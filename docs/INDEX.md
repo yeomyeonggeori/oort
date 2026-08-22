@@ -18,9 +18,9 @@
 | DDL | **`server/Migrations/*.sql`**(정본, Rust 이미지가 싣는다) + `schema_v0.sql` | — |
 | 제품 표면 | **`clients/web`**(React/Vite) · `clients/desktop`(Tauri 2) · `clients/mobile`(RN) | `clients/macOS` · `clients/iOS` |
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
-| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행 + 데스크탑 dmg 공개 자산) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
+| 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)(그록봇 3계층 플레이북) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행 + 데스크탑 dmg 공개 자산) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
-- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
+- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(삭제 아님. 라이브 웹=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228. Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web`가 아직 소비, #1610).
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
 
 ---
@@ -54,10 +54,13 @@
 | [`CHANGELOG.md`](../CHANGELOG.md) | Keep a Changelog. 첫 항목 [v0.1.0](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.0) | 릴리스 |
 | [`.github/CODEOWNERS`](../.github/CODEOWNERS) | 리뷰 라우팅 최소형 `* @kwakseongjae` | 커뮤니티 |
 | [`NOTICE`](../NOTICE) | Apache 2.0 귀속 — 앱 화면 표기 대상 | 법무 |
+| [`llms.txt`](../llms.txt) | 그록봇 진입 stub — 제품 한 줄 + `SELF_HOST_AGENT.md` GitHub raw URL + 본인 계정/VM 전용 고지 (#1652) | 에이전트 진입 |
 | [`Makefile`](../Makefile) | `build`/`test` = **현행 스택**(cargo + npm), `up`/`down`/`migrate` = dev compose, `swift-build`/`swift-test` = 은퇴 중 트리 | 빌드 명령 |
 | [`docs/SELF_HOST.md`](SELF_HOST.md) | **셀프호스트 첫 기동 정본**(#1229): clone → `scripts/self_host_env.sh` → `up -d --build --wait` → 브라우저 로그인. 분기 0. digest pull 예시는 GitHub Releases | 운영 명령 |
+| [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) | **그록봇 3계층 플레이북**(#1652): 코어 설치(digest·claim·`/workspace` pgdata) → quick tunnel → 사용자 핸드오프. 본인 계정/VM 전용. 진입은 루트 [`llms.txt`](../llms.txt) | 운영 명령(에이전트) |
 | [`docs/RELEASING.md`](RELEASING.md) | **서버/이미지 릴리스 정본**(#1628): 승격→발행→digest 수거→태그→Release→SELF_HOST 문면. 데스크탑 next 채널과 경계. 공개 dmg 는 같은 `v0.x` Release 자산(#1653) | 운영 명령 |
 | [`docs/SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) | **셀프호스트 오퍼레이터의 첫 하루**(#1608): 부트스트랩(키 둘) → GUI 초대 → 웹/`oort://join` 합류 → AI 연결 → 첫 멘션 | 운영 명령 |
+| [`docs/runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md) | **셀프호스터 pg_dump 백업·복원**(#1654): `/workspace` 덤프, 그록 이탈·B7 트라이얼 잠김·다른 VPS/로컬 이사. 프로덕션 PITR과 별 문서 | 운영 명령 |
 | [`infra/rust/README.md`](../infra/rust/README.md) | **현행 스택 심화**: Rust 이미지 + prod형 compose(로컬·푸시·폰·TLS 오버레이 전부) | 운영 명령 |
 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) | **라이브 배포 정본**(app.oor7.com Rust 스택 — 이미지 태그 교체 + Caddy/헤더 배포) | 운영 명령 |
 | [`scripts/verify_merge_tree.sh`](../scripts/verify_merge_tree.sh) | **병합 결과**(브랜치가 아니라 머지된 트리)에서 웹·폰·코어를 컴파일하는 크로스-클라 게이트(#1108) | 운영 명령 |
@@ -242,10 +245,10 @@
 | `server-rust/` | **Rust/Axum 워크스페이스**(ADR-0145). `bins/{momo-server,momo-relay,momo-agent-worker,momo-notifier,momo-migrate}` + `crates/momo-*`(messaging=쓰기경로 척추 · outbox · auth · db · agent · provider · push · drive · t3 · wire · settings · ephemeral) |
 | `server/Migrations/` | **정본 DDL**(`00N_*.sql`). Rust 이미지가 그대로 싣는다 — 은퇴 아님 |
 | `packages/momo-core/` | `@momo/core` — 웹·폰이 공유하는 TS 도메인 코어(레포 루트 npm 워크스페이스). **모델 사본 금지** |
-| `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들 |
+| `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, #1228) |
 | `clients/desktop/` | Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다 |
 | `clients/mobile/` | React Native 앱(현재 iOS) |
-| `clients/web-legacy/` | ADR-0119 v0 웹 — **알파가 실제로 서빙하는 산출물**(parity 게이트 전까지). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
+| `clients/web-legacy/` | ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
 | `adapters/hermes/` · `adapters/prime/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) · prime-agent 어댑터(스트림 릴레이·하네스 refine·RPC) |
 | `infra/rust/` | **라이브 배포 경로** — Rust 이미지 compose + `Caddyfile`(정본) + 푸시/폰 오버레이 |
 | `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(local gate boundary) · `centrifugo.json` · `.env.example`. Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
@@ -259,7 +262,7 @@
 | `server/Sources/` | MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨 |
 | `relay/OutboxRelay/` · `workers/` · `services/` | Swift 실행체(AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등) |
 | `relay/PushRelay/` | ※ **예외 — 은퇴 아님**: 라이브 푸시 경로가 지금도 빌드·배포한다 |
-| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 예외 — web-legacy를 서빙한다 |
+| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 **Swift prod 경로**에서 web-legacy dist를 담는다(라이브 알파 아님, #1610) |
 
 ---
 

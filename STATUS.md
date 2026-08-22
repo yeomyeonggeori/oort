@@ -1,5 +1,41 @@
 # oort 진행 현황
 
+## 그록봇 셀프호스트 플레이북 (#1652, 2026-08-23)
+
+- 루트 `llms.txt`(진입 stub) + `docs/SELF_HOST_AGENT.md`(3계층: digest 코어 설치 → quick tunnel → 핸드오프). 본인 그록봇 계정/VM 전용. claim 회신은 migrate `MOMO_CLAIM_PATH`. pgdata는 `/workspace` bind. 실기동 E2E는 범위 밖.
+- 현행 §2-B app digest(`0fbddd36…`)는 #1651보다 앞선 발행일 수 있다. 플레이북은 `MOMO_CLAIM_PATH` 부재 시 비밀번호 우회 없이 정지한다. Q-LEGAL(성재)이 정본 main 머지 전 판단 권장.
+
+## 셀프호스트 첫 owner claim-token 부트스트랩 (#1651, 2026-08-22)
+
+- ADR-0166: `momo-migrate` opt-in `MOMO_BOOTSTRAP_CLAIM=1`이 시드 owner를 claim-pending으로 두고 1회용 `/claim/<token>`을 stdout에만 출력한다. `POST /v1/claim`이 비밀번호 설정과 토큰 소비를 한 트랜잭션에서 처리한다. 기존 `MOMO_INITIAL_OWNER_PASSWORD` 경로 불변.
+- 봉인: TTL 24h, 라우트 `POST /v1/claim` + 웹 `/claim/<token>`, per-IP 30/60s (join과 별도 버킷), 표현=`owner_claim`(hash/`expires_at`/`consumed_at`) + `password_hash` 공란. 미소비 로그인은 `momo_password_verify` 자연 거부.
+- 검증: `scripts/verify_owner_claim.sh` (발급→로그인 401→claim→로그인 200→재사용 409→TTL 410→DB 해시만→로그 원문 부재). 웹 폼은 로그인 표면 인접 4-상태.
+
+## 셀프호스트 pg_dump 리커버리 (#1654, 2026-08-22)
+
+- 오퍼레이터 `scripts/self_host_pg_dump.sh` / `scripts/self_host_pg_restore.sh`: compose postgres에 `pg_dump -Fc` → `/workspace/oort-backups`(또는 `--output-dir`) → 다운로드 안내. 구현은 `scripts/lib/pg_dump_custom.sh` 하나이고 리허설 게이트가 같은 함수를 쓴다.
+- 셀프호스터 복원 정본 `docs/runbooks/selfhost-pg-dump-restore.md` — 그록 이탈·구독 해지·B7 트라이얼 잠김·다른 VPS/로컬 이사. PITR 런북과 경계를 나눈다. T-2 `SELF_HOST_AGENT.md` §3.2·§4가 결속. 앱 UI export는 후속.
+- AC: 고유 compose 프로젝트 2벌에 member/message 시드 → dump → 신규 postgres restore → 잔존 단정(`scripts/verify_self_host_pg_dump_restore.sh`). 시크릿 stdout 비유입.
+
+## GHCR publish-images multi-arch 계약 (#1643, 2026-08-22)
+
+- `publish-images.yml`을 native `linux/amd64`(`ubuntu-24.04`) + native `linux/arm64`(`ubuntu-24.04-arm`) 잡 분리 후 `buildx imagetools create`로 manifest list를 묶는 구조로 확장. QEMU 없음. `workflow_dispatch`·`release` Environment·main-only 승인 경계는 각 잡에 유지. attestation은 아키별 digest와 list digest 둘 다(운영자 pin=list). `sha-<gitsha>`는 list에만 붙는다.
+- 계약 테스트가 arm64 잡·manifest 합성·기존 단언(수동 전용·권한·풀 SHA·digest 검증·QEMU 금지·`latest` 금지)을 고정. **실발행 dispatch는 이 goal 밖** — 현행 v0.1.0 digest는 amd64 단일, arm64/list 실측 0.
+
+## 루트 계약 문서 web-legacy 서빙 거짓 일소 (#1641, 2026-08-22)
+
+- T-E #1610 README 이분(라이브=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228 · web-legacy=Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web` 소비)을 AGENTS.md §0/§2·CODEX.md·docs/INDEX.md·clients/web/README.md·local_gate.sh auto 분류 주석·docs/LOCAL_PR_GATE.md web 설명에 전수 반영. 서빙 배선 코드 무변경.
+
+## 발행 실측 라벨 현행화 + 운영 문서 GATED_DOCS 편입 (#1642, 2026-08-22)
+
+- v0.1.0 첫 발행 실측(원장 #1332 코멘트 2026-08-21 · 발행·익명 pull·attestation PASS · 패키지 public · amd64 단일)을 LOCAL_3_DAY H2·INTERNAL_ALPHA·infra/rust README §3-1·ncp-rust-deploy first-dispatch 문면에 반영. **H2 amd64 부팅 실측은 잔여**(Apple Silicon native pull 불가만 실측).
+- `check_docs_commands.py` GATED_DOCS에 `docs/RELEASING.md`·`docs/NEXT_CHANNEL.md`·`CONTRIBUTING.md` 편입. 게이트 407→439 fact / 12→15 문서. 하네스 26/26.
+
+## PR CI 노드 레인 붕대 제거 (#1635, 2026-08-22)
+
+- web 레인 `env TZ: Asia/Seoul` 제거. TZ 정본은 `clients/web/vite.config.ts` `test.env` (#1267). CI 중복 pin은 UTC 호스트의 로컬 빨강을 가린다.
+- mobile 레인 `inboxApproval.test.tsx` 파일명 제외+65/66 하드 게이트 제거. 전 스위트(inboxApproval 포함) 실검증 (#1268). 가드레일이 두 붕대 재도입을 RED로 고정.
+
 ## 데스크탑 dmg 공개 릴리스 준비 (T-3 / #1653, 2026-08-23)
 
 - bundle target `["app", "dmg"]`. next 채널 `.app` 경로(`bundle/macos/oort.app`)와 momo-alpha 업로드(`.app.tar.gz`+zip)는 불변. `publish_next_build.sh` 가 dmg 를 같은 빌드에서 서명하고 dry-run 에서 `codesign --verify --strict` 까지 잰다. 실공증·`gh release upload` 는 오케스트레이터.

@@ -15,7 +15,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 > ### ⚠️ Swift 트리는 은퇴 중 — 여기에 새로 짓지 마라
 > `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215 — 이식 원본은 git 이력에 있다). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다** — 그래서 더 나쁘다.
-> **은퇴 아님:** ① `server/Migrations/*.sql`(Rust 이미지가 싣는 정본 DDL) ② `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) ③ `clients/web-legacy`(알파가 실제로 서빙하는 산출물, ADR-0133 parity 게이트 전까지).
+> **은퇴 아님:** ① `server/Migrations/*.sql`(Rust 이미지가 싣는 정본 DDL) ② `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) ③ `clients/web-legacy`(삭제 아님. 라이브 웹=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228. Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web`가 아직 소비, #1610).
 
 **핵심 쓰기경로(절대 깨지 말 것):**
 `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 트랜잭션 → momo-relay가 Centrifugo /api/publish`.
@@ -55,10 +55,10 @@ server/Migrations/       **정본 DDL**(00N_*.sql). Rust 이미지가 그대로 
 schema_v0.sql            정본 스키마(PostgreSQL 18, uuidv7() PK, RLS FORCE) — 읽기 전용. 이동/수정 금지.
 
 packages/momo-core/      @momo/core — 웹·폰이 공유하는 TS 도메인 코어. **모델 단일 진실원천**(사본 금지).
-clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들.
+clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` web-assets / #1228).
 clients/desktop/         Tauri 2 셸: 딥링크·mDNS·알림·키체인·업데이터. UI를 포크하지 않는다.
 clients/mobile/          React Native 앱(현재 iOS). `lane:phone`이 실기 레인.
-clients/web-legacy/      ADR-0119 v0 웹. **알파가 실제로 서빙하는 산출물**(parity 게이트 전까지) —
+clients/web-legacy/      ADR-0119 v0 웹. 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610) —
                          생성 타입 src/api/schema.d.ts가 docs/api/openapi.yaml과 동기화돼야 한다.
 
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml. py3 only.
@@ -78,7 +78,7 @@ server/Sources/          MomoServer(Hummingbird 2) — Rust 재작성으로 대�
 relay/OutboxRelay/       Swift outbox relay — Rust momo-relay로 대체됨.
 relay/PushRelay/         ※ 예외: 라이브 푸시 경로가 지금도 빌드·배포한다(은퇴 아님).
 workers/·services/       AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등 Swift 실행체.
-infra/prod/              Swift prod compose 계열(infra/prod/Dockerfile.web은 예외 — web-legacy 서빙).
+infra/prod/              Swift prod compose 계열(`infra/prod/Dockerfile.web`은 이 경로에서 web-legacy dist를 담음 — 라이브 알파 아님, #1610).
 (삭제됨 — W-S1/#1215) clients/{Core,macOS,iOS}/ · fastlane/ · .github/workflows/{ci-build,release-ios,release-macos}.yml
 ```
 

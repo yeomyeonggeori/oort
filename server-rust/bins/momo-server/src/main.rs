@@ -77,9 +77,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     if config.rate_limit.per_ip_limit == 0 {
         tracing::warn!(
-            "RATE_LIMIT_PER_IP=0 disables the per-IP limiter; POST /v1/join is the \
-             only unauthenticated write on this instance and it accepts an invite \
-             code in the body"
+            "RATE_LIMIT_PER_IP=0 disables the per-IP limiter on POST /v1/join; \
+             that route accepts an invite code in the body"
+        );
+    }
+    if config.rate_limit.claim_per_ip_limit == 0 {
+        tracing::warn!(
+            "RATE_LIMIT_CLAIM_PER_IP=0 disables the per-IP limiter on POST /v1/claim; \
+             that route accepts a claim token in the body"
         );
     }
     if config.realtime.cent_token_hmac.is_none() || config.realtime.cent_proxy_secret.is_none() {

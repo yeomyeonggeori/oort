@@ -146,7 +146,7 @@ Profiles:
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence |
 | `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
-| `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
+| `web` | `clients/web-legacy` (ADR-0119 v0; still the `--profile web` / Swift prod `Dockerfile.web` / e2e `web-init` tree, **not** live alpha — live is `clients/web`, `server-rust/Dockerfile:147,157,173,231` / #1228), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
 | `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, GHCR notice bundle (`legal/generated/`, `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`), or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir) + `#1332` `scripts/tests/test_ghcr_notice_bundle.sh` (byte-identical + version/license-delete/Docker-COPY/GPL-as-permissive RED) + `scripts/check_ghcr_notice_bundle.sh` (lockfile-hash stale bundle + Dockerfile COPY of LICENSE/NOTICE/index/generated bundle). Policy (#1225 allow/deny) and attribution (#1332 generated notices) are separate gates. Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit`. Not a legal-sufficiency declaration |
 | `secrets` | fast standalone "did I just commit a credential" lane, or `.gitleaksignore` / secret-gate script changes | `scripts/tests/test_secrets_gate.sh` (red proofs) + `scripts/check_secrets.sh` — gitleaks over every ref with the `.gitleaksignore` triage baseline applied. ~3s, no static checks. The same two steps already run inside **every** other profile through the static block, so this profile is a convenience lane, not extra coverage. Requires `gitleaks`; fails closed with install guidance when absent, with no override env |
 | `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
@@ -410,10 +410,14 @@ runs standalone. Overrides: `WEBHOOK_GATE_PORT` /
 `scripts/local_gate.sh --profile web` is the merge gate for `clients/web-legacy`
 and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
 
-> **Path note (MOMO-596 / ADR-0133):** the v0 client this profile builds moved
-> from `clients/web` to `clients/web-legacy`. The new `clients/web` (canonical
-> React/Tauri UI) and `clients/desktop` are **not** covered by this profile —
-> `--auto` widens them to `all` until a dedicated profile exists.
+> **Path note (MOMO-596 / ADR-0133 / #1228 / #1610):** the v0 client this
+> profile builds moved from `clients/web` to `clients/web-legacy`. **Live
+> alpha serving is `clients/web`** (`server-rust/Dockerfile:147,157,173,231`
+> → `/opt/momo/web/` · `web-assets`). This profile still builds
+> `clients/web-legacy` because Swift prod `infra/prod/Dockerfile.web`, e2e
+> `web-init`, and this gate consume it (not discarded). `clients/web` and
+> `clients/desktop` are **not** covered by this profile — `--auto` widens
+> them to `all` (narrowing would green the wrong tree).
 
 1. worktree-clean guard, `npm ci`, `eslint`, `tsc --noEmit` inside
    `clients/web-legacy`.
@@ -834,7 +838,7 @@ Use the profile that matches the changed surface.
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `external-agent-provider` | opt-in credentialed external agent runtime smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
 | `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
-| `web` | `clients/web-legacy` (ADR-0119 v0), `docs/api/openapi.yaml`, web serving/login smoke changes | `scripts/local_gate.sh --profile web` (install/lint/typecheck/types-sync/build/license gate + serving smoke + Chromium login→timeline e2e smoke + OpenAPI runtime drift gate) |
+| `web` | `clients/web-legacy` (ADR-0119 v0; Swift prod/e2e/`--profile web` 소비, 라이브 서빙 아님 — 라이브=`clients/web` #1228), `docs/api/openapi.yaml`, web serving/login smoke changes | `scripts/local_gate.sh --profile web` (install/lint/typecheck/types-sync/build/license gate + serving smoke + Chromium login→timeline e2e smoke + OpenAPI runtime drift gate) |
 
 ## 5. PR Body Evidence
 

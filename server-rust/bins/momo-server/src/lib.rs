@@ -177,8 +177,8 @@ pub struct AppState {
     /// listed-instance-operator path to nobody.
     pub settings: Arc<SettingsConfig>,
     /// MOMO-300 per-IP limiter state (B4.3). Unlike every other field here the
-    /// default is **on**, not fail-closed-off: the surface it guards
-    /// (`POST /v1/join`) is the one unauthenticated write on the instance, so
+    /// default is **on**, not fail-closed-off: the surfaces it guards
+    /// (`POST /v1/join`, `POST /v1/claim`) are unauthenticated writes, so
     /// "the operator configured nothing" has to mean *limited*, not *open*.
     pub rate_limit: Arc<RateLimitState>,
     /// ADR-0162 Agent Port transport policy. It carries no session or product
@@ -1059,16 +1059,26 @@ pub fn build_app(state: AppState) -> Router {
         // (Swift mounts it outside AuthMiddleware for the same reason,
         // `JoinRoutes.swift:6-12`).
         //
-        // It is therefore the only unauthenticated WRITE on this server, and the
-        // only route carrying a rate limiter: `route_layer` runs the per-IP gate
-        // ahead of the handler and — unlike `layer` — leaves every other route
-        // untouched, so this stays a decision about the join surface rather than
-        // an accidental global one.
+        // It is therefore an unauthenticated WRITE, and it carries a rate
+        // limiter: `route_layer` runs the per-IP gate ahead of the handler and
+        // — unlike `layer` — leaves every other route untouched, so this stays
+        // a decision about the join surface rather than an accidental global one.
         .route(
             "/v1/join",
             post(routes::join::join).route_layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 rate_limit::per_ip,
+            )),
+        )
+        // ADR-0166 / T-1: the sixth public write, and public for the same
+        // construction reason as `/v1/join`. The caller holds a one-time claim
+        // token and no bearer. Mounted outside auth middleware; own per-IP
+        // budget so join traffic cannot starve first-owner setup.
+        .route(
+            "/v1/claim",
+            post(routes::claim::claim).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip_claim,
             )),
         )
         .merge(protected);

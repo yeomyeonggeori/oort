@@ -8,16 +8,19 @@ quality** — P1 feature work replaces it surface by surface.
 ## Path history (MOMO-596)
 
 `clients/web` used to hold the ADR-0119 alpha (v0). That client is **not deleted**:
-it moved to **`clients/web-legacy`** and remains the live serving/e2e target
-(`infra/prod/Dockerfile.web`, `infra/prod/docker/momo.Dockerfile` web-build stage,
-the prod Caddy static-serve, `infra/docker-compose.e2e.yml` web-init, and the
-`web`/`web-serving` profiles in `scripts/local_gate.sh` all point at
-`clients/web-legacy`). Per ADR-0133 §5, the default alpha download stays on the
-existing stack until the parity gate passes; this directory is where new UXUI
-surfaces land in the meantime.
+it moved to **`clients/web-legacy`**. **Live alpha serving is this directory** —
+the Rust image copies `clients/web` dist to `/opt/momo/web/`
+(`server-rust/Dockerfile:147,157,173,231`) and `web-assets` stages it for Caddy
+(`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md`
+「웹(정적 SPA) 배포」 / #1228).
 
-Serving/deploy wiring is **not** repointed at this directory yet. That is a
-separate gated step (ADR-0133 parity appendix), not part of the promotion.
+`clients/web-legacy` is still consumed (not discarded — dichotomy, #1610 README):
+Swift prod `infra/prod/Dockerfile.web:8-17` /
+`infra/prod/docker/momo.Dockerfile:44-69`, e2e `web-init`
+(`infra/docker-compose.e2e.yml:390-400`), and
+`scripts/local_gate.sh --profile web`. ADR-0133 desktop parity (default download)
+passed 2026-07-25 (`docs/adr/0133-ui-stack-tauri-react-migration.md` header);
+web SPA serving flipped via #1228, not that gate appendix.
 
 ## Structure (matches plan §1)
 

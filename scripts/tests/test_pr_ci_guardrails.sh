@@ -128,6 +128,20 @@ workflow_compliant() {
   grep -Fq 'scripts/check_ghcr_notice_bundle.sh --stale-only' <<<"$alignment" || return 1
   grep -Fq "if: needs.changes.outputs.rust == 'true'" <<<"$rust" || return 1
   grep -Fq "if: needs.changes.outputs.node == 'true'" <<<"$node" || return 1
+  grep -Fq 'run: npm --prefix clients/web run test' <<<"$node" || return 1
+  grep -Fq 'run: npm --prefix clients/mobile run test' <<<"$node" || return 1
+  # #1635: G3 (#1267/#1268) retired the node-lane bandages. vitest test.env
+  # is the TZ SoT — a runner TZ pin hides UTC-host local failures.
+  # inboxApproval is in the suite, not excluded by filename.
+  if grep -Fq 'TZ: Asia/Seoul' <<<"$node"; then
+    return 1
+  fi
+  if grep -Fq 'testPathIgnorePatterns' <<<"$node"; then
+    return 1
+  fi
+  if grep -Fq 'inboxApproval' <<<"$node"; then
+    return 1
+  fi
   grep -Fq "if: needs.changes.outputs.contract == 'true'" <<<"$contract" || return 1
   grep -Fq 'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' <<<"$contract" || return 1
   grep -Fq 'run: npm ci --ignore-scripts --prefix clients/web-legacy' <<<"$contract" || return 1
@@ -186,6 +200,8 @@ for required in \
   'scripts/verify_web_generated_types\.sh' \
   'run: npm ci --ignore-scripts --prefix clients/web-legacy' \
   'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' \
+  'run: npm --prefix clients/web run test' \
+  'run: npm --prefix clients/mobile run test' \
   'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' \
   'actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444' \
   'scripts/tests/test_ghcr_notice_bundle.sh' \
@@ -303,6 +319,22 @@ sed -i.bak 's/^  pull_request:$/  pull_request_target:/' \
   "$TMP_DIR/pull-request-target.yml"
 if workflow_compliant "$TMP_DIR/pull-request-target.yml"; then
   fail "pull_request_target trigger was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/web-tz-pin.yml"
+sed -i.bak 's/run: npm --prefix clients\/web run test/env:\
+          TZ: Asia\/Seoul\
+        run: npm --prefix clients\/web run test/' \
+  "$TMP_DIR/web-tz-pin.yml"
+if workflow_compliant "$TMP_DIR/web-tz-pin.yml"; then
+  fail "web lane TZ: Asia/Seoul pin was accepted"
+fi
+
+cp "$WORKFLOW" "$TMP_DIR/mobile-inbox-exclude.yml"
+sed -i.bak 's/run: npm --prefix clients\/mobile run test/run: npm --prefix clients\/mobile run test -- --testPathIgnorePatterns=inboxApproval/' \
+  "$TMP_DIR/mobile-inbox-exclude.yml"
+if workflow_compliant "$TMP_DIR/mobile-inbox-exclude.yml"; then
+  fail "mobile inboxApproval filename exclusion was accepted"
 fi
 
 # Execute the exact embedded classifier with a fake GitHub API. These fixtures

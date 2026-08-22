@@ -4,9 +4,16 @@
 # still needs an attended owner setup before the first dispatch.
 #
 # The artifacts match the live stack: the Rust multi-command app/current web
-# bundle and the pinned PostgreSQL 18 + pgBackRest database image, both native
-# linux/amd64. A future arm64 lane must use a native runner and merge digests;
-# QEMU is intentionally absent here.
+# bundle and the pinned PostgreSQL 18 + pgBackRest database image. Each
+# architecture is built on a native runner (ubuntu-24.04 = linux/amd64,
+# ubuntu-24.04-arm = linux/arm64), pushed by digest, attested, then joined
+# into one OCI manifest list whose digest is also attested. The `sha-<gitsha>`
+# tag is applied only to that list. QEMU is intentionally absent.
+#
+# Attestation subjects: every platform digest (what each runner actually
+# built) and both manifest-list digests (the operator pin after the first
+# multi-arch publication). This workflow has not been dispatched in the
+# multi-arch shape; the published v0.1.0 digests remain linux/amd64-only.
 name: publish-images
 
 on:
@@ -32,15 +39,13 @@ env:
   IMAGE_TAG: sha-${{ github.sha }}
 
 jobs:
-  publish:
+  publish-amd64:
     name: publish oort app + PostgreSQL images (linux/amd64)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     environment: release
     outputs:
-      application-image: ${{ env.IMAGE }}
       application-digest: ${{ steps.build_app.outputs.digest }}
-      postgres-image: ${{ env.POSTGRES_IMAGE }}
       postgres-digest: ${{ steps.build_postgres.outputs.digest }}
     steps:
       - name: Require a main-branch dispatch
@@ -66,9 +71,9 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # `sha-<gitsha>` is a convenient commit locator, not an immutable
-      # registry identity: a writer can move a tag. Only the returned digest is
-      # immutable and every downstream trust step binds to that digest.
+      # Push by digest only. The sha-<gitsha> tag is a movable locator owned
+      # by publish-manifest; an arch job that tagged it would race the other
+      # arch and briefly publish a single-platform image under the release tag.
       - name: Build and push commit-addressed multi-command image
         id: build_app
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
@@ -77,7 +82,7 @@ jobs:
           file: server-rust/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ env.IMAGE }}:${{ env.IMAGE_TAG }}
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             MOMO_BUILD_SHA=${{ github.sha }}
           # GHCR 패키지를 레포에 **연결**하는 것은 이 라벨이다. 없으면 공개
@@ -103,7 +108,7 @@ jobs:
           file: infra/rust/postgres-pgbackrest/Dockerfile
           platforms: linux/amd64
           push: true
-          tags: ${{ env.POSTGRES_IMAGE }}:${{ env.IMAGE_TAG }}
+          outputs: type=image,name=${{ env.POSTGRES_IMAGE }},push-by-digest=true,name-canonical=true,push=true
           build-args: |
             MOMO_BUILD_SHA=${{ github.sha }}
           labels: |
@@ -136,23 +141,236 @@ jobs:
           push-to-registry: true
           create-storage-record: false
 
+  publish-arm64:
+    name: publish oort app + PostgreSQL images (linux/arm64)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    environment: release
+    outputs:
+      application-digest: ${{ steps.build_app.outputs.digest }}
+      postgres-digest: ${{ steps.build_postgres.outputs.digest }}
+    steps:
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::publish-images must be dispatched from refs/heads/main (got $DISPATCH_REF)"
+            exit 1
+          fi
+
+      # 첫 실행 전 최신 메이저로 시작한다 — v7 breaking(fork PR 체크아웃 차단)은
+      # 이 레포 트리거에 해당 없음(W-DEP #667 판정).
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Push by digest only. The sha-<gitsha> tag is a movable locator owned
+      # by publish-manifest; an arch job that tagged it would race the other
+      # arch and briefly publish a single-platform image under the release tag.
+      - name: Build and push commit-addressed multi-command image
+        id: build_app
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: server-rust/Dockerfile
+          platforms: linux/arm64
+          push: true
+          outputs: type=image,name=${{ env.IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            MOMO_BUILD_SHA=${{ github.sha }}
+          # GHCR 패키지를 레포에 **연결**하는 것은 이 라벨이다. 없으면 공개
+          # 레포가 된 뒤에도 패키지 페이지가 소스·README·라이선스로 이어지지
+          # 않고, 익명 방문자에게는 출처 없는 바이너리로 보인다. 첫 공개 발행
+          # 이므로 여기서 붙인다(Dockerfile은 무접촉 — 라벨은 워크플로가
+          # 덧씌운다). revision은 이미지가 자기 커밋을 말할 수 있게 한다.
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=oort-rust-arm64
+          cache-to: type=gha,mode=max,scope=oort-rust-arm64
+          provenance: mode=max
+          sbom: true
+
+      - name: Build and push commit-addressed PostgreSQL image
+        id: build_postgres
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: infra/rust/postgres-pgbackrest/Dockerfile
+          platforms: linux/arm64
+          push: true
+          outputs: type=image,name=${{ env.POSTGRES_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          build-args: |
+            MOMO_BUILD_SHA=${{ github.sha }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.url=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=oort-postgres-arm64
+          cache-to: type=gha,mode=max,scope=oort-postgres-arm64
+          provenance: mode=max
+          sbom: true
+
+      - name: Attest the pushed application image digest
+        id: attest_app
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build_app.outputs.digest }}
+          push-to-registry: true
+          # The attestation API + OCI referrer are sufficient for
+          # `gh attestation verify`. Avoid artifact-metadata:write by not
+          # creating the optional organization storage record.
+          create-storage-record: false
+
+      - name: Attest the pushed PostgreSQL image digest
+        id: attest_postgres
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.POSTGRES_IMAGE }}
+          subject-digest: ${{ steps.build_postgres.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+  publish-manifest:
+    name: compose multi-arch manifest lists
+    needs: [publish-amd64, publish-arm64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment: release
+    outputs:
+      application-image: ${{ env.IMAGE }}
+      application-digest: ${{ steps.merge_app.outputs.digest }}
+      postgres-image: ${{ env.POSTGRES_IMAGE }}
+      postgres-digest: ${{ steps.merge_postgres.outputs.digest }}
+    steps:
+      - name: Require a main-branch dispatch
+        env:
+          DISPATCH_REF: ${{ github.ref }}
+        run: |
+          if [ "$DISPATCH_REF" != "refs/heads/main" ]; then
+            echo "::error::publish-images must be dispatched from refs/heads/main (got $DISPATCH_REF)"
+            exit 1
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create application manifest list
+        id: merge_app
+        env:
+          AMD64_DIGEST: ${{ needs.publish-amd64.outputs.application-digest }}
+          ARM64_DIGEST: ${{ needs.publish-arm64.outputs.application-digest }}
+        run: |
+          printf '%s\n' "$AMD64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$ARM64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          if [ "$AMD64_DIGEST" = "$ARM64_DIGEST" ]; then
+            echo "::error::application platform digests must differ"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${IMAGE_TAG}" \
+            "${IMAGE}@${AMD64_DIGEST}" \
+            "${IMAGE}@${ARM64_DIGEST}"
+          INDEX_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${IMAGE_TAG}" | awk '/^Digest:/{print $2; exit}')"
+          printf '%s\n' "$INDEX_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          if [ "$INDEX_DIGEST" = "$AMD64_DIGEST" ] || [ "$INDEX_DIGEST" = "$ARM64_DIGEST" ]; then
+            echo "::error::application manifest list digest must not equal a platform digest"
+            exit 1
+          fi
+          echo "digest=${INDEX_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Create PostgreSQL manifest list
+        id: merge_postgres
+        env:
+          AMD64_DIGEST: ${{ needs.publish-amd64.outputs.postgres-digest }}
+          ARM64_DIGEST: ${{ needs.publish-arm64.outputs.postgres-digest }}
+        run: |
+          printf '%s\n' "$AMD64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$ARM64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          if [ "$AMD64_DIGEST" = "$ARM64_DIGEST" ]; then
+            echo "::error::PostgreSQL platform digests must differ"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --tag "${POSTGRES_IMAGE}:${IMAGE_TAG}" \
+            "${POSTGRES_IMAGE}@${AMD64_DIGEST}" \
+            "${POSTGRES_IMAGE}@${ARM64_DIGEST}"
+          INDEX_DIGEST="$(docker buildx imagetools inspect "${POSTGRES_IMAGE}:${IMAGE_TAG}" | awk '/^Digest:/{print $2; exit}')"
+          printf '%s\n' "$INDEX_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          if [ "$INDEX_DIGEST" = "$AMD64_DIGEST" ] || [ "$INDEX_DIGEST" = "$ARM64_DIGEST" ]; then
+            echo "::error::PostgreSQL manifest list digest must not equal a platform digest"
+            exit 1
+          fi
+          echo "digest=${INDEX_DIGEST}" >> "$GITHUB_OUTPUT"
+
+      - name: Attest the application manifest list digest
+        id: attest_app_index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.merge_app.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
+      - name: Attest the PostgreSQL manifest list digest
+        id: attest_postgres_index
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-name: ${{ env.POSTGRES_IMAGE }}
+          subject-digest: ${{ steps.merge_postgres.outputs.digest }}
+          push-to-registry: true
+          create-storage-record: false
+
       # This is deliberately the only release-manifest summary. Step ordering
-      # means it cannot run until both pushed digests have their attestations.
+      # means it cannot run until both index digests have their attestations.
       - name: Report digest-pinned release manifest
         id: release_manifest
         env:
-          APPLICATION_DIGEST: ${{ steps.build_app.outputs.digest }}
-          POSTGRES_DIGEST: ${{ steps.build_postgres.outputs.digest }}
+          APPLICATION_DIGEST: ${{ steps.merge_app.outputs.digest }}
+          POSTGRES_DIGEST: ${{ steps.merge_postgres.outputs.digest }}
+          APPLICATION_AMD64_DIGEST: ${{ needs.publish-amd64.outputs.application-digest }}
+          APPLICATION_ARM64_DIGEST: ${{ needs.publish-arm64.outputs.application-digest }}
+          POSTGRES_AMD64_DIGEST: ${{ needs.publish-amd64.outputs.postgres-digest }}
+          POSTGRES_ARM64_DIGEST: ${{ needs.publish-arm64.outputs.postgres-digest }}
         run: |
           printf '%s\n' "$APPLICATION_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           printf '%s\n' "$POSTGRES_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$APPLICATION_AMD64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$APPLICATION_ARM64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$POSTGRES_AMD64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+          printf '%s\n' "$POSTGRES_ARM64_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
           {
             echo "### Published release manifest"
             echo
-            echo "| subject | immutable image |"
-            echo "| --- | --- |"
-            echo "| application | \`$IMAGE@$APPLICATION_DIGEST\` |"
-            echo "| PostgreSQL 18 + pgBackRest | \`$POSTGRES_IMAGE@$POSTGRES_DIGEST\` |"
+            echo "Operator pin is the manifest list digest. Platform digests are the native builds."
             echo
-            echo "Both returned registry digests were attested before this manifest was emitted."
+            echo "| subject | identity | immutable image |"
+            echo "| --- | --- | --- |"
+            echo "| application | manifest list (pin) | \`$IMAGE@$APPLICATION_DIGEST\` |"
+            echo "| application | linux/amd64 | \`$IMAGE@$APPLICATION_AMD64_DIGEST\` |"
+            echo "| application | linux/arm64 | \`$IMAGE@$APPLICATION_ARM64_DIGEST\` |"
+            echo "| PostgreSQL 18 + pgBackRest | manifest list (pin) | \`$POSTGRES_IMAGE@$POSTGRES_DIGEST\` |"
+            echo "| PostgreSQL 18 + pgBackRest | linux/amd64 | \`$POSTGRES_IMAGE@$POSTGRES_AMD64_DIGEST\` |"
+            echo "| PostgreSQL 18 + pgBackRest | linux/arm64 | \`$POSTGRES_IMAGE@$POSTGRES_ARM64_DIGEST\` |"
+            echo
+            echo "Every listed digest was attested before this manifest was emitted."
           } >> "$GITHUB_STEP_SUMMARY"

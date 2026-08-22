@@ -55,21 +55,27 @@ Release(digest 표) → SELF_HOST 문면 갱신.**
    `87296259`), `prevent_self_review=false`, deployment branch policy 는
    custom `main` 하나.
 
-3. 워크플로가 `linux/amd64` 로 앱(`ghcr.io/yeomyeonggeori/oort`)과
-   PostgreSQL 18+pgBackRest(`ghcr.io/yeomyeonggeori/oort-postgres`) 두
-   이미지를 push 하고, 각 returned digest 에 SLSA v1 provenance 를 OCI
-   referrer 로 붙인 뒤에만 summary 표를 낸다. `sha-<commit>` 태그는 커밋
-   locator 이지 불변 신원이 아니다.
+3. 워크플로가 native `linux/amd64`(`ubuntu-24.04`)와 native
+   `linux/arm64`(`ubuntu-24.04-arm`) 두 잡에서 앱
+   (`ghcr.io/yeomyeonggeori/oort`)과 PostgreSQL 18+pgBackRest
+   (`ghcr.io/yeomyeonggeori/oort-postgres`) 을 **아키별 digest** 로
+   push·attestation 한 뒤, `buildx imagetools create` 가 두 digest 를
+   manifest list 로 묶고 그 list digest 에도 SLSA v1 provenance 를 OCI
+   referrer 로 붙인 뒤에만 summary 표를 낸다. 각 잡이 GitHub `release`
+   Environment 를 거친다. `sha-<commit>` 태그는 list 에만 붙는 커밋
+   locator 이지 불변 신원이 아니다. QEMU 는 쓰지 않는다.
 
-`arm64` 재발행은 이 문서 밖이다(이슈 #1628 Out of scope). QEMU 로 arm64 를
-만들지 않는다.
+   **첫 multi-arch 발행 실측은 아직 없다.** 아래 §3 표의 v0.1.0 digest 는
+   amd64 단일 이다. 운영자 pin 은 다음 발행부터 list digest 다.
 
 ---
 
 ## 3. digest 수거
 
-run summary 의 「Published release manifest」 표에서 **두 exact digest 를
-함께** 가져온다. `sha-*` 태그나 로컬 retag 는 배포 권위가 아니다.
+run summary 의 「Published release manifest」 표에서 exact digest 를 가져온다.
+v0.1.0 은 앱·postgres **두** digest (amd64 단일). 다음 발행부터 운영자 pin 은
+manifest list digest 두 행이고, 같은 표에 아키별 digest 가 따라온다.
+`sha-*` 태그나 로컬 retag 는 배포 권위가 아니다.
 
 첫 공개 발행 실값 (원장 #1332 코멘트 2026-08-21, 빌드 커밋
 `main=45a154d2`):
@@ -96,8 +102,12 @@ gh attestation verify "oci://$POSTGRES_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-플랫폼: **`linux/amd64` 단일**. Apple Silicon native pull 은 불가했다(실측
-2026-08-21). 에뮬레이션 성공을 가정하지 않는다.
+플랫폼: **다음 발행부터** 워크플로는 `linux/amd64`+`linux/arm64`
+manifest list 를 만든다. **현행 v0.1.0 digest(`main=45a154d2`)는 amd64
+단일** — Apple Silicon 에서 그 digest 의 native pull 은 불가했다(실측
+2026-08-21). 첫 multi-arch digest 실값은 아직 없다. 에뮬레이션 성공을
+가정하지 않는다. 다음 발행의 운영자 pin 은 summary 표의 manifest list
+digest 행이다.
 
 ---
 
@@ -126,9 +136,9 @@ gh release create v0.1.0 \
   --notes-file docs/planning/research/2026-08-21-v0-1-0-release-notes.md
 ```
 
-Release 본문에는 반드시 **digest 표**(§3과 동형)가 들어간다. 초안이 그 표와
-검증 커맨드·amd64 고지를 이미 싣는다. 이후 릴리스는 같은 칸을 새 digest 로
-채운 뒤 SELF_HOST 예시만 따라 고친다. 사람용 변경 이력은
+Release 본문에는 반드시 **digest 표**(§3과 동형)가 들어간다. v0.1.0 초안이
+그 표와 검증 커맨드·amd64 고지를 싣는다. 이후 **첫 multi-arch 릴리스**는
+list digest 를 pin 칸에 두고 아키별 digest 를 같은 표에 남긴다. 사람용 변경 이력은
 [`CHANGELOG.md`](../CHANGELOG.md) — 다음 태그를 자를 때 `[Unreleased]` 를
 새 버전 칸으로 옮긴다.
 
@@ -261,6 +271,8 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
 ## 이 문서가 하지 않는 것
 
 - 태그/Release 의 원격 쓰기 — 오케스트레이터. 워커는 초안과 문면만.
+- 실발행 dispatch — owner 가 `release` Environment 에서 승인한다. 워크플로
+  계약은 multi-arch 이지만 첫 arm64 digest 실측은 아직 없다.
   공개 dmg 업로드도 같다(`gh release upload` 는 사람이 실행).
 - next 채널 실발행 — [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) §8.
 - `linux/arm64` 재발행.

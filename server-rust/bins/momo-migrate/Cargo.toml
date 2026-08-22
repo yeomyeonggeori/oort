@@ -29,3 +29,7 @@ libc.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
+# ADR-0166 claim-token mint: same 32-byte OS CSPRNG as momo-auth pairing.
+# The migrate binary prints the raw token once; Postgres stores only the hash.
+getrandom = "0.2"
+base64.workspace = true
