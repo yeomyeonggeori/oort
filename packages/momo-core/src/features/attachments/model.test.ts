@@ -276,6 +276,19 @@ describe("the line under the name", () => {
     }
   });
 
+  it("omits the size when the native picker could not measure it", () => {
+    const unknown = picked({ sizeBytes: 0, sizeKnown: false });
+    expect(draftStatusLine(unknown).text).toBe(ATTACH_COPY.queued);
+    expect(draftAnnouncement([], [unknown])).toBe(
+      `drain-log.txt ${ATTACH_COPY.queued}`
+    );
+  });
+
+  it("keeps a measured empty file distinct from an unknown size", () => {
+    const empty = picked({ sizeBytes: 0, sizeKnown: true });
+    expect(draftStatusLine(empty).text).toBe(`0 B · ${ATTACH_COPY.queued}`);
+  });
+
   it("carries the reason and the next action on a terminal failure", () => {
     const failed = failUpload([picked()], "local-1", "too-large")[0];
     const line = draftStatusLine(failed);
@@ -391,6 +404,14 @@ describe("presentation", () => {
         sizeBytes: 18,
       })
     ).toBe("텍스트 · 18 B");
+    expect(
+      attachmentMetaLine({
+        id: "unknown",
+        name: "provider.bin",
+        mime: "application/octet-stream",
+        sizeBytes: 0,
+      })
+    ).toBe("파일 · 0 B");
   });
 
   it("opens an inline preview only for a bounded raster image", () => {

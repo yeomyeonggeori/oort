@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 폰 첨부 트레이 M-2 후속 폴리시 (#1703, 2026-08-23)
+
+- 첨부 행은 모든 상태에서 진행 트랙 높이를 예약하고 첫 native 측정 전에는 값 없는 막대로 표시한다. 발치 경고색은 웹과 같은 `sendBlockReason`을 따르며, 크기 미독 파일은 `0 B`를 말하지 않는다.
+- 로그아웃·계정 identity 변경·토큰 만료 provider 해제는 모든 첨부 드래프트와 native PUT을 비우고 세션 세대를 올려 구 bearer로 시작한 늦은 업로드 응답을 폐기한다. picker의 도달 불가 `rejected`는 일부 무음 수락 대신 단정 실패하며, grabber·트레이 상한은 전용 명명 측정을 쓴다.
+- 모바일·공유 코어 전체 테스트와 tsc는 green이다. `runtime-unverified(iOS simulator visual interaction)`: 실기·시뮬레이터 검증은 패킷의 명시 비스코프이며, 폰에는 독립 디자인 프리플라이트 실행 단위가 없다.
+
 ## 폰 사진·파일 picker 전송 (#1700, 2026-08-23)
 
 - 모바일 Composer의 2행 첨부 시트가 `expo-image-picker`·`expo-document-picker`로 사진/파일 한 건을 고르고, 코어 첨부 상태기계·실패 문장을 재사용한 인라인 트레이에서 capability PUT→완료 확인→기존 메시지 `attachmentIds` 발송까지 잇는다. 일반 대화와 스레드가 같은 경로를 쓴다.
