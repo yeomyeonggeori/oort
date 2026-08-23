@@ -1,5 +1,106 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-23 스냅샷 61 (Fable · momo-main — ★M-2 폐곡선·UXUI 파도 전량 종결. PLN-20260823-UX 완결).** 컴팩트 복원 진입점.
+>
+> **★ M-2 종결**: #1702 머지 → **track/uxui=5679f6c8** · #1700 close · 후속 #1703(Medium/Nit/실기 미검증). 검수 사이클=워커→리뷰(High 2)→수리(065cb6a6, 레드 프루프)→재판정 PASS(0·0). **UXUI 파도 8 goal 전량 랜딩 — PLN-20260823-UX 완결.**
+>
+> **★ 트랙 상태**: track/uxui=5679f6c8 · track/engine=462efd67(T-9). main 승격은 성재 게이트(양 트랙 랜딩분 대기).
+>
+> **★ 성재 대기**: ①합류 릴레이 킷 2-paste ②ADR-0169/0170 문면 Accept→발사 순번(#1696·#1698) ③U-8(#1699)·#1703 발사 신호 ④track→main 승격 창 ⑤iOS 실기 재연 세션(M-1+M-2 확증).
+>
+> 이하 스냅샷 60:
+> **2026-08-23 스냅샷 60 (Fable · momo-main — ★T-9 폐곡선·M-2 가동·ADR-0169/0170 기안. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ T-9 종결**: #1701 머지 → **track/engine=462efd67** · #1678 close · ENGINE_HANDOFF A-29 info. ADR-0167 집행 완결(same-origin 파생+--public-origin+플레이북, red-proof 그린).
+>
+> **★ 가동 중**: M-2(#1700) sol 워커(feat/1700-picker-p0-adr-0168, 감시자+stall 감지). 완료 시 검수→design-review→track/uxui 머지=Fable.
+>
+> **★ 성재 대기**: ①합류 릴레이 킷 2-paste(`claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md`) ②ADR-0169/0170 문면 Accept(방향 기승인)→티켓 발사 순번 ③U-8(#1699 컴포저 하단) 발사 신호.
+>
+> 이하 스냅샷 59:
+> **2026-08-23 스냅샷 59 (Fable · momo-main — ★일괄 위임 집행: ADR 2 Accept·워커 2기 가동. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ 가동 중 워커 2기(감시자 무장)**: ①**T-9(#1678)**=grok, feat/1678-selfhost-realtime-same-origin(base=track/engine 200a1675), 로그 `scratchpad/grok-t9.out` ②**M-2(#1700)**=sol, feat/1700-picker-p0-adr-0168(base=track/uxui 7124598b), RUN_DIR=`~/.codex-fleet/runs/goal-1700-20260823T212842`. 완료 시 검수(diff 리뷰→게이트→design-review(M-2)→PR 머지)=Fable.
+>
+> **★ 집행 완료**: ADR-0167·0168 Accepted(성재 "다 승인할게" 위임) · stash drop · U-8=#1699(컴포저 하단 2행 통합 — 성재 패딩 지적 티켓화) · M-2 패킷 ready · 합류 릴레이 킷(`claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md` — 성재 2-paste만 남음).
+>
+> **★ 성재 대기(축소)**: ①합류 릴레이 킷 실행(2-paste) ②U-8·#1696·#1698 발사 순번 지정(방향은 기승인 — #1696/#1698은 ADR 기안이 Fable 다음 순번).
+>
+> 이하 스냅샷 58:
+> **2026-08-23 스냅샷 58 (Fable · momo-main — ★U-3 수리 랜딩·4축 검수·실시간 리그. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ 수리 랜딩**: #1697(cn 측정명 19종 등록+가드 — 라이트박스 512px 스트립 근본수리) → **track/uxui=7124598b**. design-review PASS·레드 프루프. U-3 E2E 종결(업로드→라이트박스 풀스크린, 로컬 stub 리그).
+>
+> **★ 기본 기능 4축(성재 요청 검수)**: 타이핑 PASS·패딩 격자 0건 위반·드로어 애니메이션 PASS·언퍼얼 미구현→**#1698**(ADR 선행). 상세=`claudedocs/uxui-qa-d8-20260823/REPORT.md` 증보 1.
+>
+> **★ 리그 자산(재사용 가능)**: 로컬 실시간 풀 리그 = make up(momo_main)+debug 서버(stub 보관소·26560)+socat `api` 브리지+프록시 5173(centrifugo 허용 오리진)+계정 demo/qa2(dev-password). 검수 앱 재빌드(수리분 포함) → ~/Desktop/oort-uxui-review.app.
+>
+> **★ 성재 대기(불변)**: ①ADR-0167 Accept+T-9 ②ADR-0168 Accept→M-2 ③stash drop 1커맨드 ④D8 에이전트 합류 릴레이 ⑤#1696(셀프호스트 보관소)·#1698(언퍼얼) 방향 판정.
+>
+> 이하 스냅샷 57:
+> **2026-08-23 스냅샷 57 (Fable · momo-main — ★재개 큐 소진: 재연 QA 대행 5/7 PASS·U-7 스코프드 랜딩·ADR-0168 기안. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ 재연 QA(성재 위임 집행)**: 브라우저 자동화 리그(localhost:23080 프록시→D8 백엔드)로 U-5·U-2·C-1·U-1·U-4 **전부 PASS**. U-3·M-2 계열은 **D8 파일 보관소 미연결(no-archive) 실측**으로 E2E 보류 — 서버측 보관소 구성=티켓 후보. 리포트 `claudedocs/uxui-qa-d8-20260823/`.
+>
+> **★ U-7 종결**: 스코프 판정 집행 — 문서 6파일+.gitignore만 랜딩(#1695 merged, **track/uxui=35074dbd**)·OmD 번들 583파일 비버전관리(.gitignore). #1693/#1689 close. 번들 원본 feat/1689-design-md-core-v2-book@272dd4c2 보존. **UXUI 파도 발사분 7/7 전량 랜딩.**
+>
+> **★ 성재 대기(갱신)**: ①ADR-0167 Accept+T-9(#1678) 발사 ②**ADR-0168**(M-2 picker 의존성 — 신규 Proposed) Accept→M-2 발사 ③rescue stash drop 1커맨드(`git -C ~/projects/momo-tracks/uxui stash drop 'stash@{0}'` — 역행 패치 확증·보험 패치 보존됨) ④D8 에이전트 합류 릴레이·온보딩 캡처 회수 ⑤(선택) U-3/M-1 실체감 — 로컬 스택(Colima 정상)으로 Fable이 다음 세션 가능.
+>
+> 이하 스냅샷 56:
+> **2026-08-23 스냅샷 56 (Fable · momo-main — ★UXUI 배치2 4/5 랜딩·U-7 보류·재연 docker hung·정지 체크포인트. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ 재개 진입점**: `docs/planning/handoffs/2026-08-23-uxui-wave-resume-checkpoint.md`(성재 "체크포인트·정지, Fable 재개" 지시 산물).
+>
+> **★ UXUI 파도**: 배치1 3/3 랜딩(M-1·U-2·U-1). 배치2 U-5·C-1·U-4 랜딩·**U-3(#1694) CI 자동머지 대기**·**U-7(#1689 OmD) 보류=성재 판정**(PR#1693 590파일 스코프). M-2(사진picker) 미발사=ADR 선행. track/uxui가 정본.
+>
+> **★ 성재 대기(재개 큐)**: ①로컬 docker 회복(hung — 재설치/재부팅 추정) 후 재연 스택+데스크탑 빌드 ②UXUI 수동 재연(빌드원본 track/uxui) ③U-7 스코프 판정 ④ADR-0167 Accept+T-9(#1678) ⑤D8 데스크탑 재연+에이전트 합류 릴레이+온보딩 캡처 회수 ⑥uxui rescue-20260823 stash 폐기.
+>
+> 이하 스냅샷 55:
+> **2026-08-23 스냅샷 55 (Fable · momo-main — ★UXUI 배치 1 랜딩(M-1·U-2 완료·U-1 CI 대기)·배치 2 대기. PLN-20260823-UX).** 컴팩트 복원 진입점.
+>
+> **★ 배치 1 랜딩**: M-1(#1681→PR#1683 iOS 첨부·프로필)·U-2(#1680→PR#1682 채널 컨텍스트) **track/uxui 머지·이슈 close·워크트리 회수**(디스크 44Gi 확보). U-1(#1679→PR#1684 우클릭·복사·프로필 카드) CI 대기(리베이스 2회전—STATUS 인접+ChatShell 헤더 3분기 병합, 양 게이트 PASS). track/uxui=a62035c9+U-1.
+> 검수 실적: Fable 재판정 수리 2(U-2 게이트 상수·DialogTrigger)·correctness Blocker 0·design은 Fable 직접(서브에이전트 좀비/오작동 회피)·게이트 red-proof. 워커 exit 101=codex 런타임(캐시TTL·디스크풀), 산출물 무결.
+>
+> **★ 배치 2 대기열(미발사)**: C-1 멘션 inline 노드(코어 markdown.ts Inline+웹/폰 렌더·공동결함)·U-3 라이트박스·U-4 컴포저 파도(이모지피커 공용화+스레드 동등성+**패딩 폴리시 px-6 근거존중**)·U-5 단축키 도움말·M-2 사진 picker(ADR-0137 D1 기안 선행)·U-7 OmD v2 채택(omd 2.0.0·momo 미채택). 서버 원장: 퍼머링크·언퍼얼·채널 rename·토픽 편집(라우트 부재).
+>
+> **★ 성재 대기**: ①UXUI 배치 1 수동 재연(빌드 원본=track/uxui 워크트리) ②ADR-0167 Accept+T-9(#1678) ③D8 수동 재연 ④M-1 이탈(expo-file-system hoist) 판정 ⑤uxui rescue-20260823 stash ⑥그록봇 에이전트 합류·온보딩 캡처 회수.
+>
+> 이하 스냅샷 54:
+> **2026-08-23 스냅샷 54 (Fable · momo-main — ★UXUI 완성도 파도 발사(sol 병렬 3)·D8 수동 재연은 파도 후. PLN-20260823-UX 신설).** 컴팩트 복원 진입점.
+>
+> **★ 진행 중**: U-1=#1679·U-2=#1680·M-1=#1681 sol 워커 3기 가동(워처 무장·PR 후 정지 계약). 검수=Fable diff+실검증+design-review(fresh·Blocker 0) → track/uxui 순차 랜딩. 계획 `research/2026-08-23-uxui-completeness-wave-plan.md`·패킷 `handoffs/2026-08-23-uxui-wave-packet.md`.
+> 감사 핵심: 기능 대부분 EXISTS — 갭은 사람 프로필·복사·우클릭(재개정)·채널 컨텍스트·폰 첨부(P0 유실). 발견성 결함이 1급 소견.
+>
+> **★ 배치 2 대기열**: C-1 멘션 inline(코어 단독)·U-3 라이트박스·U-4 컴포저 파도(패딩 폴리시 — px-6 근거 존중)·U-5 단축키 도움말·M-2 picker(ADR-0137 D1 기안 필요)·U-7 OmD v2 채택(omd 2.0.0 실측·momo 미채택). 서버 원장행: 퍼머링크·언퍼얼·채널 rename.
+>
+> **★ 성재 대기**: ①ADR-0167 Accept+T-9 발사(#1678 — RN Origin AC 합류됨) ②D8 수동 재연(파도 후) ③uxui rescue-20260823 stash 폐기 판정 ④그록봇 에이전트 합류 릴레이.
+>
+> 이하 스냅샷 53:
+> **2026-08-23 스냅샷 53 (Fable · momo-main — ★P1 원천수리 채비 완료·그록봇 릴레이 발송. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ 원천수리 채비(성재 "알아서 해결" 지시 집행)**: **ADR-0167 Proposed**(same-origin 파생 옵트인 — ADR-0110 증보) · **T-9=#1678**+패킷 ready. **성재 결재 2건 대기: ①ADR-0167 Accept ②T-9 발사 go.**
+>
+> **★ 즉석 완화+캡처 지시 릴레이 전송됨**(성재 "하라해줘" — UI 직접 전송·CDP 비사용): env 2줄 수리(WS wss+오리진)·온보딩 단계별 캡처(/workspace/oort-onboarding-captures/). **즉석 완화 폐곡선 완료**: 로그인 응답 wss 실측+데스크탑 재로그인 후 REST 발신 메시지 라이브 도착(15:59)·프레즌스 점등 — 실시간 레일 GREEN. 그록봇 온보딩 캡처 01~18 생성(INDEX.md·합류부터 19~). 잔여=①에이전트 합류(pairing) ②성재 수동 D8 재연=수용 판정 ③ADR-0167 Accept·T-9 발사 ④온보딩 와우 갭 검수(캡처 재료 준비됨).
+>
+> 이하 스냅샷 52:
+> **2026-08-23 스냅샷 52 (Fable · momo-main — ★D8 데스크탑 실접속 Fable 대행 완료: 코어 GREEN·실시간 P1. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ D8 실측(성재 지시 — Fable 직접 수행)**: v0.1.1 dmg 공증 PASS→설치→Funnel 접속→claim 소비·비번 설정→데스크탑 owner 로그인→첫 메시지 REST GREEN. T-5 감지 CTA 실환경 노출. 증거 14샷 `claudedocs/e2e-d8-desktop-20260823/`.
+>
+> **★ P1(수리 대기)**: 로그인 응답 `realtimeWebSocketUrl=ws://localhost:8088/...` — `self_host_env.sh:796` 터널 모드 무인지(ADR-0110 verbatim 반환). 원격 데스크탑 실시간 레일 RED. Funnel WS 101 통과 실측 → **수리=VM env `MOMO_CENTRIFUGO_WS_URL=wss://cursor.tailb1aad3.ts.net/connection/websocket`+api 재기동(그록봇 릴레이·지시문 성재 전달 대기)**.
+>
+> **★ 잔여 체인**: ①WS 수리 릴레이 ②그록봇 에이전트 합류(T-5 위저드 pairing 릴레이) ③성재 수동 D8 재연=수용 판정. owner 크레덴셜은 성재에게 채팅 전달(레포 비유입). 후속 티켓감: self_host_env 터널 모드 WS URL·SELF_HOST_AGENT.md 문면·owner 시드 표시명("데모 사용자").
+>
+> 이하 스냅샷 51:
+> **2026-08-23 스냅샷 51 (Fable · momo-main — ★파도 7/7+승격+v0.1.1 재발행 폐곡선. E2E만 남음. PLN-20260822-01).** 컴팩트 복원 진입점.
+>
+> **★ 체인 완결(성재 위임 집행)**: Q-LEGAL 브리핑 승인→T-2 문면보강·머지(#1663) → **main 승격 #1665(=1b79bc65)+sync 짝(#1666/#1667)** → **v0.1.1 multi-arch 첫 발행**(dispatch+release 승인 2회 — amd64+arm64 manifest list·attestation 2본 PASS·Release 생성) → digest 문면 현행화 #1669→승격 #1670+sync 짝(#1671/#1672). **운영자 pin(list)**: app `sha256:62843b1a…f23e` · postgres `sha256:b41a3ff9…9fa53`. llms.txt raw=main. topology PASS.
+>
+> **★ 잔여 2(성재)**: ①dmg 실공증 — auto 분류기 차단으로 성재 실행 필요: `! scripts/publish_next_build.sh --public --version 0.1.0`(데스크탑 번호 계열 — v0.1.1 아님) 후 Fable이 `gh release upload v0.1.1` ②**E2E 수용 런**(D7·D8 — 자연어 릴레이·지시문 채팅 제시됨)+R-1 마커 2종 재확인(같은 세션에서 자연어 질의).
+> 신규 게이트 함정 실측: verify_merge_tree RED 2종=node_modules 신선도(radix dropdown 미설치)+preview-guard 타이밍 flake(단독 재실행 green — 상습). 정책 마커 절차 누계 6회.
+>
+> 이하 스냅샷 50:
+
 > **2026-08-23 스냅샷 50 (Fable · momo-main — ★T계열 파도 6/7 랜딩·Q-LEGAL 브리핑 판단 대기. PLN-20260822-01).** 컴팩트 복원 진입점.
 >
 > **★ 파도 집행(성재 발사 go·ADR-0166 같은 날 Accepted)**: **V-1**(#1650 PASS — 발행 digest에 agent-port 401+WWW-Authenticate 실측·close) · **T-4**(#1658 engine — pg_dump 공유 lib·복원 런북·재판정 재현) · **T-5**(#1659 uxui — 감지 레지스트리(수동 시그니처만·CDP 제외)+위저드 자동채움, design-review H2 수리) · **T-6**(#1660 uxui — 첫 왕복 온보딩+bench M5 p50/p95, design-review 실렌더 H4 수리: failed 전송 제외·최신 멘션 시계·완료/닫기 localStorage 지속화) · **T-1**(#1662 engine — claim-token: ADR-0166 검증계약 전문 실측 PASS·수리 2회전(UX M2+마이그레이션 카운트·GHCR notice)·runtime-db 선재 중단 DEVIATION noted) · **T-3**(#1664 uxui — dmg dry-run 산출·서명 strict PASS·택일(a)=v0.1.0 자산 latest URL). 전부 track 랜딩·이슈 close·잔재 회수. 정책 마커 절차 3회 집행(#1658·#1662·#1664).
