@@ -15,7 +15,7 @@ export function useComposerEmoji({
   onValueChange: (value: string, caret: number) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [opener, setOpener] = useState<HTMLButtonElement | null>(null);
+  const [opener, setOpener] = useState<HTMLElement | null>(null);
   const selection = useRef<ComposerSelection>({ start: 0, end: 0 });
 
   const openPicker = (button: HTMLButtonElement) => {
@@ -25,15 +25,18 @@ export function useComposerEmoji({
       start: input?.selectionStart ?? fallback,
       end: input?.selectionEnd ?? fallback,
     };
-    setOpener(button);
+    // 닫힐 때 Radix onCloseAutoFocus가 여기로 포커스를 돌린다. 이모지 버튼이
+    // 아니라 textarea를 목적지로 삼아야, 이모지를 넣거나 Esc로 닫은 직후 바로
+    // 이어 쓸 수 있다(gate-composer: 삽입 후 textarea가 focused여야 한다).
+    setOpener(input ?? button);
     setOpen(true);
   };
 
   const pick = (emoji: string) => {
     const inserted = insertAtComposerSelection(value, selection.current, emoji);
     onValueChange(inserted.value, inserted.caret);
-    // Radix가 닫히며 opener로 포커스를 먼저 돌린 뒤, 입력을 계속할 textarea가
-    // 최종 목적지가 된다. Esc로 닫았을 때는 이 경로가 없어서 trigger에 남는다.
+    // opener가 textarea이므로 Radix가 닫히며 그리로 포커스를 돌린다. rAF는 삽입
+    // 위치로 캐럿을 옮겨, 넣은 이모지 바로 뒤에서 이어 쓰게 한다.
     requestAnimationFrame(() => {
       inputRef.current?.focus();
       inputRef.current?.setSelectionRange(inserted.caret, inserted.caret);
