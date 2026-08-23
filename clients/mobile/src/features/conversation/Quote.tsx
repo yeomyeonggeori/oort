@@ -95,11 +95,14 @@ export function QuoteBlock({
   block,
   directory,
   onJump,
+  attachmentCount = 0,
 }: {
   block: QuoteBlockModel;
   directory: Directory;
   /** 원본 줄로 이동. 원본이 로드된 범위 안에 있을 때만 주어진다. */
   onJump?: () => void;
+  /** 이미 로드된 원본 행이 가진 첨부 수. 바이트를 중첩하지 않고 유실만 막는다. */
+  attachmentCount?: number;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const jumpable = onJump !== undefined && block.kind !== 'unresolved';
@@ -152,6 +155,11 @@ export function QuoteBlock({
                 {block.truncated ? '…' : ''}
               </Text>
             )}
+            {block.kind === 'ready' && attachmentCount > 0 ? (
+              <Text style={styles.meta} testID="quote-attachments">
+                {`첨부 파일 ${attachmentCount}개`}
+              </Text>
+            ) : null}
           </>
         )}
       </View>
@@ -194,11 +202,14 @@ export function QuoteBlock({
 export function quoteAccessibilityPhrase(
   block: QuoteBlockModel,
   directory: Directory,
+  attachmentCount = 0,
 ): string {
   if (block.kind === 'unresolved') return '인용, 원본을 아직 불러오지 않음';
   const who = authorLabel(directory, block.authorMemberId);
   if (block.kind === 'deleted') return `${who} 인용, ${QUOTE_DELETED_TEXT}`;
-  return `${who} 인용, ${excerptText(block.lines, ' ')}`;
+  return `${who} 인용, ${excerptText(block.lines, ' ')}${
+    attachmentCount > 0 ? `, 첨부 파일 ${attachmentCount}개` : ''
+  }`;
 }
 
 // -----------------------------------------------------------------------------

@@ -37,6 +37,7 @@ import {
 import {hasRenderableBody} from '@momo/core/features/timeline/bodySlot';
 import {isTruncated, omittedFileCount} from '@momo/core/features/timeline/artifacts';
 import type {ArtifactPresentation} from '@momo/core/features/timeline/artifacts';
+import {attachmentMetaLine} from '@momo/core/features/attachments/model';
 import {deletedFoldLabel} from '@momo/core/features/timeline/deletedFold';
 import {AVATAR_SIZE} from '@momo/core/features/workspace/avatar';
 import {canQuoteMessage} from '@momo/core/features/timeline/quote';
@@ -84,6 +85,7 @@ import {
 const EMPTY_GATES: ReadonlyMap<string, ApprovalGate> = new Map();
 import type {DecisionOutcome} from '@momo/core/features/timeline/approvalDecision';
 import {ApprovalDecision} from '../inbox/ApprovalDecision';
+import {AttachmentList} from '../attachments/AttachmentList';
 import {
   approvalCardNote,
   type ApprovalNoteTone,
@@ -208,6 +210,15 @@ const META_HIT_SLOP = {
   bottom: META_SLOP,
   left: META_SLOP,
   right: META_SLOP,
+} as const;
+
+/** 작성자 머리줄(`line.head`)을 44pt로 만드는 슬롭. meta 줄과 높이가 다르다. */
+const AUTHOR_SLOP = slopTo(line.head);
+const AUTHOR_HIT_SLOP = {
+  top: AUTHOR_SLOP,
+  bottom: AUTHOR_SLOP,
+  left: AUTHOR_SLOP,
+  right: AUTHOR_SLOP,
 } as const;
 
 /** hh:mm, 24-hour, local. The row's own clock is never used for ordering. */
@@ -417,9 +428,17 @@ export function RecoveryDivider({
 function Author({
   directory,
   memberId,
+  onOpenProfile,
+  onLongPress,
+  delayLongPress,
+  consumeTap,
 }: {
   directory: Directory;
   memberId: string;
+  onOpenProfile?: () => void;
+  onLongPress?: () => void;
+  delayLongPress?: number;
+  consumeTap?: () => boolean;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const member = memberFor(directory, memberId);
@@ -429,8 +448,8 @@ function Author({
     isAgent && member?.ownerHumanId
       ? memberFor(directory, member.ownerHumanId)
       : null;
-  return (
-    <View style={styles.authorRow}>
+  const content = (
+    <>
       <Text
         style={[styles.authorName, isAgent && styles.authorNameAgent]}
         numberOfLines={1}>
@@ -455,7 +474,25 @@ function Author({
           연속 행에 시각을 세우고 나니 같은 정보가 두 자리에 있었고(머리 행은
           이름 옆, 연속 행은 오른쪽 끝), 그러면 눈이 매 줄 어느 쪽을 볼지 다시
           정해야 한다. 한 칸에 모으면 그 칸을 **안 보기로** 정할 수 있다. */}
-    </View>
+    </>
+  );
+  if (!onOpenProfile) return <View style={styles.authorRow}>{content}</View>;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`${parts.name} 프로필 보기`}
+      delayLongPress={delayLongPress}
+      hitSlop={AUTHOR_HIT_SLOP}
+      onLongPress={onLongPress}
+      onPress={event => {
+        event?.stopPropagation();
+        if (consumeTap?.()) return;
+        onOpenProfile();
+      }}
+      style={({pressed}) => [styles.authorRow, pressed && styles.pressed]}
+      testID="profile-author-target">
+      {content}
+    </Pressable>
   );
 }
 
@@ -1316,6 +1353,8 @@ export interface MessageRowActions {
   onJumpToQuoted?: (message: Message) => void;
   /** The gesture was used at least once, so the hint can retire itself. */
   onLongPressUsed?: () => void;
+  /** 작성자 신원을 연다. 사람은 프로필 시트, 에이전트는 기존 상세 표면으로 간다. */
+  onOpenProfile?: (memberId: string) => void;
 }
 
 export interface MessageRowProps {
@@ -1379,6 +1418,8 @@ export interface MessageRowProps {
    * hardest exactly when the conversation is busy.
    */
   quote?: QuoteBlockModel | null;
+  /** 로드된 인용 원본의 첨부 수. 인용 안에서는 바이트 대신 최소 표지만 그린다. */
+  quoteAttachmentCount?: number;
   /**
    * 이 행의 승인 카드를 **지금 결정할 수 있는가** (감사 H-1 / goal U4-g).
    *
@@ -1467,6 +1508,7 @@ function MessageRowInner({
   rollup: rollupOverride,
   replyParent,
   quote,
+  quoteAttachmentCount,
   approvalGates,
   approvalReceipts,
   approvalOffline,
@@ -1563,6 +1605,14 @@ function MessageRowInner({
   }, [actions]);
 
   const longPress = useLongPress({enabled: actionable, onFire: openSheet});
+  const attachmentGesture = useMemo(
+    () => ({
+      onLongPress: longPress.onLongPress,
+      delayLongPress: longPress.delayLongPress,
+      consumeTap: longPress.consumeTap,
+    }),
+    [longPress.onLongPress, longPress.delayLongPress, longPress.consumeTap],
+  );
 
   // ===========================================================================
   // 탭 = 이 행이 이미 열어 주는 문 (goal RN-U1 결함 2)
@@ -1682,6 +1732,9 @@ function MessageRowInner({
             if (url) openLink(url);
           }
           return;
+        case 'momoProfile':
+          actions?.onOpenProfile?.(message.authorMemberId);
+          return;
         default:
       }
     },
@@ -1702,6 +1755,9 @@ function MessageRowInner({
   const accessibilityActions = useMemo(() => {
     const list: {name: string; label: string}[] = [];
     if (actionable) list.push({name: 'momoActions', label: '메시지 액션'});
+    if (actions?.onOpenProfile && memberFor(directory, message.authorMemberId)) {
+      list.push({name: 'momoProfile', label: '작성자 프로필 보기'});
+    }
     if (threadTarget) list.push({name: 'momoThread', label: '스레드 열기'});
     // 이슈 #1112 — 시트를 열지 않고도 로터에서 바로 고정할 수 있다. 낱말은
     // 시트의 항목과 같은 코어 상수에서 오므로 둘이 갈라질 수 없다.
@@ -1745,6 +1801,8 @@ function MessageRowInner({
     presentation.artifact,
     available.pin,
     pinned,
+    directory,
+    message.authorMemberId,
   ]);
 
   const authorLabel = memberNameParts(
@@ -1819,7 +1877,7 @@ function MessageRowInner({
             : null,
         quoted:
           quote && !deleted
-            ? quoteAccessibilityPhrase(quote, directory)
+            ? quoteAccessibilityPhrase(quote, directory, quoteAttachmentCount)
             : null,
       })}
       accessibilityActions={accessibilityActions}
@@ -1857,11 +1915,40 @@ function MessageRowInner({
             그래야 한 묶음의 본문이 같은 x 에서 시작한다 (감사 H-11). */}
         {startsGroup ? (
           <View style={styles.rowAvatar}>
-            <Avatar directory={directory} memberId={message.authorMemberId} />
+            {actions?.onOpenProfile ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${authorLabel} 프로필 보기`}
+                delayLongPress={longPress.delayLongPress}
+                hitSlop={CHIP_HIT_SLOP}
+                onLongPress={longPress.onLongPress}
+                onPress={event => {
+                  event?.stopPropagation();
+                  if (longPress.consumeTap()) return;
+                  actions.onOpenProfile?.(message.authorMemberId);
+                }}
+                style={({pressed}) => [pressed && styles.pressed]}
+                testID="profile-avatar-target">
+                <Avatar directory={directory} memberId={message.authorMemberId} />
+              </Pressable>
+            ) : (
+              <Avatar directory={directory} memberId={message.authorMemberId} />
+            )}
           </View>
         ) : null}
         {startsGroup ? (
-          <Author directory={directory} memberId={message.authorMemberId} />
+          <Author
+            directory={directory}
+            memberId={message.authorMemberId}
+            onOpenProfile={
+              actions?.onOpenProfile
+                ? () => actions.onOpenProfile?.(message.authorMemberId)
+                : undefined
+            }
+            onLongPress={longPress.onLongPress}
+            delayLongPress={longPress.delayLongPress}
+            consumeTap={longPress.consumeTap}
+          />
         ) : null}
 
         {/* 답글 표식 (성재: "답글 모양 아이콘과 함께 별도로 안 보이는 거 같아").
@@ -1892,6 +1979,7 @@ function MessageRowInner({
           <QuoteBlock
             block={quote}
             directory={directory}
+            attachmentCount={quoteAttachmentCount}
             // 목적지를 **아는** 인용에는 언제나 문을 준다 — 그 행이 지금 로드된
             // 범위 안에 있든 없든.
             //
@@ -1966,6 +2054,14 @@ function MessageRowInner({
                 approvalsProvided={approvalsProvided}
                 nowMs={nowMs}
                 onApprovalSettled={onApprovalSettled}
+              />
+            ) : null}
+
+            {message.attachments && message.attachments.length > 0 ? (
+              <AttachmentList
+                channelId={message.channelId}
+                attachments={message.attachments}
+                gesture={attachmentGesture}
               />
             ) : null}
 
@@ -2312,6 +2408,7 @@ export const MESSAGE_ROW_COMPARED_PROPS: Record<keyof MessageRowProps, true> = {
   rollup: true,
   replyParent: true,
   quote: true,
+  quoteAttachmentCount: true,
   approvalGates: true,
   approvalReceipts: true,
   approvalOffline: true,
@@ -2377,6 +2474,7 @@ export function sameMessageRowProps(
     sameChips(a.chips, b.chips) &&
     sameRollup(a.rollup, b.rollup) &&
     sameQuote(a.quote, b.quote) &&
+    a.quoteAttachmentCount === b.quoteAttachmentCount &&
     // 두 표는 **동일성**으로 본다(`directory` 와 같은 취급). 화면이 `useMemo`
     // 로 붙잡고 있으므로 승인이 실제로 바뀔 때만 새 표가 되고, 그때는 붙어 있는
     // 행이 전부 다시 그려진다 — 승인은 드물어 감당할 수 있는 값이고, 대안은
@@ -2466,6 +2564,11 @@ export function rowAccessibilityLabel({
     replyTo ?? '',
     quoted ?? '',
     deleted ? (tombstoneText ?? '삭제된 메시지') : (message.body ?? '').trim(),
+    ...(!deleted
+      ? (message.attachments ?? []).map(
+          attachment => `첨부 ${attachment.name}, ${attachmentMetaLine(attachment)}`,
+        )
+      : []),
     ...tail,
     ...chips.map(
       chip => `${chip.emoji} 반응 ${chip.count}개${chip.mine ? ', 내 반응' : ''}`,
@@ -2574,6 +2677,7 @@ export function PendingRow({
   startsGroup,
   directory,
   quote,
+  quoteAttachmentCount,
   onResend,
 }: {
   pending: PendingMessage;
@@ -2588,6 +2692,7 @@ export function PendingRow({
    * 대체할 때 글이 다시 흐르면 안 된다).
    */
   quote?: QuoteBlockModel | null;
+  quoteAttachmentCount?: number;
   onResend?: (clientMsgId: string) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -2609,13 +2714,26 @@ export function PendingRow({
         {startsGroup ? (
           <Author directory={directory} memberId={pending.authorMemberId} />
         ) : null}
-        {quote ? <QuoteBlock block={quote} directory={directory} /> : null}
+        {quote ? (
+          <QuoteBlock
+            block={quote}
+            directory={directory}
+            attachmentCount={quoteAttachmentCount}
+          />
+        ) : null}
         {/* Same anatomy as a confirmed row, dimmed: the text must not re-flow
             when the server's copy replaces this one — which is exactly why the
             echo goes through the SAME renderer. Before this, a pending row
             printed markdown raw and then rearranged itself the instant its seq
             landed. */}
         <MessageBody body={pending.body} muted selectable />
+        {pending.attachments && pending.attachments.length > 0 ? (
+          <AttachmentList
+            channelId={pending.channelId}
+            attachments={pending.attachments}
+            muted
+          />
+        ) : null}
         {failed ? (
           <View style={styles.failedRow}>
             <Text style={styles.failedText}>전송 실패</Text>

@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## iOS 첨부 렌더·다운로드 + 멤버 프로필 (#1681, 2026-08-23)
+
+- 모바일 타임라인이 `Message.attachments` 전부를 3상태 고정 프레임/안전한 SVG 파일 카드로 렌더하고, 기존 ExpoFileSystem으로 인가 프록시를 캐시에 스트리밍한 뒤 iOS 공유시트를 연다. 실패·재시도·진행률과 인용 원본 첨부 수 표식을 포함해 조용한 유실을 회귀 단정했다.
+- 아바타·작성자명에서 사람/에이전트 프로필 시트를 열어 이름·핸들·kind·4개 멤버십 상태·DM 가능 여부를 보여 주며, 에이전트는 기존 상세 표면으로 잇는다. 설정·관리 표면과 사진 picker는 추가하지 않았다.
+
 ## claim 부트스트랩 ttl_seconds 모호성 (#1673, 2026-08-23)
 
 - `infra/prod/bootstrap_owner_claim_if_absent.sql` SELECT INTO를 테이블 별칭 `i`로 한정. PL/pgSQL 변수 `ttl_seconds`와 컬럼 동명으로 `MOMO_BOOTSTRAP_CLAIM=1` migrate가 스키마 78/78 뒤 Exited 1이던 P1.
