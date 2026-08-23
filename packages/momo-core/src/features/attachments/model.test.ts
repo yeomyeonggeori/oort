@@ -411,6 +411,9 @@ describe("presentation", () => {
         mime: "application/octet-stream",
         sizeBytes: 0,
       })
+      // 문서화된 잔재(#1703 리뷰 Medium-1)이지 스펙 승인이 아니다: MessageAttachment에는
+      // sizeKnown이 없어 전송 후 메타줄은 크기 미독 파일을 「0 B」로 잰 척한다. 서버가
+      // complete 시점에 실측 크기를 적는 결정(후속 티켓)이 이 단정을 바꿀 것이다.
     ).toBe("파일 · 0 B");
   });
 
