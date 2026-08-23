@@ -28,7 +28,7 @@
 //! `issue_and_record_session`. The audit row is `momo_db::audit::write_audit`.
 
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::Json;
 use momo_auth::{
     consume_claim_in_tx, normalized_claim_password, normalized_claim_token,
@@ -64,6 +64,8 @@ fn mutation_error(mutation: ClaimMutation) -> ApiError {
 
 pub async fn claim(
     State(state): State<AppState>,
+    uri: Uri,
+    headers: HeaderMap,
     Json(request): Json<ClaimRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let token = normalized_claim_token(&request.token).map_err(spec_error)?;
@@ -130,6 +132,6 @@ pub async fn claim(
             display_name: outcome.display_name,
             handle: outcome.handle,
         },
-        realtime_web_socket_url: state.realtime_ws_url.to_string(),
+        realtime_web_socket_url: state.advertised_realtime_ws_url(&headers, uri.scheme_str())?,
     }))
 }

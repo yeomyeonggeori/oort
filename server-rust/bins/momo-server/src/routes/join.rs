@@ -51,7 +51,7 @@
 //! this batch was told to leave alone. Recorded in the PR body as open.
 
 use axum::extract::State;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::Json;
 use momo_db::audit::{write_audit, AuditEntry};
@@ -98,6 +98,7 @@ fn rejection_error(rejection: JoinRejection) -> ApiError {
 
 pub async fn join(
     State(state): State<AppState>,
+    uri: Uri,
     headers: HeaderMap,
     Json(request): Json<JoinRequest>,
 ) -> Result<Response, ApiError> {
@@ -217,7 +218,7 @@ pub async fn join(
             display_name: outcome.member.display_name,
             handle: outcome.member.handle,
         },
-        realtime_web_socket_url: state.realtime_ws_url.to_string(),
+        realtime_web_socket_url: state.advertised_realtime_ws_url(&headers, uri.scheme_str())?,
         memberships: outcome
             .memberships
             .into_iter()
