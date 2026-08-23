@@ -2022,6 +2022,8 @@ function MessageRowInner({
               // (design-review M-1).
               <MessageBody
                 body={body}
+                directory={directory}
+                selfMemberId={actions?.myMemberId}
                 // ===================================================
                 // 규칙: **모든 행에 텍스트를 꺼내는 길이 정확히 하나** (goal U4-b)
                 //
@@ -2726,7 +2728,13 @@ export function PendingRow({
             echo goes through the SAME renderer. Before this, a pending row
             printed markdown raw and then rearranged itself the instant its seq
             landed. */}
-        <MessageBody body={pending.body} muted selectable />
+        <MessageBody
+          body={pending.body}
+          directory={directory}
+          muted
+          selectable
+          selfMemberId={pending.authorMemberId}
+        />
         {pending.attachments && pending.attachments.length > 0 ? (
           <AttachmentList
             channelId={pending.channelId}

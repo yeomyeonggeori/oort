@@ -89,7 +89,12 @@ export function PendingRow({
         {/* Same body renderer as the confirmed row (goal B8 H6): an echo that
             showed raw asterisks and then re-flowed into bold the moment its seq
             landed would move the text under the reader's eye. */}
-        <MessageBody body={pending.body} muted />
+        <MessageBody
+          body={pending.body}
+          directory={directory}
+          muted
+          selfMemberId={pending.authorMemberId}
+        />
         {/* 확정된 행과 **같은 카드**를 그린다 (ADR-0151). 바이트는 전송을 누르기
             전에 이미 보관소에 올라가 있으므로, 이 카드는 seq 를 기다리는 동안에도
             거짓이 아니다 — 내려받기 버튼조차 진짜로 동작한다. 인용을 echo 에도

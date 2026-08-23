@@ -1,4 +1,5 @@
 import type { RosterMember } from "../../lib/api";
+import { mentionTokenAt } from "./mentionSyntax";
 
 // =============================================================================
 // 이 메시지가 부르는 에이전트가 누구인가 (ADR-0134 D1, 컴포저 1회 오버라이드).
@@ -15,15 +16,15 @@ import type { RosterMember } from "../../lib/api";
 // 사람에게 라우팅을 붙이거나 엉뚱한 에이전트를 고르게 된다.
 // =============================================================================
 
-/** 핸들 문자에 쓰이는 글자. 서버 핸들 규칙(소문자/숫자/하이픈)의 상위집합이다. */
-const MENTION_PATTERN = /(^|\s)@([A-Za-z0-9_.-]+)/g;
-
 /** 텍스트에 실제로 적힌 @핸들들, 등장 순서대로, 중복 없이. */
 export function mentionedHandles(text: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
-  for (const match of text.matchAll(MENTION_PATTERN)) {
-    const handle = match[2].toLowerCase();
+  for (let at = text.indexOf("@"); at >= 0; at = text.indexOf("@", at + 1)) {
+    const token = mentionTokenAt(text, at);
+    if (token === null) continue;
+    at = token.end - 1;
+    const { handle } = token;
     if (seen.has(handle)) continue;
     seen.add(handle);
     out.push(handle);

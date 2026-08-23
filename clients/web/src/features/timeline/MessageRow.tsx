@@ -713,7 +713,11 @@ export function MessageRow({
             // `foldKey`가 메시지 id인 이유는 접힘 상태가 이 행보다 오래 살아야
             // 하기 때문이다: 긴 답을 펴 놓고 위 대화를 확인하러 갔다 오면
             // virtuoso는 그 사이에 이 행을 언마운트한다 (fold.ts).
-            <MessageBody body={message.body ?? ""} foldKey={message.id} />
+            <MessageBody body={message.body ?? ""}
+              directory={directory}
+              foldKey={message.id}
+              selfMemberId={actions?.myMemberId}
+            />
           ) : (
             // 살릴 본문이 없으면 칸을 만들지 않는다 (이슈 #1465 · 코어
             // `bodySlot.ts`). `keepsBody`는 「본문을 살릴 자격」이지 「살릴 본문이
