@@ -7,6 +7,7 @@ import {
   asPinFrame,
   asReactionFrame,
   asTypingFrame,
+  asUnfurlFrame,
   asWorkSessionACPFrame,
   asWorkSessionLifecycleFrame,
   asWorkSessionControlFrame,
@@ -27,6 +28,7 @@ import {
   type RealtimeStatus,
   type SubscribedRecoveryContext,
   type TypingFrame,
+  type UnfurlEvent,
   type WorkSessionACPFrame,
   type WorkSessionLifecycleFrame,
   type WorkSessionControlFrame,
@@ -200,6 +202,7 @@ export function createRealtime(
       onMessageDeleted?: (event: MessageDeletedEvent) => void;
       onReaction?: (event: ReactionEvent) => void;
       onPin?: (event: PinEvent) => void;
+      onUnfurl?: (event: UnfurlEvent) => void;
     }
   ): () => void {
     return attach(
@@ -235,7 +238,12 @@ export function createRealtime(
           // reuses the target's `seq` too, so the header list and the timeline
           // never disagree about which message a frame is about.
           const pin = asPinFrame(ctx.data);
-          if (pin) handlers.onPin?.(pin);
+          if (pin) {
+            handlers.onPin?.(pin);
+            return;
+          }
+          const unfurl = asUnfurlFrame(ctx.data);
+          if (unfurl) handlers.onUnfurl?.(unfurl);
         };
         sub.on("subscribed", onSubscribed);
         sub.on("publication", onPublication);
