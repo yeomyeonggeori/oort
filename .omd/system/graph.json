@@ -1,0 +1,1030 @@
+{
+  "$schema": "https://oh-my-design.kr/schema/design-system-graph-v2.schema.json",
+  "components_states": {
+    "components": [
+      {
+        "id": "button",
+        "anatomy": [
+          "label",
+          "optional icon",
+          "optional progress"
+        ],
+        "variants": [
+          "primary",
+          "secondary",
+          "outline",
+          "ghost",
+          "destructive"
+        ],
+        "states": [
+          "default",
+          "hover",
+          "focus-visible",
+          "disabled",
+          "loading"
+        ],
+        "token_refs": [
+          "color.accent.light",
+          "color.line-strong.light",
+          "color.danger-fill.light",
+          "radius.sm"
+        ],
+        "semantics": "동사를 먼저 말하고, 주·보조·파괴 위계를 채움과 경계의 관계로 드러내는 실제 button 요소.",
+        "interaction": {
+          "kind": "interactive",
+          "state_applicability": {
+            "default": {
+              "applicability": "applicable"
+            },
+            "hover": {
+              "applicability": "applicable"
+            },
+            "focus-visible": {
+              "applicability": "applicable"
+            },
+            "disabled": {
+              "applicability": "applicable"
+            },
+            "loading": {
+              "applicability": "applicable"
+            },
+            "error": {
+              "applicability": "not-applicable",
+              "reason": "오류는 버튼 토스트가 아니라 맥락 안 인라인 상태로 말한다."
+            },
+            "success": {
+              "applicability": "not-applicable",
+              "reason": "성공은 장식 상태가 아니라 갱신된 결과 표면으로 확인한다."
+            }
+          }
+        }
+      },
+      {
+        "id": "programmatic-dialog",
+        "anatomy": [
+          "opener button",
+          "title",
+          "description",
+          "content",
+          "trailing actions"
+        ],
+        "variants": [
+          "dialog",
+          "alert dialog"
+        ],
+        "states": [
+          "closed",
+          "open",
+          "loading",
+          "error"
+        ],
+        "token_refs": [
+          "color.scrim.light",
+          "color.surface-raised.light",
+          "radius.lg"
+        ],
+        "semantics": "open prop와 trigger button onClick, DialogContent opener를 함께 써서 Esc가 같은 트리거로 포커스를 돌려준다. DialogTrigger와 custom opener를 병용하지 않는다.",
+        "interaction": {
+          "kind": "interactive",
+          "state_applicability": {
+            "default": {
+              "applicability": "applicable"
+            },
+            "hover": {
+              "applicability": "not-applicable",
+              "reason": "dialog container 자체는 hover 컨트롤이 아니다."
+            },
+            "focus-visible": {
+              "applicability": "applicable"
+            },
+            "disabled": {
+              "applicability": "not-applicable",
+              "reason": "비활성화는 dialog가 아니라 opener나 내부 control의 상태다."
+            },
+            "loading": {
+              "applicability": "applicable"
+            },
+            "error": {
+              "applicability": "applicable"
+            },
+            "success": {
+              "applicability": "not-applicable",
+              "reason": "성공 뒤에는 결과를 갱신하고 dialog를 닫아 opener로 복귀한다."
+            }
+          }
+        }
+      },
+      {
+        "id": "message-row",
+        "anatomy": [
+          "avatar",
+          "author",
+          "timestamp",
+          "body",
+          "structured attachments",
+          "context actions"
+        ],
+        "variants": [
+          "human",
+          "agent"
+        ],
+        "states": [
+          "default",
+          "hover",
+          "focus-visible",
+          "selected"
+        ],
+        "token_refs": [
+          "color.surface-hover.light",
+          "color.agent.light",
+          "target.inline"
+        ],
+        "semantics": "사람과 에이전트가 같은 해부를 공유하고 에이전트 정체성은 avatar·badge의 agent 톤으로만 드러난다.",
+        "interaction": {
+          "kind": "interactive",
+          "state_applicability": {
+            "default": {
+              "applicability": "applicable"
+            },
+            "hover": {
+              "applicability": "applicable"
+            },
+            "focus-visible": {
+              "applicability": "applicable"
+            },
+            "disabled": {
+              "applicability": "not-applicable",
+              "reason": "기록 행 자체를 disabled 처리하지 않고 불가능한 개별 action만 잠근다."
+            },
+            "loading": {
+              "applicability": "not-applicable",
+              "reason": "행이 없을 때의 로딩은 timeline surface skeleton이 맡는다."
+            },
+            "error": {
+              "applicability": "not-applicable",
+              "reason": "전송·편집 오류는 해당 행 맥락 안에서 별도 상태로 말한다."
+            },
+            "success": {
+              "applicability": "not-applicable",
+              "reason": "기록이 보이는 것 자체가 성공 결과이며 장식하지 않는다."
+            }
+          }
+        }
+      },
+      {
+        "id": "status-chip",
+        "anatomy": [
+          "status text",
+          "persistent vessel"
+        ],
+        "variants": [
+          "ledger",
+          "measurement",
+          "skipped"
+        ],
+        "states": [
+          "default"
+        ],
+        "token_refs": [
+          "color.muted-soft.light",
+          "color.ok-soft.light",
+          "color.warn-soft.light",
+          "color.danger-soft.light"
+        ],
+        "semantics": "비대화형 상태 표식. 원장 칩은 중립 그릇, 실제 측정 칩만 톤 그릇을 얻고 테두리로 컨트롤처럼 보이게 하지 않는다.",
+        "interaction": {
+          "kind": "non-interactive",
+          "reason": "상태를 읽는 표식이며 누르는 컨트롤이 아니다."
+        }
+      },
+      {
+        "id": "product-surface",
+        "anatomy": [
+          "title or context",
+          "durable content",
+          "inline state",
+          "single next action"
+        ],
+        "variants": [
+          "timeline",
+          "directory",
+          "settings",
+          "dialog",
+          "drawer"
+        ],
+        "states": [
+          "empty",
+          "loading",
+          "error",
+          "offline"
+        ],
+        "semantics": "모든 제품 표면은 빈·로딩·오류·오프라인을 가지며 오류와 오프라인은 토스트가 아니라 맥락 안에서 다음 행동을 말한다.",
+        "interaction": {
+          "kind": "non-interactive",
+          "reason": "표면은 내부 컨트롤의 상태를 조직하는 컨테이너다."
+        }
+      }
+    ],
+    "rules": [
+      "모든 제품 표면은 빈·로딩·오류·오프라인 네 상태를 갖는다.",
+      "빈 상태는 한 줄 설명과 행동 하나, 로딩은 높이를 보존하는 중립 skeleton, 오류는 원인과 다음 행동, 오프라인은 캐시를 보존하는 배너다.",
+      "오류·성공·오프라인을 toast나 snackbar stack으로 말하지 않는다.",
+      "모든 interactive action은 keyboard 경로와 즉시 보이는 focus-visible ring을 갖는다.",
+      "overlay는 design/ui/escapeLayer.ts의 Esc 층에 합류하고 닫힘 뒤 opener로 포커스를 돌린다.",
+      "programmatic dialog는 DialogTrigger 없이 open prop·button onClick·DialogContent opener 조합만 쓴다.",
+      "파괴와 승인은 AlertDialog 확인을 거치고 단일 hover나 무방비 click으로 실행하지 않는다."
+    ]
+  },
+  "content_locales": {
+    "voice": [
+      "간결함",
+      "구체적임",
+      "비난하지 않음",
+      "증거 중심",
+      "동사 먼저"
+    ],
+    "terminology": {
+      "agent": "에이전트",
+      "agent ownership": "{owner} 님이 관리",
+      "cancelled stream": "중단됨",
+      "cut off stream": "응답이 끊김",
+      "recovery marker": "seq N까지 복구"
+    },
+    "locales": [
+      {
+        "locale": "ko",
+        "status": "supported",
+        "rules": [
+          "한국어 조사와 긴 한영 혼합 문자열을 실제 폭에서 확인한다.",
+          "오류는 무엇이 일어났고 다음에 무엇을 할지 말한다.",
+          "버튼은 가능한 경우 동사를 먼저 쓴다."
+        ]
+      },
+      {
+        "locale": "en",
+        "status": "partial",
+        "rules": [
+          "제품·프로토콜의 고유 영어 어휘는 한국어 문장 안에서 자연스럽게 혼용한다.",
+          "라틴 낱말 뒤 한국어 조사 앞에 불필요한 공백을 두지 않는다."
+        ]
+      }
+    ]
+  },
+  "experience": {
+    "summary": "사람과 AI 에이전트가 같은 대화 해부 안에서 협업하고, 작업·승인·결과를 차분하고 조밀하며 증거 중심으로 읽고 조작한다.",
+    "primary_tasks": [
+      "채널에서 사람과 에이전트의 대화를 읽고 작성한다.",
+      "에이전트 작업과 승인을 관전하고 안전하게 결정한다.",
+      "연결이 끊겨도 기록을 잃지 않고 복구 지점을 확인한다."
+    ],
+    "design_direction": [
+      "여명(Dawn)의 따뜻한 종이와 밤하늘",
+      "Slack 수준의 정보 밀도",
+      "Codex처럼 차분한 에이전트 표면",
+      "장식보다 상태와 증거"
+    ],
+    "principles": [
+      "사람과 에이전트 메시지는 같은 해부와 타이포그래피를 쓴다.",
+      "파괴 > 주 > 보조의 위계를 값이 아니라 관계로 지킨다.",
+      "빈·로딩·오류·오프라인 상태를 빠뜨리지 않는다.",
+      "Postgres에 남은 기록과 재연결 복구를 화면 장식보다 우선한다."
+    ],
+    "avoid": [
+      "네온 보라와 인디고 AI 그라디언트",
+      "토스트와 스낵바 스택",
+      "모든 행을 감싸는 과대 카드",
+      "가운데 정렬 일러스트 빈 상태",
+      "의미 없는 펄스와 장식 상태 점",
+      "제품 표면의 원시 JSON과 내부 식별자 노출"
+    ]
+  },
+  "extensions": {
+    "dev.oh-my-design.migration": {
+      "input_format": "legacy-unmarked",
+      "mapped_segment_ids": [],
+      "original_segments": [
+        {
+          "content": "# 오르트 구름 (Oort Cloud) — oort 디자인 시스템 정본\n\n> **가리킬 자리 하나.** 리뷰어·워커·스킬이 \"이건 어느 규칙 위반인가\"를 물을 때 여는 문서다.\n>\n> - 결정: [ADR-0159](../adr/0159-oort-cloud-design-system.md) (Accepted)\n> - 근거·실측: [2026-08-09 디자인 시스템 감사](../planning/research/2026-08-09-design-system-audit.md) (679줄)\n> - 관련 정본: [UX 원칙 P1~P15](../ux-bible/README.md) · [아키텍처](../architecture/overview.md) · 스킬 `.claude/skills/momo-design-taste-web/SKILL.md`\n> - 도구 소비 mirror: 루트 `DESIGN.md`(Core v2) · [OmD v2 운영 경계](OMD.md). **이 둘은 이 문서를 대체하지 않는다.**\n>\n> 위 두 링크(ADR·감사)는 **문서 정본 라인(`main`)**에 산다. 트랙 브랜치가 아직 그것을 받지 못했으면 링크가 비어 보인다 — 문서가 없는 것이 아니라 이 브랜치가 아직 못 받은 것이다.\n\n",
+          "end": 620,
+          "heading": null,
+          "id": "source-001",
+          "kind": "preamble",
+          "order": 0,
+          "sha256": "cfb612e11e77ef8a9267b93e26f47e0846bdd125874936ec0f2b593a43ca15b8",
+          "start": 0
+        },
+        {
+          "content": "## 이 문서가 존재하는 이유\n\n디자인 리뷰 16건(2,514줄)에서 뽑은 결함 170건의 **최다 패턴은 명세 부족이 아니었다.**\n\n감사 §B-3이 센 세 메타 패턴 (한 결함이 여러 패턴에 들 수 있으므로 순위가 아니라 계수다):\n\n| 메타 패턴 | 건 | 리포트 |\n|---|---|---|\n| **\"옳은 답이 바로 옆 줄·같은 파일·형제 컴포넌트에 이미 있었는데 안 썼다\"** — 코퍼스 최다 | **25** | 11 |\n| 클라 간 패리티 분기 | 18 | 8 |\n| 게이트 맹점(\"기계가 잡았어야 했는데 안 잡았다\") | 17 | 10 |\n\n가장 날카로운 예: `tokens.css`가 `py-1.5`를 **\"아예 컴파일되지 않는 예\"로 이름 대어 적어 둔 바로 그 클래스**를 U4-4가 적었고, 화면의 묶음 안 간격이 0px이 됐다.\n\n그래서 이 문서의 목적은 새 규칙을 세우는 것이 **아니다.** 이미 코드·리뷰·스킬·ADR에 흩어져 있는 규칙을 한 자리에 모아 이름을 붙이고, **각 규칙 옆에 \"이걸 무엇이 재는가\"와 \"무엇이 안 재는가\"를 적는 것**이다. 찾기 쉬움이 곧 기능이다.\n\n이 문서에 새로 발명된 규칙은 없다. 모든 항목에 출처가 붙어 있고, 출처가 없으면 그것은 규칙이 아니라 관례다.\n\nOmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 사상한\n비권위 mirror다. 도구의 구조화 graph가 존재해도 새 정본이 된 것이 아니다. 설치\n채널, taste/design-review/프리플라이트와의 역할 경계, book 사용법은\n[OmD v2 운영 경계](OMD.md)에 적는다.\n\n---\n\n",
+          "end": 1448,
+          "heading": "이 문서가 존재하는 이유",
+          "id": "source-002",
+          "kind": "section",
+          "order": 1,
+          "sha256": "59e47d5e8fdb8b49b71298fc3f2ca318d5b39d5f5b6a1072f93f12547e852f31",
+          "start": 620
+        },
+        {
+          "content": "## 0. 30초 경로\n\n| 지금 하려는 일 | 열 자리 |\n|---|---|\n| 색을 고른다 | §2.2 — 웹 `clients/web/src/design/tokens.css`가 유일 정본. 폰은 그것을 **번역**한다. |\n| 간격·반경·글자 크기를 고른다 | §2.3~§2.5 — 스케일 밖 값은 **이름**으로 들어오거나 아예 안 들어온다. |\n| 버튼 두 개를 나란히 세운다 | §3 위계 — 파괴 > 주 > 보조. 값이 아니라 **관계**다. |\n| 새 표면을 만든다 | §4 상태 — 빈·로딩·오류·오프라인 넷이 다 있어야 출하다. |\n| \"이거 기계가 잡나?\"를 묻는다 | §5 강제 기제 지도. **§5.3이 안 잡는 것 목록**이다. |\n| 스케일에 값을 하나 더하고 싶다 | §6. 대개 답은 \"더하지 말고 이름을 지어라\"다. |\n\n---\n\n",
+          "end": 1874,
+          "heading": "0. 30초 경로",
+          "id": "source-003",
+          "kind": "section",
+          "order": 2,
+          "sha256": "2a490e196fb8f38d48239e83e72fba759523e58a078af52c5cf974a3c6677e56",
+          "start": 1448
+        },
+        {
+          "content": "## 1. 디자인 표면은 셋이 아니라 **둘**이다\n\n| 표면 | 코드 | 비고 |\n|---|---|---|\n| **웹** | `clients/web` | Dawn 팔레트의 정본이 여기 산다 |\n| **폰** | `clients/mobile` (bare React Native) | 웹을 **번역**한다. 구현은 공유하지 않는다 |\n| ~~데스크톱(Tauri)~~ | `clients/desktop` | **디자인 표면이 아니다** — `frontendDist`가 `../../web/dist`이고, `clients/web/src` 전수에 런타임을 보고 **스타일을 가르는** 분기가 0건이다(§주1) |\n| ~~macOS(SwiftUI)~~ | ~~`clients/macOS`~~ | **삭제 완료**(2026-08-10, PR #1253 — W-S1). 역사 기록으로만 남김 |\n\n> **주1 — \"스타일 분기 0건\"이 \"빌드 두 개가 똑같다\"는 뜻은 아니다.** 런타임 분기는 있고, 그것은 *무엇을 보여줄지*를 가른다: `app/RuntimeBadge.tsx:26`이 배지 글자를 `desktop`/`web`으로 나누고, `features/settings/SettingsRoute.tsx:78·104`가 「업데이트」 섹션을 데스크톱에서만 렌더한다. 없는 것은 **토큰·레이아웃을 런타임에 따라 다르게 고르는 코드**이고, 디자인 시스템이 걱정하는 것은 그쪽이다. 그래서 표면은 여전히 둘이다.\n\n> **컴포넌트는 공유하지 않는다** — 토큰·코어 로직·문장만 공유하고 뷰는 각자 구현한다. 감사 §A-2가 1차 소스로 확인한 업계 표준 선택이고(Microsoft·Adobe 별도 구현, RNW는 제작자가 \"Meta 투자 0\" 선언, Airbnb \"결국 두 플랫폼이 아니라 세 플랫폼을 지원하게 됐다\"), 바꿀 이유가 없다.\n\n---\n\n",
+          "end": 2793,
+          "heading": "1. 디자인 표면은 셋이 아니라 **둘**이다",
+          "id": "source-004",
+          "kind": "section",
+          "order": 3,
+          "sha256": "fc5b887555b8ea184d3b9c8572dfc856da302ff5053500b0b05c7090b91b5d4c",
+          "start": 1874
+        },
+        {
+          "content": "## 2. 토큰 층\n\n### 2.1 정본 파일\n\n| # | 파일 | 정의하는 것 | 누구를 따르나 |\n|---|---|---|---|\n| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** |\n| 2 | `clients/mobile/src/design/tokens.ts` | 색(×2스킴) · space · radius · font · line · TOUCH_TARGET | ①을 번역 |\n| 3 | `packages/momo-core/src/features/timeline/divider.ts` | `ROW_SPACE` — 타임라인 행 간 거리 | 없음(이 축의 정본). 웹·폰이 각자 소비 |\n| 4 | ~~`clients/macOS/Sources/MomoMac/Theme.swift`~~ | (삭제됨 — PR #1253) | 정본 토큰 파일은 위 1~3의 셋뿐이다 |\n\n### 2.2 색 — 유일하게 완전히 흐르는 축\n\n**여명(Dawn) 팔레트.** 웹이 두 스킴을 `light-dark()` 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 폰은 두 상수로 나눠 들고, `clients/mobile/__tests__/paletteContrast.test.ts`가 웹 `tokens.css`를 `readFileSync`로 읽어 **바이트 단위로** 대조한다(짝 15쌍 + 스크림).\n\n규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `paletteContrast.test.ts`):\n\n- **순흑·순백 없음.** 종이의 흰색은 `#fffefb`.\n- **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *\"never neon AI purple\"*이라고 적는다.\n- **`--line`은 나누고, `--line-strong`은 컨트롤을 그린다(3:1).** `tokens.css:33`.\n- **위험 순서의 자는 대비가 아니라 채도(OKLab C)다** — `danger > warn > ink-muted`. AA를 한참 넘긴 두 톤은 대비 축에서 구분되지 않는다.\n- **스크림은 색이 아니라 방향이다** — 어느 스킴에서든 뒤를 어둡게 한다.\n- **상호작용 상태를 그리는 토큰은 정적인 그릇이 될 수 없다** (#1515) — 아래.\n- **hex 리터럴 0.** 웹은 프리플라이트 그렙이(ESLint 규칙도 있지만 어느 게이트도 안 돌린다 — §5.4, 그리고 그 셀렉터는 6자리 hex만 본다), 폰은 `conversationHygiene.test.tsx:519`가 `src/` 전수에서 센다.\n\n#### 상태 토큰과 그릇 토큰은 갈라져 있다 (#1515 / design-review #1514 H-2)\n\n**상태는 켜졌다 꺼지고 그릇은 늘 거기 있어야 한다. 둘이 한 값을 나눠 가지면 상태가 켜진 동안 그릇이 반드시 사라진다.** 수명주기 칩이 정확히 그렇게 지어져 있었다 — 칩 바탕이 `--surface-hover`였고 목록 행의 hover·펼침이 같은 토큰을 쓰므로, 사람이 **가리키고 있는 행에서만** 칩이 그릇을 잃었다(실측 대비 1.00). 읽히는 순간에만 사라지는 그릇은 없는 것보다 나쁘다.\n\n그래서 이 팔레트는 두 축을 이름으로 갈라 둔다:\n\n| 축 | 토큰 | 하는 일 |\n|---|---|---|\n| 상호작용 상태 | `--surface-hover` · `--accent-soft` | 가리킨 행 · 선택된 행. **켜졌다 꺼진다** |\n| 칩의 그릇 | `--muted-soft` · `--ok-soft` · `--warn-soft` · `--danger-soft` | 칩 한 개가 서는 옅은 채움. **늘 있다** |\n\n**「그냥 다른 회색」이 답이 아닌 것은 취향이 아니라 산술이다.** 라이트에서 `--ink-muted`가 AA를 지키려면 바탕 휘도가 0.769 이상이어야 하는데 `--surface-hover`가 0.7704다 — 바닥에 이미 붙어 있다. 칩 그릇이 설 수 있는 띠는 [0.769, 0.9911(종이)] 하나뿐이고 표면 다섯이 그것을 이미 나눠 갖고 있어, **여섯 번째 중립이 얻을 수 있는 최선의 최소 분리는 1.06:1**이다. 명도만으로 그릇을 세우는 설계는 거기서 끝나고, 남는 자가 §3.1의 위험 위계를 재던 것과 같은 축의 **OKLab 거리**다(`--danger-fill`이 `--accent`와 섞이지 않았음을 증명한 그 자). 그래서 그릇의 생존은 두 자로 정의된다: 대비 ≥ 1.05 **그리고** OKLab 거리 ≥ 0.02. 하나만 걸면 「대비는 넘는데 눈에는 같은 회색」이 통과한다.\n\n기계가 재는 것은 **세 층**이고, 셋째 층이 이 규칙의 사정거리를 진다.\n\n| 층 | 파일 | 재는 것 |\n|---|---|---|\n| 값 | `tokens.contrast.test.ts` | 그릇 토큰이 자기가 서는 행 바탕과 두 자로 다른가. 행 바탕은 **닫힌 표**(`CHIP_VESSEL_SURFACES`)이고 **그릇마다 목록이 다르다** — `CONTROL_SURFACES`와 같은 성질 |\n| 이름 | `sessionStatusClass.test.ts`(코어) | 역할표 두 개(`SESSION_STATUS_CLASS`·`ROW_STATE_CLASS`) 어느 칸도 상태 토큰을 그릇으로 들지 않는가 |\n| **전수** | `chipVessel.test.ts` | **칩 기하를 지닌 모든 클래스 목록**을 훑어 그릇을 어디서 얻는지 분류하고, 그 분류가 총체임과 잔량이 줄어들기만 함을 단정 |\n\n셋째 층이 따로 있는 이유는 §5.5②가 이름 대어 적은 실패 양식 그 자체다. 앞의 두 층은 **자기가 아는 표만** 보므로, 규칙은 팔레트 전체인데 강제는 허용목록이 된다. 실제로 그 목록 밖에서 대비 1.000짜리 산 결함 둘이 살아 있었다(워크스트림 목록 행·ADE 서랍 카드 — 그때 앞 두 층은 전부 초록이었다).\n\n**그리고 전수 층의 첫 판도 허용목록이었다.** 그 판은 칩을 `cn(CHIP_CLASS, …)`에서 찾으면서 「칩의 기하는 `CHIP_CLASS` 하나뿐」이라는 전제를 적었는데 **이 레포에서 거짓이다**: 여덟 자리가 기하를 손으로 다시 적고 있었고, 그중 `WorkSessionIdleCard`의 「대기 전환」 칩은 `hover:bg-surface-hover` 카드 위에서 **또 하나의 1.000**이었다. 그래서 발견을 import가 아니라 **기하 시그니처**(`rounded-sm px-2 py-px text-timestamp`)로 키잉한다 — 전제를 참으로 만드는 대신 **전제를 필요 없게** 만든 것이다. 손 기하 자체도 별도 잔량으로 세어 새로 적는 것을 막는다(현재 7).\n\n컨트롤 변형표(`button.tsx`)는 기하가 다르므로 자동으로 빠진다 — 컨트롤이 `--accent-soft`를 선택 상태로 입는 것은 이 규칙의 대상이 아니라 그 토큰이 하는 일 그 자체다. 반대로 **컨트롤이 칩 기하를 빌려 쓰면** 걸린다(관전 터미널 토글·설치 마법사 단계 표시기). 그 둘은 그릇이 아니라 기하가 결함이고, 잔량 표가 그 갈림을 적어 둔다.\n\n**남은 잔량 33건**(칩 그릇) **+ 7건**(손 기하). 좌표와 수가 `chipVessel.test.ts`의 두 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.\n\n**이 층이 재지 않는 축: 칩의 테두리.** `bg-*`만 읽는다. `SettingsFields`의 `StatusChip`은 `border-ok`/`border-warn`/`border-danger`/`border-line` 다섯 톤 셀로 일곱 설정 표면에 살아 있고, `AgentTurnBadge.tsx:33`·`AgentHubRoute.tsx:181`도 `border border-warn`을 두른다 — #1516이 검증 칩 **하나**에서 「컨트롤 문법」이라 판정해 걷어낸 것이 바로 그 모양이다. 즉 웹의 제거는 아직 한 칩에 그쳤고, 그 축에는 기계 강제가 **아예 없다**(§5.3).\n\n**사정거리는 웹이다.** 폰(`clients/mobile`)에도 같은 격의 칩이 있다 — `WorkSessionParts.tsx`의 `WorkStatusBadge`는 같은 `WorkSessionStatus` 키를 쓰고 자기 주석이 「역할 정본은 웹/코어 표이고, 폰은 그 표를 따른다」라고 적는다 — 그리고 그쪽은 아직 톤 채움 + 1px 테두리다. 폰 정렬은 §6 절차를 지나야 하는 별도 결정이라 여기서 하지 않았고, **후속 goal은 #1600으로 발급돼 있다**: 폰의 `okSurface`/`warnSurface`/`dangerSurface`는 새 웹 토큰과 다크에서 OKLab 거리 0.0337/0.0450/0.0421이라, 위 0.02 자로는 **서로 다른 재료**다. 번역이 아니라 신설이 필요한 자리라는 뜻이다.\n\n부수 결정 하나: 그릇은 여섯 칸이 전부 같다. **색을 버는 것은 측정이지 이름이 아니다** — 원장의 칩은 세션을 무엇이라 부르는지 말할 뿐 아무것도 재지 않으므로 그릇에 색을 얹을 근거가 없고, 톤은 잉크에만 남는다(#1491이 초록에 대해 내린 것과 같은 판단).\n\n#### 그릇의 색은 측정만이 번다 — 그리고 테두리는 컨트롤의 것이다 (#1516 / H-3)\n\n위 규칙의 나머지 반쪽. 검증 칩(세션이 스스로 보고한 게이트 결과)은 #1463에서 **테두리**를 얻었다(`--surface-raised` + `--line`). 그릇은 지켰지만 값을 치렀다: 이 팔레트에서 1px 테두리로 둘러싼 작은 알약은 **컨트롤 문법**이고(입력·`<select>`·아웃라인 버튼이 전부 그 모양이다), 그래서 「통과 12」가 누를 수 있는 것으로 읽혔다. 팔레트의 계약상으로는 컨트롤이 아니다 — `--line`은 나누는 선이고 컨트롤은 `--line-strong`이 그린다. **토큰 계약과 화면이 서로 다른 말을 하고 있었고, 그럴 때 이기는 쪽은 언제나 화면이다.**\n\n테두리를 그냥 걷는 것은 답이 아니다(#1463 H1이 되돌아온다 — 이 칩은 `--surface-raised` 카드 위에도 선다). 그래서 테두리가 지던 일을 **채움의 색상**이 진다: 색이 있는 채움은 중립 표면과 명도가 가까워도 구분된다(`--accent-soft`가 `--surface-hover` 위에서 대비 1.051뿐인데도 사라지지 않는 것이 그 증거다).\n\n| 칩 | 그릇 | 근거 |\n|---|---|---|\n| 원장의 칩(수명주기·단계 행) | `--muted-soft` 고정 | 아무것도 재지 않는다 |\n| 측정의 칩(검증) | 자기 톤의 soft | 잰 것이 있다 |\n| 측정의 칩, `건너뜀` | `--muted-soft` | **잰 것이 없으면 물들일 톤도 없다** |\n\n그래서 #1463 M2가 지적한 충돌(수명주기 `running`도 warn, 게이트 `unknown`·`pending`도 warn — 한 행에 같은 모양 호박색 알약 둘)이 잉크가 아니라 **그릇**에서 갈린다.\n\n**한 평면, 색상만 다르다.** 네 그릇은 스킴마다 한 평면에 선다(라이트 휘도 .85~.87 · 다크 .028~.029). 명도가 「이것은 그릇이다」를, 색상이 「어느 톤인가」를 말한다 — 두 축이 한 가지씩만 진다. 평면도 산술이다: 다크에서 `--ok`의 AA가 휘도 .0320에서 끊기고, 동시에 `--surface-hover`(.0192)보다 위여야 `--line-strong` 3:1을 넘지 않아 「컨트롤이 설 수 있는 표면」으로 오분류되지 않는다. 남는 구간이 .0192~.0320이고 그 안이 .0285다. (라이트 danger만 평면 1% 아래에 선다 — sRGB에서 그 명도의 빨강은 채도가 모자라 클립되고, 그러면 중립 그릇과의 거리가 0.0169로 내려간다.)\n\n기계가 새로 재는 것: 각 그릇이 **자기 톤의 색상 가족 안**에 있고(≤15°, 실측 최대 2.7°), 나란히 선 중립 그릇과 OKLab 거리 ≥ 0.02이며, 그릇 다리(`COMPLETION_TONE_SOFT_TOKEN`/`_CLASS`)의 네 칸이 tokens.css에 실재한다. 색상 가족을 걸어 두는 이유는 대비·거리 단정을 만족시키는 가장 싼 방법이 「눈에 띄는 아무 색이나」이기 때문이다 — 그러면 통과한 게이트가 붉은 그릇에 선다.\n\n그리고 그릇은 잉크에서 **파생되지 않는다**. `muted`의 잉크는 `--ink-muted`인데 그릇은 `--muted-soft`다(전경 톤과 그 톤의 옅은 채움은 서로 다른 축). 「`text-X`의 X에 `-soft`를 붙인다」로 규칙을 지으면 그 칸이 없는 토큰을 부르고, 그 실패는 컴파일이 아니라 화면에서 **그릇 없는 칩**으로 나타난다. 그래서 표가 둘이고, 테스트가 그 둘이 합쳐지지 못하게 붙들어 둔다.\n\n### 2.3 간격\n\n**리듬 스케일(숫자 축)은 닫혀 있다: `{0, 1px, 4, 8, 12, 16, 24, 32}`.** 낱말 이름의 측정값(`--spacing-marker 2` · `--spacing-row 6` …)은 별개 축이고, 그것도 간격 유틸리티를 만든다 — 아래 참조.\n\n웹은 `--spacing: initial`로 Tailwind 동적 배수를 껐다. **격자 밖 *단계*는 아예 컴파일되지 않는다** — `p-5`·`py-1.5`·`p-7`은 규칙이 만들어지지 않으므로 잘못된 크기로 조용히 렌더되는 대신 여백이 0이 된다. U4-4가 `py-1.5`를 적었고 화면의 묶음 안 간격이 0px이 된 것이 그것이다.\n\n> **그런데 임의값(`p-[13px]`)은 여전히 컴파일된다.** 동적 배수를 꺼도 임의값 문법은 스케일을 참조하지 않기 때문이다. 실측(빌드된 CSS): `p-5`·`py-1.5`·`p-7`은 규칙 0개, `pt-[13px]`는 `padding-top: 13px`로 살아 있다 — 그리고 그 클래스의 레포 내 유일한 출처는 **테스트 안의 문자열**(`spacing.test.ts:211`, 그 이름이 거부되는지 확인하는 단정)이다. 스캐너는 코드가 아니라 텍스트를 본다.\n>\n> 그래서 임의값을 막는 것은 컴파일러가 아니라 **프리플라이트 `arbitrary_tw` + ESLint**다. 두 층이 서로 다른 것을 막는다는 사실이 §5 지도의 요점이다.\n\n격자 밖 측정값은 **숫자가 아니라 이름**으로 들어온다(`--spacing-pane`, `--spacing-action`, `--spacing-row` …). 이름 축의 각 값은 자기가 왜 격자 밖인지를 주석으로 진다.\n\n폰의 `space {xs 4, sm 8, md 12, lg 16, xl 24}`는 전부 웹 리듬 단계이고, `clients/mobile/__tests__/designSystem.test.ts`가 웹 파일을 파싱해 대조한다.\n\n| | 웹 | 폰 | 관계 |\n|---|---|---|---|\n| 4 · 8 · 12 · 16 · 24 | `--spacing-1,2,3,4,6` | `space.xs~xl` | **짝 — 바이트로 같다** |\n| 0 | `--spacing-0` | — | RN은 「없음」을 `0`으로 쓴다 |\n| 1px | `--spacing-px` | — | 헤어라인은 CSS의 물건 |\n| 32 | `--spacing-8` | — | 390pt 폭에서 32 인셋은 본문을 326pt로 만든다. 필요해지면 신설한다 |\n| 가로 인셋 | — | `SAFE_GUTTER 16` | `space.lg`와 같은 값. 모든 화면이 나눠 쓴다 |\n\n> **폰에는 \"컴파일되지 않는다\"는 층이 없다.** `marginTop: 13`은 언제나 컴파일되고 화면에 그대로 나간다. 그 자리를 `designSystem.test.ts`의 **전수 스윕**이 메운다 — 오늘 남아 있는 격자 밖 값은 파일별로 세어져 있고, 늘어나면 빨갛다.\n\n### 2.4 반경\n\n세 단계뿐이다. 웹 `--radius-sm 6`(버튼·칩·입력) / `--radius-md 10`(카드·목록) / `--radius-lg 14`(다이얼로그·시트).\n\n| 이름 | 웹 | 폰 | 관계 |\n|---|---|---|---|\n| `sm` | 6 | 6 | **짝 — 바이트로 같다** |\n| `md` | 10 | 8 | **분기.** 근거가 어디에도 없다(감사 §B-1). 값을 맞추는 것은 결정이고 아직 안 내려졌다 — 그때까지 `designSystem.test.ts`가 ①분기가 이 하나뿐이라는 것과 ②그 차이가 리듬 한 단(4px)보다 작다는 것을 잰다 |\n| `lg` | 14 | — | 폰의 시트는 RN 화면 전환이 그린다 |\n| `pill` | — | 999 | 칩·배지. 웹은 같은 자리를 `rounded-sm`로 그린다 |\n\n### 2.5 타이포\n\n**역할이지 크기가 아니다.** 웹은 `text-timestamp`(11) / `text-meta`(12) / `text-body`(14) / `text-title`(16) / `text-display`(20)이고 각 롤이 자기 줄 높이를 동봉한다. `--text-*: initial`이 스톡 스케일을 지우므로 `text-sm`은 **컴파일되지 않는다**. `text-[13px]`는 — 간격과 같은 이유로 — **컴파일된다**; 그것을 막는 것은 프리플라이트 `arbitrary_tw`다. 외부 폰트·CDN은 프리플라이트 `external_font`가 막는다.\n\n폰은 `font {title 26, heading 18, body 16, label 13, meta 12}` + `line {head 15, meta 17, label 18, body 22}`.\n\n**역할과 값이 둘 다 맞는 짝은 `meta`(12px) 하나뿐이다.** 이 축은 짝이 거의 없는 것이 정답이다:\n\n- 웹은 rem으로 브라우저 줌을 타고, 폰은 pt로 iOS 동적 타입을 탄다.\n- 줄 높이의 뜻 자체가 다르다 — 웹 관용은 **무단위 비율**(1.5), RN은 **절대 포인트 수**. 한 토큰이 둘을 못 섬긴다.\n- 폰 본문 16은 **iOS 입력창이 줌을 멈추는 크기**다(`tokens.ts`의 `font` 주석). 웹 본문 14에 \"맞추면\" 로그인 폼이 포커스에서 줌한다.\n- 웹 `--text-title`(16px)과 폰 `font.body`(16)는 값이 같지만 **우연이다.** 짝으로 적으면 웹이 제목 크기를 바꾸는 날 폰 본문이 함께 끌려간다.\n\n짝이 없으므로 폰 쪽은 **관계로** 잰다(#1163·#1186이 accent 파생과 상태 3가족에 쓴 방식): 줄 상자는 자기가 담는 글자보다 크고, 머리줄 상자(`head`)는 묘비 상자(`label`)보다 얇으며, 다섯 크기와 네 줄 상자는 겹치지 않고 한 방향으로 간다.\n\n### 2.6 그림자·모션 — 축이 없는 두 자리\n\n**그림자는 이 시스템에서 유일하게 두 클라를 가로질러 대조할 수 없는 축이다.** RN은 그림자에 세 개의 별개 API를 갖는다: `boxShadow`(New Architecture 전용) · `shadowOffset/Opacity/Radius`(iOS 전용) · `elevation`(Android 전용, z-order까지 바꾼다). 한 CSS 문자열이 그 셋으로 번역되지 않는다 — Skyscanner는 파이프라인을 제대로 만들고도 안드로이드 그림자가 전부 `undefined`였다(감사 §A-1-3).\n\n그래서 지키는 것은 패리티가 아니라 **어휘**다:\n\n- 웹: 고도는 두 단뿐 — `shadow-sm`(카드)과 `shadow-lg`(떠 있는 표면). `tokens.css`에 그림자 토큰은 **없고**, 웹은 Tailwind 기본 스케일을 쓴다. 그 사실이 코드에만 있었으므로 `clients/web/src/design/designSystem.test.ts`가 실제 사용 어휘를 두 단으로 잠근다.\n- 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.\n\n**모션에도 토큰 축이 없다.** `tokens.css`에 손으로 적힌 값 전부(실측):\n\n| | 값 | 자리 |\n|---|---|---|\n| 전이(transition) | `160ms`(서랍) · `120ms`(업로드 막대) | `:397` · `:1268` |\n| 애니메이션 | `1.1s`(캐럿) · `0.9s`/`1.6s`(스피너, 뒤는 reduced-motion 판) · `1.1s`/`3.2s`(업로드 드리프트) | `:974` · `:986`/`:989` · `:1290`/`:1312` |\n\n폰은 거의 백지다. 2026-07-28 갭 감사가 `instant 0 / fast 120 / standard 180 / slow 240`을 권고했고 아직 채택되지 않았다 — **미결 결정**(감사 §C-6). 지금 지켜지는 규칙은 스킬 §4 하나다: 모든 애니메이션은 상태 변화의 피드백이고(<200ms), 비자명한 모션은 `prefers-reduced-motion`으로 감싼다.\n\n### 2.7 터치 타깃\n\n| 값 | 웹 | 폰 | 근거 |\n|---|---|---|---|\n| **44** | `--tap-target` + `@utility tap-target`(600px 미만에서만 자란다) | `TOUCH_TARGET` | WCAG 2.5.5 / Apple HIG |\n| **24** | `--touch-target` + `@utility touch-target`(`hover: none`에서만) | — | WCAG 2.5.8 AA 바닥선. 본문에 섞여 사는 링크용 |\n\n44는 두 클라가 같은 값을 들고 `designSystem.test.ts`가 대조한다. 24는 폰에 짝이 없다.\n\n**폰에서 44는 손으로 적는 값이 아니라 도출되어야 하는 값이다.** `slopTo(size)`가 콘텐츠 상자 크기에서 슬롭을 계산한다 — 슬롭을 손으로 적었을 때 아무도 산수를 다시 확인하지 않아서 답글 표식 29pt · 롤업 29pt · 오류 닫기 33pt가 출하됐던 것이 이 함수가 생긴 이유다(감사 M-14).\n\n다만 **아직 전면 적용이 아니다.** `slopTo`를 쓰는 것은 그 결함이 발견된 `MessageRow.tsx` 하나이고, 다섯 자리가 여전히 숫자를 손으로 적는다(`atoms.tsx` · `StopTurnControl.tsx` · `LongPressHint.tsx` · `MessageBody.tsx` · `Quote.tsx`). `designSystem.test.ts`가 강제하는 것은 \"전부 도출\"이 아니라 **\"그 다섯이 여섯이 되지 않는 것\"**이다 — 새로 손으로 적으면 빨갛고, 기존 다섯은 세어진 채 남아 있다.\n\n---\n\n",
+          "end": 14308,
+          "heading": "2. 토큰 층",
+          "id": "source-005",
+          "kind": "section",
+          "order": 4,
+          "sha256": "adfa3a33aa75716f091e91f7750f6df4083f754f5edc2e06331ff016be8a84ff",
+          "start": 2793
+        },
+        {
+          "content": "## 3. 위계 규칙 — 파괴 > 주 > 보조\n\n> **이 축은 우리가 업계보다 앞서 있다.** 시각 위계를 기계로 강제하는 프로덕션 도구는 존재하지 않고(있는 것은 전부 학술 프로토타입), 위계를 **토큰의 채도·채움 순서로** 성문화한 선례를 감사가 1차 소스에서 찾지 못했다(§A-3-2). 그러니 여기 적힌 것을 지우지 마라.\n\n### 3.1 규칙\n\n한 푸터·한 행에 컨트롤이 나란히 서면, 되돌릴 수 없는 것이 가장 크게 보여야 한다.\n\n1. **채도 순서**: `danger` > `warn` > `ink-muted`. 대비가 아니라 OKLab 채도로 잰다.\n2. **채움 순서**: 주 액션 채움(`--accent`) > 파괴 채움(`--danger-fill`). 파괴는 무겁되 **기본 경로가 아니다.**\n3. **윤곽 순서**: 파괴 컨트롤의 윤곽(`--danger`)은 비파괴 컨트롤의 윤곽(`--line-strong`)보다 진하다.\n4. **컨트롤 경계는 3:1이다**(WCAG 1.4.11). 채움이 3:1로 컨트롤을 식별시키면 경계는 면제된다 — 그런데 그 면제를 주장하려면 채움을 실제로 재야 한다.\n\n### 3.2 왜 값이 아니라 관계인가 — dark1155 M1\n\n**비파괴 컨트롤 하나의 경계를 3:1로 올리는 수리가, 그 옆의 파괴 형제를 화면에서 가장 흐린 선으로 만들었다.**\n\n로그아웃 확인 다이얼로그에서 취소 버튼의 테두리를 `border`(다크 1.41 · 라이트 1.32)에서 `textFaint`(다크 3.91 · 라이트 3.59)로 올렸다. 그 수리는 정확했고 검산도 맞았다. 그런데 옆에 선 파괴적 확인 버튼의 테두리는 여전히 **다크 1.70 · 라이트 1.76**이었고, **나란한 두 버튼 중 파괴적인 쪽의 유일한 윤곽선이 화면에서 가장 흐린 선이 됐다.** 팔레트 산술 가드는 그 내내 전부 초록이었다.\n\n(값은 그때의 폰 팔레트 기준이다 — `#1163` 이전. 지금 값은 §3.3의 표에 있고, 두 스킴 순서를 여기와 반대로 적지 않도록 양쪽 다 이름을 붙였다.)\n\n각 값이 개별적으로 옳으면서 전체가 틀릴 수 있다. 그래서 위계는 **두 값 사이의 순서**로 적는다.\n\n### 3.3 지금 기계가 재는 것 / 안 재는 것\n\n> **이 절과 §5.3·§5.4의 \"#1210\" 표시는 유통기한이 있다.** #1210(컨트롤 경계 3:1 · 폰 파괴 채움 토큰 · 포커스 링 페이드 · 웹 lint 게이트 배선)이 랜딩하면 아래 ❌ 넷과 §5.4의 lint 항목이 함께 닫힌다. **그 PR이 이 표를 갱신하는 것이 마지막 한 걸음이다** — 닫힌 자리를 열려 있다고 말하는 표는 이 문서가 막으려는 바로 그 결함이다.\n\n| 규칙 | 웹 | 폰 |\n|---|---|---|\n| 채도 순서 (danger>warn>muted) | `tokens.contrast.test.ts` ✅ | `paletteContrast.test.ts` ✅ |\n| 채움 순서 (accent>danger-fill) | `tokens.contrast.test.ts` ✅ | ❌ — **폰에 파괴 채움 토큰이 없다**(#1210) |\n| 윤곽 순서 (danger>line-strong) | `tokens.contrast.test.ts` ✅ (#1211) | ❌ — #1210이 토큰을 놓은 뒤 같은 자리에 |\n| `--line`이 3:1을 못 넘는다(규칙의 전제) | `tokens.contrast.test.ts` ✅ (#1211) | `paletteContrast.test.ts` ✅ |\n| **어느 컴포넌트가 어느 쪽을 쓰는가** | `designSystem.test.ts` ✅ (#1211, 프리미티브 층) | ❌ 체계적으로는 없다 — 표면 하나에 대한 단정은 있다(`adeControlSurface.test.tsx:939`) |\n| 렌더된 화면에서의 위계 | ❌ 사람 + design-review 에이전트 | ❌ 동 |\n\n**\"이 테두리가 컨트롤 경계인가\"는 문법 질문이 아니라 의미 질문이라 grep으로 못 잡는다** — 감사의 판정이고 옳다. `clients/web/src`에서 주석을 벗기고 세면(가드가 쓰는 그 방법) **약한 선 198회 · 강한 선 17회**이고, `card.tsx`·`dialog.tsx`·`dropdown-menu.tsx`의 `border-line`은 컨테이너라 정당하다.\n\n그런데 그 판정이 의미 질문인 이유는 **한 번도 이름을 안 붙였기 때문이다.** 어느 파일이 컨트롤 프리미티브인지를 한 자리에 적으면 남는 것은 문법 질문이 된다:\n\n- **컨트롤 프리미티브** (경계가 어포던스를 진다): `button.tsx` · `input.tsx` · `select.tsx`\n- **컨테이너 프리미티브** (경계는 나누는 선이다): `card.tsx` · `dialog.tsx` · `dropdown-menu.tsx`\n\n`designSystem.test.ts`가 ①이 분류표가 `src/design/ui`의 모든 파일을 덮는지(새 프리미티브는 반드시 한쪽에 든다) ②컨트롤 프리미티브가 나누는 선을 경계로 쓰지 않는지를 잰다.\n\n> 남은 위반 하나 — `button.tsx`의 `secondary` 변형. `--surface` 위에서 경계 `--line`이 라이트 1.32 · 다크 1.43이고 채움(`--surface-raised`)도 라이트 1.07 · 다크 1.10이라 면제에도 걸리지 않는다. 바로 옆 `outline` 변형은 같은 모양의 버튼인데 `--line-strong`(3.59 / 3.56)을 든다. 수리는 **#1210**.\n\n---\n\n",
+          "end": 17060,
+          "heading": "3. 위계 규칙 — 파괴 > 주 > 보조",
+          "id": "source-006",
+          "kind": "section",
+          "order": 5,
+          "sha256": "d22bc68d6cc0fc86311386534019189cb2fbb3901076459f3af00761a110da2d",
+          "start": 14308
+        },
+        {
+          "content": "## 4. 상태 규칙 — 네 상태\n\n**모든 표면이 빈 · 로딩 · 오류 · 오프라인을 갖고 출하한다.** (출처: `.claude/skills/momo-design-taste-web/SKILL.md` §5 · mac 스킬의 표면별 필수 상태표)\n\n| 상태 | 규칙 |\n|---|---|\n| **빈** | 행동으로의 초대 — 한 줄 카피 + 액션 하나. 둘째 액션은 그것이 어떤 기능으로 가는 유일한 문일 때만 서고, 그때는 §3 채움 순서로 위계를 세운다(주=채움, 보조=윤곽 — 동급 금지. 선례: 빈 채널 #1568, 위계는 게이트가 잰다). 일러스트 포스터도, 가운데 정렬 아트도 아니다. 조용한 인박스는 실패가 아니라 **설계된 것**으로 말한다(\"조용한 게 정상입니다\"). |\n| **로딩** | 높이를 보존하는 중성 스켈레톤 바. **시머 금지.** 액션은 버튼 안 스피너. 스트리밍 텍스트는 캐럿을 달지 시머를 달지 않는다. |\n| **오류** | 무슨 일이 일어났고 다음에 무엇을 할지를 **맥락 안 인라인**으로. 토스트 금지, 사과 금지, 모호함 금지. |\n| **오프라인** | 인라인 배너 하나(WS 끊김). 캐시된 내용은 계속 렌더된다(내구층, P15). 재연결 시 seq 복구 표지(\"seq N까지 복구\"). |\n\n**이 축은 100% 사람이 잡는다.** 리뷰 코퍼스 2위(상태 누락 16건/4리포트)이고 기계 검사는 존재하지 않는다 — \"이 표면에 빈 상태가 있는가\"를 물으려면 표면이 무엇인지 알아야 하고, 그 목록은 코드에 없다.\n\n가장 가까운 대체물은 **캡처 레인**이다: `clients/mobile/measure/states.tsx`가 실제 `Timeline`에 상태별 props를 먹여 사진을 찍고, `clients/web/scripts/capture-screens.mjs`가 두 스킴 × 데스크톱/폰 프로파일로 찍는다. 사진은 사람이 본다.\n\n---\n\n",
+          "end": 18009,
+          "heading": "4. 상태 규칙 — 네 상태",
+          "id": "source-007",
+          "kind": "section",
+          "order": 6,
+          "sha256": "a94455582b2fb84b241814841d53912734d169938365b4987bf3a85072346204",
+          "start": 17060
+        },
+        {
+          "content": "## 5. 강제 기제 지도\n\n> **이 절이 이 문서에서 가장 실용적인 부분이다.** \"기계가 잡았어야 했는데 안 잡았다\"가 감사의 두 번째 메타 패턴(17건/10리포트)이었고, 그 대부분은 **무엇이 안 재지는지를 아무도 몰랐기** 때문이다.\n\n### 5.1 층 다섯\n\n| 층 | 어디 | 무엇 |\n|---|---|---|\n| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 12분류 + 코어 5분류, **하드 제로** |\n| **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |\n| **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |\n| **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |\n| **병합 트리 게이트** | `scripts/verify_merge_tree.sh` | 병합 **결과**에서 7레인(코어·웹·폰 typecheck + 스위트 + 카피 스캔) |\n\n### 5.2 축 × 기제\n\n| 축 | 웹 | 폰 | 두 클라 대조 |\n|---|---|---|---|\n| **색 값** | 프리플라이트 `raw_color`/`pure_bw` + ESLint `no-restricted-syntax`(**게이트 미배선** §5.4, 6자리 hex 한정) | `conversationHygiene.test.tsx:519` (`src/` 전수 hex 0) | `paletteContrast.test.ts` — 웹 CSS 파싱 **바이트 대조** ✅ |\n| **색 대비** | `tokens.contrast.test.ts` (토큰 쌍, 두 스킴) | `paletteContrast.test.ts` (동) | 같은 규율, 같은 자 |\n| **간격** | `--spacing: initial`(격자 밖 *단계*만 차단) + 프리플라이트 `arbitrary_tw`(임의값) + `spacing.test.ts`(코어 값 ↔ 클래스) + `designSystem.test.ts`(리듬 8단계 고정·이름 축 근거 강제) | `designSystem.test.ts` **`src/` 전수 스윕** + `conversationVisual.test.tsx:229`(2파일 심층) | `designSystem.test.ts` — 웹 CSS 파싱 ✅ (#1211) |\n| **반경** | `--radius-*: initial`(이름 단계만) + `arbitrary_tw`(`rounded-[9px]`) + `designSystem.test.ts`(3단계·순서) | `designSystem.test.ts` 전수 스윕 | `designSystem.test.ts` — 짝 1 · 분기 1(상한 포함) ✅ (#1211) |\n| **타이포** | `--text-*: initial`(이름 단계만) + `arbitrary_tw`(`text-[13px]`) + `designSystem.test.ts`(롤마다 줄 높이·크기 중복 금지) | `designSystem.test.ts` 전수 스윕(`fontSize`·`lineHeight`) | `designSystem.test.ts` — 짝 1 · 나머지 관계 ✅ (#1211) |\n| **그림자** | `designSystem.test.ts` — 어휘 두 단으로 잠금 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |\n| **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |\n| **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |\n| **위계** | §3.3 표 | 동 | — |\n| **카피** | 프리플라이트 `hype` + AST `emdash`·`progress_word`·`latin_particle`(#1511) | `conversationHygiene.test.tsx` — `src/` 전수 em-dash 스윕 + 같은 AST 로 `progress_word`·`latin_particle`(`design_preflight_phone_strings.mjs` 를 자식 프로세스로, #1511) | `design_preflight_ast.mjs` 가 세 소비자의 규칙 한 벌. 코어에도 거는 이유는 실측이다 — 진행 낱말이 코어 상수로 폰까지 출하됐다(`CANCEL_BUSY_LABEL`) |\n| **포커스** | 프리플라이트 `naked_focus` — 링이 **있는지**만. 링의 성질은 §5.3 | ❌ | — |\n| **인라인 스타일** | ESLint + 프리플라이트 `inline_style` (CSP) | 비해당 | — |\n\n### 5.3 무검사 — 사람만이 잡는 것\n\n**이 목록이 짧아지는 것이 이 시스템의 진행이다.** 각 항목의 리뷰 코퍼스 순위를 함께 적는다.\n\n| 순위 | 축 | 왜 기계가 못 잡나 |\n|---|---|---|\n| 2위 (16건) | **상태 누락**(빈·로딩·오류·오프라인) | \"표면\"의 목록이 코드에 없다 |\n| 5위 (11건) | **시각 위계 역전** — 렌더된 화면에서 | 프로덕션 도구가 세상에 없다(§3 머리말) |\n| 7위 (9건) | **한국어 텍스트 처리** — 조사 고아, `break-all`, 의존형태소 절단 | 이 축에서 **한 모양만** 기계로 내려왔다: 라틴 낱말 뒤 조사의 공백(「Esc 는」 → `latin_particle`, #1511). 그 하나는 소스에서 보이기 때문이다. **세 클라 전부에서 재지만 실행 단위가 다르다** — 웹·코어는 `design_preflight_web.sh`, 폰은 jest(`conversationHygiene.test.tsx` → `design_preflight_phone_strings.mjs`). 나머지는 그대로 없다 — 조사 고아 일반·`break-all`·절단은 **렌더된 폭**에 달렸고, `fontStyle: italic`이 한글에서 0픽셀이라는 발견은 이 축에서만 나온다 |\n| 7위 (9건) | **증거·캡처 공백** — 사진 없음/낡음/비현실 픽스처 | 정의상 사람 |\n| 10위 (7건) | **한 클라 안의 내부 불일치** — 같은 것에 두 처리 | \"같은 것\"의 판정이 의미 질문 |\n| 13위 (6건) | **스크린리더 시맨틱** — 로터 도달성, aria 바인딩, 라이브 리전 | axe 도입 시 일부 커버 |\n| 14위 (5건) | **상태 수명주기** — 로그아웃/새로고침 생존, 조용한 덮어쓰기 | 사람 |\n| 16위 (4건) | **화면이 거짓을 말함** | 손으로 짠 런타임 프로브가 필요했다 |\n| — | **포커스 링의 *성질*** — 페이드·트랜지션·애니메이션 | 프리플라이트 `naked_focus`는 링이 **있는지**만 본다. 링이 잉크색에서 호박색으로 번지는 것(Tailwind v4 `transition-colors`가 `outline-color`를 포함한다 — v3엔 없던 것)은 `transition-colors`와 `focus-visible:outline-*`를 함께 든 **클래스 리스트 25곳**에 있고, 리뷰 16건이 한 번도 못 잡았다 — 수리·재발 방지는 **#1210** |\n| — | **웹의 렌더된 컨트롤 경계·터치 크기 전수** | 지금은 토큰 층과 프리미티브 층까지만 잰다. 렌더 스윕은 미구현(감사 §C-3-b·c) |\n| — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:33`·`AgentHubRoute.tsx:181`에 남아 있고, **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |\n| — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |\n| — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |\n\n> **폰에는 taste 스킬 방언이 없다.** `.claude/skills/momo-design-taste`(SwiftUI)와 `-web`(React) 둘뿐이고, `tokens.ts` 머리 주석이 그것을 자백한다. `.claude/agents/design-review.md`의 계약도 macOS/Core를 가리키는데 최근 리뷰 대부분은 웹·폰이다 — ADR-0159 D4가 Swift 삭제 배치와 함께 재조준하기로 한 자리다.\n\n### 5.4 게이트 실행 경로 — 강제 층의 실행 보장은 **사람**이다\n\n- GitHub Actions는 디자인 게이트를 **하나도** 돌리지 않는다. `.github/workflows/ci-build.yml`은 Swift 빌드뿐이고 그마저 `workflow_dispatch` 전용이다. 기본 머지 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 증거다.\n- `scripts/local_gate.sh --profile web`의 lint 레인은 **`clients/web-legacy`**(동결된 레거시 클라)를 본다. 정본 UI `clients/web`의 ESLint는 어느 게이트에도 안 걸려 있다 — 배선은 **#1210**. *완화 요인*: 그 두 규칙(hex 금지·인라인 style 금지)은 프리플라이트 그렙이 중복 커버한다. 그래서 지금 손실은 없지만 **중복이 유일한 안전망**이다.\n- 폰에는 \"디자인 프리플라이트\"라는 이름의 **실행 단위**가 없다. 검사는 `npm test`(jest) 안에 섞여 있고, 그것은 병합 트리 게이트의 `phone suite` 레인으로 **돈다**. 무엇이 커버되는지를 한눈에 못 볼 뿐이다. 한 조각은 이름을 얻었다 — `scripts/design_preflight_phone_strings.mjs`(낱말꼴 두 분류, #1511)는 웹·코어와 같은 규칙 객체를 들지만, 부르는 쪽은 여전히 jest다(`conversationHygiene.test.tsx`가 자식 프로세스로 돌린다). 쉘 `design_preflight_web.sh`는 이름 그대로 웹의 단위이고 폰을 부르지 않는다.\n\n### 5.5 이 레포가 배운 두 가지 실패 양식\n\n**① 사본을 두면 사본이 거짓말한다.** `spacing.test.ts` 1차는 `TAILWIND_SPACE_PX`가 **Tailwind 기본 스케일**을 열거하고 있었다 — 이 레포가 쓰는 표가 아니라. 거기엔 `1.5`가 있으므로 검산은 8/8 통과했고, 브라우저에는 그 클래스가 없었다. 지금은 가드가 `tokens.css`를 파싱해서 답한다. **모든 새 가드는 정본 파일을 읽는다. 기대값을 베껴 적지 않는다.**\n\n**② 허용목록과 잔량은 다른 물건이다.**\n\n| | 정하는 것 | 목록 밖은 | 예 |\n|---|---|---|---|\n| **허용목록** ❌ | **무엇을 재는가** | 측정되지 않는다 | `capture-screens.mjs` 의 탭 타깃 목록들 — `MOBILE_TAP_TARGETS`(12) · `LOGIN_TAP_TARGETS`(4) · 그리고 인라인 1건 |\n| **잔량** ✅ | 무엇이 **아직 안 닫혔는가** | 0이어야 한다 | `designSystem.test.ts`의 `REMAINING` 표들 |\n\n잔량 목록은 재는 대상을 좁히지 않는다 — 재는 것은 언제나 전수이고, 목록은 그 전수가 오늘 세어 낸 수다. 줄어드는 것은 통과하고(가드가 수리를 벌하면 안 된다), 늘어나면 빨갛다.\n\n---\n\n",
+          "end": 24657,
+          "heading": "5. 강제 기제 지도",
+          "id": "source-008",
+          "kind": "section",
+          "order": 7,
+          "sha256": "2c14feff35ca27bd27fd50184dd5298617fa6008761035409825f8873fdb8852",
+          "start": 18009
+        },
+        {
+          "content": "## 6. 규칙을 바꾸는 법\n\n### 스케일에 값을 하나 더하고 싶을 때\n\n1. **먼저 이름을 지어 보라.** 격자 밖 측정값은 숫자가 아니라 이름으로 들어온다(`--spacing-pane`, `--spacing-preview-frame`). 이름을 못 짓겠으면 그 값에 이유가 없다는 뜻이다.\n2. **이름을 지었으면 주석으로 근거를 진다.** 왜 리듬 밖인지, 어느 축인지(폭/높이/컨트롤/측정값), 실측이 있으면 실측을. `clients/web/src/design/designSystem.test.ts`가 **주석이 붙어 있는지**를 강제한다(묶음 단위). 기계는 주석의 *존재*까지만 볼 수 있고, 그 주석이 실제로 근거인지는 리뷰가 본다.\n3. **다른 축을 빌려 쓰지 마라.** `--spacing-preview-frame`이 생긴 이유가 앞 판이 `--spacing-action`(버튼 최소 **폭**)을 **높이**로 빌려 썼기 때문이다.\n4. **리듬 단계 자체를 더하는 것은 결정이다.** `clients/web/src/design/designSystem.test.ts`의 여덟 단계 표를 함께 고쳐야 초록이 된다 — 그 diff가 리뷰에 보이는 것이 요점이다.\n\n### 폰에 값을 더할 때\n\n웹에 짝이 있으면 **바이트로** 같게 하고 `clients/mobile/__tests__/designSystem.test.ts`의 짝 표에 등록한다. 짝이 없으면 그 값이 지키는 **관계**를 적고 그 관계를 단정한다 — 값이 아니라 관계여야 웹이 다시 움직여도 산다(#1163·#1186).\n\n### 새 강제 기제를 넣을 때\n\n- 정본 파일을 **읽어라.** 기대값을 베끼면 사본이 거짓말한다(§5.5 ①).\n- **전수로 재고 잔량을 세어라.** 허용목록을 만들지 마라(§5.5 ②).\n- 실패 모드를 닫아라 — 짝을 못 찾으면 조용히 통과하지 말고 **터져야** 한다(`paletteContrast.test.ts:374`가 그 예를 테스트로 들고 있다).\n- **가드가 수리를 벌하지 않게 하라.** 잔량은 `≤`이지 `=`가 아니다.\n\n### 도입하지 않기로 한 것 (ADR-0159 D5, 전부 1차 소스 근거)\n\n| | 왜 |\n|---|---|\n| Style Dictionary | **RN 포맷 자체가 없다.** RN 트랜스폼 그룹은 3개뿐(`name/camel`·`size/object`·`color/css`)이고 그림자·타이포·보더·트랜지션 트랜스폼이 전무 |\n| DTCG 파이프라인 | **안정 스펙에 다크모드가 없다.** Resolver Module은 *\"Do not attempt to implement this version\"* 상태 |\n| react-native-web / 범용 컴포넌트 층 | 제작자가 \"Meta 투자 0\" 명시, 10개월 무커밋. Airbnb: \"결국 세 플랫폼을 지원하게 됐다\" |\n| Storybook | 비평가들이 독립적으로 수렴한 대체물(\"임시 라우트 + 실제 컴포넌트 + 캡처\")을 우리가 이미 갖고 있다 |\n| `eslint-plugin-design-tokens` | **존재하지 않는 패키지.** v1.0.0이 2024-03-14 게시되고 8.5시간 뒤 unpublish |\n| stylelint | 우리 코드베이스에 구조적으로 눈이 멀었다 — CSS 선언을 파싱하므로 `className=\"text-[#f00]\"`을 영원히 못 본다 |\n\n---\n\n",
+          "end": 26348,
+          "heading": "6. 규칙을 바꾸는 법",
+          "id": "source-009",
+          "kind": "section",
+          "order": 8,
+          "sha256": "5d8b1a38251457103185389b5379cdd7a521aa5713c17304947f629bae1e07a4",
+          "start": 24657
+        },
+        {
+          "content": "## 7. 미결 결정\n\n이 문서가 답하지 **않는** 것들. 각각 성재/오케스트레이터의 자리다(감사 §C).\n\n| # | 결정 | 지금 상태 |\n|---|---|---|\n| 1 | 반경 `md` 10 vs 8을 맞출 것인가, \"플랫폼별로 다름 + 사유\"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |\n| 2 | 모션 토큰을 신설할 것인가 | 미채택. 선점 비용이 지금 가장 싸다 |\n| 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |\n| 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |\n| 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |\n| 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |\n| 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |\n",
+          "end": 27018,
+          "heading": "7. 미결 결정",
+          "id": "source-010",
+          "kind": "section",
+          "order": 9,
+          "sha256": "239df0e322236bdbc1e6f59777523c41135acf1ea7eb44b57bfe538b8a5ad685",
+          "start": 26348
+        }
+      ],
+      "partially_mapped_segment_ids": [],
+      "preservation": {
+        "dropped_segments": 0,
+        "opaque_preserved": true,
+        "projection_roundtrip_equal": true,
+        "source_reconstruction_equal": true
+      },
+      "source_sha256": "78b148d46204696c7ca52e508760222d0cec40f056df55f00870710925f0fcbc",
+      "unmapped_segment_ids": [
+        "source-001",
+        "source-002",
+        "source-003",
+        "source-004",
+        "source-005",
+        "source-006",
+        "source-007",
+        "source-008",
+        "source-009",
+        "source-010"
+      ]
+    }
+  },
+  "foundations": {
+    "tokens": {
+      "color.surface.light": {
+        "$type": "color",
+        "$value": "#f7f6f3",
+        "$description": "CSS --surface 라이트. D-OORT-1"
+      },
+      "color.surface.dark": {
+        "$type": "color",
+        "$value": "#17161a",
+        "$description": "CSS --surface 다크. D-OORT-1"
+      },
+      "color.surface-raised.light": {
+        "$type": "color",
+        "$value": "#fffefb",
+        "$description": "CSS --surface-raised 라이트 종이. D-OORT-1"
+      },
+      "color.surface-raised.dark": {
+        "$type": "color",
+        "$value": "#201f24",
+        "$description": "CSS --surface-raised 다크. D-OORT-1"
+      },
+      "color.surface-sidebar.light": {
+        "$type": "color",
+        "$value": "#efece6",
+        "$description": "CSS --surface-sidebar 라이트. D-OORT-1"
+      },
+      "color.surface-sidebar.dark": {
+        "$type": "color",
+        "$value": "#1b1a1f",
+        "$description": "CSS --surface-sidebar 다크. D-OORT-1"
+      },
+      "color.surface-hover.light": {
+        "$type": "color",
+        "$value": "#e7e3db",
+        "$description": "CSS --surface-hover 라이트 상호작용 상태. D-OORT-1"
+      },
+      "color.surface-hover.dark": {
+        "$type": "color",
+        "$value": "#26252c",
+        "$description": "CSS --surface-hover 다크 상호작용 상태. D-OORT-1"
+      },
+      "color.line.light": {
+        "$type": "color",
+        "$value": "#dcd8d0",
+        "$description": "CSS --line 라이트, 컨테이너 분리선. D-OORT-1"
+      },
+      "color.line.dark": {
+        "$type": "color",
+        "$value": "#34323b",
+        "$description": "CSS --line 다크, 컨테이너 분리선. D-OORT-1"
+      },
+      "color.line-strong.light": {
+        "$type": "color",
+        "$value": "#84817d",
+        "$description": "CSS --line-strong 라이트, 3:1 컨트롤 경계. D-OORT-1"
+      },
+      "color.line-strong.dark": {
+        "$type": "color",
+        "$value": "#6f6e73",
+        "$description": "CSS --line-strong 다크, 3:1 컨트롤 경계. D-OORT-1"
+      },
+      "color.ink.light": {
+        "$type": "color",
+        "$value": "#24211c",
+        "$description": "CSS --ink 라이트. D-OORT-1"
+      },
+      "color.ink.dark": {
+        "$type": "color",
+        "$value": "#ececf1",
+        "$description": "CSS --ink 다크. D-OORT-1"
+      },
+      "color.ink-muted.light": {
+        "$type": "color",
+        "$value": "#6a655f",
+        "$description": "CSS --ink-muted 라이트. D-OORT-1"
+      },
+      "color.ink-muted.dark": {
+        "$type": "color",
+        "$value": "#9b98a3",
+        "$description": "CSS --ink-muted 다크. D-OORT-1"
+      },
+      "color.accent.light": {
+        "$type": "color",
+        "$value": "#a54c08",
+        "$description": "CSS --accent 라이트, 호박 지평선. D-OORT-1"
+      },
+      "color.accent.dark": {
+        "$type": "color",
+        "$value": "#f0a850",
+        "$description": "CSS --accent 다크, 호박 지평선. D-OORT-1"
+      },
+      "color.accent-soft.light": {
+        "$type": "color",
+        "$value": "#f4e7d6",
+        "$description": "CSS --accent-soft 라이트 선택 상태. D-OORT-1"
+      },
+      "color.accent-soft.dark": {
+        "$type": "color",
+        "$value": "#33261a",
+        "$description": "CSS --accent-soft 다크 선택 상태. D-OORT-1"
+      },
+      "color.on-accent.light": {
+        "$type": "color",
+        "$value": "#fffefb",
+        "$description": "CSS --on-accent 라이트. D-OORT-1"
+      },
+      "color.on-accent.dark": {
+        "$type": "color",
+        "$value": "#17161a",
+        "$description": "CSS --on-accent 다크. D-OORT-1"
+      },
+      "color.agent.light": {
+        "$type": "color",
+        "$value": "#4a6785",
+        "$description": "CSS --agent 라이트, 에이전트 정체성에만 사용. D-OORT-1"
+      },
+      "color.agent.dark": {
+        "$type": "color",
+        "$value": "#7fa0c4",
+        "$description": "CSS --agent 다크, 에이전트 정체성에만 사용. D-OORT-1"
+      },
+      "color.agent-soft.light": {
+        "$type": "color",
+        "$value": "#e6ebf2",
+        "$description": "CSS --agent-soft 라이트. D-OORT-1"
+      },
+      "color.agent-soft.dark": {
+        "$type": "color",
+        "$value": "#1e2836",
+        "$description": "CSS --agent-soft 다크. D-OORT-1"
+      },
+      "color.muted-soft.light": {
+        "$type": "color",
+        "$value": "#f3efe8",
+        "$description": "CSS --muted-soft 라이트, 상태와 분리된 중립 칩 그릇. D-OORT-1"
+      },
+      "color.muted-soft.dark": {
+        "$type": "color",
+        "$value": "#302e36",
+        "$description": "CSS --muted-soft 다크, 상태와 분리된 중립 칩 그릇. D-OORT-1"
+      },
+      "color.ok-soft.light": {
+        "$type": "color",
+        "$value": "#e0f4e2",
+        "$description": "CSS --ok-soft 라이트, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.ok-soft.dark": {
+        "$type": "color",
+        "$value": "#243323",
+        "$description": "CSS --ok-soft 다크, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.warn-soft.light": {
+        "$type": "color",
+        "$value": "#ffedd4",
+        "$description": "CSS --warn-soft 라이트, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.warn-soft.dark": {
+        "$type": "color",
+        "$value": "#372e1b",
+        "$description": "CSS --warn-soft 다크, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.danger-soft.light": {
+        "$type": "color",
+        "$value": "#ffe9e5",
+        "$description": "CSS --danger-soft 라이트, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.danger-soft.dark": {
+        "$type": "color",
+        "$value": "#402a26",
+        "$description": "CSS --danger-soft 다크, 측정 결과 칩 그릇. D-OORT-1"
+      },
+      "color.danger.light": {
+        "$type": "color",
+        "$value": "#b3261e",
+        "$description": "CSS --danger 라이트 전경 위험 톤. D-OORT-1"
+      },
+      "color.danger.dark": {
+        "$type": "color",
+        "$value": "#ff796b",
+        "$description": "CSS --danger 다크 전경 위험 톤. D-OORT-1"
+      },
+      "color.danger-fill.light": {
+        "$type": "color",
+        "$value": "#8c393d",
+        "$description": "CSS --danger-fill 라이트 파괴 액션 채움. D-OORT-1"
+      },
+      "color.danger-fill.dark": {
+        "$type": "color",
+        "$value": "#dc817e",
+        "$description": "CSS --danger-fill 다크 파괴 액션 채움. D-OORT-1"
+      },
+      "color.on-danger-fill.light": {
+        "$type": "color",
+        "$value": "#fffefb",
+        "$description": "CSS --on-danger-fill 라이트. D-OORT-1"
+      },
+      "color.on-danger-fill.dark": {
+        "$type": "color",
+        "$value": "#17161a",
+        "$description": "CSS --on-danger-fill 다크. D-OORT-1"
+      },
+      "color.ok.light": {
+        "$type": "color",
+        "$value": "#187533",
+        "$description": "CSS --ok 라이트. D-OORT-1"
+      },
+      "color.ok.dark": {
+        "$type": "color",
+        "$value": "#57ab5a",
+        "$description": "CSS --ok 다크. D-OORT-1"
+      },
+      "color.warn.light": {
+        "$type": "color",
+        "$value": "#8a5c00",
+        "$description": "CSS --warn 라이트. D-OORT-1"
+      },
+      "color.warn.dark": {
+        "$type": "color",
+        "$value": "#d4a72c",
+        "$description": "CSS --warn 다크. D-OORT-1"
+      },
+      "color.scrim.light": {
+        "$type": "color",
+        "$value": "rgb(36 33 28 / 0.24)",
+        "$description": "CSS --scrim 라이트, 뒤 표면을 어둡게 하는 방향 토큰. D-OORT-1"
+      },
+      "color.scrim.dark": {
+        "$type": "color",
+        "$value": "rgb(9 8 11 / 0.62)",
+        "$description": "CSS --scrim 다크, 뒤 표면을 어둡게 하는 방향 토큰. D-OORT-1"
+      },
+      "space.0": {
+        "$type": "dimension",
+        "$value": "0px",
+        "$description": "닫힌 웹 리듬 단계. D-OORT-2"
+      },
+      "space.hairline": {
+        "$type": "dimension",
+        "$value": "1px",
+        "$description": "헤어라인. D-OORT-2"
+      },
+      "space.xs": {
+        "$type": "dimension",
+        "$value": "4px",
+        "$description": "닫힌 웹 리듬 단계, 폰 space.xs와 같은 값. D-OORT-2"
+      },
+      "space.sm": {
+        "$type": "dimension",
+        "$value": "8px",
+        "$description": "닫힌 웹 리듬 단계, 폰 space.sm과 같은 값. D-OORT-2"
+      },
+      "space.md": {
+        "$type": "dimension",
+        "$value": "12px",
+        "$description": "닫힌 웹 리듬 단계, 폰 space.md와 같은 값. D-OORT-2"
+      },
+      "space.lg": {
+        "$type": "dimension",
+        "$value": "16px",
+        "$description": "닫힌 웹 리듬 단계, 폰 space.lg와 같은 값. D-OORT-2"
+      },
+      "space.xl": {
+        "$type": "dimension",
+        "$value": "24px",
+        "$description": "닫힌 웹 리듬 단계, 폰 space.xl과 같은 값. D-OORT-2"
+      },
+      "space.2xl": {
+        "$type": "dimension",
+        "$value": "32px",
+        "$description": "닫힌 웹 리듬 단계. D-OORT-2"
+      },
+      "target.tap": {
+        "$type": "dimension",
+        "$value": "44px",
+        "$description": "자기 줄을 갖는 터치 컨트롤 target. D-OORT-2"
+      },
+      "target.inline": {
+        "$type": "dimension",
+        "$value": "24px",
+        "$description": "본문에 섞인 링크의 AA 최소 target. D-OORT-2"
+      },
+      "radius.sm": {
+        "$type": "dimension",
+        "$value": "6px",
+        "$description": "버튼·칩·입력 반경. D-OORT-3"
+      },
+      "radius.md": {
+        "$type": "dimension",
+        "$value": "10px",
+        "$description": "웹 카드·목록 반경, 폰은 8px 분기. D-OORT-3"
+      },
+      "radius.lg": {
+        "$type": "dimension",
+        "$value": "14px",
+        "$description": "dialog·sheet 반경. D-OORT-3"
+      }
+    },
+    "rules": [
+      "색·간격·반경·텍스트 역할은 clients/web/src/design/tokens.css만 정본으로 삼고 feature 파일에 원시 값을 쓰지 않는다.",
+      "폰 tokens.ts는 웹 토큰을 번역하며, 컴포넌트 뷰는 공유하지 않는다.",
+      "순흑·순백과 네온 보라를 쓰지 않고, agent 색은 avatar와 badge의 정체성에만 쓴다.",
+      "--line은 컨테이너를 나누고 --line-strong은 3:1 컨트롤 경계를 그린다.",
+      "상호작용 상태 토큰 surface-hover·accent-soft를 정적인 칩 그릇으로 쓰지 않는다.",
+      "위험 전경 채도는 danger > warn > ink-muted, 채움은 accent > danger-fill 순서를 지킨다.",
+      "숫자 리듬은 0·1·4·8·12·16·24·32px로 닫고, 밖의 측정은 근거를 가진 이름 축으로만 추가한다.",
+      "비자명한 모션은 reduced motion에서 제거하며 상태 변화 피드백은 짧고 기능적이어야 한다."
+    ],
+    "contrast_pairs": [
+      {
+        "foreground": "color.ink.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ink.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ink.light",
+        "background": "color.surface-raised.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ink.dark",
+        "background": "color.surface-raised.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ink-muted.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ink-muted.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.line-strong.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 3
+      },
+      {
+        "foreground": "color.line-strong.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 3
+      },
+      {
+        "foreground": "color.on-accent.light",
+        "background": "color.accent.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.on-accent.dark",
+        "background": "color.accent.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.on-danger-fill.light",
+        "background": "color.danger-fill.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.on-danger-fill.dark",
+        "background": "color.danger-fill.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.agent.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.agent.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ok.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.ok.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.warn.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.warn.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.danger.light",
+        "background": "color.surface.light",
+        "minimum_ratio": 4.5
+      },
+      {
+        "foreground": "color.danger.dark",
+        "background": "color.surface.dark",
+        "minimum_ratio": 4.5
+      }
+    ],
+    "reduced_motion": true
+  },
+  "governance": {
+    "decisions": [
+      {
+        "path": "/experience/design_direction",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-0 · docs/design-system/README.md §이 문서가 존재하는 이유",
+          "docs/ux-bible/README.md P1~P15"
+        ]
+      },
+      {
+        "path": "/foundations/tokens/color.surface.light",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-1 · clients/web/src/design/tokens.css :root",
+          "docs/design-system/README.md §2.2"
+        ]
+      },
+      {
+        "path": "/foundations/tokens/space.xs",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-2 · clients/web/src/design/tokens.css @theme spacing",
+          "docs/design-system/README.md §2.3"
+        ]
+      },
+      {
+        "path": "/foundations/tokens/radius.sm",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-3 · clients/web/src/design/tokens.css @theme radius",
+          "docs/design-system/README.md §2.4"
+        ]
+      },
+      {
+        "path": "/typography_assets/roles",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-4 · clients/web/src/design/tokens.css @theme text roles",
+          "docs/design-system/README.md §2.5"
+        ]
+      },
+      {
+        "path": "/components_states/rules",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-5 · docs/design-system/README.md §4",
+          ".claude/skills/momo-design-taste-web/SKILL.md §5~§6"
+        ]
+      },
+      {
+        "path": "/layout_platforms/platforms",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-6 · docs/design-system/README.md §1·§2.1",
+          ".claude/skills/momo-design-taste/SKILL.md §0·§2"
+        ]
+      },
+      {
+        "path": "/content_locales/locales",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-7 · docs/design-system/README.md §5.2·§5.3",
+          ".claude/skills/momo-design-taste-web/SKILL.md §7"
+        ]
+      },
+      {
+        "path": "/governance/change_policy",
+        "source_class": "repository-fact",
+        "evidence": [
+          "D-OORT-8 · docs/design-system/README.md §6",
+          "docs/design-system/OMD.md"
+        ]
+      }
+    ],
+    "unknown_policy": "absent-at-smallest-unresolved-boundary",
+    "priority": [
+      "직접 범위 지시",
+      "Accepted ADR와 리포지터리 사실",
+      "clients/web/src/design/tokens.css와 docs/design-system/README.md 정본",
+      "이 DESIGN.md Core v2 mirror",
+      "OmD 범용 참고와 외부 영감"
+    ],
+    "change_policy": [
+      "정본 변경은 Accepted ADR와 성재 승인을 따르고 tokens.css·README·테스트를 먼저 갱신한다.",
+      "DESIGN.md와 .omd/system은 비권위 mirror로 함께 다시 사상하고 손실 0을 검증한다.",
+      "migration-candidate graph를 portable-core authority로 adopt하지 않는다.",
+      "taste·design-review·design_preflight_web의 프로젝트 전용 판정을 OmD 범용 workflow로 대체하지 않는다.",
+      "새 토큰은 정본 README §6 절차로 이름·근거·전수 가드를 얻은 뒤에만 mirror에 들어온다."
+    ]
+  },
+  "identity": {
+    "kind": "portable-brief",
+    "name": "오르트 구름 (Oort Cloud)",
+    "scope": "oort 웹(Tauri 데스크톱 포함)과 React Native 폰의 제품 디자인 시스템을 OmD가 소비하는 비권위 mirror"
+  },
+  "layout_platforms": {
+    "minimum_width_px": 320,
+    "reflow_zoom_percent": 200,
+    "rules": [
+      "디자인 표면은 웹과 폰 둘이며 데스크톱은 clients/web/dist를 그대로 쓰는 Tauri shell이다.",
+      "웹과 폰은 토큰·도메인 로직·문장을 공유하지만 view component를 공유하지 않는다.",
+      "넓은 화면부터 320px와 200% zoom까지 읽기·작업 순서를 보존하고 가로 overflow를 만들지 않는다.",
+      "자기 줄을 갖는 터치 컨트롤은 44px, 본문 안 링크는 최소 24px target을 가진다.",
+      "cached content는 offline에도 남고 reconnect 뒤 seq 복구 지점을 인라인으로 알린다."
+    ],
+    "platforms": [
+      {
+        "id": "web",
+        "rules": [
+          "tokens.css의 Tailwind 어휘와 CSP 제약을 따르고 design_preflight_web.sh를 하드 게이트로 실행한다."
+        ]
+      },
+      {
+        "id": "desktop",
+        "rules": [
+          "Tauri는 web dist를 감싸며 런타임별 디자인 토큰이나 레이아웃 분기를 만들지 않는다."
+        ]
+      },
+      {
+        "id": "ios",
+        "rules": [
+          "bare React Native tokens.ts가 웹 토큰을 번역하고 폰 전용 component를 구현한다."
+        ]
+      }
+    ]
+  },
+  "projection": {
+    "path": "DESIGN.md",
+    "sha256": "8b4c5415810d4e8af0e8e244bac42eb559e4d251b8c4a36184418f5ca4aac8c2",
+    "locale": "ko"
+  },
+  "schema_version": "2.0.0",
+  "typography_assets": {
+    "roles": [
+      {
+        "id": "timestamp",
+        "usage": "seq·시각·카운터",
+        "family": "system sans",
+        "size": "11px",
+        "weight": 400,
+        "line_height": "16px"
+      },
+      {
+        "id": "meta",
+        "usage": "보조 정보와 메타 행",
+        "family": "system sans",
+        "size": "12px",
+        "weight": 400,
+        "line_height": "18px"
+      },
+      {
+        "id": "body",
+        "usage": "메시지 본문과 컨트롤",
+        "family": "system sans",
+        "size": "14px",
+        "weight": 400,
+        "line_height": "22px"
+      },
+      {
+        "id": "title",
+        "usage": "표면 제목",
+        "family": "system sans",
+        "size": "16px",
+        "weight": 600,
+        "line_height": "24px"
+      },
+      {
+        "id": "display",
+        "usage": "표면당 최대 하나의 표시 제목",
+        "family": "system sans",
+        "size": "20px",
+        "weight": 700,
+        "line_height": "28px"
+      },
+      {
+        "id": "mono",
+        "usage": "코드·terminal·고정폭 데이터",
+        "family": "system monospace"
+      }
+    ],
+    "assets": [],
+    "rules": [
+      "외부 webfont와 CDN을 쓰지 않고 시스템 글꼴 stack으로 offline과 CSP를 지킨다.",
+      "크기를 직접 고르지 않고 timestamp·meta·body·title·display 역할을 고른다.",
+      "기능 아이콘은 한 스타일의 lucide를 쓰고 emoji를 기능 아이콘으로 쓰지 않는다.",
+      "검증되지 않은 logo·illustration·font를 프로젝트 자산처럼 대체 생성하지 않는다."
+    ]
+  }
+}

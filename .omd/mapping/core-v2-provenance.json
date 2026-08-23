@@ -1,0 +1,14 @@
+{
+  "schema_version": "2.0.0",
+  "decisions": [
+    { "path": "/experience/design_direction", "source_class": "repository-fact", "evidence": ["D-OORT-0 · docs/design-system/README.md §이 문서가 존재하는 이유", "docs/ux-bible/README.md P1~P15"] },
+    { "path": "/foundations/tokens/color.surface.light", "source_class": "repository-fact", "evidence": ["D-OORT-1 · clients/web/src/design/tokens.css :root", "docs/design-system/README.md §2.2"] },
+    { "path": "/foundations/tokens/space.xs", "source_class": "repository-fact", "evidence": ["D-OORT-2 · clients/web/src/design/tokens.css @theme spacing", "docs/design-system/README.md §2.3"] },
+    { "path": "/foundations/tokens/radius.sm", "source_class": "repository-fact", "evidence": ["D-OORT-3 · clients/web/src/design/tokens.css @theme radius", "docs/design-system/README.md §2.4"] },
+    { "path": "/typography_assets/roles", "source_class": "repository-fact", "evidence": ["D-OORT-4 · clients/web/src/design/tokens.css @theme text roles", "docs/design-system/README.md §2.5"] },
+    { "path": "/components_states/rules", "source_class": "repository-fact", "evidence": ["D-OORT-5 · docs/design-system/README.md §4", ".claude/skills/momo-design-taste-web/SKILL.md §5~§6"] },
+    { "path": "/layout_platforms/platforms", "source_class": "repository-fact", "evidence": ["D-OORT-6 · docs/design-system/README.md §1·§2.1", ".claude/skills/momo-design-taste/SKILL.md §0·§2"] },
+    { "path": "/content_locales/locales", "source_class": "repository-fact", "evidence": ["D-OORT-7 · docs/design-system/README.md §5.2·§5.3", ".claude/skills/momo-design-taste-web/SKILL.md §7"] },
+    { "path": "/governance/change_policy", "source_class": "repository-fact", "evidence": ["D-OORT-8 · docs/design-system/README.md §6", "docs/design-system/OMD.md"] }
+  ]
+}

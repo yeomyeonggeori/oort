@@ -1,0 +1,49 @@
+{
+  "$schema": "https://oh-my-design.kr/schema/design-md-core-manifest-v2.schema.json",
+  "schema_version": "2.0.0",
+  "format": "design-md-core",
+  "format_version": "2.0.0",
+  "profile": "migration-candidate",
+  "section_order": [
+    "experience",
+    "foundations",
+    "typography-assets",
+    "components-states",
+    "layout-platforms",
+    "content-locales",
+    "governance"
+  ],
+  "authority": {
+    "status": "non-authoritative",
+    "canonical": "source-design-md",
+    "source_sha256": "78b148d46204696c7ca52e508760222d0cec40f056df55f00870710925f0fcbc",
+    "candidate_graph_path": ".omd/system/graph.json",
+    "candidate_projection_path": "DESIGN.md"
+  },
+  "artifacts": {
+    "design_md": {
+      "path": "DESIGN.md",
+      "sha256": "8b4c5415810d4e8af0e8e244bac42eb559e4d251b8c4a36184418f5ca4aac8c2"
+    },
+    "graph": {
+      "path": ".omd/system/graph.json",
+      "sha256": "12200cc027e073230c08eb0e6d5ed41ee79aa0c39e4629028b39ade570987c71"
+    },
+    "provenance": {
+      "path": ".omd/system/provenance.json",
+      "sha256": "7f7568951e26b2572c6e72c82bc84c113a397a03814de7d2a7bb49a18383e9fa"
+    },
+    "coverage": {
+      "path": ".omd/system/coverage.json",
+      "sha256": "e2385a664f5949281149188ca0554a36776c376aab1727dc36915b203128039d"
+    }
+  },
+  "extensions": {
+    "dev.oh-my-design.migration": {
+      "status": "staged-non-authoritative",
+      "adoption_required": true,
+      "source_path": "docs/design-system/README.md",
+      "migration_report_path": ".omd/system/migration-report.json"
+    }
+  }
+}

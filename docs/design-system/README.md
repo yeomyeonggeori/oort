@@ -5,6 +5,7 @@
 > - 결정: [ADR-0159](../adr/0159-oort-cloud-design-system.md) (Accepted)
 > - 근거·실측: [2026-08-09 디자인 시스템 감사](../planning/research/2026-08-09-design-system-audit.md) (679줄)
 > - 관련 정본: [UX 원칙 P1~P15](../ux-bible/README.md) · [아키텍처](../architecture/overview.md) · 스킬 `.claude/skills/momo-design-taste-web/SKILL.md`
+> - 도구 소비 mirror: 루트 `DESIGN.md`(Core v2) · [OmD v2 운영 경계](OMD.md). **이 둘은 이 문서를 대체하지 않는다.**
 >
 > 위 두 링크(ADR·감사)는 **문서 정본 라인(`main`)**에 산다. 트랙 브랜치가 아직 그것을 받지 못했으면 링크가 비어 보인다 — 문서가 없는 것이 아니라 이 브랜치가 아직 못 받은 것이다.
 
@@ -25,6 +26,11 @@
 그래서 이 문서의 목적은 새 규칙을 세우는 것이 **아니다.** 이미 코드·리뷰·스킬·ADR에 흩어져 있는 규칙을 한 자리에 모아 이름을 붙이고, **각 규칙 옆에 "이걸 무엇이 재는가"와 "무엇이 안 재는가"를 적는 것**이다. 찾기 쉬움이 곧 기능이다.
 
 이 문서에 새로 발명된 규칙은 없다. 모든 항목에 출처가 붙어 있고, 출처가 없으면 그것은 규칙이 아니라 관례다.
+
+OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 사상한
+비권위 mirror다. 도구의 구조화 graph가 존재해도 새 정본이 된 것이 아니다. 설치
+채널, taste/design-review/프리플라이트와의 역할 경계, book 사용법은
+[OmD v2 운영 경계](OMD.md)에 적는다.
 
 ---
 

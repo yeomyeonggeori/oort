@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## OmD v2 Core v2 mirror + book (#1689, 2026-08-23)
+
+- project-local Claude Code 채널에 OmD v2 전체 bundle(22 skills · 19 agents · 440 references)을 설치하고 `omd doctor` ready를 닫았다. 기존 `momo-design-taste*`·`design-review`는 프로젝트 전용 정본/리뷰 경로로 보존하고 OmD 범용 reviewer는 보조로만 성문화했다.
+- 오르트 구름 정본 `docs/design-system/README.md`를 루트 `DESIGN.md` Portable Core v2로 사상했다. `.omd/system`은 `source-design-md`·`non-authoritative` migration candidate이며 원문 10 segment `dropped=0`, source reconstruction·projection round-trip true다. `tokens.css`·폰 `tokens.ts` 변경은 0.
+- `omd book`이 59 tokens · 5 components · 20/20 contrast pairs · 9 decisions를 읽고 `http://localhost:6060`에서 기동했다. `runtime-unverified(browser visual inspection)`: 작업 계약에 따라 브라우저 게이트는 오케스트레이터가 수행한다.
+
 ## 웹 단축키 도움말 (#1687, 2026-08-23)
 
 - 사이드바 도움말 버튼과 전역 `?`가 카테고리별 단축키 Dialog를 열며, 검색·인박스·안 읽은 채널·기본 동작·메시지 행 등록처가 표시 목록과 같은 타입드 정의를 소비해 드리프트를 막는다.

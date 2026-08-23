@@ -1,0 +1,136 @@
+{
+  "adoption_status": "staged-non-authoritative",
+  "authoritative_adoption_ready": false,
+  "clean_top": true,
+  "conformance": {
+    "level": "portable-core",
+    "structurally_valid": true,
+    "portable_core": true,
+    "checks": {
+      "product_surface_scope": {
+        "pass": true,
+        "evidence": [
+          "claim:scope"
+        ]
+      },
+      "primary_task": {
+        "pass": true,
+        "evidence": [
+          "claim:primary-tasks"
+        ]
+      },
+      "actionable_foundations_or_known_constraints": {
+        "pass": true,
+        "evidence": [
+          "claim:foundations"
+        ]
+      },
+      "governance_authority": {
+        "pass": true,
+        "evidence": [
+          "claim:authority"
+        ]
+      },
+      "governance_application_priority": {
+        "pass": true,
+        "evidence": [
+          "claim:application-priority"
+        ]
+      },
+      "governance_unknown_absence": {
+        "pass": true,
+        "evidence": [
+          "claim:unknowns"
+        ]
+      },
+      "governance_change_rule": {
+        "pass": true,
+        "evidence": [
+          "claim:changes"
+        ]
+      },
+      "claim_locale_declared": {
+        "pass": true,
+        "evidence": []
+      },
+      "claim_locale_supported": {
+        "pass": true,
+        "evidence": []
+      },
+      "claim_locale_consistent": {
+        "pass": true,
+        "evidence": [
+          "lang:ko"
+        ]
+      },
+      "claim_locale_matches_projection": {
+        "pass": true,
+        "evidence": [
+          "projection:ko"
+        ]
+      },
+      "standalone_no_required_runtime": {
+        "pass": true,
+        "evidence": [
+          "markdown:document"
+        ]
+      },
+      "no_prescriptive_placeholders": {
+        "pass": true,
+        "evidence": [
+          "markdown:document"
+        ]
+      }
+    },
+    "reasons": [],
+    "claim_locale": "ko",
+    "declarations": {
+      "scope": 1,
+      "primary-tasks": 1,
+      "foundations": 1,
+      "authority": 1,
+      "application-priority": 1,
+      "unknowns": 1,
+      "changes": 1
+    }
+  },
+  "core_section_ids": [
+    "experience",
+    "foundations",
+    "typography-assets",
+    "components-states",
+    "layout-platforms",
+    "content-locales",
+    "governance"
+  ],
+  "dropped": [],
+  "dropped_segments": 0,
+  "input": {
+    "format": "legacy-unmarked",
+    "path": "/Users/kwakseongjae/projects/momo-worktrees/1689-design-md-core-v2-book/docs/design-system/README.md",
+    "sha256": "78b148d46204696c7ca52e508760222d0cec40f056df55f00870710925f0fcbc"
+  },
+  "mapped_segments": 0,
+  "merged_segments": 0,
+  "opaque_extension_preserved": true,
+  "opaque_preserved_segments": 10,
+  "output": {
+    "format": "core-v2",
+    "design_md_sha256": "8b4c5415810d4e8af0e8e244bac42eb559e4d251b8c4a36184418f5ca4aac8c2",
+    "graph_sha256": "12200cc027e073230c08eb0e6d5ed41ee79aa0c39e4629028b39ade570987c71"
+  },
+  "projection_roundtrip_equal": true,
+  "quality_tier_changed": false,
+  "schema_version": "2.0.0",
+  "source_reconstruction_equal": true,
+  "source_segments": 10,
+  "source_validation": {
+    "errors": [],
+    "valid": true
+  },
+  "status": "pass",
+  "synthetic_product_values_added": 0,
+  "unmapped_segments": 10,
+  "unsupported_claims_promoted": null,
+  "unsupported_claims_review_required": true
+}

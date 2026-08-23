@@ -1,0 +1,7 @@
+# OmD-managed assets must remain byte-identical to the installed package.
+.claude/agents/omd-*.md -whitespace
+.claude/data/** -whitespace
+.claude/hooks/** -whitespace
+.claude/settings.json -whitespace
+.claude/skills/claude-design/** -whitespace
+.claude/skills/omd-*/** -whitespace
