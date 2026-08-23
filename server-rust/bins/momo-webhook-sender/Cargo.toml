@@ -24,6 +24,9 @@ path = "src/main.rs"
 momo-db = { path = "../../crates/momo-db" }
 momo-outbox = { path = "../../crates/momo-outbox" }
 momo-webhook = { path = "../../crates/momo-webhook" }
+# ADR-0170: the unfurl drain shares this process (already BYPASSRLS, already
+# outbound HTTP). A dedicated binary was the rejected alternative.
+momo-unfurl = { path = "../../crates/momo-unfurl" }
 
 # The outbound transport. This is the reason the sender is a separate binary
 # rather than a branch inside `momo-relay`: the relay's single HTTP destination

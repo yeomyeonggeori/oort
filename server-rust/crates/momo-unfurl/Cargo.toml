@@ -1,0 +1,41 @@
+[package]
+name = "momo-unfurl"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# ADR-0170 / #1698 — link unfurl domain + the SSRF-guarded HTTP hop.
+#
+# A crate rather than a module in momo-server for the same reason momo-drive
+# and momo-ephemeral are crates: `reqwest` lives HERE, never in momo-server's
+# manifest, so a route handler cannot build an arbitrary outbound request. The
+# only things the api can reach are the sealed settings/remove/list/proxy
+# functions and [`UnfurlHttp`].
+#
+# The drain loop is consumed by `momo-webhook-sender` (already BYPASSRLS, already
+# outbound HTTP). A dedicated binary was the rejected alternative in ADR-0170.
+
+[dependencies]
+momo-db = { path = "../momo-db" }
+momo-outbox = { path = "../momo-outbox" }
+momo-webhook = { path = "../momo-webhook" }
+
+async-trait.workspace = true
+bytes.workspace = true
+chrono.workspace = true
+futures.workspace = true
+reqwest = { workspace = true, features = ["stream"] }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["net", "sync", "time"] }
+tracing.workspace = true
+uuid.workspace = true
+url = "2"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread", "net"] }
+axum.workspace = true

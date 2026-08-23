@@ -349,6 +349,29 @@ DB_VOLUME_NAME=oort-lab-pgdata
 같은 시점에 보관소 볼륨을 복사한다. 절차 한 줄은
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).
 
+## 링크 미리보기 (언퍼얼)
+
+메시지에 붙은 http(s) 링크의 제목·설명·이미지를 서버가 가져와 카드로
+광고한다(ADR-0170). **기본은 꺼져 있다.** 셀프호스트 egress 를 보수적으로
+두려면 그대로 둔다.
+
+켜려면 env 에 한 줄을 넣고 `webhook-sender` 를 재시작한다:
+
+```sh
+MOMO_UNFURL_ENABLED=1
+```
+
+워크스페이스 관리자는 `PUT /v1/workspaces/{id}/unfurl-settings` 로
+테넌트 단위에서 fetch 자체를 끌 수 있다(렌더만 끄는 게 아니다).
+발신자는 자기 메시지의 카드를 `DELETE …/messages/{id}/unfurls` 로 지운다 —
+지운 카드는 다시 만들어지지 않는다.
+
+**P9 경계.** 서버는 링크 *대상*만 읽는다. 메시지 본문을 알림 판정이나
+에이전트 컨텍스트로 읽는 경로가 아니다. URL 문자열을 집어 OG/Twitter 태그를
+가져오는 것이고, 사람 발신과 에이전트 발신은 같은 경로다. 사설망·링크로컬·
+루프백은 기존 OutboundHTTPPolicy 가 매 홉 거절한다. 미리보기 이미지는
+서버 프록시만 통과한다 — 브라우저가 임의 호스트에 직접 붙지 않는다.
+
 ## 멈추기 · 지우기
 
 3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
