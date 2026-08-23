@@ -24,8 +24,57 @@ import { extendTailwindMerge } from "tailwind-merge";
 /** The semantic type roles from tokens.css `@theme { --text-* }`. */
 const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
 
+/**
+ * The named measures from tokens.css `@theme { --spacing-* }` that are words,
+ * not numbers: marker(2) · row(6) · control-sm/control/control-lg(28/32/40) ·
+ * action-sm/action(96/144) · chat-min · rail 3종 · pane 4종 · diff-body ·
+ * terminal-body · preview-frame · tray-max. `--spacing-px`만 뺀다 — `w-px`류는
+ * stock Tailwind라 tailwind-merge가 이미 안다. 이 목록과 tokens.css의 일치는
+ * cn.test.ts가 정본을 읽어 단정한다.
+ *
+ * Same failure class as the text roles above, caught on the sizing axis
+ * (2026-08-23 재연 QA): stock tailwind-merge does not recognise `max-w-pane-md`,
+ * so it cannot see that `max-w-none` conflicts with it. Both classes reach the
+ * DOM and the STYLESHEET order picks the winner — which was `max-w-pane-md`,
+ * so the image lightbox (#1686) that passes `max-w-none` to escape the dialog
+ * width cap rendered as a 512px strip pinned to the viewport's left edge.
+ * Registering the whole word-measure vocabulary in every sizing group makes
+ * "later class wins" hold wherever a named measure can appear.
+ */
+export const NAMED_MEASURES = [
+  "marker",
+  "row",
+  "control-sm",
+  "control",
+  "control-lg",
+  "action-sm",
+  "action",
+  "chat-min",
+  "rail",
+  "rail-tile",
+  "rail-marker",
+  "pane-sm",
+  "pane",
+  "pane-md",
+  "pane-lg",
+  "diff-body",
+  "terminal-body",
+  "preview-frame",
+  "tray-max",
+] as const;
+
 const twMerge = extendTailwindMerge({
-  extend: { classGroups: { "font-size": [{ text: [...TEXT_ROLES] }] } },
+  extend: {
+    classGroups: {
+      "font-size": [{ text: [...TEXT_ROLES] }],
+      w: [{ w: [...NAMED_MEASURES] }],
+      "min-w": [{ "min-w": [...NAMED_MEASURES] }],
+      "max-w": [{ "max-w": [...NAMED_MEASURES] }],
+      h: [{ h: [...NAMED_MEASURES] }],
+      "min-h": [{ "min-h": [...NAMED_MEASURES] }],
+      "max-h": [{ "max-h": [...NAMED_MEASURES] }],
+    },
+  },
 });
 
 /** shadcn/ui class-merge helper. */
