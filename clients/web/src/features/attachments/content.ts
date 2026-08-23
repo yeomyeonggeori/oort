@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchAttachmentContent } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -37,6 +37,7 @@ import { fetchAttachmentContent } from "@momo/core/lib/api";
  */
 const previews = new Map<string, string>();
 const inflight = new Map<string, Promise<string>>();
+const previewListeners = new Map<string, Set<(state: PreviewState) => void>>();
 
 /** 세션 하나가 무한정 쌓지 않게. 오래된 것부터 놓는다(Map 은 삽입 순서를 안다). */
 const PREVIEW_LIMIT = 60;
@@ -48,6 +49,26 @@ function remember(id: string, dataUrl: string): void {
     if (oldest.done) break;
     previews.delete(oldest.value);
   }
+}
+
+function publishPreviewState(id: string, state: PreviewState): void {
+  for (const listener of previewListeners.get(id) ?? []) listener(state);
+}
+
+function subscribePreviewState(
+  id: string,
+  listener: (state: PreviewState) => void
+): () => void {
+  let listeners = previewListeners.get(id);
+  if (listeners === undefined) {
+    listeners = new Set();
+    previewListeners.set(id, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners?.delete(listener);
+    if (listeners?.size === 0) previewListeners.delete(id);
+  };
 }
 
 function readAsDataUrl(blob: Blob): Promise<string> {
@@ -68,6 +89,39 @@ export type PreviewState =
   | { status: "ready"; dataUrl: string }
   | { status: "failed" };
 
+export type AttachmentPreviewState = PreviewState & { retry: () => void };
+
+function loadAttachmentPreview(
+  workspaceId: string,
+  channelId: string,
+  attachmentId: string
+): Promise<string> {
+  const hit = previews.get(attachmentId);
+  if (hit !== undefined) {
+    publishPreviewState(attachmentId, { status: "ready", dataUrl: hit });
+    return Promise.resolve(hit);
+  }
+
+  let request = inflight.get(attachmentId);
+  if (request !== undefined) return request;
+
+  publishPreviewState(attachmentId, { status: "loading" });
+  request = fetchAttachmentContent(workspaceId, channelId, attachmentId)
+    .then(readAsDataUrl)
+    .then((dataUrl) => {
+      remember(attachmentId, dataUrl);
+      publishPreviewState(attachmentId, { status: "ready", dataUrl });
+      return dataUrl;
+    })
+    .catch((error: unknown) => {
+      publishPreviewState(attachmentId, { status: "failed" });
+      throw error;
+    })
+    .finally(() => inflight.delete(attachmentId));
+  inflight.set(attachmentId, request);
+  return request;
+}
+
 /**
  * 인라인 미리보기 한 장. `enabled` 가 거짓이면 요청 자체를 하지 않는다 — 미리보기를
  * 안 여는 첨부까지 바이트를 받아 오면 타임라인 한 화면이 수십 MB 를 긷는다.
@@ -77,7 +131,7 @@ export function useAttachmentPreview(
   channelId: string,
   attachmentId: string,
   enabled: boolean
-): PreviewState {
+): AttachmentPreviewState {
   const cached = previews.get(attachmentId);
   const [state, setState] = useState<PreviewState>(
     cached === undefined
@@ -87,38 +141,26 @@ export function useAttachmentPreview(
 
   useEffect(() => {
     if (!enabled) return;
+    const unsubscribe = subscribePreviewState(attachmentId, setState);
     const hit = previews.get(attachmentId);
     if (hit !== undefined) {
       setState({ status: "ready", dataUrl: hit });
-      return;
+      return unsubscribe;
     }
-    let live = true;
     setState({ status: "loading" });
-    // 같은 첨부를 두 행이 동시에 그릴 수 있다(스레드 패널과 채널). 요청은 하나다.
-    let request = inflight.get(attachmentId);
-    if (request === undefined) {
-      request = fetchAttachmentContent(workspaceId, channelId, attachmentId)
-        .then(readAsDataUrl)
-        .then((dataUrl) => {
-          remember(attachmentId, dataUrl);
-          return dataUrl;
-        })
-        .finally(() => inflight.delete(attachmentId));
-      inflight.set(attachmentId, request);
-    }
-    request
-      .then((dataUrl) => {
-        if (live) setState({ status: "ready", dataUrl });
-      })
-      .catch(() => {
-        if (live) setState({ status: "failed" });
-      });
-    return () => {
-      live = false;
-    };
+    // 같은 첨부를 두 행이 동시에 그릴 수 있다(스레드 패널과 채널). 요청은 하나고,
+    // 라이트박스의 재시도 결과도 이 구독으로 타임라인 미리보기에 함께 돌아온다.
+    void loadAttachmentPreview(workspaceId, channelId, attachmentId).catch(() => {});
+    return unsubscribe;
   }, [workspaceId, channelId, attachmentId, enabled]);
 
-  return state;
+  const retry = useCallback(() => {
+    if (!enabled) return;
+    setState({ status: "loading" });
+    void loadAttachmentPreview(workspaceId, channelId, attachmentId).catch(() => {});
+  }, [workspaceId, channelId, attachmentId, enabled]);
+
+  return { ...state, retry };
 }
 
 /**
@@ -159,4 +201,5 @@ export async function downloadAttachment(
 export function resetAttachmentPreviewsForTest(): void {
   previews.clear();
   inflight.clear();
+  previewListeners.clear();
 }

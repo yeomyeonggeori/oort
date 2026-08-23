@@ -1405,6 +1405,13 @@
   max-block-size: calc(100dvh - var(--spacing-8) * 2);
 }
 
+/* 이미지 라이트박스는 다이얼로그의 포커스·Esc 계약을 쓰되, 패널이 아니라 화면
+ * 자체가 뷰어다. dialog-panel의 32px 인셋 상한을 이름 없는 important 값으로
+ * 덮지 않고 이 역할이 자기 viewport 상한을 가진다(#1686). */
+@utility lightbox-panel {
+  max-block-size: 100dvh;
+}
+
 /* Marketplace is a decision surface: on a wide viewport its chosen app must
  * remain beside the catalog, not below five rows and outside the viewport.
  * The 2:3 split is named here rather than written as an arbitrary component
