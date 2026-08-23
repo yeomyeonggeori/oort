@@ -51,8 +51,9 @@ pub struct Config {
     /// `MOMO_ENV` label (local/staging/prod), used for log context.
     pub environment: String,
     /// The ONLY authority for the realtime WebSocket address (ADR-0110): clients
-    /// must never derive it from the API origin.
-    pub realtime_ws_url: String,
+    /// must never derive it from the API origin. `same-origin` (ADR-0167) is a
+    /// per-request derivation, not a boot-time URL.
+    pub realtime_ws_url: crate::realtime_advert::RealtimeAdvert,
     /// T3 (momo Cloud) settings — **off unless the operator turns them on**
     /// (B2.2).
     pub t3: T3Settings,
@@ -1687,24 +1688,16 @@ fn percent_decode(raw: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Port of Swift `Config.realtimeWebSocketURL(environment:)`: an explicit
-/// `MOMO_CENTRIFUGO_WS_URL` wins when it is a ws/wss URL with a host; otherwise
-/// the loopback default on `CENT_PORT`.
-pub fn realtime_ws_url_from_env() -> Result<String, ConfigError> {
-    if let Some(raw) = env("MOMO_CENTRIFUGO_WS_URL") {
-        let raw = raw.trim();
-        let host = raw
-            .strip_prefix("ws://")
-            .or_else(|| raw.strip_prefix("wss://"))
-            .map(|rest| rest.split('/').next().unwrap_or(""))
-            .unwrap_or("");
-        if !host.is_empty() {
-            return Ok(raw.to_string());
-        }
-    }
+/// Port of Swift `Config.realtimeWebSocketURL(environment:)` plus ADR-0167:
+/// `MOMO_CENTRIFUGO_WS_URL=same-origin` is a sentinel (trim + lowercase);
+/// an explicit ws/wss URL with a host is still Fixed verbatim; otherwise the
+/// loopback default on `CENT_PORT`.
+pub fn realtime_ws_url_from_env() -> Result<crate::realtime_advert::RealtimeAdvert, ConfigError> {
     let port: u16 = env_number("CENT_PORT", 8000u16)?;
-    let port = if port == 0 { 8000 } else { port };
-    Ok(format!("ws://127.0.0.1:{port}/connection/websocket"))
+    Ok(crate::realtime_advert::RealtimeAdvert::from_env_value(
+        env("MOMO_CENTRIFUGO_WS_URL").as_deref(),
+        port,
+    ))
 }
 
 /// The tracing filter directive for this process.

@@ -35,7 +35,7 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
-use momo_server::{build_app, AppState};
+use momo_server::{build_app, AppState, RealtimeAdvert};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -130,11 +130,11 @@ fn ensure_schema_and_roles() {
 
 /// Boot the real router on an ephemeral port; returns its base URL.
 async fn start_server(pool: PgPool) -> String {
-    let state = AppState::new(
-        pool,
-        TEST_JWT_SECRET.to_string(),
-        "ws://127.0.0.1:8000/connection/websocket".to_string(),
-    );
+    start_server_with_advert(pool, "ws://127.0.0.1:8000/connection/websocket".to_string()).await
+}
+
+async fn start_server_with_advert(pool: PgPool, advert: impl Into<RealtimeAdvert>) -> String {
+    let state = AppState::new(pool, TEST_JWT_SECRET.to_string(), advert);
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
@@ -1240,5 +1240,78 @@ async fn case_twins_are_refused_by_the_uniqueness_constraint_not_by_the_normalis
     assert!(
         still_there,
         "the probe transaction must not have leaked its DDL"
+    );
+}
+
+async fn login_realtime_url(
+    http: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    host: &str,
+    forwarded_proto: &str,
+) -> String {
+    let response = http
+        .post(format!("{base}/v1/auth/login"))
+        .header("Host", host)
+        .header("X-Forwarded-Proto", forwarded_proto)
+        .json(&json!({
+            "email": fixture.email,
+            "password": TEST_PASSWORD,
+            "workspace": fixture.workspace.to_string(),
+        }))
+        .send()
+        .await
+        .expect("login");
+    assert_eq!(response.status(), 200, "valid credentials log in: {host}");
+    let body: Value = response.json().await.expect("login body");
+    body["realtimeWebSocketUrl"]
+        .as_str()
+        .expect("realtimeWebSocketUrl")
+        .to_string()
+}
+
+/// ADR-0167 red proofs on the real login surface.
+///
+/// ① the old self-host default still advertises localhost against a remote Host
+///    (the defect, kept as Fixed verbatim);
+/// ② same-origin + `Host` + `X-Forwarded-Proto: https` derives wss;
+/// ③ an absolute production URL ignores Host (ADR-0110).
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a fresh pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn realtime_advert_red_proofs_on_login() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let http = reqwest::Client::new();
+    let remote_host = "cursor.tailb1aad3.ts.net";
+
+    let legacy = start_server_with_advert(
+        app_pool.clone(),
+        "ws://localhost:8088/connection/websocket".to_string(),
+    )
+    .await;
+    assert_eq!(
+        login_realtime_url(&http, &legacy, &fixture, remote_host, "https").await,
+        "ws://localhost:8088/connection/websocket",
+        "① old default + remote Host still advertises localhost"
+    );
+
+    let same_origin = start_server_with_advert(app_pool.clone(), RealtimeAdvert::SameOrigin).await;
+    assert_eq!(
+        login_realtime_url(&http, &same_origin, &fixture, remote_host, "https").await,
+        "wss://cursor.tailb1aad3.ts.net/connection/websocket",
+        "② same-origin derives wss from XFP + Host"
+    );
+
+    let split_domain = start_server_with_advert(
+        app_pool,
+        "wss://rt.oor7.com/connection/websocket".to_string(),
+    )
+    .await;
+    assert_eq!(
+        login_realtime_url(&http, &split_domain, &fixture, remote_host, "https").await,
+        "wss://rt.oor7.com/connection/websocket",
+        "③ absolute URL ignores Host (ADR-0110)"
     );
 }
