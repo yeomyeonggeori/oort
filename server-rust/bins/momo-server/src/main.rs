@@ -57,6 +57,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // MOMO-605: how wide the cross-origin surface is. A count, not the list —
         // the origins themselves go in the warn below only when one was refused.
         cors_allowed_origins = config.cors.allowed_origins.len(),
+        // ADR-0110 / ADR-0167: Fixed prints the URL; SameOrigin prints the mode
+        // name. Never a secret.
+        realtime_ws_url = %config.realtime_ws_url,
         // ADR-0151: which archive backs attachments. The backend name and
         // whether a shared drive was named — never the key path's contents and
         // never a token.

@@ -6,6 +6,12 @@
 - 로그아웃·계정 identity 변경·토큰 만료 provider 해제는 모든 첨부 드래프트와 native PUT을 비우고 세션 세대를 올려 구 bearer로 시작한 늦은 업로드 응답을 폐기한다. picker의 도달 불가 `rejected`는 일부 무음 수락 대신 단정 실패하며, grabber·트레이 상한은 전용 명명 측정을 쓴다.
 - 모바일·공유 코어 전체 테스트와 tsc는 green이다. `runtime-unverified(iOS simulator visual interaction)`: 실기·시뮬레이터 검증은 패킷의 명시 비스코프이며, 폰에는 독립 디자인 프리플라이트 실행 단위가 없다.
 
+## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
+
+- `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).
+- 생성기 기본값을 `same-origin`으로 교체. `--public-origin https://host`가 `CENTRIFUGO_ALLOWED_ORIGINS`에 브라우저 Origin과 RN `wss://` Origin을 멱등 추가. 기존 localhost/tauri 기본값 완화 없음.
+- 플레이북: `SELF_HOST_AGENT.md` §2.3·`SELF_HOST.md` 터널 절. 로그인 응답 `realtimeWebSocketUrl == wss://<공개호스트>/connection/websocket`이 검증 문장. `runtime-unverified(터널 e2e 브라우저 왕복)` — 오케스트레이터 몫.
+
 ## 폰 사진·파일 picker 전송 (#1700, 2026-08-23)
 
 - 모바일 Composer의 2행 첨부 시트가 `expo-image-picker`·`expo-document-picker`로 사진/파일 한 건을 고르고, 코어 첨부 상태기계·실패 문장을 재사용한 인라인 트레이에서 capability PUT→완료 확인→기존 메시지 `attachmentIds` 발송까지 잇는다. 일반 대화와 스레드가 같은 경로를 쓴다.
