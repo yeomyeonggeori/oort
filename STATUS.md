@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## claim 부트스트랩 ttl_seconds 모호성 (#1673, 2026-08-23)
+
+- `infra/prod/bootstrap_owner_claim_if_absent.sql` SELECT INTO를 테이블 별칭 `i`로 한정. PL/pgSQL 변수 `ttl_seconds`와 컬럼 동명으로 `MOMO_BOOTSTRAP_CLAIM=1` migrate가 스키마 78/78 뒤 Exited 1이던 P1.
+- `scripts/verify_owner_claim.sh`에 실 `momo-migrate` + `MOMO_BOOTSTRAP_CLAIM=1` 경로 단정 추가(claim-pending owner + `owner_claim` 행). 형제 `bootstrap_owner_if_absent.sql`·`set_initial_owner.sql`은 컬럼/변수 이름이 달라 확인함 무해. ADR-0166 계약·claim 라우트/웹 폼·078 마이그레이션 비접촉.
+
 ## 그록봇 셀프호스트 플레이북 (#1652, 2026-08-23)
 
 - 루트 `llms.txt`(진입 stub) + `docs/SELF_HOST_AGENT.md`(3계층: digest 코어 설치 → quick tunnel → 핸드오프). 본인 그록봇 계정/VM 전용. claim 회신은 migrate `MOMO_CLAIM_PATH`. pgdata는 `/workspace` bind. 실기동 E2E는 범위 밖.
@@ -9,7 +14,7 @@
 
 - ADR-0166: `momo-migrate` opt-in `MOMO_BOOTSTRAP_CLAIM=1`이 시드 owner를 claim-pending으로 두고 1회용 `/claim/<token>`을 stdout에만 출력한다. `POST /v1/claim`이 비밀번호 설정과 토큰 소비를 한 트랜잭션에서 처리한다. 기존 `MOMO_INITIAL_OWNER_PASSWORD` 경로 불변.
 - 봉인: TTL 24h, 라우트 `POST /v1/claim` + 웹 `/claim/<token>`, per-IP 30/60s (join과 별도 버킷), 표현=`owner_claim`(hash/`expires_at`/`consumed_at`) + `password_hash` 공란. 미소비 로그인은 `momo_password_verify` 자연 거부.
-- 검증: `scripts/verify_owner_claim.sh` (발급→로그인 401→claim→로그인 200→재사용 409→TTL 410→DB 해시만→로그 원문 부재). 웹 폼은 로그인 표면 인접 4-상태.
+- 검증: `scripts/verify_owner_claim.sh` (migrate-time `MOMO_BOOTSTRAP_CLAIM=1` → claim-pending owner+`owner_claim` 행, 그다음 발급→로그인 401→claim→로그인 200→재사용 409→TTL 410→DB 해시만→로그 원문 부재). 웹 폼은 로그인 표면 인접 4-상태.
 
 ## 셀프호스트 pg_dump 리커버리 (#1654, 2026-08-22)
 

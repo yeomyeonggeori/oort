@@ -33,9 +33,11 @@ DECLARE
   ttl_seconds bigint;
   updated_rows integer;
 BEGIN
-  SELECT email, token, ttl_seconds
+  -- Qualify every selected column. PL/pgSQL DECLARE names that match a
+  -- column (`ttl_seconds`) make an unqualified SELECT INTO ambiguous (#1673).
+  SELECT i.email, i.token, i.ttl_seconds
     INTO owner_email, claim_token, ttl_seconds
-    FROM momo_bootstrap_claim_input;
+    FROM momo_bootstrap_claim_input i;
 
   IF char_length(owner_email) < 3
      OR char_length(owner_email) > 320
