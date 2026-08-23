@@ -244,6 +244,10 @@ export function navReducer(state: NavState, action: NavAction): NavState {
     case 'openAgent':
       return {
         ...state,
+        // 작성자 프로필에서도 이 액션을 쓴다 (#1681). 에이전트 상세는 대화보다
+        // 아래에 그려지는 기존 층이므로, 열린 대화를 함께 걷지 않으면 새 화면이
+        // 뒤에 생겨 탭의 결과가 보이지 않는다.
+        conversation: null,
         search: null,
         agent: action.agent,
         workSession: null,

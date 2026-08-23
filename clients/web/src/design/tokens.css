@@ -854,8 +854,9 @@
  * `user-select`는 건드리지 않는다. 그걸 끄면 메시지 본문을 아예 고를 수 없게
  * 되는데 사람들은 메시지를 복사한다. 콜아웃만 끄고 선택은 남긴다.
  *
- * 폰 폭에서만 적용한다: 데스크탑의 우클릭 메뉴(복사·검사)는 진짜로 쓸모가 있고
- * 거기엔 길게 누르기가 없다. */
+ * 폰 폭에서만 적용한다. 데스크탑의 우클릭은 메시지 전체 액션 메뉴를 열되, 이 행
+ * 안에 선택 영역이 있으면 브라우저의 기본 메뉴에 양보한다. 그래서 부분 복사와
+ * 검사는 그대로 남고, 선택이 없을 때만 ⋯ 메뉴와 같은 액션 목록이 선다(#1679). */
 @utility no-touch-callout {
   @media (width < 600px) {
     -webkit-touch-callout: none;
@@ -1402,6 +1403,13 @@
  * document must never scroll (MOMO-610). */
 @utility dialog-panel {
   max-block-size: calc(100dvh - var(--spacing-8) * 2);
+}
+
+/* 이미지 라이트박스는 다이얼로그의 포커스·Esc 계약을 쓰되, 패널이 아니라 화면
+ * 자체가 뷰어다. dialog-panel의 32px 인셋 상한을 이름 없는 important 값으로
+ * 덮지 않고 이 역할이 자기 viewport 상한을 가진다(#1686). */
+@utility lightbox-panel {
+  max-block-size: 100dvh;
 }
 
 /* Marketplace is a decision surface: on a wide viewport its chosen app must

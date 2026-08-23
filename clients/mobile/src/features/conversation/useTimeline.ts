@@ -10,6 +10,7 @@ import {
   setPin,
   setReaction,
   type Message,
+  type MessageAttachment,
 } from '@momo/core/lib/api';
 import {
   payloadToMessage,
@@ -142,7 +143,11 @@ export interface UseTimelineResult {
    * block: without it the optimistic row shows no quote and then grows one the
    * instant its seq lands, moving the text under the reader's eye.
    */
-  send: (body: string, replyToId?: string) => Promise<void>;
+  send: (
+    body: string,
+    replyToId?: string,
+    attachments?: MessageAttachment[],
+  ) => Promise<void>;
   /** Re-run a failed echo with the SAME idempotency key. */
   resend: (clientMsgId: string) => Promise<void>;
   /**
@@ -157,7 +162,11 @@ export interface UseTimelineResult {
   /** One page of a root's replies, merged into the same seq-ordered state. */
   loadReplies: (rootId: string) => Promise<void>;
   /** Reply into a thread. Same echo machinery as `send`, tagged with its root. */
-  sendReply: (rootId: string, body: string) => Promise<void>;
+  sendReply: (
+    rootId: string,
+    body: string,
+    attachments?: MessageAttachment[],
+  ) => Promise<void>;
   /** The echoes belonging to one thread (never shown in the channel list). */
   repliesPending: (rootId: string) => PendingMessage[];
   loadOlder: () => Promise<void>;
@@ -275,11 +284,15 @@ export function useTimeline(
     async (row: PendingMessage) => {
       try {
         const rootId = pendingRootRef.current[row.clientMsgId];
+        const attachmentIds = row.attachments?.map(attachment => attachment.id);
         const confirmed = await (rootId === undefined
           ? sendMessage(workspaceId, row.channelId, row.clientMsgId, row.body, {
               ...(row.replyToId === undefined
                 ? {}
                 : {replyToId: row.replyToId}),
+              ...(attachmentIds === undefined || attachmentIds.length === 0
+                ? {}
+                : {attachmentIds}),
             })
           : sendThreadReply(
               workspaceId,
@@ -287,6 +300,9 @@ export function useTimeline(
               rootId,
               row.clientMsgId,
               row.body,
+              attachmentIds === undefined || attachmentIds.length === 0
+                ? undefined
+                : {attachmentIds},
             ));
         // The response IS the committed server echo (seq-authoritative), so
         // merging it is not optimistic rendering: it is the same reconcile the
@@ -304,9 +320,15 @@ export function useTimeline(
   );
 
   const send = useCallback(
-    async (body: string, replyToId?: string) => {
+    async (
+      body: string,
+      replyToId?: string,
+      attachments?: MessageAttachment[],
+    ) => {
       const channel = channelId;
-      if (channel === null || body === '') return;
+      if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
+        return;
+      }
       const row: PendingMessage = {
         // `crypto.randomUUID()` — React Native has no `crypto` global at all, so
         // this call lands on the polyfill installed by `src/boot/polyfills.ts`
@@ -322,6 +344,9 @@ export function useTimeline(
         sinceSeq: newestSeqRef.current,
         status: 'sending',
         ...(replyToId === undefined ? {} : {replyToId}),
+        ...(attachments === undefined || attachments.length === 0
+          ? {}
+          : {attachments}),
       };
       updatePending(list => addPending(list, row));
       await post(row);
@@ -499,9 +524,15 @@ export function useTimeline(
   );
 
   const sendReply = useCallback(
-    async (rootId: string, body: string) => {
+    async (
+      rootId: string,
+      body: string,
+      attachments?: MessageAttachment[],
+    ) => {
       const channel = channelId;
-      if (channel === null || body === '') return;
+      if (channel === null || (body === '' && (attachments?.length ?? 0) === 0)) {
+        return;
+      }
       const clientMsgId = crypto.randomUUID();
       pendingRootRef.current = {...pendingRootRef.current, [clientMsgId]: rootId};
       const row: PendingMessage = {
@@ -512,6 +543,9 @@ export function useTimeline(
         createdAtMs: Date.now(),
         sinceSeq: newestSeqRef.current,
         status: 'sending',
+        ...(attachments === undefined || attachments.length === 0
+          ? {}
+          : {attachments}),
       };
       updatePending(list => addPending(list, row));
       await post(row);

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, type RefObject } from "react";
+import { ROW_ACTIONS_SHORTCUT } from "@/app/keyboardShortcuts";
 
 // =============================================================================
 // 한 행 = 탭 스톱 하나 (B11 R2 H1).
@@ -39,9 +40,9 @@ export function nextRovingIndex(
   key: string
 ): number | null {
   if (count === 0) return null;
+  if (!ROW_ACTIONS_SHORTCUT.matches({ key })) return null;
   if (key === "ArrowRight") return (current + 1) % count;
-  if (key === "ArrowLeft") return (current - 1 + count) % count;
-  return null;
+  return (current - 1 + count) % count;
 }
 
 /**

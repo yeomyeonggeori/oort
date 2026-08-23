@@ -50,3 +50,13 @@ DerivedData/
 # git worktrees (never track — embedded repos)
 .claude/worktrees/
 worktrees/
+
+# OmD v2 관리 파일 (#1689 스코프 판정): 번들·생성물은 레포에 버전관리하지 않는다.
+# 로컬 설치·재생성은 omd CLI(설치/재사상 절차: docs/design-system/OMD.md).
+.omd/
+.claude/agents/omd-*.md
+.claude/skills/omd-*/
+.claude/skills/claude-design/
+.claude/data/
+.claude/hooks/
+.claude/settings.json

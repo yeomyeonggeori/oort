@@ -24,7 +24,7 @@ export function ReactionChips({
   chips: ReactionChip[];
   onToggle: (emoji: string) => void;
   /** Absent on a row that may not be reacted to (a tombstone). */
-  onOpenPicker?: () => void;
+  onOpenPicker?: (opener: HTMLButtonElement) => void;
   disabled?: boolean;
 }) {
   if (chips.length === 0) return null;
@@ -79,7 +79,7 @@ export function ReactionChips({
           data-row-action=""
           aria-label="다른 반응 고르기"
           title="다른 반응 고르기"
-          onClick={onOpenPicker}
+          onClick={(event) => onOpenPicker(event.currentTarget)}
           className="tap-target flex items-center rounded-sm border border-line bg-surface-raised px-2 py-px text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:opacity-50"
         >
           <Smile className="size-4" aria-hidden="true" />

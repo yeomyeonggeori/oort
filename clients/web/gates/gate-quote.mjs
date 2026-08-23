@@ -79,6 +79,7 @@ const memberId = "00000000-0000-7000-8000-000000000101";
 const peerId = "00000000-0000-7000-8000-000000000102";
 const agentId = "AAAAAAAA-AAAA-7AAA-8AAA-AAAAAAAAA613";
 const channelId = "00000000-0000-7000-8000-000000000201";
+const dmChannelId = "00000000-0000-7000-8000-000000000202";
 
 const QUOTE_ACTION_LABEL = canonicalActionLabel(webRoot);
 
@@ -99,7 +100,7 @@ const QUOTES_DIFF_MSG = "0199aaaa-0000-7000-8000-0000000000a6";
 const QUOTES_QUOTE_MSG = "0199aaaa-0000-7000-8000-0000000000a7";
 const LIVE_QUOTING_MSG = "0199aaaa-0000-7000-8000-0000000000a8";
 
-const ORIGIN_BODY = "배포 되돌리기 절차부터 확인해 줘. 롤백 스크립트가 최신인지도.";
+const ORIGIN_BODY = "배포 되돌리기 절차부터 확인해 줘. **롤백 스크립트**가 최신인지도.";
 const DELETED_BODY_MARKER = "이 문장은 지워졌으므로 화면에 있을 수 없다";
 const DIFF_PAYLOAD_MARKER = "infra/prod/Caddyfile";
 const LIVE_BODY = "그 절차 먼저 확인했습니다.";
@@ -158,6 +159,14 @@ const roster = [
 
 const channels = [
   { id: channelId, workspaceId, kind: "public", name: "release-2026-08", muted: false },
+  {
+    id: dmChannelId,
+    workspaceId,
+    kind: "dm",
+    dmKey: `${memberId}:${peerId}`,
+    memberIds: [memberId, peerId],
+    muted: false,
+  },
 ];
 
 const AT = 1_785_238_400_000;
@@ -493,6 +502,9 @@ async function exercise(browser) {
   const context = await browser.newContext({
     viewport: { width: 1280, height: 900 },
     reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin,
   });
   const page = await context.newPage();
   await installRealtimeSocket(page);
@@ -860,6 +872,97 @@ async function exercise(browser) {
   if ((await menu.getByTestId("menu-quote").count()) !== 1) {
     throw new Error(`${QUOTE_ACTION_LABEL} is not its own menu item`);
   }
+  const menuKeys = await menu
+    .locator('[data-testid^="menu-"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid")?.slice("menu-".length))
+    );
+  if (!menuKeys.includes("copy")) {
+    throw new Error(`the visible menu has no copy action: ${JSON.stringify(menuKeys)}`);
+  }
+
+  // ---- 8b. 원문 복사 + 우클릭 동등성 ----------------------------------------
+  await menu.getByTestId("menu-copy").click();
+  await page.getByTestId("menu-copy").getByText("복사됨").waitFor();
+  const menuCopy = await page.evaluate(() => navigator.clipboard.readText());
+  if (menuCopy !== ORIGIN_BODY) {
+    throw new Error(
+      `the ⋯ menu copied rendered text instead of raw markdown: ${JSON.stringify(menuCopy)}`
+    );
+  }
+  await page.keyboard.press("Escape");
+
+  const originRow = rowLocator(page, ORIGIN_MSG);
+  await originRow.click({ button: "right", position: { x: 180, y: 24 } });
+  const contextMenu = page.getByTestId("message-context-menu");
+  await contextMenu.waitFor();
+  const contextKeys = await contextMenu
+    .locator('[data-testid^="context-"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) =>
+        node.getAttribute("data-testid")?.slice("context-".length)
+      )
+    );
+  if (JSON.stringify(contextKeys) !== JSON.stringify(menuKeys)) {
+    throw new Error(
+      `right-click and ⋯ actions drifted: ${JSON.stringify(contextKeys)} != ${JSON.stringify(menuKeys)}`
+    );
+  }
+  await contextMenu.getByTestId("context-copy").click();
+  await page.getByTestId("context-copy").getByText("복사됨").waitFor();
+  const contextCopy = await page.evaluate(() => navigator.clipboard.readText());
+  if (contextCopy !== ORIGIN_BODY) {
+    throw new Error(
+      `the right-click menu copied rendered text instead of raw markdown: ${JSON.stringify(contextCopy)}`
+    );
+  }
+  await page.keyboard.press("Escape");
+
+  // A partial selection belongs to the browser. Record defaultPrevented at the
+  // target while headless Chromium receives the same contextmenu event.
+  await originRow.evaluate((row) => {
+    const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+    let text = walker.nextNode();
+    while (text && !(text.textContent ?? "").includes("배포")) {
+      text = walker.nextNode();
+    }
+    if (!text) throw new Error("selection fixture text not found");
+    const start = (text.textContent ?? "").indexOf("배포");
+    const range = document.createRange();
+    range.setStart(text, start);
+    range.setEnd(text, start + 2);
+    const selection = document.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    window.__quoteGateContextDefaultPrevented = null;
+    document.addEventListener(
+      "contextmenu",
+      (event) => {
+        setTimeout(() => {
+          window.__quoteGateContextDefaultPrevented = event.defaultPrevented;
+        }, 0);
+      },
+      { once: true, capture: true }
+    );
+  });
+  await wait(100);
+  await originRow.click({ button: "right", position: { x: 180, y: 24 } });
+  await wait(100);
+  const selectedContext = await page.evaluate(
+    () => window.__quoteGateContextDefaultPrevented
+  );
+  if (selectedContext !== false) {
+    throw new Error(
+      `a selected message did not yield to the native context menu (defaultPrevented=${selectedContext})`
+    );
+  }
+  if ((await page.getByTestId("message-context-menu").count()) !== 0) {
+    throw new Error("the app context menu opened over a text selection");
+  }
+  await page.evaluate(() => document.getSelection()?.removeAllRanges());
+  await wait(100);
+
+  await openRowMenu(page, ORIGIN_MSG);
   // 이미 답글인 행에서도 인용은 열려 있다 (규칙 1). 스레드 답글이 없는 이 채널에서는
   // `rootId`가 붙은 행을 목으로 만들 수 없으므로, 코어 단정(quote.test.ts)이 그
   // 자리를 지키고 여기서는 두 항목이 **함께** 있는 것만 확인한다.
@@ -957,6 +1060,107 @@ async function exercise(browser) {
     );
   }
 
+  // The avatar joins the row's roving group; it does not add another Tab stop.
+  const rowStops = await quoting
+    .locator('[data-row-action][tabindex="0"]')
+    .count();
+  if (rowStops !== 1) {
+    throw new Error(`the profile avatar changed one message row into ${rowStops} tab stops`);
+  }
+  const avatar = quoting.getByTestId("row-avatar-profile");
+  await avatar.focus();
+  await page.keyboard.press("Enter");
+  const profile = page.getByTestId("member-profile-dialog");
+  await profile.waitFor();
+  const profileText = (await profile.textContent()) ?? "";
+  for (const expected of ["이도현", "@dohyun", "사람", "활성", "멤버"]) {
+    if (!profileText.includes(expected)) {
+      throw new Error(`the shared profile omitted ${expected}: ${profileText}`);
+    }
+  }
+  if ((await profile.getByTestId("member-profile-dm").count()) !== 1) {
+    throw new Error("an active peer profile has no direct-message action");
+  }
+  await page.keyboard.press("Escape");
+  if (!(await avatar.evaluate((node) => document.activeElement === node))) {
+    throw new Error("Esc from the member profile did not return focus to the message avatar");
+  }
+
+  // Directory rows and a DM header open the same card and return to themselves.
+  await page.getByTestId("nav-directory").click();
+  const directoryRow = page.locator(
+    `[data-testid="directory-row"][data-member-id="${peerId}"]`
+  );
+  await directoryRow.waitFor();
+  await directoryRow.click();
+  await profile.waitFor();
+  await page.keyboard.press("Escape");
+  if (!(await directoryRow.evaluate((node) => document.activeElement === node))) {
+    throw new Error("the directory profile did not return focus to its row");
+  }
+
+  await page.locator(`[data-channel-id="${dmChannelId}"]`).click();
+  const dmProfileTrigger = page.getByTestId("dm-profile-trigger");
+  await dmProfileTrigger.waitFor();
+  await dmProfileTrigger.click();
+  await profile.waitFor();
+  await page.keyboard.press("Escape");
+  if (!(await dmProfileTrigger.evaluate((node) => document.activeElement === node))) {
+    throw new Error("the DM-header profile did not return focus to its trigger");
+  }
+
+  await context.close();
+  return menuKeys;
+}
+
+async function exerciseTouch(browser, menuKeys) {
+  const traffic = makeTraffic();
+  const context = await browser.newContext({
+    viewport: { width: 800, height: 900 },
+    hasTouch: true,
+    reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin,
+  });
+  const page = await context.newPage();
+  await installRealtimeSocket(page);
+  await installRoutes(context, traffic);
+  await login(page);
+
+  const originRow = rowLocator(page, ORIGIN_MSG);
+  await originRow.evaluate((row) => {
+    const rect = row.getBoundingClientRect();
+    row.dispatchEvent(
+      new PointerEvent("pointerdown", {
+        bubbles: true,
+        pointerType: "touch",
+        clientX: rect.left + 32,
+        clientY: rect.top + 24,
+      })
+    );
+  });
+  await page.getByTestId("message-action-sheet").waitFor({ timeout: 3_000 });
+  const sheet = page.getByTestId("message-action-sheet");
+  const sheetKeys = await sheet
+    .locator('[data-testid^="sheet-"]')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid")?.slice("sheet-".length))
+    );
+  if (JSON.stringify(sheetKeys) !== JSON.stringify(menuKeys)) {
+    throw new Error(
+      `long-press and ⋯ actions drifted: ${JSON.stringify(sheetKeys)} != ${JSON.stringify(menuKeys)}`
+    );
+  }
+  await sheet.getByTestId("sheet-copy").click();
+  await sheet.getByTestId("sheet-copy").getByText("복사됨").waitFor();
+  const sheetCopy = await page.evaluate(() => navigator.clipboard.readText());
+  if (sheetCopy !== ORIGIN_BODY) {
+    throw new Error(
+      `the long-press sheet copied rendered text instead of raw markdown: ${JSON.stringify(sheetCopy)}`
+    );
+  }
+  await page.keyboard.press("Escape");
   await context.close();
 }
 
@@ -997,7 +1201,8 @@ async function main() {
   try {
     const browser = await chromium.launch();
     try {
-      await exercise(browser);
+      const menuKeys = await exercise(browser);
+      await exerciseTouch(browser, menuKeys);
       if (process.env.QUOTE_GATE_SHOTS === "1") await captureShots(browser);
     } finally {
       await browser.close();
@@ -1009,6 +1214,8 @@ async function main() {
   console.log("           삭제된 원본은 사본을 남기지 않았고, 라이브 프레임은");
   console.log("           로드된 행에서 풀렸고, 전송은 한 쓰기경로에 replyToId를");
   console.log("           실었고, 인용에서 나오는 길이 둘 있었다.");
+  console.log("           메시지 액션 세 표면은 같은 목록과 원문 복사를 썼고,");
+  console.log("           프로필 세 진입점은 Esc 뒤 원래 포커스로 돌아갔다.");
 }
 
 await main();
