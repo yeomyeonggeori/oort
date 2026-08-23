@@ -1,10 +1,10 @@
 # oort 진행 현황
 
-## U-4 웹 컴포저 이모지·스레드 동등성 (#1688, 2026-08-23)
+## OmD v2 Core v2 mirror + book (#1689, 2026-08-23)
 
-- 메시지 반응의 기존 32종 이모지 격자를 공용 프로그램형 다이얼로그로 추출해 채널·스레드 컴포저가 선택 범위의 caret에 삽입하고 입력으로 복귀한다. `DialogTrigger` 없이 실제 버튼 opener를 쓰며 Esc는 그 버튼으로 돌아간다.
-- 스레드 답글이 채널과 같은 공용 멘션 자동완성·Esc 층·기존 첨부 트레이·이모지 표면을 쓴다. 힌트/입력 정렬은 토큰 산술 `p-3 + px-3 = px-6`으로 고정하고 red seam을 `gate-composer`에 넣었다. 코어(C-1) 파일 변경은 0이다.
-- 웹 타입·전체 88파일/1,383테스트·프로덕션 빌드·디자인 프리플라이트 green. `runtime-unverified(browser gate + light/dark capture)`: 워커 계약에 따라 브라우저/Docker를 실행하지 않았고 오케스트레이터가 갱신한 게이트·캡처 하네스를 실행한다.
+- project-local Claude Code 채널에 OmD v2 전체 bundle(22 skills · 19 agents · 440 references)을 설치하고 `omd doctor` ready를 닫았다. 스코프 판정(#1693)으로 bundle·`.omd/` 생성물은 레포에 버전관리하지 않고(`.gitignore`) mirror 문서(`DESIGN.md`·`docs/design-system/OMD.md`)만 랜딩했다. 기존 `momo-design-taste*`·`design-review`는 프로젝트 전용 정본/리뷰 경로로 보존하고 OmD 범용 reviewer는 보조로만 성문화했다.
+- 오르트 구름 정본 `docs/design-system/README.md`를 루트 `DESIGN.md` Portable Core v2로 사상했다. `.omd/system`은 `source-design-md`·`non-authoritative` migration candidate이며 원문 10 segment `dropped=0`, source reconstruction·projection round-trip true다. `tokens.css`·폰 `tokens.ts` 변경은 0.
+- `omd book`이 59 tokens · 5 components · 20/20 contrast pairs · 9 decisions를 읽고 `http://localhost:6060`에서 기동했다. `runtime-unverified(browser visual inspection)`: 작업 계약에 따라 브라우저 게이트는 오케스트레이터가 수행한다.
 
 ## 웹 단축키 도움말 (#1687, 2026-08-23)
 
@@ -14,11 +14,6 @@
 
 - 코어 markdown `Inline`에 원문 바이트와 case-folded handle을 보존하는 mention 노드를 추가하고, 기존 라우팅과 공유하는 경계/handle 문법으로 코드·이메일·미완성 `@`를 평문에 남겼다. safeHref와 기존 노드 의미론은 불변이다.
 - 웹·폰 타임라인은 활성 directory 멤버만 accent로 그리고 내 멘션에는 accent-soft/accentSurface를 더한다. 코어·웹·폰 전체 스위트와 양 palette 단정, 웹 디자인 preflight는 green. `runtime-unverified(browser/device visual gate)`: 오케스트레이터 실행 범위로 위임했다.
-
-## U-3 웹 이미지 라이트박스 + 다운로드 정밀도 (#1686, 2026-08-23)
-
-- 인라인 이미지가 프로그램매틱 Dialog 라이트박스로 열리고, 한 메시지의 안전한 이미지 사이를 버튼·좌우 화살표로 순환한다. 빈·로딩·오류·오프라인/캐시 유지, aria, Esc 층, 명시 opener 포커스 복귀를 단위 계약으로 고정했다.
-- 다운로드 인가 프록시는 완료된 `Blob`만 반환하고 진행 이벤트·전체 바이트를 노출하지 않아 거짓 퍼센트를 만들지 않고 기존 스피너를 공유했다. `runtime-unverified(browser interaction gate)`: 계약에 따라 브라우저 게이트는 오케스트레이터가 수행한다.
 
 ## iOS 첨부 렌더·다운로드 + 멤버 프로필 (#1681, 2026-08-23)
 
