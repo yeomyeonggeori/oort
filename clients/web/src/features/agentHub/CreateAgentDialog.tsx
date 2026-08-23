@@ -11,6 +11,7 @@ import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
+import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import type { CreatedAgent } from "@momo/core/lib/api";
 import {
   EMPTY_AGENT_DRAFT,
@@ -215,7 +216,7 @@ function CreateAgentPanel({
       onKeyDown={(event) => {
         // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장). On the panel root rather than the
         // form, because the action row is outside the form and bound by `form=`.
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (PRIMARY_ACTION_SHORTCUT.matches(event)) {
           event.preventDefault();
           formRef.current?.requestSubmit();
         }
