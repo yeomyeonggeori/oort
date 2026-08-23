@@ -926,6 +926,18 @@ mod tests {
                 && !claim_sql.contains("RAISE NOTICE '%', claim_token"),
             "NOTICE must not interpolate the raw token"
         );
+        assert!(
+            claim_sql.contains("SELECT i.email, i.token, i.ttl_seconds"),
+            "#1673: SELECT INTO columns must be table-qualified; PL/pgSQL ttl_seconds collides with the column"
+        );
+        assert!(
+            claim_sql.contains("FROM momo_bootstrap_claim_input i"),
+            "#1673: table alias required so SELECT INTO is not ambiguous"
+        );
+        assert!(
+            !claim_sql.contains("SELECT email, token, ttl_seconds"),
+            "#1673: unqualified SELECT INTO of ttl_seconds is ambiguous in PL/pgSQL"
+        );
         assert_eq!(OWNER_CLAIM_TTL_SECONDS, 24 * 60 * 60);
     }
 
