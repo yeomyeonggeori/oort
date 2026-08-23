@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # #1651 / ADR-0166 — isolated PostgreSQL 18 first-owner claim verifier.
+# #1673 — also runs the real momo-migrate MOMO_BOOTSTRAP_CLAIM=1 path (the
+# gap that let `ttl_seconds` SELECT INTO ambiguity land).
 #
 # Ownership contract matches scripts/verify_hosted_disconnect.sh: invocation
 # nonce label, janitor label, refusal of an external DATABASE_URL, trap cleanup.
@@ -49,6 +51,12 @@ PG_CONTAINER_ID=""
 MUTATION_STARTED=0
 CLEANUP_DONE=0
 ENV_FILE=""
+MIGRATE_LOG=""
+
+fail() {
+  printf '[owner-claim] FAIL: %s\n' "$*" >&2
+  exit 1
+}
 
 container_refs() { "$DOCKER_BIN" ps -aq --no-trunc; }
 label_refs() {
@@ -99,6 +107,9 @@ cleanup() {
   if [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
     rm -f -- "$ENV_FILE" || { [ "$rc" -ne 0 ] || rc=1; }
   fi
+  if [ -n "$MIGRATE_LOG" ] && [ -f "$MIGRATE_LOG" ]; then
+    rm -f -- "$MIGRATE_LOG" || { [ "$rc" -ne 0 ] || rc=1; }
+  fi
   if [ "$CLEANUP_DONE" -eq 0 ] && [ "$MUTATION_STARTED" -eq 1 ]; then
     if [ -z "$PG_CONTAINER_ID" ]; then
       labels="$(label_refs 2>/dev/null)" || { [ "$rc" -ne 0 ] || rc=1; exit "$rc"; }
@@ -144,6 +155,84 @@ export MOMO_APP_PASSWORD=momo_app_dev_pw
 export MOMO_RELAY_PASSWORD=momo_relay_dev_pw
 export MOMO_WORKER_PASSWORD=momo_worker_dev_pw
 export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD=momo
+
+# #1673 — real momo-migrate with MOMO_BOOTSTRAP_CLAIM=1. The cargo test below
+# mints tokens in-process and never executes bootstrap_owner_claim_if_absent.sql,
+# which is how `column reference "ttl_seconds" is ambiguous` shipped.
+CLAIM_EMAIL="claim-${INVOCATION_ID}@momo.local"
+MIGRATE_LOG="$(mktemp "${TMPDIR:-/tmp}/momo-owner-claim-migrate.XXXXXX")"
+chmod 600 "$MIGRATE_LOG"
+set +e
+env -u MOMO_INITIAL_OWNER_PASSWORD \
+  -u MOMO_IN_CONTAINER \
+  -u MOMO_BOOTSTRAP_OWNER_CLAIM_SQL \
+  -u MOMO_BOOTSTRAP_OWNER_SQL \
+  -u MOMO_SET_OWNER_SQL \
+  DATABASE_URL="$DATABASE_URL" \
+  MOMO_ENV=test \
+  MOMO_AGENT_SEED_MODE=none \
+  MOMO_BOOTSTRAP_CLAIM=1 \
+  MOMO_INITIAL_OWNER_EMAIL="$CLAIM_EMAIL" \
+  MOMO_BOOTSTRAP_RUNTIME_ROLES=1 \
+  MOMO_PITR_EVIDENCE_REQUIRED=0 \
+  MOMO_PITR_BOOTSTRAP_EMPTY=0 \
+  CARGO_TERM_COLOR=never \
+  cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" \
+    -p momo-migrate --quiet --bin momo-migrate -- migrate \
+  >"$MIGRATE_LOG" 2>&1
+migrate_rc=$?
+set -e
+if [ "$migrate_rc" -ne 0 ]; then
+  printf '[owner-claim] momo-migrate exited %s; log follows\n' "$migrate_rc" >&2
+  cat "$MIGRATE_LOG" >&2
+  fail "MOMO_BOOTSTRAP_CLAIM=1 migrate did not finish (claim path not created)"
+fi
+grep -Fq 'MOMO_BOOTSTRAP_CLAIM=created' "$MIGRATE_LOG" || {
+  cat "$MIGRATE_LOG" >&2
+  fail "migrate log missing MOMO_BOOTSTRAP_CLAIM=created"
+}
+if grep -Fq 'column reference "ttl_seconds" is ambiguous' "$MIGRATE_LOG"; then
+  cat "$MIGRATE_LOG" >&2
+  fail "migrate log still reports ttl_seconds SELECT INTO ambiguity"
+fi
+claim_path_line="$(grep -E '^MOMO_CLAIM_PATH=/claim/[A-Za-z0-9_-]{43}$' "$MIGRATE_LOG" || true)"
+[ -n "$claim_path_line" ] || {
+  cat "$MIGRATE_LOG" >&2
+  fail "migrate log missing MOMO_CLAIM_PATH=/claim/<token>"
+}
+CLAIM_TOKEN="${claim_path_line#MOMO_CLAIM_PATH=/claim/}"
+if grep -F "$CLAIM_TOKEN" "$MIGRATE_LOG" | grep -v -F "MOMO_CLAIM_PATH=/claim/${CLAIM_TOKEN}" | grep -q .; then
+  fail "raw claim token leaked outside MOMO_CLAIM_PATH"
+fi
+CHECK_EMAIL="$CLAIM_EMAIL"
+CHECK_TOKEN="$CLAIM_TOKEN"
+export CHECK_EMAIL CHECK_TOKEN
+claim_state="$(psql -qAt -v ON_ERROR_STOP=1 --no-psqlrc <<'SQL'
+\getenv check_email CHECK_EMAIL
+\getenv check_token CHECK_TOKEN
+SET app.workspace_id = '00000000-0000-7000-8000-000000000001';
+SELECT
+  (SELECT count(*)::text FROM human h
+    WHERE h.member_id = '00000000-0000-7000-8000-000000000101'
+      AND h.workspace_id = '00000000-0000-7000-8000-000000000001'
+      AND h.email = lower(btrim(:'check_email'))
+      AND h.email_verified
+      AND (h.password_hash IS NULL OR h.password_hash = '')),
+  (SELECT count(*)::text FROM owner_claim c
+    WHERE c.workspace_id = '00000000-0000-7000-8000-000000000001'
+      AND c.member_id = '00000000-0000-7000-8000-000000000101'
+      AND c.consumed_at IS NULL
+      AND c.expires_at > now() + interval '23 hours'
+      AND c.expires_at < now() + interval '25 hours'
+      AND c.token_hash = digest(:'check_token', 'sha256'));
+SQL
+)"
+claim_state="$(printf '%s' "$claim_state" | tr -d '[:space:]')"
+[ "$claim_state" = "1|1" ] || fail "migrate did not plant claim-pending owner + live owner_claim (got ${claim_state:-<empty>})"
+rm -f -- "$MIGRATE_LOG"
+MIGRATE_LOG=""
+echo "[owner-claim] migrate-time bootstrap planted claim-pending owner + owner_claim"
+
 (
   cd server-rust
   cargo test -p momo-server --test claim_conformance_pg \
@@ -152,4 +241,4 @@ export PGHOST=127.0.0.1 PGPORT="$PG_PORT" PGDATABASE=momo PGUSER=momo PGPASSWORD
 
 remove_owned
 CLEANUP_DONE=1
-echo "[owner-claim] PASS PG18 issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction contract"
+echo "[owner-claim] PASS PG18 migrate-time bootstrap plus issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction contract"
