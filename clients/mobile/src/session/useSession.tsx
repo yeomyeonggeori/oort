@@ -19,6 +19,7 @@ import {
 } from '../storage/secureSession';
 import {authGate, type AuthGate} from './authGate';
 import {clearAllDrafts} from '../features/conversation/drafts';
+import {clearAllAttachmentDrafts} from '../features/attachments/draftStore';
 
 // =============================================================================
 // The session, as React sees it.
@@ -71,7 +72,9 @@ export function useAuthGate(): AuthGateState {
   // only, ADR-0137 D7), so resuming IS one refresh — and until it answers, this
   // client can neither show a shell (every query would 401) nor a sign-in form
   // (the person is signed in). `restoreSettled` is what buys the third state.
-  const [restoreSettled, setRestoreSettled] = useState(() => !hasPersistedSession());
+  const [restoreSettled, setRestoreSettled] = useState(
+    () => !hasPersistedSession(),
+  );
   const [restoreUnreachable, setRestoreUnreachable] = useState(false);
   // Bumped to re-arm the effect. A launch with no signal must not cost the
   // session for the life of the process.
@@ -206,6 +209,14 @@ export function SessionProvider({
   children: React.ReactNode;
 }): React.JSX.Element {
   const queryClient = useQueryClient();
+  const attachmentSessionKey = `${member.workspaceId}|${member.id}`;
+
+  useEffect(() => {
+    // explicit signOut만 경계가 아니다. 토큰 만료는 이 provider를 바로 내리고,
+    // 같은 프로세스에서 다른 계정이 들어오면 member identity가 바뀐다. 두 경우 모두
+    // 이전 세대의 draft/native PUT/create 응답을 다음 계정보다 먼저 끊는다 (#1703).
+    return () => clearAllAttachmentDrafts();
+  }, [attachmentSessionKey]);
 
   const signOut = useCallback(() => {
     // Fire and forget, exactly as the web client does and for the reason the
@@ -224,6 +235,10 @@ export function SessionProvider({
     // 지워도 원장에 남지만 안 보낸 글은 이 기기에만 있다. 웹이 같은 자리에서 같은
     // 일을 한다(`clients/web/src/app/session.tsx`).
     clearAllDrafts();
+    // 첨부 초안은 더 위험하다: 메모리 안에 구 bearer로 만든 upload session id와
+    // native PUT이 살아 있을 수 있다. 화면만 비우지 않고 진행 중 PUT도 취소하며,
+    // 늦게 도착한 create/complete 응답도 세션 세대 경계에서 버린다 (#1703).
+    clearAllAttachmentDrafts();
   }, [queryClient]);
 
   const value = useMemo<SignedInSession>(

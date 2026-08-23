@@ -276,6 +276,19 @@ describe("the line under the name", () => {
     }
   });
 
+  it("omits the size when the native picker could not measure it", () => {
+    const unknown = picked({ sizeBytes: 0, sizeKnown: false });
+    expect(draftStatusLine(unknown).text).toBe(ATTACH_COPY.queued);
+    expect(draftAnnouncement([], [unknown])).toBe(
+      `drain-log.txt ${ATTACH_COPY.queued}`
+    );
+  });
+
+  it("keeps a measured empty file distinct from an unknown size", () => {
+    const empty = picked({ sizeBytes: 0, sizeKnown: true });
+    expect(draftStatusLine(empty).text).toBe(`0 B · ${ATTACH_COPY.queued}`);
+  });
+
   it("carries the reason and the next action on a terminal failure", () => {
     const failed = failUpload([picked()], "local-1", "too-large")[0];
     const line = draftStatusLine(failed);
@@ -391,6 +404,17 @@ describe("presentation", () => {
         sizeBytes: 18,
       })
     ).toBe("텍스트 · 18 B");
+    expect(
+      attachmentMetaLine({
+        id: "unknown",
+        name: "provider.bin",
+        mime: "application/octet-stream",
+        sizeBytes: 0,
+      })
+      // 문서화된 잔재(#1703 리뷰 Medium-1)이지 스펙 승인이 아니다: MessageAttachment에는
+      // sizeKnown이 없어 전송 후 메타줄은 크기 미독 파일을 「0 B」로 잰 척한다. 서버가
+      // complete 시점에 실측 크기를 적는 결정(후속 티켓)이 이 단정을 바꿀 것이다.
+    ).toBe("파일 · 0 B");
   });
 
   it("opens an inline preview only for a bounded raster image", () => {

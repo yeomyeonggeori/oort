@@ -16,6 +16,7 @@ import {
   isImageMime,
   isRetryableIssue,
   sendBlockCopy,
+  sendBlockReason,
   splitFileName,
   uploadIssueCopy,
   uploadIssueNext,
@@ -24,6 +25,7 @@ import {
 } from '@momo/core/features/attachments/model';
 
 import {
+  ATTACHMENT_TRAY_MAX_HEIGHT,
   font,
   line,
   radius,
@@ -49,6 +51,7 @@ export function AttachmentTray({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const blocked = sendBlockCopy(drafts);
+  const blockReason = sendBlockReason(drafts);
 
   // 보조기술이 듣는 줄 (design-review High-2). `accessibilityLiveRegion`은
   // Android 전용이라 이 앱의 1차 플랫폼(iOS)에서는 어떤 전이도 낭독되지
@@ -120,8 +123,7 @@ export function AttachmentTray({
           <Text
             style={[
               styles.blocked,
-              drafts.some(draft => draft.status === 'failed') &&
-                styles.blockedFailed,
+              blockReason === 'failed' && styles.blockedFailed,
             ]}
             testID="attachment-blocked"
           >
@@ -180,6 +182,7 @@ function DraftRow({
     draft.status === 'failed' &&
     draft.issue !== undefined &&
     isRetryableIssue(draft.issue);
+  const uploading = draft.status === 'uploading';
   return (
     <View
       accessibilityLabel={`${draft.name}. ${status.text}${
@@ -208,24 +211,39 @@ function DraftRow({
             status.percent === null ? '' : ` ${status.percent}%`
           }`}
         </Text>
-        {draft.status === 'uploading' ? (
-          <View
-            accessibilityRole="progressbar"
-            accessibilityValue={
-              status.percent === null
-                ? {text: ATTACH_COPY.uploading}
-                : {min: 0, max: 100, now: status.percent}
-            }
-            style={styles.progressTrack}
-            testID="attachment-draft-progress"
-          >
-            {status.percent === null ? null : (
-              <View
-                style={[styles.progressFill, {width: `${status.percent}%`}]}
-              />
-            )}
-          </View>
-        ) : null}
+        {/* 웹 쌍둥이와 같은 자리 예약. 상태가 바뀌어도 이 4pt가 나타났다 사라지며
+            행 높이를 흔들지 않는다. 실제 트랙은 uploading에서만 보인다. */}
+        <View
+          style={styles.progressSlot}
+          testID="attachment-draft-progress-slot"
+        >
+          {uploading ? (
+            <View
+              accessibilityRole="progressbar"
+              accessibilityValue={
+                status.percent === null
+                  ? {text: ATTACH_COPY.uploading}
+                  : {min: 0, max: 100, now: status.percent}
+              }
+              style={styles.progressTrack}
+              testID="attachment-draft-progress"
+            >
+              {status.percent === null ? (
+                // 가운데 조각은 왼쪽에서 잰 비율이 아니다. 첫 native 측정 전의
+                // 값 없음(indeterminate)을 빈 트랙이나 0%로 오독하지 않게 한다.
+                <View
+                  style={styles.progressIndeterminate}
+                  testID="attachment-draft-progress-indeterminate"
+                />
+              ) : (
+                <View
+                  style={[styles.progressFill, {width: `${status.percent}%`}]}
+                  testID="attachment-draft-progress-fill"
+                />
+              )}
+            </View>
+          ) : null}
+        </View>
       </View>
       {retryable ? (
         <Pressable
@@ -285,7 +303,7 @@ const buildStyles = (color: Palette) =>
       textDecorationLine: 'underline',
     },
     list: {gap: space.xs},
-    listViewport: {maxHeight: TOUCH_TARGET * 5},
+    listViewport: {maxHeight: ATTACHMENT_TRAY_MAX_HEIGHT},
     draft: {
       minHeight: TOUCH_TARGET,
       flexDirection: 'row',
@@ -323,11 +341,20 @@ const buildStyles = (color: Palette) =>
       color: color.textMuted,
     },
     statusDanger: {color: color.dangerText},
+    progressSlot: {height: space.xs},
     progressTrack: {
-      height: space.xs,
+      height: '100%',
+      width: '100%',
       overflow: 'hidden',
       borderRadius: radius.pill,
       backgroundColor: color.border,
+    },
+    progressIndeterminate: {
+      width: '36%',
+      height: '100%',
+      alignSelf: 'center',
+      borderRadius: radius.pill,
+      backgroundColor: color.accent,
     },
     progressFill: {
       height: '100%',
