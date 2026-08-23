@@ -1,11 +1,11 @@
-import { Download, FileText, ImageIcon, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { FileText, ImageIcon } from "lucide-react";
+import { useRef, useState } from "react";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
-import {
-  downloadAttachment,
-  useAttachmentPreview,
-} from "@/features/attachments/content";
+import { AttachmentDownloadButton } from "@/features/attachments/AttachmentDownloadButton";
+import { useAttachmentPreview } from "@/features/attachments/content";
+import { ImageLightbox } from "@/features/attachments/ImageLightbox";
+import { lightboxAttachments } from "@/features/attachments/imageLightboxModel";
 import {
   ATTACH_COPY,
   attachmentMetaLine,
@@ -48,7 +48,7 @@ import {
  * 버튼 최소**폭** 토큰을 높이로 빌려 썼다).
  */
 const PREVIEW_FRAME_CLASS =
-  "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover";
+  "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover hover:bg-surface-raised focus-visible:focus-ring";
 
 /**
  * 한 줄에 「무엇이」와 「무엇을 할 수 있는가」를 놓는 행.
@@ -72,56 +72,6 @@ function MetaLine({ attachment }: { attachment: MessageAttachment }) {
         {attachmentMetaLine(attachment)}
       </span>
     </span>
-  );
-}
-
-/**
- * 내려받기 하나.
- *
- * **바쁜 버튼은 비활성 버튼이 아니다** (design-review H-1, `tokens.md §5b` 가
- * 이 정확한 실수에 이름을 붙여 뒀다). 앞 판은 `disabled + opacity-50` 만으로
- * 진행을 말했고, 그러면 100MB 짜리를 누른 뒤 수십 초 동안 **흐려진 아이콘이
- * 유일한 신호**이면서 동시에 대비가 2.2:1 로 떨어진다. 이제 대비를 그대로 두고
- * 회전을 신호로 쓰며 `aria-busy` 를 단다. 비활성은 「지금 이걸 할 수 없다」의
- * 언어이고, 여기서는 하고 있는 중이다.
- */
-function DownloadButton({
-  workspaceId,
-  channelId,
-  attachment,
-  onFailed,
-}: {
-  workspaceId: string;
-  channelId: string;
-  attachment: MessageAttachment;
-  onFailed: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  return (
-    <button
-      type="button"
-      aria-busy={busy || undefined}
-      onClick={() => {
-        // 두 번 누르면 두 번 받는다. 막는 대신 같은 요청을 다시 보내지 않게만
-        // 한다 — 비활성화는 포커스를 <body> 로 던지고 돌려주지 않는다(SKILL §6).
-        if (busy) return;
-        setBusy(true);
-        void downloadAttachment(workspaceId, channelId, attachment)
-          .catch(onFailed)
-          .finally(() => setBusy(false));
-      }}
-      aria-label={`${attachment.name} ${ATTACH_COPY.download}`}
-      title={busy ? ATTACH_COPY.downloading : ATTACH_COPY.download}
-      data-testid="attachment-download"
-      data-busy={busy ? "" : undefined}
-      className="touch-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
-    >
-      {busy ? (
-        <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
-      ) : (
-        <Download aria-hidden="true" className="size-4" />
-      )}
-    </button>
   );
 }
 
@@ -153,10 +103,12 @@ function FileCard({
           </span>
         )}
       </span>
-      <DownloadButton
+      <AttachmentDownloadButton
         workspaceId={workspaceId}
         channelId={channelId}
         attachment={attachment}
+        joinsMessageRow
+        onStarted={() => setFailed(false)}
         onFailed={() => setFailed(true)}
       />
     </div>
@@ -167,10 +119,12 @@ function ImageCard({
   workspaceId,
   channelId,
   attachment,
+  onOpen,
 }: {
   workspaceId: string;
   channelId: string;
   attachment: MessageAttachment;
+  onOpen: (opener: HTMLButtonElement) => void;
 }) {
   const [failed, setFailed] = useState(false);
   const preview = useAttachmentPreview(
@@ -186,24 +140,34 @@ function ImageCard({
       data-preview={preview.status}
       className="flex w-fit max-w-pane-lg flex-col gap-1"
     >
-      {preview.status === "ready" ? (
-        <img
-          src={preview.dataUrl}
-          alt={attachment.name}
-          // `self-start` 가 load-bearing 이다. `figure` 는 `flex flex-col` 이고
-          // 그 기본 정렬은 `stretch` 라서, 이것이 없으면 96px 짜리 스크린샷이
-          // 640px 로 늘어나 뭉개진다. 상한만 두고 원래 크기는 그대로 둔다.
-          className="max-h-diff-body max-w-full self-start rounded-md border border-line object-contain"
-        />
-      ) : (
-        <div className={PREVIEW_FRAME_CLASS}>
+      <button
+        type="button"
+        data-row-action=""
+        onClick={(event) => onOpen(event.currentTarget)}
+        aria-label={`${attachment.name} 전체 화면 미리보기 열기`}
+        title="전체 화면 미리보기 열기"
+        className={
+          preview.status === "ready"
+            ? "max-w-full self-start rounded-md focus-visible:focus-ring"
+            : PREVIEW_FRAME_CLASS
+        }
+      >
+        {preview.status === "ready" ? (
+          <img
+            src={preview.dataUrl}
+            alt={attachment.name}
+            // `self-start`가 load-bearing이다. figure는 flex-col이고 기본 정렬은
+            // stretch라, 버튼과 이미지 모두 내용 폭을 지켜야 작은 이미지가 늘지 않는다.
+            className="block max-h-diff-body max-w-full rounded-md border border-line object-contain"
+          />
+        ) : (
           <span className="text-meta text-ink-muted">
             {preview.status === "loading"
               ? ATTACH_COPY.previewLoading
               : ATTACH_COPY.previewFailed}
           </span>
-        </div>
-      )}
+        )}
+      </button>
       {/* 카드와 **같은 행**이다 (design-review H-2): 왼쪽에 이름과 메타, 오른쪽
           끝에 같은 버튼. 두 모양 사이를 오갈 때 같은 동작을 두 번 찾지 않는다. */}
       <figcaption className={ACTION_ROW_CLASS}>
@@ -215,10 +179,12 @@ function ImageCard({
             </span>
           )}
         </span>
-        <DownloadButton
+        <AttachmentDownloadButton
           workspaceId={workspaceId}
           channelId={channelId}
           attachment={attachment}
+          joinsMessageRow
+          onStarted={() => setFailed(false)}
           onFailed={() => setFailed(true)}
         />
       </figcaption>
@@ -245,30 +211,60 @@ export function AttachmentList({
 }) {
   // 워크스페이스는 셸이 이미 알고 있다. 타임라인 전체에 프롭으로 흘려보내는 대신
   // 여기서 읽는다 — `Composer` 가 같은 값을 같은 방법으로 읽는다.
-  const { workspaceId } = useSession();
+  const { workspaceId, connStatus } = useSession();
+  const [lightbox, setLightbox] = useState<{
+    attachmentId: string;
+  } | null>(null);
+  // 닫힘 state를 먼저 반영해도 opener 자체는 남아 있어야 Radix의 closeAutoFocus가
+  // WebKit에서도 원래 미리보기 버튼으로 돌아간다(dialog.tsx의 명시 opener 계약).
+  const lightboxOpener = useRef<HTMLButtonElement | null>(null);
+  const images = lightboxAttachments(attachments);
   if (attachments.length === 0) return null;
   return (
-    <ul
-      className={cn("mt-1 flex flex-col gap-1", muted && "opacity-70")}
-      data-testid="attachment-list"
-    >
-      {attachments.map((attachment) => (
-        <li key={attachment.id} className="min-w-0">
-          {showsInlinePreview(attachment) ? (
-            <ImageCard
-              workspaceId={workspaceId}
-              channelId={channelId}
-              attachment={attachment}
-            />
-          ) : (
-            <FileCard
-              workspaceId={workspaceId}
-              channelId={channelId}
-              attachment={attachment}
-            />
-          )}
-        </li>
-      ))}
-    </ul>
+    <>
+      <ul
+        className={cn("mt-1 flex flex-col gap-1", muted && "opacity-70")}
+        data-testid="attachment-list"
+      >
+        {attachments.map((attachment) => (
+          <li key={attachment.id} className="min-w-0">
+            {showsInlinePreview(attachment) ? (
+              <ImageCard
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={attachment}
+                onOpen={(opener) => {
+                  lightboxOpener.current = opener;
+                  setLightbox({ attachmentId: attachment.id });
+                }}
+              />
+            ) : (
+              <FileCard
+                workspaceId={workspaceId}
+                channelId={channelId}
+                attachment={attachment}
+              />
+            )}
+          </li>
+        ))}
+      </ul>
+      <ImageLightbox
+        open={lightbox !== null}
+        workspaceId={workspaceId}
+        channelId={channelId}
+        images={images}
+        selectedId={lightbox?.attachmentId ?? null}
+        opener={lightboxOpener.current}
+        offline={connStatus === "disconnected"}
+        onSelect={(attachmentId) =>
+          setLightbox((current) =>
+            current === null ? null : { ...current, attachmentId }
+          )
+        }
+        onOpenChange={(open) => {
+          if (!open) setLightbox(null);
+        }}
+      />
+    </>
   );
 }

@@ -15,6 +15,11 @@
 - 코어 markdown `Inline`에 원문 바이트와 case-folded handle을 보존하는 mention 노드를 추가하고, 기존 라우팅과 공유하는 경계/handle 문법으로 코드·이메일·미완성 `@`를 평문에 남겼다. safeHref와 기존 노드 의미론은 불변이다.
 - 웹·폰 타임라인은 활성 directory 멤버만 accent로 그리고 내 멘션에는 accent-soft/accentSurface를 더한다. 코어·웹·폰 전체 스위트와 양 palette 단정, 웹 디자인 preflight는 green. `runtime-unverified(browser/device visual gate)`: 오케스트레이터 실행 범위로 위임했다.
 
+## U-3 웹 이미지 라이트박스 + 다운로드 정밀도 (#1686, 2026-08-23)
+
+- 인라인 이미지가 프로그램매틱 Dialog 라이트박스로 열리고, 한 메시지의 안전한 이미지 사이를 버튼·좌우 화살표로 순환한다. 빈·로딩·오류·오프라인/캐시 유지, aria, Esc 층, 명시 opener 포커스 복귀를 단위 계약으로 고정했다.
+- 다운로드 인가 프록시는 완료된 `Blob`만 반환하고 진행 이벤트·전체 바이트를 노출하지 않아 거짓 퍼센트를 만들지 않고 기존 스피너를 공유했다. `runtime-unverified(browser interaction gate)`: 계약에 따라 브라우저 게이트는 오케스트레이터가 수행한다.
+
 ## iOS 첨부 렌더·다운로드 + 멤버 프로필 (#1681, 2026-08-23)
 
 - 모바일 타임라인이 `Message.attachments` 전부를 3상태 고정 프레임/안전한 SVG 파일 카드로 렌더하고, 기존 ExpoFileSystem으로 인가 프록시를 캐시에 스트리밍한 뒤 iOS 공유시트를 연다. 실패·재시도·진행률과 인용 원본 첨부 수 표식을 포함해 조용한 유실을 회귀 단정했다.
