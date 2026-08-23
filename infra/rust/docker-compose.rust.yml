@@ -391,6 +391,8 @@ services:
       WEBHOOK_SENDER_CLAIM_BATCH: ${WEBHOOK_SENDER_CLAIM_BATCH:-16}
       WEBHOOK_SENDER_MAX_ATTEMPTS: ${WEBHOOK_SENDER_MAX_ATTEMPTS:-8}
       WEBHOOK_DISABLE_AFTER_5XX: ${WEBHOOK_DISABLE_AFTER_5XX:-5}
+      # ADR-0170: opt-in. Unset/0 means the unfurl drain is idle (no egress).
+      MOMO_UNFURL_ENABLED: ${MOMO_UNFURL_ENABLED:-0}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

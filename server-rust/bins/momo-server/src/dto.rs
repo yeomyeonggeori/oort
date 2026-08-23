@@ -3660,6 +3660,53 @@ impl UpdateEventSubscriptionRequest {
     }
 }
 
+// ---------------------------------------------------------------------------
+// ADR-0170 link unfurl (server half)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnfurlSettingsResponse {
+    pub enabled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PutUnfurlSettingsRequest {
+    pub enabled: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageUnfurlDto {
+    pub id: String,
+    pub message_id: String,
+    pub url: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub domain: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessageUnfurlListResponse {
+    pub unfurls: Vec<MessageUnfurlDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoveUnfurlsResponse {
+    pub removed: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

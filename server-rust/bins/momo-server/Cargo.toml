@@ -69,6 +69,10 @@ momo-wire = { path = "../../crates/momo-wire" }
 # client so this manifest does not, and its whole API takes a sealed
 # `EphemeralSignal`, so no handler can publish anything else anywhere else.
 momo-ephemeral = { path = "../../crates/momo-ephemeral" }
+# ADR-0170: the crate owns the HTTP client (SSRF-guarded GET + image proxy
+# fetch) so this manifest still does not. Handlers only call sealed
+# settings/remove/list/proxy functions.
+momo-unfurl = { path = "../../crates/momo-unfurl" }
 
 axum.workspace = true
 tokio = { workspace = true, features = ["net", "signal", "time"] }
