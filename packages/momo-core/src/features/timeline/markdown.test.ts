@@ -47,6 +47,47 @@ describe("safeHref", () => {
 });
 
 describe("parseInline", () => {
+  it("reads mention tokens with authored bytes and a case-folded handle", () => {
+    expect(parseInline("@Hermes와 @kim-intern 에게")).toEqual([
+      { kind: "mention", handle: "hermes", raw: "@Hermes" },
+      text("와 "),
+      { kind: "mention", handle: "kim-intern", raw: "@kim-intern" },
+      text(" 에게"),
+    ]);
+    expect(parseInline("**@Hermes 확인**")).toEqual([
+      {
+        kind: "strong",
+        children: [
+          { kind: "mention", handle: "hermes", raw: "@Hermes" },
+          text(" 확인"),
+        ],
+      },
+    ]);
+  });
+
+  it("keeps unmatched at-sign forms as literal text", () => {
+    for (const body of [
+      "person@example.com",
+      "앞(@hermes)뒤",
+      "@",
+      "@김인턴",
+      "문장@hermes",
+    ]) {
+      expect(parseInline(body), body).toEqual([text(body)]);
+    }
+  });
+
+  it("keeps mention-looking text literal inside code", () => {
+    expect(parseInline("`@hermes` @hermes")).toEqual([
+      { kind: "code", text: "@hermes" },
+      text(" "),
+      { kind: "mention", handle: "hermes", raw: "@hermes" },
+    ]);
+    expect(parseMarkdown("```\n@hermes\n```")).toEqual([
+      { kind: "code", text: "@hermes", lang: null },
+    ]);
+  });
+
   it("reads bold, italic and code", () => {
     expect(parseInline("**굵게** 그리고 *soon* 그리고 `코드`")).toEqual([
       { kind: "strong", children: [text("굵게")] },
@@ -338,6 +379,8 @@ describe("parseMarkdown", () => {
 describe("isPlainText", () => {
   it("passes an ordinary sentence and stops at any markup", () => {
     expect(isPlainText("배포 끝났습니다. 로그 확인 부탁해요.")).toBe(true);
+    expect(isPlainText("person@example.com 과 @김인턴")).toBe(true);
+    expect(isPlainText("@hermes 확인 부탁해요.")).toBe(false);
     expect(isPlainText("**굵게**")).toBe(false);
     expect(isPlainText("`코드`")).toBe(false);
     expect(isPlainText("- 항목")).toBe(false);

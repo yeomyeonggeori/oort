@@ -21,17 +21,21 @@
 //   * tables, footnotes, html — a message body is prose, a list, or code.
 //
 // The grammar is what agents actually emit and what people actually type:
-// **bold**, *italic*, `code`, ``` fences, - / 1. lists, [text](url), and bare
-// http(s) links. Anything unmatched stays literal text, which is the only safe
-// failure mode for a parser reading other people's writing: an unclosed ** is a
-// pair of asterisks, never a swallowed rest-of-message.
+// **bold**, *italic*, `code`, ``` fences, - / 1. lists, [text](url), bare
+// http(s) links, and syntactic @mentions. Anything unmatched stays literal
+// text, which is the only safe failure mode for a parser reading other people's
+// writing: an unclosed ** is a pair of asterisks, never a swallowed
+// rest-of-message.
 // =============================================================================
+
+import { mentionTokenAt } from "../routing/mentionSyntax";
 
 export type Inline =
   | { kind: "text"; text: string }
   | { kind: "strong"; children: Inline[] }
   | { kind: "em"; children: Inline[] }
   | { kind: "code"; text: string }
+  | { kind: "mention"; handle: string; raw: string }
   | { kind: "link"; href: string; children: Inline[] };
 
 export type Block =
@@ -206,6 +210,20 @@ export function parseInline(source: string, depth = 0): Inline[] {
           i += raw.length;
           continue;
         }
+      }
+    }
+
+    if (char === "@") {
+      const mention = mentionTokenAt(source, i);
+      if (mention !== null) {
+        flush();
+        out.push({
+          kind: "mention",
+          handle: mention.handle,
+          raw: mention.raw,
+        });
+        i = mention.end;
+        continue;
       }
     }
 
@@ -401,5 +419,11 @@ export function parseMarkdown(source: string): Block[] {
  * sentence must not start paying for a tree walk, and must not change shape.
  */
 export function isPlainText(source: string): boolean {
-  return !/[`*_[\]]|^\s{0,3}([1-9]\d{0,2}[.)]|[-*+])\s|https?:\/\//m.test(source);
+  if (/[`*_[\]]|^\s{0,3}([1-9]\d{0,2}[.)]|[-*+])\s|https?:\/\//m.test(source)) {
+    return false;
+  }
+  for (let at = source.indexOf("@"); at >= 0; at = source.indexOf("@", at + 1)) {
+    if (mentionTokenAt(source, at) !== null) return false;
+  }
+  return true;
 }

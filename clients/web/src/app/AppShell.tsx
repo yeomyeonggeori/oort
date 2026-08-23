@@ -26,6 +26,7 @@ import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
+import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
@@ -204,8 +205,8 @@ export function AppShell({
        * piece of state and no entry point can go stale (MOMO-614). The provider
        * wraps the switcher too, because the palette is the house keyboard path
        * to every action and this one had no seat in it. */}
-      {/* 에이전트 프로필도 같은 규칙이다(MOMO-626): 디렉터리 행, 타임라인의
-       * 에이전트 이름, 컴포저의 멘션 줄 셋이 하나의 다이얼로그를 연다. 진입점
+      {/* 에이전트 라우팅도 같은 규칙이다(MOMO-626): 공용 멤버 프로필의 보조 액션,
+       * 컴포저의 멘션 줄과 ⌘K가 하나의 다이얼로그를 연다. 진입점
        * 마다 다이얼로그를 두면 폼 상태가 세 벌이 되고 그중 하나는 낡는다. */}
       <ShellNavProvider value={{ isMobile, drawerOpen, openDrawer, closeDrawer }}>
       <CreateChannelProvider>
@@ -220,6 +221,7 @@ export function AppShell({
          * `packages/momo-core/src/features/timeline/model.ts` 머리말이다.) */}
         <AddChannelMemberProvider>
         <AgentProfileProvider>
+        <MemberProfileProvider>
           <div
             className="app-shell"
             data-sidebar-collapsed={sidebarPaneCollapsed ? "" : undefined}
@@ -312,6 +314,7 @@ export function AppShell({
           {!stress && turnFixture === null && <AgentWorkingRail />}
           {turnFixture !== null && <AgentTurnFixture mode={turnFixture} />}
           <QuickSwitcher open={switcherOpen} onOpenChange={setSwitcherOpen} />
+        </MemberProfileProvider>
         </AgentProfileProvider>
         </AddChannelMemberProvider>
       </AddWorkspaceProvider>

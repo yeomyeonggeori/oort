@@ -4,18 +4,20 @@
 // 이 게이트가 지키는 것은 헤더가 그려지는지가 아니라 **헤더가 하는 말과 각 액션이
 // 서버 진실을 따르는가**다.
 //
-//   1. 인원수는 숫자다   헤더의 멤버 표시는 이름 나열이 아니라 사람 아이콘과
-//                        인원수다. 수는 명부에서 이 채널의 멤버를 세어 얻는다.
-//   2. 이름이 메뉴다     채널 이름을 누르면 채널을 다루는 메뉴가 선다. 항목은
+//   1. 토픽은 읽힌다     긴 토픽은 헤더 한 줄에서 줄지만, 클릭·Enter로 연
+//                        다이얼로그에는 서버가 준 전체 문장이 선다.
+//   2. 인원수는 목록이다 헤더의 멤버 표시는 숫자 버튼이고, 사람·에이전트 목록과
+//                        기존 멤버 추가 다이얼로그로 이어진다. 좁은 폭에서도 남는다.
+//   3. 이름이 메뉴다     채널 이름을 누르면 채널을 다루는 메뉴가 선다. 항목은
 //                        알림 끄기/켜기와 채널 나가기 둘뿐이다 — 「이름 수정」은
 //                        서버 라우트가 없어(2026-08-10 실측) 그리지 않는다.
-//   3. 낱말은 상태다     알림을 끄면 다음에 여는 메뉴의 낱말이 「켜기」로 뒤집힌다.
+//   4. 낱말은 상태다     알림을 끄면 다음에 여는 메뉴의 낱말이 「켜기」로 뒤집힌다.
 //                        그 뒤집힘은 낙관적 추측이 아니라 서버가 저장한 muted를
 //                        다시 읽은 결과다.
-//   4. 나가기는 파괴다    「채널 나가기」는 확인 다이얼로그를 거쳐 DELETE를 보내고,
+//   5. 나가기는 파괴다    「채널 나가기」는 확인 다이얼로그를 거쳐 DELETE를 보내고,
 //                        성공하면 그 채널을 떠난다. 낙관적으로 지운 목록은 실패
 //                        하면 되돌아온다.
-//   5. 권한 없는 문은 안 연다  서버 `remove_member`는 오너/관리자만 멤버십을 지울
+//   6. 권한 없는 문은 안 연다  서버 `remove_member`는 오너/관리자만 멤버십을 지울
 //                        수 있으므로, 일반 멤버의 메뉴에는 「나가기」가 아예 서지
 //                        않는다(확인 뒤 403으로 끝나는 막다른 길을 만들지 않는다).
 //
@@ -75,7 +77,16 @@ const origin = `http://127.0.0.1:${port}`;
 const workspaceId = "00000000-0000-7000-8000-000000000001";
 const ownerId = "00000000-0000-7000-8000-000000000101";
 const peerId = "00000000-0000-7000-8000-000000000102";
+const agentId = "00000000-0000-7000-8000-000000000103";
 const channelId = "00000000-0000-7000-8000-000000000201";
+// 서버가 저장하는 토픽은 이미 다듬어져 있고(CreateChannelInput.topic 주석),
+// 클라이언트는 normalizeChannelTopic(=trim)을 한 번 더 걸어 방어한다. 그래서
+// 이 상수도 정규화된 형태여야 한다 — 끝 공백을 달고 원본과 비교하면 컴포넌트의
+// 정당한 trim이 게이트에서 거짓 실패로 읽힌다.
+const CHANNEL_TOPIC = (
+  "release-2026-08 운영 토픽: 온콜 교대, 배포 판단, 고객 영향, 롤백 조건을 이 채널에서 함께 기록합니다. " +
+  "긴 문장도 헤더의 다른 컨트롤을 밀어내지 않으며, 전체 내용은 키보드로 열어 읽을 수 있어야 합니다. ".repeat(2)
+).trim();
 
 function session(memberId, displayName, handle) {
   return {
@@ -111,11 +122,26 @@ function roster(selfRole) {
       handle: "seongjae",
     }),
     member({ id: peerId, kind: "human", displayName: "이도현", handle: "dohyun" }),
+    member({
+      id: agentId,
+      kind: "agent",
+      displayName: "김인턴",
+      handle: "kim-intern",
+      ownerHumanId: ownerId,
+      agentModel: "gpt-5.6",
+    }),
   ];
 }
 
 function channelRow(muted) {
-  return { id: channelId, workspaceId, kind: "public", name: "release-2026-08", muted };
+  return {
+    id: channelId,
+    workspaceId,
+    kind: "public",
+    name: "release-2026-08",
+    topic: CHANNEL_TOPIC,
+    muted,
+  };
 }
 
 const AT = 1_785_238_400_000;
@@ -199,7 +225,12 @@ async function installRealtimeSocket(page) {
 }
 
 function makeTraffic() {
-  return { mutePuts: [], memberDeletes: [] };
+  return {
+    mutePuts: [],
+    memberDeletes: [],
+    rosterAttempts: 0,
+    releaseRoster: null,
+  };
 }
 
 /**
@@ -207,6 +238,7 @@ function makeTraffic() {
  */
 async function installRoutes(context, traffic, options = {}) {
   const selfRole = options.selfRole ?? "owner";
+  const rosterScenario = options.rosterScenario ?? "ready";
   // 서버 진실의 그림자: 알림을 끄면 여기서 뒤집히고, 나가면 목록에서 빠진다.
   let muted = false;
   let left = false;
@@ -269,7 +301,22 @@ async function installRoutes(context, traffic, options = {}) {
       });
     }
 
-    if (path.endsWith("/roster") || path.endsWith("/members")) {
+    if (path.endsWith("/roster") || (path.endsWith("/members") && method === "GET")) {
+      traffic.rosterAttempts += 1;
+      if (rosterScenario === "loading" && traffic.rosterAttempts === 1) {
+        await new Promise((resolveRoster) => {
+          traffic.releaseRoster = resolveRoster;
+        });
+      }
+      // QueryClient의 retry:1 두 번까지 실패시키고, 패널의 「다시 시도」가 만든
+      // 셋째 요청에서 회복한다. 자동 재시도가 실패 표면을 지워 버리지 못하게 한다.
+      if (rosterScenario === "failed-retry" && traffic.rosterAttempts <= 2) {
+        return json(
+          route,
+          { error: { code: "unavailable", message: "roster unavailable" } },
+          503
+        );
+      }
       return json(route, { members: roster(selfRole) });
     }
     if (path.endsWith("/channels")) {
@@ -316,7 +363,31 @@ async function exercise(browser) {
   await installRoutes(context, traffic, { selfRole: "owner" });
   await login(page);
 
-  // ---- 1. 인원수는 숫자다 ----------------------------------------------------
+  // ---- 1. 토픽은 한 줄로 줄고, 전체 문장은 키보드로 읽힌다 --------------------
+  const topic = page.getByTestId("channel-topic");
+  if ((await topic.count()) !== 1 || (await topic.textContent()) !== CHANNEL_TOPIC) {
+    throw new Error("the channel topic was not rendered from the channel response");
+  }
+  const topicIsTruncated = await topic.evaluate(
+    (node) => node.scrollWidth > node.clientWidth
+  );
+  if (!topicIsTruncated) {
+    throw new Error("the long channel topic did not truncate inside the header");
+  }
+  await topic.focus();
+  await page.keyboard.press("Enter");
+  const topicDialog = page.getByTestId("channel-topic-dialog");
+  await topicDialog.waitFor();
+  if ((await page.getByTestId("channel-topic-full").textContent()) !== CHANNEL_TOPIC) {
+    throw new Error("the topic dialog did not expose the full channel topic");
+  }
+  await page.keyboard.press("Escape");
+  await topicDialog.waitFor({ state: "detached" });
+  if (!(await topic.evaluate((node) => node === document.activeElement))) {
+    throw new Error("closing the topic dialog with Escape did not return focus to its trigger");
+  }
+
+  // ---- 2. 인원수는 숫자 버튼이고, 목록·추가 경로로 이어진다 --------------------
   if (proveRedCount) {
     // red seam: DOM에서 인원수 노드를 걷어낸다. 단언이 화면을 보고 있다면 깨진다.
     await page.evaluate(() => {
@@ -329,21 +400,85 @@ async function exercise(browser) {
       "the member count node was not read from the DOM — the header must show 사람 아이콘 + 인원수"
     );
   }
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="channel-member-count"]')
+        ?.getAttribute("data-roster-status") === "ready",
+    undefined,
+    { timeout: 6_000 }
+  );
   const countText = ((await countNode.textContent()) ?? "").trim();
-  if (countText !== "2") {
+  if (countText !== "3") {
     throw new Error(
-      `the member count must be the roster's count of this channel (2), read "${countText}"`
+      `the member count must be the roster's count of this channel (3), read "${countText}"`
     );
   }
-  const countLabel =
-    (await countNode.locator("[aria-label]").getAttribute("aria-label")) ?? "";
-  if (!countLabel.includes("2")) {
+  const countLabel = (await countNode.getAttribute("aria-label")) ?? "";
+  if (!countLabel.includes("3")) {
     throw new Error(
       `the count needs an accessible name carrying the number, read "${countLabel}"`
     );
   }
 
-  // ---- 2. 이름이 메뉴다, 그리고 「이름 수정」은 없다 ---------------------------
+  await countNode.focus();
+  await page.keyboard.press("Enter");
+  const memberPanel = page.getByTestId("channel-member-panel");
+  await memberPanel.waitFor();
+  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
+    throw new Error("the member panel did not render the same three rows the count names");
+  }
+  const agentRow = page.locator(
+    '[data-testid="channel-member-item"][data-member-kind="agent"]'
+  );
+  if ((await agentRow.count()) !== 1 || !((await agentRow.textContent()) ?? "").includes("에이전트")) {
+    throw new Error("the member panel did not distinguish the agent row in text");
+  }
+  await page.keyboard.press("Escape");
+  await memberPanel.waitFor({ state: "detached" });
+  if (!(await countNode.evaluate((node) => node === document.activeElement))) {
+    throw new Error("closing the member panel with Escape did not return focus to the count");
+  }
+
+  // 오프라인은 실패와 다른 넷째 상태다. 마지막으로 받은 세 행은 계속 읽히고,
+  // 재연결 전에는 같은 요청을 반복하라는 버튼 대신 연결 사실을 인라인으로 말한다.
+  await page.evaluate(() => window.dispatchEvent(new Event("offline")));
+  await countNode.click();
+  await page.getByTestId("channel-member-offline").waitFor();
+  if ((await page.getByTestId("channel-member-item").count()) !== 3) {
+    throw new Error("the offline member panel hid the last received roster");
+  }
+  if ((await page.getByTestId("channel-member-failed").count()) !== 0) {
+    throw new Error("the offline member panel mislabeled disconnection as a retryable failure");
+  }
+  await page.keyboard.press("Escape");
+  await memberPanel.waitFor({ state: "detached" });
+  await page.evaluate(() => window.dispatchEvent(new Event("online")));
+
+  // The old `wide-only` count disappeared below 600px. Both context controls
+  // remain reachable now, and the header still does not widen the document.
+  await page.setViewportSize({ width: 390, height: 844 });
+  if (!(await countNode.isVisible()) || !(await topic.isVisible())) {
+    throw new Error("topic or member access disappeared at the narrow viewport");
+  }
+  const horizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth
+  );
+  if (horizontalOverflow) {
+    throw new Error("the channel context controls widened the narrow document");
+  }
+  await page.setViewportSize({ width: 1280, height: 900 });
+
+  // The panel's action reuses the one shell-owned add-member dialog.
+  await countNode.click();
+  await memberPanel.waitFor();
+  await page.getByTestId("channel-member-add").click();
+  const addDialog = page.getByTestId("add-channel-member-dialog");
+  await addDialog.waitFor();
+  await page.getByTestId("add-member-close").click();
+  await addDialog.waitFor({ state: "detached" });
+
+  // ---- 3. 이름이 메뉴다, 그리고 「이름 수정」은 없다 ---------------------------
   await openMenu(page);
   if (proveRedRename) {
     // red seam: 메뉴에 가짜 「이름 수정」 항목을 끼운다. 「rename 없음」 단언이
@@ -373,7 +508,7 @@ async function exercise(browser) {
     throw new Error("an owner must be offered 채널 나가기");
   }
 
-  // ---- 3. 낱말은 상태다: 알림을 끄면 다음에 여는 낱말이 뒤집힌다 --------------
+  // ---- 4. 낱말은 상태다: 알림을 끄면 다음에 여는 낱말이 뒤집힌다 --------------
   await muteItem.click();
   await page.getByTestId("channel-title-menu-content").waitFor({ state: "detached" });
   if (traffic.mutePuts.length !== 1 || traffic.mutePuts[0].muted !== true) {
@@ -408,7 +543,7 @@ async function exercise(browser) {
   await page.keyboard.press("Escape");
   await page.getByTestId("channel-title-menu-content").waitFor({ state: "detached" });
 
-  // ---- 4. 나가기는 파괴다: 확인 → DELETE → 채널을 떠난다 ----------------------
+  // ---- 5. 나가기는 파괴다: 확인 → DELETE → 채널을 떠난다 ----------------------
   await openMenu(page);
   await page.getByTestId("channel-leave").click();
   await page.getByTestId("channel-leave-confirm").waitFor();
@@ -442,6 +577,92 @@ async function exercise(browser) {
   }
 
   await context.close();
+}
+
+/**
+ * PinListMenu의 세 상태 문법을 멤버 목록도 지킨다. 첫 로스터 요청을 붙들어 실제
+ * 로딩 막대를 보고, 다른 컨텍스트에서는 자동 재시도까지 실패시킨 뒤 패널 안의
+ * 「다시 시도」가 목록을 회복하는지 본다.
+ */
+async function exerciseRosterStates(browser) {
+  const loadingTraffic = makeTraffic();
+  const loadingContext = await browser.newContext({
+    viewport: { width: 900, height: 760 },
+    reducedMotion: "reduce",
+  });
+  const loadingPage = await loadingContext.newPage();
+  await installRealtimeSocket(loadingPage);
+  await installRoutes(loadingContext, loadingTraffic, {
+    selfRole: "owner",
+    rosterScenario: "loading",
+  });
+  await login(loadingPage);
+  const loadingTrigger = loadingPage.getByTestId("channel-member-count");
+  if ((await loadingTrigger.getAttribute("data-roster-status")) !== "loading") {
+    throw new Error("the member trigger did not expose the roster loading state");
+  }
+  await loadingTrigger.click();
+  const loadingPanel = loadingPage.getByTestId("channel-member-panel");
+  await loadingPanel.waitFor();
+  if ((await loadingPanel.getByTestId("skeleton-row").count()) === 0) {
+    throw new Error("the member panel loading state did not preserve its row height");
+  }
+  loadingTraffic.releaseRoster?.();
+  await loadingPage.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="channel-member-panel"]')
+        ?.getAttribute("data-roster-status") === "ready",
+    undefined,
+    { timeout: 6_000 }
+  );
+  if ((await loadingPage.getByTestId("channel-member-item").count()) !== 3) {
+    throw new Error("the member panel did not replace loading rows with the roster");
+  }
+  await loadingContext.close();
+
+  const retryTraffic = makeTraffic();
+  const retryContext = await browser.newContext({
+    viewport: { width: 900, height: 760 },
+    reducedMotion: "reduce",
+  });
+  const retryPage = await retryContext.newPage();
+  await installRealtimeSocket(retryPage);
+  await installRoutes(retryContext, retryTraffic, {
+    selfRole: "owner",
+    rosterScenario: "failed-retry",
+  });
+  await login(retryPage);
+  const retryTrigger = retryPage.getByTestId("channel-member-count");
+  await retryPage.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="channel-member-count"]')
+        ?.getAttribute("data-roster-status") === "failed",
+    undefined,
+    { timeout: 6_000 }
+  );
+  await retryTrigger.click();
+  const failure = retryPage.getByTestId("channel-member-failed");
+  await failure.waitFor();
+  await failure.getByRole("button", { name: "다시 시도" }).click();
+  await retryPage.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="channel-member-panel"]')
+        ?.getAttribute("data-roster-status") === "ready",
+    undefined,
+    { timeout: 6_000 }
+  );
+  if (retryTraffic.rosterAttempts !== 3) {
+    throw new Error(
+      `the inline retry must make the third roster request, saw ${retryTraffic.rosterAttempts}`
+    );
+  }
+  if ((await retryPage.getByTestId("channel-member-item").count()) !== 3) {
+    throw new Error("the inline retry did not recover the member rows");
+  }
+  await retryContext.close();
 }
 
 /**
@@ -487,6 +708,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       await exercise(browser);
+      await exerciseRosterStates(browser);
       await exerciseMemberHidesLeave(browser);
     } finally {
       await browser.close();
@@ -494,10 +716,10 @@ async function main() {
   } finally {
     await server.stop();
   }
-  console.log("GATE PASS: 헤더는 인원수를 숫자로 말했고, 채널 이름 메뉴는 알림·나가기");
-  console.log("           둘만 세웠으며(이름 수정 없음), 알림 낱말은 저장된 muted를");
-  console.log("           따라 뒤집혔고, 나가기는 확인·DELETE·이탈로 이어졌으며,");
-  console.log("           일반 멤버에게는 나가기가 서지 않았다.");
+  console.log("GATE PASS: 헤더는 긴 토픽 전체 열람과 좁은 폭 멤버 목록을 열었고,");
+  console.log("           명부 loading/ready/failed+재시도 및 멤버 추가 경로를 닫았다.");
+  console.log("           채널 이름 메뉴는 알림·나가기만 세웠으며(이름 수정 없음),");
+  console.log("           알림은 서버 상태를 따르고 나가기는 확인·DELETE 뒤 이탈했다.");
 }
 
 main().catch((error) => {

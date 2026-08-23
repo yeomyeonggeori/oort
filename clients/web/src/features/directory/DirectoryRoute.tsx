@@ -6,15 +6,15 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { Input } from "@/design/ui/input";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
-import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
+import { useDirectory } from "@/features/workspace/useWorkspace";
 import { CONTENT_CLASS, MemberRow, ROW_CLASS } from "./MemberRow";
 import { countLabel, groupDirectory, hasOtherMembers } from "@momo/core/features/directory/model";
-import { useOpenDm } from "./useOpenDm";
-import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
+import { useOpenMemberProfile } from "./memberProfileContext";
 
 // =============================================================================
 // 멤버 디렉터리 (parity G-3 + G-4). The workspace roster as a list you can read,
-// search and start a conversation from. Agents are in it because agents ARE
+// search and open a profile from. The card then starts a conversation. Agents
+// are in it because agents ARE
 // members (ADR-0131); they are grouped separately only so the two 김인턴 in this
 // workspace, one human and one agent, do not read as duplicates.
 //
@@ -68,16 +68,15 @@ function DirectorySkeleton({ rows = 6 }: { rows?: number }) {
 export function DirectoryRoute() {
   const { session, workspaceId, connStatus } = useSession();
   const rosterQuery = useDirectory(workspaceId);
-  const { pendingMemberId, error: dmError, openDm } = useOpenDm();
-  const openAgentProfile = useOpenAgentProfile();
+  const openMemberProfile = useOpenMemberProfile();
   const [query, setQuery] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const navKey = useLocation().key;
 
   // 이름을 칠 곳에 캐럿을 둔다 (design-taste-web §6: every action has a keyboard
-  // path). ⌘⇧K, the 다이렉트 메시지 헤더의 +, and the 멤버 row all land on this
-  // route to start a DM by typing a name, and landing with focus on <body>
+  // path). ⌘⇧K and the 다이렉트 메시지 헤더의 + land on this route to find a
+  // profile by typing a name, and landing with focus on <body>
   // leaves that name 15 tabs away. Keyed on the navigation, not on mount, so a
   // second ⌘⇧K while the directory is already open focuses again instead of
   // doing nothing.
@@ -114,9 +113,6 @@ export function DirectoryRoute() {
     rosterQuery.directory.members,
     session.member.id
   );
-  const failedMember = dmError
-    ? memberFor(rosterQuery.directory, dmError.memberId)
-    : null;
 
   /** ↑/↓ walks the rows; the search box hands focus down on ArrowDown. */
   const focusRow = useCallback((step: number, from: number | null) => {
@@ -148,10 +144,6 @@ export function DirectoryRoute() {
     [focusRow]
   );
 
-  function startDm(member: RosterMember) {
-    void openDm(member);
-  }
-
   function section(title: string, testId: string, members: RosterMember[]) {
     if (members.length === 0) return null;
     return (
@@ -164,9 +156,9 @@ export function DirectoryRoute() {
               member={member}
               directory={rosterQuery.directory}
               selfMemberId={session.member.id}
-              pending={pendingMemberId === member.id}
-              onOpenDm={startDm}
-              onOpenProfile={(target) => openAgentProfile(target.id)}
+              onOpenProfile={(target, opener) =>
+                openMemberProfile(target.id, opener)
+              }
             />
           ))}
         </ul>
@@ -223,15 +215,6 @@ export function DirectoryRoute() {
         />
       )}
 
-      {dmError && (
-        <InlineBanner
-          message={dmError.message}
-          actionLabel={failedMember ? "다시 시도" : undefined}
-          onAction={failedMember ? () => startDm(failedMember) : undefined}
-          testId="directory-dm-error"
-        />
-      )}
-
       <div
         ref={listRef}
         onKeyDown={onListKeyDown}
@@ -250,7 +233,7 @@ export function DirectoryRoute() {
         ) : !hasOthers ? (
           <EmptyInvite
             headline="이 워크스페이스에 아직 다른 멤버가 없습니다."
-            detail="초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 바로 대화를 열 수 있습니다."
+            detail="초대 링크를 만들어 팀을 부르면 여기에 명부가 쌓이고, 각 행에서 프로필과 대화를 열 수 있습니다."
             actions={
               <Button size="sm" asChild>
                 <Link to="/settings?section=members">멤버 초대하기</Link>

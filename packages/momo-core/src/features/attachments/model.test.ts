@@ -233,6 +233,11 @@ describe("failure vocabulary", () => {
       expect(isRetryableIssue(issue)).toBe(true);
       expect(uploadIssueNext(issue)).toBeNull();
     }
+    expect(isRetryableIssue("permission-denied")).toBe(false);
+    expect(uploadIssueNext("permission-denied")).not.toBeNull();
+    // 고르기를 무른 것은 실패가 아니므로 다음 행동을 명령하지 않는다.
+    expect(isRetryableIssue("selection-cancelled")).toBe(false);
+    expect(uploadIssueNext("selection-cancelled")).toBeNull();
   });
 
   it("does not repeat the retry verb in the sentence beside the retry button", () => {
@@ -243,6 +248,8 @@ describe("failure vocabulary", () => {
 
   it("gives every reason a sentence", () => {
     for (const issue of [
+      "selection-cancelled",
+      "permission-denied",
       "too-large",
       "forbidden",
       "no-archive",

@@ -31,6 +31,10 @@
 //  11. 빈 채널의 첫 문이  메시지 0인 채널에서 맨 앞에 서는 액션이 「첫 메시지
 //      이 컴포저다        쓰기」이고, 누르면 캐럿이 이 컴포저에 온다. 멤버 추가는
 //      (#1536)            지워지지 않고 뒤에 서며, 위계는 채움 순서로 잰다.
+//  12. 이모지 삽입은      선택 영역을 바꾸고 surrogate pair 바로 뒤에 캐럿을 둔다.
+//      캐럿을 지킨다       고른 뒤에는 입력창으로 돌아와 이어 쓸 수 있다.
+//  13. 두 컴포저가        스레드도 멘션 목록·Esc 한 층·첨부 진입점을 채널과 같이
+//      같은 내용을 받는다 쓴다. 설정인 모델/강도만 의도적으로 남긴다.
 //
 // 이름 붙은 red proof (전부 CSS/DOM/저장소만 건드린다 — 제품 소스는 그대로다):
 //   COMPOSER_GATE_PROVE_RED_DRAFT=1     "a half-written message did not survive"
@@ -39,6 +43,7 @@
 //   COMPOSER_GATE_PROVE_RED_TOMBSTONE=1 "the fold hides a count it refuses to state"
 //   COMPOSER_GATE_PROVE_RED_STANDIN=1   "a quote into a folded tombstone lands nowhere"
 //   COMPOSER_GATE_PROVE_RED_TAP=1       "a finger cannot reliably hit the fold toggle"
+//   COMPOSER_GATE_PROVE_RED_SPACING=1   "composer footer alignment arithmetic drifted"
 //   COMPOSER_GATE_PROVE_RED_FIRST_ACTION=1
 //     "an empty channel offers no door to the first message" — 실측 F5 당시의
 //     화면 그대로다: 첫 행동 버튼을 DOM에서 걷어내면 멤버 추가 하나만 남는다.
@@ -143,6 +148,7 @@ const proveRedGrow = process.env.COMPOSER_GATE_PROVE_RED_GROW === "1";
 const proveRedTombstone = process.env.COMPOSER_GATE_PROVE_RED_TOMBSTONE === "1";
 const proveRedStandIn = process.env.COMPOSER_GATE_PROVE_RED_STANDIN === "1";
 const proveRedTap = process.env.COMPOSER_GATE_PROVE_RED_TAP === "1";
+const proveRedSpacing = process.env.COMPOSER_GATE_PROVE_RED_SPACING === "1";
 const proveRedFirstAction =
   process.env.COMPOSER_GATE_PROVE_RED_FIRST_ACTION === "1";
 
@@ -634,6 +640,68 @@ async function exerciseComposer(browser) {
     );
   }
 
+  // ---- 12a. 패딩은 취향이 아니라 산술이다 (#1688) --------------------------
+  if (proveRedSpacing) {
+    await page.addStyleTag({
+      content: '[data-testid="composer-hint"]{padding-left:16px!important}',
+    });
+  }
+  const spacing = await page.evaluate(() => {
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const form = input?.closest("form");
+    const hint = document.querySelector('[data-testid="composer-hint"]');
+    if (
+      !(input instanceof HTMLElement) ||
+      !(form instanceof HTMLElement) ||
+      !(hint instanceof HTMLElement)
+    ) {
+      return null;
+    }
+    return {
+      form: Number.parseFloat(getComputedStyle(form).paddingLeft),
+      input: Number.parseFloat(getComputedStyle(input).paddingLeft),
+      hint: Number.parseFloat(getComputedStyle(hint).paddingLeft),
+    };
+  });
+  if (
+    spacing === null ||
+    Math.abs(spacing.hint - (spacing.form + spacing.input)) > 0.1
+  ) {
+    throw new Error(
+      "composer footer alignment arithmetic drifted: 힌트 px-6은 form p-3 + " +
+        `textarea px-3이어야 한다 (${JSON.stringify(spacing)})`
+    );
+  }
+  console.log(
+    `[spacing] hint ${spacing.hint}px = form ${spacing.form}px + input ${spacing.input}px`
+  );
+
+  // ---- 12b. 이모지는 선택 위치에 들어가고 캐럿이 입력으로 돌아온다 ---------
+  await input.fill("앞뒤");
+  await input.evaluate((node) => node.setSelectionRange(1, 1));
+  await page.getByTestId("composer-emoji-trigger").click();
+  await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await page.getByTestId("picker-insert-🎉").click();
+  await wait(100);
+  const inserted = await input.evaluate((node) => ({
+    value: node.value,
+    start: node.selectionStart,
+    end: node.selectionEnd,
+    focused: document.activeElement === node,
+  }));
+  if (
+    inserted.value !== "앞🎉뒤" ||
+    inserted.start !== 3 ||
+    inserted.end !== 3 ||
+    !inserted.focused
+  ) {
+    throw new Error(
+      `이모지 캐럿 삽입이 어긋났다: ${JSON.stringify(inserted)} (기대 앞🎉뒤 @3)`
+    );
+  }
+  console.log("[emoji] 앞|뒤 -> 앞🎉|뒤, 입력창 포커스 복귀");
+  await input.fill("");
+
   // ---- 3. 접힌 줄도 함께 자란다 (진단 H-10) ---------------------------------
   const oneLine = await boxHeight(input);
   if (proveRedGrow) {
@@ -803,6 +871,41 @@ async function exerciseTimeline(browser) {
   await installRoutes(context);
   await login(page);
   await openChannel(page, channelA);
+
+  // ---- 13. 스레드 컴포저 동등성 (#1688) -----------------------------------
+  const threadSource = rowLocator(page, LONG_MSG);
+  await threadSource.scrollIntoViewIfNeeded();
+  await threadSource.hover();
+  await threadSource.getByTestId("message-actions-trigger").click();
+  await page.getByTestId("menu-reply").click();
+  const threadInput = page.getByTestId("thread-composer-input");
+  await threadInput.waitFor({ state: "visible" });
+  if (
+    (await page
+      .locator('[data-testid="thread-composer"] input[type="file"]')
+      .count()) !== 1
+  ) {
+    throw new Error("스레드 컴포저가 공용 첨부 진입점을 잃었다");
+  }
+  await threadInput.fill("@kim");
+  const threadMentions = page.getByTestId("thread-mention-list");
+  await threadMentions.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await threadMentions.waitFor({ state: "hidden" });
+  if ((await page.getByTestId("thread-panel").count()) !== 1) {
+    throw new Error("멘션 목록의 Esc가 아래 스레드 패널까지 함께 닫았다");
+  }
+  await threadInput.fill("");
+  await threadInput.fill("@kim");
+  await threadMentions.waitFor({ state: "visible" });
+  await page.keyboard.press("Tab");
+  if ((await threadInput.inputValue()) !== "@kim-intern ") {
+    throw new Error(
+      `스레드 멘션 확정값이 어긋났다: "${await threadInput.inputValue()}"`
+    );
+  }
+  console.log("[thread] 첨부 진입점 + @kim-intern 멘션 + Esc 한 층");
+  await page.getByTestId("thread-close").click();
 
   // ---- 8. 연속 묘비는 한 줄로 접힌다 (감사 M-1 · 코어 승격) -----------------
   if (proveRedTombstone) {
@@ -1301,7 +1404,8 @@ async function main() {
   console.log("           묘비 넷이 한 줄로 접히고도 그 줄이 몇 개를 대신하는지");
   console.log("           말했으며 그 줄이 인용의 착지점이 되었고, 손가락 타깃과");
   console.log("           아바타가 각자의 바닥선을 넘었으며, 빈 채널의 맨 앞에 선");
-  console.log("           문이 첫 메시지로 열렸다(멤버 추가는 뒤에 그대로 서 있다).");
+  console.log("           문이 첫 메시지로 열렸고, 이모지는 caret에 들어갔으며,");
+  console.log("           스레드도 멘션·첨부를 되찾고 24px 간격을 지켰다.");
 }
 
 await main();

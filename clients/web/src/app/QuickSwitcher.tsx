@@ -40,6 +40,11 @@ import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
+import {
+  OPEN_NEW_DM_SHORTCUT,
+  OPEN_QUICK_SWITCHER_SHORTCUT,
+  OPEN_SETTINGS_SHORTCUT,
+} from "@/app/keyboardShortcuts";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -176,7 +181,6 @@ export function QuickSwitcher({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!event.metaKey && !event.ctrlKey) return;
       // 모달 폼이 떠 있으면 이 셋 중 어느 것도 발화하지 않는다. 팔레트는 폼
       // 위에 겹쳐 뜨면서 캐럿을 가져갔고, 거기서 채널을 고르면 폼을 열어둔 채
       // 다른 채널로 이동했다. ⌘⇧K와 ⌘,도 같은 이유로 같은 사고를 낸다.
@@ -188,18 +192,18 @@ export function QuickSwitcher({
       // where its name promises: at a box you can type a name into. Checked
       // BEFORE ⌘K, because the shifted key still reports as "k" and would
       // otherwise toggle the palette.
-      if (event.shiftKey && event.key.toLowerCase() === "k") {
+      if (OPEN_NEW_DM_SHORTCUT.matches(event)) {
         event.preventDefault();
         onOpenChange(false);
         navigate("/directory");
         return;
       }
-      if (event.key.toLowerCase() === "k") {
+      if (OPEN_QUICK_SWITCHER_SHORTCUT.matches(event)) {
         event.preventDefault();
         onOpenChange(!open);
       }
       // ⌘, opens settings (R-1 §1 keyboard path).
-      if (event.key === ",") {
+      if (OPEN_SETTINGS_SHORTCUT.matches(event)) {
         event.preventDefault();
         navigate("/settings");
       }

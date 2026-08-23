@@ -57,6 +57,8 @@ const ROLE: Record<string, "control" | "container"> = {
   "dialog.tsx": "container",
   // 담는 것. 떠 있는 판이고, 그 안의 항목은 호버/포커스 채움으로 자기를 말한다.
   "dropdown-menu.tsx": "container",
+  // 같은 판을 우클릭 좌표에서 여는 프리미티브. 경계 역할도 dropdown과 같다.
+  "context-menu.tsx": "container",
 };
 
 /** 클래스 문자열 안의 `border-line` (뒤에 `-strong` 이 붙지 않은 것). */

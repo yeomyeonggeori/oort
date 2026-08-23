@@ -8,8 +8,14 @@ import {
   within,
 } from '@testing-library/react-native';
 import React from 'react';
-import {Linking} from 'react-native';
+import {Linking, StyleSheet} from 'react-native';
 
+import {FixedScheme, type ColorScheme} from '../src/design/theme';
+import {
+  darkPalette,
+  lightPalette,
+  type Palette,
+} from '../src/design/tokens';
 import {MessageRow} from '../src/features/conversation/MessageRow';
 import {
   MessageBody,
@@ -61,7 +67,18 @@ function member(over: Partial<RosterMember> & {id: string}): RosterMember {
 const DIRECTORY = makeDirectory([
   member({id: SELF, displayName: '곽성재', handle: 'seongjae'}),
   member({id: OTHER, displayName: '김인턴', handle: 'intern-kim'}),
+  member({
+    id: 'cccccccc-1111-4111-8111-cccccccccccc',
+    displayName: '떠난 멤버',
+    handle: 'gone',
+    status: 'deleted',
+  }),
 ]);
+
+const SCHEMES: ReadonlyArray<readonly [ColorScheme, Palette]> = [
+  ['dark', darkPalette],
+  ['light', lightPalette],
+];
 
 function message(over: Partial<Message> = {}): Message {
   return {
@@ -151,6 +168,49 @@ describe('BL-1 — 산문이 코드 상자가 되지 않는다', () => {
     );
     expect(screen.getByTestId('message-markdown')).toBeTruthy();
     expect(screen.getAllByTestId('message-code-block')).toHaveLength(1);
+  });
+});
+
+describe.each(SCHEMES)('%s — 본문 멘션 렌더', (scheme, palette) => {
+  it('활성 멤버만 accent로 그리고 미매칭 핸들은 원문으로 둔다', () => {
+    const view = render(
+      <FixedScheme scheme={scheme}>
+        <MessageBody
+          body="@intern-kim @missing @gone"
+          directory={DIRECTORY}
+          selfMemberId={SELF}
+        />
+      </FixedScheme>,
+    );
+
+    const mention = StyleSheet.flatten(
+      screen.getByTestId('message-mention').props.style,
+    );
+    expect(mention.color).toBe(palette.accentText);
+    expect(mention.backgroundColor).toBeUndefined();
+    expect(view.queryByTestId('message-self-mention')).toBeNull();
+    expect(JSON.stringify(view.toJSON())).toContain('@missing');
+    expect(JSON.stringify(view.toJSON())).toContain('@gone');
+  });
+
+  it('내 멘션은 accentSurface 채움과 추가 굵기를 얻는다', () => {
+    render(
+      <FixedScheme scheme={scheme}>
+        <MessageBody
+          body="@Seongjae @intern-kim"
+          directory={DIRECTORY}
+          selfMemberId={SELF}
+        />
+      </FixedScheme>,
+    );
+
+    const self = screen.getByTestId('message-self-mention');
+    const style = StyleSheet.flatten(self.props.style);
+    expect(self.props.children).toBe('@Seongjae');
+    expect(style.color).toBe(palette.accentText);
+    expect(style.backgroundColor).toBe(palette.accentSurface);
+    expect(style.fontWeight).toBe('700');
+    expect(screen.getByTestId('message-mention')).toBeTruthy();
   });
 });
 

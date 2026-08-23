@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buttonVariants } from "@/design/ui/button";
-import { cn } from "./cn";
+import { cn, NAMED_MEASURES } from "./cn";
 
 /**
  * The typography roles in tokens.css are custom names, and tailwind-merge only
@@ -106,5 +107,54 @@ describe("Button keeps its label color at every size", () => {
     expect(cn(buttonVariants({ variant: "destructive", size: "sm" }))).toContain(
       "text-on-danger-fill"
     );
+  });
+});
+
+describe("house measures resolve sizing conflicts (lightbox, sheets, pickers)", () => {
+  // 2026-08-23 재연 QA 실측(#1686): `max-w-pane-md`는 하우스 측정명이라 stock
+  // tailwind-merge가 못 알아보고, 나중에 온 `max-w-none`과의 충돌이 해소되지
+  // 않은 채 둘 다 DOM에 남았다. 승자는 스타일시트 순서 — pane-md — 였고,
+  // 전체 화면이어야 할 라이트박스가 512px 스트립으로 렌더됐다. 측정명을
+  // 등록한 뒤에는 크기 충돌의 규칙("나중 클래스가 이긴다")이 pane에도 선다.
+  it("max-w-none evicts max-w-pane-md", () => {
+    expect(cn("max-w-pane-md", "max-w-none")).toBe("max-w-none");
+  });
+
+  it("a later pane measure evicts an earlier one", () => {
+    expect(cn("w-pane-sm", "w-pane-lg")).toBe("w-pane-lg");
+  });
+
+  it("a pane measure and an unrelated axis coexist", () => {
+    expect(cn("max-w-pane-md", "max-h-none")).toBe("max-w-pane-md max-h-none");
+  });
+
+  it("the emoji picker's pane-sm override is now deterministic, not stylesheet luck", () => {
+    // EmojiPickerDialog passes max-w-pane-sm over the dialog base's
+    // max-w-pane-md; before registration both survived to the DOM.
+    expect(cn("max-w-pane-md", "max-w-pane-sm")).toBe("max-w-pane-sm");
+  });
+
+  it("control and action measures resolve the same way", () => {
+    expect(cn("min-w-action-sm", "min-w-action")).toBe("min-w-action");
+    expect(cn("h-control", "h-control-lg")).toBe("h-control-lg");
+  });
+});
+
+describe("NAMED_MEASURES mirrors the canonical word-form spacing vocabulary", () => {
+  // M-1 (design-review): 손 사본 목록은 tokens.css에 이름이 하나 생기는 날
+  // 조용히 낡는다 — 그날 cn은 테스트 전부 초록인 채로 #1686의 실패 모드로
+  // 되돌아간다. 그래서 정본을 읽어 대조한다. `--spacing-px`만 제외 — `w-px`류는
+  // stock Tailwind라 tailwind-merge가 이미 그룹으로 안다.
+  it("matches tokens.css word-form --spacing-* names exactly", () => {
+    const css = readFileSync(
+      fileURLToPath(new URL("../tokens.css", import.meta.url)),
+      "utf8"
+    );
+    const canonical = new Set(
+      [...css.matchAll(/^\s*--spacing-([a-z][a-z-]*):/gm)]
+        .map((m) => m[1])
+        .filter((name) => name !== "px")
+    );
+    expect(new Set(NAMED_MEASURES)).toEqual(canonical);
   });
 });

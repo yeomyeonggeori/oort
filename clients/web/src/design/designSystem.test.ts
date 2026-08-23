@@ -262,7 +262,12 @@ const CONTROL_PRIMITIVES = ["button.tsx", "input.tsx", "select.tsx"] as const;
  * (감사: *"card.tsx·dialog.tsx·dropdown-menu.tsx 도 border-line 이지만 그것들은
  * 컨테이너라 정당하다"*.)
  */
-const CONTAINER_PRIMITIVES = ["card.tsx", "dialog.tsx", "dropdown-menu.tsx"] as const;
+const CONTAINER_PRIMITIVES = [
+  "card.tsx",
+  "context-menu.tsx",
+  "dialog.tsx",
+  "dropdown-menu.tsx",
+] as const;
 
 /**
  * 아직 `--line` 을 든 컨트롤 경계의 **남은 수**. 목록이 아니라 상한이다.

@@ -1,4 +1,10 @@
-import type {RosterMember} from '@momo/core/lib/api';
+import type {MessageAttachment, RosterMember} from '@momo/core/lib/api';
+import {
+  ATTACH_COPY,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  sendBlockCopy,
+  sendBlockReason,
+} from '@momo/core/features/attachments/model';
 import {
   COMPOSER_OFFLINE_COPY,
   composerFieldLabel,
@@ -33,6 +39,20 @@ import {
 } from './mentionQuery';
 import type {QuoteDraft} from '@momo/core/features/timeline/quote';
 import {QuoteDraftBar} from './Quote';
+import {AttachmentPickerSheet} from '../attachments/AttachmentPickerSheet';
+import {AttachmentTray} from '../attachments/AttachmentTray';
+import {
+  addPickedFiles,
+  attachmentSurfaceKey,
+  clearSurface,
+  dropDraft,
+  retryDraft,
+  setPickerIssue,
+  takeSent,
+  useAttachmentSurface,
+  type AttachmentTarget,
+} from '../attachments/draftStore';
+import {pickDocument, pickPhoto} from '../attachments/picker';
 
 // =============================================================================
 // The composer.
@@ -726,6 +746,10 @@ function placeholderCandidates(
  */
 export {COMPOSER_OFFLINE_COPY};
 
+export interface ComposerSendOptions {
+  attachments: MessageAttachment[];
+}
+
 export function Composer({
   channelLabel,
   recipient,
@@ -737,6 +761,7 @@ export function Composer({
   onTyping,
   quote,
   onCancelQuote,
+  attachmentTarget,
   placeholder,
   sendLabel = '보내기',
   inputRef: externalInputRef,
@@ -790,7 +815,9 @@ export function Composer({
    * 않는다 — 이름 없는 자리에 남긴 글은 나중에 누구의 것인지 답할 수 없다.
    */
   draftKey?: string;
-  onSend: (body: string) => void;
+  onSend: (body: string, options?: ComposerSendOptions) => void;
+  /** 일반 대화와 스레드가 서로의 첨부 초안을 보지 않게 하는 자리 이름. */
+  attachmentTarget?: AttachmentTarget;
   /**
    * 자판이 눌렸다 (ADR-0149 「작성 중」).
    *
@@ -853,12 +880,74 @@ export function Composer({
   // 티켓(시트의 **상한**)의 것이 아니다.
   const [caret, setCaret] = useState(0);
   const [mentionOpen, setMentionOpen] = useState(true);
+  const [attachmentPickerOpen, setAttachmentPickerOpen] = useState(false);
   const ownInputRef = useRef<TextInput | null>(null);
   const inputRef = externalInputRef ?? ownInputRef;
   // Mirrors `text` for the caret derivation below without making `onChangeText`
   // depend on it — a changing identity there would rebuild the handler on every
   // keystroke, which is exactly the churn this file is careful about.
   const currentTextRef = useRef(text);
+
+  const attachmentWorkspaceId = attachmentTarget?.workspaceId;
+  const attachmentChannelId = attachmentTarget?.channelId;
+  const attachmentRootId = attachmentTarget?.rootId;
+  const stableAttachmentTarget = useMemo(
+    () =>
+      attachmentWorkspaceId === undefined || attachmentChannelId === undefined
+        ? null
+        : {
+            workspaceId: attachmentWorkspaceId,
+            channelId: attachmentChannelId,
+            ...(attachmentRootId === undefined
+              ? {}
+              : {rootId: attachmentRootId}),
+          },
+    [attachmentWorkspaceId, attachmentChannelId, attachmentRootId],
+  );
+  const attachmentKey = useMemo(
+    () =>
+      stableAttachmentTarget === null
+        ? null
+        : attachmentSurfaceKey(stableAttachmentTarget),
+    [stableAttachmentTarget],
+  );
+  const attachmentSurface = useAttachmentSurface(attachmentKey);
+  const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
+  const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
+
+  // 시트가 **실제로 사라진 뒤에만** 네이티브 picker를 제시한다 (design-review
+  // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
+  // 제시를 거절할 수 있고, 그 실패는 catch에서 'unavailable'로 접혀 **picker가
+  // 열린 적도 없는데 「업로드 실패」가 선다** — 화면이 거짓을 말하는 부류다.
+  // 1차 신호 = Modal onDismiss(iOS가 dismiss 완료를 아는 유일한 곳), 폴백 =
+  // fade 아웃(≈300ms)보다 긴 타이머(Android는 onDismiss가 없다). ref를 비우고
+  // 시작하므로 두 신호가 겹쳐도 제시는 한 번이다.
+  const pendingPickRef = useRef<'photo' | 'file' | null>(null);
+  const runPendingPick = useCallback(async () => {
+    const kind = pendingPickRef.current;
+    if (kind === null) return;
+    pendingPickRef.current = null;
+    if (stableAttachmentTarget === null || attachmentKey === null) return;
+    const outcome = kind === 'photo' ? await pickPhoto() : await pickDocument();
+    if (outcome.kind === 'issue') {
+      setPickerIssue(attachmentKey, outcome.issue);
+      return;
+    }
+    addPickedFiles(attachmentKey, stableAttachmentTarget, outcome.files);
+  }, [attachmentKey, stableAttachmentTarget]);
+
+  const chooseAttachment = useCallback(
+    (kind: 'photo' | 'file') => {
+      if (stableAttachmentTarget === null || attachmentKey === null) return;
+      pendingPickRef.current = kind;
+      setAttachmentPickerOpen(false);
+      setPickerIssue(attachmentKey, null);
+      setTimeout(() => {
+        void runPendingPick();
+      }, 400);
+    },
+    [attachmentKey, stableAttachmentTarget, runPendingPick],
+  );
 
   // 초안 자리도 거울로 든다. 위와 같은 이유다 — `draftKey` 를 `onChangeText` 의
   // 의존성으로 들면 채널을 옮길 때마다 핸들러가 새로 만들어진다.
@@ -954,7 +1043,14 @@ export function Composer({
 
   const submit = useCallback(() => {
     const body = text.trim();
-    if (body === '') return;
+    const hasAttachments = attachmentSurface.drafts.length > 0;
+    if (
+      offline === true ||
+      attachmentBlock !== null ||
+      (body === '' && !hasAttachments)
+    ) {
+      return;
+    }
     // Clear first, send second. The echo row carries the message from here on,
     // including its failure state and its retry; a composer that stays full
     // while its message is visible below reads as if nothing happened.
@@ -967,12 +1063,35 @@ export function Composer({
     if (draftKeyRef.current !== undefined) {
       clearDraft(draftKeyRef.current);
     }
-    onSend(body);
-  }, [text, onSend]);
+    if (attachmentKey === null) {
+      onSend(body);
+      return;
+    }
+    const sent = takeSent(attachmentKey);
+    if (sent.attachments.length === 0) {
+      onSend(body);
+      return;
+    }
+    onSend(body, {attachments: sent.attachments});
+  }, [
+    text,
+    onSend,
+    offline,
+    attachmentBlock,
+    attachmentKey,
+    attachmentSurface.drafts.length,
+  ]);
 
   // 보낼 수 있는가 — 두 조건이고 둘은 다른 종류다. 하나는 「보낼 것이 있는가」,
   // 하나는 「지금 나갈 수 있는가」다.
-  const canSend = text.trim() !== '' && offline !== true;
+  const canSend =
+    offline !== true &&
+    attachmentBlock === null &&
+    (text.trim() !== '' || attachmentSurface.drafts.length > 0);
+  const canAttach =
+    stableAttachmentTarget !== null &&
+    offline !== true &&
+    attachmentSurface.drafts.length < MAX_ATTACHMENTS_PER_MESSAGE;
 
   // ---- 절 예산 (#1479) ------------------------------------------------------
   // 넘겨받은 문장에는 절 경계가 없다(위 머리말). 그때는 절도 프로브도 안 선다.
@@ -1132,6 +1251,20 @@ export function Composer({
         </Text>
       ) : null}
 
+      {attachmentKey === null ? null : (
+        <AttachmentTray
+          drafts={attachmentSurface.drafts}
+          pickerIssue={attachmentSurface.pickerIssue}
+          onRemove={localId => dropDraft(attachmentKey, localId)}
+          onRetry={localId => {
+            if (stableAttachmentTarget !== null) {
+              retryDraft(attachmentKey, stableAttachmentTarget, localId);
+            }
+          }}
+          onClear={() => clearSurface(attachmentKey)}
+        />
+      )}
+
       {/* 입력창 **바로 위**. 지금 쓰고 있는 글이 무엇을 가리키는지는 그 글을
           쓰는 자리에 붙어 있어야 하고, 취소도 거기 있어야 한다 — 들어가는 길만
           있고 나오는 길이 없으면 안 된다(ADR-0148 미결 3). */}
@@ -1168,6 +1301,36 @@ export function Composer({
       )}
 
       <View style={styles.bar}>
+        {stableAttachmentTarget === null ? null : (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={ATTACH_COPY.attach}
+            accessibilityHint={
+              offline
+                ? COMPOSER_OFFLINE_COPY
+                : attachmentSurface.drafts.length >=
+                    MAX_ATTACHMENTS_PER_MESSAGE
+                  ? `첨부는 ${MAX_ATTACHMENTS_PER_MESSAGE}개까지 고를 수 있습니다`
+                  : undefined
+            }
+            accessibilityState={{disabled: !canAttach}}
+            disabled={!canAttach}
+            onPress={() => setAttachmentPickerOpen(true)}
+            style={({pressed}) => [
+              styles.attach,
+              !canAttach && styles.attachDisabled,
+              pressed && canAttach && styles.pressed,
+            ]}
+            testID="composer-attach">
+            <Text
+              style={[
+                styles.attachLabel,
+                !canAttach && styles.attachLabelDisabled,
+              ]}>
+              ＋
+            </Text>
+          </Pressable>
+        )}
         <TextInput
           ref={inputRef}
           style={[styles.input, {maxHeight}]}
@@ -1250,7 +1413,9 @@ export function Composer({
           // 흐려진 버튼 앞에서 **왜** 흐린지는 화면을 보지 않는 사람에게 특히
           // 안 들린다. 위의 문장은 별개의 요소라 순서대로 훑어야 닿는데, 버튼에
           // 먼저 도착하는 길(로터·직접 탐색)이 있다. 이유는 버튼이 함께 든다.
-          accessibilityHint={offline ? COMPOSER_OFFLINE_COPY : undefined}
+          accessibilityHint={
+            offline ? COMPOSER_OFFLINE_COPY : attachmentBlockCopy ?? undefined
+          }
           accessibilityState={{disabled: !canSend}}
           disabled={!canSend}
           onPress={submit}
@@ -1265,6 +1430,13 @@ export function Composer({
           </Text>
         </Pressable>
       </View>
+      <AttachmentPickerSheet
+        visible={attachmentPickerOpen}
+        onClose={() => setAttachmentPickerOpen(false)}
+        onPickPhoto={() => chooseAttachment('photo')}
+        onPickFile={() => chooseAttachment('file')}
+        onDismissed={() => void runPendingPick()}
+      />
     </View>
   );
 }
@@ -1282,6 +1454,19 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     paddingHorizontal: SAFE_GUTTER,
     paddingVertical: space.sm,
   },
+  attach: {
+    width: TOUCH_TARGET,
+    height: TOUCH_TARGET,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+  },
+  attachDisabled: {backgroundColor: color.bg},
+  attachLabel: {fontSize: font.title, color: color.text},
+  attachLabelDisabled: {color: color.textFaint},
   input: {
     flex: 1,
     // 한 줄일 때도 엄지가 닿는 크기. 도출된 한 줄 상자(22 + 8·8 + 1·1 = 40)보다

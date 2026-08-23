@@ -1,4 +1,5 @@
 import {
+  Copy,
   MessageSquareReply,
   MoreHorizontal,
   Pencil,
@@ -8,6 +9,7 @@ import {
   Smile,
   Trash2,
 } from "lucide-react";
+import { useState } from "react";
 import { cn } from "@/design/lib/cn";
 import {
   Dialog,
@@ -16,6 +18,13 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from "@/design/ui/context-menu";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -23,17 +32,18 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { Button } from "@/design/ui/button";
-import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
+import { useEscapeLayer } from "@/design/ui/escapeLayer";
 
 // =============================================================================
 // The message action surfaces (B11).
 //
-// One set of actions, two surfaces, split by **what the input device can do**
+// One set of actions, three summons, split by **what the input device can do**
 // rather than by how wide the window is:
 //
 //   * **a pointer that can hover** - a ⋯ trigger appears in the row's own
-//     gutter and opens a menu. One control, therefore one tab stop; the menu
-//     carries every action. R1 shipped a six-button bar here and it failed
+//     gutter and opens a menu, while right-click opens the same inventory at
+//     the pointer. A text selection yields to the browser's native menu. One
+//     visible control, therefore one tab stop. R1 shipped a six-button bar and failed
 //     twice over: `opacity-0` hides a button from the eye but not from Tab
 //     (up to ~150 tab stops between the timeline and the composer in a
 //     virtualized list), and skill §6 puts row-level actions in a menu, not in
@@ -55,9 +65,13 @@ import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 // so these are affordances, not access control.
 // =============================================================================
 
-import { hasAnyAction, type MessageActionAvailability } from "@momo/core/features/timeline/model";
-import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
-import { pinActionLabel } from "@momo/core/features/timeline/pins";
+import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
+import {
+  messageActionItems,
+  messageActionItemsForSurface,
+  type MessageActionItem,
+  type MessageActionItemKey,
+} from "./messageActionModel";
 
 export interface MessageActionCallbacks {
   onReply: () => void;
@@ -69,6 +83,8 @@ export interface MessageActionCallbacks {
    * devices back together in the only place the reader can see them.
    */
   onQuote: () => void;
+  /** Copy the author's raw markdown, never the rendered HTML. */
+  onCopy: () => void;
   onReact: (emoji: string) => void;
   /**
    * 이슈 #1112 - pin this message to the channel, or take the pin back down.
@@ -79,6 +95,194 @@ export interface MessageActionCallbacks {
   onPin: () => void;
   onEdit: () => void;
   onDelete: () => void;
+}
+
+function actionIcon(item: MessageActionItem, pinned: boolean) {
+  if (item.key.startsWith("react:")) return null;
+  switch (item.key) {
+    case "react-more":
+      return <Smile className="size-4" aria-hidden="true" />;
+    case "reply":
+      return <MessageSquareReply className="size-4" aria-hidden="true" />;
+    case "quote":
+      return <Quote className="size-4" aria-hidden="true" />;
+    case "copy":
+      return <Copy className="size-4" aria-hidden="true" />;
+    case "pin":
+      return pinned ? (
+        <PinOff className="size-4" aria-hidden="true" />
+      ) : (
+        <Pin className="size-4" aria-hidden="true" />
+      );
+    case "edit":
+      return <Pencil className="size-4" aria-hidden="true" />;
+    case "delete":
+      return <Trash2 className="size-4" aria-hidden="true" />;
+  }
+}
+
+function invokeAction(
+  key: MessageActionItemKey,
+  callbacks: MessageActionCallbacks,
+  onOpenPicker: () => void
+) {
+  if (key.startsWith("react:")) {
+    callbacks.onReact(key.slice("react:".length));
+    return;
+  }
+  switch (key) {
+    case "react-more":
+      onOpenPicker();
+      return;
+    case "reply":
+      callbacks.onReply();
+      return;
+    case "quote":
+      callbacks.onQuote();
+      return;
+    case "copy":
+      callbacks.onCopy();
+      return;
+    case "pin":
+      callbacks.onPin();
+      return;
+    case "edit":
+      callbacks.onEdit();
+      return;
+    case "delete":
+      callbacks.onDelete();
+  }
+}
+
+function ActionMenuItem({
+  surface,
+  prefix,
+  item,
+  pinned,
+  callbacks,
+  onOpenPicker,
+  compact = false,
+}: {
+  surface: "dropdown" | "context";
+  prefix: "menu" | "context";
+  item: MessageActionItem;
+  pinned: boolean;
+  callbacks: MessageActionCallbacks;
+  onOpenPicker: () => void;
+  compact?: boolean;
+}) {
+  const props = {
+    "data-testid": `${prefix}-${item.testKey}`,
+    "aria-label": item.accessibleLabel,
+    tone: item.tone,
+    onSelect: (event: Event) => {
+      // CopyButton's receipt only works while it remains visible. Keep this one
+      // row open long enough to become 「복사됨」; every other action dismisses.
+      if (item.key === "copy") event.preventDefault();
+      invokeAction(item.key, callbacks, onOpenPicker);
+    },
+    className: compact ? "size-control-sm justify-center px-0" : undefined,
+    children: (
+      <>
+        {item.key.startsWith("react:") ? (
+          <span aria-hidden="true">{item.label}</span>
+        ) : (
+          <>
+            {actionIcon(item, pinned)}
+            {item.label}
+          </>
+        )}
+      </>
+    ),
+  };
+  return surface === "dropdown" ? (
+    <DropdownMenuItem {...props} />
+  ) : (
+    <ContextMenuItem {...props} />
+  );
+}
+
+function ActionMenuSeparator({ surface }: { surface: "dropdown" | "context" }) {
+  return surface === "dropdown" ? (
+    <DropdownMenuSeparator />
+  ) : (
+    <ContextMenuSeparator />
+  );
+}
+
+function MessageActionMenuItems({
+  surface,
+  prefix,
+  available,
+  canCopy,
+  copied,
+  pinned,
+  callbacks,
+  onOpenPicker,
+}: {
+  surface: "dropdown" | "context";
+  prefix: "menu" | "context";
+  available: MessageActionAvailability;
+  canCopy: boolean;
+  copied: boolean;
+  pinned: boolean;
+  callbacks: MessageActionCallbacks;
+  onOpenPicker: () => void;
+}) {
+  const items = messageActionItemsForSurface(
+    surface === "dropdown" ? "menu" : "context",
+    available,
+    { canCopy, copied, pinned }
+  );
+  const quick = items.filter((item) => item.key.startsWith("react:"));
+  const more = items.find((item) => item.key === "react-more");
+  const regular = items.filter(
+    (item) => !item.key.startsWith("react:") && item.key !== "react-more"
+  );
+  return (
+    <>
+      {quick.length > 0 && (
+        <div className="flex items-center gap-px" aria-label="빠른 반응">
+          {quick.map((item) => (
+            <ActionMenuItem
+              key={item.key}
+              surface={surface}
+              prefix={prefix}
+              item={item}
+              pinned={pinned}
+              callbacks={callbacks}
+              onOpenPicker={onOpenPicker}
+              compact
+            />
+          ))}
+        </div>
+      )}
+      {more && (
+        <ActionMenuItem
+          surface={surface}
+          prefix={prefix}
+          item={more}
+          pinned={pinned}
+          callbacks={callbacks}
+          onOpenPicker={onOpenPicker}
+        />
+      )}
+      {quick.length > 0 && regular.length > 0 && (
+        <ActionMenuSeparator surface={surface} />
+      )}
+      {regular.map((item) => (
+        <ActionMenuItem
+          key={item.key}
+          surface={surface}
+          prefix={prefix}
+          item={item}
+          pinned={pinned}
+          callbacks={callbacks}
+          onOpenPicker={onOpenPicker}
+        />
+      ))}
+    </>
+  );
 }
 
 /**
@@ -99,12 +303,16 @@ export interface MessageActionCallbacks {
  */
 export function MessageActionColumn({
   available,
+  canCopy,
+  copied,
   pinned,
   callbacks,
   onOpenPicker,
   hidden,
 }: {
   available: MessageActionAvailability;
+  canCopy: boolean;
+  copied: boolean;
   /** 이슈 #1112 - whether this message is currently pinned, which flips the label. */
   pinned: boolean;
   callbacks: MessageActionCallbacks;
@@ -112,17 +320,20 @@ export function MessageActionColumn({
   /** While the row is being edited the editor owns it (R2 M3). */
   hidden?: boolean;
 }) {
-  const offersReactions = available.react;
+  const [open, setOpen] = useState(false);
+  useEscapeLayer(open, () => setOpen(false));
+  const hasItems =
+    messageActionItems(available, { canCopy, copied, pinned }).length > 0;
   return (
     <div
       data-testid="message-action-column"
       className="pointer-only relative w-control shrink-0"
     >
-      {hasAnyAction(available) && !hidden && (
+      {hasItems && !hidden && (
         // `modal={false}`: a row menu is not a mode. Radix's modal branch locks
         // `pointer-events` on the body, which stops the timeline scrolling
         // underneath and fights the confirm dialog that 지우기 opens next.
-        <DropdownMenu modal={false}>
+        <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
           <DropdownMenuTrigger asChild>
             <button
               type="button"
@@ -154,99 +365,67 @@ export function MessageActionColumn({
             data-testid="message-action-menu"
             aria-label="메시지 액션"
           >
-            {offersReactions && (
-              <>
-                {/* The six most-used emoji sit on one line: the common reaction
-                    should not cost a trip into a picker and back out of it.
-                    Radix walks these with the arrow keys like any other item. */}
-                <div className="flex items-center gap-px" aria-label="빠른 반응">
-                  {QUICK_REACTIONS.map((emoji) => (
-                    <DropdownMenuItem
-                      key={emoji}
-                      data-testid={`menu-react-${emoji}`}
-                      aria-label={`${emoji} 반응 남기기`}
-                      onSelect={() => callbacks.onReact(emoji)}
-                      className="size-control-sm justify-center px-0"
-                    >
-                      <span aria-hidden="true">{emoji}</span>
-                    </DropdownMenuItem>
-                  ))}
-                </div>
-                <DropdownMenuItem
-                  data-testid="menu-react-more"
-                  onSelect={onOpenPicker}
-                >
-                  <Smile className="size-4" aria-hidden="true" />
-                  다른 반응 고르기
-                </DropdownMenuItem>
-              </>
-            )}
-            {offersReactions &&
-              (available.reply ||
-                available.quote ||
-                available.pin ||
-                available.edit ||
-                available.delete) && <DropdownMenuSeparator />}
-            {available.reply && (
-              <DropdownMenuItem
-                data-testid="menu-reply"
-                onSelect={callbacks.onReply}
-              >
-                <MessageSquareReply className="size-4" aria-hidden="true" />
-                답글 달기
-              </DropdownMenuItem>
-            )}
-            {/* 답글 바로 아래, 다른 글리프, 다른 말 (ADR-0148). 나란히 두는 것이
-                요점이다: 두 장치의 차이는 둘을 같은 자리에서 고를 수 있을 때만
-                배울 수 있고, 하나를 메뉴 밑바닥에 숨기면 사람은 평생 하나만 쓴다. */}
-            {available.quote && (
-              <DropdownMenuItem
-                data-testid="menu-quote"
-                onSelect={callbacks.onQuote}
-              >
-                <Quote className="size-4" aria-hidden="true" />
-                {QUOTE_ACTION_LABEL}
-              </DropdownMenuItem>
-            )}
-            {/* 이슈 #1112. 인용 아래, 고치기 위: 읽고 가져가는 행동들 다음이고
-                메시지 자체를 바꾸는 행동들 앞이다. 고정은 채널을 바꾸지 메시지를
-                바꾸지 않는다. */}
-            {available.pin && (
-              <DropdownMenuItem
-                data-testid="menu-pin"
-                onSelect={callbacks.onPin}
-              >
-                {pinned ? (
-                  <PinOff className="size-4" aria-hidden="true" />
-                ) : (
-                  <Pin className="size-4" aria-hidden="true" />
-                )}
-                {pinActionLabel(pinned)}
-              </DropdownMenuItem>
-            )}
-            {available.edit && (
-              <DropdownMenuItem
-                data-testid="menu-edit"
-                onSelect={callbacks.onEdit}
-              >
-                <Pencil className="size-4" aria-hidden="true" />
-                고치기
-              </DropdownMenuItem>
-            )}
-            {available.delete && (
-              <DropdownMenuItem
-                data-testid="menu-delete"
-                tone="danger"
-                onSelect={callbacks.onDelete}
-              >
-                <Trash2 className="size-4" aria-hidden="true" />
-                지우기
-              </DropdownMenuItem>
-            )}
+            <MessageActionMenuItems
+              surface="dropdown"
+              prefix="menu"
+              available={available}
+              canCopy={canCopy}
+              copied={copied}
+              pinned={pinned}
+              callbacks={callbacks}
+              onOpenPicker={onOpenPicker}
+            />
           </DropdownMenuContent>
         </DropdownMenu>
       )}
     </div>
+  );
+}
+
+/** The row wrapper that adds the pointer-native right-click summons. */
+export function MessageActionContextMenu({
+  children,
+  enabled,
+  available,
+  canCopy,
+  copied,
+  pinned,
+  callbacks,
+  onOpenPicker,
+}: {
+  children: React.ReactElement;
+  /** False on touch-only hardware and while text in this row is selected. */
+  enabled: boolean;
+  available: MessageActionAvailability;
+  canCopy: boolean;
+  copied: boolean;
+  pinned: boolean;
+  callbacks: MessageActionCallbacks;
+  onOpenPicker: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  useEscapeLayer(open, () => setOpen(false));
+  return (
+    <ContextMenu open={open} onOpenChange={setOpen} modal={false}>
+      <ContextMenuTrigger asChild disabled={!enabled}>
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent
+        data-testid="message-context-menu"
+        aria-label="메시지 액션"
+      >
+        <MessageActionMenuItems
+          surface="context"
+          prefix="context"
+          available={available}
+          canCopy={canCopy}
+          copied={copied}
+          pinned={pinned}
+          callbacks={callbacks}
+          onOpenPicker={onOpenPicker}
+        />
+      </ContextMenuContent>
+    </ContextMenu>
   );
 }
 
@@ -293,6 +472,8 @@ export function MessageActionSheet({
   onOpenChange,
   preview,
   available,
+  canCopy,
+  copied,
   pinned,
   callbacks,
   onOpenPicker,
@@ -302,12 +483,24 @@ export function MessageActionSheet({
   /** The first line of the message, so the sheet names what it will act on. */
   preview: string;
   available: MessageActionAvailability;
+  canCopy: boolean;
+  copied: boolean;
   /** 이슈 #1112 - flips the pin row's label, exactly as it does in the menu. */
   pinned: boolean;
   callbacks: MessageActionCallbacks;
   onOpenPicker: () => void;
 }) {
   const close = () => onOpenChange(false);
+  const items = messageActionItemsForSurface("sheet", available, {
+    canCopy,
+    copied,
+    pinned,
+  });
+  const quick = items.filter((item) => item.key.startsWith("react:"));
+  const more = items.find((item) => item.key === "react-more");
+  const regular = items.filter(
+    (item) => !item.key.startsWith("react:") && item.key !== "react-more"
+  );
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -318,159 +511,54 @@ export function MessageActionSheet({
         <DialogDescription className="line-clamp-2 px-3 text-meta">
           {preview}
         </DialogDescription>
-        {available.react && (
+        {quick.length > 0 && (
           <div className="flex flex-wrap gap-1 px-1 pt-1">
-            {QUICK_REACTIONS.map((emoji) => (
+            {quick.map((item) => (
               <button
-                key={emoji}
+                key={item.key}
                 type="button"
-                data-testid={`sheet-react-${emoji}`}
-                aria-label={`${emoji} 반응 남기기`}
+                data-testid={`sheet-${item.testKey}`}
+                aria-label={item.accessibleLabel}
                 onClick={() => {
-                  callbacks.onReact(emoji);
+                  invokeAction(item.key, callbacks, onOpenPicker);
                   close();
                 }}
                 className="tap-target flex items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
               >
-                <span aria-hidden="true">{emoji}</span>
+                <span aria-hidden="true">{item.label}</span>
               </button>
             ))}
-            <button
-              type="button"
-              data-testid="sheet-react-more"
-              aria-label="다른 반응 고르기"
-              onClick={() => {
-                close();
-                onOpenPicker();
-              }}
-              className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <Smile className="size-4" aria-hidden="true" />
-            </button>
+            {more && (
+              <button
+                type="button"
+                data-testid={`sheet-${more.testKey}`}
+                aria-label={more.label}
+                onClick={() => {
+                  close();
+                  invokeAction(more.key, callbacks, onOpenPicker);
+                }}
+                className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+              >
+                {actionIcon(more, pinned)}
+              </button>
+            )}
           </div>
         )}
-        {available.reply && (
+        {regular.map((item) => (
           <SheetAction
-            label="답글 달기"
-            testId="sheet-reply"
+            key={item.key}
+            label={item.label}
+            testId={`sheet-${item.testKey}`}
+            tone={item.tone}
             onSelect={() => {
-              close();
-              callbacks.onReply();
+              // As in the pointer menus, the copy receipt has to remain visible.
+              if (item.key !== "copy") close();
+              invokeAction(item.key, callbacks, onOpenPicker);
             }}
           >
-            <MessageSquareReply className="size-4" aria-hidden="true" />
+            {actionIcon(item, pinned)}
           </SheetAction>
-        )}
-        {available.quote && (
-          <SheetAction
-            label={QUOTE_ACTION_LABEL}
-            testId="sheet-quote"
-            onSelect={() => {
-              close();
-              callbacks.onQuote();
-            }}
-          >
-            <Quote className="size-4" aria-hidden="true" />
-          </SheetAction>
-        )}
-        {available.pin && (
-          <SheetAction
-            label={pinActionLabel(pinned)}
-            testId="sheet-pin"
-            onSelect={() => {
-              close();
-              callbacks.onPin();
-            }}
-          >
-            {pinned ? (
-              <PinOff className="size-4" aria-hidden="true" />
-            ) : (
-              <Pin className="size-4" aria-hidden="true" />
-            )}
-          </SheetAction>
-        )}
-        {available.edit && (
-          <SheetAction
-            label="고치기"
-            testId="sheet-edit"
-            onSelect={() => {
-              close();
-              callbacks.onEdit();
-            }}
-          >
-            <Pencil className="size-4" aria-hidden="true" />
-          </SheetAction>
-        )}
-        {available.delete && (
-          <SheetAction
-            label="지우기"
-            testId="sheet-delete"
-            tone="danger"
-            onSelect={() => {
-              close();
-              callbacks.onDelete();
-            }}
-          >
-            <Trash2 className="size-4" aria-hidden="true" />
-          </SheetAction>
-        )}
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
- * The rest of the emoji, hand-rolled.
- *
- * No emoji-picker dependency, and that is a decision rather than a shortcut: a
- * picker library ships a font or a sprite sheet, and this app has a strict CSP
- * with no external hosts and an offline shell (B10). A fixed grid of the emoji a
- * work channel actually uses costs nothing to load and works with no network at
- * all.
- */
-const PICKER_EMOJI = [
-  "👍", "👎", "✅", "❌", "🙏", "🎉", "👀", "😄",
-  "😂", "😅", "🤔", "😮", "😭", "🔥", "💯", "✨",
-  "🚀", "🐛", "🛠️", "📌", "📝", "🔍", "⏳", "⚠️",
-  "❤️", "💡", "🙌", "👏", "☕", "🍀", "🥲", "🫡",
-];
-
-export function ReactionPickerDialog({
-  open,
-  onOpenChange,
-  onPick,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onPick: (emoji: string) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-testid="reaction-picker"
-        className="max-w-pane-sm gap-3 p-4"
-      >
-        <DialogTitle>반응 고르기</DialogTitle>
-        <DialogDescription className="sr-only">
-          이 메시지에 남길 이모지를 고르세요.
-        </DialogDescription>
-        <div className="grid grid-cols-8 gap-1">
-          {PICKER_EMOJI.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              data-testid={`picker-react-${emoji}`}
-              aria-label={`${emoji} 반응 남기기`}
-              onClick={() => {
-                onPick(emoji);
-                onOpenChange(false);
-              }}
-              className="tap-target flex size-control items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <span aria-hidden="true">{emoji}</span>
-            </button>
-          ))}
-        </div>
+        ))}
       </DialogContent>
     </Dialog>
   );

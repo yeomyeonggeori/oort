@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import {
   threadRollup,
   type Message,
@@ -69,10 +69,13 @@ import { QuoteBlock } from "./QuoteBlock";
 import {
   DeleteMessageDialog,
   MessageActionColumn,
+  MessageActionContextMenu,
   MessageActionSheet,
-  ReactionPickerDialog,
   type MessageActionCallbacks,
 } from "./MessageActions";
+import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
+import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
 import { ReactionChips } from "./ReactionChips";
@@ -88,6 +91,7 @@ import { rememberLongPressLearned } from "./LongPressHint";
 import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
+import { selectionIsWithinRow } from "./messageContextMenuModel";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -100,6 +104,40 @@ import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel
 // =============================================================================
 
 const AGENT_TEXT = "text-agent";
+
+/**
+ * A selected message belongs to the browser's native context menu.
+ *
+ * Radix's trigger is disabled before the contextmenu event reaches it, so it
+ * never calls preventDefault in this branch. That preserves the browser's own
+ * selection copy commands instead of replacing them with whole-message actions.
+ */
+function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
+  const [selected, setSelected] = useState(false);
+  useEffect(() => {
+    const update = () =>
+      setSelected(selectionIsWithinRow(ref.current, document.getSelection()));
+    update();
+    document.addEventListener("selectionchange", update);
+    return () => document.removeEventListener("selectionchange", update);
+  }, [ref]);
+  return selected;
+}
+
+/** Mirrors tokens.css `pointer-only`: touch keeps the long-press sheet. */
+function useHoverContextMenu(): boolean {
+  const [matches, setMatches] = useState(
+    () =>
+      typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches
+  );
+  useEffect(() => {
+    const query = window.matchMedia("(hover: hover)");
+    const update = () => setMatches(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return matches;
+}
 
 function timeLabel(atMs: number): string {
   const d = new Date(atMs);
@@ -327,7 +365,9 @@ export function MessageRow({
   // when one of them opens a sheet.
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const openMemberProfile = useOpenMemberProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
   const name = author?.displayName ?? message.authorMemberId.slice(0, 8);
@@ -338,6 +378,11 @@ export function MessageRow({
   // 물음이고, 왜 `trim()`인지와 부재·빈 문자열·공백이 각각 몇 픽셀이었는지는
   // 코어의 `features/timeline/bodySlot.ts`에. 폰이 같은 함수를 부른다.
   const hasBody = hasRenderableBody(message.body);
+  // Same meaning as the phone action sheet: only the author's raw markdown,
+  // and never an empty string or a tombstone. The shared hook is also what the
+  // settings CopyButton uses, so the two-second 「복사됨」 receipt cannot drift.
+  const canCopy = Boolean(actions) && !deleted && hasBody;
+  const { copied, copy: copyMessage } = useClipboardCopy(message.body ?? "");
   // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
   // `AttachmentList`가 아무것도 그리지 않는다.
   const attachments = message.attachments ?? [];
@@ -396,11 +441,22 @@ export function MessageRow({
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
-  const actionable = Boolean(actions) && hasAnyAction(available);
+  const actionable =
+    Boolean(actions) && (hasAnyAction(available) || canCopy);
 
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
     onQuote: () => onQuoteMessage?.(message),
+    onCopy: () => {
+      setRowError(null);
+      void copyMessage().then((ok) => {
+        if (!ok) {
+          setRowError(
+            "메시지를 복사하지 못했습니다. 텍스트를 선택해 복사하세요."
+          );
+        }
+      });
+    },
     onReact: (emoji) => {
       if (!actions) return;
       setRowError(null);
@@ -440,15 +496,35 @@ export function MessageRow({
   // like any form.
   const rowRef = useRef<HTMLElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
+  const selectionWithinRow = useSelectionWithinRow(rowRef);
+  const openReactionPicker = (opener?: HTMLElement | null) => {
+    // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
+    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 남아 있는 반응 추가 버튼 또는
+    // 메시지 행을 명시적으로 돌려줄 자리로 잡는다.
+    setPickerOpener(opener ?? rowRef.current);
+    setPickerOpen(true);
+  };
+  const hoverContextMenu = useHoverContextMenu();
 
+  // `data-message-id` is the row's second published identity (MOMO-677).
+  // `seq` orders the channel and is what the inbox jumps by; a projection
+  // that knows a message only by id (the workstream anchor thread) has no
+  // seq to derive, so it addresses the row the way it actually knows it.
+  // Lower-cased at the source: Swift sends UUIDs upper-cased and a CSS
+  // attribute selector does not fold case.
   return (
-    // `data-message-id` is the row's second published identity (MOMO-677).
-    // `seq` orders the channel and is what the inbox jumps by; a projection
-    // that knows a message only by id (the workstream anchor thread) has no
-    // seq to derive, so it addresses the row the way it actually knows it.
-    // Lower-cased at the source: Swift sends UUIDs upper-cased and a CSS
-    // attribute selector does not fold case.
-    <article
+    <MessageActionContextMenu
+      enabled={
+        actionable && hoverContextMenu && !selectionWithinRow && !editing
+      }
+      available={available}
+      canCopy={canCopy}
+      copied={copied}
+      pinned={Boolean(actions?.pinned)}
+      callbacks={callbacks}
+      onOpenPicker={() => openReactionPicker()}
+    >
+      <article
       ref={rowRef}
       data-testid="timeline-message"
       data-seq={message.seq}
@@ -464,6 +540,14 @@ export function MessageRow({
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       onKeyDown={onRowKeyDown}
+      // State disables the Radix trigger before a normal right-click. The
+      // capture guard covers the same gesture synchronously if React has not
+      // committed the immediately preceding selectionchange yet.
+      onContextMenuCapture={(event) => {
+        if (selectionIsWithinRow(rowRef.current, document.getSelection())) {
+          event.stopPropagation();
+        }
+      }}
       {...(actionable ? longPress : {})}
       className={cn(
         // `group` lets the action trigger react to a hover anywhere on the row
@@ -489,7 +573,26 @@ export function MessageRow({
           레이아웃을 한 픽셀도 밀지 않는다(H-2에서 배운 것과 같은 규칙). */}
       <div className="relative w-8 shrink-0">
         {startsGroup ? (
-          <Avatar member={author} />
+          author ? (
+            <button
+              type="button"
+              data-testid="row-avatar-profile"
+              data-row-action=""
+              aria-label={`${author.displayName} @${author.handle} 프로필 열기`}
+              title={`${author.displayName} @${author.handle} 프로필 열기`}
+              onClick={(event) =>
+                openMemberProfile(author.id, event.currentTarget)
+              }
+              className={cn(
+                "focus-visible:focus-ring",
+                isAgent ? "rounded-sm" : "rounded-full"
+              )}
+            >
+              <Avatar member={author} />
+            </button>
+          ) : (
+            <Avatar member={author} />
+          )
         ) : (
           <time
             dateTime={new Date(message.createdAtMs).toISOString()}
@@ -522,15 +625,10 @@ export function MessageRow({
       <div data-row-body className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
-            {/* 이름은 이름이다 (R1 M8). MOMO-626 1차에서 에이전트 이름을 라우팅
-                다이얼로그를 여는 버튼으로 바꿨는데, 정지 상태에서는 텍스트와
-                구분되지 않으면서 한 번의 클릭으로 설정을 열었고, 가상 리스트에서
-                에이전트 그룹마다 탭 스톱이 하나씩 늘어 컴포저까지 가는 키보드
-                경로가 길어졌다. SKILL §6은 행 레벨 액션을 ContextMenu에 두라고
-                하는데 이 클라이언트에는 그 프리미티브가 없다(의존성에
-                @radix-ui/react-context-menu 없음). 없는 것을 여기서 손으로 만드는
-                대신 진입점을 제대로 생긴 세 곳에 둔다: 디렉터리 행의 [라우팅]
-                버튼, 컴포저 멘션 줄의 "기본값 편집", 그리고 ⌘K 팔레트. */}
+            {/* 이름은 이름이다 (R1 M8). 프로필 진입점은 옆의 아바타다. 그 버튼은
+                `data-row-action` 로 이 행의 기존 로빙 그룹에 합류하므로 메시지마다
+                탭 정거장을 하나씩 늘리지 않는다. 행 액션은 우클릭 ContextMenu와
+                기존 ⋯ 메뉴가 같은 목록을 공유하고, 이름 자체는 계속 읽는 글이다. */}
             {/* 「누가」는 한 덩어리, 「언제」는 다른 덩어리 — 작성자 줄이 읽어야 할
                 섬을 **둘**로 줄인다 (M-3 「작성자 줄이 과적재」).
 
@@ -623,7 +721,11 @@ export function MessageRow({
             // `foldKey`가 메시지 id인 이유는 접힘 상태가 이 행보다 오래 살아야
             // 하기 때문이다: 긴 답을 펴 놓고 위 대화를 확인하러 갔다 오면
             // virtuoso는 그 사이에 이 행을 언마운트한다 (fold.ts).
-            <MessageBody body={message.body ?? ""} foldKey={message.id} />
+            <MessageBody body={message.body ?? ""}
+              directory={directory}
+              foldKey={message.id}
+              selfMemberId={actions?.myMemberId}
+            />
           ) : (
             // 살릴 본문이 없으면 칸을 만들지 않는다 (이슈 #1465 · 코어
             // `bodySlot.ts`). `keepsBody`는 「본문을 살릴 자격」이지 「살릴 본문이
@@ -739,7 +841,7 @@ export function MessageRow({
             disabled={deleted}
             onToggle={(emoji) => callbacks.onReact(emoji)}
             onOpenPicker={
-              available.react ? () => setPickerOpen(true) : undefined
+              available.react ? openReactionPicker : undefined
             }
           />
         )}
@@ -784,9 +886,11 @@ export function MessageRow({
       {actions && (
         <MessageActionColumn
           available={available}
+          canCopy={canCopy}
+          copied={copied}
           pinned={Boolean(actions?.pinned)}
           callbacks={callbacks}
-          onOpenPicker={() => setPickerOpen(true)}
+          onOpenPicker={() => openReactionPicker()}
           hidden={editing}
         />
       )}
@@ -797,14 +901,19 @@ export function MessageRow({
             onOpenChange={setSheetOpen}
             preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
             available={available}
+            canCopy={canCopy}
+            copied={copied}
             pinned={Boolean(actions?.pinned)}
             callbacks={callbacks}
-            onOpenPicker={() => setPickerOpen(true)}
+            onOpenPicker={() => openReactionPicker()}
           />
-          <ReactionPickerDialog
+          <EmojiPickerDialog
             open={pickerOpen}
             onOpenChange={setPickerOpen}
             onPick={(emoji) => callbacks.onReact(emoji)}
+            opener={pickerOpener}
+            purpose="reaction"
+            testId="reaction-picker"
           />
           <DeleteMessageDialog
             open={confirmOpen}
@@ -826,7 +935,8 @@ export function MessageRow({
           />
         </>
       )}
-    </article>
+      </article>
+    </MessageActionContextMenu>
   );
 }
 

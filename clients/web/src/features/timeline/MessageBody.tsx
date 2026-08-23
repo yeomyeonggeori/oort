@@ -7,6 +7,10 @@ import {
   type Block,
   type Inline,
 } from "@momo/core/features/timeline/markdown";
+import {
+  memberFor,
+  type Directory,
+} from "@momo/core/features/workspace/directory";
 import { foldBlocks, foldText, foldWasOpened, rememberFoldOpen } from "./fold";
 import { FoldToggle } from "./FoldToggle";
 
@@ -56,22 +60,44 @@ function canScroll(text: string): boolean {
   return text.split("\n").some((line) => line.length > 24);
 }
 
-function InlineNodes({ nodes }: { nodes: Inline[] }) {
+interface MentionRendering {
+  activeHandles: ReadonlySet<string>;
+  selfHandle: string | null;
+}
+
+const NO_MENTIONS: MentionRendering = {
+  activeHandles: new Set<string>(),
+  selfHandle: null,
+};
+
+function InlineNodes({
+  nodes,
+  mentions,
+}: {
+  nodes: Inline[];
+  mentions: MentionRendering;
+}) {
   return (
     <>
       {nodes.map((node, index) => (
-        <InlineNode key={index} node={node} />
+        <InlineNode key={index} node={node} mentions={mentions} />
       ))}
     </>
   );
 }
 
-function InlineNode({ node }: { node: Inline }) {
+function InlineNode({
+  node,
+  mentions,
+}: {
+  node: Inline;
+  mentions: MentionRendering;
+}) {
   if (node.kind === "text") return <>{node.text}</>;
   if (node.kind === "strong") {
     return (
       <strong className="font-semibold">
-        <InlineNodes nodes={node.children} />
+        <InlineNodes nodes={node.children} mentions={mentions} />
       </strong>
     );
   }
@@ -80,12 +106,28 @@ function InlineNode({ node }: { node: Inline }) {
     // Korean draws a stroke the author never typed.
     return (
       <em className="em-latin-only">
-        <InlineNodes nodes={node.children} />
+        <InlineNodes nodes={node.children} mentions={mentions} />
       </em>
     );
   }
   if (node.kind === "code") {
     return <code className={cn(CODE_CLASS, "px-1")}>{node.text}</code>;
+  }
+  if (node.kind === "mention") {
+    if (!mentions.activeHandles.has(node.handle)) return <>{node.raw}</>;
+    const self = mentions.selfHandle === node.handle;
+    return (
+      <span
+        className={cn(
+          "text-accent",
+          self && "bg-accent-soft font-semibold"
+        )}
+        data-mention-handle={node.handle}
+        data-testid={self ? "message-self-mention" : "message-mention"}
+      >
+        {node.raw}
+      </span>
+    );
   }
   return (
     <a
@@ -104,12 +146,18 @@ function InlineNode({ node }: { node: Inline }) {
       }}
       className="text-accent underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
     >
-      <InlineNodes nodes={node.children} />
+      <InlineNodes nodes={node.children} mentions={mentions} />
     </a>
   );
 }
 
-function BlockNode({ block }: { block: Block }) {
+function BlockNode({
+  block,
+  mentions,
+}: {
+  block: Block;
+  mentions: MentionRendering;
+}) {
   if (block.kind === "code") {
     const scrollable = canScroll(block.text);
     return (
@@ -155,7 +203,7 @@ function BlockNode({ block }: { block: Block }) {
   if (block.kind === "list") {
     const items = block.items.map((item, index) => (
       <li key={index} className="break-words">
-        <InlineNodes nodes={item} />
+        <InlineNodes nodes={item} mentions={mentions} />
       </li>
     ));
     // `list-outside` so a wrapped Korean line continues under its own text
@@ -191,7 +239,7 @@ function BlockNode({ block }: { block: Block }) {
       {block.lines.map((line, index) => (
         <Fragment key={index}>
           {index > 0 && "\n"}
-          <InlineNodes nodes={line} />
+          <InlineNodes nodes={line} mentions={mentions} />
         </Fragment>
       ))}
     </p>
@@ -214,9 +262,15 @@ export function MessageBody({
   body,
   muted = false,
   foldKey,
+  directory,
+  selfMemberId,
 }: {
   body: string;
   muted?: boolean;
+  /** Active roster members are the authority for whether a token is a mention. */
+  directory?: Directory;
+  /** Current member, used only for the stronger self-mention treatment. */
+  selfMemberId?: string;
   /**
    * 펼쳐 둔 상태를 기억하는 키(메시지 id). 없으면 이 본문은 언제나 접힌 채로
    * 시작한다 — 낙관적 에코처럼 곧 다른 행으로 교체될 행이 그렇다.
@@ -227,6 +281,21 @@ export function MessageBody({
     () => (isPlainText(body) ? null : parseMarkdown(body)),
     [body]
   );
+  const mentions = useMemo<MentionRendering>(() => {
+    // Keep the pre-markdown path cheap: ordinary prose neither walks the
+    // directory nor changes its rendered shape just because this prop exists.
+    if (blocks === null || directory === undefined) return NO_MENTIONS;
+    const activeHandles = new Set(
+      directory.members
+        .filter((member) => member.status === "active")
+        .map((member) => member.handle.toLowerCase())
+    );
+    const self = memberFor(directory, selfMemberId);
+    return {
+      activeHandles,
+      selfHandle: self?.handle.toLowerCase() ?? null,
+    };
+  }, [blocks, directory, selfMemberId]);
   const [expanded, setExpanded] = useState(() => foldWasOpened(foldKey));
   const toggle = () =>
     setExpanded((open) => {
@@ -274,7 +343,7 @@ export function MessageBody({
       data-testid="message-markdown"
     >
       {shown.map((block, index) => (
-        <BlockNode key={index} block={block} />
+        <BlockNode key={index} block={block} mentions={mentions} />
       ))}
       {fold.hiddenLines > 0 && (
         <FoldToggle

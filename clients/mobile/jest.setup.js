@@ -1,5 +1,5 @@
 /**
- * Test doubles for the three native modules this client depends on.
+ * Test doubles for the native modules this client exercises under Jest.
  *
  * They are in-memory implementations rather than `jest.fn()` stubs on purpose:
  * the things worth asserting are about WHERE a value went — the refresh token
@@ -122,6 +122,155 @@ jest.mock('expo-notifications', () => ({
     );
   }),
 }));
+
+// ---- expo-file-system -------------------------------------------------------
+// Expo already links this module for the bare app; timeline attachments now use
+// its native downloader so a 100MB file never takes a second trip through the
+// JS heap. Jest keeps the same File/Directory shape and an in-memory disk. Tests
+// can set `__state.failure` or `__state.progress` to drive the three UI states.
+jest.mock('expo-file-system', () => {
+  const files = new Set();
+  const directories = new Set(['file:///cache']);
+  const state = {
+    downloads: [],
+    uploads: [],
+    failure: null,
+    uploadFailure: null,
+    uploadStatus: 200,
+    progress: [{bytesWritten: 1, totalBytes: 2}, {bytesWritten: 2, totalBytes: 2}],
+    uploadProgress: [{bytesSent: 1, totalBytes: 2}, {bytesSent: 2, totalBytes: 2}],
+    sizes: new Map(),
+  };
+  const uriOf = value =>
+    typeof value === 'string' ? value : value && typeof value.uri === 'string' ? value.uri : '';
+  const join = values =>
+    values
+      .map(uriOf)
+      .filter(Boolean)
+      .join('/')
+      .replace(/([^:]\/)\/+?/g, '$1');
+
+  class Directory {
+    constructor(...parts) {
+      this.uri = join(parts);
+    }
+    get exists() {
+      return directories.has(this.uri);
+    }
+    create() {
+      directories.add(this.uri);
+    }
+  }
+
+  class File {
+    constructor(...parts) {
+      this.uri = join(parts);
+    }
+    get exists() {
+      return files.has(this.uri);
+    }
+    get size() {
+      return state.sizes.get(this.uri) ?? 0;
+    }
+    delete() {
+      files.delete(this.uri);
+    }
+    static async downloadFileAsync(url, destination, options = {}) {
+      state.downloads.push({url, destination, options});
+      for (const progress of state.progress) options.onProgress?.(progress);
+      if (state.failure) throw state.failure;
+      files.add(destination.uri);
+      return destination;
+    }
+    createUploadTask(url, options = {}) {
+      let cancelled = false;
+      state.uploads.push({url, file: this, options});
+      return {
+        uploadAsync: async () => {
+          for (const progress of state.uploadProgress) {
+            options.onProgress?.(progress);
+          }
+          if (cancelled) throw new Error('upload cancelled');
+          if (state.uploadFailure) throw state.uploadFailure;
+          return {body: '', headers: {}, status: state.uploadStatus};
+        },
+        cancel: () => {
+          cancelled = true;
+        },
+        release: () => {},
+      };
+    }
+  }
+
+  const cache = new Directory('file:///cache');
+  return {
+    Directory,
+    File,
+    UploadType: {BINARY_CONTENT: 0, MULTIPART: 1},
+    Paths: {cache},
+    __files: files,
+    __state: state,
+    __reset: () => {
+      files.clear();
+      directories.clear();
+      directories.add('file:///cache');
+      state.downloads.length = 0;
+      state.uploads.length = 0;
+      state.failure = null;
+      state.uploadFailure = null;
+      state.uploadStatus = 200;
+      state.progress = [
+        {bytesWritten: 1, totalBytes: 2},
+        {bytesWritten: 2, totalBytes: 2},
+      ];
+      state.uploadProgress = [
+        {bytesSent: 1, totalBytes: 2},
+        {bytesSent: 2, totalBytes: 2},
+      ];
+      state.sizes.clear();
+    },
+  };
+});
+
+// ---- expo image/document pickers -------------------------------------------
+// The bare app links both Expo modules through CocoaPods. Under Jest their ESM
+// entries cannot run, so these doubles expose the native outcomes the Composer
+// needs to distinguish: picked, cancelled, permission denied and provider error.
+jest.mock('expo-image-picker', () => {
+  const state = {
+    result: {canceled: true, assets: null},
+    failure: null,
+    permission: {status: 'granted', accessPrivileges: 'all'},
+  };
+  return {
+    __state: state,
+    __reset: () => {
+      state.result = {canceled: true, assets: null};
+      state.failure = null;
+      state.permission = {status: 'granted', accessPrivileges: 'all'};
+    },
+    launchImageLibraryAsync: jest.fn(async () => {
+      if (state.failure) throw state.failure;
+      return state.result;
+    }),
+    getMediaLibraryPermissionsAsync: jest.fn(async () => state.permission),
+  };
+});
+
+jest.mock('expo-document-picker', () => {
+  const state = {result: {canceled: true, assets: null}, failure: null};
+  return {
+    __state: state,
+    __reset: () => {
+      state.result = {canceled: true, assets: null};
+      state.failure = null;
+    },
+    getDocumentAsync: jest.fn(async () => {
+      if (state.failure) throw state.failure;
+      return state.result;
+    }),
+  };
+});
 
 // ---- react-native-safe-area-context ------------------------------------------
 // The real module reads insets from a native view, so under Jest every screen
