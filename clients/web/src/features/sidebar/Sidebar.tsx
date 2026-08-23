@@ -63,6 +63,8 @@ import {
 } from "./connStatusIndicator";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
+import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
+import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -276,8 +278,7 @@ export function Sidebar({
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (!event.altKey || event.metaKey || event.ctrlKey) return;
-      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+      if (!MOVE_UNREAD_CHANNEL_SHORTCUT.matches(event)) return;
       if (unreadChannels.length === 0) return;
       event.preventDefault();
       const current = window.location.hash.replace(/^#/, "");
@@ -684,6 +685,7 @@ export function Sidebar({
               )}
             />
           )}
+          <ShortcutHelpDialog />
           <Link
             to="/settings"
             aria-label="설정 열기"

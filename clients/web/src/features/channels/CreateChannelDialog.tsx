@@ -17,6 +17,7 @@ import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
+import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   channelNameIssue,
   channelNameIssueMessage,
@@ -213,7 +214,7 @@ function CreateChannelPanel({
         // fields and nothing else: [취소]와 [채널 만들기]는 form 밖에서 form=
         // 속성으로만 묶여 있어 keydown이 폼까지 올라가지 않았다. 패널 루트에
         // 걸면 액션 행을 포함해 다이얼로그 어디서든 같은 키가 같은 일을 한다.
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (PRIMARY_ACTION_SHORTCUT.matches(event)) {
           event.preventDefault();
           formRef.current?.requestSubmit();
         }
