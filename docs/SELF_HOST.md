@@ -394,6 +394,27 @@ MOMO_INITIAL_OWNER_PASSWORD='<새 비밀번호>' \
 표, 트러블슈팅)은 [`infra/rust/README.md`](../infra/rust/README.md) 에 있다. 이
 문서가 「처음 한 번」이고, 그 문서가 「그다음 전부」다.
 
+## 터널·외부 노출
+
+이 문서의 엣지는 루프백이다. Tailscale·cloudflared 같은 터널로 원격
+클라가 붙을 때 로그인 REST는 되는데 실시간만 죽는 증상은, 생성기가
+예전 기본값 `ws://localhost:<port>/connection/websocket` 을 광고했기
+때문이다(ADR-0167). 새 env 는 `MOMO_CENTRIFUGO_WS_URL=same-origin` 이라
+로그인 응답이 요청 `Host` 에서 `wss://<공개호스트>/connection/websocket`
+을 파생한다.
+
+공개 오리진을 Centrifugo 허용목록에 멱등 추가한 뒤 스택을 재시작한다.
+기본 localhost / 127.0.0.1 / tauri Origin 은 그대로 둔다.
+
+```sh
+scripts/self_host_env.sh --public-origin https://<공개호스트>
+scripts/self_host_env.sh --compose up -d
+```
+
+검증: 로그인 응답 `realtimeWebSocketUrl` == `wss://<공개호스트>/connection/websocket`.
+이미 만든 env 가 루프백 URL을 들고 있으면 그 한 줄만 `same-origin` 으로
+고친다. 시크릿 파일 재생성은 금지.
+
 ## 운영: 도메인과 TLS를 붙일 때
 
 위 경로는 **루프백 전용**이다. 엣지는 `127.0.0.1` 에만 바인딩되고 TLS가 없다.

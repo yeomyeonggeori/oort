@@ -88,6 +88,10 @@ REQUESTED_MODE=""
 REQUESTED_IMAGE=""
 REQUESTED_ACTION="prepare"
 COMPOSE_COMMAND_ARGS=()
+PUBLIC_ORIGINS=()
+# bash 3.2 + set -u treats an empty array as unbound (`${arr[@]}` / `${#arr[@]}`).
+# Count is the only length we read without expanding the array.
+PUBLIC_ORIGIN_COUNT=0
 
 # Compose contract의 단일 권위는 generated env의 실제 KEY= 행 + canonical file
 # 세 개의 `${KEY...}` interpolation이다. `compose_ambient_keys`가 둘을 실행 시
@@ -120,9 +124,13 @@ usage() {
 Usage:
   scripts/self_host_env.sh --local-build
   scripts/self_host_env.sh --published-image ghcr.io/yeomyeonggeori/oort@sha256:<64 lowercase hex>
+  scripts/self_host_env.sh --public-origin https://<host>
   scripts/self_host_env.sh --compose <docker-compose arguments...>
 
 No argument is a backwards-compatible alias for --local-build.
+--public-origin may be repeated. It idempotently adds the origin (and its
+ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS; existing
+entries are preserved. On an existing env it does not regenerate secrets.
 After preparation, use --compose for every start/stop/log command so ambient
 Compose variables cannot override infra/rust/local.secrets.env.
 EOF
@@ -140,6 +148,12 @@ while [ "$#" -gt 0 ]; do
       [ "$#" -ge 2 ] || fail "--published-image 뒤에 ref@sha256:digest가 필요하다."
       REQUESTED_MODE="published-digest"
       REQUESTED_IMAGE="$2"
+      shift 2
+      ;;
+    --public-origin)
+      [ "$#" -ge 2 ] || fail "--public-origin 뒤에 http(s)://host 가 필요하다."
+      PUBLIC_ORIGINS+=("$2")
+      PUBLIC_ORIGIN_COUNT=$((PUBLIC_ORIGIN_COUNT + 1))
       shift 2
       ;;
     --compose)
@@ -355,6 +369,136 @@ ensure_desktop_cors_allowlist() {
   printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
 }
 
+normalize_public_origin() {
+  local raw="$1"
+  validate_env_scalar MOMO_PUBLIC_ORIGIN "$raw"
+  case "$raw" in
+    */) raw="${raw%/}" ;;
+  esac
+  case "$raw" in
+    https://*|http://*) ;;
+    *) fail "--public-origin 은 http:// 또는 https:// 오리진이어야 한다 (경로·쿼리 불가)." ;;
+  esac
+  [[ "$raw" =~ ^https://[A-Za-z0-9._-]+(:[1-9][0-9]{0,4})?$ ]] ||
+    [[ "$raw" =~ ^http://[A-Za-z0-9._-]+(:[1-9][0-9]{0,4})?$ ]] ||
+    fail "--public-origin 은 http(s)://host[:port] 형식이어야 한다."
+  if [[ "$raw" =~ :([0-9]+)$ ]]; then
+    [ "${BASH_REMATCH[1]}" -le 65535 ] ||
+      fail "--public-origin 포트는 1..65535 이어야 한다."
+  fi
+  printf '%s' "$raw"
+}
+
+public_origin_websocket() {
+  local origin="$1"
+  case "$origin" in
+    https://*) printf 'wss://%s' "${origin#https://}" ;;
+    http://*) printf 'ws://%s' "${origin#http://}" ;;
+    *) fail "--public-origin 내부 오류: 스킴 화이트리스트를 통과한 값이 아니다." ;;
+  esac
+}
+
+list_has_token() {
+  local list="$1" want="$2" item
+  for item in $list; do
+    [ "$item" = "$want" ] && return 0
+  done
+  return 1
+}
+
+append_space_token() {
+  local list="$1" token="$2"
+  if [ -z "$list" ]; then
+    printf '%s' "$token"
+    return
+  fi
+  if list_has_token "$list" "$token"; then
+    printf '%s' "$list"
+    return
+  fi
+  printf '%s %s' "$list" "$token"
+}
+
+rewrite_env_assignment() {
+  local key="$1" value="$2" tmp
+  validate_env_scalar "$key" "$value"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-self-host-env.XXXXXX")"
+  awk -v key="$key" -v value="$value" '
+    BEGIN { done = 0 }
+    index($0, key "=") == 1 && done == 0 {
+      print key "=" value
+      done = 1
+      next
+    }
+    { print }
+    END {
+      if (done == 0) print key "=" value
+    }
+  ' "$ENV_FILE" >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+normalize_requested_public_origins() {
+  local i=0
+  [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
+  while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
+    PUBLIC_ORIGINS[$i]="$(normalize_public_origin "${PUBLIC_ORIGINS[$i]}")"
+    i=$((i + 1))
+  done
+}
+
+centrifugo_origins_with_public() {
+  local current="$1" origin ws_origin i=0
+  [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || {
+    printf '%s' "$current"
+    return 0
+  }
+  while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
+    origin="${PUBLIC_ORIGINS[$i]}"
+    ws_origin="$(public_origin_websocket "$origin")"
+    current="$(append_space_token "$current" "$origin")"
+    current="$(append_space_token "$current" "$ws_origin")"
+    i=$((i + 1))
+  done
+  printf '%s' "$current"
+}
+
+ensure_public_origins() {
+  [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
+  local current="" count next
+  count="$(env_key_count CENTRIFUGO_ALLOWED_ORIGINS)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 CENTRIFUGO_ALLOWED_ORIGINS 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 1 ]; then
+    current="$(env_value_once CENTRIFUGO_ALLOWED_ORIGINS)"
+  fi
+  next="$(centrifugo_origins_with_public "$current")"
+  if [ "$next" = "$current" ] && [ "$count" -eq 1 ]; then
+    printf '[self-host] CENTRIFUGO_ALLOWED_ORIGINS 에 공개 오리진이 이미 있다 (멱등).\n' >&2
+    return 0
+  fi
+  rewrite_env_assignment CENTRIFUGO_ALLOWED_ORIGINS "$next"
+  printf '[self-host] %s 의 CENTRIFUGO_ALLOWED_ORIGINS 에 공개 오리진을 추가했다.\n' \
+    "$ENV_FILE" >&2
+  printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: --compose up -d\n' >&2
+}
+
+warn_if_legacy_localhost_realtime_ws() {
+  local count current
+  count="$(env_key_count MOMO_CENTRIFUGO_WS_URL)"
+  [ "$count" -eq 1 ] || return 0
+  current="$(env_value_once MOMO_CENTRIFUGO_WS_URL)"
+  case "$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')" in
+    same-origin) return 0 ;;
+    ws://localhost:*|wss://localhost:*|ws://127.0.0.1:*|wss://127.0.0.1:*)
+      printf '[self-host] %s 의 MOMO_CENTRIFUGO_WS_URL 이 루프백을 가리킨다.\n' "$ENV_FILE" >&2
+      printf '[self-host] 원격 클라는 자기 localhost 로 WS 를 연다 (ADR-0167). 그 줄을\n' >&2
+      printf '[self-host] MOMO_CENTRIFUGO_WS_URL=same-origin 으로 고친 뒤 api 를 재시작하라.\n' >&2
+      ;;
+  esac
+}
+
 warn_if_centrifugo_missing_desktop_origins() {
   local count current missing=0
   count="$(env_key_count CENTRIFUGO_ALLOWED_ORIGINS)"
@@ -562,6 +706,8 @@ verify_published_compose_image() {
     fail "published-digest Compose의 앱 이미지가 pin과 다르다(expected consumers=$PUBLISHED_IMAGE_CONSUMERS, matched=$count)."
 }
 
+normalize_requested_public_origins
+
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음 — 시크릿을 만들 수 없다."
 DOCKER_BIN="$(command -v docker || true)"
 [ -n "$DOCKER_BIN" ] || fail "docker 없음 — https://docs.docker.com/get-docker/"
@@ -652,6 +798,8 @@ if [ -e "$ENV_FILE" ]; then
   ensure_operator_allowlist "$existing_email"
   ensure_desktop_cors_allowlist
   warn_if_centrifugo_missing_desktop_origins
+  ensure_public_origins
+  warn_if_legacy_localhost_realtime_ws
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -681,7 +829,11 @@ if [ -e "$ENV_FILE" ]; then
     run_self_host_compose "$existing_mode" "${COMPOSE_COMMAND_ARGS[@]}"
     exit $?
   fi
-  printf '[self-host] %s 는 이미 있다 — 그대로 둔다.\n' "$ENV_FILE"
+  if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
+    printf '[self-host] %s 시크릿은 그대로 두고 공개 오리진만 반영했다.\n' "$ENV_FILE"
+  else
+    printf '[self-host] %s 는 이미 있다 — 그대로 둔다.\n' "$ENV_FILE"
+  fi
   printf '[self-host] 시크릿을 다시 만들면 이미 마이그레이션된 DB의 롤 비밀번호와 어긋난다.\n'
   printf '[self-host] 정말 처음부터 다시 하려면: 스택을 down -v 로 내리고 이 파일을 지운 뒤 다시 실행.\n'
   print_next_steps "$existing_mode" "$existing_web_port" "${existing_email:-?}"
@@ -689,6 +841,9 @@ if [ -e "$ENV_FILE" ]; then
 fi
 
 [ "$REQUESTED_ACTION" = "prepare" ] || fail "$ENV_FILE 없음 — 먼저 이미지 모드를 선택해 env를 생성하라."
+if [ -z "$REQUESTED_MODE" ] && [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
+  fail "$ENV_FILE 없음 — 먼저 --local-build 또는 --published-image 로 env를 생성하라."
+fi
 
 # ---------------------------------------------------------------------------
 # 값
@@ -739,11 +894,15 @@ CENT_API_SECRET="$(gen)"
 CENT_PROXY_SECRET_VALUE="$(gen)"
 PROVIDER_LINK_SECRET="$(gen)"
 
+CENTRIFUGO_ORIGINS="http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
+CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
+
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
            JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
            PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL \
-           SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS; do
+           SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS \
+           CENTRIFUGO_ORIGINS; do
   validate_env_scalar "$key" "${!key}"
 done
 
@@ -793,11 +952,12 @@ PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_SECRET
 # (Windows/Android 는 http://tauri.localhost) 이라 /v1 이 진짜 교차 오리진이다.
 MOMO_WEB_PORT=$WEB_PORT
 # 로그인 응답이 클라이언트에게 돌려주는 레일 주소(ADR-0110 유일 권위).
-MOMO_CENTRIFUGO_WS_URL=ws://localhost:$WEB_PORT/connection/websocket
+# ADR-0167: same-origin — 로그인 요청 Host/X-Forwarded-Proto에서 WS URL을 파생한다.
+MOMO_CENTRIFUGO_WS_URL=same-origin
 # Centrifugo는 업그레이드 전에 Origin을 대조한다. **공백 구분** 목록이고,
 # localhost 로 열든 127.0.0.1 로 열든 통하도록 둘 다 적는다. tauri 2종은
 # REST CORS 와 별개 노브(#1607) — 빠지면 로그인은 되고 실시간이 403이다.
-CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS
+CENTRIFUGO_ALLOWED_ORIGINS=$CENTRIFUGO_ORIGINS
 # 엣지를 거치지 않는 직접 접속(curl·디버깅)용 루프백 포트.
 MOMO_RUST_API_PORT=$API_PORT
 CENT_HOST_PORT=$CENT_PORT
