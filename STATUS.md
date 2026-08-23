@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
+
+- `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).
+- 생성기 기본값을 `same-origin`으로 교체. `--public-origin https://host`가 `CENTRIFUGO_ALLOWED_ORIGINS`에 브라우저 Origin과 RN `wss://` Origin을 멱등 추가. 기존 localhost/tauri 기본값 완화 없음.
+- 플레이북: `SELF_HOST_AGENT.md` §2.3·`SELF_HOST.md` 터널 절. 로그인 응답 `realtimeWebSocketUrl == wss://<공개호스트>/connection/websocket`이 검증 문장. `runtime-unverified(터널 e2e 브라우저 왕복)` — 오케스트레이터 몫.
+
 ## claim 부트스트랩 ttl_seconds 모호성 (#1673, 2026-08-23)
 
 - `infra/prod/bootstrap_owner_claim_if_absent.sql` SELECT INTO를 테이블 별칭 `i`로 한정. PL/pgSQL 변수 `ttl_seconds`와 컬럼 동명으로 `MOMO_BOOTSTRAP_CLAIM=1` migrate가 스키마 78/78 뒤 Exited 1이던 P1.

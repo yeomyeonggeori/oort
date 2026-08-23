@@ -221,6 +221,8 @@ fn resolve_login_workspace(raw: Option<&str>) -> Result<Uuid, ApiError> {
 
 pub async fn login(
     State(state): State<AppState>,
+    uri: axum::http::Uri,
+    headers: HeaderMap,
     Json(request): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     let workspace_id = resolve_login_workspace(request.workspace.as_deref())?;
@@ -256,7 +258,7 @@ pub async fn login(
             display_name: member.display_name,
             handle: member.handle,
         },
-        realtime_web_socket_url: state.realtime_ws_url.to_string(),
+        realtime_web_socket_url: state.advertised_realtime_ws_url(&headers, uri.scheme_str())?,
     }))
 }
 

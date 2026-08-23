@@ -188,6 +188,7 @@ grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49100 http://127.0.0.1:49100 tauri://localhost http://tauri.localhost' \
   "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
@@ -768,6 +769,59 @@ grep -Fxq 'COMPOSE_PROJECT_NAME=isolated-clone' "$isolate_fixture/infra/rust/loc
 grep -Fxq 'DB_VOLUME_NAME=isolated-clone-pgdata' "$isolate_fixture/infra/rust/local.secrets.env"
 grep -Fq '기존 셀프호스트 볼륨 oort-pgdata 가 있다' "$isolate_fixture/output"
 grep -Fq 'DB_VOLUME_NAME 은 isolated-clone-pgdata' "$isolate_fixture/output"
+
+# ADR-0167 — --public-origin is idempotent, preserves existing tokens, and
+# registers both the browser Origin and the RN websocket Origin.
+public_fixture="$(make_fixture public-origin)"
+run_generator "$public_fixture" "$public_fixture/first-output" 49700 --local-build
+grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$public_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost' \
+  "$public_fixture/infra/rust/local.secrets.env"
+jwt_before="$(sed -n 's/^JWT_HMAC=//p' "$public_fixture/infra/rust/local.secrets.env")"
+public_before="$(hash_file "$public_fixture/infra/rust/local.secrets.env")"
+run_generator "$public_fixture" "$public_fixture/origin-output" 49700 \
+  --public-origin https://cursor.tailb1aad3.ts.net
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
+  "$public_fixture/infra/rust/local.secrets.env"
+test "$(sed -n 's/^JWT_HMAC=//p' "$public_fixture/infra/rust/local.secrets.env")" = "$jwt_before"
+grep -Fq '공개 오리진을 추가했다' "$public_fixture/origin-output"
+run_generator "$public_fixture" "$public_fixture/origin-again" 49700 \
+  --public-origin https://cursor.tailb1aad3.ts.net
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
+  "$public_fixture/infra/rust/local.secrets.env"
+grep -Fq '이미 있다 (멱등)' "$public_fixture/origin-again"
+test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
+test "$(grep -c 'wss://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
+
+# Create-time --public-origin lands in the first write; default localhost tokens stay.
+create_public="$(make_fixture public-origin-create)"
+run_generator "$create_public" "$create_public/output" 49710 \
+  --local-build --public-origin https://cursor.tailb1aad3.ts.net
+grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$create_public/infra/rust/local.secrets.env"
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49710 http://127.0.0.1:49710 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
+  "$create_public/infra/rust/local.secrets.env"
+
+# Wildcard / path / missing env without an image mode all fail closed.
+if run_generator "$(make_fixture public-origin-star)" "$TMP_ROOT/star.out" 49720 \
+  --local-build --public-origin 'https://*'; then
+  echo "--public-origin wildcard unexpectedly succeeded" >&2
+  exit 1
+fi
+if run_generator "$(make_fixture public-origin-path)" "$TMP_ROOT/path.out" 49730 \
+  --local-build --public-origin 'https://cursor.tailb1aad3.ts.net/connection'; then
+  echo "--public-origin with a path unexpectedly succeeded" >&2
+  exit 1
+fi
+missing_public="$(make_fixture public-origin-missing)"
+if run_generator "$missing_public" "$missing_public/output" 49740 \
+  --public-origin https://cursor.tailb1aad3.ts.net; then
+  echo "--public-origin without an env or image mode unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'ENV_FILE 없음' "$missing_public/output" || grep -Fq '없음' "$missing_public/output"
+
+# Existing env without --public-origin still does not rewrite allowed origins.
+test "$public_before" != "$(hash_file "$public_fixture/infra/rust/local.secrets.env")"
 
 echo "self-host image mode contract: PASS"
 
