@@ -71,9 +71,9 @@ import {
   MessageActionColumn,
   MessageActionContextMenu,
   MessageActionSheet,
-  ReactionPickerDialog,
   type MessageActionCallbacks,
 } from "./MessageActions";
+import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useRowRovingFocus } from "./rowFocus";
@@ -365,6 +365,7 @@ export function MessageRow({
   // when one of them opens a sheet.
   const [sheetOpen, setSheetOpen] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const openMemberProfile = useOpenMemberProfile();
   const author = memberFor(directory, message.authorMemberId);
@@ -496,6 +497,13 @@ export function MessageRow({
   const rowRef = useRef<HTMLElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
+  const openReactionPicker = (opener?: HTMLElement | null) => {
+    // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
+    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 남아 있는 반응 추가 버튼 또는
+    // 메시지 행을 명시적으로 돌려줄 자리로 잡는다.
+    setPickerOpener(opener ?? rowRef.current);
+    setPickerOpen(true);
+  };
   const hoverContextMenu = useHoverContextMenu();
 
   // `data-message-id` is the row's second published identity (MOMO-677).
@@ -514,7 +522,7 @@ export function MessageRow({
       copied={copied}
       pinned={Boolean(actions?.pinned)}
       callbacks={callbacks}
-      onOpenPicker={() => setPickerOpen(true)}
+      onOpenPicker={() => openReactionPicker()}
     >
       <article
       ref={rowRef}
@@ -833,7 +841,7 @@ export function MessageRow({
             disabled={deleted}
             onToggle={(emoji) => callbacks.onReact(emoji)}
             onOpenPicker={
-              available.react ? () => setPickerOpen(true) : undefined
+              available.react ? openReactionPicker : undefined
             }
           />
         )}
@@ -882,7 +890,7 @@ export function MessageRow({
           copied={copied}
           pinned={Boolean(actions?.pinned)}
           callbacks={callbacks}
-          onOpenPicker={() => setPickerOpen(true)}
+          onOpenPicker={() => openReactionPicker()}
           hidden={editing}
         />
       )}
@@ -897,12 +905,15 @@ export function MessageRow({
             copied={copied}
             pinned={Boolean(actions?.pinned)}
             callbacks={callbacks}
-            onOpenPicker={() => setPickerOpen(true)}
+            onOpenPicker={() => openReactionPicker()}
           />
-          <ReactionPickerDialog
+          <EmojiPickerDialog
             open={pickerOpen}
             onOpenChange={setPickerOpen}
             onPick={(emoji) => callbacks.onReact(emoji)}
+            opener={pickerOpener}
+            purpose="reaction"
+            testId="reaction-picker"
           />
           <DeleteMessageDialog
             open={confirmOpen}

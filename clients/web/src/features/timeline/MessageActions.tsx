@@ -565,63 +565,6 @@ export function MessageActionSheet({
 }
 
 /**
- * The rest of the emoji, hand-rolled.
- *
- * No emoji-picker dependency, and that is a decision rather than a shortcut: a
- * picker library ships a font or a sprite sheet, and this app has a strict CSP
- * with no external hosts and an offline shell (B10). A fixed grid of the emoji a
- * work channel actually uses costs nothing to load and works with no network at
- * all.
- */
-const PICKER_EMOJI = [
-  "👍", "👎", "✅", "❌", "🙏", "🎉", "👀", "😄",
-  "😂", "😅", "🤔", "😮", "😭", "🔥", "💯", "✨",
-  "🚀", "🐛", "🛠️", "📌", "📝", "🔍", "⏳", "⚠️",
-  "❤️", "💡", "🙌", "👏", "☕", "🍀", "🥲", "🫡",
-];
-
-export function ReactionPickerDialog({
-  open,
-  onOpenChange,
-  onPick,
-}: {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onPick: (emoji: string) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        data-testid="reaction-picker"
-        className="max-w-pane-sm gap-3 p-4"
-      >
-        <DialogTitle>반응 고르기</DialogTitle>
-        <DialogDescription className="sr-only">
-          이 메시지에 남길 이모지를 고르세요.
-        </DialogDescription>
-        <div className="grid grid-cols-8 gap-1">
-          {PICKER_EMOJI.map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              data-testid={`picker-react-${emoji}`}
-              aria-label={`${emoji} 반응 남기기`}
-              onClick={() => {
-                onPick(emoji);
-                onOpenChange(false);
-              }}
-              className="tap-target flex size-control items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <span aria-hidden="true">{emoji}</span>
-            </button>
-          ))}
-        </div>
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-/**
  * The delete confirmation.
  *
  * A confirmation and not an undo, because the server has no undo: the delete is

@@ -3300,17 +3300,39 @@ async function captureScheme(browser, scheme) {
   shots.push(pickerShot);
   await login.keyboard.press("Escape");
 
-  // 2h. 스레드, 이제 답글을 쓸 수 있는 (goal B11). 이 패널은 답글을 **읽기만**
-  //     했었고, 그래서 「답글 N개」는 액션이 아니라 전사(transcript) 링크였다.
-  //     컴포저가 그 나머지 반쪽이다.
+  // 2i. 같은 32개 격자를 메시지 반응과 컴포저 삽입이 공유한다 (#1688).
+  //     다이얼로그는 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
+  //     컴포저의 명시적인 진입점으로 돌린다.
+  await login.getByTestId("composer-emoji-trigger").click();
+  await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
+  await login.screenshot({ path: composerEmojiShot });
+  shots.push(composerEmojiShot);
+  await login.keyboard.press("Escape");
+
+  // 2j. 스레드도 채널과 같은 메시지 입력 능력(멘션·첨부·이모지)을 갖는다
+  //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
   await login.getByTestId("thread-anchor").first().click();
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
-  await login.getByTestId("thread-composer-input").waitFor({ state: "visible" });
+  const threadComposer = login.getByTestId("thread-composer-input");
+  await threadComposer.waitFor({ state: "visible" });
+  const threadFileInputs = await login
+    .getByTestId("thread-composer")
+    .locator('input[type="file"]')
+    .count();
+  if (threadFileInputs !== 1) {
+    throw new Error(
+      `[thread ${scheme}] 첨부 input은 하나여야 하지만 ${threadFileInputs}개다`
+    );
+  }
+  await threadComposer.fill("@kim");
+  await login.getByTestId("thread-mention-list").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
   // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
   await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
-  const threadShot = `${OUT_DIR}/b11-thread-composer-${scheme}.png`;
+  const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
   await login.getByTestId("thread-close").click();
