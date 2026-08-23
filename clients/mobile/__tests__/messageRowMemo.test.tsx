@@ -129,6 +129,7 @@ const CHANGED: Record<keyof MessageRowProps, Partial<MessageRowProps>> = {
       onDelete: async () => {},
     },
   },
+  quoteAttachmentCount: {quoteAttachmentCount: 2},
   rollup: {rollup: {replyCount: 2, lastReplySeq: 10, lastReplyAtMs: BASE_MS}},
   replyParent: {replyParent: message(1)},
   // 원본이 **수정되면** 인용도 따라 바뀐다(ADR-0148 규칙 3: 참조이지 사본이

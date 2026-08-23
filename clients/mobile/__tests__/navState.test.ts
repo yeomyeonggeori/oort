@@ -173,6 +173,20 @@ describe('one agent, opened from the 에이전트 tab', () => {
     });
   });
 
+  it('작성자 프로필에서 에이전트를 열면 뒤에 가려질 대화층을 걷는다', () => {
+    const conversation: NavState = {
+      tab: 'channels',
+      conversation: OPEN,
+      search: null,
+      agent: null,
+      workSession: null,
+      hosted: null,
+    };
+    const next = navReducer(conversation, {type: 'openAgent', agent: AGENT});
+    expect(next.conversation).toBeNull();
+    expect(next.agent).toEqual(AGENT);
+  });
+
   it('sits UNDER a conversation, so the DM comes back to the agent', () => {
     // The reason this layer exists: 대화 열기 on an agent's own screen must
     // return HERE, not to the list two steps out.

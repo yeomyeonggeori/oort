@@ -53,6 +53,7 @@ export function ThreadPanel({
   nowMs,
   onClose,
   onReplySent,
+  onOpenProfile,
 }: {
   root: Message;
   timeline: UseTimelineResult;
@@ -60,6 +61,7 @@ export function ThreadPanel({
   myMemberId: string;
   nowMs: number;
   onClose: () => void;
+  onOpenProfile?: (memberId: string) => void;
   /**
    * A reply was just issued. The channel underneath uses it to follow its own
    * tail, so that closing this panel lands on the thing that was just written
@@ -127,6 +129,7 @@ export function ThreadPanel({
       // 헤더의 목록은 채널로 돌아가면 늘어 있지만, 그것은 이 행동의 영수증이
       // 아니라 그 결과가 모이는 곳이다.
       onTogglePin: togglePin,
+      onOpenProfile,
       // No `onOpenThread`: see the header. Every row here is already in one.
       //
       // No `onQuote` either, and that absence is a decision rather than an
@@ -139,7 +142,7 @@ export function ThreadPanel({
       // decision about where a quoted thread reply lands (본류 or the thread)
       // and belongs to whoever makes that one.
     }),
-    [myMemberId, toggleReaction, editBody, removeMessage, togglePin],
+    [myMemberId, toggleReaction, editBody, removeMessage, togglePin, onOpenProfile],
   );
 
   const pending = timeline.repliesPending(root.id);
