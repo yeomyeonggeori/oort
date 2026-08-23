@@ -4,6 +4,7 @@ import { useCreateChannelOpen } from "@/features/channels/useCreateChannel";
 import { useAddChannelMemberOpen } from "@/features/channels/useAddChannelMember";
 import { useAgentProfileOpen } from "@/features/routing/useAgentProfile";
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
+import { OPEN_INBOX_SHORTCUT } from "@/app/keyboardShortcuts";
 
 /**
  * ⌘⇧A opens the inbox from anywhere (R-1 §2 키보드 경로). It lives in the shell
@@ -30,10 +31,7 @@ export function InboxHotkeys() {
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
       if (formDialogOpen) return;
-      if (!event.metaKey || !event.shiftKey || event.ctrlKey || event.altKey) {
-        return;
-      }
-      if (event.key.toLowerCase() !== "a") return;
+      if (!OPEN_INBOX_SHORTCUT.matches(event)) return;
       event.preventDefault();
       navigate("/inbox");
     }

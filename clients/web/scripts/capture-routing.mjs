@@ -543,6 +543,20 @@ async function shoot(page, path, shots) {
   shots.push(path);
 }
 
+async function openDirectoryRouting(page, memberId) {
+  await page
+    .locator(`[data-testid="directory-row"][data-member-id="${memberId}"]`)
+    .click();
+  await page.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
+  await page.getByTestId("member-profile-routing").click();
+  await page.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+}
+
+async function closeMemberProfile(page) {
+  await page.getByTestId("member-profile-close").click();
+  await page.getByTestId("member-profile-dialog").waitFor({ state: "hidden" });
+}
+
 async function captureScheme(browser, scheme, support) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -556,7 +570,8 @@ async function captureScheme(browser, scheme, support) {
   const tag = `${support}-${scheme}`;
   const hasEffortAxis = support !== "absent";
 
-  // 1. 디렉터리: 에이전트 행에만 붙는 [라우팅] 진입점.
+  // 1. 디렉터리: 모든 멤버 행이 공용 프로필을 열고, 에이전트 카드 안에만
+  //    [라우팅 설정] 보조 진입점이 선다.
   const directory = await context.newPage();
   await directory.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(directory);
@@ -569,8 +584,7 @@ async function captureScheme(browser, scheme, support) {
   //    그대로 적혀 있다 -- D3의 "상속 (실제값 병기)"가 실제로 보이는 프레임.
   //    absent 서버에서는 같은 프레임이 R2 M3도 함께 보여 준다: 고를 수 있는 값이
   //    상속과 같은 하나뿐이고, 그 이유가 상자 밑에 한 줄로 적혀 있다.
-  await directory.locator(`[data-testid="directory-row-profile"][data-member-id="${TIDY}"]`).click();
-  await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+  await openDirectoryRouting(directory, TIDY);
   await shoot(directory, `${OUT_DIR}/agent-profile-inherit-${tag}.png`, shots);
 
   // 2a. 저장 한 번. 화면이 아니라 **나가는 본문**을 보기 위한 단계다(R2 H2):
@@ -584,23 +598,24 @@ async function captureScheme(browser, scheme, support) {
     .selectOption(hasEffortAxis ? "hermes-lite" : "hermes-agent");
   await directory.getByTestId("agent-profile-save").click();
   await directory.getByTestId("agent-profile-dialog").waitFor({ state: "hidden" });
+  await closeMemberProfile(directory);
 
   // 2b. 저장된 오버라이드가 있는 에이전트(hermes: hermes-fast / 낮음).
   //     absent 서버에서 특히 봐야 할 프레임이다: 모델 상자는 열려 있고, 잠긴
   //     것은 강도 상자 하나이며, 그 사유가 "지금 적용: 모델 hermes-fast" 줄과
   //     모순되지 않는다.
-  await directory.locator(`[data-testid="directory-row-profile"][data-member-id="${HERMES}"]`).click();
-  await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+  await openDirectoryRouting(directory, HERMES);
   await shoot(directory, `${OUT_DIR}/agent-profile-saved-${tag}.png`, shots);
   await directory.getByTestId("agent-profile-cancel").click();
+  await closeMemberProfile(directory);
 
   // 2c. 프로필 행이 아직 없는 에이전트(회의록봇, GET 404). 폼은 열려 있고
   //     저장이 곧 생성이다. 한 줄 고지 + 액션 하나(SKILL §5 empty).
-  await directory.locator(`[data-testid="directory-row-profile"][data-member-id="${NOTE}"]`).click();
-  await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+  await openDirectoryRouting(directory, NOTE);
   await directory.getByTestId("agent-profile-empty").waitFor({ state: "visible" });
   await shoot(directory, `${OUT_DIR}/agent-profile-new-${tag}.png`, shots);
   await directory.getByTestId("agent-profile-cancel").click();
+  await closeMemberProfile(directory);
 
   // 2d. 허용목록 밖 모델을 골랐을 때 (2026-07-26 머지 리뷰 F1). 워크스페이스
   //     허용목록(`workspace.settings.allowed_agent_models`)을 내려주는 REST가
@@ -626,10 +641,7 @@ async function captureScheme(browser, scheme, support) {
           )
         : route.fallback()
     );
-    await directory
-      .locator(`[data-testid="directory-row-profile"][data-member-id="${TIDY}"]`)
-      .click();
-    await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+    await openDirectoryRouting(directory, TIDY);
     // 2a에서 이미 hermes-lite로 저장했으므로 다른 이름을 골라야 dirty가 된다.
     await directory.getByTestId("agent-profile-model").selectOption("hermes-default");
     await directory.getByTestId("agent-profile-save").click();
@@ -638,6 +650,7 @@ async function captureScheme(browser, scheme, support) {
       .waitFor({ state: "visible" });
     await shoot(directory, `${OUT_DIR}/agent-profile-model-rejected-${tag}.png`, shots);
     await directory.getByTestId("agent-profile-cancel").click();
+    await closeMemberProfile(directory);
     await directory.unroute("**/v1/workspaces/*/agents/*/profile");
   }
 
@@ -647,10 +660,7 @@ async function captureScheme(browser, scheme, support) {
   if (hasEffortAxis) {
     // 김인턴이 hermes-agent/max를 들고 있으므로, hermes-fast로 내리면 max가
     // 유효값에서 빠진다.
-    await directory
-      .locator(`[data-testid="directory-row-profile"][data-member-id="${KIM}"]`)
-      .click();
-    await directory.getByTestId("agent-profile-dialog").waitFor({ state: "visible" });
+    await openDirectoryRouting(directory, KIM);
     await directory.getByTestId("agent-profile-model").selectOption("hermes-fast");
     await directory.getByTestId("agent-profile-cleared").waitFor({ state: "visible" });
     await shoot(directory, `${OUT_DIR}/agent-profile-cleared-${tag}.png`, shots);

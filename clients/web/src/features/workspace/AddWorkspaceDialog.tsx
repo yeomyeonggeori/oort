@@ -12,6 +12,7 @@ import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { OperatorNotice } from "@/features/settings/SettingsFields";
+import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import {
   createWorkspace,
   type CreatedWorkspace,
@@ -192,7 +193,7 @@ function AddWorkspacePanel({
       onKeyDown={(event) => {
         // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장), from anywhere in the panel
         // including the trailing action row.
-        if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+        if (PRIMARY_ACTION_SHORTCUT.matches(event)) {
           event.preventDefault();
           formRef.current?.requestSubmit();
         }

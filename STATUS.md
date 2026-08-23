@@ -6,6 +6,37 @@
 - 생성기 기본값을 `same-origin`으로 교체. `--public-origin https://host`가 `CENTRIFUGO_ALLOWED_ORIGINS`에 브라우저 Origin과 RN `wss://` Origin을 멱등 추가. 기존 localhost/tauri 기본값 완화 없음.
 - 플레이북: `SELF_HOST_AGENT.md` §2.3·`SELF_HOST.md` 터널 절. 로그인 응답 `realtimeWebSocketUrl == wss://<공개호스트>/connection/websocket`이 검증 문장. `runtime-unverified(터널 e2e 브라우저 왕복)` — 오케스트레이터 몫.
 
+## 폰 사진·파일 picker 전송 (#1700, 2026-08-23)
+
+- 모바일 Composer의 2행 첨부 시트가 `expo-image-picker`·`expo-document-picker`로 사진/파일 한 건을 고르고, 코어 첨부 상태기계·실패 문장을 재사용한 인라인 트레이에서 capability PUT→완료 확인→기존 메시지 `attachmentIds` 발송까지 잇는다. 일반 대화와 스레드가 같은 경로를 쓴다.
+- PHPicker 사진 선택만 지원하고 카메라 촬영·사진 보관함 쓰기는 지원하지 않아 `NSCameraUsageDescription`·`NSPhotoLibraryAddUsageDescription`를 추가하지 않았다. CocoaPods autolinking은 `ExpoImagePicker`·`ExpoDocumentPicker`를 lockfile에 고정했고 pbxproj·entitlement·서명은 비접촉이다.
+- `runtime-unverified(iOS simulator picker interaction)`: 시뮬레이터 실행 검증은 오케스트레이터 범위다. 폰에는 독립 디자인 프리플라이트 실행 단위가 없고 관련 기계 검사는 mobile Jest 스위트 안에서 돈다.
+
+## OmD v2 Core v2 mirror + book (#1689, 2026-08-23)
+
+- project-local Claude Code 채널에 OmD v2 전체 bundle(22 skills · 19 agents · 440 references)을 설치하고 `omd doctor` ready를 닫았다. 스코프 판정(#1693)으로 bundle·`.omd/` 생성물은 레포에 버전관리하지 않고(`.gitignore`) mirror 문서(`DESIGN.md`·`docs/design-system/OMD.md`)만 랜딩했다. 기존 `momo-design-taste*`·`design-review`는 프로젝트 전용 정본/리뷰 경로로 보존하고 OmD 범용 reviewer는 보조로만 성문화했다.
+- 오르트 구름 정본 `docs/design-system/README.md`를 루트 `DESIGN.md` Portable Core v2로 사상했다. `.omd/system`은 `source-design-md`·`non-authoritative` migration candidate이며 원문 10 segment `dropped=0`, source reconstruction·projection round-trip true다. `tokens.css`·폰 `tokens.ts` 변경은 0.
+- `omd book`이 59 tokens · 5 components · 20/20 contrast pairs · 9 decisions를 읽고 `http://localhost:6060`에서 기동했다. `runtime-unverified(browser visual inspection)`: 작업 계약에 따라 브라우저 게이트는 오케스트레이터가 수행한다.
+
+## 웹 단축키 도움말 (#1687, 2026-08-23)
+
+- 사이드바 도움말 버튼과 전역 `?`가 카테고리별 단축키 Dialog를 열며, 검색·인박스·안 읽은 채널·기본 동작·메시지 행 등록처가 표시 목록과 같은 타입드 정의를 소비해 드리프트를 막는다.
+- input·textarea·contenteditable 입력 중에는 발동하지 않고, 프로그램형 opener를 Dialog에 넘겨 Esc 뒤 포커스를 돌려준다. `runtime-unverified(browser interaction gate)`: 브라우저 게이트는 오케스트레이터 실행 범위다.
+## C-1 메시지 멘션 하이라이트 (#1685, 2026-08-23)
+
+- 코어 markdown `Inline`에 원문 바이트와 case-folded handle을 보존하는 mention 노드를 추가하고, 기존 라우팅과 공유하는 경계/handle 문법으로 코드·이메일·미완성 `@`를 평문에 남겼다. safeHref와 기존 노드 의미론은 불변이다.
+- 웹·폰 타임라인은 활성 directory 멤버만 accent로 그리고 내 멘션에는 accent-soft/accentSurface를 더한다. 코어·웹·폰 전체 스위트와 양 palette 단정, 웹 디자인 preflight는 green. `runtime-unverified(browser/device visual gate)`: 오케스트레이터 실행 범위로 위임했다.
+
+## iOS 첨부 렌더·다운로드 + 멤버 프로필 (#1681, 2026-08-23)
+
+- 모바일 타임라인이 `Message.attachments` 전부를 3상태 고정 프레임/안전한 SVG 파일 카드로 렌더하고, 기존 ExpoFileSystem으로 인가 프록시를 캐시에 스트리밍한 뒤 iOS 공유시트를 연다. 실패·재시도·진행률과 인용 원본 첨부 수 표식을 포함해 조용한 유실을 회귀 단정했다.
+- 아바타·작성자명에서 사람/에이전트 프로필 시트를 열어 이름·핸들·kind·4개 멤버십 상태·DM 가능 여부를 보여 주며, 에이전트는 기존 상세 표면으로 잇는다. 설정·관리 표면과 사진 picker는 추가하지 않았다.
+## U-1 웹 메시지 표면 완결 (#1679, 2026-08-23)
+
+- 기존 `MessageActions` 인벤토리를 ⋯·우클릭·길게 누르기가 함께 쓰고, 세 경로의 메시지 복사는 렌더 결과가 아닌 원문 Markdown을 `복사됨` 자리 피드백으로 건넨다. 선택 영역 우클릭은 브라우저 기본 메뉴에 양보한다.
+- 사람·에이전트 공용 멤버 프로필을 메시지 아바타(행 로빙 그룹)·디렉터리 행·DM 헤더에 연결했다. 상태/역할/관리자·DM 진입과 에이전트 라우팅 보조 액션, empty/loading/error/offline 및 Esc 포커스 복귀를 한 다이얼로그가 맡는다.
+- 타입·단위·빌드는 green. `runtime-unverified(browser interaction gate)`: 이 샌드박스가 Chromium Mach port 등록을 거절해 작성한 세 표면/선택/Esc 실브라우저 게이트를 시작하지 못했다.
+
 ## claim 부트스트랩 ttl_seconds 모호성 (#1673, 2026-08-23)
 
 - `infra/prod/bootstrap_owner_claim_if_absent.sql` SELECT INTO를 테이블 별칭 `i`로 한정. PL/pgSQL 변수 `ttl_seconds`와 컬럼 동명으로 `MOMO_BOOTSTRAP_CLAIM=1` migrate가 스키마 78/78 뒤 Exited 1이던 P1.

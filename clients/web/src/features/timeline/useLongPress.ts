@@ -34,8 +34,8 @@ export interface LongPressHandlers {
  * 길게 눌러 반응해야 하는 요소에 그대로 펼쳐 넣는다.
  *
  * `onContextMenu`는 **터치일 때만** 막는다: 안드로이드는 길게 누르기에 자기
- * 컨텍스트 메뉴를 이 시트 위로 띄우지만, 데스크탑의 우클릭 메뉴(복사·검사)는
- * 진짜로 쓸모가 있고 거기엔 길게 누르기가 없다.
+ * 컨텍스트 메뉴를 이 시트 위로 띄운다. 데스크탑 우클릭은 MessageRow의 공용 액션
+ * 메뉴가 받고, 선택 영역이 있으면 브라우저의 부분 복사·검사 메뉴에 양보한다.
  */
 export function useLongPress(
   onLongPress: () => void,

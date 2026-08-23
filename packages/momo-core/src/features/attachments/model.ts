@@ -68,13 +68,16 @@ export const MAX_ATTACHMENTS_PER_MESSAGE = 20;
 export const INLINE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
 
 /**
- * 업로드가 실패한 이유, 화면이 구분할 수 있는 만큼만.
+ * 첨부 준비·업로드가 끝나지 않은 이유, 화면이 구분할 수 있는 만큼만.
  *
  * macOS는 `fileTooLarge`와 `unavailable` 둘로 접었다(`UploadIssue`). 그 둘은
- * 그대로 두고 셋을 더한다 — 셋 다 **사람이 할 수 있는 다음 행동이 다르기**
- * 때문이고, 그것이 이 앱이 오류 문장에 요구하는 것이다(design-taste-web §5:
+ * 그대로 두고 화면이 구분할 이유를 더한다 — 각자 **사람이 할 수 있는 다음
+ * 행동이 다르기** 때문이고, 그것이 이 앱이 오류 문장에 요구하는 것이다
+ * (design-taste-web §5:
  * 무슨 일이 있었는가 + 다음에 무엇을 하는가).
  *
+ *   selection-cancelled → 그대로 작성한다    (실패가 아니고 재시도도 아니다)
+ *   permission-denied  → 기기 설정을 연다    (picker를 다시 열기 전 선행 행동)
  *   too-large   → 다른 파일을 고른다        (재시도는 의미가 없다)
  *   forbidden   → 이 방에서는 못 한다        (재시도는 의미가 없다)
  *   no-archive  → 관리자에게 알린다          (재시도는 의미가 없다)
@@ -83,6 +86,8 @@ export const INLINE_PREVIEW_MAX_BYTES = 8 * 1024 * 1024;
  *   unavailable → 다시 올린다               (재시도가 정답이다)
  */
 export type UploadIssue =
+  | "selection-cancelled"
+  | "permission-denied"
   | "too-large"
   | "forbidden"
   | "no-archive"
@@ -184,6 +189,10 @@ export const ATTACH_COPY = {
  */
 export function uploadIssueCopy(issue: UploadIssue): string {
   switch (issue) {
+    case "selection-cancelled":
+      return "선택을 취소했습니다";
+    case "permission-denied":
+      return "사진 접근 권한이 꺼져 있습니다";
     case "too-large":
       return "100MB를 초과함";
     case "forbidden":
@@ -209,6 +218,10 @@ export function uploadIssueCopy(issue: UploadIssue): string {
  */
 export function uploadIssueNext(issue: UploadIssue): string | null {
   switch (issue) {
+    case "permission-denied":
+      return "기기 설정에서 사진 접근을 허용한 뒤 다시 시도하세요";
+    case "selection-cancelled":
+      return null;
     case "too-large":
       return "더 작은 파일을 고르세요";
     case "forbidden":

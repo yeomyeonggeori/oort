@@ -11,6 +11,7 @@ import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { useSession } from "@/app/session";
+import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import { RoutingFields } from "./RoutingFields";
 import {
   useAgentEditingCapability,
@@ -310,7 +311,7 @@ function AgentProfilePanel({
   );
 
   const onKeyDown = (event: React.KeyboardEvent) => {
-    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+    if (PRIMARY_ACTION_SHORTCUT.matches(event)) {
       event.preventDefault();
       formRef.current?.requestSubmit();
     }

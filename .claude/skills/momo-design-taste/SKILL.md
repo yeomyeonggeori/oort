@@ -40,6 +40,11 @@ across 10 reports), and it was mostly caused by nobody knowing which axes are un
 A skill that restates rules invites a reader to believe the restatement is the rule; the
 canonical page is versioned with the code that enforces it, and this file is not.
 
+The root `DESIGN.md` and `.omd/system/*` are OmD Core v2 **non-authoritative mirrors**
+of that page. They make the same system portable and browsable; they do not add a third
+dialect or outrank this router. The exact coexistence contract is
+`docs/design-system/OMD.md`.
+
 ## 2. The phone surface has no dialect skill, and that is stated rather than papered over
 
 `momo-design-taste-web` is a real dialect: it translates the shared rules into Tailwind
