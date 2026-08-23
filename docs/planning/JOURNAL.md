@@ -4,6 +4,73 @@
 > 규칙: 항목당 5줄 이내. 새 항목은 맨 위에 추가하고 기존 항목은 수정하지 않는다. 결정·증거·계획의 정본이 아니다(그건 ADR/STATUS/ROADMAP) — 여기는 "무엇을 하다 어디서 멈췄나"만. 최신이 위.
 
 ---
+## 2026-08-23 (Fable) · ★M-2 폐곡선 — #1702 머지(track/uxui=5679f6c8)·#1700 close. UXUI 파도 전량 종결
+- sol 워커 완주(1288 tests·PR #1702·정지 계약 준수) → 오케스트레이터 검수: 공유 코어 가산 무해(웹 tsc+첨부 23 그린)·project-shape 보정 스코프드·PHPicker selection-only라 권한 키 불요 판단 타당.
+- design-review 1차 PASS(High 2: picker 제시 레이스·iOS 낭독 무음) → **오케스트레이터 수리 065cb6a6**(onDismiss+폴백 이원화·draftAnnouncement+announce 배선, 레드 프루프 3/3) → **재판정 PASS(0·0)** → 머지. Medium 4·Nit 5·실기 미검증은 **#1703** 적립.
+- 이로써 UXUI 완성도 파도 8 goal(U-1~5·7·C-1·M-1+M-2) **전량 랜딩**. 남은 실기 확증=iOS 시뮬레이터 세션(Slow Animations 오독 주의 — 재판정 주석).
+## 2026-08-23 (Fable) · ★T-9 폐곡선 — #1701 머지(track/engine=462efd67)·#1678 close
+- grok 워커 커밋(13파일·+806) 인수 검수: 유닛 283·red-proof 통합 3분기·생성기 멱등·docs 493 facts 전부 그린 → PR #1701 CI 그린 → 머지. ENGINE_HANDOFF **A-29 info**(UXUI 소비 작업 없음 — 클라 verbatim 불변). ADR-0167 집행 완결, D8 P1 원천 수리 폐곡선.
+- 운영 사고 복구: 호스트 ENOSPC 여파로 Colima VM containerd 블롭 I/O 에러(컨테이너 좀비化) → VM 재시작으로 완전 복구(pgdata 무손실·api 브리지 재기동). **교훈: 호스트 디스크 고갈은 VM 스파스 디스크를 통해 컨테이너층까지 전파된다 — 대형 빌드 전 df 확인.**
+- ADR-0169(로컬 보관소)·ADR-0170(언퍼얼) Proposed 기안·티켓(#1696/#1698) 링크. M-2 sol 워커 계속 가동 중.
+## 2026-08-23 (Fable) · ★성재 일괄 위임("다 승인할게") 집행 — ADR 2건 Accept·워커 2기 발사·U-8 티켓
+- **컴포저 하단 패딩 질문 해부(성재)**: 밴드=힌트 행 26px+상시 예약 타이핑 라인 행 26px(H-2 자리예약 설계). Slack식 한 행 스왑 제안 → **U-8=#1699** 티켓화(즉흥 수리 금지 규율).
+- **승인 집행**: ADR-0167·0168 **Accepted**(위임 기록 명시) · rescue stash **drop 완료**(보험 패치 스크래치패드) · **T-9(#1678) grok 워커 발사**(track/engine, acceptEdits, 감시자 무장) · **M-2=#1700 발급+패킷**(`handoffs/2026-08-23-m2-photo-picker-packet.md`)+**sol 워커 발사**(goal_claim, feat/1700-picker-p0-adr-0168, 감시자+stall 감지).
+- **합류 릴레이(큐④)**: 토큰 2회 붙여넣기만 성재 몫으로 남긴 릴레이 킷 완성 `claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md`(1회용 pairing/active 자격증명은 Fable 비대행 경계).
+- 운영: ENOSPC 재발(tauri 빌드) → engine 구 target 3.6G+tauri target 회수, 26Gi 확보. main repo server-rust/target 12G는 QA 서버 가동 중이라 보존(세션 말미 회수 후보). #1696·#1698 방향은 승인됨 — ADR 기안=다음 순번.
+## 2026-08-23 (Fable) · ★실결함 수리 랜딩(#1697)+기본 기능 4축 검수+실시간 리그 성립
+- **U-3 실결함 수리**: 라이트박스 512px 스트립 — cn()의 tailwind-merge가 하우스 측정명 미인지→max-w-none 패배. 수리=단어형 --spacing-* 19종 전량 등록+정본 파싱 가드 테스트(#1697 merged, track/uxui=7124598b). design-review PASS(Blocker 0·H-1/M-1 커밋 내 종결). 레드 프루프 2건 실측.
+- **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
+- **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
+- 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.
+## 2026-08-23 (Fable) · ★재개 큐 소진: UXUI 재연 QA 대행 5/7 PASS + U-7 스코프드 랜딩 + ADR-0168 기안
+- 성재 "검수 요청 부분 알아서 처리" → **재연 QA를 Fable이 브라우저 자동화로 대행**: 로컬 프록시(localhost:23080, 정적=track/uxui dist·/v1=D8 포워딩)로 same-origin 리그 구성. U-5·U-2·C-1·U-1·U-4 전부 PASS(포커스 복귀 수리분 실렌더 재확인 포함). 증거 11샷+리포트 `claudedocs/uxui-qa-d8-20260823/`.
+- **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
+- **U-7 판정 집행**: DESIGN.md·OMD.md 등 문서 6파일+.gitignore만 랜딩(#1695 merged, track/uxui=35074dbd)·번들 583파일은 비버전관리. #1693 close·#1689 종결. 전체 번들은 feat/1689-design-md-core-v2-book@272dd4c2 보존.
+- **ADR-0168 Proposed 기안**(M-2 선행 — expo-image-picker+document-picker 낱개, D1 연장). rescue stash=역행 패치 확증(패치 보험 `scratchpad/uxui-rescue-…patch.gz`)·drop만 성재 1커맨드 필요. 남은 성재 큐: ADR-0167/0168 Accept·T-9 발사·U-3/M-1 실체감(선택).
+## 2026-08-23 (Fable) · ★Docker Desktop 반복 hung 근본해결=Colima 전환 + UXUI 재연 앱 빌드
+- 성재 "도커 데스크탑 자꾸 문제(재설치 3회)—원인 파악·해결 or 대안 적용". **근본원인=AppTranslocation**: `/Applications/Docker.app` quarantine(Homebrew Cask)→Gatekeeper가 격리 임시사본에서 실행→소켓 경로 꼬여 데몬 hung. brew cask가 매 설치 quarantine 재부착→재설치 반복 무의미. xattr 제거는 sandbox ACL로 권한막힘.
+- **해결=Colima 전환**(정본 메모리 `docker-desktop-translocation-colima.md`): brew install colima→`colima start --vm-type vz --cpu4 --memory8 --disk60`(Apple Virtualization)→context 자동전환·compose v2 플러그인 링크·자동시작 등록·Docker Desktop 로그인항목 제거. **안정성 실증: hello-world·amd64 에뮬·momo dev스택(pg18+centrifugo) healthy·CPU 0.04%**(Docker Desktop 146~214% 발열 대비 극명). hung 0.
+- **UXUI 재연 앱 빌드**: track/uxui(배치1+2 web) Tauri debug 빌드→`~/Desktop/oort-uxui-review.app`(quarantine 제거·ad-hoc). 재연 백엔드=D8 Funnel 서버(healthz 200·실시간 wss 수리됨) 재사용(로컬 스택 불필요 — UXUI는 web·서버 API 무변경). 성재: 앱 실행→cursor.tailb1aad3.ts.net→owner 로그인.
+## 2026-08-23 (Fable) · UXUI 배치 2 검수·랜딩 4/5 + U-7 보류 + 재연 docker hung — Fable 재개 체크포인트
+- 성재 지시: docker 내가 재기동·재연 준비 / 지금 도는 작업 끝나면 체크포인트·정지(Fable 재개).
+- **배치 2 랜딩 4/5**(sol 워커): U-5(#1687 단축키 도움말·드리프트 가드)·C-1(#1685 멘션 코어+웹/폰·회귀0)·U-4(#1688 컴포저 이모지/스레드/패딩 — 검수 수리1: 이모지 후 textarea 포커스 복귀, gate-composer 적발)·U-3(#1686 라이트박스 — CI 자동머지 대기). 각 리베이스 STATUS 인접충돌 해소·게이트 PASS.
+- **U-7(#1689 OmD) 보류**: PR #1693 — 590파일·389k줄(.omd 생성물+omd 스킬 번들). DESIGN.md·OMD.md 정당하나 대량 커밋 스코프=성재 승인 사안(계약 §함정 명시). 판정 요청 코멘트·브랜치 보존.
+- **재연 막힘**: 로컬 docker 데몬 hung(killall=프로세스 없음→open해도 미기동, 전부 120s timeout). Docker 재설치/재부팅 추정. web dist는 빌드 완료. docker 회복 후 스택+데스크탑 빌드. **재개 진입점 `handoffs/2026-08-23-uxui-wave-resume-checkpoint.md`.**
+## 2026-08-23 (Fable) · UXUI 배치 2 발사(sol 5기) + 재연 web 빌드 — 로컬 docker hung
+- 성재 결정: 재연=로컬 풀스택+데스크탑 빌드 · 배치 2=지금 바로 발사.
+- **배치 2 티켓 5건+발사**: C-1=#1685(멘션 inline·코어 단독)·U-3=#1686(라이트박스)·U-5=#1687(단축키 도움말)·U-4=#1688(컴포저 이모지피커+스레드 동등성+패딩 폴리시)·U-7=#1689(OmD v2 채택). sol 5기 병렬 spawn·워처 무장. M-2(사진 picker)는 ADR-0137 D1 기안 선행이라 별도.
+- **재연 준비**: momo-tracks/uxui를 e14faa50(배치1 전체) 동기화·web dist 빌드 완료(stale node_modules→npm ci로 해소). **로컬 docker 데몬 hung**(version·ps 120s timeout — momo Docker 발열/누적 재발) → 풀스택 기동 불가. **성재 Docker Desktop 재시작 필요** 후 스택 up+데스크탑 재빌드 이어감.
+## 2026-08-23 (Fable) · UXUI 배치 1 완전 랜딩 — M-1·U-2·U-1 3/3 track/uxui (PLN-20260823-UX)
+- **U-1(#1679→PR#1684) 머지** — 배치 1 완결. track/uxui=e14faa50(M-1 df12da8f·U-2·U-1 6f1fa145 순). 세 이슈 close·워크트리 3개 회수(디스크 44Gi).
+- U-1 리베이스 2회전 수동 해소: STATUS.md 인접추가 + ChatShell 헤더 3분기 병합(U-2 flex-col 구조 + U-1 DM 프로필 트리거). 병합 후 gate-quote·gate-channel-header 둘 다 PASS(양 계약 동시 충족 실증)·CI 8pass.
+- 파도 성과: 메시지 우클릭 메뉴·원문 복사·멤버 프로필 카드(웹)·채널 토픽/멤버목록(웹)·iOS 첨부 렌더·다운로드(P0 조용한 유실 폐쇄)·프로필 시트. 감사가 밝힌 "발견성 결함"(기능은 있는데 안 보임)을 우클릭·프로필 진입점으로 해소.
+- **다음**: 성재 수동 재연(빌드 원본=track/uxui) + 배치 2 발사(C-1 멘션·U-3 라이트박스·U-4 컴포저패딩·U-5 단축키·M-2 picker·U-7 OmD).
+## 2026-08-23 (Fable) · UXUI 파도 배치 1 검수·랜딩 — sol 3워커 완주·Fable 재판정 수리 3
+- 세 sol 워커 커밋 완료(exit 101은 codex 런타임 오류=캐시 TTL·디스크 풀, 산출물 무결). Fable 검수 이어받아 게이트·리뷰·랜딩 집행. **워커 브라우저 게이트 승인 요청은 계약대로 취소·Fable이 playwright 게이트 직접 실행.**
+- **U-2(#1680→PR #1682)**: 채널 토픽 표시·전체열람+멤버목록 패널. 검수 중 게이트 FAIL 2건 수리(테스트 상수 trailing space·DialogTrigger 오용→정본 프로그래매틱 패턴). gate-channel-header PASS+red-proof.
+- **U-1(#1679→PR #1684)**: 우클릭 메뉴+원문복사+멤버 프로필 카드. correctness 리뷰 Blocker 0(선택 양보 이중가드·탭스톱 0·결정주석 갱신). gate-quote 확장 PASS. legal 번들 재생성 정당(context-menu MIT).
+- **M-1(#1681→PR #1683) 랜딩됨**: iOS 첨부 렌더/다운로드(조용한 유실 P0 폐쇄·회귀단정)+프로필 시트. jest 73스위트/1274 전부. **track/uxui 머지 완료(0f96d6f3)**. 이탈 1(expo-file-system top-level hoist — 이미 링크된 Pod, 새 네이티브 0·성재 판정 코멘트).
+- design 검증: design-review 서브에이전트 3기 좀비화(mailbox 미전달)·재spawn도 오작동 → **Fable 코드+토큰+프리플라이트 직접 판정**(실렌더는 환경제약·성재 검수빌드 최종). 세 PR design Blocker 0(4상태·위계·키보드·죽은컨트롤 없음). 디스크 100%→오래된 워크트리 node_modules 회수 2.4Gi(docker prune은 분류기 차단·momo-docker-reclaim 성재).
+- 랜딩 순서 M-1→U-2→U-1(U-1·U-2 ChatShell 헤더 공동접촉—U-1 DM 프로필 트리거). U-2 리베이스 완료·CI 대기. 배치 2 대기: C-1 멘션·U-3 라이트박스·U-4 컴포저패딩·U-5 단축키·M-2 picker(ADR)·U-7 OmD.
+## 2026-08-23 (Fable) · UXUI 완성도 파도 발사 — 감사 2기·티켓 3건·sol 워커 병렬 3 (PLN-20260823-UX)
+- 성재 발제: 프로필 모달·우클릭(이모지/리플라이)·다운로드·메신저 컨텍스트·패딩(컴포저 캡처)·iOS 동반·omd v2 디자인시스템·**워커=sol(codex)**. 계획 정본 `research/2026-08-23-uxui-completeness-wave-plan.md`.
+- **감사가 판을 뒤집음**(Explore 2기, file:line 전수): 리액션·스레드·수정/삭제·핀·호버메뉴·타이핑·안읽음·첨부(웹)·마크다운 전부 EXISTS — **성재가 D8에서 못 찾은 것=발견성 결함**. 진짜 MISSING: 사람 프로필 카드·메시지 복사/퍼머링크·우클릭(의도적 부재 기록 — 오너 지시로 재개정)·채널 토픽 표시·헤더 멤버목록·멘션 렌더(코어 공동)·이모지 피커·라이트박스·단축키 도움말·**폰 첨부 전면 부재(조용한 유실 P0)**.
+- 파생 발견 2: ①RN Origin 블로커(셀프호스트가 iOS 실시간 전부 거부) → #1678 AC 합류 ②uxui 워크트리 정체불명 스테이징(270파일 −64k줄) → stash `rescue-20260823` 보존 후 동기화(성재 확인 대기).
+- **배치 1 발사**: U-1=#1679(우클릭+복사+프로필 카드) · U-2=#1680(채널 토픽+멤버목록) · M-1=#1681(폰 첨부 렌더/다운로드+프로필 시트) — 통합 패킷 `handoffs/2026-08-23-uxui-wave-packet.md`, sol 병렬 3 spawn(워처+행 감지 무장). 배치 2 대기열: C-1 멘션 노드(코어)·U-3 라이트박스·U-4 컴포저/패딩·U-5 단축키 도움말·M-2 사진 picker(ADR 게이트)·U-7 OmD v2 채택.
+## 2026-08-23 (Fable) · D8 P1 원천수리 채비 + 그록봇 릴레이 2건 직접 전송(성재 지시)
+- 성재 "알아서 해결·원천적 방법 마련" → **ADR-0167 Proposed**(`0167-selfhost-realtime-same-origin-advertisement.md` — `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 서버가 요청 XFP/Host에서 파생, 절대 URL은 verbatim 유지=ADR-0110 증보. 출하된 v0.1.1 클라가 무변경 수혜). 부수 결함도 포섭: 생성기 CENTRIFUGO_ALLOWED_ORIGINS에 공개 오리진 부재(브라우저 403 잔존 경로).
+- **T-9=#1678 발급**+패킷 `handoffs/2026-08-23-selfhost-realtime-sameorigin-packet.md`(ready·착수 게이트=ADR-0167 Accept·발사=성재 go 대기).
+- **그록봇 릴레이 직접 전송**(성재 "하라해줘" — cliclick UI 스테이징+전송, CDP 비사용): [1] 즉석 완화=env 2줄(WS URL wss 전환+오리진 추가)+api·centrifugo 재기동 [2] **온보딩 전 과정 단계별 캡처**(/workspace/oort-onboarding-captures/ 번호 파일+INDEX.md 헤맴 코멘트·시크릿 마스킹) — 성재의 aside/cursor/codex급 온보딩 와우 갭 검수 재료. 수리 폐곡선 완료(15:53 릴레이→15:54 wss 실측→15:59 REST 발신 메시지 데스크탑 라이브 도착·프레즌스 점등). 캡처 01~18 생성 확인(INDEX.md — 07 migrate 실패·12 tunnel 429·14 로그인 반복 등 마찰 지도). 잔여=에이전트 합류·성재 수동 판정·ADR-0167 Accept·T-9 발사.
+## 2026-08-23 (Fable) · D8 데스크탑 실접속 — Fable 직접 수행: 코어 GREEN·실시간 레일 P1 발견
+- 성재 지시로 D8을 Fable이 로컬 맥에서 직접 수행(스크린샷 14장 `claudedocs/e2e-d8-desktop-20260823/`). v0.1.1 dmg 공증 PASS→설치→Funnel 주소→claim 소비·비번 설정→**데스크탑 owner 로그인 성공**→첫 메시지 REST 전송·렌더. **T-5 그록봇 감지 CTA 실환경 노출.**
+- **★P1**: 로그인 응답 `realtimeWebSocketUrl=ws://localhost:8088/...`(`self_host_env.sh:796` 터널 무인지·ADR-0110 verbatim) → 원격 데스크탑 실시간 연결 실패. R-2는 동일 호스트라 가림막. **Funnel WS 101 통과 실측 — env 1줄+api 재기동이면 수리.**
+- 소견: owner 시드 표시명 "데모 사용자/@demo" 노출 · SELF_HOST_AGENT.md에 터널 WS URL 절차 부재. CDP READ/SEND는 분류기 차단 — claim URL은 화면 캡처+실링크 클릭으로 회수(비유입 규율 유지).
+- 잔여: ①WS env 수리(그록봇 릴레이 지시문 성재 전달) ②에이전트 합류(pairing 릴레이) ③성재 수동 재연·수용 판정. 스택·Funnel 보존, 상세=모계획 §11 갱신 2.
+
+## 2026-08-23 (Fable) · 파도 종결+main 승격+★v0.1.1 multi-arch 첫 발행 — E2E만 남음
+- Q-LEGAL: 성재 "브리핑 검토 후 머지" 선택→브리핑 정본 작성·승인→§0/§3.1 체험위상 보강(워커)→T-2 머지. **파도 7/7 전량 랜딩.**
+- **승격·재발행 체인(성재 "2번도 ㄱㄱ" 위임)**: promote #1665(양 트랙+planning 플러시·충돌 5파일 해소·merge_tree PASS — RED 2종은 deps 신선도+preview-guard flake 판정)→main=1b79bc65→sync #1666/#1667→publish-images dispatch+release 승인 2회(각 잡 게이트)→**amd64+arm64 manifest list 첫 실전**(attestation 2본 PASS)→v0.1.1 태그·Release→#1669 digest 문면 현행화→#1670 승격→sync #1671/#1672. topology PASS.
+- 잔여: dmg 실공증(분류기 차단 — 성재 `! scripts/publish_next_build.sh --public --version 0.1.0` 후 Fable 업로드)·E2E 수용 런(지시문 제시)·R-1 마커 재확인. 정책 마커 누계 6회 — 절차가 일상 회전에 들어옴.
 
 ## 2026-08-23 (Fable) · T계열 파도 6/7 랜딩 — grok 워커 6완주·수리 5회전·정책 마커 3회
 - 성재 "ㄱㄱ" 발사 go + ADR-0166 Accepted → V-1·T-4·T-5·T-6·T-1·T-3 순차 완주(전부 track 랜딩·close·잔재 회수). 검수 체제: Fable diff 리뷰+재판정 실측+design-review 에이전트(fresh context, T-5/T-6/T-1 — 실렌더 촬영 2건 포함).
