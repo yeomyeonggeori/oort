@@ -6,6 +6,11 @@
 - 로그아웃·계정 identity 변경·토큰 만료 provider 해제는 모든 첨부 드래프트와 native PUT을 비우고 세션 세대를 올려 구 bearer로 시작한 늦은 업로드 응답을 폐기한다. picker의 도달 불가 `rejected`는 일부 무음 수락 대신 단정 실패하며, grabber·트레이 상한은 전용 명명 측정을 쓴다.
 - 모바일·공유 코어 전체 테스트와 tsc는 green이다. `runtime-unverified(iOS simulator visual interaction)`: 실기·시뮬레이터 검증은 패킷의 명시 비스코프이며, 폰에는 독립 디자인 프리플라이트 실행 단위가 없다.
 
+## U-8 웹 컴포저 하단 메타 1행 통합 (#1699, 2026-08-23)
+
+- 넓은 화면의 전송 키 힌트와 상시 예약 타이핑 라인이 하나의 26px 행을 공유한다. 기본에는 힌트, 사람이 작성 중이면 같은 자리에 타이핑 문장이 서며, 힌트가 없거나 폰인 기본판은 기존 빈 글자 상자가 높이를 예약한다. AgentActivityBar 인접성과 비-live 낭독 계약은 유지했다.
+- 상태 전이·폰 예약판·정본 토큰 계산(18px line-height + 8px padding = 26px)을 신규 Vitest로 고정했고 웹 전체 1,412 tests·tsc·lint·디자인 프리플라이트가 PASS했다. `runtime-unverified(browser typing gate/screenshots)`: Chromium Mach-port와 Chrome remote-debugging 허용 대기 때문에 브라우저 evidence는 오케스트레이터 범위다.
+
 ## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
 
 - `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).
