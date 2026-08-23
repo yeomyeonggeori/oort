@@ -99,7 +99,7 @@ DropdownMenuContent.displayName = MenuPrimitive.Content.displayName;
  * suppressed. The house focus ring is restored on the same class list (§6): it
  * is what tells a Tab user which row Enter will fire.
  */
-function menuRowClass({
+export function menuRowClass({
   tone,
   layout = "row",
   className,

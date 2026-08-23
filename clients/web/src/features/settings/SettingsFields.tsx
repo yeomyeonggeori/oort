@@ -9,6 +9,7 @@ import {
 import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
+import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { choiceRadiosHintId } from "./fieldIds";
 
 // =============================================================================
@@ -534,22 +535,7 @@ export function CopyButton({
   subject?: string;
   testId?: string;
 }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-    } catch {
-      // Clipboard permission can be denied; the value stays selectable on screen.
-      return;
-    }
-    setCopied(true);
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setCopied(false), 2000);
-  }
+  const { copied, copy } = useClipboardCopy(value);
 
   // The visible text carries the result, so the accessible name has to move
   // with it: a fixed aria-label would leave a screen reader on "복사" after the
@@ -561,7 +547,7 @@ export function CopyButton({
       type="button"
       variant="outline"
       size="sm"
-      onClick={copy}
+      onClick={() => void copy()}
       aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}
     >

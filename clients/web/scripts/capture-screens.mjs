@@ -2986,6 +2986,8 @@ async function captureMobile(browser, scheme) {
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
     .first()
     .click();
+  await page.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
+  await page.getByTestId("member-profile-dm").click();
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
   await page.getByTestId("composer-dm-hint").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -3430,7 +3432,7 @@ async function captureScheme(browser, scheme) {
   shots.push(nonAdminShot);
 
   // 3b. 멤버 디렉터리 (MOMO-611): the roster as a list, the role labels, the
-  //     human/agent split, and the row that starts a DM.
+  //     human/agent split, and the row that opens the shared profile card.
   const directory = await context.newPage();
   await directory.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(directory);
@@ -3452,11 +3454,13 @@ async function captureScheme(browser, scheme) {
   shots.push(switcherShot);
   await directory.keyboard.press("Escape");
 
-  // 3d. the DM that a directory row opens: same timeline anatomy as a channel.
+  // 3d. the DM that a directory profile opens: same timeline anatomy as a channel.
   await directory
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
     .first()
     .click();
+  await directory.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
+  await directory.getByTestId("member-profile-dm").click();
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await assertPausedNoticeFolded(directory, `dm ${scheme}`);

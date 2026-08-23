@@ -69,6 +69,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
+import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -93,6 +94,7 @@ export function ChatShell() {
   const isOffline = useOffline();
   const params = useParams();
   const navigate = useNavigate();
+  const openMemberProfile = useOpenMemberProfile();
 
   // ── 1k-scroll gate: ?stress=N renders synthetic rows, no network ───────────
   const stressCount = useMemo(() => {
@@ -754,7 +756,8 @@ export function ChatShell() {
               {/* 검수 피드백 #3 ②: 채널 이름을 누르면 채널을 다루는 메뉴가 선다.
                   진짜 채널(공개/비공개)에서만 — DM은 이름을 바꾸거나 나갈 대상이
                   아니고, 스트레스 픽스처는 뒤에 서버 행이 없다. h1은 그대로 제목의
-                  지표(landmark)로 남고, 트리거 버튼이 그 안에 산다. */}
+                  지표(landmark)로 남고, 트리거 버튼이 그 안에 산다. DM 헤더의 이름은
+                  상대 프로필 카드를 여는 트리거다(#1679). */}
               {stressCount === 0 && channel && channel.kind !== "dm" ? (
                 <h1 className="flex min-w-0 items-center text-body font-semibold">
                   <ChannelHeaderMenu
@@ -764,6 +767,23 @@ export function ChatShell() {
                     selfMemberId={session.member.id}
                     selfRole={memberFor(directory, session.member.id)?.role}
                   />
+                </h1>
+              ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
+                <h1 className="flex min-w-0 items-center text-body font-semibold">
+                  <button
+                    type="button"
+                    data-testid="dm-profile-trigger"
+                    aria-label={`${label} 프로필 열기`}
+                    onClick={(event) =>
+                      openMemberProfile(peer.id, event.currentTarget)
+                    }
+                    className={cn(
+                      "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
+                      labelParts?.isAgent ? "text-agent" : "text-ink"
+                    )}
+                  >
+                    {labelParts?.text ?? label}
+                  </button>
                 </h1>
               ) : (
                 <h1
