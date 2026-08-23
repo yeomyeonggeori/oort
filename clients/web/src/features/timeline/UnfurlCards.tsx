@@ -31,6 +31,10 @@ function UnfurlCard({ unfurl }: { unfurl: MessageUnfurl }) {
         href={unfurl.url}
         target="_blank"
         rel="noreferrer noopener"
+        // 행의 로빙 그룹에 합류한다(AttachmentList·QuoteBlock과 같은 문법). 카드는
+        // 본문 URL 링크가 이미 가진 목적지의 액세서리라, 자연 탭 스톱으로 서면
+        // 링크 메시지마다 키보드 여정이 카드 수만큼 늘어난다(리뷰 Blocker-1).
+        data-row-action=""
         className="flex min-w-0 flex-1 items-stretch rounded-md focus-visible:focus-ring"
         data-testid="unfurl-card"
         onClick={(event) => {
@@ -105,6 +109,8 @@ export function UnfurlCards({
 
   const removeControl = (index: number) =>
     index === 0 && canRemove && onRemove ? (
+      // X는 상시 노출이 의도다: hover 표출은 카드 이미지 위에서 발견 불가능하고,
+      // 제거는 이 카드의 유일한 소유자 액션이라 숨길 이유가 없다(리뷰 Nit-1 기록).
       <button
         type="button"
         data-row-action=""
@@ -130,7 +136,7 @@ export function UnfurlCards({
           // all, so this placeholder can only represent a real pending record.
           <div
             key={state.unfurl.id}
-            className="relative h-rail-tile rounded-md border border-line bg-surface-hover"
+            className="relative h-rail-tile rounded-md border border-line bg-muted-soft"
             role="status"
             aria-label="링크 미리보기를 불러오는 중"
             data-testid="unfurl-pending"
@@ -140,7 +146,7 @@ export function UnfurlCards({
         ) : (
           <div
             key={state.unfurl.id}
-            className="relative flex overflow-hidden rounded-md border border-line bg-surface-raised hover:bg-surface-hover"
+            className="relative flex overflow-hidden rounded-md border border-line bg-surface-raised"
           >
             <UnfurlCard unfurl={state.unfurl} />
             {removeControl(index)}

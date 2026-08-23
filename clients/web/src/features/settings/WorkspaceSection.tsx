@@ -87,7 +87,7 @@ function WorkspaceUnfurlSetting({
       title="링크 미리보기"
       lines={[
         "워크스페이스 전체에서 서버가 새 링크를 확인하고 미리보기를 만들지 정합니다.",
-        "개인의 ‘링크 미리보기 접기’는 렌더만 바꾸며 이 서버 설정과 별개입니다.",
+        "개인의 「링크 미리보기 접기」는 렌더만 바꾸며 이 서버 설정과 별개입니다.",
       ]}
     >
       {query.isPending && <SkeletonRows rows={1} />}

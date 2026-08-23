@@ -84,32 +84,33 @@ export function useRowRovingFocus(
   useEffect(() => {
     const root = ref.current;
     if (!root) return;
-    const items = rowActionItems(root);
-    if (items.length === 0) {
-      // **컨트롤이 하나도 없는 행은 자기 자신이 정거장이 된다** (리뷰 W-4).
-      //
-      // 이 규칙이 지키는 것은 「행 하나 = 탭 스톱 하나」의 나머지 절반이다. 위
-      // 문단은 여섯 개를 하나로 줄이는 이야기였고, 여기는 **0개를 하나로 올리는**
-      // 이야기다. 액션 없이 마운트되는 표면(작업 세션 이벤트 로그, 읽기 전용
-      // 스레드)과 액션을 내놓지 않는 행(삭제된 메시지)에는 포커스 받을 자식이
-      // 없어서, 거터의 시각을 드러내는 `group-focus-within`이 걸릴 자리가 아예
-      // 없었다 — 눈으로 읽으며 키보드만 쓰는 사람에게는 시각으로 가는 길이
-      // 하나도 없었다는 뜻이다(보조기술은 `<time>`이 DOM에 있어 영향 없다).
-      //
-      // 예산은 늘지 않는다: 이 갈래가 도는 행은 정의상 다른 정거장이 0개다.
-      // `:focus-within`은 **자기 자신이 포커스일 때도** 참이므로 시각을 드러내는
-      // 규칙은 이미 있는 그것을 그대로 쓴다.
-      root.tabIndex = 0;
-      return;
-    }
-    // 컨트롤이 생긴 행에서는 그 자리를 돌려준다. 그러지 않으면 반응이 하나
-    // 달리는 순간 행에 정거장이 둘이 된다.
-    if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
-    const focused = items.findIndex((el) => el === document.activeElement);
-    const active = focused >= 0 ? focused : preferredIndex(items);
-    for (let i = 0; i < items.length; i++) {
-      items[i].tabIndex = i === active ? 0 : -1;
-    }
+    const normalize = () => {
+      normalizeRow(root);
+    };
+    normalize();
+    // 렌더 밖에서 태어나는 구성원(#1718 리뷰 Blocker-1의 뿌리). 언퍼얼 카드와
+    // 제거 X는 자기 스토어 구독으로 **행 리렌더 없이** 마운트되는 첫 액세서리라,
+    // 위 정규화가 지나간 뒤 기본 tabIndex 0으로 태어나 「행 하나 = 탭 스톱
+    // 하나」를 조용히 깬다. 구성원 목록의 정본은 DOM이므로(파일 머리말), DOM의
+    // 변화 통지로 같은 정규화를 다시 돈다 — React를 거치지 않는 사실에는 React
+    // 를 거치지 않는 귀가 맞다.
+    const observer = new MutationObserver(normalize);
+    observer.observe(root, { childList: true, subtree: true });
+    // 포커스가 행을 **떠나면** 정거장을 기본 진입점(primary)으로 되돌린다.
+    // 로빙의 「마지막 방문 기억」은 행 안에 머무는 동안의 예의고, 떠난 뒤의
+    // 다음 Tab 진입은 언제나 「사람이 이 행에서 가장 먼저 찾는 것」(파일 머리말)
+    // 이어야 한다 — 이 복원이 없으면 앞선 상호작용이 남긴 임의 구성원이
+    // 정거장으로 굳어, 행마다 Tab 도착지가 이력에 따라 달라진다(#1718 Blocker-1).
+    const onFocusOut = (event: FocusEvent) => {
+      const next = event.relatedTarget;
+      if (next instanceof Node && root.contains(next)) return;
+      normalizeRow(root, { resetToPreferred: true });
+    };
+    root.addEventListener("focusout", onFocusOut);
+    return () => {
+      observer.disconnect();
+      root.removeEventListener("focusout", onFocusOut);
+    };
   });
 
   return useCallback(
@@ -129,4 +130,38 @@ export function useRowRovingFocus(
     },
     [ref]
   );
+}
+
+function normalizeRow(
+  root: HTMLElement,
+  options?: { resetToPreferred?: boolean }
+): void {
+  const items = rowActionItems(root);
+    if (items.length === 0) {
+      // **컨트롤이 하나도 없는 행은 자기 자신이 정거장이 된다** (리뷰 W-4).
+      //
+      // 이 규칙이 지키는 것은 「행 하나 = 탭 스톱 하나」의 나머지 절반이다. 위
+      // 문단은 여섯 개를 하나로 줄이는 이야기였고, 여기는 **0개를 하나로 올리는**
+      // 이야기다. 액션 없이 마운트되는 표면(작업 세션 이벤트 로그, 읽기 전용
+      // 스레드)과 액션을 내놓지 않는 행(삭제된 메시지)에는 포커스 받을 자식이
+      // 없어서, 거터의 시각을 드러내는 `group-focus-within`이 걸릴 자리가 아예
+      // 없었다 — 눈으로 읽으며 키보드만 쓰는 사람에게는 시각으로 가는 길이
+      // 하나도 없었다는 뜻이다(보조기술은 `<time>`이 DOM에 있어 영향 없다).
+      //
+      // 예산은 늘지 않는다: 이 갈래가 도는 행은 정의상 다른 정거장이 0개다.
+      // `:focus-within`은 **자기 자신이 포커스일 때도** 참이므로 시각을 드러내는
+      // 규칙은 이미 있는 그것을 그대로 쓴다.
+    root.tabIndex = 0;
+    return;
+  }
+  // 컨트롤이 생긴 행에서는 그 자리를 돌려준다. 그러지 않으면 반응이 하나
+  // 달리는 순간 행에 정거장이 둘이 된다.
+  if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
+  const focused = options?.resetToPreferred
+    ? -1
+    : items.findIndex((el) => el === document.activeElement);
+  const active = focused >= 0 ? focused : preferredIndex(items);
+  for (let i = 0; i < items.length; i++) {
+    items[i].tabIndex = i === active ? 0 : -1;
+  }
 }

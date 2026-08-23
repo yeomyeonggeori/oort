@@ -73,6 +73,8 @@ const MOBILE_TAP_TARGETS = [
   // optional인 것은 각자 자기 화면에만 존재하기 때문이고, 그 화면을 찍는 프레임이
   // `assertTapTargets`를 다시 부른다.
   ["message-editor-save", "수정 저장", "optional"],
+  // #1718 — 언퍼얼 카드의 제거 X. 카드가 있는 프레임에만 존재한다.
+  ["unfurl-remove", "링크 미리보기 제거", "optional"],
   ["message-editor-cancel", "수정 취소", "optional"],
   ["delete-message-commit", "삭제 확인", "optional"],
   ["delete-message-cancel", "삭제 취소", "optional"],
