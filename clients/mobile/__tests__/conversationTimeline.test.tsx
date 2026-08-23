@@ -425,6 +425,51 @@ describe('보내기 — 낙관적 반영과 화해', () => {
     expect(result.current.pending).toEqual([]);
   });
 
+  it('완료된 첨부 id를 일반 메시지 REST와 낙관적 행에 함께 싣는다', async () => {
+    const attachment = {
+      id: 'attachment-photo',
+      name: 'photo.jpg',
+      mime: 'image/jpeg',
+      sizeBytes: 4,
+    };
+    const log = installFetch();
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.send('', undefined, [attachment]);
+    });
+
+    expect(log.sendBodies[0]).toMatchObject({
+      body: '',
+      attachmentIds: ['attachment-photo'],
+    });
+  });
+
+  it('스레드 답글도 같은 message REST에 rootId와 첨부 id를 함께 싣는다', async () => {
+    const attachment = {
+      id: 'attachment-file',
+      name: 'brief.pdf',
+      mime: 'application/pdf',
+      sizeBytes: 8,
+    };
+    const log = installFetch();
+    const {rail} = makeRail();
+    const {result} = renderTimeline(rail);
+    await waitFor(() => expect(result.current.status).toBe('ready'));
+
+    await act(async () => {
+      await result.current.sendReply('root-message', '', [attachment]);
+    });
+
+    expect(log.sendBodies[0]).toMatchObject({
+      body: '',
+      rootId: 'root-message',
+      attachmentIds: ['attachment-file'],
+    });
+  });
+
   it('실시간 에코가 POST 응답을 앞질러도 중복이 남지 않는다', async () => {
     // The realtime frame does NOT carry client_msg_id, so this settlement can
     // only be decided on content: same author, same body, seq above the newest

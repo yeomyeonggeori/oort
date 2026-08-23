@@ -7,7 +7,7 @@ import {ErrorState, Screen, ScreenHeader} from '../../design/atoms';
 import {font, SAFE_GUTTER, space, type Palette} from '../../design/tokens';
 import {useStyles} from '../../design/theme';
 import {EdgeSwipeBack} from '../../nav/EdgeSwipeBack';
-import {Composer} from './Composer';
+import {Composer, type ComposerSendOptions} from './Composer';
 import {ConversationLayout} from './ConversationLayout';
 import {threadDraftKey} from './drafts';
 import {useOnline} from '../inbox/useOnline';
@@ -47,6 +47,8 @@ import type {UseTimelineResult} from './useTimeline';
 
 export function ThreadPanel({
   root,
+  workspaceId,
+  channelId,
   timeline,
   directory,
   myMemberId,
@@ -56,6 +58,9 @@ export function ThreadPanel({
   onOpenProfile,
 }: {
   root: Message;
+  /** Production supplies both; isolated legacy render fixtures may omit them. */
+  workspaceId?: string;
+  channelId?: string;
   timeline: UseTimelineResult;
   directory: Directory;
   myMemberId: string;
@@ -155,14 +160,14 @@ export function ThreadPanel({
   // it comes to me regardless of where I had scrolled to.
   const [selfSendToken, setSelfSendToken] = useState(0);
   const onSend = useCallback(
-    (body: string) => {
+    (body: string, options?: ComposerSendOptions) => {
       setSelfSendToken(token => token + 1);
       // 채널도 같이 따라가게 한다. 답글은 이 채널의 메시지이고, 이 패널을 닫으면
       // 그것이 채널의 마지막 줄이다 — 내가 방금 쓴 것을 보려고 스크롤을 해야
       // 한다면 그것은 "내가 친 채팅이 아래로 떠서 스크롤해야 나온다"와 같은
       // 결함이 한 화면 건너에서 반복되는 것이다.
       onReplySent?.();
-      void sendReply(root.id, body);
+      void sendReply(root.id, body, options?.attachments);
     },
     [sendReply, root.id, onReplySent],
   );
@@ -262,6 +267,11 @@ export function ThreadPanel({
                 // 채널과 **다른 이름 공간**이다(`drafts.ts`). 스레드에 쓰다 만
                 // 답글이 채널 입력창에서 되살아나면 그 글은 잘못된 방으로 간다.
                 draftKey={threadDraftKey(root.id)}
+                attachmentTarget={
+                  workspaceId === undefined || channelId === undefined
+                    ? undefined
+                    : {workspaceId, channelId, rootId: root.id}
+                }
                 offline={!online}
                 // 웹 `timeline/ThreadComposer.tsx` 와 한 벌이다 (#1384).
                 placeholder={THREAD_COMPOSER_PLACEHOLDER}
