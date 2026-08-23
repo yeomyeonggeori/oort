@@ -89,10 +89,10 @@ pub struct Config {
     /// MOMO-605 CORS origin allowlist — **empty unless the operator names an
     /// origin**, and an empty one mounts no middleware at all.
     pub cors: CorsConfig,
-    /// ADR-0151 Drive archive — **unavailable unless the operator names a
-    /// service-account key and a shared drive**, in which case the three
-    /// attachment routes answer 503 rather than 404. Same fail-closed posture as
-    /// every other subsystem above.
+    /// ADR-0151 / ADR-0169 Drive archive — **unavailable unless the operator
+    /// names a backend**. Empty → 503. `local` writes a directory; `google`/`sa`
+    /// need a service-account key and a shared drive. Same fail-closed posture
+    /// as every other subsystem above.
     pub drive: DriveSettings,
     /// LIVE-5a / ADR-0165 증보 1 D3-2 — the oort-operated TURN relay's ephemeral
     /// credential policy. `None` on any instance that named no relay or no
@@ -122,15 +122,18 @@ pub struct Config {
 /// Names kept verbatim so one env block configures either implementation during
 /// the cutover — `MOMO_DRIVE_ARCHIVE_BACKEND` with `MOMO_DRIVE_BACKEND` as the
 /// legacy alias, plus `MOMO_DRIVE_SA_KEY_PATH` and `MOMO_DRIVE_SHARED_DRIVE_ID`.
+/// ADR-0169 adds `MOMO_DRIVE_LOCAL_DIR` for the self-host local-volume backend.
 ///
 /// **No credential is in this struct.** `sa_key_path` is a path the operator
 /// owns; the key material is read inside `momo-drive` and never comes back out
-/// (ADR-0004: provider credentials do not flow through momo).
+/// (ADR-0004: provider credentials do not flow through momo). `local` has no
+/// credential at all.
 #[derive(Debug, Clone, Default)]
 pub struct DriveSettings {
     pub backend: String,
     pub sa_key_path: Option<String>,
     pub shared_drive_id: Option<String>,
+    pub local_dir: Option<String>,
 }
 
 impl DriveSettings {
@@ -142,24 +145,43 @@ impl DriveSettings {
                 .unwrap_or_default(),
             sa_key_path: env("MOMO_DRIVE_SA_KEY_PATH"),
             shared_drive_id: env("MOMO_DRIVE_SHARED_DRIVE_ID"),
+            local_dir: env("MOMO_DRIVE_LOCAL_DIR"),
         }
     }
 
-    /// The boot refusal: a stub archive in a deployed environment (Swift
-    /// `DriveArchiveClientFactory.validateForBoot`, :77-87).
+    /// Boot refusals (Swift `DriveArchiveClientFactory.validateForBoot`, :77-87,
+    /// plus ADR-0169).
     ///
-    /// Fatal rather than degrading, unlike every other Drive misconfiguration,
-    /// and the asymmetry is the point. An *absent* archive closes the attachment
-    /// surface visibly — clients get 503 and nobody believes a file was stored.
-    /// A **stub** archive accepts uploads, reports them complete, and loses every
-    /// byte on restart: it looks like it works. That is the one Drive
-    /// configuration worth refusing to start over.
+    /// Fatal rather than degrading, unlike an *absent* archive:
+    ///
+    /// * A **stub** archive in a deployed environment accepts uploads, reports
+    ///   them complete, and loses every byte on restart. That is the one Drive
+    ///   configuration worth refusing to start over.
+    /// * A **local** archive whose directory cannot be created or written would
+    ///   look configured and then 503 every upload. Missing directory → create;
+    ///   unwritable → refuse the boot. `local` itself is allowed in deployed
+    ///   environments because the bytes survive a restart.
     pub fn boot_error(&self, environment: &str) -> Option<&'static str> {
         if self.backend == momo_drive::STUB_BACKEND && requires_strict_secrets(environment) {
             return Some(
                 "MOMO_DRIVE_ARCHIVE_BACKEND=stub is forbidden in a deployed environment \
                  (staging/prod/production/internal-host)",
             );
+        }
+        if self.backend == momo_drive::LOCAL_BACKEND {
+            let Some(dir) = self
+                .local_dir
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            else {
+                return Some(
+                    "MOMO_DRIVE_LOCAL_DIR is required when MOMO_DRIVE_ARCHIVE_BACKEND=local",
+                );
+            };
+            if let Err(message) = momo_drive::prepare_local_dir(dir) {
+                return Some(message);
+            }
         }
         None
     }
@@ -174,12 +196,17 @@ impl DriveSettings {
     /// right for a stub, since nothing outside the host should be uploading to
     /// an in-memory archive.
     pub fn backend_config(&self, port: u16) -> momo_drive::DriveBackendConfig {
+        let stub_base_url = env("MOMO_DRIVE_ARCHIVE_STUB_BASE_URL")
+            .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
+        let local_base_url =
+            env("MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL").unwrap_or_else(|| stub_base_url.clone());
         momo_drive::DriveBackendConfig {
             mode: self.backend.clone(),
             sa_key_path: self.sa_key_path.clone(),
             shared_drive_id: self.shared_drive_id.clone(),
-            stub_base_url: env("MOMO_DRIVE_ARCHIVE_STUB_BASE_URL")
-                .unwrap_or_else(|| format!("http://127.0.0.1:{port}")),
+            stub_base_url,
+            local_dir: self.local_dir.clone(),
+            local_base_url,
         }
     }
 }
@@ -2092,6 +2119,71 @@ mod tests {
         assert!(requires_strict_secrets("internal-host"));
         assert!(!requires_strict_secrets("local"));
         assert!(!requires_strict_secrets("test"));
+    }
+
+    #[test]
+    fn a_stub_archive_is_a_boot_error_only_in_deployed_environments() {
+        let stub = DriveSettings {
+            backend: momo_drive::STUB_BACKEND.into(),
+            ..DriveSettings::default()
+        };
+        assert!(stub.boot_error("staging").is_some());
+        assert!(stub.boot_error("prod").is_some());
+        assert!(stub.boot_error("local").is_none());
+    }
+
+    #[test]
+    fn a_local_archive_is_allowed_in_a_deployed_environment_when_the_dir_is_writable() {
+        let dir = std::env::temp_dir().join(format!(
+            "oort-drive-boot-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        let local = DriveSettings {
+            backend: momo_drive::LOCAL_BACKEND.into(),
+            local_dir: Some(dir.to_string_lossy().into_owned()),
+            ..DriveSettings::default()
+        };
+        assert!(local.boot_error("staging").is_none());
+        assert!(dir.join("objects").is_dir());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_local_archive_without_a_directory_is_a_boot_error() {
+        let local = DriveSettings {
+            backend: momo_drive::LOCAL_BACKEND.into(),
+            local_dir: None,
+            ..DriveSettings::default()
+        };
+        assert_eq!(
+            local.boot_error("staging"),
+            Some("MOMO_DRIVE_LOCAL_DIR is required when MOMO_DRIVE_ARCHIVE_BACKEND=local")
+        );
+        assert_eq!(
+            local.boot_error("local"),
+            Some("MOMO_DRIVE_LOCAL_DIR is required when MOMO_DRIVE_ARCHIVE_BACKEND=local")
+        );
+    }
+
+    #[test]
+    fn a_local_archive_pointing_at_a_file_is_a_boot_error() {
+        let dir = std::env::temp_dir().join(format!(
+            "oort-drive-boot-file-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::write(&dir, b"not a directory").expect("file");
+        let local = DriveSettings {
+            backend: momo_drive::LOCAL_BACKEND.into(),
+            local_dir: Some(dir.to_string_lossy().into_owned()),
+            ..DriveSettings::default()
+        };
+        assert_eq!(
+            local.boot_error("staging"),
+            Some("MOMO_DRIVE_LOCAL_DIR could not be created or is not writable")
+        );
+        let _ = std::fs::remove_file(&dir);
     }
 
     // -- B2.6 agent gateway ------------------------------------------------

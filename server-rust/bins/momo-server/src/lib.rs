@@ -42,6 +42,7 @@ pub use realtime_advert::{RealtimeAdvert, RealtimeAdvertError};
 
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
@@ -998,10 +999,11 @@ pub fn build_app(state: AppState) -> Router {
 
     // MOMO-605: taken before `with_state` moves the state below.
     let cors = state.cors.clone();
-    // ADR-0151: likewise. The stub upload endpoint exists only when the archive
-    // is the stub one — Swift gates it on the same predicate
-    // (`App.swift:115-117`), and a deployed environment cannot reach this branch
-    // because a stub archive is a boot error there.
+    // ADR-0151 / ADR-0169: the in-process upload endpoint exists when the
+    // archive accepts stub-shaped PUTs (the in-memory stub, or the local-volume
+    // archive). Swift gated it on the same predicate (`App.swift:115-117`). A
+    // deployed environment cannot reach this branch via the stub (that is a
+    // boot error); `local` is allowed there because the bytes survive a restart.
     let accepts_stub_uploads = state.drive.accepts_stub_uploads();
 
     let app = Router::new()
@@ -1109,7 +1111,9 @@ pub fn build_app(state: AppState) -> Router {
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
-            put(routes::attachments::stub_upload),
+            put(routes::attachments::stub_upload).layer(DefaultBodyLimit::max(
+                momo_drive::MAX_ATTACHMENT_BYTES as usize,
+            )),
         )
     } else {
         app

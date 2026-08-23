@@ -41,6 +41,7 @@
 //! reachable from a handler.
 
 pub mod google;
+pub mod local;
 pub mod stub;
 
 use std::sync::Arc;
@@ -51,6 +52,7 @@ use futures::stream::BoxStream;
 use uuid::Uuid;
 
 pub use google::GoogleDriveArchive;
+pub use local::{prepare_local_dir, resolve_local_id, LocalDriveArchive};
 pub use stub::StubDriveArchive;
 
 /// The 100 MB ceiling, verbatim from Swift `AttachmentRoutes.maximumSizeBytes`
@@ -139,8 +141,9 @@ impl DriveError {
 /// the operator's environment decides which archive they run against.
 #[async_trait]
 pub trait DriveArchive: Send + Sync + std::fmt::Debug {
-    /// Whether this backend serves the in-process upload endpoint. Only the stub
-    /// does; the route is mounted only when this is true (Swift `App.swift:115`).
+    /// Whether this backend serves the in-process upload endpoint. The stub and
+    /// the local-volume archive do; the route is mounted only when this is true
+    /// (Swift `App.swift:115`, ADR-0169).
     fn accepts_stub_uploads(&self) -> bool {
         false
     }
@@ -220,6 +223,12 @@ pub struct DriveBackendConfig {
     pub shared_drive_id: Option<String>,
     /// The base URL the stub's upload capability URLs are built against.
     pub stub_base_url: String,
+    /// `MOMO_DRIVE_LOCAL_DIR` — the directory `local` writes into.
+    pub local_dir: Option<String>,
+    /// The base URL local upload capability URLs are built against. Falls back
+    /// to [`Self::stub_base_url`] when empty so a verifier can point both at the
+    /// same in-process PUT route.
+    pub local_base_url: String,
 }
 
 /// The backend name that must never be selected in a deployed environment.
@@ -232,6 +241,10 @@ pub struct DriveBackendConfig {
 /// passed in.)
 pub const STUB_BACKEND: &str = "stub";
 
+/// The self-host default archive (ADR-0169). Allowed in a deployed environment
+/// — unlike [`STUB_BACKEND`] — because the bytes survive a restart.
+pub const LOCAL_BACKEND: &str = "local";
+
 /// Build the archive an operator configured.
 ///
 /// **Never fails.** Every misconfiguration degrades to
@@ -241,6 +254,7 @@ pub const STUB_BACKEND: &str = "stub";
 pub async fn build_archive(config: &DriveBackendConfig) -> Arc<dyn DriveArchive> {
     match config.mode.as_str() {
         STUB_BACKEND => Arc::new(StubDriveArchive::new(&config.stub_base_url)),
+        LOCAL_BACKEND => local_or_unavailable(config),
         "google" | "sa" => google_or_unavailable(config).await,
         // Swift's `case ""`: infer. Naming either knob is the operator saying
         // "there is a Drive"; naming neither is the operator saying there is not.
@@ -255,6 +269,24 @@ pub async fn build_archive(config: &DriveBackendConfig) -> Arc<dyn DriveArchive>
             tracing::error!(
                 backend = other,
                 "unknown MOMO_DRIVE_ARCHIVE_BACKEND; the attachment surface stays closed"
+            );
+            Arc::new(UnavailableDriveArchive)
+        }
+    }
+}
+
+fn local_or_unavailable(config: &DriveBackendConfig) -> Arc<dyn DriveArchive> {
+    let base = if config.local_base_url.trim().is_empty() {
+        config.stub_base_url.as_str()
+    } else {
+        config.local_base_url.as_str()
+    };
+    match LocalDriveArchive::open(config.local_dir.as_deref(), base) {
+        Ok(archive) => Arc::new(archive),
+        Err(error) => {
+            tracing::error!(
+                %error,
+                "local Drive archive unavailable; the attachment surface stays closed"
             );
             Arc::new(UnavailableDriveArchive)
         }
@@ -320,12 +352,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_local_dir_without_the_local_backend_does_not_open_the_surface() {
+        let archive = build_archive(&DriveBackendConfig {
+            mode: String::new(),
+            sa_key_path: None,
+            shared_drive_id: None,
+            stub_base_url: "http://127.0.0.1:1".into(),
+            local_dir: Some("/var/lib/oort/drive".into()),
+            local_base_url: "http://127.0.0.1:1".into(),
+        })
+        .await;
+        assert!(!archive.accepts_stub_uploads());
+        assert_eq!(
+            archive
+                .create_resumable_upload(Uuid::nil(), "a.txt", "text/plain", 1)
+                .await
+                .expect_err("mode is still empty"),
+            DriveError::Unavailable
+        );
+    }
+
+    #[tokio::test]
     async fn an_unconfigured_instance_answers_unavailable_rather_than_failing_to_boot() {
         let archive = build_archive(&DriveBackendConfig {
             mode: String::new(),
             sa_key_path: None,
             shared_drive_id: None,
             stub_base_url: "http://127.0.0.1:1".into(),
+            local_dir: None,
+            local_base_url: String::new(),
         })
         .await;
         assert!(!archive.accepts_stub_uploads());
@@ -347,6 +402,8 @@ mod tests {
             sa_key_path: Some("/nonexistent/momo-drive-sa.json".into()),
             shared_drive_id: Some("0ABCdef1234567890".into()),
             stub_base_url: "http://127.0.0.1:1".into(),
+            local_dir: None,
+            local_base_url: String::new(),
         })
         .await;
         assert_eq!(
@@ -364,6 +421,41 @@ mod tests {
     #[test]
     fn the_stub_backend_keeps_the_name_the_boot_refusal_looks_for() {
         assert_eq!(STUB_BACKEND, "stub");
+    }
+
+    #[test]
+    fn the_local_backend_keeps_the_name_self_host_selects() {
+        assert_eq!(LOCAL_BACKEND, "local");
+    }
+
+    #[tokio::test]
+    async fn a_local_backend_opens_without_touching_google_or_the_stub() {
+        let dir = std::env::temp_dir().join(format!(
+            "oort-drive-local-factory-{}-{}",
+            std::process::id(),
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp");
+        let archive = build_archive(&DriveBackendConfig {
+            mode: LOCAL_BACKEND.into(),
+            sa_key_path: Some("/nonexistent/momo-drive-sa.json".into()),
+            shared_drive_id: Some("0ABCdef1234567890".into()),
+            stub_base_url: "http://127.0.0.1:1".into(),
+            local_dir: Some(dir.to_string_lossy().into_owned()),
+            local_base_url: "http://127.0.0.1:9".into(),
+        })
+        .await;
+        assert!(archive.accepts_stub_uploads());
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "a.txt", "text/plain", 1)
+            .await
+            .expect("local session");
+        assert!(
+            session.drive_file_id.starts_with("local-"),
+            "{}",
+            session.drive_file_id
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

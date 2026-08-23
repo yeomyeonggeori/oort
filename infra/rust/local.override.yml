@@ -45,6 +45,14 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.match-label: com.docker.compose.project
 
 services:
+  # ADR-0169 — local file archive. The api service is defined in
+  # docker-compose.rust.yml; this overlay only adds the named volume so a
+  # hosted google path (caddy.override.yml, no this file) never grows a
+  # bind. Target defaults to the generator's MOMO_DRIVE_LOCAL_DIR.
+  api:
+    volumes:
+      - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}
+
   # SPA 스테이징 원샷. 이미지 안의 dist를 볼륨으로 **교체 복사**한다(merge 아님):
   # 다운그레이드가 새 청크를 남겨 두면 낡은 index.html이 없는 파일을 부른다.
   web-init:
@@ -101,3 +109,8 @@ volumes:
   # 이름 없이 프로젝트 스코프로 둔다(base의 pgdata와 다른 규율): `down -v` 가
   # 회수해야 하고, 고정 이름을 주면 같은 호스트의 다른 스택과 한 볼륨을 공유한다.
   web-static:
+  # ADR-0169 첨부 보관소. `name:` 은 pgdata 와 같은 호스트-전역 문자열이라
+  # 생성기가 `DRIVE_VOLUME_NAME=$PROJECT-drive` 를 쓴다. 기본 프로젝트 `oort`
+  # → `oort-drive`. `down -v` 가 이 이름만 회수한다.
+  drive-archive:
+    name: ${DRIVE_VOLUME_NAME:-${COMPOSE_PROJECT_NAME:-momo-rust}-drive}

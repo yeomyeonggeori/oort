@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## 셀프호스트 로컬 파일 보관소 (#1696, ADR-0169, 2026-08-23)
+
+- `momo-drive`에 `LocalDriveArchive`(`MOMO_DRIVE_ARCHIVE_BACKEND=local` + `MOMO_DRIVE_LOCAL_DIR`). DriveArchive 계약·100MB 상한·in-process PUT(`/__momo_stub/drive/uploads/{token}`)·DriveError 표 재사용. 저장 키는 불투명 id만(파일명은 메타). `../`·절대경로·심링크 이탈 거부. deployed env 허용. 디렉터리 미존재=생성, 쓰기불가=부팅 거부.
+- 생성기 기본값 local+`oort-drive` 볼륨. `local.override.yml` 마운트, `Caddyfile.local`이 `/__momo_stub/*`를 api로 프록시. 기존 env는 키 없을 때만 가산. google/stub 비접촉. schema 비접촉. 클라 변경 0.
+- 문서: SELF_HOST.md 보관소 절, SELF_HOST_AGENT.md 동기, pg_dump 런북 동반 백업 1줄.
+- 검증: crate 단위 25/25(이탈 3계열·왕복·413) · `momo-server --lib` 287/287 · attachment_conformance_pg ignored 8/8(local 왕복 + 미구성 503, 이 워크트리 `make up` PG:22602) · `test_self_host_env_modes.sh` PASS · `check_docs_commands.py` 493 facts. google.rs/stub.rs 비접촉.
+
 ## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
 
 - `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).
