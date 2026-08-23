@@ -17,11 +17,14 @@ import {useStyles} from '../../design/theme';
 
 export function AttachmentPickerSheet({
   visible,
+  onDismissed,
   onClose,
   onPickPhoto,
   onPickFile,
 }: {
   visible: boolean;
+  /** Modal이 실제로 사라진 뒤(iOS onDismiss). picker 제시는 이 뒤여야 한다. */
+  onDismissed?: () => void;
   onClose: () => void;
   onPickPhoto: () => void;
   onPickFile: () => void;
@@ -34,6 +37,7 @@ export function AttachmentPickerSheet({
       transparent
       animationType="fade"
       onRequestClose={onClose}
+      onDismiss={onDismissed}
       testID="attachment-picker-sheet"
     >
       <View style={styles.root}>

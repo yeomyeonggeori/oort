@@ -16,7 +16,7 @@ import {
   waitFor,
 } from '@testing-library/react-native';
 import React from 'react';
-import {Linking} from 'react-native';
+import {AccessibilityInfo, Linking} from 'react-native';
 
 import {Composer} from '../src/features/conversation/Composer';
 import {resetAttachmentDraftsForTest} from '../src/features/attachments/draftStore';
@@ -110,6 +110,11 @@ function renderComposer(onSend = jest.fn()) {
 }
 
 beforeEach(() => {
+  (
+    AccessibilityInfo.announceForAccessibility as unknown as jest.Mock
+  ).mockClear();
+  (imagePicker as unknown as {launchImageLibraryAsync: jest.Mock})
+    .launchImageLibraryAsync.mockClear();
   imagePicker.__reset();
   documentPicker.__reset();
   fileSystem.__reset();
@@ -372,5 +377,65 @@ describe('Composer 첨부 렌더·발송', () => {
     expect(
       screen.getByTestId('composer-send').props.accessibilityState,
     ).toEqual({disabled: true});
+  });
+});
+
+describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
+  it('picker 제시는 시트가 사라진 뒤다 — 닫는 같은 틱에 제시하지 않는다', async () => {
+    // High-1: 닫히는 Modal과 같은 틱의 제시는 iOS가 거절할 수 있고, 그 거절은
+    // 「업로드 실패」 오탐으로 접힌다. 제시는 onDismiss 또는 폴백 타이머 뒤다.
+    renderComposer();
+    fireEvent.press(screen.getByTestId('composer-attach'));
+    fireEvent.press(screen.getByTestId('attachment-pick-photo'));
+    const launch = (
+      imagePicker as unknown as {launchImageLibraryAsync: jest.Mock}
+    ).launchImageLibraryAsync;
+    expect(launch).not.toHaveBeenCalled();
+    await waitFor(() => expect(launch).toHaveBeenCalledTimes(1));
+  });
+
+  it('첨부 상태 전이를 announceForAccessibility로 말한다 (iOS 낭독)', async () => {
+    // High-2: accessibilityLiveRegion은 Android 전용이다. 폰의 전달 관례대로
+    // announce를 쓰고, 문장은 코어 draftAnnouncement가 만든다(바뀐 것만).
+    successfulUploads('announce');
+    imagePicker.__state.result = {
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///photos/notes.jpg',
+          fileName: 'notes.jpg',
+          fileSize: 4,
+          mimeType: 'image/jpeg',
+        },
+      ],
+    };
+    renderComposer();
+    openPicker('photo');
+    const announce = AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
+    await waitFor(() =>
+      expect(
+        announce.mock.calls.some(([sentence]) =>
+          String(sentence).includes('notes.jpg'),
+        ),
+      ).toBe(true),
+    );
+  });
+
+  it('권한 거부 사유도 낭독된다 — 문장과 다음 행동을 함께', async () => {
+    imagePicker.__state.failure = new Error('permission denied');
+    imagePicker.__state.permission = {
+      status: 'denied',
+      accessPrivileges: 'none',
+    };
+    renderComposer();
+    openPicker('photo');
+    const announce = AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
+    await waitFor(() =>
+      expect(
+        announce.mock.calls.some(([sentence]) =>
+          String(sentence).includes(uploadIssueCopy('permission-denied')),
+        ),
+      ).toBe(true),
+    );
   });
 });

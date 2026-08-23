@@ -1,5 +1,6 @@
-import React from 'react';
+import React, {useEffect, useRef} from 'react';
 import {
+  AccessibilityInfo,
   Linking,
   Pressable,
   ScrollView,
@@ -10,6 +11,7 @@ import {
 
 import {
   ATTACH_COPY,
+  draftAnnouncement,
   draftStatusLine,
   isImageMime,
   isRetryableIssue,
@@ -47,6 +49,35 @@ export function AttachmentTray({
 }): React.JSX.Element | null {
   const styles = useStyles(buildStyles);
   const blocked = sendBlockCopy(drafts);
+
+  // 보조기술이 듣는 줄 (design-review High-2). `accessibilityLiveRegion`은
+  // Android 전용이라 이 앱의 1차 플랫폼(iOS)에서는 어떤 전이도 낭독되지
+  // 않았다. 코어 `draftAnnouncement`가 정확히 이 용도로 **바뀐 것만** 문장으로
+  // 만들고(웹 트레이가 같은 함수를 소비한다), 폰의 전달 관례는 형제들처럼
+  // `announceForAccessibility`다 — 소리로만 전달된다, RN에는 웹의 `focus()`가
+  // 없다(ApprovalDecision.tsx와 같은 이유).
+  const announcedDrafts = useRef<AttachmentDraft[]>([]);
+  useEffect(() => {
+    const sentence = draftAnnouncement(announcedDrafts.current, drafts);
+    announcedDrafts.current = drafts;
+    if (sentence !== null) AccessibilityInfo.announceForAccessibility(sentence);
+  }, [drafts]);
+
+  // picker 사유(선택 취소·권한 거부)는 draft가 되기 전의 실패라 위 문장에
+  // 실리지 않는다 — 같은 채널로 따로 말한다. 사유가 걷히는 전이는 침묵한다.
+  const announcedPickerIssue = useRef<UploadIssue | null>(null);
+  useEffect(() => {
+    if (pickerIssue === announcedPickerIssue.current) return;
+    announcedPickerIssue.current = pickerIssue;
+    if (pickerIssue === null) return;
+    const next = uploadIssueNext(pickerIssue);
+    AccessibilityInfo.announceForAccessibility(
+      next === null
+        ? uploadIssueCopy(pickerIssue)
+        : `${uploadIssueCopy(pickerIssue)}. ${next}`,
+    );
+  }, [pickerIssue]);
+
   if (drafts.length === 0 && pickerIssue === null) return null;
 
   const pickerReason =
@@ -100,7 +131,6 @@ export function AttachmentTray({
       ) : null}
       {pickerReason !== null ? (
         <View
-          accessibilityLiveRegion="polite"
           style={styles.pickerNotice}
           testID={`attachment-picker-issue-${pickerIssue}`}
         >

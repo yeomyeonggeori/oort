@@ -915,19 +915,38 @@ export function Composer({
   const attachmentBlock = sendBlockReason(attachmentSurface.drafts);
   const attachmentBlockCopy = sendBlockCopy(attachmentSurface.drafts);
 
+  // 시트가 **실제로 사라진 뒤에만** 네이티브 picker를 제시한다 (design-review
+  // High-1). 닫히는 Modal과 같은 틱에 picker를 띄우면 iOS가 dismiss 중인 VC 위
+  // 제시를 거절할 수 있고, 그 실패는 catch에서 'unavailable'로 접혀 **picker가
+  // 열린 적도 없는데 「업로드 실패」가 선다** — 화면이 거짓을 말하는 부류다.
+  // 1차 신호 = Modal onDismiss(iOS가 dismiss 완료를 아는 유일한 곳), 폴백 =
+  // fade 아웃(≈300ms)보다 긴 타이머(Android는 onDismiss가 없다). ref를 비우고
+  // 시작하므로 두 신호가 겹쳐도 제시는 한 번이다.
+  const pendingPickRef = useRef<'photo' | 'file' | null>(null);
+  const runPendingPick = useCallback(async () => {
+    const kind = pendingPickRef.current;
+    if (kind === null) return;
+    pendingPickRef.current = null;
+    if (stableAttachmentTarget === null || attachmentKey === null) return;
+    const outcome = kind === 'photo' ? await pickPhoto() : await pickDocument();
+    if (outcome.kind === 'issue') {
+      setPickerIssue(attachmentKey, outcome.issue);
+      return;
+    }
+    addPickedFiles(attachmentKey, stableAttachmentTarget, outcome.files);
+  }, [attachmentKey, stableAttachmentTarget]);
+
   const chooseAttachment = useCallback(
-    async (kind: 'photo' | 'file') => {
+    (kind: 'photo' | 'file') => {
       if (stableAttachmentTarget === null || attachmentKey === null) return;
+      pendingPickRef.current = kind;
       setAttachmentPickerOpen(false);
       setPickerIssue(attachmentKey, null);
-      const outcome = kind === 'photo' ? await pickPhoto() : await pickDocument();
-      if (outcome.kind === 'issue') {
-        setPickerIssue(attachmentKey, outcome.issue);
-        return;
-      }
-      addPickedFiles(attachmentKey, stableAttachmentTarget, outcome.files);
+      setTimeout(() => {
+        void runPendingPick();
+      }, 400);
     },
-    [attachmentKey, stableAttachmentTarget],
+    [attachmentKey, stableAttachmentTarget, runPendingPick],
   );
 
   // 초안 자리도 거울로 든다. 위와 같은 이유다 — `draftKey` 를 `onChangeText` 의
@@ -1414,8 +1433,9 @@ export function Composer({
       <AttachmentPickerSheet
         visible={attachmentPickerOpen}
         onClose={() => setAttachmentPickerOpen(false)}
-        onPickPhoto={() => void chooseAttachment('photo')}
-        onPickFile={() => void chooseAttachment('file')}
+        onPickPhoto={() => chooseAttachment('photo')}
+        onPickFile={() => chooseAttachment('file')}
+        onDismissed={() => void runPendingPick()}
       />
     </View>
   );
