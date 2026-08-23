@@ -66,7 +66,10 @@ import {
   jumpMissedNotice,
   type JumpSubject,
 } from '../features/conversation/jumpNotice';
-import {Composer} from '../features/conversation/Composer';
+import {
+  Composer,
+  type ComposerSendOptions,
+} from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -890,14 +893,14 @@ export default function ConversationScreen({
   const quoteRef = useRef<QuoteDraft | null>(null);
   quoteRef.current = quote;
   const onSend = useCallback(
-    (body: string) => {
+    (body: string, options?: ComposerSendOptions) => {
       setSelfSendToken(token => token + 1);
       // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
       // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
       const replyToId = quoteRef.current?.targetId;
       setQuote(null);
-      void send(body, replyToId);
+      void send(body, replyToId, options?.attachments);
     },
     [send],
   );
@@ -924,7 +927,13 @@ export default function ConversationScreen({
   const openThread = useCallback((message: Message) => setThread(message), []);
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
   const onResend = useCallback(
-    (message: Message) => onSend(message.body ?? ''),
+    (message: Message) =>
+      onSend(
+        message.body ?? '',
+        message.attachments === undefined
+          ? undefined
+          : {attachments: message.attachments},
+      ),
     [onSend],
   );
   const onResendPending = useCallback(
@@ -1221,6 +1230,7 @@ export default function ConversationScreen({
               // `offline` prop 주석에 있다.
               offline={!networkOnline}
               draftKey={channelDraftKey(channelId)}
+              attachmentTarget={{workspaceId, channelId}}
               quote={quote}
               onCancelQuote={onCancelQuote}
               inputRef={composerInputRef}
@@ -1234,6 +1244,8 @@ export default function ConversationScreen({
       {thread ? (
         <ThreadPanel
           root={thread}
+          workspaceId={workspaceId}
+          channelId={channelId}
           timeline={timeline}
           directory={directory}
           myMemberId={member.id}

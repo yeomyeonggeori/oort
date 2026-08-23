@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 폰 사진·파일 picker 전송 (#1700, 2026-08-23)
+
+- 모바일 Composer의 2행 첨부 시트가 `expo-image-picker`·`expo-document-picker`로 사진/파일 한 건을 고르고, 코어 첨부 상태기계·실패 문장을 재사용한 인라인 트레이에서 capability PUT→완료 확인→기존 메시지 `attachmentIds` 발송까지 잇는다. 일반 대화와 스레드가 같은 경로를 쓴다.
+- PHPicker 사진 선택만 지원하고 카메라 촬영·사진 보관함 쓰기는 지원하지 않아 `NSCameraUsageDescription`·`NSPhotoLibraryAddUsageDescription`를 추가하지 않았다. CocoaPods autolinking은 `ExpoImagePicker`·`ExpoDocumentPicker`를 lockfile에 고정했고 pbxproj·entitlement·서명은 비접촉이다.
+- `runtime-unverified(iOS simulator picker interaction)`: 시뮬레이터 실행 검증은 오케스트레이터 범위다. 폰에는 독립 디자인 프리플라이트 실행 단위가 없고 관련 기계 검사는 mobile Jest 스위트 안에서 돈다.
+
 ## OmD v2 Core v2 mirror + book (#1689, 2026-08-23)
 
 - project-local Claude Code 채널에 OmD v2 전체 bundle(22 skills · 19 agents · 440 references)을 설치하고 `omd doctor` ready를 닫았다. 스코프 판정(#1693)으로 bundle·`.omd/` 생성물은 레포에 버전관리하지 않고(`.gitignore`) mirror 문서(`DESIGN.md`·`docs/design-system/OMD.md`)만 랜딩했다. 기존 `momo-design-taste*`·`design-review`는 프로젝트 전용 정본/리뷰 경로로 보존하고 OmD 범용 reviewer는 보조로만 성문화했다.
