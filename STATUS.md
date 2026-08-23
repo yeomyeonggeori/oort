@@ -4,6 +4,10 @@
 
 - 사이드바 도움말 버튼과 전역 `?`가 카테고리별 단축키 Dialog를 열며, 검색·인박스·안 읽은 채널·기본 동작·메시지 행 등록처가 표시 목록과 같은 타입드 정의를 소비해 드리프트를 막는다.
 - input·textarea·contenteditable 입력 중에는 발동하지 않고, 프로그램형 opener를 Dialog에 넘겨 Esc 뒤 포커스를 돌려준다. `runtime-unverified(browser interaction gate)`: 브라우저 게이트는 오케스트레이터 실행 범위다.
+## C-1 메시지 멘션 하이라이트 (#1685, 2026-08-23)
+
+- 코어 markdown `Inline`에 원문 바이트와 case-folded handle을 보존하는 mention 노드를 추가하고, 기존 라우팅과 공유하는 경계/handle 문법으로 코드·이메일·미완성 `@`를 평문에 남겼다. safeHref와 기존 노드 의미론은 불변이다.
+- 웹·폰 타임라인은 활성 directory 멤버만 accent로 그리고 내 멘션에는 accent-soft/accentSurface를 더한다. 코어·웹·폰 전체 스위트와 양 palette 단정, 웹 디자인 preflight는 green. `runtime-unverified(browser/device visual gate)`: 오케스트레이터 실행 범위로 위임했다.
 
 ## iOS 첨부 렌더·다운로드 + 멤버 프로필 (#1681, 2026-08-23)
 
