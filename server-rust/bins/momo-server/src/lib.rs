@@ -34,11 +34,15 @@ pub mod cors;
 pub mod dto;
 pub mod error;
 pub mod rate_limit;
+pub mod realtime_advert;
 pub mod routes;
 pub mod work_host_auth;
 
+pub use realtime_advert::{RealtimeAdvert, RealtimeAdvertError};
+
 use std::sync::Arc;
 
+use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
 use momo_db::PgPool;
@@ -47,6 +51,7 @@ use crate::config::{
     AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, MentionSettings,
     RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
 };
+use crate::error::ApiError;
 use crate::rate_limit::SlidingWindowRateLimiter;
 
 /// The MOMO-300 limiter and the knobs it reads, held together because neither is
@@ -143,8 +148,8 @@ pub struct AppState {
     pub pool: PgPool,
     /// HS256 App JWT secret. Never logged, never echoed in a response.
     pub jwt_secret: Arc<String>,
-    /// Advertised realtime WebSocket endpoint (ADR-0110).
-    pub realtime_ws_url: Arc<String>,
+    /// Advertised realtime WebSocket endpoint (ADR-0110 / ADR-0167).
+    pub realtime_ws_url: Arc<RealtimeAdvert>,
     /// T3 (momo Cloud) settings. **Off** unless [`AppState::with_t3`] says
     /// otherwise, so a deployment that never configured T3 answers 503 on every
     /// T3 route instead of half-provisioning something billable.
@@ -240,12 +245,16 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(pool: PgPool, jwt_secret: String, realtime_ws_url: String) -> Self {
+    pub fn new(
+        pool: PgPool,
+        jwt_secret: String,
+        realtime_ws_url: impl Into<RealtimeAdvert>,
+    ) -> Self {
         let ephemeral_grant_key = momo_auth::ephemeral_grant_key(&jwt_secret);
         AppState {
             pool,
             jwt_secret: Arc::new(jwt_secret),
-            realtime_ws_url: Arc::new(realtime_ws_url),
+            realtime_ws_url: Arc::new(realtime_ws_url.into()),
             t3: Arc::new(T3Settings::default()),
             t3_provisioner: None,
             agent_gateway: Arc::new(AgentGatewaySettings::default()),
@@ -261,6 +270,17 @@ impl AppState {
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
         }
+    }
+
+    /// The URL login/join/claim put in `realtimeWebSocketUrl` (ADR-0110 / ADR-0167).
+    pub fn advertised_realtime_ws_url(
+        &self,
+        headers: &HeaderMap,
+        connection_scheme: Option<&str>,
+    ) -> Result<String, ApiError> {
+        self.realtime_ws_url
+            .advertise_from_headers(headers, connection_scheme)
+            .map_err(|error| ApiError::internal("realtime.advertise", error))
     }
 
     /// Attach the oort TURN relay's ephemeral-credential policy (LIVE-5a).

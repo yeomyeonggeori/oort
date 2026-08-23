@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
+
+- `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).
+- 생성기 기본값을 `same-origin`으로 교체. `--public-origin https://host`가 `CENTRIFUGO_ALLOWED_ORIGINS`에 브라우저 Origin과 RN `wss://` Origin을 멱등 추가. 기존 localhost/tauri 기본값 완화 없음.
+- 플레이북: `SELF_HOST_AGENT.md` §2.3·`SELF_HOST.md` 터널 절. 로그인 응답 `realtimeWebSocketUrl == wss://<공개호스트>/connection/websocket`이 검증 문장. `runtime-unverified(터널 e2e 브라우저 왕복)` — 오케스트레이터 몫.
+
 ## 폰 사진·파일 picker 전송 (#1700, 2026-08-23)
 
 - 모바일 Composer의 2행 첨부 시트가 `expo-image-picker`·`expo-document-picker`로 사진/파일 한 건을 고르고, 코어 첨부 상태기계·실패 문장을 재사용한 인라인 트레이에서 capability PUT→완료 확인→기존 메시지 `attachmentIds` 발송까지 잇는다. 일반 대화와 스레드가 같은 경로를 쓴다.

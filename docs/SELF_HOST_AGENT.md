@@ -253,9 +253,10 @@ URL은 기동마다 바뀐다.
 
 데스크탑 Tauri Origin(`tauri://localhost`, `http://tauri.localhost`)은
 셀프호스트 env 기본 허용 목록에 있다 — **터널 URL로 데스크탑 접속은
-무설정 통과**. 웹 브라우저로 터널 URL을 열면 Centrifugo가 터널 Origin을
-403 한다. v1은 데스크탑 전용. 웹-경유-터널 Origin 주입은 이 플레이북
-밖이다.
+무설정 통과**. 웹 브라우저·RN이 터널 Origin으로 붙으려면 그 공개
+오리진을 Centrifugo 허용목록에 넣는다(§2.3). 로그인 응답의
+`realtimeWebSocketUrl` 은 생성기 기본값 `same-origin`(ADR-0167)이
+요청 `Host` / `X-Forwarded-Proto` 에서 파생한다.
 
 ### 2.1 공인 IP 판단
 
@@ -290,7 +291,25 @@ cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
 VM이 살아있는 동안 유지한다. URL을 재기동하면 바뀐다 — 사용자에게
 새 주소를 다시 회신한다.
 
-### 2.3 외부 도달성 자가검증
+### 2.3 공개 오리진 등록
+
+터널 주소가 생긴 뒤에 **시크릿을 다시 만들지 말고** 이 한 줄을 실행한다.
+브라우저 Origin(`https://…`)과 RN 소켓 Origin(`wss://…`)을 같이 넣는다.
+두 번 실행해도 항목은 하나다.
+
+```sh
+scripts/self_host_env.sh --public-origin https://<공개호스트>
+scripts/self_host_env.sh --compose up -d
+```
+
+이미 있는 env 의 `MOMO_CENTRIFUGO_WS_URL` 이 `ws://localhost:…` 이면 그
+한 줄만 `same-origin` 으로 고친다. 시크릿 재생성은 금지.
+
+**검증:** 이후 로그인(claim 직후 포함) 응답의 `realtimeWebSocketUrl` 이
+`wss://<공개호스트>/connection/websocket` 과 같아야 한다.
+`ws://localhost` 이면 same-origin 값과 api 재시작을 확인한다.
+
+### 2.4 외부 도달성 자가검증
 
 VM **안에서** 터널 URL로 나갔다 들어온다(V-1이 로컬에서 증명한 같은
 표면).
@@ -318,7 +337,7 @@ curl -sS -D - -o /dev/null -X POST \
 
 ## 3. 사용자 핸드오프
 
-§2.3 게이트를 통과한 뒤에만 회신한다. 비밀번호를 회신하지 않는다.
+§2.4 게이트를 통과한 뒤에만 회신한다. 비밀번호를 회신하지 않는다.
 claim 토큰은 URL 안에만 있고, 이 한 번뿐이다. TTL 24h, 단회 소비.
 
 ### 3.1 회신 템플릿
