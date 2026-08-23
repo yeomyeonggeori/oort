@@ -195,11 +195,11 @@ T-2 플레이북이 사람·그록봇에게 줄 **안정 다운로드 URL** 의 
 
 | 갈래 | 무엇 | 판정 |
 |---|---|---|
-| **(a) 기존 `v0.1.0` Release 에 dmg 자산 첨부** | 서버 digest 표와 같은 GitHub Release | **채택** |
-| (b) 별도 `desktop-v0.1.0` 태그 | 데스크탑만의 Release | 기각 |
+| **(a) 기존 `v0.1.1` Release 에 dmg 자산 첨부** | 서버 digest 표와 같은 GitHub Release | **채택** |
+| (b) 별도 `desktop-v0.1.1` 태그 | 데스크탑만의 Release | 기각 |
 
 **(a) 논거.** GitHub `…/releases/latest/download/<filename>` 은 가장 최근
-**비-prerelease** 를 가리킨다. 지금 `latest` = `v0.1.0`(서버 릴리스, dmg
+**비-prerelease** 를 가리킨다. 지금 `latest` = `v0.1.1`(서버 릴리스, dmg
 자산 없음). 그 Release 에 고정 파일명으로 붙이면 T-2 링크가 즉시 성립하고,
 서버 digest 표가 `/releases/latest` 에서 밀리지 않는다. (b) 를 풀 릴리스로
 만들면 그 태그가 latest 가 되어 이미지 digest 안내가 가려진다. prerelease 로
@@ -216,7 +216,7 @@ https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-macos-aarch
 ```
 
 태그 고정이 필요하면 같은 자산의
-`https://github.com/yeomyeonggeori/oort/releases/download/v0.1.0/oort-macos-aarch64.dmg`.
+`https://github.com/yeomyeonggeori/oort/releases/download/v0.1.1/oort-macos-aarch64.dmg`.
 darwin-x86_64 / Windows 는 이 절의 범위가 아니다.
 
 ### 절차 (오케스트레이터)
@@ -248,13 +248,13 @@ scripts/publish_next_build.sh --public --version 0.1.0
 스크립트가 찍는 `gh` 한 줄을 사람이 실행한다:
 
 ```sh
-gh release upload v0.1.0 \
+gh release upload v0.1.1 \
   clients/desktop/src-tauri/target/release/bundle/dmg/oort-macos-aarch64.dmg \
   --repo yeomyeonggeori/oort
 ```
 
 `--clobber` 는 같은 이름을 교체할 때만. 태그/Release 자체를 새로 만들지 않는다
-(§5 가 이미 `v0.1.0` 을 만들었다).
+(`v0.1.1` Release 는 이미 있다).
 
 확인:
 
@@ -263,7 +263,7 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
   | grep -Ei '^(HTTP|content-type|location):'
 ```
 
-302 가 `releases/download/v0.1.0/oort-macos-aarch64.dmg` 로 끝나면 T-2 링크가
+302 가 `releases/download/v0.1.1/oort-macos-aarch64.dmg` 로 끝나면 T-2 링크가
 산다.
 
 ---
