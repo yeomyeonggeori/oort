@@ -373,12 +373,13 @@ pub async fn content(
         .map_err(|error| ApiError::internal("attachments.content.response", error))
 }
 
-/// `PUT /__momo_stub/drive/uploads/{token}` — the stub archive's upload endpoint
-/// (Swift `AttachmentRoutes.stubUpload`, :257-280).
+/// `PUT /__momo_stub/drive/uploads/{token}` — the in-process upload endpoint
+/// (Swift `AttachmentRoutes.stubUpload`, :257-280; ADR-0169 local archive).
 ///
-/// Mounted **only when the configured archive accepts stub uploads**, which no
-/// deployed environment's does (a stub in `staging`/`prod` is a boot error, see
-/// `config::DriveSettings::boot_error`). Public by construction: it stands in for
+/// Mounted **only when the configured archive accepts stub uploads**. The
+/// in-memory stub is a boot error in `staging`/`prod` (see
+/// `config::DriveSettings::boot_error`); the local-volume archive is not,
+/// because its bytes survive a restart. Public by construction: it stands in for
 /// Google's resumable session URL, which carries no bearer either — its
 /// authorization is the unguessable token in the path, and the token names one
 /// pre-declared file of one pre-declared length.

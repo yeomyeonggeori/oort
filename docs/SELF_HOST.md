@@ -11,6 +11,8 @@
 > 그록봇 VM이나 개인 인스턴스에서 **데이터를 파일로 가져가려면**
 > [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
 > (`scripts/self_host_pg_dump.sh`) — PITR의 대체재가 아니다.
+> 첨부 바이트는 Postgres 밖에 있다. 덤프와 **보관소 볼륨**(`DRIVE_VOLUME_NAME`,
+> 기본 `oort-drive`)을 같이 가져가라(아래 [첨부 보관소](#첨부-보관소)).
 >
 > 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
 > digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
@@ -325,7 +327,27 @@ DB_VOLUME_NAME=oort-lab-pgdata
 기존 `oort-pgdata` 데이터를 이 클론이 이어받으려면 기본 이름(`oort` /
 `oort-pgdata`)을 유지한 채 **먼저 다른 체크아웃에서 `down`**(볼륨은 남김)한다.
 업그레이드가 볼륨을 지우거나 새 빈 볼륨으로 바꿔 끼우지 않는다. `down -v` 의
-의미는 그대로다: **이 env 가 가리키는 볼륨**을 지운다.
+의미는 그대로다: **이 env 가 가리키는 볼륨**을 지운다. 첨부 보관소 볼륨
+(`DRIVE_VOLUME_NAME`, 기본 `oort-drive`)도 같은 규율이다 — 프로젝트명을
+바꿀 때 같이 바꾼다.
+
+## 첨부 보관소
+
+셀프호스트 생성 env 는 `MOMO_DRIVE_ARCHIVE_BACKEND=local` 과
+`MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive` 를 기본으로 쓴다(ADR-0169).
+첨부 바이트는 Postgres 가 아니라 그 디렉터리(compose 명명 볼륨
+`DRIVE_VOLUME_NAME`, 기본 `oort-drive`)에 산다. 파일명은 메타만 되고,
+디스크 경로는 서버가 만든 불투명 id 뿐이다. Google Workspace SA 는
+이 경로에 필요 없다. `stub` 은 `MOMO_ENV=staging` 에서 부팅이 거부된다.
+
+기존 env 에 이 키가 없으면 `scripts/self_host_env.sh` 가 **그 줄만
+덧붙인다** — 시크릿은 다시 만들지 않는다. 반영에는 api 재시작이 필요하다
+(`scripts/self_host_env.sh --compose up -d`). 값을 비워 두면 첨부는 예전처럼
+503 `Drive archive is not configured` 이다.
+
+**백업 대상.** `pg_dump` 는 메시지·멤버만 가져온다. 첨부 파일을 살리려면
+같은 시점에 보관소 볼륨을 복사한다. 절차 한 줄은
+[`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).
 
 ## 멈추기 · 지우기
 

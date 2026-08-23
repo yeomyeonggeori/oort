@@ -286,12 +286,23 @@ services:
       # in-memory archive accepts uploads, reports them complete and loses every
       # byte on restart; that is the one Drive configuration worth refusing to
       # start over.
+      #
+      # ADR-0169 `local` IS usable here: bytes live on a volume and survive a
+      # restart. The self-host generator writes `local` + `MOMO_DRIVE_LOCAL_DIR`.
+      # Empty (this default) still means 503 "Drive archive is not configured",
+      # so an un-updated NCP/smoke env is unchanged.
       MOMO_DRIVE_ARCHIVE_BACKEND: ${MOMO_DRIVE_ARCHIVE_BACKEND:-}
       # A path INSIDE the api container. The key never enters the image or this
       # file — mount it read-only and name it here (ADR-0004: provider
       # credentials do not flow through momo's request path).
       MOMO_DRIVE_SA_KEY_PATH: ${MOMO_DRIVE_SA_KEY_PATH:-}
       MOMO_DRIVE_SHARED_DRIVE_ID: ${MOMO_DRIVE_SHARED_DRIVE_ID:-}
+      # Local-volume archive (ADR-0169). Empty unless the operator or the
+      # self-host generator named a directory. The mount itself lives on the
+      # self-host overlay (`local.override.yml`) so hosted google stays a
+      # bind-mount-free path.
+      MOMO_DRIVE_LOCAL_DIR: ${MOMO_DRIVE_LOCAL_DIR:-}
+      MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL: ${MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     ports:
       # Loopback only. The NCP smoke drives it over an SSH tunnel; nothing here

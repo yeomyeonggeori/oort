@@ -42,6 +42,11 @@
 # `CENTRIFUGO_ALLOWED_ORIGINS`에도 같은 2종을 넣는다 — REST 만 열고 WSS 를
 # 안 열면 로그인은 되고 실시간이 403이다.
 #
+# `MOMO_DRIVE_ARCHIVE_BACKEND=local` 도 같다(#1696 / ADR-0169). compose 기본값은
+# 빈 값(첨부 라우트 503 no-archive)이고, 셀프호스트 생성 env 만 로컬 볼륨을
+# 켠다. stub 은 MOMO_ENV=staging 에서 부팅 거부라 쓰지 않는다. 운영 google
+# 경로는 이 파일을 읽지 않는다.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **절대 덮어쓰지 않는다.** 볼륨이 살아 있는 상태에서 시크릿을
@@ -116,6 +121,7 @@ COMPOSE_CONTROL_KEYS=(
 # 읽지 않는다.
 SELF_HOST_DESKTOP_CORS_ORIGINS="tauri://localhost,http://tauri.localhost"
 SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS="tauri://localhost http://tauri.localhost"
+SELF_HOST_DRIVE_LOCAL_DIR="/var/lib/oort/drive"
 
 fail() { printf '[self-host] %s\n' "$*" >&2; exit 1; }
 
@@ -367,6 +373,76 @@ ensure_desktop_cors_allowlist() {
   printf '[self-host] %s 에 MOMO_CORS_ALLOWED_ORIGINS=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$SELF_HOST_DESKTOP_CORS_ORIGINS" >&2
   printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+}
+
+# #1696 / ADR-0169 — local file archive, for env files written before it existed.
+#
+# Same add-only rule as `ensure_operator_allowlist`: these keys are not secrets.
+# A value somebody typed (including a deliberately empty backend, which keeps
+# the 503 no-archive surface) is left exactly as it is.
+ensure_local_drive_archive() {
+  local web_port="8088" project count
+  if [ "$(env_key_count MOMO_WEB_PORT)" -eq 1 ]; then
+    web_port="$(normalize_port MOMO_WEB_PORT "$(env_value_once MOMO_WEB_PORT)")"
+  fi
+  project="$(self_host_compose_project_name)"
+  validate_project_name "$project"
+  validate_env_scalar MOMO_DRIVE_LOCAL_DIR "$SELF_HOST_DRIVE_LOCAL_DIR"
+  validate_env_scalar MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "http://localhost:${web_port}"
+  validate_env_scalar DRIVE_VOLUME_NAME "${project}-drive"
+
+  count="$(env_key_count MOMO_DRIVE_ARCHIVE_BACKEND)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_BACKEND 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 0 ]; then
+    {
+      printf '\n# --- 첨부 보관소 (#1696, 기존 env에 추가) -------------------------------\n'
+      printf '# 셀프호스트 기본은 로컬 볼륨. Google SA 없이 첨부가 켜진다.\n'
+      printf '# 반영에는 api 재시작이 필요하다(프로세스 env). 시크릿은 하나도 바뀌지 않았다.\n'
+      printf 'MOMO_DRIVE_ARCHIVE_BACKEND=local\n'
+    } >>"$ENV_FILE"
+    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_BACKEND=local 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" >&2
+  fi
+
+  count="$(env_key_count MOMO_DRIVE_LOCAL_DIR)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_DRIVE_LOCAL_DIR 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 0 ]; then
+    printf 'MOMO_DRIVE_LOCAL_DIR=%s\n' "$SELF_HOST_DRIVE_LOCAL_DIR" >>"$ENV_FILE"
+    printf '[self-host] %s 에 MOMO_DRIVE_LOCAL_DIR=%s 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" "$SELF_HOST_DRIVE_LOCAL_DIR" >&2
+  fi
+
+  count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 0 ]; then
+    printf 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s\n' "$web_port" >>"$ENV_FILE"
+    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" "$web_port" >&2
+  fi
+
+  count="$(env_key_count DRIVE_VOLUME_NAME)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 DRIVE_VOLUME_NAME 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 0 ]; then
+    printf 'DRIVE_VOLUME_NAME=%s-drive\n' "$project" >>"$ENV_FILE"
+    printf '[self-host] %s 에 DRIVE_VOLUME_NAME=%s-drive 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" "$project" >&2
+  fi
+}
+
+ensure_local_drive_public_base() {
+  [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
+  local origin="${PUBLIC_ORIGINS[0]}"
+  local count
+  count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
+  rewrite_env_assignment MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "$origin"
+  printf '[self-host] %s 의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 을 공개 오리진으로 맞췄다.\n' \
+    "$ENV_FILE" >&2
 }
 
 normalize_public_origin() {
@@ -797,8 +873,10 @@ if [ -e "$ENV_FILE" ]; then
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
   ensure_operator_allowlist "$existing_email"
   ensure_desktop_cors_allowlist
+  ensure_local_drive_archive
   warn_if_centrifugo_missing_desktop_origins
   ensure_public_origins
+  ensure_local_drive_public_base
   warn_if_legacy_localhost_realtime_ws
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
@@ -896,13 +974,19 @@ PROVIDER_LINK_SECRET="$(gen)"
 
 CENTRIFUGO_ORIGINS="http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
 CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
+DRIVE_LOCAL_DIR="$SELF_HOST_DRIVE_LOCAL_DIR"
+DRIVE_VOLUME="${PROJECT}-drive"
+DRIVE_LOCAL_BASE="http://localhost:$WEB_PORT"
+if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
+  DRIVE_LOCAL_BASE="${PUBLIC_ORIGINS[0]}"
+fi
 
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
            JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
            PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL \
            SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS \
-           CENTRIFUGO_ORIGINS; do
+           CENTRIFUGO_ORIGINS DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE; do
   validate_env_scalar "$key" "${!key}"
 done
 
@@ -994,6 +1078,16 @@ MOMO_INITIAL_OWNER_PASSWORD=$OWNER_PASSWORD
 # 값은 쉼표로 나눠 여러 명을 적을 수 있다. 바꾼 뒤에는 **api를 재시작**해야 한다
 # (프로세스 env다). provider 키 자체는 DB 행이라 재시작이 필요 없다.
 PLATFORM_ADMIN_EMAILS=$OWNER_EMAIL
+
+# --- 첨부 보관소 (ADR-0169 / #1696) ------------------------------------------
+# 셀프호스트 기본은 로컬 볼륨. Google SA 없이 첨부가 켜진다. stub 은
+# MOMO_ENV=staging 에서 부팅 거부라 쓰지 않는다. 운영 google 경로는 이
+# 파일을 읽지 않는다. 디렉터리는 api 컨테이너 안 경로이고, 호스트 볼륨
+# 이름은 DRIVE_VOLUME_NAME 이다. 백업 때 pg_dump 와 이 볼륨을 같이 가져가라.
+MOMO_DRIVE_ARCHIVE_BACKEND=local
+MOMO_DRIVE_LOCAL_DIR=$DRIVE_LOCAL_DIR
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=$DRIVE_LOCAL_BASE
+DRIVE_VOLUME_NAME=$DRIVE_VOLUME
 EOF
 chmod 600 "$ENV_FILE"
 

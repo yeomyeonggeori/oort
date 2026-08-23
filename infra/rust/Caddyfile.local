@@ -33,6 +33,13 @@
 	handle /v1/* {
 		reverse_proxy api:8080
 	}
+	# ADR-0169 — local archive PUT is same-origin. The capability URL the
+	# client is handed is `$origin/__momo_stub/drive/uploads/{token}`; without
+	# this matcher the catch-all SPA handle would serve index.html and the
+	# upload would 200 an HTML body. Hosted google does not use this path.
+	handle /__momo_stub/* {
+		reverse_proxy api:8080
+	}
 	handle /healthz {
 		reverse_proxy api:8080
 	}
