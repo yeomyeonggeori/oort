@@ -87,7 +87,7 @@
 
 ## 7. R-2 종결 (2026-08-22 저녁 — D4 결정 완료)
 
-로컬 스택+cloudflared quick tunnel 전면 실측 GREEN(정본 `research/2026-08-22-tunnel-spike-r2.md`): HTTP 200·agent-port 401 통과·WS 프레임 왕복 성립·지연 중앙값 13ms. **데스크탑(Tauri) Origin은 기본 허용목록에 이미 있어 무설정 통과** — 웹-경유-터널만 Origin 주입 필요(T-2 플레이북 반영 or v1 데스크탑 전용). **D4 확정: v1 터널 = cloudflared quick tunnel.** URL 휘발성은 체험 위상 고지+T-4와 결합 수용. 아울러 1차 런칭 타겟 축소·온보딩 3축은 증보 계획 `research/2026-08-22-aside-onboarding-three-axis-plan.md`(E1~E10) 참조 — 게이트 = PLN E2E + 그록봇 감지·등록(T-5) + 첫 왕복 온보딩(T-6).
+로컬 스택+cloudflared quick tunnel 전면 실측 GREEN(정본 `research/2026-08-22-tunnel-spike-r2.md`): HTTP 200·agent-port 401 통과·WS 프레임 왕복 성립·지연 중앙값 13ms. **데스크탑(Tauri) Origin은 기본 허용목록에 이미 있어 무설정 통과** — 웹-경유-터널만 Origin 주입 필요(T-2 플레이북 반영 or v1 데스크탑 전용). **D4 확정: v1 터널 = cloudflared quick tunnel.** ~~(2026-08-22)~~ **→ D4 재개정(2026-08-23, 성재): **Tailscale Funnel 전면 전환**(기본 터널=Tailscale Funnel·고정 URL·rate limit 구조 소멸·에이전트 headless 설치). quick tunnel 후순위. 사유=그록봇 VM egress=CF 대역 공유로 1015 구조 노출(E2E §11 실측·RA-5).** URL 휘발성은 체험 위상 고지+T-4와 결합 수용. 아울러 1차 런칭 타겟 축소·온보딩 3축은 증보 계획 `research/2026-08-22-aside-onboarding-three-axis-plan.md`(E1~E10) 참조 — 게이트 = PLN E2E + 그록봇 감지·등록(T-5) + 첫 왕복 온보딩(T-6).
 
 ## 8. R-1 종합 판정 (2026-08-22 — 문서면 종결 · 관문 통과, 단 조건부)
 
@@ -132,3 +132,53 @@ Grok Bot = **xAI+Anysphere(Cursor) 합병 첫 공동 제품**(SpaceX의 Anyspher
 | **Q-LEGAL** | **미결(성재 판단 대기)** | 본인 계정 구조라도 남는 조력 리스크(B1 베타 무보증·B2 개인 비상업·B4 경쟁서비스)의 법무 검토 1회 여부. 티켓 착수 비차단 — 단 **T-2(공개 플레이북) 정본 머지 전 판단 권장**(공개 문서가 조력의 실물이므로) |
 | **티켓 발급** | **go** — T-1~T-6·V-1 발급(이 세션 집행). **워커 발사는 별도 명시 신호 대기** | 패킷: `handoffs/2026-08-22-grokbot-selfhost-wave-packet.md`. T-1은 ADR(claim-token) Accept가 착수 게이트 |
 
+
+## 10. Q-CDP 예외 1회 — E2E 수용 런 (2026-08-23 성재 지시)
+
+성재가 E2E 수용 런 진행을 Fable에 위임하며 "너가 그록봇 제어해서 진행"을 지시. Q-CDP 결재(CDP 자동 제어 은퇴 — Cursor ToS B3)와 충돌하나, **이번 E2E 수용 런 1회에 한한 예외**로 처리(성재 선택 "이번 E2E 한정 예외"). 범위: 본인(성재) 계정 VM·수용 런 1회. 은퇴 결정 자체는 유지 — 이후 그록봇 검증/데모는 자연어 릴레이가 기본. 예외 사용 도구=스크래치패드 cdp_*.py(READ/WRITE/SEND), 크레덴셜·claim 원문은 산출물 비유입(ADR-0004).
+
+
+## 11. E2E 수용 런 실측 (2026-08-23 — §1 코어 GREEN·P1 발견·§2 CF rate limit)
+
+Q-CDP 예외 1회(§10)로 그록봇 실설치 수행. 두 바퀴:
+
+**1차(v0.1.1 digest)**: §1.4 claim 부트스트랩에서 **실결함 발견** — `bootstrap_owner_claim_if_absent.sql` `column reference "ttl_seconds" is ambiguous`(PL/pgSQL 변수↔컬럼 동명), migrate 스키마 78/78 후 Exited 1. 봇이 §5 규율대로 비밀번호 우회 거부·정확한 게이트 보고. → P1 #1673 수리(SQL 별칭 한정+cargo 회귀 가드+verify migrate-time 단정 3중 방어)→승격→재발행.
+
+**2차(재발행 digest app `6cd5320e…`)**: 스택 보존 상태에서 §1.2 digest만 교체·§1.4 재개.
+- **§1.4 GREEN**: migrate **Exit 0**(claim 부트스트랩 통과) → api/relay/agent-worker/webhook-sender 전부 Up healthy. **P1 수리 실환경 검증 완료.**
+- **§1.5 GREEN**: 로컬 `/healthz` 200 status=ok · **agent-port 401 + `Bearer scope="agent:port:connect"`**(V-1 #1650 검증 표면을 실 셀프호스트 스택에서 재확인).
+- **§1.6 GREEN**: claim 경로를 `/workspace/oort-claim.env`에 1회 수거(원문 대화 비노출).
+- **§2 멈춤(외부 요인)**: cloudflared quick tunnel `429 / error 1015`(Cloudflare rate limit) — R-2 스파이크 등 반복 개설 이력으로 IP 한도. 봇 올바른 백오프(재시도 중단). 우리 코드·파이프라인 무결.
+- §3 핸드오프: §2 대기.
+
+### 판정
+- **코어 계층(§1 설치·헬스체크·agent-port·claim) 전량 GREEN 실증** — 파이프라인·claim-token·플레이북 fail-closed가 실환경에서 정확히 작동.
+- §2/§3 잔여 = **Cloudflare quick tunnel rate limit(외부·일시)**. 한도 회복 후 §2부터 재개하면 폐곡선. 또는 named tunnel 전환(D4 변경 — 성재 결재 필요, RA-4 A6 고정링크 대응책과 동일).
+- **플레이북 후속 후보**: §2에 "quick tunnel 429/1015 시 백오프·named tunnel 대안" 문면 추가(T-2 후속 소형 티켓).
+
+### 성재 결정 큐 (E2E 발)
+- **Q-TUNNEL**: §2/§3 재개를 ⓐquick tunnel 한도 회복 대기 후 재시도 ⓑnamed tunnel+도메인으로 전환(D4 변경) 중 무엇으로.
+
+
+### §11 갱신 (2026-08-23 — Tailscale Funnel로 §2·§3 종결)
+D4 재개정(Tailscale Funnel) 후 그록봇 실환경에서 §2 재개:
+- Tailscale 설치(에이전트 1줄)·인증(성재 로그인 URL 클릭 — 첫 시도 VM 미반영, 재인증 1회로 성립)·Funnel 연결(에이전트 `tailscale serve --bg 8088`+`funnel 443 on`) 전부 성립.
+- **§2 GREEN(고정 URL)**: `https://cursor.tailb1aad3.ts.net` — `/healthz` 200·agent-port 401+`Bearer scope="agent:port:connect"` 외부 도달성 실측.
+- **§3 GREEN(핸드오프)**: 접속 주소(고정 URL)+데스크탑 앱(Releases latest)+셋업 링크(claim URL 1회·24h)+본인 계정 고지+덤프 백업 안내. 봇이 Q-STRUCT·ADR-0004·T-4 문면 자발 준수.
+- **RA-5 Tailscale 전환 실환경 검증 완료** — quick tunnel 1015 구조 노출을 자체 릴레이 고정 URL로 해소.
+- **claim 토큰 대화 노출 발견**: claim URL은 토큰 포함 구조라 링크 전달 시 대화(그록/xAI 로그)에 원문 노출 불가피. 1회·24h·소비 시 무효라 파급 제한적이나, **플레이북 재작성 시 "claim 링크는 즉시 소비 권장·미사용 시 재발급" 문면 명시** 필요(§5 "원문 반복 금지"와 claim URL의 관계 정교화).
+- **잔여 = D8**(성재 데스크탑 실접속→claim 비번 설정→첫 메시지→그록봇 에이전트 합류). 스택·Funnel 보존. D8 GREEN 시 E2E 완전 종결.
+
+### §11 갱신 2 (2026-08-23 — D8 Fable 대행 실측: 코어 GREEN·실시간 레일 P1)
+성재 지시("너가 직접 데스크탑 제어해서 수행")로 Fable이 로컬 맥에서 D8 직접 수행. 증거 14샷 `claudedocs/e2e-d8-desktop-20260823/`.
+- **D8 코어 GREEN**: v0.1.1 dmg(공증 stapler PASS) 설치→실행→Funnel 주소 입력→claim 소비·비번 설정(웹)→**데스크탑 owner 로그인 성공**→첫 메시지 REST 전송·렌더. **T-5 그록봇 감지 CTA가 실환경 데스크탑에서 노출**("그록봇을 팀에 초대할까요?").
+- **★P1 발견 — 실시간 레일 RED**: 로그인 응답 `realtimeWebSocketUrl=ws://localhost:8088/connection/websocket`(curl 실측). 근원=`scripts/self_host_env.sh:796` 기본값이 터널 모드 무인지, 서버는 ADR-0110대로 verbatim 반환 → 원격 클라가 자기 localhost로 WS 시도·실패. **R-2가 이를 못 본 이유=스택이 검증 머신과 동일 호스트라 localhost가 우연히 옳았음**(가림막 실증 — 원격 D8만이 잡을 수 있던 결함).
+- **수리 유효성 실측**: Funnel 경유 `/connection/websocket` WS 업그레이드 **101 통과**(curl) — VM env `MOMO_CENTRIFUGO_WS_URL=wss://cursor.tailb1aad3.ts.net/connection/websocket` + api 재기동이면 폐곡선. 수리는 그록봇 릴레이(성재 전달) 대상.
+- 소견 2: ①owner 계정 표시명이 시드 "데모 사용자/@demo"로 노출(첫 소유자 이름 설정 단계 부재 — 폴리시 티켓감) ②플레이북(SELF_HOST_AGENT.md) websocket/realtime 문면 0건 — 터널 모드 WS URL 재설정 절차 부재(T-2 후속과 병합).
+- **잔여**: ①WS env 수리(그록봇 릴레이) ②그록봇 에이전트 합류(T-5 위저드 pairing — 그록봇 릴레이) ③성재 수동 D8 재연·수용 판정. 스택·Funnel·claim 소비 상태 보존.
+
+### §11 갱신 3 (2026-08-23 — P1 즉석 완화 폐곡선: 실시간 레일 GREEN 실측)
+- 성재 "알아서 해결" 지시 → 원천수리 채비(**ADR-0167 Proposed**·**T-9=#1678**·패킷 ready — Accept·발사 go 대기)와 별도로, 즉석 완화를 그록봇 릴레이로 집행(전달도 Fable — 성재 "하라해줘", UI 스테이징 전송·CDP 비사용).
+- 타임라인: 릴레이 15:53 → 그록봇 env 2줄(WS URL wss 전환+Origin 추가)+api·centrifugo 재생성 → 로그인 응답 `wss://cursor.tailb1aad3.ts.net/connection/websocket` 실측 15:54 → 데스크탑 재로그인(구 세션은 구 광고 URL 보유 — 재로그인 필요 실측) → **REST 201 발신 메시지가 열려있는 데스크탑 채널에 라이브 도착 15:59 + 프레즌스 점등**. 실시간 레일 GREEN.
+- **온보딩 캡처 가동**(성재 발제 — 와우 갭 검수 재료): 그록봇이 `/workspace/oort-onboarding-captures/` 01~18 생성(INDEX.md 목차·헤맴 코멘트·시크릿 마스킹). 목록 자체가 마찰 지도다: 07 migrate ttl 실패·12 quick tunnel 429·14 로그인 반복·18 WS 공개 URL. 합류 단계는 19번부터 이어붙임 약속.
+- **잔여 = 에이전트 합류**(T-5 위저드 pairing→그록봇) + **성재 수동 D8 재연=수용 판정** + ADR-0167 Accept·T-9 발사.

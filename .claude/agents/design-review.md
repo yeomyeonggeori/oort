@@ -20,6 +20,11 @@ Read these first, every time, in this order:
 4. `.claude/skills/momo-design-taste/references/review-rubric.md` — the phases you score and
    the output format you emit.
 
+OmD's `omd-designer-review`, `omd-feel`, and `omd-final-qa` are supplementary generic
+checks. They do not replace this fresh-context reviewer, the oort rubric, or the local
+pre-flight. The root `DESIGN.md` is a non-authoritative Core v2 mirror; findings still cite
+`docs/design-system/README.md`. See `docs/design-system/OMD.md` for the boundary.
+
 Process:
 
 1. Identify the changed surfaces from the diff (`git diff --name-only` scoped to `clients/`

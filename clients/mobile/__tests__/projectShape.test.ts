@@ -264,7 +264,11 @@ describe('DOM is in `lib`, so the discipline is enforced by a gate', () => {
           // that did not strip them would drown, then get tuned until it caught
           // nothing. Same reasoning the core's purity gate gives for parsing.
           .replace(/\/\*[\s\S]*?\*\//g, '')
-          .replace(/^\s*\/\/.*$/gm, '');
+          .replace(/^\s*\/\/.*$/gm, '')
+          // Module specifiers and UI copy are values, not global reads. Without
+          // stripping strings, `expo-document-picker` is mistaken for the DOM
+          // `document` global even though the source never evaluates it.
+          .replace(/(['"])(?:\\.|(?!\1).)*\1/g, '');
         return banned.test(source);
       });
     expect(offenders).toEqual([]);

@@ -374,3 +374,19 @@ xAI AUP와 구조가 거의 동일. 추가로 Cursor에만 있는 조항(한국�
 - [digitalapplied — Grok Bot Ships Through Cursor Tiers, Not xAI Plans](https://www.digitalapplied.com/blog/grok-bot-cursor-tier-gating-spacex-anysphere-deal-2026)
 - [kie.ai — What Is Grok Bot? (2차, 원문 403)](https://kie.ai/blog/grok-bot-release)
 - [github.com/adam91holt/grokbot-sdk (서드파티, 저신뢰)](https://github.com/adam91holt/grokbot-sdk)
+
+
+## 9. R-1 실측면 종결 (2026-08-23 — 마커 2종 잔존 확인)
+
+E2E 수용 런 착수 시 그록봇에 자연어로 마커 재확인 질의(CDP 예외 1회 — 모계획 §10). **두 마커 모두 세션을 넘어 잔존 확인:**
+
+| 마커 | 결과 |
+|---|---|
+| `~/.oort_probe`(홈 파일) | **있음** — `2026-08-22T09:35:55Z` 원값 그대로. uptime 16h57m(전 세션 1h39m→또 재시작됐으나 마커 유지) |
+| Docker 볼륨 `oort-persist-probe`(`/var/lib/docker` 층) | **있음** — HTTP 200·라벨 created=2026-08-22 |
+
+**판정**: 
+1. 이전 세션 봇의 "홈은 세션 넘어 안 남았다" 추론은 오류였음이 확증(마커 최초 심은 뒤 다음 세션 실제 잔존 — §6.1 예측대로 무증거 추론이었음).
+2. **oort pgdata가 사는 `/var/lib/docker` 볼륨 층이 세션 재시작(≥1회)을 넘어 재부착됨** — §8.4 실측면 잔여("Update가 Docker 볼륨을 보존하는지, 문서상 replaceable이라 위험 쪽")에 **긍정적 실측 증거**. 단 관측된 재시작이 Update(새 인스턴스)인지 팟 재스케줄인지는 여전히 불명 — Update 유형에서의 볼륨 생존은 별도 미검증.
+
+**설계 반영**: T-2 플레이북의 pgdata `/workspace` bind mount "보수 기본"은 **유지**(Update 유형 미검증이라 안전측). 단 §8.3 ⓒ의 "마커 실측이 볼륨 생존을 증명하면 완화 가능" 조건이 재시작 유형에 한해 부분 충족 — Update 유형 검증이 추가되면 Docker 볼륨 직접 사용으로 완화하는 후속 티켓 여지.

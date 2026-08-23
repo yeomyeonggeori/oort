@@ -6,7 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { SendHorizontal } from "lucide-react";
+import { SendHorizontal, Smile } from "lucide-react";
 import type {
   MessageAttachment,
   RequestRouting,
@@ -17,7 +17,10 @@ import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { useIsMobileShell } from "@/app/shellNav";
 import type { Directory } from "@/features/workspace/useWorkspace";
-import { composerKeyIntent, isComposingEvent } from "@momo/core/features/chat/composerKeys";
+import {
+  composerKeyIntent,
+  isComposingEvent,
+} from "@momo/core/features/chat/composerKeys";
 import type { RecipientKind } from "@momo/core/lib/koreanParticle";
 import {
   COMPOSER_KEYS_HINT,
@@ -85,6 +88,12 @@ import {
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
+import {
+  MentionAutocompleteList,
+  useMentionAutocomplete,
+} from "@/features/chat/MentionAutocomplete";
+import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
+import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 // =============================================================================
 // Composer (R-1 §3). Send plus the @mention skeleton. ↵ sends, ⇧↵ is a line
@@ -125,7 +134,6 @@ import { useComposerDropZone } from "@/features/attachments/useComposerDropZone"
 
 const MIN_ROWS = 1;
 const MAX_ROWS = 6;
-const MENTION_LIMIT = 6;
 
 /**
  * 연결이 끊겨 있을 때 전송 자리에서 하는 말. **이름만 여기 있고 값은 코어에
@@ -142,40 +150,6 @@ const MENTION_LIMIT = 6;
  * 게이트가 찾는 `data-testid`). 값을 세 번 적는 대신 이름 하나를 쓴다.
  */
 export { COMPOSER_OFFLINE_COPY };
-
-interface MentionQuery {
-  /** Index of the '@' that opened the query. */
-  start: number;
-  text: string;
-}
-
-/** The active @mention token at the caret, or null when there is none. */
-export function mentionQueryAt(value: string, caret: number): MentionQuery | null {
-  const upto = value.slice(0, caret);
-  const at = upto.lastIndexOf("@");
-  if (at < 0) return null;
-  if (at > 0 && !/\s/.test(upto[at - 1])) return null; // mid-word @ is not a mention
-  const text = upto.slice(at + 1);
-  if (/\s/.test(text)) return null;
-  return { start: at, text };
-}
-
-export function matchMembers(
-  members: RosterMember[],
-  query: string,
-  limit = MENTION_LIMIT
-): RosterMember[] {
-  const needle = query.trim().toLowerCase();
-  const active = members.filter((m) => m.status === "active");
-  const matched = needle
-    ? active.filter(
-        (m) =>
-          m.handle.toLowerCase().includes(needle) ||
-          m.displayName.toLowerCase().includes(needle)
-      )
-    : active;
-  return matched.slice(0, limit);
-}
 
 /**
  * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One flat meta
@@ -388,10 +362,23 @@ export function Composer({
   // 「초안이 없다」로 읽히기 때문이다 — 그 프레임에 사람이 타이핑을 시작하면 복원이
   // 그 글자를 덮어쓴다.
   const [text, setText] = useState(() => readDraft(workspaceId, channelId));
-  const [caret, setCaret] = useState(0);
-  const [highlight, setHighlight] = useState(0);
-  const [mentionOpen, setMentionOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const mentions = useMentionAutocomplete({
+    value: text,
+    members: directory.members,
+    inputRef,
+    onValueChange: (next) => {
+      setText(next);
+      writeDraft(workspaceId, channelId, next);
+    },
+  });
+  const setMentionCaret = mentions.setCaret;
+  const closeMentions = mentions.close;
+  const emoji = useComposerEmoji({
+    value: text,
+    inputRef,
+    onValueChange: mentions.replaceValue,
+  });
   // Raised by `compositionend`, lowered by the next `keyup` (composerKeys.ts).
   // In WebKit, which is the Tauri shell's engine, `compositionend` is dispatched
   // BEFORE the keydown of the Enter that committed the composition, so by the
@@ -467,12 +454,6 @@ export function Composer({
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
   const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
-  const query = mentionOpen ? mentionQueryAt(text, caret) : null;
-  const candidates = useMemo(
-    () => (query ? matchMembers(directory.members, query.text) : []),
-    [query, directory.members]
-  );
-  const showMentions = candidates.length > 0;
   /** 힌트 줄에 남은 조각이 하나라도 있는가. 없으면 그 줄은 서지 않는다. */
   const hasHint = dmAgent !== null || keysHintNeeded;
 
@@ -536,8 +517,8 @@ export function Composer({
   useEffect(() => {
     const restored = readDraft(workspaceId, channelId);
     setText(restored);
-    setCaret(restored.length);
-    setMentionOpen(false);
+    setMentionCaret(restored.length);
+    closeMentions();
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
     const onSeed = (event: Event) => {
@@ -552,8 +533,8 @@ export function Composer({
       }
       if (textRef.current.trim() !== "") return;
       setText(detail.text);
-      setCaret(detail.text.length);
-      setMentionOpen(false);
+      setMentionCaret(detail.text.length);
+      closeMentions();
     };
     window.addEventListener(COMPOSER_SEED_EVENT, onSeed);
     return () => {
@@ -561,20 +542,7 @@ export function Composer({
       window.removeEventListener(COMPOSER_SEED_EVENT, onSeed);
       save();
     };
-  }, [workspaceId, channelId]);
-
-  function applyMention(member: RosterMember) {
-    if (!query) return;
-    const next = `${text.slice(0, query.start)}@${member.handle} ${text.slice(caret)}`;
-    setText(next);
-    setMentionOpen(false);
-    const position = query.start + member.handle.length + 2;
-    requestAnimationFrame(() => {
-      inputRef.current?.focus();
-      inputRef.current?.setSelectionRange(position, position);
-      setCaret(position);
-    });
-  }
+  }, [workspaceId, channelId, setMentionCaret, closeMentions]);
 
   /**
    * 지금 이 전송이 나갈 수 있는가.
@@ -603,7 +571,7 @@ export function Composer({
     // including its failure state and its retry, so there is nothing left for
     // the composer to hold on to.
     setText("");
-    setMentionOpen(false);
+    mentions.close();
     routing.reset();
     onCancelQuote();
     // 화면에서 사라진 글은 저장소에서도 사라진다. 여기서 지우지 않으면 이 채널을
@@ -648,12 +616,17 @@ export function Composer({
         composing: isComposingEvent(event.nativeEvent),
       },
       {
-        mentionsOpen: showMentions,
+        mentionsOpen: mentions.visible,
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
         quoteOpen: quote !== null,
       }
     );
+
+    if (mentions.handleIntent(intent)) {
+      event.preventDefault();
+      return;
+    }
 
     switch (intent) {
       case "send": {
@@ -668,22 +641,6 @@ export function Composer({
         }
         return;
       }
-      case "mention-accept":
-        event.preventDefault();
-        applyMention(candidates[Math.min(highlight, candidates.length - 1)]);
-        return;
-      case "mention-next":
-        event.preventDefault();
-        setHighlight((h) => (h + 1) % candidates.length);
-        return;
-      case "mention-prev":
-        event.preventDefault();
-        setHighlight((h) => (h - 1 + candidates.length) % candidates.length);
-        return;
-      case "mention-close":
-        event.preventDefault();
-        setMentionOpen(false);
-        return;
       case "quote-cancel":
         // Esc는 「지금 열려 있는 것을 닫는다」이고, 멘션 목록이 닫혀 있을 때 이
         // 컴포저에 열려 있는 것은 인용이다. 취소 버튼과 같은 일을 하는 두 번째
@@ -765,45 +722,35 @@ export function Composer({
       )}
 
       <form onSubmit={onSubmit} className="relative flex items-end gap-2 p-3">
-        {showMentions && (
-          <ul
-            role="listbox"
-            aria-label="멤버 언급"
-            data-testid="mention-list"
-            className="absolute bottom-full left-3 mb-2 w-pane-sm overflow-hidden rounded-md border border-line bg-surface-raised p-1 shadow-lg"
-          >
-            {candidates.map((member, index) => (
-              <li key={member.id}>
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={index === highlight}
-                  data-testid="mention-option"
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    applyMention(member);
-                  }}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body",
-                    index === highlight
-                      ? "bg-accent-soft text-ink"
-                      : "text-ink"
-                  )}
-                >
-                  <span className="truncate">@{member.handle}</span>
-                  <span className="min-w-0 flex-1 truncate text-meta text-ink-muted">
-                    {member.displayName}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <MentionAutocompleteList
+          id="composer-mention-list"
+          candidates={mentions.candidates}
+          highlight={mentions.highlight}
+          onChoose={mentions.choose}
+          testId="mention-list"
+          optionTestId="mention-option"
+        />
 
         {/* 클립은 입력창 **왼쪽**이다. 전송이 오른쪽 끝을 갖는 것과 짝이고
             (넣는 것은 앞, 보내는 것은 뒤), Slack·Discord·Linear 가 전부 같은
             자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
         <AttachButton onPick={onFiles} disabled={offline} />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className="tap-target shrink-0"
+          disabled={offline}
+          aria-label="이모지 넣기"
+          title="이모지 넣기"
+          data-testid="composer-emoji-trigger"
+          onClick={(event) => {
+            mentions.close();
+            emoji.openPicker(event.currentTarget);
+          }}
+        >
+          <Smile aria-hidden="true" />
+        </Button>
         <label className="sr-only" htmlFor="composer-input">
           {composerFieldLabel(channelLabel, recipient)}
         </label>
@@ -816,22 +763,20 @@ export function Composer({
           rows={MIN_ROWS}
           onChange={(event) => {
             const next = event.target.value;
-            setText(next);
-            setCaret(event.target.selectionStart ?? 0);
-            setMentionOpen(true);
-            setHighlight(0);
+            mentions.onTextChange(next, event.target.selectionStart ?? 0);
             // 초안은 **입력마다** 남는다. 디바운스를 걸지 않는 이유는 이 저장이
             // 문자열 하나를 동기로 쓰는 일이고(같은 저장소에 세션 기록이 이미 이
             // 방식으로 산다), 디바운스가 사는 창이 정확히 「마지막 몇 글자를
             // 잃는 창」이기 때문이다.
-            writeDraft(workspaceId, channelId, next);
             // 「작성 중」은 **키에서만** 나간다 (ADR-0149). 타이머가 없으므로 입력이
             // 멈추면 송신도 멈추고, 흐림·탭 전환·언마운트에 끌 것이 없다. 소멸은
             // TTL이 하고 「정지」 신호는 계약에 없다.
             typing.onInput();
           }}
           onSelect={(event) =>
-            setCaret((event.target as HTMLTextAreaElement).selectionStart ?? 0)
+            mentions.setCaret(
+              (event.target as HTMLTextAreaElement).selectionStart ?? 0
+            )
           }
           onKeyDown={onKeyDown}
           // 스크린샷을 ⌘V 로 넣는 것은 이 도구를 쓰는 사람이 하루에 몇 번씩 하는
@@ -862,6 +807,14 @@ export function Composer({
           // `composer-placeholder` 의 `1lh`(#1418)는 그 뒤에 남는 마지막
           // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
           placeholder={placeholder}
+          aria-autocomplete="list"
+          aria-expanded={mentions.visible}
+          aria-controls={mentions.visible ? "composer-mention-list" : undefined}
+          aria-activedescendant={
+            mentions.visible
+              ? `composer-mention-list-option-${mentions.highlight}`
+              : undefined
+          }
           aria-describedby={hasHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
@@ -970,6 +923,14 @@ export function Composer({
         directory={directory}
         nowMs={nowMs}
         live={railLive}
+      />
+      <EmojiPickerDialog
+        open={emoji.open}
+        onOpenChange={emoji.setOpen}
+        onPick={emoji.pick}
+        opener={emoji.opener}
+        purpose="insert"
+        testId="composer-emoji-picker"
       />
     </div>
   );

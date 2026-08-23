@@ -1,10 +1,17 @@
-import { useMemo, useRef, useState } from "react";
-import { SendHorizontal } from "lucide-react";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { SendHorizontal, Smile } from "lucide-react";
 import { sendThreadReply } from "@momo/core/lib/api";
+import {
+  composerKeyIntent,
+  isComposingEvent,
+} from "@momo/core/features/chat/composerKeys";
 import { InlineBanner } from "@/features/common/States";
 import { replyFailureMessage } from "@momo/core/features/timeline/actionCopy";
 import { THREAD_COMPOSER_PLACEHOLDER } from "@momo/core/features/chat/composerCopy";
 import { cn } from "@/design/lib/cn";
+import { Button } from "@/design/ui/button";
+import { useIsMobileShell } from "@/app/shellNav";
+import type { Directory } from "@/features/workspace/useWorkspace";
 import {
   AttachButton,
   AttachmentTray,
@@ -20,6 +27,12 @@ import {
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
+import {
+  MentionAutocompleteList,
+  useMentionAutocomplete,
+} from "@/features/chat/MentionAutocomplete";
+import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
+import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
   sendBlockCopy,
   sendBlockReason,
@@ -38,10 +51,11 @@ import { useAutoGrow } from "./useAutoGrow";
 // work excerpt into a session thread. There is no reply endpoint and inventing
 // one client-side would be a second write path into the same ledger.
 //
-// Deliberately simpler than the channel composer: no mention autocomplete and no
-// model/effort selector. Those belong to the surface where a conversation
-// starts; a reply is a follow-up, and every control added here is one more thing
-// between reading the thread and answering it.
+// Deliberately simpler than the channel composer only where the action changes
+// how an agent runs: no model/effort selector. Mention autocomplete, attachments
+// and emoji are message contents, so both composers use the same surfaces. A
+// reply that cannot name a member or carry the file it discusses is not a
+// simpler reply; it is an incomplete one (#1688).
 //
 // ## 첨부는 그 목록에서 빠진다 (ADR-0151 D2 / #1202)
 //
@@ -65,11 +79,13 @@ export function ThreadComposer({
   workspaceId,
   channelId,
   rootId,
+  directory,
   onSent,
 }: {
   workspaceId: string;
   channelId: string;
   rootId: string;
+  directory: Directory;
   /** Refetch the thread; the reply also arrives on the realtime rail. */
   onSent: () => void;
 }) {
@@ -77,6 +93,19 @@ export function ThreadComposer({
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const ref = useRef<HTMLTextAreaElement | null>(null);
+  const justComposedRef = useRef(false);
+  const isMobile = useIsMobileShell();
+  const mentions = useMentionAutocomplete({
+    value: draft,
+    members: directory.members,
+    inputRef: ref,
+    onValueChange: setDraft,
+  });
+  const emoji = useComposerEmoji({
+    value: draft,
+    inputRef: ref,
+    onValueChange: mentions.replaceValue,
+  });
 
   // 트레이는 **이 스레드의 것**이다. 채널 컴포저와 열쇠가 다르므로, 스레드에 붙인
   // 파일이 패널을 닫는 순간 채널 입력창에 나타나는 일이 없다.
@@ -121,6 +150,7 @@ export function ThreadComposer({
     })
       .then(() => {
         setDraft("");
+        mentions.close();
         clearSurface(trayKey);
         onSent();
         ref.current?.focus();
@@ -159,28 +189,101 @@ export function ThreadComposer({
             testId="thread-composer-error"
           />
         )}
-        <div className="flex items-end gap-2">
+        <div className="relative flex items-end gap-2">
+          <MentionAutocompleteList
+            id="thread-mention-list"
+            candidates={mentions.candidates}
+            highlight={mentions.highlight}
+            onChoose={mentions.choose}
+            testId="thread-mention-list"
+            optionTestId="thread-mention-option"
+            className="left-0"
+          />
           <AttachButton onPick={onFiles} disabled={sending} />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="tap-target shrink-0"
+            disabled={sending}
+            aria-label="이모지 넣기"
+            title="이모지 넣기"
+            data-testid="thread-composer-emoji-trigger"
+            onClick={(event) => {
+              mentions.close();
+              emoji.openPicker(event.currentTarget);
+            }}
+          >
+            <Smile aria-hidden="true" />
+          </Button>
           <textarea
             ref={ref}
             value={draft}
             disabled={sending}
-            // 채널 컴포저와 달리 `@` 를 광고하지 않는다 (#1384). 이유는
-            // **이 상자**에 멘션 자동완성이 없어서다(이 파일 머리말) — 폰의
-            // 스레드는 채널 컴포저를 그대로 세우므로 거기서는 @ 가 목록을 연다.
-            // 그 비대칭은 동작이라 카피 티켓이 고치지 않고 코어가 기록한다
-            // (`composerCopy.ts` 의 THREAD_COMPOSER_PLACEHOLDER). 문장은 두
-            // 클라가 함께 쓰므로 **둘 다 하는 일**까지만 말한다.
+            // 공유 문구는 아직 「답글 쓰기」만 말한다. C-1 코어 파도와 충돌하지
+            // 않도록 이 goal은 코어 문장을 건드리지 않고, 실제 @ 동작만 웹과 폰에
+            // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
             placeholder={THREAD_COMPOSER_PLACEHOLDER}
             aria-label={THREAD_COMPOSER_PLACEHOLDER}
+            aria-autocomplete="list"
+            aria-expanded={mentions.visible}
+            aria-controls={mentions.visible ? "thread-mention-list" : undefined}
+            aria-activedescendant={
+              mentions.visible
+                ? `thread-mention-list-option-${mentions.highlight}`
+                : undefined
+            }
             data-testid="thread-composer-input"
-            onChange={(event) => setDraft(event.target.value)}
+            onChange={(event) =>
+              mentions.onTextChange(
+                event.target.value,
+                event.target.selectionStart ?? 0
+              )
+            }
+            onSelect={(event) =>
+              mentions.setCaret(
+                (event.target as HTMLTextAreaElement).selectionStart ?? 0
+              )
+            }
             onPaste={drop.onPaste}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && !event.shiftKey) {
-                event.preventDefault();
-                submit();
+            onCompositionStart={() => {
+              justComposedRef.current = false;
+            }}
+            onCompositionEnd={() => {
+              justComposedRef.current = true;
+            }}
+            onKeyUp={() => {
+              justComposedRef.current = false;
+            }}
+            onBlur={() => {
+              justComposedRef.current = false;
+            }}
+            onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+              if (event.key !== "Enter" && event.key !== "Tab") {
+                justComposedRef.current = false;
               }
+              const intent = composerKeyIntent(
+                {
+                  key: event.key,
+                  shiftKey: event.shiftKey,
+                  metaKey: event.metaKey,
+                  ctrlKey: event.ctrlKey,
+                  altKey: event.altKey,
+                  composing: isComposingEvent(event.nativeEvent),
+                },
+                {
+                  mentionsOpen: mentions.visible,
+                  justComposed: justComposedRef.current,
+                  enterSends: !isMobile,
+                }
+              );
+              if (mentions.handleIntent(intent)) {
+                event.preventDefault();
+                return;
+              }
+              if (intent !== "send") return;
+              event.preventDefault();
+              submit();
             }}
             className="tap-target min-h-control w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:opacity-50"
           />
@@ -189,9 +292,7 @@ export function ThreadComposer({
             disabled={!canSend}
             onClick={submit}
             aria-label="답글 보내기"
-            title={
-              attachBlockCopy ?? "답글 보내기"
-            }
+            title={attachBlockCopy ?? "답글 보내기"}
             data-testid="thread-composer-send"
             className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-50"
           >
@@ -199,6 +300,14 @@ export function ThreadComposer({
           </button>
         </div>
       </div>
+      <EmojiPickerDialog
+        open={emoji.open}
+        onOpenChange={emoji.setOpen}
+        onPick={emoji.pick}
+        opener={emoji.opener}
+        purpose="insert"
+        testId="thread-composer-emoji-picker"
+      />
     </div>
   );
 }

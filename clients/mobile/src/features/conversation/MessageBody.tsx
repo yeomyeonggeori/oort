@@ -5,6 +5,10 @@ import {
   type Block,
   type Inline,
 } from '@momo/core/features/timeline/markdown';
+import {
+  memberFor,
+  type Directory,
+} from '@momo/core/features/workspace/directory';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   Linking,
@@ -176,30 +180,52 @@ export function bodyAffordances(body: string): BodyAffordances {
   };
 }
 
-function InlineNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
+interface MentionRendering {
+  activeHandles: ReadonlySet<string>;
+  selfHandle: string | null;
+}
+
+const NO_MENTIONS: MentionRendering = {
+  activeHandles: new Set<string>(),
+  selfHandle: null,
+};
+
+function InlineNodes({
+  nodes,
+  mentions,
+}: {
+  nodes: Inline[];
+  mentions: MentionRendering;
+}): React.JSX.Element {
   return (
     <>
       {nodes.map((node, index) => (
-        <InlineNode key={index} node={node} />
+        <InlineNode key={index} node={node} mentions={mentions} />
       ))}
     </>
   );
 }
 
-function InlineNode({node}: {node: Inline}): React.JSX.Element {
+function InlineNode({
+  node,
+  mentions,
+}: {
+  node: Inline;
+  mentions: MentionRendering;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   if (node.kind === 'text') return <>{node.text}</>;
   if (node.kind === 'strong') {
     return (
       <Text style={styles.strong}>
-        <InlineNodes nodes={node.children} />
+        <InlineNodes nodes={node.children} mentions={mentions} />
       </Text>
     );
   }
   if (node.kind === 'em') {
     return (
       <Text testID="message-em">
-        <EmphasisNodes nodes={node.children} />
+        <EmphasisNodes nodes={node.children} mentions={mentions} />
       </Text>
     );
   }
@@ -207,6 +233,17 @@ function InlineNode({node}: {node: Inline}): React.JSX.Element {
     return (
       <Text style={styles.inlineCode} testID="message-inline-code">
         {node.text}
+      </Text>
+    );
+  }
+  if (node.kind === 'mention') {
+    if (!mentions.activeHandles.has(node.handle)) return <>{node.raw}</>;
+    const self = mentions.selfHandle === node.handle;
+    return (
+      <Text
+        style={[styles.mention, self && styles.mentionSelf]}
+        testID={self ? 'message-self-mention' : 'message-mention'}>
+        {node.raw}
       </Text>
     );
   }
@@ -219,18 +256,26 @@ function InlineNode({node}: {node: Inline}): React.JSX.Element {
       onPress={() => openLink(node.href)}
       style={styles.link}
       testID="message-link">
-      <InlineNodes nodes={node.children} />
+      <InlineNodes nodes={node.children} mentions={mentions} />
     </Text>
   );
 }
 
 /** `em` 안쪽. 텍스트 잎만 스크립트별로 끊고, 나머지는 그대로 내려간다. */
-function EmphasisNodes({nodes}: {nodes: Inline[]}): React.JSX.Element {
+function EmphasisNodes({
+  nodes,
+  mentions,
+}: {
+  nodes: Inline[];
+  mentions: MentionRendering;
+}): React.JSX.Element {
   const styles = useStyles(buildStyles);
   return (
     <>
       {nodes.map((node, index) => {
-        if (node.kind !== 'text') return <InlineNode key={index} node={node} />;
+        if (node.kind !== 'text') {
+          return <InlineNode key={index} node={node} mentions={mentions} />;
+        }
         return (
           <React.Fragment key={index}>
             {splitItalicRuns(node.text).map((run, runIndex) => (
@@ -319,10 +364,12 @@ function BlockNode({
   block,
   muted,
   selectable,
+  mentions,
 }: {
   block: Block;
   muted: boolean;
   selectable: boolean;
+  mentions: MentionRendering;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   if (block.kind === 'code') {
@@ -399,7 +446,7 @@ function BlockNode({
             <Text
               selectable={selectable}
               style={[styles.listText, muted && styles.muted]}>
-              <InlineNodes nodes={item} />
+              <InlineNodes nodes={item} mentions={mentions} />
             </Text>
           </View>
         ))}
@@ -414,7 +461,7 @@ function BlockNode({
       {block.lines.map((line, index) => (
         <React.Fragment key={index}>
           {index > 0 ? '\n' : null}
-          <InlineNodes nodes={line} />
+          <InlineNodes nodes={line} mentions={mentions} />
         </React.Fragment>
       ))}
     </Text>
@@ -438,9 +485,15 @@ export function MessageBody({
   body,
   muted = false,
   selectable = false,
+  directory,
+  selfMemberId,
 }: {
   body: string;
   muted?: boolean;
+  /** Active roster members are the authority for whether a token is a mention. */
+  directory?: Directory;
+  /** Current member, used only for the stronger self-mention treatment. */
+  selfMemberId?: string;
   /**
    * 본문 텍스트를 손가락으로 고를 수 있나.
    *
@@ -459,6 +512,21 @@ export function MessageBody({
     () => (isPlainText(body) ? null : parseMarkdown(body)),
     [body],
   );
+  const mentions = useMemo<MentionRendering>(() => {
+    // Keep the pre-markdown path cheap: ordinary prose neither walks the
+    // directory nor changes its rendered shape just because this prop exists.
+    if (blocks === null || directory === undefined) return NO_MENTIONS;
+    const activeHandles = new Set(
+      directory.members
+        .filter(member => member.status === 'active')
+        .map(member => member.handle.toLowerCase()),
+    );
+    const self = memberFor(directory, selfMemberId);
+    return {
+      activeHandles,
+      selfHandle: self?.handle.toLowerCase() ?? null,
+    };
+  }, [blocks, directory, selfMemberId]);
 
   if (blocks === null || blocks.length === 0) {
     return (
@@ -478,6 +546,7 @@ export function MessageBody({
           block={block}
           muted={muted}
           selectable={selectable}
+          mentions={mentions}
         />
       ))}
     </View>
@@ -499,6 +568,11 @@ const buildStyles = (color: Palette) => StyleSheet.create({
     backgroundColor: color.surfacePressed,
   },
   link: {color: color.accentText, textDecorationLine: 'underline'},
+  mention: {color: color.accentText},
+  mentionSelf: {
+    backgroundColor: color.accentSurface,
+    fontWeight: '700',
+  },
   // N-1: `#0b0d11` 은 토큰이 아니었고 **앱 배경보다 더 어두웠다**. 웹은 반대
   // 방향으로 한 단 **올린다**(`bg-surface-hover`) — 코드 상자는 파묻히는 것이
   // 아니라 떠 있는 것이다. 폰의 그 한 단이 `surface` 이고, 이 파일의 카드들이

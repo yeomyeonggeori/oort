@@ -1,4 +1,8 @@
-import {uuidEq, type Message} from '@momo/core/lib/api';
+import {
+  openDirectMessage,
+  uuidEq,
+  type Message,
+} from '@momo/core/lib/api';
 import {
   quoteDraftFor,
   quoteDraftStillValid,
@@ -10,13 +14,18 @@ import {
   typingSegments,
   TYPING_AGGREGATE_THRESHOLD_FALLBACK,
 } from '@momo/core/features/chat/typing';
-import {memberFor, memberNameParts} from '@momo/core/features/workspace/directory';
+import {
+  channelLabel,
+  memberFor,
+  memberNameParts,
+} from '@momo/core/features/workspace/directory';
 import {
   dmAutoReplyAgent,
   dmPeer,
   unreadFor,
 } from '@momo/core/features/workspace/directory';
 import type {CancelOutcome} from '@momo/core/features/agents/runCancel';
+import {useMutation} from '@tanstack/react-query';
 import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
   AccessibilityInfo,
@@ -34,6 +43,7 @@ import {useStyles} from '../design/theme';
 import {AdeControlPanel} from '../features/ade/AdeControlPanel';
 import {AdeSummaryLine} from '../features/ade/AdeSummaryLine';
 import {StopTurnControl} from '../features/agents/StopTurnControl';
+import {MemberProfileSheet} from '../features/directory/MemberProfileSheet';
 import {AgentActivityBar} from '../features/agents/turnSurfaces';
 import {
   agentTurnsInChannel,
@@ -56,7 +66,10 @@ import {
   jumpMissedNotice,
   type JumpSubject,
 } from '../features/conversation/jumpNotice';
-import {Composer} from '../features/conversation/Composer';
+import {
+  Composer,
+  type ComposerSendOptions,
+} from '../features/conversation/Composer';
 import {channelDraftKey} from '../features/conversation/drafts';
 import {TypingBar} from '../features/conversation/TypingBar';
 import {
@@ -161,6 +174,7 @@ export default function ConversationScreen({
   anchor,
   onBack,
   onOpenConversation,
+  onOpenAgent,
 }: {
   channelId: string;
   title: string;
@@ -185,6 +199,12 @@ export default function ConversationScreen({
    * 뒤로가기는 여전히 한 겹이다(`navReducer`).
    */
   onOpenConversation?: (channelId: string, title: string) => void;
+  /** 에이전트 프로필의 기존 상세 표면. 사람은 이 콜백을 쓰지 않는다. */
+  onOpenAgent?: (agent: {
+    memberId: string;
+    displayName: string;
+    handle: string;
+  }) => void;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const {member, workspaceId} = useSession();
@@ -197,6 +217,38 @@ export default function ConversationScreen({
   const markRead = useMarkRead();
 
   const timeline = useTimeline(rail, workspaceId, channelId, member.id);
+  const [profileMemberId, setProfileMemberId] = useState<string | null>(null);
+  const profileMember = useMemo(
+    () => memberFor(directory, profileMemberId ?? undefined),
+    [directory, profileMemberId],
+  );
+
+  const {
+    mutate: openProfileDm,
+    reset: resetProfileDm,
+    isPending: profileDmPending,
+    error: profileDmError,
+  } = useMutation({
+    mutationFn: (memberId: string) => openDirectMessage(workspaceId, memberId),
+    onSuccess: opened => {
+      setProfileMemberId(null);
+      onOpenConversation?.(
+        opened.channel.id,
+        channelLabel(opened.channel, directory, member.id),
+      );
+    },
+  });
+  const showMemberProfile = useCallback(
+    (memberId: string) => {
+      resetProfileDm();
+      setProfileMemberId(memberId);
+    },
+    [resetProfileDm],
+  );
+  const closeMemberProfile = useCallback(() => {
+    resetProfileDm();
+    setProfileMemberId(null);
+  }, [resetProfileDm]);
 
   const channel = useMemo(
     () =>
@@ -841,14 +893,14 @@ export default function ConversationScreen({
   const quoteRef = useRef<QuoteDraft | null>(null);
   quoteRef.current = quote;
   const onSend = useCallback(
-    (body: string) => {
+    (body: string, options?: ComposerSendOptions) => {
       setSelfSendToken(token => token + 1);
       // 인용은 **보낸 순간** 떨어진다. 남겨 두면 다음 줄까지 같은 원본을 가리키게
       // 되는데, 그것을 원한 사람은 거의 없고 알아채는 사람은 더 적다. 컴포저가
       // 자기 글을 먼저 비우는 것과 같은 규율이다.
       const replyToId = quoteRef.current?.targetId;
       setQuote(null);
-      void send(body, replyToId);
+      void send(body, replyToId, options?.attachments);
     },
     [send],
   );
@@ -875,7 +927,13 @@ export default function ConversationScreen({
   const openThread = useCallback((message: Message) => setThread(message), []);
   const onStartReached = useCallback(() => void loadOlder(), [loadOlder]);
   const onResend = useCallback(
-    (message: Message) => onSend(message.body ?? ''),
+    (message: Message) =>
+      onSend(
+        message.body ?? '',
+        message.attachments === undefined
+          ? undefined
+          : {attachments: message.attachments},
+      ),
     [onSend],
   );
   const onResendPending = useCallback(
@@ -924,6 +982,7 @@ export default function ConversationScreen({
       onQuote: onQuoteMessage,
       onJumpToQuoted,
       onLongPressUsed: hint.markUsed,
+      onOpenProfile: showMemberProfile,
     }),
     [
       member.id,
@@ -935,6 +994,7 @@ export default function ConversationScreen({
       onQuoteMessage,
       onJumpToQuoted,
       hint.markUsed,
+      showMemberProfile,
     ],
   );
 
@@ -1170,6 +1230,7 @@ export default function ConversationScreen({
               // `offline` prop 주석에 있다.
               offline={!networkOnline}
               draftKey={channelDraftKey(channelId)}
+              attachmentTarget={{workspaceId, channelId}}
               quote={quote}
               onCancelQuote={onCancelQuote}
               inputRef={composerInputRef}
@@ -1183,12 +1244,15 @@ export default function ConversationScreen({
       {thread ? (
         <ThreadPanel
           root={thread}
+          workspaceId={workspaceId}
+          channelId={channelId}
           timeline={timeline}
           directory={directory}
           myMemberId={member.id}
           nowMs={nowMs}
           onClose={closeThread}
           onReplySent={bumpSelfSend}
+          onOpenProfile={showMemberProfile}
         />
       ) : null}
 
@@ -1219,6 +1283,31 @@ export default function ConversationScreen({
           onClose={closeAde}
           onOpenChannel={onOpenConversation}
           onOpenAnchor={onOpenAdeAnchor}
+        />
+      ) : null}
+
+      {profileMember ? (
+        <MemberProfileSheet
+          member={profileMember}
+          directory={directory}
+          selfMemberId={member.id}
+          online={networkOnline}
+          dmPending={profileDmPending}
+          dmError={profileDmError}
+          onClose={closeMemberProfile}
+          onOpenDm={() => openProfileDm(profileMember.id)}
+          onOpenAgent={
+            profileMember.kind === 'agent' && onOpenAgent
+              ? () => {
+                  closeMemberProfile();
+                  onOpenAgent({
+                    memberId: profileMember.id,
+                    displayName: profileMember.displayName,
+                    handle: profileMember.handle,
+                  });
+                }
+              : undefined
+          }
         />
       ) : null}
     </Screen>

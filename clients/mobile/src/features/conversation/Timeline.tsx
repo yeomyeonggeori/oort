@@ -1005,6 +1005,11 @@ function TimelineInner({
               {replyToId: item.pending.replyToId},
               quoteLookup,
             )}
+            quoteAttachmentCount={
+              item.pending.replyToId
+                ? quoteLookup(item.pending.replyToId)?.attachments?.length ?? 0
+                : 0
+            }
             onResend={onResendPending}
           />
         );
@@ -1033,6 +1038,11 @@ function TimelineInner({
             markReplies ? parentOf(item.message, threads) : undefined
           }
           quote={resolveQuote(item.message, quoteLookup)}
+          quoteAttachmentCount={
+            item.message.replyToId
+              ? quoteLookup(item.message.replyToId)?.attachments?.length ?? 0
+              : 0
+          }
           approvalGates={approvalGates}
           approvalReceipts={approvalReceipts}
           approvalOffline={approvalOffline}

@@ -99,8 +99,8 @@ export function ThreadPanel({
         // 작업 서랍과 동형: Escape로 서랍을 닫는다 (#1431 · WorkPanel.tsx:839-852).
         // 이 서랍은 작업 서랍의 상세/엿보기 같은 중간 단계가 없어 한 단계뿐이므로,
         // stopPropagation 없이 곧장 닫는 WorkPanel의 마지막 분기(`closePanel()`)와
-        // 같다. 답글 컴포저는 Escape를 삼키지 않고(엔터만 가로챈다) 멘션 팝오버도
-        // 없으므로, 컴포저 안에서 누른 Escape가 여기로 올라온다.
+        // 같다. 답글 컴포저의 멘션 목록은 공용 useEscapeLayer가 먼저 한 단계만
+        // 물러나며 전파를 막는다. 목록이 닫힌 뒤의 Escape만 여기로 올라온다.
         if (event.key !== "Escape") return;
         closePanel();
       }}
@@ -185,6 +185,7 @@ export function ThreadPanel({
           workspaceId={workspaceId}
           channelId={channelId}
           rootId={root.id}
+          directory={directory}
           onSent={() => void query.refetch()}
         />
       )}

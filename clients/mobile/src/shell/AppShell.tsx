@@ -277,6 +277,7 @@ function Shell(): React.JSX.Element {
             // ADE 관제 목록의 카드가 자기 채널로 확대되는 길 (이슈 1137). 셸의
             // 같은 액션이라 뒤로가기는 여전히 한 겹씩 벗겨진다.
             onOpenConversation={onOpenConversation}
+            onOpenAgent={onOpenAgent}
           />
         </EdgeSwipeBack>
       ) : null}
