@@ -6,7 +6,7 @@
 //! the durable rail — the two workers' capabilities are disjoint by construction.
 
 use momo_unfurl::{UnfurlConfig, UnfurlWorker};
-use momo_webhook_sender::{SenderConfig, WebhookSender};
+use momo_webhook_sender::{DoorbellWorker, SafeWebhookTransport, SenderConfig, WebhookSender};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -29,20 +29,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "starting momo-webhook-sender"
     );
 
-    let sender = WebhookSender::connect(config).await?;
+    let sender = WebhookSender::connect(config.clone()).await?;
     let unfurl_config = UnfurlConfig::from_env();
     tracing::info!(
         unfurl_enabled = unfurl_config.enabled,
-        "momo-webhook-sender unfurl drain"
+        doorbell_enabled = config.doorbell_enabled,
+        "momo-webhook-sender companion drains"
     );
+    let doorbell_transport =
+        SafeWebhookTransport::new(config.allow_development_http, config.doorbell_timeout);
+    let doorbell = DoorbellWorker::new(sender.pool().clone(), doorbell_transport, config.clone());
     if unfurl_config.enabled {
         let unfurl = UnfurlWorker::connect(unfurl_config).await?;
         tokio::select! {
             _ = sender.run(shutdown_signal()) => {}
+            _ = doorbell.run(std::future::pending()) => {}
             _ = unfurl.run(std::future::pending()) => {}
         }
     } else {
-        sender.run(shutdown_signal()).await;
+        tokio::select! {
+            _ = sender.run(shutdown_signal()) => {}
+            _ = doorbell.run(std::future::pending()) => {}
+        }
     }
     Ok(())
 }

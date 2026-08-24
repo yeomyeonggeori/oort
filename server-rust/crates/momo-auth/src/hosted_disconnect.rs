@@ -373,6 +373,27 @@ fn decode_connection(row: &sqlx::postgres::PgRow) -> Result<HostedConnection, sq
     })
 }
 
+/// Drop the doorbell row for this connection. No-op when none is registered.
+///
+/// Callers already hold `hosted_agent_connection` `FOR UPDATE`, which is the
+/// HAP-E6 head of the lock order. The doorbell table is keyed by that same
+/// connection and is never locked first.
+pub async fn clear_hosted_doorbell_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    connection_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "DELETE FROM hosted_agent_doorbell \
+          WHERE workspace_id = $1 AND connection_id = $2",
+    )
+    .bind(workspace_id)
+    .bind(connection_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 async fn load_connection(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -650,6 +671,12 @@ pub async fn start_hosted_disconnect_in_tx(
     };
     let connection = decode_connection(&row)?;
 
+    // 6b — ADR-0171 D1: doorbell registration is connection-accessory data.
+    // Cleared in this same transaction after the connection lock (HAP-E6
+    // order: connection → token → member → membership → profile). No new
+    // manifest kind.
+    clear_hosted_doorbell_in_tx(conn, workspace_id, connection_id).await?;
+
     // 7 — the manifest.
     seed_manifest_in_tx(
         conn,
@@ -715,6 +742,7 @@ pub async fn reconcile_hosted_connection_in_tx(
     if transitioned.rows_affected() == 0 {
         return Err(sqlx::Error::RowNotFound);
     }
+    clear_hosted_doorbell_in_tx(conn, workspace_id, connection_id).await?;
     seed_manifest_in_tx(
         conn,
         workspace_id,

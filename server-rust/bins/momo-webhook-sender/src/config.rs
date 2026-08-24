@@ -49,6 +49,14 @@ pub struct SenderConfig {
     /// `MOMO_ENV=local` **and** `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP=1`. Both
     /// halves required, so the flag cannot be effective in staging or prod.
     pub allow_development_http: bool,
+    /// ADR-0171 D6. Exact lowercase `true` only.
+    pub doorbell_enabled: bool,
+    /// Cooldown window (D4). Default 60s.
+    pub doorbell_cooldown: Duration,
+    /// Per-doorbell POST timeout. Default 10s (D5).
+    pub doorbell_timeout: Duration,
+    /// Retries after the first attempt (D5 ≤2). Total attempts = 1 + this.
+    pub doorbell_retries: u32,
 }
 
 impl std::fmt::Debug for SenderConfig {
@@ -66,6 +74,8 @@ impl std::fmt::Debug for SenderConfig {
             )
             .field("request_timeout", &self.request_timeout)
             .field("allow_development_http", &self.allow_development_http)
+            .field("doorbell_enabled", &self.doorbell_enabled)
+            .field("doorbell_cooldown", &self.doorbell_cooldown)
             .finish_non_exhaustive()
     }
 }
@@ -110,6 +120,17 @@ impl SenderConfig {
                 .trim()
                 .eq_ignore_ascii_case("local")
                 && env("MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP").as_deref() == Some("1"),
+            doorbell_enabled: env("MOMO_DOORBELL_ENABLED")
+                .as_deref()
+                .is_some_and(|value| value.trim() == "true"),
+            doorbell_cooldown: Duration::from_secs(env_number(
+                "MOMO_DOORBELL_COOLDOWN_SECONDS",
+                60u64,
+            )?),
+            doorbell_timeout: Duration::from_millis(
+                env_number("MOMO_DOORBELL_TIMEOUT_MS", 10_000u64)?.max(1),
+            ),
+            doorbell_retries: env_number("MOMO_DOORBELL_RETRIES", 2u32)?.min(2),
         })
     }
 
@@ -128,7 +149,16 @@ impl SenderConfig {
             disable_after_server_failures: 5,
             request_timeout: Duration::from_secs(5),
             allow_development_http: false,
+            doorbell_enabled: false,
+            doorbell_cooldown: Duration::from_secs(60),
+            doorbell_timeout: Duration::from_secs(10),
+            doorbell_retries: 2,
         }
+    }
+
+    pub fn with_doorbell_enabled(mut self, enabled: bool) -> SenderConfig {
+        self.doorbell_enabled = enabled;
+        self
     }
 }
 

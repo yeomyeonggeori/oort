@@ -29,6 +29,7 @@ pub mod ephemeral;
 pub mod event_subscriptions;
 pub mod health;
 pub mod hosted_agent_connections;
+pub mod hosted_agent_doorbell;
 pub mod invites;
 pub mod join;
 pub mod messages;
