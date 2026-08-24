@@ -42,6 +42,7 @@ pub use realtime_advert::{RealtimeAdvert, RealtimeAdvertError};
 
 use std::sync::Arc;
 
+use axum::extract::DefaultBodyLimit;
 use axum::http::HeaderMap;
 use axum::routing::{delete, get, patch, post, put};
 use axum::Router;
@@ -242,6 +243,10 @@ pub struct AppState {
     /// retirement order — 신규 단명 자격 실증 먼저, 정적 제거는 그다음 — and it
     /// lives in the default rather than in a runbook step somebody remembers.
     pub turn: Option<Arc<momo_t3::TurnCredentialPolicy>>,
+    /// ADR-0170 — the only object in this process that can GET a remote URL.
+    /// Default is the SSRF-guarded transport. Tests inject a loopback client.
+    pub unfurl_http: Arc<dyn momo_unfurl::UnfurlHttp>,
+    pub unfurl_cache: Arc<momo_unfurl::ImageCache>,
 }
 
 impl AppState {
@@ -269,7 +274,15 @@ impl AppState {
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
+            unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
+            unfurl_cache: Arc::new(momo_unfurl::ImageCache::default()),
         }
+    }
+
+    /// Replace the unfurl HTTP hop (conformance tests with a mock origin).
+    pub fn with_unfurl_http(mut self, http: Arc<dyn momo_unfurl::UnfurlHttp>) -> Self {
+        self.unfurl_http = http;
+        self
     }
 
     /// The URL login/join/claim put in `realtimeWebSocketUrl` (ADR-0110 / ADR-0167).
@@ -492,6 +505,21 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/pins",
             get(routes::messages::pin_list),
+        )
+        // ADR-0170 — link unfurl server half. Workspace on/off is owner/admin;
+        // message-level remove is the author; the image bytes never leave this
+        // origin (CSP). Personal render-fold is the client ticket.
+        .route(
+            "/v1/workspaces/{ws}/unfurl-settings",
+            get(routes::unfurl::get_settings).put(routes::unfurl::put_settings),
+        )
+        .route(
+            "/v1/workspaces/{ws}/messages/{id}/unfurls",
+            get(routes::unfurl::list).delete(routes::unfurl::remove),
+        )
+        .route(
+            "/v1/workspaces/{ws}/unfurls/{id}/image",
+            get(routes::unfurl::image),
         )
         // ADR-0151 — 첨부. Three routes, and the split between them is the
         // decision: the upload session hands out a Drive capability so the bytes
@@ -998,10 +1026,11 @@ pub fn build_app(state: AppState) -> Router {
 
     // MOMO-605: taken before `with_state` moves the state below.
     let cors = state.cors.clone();
-    // ADR-0151: likewise. The stub upload endpoint exists only when the archive
-    // is the stub one — Swift gates it on the same predicate
-    // (`App.swift:115-117`), and a deployed environment cannot reach this branch
-    // because a stub archive is a boot error there.
+    // ADR-0151 / ADR-0169: the in-process upload endpoint exists when the
+    // archive accepts stub-shaped PUTs (the in-memory stub, or the local-volume
+    // archive). Swift gated it on the same predicate (`App.swift:115-117`). A
+    // deployed environment cannot reach this branch via the stub (that is a
+    // boot error); `local` is allowed there because the bytes survive a restart.
     let accepts_stub_uploads = state.drive.accepts_stub_uploads();
 
     let app = Router::new()
@@ -1109,7 +1138,9 @@ pub fn build_app(state: AppState) -> Router {
     let app = if accepts_stub_uploads {
         app.route(
             "/__momo_stub/drive/uploads/{token}",
-            put(routes::attachments::stub_upload),
+            put(routes::attachments::stub_upload).layer(DefaultBodyLimit::max(
+                momo_drive::MAX_ATTACHMENT_BYTES as usize,
+            )),
         )
     } else {
         app

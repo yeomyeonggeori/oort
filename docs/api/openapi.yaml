@@ -97,6 +97,11 @@ tags:
     description: Workspace-admin signed outbound event webhook subscriptions.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: unfurls
+    description: >
+      ADR-0170 link unfurl server surface. Workspace on/off, message-level
+      removal, and the authenticated image proxy. Cards arrive on
+      `message.unfurl` broadcasts; personal render-fold is a client concern.
   - name: attachments
     description: Drive archive resumable uploads, completion, and authorized content proxy.
   - name: read-state
@@ -4170,6 +4175,172 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurl-settings:
+    get:
+      tags: [unfurls]
+      operationId: getWorkspaceUnfurlSettings
+      summary: Read the workspace link-unfurl fetch switch.
+      description: >
+        Owner/admin. Missing row means enabled. Off skips fetch itself, not just
+        client render (ADR-0170 D4). Instance-level `MOMO_UNFURL_ENABLED` (default
+        0) is a separate opt-in that must also be on before any GET leaves the
+        process.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current switch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UnfurlSettings"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner/admin required.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    put:
+      tags: [unfurls]
+      operationId: putWorkspaceUnfurlSettings
+      summary: Set the workspace link-unfurl fetch switch.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PutUnfurlSettingsRequest"}
+      responses:
+        "200":
+          description: Updated switch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/UnfurlSettings"}
+        "400":
+          description: Malformed body.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Workspace owner/admin required.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/messages/{messageId}/unfurls:
+    get:
+      tags: [unfurls]
+      operationId: listMessageUnfurls
+      summary: List derived unfurl cards for a message.
+      description: >
+        Channel members. Failed/blocked cards are present so a client can choose
+        silence (ADR-0170 D5). Image bytes are not inlined — `imageUrl` is the
+        authenticated proxy path.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Cards in insertion order. Empty array when none.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/MessageUnfurlList"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    delete:
+      tags: [unfurls]
+      operationId: removeMessageUnfurls
+      summary: Remove unfurl cards from a message. Author only. Not regenerated.
+      description: >
+        Deletes the derived rows and plants a tombstone so the worker will not
+        recreate them. Does not modify `message` or consume `seq`. Publishes
+        `message.unfurl.removed` reusing the message's seq.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: messageId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Removal is idempotent; removed=false when already gone.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RemoveUnfurlsResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Only the message author may remove its unfurls.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Message not found.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+
+  /v1/workspaces/{workspaceId}/unfurls/{unfurlId}/image:
+    get:
+      tags: [unfurls]
+      operationId: getUnfurlImage
+      summary: Stream the unfurl preview image through this origin.
+      description: >
+        Channel members. The client must not fetch the remote host (CSP).
+        Private/loopback/link-local destinations are refused by the same
+        OutboundHTTPPolicy as webhook delivery. Only image/jpeg, png, gif,
+        webp, avif are proxied.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: unfurlId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        "200":
+          description: Image bytes.
+          content:
+            "image/*":
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a channel member, or workspace scope mismatch.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Card or image not available (including SSRF-blocked).
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -9747,6 +9918,53 @@ components:
         pins:
           type: array
           items: {$ref: "#/components/schemas/PinnedMessage"}
+
+    UnfurlSettings:
+      type: object
+      required: [enabled]
+      properties:
+        enabled: {type: boolean}
+        updatedAtMs: {type: integer, format: int64}
+
+    PutUnfurlSettingsRequest:
+      type: object
+      required: [enabled]
+      additionalProperties: false
+      properties:
+        enabled: {type: boolean}
+
+    MessageUnfurl:
+      type: object
+      required: [id, messageId, url, status]
+      properties:
+        id: {type: string, format: uuid}
+        messageId: {type: string, format: uuid}
+        url: {type: string, format: uri}
+        status:
+          type: string
+          enum: [pending, ok, failed, blocked]
+        title: {type: string}
+        description: {type: string}
+        domain: {type: string}
+        imageUrl:
+          type: string
+          description: Authenticated proxy path on this origin. Never a remote host.
+
+    MessageUnfurlList:
+      type: object
+      required: [unfurls]
+      properties:
+        unfurls:
+          type: array
+          items: {$ref: "#/components/schemas/MessageUnfurl"}
+
+    RemoveUnfurlsResponse:
+      type: object
+      required: [removed]
+      properties:
+        removed:
+          type: boolean
+          description: false when the cards were already gone (idempotent).
 
     CreateAttachmentUploadRequest:
       type: object

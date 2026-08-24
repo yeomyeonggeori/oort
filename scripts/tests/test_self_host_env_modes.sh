@@ -189,6 +189,13 @@ grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49100 http://127.0.0.1:49100 tauri://localhost http://tauri.localhost' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$local_fixture/infra/rust/local.secrets.env"
+# #1696 / ADR-0169 — self-host default archive is a named local volume, not
+# stub (boot-refused in staging) and not Google SA.
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49100' \
+  "$local_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
@@ -274,10 +281,18 @@ expected_operator="$(sed -n 's/^PLATFORM_ADMIN_EMAILS=//p' "$published_fixture/i
 expected_master_key="$(sed -n 's/^PROVIDER_LINK_MASTER_KEY=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_cors="$(sed -n 's/^MOMO_CORS_ALLOWED_ORIGINS=//p' "$published_fixture/infra/rust/local.secrets.env")"
 expected_centrifugo="$(sed -n 's/^CENTRIFUGO_ALLOWED_ORIGINS=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_drive_backend="$(sed -n 's/^MOMO_DRIVE_ARCHIVE_BACKEND=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_drive_dir="$(sed -n 's/^MOMO_DRIVE_LOCAL_DIR=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_drive_base="$(sed -n 's/^MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=//p' "$published_fixture/infra/rust/local.secrets.env")"
+expected_drive_volume="$(sed -n 's/^DRIVE_VOLUME_NAME=//p' "$published_fixture/infra/rust/local.secrets.env")"
 test -n "$expected_operator"
 test -n "$expected_master_key"
 test "$expected_cors" = "tauri://localhost,http://tauri.localhost"
 test "$expected_centrifugo" = "http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost"
+test "$expected_drive_backend" = "local"
+test "$expected_drive_dir" = "/var/lib/oort/drive"
+test "$expected_drive_base" = "http://localhost:49200"
+test "$expected_drive_volume" = "oort-drive"
 jq -e \
   --arg image "$GOOD_DIGEST" \
   --arg jwt "$expected_jwt" \
@@ -286,7 +301,11 @@ jq -e \
   --arg operator "$expected_operator" \
   --arg master "$expected_master_key" \
   --arg cors "$expected_cors" \
-  --arg centrifugo "$expected_centrifugo" '
+  --arg centrifugo "$expected_centrifugo" \
+  --arg drive_backend "$expected_drive_backend" \
+  --arg drive_dir "$expected_drive_dir" \
+  --arg drive_base "$expected_drive_base" \
+  --arg drive_volume "$expected_drive_volume" '
     .name == "oort" and
     .services.api.image == $image and
     .services.api.environment.JWT_HMAC == $jwt and
@@ -300,6 +319,10 @@ jq -e \
     .services.api.environment.MOMO_CORS_ALLOWED_ORIGINS == $cors and
     .services["agent-worker"].environment.PROVIDER_LINK_MASTER_KEY == $master and
     .services.centrifugo.environment.CENTRIFUGO_CLIENT_ALLOWED_ORIGINS == $centrifugo and
+    .services.api.environment.MOMO_DRIVE_ARCHIVE_BACKEND == $drive_backend and
+    .services.api.environment.MOMO_DRIVE_LOCAL_DIR == $drive_dir and
+    .services.api.environment.MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL == $drive_base and
+    .volumes["drive-archive"].name == $drive_volume and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and
@@ -632,6 +655,57 @@ run_generator "$cors_empty_fixture" "$cors_empty_fixture/empty-output" 49500 --l
 grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=' "$cors_empty_env"
 test "$(grep -c '^MOMO_CORS_ALLOWED_ORIGINS=' "$cors_empty_env")" = "1"
 
+# #1696 — an env written before the local archive lines existed. Same add-only
+# rule: secrets do not rotate, a chosen backend (including empty) is never
+# overwritten, and --compose stdout stays a machine surface.
+drive_repair_fixture="$(make_fixture local-drive-archive-repair)"
+run_generator "$drive_repair_fixture" "$drive_repair_fixture/first-output" 49520 --local-build
+drive_repair_env="$drive_repair_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$drive_repair_env"
+grep -vE '^(MOMO_DRIVE_ARCHIVE_BACKEND|MOMO_DRIVE_LOCAL_DIR|MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL|DRIVE_VOLUME_NAME)=' \
+  "$drive_repair_env" >"$drive_repair_fixture/stripped.env"
+mv "$drive_repair_fixture/stripped.env" "$drive_repair_env"
+if grep -q '^MOMO_DRIVE_ARCHIVE_BACKEND=' "$drive_repair_env"; then
+  echo "fixture setup failed: drive backend line still present" >&2
+  exit 1
+fi
+drive_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$drive_repair_env")"
+run_generator "$drive_repair_fixture" "$drive_repair_fixture/repair-output" 49520 --local-build
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$drive_repair_env"
+grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$drive_repair_env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49520' "$drive_repair_env"
+grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$drive_repair_env"
+test "$drive_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$drive_repair_env")"
+grep -Fq 'MOMO_DRIVE_ARCHIVE_BACKEND=local 를 추가했다' "$drive_repair_fixture/repair-output"
+run_generator "$drive_repair_fixture" "$drive_repair_fixture/repair-output-2" 49520 --local-build
+test "$(grep -c '^MOMO_DRIVE_ARCHIVE_BACKEND=' "$drive_repair_env")" = "1"
+
+grep -vE '^(MOMO_DRIVE_ARCHIVE_BACKEND|MOMO_DRIVE_LOCAL_DIR|MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL|DRIVE_VOLUME_NAME)=' \
+  "$drive_repair_env" >"$drive_repair_fixture/stripped-again.env"
+mv "$drive_repair_fixture/stripped-again.env" "$drive_repair_env"
+(
+  cd "$drive_repair_fixture"
+  PATH="$drive_repair_fixture/fake-bin:/usr/bin:/bin" \
+    bash scripts/self_host_env.sh --compose config --images
+) >"$drive_repair_fixture/images.stdout" 2>"$drive_repair_fixture/images.stderr"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$drive_repair_env"
+if grep -Fq 'MOMO_DRIVE_ARCHIVE_BACKEND' "$drive_repair_fixture/images.stdout"; then
+  echo "local-drive repair notice reached the machine-parsed --compose stdout" >&2
+  exit 1
+fi
+grep -Fq 'MOMO_DRIVE_ARCHIVE_BACKEND=local 를 추가했다' "$drive_repair_fixture/images.stderr"
+test "$(sort -u "$drive_repair_fixture/images.stdout")" = "oort:local"
+
+drive_empty_fixture="$(make_fixture local-drive-archive-empty)"
+run_generator "$drive_empty_fixture" "$drive_empty_fixture/first-output" 49530 --local-build
+drive_empty_env="$drive_empty_fixture/infra/rust/local.secrets.env"
+awk '/^MOMO_DRIVE_ARCHIVE_BACKEND=/ { print "MOMO_DRIVE_ARCHIVE_BACKEND="; next } { print }' \
+  "$drive_empty_env" >"$drive_empty_fixture/empty.env"
+mv "$drive_empty_fixture/empty.env" "$drive_empty_env"
+run_generator "$drive_empty_fixture" "$drive_empty_fixture/empty-output" 49530 --local-build
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=' "$drive_empty_env"
+test "$(grep -c '^MOMO_DRIVE_ARCHIVE_BACKEND=' "$drive_empty_env")" = "1"
+
 # Existing CENTRIFUGO_ALLOWED_ORIGINS is never rewritten. A pre-#1607 list
 # without tauri origins stays byte-for-byte; the generator warns on stderr.
 cent_warn_fixture="$(make_fixture centrifugo-desktop-origin-warn)"
@@ -790,8 +864,10 @@ run_generator "$public_fixture" "$public_fixture/origin-again" 49700 \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
   "$public_fixture/infra/rust/local.secrets.env"
 grep -Fq '이미 있다 (멱등)' "$public_fixture/origin-again"
-test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
+test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 2
 test "$(grep -c 'wss://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://cursor.tailb1aad3.ts.net' \
+  "$public_fixture/infra/rust/local.secrets.env"
 
 # Create-time --public-origin lands in the first write; default localhost tokens stay.
 create_public="$(make_fixture public-origin-create)"
@@ -799,6 +875,8 @@ run_generator "$create_public" "$create_public/output" 49710 \
   --local-build --public-origin https://cursor.tailb1aad3.ts.net
 grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$create_public/infra/rust/local.secrets.env"
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49710 http://127.0.0.1:49710 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
+  "$create_public/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://cursor.tailb1aad3.ts.net' \
   "$create_public/infra/rust/local.secrets.env"
 
 # Wildcard / path / missing env without an image mode all fail closed.
