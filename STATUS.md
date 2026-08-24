@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 메시지 호버 퀵액션 툴바 (#1743, 2026-08-25)
+
+- 행 hover/focus-within 에만 우상단 툴바를 마운트한다: 빈도 슬롯 3(시드 👍✅🙏, UX-EB `frequencyStore` 공유) · React · 답글 · ⋯. 비호버 행은 DOM 0(opacity 트릭 금지). `role=toolbar` + 내부 roving. 터치는 비렌더, 시트 불변.
+- B11 주석·스킬 §6·디자인 시스템 §6을 조건부 렌더+toolbar 계약으로 개정. 적립(미구현): 메시지 포커스+단일 키 R/E/T, 슬롯 커스터마이즈.
+- 검증: 웹 `tsc -b` · vitest 1,486 (툴바 15 포함) · `capture:design` exit 0 (rest/hover/focus/touch 4상태) · `design_preflight_web.sh` 12/12+core 5/5. `runtime-unverified`(실서버 리액션 왕복은 기존 경로).
+
 ## 이모지 피커 고도화 (#1742, 2026-08-24)
 
 - 자작 피커: emojibase compact(en)+iamcal 빌드타임 추출(same-origin, 외부 fetch 0). 검색·카테고리 탭·빈도 store(frequency, recency 금지, UX-HT 공유)·스킨톤 persist·프리뷰 푸터. 포인터=anchored popover, 터치(`hover: none`)=바텀시트. #1688 32종·중앙 Dialog 주석 supersede, 무라이브러리 유지.

@@ -367,6 +367,17 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 ## 6. 규칙을 바꾸는 법
 
+### 행 액션 표면 (2026-08-24 성재 지시, #1743)
+
+스킬 §6의 옛 문장("행 액션은 메뉴로")은 B11 R1이 여섯 버튼 바를 `opacity-0`으로 숨겼다가 가상화 타임라인에 탭스톱 ~150개를 만든 실패와 묶여 있었다. 호버 퀵액션 툴바를 재도입하는 조건은 그 두 실패를 닫는 것이다:
+
+1. **조건부 렌더.** 비호버·비포커스 행은 툴바 DOM을 마운트하지 않는다. opacity/visibility 트릭 금지.
+2. **한 탭스톱.** 툴바는 WAI-ARIA `toolbar` + 내부 roving tabindex. 행당 추가 탭스톱 ≤ 1.
+3. **메뉴에만 남는 것.** 고치기/지우기는 overflow `⋯`와 우클릭 메뉴에만 있다.
+4. **터치.** `(hover: none)`에서는 툴바를 그리지 않는다. 길게 누르기 시트는 그대로다.
+
+정본 구현: `clients/web/src/features/timeline/MessageActions.tsx` (`MessageHoverToolbar`). 기계 자는 `capture-screens.mjs`의 호버/포커스/터치 4상태와 행당 탭스톱 단정이다.
+
 ### 스케일에 값을 하나 더하고 싶을 때
 
 1. **먼저 이름을 지어 보라.** 격자 밖 측정값은 숫자가 아니라 이름으로 들어온다(`--spacing-pane`, `--spacing-preview-frame`). 이름을 못 짓겠으면 그 값에 이유가 없다는 뜻이다.

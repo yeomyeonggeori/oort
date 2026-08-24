@@ -77,7 +77,7 @@ Every surface ships **empty / loading / error / offline**:
 
 ## 6. Interaction, keyboard, focus, a11y
 
-- **Keyboard path for every action** (P11): cmdk Cmd+K switcher, Cmd+N, arrow navigation, unread traversal. Row-level actions live in `ContextMenu`, not always-visible button rows.
+- **Keyboard path for every action** (P11): cmdk Cmd+K switcher, Cmd+N, arrow navigation, unread traversal. Mutating row actions (고치기/지우기) live in `ContextMenu` and the overflow menu, never as always-visible buttons. Pointer rows may mount a hover/focus-within **toolbar** (`role="toolbar"`, internal roving tabindex) with one-click reactions, React, Reply, and overflow. The toolbar DOM is not mounted on a row that is not hovered, not focused, and has no open overlay: no `opacity-0` / `visibility` trick (that was B11 R1, reverted). Touch (`hover: none`) does not render it. See `MessageActions.tsx` and #1743.
 - **Focus ring is mandatory and visible.** The house pattern is `focus-visible:focus-ring`: a 2px accent outline inset by its width (`outline-offset: -2px`). Filled accent controls additionally use `focus-ring-on-fill`. If you set `outline-none`, you must add a `focus-visible:` ring in the same class list; the pre-flight fails a naked `outline-none`.
 - **Destructive and approval actions require confirmation** (`AlertDialog`), never fire on a single unguarded click or a bare hover.
 - **Hover uses subtle background change** (`hover:bg-surface-hover`), not scale transforms.
