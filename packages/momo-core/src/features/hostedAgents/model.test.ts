@@ -94,6 +94,26 @@ describe("RED PROOF ① 파서를 통과한 줄은 비밀값을 실어 나르지
     ]);
   });
 
+  it("도어벨 원문은 버리고 마스킹만 남긴다", () => {
+    const leaked = "crsr_live_this_must_not_appear";
+    const row = toHostedConnection(
+      wireConnection({
+        doorbellUrl: "https://hooks.example/a",
+        doorbellSecretMasked: "••••abcd",
+        doorbellSecret: leaked,
+        doorbellLastFiredAtMs: 9,
+        doorbellLastStatus: "ok_200",
+      })
+    );
+    expect(row).not.toBeNull();
+    expect(row?.doorbellUrl).toBe("https://hooks.example/a");
+    expect(row?.doorbellSecretMasked).toBe("••••abcd");
+    expect(row?.doorbellLastFiredAtMs).toBe(9);
+    expect(row?.doorbellLastStatus).toBe("ok_200");
+    expect(row as object).not.toHaveProperty("doorbellSecret");
+    expect(JSON.stringify(row)).not.toContain(leaked);
+  });
+
   it("필수 칸이 하나라도 없으면 반쯤 그린 줄 대신 아무것도 안 준다", () => {
     expect(toHostedConnection(wireConnection({ status: "wat" }))).toBeNull();
     expect(toHostedConnection(wireConnection({ approvedChannelIds: null }))).toBeNull();

@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## Agent Hub 커넥션 도어벨 등록 UI (#1735, ADR-0171, 2026-08-24)
+
+- 연결 탭에 도어벨 섹션: URL+sender key 등록(write-only·마스킹), 해제 확인, last-fired 상대시각·lastStatus. 빈/로딩/성공/실패 + 게이트 닫힘(빈 404)을 등록 실패와 구분. 시험 발화 버튼은 WD-1 엔드포인트 부재로 적립.
+- 검증: `@momo/core` 1,706 tests · web 1,446 tests · tsc/lint · `design_preflight_web.sh` 12/12+core 5/5 · `capture:design` exit 0 (hosted-doorbell-{empty,loading,registered,error,gate-off}-{light,dark}.png). `runtime-unverified`(실서버 PUT/DELETE 왕복).
+
 ## 언퍼얼 클라이언트 후속 고정 (#1720 항목 1·3·4 + U-8 Nit, 2026-08-24)
 
 - rowFocus의 구성원 0/有 정규화·focused 보존과 MutationObserver 재정규화, 행 안/밖 focusout 복원을 jsdom 12개 유닛으로 고정했다.

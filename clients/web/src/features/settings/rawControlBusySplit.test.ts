@@ -62,6 +62,7 @@ const FILES = {
   "HostedConnectionSection.tsx": source(
     "../hostedAgents/HostedConnectionSection.tsx"
   ),
+  "DoorbellSection.tsx": source("../hostedAgents/DoorbellSection.tsx"),
   // #1559 가 데려온 두 파일. 위 다섯이 「같은 다섯 파일」이던 동안 이 둘은 파일군
   // 밖이라 한 번도 재어지지 않았다.
   "InviteSection.tsx": source("./InviteSection.tsx"),
@@ -200,6 +201,17 @@ const SITES = [
     words: ["만드는 중"],
     rendersVia: null,
     guard: "if (offline || creating) return;",
+  },
+  {
+    file: "DoorbellSection.tsx",
+    testId: "hosted-doorbell-register",
+    lock: "registerLocked",
+    lockVia:
+      "const registerLocked =\n    blocked || !active || (ownBusy && !registering);",
+    busy: "registering",
+    words: ["등록 중", "교체 중"],
+    rendersVia: "{registering",
+    guard: "if (registerLocked || registering) return;",
   },
 ] as const satisfies readonly {
   file: FileName;
