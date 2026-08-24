@@ -3,7 +3,7 @@
 ## 메시지 호버 퀵액션 툴바 (#1743, 2026-08-25)
 
 - 행 hover/focus-within 에만 우상단 툴바를 마운트한다: 빈도 슬롯 3(시드 👍✅🙏, UX-EB `frequencyStore` 공유) · React · 답글 · ⋯. 비호버 행은 DOM 0(opacity 트릭 금지). 툴바 항목은 행 로빙 그룹에 편입. 터치는 비렌더, 시트 불변.
-- #1750 design-review 수리: frequency 랭킹 안정 캐시(B-1) · 행 rest 정거장+⋯ 핸드오프(B-2/H-1) · 상단 straddle+본문 교차 0(B-3) · 슬롯 마운트 고정(H-2) · `border-line-strong`(H-3) · `right-4`(M-3).
+- #1750 design-review 수리: frequency 랭킹 안정 캐시(B-1) · 행 rest 정거장+키보드 `:focus-visible`만 ⋯ 핸드오프(B-2/B-4/H-1) · 상단 straddle, 스크롤러 상단이면 하단 미러(B-3/H-4) · 슬롯은 마운트가 유지되는 동안 고정(H-2, 포커스가 마운트를 유지할 수 있다) · `border-line-strong`(H-3) · `right-4`(M-3).
 - B11 주석·스킬 §6·디자인 시스템 §6을 조건부 렌더+toolbar+겹침 금지 계약으로 개정. 적립(미구현): 메시지 포커스+단일 키 R/E/T, 슬롯 커스터마이즈.
 - 검증: 웹 `tsc -b` · vitest · `capture:design` · `design_preflight_web.sh`. `runtime-unverified`(실서버 리액션 왕복은 기존 경로).
 
