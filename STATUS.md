@@ -2,9 +2,9 @@
 
 ## 웹 컴포저 buzz형 2행 그릇 (#1749, 2026-08-25)
 
-- 채널·DM·스레드 컴포저를 무테두리 textarea와 `@`·첨부·이모지/보내기 액션 행이 한 `border-line-strong` 그릇을 쓰는 동형 구조로 재구성했다. `@`는 현재 캐럿에 문자만 삽입해 기존 멘션 자동완성 경로를 그대로 열며, Aa·새 상태·새 의존성은 만들지 않았다.
-- 하단 상시 예약 행을 그릇 위로 옮겨 데스크톱 죽은 밴드를 없애고 마지막 여백을 `p-3`+safe-area로 제한했다. 정적/캡처 계약은 탭 순서 5개, 포인터 `@` 실클릭, 이모지 실제 트리거 앵커, rest/focus/offline/첨부 pending을 light/dark로 잰다.
-- 웹 tsc·vitest·lint·build와 디자인 프리플라이트는 green. `runtime-unverified(capture:design)`: 이 샌드박스가 Chromium Mach rendezvous를 `Permission denied`로 막고 browser-harness도 Chrome remote-debugging 연결을 만들지 못해 새 캡처 레인의 브라우저 완주는 오케스트레이터 검증이 필요하다.
+- #1751 design-review 수리: `@` 버튼은 줄 시작·공백 뒤에는 `@`, 비공백 뒤에는 ` @`를 넣고 선택은 끝으로 접어 보존한다. 문장 끝·한글/영문·문장부호·연타 red proof가 기존 `mentionQueryAt`을 그대로 열며, 클릭은 ADR-0149 작성 중 신호를 내보내지 않는다.
+- textarea 자체 링을 걷고 `focus-within` 그릇이 포커스 표시를 맡는다. 버튼 아닌 그릇 면적은 입력 캐럿을 돌려주며, 스레드 sending은 그릇 전체가 함께 흐려진다. ↵ 힌트·작성 중 교대 슬롯은 액션 행 가운데로 옮겨 별도 26px 예약 띠와 레이아웃 시프트를 함께 없앴다.
+- 캡처 자는 비공백 멘션 픽스처, 채널/스레드 이모지 가로 앵커, `--line-strong` 계산색과 `--spacing-3` 정본 인셋을 단정한다. `runtime-unverified(capture:design)`: 이 샌드박스에서는 실행하지 않고 오케스트레이터가 대행한다. 폰 TypingBar 동형 후속은 #1752다.
 
 ## 메시지 호버 퀵액션 툴바 (#1743, 2026-08-25)
 

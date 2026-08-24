@@ -156,8 +156,8 @@ const MAX_ROWS = 6;
 export { COMPOSER_OFFLINE_COPY };
 
 /**
- * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 메타 행이고, 폰 DM에서는 기존처럼 그
- * 공유 행 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
+ * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 액션 슬롯이고, 폰 DM에서는 기존처럼
+ * 그릇 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
  */
 function ComposerHint({
   directory,
@@ -173,18 +173,17 @@ function ComposerHint({
   return (
     <p
       id="composer-hint"
-      // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
-      // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
-      // 맞지 않아 4px 어긋난 줄로 보였다.
-      //
-      // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
-      // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
+      // 공유 판은 액션 아이콘과 보내기 사이에서 이미 예약된 가로폭만 쓴다. 별도
+      // 26px 행을 두면 ↵를 배운 뒤에도 타임라인과 그릇 사이에 죽은 밴드가 남는다.
+      // 폰 DM 판만 그릇 위에 서므로 기존 텍스트 기둥 인셋(px-6)을 유지한다.
       className={cn(
-        "px-6 pb-2 text-meta text-ink-muted",
+        sharedRow
+          ? "min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
+          : "px-6 pb-2 text-meta text-ink-muted",
         !dmAgent && "wide-only"
       )}
       data-testid="composer-hint"
-      data-composer-meta-row={sharedRow ? "" : undefined}
+      data-composer-meta-slot={sharedRow ? "" : undefined}
     >
       {dmAgent && (
         <span data-testid="composer-dm-hint">
@@ -255,10 +254,9 @@ function AgentActivityBar({
 
   return (
     <ul
-      // `px-6`은 바로 위 공유 메타 행(기본=힌트, 작성 중=사람)과 같은 값이다. 이 줄은
-      // 원래 `px-4`였고, 당시 힌트·작성 중·작업 중 3행이 서로 다른 세로선에 섰다
-      // (design-review PR 1059 H-3). 정답은 이 파일이 힌트 판에 이미 적어 뒀다:
-      // 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px.
+      // `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 작업 줄은
+      // textarea 텍스트 기둥에 서고, 작성 중·키 힌트는 #1749에서 액션 행 가운데
+      // 슬롯으로 내려갔다.
       className="flex flex-col gap-1 px-6 pb-2"
       // The offline sentence is a real list item below, so it is announced in
       // reading order rather than glued onto the list's name and read twice.
@@ -508,11 +506,11 @@ export function Composer({
   const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
   /**
-   * 작성 중이 아닐 때 공유 메타 행을 힌트가 차지하는가 (U-8).
+   * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
    *
-   * 폰에서 키 힌트는 원래 보이지 않는다. 그때는 `TypingLine`의 예약판이 같은 26px을
-   * 지켜, 사람의 타이핑이 시작돼도 폰 컴포저가 움직이지 않는다. DM 힌트는 폭과
-   * 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
+   * 폰에서 키 힌트는 원래 보이지 않는다. 빈 슬롯과 `TypingLine`은 모두 이미 높이가
+   * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
+   * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
   const metaMode = composerMetaMode({
     typistCount: typists.length,
@@ -790,9 +788,8 @@ export function Composer({
         )
       )}
 
-      {/* 상태·메타 행은 그릇 위에 선다. 이전에는 아래의 빈 예약판이 마지막 26px을
-          차지해, 안전 영역이 0인 데스크톱에서도 컴포저 아래가 죽은 밴드로 남았다.
-          내용과 방출 타이밍은 그대로 두고 마지막 컨트롤 뒤에는 p-3+safe-area만 둔다. */}
+      {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가
+          별도 26px 예약 띠를 만들지 않는다. 마지막 컨트롤 뒤에는 p-3+safe-area만 둔다. */}
       {offline && (
         <p
           role="status"
@@ -811,23 +808,6 @@ export function Composer({
           sharedRow={false}
         />
       )}
-      {metaMode === "hint" ? (
-        <ComposerHint
-          directory={directory}
-          dmAgent={dmAgent}
-          keysHintNeeded={keysHintNeeded}
-          sharedRow
-        />
-      ) : (
-        <TypingLine
-          memberIds={metaMode === "typing" ? typists : []}
-          threshold={typingThreshold}
-          directory={directory}
-        />
-      )}
-
-      {/* 공유 메타 행에서 사람이 작성 중이면 바로 아래의 에이전트 작업 중 줄과
-          인접한다. 두 낱말의 대조축은 TypingLine의 머리 주석이 정본이다. */}
       <AgentActivityBar
         turns={turns}
         directory={directory}
@@ -845,8 +825,19 @@ export function Composer({
           optionTestId="mention-option"
         />
         <div
-          className="rounded-md border border-line-strong bg-surface-raised"
+          className="rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring"
           data-testid="composer-frame"
+          onClick={(event) => {
+            // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
+            // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
+            if (
+              event.target instanceof Element &&
+              event.target.closest("button")
+            ) {
+              return;
+            }
+            inputRef.current?.focus();
+          }}
         >
           <label className="sr-only" htmlFor="composer-input">
             {composerFieldLabel(channelLabel, recipient)}
@@ -914,10 +905,10 @@ export function Composer({
             }
             aria-describedby={showComposerHint ? "composer-hint" : undefined}
             data-testid="composer-input"
-            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
+            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted"
           />
           <div
-            className="flex items-center justify-between gap-2 px-2 pb-2"
+            className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
             data-testid="composer-actions"
           >
             <div className="flex items-center gap-1">
@@ -929,10 +920,7 @@ export function Composer({
                 aria-label="멘션 넣기"
                 title="멘션 넣기"
                 data-testid="composer-mention-trigger"
-                onClick={() => {
-                  mentions.insertTrigger();
-                  typing.onInput();
-                }}
+                onClick={mentions.insertTrigger}
               >
                 <AtSign aria-hidden="true" />
               </Button>
@@ -955,6 +943,20 @@ export function Composer({
                 <Smile aria-hidden="true" />
               </Button>
             </div>
+            {metaMode === "hint" ? (
+              <ComposerHint
+                directory={directory}
+                dmAgent={dmAgent}
+                keysHintNeeded={keysHintNeeded}
+                sharedRow
+              />
+            ) : (
+              <TypingLine
+                memberIds={metaMode === "typing" ? typists : []}
+                threshold={typingThreshold}
+                directory={directory}
+              />
+            )}
             <Button
               type="submit"
               size="icon"

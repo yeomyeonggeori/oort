@@ -23,12 +23,29 @@ describe("컴포저 캐럿 삽입 (#1688)", () => {
     ).toEqual({ value: "확👀", caret: 3 });
   });
 
-  it("[@]는 현재 선택을 @로 바꾸고 자동완성이 읽을 캐럿을 돌려준다 (#1749)", () => {
+  it("[@]는 선택을 지우지 않고 선택 끝에서 멘션을 시작한다 (#1749)", () => {
     expect(
       insertMentionTriggerAtComposerSelection("배포 담당자", {
         start: 3,
         end: 6,
       })
-    ).toEqual({ value: "배포 @", caret: 4 });
+    ).toEqual({ value: "배포 담당자 @", caret: 8 });
+  });
+
+  it.each([
+    ["문장 끝", "배포 로그 확인해주세요", 12, "배포 로그 확인해주세요 @", 14],
+    ["한글 단어 뒤", "안녕하세요", 5, "안녕하세요 @", 7],
+    ["영문 단어 뒤", "deploy", 6, "deploy @", 8],
+    ["문장부호 뒤", "확인,", 3, "확인, @", 5],
+    ["[@] 연타", "@", 1, "@ @", 3],
+    ["공백 뒤", "배포 확인", 3, "배포 @확인", 4],
+    ["줄 시작", "확인", 0, "@확인", 1],
+  ])("[@]는 %s 캐럿에서 멘션 경계를 만든다", (_name, value, caret, next, nextCaret) => {
+    expect(
+      insertMentionTriggerAtComposerSelection(value, {
+        start: caret,
+        end: caret,
+      })
+    ).toEqual({ value: next, caret: nextCaret });
   });
 });

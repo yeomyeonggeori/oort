@@ -31,13 +31,22 @@ export function insertAtComposerSelection(
 }
 
 /**
- * [@] 버튼은 새 멘션 모델을 만들지 않는다. 현재 선택 범위에 멘션 시작 문자만
- * 넣고, `useMentionAutocomplete`가 평범한 텍스트 입력과 같은 open/caret 경로를
- * 이어받게 한다.
+ * [@] 버튼은 새 멘션 모델을 만들지 않는다. 선택이 있으면 선택 끝으로 캐럿을
+ * 접어서 원문을 보존하고, 그 캐럿 앞이 비공백이면 공백과 `@`를 함께 넣는다.
+ * 이 버튼이 `mentionQueryAt`의 「줄 시작 또는 공백 뒤 @만 멘션」 계약을 만족시키므로
+ * 평범하게 `@`를 타이핑한 open/caret 경로를 그대로 이어받을 수 있다.
  */
 export function insertMentionTriggerAtComposerSelection(
   value: string,
   selection: ComposerSelection
 ): ComposerInsertion {
-  return insertAtComposerSelection(value, selection, "@");
+  const boundedStart = Math.min(Math.max(selection.start, 0), value.length);
+  const boundedEnd = Math.min(Math.max(selection.end, 0), value.length);
+  const caret = Math.max(boundedStart, boundedEnd);
+  const insertion = caret > 0 && !/\s/.test(value[caret - 1]) ? " @" : "@";
+  return insertAtComposerSelection(
+    value,
+    { start: caret, end: caret },
+    insertion
+  );
 }

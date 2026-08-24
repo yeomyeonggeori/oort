@@ -200,8 +200,22 @@ export function ThreadComposer({
             className="left-0"
           />
           <div
-            className="rounded-md border border-line-strong bg-surface-raised"
+            className={cn(
+              "rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring",
+              sending && "opacity-50"
+            )}
+            aria-busy={sending}
+            data-sending={sending ? "" : undefined}
             data-testid="thread-composer-frame"
+            onClick={(event) => {
+              if (
+                event.target instanceof Element &&
+                event.target.closest("button")
+              ) {
+                return;
+              }
+              ref.current?.focus();
+            }}
           >
             <textarea
               ref={ref}
@@ -272,10 +286,10 @@ export function ThreadComposer({
                 event.preventDefault();
                 submit();
               }}
-              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:opacity-50"
+              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink"
             />
             <div
-              className="flex items-center justify-between gap-2 px-2 pb-2"
+              className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
               data-testid="thread-composer-actions"
             >
               <div className="flex items-center gap-1">
@@ -283,7 +297,7 @@ export function ThreadComposer({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="tap-target shrink-0"
+                  className="tap-target shrink-0 disabled:opacity-100"
                   disabled={sending}
                   aria-label="멘션 넣기"
                   title="멘션 넣기"
@@ -292,12 +306,16 @@ export function ThreadComposer({
                 >
                   <AtSign aria-hidden="true" />
                 </Button>
-                <AttachButton onPick={onFiles} disabled={sending} />
+                <AttachButton
+                  onPick={onFiles}
+                  disabled={sending}
+                  className="disabled:opacity-100"
+                />
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="tap-target shrink-0"
+                  className="tap-target shrink-0 disabled:opacity-100"
                   disabled={sending}
                   aria-label="이모지 넣기"
                   title="이모지 넣기"
@@ -317,7 +335,7 @@ export function ThreadComposer({
                 aria-label="답글 보내기"
                 title={attachBlockCopy ?? "답글 보내기"}
                 data-testid="thread-composer-send"
-                className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-50"
+                className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-100"
               >
                 <SendHorizontal className="size-4" aria-hidden="true" />
               </button>

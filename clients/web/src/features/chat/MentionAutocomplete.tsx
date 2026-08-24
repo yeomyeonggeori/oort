@@ -181,7 +181,7 @@ export function MentionAutocompleteList({
     <ul
       id={id}
       role="listbox"
-      aria-label="멤버 언급"
+      aria-label="멘션 선택"
       data-testid={testId}
       className={cn(
         "absolute bottom-full left-3 mb-2 w-pane-sm overflow-hidden rounded-md border border-line bg-surface-raised p-1 shadow-lg",

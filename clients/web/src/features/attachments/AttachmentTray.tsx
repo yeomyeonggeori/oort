@@ -175,9 +175,11 @@ function DraftChip({
 export function AttachButton({
   onPick,
   disabled,
+  className,
 }: {
   onPick: (files: File[]) => void;
   disabled?: boolean;
+  className?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -202,7 +204,7 @@ export function AttachButton({
         type="button"
         variant="ghost"
         size="icon"
-        className="tap-target"
+        className={cn("tap-target", className)}
         disabled={disabled ?? false}
         onClick={() => inputRef.current?.click()}
         aria-label={ATTACH_COPY.attach}
