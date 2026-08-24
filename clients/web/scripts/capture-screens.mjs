@@ -2182,10 +2182,13 @@ async function assertMentionTrigger(page, where, ids) {
         inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
     };
   })()`);
+  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
+  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
+  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
   if (
     proof.value !== "배포 @확인" ||
     proof.active !== ids.input ||
-    proof.focusVisible !== false ||
+    proof.focusVisible !== true ||
     proof.options < 1 ||
     Math.abs(proof.leftDelta) > 1 ||
     proof.gap < 0 ||
@@ -2194,13 +2197,25 @@ async function assertMentionTrigger(page, where, ids) {
     throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
   }
   console.log(
-    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · pointer fv=false`
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true(스펙)`
   );
   return proof;
 }
 
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
 async function assertEmojiAnchor(page, where, triggerId, pickerId) {
+  // Radix 포지셔닝은 비동기라 open 직후 rect가 미배치(0,0)일 수 있다 — 배치가
+  // 두 폴링 연속 같은 자리에 정착한 뒤에만 잰다. 단정은 아래 그대로이므로
+  // 진짜 오배치는 정착한 그 자리에서 여전히 걸린다.
+  await page.waitForFunction((pid) => {
+    const el = document.querySelector(`[data-testid="${pid}"]`);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.left <= 0 && r.top <= 0) return false;
+    const prev = el.__momoPrevRect;
+    el.__momoPrevRect = { l: r.left, t: r.top };
+    return Boolean(prev && prev.l === r.left && prev.t === r.top);
+  }, pickerId);
   const proof = await page.evaluate(`(() => {
     const trigger = document.querySelector('[data-testid="${triggerId}"]');
     const picker = document.querySelector('[data-testid="${pickerId}"]');
