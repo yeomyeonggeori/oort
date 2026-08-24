@@ -34,6 +34,21 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+const TOKENS_CSS = readFileSync(
+  resolve(WEB_ROOT, "src/design/tokens.css"),
+  "utf8"
+);
+
+function pixelToken(name) {
+  const match = TOKENS_CSS.match(
+    new RegExp(`^\\s*--${name}:\\s*([\\d.]+)px;`, "m")
+  );
+  if (match === null) throw new Error(`tokens.css의 --${name}을 읽지 못했다`);
+  return Number(match[1]);
+}
+
+const COMPOSER_FRAME_INSET = pixelToken("spacing-3");
+const ANCHOR_ALIGNMENT_TOLERANCE = pixelToken("spacing-1");
 
 const CRC_TABLE = (() => {
   const table = new Int32Array(256);
@@ -121,6 +136,7 @@ const MOBILE_TAP_TARGETS = [
   ["open-sidebar-drawer", "채널 목록 열기"],
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
+  ["composer-mention-trigger", "멘션 넣기"],
   ["composer-emoji-trigger", "이모지 넣기"],
   ["emoji-search", "이모지 검색", "optional"],
   // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
@@ -138,6 +154,7 @@ const MOBILE_TAP_TARGETS = [
   ["delete-message-commit", "삭제 확인", "optional"],
   ["delete-message-cancel", "삭제 취소", "optional"],
   ["thread-composer-input", "답글 입력", "optional"],
+  ["thread-composer-mention-trigger", "답글 멘션 넣기", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
   // 프레즌스 6b H2 — 하단 프로필 행의 상태 트리거. 바로 옆 설정 톱니가 44px인데
@@ -2085,6 +2102,276 @@ async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
 }
 
 /**
+ * UX-CB의 닫힌 탭 예산. 캡처 레인이 실제 DOM을 걷는다: 정적 소스에서 버튼 이름만
+ * 세면 hidden file input이나 disabled 전송 버튼을 놓치고도 초록이 된다.
+ */
+async function assertComposerTabOrder(page, where) {
+  const expected = [
+    "composer-input",
+    "composer-mention-trigger",
+    "composer-attach",
+    "composer-emoji-trigger",
+    "composer-send",
+  ];
+  const input = page.getByTestId("composer-input");
+  await input.fill("탭 순서 확인");
+  const tabbable = await page.getByTestId("composer-frame").evaluate((frame) =>
+    Array.from(
+      frame.querySelectorAll(
+        'textarea:not(:disabled), button:not(:disabled), input:not(:disabled):not([tabindex="-1"])'
+      )
+    )
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden";
+      })
+      .map((element) => element.getAttribute("data-testid"))
+  );
+  if (JSON.stringify(tabbable) !== JSON.stringify(expected)) {
+    throw new Error(
+      `컴포저 탭 순서 ${where}: ${JSON.stringify(tabbable)} (기대 ${JSON.stringify(expected)})`
+    );
+  }
+
+  // Tab으로 버튼에 간 뒤 Shift+Tab으로 돌아와야 textarea도 키보드 모달리티의
+  // :focus-visible을 얻는다. 링은 textarea가 아니라 한 컨트롤인 그릇이 진다.
+  await input.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  const walked = [];
+  for (let index = 0; index < expected.length; index++) {
+    const focus = await page.evaluate(`(() => {
+      const active = document.activeElement;
+      const frame = document.querySelector('[data-testid="composer-frame"]');
+      const activeStyle = active ? getComputedStyle(active) : null;
+      const ringTarget = active?.getAttribute("data-testid") === "composer-input"
+        ? frame
+        : active;
+      const ringStyle = ringTarget ? getComputedStyle(ringTarget) : null;
+      return {
+        testId: active?.getAttribute("data-testid") ?? null,
+        focusVisible: active?.matches(":focus-visible") ?? false,
+        activeOutlineWidth: activeStyle?.outlineWidth ?? null,
+        activeOutlineStyle: activeStyle?.outlineStyle ?? null,
+        outlineWidth: ringStyle?.outlineWidth ?? null,
+        outlineStyle: ringStyle?.outlineStyle ?? null,
+      };
+    })()`);
+    walked.push(focus.testId);
+    if (
+      focus.testId !== expected[index] ||
+      !focus.focusVisible ||
+      focus.outlineWidth !== "2px" ||
+      focus.outlineStyle !== "solid" ||
+      (index === 0 && focus.activeOutlineStyle !== "none")
+    ) {
+      throw new Error(
+        `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
+      );
+    }
+    if (index < expected.length - 1) await page.keyboard.press("Tab");
+  }
+  console.log(
+    `  composer tabs ${where}: ${walked.join(" → ")} (총 ${walked.length}, 입력은 그릇 링·버튼은 자체 2px 링)`
+  );
+  return walked;
+}
+
+/** 액션 행의 버튼 아닌 가운데 폭을 실제로 눌러 입력 캐럿이 돌아오는지 잰다. */
+async function assertComposerVesselClick(page, where, ids) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("그릇 클릭 확인");
+  await input.evaluate((element) => element.setSelectionRange(2, 2));
+  await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
+  const proof = await input.evaluate((element) => ({
+    active: document.activeElement === element,
+    start: element.selectionStart,
+    end: element.selectionEnd,
+  }));
+  if (!proof.active || proof.start !== 2 || proof.end !== 2) {
+    throw new Error(`컴포저 그릇 클릭 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(`  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start}`);
+}
+
+/** [@]를 포인터로 실제 누르고, 기존 listbox가 입력 기준 위치에서 열린 것을 잰다. */
+async function assertMentionTrigger(page, where, ids) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("배포 확인");
+  // `배포` 바로 뒤는 비공백 경계다. 공백 뒤를 고르면 B-1의 죽은 버튼도 초록이다.
+  await input.evaluate((element) => element.setSelectionRange(2, 2));
+  await page.getByTestId(ids.trigger).click();
+  await page.getByTestId(ids.list).waitFor({ state: "visible" });
+  await page.waitForFunction(
+    (testId) =>
+      document.activeElement?.getAttribute("data-testid") === testId,
+    ids.input
+  );
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${ids.list}"]');
+    const frame = input?.closest('[data-testid$="composer-frame"]');
+    const inputRect = input?.getBoundingClientRect();
+    const listRect = list?.getBoundingClientRect();
+    return {
+      value: input?.value ?? null,
+      active: document.activeElement?.getAttribute("data-testid") ?? null,
+      focusVisible: input?.matches(":focus-visible") ?? null,
+      inputOutlineWidth: input ? getComputedStyle(input).outlineWidth : null,
+      inputOutlineStyle: input ? getComputedStyle(input).outlineStyle : null,
+      frameOutlineWidth: frame
+        ? getComputedStyle(frame).outlineWidth
+        : null,
+      frameOutlineStyle: frame
+        ? getComputedStyle(frame).outlineStyle
+        : null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      leftDelta:
+        inputRect && listRect ? Math.round(listRect.left - inputRect.left) : null,
+      gap:
+        inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
+    };
+  })()`);
+  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
+  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
+  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
+  if (
+    proof.value !== "배포 @ 확인" ||
+    proof.active !== ids.input ||
+    proof.focusVisible !== true ||
+    proof.inputOutlineStyle !== "none" ||
+    proof.frameOutlineWidth !== "2px" ||
+    proof.frameOutlineStyle !== "solid" ||
+    proof.options < 1 ||
+    Math.abs(proof.leftDelta) > 1 ||
+    proof.gap < 0 ||
+    proof.gap > 24
+  ) {
+    throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, ring=frame`
+  );
+  return proof;
+}
+
+/** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
+async function assertEmojiAnchor(page, where, triggerId, pickerId) {
+  // Radix 포지셔닝은 비동기라 open 직후 rect가 미배치(0,0)일 수 있다 — 배치가
+  // 두 폴링 연속 같은 자리에 정착한 뒤에만 잰다. 단정은 아래 그대로이므로
+  // 진짜 오배치는 정착한 그 자리에서 여전히 걸린다.
+  await page.waitForFunction((pid) => {
+    const el = document.querySelector(`[data-testid="${pid}"]`);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.left <= 0 && r.top <= 0) return false;
+    const prev = el.__momoPrevRect;
+    el.__momoPrevRect = { l: r.left, t: r.top };
+    return Boolean(prev && prev.l === r.left && prev.t === r.top);
+  }, pickerId);
+  const proof = await page.evaluate(`(() => {
+    const trigger = document.querySelector('[data-testid="${triggerId}"]');
+    const picker = document.querySelector('[data-testid="${pickerId}"]');
+    const triggerRect = trigger?.getBoundingClientRect();
+    const pickerRect = picker?.getBoundingClientRect();
+    return {
+      trigger: triggerRect
+        ? { left: Math.round(triggerRect.left), top: Math.round(triggerRect.top) }
+        : null,
+      picker: pickerRect
+        ? {
+            left: Math.round(pickerRect.left),
+            right: Math.round(pickerRect.right),
+            bottom: Math.round(pickerRect.bottom),
+            width: Math.round(pickerRect.width),
+          }
+        : null,
+      triggerRight: triggerRect ? Math.round(triggerRect.right) : null,
+      viewportWidth: window.innerWidth,
+      horizontalDelta:
+        triggerRect && pickerRect
+          ? Math.round(pickerRect.left - triggerRect.left)
+          : null,
+      verticalGap:
+        triggerRect && pickerRect
+          ? Math.round(triggerRect.top - pickerRect.bottom)
+          : null,
+    };
+  })()`);
+  const channelAligned =
+    proof.trigger !== null &&
+    proof.picker !== null &&
+    (!where.startsWith("channel") ||
+      Math.abs(proof.horizontalDelta) <= ANCHOR_ALIGNMENT_TOLERANCE);
+  // 스레드는 오른쪽 패널 끝에 붙어 있어 Radix가 피커를 왼쪽으로 민다. 시작점 일치
+  // 대신 트리거가 피커 가로 범위 안에 남고, 피커가 뷰포트를 넘지 않는지를 단정한다.
+  const threadCollisionContained =
+    proof.trigger !== null &&
+    proof.picker !== null &&
+    (!where.startsWith("thread") ||
+      (proof.picker.left <= proof.trigger.left + ANCHOR_ALIGNMENT_TOLERANCE &&
+        proof.triggerRight <= proof.picker.right + ANCHOR_ALIGNMENT_TOLERANCE &&
+        proof.picker.right <= proof.viewportWidth + ANCHOR_ALIGNMENT_TOLERANCE &&
+        Math.abs(proof.horizontalDelta) <= proof.picker.width));
+  if (
+    proof.trigger === null ||
+    proof.picker === null ||
+    proof.verticalGap < 0 ||
+    proof.verticalGap > 16 ||
+    !channelAligned ||
+    !threadCollisionContained
+  ) {
+    throw new Error(`이모지 앵커 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  emoji anchor ${where}: trigger (${proof.trigger.left},${proof.trigger.top}) · picker (${proof.picker.left},${proof.picker.bottom}) · xΔ ${proof.horizontalDelta}px / gap ${proof.verticalGap}px`
+  );
+  return proof;
+}
+
+/** 단일 그릇의 위/아래 인셋과 컨트롤 경계를 계산 스타일로 고정한다. */
+async function assertComposerFrameGeometry(page, where) {
+  const proof = await page.evaluate(`(() => {
+    const root = document.querySelector('[data-testid="composer"]');
+    const form = root?.querySelector("form");
+    const frame = document.querySelector('[data-testid="composer-frame"]');
+    if (!root || !form || !frame) return null;
+    const rootRect = root.getBoundingClientRect();
+    const formRect = form.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    const style = getComputedStyle(frame);
+    const tokenProbe = document.createElement("span");
+    tokenProbe.style.color = "var(--line-strong)";
+    document.body.append(tokenProbe);
+    const expectedBorder = getComputedStyle(tokenProbe).color;
+    tokenProbe.remove();
+    return {
+      topInset: Math.round(frameRect.top - formRect.top),
+      bottomInset: Math.round(rootRect.bottom - frameRect.bottom),
+      borderWidth: style.borderTopWidth,
+      borderStyle: style.borderTopStyle,
+      background: style.backgroundColor,
+      border: style.borderTopColor,
+      expectedBorder,
+    };
+  })()`);
+  if (
+    proof === null ||
+    proof.topInset !== COMPOSER_FRAME_INSET ||
+    proof.bottomInset !== COMPOSER_FRAME_INSET ||
+    proof.borderWidth !== "1px" ||
+    proof.borderStyle !== "solid" ||
+    proof.border !== proof.expectedBorder
+  ) {
+    throw new Error(`컴포저 그릇 기하 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  composer frame ${where}: top ${proof.topInset}px / bottom ${proof.bottomInset}px (--spacing-3) · border ${proof.borderWidth} ${proof.border} (--line-strong) · fill ${proof.background}`
+  );
+  return proof;
+}
+
+/**
  * 인박스가 **자리를 잡을 때까지** 기다린다 (goal P3 후속, B12 회귀 복구).
  *
  * 이 프레임은 `feed-row`가 보이기를 기다리고 있었다. B12가 `isSurfaceProvided`를
@@ -3576,6 +3863,123 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
 
+  // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
+  // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.
+  await assertComposerFrameGeometry(login, `rest ${scheme}`);
+  await assertComposerTabOrder(login, scheme);
+  for (let index = 0; index < 4; index++) {
+    await login.keyboard.press("Shift+Tab");
+  }
+  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
+  await login.screenshot({ path: focusShot });
+  shots.push(focusShot);
+  await assertComposerVesselClick(login, scheme, {
+    input: "composer-input",
+    actions: "composer-actions",
+  });
+
+  // 새 진입점은 캡처 레인이 실제로 누른다. 클릭이 @를 넣고 기존 listbox를 열며,
+  // 포인터 경로의 프로그램 포커스가 :focus-visible 링을 지어내지 않는 데까지 한 자다.
+  const mentionProof = await assertMentionTrigger(login, scheme, {
+    input: "composer-input",
+    trigger: "composer-mention-trigger",
+    list: "mention-list",
+  });
+  const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
+  await login.screenshot({ path: mentionShot });
+  shots.push(mentionShot);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-input").fill("");
+
+  // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
+  // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.
+  await context.setOffline(true);
+  await login.getByTestId("composer-offline").waitFor({ state: "visible" });
+  const offlineControls = await login.getByTestId("composer-frame").evaluate((frame) => ({
+    input: frame.querySelector('[data-testid="composer-input"]')?.hasAttribute("disabled"),
+    mention: frame
+      .querySelector('[data-testid="composer-mention-trigger"]')
+      ?.hasAttribute("disabled"),
+    attach: frame
+      .querySelector('[data-testid="composer-attach"]')
+      ?.hasAttribute("disabled"),
+    emoji: frame
+      .querySelector('[data-testid="composer-emoji-trigger"]')
+      ?.hasAttribute("disabled"),
+    send: frame
+      .querySelector('[data-testid="composer-send"]')
+      ?.hasAttribute("disabled"),
+  }));
+  if (
+    offlineControls.input !== false ||
+    offlineControls.mention !== false ||
+    offlineControls.attach !== true ||
+    offlineControls.emoji !== false ||
+    offlineControls.send !== true
+  ) {
+    throw new Error(
+      `컴포저 오프라인 disabled 의미 ${scheme}: ${JSON.stringify(offlineControls)}`
+    );
+  }
+  const composerOfflineShot = `${OUT_DIR}/composer-offline-${scheme}.png`;
+  await login.screenshot({ path: composerOfflineShot });
+  shots.push(composerOfflineShot);
+  await context.setOffline(false);
+  await login.getByTestId("composer-offline").waitFor({ state: "hidden" });
+
+  // 첨부 pending: session 응답을 붙잡아 실제 draftStore가 uploading 칩을 그린
+  // 순간을 찍고, 촬영 뒤 같은 3왕복을 끝내 깨끗한 rest로 복귀한다.
+  let releaseComposerUpload;
+  const composerUploadHeld = new Promise((resolve) => {
+    releaseComposerUpload = resolve;
+  });
+  await login.route("**/attachments/uploads", async (route) => {
+    await composerUploadHeld;
+    return json(route, {
+      id: "capture-composer-attachment",
+      status: "pending",
+      uploadUrl: `${ORIGIN}/capture-composer-upload`,
+    });
+  });
+  await login.route("**/capture-composer-upload", (route) =>
+    route.fulfill({ status: 200, body: "" })
+  );
+  await login.route("**/attachments/capture-composer-attachment/complete", (route) =>
+    json(route, {
+      id: "capture-composer-attachment",
+      channelId: GENERAL_ID,
+      uploaderMemberId: ME,
+      name: "deploy-log.txt",
+      mime: "text/plain",
+      size: 18,
+      status: "complete",
+      createdAtMs: Date.now(),
+    })
+  );
+  await login
+    .getByTestId("composer")
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "deploy-log.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("capture attachment"),
+    });
+  await login.getByTestId("attachment-chip-progress").waitFor({ state: "visible" });
+  const composerPendingShot = `${OUT_DIR}/composer-attachment-pending-${scheme}.png`;
+  await login.screenshot({ path: composerPendingShot });
+  shots.push(composerPendingShot);
+  releaseComposerUpload();
+  await login.getByTestId("attachment-chip-progress").waitFor({ state: "hidden" });
+  await login.getByTestId("attachment-chip-remove").click();
+  await login.getByTestId("attachment-chip").waitFor({ state: "hidden" });
+  await login.unroute("**/attachments/uploads");
+  await login.unroute("**/capture-composer-upload");
+  await login.unroute("**/attachments/capture-composer-attachment/complete");
+  console.log(
+    `  composer states ${scheme}: rest/focus/offline/attachment-pending · mention options ${mentionProof.options}`
+  );
+
   // ADR-0170 destructive boundary: removing a preview is permanent for this
   // message, so the no-regeneration sentence and Esc layer get their own
   // review frame. Esc must restore focus to the exact opener and keeps the card
@@ -3940,6 +4344,12 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
+  await assertEmojiAnchor(
+    login,
+    `channel ${scheme}`,
+    "composer-emoji-trigger",
+    "composer-emoji-picker"
+  );
   const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
@@ -3960,7 +4370,15 @@ async function captureScheme(browser, scheme) {
       `[thread ${scheme}] 첨부 input은 하나여야 하지만 ${threadFileInputs}개다`
     );
   }
-  await threadComposer.fill("@kim");
+  await assertComposerVesselClick(login, `thread ${scheme}`, {
+    input: "thread-composer-input",
+    actions: "thread-composer-actions",
+  });
+  await assertMentionTrigger(login, `thread ${scheme}`, {
+    input: "thread-composer-input",
+    trigger: "thread-composer-mention-trigger",
+    list: "thread-mention-list",
+  });
   await login.getByTestId("thread-mention-list").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
@@ -3969,6 +4387,19 @@ async function captureScheme(browser, scheme) {
   const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
+  await login.keyboard.press("Escape");
+  await threadComposer.fill("");
+  await login.getByTestId("thread-composer-emoji-trigger").click();
+  await login
+    .getByTestId("thread-composer-emoji-picker")
+    .waitFor({ state: "visible" });
+  await assertEmojiAnchor(
+    login,
+    `thread ${scheme}`,
+    "thread-composer-emoji-trigger",
+    "thread-composer-emoji-picker"
+  );
+  await login.keyboard.press("Escape");
   await login.getByTestId("thread-close").click();
 
   // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
@@ -3976,12 +4407,6 @@ async function captureScheme(browser, scheme) {
   //     컨트롤)이고 상한은 24번이다: 행마다 컨트롤이 하나 더 늘면 11이 더해져
   //     바로 넘는다. 1라운드의 액션 바(행당 6개)는 근처에도 오지 못한다.
   await countTabStopsToComposer(login, `desktop ${scheme}`, 24);
-
-  // 3. focus ring on the composer (focus indication is a hard rule)
-  await login.getByTestId("composer-input").focus();
-  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
-  await login.screenshot({ path: focusShot });
-  shots.push(focusShot);
 
   // 3a. 채널 만들기 다이얼로그 (MOMO-614): the form the sidebar + opens, filled
   //     the way a person fills it. This is the surface that replaced the

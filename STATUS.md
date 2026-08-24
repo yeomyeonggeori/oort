@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 웹 컴포저 buzz형 2행 그릇 (#1749, 2026-08-25)
+
+- #1751 design-review 수리: `@` 버튼은 줄 시작·공백 뒤에는 `@`, 비공백 뒤에는 ` @`를 넣고 선택은 끝으로 접어 보존한다. 문장 끝·한글/영문·문장부호·연타 red proof가 기존 `mentionQueryAt`을 그대로 열며, 클릭은 ADR-0149 작성 중 신호를 내보내지 않는다.
+- textarea의 UA outline까지 명시적으로 끄고 `focus-within` 그릇만 포커스 표시를 맡긴다. 버튼 아닌 그릇 면적은 입력 캐럿을 돌려주며, 스레드는 sending이면 그릇 전체를 흐리고 빈 초안이면 전송 버튼만 50%로 낮춘다. ↵ 힌트·작성 중 교대 슬롯은 액션 행 가운데로 옮겨 별도 26px 예약 띠와 레이아웃 시프트를 함께 없앴다.
+- 캡처 자는 입력 outline 부재를 `outlineStyle=none`으로 재며, typing 게이트는 0높이 빈 슬롯의 부착·무텍스트·flex 폭을 확인한 뒤 `[fit]`·`[cut]`·`[a11y]`·`[slot]`까지 진행한다. `runtime-unverified(capture:design·gate-typing)`: 이 샌드박스에서는 실행하지 않고 오케스트레이터가 대행한다. 폰 TypingBar 동형 후속은 #1752다.
+
 ## 메시지 호버 퀵액션 툴바 (#1743, 2026-08-25)
 
 - 행 hover/focus-within 에만 우상단 툴바를 마운트한다: 빈도 슬롯 3(시드 👍✅🙏, UX-EB `frequencyStore` 공유) · React · 답글 · ⋯. 비호버 행은 DOM 0(opacity 트릭 금지). 툴바 항목은 행 로빙 그룹에 편입. 터치는 비렌더, 시트 불변.
