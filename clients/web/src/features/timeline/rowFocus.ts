@@ -48,10 +48,10 @@ export function nextRovingIndex(
 /**
  * 지금 이 행에서 실제로 포커스를 받을 수 있는 컨트롤들.
  *
- * `disabled`와 `display:none`을 빼는 것이 핵심이다. 액션 열은 hover가 없는
- * 기기에서 통째로 사라지고(tokens.css `pointer-only`), 칩은 삭제된 메시지에서
- * disabled가 된다. 둘 중 하나를 그룹의 유일한 구성원으로 골라 두면 그 행에는
- * 아예 닿을 수 없는 탭 스톱 하나가 남는다.
+ * `disabled`와 `display:none`을 빼는 것이 핵심이다. 호버 툴바는 hover가 없는
+ * 기기와 비호버 행에서 마운트 자체가 없고, 칩은 삭제된 메시지에서 disabled가
+ * 된다. 둘 중 하나를 그룹의 유일한 구성원으로 골라 두면 그 행에는 아예 닿을
+ * 수 없는 탭 스톱 하나가 남는다.
  */
 function rowActionItems(root: HTMLElement): HTMLElement[] {
   return Array.from(

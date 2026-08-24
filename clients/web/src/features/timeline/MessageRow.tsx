@@ -68,12 +68,14 @@ import {
 import { QuoteBlock } from "./QuoteBlock";
 import {
   DeleteMessageDialog,
-  MessageActionColumn,
   MessageActionContextMenu,
   MessageActionSheet,
+  MessageHoverToolbar,
   type MessageActionCallbacks,
 } from "./MessageActions";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { shouldShowHoverToolbar } from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useRowRovingFocus } from "./rowFocus";
@@ -126,20 +128,7 @@ function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
   return selected;
 }
 
-/** Mirrors tokens.css `pointer-only`: touch keeps the long-press sheet. */
-function useHoverContextMenu(): boolean {
-  const [matches, setMatches] = useState(
-    () =>
-      typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches
-  );
-  useEffect(() => {
-    const query = window.matchMedia("(hover: hover)");
-    const update = () => setMatches(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return matches;
-}
+
 
 function timeLabel(atMs: number): string {
   const d = new Date(atMs);
@@ -376,6 +365,10 @@ export function MessageRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [rowHovered, setRowHovered] = useState(false);
+  const [rowFocused, setRowFocused] = useState(false);
   const openMemberProfile = useOpenMemberProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
@@ -510,12 +503,30 @@ export function MessageRow({
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
     // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
-    // 칩의 + 는 그 버튼, ⋯/컨텍스트/시트는 행의 ⋯ 버튼. 행 전체에 앵커하면
+    // 칩의 + 는 그 버튼, 툴바 React/⋯ 는 그 버튼. 행 전체에 앵커하면
     // 트리거와 팝오버가 996px 벌어진다 (design-review #1746 H-4).
     setPickerOpener(opener ?? actionTriggerRef.current ?? rowRef.current);
     setPickerOpen(true);
+    setActionMenuOpen(false);
+    setContextMenuOpen(false);
   };
-  const hoverContextMenu = useHoverContextMenu();
+  const touchSurface = useHoverNone();
+  const mineEmojis = useMemo(() => {
+    const next = new Set<string>();
+    if (!actions) return next;
+    for (const chip of actions.chips) {
+      if (chip.mine) next.add(chip.emoji);
+    }
+    return next;
+  }, [actions]);
+  const showHoverToolbar = shouldShowHoverToolbar({
+    pointerCanHover: !touchSurface,
+    editing,
+    rowHovered,
+    rowFocused,
+    overlayOpen: pickerOpen || actionMenuOpen || contextMenuOpen,
+    selecting: selectionWithinRow,
+  });
 
   // `data-message-id` is the row's second published identity (MOMO-677).
   // `seq` orders the channel and is what the inbox jumps by; a projection
@@ -526,7 +537,7 @@ export function MessageRow({
   return (
     <MessageActionContextMenu
       enabled={
-        actionable && hoverContextMenu && !selectionWithinRow && !editing
+        actionable && !touchSurface && !selectionWithinRow && !editing
       }
       available={available}
       canCopy={canCopy}
@@ -534,6 +545,7 @@ export function MessageRow({
       pinned={Boolean(actions?.pinned)}
       callbacks={callbacks}
       onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
+      onOpenChange={setContextMenuOpen}
     >
       <article
       ref={rowRef}
@@ -551,6 +563,14 @@ export function MessageRow({
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       onKeyDown={onRowKeyDown}
+      onMouseEnter={() => setRowHovered(true)}
+      onMouseLeave={() => setRowHovered(false)}
+      onFocusCapture={() => setRowFocused(true)}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        setRowFocused(false);
+      }}
       // State disables the Radix trigger before a normal right-click. The
       // capture guard covers the same gesture synchronously if React has not
       // committed the immediately preceding selectionchange yet.
@@ -561,11 +581,10 @@ export function MessageRow({
       }}
       {...(actionable ? longPress : {})}
       className={cn(
-        // `group` lets the action trigger react to a hover anywhere on the row
-        // rather than only on itself, which would be an affordance you can only
-        // find by already being on it. `no-touch-callout` stops iOS raising its
-        // own selection menu on top of the long-press sheet.
-        "group flex gap-2 px-4 hover:bg-surface-hover",
+        // `group` lets the gutter clock react to a hover anywhere on the row.
+        // The hover toolbar is JS-mounted (not group-hover opacity) so a
+        // non-hovered row contributes zero toolbar tab stops.
+        "group relative flex gap-2 px-4 hover:bg-surface-hover",
         // 컨트롤이 없는 행은 자기 자신이 탭 정거장이 된다 (rowFocus.ts, 리뷰 W-4).
         // 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에 그린다 — 행은
         // 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은 잘린다
@@ -638,8 +657,8 @@ export function MessageRow({
           <div className="flex flex-wrap items-baseline gap-2">
             {/* 이름은 이름이다 (R1 M8). 프로필 진입점은 옆의 아바타다. 그 버튼은
                 `data-row-action` 로 이 행의 기존 로빙 그룹에 합류하므로 메시지마다
-                탭 정거장을 하나씩 늘리지 않는다. 행 액션은 우클릭 ContextMenu와
-                기존 ⋯ 메뉴가 같은 목록을 공유하고, 이름 자체는 계속 읽는 글이다. */}
+                탭 정거장을 하나씩 늘리지 않는다. 행 액션은 호버 툴바·우클릭
+                ContextMenu·⋯ 메뉴가 같은 목록을 공유하고, 이름 자체는 계속 읽는 글이다. */}
             {/* 「누가」는 한 덩어리, 「언제」는 다른 덩어리 — 작성자 줄이 읽어야 할
                 섬을 **둘**로 줄인다 (M-3 「작성자 줄이 과적재」).
 
@@ -908,16 +927,20 @@ export function MessageRow({
           </span>
         )}
       </div>
-      {actions && (
-        <MessageActionColumn
+      {actions && showHoverToolbar && (
+        <MessageHoverToolbar
           available={available}
           canCopy={canCopy}
           copied={copied}
           pinned={Boolean(actions?.pinned)}
           callbacks={callbacks}
-          onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
-          hidden={editing}
+          onOpenPicker={(el) =>
+            openReactionPicker(el ?? actionTriggerRef.current)
+          }
+          menuOpen={actionMenuOpen}
+          onMenuOpenChange={setActionMenuOpen}
           triggerRef={actionTriggerRef}
+          mineEmojis={mineEmojis}
         />
       )}
       {actions && actionable && (

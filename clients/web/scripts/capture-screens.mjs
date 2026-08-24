@@ -2245,45 +2245,62 @@ async function assertThreadRollupPlacement(page, where) {
 }
 
 /**
- * 액션 진입점이 자기 행의 본문을 덮지 않는가 (goal B11 R2 Blocker).
+ * 호버 툴바가 지금 이 프레임에서 몇 개인지 (#1743).
  *
- * 1라운드는 액션 바를 행 위에 음수 오프셋(`-top-3`)으로 띄웠는데, 바 높이가
- * 32px이라 20px이 언제나 행 안에 남았다 — 연속 행의 첫 줄 오른쪽 끝이 그만큼
- * 가려졌고, 한국어 문단의 첫 줄은 거의 언제나 오른쪽 끝까지 간다. 스크린샷은
- * 그것을 보여주지만 **증명하지는** 않는다: 리뷰어가 두 상자를 재야 한다.
- *
- * 그래서 여기서 잰다. 본문 상자(`data-row-body`)의 오른쪽 끝보다 진입점이
- * 왼쪽에서 시작하면 그것이 겹침이고, 몇 px인지까지 말한다. 지금 구조에서는
- * 진입점이 본문 **밖**의 예약된 열에 있으므로 이 값은 음수여야 한다.
+ * 기본/터치 프레임은 0, hover·포커스 프레임은 1. 비호버 행에 툴바가 남아
+ * 있으면 opacity 트릭이 돌아온 것이고, 그게 B11 리버트의 원인이다.
  */
-async function assertActionGutterClearsBody(page, where) {
-  const rows = await page.evaluate(`(() => {
-    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
-      .map((row) => {
-        const body = row.querySelector('[data-row-body]');
-        const trigger = row.querySelector('[data-testid="message-actions-trigger"]');
-        if (!body || !trigger) return null;
-        const b = body.getBoundingClientRect();
-        const t = trigger.getBoundingClientRect();
-        return {
-          seq: row.getAttribute('data-seq'),
-          overlap: Math.round(b.right - t.left),
-          gap: Math.round(t.left - b.right),
-        };
-      })
-      .filter(Boolean);
-  })()`);
-  if (rows.length === 0) {
-    throw new Error(`[액션 열 ${where}] 잴 행이 하나도 없다`);
-  }
-  const worst = rows.reduce((a, b) => (b.overlap > a.overlap ? b : a));
-  if (worst.overlap > 0) {
+async function assertHoverToolbarCount(page, where, expected) {
+  const count = await page.evaluate(
+    `document.querySelectorAll('[data-testid="message-hover-toolbar"]').length`
+  );
+  if (count !== expected) {
     throw new Error(
-      `[액션 열 ${where}] seq ${worst.seq}: 액션 진입점이 본문 상자를 ${worst.overlap}px 덮는다`
+      `[호버 툴바 ${where}] ${count}개가 마운트됐다 (기대 ${expected})`
+    );
+  }
+  console.log(`  호버 툴바 ${where}: ${count}개`);
+}
+
+/**
+ * 마운트된 툴바가 자기 행의 우상단에 앉는가 (#1743).
+ *
+ * 겹침은 계약이다(3사 플로팅 바). 행 상자를 가로로 뚫고 나가면 캡처의
+ * 가로 스크롤 게이트가 따로 잡는다. 여기서는 "어느 행의 우상단인가"만 잰다.
+ */
+async function assertHoverToolbarPlacement(page, where) {
+  const info = await page.evaluate(`(() => {
+    const bars = Array.from(
+      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
+    );
+    return bars.map((bar) => {
+      const row = bar.closest('[data-testid="timeline-message"]');
+      if (!row) return { seq: null, within: false };
+      const r = row.getBoundingClientRect();
+      const t = bar.getBoundingClientRect();
+      return {
+        seq: row.getAttribute('data-seq'),
+        within:
+          t.left >= r.left - 1 &&
+          t.right <= r.right + 1 &&
+          t.top >= r.top - 1 &&
+          t.bottom <= r.bottom + 1,
+        fromRight: Math.round(r.right - t.right),
+        fromTop: Math.round(t.top - r.top),
+      };
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[호버 툴바 ${where}] 잴 툴바가 없다`);
+  }
+  const stray = info.find((item) => !item.within);
+  if (stray) {
+    throw new Error(
+      `[호버 툴바 ${where}] seq ${stray.seq}: 툴바가 행 상자를 벗어났다`
     );
   }
   console.log(
-    `  액션 열 ${where}: ${rows.length}행, 본문과의 최소 간격 ${-worst.overlap}px`
+    `  호버 툴바 위치 ${where}: ${info.length}개, 우측 ${info[0].fromRight}px · 상단 ${info[0].fromTop}px`
   );
 }
 
@@ -2307,6 +2324,7 @@ async function assertRowTabStops(page, where, limit = 1) {
       '[data-testid="reaction-add"]',
       '[data-testid="thread-anchor"]',
       '[data-testid="message-resend"]',
+      '[data-toolbar-item]',
     ].join(',');
     return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
       .map((row) => {
@@ -2892,23 +2910,10 @@ async function captureMobile(browser, scheme) {
   //       보이지 않는 제스처 하나뿐이었고, 그래서 이 표면에는 "여기서 무언가 할
   //       수 있다"고 말하는 것이 하나도 없었다. 손가락 기기에서만, 한 번만.
   await page.getByTestId("long-press-hint").waitFor({ state: "visible" });
-  // 같은 축의 반대편: hover가 없는 기기에는 액션 열이 아예 없어야 한다. 있으면
-  // 본문이 쓸 수 있었던 폭을, 어떤 제스처로도 열리지 않는 컨트롤에 준 것이다.
-  const gutterOnTouch = await page.evaluate(`(() => {
-    const columns = Array.from(
-      document.querySelectorAll('[data-testid="message-action-column"]')
-    );
-    const shown = columns.filter((el) => el.getBoundingClientRect().width > 0);
-    return { total: columns.length, shown: shown.length };
-  })()`);
-  if (gutterOnTouch.shown > 0) {
-    throw new Error(
-      `[폰 ${scheme}] hover가 없는 기기에 액션 열이 ${gutterOnTouch.shown}개 그려졌다`
-    );
-  }
-  console.log(
-    `  폰 ${scheme}: 액션 열 ${gutterOnTouch.total}개 모두 접힘, 길게 누르기 안내 보임`
-  );
+  // 같은 축의 반대편: hover가 없는 기기에는 호버 툴바가 아예 없어야 한다.
+  // display:none 이 아니라 DOM 0 — opacity 트릭의 재발을 여기서 차단한다.
+  await assertHoverToolbarCount(page, `폰 ${scheme}`, 0);
+  console.log(`  폰 ${scheme}: 호버 툴바 0, 길게 누르기 안내 보임`);
 
   // 2a-2. 스크롤은 누르기가 아니다 (goal B11 R2 H2). **먼저 열리지 않아야 하는
   //       제스처부터 잰다.** 1라운드의 이 방어는 죽은 코드였다: `origin`을 채운
@@ -3259,6 +3264,11 @@ async function captureScheme(browser, scheme) {
   // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
   // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
   await assertNoHorizontalOverflow(login, `desktop chat ${scheme}`);
+  // Park the pointer on the composer so a leftover login-click coordinate
+  // cannot keep a row hovered. Rest means the toolbar is not mounted.
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(100);
+  await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
@@ -3313,80 +3323,140 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoval.screenshot({ path: unfurlRemovedShot });
   shots.push(unfurlRemovedShot);
 
-  // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
-  //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
-  //     표식, 그리고 조용히 사라지지 않고 자리에 남은 「삭제된 메시지」.
+  // 2c. 메시지 액션 (goal B11 / #1743). 한 프레임이 네 가지를 한꺼번에 증명한다:
+  //     내 메시지 위에 뜬 호버 툴바, 위 행들의 반응 칩(내가 누른 것은 강조),
+  //     「수정됨」 표식, 그리고 자리에 남은 「삭제된 메시지」.
   //
   //     hover로 띄운다 — 데스크탑의 진입점이 hover이기 때문이다. 폰에는 hover가
   //     없고, 그쪽은 captureMobile의 길게 누르기 프레임이 맡는다.
   const actionRow = login.getByTestId("timeline-message").last();
   await actionRow.hover();
   await login
-    .getByTestId("message-actions-trigger")
+    .getByTestId("message-hover-toolbar")
     .last()
     .waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  // Blocker 회귀 (R2). 진입점은 본문 상자 밖의 예약된 열에 있어야 한다.
-  await assertActionGutterClearsBody(login, `hover ${scheme}`);
-  // H1 회귀 (R2). 행마다 최대 여섯 개였던 탭 스톱이 하나가 되었는가.
+  await assertHoverToolbarCount(login, `hover ${scheme}`, 1);
+  await assertHoverToolbarPlacement(login, `hover ${scheme}`);
+  await assertNoHorizontalOverflow(login, `hover toolbar ${scheme}`);
   await assertRowTabStops(login, `hover ${scheme}`);
   const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
   await login.screenshot({ path: actionsShot });
   shots.push(actionsShot);
 
-  // 2d. 키보드 경로 (goal B11 R2 H1). **진짜 Tab으로 만든 프레임이다.**
+  // 2d. 키보드 경로 (goal B11 R2 H1 · #1743). **진짜 Tab으로 만든 프레임이다.**
   //
-  //     1라운드의 이 프레임은 `locator.focus()`로 찍혔고, 그래서 hover 프레임과
-  //     md5까지 같았다: 프로그래매틱 포커스는 Chromium에서 `:focus-visible`을
-  //     켜지 않으므로 링이 그려지지 않았고, 아무것도 재지 못한 채 "키보드로
-  //     닿는다"고 주장했다. 여기서는 바로 앞 행의 진입점에 포커스를 두고 Tab을
-  //     **눌러서** 다음 진입점에 착지한 뒤, 그 순간의 상태를 직접 확인한다.
-  const landed = await login.evaluate(`(() => {
-    const triggers = Array.from(
-      document.querySelectorAll('[data-testid="message-actions-trigger"]')
+  //     툴바는 비포커스 행에 없으므로, 바로 앞 행의 로빙 정거장에서 Tab을 눌러
+  //     마지막 행으로 들어간다. 그 순간 focus-within 이 툴바를 마운트하고,
+  //     포커스는 이미 보이는 컨트롤에 있어야 한다 (opacity-0 트리거에 착지하는
+  //     옛 경로의 반대).
+  const tabStart = await login.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
     );
-    if (triggers.length < 2) return false;
-    triggers[triggers.length - 2].focus();
-    return true;
+    if (rows.length < 2) return false;
+    const prev = rows[rows.length - 2];
+    const start =
+      prev.querySelector('[data-row-action][tabindex="0"]') ||
+      prev.querySelector('[data-row-action]') ||
+      prev;
+    start.focus();
+    return document.activeElement === start;
   })()`);
-  if (!landed) {
-    throw new Error(`[키보드 ${scheme}] 액션 진입점이 두 개 미만이다`);
+  if (!tabStart) {
+    throw new Error(`[키보드 ${scheme}] 바로 앞 행에 탭 출발점이 없다`);
   }
-  // 본문 안의 링크도 정당한 탭 스톱이므로(마지막 행에는 긴 URL이 있다) 진입점이
-  // 나올 때까지 Tab을 **누른다**. 중요한 것은 몇 번째냐가 아니라, 실제 키 입력으로
-  // 거기에 닿았고 그 순간 브라우저가 `:focus-visible`을 켰다는 것이다.
+  let landedRow = false;
   let landedOn = "";
-  for (let press = 0; press < 8 && landedOn !== "message-actions-trigger"; press++) {
+  for (let press = 0; press < 12; press++) {
     await login.keyboard.press("Tab");
-    landedOn = await login.evaluate(
-      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
-    );
+    const proof = await login.evaluate(`(() => {
+      const el = document.activeElement;
+      if (!el) return { inLast: false, testId: "", focusVisible: false, opacity: 0, toolbar: 0 };
+      const rows = Array.from(
+        document.querySelectorAll('[data-testid="timeline-message"]')
+      );
+      const last = rows[rows.length - 1];
+      return {
+        inLast: Boolean(last && last.contains(el)),
+        testId: el.getAttribute("data-testid") || "",
+        focusVisible: el.matches(":focus-visible"),
+        opacity: Number(getComputedStyle(el).opacity),
+        toolbar: last
+          ? last.querySelectorAll('[data-testid="message-hover-toolbar"]').length
+          : 0,
+      };
+    })()`);
+    landedOn = proof.testId;
+    if (proof.inLast) {
+      if (!proof.focusVisible) {
+        throw new Error(
+          `[키보드 ${scheme}] 행 착지점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+        );
+      }
+      if (proof.opacity < 1) {
+        throw new Error(
+          `[키보드 ${scheme}] 포커스를 받은 컨트롤의 opacity가 ${proof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
+        );
+      }
+      if (proof.toolbar !== 1) {
+        throw new Error(
+          `[키보드 ${scheme}] focus-within 행에 툴바가 ${proof.toolbar}개다`
+        );
+      }
+      landedRow = true;
+      break;
+    }
   }
-  const focusProof = await login.evaluate(`(() => {
-    const el = document.activeElement;
-    if (!el) return { testId: "", focusVisible: false, opacity: 0 };
-    return {
-      testId: el.getAttribute("data-testid") || "",
-      focusVisible: el.matches(":focus-visible"),
-      opacity: Number(getComputedStyle(el).opacity),
-    };
-  })()`);
-  if (focusProof.testId !== "message-actions-trigger") {
+  if (!landedRow) {
     throw new Error(
-      `[키보드 ${scheme}] Tab이 액션 진입점이 아니라 ${focusProof.testId || "(없음)"}에 닿았다`
+      `[키보드 ${scheme}] Tab이 마지막 행에 닿지 못했다 (마지막 착지 ${landedOn || "(없음)"})`
     );
   }
-  if (!focusProof.focusVisible) {
+  // 본문 링크는 행 로빙 밖의 정당한 탭 스톱이다. 링크에 착지했으면 Tab으로
+  // 툴바(tabIndex 0 인 ⋯)에 한 칸 더 들어간다. Arrow 는 로빙 그룹 밖에서
+  // 아무 일도 하지 않는다.
+  for (let press = 0; press < 8; press++) {
+    const reach = await login.evaluate(`(() => {
+      const el = document.activeElement;
+      const rows = Array.from(
+        document.querySelectorAll('[data-testid="timeline-message"]')
+      );
+      const last = rows[rows.length - 1];
+      return {
+        onToolbar: Boolean(el && el.hasAttribute("data-toolbar-item")),
+        inLast: Boolean(last && el && last.contains(el)),
+        testId: el ? el.getAttribute("data-testid") || "" : "",
+      };
+    })()`);
+    if (reach.onToolbar) break;
+    if (!reach.inLast) {
+      throw new Error(
+        `[키보드 ${scheme}] 툴바에 닿기 전에 마지막 행을 떠났다 (${reach.testId || "(없음)"})`
+      );
+    }
+    await login.keyboard.press("Tab");
+  }
+  const beforeArrow = await login.evaluate(
+    `document.activeElement && document.activeElement.hasAttribute("data-toolbar-item")
+      ? (document.activeElement.getAttribute("data-testid") || "")
+      : ""`
+  );
+  if (!beforeArrow) {
+    throw new Error(`[키보드 ${scheme}] 툴바 항목에 닿지 못했다`);
+  }
+  await login.keyboard.press("ArrowRight");
+  const afterArrow = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  if (!afterArrow || afterArrow === beforeArrow) {
     throw new Error(
-      `[키보드 ${scheme}] 진입점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+      `[키보드 ${scheme}] 툴바 ←/→ 가 ${beforeArrow}에서 움직이지 않았다`
     );
   }
-  if (focusProof.opacity < 1) {
-    throw new Error(
-      `[키보드 ${scheme}] 포커스를 받은 진입점의 opacity가 ${focusProof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
-    );
-  }
-  console.log(`  키보드 ${scheme}: Tab → 진입점, :focus-visible 켜짐`);
+  console.log(
+    `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow}`
+  );
   await login.waitForTimeout(300);
   const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
   await login.screenshot({ path: actionsFocusShot });
@@ -3396,6 +3466,13 @@ async function captureScheme(browser, scheme) {
   //     진입점으로 같은 액션 **전부**에 닿아야 한다. Enter로 열고, 방향키가
   //     실제로 항목 사이를 도는지 확인하고, Esc가 포커스를 진입점에 돌려주는지
   //     까지 같은 시퀀스에서 잰다.
+  for (let press = 0; press < 8; press++) {
+    const onOverflow = await login.evaluate(
+      `document.activeElement ? document.activeElement.getAttribute("data-testid") : ""`
+    );
+    if (onOverflow === "message-actions-trigger") break;
+    await login.keyboard.press("ArrowRight");
+  }
   await login.keyboard.press("Enter");
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);

@@ -4,13 +4,16 @@ import { cn } from "@/design/lib/cn";
 
 // shadcn/ui new-york DropdownMenu (vendored, Radix primitive).
 //
-// Added in B11 R2 for the message row's single action entry point. The row used
-// to carry a six-button hover bar, which §6 rules out ("row-level actions live
-// in ContextMenu, not always-visible button rows") and which cost one tab stop
-// per button on every row of a virtualized list. A menu needs collision-aware
-// positioning, a focus scope, arrow-key roving, Escape, outside-dismiss and
-// focus return to the trigger; hand-rolling those inside a recycled row is how
-// you ship a menu that survives every case but the one nobody tried.
+// Added in B11 R2 for the message row's overflow entry point. The row used to
+// carry a six-button hover bar that §6 then forbade (always-visible button
+// rows, one tab stop per button on every virtualized row). #1743 reintroduces
+// a hover toolbar under a tighter contract: the toolbar is not mounted until
+// hover/focus-within, it is one WAI-ARIA composite, and this menu remains the
+// overflow (Edit/Delete live here, not on the bar). A menu still needs
+// collision-aware positioning, a focus scope, arrow-key roving, Escape,
+// outside-dismiss and focus return to the trigger; hand-rolling those inside
+// a recycled row is how you ship a menu that survives every case but the one
+// nobody tried.
 //
 // Same two house deviations as the Dialog: no animation (motion is feedback,
 // §4), and no decorative chrome.
