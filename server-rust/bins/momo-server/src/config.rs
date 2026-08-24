@@ -539,6 +539,12 @@ fn hosted_delivery_gate_open(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim() == "true")
 }
 
+/// ADR-0171 D6 — same spelling as the hosted-delivery gate: lowercase `true`
+/// only. `True` / `1` / `yes` stay closed.
+fn doorbell_gate_open(value: Option<&str>) -> bool {
+    hosted_delivery_gate_open(value)
+}
+
 impl AgentPortConfig {
     pub fn from_env() -> Result<AgentPortConfig, ConfigError> {
         let defaults = AgentPortConfig::default();
@@ -1377,6 +1383,9 @@ pub struct WebhookSettings {
     /// HTTP; requiring the environment label too means the flag cannot be
     /// effective anywhere it should not be.
     pub allow_development_http: bool,
+    /// ADR-0171 D6. Exactly the lowercase word `true` opens the doorbell
+    /// register/unregister routes and the sender drain. Default off.
+    pub doorbell_enabled: bool,
 }
 
 impl Default for WebhookSettings {
@@ -1386,6 +1395,7 @@ impl Default for WebhookSettings {
         WebhookSettings {
             outbound_master_key: None,
             allow_development_http: false,
+            doorbell_enabled: false,
         }
     }
 }
@@ -1401,6 +1411,7 @@ impl std::fmt::Debug for WebhookSettings {
                 &self.outbound_master_key.is_some(),
             )
             .field("allow_development_http", &self.allow_development_http)
+            .field("doorbell_enabled", &self.doorbell_enabled)
             .finish_non_exhaustive()
     }
 }
@@ -1413,6 +1424,7 @@ impl WebhookSettings {
                 .trim()
                 .eq_ignore_ascii_case("local")
                 && env_or("MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP", "0").trim() == "1",
+            doorbell_enabled: doorbell_gate_open(env("MOMO_DOORBELL_ENABLED").as_deref()),
         }
     }
 
@@ -1768,6 +1780,28 @@ mod tests {
             "null",
         ] {
             assert!(!configured.origin_is_allowed(Some(value)), "{value}");
+        }
+    }
+
+    #[test]
+    fn doorbell_is_closed_by_default_and_opens_only_on_an_exact_true() {
+        assert!(
+            !WebhookSettings::default().doorbell_enabled,
+            "ADR-0171 D6: shipped default is closed"
+        );
+        assert!(doorbell_gate_open(Some("true")));
+        assert!(doorbell_gate_open(Some(" true\n")));
+        for closed in [
+            None,
+            Some(""),
+            Some("True"),
+            Some("TRUE"),
+            Some("1"),
+            Some("yes"),
+            Some("on"),
+            Some("false"),
+        ] {
+            assert!(!doorbell_gate_open(closed), "{closed:?}");
         }
     }
 

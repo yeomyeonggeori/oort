@@ -35,14 +35,23 @@
 //! `Cargo.toml`). The delivery transport lives in the sender binary.
 
 pub mod crypto;
+pub mod doorbell;
 pub mod installations;
 pub mod outbound;
 pub mod subscriptions;
 
 pub use crypto::{
-    delivery_signature, native_secret, outbound_secret, random_reference, sha256_hex, slack_token,
-    token_hash, workspace_id_from_slack_token, NATIVE_SECRET_PREFIX, OUTBOUND_SECRET_PREFIX,
-    SLACK_TOKEN_PREFIX,
+    delivery_signature, masked_doorbell_secret, native_secret, open_doorbell_secret,
+    outbound_secret, random_reference, seal_doorbell_secret, sha256_hex, slack_token, token_hash,
+    workspace_id_from_slack_token, DoorbellSealError, DOORBELL_SECRET_MAX_BYTES,
+    NATIVE_SECRET_PREFIX, OUTBOUND_SECRET_PREFIX, SLACK_TOKEN_PREFIX,
+};
+pub use doorbell::{
+    claim_doorbell_batch, coalesce_action, consume_for_fire_in_tx, doorbell_body,
+    list_doorbell_projections_in_tx, load_doorbell_projection_in_tx, mark_trailing_in_tx,
+    open_claimed_secret, record_doorbell_fire_in_tx, register_doorbell_in_tx,
+    unguarded_fire_every_new_event, unregister_doorbell_in_tx, CoalesceAction, DoorbellClaim,
+    DoorbellProjection, DoorbellRegisterError, DOORBELL_BODY, DOORBELL_KIND,
 };
 pub use installations::{
     active_channel_exists, create_installation, list_installations, load_installation_for_update,

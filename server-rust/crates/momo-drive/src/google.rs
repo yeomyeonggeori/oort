@@ -45,7 +45,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    nonempty, valid_drive_id, DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession,
+    nonempty, upload_content_length_header_value, valid_drive_id, DriveArchive, DriveContent,
+    DriveError, DriveFile, DriveUploadSession,
 };
 
 const DRIVE_API_BASE: &str = "https://www.googleapis.com/drive/v3";
@@ -349,13 +350,16 @@ impl DriveArchive for GoogleDriveArchive {
             &[("uploadType", "resumable"), ("supportsAllDrives", "true")],
         )?;
         let token = self.access_token().await?;
-        let response = self
+        let mut request = self
             .http
             .post(url)
             .bearer_auth(token)
             .timeout(API_TIMEOUT)
-            .header("X-Upload-Content-Type", mime)
-            .header("X-Upload-Content-Length", size_bytes.to_string())
+            .header("X-Upload-Content-Type", mime);
+        if let Some(length) = upload_content_length_header_value(size_bytes) {
+            request = request.header("X-Upload-Content-Length", length);
+        }
+        let response = request
             .json(&serde_json::json!({
                 "id": file_id,
                 "name": name,
