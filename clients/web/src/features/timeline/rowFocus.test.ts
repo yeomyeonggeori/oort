@@ -5,10 +5,24 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
   handoffRowFocusToPreferred,
+  isKeyboardRowFocus,
   nextRovingIndex,
   normalizeRow,
   useRowRovingFocus,
 } from "./rowFocus";
+
+function stubFocusVisible(el: HTMLElement, visible: boolean) {
+  const proto = HTMLElement.prototype.matches;
+  return vi.spyOn(el, "matches").mockImplementation(function (
+    this: HTMLElement,
+    selectors: string
+  ) {
+    if (selectors === ":focus-visible") {
+      return visible && document.activeElement === this;
+    }
+    return proto.call(this, selectors);
+  });
+}
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -197,7 +211,9 @@ describe("normalizeRow", () => {
     const primary = action("primary");
     row.append(avatar, primary);
     document.body.append(row);
+    stubFocusVisible(row, true);
     row.focus();
+    expect(isKeyboardRowFocus(row)).toBe(true);
 
     handoffRowFocusToPreferred(row);
 
@@ -205,6 +221,24 @@ describe("normalizeRow", () => {
     expect(row.hasAttribute("tabindex")).toBe(false);
     expect(avatar.tabIndex).toBe(-1);
     expect(primary.tabIndex).toBe(0);
+  });
+
+  it("비-focus-visible 포커스 진입 시 핸드오프 미발동", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    const primary = action("primary");
+    row.append(primary);
+    document.body.append(row);
+    normalizeRow(row);
+    stubFocusVisible(row, false);
+    row.focus();
+    expect(isKeyboardRowFocus(row)).toBe(false);
+
+    handoffRowFocusToPreferred(row);
+
+    expect(document.activeElement).toBe(row);
+    expect(row.tabIndex).toBe(0);
+    expect(primary.tabIndex).toBe(-1);
   });
 
   it("비구성원 포커스 중 normalize를 다시 돌려도 아바타를 0으로 남기지 않는다", () => {

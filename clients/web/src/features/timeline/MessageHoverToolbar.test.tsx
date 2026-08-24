@@ -28,6 +28,19 @@ import {
 } from "./hoverToolbarModel";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 
+function stubFocusVisible(el: HTMLElement, visible: boolean) {
+  const proto = HTMLElement.prototype.matches;
+  return vi.spyOn(el, "matches").mockImplementation(function (
+    this: HTMLElement,
+    selectors: string
+  ) {
+    if (selectors === ":focus-visible") {
+      return visible && document.activeElement === this;
+    }
+    return proto.call(this, selectors);
+  });
+}
+
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
@@ -385,6 +398,7 @@ describe("B-2 rest 구성원 0인 actionable 행 (#1743)", () => {
     expect(row.querySelectorAll("[data-row-action]")).toHaveLength(0);
     expect(rowStations(row)).toHaveLength(1);
 
+    stubFocusVisible(row, true);
     act(() => {
       row.focus();
     });
@@ -401,9 +415,29 @@ describe("B-2 rest 구성원 0인 actionable 행 (#1743)", () => {
     expect(row.querySelector('[data-testid="message-hover-toolbar"]')).not.toBeNull();
   });
 
+  it("비-focus-visible 포커스 진입 시 핸드오프 미발동", async () => {
+    const host = mountTimeline(null, null, false);
+    const row = host.querySelector('[data-seq="3"]') as HTMLElement;
+    await vi.waitFor(() => expect(row.tabIndex).toBe(0));
+
+    stubFocusVisible(row, false);
+    act(() => {
+      row.focus();
+    });
+
+    await vi.waitFor(() =>
+      expect(row.querySelector('[data-testid="message-hover-toolbar"]')).not.toBeNull()
+    );
+    expect(document.activeElement).toBe(row);
+    expect(
+      row.querySelector('[data-testid="message-actions-trigger"]')
+    ).not.toBe(document.activeElement);
+  });
+
   it("순회 중 normalize를 다시 돌려도 행당 정거장은 1이다", async () => {
     const host = mountTimeline(null, null, false);
     const row = host.querySelector('[data-seq="4"]') as HTMLElement;
+    stubFocusVisible(row, true);
     act(() => {
       row.focus();
     });

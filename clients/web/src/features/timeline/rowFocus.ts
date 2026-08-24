@@ -16,10 +16,12 @@ import { ROW_ACTIONS_SHORTCUT } from "@/app/keyboardShortcuts";
 // (#1743 M-2: 툴바 안 별도 링 금지).
 //
 // **actionable 포인터 행의 rest 정거장은 행 자신이다** (W-4, #1743 B-2/H-1).
-// 아바타를 승격하지 않는다. 행이 키보드 포커스를 받으면 툴바가 마운트되고,
-// 포커스는 preferred 항목(⋯)으로 프로그램 핸드오프된다. `normalizeRow`는 그
-// 핸드오프가 끝나기 전에 행의 tabindex를 떼지 않는다. 순회 중 재실행해도
-// 행당 정거장은 1이다.
+// 아바타를 승격하지 않는다. 행이 **키보드** 포커스(`:focus-visible`)를 받으면
+// 툴바가 마운트되고, 포커스는 preferred 항목(⋯)으로 핸드오프된다. 마우스
+// mousedown이 행을 포커스해도 핸드오프하지 않는다 — `focus({focusVisible})`
+// 강제는 클릭에 호박색 링을 그리고 본문 드래그 선택을 접는다 (#1743 B-4).
+// `normalizeRow`는 그 핸드오프가 끝나기 전에 행의 tabindex를 떼지 않는다.
+// 순회 중 재실행해도 행당 정거장은 1이다.
 //
 // **왜 ↑/↓가 아니라 ←/→인가.** 위아래는 이미 타임라인을 스크롤한다. 그것을
 // 가로채면 메시지를 읽으려는 사람에게서 스크롤을 빼앗는 셈이다.
@@ -226,22 +228,37 @@ export function normalizeRow(
 }
 
 /**
+ * 행이 키보드로 포커스를 들고 있는가. 마우스 mousedown 포커스는
+ * `:focus-visible`이 아니라서 여기서 거짓이다.
+ */
+export function isKeyboardRowFocus(root: HTMLElement): boolean {
+  if (document.activeElement !== root) return false;
+  try {
+    return root.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
+/**
  * 행이 키보드 포커스를 들고 있고 툴바가 마운트됐으면 ⋯로 옮긴다.
  * 포인터 hover 마운트는 activeElement가 행이 아니므로 포커스를 훔치지 않는다.
+ * 마우스 mousedown 포커스는 `:focus-visible`이 아니라서 아무것도 하지 않는다
+ * (#1743 B-4). 키보드 경로의 모달리티는 평범한 `focus()`로 승계된다.
  */
 export function handoffRowFocusToPreferred(root: HTMLElement): void {
-  if (document.activeElement !== root) return;
+  if (!isKeyboardRowFocus(root)) return;
   const items = rowActionItems(root);
   const primary = items.find(
     (el) => el.getAttribute("data-row-action") === "primary"
   );
   const target = primary ?? items[0];
   if (!target) return;
-  target.focus({ focusVisible: true } as FocusOptions);
+  target.focus();
   normalizeRow(root);
 }
 
-/** 행이 포커스를 들고 툴바가 떠 있으면 ⋯로 핸드오프한다. */
+/** 행이 키보드 포커스를 들고 툴바가 떠 있으면 ⋯로 핸드오프한다. */
 export function useHoverToolbarFocusHandoff(
   ref: RefObject<HTMLElement | null>,
   toolbarMounted: boolean,
@@ -250,6 +267,7 @@ export function useHoverToolbarFocusHandoff(
   useLayoutEffect(() => {
     const root = ref.current;
     if (!root || !toolbarMounted || !rowFocused) return;
+    if (!isKeyboardRowFocus(root)) return;
     handoffRowFocusToPreferred(root);
   }, [ref, toolbarMounted, rowFocused]);
 }
