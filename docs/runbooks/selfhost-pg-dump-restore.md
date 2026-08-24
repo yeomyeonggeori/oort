@@ -45,6 +45,8 @@ scripts/self_host_pg_dump.sh --output-dir /var/tmp/oort-backups
 
 스크립트는 실행 중인 compose `postgres` 서비스에 `pg_dump -Fc` 를 보내고, 경로·바이트·sha256·다운로드 안내만 출력한다. 비밀번호는 stdout에 없다.
 
+첨부 바이트는 Postgres 밖에 있다. 같은 백업 세트에 보관소 디렉터리(compose 볼륨 `DRIVE_VOLUME_NAME`, 기본 `oort-drive` → 컨테이너 `MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive`)를 동반 복사한다. 덤프만 복원하면 메시지 행은 남고 파일은 없다.
+
 덤프 구현은 `scripts/lib/pg_dump_custom.sh` 하나다. 리허설 게이트 `scripts/verify_backup_restore_rehearsal.sh` 도 같은 함수를 쓴다.
 
 ## 복원 (새 oort 스택)

@@ -382,19 +382,22 @@ mod tests {
     ///
     /// 078 is ADR-0166 T-1's `owner_claim`: first-owner bootstrap token hash
     /// plus TTL plus single-use `consumed_at`. The raw token never lands here.
+    ///
+    /// 079 is ADR-0170's `message_unfurl` sidecar (job + cache + tombstone +
+    /// workspace on/off). Derived records — `schema_v0.sql` is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_078() {
+    fn discovers_contiguous_migrations_001_to_079() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            78,
-            "expected 78 migrations under {}",
+            79,
+            "expected 79 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 78);
+        assert_eq!(migrations.last().unwrap().version, 79);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -5,6 +5,7 @@
 //! outbound signing master key. It holds no Centrifugo key and cannot publish to
 //! the durable rail — the two workers' capabilities are disjoint by construction.
 
+use momo_unfurl::{UnfurlConfig, UnfurlWorker};
 use momo_webhook_sender::{SenderConfig, WebhookSender};
 
 #[tokio::main]
@@ -29,7 +30,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
 
     let sender = WebhookSender::connect(config).await?;
-    sender.run(shutdown_signal()).await;
+    let unfurl_config = UnfurlConfig::from_env();
+    tracing::info!(
+        unfurl_enabled = unfurl_config.enabled,
+        "momo-webhook-sender unfurl drain"
+    );
+    if unfurl_config.enabled {
+        let unfurl = UnfurlWorker::connect(unfurl_config).await?;
+        tokio::select! {
+            _ = sender.run(shutdown_signal()) => {}
+            _ = unfurl.run(std::future::pending()) => {}
+        }
+    } else {
+        sender.run(shutdown_signal()).await;
+    }
     Ok(())
 }
 

@@ -1753,6 +1753,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/unfurl-settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the workspace link-unfurl fetch switch.
+         * @description Owner/admin. Missing row means enabled. Off skips fetch itself, not just client render (ADR-0170 D4). Instance-level `MOMO_UNFURL_ENABLED` (default 0) is a separate opt-in that must also be on before any GET leaves the process.
+         */
+        get: operations["getWorkspaceUnfurlSettings"];
+        /** Set the workspace link-unfurl fetch switch. */
+        put: operations["putWorkspaceUnfurlSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/messages/{messageId}/unfurls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List derived unfurl cards for a message.
+         * @description Channel members. Failed/blocked cards are present so a client can choose silence (ADR-0170 D5). Image bytes are not inlined — `imageUrl` is the authenticated proxy path.
+         */
+        get: operations["listMessageUnfurls"];
+        put?: never;
+        post?: never;
+        /**
+         * Remove unfurl cards from a message. Author only. Not regenerated.
+         * @description Deletes the derived rows and plants a tombstone so the worker will not recreate them. Does not modify `message` or consume `seq`. Publishes `message.unfurl.removed` reusing the message's seq.
+         */
+        delete: operations["removeMessageUnfurls"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/unfurls/{unfurlId}/image": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Stream the unfurl preview image through this origin.
+         * @description Channel members. The client must not fetch the remote host (CSP). Private/loopback/link-local destinations are refused by the same OutboundHTTPPolicy as webhook delivery. Only image/jpeg, png, gif, webp, avif are proxied.
+         */
+        get: operations["getUnfurlImage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/channels/{channelId}/reactions": {
         parameters: {
             query?: never;
@@ -4299,6 +4364,36 @@ export interface components {
         };
         PinList: {
             pins: components["schemas"]["PinnedMessage"][];
+        };
+        UnfurlSettings: {
+            enabled: boolean;
+            /** Format: int64 */
+            updatedAtMs?: number;
+        };
+        PutUnfurlSettingsRequest: {
+            enabled: boolean;
+        };
+        MessageUnfurl: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            messageId: string;
+            /** Format: uri */
+            url: string;
+            /** @enum {string} */
+            status: "pending" | "ok" | "failed" | "blocked";
+            title?: string;
+            description?: string;
+            domain?: string;
+            /** @description Authenticated proxy path on this origin. Never a remote host. */
+            imageUrl?: string;
+        };
+        MessageUnfurlList: {
+            unfurls: components["schemas"]["MessageUnfurl"][];
+        };
+        RemoveUnfurlsResponse: {
+            /** @description false when the cards were already gone (idempotent). */
+            removed: boolean;
         };
         CreateAttachmentUploadRequest: {
             name: string;
@@ -10354,6 +10449,219 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Not a channel member, or workspace scope mismatch. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getWorkspaceUnfurlSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current switch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnfurlSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner/admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    putWorkspaceUnfurlSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PutUnfurlSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated switch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnfurlSettings"];
+                };
+            };
+            /** @description Malformed body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Workspace owner/admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listMessageUnfurls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Cards in insertion order. Empty array when none. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MessageUnfurlList"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a channel member, or workspace scope mismatch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    removeMessageUnfurls: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                messageId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Removal is idempotent; removed=false when already gone. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemoveUnfurlsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Only the message author may remove its unfurls. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getUnfurlImage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                unfurlId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Image bytes. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "image/*": string;
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a channel member, or workspace scope mismatch. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Card or image not available (including SSRF-blocked). */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
