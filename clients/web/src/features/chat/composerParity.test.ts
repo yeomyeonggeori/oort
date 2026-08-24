@@ -11,6 +11,8 @@ const channel = source("./Composer.tsx");
 const thread = source("../timeline/ThreadComposer.tsx");
 const actions = source("../timeline/MessageActions.tsx");
 const picker = source("../emoji/EmojiPickerDialog.tsx");
+const panel = source("../emoji/EmojiPickerPanel.tsx");
+const row = source("../timeline/MessageRow.tsx");
 const tokens = source("../../design/tokens.css");
 
 function spacing(step: string): number {
@@ -40,6 +42,11 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(channel).toContain("emoji.openPicker(event.currentTarget)");
     expect(thread).toContain("emoji.openPicker(event.currentTarget)");
     expect(picker).toContain("onOpenAutoFocus");
+    expect(picker).toContain("autoFocusSearch={!isTouch}");
+    expect(picker).toContain("onEscapeKeyDown={onEscapeKeyDown}");
+    expect(panel).not.toContain("event.stopPropagation()");
+    expect(row).toContain("triggerRef={actionTriggerRef}");
+    expect(row).toContain("openReactionPicker(actionTriggerRef.current)");
   });
 
   it("채널과 스레드가 같은 멘션 목록·첨부 트레이를 쓴다", () => {
