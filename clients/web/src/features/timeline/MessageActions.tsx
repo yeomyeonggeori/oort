@@ -9,7 +9,7 @@ import {
   Smile,
   Trash2,
 } from "lucide-react";
-import { useState } from "react";
+import { useState, type Ref } from "react";
 import { cn } from "@/design/lib/cn";
 import {
   Dialog,
@@ -309,6 +309,7 @@ export function MessageActionColumn({
   callbacks,
   onOpenPicker,
   hidden,
+  triggerRef,
 }: {
   available: MessageActionAvailability;
   canCopy: boolean;
@@ -319,6 +320,8 @@ export function MessageActionColumn({
   onOpenPicker: () => void;
   /** While the row is being edited the editor owns it (R2 M3). */
   hidden?: boolean;
+  /** Surviving ⋯ trigger used as the reaction picker anchor (H-4). */
+  triggerRef?: Ref<HTMLButtonElement>;
 }) {
   const [open, setOpen] = useState(false);
   useEscapeLayer(open, () => setOpen(false));
@@ -337,6 +340,7 @@ export function MessageActionColumn({
           <DropdownMenuTrigger asChild>
             <button
               type="button"
+              ref={triggerRef}
               data-testid="message-actions-trigger"
               // The row's preferred keyboard entry point (see rowFocus.ts):
               // last in DOM order, first in the order someone looks for it.

@@ -186,3 +186,9 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 1c0cfaa92be3a84f5866d01cf83f46c509509787:clients/web/src/features/pwa/store.ts:generic-api-key:32
 #   scripts/verify_auth_hardening.sh:621  [generic-api-key]
 560a2978b8f44e36385f2ac11922f15449a85f56:scripts/verify_auth_hardening.sh:generic-api-key:621
+
+# ── 저장 키 이름 (1건, UX-EB #1742) ─────────────────────────────────
+# 이모지 빈도 store가 쓰는 localStorage **키 이름** 상수다(값이 아니라 이름).
+# 위 pwa/store.ts:32 항목과 같은 클래스 — generic-api-key 엔트로피 오탐.
+#   clients/web/src/features/emoji/frequencyStore.ts:14  [generic-api-key]
+856df558f3634d8a375184a61009a21eb0b4185f:clients/web/src/features/emoji/frequencyStore.ts:generic-api-key:14

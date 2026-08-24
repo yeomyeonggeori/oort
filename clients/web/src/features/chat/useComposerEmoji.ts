@@ -16,6 +16,7 @@ export function useComposerEmoji({
 }) {
   const [open, setOpen] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
+  const [anchor, setAnchor] = useState<HTMLElement | null>(null);
   const selection = useRef<ComposerSelection>({ start: 0, end: 0 });
 
   const openPicker = (button: HTMLButtonElement) => {
@@ -25,9 +26,10 @@ export function useComposerEmoji({
       start: input?.selectionStart ?? fallback,
       end: input?.selectionEnd ?? fallback,
     };
-    // 닫힐 때 Radix onCloseAutoFocus가 여기로 포커스를 돌린다. 이모지 버튼이
-    // 아니라 textarea를 목적지로 삼아야, 이모지를 넣거나 Esc로 닫은 직후 바로
-    // 이어 쓸 수 있다(gate-composer: 삽입 후 textarea가 focused여야 한다).
+    // Popover는 트리거 버튼에 붙는다. 닫힐 때 Radix onCloseAutoFocus는
+    // textarea로 돌아가야, 이모지를 넣거나 Esc로 닫은 직후 바로 이어 쓸 수
+    // 있다(gate-composer: 삽입 후 textarea가 focused여야 한다).
+    setAnchor(button);
     setOpener(input ?? button);
     setOpen(true);
   };
@@ -43,5 +45,5 @@ export function useComposerEmoji({
     });
   };
 
-  return { open, setOpen, opener, openPicker, pick };
+  return { open, setOpen, opener, anchor, openPicker, pick };
 }

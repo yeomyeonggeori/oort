@@ -504,13 +504,15 @@ export function MessageRow({
   // and its 저장/취소 belong to a focused editing context and are reached by Tab
   // like any form.
   const rowRef = useRef<HTMLElement | null>(null);
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
-    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 남아 있는 반응 추가 버튼 또는
-    // 메시지 행을 명시적으로 돌려줄 자리로 잡는다.
-    setPickerOpener(opener ?? rowRef.current);
+    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
+    // 칩의 + 는 그 버튼, ⋯/컨텍스트/시트는 행의 ⋯ 버튼. 행 전체에 앵커하면
+    // 트리거와 팝오버가 996px 벌어진다 (design-review #1746 H-4).
+    setPickerOpener(opener ?? actionTriggerRef.current ?? rowRef.current);
     setPickerOpen(true);
   };
   const hoverContextMenu = useHoverContextMenu();
@@ -531,7 +533,7 @@ export function MessageRow({
       copied={copied}
       pinned={Boolean(actions?.pinned)}
       callbacks={callbacks}
-      onOpenPicker={() => openReactionPicker()}
+      onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
     >
       <article
       ref={rowRef}
@@ -913,8 +915,9 @@ export function MessageRow({
           copied={copied}
           pinned={Boolean(actions?.pinned)}
           callbacks={callbacks}
-          onOpenPicker={() => openReactionPicker()}
+          onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
           hidden={editing}
+          triggerRef={actionTriggerRef}
         />
       )}
       {actions && actionable && (
@@ -928,13 +931,14 @@ export function MessageRow({
             copied={copied}
             pinned={Boolean(actions?.pinned)}
             callbacks={callbacks}
-            onOpenPicker={() => openReactionPicker()}
+            onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
           />
           <EmojiPickerDialog
             open={pickerOpen}
             onOpenChange={setPickerOpen}
             onPick={(emoji) => callbacks.onReact(emoji)}
             opener={pickerOpener}
+            anchor={pickerOpener}
             purpose="reaction"
             testId="reaction-picker"
           />

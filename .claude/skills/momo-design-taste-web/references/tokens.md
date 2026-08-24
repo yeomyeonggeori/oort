@@ -318,7 +318,8 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
 compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
-`w-pane` / `max-h-pane` 320px (thread panel, command list), `max-w-pane-md`
+`w-pane` / `max-h-pane` 320px (thread panel, command list), `w-pane-picker` 384px
+(emoji picker popover, #1742, inside the 340-440 band), `max-w-pane-md`
 512px (the overlay measure: dialog panel and ⌘K palette), `max-w-pane-lg` 640px
 (agent card measure, R-1 §4). The card measure is a token for the same reason as
 the others: let an agent card run the full timeline width and its right-aligned

@@ -809,7 +809,6 @@ export function Composer({
           variant="ghost"
           size="icon"
           className="tap-target shrink-0"
-          disabled={offline}
           aria-label="이모지 넣기"
           title="이모지 넣기"
           data-testid="composer-emoji-trigger"
@@ -987,6 +986,7 @@ export function Composer({
         onOpenChange={emoji.setOpen}
         onPick={emoji.pick}
         opener={emoji.opener}
+        anchor={emoji.anchor}
         purpose="insert"
         testId="composer-emoji-picker"
       />
