@@ -31,7 +31,8 @@ use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_drive::{
-    DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, StubDriveArchive,
+    DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, LocalDriveArchive,
+    StubDriveArchive,
 };
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
@@ -1185,4 +1186,75 @@ async fn an_unconfigured_archive_answers_503_from_a_mounted_route() {
             .await
             .expect("count");
     assert_eq!(unwritten, 0);
+}
+
+/// ADR-0169 — the local-volume archive is a third DriveArchive, not a fork of
+/// the routes. Google is never contacted; the in-memory stub is not used.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_local_archive_round_trips_session_put_complete_content() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = std::env::temp_dir().join(format!(
+        "oort-drive-local-pg-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp archive");
+    let dir_str = dir.to_string_lossy().into_owned();
+    let (base, archive) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(LocalDriveArchive::open(Some(dir_str.as_str()), &base).expect("local archive"))
+    })
+    .await;
+    assert!(archive.accepts_stub_uploads());
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+
+    const BYTES: &[u8] = b"local-archive-round-trip";
+    let id = upload_and_complete(
+        &http,
+        &base,
+        &alice,
+        fixture.workspace,
+        fixture.channel,
+        "note.txt",
+        "text/plain",
+        BYTES,
+    )
+    .await;
+
+    let content = http
+        .get(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{id}/content",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("content");
+    assert_eq!(content.status(), 200);
+    assert_eq!(content.bytes().await.expect("bytes").as_ref(), BYTES);
+
+    let row: String = sqlx::query_scalar("SELECT drive_file_id FROM attachment WHERE id = $1")
+        .bind(Uuid::parse_str(&id).expect("uuid"))
+        .fetch_one(&su)
+        .await
+        .expect("drive_file_id");
+    assert!(
+        row.starts_with("local-"),
+        "the stored archive id is the local opaque id, not a stub/google id: {row}"
+    );
+
+    let mut leaked = false;
+    if let Ok(entries) = std::fs::read_dir(dir.join("objects")) {
+        for entry in entries.flatten() {
+            if entry.file_name().to_string_lossy().contains("note") {
+                leaked = true;
+            }
+        }
+    }
+    assert!(!leaked, "user filename leaked onto the archive volume");
+    let _ = std::fs::remove_dir_all(&dir);
 }

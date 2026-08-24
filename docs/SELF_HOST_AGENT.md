@@ -377,8 +377,8 @@ oort를 이 컴퓨터(당신의 그록봇 VM)에 켜 두었습니다. 팀 공용
 6) 오늘 백업 (중요)
    그록 트라이얼이 잠기면 VM 자체에 못 들어갑니다(B7). 구독을 해지해도
    같습니다. 첫 메시지를 보내기 전에 /workspace/oort-backups 에 덤프를
-   만들어 두었습니다. Grok Bot 워크스페이스에서 그 폴더를 당신 기기로
-   복사해 두세요. 복원 절차:
+   만들어 두었습니다. 첨부 파일은 Postgres 밖 보관소 볼륨(기본 oort-drive)에
+   있습니다. 덤프와 그 볼륨을 같이 내려받으세요. 복원 절차:
    https://raw.githubusercontent.com/yeomyeonggeori/oort/track/engine/docs/runbooks/selfhost-pg-dump-restore.md
 
 7) 저를 팀에 넣으려면
@@ -398,7 +398,9 @@ scripts/self_host_pg_dump.sh --output-dir /workspace/oort-backups
 
 **게이트:** `/workspace/oort-backups` 아래 `.dump` 파일이 생기고, 스크립트
 stdout에 비밀번호가 없다. 사용자에게 그 폴더를 워크스페이스에서 내려받으라고
-§3.1-6에 적는다. 덤프 바이트를 채팅에 붙이지 않는다.
+§3.1-6에 적는다. 덤프 바이트를 채팅에 붙이지 않는다. 첨부 바이트는
+`DRIVE_VOLUME_NAME`(기본 `oort-drive`)에 있으므로 덤프만으로 복원되지
+않는다 — 런북의 보관소 동반 백업 한 줄을 같이 따른다.
 
 ### 3.3 에이전트 합류 (VM 내부 curl, static bearer)
 

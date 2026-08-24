@@ -1382,6 +1382,7 @@ dependencies = [
  "momo-push",
  "momo-settings",
  "momo-t3",
+ "momo-unfurl",
  "momo-webhook",
  "momo-wire",
  "reqwest",
@@ -1435,6 +1436,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "momo-unfurl"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "axum",
+ "bytes",
+ "chrono",
+ "futures",
+ "momo-db",
+ "momo-outbox",
+ "momo-webhook",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sqlx",
+ "thiserror 1.0.69",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "momo-webhook"
 version = "0.0.0"
 dependencies = [
@@ -1463,6 +1488,7 @@ dependencies = [
  "momo-db",
  "momo-outbox",
  "momo-server",
+ "momo-unfurl",
  "momo-webhook",
  "reqwest",
  "serde",

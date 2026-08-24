@@ -45,6 +45,8 @@ pub mod roster;
 pub mod search;
 pub mod shared;
 pub mod terminal_attach;
+/// ADR-0170 — link unfurl settings, message-level remove, image proxy.
+pub mod unfurl;
 pub mod usage;
 /// #1222 — 인바운드 웹훅 설치 관리 (ADR-0115). The public ingress half is not
 /// ported yet; see the module header.

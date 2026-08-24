@@ -1,5 +1,19 @@
 # oort 진행 현황
 
+## 링크 언퍼얼 서버 표면 (#1698, ADR-0170, 2026-08-23) — 1/2
+
+- 마이그레이션 079 `message_unfurl` 계열(job·cache·tombstone·workspace on/off) + RLS FORCE. `schema_v0.sql` 불변. 워커는 `momo-webhook-sender` 프로세스의 옵트인 드레인(`MOMO_UNFURL_ENABLED` 기본 0). URL≤3 추출(코드블록·이메일 제외) → OG/Twitter 파싱 → upsert → `message.unfurl` broadcast. `message.seq` 불변.
+- egress = 기존 OutboundHTTPPolicy(사설망/링크로컬/루프백, redirect≤3 매홉 재검사, HTML 512KB·이미지 5MB). 이미지 프록시 라우트. 워크스페이스 설정 REST + 메시지 단위 제거 REST(tombstone, 재생성 안 함). 클라 변경 0.
+- P9: 서버는 링크 대상만 읽는다 — SELF_HOST 1절 + crate 주석. 발신자 구분 없음.
+- 검증: `cargo test --workspace` green · `momo-unfurl` 단위 16/16(SSRF red proof 사설망 3계열+redirect 상한) · PG ignored 7/7 (`DATABASE_URL` 이 워크트리 `make up` PG:27682 — 메시지→레코드→outbox, off fetch 0, TTL 캐시, mock HTTP, 제거 REST). `cargo fmt --all --check` · clippy `-D warnings` (momo-unfurl/momo-server/momo-webhook-sender). docs: migration-numbers 79 · check_docs_commands 493 · compose-env 11. Docker 이미지 빌드(openapi-rust gate)는 성공; 그 게이트의 login 표본은 claim fixture 실패로 이 티켓과 무관하게 빨개졌다.
+
+## 셀프호스트 로컬 파일 보관소 (#1696, ADR-0169, 2026-08-23)
+
+- `momo-drive`에 `LocalDriveArchive`(`MOMO_DRIVE_ARCHIVE_BACKEND=local` + `MOMO_DRIVE_LOCAL_DIR`). DriveArchive 계약·100MB 상한·in-process PUT(`/__momo_stub/drive/uploads/{token}`)·DriveError 표 재사용. 저장 키는 불투명 id만(파일명은 메타). `../`·절대경로·심링크 이탈 거부. deployed env 허용. 디렉터리 미존재=생성, 쓰기불가=부팅 거부.
+- 생성기 기본값 local+`oort-drive` 볼륨. `local.override.yml` 마운트, `Caddyfile.local`이 `/__momo_stub/*`를 api로 프록시. 기존 env는 키 없을 때만 가산. google/stub 비접촉. schema 비접촉. 클라 변경 0.
+- 문서: SELF_HOST.md 보관소 절, SELF_HOST_AGENT.md 동기, pg_dump 런북 동반 백업 1줄.
+- 검증: crate 단위 25/25(이탈 3계열·왕복·413) · `momo-server --lib` 287/287 · attachment_conformance_pg ignored 8/8(local 왕복 + 미구성 503, 이 워크트리 `make up` PG:22602) · `test_self_host_env_modes.sh` PASS · `check_docs_commands.py` 493 facts. google.rs/stub.rs 비접촉.
+
 ## 웹 링크 언퍼얼 렌더·온오프 표면 (#1718, 2026-08-24)
 
 - 공유 코어에 언퍼얼 4상태와 REST↔실시간 병합 규칙을 두고, 웹 타임라인에 서버 프록시 이미지만 쓰는 카드와 발신자 전용 제거 확인(재생성 없음)을 연결했다. failed·blocked·empty와 서버 off는 자리표시자 없이 조용한 부재다.

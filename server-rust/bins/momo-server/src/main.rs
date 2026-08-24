@@ -64,7 +64,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // whether a shared drive was named — never the key path's contents and
         // never a token.
         drive_backend = %config.drive.backend,
-        drive_configured = config.drive.shared_drive_id.is_some(),
+        drive_configured = config.drive.shared_drive_id.is_some()
+            || config.drive.backend == momo_drive::LOCAL_BACKEND,
         "momo-server starting"
     );
     // MOMO-605: a refused entry is silent otherwise, and silence here reads as
@@ -131,6 +132,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "MOMO_DRIVE_ARCHIVE_BACKEND=stub — attachments are held in memory and are \
              LOST on restart. Refused outright in a deployed environment; this instance \
              is not one."
+        );
+    }
+    if config.drive.backend == momo_drive::LOCAL_BACKEND {
+        tracing::info!(
+            "MOMO_DRIVE_ARCHIVE_BACKEND=local — attachments are stored under \
+             MOMO_DRIVE_LOCAL_DIR and survive a restart"
         );
     }
 
