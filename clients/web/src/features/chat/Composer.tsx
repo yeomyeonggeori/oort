@@ -905,7 +905,9 @@ export function Composer({
             }
             aria-describedby={showComposerHint ? "composer-hint" : undefined}
             data-testid="composer-input"
-            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted"
+            // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
+            // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
+            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed outline-none placeholder:text-ink-muted focus-visible:outline-none"
           />
           <div
             className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"

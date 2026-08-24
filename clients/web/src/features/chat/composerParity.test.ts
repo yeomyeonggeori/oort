@@ -136,7 +136,14 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(threadInputClass).toBeDefined();
     expect(channelInputClass).not.toContain("focus-visible:focus-ring");
     expect(threadInputClass).not.toContain("focus-visible:focus-ring");
+    expect(channelInputClass).toContain("outline-none");
+    expect(channelInputClass).toContain("focus-visible:outline-none");
+    expect(threadInputClass).toContain("outline-none");
+    expect(threadInputClass).toContain("focus-visible:outline-none");
     expect(thread).toContain('sending && "opacity-50"');
+    expect(thread).toContain(
+      'sending ? "disabled:opacity-100" : "disabled:opacity-50"'
+    );
   });
 
   it("[@] 포인터 삽입은 키 입력 전용 작성 중 신호를 내보내지 않고 용어를 맞춘다", () => {

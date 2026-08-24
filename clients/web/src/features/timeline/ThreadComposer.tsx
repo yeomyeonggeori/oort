@@ -286,7 +286,9 @@ export function ThreadComposer({
                 event.preventDefault();
                 submit();
               }}
-              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink"
+              // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
+              // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
+              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink outline-none focus-visible:outline-none"
             />
             <div
               className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
@@ -335,7 +337,12 @@ export function ThreadComposer({
                 aria-label="답글 보내기"
                 title={attachBlockCopy ?? "답글 보내기"}
                 data-testid="thread-composer-send"
-                className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-100"
+                className={cn(
+                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill",
+                  // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은
+                  // 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
+                  sending ? "disabled:opacity-100" : "disabled:opacity-50"
+                )}
               >
                 <SendHorizontal className="size-4" aria-hidden="true" />
               </button>

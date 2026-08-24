@@ -107,6 +107,9 @@ const PUBLISH_DELAY_MS = 60;
 // 서버 값 그대로 (`momo-ephemeral::signal.rs`).
 const REPUBLISH_MS = 3_000;
 const AGGREGATE_THRESHOLD = 3;
+// 공유 슬롯은 `text-meta` 한 줄이다. 옛 26px 예약 행을 없앤 뒤의 구체 높이이며,
+// 0보다 크기만 하면 된다는 단정은 높이 축을 사실상 지워 버린다 (R2 N-8).
+const ACTION_META_SLOT_HEIGHT_PX = 18;
 /** 이 게이트가 쓰는 짧은 TTL. 실제 6초를 기다리면 게이트가 분 단위로 길어진다. */
 const GATE_TTL_MS = 1_200;
 /**
@@ -635,12 +638,12 @@ async function exercise(browser) {
   if (
     !proveRedShift &&
     (beforeMeta.count !== 1 ||
-      beforeMeta.height <= 0 ||
+      beforeMeta.height !== ACTION_META_SLOT_HEIGHT_PX ||
       beforeMeta.kind !== "composer-hint" ||
       beforeDescribedBy !== "composer-hint")
   ) {
     throw new Error(
-      `기본 액션 슬롯은 힌트 하나여야 한다: ${JSON.stringify({
+      `기본 액션 슬롯은 힌트 하나·${ACTION_META_SLOT_HEIGHT_PX}px이어야 한다: ${JSON.stringify({
         ...beforeMeta,
         describedBy: beforeDescribedBy,
       })}`
@@ -667,7 +670,8 @@ async function exercise(browser) {
   );
   if (
     duringMeta.count !== 1 ||
-    (!proveRedShift && duringMeta.height !== beforeMeta.height) ||
+    (!proveRedShift &&
+      duringMeta.height !== ACTION_META_SLOT_HEIGHT_PX) ||
     duringMeta.kind !== "composer-typing" ||
     duringDescribedBy !== null ||
     (await page.getByTestId("composer-hint").count()) !== 0
@@ -813,10 +817,39 @@ async function exercise(browser) {
       content: '[data-testid="composer-typing-label"]{display:none!important}',
     });
   }
-  await page.getByTestId("composer-meta-empty").waitFor({
-    state: "visible",
+  const emptyMeta = page.getByTestId("composer-meta-empty");
+  await emptyMeta.waitFor({
+    state: "attached",
     timeout: 5_000,
   });
+  const emptyMetaState = await emptyMeta.evaluate((node) => {
+    const style = getComputedStyle(node);
+    const rect = node.getBoundingClientRect();
+    return {
+      ariaHidden: node.getAttribute("aria-hidden"),
+      hasSlot: node.hasAttribute("data-composer-meta-slot"),
+      text: node.textContent ?? "",
+      display: style.display,
+      visibility: style.visibility,
+      flexGrow: style.flexGrow,
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+  });
+  if (
+    emptyMetaState.ariaHidden !== "true" ||
+    !emptyMetaState.hasSlot ||
+    emptyMetaState.text !== "" ||
+    emptyMetaState.display === "none" ||
+    emptyMetaState.visibility === "hidden" ||
+    emptyMetaState.flexGrow !== "1" ||
+    emptyMetaState.width <= 0 ||
+    emptyMetaState.height !== 0
+  ) {
+    throw new Error(
+      `폰 기본판의 빈 액션 슬롯이 새 설계와 다르다: ${JSON.stringify(emptyMetaState)}`
+    );
+  }
   if ((await page.getByTestId("composer-hint").count()) !== 0) {
     throw new Error("폰 기본판에 wide-only Enter 힌트가 남았다");
   }

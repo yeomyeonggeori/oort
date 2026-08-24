@@ -123,7 +123,7 @@ import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
  * 이 두 번째 줄로 넘어가는 것을 막는다(`whitespace-nowrap`은 조각 쪽에 있다).
  */
 const LINE_CLASS =
-  "flex min-w-0 flex-1 items-baseline overflow-hidden text-meta";
+  "flex min-w-0 flex-1 items-baseline justify-end overflow-hidden text-meta";
 
 export function TypingLine({
   memberIds,

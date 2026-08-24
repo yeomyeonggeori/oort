@@ -56,7 +56,7 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
       '"min-w-0 flex-1 truncate text-right text-meta text-ink-muted"'
     );
     expect(typingLine).toContain(
-      '"flex min-w-0 flex-1 items-baseline overflow-hidden text-meta"'
+      '"flex min-w-0 flex-1 items-baseline justify-end overflow-hidden text-meta"'
     );
     expect(composer).toContain(
       'data-composer-meta-slot={sharedRow ? "" : undefined}'
@@ -64,6 +64,7 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
     expect(typingLine.match(/data-composer-meta-slot=""/g)).toHaveLength(2);
     expect(typingLine).not.toContain("composer-typing-reserved");
     expect(typingLine).not.toContain('{"\\u200b"}');
+    expect(typingLine).toContain('aria-hidden="true"');
     expect(composer).toMatch(
       /data-testid="composer-actions"[\s\S]*?<ComposerHint[\s\S]*?<TypingLine/
     );

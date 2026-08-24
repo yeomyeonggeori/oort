@@ -2152,6 +2152,7 @@ async function assertComposerTabOrder(page, where) {
         testId: active?.getAttribute("data-testid") ?? null,
         focusVisible: active?.matches(":focus-visible") ?? false,
         activeOutlineWidth: activeStyle?.outlineWidth ?? null,
+        activeOutlineStyle: activeStyle?.outlineStyle ?? null,
         outlineWidth: ringStyle?.outlineWidth ?? null,
         outlineStyle: ringStyle?.outlineStyle ?? null,
       };
@@ -2162,7 +2163,7 @@ async function assertComposerTabOrder(page, where) {
       !focus.focusVisible ||
       focus.outlineWidth !== "2px" ||
       focus.outlineStyle !== "solid" ||
-      (index === 0 && focus.activeOutlineWidth === "2px")
+      (index === 0 && focus.activeOutlineStyle !== "none")
     ) {
       throw new Error(
         `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
@@ -2217,6 +2218,7 @@ async function assertMentionTrigger(page, where, ids) {
       active: document.activeElement?.getAttribute("data-testid") ?? null,
       focusVisible: input?.matches(":focus-visible") ?? null,
       inputOutlineWidth: input ? getComputedStyle(input).outlineWidth : null,
+      inputOutlineStyle: input ? getComputedStyle(input).outlineStyle : null,
       frameOutlineWidth: frame
         ? getComputedStyle(frame).outlineWidth
         : null,
@@ -2237,7 +2239,7 @@ async function assertMentionTrigger(page, where, ids) {
     proof.value !== "배포 @ 확인" ||
     proof.active !== ids.input ||
     proof.focusVisible !== true ||
-    proof.inputOutlineWidth === "2px" ||
+    proof.inputOutlineStyle !== "none" ||
     proof.frameOutlineWidth !== "2px" ||
     proof.frameOutlineStyle !== "solid" ||
     proof.options < 1 ||
