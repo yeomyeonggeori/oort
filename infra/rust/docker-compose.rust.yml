@@ -212,6 +212,8 @@ services:
       # policies production uses (invariant #6).
       DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
+      # ADR-0171: exact lowercase `true` only. Unset = doorbell register routes 404.
+      MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
@@ -393,6 +395,8 @@ services:
       WEBHOOK_DISABLE_AFTER_5XX: ${WEBHOOK_DISABLE_AFTER_5XX:-5}
       # ADR-0170: opt-in. Unset/0 means the unfurl drain is idle (no egress).
       MOMO_UNFURL_ENABLED: ${MOMO_UNFURL_ENABLED:-0}
+      # ADR-0171: exact lowercase `true` only. Unset/anything else = no doorbell drain.
+      MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

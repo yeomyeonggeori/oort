@@ -318,6 +318,11 @@ pub async fn load_attachment_in_tx(
 /// Move a pending row to `complete` or `failed`, recording what Drive reported
 /// against what was declared.
 ///
+/// On `complete`, `size_bytes` is overwritten with the archive's measured
+/// length — the create-time declaration is a hint, not the row's source of
+/// truth. A `failed` row keeps the declaration so the audit trail still names
+/// what was promised.
+///
 /// **The `failed` write is not a rollback.** Swift commits the transition and
 /// *then* answers 409 (`AttachmentRoutes.swift:206-208`), so a mismatch leaves a
 /// durable, audited record of the divergence rather than a row that stays
@@ -337,11 +342,20 @@ pub async fn settle_upload_in_tx(
     actual: (&str, i64),
 ) -> Result<(), DbError> {
     let status = if matched { "complete" } else { "failed" };
-    sqlx::query("UPDATE attachment SET status = $2 WHERE id = $1")
-        .bind(attachment_id)
-        .bind(status)
-        .execute(&mut *conn)
-        .await?;
+    if matched {
+        sqlx::query("UPDATE attachment SET status = $2, size_bytes = $3 WHERE id = $1")
+            .bind(attachment_id)
+            .bind(status)
+            .bind(actual.1)
+            .execute(&mut *conn)
+            .await?;
+    } else {
+        sqlx::query("UPDATE attachment SET status = $2 WHERE id = $1")
+            .bind(attachment_id)
+            .bind(status)
+            .execute(&mut *conn)
+            .await?;
+    }
 
     let action = if matched {
         "attachment.upload_completed"

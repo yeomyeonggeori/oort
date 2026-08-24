@@ -21,8 +21,8 @@ use tokio::sync::Mutex;
 use uuid::Uuid;
 
 use crate::{
-    nonempty, valid_drive_id, DriveArchive, DriveContent, DriveError, DriveFile,
-    DriveUploadSession, MAX_ATTACHMENT_BYTES,
+    nonempty, uploaded_size_refusal, valid_drive_id, DriveArchive, DriveContent, DriveError,
+    DriveFile, DriveUploadSession, MAX_ATTACHMENT_BYTES,
 };
 
 const OBJECTS_DIR: &str = "objects";
@@ -237,11 +237,17 @@ impl DriveArchive for LocalDriveArchive {
         if !object.is_file() {
             return Err(DriveError::FileNotFound);
         }
+        let measured = fs::metadata(&object)
+            .map_err(|_| DriveError::FileNotFound)?
+            .len();
+        if measured > i64::MAX as u64 {
+            return Err(DriveError::ContentTooLarge);
+        }
         Ok(DriveFile {
             drive_file_id: file_id.to_string(),
             name: meta.name,
             mime: meta.mime,
-            size_bytes: meta.size_bytes,
+            size_bytes: measured as i64,
         })
     }
 
@@ -272,9 +278,6 @@ impl DriveArchive for LocalDriveArchive {
         bytes: Vec<u8>,
     ) -> Result<(), DriveError> {
         let _guard = self.lock.lock().await;
-        if bytes.len() as i64 > MAX_ATTACHMENT_BYTES {
-            return Err(DriveError::ContentTooLarge);
-        }
         let session = session_path(&self.root, token)?;
         let raw = fs::read(&session).map_err(|_| DriveError::FileNotFound)?;
         let pending: serde_json::Value =
@@ -295,10 +298,9 @@ impl DriveArchive for LocalDriveArchive {
             .get("name")
             .and_then(|v| v.as_str())
             .ok_or(DriveError::FileNotFound)?;
-        if bytes.len() as i64 != declared_size {
-            return Err(DriveError::InvalidArguments(
-                "uploaded size does not match the session".into(),
-            ));
+        let measured = bytes.len() as i64;
+        if let Some(error) = uploaded_size_refusal(declared_size, measured) {
+            return Err(error);
         }
         if let Some(mime) = mime {
             if !mime.is_empty() && mime != declared_mime {
@@ -313,7 +315,7 @@ impl DriveArchive for LocalDriveArchive {
         let stored = StoredMeta {
             name: name.to_string(),
             mime: declared_mime.to_string(),
-            size_bytes: declared_size,
+            size_bytes: measured,
         };
         let meta_bytes = serde_json::to_vec(&stored).map_err(|_| DriveError::UpstreamFailure)?;
         atomic_write(&meta, &meta_bytes)?;
@@ -554,6 +556,26 @@ mod tests {
                 .expect_err("over the ceiling"),
             DriveError::ContentTooLarge
         );
+    }
+
+    #[tokio::test]
+    async fn a_zero_declaration_records_the_received_length() {
+        let (dir, _guard) = temp_root();
+        let archive = LocalDriveArchive::open(dir.to_str(), "http://127.0.0.1:9").expect("open");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 0)
+            .await
+            .expect("session");
+        let token = token_from(&session);
+        archive
+            .accept_stub_upload(&token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("unknown declaration accepts measured bytes");
+        let metadata = archive
+            .file_metadata(&session.drive_file_id)
+            .await
+            .expect("metadata");
+        assert_eq!(metadata.size_bytes, 5);
     }
 
     #[tokio::test]

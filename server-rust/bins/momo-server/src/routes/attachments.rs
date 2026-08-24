@@ -45,7 +45,10 @@ use axum::http::{header, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
-use momo_drive::{DriveError, MAX_ATTACHMENT_BYTES};
+use momo_drive::{
+    received_size_agrees_with_declaration, received_size_within_ceiling, DriveError,
+    MAX_ATTACHMENT_BYTES,
+};
 use momo_messaging::{
     create_pending_upload_in_tx, is_attachment_channel_member, load_attachment_in_tx,
     settle_upload_in_tx, validate_attachment_mime, validate_attachment_name, Attachment,
@@ -183,13 +186,15 @@ pub async fn create_upload(
 /// `POST /v1/workspaces/{ws}/channels/{ch}/attachments/{id}/complete`
 ///
 /// Verifies what Drive actually holds against what the uploader declared, then
-/// transitions the row.
+/// transitions the row. The measured archive size is what the row (and the
+/// response) keep; a declared `0` is unknown and is not a mismatch.
 ///
 /// **A mismatch commits `failed` and *then* answers 409.** That order is Swift's
 /// (`AttachmentRoutes.swift:162-208`) and it is the honest one: the divergence is
 /// a fact worth recording, and a row left `pending` forever would be reaped as an
 /// abandoned upload rather than read as a rejected one. The client still gets its
-/// refusal — it just gets it after the record exists.
+/// refusal — it just gets it after the record exists. An over-ceiling measured
+/// size is the same durable `failed` write, then 413.
 ///
 /// Idempotent: completing an already-complete attachment returns it unchanged.
 pub async fn complete(
@@ -241,10 +246,13 @@ pub async fn complete(
         .file_metadata(&drive_file_id)
         .await
         .map_err(drive_error)?;
-    // All three must agree. The file id is checked too, because a client that
-    // could make `complete` verify a *different* file would be able to swap the
-    // bytes behind an already-declared name and size.
-    let matched = metadata.size_bytes == pending.size_bytes
+    // Mime and file id must agree. Size agrees when the declaration is known;
+    // `0` is unknown and is not a mismatch. The 100 MB ceiling is on the
+    // archive's measured length, so a shrunk declaration cannot complete an
+    // over-ceiling object.
+    let over_ceiling = !received_size_within_ceiling(metadata.size_bytes);
+    let matched = !over_ceiling
+        && received_size_agrees_with_declaration(pending.size_bytes, metadata.size_bytes)
         && metadata.mime == pending.mime
         && metadata.drive_file_id == drive_file_id;
 
@@ -263,7 +271,7 @@ pub async fn complete(
                 let locked =
                     load_attachment_in_tx(conn, attachment_id, channel_id, Some(member_id), true)
                         .await?;
-                let Some(locked) = locked else {
+                let Some(mut locked) = locked else {
                     return Ok(Err(ApiError::not_found("attachment not found")));
                 };
                 if locked.status == "complete" {
@@ -291,6 +299,10 @@ pub async fn complete(
                     (&actual_mime, actual_size),
                 )
                 .await?;
+                if matched {
+                    locked.size_bytes = actual_size;
+                    locked.status = "complete".to_string();
+                }
                 Ok(Ok(locked))
             })
         })
@@ -299,6 +311,9 @@ pub async fn complete(
 
     // The transition is committed; only now is the caller told whether it was
     // the one they wanted.
+    if over_ceiling {
+        return Err(drive_error(DriveError::ContentTooLarge));
+    }
     if !matched {
         return Err(ApiError::new(
             StatusCode::CONFLICT,
@@ -382,7 +397,8 @@ pub async fn content(
 /// because its bytes survive a restart. Public by construction: it stands in for
 /// Google's resumable session URL, which carries no bearer either — its
 /// authorization is the unguessable token in the path, and the token names one
-/// pre-declared file of one pre-declared length.
+/// pre-declared file. A declared length of 0 is unknown; the received length is
+/// measured and the 100 MB ceiling is enforced on those bytes.
 pub async fn stub_upload(
     State(state): State<AppState>,
     Path(token): Path<String>,

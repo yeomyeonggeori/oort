@@ -487,6 +487,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/doorbell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register or replace a hosted-connection doorbell (ADR-0171).
+         * @description Tenant-scoped. Stores `doorbellUrl` plus an AEAD-sealed Bearer. Responses never echo the secret (mask only). Closed unless `MOMO_DOORBELL_ENABLED` is the exact lowercase word `true` — otherwise this path answers empty 404, the same as an unknown route.
+         */
+        put: operations["registerHostedAgentDoorbell"];
+        post?: never;
+        /** Remove a hosted-connection doorbell registration (ADR-0171). */
+        delete: operations["unregisterHostedAgentDoorbell"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
         parameters: {
             query?: never;
@@ -1622,7 +1643,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Verify Drive size and mime, then mark the uploader's attachment complete. */
+        /** Verify Drive mime and declared size, record the measured size, then mark complete. */
         post: operations["completeAttachmentUpload"];
         delete?: never;
         options?: never;
@@ -3066,6 +3087,34 @@ export interface components {
             createdAtMs: number;
             /** Format: int64 */
             updatedAtMs: number;
+            /**
+             * Format: uri
+             * @description Present only when a doorbell is registered and MOMO_DOORBELL_ENABLED=true.
+             */
+            doorbellUrl?: string;
+            /** @description Non-secret display tail. Never the Bearer. */
+            doorbellSecretMasked?: string;
+            /** Format: int64 */
+            doorbellLastFiredAtMs?: number;
+            doorbellLastStatus?: string;
+        };
+        RegisterHostedDoorbellRequest: {
+            /** @description HTTPS doorbell URL. Validated by OutboundHTTPPolicy. */
+            url: string;
+            /** @description Operator Bearer. AEAD-sealed; never returned. */
+            secret: string;
+        };
+        HostedDoorbellResponse: {
+            /** Format: uuid */
+            connectionId: string;
+            url: string;
+            /** @description Masked display. Never the pasted Bearer. */
+            secretMasked: string;
+            /** Format: int64 */
+            registeredAtMs: number;
+            /** Format: int64 */
+            lastFiredAtMs?: number;
+            lastStatus?: string;
         };
         CreateHostedAgentConnectionRequest: {
             displayName: string;
@@ -4398,7 +4447,10 @@ export interface components {
         CreateAttachmentUploadRequest: {
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Client-declared length in bytes. `0` means the client does not know the length; the server does not treat that as a mismatch and records the measured archive size at complete. The 100 MB ceiling is enforced on received bytes, not on this hint.
+             */
             size: number;
         };
         AttachmentUploadResponse: {
@@ -4423,7 +4475,10 @@ export interface components {
             messageId?: string;
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Attachment length in bytes. After complete this is the measured archive size, not the create-time declaration.
+             */
             size: number;
             /** @enum {string} */
             status: "pending" | "complete" | "failed";
@@ -4527,7 +4582,10 @@ export interface components {
             id: string;
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Measured attachment length in bytes after complete. A create-time declaration of `0` is unknown and is replaced by this value.
+             */
             sizeBytes: number;
         };
         ThreadRollup: {
@@ -6597,6 +6655,116 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+        };
+    };
+    registerHostedAgentDoorbell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterHostedDoorbellRequest"];
+            };
+        };
+        responses: {
+            /** @description Doorbell registered. Secret is write-only. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedDoorbellResponse"];
+                };
+            };
+            /** @description Invalid URL (HTTPS/OutboundHTTPPolicy) or empty secret */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Gate closed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is not active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregisterHostedAgentDoorbell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Doorbell unregistered. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedDoorbellResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Gate closed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -9939,7 +10107,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Drive metadata verified; attachment is complete. */
+            /** @description Drive metadata verified; attachment is complete with the measured size. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9969,6 +10137,15 @@ export interface operations {
             };
             /** @description Size/mime mismatch or invalid lifecycle state. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Measured archive size exceeds 100 MB. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

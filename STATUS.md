@@ -1,5 +1,24 @@
 # oort 진행 현황
 
+## 그록봇 도어벨 플레이북 (#1736, ADR-0171, 2026-08-24)
+
+- `docs/SELF_HOST_AGENT.md` §4: webhook 루틴 생성 문안(실측 문안 승계), WD-1 REST 등록·마스킹·해제 curl, 프로덕션/15분 스윕 지시문(ADR-0132 발화 규약), usage·베타·Q-STRUCT 고지. UI 등록은 #1735 후속.
+- 검증: `scripts/check_docs_commands.py` 493 facts · `scripts/tests/test_docs_commands_gate.sh` 26 cases. `runtime-unverified`(그록봇 루틴 E2E·멘션→도어벨→응답) — 성재 자연어 릴레이.
+
+## hosted 커넥션 도어벨 서버 (#1734, ADR-0171, 2026-08-24)
+
+- 마이그레이션 080 `hosted_agent_doorbell`(AEAD 봉인 시크릿·RLS FORCE). `schema_v0.sql` 불변. **outbox 생산자 트리거 0.**
+- tenant REST `PUT/DELETE …/hosted-agent-connections/{id}/doorbell`. 시크릿은 마스킹만. URL은 OutboundHTTPPolicy(https·사설망 거부). 등록/해제 audit 각 1행. disconnect/reconcile 같은 tx에서 소거.
+- `momo-webhook-sender` 가 hosted inbox append 파생을 폴링해 커넥션당 leading-edge + 60s trailing 코얼레싱. 상수 페이로드 `{"kind":"oort.doorbell.v1"}` + `Authorization: Bearer`. 타임아웃 10s, retry ≤2.
+- 게이트 `MOMO_DOORBELL_ENABLED` 소문자 `true`만 개방, 기본 off. off면 라우트 빈 404 + drain 무동작.
+- 검증: `cargo fmt --all --check` · clippy `-D warnings` · `momo-webhook` 28/28 · `momo-webhook-sender --lib` 8/8 · `momo-server --lib` doorbell gate 1/1. ignored PG `doorbell_admin_conformance_pg` 4/4 · `doorbell_dispatch_conformance_pg` 4/4 (`DATABASE_URL` 이 워크트리 `make up` PG:23202). openapi 동기화 + web-legacy 생성 타입. migration-numbers 80. `check_docs_commands.py` 493.
+
+## 첨부 실측 크기 (#1716, 2026-08-24)
+
+- complete가 아카이브 실수신 바이트를 `attachment.size_bytes` 정본으로 기록·응답한다. 선언 `size: 0`은 미지(create 201 유지, PUT mismatch 철회, 대조 생략). 100MB 상한은 실측 강제(선언 축소 우회 413 red proof). 클라 변경 0.
+- 선행 실측: 고치기 전 stub/local은 create `size: 0`을 받고 nonempty PUT을 session mismatch(400)로 죽여 complete에 도달하지 않았다. Google은 `X-Upload-Content-Length: 0`이라 세션이 0바이트로 캡됐을 것. 스키마 불변(기존 `size_bytes`).
+- 검증: `cargo fmt --all --check` · clippy `-D warnings` · `cargo test --workspace` green. `momo-drive` 30/30(0-선언 실측·선언 축소 상한 red proof). `momo-server --lib` 287/287. `attachment_conformance_pg` ignored 12/12(0-선언 실측·local 실측·상한 413·알려진 선언 mismatch 409, 이 워크트리 `make up` PG:21852). openapi yaml parse · `check_docs_commands.py` 493 · migration-numbers 79.
+
 ## 링크 언퍼얼 서버 표면 (#1698, ADR-0170, 2026-08-23) — 1/2
 
 - 마이그레이션 079 `message_unfurl` 계열(job·cache·tombstone·workspace on/off) + RLS FORCE. `schema_v0.sql` 불변. 워커는 `momo-webhook-sender` 프로세스의 옵트인 드레인(`MOMO_UNFURL_ENABLED` 기본 0). URL≤3 추출(코드블록·이메일 제외) → OG/Twitter 파싱 → upsert → `message.unfurl` broadcast. `message.seq` 불변.

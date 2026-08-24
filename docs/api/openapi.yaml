@@ -895,6 +895,54 @@ paths:
         "404": {description: Cleanup artifact not found on this connection, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: Connection is not awaiting cleanup, or the artifact is already resolved, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
 
+  /v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/doorbell:
+    put:
+      tags: [agents]
+      operationId: registerHostedAgentDoorbell
+      summary: Register or replace a hosted-connection doorbell (ADR-0171).
+      description: >
+        Tenant-scoped. Stores `doorbellUrl` plus an AEAD-sealed Bearer.
+        Responses never echo the secret (mask only). Closed unless
+        `MOMO_DOORBELL_ENABLED` is the exact lowercase word `true` — otherwise
+        this path answers empty 404, the same as an unknown route.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: "#/components/schemas/RegisterHostedDoorbellRequest"}}}
+      responses:
+        "200":
+          description: Doorbell registered. Secret is write-only.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDoorbellResponse"}}}
+        "400": {description: Invalid URL (HTTPS/OutboundHTTPPolicy) or empty secret, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Gate closed, connection missing, or unknown path, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "409": {description: Connection is not active, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+    delete:
+      tags: [agents]
+      operationId: unregisterHostedAgentDoorbell
+      summary: Remove a hosted-connection doorbell registration (ADR-0171).
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: connectionId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "200":
+          description: Doorbell unregistered.
+          headers:
+            Cache-Control: {required: true, schema: {type: string, enum: [no-store]}}
+            Pragma: {required: true, schema: {type: string, enum: [no-cache]}}
+          content: {application/json: {schema: {$ref: "#/components/schemas/HostedDoorbellResponse"}}}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {description: Human workspace owner/admin required, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+        "404": {description: Gate closed, doorbell missing, or unknown path}
+
   /v1/workspaces/{workspaceId}/agents/{agentId}/credentials:
     post:
       tags: [agents]
@@ -3750,7 +3798,7 @@ paths:
     post:
       tags: [attachments]
       operationId: completeAttachmentUpload
-      summary: Verify Drive size and mime, then mark the uploader's attachment complete.
+      summary: Verify Drive mime and declared size, record the measured size, then mark complete.
       security:
         - bearerAuth: []
       parameters:
@@ -3759,7 +3807,7 @@ paths:
         - $ref: "#/components/parameters/AttachmentId"
       responses:
         "200":
-          description: Drive metadata verified; attachment is complete.
+          description: Drive metadata verified; attachment is complete with the measured size.
           content:
             application/json:
               schema:
@@ -3780,6 +3828,12 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: Size/mime mismatch or invalid lifecycle state.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "413":
+          description: Measured archive size exceeds 100 MB.
           content:
             application/json:
               schema:
@@ -7438,6 +7492,30 @@ components:
         activeCredentialId: {type: string, format: uuid}
         createdAtMs: {type: integer, format: int64}
         updatedAtMs: {type: integer, format: int64}
+        doorbellUrl: {type: string, format: uri, description: Present only when a doorbell is registered and MOMO_DOORBELL_ENABLED=true.}
+        doorbellSecretMasked: {type: string, description: Non-secret display tail. Never the Bearer.}
+        doorbellLastFiredAtMs: {type: integer, format: int64}
+        doorbellLastStatus: {type: string}
+
+    RegisterHostedDoorbellRequest:
+      type: object
+      additionalProperties: false
+      required: [url, secret]
+      properties:
+        url: {type: string, minLength: 1, maxLength: 2048, description: HTTPS doorbell URL. Validated by OutboundHTTPPolicy.}
+        secret: {type: string, minLength: 1, maxLength: 4096, writeOnly: true, description: Operator Bearer. AEAD-sealed; never returned.}
+
+    HostedDoorbellResponse:
+      type: object
+      additionalProperties: false
+      required: [connectionId, url, secretMasked, registeredAtMs]
+      properties:
+        connectionId: {type: string, format: uuid}
+        url: {type: string}
+        secretMasked: {type: string, description: Masked display. Never the pasted Bearer.}
+        registeredAtMs: {type: integer, format: int64}
+        lastFiredAtMs: {type: integer, format: int64}
+        lastStatus: {type: string}
 
     CreateHostedAgentConnectionRequest:
       type: object
@@ -9981,6 +10059,11 @@ components:
           format: int64
           minimum: 0
           maximum: 104857600
+          description: >
+            Client-declared length in bytes. `0` means the client does not know
+            the length; the server does not treat that as a mismatch and records
+            the measured archive size at complete. The 100 MB ceiling is enforced
+            on received bytes, not on this hint.
 
     AttachmentUploadResponse:
       type: object
@@ -10020,6 +10103,11 @@ components:
         size:
           type: integer
           format: int64
+          minimum: 0
+          maximum: 104857600
+          description: >
+            Attachment length in bytes. After complete this is the measured
+            archive size, not the create-time declaration.
         status:
           type: string
           enum: [pending, complete, failed]
@@ -10210,6 +10298,9 @@ components:
           format: int64
           minimum: 0
           maximum: 104857600
+          description: >
+            Measured attachment length in bytes after complete. A create-time
+            declaration of `0` is unknown and is replaced by this value.
 
     ThreadRollup:
       type: object

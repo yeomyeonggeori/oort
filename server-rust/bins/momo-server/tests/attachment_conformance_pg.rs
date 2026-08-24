@@ -32,7 +32,7 @@ use momo_db::sqlx::Row;
 use momo_db::PgPool;
 use momo_drive::{
     DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession, LocalDriveArchive,
-    StubDriveArchive,
+    StubDriveArchive, MAX_ATTACHMENT_BYTES,
 };
 use momo_messaging::{create_channel, ChannelKind, NewChannel};
 use momo_server::{build_app, AppState};
@@ -1257,4 +1257,375 @@ async fn the_local_archive_round_trips_session_put_complete_content() {
     }
     assert!(!leaked, "user filename leaked onto the archive volume");
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+// ---------------------------------------------------------------------------
+// #1716 — measured size is the row's source of truth
+// ---------------------------------------------------------------------------
+
+/// Declared `size: 0` is unknown. Create still accepts it; PUT of real bytes
+/// is not a mismatch; complete writes and returns the measured length.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_zero_declaration_completes_with_the_measured_size() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let base = start_server(app_pool.clone()).await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+
+    const BYTES: &[u8] = b"measured-unknown-size";
+    let created = http
+        .post(uploads_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "unknown.txt", "mime": "text/plain", "size": 0}))
+        .send()
+        .await
+        .expect("create upload");
+    assert_eq!(
+        created.status(),
+        201,
+        "a zero declaration is unknown, not 413"
+    );
+    let created: Value = created.json().await.expect("body");
+    let attachment_id = created["id"].as_str().expect("id").to_string();
+    let upload_url = created["uploadUrl"]
+        .as_str()
+        .expect("uploadUrl")
+        .to_string();
+
+    let pending_size: i64 = sqlx::query_scalar("SELECT size_bytes FROM attachment WHERE id = $1")
+        .bind(Uuid::parse_str(&attachment_id).expect("uuid"))
+        .fetch_one(&su)
+        .await
+        .expect("pending size");
+    assert_eq!(
+        pending_size, 0,
+        "the pending row keeps the unknown declaration"
+    );
+
+    let uploaded = http
+        .put(&upload_url)
+        .header(reqwest::header::CONTENT_TYPE, "text/plain")
+        .body(BYTES.to_vec())
+        .send()
+        .await
+        .expect("upload");
+    assert_eq!(
+        uploaded.status(),
+        200,
+        "unknown declaration accepts measured bytes"
+    );
+
+    let completed = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete");
+    assert_eq!(completed.status(), 200);
+    let completed: Value = completed.json().await.expect("body");
+    assert_eq!(completed["status"], json!("complete"));
+    assert_eq!(
+        completed["size"],
+        json!(BYTES.len()),
+        "complete answers with the measured size, not the 0 declaration: {completed}"
+    );
+
+    let stored: i64 = sqlx::query_scalar("SELECT size_bytes FROM attachment WHERE id = $1")
+        .bind(Uuid::parse_str(&attachment_id).expect("uuid"))
+        .fetch_one(&su)
+        .await
+        .expect("stored size");
+    assert_eq!(stored, BYTES.len() as i64);
+
+    let again = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{attachment_id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete again");
+    assert_eq!(again.status(), 200);
+    assert_eq!(
+        again.json::<Value>().await.expect("body")["size"],
+        json!(BYTES.len()),
+        "idempotent complete still answers with the measured size"
+    );
+
+    let sent = http
+        .post(messages_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "type": "text",
+            "body": "실측 크기",
+            "attachmentIds": [attachment_id],
+        }))
+        .send()
+        .await
+        .expect("send");
+    assert_eq!(sent.status(), 201);
+    let sent: Value = sent.json().await.expect("send body");
+    assert_eq!(sent["attachments"][0]["sizeBytes"], json!(BYTES.len()));
+}
+
+/// Same unknown-declaration path against the local-volume archive.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn the_local_archive_records_measured_size_for_a_zero_declaration() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let dir = std::env::temp_dir().join(format!(
+        "oort-drive-local-zero-{}-{}",
+        std::process::id(),
+        Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp archive");
+    let dir_str = dir.to_string_lossy().into_owned();
+    let (base, _archive) = start_server_with(app_pool.clone(), move |base| {
+        Arc::new(LocalDriveArchive::open(Some(dir_str.as_str()), &base).expect("local archive"))
+    })
+    .await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+
+    const BYTES: &[u8] = b"local-measured";
+    let created = http
+        .post(uploads_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "local-unknown.txt", "mime": "text/plain", "size": 0}))
+        .send()
+        .await
+        .expect("create");
+    assert_eq!(created.status(), 201);
+    let created: Value = created.json().await.expect("body");
+    let id = created["id"].as_str().expect("id").to_string();
+    let upload_url = created["uploadUrl"].as_str().expect("uploadUrl");
+    assert_eq!(
+        http.put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain")
+            .body(BYTES.to_vec())
+            .send()
+            .await
+            .expect("put")
+            .status(),
+        200
+    );
+    let completed = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete");
+    assert_eq!(completed.status(), 200);
+    let completed: Value = completed.json().await.expect("body");
+    assert_eq!(completed["size"], json!(BYTES.len()));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// An archive that reports a size other than what the session declared.
+#[derive(Debug)]
+struct DivergentSizeArchive {
+    inner: StubDriveArchive,
+    reported_size: i64,
+}
+
+#[async_trait]
+impl DriveArchive for DivergentSizeArchive {
+    fn accepts_stub_uploads(&self) -> bool {
+        true
+    }
+
+    async fn create_resumable_upload(
+        &self,
+        channel_id: Uuid,
+        name: &str,
+        mime: &str,
+        size_bytes: i64,
+    ) -> Result<DriveUploadSession, DriveError> {
+        self.inner
+            .create_resumable_upload(channel_id, name, mime, size_bytes)
+            .await
+    }
+
+    async fn file_metadata(&self, file_id: &str) -> Result<DriveFile, DriveError> {
+        let mut file = self.inner.file_metadata(file_id).await?;
+        file.size_bytes = self.reported_size;
+        Ok(file)
+    }
+
+    async fn file_content(
+        &self,
+        file_id: &str,
+        max_bytes: i64,
+    ) -> Result<DriveContent, DriveError> {
+        self.inner.file_content(file_id, max_bytes).await
+    }
+
+    async fn accept_stub_upload(
+        &self,
+        token: &str,
+        mime: Option<&str>,
+        bytes: Vec<u8>,
+    ) -> Result<(), DriveError> {
+        self.inner.accept_stub_upload(token, mime, bytes).await
+    }
+}
+
+/// **Red proof.** Declaring 0 (unknown) or a small known size cannot complete
+/// an archive object over 100 MB. The ceiling is on the measured size.
+///
+/// Drop the `over_ceiling` term in `routes::attachments::complete` and this
+/// goes red: complete answers 200 with a size the check constraint forbids
+/// on a well-behaved archive, or 409 mismatch — neither is the 413 the
+/// receive-time cap owes the client.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn declaring_zero_or_a_small_size_cannot_complete_an_over_ceiling_object() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (base, _archive) = start_server_with(app_pool.clone(), |base| {
+        Arc::new(DivergentSizeArchive {
+            inner: StubDriveArchive::new(&base),
+            reported_size: MAX_ATTACHMENT_BYTES + 1,
+        })
+    })
+    .await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+
+    for declared in [0_i64, 5] {
+        const BYTES: &[u8] = b"hello";
+        let created = http
+            .post(uploads_url(&base, fixture.workspace, fixture.channel))
+            .bearer_auth(&alice)
+            .json(
+                &json!({"name": "huge.bin", "mime": "application/octet-stream", "size": declared}),
+            )
+            .send()
+            .await
+            .expect("create");
+        assert_eq!(created.status(), 201, "declared {declared}");
+        let created: Value = created.json().await.expect("body");
+        let id = created["id"].as_str().expect("id").to_string();
+        let upload_url = created["uploadUrl"].as_str().expect("uploadUrl");
+        let put_bytes = if declared == 0 {
+            BYTES.to_vec()
+        } else {
+            vec![b'x'; declared as usize]
+        };
+        assert_eq!(
+            http.put(upload_url)
+                .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
+                .body(put_bytes)
+                .send()
+                .await
+                .expect("put")
+                .status(),
+            200,
+            "declared {declared} PUT"
+        );
+        let completed = http
+            .post(format!(
+                "{base}/v1/workspaces/{}/channels/{}/attachments/{id}/complete",
+                fixture.workspace, fixture.channel
+            ))
+            .bearer_auth(&alice)
+            .send()
+            .await
+            .expect("complete");
+        assert_eq!(
+            completed.status(),
+            413,
+            "declared {declared} cannot complete an over-ceiling object"
+        );
+        assert_eq!(
+            completed.json::<Value>().await.expect("body")["error"]["message"],
+            json!("Drive attachment exceeds the allowed size")
+        );
+        let status: String = sqlx::query_scalar("SELECT status FROM attachment WHERE id = $1")
+            .bind(Uuid::parse_str(&id).expect("uuid"))
+            .fetch_one(&su)
+            .await
+            .expect("row");
+        assert_eq!(status, "failed", "declared {declared} is recorded failed");
+    }
+}
+
+/// Known (nonzero) declarations still mismatch when the archive disagrees,
+/// even when the measured size is under the ceiling.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn a_known_declaration_that_disagrees_with_the_archive_still_fails() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed(&su, &app_pool).await;
+    let (base, _archive) = start_server_with(app_pool.clone(), |base| {
+        Arc::new(DivergentSizeArchive {
+            inner: StubDriveArchive::new(&base),
+            reported_size: 8,
+        })
+    })
+    .await;
+    let http = reqwest::Client::new();
+    let alice = login(&http, &base, fixture.workspace, &fixture.alice).await;
+
+    const BYTES: &[u8] = b"hello";
+    let created = http
+        .post(uploads_url(&base, fixture.workspace, fixture.channel))
+        .bearer_auth(&alice)
+        .json(&json!({"name": "note.txt", "mime": "text/plain", "size": BYTES.len()}))
+        .send()
+        .await
+        .expect("create");
+    assert_eq!(created.status(), 201);
+    let created: Value = created.json().await.expect("body");
+    let id = created["id"].as_str().expect("id").to_string();
+    let upload_url = created["uploadUrl"].as_str().expect("uploadUrl");
+    assert_eq!(
+        http.put(upload_url)
+            .header(reqwest::header::CONTENT_TYPE, "text/plain")
+            .body(BYTES.to_vec())
+            .send()
+            .await
+            .expect("put")
+            .status(),
+        200
+    );
+    let completed = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/attachments/{id}/complete",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&alice)
+        .send()
+        .await
+        .expect("complete");
+    assert_eq!(completed.status(), 409);
+    assert_eq!(
+        completed.json::<Value>().await.expect("body")["error"]["message"],
+        json!("uploaded file size or mime does not match")
+    );
+    let status: String = sqlx::query_scalar("SELECT status FROM attachment WHERE id = $1")
+        .bind(Uuid::parse_str(&id).expect("uuid"))
+        .fetch_one(&su)
+        .await
+        .expect("row");
+    assert_eq!(status, "failed");
 }

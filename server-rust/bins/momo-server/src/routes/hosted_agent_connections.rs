@@ -56,7 +56,24 @@ fn dto(connection: HostedConnection) -> HostedAgentConnectionDto {
         active_credential_id: connection.active_token_id.map(|id| id.to_string()),
         created_at_ms: connection.created_at_ms,
         updated_at_ms: connection.updated_at_ms,
+        doorbell_url: None,
+        doorbell_secret_masked: None,
+        doorbell_last_fired_at_ms: None,
+        doorbell_last_status: None,
     }
+}
+
+pub(crate) fn attach_doorbell(
+    mut dto: HostedAgentConnectionDto,
+    doorbell: Option<momo_webhook::DoorbellProjection>,
+) -> HostedAgentConnectionDto {
+    if let Some(doorbell) = doorbell {
+        dto.doorbell_url = Some(doorbell.url);
+        dto.doorbell_secret_masked = Some(doorbell.secret_masked);
+        dto.doorbell_last_fired_at_ms = doorbell.last_fired_at.map(super::shared::epoch_ms);
+        dto.doorbell_last_status = doorbell.last_status;
+    }
+    dto
 }
 
 fn artifact_dto(artifact: HostedArtifact) -> HostedCleanupArtifactDto {
@@ -210,20 +227,36 @@ pub async fn list(
     require_human(&principal, "human workspace admin required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let actor = principal.member_id;
-    let rows = settle_db(
+    let doorbell_enabled = state.webhook.doorbell_enabled;
+    let (rows, doorbells) = settle_db(
         "hosted_agent_connections.list",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
                 if let Err(error) = require_admin(conn, workspace_id, actor).await? {
                     return Ok(Err(error));
                 }
-                Ok(Ok(list_hosted_connections_in_tx(conn, workspace_id).await?))
+                let rows = list_hosted_connections_in_tx(conn, workspace_id).await?;
+                let doorbells = if doorbell_enabled {
+                    momo_webhook::list_doorbell_projections_in_tx(conn, workspace_id).await?
+                } else {
+                    Vec::new()
+                };
+                Ok(Ok((rows, doorbells)))
             })
         })
         .await,
     )?;
+    let mut doorbells = doorbells
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
     Ok(Json(HostedAgentConnectionListResponse {
-        connections: rows.into_iter().map(dto).collect(),
+        connections: rows
+            .into_iter()
+            .map(|row| {
+                let id = row.id;
+                attach_doorbell(dto(row), doorbells.remove(&id))
+            })
+            .collect(),
     }))
 }
 
@@ -236,7 +269,8 @@ pub async fn get(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;
     let actor = principal.member_id;
-    let (row, artifacts) = settle_db(
+    let doorbell_enabled = state.webhook.doorbell_enabled;
+    let (row, artifacts, doorbell) = settle_db(
         "hosted_agent_connections.get",
         agent_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
@@ -250,13 +284,19 @@ pub async fn get(
                 };
                 let artifacts =
                     list_hosted_artifacts_in_tx(conn, workspace_id, connection_id).await?;
-                Ok(Ok((row, artifacts)))
+                let doorbell = if doorbell_enabled {
+                    momo_webhook::load_doorbell_projection_in_tx(conn, workspace_id, connection_id)
+                        .await?
+                } else {
+                    None
+                };
+                Ok(Ok((row, artifacts, doorbell)))
             })
         })
         .await,
     )?;
     Ok(Json(HostedAgentConnectionResponse {
-        connection: dto(row),
+        connection: attach_doorbell(dto(row), doorbell),
         cleanup_artifacts: artifact_dtos(artifacts),
     }))
 }

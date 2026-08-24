@@ -407,9 +407,10 @@ pub struct MessageDto {
 
 /// `POST …/attachments/uploads` request (openapi `CreateAttachmentUploadRequest`).
 ///
-/// `size` is the client's declaration, and the whole completion step exists to
-/// check it: the server never sees the bytes on the way up, so a declared size
-/// that Drive later contradicts is what turns an attachment `failed`.
+/// `size` is a client hint. `0` means the length is unknown; a nonzero value is
+/// checked against the archive at complete. The row's source of truth is the
+/// measured archive size written at complete, and the 100 MB ceiling is
+/// enforced on those received bytes.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateAttachmentUploadRequest {
@@ -2894,6 +2895,36 @@ pub struct HostedAgentConnectionDto {
     pub active_credential_id: Option<String>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
+    /// ADR-0171. Omitted when no doorbell is registered so a flag-off GET is
+    /// byte-identical to the pre-doorbell response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doorbell_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doorbell_secret_masked: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doorbell_last_fired_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub doorbell_last_status: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RegisterHostedDoorbellRequest {
+    pub url: String,
+    pub secret: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostedDoorbellResponse {
+    pub connection_id: String,
+    pub url: String,
+    pub secret_masked: String,
+    pub registered_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_fired_at_ms: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_status: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
