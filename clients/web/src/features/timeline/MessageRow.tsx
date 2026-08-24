@@ -667,8 +667,9 @@ export function MessageRow({
         )}
       </div>
       {/* `data-row-body` is the box whose text Range the capture gate measures
-          against the hover toolbar: intersection with this row's glyphs must
-          be 0 (B11 R2 Blocker / #1743 B-3). */}
+          against the hover toolbar: intersection with this row's glyphs and
+          the immediate neighbour rows must be 0 (B11 R2 Blocker / #1743 B-3
+          · N-2). */}
       <div data-row-body className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
