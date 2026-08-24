@@ -348,12 +348,15 @@ export function EmojiPickerPanel({
       </div>
 
       {!searching && (
+        // 390에서 9탭이 7+2로 접힌다. nowrap+overflow-x는 무선언 가로 스크롤이라
+        // capture:design 하네스가 차단하고(iOS엔 스크롤 어포던스도 없다),
+        // 끌리는 상자로 바꾸려면 컴포넌트가 data-scroll-x를 선언해야 한다.
         <div
           role="tablist"
           aria-label="이모지 분류"
           id={tablistId}
           onKeyDown={onTabKeyDown}
-          className="flex flex-nowrap gap-1 overflow-x-auto"
+          className="flex flex-wrap gap-1"
         >
           {EMOJI_CATEGORY_TABS.map((tab, index) => {
             const selected = category === tab.id;
@@ -426,7 +429,15 @@ export function EmojiPickerPanel({
               </Button>
             }
           />
-        ) : visible.length === 0 ? null : (
+        ) : visible.length === 0 ? (
+          // 오늘은 도달 불가(빈도 탭은 32종 시드로 폴백)지만, 빈 목록이 문장
+          // 없는 상자로 출하되지 않게 자리를 지킨다.
+          <EmptyInvite
+            headline="표시할 이모지가 없습니다"
+            className="px-0 py-4"
+            testId="emoji-grid-empty"
+          />
+        ) : (
           <div
             id={listId}
             role={searching ? "listbox" : "menu"}

@@ -23,7 +23,9 @@ export function emojiGridWindow(
   const totalRows = Math.ceil(count / EMOJI_GRID_COLS);
   const clamped = Math.min(count - 1, Math.max(0, centerIndex));
   const centerRow = Math.floor(clamped / EMOJI_GRID_COLS);
-  let startRow = centerRow - Math.floor(rows / 2);
+  // 앵커는 보이는 밴드의 첫 행이다(onGridScroll). 창을 반씩 가르면 위 6행이
+  // 화면 밖 overscan으로 죽고 아래가 밴드(약 7행)보다 얕아 빈 띠가 남는다.
+  let startRow = centerRow - 3;
   if (startRow < 0) startRow = 0;
   if (startRow + rows > totalRows) startRow = Math.max(0, totalRows - rows);
   const start = startRow * EMOJI_GRID_COLS;

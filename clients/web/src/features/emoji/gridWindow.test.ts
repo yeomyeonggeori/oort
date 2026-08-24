@@ -26,6 +26,14 @@ describe("emojiGridWindow", () => {
     expect(end - start).toBeLessThanOrEqual(EMOJI_GRID_RENDER_LIMIT);
   });
 
+  it("keeps most of the window below the anchor row", () => {
+    // 앵커 = 보이는 밴드의 첫 행. 아래가 밴드(약 7행)보다 깊어야 빈 띠가 없다.
+    const center = 400;
+    const { start, end } = emojiGridWindow(1914, center);
+    expect(end - center).toBeGreaterThan(center - start);
+    expect(end - center).toBeGreaterThanOrEqual(7 * EMOJI_GRID_COLS);
+  });
+
   it("counts pad rows for unmounted items", () => {
     expect(emojiGridPadRows(0)).toBe(0);
     expect(emojiGridPadRows(8)).toBe(1);

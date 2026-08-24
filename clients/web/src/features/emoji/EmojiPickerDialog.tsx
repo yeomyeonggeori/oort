@@ -17,7 +17,6 @@ import { EmojiPickerPanel } from "./EmojiPickerPanel";
 import { recordEmojiUse } from "./frequencyStore";
 import { useHoverNone } from "./useHoverNone";
 
-
 // =============================================================================
 // 컴포저와 메시지 반응이 함께 쓰는 이모지 표면 (#1742, supersede #1688).
 //
@@ -78,6 +77,7 @@ export function EmojiPickerDialog({
   const copy = COPY[purpose];
   const isTouch = useHoverNone();
   const searchRef = useRef<HTMLInputElement | null>(null);
+  const sheetRef = useRef<HTMLDivElement | null>(null);
   const [entries, setEntries] = useState<CatalogEmoji[] | null>(null);
   const [error, setError] = useState(false);
   const [loadNonce, setLoadNonce] = useState(0);
@@ -151,12 +151,18 @@ export function EmojiPickerDialog({
     return (
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
+          ref={sheetRef}
+          tabIndex={-1}
           opener={opener}
           data-testid={testId}
           className="safe-area-bottom bottom-0 left-0 top-auto max-h-pane-lg max-w-none translate-x-0 gap-2 rounded-lg p-3"
           onEscapeKeyDown={onEscapeKeyDown}
           onOpenAutoFocus={(event) => {
+            // 검색창을 포커스하면 소프트 키보드가 fixed 시트를 덮는다. 그렇다고
+            // 포커스를 트리거(시트 뒤, aria-hidden 서브트리)에 남기면 Tab이 눈에
+            // 안 보이는 컨트롤에 닿는다(ADR-0112 D6). 시트 자신에게 옮긴다.
             event.preventDefault();
+            sheetRef.current?.focus();
           }}
         >
           <DialogTitle>{copy.title}</DialogTitle>
