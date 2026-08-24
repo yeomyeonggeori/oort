@@ -9,7 +9,7 @@ import {
   Smile,
   Trash2,
 } from "lucide-react";
-import { useState, type Ref } from "react";
+import { useLayoutEffect, useRef, useState, type Ref } from "react";
 import { cn } from "@/design/lib/cn";
 import {
   recordEmojiUse,
@@ -18,6 +18,7 @@ import {
 import {
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
+  toolbarClipsScrollerTop,
 } from "./hoverToolbarModel";
 import {
   Dialog,
@@ -318,8 +319,10 @@ const toolbarItemClass =
  * pointer highlight is CSS only (UX-EB cursor split).
  *
  * Placement straddles the row's top edge (`hover-toolbar-straddle`) and keeps
- * the same 16px right gutter as the body (`right-4`). Own-row body text must
- * not intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
+ * the same 16px right gutter as the body (`right-4`). When that would clip the
+ * scroller top, it mirrors to the row's bottom edge
+ * (`hover-toolbar-straddle-below`, #1743 H-4). Own-row body text must not
+ * intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
 export function MessageHoverToolbar({
   available,
@@ -346,25 +349,52 @@ export function MessageHoverToolbar({
   mineEmojis: ReadonlySet<string>;
 }) {
   useEscapeLayer(menuOpen, () => onMenuOpenChange(false));
+  const barRef = useRef<HTMLDivElement>(null);
+  const [straddleBelow, setStraddleBelow] = useState(false);
   const liveSlots = useFrequentEmojis(
     HOVER_TOOLBAR_REACTION_SEED,
     HOVER_TOOLBAR_SLOT_COUNT
   );
-  // Freeze rank at mount. A click must not rearrange the glyph under the
-  // cursor; the next mount picks up the new order (#1743 H-2). aria-pressed
+  // Freeze rank for the life of this mount (focus on a slot can keep the
+  // mount alive). A click must not rearrange the glyph under the cursor;
+  // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
   // still follows live `mineEmojis`.
   const [slots] = useState(liveSlots);
+  useLayoutEffect(() => {
+    if (straddleBelow) return;
+    const bar = barRef.current;
+    if (!bar) return;
+    const scroller =
+      bar.closest("[data-virtuoso-scroller]") ??
+      bar.closest('[data-testid="timeline-virtuoso"]');
+    if (!(scroller instanceof HTMLElement)) return;
+    if (
+      toolbarClipsScrollerTop(
+        bar.getBoundingClientRect(),
+        scroller.getBoundingClientRect()
+      )
+    ) {
+      setStraddleBelow(true);
+    }
+  }, [straddleBelow]);
   const hasMenu =
     messageActionItems(available, { canCopy, copied, pinned }).length > 0;
   if (!available.react && !available.reply && !hasMenu) return null;
 
   return (
     <div
+      ref={barRef}
       role="toolbar"
       aria-label="메시지 액션"
       aria-orientation="horizontal"
       data-testid="message-hover-toolbar"
-      className="hover-toolbar-straddle absolute right-4 z-20 flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
+      data-straddle={straddleBelow ? "below" : "top"}
+      className={cn(
+        straddleBelow
+          ? "hover-toolbar-straddle-below"
+          : "hover-toolbar-straddle",
+        "absolute right-4 z-20 flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
+      )}
     >
       {available.react &&
         slots.map((emoji) => {

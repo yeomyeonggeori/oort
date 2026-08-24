@@ -6,6 +6,7 @@ import {
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
   shouldShowHoverToolbar,
+  toolbarClipsScrollerTop,
 } from "./hoverToolbarModel";
 
 const actionsSource = readFileSync(
@@ -67,6 +68,26 @@ describe("shouldShowHoverToolbar", () => {
         pointerCanHover: false,
         overlayOpen: true,
       })
+    ).toBe(false);
+  });
+});
+
+describe("toolbarClipsScrollerTop", () => {
+  it("스크롤러 높이가 없으면 뒤집지 않는다", () => {
+    expect(
+      toolbarClipsScrollerTop({ top: -10 }, { top: 0, height: 0 })
+    ).toBe(false);
+  });
+
+  it("툴바 상단이 스크롤러 상단을 침범하면 뒤집는다", () => {
+    expect(
+      toolbarClipsScrollerTop({ top: 18 }, { top: 45, height: 700 })
+    ).toBe(true);
+  });
+
+  it("여유가 있으면 위 straddle을 유지한다", () => {
+    expect(
+      toolbarClipsScrollerTop({ top: 80 }, { top: 45, height: 700 })
     ).toBe(false);
   });
 });

@@ -800,6 +800,17 @@
   translate: 0 calc(-100% + var(--spacing-row));
 }
 
+/* 위쪽 여유가 없을 때의 대칭 (#1743 H-4).
+ *
+ * `bottom: 0`에서 자기 키만큼 내린 뒤 `--spacing-row`만큼만 다시 올린다.
+ * 상단 가장자리가 이 행의 하단 패딩 상자 안에 머물고, 나머지 높이는 다음
+ * 행과의 행간에 앉는다. 위 straddle과 같은 26px 띠·같은 교차 0 계약. */
+@utility hover-toolbar-straddle-below {
+  top: auto;
+  bottom: 0;
+  translate: 0 calc(100% - var(--spacing-row));
+}
+
 /* 그 반대. 손가락에게만 하는 말 (B11 R2): 길게 누르기를 알려 주는 한 줄은
  * hover가 있는 기기에서는 할 말이 없다. 거기엔 행 hover에 툴바가 보이기 때문이다. */
 @utility touch-only {
