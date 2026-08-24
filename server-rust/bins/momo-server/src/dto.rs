@@ -407,9 +407,10 @@ pub struct MessageDto {
 
 /// `POST …/attachments/uploads` request (openapi `CreateAttachmentUploadRequest`).
 ///
-/// `size` is the client's declaration, and the whole completion step exists to
-/// check it: the server never sees the bytes on the way up, so a declared size
-/// that Drive later contradicts is what turns an attachment `failed`.
+/// `size` is a client hint. `0` means the length is unknown; a nonzero value is
+/// checked against the archive at complete. The row's source of truth is the
+/// measured archive size written at complete, and the 100 MB ceiling is
+/// enforced on those received bytes.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateAttachmentUploadRequest {

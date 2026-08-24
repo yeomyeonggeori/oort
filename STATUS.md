@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 첨부 실측 크기 (#1716, 2026-08-24)
+
+- complete가 아카이브 실수신 바이트를 `attachment.size_bytes` 정본으로 기록·응답한다. 선언 `size: 0`은 미지(create 201 유지, PUT mismatch 철회, 대조 생략). 100MB 상한은 실측 강제(선언 축소 우회 413 red proof). 클라 변경 0.
+- 선행 실측: 고치기 전 stub/local은 create `size: 0`을 받고 nonempty PUT을 session mismatch(400)로 죽여 complete에 도달하지 않았다. Google은 `X-Upload-Content-Length: 0`이라 세션이 0바이트로 캡됐을 것. 스키마 불변(기존 `size_bytes`).
+- 검증: `cargo fmt --all --check` · clippy `-D warnings` · `cargo test --workspace` green. `momo-drive` 30/30(0-선언 실측·선언 축소 상한 red proof). `momo-server --lib` 287/287. `attachment_conformance_pg` ignored 12/12(0-선언 실측·local 실측·상한 413·알려진 선언 mismatch 409, 이 워크트리 `make up` PG:21852). openapi yaml parse · `check_docs_commands.py` 493 · migration-numbers 79.
+
 ## 링크 언퍼얼 서버 표면 (#1698, ADR-0170, 2026-08-23) — 1/2
 
 - 마이그레이션 079 `message_unfurl` 계열(job·cache·tombstone·workspace on/off) + RLS FORCE. `schema_v0.sql` 불변. 워커는 `momo-webhook-sender` 프로세스의 옵트인 드레인(`MOMO_UNFURL_ENABLED` 기본 0). URL≤3 추출(코드블록·이메일 제외) → OG/Twitter 파싱 → upsert → `message.unfurl` broadcast. `message.seq` 불변.

@@ -1622,7 +1622,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Verify Drive size and mime, then mark the uploader's attachment complete. */
+        /** Verify Drive mime and declared size, record the measured size, then mark complete. */
         post: operations["completeAttachmentUpload"];
         delete?: never;
         options?: never;
@@ -4398,7 +4398,10 @@ export interface components {
         CreateAttachmentUploadRequest: {
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Client-declared length in bytes. `0` means the client does not know the length; the server does not treat that as a mismatch and records the measured archive size at complete. The 100 MB ceiling is enforced on received bytes, not on this hint.
+             */
             size: number;
         };
         AttachmentUploadResponse: {
@@ -4423,7 +4426,10 @@ export interface components {
             messageId?: string;
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Attachment length in bytes. After complete this is the measured archive size, not the create-time declaration.
+             */
             size: number;
             /** @enum {string} */
             status: "pending" | "complete" | "failed";
@@ -4527,7 +4533,10 @@ export interface components {
             id: string;
             name: string;
             mime: string;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description Measured attachment length in bytes after complete. A create-time declaration of `0` is unknown and is replaced by this value.
+             */
             sizeBytes: number;
         };
         ThreadRollup: {
@@ -9939,7 +9948,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Drive metadata verified; attachment is complete. */
+            /** @description Drive metadata verified; attachment is complete with the measured size. */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -9969,6 +9978,15 @@ export interface operations {
             };
             /** @description Size/mime mismatch or invalid lifecycle state. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Measured archive size exceeds 100 MB. */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };
