@@ -487,6 +487,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/hosted-agent-connections/{connectionId}/doorbell": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Register or replace a hosted-connection doorbell (ADR-0171).
+         * @description Tenant-scoped. Stores `doorbellUrl` plus an AEAD-sealed Bearer. Responses never echo the secret (mask only). Closed unless `MOMO_DOORBELL_ENABLED` is the exact lowercase word `true` — otherwise this path answers empty 404, the same as an unknown route.
+         */
+        put: operations["registerHostedAgentDoorbell"];
+        post?: never;
+        /** Remove a hosted-connection doorbell registration (ADR-0171). */
+        delete: operations["unregisterHostedAgentDoorbell"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/agents/{agentId}/credentials": {
         parameters: {
             query?: never;
@@ -3066,6 +3087,34 @@ export interface components {
             createdAtMs: number;
             /** Format: int64 */
             updatedAtMs: number;
+            /**
+             * Format: uri
+             * @description Present only when a doorbell is registered and MOMO_DOORBELL_ENABLED=true.
+             */
+            doorbellUrl?: string;
+            /** @description Non-secret display tail. Never the Bearer. */
+            doorbellSecretMasked?: string;
+            /** Format: int64 */
+            doorbellLastFiredAtMs?: number;
+            doorbellLastStatus?: string;
+        };
+        RegisterHostedDoorbellRequest: {
+            /** @description HTTPS doorbell URL. Validated by OutboundHTTPPolicy. */
+            url: string;
+            /** @description Operator Bearer. AEAD-sealed; never returned. */
+            secret: string;
+        };
+        HostedDoorbellResponse: {
+            /** Format: uuid */
+            connectionId: string;
+            url: string;
+            /** @description Masked display. Never the pasted Bearer. */
+            secretMasked: string;
+            /** Format: int64 */
+            registeredAtMs: number;
+            /** Format: int64 */
+            lastFiredAtMs?: number;
+            lastStatus?: string;
         };
         CreateHostedAgentConnectionRequest: {
             displayName: string;
@@ -6606,6 +6655,116 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
+            };
+        };
+    };
+    registerHostedAgentDoorbell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterHostedDoorbellRequest"];
+            };
+        };
+        responses: {
+            /** @description Doorbell registered. Secret is write-only. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedDoorbellResponse"];
+                };
+            };
+            /** @description Invalid URL (HTTPS/OutboundHTTPPolicy) or empty secret */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Gate closed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Connection is not active */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    unregisterHostedAgentDoorbell: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                connectionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Doorbell unregistered. */
+            200: {
+                headers: {
+                    "Cache-Control": "no-store";
+                    Pragma: "no-cache";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostedDoorbellResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human workspace owner/admin required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Gate closed */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
