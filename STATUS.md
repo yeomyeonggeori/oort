@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 그록봇 도어벨 플레이북 (#1736, ADR-0171, 2026-08-24)
+
+- `docs/SELF_HOST_AGENT.md` §4: webhook 루틴 생성 문안(실측 문안 승계), WD-1 REST 등록·마스킹·해제 curl, 프로덕션/15분 스윕 지시문(ADR-0132 발화 규약), usage·베타·Q-STRUCT 고지. UI 등록은 #1735 후속.
+- 검증: `scripts/check_docs_commands.py` 493 facts · `scripts/tests/test_docs_commands_gate.sh` 26 cases. `runtime-unverified`(그록봇 루틴 E2E·멘션→도어벨→응답) — 성재 자연어 릴레이.
+
 ## hosted 커넥션 도어벨 서버 (#1734, ADR-0171, 2026-08-24)
 
 - 마이그레이션 080 `hosted_agent_doorbell`(AEAD 봉인 시크릿·RLS FORCE). `schema_v0.sql` 불변. **outbox 생산자 트리거 0.**
