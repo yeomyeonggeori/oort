@@ -1,4 +1,4 @@
-import { useCallback, useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 
 // =============================================================================
 // Per-user emoji frequency (#1742).
@@ -38,10 +38,23 @@ function readCounts(): Counts {
 }
 
 let counts: Counts = readCounts();
-let snapshotCache: { key: string; value: readonly string[] } | null = null;
+
+/** Ranked used-glyphs only. Rebuilt on emit; the same array is returned until then. */
+const EMPTY_RANKING: readonly string[] = Object.freeze([]);
+let rankingCache: readonly string[] = EMPTY_RANKING;
+
+function rankUsed(): readonly string[] {
+  const ranked = Object.entries(counts)
+    .filter(([, n]) => n > 0)
+    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+    .map(([glyph]) => glyph);
+  return ranked.length === 0 ? EMPTY_RANKING : ranked;
+}
+
+rankingCache = rankUsed();
 
 function emit() {
-  snapshotCache = null;
+  rankingCache = rankUsed();
   for (const listener of listeners) listener();
 }
 
@@ -61,14 +74,11 @@ export function getEmojiFrequency(glyph: string): number {
   return counts[glyph] ?? 0;
 }
 
-export function frequentEmojis(
-  limit = EMOJI_FREQUENCY_LIMIT,
-  seed: readonly string[] = []
+function mergeRanking(
+  ranked: readonly string[],
+  seed: readonly string[],
+  limit: number
 ): string[] {
-  const ranked = Object.entries(counts)
-    .filter(([, n]) => n > 0)
-    .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
-    .map(([glyph]) => glyph);
   if (ranked.length === 0) return [...seed].slice(0, limit);
   const seen = new Set(ranked);
   const out = [...ranked];
@@ -81,12 +91,20 @@ export function frequentEmojis(
   return out.slice(0, limit);
 }
 
-function snapshot(limit: number, seed: readonly string[]): readonly string[] {
-  const key = `${limit}\0${JSON.stringify(counts)}\0${seed.join("\0")}`;
-  if (snapshotCache?.key === key) return snapshotCache.value;
-  const value = frequentEmojis(limit, seed);
-  snapshotCache = { key, value };
-  return value;
+export function frequentEmojis(
+  limit = EMOJI_FREQUENCY_LIMIT,
+  seed: readonly string[] = []
+): string[] {
+  return mergeRanking(rankUsed(), seed, limit);
+}
+
+/** Stable ranking array. Same reference until the next emit. */
+export function getEmojiRankingSnapshot(): readonly string[] {
+  return rankingCache;
+}
+
+function getServerEmojiRankingSnapshot(): readonly string[] {
+  return EMPTY_RANKING;
 }
 
 export function subscribeEmojiFrequency(listener: () => void): () => void {
@@ -96,30 +114,32 @@ export function subscribeEmojiFrequency(listener: () => void): () => void {
   };
 }
 
-/** UX-HT and the picker share this hook so slot ranking cannot drift. */
+/**
+ * UX-HT and the picker share this hook so slot ranking cannot drift.
+ *
+ * `getSnapshot` returns the store's ranking array (one reference, rebuilt only
+ * on emit). Limit/seed slicing is a hook-local memo: two consumers with
+ * different limits cannot evict each other's cache.
+ */
 export function useFrequentEmojis(
   seed: readonly string[],
   limit = EMOJI_FREQUENCY_LIMIT
 ): readonly string[] {
-  const subscribe = useCallback(
-    (listener: () => void) => subscribeEmojiFrequency(listener),
-    []
+  const ranking = useSyncExternalStore(
+    subscribeEmojiFrequency,
+    getEmojiRankingSnapshot,
+    getServerEmojiRankingSnapshot
   );
-  const getSnapshot = useCallback(
-    () => snapshot(limit, seed),
-    [limit, seed]
+  return useMemo(
+    () => mergeRanking(ranking, seed, limit),
+    [ranking, seed, limit]
   );
-  const getServerSnapshot = useCallback(
-    () => seed.slice(0, limit),
-    [limit, seed]
-  );
-  return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
 }
 
 /** Test helper. Not for product code. */
 export function resetEmojiFrequencyForTests(): void {
   counts = {};
-  snapshotCache = null;
+  rankingCache = EMPTY_RANKING;
   if (typeof localStorage !== "undefined") {
     localStorage.removeItem(EMOJI_FREQUENCY_STORAGE_KEY);
   }

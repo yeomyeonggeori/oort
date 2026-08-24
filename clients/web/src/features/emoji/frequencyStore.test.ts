@@ -3,6 +3,7 @@ import {
   EMOJI_FREQUENCY_STORAGE_KEY,
   frequentEmojis,
   getEmojiFrequency,
+  getEmojiRankingSnapshot,
   recordEmojiUse,
   resetEmojiFrequencyForTests,
 } from "./frequencyStore";
@@ -53,5 +54,15 @@ describe("emoji frequency store", () => {
     recordEmojiUse("🙏");
     recordEmojiUse("👍");
     expect(frequentEmojis(2, seed)).toEqual(["👍", "🙏"]);
+  });
+
+  it("returns the same ranking array until the next emit", () => {
+    const rest = getEmojiRankingSnapshot();
+    expect(getEmojiRankingSnapshot()).toBe(rest);
+    recordEmojiUse("👍");
+    const used = getEmojiRankingSnapshot();
+    expect(used).not.toBe(rest);
+    expect(getEmojiRankingSnapshot()).toBe(used);
+    expect(used).toEqual(["👍"]);
   });
 });
