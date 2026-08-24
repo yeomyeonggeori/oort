@@ -46,6 +46,7 @@
 
 pub mod config;
 pub mod delivery;
+pub mod doorbell;
 
 use std::future::Future;
 
@@ -61,7 +62,8 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 pub use config::SenderConfig;
-pub use delivery::{DeliveryResult, SafeWebhookTransport, WebhookTransport};
+pub use delivery::{DeliveryResult, DoorbellTransport, SafeWebhookTransport, WebhookTransport};
+pub use doorbell::{DoorbellDrainStats, DoorbellWorker};
 
 /// The `momo.webhook_delivery.v1` envelope migration 033 enqueues.
 ///

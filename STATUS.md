@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## hosted 커넥션 도어벨 서버 (#1734, ADR-0171, 2026-08-24)
+
+- 마이그레이션 080 `hosted_agent_doorbell`(AEAD 봉인 시크릿·RLS FORCE). `schema_v0.sql` 불변. **outbox 생산자 트리거 0.**
+- tenant REST `PUT/DELETE …/hosted-agent-connections/{id}/doorbell`. 시크릿은 마스킹만. URL은 OutboundHTTPPolicy(https·사설망 거부). 등록/해제 audit 각 1행. disconnect/reconcile 같은 tx에서 소거.
+- `momo-webhook-sender` 가 hosted inbox append 파생을 폴링해 커넥션당 leading-edge + 60s trailing 코얼레싱. 상수 페이로드 `{"kind":"oort.doorbell.v1"}` + `Authorization: Bearer`. 타임아웃 10s, retry ≤2.
+- 게이트 `MOMO_DOORBELL_ENABLED` 소문자 `true`만 개방, 기본 off. off면 라우트 빈 404 + drain 무동작.
+- 검증: `cargo fmt --all --check` · clippy `-D warnings` · `momo-webhook` 28/28 · `momo-webhook-sender --lib` 8/8 · `momo-server --lib` doorbell gate 1/1. ignored PG `doorbell_admin_conformance_pg` 4/4 · `doorbell_dispatch_conformance_pg` 4/4 (`DATABASE_URL` 이 워크트리 `make up` PG:23202). openapi 동기화 + web-legacy 생성 타입. migration-numbers 80. `check_docs_commands.py` 493.
+
 ## 첨부 실측 크기 (#1716, 2026-08-24)
 
 - complete가 아카이브 실수신 바이트를 `attachment.size_bytes` 정본으로 기록·응답한다. 선언 `size: 0`은 미지(create 201 유지, PUT mismatch 철회, 대조 생략). 100MB 상한은 실측 강제(선언 축소 우회 413 red proof). 클라 변경 0.

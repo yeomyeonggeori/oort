@@ -13,6 +13,7 @@
 
 | # | 상태 | 항목 | UI가 할 일 | 착수 포인터 (전부 main) |
 |---|---|---|---|---|
+| A-32 | `ready` | **Agent Hub 도어벨 등록 UI (#1735 / WD-2, ADR-0171)** | 커넥션 상세에 도어벨 섹션: URL/key 입력(저장 후 마스킹)·벨 테스트·last-fired 4상태. `PUT/DELETE …/hosted-agent-connections/{id}/doorbell`. 게이트 off 는 섹션 부재. | ADR-0171, #1734 서버, `docs/planning/handoffs/2026-08-24-grokbot-doorbell-packet.md` WD-2 |
 | A-31 | `info` | **첨부 실측 크기 (#1716)** | **UXUI 추가 작업 없음.** complete 응답 `size`와 메시지 `attachments[].sizeBytes`가 수신 바이트를 싣는다. 클라 `size: 0`(sizeKnown=false)은 미지 선언. 코어 `attachmentMetaLine` 「0 B」 잔재 주석은 후속. | `POST …/attachments/{id}/complete`, `momo-drive` 실측 SoT |
 | A-30 | `ready` | **링크 언퍼얼 클라 렌더 (#1698 2/2, ADR-0170 D5)** | 서버 절반이 랜딩하면 웹·폰 타임라인에 카드(제목·설명·도메인·이미지) 4상태(로딩/실패/차단/빈). 실패·차단은 침묵이 기본. 이미지는 `GET …/unfurls/{id}/image` 프록시만(임의 호스트 직접 fetch 금지). 워크스페이스 설정 토글 + 메시지 x 제거 + 개인 화면 접기. `message.unfurl` / `message.unfurl.removed` 브로드캐스트 소비. | `docs/adr/0170-link-unfurl-server-surface.md` D5, `GET/PUT /v1/workspaces/{ws}/unfurl-settings`, `GET/DELETE …/messages/{id}/unfurls`, `GET …/unfurls/{id}/image` |
 | A-30 | `ready` | **폰 링크 언퍼얼 렌더·개인 접기 (#1718 후속 / ADR-0170)** | `momo-core/features/timeline/unfurl`의 4상태·REST/live/remove 병합을 그대로 소비해 RN 타임라인 카드와 발신자 제거를 만든다. 이미지는 remote URL이 아니라 인증된 서버 프록시만 네이티브 캐시로 읽고, failed·blocked·empty·서버 off는 조용한 부재로 둔다. 개인 「링크 미리보기 접기」는 폰 기기 저장소에 렌더 선택만 보존하며 워크스페이스 fetch 설정과 섞지 않는다. **#1718의 명시 비스코프였으므로 웹 PR에 폰 코드를 얹지 않는다.** | #1718, ADR-0170 D4·D5, `packages/momo-core/src/features/timeline/unfurl.ts`, `docs/planning/handoffs/2026-08-24-unfurl-client-packet.md` |

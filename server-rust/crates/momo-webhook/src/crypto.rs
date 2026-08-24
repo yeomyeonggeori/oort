@@ -28,6 +28,8 @@
 //! reference are unrelated values, so a leak of one direction's material cannot
 //! be replayed into the other.
 
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng};
+use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use hmac::{Hmac, Mac};
@@ -66,7 +68,7 @@ pub fn random_reference() -> String {
 }
 
 fn derive(master_key: &str, domain: &str, secret_ref: &str, prefix: &str) -> String {
-    let mut mac = HmacSha256::new_from_slice(master_key.as_bytes())
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(master_key.as_bytes())
         .expect("HMAC accepts a key of any length");
     mac.update(domain.as_bytes());
     mac.update(secret_ref.as_bytes());
@@ -132,8 +134,8 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 /// invalidating the signature. Ported from
 /// `SafeWebhookDeliveryClient.signature(secret:timestamp:body:)`.
 pub fn delivery_signature(secret: &str, timestamp: &str, body: &[u8]) -> String {
-    let mut mac =
-        HmacSha256::new_from_slice(secret.as_bytes()).expect("HMAC accepts a key of any length");
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts a key of any length");
     mac.update(timestamp.as_bytes());
     mac.update(b".");
     mac.update(body);
@@ -145,6 +147,109 @@ pub fn delivery_signature(secret: &str, timestamp: &str, body: &[u8]) -> String 
 /// `Display` is already that, so this exists to make the intent greppable.
 pub(crate) fn hyphenated(id: Uuid) -> String {
     id.hyphenated().to_string()
+}
+
+// ---------------------------------------------------------------------------
+// ADR-0171 doorbell AEAD — operator-supplied Bearer, reversible, domain-separated
+//
+// Event-subscription secrets are derived and never stored. A doorbell secret is
+// the opposite: the operator pastes a vendor webhook key that we must replay as
+// `Authorization: Bearer`. That needs authenticated reversible encryption, the
+// same framing `momo-settings` uses for provider links, with a *different*
+// domain so a leaked provider box cannot open a doorbell box.
+// ---------------------------------------------------------------------------
+
+/// Sealed-box format version. Byte 0 of the stored `bytea`.
+pub const DOORBELL_SEALED_VERSION: u8 = 0x01;
+const DOORBELL_NONCE_LEN: usize = 12;
+const DOORBELL_TAG_LEN: usize = 16;
+const DOORBELL_KEY_DOMAIN: &[u8] = b"momo.hosted_doorbell.key.v1\n";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DoorbellSealError {
+    #[error("doorbell secret must not be empty")]
+    EmptyPlaintext,
+    #[error("doorbell secret exceeds the sealed-box bound")]
+    TooLong,
+    #[error("sealed doorbell box carries an unknown format version")]
+    BadVersion,
+    #[error("sealed doorbell box is malformed")]
+    MalformedCiphertext,
+    #[error("sealed doorbell box did not open to valid UTF-8")]
+    InvalidUtf8,
+}
+
+/// Maximum operator-supplied Bearer length. Far above a Cursor sender key;
+/// short enough that a pasted dump cannot become an unbounded `bytea`.
+pub const DOORBELL_SECRET_MAX_BYTES: usize = 4_096;
+
+fn doorbell_symmetric_key(master_key: &str) -> Key<Aes256Gcm> {
+    let mut hasher = Sha256::new();
+    hasher.update(DOORBELL_KEY_DOMAIN);
+    hasher.update(master_key.as_bytes());
+    let digest = hasher.finalize();
+    *Key::<Aes256Gcm>::from_slice(&digest)
+}
+
+/// Encrypt an operator doorbell Bearer into `version || nonce || ciphertext || tag`.
+pub fn seal_doorbell_secret(
+    plaintext: &str,
+    master_key: &str,
+) -> Result<Vec<u8>, DoorbellSealError> {
+    let trimmed = plaintext.trim();
+    if trimmed.is_empty() {
+        return Err(DoorbellSealError::EmptyPlaintext);
+    }
+    if trimmed.len() > DOORBELL_SECRET_MAX_BYTES {
+        return Err(DoorbellSealError::TooLong);
+    }
+    let cipher = Aes256Gcm::new(&doorbell_symmetric_key(master_key));
+    let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
+    let ciphertext = cipher
+        .encrypt(&nonce, trimmed.as_bytes())
+        .map_err(|_| DoorbellSealError::MalformedCiphertext)?;
+    let mut out = Vec::with_capacity(1 + DOORBELL_NONCE_LEN + ciphertext.len());
+    out.push(DOORBELL_SEALED_VERSION);
+    out.extend_from_slice(nonce.as_slice());
+    out.extend_from_slice(&ciphertext);
+    Ok(out)
+}
+
+/// Open a stored doorbell box back to the Bearer the sender will present.
+pub fn open_doorbell_secret(sealed: &[u8], master_key: &str) -> Result<String, DoorbellSealError> {
+    let (version, body) = sealed
+        .split_first()
+        .ok_or(DoorbellSealError::MalformedCiphertext)?;
+    if *version != DOORBELL_SEALED_VERSION {
+        return Err(DoorbellSealError::BadVersion);
+    }
+    if body.len() <= DOORBELL_NONCE_LEN + DOORBELL_TAG_LEN {
+        return Err(DoorbellSealError::MalformedCiphertext);
+    }
+    let (nonce_bytes, ciphertext) = body.split_at(DOORBELL_NONCE_LEN);
+    let cipher = Aes256Gcm::new(&doorbell_symmetric_key(master_key));
+    let opened = cipher
+        .decrypt(Nonce::from_slice(nonce_bytes), ciphertext)
+        .map_err(|_| DoorbellSealError::MalformedCiphertext)?;
+    String::from_utf8(opened).map_err(|_| DoorbellSealError::InvalidUtf8)
+}
+
+/// Non-secret display for GET. Short secrets are fully masked; otherwise the
+/// last four characters ride behind a bullet prefix. Never the plaintext.
+pub fn masked_doorbell_secret(secret: &str) -> String {
+    let trimmed = secret.trim();
+    if trimmed.chars().count() < 8 {
+        return "••••".to_string();
+    }
+    let tail: String = trimmed
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    format!("••••{tail}")
 }
 
 #[cfg(test)]
@@ -241,6 +346,51 @@ mod tests {
         assert_ne!(
             at_100,
             delivery_signature(secret, "100", br#"{"kind":"approval_request"}"#)
+        );
+    }
+
+    #[test]
+    fn a_doorbell_secret_round_trips_under_its_own_master_key() {
+        let sealed = seal_doorbell_secret("  crsr_live_abcdefgh  ", "master-one").expect("seal");
+        assert_eq!(sealed[0], DOORBELL_SEALED_VERSION);
+        assert_eq!(
+            open_doorbell_secret(&sealed, "master-one").expect("open"),
+            "crsr_live_abcdefgh"
+        );
+    }
+
+    #[test]
+    fn a_provider_link_master_key_cannot_open_a_doorbell_box() {
+        let sealed = seal_doorbell_secret("crsr_live_abcdefgh", "master-one").expect("seal");
+        assert_eq!(
+            open_doorbell_secret(&sealed, "master-two"),
+            Err(DoorbellSealError::MalformedCiphertext)
+        );
+    }
+
+    #[test]
+    fn a_short_doorbell_secret_is_masked_entirely() {
+        assert_eq!(masked_doorbell_secret("crsr_12"), "••••");
+        assert_eq!(masked_doorbell_secret("crsr_12345"), "••••2345");
+        assert!(
+            !masked_doorbell_secret("crsr_live_abcdefgh").contains("crsr_live_abcdefgh"),
+            "the display string must never be the plaintext"
+        );
+    }
+
+    /// RED of the unguarded path: echoing the pasted Bearer in a response body
+    /// is exactly the leak AC1 forbids. The masked helper is what makes that
+    /// assertion fail if someone swaps it for the raw secret.
+    #[test]
+    fn an_unguarded_echo_would_put_the_secret_on_the_wire() {
+        let secret = "crsr_live_super_secret_value";
+        let unguarded = serde_json::json!({"secret": secret}).to_string();
+        let guarded =
+            serde_json::json!({"secretMasked": masked_doorbell_secret(secret)}).to_string();
+        assert!(unguarded.contains(secret), "the unguarded body is the red");
+        assert!(
+            !guarded.contains(secret),
+            "removing the mask helper would fail this assertion"
         );
     }
 }

@@ -385,19 +385,22 @@ mod tests {
     ///
     /// 079 is ADR-0170's `message_unfurl` sidecar (job + cache + tombstone +
     /// workspace on/off). Derived records — `schema_v0.sql` is not modified.
+    ///
+    /// 080 is ADR-0171's hosted-connection doorbell sidecar. No outbox producer
+    /// trigger — the sender polls `hosted_agent_inbox_counter`.
     #[test]
-    fn discovers_contiguous_migrations_001_to_079() {
+    fn discovers_contiguous_migrations_001_to_080() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            79,
-            "expected 79 migrations under {}",
+            80,
+            "expected 80 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 79);
+        assert_eq!(migrations.last().unwrap().version, 80);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
