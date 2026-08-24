@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 언퍼얼 클라이언트 후속 고정 (#1720 항목 1·3·4 + U-8 Nit, 2026-08-24)
+
+- rowFocus의 구성원 0/有 정규화·focused 보존과 MutationObserver 재정규화, 행 안/밖 focusout 복원을 jsdom 12개 유닛으로 고정했다.
+- 언퍼얼 data URL 캐시는 48개와 32 MiB 병행 LRU 예산을 쓰며, 캡처 픽스처는 1200×630 실제 OG 비율·자연 크기 단언으로 교체했다. 폰 TypingBar의 웹 헤딩 인용도 현행화했다.
+- 웹 1,429 tests·폰 1,301 tests·양쪽 tsc/lint와 전체 `capture:design`(light/dark·desktop/mobile, exit 0)이 green이다. #1720의 서버 읽기 fan-out 배치(2항)는 비스코프로 남아 이슈를 열어 둔다.
+
 ## 웹 링크 언퍼얼 렌더·온오프 표면 (#1718, 2026-08-24)
 
 - 공유 코어에 언퍼얼 4상태와 REST↔실시간 병합 규칙을 두고, 웹 타임라인에 서버 프록시 이미지만 쓰는 카드와 발신자 전용 제거 확인(재생성 없음)을 연결했다. failed·blocked·empty와 서버 off는 자리표시자 없이 조용한 부재다.
