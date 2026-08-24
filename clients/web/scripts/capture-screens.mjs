@@ -2263,10 +2263,11 @@ async function assertHoverToolbarCount(page, where, expected) {
 }
 
 /**
- * 마운트된 툴바가 자기 행의 우상단에 앉는가 (#1743).
+ * 마운트된 툴바가 자기 행의 우측 거터를 지키는가 (#1743 M-3).
  *
- * 겹침은 계약이다(3사 플로팅 바). 행 상자를 가로로 뚫고 나가면 캡처의
- * 가로 스크롤 게이트가 따로 잡는다. 여기서는 "어느 행의 우상단인가"만 잰다.
+ * 상단은 행 경계를 걸치므로(straddle) 행 상자 위로 나가도 된다. 가로는
+ * 본문과 같은 16px 거터(`right-4`)를 지킨다. 본문 겹침은 아래
+ * `assertHoverToolbarClearsBodyText`가 잰다.
  */
 async function assertHoverToolbarPlacement(page, where) {
   const info = await page.evaluate(`(() => {
@@ -2278,15 +2279,15 @@ async function assertHoverToolbarPlacement(page, where) {
       if (!row) return { seq: null, within: false };
       const r = row.getBoundingClientRect();
       const t = bar.getBoundingClientRect();
+      const fromRight = Math.round(r.right - t.right);
       return {
         seq: row.getAttribute('data-seq'),
         within:
           t.left >= r.left - 1 &&
-          t.right <= r.right + 1 &&
-          t.top >= r.top - 1 &&
-          t.bottom <= r.bottom + 1,
-        fromRight: Math.round(r.right - t.right),
+          t.right <= r.right + 1,
+        fromRight,
         fromTop: Math.round(t.top - r.top),
+        gutterOk: Math.abs(fromRight - 16) <= 2,
       };
     });
   })()`);
@@ -2296,11 +2297,82 @@ async function assertHoverToolbarPlacement(page, where) {
   const stray = info.find((item) => !item.within);
   if (stray) {
     throw new Error(
-      `[호버 툴바 ${where}] seq ${stray.seq}: 툴바가 행 상자를 벗어났다`
+      `[호버 툴바 ${where}] seq ${stray.seq}: 툴바가 행 상자를 가로로 벗어났다`
+    );
+  }
+  const gutter = info.find((item) => !item.gutterOk);
+  if (gutter) {
+    throw new Error(
+      `[호버 툴바 ${where}] seq ${gutter.seq}: 우측 거터 ${gutter.fromRight}px (기대 16px)`
     );
   }
   console.log(
     `  호버 툴바 위치 ${where}: ${info.length}개, 우측 ${info[0].fromRight}px · 상단 ${info[0].fromTop}px`
+  );
+}
+
+/**
+ * 툴바 상자 ∩ 자기 행 본문 텍스트 Range = 0 (#1743 B-3).
+ *
+ * 삭제된 `assertActionGutterClearsBody`의 후계. 상자 대 상자가 아니라
+ * `data-row-body` 안의 글자 Range를 px로 잰다. 겹치면 가려진 글자 수와
+ * 면적을 말한다.
+ */
+async function assertHoverToolbarClearsBodyText(page, where) {
+  const info = await page.evaluate(`(() => {
+    function intersects(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+    const bars = Array.from(
+      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
+    );
+    return bars.map((bar) => {
+      const row = bar.closest('[data-testid="timeline-message"]');
+      const body = row && row.querySelector('[data-row-body]');
+      if (!row || !body) return { seq: null, chars: -1, area: -1 };
+      const t = bar.getBoundingClientRect();
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let chars = 0;
+      let area = 0;
+      let sample = "";
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const r = range.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (!intersects(t, r)) continue;
+          chars += 1;
+          const w = Math.min(t.right, r.right) - Math.max(t.left, r.left);
+          const h = Math.min(t.bottom, r.bottom) - Math.max(t.top, r.top);
+          area += Math.max(0, w) * Math.max(0, h);
+          if (sample.length < 24) sample += text[i];
+        }
+      }
+      return {
+        seq: row.getAttribute("data-seq"),
+        chars,
+        area: Math.round(area),
+        sample,
+        fromTop: Math.round(t.top - row.getBoundingClientRect().top),
+      };
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[호버 툴바 본문 ${where}] 잴 툴바가 없다`);
+  }
+  const hit = info.find((item) => item.chars > 0);
+  if (hit) {
+    throw new Error(
+      `[호버 툴바 본문 ${where}] seq ${hit.seq}: 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
+    );
+  }
+  console.log(
+    `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0 · 상단 ${info[0].fromTop}px`
   );
 }
 
@@ -3338,8 +3410,36 @@ async function captureScheme(browser, scheme) {
   await login.waitForTimeout(300);
   await assertHoverToolbarCount(login, `hover ${scheme}`, 1);
   await assertHoverToolbarPlacement(login, `hover ${scheme}`);
+  await assertHoverToolbarClearsBodyText(login, `hover ${scheme}`);
   await assertNoHorizontalOverflow(login, `hover toolbar ${scheme}`);
   await assertRowTabStops(login, `hover ${scheme}`);
+  // N-2 / B-1: the React button on the mounted toolbar must open the picker.
+  // The ⋯ 메뉴 path is a different consumer and used to stay green while this
+  // one crashed.
+  await login.getByTestId("toolbar-react-more").last().click();
+  await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
+  const chipPlus = actionRow.getByTestId("reaction-add");
+  if ((await chipPlus.count()) > 0) {
+    await login.keyboard.press("Escape");
+    await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+    await actionRow.hover();
+    await chipPlus.click();
+    await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+    await login.getByTestId("emoji-search").waitFor({ state: "visible" });
+  }
+  await login.keyboard.press("Escape");
+  await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
+  await login.setViewportSize({ width: 900, height: 800 });
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
+  await assertHoverToolbarClearsBodyText(login, `hover 900 ${scheme}`);
+  await assertHoverToolbarPlacement(login, `hover 900 ${scheme}`);
+  await login.setViewportSize(VIEWPORT);
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
   const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
   await login.screenshot({ path: actionsShot });
   shots.push(actionsShot);
@@ -3349,7 +3449,10 @@ async function captureScheme(browser, scheme) {
   //     툴바는 비포커스 행에 없으므로, 바로 앞 행의 로빙 정거장에서 Tab을 눌러
   //     마지막 행으로 들어간다. 그 순간 focus-within 이 툴바를 마운트하고,
   //     포커스는 이미 보이는 컨트롤에 있어야 한다 (opacity-0 트리거에 착지하는
-  //     옛 경로의 반대).
+  //     옛 경로의 반대). hover 프레임의 포인터가 마지막 행에 남아 있으면
+  //     툴바가 미리 떠 있으므로, 키보드 전에 포인터를 치운다.
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(100);
   const tabStart = await login.evaluate(`(() => {
     const rows = Array.from(
       document.querySelectorAll('[data-testid="timeline-message"]')
@@ -3370,6 +3473,7 @@ async function captureScheme(browser, scheme) {
   let landedOn = "";
   for (let press = 0; press < 12; press++) {
     await login.keyboard.press("Tab");
+    await login.waitForTimeout(30);
     const proof = await login.evaluate(`(() => {
       const el = document.activeElement;
       if (!el) return { inLast: false, testId: "", focusVisible: false, opacity: 0, toolbar: 0 };
@@ -3454,8 +3558,17 @@ async function captureScheme(browser, scheme) {
       `[키보드 ${scheme}] 툴바 ←/→ 가 ${beforeArrow}에서 움직이지 않았다`
     );
   }
+  await login.keyboard.press("ArrowLeft");
+  const backArrow = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  if (backArrow !== beforeArrow) {
+    throw new Error(
+      `[키보드 ${scheme}] ← 가 ${afterArrow}에서 ${beforeArrow}로 돌아오지 못했다 (${backArrow || "(없음)"})`
+    );
+  }
   console.log(
-    `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow}`
+    `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow} → ${backArrow}`
   );
   await login.waitForTimeout(300);
   const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
