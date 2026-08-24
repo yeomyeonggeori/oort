@@ -9,8 +9,17 @@ import {
   Smile,
   Trash2,
 } from "lucide-react";
-import { useState, type Ref } from "react";
+import { useLayoutEffect, useRef, useState, type Ref } from "react";
 import { cn } from "@/design/lib/cn";
+import {
+  recordEmojiUse,
+  useFrequentEmojis,
+} from "@/features/emoji/frequencyStore";
+import {
+  HOVER_TOOLBAR_REACTION_SEED,
+  HOVER_TOOLBAR_SLOT_COUNT,
+  toolbarClipsScrollerTop,
+} from "./hoverToolbarModel";
 import {
   Dialog,
   DialogContent,
@@ -35,25 +44,33 @@ import { Button } from "@/design/ui/button";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 
 // =============================================================================
-// The message action surfaces (B11).
+// The message action surfaces (B11, hover toolbar reintroduced #1743).
 //
 // One set of actions, three summons, split by **what the input device can do**
 // rather than by how wide the window is:
 //
-//   * **a pointer that can hover** - a ⋯ trigger appears in the row's own
-//     gutter and opens a menu, while right-click opens the same inventory at
-//     the pointer. A text selection yields to the browser's native menu. One
-//     visible control, therefore one tab stop. R1 shipped a six-button bar and failed
-//     twice over: `opacity-0` hides a button from the eye but not from Tab
-//     (up to ~150 tab stops between the timeline and the composer in a
-//     virtualized list), and skill §6 puts row-level actions in a menu, not in
-//     a visible button row. MOMO-626 R1 M8 reverted a change that added ONE tab
-//     stop per agent group; this had added six per message.
+//   * **a pointer that can hover** - on row hover or focus-within, a floating
+//     toolbar straddles the top-right (16px gutter, no own-row body overlap):
+//     frequency slots, React, Reply, and ⋯. Right-click still opens the same
+//     inventory at the pointer. A text selection yields to the browser's
+//     native menu and unmounts the toolbar so a drag is not stolen.
+//     Edit/Delete stay in the overflow menu.
+//
+//     R1 shipped a six-button bar and failed twice: `opacity-0` hides a button
+//     from the eye but not from Tab (up to ~150 tab stops in a virtualized
+//     list), and skill §6 used to forbid a visible button row. The 2026-08-24
+//     reintroduction is the two conditions that close those failures: the
+//     toolbar DOM is not mounted on a row that is not hovered, not focused,
+//     and has no open overlay (no opacity/visibility trick), and the toolbar
+//     is a WAI-ARIA toolbar whose items join the row's one roving group so
+//     it adds at most one tab stop. Open popover/menu keeps it mounted
+//     because focus then lives in a portal.
+//
 //   * **a finger** - a long press opens a bottom sheet, every row 44px. Hover
-//     does not exist on a touch screen, so the gutter and its trigger are not
-//     rendered there at all (tokens.css `pointer-only`): a control that no
-//     gesture can reach is worse than no control, and the width it would take
-//     is width the message text gets to keep.
+//     does not exist on a touch screen, so the toolbar is not rendered there
+//     at all. A control that no gesture can reach is worse than no control,
+//     and the width it would take is width the message text gets to keep.
+//     The sheet does not grow a frequency row (out of scope).
 //
 // The axis is `(hover: none)`, not a breakpoint. R1 keyed the bar to width and
 // the long press to `pointerType`, so a mouse in a 500px window had a bar that
@@ -124,7 +141,7 @@ function actionIcon(item: MessageActionItem, pinned: boolean) {
 function invokeAction(
   key: MessageActionItemKey,
   callbacks: MessageActionCallbacks,
-  onOpenPicker: () => void
+  onOpenPicker: (opener?: HTMLElement | null) => void
 ) {
   if (key.startsWith("react:")) {
     callbacks.onReact(key.slice("react:".length));
@@ -168,7 +185,7 @@ function ActionMenuItem({
   item: MessageActionItem;
   pinned: boolean;
   callbacks: MessageActionCallbacks;
-  onOpenPicker: () => void;
+  onOpenPicker: (opener?: HTMLElement | null) => void;
   compact?: boolean;
 }) {
   const props = {
@@ -178,7 +195,11 @@ function ActionMenuItem({
     onSelect: (event: Event) => {
       // CopyButton's receipt only works while it remains visible. Keep this one
       // row open long enough to become 「복사됨」; every other action dismisses.
-      if (item.key === "copy") event.preventDefault();
+      // react-more opens a picker anchored to the ⋯ trigger. If Radix closes
+      // the menu first, the hover toolbar can unmount (pointer is on the
+      // portaled item, outside the row) before setPickerOpen runs, and the
+      // popover is left with a detached anchor.
+      if (item.key === "copy" || item.key === "react-more") event.preventDefault();
       invokeAction(item.key, callbacks, onOpenPicker);
     },
     className: compact ? "size-control-sm justify-center px-0" : undefined,
@@ -227,7 +248,7 @@ function MessageActionMenuItems({
   copied: boolean;
   pinned: boolean;
   callbacks: MessageActionCallbacks;
-  onOpenPicker: () => void;
+  onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const items = messageActionItemsForSurface(
     surface === "dropdown" ? "menu" : "context",
@@ -285,80 +306,174 @@ function MessageActionMenuItems({
   );
 }
 
+const toolbarItemClass =
+  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+
 /**
- * The row's action gutter: a reserved 32px column, and inside it the single
- * control that opens everything.
+ * Floating hover/focus toolbar. The parent decides whether this is mounted;
+ * this component never hides itself with opacity or visibility.
  *
- * **Why a reserved column.** R1 floated the bar over the row with a negative
- * offset (`-top-3` against a 32px bar), which left 20px of it inside the row
- * and covered the first line of the message it belonged to - in a Korean
- * paragraph the first line reaches the right edge almost every time, so the bar
- * covered the text you were reading. Any offset is a bet about line heights.
- * A column is not a bet: text stops where the gutter starts, and the trigger
- * has nothing to overlap. The width is paid on every row of the surface, which
- * is what keeps the right edge of the channel straight.
+ * Custom rather than a Radix Toolbar: that primitive is not vendored, and a
+ * row-local toolbar has to join the row's existing roving group (`data-row-action`)
+ * so ←/→ can enter and leave it (#1743 M-2). Hover must not call `focus()`; the
+ * pointer highlight is CSS only (UX-EB cursor split).
  *
- * The trigger is `absolute` inside that column so it contributes no height: a
- * 28px control must not make a 24px line into a 28px row.
+ * Placement straddles the row's top edge (`hover-toolbar-straddle`) and keeps
+ * the same 16px right gutter as the body (`right-4`). When that would clip the
+ * scroller top, it mirrors to the row's bottom edge
+ * (`hover-toolbar-straddle-below`, #1743 H-4). Own-row body text must not
+ * intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
-export function MessageActionColumn({
+export function MessageHoverToolbar({
   available,
   canCopy,
   copied,
   pinned,
   callbacks,
   onOpenPicker,
-  hidden,
+  menuOpen,
+  onMenuOpenChange,
   triggerRef,
+  mineEmojis,
 }: {
   available: MessageActionAvailability;
   canCopy: boolean;
   copied: boolean;
-  /** 이슈 #1112 - whether this message is currently pinned, which flips the label. */
   pinned: boolean;
   callbacks: MessageActionCallbacks;
-  onOpenPicker: () => void;
-  /** While the row is being edited the editor owns it (R2 M3). */
-  hidden?: boolean;
-  /** Surviving ⋯ trigger used as the reaction picker anchor (H-4). */
+  onOpenPicker: (opener?: HTMLElement | null) => void;
+  menuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
+  /** Surviving ⋯ trigger used as the reaction picker fallback anchor (H-4). */
   triggerRef?: Ref<HTMLButtonElement>;
+  mineEmojis: ReadonlySet<string>;
 }) {
-  const [open, setOpen] = useState(false);
-  useEscapeLayer(open, () => setOpen(false));
-  const hasItems =
+  useEscapeLayer(menuOpen, () => onMenuOpenChange(false));
+  const barRef = useRef<HTMLDivElement>(null);
+  const [straddleBelow, setStraddleBelow] = useState(false);
+  const liveSlots = useFrequentEmojis(
+    HOVER_TOOLBAR_REACTION_SEED,
+    HOVER_TOOLBAR_SLOT_COUNT
+  );
+  // Freeze rank for the life of this mount (focus on a slot can keep the
+  // mount alive). A click must not rearrange the glyph under the cursor;
+  // the next unmount+mount picks up the new order (#1743 H-2). aria-pressed
+  // still follows live `mineEmojis`.
+  const [slots] = useState(liveSlots);
+  useLayoutEffect(() => {
+    if (straddleBelow) return;
+    const bar = barRef.current;
+    if (!bar) return;
+    const scroller =
+      bar.closest("[data-virtuoso-scroller]") ??
+      bar.closest('[data-testid="timeline-virtuoso"]');
+    if (!(scroller instanceof HTMLElement)) return;
+    if (
+      toolbarClipsScrollerTop(
+        bar.getBoundingClientRect(),
+        scroller.getBoundingClientRect()
+      )
+    ) {
+      setStraddleBelow(true);
+    }
+  }, [straddleBelow]);
+  const hasMenu =
     messageActionItems(available, { canCopy, copied, pinned }).length > 0;
+  if (!available.react && !available.reply && !hasMenu) return null;
+
   return (
     <div
-      data-testid="message-action-column"
-      className="pointer-only relative w-control shrink-0"
+      ref={barRef}
+      role="toolbar"
+      aria-label="메시지 액션"
+      aria-orientation="horizontal"
+      data-testid="message-hover-toolbar"
+      data-straddle={straddleBelow ? "below" : "top"}
+      className={cn(
+        straddleBelow
+          ? "hover-toolbar-straddle-below"
+          : "hover-toolbar-straddle",
+        "absolute right-4 z-20 flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
+      )}
     >
-      {hasItems && !hidden && (
-        // `modal={false}`: a row menu is not a mode. Radix's modal branch locks
-        // `pointer-events` on the body, which stops the timeline scrolling
-        // underneath and fights the confirm dialog that 지우기 opens next.
-        <DropdownMenu open={open} onOpenChange={setOpen} modal={false}>
+      {available.react &&
+        slots.map((emoji) => {
+          const mine = mineEmojis.has(emoji);
+          return (
+            <button
+              key={emoji}
+              type="button"
+              data-toolbar-item=""
+              data-row-action=""
+              data-testid={`toolbar-react-${emoji}`}
+              aria-label={
+                mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`
+              }
+              title={mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`}
+              aria-pressed={mine}
+              onClick={() => {
+                recordEmojiUse(emoji);
+                callbacks.onReact(emoji);
+              }}
+              className={cn(
+                toolbarItemClass,
+                "text-title",
+                mine && "bg-accent-soft text-ink"
+              )}
+            >
+              <span aria-hidden="true">{emoji}</span>
+            </button>
+          );
+        })}
+      {available.react && (
+        <div className="mx-px h-4 w-px bg-line" aria-hidden="true" />
+      )}
+      {available.react && (
+        <button
+          type="button"
+          data-toolbar-item=""
+          data-row-action=""
+          data-testid="toolbar-react-more"
+          aria-label="다른 반응 고르기"
+          title="다른 반응 고르기"
+          onClick={(event) => onOpenPicker(event.currentTarget)}
+          className={toolbarItemClass}
+        >
+          <Smile className="size-4" aria-hidden="true" />
+        </button>
+      )}
+      {available.reply && (
+        <button
+          type="button"
+          data-toolbar-item=""
+          data-row-action=""
+          data-testid="toolbar-reply"
+          aria-label="답글 달기"
+          title="답글 달기"
+          onClick={() => callbacks.onReply()}
+          className={toolbarItemClass}
+        >
+          <MessageSquareReply className="size-4" aria-hidden="true" />
+        </button>
+      )}
+      {hasMenu && (
+        <DropdownMenu
+          open={menuOpen}
+          onOpenChange={onMenuOpenChange}
+          modal={false}
+        >
           <DropdownMenuTrigger asChild>
             <button
               type="button"
               ref={triggerRef}
+              data-toolbar-item=""
               data-testid="message-actions-trigger"
-              // The row's preferred keyboard entry point (see rowFocus.ts):
-              // last in DOM order, first in the order someone looks for it.
               data-row-action="primary"
-              aria-label="메시지 액션"
-              title="메시지 액션"
+              aria-label="더 많은 액션"
+              title="더 많은 액션"
               className={cn(
-                "absolute right-0 top-0 flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-opacity",
-                "hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
-                // Invisible and un-clickable until the row is under the pointer
-                // or holds focus. `pointer-events-none` matters: an invisible
-                // button that still takes clicks is a trap in the gutter.
-                "pointer-events-none opacity-0",
-                "group-hover:pointer-events-auto group-hover:opacity-100",
-                "group-focus-within:pointer-events-auto group-focus-within:opacity-100",
-                // While the menu is open focus lives in the portal, outside this
-                // row, so `focus-within` cannot hold the trigger visible.
-                "data-[state=open]:pointer-events-auto data-[state=open]:bg-surface-hover data-[state=open]:text-ink data-[state=open]:opacity-100"
+                toolbarItemClass,
+                "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
               )}
             >
               <MoreHorizontal className="size-4" aria-hidden="true" />
@@ -396,6 +511,7 @@ export function MessageActionContextMenu({
   pinned,
   callbacks,
   onOpenPicker,
+  onOpenChange,
 }: {
   children: React.ReactElement;
   /** False on touch-only hardware and while text in this row is selected. */
@@ -405,12 +521,17 @@ export function MessageActionContextMenu({
   copied: boolean;
   pinned: boolean;
   callbacks: MessageActionCallbacks;
-  onOpenPicker: () => void;
+  onOpenPicker: (opener?: HTMLElement | null) => void;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
-  useEscapeLayer(open, () => setOpen(false));
+  const setMenuOpen = (next: boolean) => {
+    setOpen(next);
+    onOpenChange?.(next);
+  };
+  useEscapeLayer(open, () => setMenuOpen(false));
   return (
-    <ContextMenu open={open} onOpenChange={setOpen} modal={false}>
+    <ContextMenu open={open} onOpenChange={setMenuOpen} modal={false}>
       <ContextMenuTrigger asChild disabled={!enabled}>
         {children}
       </ContextMenuTrigger>
@@ -492,7 +613,7 @@ export function MessageActionSheet({
   /** 이슈 #1112 - flips the pin row's label, exactly as it does in the menu. */
   pinned: boolean;
   callbacks: MessageActionCallbacks;
-  onOpenPicker: () => void;
+  onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const close = () => onOpenChange(false);
   const items = messageActionItemsForSurface("sheet", available, {

@@ -47,6 +47,8 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(panel).not.toContain("event.stopPropagation()");
     expect(row).toContain("triggerRef={actionTriggerRef}");
     expect(row).toContain("openReactionPicker(actionTriggerRef.current)");
+    expect(row).toContain("<MessageHoverToolbar");
+    expect(actions).toContain("useFrequentEmojis");
   });
 
   it("채널과 스레드가 같은 멘션 목록·첨부 트레이를 쓴다", () => {

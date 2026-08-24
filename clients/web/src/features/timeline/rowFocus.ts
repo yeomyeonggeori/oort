@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, type RefObject } from "react";
 import { ROW_ACTIONS_SHORTCUT } from "@/app/keyboardShortcuts";
 
 // =============================================================================
@@ -12,8 +12,16 @@ import { ROW_ACTIONS_SHORTCUT } from "@/app/keyboardShortcuts";
 //
 // **그래서 무엇을.** 행 안의 컨트롤들은 하나의 로빙 그룹이 된다. 그 중 정확히
 // 하나만 `tabIndex=0`이고 나머지는 `-1`이다. Tab은 행을 한 번에 지나가고,
-// 행 안에서는 ←/→가 컨트롤 사이를 돈다. 툴바·라디오 그룹이 20년째 쓰는
-// 그 패턴이고, 여기서 새로 만든 것은 없다.
+// 행 안에서는 ←/→가 컨트롤 사이를 돈다. 툴바 항목도 이 그룹의 구성원이다
+// (#1743 M-2: 툴바 안 별도 링 금지).
+//
+// **actionable 포인터 행의 rest 정거장은 행 자신이다** (W-4, #1743 B-2/H-1).
+// 아바타를 승격하지 않는다. 행이 **키보드** 포커스(`:focus-visible`)를 받으면
+// 툴바가 마운트되고, 포커스는 preferred 항목(⋯)으로 핸드오프된다. 마우스
+// mousedown이 행을 포커스해도 핸드오프하지 않는다 — `focus({focusVisible})`
+// 강제는 클릭에 호박색 링을 그리고 본문 드래그 선택을 접는다 (#1743 B-4).
+// `normalizeRow`는 그 핸드오프가 끝나기 전에 행의 tabindex를 떼지 않는다.
+// 순회 중 재실행해도 행당 정거장은 1이다.
 //
 // **왜 ↑/↓가 아니라 ←/→인가.** 위아래는 이미 타임라인을 스크롤한다. 그것을
 // 가로채면 메시지를 읽으려는 사람에게서 스크롤을 빼앗는 셈이다.
@@ -48,10 +56,10 @@ export function nextRovingIndex(
 /**
  * 지금 이 행에서 실제로 포커스를 받을 수 있는 컨트롤들.
  *
- * `disabled`와 `display:none`을 빼는 것이 핵심이다. 액션 열은 hover가 없는
- * 기기에서 통째로 사라지고(tokens.css `pointer-only`), 칩은 삭제된 메시지에서
- * disabled가 된다. 둘 중 하나를 그룹의 유일한 구성원으로 골라 두면 그 행에는
- * 아예 닿을 수 없는 탭 스톱 하나가 남는다.
+ * `disabled`와 `display:none`을 빼는 것이 핵심이다. 호버 툴바는 hover가 없는
+ * 기기와 비호버 행에서 마운트 자체가 없고, 칩은 삭제된 메시지에서 disabled가
+ * 된다. 둘 중 하나를 그룹의 유일한 구성원으로 골라 두면 그 행에는 아예 닿을
+ * 수 없는 탭 스톱 하나가 남는다.
  */
 function rowActionItems(root: HTMLElement): HTMLElement[] {
   return Array.from(
@@ -69,6 +77,25 @@ function preferredIndex(items: HTMLElement[]): number {
     (el) => el.getAttribute("data-row-action") === "primary"
   );
   return primary >= 0 ? primary : 0;
+}
+
+function hasPrimary(items: HTMLElement[]): boolean {
+  return items.some((el) => el.getAttribute("data-row-action") === "primary");
+}
+
+function isActionableRow(root: HTMLElement): boolean {
+  return root.getAttribute("data-actionable") === "true";
+}
+
+function setItemTabStops(items: HTMLElement[], active: number): void {
+  for (let i = 0; i < items.length; i++) {
+    items[i].tabIndex = i === active ? 0 : -1;
+  }
+}
+
+function restStationOnRow(root: HTMLElement, items: HTMLElement[]): void {
+  root.tabIndex = 0;
+  for (const item of items) item.tabIndex = -1;
 }
 
 /**
@@ -137,6 +164,13 @@ export function normalizeRow(
   options?: { resetToPreferred?: boolean }
 ): void {
   const items = rowActionItems(root);
+  const activeEl = document.activeElement;
+  const rowHoldsFocus = activeEl === root;
+  const focusedItem = options?.resetToPreferred
+    ? -1
+    : items.findIndex((el) => el === activeEl);
+  const actionable = isActionableRow(root);
+
   if (items.length === 0) {
     // **컨트롤이 하나도 없는 행은 자기 자신이 정거장이 된다** (리뷰 W-4).
     //
@@ -154,14 +188,86 @@ export function normalizeRow(
     root.tabIndex = 0;
     return;
   }
-  // 컨트롤이 생긴 행에서는 그 자리를 돌려준다. 그러지 않으면 반응이 하나
-  // 달리는 순간 행에 정거장이 둘이 된다.
-  if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
-  const focused = options?.resetToPreferred
-    ? -1
-    : items.findIndex((el) => el === document.activeElement);
-  const active = focused >= 0 ? focused : preferredIndex(items);
-  for (let i = 0; i < items.length; i++) {
-    items[i].tabIndex = i === active ? 0 : -1;
+
+  // 행이 포커스를 들고 있는 동안에는 정거장을 빼앗지 않는다 (#1743 B-2).
+  // 툴바 마운트 → MutationObserver → 여기서 tabindex를 떼면 Chrome이 포커스를
+  // BODY로 떨어뜨린다. 핸드오프가 ⋯에 옮긴 뒤에야 행에서 뗀다.
+  if (rowHoldsFocus) {
+    restStationOnRow(root, items);
+    return;
   }
+
+  if (focusedItem >= 0) {
+    if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
+    setItemTabStops(items, focusedItem);
+    return;
+  }
+
+  // 로빙 그룹 밖(링크·카드·디스클로저)에 포커스가 있다. 아바타를 승격하지
+  // 않는다. 툴바가 떠 있으면 ⋯만 구성원 정거장으로 두어 Tab이 닿게 한다.
+  const inside =
+    activeEl instanceof Node && root.contains(activeEl) && !options?.resetToPreferred;
+  if (actionable && inside) {
+    if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
+    if (hasPrimary(items)) {
+      setItemTabStops(items, preferredIndex(items));
+    } else {
+      for (const item of items) item.tabIndex = -1;
+    }
+    return;
+  }
+
+  // Rest, 또는 행을 떠난 뒤의 복원. actionable 행은 행 자신이 정거장이다.
+  if (actionable) {
+    restStationOnRow(root, items);
+    return;
+  }
+
+  if (root.hasAttribute("tabindex")) root.removeAttribute("tabindex");
+  setItemTabStops(items, preferredIndex(items));
+}
+
+/**
+ * 행이 키보드로 포커스를 들고 있는가. 마우스 mousedown 포커스는
+ * `:focus-visible`이 아니라서 여기서 거짓이다.
+ */
+export function isKeyboardRowFocus(root: HTMLElement): boolean {
+  if (document.activeElement !== root) return false;
+  try {
+    return root.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 행이 키보드 포커스를 들고 있고 툴바가 마운트됐으면 ⋯로 옮긴다.
+ * 포인터 hover 마운트는 activeElement가 행이 아니므로 포커스를 훔치지 않는다.
+ * 마우스 mousedown 포커스는 `:focus-visible`이 아니라서 아무것도 하지 않는다
+ * (#1743 B-4). 키보드 경로의 모달리티는 평범한 `focus()`로 승계된다.
+ */
+export function handoffRowFocusToPreferred(root: HTMLElement): void {
+  if (!isKeyboardRowFocus(root)) return;
+  const items = rowActionItems(root);
+  const primary = items.find(
+    (el) => el.getAttribute("data-row-action") === "primary"
+  );
+  const target = primary ?? items[0];
+  if (!target) return;
+  target.focus();
+  normalizeRow(root);
+}
+
+/** 행이 키보드 포커스를 들고 툴바가 떠 있으면 ⋯로 핸드오프한다. */
+export function useHoverToolbarFocusHandoff(
+  ref: RefObject<HTMLElement | null>,
+  toolbarMounted: boolean,
+  rowFocused = toolbarMounted
+): void {
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root || !toolbarMounted || !rowFocused) return;
+    if (!isKeyboardRowFocus(root)) return;
+    handoffRowFocusToPreferred(root);
+  }, [ref, toolbarMounted, rowFocused]);
 }
