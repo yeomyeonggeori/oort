@@ -308,6 +308,7 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `WEBHOOK_DISABLE_AFTER_5XX` | ✅ (기본 5, 최소 1). 연속 목적지 5xx 가 이 수에 닿으면 구독을 자동 비활성하고 `event_subscription.auto_disabled` 감사행을 남긴다 |
 | `MOMO_ENV` / `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` / `LOG_LEVEL` | ✅ (api 와 같은 규칙) |
 | `MOMO_UNFURL_ENABLED` | ✅ (기본 0 — 옵트인). `1` 일 때만 링크 언퍼얼 drain 이 OG/Twitter fetch 를 한다 (ADR-0170). 워크스페이스 설정 off 는 fetch 자체를 생략한다 |
+| `MOMO_DOORBELL_ENABLED` | ✅ (기본 off — 옵트인). 소문자 `true` 일 때만 hosted 커넥션 도어벨 등록 REST와 sender drain 이 열린다 (ADR-0171 D6). `True`/`1`/`yes` 는 닫힘 |
 
 migrate/runtime-roles는 prod의 스위치를 그대로 읽는다: `DATABASE_URL`,
 `MOMO_RUNTIME_ROLE_PROVISION`(0|1), `MOMO_BOOTSTRAP_RUNTIME_ROLES`(0|1),

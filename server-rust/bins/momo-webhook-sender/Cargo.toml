@@ -50,3 +50,5 @@ tracing-subscriber.workspace = true
 # would, plus the real management routes to install the subscription.
 axum.workspace = true
 momo-server = { path = "../momo-server" }
+momo-auth = { path = "../../crates/momo-auth" }
+momo-messaging = { path = "../../crates/momo-messaging" }

@@ -28,6 +28,9 @@ hmac.workspace = true
 sha2.workspace = true
 base64.workspace = true
 hex.workspace = true
+# ADR-0171: operator-supplied doorbell Bearer is stored as an AES-GCM sealed
+# box (reversible). Same crate the provider-link and inbox-cursor paths use.
+aes-gcm = "0.10"
 # `secret_ref` / Slack URL tokens are 32 bytes of CSPRNG. `getrandom` is the OS
 # entropy call and nothing else — deliberately not a general PRNG, because a
 # seedable generator is one refactor away from a predictable webhook secret.

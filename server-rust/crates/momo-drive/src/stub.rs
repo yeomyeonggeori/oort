@@ -14,12 +14,11 @@
 //!    [`DriveError::FileNotFound`] until an upload lands, which is what makes
 //!    "complete before uploading" a 404 in tests exactly as it is against Drive.
 //!
-//! What it deliberately does NOT do is diverge from the session it was told
-//! about: `file_metadata` reports the declared name/mime/size. A verifier that
-//! could report something else would let the completion route's mismatch branch
-//! be tested against the stub's imagination instead of against the route's
-//! logic; a suite that wants that branch implements [`DriveArchive`] itself and
-//! says so out loud.
+//! `file_metadata` reports the declared name/mime and the **measured** byte
+//! count once bytes have landed (a `size: 0` session is unknown, not a promise
+//! of an empty file). A verifier that needs the completion route's mismatch
+//! branch implements [`DriveArchive`] itself and says so out loud — the stub
+//! will not invent a size that contradicts the bytes it accepted.
 
 use std::collections::HashMap;
 
@@ -28,7 +27,10 @@ use bytes::Bytes;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
-use crate::{DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession};
+use crate::{
+    uploaded_size_refusal, DriveArchive, DriveContent, DriveError, DriveFile, DriveUploadSession,
+    MAX_ATTACHMENT_BYTES,
+};
 
 #[derive(Debug, Clone)]
 struct PendingUpload {
@@ -74,6 +76,9 @@ impl DriveArchive for StubDriveArchive {
         mime: &str,
         size_bytes: i64,
     ) -> Result<DriveUploadSession, DriveError> {
+        if !(0..=MAX_ATTACHMENT_BYTES).contains(&size_bytes) {
+            return Err(DriveError::ContentTooLarge);
+        }
         // Lowercase because the stub-upload route matches `[a-f0-9-]{36}`, the
         // same regex Swift's route used.
         let token = Uuid::new_v4().to_string().to_lowercase();
@@ -104,11 +109,16 @@ impl DriveArchive for StubDriveArchive {
             .and_then(|token| state.sessions.get(token))
             .filter(|pending| pending.bytes.is_some())
             .ok_or(DriveError::FileNotFound)?;
+        let size_bytes = pending
+            .bytes
+            .as_ref()
+            .expect("filtered to landed bytes")
+            .len() as i64;
         Ok(DriveFile {
             drive_file_id: pending.file_id.clone(),
             name: pending.name.clone(),
             mime: pending.mime.clone(),
-            size_bytes: pending.size_bytes,
+            size_bytes,
         })
     }
 
@@ -147,12 +157,8 @@ impl DriveArchive for StubDriveArchive {
             .sessions
             .get_mut(token)
             .ok_or(DriveError::FileNotFound)?;
-        // The session declared a length; an upload of a different length is the
-        // client contradicting itself, and Drive would reject it too.
-        if bytes.len() as i64 != pending.size_bytes {
-            return Err(DriveError::InvalidArguments(
-                "uploaded size does not match the session".into(),
-            ));
+        if let Some(error) = uploaded_size_refusal(pending.size_bytes, bytes.len() as i64) {
+            return Err(error);
         }
         if let Some(mime) = mime {
             if !mime.is_empty() && mime != pending.mime {
@@ -228,6 +234,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_zero_declaration_records_the_received_length() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        let session = archive
+            .create_resumable_upload(Uuid::nil(), "note.txt", "text/plain", 0)
+            .await
+            .expect("session");
+        let token = session.upload_url.rsplit('/').next().expect("token");
+        archive
+            .accept_stub_upload(token, Some("text/plain"), b"hello".to_vec())
+            .await
+            .expect("unknown declaration accepts measured bytes");
+        let metadata = archive
+            .file_metadata(&session.drive_file_id)
+            .await
+            .expect("metadata");
+        assert_eq!(metadata.size_bytes, 5);
+    }
+
+    #[tokio::test]
     async fn an_upload_that_contradicts_its_session_is_refused() {
         let archive = StubDriveArchive::new("http://127.0.0.1:9");
         let session = archive
@@ -254,6 +279,23 @@ mod tests {
                 .await
                 .expect_err("unknown token"),
             DriveError::FileNotFound
+        );
+    }
+
+    #[tokio::test]
+    async fn a_session_over_the_ceiling_is_refused_before_bytes() {
+        let archive = StubDriveArchive::new("http://127.0.0.1:9");
+        assert_eq!(
+            archive
+                .create_resumable_upload(
+                    Uuid::nil(),
+                    "huge.bin",
+                    "application/octet-stream",
+                    MAX_ATTACHMENT_BYTES + 1
+                )
+                .await
+                .expect_err("over the ceiling"),
+            DriveError::ContentTooLarge
         );
     }
 

@@ -73,6 +73,14 @@ pub trait WebhookTransport: Send + Sync {
     ) -> DeliveryResult;
 }
 
+/// Doorbell hop (ADR-0171 D2): Bearer POST of a constant body. Distinct from
+/// [`WebhookTransport`] so a stub cannot accidentally send HMAC headers or a
+/// payload that names a workspace.
+#[allow(async_fn_in_trait)]
+pub trait DoorbellTransport: Send + Sync {
+    async fn ring(&self, url: &OutboundUrl, secret: &str, body: &[u8]) -> DeliveryResult;
+}
+
 /// The real client: SSRF-guarded, address-pinned, redirect-refusing.
 pub struct SafeWebhookTransport {
     allow_development_http: bool,
@@ -164,6 +172,57 @@ impl WebhookTransport for SafeWebhookTransport {
             Err(error) => DeliveryResult::Transient {
                 // The request may or may not have reached the host — an audit
                 // row either way would be a guess.
+                reason: if error.is_timeout() {
+                    "request timed out".to_string()
+                } else {
+                    "request failed".to_string()
+                },
+                status: None,
+            },
+        }
+    }
+}
+
+impl DoorbellTransport for SafeWebhookTransport {
+    async fn ring(&self, url: &OutboundUrl, secret: &str, body: &[u8]) -> DeliveryResult {
+        let Some(address) = self.checked_address(url).await else {
+            return DeliveryResult::Permanent {
+                reason: "SSRF guard rejected destination".to_string(),
+                status: None,
+            };
+        };
+
+        let client = match reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(self.timeout)
+            .resolve_to_addrs(&url.host, &[address])
+            .build()
+        {
+            Ok(client) => client,
+            Err(error) => {
+                return DeliveryResult::Transient {
+                    reason: format!("client build failed: {error}"),
+                    status: None,
+                }
+            }
+        };
+
+        let response = client
+            .post(&url.absolute)
+            .header("Content-Type", "application/json")
+            .header("User-Agent", "momo-doorbell/1")
+            .header("Authorization", format!("Bearer {secret}"))
+            .body(body.to_vec())
+            .send()
+            .await;
+
+        match response {
+            Ok(response) => {
+                let status = response.status().as_u16();
+                drop(response.bytes().await);
+                classify(status)
+            }
+            Err(error) => DeliveryResult::Transient {
                 reason: if error.is_timeout() {
                     "request timed out".to_string()
                 } else {
