@@ -1,5 +1,87 @@
-import { describe, expect, it } from "vitest";
-import { nextRovingIndex } from "./rowFocus";
+// @vitest-environment jsdom
+
+import { act, createElement, useRef } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import {
+  nextRovingIndex,
+  normalizeRow,
+  useRowRovingFocus,
+} from "./rowFocus";
+
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let offsetParentDescriptor: PropertyDescriptor | undefined;
+let mountedRoot: Root | null = null;
+
+beforeAll(() => {
+  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  // jsdom에는 layout engine이 없어 offsetParent가 항상 null이다. rowFocus가
+  // display:none 구성원을 버리는 제품 분기를 유지한 채, 이 픽스처의 붙어 있는
+  // 버튼만 실제로 보이는 것으로 번역한다.
+  offsetParentDescriptor = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "offsetParent"
+  );
+  Object.defineProperty(HTMLElement.prototype, "offsetParent", {
+    configurable: true,
+    get() {
+      return this.parentElement;
+    },
+  });
+});
+
+afterEach(() => {
+  if (mountedRoot) {
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+  }
+  document.body.replaceChildren();
+});
+
+afterAll(() => {
+  if (offsetParentDescriptor) {
+    Object.defineProperty(
+      HTMLElement.prototype,
+      "offsetParent",
+      offsetParentDescriptor
+    );
+  } else {
+    Reflect.deleteProperty(HTMLElement.prototype, "offsetParent");
+  }
+  delete reactActEnvironment.IS_REACT_ACT_ENVIRONMENT;
+});
+
+function action(kind?: "primary"): HTMLButtonElement {
+  const button = document.createElement("button");
+  button.setAttribute("data-row-action", kind ?? "");
+  return button;
+}
+
+function RovingRow() {
+  const ref = useRef<HTMLDivElement>(null);
+  return createElement(
+    "div",
+    { ref, onKeyDown: useRowRovingFocus(ref), "data-testid": "row" },
+    createElement("button", {
+      "data-row-action": "primary",
+      "data-testid": "primary",
+    }),
+    createElement("button", {
+      "data-row-action": "",
+      "data-testid": "secondary",
+    })
+  );
+}
+
+function mountRovingRow(): HTMLElement {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountedRoot = createRoot(host);
+  act(() => mountedRoot?.render(createElement(RovingRow)));
+  return host.querySelector<HTMLElement>('[data-testid="row"]')!;
+}
 
 // 행 하나가 키보드에 얼마를 청구하는가를 정하는 산수. 위아래는 타임라인의
 // 스크롤이므로 이 함수는 좌우만 안다.
@@ -37,5 +119,86 @@ describe("nextRovingIndex", () => {
 
   it("빈 그룹은 아무 데도 가지 않는다", () => {
     expect(nextRovingIndex(0, 0, "ArrowRight")).toBeNull();
+  });
+});
+
+describe("normalizeRow", () => {
+  it("구성원이 없으면 행 자신만 탭 정거장으로 만든다", () => {
+    const row = document.createElement("div");
+
+    normalizeRow(row);
+
+    expect(row.tabIndex).toBe(0);
+  });
+
+  it("구성원이 생기면 행 정거장을 내리고 primary 하나를 우선한다", () => {
+    const row = document.createElement("div");
+    const secondary = action();
+    const primary = action("primary");
+    row.tabIndex = 0;
+    row.append(secondary, primary);
+
+    normalizeRow(row);
+
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    expect(secondary.tabIndex).toBe(-1);
+    expect(primary.tabIndex).toBe(0);
+  });
+
+  it("행 안에서 이미 focused인 구성원을 로빙 정거장으로 보존한다", () => {
+    const row = document.createElement("div");
+    const primary = action("primary");
+    const focused = action();
+    row.append(primary, focused);
+    document.body.append(row);
+    focused.focus();
+
+    normalizeRow(row);
+
+    expect(document.activeElement).toBe(focused);
+    expect(primary.tabIndex).toBe(-1);
+    expect(focused.tabIndex).toBe(0);
+  });
+});
+
+describe("useRowRovingFocus DOM lifecycle", () => {
+  it("늦게 마운트된 구성원을 MutationObserver가 -1로 재정규화한다", async () => {
+    const row = mountRovingRow();
+    const late = action();
+    late.dataset.testid = "late";
+
+    row.append(late);
+
+    await vi.waitFor(() => expect(late.tabIndex).toBe(-1));
+    expect(
+      Array.from(row.querySelectorAll<HTMLElement>("[data-row-action]")).filter(
+        (item) => item.tabIndex === 0
+      )
+    ).toHaveLength(1);
+  });
+
+  it("focusout은 행 안 이동을 보존하고 행을 떠날 때만 primary를 복원한다", () => {
+    const row = mountRovingRow();
+    const primary = row.querySelector<HTMLElement>('[data-testid="primary"]')!;
+    const secondary = row.querySelector<HTMLElement>(
+      '[data-testid="secondary"]'
+    )!;
+    const outside = document.createElement("button");
+    document.body.append(outside);
+    primary.tabIndex = -1;
+    secondary.tabIndex = 0;
+    secondary.focus();
+
+    secondary.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: primary })
+    );
+    expect(primary.tabIndex).toBe(-1);
+    expect(secondary.tabIndex).toBe(0);
+
+    secondary.dispatchEvent(
+      new FocusEvent("focusout", { bubbles: true, relatedTarget: outside })
+    );
+    expect(primary.tabIndex).toBe(0);
+    expect(secondary.tabIndex).toBe(-1);
   });
 });

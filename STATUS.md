@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 언퍼얼 클라이언트 후속 고정 (#1720 항목 1·3·4 + U-8 Nit, 2026-08-24)
+
+- rowFocus의 구성원 0/有 정규화·focused 보존과 MutationObserver 재정규화, 행 안/밖 focusout 복원을 jsdom 12개 유닛으로 고정했다.
+- 언퍼얼 data URL 캐시는 48개와 32 MiB 병행 LRU 예산을 쓰며, 캡처 픽스처는 1200×630 실제 OG 비율·자연 크기 단언으로 교체했다. 폰 TypingBar의 웹 헤딩 인용도 현행화했다.
+- 웹 1,429 tests·폰 1,301 tests·양쪽 tsc/lint와 전체 `capture:design`(light/dark·desktop/mobile, exit 0)이 green이다. #1720의 서버 읽기 fan-out 배치(2항)는 비스코프로 남아 이슈를 열어 둔다.
+
 ## 링크 언퍼얼 서버 표면 (#1698, ADR-0170, 2026-08-23) — 1/2
 
 - 마이그레이션 079 `message_unfurl` 계열(job·cache·tombstone·workspace on/off) + RLS FORCE. `schema_v0.sql` 불변. 워커는 `momo-webhook-sender` 프로세스의 옵트인 드레인(`MOMO_UNFURL_ENABLED` 기본 0). URL≤3 추출(코드블록·이메일 제외) → OG/Twitter 파싱 → upsert → `message.unfurl` broadcast. `message.seq` 불변.

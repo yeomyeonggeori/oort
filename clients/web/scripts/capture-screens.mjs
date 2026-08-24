@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -33,6 +34,62 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c;
+  }
+  return table;
+})();
+
+function crc32(buffer) {
+  let c = 0xffffffff;
+  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return c ^ 0xffffffff;
+}
+
+/**
+ * 1200×630 is the common OG thumbnail canvas. The old 1×1 black pixel could
+ * neither exercise `object-cover` nor make an aspect-ratio regression visible
+ * in the captured frame. The two-axis gradient makes both cropped edges and
+ * the retained centre legible without importing an external asset.
+ */
+function makeUnfurlPreviewPng(width, height) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  let at = 0;
+  for (let y = 0; y < height; y++) {
+    raw[at++] = 0;
+    for (let x = 0; x < width; x++) {
+      raw[at++] = 32 + Math.round((x / width) * 176);
+      raw[at++] = 52 + Math.round((y / height) * 140);
+      raw[at++] = 184 - Math.round((x / width) * 112);
+    }
+  }
+  const chunk = (type, body) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+const UNFURL_PREVIEW_PNG = makeUnfurlPreviewPng(1200, 630);
 
 // 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
 // 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
@@ -1632,10 +1689,7 @@ async function installMocks(context) {
     route.fulfill({
       status: 200,
       contentType: "image/png",
-      body: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "base64"
-      ),
+      body: UNFURL_PREVIEW_PNG,
     })
   );
   await context.route("**/v1/workspaces/*/unfurl-settings", (route) => {
@@ -3177,6 +3231,17 @@ async function captureScheme(browser, scheme) {
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await login.getByTestId("unfurl-card").waitFor({ state: "visible" });
+  const unfurlImage = login.getByTestId("unfurl-image");
+  await unfurlImage.waitFor({ state: "visible" });
+  const unfurlNaturalSize = await unfurlImage.evaluate((element) => ({
+    width: element.naturalWidth,
+    height: element.naturalHeight,
+  }));
+  if (unfurlNaturalSize.width !== 1200 || unfurlNaturalSize.height !== 630) {
+    throw new Error(
+      `언퍼얼 캡처 픽스처가 1200×630이 아니다 ${scheme}: ${JSON.stringify(unfurlNaturalSize)}`
+    );
+  }
   // 넓은 창도 같은 자로 잰다 (goal B9). 긴 무공백 토큰은 폰에서만 나는 결함이
   // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
   // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
@@ -3197,11 +3262,25 @@ async function captureScheme(browser, scheme) {
   shots.push(unfurlRemoveShot);
   await login.keyboard.press("Escape");
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "hidden" });
-  const unfurlFocusRestored = await unfurlRemoveOpener.evaluate(
-    (element) => element === document.activeElement
-  );
-  if (!unfurlFocusRestored) {
-    throw new Error(`언퍼얼 제거 Esc가 opener 초점을 복원하지 않았다 ${scheme}`);
+  // Portal removal can become observable one task before Radix runs its
+  // close-auto-focus callback. Do not manufacture focus for the proof; wait a
+  // bounded interval for the product callback and still fail if it never runs.
+  const unfurlFocusProof = await unfurlRemoveOpener.evaluate(async (element) => {
+    const deadline = performance.now() + 1_000;
+    while (element !== document.activeElement && performance.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    const active = document.activeElement;
+    return {
+      restored: element === active,
+      activeTag: active?.tagName ?? null,
+      activeTestId: active?.getAttribute("data-testid") ?? null,
+    };
+  });
+  if (!unfurlFocusProof.restored) {
+    throw new Error(
+      `언퍼얼 제거 Esc가 opener 초점을 복원하지 않았다 ${scheme}: ${JSON.stringify(unfurlFocusProof)}`
+    );
   }
 
   // Mocked author DELETE round trip. A separate page keeps the main evidence

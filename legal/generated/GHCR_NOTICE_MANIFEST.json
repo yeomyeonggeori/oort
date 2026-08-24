@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 292,
-    "npm": 412,
-    "unique_blobs": 343
+    "npm": 448,
+    "unique_blobs": 369
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "ed4a40f635423253e5a38e197603239c98a1c91dea7fecd997f15daa11d3dc89",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "2d47de89d74f085f62fba09307df858f90d6eb972bcee4db7742eb8be1beaf82",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "bb85609df736f68f239429c5d7fd929183d80d109fdc1ba54a21a52489c53882",
     "THIRD_PARTY_NOTICES.md": "9805840be5ca4af699dd1492b7ceda0a9d71fc0dd29faaa36e665efbfe2626df"
   },
   "inputs": {
-    "clarify_sha256": "433f24a14226724181e3c6c9f4323a13824be8bd963bdf84b8389eef1f6a63b3",
-    "clients_web_package_lock_sha256": "b3f0711d6e24b599928e9dfbacfc8b1fde6b5059120fe1a52d9b4469c7f399ea",
+    "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
+    "clients_web_package_lock_sha256": "b114e3860f4e3d2cd47ee028e2495785d582f597ac40c88527fafc6fcf9cdd2a",
     "server_rust_cargo_lock_sha256": "998ba0a79b844d88dd04fbfb1117a07d6ff0ad60b9ffab37c767b3b9cbd93759",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "ed4a40f635423253e5a38e197603239c98a1c91dea7fecd997f15daa11d3dc89",
-    "sha256_manifest_sha256": "a8014e3c4373111f4de2242c2231956f2de9d1340fc92e3ff3ffa0477279cd5c"
+    "bundle_sha256": "2d47de89d74f085f62fba09307df858f90d6eb972bcee4db7742eb8be1beaf82",
+    "sha256_manifest_sha256": "83908c65aa63a85987dd3e3b971001585aabb09fc09f8e08a3f27d0d846434d0"
   },
   "packages": [
     {
@@ -5961,6 +5961,22 @@
       "version": "1.0.23"
     },
     {
+      "copyright": "Copyright (c) 2024 asamuzaK (Kazz)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "2f11a643ac2dfffa6649f388df26c2310830580d4077ebccba923811c52bb8b1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@asamuzakjp/css-color",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.2.0"
+    },
+    {
       "copyright": "Copyright (c) 2014-present Sebastian McKenzie and other contributors",
       "ecosystem": "npm",
       "files": [
@@ -6284,6 +6300,86 @@
       "source": "clarify",
       "spdx": "(Apache-2.0 AND BSD-3-Clause)",
       "version": "1.10.1"
+    },
+    {
+      "copyright": "Copyright © CSSTools Contributors",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "947e32047a166cd05f04e45938d172b412c07cbee0b9735afd14bae30e02c2f6",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@csstools/color-helpers",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT-0",
+      "version": "5.1.0"
+    },
+    {
+      "copyright": "Copyright 2022 Romain Menke, Antonio Laguna <antonio@laguna.es>; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@csstools/css-calc",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.1.4"
+    },
+    {
+      "copyright": "Copyright 2022 Romain Menke, Antonio Laguna <antonio@laguna.es>; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@csstools/css-color-parser",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.1.0"
+    },
+    {
+      "copyright": "Copyright 2022 Romain Menke, Antonio Laguna <antonio@laguna.es>; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@csstools/css-parser-algorithms",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.0.5"
+    },
+    {
+      "copyright": "Copyright 2022 Romain Menke, Antonio Laguna <antonio@laguna.es>; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "d00d032f517721b45c56c70c46bf904ebb71ad313df4d4db7722266b38069665",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@csstools/css-tokenizer",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.0.4"
     },
     {
       "copyright": "copyright not stated in license file",
@@ -9555,6 +9651,22 @@
       "version": "5.3.2"
     },
     {
+      "copyright": "Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef",
+          "source": "package-tree"
+        }
+      ],
+      "name": "agent-base",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.1.4"
+    },
+    {
       "copyright": "Copyright (c) 2015-2017 Evgeny Poberezkin",
       "ecosystem": "npm",
       "files": [
@@ -9971,6 +10083,22 @@
       "version": "7.0.6"
     },
     {
+      "copyright": "Copyright (c) Chad Walker",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "768faff9f6908c78d848b18770b2a93e3361d6e2ee35edf45c6a5ddf1f7cb185",
+          "source": "package-tree"
+        }
+      ],
+      "name": "cssstyle",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "4.6.0"
+    },
+    {
       "copyright": "Copyright (c) 2017-2018 Fredrik Nicol",
       "ecosystem": "npm",
       "files": [
@@ -9987,6 +10115,22 @@
       "version": "3.2.3"
     },
     {
+      "copyright": "Copyright © Domenic Denicola <d@domenic.me>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "data-urls",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.0.0"
+    },
+    {
       "copyright": "Copyright (c) 2014-2017 TJ Holowaychuk <tj@vision-media.ca>; Copyright (c) 2018-2021 Josh Junon",
       "ecosystem": "npm",
       "files": [
@@ -10001,6 +10145,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "4.4.3"
+    },
+    {
+      "copyright": "Copyright (c) 2025 Michael Mclaughlin",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENCE.md",
+          "sha256": "a0df2307b32880324fc5f42def582b5c1fa2058a30bbab90731c948241a5c7c2",
+          "source": "package-tree"
+        }
+      ],
+      "name": "decimal.js",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "10.6.0"
     },
     {
       "copyright": "Copyright (c) 2013 Jake Luer <jake@alogicalparadox.com> (http://alogicalparadox.com)",
@@ -10097,6 +10257,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "5.24.3"
+    },
+    {
+      "copyright": "Copyright (c) Felix Böhm",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164",
+          "source": "package-tree"
+        }
+      ],
+      "name": "entities",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "BSD-2-Clause",
+      "version": "6.0.1"
     },
     {
       "copyright": "Copyright (C) 2018-2022 Guy Bedford",
@@ -10691,6 +10867,70 @@
       "version": "4.0.0"
     },
     {
+      "copyright": "Copyright © Domenic Denicola <d@domenic.me>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "html-encoding-sniffer",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "4.0.0"
+    },
+    {
+      "copyright": "Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef",
+          "source": "package-tree"
+        }
+      ],
+      "name": "http-proxy-agent",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.0.2"
+    },
+    {
+      "copyright": "Copyright (c) 2013 Nathan Rajlich <nathan@tootallnate.net>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "71368fd0f5b4129191e9afcd1e1ef2dc89a9090d3e4d80bbab92dafd032b3bef",
+          "source": "package-tree"
+        }
+      ],
+      "name": "https-proxy-agent",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.0.6"
+    },
+    {
+      "copyright": "Copyright (c) 2011 Alexander Shtuchkin",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "ac779f7314c74f232ef847ea86e714abe25cf6eeb5cc97b69451b74e2af6492d",
+          "source": "package-tree"
+        }
+      ],
+      "name": "iconv-lite",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.6.3"
+    },
+    {
       "copyright": "Copyright (c) 2013 Kael Zhang <i@kael.me>, contributors",
       "ecosystem": "npm",
       "files": [
@@ -10787,6 +11027,22 @@
       "version": "4.0.3"
     },
     {
+      "copyright": "Copyright Mathias Bynens <https://mathiasbynens.be/>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE-MIT.txt",
+          "sha256": "483acb265f182907d1caf6cff9c16c96f31325ed23792832cc5d8b12d5f88c8a",
+          "source": "package-tree"
+        }
+      ],
+      "name": "is-potential-custom-element-name",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "1.0.1"
+    },
+    {
       "copyright": "Copyright (c) Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.",
       "ecosystem": "npm",
       "files": [
@@ -10865,6 +11121,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "4.3.0"
+    },
+    {
+      "copyright": "Copyright (c) 2010 Elijah Insua",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "242d37e7cab25cbafc36cc973ee88f9345fddf066afe4f72b7ac3d9ad4e24cce",
+          "source": "package-tree"
+        }
+      ],
+      "name": "jsdom",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "26.1.0"
     },
     {
       "copyright": "Copyright Mathias Bynens <https://mathiasbynens.be/>",
@@ -11283,6 +11555,22 @@
       "version": "3.2.1"
     },
     {
+      "copyright": "Copyright (c) 2010-2023 Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "451ec07eeb9c4e1b86de9abdaa426462a8be48f887ec7421cf0bbb9c769555ab",
+          "source": "package-tree"
+        }
+      ],
+      "name": "lru-cache",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "ISC",
+      "version": "10.4.3"
+    },
+    {
       "copyright": "Copyright (c) Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.",
       "ecosystem": "npm",
       "files": [
@@ -11427,6 +11715,22 @@
       "version": "2.0.51"
     },
     {
+      "copyright": "Copyright (c) 2007-2026 Diego Perini (http://www.iport.it/)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "2aebdf8ae67777ccb2fa66b32066c1a16bd71085011bb4085dc7408e2947d2c2",
+          "source": "package-tree"
+        }
+      ],
+      "name": "nwsapi",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.2.24"
+    },
+    {
       "copyright": "Copyright (c) George Zahariev",
       "ecosystem": "npm",
       "files": [
@@ -11489,6 +11793,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "1.0.1"
+    },
+    {
+      "copyright": "Copyright (c) 2013-2019 Ivan Nikulin (ifaaan@gmail.com, https://github.com/inikulin)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "8c535800331e1e4439835555b3f9edc7fe9dee2fab0d8bbbd5a982e8b8343d4d",
+          "source": "package-tree"
+        }
+      ],
+      "name": "parse5",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.3.0"
     },
     {
       "copyright": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)",
@@ -11869,6 +12189,22 @@
       "version": "4.62.2"
     },
     {
+      "copyright": "Copyright (c) Nikita Vasilyev",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "e539937c489c4928ad7461669ec017f4d916fb3565fc26f5b8a0ce816d2ed23c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "rrweb-cssom",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.8.0"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright (c) 2015-2018 Google, Inc., Netflix, Inc., Microsoft Corp. and contributors",
       "ecosystem": "npm",
       "files": [
@@ -11883,6 +12219,38 @@
       "source": "package-tree",
       "spdx": "Apache-2.0",
       "version": "7.8.2"
+    },
+    {
+      "copyright": "Copyright (c) 2018 Nikita Skovoroda <chalkerx@gmail.com>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "4bc935e71be198c67ddf3c2b5fddb195f6edc182bfc155a96a6db61b44b494b9",
+          "source": "package-tree"
+        }
+      ],
+      "name": "safer-buffer",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.1.2"
+    },
+    {
+      "copyright": "copyright notice and this permission notice appear in all copies.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "SPDX-ISC.txt",
+          "sha256": "53ebfcc44f88a3ff4e54d154df8c22df21502bcbf5f84a050a5caa72dcfa5ed9",
+          "source": "clarify"
+        }
+      ],
+      "name": "saxes",
+      "repository": "",
+      "source": "clarify",
+      "spdx": "ISC",
+      "version": "6.0.0"
     },
     {
       "copyright": "Copyright (c) Facebook, Inc. and its affiliates.",
@@ -12093,6 +12461,22 @@
       "version": "7.2.0"
     },
     {
+      "copyright": "Copyright (c) 2015 Joris van der Wel",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "9ea1eccdabe469767a9edb9249a840b2461cf91b2434bf8a3e2fc1f414311cb1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "symbol-tree",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.2.4"
+    },
+    {
       "copyright": "Copyright (c) 2021 Dany Castillo",
       "ecosystem": "npm",
       "files": [
@@ -12235,6 +12619,70 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "3.0.2"
+    },
+    {
+      "copyright": "Copyright (c) 2017 Thomas Parisot, 2018 Rémi Berson",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tldts",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "6.1.86"
+    },
+    {
+      "copyright": "Copyright (c) 2017 Thomas Parisot, 2018 Rémi Berson",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c64182d48160db948b6aa97a984f1a32974ce4d2053900361264cd33853796cb",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tldts-core",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "6.1.86"
+    },
+    {
+      "copyright": "Copyright (c) 2015, Salesforce.com, Inc.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "22ec6791c91ba42c0516a05f4cbdde019aae4687f8a38c5ca7e8a69ee68f851d",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tough-cookie",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "BSD-3-Clause",
+      "version": "5.1.2"
+    },
+    {
+      "copyright": "Copyright (c) Sebastian Mayr",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "499d6d466d064e0460427967a344e2a32fcb86ea8c6cd1a285ec4f1fa03fba67",
+          "source": "package-tree"
+        }
+      ],
+      "name": "tr46",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.1.1"
     },
     {
       "copyright": "copyright not stated in license file",
@@ -12477,6 +12925,38 @@
       "version": "2.1.9"
     },
     {
+      "copyright": "Copyright © Sebastian Mayr",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "ab654de803cdaa9e2819ab2e934bdf7f757e308649ec231d78e80e92425cdc34",
+          "source": "package-tree"
+        }
+      ],
+      "name": "w3c-xmlserializer",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.0.0"
+    },
+    {
+      "copyright": "Copyright (c) 2014, Domenic Denicola",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "a889cc4dbee2ae172c179856b25d75b0b7a5a136e1b97109b9b590b2ff1a879c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "webidl-conversions",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "BSD-2-Clause",
+      "version": "7.0.0"
+    },
+    {
       "copyright": "Copyright (c) 2014, The WebRTC project authors. All rights reserved.; Copyright (c) 2018, The adapter.js project authors. All rights reserved.",
       "ecosystem": "npm",
       "files": [
@@ -12491,6 +12971,54 @@
       "source": "package-tree",
       "spdx": "BSD-3-Clause",
       "version": "9.0.6"
+    },
+    {
+      "copyright": "Copyright © Domenic Denicola <d@domenic.me>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "whatwg-encoding",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "3.1.1"
+    },
+    {
+      "copyright": "Copyright © Domenic Denicola <d@domenic.me>",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "528eec83cb836a0adda9f8fc3d6a2a70a710d6cc0be9a155f92212c8df28acfa",
+          "source": "package-tree"
+        }
+      ],
+      "name": "whatwg-mimetype",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "4.0.0"
+    },
+    {
+      "copyright": "Copyright (c) Sebastian Mayr",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "db480f236292a093e77a83c35431a8496624e1e664a3547768a9ce2bdde39877",
+          "source": "package-tree"
+        }
+      ],
+      "name": "whatwg-url",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "14.2.0"
     },
     {
       "copyright": "Copyright (c) Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.",
@@ -12539,6 +13067,54 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "1.2.5"
+    },
+    {
+      "copyright": "Copyright (c) 2011 Einar Otto Stangvik <einaros@gmail.com>; Copyright (c) 2013 Arnout Kazemier and contributors; Copyright (c) 2016 Luigi Pinca and contributors; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "2b29dcfe0d6471f7e8c92c5fb38c9f93edee10330937055440192f1832b1ecef",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ws",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "8.21.3"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.txt",
+          "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+          "source": "package-tree"
+        }
+      ],
+      "name": "xml-name-validator",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "5.0.0"
+    },
+    {
+      "copyright": "Copyright Louis-Dominique Dubeau and contributors to xmlchars; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "45d196313c2647d313cc65ca9b093d2d6974b64d35ee7346f2c60c9d518dff2c",
+          "source": "package-tree"
+        }
+      ],
+      "name": "xmlchars",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.2.0"
     },
     {
       "copyright": "Copyright (c) Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.",
