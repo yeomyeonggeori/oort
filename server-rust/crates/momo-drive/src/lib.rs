@@ -60,6 +60,50 @@ pub use stub::StubDriveArchive;
 /// on the number; this constant is the one the Rust side reads.
 pub const MAX_ATTACHMENT_BYTES: i64 = 100 * 1024 * 1024;
 
+/// A create-time declaration of `0` means the client does not know the length
+/// (`sizeKnown=false`). It is a hint, not a promise: complete records the
+/// measured archive size, and the ceiling is enforced on received bytes.
+pub fn declared_size_is_unknown(declared_size_bytes: i64) -> bool {
+    declared_size_bytes == 0
+}
+
+/// Whether a received length may be stored: empty files are legal, over-ceiling
+/// files are not. Negative lengths never come from a `Vec`, but a lying archive
+/// can report them.
+pub fn received_size_within_ceiling(actual_size_bytes: i64) -> bool {
+    (0..=MAX_ATTACHMENT_BYTES).contains(&actual_size_bytes)
+}
+
+/// Known declarations must equal the received length. Unknown (`0`) skips the
+/// equality check so a `sizeKnown=false` client can still complete.
+pub fn received_size_agrees_with_declaration(declared: i64, actual: i64) -> bool {
+    declared_size_is_unknown(declared) || declared == actual
+}
+
+/// PUT-time refusal: the 100 MB ceiling is on the bytes that arrived, not on
+/// the declaration. A shrunk declaration cannot smuggle an over-ceiling body.
+pub fn uploaded_size_refusal(declared: i64, actual: i64) -> Option<DriveError> {
+    if actual > MAX_ATTACHMENT_BYTES {
+        return Some(DriveError::ContentTooLarge);
+    }
+    if !received_size_agrees_with_declaration(declared, actual) {
+        return Some(DriveError::InvalidArguments(
+            "uploaded size does not match the session".into(),
+        ));
+    }
+    None
+}
+
+/// `X-Upload-Content-Length` for a Google resumable session. Unknown
+/// declarations omit the header so Drive will not cap the session at 0 bytes.
+pub fn upload_content_length_header_value(declared_size_bytes: i64) -> Option<String> {
+    if declared_size_is_unknown(declared_size_bytes) {
+        None
+    } else {
+        Some(declared_size_bytes.to_string())
+    }
+}
+
 /// A created resumable upload session: the id PostgreSQL will store, and the
 /// capability URL the **client** uploads to.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -466,6 +510,42 @@ mod tests {
         assert!(!valid_drive_id("id with space"));
         assert!(!valid_drive_id("id?alt=media"));
         assert!(!valid_drive_id(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn a_zero_declaration_is_unknown_and_does_not_cap_google_at_zero_bytes() {
+        assert!(declared_size_is_unknown(0));
+        assert!(!declared_size_is_unknown(1));
+        assert!(received_size_agrees_with_declaration(0, 5));
+        assert!(received_size_agrees_with_declaration(5, 5));
+        assert!(!received_size_agrees_with_declaration(5, 8));
+        assert!(received_size_within_ceiling(0));
+        assert!(received_size_within_ceiling(MAX_ATTACHMENT_BYTES));
+        assert!(!received_size_within_ceiling(MAX_ATTACHMENT_BYTES + 1));
+        assert!(!received_size_within_ceiling(-1));
+        assert_eq!(upload_content_length_header_value(0), None);
+        assert_eq!(
+            upload_content_length_header_value(12),
+            Some("12".to_string())
+        );
+    }
+
+    #[test]
+    fn a_shrunk_declaration_cannot_smuggle_an_over_ceiling_upload() {
+        assert_eq!(
+            uploaded_size_refusal(0, MAX_ATTACHMENT_BYTES + 1),
+            Some(DriveError::ContentTooLarge)
+        );
+        assert_eq!(
+            uploaded_size_refusal(1, MAX_ATTACHMENT_BYTES + 1),
+            Some(DriveError::ContentTooLarge)
+        );
+        assert_eq!(uploaded_size_refusal(0, 5), None);
+        assert_eq!(uploaded_size_refusal(5, 5), None);
+        assert!(matches!(
+            uploaded_size_refusal(5, 8),
+            Some(DriveError::InvalidArguments(_))
+        ));
     }
 
     #[test]
