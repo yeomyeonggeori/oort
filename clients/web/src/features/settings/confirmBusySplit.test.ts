@@ -48,6 +48,7 @@ const FILES = {
   "HostedConnectionSection.tsx": source(
     "../hostedAgents/HostedConnectionSection.tsx"
   ),
+  "DoorbellSection.tsx": source("../hostedAgents/DoorbellSection.tsx"),
 } as const;
 
 type FileName = keyof typeof FILES;
@@ -131,6 +132,14 @@ const SITES = [
     label: "확정 중",
     lock: "locked",
     lockVia: "const locked = blocked || (busy && !completing);",
+  },
+  {
+    file: "DoorbellSection.tsx",
+    testId: "hosted-doorbell-unregister",
+    busy: "unregistering",
+    label: "해제 중",
+    lock: "unregisterLocked",
+    lockVia: "const unregisterLocked = blocked || (ownBusy && !unregistering);",
   },
   {
     file: "WorkspaceSection.tsx",

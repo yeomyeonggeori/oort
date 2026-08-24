@@ -94,6 +94,10 @@ export function isHostedScope(value: string): value is HostedAgentScope {
  * `activeCredentialId` 는 자격증명의 **식별자**이지 자격증명이 아니다. 이 값이
  * 있고 상태가 아직 `detected` 인 구간이 "승인은 끝났고 증명이 안 왔다"이며,
  * 마법사의 5단계가 정확히 그 구간에 산다.
+ *
+ * 도어벨 네 칸은 시크릿이 아니다. 원문 Bearer 는 필드 이름에 없고, 서버가
+ * `doorbellSecret` 을 실어도 파서가 읽지 않는다. 미등록이거나 게이트가 닫히면
+ * 네 칸 자체가 생략된다.
  */
 export interface HostedAgentConnection {
   id: string;
@@ -106,6 +110,10 @@ export interface HostedAgentConnection {
   activeCredentialId?: string;
   createdAtMs: number;
   updatedAtMs: number;
+  doorbellUrl?: string;
+  doorbellSecretMasked?: string;
+  doorbellLastFiredAtMs?: number;
+  doorbellLastStatus?: string;
 }
 
 /**
@@ -184,6 +192,10 @@ export function toHostedConnection(value: unknown): HostedAgentConnection | null
     return null;
   }
   const activeCredentialId = str(row, "activeCredentialId");
+  const doorbellUrl = str(row, "doorbellUrl");
+  const doorbellSecretMasked = str(row, "doorbellSecretMasked");
+  const doorbellLastFiredAtMs = num(row, "doorbellLastFiredAtMs");
+  const doorbellLastStatus = str(row, "doorbellLastStatus");
   return {
     id,
     agentMemberId,
@@ -195,6 +207,12 @@ export function toHostedConnection(value: unknown): HostedAgentConnection | null
     ...(activeCredentialId ? { activeCredentialId } : {}),
     createdAtMs,
     updatedAtMs,
+    ...(doorbellUrl ? { doorbellUrl } : {}),
+    ...(doorbellSecretMasked ? { doorbellSecretMasked } : {}),
+    ...(doorbellLastFiredAtMs !== undefined
+      ? { doorbellLastFiredAtMs }
+      : {}),
+    ...(doorbellLastStatus ? { doorbellLastStatus } : {}),
   };
 }
 

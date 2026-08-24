@@ -8,7 +8,7 @@ import type { OauthApproveRequest, OauthDenyRequest } from "./oauthConsent";
 // =============================================================================
 // REST client for hosted agent connections (ADR-0162 HAP-E3, openapi `agents`).
 //
-// 여덟 동작만 있고 전부 이미 서버에 있다. 새로 지어낸 wire 는 없다:
+// 열 동작만 있고 전부 이미 서버에 있다. 새로 지어낸 wire 는 없다:
 //   POST /v1/workspaces/{ws}/hosted-agent-connections                       create
 //   GET  /v1/workspaces/{ws}/hosted-agent-connections                       list
 //   GET  /v1/workspaces/{ws}/hosted-agent-connections/{id}                  get
@@ -17,6 +17,8 @@ import type { OauthApproveRequest, OauthDenyRequest } from "./oauthConsent";
 //   POST …/{id}/disconnect                                                  disconnect
 //   POST …/{id}/cleanup-artifacts/{artifactId}/acknowledge                  acknowledge
 //   POST …/{id}/disconnect/complete                                         complete
+//   PUT  …/{id}/doorbell                                                    register doorbell (ADR-0171)
+//   DELETE …/{id}/doorbell                                                  unregister doorbell
 //
 // 아래 셋은 HAP-UX2(#1362)가 열었다. 앞선 다섯과 한 파일에 사는 이유는 자격증명
 // 경계가 같기 때문이다 — 다만 방향이 반대다: 앞의 셋이 원문을 **받아** 오는 반면
@@ -195,6 +197,41 @@ export function completeHostedDisconnect(
     `${connection(workspaceId, connectionId)}/disconnect/complete`,
     { method: "POST" }
   );
+}
+
+// ---- 도어벨 (ADR-0171 / WD-2) -----------------------------------------------
+//
+// PUT 본문에 운영자 Bearer 가 실린다. 서버는 응답에 마스킹만 남기고
+// `Cache-Control: no-store` 를 강제한다. 그래서 이 둘도 `cache: "no-store"` 로
+// 보낸다. 이 파일은 아무것도 로그하지 않는다는 규율이 여기서도 그대로다.
+
+export interface RegisterHostedDoorbellInput {
+  url: string;
+  secret: string;
+}
+
+/** 200. 같은 URL 로 다시 보내면 교체·재봉인되고 발화 시각은 초기화된다. */
+export function registerHostedDoorbell(
+  workspaceId: string,
+  connectionId: string,
+  input: RegisterHostedDoorbellInput
+): Promise<unknown> {
+  return hostedRequest(`${connection(workspaceId, connectionId)}/doorbell`, {
+    method: "PUT",
+    cache: "no-store",
+    body: JSON.stringify(input),
+  });
+}
+
+/** 200. 미등록이면 JSON 404, 게이트 닫힘이면 본문 없는 404. */
+export function unregisterHostedDoorbell(
+  workspaceId: string,
+  connectionId: string
+): Promise<unknown> {
+  return hostedRequest(`${connection(workspaceId, connectionId)}/doorbell`, {
+    method: "DELETE",
+    cache: "no-store",
+  });
 }
 
 // ---- OAuth resource-owner consent (HAP-E7 / #1368, HAP-UX4 / #1369) ---------

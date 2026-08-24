@@ -5116,6 +5116,147 @@ async function captureHostedDisconnectScenes(browser, scheme) {
   return shots;
 }
 
+// =============================================================================
+// 호스티드 연결 도어벨 등록 (ADR-0171 / WD-2 / #1735).
+//
+// 연결 탭의 한 상자다. 찍는 것은 네 상태(빈·로딩·등록됨·실패)와, 등록 실패와
+// 다른 게이트 닫힘이다. 벨 테스트는 이 파도에 없다.
+// =============================================================================
+async function captureHostedDoorbellScenes(browser, scheme) {
+  const shots = [];
+  const connection = disconnectConnection({ status: "active" });
+
+  async function shoot(name, install, settle = async () => {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/agents"');
+    await page
+      .locator(
+        `[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`
+      )
+      .click();
+    await page.getByTestId("agent-hub-tab-connection").click();
+    await page.getByTestId("hosted-doorbell-section").waitFor({ state: "visible" });
+    await settle(page, context);
+    const path = `${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  function surface(row, extra) {
+    return async (context) => {
+      await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+        json(route, { connections: [row] })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        (route) => json(route, { connection: row, cleanupArtifacts: [] })
+      );
+      // 나중에 등록한 라우트가 이긴다. 도어벨 PUT 이 단건 GET 글로브에 먹히면
+      // 실패·게이트 닫힘 프레임이 등록 성공으로 찍힌다.
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*/doorbell",
+        extra
+          ? extra
+          : (route) =>
+              json(route, {
+                connectionId: row.id,
+                url: "https://hooks.example.com/doorbell",
+                secretMasked: "••••wxyz",
+                registeredAtMs: 1_700_000_700_000,
+              })
+      );
+    };
+  }
+
+  await shoot("empty", surface(connection), async (page) => {
+    await page.getByTestId("hosted-doorbell-empty").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "loading",
+    async (context) => {
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections",
+        (route) => json(route, { connections: [connection] })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        () => new Promise(() => {})
+      );
+    },
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-loading").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "registered",
+    surface({
+      ...connection,
+      doorbellUrl: "https://hooks.example.com/doorbell",
+      doorbellSecretMasked: "••••wxyz",
+      doorbellLastFiredAtMs: Date.now() - 12 * 60_000,
+      doorbellLastStatus: "ok_200",
+    }),
+    async (page) => {
+      await page
+        .getByTestId("hosted-doorbell-registered")
+        .waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "error",
+    surface(connection, (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            message: "webhook URL resolves to a private or reserved address",
+          },
+        }),
+      })
+    ),
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-url").fill(
+        "https://hooks.example.com/doorbell"
+      );
+      await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
+      await page.getByTestId("hosted-doorbell-register").click();
+      await page.getByTestId("hosted-doorbell-failure").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "gate-off",
+    surface(connection, (route) =>
+      route.fulfill({ status: 404, body: "" })
+    ),
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-url").fill(
+        "https://hooks.example.com/doorbell"
+      );
+      await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
+      await page.getByTestId("hosted-doorbell-register").click();
+      await page.getByTestId("hosted-doorbell-gate-off").waitFor({ state: "visible" });
+    }
+  );
+
+  return shots;
+}
+
 /**
  * #1369 HAP-UX4 — the MCP OAuth resource-owner consent surface, in both schemes.
  *
@@ -5212,6 +5353,7 @@ async function main() {
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
+          all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
           all.push(...(await captureConsent(browser, scheme)));
         }
       }
