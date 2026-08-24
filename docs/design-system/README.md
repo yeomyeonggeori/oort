@@ -372,11 +372,16 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 스킬 §6의 옛 문장("행 액션은 메뉴로")은 B11 R1이 여섯 버튼 바를 `opacity-0`으로 숨겼다가 가상화 타임라인에 탭스톱 ~150개를 만든 실패와 묶여 있었다. 호버 퀵액션 툴바를 재도입하는 조건은 그 두 실패를 닫는 것이다:
 
 1. **조건부 렌더.** 비호버·비포커스 행은 툴바 DOM을 마운트하지 않는다. opacity/visibility 트릭 금지.
-2. **한 탭스톱.** 툴바는 WAI-ARIA `toolbar` + 내부 roving tabindex. 행당 추가 탭스톱 ≤ 1.
+2. **한 탭스톱.** 툴바 항목은 행의 로빙 그룹에 편입된다. 행당 추가 탭스톱 ≤ 1. rest 정거장은 행 자신이며, 포커스 시 ⋯로 핸드오프한다.
 3. **메뉴에만 남는 것.** 고치기/지우기는 overflow `⋯`와 우클릭 메뉴에만 있다.
 4. **터치.** `(hover: none)`에서는 툴바를 그리지 않는다. 길게 누르기 시트는 그대로다.
+5. **본문 겹침 금지 (B11 R2 Blocker).** 툴바는 행 상단 경계를 걸치는 플로팅 그릇이다. 자기 행의 본문 텍스트 Range와 교차 면적 0. 겹침은 계약이 아니다.
 
-정본 구현: `clients/web/src/features/timeline/MessageActions.tsx` (`MessageHoverToolbar`). 기계 자는 `capture-screens.mjs`의 호버/포커스/터치 4상태와 행당 탭스톱 단정이다.
+정본 구현: `clients/web/src/features/timeline/MessageActions.tsx` (`MessageHoverToolbar`).
+
+기계 자가 **닫은** 축: 호버/포커스/터치 4상태 마운트 수, 행당 탭스톱(정적 스냅샷), 본문 텍스트 Range ∩ 툴바 상자 = 0 (`assertHoverToolbarClearsBodyText`, 삭제된 `assertActionGutterClearsBody`의 후계), 툴바 React 버튼 클릭 → 피커 오픈.
+
+기계 자가 **아직 안 재는** 축: 순회 중 탭스톱 +1(유닛이 행당 1 불변), 다크 그릇 분리(토큰 §2.2 산술 + 사람 리뷰), 슬롯 클릭 직후 재배열(유닛이 마운트 고정).
 
 ### 스케일에 값을 하나 더하고 싶을 때
 
