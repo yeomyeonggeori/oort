@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { insertAtComposerSelection } from "./composerInsertion";
+import {
+  insertAtComposerSelection,
+  insertMentionTriggerAtComposerSelection,
+} from "./composerInsertion";
 
 describe("컴포저 캐럿 삽입 (#1688)", () => {
   it("surrogate pair 이모지 뒤로 UTF-16 캐럿을 옮긴다", () => {
@@ -18,5 +21,14 @@ describe("컴포저 캐럿 삽입 (#1688)", () => {
     expect(
       insertAtComposerSelection("확인", { start: 20, end: 1 }, "👀")
     ).toEqual({ value: "확👀", caret: 3 });
+  });
+
+  it("[@]는 현재 선택을 @로 바꾸고 자동완성이 읽을 캐럿을 돌려준다 (#1749)", () => {
+    expect(
+      insertMentionTriggerAtComposerSelection("배포 담당자", {
+        start: 3,
+        end: 6,
+      })
+    ).toEqual({ value: "배포 @", caret: 4 });
   });
 });

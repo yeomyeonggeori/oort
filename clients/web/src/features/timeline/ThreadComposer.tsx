@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { SendHorizontal, Smile } from "lucide-react";
+import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import { sendThreadReply } from "@momo/core/lib/api";
 import {
   composerKeyIntent,
@@ -189,7 +189,7 @@ export function ThreadComposer({
             testId="thread-composer-error"
           />
         )}
-        <div className="relative flex items-end gap-2">
+        <div className="relative">
           <MentionAutocompleteList
             id="thread-mention-list"
             candidates={mentions.candidates}
@@ -199,105 +199,130 @@ export function ThreadComposer({
             optionTestId="thread-mention-option"
             className="left-0"
           />
-          <AttachButton onPick={onFiles} disabled={sending} />
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="tap-target shrink-0"
-            disabled={sending}
-            aria-label="이모지 넣기"
-            title="이모지 넣기"
-            data-testid="thread-composer-emoji-trigger"
-            onClick={(event) => {
-              mentions.close();
-              emoji.openPicker(event.currentTarget);
-            }}
+          <div
+            className="rounded-md border border-line-strong bg-surface-raised"
+            data-testid="thread-composer-frame"
           >
-            <Smile aria-hidden="true" />
-          </Button>
-          <textarea
-            ref={ref}
-            value={draft}
-            disabled={sending}
-            // 공유 문구는 아직 「답글 쓰기」만 말한다. C-1 코어 파도와 충돌하지
-            // 않도록 이 goal은 코어 문장을 건드리지 않고, 실제 @ 동작만 웹과 폰에
-            // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
-            placeholder={THREAD_COMPOSER_PLACEHOLDER}
-            aria-label={THREAD_COMPOSER_PLACEHOLDER}
-            aria-autocomplete="list"
-            aria-expanded={mentions.visible}
-            aria-controls={mentions.visible ? "thread-mention-list" : undefined}
-            aria-activedescendant={
-              mentions.visible
-                ? `thread-mention-list-option-${mentions.highlight}`
-                : undefined
-            }
-            data-testid="thread-composer-input"
-            onChange={(event) =>
-              mentions.onTextChange(
-                event.target.value,
-                event.target.selectionStart ?? 0
-              )
-            }
-            onSelect={(event) =>
-              mentions.setCaret(
-                (event.target as HTMLTextAreaElement).selectionStart ?? 0
-              )
-            }
-            onPaste={drop.onPaste}
-            onCompositionStart={() => {
-              justComposedRef.current = false;
-            }}
-            onCompositionEnd={() => {
-              justComposedRef.current = true;
-            }}
-            onKeyUp={() => {
-              justComposedRef.current = false;
-            }}
-            onBlur={() => {
-              justComposedRef.current = false;
-            }}
-            onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
-              if (event.key !== "Enter" && event.key !== "Tab") {
+            <textarea
+              ref={ref}
+              value={draft}
+              disabled={sending}
+              // 공유 문구는 아직 「답글 쓰기」만 말한다. C-1 코어 파도와 충돌하지
+              // 않도록 이 goal은 코어 문장을 건드리지 않고, 실제 @ 동작만 웹과 폰에
+              // 맞춘다. 다음 코어 카피 정리에서 광고 절을 한 벌로 올릴 수 있다.
+              placeholder={THREAD_COMPOSER_PLACEHOLDER}
+              aria-label={THREAD_COMPOSER_PLACEHOLDER}
+              aria-autocomplete="list"
+              aria-expanded={mentions.visible}
+              aria-controls={mentions.visible ? "thread-mention-list" : undefined}
+              aria-activedescendant={
+                mentions.visible
+                  ? `thread-mention-list-option-${mentions.highlight}`
+                  : undefined
+              }
+              data-testid="thread-composer-input"
+              onChange={(event) =>
+                mentions.onTextChange(
+                  event.target.value,
+                  event.target.selectionStart ?? 0
+                )
+              }
+              onSelect={(event) =>
+                mentions.setCaret(
+                  (event.target as HTMLTextAreaElement).selectionStart ?? 0
+                )
+              }
+              onPaste={drop.onPaste}
+              onCompositionStart={() => {
                 justComposedRef.current = false;
-              }
-              const intent = composerKeyIntent(
-                {
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  metaKey: event.metaKey,
-                  ctrlKey: event.ctrlKey,
-                  altKey: event.altKey,
-                  composing: isComposingEvent(event.nativeEvent),
-                },
-                {
-                  mentionsOpen: mentions.visible,
-                  justComposed: justComposedRef.current,
-                  enterSends: !isMobile,
+              }}
+              onCompositionEnd={() => {
+                justComposedRef.current = true;
+              }}
+              onKeyUp={() => {
+                justComposedRef.current = false;
+              }}
+              onBlur={() => {
+                justComposedRef.current = false;
+              }}
+              onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                if (event.key !== "Enter" && event.key !== "Tab") {
+                  justComposedRef.current = false;
                 }
-              );
-              if (mentions.handleIntent(intent)) {
+                const intent = composerKeyIntent(
+                  {
+                    key: event.key,
+                    shiftKey: event.shiftKey,
+                    metaKey: event.metaKey,
+                    ctrlKey: event.ctrlKey,
+                    altKey: event.altKey,
+                    composing: isComposingEvent(event.nativeEvent),
+                  },
+                  {
+                    mentionsOpen: mentions.visible,
+                    justComposed: justComposedRef.current,
+                    enterSends: !isMobile,
+                  }
+                );
+                if (mentions.handleIntent(intent)) {
+                  event.preventDefault();
+                  return;
+                }
+                if (intent !== "send") return;
                 event.preventDefault();
-                return;
-              }
-              if (intent !== "send") return;
-              event.preventDefault();
-              submit();
-            }}
-            className="tap-target min-h-control w-full resize-none rounded-sm border border-line-strong bg-surface-raised px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:opacity-50"
-          />
-          <button
-            type="button"
-            disabled={!canSend}
-            onClick={submit}
-            aria-label="답글 보내기"
-            title={attachBlockCopy ?? "답글 보내기"}
-            data-testid="thread-composer-send"
-            className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-50"
-          >
-            <SendHorizontal className="size-4" aria-hidden="true" />
-          </button>
+                submit();
+              }}
+              className="tap-target block min-h-control w-full resize-none rounded-sm bg-transparent px-3 py-2 text-body text-ink focus-visible:focus-ring disabled:opacity-50"
+            />
+            <div
+              className="flex items-center justify-between gap-2 px-2 pb-2"
+              data-testid="thread-composer-actions"
+            >
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="tap-target shrink-0"
+                  disabled={sending}
+                  aria-label="멘션 넣기"
+                  title="멘션 넣기"
+                  data-testid="thread-composer-mention-trigger"
+                  onClick={mentions.insertTrigger}
+                >
+                  <AtSign aria-hidden="true" />
+                </Button>
+                <AttachButton onPick={onFiles} disabled={sending} />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="tap-target shrink-0"
+                  disabled={sending}
+                  aria-label="이모지 넣기"
+                  title="이모지 넣기"
+                  data-testid="thread-composer-emoji-trigger"
+                  onClick={(event) => {
+                    mentions.close();
+                    emoji.openPicker(event.currentTarget);
+                  }}
+                >
+                  <Smile aria-hidden="true" />
+                </Button>
+              </div>
+              <button
+                type="button"
+                disabled={!canSend}
+                onClick={submit}
+                aria-label="답글 보내기"
+                title={attachBlockCopy ?? "답글 보내기"}
+                data-testid="thread-composer-send"
+                className="tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill disabled:opacity-50"
+              >
+                <SendHorizontal className="size-4" aria-hidden="true" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
       <EmojiPickerDialog

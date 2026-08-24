@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
 import { insertMention, mentionQueryAt } from "./MentionAutocomplete";
+import { insertMentionTriggerAtComposerSelection } from "./composerInsertion";
 
 const source = (relative: string) =>
   readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8");
@@ -57,6 +58,36 @@ describe("컴포저 공용 표면 (#1688)", () => {
       expect(composer).toContain("<MentionAutocompleteList");
       expect(composer).toContain("<AttachButton");
       expect(composer).toContain("<AttachmentTray");
+    }
+  });
+
+  it("채널과 스레드가 입력 다음에 @·첨부·이모지·보내기 한 벌을 둔다 (#1749)", () => {
+    expect(channel).toMatch(
+      /data-testid="composer-input"[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/
+    );
+    expect(thread).toMatch(
+      /data-testid="thread-composer-input"[\s\S]*?data-testid="thread-composer-mention-trigger"[\s\S]*?<AttachButton[\s\S]*?data-testid="thread-composer-emoji-trigger"[\s\S]*?data-testid="thread-composer-send"/
+    );
+    expect(channel.match(/data-testid="composer-mention-trigger"/g)).toHaveLength(
+      1
+    );
+    expect(
+      thread.match(/data-testid="thread-composer-mention-trigger"/g)
+    ).toHaveLength(1);
+  });
+
+  it("[@]은 선택 범위에 @를 넣고 기존 멘션 쿼리를 즉시 연다 (#1749)", () => {
+    const inserted = insertMentionTriggerAtComposerSelection("배포 담당자 확인", {
+      start: 3,
+      end: 6,
+    });
+    expect(inserted).toEqual({ value: "배포 @ 확인", caret: 4 });
+    expect(mentionQueryAt(inserted.value, inserted.caret)).toEqual({
+      start: 3,
+      text: "",
+    });
+    for (const composer of [channel, thread]) {
+      expect(composer).toContain("mentions.insertTrigger");
     }
   });
 

@@ -29,3 +29,15 @@ export function insertAtComposerSelection(
     caret: start + insertion.length,
   };
 }
+
+/**
+ * [@] 버튼은 새 멘션 모델을 만들지 않는다. 현재 선택 범위에 멘션 시작 문자만
+ * 넣고, `useMentionAutocomplete`가 평범한 텍스트 입력과 같은 open/caret 경로를
+ * 이어받게 한다.
+ */
+export function insertMentionTriggerAtComposerSelection(
+  value: string,
+  selection: ComposerSelection
+): ComposerInsertion {
+  return insertAtComposerSelection(value, selection, "@");
+}
