@@ -14,6 +14,23 @@
 - 문서: SELF_HOST.md 보관소 절, SELF_HOST_AGENT.md 동기, pg_dump 런북 동반 백업 1줄.
 - 검증: crate 단위 25/25(이탈 3계열·왕복·413) · `momo-server --lib` 287/287 · attachment_conformance_pg ignored 8/8(local 왕복 + 미구성 503, 이 워크트리 `make up` PG:22602) · `test_self_host_env_modes.sh` PASS · `check_docs_commands.py` 493 facts. google.rs/stub.rs 비접촉.
 
+## 웹 링크 언퍼얼 렌더·온오프 표면 (#1718, 2026-08-24)
+
+- 공유 코어에 언퍼얼 4상태와 REST↔실시간 병합 규칙을 두고, 웹 타임라인에 서버 프록시 이미지만 쓰는 카드와 발신자 전용 제거 확인(재생성 없음)을 연결했다. failed·blocked·empty와 서버 off는 자리표시자 없이 조용한 부재다.
+- 개인 설정의 「링크 미리보기 접기」는 이 기기의 렌더만 지속화하고, 워크스페이스 설정은 오너/관리자가 서버 fetch를 켜고 끄는 별도 표면으로 분리했다. 폰 렌더 후속은 `docs/planning/ENGINE_HANDOFF.md` A-30으로 넘겼다.
+- 코어·웹 전체 스위트, tsc, lint, build, 디자인 프리플라이트는 green. `runtime-unverified(real server/outbox round-trip and browser visual)`: #1717 실서버 왕복은 오케스트레이터 몫이고, 로컬 캡처 레인은 카드 앵커의 탭 예산 이탈에서 실측 red였고(리뷰 Blocker-1), 로빙 합류 수리 후 완주 green이 이 문장의 근거다.
+
+## 폰 첨부 트레이 M-2 후속 폴리시 (#1703, 2026-08-23)
+
+- 첨부 행은 모든 상태에서 진행 트랙 높이를 예약하고 첫 native 측정 전에는 값 없는 막대로 표시한다. 발치 경고색은 웹과 같은 `sendBlockReason`을 따르며, 크기 미독 파일은 `0 B`를 말하지 않는다.
+- 로그아웃·계정 identity 변경·토큰 만료 provider 해제는 모든 첨부 드래프트와 native PUT을 비우고 세션 세대를 올려 구 bearer로 시작한 늦은 업로드 응답을 폐기한다. picker의 도달 불가 `rejected`는 일부 무음 수락 대신 단정 실패하며, grabber·트레이 상한은 전용 명명 측정을 쓴다.
+- 모바일·공유 코어 전체 테스트와 tsc는 green이다. `runtime-unverified(iOS simulator visual interaction)`: 실기·시뮬레이터 검증은 패킷의 명시 비스코프이며, 폰에는 독립 디자인 프리플라이트 실행 단위가 없다.
+
+## U-8 웹 컴포저 하단 메타 1행 통합 (#1699, 2026-08-23)
+
+- 넓은 화면의 전송 키 힌트와 상시 예약 타이핑 라인이 하나의 26px 행을 공유한다. 기본에는 힌트, 사람이 작성 중이면 같은 자리에 타이핑 문장이 서며, 힌트가 없거나 폰인 기본판은 기존 빈 글자 상자가 높이를 예약한다. AgentActivityBar 인접성과 비-live 낭독 계약은 유지했다.
+- 상태 전이·폰 예약판·정본 토큰 계산(18px line-height + 8px padding = 26px)을 신규 Vitest로 고정했고 웹 전체 1,412 tests·tsc·lint·디자인 프리플라이트가 PASS했다. `runtime-unverified(browser typing gate/screenshots)`: Chromium Mach-port와 Chrome remote-debugging 허용 대기 때문에 브라우저 evidence는 오케스트레이터 범위다.
+
 ## 셀프호스트 실시간 WS URL same-origin 파생 (#1678, 2026-08-23)
 
 - `MOMO_CENTRIFUGO_WS_URL=same-origin` 센티널: 로그인/join/claim이 요청 `Host`+`X-Forwarded-Proto`에서 `wss://<공개호스트>/connection/websocket`을 파생한다(ADR-0167). 절대 ws/wss는 부팅 시 verbatim(ADR-0110 프로덕션 분리 도메인 불변).

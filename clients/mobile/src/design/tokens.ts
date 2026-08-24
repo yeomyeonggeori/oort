@@ -26,6 +26,24 @@ export const TOUCH_TARGET = 44;
 export const SAFE_GUTTER = 16;
 
 /**
+ * 첨부 picker 시트 grabber의 시각 너비.
+ *
+ * 지금 값은 `TOUCH_TARGET`과 우연히 같지만 이 막대는 누르는 컨트롤이 아니다. 터치
+ * 최소값을 조정하는 날 grabber까지 따라 움직이지 않도록, 시트의 측정값으로 따로
+ * 이름 붙인다 (#1703). 시트 radius·가족 문법 통일은 이 이름의 범위가 아니다.
+ */
+export const ATTACHMENT_SHEET_GRABBER_WIDTH = 44;
+
+/**
+ * 컴포저 첨부 트레이가 차지할 수 있는 최대 높이.
+ *
+ * 웹의 같은 첨부 트레이 측정 `--spacing-tray-max`와 240으로 짝을 이룬다. 행 수를
+ * `TOUCH_TARGET`에서 곱해 얻은 값이 아니라, 컴포저가 대화를 먹지 않게 제한하고
+ * 초과분을 스크롤로 알리는 두 표면의 공용 상한이다 (#1703).
+ */
+export const ATTACHMENT_TRAY_MAX_HEIGHT = 240;
+
+/**
  * 콘텐츠 상자 한 변을 `TOUCH_TARGET` 으로 채우는 `hitSlop` 값 (감사 M-14).
  *
  * ## 왜 함수인가 — 6·6·4·4 가 어떻게 29pt 가 되었나

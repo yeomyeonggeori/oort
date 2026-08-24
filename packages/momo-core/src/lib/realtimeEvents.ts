@@ -1,4 +1,8 @@
 import type { Message, MessageAttachment, PinnedMessageWire } from "./api";
+import {
+  messageUnfurlFromWire,
+  type MessageUnfurl,
+} from "../features/timeline/unfurl";
 import { num, str } from "./wire";
 
 
@@ -227,6 +231,85 @@ export function asReactionFrame(data: unknown): ReactionEvent | null {
     return null;
   }
   return frame;
+}
+
+/** ADR-0170 D5 — a complete server-owned unfurl projection for one message. */
+export interface MessageUnfurlEvent {
+  type: "message.unfurl";
+  v: 1;
+  ts: number;
+  /** Reuses the target message's seq; an accessory never advances the rail. */
+  seq: number;
+  payload: {
+    message_id: string;
+    channel_id: string;
+    unfurls: MessageUnfurl[];
+  };
+}
+
+/** Author removal publishes absence, without re-broadcasting page metadata. */
+export interface MessageUnfurlRemovedEvent {
+  type: "message.unfurl.removed";
+  v: 1;
+  ts: number;
+  seq: number;
+  payload: { message_id: string; channel_id: string };
+}
+
+export type UnfurlEvent = MessageUnfurlEvent | MessageUnfurlRemovedEvent;
+
+/**
+ * Narrow and normalise both unfurl channel frames. A partial full-projection
+ * frame is dropped rather than applied, because applying half of a replacement
+ * would erase valid cards until the next REST read.
+ */
+export function asUnfurlFrame(data: unknown): UnfurlEvent | null {
+  if (!data || typeof data !== "object") return null;
+  const source = data as Record<string, unknown>;
+  if (
+    source.v !== 1 ||
+    typeof source.ts !== "number" ||
+    typeof source.seq !== "number" ||
+    !source.payload ||
+    typeof source.payload !== "object"
+  ) {
+    return null;
+  }
+  const payload = source.payload as Record<string, unknown>;
+  if (
+    typeof payload.message_id !== "string" ||
+    typeof payload.channel_id !== "string"
+  ) {
+    return null;
+  }
+  if (source.type === "message.unfurl.removed") {
+    return {
+      type: "message.unfurl.removed",
+      v: 1,
+      ts: source.ts,
+      seq: source.seq,
+      payload: {
+        message_id: payload.message_id,
+        channel_id: payload.channel_id,
+      },
+    };
+  }
+  if (source.type !== "message.unfurl" || !Array.isArray(payload.unfurls)) {
+    return null;
+  }
+  const unfurls = payload.unfurls.map(messageUnfurlFromWire);
+  if (unfurls.some((row) => row === null)) return null;
+  return {
+    type: "message.unfurl",
+    v: 1,
+    ts: source.ts,
+    seq: source.seq,
+    payload: {
+      message_id: payload.message_id,
+      channel_id: payload.channel_id,
+      unfurls: unfurls as MessageUnfurl[],
+    },
+  };
 }
 
 /**
@@ -904,6 +987,8 @@ export interface RealtimeHandle {
       onReaction?: (event: ReactionEvent) => void;
       /** 이슈 #1112 — optional for the same reason as the two above. */
       onPin?: (event: PinEvent) => void;
+      /** ADR-0170 — projection update or author removal on the same rail. */
+      onUnfurl?: (event: UnfurlEvent) => void;
     }
   ) => () => void;
   /**

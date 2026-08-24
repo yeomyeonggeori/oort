@@ -106,6 +106,8 @@ export interface AttachmentDraft {
   name: string;
   mime: string;
   sizeBytes: number;
+  /** false면 picker/provider가 크기를 재지 못한 것. 실제 0-byte 파일과 구분한다. */
+  sizeKnown: boolean;
   status: DraftStatus;
   /** 0..1. `uploading`에서만 뜻이 있고, 그 밖에서는 읽지 않는다. */
   progress: number;
@@ -268,7 +270,7 @@ export function draftStatusWord(draft: AttachmentDraft): string {
 }
 
 /**
- * 칩 아래 한 줄. **크기가 항상 앞에 온다** (리뷰 M-7).
+ * 칩 아래 한 줄. **알고 있는 크기는 항상 앞에 온다** (리뷰 M-7).
  *
  * 앞 판은 업로드가 **끝난 뒤에야** 크기를 말했다. 그래서 오래 걸리는 업로드를
  * 보면서 "이게 몇 MB짜리였지"를 확인할 방법이 화면에 없었다 — 크기가 가장
@@ -285,14 +287,16 @@ export function draftStatusLine(draft: AttachmentDraft): {
   /** 잰 값이 있을 때만. 없으면 화면도 낭독도 수를 말하지 않는다. */
   percent: number | null;
 } {
-  const size = formatBytes(draft.sizeBytes);
+  // 폰 picker가 provider 메타데이터도 native 재측정도 얻지 못한 경우만 생략한다.
+  // 실제 0-byte 파일은 `sizeKnown=true`라서 정직하게 「0 B」를 말한다 (#1703 Nit-2).
+  const size = draft.sizeKnown ? formatBytes(draft.sizeBytes) : null;
   const word = draftStatusWord(draft);
   const percent =
     draft.status === "uploading" && draft.progress > 0
       ? Math.round(draft.progress * 100)
       : null;
   return {
-    text: `${size} · ${word}`,
+    text: size === null ? word : `${size} · ${word}`,
     danger: draft.status === "failed",
     percent,
   };
@@ -330,7 +334,7 @@ export function draftAnnouncement(
   if (changed.length === 0) return null;
   if (changed.length === 1) {
     const draft = changed[0];
-    return `${draft.name} ${formatBytes(draft.sizeBytes)} · ${draftStatusWord(draft)}`;
+    return `${draft.name} ${draftStatusLine(draft).text}`;
   }
   // 낱말별로 묶어 개수로 말한다. 「N개 상태가 바뀌었습니다」 같은 요약은 짧지만
   // 아무것도 말하지 않는다 — 무엇이 몇 개인지가 이 줄의 전부다.
@@ -369,7 +373,13 @@ export function issueForStatus(status: number): UploadIssue {
 /** 고른 파일 하나 → 처음의 칸. 상한을 넘으면 올려 보지도 않는다. */
 export function draftFor(
   localId: string,
-  file: { name: string; mime: string; sizeBytes: number }
+  file: {
+    name: string;
+    mime: string;
+    sizeBytes: number;
+    /** 생략하면 브라우저 File처럼 크기를 안다고 본다. */
+    sizeKnown?: boolean;
+  }
 ): AttachmentDraft {
   const tooLarge = file.sizeBytes > MAX_ATTACHMENT_BYTES;
   return {
@@ -377,6 +387,7 @@ export function draftFor(
     name: file.name,
     mime: file.mime,
     sizeBytes: file.sizeBytes,
+    sizeKnown: file.sizeKnown ?? true,
     status: tooLarge ? "failed" : "ready",
     progress: 0,
     ...(tooLarge ? { issue: "too-large" as const } : {}),

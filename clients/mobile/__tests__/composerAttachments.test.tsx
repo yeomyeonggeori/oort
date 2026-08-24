@@ -1,12 +1,21 @@
 import {
   ATTACH_COPY,
   MAX_ATTACHMENT_BYTES,
+  MAX_ATTACHMENTS_PER_MESSAGE,
+  beginUpload,
+  completeUpload as completeDraftUpload,
+  draftFor,
+  failUpload,
+  progressUpload,
   uploadIssueCopy,
   uploadIssueNext,
+  verifyUpload,
+  type AttachmentDraft,
 } from '@momo/core/features/attachments/model';
 import {ApiError} from '@momo/core/lib/api';
 import * as api from '@momo/core/lib/api';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
+import {QueryClient, QueryClientProvider} from '@tanstack/react-query';
 import {
   act,
   cleanup,
@@ -18,10 +27,25 @@ import {
 import React from 'react';
 import {AccessibilityInfo, Linking} from 'react-native';
 
+import {
+  ATTACHMENT_SHEET_GRABBER_WIDTH,
+  ATTACHMENT_TRAY_MAX_HEIGHT,
+  lightPalette,
+  space,
+} from '../src/design/tokens';
+import {FixedScheme} from '../src/design/theme';
+import {AttachmentPickerSheet} from '../src/features/attachments/AttachmentPickerSheet';
+import {AttachmentTray} from '../src/features/attachments/AttachmentTray';
 import {Composer} from '../src/features/conversation/Composer';
-import {resetAttachmentDraftsForTest} from '../src/features/attachments/draftStore';
+import {
+  addPickedFiles,
+  attachmentSurfaceKey,
+  resetAttachmentDraftsForTest,
+} from '../src/features/attachments/draftStore';
 import {pickDocument, pickPhoto} from '../src/features/attachments/picker';
 import {putAttachmentBytes} from '../src/features/attachments/uploadTransport';
+import * as uploadTransport from '../src/features/attachments/uploadTransport';
+import {SessionProvider, useSession} from '../src/session/useSession';
 
 const EMPTY = makeDirectory([]);
 const TARGET = {workspaceId: 'ws-1', channelId: 'channel-1'};
@@ -109,12 +133,99 @@ function renderComposer(onSend = jest.fn()) {
   };
 }
 
+function flatten(style: unknown): Record<string, unknown> {
+  if (Array.isArray(style)) {
+    return Object.assign({}, ...style.filter(Boolean).map(flatten));
+  }
+  return (style ?? {}) as Record<string, unknown>;
+}
+
+function draft(
+  localId: string,
+  over: Partial<AttachmentDraft> = {},
+): AttachmentDraft {
+  return {
+    ...draftFor(localId, {
+      name: `${localId}.txt`,
+      mime: 'text/plain',
+      sizeBytes: 2048,
+    }),
+    ...over,
+  };
+}
+
+function renderTray(drafts: AttachmentDraft[]) {
+  const node = (next: AttachmentDraft[]) => (
+    <FixedScheme scheme="light">
+      <AttachmentTray
+        drafts={next}
+        pickerIssue={null}
+        onRemove={jest.fn()}
+        onRetry={jest.fn()}
+        onClear={jest.fn()}
+      />
+    </FixedScheme>
+  );
+  const view = render(node(drafts));
+  return {
+    ...view,
+    rerenderDrafts: (next: AttachmentDraft[]) => view.rerender(node(next)),
+  };
+}
+
+function renderSignedInComposer(): {
+  signOut: () => void;
+  switchAccount: () => void;
+  endSession: () => void;
+} {
+  let signOut: (() => void) | null = null;
+  function Probe(): null {
+    signOut = useSession().signOut;
+    return null;
+  }
+  const client = new QueryClient({
+    defaultOptions: {queries: {retry: false, gcTime: 0}},
+  });
+  const tree = (memberId: string, displayName: string) => (
+    <QueryClientProvider client={client}>
+      <SessionProvider
+        member={
+          {
+            id: memberId,
+            workspaceId: TARGET.workspaceId,
+            kind: 'human',
+            displayName,
+            handle: memberId,
+          } as never
+        }
+      >
+        <Probe />
+        <Composer
+          recipient="place"
+          channelLabel="general"
+          directory={EMPTY}
+          attachmentTarget={TARGET}
+          onSend={jest.fn()}
+        />
+      </SessionProvider>
+    </QueryClientProvider>
+  );
+  const view = render(tree('member-1', '첫 계정'));
+  if (signOut === null) throw new Error('signOut을 잡지 못했다');
+  return {
+    signOut,
+    switchAccount: () => view.rerender(tree('member-2', '다음 계정')),
+    endSession: view.unmount,
+  };
+}
+
 beforeEach(() => {
   (
     AccessibilityInfo.announceForAccessibility as unknown as jest.Mock
   ).mockClear();
-  (imagePicker as unknown as {launchImageLibraryAsync: jest.Mock})
-    .launchImageLibraryAsync.mockClear();
+  (
+    imagePicker as unknown as {launchImageLibraryAsync: jest.Mock}
+  ).launchImageLibraryAsync.mockClear();
   imagePicker.__reset();
   documentPicker.__reset();
   fileSystem.__reset();
@@ -161,6 +272,7 @@ describe('picker·native upload 단위 배선', () => {
           name: 'launch day.jpg',
           mime: 'image/jpeg',
           sizeBytes: 7,
+          sizeKnown: true,
         },
       ],
     });
@@ -172,6 +284,33 @@ describe('picker·native upload 단위 배선', () => {
           name: 'brief.pdf',
           mime: 'application/pdf',
           sizeBytes: 9,
+          sizeKnown: true,
+        },
+      ],
+    });
+  });
+
+  it('provider와 native 파일 모두 크기를 못 읽은 경우만 unknown으로 보존한다', async () => {
+    documentPicker.__state.result = {
+      canceled: false,
+      assets: [
+        {
+          uri: 'file:///docs/provider.bin',
+          name: 'provider.bin',
+          mimeType: 'application/octet-stream',
+        },
+      ],
+    };
+
+    await expect(pickDocument()).resolves.toEqual({
+      kind: 'picked',
+      files: [
+        {
+          uri: 'file:///docs/provider.bin',
+          name: 'provider.bin',
+          mime: 'application/octet-stream',
+          sizeBytes: 0,
+          sizeKnown: false,
         },
       ],
     });
@@ -411,7 +550,8 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
     };
     renderComposer();
     openPicker('photo');
-    const announce = AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
+    const announce =
+      AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
     await waitFor(() =>
       expect(
         announce.mock.calls.some(([sentence]) =>
@@ -429,7 +569,8 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
     };
     renderComposer();
     openPicker('photo');
-    const announce = AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
+    const announce =
+      AccessibilityInfo.announceForAccessibility as unknown as jest.Mock;
     await waitFor(() =>
       expect(
         announce.mock.calls.some(([sentence]) =>
@@ -437,5 +578,274 @@ describe('검수 수리 회귀 (design-review High-1·High-2)', () => {
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe('#1703 M-2 후속 폴리시', () => {
+  it('진행 트랙 자리를 전 상태 예약하고 첫 측정 전에는 indeterminate로 말한다', () => {
+    const ready = draft('slot');
+    const view = renderTray([ready]);
+    expect(
+      flatten(screen.getByTestId('attachment-draft-progress-slot').props.style)
+        .height,
+    ).toBe(space.xs);
+    expect(screen.queryByTestId('attachment-draft-progress')).toBeNull();
+
+    const uploading = beginUpload([ready], ready.localId)[0];
+    view.rerenderDrafts([uploading]);
+    expect(
+      screen.getByTestId('attachment-draft-progress').props.accessibilityValue,
+    ).toEqual({
+      text: ATTACH_COPY.uploading,
+    });
+    expect(
+      flatten(
+        screen.getByTestId('attachment-draft-progress-indeterminate').props
+          .style,
+      ).alignSelf,
+    ).toBe('center');
+    expect(screen.queryByTestId('attachment-draft-progress-fill')).toBeNull();
+
+    const measured = progressUpload([uploading], ready.localId, 0.34)[0];
+    view.rerenderDrafts([measured]);
+    expect(
+      flatten(screen.getByTestId('attachment-draft-progress-fill').props.style)
+        .width,
+    ).toBe('34%');
+    expect(
+      screen.getByTestId('attachment-draft-progress').props.accessibilityValue,
+    ).toEqual({
+      min: 0,
+      max: 100,
+      now: 34,
+    });
+    expect(
+      screen.queryByTestId('attachment-draft-progress-indeterminate'),
+    ).toBeNull();
+
+    const verifying = verifyUpload([measured], ready.localId)[0];
+    const settled = [
+      verifying,
+      completeDraftUpload([verifying], ready.localId, 'att-slot')[0],
+      failUpload([ready], ready.localId, 'unavailable')[0],
+    ];
+    for (const nonUploading of settled) {
+      view.rerenderDrafts([nonUploading]);
+      expect(
+        flatten(
+          screen.getByTestId('attachment-draft-progress-slot').props.style,
+        ).height,
+      ).toBe(space.xs);
+      expect(screen.queryByTestId('attachment-draft-progress')).toBeNull();
+    }
+  });
+
+  it('발치 경고색은 failed 존재가 아니라 웹과 같은 sendBlockReason을 따른다', () => {
+    const queued = draft('queued');
+    const failed = failUpload([draft('failed')], 'failed', 'unavailable')[0];
+    const view = renderTray([queued, failed]);
+    expect(
+      flatten(screen.getByTestId('attachment-blocked').props.style).color,
+    ).toBe(lightPalette.textMuted);
+
+    view.rerenderDrafts([failed]);
+    expect(
+      flatten(screen.getByTestId('attachment-blocked').props.style).color,
+    ).toBe(lightPalette.warn);
+  });
+
+  it('크기를 읽지 못한 파일은 0 B라고 측정한 척하지 않는다', () => {
+    renderTray([draft('unknown-size', {sizeBytes: 0, sizeKnown: false})]);
+    const status = String(
+      screen.getByTestId('attachment-draft-status').props.children,
+    );
+    expect(status).toBe(ATTACH_COPY.queued);
+    expect(status).not.toContain('0 B');
+  });
+
+  it('grabber와 트레이 상한은 TOUCH_TARGET 대신 명명 측정을 소비한다', () => {
+    render(
+      <FixedScheme scheme="light">
+        <AttachmentTray
+          drafts={[draft('measure')]}
+          pickerIssue={null}
+          onRemove={jest.fn()}
+          onRetry={jest.fn()}
+          onClear={jest.fn()}
+        />
+        <AttachmentPickerSheet
+          visible
+          onClose={jest.fn()}
+          onPickPhoto={jest.fn()}
+          onPickFile={jest.fn()}
+        />
+      </FixedScheme>,
+    );
+    expect(
+      flatten(screen.getByTestId('attachment-tray-list').props.style).maxHeight,
+    ).toBe(ATTACHMENT_TRAY_MAX_HEIGHT);
+    expect(
+      flatten(screen.getByTestId('attachment-picker-grabber').props.style)
+        .width,
+    ).toBe(ATTACHMENT_SHEET_GRABBER_WIDTH);
+  });
+
+  it('현재 단건 picker 불변식에서 rejected를 일부 수락 뒤 무음 폐기하지 않는다', () => {
+    const tooMany = Array.from(
+      {length: MAX_ATTACHMENTS_PER_MESSAGE + 1},
+      (_, index) => ({
+        uri: `file:///docs/${index}.txt`,
+        name: `${index}.txt`,
+        mime: 'text/plain',
+        sizeBytes: 1,
+        sizeKnown: true,
+      }),
+    );
+    const key = attachmentSurfaceKey(TARGET);
+
+    expect(() => addPickedFiles(key, TARGET, tooMany)).toThrow(
+      /rejected files need a visible notice/,
+    );
+    renderComposer();
+    expect(screen.queryByTestId('attachment-tray')).toBeNull();
+    expect(createUpload).not.toHaveBeenCalled();
+  });
+
+  it('로그아웃은 드래프트 0건으로 만들고 진행 중 native PUT을 취소한다', async () => {
+    let settleUpload:
+      | ((value: {ok: false; failure: 'aborted'}) => void)
+      | undefined;
+    const abort = jest.fn();
+    const put = jest
+      .spyOn(uploadTransport, 'putAttachmentBytes')
+      .mockReturnValue({
+        done: new Promise(resolve => {
+          settleUpload = resolve;
+        }),
+        abort,
+      });
+    createUpload.mockResolvedValue({
+      id: 'old-bearer-upload',
+      status: 'pending',
+      uploadUrl: 'https://upload.example/old-bearer-upload',
+    });
+    const {signOut} = renderSignedInComposer();
+
+    act(() => {
+      addPickedFiles(attachmentSurfaceKey(TARGET), TARGET, [
+        {
+          uri: 'file:///docs/private.txt',
+          name: 'private.txt',
+          mime: 'text/plain',
+          sizeBytes: 8,
+          sizeKnown: true,
+        },
+      ]);
+    });
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+    expect(screen.getAllByTestId('attachment-draft')).toHaveLength(1);
+
+    act(() => signOut());
+
+    expect(abort).toHaveBeenCalledTimes(1);
+    expect(screen.queryAllByTestId('attachment-draft')).toHaveLength(0);
+    expect(screen.queryByTestId('attachment-tray')).toBeNull();
+
+    await act(async () => {
+      settleUpload?.({ok: false, failure: 'aborted'});
+      await Promise.resolve();
+    });
+    expect(completeUpload).not.toHaveBeenCalled();
+    expect(screen.queryAllByTestId('attachment-draft')).toHaveLength(0);
+    put.mockRestore();
+  });
+
+  it('계정 전환은 늦은 구 bearer upload session id를 native PUT에 넘기지 않는다', async () => {
+    let resolveCreate:
+      | ((
+          value: Awaited<ReturnType<typeof api.createAttachmentUpload>>,
+        ) => void)
+      | undefined;
+    createUpload.mockReturnValue(
+      new Promise(resolve => {
+        resolveCreate = resolve;
+      }),
+    );
+    const put = jest.spyOn(uploadTransport, 'putAttachmentBytes');
+    const {switchAccount} = renderSignedInComposer();
+
+    act(() => {
+      addPickedFiles(attachmentSurfaceKey(TARGET), TARGET, [
+        {
+          uri: 'file:///docs/old-account.txt',
+          name: 'old-account.txt',
+          mime: 'text/plain',
+          sizeBytes: 8,
+          sizeKnown: true,
+        },
+      ]);
+    });
+    await waitFor(() => expect(createUpload).toHaveBeenCalledTimes(1));
+
+    act(() => switchAccount());
+    expect(screen.queryAllByTestId('attachment-draft')).toHaveLength(0);
+
+    await act(async () => {
+      resolveCreate?.({
+        id: 'old-account-upload',
+        status: 'pending',
+        uploadUrl: 'https://upload.example/old-account-upload',
+      });
+      await Promise.resolve();
+    });
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.queryAllByTestId('attachment-draft')).toHaveLength(0);
+    put.mockRestore();
+  });
+
+  it('토큰 만료처럼 provider가 내려가도 진행 중 native PUT과 드래프트를 끝낸다', async () => {
+    let settleUpload:
+      | ((value: {ok: false; failure: 'aborted'}) => void)
+      | undefined;
+    const abort = jest.fn();
+    const put = jest
+      .spyOn(uploadTransport, 'putAttachmentBytes')
+      .mockReturnValue({
+        done: new Promise(resolve => {
+          settleUpload = resolve;
+        }),
+        abort,
+      });
+    createUpload.mockResolvedValue({
+      id: 'expired-session-upload',
+      status: 'pending',
+      uploadUrl: 'https://upload.example/expired-session-upload',
+    });
+    const {endSession} = renderSignedInComposer();
+
+    act(() => {
+      addPickedFiles(attachmentSurfaceKey(TARGET), TARGET, [
+        {
+          uri: 'file:///docs/expired.txt',
+          name: 'expired.txt',
+          mime: 'text/plain',
+          sizeBytes: 8,
+          sizeKnown: true,
+        },
+      ]);
+    });
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(1));
+
+    act(() => endSession());
+    expect(abort).toHaveBeenCalledTimes(1);
+    renderComposer();
+    expect(screen.queryAllByTestId('attachment-draft')).toHaveLength(0);
+
+    await act(async () => {
+      settleUpload?.({ok: false, failure: 'aborted'});
+      await Promise.resolve();
+    });
+    expect(completeUpload).not.toHaveBeenCalled();
+    put.mockRestore();
   });
 });

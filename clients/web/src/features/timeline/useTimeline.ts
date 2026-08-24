@@ -3,8 +3,10 @@ import {
   deleteMessage as deleteMessageRequest,
   editMessage as editMessageRequest,
   fetchChannelPins,
+  fetchMessageUnfurls,
   fetchMessages,
   fetchReactionSnapshot,
+  removeMessageUnfurls,
   sendMessage,
   setPin,
   setReaction,
@@ -49,6 +51,15 @@ import {
 } from "@momo/core/features/timeline/pins";
 import { endedStreamRunIds } from "@momo/core/features/timeline/streamStop";
 import { seedEndedRuns } from "@/features/agents/endedRuns";
+import {
+  clearMessageUnfurls,
+  emptyUnfurls,
+  mergeColdMessageUnfurls,
+  messageMayHaveUnfurls,
+  replaceMessageUnfurls,
+  type MessageUnfurl,
+  type UnfurlMap,
+} from "@momo/core/features/timeline/unfurl";
 
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
@@ -121,6 +132,10 @@ export interface UseTimelineResult {
   editMessage: (message: Message, body: string) => Promise<void>;
   /** Soft-delete my own message. The tombstone replaces the local row. */
   deleteMessage: (message: Message) => Promise<void>;
+  /** ADR-0170 — author-only removal; success also tombstones regeneration. */
+  removeUnfurls: (message: Message) => Promise<void>;
+  /** Server projection keyed by case-folded message id. */
+  unfurls: UnfurlMap;
 }
 
 /**
@@ -171,6 +186,15 @@ export function useTimeline(
   // "we never found out", and the header list was printing the first sentence
   // for both.
   const [pinsStatus, setPinsStatus] = useState<PinListStatus>("loading");
+  // ADR-0170. Absence and an explicit empty list differ while a cold request is
+  // racing realtime: the latter is a live/remove tombstone and must win.
+  const [unfurls, setUnfurls] = useState<UnfurlMap>(emptyUnfurls);
+  const unfurlsRef = useRef<UnfurlMap>(unfurls);
+  const unfurlReadsRef = useRef<Set<string>>(new Set());
+  const applyUnfurls = useCallback((next: UnfurlMap) => {
+    unfurlsRef.current = next;
+    setUnfurls(next);
+  }, []);
   // Which read owns the answer. A channel switch and a retry both bump it, so a
   // slow reply from the channel you just left cannot write over the one you are
   // in — the same hazard the `cancelled` flag guards in the effect, held in a
@@ -256,6 +280,39 @@ export function useTimeline(
   // resolved after the user moved on. Without it a POST for channel A could
   // merge its row into channel B's timeline.
   const channelRef = useRef<string | null>(null);
+
+  /**
+   * Accessory reads never hold up message history. Unsupported routes, server
+   * off, and individual fetch failures all resolve to quiet absence; a later
+   * live frame may still replace that local tombstone.
+   */
+  const hydrateUnfurls = useCallback(
+    (messages: readonly Message[], channel: string) => {
+      const candidates = messages.filter((message) => {
+        const folded = message.id.toLowerCase();
+        if (!messageMayHaveUnfurls(message.body)) return false;
+        if (unfurlReadsRef.current.has(folded)) return false;
+        unfurlReadsRef.current.add(folded);
+        return true;
+      });
+      void Promise.all(
+        candidates.map(async (message) => {
+          let rows: MessageUnfurl[] = [];
+          try {
+            rows = await fetchMessageUnfurls(workspaceId, message.id);
+          } catch {
+            // Server disabled/old/unreachable means no accessory, not an error
+            // state on a readable message (ADR-0170 D4/D5).
+          }
+          if (channelRef.current !== channel) return;
+          applyUnfurls(
+            mergeColdMessageUnfurls(unfurlsRef.current, message.id, rows)
+          );
+        })
+      );
+    },
+    [workspaceId, applyUnfurls]
+  );
 
   const post = useCallback(
     async (row: PendingMessage) => {
@@ -351,6 +408,7 @@ export function useTimeline(
         if (page.messages.length === 0) break;
         total += page.messages.length;
         applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channel);
         const maxSeq = page.messages.reduce((m, x) => Math.max(m, x.seq), after);
         if (maxSeq <= after) break;
         after = maxSeq;
@@ -358,7 +416,7 @@ export function useTimeline(
       }
       return total;
     },
-    [workspaceId, applyBatch]
+    [workspaceId, applyBatch, hydrateUnfurls]
   );
 
   useEffect(() => {
@@ -391,12 +449,15 @@ export function useTimeline(
     reactionsRef.current = emptyReactions();
     setReactions(reactionsRef.current);
     applyPins(emptyPins());
+    unfurlReadsRef.current = new Set();
+    applyUnfurls(emptyUnfurls());
 
     // 1) REST head (descending page; merge is order-agnostic).
     fetchMessages(workspaceId, channelId, { limit: HEAD_LIMIT })
       .then((page) => {
         if (cancelled) return;
         applyBatch(page.messages);
+        hydrateUnfurls(page.messages, channelId);
         setReachedStart(page.nextBefore === undefined);
         setStatus("ready");
       })
@@ -477,6 +538,7 @@ export function useTimeline(
         // `message.unpinned` is published for a delete, so this is the only
         // place the header list learns about it.
         applyPins(removePin(pinsRef.current, messageId));
+        applyUnfurls(clearMessageUnfurls(unfurlsRef.current, messageId));
       },
       onReaction: (event) => {
         if (cancelled) return;
@@ -502,6 +564,20 @@ export function useTimeline(
           applyPins(removePin(pinsRef.current, event.payload.message_id));
         }
       },
+      onUnfurl: (event) => {
+        if (cancelled) return;
+        const messageId = event.payload.message_id;
+        unfurlReadsRef.current.add(messageId.toLowerCase());
+        applyUnfurls(
+          event.type === "message.unfurl"
+            ? replaceMessageUnfurls(
+                unfurlsRef.current,
+                messageId,
+                event.payload.unfurls
+              )
+            : clearMessageUnfurls(unfurlsRef.current, messageId)
+        );
+      },
     });
 
     return () => {
@@ -516,6 +592,8 @@ export function useTimeline(
     applyBatch,
     applyReaction,
     applyPins,
+    applyUnfurls,
+    hydrateUnfurls,
     loadPins,
     addMarker,
     updatePending,
@@ -545,12 +623,21 @@ export function useTimeline(
         before: oldest,
         limit: PAGE_LIMIT,
       });
-      setState((s) => reconcileMessages(s, page.messages));
+      applyBatch(page.messages);
+      hydrateUnfurls(page.messages, channelId);
       if (page.nextBefore === undefined) setReachedStart(true);
     } finally {
       setLoadingOlder(false);
     }
-  }, [workspaceId, channelId, state.oldestSeq, loadingOlder, reachedStart]);
+  }, [
+    workspaceId,
+    channelId,
+    state.oldestSeq,
+    loadingOlder,
+    reachedStart,
+    applyBatch,
+    hydrateUnfurls,
+  ]);
 
   const reload = useCallback(() => setReloadNonce((n) => n + 1), []);
 
@@ -623,8 +710,17 @@ export function useTimeline(
       );
       setReactions(reactionsRef.current);
       applyPins(removePin(pinsRef.current, message.id));
+      applyUnfurls(clearMessageUnfurls(unfurlsRef.current, message.id));
     },
-    [workspaceId, applyBatch, applyPins]
+    [workspaceId, applyBatch, applyPins, applyUnfurls]
+  );
+
+  const removeUnfurls = useCallback(
+    async (message: Message) => {
+      await removeMessageUnfurls(workspaceId, message.id);
+      applyUnfurls(clearMessageUnfurls(unfurlsRef.current, message.id));
+    },
+    [workspaceId, applyUnfurls]
   );
 
   /**
@@ -680,5 +776,7 @@ export function useTimeline(
     togglePin,
     editMessage,
     deleteMessage,
+    unfurls,
+    removeUnfurls,
   };
 }
