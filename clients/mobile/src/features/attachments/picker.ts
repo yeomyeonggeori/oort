@@ -9,6 +9,8 @@ export interface PickedAttachmentFile {
   name: string;
   mime: string;
   sizeBytes: number;
+  /** provider 값 또는 읽을 수 있는 native 파일에서 실제로 잰 값인가. */
+  sizeKnown: boolean;
 }
 
 export type AttachmentPickerOutcome =
@@ -25,16 +27,23 @@ function fileNameFromUri(uri: string, fallback: string): string {
   }
 }
 
-function fileSize(uri: string, reported: number | undefined): number {
+function fileSize(
+  uri: string,
+  reported: number | undefined,
+): {sizeBytes: number; sizeKnown: boolean} {
   if (reported !== undefined && Number.isFinite(reported) && reported >= 0) {
-    return reported;
+    return {sizeBytes: reported, sizeKnown: true};
   }
   try {
-    const measured = new File(uri).size;
-    return Number.isFinite(measured) && measured >= 0 ? measured : 0;
+    const file = new File(uri);
+    const measured = file.size;
+    if (file.exists && Number.isFinite(measured) && measured >= 0) {
+      return {sizeBytes: measured, sizeKnown: true};
+    }
   } catch {
-    return 0;
+    // 아래의 명시적인 unknown으로 접는다.
   }
+  return {sizeBytes: 0, sizeKnown: false};
 }
 
 /**
@@ -54,6 +63,7 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
       return {kind: 'issue', issue: 'selection-cancelled'};
     }
     const asset = result.assets[0];
+    const size = fileSize(asset.uri, asset.fileSize);
     return {
       kind: 'picked',
       files: [
@@ -61,7 +71,7 @@ export async function pickPhoto(): Promise<AttachmentPickerOutcome> {
           uri: asset.uri,
           name: asset.fileName ?? fileNameFromUri(asset.uri, 'photo.jpg'),
           mime: asset.mimeType ?? 'image/jpeg',
-          sizeBytes: fileSize(asset.uri, asset.fileSize),
+          ...size,
         },
       ],
     };
@@ -93,6 +103,7 @@ export async function pickDocument(): Promise<AttachmentPickerOutcome> {
       return {kind: 'issue', issue: 'selection-cancelled'};
     }
     const asset = result.assets[0];
+    const size = fileSize(asset.uri, asset.size);
     return {
       kind: 'picked',
       files: [
@@ -100,7 +111,7 @@ export async function pickDocument(): Promise<AttachmentPickerOutcome> {
           uri: asset.uri,
           name: asset.name,
           mime: asset.mimeType ?? 'application/octet-stream',
-          sizeBytes: fileSize(asset.uri, asset.size),
+          ...size,
         },
       ],
     };

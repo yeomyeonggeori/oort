@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import {
+  ATTACHMENT_TRAY_MAX_HEIGHT,
   font,
   line,
   radius,
@@ -140,6 +141,12 @@ describe('간격 축이 웹 정본과 같은 표 위에 있다', () => {
     // (웹 `--tap-target`, 폰 `TOUCH_TARGET`), 24(`--touch-target`)는 폰에 짝이 없다.
     // 앞의 절반은 여기서 대조되고, 뒤의 절반은 아래 목록에 열거된다.
     expect(TOUCH_TARGET).toBe(webPx('tap-target'));
+  });
+
+  it('첨부 트레이 상한이 웹 --spacing-tray-max 와 같다', () => {
+    // 같은 컴포저 역할의 같은 측정이다. 어느 한쪽이 움직이면 다른 쪽도 의식적으로
+    // 받거나 분기 근거를 남겨야 하므로 정본 값을 직접 읽어 대조한다 (#1703).
+    expect(ATTACHMENT_TRAY_MAX_HEIGHT).toBe(webPx('spacing-tray-max'));
   });
 
   it('짝 없는 웹 단계가 정확히 셋이고, 그것이 자라면 여기가 빨갛다', () => {

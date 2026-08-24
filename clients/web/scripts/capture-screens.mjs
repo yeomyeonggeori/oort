@@ -73,6 +73,8 @@ const MOBILE_TAP_TARGETS = [
   // optional인 것은 각자 자기 화면에만 존재하기 때문이고, 그 화면을 찍는 프레임이
   // `assertTapTargets`를 다시 부른다.
   ["message-editor-save", "수정 저장", "optional"],
+  // #1718 — 언퍼얼 카드의 제거 X. 카드가 있는 프레임에만 존재한다.
+  ["unfurl-remove", "링크 미리보기 제거", "optional"],
   ["message-editor-cancel", "수정 취소", "optional"],
   ["delete-message-commit", "삭제 확인", "optional"],
   ["delete-message-cancel", "삭제 취소", "optional"],
@@ -1598,6 +1600,51 @@ async function installMocks(context) {
       },
     })
   );
+  // ADR-0170 client evidence. Only the newest fixture row carries a card, so
+  // the normal chat frame shows the real density and the author-only remove
+  // control. Every other candidate answers with the server-off shape: empty,
+  // with no placeholder invented by the client.
+  await context.route("**/v1/workspaces/*/messages/*/unfurls", (route) => {
+    if (route.request().method() === "DELETE") {
+      return json(route, { removed: true });
+    }
+    const messageId = new URL(route.request().url()).pathname.split("/").at(-2);
+    return json(route, {
+      unfurls:
+        messageId === "capture-17"
+          ? [
+              {
+                id: "capture-unfurl-1",
+                messageId,
+                url: "https://docs.oor7.com/runbooks/gateway-errors",
+                status: "ok",
+                title: "게이트웨이 오류 대응 런북",
+                description:
+                  "502가 반복될 때 요청 경로와 워커 상태를 확인하는 순서입니다.",
+                domain: "docs.oor7.com",
+                imageUrl: `/v1/workspaces/${WORKSPACE_ID}/unfurls/capture-unfurl-1/image`,
+              },
+            ]
+          : [],
+    });
+  });
+  await context.route("**/v1/workspaces/*/unfurls/*/image", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "image/png",
+      body: Buffer.from(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+        "base64"
+      ),
+    })
+  );
+  await context.route("**/v1/workspaces/*/unfurl-settings", (route) => {
+    const body = JSON.parse(route.request().postData() || "{}");
+    return json(route, {
+      enabled: route.request().method() === "PUT" ? body.enabled : true,
+      updatedAtMs: Date.now() - 3_600_000,
+    });
+  });
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {
@@ -3129,6 +3176,7 @@ async function captureScheme(browser, scheme) {
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await login.getByTestId("unfurl-card").waitFor({ state: "visible" });
   // 넓은 창도 같은 자로 잰다 (goal B9). 긴 무공백 토큰은 폰에서만 나는 결함이
   // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
   // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
@@ -3136,6 +3184,42 @@ async function captureScheme(browser, scheme) {
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  // ADR-0170 destructive boundary: removing a preview is permanent for this
+  // message, so the no-regeneration sentence and Esc layer get their own
+  // review frame. Esc must restore focus to the exact opener and keeps the card
+  // available for the remaining lanes.
+  const unfurlRemoveOpener = login.getByTestId("unfurl-remove");
+  await unfurlRemoveOpener.click();
+  await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "visible" });
+  const unfurlRemoveShot = `${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`;
+  await login.screenshot({ path: unfurlRemoveShot });
+  shots.push(unfurlRemoveShot);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "hidden" });
+  const unfurlFocusRestored = await unfurlRemoveOpener.evaluate(
+    (element) => element === document.activeElement
+  );
+  if (!unfurlFocusRestored) {
+    throw new Error(`언퍼얼 제거 Esc가 opener 초점을 복원하지 않았다 ${scheme}`);
+  }
+
+  // Mocked author DELETE round trip. A separate page keeps the main evidence
+  // lane's card intact while proving that success removes only the projection,
+  // not the message body, and leaves no regeneration placeholder behind.
+  const unfurlRemoval = await context.newPage();
+  await unfurlRemoval.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(unfurlRemoval);
+  await unfurlRemoval.getByTestId("unfurl-card").waitFor({ state: "visible" });
+  await unfurlRemoval.getByTestId("unfurl-remove").click();
+  await unfurlRemoval.getByTestId("unfurl-remove-commit").click();
+  await unfurlRemoval.getByTestId("unfurl-group").waitFor({ state: "hidden" });
+  await unfurlRemoval
+    .getByText("502가 계속 납니다.", { exact: false })
+    .waitFor({ state: "visible" });
+  const unfurlRemovedShot = `${OUT_DIR}/unfurl-removed-${scheme}.png`;
+  await unfurlRemoval.screenshot({ path: unfurlRemovedShot });
+  shots.push(unfurlRemovedShot);
 
   // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
   //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
@@ -3918,6 +4002,7 @@ async function captureScheme(browser, scheme) {
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
     // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
     ["appearance", "테마", "appearance"],
+    ["link-previews", "링크 미리보기", "link-previews"],
     ["notifications", "알림 규칙", "notifications"],
     ["workspace", "워크스페이스", "workspace"],
     ["plugins", "앱", "plugins"],

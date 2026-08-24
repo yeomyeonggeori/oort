@@ -5,6 +5,7 @@ import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {ATTACH_COPY} from '@momo/core/features/attachments/model';
 
 import {
+  ATTACHMENT_SHEET_GRABBER_WIDTH,
   font,
   line,
   radius,
@@ -55,7 +56,7 @@ export function AttachmentPickerSheet({
             {paddingBottom: Math.max(insets.bottom, space.md)},
           ]}
         >
-          <View style={styles.grabber} />
+          <View style={styles.grabber} testID="attachment-picker-grabber" />
           <View style={styles.header}>
             <Text style={styles.title}>{ATTACH_COPY.attach}</Text>
             <Pressable
@@ -134,7 +135,7 @@ const buildStyles = (color: Palette) =>
     },
     grabber: {
       alignSelf: 'center',
-      width: TOUCH_TARGET,
+      width: ATTACHMENT_SHEET_GRABBER_WIDTH,
       height: space.xs,
       marginTop: space.sm,
       borderRadius: radius.pill,

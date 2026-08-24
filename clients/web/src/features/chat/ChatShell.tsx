@@ -991,6 +991,7 @@ export function ChatShell() {
               // offered and then failing on every click.
               reactions={stressCount > 0 ? undefined : timeline.reactions}
               pins={stressCount > 0 ? undefined : timeline.pins}
+              unfurls={stressCount > 0 ? undefined : timeline.unfurls}
               actions={
                 stressCount > 0
                   ? undefined
@@ -1000,6 +1001,7 @@ export function ChatShell() {
                       onTogglePin: timeline.togglePin,
                       onEditMessage: timeline.editMessage,
                       onDeleteMessage: timeline.deleteMessage,
+                      onRemoveUnfurls: timeline.removeUnfurls,
                     }
               }
               onStartReached={stressCount > 0 ? undefined : timeline.loadOlder}

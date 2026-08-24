@@ -42,6 +42,11 @@ import { PendingRow } from "./PendingRow";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import {
+  unfurlsFor,
+  type UnfurlMap,
+} from "@momo/core/features/timeline/unfurl";
+import { useLinkPreviewsFolded } from "./linkPreviewPreference";
+import {
   AT_BOTTOM_SLACK_PX,
   countNewerThan,
   newestSeqOf,
@@ -171,6 +176,7 @@ export function Timeline({
   actions,
   reactions,
   pins,
+  unfurls,
   onStartReached,
   onRetry,
   onOpenThread,
@@ -211,6 +217,8 @@ export function Timeline({
    * would re-render every time anything anywhere in the channel was pinned.
    */
   pins?: PinMap;
+  /** ADR-0170 server projection, keyed by case-folded message id. */
+  unfurls?: UnfurlMap;
   onStartReached?: () => void;
   onRetry?: () => void;
   onOpenThread?: (message: Message) => void;
@@ -239,6 +247,7 @@ export function Timeline({
   onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
+  const foldLinkPreviews = useLinkPreviewsFolded();
 
   // ADR-0148 - 라이브로 도착한 인용 답글의 원본을 화면에 이미 있는 행에서 푼다.
   //
@@ -549,6 +558,8 @@ export function Timeline({
               message={item.message}
               startsGroup={item.startsGroup}
               directory={directory}
+              unfurls={unfurlsFor(unfurls ?? {}, item.message.id)}
+              foldLinkPreviews={foldLinkPreviews}
               actions={
                 actions && {
                   ...actions,
