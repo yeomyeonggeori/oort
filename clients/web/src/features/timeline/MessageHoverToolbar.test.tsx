@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, createElement, useRef, useState } from "react";
+import {
+  act,
+  createElement,
+  useRef,
+  useState,
+  type FocusEvent,
+} from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
@@ -8,6 +14,7 @@ import {
   frequentEmojis,
   recordEmojiUse,
   resetEmojiFrequencyForTests,
+  useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
 import {
   MessageHoverToolbar,
@@ -19,7 +26,7 @@ import {
   HOVER_TOOLBAR_SLOT_COUNT,
   shouldShowHoverToolbar,
 } from "./hoverToolbarModel";
-import { useRowRovingFocus } from "./rowFocus";
+import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -119,38 +126,53 @@ function mountToolbar(open = true): HTMLElement {
 function TimelineHarness({
   hovered,
   focused,
+  withChip = true,
 }: {
   hovered: number | null;
   focused: number | null;
+  withChip?: boolean;
 }) {
   return createElement(
     "div",
     { "data-testid": "timeline" },
     Array.from({ length: 20 }, (_, index) =>
-      createElement(Row, { key: index, index, hovered, focused })
+      createElement(Row, { key: index, index, hovered, focused, withChip })
     )
   );
+}
+
+function rowStations(row: Element): HTMLElement[] {
+  const members = Array.from(
+    row.querySelectorAll<HTMLElement>("[data-row-action]")
+  ).filter((el) => el.tabIndex >= 0);
+  const host = row as HTMLElement;
+  if (host.tabIndex >= 0) return [host, ...members];
+  return members;
 }
 
 function Row({
   index,
   hovered,
   focused,
+  withChip,
 }: {
   index: number;
   hovered: number | null;
   focused: number | null;
+  withChip: boolean;
 }) {
   const ref = useRef<HTMLElement | null>(null);
   const onKeyDown = useRowRovingFocus(ref);
+  const [rowFocused, setRowFocused] = useState(focused === index);
   const show = shouldShowHoverToolbar({
     pointerCanHover: true,
     editing: false,
     rowHovered: hovered === index,
-    rowFocused: focused === index,
+    rowFocused,
     overlayOpen: false,
     selecting: false,
   });
+  useHoverToolbarFocusHandoff(ref, show, rowFocused);
   return createElement(
     "article",
     {
@@ -158,11 +180,20 @@ function Row({
       onKeyDown,
       "data-testid": "timeline-message",
       "data-seq": String(index),
+      "data-actionable": "true",
+      onFocusCapture: () => setRowFocused(true),
+      onBlurCapture: (event: FocusEvent) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        setRowFocused(false);
+      },
     },
-    createElement("button", {
-      "data-row-action": "",
-      "data-testid": `chip-${index}`,
-    }),
+    withChip
+      ? createElement("button", {
+          "data-row-action": "",
+          "data-testid": `chip-${index}`,
+        })
+      : null,
     show
       ? createElement(MessageHoverToolbar, {
           available,
@@ -179,14 +210,44 @@ function Row({
   );
 }
 
-function mountTimeline(hovered: number | null, focused: number | null): HTMLElement {
+function mountTimeline(
+  hovered: number | null,
+  focused: number | null,
+  withChip = true
+): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
   act(() =>
-    mountedRoot?.render(createElement(TimelineHarness, { hovered, focused }))
+    mountedRoot?.render(
+      createElement(TimelineHarness, { hovered, focused, withChip })
+    )
   );
   return host;
+}
+
+const DUAL_SEED = [
+  "👍",
+  "✅",
+  "🙏",
+  "🎉",
+  "👀",
+  "🔥",
+  "💯",
+  "✨",
+] as const;
+
+let dualLimitRenders = 0;
+
+function DualLimitProbe() {
+  dualLimitRenders += 1;
+  const a = useFrequentEmojis(DUAL_SEED, 3);
+  const b = useFrequentEmojis(DUAL_SEED, 32);
+  return createElement("div", {
+    "data-testid": "dual",
+    "data-a": a.join(""),
+    "data-b": b.join(""),
+  });
 }
 
 describe("MessageHoverToolbar", () => {
@@ -241,10 +302,7 @@ describe("가상화 타임라인 탭스톱 불변 (red proof)", () => {
       const rows = host.querySelectorAll('[data-testid="timeline-message"]');
       expect(rows).toHaveLength(20);
       for (const row of rows) {
-        const stops = Array.from(
-          row.querySelectorAll<HTMLElement>("[data-row-action]")
-        ).filter((el) => el.tabIndex >= 0);
-        expect(stops).toHaveLength(1);
+        expect(rowStations(row)).toHaveLength(1);
         expect(countToolbarTabStops(row)).toBe(0);
       }
     });
@@ -257,10 +315,7 @@ describe("가상화 타임라인 탭스톱 불변 (red proof)", () => {
     const hovered = host.querySelector('[data-seq="7"]')!;
     expect(hovered.contains(toolbars[0])).toBe(true);
     await vi.waitFor(() => {
-      const stops = Array.from(
-        hovered.querySelectorAll<HTMLElement>("[data-row-action]")
-      ).filter((el) => el.tabIndex >= 0);
-      expect(stops).toHaveLength(1);
+      expect(rowStations(hovered)).toHaveLength(1);
       expect(countToolbarTabStops(hovered)).toBeLessThanOrEqual(1);
     });
     const others = host.querySelectorAll(
@@ -271,7 +326,7 @@ describe("가상화 타임라인 탭스톱 불변 (red proof)", () => {
     }
   });
 
-  it("툴바 안에서 ←/→ 는 슬롯을 돌고 행 로빙으로 새지 않는다", async () => {
+  it("툴바 항목이 행 로빙에 편입되어 ←/→ 로 슬롯을 돈다", async () => {
     const host = mountTimeline(0, 0);
     const row = host.querySelector('[data-seq="0"]') as HTMLElement;
     const firstSlot = row.querySelector<HTMLButtonElement>(
@@ -296,5 +351,104 @@ describe("가상화 타임라인 탭스톱 불변 (red proof)", () => {
     expect(document.activeElement).toBe(secondSlot);
     expect(secondSlot.tabIndex).toBe(0);
     expect(firstSlot.tabIndex).toBe(-1);
+  });
+});
+
+describe("B-1 frequency 소비자 둘 (#1743)", () => {
+  it("서로 다른 limit 훅 둘을 한 트리에 마운트해도 무한 렌더가 없다", () => {
+    dualLimitRenders = 0;
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+    act(() => mountedRoot?.render(createElement(DualLimitProbe)));
+    const afterMount = dualLimitRenders;
+    expect(afterMount).toBeGreaterThan(0);
+    expect(afterMount).toBeLessThan(5);
+    act(() => {
+      recordEmojiUse("🎉");
+    });
+    expect(dualLimitRenders - afterMount).toBeGreaterThan(0);
+    expect(dualLimitRenders).toBeLessThan(12);
+    const dual = host.querySelector("[data-testid='dual']")!;
+    expect(dual.getAttribute("data-a")?.length).toBeGreaterThan(0);
+    expect((dual.getAttribute("data-b") ?? "").length).toBeGreaterThan(
+      dual.getAttribute("data-a")?.length ?? 0
+    );
+  });
+});
+
+describe("B-2 rest 구성원 0인 actionable 행 (#1743)", () => {
+  it("Tab이 행에 착지하고 BODY로 떨어지지 않으며 ⋯까지 핸드오프한다", async () => {
+    const host = mountTimeline(null, null, false);
+    const row = host.querySelector('[data-seq="3"]') as HTMLElement;
+    await vi.waitFor(() => expect(row.tabIndex).toBe(0));
+    expect(row.querySelectorAll("[data-row-action]")).toHaveLength(0);
+    expect(rowStations(row)).toHaveLength(1);
+
+    act(() => {
+      row.focus();
+    });
+
+    await vi.waitFor(() => {
+      expect(document.activeElement).not.toBe(document.body);
+      const primary = row.querySelector<HTMLElement>(
+        '[data-testid="message-actions-trigger"]'
+      );
+      expect(primary).not.toBeNull();
+      expect(document.activeElement).toBe(primary);
+    });
+    expect(rowStations(row)).toHaveLength(1);
+    expect(row.querySelector('[data-testid="message-hover-toolbar"]')).not.toBeNull();
+  });
+
+  it("순회 중 normalize를 다시 돌려도 행당 정거장은 1이다", async () => {
+    const host = mountTimeline(null, null, false);
+    const row = host.querySelector('[data-seq="4"]') as HTMLElement;
+    act(() => {
+      row.focus();
+    });
+    await vi.waitFor(() =>
+      expect(
+        row.querySelector('[data-testid="message-actions-trigger"]')
+      ).not.toBeNull()
+    );
+    expect(rowStations(row)).toHaveLength(1);
+    act(() => {
+      row.focus();
+    });
+    await vi.waitFor(() => expect(rowStations(row)).toHaveLength(1));
+  });
+});
+
+describe("H-2 슬롯 순위 마운트 고정 (#1743)", () => {
+  it("슬롯 클릭 직후 같은 위치 같은 글리프다", () => {
+    const host = mountToolbar();
+    const slots = () =>
+      Array.from(
+        host.querySelectorAll<HTMLElement>('[data-testid^="toolbar-react-"]')
+      )
+        .filter((el) => el.dataset.testid !== "toolbar-react-more")
+        .map((el) => el.textContent);
+    const before = slots();
+    const second = host.querySelector<HTMLButtonElement>(
+      `[data-testid="toolbar-react-${before[1]}"]`
+    )!;
+    act(() => {
+      second.click();
+    });
+    expect(slots()).toEqual(before);
+    expect(slots()[1]).toBe(before[1]);
+  });
+});
+
+describe("M-1 ⋯ 이름", () => {
+  it("툴바는 메시지 액션, ⋯는 더 많은 액션이다", () => {
+    const host = mountToolbar();
+    const bar = host.querySelector('[data-testid="message-hover-toolbar"]');
+    const overflow = host.querySelector(
+      '[data-testid="message-actions-trigger"]'
+    );
+    expect(bar?.getAttribute("aria-label")).toBe("메시지 액션");
+    expect(overflow?.getAttribute("aria-label")).toBe("더 많은 액션");
   });
 });

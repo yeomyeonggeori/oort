@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 const QUERY = "(hover: none)";
 
-/** Pointer vs finger. Same axis as MessageActions (`pointer-only` / `touch-only`). */
+/** Pointer vs finger. Same axis as MessageActions (`touch-only` / `(hover: none)` JS). */
 export function useHoverNone(): boolean {
   const [matches, setMatches] = useState(
     () =>

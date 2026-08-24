@@ -95,6 +95,6 @@ describe("B11 리버트 원인 — 소스 계약", () => {
     expect(body).not.toMatch(/opacity-0|invisible|visibility-hidden/);
     expect(body).toContain('role="toolbar"');
     expect(body).toContain("data-toolbar-item");
-    expect(body).toContain("stopPropagation");
+    expect(body).not.toContain("stopPropagation");
   });
 });

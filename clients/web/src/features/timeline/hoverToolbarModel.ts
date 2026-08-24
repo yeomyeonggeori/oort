@@ -5,7 +5,9 @@
 // `opacity-0`; Tab still found them, and a virtualized timeline grew ~150 stops.
 // The replacement is: mount the toolbar only while the row is hovered, focused,
 // or holding an overlay, and treat the toolbar as one WAI-ARIA composite
-// (internal roving tabindex). Touch (`hover: none`) never mounts it.
+// (toolbar items join the row's one roving group). Touch (`hover: none`) never
+// mounts it. The bar straddles the row's top edge and must not intersect this
+// row's body text (B11 R2 Blocker).
 // =============================================================================
 
 /** Curated seed. Must stay inside `PICKER_EMOJI`. Frequency then promotes. */

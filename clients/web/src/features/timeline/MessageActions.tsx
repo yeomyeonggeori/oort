@@ -15,7 +15,6 @@ import {
   recordEmojiUse,
   useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
-import { nextRovingIndex } from "./rowFocus";
 import {
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
@@ -50,10 +49,11 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 // rather than by how wide the window is:
 //
 //   * **a pointer that can hover** - on row hover or focus-within, a floating
-//     toolbar mounts at the top-right: frequency slots, React, Reply, and ⋯.
-//     Right-click still opens the same inventory at the pointer. A text
-//     selection yields to the browser's native menu and unmounts the toolbar
-//     so a drag is not stolen. Edit/Delete stay in the overflow menu.
+//     toolbar straddles the top-right (16px gutter, no own-row body overlap):
+//     frequency slots, React, Reply, and ⋯. Right-click still opens the same
+//     inventory at the pointer. A text selection yields to the browser's
+//     native menu and unmounts the toolbar so a drag is not stolen.
+//     Edit/Delete stay in the overflow menu.
 //
 //     R1 shipped a six-button bar and failed twice: `opacity-0` hides a button
 //     from the eye but not from Tab (up to ~150 tab stops in a virtualized
@@ -61,9 +61,9 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 //     reintroduction is the two conditions that close those failures: the
 //     toolbar DOM is not mounted on a row that is not hovered, not focused,
 //     and has no open overlay (no opacity/visibility trick), and the toolbar
-//     is a WAI-ARIA toolbar with internal roving tabindex so it adds at most
-//     one tab stop to the row. Open popover/menu keeps it mounted because
-//     focus then lives in a portal.
+//     is a WAI-ARIA toolbar whose items join the row's one roving group so
+//     it adds at most one tab stop. Open popover/menu keeps it mounted
+//     because focus then lives in a portal.
 //
 //   * **a finger** - a long press opens a bottom sheet, every row 44px. Hover
 //     does not exist on a touch screen, so the toolbar is not rendered there
@@ -306,7 +306,7 @@ function MessageActionMenuItems({
 }
 
 const toolbarItemClass =
-  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
 
 /**
  * Floating hover/focus toolbar. The parent decides whether this is mounted;
@@ -314,8 +314,12 @@ const toolbarItemClass =
  *
  * Custom rather than a Radix Toolbar: that primitive is not vendored, and a
  * row-local toolbar has to join the row's existing roving group (`data-row-action`)
- * while keeping arrow keys inside the toolbar once focus is in it. Hover must
- * not call `focus()`; the pointer highlight is CSS only (UX-EB cursor split).
+ * so ←/→ can enter and leave it (#1743 M-2). Hover must not call `focus()`; the
+ * pointer highlight is CSS only (UX-EB cursor split).
+ *
+ * Placement straddles the row's top edge (`hover-toolbar-straddle`) and keeps
+ * the same 16px right gutter as the body (`right-4`). Own-row body text must
+ * not intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
 export function MessageHoverToolbar({
   available,
@@ -342,28 +346,17 @@ export function MessageHoverToolbar({
   mineEmojis: ReadonlySet<string>;
 }) {
   useEscapeLayer(menuOpen, () => onMenuOpenChange(false));
-  const slots = useFrequentEmojis(
+  const liveSlots = useFrequentEmojis(
     HOVER_TOOLBAR_REACTION_SEED,
     HOVER_TOOLBAR_SLOT_COUNT
   );
+  // Freeze rank at mount. A click must not rearrange the glyph under the
+  // cursor; the next mount picks up the new order (#1743 H-2). aria-pressed
+  // still follows live `mineEmojis`.
+  const [slots] = useState(liveSlots);
   const hasMenu =
     messageActionItems(available, { canCopy, copied, pinned }).length > 0;
   if (!available.react && !available.reply && !hasMenu) return null;
-
-  const onToolbarKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    const items = Array.from(
-      event.currentTarget.querySelectorAll<HTMLElement>("[data-toolbar-item]")
-    ).filter((el) => !el.hasAttribute("disabled"));
-    const current = items.indexOf(document.activeElement as HTMLElement);
-    if (current < 0) return;
-    const next = nextRovingIndex(current, items.length, event.key);
-    if (next === null) return;
-    event.preventDefault();
-    event.stopPropagation();
-    items[current].tabIndex = -1;
-    items[next].tabIndex = 0;
-    items[next].focus();
-  };
 
   return (
     <div
@@ -371,8 +364,7 @@ export function MessageHoverToolbar({
       aria-label="메시지 액션"
       aria-orientation="horizontal"
       data-testid="message-hover-toolbar"
-      onKeyDown={onToolbarKeyDown}
-      className="absolute right-0 top-0 z-20 flex select-none items-center gap-px rounded-md border border-line bg-surface-raised p-px shadow-lg"
+      className="hover-toolbar-straddle absolute right-4 z-20 flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
     >
       {available.react &&
         slots.map((emoji) => {
@@ -387,6 +379,7 @@ export function MessageHoverToolbar({
               aria-label={
                 mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`
               }
+              title={mine ? `${emoji} 반응 취소` : `${emoji} 반응 남기기`}
               aria-pressed={mine}
               onClick={() => {
                 recordEmojiUse(emoji);
@@ -446,8 +439,8 @@ export function MessageHoverToolbar({
               data-toolbar-item=""
               data-testid="message-actions-trigger"
               data-row-action="primary"
-              aria-label="메시지 액션"
-              title="메시지 액션"
+              aria-label="더 많은 액션"
+              title="더 많은 액션"
               className={cn(
                 toolbarItemClass,
                 "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
