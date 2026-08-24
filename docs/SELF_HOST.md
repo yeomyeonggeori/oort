@@ -81,7 +81,7 @@ scripts/self_host_env.sh --local-build
 본다.
 
 ```sh
-IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
+IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:43babdbc06ba7f4a1e0b9b140b826d026531b54487a918c26e0ddd2c90c4de6d'
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
@@ -92,8 +92,8 @@ scripts/self_host_env.sh --published-image "$IMAGE_REF"
 
 | 대상 | 불변 이미지 |
 |---|---|
-| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:b41a3ff9fe24aa5adb740f1159d0c9298d8b483296a9dee86dc6d2c0b4a9fa53` |
+| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:43babdbc06ba7f4a1e0b9b140b826d026531b54487a918c26e0ddd2c90c4de6d` |
+| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:b09eb970e636afde1b31a6c50d27840a1e299f2b7a7beacaa9fa0dd282361626` |
 
 공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.1
 digest는 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
