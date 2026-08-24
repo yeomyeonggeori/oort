@@ -4,6 +4,7 @@ import { act, createElement, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  handoffRowFocusToPreferred,
   nextRovingIndex,
   normalizeRow,
   useRowRovingFocus,
@@ -158,6 +159,72 @@ describe("normalizeRow", () => {
     expect(document.activeElement).toBe(focused);
     expect(primary.tabIndex).toBe(-1);
     expect(focused.tabIndex).toBe(0);
+  });
+
+  it("actionable 행은 rest에서 행이 정거장이고 아바타를 승격하지 않는다", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    const avatar = action();
+    row.append(avatar);
+
+    normalizeRow(row);
+
+    expect(row.tabIndex).toBe(0);
+    expect(avatar.tabIndex).toBe(-1);
+  });
+
+  it("행이 포커스를 들고 있으면 구성원이 생겨도 tabindex를 떼지 않는다", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    row.tabIndex = 0;
+    document.body.append(row);
+    row.focus();
+    const primary = action("primary");
+    row.append(primary);
+
+    normalizeRow(row);
+
+    expect(document.activeElement).toBe(row);
+    expect(row.tabIndex).toBe(0);
+    expect(primary.tabIndex).toBe(-1);
+  });
+
+  it("핸드오프 후 포커스된 primary만 정거장이다", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    row.tabIndex = 0;
+    const avatar = action();
+    const primary = action("primary");
+    row.append(avatar, primary);
+    document.body.append(row);
+    row.focus();
+
+    handoffRowFocusToPreferred(row);
+
+    expect(document.activeElement).toBe(primary);
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    expect(avatar.tabIndex).toBe(-1);
+    expect(primary.tabIndex).toBe(0);
+  });
+
+  it("비구성원 포커스 중 normalize를 다시 돌려도 아바타를 0으로 남기지 않는다", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    const avatar = action();
+    const card = document.createElement("button");
+    const primary = action("primary");
+    row.append(avatar, card, primary);
+    document.body.append(row);
+    card.focus();
+
+    normalizeRow(row);
+    normalizeRow(row);
+
+    expect(avatar.tabIndex).toBe(-1);
+    expect(primary.tabIndex).toBe(0);
+    expect(row.hasAttribute("tabindex")).toBe(false);
+    const memberStops = [avatar, primary].filter((el) => el.tabIndex >= 0);
+    expect(memberStops).toHaveLength(1);
   });
 });
 

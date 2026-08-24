@@ -78,7 +78,7 @@ import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { shouldShowHoverToolbar } from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
-import { useRowRovingFocus } from "./rowFocus";
+import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
 import { ReactionChips } from "./ReactionChips";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
@@ -527,6 +527,7 @@ export function MessageRow({
     overlayOpen: pickerOpen || actionMenuOpen || contextMenuOpen,
     selecting: selectionWithinRow,
   });
+  useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
   // `data-message-id` is the row's second published identity (MOMO-677).
   // `seq` orders the channel and is what the inbox jumps by; a projection
@@ -585,10 +586,10 @@ export function MessageRow({
         // The hover toolbar is JS-mounted (not group-hover opacity) so a
         // non-hovered row contributes zero toolbar tab stops.
         "group relative flex gap-2 px-4 hover:bg-surface-hover",
-        // 컨트롤이 없는 행은 자기 자신이 탭 정거장이 된다 (rowFocus.ts, 리뷰 W-4).
-        // 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에 그린다 — 행은
-        // 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은 잘린다
-        // (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
+        // actionable 행의 rest 정거장은 행 자신이다 (rowFocus.ts, 리뷰 W-4,
+        // #1743 B-2). 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에
+        // 그린다 — 행은 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은
+        // 잘린다 (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
         "focus-visible:focus-ring",
         actionable && "no-touch-callout",
         // 행 사이 간격은 코어가 정한다 (H-7 · `ROW_SPACE`). 진단이 실측한 값은 연속
@@ -597,6 +598,22 @@ export function MessageRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
+      {actions && showHoverToolbar && (
+        <MessageHoverToolbar
+          available={available}
+          canCopy={canCopy}
+          copied={copied}
+          pinned={Boolean(actions?.pinned)}
+          callbacks={callbacks}
+          onOpenPicker={(el) =>
+            openReactionPicker(el ?? actionTriggerRef.current)
+          }
+          menuOpen={actionMenuOpen}
+          onMenuOpenChange={setActionMenuOpen}
+          triggerRef={actionTriggerRef}
+          mineEmojis={mineEmojis}
+        />
+      )}
       {/* 거터. 그룹 머리 행에는 아바타가, 이어지는 행에는 **시각**이 온다 (H-3).
           `relative`인 이유는 그 시각이 24px 상자보다 넓기 때문이다 — 절대 배치로
           거터 오른끝에 붙이면 남는 글자는 행의 `px-4` 여백 쪽으로 흘러나가고, 그래서
@@ -649,9 +666,9 @@ export function MessageRow({
           </time>
         )}
       </div>
-      {/* `data-row-body` is the box the capture gate measures the action gutter
-          against: everything the author wrote lives inside it, so "the trigger
-          starts where the body ends" is checkable rather than eyeballed. */}
+      {/* `data-row-body` is the box whose text Range the capture gate measures
+          against the hover toolbar: intersection with this row's glyphs must
+          be 0 (B11 R2 Blocker / #1743 B-3). */}
       <div data-row-body className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
@@ -927,22 +944,6 @@ export function MessageRow({
           </span>
         )}
       </div>
-      {actions && showHoverToolbar && (
-        <MessageHoverToolbar
-          available={available}
-          canCopy={canCopy}
-          copied={copied}
-          pinned={Boolean(actions?.pinned)}
-          callbacks={callbacks}
-          onOpenPicker={(el) =>
-            openReactionPicker(el ?? actionTriggerRef.current)
-          }
-          menuOpen={actionMenuOpen}
-          onMenuOpenChange={setActionMenuOpen}
-          triggerRef={actionTriggerRef}
-          mineEmojis={mineEmojis}
-        />
-      )}
       {actions && actionable && (
         <>
           <MessageActionSheet
