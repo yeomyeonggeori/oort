@@ -3,6 +3,7 @@
 ## 이모지 피커 고도화 (#1742, 2026-08-24)
 
 - 자작 피커: emojibase compact(en)+iamcal 빌드타임 추출(same-origin, 외부 fetch 0). 검색·카테고리 탭·빈도 store(frequency, recency 금지, UX-HT 공유)·스킨톤 persist·프리뷰 푸터. 포인터=anchored popover, 터치(`hover: none`)=바텀시트. #1688 32종·중앙 Dialog 주석 supersede, 무라이브러리 유지.
+- #1746 design-review 수리: 검색 hover가 키보드 커서를 가로채지 않음, 활성 `bg-accent-soft`, 그리드 96칸 상한+콜론은 탭 유지, 스킨 Esc는 Radix `onEscapeKeyDown`, 반응 피커 앵커=실제 트리거, 터치 시트 검색 autofocus 없음.
 - 검증: 웹 tsc/lint/unit · design_preflight · capture:design(피커 열림). `runtime-unverified`(실서버 반응 왕복은 기존 경로, 이번 티켓 비스코프).
 
 ## Agent Hub 커넥션 도어벨 등록 UI (#1735, ADR-0171, 2026-08-24)
