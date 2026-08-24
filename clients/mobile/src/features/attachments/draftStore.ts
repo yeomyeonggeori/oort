@@ -42,8 +42,11 @@ const EMPTY: AttachmentSurface = {drafts: [], pickerIssue: null};
 let surfaces: ReadonlyMap<string, AttachmentSurface> = new Map();
 const files = new Map<string, PickedAttachmentFile>();
 const inflight = new Map<string, UploadHandle>();
-const pumping = new Set<string>();
+const pumping = new Map<string, number>();
 const listeners = new Set<() => void>();
+// 로그아웃 뒤 도착한 create/complete 응답이 새 계정의 bearer로 이어지지 않게 한다.
+// reset 때마다 증가하고, 비동기 경계마다 시작 세대와 대조한다.
+let sessionGeneration = 0;
 
 export function attachmentSurfaceKey(target: AttachmentTarget): string {
   return `${target.workspaceId}|${target.channelId}|${target.rootId ?? ''}`;
@@ -94,6 +97,7 @@ async function uploadOne(
   key: string,
   target: AttachmentTarget,
   draft: AttachmentDraft,
+  generation: number,
 ): Promise<void> {
   const picked = files.get(draft.localId);
   if (picked === undefined) {
@@ -114,6 +118,7 @@ async function uploadOne(
       },
     );
   } catch (error: unknown) {
+    if (generation !== sessionGeneration) return;
     update(key, list =>
       failUpload(
         list,
@@ -125,6 +130,10 @@ async function uploadOne(
     );
     return;
   }
+
+  // `create upload`은 abort 가능한 native PUT보다 먼저다. 로그아웃이 그 왕복 중에
+  // 일어나면 구 bearer로 발급된 session.id를 새 계정에서 절대 소비하지 않는다.
+  if (generation !== sessionGeneration) return;
 
   let handle: UploadHandle;
   try {
@@ -142,6 +151,8 @@ async function uploadOne(
   inflight.set(draft.localId, handle);
   const result = await handle.done;
   inflight.delete(draft.localId);
+
+  if (generation !== sessionGeneration) return;
 
   if (!result.ok) {
     if (result.failure === 'aborted') {
@@ -167,8 +178,10 @@ async function uploadOne(
       target.channelId,
       session.id,
     );
+    if (generation !== sessionGeneration) return;
     update(key, list => completeUpload(list, draft.localId, row.id));
   } catch (error: unknown) {
+    if (generation !== sessionGeneration) return;
     update(key, list =>
       failUpload(
         list,
@@ -182,16 +195,20 @@ async function uploadOne(
 }
 
 async function pump(key: string, target: AttachmentTarget): Promise<void> {
-  if (pumping.has(key)) return;
-  pumping.add(key);
+  const generation = sessionGeneration;
+  if (pumping.get(key) === generation) return;
+  pumping.set(key, generation);
   try {
     for (;;) {
+      if (generation !== sessionGeneration) return;
       const next = read(key).drafts.find(draft => draft.status === 'ready');
       if (next === undefined) return;
-      await uploadOne(key, target, next);
+      await uploadOne(key, target, next, generation);
     }
   } finally {
-    pumping.delete(key);
+    // reset 뒤 같은 surface에서 새 계정 pump가 시작됐을 수 있다. 옛 finally가 새
+    // 자물쇠를 지우지 않는다.
+    if (pumping.get(key) === generation) pumping.delete(key);
   }
 }
 
@@ -213,6 +230,16 @@ export function addPickedFiles(
   });
   const surface = read(key);
   const admitted = admitDrafts(surface.drafts, incoming);
+  // 현재 picker는 한 번에 한 건이고, Composer는 20개에서 진입점을 잠근다. 따라서
+  // rejected는 도달 불가 불변식이다. 향후 multiple picker가 들어오며 이 경계를
+  // 바꾸려면 웹처럼 거절 개수를 말하는 UI를 먼저 만들어야 한다. 그 전에는 일부만
+  // 말없이 받아 사람이 전부 붙었다고 믿게 하지 않는다 (#1703 Nit-3).
+  if (admitted.rejected !== 0) {
+    for (const draft of incoming) files.delete(draft.localId);
+    throw new Error(
+      'attachment picker invariant: rejected files need a visible notice',
+    );
+  }
   const acceptedIds = new Set(admitted.next.map(draft => draft.localId));
   for (const draft of incoming) {
     if (!acceptedIds.has(draft.localId)) files.delete(draft.localId);
@@ -255,10 +282,20 @@ export function takeSent(key: string): {attachments: MessageAttachment[]} {
   return {attachments};
 }
 
-export function resetAttachmentDraftsForTest(): void {
+/**
+ * 인증 세션 경계의 첨부 청소. 모든 surface와 native PUT을 한 번에 끝낸다.
+ *
+ * `resetAttachmentDraftsForTest`와 달리 제품 코드가 부르는 공개 수명주기 훅이다.
+ */
+export function clearAllAttachmentDrafts(): void {
+  sessionGeneration += 1;
   for (const handle of inflight.values()) handle.abort();
   inflight.clear();
   files.clear();
   pumping.clear();
   emit(new Map());
+}
+
+export function resetAttachmentDraftsForTest(): void {
+  clearAllAttachmentDrafts();
 }

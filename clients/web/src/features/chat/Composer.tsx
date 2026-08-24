@@ -58,6 +58,10 @@ import { routingPayload } from "@momo/core/features/routing/routingModel";
 import type { QuoteDraft } from "@momo/core/features/timeline/quote";
 import { QuoteChip } from "@/features/timeline/QuoteBlock";
 import { TypingLine } from "@/features/chat/TypingLine";
+import {
+  composerMetaMode,
+  keepPhoneDmHint,
+} from "@/features/chat/composerMeta";
 import { useTypingSend } from "@/features/chat/useTyping";
 import { useTypingThreshold, useTypists } from "@/features/chat/typingStore";
 import {
@@ -152,6 +156,56 @@ const MAX_ROWS = 6;
 export { COMPOSER_OFFLINE_COPY };
 
 /**
+ * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 메타 행이고, 폰 DM에서는 기존처럼 그
+ * 공유 행 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
+ */
+function ComposerHint({
+  directory,
+  dmAgent,
+  keysHintNeeded,
+  sharedRow,
+}: {
+  directory: Directory;
+  dmAgent: RosterMember | null;
+  keysHintNeeded: boolean;
+  sharedRow: boolean;
+}) {
+  return (
+    <p
+      id="composer-hint"
+      // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
+      // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
+      // 맞지 않아 4px 어긋난 줄로 보였다.
+      //
+      // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
+      // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
+      className={cn(
+        "px-6 pb-2 text-meta text-ink-muted",
+        !dmAgent && "wide-only"
+      )}
+      data-testid="composer-hint"
+      data-composer-meta-row={sharedRow ? "" : undefined}
+    >
+      {dmAgent && (
+        <span data-testid="composer-dm-hint">
+          멘션 없이 바로 말하면{" "}
+          {agentLabelAsSubject(
+            memberNameParts(directory, dmAgent.id, dmAgent.displayName)
+          )}{" "}
+          답합니다
+        </span>
+      )}
+      {keysHintNeeded && (
+        <span className="wide-only" data-testid="composer-keys-hint">
+          {dmAgent ? HINT_SEPARATOR : ""}
+          {COMPOSER_KEYS_HINT}
+        </span>
+      )}
+    </p>
+  );
+}
+
+/**
  * Composer activity bar (R-1 §3, mac AgentWorkingComposerBar). One flat meta
  * line per open turn, drawn from what the agent actually wrote, with its clock
  * beside its own label.
@@ -201,11 +255,10 @@ function AgentActivityBar({
 
   return (
     <ul
-      // `px-6`은 위 두 줄(힌트·작성 중)과 같은 값이다. 이 줄은 원래 `px-4`였고 그때는
-      // 「두 줄 사이의 우연한 4px」이었는데, 「작성 중」이 그 사이에 끼면서 스택이
-      // 왼쪽 모서리를 두 개 갖게 됐다 — 입력창 아래 12px 회색 3행이 서로 다른
-      // 세로선에 서는 모양이다 (design-review PR 1059 H-3). 정답은 이 파일이 힌트
-      // 줄에 이미 적어 뒀다: 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px.
+      // `px-6`은 바로 위 공유 메타 행(기본=힌트, 작성 중=사람)과 같은 값이다. 이 줄은
+      // 원래 `px-4`였고, 당시 힌트·작성 중·작업 중 3행이 서로 다른 세로선에 섰다
+      // (design-review PR 1059 H-3). 정답은 이 파일이 힌트 판에 이미 적어 뒀다:
+      // 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px.
       className="flex flex-col gap-1 px-6 pb-2"
       // The offline sentence is a real list item below, so it is announced in
       // reading order rather than glued onto the list's name and read twice.
@@ -454,8 +507,24 @@ export function Composer({
   const nowMs = useTickingNow(hasChannelTurn(signals, channelId) && railLive);
   const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
-  /** 힌트 줄에 남은 조각이 하나라도 있는가. 없으면 그 줄은 서지 않는다. */
-  const hasHint = dmAgent !== null || keysHintNeeded;
+  /**
+   * 작성 중이 아닐 때 공유 메타 행을 힌트가 차지하는가 (U-8).
+   *
+   * 폰에서 키 힌트는 원래 보이지 않는다. 그때는 `TypingLine`의 예약판이 같은 26px을
+   * 지켜, 사람의 타이핑이 시작돼도 폰 컴포저가 움직이지 않는다. DM 힌트는 폭과
+   * 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
+   */
+  const metaMode = composerMetaMode({
+    typistCount: typists.length,
+    hasDmHint: dmAgent !== null,
+    keysHintNeeded,
+    isMobile,
+  });
+  const persistentPhoneDmHint = keepPhoneDmHint({
+    hasDmHint: dmAgent !== null,
+    isMobile,
+  });
+  const showComposerHint = persistentPhoneDmHint || metaMode === "hint";
 
   // 실제로 차지한 높이를 재서 자란다 (진단 H-10 / 감사 M-7). 앞 판의 `\n` 세기는
   // **접힌 줄을 못 봤다** — 한국어 메시지는 줄바꿈 없이 한 문단으로 오고 창 폭에서
@@ -815,7 +884,7 @@ export function Composer({
               ? `composer-mention-list-option-${mentions.highlight}`
               : undefined
           }
-          aria-describedby={hasHint ? "composer-hint" : undefined}
+          aria-describedby={showComposerHint ? "composer-hint" : undefined}
           data-testid="composer-input"
           className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
         />
@@ -867,57 +936,46 @@ export function Composer({
 
           감사 M-7: 키 배치 설명은 **배운 사람에게는 사라진다**(`sendHint.ts`).
           DM 문장은 그 규칙 밖이다 — 그것은 키가 아니라 **이 방의 성질**이라 방마다
-          다르고, 한 번 배워서 끝나지 않는다. 그래서 이 줄은 조각 둘이 각자 사라질
-          수 있고, 둘 다 없으면 <p> 자체가 서지 않는다: 빈 문단의 pb-2는 8px짜리
-          죽은 공간이고, `aria-describedby`가 가리키는 빈 요소는 보조기술에 아무
-          말도 하지 않는 이름이다.
+          다르고, 한 번 배워서 끝나지 않는다. 두 조각이 모두 없거나 폰에서 키 조각이
+          접히는 판에는 `TypingLine`의 빈 판이 같은 26px을 예약한다. 힌트 문단을
+          빈 채로 남기지 않는 이유는 `aria-describedby`가 가리키는 빈 요소가
+          보조기술에 아무 말도 하지 않으면서 pb-2만 차지하기 때문이다.
+
+          U-8: 넓은 화면에서는 이 힌트와 작성 중 문장이 **동시에 서지 않는다.**
+          기본에는 힌트가 26px 공유 행을 쓰고, 사람이 쓰기 시작하면 같은 자리를
+          `TypingLine`이 쓴다. 폰의 DM 문장은 wide-only 키 힌트가 아니라 방의 성질이라
+          공유 대상에서 빠지고, 기존처럼 타이핑 행 위에 상시 남는다.
 
           #1384: 키 조각의 문장과 이음쇠는 코어가 든다(`composerCopy.ts`의
           「키보드 힌트의 표기법」). 이 앱의 키 힌트는 세 자리에 서 있었고
           (여기 · `timeline/MessageEditor.tsx` · `sidebar/Sidebar.tsx`) 크기도
           이음쇠도 문법도 갈라져 있었다. 여기 있던 쉼표가 가운뎃점이 된 것이
           그 통일이고, 그것을 코어의 테스트가 전수로 잰다. */}
-      {hasHint && (
-        <p
-          id="composer-hint"
-          // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
-          // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
-          // 맞지 않아 4px 어긋난 줄로 보였다.
-          //
-          // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
-          // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
-          className={cn(
-            "px-6 pb-2 text-meta text-ink-muted",
-            !dmAgent && "wide-only"
-          )}
-          data-testid="composer-hint"
-        >
-          {dmAgent && (
-            <span data-testid="composer-dm-hint">
-              멘션 없이 바로 말하면{" "}
-              {agentLabelAsSubject(
-                memberNameParts(directory, dmAgent.id, dmAgent.displayName)
-              )}{" "}
-              답합니다
-            </span>
-          )}
-          {keysHintNeeded && (
-            <span className="wide-only" data-testid="composer-keys-hint">
-              {dmAgent ? HINT_SEPARATOR : ""}
-              {COMPOSER_KEYS_HINT}
-            </span>
-          )}
-        </p>
+      {persistentPhoneDmHint && (
+        <ComposerHint
+          directory={directory}
+          dmAgent={dmAgent}
+          keysHintNeeded={keysHintNeeded}
+          sharedRow={false}
+        />
+      )}
+      {metaMode === "hint" ? (
+        <ComposerHint
+          directory={directory}
+          dmAgent={dmAgent}
+          keysHintNeeded={keysHintNeeded}
+          sharedRow
+        />
+      ) : (
+        <TypingLine
+          memberIds={metaMode === "typing" ? typists : []}
+          threshold={typingThreshold}
+          directory={directory}
+        />
       )}
 
-      {/* 사람이 위, 에이전트가 아래. 같은 구역에 나란히 두는 것이 「작성 중」과
-          「작업 중」을 사람이 배우는 유일한 자리다 (TypingLine의 머리 주석). */}
-      <TypingLine
-        memberIds={typists}
-        threshold={typingThreshold}
-        directory={directory}
-      />
-
+      {/* 공유 메타 행에서 사람이 작성 중이면 바로 아래의 에이전트 작업 중 줄과
+          인접한다. 두 낱말의 대조축은 TypingLine의 머리 주석이 정본이다. */}
       <AgentActivityBar
         turns={turns}
         directory={directory}

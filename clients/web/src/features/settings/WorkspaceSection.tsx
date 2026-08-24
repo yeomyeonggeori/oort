@@ -11,7 +11,9 @@ import { useSession } from "@/app/session";
 import {
   completeWorkspaceAvatarUpload,
   createWorkspaceAvatarUpload,
+  fetchWorkspaceUnfurlSettings,
   leaveWorkspace,
+  updateWorkspaceUnfurlSettings,
 } from "@momo/core/lib/api";
 import { ApiError } from "@momo/core/lib/api";
 import { createWorkspace, fetchWorkspace, type CreatedWorkspace } from "@momo/core/features/settings/api";
@@ -29,6 +31,7 @@ import {
   KeyValueRows,
   OperatorNotice,
   SectionShell,
+  Subsection,
 } from "./SettingsFields";
 
 // =============================================================================
@@ -44,6 +47,119 @@ import {
 /** 5 MiB — server `workspace_avatar_size_ck`. Checked here so an oversize file
  *  is a clear message rather than a 413 after the bytes are read. */
 const MAX_AVATAR_BYTES = 5 * 1024 * 1024;
+
+function WorkspaceUnfurlSetting({
+  workspaceId,
+  offline,
+}: {
+  workspaceId: string;
+  offline: boolean;
+}) {
+  const client = useQueryClient();
+  const queryKey = ["settings", "workspace-unfurls", workspaceId];
+  const query = useQuery({
+    queryKey,
+    queryFn: () => fetchWorkspaceUnfurlSettings(workspaceId),
+    retry: false,
+  });
+  const save = useMutation({
+    mutationFn: (enabled: boolean) =>
+      updateWorkspaceUnfurlSettings(workspaceId, enabled),
+    onSuccess: (saved) => client.setQueryData(queryKey, saved),
+  });
+
+  const denied =
+    (query.isError && isOperatorDenied(query.error)) ||
+    (save.isError && isOperatorDenied(save.error));
+  const nameId = "workspace-unfurls-name";
+  const descId = "workspace-unfurls-desc";
+  const offlineId = "workspace-unfurls-offline";
+  // A controlled checkbox must show the requested value while PUT is in
+  // flight. Waiting for query.data makes the native toggle snap back and turns
+  // a slow save into a dead-looking control.
+  const shownEnabled =
+    save.isPending && typeof save.variables === "boolean"
+      ? save.variables
+      : (query.data?.enabled ?? false);
+
+  return (
+    <Subsection
+      title="링크 미리보기"
+      lines={[
+        "워크스페이스 전체에서 서버가 새 링크를 확인하고 미리보기를 만들지 정합니다.",
+        "개인의 「링크 미리보기 접기」는 렌더만 바꾸며 이 서버 설정과 별개입니다.",
+      ]}
+    >
+      {query.isPending && <SkeletonRows rows={1} />}
+      {denied && (
+        <OperatorNotice
+          who="링크 미리보기는 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+        />
+      )}
+      {query.isError && !denied && (
+        <InlineBanner
+          message="링크 미리보기 설정을 불러오지 못했습니다."
+          actionLabel="다시 시도"
+          onAction={() => void query.refetch()}
+          testId="workspace-unfurls-error"
+        />
+      )}
+      {query.data && !denied && (
+        <div className="flex min-w-0 items-start gap-3 rounded-md border border-line bg-surface-raised p-3">
+          <input
+            id="workspace-unfurls"
+            type="checkbox"
+            checked={shownEnabled}
+            aria-disabled={offline || undefined}
+            aria-busy={save.isPending || undefined}
+            aria-labelledby={nameId}
+            aria-describedby={offline ? `${descId} ${offlineId}` : descId}
+            onChange={(event) => {
+              if (offline || save.isPending) return;
+              save.mutate(event.target.checked);
+            }}
+            className={cn(
+              "mt-1 accent-accent focus-visible:focus-ring",
+              offline && "opacity-50"
+            )}
+            data-testid="workspace-unfurls"
+          />
+          <label
+            htmlFor="workspace-unfurls"
+            className={cn(
+              "flex min-w-0 cursor-pointer flex-col gap-px",
+              offline && "opacity-50"
+            )}
+          >
+            <span id={nameId} className="text-body text-ink" aria-live="polite">
+              {save.isPending
+                ? shownEnabled
+                  ? "새 링크 미리보기 켜는 중"
+                  : "새 링크 미리보기 끄는 중"
+                : "새 링크 미리보기 만들기"}
+            </span>
+            <span id={descId} className="break-keep text-meta text-ink-muted">
+              끄면 서버가 새 링크를 가져오지 않습니다. 이미 만들어진 카드는 남고,
+              인스턴스 운영자가 기능을 꺼 둔 경우에는 이 설정이 켜져 있어도 카드가
+              생기지 않습니다.
+            </span>
+          </label>
+        </div>
+      )}
+      {offline && query.data && !denied && (
+        <p id={offlineId} className="text-meta text-ink-muted">
+          연결이 끊겨 지금은 이 설정을 바꿀 수 없습니다.
+        </p>
+      )}
+      {save.isError && !denied && (
+        <p className="text-meta text-danger" role="alert" data-testid="workspace-unfurls-save-error">
+          설정을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.
+        </p>
+      )}
+    </Subsection>
+  );
+}
 
 /**
  * The workspace avatar: a preview, and an owner/admin control to replace it.
@@ -379,6 +495,8 @@ export function WorkspaceSection({
           />
         </div>
       )}
+
+      <WorkspaceUnfurlSetting workspaceId={workspaceId} offline={offline} />
 
       {query.data && <LeaveWorkspace workspaceId={workspaceId} offline={offline} />}
 

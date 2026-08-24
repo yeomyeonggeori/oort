@@ -92,6 +92,8 @@ import { WorkSessionIdleCard } from "@/features/work/WorkSessionIdleCard";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel";
 import { selectionIsWithinRow } from "./messageContextMenuModel";
+import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
+import { UnfurlCards } from "./UnfurlCards";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -255,6 +257,7 @@ export interface MessageRowActions {
   onTogglePin: (message: Message) => Promise<void> | void;
   onEditMessage: (message: Message, body: string) => Promise<void>;
   onDeleteMessage: (message: Message) => Promise<void>;
+  onRemoveUnfurls?: (message: Message) => Promise<void>;
 }
 
 export function MessageRow({
@@ -265,6 +268,8 @@ export function MessageRow({
   pausedRepeat,
   deletedRepeat,
   deletedFoldedIds,
+  unfurls = [],
+  foldLinkPreviews = false,
   runEnded = false,
   onOpenThread,
   onQuoteMessage,
@@ -298,6 +303,10 @@ export function MessageRow({
    * 고친 거짓 지시가 웹에서 재현되지 않게 하는 자리다).
    */
   deletedFoldedIds?: readonly string[];
+  /** ADR-0170 projection for this row; failed/blocked are kept for quiet render. */
+  unfurls?: readonly MessageUnfurl[];
+  /** Personal, device-local render choice. It never changes server fetching. */
+  foldLinkPreviews?: boolean;
   /**
    * ADR-0155 — 이 메시지를 쓴 run 이 **끝난 것을 보았는가**.
    *
@@ -742,6 +751,20 @@ export function MessageRow({
           <AttachmentList
             channelId={message.channelId}
             attachments={attachments}
+          />
+        )}
+        {!deleted && unfurls.length > 0 && (
+          <UnfurlCards
+            unfurls={unfurls}
+            folded={foldLinkPreviews}
+            canRemove={
+              Boolean(actions?.onRemoveUnfurls) &&
+              actions?.myMemberId.toLowerCase() ===
+                message.authorMemberId.toLowerCase()
+            }
+            {...(actions?.onRemoveUnfurls
+              ? { onRemove: () => actions.onRemoveUnfurls?.(message) ?? Promise.resolve() }
+              : {})}
           />
         )}
         {idleNotice && (

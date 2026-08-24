@@ -27,6 +27,12 @@ import { apiBase, coreSession } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
 import {
+  isUnfurlImagePath,
+  messageUnfurlFromWire,
+  type MessageUnfurl,
+  type WorkspaceUnfurlSettings,
+} from "../features/timeline/unfurl";
+import {
   arrayField,
   bool,
   num,
@@ -1578,6 +1584,110 @@ export async function fetchMessages(
   );
   const messages = arrayField<Message>(page, "messages");
   return { ...page, messages: (messages ?? []).filter(isMessage) };
+}
+
+// ---- 링크 언퍼얼 (ADR-0170 D5) ---------------------------------------------
+//
+// 원격 URL을 읽는 주체는 서버뿐이다. 클라이언트가 받는 것은 정제된 메타데이터와
+// 인가가 걸린 same-origin 이미지 프록시 경로뿐이며, failed/blocked 행도 그대로
+// 보존해 순수 상태 기계가 둘을 조용한 부재로 판정하게 한다.
+
+function messageUnfurlPath(workspaceId: string, messageId: string): string {
+  return `/v1/workspaces/${encodeURIComponent(
+    workspaceId
+  )}/messages/${encodeURIComponent(messageId)}/unfurls`;
+}
+
+export async function fetchMessageUnfurls(
+  workspaceId: string,
+  messageId: string
+): Promise<MessageUnfurl[]> {
+  const source = responseRecord(
+    await request<unknown>(messageUnfurlPath(workspaceId, messageId))
+  );
+  const rows = arrayField(source, "unfurls");
+  if (rows === null) throw new WireShapeError();
+  return rows
+    .map(messageUnfurlFromWire)
+    .filter((row): row is MessageUnfurl => row !== null);
+}
+
+/** Author-only, idempotent removal. The server tombstones regeneration. */
+export async function removeMessageUnfurls(
+  workspaceId: string,
+  messageId: string
+): Promise<{ removed: boolean }> {
+  const source = responseRecord(
+    await request<unknown>(messageUnfurlPath(workspaceId, messageId), {
+      method: "DELETE",
+    })
+  );
+  const removed = bool(source, "removed");
+  if (removed === undefined) throw new WireShapeError();
+  return { removed };
+}
+
+function workspaceUnfurlSettingsFromWire(
+  value: unknown
+): WorkspaceUnfurlSettings {
+  const source = responseRecord(value);
+  const enabled = bool(source, "enabled");
+  if (enabled === undefined) throw new WireShapeError();
+  const updatedAtMs = num(source, "updatedAtMs");
+  return {
+    enabled,
+    ...(updatedAtMs === undefined ? {} : { updatedAtMs }),
+  };
+}
+
+export async function fetchWorkspaceUnfurlSettings(
+  workspaceId: string
+): Promise<WorkspaceUnfurlSettings> {
+  return workspaceUnfurlSettingsFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/unfurl-settings`
+    )
+  );
+}
+
+export async function updateWorkspaceUnfurlSettings(
+  workspaceId: string,
+  enabled: boolean
+): Promise<WorkspaceUnfurlSettings> {
+  return workspaceUnfurlSettingsFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/unfurl-settings`,
+      { method: "PUT", body: JSON.stringify({ enabled }) }
+    )
+  );
+}
+
+/**
+ * Fetch image bytes through the authenticated server proxy. The strict path
+ * gate makes it impossible to attach a bearer to a remote image host.
+ */
+export async function fetchUnfurlImage(
+  imageUrl: string,
+  signal?: AbortSignal
+): Promise<Blob> {
+  if (!isUnfurlImagePath(imageUrl)) {
+    throw new ApiError(400, "not an unfurl image proxy path");
+  }
+  const send = (token: string | null): Promise<Response> => {
+    const headers = new Headers();
+    if (token) headers.set("Authorization", `Bearer ${token}`);
+    return fetch(`${apiBase()}${imageUrl}`, {
+      headers,
+      ...(signal ? { signal } : {}),
+    });
+  };
+  let res = await send(coreSession().getAccessToken());
+  if (res.status === 401 && coreSession().getRefreshToken()) {
+    if (await refreshSession()) res = await send(coreSession().getAccessToken());
+  }
+  if (res.status === 401) coreSession().markAuthExpired();
+  if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
+  return res.blob();
 }
 
 // ---- 메시지 검색 (goal B12 H5) ----------------------------------------------
