@@ -20,6 +20,7 @@ import {
 import {
   applyDoorbellRegistration,
   doorbellFailureMessage,
+  doorbellLastStatusLabel,
   doorbellLastStatusTone,
   doorbellProjection,
   doorbellSecretIssue,
@@ -45,14 +46,15 @@ import {
   DOORBELL_RETRY_GATE,
   DOORBELL_SECRET_HINT,
   DOORBELL_SECRET_LABEL,
+  DOORBELL_SECRET_REPLACE_LABEL,
   DOORBELL_STATUS_LABEL,
-  DOORBELL_STATUS_NONE,
   DOORBELL_UNREGISTER_CONFIRM,
   DOORBELL_UNREGISTER_LABEL,
   DOORBELL_UNREGISTER_QUESTION,
   DOORBELL_UNREGISTERED_LIVE,
   DOORBELL_URL_HINT,
   DOORBELL_URL_LABEL,
+  DOORBELL_URL_REPLACE_LABEL,
 } from "@momo/core/features/hostedAgents/doorbell";
 import type { HostedAgentConnection } from "@momo/core/features/hostedAgents/model";
 import { normalizedId } from "@momo/core/features/agents/hubModel";
@@ -316,8 +318,13 @@ export function DoorbellSection({
                   {DOORBELL_STATUS_LABEL}
                 </span>
                 <StatusChip tone={doorbellLastStatusTone(projection.lastStatus)}>
-                  {projection.lastStatus ?? DOORBELL_STATUS_NONE}
+                  {doorbellLastStatusLabel(projection.lastStatus)}
                 </StatusChip>
+                {projection.lastStatus !== undefined && (
+                  <span className="font-mono text-meta text-ink-muted">
+                    {projection.lastStatus}
+                  </span>
+                )}
               </div>
             </div>
           )}
@@ -338,7 +345,9 @@ export function DoorbellSection({
             data-testid="hosted-doorbell-form"
           >
             <Field
-              label={DOORBELL_URL_LABEL}
+              label={
+                projection === null ? DOORBELL_URL_LABEL : DOORBELL_URL_REPLACE_LABEL
+              }
               htmlFor={urlFieldId}
               hint={DOORBELL_URL_HINT}
               error={urlError}
@@ -358,7 +367,11 @@ export function DoorbellSection({
               />
             </Field>
             <Field
-              label={DOORBELL_SECRET_LABEL}
+              label={
+                projection === null
+                  ? DOORBELL_SECRET_LABEL
+                  : DOORBELL_SECRET_REPLACE_LABEL
+              }
               htmlFor={secretFieldId}
               hint={DOORBELL_SECRET_HINT}
               error={secretError}

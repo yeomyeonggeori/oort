@@ -52,18 +52,17 @@ export const DOORBELL_NOT_ACTIVE =
   "활성 연결에서만 도어벨을 등록할 수 있습니다.";
 export const DOORBELL_REGISTER_LABEL = "도어벨 등록";
 export const DOORBELL_REPLACE_LABEL = "도어벨 교체";
-export const DOORBELL_REGISTER_BUSY = "등록 중";
-export const DOORBELL_REPLACE_BUSY = "교체 중";
 export const DOORBELL_UNREGISTER_LABEL = "도어벨 해제";
 export const DOORBELL_UNREGISTER_QUESTION =
   "해제하면 이 연결의 webhook 깨우기가 즉시 멈춥니다. 부름 전달은 그대로입니다.";
 export const DOORBELL_UNREGISTER_CONFIRM = "해제";
-export const DOORBELL_UNREGISTER_BUSY = "해제 중";
 export const DOORBELL_REGISTERED_LIVE = "도어벨을 등록했습니다.";
 export const DOORBELL_UNREGISTERED_LIVE = "도어벨을 해제했습니다.";
 export const DOORBELL_URL_LABEL = "webhook 주소";
+export const DOORBELL_URL_REPLACE_LABEL = "새 webhook 주소";
 export const DOORBELL_SECRET_LABEL = "sender key";
-export const DOORBELL_MASK_LABEL = "시크릿";
+export const DOORBELL_SECRET_REPLACE_LABEL = "새 sender key";
+export const DOORBELL_MASK_LABEL = "sender key";
 export const DOORBELL_FIRED_LABEL = "마지막 발화";
 export const DOORBELL_STATUS_LABEL = "마지막 상태";
 export const DOORBELL_OFFLINE_NOTE =
@@ -71,7 +70,7 @@ export const DOORBELL_OFFLINE_NOTE =
 export const DOORBELL_BUSY_NOTE =
   "앞서 누른 것이 아직 끝나지 않았습니다. 이어서 등록하거나 해제할 수 있습니다.";
 export const DOORBELL_LOADING_LABEL = "도어벨을 불러오는 중입니다.";
-export const DOORBELL_RETRY_GATE = "다시 시도";
+export const DOORBELL_RETRY_GATE = "다시 입력";
 
 /**
  * GET 투영. URL 과 마스킹이 둘 다 있어야 등록된 것이다. 하나만 오면 그리지 않는다.
@@ -189,9 +188,52 @@ export function isDoorbellGateClosed(error: unknown): boolean {
 export type DoorbellAction = "register" | "unregister";
 
 /**
- * 400/409 는 서버 계약 문구를 그대로 쓴다. 그 문구가 이 표면의 다음 행동이다.
- * 시크릿 원문은 서버가 응답에 싣지 않으므로 이어 붙여도 원문이 되지 않는다.
+ * 400/409/404 의 서버 계약 문구는 닫힌 집합이다 — 화면에는 그대로가 아니라
+ * 한국어 문장(무슨 일 + 다음 행동)으로 사상한다(model.ts 규율 3). 목록 밖 문구는
+ * status 분기 일반 안내로 떨어진다. 시크릿 원문은 서버가 응답에 싣지 않으므로
+ * 어느 분기도 원문을 재노출하지 않는다.
  */
+const WIRE_CONTRACT_MESSAGES: ReadonlyArray<readonly [string, string]> = [
+  [
+    "webhook URL must be an absolute HTTP(S) URL",
+    "webhook 주소가 완전한 주소가 아닙니다. https:// 로 시작하는 전체 주소를 넣으세요.",
+  ],
+  [
+    "webhook URL must use HTTPS",
+    "webhook 주소는 https만 받습니다. https:// 주소로 바꾸세요.",
+  ],
+  [
+    "webhook URL resolves to a private or reserved address",
+    "webhook 주소가 사설망·예약 대역이라 거부되었습니다. 공인 https 주소를 넣으세요.",
+  ],
+  [
+    "webhook URL host could not be resolved",
+    "webhook 주소의 호스트를 찾지 못했습니다. 주소 철자를 확인하세요.",
+  ],
+  [
+    "doorbell secret must not be empty",
+    "sender key가 비어 있습니다. 값을 넣고 다시 시도하세요.",
+  ],
+  [
+    "doorbell secret exceeds",
+    "sender key가 너무 깁니다. 발급받은 키 그대로인지 확인하세요.",
+  ],
+  [
+    "doorbell requires an active hosted connection",
+    "활성 연결에서만 도어벨을 다룰 수 있습니다. 연결을 먼저 활성 상태로 만드세요.",
+  ],
+  [
+    "doorbell is not registered",
+    "이 연결에는 등록된 도어벨이 없습니다. 화면을 새로 고치세요.",
+  ],
+];
+
+function wireContractMessage(wire: string): string | null {
+  for (const [needle, sentence] of WIRE_CONTRACT_MESSAGES) {
+    if (wire.startsWith(needle)) return sentence;
+  }
+  return null;
+}
 export function doorbellFailureMessage(
   action: DoorbellAction,
   error: unknown
@@ -206,8 +248,9 @@ export function doorbellFailureMessage(
   }
   if (error instanceof ApiError) {
     if (error.status === 400 || error.status === 409) {
-      const wire = error.message.trim();
-      if (wire && !wire.startsWith("HTTP ")) return wire;
+      const mapped = wireContractMessage(error.message.trim());
+      if (mapped) return `${prefix} ${mapped}`;
+      return `${prefix} 입력값이 서버 계약과 맞지 않습니다. 주소와 sender key를 확인한 뒤 다시 시도하세요.`;
     }
     if (error.status === 401) {
       return `${prefix} 로그인 세션이 만료되었습니다. 다시 로그인한 뒤 시도하세요.`;
@@ -216,8 +259,8 @@ export function doorbellFailureMessage(
       return `${prefix} 호스티드 에이전트 연결은 워크스페이스 오너나 관리자만 다룰 수 있습니다.`;
     }
     if (error.status === 404) {
-      const wire = error.message.trim();
-      if (wire && !wire.startsWith("HTTP ")) return wire;
+      const mapped = wireContractMessage(error.message.trim());
+      if (mapped) return `${prefix} ${mapped}`;
       return `${prefix} 이 연결이 서버에 없습니다. 다시 불러오세요.`;
     }
     if (error.status === 429) {
@@ -233,4 +276,10 @@ export function doorbellLastStatusTone(
 ): "ok" | "warn" | "muted" {
   if (!status) return "muted";
   return status.startsWith("ok_") ? "ok" : "warn";
+}
+
+/** 칩 본문은 한국어 낱말이고, 원시 코드는 부가 메타로만 붙는다. */
+export function doorbellLastStatusLabel(status: string | undefined): string {
+  if (!status) return DOORBELL_STATUS_NONE;
+  return status.startsWith("ok_") ? "성공" : "실패";
 }

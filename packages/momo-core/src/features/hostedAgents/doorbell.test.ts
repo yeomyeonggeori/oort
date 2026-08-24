@@ -5,6 +5,7 @@ import { WireShapeError } from "../../lib/wire";
 import {
   applyDoorbellRegistration,
   doorbellFailureMessage,
+  doorbellLastStatusLabel,
   doorbellLastStatusTone,
   doorbellProjection,
   doorbellSecretIssue,
@@ -169,25 +170,39 @@ describe("게이트 닫힘과 실패 문구", () => {
     expect(isDoorbellGateClosed(new ApiError(400, "HTTP 400"))).toBe(false);
   });
 
-  it("400/409 는 서버 계약 문구를 그대로 쓴다", () => {
-    expect(
-      doorbellFailureMessage(
-        "register",
-        new ApiError(400, "doorbell secret must not be empty")
-      )
-    ).toBe("doorbell secret must not be empty");
-    expect(
-      doorbellFailureMessage(
-        "register",
-        new ApiError(409, "doorbell requires an active hosted connection")
-      )
-    ).toBe("doorbell requires an active hosted connection");
-    expect(
-      doorbellFailureMessage(
-        "unregister",
-        new ApiError(404, "doorbell is not registered")
-      )
-    ).toBe("doorbell is not registered");
+  it("계약 문구는 한국어 문장으로 사상되고 wire 원문은 화면에 남지 않는다", () => {
+    const empty = doorbellFailureMessage(
+      "register",
+      new ApiError(400, "doorbell secret must not be empty")
+    );
+    expect(empty).toBe(
+      "도어벨을 등록하지 못했습니다. sender key가 비어 있습니다. 값을 넣고 다시 시도하세요."
+    );
+    const notActive = doorbellFailureMessage(
+      "register",
+      new ApiError(409, "doorbell requires an active hosted connection")
+    );
+    expect(notActive).toContain("활성 연결에서만");
+    expect(notActive).not.toContain("hosted connection");
+    const gone = doorbellFailureMessage(
+      "unregister",
+      new ApiError(404, "doorbell is not registered")
+    );
+    expect(gone).toContain("등록된 도어벨이 없습니다");
+    expect(gone).not.toContain("not registered");
+    const ssrf = doorbellFailureMessage(
+      "register",
+      new ApiError(400, "webhook URL resolves to a private or reserved address")
+    );
+    expect(ssrf).toContain("사설망·예약 대역");
+    expect(ssrf).not.toContain("private or reserved");
+    // 목록 밖 400 은 일반 안내로 떨어지고, 역시 wire 를 되뱉지 않는다.
+    const unknown = doorbellFailureMessage(
+      "register",
+      new ApiError(400, "some future contract message")
+    );
+    expect(unknown).toContain("입력값이 서버 계약과 맞지 않습니다");
+    expect(unknown).not.toContain("some future contract message");
   });
 
   it("시크릿 원문을 실패 문구에 잇지 않는다", () => {
@@ -218,5 +233,11 @@ describe("마지막 상태 톤", () => {
     expect(doorbellLastStatusTone("http_500")).toBe("warn");
     expect(doorbellLastStatusTone("ssrf")).toBe("warn");
     expect(doorbellLastStatusTone(undefined)).toBe("muted");
+  });
+
+  it("칩 본문은 한국어 낱말이다", () => {
+    expect(doorbellLastStatusLabel("ok_200")).toBe("성공");
+    expect(doorbellLastStatusLabel("http_500")).toBe("실패");
+    expect(doorbellLastStatusLabel(undefined)).toBe("없음");
   });
 });
