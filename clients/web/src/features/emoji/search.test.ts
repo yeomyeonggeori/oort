@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { CatalogEmoji } from "./catalog";
-import { emojiMatches, filterEmojis, normalizeEmojiQuery } from "./search";
+import {
+  emojiMatches,
+  filterEmojis,
+  isEmojiSearchQuery,
+  normalizeEmojiQuery,
+} from "./search";
 
 const fixture: CatalogEmoji[] = [
   {
@@ -40,6 +45,20 @@ describe("emojiMatches", () => {
     expect(emojiMatches(party, "tada")).toBe(true);
     expect(emojiMatches(party, "hooray")).toBe(true);
     expect(emojiMatches(party, "clover")).toBe(false);
+  });
+});
+
+describe("isEmojiSearchQuery", () => {
+  it("does not treat a lone colon as a search (Slack first keystroke)", () => {
+    expect(isEmojiSearchQuery(":")).toBe(false);
+    expect(isEmojiSearchQuery(" : ")).toBe(false);
+    expect(isEmojiSearchQuery("")).toBe(false);
+  });
+
+  it("starts searching once a significant character remains", () => {
+    expect(isEmojiSearchQuery("s")).toBe(true);
+    expect(isEmojiSearchQuery(":s")).toBe(true);
+    expect(isEmojiSearchQuery(":smile:")).toBe(true);
   });
 });
 

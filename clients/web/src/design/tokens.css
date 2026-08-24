@@ -880,6 +880,29 @@
   }
 }
 
+/* 이모지 피커 그리드 (#1742 H-2). 8칸 + gap-1 은 패널 폭 산술과 같고, 칸은
+ * `aspect-square`라 높이가 폭에서 나온다. 전량 버튼을 올리지 않으므로(패킷 AC)
+ * 빠진 행은 같은 높이의 패드로 스크롤 길이를 보존한다. `container-type`은
+ * 패드 높이를 그리드 인라인 크기에서 재기 위함이다 — 인라인 style 금지. */
+@utility emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--spacing-1);
+  container-type: inline-size;
+}
+
+@utility emoji-grid-row-pad {
+  grid-column: 1 / -1;
+  height: calc((100cqw - 7 * var(--spacing-1)) / 8);
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--spacing-control);
+}
+
+@utility emoji-grid-slot {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--spacing-control);
+}
+
 /* 스레드 패널 기하 (B6). work-pane과 **같은 규칙이고 문턱도 같다**. 320px 패널은
  * 900px 창에서는 채널에 580px를 남기지만 390px 폰에서는 70px를 남긴다 — 그 70px
  * 에는 타임라인도 컴포저도 들어가지 않는다. 그래서 좁은 창에서는 두 표면이 행을
