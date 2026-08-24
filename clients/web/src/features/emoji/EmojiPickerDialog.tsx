@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import {
   Dialog,
@@ -16,6 +16,7 @@ import { loadCatalog } from "./catalog";
 import { EmojiPickerPanel } from "./EmojiPickerPanel";
 import { recordEmojiUse } from "./frequencyStore";
 import { useHoverNone } from "./useHoverNone";
+
 
 // =============================================================================
 // 컴포저와 메시지 반응이 함께 쓰는 이모지 표면 (#1742, supersede #1688).
@@ -80,8 +81,17 @@ export function EmojiPickerDialog({
   const [entries, setEntries] = useState<CatalogEmoji[] | null>(null);
   const [error, setError] = useState(false);
   const [loadNonce, setLoadNonce] = useState(0);
-  const positionRef = useRef<HTMLElement | null>(null);
-  positionRef.current = (anchor ?? (opener as HTMLElement | null)) ?? null;
+  const [skinOpen, setSkinOpen] = useState(false);
+  const positionRef = useMemo(
+    () => ({
+      current: (anchor ?? (opener instanceof HTMLElement ? opener : null)) ?? null,
+    }),
+    [anchor, opener]
+  );
+
+  useEffect(() => {
+    if (!open) setSkinOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -115,6 +125,12 @@ export function EmojiPickerDialog({
     setLoadNonce((n) => n + 1);
   };
 
+  const onEscapeKeyDown = (event: KeyboardEvent) => {
+    if (!skinOpen) return;
+    event.preventDefault();
+    setSkinOpen(false);
+  };
+
   const panel = (
     <EmojiPickerPanel
       itemPrefix={copy.itemPrefix}
@@ -125,6 +141,9 @@ export function EmojiPickerDialog({
       onPick={handlePick}
       seed={PICKER_EMOJI}
       searchRef={searchRef}
+      skinOpen={skinOpen}
+      onSkinOpenChange={setSkinOpen}
+      autoFocusSearch={!isTouch}
     />
   );
 
@@ -135,6 +154,10 @@ export function EmojiPickerDialog({
           opener={opener}
           data-testid={testId}
           className="safe-area-bottom bottom-0 left-0 top-auto max-h-pane-lg max-w-none translate-x-0 gap-2 rounded-lg p-3"
+          onEscapeKeyDown={onEscapeKeyDown}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+          }}
         >
           <DialogTitle>{copy.title}</DialogTitle>
           <DialogDescription className="sr-only">
@@ -155,6 +178,7 @@ export function EmojiPickerDialog({
         side="top"
         align="start"
         aria-label={copy.title}
+        onEscapeKeyDown={onEscapeKeyDown}
         onOpenAutoFocus={(event) => {
           event.preventDefault();
           searchRef.current?.focus();
