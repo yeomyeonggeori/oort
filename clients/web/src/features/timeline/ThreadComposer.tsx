@@ -305,6 +305,7 @@ export function ThreadComposer({
         onOpenChange={emoji.setOpen}
         onPick={emoji.pick}
         opener={emoji.opener}
+        anchor={emoji.anchor}
         purpose="insert"
         testId="thread-composer-emoji-picker"
       />

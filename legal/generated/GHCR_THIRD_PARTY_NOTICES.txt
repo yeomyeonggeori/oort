@@ -9,11 +9,11 @@
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
 # cargo.lock.sha256: cfe001461f66758fc1a640d682deff660380916e25be97acf2f2b1e7ea30e28d
-# web.package-lock.sha256: b114e3860f4e3d2cd47ee028e2495785d582f597ac40c88527fafc6fcf9cdd2a
+# web.package-lock.sha256: c12017de24aec23b76026d5f3de596a3ff229b782447c013ff269e5748a86003
 # clarify.sha256: 82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4
 # cargo.packages: 292
-# npm.packages: 448
-# unique.license.blobs: 369
+# npm.packages: 451
+# unique.license.blobs: 370
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
@@ -440,6 +440,7 @@ npm	@radix-ui/react-focus-guards	1.1.6	MIT	Copyright (c) 2022 WorkOS	package-tre
 npm	@radix-ui/react-focus-scope	1.1.16	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
 npm	@radix-ui/react-id	1.1.4	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
 npm	@radix-ui/react-menu	2.1.24	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
+npm	@radix-ui/react-popover	1.1.23	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
 npm	@radix-ui/react-popper	1.3.7	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
 npm	@radix-ui/react-portal	1.1.17	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
 npm	@radix-ui/react-presence	1.1.10	MIT	Copyright (c) 2022 WorkOS	package-tree	0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138
@@ -576,6 +577,8 @@ npm	deep-is	0.1.4	MIT	Copyright (c) 2012, 2013 Thorsten Lorenz <thlorenz@gmx.de>
 npm	detect-libc	2.1.2	Apache-2.0	copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}	package-tree	b40930bbcf80744c86c46a12bc9da056641d722716c378f5659b9e555ef833e1
 npm	detect-node-es	1.1.0	MIT	Copyright (c) 2017 Ilya Kantor	package-tree	54b32293ea560d22cd9b62af9b2cda1a030d910a48c6601d227c5ff2338d95f8
 npm	electron-to-chromium	1.5.396	ISC	Copyright 2018 Kilian Valkhof	package-tree	25ba5c59dad3e0dd8f9540beaa0f0a86a10e3aec35af5fdc8e88c5f6a5c0d8c6
+npm	emojibase	17.0.0	MIT	Copyright (c) 2017-2019 Miles Johnson	package-tree	5c4e1582dcae9429a5d00ec0a64185c3a711f9757b2308fdf275d90b120f6149
+npm	emojibase-data	17.0.0	MIT	Copyright (c) 2017-2019 Miles Johnson	package-tree	5c4e1582dcae9429a5d00ec0a64185c3a711f9757b2308fdf275d90b120f6149
 npm	enhanced-resolve	5.24.3	MIT	Copyright JS Foundation and other contributors	package-tree	9068a8782d2fb4c6e432cfa25334efa56f722822180570802bf86e71b6003b1e
 npm	entities	6.0.1	BSD-2-Clause	Copyright (c) Felix Böhm	package-tree	cb992345949ccd6e8394b2cd6c465f7b897c864f845937dbf64e8997f389e164
 npm	es-module-lexer	1.7.0	MIT	Copyright (C) 2018-2022 Guy Bedford	package-tree	8a4b6c44eebfb026d23719a348145a661a555568dbfdc11618ff2d0dd9306b00
@@ -15032,6 +15035,32 @@ FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
 COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+-----
+
+### sha256:5c4e1582dcae9429a5d00ec0a64185c3a711f9757b2308fdf275d90b120f6149
+# as-filed: LICENSE
+-----
+MIT License
+
+Copyright (c) 2017-2019 Miles Johnson
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
 -----
 
 ### sha256:5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec

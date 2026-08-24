@@ -935,6 +935,7 @@ export function MessageRow({
             onOpenChange={setPickerOpen}
             onPick={(emoji) => callbacks.onReact(emoji)}
             opener={pickerOpener}
+            anchor={pickerOpener}
             purpose="reaction"
             testId="reaction-picker"
           />

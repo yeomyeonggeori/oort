@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 292,
-    "npm": 448,
-    "unique_blobs": 369
+    "npm": 451,
+    "unique_blobs": 370
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "39b2e2720b241784d6708618717bbd1591b5375e1780560a3cbc79310c2e4431",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "03ee4ac7533ed10bb7ffdd0363f8d86e204f518c51420434fbf0a123edbc3598",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "bb85609df736f68f239429c5d7fd929183d80d109fdc1ba54a21a52489c53882",
     "THIRD_PARTY_NOTICES.md": "9805840be5ca4af699dd1492b7ceda0a9d71fc0dd29faaa36e665efbfe2626df"
   },
   "inputs": {
     "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
-    "clients_web_package_lock_sha256": "b114e3860f4e3d2cd47ee028e2495785d582f597ac40c88527fafc6fcf9cdd2a",
+    "clients_web_package_lock_sha256": "c12017de24aec23b76026d5f3de596a3ff229b782447c013ff269e5748a86003",
     "server_rust_cargo_lock_sha256": "cfe001461f66758fc1a640d682deff660380916e25be97acf2f2b1e7ea30e28d",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "39b2e2720b241784d6708618717bbd1591b5375e1780560a3cbc79310c2e4431",
-    "sha256_manifest_sha256": "76ea9a6eebf4c707ff3c2247f9455af5504d63ea29b8cd4a039ad467c21f8c64"
+    "bundle_sha256": "03ee4ac7533ed10bb7ffdd0363f8d86e204f518c51420434fbf0a123edbc3598",
+    "sha256_manifest_sha256": "1b93b2d78869eed5c3add7b89221f6820c30584a850f2ad09dd51d07e73d96e2"
   },
   "packages": [
     {
@@ -8071,6 +8071,22 @@
           "source": "package-tree"
         }
       ],
+      "name": "@radix-ui/react-popover",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "1.1.23"
+    },
+    {
+      "copyright": "Copyright (c) 2022 WorkOS",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "0e80a2d229d2fd4fc7e8636142ec5d0ff0bc031f14c15b682e2ac01dfd5b5138",
+          "source": "package-tree"
+        }
+      ],
       "name": "@radix-ui/react-popper",
       "repository": "",
       "source": "package-tree",
@@ -10241,6 +10257,38 @@
       "source": "package-tree",
       "spdx": "ISC",
       "version": "1.5.396"
+    },
+    {
+      "copyright": "Copyright (c) 2017-2019 Miles Johnson",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "5c4e1582dcae9429a5d00ec0a64185c3a711f9757b2308fdf275d90b120f6149",
+          "source": "package-tree"
+        }
+      ],
+      "name": "emojibase",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "17.0.0"
+    },
+    {
+      "copyright": "Copyright (c) 2017-2019 Miles Johnson",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "5c4e1582dcae9429a5d00ec0a64185c3a711f9757b2308fdf275d90b120f6149",
+          "source": "package-tree"
+        }
+      ],
+      "name": "emojibase-data",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "17.0.0"
     },
     {
       "copyright": "Copyright JS Foundation and other contributors",

@@ -121,6 +121,8 @@ const MOBILE_TAP_TARGETS = [
   ["open-sidebar-drawer", "채널 목록 열기"],
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
+  ["composer-emoji-trigger", "이모지 넣기"],
+  ["emoji-search", "이모지 검색", "optional"],
   // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
   // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
   ["inbox-approval-approve", "인박스 승인", "optional"],
@@ -2875,6 +2877,17 @@ async function captureMobile(browser, scheme) {
   await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
 
+  // 2a-0. 이모지 피커 바텀시트 (#1742). 390에서 분류 탭이 화면 밖으로
+  //       나가면 안 된다. hover: none 이므로 포인터 popover가 아니라 시트다.
+  await page.getByTestId("composer-emoji-trigger").click();
+  await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await page.getByTestId("emoji-search").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `emoji picker ${scheme}`);
+  await assertTapTargets(page, `emoji picker ${scheme}`);
+  await shoot(page, "composer-emoji");
+  await page.keyboard.press("Escape");
+
   // 2a-1. 폰에 액션이 있다는 것을 말하는 한 줄 (goal B11 R2 H4). 폰의 진입점은
   //       보이지 않는 제스처 하나뿐이었고, 그래서 이 표면에는 "여기서 무언가 할
   //       수 있다"고 말하는 것이 하나도 없었다. 손가락 기기에서만, 한 번만.
@@ -3450,24 +3463,25 @@ async function captureScheme(browser, scheme) {
   shots.push(deleteShot);
   await login.getByTestId("delete-message-cancel").click();
 
-  // 2h. 반응 고르기 (goal B11). 이모지 피커 의존성 없이 손으로 짠 격자다: 피커
-  //     라이브러리는 폰트나 스프라이트를 싣는데 이 앱은 외부 호스트가 막힌 CSP와
-  //     오프라인 셸(B10)을 갖고 있다.
+  // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
+  //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
   await login.getByTestId("message-actions-trigger").last().click();
   await login.getByTestId("menu-react-more").click();
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
   await login.keyboard.press("Escape");
 
-  // 2i. 같은 32개 격자를 메시지 반응과 컴포저 삽입이 공유한다 (#1688).
-  //     다이얼로그는 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
+  // 2i. 같은 피커를 메시지 반응과 컴포저 삽입이 공유한다 (#1742).
+  //     패널은 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
   //     컴포저의 명시적인 진입점으로 돌린다.
   await login.getByTestId("composer-emoji-trigger").click();
   await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
   await login.screenshot({ path: composerEmojiShot });

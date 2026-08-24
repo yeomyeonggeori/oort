@@ -681,6 +681,7 @@ async function exerciseComposer(browser) {
   await input.evaluate((node) => node.setSelectionRange(1, 1));
   await page.getByTestId("composer-emoji-trigger").click();
   await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await page.getByTestId("picker-insert-🎉").waitFor({ state: "visible" });
   await page.getByTestId("picker-insert-🎉").click();
   await wait(100);
   const inserted = await input.evaluate((node) => ({

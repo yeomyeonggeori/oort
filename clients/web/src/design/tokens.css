@@ -356,6 +356,12 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* 이모지 피커 패널 (#1742). 8칸 size-control(32) + gap-1×7 + p-3×2 = 308 이고,
+   * 검색·카테고리 탭·스킨톤이 같은 폭을 쓰므로 패널은 그 그리드보다 넓어야 한다.
+   * 패킷 340-440 구간의 가운데 384. pane(320)과 pane-md(512) 사이이며 리듬
+   * 단계가 아니다. */
+  --spacing-pane-picker: 384px;
+
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
    * 있다: pane 은 부차 표면이 **가져가는** 폭이고, 이것은 부차 표면이 옆에 설 때
    * **남겨야 하는** 폭이다. 빌려 쓰면 축이 섞인다.

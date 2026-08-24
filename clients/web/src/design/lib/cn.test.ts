@@ -129,9 +129,8 @@ describe("house measures resolve sizing conflicts (lightbox, sheets, pickers)", 
   });
 
   it("the emoji picker's pane-sm override is now deterministic, not stylesheet luck", () => {
-    // EmojiPickerDialog passes max-w-pane-sm over the dialog base's
-    // max-w-pane-md; before registration both survived to the DOM.
     expect(cn("max-w-pane-md", "max-w-pane-sm")).toBe("max-w-pane-sm");
+    expect(cn("w-pane-md", "w-pane-picker")).toBe("w-pane-picker");
   });
 
   it("control and action measures resolve the same way", () => {

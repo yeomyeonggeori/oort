@@ -31,12 +31,15 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(new Set(PICKER_EMOJI).size).toBe(32);
   });
 
-  it("피커는 programmatic dialog 한 패턴만 쓴다", () => {
-    expect(picker).toContain("<Dialog open={open} onOpenChange={onOpenChange}>");
+  it("피커는 programmatic popover/sheet 한 패턴만 쓴다", () => {
     expect(picker).toContain("opener={opener}");
+    expect(picker).toContain("<Popover open={open} onOpenChange={onOpenChange} modal>");
+    expect(picker).toContain("<Dialog open={open} onOpenChange={onOpenChange}>");
     expect(picker).not.toMatch(/<DialogTrigger|import[^;]+DialogTrigger/);
+    expect(picker).not.toMatch(/<PopoverTrigger|import[^;]+PopoverTrigger/);
     expect(channel).toContain("emoji.openPicker(event.currentTarget)");
     expect(thread).toContain("emoji.openPicker(event.currentTarget)");
+    expect(picker).toContain("onOpenAutoFocus");
   });
 
   it("채널과 스레드가 같은 멘션 목록·첨부 트레이를 쓴다", () => {
