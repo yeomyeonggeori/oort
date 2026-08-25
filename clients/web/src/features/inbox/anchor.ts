@@ -1,3 +1,5 @@
+import { uuidEq } from "@momo/core/lib/api";
+
 // =============================================================================
 // Jump from an inbox row to the message it is about (R-1 §2: "Enter 원본으로
 // 점프").
@@ -122,6 +124,44 @@ export function messageShareUrl(
 }
 
 /**
+ * 주소가 가리킨 자리. 소속 채널을 함께 든다 — 방을 옮길 때만 소거하고,
+ * 콜드 마운트에서 읽기 효과와 채널 효과가 같은 커밋에 돌아도 자기 채널
+ * 앵커는 살아 있어야 붙여넣은 링크가 점프한다 (#1755 / design-review #1764 R2-B1).
+ */
+export type UrlAnchor = {
+  channelId: string;
+  msg: string | null;
+  seq: string | null;
+  token: number;
+};
+
+/** 읽은 `?msg=`/`?seq=`를 상태로 옮긴다. 같은 곳을 두 번 가리키면 token이 오른다. */
+export function takeUrlAnchor(
+  previous: UrlAnchor | null,
+  next: { channelId: string; msg: string | null; seq: string | null }
+): UrlAnchor {
+  return {
+    channelId: next.channelId,
+    msg: next.msg,
+    seq: next.seq,
+    token: (previous?.token ?? 0) + 1,
+  };
+}
+
+/**
+ * 방을 옮기면 앞선 주소가 가리키던 자리는 이 화면의 사실이 아니다.
+ * 같은 채널이면 남긴다. `channelId`가 비면 소속할 방이 없으므로 비운다.
+ */
+export function urlAnchorForChannel(
+  anchor: UrlAnchor | null,
+  channelId: string | null
+): UrlAnchor | null {
+  if (anchor === null || channelId === null) return null;
+  if (!uuidEq(anchor.channelId, channelId)) return null;
+  return anchor;
+}
+
+/**
  * Why a jump expired. `seq` is the channel's order, so a target below the
  * oldest loaded row is "further up, not yet fetched" as a fact. Without a
  * seq the screen can only say it does not know.
@@ -230,6 +270,27 @@ export interface WatchOptions {
    * 취소된 감시자는 부르지 않는다: 채널을 옮겨서 그만둔 것은 실패가 아니다.
    */
   onExpire?: () => void;
+  /**
+   * 매 틱마다, 행을 찾기 전에 부른다. 가상 목록은 DOM 오버스캔에 행이 있어도
+   * `scrollIntoView`만으로는 창을 옮기지 못하므로, 목록의 `scrollToIndex`를
+   * 여기서 다시 민다 (#1755 콜드 착지).
+   */
+  nudge?: () => void;
+}
+
+/** 워처가 「착지했다」고 말할 수 있는 자리. 오버스캔의 화면 밖 행은 해당 없음. */
+export function rowInViewport(
+  row: { getBoundingClientRect(): { top: number; bottom: number; height: number } },
+  viewportHeight?: number
+): boolean {
+  const box = row.getBoundingClientRect();
+  if (box.height <= 0 || box.bottom <= 0) return false;
+  const vh =
+    viewportHeight ??
+    (typeof window !== "undefined" ? window.innerHeight : 0);
+  // jsdom 등 높이를 모르는 환경에서는 위쪽(bottom≤0)만 거른다.
+  if (vh > 0 && box.top >= vh) return false;
+  return true;
 }
 
 /**
@@ -275,8 +336,11 @@ function watchForRow(
 
   const tick = () => {
     if (stopped) return;
+    options.nudge?.();
     const row = find();
-    if (row) {
+    // 가상 목록의 오버스캔 행은 DOM에 있어도 화면 밖이다. 그걸 착지로
+    // 세면 scrollToIndex가 채 먹히기 전에 워처가 끝나 하이라이트만 깜빡인다.
+    if (row && rowInViewport(row)) {
       row.scrollIntoView({ block: "center" });
       row.classList.add(HIGHLIGHT_CLASS);
       schedule(() => row.classList.remove(HIGHLIGHT_CLASS), HIGHLIGHT_MS);

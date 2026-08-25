@@ -9,6 +9,9 @@ import {
   messageSelector,
   oldestLoadedSeq,
   searchHitPath,
+  takeUrlAnchor,
+  urlAnchorForChannel,
+  rowInViewport,
   watchForMessage,
   watchForMessageId,
   workSessionPath,
@@ -82,6 +85,62 @@ describe("messageShareUrl", () => {
     expect(url).not.toContain("agentwork");
     expect(url.startsWith("http://127.0.0.1:5178/#/c/")).toBe(true);
     expect(url).toContain("seq=812");
+  });
+});
+
+describe("urlAnchor 채널 소속", () => {
+  const CHANNEL_A = "00000000-0000-7000-8000-000000000201";
+  const CHANNEL_B = "00000000-0000-7000-8000-000000000202";
+
+  it("콜드 마운트: 앵커를 담은 뒤 같은 채널 효과가 돌아도 점프가 산다", () => {
+    // 같은 커밋 순서: 읽기 효과 → 채널 효과 → 메시지 도착.
+    // 예전 코드는 채널 효과가 무조건 null이라 메시지가 올 때 앵커가 없었다.
+    const taken = takeUrlAnchor(null, {
+      channelId: CHANNEL_A,
+      msg: "msg-old",
+      seq: "1407",
+    });
+    const afterChannelEffect = urlAnchorForChannel(taken, CHANNEL_A);
+    expect(afterChannelEffect).toEqual(taken);
+    expect(urlAnchorForChannel(afterChannelEffect, CHANNEL_A)?.msg).toBe(
+      "msg-old"
+    );
+  });
+
+  it("채널을 실제로 옮기면 소거한다", () => {
+    const taken = takeUrlAnchor(null, {
+      channelId: CHANNEL_A,
+      msg: "msg-old",
+      seq: "1",
+    });
+    expect(urlAnchorForChannel(taken, CHANNEL_B)).toBeNull();
+    expect(urlAnchorForChannel(taken, null)).toBeNull();
+    expect(urlAnchorForChannel(null, CHANNEL_A)).toBeNull();
+  });
+
+  it("인앱: 같은 채널에서 새 앵커를 담으면 token이 오르고 채널 효과는 지우지 않는다", () => {
+    const first = takeUrlAnchor(null, {
+      channelId: CHANNEL_A,
+      msg: "msg-one",
+      seq: "1",
+    });
+    const second = takeUrlAnchor(first, {
+      channelId: CHANNEL_A,
+      msg: "msg-two",
+      seq: "2",
+    });
+    expect(second.token).toBe(first.token + 1);
+    expect(second.msg).toBe("msg-two");
+    expect(urlAnchorForChannel(second, CHANNEL_A)).toEqual(second);
+  });
+
+  it("대소문자만 다른 채널 id는 같은 방이다", () => {
+    const taken = takeUrlAnchor(null, {
+      channelId: CHANNEL_A.toUpperCase(),
+      msg: "msg-old",
+      seq: "1",
+    });
+    expect(urlAnchorForChannel(taken, CHANNEL_A)).toEqual(taken);
   });
 });
 
@@ -159,12 +218,41 @@ describe("workSessionPath", () => {
   });
 });
 
+function fakeRow(rect: { top: number; bottom: number; height: number } = {
+  top: 200,
+  bottom: 280,
+  height: 80,
+}) {
+  return {
+    scrollIntoView: vi.fn(),
+    classList: { add: vi.fn(), remove: vi.fn() },
+    getBoundingClientRect: () => rect,
+  };
+}
+
+describe("rowInViewport", () => {
+  it("오버스캔의 화면 위 행은 착지가 아니다", () => {
+    expect(
+      rowInViewport(
+        { getBoundingClientRect: () => ({ top: -589, bottom: -379, height: 210 }) },
+        800
+      )
+    ).toBe(false);
+  });
+
+  it("화면 안에 앉은 행은 착지다", () => {
+    expect(
+      rowInViewport(
+        { getBoundingClientRect: () => ({ top: 264, bottom: 340, height: 76 }) },
+        800
+      )
+    ).toBe(true);
+  });
+});
+
 describe("watchForMessageId", () => {
   it("scrolls the anchor card into view and expires quietly when it never mounts", () => {
-    const row = {
-      scrollIntoView: vi.fn(),
-      classList: { add: vi.fn(), remove: vi.fn() },
-    };
+    const row = fakeRow();
     const found: (() => void)[] = [];
     watchForMessageId("019F94E3-0E04-79CD-9DEE-208F47EDD9A8", {
       doc: {
@@ -194,6 +282,29 @@ describe("watchForMessageId", () => {
     queued[0]();
     expect(queued).toHaveLength(1);
   });
+
+  it("오버스캔의 화면 밖 행은 착지로 세지 않고 nudge를 다시 민다", () => {
+    const row = fakeRow({ top: -589, bottom: -379, height: 210 });
+    const nudge = vi.fn();
+    const queued: (() => void)[] = [];
+    watchForMessageId("019F94E3-0E04-79CD-9DEE-208F47EDD9A8", {
+      doc: { querySelector: () => row } as unknown as Document,
+      now: () => 0,
+      schedule: (fn: () => void) => {
+        queued.push(fn);
+        return queued.length;
+      },
+      cancel: () => {},
+      watchMs: 1_000,
+      nudge,
+    });
+    expect(nudge).toHaveBeenCalled();
+    expect(row.classList.add).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(1);
+    row.getBoundingClientRect = () => ({ top: 264, bottom: 340, height: 76 });
+    queued[0]();
+    expect(row.classList.add).toHaveBeenCalled();
+  });
 });
 
 describe("watchForMessage", () => {
@@ -209,10 +320,7 @@ describe("watchForMessage", () => {
   }
 
   it("scrolls the row into view as soon as virtuoso has mounted it", () => {
-    const row = {
-      scrollIntoView: vi.fn(),
-      classList: { add: vi.fn(), remove: vi.fn() },
-    };
+    const row = fakeRow();
     const { queued, schedule } = fakeSchedule();
     watchForMessage(147, {
       doc: { querySelector: () => row } as unknown as Document,
@@ -265,10 +373,7 @@ describe("watchForMessage", () => {
   });
 
   it("행을 찾으면 만료를 알리지 않는다", () => {
-    const row = {
-      scrollIntoView: vi.fn(),
-      classList: { add: vi.fn(), remove: vi.fn() },
-    };
+    const row = fakeRow();
     const onExpire = vi.fn();
     watchForMessage(147, {
       doc: { querySelector: () => row } as unknown as Document,
@@ -364,8 +469,7 @@ describe("watchForMessageId: 두 자리를 이 순서로 본다", () => {
   function row(name: string) {
     return {
       name,
-      scrollIntoView: vi.fn(),
-      classList: { add: vi.fn(), remove: vi.fn() },
+      ...fakeRow(),
     };
   }
 
