@@ -1,5 +1,6 @@
 import {
   Copy,
+  Link,
   MessageSquareReply,
   MoreHorizontal,
   Pencil,
@@ -85,8 +86,10 @@ import { useEscapeLayer } from "@/design/ui/escapeLayer";
 
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import {
+  actionKeepsMenuOpen,
   messageActionItems,
   messageActionItemsForSurface,
+  type MessageActionCopyState,
   type MessageActionItem,
   type MessageActionItemKey,
 } from "./messageActionModel";
@@ -103,6 +106,8 @@ export interface MessageActionCallbacks {
   onQuote: () => void;
   /** Copy the author's raw markdown, never the rendered HTML. */
   onCopy: () => void;
+  /** Copy the HashRouter URL that ChatShell already reads (`?msg=`). */
+  onCopyLink: () => void;
   onReact: (emoji: string) => void;
   /**
    * 이슈 #1112 - pin this message to the channel, or take the pin back down.
@@ -126,6 +131,8 @@ function actionIcon(item: MessageActionItem, pinned: boolean) {
       return <Quote className="size-4" aria-hidden="true" />;
     case "copy":
       return <Copy className="size-4" aria-hidden="true" />;
+    case "copy-link":
+      return <Link className="size-4" aria-hidden="true" />;
     case "pin":
       return pinned ? (
         <PinOff className="size-4" aria-hidden="true" />
@@ -161,6 +168,9 @@ function invokeAction(
     case "copy":
       callbacks.onCopy();
       return;
+    case "copy-link":
+      callbacks.onCopyLink();
+      return;
     case "pin":
       callbacks.onPin();
       return;
@@ -194,13 +204,12 @@ function ActionMenuItem({
     "aria-label": item.accessibleLabel,
     tone: item.tone,
     onSelect: (event: Event) => {
-      // CopyButton's receipt only works while it remains visible. Keep this one
-      // row open long enough to become 「복사됨」; every other action dismisses.
-      // react-more opens a picker anchored to the ⋯ trigger. If Radix closes
-      // the menu first, the hover toolbar can unmount (pointer is on the
-      // portaled item, outside the row) before setPickerOpen runs, and the
-      // popover is left with a detached anchor.
-      if (item.key === "copy" || item.key === "react-more") event.preventDefault();
+      // Copy receipts only work while the row stays visible. react-more opens
+      // a picker anchored to the ⋯ trigger. If Radix closes the menu first,
+      // the hover toolbar can unmount (pointer is on the portaled item,
+      // outside the row) before setPickerOpen runs, and the popover is left
+      // with a detached anchor.
+      if (actionKeepsMenuOpen(item.key)) event.preventDefault();
       invokeAction(item.key, callbacks, onOpenPicker);
     },
     className: compact ? "size-control-sm justify-center px-0" : undefined,
@@ -236,25 +245,21 @@ function MessageActionMenuItems({
   surface,
   prefix,
   available,
-  canCopy,
-  copied,
-  pinned,
+  copyState,
   callbacks,
   onOpenPicker,
 }: {
   surface: "dropdown" | "context";
   prefix: "menu" | "context";
   available: MessageActionAvailability;
-  canCopy: boolean;
-  copied: boolean;
-  pinned: boolean;
+  copyState: MessageActionCopyState;
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const items = messageActionItemsForSurface(
     surface === "dropdown" ? "menu" : "context",
     available,
-    { canCopy, copied, pinned }
+    copyState
   );
   const quick = items.filter((item) => item.key.startsWith("react:"));
   const more = items.find((item) => item.key === "react-more");
@@ -271,7 +276,7 @@ function MessageActionMenuItems({
               surface={surface}
               prefix={prefix}
               item={item}
-              pinned={pinned}
+              pinned={copyState.pinned}
               callbacks={callbacks}
               onOpenPicker={onOpenPicker}
               compact
@@ -284,7 +289,7 @@ function MessageActionMenuItems({
           surface={surface}
           prefix={prefix}
           item={more}
-          pinned={pinned}
+          pinned={copyState.pinned}
           callbacks={callbacks}
           onOpenPicker={onOpenPicker}
         />
@@ -298,7 +303,7 @@ function MessageActionMenuItems({
           surface={surface}
           prefix={prefix}
           item={item}
-          pinned={pinned}
+          pinned={copyState.pinned}
           callbacks={callbacks}
           onOpenPicker={onOpenPicker}
         />
@@ -327,9 +332,7 @@ const toolbarItemClass =
  */
 export function MessageHoverToolbar({
   available,
-  canCopy,
-  copied,
-  pinned,
+  copyState,
   callbacks,
   onOpenPicker,
   menuOpen,
@@ -338,9 +341,7 @@ export function MessageHoverToolbar({
   mineEmojis,
 }: {
   available: MessageActionAvailability;
-  canCopy: boolean;
-  copied: boolean;
-  pinned: boolean;
+  copyState: MessageActionCopyState;
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
   menuOpen: boolean;
@@ -376,8 +377,7 @@ export function MessageHoverToolbar({
       setStraddleBelow(true);
     }
   }, [straddleBelow]);
-  const hasMenu =
-    messageActionItems(available, { canCopy, copied, pinned }).length > 0;
+  const hasMenu = messageActionItems(available, copyState).length > 0;
   if (!available.react && !available.reply && !hasMenu) return null;
 
   return (
@@ -487,9 +487,7 @@ export function MessageHoverToolbar({
               surface="dropdown"
               prefix="menu"
               available={available}
-              canCopy={canCopy}
-              copied={copied}
-              pinned={pinned}
+              copyState={copyState}
               callbacks={callbacks}
               onOpenPicker={onOpenPicker}
             />
@@ -505,9 +503,7 @@ export function MessageActionContextMenu({
   children,
   enabled,
   available,
-  canCopy,
-  copied,
-  pinned,
+  copyState,
   callbacks,
   onOpenPicker,
   onOpenChange,
@@ -516,9 +512,7 @@ export function MessageActionContextMenu({
   /** False on touch-only hardware and while text in this row is selected. */
   enabled: boolean;
   available: MessageActionAvailability;
-  canCopy: boolean;
-  copied: boolean;
-  pinned: boolean;
+  copyState: MessageActionCopyState;
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
   onOpenChange?: (open: boolean) => void;
@@ -542,9 +536,7 @@ export function MessageActionContextMenu({
           surface="context"
           prefix="context"
           available={available}
-          canCopy={canCopy}
-          copied={copied}
-          pinned={pinned}
+          copyState={copyState}
           callbacks={callbacks}
           onOpenPicker={onOpenPicker}
         />
@@ -596,9 +588,7 @@ export function MessageActionSheet({
   onOpenChange,
   preview,
   available,
-  canCopy,
-  copied,
-  pinned,
+  copyState,
   callbacks,
   onOpenPicker,
 }: {
@@ -607,19 +597,12 @@ export function MessageActionSheet({
   /** The first line of the message, so the sheet names what it will act on. */
   preview: string;
   available: MessageActionAvailability;
-  canCopy: boolean;
-  copied: boolean;
-  /** 이슈 #1112 - flips the pin row's label, exactly as it does in the menu. */
-  pinned: boolean;
+  copyState: MessageActionCopyState;
   callbacks: MessageActionCallbacks;
   onOpenPicker: (opener?: HTMLElement | null) => void;
 }) {
   const close = () => onOpenChange(false);
-  const items = messageActionItemsForSurface("sheet", available, {
-    canCopy,
-    copied,
-    pinned,
-  });
+  const items = messageActionItemsForSurface("sheet", available, copyState);
   const quick = items.filter((item) => item.key.startsWith("react:"));
   const more = items.find((item) => item.key === "react-more");
   const regular = items.filter(
@@ -663,7 +646,7 @@ export function MessageActionSheet({
                 }}
                 className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
               >
-                {actionIcon(more, pinned)}
+                {actionIcon(more, copyState.pinned)}
               </button>
             )}
           </div>
@@ -676,11 +659,11 @@ export function MessageActionSheet({
             tone={item.tone}
             onSelect={() => {
               // As in the pointer menus, the copy receipt has to remain visible.
-              if (item.key !== "copy") close();
+              if (!actionKeepsMenuOpen(item.key)) close();
               invokeAction(item.key, callbacks, onOpenPicker);
             }}
           >
-            {actionIcon(item, pinned)}
+            {actionIcon(item, copyState.pinned)}
           </SheetAction>
         ))}
       </DialogContent>

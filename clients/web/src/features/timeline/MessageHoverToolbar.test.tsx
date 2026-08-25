@@ -11,6 +11,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import {
+  COPY_LINK_ACTION_LABEL,
+  COPY_MESSAGE_ACTION_LABEL,
+} from "@momo/core/features/timeline/copyLabels";
+import {
   frequentEmojis,
   recordEmojiUse,
   resetEmojiFrequencyForTests,
@@ -107,24 +111,31 @@ const callbacks: MessageActionCallbacks = {
   onReply: () => undefined,
   onQuote: () => undefined,
   onCopy: () => undefined,
+  onCopyLink: () => undefined,
   onReact: () => undefined,
   onPin: () => undefined,
   onEdit: () => undefined,
   onDelete: () => undefined,
 };
 
-function mountToolbar(open = true): HTMLElement {
+const copyState = {
+  canCopy: true,
+  copied: false,
+  canCopyLink: true,
+  copiedLink: false,
+  pinned: false,
+};
+
+function mountToolbar(open = true, menuOpenInit = false): HTMLElement {
   const host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
   function Harness() {
-    const [menuOpen, setMenuOpen] = useState(false);
+    const [menuOpen, setMenuOpen] = useState(menuOpenInit);
     if (!open) return createElement("article", { "data-testid": "row" });
     return createElement(MessageHoverToolbar, {
       available,
-      canCopy: true,
-      copied: false,
-      pinned: false,
+      copyState,
       callbacks,
       onOpenPicker: () => undefined,
       menuOpen,
@@ -210,9 +221,7 @@ function Row({
     show
       ? createElement(MessageHoverToolbar, {
           available,
-          canCopy: true,
-          copied: false,
-          pinned: false,
+          copyState,
           callbacks,
           onOpenPicker: () => undefined,
           menuOpen: false,
@@ -277,6 +286,18 @@ describe("MessageHoverToolbar", () => {
     expect(host.querySelector('[data-testid="toolbar-react-more"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="toolbar-reply"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="message-actions-trigger"]')).not.toBeNull();
+  });
+
+  it("⋯ 메뉴가 메시지 복사와 링크 복사를 같은 인벤토리로 그린다", () => {
+    mountToolbar(true, true);
+    const copy = document.querySelector('[data-testid="menu-copy"]');
+    const copyLink = document.querySelector('[data-testid="menu-copy-link"]');
+    expect(copy).not.toBeNull();
+    expect(copyLink).not.toBeNull();
+    expect(COPY_MESSAGE_ACTION_LABEL).toBe("메시지 복사하기");
+    expect(COPY_LINK_ACTION_LABEL).toBe("링크 복사하기");
+    expect(copy?.textContent).toContain(COPY_MESSAGE_ACTION_LABEL);
+    expect(copyLink?.textContent).toContain(COPY_LINK_ACTION_LABEL);
   });
 
   it("슬롯은 빈도 store 순서를 따른다", () => {

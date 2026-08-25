@@ -2,6 +2,7 @@ import type {Message} from '@momo/core/lib/api';
 import type {MessageActionAvailability} from '@momo/core/features/timeline/model';
 import {QUOTE_ACTION_LABEL} from '@momo/core/features/timeline/quote';
 import {pinActionLabel} from '@momo/core/features/timeline/pins';
+import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
 import {
   QUICK_REACTIONS,
   type ReactionChip,
@@ -285,10 +286,9 @@ export function MessageActionSheet({
                   쪽이 아래로 간다. */}
               {onCopy ? (
                 <SheetRow
-                  // 동사형 (design-review M-2). 이웃이 전부 「답글 달기」·
-                  // 「인용해서 답하기」·「고치기」·「지우기」인데 이 항목만
-                  // 명사형이었다 — 목록의 결이 한 줄에서 끊긴다.
-                  label="메시지 복사하기"
+                  // 동사형. 낱말은 코어의 `COPY_MESSAGE_ACTION_LABEL` — 웹
+                  // 메뉴와 이 시트가 같은 말을 쓴다.
+                  label={COPY_MESSAGE_ACTION_LABEL}
                   onPress={onCopy}
                   testID="sheet-copy"
                 />
