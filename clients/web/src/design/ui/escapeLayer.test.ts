@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   escapeIsClaimed,
   escapeLayerDepth,
@@ -19,6 +19,9 @@ import {
 describe("escape layer stack", () => {
   beforeEach(() => {
     resetEscapeLayers();
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it("Esc 한 번은 맨 위 층 하나만 닫는다", () => {
@@ -85,6 +88,20 @@ describe("escape layer stack", () => {
       expect(escapeIsClaimed()).toBe(true);
       removeEscapeLayer(layer);
       expect(escapeIsClaimed()).toBe(false);
+    });
+
+    it("열린 role=menu 셀렉터를 실제로 조회한다 (N-5)", () => {
+      const seen: string[] = [];
+      vi.stubGlobal("document", {
+        querySelector: (sel: string) => {
+          seen.push(sel);
+          return sel === '[role="menu"][data-state="open"]' ? {} : null;
+        },
+      });
+      expect(escapeLayerDepth()).toBe(0);
+      expect(escapeIsClaimed()).toBe(true);
+      expect(seen).toContain('[role="menu"][data-state="open"]');
+      vi.unstubAllGlobals();
     });
   });
 });

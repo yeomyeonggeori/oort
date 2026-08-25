@@ -129,6 +129,16 @@ describe("상태 메뉴는 하나를 고르는 자리다 (M1)", () => {
   });
 });
 
+describe("프로필 카드 트리거는 코어 이름을 쓴다 (M-6)", () => {
+  it("title 과 aria-label 이 같은 presenceTriggerLabel 문장이다", () => {
+    expect(profileCard).toContain("presenceTriggerLabel");
+    expect(profileCard).toContain("aria-label={triggerName}");
+    expect(profileCard).toContain("title={triggerName}");
+    expect(profileCard).not.toContain("프로필 열기");
+    expect(profileCard).toContain('title="설정 (⌘,)"');
+  });
+});
+
 describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
   it("서브메뉴를 들이지 않고 레일의 워크스페이스 추가를 연다", () => {
     expect(profileCard).not.toContain("DropdownMenuSub");

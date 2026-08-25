@@ -162,6 +162,13 @@ const MOBILE_TAP_TARGETS = [
   // (폰에서는 서랍)가 열린 프레임에서만 보이기 때문이고, 그 프레임이
   // `assertTapTargets`를 다시 부른다.
   ["profile-card", "프로필 카드 열기", "optional"],
+  // UX-D4 H-1 — 카드가 여는 메뉴 행. 폰 서랍의 1급 진입이라 32px 포인터
+  // 치수가 아니라 시트 행(44)이다. optional: 카드가 열린 프레임에서만 존재.
+  ["presence-option-auto", "상태 온라인", "optional"],
+  ["presence-option-away", "상태 자리 비움", "optional"],
+  ["presence-option-dnd", "상태 방해 금지", "optional"],
+  ["profile-add-workspace", "워크스페이스 추가", "optional"],
+  ["nav-settings", "설정", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
@@ -1805,6 +1812,43 @@ async function captureSidebarD4(page, scheme, shots) {
     throw new Error(`채널 + 가 포인터 rest 에 떠 있다 ${scheme}: ${restPlus}`);
   }
 
+  const restHeader = await page
+    .getByTestId("sidebar-section-channels-header")
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height));
+
+  // B-1 red proof: 순수 키보드 왕복. hover 없이 Tab 으로 + 에 닿고, 연 뒤
+  // Esc 하면 포커스가 + 로 돌아와야 한다. BODY 추락은 회귀.
+  await page.getByTestId("nav-search").focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  const plusStop = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (plusStop !== "new-channel") {
+    throw new Error(
+      `채널 + 키보드 정거장 ${scheme}: ${plusStop} (new-channel 이어야 함)`
+    );
+  }
+  await page.keyboard.press("Enter");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  const plusWhileOpen = await page.getByTestId("new-channel").count();
+  if (plusWhileOpen !== 1) {
+    throw new Error(
+      `다이얼로그가 떠 있는데 + 가 언마운트됐다 ${scheme}: ${plusWhileOpen}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  const plusAfterEsc = await page.evaluate(`(() => ({
+    active: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName,
+    plus: document.querySelectorAll('[data-testid="new-channel"]').length,
+  }))()`);
+  if (plusAfterEsc.active !== "new-channel") {
+    throw new Error(
+      `채널 만들기 Esc 후 포커스 ${scheme}: ${plusAfterEsc.active} (new-channel, BODY 금지), + DOM ${plusAfterEsc.plus}`
+    );
+  }
+
   await page.getByTestId("profile-card").click();
   const menu = page.getByTestId("profile-card-menu");
   await menu.waitFor({ state: "visible" });
@@ -1858,9 +1902,43 @@ async function captureSidebarD4(page, scheme, shots) {
   await putAuto;
   await menu.waitFor({ state: "hidden" });
 
+  // H-2: 카드가 연 워크스페이스 추가를 취소하면 트리거(프로필 카드)로 복귀.
+  await page.getByTestId("profile-card").click();
+  await menu.waitFor({ state: "visible" });
+  await page.getByTestId("profile-add-workspace").click();
+  await page.getByTestId("add-workspace-dialog").waitFor({ state: "visible" });
+  await page.getByTestId("add-workspace-name").waitFor({ state: "visible" });
+  // Esc first (review probe). If a leftover layer ate the key, the visible
+  // 취소 button is the same close path and still proves restore.
+  await page.getByTestId("add-workspace-name").focus();
+  await page.keyboard.press("Escape");
+  if (await page.getByTestId("add-workspace-dialog").count()) {
+    await page.getByTestId("add-workspace-cancel").click();
+  }
+  await page.getByTestId("add-workspace-dialog").waitFor({ state: "detached" });
+  await page.waitForFunction(
+    `document.activeElement?.getAttribute("data-testid") === "profile-card"`
+  );
+  const afterAddWorkspace = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+  );
+  if (afterAddWorkspace !== "profile-card") {
+    throw new Error(
+      `워크스페이스 추가 취소 후 포커스 ${scheme}: ${afterAddWorkspace} (profile-card, BODY 금지)`
+    );
+  }
+
   const header = page.getByTestId("sidebar-section-channels-header");
   await header.hover();
   await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const hoverHeader = await header.evaluate((el) =>
+    Math.round(el.getBoundingClientRect().height)
+  );
+  if (restHeader !== hoverHeader) {
+    throw new Error(
+      `섹션 헤더 높이가 rest ${restHeader} → hover ${hoverHeader} 로 자랐다 ${scheme}`
+    );
+  }
   const hoverShot = `${OUT_DIR}/sidebar-section-hover-${scheme}.png`;
   await page.screenshot({ path: hoverShot });
   shots.push(hoverShot);
@@ -1876,6 +1954,14 @@ async function captureSidebarD4(page, scheme, shots) {
     .getAttribute("data-collapsed");
   if (sectionCollapsed === null) {
     throw new Error(`채널 섹션이 접히지 않았다 ${scheme}`);
+  }
+  const collapsedUnread = await page.getByTestId("section-unread-channels");
+  await collapsedUnread.waitFor({ state: "visible" });
+  const unreadText = (await collapsedUnread.innerText()).trim();
+  if (!/^\d+$/.test(unreadText) || Number(unreadText) < 1) {
+    throw new Error(
+      `접힌 채널 섹션에 언리드 배지가 없다 ${scheme}: ${unreadText}`
+    );
   }
   const sectionShot = `${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`;
   await page.screenshot({ path: sectionShot });
