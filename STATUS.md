@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## HD-1 Rust 허들 서버 복원 (#1757, ADR-0122, 2026-08-25)
+
+- Swift 정본의 start/join/leave/active 4 REST를 Rust/Axum으로 이식했다. `momo-messaging` 한 tenant tx가 기존 016/046 테이블의 lifecycle·audit·broadcast outbox를 함께 쓰며 단일 활성·재입장 이력·RLS FORCE를 보존한다. `schema_v0.sql`·마이그레이션 변경은 없다.
+- LiveKit HS256 video grant는 600초이며 세 env가 완비되지 않으면 네 route가 503 `허들 미구성`으로 닫힌다. `infra/rust`에는 pinned `livekit:v1.13.3` huddle profile·healthcheck·UDP 50000~50100 제한을 배선했고, 두 허들 verifier는 Rust 경로로 현행화했다. 기존 OpenAPI와 web-legacy 생성 타입의 4-route wire는 그대로 유효하다.
+- 로컬 `cargo fmt --all --check`·workspace all-target clippy `-D warnings`·비-PG `cargo test --workspace` 1,198/1,198 PASS. PG18 conformance(503·grant·concurrent single-active·re-entry·outbox/audit·RLS)와 실제 LiveKit `/rtc/validate`는 작성했지만 이 worker sandbox에서는 `runtime-unverified`; momo-main 오케스트레이터 실행 대기다. UXUI 후속은 `ENGINE_HANDOFF.md` A-33 `ready`.
+
 ## 그록봇 도어벨 플레이북 (#1736, ADR-0171, 2026-08-24)
 
 - `docs/SELF_HOST_AGENT.md` §4: webhook 루틴 생성 문안(실측 문안 승계), WD-1 REST 등록·마스킹·해제 curl, 프로덕션/15분 스윕 지시문(ADR-0132 발화 규약), usage·베타·Q-STRUCT 고지. UI 등록은 #1735 후속.

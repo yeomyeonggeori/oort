@@ -33,6 +33,7 @@ pub mod config;
 pub mod cors;
 pub mod dto;
 pub mod error;
+mod livekit;
 pub mod rate_limit;
 pub mod realtime_advert;
 pub mod routes;
@@ -49,8 +50,9 @@ use axum::Router;
 use momo_db::PgPool;
 
 use crate::config::{
-    AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, MentionSettings,
-    RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings, WebhookSettings,
+    AgentGatewaySettings, AgentPortConfig, CorsConfig, EphemeralSettings, LiveKitConfig,
+    MentionSettings, RateLimitConfig, RealtimeSettings, SettingsConfig, T3Settings,
+    WebhookSettings,
 };
 use crate::error::ApiError;
 use crate::rate_limit::SlidingWindowRateLimiter;
@@ -216,6 +218,10 @@ pub struct AppState {
     /// mismatch branch: a test supplies its own archive without a test-only
     /// branch existing anywhere in the handlers.
     pub drive: Arc<dyn momo_drive::DriveArchive>,
+    /// ADR-0122 / HD-1 — complete LiveKit issuer settings, or no huddle
+    /// capability. The routes remain mounted in both cases so clients can tell
+    /// 503 "not configured" from a server too old to know the path.
+    pub livekit: Option<Arc<LiveKitConfig>>,
     /// #1222 — the two webhook families' knobs. Default: no dedicated outbound
     /// master key (the JWT secret stands in, as it does in Swift) and HTTPS
     /// required. Nothing here is a switch that *closes* a surface: an operator
@@ -272,6 +278,7 @@ impl AppState {
             ephemeral: Arc::new(EphemeralState::default()),
             webhook: Arc::new(WebhookSettings::default()),
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
+            livekit: None,
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
             unfurl_http: Arc::new(momo_unfurl::SafeUnfurlTransport::production(false)),
@@ -312,6 +319,13 @@ impl AppState {
     /// configured", not one that quietly stores bytes somewhere nobody chose.
     pub fn with_drive(mut self, archive: Arc<dyn momo_drive::DriveArchive>) -> Self {
         self.drive = archive;
+        self
+    }
+
+    /// Attach the complete LiveKit issuer unit. The default remains `None`,
+    /// which closes every huddle route with the Swift-compatible 503.
+    pub fn with_livekit(mut self, config: LiveKitConfig) -> Self {
+        self.livekit = Some(Arc::new(config));
         self
     }
 
@@ -537,6 +551,24 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/channels/{ch}/attachments/{attachment}/content",
             get(routes::attachments::content),
+        )
+        // ADR-0122 / HD-1 — PostgreSQL lifecycle + transactional outbox;
+        // LiveKit is only the optional media plane and grant verifier.
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/huddles",
+            post(routes::huddles::start),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/huddles/active",
+            get(routes::huddles::active),
+        )
+        .route(
+            "/v1/workspaces/{ws}/huddles/{huddle}/join",
+            post(routes::huddles::join),
+        )
+        .route(
+            "/v1/workspaces/{ws}/huddles/{huddle}/leave",
+            post(routes::huddles::leave),
         )
         // ADR-0161 D5 — the workspace avatar media surface. The attachment three
         // re-aimed at a workspace: owner/admin sets, any member reads, the bytes

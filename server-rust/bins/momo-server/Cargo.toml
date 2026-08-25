@@ -83,6 +83,9 @@ chrono.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+# ADR-0122 / HD-1: signs the ten-minute LiveKit room grant. This package was
+# already in this crate's test graph, so promotion does not change Cargo.lock.
+jsonwebtoken.workspace = true
 
 # NOTE (invariant #2, amended by ADR-0149): there is still deliberately no
 # `reqwest` here. Until goal SRV-T2 that meant "momo-server never talks to
@@ -119,10 +122,8 @@ base64.workspace = true
 # the RFC 7636 code challenge from its fixed verifier, so the PKCE canary is a
 # byte-level derivation rather than a copied literal that could drift.
 sha2.workspace = true
-# B4 client-rewire smoke only: the test plays the part of CENTRIFUGO, so it
-# verifies the connection token with the broker's HMAC key exactly as the broker
-# would. Already in the tree via momo-auth; never linked for a server-side use.
-jsonwebtoken.workspace = true
+# B4 client-rewire smoke also uses the runtime `jsonwebtoken` dependency above
+# to verify a connection token exactly as the broker would.
 # B5.2 conformance only: `tests/mention_routing_conformance_pg.rs` runs ONE real
 # worker iteration in-process after the send, so the 티키타카 is proved end to end
 # instead of stopping at "a row was enqueued". Dev-only — the server binary

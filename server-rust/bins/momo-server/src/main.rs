@@ -66,6 +66,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         drive_backend = %config.drive.backend,
         drive_configured = config.drive.shared_drive_id.is_some()
             || config.drive.backend == momo_drive::LOCAL_BACKEND,
+        livekit_configured = config.livekit.is_some(),
         "momo-server starting"
     );
     // MOMO-605: a refused entry is silent otherwise, and silence here reads as
@@ -206,6 +207,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // service-account key and a shared drive. The routes are mounted either way,
     // so "no archive here" is distinguishable from "no such route".
     .with_drive(drive);
+    let state = match config.livekit.clone() {
+        Some(livekit) => state.with_livekit(livekit),
+        None => state,
+    };
     // ADR-0156 D4-④: attached only when one was actually built, so "no managed
     // substrate here" stays distinguishable from "one that cannot be reached".
     let state = match t3_provisioner {
