@@ -119,7 +119,10 @@ export function ThreadPanel({
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        data-message-scroll-container=""
+      >
         {/* 루트에 「답글 N개」를 적지 않는다 (goal RN-U2).
 
             성재(iOS 실기기): "답글에서 개수 업데이트는 굳이 왜 해? 목록에 나오면
@@ -142,38 +145,42 @@ export function ThreadPanel({
           onOpenWorkSession={onOpenWorkSession}
           showRollup={false}
         />
-        <div className="mx-4 my-2 h-px bg-line" />
-
-        {query.isLoading && <SkeletonRows rows={3} className="p-4" />}
-        {query.error && (
-          <InlineBanner
-            message="답글을 불러오지 못했습니다."
-            actionLabel="다시 시도"
-            onAction={() => void query.refetch()}
-            testId="thread-error"
-          />
-        )}
-        {!query.isLoading && !query.error && replies.length === 0 && (
-          <EmptyInvite
-            headline="첫 답글을 남겨 이 대화를 이어가세요."
-            testId="thread-empty"
-          />
-        )}
-        {replies.map((reply, index) => (
-          <MessageRow
-            key={reply.seq}
-            message={reply}
-            startsGroup={startsAuthorGroup(replies[index - 1], reply)}
-            directory={directory}
-            actions={rowActions(reply)}
-            onOpenWorkSession={onOpenWorkSession}
-            // 답글은 애초에 롤업을 갖지 않는다(서버 투영이 `root_id IS NULL` 로
-            // 거른다 — 스레드는 한 단계다). 명시해 두는 것은 그 불변식이 깨져
-            // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
-            // 말하지 않게 하기 위해서다.
-            showRollup={false}
-          />
-        ))}
+        {/* 루트와 답글 사이에는 선을 긋지 않는다 (#1753). 둘은 32px 여백으로
+            갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
+            이 여백은 루트 툴바가 아래로 뒤집힐 때 쓰는 26px 띠도 함께 비워 둔다. */}
+        <div className="pt-8" data-testid="thread-replies">
+          {query.isLoading && <SkeletonRows rows={3} className="p-4" />}
+          {query.error && (
+            <InlineBanner
+              message="답글을 불러오지 못했습니다."
+              actionLabel="다시 시도"
+              onAction={() => void query.refetch()}
+              testId="thread-error"
+            />
+          )}
+          {!query.isLoading && !query.error && replies.length === 0 && (
+            <EmptyInvite
+              headline="첫 답글을 남겨 이 대화를 이어가세요."
+              className="mx-4 rounded-md border border-dashed border-line"
+              testId="thread-empty"
+            />
+          )}
+          {replies.map((reply, index) => (
+            <MessageRow
+              key={reply.seq}
+              message={reply}
+              startsGroup={startsAuthorGroup(replies[index - 1], reply)}
+              directory={directory}
+              actions={rowActions(reply)}
+              onOpenWorkSession={onOpenWorkSession}
+              // 답글은 애초에 롤업을 갖지 않는다(서버 투영이 `root_id IS NULL` 로
+              // 거른다 — 스레드는 한 단계다). 명시해 두는 것은 그 불변식이 깨져
+              // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
+              // 말하지 않게 하기 위해서다.
+              showRollup={false}
+            />
+          ))}
+        </div>
       </div>
 
       {/* B11 — the half that was missing. Reading a thread and not being able

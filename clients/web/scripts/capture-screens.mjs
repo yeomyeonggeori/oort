@@ -2868,6 +2868,7 @@ async function assertHoverToolbarInsideScroller(page, where, expectedStraddle) {
     const bar = document.querySelector('[data-testid="message-hover-toolbar"]');
     if (!bar) return null;
     const scroller =
+      bar.closest("[data-message-scroll-container]") ||
       bar.closest("[data-virtuoso-scroller]") ||
       bar.closest('[data-testid="timeline-virtuoso"]');
     if (!scroller) return { missing: "scroller" };
@@ -2903,6 +2904,87 @@ async function assertHoverToolbarInsideScroller(page, where, expectedStraddle) {
   console.log(
     `  호버 툴바 스크롤러 ${where}: seq ${info.seq} inside · straddle ${info.straddle}` +
       ` · 툴바 ${info.barTop} / 스크롤러 ${info.scrollerTop}`
+  );
+}
+
+/**
+ * 스레드 패널의 첫 행은 채널 Virtuoso가 아니라 패널 자체 스크롤러 바로 아래에 선다
+ * (#1753). 그 행을 실제로 hover해 툴바가 아래로 뒤집히고, 패널 안에 온전히 남으며,
+ * 루트·답글 어느 글자도 덮지 않는지를 한 프레임에서 잰다.
+ */
+async function assertThreadRootHoverToolbar(page, where) {
+  const panel = page.getByTestId("thread-panel");
+  const root = panel.getByTestId("timeline-message").first();
+  await root.hover();
+  await root
+    .getByTestId("message-hover-toolbar")
+    .waitFor({ state: "visible" });
+
+  const proof = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const scroller = panel?.querySelector('[data-message-scroll-container]');
+    const root = panel?.querySelector('[data-testid="timeline-message"]');
+    const bar = root?.querySelector('[data-testid="message-hover-toolbar"]');
+    if (!panel || !scroller || !root || !bar) return null;
+
+    const intersects = (a, b) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const barRect = bar.getBoundingClientRect();
+    const scrollRect = scroller.getBoundingClientRect();
+    let chars = 0;
+    let sample = "";
+    for (const body of panel.querySelectorAll('[data-row-body]')) {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const rect = range.getBoundingClientRect();
+          if ((rect.width > 0 || rect.height > 0) && intersects(barRect, rect)) {
+            chars += 1;
+            if (sample.length < 24) sample += text[i];
+          }
+        }
+      }
+    }
+    const slack = 1;
+    return {
+      seq: root.getAttribute("data-seq"),
+      straddle: bar.getAttribute("data-straddle") || "",
+      inside:
+        barRect.top >= scrollRect.top - slack &&
+        barRect.bottom <= scrollRect.bottom + slack &&
+        barRect.left >= scrollRect.left - slack &&
+        barRect.right <= scrollRect.right + slack,
+      chars,
+      sample,
+      barTop: Math.round(barRect.top),
+      barBottom: Math.round(barRect.bottom),
+      scrollTop: Math.round(scrollRect.top),
+      scrollBottom: Math.round(scrollRect.bottom),
+    };
+  })()`);
+
+  if (!proof) {
+    throw new Error(`[스레드 루트 호버 ${where}] 패널·루트·툴바·스크롤러 중 하나가 없다`);
+  }
+  if (!proof.inside || proof.straddle !== "below") {
+    throw new Error(
+      `[스레드 루트 호버 ${where}] seq ${proof.seq}: 툴바 ${proof.barTop}–${proof.barBottom}` +
+        ` / 스크롤러 ${proof.scrollTop}–${proof.scrollBottom} / straddle ${proof.straddle}`
+    );
+  }
+  if (proof.chars > 0) {
+    throw new Error(
+      `[스레드 루트 호버 ${where}] 본문 ${proof.chars}자를 덮는다 「${proof.sample}」`
+    );
+  }
+  console.log(
+    `  스레드 루트 호버 ${where}: 패널 안쪽 · 글자 교차 0 · straddle below`
   );
 }
 
@@ -4384,6 +4466,7 @@ async function captureScheme(browser, scheme) {
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
   // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
   await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
+  await assertThreadRootHoverToolbar(login, scheme);
   const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);

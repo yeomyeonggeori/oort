@@ -48,3 +48,38 @@ export function toolbarClipsScrollerTop(
   if (scroller.height <= 0) return false;
   return bar.top < scroller.top;
 }
+
+const TOOLBAR_CLIPPING_OVERFLOW = new Set([
+  "auto",
+  "scroll",
+  "overlay",
+  "hidden",
+  "clip",
+]);
+
+/**
+ * 툴바를 실제로 자를 수 있는 가장 가까운 세로 경계를 찾는다 (#1753).
+ *
+ * 채널 타임라인은 react-virtuoso가 `data-virtuoso-scroller`를 주지만 스레드 패널은
+ * 자기 `overflow-y-auto` 상자를 쓴다. 특정 타임라인 표식만 찾으면 스레드 루트는
+ * 경계를 하나도 못 찾아 위 straddle을 헤더 쪽으로 내보낸다. 표식은 안정적인 빠른
+ * 경로로 보존하고, 나머지는 계산된 overflow로 일반화한다.
+ */
+export function closestToolbarScrollContainer(
+  element: HTMLElement
+): HTMLElement | null {
+  let ancestor = element.parentElement;
+  while (ancestor) {
+    if (
+      ancestor.hasAttribute("data-message-scroll-container") ||
+      ancestor.hasAttribute("data-virtuoso-scroller") ||
+      ancestor.getAttribute("data-testid") === "timeline-virtuoso"
+    ) {
+      return ancestor;
+    }
+    const overflowY = getComputedStyle(ancestor).overflowY;
+    if (TOOLBAR_CLIPPING_OVERFLOW.has(overflowY)) return ancestor;
+    ancestor = ancestor.parentElement;
+  }
+  return null;
+}
