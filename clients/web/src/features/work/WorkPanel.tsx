@@ -2,6 +2,11 @@
 // work.* 프레임, 세션 단위). 「작업 패널」을 찾아왔다면 그것은 다른 표면이다:
 // `features/agents/AgentWorkPanel.tsx` — agent run 하나의 진행 스트림(`agent:`
 // 레일, 휘발, run 단위, goal WEB-WP1). 이름만 닮았고 데이터도 수명도 다르다.
+//
+// TC-1 (#1758) 하단 터미널 도크(`TerminalDock`)와의 관계: 공존, 역할 분리.
+// 이 패널은 목록·미리보기·인수·화면 관전/조작·원장이다. 채널 헤더 터미널
+// 아이콘은 도크를 연다. 같은 세션의 ObserverTerminal 을 두 번 마운트하지 않기
+// 위해 ChatShell 이 둘을 XOR 한다. 입력 왕복은 여기도 도크도 없다.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { PanelRightClose, PanelRightOpen, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";

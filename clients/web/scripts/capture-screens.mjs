@@ -2273,6 +2273,38 @@ async function assertComposerVisible(page, where) {
 }
 
 /**
+ * TC-1 (#1758): 하단 도크는 컴포저 형제이지 덮개가 아니다. 아랫변이 컴포저
+ * 윗변을 넘으면 본문 교차 자 관례를 깬 것이다.
+ */
+async function assertDockAboveComposer(page, where) {
+  const measure = await page.evaluate(`(() => {
+    const dock = document.querySelector('[data-testid="terminal-dock"]');
+    const composer = document.querySelector('[data-testid="composer"]');
+    if (!dock || !composer) return { missing: true };
+    const d = dock.getBoundingClientRect();
+    const c = composer.getBoundingClientRect();
+    return {
+      missing: false,
+      dockBottom: Math.round(d.bottom),
+      composerTop: Math.round(c.top),
+      overlap: Math.round(d.bottom - c.top),
+    };
+  })()`);
+  if (measure.missing) {
+    throw new Error(`도크/컴포저 교차 ${where}: 도크 또는 컴포저가 없다`);
+  }
+  if (measure.overlap > 1) {
+    throw new Error(
+      `도크가 컴포저를 덮는다 ${where}: 도크 아랫변 ${measure.dockBottom}px, ` +
+        `컴포저 윗변 ${measure.composerTop}px, 교차 ${measure.overlap}px`
+    );
+  }
+  console.log(
+    `  dock ${where}: 아랫변 ${measure.dockBottom}px <= 컴포저 ${measure.composerTop}px`
+  );
+}
+
+/**
  * 위쪽이 답답한가 (goal B9 §0.3). 성재 실캡처 1번의 지적은 "헤더 아래 콘텐츠가 상단에
  * 붙어 답답"이었고, 그 인상은 두 숫자로 갈린다: 헤더 줄 자체가 손가락 줄만큼 높은가,
  * 그리고 셸이 위쪽 안전 영역을 인정하는가.
@@ -4119,6 +4151,18 @@ async function captureMobile(browser, scheme) {
   await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
 
+  // TC-1 (#1758): 헤더 터미널을 실제로 눌러 도크가 컴포저 위에 앉는지 폰에서도 잰다.
+  await page.getByTestId("open-work-panel").click();
+  await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
+  await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+  await assertComposerVisible(page, `terminal dock ${scheme}`);
+  await assertDockAboveComposer(page, `terminal dock ${scheme}`);
+  await assertNoHorizontalOverflow(page, `terminal dock ${scheme}`);
+  await assertTapTargets(page, `terminal dock ${scheme}`);
+  await shoot(page, "terminal-dock");
+  await page.getByTestId("terminal-dock-close").click();
+  await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
+
   // 2a-0. 이모지 피커 바텀시트 (#1742). 390에서 분류 탭이 화면 밖으로
   //       나가면 안 된다. hover: none 이므로 포인터 popover가 아니라 시트다.
   await page.getByTestId("composer-emoji-trigger").click();
@@ -5903,13 +5947,190 @@ function reportUnmocked() {
   for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
 }
 
+// TC-1 (#1758). 헤더 터미널을 실제로 눌러 4상태·탭 전환·확대·닫기·컴포저
+// 비교차를 잰다. ADE가 같은 work-sessions 키를 셸에서 읽으므로 로딩 장면은
+// networkidle을 기다리지 않는다.
+async function captureTerminalDockScenes(browser, scheme) {
+  const shots = [];
+  const liveHostId = "019f994c-4ed0-76a9-9d43-a9bde45b8fcd";
+  const dockSessions = [
+    {
+      id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c3",
+      workspaceId: WORKSPACE_ID,
+      channelId: GENERAL_ID,
+      memberId: ME,
+      hostId: liveHostId,
+      rootMessageId: "019f9ab9-6da4-7be7-9bc9-4a3872d921c4",
+      tool: "claude",
+      label: "relay outbox_drain 재시작 루프 조사",
+      status: "running",
+      observation: "open",
+      observerGrantCount: 1,
+      remoteAttachAvailable: true,
+      remoteDisplayAvailable: false,
+      startedAtMs: Date.now() - 12 * 60_000,
+    },
+    {
+      id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c5",
+      workspaceId: WORKSPACE_ID,
+      channelId: GENERAL_ID,
+      memberId: ME,
+      hostId: liveHostId,
+      rootMessageId: "019f9ab9-6da4-7be7-9bc9-4a3872d921c6",
+      tool: "claude",
+      label: "배포 로그 수집",
+      status: "idle",
+      observation: "open",
+      observerGrantCount: 0,
+      remoteAttachAvailable: true,
+      remoteDisplayAvailable: false,
+      startedAtMs: Date.now() - 45 * 60_000,
+    },
+  ];
+
+  async function openDock(page) {
+    const toggle = page.getByTestId("open-work-panel");
+    await toggle.click();
+    await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
+    if ((await toggle.getAttribute("aria-pressed")) !== "true") {
+      throw new Error(`터미널 토글이 열린 동안 pressed가 아니다 ${scheme}`);
+    }
+    if ((await page.getByTestId("terminal-dock-new").count()) !== 0) {
+      throw new Error(`새 세션 버튼이 그렸다 ${scheme}: 웹에 create 경로가 없다`);
+    }
+  }
+
+  async function shoot(name, prepare, settle, boot = "idle") {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: ORIGIN,
+    });
+    await installMocks(context);
+    if (prepare) await prepare(context);
+    const page = await context.newPage();
+    // ADE 가 셸에서 work-sessions 를 읽는다. 로딩 장면은 그 요청을 붙잡으므로
+    // networkidle 을 기다리면 캡처가 영원히 멈춘다.
+    if (boot === "pending") {
+      await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("login-email").fill("seongjae@dawn.example");
+      await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+      await page.getByTestId("login-submit").click();
+      await page.getByTestId("open-work-panel").waitFor({ state: "visible" });
+      await page.getByTestId("composer-input").waitFor({ state: "visible" });
+    } else {
+      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page.getByTestId("composer-input").waitFor({ state: "visible" });
+    }
+    await settle(page);
+    await assertNoHorizontalOverflow(page, `terminal dock ${name} ${scheme}`);
+    await assertComposerVisible(page, `terminal dock ${name} ${scheme}`);
+    await assertDockAboveComposer(page, `terminal dock ${name} ${scheme}`);
+    const path = `${OUT_DIR}/terminal-dock-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("empty", null, async (page) => {
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
+    await page.waitForFunction(
+      `document.activeElement?.getAttribute("data-testid") === "open-work-panel"`
+    );
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "loading",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", () => new Promise(() => {}));
+    },
+    async (page) => {
+      await openDock(page);
+      await page.getByTestId("terminal-dock-loading").waitFor({ state: "visible" });
+    },
+    "pending"
+  );
+
+  await shoot(
+    "error",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "ledger unavailable" } }),
+        })
+      );
+    },
+    async (page) => {
+      await openDock(page);
+      await page.getByTestId("terminal-dock-error").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot("offline", null, async (page) => {
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+    await page.context().setOffline(true);
+    await page.getByTestId("terminal-dock-offline").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "sessions",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+        json(route, { workSessions: dockSessions })
+      );
+    },
+    async (page) => {
+      await openDock(page);
+      const tabs = page.getByTestId("terminal-dock-tab");
+      await tabs.first().waitFor({ state: "visible" });
+      if ((await tabs.count()) < 2) {
+        throw new Error(`세션 탭이 2개 미만이다 ${scheme}`);
+      }
+      await tabs.nth(1).click();
+      if ((await tabs.nth(1).getAttribute("aria-selected")) !== "true") {
+        throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
+      }
+      await page.getByTestId("work-observer").waitFor({ state: "visible" });
+      const dock = page.getByTestId("terminal-dock");
+      const before = await dock.evaluate((el) => el.getBoundingClientRect().height);
+      await page.getByTestId("terminal-dock-expand").click();
+      if ((await dock.getAttribute("data-expanded")) === null) {
+        throw new Error(`확대 뒤 data-expanded가 없다 ${scheme}`);
+      }
+      const after = await dock.evaluate((el) => el.getBoundingClientRect().height);
+      if (after <= before) {
+        throw new Error(`확대가 높이를 바꾸지 않았다 ${scheme}: ${before} -> ${after}`);
+      }
+      await page.getByTestId("terminal-dock-close").click();
+      await dock.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        `document.activeElement?.getAttribute("data-testid") === "open-work-panel"`
+      );
+      await openDock(page);
+      await tabs.nth(1).waitFor({ state: "visible" });
+      await page.getByTestId("terminal-dock-expand").click();
+    }
+  );
+
+  return shots;
+}
+
 // 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
-//
-// 두 장을 찍는 이유는 두 분기가 다른 말을 하기 때문이다: 채널은 액션 둘(첫 메시지
-// 쓰기 · 멤버 추가하기)을 위계를 세워 내놓고, DM은 참여자가 dmKey로 고정되어 있어
-// 첫 메시지 하나뿐이다. 한 장만 찍으면 리뷰가 보는 것은 둘 중 하나의 옷차림이다.
 async function captureEmptyConversationScenes(browser, scheme) {
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
@@ -6994,6 +7215,7 @@ async function main() {
       if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
+          all.push(...(await captureTerminalDockScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));

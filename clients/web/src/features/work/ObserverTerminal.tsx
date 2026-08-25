@@ -151,6 +151,7 @@ export function ObserverTerminal({
   wide,
   onWideChange,
   headingLevel = 4,
+  variant = "pane",
 }: {
   session: WorkSession;
   hostName: string | null;
@@ -159,6 +160,12 @@ export function ObserverTerminal({
   onWideChange: (wide: boolean) => void;
   /** Follows the WorkSessionDetail heading in its route or panel context. */
   headingLevel?: 3 | 4;
+  /**
+   * `dock` is the channel-bottom terminal (#1758). Same observer stream, no
+   * stdin. The box fills the dock instead of a fixed 320px pane body, and it
+   * drops the pane hairline that would double the dock's own border.
+   */
+  variant?: "pane" | "dock";
 }) {
   const { session: auth, workspaceId } = useSession();
   const queryClient = useQueryClient();
@@ -818,12 +825,18 @@ export function ObserverTerminal({
   // R2 M2 measured what that left behind: a permanent "긴 줄은 접혀서 보입니다"
   // over zero controls. The remedy at that width is the window, so the notice
   // says the window instead of pointing at a button that is not there.
-  const paneAtFullWidth = wide || paneAtWindowWidth;
+  const paneAtFullWidth = wide || paneAtWindowWidth || variant === "dock";
   const Heading = headingLevel === 3 ? "h3" : "h4";
+  const docked = variant === "dock";
 
   return (
     <section
-      className="border-b border-line px-4 py-2"
+      className={cn(
+        "px-4 py-2",
+        docked
+          ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+          : "border-b border-line"
+      )}
       data-testid="work-observer"
       data-phase={phase.kind}
       data-link={link ?? undefined}
@@ -1033,7 +1046,13 @@ export function ObserverTerminal({
       {/* The terminal stays mounted across a failure: those bytes really did
           arrive, and clearing them on a dropped socket would delete the only
           record of what the agent printed. */}
-      <div className={cn("pt-2", !showTerminal && "hidden")}>
+      <div
+        className={cn(
+          "pt-2",
+          !showTerminal && "hidden",
+          docked && "flex min-h-0 flex-1 flex-col"
+        )}
+      >
         {/* The frame and the terminal are two boxes on purpose.
             FitAddon measures its parent with `getComputedStyle().height`, which
             on a `box-sizing: border-box` element resolves to the BORDER box
@@ -1043,7 +1062,12 @@ export function ObserverTerminal({
             fixed height and ran away entirely against a content height: the
             box grew ~12 rows per frame, forever. So the mount carries no
             padding and no border, and the chrome lives out here. */}
-        <div className="rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring">
+        <div
+          className={cn(
+            "rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring",
+            docked && "flex min-h-0 flex-1 flex-col"
+          )}
+        >
           <div
             // The whole point of a read-only terminal is that it can be read:
             // focus reaches it (xterm puts a textarea inside), selection and
@@ -1056,10 +1080,17 @@ export function ObserverTerminal({
             // plus the counted summary underneath says the same thing in one
             // sentence, and xterm's own screenReaderMode stays off because it
             // would put that live region back.
+            //
+            // `data-scroll-x`: xterm's viewport is a declared horizontal
+            // scroller when a host line is wider than this box (#1758 dock
+            // capture). The harness skips boxes that say so.
             className={cn(
               "overflow-hidden bg-surface-raised font-mono text-meta text-ink",
-              !bodyFitsContent && "h-terminal-body"
+              docked
+                ? "min-h-0 flex-1"
+                : !bodyFitsContent && "h-terminal-body"
             )}
+            data-scroll-x={docked ? "" : undefined}
             ref={mountRef}
             role="group"
             aria-label="세션 터미널 출력, 읽기 전용"

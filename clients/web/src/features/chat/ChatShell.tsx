@@ -44,6 +44,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import { TerminalDock } from "@/features/work/TerminalDock";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -247,7 +248,16 @@ export function ChatShell() {
   // it unmounts it: held locally, the chosen range and the session being read
   // were thrown away on every close, and reopening dropped an all-workspace
   // view back to the current channel (frequently an empty list).
+  //
+  // TC-1 (#1758): the header SquareTerminal opens the BOTTOM terminal dock, not
+  // this pane. WorkPanel stays for list / takeover / display / ledger, reached
+  // from session cards (`openWorkSession`) and `/work`. Dock and WorkPanel XOR
+  // so ObserverTerminal is not mounted twice on the same session. The dock sits
+  // in the chat column above the composer and does not cover it.
   const [workOpen, setWorkOpen] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
+  const terminalToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => setDockOpen(false), [channelId]);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
   const [openingWorkThreadId, setOpeningWorkThreadId] = useState<string | null>(
@@ -276,6 +286,7 @@ export function ChatShell() {
   const openWorkSession = useCallback<OpenWorkSession>(
     (sessionId, intent) => {
       setThread(null);
+      setDockOpen(false);
       setWorkScope("channel");
       setWorkSessionId(sessionId);
       setWorkControlIntent(intent?.control === true ? sessionId : null);
@@ -283,6 +294,13 @@ export function ChatShell() {
     },
     []
   );
+
+  const closeDock = useCallback(() => {
+    setDockOpen(false);
+    // overlayHeld lesson: the opener lives outside the dock. Restore after
+    // unmount so Escape/닫기 does not dump focus onto the document body.
+    requestAnimationFrame(() => terminalToggleRef.current?.focus());
+  }, []);
 
   // A scope chip means "show me that list". The panel keeps its selected
   // session across close/reopen (returning to where you were), so while a
@@ -871,28 +889,33 @@ export function ChatShell() {
               onRetry={timeline.reloadPins}
             />
           )}
-          {/* The tooltip and the accessible name are the same string: two
-              names for one control is two controls to a reader who hears one
-              and sees the other. */}
+          {/* TC-1 (#1758): this control opens the bottom terminal dock.
+              WorkPanel remains reachable from session cards. testid stays
+              `open-work-panel` because huddle/shell gates measure this header
+              slot by that name; the accessible name is the product name. */}
           {stressCount === 0 && (
             <button
+              ref={terminalToggleRef}
               type="button"
               onClick={() => {
-                setThread(null);
-                setWorkOpen((open) => !open);
+                setWorkOpen(false);
+                setDockOpen((open) => !open);
               }}
-              aria-pressed={workOpen}
-              aria-label="작업 세션 패널"
-              title="작업 세션 패널"
+              aria-pressed={dockOpen}
+              {...(dockOpen
+                ? { "aria-controls": "channel-terminal-dock" }
+                : {})}
+              aria-label="터미널"
+              title="터미널"
               data-testid="open-work-panel"
               className={cn(
                 "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
-                workOpen
+                dockOpen
                   ? "bg-accent-soft text-accent"
                   : "text-ink-muted hover:bg-surface-hover"
               )}
             >
-              <SquareTerminal className="size-4" />
+              <SquareTerminal aria-hidden="true" className="size-4" />
             </button>
           )}
         </div>
@@ -1081,6 +1104,10 @@ export function ChatShell() {
           )}
         </div>
 
+        {dockOpen && stressCount === 0 && (
+          <TerminalDock channelId={channelId} onClose={closeDock} />
+        )}
+
         {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
         {stressCount === 0 && channelId !== null && <LongPressHint />}
@@ -1131,7 +1158,7 @@ export function ChatShell() {
         />
       )}
 
-      {workOpen && !thread && stressCount === 0 && !workPanelOpen && (
+      {workOpen && !thread && stressCount === 0 && !workPanelOpen && !dockOpen && (
         <WorkPanel
           channelId={channelId}
           scope={workScope}
