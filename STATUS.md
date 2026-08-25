@@ -2,11 +2,13 @@
 
 ## UX-D3 메시지 ⋯ 더보기 메뉴 보강 (#1755, 2026-08-26)
 
-- 선행 판정: 메시지 복사 실존(원문 클립보드). 링크 복사 실존(`#/c/{ch}?msg=` → ChatShell 착지). 읽지 않음 표시는 PUT read-state가 `GREATEST` 단조라 커서 후진 불가. Remind me later·Report는 표면 없음.
-- 실존 항목만 추가: ⋯/우클릭/시트 동형. 「복사」→「메시지 복사」, 「링크 복사」를 copy 뒤에. 기존 13/11/0 차등은 14/12/0(저자만 고치기/지우기, 묘비 0). lucide `Copy`·`Link`.
-- 적립: 읽지 않음 표시(서버 커서 후진 API), Remind me later, Report message.
-- 캡처 3표면: `b11-message-action-menu` · 신설 `b11-message-context-menu` · `mobile-b11-action-sheet`. 클립보드 항목은 실제로 눌러 내용 검증.
-- 검증: 웹 `tsc -b` rc=0 · Vitest 1,543/1,543 · 디자인 프리플라이트 web 12/12 + core 5/5 · `capture:design` rc=0 (⋯/우클릭/시트 클립보드 단정 포함). 자체 design-review 안 함(오케스트레이터).
+- 선행 판정: 메시지 복사 실존(원문 클립보드). 링크 복사 실존(`#/c/{ch}?msg=&seq=` → ChatShell 착지). 읽지 않음 표시는 PUT read-state가 `GREATEST` 단조라 커서 후진 불가. Remind me later·Report는 표면 없음.
+- 실존 항목만 추가: ⋯/우클릭/시트 동형. 「복사」→코어 `copyMessageActionLabel`(「메시지 복사하기」), 「링크 복사하기」를 copy 뒤에. 기존 13/11/0 차등은 14/12/0(저자만 고치기/지우기, 묘비 0). lucide `Copy`·`Link`.
+- 공유 링크 origin은 `absoluteApiBase()`(남에게 건넬 절대 origin). 웹 배포는 자기 origin과 동일. Tauri는 연결 시 서버 base가 필수(`requiresServerUrl`)이거나 빌드에 `API_BASE_DEFAULT`가 구워져 있으므로, MessageRow가 그려지는 순간 `absoluteApiBase()`가 건넬 수 없는 런타임은 코드상 존재하지 않음 — 액션 숨김 갈래 없음.
+- 적립: 읽지 않음 표시(서버 커서 후진 API), Remind me later, Report message. **폰 「링크 복사」는 미구현**(표면 정본 절차 별도 — origin은 코어 `host.absoluteApiBase`가 이미 있음).
+- 캡처 3표면: `b11-message-action-menu` · `b11-message-context-menu` · `mobile-b11-action-sheet`. 클립보드 항목은 실제로 눌러 내용을 읽고, 복사된 URL을 새 페이지에서 열어 착지한다. URL 모양 사본(`messageShareUrlForCapture`)은 없음.
+- §2.8 아이콘 1개(`Link`) 추가. design-mode dist JS gzip 합계 725,020 B (index 452,999 · huddleRuntime 137,855 · terminalRuntime 83,921 · emojiCatalog 48,577). 미사용 글리프 `aperture`·`bluetooth`는 dist JS에서 0회.
+- 검증: 웹 `tsc -b` · Vitest · 디자인 프리플라이트 web 12/12 + core 5/5 · `capture:design`. 자체 design-review 안 함(오케스트레이터). 데스크톱 실기 클립보드 실측은 성재 QA.
 
 ## UX-D1 웹 Lucide 아이콘 체계 고정 (#1754, 2026-08-25)
 
