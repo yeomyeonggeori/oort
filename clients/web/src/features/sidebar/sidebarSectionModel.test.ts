@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { shouldShowSectionActions } from "./sidebarSectionModel";
+import {
+  countSectionActionTabStops,
+  sectionUnreadTotals,
+  shouldShowSectionActions,
+} from "./sidebarSectionModel";
 
 const sectionSource = readFileSync(
   fileURLToPath(new URL("./SidebarRow.tsx", import.meta.url)),
@@ -56,8 +60,47 @@ describe("UX-HT 계약 (소스)", () => {
     expect(sectionSource).toContain("shouldShowSectionActions");
   });
 
+  it("overlayOpen 은 리터럴이 아니라 채널 만들기 열림 상태다 (B-1)", () => {
+    expect(sectionSource).toContain("useCreateChannelOpen");
+    expect(sectionSource).toContain("overlayHeld");
+    expect(sectionSource).toContain("overlayOpen: overlayOpen || overlayHeld");
+    expect(sectionSource).not.toMatch(/overlayOpen:\s*false/);
+  });
+
+  it("rest 헤더는 컨트롤 높이를 예약한다 (M-1)", () => {
+    expect(sectionSource).toContain("flex h-control-sm items-center");
+    expect(sectionSource).not.toMatch(/rounded-sm py-1 text-left text-meta/);
+  });
+
+  it("제목 버튼은 보이는 글자를 이름으로 쓴다 (N-3)", () => {
+    expect(sectionSource).not.toContain("aria-label={`${title} 섹션");
+    expect(sectionSource).toContain("aria-controls={collapsed ? undefined : listId}");
+  });
+
   it("포인터 클릭 링은 focus-visible 만 쓴다", () => {
     expect(sectionSource).toContain("focus-visible:focus-ring");
     expect(sectionSource).not.toMatch(/className=\{[^}]*\bfocus:focus-ring/);
+  });
+});
+
+describe("countSectionActionTabStops", () => {
+  it("mounted section-action 탭 스톱만 센다", () => {
+    const action = { hasAttribute: () => false, tabIndex: 0 };
+    const disabled = { hasAttribute: (name: string) => name === "disabled", tabIndex: 0 };
+    const root = {
+      querySelectorAll: () => [action, disabled],
+    } as unknown as ParentNode;
+    expect(countSectionActionTabStops(root)).toBe(1);
+  });
+});
+
+describe("sectionUnreadTotals", () => {
+  it("접힌 섹션이 헤더에 올릴 합을 낸다", () => {
+    expect(
+      sectionUnreadTotals([
+        { unreadCount: 5, mentionCount: 1 },
+        { unreadCount: 2, mentionCount: 0 },
+      ])
+    ).toEqual({ unreadCount: 7, mentionCount: 1 });
   });
 });

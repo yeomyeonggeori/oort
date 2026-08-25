@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { useCreateChannelOpen } from "@/features/channels/useCreateChannel";
 import {
   shouldShowSectionActions,
   type SidebarSectionId,
@@ -131,6 +132,8 @@ export function SidebarSection({
   action,
   collapsed,
   onCollapsedChange,
+  unreadCount = 0,
+  mentionCount = 0,
 }: {
   title: string;
   sectionId: SidebarSectionId;
@@ -138,18 +141,31 @@ export function SidebarSection({
   action?: ReactNode;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
+  unreadCount?: number;
+  mentionCount?: number;
 }) {
   const touchSurface = useHoverNone();
   const [headerHovered, setHeaderHovered] = useState(false);
   const [headerKeyboardFocused, setHeaderKeyboardFocused] = useState(false);
+  // Same overlay pin as MessageRow → hoverToolbarModel. The + that opened
+  // 채널 만들기 must stay mounted so Radix can restore focus on close (B-1).
+  // Open-state alone is not enough: the provider flips it false in the same
+  // commit that unmounts the dialog, so a hold keeps the trigger alive until
+  // the header actually blurs after restore.
+  const overlayOpen = useCreateChannelOpen();
+  const [overlayHeld, setOverlayHeld] = useState(false);
+  if (overlayOpen && !overlayHeld) setOverlayHeld(true);
   const showActions = shouldShowSectionActions({
     pointerCanHover: !touchSurface,
     headerHovered,
     headerKeyboardFocused,
-    overlayOpen: false,
+    overlayOpen: overlayOpen || overlayHeld,
   });
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   const listId = `sidebar-section-${sectionId}-list`;
+  const hasUnread = unreadCount > 0;
+  const hasMention = mentionCount > 0;
 
   const onHeaderFocus = (event: FocusEvent<HTMLDivElement>) => {
     // Pointer click focuses the collapse button but must not paint a ring or
@@ -164,6 +180,7 @@ export function SidebarSection({
     const next = event.relatedTarget;
     if (next instanceof Node && event.currentTarget.contains(next)) return;
     setHeaderKeyboardFocused(false);
+    if (!overlayOpen) setOverlayHeld(false);
   };
 
   return (
@@ -173,7 +190,7 @@ export function SidebarSection({
       data-collapsed={collapsed ? "" : undefined}
     >
       <div
-        className="flex items-center gap-1 px-2"
+        className="flex h-control-sm items-center gap-1 px-2"
         data-testid={`sidebar-section-${sectionId}-header`}
         onMouseEnter={() => setHeaderHovered(true)}
         onMouseLeave={() => setHeaderHovered(false)}
@@ -185,16 +202,32 @@ export function SidebarSection({
             type="button"
             onClick={() => onCollapsedChange(!collapsed)}
             aria-expanded={!collapsed}
-            aria-controls={listId}
-            aria-label={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
+            aria-controls={collapsed ? undefined : listId}
             title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
             data-testid={`section-collapse-${sectionId}`}
-            className="flex w-full min-w-0 items-center gap-1 rounded-sm py-1 text-left text-meta font-medium text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+            className="flex h-control-sm w-full min-w-0 items-center gap-1 rounded-sm text-left text-meta font-medium text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
           >
             <Chevron className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">{title}</span>
           </button>
         </h2>
+        {collapsed && hasMention ? (
+          <span
+            className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
+            data-numeric
+            data-testid={`section-unread-${sectionId}`}
+          >
+            {mentionCount}
+          </span>
+        ) : collapsed && hasUnread ? (
+          <span
+            className="shrink-0 text-timestamp text-ink-muted"
+            data-numeric
+            data-testid={`section-unread-${sectionId}`}
+          >
+            {unreadCount}
+          </span>
+        ) : null}
         {showActions ? action : null}
       </div>
       {collapsed ? null : (

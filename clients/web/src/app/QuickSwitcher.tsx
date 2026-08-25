@@ -343,7 +343,7 @@ export function QuickSwitcher({
                 // 열리면 두 포커스 스코프가 겹쳐, 폼이 "무엇이 나를 열었나"로
                 // 사라지는 중인 팔레트 입력을 잡는다. 팔레트가 먼저 캐럿을
                 // 제자리에 돌려놓은 다음 열려야 닫을 때도 그 자리로 돌아간다.
-                requestAnimationFrame(openCreateChannel);
+                requestAnimationFrame(() => openCreateChannel());
               }}
             >
               <Plus className="size-4 opacity-70" />

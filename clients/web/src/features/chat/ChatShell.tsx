@@ -1064,7 +1064,7 @@ export function ChatShell() {
               actions={
                 <Button
                   size="sm"
-                  onClick={openCreateChannel}
+                  onClick={() => openCreateChannel()}
                   data-testid="chat-create-channel"
                 >
                   채널 만들기

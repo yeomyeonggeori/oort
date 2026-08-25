@@ -28,9 +28,25 @@ export function shouldShowSectionActions(input: {
 }
 
 /** Tab stops owned by a mounted section-action cluster. Red proof: 0 at rest
- *  on a pointer surface (the actions are not in the DOM). */
+ *  on a pointer surface (the actions are not in the DOM). Called from
+ *  sidebarSectionModel.test.ts — same contract as countToolbarTabStops. */
 export function countSectionActionTabStops(root: ParentNode): number {
   return Array.from(
     root.querySelectorAll<HTMLElement>("[data-section-action]")
   ).filter((el) => !el.hasAttribute("disabled") && el.tabIndex >= 0).length;
+}
+
+/** Unread + mention totals for a collapsed section header. Collapse hides
+ *  rows, not alerts: ⌥↓ still walks these channels, so the header must say
+ *  the same fact the keyboard already knows. */
+export function sectionUnreadTotals(
+  items: ReadonlyArray<{ unreadCount: number; mentionCount: number }>
+): { unreadCount: number; mentionCount: number } {
+  let unreadCount = 0;
+  let mentionCount = 0;
+  for (const item of items) {
+    unreadCount += item.unreadCount;
+    mentionCount += item.mentionCount;
+  }
+  return { unreadCount, mentionCount };
 }
