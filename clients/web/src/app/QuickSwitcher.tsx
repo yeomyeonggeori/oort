@@ -235,13 +235,22 @@ export function QuickSwitcher({
       contentClassName="fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg"
       data-testid="quick-switcher"
     >
-      <Command.Input
-        value={typed}
-        onValueChange={setTyped}
-        placeholder="채널, 사람, 설정으로 이동"
-        data-testid="quick-switcher-input"
-        className="w-full border-b border-line bg-transparent px-4 py-3 text-body focus-visible:focus-ring placeholder:text-ink-muted"
-      />
+      {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
+          팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은
+          상시 점등이 되어 정보가 0이다 — 링 없이 hairline 구분선만 남긴다.
+          placeholder가 입력 목적을 계속 눈에 보이게 한다. */}
+      <div
+        className="border-b border-line"
+        data-testid="quick-switcher-input-vessel"
+      >
+        <Command.Input
+          value={typed}
+          onValueChange={setTyped}
+          placeholder="채널, 사람, 설정으로 이동"
+          data-testid="quick-switcher-input"
+          className="w-full bg-transparent px-4 py-3 text-body outline-none placeholder:text-ink-muted focus-visible:outline-none"
+        />
+      </div>
 
       {/* A DM that failed to open keeps the palette up: the message belongs next
        * to the name that was picked, not behind a dialog that closed itself. */}

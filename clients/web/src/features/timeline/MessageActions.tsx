@@ -16,6 +16,7 @@ import {
   useFrequentEmojis,
 } from "@/features/emoji/frequencyStore";
 import {
+  closestToolbarScrollContainer,
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
   toolbarClipsScrollerTop,
@@ -320,7 +321,7 @@ const toolbarItemClass =
  *
  * Placement straddles the row's top edge (`hover-toolbar-straddle`) and keeps
  * the same 16px right gutter as the body (`right-4`). When that would clip the
- * scroller top, it mirrors to the row's bottom edge
+ * nearest scroll-container top, it mirrors to the row's bottom edge
  * (`hover-toolbar-straddle-below`, #1743 H-4). Own-row body text must not
  * intersect the toolbar box (B11 R2 Blocker / #1743 B-3).
  */
@@ -364,10 +365,8 @@ export function MessageHoverToolbar({
     if (straddleBelow) return;
     const bar = barRef.current;
     if (!bar) return;
-    const scroller =
-      bar.closest("[data-virtuoso-scroller]") ??
-      bar.closest('[data-testid="timeline-virtuoso"]');
-    if (!(scroller instanceof HTMLElement)) return;
+    const scroller = closestToolbarScrollContainer(bar);
+    if (!scroller) return;
     if (
       toolbarClipsScrollerTop(
         bar.getBoundingClientRect(),
