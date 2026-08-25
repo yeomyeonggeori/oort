@@ -23,7 +23,12 @@ import {
   useInvalidateReadStates,
   useReadStates,
 } from "@/features/workspace/useWorkspace";
-import { watchForMessage, watchForMessageId } from "@/features/inbox/anchor";
+import {
+  anchorMissKind,
+  oldestLoadedSeq,
+  watchForMessage,
+  watchForMessageId,
+} from "@/features/inbox/anchor";
 import {
   quoteDraftFor,
   quoteDraftStillValid,
@@ -536,14 +541,8 @@ export function ChatShell() {
       // 만료되는 쪽이 이미 도착한 점프에 대해 「못 찾았다」를 띄운다.
       quoteJumpRef.current?.();
       setAnchorMissed(null);
-      const missKind = (): "older" | "unknown" => {
-        if (seq === null) return "unknown";
-        const oldestLoaded = messages.reduce(
-          (min, message) => Math.min(min, message.seq),
-          Number.POSITIVE_INFINITY
-        );
-        return seq < oldestLoaded ? "older" : "unknown";
-      };
+      const missKind = (): "older" | "unknown" =>
+        anchorMissKind(seq, oldestLoadedSeq(messages));
       // 목록에게 먼저 묻는다 (리뷰 B1). 「없다」면 기다릴 것이 없으므로 3초를
       // 흘려보내지 않고 그 자리에서 사실을 말한다.
       if (timelineJump.current?.bringIntoView({ messageId }) === false) {
@@ -567,15 +566,11 @@ export function ChatShell() {
      * 가장 오래된 로드분보다 작으면 그것은 추측이 아니라 사실이다. seq를 모르면
      * (`?seq=` 없이 온 링크) 모른다고 답하고, 화면도 모르는 채로 말한다.
      */
-    const missKind = (): "older" | "unknown" => {
-      const target = rawSeq === null ? Number.NaN : Number(rawSeq);
-      if (!Number.isFinite(target)) return "unknown";
-      const oldestLoaded = messages.reduce(
-        (min, message) => Math.min(min, message.seq),
-        Number.POSITIVE_INFINITY
+    const missKind = (): "older" | "unknown" =>
+      anchorMissKind(
+        rawSeq === null ? null : Number(rawSeq),
+        oldestLoadedSeq(messages)
       );
-      return target < oldestLoaded ? "older" : "unknown";
-    };
     const onExpire = () => setAnchorMissed(missKind());
 
     // 목록에게 먼저 묻는다 (리뷰 B1). 가상 창 밖의 행은 로드돼 있어도 DOM 에

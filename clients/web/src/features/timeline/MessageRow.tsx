@@ -78,6 +78,7 @@ import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { shouldShowHoverToolbar } from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { messageShareUrl } from "@/features/inbox/anchor";
+import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
@@ -386,12 +387,15 @@ export function MessageRow({
   // settings CopyButton uses, so the two-second 「복사됨」 receipt cannot drift.
   const canCopy = Boolean(actions) && !deleted && hasBody;
   const { copied, copy: copyMessage } = useClipboardCopy(message.body ?? "");
-  // UX-D3: a persisted row already has a HashRouter landing (`?msg=`). Failed
-  // local sends and tombstones do not. Those URLs would open a hole.
+  // UX-D3: a persisted row already has a HashRouter landing (`?msg=`+`seq=`).
+  // Failed local sends and tombstones do not. Those URLs would open a hole.
   const canCopyLink =
     Boolean(actions) && !deleted && message.state !== "failed";
   const { copied: copiedLink, copy: copyMessageLink } = useClipboardCopy(
-    messageShareUrl(message.channelId, message.id, window.location)
+    messageShareUrl(message.channelId, message.id, message.seq, {
+      origin: absoluteApiBase(),
+      pathname: window.location.pathname,
+    })
   );
   const copyState = {
     canCopy,
@@ -480,7 +484,7 @@ export function MessageRow({
       void copyMessageLink().then((ok) => {
         if (!ok) {
           setRowError(
-            "링크를 복사하지 못했습니다. 주소창의 채널 주소를 복사하세요."
+            "링크를 복사하지 못했습니다. 같은 항목을 다시 눌러 보세요."
           );
         }
       });

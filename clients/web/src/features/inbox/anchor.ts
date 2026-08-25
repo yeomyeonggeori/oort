@@ -97,20 +97,51 @@ export function messageAnchorPath(channelId: string, messageId: string): string 
  * Paste-anywhere URL for a message (UX-D3 / #1755).
  *
  * HashRouter speaks the hash, so the shareable address is origin + pathname +
- * `#` + {@link messageAnchorPath}. `search` is omitted on purpose: a capture
- * seam (`?agentwork=`) or an invite query must not ride along into a pasted
- * link. ChatShell reads `?msg=` out of that hash and jumps; the jump consumes
- * the param, so a reload after landing does not re-seek (see the header).
+ * `#` + {@link searchHitPath}. The origin is the one `absoluteApiBase()`
+ * names — "to hand someone else" — not `window.location.origin`. In a web
+ * tab those are the same; in the Tauri release shell the page origin is
+ * `tauri://localhost` and is not a URL anyone can open.
+ *
+ * Both keys travel: `msg` finds the row, `seq` lets ChatShell say *why* it
+ * missed (`anchorMissKind`). `search` on the real location is omitted on
+ * purpose: a capture seam (`?agentwork=`) or an invite query must not ride
+ * along. ChatShell consumes the params after the jump, so a reload after
+ * landing does not re-seek (see the header).
  */
 export function messageShareUrl(
   channelId: string,
   messageId: string,
+  seq: number,
   location: Pick<Location, "origin" | "pathname">
 ): string {
-  return `${location.origin}${location.pathname}#${messageAnchorPath(
+  return `${location.origin}${location.pathname}#${searchHitPath(
     channelId,
-    messageId
+    messageId,
+    seq
   )}`;
+}
+
+/**
+ * Why a jump expired. `seq` is the channel's order, so a target below the
+ * oldest loaded row is "further up, not yet fetched" as a fact. Without a
+ * seq the screen can only say it does not know.
+ */
+export function anchorMissKind(
+  targetSeq: number | null,
+  oldestLoaded: number
+): "older" | "unknown" {
+  if (targetSeq === null || !Number.isFinite(targetSeq)) return "unknown";
+  return targetSeq < oldestLoaded ? "older" : "unknown";
+}
+
+/** Oldest seq in the loaded window, or +∞ when the list is empty. */
+export function oldestLoadedSeq(
+  messages: readonly { seq: number }[]
+): number {
+  return messages.reduce(
+    (min, message) => Math.min(min, message.seq),
+    Number.POSITIVE_INFINITY
+  );
 }
 
 /**

@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  anchorMissKind,
   channelPath,
   messageAnchorPath,
   messageShareUrl,
   foldedStandInSelector,
   messageIdSelector,
   messageSelector,
+  oldestLoadedSeq,
   searchHitPath,
   watchForMessage,
   watchForMessageId,
@@ -46,26 +48,59 @@ describe("searchHitPath", () => {
 });
 
 describe("messageShareUrl", () => {
-  it("HashRouter 주소로 특정 메시지에 닿는 붙여넣기 URL을 만든다", () => {
+  const CHANNEL = "00000000-0000-7000-8000-000000000201";
+  const MESSAGE = "019F94E3-0E04-79CD-9DEE-208F47EDD9A8";
+
+  it("남에게 건넬 주소는 서버 base를 쓰고 msg와 seq를 함께 싣는다", () => {
     expect(
-      messageShareUrl(
-        "00000000-0000-7000-8000-000000000201",
-        "019F94E3-0E04-79CD-9DEE-208F47EDD9A8",
-        { origin: "https://app.oor7.com", pathname: "/" }
-      )
+      messageShareUrl(CHANNEL, MESSAGE, 147, {
+        origin: "https://app.oor7.com",
+        pathname: "/",
+      })
     ).toBe(
-      "https://app.oor7.com/#/c/00000000-0000-7000-8000-000000000201?msg=019f94e3-0e04-79cd-9dee-208f47edd9a8"
+      "https://app.oor7.com/#/c/00000000-0000-7000-8000-000000000201?msg=019f94e3-0e04-79cd-9dee-208f47edd9a8&seq=147"
     );
   });
 
-  it("실경로 쿼리는 싣지 않는다. 캡처 심이 공유 링크를 오염시키면 안 된다", () => {
-    const url = messageShareUrl(
-      "00000000-0000-7000-8000-000000000201",
-      "019f94e3-0e04-79cd-9dee-208f47edd9a8",
-      { origin: "http://127.0.0.1:5178", pathname: "/" }
+  it("Tauri 번들 origin은 건네지 않는다", () => {
+    const page = { origin: "tauri://localhost", pathname: "/" };
+    const handed = messageShareUrl(CHANNEL, MESSAGE, 147, {
+      origin: "https://app.oor7.com",
+      pathname: page.pathname,
+    });
+    expect(handed).toBe(
+      "https://app.oor7.com/#/c/00000000-0000-7000-8000-000000000201?msg=019f94e3-0e04-79cd-9dee-208f47edd9a8&seq=147"
     );
+    expect(handed).not.toContain("tauri://");
+  });
+
+  it("실경로 쿼리는 싣지 않는다. 캡처 심이 공유 링크를 오염시키면 안 된다", () => {
+    const url = messageShareUrl(CHANNEL, MESSAGE, 812, {
+      origin: "http://127.0.0.1:5178",
+      pathname: "/",
+    });
     expect(url).not.toContain("agentwork");
     expect(url.startsWith("http://127.0.0.1:5178/#/c/")).toBe(true);
+    expect(url).toContain("seq=812");
+  });
+});
+
+describe("anchorMissKind", () => {
+  it("seq가 로드된 머리보다 오래면 older다", () => {
+    expect(anchorMissKind(50, 100)).toBe("older");
+    expect(anchorMissKind(99, oldestLoadedSeq([{ seq: 100 }, { seq: 140 }]))).toBe(
+      "older"
+    );
+  });
+
+  it("seq가 없으면 unknown이다", () => {
+    expect(anchorMissKind(null, 100)).toBe("unknown");
+    expect(anchorMissKind(Number.NaN, 100)).toBe("unknown");
+  });
+
+  it("seq는 있는데 창 안에 있으면 unknown이다 — 없거나 지워진 것이다", () => {
+    expect(anchorMissKind(120, 100)).toBe("unknown");
+    expect(anchorMissKind(100, 100)).toBe("unknown");
   });
 });
 
