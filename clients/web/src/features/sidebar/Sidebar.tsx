@@ -44,7 +44,10 @@ import {
   type Directory,
 } from "@/features/workspace/useWorkspace";
 import { canCreateChannelNow } from "@momo/core/features/channels/model";
-import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
+import {
+  useCreateChannelOpen,
+  useOpenCreateChannel,
+} from "@/features/channels/useCreateChannel";
 import {
   isSurfaceProvided,
   serverSurface,
@@ -246,6 +249,7 @@ export function Sidebar({
   // 명부가 도착하기 전에는 아직 아무것도 내밀지 않는다 (R2 M5); 그동안 헤더의
   // 액션 자리는 아래에서 같은 크기의 빈 칸이 지킨다.
   const openCreateChannel = useOpenCreateChannel();
+  const createChannelOpen = useCreateChannelOpen();
   const newChannelRef = useRef<HTMLButtonElement>(null);
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
@@ -551,6 +555,7 @@ export function Sidebar({
               onCollapsedChange={(next) =>
                 setSidebarSectionCollapsed("channels", next)
               }
+              overlayOpen={createChannelOpen}
               unreadCount={channelUnread.unreadCount}
               mentionCount={channelUnread.mentionCount}
               action={

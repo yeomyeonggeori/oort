@@ -28,8 +28,9 @@ export function shouldShowSectionActions(input: {
 }
 
 /** Tab stops owned by a mounted section-action cluster. Red proof: 0 at rest
- *  on a pointer surface (the actions are not in the DOM). Called from
- *  sidebarSectionModel.test.ts — same contract as countToolbarTabStops. */
+ *  on a pointer surface (the actions are not in the DOM). Called from a
+ *  rendered SidebarSection (SidebarSection.test.tsx), same contract as
+ *  countToolbarTabStops receiving a rendered row. */
 export function countSectionActionTabStops(root: ParentNode): number {
   return Array.from(
     root.querySelectorAll<HTMLElement>("[data-section-action]")

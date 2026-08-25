@@ -1,9 +1,8 @@
-import { useState, type FocusEvent, type ReactNode } from "react";
+import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
-import { useCreateChannelOpen } from "@/features/channels/useCreateChannel";
 import {
   shouldShowSectionActions,
   type SidebarSectionId,
@@ -132,6 +131,7 @@ export function SidebarSection({
   action,
   collapsed,
   onCollapsedChange,
+  overlayOpen = false,
   unreadCount = 0,
   mentionCount = 0,
 }: {
@@ -141,6 +141,13 @@ export function SidebarSection({
   action?: ReactNode;
   collapsed: boolean;
   onCollapsedChange: (collapsed: boolean) => void;
+  /**
+   * This section's overlay, not a shell-wide flag. 채널 만들기 pins the
+   * channel header; a DM compose pins the DM header. A workspace-wide
+   * open flag wired into every section made ⌘K 채널 만들기 freeze the
+   * DM + as well (R2-1).
+   */
+  overlayOpen?: boolean;
   /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
   unreadCount?: number;
   mentionCount?: number;
@@ -151,11 +158,24 @@ export function SidebarSection({
   // Same overlay pin as MessageRow → hoverToolbarModel. The + that opened
   // 채널 만들기 must stay mounted so Radix can restore focus on close (B-1).
   // Open-state alone is not enough: the provider flips it false in the same
-  // commit that unmounts the dialog, so a hold keeps the trigger alive until
-  // the header actually blurs after restore.
-  const overlayOpen = useCreateChannelOpen();
+  // commit that unmounts the dialog, so a hold keeps the trigger alive for
+  // one frame after close (restore runs in a microtask). Blur still drops
+  // the hold as a backstop; the close transition is what actually releases
+  // it, or a ⌘K-opened dialog would pin the actions for the rest of the
+  // session (R2-1).
   const [overlayHeld, setOverlayHeld] = useState(false);
   if (overlayOpen && !overlayHeld) setOverlayHeld(true);
+  useEffect(() => {
+    if (overlayOpen || !overlayHeld) return;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (!cancelled) setOverlayHeld(false);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [overlayOpen, overlayHeld]);
   const showActions = shouldShowSectionActions({
     pointerCanHover: !touchSurface,
     headerHovered,
@@ -190,7 +210,7 @@ export function SidebarSection({
       data-collapsed={collapsed ? "" : undefined}
     >
       <div
-        className="flex h-control-sm items-center gap-1 px-2"
+        className="flex min-h-control-sm items-center gap-1 px-2"
         data-testid={`sidebar-section-${sectionId}-header`}
         onMouseEnter={() => setHeaderHovered(true)}
         onMouseLeave={() => setHeaderHovered(false)}

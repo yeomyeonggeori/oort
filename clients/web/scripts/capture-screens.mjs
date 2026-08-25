@@ -1802,15 +1802,38 @@ async function revealNewChannel(page) {
   await button.click();
 }
 
+async function sectionActionRestCounts(page) {
+  return page.evaluate(`(() => {
+    const plus = document.querySelectorAll('[data-testid="new-channel"]').length;
+    const dm = document.querySelectorAll('[data-testid="new-dm"]').length;
+    const tabStops = Array.from(
+      document.querySelectorAll('[data-section-action]')
+    ).filter((el) => !el.hasAttribute("disabled") && el.tabIndex >= 0).length;
+    return { plus, dm, tabStops };
+  })()`);
+}
+
+/** overlayHeld 해제(rAF) 와 포인터 주차를 기다린 뒤 rest 0 을 단정한다. */
+async function assertSectionActionsAtRest(page, scheme, where) {
+  await page.getByTestId("composer-input").hover();
+  await page.getByTestId("composer-input").click();
+  await page.evaluate(
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
+  );
+  const counts = await sectionActionRestCounts(page);
+  if (counts.plus !== 0 || counts.dm !== 0 || counts.tabStops !== 0) {
+    throw new Error(
+      `섹션 액션 rest ${where} ${scheme}: ${JSON.stringify(counts)} (plus/dm/tabStops 전부 0이어야 함)`
+    );
+  }
+}
+
 /**
  * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
-  const restPlus = await page.getByTestId("new-channel").count();
-  if (restPlus !== 0) {
-    throw new Error(`채널 + 가 포인터 rest 에 떠 있다 ${scheme}: ${restPlus}`);
-  }
+  await assertSectionActionsAtRest(page, scheme, "첫 줄");
 
   const restHeader = await page
     .getByTestId("sidebar-section-channels-header")
@@ -1837,6 +1860,12 @@ async function captureSidebarD4(page, scheme, shots) {
       `다이얼로그가 떠 있는데 + 가 언마운트됐다 ${scheme}: ${plusWhileOpen}`
     );
   }
+  const dmWhileHeaderDialog = await page.getByTestId("new-dm").count();
+  if (dmWhileHeaderDialog !== 0) {
+    throw new Error(
+      `채널 만들기(헤더) 중 DM 액션이 고정됐다 ${scheme}: ${dmWhileHeaderDialog}`
+    );
+  }
   await page.keyboard.press("Escape");
   await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   const plusAfterEsc = await page.evaluate(`(() => ({
@@ -1848,6 +1877,23 @@ async function captureSidebarD4(page, scheme, shots) {
       `채널 만들기 Esc 후 포커스 ${scheme}: ${plusAfterEsc.active} (new-channel, BODY 금지), + DOM ${plusAfterEsc.plus}`
     );
   }
+  await assertSectionActionsAtRest(page, scheme, "헤더 경유 왕복 후");
+
+  // R2-1: ⌘K 팔레트는 헤더를 거치지 않는다. 닫힌 뒤 hold 가 헤더 blur 를
+  // 기다리면 +·DM 이 세션 내내 rest 에 남는다.
+  await page.getByTestId("open-quick-switcher").click();
+  await page.getByTestId("quick-switcher").waitFor({ state: "visible" });
+  await page.getByTestId("switcher-create-channel").click();
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  const dmWhileCmdkDialog = await page.getByTestId("new-dm").count();
+  if (dmWhileCmdkDialog !== 0) {
+    throw new Error(
+      `채널 만들기(⌘K) 중 DM 액션이 고정됐다 ${scheme}: ${dmWhileCmdkDialog}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  await assertSectionActionsAtRest(page, scheme, "⌘K 왕복 후");
 
   await page.getByTestId("profile-card").click();
   const menu = page.getByTestId("profile-card-menu");

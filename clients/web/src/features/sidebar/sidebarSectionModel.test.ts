@@ -11,6 +11,10 @@ const sectionSource = readFileSync(
   fileURLToPath(new URL("./SidebarRow.tsx", import.meta.url)),
   "utf8"
 );
+const sidebarSource = readFileSync(
+  fileURLToPath(new URL("./Sidebar.tsx", import.meta.url)),
+  "utf8"
+);
 
 describe("shouldShowSectionActions", () => {
   const rest = {
@@ -60,15 +64,21 @@ describe("UX-HT 계약 (소스)", () => {
     expect(sectionSource).toContain("shouldShowSectionActions");
   });
 
-  it("overlayOpen 은 리터럴이 아니라 채널 만들기 열림 상태다 (B-1)", () => {
-    expect(sectionSource).toContain("useCreateChannelOpen");
+  it("overlayOpen 은 섹션 props 이고, 닫힘 전이가 hold 를 푼다 (B-1 / R2-1)", () => {
+    expect(sectionSource).not.toContain("useCreateChannelOpen");
     expect(sectionSource).toContain("overlayHeld");
     expect(sectionSource).toContain("overlayOpen: overlayOpen || overlayHeld");
+    expect(sectionSource).toContain("requestAnimationFrame");
     expect(sectionSource).not.toMatch(/overlayOpen:\s*false/);
   });
 
-  it("rest 헤더는 컨트롤 높이를 예약한다 (M-1)", () => {
-    expect(sectionSource).toContain("flex h-control-sm items-center");
+  it("rest 헤더는 컨트롤 높이를 바닥선으로 예약한다 (M-1 / R2-2)", () => {
+    expect(sectionSource).toContain(
+      'className="flex min-h-control-sm items-center gap-1 px-2"'
+    );
+    expect(sectionSource).not.toMatch(
+      /className="flex h-control-sm items-center gap-1 px-2"/
+    );
     expect(sectionSource).not.toMatch(/rounded-sm py-1 text-left text-meta/);
   });
 
@@ -91,6 +101,16 @@ describe("countSectionActionTabStops", () => {
       querySelectorAll: () => [action, disabled],
     } as unknown as ParentNode;
     expect(countSectionActionTabStops(root)).toBe(1);
+  });
+});
+
+describe("채널 만들기 오버레이 스코프 (R2-1)", () => {
+  it("전역 열림 상태는 채널 섹션에만 배선한다", () => {
+    expect(sidebarSource).toContain("useCreateChannelOpen");
+    expect(sidebarSource).toContain("overlayOpen={createChannelOpen}");
+    const dmBlock = sidebarSource.split('sectionId="dms"')[1] ?? "";
+    const dmHeader = dmBlock.slice(0, dmBlock.indexOf("</SidebarSection>"));
+    expect(dmHeader).not.toContain("overlayOpen");
   });
 });
 
