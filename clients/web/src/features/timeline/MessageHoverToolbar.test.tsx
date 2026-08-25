@@ -11,6 +11,10 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import {
+  COPY_LINK_ACTION_LABEL,
+  COPY_MESSAGE_ACTION_LABEL,
+} from "@momo/core/features/timeline/copyLabels";
+import {
   frequentEmojis,
   recordEmojiUse,
   resetEmojiFrequencyForTests,
@@ -290,8 +294,8 @@ describe("MessageHoverToolbar", () => {
     const copyLink = document.querySelector('[data-testid="menu-copy-link"]');
     expect(copy).not.toBeNull();
     expect(copyLink).not.toBeNull();
-    expect(copy?.textContent).toContain("메시지 복사");
-    expect(copyLink?.textContent).toContain("링크 복사");
+    expect(copy?.textContent).toContain(COPY_MESSAGE_ACTION_LABEL);
+    expect(copyLink?.textContent).toContain(COPY_LINK_ACTION_LABEL);
   });
 
   it("슬롯은 빈도 store 순서를 따른다", () => {

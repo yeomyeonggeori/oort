@@ -590,7 +590,7 @@ describe('#1079 N-1 — 같은 동사에 한 이름', () => {
   it('시트와 코드 상자가 한 화면에서 같은 낱말을 쓴다', () => {
     // 이 둘은 마크다운 답 하나에서 **동시에** 만날 수 있는 두 문이다.
     const sheet = codeOnly(SRC('MessageActionSheet.tsx'));
-    expect(sheet).toContain('메시지 복사하기');
+    expect(sheet).toContain('COPY_MESSAGE_ACTION_LABEL');
     expect(codeOnly(SRC('MessageBody.tsx'))).toContain('복사하기');
   });
 });

@@ -2,6 +2,10 @@ import type { MessageActionAvailability } from "@momo/core/features/timeline/mod
 import { pinActionLabel } from "@momo/core/features/timeline/pins";
 import { QUICK_REACTIONS } from "@momo/core/features/timeline/reactions";
 import { QUOTE_ACTION_LABEL } from "@momo/core/features/timeline/quote";
+import {
+  copyLinkActionLabel,
+  copyMessageActionLabel,
+} from "@momo/core/features/timeline/copyLabels";
 
 export type MessageActionItemKey =
   | `react:${string}`
@@ -39,8 +43,9 @@ export interface MessageActionCopyState {
  * they must not grow a local branch.
  *
  *   * copy        — already shipped as raw-markdown copy. Visible copy is
- *                   「메시지 복사」 so it sits next to 「링크 복사」.
- *   * copy-link   — `#/c/{ch}?msg=` already lands (ChatShell + messageAnchorPath).
+ *                   `copyMessageActionLabel` so it sits next to the link
+ *                   action; both are verb phrases, same as the phone sheet.
+ *   * copy-link   — `#/c/{ch}?msg=&seq=` already lands (ChatShell + searchHitPath).
  *   * mark unread — PUT read-state is monotone (`GREATEST`). Accrued.
  *   * remind later / report — no surface. Accrued.
  */
@@ -78,15 +83,16 @@ export function messageActionItems(
     items.push({
       key: "copy",
       testKey: "copy",
-      label: copied ? "복사됨" : "메시지 복사",
-      accessibleLabel: copied ? "메시지 복사됨" : "메시지 복사",
+      label: copyMessageActionLabel(copied),
+      accessibleLabel: copyMessageActionLabel(copied),
     });
   }
   if (canCopyLink) {
     items.push({
       key: "copy-link",
       testKey: "copy-link",
-      label: copiedLink ? "링크 복사됨" : "링크 복사",
+      label: copyLinkActionLabel(copiedLink),
+      accessibleLabel: copyLinkActionLabel(copiedLink),
     });
   }
   if (available.pin) {
@@ -123,7 +129,15 @@ export function messageActionItemsForSurface(
   return messageActionItems(available, state);
 }
 
-/** Copy receipts have to stay on screen; react-more hands off to a picker. */
+/**
+ * Copy receipts have to stay on screen. `react-more` hands off to a picker
+ * on the pointer menus (⋯ and right-click).
+ *
+ * The sheet never meets this key: `react-more` is filtered out of `regular`
+ * and its own button always `close()`s first. The name reads as a three-surface
+ * fact; it is a two-surface fact. If `regular` later includes that key, the
+ * picker would open on top of the sheet and Esc would have to fire twice.
+ */
 export function actionKeepsMenuOpen(key: MessageActionItemKey): boolean {
   return key === "copy" || key === "copy-link" || key === "react-more";
 }
