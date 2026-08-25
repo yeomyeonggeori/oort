@@ -63,6 +63,10 @@ describe("TC-1 terminal dock is observation-only UI on the existing session mode
     expect(OBSERVER).toMatch(/data-testid="terminal-dock-short"/);
     expect(DOCK).toMatch(/<TerminalShortNotice/);
     expect(DOCK_CODE).not.toMatch(/work-observer-start/);
+    expect(DOCK_CODE).toMatch(/work-observer-terminal/);
+    expect(DOCK_CODE).toMatch(/spacing-terminal-floor/);
+    expect(DOCK_CODE).not.toMatch(/terminal-dock-chrome/);
+    expect(DOCK_CODE).not.toMatch(/chrome \+ floor/);
   });
 
   it("imports lucide glyphs by static name at 16px", () => {

@@ -351,8 +351,9 @@ The channel-bottom dock (#1758) does **not** borrow `h-pane` / `h-pane-lg`
 (22 rows + measured chrome; 22 rows only when vh ≳ 784), `--spacing-terminal-dock-lg`
 800 (ask for the rest of the column), `--spacing-terminal-dock-reserve` 280
 (header + composer + strip, the **collapsed** vh cap), `--spacing-terminal-floor`
-56 (4 × 14px cells; below this the box is folded), `--spacing-terminal-dock-chrome`
-200 (tabs + observer chrome, measured at 480), `--spacing-timeline-strip` 80
+56 (4 × 14px cells; the dock folds when the **measured** box is below this,
+not against a copied chrome constant — chrome height changes with width),
+`--spacing-timeline-strip` 80
 (reserved band so the conversation does not vanish; the last item's bottom
 fragment, not a guaranteed full readable row). Utilities `terminal-dock` /
 `terminal-dock-lg` / `terminal-dock-short` / `timeline-strip` apply them;

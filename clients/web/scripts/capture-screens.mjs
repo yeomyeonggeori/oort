@@ -2396,22 +2396,26 @@ async function assertDockAboveComposer(page, where) {
 }
 
 /**
- * R2-H1/H2: 확대가 720에서 실줄을 벌고, 이득이 0이면 버튼이 disabled 이며,
- * 480에서는 정직 문장만 남고 0px 터미널 상자는 없다.
+ * R2-H1/H2 · R3-H1: 확대가 720에서 실줄을 벌고, 이득이 0이면 버튼이 disabled
+ * 이며, 짧은 창(760×480 · 폰 폭 390×560)에서는 정직 문장만 남고 0px 터미널
+ * 상자는 없다. 접힘은 크롬 상수가 아니라 상자 실높이 < floor.
  */
 async function assertDockExpandHonesty(page, where) {
   const original = page.viewportSize();
   if (!original) {
     throw new Error(`도크 확대 ${where}: 뷰포트 크기를 모른다`);
   }
+  const hasObserver = (await page.getByTestId("work-observer").count()) > 0;
   const cases = [
     { width: 1280, height: 720, expectGrow: true },
     { width: 1280, height: 800, expectGrow: true },
     { width: 1280, height: 844, expectGrow: true },
     { width: 760, height: 480, expectShort: true },
+    { width: 390, height: 560, expectShort: true },
   ];
   try {
     for (const next of cases) {
+      if (next.expectShort && !hasObserver) continue;
       await page.setViewportSize({ width: next.width, height: next.height });
       await pinViewportHeight(page, next.height);
       await page.waitForFunction(
@@ -2426,17 +2430,25 @@ async function assertDockExpandHonesty(page, where) {
         await page.getByTestId("terminal-dock-short").waitFor({ state: "visible" });
         const terminalBox = page.getByTestId("work-observer-terminal");
         if ((await terminalBox.count()) > 0 && (await terminalBox.isVisible())) {
-          throw new Error(`480에서 터미널 상자가 보인다 ${where}`);
+          throw new Error(
+            `${next.width}×${next.height}에서 터미널 상자가 보인다 ${where}`
+          );
         }
         const start = page.getByTestId("work-observer-start");
         if ((await start.count()) > 0 && (await start.isVisible())) {
-          throw new Error(`480에서 관전 시작이 보인다 ${where}`);
+          throw new Error(
+            `${next.width}×${next.height}에서 관전 시작이 보인다 ${where}`
+          );
         }
         if (!(await expand.isDisabled())) {
-          throw new Error(`480에서 확대가 활성이다 ${where}`);
+          throw new Error(
+            `${next.width}×${next.height}에서 확대가 활성이다 ${where}`
+          );
         }
         if ((await dock.getAttribute("data-expanded")) !== null) {
-          throw new Error(`480에서 data-expanded 가 붙었다 ${where}`);
+          throw new Error(
+            `${next.width}×${next.height}에서 data-expanded 가 붙었다 ${where}`
+          );
         }
         const dockH = await dock.evaluate((el) => Math.round(el.getBoundingClientRect().height));
         console.log(

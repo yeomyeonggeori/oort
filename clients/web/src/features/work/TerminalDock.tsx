@@ -86,6 +86,8 @@ export function TerminalDock({
   const [expanded, setExpanded] = useState(false);
   const expandedRef = useRef(false);
   const [short, setShort] = useState(false);
+  const shortRef = useRef(false);
+  const probedGeoRef = useRef("");
   const [canExpand, setCanExpand] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   expandedRef.current = expanded;
@@ -162,11 +164,27 @@ export function TerminalDock({
       const vh = viewportHeightPx();
       const reserve = readPx("--spacing-terminal-dock-reserve") || 280;
       const target = readPx("--spacing-terminal-dock") || 504;
-      const chrome = readPx("--spacing-terminal-dock-chrome") || 200;
       const floor = readPx("--spacing-terminal-floor") || 56;
       const strip = readPx("--spacing-timeline-strip") || 80;
       const collapsedMax = Math.min(target, vh - reserve);
-      const nextShort = collapsedMax < chrome + floor;
+      // 크롬은 폭에 따라 달라지므로 상수와 대조하지 않는다. 터미널 상자
+      // 실높이가 floor 미만이면 접고, 접힌 뒤 창이 바뀌면 한 번 펼쳐 다시 잰다.
+      const geo = `${Math.round(vh)}x${Math.round(window.innerWidth)}`;
+      const box = dock.querySelector<HTMLElement>(
+        "[data-testid='work-observer-terminal']"
+      );
+      let nextShort = false;
+      if (box) {
+        nextShort = box.getBoundingClientRect().height < floor;
+        probedGeoRef.current = geo;
+      } else if (shortRef.current) {
+        if (geo !== probedGeoRef.current) {
+          probedGeoRef.current = geo;
+          nextShort = false;
+        } else {
+          nextShort = true;
+        }
+      }
 
       const timeline = document.querySelector("[data-testid='chat-timeline']");
       const timelineH = timeline?.getBoundingClientRect().height ?? strip;
@@ -178,6 +196,7 @@ export function TerminalDock({
       const gained = dockH > collapsedMax + 1;
       const nextCanExpand = !nextShort && (isExpanded ? gained : slack > 1);
 
+      shortRef.current = nextShort;
       setShort(nextShort);
       setCanExpand(nextCanExpand);
       if (nextShort || (isExpanded && !gained && slack <= 1)) {
@@ -190,6 +209,8 @@ export function TerminalDock({
     ro.observe(dock);
     const timeline = document.querySelector("[data-testid='chat-timeline']");
     if (timeline) ro.observe(timeline);
+    const box = dock.querySelector("[data-testid='work-observer-terminal']");
+    if (box) ro.observe(box);
     window.addEventListener("resize", measure);
     window.visualViewport?.addEventListener("resize", measure);
     return () => {
@@ -197,7 +218,7 @@ export function TerminalDock({
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
     };
-  }, []);
+  }, [selectedId, short]);
 
   const shownExpanded = canExpand && expanded;
   const expandTitle = !canExpand
