@@ -2,9 +2,8 @@
 //!
 //! Deliberately narrow: this batch's routes need a listen address, a DB pool, the
 //! app JWT secret, the environment label, and the realtime URL advertised to
-//! sessions. The Swift `Config.swift` surface (provider keys, rate limits, CORS,
-//! LiveKit, …) is intentionally NOT ported here — each lands with the batch that
-//! needs it.
+//! sessions. The Swift `Config.swift` surface is ported incrementally: each
+//! subsystem's keys land with the Rust batch that consumes them.
 //!
 //! **The deployed env contract is `infra/prod/docker-compose.prod.yml`'s `api`
 //! service (:148-189), not this file** (B1.7): every key read here is spelled the
@@ -94,6 +93,10 @@ pub struct Config {
     /// need a service-account key and a shared drive. Same fail-closed posture
     /// as every other subsystem above.
     pub drive: DriveSettings,
+    /// ADR-0122 / HD-1 — LiveKit is optional as one complete unit. If any of
+    /// key, secret, or public URL is absent or invalid, all huddle routes stay
+    /// mounted and answer 503 `허들 미구성`.
+    pub livekit: Option<LiveKitConfig>,
     /// LIVE-5a / ADR-0165 증보 1 D3-2 — the oort-operated TURN relay's ephemeral
     /// credential policy. `None` on any instance that named no relay or no
     /// secret, and `None` means the display routes hand back an **empty**
@@ -114,6 +117,71 @@ pub struct Config {
     /// and `main` owns the boot log, so a warning written here would be a second
     /// place deciding what an operator hears at startup.
     pub turn_ttl_clamped_from: Option<i64>,
+}
+
+/// LiveKit token issuer settings. The API secret is intentionally private and
+/// the hand-written Debug implementation never prints credentials.
+#[derive(Clone, PartialEq, Eq)]
+pub struct LiveKitConfig {
+    api_key: String,
+    api_secret: String,
+    pub url: String,
+}
+
+impl LiveKitConfig {
+    pub fn parse(
+        api_key: Option<&str>,
+        api_secret: Option<&str>,
+        url: Option<&str>,
+    ) -> Option<Self> {
+        let api_key = nonempty(api_key)?;
+        let api_secret = nonempty(api_secret)?;
+        let url = nonempty(url)?;
+        let uri: axum::http::Uri = url.parse().ok()?;
+        let valid_scheme = uri.scheme_str().is_some_and(|scheme| {
+            ["http", "https", "ws", "wss"]
+                .iter()
+                .any(|candidate| scheme.eq_ignore_ascii_case(candidate))
+        });
+        if !valid_scheme || uri.host().is_none() {
+            return None;
+        }
+        Some(LiveKitConfig {
+            api_key: api_key.to_string(),
+            api_secret: api_secret.to_string(),
+            url: url.to_string(),
+        })
+    }
+
+    pub fn from_env() -> Option<Self> {
+        let api_key = env("MOMO_LIVEKIT_API_KEY");
+        let api_secret = env("MOMO_LIVEKIT_API_SECRET");
+        let url = env("MOMO_LIVEKIT_URL");
+        Self::parse(api_key.as_deref(), api_secret.as_deref(), url.as_deref())
+    }
+
+    pub fn api_key(&self) -> &str {
+        &self.api_key
+    }
+
+    pub fn api_secret(&self) -> &str {
+        &self.api_secret
+    }
+}
+
+impl std::fmt::Debug for LiveKitConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("LiveKitConfig")
+            .field("api_key_configured", &true)
+            .field("api_secret", &"<redacted>")
+            .field("url", &self.url)
+            .finish()
+    }
+}
+
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
 /// The workspace Drive archive's environment block (Swift
@@ -1585,6 +1653,9 @@ impl Config {
             // the whole instance down for a desktop-only concern.
             cors: CorsConfig::from_env(),
             drive,
+            // ADR-0122: optional as a complete unit. Partial or invalid input
+            // closes only the huddle surface; the rest of the server boots.
+            livekit: LiveKitConfig::from_env(),
             // LIVE-5a: never fatal, and never closing. An instance that names no
             // relay hands back an empty `ice_servers`, and the producer keeps
             // the static credential the template already carries — which is the
@@ -2144,6 +2215,48 @@ mod tests {
             rendered.contains("cent_api_key_configured: true"),
             "{rendered}"
         );
+    }
+
+    #[test]
+    fn livekit_is_configured_only_as_a_complete_valid_unit() {
+        assert!(LiveKitConfig::parse(None, None, None).is_none());
+        assert!(LiveKitConfig::parse(Some("key"), Some("secret"), None).is_none());
+        assert!(
+            LiveKitConfig::parse(Some("key"), Some("secret"), Some("localhost:7880")).is_none()
+        );
+        assert!(
+            LiveKitConfig::parse(Some("key"), Some("secret"), Some("ftp://livekit:7880")).is_none()
+        );
+        let config = LiveKitConfig::parse(
+            Some(" key "),
+            Some(" secret "),
+            Some("ws://livekit.example:7880"),
+        )
+        .expect("complete LiveKit config");
+        assert_eq!(config.api_key(), "key");
+        assert_eq!(config.api_secret(), "secret");
+        assert_eq!(config.url, "ws://livekit.example:7880");
+        assert!(
+            LiveKitConfig::parse(Some("key"), Some("secret"), Some("WSS://livekit.example"))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn livekit_debug_never_prints_credentials() {
+        let config = LiveKitConfig::parse(
+            Some("public-but-redacted-key"),
+            Some("super-secret-livekit-value"),
+            Some("wss://livekit.example"),
+        )
+        .unwrap();
+        let rendered = format!("{config:?}");
+        assert!(!rendered.contains("public-but-redacted-key"), "{rendered}");
+        assert!(
+            !rendered.contains("super-secret-livekit-value"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("api_key_configured: true"), "{rendered}");
     }
 
     #[test]

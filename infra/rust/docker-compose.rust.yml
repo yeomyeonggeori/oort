@@ -8,7 +8,7 @@
 # minimum set the Rust binaries can actually serve today:
 #
 #   postgres · centrifugo · runtime-roles · migrate · api · relay · agent-worker
-#   webhook-sender
+#   webhook-sender · livekit(profile: huddle)
 #
 # ## Overlays (#1228) — this file is the base, not the whole deployment
 #
@@ -105,6 +105,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+      start_period: 10s
+
+  # ADR-0122 / HD-1 — optional voice SFU. The base stack remains unchanged
+  # unless `--profile huddle` is selected. Credential expansion happens inside
+  # the container so an inactive profile never makes ordinary compose commands
+  # require LiveKit secrets; once selected, shell `:?` makes both values hard
+  # requirements before the server starts.
+  livekit:
+    image: livekit/livekit-server:v1.13.3
+    profiles: ["huddle"]
+    mem_limit: ${MOMO_LIVEKIT_MEM_LIMIT:-1g}
+    labels: *momo-janitor-labels
+    restart: unless-stopped
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        : "$${MOMO_LIVEKIT_API_KEY:?set MOMO_LIVEKIT_API_KEY}"
+        : "$${MOMO_LIVEKIT_API_SECRET:?set MOMO_LIVEKIT_API_SECRET}"
+        export LIVEKIT_KEYS="$${MOMO_LIVEKIT_API_KEY}: $${MOMO_LIVEKIT_API_SECRET}"
+        exec /livekit-server --config=/etc/livekit/livekit.yaml
+    environment:
+      MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
+      MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
+    ports:
+      - "127.0.0.1:${LIVEKIT_PORT:-7880}:7880"
+      - "127.0.0.1:${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
+      - "${LIVEKIT_RTC_UDP_START:-50000}-${LIVEKIT_RTC_UDP_END:-50100}:50000-50100/udp"
+    volumes:
+      - ../livekit.yaml:/etc/livekit/livekit.yaml:ro
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:7880/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
       start_period: 10s
 
   # MOMO-554 parity (prod :319): idempotent runtime-role creation / password
@@ -227,6 +264,13 @@ services:
       # (503), which is why neither line uses the `:?` required form.
       CENT_API_URL: http://centrifugo:8000/api
       CENT_API_KEY: ${CENT_API_KEY:-}
+      # ADR-0122 / HD-1. All three are one optional unit: absent/partial/invalid
+      # means every huddle route returns 503 `허들 미구성`, while the rest of the
+      # API remains available. With profile `huddle`, these credentials must
+      # equal the LiveKit service block and the URL must be client-reachable.
+      MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
+      MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
+      MOMO_LIVEKIT_URL: ${MOMO_LIVEKIT_URL:-}
       # #1534 — the two keys the 설정 › AI 연결 family needs on the *api*, both
       # absent here until now. The header above says the provider master key is
       # withheld because "no route consumes them yet"; that sentence stopped
