@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -11,7 +11,6 @@ import {
   PanelLeftClose,
   Plus,
   Search,
-  Settings,
   SquareTerminal,
   SquarePen,
   Users,
@@ -55,7 +54,8 @@ import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
-import { PresenceControl } from "./PresenceControl";
+import { ProfileCard } from "./ProfileCard";
+import { type SidebarSectionId } from "./sidebarSectionModel";
 import {
   connectionBarClass,
   connectionCopy,
@@ -143,6 +143,15 @@ export function Sidebar({
   const previousCollapsedRef = useRef(channelPaneCollapsed);
   const previousDrawerRef = useRef(asDrawer);
   const desktopToggleFocusedRef = useRef(false);
+  const [collapsedSections, setCollapsedSections] = useState<
+    Record<SidebarSectionId, boolean>
+  >({ channels: false, dms: false });
+
+  const setSectionCollapsed = (id: SidebarSectionId, next: boolean) => {
+    setCollapsedSections((current) =>
+      current[id] === next ? current : { ...current, [id]: next }
+    );
+  };
 
   const onDesktopToggleBlur = (event: React.FocusEvent<HTMLButtonElement>) => {
     const next = event.relatedTarget;
@@ -386,6 +395,30 @@ export function Sidebar({
         className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
       >
         <div className="flex items-center gap-2 border-b border-line p-2">
+          {/* Desktop-only. The control used to live under the identity row
+              (#1291); UX-D4 puts it at the top of the pane so collapse and
+              expand share one vertical seat (buzz 34·35). Icon-only: the
+              accessible name is unchanged so the shell gate still reads the
+              same aria-controls relationship. */}
+          {!asDrawer && (
+            <button
+              ref={collapsePaneRef}
+              type="button"
+              onClick={() => onChannelPaneCollapsedChange(true)}
+              onFocus={() => {
+                desktopToggleFocusedRef.current = true;
+              }}
+              onBlur={onDesktopToggleBlur}
+              aria-label="탐색 패널 접기"
+              aria-expanded="true"
+              aria-controls="sidebar-channel-pane"
+              title="탐색 패널 접기"
+              data-testid="sidebar-collapse"
+              className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <PanelLeftClose className="size-4" aria-hidden="true" />
+            </button>
+          )}
           <Button
             variant="outline"
             size="sm"
@@ -505,6 +538,9 @@ export function Sidebar({
 
             <SidebarSection
               title="채널"
+              sectionId="channels"
+              collapsed={collapsedSections.channels}
+              onCollapsedChange={(next) => setSectionCollapsed("channels", next)}
               action={
                 canCreate ? (
                   /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
@@ -516,14 +552,14 @@ export function Sidebar({
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
+                    data-section-action=""
                     className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
                   >
-                    <Plus className="size-4" />
+                    <Plus className="size-4" aria-hidden="true" />
                   </button>
                 ) : rosterSettled ? undefined : (
-                  /* 명부를 기다리는 동안 자리만 지킨다. 이 칸이 비면 헤더가
-                     18px로 줄었다가 명부가 오는 순간 28px로 뛰어, 아직
-                     아무것도 하지 않은 사람의 채널 목록이 한 번 내려앉는다. */
+                  /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
+                     때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
                   <span aria-hidden="true" className="block size-control-sm" />
                 )
               }
@@ -572,15 +608,19 @@ export function Sidebar({
             {dms.length > 0 && (
               <SidebarSection
                 title="다이렉트 메시지"
+                sectionId="dms"
+                collapsed={collapsedSections.dms}
+                onCollapsedChange={(next) => setSectionCollapsed("dms", next)}
                 action={
                   <Link
                     to="/directory"
                     aria-label="새 다이렉트 메시지 시작"
                     title="새 다이렉트 메시지 (⌘⇧K)"
                     data-testid="new-dm"
+                    data-section-action=""
                     className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
                   >
-                    <SquarePen className="size-4" />
+                    <SquarePen className="size-4" aria-hidden="true" />
                   </Link>
                 }
               >
@@ -614,59 +654,25 @@ export function Sidebar({
             Renders nothing at all unless there is something to act on. */}
         <UpdateBadge />
 
-        {/* 데스크톱 전용 텍스트+아이콘 컨트롤 (#1291). 접힌 뒤에는 이 노드가
-            패널과 함께 사라지고 WorkspaceRail의 열기 컨트롤이 같은 aria-controls
-            관계를 이어받는다. 모바일 서랍은 기존 닫기 버튼/Escape만 쓴다. */}
-        {!asDrawer && (
-          <div className="border-t border-line p-2">
-            <Button
-              ref={collapsePaneRef}
-              type="button"
-              variant="ghost"
-              size="sm"
-              onClick={() => onChannelPaneCollapsedChange(true)}
-              onFocus={() => {
-                desktopToggleFocusedRef.current = true;
-              }}
-              onBlur={onDesktopToggleBlur}
-              aria-label="탐색 패널 접기"
-              aria-expanded="true"
-              aria-controls="sidebar-channel-pane"
-              title="탐색 패널 접기"
-              data-testid="sidebar-collapse"
-              className="w-full justify-start text-ink-muted"
-            >
-              <PanelLeftClose aria-hidden="true" />
-              탐색 패널 접기
-            </Button>
-          </div>
-        )}
-
         {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
             ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
             the separation real rather than asserted:
-            • the presence control (③) is the avatar: the declared status
-              (auto/away/dnd) as a ROUND badge on the avatar, the universally read
-              presence spot. It is the only thing on this row that is ever green.
-            • the connection indicator (①, moved here in 6a) is a BAR next to the
-              gear, and only when the rail is unhealthy. It used to be an 8px
-              `rounded-sm` dot, which the radius clamp rendered as a circle: two
-              circles on one row, contradicting each other at away/dnd (amber
-              badge, green dot). Now health is silence and trouble is a bar, so
-              the two indicators cannot be read as one signal at any pixel size.
-            Nothing is lost by the silence: ConnectionBanner carries the
-            load-bearing disconnect story shell-wide on every viewport. */}
+            • the presence badge (③) is on the avatar: the declared status
+              (auto/away/dnd) as a ROUND badge, the universally read presence
+              spot. It is the only thing on this row that is ever green.
+            • the connection indicator (①, moved here in 6a) is a BAR next to
+              the card, and only when the rail is unhealthy.
+            UX-D4 (#1756) made the whole row the profile-card trigger: status
+            radios, the rail's 워크스페이스 추가, and settings live in that
+            card. The collapse control moved to the pane header (buzz 34·35). */}
         <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
-          <PresenceControl
+          <ProfileCard
             workspaceId={workspaceId}
             selfMemberId={session.member.id}
             selfMember={selfMember}
             selfName={selfName}
             connected={connStatus === "connected"}
           />
-          <span className="min-w-0 flex-1 truncate text-body" data-testid="self-name">
-            {selfName}
-          </span>
           {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
               the accessible name both derive from the status, and while connected
               the element is not rendered at all. 12x4 bar = the workspace rail's
@@ -686,15 +692,6 @@ export function Sidebar({
             />
           )}
           <ShortcutHelpDialog />
-          <Link
-            to="/settings"
-            aria-label="설정 열기"
-            title="설정 (⌘,)"
-            data-testid="nav-settings"
-            className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <Settings className="size-4" />
-          </Link>
         </div>
       </div>
     </div>

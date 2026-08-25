@@ -1,6 +1,12 @@
-import type { ReactNode } from "react";
+import { useState, type FocusEvent, type ReactNode } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
+import {
+  shouldShowSectionActions,
+  type SidebarSectionId,
+} from "./sidebarSectionModel";
 
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
@@ -109,25 +115,93 @@ export function SidebarRow({
   );
 }
 
-/** Section header. Sentence case, no uppercase-tracking micro label. */
+/**
+ * Section header. Sentence case, no uppercase-tracking micro label.
+ *
+ * Collapse is always mounted (a keyboard user reaches it without hovering).
+ * Create/overflow actions follow the UX-HT contract: conditional render, never
+ * an opacity/visibility hide. Pointer rest shows none; hover, `:focus-visible`,
+ * an open overlay, or a touch surface (`hover: none`) shows the real actions
+ * only.
+ */
 export function SidebarSection({
   title,
+  sectionId,
   children,
   action,
+  collapsed,
+  onCollapsedChange,
 }: {
   title: string;
+  sectionId: SidebarSectionId;
   children: ReactNode;
   action?: ReactNode;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
 }) {
+  const touchSurface = useHoverNone();
+  const [headerHovered, setHeaderHovered] = useState(false);
+  const [headerKeyboardFocused, setHeaderKeyboardFocused] = useState(false);
+  const showActions = shouldShowSectionActions({
+    pointerCanHover: !touchSurface,
+    headerHovered,
+    headerKeyboardFocused,
+    overlayOpen: false,
+  });
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const listId = `sidebar-section-${sectionId}-list`;
+
+  const onHeaderFocus = (event: FocusEvent<HTMLDivElement>) => {
+    // Pointer click focuses the collapse button but must not paint a ring or
+    // reveal hover actions (#1743 B-4 / UX-HT 포인터·키보드 분리). Only a
+    // keyboard stop (`:focus-visible`) opens the hover cluster.
+    const target = event.target;
+    if (target instanceof HTMLElement && target.matches(":focus-visible")) {
+      setHeaderKeyboardFocused(true);
+    }
+  };
+  const onHeaderBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setHeaderKeyboardFocused(false);
+  };
+
   return (
-    <section className="flex flex-col gap-1 px-2 py-2">
-      <div className="flex items-center justify-between gap-2 px-2">
-        <h2 className="text-meta font-medium text-ink-muted">
-          {title}
+    <section
+      className="flex flex-col gap-1 px-2 py-2"
+      data-testid={`sidebar-section-${sectionId}`}
+      data-collapsed={collapsed ? "" : undefined}
+    >
+      <div
+        className="flex items-center gap-1 px-2"
+        data-testid={`sidebar-section-${sectionId}-header`}
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
+        onFocusCapture={onHeaderFocus}
+        onBlurCapture={onHeaderBlur}
+      >
+        <h2 className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => onCollapsedChange(!collapsed)}
+            aria-expanded={!collapsed}
+            aria-controls={listId}
+            aria-label={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
+            title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
+            data-testid={`section-collapse-${sectionId}`}
+            className="flex w-full min-w-0 items-center gap-1 rounded-sm py-1 text-left text-meta font-medium text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          >
+            <Chevron className="size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{title}</span>
+          </button>
         </h2>
-        {action}
+        {showActions ? action : null}
       </div>
-      <ul className="flex flex-col">{children}</ul>
+      {collapsed ? null : (
+        <ul id={listId} className="flex flex-col">
+          {children}
+        </ul>
+      )}
     </section>
   );
 }

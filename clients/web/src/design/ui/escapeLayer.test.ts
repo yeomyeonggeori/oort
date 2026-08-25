@@ -48,7 +48,7 @@ describe("escape layer stack", () => {
     expect(runTopEscapeLayer(false)).toBe(false);
   });
 
-  it("다이얼로그가 열려 있으면 어느 층도 받지 않는다", () => {
+  it("다이얼로그·메뉴가 열려 있으면 어느 층도 받지 않는다", () => {
     const drawer = vi.fn();
     pushEscapeLayer({ handle: drawer });
     expect(runTopEscapeLayer(true)).toBe(false);

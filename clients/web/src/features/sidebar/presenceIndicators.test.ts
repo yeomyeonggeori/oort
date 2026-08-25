@@ -25,6 +25,10 @@ const presenceControl = readFileSync(
   new URL("./PresenceControl.tsx", import.meta.url),
   "utf8"
 );
+const profileCard = readFileSync(
+  new URL("./ProfileCard.tsx", import.meta.url),
+  "utf8"
+);
 
 /** 고정 스케일의 한 단계(px). 표에 없는 단계는 클래스만 있고 CSS 규칙이 없다. */
 function spacingStep(step: string): number {
@@ -69,18 +73,18 @@ describe("두 표시는 모양이 다르다 (H1)", () => {
 });
 
 describe("상태 트리거는 이웃과 같은 크기로 눌린다 (H2)", () => {
-  it("설정 톱니와 같은 tap-target 을 쓴다", () => {
-    // 톱니는 이미 이 유틸을 쓴다. 트리거만 24x24로 남으면 같은 줄에서 엄지가
-    // 노리는 두 컨트롤이 서로 다른 확률로 눌린다.
-    expect(sidebar).toContain("tap-target");
-    expect(presenceControl).toContain('"tap-target flex size-6 shrink-0');
+  it("프로필 카드 전체가 tap-target 이다", () => {
+    // 예전 트리거는 아바타 24×24 이고 옆 톱니가 44px 이었다. UX-D4 는 행
+    // 전체를 트리거로 올려 그 불일치를 없앤다.
+    expect(profileCard).toContain("tap-target flex min-w-0 flex-1");
+    expect(presenceControl).not.toContain('"tap-target flex size-6 shrink-0');
   });
 
   it("배지는 버튼이 아니라 안쪽 아바타에 붙는다", () => {
     // 이것이 H2의 함정이다: 버튼만 44px로 키우면 버튼 모서리에 앵커된 배지가
     // 24px 아바타에서 떨어져 허공에 뜬다. 앵커는 아바타 span 이어야 한다.
     expect(presenceControl).toContain(
-      '"relative flex size-6 items-center justify-center rounded-sm bg-surface-hover'
+      '"relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover'
     );
     expect(presenceControl).toContain("absolute bottom-0 right-0 size-2");
   });
@@ -122,5 +126,21 @@ describe("상태 메뉴는 하나를 고르는 자리다 (M1)", () => {
     // 한쪽만 고쳐도 테스트는 전부 초록이다(PRESENCE_OPTIONS 가 M2 에서 겪은 그 결함).
     expect(presenceControl).toContain("PRESENCE_MENU_LABEL");
     expect(presenceControl).not.toContain("내 상태");
+  });
+});
+
+describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
+  it("서브메뉴를 들이지 않고 레일의 워크스페이스 추가를 연다", () => {
+    expect(profileCard).not.toContain("DropdownMenuSub");
+    expect(profileCard).toContain("useOpenAddWorkspace");
+    expect(profileCard).toContain("워크스페이스 추가");
+    expect(profileCard).not.toContain("전환");
+    expect(profileCard).not.toMatch(/["'`]Send feedback["'`]/);
+  });
+
+  it("설정은 카드 안의 실존 라우트다", () => {
+    expect(profileCard).toContain('data-testid="nav-settings"');
+    expect(profileCard).toContain('navigate("/settings")');
+    expect(sidebar).not.toContain('data-testid="nav-settings"');
   });
 });

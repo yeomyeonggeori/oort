@@ -102,21 +102,6 @@ export function WorkspaceRail({
         )}
       </span>
 
-      {/* [+] 는 워크스페이스를 추가한다 (#4a-2). 셸이 소유한 다이얼로그를 액션
-          자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
-          을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
-          "현재"로 오인되지 않는다. */}
-      <button
-        type="button"
-        onClick={openAddWorkspace}
-        aria-label="워크스페이스 추가"
-        title="워크스페이스 추가"
-        data-testid="add-workspace"
-        className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-      >
-        <Plus className="size-6" />
-      </button>
-
       {showChannelPaneExpand && (
         <button
           ref={channelPaneExpandRef}
@@ -129,12 +114,27 @@ export function WorkspaceRail({
           aria-controls="sidebar-channel-pane"
           title="탐색 패널 열기"
           data-testid="sidebar-expand"
-          className="mt-auto flex size-rail-tile flex-col items-center justify-center gap-px rounded-md text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+          className="flex size-rail-tile flex-col items-center justify-center gap-px rounded-md text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
         >
           <PanelLeftOpen className="size-4" aria-hidden="true" />
           <span className="text-timestamp">열기</span>
         </button>
       )}
+
+      {/* [+] 는 워크스페이스를 추가한다 (#4a-2). 셸이 소유한 다이얼로그를 액션
+          자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
+          을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
+          "현재"로 오인되지 않는다. */}
+      <button
+        type="button"
+        onClick={openAddWorkspace}
+        aria-label="워크스페이스 추가"
+        title="워크스페이스 추가"
+        data-testid="add-workspace"
+        className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+      >
+        <Plus className="size-6" aria-hidden="true" />
+      </button>
 
       {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
           "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,
