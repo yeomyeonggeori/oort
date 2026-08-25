@@ -1242,6 +1242,21 @@ export function ObserverTerminal({
   );
 }
 
+/** 가로 `notice === "folded"` 와 같은 문법의 세로 바닥 (#1758 R2-H2). */
+export const TERMINAL_SHORT_COPY =
+  "창이 낮아 터미널을 접었습니다. 창을 높이면 펼쳐집니다.";
+
+export function TerminalShortNotice() {
+  return (
+    <p
+      className="px-4 py-2 text-meta text-ink-muted"
+      data-testid="terminal-dock-short"
+    >
+      {TERMINAL_SHORT_COPY}
+    </p>
+  );
+}
+
 /**
  * One half of the scope control. `aria-pressed` rather than two radio inputs:
  * both options are actions the owner takes, and the pressed one is the state.

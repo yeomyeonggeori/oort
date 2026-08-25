@@ -2276,6 +2276,26 @@ async function assertComposerVisible(page, where) {
   );
 }
 
+async function pinViewportHeight(page, height) {
+  await page.evaluate((nextHeight) => {
+    document.documentElement.style.setProperty(
+      "--app-viewport-height",
+      `${nextHeight}px`
+    );
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+  }, height);
+}
+
+/** N-4: px 문자열로 얼리지 않는다. 변수를 걷어 트래커가 visualViewport 로 다시 쓴다. */
+async function unpinViewportHeight(page) {
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty("--app-viewport-height");
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
 /**
  * TC-1 (#1758 B-1): 도크가 컴포저를 덮지 않는 것만으로는 부족하다. 800px 창에서
  * 컴포저가 뷰포트 밖으로 나가도 그 경계 단정은 참이었다. 자는 「컴포저 rect ⊂
@@ -2292,14 +2312,7 @@ async function assertDockAboveComposer(page, where) {
       // 폰 셸은 `--app-viewport-height`를 visualViewport에서 받아 쓴다. Playwright
       // 의 setViewportSize 직후에는 그 변수가 직전 높이에 남아 컴포저가 옛 좌표에
       // 서 있는 경합이 있다. 트래커가 쓸 값과 같은 픽셀을 맞춘 뒤 두 프레임을 기다린다.
-      await page.evaluate((nextHeight) => {
-        document.documentElement.style.setProperty(
-          "--app-viewport-height",
-          `${nextHeight}px`
-        );
-        window.visualViewport?.dispatchEvent(new Event("resize"));
-        window.dispatchEvent(new Event("resize"));
-      }, height);
+      await pinViewportHeight(page, height);
       await page.waitForFunction(
         (nextHeight) => {
           const composer = document.querySelector('[data-testid="composer"]');
@@ -2378,12 +2391,131 @@ async function assertDockAboveComposer(page, where) {
     }
   } finally {
     await page.setViewportSize(original);
-    await page.evaluate((nextHeight) => {
-      document.documentElement.style.setProperty(
-        "--app-viewport-height",
-        `${nextHeight}px`
+    await unpinViewportHeight(page);
+  }
+}
+
+/**
+ * R2-H1/H2: 확대가 720에서 실줄을 벌고, 이득이 0이면 버튼이 disabled 이며,
+ * 480에서는 정직 문장만 남고 0px 터미널 상자는 없다.
+ */
+async function assertDockExpandHonesty(page, where) {
+  const original = page.viewportSize();
+  if (!original) {
+    throw new Error(`도크 확대 ${where}: 뷰포트 크기를 모른다`);
+  }
+  const cases = [
+    { width: 1280, height: 720, expectGrow: true },
+    { width: 1280, height: 800, expectGrow: true },
+    { width: 1280, height: 844, expectGrow: true },
+    { width: 760, height: 480, expectShort: true },
+  ];
+  try {
+    for (const next of cases) {
+      await page.setViewportSize({ width: next.width, height: next.height });
+      await pinViewportHeight(page, next.height);
+      await page.waitForFunction(
+        (nextHeight) => window.innerHeight === nextHeight,
+        next.height,
+        { timeout: 5_000 }
       );
-    }, original.height);
+      const expand = page.getByTestId("terminal-dock-expand");
+      const dock = page.getByTestId("terminal-dock");
+      await dock.waitFor({ state: "visible" });
+      if (next.expectShort) {
+        await page.getByTestId("terminal-dock-short").waitFor({ state: "visible" });
+        const terminalBox = page.getByTestId("work-observer-terminal");
+        if ((await terminalBox.count()) > 0 && (await terminalBox.isVisible())) {
+          throw new Error(`480에서 터미널 상자가 보인다 ${where}`);
+        }
+        const start = page.getByTestId("work-observer-start");
+        if ((await start.count()) > 0 && (await start.isVisible())) {
+          throw new Error(`480에서 관전 시작이 보인다 ${where}`);
+        }
+        if (!(await expand.isDisabled())) {
+          throw new Error(`480에서 확대가 활성이다 ${where}`);
+        }
+        if ((await dock.getAttribute("data-expanded")) !== null) {
+          throw new Error(`480에서 data-expanded 가 붙었다 ${where}`);
+        }
+        const dockH = await dock.evaluate((el) => Math.round(el.getBoundingClientRect().height));
+        console.log(
+          `  dock expand ${where} @${next.width}×${next.height}: 접힘 문장 · 확대 disabled · 도크 ${dockH}px`
+        );
+        continue;
+      }
+      const geo = await page.evaluate(() => {
+        const dockEl = document.querySelector('[data-testid="terminal-dock"]');
+        const timeline = document.querySelector('[data-testid="chat-timeline"]');
+        const strip = timeline
+          ? parseFloat(getComputedStyle(timeline).minHeight) || 0
+          : 0;
+        return {
+          dockH: dockEl ? dockEl.getBoundingClientRect().height : 0,
+          timelineH: timeline ? timeline.getBoundingClientRect().height : 0,
+          strip,
+        };
+      });
+      const slack = geo.timelineH - geo.strip;
+      const before = geo.dockH;
+      if (slack <= 1) {
+        if (!(await expand.isDisabled())) {
+          throw new Error(
+            `띠에 여유 없는데 확대가 활성이다 ${where} @${next.height}: 타임라인 ${Math.round(geo.timelineH)}px`
+          );
+        }
+        if ((await dock.getAttribute("data-expanded")) !== null) {
+          throw new Error(`이득 0인데 data-expanded 가 붙었다 ${where} @${next.height}`);
+        }
+        console.log(
+          `  dock expand ${where} @${next.width}×${next.height}: 여유 0 · 확대 disabled · 도크 ${Math.round(before)}px`
+        );
+        continue;
+      }
+      if (await expand.isDisabled()) {
+        throw new Error(
+          `여유 ${Math.round(slack)}px 있는데 확대가 비활성이다 ${where} @${next.height}`
+        );
+      }
+      await expand.click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-testid="terminal-dock"]')
+            ?.hasAttribute("data-expanded") === true,
+        null,
+        { timeout: 3_000 }
+      );
+      const after = await dock.evaluate((el) => el.getBoundingClientRect().height);
+      if (next.expectGrow && after <= before + 1) {
+        throw new Error(
+          `확대가 높이를 바꾸지 않았다 ${where} @${next.height}: ${Math.round(before)} -> ${Math.round(after)}`
+        );
+      }
+      console.log(
+        `  dock expand ${where} @${next.width}×${next.height}: ${Math.round(before)} → ${Math.round(after)} (Δ${Math.round(after - before)})`
+      );
+      await expand.click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-testid="terminal-dock"]')
+            ?.hasAttribute("data-expanded") !== true,
+        null,
+        { timeout: 3_000 }
+      );
+    }
+  } finally {
+    await page.setViewportSize(original);
+    await unpinViewportHeight(page);
+    await page.waitForFunction(
+      () => {
+        const dock = document.querySelector('[data-testid="terminal-dock"]');
+        return Boolean(dock) && !dock.hasAttribute("data-short");
+      },
+      null,
+      { timeout: 5_000 }
+    );
   }
 }
 
@@ -4240,6 +4372,8 @@ async function captureMobile(browser, scheme) {
   await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
   await assertComposerVisible(page, `terminal dock ${scheme}`);
   await assertDockAboveComposer(page, `terminal dock ${scheme}`);
+  await assertDockExpandHonesty(page, `terminal dock ${scheme}`);
+  await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
   await assertNoHorizontalOverflow(page, `terminal dock ${scheme}`);
   await assertTapTargets(page, `terminal dock ${scheme}`);
   await shoot(page, "terminal-dock");
@@ -6114,6 +6248,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     await assertNoHorizontalOverflow(page, `terminal dock ${name} ${scheme}`);
     await assertComposerVisible(page, `terminal dock ${name} ${scheme}`);
     await assertDockAboveComposer(page, `terminal dock ${name} ${scheme}`);
+    await assertDockExpandHonesty(page, `terminal dock ${name} ${scheme}`);
     const path = `${OUT_DIR}/terminal-dock-${name}-${scheme}.png`;
     await page.screenshot({ path });
     shots.push(path);
@@ -6188,15 +6323,6 @@ async function captureTerminalDockScenes(browser, scheme) {
       }
       await page.getByTestId("work-observer").waitFor({ state: "visible" });
       const dock = page.getByTestId("terminal-dock");
-      const before = await dock.evaluate((el) => el.getBoundingClientRect().height);
-      await page.getByTestId("terminal-dock-expand").click();
-      if ((await dock.getAttribute("data-expanded")) === null) {
-        throw new Error(`확대 뒤 data-expanded가 없다 ${scheme}`);
-      }
-      const after = await dock.evaluate((el) => el.getBoundingClientRect().height);
-      if (after <= before) {
-        throw new Error(`확대가 높이를 바꾸지 않았다 ${scheme}: ${before} -> ${after}`);
-      }
       await page.getByTestId("terminal-dock-close").click();
       await dock.waitFor({ state: "detached" });
       await page.waitForFunction(
@@ -6204,7 +6330,6 @@ async function captureTerminalDockScenes(browser, scheme) {
       );
       await openDock(page);
       await tabs.nth(1).waitFor({ state: "visible" });
-      await page.getByTestId("terminal-dock-expand").click();
     }
   );
 

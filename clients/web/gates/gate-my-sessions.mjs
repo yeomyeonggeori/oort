@@ -447,9 +447,9 @@ async function installRoutes(context, state) {
   });
 }
 
-async function loginAndOpenPanel(context) {
+async function loginAndOpenPanel(context, options = {}) {
   const page = await loginPage(context);
-  await openWorkPanelViaConsole(page);
+  await openWorkPanelViaConsole(page, options);
   return page;
 }
 
@@ -1106,7 +1106,9 @@ async function assertTransitionBeforeList(context, state) {
 async function assertTerminalState(context, state, testId) {
   state.mode = testId;
   state.hostDelayMs = 0;
-  const page = await loginAndOpenPanel(context);
+  const page = await loginAndOpenPanel(context, {
+    allowHashFallback: testId === "sessions-empty" || testId === "error",
+  });
   await page.getByTestId("work-scope-mine").click();
   if (testId === "hosts-empty") {
     const rows = page.getByTestId("my-work-session-row");

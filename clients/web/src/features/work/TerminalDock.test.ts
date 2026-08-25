@@ -50,6 +50,19 @@ describe("TC-1 terminal dock is observation-only UI on the existing session mode
     expect(DOCK_CODE).not.toMatch(/h-pane/);
     expect(DOCK).toMatch(/aria-label="터미널 크게 보기"/);
     expect(DOCK).toMatch(/headingLevel=\{2\}/);
+    expect(DOCK_CODE).toMatch(/disabled=\{!canExpand\}/);
+    expect(DOCK_CODE).toMatch(/shownExpanded/);
+    expect(DOCK_CODE).toMatch(/terminal-dock-short/);
+  });
+
+  it("folds the terminal into one honest sentence below the named floor", () => {
+    expect(OBSERVER).toMatch(/TERMINAL_SHORT_COPY/);
+    expect(OBSERVER).toMatch(
+      /창이 낮아 터미널을 접었습니다\. 창을 높이면 펼쳐집니다\./
+    );
+    expect(OBSERVER).toMatch(/data-testid="terminal-dock-short"/);
+    expect(DOCK).toMatch(/<TerminalShortNotice/);
+    expect(DOCK_CODE).not.toMatch(/work-observer-start/);
   });
 
   it("imports lucide glyphs by static name at 16px", () => {

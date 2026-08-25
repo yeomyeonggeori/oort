@@ -706,7 +706,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
   // A remount can reproduce text and geometry but cannot reproduce these
   // runtime-only markers, so their survival proves the same subtree remained.
   // TC-1 (#1758): 헤더는 도크다. WorkPanel 은 작업 콘솔 경유.
-  await openWorkPanelViaConsole(page);
+  await openWorkPanelViaConsole(page, { allowHashFallback: true });
   const workPanel = page.getByTestId("work-panel");
   await workPanel.waitFor({ state: "visible" });
   if (size.width >= 900) {

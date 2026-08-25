@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ChevronsUpDown, X } from "lucide-react";
 import { cn } from "@/design/lib/cn";
@@ -12,8 +12,27 @@ import {
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
-import { ObserverTerminal } from "./ObserverTerminal";
+import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
 import { useSession } from "@/app/session";
+
+function readPx(name: string): number {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function viewportHeightPx(): number {
+  // `--app-viewport-height` 의 기본값은 `100dvh` 라 parseFloat 가 100 이 된다.
+  // px 로 덮인 값만 믿고, 아니면 창 높이를 본다.
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--app-viewport-height")
+    .trim();
+  if (raw.endsWith("px")) {
+    const n = parseFloat(raw);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return window.visualViewport?.height || window.innerHeight;
+}
 
 // =============================================================================
 // 채널 하단 터미널 도크 (TC-1 / #1758).
@@ -65,7 +84,11 @@ export function TerminalDock({
   const dockRef = useRef<HTMLElement>(null);
   const tabListRef = useRef<HTMLDivElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const expandedRef = useRef(false);
+  const [short, setShort] = useState(false);
+  const [canExpand, setCanExpand] = useState(true);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  expandedRef.current = expanded;
 
   const sessions = useMemo(
     () =>
@@ -131,6 +154,58 @@ export function TerminalDock({
   const pending = sessionsQuery.isPending && sessionsQuery.data === undefined;
   const failed = sessionsQuery.isError && sessionsQuery.data === undefined;
 
+  useLayoutEffect(() => {
+    const dock = dockRef.current;
+    if (!dock) return;
+
+    const measure = () => {
+      const vh = viewportHeightPx();
+      const reserve = readPx("--spacing-terminal-dock-reserve") || 280;
+      const target = readPx("--spacing-terminal-dock") || 504;
+      const chrome = readPx("--spacing-terminal-dock-chrome") || 200;
+      const floor = readPx("--spacing-terminal-floor") || 56;
+      const strip = readPx("--spacing-timeline-strip") || 80;
+      const collapsedMax = Math.min(target, vh - reserve);
+      const nextShort = collapsedMax < chrome + floor;
+
+      const timeline = document.querySelector("[data-testid='chat-timeline']");
+      const timelineH = timeline?.getBoundingClientRect().height ?? strip;
+      const slack = timelineH - strip;
+      const dockH = dock.getBoundingClientRect().height;
+      const isExpanded = expandedRef.current;
+      // 확대가 실제로 벌 게 없으면 눌림을 거둔다. 이미 확대해서 띠까지
+      // 가져간 자리(dock > 접힘 상한)는 그 자체가 이득이라 유지한다.
+      const gained = dockH > collapsedMax + 1;
+      const nextCanExpand = !nextShort && (isExpanded ? gained : slack > 1);
+
+      setShort(nextShort);
+      setCanExpand(nextCanExpand);
+      if (nextShort || (isExpanded && !gained && slack <= 1)) {
+        setExpanded(false);
+      }
+    };
+
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(dock);
+    const timeline = document.querySelector("[data-testid='chat-timeline']");
+    if (timeline) ro.observe(timeline);
+    window.addEventListener("resize", measure);
+    window.visualViewport?.addEventListener("resize", measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener("resize", measure);
+      window.visualViewport?.removeEventListener("resize", measure);
+    };
+  }, []);
+
+  const shownExpanded = canExpand && expanded;
+  const expandTitle = !canExpand
+    ? short
+      ? "창이 낮아 터미널을 접었습니다"
+      : "타임라인이 이미 최소입니다"
+    : undefined;
+
   return (
     <section
       ref={dockRef}
@@ -138,11 +213,16 @@ export function TerminalDock({
       id="channel-terminal-dock"
       aria-label="터미널"
       data-testid="terminal-dock"
-      data-expanded={expanded ? "" : undefined}
+      data-expanded={shownExpanded ? "" : undefined}
+      data-short={short ? "" : undefined}
       onKeyDown={onDockKeyDown}
       className={cn(
         "flex flex-col border-t border-line bg-surface outline-none focus-visible:focus-ring",
-        expanded ? "terminal-dock-lg" : "terminal-dock"
+        short
+          ? "terminal-dock-short"
+          : shownExpanded
+            ? "terminal-dock-lg"
+            : "terminal-dock"
       )}
     >
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-2">
@@ -155,6 +235,8 @@ export function TerminalDock({
             data-testid="terminal-dock-tabs"
             onKeyDown={onTabListKeyDown}
             className="scrollbar-visible flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1"
+            // N-3: 헤드리스 크로미움은 이 막대를 0px 로 숨긴다. 유틸은 정상이고
+            // artifacts/design 캡처에는 막대가 영원히 안 나온다.
           >
             {sessions.map((session) => {
               const selectedTab = uuidEq(session.id, selectedId ?? undefined);
@@ -193,11 +275,16 @@ export function TerminalDock({
         )}
         <button
           type="button"
-          onClick={() => setExpanded((current) => !current)}
-          aria-pressed={expanded}
+          disabled={!canExpand}
+          onClick={() => {
+            if (!canExpand) return;
+            setExpanded((current) => !current);
+          }}
+          aria-pressed={shownExpanded}
           aria-label="터미널 크게 보기"
+          title={expandTitle}
           data-testid="terminal-dock-expand"
-          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
         >
           <ChevronsUpDown aria-hidden="true" className="size-4" />
         </button>
@@ -212,7 +299,14 @@ export function TerminalDock({
         </button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        data-testid="terminal-dock-body"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden"
+      >
+        {short ? (
+          <TerminalShortNotice />
+        ) : (
+          <>
         {offline && (
           <InlineBanner
             tone="neutral"
@@ -269,6 +363,8 @@ export function TerminalDock({
               headingLevel={2}
             />
           </div>
+        )}
+          </>
         )}
       </div>
     </section>

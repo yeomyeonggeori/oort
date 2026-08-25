@@ -254,6 +254,18 @@ async function main() {
       await page.getByTestId("work-observer-start").click();
       await page.locator(".xterm").waitFor({ state: "attached", timeout: 15_000 });
       await page.waitForTimeout(300);
+      const scrollMount = await page.evaluate(() => {
+        const viewport = document.querySelector(".xterm-viewport");
+        return {
+          attached: Boolean(viewport),
+          hasScrollX: viewport?.hasAttribute("data-scroll-x") ?? false,
+        };
+      });
+      if (!scrollMount.attached || !scrollMount.hasScrollX) {
+        throw new Error(
+          `xterm-viewport 에 data-scroll-x 가 없다: ${JSON.stringify(scrollMount)}`
+        );
+      }
 
       const violations = await page.evaluate(() => window.__momoCspViolations ?? []);
       if (

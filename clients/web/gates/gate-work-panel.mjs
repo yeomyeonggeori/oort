@@ -868,7 +868,7 @@ async function captureWorkPaneShots(browser) {
       await installRealtimeSocket(page);
       await installRoutes(context, CO_OPEN_SCENARIO);
       await login(page);
-      await openWorkPanelViaConsole(page);
+      await openWorkPanelViaConsole(page, { allowHashFallback: true });
       // 목록이 자리를 잡은 뒤에 찍는다. 골격 막대가 서 있는 순간을 찍으면 두 번
       // 돌릴 때마다 다른 판이 나오고, 전후 비교가 조명 비교가 된다.
       await page.getByTestId("work-panel-empty").waitFor();
@@ -1022,7 +1022,7 @@ async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARI
     });
   }
 
-  await openWorkPanelViaConsole(page);
+  await openWorkPanelViaConsole(page, { allowHashFallback: true });
   await settlePlaceholder(page);
 
   // red seam (#1422): 절 단위 생략을 **끄지 않고**, 그 결과를 되돌린다 — 상자에
@@ -1509,7 +1509,7 @@ async function exerciseHeadClauseBand(browser, width) {
     });
   }
 
-  await openWorkPanelViaConsole(page);
+  await openWorkPanelViaConsole(page, { allowHashFallback: true });
   await settlePlaceholder(page);
 
   const geometry = await page.evaluate(() => {
@@ -1637,7 +1637,7 @@ async function exerciseProbeRuler(browser, wideWidth, width) {
   await installRealtimeSocket(page);
   await installRoutes(context, CO_OPEN_SCENARIO);
   await login(page);
-  await openWorkPanelViaConsole(page);
+  await openWorkPanelViaConsole(page, { allowHashFallback: true });
   await settlePlaceholder(page);
 
   const before = await page.evaluate(() => {
@@ -1803,7 +1803,7 @@ async function captureClauseShots(browser) {
       // 900px 에서만 pane 을 연다: 그 판이 이 티켓이 물려받은 판이고(#1418),
       // 390 과 1200 은 pane 없이도 각각 「가장 좁은 상자」와 「넉넉한 상자」다.
       if (width === 900) {
-        await openWorkPanelViaConsole(page);
+        await openWorkPanelViaConsole(page, { allowHashFallback: true });
       }
       await page.setViewportSize({ width, height: 800 });
       await page.locator("#composer-input").waitFor();

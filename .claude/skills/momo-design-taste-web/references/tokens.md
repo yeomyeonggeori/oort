@@ -348,11 +348,16 @@ window in which a command and the output it produced are visible together.
 
 The channel-bottom dock (#1758) does **not** borrow `h-pane` / `h-pane-lg`
 (those are widths). Named vertical measures: `--spacing-terminal-dock` 504
-(22 rows + measured chrome), `--spacing-terminal-dock-lg` 800 (ask for the
-rest of the column), `--spacing-terminal-dock-reserve` 280 (header + composer +
-strip, the vh cap), `--spacing-timeline-strip` 80 (one readable message row).
-Utilities `terminal-dock` / `terminal-dock-lg` / `timeline-strip` apply them;
-the dock yields first so the composer stays inside the viewport.
+(22 rows + measured chrome; 22 rows only when vh ≳ 784), `--spacing-terminal-dock-lg`
+800 (ask for the rest of the column), `--spacing-terminal-dock-reserve` 280
+(header + composer + strip, the **collapsed** vh cap), `--spacing-terminal-floor`
+56 (4 × 14px cells; below this the box is folded), `--spacing-terminal-dock-chrome`
+200 (tabs + observer chrome, measured at 480), `--spacing-timeline-strip` 80
+(reserved band so the conversation does not vanish; the last item's bottom
+fragment, not a guaranteed full readable row). Utilities `terminal-dock` /
+`terminal-dock-lg` / `terminal-dock-short` / `timeline-strip` apply them;
+the dock yields first so the composer stays inside the viewport. Expand takes
+timeline slack down to the strip instead of sharing the 280 reserve.
 
 Three corrections from the MOMO-619 R1 review, the first two the same bug.
 `FitAddon` measures its parent with `getComputedStyle().height`, which on a
