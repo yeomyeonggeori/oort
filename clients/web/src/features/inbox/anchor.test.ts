@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   channelPath,
   messageAnchorPath,
+  messageShareUrl,
   foldedStandInSelector,
   messageIdSelector,
   messageSelector,
@@ -41,6 +42,30 @@ describe("searchHitPath", () => {
     expect(path).toContain("msg=019f94e3-0e04-79cd-9dee-208f47edd9a9");
     expect(path).toContain("seq=812");
     expect(path.startsWith("/c/019F94E3-0E04-79CD-9DEE-208F47EDD9A8?")).toBe(true);
+  });
+});
+
+describe("messageShareUrl", () => {
+  it("HashRouter 주소로 특정 메시지에 닿는 붙여넣기 URL을 만든다", () => {
+    expect(
+      messageShareUrl(
+        "00000000-0000-7000-8000-000000000201",
+        "019F94E3-0E04-79CD-9DEE-208F47EDD9A8",
+        { origin: "https://app.oor7.com", pathname: "/" }
+      )
+    ).toBe(
+      "https://app.oor7.com/#/c/00000000-0000-7000-8000-000000000201?msg=019f94e3-0e04-79cd-9dee-208f47edd9a8"
+    );
+  });
+
+  it("실경로 쿼리는 싣지 않는다. 캡처 심이 공유 링크를 오염시키면 안 된다", () => {
+    const url = messageShareUrl(
+      "00000000-0000-7000-8000-000000000201",
+      "019f94e3-0e04-79cd-9dee-208f47edd9a8",
+      { origin: "http://127.0.0.1:5178", pathname: "/" }
+    );
+    expect(url).not.toContain("agentwork");
+    expect(url.startsWith("http://127.0.0.1:5178/#/c/")).toBe(true);
   });
 });
 

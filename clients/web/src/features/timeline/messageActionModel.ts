@@ -9,6 +9,7 @@ export type MessageActionItemKey =
   | "reply"
   | "quote"
   | "copy"
+  | "copy-link"
   | "pin"
   | "edit"
   | "delete";
@@ -24,14 +25,28 @@ export interface MessageActionItem {
 export const MESSAGE_ACTION_SURFACES = ["menu", "context", "sheet"] as const;
 export type MessageActionSurface = (typeof MESSAGE_ACTION_SURFACES)[number];
 
-/** The one inventory rendered by the ⋯ menu, right-click menu and sheet. */
+export interface MessageActionCopyState {
+  canCopy: boolean;
+  copied: boolean;
+  canCopyLink: boolean;
+  copiedLink: boolean;
+  pinned: boolean;
+}
+
+/**
+ * UX-D3 (#1755) inventory notes, so a later surface cannot "complete" buzz by
+ * inventing a server. The ⋯ / right-click / sheet lists are this function;
+ * they must not grow a local branch.
+ *
+ *   * copy        — already shipped as raw-markdown copy. Visible copy is
+ *                   「메시지 복사」 so it sits next to 「링크 복사」.
+ *   * copy-link   — `#/c/{ch}?msg=` already lands (ChatShell + messageAnchorPath).
+ *   * mark unread — PUT read-state is monotone (`GREATEST`). Accrued.
+ *   * remind later / report — no surface. Accrued.
+ */
 export function messageActionItems(
   available: MessageActionAvailability,
-  {
-    canCopy,
-    copied,
-    pinned,
-  }: { canCopy: boolean; copied: boolean; pinned: boolean }
+  { canCopy, copied, canCopyLink, copiedLink, pinned }: MessageActionCopyState
 ): MessageActionItem[] {
   const items: MessageActionItem[] = [];
   if (available.react) {
@@ -63,8 +78,15 @@ export function messageActionItems(
     items.push({
       key: "copy",
       testKey: "copy",
-      label: copied ? "복사됨" : "복사",
+      label: copied ? "복사됨" : "메시지 복사",
       accessibleLabel: copied ? "메시지 복사됨" : "메시지 복사",
+    });
+  }
+  if (canCopyLink) {
+    items.push({
+      key: "copy-link",
+      testKey: "copy-link",
+      label: copiedLink ? "링크 복사됨" : "링크 복사",
     });
   }
   if (available.pin) {
@@ -96,7 +118,12 @@ export function messageActionItems(
 export function messageActionItemsForSurface(
   _surface: MessageActionSurface,
   available: MessageActionAvailability,
-  state: { canCopy: boolean; copied: boolean; pinned: boolean }
+  state: MessageActionCopyState
 ): MessageActionItem[] {
   return messageActionItems(available, state);
+}
+
+/** Copy receipts have to stay on screen; react-more hands off to a picker. */
+export function actionKeepsMenuOpen(key: MessageActionItemKey): boolean {
+  return key === "copy" || key === "copy-link" || key === "react-more";
 }

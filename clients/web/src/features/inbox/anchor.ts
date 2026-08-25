@@ -94,6 +94,26 @@ export function messageAnchorPath(channelId: string, messageId: string): string 
 }
 
 /**
+ * Paste-anywhere URL for a message (UX-D3 / #1755).
+ *
+ * HashRouter speaks the hash, so the shareable address is origin + pathname +
+ * `#` + {@link messageAnchorPath}. `search` is omitted on purpose: a capture
+ * seam (`?agentwork=`) or an invite query must not ride along into a pasted
+ * link. ChatShell reads `?msg=` out of that hash and jumps; the jump consumes
+ * the param, so a reload after landing does not re-seek (see the header).
+ */
+export function messageShareUrl(
+  channelId: string,
+  messageId: string,
+  location: Pick<Location, "origin" | "pathname">
+): string {
+  return `${location.origin}${location.pathname}#${messageAnchorPath(
+    channelId,
+    messageId
+  )}`;
+}
+
+/**
  * Route for a channel with the 작업 세션 패널 opened on one session (MOMO-679).
  *
  * A goal's run ledger lists work sessions, and those live in a PANE inside the

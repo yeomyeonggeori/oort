@@ -77,6 +77,7 @@ import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { shouldShowHoverToolbar } from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
+import { messageShareUrl } from "@/features/inbox/anchor";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
 import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
@@ -385,6 +386,20 @@ export function MessageRow({
   // settings CopyButton uses, so the two-second 「복사됨」 receipt cannot drift.
   const canCopy = Boolean(actions) && !deleted && hasBody;
   const { copied, copy: copyMessage } = useClipboardCopy(message.body ?? "");
+  // UX-D3: a persisted row already has a HashRouter landing (`?msg=`). Failed
+  // local sends and tombstones do not. Those URLs would open a hole.
+  const canCopyLink =
+    Boolean(actions) && !deleted && message.state !== "failed";
+  const { copied: copiedLink, copy: copyMessageLink } = useClipboardCopy(
+    messageShareUrl(message.channelId, message.id, window.location)
+  );
+  const copyState = {
+    canCopy,
+    copied,
+    canCopyLink,
+    copiedLink,
+    pinned: Boolean(actions?.pinned),
+  };
   // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
   // `AttachmentList`가 아무것도 그리지 않는다.
   const attachments = message.attachments ?? [];
@@ -444,7 +459,8 @@ export function MessageRow({
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
   const actionable =
-    Boolean(actions) && (hasAnyAction(available) || canCopy);
+    Boolean(actions) &&
+    (hasAnyAction(available) || canCopy || canCopyLink);
 
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
@@ -455,6 +471,16 @@ export function MessageRow({
         if (!ok) {
           setRowError(
             "메시지를 복사하지 못했습니다. 텍스트를 선택해 복사하세요."
+          );
+        }
+      });
+    },
+    onCopyLink: () => {
+      setRowError(null);
+      void copyMessageLink().then((ok) => {
+        if (!ok) {
+          setRowError(
+            "링크를 복사하지 못했습니다. 주소창의 채널 주소를 복사하세요."
           );
         }
       });
@@ -541,9 +567,7 @@ export function MessageRow({
         actionable && !touchSurface && !selectionWithinRow && !editing
       }
       available={available}
-      canCopy={canCopy}
-      copied={copied}
-      pinned={Boolean(actions?.pinned)}
+      copyState={copyState}
       callbacks={callbacks}
       onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
       onOpenChange={setContextMenuOpen}
@@ -601,9 +625,7 @@ export function MessageRow({
       {actions && showHoverToolbar && (
         <MessageHoverToolbar
           available={available}
-          canCopy={canCopy}
-          copied={copied}
-          pinned={Boolean(actions?.pinned)}
+          copyState={copyState}
           callbacks={callbacks}
           onOpenPicker={(el) =>
             openReactionPicker(el ?? actionTriggerRef.current)
@@ -952,9 +974,7 @@ export function MessageRow({
             onOpenChange={setSheetOpen}
             preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
             available={available}
-            canCopy={canCopy}
-            copied={copied}
-            pinned={Boolean(actions?.pinned)}
+            copyState={copyState}
             callbacks={callbacks}
             onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
           />
