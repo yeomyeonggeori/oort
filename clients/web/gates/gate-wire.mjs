@@ -196,8 +196,9 @@ async function main() {
       await page.getByTestId("login-password").fill("not-a-secret");
       await page.getByTestId("login-submit").click();
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
-      // 설정 진입은 <Link>라 role=link다. 사이드바가 이 컨트롤을 어떤 요소로
-      // 그리는지에 게이트가 묶이지 않도록 testid로 잡는다.
+      // UX-D4: 설정은 하단 프로필 카드 안의 실존 항목이다. 톱니 Link 가 아니다.
+      await page.getByTestId("profile-card").click();
+      await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
       await page.getByTestId("nav-settings").click();
       await page.waitForSelector('[data-testid="settings-route"]');
       for (const [section, label] of [["ai", "AI 연결"], ["code", "코드 실행 호스트"], ["members", "멤버와 초대"], ["plugins", "앱"], ["account", "계정"]]) {

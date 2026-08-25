@@ -157,11 +157,11 @@ const MOBILE_TAP_TARGETS = [
   ["thread-composer-mention-trigger", "답글 멘션 넣기", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
-  // 프레즌스 6b H2 — 하단 프로필 행의 상태 트리거. 바로 옆 설정 톱니가 44px인데
-  // 이것만 24×24였다(design-review 실측): 같은 줄에서 엄지가 노리는 두 컨트롤이
-  // 서로 다른 확률로 눌린다. optional인 것은 사이드바(폰에서는 서랍)가 열린
-  // 프레임에서만 보이기 때문이고, 그 프레임이 `assertTapTargets`를 다시 부른다.
-  ["presence-control", "내 상태 변경", "optional"],
+  // UX-D4 — 하단 프로필 카드 전체. 예전 24×24 아바타 트리거가 옆 톱니 44px와
+  // 어긋나던 자리(6b H2)를 행 전체 타깃으로 올렸다. optional인 것은 사이드바
+  // (폰에서는 서랍)가 열린 프레임에서만 보이기 때문이고, 그 프레임이
+  // `assertTapTargets`를 다시 부른다.
+  ["profile-card", "프로필 카드 열기", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
@@ -368,6 +368,7 @@ const ROSTER = [
     channelCount: CHANNEL_IDS.length,
     channelIds: CHANNEL_IDS,
     capabilities: [],
+    presenceStatus: "auto",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -1275,6 +1276,7 @@ async function installUnmockedFallback(context) {
 }
 
 async function installMocks(context) {
+  let declaredPresence = "auto";
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
@@ -1439,8 +1441,33 @@ async function installMocks(context) {
         url.searchParams.get("status") === "pending" ? APPROVALS : [],
     });
   });
+  await context.route("**/v1/workspaces/*/presence", (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() || "{}");
+      if (
+        body.status === "auto" ||
+        body.status === "away" ||
+        body.status === "dnd"
+      ) {
+        declaredPresence = body.status;
+        return json(route, { status: declaredPresence });
+      }
+      return route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "invalid_status" }),
+      });
+    }
+    return json(route, { status: declaredPresence });
+  });
   await context.route("**/v1/workspaces/*/roster", (route) =>
-    json(route, { members: ROSTER })
+    json(route, {
+      members: ROSTER.map((member) =>
+        member.id === ME
+          ? { ...member, presenceStatus: declaredPresence }
+          : member
+      ),
+    })
   );
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: READ_STATES })
@@ -1747,6 +1774,124 @@ async function signIn(page) {
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+}
+
+function isPresencePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/presence");
+  } catch {
+    return false;
+  }
+}
+
+/** UX-HT: 포인터 rest 에서 + 는 DOM 0. 캡처가 열려면 헤더를 먼저 hover 한다. */
+async function revealNewChannel(page) {
+  const button = page.getByTestId("new-channel");
+  if ((await button.count()) === 0) {
+    await page.getByTestId("sidebar-section-channels-header").hover();
+    await button.waitFor({ state: "visible" });
+  }
+  await button.click();
+}
+
+/**
+ * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
+ * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
+ */
+async function captureSidebarD4(page, scheme, shots) {
+  const restPlus = await page.getByTestId("new-channel").count();
+  if (restPlus !== 0) {
+    throw new Error(`채널 + 가 포인터 rest 에 떠 있다 ${scheme}: ${restPlus}`);
+  }
+
+  await page.getByTestId("profile-card").click();
+  const menu = page.getByTestId("profile-card-menu");
+  await menu.waitFor({ state: "visible" });
+  const anchor = await page.evaluate(`(() => {
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    const panel = document.querySelector('[data-testid="profile-card-menu"]');
+    if (!trigger || !panel) return null;
+    const t = trigger.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return {
+      triggerBottom: Math.round(t.bottom),
+      panelTop: Math.round(p.top),
+      overlapX: Math.max(0, Math.min(t.right, p.right) - Math.max(t.left, p.left)),
+    };
+  })()`);
+  if (!anchor || anchor.overlapX < 8) {
+    throw new Error(
+      `프로필 카드가 트리거에 앵커되지 않았다 ${scheme}: ${JSON.stringify(anchor)}`
+    );
+  }
+  if (anchor.panelTop < 0) {
+    throw new Error(
+      `프로필 카드가 뷰포트 위로 새었다 ${scheme}: ${JSON.stringify(anchor)}`
+    );
+  }
+  const profileShot = `${OUT_DIR}/sidebar-profile-card-${scheme}.png`;
+  await page.screenshot({ path: profileShot });
+  shots.push(profileShot);
+
+  const putAway = page.waitForRequest(isPresencePut);
+  await page.getByTestId("presence-option-away").click();
+  const awayReq = await putAway;
+  const awayBody = awayReq.postDataJSON();
+  if (awayBody?.status !== "away") {
+    throw new Error(
+      `상태 PUT 이 away 가 아니다 ${scheme}: ${JSON.stringify(awayBody)}`
+    );
+  }
+  await menu.waitFor({ state: "hidden" });
+  const effective = await page
+    .getByTestId("presence-control")
+    .getAttribute("data-effective");
+  if (effective !== "away") {
+    throw new Error(`배지가 away 로 안 바뀌었다 ${scheme}: ${effective}`);
+  }
+
+  await page.getByTestId("profile-card").press("Enter");
+  await menu.waitFor({ state: "visible" });
+  const putAuto = page.waitForRequest(isPresencePut);
+  await page.getByTestId("presence-option-auto").click();
+  await putAuto;
+  await menu.waitFor({ state: "hidden" });
+
+  const header = page.getByTestId("sidebar-section-channels-header");
+  await header.hover();
+  await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const hoverShot = `${OUT_DIR}/sidebar-section-hover-${scheme}.png`;
+  await page.screenshot({ path: hoverShot });
+  shots.push(hoverShot);
+
+  await page.getByTestId("section-collapse-channels").press("Enter");
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "detached" });
+  const sectionCollapsed = await page
+    .getByTestId("sidebar-section-channels")
+    .getAttribute("data-collapsed");
+  if (sectionCollapsed === null) {
+    throw new Error(`채널 섹션이 접히지 않았다 ${scheme}`);
+  }
+  const sectionShot = `${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`;
+  await page.screenshot({ path: sectionShot });
+  shots.push(sectionShot);
+  await page.getByTestId("section-collapse-channels").press("Enter");
+  await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
+
+  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-expand").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
+  const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
+  await page.screenshot({ path: collapsedShot });
+  shots.push(collapsedShot);
+  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-collapse").waitFor({ state: "visible" });
+  await page.getByTestId("composer-input").hover();
 }
 
 /**
@@ -4051,6 +4196,15 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
   await shoot(page, "sidebar-drawer");
 
+  await page.getByTestId("profile-card").click();
+  await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+  await assertTapTargets(page, `drawer profile ${scheme}`);
+  await shoot(page, "sidebar-profile-card");
+  // 첫 Esc 는 카드, 둘째는 서랍. 메뉴가 열려 있는 동안 escape 층은 양보한다
+  // (`role="menu"` — UX-D4, 서랍이 카드를 삼키던 자리).
+  await page.keyboard.press("Escape");
+  await page.getByTestId("profile-card-menu").waitFor({ state: "hidden" });
+
   // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
   // 여기서 실제로 걷는다.
   await page.keyboard.press("Escape");
@@ -4238,6 +4392,8 @@ async function captureScheme(browser, scheme) {
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  await captureSidebarD4(login, scheme, shots);
 
   // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
   // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.
@@ -4872,7 +5028,7 @@ async function captureScheme(browser, scheme) {
   // 3a. 채널 만들기 다이얼로그 (MOMO-614): the form the sidebar + opens, filled
   //     the way a person fills it. This is the surface that replaced the
   //     /settings dead end, so it is reviewed in both schemes.
-  await login.getByTestId("new-channel").click();
+  await revealNewChannel(login);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-name").fill("release-rollback");
   await login
@@ -4923,7 +5079,7 @@ async function captureScheme(browser, scheme) {
   //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
   //       함께 읽는다. 여기서는 그 브라우저 신호를 실제로 끊어 확인한다.
   await context.setOffline(true);
-  await login.getByTestId("new-channel").click();
+  await revealNewChannel(login);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
   await login.waitForTimeout(200);

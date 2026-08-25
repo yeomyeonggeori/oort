@@ -291,6 +291,8 @@ function assertPutShape(raw) {
 }
 
 async function openAiLinkForm(page) {
+  await page.getByTestId("profile-card").click();
+  await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
   await page.getByTestId("nav-settings").click();
   await page.waitForSelector('[data-testid="settings-route"]');
   await page.getByRole("button", { name: "AI 연결", exact: true }).click();
