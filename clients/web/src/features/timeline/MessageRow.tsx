@@ -481,6 +481,14 @@ export function MessageRow({
     },
     onCopyLink: () => {
       setRowError(null);
+      // 클립보드 API가 없으면 다시 눌러도 같다. 형제 `onCopy`가 그 경우
+      // 「텍스트를 선택해 복사하세요」로 출구를 주는 것과 같은 자리.
+      if (typeof navigator.clipboard?.writeText !== "function") {
+        setRowError(
+          "링크를 복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다."
+        );
+        return;
+      }
       void copyMessageLink().then((ok) => {
         if (!ok) {
           setRowError(
