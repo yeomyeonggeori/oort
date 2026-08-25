@@ -7,6 +7,8 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  restoreDialogOpenerFocus,
+  type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
@@ -111,10 +113,12 @@ function AddWorkspacePanel({
   draft,
   setDraft,
   onOpenChange,
+  opener,
 }: {
   draft: WorkspaceDraft;
   setDraft: (next: WorkspaceDraft) => void;
   onOpenChange: (open: boolean) => void;
+  opener?: DialogFocusTarget | null;
 }) {
   const offline = useOffline();
   const { name, slug } = draft;
@@ -189,6 +193,7 @@ function AddWorkspacePanel({
 
   return (
     <DialogContent
+      opener={opener}
       data-testid="add-workspace-dialog"
       onKeyDown={(event) => {
         // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장), from anywhere in the panel
@@ -379,23 +384,27 @@ export function AddWorkspaceDialog({
   onOpenChange,
   draft,
   setDraft,
+  opener,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draft: WorkspaceDraft;
   setDraft: (next: WorkspaceDraft) => void;
+  opener?: DialogFocusTarget | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* 열려 있는 동안에만 마운트한다: 이전 시도의 성공/거절/attempted가 다음
           열기까지 따라오지 않고, 여는 순간의 activeElement가 곧 "무엇이 이걸
-          열었나"라 닫을 때 캐럿이 그리로 돌아간다. 초안만 provider에 남아, 이름을
-          쓰다 바깥을 눌러도 글은 그대로다. */}
+          열었나"라 닫을 때 캐럿이 그리로 돌아간다. 카드 메뉴처럼 그 순간
+          트리거가 이미 언마운트된 진입점은 `opener`로 명시한다 (H-2).
+          초안만 provider에 남아, 이름을 쓰다 바깥을 눌러도 글은 그대로다. */}
       {open && (
         <AddWorkspacePanel
           draft={draft}
           setDraft={setDraft}
           onOpenChange={onOpenChange}
+          opener={opener}
         />
       )}
     </Dialog>
@@ -410,7 +419,19 @@ export function AddWorkspaceDialog({
 export function AddWorkspaceProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<WorkspaceDraft>(EMPTY_DRAFT);
-  const openAdd = useCallback(() => setOpen(true), []);
+  const openerRef = useRef<DialogFocusTarget | null>(null);
+  const openAdd = useCallback((opener?: DialogFocusTarget | null) => {
+    openerRef.current = opener ?? null;
+    setOpen(true);
+  }, []);
+  const onOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (next) return;
+    const opener = openerRef.current;
+    queueMicrotask(() => {
+      restoreDialogOpenerFocus(opener);
+    });
+  }, []);
   return (
     <AddWorkspaceOpenContext.Provider value={openAdd}>
       <AddWorkspaceOpenStateContext.Provider value={open}>
@@ -418,9 +439,10 @@ export function AddWorkspaceProvider({ children }: { children: ReactNode }) {
       </AddWorkspaceOpenStateContext.Provider>
       <AddWorkspaceDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={onOpenChange}
         draft={draft}
         setDraft={setDraft}
+        opener={openerRef.current}
       />
     </AddWorkspaceOpenContext.Provider>
   );

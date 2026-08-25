@@ -73,9 +73,11 @@ export const DropdownMenuContent = React.forwardRef<
 DropdownMenuContent.displayName = MenuPrimitive.Content.displayName;
 
 /**
- * One row of the menu. `h-control` (32px) is the pointer measure: this menu is
- * opened by a mouse or a Tab, never by a thumb (the phone opens the sheet in
- * `MessageActions.tsx`, whose rows are 44px).
+ * One row of the menu. `h-control` (32px) is the pointer measure. On a phone
+ * (`tap-target`, width < 600px) the same row grows to 44px — the sheet-row
+ * measure `MessageActions.tsx` already uses. The profile card is a first-class
+ * phone-drawer entry, so this primitive can no longer claim it is never
+ * opened by a thumb.
  *
  * Radix moves focus with the arrow keys, so the highlight is a focus ring and a
  * background, not a separate "selected" concept.
@@ -112,7 +114,7 @@ export function menuRowClass({
   className?: string;
 }) {
   return cn(
-    "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+    "tap-target flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
     layout === "stack"
       ? // `gap-2` between two lines of ONE item would read as a paragraph
         // break, so a stacked item sets its own vertical rhythm.

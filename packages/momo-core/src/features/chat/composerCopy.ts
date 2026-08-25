@@ -507,7 +507,7 @@ export const THREAD_COMPOSER_PLACEHOLDER = "답글 쓰기";
 // 사는 다른 어법이 하나 더 있고, 그것은 잘못 통일된 것이 아니라 **다른 자리**다:
 //
 //   sidebar/Sidebar.tsx:578   title="새 다이렉트 메시지 (⌘⇧K)"
-//   sidebar/Sidebar.tsx:690   title="설정 (⌘,)"
+//   sidebar/ProfileCard.tsx:106   title="설정 (⌘,)"
 //   chat/Composer.tsx:838     title="메시지 보내기 (Enter)"
 //
 // 어법은 `<동작> (<키>)` — 힌트 줄과 **정반대 순서**이고, 그것이 맞다:

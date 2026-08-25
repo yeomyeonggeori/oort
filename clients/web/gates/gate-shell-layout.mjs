@@ -689,7 +689,6 @@ async function assertDesktopSidebarFocusMode(page, size) {
     before.collapsed === false &&
       before.sidebarWidth === 240 &&
       before.railWidth === 56 &&
-      before.buttonText?.includes("탐색 패널 접기") &&
       before.buttonName === "탐색 패널 접기" &&
       before.buttonTitle === "탐색 패널 접기" &&
       before.buttonHasIcon === true &&

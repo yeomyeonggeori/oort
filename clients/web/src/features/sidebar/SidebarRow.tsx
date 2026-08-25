@@ -1,6 +1,12 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
+import {
+  shouldShowSectionActions,
+  type SidebarSectionId,
+} from "./sidebarSectionModel";
 
 // Flat rows with a hover background, not one rounded "web card" per list item
 // (design-taste-web §8). Everything interactive is a real link/button with a
@@ -109,25 +115,146 @@ export function SidebarRow({
   );
 }
 
-/** Section header. Sentence case, no uppercase-tracking micro label. */
+/**
+ * Section header. Sentence case, no uppercase-tracking micro label.
+ *
+ * Collapse is always mounted (a keyboard user reaches it without hovering).
+ * Create/overflow actions follow the UX-HT contract: conditional render, never
+ * an opacity/visibility hide. Pointer rest shows none; hover, `:focus-visible`,
+ * an open overlay, or a touch surface (`hover: none`) shows the real actions
+ * only.
+ */
 export function SidebarSection({
   title,
+  sectionId,
   children,
   action,
+  collapsed,
+  onCollapsedChange,
+  overlayOpen = false,
+  unreadCount = 0,
+  mentionCount = 0,
 }: {
   title: string;
+  sectionId: SidebarSectionId;
   children: ReactNode;
   action?: ReactNode;
+  collapsed: boolean;
+  onCollapsedChange: (collapsed: boolean) => void;
+  /**
+   * This section's overlay, not a shell-wide flag. 채널 만들기 pins the
+   * channel header; a DM compose pins the DM header. A workspace-wide
+   * open flag wired into every section made ⌘K 채널 만들기 freeze the
+   * DM + as well (R2-1).
+   */
+  overlayOpen?: boolean;
+  /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
+  unreadCount?: number;
+  mentionCount?: number;
 }) {
+  const touchSurface = useHoverNone();
+  const [headerHovered, setHeaderHovered] = useState(false);
+  const [headerKeyboardFocused, setHeaderKeyboardFocused] = useState(false);
+  // Same overlay pin as MessageRow → hoverToolbarModel. The + that opened
+  // 채널 만들기 must stay mounted so Radix can restore focus on close (B-1).
+  // Open-state alone is not enough: the provider flips it false in the same
+  // commit that unmounts the dialog, so a hold keeps the trigger alive for
+  // one frame after close (restore runs in a microtask). Blur still drops
+  // the hold as a backstop; the close transition is what actually releases
+  // it, or a ⌘K-opened dialog would pin the actions for the rest of the
+  // session (R2-1).
+  const [overlayHeld, setOverlayHeld] = useState(false);
+  if (overlayOpen && !overlayHeld) setOverlayHeld(true);
+  useEffect(() => {
+    if (overlayOpen || !overlayHeld) return;
+    let cancelled = false;
+    const frame = requestAnimationFrame(() => {
+      if (!cancelled) setOverlayHeld(false);
+    });
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+    };
+  }, [overlayOpen, overlayHeld]);
+  const showActions = shouldShowSectionActions({
+    pointerCanHover: !touchSurface,
+    headerHovered,
+    headerKeyboardFocused,
+    overlayOpen: overlayOpen || overlayHeld,
+  });
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  const listId = `sidebar-section-${sectionId}-list`;
+  const hasUnread = unreadCount > 0;
+  const hasMention = mentionCount > 0;
+
+  const onHeaderFocus = (event: FocusEvent<HTMLDivElement>) => {
+    // Pointer click focuses the collapse button but must not paint a ring or
+    // reveal hover actions (#1743 B-4 / UX-HT 포인터·키보드 분리). Only a
+    // keyboard stop (`:focus-visible`) opens the hover cluster.
+    const target = event.target;
+    if (target instanceof HTMLElement && target.matches(":focus-visible")) {
+      setHeaderKeyboardFocused(true);
+    }
+  };
+  const onHeaderBlur = (event: FocusEvent<HTMLDivElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setHeaderKeyboardFocused(false);
+    if (!overlayOpen) setOverlayHeld(false);
+  };
+
   return (
-    <section className="flex flex-col gap-1 px-2 py-2">
-      <div className="flex items-center justify-between gap-2 px-2">
-        <h2 className="text-meta font-medium text-ink-muted">
-          {title}
+    <section
+      className="flex flex-col gap-1 px-2 py-2"
+      data-testid={`sidebar-section-${sectionId}`}
+      data-collapsed={collapsed ? "" : undefined}
+    >
+      <div
+        className="flex min-h-control-sm items-center gap-1 px-2"
+        data-testid={`sidebar-section-${sectionId}-header`}
+        onMouseEnter={() => setHeaderHovered(true)}
+        onMouseLeave={() => setHeaderHovered(false)}
+        onFocusCapture={onHeaderFocus}
+        onBlurCapture={onHeaderBlur}
+      >
+        <h2 className="min-w-0 flex-1">
+          <button
+            type="button"
+            onClick={() => onCollapsedChange(!collapsed)}
+            aria-expanded={!collapsed}
+            aria-controls={collapsed ? undefined : listId}
+            title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
+            data-testid={`section-collapse-${sectionId}`}
+            className="flex h-control-sm w-full min-w-0 items-center gap-1 rounded-sm text-left text-meta font-medium text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          >
+            <Chevron className="size-4 shrink-0" aria-hidden="true" />
+            <span className="min-w-0 truncate">{title}</span>
+          </button>
         </h2>
-        {action}
+        {collapsed && hasMention ? (
+          <span
+            className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
+            data-numeric
+            data-testid={`section-unread-${sectionId}`}
+          >
+            {mentionCount}
+          </span>
+        ) : collapsed && hasUnread ? (
+          <span
+            className="shrink-0 text-timestamp text-ink-muted"
+            data-numeric
+            data-testid={`section-unread-${sectionId}`}
+          >
+            {unreadCount}
+          </span>
+        ) : null}
+        {showActions ? action : null}
       </div>
-      <ul className="flex flex-col">{children}</ul>
+      {collapsed ? null : (
+        <ul id={listId} className="flex flex-col">
+          {children}
+        </ul>
+      )}
     </section>
   );
 }
