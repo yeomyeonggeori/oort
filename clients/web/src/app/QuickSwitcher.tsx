@@ -235,11 +235,12 @@ export function QuickSwitcher({
       contentClassName="fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg"
       data-testid="quick-switcher"
     >
-      {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753). 머리
-          그릇의 구분선이 목록과 나누고, 포커스도 UX-CB와 같은 focus-within
-          관례로 그릇이 맡는다. placeholder는 입력 목적을 계속 눈에 보이게 한다. */}
+      {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
+          팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은
+          상시 점등이 되어 정보가 0이다 — 링 없이 hairline 구분선만 남긴다.
+          placeholder가 입력 목적을 계속 눈에 보이게 한다. */}
       <div
-        className="border-b border-line focus-within:focus-ring"
+        className="border-b border-line"
         data-testid="quick-switcher-input-vessel"
       >
         <Command.Input

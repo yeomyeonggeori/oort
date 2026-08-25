@@ -26,6 +26,8 @@ describe("⌘K 입력 표면 (#1753)", () => {
   it("팔레트 머리 그릇이 구분선과 포커스 표시를 맡는다", () => {
     const vessel = openingTag("quick-switcher-input-vessel");
     expect(vessel).toContain("border-b border-line");
-    expect(vessel).toContain("focus-within:focus-ring");
+    // H-1: 팔레트 입력은 상시 포커스라 그릇 링도 상시 점등 — 링 자체가 없어야 한다.
+    expect(vessel).not.toContain("focus-ring");
+    expect(vessel).toContain("border-b border-line");
   });
 });
