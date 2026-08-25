@@ -3430,44 +3430,243 @@ async function readCopiedShareUrl(page, where, { messageId, seq }) {
   return text;
 }
 
+async function scrollTimelineToBottom(page) {
+  await page.evaluate(async () => {
+    const frame = () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+      });
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return;
+    scroller.scrollTop = scroller.scrollHeight;
+    for (let i = 0; i < 8; i++) await frame();
+  });
+}
+
 /**
- * 복사된 URL을 새 페이지에서 열어 대상 행에 착지하는지 잰다.
- * 캡처 컨텍스트는 localStorage를 페이지끼리 공유하므로 두 번째 장부터는
- * 이미 로그인된 셸이다 (`signIn` 주석).
+ * 이미 열린 채널의 렌더된 행에서, **뷰포트 위쪽**(채널이 바닥에 붙어 열리면
+ * 안 보이는 머리) 행을 고른다. 픽스처 id를 다시 적지 않는다 — 그 숫자를
+ * 고치면 자가 조용히 공허해진다 (design-review #1764 R2-H1 · 정본 §5.5①).
  */
-async function assertShareUrlLands(context, url, where) {
-  const hashQuery = url.split("#")[1]?.split("?")[1] ?? "";
-  const msg = new URLSearchParams(hashQuery).get("msg");
-  if (!msg) {
-    throw new Error(`[${where}] 착지 URL에 msg가 없다: ${url}`);
-  }
-  const landing = await context.newPage();
-  try {
-    await landing.goto(url, { waitUntil: "networkidle" });
-    const row = landing.locator(
-      `[data-testid="timeline-message"][data-message-id="${msg}"]`
-    );
-    await row.waitFor({ state: "visible", timeout: 8_000 });
-    const pos = await row.evaluate((el) => {
+async function pickOffscreenShareTarget(page, where) {
+  await scrollTimelineToBottom(page);
+  const picked = await page.evaluate(() => {
+    const vh = window.innerHeight;
+    const rows = [
+      ...document.querySelectorAll('[data-testid="timeline-message"]'),
+    ].map((el) => {
       const r = el.getBoundingClientRect();
       return {
+        id: el.getAttribute("data-message-id"),
+        seq: el.getAttribute("data-seq"),
         top: r.top,
         bottom: r.bottom,
-        vh: window.innerHeight,
-        inView: r.top >= 0 && r.top < window.innerHeight && r.height > 0,
+        height: r.height,
+        actionable: el.getAttribute("data-actionable") === "true",
       };
     });
-    if (!pos.inView) {
+    const above = rows.filter(
+      (row) => row.id && row.actionable && row.bottom <= 0
+    );
+    const seqs = rows
+      .map((row) => Number(row.seq))
+      .filter((n) => Number.isFinite(n));
+    return {
+      target: above[0] ?? null,
+      oldestSeq: seqs.length ? Math.min(...seqs) : null,
+      present: rows.map((row) => row.id).filter(Boolean),
+      vh,
+      rowCount: rows.length,
+      aboveCount: above.length,
+    };
+  });
+  if (!picked.target) {
+    throw new Error(
+      `[${where}] 뷰포트 위에 있는 행이 없다 ` +
+        `(렌더 ${picked.rowCount}행 위쪽 ${picked.aboveCount} vh=${picked.vh}) — ` +
+        `바닥 행을 재면 착지를 못 잰다`
+    );
+  }
+  return picked;
+}
+
+/** 제품이 낸 공유 링크의 채널/origin을 지키고 msg/seq만 갈아 끼운다. */
+function shareUrlForTarget(productShareUrl, { messageId, seq }) {
+  const [beforeHash, hash = ""] = productShareUrl.split("#");
+  const qIndex = hash.indexOf("?");
+  const path = qIndex >= 0 ? hash.slice(0, qIndex) : hash;
+  const params = new URLSearchParams(qIndex >= 0 ? hash.slice(qIndex + 1) : "");
+  params.set("msg", String(messageId).toLowerCase());
+  if (seq !== undefined && seq !== null && seq !== "") {
+    params.set("seq", String(seq));
+  } else {
+    params.delete("seq");
+  }
+  return `${beforeHash}#${path}?${params}`;
+}
+
+async function openColdSharePage(context, url) {
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: "networkidle" });
+  return page;
+}
+
+/**
+ * 복사된 URL을 **콜드 새 페이지**에서 열어 대상 행에 착지하는지 잰다.
+ * 대상은 채널이 저절로 보여 주지 않는 행이어야 한다 — 바닥 행은 점프 없이도
+ * 보이므로 그 자리의 초록은 공허하다 (R2-B1 / R2-H1).
+ * 화면 안 판정은 위·아래 경계를 함께 본다 (R2-N2).
+ */
+async function assertShareUrlLands(context, productShareUrl, sourcePage, where) {
+  const picked = await pickOffscreenShareTarget(sourcePage, where);
+  const landingUrl = shareUrlForTarget(productShareUrl, {
+    messageId: picked.target.id,
+    seq: picked.target.seq,
+  });
+  const landing = await openColdSharePage(context, landingUrl);
+  try {
+    await landing
+      .getByTestId("timeline-message")
+      .first()
+      .waitFor({ state: "visible", timeout: 8_000 });
+    try {
+      await landing.waitForFunction(
+        (id) => {
+          const el = document.querySelector(
+            `[data-testid="timeline-message"][data-message-id="${id}"]`
+          );
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const inView =
+            r.top >= 0 && r.bottom <= window.innerHeight && r.height > 0;
+          // 워처가 착지 행에 얹는 클래스 (`anchor.ts` HIGHLIGHT_CLASS).
+          return inView && el.classList.contains("bg-accent-soft");
+        },
+        picked.target.id,
+        { timeout: 8_000 }
+      );
+    } catch (error) {
+      const dump = await landing.evaluate((id) => {
+        const el = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"]`
+        );
+        const region = document.querySelector(".chat-region");
+        const banner = document.querySelector(
+          '[data-testid="chat-anchor-missed"]'
+        );
+        const rows = [
+          ...document.querySelectorAll('[data-testid="timeline-message"]'),
+        ].map((row) => {
+          const r = row.getBoundingClientRect();
+          return {
+            id: row.getAttribute("data-message-id"),
+            seq: row.getAttribute("data-seq"),
+            top: Math.round(r.top),
+            bottom: Math.round(r.bottom),
+            highlight: row.classList.contains("bg-accent-soft"),
+          };
+        });
+        return {
+          href: location.href,
+          hash: location.hash,
+          anchorMsg: region?.getAttribute("data-url-anchor-msg"),
+          anchorSeq: region?.getAttribute("data-url-anchor-seq"),
+          banner: banner ? banner.textContent?.trim() : null,
+          target: el
+            ? {
+                top: Math.round(el.getBoundingClientRect().top),
+                bottom: Math.round(el.getBoundingClientRect().bottom),
+                highlight: el.classList.contains("bg-accent-soft"),
+                className: el.className,
+              }
+            : null,
+          rows,
+        };
+      }, picked.target.id);
       throw new Error(
-        `[${where}] 붙여넣은 링크가 대상 행을 뷰포트에 두지 못했다 ` +
-          `top=${pos.top} bottom=${pos.bottom} vh=${pos.vh}`
+        `[${where}] 콜드 착지 실패 url=${landingUrl} ` +
+          `target=${picked.target.id} 열기전 top=${Math.round(picked.target.top)} ` +
+          `dump=${JSON.stringify(dump)}` +
+          (error instanceof Error ? ` (${error.message})` : "")
       );
     }
+    const pos = await landing
+      .locator(
+        `[data-testid="timeline-message"][data-message-id="${picked.target.id}"]`
+      )
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          top: r.top,
+          bottom: r.bottom,
+          vh: window.innerHeight,
+          highlighted: el.classList.contains("bg-accent-soft"),
+        };
+      });
     console.log(
-      `  착지 ${where}: msg=${msg} top=${Math.round(pos.top)} vh=${pos.vh}`
+      `  착지 ${where}: msg=${picked.target.id} top=${Math.round(pos.top)} ` +
+        `bottom=${Math.round(pos.bottom)} vh=${pos.vh} highlight=${pos.highlighted ? 1 : 0} ` +
+        `(열기 전 top=${Math.round(picked.target.top)})`
     );
   } finally {
     await landing.close();
+  }
+
+  await assertColdAnchorMissBanners(context, productShareUrl, picked, where);
+}
+
+/**
+ * 콜드 오픈에서 없는 msg의 미발견 배너 (P3가 null이던 older/unknown).
+ */
+async function assertColdAnchorMissBanners(
+  context,
+  productShareUrl,
+  picked,
+  where
+) {
+  let missingId = "capture-missing";
+  while (picked.present.includes(missingId)) missingId = `${missingId}-x`;
+
+  const unknownUrl = shareUrlForTarget(productShareUrl, {
+    messageId: missingId,
+    seq: null,
+  });
+  const unknownPage = await openColdSharePage(context, unknownUrl);
+  try {
+    const banner = unknownPage.getByTestId("chat-anchor-missed");
+    await banner.waitFor({ state: "visible", timeout: 8_000 });
+    const text = (await banner.innerText()).trim();
+    if (!text.includes("찾지 못했습니다")) {
+      throw new Error(
+        `[${where}] 없는 msg(unknown) 배너가 이유를 말하지 않는다: ${text}`
+      );
+    }
+    console.log(`  착지 ${where} 배너 unknown: ${text}`);
+  } finally {
+    await unknownPage.close();
+  }
+
+  // seq 0은 어떤 로드 창보다도 위다. 렌더된 최소 seq-1은 창 *안*일 수 있다
+  // (가상 목록이 머리 행을 안 그리는 자리 — 그때는 unknown이 맞다).
+  const olderUrl = shareUrlForTarget(productShareUrl, {
+    messageId: missingId,
+    seq: 0,
+  });
+  const olderPage = await openColdSharePage(context, olderUrl);
+  try {
+    const banner = olderPage.getByTestId("chat-anchor-missed");
+    await banner.waitFor({ state: "visible", timeout: 8_000 });
+    const text = (await banner.innerText()).trim();
+    if (!text.includes("위쪽")) {
+      throw new Error(
+        `[${where}] 없는 msg(older) 배너가 이유를 말하지 않는다: ${text}`
+      );
+    }
+    console.log(`  착지 ${where} 배너 older: ${text}`);
+  } finally {
+    await olderPage.close();
   }
 }
 
@@ -4503,7 +4702,7 @@ async function captureScheme(browser, scheme) {
   await login.keyboard.press("Escape");
   await login.getByTestId("message-context-menu").waitFor({ state: "hidden" });
   console.log(`  메뉴 ${scheme}: ⋯·우클릭 클립보드 항목 누름`);
-  await assertShareUrlLands(context, copiedLink, `⋯ 링크 ${scheme}`);
+  await assertShareUrlLands(context, copiedLink, login, `⋯ 링크 ${scheme}`);
 
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
