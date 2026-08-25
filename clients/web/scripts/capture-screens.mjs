@@ -638,6 +638,7 @@ const LONG_DIGEST =
 // 사이에서 끊을 수 있어 이것만으로는 넘치지 않고, 라틴 토큰과 이어 붙어야 한 낱말이
 // 된다 — 그래서 붙여 쓴다.
 const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_restart_loop_2026_08_02";
+const ACTION_ROW_BODY = `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`;
 
 function makeMessages(count) {
   const base = Date.now() - count * 60_000;
@@ -708,7 +709,7 @@ function makeMessages(count) {
     hlcCount: 0,
     authorMemberId: ME,
     type: "text",
-    body: `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`,
+    body: ACTION_ROW_BODY,
     state: "sent",
     createdAtMs: base + count * 60_000,
   });
@@ -3398,6 +3399,19 @@ async function waitForFocus(page, testId, where, note) {
   }
 }
 
+async function assertCopiedClipboard(page, where, expected) {
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  if (text !== expected) {
+    throw new Error(
+      `[${where}] 클립보드 ${JSON.stringify(text)} ≠ ${JSON.stringify(expected)}`
+    );
+  }
+}
+
+function messageShareUrlForCapture(messageId) {
+  return `${ORIGIN}/#/c/${GENERAL_ID}?msg=${messageId}`;
+}
+
 /**
  * 진짜 손가락 제스처 (goal B11 R2 H2).
  *
@@ -3534,6 +3548,9 @@ async function captureMobile(browser, scheme) {
     colorScheme: scheme,
     reducedMotion: "reduce",
   });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
   await installMocks(context);
   const shots = [];
   const shoot = async (page, name) => {
@@ -3620,7 +3637,7 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `action sheet ${scheme}`);
   // 시트의 모든 행은 44px 손가락 타깃이어야 한다 — 시트를 여는 이유가 그것이다.
   const sheetTaps = await page.evaluate(`(() => {
-    const ids = ["sheet-reply", "sheet-edit", "sheet-delete"];
+    const ids = ["sheet-reply", "sheet-copy-link", "sheet-edit", "sheet-delete"];
     return ids
       .map((id) => {
         const el = document.querySelector('[data-testid="' + id + '"]');
@@ -3634,9 +3651,9 @@ async function captureMobile(browser, scheme) {
   // 있어서, 시트가 닫힌 뒤 이 자리에 오면 **행 0개를 무사통과**했다 — 44px 계약이
   // 검사된 적 없는데 초록이 나오는 상태였고, 그 조용한 초록이 시트가 닫히고 있다는
   // 사실을 118프레임 뒤까지 가려 줬다.
-  if (sheetTaps.length !== 3) {
+  if (sheetTaps.length !== 4) {
     throw new Error(
-      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/3 — 시트가 닫혔거나 행이 사라졌다`
+      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/4 — 시트가 닫혔거나 링크 복사가 없다`
     );
   }
   for (const tap of sheetTaps) {
@@ -3647,6 +3664,22 @@ async function captureMobile(browser, scheme) {
     }
   }
   await shoot(page, "b11-action-sheet");
+  // UX-D3 (#1755): 시트 클립보드 항목을 실제로 누르고 내용을 읽는다.
+  await page.getByTestId("sheet-copy").click();
+  await page.getByTestId("sheet-copy").getByText("복사됨").waitFor();
+  await assertCopiedClipboard(page, `시트 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
+  await page.getByTestId("sheet-copy-link").click();
+  await page.getByTestId("sheet-copy-link").getByText("링크 복사됨").waitFor();
+  const sheetMessageId = await sheetTarget.getAttribute("data-message-id");
+  if (!sheetMessageId) {
+    throw new Error(`[시트 ${scheme}] 마지막 행에 data-message-id가 없다`);
+  }
+  await assertCopiedClipboard(
+    page,
+    `시트 링크 복사 ${scheme}`,
+    messageShareUrlForCapture(sheetMessageId)
+  );
+  console.log(`  시트 ${scheme}: 메시지 복사 · 링크 복사 클립보드 일치`);
   await page.keyboard.press("Escape");
   await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
 
@@ -3871,6 +3904,9 @@ async function captureScheme(browser, scheme) {
     deviceScaleFactor: 2,
     colorScheme: scheme,
     reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
   });
   await installMocks(context);
   const shots = [];
@@ -4367,6 +4403,41 @@ async function captureScheme(browser, scheme) {
     `메뉴 ${scheme}`,
     "Esc 뒤 포커스는 진입점으로 돌아가야 한다"
   );
+
+  // 2e-d3. UX-D3 (#1755): 새 메뉴 항목을 실제로 누르고 클립보드를 읽는다.
+  //     세 표면(⋯ · 우클릭 · 시트) 중 포인터 둘. 시트는 captureMobile.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  if ((await login.getByTestId("menu-copy-link").count()) !== 1) {
+    throw new Error(`[메뉴 ${scheme}] 링크 복사가 없다`);
+  }
+  await login.getByTestId("menu-copy").click();
+  await login.getByTestId("menu-copy").getByText("복사됨").waitFor();
+  await assertCopiedClipboard(login, `⋯ 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
+  await login.getByTestId("menu-copy-link").click();
+  await login.getByTestId("menu-copy-link").getByText("링크 복사됨").waitFor();
+  const menuMessageId = await actionRow.getAttribute("data-message-id");
+  if (!menuMessageId) {
+    throw new Error(`[메뉴 ${scheme}] 마지막 행에 data-message-id가 없다`);
+  }
+  const expectedLink = messageShareUrlForCapture(menuMessageId);
+  await assertCopiedClipboard(login, `⋯ 링크 복사 ${scheme}`, expectedLink);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
+
+  await actionRow.click({ button: "right", position: { x: 180, y: 24 } });
+  await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
+  await login.screenshot({ path: contextShot });
+  shots.push(contextShot);
+  await login.getByTestId("context-copy-link").click();
+  await login.getByTestId("context-copy-link").getByText("링크 복사됨").waitFor();
+  await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, expectedLink);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-context-menu").waitFor({ state: "hidden" });
+  console.log(`  메뉴 ${scheme}: ⋯·우클릭 클립보드 항목 누름`);
 
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.

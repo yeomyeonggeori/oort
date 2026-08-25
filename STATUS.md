@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## UX-D3 메시지 ⋯ 더보기 메뉴 보강 (#1755, 2026-08-26)
+
+- 선행 판정: 메시지 복사 실존(원문 클립보드). 링크 복사 실존(`#/c/{ch}?msg=` → ChatShell 착지). 읽지 않음 표시는 PUT read-state가 `GREATEST` 단조라 커서 후진 불가. Remind me later·Report는 표면 없음.
+- 실존 항목만 추가: ⋯/우클릭/시트 동형. 「복사」→「메시지 복사」, 「링크 복사」를 copy 뒤에. 기존 13/11/0 차등은 14/12/0(저자만 고치기/지우기, 묘비 0). lucide `Copy`·`Link`.
+- 적립: 읽지 않음 표시(서버 커서 후진 API), Remind me later, Report message.
+- 캡처 3표면: `b11-message-action-menu` · 신설 `b11-message-context-menu` · `mobile-b11-action-sheet`. 클립보드 항목은 실제로 눌러 내용 검증.
+- 검증: 웹 `tsc -b` rc=0 · Vitest 1,543/1,543 · 디자인 프리플라이트 web 12/12 + core 5/5 · `capture:design` rc=0 (⋯/우클릭/시트 클립보드 단정 포함). 자체 design-review 안 함(오케스트레이터).
+
 ## UX-D1 웹 Lucide 아이콘 체계 고정 (#1754, 2026-08-25)
 
 - base `0e202e5e` 실측에서 `lucide-react@0.454.0`(ISC)은 이미 package/lock에 고정돼 있었고, 58개 파일·76개 글리프·정적 배치 165곳이 Lucide를 사용했다. 기능 표면 raw `<svg>`는 0건이었다. 따라서 신규 교체는 0건이며 의존성 바이트도 바꾸지 않았다.
