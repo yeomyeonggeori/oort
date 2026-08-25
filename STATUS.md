@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## UX-D1 웹 Lucide 아이콘 체계 고정 (#1754, 2026-08-25)
+
+- base `0e202e5e` 실측에서 `lucide-react@0.454.0`(ISC)은 이미 package/lock에 고정돼 있었고, 58개 파일·76개 글리프·정적 배치 165곳이 Lucide를 사용했다. 기능 표면 raw `<svg>`는 0건이었다. 따라서 신규 교체는 0건이며 의존성 바이트도 바꾸지 않았다.
+- 로컬 SVG 존치는 oort 브랜드 3파일(`OortMark.tsx`·`oort-mark.svg`·`favicon.svg`)뿐이다. 각 파일에 ADR-0172 예외 사유를 붙이고 `iconSystem.test.ts`가 raw SVG 전수·정적 named import·ISC lock을 fail-closed한다. 디자인 시스템 §2.8에 16/20px·기본 획 2·`currentColor`·접근성·예외 목록·tree-shaking 실측 규칙을 정본화했다.
+- 검증: 웹 `tsc -b` · Vitest 1,535/1,535 · 디자인 프리플라이트 web 12/12 + core 5/5 · npm license 533 packages PASS(`lucide-react` ISC prod). 프로덕션 메인 JS gzip은 전/후 455.88 kB, 전체 JS 청크 합계는 전/후 729.44 kB로 동일했다. `runtime-unverified(capture:design·독립 design-review)`: 계약에 따라 오케스트레이터가 대행한다.
+
 ## UX-D2 스레드 표면 수리 (#1753, 2026-08-25)
 
 - 스레드 루트/답글 구분선을 32px 여백으로 바꾸고, 답글이 없을 때만 점선 빈 상태 상자가 영역을 말하게 했다.

@@ -223,6 +223,42 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 다만 **아직 전면 적용이 아니다.** `slopTo`를 쓰는 것은 그 결함이 발견된 `MessageRow.tsx` 하나이고, 다섯 자리가 여전히 숫자를 손으로 적는다(`atoms.tsx` · `StopTurnControl.tsx` · `LongPressHint.tsx` · `MessageBody.tsx` · `Quote.tsx`). `designSystem.test.ts`가 강제하는 것은 "전부 도출"이 아니라 **"그 다섯이 여섯이 되지 않는 것"**이다 — 새로 손으로 적으면 빨갛고, 기존 다섯은 세어진 채 남아 있다.
 
+### 2.8 아이콘 — `lucide-react`가 기능 글리프의 정본이다
+
+웹·Tauri 제품 표면의 기능 아이콘은 **`lucide-react` 한 벌만** 쓴다(ADR-0172,
+Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS 도형·아이콘 폰트·
+기능 이모지를 새로 만들지 않는다. 이름은 화면에서 하는 일에 맞춘다. 예를 들어 검색은
+`Search`, 인박스는 `Inbox`, 설정은 `Settings`, 복사는 `Copy`, 시각은 `Clock`, 링크는
+`Link`/`ExternalLink`, 플래그는 `Flag` 계열이다. 모양이 완전히 같은가보다 **행동이 같은가**가
+선택 기준이다.
+
+- **가져오기와 번들:** 아이콘을 정적인 named import로만 가져온다. `import * as Icons`,
+  런타임 이름 조회, 전체 아이콘 사전은 금지한다. `lucide-react`는 `sideEffects: false`이고
+  Vite 프로덕션 빌드가 사용한 export만 tree-shake한다. 아이콘을 늘린 PR은 전·후 gzip
+  번들을 실측해 이 전제가 실제 산출물에서도 맞는지 기록한다.
+- **크기:** 조밀한 행·컨트롤의 기본은 16px(`size-4`), 독립된 상위 액션의 기본은
+  20px(`size-5`)다. 버튼 프리미티브처럼 부모가 SVG 크기를 정하는 자리에서는 그 계약을
+  따른다. 교체하면서 컨트롤 상자·패딩·행 높이를 바꾸지 않는다. 12px/24px처럼 기존의
+  측정된 기하를 보존해야 하는 예외는 해당 컴포넌트가 이유를 진다.
+- **획과 색:** Lucide 기본 획 2를 유지하고 개별 아이콘에서 `strokeWidth`를 다시 정하지
+  않는다. 색은 언제나 `currentColor` 상속이며 토큰 텍스트 클래스가 부모 또는 아이콘에
+  놓인다. `stroke`·`fill` 색 하드코딩은 0이다.
+- **접근성:** 옆에 읽는 레이블이 있는 아이콘은 `aria-hidden`이다. 아이콘만 있는 버튼은
+  기존 `aria-label`을 보존한다. 아이콘 이름을 접근성 이름으로 대신 쓰지 않는다.
+
+**로컬 SVG 예외 목록은 아래 세 파일로 닫혀 있다.** 셋은 모두 같은 oort 브랜드 글리프이며
+기능 아이콘이 아니다.
+
+| 파일 | 존치 사유 |
+|---|---|
+| `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크. 앱 안에서 `currentColor`를 상속한다. |
+| `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
+| `clients/web/public/favicon.svg` | 브라우저가 직접 읽는 고정 파비콘 브랜드 자산. |
+
+각 파일은 `icon-system-exception(ADR-0172)` 주석으로 이유를 선언한다. 기계 정본은
+`clients/web/src/design/iconSystem.test.ts`다. 새 raw SVG 또는 정적 SVG는 목록 밖이면
+실패하고, 예외를 늘리려면 이 절과 해당 파일의 사유를 같은 변경에서 갱신해야 한다.
+
 ---
 
 ## 3. 위계 규칙 — 파괴 > 주 > 보조
