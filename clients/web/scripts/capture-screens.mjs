@@ -3406,10 +3406,69 @@ async function assertCopiedClipboard(page, where, expected) {
       `[${where}] 클립보드 ${JSON.stringify(text)} ≠ ${JSON.stringify(expected)}`
     );
   }
+  return text;
 }
 
-function messageShareUrlForCapture(messageId) {
-  return `${ORIGIN}/#/c/${GENERAL_ID}?msg=${messageId}`;
+/**
+ * 제품이 클립보드에 넣은 공유 링크를 읽는다. URL 모양을 여기서 다시 적지 않는다
+ * (사본이 초록인 채 링크만 죽는 자리 — design-review #1764 M-3).
+ */
+async function readCopiedShareUrl(page, where, { messageId, seq }) {
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  if (!text.startsWith(`${ORIGIN}/#/c/${GENERAL_ID}?`)) {
+    throw new Error(`[${where}] 공유 링크가 이 서버 origin이 아니다: ${text}`);
+  }
+  if (!text.includes(`msg=${String(messageId).toLowerCase()}`)) {
+    throw new Error(`[${where}] 공유 링크에 msg가 없다: ${text}`);
+  }
+  if (seq !== undefined && seq !== null && !text.includes(`seq=${seq}`)) {
+    throw new Error(`[${where}] 공유 링크에 seq가 없다: ${text}`);
+  }
+  if (text.includes("tauri://")) {
+    throw new Error(`[${where}] 공유 링크가 번들 origin을 싣고 있다: ${text}`);
+  }
+  return text;
+}
+
+/**
+ * 복사된 URL을 새 페이지에서 열어 대상 행에 착지하는지 잰다.
+ * 캡처 컨텍스트는 localStorage를 페이지끼리 공유하므로 두 번째 장부터는
+ * 이미 로그인된 셸이다 (`signIn` 주석).
+ */
+async function assertShareUrlLands(context, url, where) {
+  const hashQuery = url.split("#")[1]?.split("?")[1] ?? "";
+  const msg = new URLSearchParams(hashQuery).get("msg");
+  if (!msg) {
+    throw new Error(`[${where}] 착지 URL에 msg가 없다: ${url}`);
+  }
+  const landing = await context.newPage();
+  try {
+    await landing.goto(url, { waitUntil: "networkidle" });
+    const row = landing.locator(
+      `[data-testid="timeline-message"][data-message-id="${msg}"]`
+    );
+    await row.waitFor({ state: "visible", timeout: 8_000 });
+    const pos = await row.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        top: r.top,
+        bottom: r.bottom,
+        vh: window.innerHeight,
+        inView: r.top >= 0 && r.top < window.innerHeight && r.height > 0,
+      };
+    });
+    if (!pos.inView) {
+      throw new Error(
+        `[${where}] 붙여넣은 링크가 대상 행을 뷰포트에 두지 못했다 ` +
+          `top=${pos.top} bottom=${pos.bottom} vh=${pos.vh}`
+      );
+    }
+    console.log(
+      `  착지 ${where}: msg=${msg} top=${Math.round(pos.top)} vh=${pos.vh}`
+    );
+  } finally {
+    await landing.close();
+  }
 }
 
 /**
@@ -3666,19 +3725,19 @@ async function captureMobile(browser, scheme) {
   await shoot(page, "b11-action-sheet");
   // UX-D3 (#1755): 시트 클립보드 항목을 실제로 누르고 내용을 읽는다.
   await page.getByTestId("sheet-copy").click();
-  await page.getByTestId("sheet-copy").getByText("복사됨").waitFor();
+  await page.getByTestId("sheet-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(page, `시트 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
   await page.getByTestId("sheet-copy-link").click();
   await page.getByTestId("sheet-copy-link").getByText("링크 복사됨").waitFor();
   const sheetMessageId = await sheetTarget.getAttribute("data-message-id");
+  const sheetSeq = await sheetTarget.getAttribute("data-seq");
   if (!sheetMessageId) {
     throw new Error(`[시트 ${scheme}] 마지막 행에 data-message-id가 없다`);
   }
-  await assertCopiedClipboard(
-    page,
-    `시트 링크 복사 ${scheme}`,
-    messageShareUrlForCapture(sheetMessageId)
-  );
+  await readCopiedShareUrl(page, `시트 링크 복사 ${scheme}`, {
+    messageId: sheetMessageId,
+    seq: sheetSeq,
+  });
   console.log(`  시트 ${scheme}: 메시지 복사 · 링크 복사 클립보드 일치`);
   await page.keyboard.press("Escape");
   await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
@@ -4413,16 +4472,19 @@ async function captureScheme(browser, scheme) {
     throw new Error(`[메뉴 ${scheme}] 링크 복사가 없다`);
   }
   await login.getByTestId("menu-copy").click();
-  await login.getByTestId("menu-copy").getByText("복사됨").waitFor();
+  await login.getByTestId("menu-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(login, `⋯ 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
   await login.getByTestId("menu-copy-link").click();
   await login.getByTestId("menu-copy-link").getByText("링크 복사됨").waitFor();
   const menuMessageId = await actionRow.getAttribute("data-message-id");
+  const menuSeq = await actionRow.getAttribute("data-seq");
   if (!menuMessageId) {
     throw new Error(`[메뉴 ${scheme}] 마지막 행에 data-message-id가 없다`);
   }
-  const expectedLink = messageShareUrlForCapture(menuMessageId);
-  await assertCopiedClipboard(login, `⋯ 링크 복사 ${scheme}`, expectedLink);
+  const copiedLink = await readCopiedShareUrl(login, `⋯ 링크 복사 ${scheme}`, {
+    messageId: menuMessageId,
+    seq: menuSeq,
+  });
   await login.keyboard.press("Escape");
   await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
 
@@ -4432,12 +4494,16 @@ async function captureScheme(browser, scheme) {
   const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
   await login.screenshot({ path: contextShot });
   shots.push(contextShot);
+  await login.getByTestId("context-copy").click();
+  await login.getByTestId("context-copy").getByText("메시지 복사됨").waitFor();
+  await assertCopiedClipboard(login, `우클릭 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
   await login.getByTestId("context-copy-link").click();
   await login.getByTestId("context-copy-link").getByText("링크 복사됨").waitFor();
-  await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, expectedLink);
+  await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, copiedLink);
   await login.keyboard.press("Escape");
   await login.getByTestId("message-context-menu").waitFor({ state: "hidden" });
   console.log(`  메뉴 ${scheme}: ⋯·우클릭 클립보드 항목 누름`);
+  await assertShareUrlLands(context, copiedLink, `⋯ 링크 ${scheme}`);
 
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
