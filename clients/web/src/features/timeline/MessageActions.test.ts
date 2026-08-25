@@ -111,6 +111,7 @@ describe("메시지 액션 세 표면", () => {
   it("복사는 렌더된 HTML이 아니라 본문 원문을 받는 독립 액션이다", () => {
     const items = messageActionItemsForSurface("menu", available, copyReady);
     const copy = items.find((item) => item.key === "copy");
+    expect(COPY_MESSAGE_ACTION_LABEL).toBe("메시지 복사하기");
     expect(copy).toMatchObject({
       label: COPY_MESSAGE_ACTION_LABEL,
       accessibleLabel: COPY_MESSAGE_ACTION_LABEL,
@@ -138,6 +139,7 @@ describe("메시지 액션 세 표면", () => {
         available,
         copyReady
       ).find((entry) => entry.key === "copy-link");
+      expect(COPY_LINK_ACTION_LABEL).toBe("링크 복사하기");
       expect(item).toMatchObject({
         key: "copy-link",
         testKey: "copy-link",

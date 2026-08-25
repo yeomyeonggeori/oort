@@ -294,6 +294,8 @@ describe("MessageHoverToolbar", () => {
     const copyLink = document.querySelector('[data-testid="menu-copy-link"]');
     expect(copy).not.toBeNull();
     expect(copyLink).not.toBeNull();
+    expect(COPY_MESSAGE_ACTION_LABEL).toBe("메시지 복사하기");
+    expect(COPY_LINK_ACTION_LABEL).toBe("링크 복사하기");
     expect(copy?.textContent).toContain(COPY_MESSAGE_ACTION_LABEL);
     expect(copyLink?.textContent).toContain(COPY_LINK_ACTION_LABEL);
   });

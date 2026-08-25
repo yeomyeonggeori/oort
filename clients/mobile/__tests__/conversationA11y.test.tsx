@@ -371,6 +371,7 @@ describe('M-2 — 목록의 결', () => {
     };
     fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
     fireEvent(screen.getByTestId('message-press'), 'longPress');
+    expect(COPY_MESSAGE_ACTION_LABEL).toBe('메시지 복사하기');
     expect(screen.getByTestId('sheet-copy').props.accessibilityLabel).toBe(
       COPY_MESSAGE_ACTION_LABEL,
     );
