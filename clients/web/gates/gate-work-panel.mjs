@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // GATE: WEB-WP1 「작업 패널」 v0 (결정 정본 docs/planning/2026-08-04-work-panel-design.md).
 //
+// TC-1 (#1758): 헤더 터미널은 도크다. 이 게이트의 WorkPanel(작업 세션 pane)
+// 진입은 작업 콘솔 경유(`openWorkPanelViaConsole`). agent-work-panel 은
+// 컴포저 경로 그대로다.
+//
 // 이 게이트가 지키는 것은 화면의 모양이 아니라 **패널이 하는 말이 참인가**이다.
 //
 //   1. 도착 순서       `text_delta` 3프레임이 도착한 순서대로 한 문장이 된다.
@@ -73,6 +77,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { openWorkPanelViaConsole } from "./work-openers.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_PANEL_GATE_PORT || 5189);
@@ -247,8 +252,17 @@ const channels = [
  * 달라지는 것은 오직 **글자 폭** 하나여야 비교가 성립한다.
  */
 const LONG_CHANNEL_NAME = "release-2026-08-hotfix";
+/**
+ * 머리 절이 900px 양보 폭(실측 글 318px)에도 안 드는 이름.
+ * `LONG_CHANNEL_NAME` 머리 절은 246px 이라 그 띠를 못 잰다 — 절 생략이
+ * 할 일이 없는 판만 이 이름을 쓴다 (`exerciseHeadClauseBand`).
+ */
+const HEAD_CLAUSE_CHANNEL_NAME = "release-2026-08-hotfix-canary-rollback";
 
 function channelsFor(scenario) {
+  if (typeof scenario.channelName === "string") {
+    return channels.map((channel) => ({ ...channel, name: scenario.channelName }));
+  }
   if (scenario.longChannelName !== true) return channels;
   return channels.map((channel) => ({ ...channel, name: LONG_CHANNEL_NAME }));
 }
@@ -854,8 +868,7 @@ async function captureWorkPaneShots(browser) {
       await installRealtimeSocket(page);
       await installRoutes(context, CO_OPEN_SCENARIO);
       await login(page);
-      await page.getByTestId("open-work-panel").click();
-      await page.getByTestId("work-panel").waitFor();
+      await openWorkPanelViaConsole(page);
       // 목록이 자리를 잡은 뒤에 찍는다. 골격 막대가 서 있는 순간을 찍으면 두 번
       // 돌릴 때마다 다른 판이 나오고, 전후 비교가 조명 비교가 된다.
       await page.getByTestId("work-panel-empty").waitFor();
@@ -988,8 +1001,7 @@ function settlePlaceholder(page) {
   );
 }
 
-async function exerciseWorkPaneCoOpen(browser, width) {
-  const scenario = CO_OPEN_SCENARIO;
+async function exerciseWorkPaneCoOpen(browser, width, scenario = CO_OPEN_SCENARIO) {
   const context = await browser.newContext({
     viewport: { width, height: 800 },
     reducedMotion: "reduce",
@@ -1010,8 +1022,7 @@ async function exerciseWorkPaneCoOpen(browser, width) {
     });
   }
 
-  await page.getByTestId("open-work-panel").click();
-  await page.getByTestId("work-panel").waitFor();
+  await openWorkPanelViaConsole(page);
   await settlePlaceholder(page);
 
   // red seam (#1422): 절 단위 생략을 **끄지 않고**, 그 결과를 되돌린다 — 상자에
@@ -1481,7 +1492,7 @@ async function captureThreadPaneShots(browser) {
  * 는 이 폭의 스크린샷이 사람에게 답한다.
  */
 async function exerciseHeadClauseBand(browser, width) {
-  const scenario = { ...CO_OPEN_SCENARIO, longChannelName: true };
+  const scenario = { ...CO_OPEN_SCENARIO, channelName: HEAD_CLAUSE_CHANNEL_NAME };
   const context = await browser.newContext({
     viewport: { width, height: 800 },
     reducedMotion: "reduce",
@@ -1498,8 +1509,7 @@ async function exerciseHeadClauseBand(browser, width) {
     });
   }
 
-  await page.getByTestId("open-work-panel").click();
-  await page.getByTestId("work-panel").waitFor();
+  await openWorkPanelViaConsole(page);
   await settlePlaceholder(page);
 
   const geometry = await page.evaluate(() => {
@@ -1605,10 +1615,12 @@ async function exerciseHeadClauseBand(browser, width) {
  * 결함이라 고칠 자리도 다르다 — 관찰 대상에 글자 축을 더하는 결정이고, 그 결정은
  * 이 회전의 범위가 아니다.)
  *
- * 1280 -> 980 인 이유: 1280 은 base 에서 문장 전체가 넉넉히 드는 폭이고(그래서
- * 「사라졌다」의 출발점이 광고가 선 화면이다), 980 은 키운 글자로 문장 전체가 안
- * 드는 첫 띠이면서 머리 절은 아직 드는 폭이다. 900 은 base 에서 이미 안 드는 폭이라
- * 이 축을 못 잰다.
+ * 1280 -> 928 인 이유: 1280 은 base 에서 문장 전체가 넉넉히 드는 폭이고(그래서
+ * 「사라졌다」의 출발점이 광고가 선 화면이다), 928 은 pane 이 320px 를 유지하는
+ * 왼쪽 끝이며 키운 글자(17.5px, 문장 339px)가 글 상자(~318px)를 넘는 첫 띠다.
+ * 옛 980 은 컴포저가 더 좁던 판의 눈금이었고, 900px 양보 이후 그 폭에서는 키운
+ * 문장도 든다(실측 339 <= 370). 900 은 pane 이 이미 양보하는 폭이라 이 축의
+ * 「첫 띠」가 아니다.
  *
  * 넷을 잰다:
  *   1. base 에서 광고가 서 있다 — 안 그러면 아래 「사라졌다」가 아무것도 안 잰다.
@@ -1625,8 +1637,7 @@ async function exerciseProbeRuler(browser, wideWidth, width) {
   await installRealtimeSocket(page);
   await installRoutes(context, CO_OPEN_SCENARIO);
   await login(page);
-  await page.getByTestId("open-work-panel").click();
-  await page.getByTestId("work-panel").waitFor();
+  await openWorkPanelViaConsole(page);
   await settlePlaceholder(page);
 
   const before = await page.evaluate(() => {
@@ -1792,8 +1803,7 @@ async function captureClauseShots(browser) {
       // 900px 에서만 pane 을 연다: 그 판이 이 티켓이 물려받은 판이고(#1418),
       // 390 과 1200 은 pane 없이도 각각 「가장 좁은 상자」와 「넉넉한 상자」다.
       if (width === 900) {
-        await page.getByTestId("open-work-panel").click();
-        await page.getByTestId("work-panel").waitFor();
+        await openWorkPanelViaConsole(page);
       }
       await page.setViewportSize({ width, height: 800 });
       await page.locator("#composer-input").waitFor();
@@ -1862,15 +1872,23 @@ async function main() {
       await exerciseCoOpen(browser);
       // 양보 구간과 그 밖 (#1418). 900px 은 pane 이 폭을 내는 유일한 구간의
       // 왼쪽 끝이고, 1280px 은 gate:my-sessions 가 자기 단언을 세워 둔 폭이다.
-      await exerciseWorkPaneCoOpen(browser, 900);
+      //
+      // 900px 실측 컴포저는 ~342px 이고, `release-2026-08` 문장은 그 폭에 한 줄로
+      // 든다. 절 생략·넘침 단정(아래 width < 928)이 공회전하지 않게 접히는 쪽만
+      // 긴 방 이름을 쓴다. 1280 은 짧은 이름 그대로 — 「넓은 판에서는 안 버린다」
+      // 짝이 남는다. 숫자(한 줄/두 줄, 광고 유무)는 그대로다.
+      await exerciseWorkPaneCoOpen(browser, 900, {
+        ...CO_OPEN_SCENARIO,
+        longChannelName: true,
+      });
       await exerciseWorkPaneCoOpen(browser, 1280);
       // 절 단위 생략이 손을 뗀 띠 (#1422 design-review H1). 같은 900px 판에서
       // 방 이름만 넉 자 길다.
       await exerciseHeadClauseBand(browser, 900);
       // 자를 움직이는 다른 축 — 같은 상자, 큰 글자 (#1422 수리 회전 M1). 1280 에서
-      // 글자를 키운 뒤 980 으로 좁힌다: 자를 늙게 하는 사건과 자를 쓰게 하는
+      // 글자를 키운 뒤 928 으로 좁힌다: 자를 늙게 하는 사건과 자를 쓰게 하는
       // 사건이 따로 오는 그 순서가 이 결함이 화면에 나오는 순서다.
-      await exerciseProbeRuler(browser, 1280, 980);
+      await exerciseProbeRuler(browser, 1280, 928);
       // 문턱 아래의 스레드 패널 (#1421). 600 과 899 는 구간의 양 끝이고, 700 은
       // 티켓이 인용한 실측(컴포저 36px)이 난 폭이다. 양 끝만 재면 그 사이에서
       // 무엇이 달라지는지 아무도 모르고, 가운데만 재면 경계가 어디였는지 모른다.

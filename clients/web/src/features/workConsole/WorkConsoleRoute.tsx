@@ -63,6 +63,11 @@ import {
 //
 // T1/T2/T3는 상태 칩과 나란히 합치지 않는다. 상태는 "지금 무엇을 하는가",
 // 위치는 "어디서 도는가"라는 서로 다른 질문이며, 둘 다 글자와 아이콘으로 답한다.
+//
+// TC-1 (#1758) 공존: 헤더 터미널 아이콘은 채널 하단 도크다. 전역 세션 목록은
+// 여기(`/work`)가 산다. 채널 우측 WorkPanel 은 표면 삭제되지 않았고, 이
+// 라우트의 `open-work-panel` → `/c/:id?work-panel=1` 이 그 도달 경로다.
+// 채널 컨텍스트의 관전 진입은 도크가 승계한다.
 // =============================================================================
 
 function LocationIcon({ location }: { location: WorkConsoleLocation }) {
@@ -257,6 +262,11 @@ export function WorkConsoleRoute() {
     directoryQuery.directory,
     directoryQuery.error,
   ]);
+  // 채널 우측 WorkPanel 도달 (#1758). 선택된 세션의 방이 있으면 그 방,
+  // 없으면 명부의 첫 채널. 헤더 터미널 아이콘은 도크이므로 이 링크가
+  // WorkPanel 의 제품 진입점이다.
+  const panelChannelId = selected?.channelId ?? channels[0]?.id ?? null;
+
   const ownerNameOf = (memberId: string): string => {
     if (directoryQuery.data === undefined) {
       return directoryQuery.error === null
@@ -327,17 +337,28 @@ export function WorkConsoleRoute() {
             워크스페이스의 작업 세션과 터미널 관전을 한곳에서 확인합니다.
           </p>
         </div>
-        {sessionsQuery.data !== undefined && (
-          <span
-            className="shrink-0 text-meta text-ink-muted"
-            data-testid="work-console-count"
-          >
-            <span data-numeric className="font-mono">
-              {sessions.length}
+        <div className="flex shrink-0 items-center gap-2">
+          {panelChannelId !== null && (
+            <Link
+              to={`/c/${panelChannelId}?work-panel=1`}
+              className="text-meta text-ink-muted hover:text-ink focus-visible:focus-ring"
+              data-testid="open-work-panel"
+            >
+              채널에서 보기
+            </Link>
+          )}
+          {sessionsQuery.data !== undefined && (
+            <span
+              className="shrink-0 text-meta text-ink-muted"
+              data-testid="work-console-count"
+            >
+              <span data-numeric className="font-mono">
+                {sessions.length}
+              </span>
+              개
             </span>
-            개
-          </span>
-        )}
+          )}
+        </div>
       </header>
 
       {offline && (

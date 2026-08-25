@@ -60,12 +60,27 @@ describe("channel header terminal opens the dock, not a fake input", () => {
     expect(SHELL_CODE).toMatch(/<TerminalDock /);
     expect(SHELL_CODE).toMatch(/setDockOpen/);
     expect(SHELL).toMatch(/aria-label="터미널"/);
-    expect(SHELL).toMatch(/data-testid="open-work-panel"/);
+    expect(SHELL).toMatch(/data-testid="open-terminal-dock"/);
+    expect(SHELL_CODE).not.toMatch(/data-testid="open-work-panel"/);
     expect(SHELL_CODE).toMatch(/requestAnimationFrame/);
   });
 
   it("XOR the right work panel so ObserverTerminal is not mounted twice", () => {
     expect(SHELL_CODE).toMatch(/!dockOpen/);
     expect(SHELL_CODE).toMatch(/setDockOpen\(false\)/);
+  });
+});
+
+describe("WorkPanel is reached from the work console, not the header", () => {
+  const CONSOLE = readFileSync(
+    new URL("../workConsole/WorkConsoleRoute.tsx", import.meta.url),
+    "utf8"
+  );
+
+  it("keeps open-work-panel on the work console route", () => {
+    expect(CONSOLE).toMatch(/data-testid="open-work-panel"/);
+    expect(CONSOLE).toMatch(/\?work-panel=1/);
+    expect(SHELL_CODE).toMatch(/anchorWorkPanel/);
+    expect(SHELL_CODE).toMatch(/work-panel/);
   });
 });

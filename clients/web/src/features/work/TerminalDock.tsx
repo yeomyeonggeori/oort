@@ -28,9 +28,11 @@ import { useSession } from "@/app/session";
 //     send_stdin/resize/kill 인코더가 없다 (observerStream.ts 부재가 계약).
 //   * 우측 WorkPanel 은 목록·인수·화면 관전/조작·원장이고, 그 안의
 //     ObserverTerminal 도 관찰 전용이다. 즉시 입력 왕복 터미널은 웹에 없다.
-//   * 헤더 SquareTerminal 은 이 도크를 연다. WorkPanel 은 타임라인 세션 카드
-//     (`openWorkSession`)·`/work` 작업 콘솔이 연다. 공존, 역할 분리.
-//     같은 세션의 ObserverTerminal 이중 마운트를 막기 위해 둘은 XOR.
+//   * 헤더 SquareTerminal 은 이 도크를 연다 (`open-terminal-dock`).
+//     WorkPanel 은 타임라인 세션 카드 (`openWorkSession`)·사이드바
+//     「작업 콘솔」(`/work` → `open-work-panel` → `?work-panel=1`)이 연다.
+//     공존, 역할 분리. 같은 세션의 ObserverTerminal 이중 마운트를 막기 위해
+//     둘은 XOR. 채널 스코프 관전은 도크, 전역 목록·원장은 작업 콘솔/WorkPanel.
 //   * 새 세션 POST 는 웹 클라에 없다. + 버튼을 그리지 않는다.
 //   * 원격(팀원) 터미널 조작은 TC-2. 여기 입력창 없음.
 //

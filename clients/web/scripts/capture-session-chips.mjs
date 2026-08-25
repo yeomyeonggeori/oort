@@ -38,6 +38,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { openTerminalDock } from "../gates/work-openers.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SESSION_CHIPS_CAPTURE_PORT || 5198);
@@ -621,6 +622,14 @@ async function openPanel(context) {
     .locator(`[data-testid="channel-list"] a[href="#/c/${CHANNEL_ID}"]`)
     .first()
     .click();
+  // 채널 스코프 세션은 도크에 산다. 전역 목록은 작업 콘솔. 칩 문법은 여전히
+  // WorkPanel 목록/상세에 있고, 그 패널은 작업 콘솔 경유로 연다 (#1758).
+  await openTerminalDock(page);
+  await page.getByTestId("terminal-dock-tab").first().waitFor();
+  await page.getByTestId("terminal-dock-close").click();
+  await page.getByTestId("nav-work-console").click();
+  await page.getByTestId("work-console-route").waitFor();
+  await page.getByTestId("work-console-row").first().waitFor();
   await page.getByTestId("open-work-panel").click();
   await page.getByTestId("work-panel").waitFor({ state: "visible" });
   await page.getByTestId("work-scope-all").click();

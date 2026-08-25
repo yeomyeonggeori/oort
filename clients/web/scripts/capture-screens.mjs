@@ -4152,7 +4152,7 @@ async function captureMobile(browser, scheme) {
   await shoot(page, "chat");
 
   // TC-1 (#1758): 헤더 터미널을 실제로 눌러 도크가 컴포저 위에 앉는지 폰에서도 잰다.
-  await page.getByTestId("open-work-panel").click();
+  await page.getByTestId("open-terminal-dock").click();
   await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
   await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
   await assertComposerVisible(page, `terminal dock ${scheme}`);
@@ -5989,7 +5989,7 @@ async function captureTerminalDockScenes(browser, scheme) {
   ];
 
   async function openDock(page) {
-    const toggle = page.getByTestId("open-work-panel");
+    const toggle = page.getByTestId("open-terminal-dock");
     await toggle.click();
     await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
     if ((await toggle.getAttribute("aria-pressed")) !== "true") {
@@ -6020,7 +6020,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       await page.getByTestId("login-email").fill("seongjae@dawn.example");
       await page.getByTestId("login-password").fill("capture-only-not-a-credential");
       await page.getByTestId("login-submit").click();
-      await page.getByTestId("open-work-panel").waitFor({ state: "visible" });
+      await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
       await page.getByTestId("composer-input").waitFor({ state: "visible" });
     } else {
       await page.goto(ORIGIN, { waitUntil: "networkidle" });
@@ -6043,7 +6043,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     await page.keyboard.press("Escape");
     await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
     await page.waitForFunction(
-      `document.activeElement?.getAttribute("data-testid") === "open-work-panel"`
+      `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
     );
     await openDock(page);
     await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
@@ -6117,7 +6117,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       await page.getByTestId("terminal-dock-close").click();
       await dock.waitFor({ state: "detached" });
       await page.waitForFunction(
-        `document.activeElement?.getAttribute("data-testid") === "open-work-panel"`
+        `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
       );
       await openDock(page);
       await tabs.nth(1).waitFor({ state: "visible" });

@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // GATE: MOMO-644 my-session continuity surface.
 //
+// TC-1 (#1758): 채널 스코프 세션은 도크, 전역 목록은 작업 콘솔에서 같은
+// 강도로 잰다. WorkPanel 고유 단정(범위 칩·320px 피커·내 세션 행)은
+// 작업 콘솔 경유(`open-work-panel` → `?work-panel=1`)로 연 뒤에 유지한다.
+//
 // No backend or credentials. The long DM label locks scope-chip shrink priority,
 // and the session projection resolves before the host projection on purpose:
 // every scope must wait for host truth instead of briefly painting an offline
@@ -40,6 +44,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import {
+  openTerminalDock,
+  openWorkPanelViaConsole,
+} from "./work-openers.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.MY_SESSIONS_GATE_PORT || 5184);
@@ -357,7 +365,7 @@ async function installRoutes(context, state) {
     // `return json(route, {})` 가 200 을 주지만 **모양이 비어 있고**, 코어의
     // `refreshResponseFromWire`(packages/momo-core/src/lib/api.ts:632)는 두 필드가
     // 문자열이 아니면 throw 한다 → `markAuthExpired()` → 앱이 스스로 로그아웃한다.
-    // 증상은 `loginPage` 가 `open-work-panel` 을 30초 기다리다 죽는 것이었다(규명 2/4).
+    // 증상은 `loginPage` 가 헤더 터미널 토글(`open-terminal-dock`)을 30초 기다리다 죽는 것이었다(규명 2/4).
     if (path === "/v1/auth/refresh") {
       return json(route, {
         accessToken: auth.accessToken,
@@ -441,7 +449,7 @@ async function installRoutes(context, state) {
 
 async function loginAndOpenPanel(context) {
   const page = await loginPage(context);
-  await page.getByTestId("open-work-panel").click();
+  await openWorkPanelViaConsole(page);
   return page;
 }
 
@@ -454,18 +462,51 @@ async function loginPage(context) {
   // appear, skip sign-in, and then wait forever for the shell. Wait until ONE
   // of the two possible surfaces actually exists before deciding which one.
   const loginSubmit = page.getByTestId("login-submit");
-  const workPanelToggle = page.getByTestId("open-work-panel");
+  const terminalToggle = page.getByTestId("open-terminal-dock");
   await Promise.race([
     loginSubmit.waitFor({ timeout: 30_000 }).catch(() => {}),
-    workPanelToggle.waitFor({ timeout: 30_000 }).catch(() => {}),
+    terminalToggle.waitFor({ timeout: 30_000 }).catch(() => {}),
   ]);
   if ((await loginSubmit.count()) > 0) {
     await page.getByTestId("login-email").fill("gate@example.test");
     await page.getByTestId("login-password").fill("not-a-secret");
     await loginSubmit.click();
   }
-  await workPanelToggle.waitFor();
+  await terminalToggle.waitFor();
   return page;
+}
+
+/** 채널 스코프 세션은 이제 도크에 산다. 탭 수와 원장 id 를 같은 강도로 잰다. */
+async function assertChannelDock(page, expectedIds) {
+  await openTerminalDock(page);
+  const tabs = page.getByTestId("terminal-dock-tab");
+  await tabs.first().waitFor();
+  const ids = await tabs.evaluateAll((nodes) =>
+    nodes.map((node) => String(node.getAttribute("data-session-id") ?? "").toLowerCase())
+  );
+  const missing = expectedIds.filter(
+    (id) => !ids.includes(id.toLowerCase())
+  );
+  if (missing.length > 0 || ids.length !== expectedIds.length) {
+    throw new Error(
+      `channel dock lost ledger sessions: rendered ${JSON.stringify(ids)}, expected ${JSON.stringify(expectedIds)}`
+    );
+  }
+  await page.getByTestId("terminal-dock-close").click();
+  await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
+}
+
+/** 전역 세션 목록은 작업 콘솔에 산다. */
+async function assertWorkConsoleList(page, expectedCount) {
+  await page.getByTestId("nav-work-console").click();
+  await page.getByTestId("work-console-route").waitFor();
+  const rows = page.getByTestId("work-console-row");
+  await rows.first().waitFor();
+  if ((await rows.count()) !== expectedCount) {
+    throw new Error(
+      `work console lost ledger sessions: rendered ${await rows.count()}, expected ${expectedCount}`
+    );
+  }
 }
 
 /**
@@ -684,9 +725,14 @@ async function assertContinuity(context, state) {
     throw new Error("idle channel card did not open the matching session");
   }
   await page.getByTestId("work-panel-close").click();
-  await page.getByTestId("open-work-panel").click();
-
+  // 호스트 지연 단정은 패널을 다시 연 직후에 잰다. 도크/콘솔을 먼저 들르면
+  // 1200ms 지연이 이미 끝나 원 단정이 허공이 된다. 목적지는 작업 콘솔이
+  // 내는 것과 같은 `?work-panel=1` 이다.
+  await page.goto(`${origin}/#/c/${channelId}?work-panel=1`, {
+    waitUntil: "domcontentloaded",
+  });
   const panel = page.getByTestId("work-panel");
+  await panel.waitFor();
   await panel
     .getByTestId("work-panel-summary")
     .filter({ hasText: "세션 4개" })
@@ -971,6 +1017,15 @@ async function assertContinuity(context, state) {
     .getByTestId("my-work-session-status")
     .filter({ hasText: "실행 중" })
     .waitFor();
+
+  await page.getByTestId("work-panel-close").click();
+  await assertChannelDock(page, [
+    offlineSessionId,
+    onlineSessionId,
+    orphanedSessionId,
+    otherSessionId,
+  ]);
+  await assertWorkConsoleList(page, 4);
   await page.close();
 }
 
@@ -979,8 +1034,7 @@ async function assertTransitionBeforeList(context, state) {
   state.sessionStatuses[onlineSessionId] = "running";
   state.nextSessionDelayMs = 1_200;
   const page = await loginPage(context);
-  await page.getByTestId("open-work-panel").click();
-  await page.getByTestId("work-panel").waitFor();
+  await openWorkPanelViaConsole(page);
   await page.waitForTimeout(100);
 
   state.sessionStatuses[onlineSessionId] = "idle";
