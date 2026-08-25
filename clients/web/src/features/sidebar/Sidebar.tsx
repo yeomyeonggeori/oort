@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -55,7 +55,11 @@ import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
-import { type SidebarSectionId } from "./sidebarSectionModel";
+import { sectionUnreadTotals } from "./sidebarSectionModel";
+import {
+  setSidebarSectionCollapsed,
+  useSidebarSectionsCollapsed,
+} from "./sidebarSectionPreference";
 import {
   connectionBarClass,
   connectionCopy,
@@ -143,15 +147,7 @@ export function Sidebar({
   const previousCollapsedRef = useRef(channelPaneCollapsed);
   const previousDrawerRef = useRef(asDrawer);
   const desktopToggleFocusedRef = useRef(false);
-  const [collapsedSections, setCollapsedSections] = useState<
-    Record<SidebarSectionId, boolean>
-  >({ channels: false, dms: false });
-
-  const setSectionCollapsed = (id: SidebarSectionId, next: boolean) => {
-    setCollapsedSections((current) =>
-      current[id] === next ? current : { ...current, [id]: next }
-    );
-  };
+  const collapsedSections = useSidebarSectionsCollapsed();
 
   const onDesktopToggleBlur = (event: React.FocusEvent<HTMLButtonElement>) => {
     const next = event.relatedTarget;
@@ -250,6 +246,7 @@ export function Sidebar({
   // 명부가 도착하기 전에는 아직 아무것도 내밀지 않는다 (R2 M5); 그동안 헤더의
   // 액션 자리는 아래에서 같은 크기의 빈 칸이 지킨다.
   const openCreateChannel = useOpenCreateChannel();
+  const newChannelRef = useRef<HTMLButtonElement>(null);
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
 
@@ -283,6 +280,16 @@ export function Sidebar({
   const unreadChannels = useMemo(
     () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
     [ordered, unreadCountFor]
+  );
+  // ⌥↓ walks this list even when a section is folded. The collapsed header
+  // therefore carries the same aggregate the keyboard already visits (M-2).
+  const channelUnread = useMemo(
+    () => sectionUnreadTotals(channels.map(unreadCountFor)),
+    [channels, unreadCountFor]
+  );
+  const dmUnread = useMemo(
+    () => sectionUnreadTotals(dms.map(unreadCountFor)),
+    [dms, unreadCountFor]
   );
 
   useEffect(() => {
@@ -396,8 +403,9 @@ export function Sidebar({
       >
         <div className="flex items-center gap-2 border-b border-line p-2">
           {/* Desktop-only. The control used to live under the identity row
-              (#1291); UX-D4 puts it at the top of the pane so collapse and
-              expand share one vertical seat (buzz 34·35). Icon-only: the
+              (#1291); UX-D4 puts it at the top of the open pane (buzz 34·35).
+              Expand lives on the rail, outside the workspace nav, so the
+              two are a focus handoff rather than one seat. Icon-only: the
               accessible name is unchanged so the shell gate still reads the
               same aria-controls relationship. */}
           {!asDrawer && (
@@ -540,15 +548,21 @@ export function Sidebar({
               title="채널"
               sectionId="channels"
               collapsed={collapsedSections.channels}
-              onCollapsedChange={(next) => setSectionCollapsed("channels", next)}
+              onCollapsedChange={(next) =>
+                setSidebarSectionCollapsed("channels", next)
+              }
+              unreadCount={channelUnread.unreadCount}
+              mentionCount={channelUnread.mentionCount}
               action={
                 canCreate ? (
                   /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
                      크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
-                     셋(+, 새 DM, 설정)이 같은 규격이다. */
+                     셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
+                     이사했다. */
                   <button
+                    ref={newChannelRef}
                     type="button"
-                    onClick={openCreateChannel}
+                    onClick={() => openCreateChannel(newChannelRef.current)}
                     aria-label="새 채널 만들기"
                     title="새 채널 만들기"
                     data-testid="new-channel"
@@ -590,7 +604,7 @@ export function Sidebar({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={openCreateChannel}
+                        onClick={() => openCreateChannel()}
                         data-testid="sidebar-create-channel"
                       >
                         채널 만들기
@@ -610,7 +624,11 @@ export function Sidebar({
                 title="다이렉트 메시지"
                 sectionId="dms"
                 collapsed={collapsedSections.dms}
-                onCollapsedChange={(next) => setSectionCollapsed("dms", next)}
+                onCollapsedChange={(next) =>
+                  setSidebarSectionCollapsed("dms", next)
+                }
+                unreadCount={dmUnread.unreadCount}
+                mentionCount={dmUnread.mentionCount}
                 action={
                   <Link
                     to="/directory"
