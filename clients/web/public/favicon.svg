@@ -2,6 +2,8 @@
   <!--
     oort 탭 아이콘 (B4.4). src/design/brand/OortMark.tsx와 같은 24x24 격자의 같은
     path이고, 32x32 타일 안에 4px 여백을 두고 앉는다.
+    icon-system-exception(ADR-0172): 브라우저가 직접 읽는 oort 브랜드 파비콘이라
+    Lucide 기능 아이콘으로 바꾸지 않고 로컬 SVG로 남긴다.
 
     여기서는 색이 토큰이 아니라 리터럴이다. 이 파일은 CSS 캐스케이드 밖에서
     브라우저 탭이 직접 읽으므로 var(accent 토큰)가 닿지 않는다. 값은 tokens.css의

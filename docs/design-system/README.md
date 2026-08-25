@@ -40,6 +40,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 |---|---|
 | 색을 고른다 | §2.2 — 웹 `clients/web/src/design/tokens.css`가 유일 정본. 폰은 그것을 **번역**한다. |
 | 간격·반경·글자 크기를 고른다 | §2.3~§2.5 — 스케일 밖 값은 **이름**으로 들어오거나 아예 안 들어온다. |
+| 아이콘을 고른다 | §2.8 — lucide 한 벌, 16px 단일 기본. 예외는 컴포넌트가 사유를 진다. |
 | 버튼 두 개를 나란히 세운다 | §3 위계 — 파괴 > 주 > 보조. 값이 아니라 **관계**다. |
 | 새 표면을 만든다 | §4 상태 — 빈·로딩·오류·오프라인 넷이 다 있어야 출하다. |
 | "이거 기계가 잡나?"를 묻는다 | §5 강제 기제 지도. **§5.3이 안 잡는 것 목록**이다. |
@@ -223,6 +224,51 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 다만 **아직 전면 적용이 아니다.** `slopTo`를 쓰는 것은 그 결함이 발견된 `MessageRow.tsx` 하나이고, 다섯 자리가 여전히 숫자를 손으로 적는다(`atoms.tsx` · `StopTurnControl.tsx` · `LongPressHint.tsx` · `MessageBody.tsx` · `Quote.tsx`). `designSystem.test.ts`가 강제하는 것은 "전부 도출"이 아니라 **"그 다섯이 여섯이 되지 않는 것"**이다 — 새로 손으로 적으면 빨갛고, 기존 다섯은 세어진 채 남아 있다.
 
+### 2.8 아이콘 — `lucide-react`가 기능 글리프의 정본이다
+
+웹·Tauri 제품 표면의 기능 아이콘은 **`lucide-react` 한 벌만** 쓴다(ADR-0172,
+Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS 도형·아이콘 폰트·
+기능 이모지를 새로 만들지 않는다. 이름은 화면에서 하는 일에 맞춘다. 예를 들어 검색은
+`Search`, 인박스는 `Inbox`, 설정은 `Settings`, 복사는 `Copy`, 시각은 `Clock`, 링크는
+`Link`/`ExternalLink`, 플래그는 `Flag` 계열이다. 모양이 완전히 같은가보다 **행동이 같은가**가
+선택 기준이다.
+
+- **가져오기와 번들:** 아이콘을 정적인 named import로만 가져온다. `import * as Icons`,
+  런타임 이름 조회, 전체 아이콘 사전은 금지한다. `lucide-react`는 `sideEffects: false`이고
+  Vite 프로덕션 빌드가 사용한 export만 tree-shake한다. 아이콘을 늘린 PR은 전·후 gzip
+  번들을 실측해 이 전제가 실제 산출물에서도 맞는지 기록한다.
+- **크기:** 기본은 16px(`size-4`) **하나다** — 직접 지정이 대다수이고 나머지는 버튼
+  프리미티브의 `[&_svg]:size-4`(레포 유일의 부모 크기 계약, `button.tsx`)가 진다.
+  20px(`size-5`)는 레포에 **0건**이다(헤더 상위 액션 — 허들·핀·터미널 — 도 16px).
+  두 번째 기본을 들이는 것은 관례 추가가 아니라 이 절의 개정이다. 교체하면서 컨트롤
+  상자·패딩·행 높이를 바꾸지 않는다. 12px·24px처럼 기존의 측정된 기하를 보존하는
+  예외가 **소수 실재**하고(크기는 태그 리터럴·지역 const·컴포넌트 prop 세 경로로
+  오며 셋째는 이름으로 보이지 않는다), 그 예외는 해당 컴포넌트가 이유를 진다 —
+  오늘 사유 주석은 0곳이다. **이 축을 세는 기계는 없고**(§5.3), 손으로 센 수는 여기
+  적지 않는다 — 세 경로 탓에 수가 곧 썩는다.
+- **획과 색:** Lucide 기본 획 2를 유지하고 개별 아이콘에서 `strokeWidth`를 다시 정하지
+  않는다. 색은 언제나 `currentColor` 상속이며 토큰 텍스트 클래스가 부모 또는 아이콘에
+  놓인다. `stroke`·`fill` 색 하드코딩은 0이다.
+- **접근성:** 새로 놓는 장식 아이콘(옆에 읽는 레이블이 있는 것)은 `aria-hidden`을
+  단다. 아이콘만 있는 버튼은 `aria-label`을 보존하고, 아이콘 이름을 접근성 이름으로
+  대신 쓰지 않는다. `lucide-react`는 기본 props에 `aria-hidden`을 넣지 **않으므로**
+  빼먹으면 이름 없는 그래픽이 접근성 트리에 남는다 — **잔량: 오늘 `aria-hidden` 없는
+  배치 57곳, 그중 인접 레이블조차 없는 36곳**(QuickSwitcher 12곳 포함). 이 축을 재는
+  기계는 없다(§5.3).
+
+**로컬 SVG 예외 목록은 아래 세 파일로 닫혀 있다.** 셋은 모두 같은 oort 브랜드 글리프이며
+기능 아이콘이 아니다.
+
+| 파일 | 존치 사유 |
+|---|---|
+| `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크. 앱 안에서 `currentColor`를 상속한다. |
+| `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
+| `clients/web/public/favicon.svg` | 브라우저가 직접 읽는 고정 파비콘 브랜드 자산. |
+
+각 파일은 `icon-system-exception(ADR-0172)` 주석으로 이유를 선언한다. 기계 정본은
+`clients/web/src/design/iconSystem.test.ts`다. 새 raw SVG 또는 정적 SVG는 목록 밖이면
+실패하고, 예외를 늘리려면 이 절과 해당 파일의 사유를 같은 변경에서 갱신해야 한다.
+
 ---
 
 ## 3. 위계 규칙 — 파괴 > 주 > 보조
@@ -321,6 +367,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | **카피** | 프리플라이트 `hype` + AST `emdash`·`progress_word`·`latin_particle`(#1511) | `conversationHygiene.test.tsx` — `src/` 전수 em-dash 스윕 + 같은 AST 로 `progress_word`·`latin_particle`(`design_preflight_phone_strings.mjs` 를 자식 프로세스로, #1511) | `design_preflight_ast.mjs` 가 세 소비자의 규칙 한 벌. 코어에도 거는 이유는 실측이다 — 진행 낱말이 코어 상수로 폰까지 출하됐다(`CANCEL_BUSY_LABEL`) |
 | **포커스** | 프리플라이트 `naked_focus` — 링이 **있는지**만. 링의 성질은 §5.3 | ❌ | — |
 | **인라인 스타일** | ESLint + 프리플라이트 `inline_style` (CSP) | 비해당 | — |
+| **아이콘** | `iconSystem.test.ts` — **`src/**/*.tsx`의 `<svg` 리터럴 + `public/**/*.svg` 전수**와 **정적 named import 형태**만. 그 밖의 유입 경로는 전부 §5.3 | ❌ (ADR-0172가 명시적으로 범위 밖) | — |
 
 ### 5.3 무검사 — 사람만이 잡는 것
 
@@ -341,6 +388,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:33`·`AgentHubRoute.tsx:181`에 남아 있고, **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
 | — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
+| — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |
 
 > **폰에는 taste 스킬 방언이 없다.** `.claude/skills/momo-design-taste`(SwiftUI)와 `-web`(React) 둘뿐이고, `tokens.ts` 머리 주석이 그것을 자백한다. `.claude/agents/design-review.md`의 계약도 macOS/Core를 가리키는데 최근 리뷰 대부분은 웹·폰이다 — ADR-0159 D4가 Swift 삭제 배치와 함께 재조준하기로 한 자리다.
 
