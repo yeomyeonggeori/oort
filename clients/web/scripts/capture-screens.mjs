@@ -169,6 +169,10 @@ const MOBILE_TAP_TARGETS = [
   ["presence-option-dnd", "상태 방해 금지", "optional"],
   ["profile-add-workspace", "워크스페이스 추가", "optional"],
   ["nav-settings", "설정", "optional"],
+  // #1758 M-1 — 도크 닫기/확대는 빠져나오는 손가락 경로인데 28px였다.
+  // optional: 도크가 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["terminal-dock-close", "터미널 닫기", "optional"],
+  ["terminal-dock-expand", "터미널 크게 보기", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
@@ -2273,35 +2277,114 @@ async function assertComposerVisible(page, where) {
 }
 
 /**
- * TC-1 (#1758): 하단 도크는 컴포저 형제이지 덮개가 아니다. 아랫변이 컴포저
- * 윗변을 넘으면 본문 교차 자 관례를 깬 것이다.
+ * TC-1 (#1758 B-1): 도크가 컴포저를 덮지 않는 것만으로는 부족하다. 800px 창에서
+ * 컴포저가 뷰포트 밖으로 나가도 그 경계 단정은 참이었다. 자는 「컴포저 rect ⊂
+ * 뷰포트」와 「타임라인 최소 띠」를 720·800·844 세 높이에서 함께 잰다.
  */
 async function assertDockAboveComposer(page, where) {
-  const measure = await page.evaluate(`(() => {
-    const dock = document.querySelector('[data-testid="terminal-dock"]');
-    const composer = document.querySelector('[data-testid="composer"]');
-    if (!dock || !composer) return { missing: true };
-    const d = dock.getBoundingClientRect();
-    const c = composer.getBoundingClientRect();
-    return {
-      missing: false,
-      dockBottom: Math.round(d.bottom),
-      composerTop: Math.round(c.top),
-      overlap: Math.round(d.bottom - c.top),
-    };
-  })()`);
-  if (measure.missing) {
-    throw new Error(`도크/컴포저 교차 ${where}: 도크 또는 컴포저가 없다`);
+  const original = page.viewportSize();
+  if (!original) {
+    throw new Error(`도크 기하 ${where}: 뷰포트 크기를 모른다`);
   }
-  if (measure.overlap > 1) {
-    throw new Error(
-      `도크가 컴포저를 덮는다 ${where}: 도크 아랫변 ${measure.dockBottom}px, ` +
-        `컴포저 윗변 ${measure.composerTop}px, 교차 ${measure.overlap}px`
-    );
+  try {
+    for (const height of [720, 800, 844]) {
+      await page.setViewportSize({ width: original.width, height });
+      // 폰 셸은 `--app-viewport-height`를 visualViewport에서 받아 쓴다. Playwright
+      // 의 setViewportSize 직후에는 그 변수가 직전 높이에 남아 컴포저가 옛 좌표에
+      // 서 있는 경합이 있다. 트래커가 쓸 값과 같은 픽셀을 맞춘 뒤 두 프레임을 기다린다.
+      await page.evaluate((nextHeight) => {
+        document.documentElement.style.setProperty(
+          "--app-viewport-height",
+          `${nextHeight}px`
+        );
+        window.visualViewport?.dispatchEvent(new Event("resize"));
+        window.dispatchEvent(new Event("resize"));
+      }, height);
+      await page.waitForFunction(
+        (nextHeight) => {
+          const composer = document.querySelector('[data-testid="composer"]');
+          if (!composer || window.innerHeight !== nextHeight) return false;
+          return composer.getBoundingClientRect().bottom <= nextHeight + 1;
+        },
+        height,
+        { timeout: 5_000 }
+      );
+      const measure = await page.evaluate(`(() => {
+        const dock = document.querySelector('[data-testid="terminal-dock"]');
+        const composer = document.querySelector('[data-testid="composer"]');
+        const timeline = document.querySelector('[data-testid="chat-timeline"]');
+        const input = document.querySelector('[data-testid="composer-input"]');
+        const send = document.querySelector('[data-testid="composer-send"]');
+        if (!dock || !composer) return { missing: true };
+        const d = dock.getBoundingClientRect();
+        const c = composer.getBoundingClientRect();
+        const t = timeline ? timeline.getBoundingClientRect() : null;
+        const strip = timeline
+          ? parseFloat(getComputedStyle(timeline).minHeight) || 0
+          : 0;
+        const vh = window.innerHeight;
+        const vw = window.innerWidth;
+        const inputBox = input ? input.getBoundingClientRect() : null;
+        const sendBox = send ? send.getBoundingClientRect() : null;
+        const inside = (box) =>
+          box &&
+          box.top >= -1 &&
+          box.left >= -1 &&
+          box.bottom <= vh + 1 &&
+          box.right <= vw + 1;
+        return {
+          missing: false,
+          vh,
+          vw,
+          dockTop: Math.round(d.top),
+          dockBottom: Math.round(d.bottom),
+          dockH: Math.round(d.height),
+          composerTop: Math.round(c.top),
+          composerBottom: Math.round(c.bottom),
+          composerH: Math.round(c.height),
+          overlap: Math.round(d.bottom - c.top),
+          timelineH: t ? Math.round(t.height) : 0,
+          strip: Math.round(strip),
+          composerInView: inside(c),
+          inputInView: inside(inputBox),
+          sendInView: inside(sendBox),
+        };
+      })()`);
+      if (measure.missing) {
+        throw new Error(`도크 기하 ${where} @${height}: 도크 또는 컴포저가 없다`);
+      }
+      if (measure.overlap > 1) {
+        throw new Error(
+          `도크가 컴포저를 덮는다 ${where} @${height}: 도크 아랫변 ${measure.dockBottom}px, ` +
+            `컴포저 윗변 ${measure.composerTop}px, 교차 ${measure.overlap}px`
+        );
+      }
+      if (!measure.composerInView || !measure.inputInView || !measure.sendInView) {
+        throw new Error(
+          `컴포저가 뷰포트 밖이다 ${where} @${height}: 컴포저 ${measure.composerTop}–${measure.composerBottom} ` +
+            `/ 창 ${measure.vw}×${measure.vh} (입력 ${measure.inputInView} · 전송 ${measure.sendInView})`
+        );
+      }
+      if (measure.timelineH + 1 < measure.strip) {
+        throw new Error(
+          `타임라인 띠가 사라졌다 ${where} @${height}: ${measure.timelineH}px < 바닥 ${measure.strip}px`
+        );
+      }
+      console.log(
+        `  dock ${where} @${height}: 도크 ${measure.dockH}px (${measure.dockTop}–${measure.dockBottom}) · ` +
+          `타임라인 ${measure.timelineH}px(바닥 ${measure.strip}) · ` +
+          `컴포저 ${measure.composerTop}–${measure.composerBottom} ⊂ ${measure.vw}×${measure.vh}`
+      );
+    }
+  } finally {
+    await page.setViewportSize(original);
+    await page.evaluate((nextHeight) => {
+      document.documentElement.style.setProperty(
+        "--app-viewport-height",
+        `${nextHeight}px`
+      );
+    }, original.height);
   }
-  console.log(
-    `  dock ${where}: 아랫변 ${measure.dockBottom}px <= 컴포저 ${measure.composerTop}px`
-  );
 }
 
 /**

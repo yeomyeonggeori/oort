@@ -630,6 +630,8 @@ async function openPanel(context) {
   await page.getByTestId("nav-work-console").click();
   await page.getByTestId("work-console-route").waitFor();
   await page.getByTestId("work-console-row").first().waitFor();
+  await page.locator('[data-testid="work-console-row"] a').first().click();
+  await page.getByTestId("open-work-panel").waitFor();
   await page.getByTestId("open-work-panel").click();
   await page.getByTestId("work-panel").waitFor({ state: "visible" });
   await page.getByTestId("work-scope-all").click();

@@ -46,6 +46,10 @@ describe("TC-1 terminal dock is observation-only UI on the existing session mode
     expect(DOCK).toMatch(/data-testid="terminal-dock-expand"/);
     expect(DOCK).toMatch(/data-testid="terminal-dock-close"/);
     expect(DOCK).toMatch(/data-scroll-x=""/);
+    expect(DOCK_CODE).toMatch(/terminal-dock/);
+    expect(DOCK_CODE).not.toMatch(/h-pane/);
+    expect(DOCK).toMatch(/aria-label="터미널 크게 보기"/);
+    expect(DOCK).toMatch(/headingLevel=\{2\}/);
   });
 
   it("imports lucide glyphs by static name at 16px", () => {
@@ -80,6 +84,9 @@ describe("WorkPanel is reached from the work console, not the header", () => {
   it("keeps open-work-panel on the work console route", () => {
     expect(CONSOLE).toMatch(/data-testid="open-work-panel"/);
     expect(CONSOLE).toMatch(/\?work-panel=1/);
+    expect(CONSOLE).toMatch(/이 채널에서 작업 보기/);
+    expect(CONSOLE).toMatch(/selected\?\.channelId/);
+    expect(CONSOLE).not.toMatch(/channels\[0\]/);
     expect(SHELL_CODE).toMatch(/anchorWorkPanel/);
     expect(SHELL_CODE).toMatch(/work-panel/);
   });

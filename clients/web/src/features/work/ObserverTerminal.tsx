@@ -159,7 +159,7 @@ export function ObserverTerminal({
   wide: boolean;
   onWideChange: (wide: boolean) => void;
   /** Follows the WorkSessionDetail heading in its route or panel context. */
-  headingLevel?: 3 | 4;
+  headingLevel?: 2 | 3 | 4;
   /**
    * `dock` is the channel-bottom terminal (#1758). Same observer stream, no
    * stdin. The box fills the dock instead of a fixed 320px pane body, and it
@@ -359,6 +359,11 @@ export function ObserverTerminal({
     const fit = new runtime.FitAddon();
     terminal.loadAddon(fit);
     terminal.open(mount);
+    // 가로 스크롤은 xterm 의 `.xterm-viewport` 가 한다. 마운트 상자는
+    // overflow-hidden 이라 후보가 아니고, 면제 선언은 실제로 끄는 상자에 둔다
+    // (#1758 M-2). 하네스는 overflow-x:auto|scroll 상자만 보고 data-scroll-x 를
+    // 건너뛴다.
+    mount.querySelector(".xterm-viewport")?.setAttribute("data-scroll-x", "");
     // Local geometry only. There is no resize frame in this client, so the HOST
     // pty keeps the size it was created with: fitting changes how many rows this
     // browser draws, never how the host wraps the output it writes. Which is
@@ -825,8 +830,9 @@ export function ObserverTerminal({
   // R2 M2 measured what that left behind: a permanent "긴 줄은 접혀서 보입니다"
   // over zero controls. The remedy at that width is the window, so the notice
   // says the window instead of pointing at a button that is not there.
-  const paneAtFullWidth = wide || paneAtWindowWidth || variant === "dock";
-  const Heading = headingLevel === 3 ? "h3" : "h4";
+  const paneAtFullWidth = wide || paneAtWindowWidth;
+  const Heading =
+    headingLevel === 2 ? "h2" : headingLevel === 3 ? "h3" : "h4";
   const docked = variant === "dock";
 
   return (
@@ -1081,16 +1087,12 @@ export function ObserverTerminal({
             // sentence, and xterm's own screenReaderMode stays off because it
             // would put that live region back.
             //
-            // `data-scroll-x`: xterm's viewport is a declared horizontal
-            // scroller when a host line is wider than this box (#1758 dock
-            // capture). The harness skips boxes that say so.
             className={cn(
               "overflow-hidden bg-surface-raised font-mono text-meta text-ink",
               docked
                 ? "min-h-0 flex-1"
                 : !bodyFitsContent && "h-terminal-body"
             )}
-            data-scroll-x={docked ? "" : undefined}
             ref={mountRef}
             role="group"
             aria-label="세션 터미널 출력, 읽기 전용"

@@ -5,7 +5,8 @@
 - 조사: 작업 세션 원장(`GET …/work-sessions`)·이벤트 스레드·observer-grade 호스트 터미널 소켓은 실존. 웹은 `mode: "observer"`만 요청하고 stdin/resize/kill 인코더가 없다. 우측 WorkPanel은 목록·인수·화면 관전/조작·원장. 헤더 SquareTerminal은 이 티켓 전까지 그 패널을 열었다. 즉시 입력 왕복 터미널은 웹에 없다. 새 세션 POST도 웹 클라에 없다.
 - 헤더 터미널 → 하단 도크(탭·관전 터미널·높이 토글·닫기). 관찰 전용, 입력창 없음, + 없음. WorkPanel은 세션 카드/`?work=`/`/work`가 연다(공존·XOR). 원격 조작은 TC-2 적립.
 - 4상태(빈/로딩/오류/연결 끊김)·Esc·탭 ←/→·확대·닫기 포커스 복귀. 도크는 컴포저 형제(덮지 않음). ObserverTerminal `variant="dock"` 재사용.
-- 검증: 웹 tsc · vitest · 디자인 프리플라이트 · `capture:design`(실클릭). 자체 design-review 안 함.
+- #1766 design-review 수리: 도크 높이를 `terminal-dock` / `terminal-dock-lg`(뷰포트 상한 + flex 양보)로 두고 타임라인에 `timeline-strip` 바닥을 줌. 어느 지원 크기에서도 컴포저(입력+보내기)는 뷰포트 안. 자는 720·800·844에서 `컴포저 ⊂ 뷰포트` + 타임라인 띠를 잰다.
+- 검증: 웹 tsc · vitest · 디자인 프리플라이트 · `capture:design`(실클릭) · 게이트 7종. 자체 design-review 안 함.
 
 ## UX-D4 사이드바 개편 (#1756, 2026-08-26)
 

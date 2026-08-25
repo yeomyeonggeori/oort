@@ -1047,7 +1047,10 @@ export function ChatShell() {
           />
         )}
 
-        <div className="min-h-0 flex-1">
+        <div
+          className="flex-1 overflow-hidden timeline-strip"
+          data-testid="chat-timeline"
+        >
           {hasChannel ? (
             <Timeline
               messages={messages}

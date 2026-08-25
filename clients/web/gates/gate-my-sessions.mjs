@@ -773,6 +773,33 @@ async function assertContinuity(context, state) {
   if ((await page.getByTestId("my-work-session-row").count()) !== 0) {
     throw new Error("mine rows rendered before the delayed host projection resolved");
   }
+
+  // 같은 마운트에서 닫았다 다시 연다 (#1758 M-3). 재배선이 이 축을
+  // `page.goto` 로 바꿔 ChatShell 이 통째로 리마운트됐고, 끌어올린 범위가
+  // 닫힘에 살아남는지 재는 시퀀스가 사라졌다. 해시만 바꾸면 같은 트리가 남는다.
+  await page
+    .locator(`[data-session-id="${offlineSessionId}"]`)
+    .waitFor({ timeout: 10_000 });
+  if (
+    (await page.getByTestId("work-scope-mine").getAttribute("aria-pressed")) !==
+    "true"
+  ) {
+    throw new Error("mine scope was not pressed before same-mount reopen");
+  }
+  await page.getByTestId("work-panel-close").click();
+  await page.getByTestId("work-panel").waitFor({ state: "detached" });
+  await page.evaluate((id) => {
+    window.location.hash = `#/c/${id}?work-panel=1`;
+  }, channelId);
+  await page.getByTestId("work-panel").waitFor();
+  if (
+    (await page.getByTestId("work-scope-mine").getAttribute("aria-pressed")) !==
+    "true"
+  ) {
+    throw new Error(
+      "같은 마운트에서 닫았다 다시 열었는데 범위가 초기화됐다 (ChatShell workScope)"
+    );
+  }
   await page
     .locator(`[data-session-id="${offlineSessionId}"]`)
     .waitFor({ timeout: 10_000 });

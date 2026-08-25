@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
+import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
@@ -262,10 +263,11 @@ export function WorkConsoleRoute() {
     directoryQuery.directory,
     directoryQuery.error,
   ]);
-  // 채널 우측 WorkPanel 도달 (#1758). 선택된 세션의 방이 있으면 그 방,
-  // 없으면 명부의 첫 채널. 헤더 터미널 아이콘은 도크이므로 이 링크가
-  // WorkPanel 의 제품 진입점이다.
-  const panelChannelId = selected?.channelId ?? channels[0]?.id ?? null;
+  // 채널 우측 WorkPanel 도달 (#1758). 헤더 터미널은 도크이므로 이 버튼이
+  // WorkPanel 의 제품 진입점이다. 선택된 세션의 방만 가리킨다 — 고른 세션이
+  // 없으면 명부 첫 항목으로 보내지 않는다 (화면이 「확인할 세션을 선택하세요」
+  // 라고 말하는 동안 임의 채널을 여는 거짓 문을 만들지 않기 위해).
+  const panelChannelId = selected?.channelId ?? null;
 
   const ownerNameOf = (memberId: string): string => {
     if (directoryQuery.data === undefined) {
@@ -339,13 +341,14 @@ export function WorkConsoleRoute() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {panelChannelId !== null && (
-            <Link
-              to={`/c/${panelChannelId}?work-panel=1`}
-              className="text-meta text-ink-muted hover:text-ink focus-visible:focus-ring"
-              data-testid="open-work-panel"
-            >
-              채널에서 보기
-            </Link>
+            <Button variant="outline" size="sm" className="tap-target" asChild>
+              <Link
+                to={`/c/${panelChannelId}?work-panel=1`}
+                data-testid="open-work-panel"
+              >
+                이 채널에서 작업 보기
+              </Link>
+            </Button>
           )}
           {sessionsQuery.data !== undefined && (
             <span

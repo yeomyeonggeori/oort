@@ -141,8 +141,8 @@ export function TerminalDock({
       data-expanded={expanded ? "" : undefined}
       onKeyDown={onDockKeyDown}
       className={cn(
-        "flex shrink-0 flex-col border-t border-line bg-surface",
-        expanded ? "h-pane-lg" : "h-pane"
+        "flex flex-col border-t border-line bg-surface outline-none focus-visible:focus-ring",
+        expanded ? "terminal-dock-lg" : "terminal-dock"
       )}
     >
       <div className="flex shrink-0 items-center gap-1 border-b border-line px-2">
@@ -154,7 +154,7 @@ export function TerminalDock({
             data-scroll-x=""
             data-testid="terminal-dock-tabs"
             onKeyDown={onTabListKeyDown}
-            className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1"
+            className="scrollbar-visible flex min-w-0 flex-1 items-center gap-1 overflow-x-auto py-1"
           >
             {sessions.map((session) => {
               const selectedTab = uuidEq(session.id, selectedId ?? undefined);
@@ -173,6 +173,7 @@ export function TerminalDock({
                   data-session-id={session.id}
                   data-status={session.status}
                   onClick={() => selectSession(session.id)}
+                  title={session.label}
                   className={cn(
                     "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta transition-colors focus-visible:focus-ring",
                     selectedTab
@@ -194,9 +195,9 @@ export function TerminalDock({
           type="button"
           onClick={() => setExpanded((current) => !current)}
           aria-pressed={expanded}
-          aria-label={expanded ? "패널 작게 보기" : "패널 크게 보기"}
+          aria-label="터미널 크게 보기"
           data-testid="terminal-dock-expand"
-          className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
         >
           <ChevronsUpDown aria-hidden="true" className="size-4" />
         </button>
@@ -205,7 +206,7 @@ export function TerminalDock({
           onClick={onClose}
           aria-label="터미널 닫기"
           data-testid="terminal-dock-close"
-          className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X aria-hidden="true" className="size-4" />
         </button>
@@ -216,7 +217,7 @@ export function TerminalDock({
           <InlineBanner
             tone="neutral"
             separator={false}
-            message="연결이 끊겼습니다. 이미 불러 온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받습니다."
+            message="연결이 끊겼습니다. 이미 불러온 세션은 그대로 두고, 다시 연결되면 출력을 이어서 받습니다."
             testId="terminal-dock-offline"
           />
         )}
@@ -265,7 +266,7 @@ export function TerminalDock({
                 /* 도크는 이미 채널 열 전체 폭이라 패널 넓게 보기가 할 일이 없다. */
               }}
               variant="dock"
-              headingLevel={3}
+              headingLevel={2}
             />
           </div>
         )}
