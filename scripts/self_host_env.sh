@@ -277,10 +277,12 @@ is_claim_bootstrap_env() {
 }
 
 stack_restart_hint() {
+  # 두 갈래 모두 %s 로 낸다. 비-claim 문자열은 `--` 로 시작하는데, bash printf 는
+  # 그것을 자기 옵션으로 읽어 `invalid option` 으로 죽는다(#1790 회귀).
   if is_claim_bootstrap_env; then
-    printf 'docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출'
+    printf '%s' 'docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출'
   else
-    printf '--compose up -d'
+    printf '%s' '--compose up -d'
   fi
 }
 
