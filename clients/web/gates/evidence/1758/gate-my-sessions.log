@@ -1,0 +1,5 @@
+[idle-chip] light: rest card rgb(255, 254, 251) / chip rgb(243, 239, 232) · hover card rgb(231, 227, 219) / chip rgb(243, 239, 232)
+[idle-chip] dark: rest card rgb(32, 31, 36) / chip rgb(48, 46, 54) · hover card rgb(38, 37, 44) / chip rgb(48, 46, 54)
+narrow pane picker: 블록 287px, 폼 261x90px, 선택지 3개(최장 33자), select 261px, 확정 버튼 96px
+PASS my sessions: idle card, reattach/resume copy split, transition timing, shared host wait, owner filter, terminal states, and a host picker that holds one select plus one filled button at the 262px pane measure
+rc=0

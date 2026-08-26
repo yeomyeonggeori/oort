@@ -44,6 +44,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import { TerminalDock } from "@/features/work/TerminalDock";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -247,7 +248,19 @@ export function ChatShell() {
   // it unmounts it: held locally, the chosen range and the session being read
   // were thrown away on every close, and reopening dropped an all-workspace
   // view back to the current channel (frequently an empty list).
+  //
+  // TC-1 (#1758) 역할 구분 (헤더 ≠ WorkPanel):
+  //   * 헤더 SquareTerminal 은 하단 터미널 도크만 연다 (`open-terminal-dock`).
+  //     채널 컨텍스트의 관전 진입은 도크가 승계한다.
+  //   * 우측 WorkPanel 은 목록·인수·화면 관전/조작·원장이다. 헤더로 열지 않는다.
+  //     도달 경로: 타임라인 세션 카드 (`openWorkSession`) · `?work=` ·
+  //     사이드바 「작업 콘솔」(`/work`) 의 `open-work-panel` → `?work-panel=1`.
+  //   * 도크와 WorkPanel 은 XOR — 같은 세션의 ObserverTerminal 이중 마운트 금지.
+  //     도크는 채팅 열 안, 컴포저 위에 앉고 컴포저를 덮지 않는다.
   const [workOpen, setWorkOpen] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
+  const terminalToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => setDockOpen(false), [channelId]);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
   const [openingWorkThreadId, setOpeningWorkThreadId] = useState<string | null>(
@@ -276,6 +289,7 @@ export function ChatShell() {
   const openWorkSession = useCallback<OpenWorkSession>(
     (sessionId, intent) => {
       setThread(null);
+      setDockOpen(false);
       setWorkScope("channel");
       setWorkSessionId(sessionId);
       setWorkControlIntent(intent?.control === true ? sessionId : null);
@@ -283,6 +297,13 @@ export function ChatShell() {
     },
     []
   );
+
+  const closeDock = useCallback(() => {
+    setDockOpen(false);
+    // overlayHeld lesson: the opener lives outside the dock. Restore after
+    // unmount so Escape/닫기 does not dump focus onto the document body.
+    requestAnimationFrame(() => terminalToggleRef.current?.focus());
+  }, []);
 
   // A scope chip means "show me that list". The panel keeps its selected
   // session across close/reopen (returning to where you were), so while a
@@ -402,6 +423,7 @@ export function ChatShell() {
   // 아니라 이 채널 표면 안의 패널이라, 링크가 채널과 세션을 함께 말한다.
   const [searchParams, setSearchParams] = useSearchParams();
   const anchorWork = searchParams.get("work");
+  const anchorWorkPanel = searchParams.get("work-panel");
   const anchorMsg = searchParams.get("msg");
   const anchorSeq = searchParams.get("seq");
   const anchorFirstMention = searchParams.get("firstMention");
@@ -454,6 +476,25 @@ export function ChatShell() {
       { replace: true }
     );
   }, [anchorControl, anchorWork, openWorkSession, setSearchParams]);
+
+  // 작업 콘솔(`/work`) 이 채널 우측 WorkPanel 을 여는 주소.
+  // 세션 id 없이 목록을 연다 — `?work=` 는 한 세션을 가리키고, 이 열쇠는
+  // 「그 채널의 작업 세션 원장」이다. 헤더 터미널 아이콘은 도크이므로
+  // 이 경로가 WorkPanel 의 제품 진입점이다 (#1758).
+  useEffect(() => {
+    if (anchorWorkPanel === null) return;
+    setThread(null);
+    setDockOpen(false);
+    setWorkOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("work-panel");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [anchorWorkPanel, setSearchParams]);
 
   /**
    * 주소가 가리킨 자리를 **읽고 나면 지운다** (리뷰 B2, #1193).
@@ -871,28 +912,33 @@ export function ChatShell() {
               onRetry={timeline.reloadPins}
             />
           )}
-          {/* The tooltip and the accessible name are the same string: two
-              names for one control is two controls to a reader who hears one
-              and sees the other. */}
+          {/* TC-1 (#1758): 헤더 터미널 아이콘 = 하단 도크. WorkPanel 이 아니다.
+              WorkPanel 은 사이드바 「작업 콘솔」(`open-work-panel`) 과 세션
+              카드가 연다. 이 testid 를 `open-work-panel` 로 남기면 게이트가
+              도크를 패널로 착각한다. */}
           {stressCount === 0 && (
             <button
+              ref={terminalToggleRef}
               type="button"
               onClick={() => {
-                setThread(null);
-                setWorkOpen((open) => !open);
+                setWorkOpen(false);
+                setDockOpen((open) => !open);
               }}
-              aria-pressed={workOpen}
-              aria-label="작업 세션 패널"
-              title="작업 세션 패널"
-              data-testid="open-work-panel"
+              aria-pressed={dockOpen}
+              {...(dockOpen
+                ? { "aria-controls": "channel-terminal-dock" }
+                : {})}
+              aria-label="터미널"
+              title="터미널"
+              data-testid="open-terminal-dock"
               className={cn(
                 "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
-                workOpen
+                dockOpen
                   ? "bg-accent-soft text-accent"
                   : "text-ink-muted hover:bg-surface-hover"
               )}
             >
-              <SquareTerminal className="size-4" />
+              <SquareTerminal aria-hidden="true" className="size-4" />
             </button>
           )}
         </div>
@@ -1001,7 +1047,10 @@ export function ChatShell() {
           />
         )}
 
-        <div className="min-h-0 flex-1">
+        <div
+          className="flex-1 overflow-hidden timeline-strip"
+          data-testid="chat-timeline"
+        >
           {hasChannel ? (
             <Timeline
               messages={messages}
@@ -1081,6 +1130,10 @@ export function ChatShell() {
           )}
         </div>
 
+        {dockOpen && stressCount === 0 && (
+          <TerminalDock channelId={channelId} onClose={closeDock} />
+        )}
+
         {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
         {stressCount === 0 && channelId !== null && <LongPressHint />}
@@ -1131,7 +1184,7 @@ export function ChatShell() {
         />
       )}
 
-      {workOpen && !thread && stressCount === 0 && !workPanelOpen && (
+      {workOpen && !thread && stressCount === 0 && !workPanelOpen && !dockOpen && (
         <WorkPanel
           channelId={channelId}
           scope={workScope}

@@ -1,0 +1,83 @@
+  light: running=3m 13s · ended=24분 28초 동안 작업 · widest=1시간 24분 동안 작업 · blink=1초 미만 작업
+  light: 목록 행 칩 601=없음 · 608=미상 결과 2 · 606=없음 · 602=통과 3 · 603=실패 1 · 604=없음 · 605=미상 결과 2 · 607=실패 1
+  light: 같은 톤 한 쌍 「실행 중」/「미상 결과 2」 ink rgb(138, 92, 0) · 그릇 rgb(243, 239, 232)(테두리 0) vs rgb(255, 237, 212)(테두리 0)
+  light/1280px: 기둥 319/319 · 아랫줄 최대 scrollW 287 (client 287)
+  light/900px: 기둥 291/291 · 아랫줄 최대 scrollW 259 (client 259)
+  light/clean: 선택된 행 칩 rgb(224, 244, 226) vs 행 rgb(231, 227, 219) (테두리 0px)
+  light/attention: 선택된 행 칩 rgb(255, 233, 229) vs 행 rgb(231, 227, 219) (테두리 0px)
+  light/widest: 선택된 행 칩 rgb(255, 237, 212) vs 행 rgb(231, 227, 219) (테두리 0px)
+  light/long-thread: 선택된 행 칩 rgb(255, 233, 229) vs 행 rgb(231, 227, 219) (테두리 0px)
+  light/attention: 제목 상세 202px / 목록 132px 「결제 어댑터 회귀 점검」
+  light/attention: 수명주기 「종료됨」 rgb(106, 101, 95) · 검증 「실패 1」 rgb(179, 38, 30) · --ok rgb(24, 117, 51)
+  light/attention: 세션 정보 「작업 시간 24분 28초」 · 보고 줄 「24분 28초 동안 작업」
+  light/clean: 제목 상세 202px / 목록 132px 「웹 세션 표면 게이트 정리」
+  light/clean: 수명주기 「종료됨」 rgb(106, 101, 95) · 검증 「통과 3」 rgb(24, 117, 51) · --ok rgb(24, 117, 51)
+  light/clean: 세션 정보 「작업 시간 24분 28초」 · 보고 줄 「24분 28초 동안 작업」
+  light/widest: 제목 상세 202px / 목록 132px (잘림) 「결제 정산 배치 재실행 파이프라인 점검」
+  light/widest: 수명주기 「종료됨」 rgb(106, 101, 95) · 검증 「미상 결과 2」 rgb(138, 92, 0) · --ok rgb(24, 117, 51)
+  light/widest: 세션 정보 「작업 시간 1시간 24분」 · 보고 줄 「1시간 24분 동안 작업」
+  light/long-thread: 제목 상세 202px / 목록 132px 「야간 회귀 스위트 전량 재실행」
+  light/long-thread: 수명주기 「종료됨」 rgb(106, 101, 95) · 검증 「실패 1」 rgb(179, 38, 30) · --ok rgb(24, 117, 51)
+  light/long-thread: 세션 정보 「작업 시간 1시간 24분」 · 보고 줄 「1시간 24분 동안 작업」
+  dark: running=3m 21s · ended=24분 28초 동안 작업 · widest=1시간 24분 동안 작업 · blink=1초 미만 작업
+  dark: 목록 행 칩 601=없음 · 608=미상 결과 2 · 606=없음 · 602=통과 3 · 603=실패 1 · 604=없음 · 605=미상 결과 2 · 607=실패 1
+  dark: 같은 톤 한 쌍 「실행 중」/「미상 결과 2」 ink rgb(212, 167, 44) · 그릇 rgb(48, 46, 54)(테두리 0) vs rgb(55, 46, 27)(테두리 0)
+  dark/1280px: 기둥 319/319 · 아랫줄 최대 scrollW 287 (client 287)
+  dark/900px: 기둥 291/291 · 아랫줄 최대 scrollW 259 (client 259)
+  dark/clean: 선택된 행 칩 rgb(36, 51, 35) vs 행 rgb(38, 37, 44) (테두리 0px)
+  dark/attention: 선택된 행 칩 rgb(64, 42, 38) vs 행 rgb(38, 37, 44) (테두리 0px)
+  dark/widest: 선택된 행 칩 rgb(55, 46, 27) vs 행 rgb(38, 37, 44) (테두리 0px)
+  dark/long-thread: 선택된 행 칩 rgb(64, 42, 38) vs 행 rgb(38, 37, 44) (테두리 0px)
+  dark/attention: 제목 상세 202px / 목록 132px 「결제 어댑터 회귀 점검」
+  dark/attention: 수명주기 「종료됨」 rgb(155, 152, 163) · 검증 「실패 1」 rgb(255, 121, 107) · --ok rgb(87, 171, 90)
+  dark/attention: 세션 정보 「작업 시간 24분 28초」 · 보고 줄 「24분 28초 동안 작업」
+  dark/clean: 제목 상세 202px / 목록 132px 「웹 세션 표면 게이트 정리」
+  dark/clean: 수명주기 「종료됨」 rgb(155, 152, 163) · 검증 「통과 3」 rgb(87, 171, 90) · --ok rgb(87, 171, 90)
+  dark/clean: 세션 정보 「작업 시간 24분 28초」 · 보고 줄 「24분 28초 동안 작업」
+  dark/widest: 제목 상세 202px / 목록 132px (잘림) 「결제 정산 배치 재실행 파이프라인 점검」
+  dark/widest: 수명주기 「종료됨」 rgb(155, 152, 163) · 검증 「미상 결과 2」 rgb(212, 167, 44) · --ok rgb(87, 171, 90)
+  dark/widest: 세션 정보 「작업 시간 1시간 24분」 · 보고 줄 「1시간 24분 동안 작업」
+  dark/long-thread: 제목 상세 202px / 목록 132px 「야간 회귀 스위트 전량 재실행」
+  dark/long-thread: 수명주기 「종료됨」 rgb(155, 152, 163) · 검증 「실패 1」 rgb(255, 121, 107) · --ok rgb(87, 171, 90)
+  dark/long-thread: 세션 정보 「작업 시간 1시간 24분」 · 보고 줄 「1시간 24분 동안 작업」
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-900-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-mine-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-clean-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-attention-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-no-report-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-widest-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-long-thread-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-meta-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-wide-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-meta-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-wide-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-meta-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-wide-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-meta-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-wide-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-900-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-list-mine-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-clean-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-attention-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-no-report-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-widest-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-peek-long-thread-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-meta-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-attention-wide-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-meta-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-clean-wide-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-meta-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-widest-wide-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-meta-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/session-chips/session-detail-long-thread-wide-dark.png
+rc=0

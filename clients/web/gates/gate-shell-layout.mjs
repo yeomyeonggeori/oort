@@ -34,6 +34,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { openWorkPanelViaConsole } from "./work-openers.mjs";
 import {
   buildExactSourceBeforePreview,
   matchesInsetFocusRing,
@@ -657,6 +658,10 @@ async function go(page, hash) {
  * the channel/profile pane's actual 184px, and every focus target inside that
  * hidden pane must leave both the visual and keyboard paths.
  *
+ * 56px 는 `[data-testid="workspace-rail"]` (`w-rail` / `--spacing-rail`) 이다.
+ * 안쪽 `[aria-label="워크스페이스"]` nav 는 44px 타일(`--spacing-rail-tile`)만
+ * 감싸므로, 그 폭을 재면 레일 단정이 타일 폭을 재게 된다. 56 숫자는 그대로다.
+ *
  * The work-session pane then covers the newly widened chat surface. This is the
  * seam `/work` uses after #1290 lands too: both are children of the same second
  * shell track, so no route-specific width is inferred here.
@@ -668,7 +673,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
     const shell = document.querySelector(".app-shell");
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[aria-label="워크스페이스"]');
+    const rail = document.querySelector('[data-testid="workspace-rail"]');
     const button = document.querySelector('[data-testid="sidebar-collapse"]');
     const rect = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
     return {
@@ -700,7 +705,8 @@ async function assertDesktopSidebarFocusMode(page, size) {
   // Open and widen FIRST, then mark both the panel root and a stable child.
   // A remount can reproduce text and geometry but cannot reproduce these
   // runtime-only markers, so their survival proves the same subtree remained.
-  await page.getByTestId("open-work-panel").click();
+  // TC-1 (#1758): 헤더는 도크다. WorkPanel 은 작업 콘솔 경유.
+  await openWorkPanelViaConsole(page, { allowHashFallback: true });
   const workPanel = page.getByTestId("work-panel");
   await workPanel.waitFor({ state: "visible" });
   if (size.width >= 900) {
@@ -762,7 +768,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[aria-label="워크스페이스"]');
+    const rail = document.querySelector('[data-testid="workspace-rail"]');
     const expand = document.querySelector('[data-testid="sidebar-expand"]');
     const focusable = pane ? Array.from(pane.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'

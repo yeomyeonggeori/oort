@@ -737,7 +737,7 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        "safe-area-bottom border-t border-line",
+        "safe-area-bottom shrink-0 border-t border-line",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
         // 말하는 최소한이다.

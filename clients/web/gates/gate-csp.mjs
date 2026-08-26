@@ -45,6 +45,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { openTerminalDock } from "./work-openers.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const tauriConfigPath = resolve(webRoot, "../desktop/src-tauri/tauri.conf.json");
@@ -245,15 +246,26 @@ async function main() {
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
 
       // This is the smallest real shell route that loads the lazy xterm chunk:
-      // panel -> row peek -> detail -> observer start. A fixture-only style tag
+      // header dock -> selected session ObserverTerminal -> observer start.
+      // Channel-scoped entry is the dock now (#1758); a fixture-only style tag
       // would prove the browser, not the application dependency that needs the
       // exception.
-      await page.getByTestId("open-work-panel").click();
-      await page.getByTestId("work-session-row").click();
-      await page.getByTestId("work-session-open").click();
+      await openTerminalDock(page);
       await page.getByTestId("work-observer-start").click();
       await page.locator(".xterm").waitFor({ state: "attached", timeout: 15_000 });
       await page.waitForTimeout(300);
+      const scrollMount = await page.evaluate(() => {
+        const viewport = document.querySelector(".xterm-viewport");
+        return {
+          attached: Boolean(viewport),
+          hasScrollX: viewport?.hasAttribute("data-scroll-x") ?? false,
+        };
+      });
+      if (!scrollMount.attached || !scrollMount.hasScrollX) {
+        throw new Error(
+          `xterm-viewport 에 data-scroll-x 가 없다: ${JSON.stringify(scrollMount)}`
+        );
+      }
 
       const violations = await page.evaluate(() => window.__momoCspViolations ?? []);
       if (

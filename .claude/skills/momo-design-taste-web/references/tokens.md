@@ -346,6 +346,20 @@ the box it is handed, so this is a FIXED height while the stream is alive:
 measured 2026-07-26 the cell is 14px, so 320px draws 22 rows, the smallest
 window in which a command and the output it produced are visible together.
 
+The channel-bottom dock (#1758) does **not** borrow `h-pane` / `h-pane-lg`
+(those are widths). Named vertical measures: `--spacing-terminal-dock` 504
+(22 rows + measured chrome; 22 rows only when vh ≳ 784), `--spacing-terminal-dock-lg`
+800 (ask for the rest of the column), `--spacing-terminal-dock-reserve` 280
+(header + composer + strip, the **collapsed** vh cap), `--spacing-terminal-floor`
+56 (4 × 14px cells; the dock folds when the **measured** box is below this,
+not against a copied chrome constant — chrome height changes with width),
+`--spacing-timeline-strip` 80
+(reserved band so the conversation does not vanish; the last item's bottom
+fragment, not a guaranteed full readable row). Utilities `terminal-dock` /
+`terminal-dock-lg` / `terminal-dock-short` / `timeline-strip` apply them;
+the dock yields first so the composer stays inside the viewport. Expand takes
+timeline slack down to the strip instead of sharing the 280 reserve.
+
 Three corrections from the MOMO-619 R1 review, the first two the same bug.
 `FitAddon` measures its parent with `getComputedStyle().height`, which on a
 `box-sizing: border-box` element resolves to the BORDER box. With `p-2` and a

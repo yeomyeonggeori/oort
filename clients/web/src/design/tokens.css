@@ -429,6 +429,48 @@
    * hugs the rows it actually used (MOMO-619 R1 M7). */
   --spacing-terminal-body: 320px;
 
+  /* 채널 하단 관전 도크의 세로 축 (#1758 design-review B-1/H-1/H-2).
+   *
+   * `--spacing-pane` / `--spacing-pane-lg` 는 **가로** 측정이다(thread panel ·
+   * agent card). 앞 판이 그 값을 도크 높이로 빌려 썼고, `h-pane-lg`(640) +
+   * `shrink-0` 이 1280×720 · 390×844 에서 컴포저를 뷰포트 밖으로 밀며 타임라인을
+   * 0px 로 만들었다. 세로에 바닥이 없던 것이 가로 `#1413`·`#1418` 과 같은
+   * 사고다. 축을 빌려 쓰지 않는다.
+   *
+   * 도크 높이는 터미널 **줄 수** 에서 나온다. `--spacing-terminal-body`(320) 가
+   * 12px 모노 롤에서 22줄이고, 그것이 「명령과 그 출력이 함께 보이는 가장 작은
+   * 창」이다. HEAD 실측에서 탭 바·관전 헤더·안내·상태줄이 182px 을 먼저 먹으므로
+   * 도크 목표 = 320 + 182 = 502, 8px 격자로 올린 504. 유틸 `terminal-dock` 이
+   * 이 값을 flex 기준선으로 들고, 작은 높이에서는 도크가 먼저 줄어든다.
+   *
+   * 22줄은 **접힘 상한 `vh − reserve` 가 504 이상일 때만** 성립한다. reserve 280
+   * 이면 그 높이는 vh ≳ 784. 그 아래에서는 양보 순서(터미널 → 타임라인 띠 →
+   * 컴포저)가 줄 수를 회수한다. 504를 보장으로 읽지 마라.
+   *
+   * `terminal-dock-lg` 의 800 은 「남은 열을 달라」는 확대 기준선이다. 확대의
+   * 정의는 타임라인 여유를 `timeline-strip`(80)까지 실제로 가져가는 것이다.
+   * 접힘 유틸만 reserve 280 상한을 쓴다. 확대는 그 상한을 쓰지 않고, 헤더·컴포저
+   * `shrink-0` + 타임라인 `flex-grow: 0` 이 `vh − 헤더 − 80 − 컴포저 실높이` 를
+   * flex 로 만든다.
+   *
+   * reserve 280 = 헤더 ~80 + 컴포저 ~120 + 타임라인 띠 80. 폰 헤더가 더 커지는
+   * 판은 이 상한만으로 모자라므로, flex 양보 + `timeline-strip` 바닥이 함께
+   * 지킨다. 컴포저는 `shrink-0` 이라 어느 지원 크기에서도 뷰포트 안에 남는다. */
+  --spacing-terminal-dock: 504px;
+  --spacing-terminal-dock-lg: 800px;
+  --spacing-terminal-dock-reserve: 280px;
+
+  /* 세로로 터미널 상자를 접는 바닥 (#1758 R2-H2 / R3-H1). xterm 셀 14px × 4줄.
+   * 상자의 실높이가 이보다 짧으면 그리지 않고 한 문장만 남긴다. 크롬은 폭에
+   * 따라 달라지므로 상수로 대조하지 않는다. */
+  --spacing-terminal-floor: 56px;
+
+  /* 도크가 열린 채팅 열에서 타임라인이 양보하는 바닥 (#1758 H-1).
+   * 대화가 0px 로 사라지지 않게 예약한 띠이지, 메시지 한 행이 온전히 읽힌다는
+   * 보장은 아니다. 바닥에 붙으므로 실제로 보이는 것은 마지막 항목의 아랫동강
+   * 이다 (아바타 32 + 행 패딩 12 + 본문 줄 22 ≈ 66, 8px 격자로 올린 80). */
+  --spacing-timeline-strip: 80px;
+
   /* 첨부 이미지 미리보기의 자리표시자 높이 (#1202 · design-review M-2/N-3).
    *
    * 이름이 따로 있는 이유는 앞 판이 `--spacing-action`(다이얼로그 주 버튼의 최소
@@ -1225,6 +1267,43 @@
   @media (width >= 900px) {
     min-inline-size: var(--spacing-chat-min);
   }
+}
+
+/* 채널 하단 관전 도크 (#1758 B-1/H-1/H-2, R2-H1). 높이는 `--spacing-terminal-dock*`
+ * 주석이 든다. 여기 적는 것은 **양보 규칙**뿐이다: 접힘 기준선은 22줄 상당,
+ * 접힘 상한은 뷰포트에서 reserve 를 뺀 값, 바닥은 0 이라 작은 높이에서 도크가
+ * 먼저 줄어든다. 확대는 reserve 상한을 쓰지 않는다 — 타임라인이 최소 띠에
+ * 머물고 도크가 `vh − 헤더 − 띠 − 컴포저` 를 가져간다. 타임라인은
+ * `timeline-strip` 아래로 못 내려가고 컴포저는 shrink-0 이다. */
+@utility terminal-dock {
+  flex: 0 1 var(--spacing-terminal-dock);
+  min-block-size: 0;
+  max-block-size: calc(
+    var(--app-viewport-height) - var(--spacing-terminal-dock-reserve)
+  );
+}
+
+@utility terminal-dock-lg {
+  flex: 1 1 var(--spacing-terminal-dock-lg);
+  min-block-size: 0;
+}
+
+/* 세로 바닥 아래 (#1758 R2-H2). 한 문장만 남기므로 504 기준선을 들이대지 않는다. */
+@utility terminal-dock-short {
+  flex: 0 0 auto;
+  min-block-size: 0;
+}
+
+@utility timeline-strip {
+  min-block-size: var(--spacing-timeline-strip);
+}
+
+/* 확대 중 타임라인은 최소 띠만 남긴다. `flex-1` 의 grow 를 끄면 여유는
+ * `terminal-dock-lg` 가 가져가고, 컴포저 `shrink-0` 이 뷰포트 안에 남는다. */
+.chat-region:has([data-testid="terminal-dock"][data-expanded]) .timeline-strip {
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: var(--spacing-timeline-strip);
 }
 
 /* 컴포저 빈 상자의 넘침 처리 (#1418, design-review #1413 Low).

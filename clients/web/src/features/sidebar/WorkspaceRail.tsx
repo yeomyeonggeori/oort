@@ -49,7 +49,12 @@ export function WorkspaceRail({
   const openAddWorkspace = useOpenAddWorkspace();
   const addWorkspaceRef = useRef<HTMLButtonElement>(null);
   return (
-    <div className="flex h-full w-rail shrink-0 flex-col items-center gap-2 border-r border-line bg-surface-sidebar py-2">
+    // 56px 레일 열 (`--spacing-rail`). 안쪽 nav 는 44px 타일만 감싸므로
+    // 셸 게이트는 이 래퍼(`workspace-rail`)를 잰다 — nav 를 재면 44가 나온다.
+    <div
+      data-testid="workspace-rail"
+      className="flex h-full w-rail shrink-0 flex-col items-center gap-2 border-r border-line bg-surface-sidebar py-2"
+    >
       <nav
         aria-label="워크스페이스"
         className="flex flex-col items-center gap-2"

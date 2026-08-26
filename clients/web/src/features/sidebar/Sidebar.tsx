@@ -501,6 +501,9 @@ export function Sidebar({
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+              {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
+                  도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
+                  연다. 표면 삭제 금지. */}
               <SidebarRow
                 to="/work"
                 icon={<SquareTerminal className="size-4" />}
