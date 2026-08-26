@@ -729,6 +729,7 @@ guard_self_host_stack_collision() {
   local our_project our_volume our_wd id their_wd their_project
   local ids_project ids_volume
   local collisions=0
+  local our_compose_wd
   local -a reports=()
 
   our_project="$(self_host_compose_project_name)"
@@ -737,6 +738,12 @@ guard_self_host_stack_collision() {
   validate_env_scalar DB_VOLUME_NAME "$our_volume"
   our_wd="$(self_host_canonical_dir "$REPO_ROOT")" ||
     fail "이 체크아웃 경로를 정규화할 수 없다: $REPO_ROOT"
+  # docker compose 는 working_dir 라벨에 **첫 compose 파일의 디렉토리**를 적는다.
+  # 우리 파일들은 infra/rust 아래이므로 라벨은 REPO_ROOT 가 아니라 REPO_ROOT/infra/rust 다.
+  # REPO_ROOT 하나로만 비교하면 **자기 스택이 영원히 남의 것으로 보이고**, up 도 down 도
+  # 막혀 교착이 된다. 두 형태를 모두 자기 것으로 인정한다.
+  our_compose_wd="$(self_host_canonical_dir "$REPO_ROOT/infra/rust")" ||
+    fail "이 체크아웃의 compose 경로를 정규화할 수 없다: $REPO_ROOT/infra/rust"
 
   if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
     fail "docker daemon에 연결할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
@@ -756,7 +763,9 @@ guard_self_host_stack_collision() {
       fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
     their_project="$("$DOCKER_BIN" inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$id")" ||
       fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
-    if self_host_same_workdir "$their_wd" "$our_wd" && [ "$their_project" = "$our_project" ]; then
+    if [ "$their_project" = "$our_project" ] &&
+       { self_host_same_workdir "$their_wd" "$our_wd" ||
+         self_host_same_workdir "$their_wd" "$our_compose_wd"; }; then
       continue
     fi
     collisions=$((collisions + 1))
