@@ -68,15 +68,19 @@ import {
 import { QuoteBlock } from "./QuoteBlock";
 import {
   DeleteMessageDialog,
-  MessageActionColumn,
   MessageActionContextMenu,
   MessageActionSheet,
+  MessageHoverToolbar,
   type MessageActionCallbacks,
 } from "./MessageActions";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { shouldShowHoverToolbar } from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
+import { messageShareUrl } from "@/features/inbox/anchor";
+import { absoluteApiBase } from "@/lib/serverBase";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
-import { useRowRovingFocus } from "./rowFocus";
+import { useHoverToolbarFocusHandoff, useRowRovingFocus } from "./rowFocus";
 import { MessageEditor } from "./MessageEditor";
 import { ReactionChips } from "./ReactionChips";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
@@ -126,20 +130,7 @@ function useSelectionWithinRow(ref: RefObject<HTMLElement | null>): boolean {
   return selected;
 }
 
-/** Mirrors tokens.css `pointer-only`: touch keeps the long-press sheet. */
-function useHoverContextMenu(): boolean {
-  const [matches, setMatches] = useState(
-    () =>
-      typeof window !== "undefined" && window.matchMedia("(hover: hover)").matches
-  );
-  useEffect(() => {
-    const query = window.matchMedia("(hover: hover)");
-    const update = () => setMatches(query.matches);
-    query.addEventListener("change", update);
-    return () => query.removeEventListener("change", update);
-  }, []);
-  return matches;
-}
+
 
 function timeLabel(atMs: number): string {
   const d = new Date(atMs);
@@ -376,6 +367,10 @@ export function MessageRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [actionMenuOpen, setActionMenuOpen] = useState(false);
+  const [contextMenuOpen, setContextMenuOpen] = useState(false);
+  const [rowHovered, setRowHovered] = useState(false);
+  const [rowFocused, setRowFocused] = useState(false);
   const openMemberProfile = useOpenMemberProfile();
   const author = memberFor(directory, message.authorMemberId);
   const isAgent = author?.kind === "agent";
@@ -392,6 +387,23 @@ export function MessageRow({
   // settings CopyButton uses, so the two-second 「복사됨」 receipt cannot drift.
   const canCopy = Boolean(actions) && !deleted && hasBody;
   const { copied, copy: copyMessage } = useClipboardCopy(message.body ?? "");
+  // UX-D3: a persisted row already has a HashRouter landing (`?msg=`+`seq=`).
+  // Failed local sends and tombstones do not. Those URLs would open a hole.
+  const canCopyLink =
+    Boolean(actions) && !deleted && message.state !== "failed";
+  const { copied: copiedLink, copy: copyMessageLink } = useClipboardCopy(
+    messageShareUrl(message.channelId, message.id, message.seq, {
+      origin: absoluteApiBase(),
+      pathname: window.location.pathname,
+    })
+  );
+  const copyState = {
+    canCopy,
+    copied,
+    canCopyLink,
+    copiedLink,
+    pinned: Boolean(actions?.pinned),
+  };
   // ADR-0151 — 서버가 완료된 것만 실어 준다. 없으면 빈 배열이고, 빈 배열은
   // `AttachmentList`가 아무것도 그리지 않는다.
   const attachments = message.attachments ?? [];
@@ -451,7 +463,8 @@ export function MessageRow({
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
   const actionable =
-    Boolean(actions) && (hasAnyAction(available) || canCopy);
+    Boolean(actions) &&
+    (hasAnyAction(available) || canCopy || canCopyLink);
 
   const callbacks: MessageActionCallbacks = {
     onReply: () => onOpenThread?.(message),
@@ -462,6 +475,24 @@ export function MessageRow({
         if (!ok) {
           setRowError(
             "메시지를 복사하지 못했습니다. 텍스트를 선택해 복사하세요."
+          );
+        }
+      });
+    },
+    onCopyLink: () => {
+      setRowError(null);
+      // 클립보드 API가 없으면 다시 눌러도 같다. 형제 `onCopy`가 그 경우
+      // 「텍스트를 선택해 복사하세요」로 출구를 주는 것과 같은 자리.
+      if (typeof navigator.clipboard?.writeText !== "function") {
+        setRowError(
+          "링크를 복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다."
+        );
+        return;
+      }
+      void copyMessageLink().then((ok) => {
+        if (!ok) {
+          setRowError(
+            "링크를 복사하지 못했습니다. 같은 항목을 다시 눌러 보세요."
           );
         }
       });
@@ -504,16 +535,37 @@ export function MessageRow({
   // and its 저장/취소 belong to a focused editing context and are reached by Tab
   // like any form.
   const rowRef = useRef<HTMLElement | null>(null);
+  const actionTriggerRef = useRef<HTMLButtonElement | null>(null);
   const onRowKeyDown = useRowRovingFocus(rowRef);
   const selectionWithinRow = useSelectionWithinRow(rowRef);
   const openReactionPicker = (opener?: HTMLElement | null) => {
     // 메뉴 항목은 다이얼로그가 열릴 때 포털과 함께 사라진다. 그 항목을 opener로
-    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 남아 있는 반응 추가 버튼 또는
-    // 메시지 행을 명시적으로 돌려줄 자리로 잡는다.
-    setPickerOpener(opener ?? rowRef.current);
+    // 잡으면 Esc 뒤 포커스가 body로 떨어지므로, 살아 남은 트리거를 쓴다.
+    // 칩의 + 는 그 버튼, 툴바 React/⋯ 는 그 버튼. 행 전체에 앵커하면
+    // 트리거와 팝오버가 996px 벌어진다 (design-review #1746 H-4).
+    setPickerOpener(opener ?? actionTriggerRef.current ?? rowRef.current);
     setPickerOpen(true);
+    setActionMenuOpen(false);
+    setContextMenuOpen(false);
   };
-  const hoverContextMenu = useHoverContextMenu();
+  const touchSurface = useHoverNone();
+  const mineEmojis = useMemo(() => {
+    const next = new Set<string>();
+    if (!actions) return next;
+    for (const chip of actions.chips) {
+      if (chip.mine) next.add(chip.emoji);
+    }
+    return next;
+  }, [actions]);
+  const showHoverToolbar = shouldShowHoverToolbar({
+    pointerCanHover: !touchSurface,
+    editing,
+    rowHovered,
+    rowFocused,
+    overlayOpen: pickerOpen || actionMenuOpen || contextMenuOpen,
+    selecting: selectionWithinRow,
+  });
+  useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
   // `data-message-id` is the row's second published identity (MOMO-677).
   // `seq` orders the channel and is what the inbox jumps by; a projection
@@ -524,14 +576,13 @@ export function MessageRow({
   return (
     <MessageActionContextMenu
       enabled={
-        actionable && hoverContextMenu && !selectionWithinRow && !editing
+        actionable && !touchSurface && !selectionWithinRow && !editing
       }
       available={available}
-      canCopy={canCopy}
-      copied={copied}
-      pinned={Boolean(actions?.pinned)}
+      copyState={copyState}
       callbacks={callbacks}
-      onOpenPicker={() => openReactionPicker()}
+      onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
+      onOpenChange={setContextMenuOpen}
     >
       <article
       ref={rowRef}
@@ -549,6 +600,14 @@ export function MessageRow({
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       onKeyDown={onRowKeyDown}
+      onMouseEnter={() => setRowHovered(true)}
+      onMouseLeave={() => setRowHovered(false)}
+      onFocusCapture={() => setRowFocused(true)}
+      onBlurCapture={(event) => {
+        const next = event.relatedTarget;
+        if (next instanceof Node && event.currentTarget.contains(next)) return;
+        setRowFocused(false);
+      }}
       // State disables the Radix trigger before a normal right-click. The
       // capture guard covers the same gesture synchronously if React has not
       // committed the immediately preceding selectionchange yet.
@@ -559,15 +618,14 @@ export function MessageRow({
       }}
       {...(actionable ? longPress : {})}
       className={cn(
-        // `group` lets the action trigger react to a hover anywhere on the row
-        // rather than only on itself, which would be an affordance you can only
-        // find by already being on it. `no-touch-callout` stops iOS raising its
-        // own selection menu on top of the long-press sheet.
-        "group flex gap-2 px-4 hover:bg-surface-hover",
-        // 컨트롤이 없는 행은 자기 자신이 탭 정거장이 된다 (rowFocus.ts, 리뷰 W-4).
-        // 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에 그린다 — 행은
-        // 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은 잘린다
-        // (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
+        // `group` lets the gutter clock react to a hover anywhere on the row.
+        // The hover toolbar is JS-mounted (not group-hover opacity) so a
+        // non-hovered row contributes zero toolbar tab stops.
+        "group relative flex gap-2 px-4 hover:bg-surface-hover",
+        // actionable 행의 rest 정거장은 행 자신이다 (rowFocus.ts, 리뷰 W-4,
+        // #1743 B-2). 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에
+        // 그린다 — 행은 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은
+        // 잘린다 (ArtifactCard가 diff 본문 안에서 같은 이유로 같은 선택을 한다).
         "focus-visible:focus-ring",
         actionable && "no-touch-callout",
         // 행 사이 간격은 코어가 정한다 (H-7 · `ROW_SPACE`). 진단이 실측한 값은 연속
@@ -576,6 +634,20 @@ export function MessageRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
+      {actions && showHoverToolbar && (
+        <MessageHoverToolbar
+          available={available}
+          copyState={copyState}
+          callbacks={callbacks}
+          onOpenPicker={(el) =>
+            openReactionPicker(el ?? actionTriggerRef.current)
+          }
+          menuOpen={actionMenuOpen}
+          onMenuOpenChange={setActionMenuOpen}
+          triggerRef={actionTriggerRef}
+          mineEmojis={mineEmojis}
+        />
+      )}
       {/* 거터. 그룹 머리 행에는 아바타가, 이어지는 행에는 **시각**이 온다 (H-3).
           `relative`인 이유는 그 시각이 24px 상자보다 넓기 때문이다 — 절대 배치로
           거터 오른끝에 붙이면 남는 글자는 행의 `px-4` 여백 쪽으로 흘러나가고, 그래서
@@ -628,16 +700,17 @@ export function MessageRow({
           </time>
         )}
       </div>
-      {/* `data-row-body` is the box the capture gate measures the action gutter
-          against: everything the author wrote lives inside it, so "the trigger
-          starts where the body ends" is checkable rather than eyeballed. */}
+      {/* `data-row-body` is the box whose text Range the capture gate measures
+          against the hover toolbar: intersection with this row's glyphs and
+          the immediate neighbour rows must be 0 (B11 R2 Blocker / #1743 B-3
+          · N-2). */}
       <div data-row-body className="min-w-0 flex-1">
         {startsGroup && (
           <div className="flex flex-wrap items-baseline gap-2">
             {/* 이름은 이름이다 (R1 M8). 프로필 진입점은 옆의 아바타다. 그 버튼은
                 `data-row-action` 로 이 행의 기존 로빙 그룹에 합류하므로 메시지마다
-                탭 정거장을 하나씩 늘리지 않는다. 행 액션은 우클릭 ContextMenu와
-                기존 ⋯ 메뉴가 같은 목록을 공유하고, 이름 자체는 계속 읽는 글이다. */}
+                탭 정거장을 하나씩 늘리지 않는다. 행 액션은 호버 툴바·우클릭
+                ContextMenu·⋯ 메뉴가 같은 목록을 공유하고, 이름 자체는 계속 읽는 글이다. */}
             {/* 「누가」는 한 덩어리, 「언제」는 다른 덩어리 — 작성자 줄이 읽어야 할
                 섬을 **둘**로 줄인다 (M-3 「작성자 줄이 과적재」).
 
@@ -906,17 +979,6 @@ export function MessageRow({
           </span>
         )}
       </div>
-      {actions && (
-        <MessageActionColumn
-          available={available}
-          canCopy={canCopy}
-          copied={copied}
-          pinned={Boolean(actions?.pinned)}
-          callbacks={callbacks}
-          onOpenPicker={() => openReactionPicker()}
-          hidden={editing}
-        />
-      )}
       {actions && actionable && (
         <>
           <MessageActionSheet
@@ -924,17 +986,16 @@ export function MessageRow({
             onOpenChange={setSheetOpen}
             preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
             available={available}
-            canCopy={canCopy}
-            copied={copied}
-            pinned={Boolean(actions?.pinned)}
+            copyState={copyState}
             callbacks={callbacks}
-            onOpenPicker={() => openReactionPicker()}
+            onOpenPicker={() => openReactionPicker(actionTriggerRef.current)}
           />
           <EmojiPickerDialog
             open={pickerOpen}
             onOpenChange={setPickerOpen}
             onPick={(emoji) => callbacks.onReact(emoji)}
             opener={pickerOpener}
+            anchor={pickerOpener}
             purpose="reaction"
             testId="reaction-picker"
           />

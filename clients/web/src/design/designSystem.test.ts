@@ -267,6 +267,7 @@ const CONTAINER_PRIMITIVES = [
   "context-menu.tsx",
   "dialog.tsx",
   "dropdown-menu.tsx",
+  "popover.tsx",
 ] as const;
 
 /**

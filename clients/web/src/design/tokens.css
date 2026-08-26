@@ -356,6 +356,12 @@
   --spacing-pane-md: 512px; /* the overlay measure: dialog panel, ⌘K palette */
   --spacing-pane-lg: 640px; /* agent card measure: a card is not a banner */
 
+  /* 이모지 피커 패널 (#1742). 8칸 size-control(32) + gap-1×7 + p-3×2 = 308 이고,
+   * 검색·카테고리 탭·스킨톤이 같은 폭을 쓰므로 패널은 그 그리드보다 넓어야 한다.
+   * 패킷 340-440 구간의 가운데 384. pane(320)과 pane-md(512) 사이이며 리듬
+   * 단계가 아니다. */
+  --spacing-pane-picker: 384px;
+
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
    * 있다: pane 은 부차 표면이 **가져가는** 폭이고, 이것은 부차 표면이 옆에 설 때
    * **남겨야 하는** 폭이다. 빌려 쓰면 축이 섞인다.
@@ -422,6 +428,48 @@
    * h-[320px]. It is applied only while the stream can still grow: a failed one
    * hugs the rows it actually used (MOMO-619 R1 M7). */
   --spacing-terminal-body: 320px;
+
+  /* 채널 하단 관전 도크의 세로 축 (#1758 design-review B-1/H-1/H-2).
+   *
+   * `--spacing-pane` / `--spacing-pane-lg` 는 **가로** 측정이다(thread panel ·
+   * agent card). 앞 판이 그 값을 도크 높이로 빌려 썼고, `h-pane-lg`(640) +
+   * `shrink-0` 이 1280×720 · 390×844 에서 컴포저를 뷰포트 밖으로 밀며 타임라인을
+   * 0px 로 만들었다. 세로에 바닥이 없던 것이 가로 `#1413`·`#1418` 과 같은
+   * 사고다. 축을 빌려 쓰지 않는다.
+   *
+   * 도크 높이는 터미널 **줄 수** 에서 나온다. `--spacing-terminal-body`(320) 가
+   * 12px 모노 롤에서 22줄이고, 그것이 「명령과 그 출력이 함께 보이는 가장 작은
+   * 창」이다. HEAD 실측에서 탭 바·관전 헤더·안내·상태줄이 182px 을 먼저 먹으므로
+   * 도크 목표 = 320 + 182 = 502, 8px 격자로 올린 504. 유틸 `terminal-dock` 이
+   * 이 값을 flex 기준선으로 들고, 작은 높이에서는 도크가 먼저 줄어든다.
+   *
+   * 22줄은 **접힘 상한 `vh − reserve` 가 504 이상일 때만** 성립한다. reserve 280
+   * 이면 그 높이는 vh ≳ 784. 그 아래에서는 양보 순서(터미널 → 타임라인 띠 →
+   * 컴포저)가 줄 수를 회수한다. 504를 보장으로 읽지 마라.
+   *
+   * `terminal-dock-lg` 의 800 은 「남은 열을 달라」는 확대 기준선이다. 확대의
+   * 정의는 타임라인 여유를 `timeline-strip`(80)까지 실제로 가져가는 것이다.
+   * 접힘 유틸만 reserve 280 상한을 쓴다. 확대는 그 상한을 쓰지 않고, 헤더·컴포저
+   * `shrink-0` + 타임라인 `flex-grow: 0` 이 `vh − 헤더 − 80 − 컴포저 실높이` 를
+   * flex 로 만든다.
+   *
+   * reserve 280 = 헤더 ~80 + 컴포저 ~120 + 타임라인 띠 80. 폰 헤더가 더 커지는
+   * 판은 이 상한만으로 모자라므로, flex 양보 + `timeline-strip` 바닥이 함께
+   * 지킨다. 컴포저는 `shrink-0` 이라 어느 지원 크기에서도 뷰포트 안에 남는다. */
+  --spacing-terminal-dock: 504px;
+  --spacing-terminal-dock-lg: 800px;
+  --spacing-terminal-dock-reserve: 280px;
+
+  /* 세로로 터미널 상자를 접는 바닥 (#1758 R2-H2 / R3-H1). xterm 셀 14px × 4줄.
+   * 상자의 실높이가 이보다 짧으면 그리지 않고 한 문장만 남긴다. 크롬은 폭에
+   * 따라 달라지므로 상수로 대조하지 않는다. */
+  --spacing-terminal-floor: 56px;
+
+  /* 도크가 열린 채팅 열에서 타임라인이 양보하는 바닥 (#1758 H-1).
+   * 대화가 0px 로 사라지지 않게 예약한 띠이지, 메시지 한 행이 온전히 읽힌다는
+   * 보장은 아니다. 바닥에 붙으므로 실제로 보이는 것은 마지막 항목의 아랫동강
+   * 이다 (아바타 32 + 행 패딩 12 + 본문 줄 22 ≈ 66, 8px 격자로 올린 80). */
+  --spacing-timeline-strip: 80px;
 
   /* 첨부 이미지 미리보기의 자리표시자 높이 (#1202 · design-review M-2/N-3).
    *
@@ -769,26 +817,44 @@
   }
 }
 
-/* 폭이 아니라 **입력 장치**로 가르는 자리 (B11 R2).
+/* 폭이 아니라 **입력 장치**로 가르는 자리 (B11 R2 · #1743).
  *
- * 메시지 행의 액션 진입점(⋯)은 hover로 나타난다. hover가 없는 기기에서 그것은
- * 어떤 제스처로도 나타나지 않는 컨트롤이고, 그 자리를 위해 비워 둔 열은 본문이
- * 쓸 수 있었던 폭이다. 그래서 터치에서는 열째로 사라지고, 폰은 자기 진입점(길게
- * 누르기 → 시트)을 쓴다.
+ * 메시지 행의 호버 툴바는 hover로 마운트된다. hover가 없는 기기에서 그것은
+ * 어떤 제스처로도 나타나지 않는 컨트롤이다. 툴바 쪽은 JS가 `(hover: none)`이면
+ * DOM 자체를 안 그린다. 예전 `pointer-only` 유틸리티는 그 축의 CSS 갈래였으나
+ * 쓰는 자리가 없어 제거했다 (#1743 M-5).
  *
  * `wide-only`를 쓰지 않는 이유가 정확히 여기 있다. R1은 바를 폭으로 숨기고 길게
  * 누르기는 포인터 종류로 무장해서, 마우스로 창을 600px 아래로 줄이면 바는 CSS가
  * 숨기고 길게 누르기는 마우스라서 무장하지 않는 구멍이 생겼다 — 액션에 닿는 길이
  * 하나도 남지 않았다(R2 M2). 두 쪽을 같은 축(`hover`)에 매어 두면 그 둘은
- * 어긋날 수 없다. 좁은 창의 마우스는 여전히 hover하므로 열을 갖는다. */
-@utility pointer-only {
-  @media (hover: none) {
-    display: none;
-  }
+ * 어긋날 수 없다. 좁은 창의 마우스는 여전히 hover하므로 툴바를 갖는다. */
+
+/* 호버 툴바를 행 상단 경계에 걸친다 (#1743 B-3).
+ *
+ * `top: 0`에서 자기 키만큼 올린 뒤, 이 행의 `--spacing-row`(6px, 연속 행
+ * 상단 패딩)만큼만 다시 내려 앉힌다. 하단 가장자리가 패딩 상자 안에 머물므로
+ * 자기 행 본문 텍스트 Range와 교차 0이 된다(B11 R2 Blocker의 후계 자
+ * `assertHoverToolbarClearsBodyText`). 나머지 높이는 행간·이전 행 하단 패딩
+ * 위에 얹힌다. 임의 translate 값은 금지라 토큰으로 계산한다. */
+@utility hover-toolbar-straddle {
+  top: 0;
+  translate: 0 calc(-100% + var(--spacing-row));
+}
+
+/* 위쪽 여유가 없을 때의 대칭 (#1743 H-4).
+ *
+ * `bottom: 0`에서 자기 키만큼 내린 뒤 `--spacing-row`만큼만 다시 올린다.
+ * 상단 가장자리가 이 행의 하단 패딩 상자 안에 머물고, 나머지 높이는 다음
+ * 행과의 행간에 앉는다. 위 straddle과 같은 26px 띠·같은 교차 0 계약. */
+@utility hover-toolbar-straddle-below {
+  top: auto;
+  bottom: 0;
+  translate: 0 calc(100% - var(--spacing-row));
 }
 
 /* 그 반대. 손가락에게만 하는 말 (B11 R2): 길게 누르기를 알려 주는 한 줄은
- * hover가 있는 기기에서는 할 말이 없다. 거기엔 행마다 ⋯가 보이기 때문이다. */
+ * hover가 있는 기기에서는 할 말이 없다. 거기엔 행 hover에 툴바가 보이기 때문이다. */
 @utility touch-only {
   @media (hover: hover) {
     display: none;
@@ -830,7 +896,7 @@
  *
  * 문턱이 `tap-target`과 다르다. 그쪽은 폭(`width < 600px`)으로 가르고 이쪽은
  * **입력 장치**(`hover: none`)로 가른다. 이유는 이 축이 이미 그렇게 갈려
- * 있기 때문이다 — `pointer-only`/`touch-only`, 그리고 거터 시각의 정지 노출이
+ * 있기 때문이다 — `touch-only`, 그리고 거터 시각의 정지 노출이
  * 전부 `hover`를 본다(리뷰 W-4). 손가락으로 쓰는 큰 화면(터치 노트북, 태블릿)이
  * 폭 기준에서는 빠지는데, 거기서 이 링크를 누르는 것은 여전히 손가락이다.
  *
@@ -872,6 +938,29 @@
   @media (width < 600px) {
     padding-block-end: env(safe-area-inset-bottom, 0px);
   }
+}
+
+/* 이모지 피커 그리드 (#1742 H-2). 8칸 + gap-1 은 패널 폭 산술과 같고, 칸은
+ * `aspect-square`라 높이가 폭에서 나온다. 전량 버튼을 올리지 않으므로(패킷 AC)
+ * 빠진 행은 같은 높이의 패드로 스크롤 길이를 보존한다. `container-type`은
+ * 패드 높이를 그리드 인라인 크기에서 재기 위함이다 — 인라인 style 금지. */
+@utility emoji-grid {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: var(--spacing-1);
+  container-type: inline-size;
+}
+
+@utility emoji-grid-row-pad {
+  grid-column: 1 / -1;
+  height: calc((100cqw - 7 * var(--spacing-1)) / 8);
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--spacing-control);
+}
+
+@utility emoji-grid-slot {
+  content-visibility: auto;
+  contain-intrinsic-size: auto var(--spacing-control);
 }
 
 /* 스레드 패널 기하 (B6). work-pane과 **같은 규칙이고 문턱도 같다**. 320px 패널은
@@ -1178,6 +1267,43 @@
   @media (width >= 900px) {
     min-inline-size: var(--spacing-chat-min);
   }
+}
+
+/* 채널 하단 관전 도크 (#1758 B-1/H-1/H-2, R2-H1). 높이는 `--spacing-terminal-dock*`
+ * 주석이 든다. 여기 적는 것은 **양보 규칙**뿐이다: 접힘 기준선은 22줄 상당,
+ * 접힘 상한은 뷰포트에서 reserve 를 뺀 값, 바닥은 0 이라 작은 높이에서 도크가
+ * 먼저 줄어든다. 확대는 reserve 상한을 쓰지 않는다 — 타임라인이 최소 띠에
+ * 머물고 도크가 `vh − 헤더 − 띠 − 컴포저` 를 가져간다. 타임라인은
+ * `timeline-strip` 아래로 못 내려가고 컴포저는 shrink-0 이다. */
+@utility terminal-dock {
+  flex: 0 1 var(--spacing-terminal-dock);
+  min-block-size: 0;
+  max-block-size: calc(
+    var(--app-viewport-height) - var(--spacing-terminal-dock-reserve)
+  );
+}
+
+@utility terminal-dock-lg {
+  flex: 1 1 var(--spacing-terminal-dock-lg);
+  min-block-size: 0;
+}
+
+/* 세로 바닥 아래 (#1758 R2-H2). 한 문장만 남기므로 504 기준선을 들이대지 않는다. */
+@utility terminal-dock-short {
+  flex: 0 0 auto;
+  min-block-size: 0;
+}
+
+@utility timeline-strip {
+  min-block-size: var(--spacing-timeline-strip);
+}
+
+/* 확대 중 타임라인은 최소 띠만 남긴다. `flex-1` 의 grow 를 끄면 여유는
+ * `terminal-dock-lg` 가 가져가고, 컴포저 `shrink-0` 이 뷰포트 안에 남는다. */
+.chat-region:has([data-testid="terminal-dock"][data-expanded]) .timeline-strip {
+  flex-grow: 0;
+  flex-shrink: 0;
+  flex-basis: var(--spacing-timeline-strip);
 }
 
 /* 컴포저 빈 상자의 넘침 처리 (#1418, design-review #1413 Low).
@@ -1825,10 +1951,10 @@
  * 덮는 묶음마다 시각을 상시로 켜면 타임라인의 밀도가 시계에 먹힌다. 문제는
  * **hover가 없는 기기**다: 거기서는 그 시각을 드러낼 제스처가 하나도 없으므로,
  * 「이 말 언제 한 거지」에 답이 없던 진단 H-3의 상태가 그대로 남는다.
- * (폰 뷰포트에서는 액션 열도 `pointer-only`로 사라지므로 포커스로 드러날
- * 자식조차 없다.)
+ * (폰 뷰포트에서는 호버 툴바가 마운트되지 않으므로 포커스로 드러날
+ * 액션 자식조차 없다.)
  *
- * 그래서 규칙을 입력 장치로 가른다 — `pointer-only`/`touch-only`가 이미 쓰는
+ * 그래서 규칙을 입력 장치로 가른다 — `touch-only`와 JS `(hover: none)`이 쓰는
  * 그 축이다. 포인터가 있으면 hover가 가르치고, 없으면 시각이 처음부터 서 있다.
  * 정지 상태의 발견 가능성(리뷰 W-4)은 이 갈래로만 손대고, 포인터 쪽 밀도는
  * 건드리지 않는다: 그쪽은 묶음 머리 행이 이름 옆에 상시로 시각을 보여 주므로

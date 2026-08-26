@@ -1,4 +1,5 @@
 import { createContext, useCallback, useContext, useState } from "react";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { createChannel, type Channel, type CreateChannelInput } from "@momo/core/lib/api";
@@ -71,9 +72,13 @@ export function useCreateChannel(): CreateChannelHandle {
 // mean three copies of the form state and three ways for one of them to go
 // stale. So the shell owns one dialog and hands down the verb.
 
-export const CreateChannelOpenContext = createContext<(() => void) | null>(null);
+export type OpenCreateChannel = (opener?: DialogFocusTarget | null) => void;
 
-export function useOpenCreateChannel(): () => void {
+export const CreateChannelOpenContext = createContext<OpenCreateChannel | null>(
+  null
+);
+
+export function useOpenCreateChannel(): OpenCreateChannel {
   const open = useContext(CreateChannelOpenContext);
   if (!open) {
     throw new Error("useOpenCreateChannel must be used inside CreateChannelProvider");

@@ -1,0 +1,20 @@
+diff --git a/infra/rust/docker-compose.rust.yml b/infra/rust/docker-compose.rust.yml
+index 3244c6d8..0ea3f3fb 100644
+--- a/infra/rust/docker-compose.rust.yml
++++ b/infra/rust/docker-compose.rust.yml
+@@ -214,6 +214,7 @@ services:
+       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
+       # ADR-0171: exact lowercase `true` only. Unset = doorbell register routes 404.
+       MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
++      MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
+       # ADR-0110: the ONLY authority for the realtime address handed to clients.
+       # No default — a wrong guess silently points every client at nothing.
+       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
+@@ -397,6 +398,7 @@ services:
+       MOMO_UNFURL_ENABLED: ${MOMO_UNFURL_ENABLED:-0}
+       # ADR-0171: exact lowercase `true` only. Unset/anything else = no doorbell drain.
+       MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
++      MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
+       LOG_LEVEL: ${LOG_LEVEL:-info}
+     depends_on:
+       postgres:

@@ -72,6 +72,7 @@ import {
   type HostedAgentConnection,
 } from "@momo/core/features/hostedAgents/model";
 import { CleanupArtifactRow } from "./CleanupArtifactRow";
+import { DoorbellSection } from "./DoorbellSection";
 import { hostedListQuery } from "./hostedCredentialScope";
 import {
   hostedConnectionDetailQuery,
@@ -342,6 +343,19 @@ export function HostedConnectionSection({
               testId="hosted-disconnect-detail-error"
             />
           )}
+
+          {connection.status !== "cleanup_pending" &&
+            connection.status !== "disconnected" &&
+            !detail.isError && (
+              <DoorbellSection
+                workspaceId={workspaceId}
+                connectionId={connectionId}
+                connection={detail.data?.connection ?? null}
+                loading={detail.isPending}
+                offline={offline}
+                writesLocked={busy}
+              />
+            )}
 
           {connection.status !== "cleanup_pending" &&
             connection.status !== "disconnected" && (

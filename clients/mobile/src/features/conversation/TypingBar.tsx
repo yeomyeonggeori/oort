@@ -50,7 +50,7 @@ import {useStyles} from '../../design/theme';
 // 전송 버튼**이다.
 //
 // 이 판정을 이미 웹이 내렸고, **그 근거가 하필 폰이었다**
-// (`clients/web/src/features/chat/TypingLine.tsx` "## 자리는 예약한다 (H-2)"):
+// (`clients/web/src/features/chat/TypingLine.tsx` "## 공유 행은 항상 26px을 예약한다"):
 // *"폰에서는 키보드가 올라온 상태에서 엄지 아래의 전송 버튼이 움직인다."*
 // 웹 리뷰가 폰을 들어 설득한 결정을 정작 폰이 반대로 구현했었다.
 //

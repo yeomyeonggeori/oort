@@ -794,11 +794,11 @@ async function exerciseTouch(browser) {
   const opacity = await clock.evaluate((node) =>
     Number(getComputedStyle(node).opacity)
   );
-  const actionColumn = await contRow
-    .getByTestId("message-action-column")
-    .evaluate((node) => getComputedStyle(node).display);
+  const toolbarCount = await contRow
+    .locator('[data-testid="message-hover-toolbar"]')
+    .count();
   console.log(
-    `[touch] 정지 상태 불투명도 ${opacity} · 액션 열 display=${actionColumn}`
+    `[touch] 정지 상태 불투명도 ${opacity} · 호버 툴바 ${toolbarCount}개`
   );
   if (opacity < 0.99) {
     throw new Error(
@@ -807,10 +807,10 @@ async function exerciseTouch(browser) {
         "그 기기에서는 없는 기능이다 (리뷰 W-4)"
     );
   }
-  if (actionColumn !== "none") {
+  if (toolbarCount !== 0) {
     throw new Error(
-      `hover 없는 기기에 액션 열이 서 있다 (display=${actionColumn}): pointer-only의 ` +
-        "계약이 깨졌다면 위 판정의 전제도 다시 봐야 한다"
+      `hover 없는 기기에 호버 툴바가 ${toolbarCount}개 있다: 터치에서는 마운트 ` +
+        "자체가 없어야 한다 (#1743)"
     );
   }
 

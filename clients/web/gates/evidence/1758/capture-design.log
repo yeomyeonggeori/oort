@@ -1,0 +1,500 @@
+
+> momo-web@0.0.0 capture:design
+> npm run build:design && node scripts/capture-screens.mjs
+
+
+> momo-web@0.0.0 build:design
+> tsc -b && vite build --mode design
+
+vite v6.4.3 building for design...
+transforming...
+✓ 2094 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                               4.82 kB │ gzip:   2.40 kB
+dist/sw.js                                    7.57 kB
+dist/assets/terminalRuntime-6GBZ9nXN.css      5.24 kB │ gzip:   1.92 kB
+dist/assets/index-CBGPtWiH.css               42.91 kB │ gzip:   9.38 kB
+dist/assets/event-CNdo2oXa.js                 1.44 kB │ gzip:   0.69 kB
+dist/assets/core-DhEqZVGG.js                  2.44 kB │ gzip:   0.98 kB
+dist/assets/emojiCatalog-CX6tsjFf.js        176.39 kB │ gzip:  48.53 kB
+dist/assets/terminalRuntime-Du9Rgm6E.js     334.23 kB │ gzip:  84.74 kB
+dist/assets/huddleRuntime-CXuTwgFI.js       531.19 kB │ gzip: 138.62 kB
+dist/assets/index-1j9CZR9_.js             1,579.82 kB │ gzip: 459.13 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.90s
+  overflow-x desktop chat light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  호버 툴바 desktop chat rest light: 0개
+  overflow-x sidebar collapsed light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer frame rest light: top 12px / bottom 12px (--spacing-3) · border 1px rgb(132, 129, 125) (--line-strong) · fill rgb(255, 254, 251)
+  composer tabs light: composer-input → composer-mention-trigger → composer-attach → composer-emoji-trigger → composer-send (총 5, 입력은 그릇 링·버튼은 자체 2px 링)
+  composer vessel light: 액션 행 빈 폭 → 입력 캐럿 2
+  mention trigger light: 배포 @ 확인 · 후보 5 · 입력 기준 left -1px / gap 21px · input fv=true, ring=frame
+  composer states light: rest/focus/offline/attachment-pending · mention options 5
+  호버 툴바 hover light: 1개
+  호버 툴바 위치 hover light: 1개, 우측 16px · 상단 -26px
+  호버 툴바 본문 hover light: 1개, 글자 교차 0(자기+이웃) · 상단 -26px · straddle top
+  overflow-x hover toolbar light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  탭 스톱 hover light: 10행에 행 컨트롤 22개, 탭 스톱 10개 (행당 정확히 1)
+  호버 툴바 본문 hover 900 light: 1개, 글자 교차 0(자기+이웃) · 상단 -26px · straddle top
+  호버 툴바 위치 hover 900 light: 1개, 우측 16px · 상단 -26px
+  드래그 선택 hover light: seq 1416 「502가 계속 납니다. GET」 · active=timeline-virtuoso · fv=false
+  호버 툴바 스크롤러 top light: seq 1400 inside · straddle below · 툴바 102 / 스크롤러 45
+  호버 툴바 본문 top light: 1개, 글자 교차 0(자기+이웃) · 상단 57px · straddle below
+  호버 툴바 위치 top light: 1개, 우측 16px · 상단 57px
+  키보드 light: Tab → 행 · 툴바 마운트 · → message-actions-trigger → unfurl-card → message-actions-trigger
+  메뉴 light: 항목 14개, ↓로 menu-react-👍 → menu-react-✅
+  메뉴 light: ⋯·우클릭 클립보드 항목 누름
+  착지 ⋯ 링크 light: msg=capture-8 top=264 bottom=474 vh=800 highlight=1 (열기 전 top=-652)
+  착지 ⋯ 링크 light 배너 unknown: 찾던 메시지를 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요.
+닫기
+  착지 ⋯ 링크 light 배너 older: 찾던 메시지는 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.
+닫기
+  emoji anchor channel light: trigger (329,747) · picker (329,743) · xΔ 0px / gap 4px
+  composer vessel thread light: 액션 행 빈 폭 → 입력 캐럿 2
+  mention trigger thread light: 배포 @ 확인 · 후보 5 · 입력 기준 left -1px / gap 9px · input fv=true, ring=frame
+  overflow-x thread panel light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  thread rollup thread panel light: 패널 0개 · 타임라인 1개 버튼
+  스레드 루트 호버 light: 패널 안쪽 · 글자 교차 0 · straddle below
+  emoji anchor thread light: trigger (1050,747) · picker (888,743) · xΔ -162px / gap 4px
+  overflow-x thread empty light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  탭 경로 desktop light: 타임라인 → 컴포저 Tab 3번
+  paused notice dm light: 3줄 → 1줄 + "응답하지 못한 메시지 3개"
+  스크롤 message-markdown · B8 light: 이미 창 안 · 마운트된 항목 17개 (index 1000001~1000017) · timeline-message 17행 · 스크롤러 [{"top":691,"height":2042,"client":649}]
+  스크롤 turn-failure · B8 light: 이미 창 안 · 마운트된 항목 11개 (index 1000007~1000017) · timeline-message 11행 · 스크롤러 [{"top":1343,"height":2043,"client":649}]
+  overflow-x terminal dock empty light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock empty light: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock empty light: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock loading light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock loading light: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock loading light: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock error light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock error light: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock error light: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock offline light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock offline light: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock offline light: 아랫변 668px <= 컴포저 668px
+  overflow-x terminal dock sessions light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock sessions light: 입력창 768px · 전송 800px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock sessions light: 아랫변 715px <= 컴포저 715px
+  overflow-x oauth-consent preview light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent no-candidate light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent expired light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent unavailable light: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x desktop chat dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  호버 툴바 desktop chat rest dark: 0개
+  overflow-x sidebar collapsed dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer frame rest dark: top 12px / bottom 12px (--spacing-3) · border 1px rgb(111, 110, 115) (--line-strong) · fill rgb(32, 31, 36)
+  composer tabs dark: composer-input → composer-mention-trigger → composer-attach → composer-emoji-trigger → composer-send (총 5, 입력은 그릇 링·버튼은 자체 2px 링)
+  composer vessel dark: 액션 행 빈 폭 → 입력 캐럿 2
+  mention trigger dark: 배포 @ 확인 · 후보 5 · 입력 기준 left -1px / gap 21px · input fv=true, ring=frame
+  composer states dark: rest/focus/offline/attachment-pending · mention options 5
+  호버 툴바 hover dark: 1개
+  호버 툴바 위치 hover dark: 1개, 우측 16px · 상단 -26px
+  호버 툴바 본문 hover dark: 1개, 글자 교차 0(자기+이웃) · 상단 -26px · straddle top
+  overflow-x hover toolbar dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  탭 스톱 hover dark: 10행에 행 컨트롤 22개, 탭 스톱 10개 (행당 정확히 1)
+  호버 툴바 본문 hover 900 dark: 1개, 글자 교차 0(자기+이웃) · 상단 -26px · straddle top
+  호버 툴바 위치 hover 900 dark: 1개, 우측 16px · 상단 -26px
+  드래그 선택 hover dark: seq 1416 「502가 계속 납니다. GET」 · active=timeline-virtuoso · fv=false
+  호버 툴바 스크롤러 top dark: seq 1400 inside · straddle below · 툴바 102 / 스크롤러 45
+  호버 툴바 본문 top dark: 1개, 글자 교차 0(자기+이웃) · 상단 57px · straddle below
+  호버 툴바 위치 top dark: 1개, 우측 16px · 상단 57px
+  키보드 dark: Tab → 행 · 툴바 마운트 · → message-actions-trigger → unfurl-card → message-actions-trigger
+  메뉴 dark: 항목 14개, ↓로 menu-react-👍 → menu-react-✅
+  메뉴 dark: ⋯·우클릭 클립보드 항목 누름
+  착지 ⋯ 링크 dark: msg=capture-8 top=264 bottom=474 vh=800 highlight=1 (열기 전 top=-652)
+  착지 ⋯ 링크 dark 배너 unknown: 찾던 메시지를 이 화면에서 찾지 못했습니다. 위로 올려 이전 대화를 더 불러오세요.
+닫기
+  착지 ⋯ 링크 dark 배너 older: 찾던 메시지는 이 대화의 더 위쪽에 있어 아직 불러오지 않았습니다. 위로 올려 이어서 불러오세요.
+닫기
+  emoji anchor channel dark: trigger (329,747) · picker (329,743) · xΔ 0px / gap 4px
+  composer vessel thread dark: 액션 행 빈 폭 → 입력 캐럿 2
+  mention trigger thread dark: 배포 @ 확인 · 후보 5 · 입력 기준 left -1px / gap 9px · input fv=true, ring=frame
+  overflow-x thread panel dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  thread rollup thread panel dark: 패널 0개 · 타임라인 1개 버튼
+  스레드 루트 호버 dark: 패널 안쪽 · 글자 교차 0 · straddle below
+  emoji anchor thread dark: trigger (1050,747) · picker (888,743) · xΔ -162px / gap 4px
+  overflow-x thread empty dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  탭 경로 desktop dark: 타임라인 → 컴포저 Tab 3번
+  paused notice dm dark: 3줄 → 1줄 + "응답하지 못한 메시지 3개"
+  스크롤 message-markdown · B8 dark: 이미 창 안 · 마운트된 항목 17개 (index 1000001~1000017) · timeline-message 17행 · 스크롤러 [{"top":691,"height":2042,"client":649}]
+  스크롤 turn-failure · B8 dark: 이미 창 안 · 마운트된 항목 11개 (index 1000007~1000017) · timeline-message 11행 · 스크롤러 [{"top":1343,"height":2043,"client":649}]
+  overflow-x terminal dock empty dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock empty dark: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock empty dark: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock loading dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock loading dark: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock loading dark: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock error dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock error dark: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock error dark: 아랫변 694px <= 컴포저 694px
+  overflow-x terminal dock offline dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock offline dark: 입력창 747px · 전송 779px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock offline dark: 아랫변 668px <= 컴포저 668px
+  overflow-x terminal dock sessions dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  composer terminal dock sessions dark: 입력창 768px · 전송 800px <= 보이는 800px (레이아웃 800px, 셸 800px)
+  dock terminal dock sessions dark: 아랫변 715px <= 컴포저 715px
+  overflow-x oauth-consent preview dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent no-candidate dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent expired dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x oauth-consent unavailable dark: 0 (문서 1280px = 1280px, 스크롤 상자 누수 0)
+  overflow-x login light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets login light: login-server 292x44, login-email 292x44, login-password 292x44, login-submit 292x44
+  overflow-x chat light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets chat light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  top chat light: 헤더 61px, 셸 상단 61px, safe-area-top 선언됨
+  composer chat light: 입력창 779px · 전송 823px <= 보이는 844px (레이아웃 844px, 셸 783px)
+  composer terminal dock light: 입력창 779px · 전송 823px <= 보이는 844px (레이아웃 844px, 셸 783px)
+  dock terminal dock light: 아랫변 676px <= 컴포저 721px
+  overflow-x terminal dock light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets terminal dock light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x emoji picker light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets emoji picker light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search 312x44, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  호버 툴바 폰 light: 0개
+  폰 light: 호버 툴바 0, 길게 누르기 안내 보임
+  길게 누르기 light: 40px 끌기는 시트를 열지 않는다
+  overflow-x action sheet light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  시트 light: 메시지 복사 · 링크 복사 클립보드 일치
+  overflow-x inline editor light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets inline editor light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save 45x44, unfurl-remove 44x44, message-editor-cancel 45x44, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x delete dialog light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets delete dialog light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit 68x44, delete-message-cancel 58x44, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x thread light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets thread light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input 363x60, thread-composer-mention-trigger 44x44, thread-composer-send 44x44, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  가시성 thread + 하단 크롬 light: thread-composer-input 679px · thread-composer-send 723px <= 보이는 744px
+  composer chat + 하단 크롬 light: 입력창 679px · 전송 723px <= 보이는 744px (레이아웃 844px, 셸 683px)
+  overflow-x chat + 하단 크롬 light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  drawer light: 280px 서랍 + 110px 잔여, 행 44px, 본문 inert=true
+  overflow-x drawer light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets drawer profile light: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto 182x44, presence-option-away 182x44, presence-option-dnd 182x44, profile-add-workspace 182x44, nav-settings 182x44
+  dm hint light: "멘션 없이 바로 말하면 hermes가 답합니다" (넘침 0)
+  overflow-x dm light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  overflow-x agent hub light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  inbox mobile light: inbox-list로 정착
+  overflow-x inbox light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets inbox light: open-sidebar-drawer 44x44
+  long token light: 서버가 쓴 글 51곳에 74자 무공백 토큰
+  overflow-x long token light: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  overflow-x login dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets login dark: login-server 292x44, login-email 292x44, login-password 292x44, login-submit 292x44
+  overflow-x chat dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets chat dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  top chat dark: 헤더 61px, 셸 상단 61px, safe-area-top 선언됨
+  composer chat dark: 입력창 779px · 전송 823px <= 보이는 844px (레이아웃 844px, 셸 783px)
+  composer terminal dock dark: 입력창 779px · 전송 823px <= 보이는 844px (레이아웃 844px, 셸 783px)
+  dock terminal dock dark: 아랫변 676px <= 컴포저 721px
+  overflow-x terminal dock dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets terminal dock dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x emoji picker dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets emoji picker dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search 312x44, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss 44x44, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  호버 툴바 폰 dark: 0개
+  폰 dark: 호버 툴바 0, 길게 누르기 안내 보임
+  길게 누르기 dark: 40px 끌기는 시트를 열지 않는다
+  overflow-x action sheet dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  시트 dark: 메시지 복사 · 링크 복사 클립보드 일치
+  overflow-x inline editor dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets inline editor dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save 45x44, unfurl-remove 44x44, message-editor-cancel 45x44, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x delete dialog dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets delete dialog dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit 68x44, delete-message-cancel 58x44, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  overflow-x thread dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets thread dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input 363x60, thread-composer-mention-trigger 44x44, thread-composer-send 44x44, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto undefinedxundefined, presence-option-away undefinedxundefined, presence-option-dnd undefinedxundefined, profile-add-workspace undefinedxundefined, nav-settings undefinedxundefined
+  가시성 thread + 하단 크롬 dark: thread-composer-input 679px · thread-composer-send 723px <= 보이는 744px
+  composer chat + 하단 크롬 dark: 입력창 679px · 전송 723px <= 보이는 744px (레이아웃 844px, 셸 683px)
+  overflow-x chat + 하단 크롬 dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  drawer dark: 280px 서랍 + 110px 잔여, 행 44px, 본문 inert=true
+  overflow-x drawer dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets drawer profile dark: open-sidebar-drawer 44x44, composer-send 44x44, composer-input 364x44, composer-mention-trigger 44x44, composer-emoji-trigger 44x44, emoji-search undefinedxundefined, inbox-approval-approve undefinedxundefined, inbox-approval-reject undefinedxundefined, message-editor-save undefinedxundefined, unfurl-remove 44x44, message-editor-cancel undefinedxundefined, delete-message-commit undefinedxundefined, delete-message-cancel undefinedxundefined, thread-composer-input undefinedxundefined, thread-composer-mention-trigger undefinedxundefined, thread-composer-send undefinedxundefined, long-press-hint-dismiss undefinedxundefined, profile-card 135x44, presence-option-auto 182x44, presence-option-away 182x44, presence-option-dnd 182x44, profile-add-workspace 182x44, nav-settings 182x44
+  dm hint dark: "멘션 없이 바로 말하면 hermes가 답합니다" (넘침 0)
+  overflow-x dm dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  overflow-x agent hub dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  inbox mobile dark: inbox-list로 정착
+  overflow-x inbox dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+  tap targets inbox dark: open-sidebar-drawer 44x44
+  long token dark: 서버가 쓴 글 51곳에 74자 무공백 토큰
+  overflow-x long token dark: 0 (문서 390px = 390px, 스크롤 상자 누수 0)
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/login-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/login-workspace-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/connect-invite-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/chat-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-profile-card-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-section-hover-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-section-collapsed-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-collapsed-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-focus-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-mention-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-attachment-pending-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/unfurl-remove-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/unfurl-removed-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-actions-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-actions-focus-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-action-menu-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-context-menu-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-edit-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-delete-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-reaction-picker-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/u4-composer-emoji-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/thread-root-hover-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/u4-thread-composer-parity-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/thread-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-pending-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/workspace-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/workspace-empty-nonadmin-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/directory-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/quick-switcher-people-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/dm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-hub-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-create-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-create-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-hub-readonly-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-host-picker-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-host-blocked-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-turns-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/cascade-notice-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-turns-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-work-host-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-work-host-policy-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-edit-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-probe-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-new-row-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-probe-pending-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-partial-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-no-chain-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-mock-mode-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-account-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-appearance-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-link-previews-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-notifications-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-workspace-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-plugins-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-usage-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-members-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-revoke-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-rotate-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-created-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/timeline-dense-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-message-markdown-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-provider-failure-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-composer-hint-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-connection-banner-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-narrow-900-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-loading-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-sessions-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/empty-channel-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/empty-dm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-normal-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-loading-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-identity-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-pairing-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-detecting-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-scopes-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-consequence-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-awaiting-proof-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-active-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-expired-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-offline-consequence-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-loading-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-start-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-start-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-manifest-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-blocked-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-bot-choice-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-bot-preserve-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-confirm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-done-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-offline-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-manifest-900-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-blocked-900-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-done-900-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-empty-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-loading-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-registered-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-error-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-gate-off-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-signin-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-preview-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-no-candidate-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-expired-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-unavailable-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/login-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/login-workspace-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/connect-invite-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/chat-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-profile-card-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-section-hover-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-section-collapsed-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/sidebar-collapsed-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-focus-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-mention-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/composer-attachment-pending-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/unfurl-remove-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/unfurl-removed-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-actions-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-actions-focus-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-action-menu-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-context-menu-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-edit-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-message-delete-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b11-reaction-picker-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/u4-composer-emoji-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/thread-root-hover-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/u4-thread-composer-parity-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/thread-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-pending-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/channel-create-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/workspace-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/workspace-empty-nonadmin-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/directory-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/quick-switcher-people-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/dm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-hub-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-create-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-create-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-hub-readonly-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-host-picker-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/approvals-host-blocked-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-turns-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/cascade-notice-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/agent-turns-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-work-host-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-work-host-policy-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-edit-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-probe-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-new-row-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-probe-pending-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-chain-partial-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-no-chain-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-ai-mock-mode-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-account-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-appearance-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-link-previews-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-notifications-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-workspace-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-plugins-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-usage-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-members-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-revoke-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-rotate-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/settings-webhooks-created-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/timeline-dense-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-message-markdown-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-provider-failure-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-composer-hint-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-connection-banner-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/b8-narrow-900-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-loading-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/terminal-dock-sessions-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/empty-channel-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/empty-dm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-normal-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/add-member-loading-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-identity-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-pairing-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-detecting-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-scopes-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-approval-consequence-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-awaiting-proof-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-active-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-expired-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-offline-consequence-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-pairing-loading-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-start-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-start-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-manifest-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-blocked-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-bot-choice-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-bot-preserve-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-confirm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-done-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-offline-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-manifest-900-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-terminal-blocked-900-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-disconnect-done-900-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-empty-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-loading-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-registered-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-error-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/hosted-doorbell-gate-off-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-signin-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-preview-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-no-candidate-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-expired-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/oauth-consent-unavailable-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-login-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-chat-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-terminal-dock-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-composer-emoji-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-action-sheet-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-edit-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-delete-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-thread-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-thread-bottom-chrome-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-chat-bottom-chrome-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-sidebar-drawer-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-sidebar-profile-card-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-dm-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-agent-hub-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-inbox-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-long-token-light.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-login-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-chat-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-terminal-dock-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-composer-emoji-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-action-sheet-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-edit-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-delete-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-thread-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-b11-thread-bottom-chrome-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-chat-bottom-chrome-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-sidebar-drawer-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-sidebar-profile-card-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-dm-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-agent-hub-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-inbox-dark.png
+/Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/design/mobile-long-token-dark.png
+
+[미대응 /v1 경로 2건 — 본문 없는 404로 답했다]
+  GET /v1/workspaces/00000000-0000-7000-8000-000000000001/hosted-agent-connections
+  GET /v1/workspaces/00000000-0000-7000-8000-000000000001/notification-rules
+rc=0
