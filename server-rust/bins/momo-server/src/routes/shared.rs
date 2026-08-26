@@ -46,6 +46,18 @@ pub(crate) fn require_human(principal: &Principal, message: &'static str) -> Res
     }
 }
 
+/// Swift `create` guard (`WorkSessionRoutes.swift:129-131`): a work session
+/// may be opened by a human bearer **or** a signed work host. Agents stay out.
+pub(crate) fn require_human_or_work_host(
+    principal: &Principal,
+    message: &'static str,
+) -> Result<(), ApiError> {
+    match principal.kind {
+        PrincipalKind::Human | PrincipalKind::WorkHost => Ok(()),
+        PrincipalKind::Agent => Err(ApiError::forbidden(message)),
+    }
+}
+
 /// The `audit_log.via_token_id` a principal may legitimately claim (B2.4).
 ///
 /// `via_token_id` is `REFERENCES token(id)`. A human bearer's `token_id` IS such

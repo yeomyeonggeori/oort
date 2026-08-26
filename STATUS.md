@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## host-signed 세션 변이 이식 (#1777, 2026-08-26)
+
+- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778.
+- 데몬 부팅용으로 `GET …/work-tool-profiles`(enabled 투영, CRUD 없음)를 같이 열었다. 없으면 `momo-workd`가 heartbeat 직후 `transport_failed`로 죽어 create에 도달하지 못한다.
+- 세션 생산 레시피: `scripts/verify_workd_rust.sh` + `docs/runbooks/workd-rust-session.md` (맥 로컬 workd ↔ Rust 리그). `remote_attach_available` false→true가 도크 생산자를 연다.
+
 ## LiveKit env 게이트 오탐 수리 (#1781, 2026-08-26)
 
 - 판정(실측): 오탐. huddle profile 없이 `docker compose --env-file rust-smoke.env.example -f docker-compose.rust.yml config`는 LiveKit 키 공백·삭제 모두 rc=0. 렌더된 서비스에 livekit 없음. 맨몸 `config` 실패 목록에도 `MOMO_LIVEKIT_*` 0건.

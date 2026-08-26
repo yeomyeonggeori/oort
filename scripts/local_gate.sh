@@ -712,6 +712,7 @@ add_static_commands() {
   add_cmd_once "work host verifier shell syntax" "bash -n scripts/verify_work_host.sh"
   add_cmd_once "workd verifier shell syntax" "bash -n scripts/verify_workd.sh"
   add_cmd_once "workd attach verifier shell syntax" "bash -n scripts/verify_workd_attach.sh"
+  add_cmd_once "workd rust verifier shell syntax" "bash -n scripts/verify_workd_rust.sh"
   add_cmd_once "work pool verifier shell syntax" "bash -n scripts/verify_work_pool.sh"
   add_cmd_once "tier fallback verifier shell syntax" "bash -n scripts/verify_tier_fallback.sh"
   add_cmd_once "workstream continuity verifier shell syntax" "bash -n scripts/verify_workstream_continuity.sh"
