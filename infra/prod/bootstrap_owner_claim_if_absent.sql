@@ -80,18 +80,20 @@ BEGIN
   -- Drop expired unconsumed rows for this owner so a restart after TTL can
   -- issue a replacement. Live unconsumed rows are not this file's job:
   -- migrate refuses to generate a token unless the plan said `issue`.
-  DELETE FROM owner_claim
+  DELETE FROM credential_claim
    WHERE workspace_id = '00000000-0000-7000-8000-000000000001'
      AND member_id = '00000000-0000-7000-8000-000000000101'
+     AND kind = 'owner_bootstrap'
      AND consumed_at IS NULL
      AND expires_at <= now();
 
-  INSERT INTO owner_claim (workspace_id, member_id, token_hash, expires_at)
+  INSERT INTO credential_claim (workspace_id, member_id, token_hash, expires_at, kind)
   VALUES (
     '00000000-0000-7000-8000-000000000001',
     '00000000-0000-7000-8000-000000000101',
     digest(claim_token, 'sha256'),
-    now() + (ttl_seconds * interval '1 second')
+    now() + (ttl_seconds * interval '1 second'),
+    'owner_bootstrap'
   );
 
   RAISE NOTICE 'MOMO_BOOTSTRAP_CLAIM=created';

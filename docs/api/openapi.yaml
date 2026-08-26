@@ -67,7 +67,9 @@ tags:
   - name: join
     description: Public invite self-signup (no auth required).
   - name: claim
-    description: Public first-owner claim (ADR-0166). One-time token sets the owner password.
+    description: >
+      Public credential claim (ADR-0166 / #1767). One-time token sets a
+      password — first-owner bootstrap or operator-issued password reset.
   - name: roster
     description: Workspace member roster.
   - name: membership-admin
@@ -324,11 +326,13 @@ paths:
     post:
       tags: [claim]
       operationId: publicClaim
-      summary: Consume a first-owner claim token and set the password (public, no auth).
+      summary: Consume a claim token and set the password (public, no auth).
       description: >
-        ADR-0166. Redeems a one-time 32-byte claim token issued by momo-migrate
-        claim mode, sets the seeded owner's password in the same transaction,
-        and issues a session token pair. The raw token is never stored (sha256
+        ADR-0166 / #1767. Redeems a one-time 32-byte claim token
+        (`owner_bootstrap` from momo-migrate, or `password_reset` issued by an
+        owner/admin). Sets the target human's password in the same transaction
+        and issues a session token pair. `password_reset` also revokes that
+        member's other session tokens. The raw token is never stored (sha256
         only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
       security: []
       requestBody:
@@ -501,6 +505,99 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: Caller is the last active owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/members/me/password:
+    patch:
+      tags: [auth]
+      operationId: changeOwnPassword
+      summary: Change the caller's password after reconfirming the current one.
+      description: >
+        #1767. Requires the current password. On success every live session
+        token of this member is revoked and a fresh access/refresh pair is
+        issued (same LoginResponse shape as login/claim). Agent bearers are
+        not touched. Per-member and per-IP rate limited.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed; previous sessions revoked; new pair issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Password shape invalid, or new password equals current.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Current password is incorrect, or caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Caller has no password to change (use claim).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/password-reset:
+    post:
+      tags: [membership-admin]
+      operationId: issuePasswordReset
+      summary: Issue a one-time password-reset claim for a human member.
+      description: >
+        #1767. Owner/admin only. Mints a 32-byte token (same shape as
+        owner_bootstrap), stores sha256 only, TTL 24h, single use. Reissue
+        consumes any previous live reset token for that member. The raw token
+        is in this 201 body once — the operator delivers `/claim/<token>`
+        out of band. There is no mailer.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "201":
+          description: Reset token issued. Raw token is shown only here.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetClaimResponse"
+        "400":
+          description: Target is not a human member, or member id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Workspace member not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Target member is not active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
     delete:
@@ -6753,10 +6850,42 @@ components:
           type: string
           description: >
             Raw 32-byte claim token (43-char base64url, no padding). Shown once
-            at bootstrap; the server stores only sha256.
+            at issue (migrate bootstrap or operator reset); the server stores
+            only sha256.
         password:
           type: string
-          description: Required, at most 1024 chars. Set on the first owner.
+          description: Required, at most 1024 chars.
+
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          description: The caller's current password. Reconfirm is mandatory.
+        newPassword:
+          type: string
+          description: Replacement password, at most 1024 chars, must differ.
+
+    PasswordResetClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [token, kind, expiresAtMs, claimPath]
+      properties:
+        token:
+          type: string
+          description: Raw 32-byte token. Present only on this 201.
+        kind:
+          type: string
+          enum: [password_reset]
+        expiresAtMs:
+          type: integer
+          format: int64
+        claimPath:
+          type: string
+          description: >
+            /claim/<token> — the existing ClaimPage route.
 
     LoginRequest:
       type: object

@@ -150,6 +150,8 @@ POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
 # 실측한다는 뜻이고, 초대 코드는 스펙에 없는 `…/invites` 대신 SQL 픽스처가 준다.
 POST /v1/join
 POST /v1/claim
+PATCH /v1/workspaces/{workspaceId}/members/me/password
+POST /v1/workspaces/{workspaceId}/members/{memberId}/password-reset
 GET /v1/workspaces/{workspaceId}/roster
 GET /v1/workspaces/{workspaceId}/members
 GET /v1/workspaces/{workspaceId}/channels

@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## 패스워드 초기화 경로 (#1767, 2026-08-27)
+
+- `owner_claim`을 `credential_claim` + `kind`(`owner_bootstrap` | `password_reset`)로 일반화(081). token_hash 32B · TTL 24h · 단일 사용 · definer lookup 관례는 078 승계. `schema_v0.sql` 비접촉.
+- 운영자 발급: `POST …/members/{id}/password-reset` (owner/admin). 재발급은 이전 미소비 reset 을 `consumed_at`으로 무효화. 원문은 201 1회. 메일 없음 — out-of-band 전달.
+- 본인 변경: `PATCH …/members/me/password` — 현재 비번 재확인 · 멤버/IP 레이트리밋. 세션 회전: 해당 멤버의 모든 `kind=session` 토큰을 만료하고 새 쌍을 발급(agent bearer 비접촉).
+- `POST /v1/claim`이 두 kind를 소비. owner_bootstrap 회귀는 기존 경로 그대로.
+- 웹 ClaimPage kind 문구 분기는 후속 UXUI. 발급 응답 `claimPath=/claim/<token>`.
+
 ## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
 
 - `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`이면 업로드 URL을 ADR-0167과 같은 `Host`+`X-Forwarded-Proto`(Caddy 정규화)에서 파생한다. 절대 URL은 verbatim. `MOMO_DRIVE_ARCHIVE_BACKEND` 선택 축은 무영향.

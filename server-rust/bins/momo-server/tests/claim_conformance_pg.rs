@@ -191,8 +191,10 @@ async fn seed_claim_pending(
     let token = mint_owner_claim_token().expect("entropy");
     assert_eq!(token.len(), OWNER_CLAIM_TOKEN_LEN);
     let insert = format!(
-        "INSERT INTO owner_claim (workspace_id, member_id, token_hash, expires_at, created_at) \
-         VALUES ($1, $2, digest($3::text, 'sha256'), {expires_sql}, {created_sql})"
+        "INSERT INTO credential_claim \
+            (workspace_id, member_id, token_hash, expires_at, created_at, kind) \
+         VALUES ($1, $2, digest($3::text, 'sha256'), {expires_sql}, {created_sql}, \
+                 'owner_bootstrap')"
     );
     sqlx::query(&insert)
         .bind(workspace)
@@ -321,8 +323,9 @@ async fn claim_issue_login_reject_consume_login_reuse_and_hash_only() {
     assert_eq!(reuse_status, 409, "reuse must be refused: {reuse_body}");
 
     let stored: Vec<u8> = sqlx::query_scalar(
-        "SELECT token_hash FROM owner_claim \
-          WHERE workspace_id = $1 AND member_id = $2",
+        "SELECT token_hash FROM credential_claim \
+          WHERE workspace_id = $1 AND member_id = $2 \
+            AND kind = 'owner_bootstrap'",
     )
     .bind(fixture.workspace)
     .bind(fixture.owner)
@@ -336,8 +339,9 @@ async fn claim_issue_login_reject_consume_login_reuse_and_hash_only() {
         "DB must not hold the raw token"
     );
     let matches: bool = sqlx::query_scalar(
-        "SELECT token_hash = digest($1::text, 'sha256') FROM owner_claim \
-          WHERE workspace_id = $2 AND member_id = $3",
+        "SELECT token_hash = digest($1::text, 'sha256') FROM credential_claim \
+          WHERE workspace_id = $2 AND member_id = $3 \
+            AND kind = 'owner_bootstrap'",
     )
     .bind(&fixture.token)
     .bind(fixture.workspace)
