@@ -60,3 +60,16 @@ worktrees/
 .claude/data/
 .claude/hooks/
 .claude/settings.json
+
+# 검수 증거 스크린샷 (2026-08-26). 리뷰 리포트 .md 는 정본으로 커밋하되,
+# 캡처 PNG 는 레포에 싣지 않는다 — 실측 1,005장 247MB 로 공개 레포 클론을
+# 무겁게 하고, 리포트가 인용하는 것은 수치이지 이미지 자체가 아니다.
+# (U-7 #1689 에서 .omd 번들에 내린 판정과 같은 클래스)
+claudedocs/**/*.png
+
+# E2E 리그 잔재 — 페어링/토큰 값이 워크트리에 남는 자리 (2026-08-26 실측:
+# engine 워크트리에 .tok·PAIRING_VALUE.txt 가 미무시로 방치돼 있었다).
+# 값 자체는 세션 한정이지만 `git add -A` 한 번이면 공개 레포에 실린다.
+.tok
+PAIRING_VALUE.txt
+*.pairing
