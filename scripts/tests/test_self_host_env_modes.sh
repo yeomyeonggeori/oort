@@ -901,6 +901,64 @@ grep -Fq 'ENV_FILE 없음' "$missing_public/output" || grep -Fq '없음' "$missi
 # Existing env without --public-origin still does not rewrite allowed origins.
 test "$public_before" != "$(hash_file "$public_fixture/infra/rust/local.secrets.env")"
 
+# #1790 — claim-mode env (password key removed, MOMO_BOOTSTRAP_CLAIM=1)
+# must reach the --public-origin maintenance path. --compose stays closed.
+claim_fixture="$(make_fixture claim-public-origin)"
+run_generator "$claim_fixture" "$claim_fixture/first-output" 49750 --local-build
+claim_env="$claim_fixture/infra/rust/local.secrets.env"
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
+  { print }
+  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
+' "$claim_env" >"$claim_fixture/claim.env"
+mv "$claim_fixture/claim.env" "$claim_env"
+chmod 600 "$claim_env"
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$claim_env"
+if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$claim_env"; then
+  echo "claim surgery left a password key" >&2
+  exit 1
+fi
+jwt_claim_before="$(sed -n 's/^JWT_HMAC=//p' "$claim_env")"
+run_generator "$claim_fixture" "$claim_fixture/origin-output" 49750 \
+  --public-origin https://example-tunnel.test
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49750 http://127.0.0.1:49750 tauri://localhost http://tauri.localhost https://example-tunnel.test wss://example-tunnel.test' \
+  "$claim_env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://example-tunnel.test' "$claim_env"
+test "$(sed -n 's/^JWT_HMAC=//p' "$claim_env")" = "$jwt_claim_before"
+grep -Fq '공개 오리진을 추가했다' "$claim_fixture/origin-output"
+grep -Fq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 을 공개 오리진으로 맞췄다' "$claim_fixture/origin-output"
+if grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/origin-output"; then
+  echo "claim-mode next-steps unexpectedly recommended --compose" >&2
+  exit 1
+fi
+if grep -Fq '재시작: --compose' "$claim_fixture/origin-output"; then
+  echo "claim-mode origin refresh unexpectedly recommended --compose restart" >&2
+  exit 1
+fi
+if run_generator "$claim_fixture" "$claim_fixture/compose-output" 49750 --compose up -d; then
+  echo "claim-mode --compose unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'claim 모드' "$claim_fixture/compose-output"
+grep -Fq '비밀번호 키를 요구한다' "$claim_fixture/compose-output"
+
+# Password absence without the claim marker is still malformed.
+no_claim_fixture="$(make_fixture missing-password-no-claim)"
+run_generator "$no_claim_fixture" "$no_claim_fixture/first-output" 49760 --local-build
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  { print }
+' "$no_claim_fixture/infra/rust/local.secrets.env" >"$no_claim_fixture/stripped.env"
+mv "$no_claim_fixture/stripped.env" "$no_claim_fixture/infra/rust/local.secrets.env"
+if run_generator "$no_claim_fixture" "$no_claim_fixture/origin-output" 49760 \
+  --public-origin https://example-tunnel.test; then
+  echo "password-less env without claim marker unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다' \
+  "$no_claim_fixture/origin-output"
+
 echo "self-host image mode contract: PASS"
 
 # Real docker proof is a separate script so local_gate profiles do not each

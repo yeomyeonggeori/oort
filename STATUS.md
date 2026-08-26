@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## claim 모드 env 유지보수 경로 (#1790, 2026-08-26)
+
+- `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 `--public-origin` 유지보수가 비밀번호 검증을 건너뛰고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`·`CENTRIFUGO_ALLOWED_ORIGINS`를 갱신한다. `--compose`는 ADR-0166대로 비밀번호 키를 계속 요구한다.
+- 비밀번호가 있는 env의 12–128자 dotenv-safe 검증은 그대로다. `docs/SELF_HOST_AGENT.md` §1.4↔§2.3 문면 정합.
+
 ## 소유자 관전 차단 토글 (#1778, 2026-08-26)
 
 - 인간 세션 소유자의 `PATCH …/work-sessions/{session}` `{observation: open|owner_only}`를 Swift `updateObservation` 문장 그대로 서빙한다. 비소유자 403, 호스트 서명 403(인간 경로 — #1777 팔 비접촉). `owner_only`는 같은 트랜잭션에서 observer capability를 회수한다.
