@@ -1,5 +1,51 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-26 스냅샷 67 (Fable · momo-main — ★buzz 정합 파도 완결: uxui 6/6+HD-1, 워커 레인 Cursor CLI 전환).** 컴팩트 복원 진입점.
+>
+> **★ buzz 파도 완결**: D2(스레드 표면)·D1(lucide 정본화)·D3(⋯메뉴+콜드 착지 선재버그 수리)·D4(사이드바 — R3 전등급 0)·TC-1(관전 터미널 도크, 4회전) → track/uxui **264bb1dc** / HD-1(허들 서버 복원) → track/engine **46a1788e**. 리뷰 누적 16회전(B9·H15 실측 적발·전부 폐곡선). vitest 1523→**1585**. 리뷰 정본 claudedocs/design-review-{1761,1762,1764,1765,1766}/.
+>
+> **★ 워커 레인**: Codex CLI 공식 은퇴 → **cursor-agent + cursor-grok-4.6-high-fast**(-p --trust -f, kwak@dawn.kim). 호스트 직접 실행=워커가 전 게이트 자가 실행. 제도화: 게이트 파일 수정 시 초록 완주 로그 커밋 동반.
+>
+> **★ 성재 게이트 대기**: ①**main 승격 창**(uxui 9틱 적체+engine 허들 — 승격 후 #850 웹 허들 착수 가능) ②검수 앱 실물 QA(재빌드 배포 직후 고지) ③RA-7 리서치 발사(RQ-1 Tailscale state 영속화+RQ-2 계정 — url-stability 인터뷰 §③) ④AC-1~4 티켓 발급(계정·권한 감사) ⑤T-2 플레이북 재작성 ⑥TC-2 기획 세션 ⑦도어벨 재시험(벤더+루틴 key) ⑧grok Build 잔고(Cursor 레인으로 대체 중).
+>
+> **★ 적립 이슈**: #1748 폰 피커·#1752 폰 컴포저·#1759 TC-2·#1763 D1 적립 6건·Mark unread 서버 후보·폰 링크복사.
+>
+> 이하 스냅샷 66:
+> **2026-08-25 스냅샷 66 (Fable · momo-main — ★UX 파도 3티켓 완결: EB·HT·CB 전부 track/uxui 랜딩).** 컴팩트 복원 진입점.
+>
+> **★ UX 파도 완결**: UX-EB(#1742→PR#1746, c2b779cf)·UX-HT(#1743→PR#1750, ba914b7a)·UX-CB(#1749→PR#1751, 31dc8a89) — 각각 독립 design-review 3회전(FAIL→수리→FAIL→수리→PASS B0·H0)으로 랜딩. 리뷰 정본 `claudedocs/design-review-{1746,1750,1751}/`. vitest 1446→**1523**. 신설 기계 자: 드래그 선택·본문 교차(이웃 포함)·행당 정거장·[@] 비공백 캐럿·이모지 앵커 xΔ·frame 토큰 대조.
+>
+> **★ 워커 레인**: grok = Build 잔고 402 소진(성재 충전/리셋 대기) → **codex-fleet 전환 가동 실증**(UX-CB 2라운드). 대행 게이트 세트 교훈 성문: codex 샌드박스는 브라우저 게이트 전부(capture+gate-typing+composer+shell-layout) 오케스트레이터 대행.
+>
+> **★ 적립**: #1748(폰 이모지 피커 패리티)·#1752(폰 컴포저 동형+M-5R 폰 작성중 폭 거래 — 성재 판단)·soft 채움 3:1 시스템 미결(§5.3)·UX-HT R3 잔여 Nit 3.
+>
+> **★ 도어벨(#28)**: WD 전부 랜딩·E2E 서버 절반 GREEN·cursor 벤더 500 RED. 재시험 정본 `claudedocs/e2e-doorbell-20260824/RERUN.md`. 선결=①성재 그록봇 루틴 key 재발급/삭제 ②무인증 POST 401 프로브. #1747(compose 배선 갭) 미착수. 로컬 리그는 성재 QA용 재기동 상태(owner@oort.local).
+>
+> **★ 성재 대기**: ①검수 앱(UX-HT 툴바+UX-CB 컴포저 포함 재빌드) 실물 QA — 고지 예정 ②grok Build 잔고 ③그록봇 스파이크 루틴 정리 ④도어벨 재시험 신호 ⑤track/uxui→main 승격 창 결정(3티켓+도어벨 UI 적체) ⑥#1752 M-5R 판단.
+>
+> 이하 스냅샷 65:
+> **2026-08-25 스냅샷 65 (Fable · momo-main — ★UX-EB 랜딩(리뷰 3회전)·자원 대청소·UX-HT 가동).** 컴팩트 복원 진입점.
+>
+> **★ UX-EB(#1742) 랜딩**: PR #1746 → track/uxui **c2b779cf**. design-review 3회전(R1 FAIL B1·H5 → grok 수리 → R2 FAIL 신규 B2 → 오케스트레이터 마감 90ae48aa → **R3 PASS B0·H0**). 증거 `claudedocs/design-review-1746/`. 적립: #1748 폰 패리티·soft 3:1 시스템 미결·N-7 수용. **교훈: 수리 검수 게이트에 capture:design 상시 포함.**
+>
+> **★ 가동 중**: UX-HT(#1743) grok 워커(uxht-hover-toolbar, base c2b779cf — 탭스톱 red proof·단일 빈도 store·B11+§6 개정 동반 지시) + 성재 검수용 track/uxui Tauri debug 재빌드.
+>
+> **★ 자원 대청소 집행(성재 승인)**: Docker 이미지 8.5→3.1GB·볼륨 645→78MB(oort 리그 4볼륨 보존)·워크트리 10→5(wd1-doorbell=리그 compose 실물 보존, diff 백업)·로컬 브랜치 538→183. E2E 리그 down·터널 종료. 재시험 정본 `claudedocs/e2e-doorbell-20260824/RERUN.md`.
+>
+> **★ 도어벨(#28)**: WD-1/2/3 전부 랜딩. E2E 서버 절반 GREEN·cursor 벤더 500 RED — 재시험 선결=①성재 그록봇 루틴 key 재발급/삭제 ②무인증 POST 401 프로브로 벤더 회복 확인. 셀프호스트 갭 2건=#1747(미착수).
+>
+> **★ 성재 대기**: ①UX-EB 실물 검수(재빌드 앱 완료 시 고지) ②그록봇 스파이크 루틴 정리(계정 주인만 가능) ③도어벨 재시험 신호 ④합류 릴레이 킷 2-paste·iOS 실기(전 스냅샷 승계) ⑤기기 위생: 외부 프로젝트 vite preview가 4300/4301 점유(PID 4023/4024) — 게이트 계약 테스트와 충돌.
+>
+> 이하 스냅샷 64:
+> **2026-08-24 스냅샷 64 (Fable · momo-main — ★4차 집행 완결: v0.1.2 발행·전 워커 소진).** 컴팩트 복원 진입점.
+>
+> **★ v0.1.2 발행**: 첫 멀티아치 list pin(앱 43babdbc…de6d·pg b09eb970…1626)·attestation PASS·Release·SELF_HOST 현행화. D8 함정 3종+언퍼얼(기본 꺼짐)이 셀프호스트 이미지에 실림. Release가 digest 정본.
+>
+> **★ 랜딩 완결**: 2차 승격 창(#1724 uxui·#1726 engine)+#1729(실측 크기)+#1733(#1720 1·3·4항). 가동 워커 0. 열린 티켓 잔여: #1720(2항 fan-out만)·U-8 폰 각주 소화됨(#1733).
+>
+> **★ 성재 대기**: ①합류 릴레이 킷 2-paste(경계 유지 — Fable 비대행) ②iOS 실기 세션(후열 지시됨) ③워크트리 50개 적체 정리 판정(ENOSPC 4회 근본 원인 — 머지 완료분 일괄 회수 승인?) ④라이브(호스티드) 배포 창은 별개 결정(이번 발행은 셀프호스트 이미지·라이브 서버 무변경).
+>
+> 이하 스냅샷 63:
 > **2026-08-24 스냅샷 63 (Fable · momo-main — ★일괄 승인 창 전량 소진: ADR-0170까지 완결).** 컴팩트 복원 진입점.
 >
 > **★ 언퍼얼 완결**: 서버 #1717(engine)+클라 #1719(uxui, 리뷰 FAIL→수리→PASS 0·0). #1698/#1718 close. 수리 부산물=로빙 기계 근본 수리 2건(rowFocus). 적립 #1720. **성재 요청 4축 기능(타이핑·패딩·드로어·언퍼얼) 전부 랜딩 상태.**

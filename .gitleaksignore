@@ -192,3 +192,13 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 # 위 pwa/store.ts:32 항목과 같은 클래스 — generic-api-key 엔트로피 오탐.
 #   clients/web/src/features/emoji/frequencyStore.ts:14  [generic-api-key]
 856df558f3634d8a375184a61009a21eb0b4185f:clients/web/src/features/emoji/frequencyStore.ts:generic-api-key:14
+
+# ── RA-7 리서치 문서의 예제 명령 (3건) ──────────────────────────────
+# 셋 다 값이 아니라 **문법**이다. 앞의 것은 RFC 6455가 스펙 본문에 적어 둔
+# 표준 예제 키 `dGhlIHNhbXBsZSBub25jZQ==`(base64 "the sample nonce")이고,
+# 뒤 둘은 `curl -u "$TS_APIKEY:"` — 셸 변수 참조라 실제 값이 없다.
+#   docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:169  [generic-api-key]
+372ea1c33d41a75f69b598e1c1fd85b655c45501:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:generic-api-key:169
+#   :203 · :204  [curl-auth-user]
+372ea1c33d41a75f69b598e1c1fd85b655c45501:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:203
+372ea1c33d41a75f69b598e1c1fd85b655c45501:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:204

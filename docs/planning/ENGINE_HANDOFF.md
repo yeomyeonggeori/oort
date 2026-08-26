@@ -146,3 +146,5 @@ B-1 첨부 업로드(MOMO-474) · B-2 검색 FTS(MOMO-475) · B-3 스레드 개�
   - **방어 렌더링의 입력**: 닫는 PATCH 는 best effort 라 실패하면 메시지가 `streaming:true` 로 남는다. 그 경우를 잡으려고 두 클라에 `endedRuns` 스토어(터미널 `agent.status` 를 **본** run 만 적는다)를 두고 `Timeline` 이 행마다 `runEnded` 를 넣는다. **부재를 종결로 읽지 말 것** — 레일은 끝난 run 을 지우므로 부재는 새로고침 직후와 구별되지 않고, 부재 기반 판정은 도착 중인 답에 「응답이 끊김」을 붙인다.
   - **ephemeral(`agent.partial`) 무접촉**: 진행 중 힌트 경로는 이 ADR 밖이다(durable 한 것이 없으므로 Suppressed 유지).
   - 미결: `run_turn` 의 in-process 스트리밍 전환은 ADR-0155 결정 5의 **별도 티켓**. 그때까지 이 경로를 실제로 쓰는 것은 REST 로 스트리밍하는 prime·hermes 어댑터뿐이다.
+
+- **X-WD1 (ready)**: #1734 hosted 커넥션 도어벨 — track/engine 랜딩(PR #1737, c36311c1, 2026-08-24). ADR-0171(Accepted). 웹(WD-2 #1735) 소비 표면: 커넥션 도어벨 등록/해제 tenant REST(시크릿 write-only·응답은 `secret_masked`만)·`doorbell_last_fired_at/-status` projection·`MOMO_DOORBELL_ENABLED` 게이트(off=라우트 404). OpenAPI `docs/api/openapi.yaml`에 계약 랜딩(web-legacy 생성 타입 동기화 PASS). **UI 착수는 track→main 승격+uxui sync 후**(생성 타입 전파 필요 — 성재 승격 게이트 대기). 실측: 도어벨 POST→그록봇 ACK 9s.
