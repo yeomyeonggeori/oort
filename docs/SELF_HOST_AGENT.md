@@ -458,6 +458,12 @@ oort_compose up -d
 거절한다. 사람 노트북의 비밀번호 있는 env(`SELF_HOST.md`)는 `--compose`
 를 그대로 쓴다.
 
+**레거시 env 한 줄 (#1790 복원).** 생성기가 `MOMO_CENTRIFUGO_WS_URL 이
+루프백을 가리킨다` 고 경고하면 — 생성기는 경고만 하고 고치지 않는다 —
+이미 있는 env 의 그 한 줄을 `MOMO_CENTRIFUGO_WS_URL=same-origin` 으로
+고친 뒤 재시작한다(ADR-0167). 원격 클라가 자기 localhost 로 WS 를 여는
+것을 막는 단계다. **시크릿 재생성은 금지.**
+
 **검증:** 이후 로그인(claim 직후 포함) 응답의 `realtimeWebSocketUrl` 이
 `wss://<공개호스트>/connection/websocket` 과 같아야 한다.
 `ws://localhost` 이면 same-origin 값과 api 재시작을 확인한다.
