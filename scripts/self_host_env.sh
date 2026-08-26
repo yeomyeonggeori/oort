@@ -49,9 +49,11 @@
 #
 # ## 규율
 #
-# * 이미 파일이 있으면 **절대 덮어쓰지 않는다.** 볼륨이 살아 있는 상태에서 시크릿을
-#   다시 만들면 DB 안의 롤 비밀번호와 env가 어긋나 스택이 부팅하지 못한다. 이 경우
-#   현재 로그인 정보만 다시 출력하고 끝낸다.
+# * 이미 파일이 있으면 **시크릿을 다시 만들지 않는다.** 볼륨이 살아 있는 상태에서
+#   시크릿을 다시 만들면 DB 안의 롤 비밀번호와 env가 어긋나 스택이 부팅하지 못한다.
+#   `--public-origin` 유지보수는 시크릿을 건드리지 않는다. claim 모드
+#   (`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)에서도 그 경로만 통과한다(#1790).
+#   `--compose`는 비밀번호 키를 계속 요구한다(ADR-0166).
 # * 값은 openssl로 만들고, 파일은 0600으로 쓴다. `*.secrets.env` 는 레포 전역
 #   gitignore 대상이다.
 # * 포트가 이미 쓰이고 있으면 **비어 있는 다음 포트를 골라** 알려 준다. 사람이
@@ -135,10 +137,14 @@ Usage:
 
 No argument is a backwards-compatible alias for --local-build.
 --public-origin may be repeated. It idempotently adds the origin (and its
-ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS; existing
-entries are preserved. On an existing env it does not regenerate secrets.
+ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS and rewrites
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL; existing Centrifugo tokens are preserved.
+On an existing env it does not regenerate secrets. Claim-mode env
+(MOMO_BOOTSTRAP_CLAIM=1, no owner password) may use this maintenance path;
+--compose still requires the password key (ADR-0166).
 After preparation, use --compose for every start/stop/log command so ambient
-Compose variables cannot override infra/rust/local.secrets.env.
+Compose variables cannot override infra/rust/local.secrets.env. Use the
+playbook's docker compose helper in claim mode instead of --compose.
 EOF
 }
 
@@ -262,6 +268,22 @@ env_value_once() {
   awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2) }' "$ENV_FILE"
 }
 
+# ADR-0166 claim bootstrap: the playbook strips MOMO_INITIAL_OWNER_PASSWORD
+# and writes MOMO_BOOTSTRAP_CLAIM=1. That absence is the contract, not a
+# malformed env. Other values (created/skipped) are migrate stdout, not this file.
+is_claim_bootstrap_env() {
+  [ "$(env_key_count MOMO_BOOTSTRAP_CLAIM)" -eq 1 ] || return 1
+  [ "$(env_value_once MOMO_BOOTSTRAP_CLAIM)" = "1" ]
+}
+
+stack_restart_hint() {
+  if is_claim_bootstrap_env; then
+    printf 'docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출'
+  else
+    printf '--compose up -d'
+  fi
+}
+
 reject_duplicate_env_keys() {
   local duplicate
   duplicate="$(awk -F= '
@@ -345,7 +367,8 @@ ensure_operator_allowlist() {
   # that lands in the middle of rendered Compose JSON is worse than no notice.
   printf '[self-host] %s 에 PLATFORM_ADMIN_EMAILS=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$owner_email" >&2
-  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # #1607 — desktop CORS allowlist, for env files written before it existed.
@@ -372,7 +395,8 @@ ensure_desktop_cors_allowlist() {
   } >>"$ENV_FILE"
   printf '[self-host] %s 에 MOMO_CORS_ALLOWED_ORIGINS=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$SELF_HOST_DESKTOP_CORS_ORIGINS" >&2
-  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # #1696 / ADR-0169 — local file archive, for env files written before it existed.
@@ -557,7 +581,8 @@ ensure_public_origins() {
   rewrite_env_assignment CENTRIFUGO_ALLOWED_ORIGINS "$next"
   printf '[self-host] %s 의 CENTRIFUGO_ALLOWED_ORIGINS 에 공개 오리진을 추가했다.\n' \
     "$ENV_FILE" >&2
-  printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: --compose up -d\n' >&2
+  printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 warn_if_legacy_localhost_realtime_ws() {
@@ -593,7 +618,8 @@ warn_if_centrifugo_missing_desktop_origins() {
     "$ENV_FILE" >&2
   printf '[self-host] 데스크탑 실시간은 업그레이드 전 Origin 대조에서 403이 된다. 시크릿을\n' >&2
   printf '[self-host] 건드리지 말고 그 줄 끝에 " tauri://localhost http://tauri.localhost" 를\n' >&2
-  printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: --compose up -d\n' >&2
+  printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # Historical self-host volume name (#1613). Existing installs used the generator
@@ -825,6 +851,29 @@ print_next_steps() {
       ;;
     *) fail "저장된 MOMO_SELF_HOST_MODE가 잘못됐다: $mode" ;;
   esac
+  if is_claim_bootstrap_env; then
+    cat <<EOF
+
+[self-host] 준비됐다. 모드: $mode_summary
+[self-host] 이 env는 claim 모드다. --compose는 비밀번호 키를 요구하므로 거절한다.
+[self-host] 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다.
+[self-host] 주의: 이 quickstart는 로컬 named volume만 사용하며 production 백업/PITR가 아니다.
+[self-host] 운영 업그레이드는 pgBackRest 오버레이+서명된 fresh evidence gate를 따라야 한다.
+[self-host] 브라우저에서 열고 migrate가 출력한 /claim/<token> 으로 첫 비밀번호를 설정한다:
+
+  http://localhost:${web_port}
+  email    ${owner_email}
+
+[self-host] 비밀번호 키는 이 파일에 없다. 원문 토큰을 stdout·이슈에 다시 적지 않는다.
+[self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
+[self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
+[self-host] 패키징된 데스크탑 릴리스(tauri://localhost)는 같은 스택에 교차 오리진으로
+[self-host] 붙는다. 새 env 는 MOMO_CORS_ALLOWED_ORIGINS 와 CENTRIFUGO_ALLOWED_ORIGINS 에
+[self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
+[self-host] CORS가 필요 없다.
+EOF
+    return
+  fi
   cat <<EOF
 
 [self-host] 준비됐다. 모드: $mode_summary
@@ -859,7 +908,24 @@ if [ -e "$ENV_FILE" ]; then
   existing_image="$(env_value_once MOMO_RUST_IMAGE)"
   existing_web_port="$(env_value_once MOMO_WEB_PORT)"
   existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
-  existing_password="$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
+  password_count="$(env_key_count MOMO_INITIAL_OWNER_PASSWORD)"
+  [ "$password_count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_INITIAL_OWNER_PASSWORD 항목은 최대 한 번만 있어야 한다."
+  claim_count="$(env_key_count MOMO_BOOTSTRAP_CLAIM)"
+  [ "$claim_count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_BOOTSTRAP_CLAIM 항목은 최대 한 번만 있어야 한다."
+  if [ "$password_count" -eq 1 ]; then
+    validate_owner_password "$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
+  elif is_claim_bootstrap_env; then
+    # #1790 — password absence is normal in claim mode. Origin refresh and
+    # other existing-env maintenance may proceed. --compose stays closed
+    # (ADR-0166: the launcher still requires the password key).
+    if [ "$REQUESTED_ACTION" = "compose" ]; then
+      fail "${ENV_FILE}은 claim 모드다. --compose는 비밀번호 키를 요구한다(ADR-0166). 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다."
+    fi
+  else
+    fail "${ENV_FILE}의 MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다."
+  fi
   mode_count="$(env_key_count MOMO_SELF_HOST_MODE)"
   [ "$mode_count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE 항목은 최대 한 번만 있어야 한다."
@@ -869,7 +935,6 @@ if [ -e "$ENV_FILE" ]; then
   fi
   validate_env_scalar MOMO_RUST_IMAGE "$existing_image"
   validate_owner_email "$existing_email"
-  validate_owner_password "$existing_password"
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
   ensure_operator_allowlist "$existing_email"
   ensure_desktop_cors_allowlist

@@ -151,8 +151,19 @@ chmod 600 "$ENV_FILE"
 ```
 
 env 파일을 cat/grep 해서 stdout에 흘리지 않는다. 이미 claim 수술된
-파일이면 같은 awk가 멱등이다. **생성기를 다시 돌리지 않는다** — 비밀번호
-키가 없으면 `--compose`/재생성 경로가 거절한다.
+파일이면 같은 awk가 멱등이다.
+
+**「생성기를 다시 돌리지 않는다」의 범위 (#1790).**
+
+- **유효 — 시크릿 재생성·`--compose` 기동.** 비밀번호 키가 없으면
+  `--compose`와 파일-없음 재생성 경로는 거절한다(ADR-0166). 스택
+  기동은 아래 `oort_compose`만 쓴다.
+- **무효 — 이미 있는 env의 유지보수.** 공개 주소가 생긴 뒤
+  `--public-origin` 을 돌리는 것(§2.3)은 시크릿을 다시 만들지 않는다.
+  `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 그 경로만
+  비밀번호 검증을 면제하고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` 과
+  `CENTRIFUGO_ALLOWED_ORIGINS` 를 갱신한다. 비밀번호가 **있는** env는
+  지금과 같이 12–128자 dotenv-safe를 강제한다.
 
 ```sh
 oort_compose() {
@@ -431,15 +442,27 @@ tailscale funnel --bg --yes "${WEB_PORT}"
 
 공개 주소가 생긴 뒤에 **시크릿을 다시 만들지 말고** 이 한 줄을 실행한다.
 브라우저 Origin(`https://…`)과 RN 소켓 Origin(`wss://…`)을 같이 넣는다.
-두 번 실행해도 항목은 하나다.
+첨부 업로드 base(`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`)도 같은 공개
+오리진으로 맞춘다. 두 번 실행해도 항목은 하나다. claim 수술된 env
+(`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)에서도 이 유지보수 경로는
+통과한다 — 「생성기를 다시 돌리지 않는다」(§1.4)는 시크릿 재생성·
+`--compose`에만 적용된다.
 
 ```sh
 scripts/self_host_env.sh --public-origin https://<공개호스트>
-scripts/self_host_env.sh --compose up -d
+oort_compose up -d
 ```
 
-이미 있는 env 의 `MOMO_CENTRIFUGO_WS_URL` 이 `ws://localhost:…` 이면 그
-한 줄만 `same-origin` 으로 고친다. 시크릿 재생성은 금지.
+재시작은 §1.4의 `oort_compose`다. claim 모드에서
+`scripts/self_host_env.sh --compose` 는 비밀번호 키를 요구하므로
+거절한다. 사람 노트북의 비밀번호 있는 env(`SELF_HOST.md`)는 `--compose`
+를 그대로 쓴다.
+
+**레거시 env 한 줄 (#1790 복원).** 생성기가 `MOMO_CENTRIFUGO_WS_URL 이
+루프백을 가리킨다` 고 경고하면 — 생성기는 경고만 하고 고치지 않는다 —
+이미 있는 env 의 그 한 줄을 `MOMO_CENTRIFUGO_WS_URL=same-origin` 으로
+고친 뒤 재시작한다(ADR-0167). 원격 클라가 자기 localhost 로 WS 를 여는
+것을 막는 단계다. **시크릿 재생성은 금지.**
 
 **검증:** 이후 로그인(claim 직후 포함) 응답의 `realtimeWebSocketUrl` 이
 `wss://<공개호스트>/connection/websocket` 과 같아야 한다.
