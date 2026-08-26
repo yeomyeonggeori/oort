@@ -24,7 +24,7 @@
 | 6 | **링크 언퍼얼** | ①자립 (fetch 대상만 제3자) | 기본 OFF. fetch 주체는 셀프호스트 `webhook-sender` 자신(UA `oort-unfurl/1`), 이미지도 **자기 서버 프록시**. **oort 프록시 0** |
 | 7 | **첨부/Drive** | ①자립이 **기본** | 기본 = `MOMO_DRIVE_ARCHIVE_BACKEND=local` + 볼륨. google 백엔드는 옵트인 — **제3자, 우리 아님** |
 | 8 | **그록봇/에이전트 연동** | ①자립 (우리 서버 **비경유**) | Agent Port = 셀프호스트 api 자신의 `/v1/mcp/agent-port`. 도어벨은 **우리 서버 → 사용자 루틴 webhook** POST(ADR-0171). LLM은 사용자가 넣은 endpoint를 자기 DB에 암호화 저장 후 agent-worker가 직접 호출. 벤더 의존은 그록봇(xAI/Cursor) 쪽이고 **oort 서버는 안 탄다** |
-| 9 | **터널** | ②제3자 / A트랙은 **미구현** | 현행 v1 = cloudflared quick tunnel(계정 불요, URL 기동마다 변동). **A트랙(oort 릴레이)은 코드에 전무** — `tailscale|funnel|cloudflared` 문자열이 배선으로 없고 문서에만 존재 |
+| 9 | **터널** | ②제3자(사용자 자기 계정) / A트랙은 **미구현** | ⚠️ **2026-08-26 정정**: 이 칸의 최초 판정("현행 v1 = cloudflared quick tunnel")은 **오독이었다.** 플레이북 §2.2가 **"v1 외부 도달 = Tailscale Funnel(사용자 자기 tailnet, RA-7 M1)"을 기본**으로 정하고 있고 quick tunnel은 *"Funnel을 켤 수 없을 때만 · production 금지"* 폴백이다(`SELF_HOST_AGENT.md:253,275-276`). 성공 기준도 *"사람 터미널 명령 0회 · 브라우저 클릭 4~5회(가입/로그인/승인)"*로 명시돼 있다. **A트랙(oort 릴레이)은 코드에 전무** — `tailscale|funnel|cloudflared` 문자열이 배선으로 없고 문서에만 존재 |
 | 10 | **텔레메트리/분석/에러 리포팅** | ①**없음** | sentry/posthog/GA/amplitude/mixpanel 배선 **0건**. 메트릭은 pull-only·compose 사설, 셀프호스트 스택엔 prometheus 자체가 없음 |
 | 11 | **라이선스/인증/과금 콜백** | ①**없음** | 외부 라이선스·활성화 콜백 0. `billing`은 T3 내부 사용량 원장 |
 | 12 | 초대/딥링크 | ①자립 | `oort://join?server=<자기 서버>&code=`. ADR-0121의 LinkShort는 **prod compose에만** 존재 |
