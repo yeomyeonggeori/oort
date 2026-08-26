@@ -4,6 +4,13 @@
 > 규칙: 항목당 5줄 이내. 새 항목은 맨 위에 추가하고 기존 항목은 수정하지 않는다. 결정·증거·계획의 정본이 아니다(그건 ADR/STATUS/ROADMAP) — 여기는 "무엇을 하다 어디서 멈췄나"만. 최신이 위.
 
 ---
+
+## 2026-08-26 (Opus) · ★NCP 비용 판정 + 셀프호스트 외부 의존 전수 감사 · 파도 1 완주(#1777·#1778)
+- **전수 감사**(`research/2026-08-26-selfhost-external-dependency-audit.md`): "우리 서버를 타는 자리"=4곳, 런타임 강제는 **실질 1곳(데스크톱 자동 업데이트 — 빌드타임 baked)**뿐. 이미지 pull=local-build 대안 1급, 푸시=기본 스택에 부재, display TURN=**문면만 oort 전용이고 코드는 호스트 미검증**(M7 판정 필요). 텔레메트리·분석·과금 콜백 **0건**. **사실 정정: 허들은 oort TURN을 타지 않는다 — livekit.yaml TURN 블록이 통째 주석이라 TURN이 아예 없다.**
+- **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
+- 파도 1: **#1777 랜딩**(9a308276) — host-signed 세 팔 이식으로 remote_attach_available false→true, 터미널 축 개방. 레시피 `scripts/verify_workd_rust.sh` 동반. **#1778 PR #1787** — 소유자 관전 토글 400 수리, **ADR-0004 증보3 D3 원문 회귀 이식**(owner_only 강제는 077 파도가 스스로 넓힌 규칙이었다). 독립 재현 1199/1199 + PG 컨포먼스 1/1(일회용 PG 신규 기동).
+- 적립: **#1788**(M6 — 첨부 capability URL이 고정 localhost로 조립돼 터널 접속에서 깨짐. `--public-origin` 갱신 대상에서 누락. 그록봇 VM E2E가 정확히 이 조건). #1785(ACP 릴레이).
+
 ## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
 - 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
 - ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
@@ -2647,3 +2654,14 @@
 - **워커 예고→실측 RED 5게이트**(헤더 트리거 의미 변경) 재배선 — 보호 단정 강도 유지·evidence 로그 커밋 동반(UX-CB B-2 교훈 제도화 첫 실전).
 - **buzz 정합 파도 uxui 완결(6/6)**: D2 0e202e5e·D1 4c913f77·D3 1eb7c627·D4 e1a0ca42·TC-1 264bb1dc(+HD-1 engine 46a1788e). 리뷰 누적 16회전, Blocker 9·High 15 실측 적발·전부 폐곡선. 잔여: #850 웹 허들(승격 후)·TC-2 기획·AC-1~4 발급 대기.
 - 검수 앱 재빌드 착수(track/uxui 264bb1dc).
+
+## 2026-08-26 · Opus5(Fable 대행) · 승격 창 완결 + 5갈래 집행
+- **인계**: 성재 지시로 Fable→Opus 5 역할 대행. 워커 레인은 cursor-agent(grok-4.6) 유지.
+- **★ 승격 창 완결 — 삼자 정렬 복구**: engine→main(#1771, HD-1 허들) → uxui sync(#1773, STATUS union) → engine sync(#1775) → **uxui→main(#1772, 74커밋/9티켓)** → docs 플러시(#1776) → sync 짝(#1779·#1780). 최종 main=dafe81b1, 잔여 0, `main ⊂ 두 트랙` 복구.
+  - 순서 함정 실측: engine 승격이 uxui PR을 CONFLICTING으로 만들고(STATUS.md), sync로 풀면 이번엔 `main is ancestor of both tracks`가 걸린다 — 이 체크는 **pull_request가 아니라 push 이벤트 기반 브랜치 감시**라 PR 머지 전에는 구조적으로 통과 불가. required 아님(required=PR CI gate·Policy integrity gate 둘). 순서 = 승격→sync→승격 재개.
+  - **정책 감사가 세 번 요구됨**(원 랜딩 #1760 → 승격 #1771 → sync #1773, 전부 같은 한 줄). 대행 서명으로 통과시키되 **마찰 자체를 #1774로 적립** — 서명이 형식이 되면 게이트 실효가 준다.
+- **AC 티켓 4건 발급**(계정·권한 5축 감사 근거): #1767 패스워드 초기화(reset 토큰+본인 변경) · #1768 멤버 라이프사이클 10경로 이식 · #1769 초대 revoke/regenerate · #1770 role 표시명 인스턴스 커스텀.
+- **RA-7 랜딩**(`research/2026-08-26-ra7-tunnel-identity-feasibility.md`): ①state 영속 → 같은 URL·인증서 재발급 0회(성재 직관 공식 확인) ②URL 파괴 경로는 state 소실 하나이고 **되돌릴 수 없다**(이름 자동회수 없음·재사용 불가·CT 오류) ③"터미널 0회"는 되나 **"계정 0개"는 불가** — oort tailnet 수용은 ToS 소지+ACL로 전 고객 서버 접근권을 갖게 돼 셀프호스팅 명분 붕괴 ④**무계정+고정URL 대안 부재는 구조** → A트랙은 폴백이 아니라 무계정 tier의 유일 구현(CNAME 불가·TLS 종단 프록시 필요) ⑤진짜 blocker=Funnel WS 1001(#18827). 보너스: 비대화형 `exit 0` 조용한 실패·OAuth secret=ephemeral 기본 함정.
+- **TC-2 랜딩**(`research/2026-08-26-tc2-work-console-remote-control.md`) — **출시 결함 2건 적발**: **#1777 WK-0a** host-signed 세션 변이 미이식으로 `remote_attach_available` 항상 false → **방금 랜딩한 TC-1 관전 도크가 붙을 PTY가 원리적으로 없음**(리뷰 4회전이 못 잡은 이유=캡처 픽스처가 세션을 모킹). **#1778 WK-0b** 소유자 관전차단 토글 400(동의 모델이 열린 채 잠김). 정정 2건: ⓐ 내가 브리프에 세운 "고빈도 입력 vs 단일 쓰기경로" 긴장은 **성립하지 않음**(ADR-0125 D10에서 터미널 바이트는 이미 서버 비경유) ⓑ 「조작 중 관전 차단」은 증보 3 결재분이 아니라 077 파도가 넓힌 규칙. display 평면은 살아 있어 조작을 그 위에 세우는 선택지 실재(D5-B), `grantee_member_id`가 확장을 이미 예약.
+- **docs 플러시**(#1776): planning 3본 + **리뷰 정본 40본**(claudedocs md). gitignore 둘 — `claudedocs/**/*.png`(1,005장 247MB, U-7 판정 승계) · **`.tok`·`PAIRING_VALUE.txt`**(도어벨 E2E 잔재가 engine 워크트리에 **미무시로 방치**, `git add -A` 한 번이면 공개 레포 유출). gitleaks 오탐 3건 등록(RFC 6455 표준 예제 키·`$TS_APIKEY` 셸 변수).
+- **가동/대기**: T-2 플레이북 §2 재작성 워커 진행(RA-7 근거·조용한 실패 2종 절차화). WS soak는 **환경 부재로 미실행** — 로컬 tailscale 없음 + D8 Funnel 서버 응답 없음(그록봇 VM 쪽).
