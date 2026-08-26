@@ -815,6 +815,11 @@ pub fn build_app(state: AppState) -> Router {
             put(routes::work_controls::enable_auto_approve)
                 .delete(routes::work_controls::disable_auto_approve),
         )
+        // #1777: daemon-boot catalog. GET only — Swift CRUD stays unported.
+        .route(
+            "/v1/workspaces/{ws}/work-tool-profiles",
+            get(routes::work_tool_profiles::list),
+        )
         // reattach + replay (ADR-0139)
         .route(
             "/v1/workspaces/{ws}/work-sessions/{session}/reattach",

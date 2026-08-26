@@ -232,6 +232,94 @@ pub fn validated_binding(
     })
 }
 
+/// Write-time twin of [`validated_binding`] — Swift `RemotePTYBinding.validated`
+/// (`TerminalAttachRoutes.swift:19-48`). The read path returns `None` for a
+/// half-set or illegal pair (a stored row that can no longer be handed out);
+/// a host *publishing* one must hear which half failed, in Swift's sentences.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PtyBindingParseError {
+    MissingHalf,
+    InvalidPtyId,
+    InvalidEndpoint,
+}
+
+impl PtyBindingParseError {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::MissingHalf => "ptyId and attachEndpoint must be provided together",
+            Self::InvalidPtyId => "ptyId is invalid",
+            Self::InvalidEndpoint => "attachEndpoint must be a credential-free HTTPS or WSS URL",
+        }
+    }
+}
+
+/// Parse a host-supplied PTY pair. `Ok(None)` = both absent (create without a
+/// binding). Either half alone, or a pair that fails the CHECK grammar, is an
+/// error — the host is told which, not that "the session cannot be attached".
+pub fn parse_remote_pty_binding(
+    pty_id: Option<&str>,
+    attach_endpoint: Option<&str>,
+) -> Result<Option<RemotePtyBinding>, PtyBindingParseError> {
+    match (pty_id, attach_endpoint) {
+        (None, None) => Ok(None),
+        (Some(pty_id), Some(endpoint)) => {
+            if !is_valid_attach_target_id(pty_id) {
+                return Err(PtyBindingParseError::InvalidPtyId);
+            }
+            if !is_credential_free_stream_url(endpoint) {
+                return Err(PtyBindingParseError::InvalidEndpoint);
+            }
+            Ok(Some(RemotePtyBinding {
+                pty_id: pty_id.to_string(),
+                attach_endpoint: endpoint.to_string(),
+            }))
+        }
+        _ => Err(PtyBindingParseError::MissingHalf),
+    }
+}
+
+/// Swift `requireRemotePTYCapableHost` (`WorkSessionRoutes.swift:2468-2491`).
+///
+/// A host may publish a PTY binding only when it is unrevoked **and** advertised
+/// `capabilities.terminal_attach`. Fail-closed either way: a missing row and a
+/// revoked/incapable row are different 403s at the route, so they stay distinct
+/// here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemotePtyHostStatus {
+    Capable,
+    NotFound,
+    NotCapable,
+}
+
+pub async fn remote_pty_host_status_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    host_id: Uuid,
+) -> Result<RemotePtyHostStatus, T3Error> {
+    let row = sqlx::query(
+        "SELECT revoked_at IS NULL AS active, \
+                COALESCE((capabilities->>'terminal_attach')::boolean, false) AS supported \
+           FROM work_host \
+          WHERE id = $1 \
+            AND workspace_id = $2 \
+          FOR SHARE",
+    )
+    .bind(host_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(RemotePtyHostStatus::NotFound);
+    };
+    let active: bool = row.try_get("active")?;
+    let supported: bool = row.try_get("supported")?;
+    if active && supported {
+        Ok(RemotePtyHostStatus::Capable)
+    } else {
+        Ok(RemotePtyHostStatus::NotCapable)
+    }
+}
+
 /// [`validated_binding`]'s display twin, applied to the **stored** pair.
 ///
 /// Same shape, same re-validate-on-read discipline, and deliberately the same
@@ -816,6 +904,32 @@ pub async fn write_display_binding_in_tx(
     Ok(updated == 1)
 }
 
+/// PTY twin of [`write_display_binding_in_tx`] — Swift `bindRemotePTY` update
+/// (`WorkSessionRoutes.swift:1627-1635`). Same `running|idle` guard: a binding
+/// on an ended session is a pointer at a machine that is no longer serving.
+pub async fn write_remote_pty_binding_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    binding: &RemotePtyBinding,
+) -> Result<bool, T3Error> {
+    let updated = sqlx::query(
+        "UPDATE work_session \
+            SET pty_id = $3, attach_endpoint = $4 \
+          WHERE workspace_id = $1 \
+            AND id = $2 \
+            AND status IN ('running', 'idle')",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(&binding.pty_id)
+    .bind(&binding.attach_endpoint)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(updated == 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -885,6 +999,42 @@ mod tests {
         assert!(
             validated_display_binding(Some("display-1"), Some("ws://host.example/signal"))
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn parse_remote_pty_binding_names_the_half_that_failed() {
+        assert_eq!(parse_remote_pty_binding(None, None), Ok(None));
+        assert_eq!(
+            parse_remote_pty_binding(Some("pty"), None),
+            Err(PtyBindingParseError::MissingHalf)
+        );
+        assert_eq!(
+            parse_remote_pty_binding(None, Some("wss://host.example/pty")),
+            Err(PtyBindingParseError::MissingHalf)
+        );
+        assert_eq!(
+            parse_remote_pty_binding(Some("-bad"), Some("wss://host.example/pty")),
+            Err(PtyBindingParseError::InvalidPtyId)
+        );
+        assert_eq!(
+            parse_remote_pty_binding(Some("pty"), Some("ws://host.example/pty")),
+            Err(PtyBindingParseError::InvalidEndpoint)
+        );
+        assert_eq!(
+            parse_remote_pty_binding(Some("pty-1"), Some("wss://host.example/pty")),
+            Ok(Some(RemotePtyBinding {
+                pty_id: "pty-1".into(),
+                attach_endpoint: "wss://host.example/pty".into(),
+            }))
+        );
+        assert_eq!(
+            PtyBindingParseError::MissingHalf.message(),
+            "ptyId and attachEndpoint must be provided together"
+        );
+        assert_eq!(
+            PtyBindingParseError::InvalidEndpoint.message(),
+            "attachEndpoint must be a credential-free HTTPS or WSS URL"
         );
     }
 

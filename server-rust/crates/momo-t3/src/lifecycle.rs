@@ -733,6 +733,52 @@ pub async fn end_work_session_in_tx(
     row.as_ref().map(decode_detail).transpose()
 }
 
+/// Host-signed idle/running write (`WorkSessionRoutes.transitionToolLifecycle`
+/// :820-890). `Ok(None)` = the CAS missed (status was not the expected
+/// predecessor) → 409.
+pub async fn transition_tool_lifecycle_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    target_status: &str,
+    exit_code: Option<i32>,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let returning = detail_returning();
+    let sql = if target_status == "idle" {
+        format!(
+            "UPDATE work_session \
+                SET status = 'idle', \
+                    idle_at = clock_timestamp(), \
+                    exit_code = $3, \
+                    ended_at = NULL, \
+                    end_reason = NULL \
+              WHERE workspace_id = $1 \
+                AND id = $2 \
+                AND status = 'running' \
+            RETURNING {returning}"
+        )
+    } else {
+        format!(
+            "UPDATE work_session \
+                SET status = 'running', \
+                    idle_at = NULL, \
+                    ended_at = NULL, \
+                    end_reason = NULL \
+              WHERE workspace_id = $1 \
+                AND id = $2 \
+                AND status = 'idle' \
+            RETURNING {returning}"
+        )
+    };
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_id)
+        .bind(exit_code)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref().map(decode_detail).transpose()
+}
+
 /// The channel-scoped session list (`WorkSessionRoutes.list` :2038-2087).
 ///
 /// A function rather than a `const` so
@@ -1275,6 +1321,65 @@ pub fn lifecycle_payload(
             "payload": serde_json::Value::Object(payload),
         },
         "idempotency_key": format!("{cent_channel}:{event_type}:{}", session.id),
+    })
+}
+
+/// Swift `toolLifecyclePayload` (`WorkSessionRoutes.swift:2158-2193`) — idle /
+/// resumed-to-running envelopes. Distinct from [`lifecycle_payload`]: the
+/// discriminator is part of the idempotency key so two transitions of the same
+/// session do not collapse onto one outbox row.
+pub fn tool_lifecycle_payload(
+    cent_channel: &str,
+    event_type: &str,
+    session: &WorkSessionDetail,
+    seq: i64,
+    timestamp_ms: i64,
+    idempotency_discriminator: &str,
+) -> serde_json::Value {
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "session_id".into(),
+        serde_json::json!(session.id.to_string()),
+    );
+    payload.insert(
+        "channel_id".into(),
+        serde_json::json!(session.channel_id.to_string()),
+    );
+    payload.insert(
+        "root_message_id".into(),
+        serde_json::json!(session.root_message_id.to_string()),
+    );
+    payload.insert(
+        "member_id".into(),
+        serde_json::json!(session.member_id.to_string()),
+    );
+    payload.insert(
+        "host_id".into(),
+        serde_json::json!(session.host_id.to_string()),
+    );
+    payload.insert("status".into(), serde_json::json!(session.status));
+    if let Some(exit_code) = session.exit_code {
+        payload.insert("exit_code".into(), serde_json::json!(exit_code));
+    }
+    if event_type == "work.session.idle" {
+        payload.insert("idle_at".into(), serde_json::json!(timestamp_ms));
+    } else {
+        payload.insert("resumed_at".into(), serde_json::json!(timestamp_ms));
+    }
+
+    serde_json::json!({
+        "channel": cent_channel,
+        "data": {
+            "type": event_type,
+            "v": 1,
+            "ts": timestamp_ms,
+            "seq": seq,
+            "payload": serde_json::Value::Object(payload),
+        },
+        "idempotency_key": format!(
+            "{cent_channel}:{event_type}:{}:{idempotency_discriminator}",
+            session.id
+        ),
     })
 }
 

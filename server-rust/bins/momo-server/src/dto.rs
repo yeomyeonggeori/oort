@@ -840,10 +840,10 @@ pub struct CloudHostResponse {
 
 /// `POST …/work-sessions` request (Swift `CreateWorkSessionRequest`, :8-16).
 ///
-/// `controlId`/`ptyId`/`attachEndpoint` are decoded so they can be refused
-/// **visibly** (ADR-0134 D1): each belongs to a work-host-signed path this batch
-/// does not serve, and accepting-then-dropping them would silently change what
-/// the caller asked for.
+/// `controlId`/`ptyId`/`attachEndpoint` are decoded so a human bearer is
+/// refused **visibly** (ADR-0134 D1). A signed work host may send them
+/// (`#1777`): `controlId` names the dispatched spawn, and the PTY pair is
+/// optional at create (the daemon usually binds later via PATCH).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateWorkSessionRequest {
@@ -867,9 +867,9 @@ pub struct CreateWorkSessionRequest {
 }
 
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
-/// :23-38). This batch serves `status: "ended"`; the other arms
-/// (idle/running transitions, ACP events, observation, remote-PTY binding) are
-/// work-host-signed or B2.3 surfaces and are refused by name.
+/// :23-38). `#1777` serves `ended` plus host-signed idle/running and
+/// `bindRemotePTY`. ACP events stay refused-by-name (follow-up requested in
+/// the #1777 PR). Observation is #1778.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateWorkSessionRequest {
@@ -890,6 +890,30 @@ pub struct UpdateWorkSessionRequest {
     pub display_id: Option<String>,
     #[serde(default)]
     pub display_endpoint: Option<String>,
+}
+
+/// Swift `WorkToolProfileDTO` (`WorkToolProfileRoutes.swift:23-36`).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkToolProfileDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub tool_key: String,
+    pub display_name: String,
+    pub launch_template: Value,
+    pub tier_defaults: Value,
+    pub env_policy: Value,
+    pub enabled: bool,
+    pub created_by: String,
+    pub updated_by: String,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkToolProfilesResponse {
+    pub work_tool_profiles: Vec<WorkToolProfileDto>,
 }
 
 /// `POST …/work-sessions/{session}/resume` request (Swift, :53-55).
