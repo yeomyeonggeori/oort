@@ -2745,6 +2745,50 @@ pub struct CreateInviteRequest {
     pub expires_at_ms: Option<i64>,
 }
 
+/// Swift `RevokeInviteRequest`. Absent/empty body is a revoke with no reason.
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevokeInviteRequest {
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+/// Swift `RedeemInviteRequest`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedeemInviteRequest {
+    pub code: String,
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// Swift `RedeemInviteResponse`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RedeemInviteResponse {
+    pub invite: InviteCodeDto,
+    pub redemption_id: String,
+}
+
+/// One `invite_code_redemption` row. No raw code, no hash.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteRedemptionDto {
+    pub id: String,
+    pub member_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    pub redeemed_at_ms: i64,
+}
+
+/// `GET /v1/workspaces/{ws}/invites/{invite}` — redeem status for operators.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InviteStatusResponse {
+    pub invite: InviteCodeDto,
+    pub redemptions: Vec<InviteRedemptionDto>,
+}
+
 // ---------------------------------------------------------------------------
 // public join (B4.3 — Swift `JoinRoutes` + `DTOs.swift:781-836`)
 // ---------------------------------------------------------------------------

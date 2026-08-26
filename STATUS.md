@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 초대 revoke/regenerate/redeem REST 이식 (#1769, 2026-08-27)
+
+- Swift `InviteRoutes` 3경로를 Rust로 포팅: `POST …/revoke`(동일 핸들러 `DELETE …/invites/{id}`), `POST …/regenerate`, `POST …/redeem`. 운영자 상태 조회는 `GET …/invites/{id}`(usedCount + redemption 행).
+- 기존 `003_onboarding.sql` 재사용. revoke는 잔여 사용이 있는 미취소 코드만 새로 찍고, 소진된 코드는 409. regenerate는 구 코드를 즉시 `regenerated`로 무효화. 권한은 `is_admin()` 단일 권위.
+- 새 마이그레이션 없음. `runtime-unverified` 아님 — PG 컨포먼스가 거부/정상 경로를 실측.
+
 ## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
 
 - `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`이면 업로드 URL을 ADR-0167과 같은 `Host`+`X-Forwarded-Proto`(Caddy 정규화)에서 파생한다. 절대 URL은 verbatim. `MOMO_DRIVE_ARCHIVE_BACKEND` 선택 축은 무영향.
