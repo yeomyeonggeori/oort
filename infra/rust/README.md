@@ -19,7 +19,7 @@
 |---|---|
 | `server-rust/Dockerfile` | 멀티스테이지 이미지 — 하나의 이미지, 7개 커맨드(`api`/`relay`/`agent-worker`/`webhook-sender`/`notifier`/`migrate`/`web-assets`) |
 | `server-rust/docker-entrypoint.sh` | 역할 선택만. prod Swift 이미지와 동일 계약(`command: ["api"]`) |
-| `docker-compose.rust.yml` | prod compose 미러(최소셋): postgres · centrifugo · runtime-roles · migrate · api · relay |
+| `docker-compose.rust.yml` | prod compose 미러: postgres · centrifugo · runtime-roles · migrate · api · relay + 선택 `huddle` LiveKit profile |
 | `docker-compose.rust.build.yml` | 로컬 빌드 전용 오버라이드(`build:` 주입). 발행 digest 경로는 이 파일과 `--build`를 둘 다 빼고 이미지를 pull(#1266) |
 | `docker-compose.backup.yml` | **운영 전용** PostgreSQL 18+pgBackRest digest, encrypted repo, continuous WAL, signed fresh-evidence migrate gate. 로컬 quickstart는 자동으로 붙이지 않는다(#1330) |
 | `postgres-pgbackrest/Dockerfile` | pinned PG18/pgvector 기반 pgBackRest 이미지. 앱 이미지와 별도 digest·SBOM·provenance subject |
@@ -240,6 +240,27 @@ momorust logs | grep -Ei 'jwt_hmac|cent_api_key|password|postgres://' && echo "L
 
 `api`/`relay`는 부팅 시 **모양만** 로깅한다(호스트·포트·DB 이름·Centrifugo API URL).
 `migrate`는 롤 비번과 오너 비번을 `\getenv`로만 넘기므로 argv·stdout 어디에도 값이 없다.
+
+### 4-6. 선택 허들 / LiveKit profile (ADR-0122)
+
+허들은 self-host 선택 기능이다. 기본 스택에서 LiveKit은 뜨지 않으며, API의
+`MOMO_LIVEKIT_API_KEY` · `MOMO_LIVEKIT_API_SECRET` · `MOMO_LIVEKIT_URL` 중 하나라도
+비었거나 URL이 유효하지 않으면 네 허들 REST가 모두 503 `허들 미구성`으로 닫힌다.
+나머지 API는 계속 동작한다.
+
+`rust-smoke.secrets.env`의 세 값을 채우고 다음처럼 profile을 명시한다. 키와 secret은
+LiveKit service와 API token issuer가 같은 값을 받으며, real secret은 커밋하지 않는다.
+
+```sh
+momorust --profile huddle up -d livekit api
+momorust ps livekit api
+```
+
+호스트 노출은 signalling `LIVEKIT_PORT`(기본 7880), RTC TCP
+`LIVEKIT_RTC_TCP_PORT`(7881), UDP `LIVEKIT_RTC_UDP_START`~`LIVEKIT_RTC_UDP_END`
+(50000~50100)로 제한된다. 공용 배포의 `MOMO_LIVEKIT_URL`은 브라우저/앱이 닿는
+`wss://` 주소여야 한다. 실제 JWT 수용 검증은 `scripts/verify_huddle_livekit.sh`,
+PG/RLS lifecycle 검증은 `scripts/verify_huddle_lifecycle.sh`가 담당한다.
 
 ## 5. 정지 / 청소
 

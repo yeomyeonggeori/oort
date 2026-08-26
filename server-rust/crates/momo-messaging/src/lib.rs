@@ -42,14 +42,17 @@
 //! contrast, are `momo-drive`'s and are deliberately not reachable from here —
 //! this crate owns the ledger, that one owns the archive.
 //!
-//! Deliberately **still out of scope** (later batches): huddle and the pgvector
-//! memory plane.
+//! **HD-1** restores the huddle lifecycle in [`huddle`]. Huddle state remains
+//! PostgreSQL-owned and every live update uses the same transactional outbox;
+//! LiveKit receives only a short-lived room grant. The pgvector memory plane
+//! remains outside this crate.
 
 pub mod attachment;
 pub mod channel;
 pub mod dm;
 pub mod error;
 pub mod hosted_inbox;
+pub mod huddle;
 pub mod identity;
 pub mod interaction;
 pub mod message;
@@ -88,6 +91,10 @@ pub use hosted_inbox::{
     hosted_inbox_recipients_in_tx, list_hosted_inbox_in_tx, HostedInboxCursor,
     HostedInboxCursorError, HostedInboxEvent, HostedInboxPage, HostedInboxReadError,
     HOSTED_INBOX_LIMIT_DEFAULT, HOSTED_INBOX_LIMIT_MAX,
+};
+pub use huddle::{
+    active_huddle, join_huddle, leave_huddle, start_huddle, Huddle, HuddleActor, HuddleError,
+    HuddleParticipant, JoinHuddleOutcome, LeaveHuddleOutcome, StartHuddleOutcome,
 };
 pub use identity::{
     active_workspace_role, can_observe_agent, clamp_roster_limit, get_member, get_workspace,

@@ -13,6 +13,7 @@
 
 | # | 상태 | 항목 | UI가 할 일 | 착수 포인터 (전부 main) |
 |---|---|---|---|---|
+| A-33 | `ready` | **Rust 허들 서버 복원 (#1757 / #850 선행, ADR-0122)** | 웹 채널 헤더/통화창을 기존 `@momo/core` 허들 REST·realtime 소비면에 연결한다. 네 REST(start/join/leave/active)는 Swift wire·에러 문장을 유지하고, `huddle_started`/`huddle_participants_changed`/`huddle_ended`는 기존 outbox→relay로 온다. 503 `허들 미구성`은 재시도 장애가 아니라 운영자 LiveKit 미설정 상태로 설명한다. | `POST …/channels/{ch}/huddles`, `POST …/huddles/{id}/join|leave`, `GET …/huddles/active`, `packages/momo-core/src/features/huddles`, #1757 PG verifier |
 | A-32 | `ready` | **Agent Hub 도어벨 등록 UI (#1735 / WD-2, ADR-0171)** | 커넥션 상세에 도어벨 섹션: URL/key 입력(저장 후 마스킹)·벨 테스트·last-fired 4상태. `PUT/DELETE …/hosted-agent-connections/{id}/doorbell`. 게이트 off 는 섹션 부재. | ADR-0171, #1734 서버, `docs/planning/handoffs/2026-08-24-grokbot-doorbell-packet.md` WD-2 |
 | A-31 | `info` | **첨부 실측 크기 (#1716)** | **UXUI 추가 작업 없음.** complete 응답 `size`와 메시지 `attachments[].sizeBytes`가 수신 바이트를 싣는다. 클라 `size: 0`(sizeKnown=false)은 미지 선언. 코어 `attachmentMetaLine` 「0 B」 잔재 주석은 후속. | `POST …/attachments/{id}/complete`, `momo-drive` 실측 SoT |
 | A-30 | `ready` | **링크 언퍼얼 클라 렌더 (#1698 2/2, ADR-0170 D5)** | 서버 절반이 랜딩하면 웹·폰 타임라인에 카드(제목·설명·도메인·이미지) 4상태(로딩/실패/차단/빈). 실패·차단은 침묵이 기본. 이미지는 `GET …/unfurls/{id}/image` 프록시만(임의 호스트 직접 fetch 금지). 워크스페이스 설정 토글 + 메시지 x 제거 + 개인 화면 접기. `message.unfurl` / `message.unfurl.removed` 브로드캐스트 소비. | `docs/adr/0170-link-unfurl-server-surface.md` D5, `GET/PUT /v1/workspaces/{ws}/unfurl-settings`, `GET/DELETE …/messages/{id}/unfurls`, `GET …/unfurls/{id}/image` |
