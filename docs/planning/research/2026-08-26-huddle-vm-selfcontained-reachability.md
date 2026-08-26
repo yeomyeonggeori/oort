@@ -865,3 +865,37 @@ P1은 Tailscale Funnel 위에 서므로 **Funnel의 위험을 그대로 물려�
 ### 레포 내부 근거 (재조사 불요 · 이 리서치가 전제로 삼음)
 - `infra/livekit.yaml:15-19` · `infra/rust/docker-compose.rust.yml:110-149,133-135,271-273` · `server-rust/bins/momo-server/src/config.rs:137-154` · `server-rust/bins/momo-server/src/routes/huddles.rs:133` · `infra/rust/Caddyfile.local:57` · `infra/rust/Caddyfile:109` · `clients/desktop/src-tauri/tauri.conf.json:24` · `clients/web/src/features/huddles/huddleRuntime.ts:52` · `docs/SELF_HOST_AGENT.md:261-271` · `docs/runbooks/turn-host-install.md:6-9` · `docs/adr/0122-voice-huddles-meeting-intelligence.md`
 - `research/2026-08-15-reachability-spike-1411.md` §2.4 (STUN 2곳 대조로 SYMMETRIC 판정한 사내 실측 방법) · `research/2026-08-22-tunnel-spike-r2.md` · `research/2026-08-23-tunnel-strategy-ra5.md` · `research/2026-08-25-tunnel-scalability-pricing.md` §1.7 · `research/2026-08-26-ra7-tunnel-identity-feasibility.md` §2.3 · `research/2026-08-26-selfhost-external-dependency-audit.md` · `research/2026-08-26-ncp-teardown-judgment.md` · `research/2026-08-26-selfhost-product-model-review.md` 급소 1
+
+---
+
+## ⑭ RP-1 실측 결과 — 2026-08-26 (그록봇 VM에서 성재 실행)
+
+```
+[기본] 로컬 소스포트 52335 (한 소켓 고정)
+[기본]   stun.l.google.com:19302 → 매핑 3.151.208.192:60444
+[기본]   stun.cloudflare.com:3478 → 매핑 13.59.64.92:40359
+판정: SYMMETRIC (매핑 포트 [60444, 40359]) — P0 홀펀칭 사망 확정.
+```
+
+### 판정: **P0(SFU 홀펀칭) 사망 확정. 그리고 예상보다 나쁘다.**
+
+리서치는 "매핑 **포트**가 다르면 symmetric"을 red 기준으로 삼았다. 실측은 그 기준을 넘겼을 뿐 아니라 **매핑 IP까지 다르다** — `3.151.208.192` vs `13.59.64.92`. 둘 다 **AWS**(`whois` NetName `AT-88-Z`, 2026-08-26 조회).
+
+⇒ 그록봇 VM의 egress는 **목적지마다 다른 공인 IP로 나가는 로드밸런싱 NAT 풀**을 지난다. 고전적 symmetric NAT(IP는 고정, 포트만 변동)보다 한 단계 더 강한 형태다.
+
+**함의 (P0을 넘어선다):**
+1. **VM에는 안정적인 공인 신원이 아예 없다.** 포트만이 아니라 주소가 흔들린다.
+2. **VM을 어떤 형태로든 "밖에서 찾아오는 서버"로 세우는 설계는 전부 무효다** — 자체 TURN을 공인 주소로 광고하는 경로(§4.2 A′)가 여기서 최종적으로 닫힌다.
+3. **살아남는 것은 안에서 밖으로 먼저 열고 유지하는 터널뿐이다** — 연결을 VM이 개시하므로 egress IP가 흔들려도 세션이 유지된다. **P1(Funnel을 TURNS 통로로)이 이 조건을 만족하는 유일한 후보로 남는다.**
+
+**단계 3(UDP/443)은 미판정**이다 — 프로브가 443을 듣지 않는 STUN 서버에 쐈으므로 timeout이 차단의 근거가 되지 못한다(설계 한계를 스크립트가 명시). 필요하면 443 응답자를 세우고 재측정한다.
+
+### 전제 변경 — 성재 정정 (2026-08-26)
+
+> "cloudflare나 tunnel은 우리가 대신 가입해주는 게 아니야. **그록봇이 '이거 회원가입 필요하다' 같은 걸로 사용자한테 회원가입 정도는 시키게 할** 거야. tailscale도 마찬가지고."
+
+이 정정이 **§RQ-3의 차단 사유 중 결정적인 것을 무효화한다.** 리서치는 Cloudflare 약관 §2.2.1(a) *"sign up for the Services on behalf of a third party"* 금지를 네 겹 중 결정타로 들었으나, **사용자가 자기 손으로 가입하면 그 조항의 적용 대상이 아니다.**
+
+또한 이 구조는 **ADR-0004와 정합한다** — 자격증명이 "사용자 → 자기 서버" 한 홉만 지나고 우리를 경유하지 않는다(제품 모델 검수 §급소 5의 경계 문장 그대로).
+
+⇒ **조건이 「제로 설정」에서 「그록봇 안내 + 사용자 1회 가입」으로 완화됐다.** 이 전제에서 §⑨ 경로표를 다시 읽어야 하며, Tailscale·Cloudflare 계정을 요구하는 경로들이 **되살아난다.**
