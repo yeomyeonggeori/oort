@@ -660,6 +660,8 @@ CENT_TOKEN_HMAC="$(rand_hex)"
 CENT_API_KEY="$(rand_hex)"
 CENT_PROXY_SECRET="$(rand_hex)"
 PROVIDER_LINK_MASTER_KEY="$(rand_hex)"
+LIVEKIT_API_KEY="$(rand_hex)"
+LIVEKIT_API_SECRET="$(rand_hex)"
 GATEWAY_SECRET="$(rand_hex)"
 
 # 볼륨 이름은 프로젝트명에서 파생한다: infra/rust 의 기본값은 고정 이름이라
@@ -863,7 +865,8 @@ for secret_value in \
   "$GATE_PASSWORD" \
   "$JOIN_PASSWORD" "$PG_PASSWORD" "$APP_PASSWORD" "$RELAY_PASSWORD" \
   "$WORKER_PASSWORD" "$INVITE_CODE" "$JWT_HMAC" "$CENT_TOKEN_HMAC" \
-  "$CENT_API_KEY" "$CENT_PROXY_SECRET" "$PROVIDER_LINK_MASTER_KEY"; do
+  "$CENT_API_KEY" "$CENT_PROXY_SECRET" "$PROVIDER_LINK_MASTER_KEY" \
+  "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET"; do
   append_secret_with_derivatives "$secret_value" || {
     echo "[openapi-rust] could not initialize secret leak needles" >&2
     exit 1
@@ -901,6 +904,9 @@ CENT_TOKEN_HMAC=$CENT_TOKEN_HMAC
 CENT_API_KEY=$CENT_API_KEY
 CENT_PROXY_SECRET=$CENT_PROXY_SECRET
 PROVIDER_LINK_MASTER_KEY=$PROVIDER_LINK_MASTER_KEY
+MOMO_LIVEKIT_API_KEY=$LIVEKIT_API_KEY
+MOMO_LIVEKIT_API_SECRET=$LIVEKIT_API_SECRET
+MOMO_LIVEKIT_URL=ws://livekit.invalid:7880
 AGENT_GATEWAY_MODE=gateway
 AGENT_GATEWAY_SECRET=$GATEWAY_SECRET
 MOMO_ALLOW_LEGACY_GATEWAY_SECRET=1
@@ -3434,6 +3440,43 @@ sample notification-pref put \
   "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/notification-pref" 200 \
   '{"muted":true}' "$ACCESS"
 guard_jq '.muted == true' "notification preference echoes the effective mute state"
+
+# ---------------------------------------------------------------------------
+# 허들 — LiveKit media server 없이도 lifecycle + grant 응답 모양은 완결된다.
+# 실제 grant 수용은 scripts/verify_huddle_livekit.sh가 pinned server로 잇는다.
+# ---------------------------------------------------------------------------
+sample huddle-start post \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles" \
+  "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/huddles" 201 "" "$ACCESS"
+HUDDLE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.huddle.id')"
+canonical_uuid "$HUDDLE_ID" || {
+  echo "[openapi-rust] candidate returned a non-canonical huddle id" >&2
+  exit 1
+}
+guard_jq --arg ch "$GATE_CHANNEL_ID" \
+  '(.huddle.channelId | ascii_downcase) == ($ch | ascii_downcase)
+   and .huddle.participants == []' \
+  "new huddle belongs to the channel and starts empty"
+
+sample huddle-active get \
+  "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles/active" \
+  "/v1/workspaces/$WS/channels/$GATE_CHANNEL_ID/huddles/active" 200 "" "$ACCESS"
+guard_jq --arg id "$HUDDLE_ID" \
+  '(.huddle.id | ascii_downcase) == ($id | ascii_downcase)' \
+  "active projection returns the started huddle"
+
+sample huddle-join post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/join" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/join" 200 "" "$ACCESS"
+guard_jq --arg id "$GATE_MEMBER_ID" '
+  .ttlSeconds == 600 and (.token | type == "string")
+  and (.expiresAtMs | type == "number")
+  and any(.huddle.participants[]; (.memberId | ascii_downcase) == $id)' \
+  "join returns the current participant and a ten-minute grant"
+
+sample huddle-leave post "/v1/workspaces/{workspaceId}/huddles/{huddleId}/leave" \
+  "/v1/workspaces/$WS/huddles/$HUDDLE_ID/leave" 200 "" "$ACCESS"
+guard_jq '.ended == true and (.huddle.endedAtMs | type == "number")' \
+  "last leave atomically ends the huddle"
 
 # ---------------------------------------------------------------------------
 # 메시지 · 스레드 · 반응 · 고정 · 검색 · 읽음

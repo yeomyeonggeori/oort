@@ -156,6 +156,14 @@ GET /v1/workspaces/{workspaceId}/channels
 POST /v1/workspaces/{workspaceId}/channels
 PUT /v1/workspaces/{workspaceId}/channels/{channelId}/notification-pref
 
+# ── 허들 (ADR-0122 / HD-1) ────────────────────────────────────────────────
+# LiveKit 서버 자체는 응답 모양의 전제가 아니다. Rust API가 게이트 전용 issuer
+# 세 값을 받아 lifecycle + 600초 grant를 만들고, media 수용은 별도 verifier가 잇는다.
+POST /v1/workspaces/{workspaceId}/channels/{channelId}/huddles
+GET /v1/workspaces/{workspaceId}/channels/{channelId}/huddles/active
+POST /v1/workspaces/{workspaceId}/huddles/{huddleId}/join
+POST /v1/workspaces/{workspaceId}/huddles/{huddleId}/leave
+
 # ── 메시지 스파인 ───────────────────────────────────────────────────────────
 # 보내기와 읽기, 그리고 「이미 보낸 메시지에 할 수 있는 일」 전부. 반응·고정은
 # seq 를 소비하지 않는 message-scoped 동사이고(momo_messaging::interaction),
