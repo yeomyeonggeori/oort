@@ -2,7 +2,6 @@ import { useId, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check } from "lucide-react";
 import {
-  effectivePresence,
   setPresenceStatus,
   uuidEq,
   type EffectivePresence,
@@ -11,25 +10,22 @@ import {
 } from "@momo/core/lib/api";
 import {
   declaredStatusLabel,
-  presenceTriggerLabel,
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
 } from "@momo/core/features/presence/model";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { InlineBanner } from "@/features/common/States";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
-// Self presence control (ADR-0160 ③, 프레즌스 6b). The bottom profile panel's
-// avatar becomes the status chip + status-change dropdown, the 6b seam the 6a
-// move left open ("the avatar below becomes its click target").
+// Self presence (ADR-0160 ③, 프레즌스 6b). UX-D4 (#1756) moved the trigger: the
+// whole bottom identity row is now the profile card, and this file owns the
+// two pieces that card composes — the avatar badge (effective dot) and the
+// declared-status radio group inside that card's menu.
 //
 // This is the DECLARED-status control (③), a separate vocabulary from the
 // connection indicator (①) further along the row: that one says "am I attached",
@@ -47,6 +43,10 @@ import { cn } from "@/design/lib/cn";
 // rail and is rendered on member surfaces elsewhere; for the self chip the
 // availability input is simply this client's own connection, which it already
 // knows, so this control needs no realtime subscription of its own.
+//
+// Declared options stay auto/away/dnd (온라인 / 자리 비움 / 방해 금지). Buzz's
+// Online/Away/Offline is the *effective* vocabulary; Offline is not a durable
+// intent and is not offered as a radio (ADR-0160 D2/D3).
 // =============================================================================
 
 /** The badge color for an effective value. Filled for a live status, a hollow
@@ -79,33 +79,54 @@ function optionDotClass(status: PresenceStatus): string {
   }
 }
 
-export function PresenceControl({
+export function PresenceBadge({
+  selfName,
+  effective,
+}: {
+  selfName: string;
+  effective: EffectivePresence;
+}) {
+  return (
+    <span
+      data-testid="presence-control"
+      data-effective={effective}
+      className="relative flex size-6 shrink-0 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
+      aria-hidden="true"
+    >
+      {selfName.slice(0, 1)}
+      {/* The presence badge. Bound to `effective`, ringed in the sidebar
+          surface so it reads as a badge sitting on the avatar rather than a
+          hole punched through it. Anchored to THIS span, not to the profile
+          trigger: enlarging the hit area must not float the dot off the
+          avatar (presence 6b H2). */}
+      <span
+        className={cn(
+          "absolute bottom-0 right-0 size-2 rounded-full border",
+          effectiveBadgeClass(effective)
+        )}
+      />
+    </span>
+  );
+}
+
+export function PresenceStatusItems({
   workspaceId,
   selfMemberId,
   selfMember,
-  selfName,
-  connected,
+  onWrote,
 }: {
   workspaceId: string;
-  /** Always known (from the session), so an optimistic write can find the row
-   *  even before the roster query resolves. */
   selfMemberId: string;
-  /** The roster row, once loaded; carries the durable declared status. `null`
-   *  until the directory resolves (or if the self row is not on it yet). */
   selfMember: RosterMember | null | undefined;
-  selfName: string;
-  /** The realtime rail is connected — the availability input for the self dot. */
-  connected: boolean;
+  /** Called after a successful durable write so the owning card can close. */
+  onWrote?: () => void;
 }) {
   const client = useQueryClient();
-  const [open, setOpen] = useState(false);
   const [failed, setFailed] = useState(false);
-  /** The menu title's id, so the radio group can name itself with it. */
   const menuLabelId = useId();
 
   const declared = selfMember?.presenceStatus;
   const current: PresenceStatus = declared ?? "auto";
-  const effective = effectivePresence(declared, connected);
 
   const mutation = useMutation({
     mutationFn: (status: PresenceStatus) => setPresenceStatus(workspaceId, status),
@@ -129,134 +150,71 @@ export function PresenceControl({
     },
     onSuccess: () => {
       setFailed(false);
-      setOpen(false);
+      onWrote?.();
       // The server broadcast is the truth co-members see; re-read so this device
-      // matches it (and any change made on another device).
+      // matches it (and any change made on another device). PUT is the durable
+      // ③ write (REST→PG→outbox→relay); availability ② is not this request.
       void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
     },
   });
 
   return (
-    <DropdownMenu
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setFailed(false);
-      }}
-    >
-      <DropdownMenuTrigger asChild>
-        {/* `tap-target` (44px under 600px wide) matches the settings gear beside
-            it — design-review H2 measured this trigger at 24x24 on a touch
-            viewport while its neighbour was 44x44, so the two controls a thumb
-            reaches for on the same row had different odds of being hit. The
-            avatar itself stays 24px; only the hit area grows. */}
-        <button
-          type="button"
-          data-testid="presence-control"
-          data-effective={effective}
-          aria-label={presenceTriggerLabel(effective)}
-          title={presenceTriggerLabel(effective)}
-          className="tap-target flex size-6 shrink-0 items-center justify-center rounded-sm focus-visible:focus-ring"
-        >
-          {/* The badge anchors to THIS span, not to the button. On a touch
-              viewport the button is 44px and the avatar is 24px, so a badge
-              anchored to the button's corner would float away from the avatar it
-              is supposed to sit on — the trap that makes "just enlarge the
-              button" a half repair. */}
-          <span
-            className="relative flex size-6 items-center justify-center rounded-sm bg-surface-hover text-meta font-semibold"
-            aria-hidden="true"
-          >
-            {selfName.slice(0, 1)}
-            {/* The presence badge. Bound to `effective`, ringed in the sidebar
-                surface so it reads as a badge sitting on the avatar rather than a
-                hole punched through it. */}
-            <span
-              className={cn(
-                "absolute bottom-0 right-0 size-2 rounded-full border",
-                effectiveBadgeClass(effective)
-              )}
-            />
-          </span>
-        </button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="start"
-        side="top"
-        sideOffset={8}
-        data-testid="presence-menu"
-      >
-        {/* The menu's title (이슈 #1383). The trigger is an avatar, so nothing
-            in the open panel said what the three words are *about* — a person
-            arriving at 온라인 / 자리 비움 / 방해 금지 had to infer the question
-            from the answers. The title is the same name the trigger already
-            speaks (`PRESENCE_MENU_LABEL`), and it is a real name rather than
-            decoration: the radio group points back at it with
-            `aria-labelledby`, the idiom `HostPicker` already uses, so
-            「무엇을 고르는 중인가」 reaches the eye and the screen reader from
-            one string.
+    <>
+      {/* The menu's title (이슈 #1383). The trigger is an avatar, so nothing
+          in the open panel said what the three words are *about* — a person
+          arriving at 온라인 / 자리 비움 / 방해 금지 had to infer the question
+          from the answers. The title is the same name the trigger already
+          speaks (`PRESENCE_MENU_LABEL`), and it is a real name rather than
+          decoration: the radio group points back at it with
+          `aria-labelledby`, the idiom `HostPicker` already uses.
 
-            **It stands first, above the failure banner** (design-review M1).
-            The first cut put the banner on top, which meant the one state where
-            the panel is hardest to read — a write just failed, and it is still
-            open specifically so the sentence can be read — was also the one
-            state where the panel lost its name: 오류 → 제목 → 선택지. A title
-            that steps aside for an error answers 「무엇을 고르는 중인가」
-            everywhere except where the question is actually being asked. So the
-            name holds its place, and the banner sits where the interruption
-            happened: between the name and the options it interrupted. */}
-        <DropdownMenuLabel id={menuLabelId}>
-          {PRESENCE_MENU_LABEL}
-        </DropdownMenuLabel>
-        {failed && (
-          <InlineBanner
-            message="상태를 바꾸지 못했습니다. 다시 시도하세요."
-            testId="presence-error"
-          />
-        )}
-        {/* A single choice among three, so the rows are `menuitemradio` and the
-            group's `value` is what computes `aria-checked` (design-review M1).
-            Before this, a screen-reader user heard three equal commands and had
-            no way to learn which one they were already in — the check mark said
-            it to sighted users only. Selection is still handled per-row in
-            `onSelect` (not `onValueChange`) so a failed write can hold the menu
-            open with its banner; the group's value is the a11y state, not a
-            second event path. */}
-        <DropdownMenuRadioGroup value={current} aria-labelledby={menuLabelId}>
-          {PRESENCE_OPTIONS.map((status) => {
-            const isCurrent = status === current;
-            return (
-              <DropdownMenuRadioItem
-                key={status}
-                value={status}
-                data-testid={`presence-option-${status}`}
-                disabled={mutation.isPending}
-                onSelect={(event) => {
-                  // One REST round trip; keep the menu open on failure so the
-                  // banner above is readable (the mute toggle's discipline).
-                  event.preventDefault();
-                  if (isCurrent) {
-                    setOpen(false);
-                    return;
-                  }
-                  mutation.mutate(status);
-                }}
-              >
-                <span
-                  aria-hidden="true"
-                  className={cn("size-2 shrink-0 rounded-full", optionDotClass(status))}
-                />
-                <span className="flex-1">{declaredStatusLabel(status)}</span>
-                {/* Decoration for the eye only: `aria-checked` above already
-                    carries this fact to a screen reader. */}
-                {isCurrent && (
-                  <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
-                )}
-              </DropdownMenuRadioItem>
-            );
-          })}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
+          **It stands first, above the failure banner** (design-review M1). */}
+      <DropdownMenuLabel id={menuLabelId}>
+        {PRESENCE_MENU_LABEL}
+      </DropdownMenuLabel>
+      {failed && (
+        <InlineBanner
+          message="상태를 바꾸지 못했습니다. 다시 시도하세요."
+          testId="presence-error"
+        />
+      )}
+      {/* A single choice among three, so the rows are `menuitemradio` and the
+          group's `value` is what computes `aria-checked` (design-review M1).
+          Selection is still handled per-row in `onSelect` (not `onValueChange`)
+          so a failed write can hold the menu open with its banner; the group's
+          value is the a11y state, not a second event path. */}
+      <DropdownMenuRadioGroup value={current} aria-labelledby={menuLabelId}>
+        {PRESENCE_OPTIONS.map((status) => {
+          const isCurrent = status === current;
+          return (
+            <DropdownMenuRadioItem
+              key={status}
+              value={status}
+              data-testid={`presence-option-${status}`}
+              disabled={mutation.isPending}
+              onSelect={(event) => {
+                // One REST round trip; keep the menu open on failure so the
+                // banner above is readable (the mute toggle's discipline).
+                event.preventDefault();
+                if (isCurrent) {
+                  onWrote?.();
+                  return;
+                }
+                mutation.mutate(status);
+              }}
+            >
+              <span
+                aria-hidden="true"
+                className={cn("size-2 shrink-0 rounded-full", optionDotClass(status))}
+              />
+              <span className="flex-1">{declaredStatusLabel(status)}</span>
+              {isCurrent && (
+                <Check className="size-4 shrink-0 text-ink-muted" aria-hidden="true" />
+              )}
+            </DropdownMenuRadioItem>
+          );
+        })}
+      </DropdownMenuRadioGroup>
+    </>
   );
 }

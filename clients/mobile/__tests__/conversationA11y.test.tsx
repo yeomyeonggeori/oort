@@ -1,5 +1,6 @@
 import type {Message, RosterMember} from '@momo/core/lib/api';
 import {quoteDraftFor} from '@momo/core/features/timeline/quote';
+import {COPY_MESSAGE_ACTION_LABEL} from '@momo/core/features/timeline/copyLabels';
 import {makeDirectory} from '@momo/core/features/workspace/directory';
 import {
   act,
@@ -370,8 +371,9 @@ describe('M-2 — 목록의 결', () => {
     };
     fireEvent(screen.getByTestId('message-row'), 'touchStart', point);
     fireEvent(screen.getByTestId('message-press'), 'longPress');
+    expect(COPY_MESSAGE_ACTION_LABEL).toBe('메시지 복사하기');
     expect(screen.getByTestId('sheet-copy').props.accessibilityLabel).toBe(
-      '메시지 복사하기',
+      COPY_MESSAGE_ACTION_LABEL,
     );
   });
 });

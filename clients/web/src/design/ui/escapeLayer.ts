@@ -21,11 +21,15 @@ import { useEffect, useRef } from "react";
 // **먼저** 물러나므로(AdeDrawer.openItem) 둘이 겹친 채 순서가 뒤집히는 자리는
 // 없다. 층이 하나 더 생기면 그때도 규칙은 같다: 늦게 덮은 것이 위다.
 //
-// ## 다이얼로그
+// ## 다이얼로그·메뉴
 //
 // Radix 다이얼로그(⌘K 팔레트·채널 만들기·에이전트 프로필)가 열려 있으면 어느
 // 층도 받지 않는다. 그때 가장 위는 그 다이얼로그이고 Radix 가 자기 Esc 를 갖는다.
 // 세 표면이 각자 적어 두었던 이 예외를 여기 한 번만 적는다.
+//
+// 드롭다운 메뉴도 같다 (UX-D4 #1756). `role="menu"` 는 다이얼로그가 아니라서
+// 옛 술어가 통과시켰고, 폰 서랍 안에서 프로필 카드를 연 뒤 Esc 한 번이 카드를
+// 건너뛰고 서랍을 닫았다. 메뉴가 열려 있는 동안도 가장 위는 그 메뉴다.
 //
 // ## 왜 캡처 단계이고, 왜 `stopImmediatePropagation` 까지 부르는가
 //
@@ -96,7 +100,10 @@ export function resetEscapeLayers(): void {
 
 function dialogIsOpen(): boolean {
   if (typeof document === "undefined") return false;
-  return document.querySelector('[role="dialog"][data-state="open"]') !== null;
+  return (
+    document.querySelector('[role="dialog"][data-state="open"]') !== null ||
+    document.querySelector('[role="menu"][data-state="open"]') !== null
+  );
 }
 
 /**
@@ -111,12 +118,13 @@ function dialogIsOpen(): boolean {
  *   - 층이 서 있을 때는 위의 캡처 리스너가 이미 전파를 끊으므로 라우트의
  *     리스너가 돌지 않는다. 이 술어는 그 규칙을 **판정하는 자리에 적어 두는**
  *     것이지, 혼자 그 일을 하는 것이 아니다.
- *   - 다이얼로그는 다르다. Radix 는 층 스택에 들어오지 않고 네이티브 이벤트의
+ *   - 다이얼로그·메뉴는 다르다. Radix 는 층 스택에 들어오지 않고 네이티브 이벤트의
  *     전파도 끊지 않는다. 그런데도 ⌘K 팔레트에서 이 사고가 나지 않았던 이유는
  *     **포커스가 팔레트의 입력 칸에 있었기 때문**이다 — 라우트의 옛 면제가
  *     `INPUT` 을 통과시켰다. 즉 안전이 포커스 위치에 얹혀 있었다. 포커스가
  *     입력 칸 밖으로 나간 순간(항목 이동·프로그램적 blur) 같은 Esc 가 팔레트와
- *     라우트를 함께 닫는다. 이 술어는 그 우연을 이유로 바꾼다.
+ *     라우트를 함께 닫는다. 이 술어는 그 우연을 이유로 바꾼다. 프로필 카드
+ *     메뉴(`role="menu"`)도 같은 면제에 들어간다: 없으면 서랍 층이 한 번에 닫힌다.
  */
 export function escapeIsClaimed(): boolean {
   return stack.length > 0 || dialogIsOpen();

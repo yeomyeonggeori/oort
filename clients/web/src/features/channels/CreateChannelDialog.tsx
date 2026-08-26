@@ -12,6 +12,8 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  restoreDialogOpenerFocus,
+  type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
@@ -131,10 +133,12 @@ function CreateChannelPanel({
   draft,
   setDraft,
   onOpenChange,
+  opener,
 }: {
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   onOpenChange: (open: boolean) => void;
+  opener?: DialogFocusTarget | null;
 }) {
   const { pending, failure, create, clearFailure } = useCreateChannel();
   const offline = useOffline();
@@ -208,6 +212,7 @@ function CreateChannelPanel({
 
   return (
     <DialogContent
+      opener={opener}
       data-testid="create-channel-dialog"
       onKeyDown={(event) => {
         // ⌘↵ = 다이얼로그 기본 액션 (R-1 5장). On the <form> this reached the
@@ -400,18 +405,21 @@ export function CreateChannelDialog({
   onOpenChange,
   draft,
   setDraft,
+  opener,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
+  opener?: DialogFocusTarget | null;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       {/* 열려 있는 동안에만 마운트한다. 이전 시도의 거절과 attempted 플래그가
           다음 열기까지 따라오지 않고, 다이얼로그가 열리는 그 순간의
           document.activeElement가 곧 "무엇이 이걸 열었나"이기 때문이다
-          (dialog.tsx가 그 값을 잡아 닫을 때 돌려준다).
+          (dialog.tsx가 그 값을 잡아 닫을 때 돌려준다). 조건부 마운트 액션은
+          그 순간 이미 언마운트될 수 있어 `opener`로 트리거를 명시한다 (B-1).
           다만 초안은 위(provider)에 있어서, 280자를 쓰다가 바깥을 한 번
           클릭해도 글은 그대로 있고 다시 열면 이어서 쓴다. 지운 적 없는 글은
           지워지지 않는다는 쪽이, 닫을 때마다 확인 다이얼로그를 띄우는 쪽보다
@@ -421,6 +429,7 @@ export function CreateChannelDialog({
           draft={draft}
           setDraft={setDraft}
           onOpenChange={onOpenChange}
+          opener={opener}
         />
       )}
     </Dialog>
@@ -434,7 +443,19 @@ export function CreateChannelDialog({
 export function CreateChannelProvider({ children }: { children: ReactNode }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState<ChannelDraft>(EMPTY_DRAFT);
-  const openCreate = useCallback(() => setOpen(true), []);
+  const openerRef = useRef<DialogFocusTarget | null>(null);
+  const openCreate = useCallback((opener?: DialogFocusTarget | null) => {
+    openerRef.current = opener ?? null;
+    setOpen(true);
+  }, []);
+  const onOpenChange = useCallback((next: boolean) => {
+    setOpen(next);
+    if (next) return;
+    const opener = openerRef.current;
+    queueMicrotask(() => {
+      restoreDialogOpenerFocus(opener);
+    });
+  }, []);
   return (
     <CreateChannelOpenContext.Provider value={openCreate}>
       {/* 열림 상태는 별도 컨텍스트다. 셸의 전역 단축키가 모달 위에서 발화하지
@@ -445,9 +466,10 @@ export function CreateChannelProvider({ children }: { children: ReactNode }) {
       </CreateChannelOpenStateContext.Provider>
       <CreateChannelDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={onOpenChange}
         draft={draft}
         setDraft={setDraft}
+        opener={openerRef.current}
       />
     </CreateChannelOpenContext.Provider>
   );

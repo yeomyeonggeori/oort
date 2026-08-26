@@ -59,6 +59,8 @@ const ROLE: Record<string, "control" | "container"> = {
   "dropdown-menu.tsx": "container",
   // 같은 판을 우클릭 좌표에서 여는 프리미티브. 경계 역할도 dropdown과 같다.
   "context-menu.tsx": "container",
+  // 담는 것. 트리거에 붙는 떠 있는 판이고, 안의 검색/그리드가 자기 경계를 진다.
+  "popover.tsx": "container",
 };
 
 /** 클래스 문자열 안의 `border-line` (뒤에 `-strong` 이 붙지 않은 것). */

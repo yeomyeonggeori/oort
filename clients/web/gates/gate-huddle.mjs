@@ -15,7 +15,7 @@
 //   3. huddle_ended removes the badge even when an older active GET resolves
 //      afterwards (the intentionally inverted response timing);
 //   4. at 760x480 joined controls have a finite width, leaving the channel title
-//      measurable and the work-panel toggle inside the viewport;
+//      measurable and the terminal-dock toggle inside the viewport;
 //   5. after audio joined, a projection 500 cannot hide Live, microphone or exit.
 //
 // Red proofs:
@@ -381,7 +381,7 @@ async function main() {
       const geometry = await page.evaluate(() => {
         const title = document.querySelector("h1")?.getBoundingClientRect();
         const workToggle = document
-          .querySelector("[data-testid='open-work-panel']")
+          .querySelector("[data-testid='open-terminal-dock']")
           ?.getBoundingClientRect();
         return {
           titleWidth: title?.width ?? 0,
@@ -392,7 +392,7 @@ async function main() {
         throw new Error(`joined header erased channel title: ${JSON.stringify(geometry)}`);
       }
       if (geometry.workToggleRight > 760) {
-        throw new Error(`work-panel toggle escaped viewport: ${JSON.stringify(geometry)}`);
+        throw new Error(`terminal-dock toggle escaped viewport: ${JSON.stringify(geometry)}`);
       }
 
       state.mode = "error";

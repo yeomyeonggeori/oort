@@ -24,6 +24,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -33,6 +34,77 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+const TOKENS_CSS = readFileSync(
+  resolve(WEB_ROOT, "src/design/tokens.css"),
+  "utf8"
+);
+
+function pixelToken(name) {
+  const match = TOKENS_CSS.match(
+    new RegExp(`^\\s*--${name}:\\s*([\\d.]+)px;`, "m")
+  );
+  if (match === null) throw new Error(`tokens.css의 --${name}을 읽지 못했다`);
+  return Number(match[1]);
+}
+
+const COMPOSER_FRAME_INSET = pixelToken("spacing-3");
+const ANCHOR_ALIGNMENT_TOLERANCE = pixelToken("spacing-1");
+
+const CRC_TABLE = (() => {
+  const table = new Int32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    table[n] = c;
+  }
+  return table;
+})();
+
+function crc32(buffer) {
+  let c = 0xffffffff;
+  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
+  return c ^ 0xffffffff;
+}
+
+/**
+ * 1200×630 is the common OG thumbnail canvas. The old 1×1 black pixel could
+ * neither exercise `object-cover` nor make an aspect-ratio regression visible
+ * in the captured frame. The two-axis gradient makes both cropped edges and
+ * the retained centre legible without importing an external asset.
+ */
+function makeUnfurlPreviewPng(width, height) {
+  const raw = Buffer.alloc((width * 3 + 1) * height);
+  let at = 0;
+  for (let y = 0; y < height; y++) {
+    raw[at++] = 0;
+    for (let x = 0; x < width; x++) {
+      raw[at++] = 32 + Math.round((x / width) * 176);
+      raw[at++] = 52 + Math.round((y / height) * 140);
+      raw[at++] = 184 - Math.round((x / width) * 112);
+    }
+  }
+  const chunk = (type, body) => {
+    const length = Buffer.alloc(4);
+    length.writeUInt32BE(body.length);
+    const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(typed) >>> 0);
+    return Buffer.concat([length, typed, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk("IHDR", ihdr),
+    chunk("IDAT", deflateSync(raw)),
+    chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+const UNFURL_PREVIEW_PNG = makeUnfurlPreviewPng(1200, 630);
 
 // 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
 // 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
@@ -64,6 +136,9 @@ const MOBILE_TAP_TARGETS = [
   ["open-sidebar-drawer", "채널 목록 열기"],
   ["composer-send", "메시지 보내기"],
   ["composer-input", "컴포저 입력"],
+  ["composer-mention-trigger", "멘션 넣기"],
+  ["composer-emoji-trigger", "이모지 넣기"],
+  ["emoji-search", "이모지 검색", "optional"],
   // B6 H1 — 오터치 비용이 가장 큰 1급 액션도 44px을 회귀로 잰다.
   // optional: 인박스 화면에만 존재 — 있으면 44px을 강제, 없으면 건너뛴다.
   ["inbox-approval-approve", "인박스 승인", "optional"],
@@ -79,13 +154,25 @@ const MOBILE_TAP_TARGETS = [
   ["delete-message-commit", "삭제 확인", "optional"],
   ["delete-message-cancel", "삭제 취소", "optional"],
   ["thread-composer-input", "답글 입력", "optional"],
+  ["thread-composer-mention-trigger", "답글 멘션 넣기", "optional"],
   ["thread-composer-send", "답글 보내기", "optional"],
   ["long-press-hint-dismiss", "안내 닫기", "optional"],
-  // 프레즌스 6b H2 — 하단 프로필 행의 상태 트리거. 바로 옆 설정 톱니가 44px인데
-  // 이것만 24×24였다(design-review 실측): 같은 줄에서 엄지가 노리는 두 컨트롤이
-  // 서로 다른 확률로 눌린다. optional인 것은 사이드바(폰에서는 서랍)가 열린
-  // 프레임에서만 보이기 때문이고, 그 프레임이 `assertTapTargets`를 다시 부른다.
-  ["presence-control", "내 상태 변경", "optional"],
+  // UX-D4 — 하단 프로필 카드 전체. 예전 24×24 아바타 트리거가 옆 톱니 44px와
+  // 어긋나던 자리(6b H2)를 행 전체 타깃으로 올렸다. optional인 것은 사이드바
+  // (폰에서는 서랍)가 열린 프레임에서만 보이기 때문이고, 그 프레임이
+  // `assertTapTargets`를 다시 부른다.
+  ["profile-card", "프로필 카드 열기", "optional"],
+  // UX-D4 H-1 — 카드가 여는 메뉴 행. 폰 서랍의 1급 진입이라 32px 포인터
+  // 치수가 아니라 시트 행(44)이다. optional: 카드가 열린 프레임에서만 존재.
+  ["presence-option-auto", "상태 온라인", "optional"],
+  ["presence-option-away", "상태 자리 비움", "optional"],
+  ["presence-option-dnd", "상태 방해 금지", "optional"],
+  ["profile-add-workspace", "워크스페이스 추가", "optional"],
+  ["nav-settings", "설정", "optional"],
+  // #1758 M-1 — 도크 닫기/확대는 빠져나오는 손가락 경로인데 28px였다.
+  // optional: 도크가 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["terminal-dock-close", "터미널 닫기", "optional"],
+  ["terminal-dock-expand", "터미널 크게 보기", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
@@ -292,6 +379,7 @@ const ROSTER = [
     channelCount: CHANNEL_IDS.length,
     channelIds: CHANNEL_IDS,
     capabilities: [],
+    presenceStatus: "auto",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -562,6 +650,7 @@ const LONG_DIGEST =
 // 사이에서 끊을 수 있어 이것만으로는 넘치지 않고, 라틴 토큰과 이어 붙어야 한 낱말이
 // 된다 — 그래서 붙여 쓴다.
 const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_restart_loop_2026_08_02";
+const ACTION_ROW_BODY = `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`;
 
 function makeMessages(count) {
   const base = Date.now() - count * 60_000;
@@ -632,7 +721,7 @@ function makeMessages(count) {
     hlcCount: 0,
     authorMemberId: ME,
     type: "text",
-    body: `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`,
+    body: ACTION_ROW_BODY,
     state: "sent",
     createdAtMs: base + count * 60_000,
   });
@@ -1198,6 +1287,7 @@ async function installUnmockedFallback(context) {
 }
 
 async function installMocks(context) {
+  let declaredPresence = "auto";
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
@@ -1362,8 +1452,33 @@ async function installMocks(context) {
         url.searchParams.get("status") === "pending" ? APPROVALS : [],
     });
   });
+  await context.route("**/v1/workspaces/*/presence", (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() || "{}");
+      if (
+        body.status === "auto" ||
+        body.status === "away" ||
+        body.status === "dnd"
+      ) {
+        declaredPresence = body.status;
+        return json(route, { status: declaredPresence });
+      }
+      return route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({ error: "invalid_status" }),
+      });
+    }
+    return json(route, { status: declaredPresence });
+  });
   await context.route("**/v1/workspaces/*/roster", (route) =>
-    json(route, { members: ROSTER })
+    json(route, {
+      members: ROSTER.map((member) =>
+        member.id === ME
+          ? { ...member, presenceStatus: declaredPresence }
+          : member
+      ),
+    })
   );
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: READ_STATES })
@@ -1632,10 +1747,7 @@ async function installMocks(context) {
     route.fulfill({
       status: 200,
       contentType: "image/png",
-      body: Buffer.from(
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
-        "base64"
-      ),
+      body: UNFURL_PREVIEW_PNG,
     })
   );
   await context.route("**/v1/workspaces/*/unfurl-settings", (route) => {
@@ -1673,6 +1785,249 @@ async function signIn(page) {
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+}
+
+function isPresencePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/presence");
+  } catch {
+    return false;
+  }
+}
+
+/** UX-HT: 포인터 rest 에서 + 는 DOM 0. 캡처가 열려면 헤더를 먼저 hover 한다. */
+async function revealNewChannel(page) {
+  const button = page.getByTestId("new-channel");
+  if ((await button.count()) === 0) {
+    await page.getByTestId("sidebar-section-channels-header").hover();
+    await button.waitFor({ state: "visible" });
+  }
+  await button.click();
+}
+
+async function sectionActionRestCounts(page) {
+  return page.evaluate(`(() => {
+    const plus = document.querySelectorAll('[data-testid="new-channel"]').length;
+    const dm = document.querySelectorAll('[data-testid="new-dm"]').length;
+    const tabStops = Array.from(
+      document.querySelectorAll('[data-section-action]')
+    ).filter((el) => !el.hasAttribute("disabled") && el.tabIndex >= 0).length;
+    return { plus, dm, tabStops };
+  })()`);
+}
+
+/** overlayHeld 해제(rAF) 와 포인터 주차를 기다린 뒤 rest 0 을 단정한다. */
+async function assertSectionActionsAtRest(page, scheme, where) {
+  await page.getByTestId("composer-input").hover();
+  await page.getByTestId("composer-input").click();
+  await page.evaluate(
+    `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
+  );
+  const counts = await sectionActionRestCounts(page);
+  if (counts.plus !== 0 || counts.dm !== 0 || counts.tabStops !== 0) {
+    throw new Error(
+      `섹션 액션 rest ${where} ${scheme}: ${JSON.stringify(counts)} (plus/dm/tabStops 전부 0이어야 함)`
+    );
+  }
+}
+
+/**
+ * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
+ * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
+ */
+async function captureSidebarD4(page, scheme, shots) {
+  await assertSectionActionsAtRest(page, scheme, "첫 줄");
+
+  const restHeader = await page
+    .getByTestId("sidebar-section-channels-header")
+    .evaluate((el) => Math.round(el.getBoundingClientRect().height));
+
+  // B-1 red proof: 순수 키보드 왕복. hover 없이 Tab 으로 + 에 닿고, 연 뒤
+  // Esc 하면 포커스가 + 로 돌아와야 한다. BODY 추락은 회귀.
+  await page.getByTestId("nav-search").focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Tab");
+  const plusStop = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (plusStop !== "new-channel") {
+    throw new Error(
+      `채널 + 키보드 정거장 ${scheme}: ${plusStop} (new-channel 이어야 함)`
+    );
+  }
+  await page.keyboard.press("Enter");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  const plusWhileOpen = await page.getByTestId("new-channel").count();
+  if (plusWhileOpen !== 1) {
+    throw new Error(
+      `다이얼로그가 떠 있는데 + 가 언마운트됐다 ${scheme}: ${plusWhileOpen}`
+    );
+  }
+  const dmWhileHeaderDialog = await page.getByTestId("new-dm").count();
+  if (dmWhileHeaderDialog !== 0) {
+    throw new Error(
+      `채널 만들기(헤더) 중 DM 액션이 고정됐다 ${scheme}: ${dmWhileHeaderDialog}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  const plusAfterEsc = await page.evaluate(`(() => ({
+    active: document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName,
+    plus: document.querySelectorAll('[data-testid="new-channel"]').length,
+  }))()`);
+  if (plusAfterEsc.active !== "new-channel") {
+    throw new Error(
+      `채널 만들기 Esc 후 포커스 ${scheme}: ${plusAfterEsc.active} (new-channel, BODY 금지), + DOM ${plusAfterEsc.plus}`
+    );
+  }
+  await assertSectionActionsAtRest(page, scheme, "헤더 경유 왕복 후");
+
+  // R2-1: ⌘K 팔레트는 헤더를 거치지 않는다. 닫힌 뒤 hold 가 헤더 blur 를
+  // 기다리면 +·DM 이 세션 내내 rest 에 남는다.
+  await page.getByTestId("open-quick-switcher").click();
+  await page.getByTestId("quick-switcher").waitFor({ state: "visible" });
+  await page.getByTestId("switcher-create-channel").click();
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
+  const dmWhileCmdkDialog = await page.getByTestId("new-dm").count();
+  if (dmWhileCmdkDialog !== 0) {
+    throw new Error(
+      `채널 만들기(⌘K) 중 DM 액션이 고정됐다 ${scheme}: ${dmWhileCmdkDialog}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
+  await assertSectionActionsAtRest(page, scheme, "⌘K 왕복 후");
+
+  await page.getByTestId("profile-card").click();
+  const menu = page.getByTestId("profile-card-menu");
+  await menu.waitFor({ state: "visible" });
+  const anchor = await page.evaluate(`(() => {
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    const panel = document.querySelector('[data-testid="profile-card-menu"]');
+    if (!trigger || !panel) return null;
+    const t = trigger.getBoundingClientRect();
+    const p = panel.getBoundingClientRect();
+    return {
+      triggerBottom: Math.round(t.bottom),
+      panelTop: Math.round(p.top),
+      overlapX: Math.max(0, Math.min(t.right, p.right) - Math.max(t.left, p.left)),
+    };
+  })()`);
+  if (!anchor || anchor.overlapX < 8) {
+    throw new Error(
+      `프로필 카드가 트리거에 앵커되지 않았다 ${scheme}: ${JSON.stringify(anchor)}`
+    );
+  }
+  if (anchor.panelTop < 0) {
+    throw new Error(
+      `프로필 카드가 뷰포트 위로 새었다 ${scheme}: ${JSON.stringify(anchor)}`
+    );
+  }
+  const profileShot = `${OUT_DIR}/sidebar-profile-card-${scheme}.png`;
+  await page.screenshot({ path: profileShot });
+  shots.push(profileShot);
+
+  const putAway = page.waitForRequest(isPresencePut);
+  await page.getByTestId("presence-option-away").click();
+  const awayReq = await putAway;
+  const awayBody = awayReq.postDataJSON();
+  if (awayBody?.status !== "away") {
+    throw new Error(
+      `상태 PUT 이 away 가 아니다 ${scheme}: ${JSON.stringify(awayBody)}`
+    );
+  }
+  await menu.waitFor({ state: "hidden" });
+  const effective = await page
+    .getByTestId("presence-control")
+    .getAttribute("data-effective");
+  if (effective !== "away") {
+    throw new Error(`배지가 away 로 안 바뀌었다 ${scheme}: ${effective}`);
+  }
+
+  await page.getByTestId("profile-card").press("Enter");
+  await menu.waitFor({ state: "visible" });
+  const putAuto = page.waitForRequest(isPresencePut);
+  await page.getByTestId("presence-option-auto").click();
+  await putAuto;
+  await menu.waitFor({ state: "hidden" });
+
+  // H-2: 카드가 연 워크스페이스 추가를 취소하면 트리거(프로필 카드)로 복귀.
+  await page.getByTestId("profile-card").click();
+  await menu.waitFor({ state: "visible" });
+  await page.getByTestId("profile-add-workspace").click();
+  await page.getByTestId("add-workspace-dialog").waitFor({ state: "visible" });
+  await page.getByTestId("add-workspace-name").waitFor({ state: "visible" });
+  // Esc first (review probe). If a leftover layer ate the key, the visible
+  // 취소 button is the same close path and still proves restore.
+  await page.getByTestId("add-workspace-name").focus();
+  await page.keyboard.press("Escape");
+  if (await page.getByTestId("add-workspace-dialog").count()) {
+    await page.getByTestId("add-workspace-cancel").click();
+  }
+  await page.getByTestId("add-workspace-dialog").waitFor({ state: "detached" });
+  await page.waitForFunction(
+    `document.activeElement?.getAttribute("data-testid") === "profile-card"`
+  );
+  const afterAddWorkspace = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+  );
+  if (afterAddWorkspace !== "profile-card") {
+    throw new Error(
+      `워크스페이스 추가 취소 후 포커스 ${scheme}: ${afterAddWorkspace} (profile-card, BODY 금지)`
+    );
+  }
+
+  const header = page.getByTestId("sidebar-section-channels-header");
+  await header.hover();
+  await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const hoverHeader = await header.evaluate((el) =>
+    Math.round(el.getBoundingClientRect().height)
+  );
+  if (restHeader !== hoverHeader) {
+    throw new Error(
+      `섹션 헤더 높이가 rest ${restHeader} → hover ${hoverHeader} 로 자랐다 ${scheme}`
+    );
+  }
+  const hoverShot = `${OUT_DIR}/sidebar-section-hover-${scheme}.png`;
+  await page.screenshot({ path: hoverShot });
+  shots.push(hoverShot);
+
+  await page.getByTestId("section-collapse-channels").press("Enter");
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "detached" });
+  const sectionCollapsed = await page
+    .getByTestId("sidebar-section-channels")
+    .getAttribute("data-collapsed");
+  if (sectionCollapsed === null) {
+    throw new Error(`채널 섹션이 접히지 않았다 ${scheme}`);
+  }
+  const collapsedUnread = await page.getByTestId("section-unread-channels");
+  await collapsedUnread.waitFor({ state: "visible" });
+  const unreadText = (await collapsedUnread.innerText()).trim();
+  if (!/^\d+$/.test(unreadText) || Number(unreadText) < 1) {
+    throw new Error(
+      `접힌 채널 섹션에 언리드 배지가 없다 ${scheme}: ${unreadText}`
+    );
+  }
+  const sectionShot = `${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`;
+  await page.screenshot({ path: sectionShot });
+  shots.push(sectionShot);
+  await page.getByTestId("section-collapse-channels").press("Enter");
+  await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
+
+  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-expand").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
+  const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
+  await page.screenshot({ path: collapsedShot });
+  shots.push(collapsedShot);
+  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-collapse").waitFor({ state: "visible" });
+  await page.getByTestId("composer-input").hover();
 }
 
 /**
@@ -1921,6 +2276,261 @@ async function assertComposerVisible(page, where) {
   );
 }
 
+async function pinViewportHeight(page, height) {
+  await page.evaluate((nextHeight) => {
+    document.documentElement.style.setProperty(
+      "--app-viewport-height",
+      `${nextHeight}px`
+    );
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+  }, height);
+}
+
+/** N-4: px 문자열로 얼리지 않는다. 변수를 걷어 트래커가 visualViewport 로 다시 쓴다. */
+async function unpinViewportHeight(page) {
+  await page.evaluate(() => {
+    document.documentElement.style.removeProperty("--app-viewport-height");
+    window.visualViewport?.dispatchEvent(new Event("resize"));
+    window.dispatchEvent(new Event("resize"));
+  });
+}
+
+/**
+ * TC-1 (#1758 B-1): 도크가 컴포저를 덮지 않는 것만으로는 부족하다. 800px 창에서
+ * 컴포저가 뷰포트 밖으로 나가도 그 경계 단정은 참이었다. 자는 「컴포저 rect ⊂
+ * 뷰포트」와 「타임라인 최소 띠」를 720·800·844 세 높이에서 함께 잰다.
+ */
+async function assertDockAboveComposer(page, where) {
+  const original = page.viewportSize();
+  if (!original) {
+    throw new Error(`도크 기하 ${where}: 뷰포트 크기를 모른다`);
+  }
+  try {
+    for (const height of [720, 800, 844]) {
+      await page.setViewportSize({ width: original.width, height });
+      // 폰 셸은 `--app-viewport-height`를 visualViewport에서 받아 쓴다. Playwright
+      // 의 setViewportSize 직후에는 그 변수가 직전 높이에 남아 컴포저가 옛 좌표에
+      // 서 있는 경합이 있다. 트래커가 쓸 값과 같은 픽셀을 맞춘 뒤 두 프레임을 기다린다.
+      await pinViewportHeight(page, height);
+      await page.waitForFunction(
+        (nextHeight) => {
+          const composer = document.querySelector('[data-testid="composer"]');
+          if (!composer || window.innerHeight !== nextHeight) return false;
+          return composer.getBoundingClientRect().bottom <= nextHeight + 1;
+        },
+        height,
+        { timeout: 5_000 }
+      );
+      const measure = await page.evaluate(`(() => {
+        const dock = document.querySelector('[data-testid="terminal-dock"]');
+        const composer = document.querySelector('[data-testid="composer"]');
+        const timeline = document.querySelector('[data-testid="chat-timeline"]');
+        const input = document.querySelector('[data-testid="composer-input"]');
+        const send = document.querySelector('[data-testid="composer-send"]');
+        if (!dock || !composer) return { missing: true };
+        const d = dock.getBoundingClientRect();
+        const c = composer.getBoundingClientRect();
+        const t = timeline ? timeline.getBoundingClientRect() : null;
+        const strip = timeline
+          ? parseFloat(getComputedStyle(timeline).minHeight) || 0
+          : 0;
+        const vh = window.innerHeight;
+        const vw = window.innerWidth;
+        const inputBox = input ? input.getBoundingClientRect() : null;
+        const sendBox = send ? send.getBoundingClientRect() : null;
+        const inside = (box) =>
+          box &&
+          box.top >= -1 &&
+          box.left >= -1 &&
+          box.bottom <= vh + 1 &&
+          box.right <= vw + 1;
+        return {
+          missing: false,
+          vh,
+          vw,
+          dockTop: Math.round(d.top),
+          dockBottom: Math.round(d.bottom),
+          dockH: Math.round(d.height),
+          composerTop: Math.round(c.top),
+          composerBottom: Math.round(c.bottom),
+          composerH: Math.round(c.height),
+          overlap: Math.round(d.bottom - c.top),
+          timelineH: t ? Math.round(t.height) : 0,
+          strip: Math.round(strip),
+          composerInView: inside(c),
+          inputInView: inside(inputBox),
+          sendInView: inside(sendBox),
+        };
+      })()`);
+      if (measure.missing) {
+        throw new Error(`도크 기하 ${where} @${height}: 도크 또는 컴포저가 없다`);
+      }
+      if (measure.overlap > 1) {
+        throw new Error(
+          `도크가 컴포저를 덮는다 ${where} @${height}: 도크 아랫변 ${measure.dockBottom}px, ` +
+            `컴포저 윗변 ${measure.composerTop}px, 교차 ${measure.overlap}px`
+        );
+      }
+      if (!measure.composerInView || !measure.inputInView || !measure.sendInView) {
+        throw new Error(
+          `컴포저가 뷰포트 밖이다 ${where} @${height}: 컴포저 ${measure.composerTop}–${measure.composerBottom} ` +
+            `/ 창 ${measure.vw}×${measure.vh} (입력 ${measure.inputInView} · 전송 ${measure.sendInView})`
+        );
+      }
+      if (measure.timelineH + 1 < measure.strip) {
+        throw new Error(
+          `타임라인 띠가 사라졌다 ${where} @${height}: ${measure.timelineH}px < 바닥 ${measure.strip}px`
+        );
+      }
+      console.log(
+        `  dock ${where} @${height}: 도크 ${measure.dockH}px (${measure.dockTop}–${measure.dockBottom}) · ` +
+          `타임라인 ${measure.timelineH}px(바닥 ${measure.strip}) · ` +
+          `컴포저 ${measure.composerTop}–${measure.composerBottom} ⊂ ${measure.vw}×${measure.vh}`
+      );
+    }
+  } finally {
+    await page.setViewportSize(original);
+    await unpinViewportHeight(page);
+  }
+}
+
+/**
+ * R2-H1/H2 · R3-H1: 확대가 720에서 실줄을 벌고, 이득이 0이면 버튼이 disabled
+ * 이며, 짧은 창(760×480 · 폰 폭 390×560)에서는 정직 문장만 남고 0px 터미널
+ * 상자는 없다. 접힘은 크롬 상수가 아니라 상자 실높이 < floor.
+ */
+async function assertDockExpandHonesty(page, where) {
+  const original = page.viewportSize();
+  if (!original) {
+    throw new Error(`도크 확대 ${where}: 뷰포트 크기를 모른다`);
+  }
+  const hasObserver = (await page.getByTestId("work-observer").count()) > 0;
+  const cases = [
+    { width: 1280, height: 720, expectGrow: true },
+    { width: 1280, height: 800, expectGrow: true },
+    { width: 1280, height: 844, expectGrow: true },
+    { width: 760, height: 480, expectShort: true },
+    { width: 390, height: 560, expectShort: true },
+  ];
+  try {
+    for (const next of cases) {
+      if (next.expectShort && !hasObserver) continue;
+      await page.setViewportSize({ width: next.width, height: next.height });
+      await pinViewportHeight(page, next.height);
+      await page.waitForFunction(
+        (nextHeight) => window.innerHeight === nextHeight,
+        next.height,
+        { timeout: 5_000 }
+      );
+      const expand = page.getByTestId("terminal-dock-expand");
+      const dock = page.getByTestId("terminal-dock");
+      await dock.waitFor({ state: "visible" });
+      if (next.expectShort) {
+        await page.getByTestId("terminal-dock-short").waitFor({ state: "visible" });
+        const terminalBox = page.getByTestId("work-observer-terminal");
+        if ((await terminalBox.count()) > 0 && (await terminalBox.isVisible())) {
+          throw new Error(
+            `${next.width}×${next.height}에서 터미널 상자가 보인다 ${where}`
+          );
+        }
+        const start = page.getByTestId("work-observer-start");
+        if ((await start.count()) > 0 && (await start.isVisible())) {
+          throw new Error(
+            `${next.width}×${next.height}에서 관전 시작이 보인다 ${where}`
+          );
+        }
+        if (!(await expand.isDisabled())) {
+          throw new Error(
+            `${next.width}×${next.height}에서 확대가 활성이다 ${where}`
+          );
+        }
+        if ((await dock.getAttribute("data-expanded")) !== null) {
+          throw new Error(
+            `${next.width}×${next.height}에서 data-expanded 가 붙었다 ${where}`
+          );
+        }
+        const dockH = await dock.evaluate((el) => Math.round(el.getBoundingClientRect().height));
+        console.log(
+          `  dock expand ${where} @${next.width}×${next.height}: 접힘 문장 · 확대 disabled · 도크 ${dockH}px`
+        );
+        continue;
+      }
+      const geo = await page.evaluate(() => {
+        const dockEl = document.querySelector('[data-testid="terminal-dock"]');
+        const timeline = document.querySelector('[data-testid="chat-timeline"]');
+        const strip = timeline
+          ? parseFloat(getComputedStyle(timeline).minHeight) || 0
+          : 0;
+        return {
+          dockH: dockEl ? dockEl.getBoundingClientRect().height : 0,
+          timelineH: timeline ? timeline.getBoundingClientRect().height : 0,
+          strip,
+        };
+      });
+      const slack = geo.timelineH - geo.strip;
+      const before = geo.dockH;
+      if (slack <= 1) {
+        if (!(await expand.isDisabled())) {
+          throw new Error(
+            `띠에 여유 없는데 확대가 활성이다 ${where} @${next.height}: 타임라인 ${Math.round(geo.timelineH)}px`
+          );
+        }
+        if ((await dock.getAttribute("data-expanded")) !== null) {
+          throw new Error(`이득 0인데 data-expanded 가 붙었다 ${where} @${next.height}`);
+        }
+        console.log(
+          `  dock expand ${where} @${next.width}×${next.height}: 여유 0 · 확대 disabled · 도크 ${Math.round(before)}px`
+        );
+        continue;
+      }
+      if (await expand.isDisabled()) {
+        throw new Error(
+          `여유 ${Math.round(slack)}px 있는데 확대가 비활성이다 ${where} @${next.height}`
+        );
+      }
+      await expand.click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-testid="terminal-dock"]')
+            ?.hasAttribute("data-expanded") === true,
+        null,
+        { timeout: 3_000 }
+      );
+      const after = await dock.evaluate((el) => el.getBoundingClientRect().height);
+      if (next.expectGrow && after <= before + 1) {
+        throw new Error(
+          `확대가 높이를 바꾸지 않았다 ${where} @${next.height}: ${Math.round(before)} -> ${Math.round(after)}`
+        );
+      }
+      console.log(
+        `  dock expand ${where} @${next.width}×${next.height}: ${Math.round(before)} → ${Math.round(after)} (Δ${Math.round(after - before)})`
+      );
+      await expand.click();
+      await page.waitForFunction(
+        () =>
+          document
+            .querySelector('[data-testid="terminal-dock"]')
+            ?.hasAttribute("data-expanded") !== true,
+        null,
+        { timeout: 3_000 }
+      );
+    }
+  } finally {
+    await page.setViewportSize(original);
+    await unpinViewportHeight(page);
+    await page.waitForFunction(
+      () => {
+        const dock = document.querySelector('[data-testid="terminal-dock"]');
+        return Boolean(dock) && !dock.hasAttribute("data-short");
+      },
+      null,
+      { timeout: 5_000 }
+    );
+  }
+}
+
 /**
  * 위쪽이 답답한가 (goal B9 §0.3). 성재 실캡처 1번의 지적은 "헤더 아래 콘텐츠가 상단에
  * 붙어 답답"이었고, 그 인상은 두 숫자로 갈린다: 헤더 줄 자체가 손가락 줄만큼 높은가,
@@ -2026,6 +2636,276 @@ async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
     `  tap targets ${where}: ` +
       measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
   );
+}
+
+/**
+ * UX-CB의 닫힌 탭 예산. 캡처 레인이 실제 DOM을 걷는다: 정적 소스에서 버튼 이름만
+ * 세면 hidden file input이나 disabled 전송 버튼을 놓치고도 초록이 된다.
+ */
+async function assertComposerTabOrder(page, where) {
+  const expected = [
+    "composer-input",
+    "composer-mention-trigger",
+    "composer-attach",
+    "composer-emoji-trigger",
+    "composer-send",
+  ];
+  const input = page.getByTestId("composer-input");
+  await input.fill("탭 순서 확인");
+  const tabbable = await page.getByTestId("composer-frame").evaluate((frame) =>
+    Array.from(
+      frame.querySelectorAll(
+        'textarea:not(:disabled), button:not(:disabled), input:not(:disabled):not([tabindex="-1"])'
+      )
+    )
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        return style.display !== "none" && style.visibility !== "hidden";
+      })
+      .map((element) => element.getAttribute("data-testid"))
+  );
+  if (JSON.stringify(tabbable) !== JSON.stringify(expected)) {
+    throw new Error(
+      `컴포저 탭 순서 ${where}: ${JSON.stringify(tabbable)} (기대 ${JSON.stringify(expected)})`
+    );
+  }
+
+  // Tab으로 버튼에 간 뒤 Shift+Tab으로 돌아와야 textarea도 키보드 모달리티의
+  // :focus-visible을 얻는다. 링은 textarea가 아니라 한 컨트롤인 그릇이 진다.
+  await input.focus();
+  await page.keyboard.press("Tab");
+  await page.keyboard.press("Shift+Tab");
+  const walked = [];
+  for (let index = 0; index < expected.length; index++) {
+    const focus = await page.evaluate(`(() => {
+      const active = document.activeElement;
+      const frame = document.querySelector('[data-testid="composer-frame"]');
+      const activeStyle = active ? getComputedStyle(active) : null;
+      const ringTarget = active?.getAttribute("data-testid") === "composer-input"
+        ? frame
+        : active;
+      const ringStyle = ringTarget ? getComputedStyle(ringTarget) : null;
+      return {
+        testId: active?.getAttribute("data-testid") ?? null,
+        focusVisible: active?.matches(":focus-visible") ?? false,
+        activeOutlineWidth: activeStyle?.outlineWidth ?? null,
+        activeOutlineStyle: activeStyle?.outlineStyle ?? null,
+        outlineWidth: ringStyle?.outlineWidth ?? null,
+        outlineStyle: ringStyle?.outlineStyle ?? null,
+      };
+    })()`);
+    walked.push(focus.testId);
+    if (
+      focus.testId !== expected[index] ||
+      !focus.focusVisible ||
+      focus.outlineWidth !== "2px" ||
+      focus.outlineStyle !== "solid" ||
+      (index === 0 && focus.activeOutlineStyle !== "none")
+    ) {
+      throw new Error(
+        `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
+      );
+    }
+    if (index < expected.length - 1) await page.keyboard.press("Tab");
+  }
+  console.log(
+    `  composer tabs ${where}: ${walked.join(" → ")} (총 ${walked.length}, 입력은 그릇 링·버튼은 자체 2px 링)`
+  );
+  return walked;
+}
+
+/** 액션 행의 버튼 아닌 가운데 폭을 실제로 눌러 입력 캐럿이 돌아오는지 잰다. */
+async function assertComposerVesselClick(page, where, ids) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("그릇 클릭 확인");
+  await input.evaluate((element) => element.setSelectionRange(2, 2));
+  await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
+  const proof = await input.evaluate((element) => ({
+    active: document.activeElement === element,
+    start: element.selectionStart,
+    end: element.selectionEnd,
+  }));
+  if (!proof.active || proof.start !== 2 || proof.end !== 2) {
+    throw new Error(`컴포저 그릇 클릭 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(`  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start}`);
+}
+
+/** [@]를 포인터로 실제 누르고, 기존 listbox가 입력 기준 위치에서 열린 것을 잰다. */
+async function assertMentionTrigger(page, where, ids) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("배포 확인");
+  // `배포` 바로 뒤는 비공백 경계다. 공백 뒤를 고르면 B-1의 죽은 버튼도 초록이다.
+  await input.evaluate((element) => element.setSelectionRange(2, 2));
+  await page.getByTestId(ids.trigger).click();
+  await page.getByTestId(ids.list).waitFor({ state: "visible" });
+  await page.waitForFunction(
+    (testId) =>
+      document.activeElement?.getAttribute("data-testid") === testId,
+    ids.input
+  );
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${ids.list}"]');
+    const frame = input?.closest('[data-testid$="composer-frame"]');
+    const inputRect = input?.getBoundingClientRect();
+    const listRect = list?.getBoundingClientRect();
+    return {
+      value: input?.value ?? null,
+      active: document.activeElement?.getAttribute("data-testid") ?? null,
+      focusVisible: input?.matches(":focus-visible") ?? null,
+      inputOutlineWidth: input ? getComputedStyle(input).outlineWidth : null,
+      inputOutlineStyle: input ? getComputedStyle(input).outlineStyle : null,
+      frameOutlineWidth: frame
+        ? getComputedStyle(frame).outlineWidth
+        : null,
+      frameOutlineStyle: frame
+        ? getComputedStyle(frame).outlineStyle
+        : null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      leftDelta:
+        inputRect && listRect ? Math.round(listRect.left - inputRect.left) : null,
+      gap:
+        inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
+    };
+  })()`);
+  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
+  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
+  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
+  if (
+    proof.value !== "배포 @ 확인" ||
+    proof.active !== ids.input ||
+    proof.focusVisible !== true ||
+    proof.inputOutlineStyle !== "none" ||
+    proof.frameOutlineWidth !== "2px" ||
+    proof.frameOutlineStyle !== "solid" ||
+    proof.options < 1 ||
+    Math.abs(proof.leftDelta) > 1 ||
+    proof.gap < 0 ||
+    proof.gap > 24
+  ) {
+    throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, ring=frame`
+  );
+  return proof;
+}
+
+/** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
+async function assertEmojiAnchor(page, where, triggerId, pickerId) {
+  // Radix 포지셔닝은 비동기라 open 직후 rect가 미배치(0,0)일 수 있다 — 배치가
+  // 두 폴링 연속 같은 자리에 정착한 뒤에만 잰다. 단정은 아래 그대로이므로
+  // 진짜 오배치는 정착한 그 자리에서 여전히 걸린다.
+  await page.waitForFunction((pid) => {
+    const el = document.querySelector(`[data-testid="${pid}"]`);
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    if (r.left <= 0 && r.top <= 0) return false;
+    const prev = el.__momoPrevRect;
+    el.__momoPrevRect = { l: r.left, t: r.top };
+    return Boolean(prev && prev.l === r.left && prev.t === r.top);
+  }, pickerId);
+  const proof = await page.evaluate(`(() => {
+    const trigger = document.querySelector('[data-testid="${triggerId}"]');
+    const picker = document.querySelector('[data-testid="${pickerId}"]');
+    const triggerRect = trigger?.getBoundingClientRect();
+    const pickerRect = picker?.getBoundingClientRect();
+    return {
+      trigger: triggerRect
+        ? { left: Math.round(triggerRect.left), top: Math.round(triggerRect.top) }
+        : null,
+      picker: pickerRect
+        ? {
+            left: Math.round(pickerRect.left),
+            right: Math.round(pickerRect.right),
+            bottom: Math.round(pickerRect.bottom),
+            width: Math.round(pickerRect.width),
+          }
+        : null,
+      triggerRight: triggerRect ? Math.round(triggerRect.right) : null,
+      viewportWidth: window.innerWidth,
+      horizontalDelta:
+        triggerRect && pickerRect
+          ? Math.round(pickerRect.left - triggerRect.left)
+          : null,
+      verticalGap:
+        triggerRect && pickerRect
+          ? Math.round(triggerRect.top - pickerRect.bottom)
+          : null,
+    };
+  })()`);
+  const channelAligned =
+    proof.trigger !== null &&
+    proof.picker !== null &&
+    (!where.startsWith("channel") ||
+      Math.abs(proof.horizontalDelta) <= ANCHOR_ALIGNMENT_TOLERANCE);
+  // 스레드는 오른쪽 패널 끝에 붙어 있어 Radix가 피커를 왼쪽으로 민다. 시작점 일치
+  // 대신 트리거가 피커 가로 범위 안에 남고, 피커가 뷰포트를 넘지 않는지를 단정한다.
+  const threadCollisionContained =
+    proof.trigger !== null &&
+    proof.picker !== null &&
+    (!where.startsWith("thread") ||
+      (proof.picker.left <= proof.trigger.left + ANCHOR_ALIGNMENT_TOLERANCE &&
+        proof.triggerRight <= proof.picker.right + ANCHOR_ALIGNMENT_TOLERANCE &&
+        proof.picker.right <= proof.viewportWidth + ANCHOR_ALIGNMENT_TOLERANCE &&
+        Math.abs(proof.horizontalDelta) <= proof.picker.width));
+  if (
+    proof.trigger === null ||
+    proof.picker === null ||
+    proof.verticalGap < 0 ||
+    proof.verticalGap > 16 ||
+    !channelAligned ||
+    !threadCollisionContained
+  ) {
+    throw new Error(`이모지 앵커 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  emoji anchor ${where}: trigger (${proof.trigger.left},${proof.trigger.top}) · picker (${proof.picker.left},${proof.picker.bottom}) · xΔ ${proof.horizontalDelta}px / gap ${proof.verticalGap}px`
+  );
+  return proof;
+}
+
+/** 단일 그릇의 위/아래 인셋과 컨트롤 경계를 계산 스타일로 고정한다. */
+async function assertComposerFrameGeometry(page, where) {
+  const proof = await page.evaluate(`(() => {
+    const root = document.querySelector('[data-testid="composer"]');
+    const form = root?.querySelector("form");
+    const frame = document.querySelector('[data-testid="composer-frame"]');
+    if (!root || !form || !frame) return null;
+    const rootRect = root.getBoundingClientRect();
+    const formRect = form.getBoundingClientRect();
+    const frameRect = frame.getBoundingClientRect();
+    const style = getComputedStyle(frame);
+    const tokenProbe = document.createElement("span");
+    tokenProbe.style.color = "var(--line-strong)";
+    document.body.append(tokenProbe);
+    const expectedBorder = getComputedStyle(tokenProbe).color;
+    tokenProbe.remove();
+    return {
+      topInset: Math.round(frameRect.top - formRect.top),
+      bottomInset: Math.round(rootRect.bottom - frameRect.bottom),
+      borderWidth: style.borderTopWidth,
+      borderStyle: style.borderTopStyle,
+      background: style.backgroundColor,
+      border: style.borderTopColor,
+      expectedBorder,
+    };
+  })()`);
+  if (
+    proof === null ||
+    proof.topInset !== COMPOSER_FRAME_INSET ||
+    proof.bottomInset !== COMPOSER_FRAME_INSET ||
+    proof.borderWidth !== "1px" ||
+    proof.borderStyle !== "solid" ||
+    proof.border !== proof.expectedBorder
+  ) {
+    throw new Error(`컴포저 그릇 기하 ${where}: ${JSON.stringify(proof)}`);
+  }
+  console.log(
+    `  composer frame ${where}: top ${proof.topInset}px / bottom ${proof.bottomInset}px (--spacing-3) · border ${proof.borderWidth} ${proof.border} (--line-strong) · fill ${proof.background}`
+  );
+  return proof;
 }
 
 /**
@@ -2189,45 +3069,168 @@ async function assertThreadRollupPlacement(page, where) {
 }
 
 /**
- * 액션 진입점이 자기 행의 본문을 덮지 않는가 (goal B11 R2 Blocker).
+ * 호버 툴바가 지금 이 프레임에서 몇 개인지 (#1743).
  *
- * 1라운드는 액션 바를 행 위에 음수 오프셋(`-top-3`)으로 띄웠는데, 바 높이가
- * 32px이라 20px이 언제나 행 안에 남았다 — 연속 행의 첫 줄 오른쪽 끝이 그만큼
- * 가려졌고, 한국어 문단의 첫 줄은 거의 언제나 오른쪽 끝까지 간다. 스크린샷은
- * 그것을 보여주지만 **증명하지는** 않는다: 리뷰어가 두 상자를 재야 한다.
+ * 기본/터치 프레임은 0, hover·포커스 프레임은 1. 비호버 행에 툴바가 남아
+ * 있으면 opacity 트릭이 돌아온 것이고, 그게 B11 리버트의 원인이다.
  *
- * 그래서 여기서 잰다. 본문 상자(`data-row-body`)의 오른쪽 끝보다 진입점이
- * 왼쪽에서 시작하면 그것이 겹침이고, 몇 px인지까지 말한다. 지금 구조에서는
- * 진입점이 본문 **밖**의 예약된 열에 있으므로 이 값은 음수여야 한다.
+ * 피커가 닫히는 순간처럼 「포커스를 든 행 + 포인터 아래 행」이 갈리면 한
+ * 프레임 2개가 보일 수 있다(계약은 hover 또는 focus 또는 overlay 이라
+ * 모순은 아니다). 개수는 그 과도 상태가 잦아들 때까지 기다린 뒤에 판정한다.
  */
-async function assertActionGutterClearsBody(page, where) {
-  const rows = await page.evaluate(`(() => {
-    return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
-      .map((row) => {
-        const body = row.querySelector('[data-row-body]');
-        const trigger = row.querySelector('[data-testid="message-actions-trigger"]');
-        if (!body || !trigger) return null;
-        const b = body.getBoundingClientRect();
-        const t = trigger.getBoundingClientRect();
-        return {
-          seq: row.getAttribute('data-seq'),
-          overlap: Math.round(b.right - t.left),
-          gap: Math.round(t.left - b.right),
-        };
-      })
-      .filter(Boolean);
-  })()`);
-  if (rows.length === 0) {
-    throw new Error(`[액션 열 ${where}] 잴 행이 하나도 없다`);
+async function assertHoverToolbarCount(page, where, expected) {
+  const deadline = Date.now() + 1000;
+  let count = -1;
+  while (Date.now() < deadline) {
+    count = await page.evaluate(
+      `document.querySelectorAll('[data-testid="message-hover-toolbar"]').length`
+    );
+    if (count === expected) break;
+    await page.waitForTimeout(16);
   }
-  const worst = rows.reduce((a, b) => (b.overlap > a.overlap ? b : a));
-  if (worst.overlap > 0) {
+  if (count !== expected) {
     throw new Error(
-      `[액션 열 ${where}] seq ${worst.seq}: 액션 진입점이 본문 상자를 ${worst.overlap}px 덮는다`
+      `[호버 툴바 ${where}] ${count}개가 마운트됐다 (기대 ${expected})`
+    );
+  }
+  console.log(`  호버 툴바 ${where}: ${count}개`);
+}
+
+/**
+ * 마운트된 툴바가 자기 행의 우측 거터를 지키는가 (#1743 M-3).
+ *
+ * 상단은 행 경계를 걸치므로(straddle) 행 상자 위로 나가도 된다. 가로는
+ * 본문과 같은 16px 거터(`right-4`)를 지킨다. 본문 겹침은 아래
+ * `assertHoverToolbarClearsBodyText`가 잰다.
+ */
+async function assertHoverToolbarPlacement(page, where) {
+  const info = await page.evaluate(`(() => {
+    const bars = Array.from(
+      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
+    );
+    return bars.map((bar) => {
+      const row = bar.closest('[data-testid="timeline-message"]');
+      if (!row) return { seq: null, within: false };
+      const r = row.getBoundingClientRect();
+      const t = bar.getBoundingClientRect();
+      const fromRight = Math.round(r.right - t.right);
+      return {
+        seq: row.getAttribute('data-seq'),
+        within:
+          t.left >= r.left - 1 &&
+          t.right <= r.right + 1,
+        fromRight,
+        fromTop: Math.round(t.top - r.top),
+        gutterOk: Math.abs(fromRight - 16) <= 2,
+      };
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[호버 툴바 ${where}] 잴 툴바가 없다`);
+  }
+  const stray = info.find((item) => !item.within);
+  if (stray) {
+    throw new Error(
+      `[호버 툴바 ${where}] seq ${stray.seq}: 툴바가 행 상자를 가로로 벗어났다`
+    );
+  }
+  const gutter = info.find((item) => !item.gutterOk);
+  if (gutter) {
+    throw new Error(
+      `[호버 툴바 ${where}] seq ${gutter.seq}: 우측 거터 ${gutter.fromRight}px (기대 16px)`
     );
   }
   console.log(
-    `  액션 열 ${where}: ${rows.length}행, 본문과의 최소 간격 ${-worst.overlap}px`
+    `  호버 툴바 위치 ${where}: ${info.length}개, 우측 ${info[0].fromRight}px · 상단 ${info[0].fromTop}px`
+  );
+}
+
+/**
+ * 툴바 상자 ∩ 본문 텍스트 Range = 0 (#1743 B-3, 이웃 행 N-2).
+ *
+ * 삭제된 `assertActionGutterClearsBody`의 후계. 상자 대 상자가 아니라
+ * `data-row-body` 안의 글자 Range를 px로 잰다. 위 straddle은 위 행 아랫단,
+ * 아래 뒤집기는 아래 행 윗단에 앉으므로 자기 행만이 아니라 바로 이웃도 본다.
+ */
+async function assertHoverToolbarClearsBodyText(page, where) {
+  const info = await page.evaluate(`(() => {
+    function intersects(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+    function hitChars(barRect, body) {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let chars = 0;
+      let area = 0;
+      let sample = "";
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const r = range.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (!intersects(barRect, r)) continue;
+          chars += 1;
+          const w = Math.min(barRect.right, r.right) - Math.max(barRect.left, r.left);
+          const h = Math.min(barRect.bottom, r.bottom) - Math.max(barRect.top, r.top);
+          area += Math.max(0, w) * Math.max(0, h);
+          if (sample.length < 24) sample += text[i];
+        }
+      }
+      return { chars, area: Math.round(area), sample };
+    }
+    const allRows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
+    );
+    const bars = Array.from(
+      document.querySelectorAll('[data-testid="message-hover-toolbar"]')
+    );
+    return bars.map((bar) => {
+      const row = bar.closest('[data-testid="timeline-message"]');
+      if (!row) return { seq: null, chars: -1, area: -1, neighbor: null };
+      const idx = allRows.indexOf(row);
+      const neighbors = [allRows[idx - 1], allRows[idx + 1]].filter(Boolean);
+      const t = bar.getBoundingClientRect();
+      const bodies = [
+        { seq: row.getAttribute("data-seq"), neighbor: "self", el: row.querySelector("[data-row-body]") },
+        ...neighbors.map((n) => ({
+          seq: n.getAttribute("data-seq"),
+          neighbor: n === allRows[idx - 1] ? "prev" : "next",
+          el: n.querySelector("[data-row-body]"),
+        })),
+      ].filter((item) => item.el);
+      let worst = {
+        seq: row.getAttribute("data-seq"),
+        neighbor: "self",
+        chars: 0,
+        area: 0,
+        sample: "",
+        fromTop: Math.round(t.top - row.getBoundingClientRect().top),
+        straddle: bar.getAttribute("data-straddle") || "",
+      };
+      for (const body of bodies) {
+        const hit = hitChars(t, body.el);
+        if (hit.chars > worst.chars) {
+          worst = { ...worst, ...hit, seq: body.seq, neighbor: body.neighbor };
+        }
+      }
+      return worst;
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[호버 툴바 본문 ${where}] 잴 툴바가 없다`);
+  }
+  const hit = info.find((item) => item.chars > 0);
+  if (hit) {
+    throw new Error(
+      `[호버 툴바 본문 ${where}] seq ${hit.seq}(${hit.neighbor}): 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
+    );
+  }
+  console.log(
+    `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0(자기+이웃) · 상단 ${info[0].fromTop}px · straddle ${info[0].straddle || "top"}`
   );
 }
 
@@ -2239,37 +3242,42 @@ async function assertActionGutterClearsBody(page, where) {
  * 세지 않는다 — 대신 아래 `countTabStopsToComposer`가 그것까지 포함한 실제
  * 비용을 잰다.
  *
- * 기준은 **행당 1개 이하**다. `opacity-0`으로만 숨긴 버튼은 눈에서만 사라지고
- * 탭 순서에는 그대로 남는다는 것이 1라운드의 결함이었으므로, 여기서는 보이는지
- * 가 아니라 `tabIndex`를 본다.
+ * 기준은 **행당 정확히 1**이다. rest 정거장은 행 자신이므로 OWNED에 행을
+ * 편입한다. `opacity-0`으로만 숨긴 버튼은 눈에서만 사라지고 탭 순서에는
+ * 그대로 남는다는 것이 1라운드의 결함이었으므로, 여기서는 보이는지가 아니라
+ * `tabIndex`를 본다.
  */
 async function assertRowTabStops(page, where, limit = 1) {
   const rows = await page.evaluate(`(() => {
-    const OWNED = [
-      '[data-testid="message-actions-trigger"]',
-      '[data-testid="reaction-chip"]',
-      '[data-testid="reaction-add"]',
-      '[data-testid="thread-anchor"]',
-      '[data-testid="message-resend"]',
-    ].join(',');
+    // 행 로빙 구성원(data-row-action) + 행 자신. 아바타, 칩, 툴바, overflow가
+    // 여기 들어간다. 카드 안 버튼은 data-row-action이 아니라 세지 않는다.
+    const OWNED = '[data-row-action]';
+    const isStop = (el) => {
+      if (el.hasAttribute('disabled')) return false;
+      // display:none 은 폭도 높이도 0이다. opacity-0 은 여전히 탭 스톱이고,
+      // 그것이 정확히 이 게이트가 잡아야 하는 상태다.
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 && r.height === 0) return false;
+      return el.tabIndex >= 0;
+    };
     return Array.from(document.querySelectorAll('[data-testid="timeline-message"]'))
       .map((row) => {
-        const stops = Array.from(row.querySelectorAll(OWNED)).filter((el) => {
-          if (el.hasAttribute('disabled')) return false;
-          // display:none 은 폭도 높이도 0이다. opacity-0 은 여전히 탭 스톱이고,
-          // 그것이 정확히 이 게이트가 잡아야 하는 상태다.
-          const r = el.getBoundingClientRect();
-          if (r.width === 0 && r.height === 0) return false;
-          return el.tabIndex >= 0;
-        });
+        const box = row.getBoundingClientRect();
+        const owned = [row, ...row.querySelectorAll(OWNED)];
+        const stops = owned.filter(isStop);
         return {
           seq: row.getAttribute('data-seq'),
           stops: stops.length,
           controls: row.querySelectorAll(OWNED).length,
+          visible: box.width > 0 && box.height > 0,
         };
       });
   })()`);
-  const worst = rows.reduce(
+  const visible = rows.filter((row) => row.visible);
+  if (visible.length === 0) {
+    throw new Error(`[탭 스톱 ${where}] 상자 있는 행이 없다`);
+  }
+  const worst = visible.reduce(
     (a, b) => (b.stops > a.stops ? b : a),
     { seq: null, stops: 0, controls: 0 }
   );
@@ -2278,11 +3286,286 @@ async function assertRowTabStops(page, where, limit = 1) {
       `[탭 스톱 ${where}] seq ${worst.seq}: 컨트롤 ${worst.controls}개 중 ${worst.stops}개가 탭 순서에 있다 (행당 ${limit}개 이하)`
     );
   }
-  const controls = rows.reduce((sum, r) => sum + r.controls, 0);
-  const stops = rows.reduce((sum, r) => sum + r.stops, 0);
+  const empty = visible.find((row) => row.stops === 0);
+  if (empty) {
+    throw new Error(
+      `[탭 스톱 ${where}] seq ${empty.seq}: 행 정거장이 0이다 (행당 정확히 1)`
+    );
+  }
+  const controls = visible.reduce((sum, r) => sum + r.controls, 0);
+  const stops = visible.reduce((sum, r) => sum + r.stops, 0);
   console.log(
-    `  탭 스톱 ${where}: ${rows.length}행에 행 컨트롤 ${controls}개, 탭 스톱 ${stops}개 (행당 최대 ${worst.stops})`
+    `  탭 스톱 ${where}: ${visible.length}행에 행 컨트롤 ${controls}개, 탭 스톱 ${stops}개 (행당 정확히 ${worst.stops})`
   );
+}
+
+/**
+ * 본문 드래그 선택이 핸드오프에 죽지 않는가 (#1743 B-4).
+ *
+ * actionable 행은 rest 정거장이 행 자신이라 mousedown이 행을 포커스한다.
+ * 핸드오프가 `:focus-visible`이 아닌 포커스에도 ⋯로 옮기면 Chrome이 선택을
+ * 접는다. 이 레인은 그 축을 실측한다: 선택 문자열 비공허, ⋯ 미탈취,
+ * 행 안 `:focus-visible` 링 없음.
+ */
+async function assertActionableRowDragSelect(page, where) {
+  const box = await page.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"][data-actionable="true"]')
+    );
+    for (const row of [...rows].reverse()) {
+      const body = row.querySelector("[data-row-body]");
+      if (!body) continue;
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        if (node.parentElement && node.parentElement.closest('[data-testid="unfurl-card"]')) {
+          continue;
+        }
+        const text = node.textContent || "";
+        if (text.trim().length < 8) continue;
+        const range = document.createRange();
+        const from = text.search(/\\S/);
+        const start = from < 0 ? 0 : from;
+        const end = Math.min(text.length, start + 32);
+        if (end - start < 8) continue;
+        range.setStart(node, start);
+        range.setEnd(node, end);
+        const r = range.getBoundingClientRect();
+        if (r.width < 24 || r.height < 4) continue;
+        return {
+          seq: row.getAttribute("data-seq"),
+          x: r.left + 2,
+          y: r.top + r.height / 2,
+          x2: r.right - 2,
+          y2: r.top + r.height / 2,
+        };
+      }
+    }
+    return null;
+  })()`);
+  if (!box) {
+    throw new Error(`[드래그 선택 ${where}] 본문이 있는 actionable 행이 없다`);
+  }
+  await page.evaluate(`document.getSelection() && document.getSelection().removeAllRanges()`);
+  await page.mouse.move(box.x, box.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x2, box.y2, { steps: 12 });
+  await page.mouse.up();
+  const proof = await page.evaluate(`(() => {
+    const sel = document.getSelection();
+    const text = sel ? sel.toString() : "";
+    const active = document.activeElement;
+    const row = active && active.closest
+      ? active.closest('[data-testid="timeline-message"]')
+      : null;
+    const scanned = row
+      ? [row, ...row.querySelectorAll("*")]
+      : [];
+    const focusVisible = scanned.some((el) => {
+      try { return el.matches(":focus-visible"); } catch { return false; }
+    });
+    return {
+      text,
+      collapsed: !sel || sel.isCollapsed,
+      activeTestId: active
+        ? (active.getAttribute("data-testid") || active.tagName)
+        : "",
+      focusVisible,
+    };
+  })()`);
+  if (!proof.text || !proof.text.trim()) {
+    throw new Error(
+      `[드래그 선택 ${where}] seq ${box.seq}: 선택 문자열이 비었다 ` +
+        `(active=${proof.activeTestId}, collapsed=${proof.collapsed})`
+    );
+  }
+  if (proof.activeTestId === "message-actions-trigger") {
+    throw new Error(
+      `[드래그 선택 ${where}] seq ${box.seq}: 선택이 ⋯로 탈취됐다`
+    );
+  }
+  if (proof.focusVisible) {
+    throw new Error(
+      `[드래그 선택 ${where}] seq ${box.seq}: 포인터 경로에 :focus-visible 링이 있다 ` +
+        `(active=${proof.activeTestId})`
+    );
+  }
+  console.log(
+    `  드래그 선택 ${where}: seq ${box.seq} 「${proof.text.slice(0, 48)}」 · ` +
+      `active=${proof.activeTestId} · fv=false`
+  );
+}
+
+/**
+ * 툴바 상자가 스크롤러 안에 있는가 (#1743 H-4).
+ * 최상단 행 레인은 뒤집힌 straddle(`below`)까지 요구한다.
+ */
+async function assertHoverToolbarInsideScroller(page, where, expectedStraddle) {
+  const info = await page.evaluate(`(() => {
+    const bar = document.querySelector('[data-testid="message-hover-toolbar"]');
+    if (!bar) return null;
+    const scroller =
+      bar.closest("[data-message-scroll-container]") ||
+      bar.closest("[data-virtuoso-scroller]") ||
+      bar.closest('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return { missing: "scroller" };
+    const t = bar.getBoundingClientRect();
+    const s = scroller.getBoundingClientRect();
+    const slack = 1;
+    const row = bar.closest('[data-testid="timeline-message"]');
+    return {
+      seq: row ? row.getAttribute("data-seq") : null,
+      barTop: Math.round(t.top),
+      barBottom: Math.round(t.bottom),
+      scrollerTop: Math.round(s.top),
+      scrollerBottom: Math.round(s.bottom),
+      straddle: bar.getAttribute("data-straddle") || "",
+      inside: t.top >= s.top - slack && t.bottom <= s.bottom + slack,
+    };
+  })()`);
+  if (!info || info.missing) {
+    throw new Error(`[호버 툴바 스크롤러 ${where}] 툴바 또는 스크롤러가 없다`);
+  }
+  if (!info.inside) {
+    throw new Error(
+      `[호버 툴바 스크롤러 ${where}] seq ${info.seq}: 툴바 ${info.barTop}–${info.barBottom}` +
+        ` 가 스크롤러 ${info.scrollerTop}–${info.scrollerBottom} 밖 (straddle ${info.straddle})`
+    );
+  }
+  if (expectedStraddle && info.straddle !== expectedStraddle) {
+    throw new Error(
+      `[호버 툴바 스크롤러 ${where}] seq ${info.seq}: straddle=${info.straddle} ` +
+        `(기대 ${expectedStraddle}) · 툴바 상단 ${info.barTop} vs 스크롤러 ${info.scrollerTop}`
+    );
+  }
+  console.log(
+    `  호버 툴바 스크롤러 ${where}: seq ${info.seq} inside · straddle ${info.straddle}` +
+      ` · 툴바 ${info.barTop} / 스크롤러 ${info.scrollerTop}`
+  );
+}
+
+/**
+ * 스레드 패널의 첫 행은 채널 Virtuoso가 아니라 패널 자체 스크롤러 바로 아래에 선다
+ * (#1753). 그 행을 실제로 hover해 툴바가 아래로 뒤집히고, 패널 안에 온전히 남으며,
+ * 루트·답글 어느 글자도 덮지 않는지를 한 프레임에서 잰다.
+ */
+async function assertThreadRootHoverToolbar(page, where) {
+  const panel = page.getByTestId("thread-panel");
+  const root = panel.getByTestId("timeline-message").first();
+  await root.hover();
+  await root
+    .getByTestId("message-hover-toolbar")
+    .waitFor({ state: "visible" });
+
+  const proof = await page.evaluate(`(() => {
+    const panel = document.querySelector('[data-testid="thread-panel"]');
+    const scroller = panel?.querySelector('[data-message-scroll-container]');
+    const root = panel?.querySelector('[data-testid="timeline-message"]');
+    const bar = root?.querySelector('[data-testid="message-hover-toolbar"]');
+    if (!panel || !scroller || !root || !bar) return null;
+
+    const intersects = (a, b) =>
+      a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    const barRect = bar.getBoundingClientRect();
+    const scrollRect = scroller.getBoundingClientRect();
+    let chars = 0;
+    let sample = "";
+    for (const body of panel.querySelectorAll('[data-row-body]')) {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const rect = range.getBoundingClientRect();
+          if ((rect.width > 0 || rect.height > 0) && intersects(barRect, rect)) {
+            chars += 1;
+            if (sample.length < 24) sample += text[i];
+          }
+        }
+      }
+    }
+    const slack = 1;
+    return {
+      seq: root.getAttribute("data-seq"),
+      straddle: bar.getAttribute("data-straddle") || "",
+      inside:
+        barRect.top >= scrollRect.top - slack &&
+        barRect.bottom <= scrollRect.bottom + slack &&
+        barRect.left >= scrollRect.left - slack &&
+        barRect.right <= scrollRect.right + slack,
+      chars,
+      sample,
+      barTop: Math.round(barRect.top),
+      barBottom: Math.round(barRect.bottom),
+      scrollTop: Math.round(scrollRect.top),
+      scrollBottom: Math.round(scrollRect.bottom),
+    };
+  })()`);
+
+  if (!proof) {
+    throw new Error(`[스레드 루트 호버 ${where}] 패널·루트·툴바·스크롤러 중 하나가 없다`);
+  }
+  if (!proof.inside || proof.straddle !== "below") {
+    throw new Error(
+      `[스레드 루트 호버 ${where}] seq ${proof.seq}: 툴바 ${proof.barTop}–${proof.barBottom}` +
+        ` / 스크롤러 ${proof.scrollTop}–${proof.scrollBottom} / straddle ${proof.straddle}`
+    );
+  }
+  if (proof.chars > 0) {
+    throw new Error(
+      `[스레드 루트 호버 ${where}] 본문 ${proof.chars}자를 덮는다 「${proof.sample}」`
+    );
+  }
+  console.log(
+    `  스레드 루트 호버 ${where}: 패널 안쪽 · 글자 교차 0 · straddle below`
+  );
+}
+
+async function pinActionableRowToScrollerTop(page) {
+  return page.evaluate(async () => {
+    const frame = () =>
+      new Promise((resolve) => {
+        let done = false;
+        const finish = () => {
+          if (!done) {
+            done = true;
+            resolve();
+          }
+        };
+        requestAnimationFrame(() => setTimeout(finish, 0));
+        setTimeout(finish, 50);
+      });
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return null;
+    scroller.scrollTop = 0;
+    for (let i = 0; i < 12; i++) await frame();
+    const rows = Array.from(
+      document.querySelectorAll(
+        '[data-testid="timeline-message"][data-actionable="true"]'
+      )
+    );
+    const row = rows[0];
+    if (!row) return null;
+    const delta =
+      row.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    scroller.scrollTop += delta;
+    for (let i = 0; i < 8; i++) await frame();
+    const still = document.querySelector(
+      `[data-testid="timeline-message"][data-seq="${row.getAttribute("data-seq")}"]`
+    );
+    if (!still) return row.getAttribute("data-seq");
+    const fix =
+      still.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+    if (Math.abs(fix) > 1) scroller.scrollTop += fix;
+    await frame();
+    return still.getAttribute("data-seq");
+  });
 }
 
 /**
@@ -2652,6 +3935,277 @@ async function waitForFocus(page, testId, where, note) {
   }
 }
 
+async function assertCopiedClipboard(page, where, expected) {
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  if (text !== expected) {
+    throw new Error(
+      `[${where}] 클립보드 ${JSON.stringify(text)} ≠ ${JSON.stringify(expected)}`
+    );
+  }
+  return text;
+}
+
+/**
+ * 제품이 클립보드에 넣은 공유 링크를 읽는다. URL 모양을 여기서 다시 적지 않는다
+ * (사본이 초록인 채 링크만 죽는 자리 — design-review #1764 M-3).
+ */
+async function readCopiedShareUrl(page, where, { messageId, seq }) {
+  const text = await page.evaluate(() => navigator.clipboard.readText());
+  if (!text.startsWith(`${ORIGIN}/#/c/${GENERAL_ID}?`)) {
+    throw new Error(`[${where}] 공유 링크가 이 서버 origin이 아니다: ${text}`);
+  }
+  if (!text.includes(`msg=${String(messageId).toLowerCase()}`)) {
+    throw new Error(`[${where}] 공유 링크에 msg가 없다: ${text}`);
+  }
+  if (seq !== undefined && seq !== null && !text.includes(`seq=${seq}`)) {
+    throw new Error(`[${where}] 공유 링크에 seq가 없다: ${text}`);
+  }
+  if (text.includes("tauri://")) {
+    throw new Error(`[${where}] 공유 링크가 번들 origin을 싣고 있다: ${text}`);
+  }
+  return text;
+}
+
+async function scrollTimelineToBottom(page) {
+  await page.evaluate(async () => {
+    const frame = () =>
+      new Promise((resolve) => {
+        requestAnimationFrame(() => setTimeout(resolve, 0));
+      });
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return;
+    scroller.scrollTop = scroller.scrollHeight;
+    for (let i = 0; i < 8; i++) await frame();
+  });
+}
+
+/**
+ * 이미 열린 채널의 렌더된 행에서, **뷰포트 위쪽**(채널이 바닥에 붙어 열리면
+ * 안 보이는 머리) 행을 고른다. 픽스처 id를 다시 적지 않는다 — 그 숫자를
+ * 고치면 자가 조용히 공허해진다 (design-review #1764 R2-H1 · 정본 §5.5①).
+ */
+async function pickOffscreenShareTarget(page, where) {
+  await scrollTimelineToBottom(page);
+  const picked = await page.evaluate(() => {
+    const vh = window.innerHeight;
+    const rows = [
+      ...document.querySelectorAll('[data-testid="timeline-message"]'),
+    ].map((el) => {
+      const r = el.getBoundingClientRect();
+      return {
+        id: el.getAttribute("data-message-id"),
+        seq: el.getAttribute("data-seq"),
+        top: r.top,
+        bottom: r.bottom,
+        height: r.height,
+        actionable: el.getAttribute("data-actionable") === "true",
+      };
+    });
+    const above = rows.filter(
+      (row) => row.id && row.actionable && row.bottom <= 0
+    );
+    const seqs = rows
+      .map((row) => Number(row.seq))
+      .filter((n) => Number.isFinite(n));
+    return {
+      target: above[0] ?? null,
+      oldestSeq: seqs.length ? Math.min(...seqs) : null,
+      present: rows.map((row) => row.id).filter(Boolean),
+      vh,
+      rowCount: rows.length,
+      aboveCount: above.length,
+    };
+  });
+  if (!picked.target) {
+    throw new Error(
+      `[${where}] 뷰포트 위에 있는 행이 없다 ` +
+        `(렌더 ${picked.rowCount}행 위쪽 ${picked.aboveCount} vh=${picked.vh}) — ` +
+        `바닥 행을 재면 착지를 못 잰다`
+    );
+  }
+  return picked;
+}
+
+/** 제품이 낸 공유 링크의 채널/origin을 지키고 msg/seq만 갈아 끼운다. */
+function shareUrlForTarget(productShareUrl, { messageId, seq }) {
+  const [beforeHash, hash = ""] = productShareUrl.split("#");
+  const qIndex = hash.indexOf("?");
+  const path = qIndex >= 0 ? hash.slice(0, qIndex) : hash;
+  const params = new URLSearchParams(qIndex >= 0 ? hash.slice(qIndex + 1) : "");
+  params.set("msg", String(messageId).toLowerCase());
+  if (seq !== undefined && seq !== null && seq !== "") {
+    params.set("seq", String(seq));
+  } else {
+    params.delete("seq");
+  }
+  return `${beforeHash}#${path}?${params}`;
+}
+
+async function openColdSharePage(context, url) {
+  const page = await context.newPage();
+  await page.goto(url, { waitUntil: "networkidle" });
+  return page;
+}
+
+/**
+ * 복사된 URL을 **콜드 새 페이지**에서 열어 대상 행에 착지하는지 잰다.
+ * 대상은 채널이 저절로 보여 주지 않는 행이어야 한다 — 바닥 행은 점프 없이도
+ * 보이므로 그 자리의 초록은 공허하다 (R2-B1 / R2-H1).
+ * 화면 안 판정은 위·아래 경계를 함께 본다 (R2-N2).
+ */
+async function assertShareUrlLands(context, productShareUrl, sourcePage, where) {
+  const picked = await pickOffscreenShareTarget(sourcePage, where);
+  const landingUrl = shareUrlForTarget(productShareUrl, {
+    messageId: picked.target.id,
+    seq: picked.target.seq,
+  });
+  const landing = await openColdSharePage(context, landingUrl);
+  try {
+    await landing
+      .getByTestId("timeline-message")
+      .first()
+      .waitFor({ state: "visible", timeout: 8_000 });
+    try {
+      await landing.waitForFunction(
+        (id) => {
+          const el = document.querySelector(
+            `[data-testid="timeline-message"][data-message-id="${id}"]`
+          );
+          if (!el) return false;
+          const r = el.getBoundingClientRect();
+          const inView =
+            r.top >= 0 && r.bottom <= window.innerHeight && r.height > 0;
+          // 워처가 착지 행에 얹는 클래스 (`anchor.ts` HIGHLIGHT_CLASS).
+          return inView && el.classList.contains("bg-accent-soft");
+        },
+        picked.target.id,
+        { timeout: 8_000 }
+      );
+    } catch (error) {
+      const dump = await landing.evaluate((id) => {
+        const el = document.querySelector(
+          `[data-testid="timeline-message"][data-message-id="${id}"]`
+        );
+        const region = document.querySelector(".chat-region");
+        const banner = document.querySelector(
+          '[data-testid="chat-anchor-missed"]'
+        );
+        const rows = [
+          ...document.querySelectorAll('[data-testid="timeline-message"]'),
+        ].map((row) => {
+          const r = row.getBoundingClientRect();
+          return {
+            id: row.getAttribute("data-message-id"),
+            seq: row.getAttribute("data-seq"),
+            top: Math.round(r.top),
+            bottom: Math.round(r.bottom),
+            highlight: row.classList.contains("bg-accent-soft"),
+          };
+        });
+        return {
+          href: location.href,
+          hash: location.hash,
+          anchorMsg: region?.getAttribute("data-url-anchor-msg"),
+          anchorSeq: region?.getAttribute("data-url-anchor-seq"),
+          banner: banner ? banner.textContent?.trim() : null,
+          target: el
+            ? {
+                top: Math.round(el.getBoundingClientRect().top),
+                bottom: Math.round(el.getBoundingClientRect().bottom),
+                highlight: el.classList.contains("bg-accent-soft"),
+                className: el.className,
+              }
+            : null,
+          rows,
+        };
+      }, picked.target.id);
+      throw new Error(
+        `[${where}] 콜드 착지 실패 url=${landingUrl} ` +
+          `target=${picked.target.id} 열기전 top=${Math.round(picked.target.top)} ` +
+          `dump=${JSON.stringify(dump)}` +
+          (error instanceof Error ? ` (${error.message})` : "")
+      );
+    }
+    const pos = await landing
+      .locator(
+        `[data-testid="timeline-message"][data-message-id="${picked.target.id}"]`
+      )
+      .evaluate((el) => {
+        const r = el.getBoundingClientRect();
+        return {
+          top: r.top,
+          bottom: r.bottom,
+          vh: window.innerHeight,
+          highlighted: el.classList.contains("bg-accent-soft"),
+        };
+      });
+    console.log(
+      `  착지 ${where}: msg=${picked.target.id} top=${Math.round(pos.top)} ` +
+        `bottom=${Math.round(pos.bottom)} vh=${pos.vh} highlight=${pos.highlighted ? 1 : 0} ` +
+        `(열기 전 top=${Math.round(picked.target.top)})`
+    );
+  } finally {
+    await landing.close();
+  }
+
+  await assertColdAnchorMissBanners(context, productShareUrl, picked, where);
+}
+
+/**
+ * 콜드 오픈에서 없는 msg의 미발견 배너 (P3가 null이던 older/unknown).
+ */
+async function assertColdAnchorMissBanners(
+  context,
+  productShareUrl,
+  picked,
+  where
+) {
+  let missingId = "capture-missing";
+  while (picked.present.includes(missingId)) missingId = `${missingId}-x`;
+
+  const unknownUrl = shareUrlForTarget(productShareUrl, {
+    messageId: missingId,
+    seq: null,
+  });
+  const unknownPage = await openColdSharePage(context, unknownUrl);
+  try {
+    const banner = unknownPage.getByTestId("chat-anchor-missed");
+    await banner.waitFor({ state: "visible", timeout: 8_000 });
+    const text = (await banner.innerText()).trim();
+    if (!text.includes("찾지 못했습니다")) {
+      throw new Error(
+        `[${where}] 없는 msg(unknown) 배너가 이유를 말하지 않는다: ${text}`
+      );
+    }
+    console.log(`  착지 ${where} 배너 unknown: ${text}`);
+  } finally {
+    await unknownPage.close();
+  }
+
+  // seq 0은 어떤 로드 창보다도 위다. 렌더된 최소 seq-1은 창 *안*일 수 있다
+  // (가상 목록이 머리 행을 안 그리는 자리 — 그때는 unknown이 맞다).
+  const olderUrl = shareUrlForTarget(productShareUrl, {
+    messageId: missingId,
+    seq: 0,
+  });
+  const olderPage = await openColdSharePage(context, olderUrl);
+  try {
+    const banner = olderPage.getByTestId("chat-anchor-missed");
+    await banner.waitFor({ state: "visible", timeout: 8_000 });
+    const text = (await banner.innerText()).trim();
+    if (!text.includes("위쪽")) {
+      throw new Error(
+        `[${where}] 없는 msg(older) 배너가 이유를 말하지 않는다: ${text}`
+      );
+    }
+    console.log(`  착지 ${where} 배너 older: ${text}`);
+  } finally {
+    await olderPage.close();
+  }
+}
+
 /**
  * 진짜 손가락 제스처 (goal B11 R2 H2).
  *
@@ -2788,6 +4342,9 @@ async function captureMobile(browser, scheme) {
     colorScheme: scheme,
     reducedMotion: "reduce",
   });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
   await installMocks(context);
   const shots = [];
   const shoot = async (page, name) => {
@@ -2821,27 +4378,39 @@ async function captureMobile(browser, scheme) {
   await assertComposerVisible(page, `chat ${scheme}`);
   await shoot(page, "chat");
 
+  // TC-1 (#1758): 헤더 터미널을 실제로 눌러 도크가 컴포저 위에 앉는지 폰에서도 잰다.
+  await page.getByTestId("open-terminal-dock").click();
+  await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
+  await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+  await assertComposerVisible(page, `terminal dock ${scheme}`);
+  await assertDockAboveComposer(page, `terminal dock ${scheme}`);
+  await assertDockExpandHonesty(page, `terminal dock ${scheme}`);
+  await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `terminal dock ${scheme}`);
+  await assertTapTargets(page, `terminal dock ${scheme}`);
+  await shoot(page, "terminal-dock");
+  await page.getByTestId("terminal-dock-close").click();
+  await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
+
+  // 2a-0. 이모지 피커 바텀시트 (#1742). 390에서 분류 탭이 화면 밖으로
+  //       나가면 안 된다. hover: none 이므로 포인터 popover가 아니라 시트다.
+  await page.getByTestId("composer-emoji-trigger").click();
+  await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await page.getByTestId("emoji-search").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `emoji picker ${scheme}`);
+  await assertTapTargets(page, `emoji picker ${scheme}`);
+  await shoot(page, "composer-emoji");
+  await page.keyboard.press("Escape");
+
   // 2a-1. 폰에 액션이 있다는 것을 말하는 한 줄 (goal B11 R2 H4). 폰의 진입점은
   //       보이지 않는 제스처 하나뿐이었고, 그래서 이 표면에는 "여기서 무언가 할
   //       수 있다"고 말하는 것이 하나도 없었다. 손가락 기기에서만, 한 번만.
   await page.getByTestId("long-press-hint").waitFor({ state: "visible" });
-  // 같은 축의 반대편: hover가 없는 기기에는 액션 열이 아예 없어야 한다. 있으면
-  // 본문이 쓸 수 있었던 폭을, 어떤 제스처로도 열리지 않는 컨트롤에 준 것이다.
-  const gutterOnTouch = await page.evaluate(`(() => {
-    const columns = Array.from(
-      document.querySelectorAll('[data-testid="message-action-column"]')
-    );
-    const shown = columns.filter((el) => el.getBoundingClientRect().width > 0);
-    return { total: columns.length, shown: shown.length };
-  })()`);
-  if (gutterOnTouch.shown > 0) {
-    throw new Error(
-      `[폰 ${scheme}] hover가 없는 기기에 액션 열이 ${gutterOnTouch.shown}개 그려졌다`
-    );
-  }
-  console.log(
-    `  폰 ${scheme}: 액션 열 ${gutterOnTouch.total}개 모두 접힘, 길게 누르기 안내 보임`
-  );
+  // 같은 축의 반대편: hover가 없는 기기에는 호버 툴바가 아예 없어야 한다.
+  // display:none 이 아니라 DOM 0 — opacity 트릭의 재발을 여기서 차단한다.
+  await assertHoverToolbarCount(page, `폰 ${scheme}`, 0);
+  console.log(`  폰 ${scheme}: 호버 툴바 0, 길게 누르기 안내 보임`);
 
   // 2a-2. 스크롤은 누르기가 아니다 (goal B11 R2 H2). **먼저 열리지 않아야 하는
   //       제스처부터 잰다.** 1라운드의 이 방어는 죽은 코드였다: `origin`을 채운
@@ -2876,7 +4445,7 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `action sheet ${scheme}`);
   // 시트의 모든 행은 44px 손가락 타깃이어야 한다 — 시트를 여는 이유가 그것이다.
   const sheetTaps = await page.evaluate(`(() => {
-    const ids = ["sheet-reply", "sheet-edit", "sheet-delete"];
+    const ids = ["sheet-reply", "sheet-copy-link", "sheet-edit", "sheet-delete"];
     return ids
       .map((id) => {
         const el = document.querySelector('[data-testid="' + id + '"]');
@@ -2890,9 +4459,9 @@ async function captureMobile(browser, scheme) {
   // 있어서, 시트가 닫힌 뒤 이 자리에 오면 **행 0개를 무사통과**했다 — 44px 계약이
   // 검사된 적 없는데 초록이 나오는 상태였고, 그 조용한 초록이 시트가 닫히고 있다는
   // 사실을 118프레임 뒤까지 가려 줬다.
-  if (sheetTaps.length !== 3) {
+  if (sheetTaps.length !== 4) {
     throw new Error(
-      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/3 — 시트가 닫혔거나 행이 사라졌다`
+      `[action sheet ${scheme}] 시트 행 ${sheetTaps.length}/4 — 시트가 닫혔거나 링크 복사가 없다`
     );
   }
   for (const tap of sheetTaps) {
@@ -2903,6 +4472,22 @@ async function captureMobile(browser, scheme) {
     }
   }
   await shoot(page, "b11-action-sheet");
+  // UX-D3 (#1755): 시트 클립보드 항목을 실제로 누르고 내용을 읽는다.
+  await page.getByTestId("sheet-copy").click();
+  await page.getByTestId("sheet-copy").getByText("메시지 복사됨").waitFor();
+  await assertCopiedClipboard(page, `시트 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
+  await page.getByTestId("sheet-copy-link").click();
+  await page.getByTestId("sheet-copy-link").getByText("링크 복사됨").waitFor();
+  const sheetMessageId = await sheetTarget.getAttribute("data-message-id");
+  const sheetSeq = await sheetTarget.getAttribute("data-seq");
+  if (!sheetMessageId) {
+    throw new Error(`[시트 ${scheme}] 마지막 행에 data-message-id가 없다`);
+  }
+  await readCopiedShareUrl(page, `시트 링크 복사 ${scheme}`, {
+    messageId: sheetMessageId,
+    seq: sheetSeq,
+  });
+  console.log(`  시트 ${scheme}: 메시지 복사 · 링크 복사 클립보드 일치`);
   await page.keyboard.press("Escape");
   await page.getByTestId("message-action-sheet").waitFor({ state: "hidden" });
 
@@ -3016,6 +4601,15 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
   await shoot(page, "sidebar-drawer");
 
+  await page.getByTestId("profile-card").click();
+  await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+  await assertTapTargets(page, `drawer profile ${scheme}`);
+  await shoot(page, "sidebar-profile-card");
+  // 첫 Esc 는 카드, 둘째는 서랍. 메뉴가 열려 있는 동안 escape 층은 양보한다
+  // (`role="menu"` — UX-D4, 서랍이 카드를 삼키던 자리).
+  await page.keyboard.press("Escape");
+  await page.getByTestId("profile-card-menu").waitFor({ state: "hidden" });
+
   // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
   // 여기서 실제로 걷는다.
   await page.keyboard.press("Escape");
@@ -3128,6 +4722,9 @@ async function captureScheme(browser, scheme) {
     colorScheme: scheme,
     reducedMotion: "reduce",
   });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
   await installMocks(context);
   const shots = [];
 
@@ -3177,13 +4774,148 @@ async function captureScheme(browser, scheme) {
   await signIn(login);
   await login.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await login.getByTestId("unfurl-card").waitFor({ state: "visible" });
+  const unfurlImage = login.getByTestId("unfurl-image");
+  await unfurlImage.waitFor({ state: "visible" });
+  const unfurlNaturalSize = await unfurlImage.evaluate((element) => ({
+    width: element.naturalWidth,
+    height: element.naturalHeight,
+  }));
+  if (unfurlNaturalSize.width !== 1200 || unfurlNaturalSize.height !== 630) {
+    throw new Error(
+      `언퍼얼 캡처 픽스처가 1200×630이 아니다 ${scheme}: ${JSON.stringify(unfurlNaturalSize)}`
+    );
+  }
   // 넓은 창도 같은 자로 잰다 (goal B9). 긴 무공백 토큰은 폰에서만 나는 결함이
   // 아니다: 1280px 창에서도 타임라인 스크롤러는 세로 전용이어야 하고, 그 상자가
   // 가로로 끌린다면 새는 것이 있다는 뜻이다. 폭만 다른 같은 주장이다.
   await assertNoHorizontalOverflow(login, `desktop chat ${scheme}`);
+  // Park the pointer on the composer so a leftover login-click coordinate
+  // cannot keep a row hovered. Rest means the toolbar is not mounted.
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(100);
+  await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
+
+  await captureSidebarD4(login, scheme, shots);
+
+  // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
+  // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.
+  await assertComposerFrameGeometry(login, `rest ${scheme}`);
+  await assertComposerTabOrder(login, scheme);
+  for (let index = 0; index < 4; index++) {
+    await login.keyboard.press("Shift+Tab");
+  }
+  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
+  await login.screenshot({ path: focusShot });
+  shots.push(focusShot);
+  await assertComposerVesselClick(login, scheme, {
+    input: "composer-input",
+    actions: "composer-actions",
+  });
+
+  // 새 진입점은 캡처 레인이 실제로 누른다. 클릭이 @를 넣고 기존 listbox를 열며,
+  // 포인터 경로의 프로그램 포커스가 :focus-visible 링을 지어내지 않는 데까지 한 자다.
+  const mentionProof = await assertMentionTrigger(login, scheme, {
+    input: "composer-input",
+    trigger: "composer-mention-trigger",
+    list: "mention-list",
+  });
+  const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
+  await login.screenshot({ path: mentionShot });
+  shots.push(mentionShot);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-input").fill("");
+
+  // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
+  // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.
+  await context.setOffline(true);
+  await login.getByTestId("composer-offline").waitFor({ state: "visible" });
+  const offlineControls = await login.getByTestId("composer-frame").evaluate((frame) => ({
+    input: frame.querySelector('[data-testid="composer-input"]')?.hasAttribute("disabled"),
+    mention: frame
+      .querySelector('[data-testid="composer-mention-trigger"]')
+      ?.hasAttribute("disabled"),
+    attach: frame
+      .querySelector('[data-testid="composer-attach"]')
+      ?.hasAttribute("disabled"),
+    emoji: frame
+      .querySelector('[data-testid="composer-emoji-trigger"]')
+      ?.hasAttribute("disabled"),
+    send: frame
+      .querySelector('[data-testid="composer-send"]')
+      ?.hasAttribute("disabled"),
+  }));
+  if (
+    offlineControls.input !== false ||
+    offlineControls.mention !== false ||
+    offlineControls.attach !== true ||
+    offlineControls.emoji !== false ||
+    offlineControls.send !== true
+  ) {
+    throw new Error(
+      `컴포저 오프라인 disabled 의미 ${scheme}: ${JSON.stringify(offlineControls)}`
+    );
+  }
+  const composerOfflineShot = `${OUT_DIR}/composer-offline-${scheme}.png`;
+  await login.screenshot({ path: composerOfflineShot });
+  shots.push(composerOfflineShot);
+  await context.setOffline(false);
+  await login.getByTestId("composer-offline").waitFor({ state: "hidden" });
+
+  // 첨부 pending: session 응답을 붙잡아 실제 draftStore가 uploading 칩을 그린
+  // 순간을 찍고, 촬영 뒤 같은 3왕복을 끝내 깨끗한 rest로 복귀한다.
+  let releaseComposerUpload;
+  const composerUploadHeld = new Promise((resolve) => {
+    releaseComposerUpload = resolve;
+  });
+  await login.route("**/attachments/uploads", async (route) => {
+    await composerUploadHeld;
+    return json(route, {
+      id: "capture-composer-attachment",
+      status: "pending",
+      uploadUrl: `${ORIGIN}/capture-composer-upload`,
+    });
+  });
+  await login.route("**/capture-composer-upload", (route) =>
+    route.fulfill({ status: 200, body: "" })
+  );
+  await login.route("**/attachments/capture-composer-attachment/complete", (route) =>
+    json(route, {
+      id: "capture-composer-attachment",
+      channelId: GENERAL_ID,
+      uploaderMemberId: ME,
+      name: "deploy-log.txt",
+      mime: "text/plain",
+      size: 18,
+      status: "complete",
+      createdAtMs: Date.now(),
+    })
+  );
+  await login
+    .getByTestId("composer")
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: "deploy-log.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("capture attachment"),
+    });
+  await login.getByTestId("attachment-chip-progress").waitFor({ state: "visible" });
+  const composerPendingShot = `${OUT_DIR}/composer-attachment-pending-${scheme}.png`;
+  await login.screenshot({ path: composerPendingShot });
+  shots.push(composerPendingShot);
+  releaseComposerUpload();
+  await login.getByTestId("attachment-chip-progress").waitFor({ state: "hidden" });
+  await login.getByTestId("attachment-chip-remove").click();
+  await login.getByTestId("attachment-chip").waitFor({ state: "hidden" });
+  await login.unroute("**/attachments/uploads");
+  await login.unroute("**/capture-composer-upload");
+  await login.unroute("**/attachments/capture-composer-attachment/complete");
+  console.log(
+    `  composer states ${scheme}: rest/focus/offline/attachment-pending · mention options ${mentionProof.options}`
+  );
 
   // ADR-0170 destructive boundary: removing a preview is permanent for this
   // message, so the no-regeneration sentence and Esc layer get their own
@@ -3197,11 +4929,25 @@ async function captureScheme(browser, scheme) {
   shots.push(unfurlRemoveShot);
   await login.keyboard.press("Escape");
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "hidden" });
-  const unfurlFocusRestored = await unfurlRemoveOpener.evaluate(
-    (element) => element === document.activeElement
-  );
-  if (!unfurlFocusRestored) {
-    throw new Error(`언퍼얼 제거 Esc가 opener 초점을 복원하지 않았다 ${scheme}`);
+  // Portal removal can become observable one task before Radix runs its
+  // close-auto-focus callback. Do not manufacture focus for the proof; wait a
+  // bounded interval for the product callback and still fail if it never runs.
+  const unfurlFocusProof = await unfurlRemoveOpener.evaluate(async (element) => {
+    const deadline = performance.now() + 1_000;
+    while (element !== document.activeElement && performance.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 16));
+    }
+    const active = document.activeElement;
+    return {
+      restored: element === active,
+      activeTag: active?.tagName ?? null,
+      activeTestId: active?.getAttribute("data-testid") ?? null,
+    };
+  });
+  if (!unfurlFocusProof.restored) {
+    throw new Error(
+      `언퍼얼 제거 Esc가 opener 초점을 복원하지 않았다 ${scheme}: ${JSON.stringify(unfurlFocusProof)}`
+    );
   }
 
   // Mocked author DELETE round trip. A separate page keeps the main evidence
@@ -3221,80 +4967,217 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoval.screenshot({ path: unfurlRemovedShot });
   shots.push(unfurlRemovedShot);
 
-  // 2c. 메시지 액션 (goal B11). 한 프레임이 네 가지를 한꺼번에 증명한다: 내
-  //     메시지 위에 뜬 액션 바, 위 행들의 반응 칩(내가 누른 것은 강조), 「수정됨」
-  //     표식, 그리고 조용히 사라지지 않고 자리에 남은 「삭제된 메시지」.
+  // 2c. 메시지 액션 (goal B11 / #1743). 한 프레임이 네 가지를 한꺼번에 증명한다:
+  //     내 메시지 위에 뜬 호버 툴바, 위 행들의 반응 칩(내가 누른 것은 강조),
+  //     「수정됨」 표식, 그리고 자리에 남은 「삭제된 메시지」.
   //
   //     hover로 띄운다 — 데스크탑의 진입점이 hover이기 때문이다. 폰에는 hover가
   //     없고, 그쪽은 captureMobile의 길게 누르기 프레임이 맡는다.
   const actionRow = login.getByTestId("timeline-message").last();
   await actionRow.hover();
   await login
-    .getByTestId("message-actions-trigger")
+    .getByTestId("message-hover-toolbar")
     .last()
     .waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  // Blocker 회귀 (R2). 진입점은 본문 상자 밖의 예약된 열에 있어야 한다.
-  await assertActionGutterClearsBody(login, `hover ${scheme}`);
-  // H1 회귀 (R2). 행마다 최대 여섯 개였던 탭 스톱이 하나가 되었는가.
+  await assertHoverToolbarCount(login, `hover ${scheme}`, 1);
+  await assertHoverToolbarPlacement(login, `hover ${scheme}`);
+  await assertHoverToolbarClearsBodyText(login, `hover ${scheme}`);
+  await assertNoHorizontalOverflow(login, `hover toolbar ${scheme}`);
   await assertRowTabStops(login, `hover ${scheme}`);
+  // N-2 / B-1: the React button on the mounted toolbar must open the picker.
+  // The ⋯ 메뉴 path is a different consumer and used to stay green while this
+  // one crashed.
+  await login.getByTestId("toolbar-react-more").last().click();
+  await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
+  const chipPlus = actionRow.getByTestId("reaction-add");
+  if ((await chipPlus.count()) > 0) {
+    await login.keyboard.press("Escape");
+    await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+    await actionRow.hover();
+    await chipPlus.click();
+    await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+    await login.getByTestId("emoji-search").waitFor({ state: "visible" });
+  }
+  await login.keyboard.press("Escape");
+  await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
+  await login.setViewportSize({ width: 900, height: 800 });
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
+  await assertHoverToolbarClearsBodyText(login, `hover 900 ${scheme}`);
+  await assertHoverToolbarPlacement(login, `hover 900 ${scheme}`);
+  await login.setViewportSize(VIEWPORT);
+  await actionRow.hover();
+  await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
   const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
   await login.screenshot({ path: actionsShot });
   shots.push(actionsShot);
 
-  // 2d. 키보드 경로 (goal B11 R2 H1). **진짜 Tab으로 만든 프레임이다.**
+  // 2c-2. 본문 드래그 선택 (#1743 B-4). 핸드오프가 마우스 포커스에도 ⋯로
+  //     옮기면 선택이 빈 문자열이 된다. 포인터를 치운 뒤 본문을 드래그한다.
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(100);
+  await assertActionableRowDragSelect(login, `hover ${scheme}`);
+  await login.evaluate(
+    `document.getSelection() && document.getSelection().removeAllRanges()`
+  );
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(50);
+
+  // 2c-3. 스크롤러 맨 위 행 (#1743 H-4). 위 straddle이 헤더 뒤로 잘리면
+  //     행 하단으로 뒤집고, 그 상태에서도 글자 교차 0·상자 전부 스크롤러 안.
+  const topSeq = await pinActionableRowToScrollerTop(login);
+  if (!topSeq) {
+    throw new Error(`[상단 뒤집기 ${scheme}] 스크롤러 상단에 붙일 actionable 행이 없다`);
+  }
+  const topRow = login.locator(
+    `[data-testid="timeline-message"][data-seq="${topSeq}"]`
+  );
+  await topRow.hover();
+  await login.getByTestId("message-hover-toolbar").waitFor({ state: "visible" });
+  await login
+    .locator('[data-testid="message-hover-toolbar"][data-straddle="below"]')
+    .waitFor({ state: "visible", timeout: 1000 });
+  await assertHoverToolbarInsideScroller(login, `top ${scheme}`, "below");
+  await assertHoverToolbarClearsBodyText(login, `top ${scheme}`);
+  await assertHoverToolbarPlacement(login, `top ${scheme}`);
+  await login.getByTestId("composer-input").hover();
+  await login.evaluate(`(() => {
+    const rows = document.querySelectorAll('[data-testid="timeline-message"]');
+    const last = rows[rows.length - 1];
+    if (last) last.scrollIntoView({ block: "end" });
+  })()`);
+  await login.waitForTimeout(200);
+
+  // 2d. 키보드 경로 (goal B11 R2 H1 · #1743). **진짜 Tab으로 만든 프레임이다.**
   //
-  //     1라운드의 이 프레임은 `locator.focus()`로 찍혔고, 그래서 hover 프레임과
-  //     md5까지 같았다: 프로그래매틱 포커스는 Chromium에서 `:focus-visible`을
-  //     켜지 않으므로 링이 그려지지 않았고, 아무것도 재지 못한 채 "키보드로
-  //     닿는다"고 주장했다. 여기서는 바로 앞 행의 진입점에 포커스를 두고 Tab을
-  //     **눌러서** 다음 진입점에 착지한 뒤, 그 순간의 상태를 직접 확인한다.
-  const landed = await login.evaluate(`(() => {
-    const triggers = Array.from(
-      document.querySelectorAll('[data-testid="message-actions-trigger"]')
+  //     툴바는 비포커스 행에 없으므로, 바로 앞 행의 로빙 정거장에서 Tab을 눌러
+  //     마지막 행으로 들어간다. 그 순간 focus-within 이 툴바를 마운트하고,
+  //     포커스는 이미 보이는 컨트롤에 있어야 한다 (opacity-0 트리거에 착지하는
+  //     옛 경로의 반대). hover 프레임의 포인터가 마지막 행에 남아 있으면
+  //     툴바가 미리 떠 있으므로, 키보드 전에 포인터를 치운다.
+  await login.getByTestId("composer-input").hover();
+  await login.waitForTimeout(100);
+  const tabStart = await login.evaluate(`(() => {
+    const rows = Array.from(
+      document.querySelectorAll('[data-testid="timeline-message"]')
     );
-    if (triggers.length < 2) return false;
-    triggers[triggers.length - 2].focus();
-    return true;
+    if (rows.length < 2) return false;
+    const prev = rows[rows.length - 2];
+    const start =
+      prev.querySelector('[data-row-action][tabindex="0"]') ||
+      prev.querySelector('[data-row-action]') ||
+      prev;
+    start.focus();
+    return document.activeElement === start;
   })()`);
-  if (!landed) {
-    throw new Error(`[키보드 ${scheme}] 액션 진입점이 두 개 미만이다`);
+  if (!tabStart) {
+    throw new Error(`[키보드 ${scheme}] 바로 앞 행에 탭 출발점이 없다`);
   }
-  // 본문 안의 링크도 정당한 탭 스톱이므로(마지막 행에는 긴 URL이 있다) 진입점이
-  // 나올 때까지 Tab을 **누른다**. 중요한 것은 몇 번째냐가 아니라, 실제 키 입력으로
-  // 거기에 닿았고 그 순간 브라우저가 `:focus-visible`을 켰다는 것이다.
+  let landedRow = false;
   let landedOn = "";
-  for (let press = 0; press < 8 && landedOn !== "message-actions-trigger"; press++) {
+  for (let press = 0; press < 12; press++) {
     await login.keyboard.press("Tab");
-    landedOn = await login.evaluate(
-      `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
-    );
+    await login.waitForTimeout(30);
+    const proof = await login.evaluate(`(() => {
+      const el = document.activeElement;
+      if (!el) return { inLast: false, testId: "", focusVisible: false, opacity: 0, toolbar: 0 };
+      const rows = Array.from(
+        document.querySelectorAll('[data-testid="timeline-message"]')
+      );
+      const last = rows[rows.length - 1];
+      return {
+        inLast: Boolean(last && last.contains(el)),
+        testId: el.getAttribute("data-testid") || "",
+        focusVisible: el.matches(":focus-visible"),
+        opacity: Number(getComputedStyle(el).opacity),
+        toolbar: last
+          ? last.querySelectorAll('[data-testid="message-hover-toolbar"]').length
+          : 0,
+      };
+    })()`);
+    landedOn = proof.testId;
+    if (proof.inLast) {
+      if (!proof.focusVisible) {
+        throw new Error(
+          `[키보드 ${scheme}] 행 착지점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+        );
+      }
+      if (proof.opacity < 1) {
+        throw new Error(
+          `[키보드 ${scheme}] 포커스를 받은 컨트롤의 opacity가 ${proof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
+        );
+      }
+      if (proof.toolbar !== 1) {
+        throw new Error(
+          `[키보드 ${scheme}] focus-within 행에 툴바가 ${proof.toolbar}개다`
+        );
+      }
+      landedRow = true;
+      break;
+    }
   }
-  const focusProof = await login.evaluate(`(() => {
-    const el = document.activeElement;
-    if (!el) return { testId: "", focusVisible: false, opacity: 0 };
-    return {
-      testId: el.getAttribute("data-testid") || "",
-      focusVisible: el.matches(":focus-visible"),
-      opacity: Number(getComputedStyle(el).opacity),
-    };
-  })()`);
-  if (focusProof.testId !== "message-actions-trigger") {
+  if (!landedRow) {
     throw new Error(
-      `[키보드 ${scheme}] Tab이 액션 진입점이 아니라 ${focusProof.testId || "(없음)"}에 닿았다`
+      `[키보드 ${scheme}] Tab이 마지막 행에 닿지 못했다 (마지막 착지 ${landedOn || "(없음)"})`
     );
   }
-  if (!focusProof.focusVisible) {
+  // 본문 링크는 행 로빙 밖의 정당한 탭 스톱이다. 링크에 착지했으면 Tab으로
+  // 툴바(tabIndex 0 인 ⋯)에 한 칸 더 들어간다. Arrow 는 로빙 그룹 밖에서
+  // 아무 일도 하지 않는다.
+  for (let press = 0; press < 8; press++) {
+    const reach = await login.evaluate(`(() => {
+      const el = document.activeElement;
+      const rows = Array.from(
+        document.querySelectorAll('[data-testid="timeline-message"]')
+      );
+      const last = rows[rows.length - 1];
+      return {
+        onToolbar: Boolean(el && el.hasAttribute("data-toolbar-item")),
+        inLast: Boolean(last && el && last.contains(el)),
+        testId: el ? el.getAttribute("data-testid") || "" : "",
+      };
+    })()`);
+    if (reach.onToolbar) break;
+    if (!reach.inLast) {
+      throw new Error(
+        `[키보드 ${scheme}] 툴바에 닿기 전에 마지막 행을 떠났다 (${reach.testId || "(없음)"})`
+      );
+    }
+    await login.keyboard.press("Tab");
+  }
+  const beforeArrow = await login.evaluate(
+    `document.activeElement && document.activeElement.hasAttribute("data-toolbar-item")
+      ? (document.activeElement.getAttribute("data-testid") || "")
+      : ""`
+  );
+  if (!beforeArrow) {
+    throw new Error(`[키보드 ${scheme}] 툴바 항목에 닿지 못했다`);
+  }
+  await login.keyboard.press("ArrowRight");
+  const afterArrow = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  if (!afterArrow || afterArrow === beforeArrow) {
     throw new Error(
-      `[키보드 ${scheme}] 진입점이 :focus-visible이 아니다 — 링 없는 프레임은 아무것도 증명하지 않는다`
+      `[키보드 ${scheme}] 툴바 ←/→ 가 ${beforeArrow}에서 움직이지 않았다`
     );
   }
-  if (focusProof.opacity < 1) {
+  await login.keyboard.press("ArrowLeft");
+  const backArrow = await login.evaluate(
+    `document.activeElement ? (document.activeElement.getAttribute("data-testid") || "") : ""`
+  );
+  if (backArrow !== beforeArrow) {
     throw new Error(
-      `[키보드 ${scheme}] 포커스를 받은 진입점의 opacity가 ${focusProof.opacity}다 (보이지 않는 컨트롤에 포커스가 있다)`
+      `[키보드 ${scheme}] ← 가 ${afterArrow}에서 ${beforeArrow}로 돌아오지 못했다 (${backArrow || "(없음)"})`
     );
   }
-  console.log(`  키보드 ${scheme}: Tab → 진입점, :focus-visible 켜짐`);
+  console.log(
+    `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow} → ${backArrow}`
+  );
   await login.waitForTimeout(300);
   const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
   await login.screenshot({ path: actionsFocusShot });
@@ -3304,6 +5187,13 @@ async function captureScheme(browser, scheme) {
   //     진입점으로 같은 액션 **전부**에 닿아야 한다. Enter로 열고, 방향키가
   //     실제로 항목 사이를 도는지 확인하고, Esc가 포커스를 진입점에 돌려주는지
   //     까지 같은 시퀀스에서 잰다.
+  for (let press = 0; press < 8; press++) {
+    const onOverflow = await login.evaluate(
+      `document.activeElement ? document.activeElement.getAttribute("data-testid") : ""`
+    );
+    if (onOverflow === "message-actions-trigger") break;
+    await login.keyboard.press("ArrowRight");
+  }
   await login.keyboard.press("Enter");
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
@@ -3332,6 +5222,48 @@ async function captureScheme(browser, scheme) {
     `메뉴 ${scheme}`,
     "Esc 뒤 포커스는 진입점으로 돌아가야 한다"
   );
+
+  // 2e-d3. UX-D3 (#1755): 새 메뉴 항목을 실제로 누르고 클립보드를 읽는다.
+  //     세 표면(⋯ · 우클릭 · 시트) 중 포인터 둘. 시트는 captureMobile.
+  await actionRow.hover();
+  await login.getByTestId("message-actions-trigger").last().click();
+  await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  if ((await login.getByTestId("menu-copy-link").count()) !== 1) {
+    throw new Error(`[메뉴 ${scheme}] 링크 복사가 없다`);
+  }
+  await login.getByTestId("menu-copy").click();
+  await login.getByTestId("menu-copy").getByText("메시지 복사됨").waitFor();
+  await assertCopiedClipboard(login, `⋯ 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
+  await login.getByTestId("menu-copy-link").click();
+  await login.getByTestId("menu-copy-link").getByText("링크 복사됨").waitFor();
+  const menuMessageId = await actionRow.getAttribute("data-message-id");
+  const menuSeq = await actionRow.getAttribute("data-seq");
+  if (!menuMessageId) {
+    throw new Error(`[메뉴 ${scheme}] 마지막 행에 data-message-id가 없다`);
+  }
+  const copiedLink = await readCopiedShareUrl(login, `⋯ 링크 복사 ${scheme}`, {
+    messageId: menuMessageId,
+    seq: menuSeq,
+  });
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
+
+  await actionRow.click({ button: "right", position: { x: 180, y: 24 } });
+  await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
+  await login.waitForTimeout(300);
+  const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
+  await login.screenshot({ path: contextShot });
+  shots.push(contextShot);
+  await login.getByTestId("context-copy").click();
+  await login.getByTestId("context-copy").getByText("메시지 복사됨").waitFor();
+  await assertCopiedClipboard(login, `우클릭 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
+  await login.getByTestId("context-copy-link").click();
+  await login.getByTestId("context-copy-link").getByText("링크 복사됨").waitFor();
+  await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, copiedLink);
+  await login.keyboard.press("Escape");
+  await login.getByTestId("message-context-menu").waitFor({ state: "hidden" });
+  console.log(`  메뉴 ${scheme}: ⋯·우클릭 클립보드 항목 누름`);
+  await assertShareUrlLands(context, copiedLink, login, `⋯ 링크 ${scheme}`);
 
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
@@ -3371,25 +5303,32 @@ async function captureScheme(browser, scheme) {
   shots.push(deleteShot);
   await login.getByTestId("delete-message-cancel").click();
 
-  // 2h. 반응 고르기 (goal B11). 이모지 피커 의존성 없이 손으로 짠 격자다: 피커
-  //     라이브러리는 폰트나 스프라이트를 싣는데 이 앱은 외부 호스트가 막힌 CSP와
-  //     오프라인 셸(B10)을 갖고 있다.
+  // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
+  //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
   await login.getByTestId("message-actions-trigger").last().click();
   await login.getByTestId("menu-react-more").click();
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
   await login.keyboard.press("Escape");
 
-  // 2i. 같은 32개 격자를 메시지 반응과 컴포저 삽입이 공유한다 (#1688).
-  //     다이얼로그는 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
+  // 2i. 같은 피커를 메시지 반응과 컴포저 삽입이 공유한다 (#1742).
+  //     패널은 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
   //     컴포저의 명시적인 진입점으로 돌린다.
   await login.getByTestId("composer-emoji-trigger").click();
   await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
+  await assertEmojiAnchor(
+    login,
+    `channel ${scheme}`,
+    "composer-emoji-trigger",
+    "composer-emoji-picker"
+  );
   const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
@@ -3410,15 +5349,79 @@ async function captureScheme(browser, scheme) {
       `[thread ${scheme}] 첨부 input은 하나여야 하지만 ${threadFileInputs}개다`
     );
   }
-  await threadComposer.fill("@kim");
+  await assertComposerVesselClick(login, `thread ${scheme}`, {
+    input: "thread-composer-input",
+    actions: "thread-composer-actions",
+  });
+  await assertMentionTrigger(login, `thread ${scheme}`, {
+    input: "thread-composer-input",
+    trigger: "thread-composer-mention-trigger",
+    list: "thread-mention-list",
+  });
   await login.getByTestId("thread-mention-list").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   await assertNoHorizontalOverflow(login, `thread panel ${scheme}`);
   // goal P3 1-1: 이미 열어 둔 스레드의 「답글 N개」는 읽는 값이지 누르는 것이 아니다.
   await assertThreadRollupPlacement(login, `thread panel ${scheme}`);
+  await assertThreadRootHoverToolbar(login, scheme);
+  // 호버 프레임은 자기 이름으로 찍고(#1753 N-1), 패리티 사진은 마우스를 치운
+  // rest 상태로 되돌린다 — hover 잔상이 다른 목적의 사진에 앉지 않게.
+  const threadHoverShot = `${OUT_DIR}/thread-root-hover-${scheme}.png`;
+  await login.screenshot({ path: threadHoverShot });
+  shots.push(threadHoverShot);
+  await login.mouse.move(8, 8);
+  await login
+    .getByTestId("thread-panel")
+    .getByTestId("message-hover-toolbar")
+    .waitFor({ state: "detached" });
   const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
+  await login.keyboard.press("Escape");
+  await threadComposer.fill("");
+  await login.getByTestId("thread-composer-emoji-trigger").click();
+  await login
+    .getByTestId("thread-composer-emoji-picker")
+    .waitFor({ state: "visible" });
+  await assertEmojiAnchor(
+    login,
+    `thread ${scheme}`,
+    "thread-composer-emoji-trigger",
+    "thread-composer-emoji-picker"
+  );
+  await login.keyboard.press("Escape");
+  await login.getByTestId("thread-close").click();
+
+  // 2j-2. 답글 0개 분기(#1753 M-2): 점선 빈 상태 상자의 자연 경로는 「아직 답글
+  //       없는 행에서 툴바 [답글]로 스레드를 여는 것」이다 — 이미 연 스레드는
+  //       클라 스토어가 답글을 기억해 빈 상태로 돌아가지 않는다. 이 루트의
+  //       replies 응답만 page 라우트로 비운다(page가 context보다 먼저 매칭).
+  await login.route(
+    "**/v1/workspaces/*/channels/*/messages/*/replies*",
+    (route) => json(route, { messages: [] })
+  );
+  await login.waitForTimeout(300);
+  // 화면 안 마지막 actionable 행을 스크롤 없이 hover한다 — Virtuoso가 스크롤로
+  // 행을 리마운트하면 locator와 실제 hover 대상이 어긋난다. 툴바는 전역 1개
+  // 불변식(탭 스톱 자)이 있으므로 전역 locator로 잡는다.
+  // 앞 레인이 행에 남긴 키보드 포커스를 컴포저로 옮긴다 — 포커스 행+호버 행이
+  // 갈리면 툴바가 2개 떠서(hover∨focus 계약) 전역 locator가 흔들린다.
+  await login.getByTestId("composer-input").click();
+  const freshThreadRow = login
+    .locator('[data-testid="timeline-message"][data-actionable="true"]')
+    .last();
+  await freshThreadRow.hover();
+  const freshToolbar = freshThreadRow.getByTestId("message-hover-toolbar");
+  await freshToolbar.waitFor({ state: "visible" });
+  await freshToolbar.getByTestId("toolbar-reply").click();
+  await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await login.getByTestId("thread-empty").waitFor({ state: "visible" });
+  await login.mouse.move(8, 8);
+  await assertNoHorizontalOverflow(login, `thread empty ${scheme}`);
+  const threadEmptyShot = `${OUT_DIR}/thread-empty-${scheme}.png`;
+  await login.screenshot({ path: threadEmptyShot });
+  shots.push(threadEmptyShot);
+  await login.unroute("**/v1/workspaces/*/channels/*/messages/*/replies*");
   await login.getByTestId("thread-close").click();
 
   // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
@@ -3427,16 +5430,10 @@ async function captureScheme(browser, scheme) {
   //     바로 넘는다. 1라운드의 액션 바(행당 6개)는 근처에도 오지 못한다.
   await countTabStopsToComposer(login, `desktop ${scheme}`, 24);
 
-  // 3. focus ring on the composer (focus indication is a hard rule)
-  await login.getByTestId("composer-input").focus();
-  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
-  await login.screenshot({ path: focusShot });
-  shots.push(focusShot);
-
   // 3a. 채널 만들기 다이얼로그 (MOMO-614): the form the sidebar + opens, filled
   //     the way a person fills it. This is the surface that replaced the
   //     /settings dead end, so it is reviewed in both schemes.
-  await login.getByTestId("new-channel").click();
+  await revealNewChannel(login);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-name").fill("release-rollback");
   await login
@@ -3487,7 +5484,7 @@ async function captureScheme(browser, scheme) {
   //       레일의 disconnected는 종단 절단에서만 오므로 브라우저가 아는 오프라인도
   //       함께 읽는다. 여기서는 그 브라우저 신호를 실제로 끊어 확인한다.
   await context.setOffline(true);
-  await login.getByTestId("new-channel").click();
+  await revealNewChannel(login);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
   await login.waitForTimeout(200);
@@ -4179,13 +6176,181 @@ function reportUnmocked() {
   for (const path of [...unmockedPaths].sort()) console.log(`  ${path}`);
 }
 
+// TC-1 (#1758). 헤더 터미널을 실제로 눌러 4상태·탭 전환·확대·닫기·컴포저
+// 비교차를 잰다. ADE가 같은 work-sessions 키를 셸에서 읽으므로 로딩 장면은
+// networkidle을 기다리지 않는다.
+async function captureTerminalDockScenes(browser, scheme) {
+  const shots = [];
+  const liveHostId = "019f994c-4ed0-76a9-9d43-a9bde45b8fcd";
+  const dockSessions = [
+    {
+      id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c3",
+      workspaceId: WORKSPACE_ID,
+      channelId: GENERAL_ID,
+      memberId: ME,
+      hostId: liveHostId,
+      rootMessageId: "019f9ab9-6da4-7be7-9bc9-4a3872d921c4",
+      tool: "claude",
+      label: "relay outbox_drain 재시작 루프 조사",
+      status: "running",
+      observation: "open",
+      observerGrantCount: 1,
+      remoteAttachAvailable: true,
+      remoteDisplayAvailable: false,
+      startedAtMs: Date.now() - 12 * 60_000,
+    },
+    {
+      id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c5",
+      workspaceId: WORKSPACE_ID,
+      channelId: GENERAL_ID,
+      memberId: ME,
+      hostId: liveHostId,
+      rootMessageId: "019f9ab9-6da4-7be7-9bc9-4a3872d921c6",
+      tool: "claude",
+      label: "배포 로그 수집",
+      status: "idle",
+      observation: "open",
+      observerGrantCount: 0,
+      remoteAttachAvailable: true,
+      remoteDisplayAvailable: false,
+      startedAtMs: Date.now() - 45 * 60_000,
+    },
+  ];
+
+  async function openDock(page) {
+    const toggle = page.getByTestId("open-terminal-dock");
+    await toggle.click();
+    await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
+    if ((await toggle.getAttribute("aria-pressed")) !== "true") {
+      throw new Error(`터미널 토글이 열린 동안 pressed가 아니다 ${scheme}`);
+    }
+    if ((await page.getByTestId("terminal-dock-new").count()) !== 0) {
+      throw new Error(`새 세션 버튼이 그렸다 ${scheme}: 웹에 create 경로가 없다`);
+    }
+  }
+
+  async function shoot(name, prepare, settle, boot = "idle") {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+      origin: ORIGIN,
+    });
+    await installMocks(context);
+    if (prepare) await prepare(context);
+    const page = await context.newPage();
+    // ADE 가 셸에서 work-sessions 를 읽는다. 로딩 장면은 그 요청을 붙잡으므로
+    // networkidle 을 기다리면 캡처가 영원히 멈춘다.
+    if (boot === "pending") {
+      await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+      await page.getByTestId("login-email").fill("seongjae@dawn.example");
+      await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+      await page.getByTestId("login-submit").click();
+      await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
+      await page.getByTestId("composer-input").waitFor({ state: "visible" });
+    } else {
+      await page.goto(ORIGIN, { waitUntil: "networkidle" });
+      await signIn(page);
+      await page.getByTestId("composer-input").waitFor({ state: "visible" });
+    }
+    await settle(page);
+    await assertNoHorizontalOverflow(page, `terminal dock ${name} ${scheme}`);
+    await assertComposerVisible(page, `terminal dock ${name} ${scheme}`);
+    await assertDockAboveComposer(page, `terminal dock ${name} ${scheme}`);
+    await assertDockExpandHonesty(page, `terminal dock ${name} ${scheme}`);
+    const path = `${OUT_DIR}/terminal-dock-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("empty", null, async (page) => {
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+    await page.keyboard.press("Escape");
+    await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
+    await page.waitForFunction(
+      `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
+    );
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "loading",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", () => new Promise(() => {}));
+    },
+    async (page) => {
+      await openDock(page);
+      await page.getByTestId("terminal-dock-loading").waitFor({ state: "visible" });
+    },
+    "pending"
+  );
+
+  await shoot(
+    "error",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+        route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "ledger unavailable" } }),
+        })
+      );
+    },
+    async (page) => {
+      await openDock(page);
+      await page.getByTestId("terminal-dock-error").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot("offline", null, async (page) => {
+    await openDock(page);
+    await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
+    await page.context().setOffline(true);
+    await page.getByTestId("terminal-dock-offline").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "sessions",
+    async (context) => {
+      await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
+        json(route, { workSessions: dockSessions })
+      );
+    },
+    async (page) => {
+      await openDock(page);
+      const tabs = page.getByTestId("terminal-dock-tab");
+      await tabs.first().waitFor({ state: "visible" });
+      if ((await tabs.count()) < 2) {
+        throw new Error(`세션 탭이 2개 미만이다 ${scheme}`);
+      }
+      await tabs.nth(1).click();
+      if ((await tabs.nth(1).getAttribute("aria-selected")) !== "true") {
+        throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
+      }
+      await page.getByTestId("work-observer").waitFor({ state: "visible" });
+      const dock = page.getByTestId("terminal-dock");
+      await page.getByTestId("terminal-dock-close").click();
+      await dock.waitFor({ state: "detached" });
+      await page.waitForFunction(
+        `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
+      );
+      await openDock(page);
+      await tabs.nth(1).waitFor({ state: "visible" });
+    }
+  );
+
+  return shots;
+}
+
 // 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
-//
-// 두 장을 찍는 이유는 두 분기가 다른 말을 하기 때문이다: 채널은 액션 둘(첫 메시지
-// 쓰기 · 멤버 추가하기)을 위계를 세워 내놓고, DM은 참여자가 dmKey로 고정되어 있어
-// 첫 메시지 하나뿐이다. 한 장만 찍으면 리뷰가 보는 것은 둘 중 하나의 옷차림이다.
 async function captureEmptyConversationScenes(browser, scheme) {
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
@@ -5037,6 +7202,147 @@ async function captureHostedDisconnectScenes(browser, scheme) {
   return shots;
 }
 
+// =============================================================================
+// 호스티드 연결 도어벨 등록 (ADR-0171 / WD-2 / #1735).
+//
+// 연결 탭의 한 상자다. 찍는 것은 네 상태(빈·로딩·등록됨·실패)와, 등록 실패와
+// 다른 게이트 닫힘이다. 벨 테스트는 이 파도에 없다.
+// =============================================================================
+async function captureHostedDoorbellScenes(browser, scheme) {
+  const shots = [];
+  const connection = disconnectConnection({ status: "active" });
+
+  async function shoot(name, install, settle = async () => {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/agents"');
+    await page
+      .locator(
+        `[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`
+      )
+      .click();
+    await page.getByTestId("agent-hub-tab-connection").click();
+    await page.getByTestId("hosted-doorbell-section").waitFor({ state: "visible" });
+    await settle(page, context);
+    const path = `${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  function surface(row, extra) {
+    return async (context) => {
+      await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+        json(route, { connections: [row] })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        (route) => json(route, { connection: row, cleanupArtifacts: [] })
+      );
+      // 나중에 등록한 라우트가 이긴다. 도어벨 PUT 이 단건 GET 글로브에 먹히면
+      // 실패·게이트 닫힘 프레임이 등록 성공으로 찍힌다.
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*/doorbell",
+        extra
+          ? extra
+          : (route) =>
+              json(route, {
+                connectionId: row.id,
+                url: "https://hooks.example.com/doorbell",
+                secretMasked: "••••wxyz",
+                registeredAtMs: 1_700_000_700_000,
+              })
+      );
+    };
+  }
+
+  await shoot("empty", surface(connection), async (page) => {
+    await page.getByTestId("hosted-doorbell-empty").waitFor({ state: "visible" });
+  });
+
+  await shoot(
+    "loading",
+    async (context) => {
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections",
+        (route) => json(route, { connections: [connection] })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        () => new Promise(() => {})
+      );
+    },
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-loading").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "registered",
+    surface({
+      ...connection,
+      doorbellUrl: "https://hooks.example.com/doorbell",
+      doorbellSecretMasked: "••••wxyz",
+      doorbellLastFiredAtMs: Date.now() - 12 * 60_000,
+      doorbellLastStatus: "ok_200",
+    }),
+    async (page) => {
+      await page
+        .getByTestId("hosted-doorbell-registered")
+        .waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "error",
+    surface(connection, (route) =>
+      route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: {
+            message: "webhook URL resolves to a private or reserved address",
+          },
+        }),
+      })
+    ),
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-url").fill(
+        "https://hooks.example.com/doorbell"
+      );
+      await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
+      await page.getByTestId("hosted-doorbell-register").click();
+      await page.getByTestId("hosted-doorbell-failure").waitFor({ state: "visible" });
+    }
+  );
+
+  await shoot(
+    "gate-off",
+    surface(connection, (route) =>
+      route.fulfill({ status: 404, body: "" })
+    ),
+    async (page) => {
+      await page.getByTestId("hosted-doorbell-url").fill(
+        "https://hooks.example.com/doorbell"
+      );
+      await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
+      await page.getByTestId("hosted-doorbell-register").click();
+      await page.getByTestId("hosted-doorbell-gate-off").waitFor({ state: "visible" });
+    }
+  );
+
+  return shots;
+}
+
 /**
  * #1369 HAP-UX4 — the MCP OAuth resource-owner consent surface, in both schemes.
  *
@@ -5129,10 +7435,12 @@ async function main() {
       if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
+          all.push(...(await captureTerminalDockScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
+          all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
           all.push(...(await captureConsent(browser, scheme)));
         }
       }

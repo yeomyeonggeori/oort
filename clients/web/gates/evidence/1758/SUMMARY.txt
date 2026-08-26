@@ -1,0 +1,16 @@
+TC-1 (#1758) 7종 게이트 실측 — 2026-08-26
+cwd feat/1758-tc1-terminal
+
+gate-work-panel          rc=0
+gate-my-sessions         rc=0
+gate-shell-layout        rc=0
+gate-csp                 rc=0
+capture-session-chips    rc=0
+gate-typing              rc=0
+gate-composer            rc=0
+
+also:
+npx tsc -b               rc=0
+npx vitest run           114 files / 1584 tests
+npm run capture:design   rc=0
+scripts/design_preflight_web.sh  PASS (web 12/12 + core 5/5)

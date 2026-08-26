@@ -1,5 +1,74 @@
 # oort 진행 현황
 
+## TC-1 채널 하단 터미널 도크 (#1758, 2026-08-26)
+
+- 조사: 작업 세션 원장(`GET …/work-sessions`)·이벤트 스레드·observer-grade 호스트 터미널 소켓은 실존. 웹은 `mode: "observer"`만 요청하고 stdin/resize/kill 인코더가 없다. 우측 WorkPanel은 목록·인수·화면 관전/조작·원장. 헤더 SquareTerminal은 이 티켓 전까지 그 패널을 열었다. 즉시 입력 왕복 터미널은 웹에 없다. 새 세션 POST도 웹 클라에 없다.
+- 헤더 터미널 → 하단 도크(탭·관전 터미널·높이 토글·닫기). 관찰 전용, 입력창 없음, + 없음. WorkPanel은 세션 카드/`?work=`/`/work`가 연다(공존·XOR). 원격 조작은 TC-2 적립.
+- 4상태(빈/로딩/오류/연결 끊김)·Esc·탭 ←/→·확대·닫기 포커스 복귀. 도크는 컴포저 형제(덮지 않음). ObserverTerminal `variant="dock"` 재사용.
+- #1766 design-review 수리: 도크 높이를 `terminal-dock` / `terminal-dock-lg`(뷰포트 상한 + flex 양보)로 두고 타임라인에 `timeline-strip` 바닥을 줌. 어느 지원 크기에서도 컴포저(입력+보내기)는 뷰포트 안. 자는 720·800·844에서 `컴포저 ⊂ 뷰포트` + 타임라인 띠를 잰다.
+- #1766 R3: 접힘은 크롬 상수(200)가 아니라 터미널 상자 실높이 < `terminal-floor`(56) 실측. 폭 무관. 확대 disabled·컴포저 불변식·양보 순서는 R2 그대로.
+- 검증: 웹 tsc · vitest · 디자인 프리플라이트 · `capture:design`(실클릭) · 게이트 7종. 자체 design-review 안 함.
+
+## UX-D4 사이드바 개편 (#1756, 2026-08-26)
+
+- 하단 프로필 카드: 아바타+이름+유효 상태 배지가 트리거. 카드에 ADR-0160 선언 상태(auto/away/dnd = 온라인/자리 비움/방해 금지) 라디오, 레일과 같은 `워크스페이스 추가`, 설정. 서브메뉴 없음(#1383).
+- 상태 PUT은 `PUT /v1/workspaces/{ws}/presence` 단일 쓰기경로(서버 `routes/presence.rs` · `momo-messaging/presence.rs`). Offline은 유효값이지 선언값이 아니라 픽커에 없음.
+- 탐색 패널 접기를 채널 패널 상단 아이콘 토글로 이동. 접힘 복원·레일 열기는 기존 셸 상태. 접힘 전환은 즉시 폭 변경(가로 스크롤 장식 없음).
+- 채널/DM 섹션: 상시 + 제거, hover·`:focus-visible`·터치에만 액션 마운트(opacity 트릭 금지). chevron 접기는 상시 탭 스톱. 채널 행 호버 ⋯는 사이드바에 실존 액션이 없어 적립(뮤트/나가기는 채널 헤더 메뉴).
+- 캡처가 카드 열기·상태 PUT·섹션 접기·패널 접기를 실제로 누른다. 폰 서랍에서 카드 Esc 는 메뉴를 닫고 서랍은 남긴다(`escapeLayer` 가 `role="menu"` 를 다이얼로그와 같이 면제). 자체 design-review 안 함.
+
+## UX-D3 메시지 ⋯ 더보기 메뉴 보강 (#1755, 2026-08-26)
+
+- 선행 판정: 메시지 복사 실존(원문 클립보드). 링크 복사 실존(`#/c/{ch}?msg=&seq=` → ChatShell 착지). 읽지 않음 표시는 PUT read-state가 `GREATEST` 단조라 커서 후진 불가. Remind me later·Report는 표면 없음.
+- 실존 항목만 추가: ⋯/우클릭/시트 동형. 「복사」→코어 `copyMessageActionLabel`(「메시지 복사하기」), 「링크 복사하기」를 copy 뒤에. 기존 13/11/0 차등은 14/12/0(저자만 고치기/지우기, 묘비 0). lucide `Copy`·`Link`.
+- 공유 링크 origin은 `absoluteApiBase()`(남에게 건넬 절대 origin). 웹 배포는 자기 origin과 동일. Tauri는 연결 시 서버 base가 필수(`requiresServerUrl`)이거나 빌드에 `API_BASE_DEFAULT`가 구워져 있으므로, MessageRow가 그려지는 순간 `absoluteApiBase()`가 건넬 수 없는 런타임은 코드상 존재하지 않음 — 액션 숨김 갈래 없음.
+- 적립: 읽지 않음 표시(서버 커서 후진 API), Remind me later, Report message. **폰 「링크 복사」는 미구현**(표면 정본 절차 별도 — origin은 코어 `host.absoluteApiBase`가 이미 있음).
+- 캡처 3표면: `b11-message-action-menu` · `b11-message-context-menu` · `mobile-b11-action-sheet`. 클립보드 항목은 실제로 눌러 내용을 읽고, 복사된 URL을 새 페이지에서 열어 착지한다. URL 모양 사본(`messageShareUrlForCapture`)은 없음.
+- #1764 R2: 콜드 붙여넣기 착지 — `urlAnchor`가 소속 `channelId`를 함께 든다. 채널 효과는 방이 바뀌었을 때만 소거한다(#1195가 읽기는 시작했으나 같은 커밋에서 자기 채널 앵커를 지워 새 탭 붙여넣기가 채널만 열리던 자리). 캡처 착지 자는 초기 뷰포트 밖 행+하이라이트와 없는 msg의 older/unknown 배너를 잰다. 바닥 행은 점프 없이도 보여 자로 쓰지 않는다.
+- §2.8 아이콘 1개(`Link`) 추가. design-mode dist JS gzip 합계 725,020 B (index 452,999 · huddleRuntime 137,855 · terminalRuntime 83,921 · emojiCatalog 48,577). 미사용 글리프 `aperture`·`bluetooth`는 dist JS에서 0회.
+- 검증: 웹 `tsc -b` · Vitest · 디자인 프리플라이트 web 12/12 + core 5/5 · `capture:design`. 자체 design-review 안 함(오케스트레이터). 데스크톱 실기 클립보드 실측은 성재 QA.
+
+## UX-D1 웹 Lucide 아이콘 체계 고정 (#1754, 2026-08-25)
+
+- base `0e202e5e` 실측에서 `lucide-react@0.454.0`(ISC)은 이미 package/lock에 고정돼 있었고, 58개 파일·76개 글리프·정적 배치 165곳이 Lucide를 사용했다. 기능 표면 raw `<svg>`는 0건이었다. 따라서 신규 교체는 0건이며 의존성 바이트도 바꾸지 않았다.
+- 로컬 SVG 존치는 oort 브랜드 3파일(`OortMark.tsx`·`oort-mark.svg`·`favicon.svg`)뿐이다. 각 파일에 ADR-0172 예외 사유를 붙이고 `iconSystem.test.ts`가 raw SVG 전수·정적 named import·ISC lock을 fail-closed한다. 디자인 시스템 §2.8에 16/20px·기본 획 2·`currentColor`·접근성·예외 목록·tree-shaking 실측 규칙을 정본화했다.
+- 검증: 웹 `tsc -b` · Vitest 1,535/1,535 · 디자인 프리플라이트 web 12/12 + core 5/5 · npm license 533 packages PASS(`lucide-react` ISC prod). 프로덕션 메인 JS gzip은 전/후 455.88 kB, 전체 JS 청크 합계는 전/후 729.44 kB로 동일했다. `runtime-unverified(capture:design·독립 design-review)`: 계약에 따라 오케스트레이터가 대행한다.
+
+## UX-D2 스레드 표면 수리 (#1753, 2026-08-25)
+
+- 스레드 루트/답글 구분선을 32px 여백으로 바꾸고, 답글이 없을 때만 점선 빈 상태 상자가 영역을 말하게 했다.
+- 호버 툴바의 상단 충돌 기준을 Virtuoso 전용 선택자에서 가장 가까운 세로 overflow 경계로 일반화했다. 스레드 자체 스크롤러 표식과 루트 hover 캡처 자(패널 안쪽·글자 교차 0)를 추가했다.
+- ⌘K 입력 자체의 보더·포커스링을 없애고 머리 그릇의 구분선·`focus-within` 링으로 옮겼다. 웹 tsc · Vitest 1,530/1,530 · 디자인 프리플라이트 web 12/12+core 5/5 green. `runtime-unverified(capture:design·독립 design-review)`: 계약에 따라 오케스트레이터가 대행한다.
+
+## 웹 컴포저 buzz형 2행 그릇 (#1749, 2026-08-25)
+
+- #1751 design-review 수리: `@` 버튼은 줄 시작·공백 뒤에는 `@`, 비공백 뒤에는 ` @`를 넣고 선택은 끝으로 접어 보존한다. 문장 끝·한글/영문·문장부호·연타 red proof가 기존 `mentionQueryAt`을 그대로 열며, 클릭은 ADR-0149 작성 중 신호를 내보내지 않는다.
+- textarea의 UA outline까지 명시적으로 끄고 `focus-within` 그릇만 포커스 표시를 맡긴다. 버튼 아닌 그릇 면적은 입력 캐럿을 돌려주며, 스레드는 sending이면 그릇 전체를 흐리고 빈 초안이면 전송 버튼만 50%로 낮춘다. ↵ 힌트·작성 중 교대 슬롯은 액션 행 가운데로 옮겨 별도 26px 예약 띠와 레이아웃 시프트를 함께 없앴다.
+- 캡처 자는 입력 outline 부재를 `outlineStyle=none`으로 재며, typing 게이트는 0높이 빈 슬롯의 부착·무텍스트·flex 폭을 확인한 뒤 `[fit]`·`[cut]`·`[a11y]`·`[slot]`까지 진행한다. `runtime-unverified(capture:design·gate-typing)`: 이 샌드박스에서는 실행하지 않고 오케스트레이터가 대행한다. 폰 TypingBar 동형 후속은 #1752다.
+
+## 메시지 호버 퀵액션 툴바 (#1743, 2026-08-25)
+
+- 행 hover/focus-within 에만 우상단 툴바를 마운트한다: 빈도 슬롯 3(시드 👍✅🙏, UX-EB `frequencyStore` 공유) · React · 답글 · ⋯. 비호버 행은 DOM 0(opacity 트릭 금지). 툴바 항목은 행 로빙 그룹에 편입. 터치는 비렌더, 시트 불변.
+- #1750 design-review 수리: frequency 랭킹 안정 캐시(B-1) · 행 rest 정거장+키보드 `:focus-visible`만 ⋯ 핸드오프(B-2/B-4/H-1) · 상단 straddle, 스크롤러 상단이면 하단 미러(B-3/H-4) · 슬롯은 마운트가 유지되는 동안 고정(H-2, 포커스가 마운트를 유지할 수 있다) · `border-line-strong`(H-3) · `right-4`(M-3).
+- B11 주석·스킬 §6·디자인 시스템 §6을 조건부 렌더+toolbar+겹침 금지 계약으로 개정. 적립(미구현): 메시지 포커스+단일 키 R/E/T, 슬롯 커스터마이즈.
+- 검증: 웹 `tsc -b` · vitest · `capture:design` · `design_preflight_web.sh`. `runtime-unverified`(실서버 리액션 왕복은 기존 경로).
+
+## 이모지 피커 고도화 (#1742, 2026-08-24)
+
+- 자작 피커: emojibase compact(en)+iamcal 빌드타임 추출(same-origin, 외부 fetch 0). 검색·카테고리 탭·빈도 store(frequency, recency 금지, UX-HT 공유)·스킨톤 persist·프리뷰 푸터. 포인터=anchored popover, 터치(`hover: none`)=바텀시트. #1688 32종·중앙 Dialog 주석 supersede, 무라이브러리 유지.
+- #1746 design-review 수리: 검색 hover가 키보드 커서를 가로채지 않음, 활성 `bg-accent-soft`, 그리드 96칸 상한+콜론은 탭 유지, 스킨 Esc는 Radix `onEscapeKeyDown`, 반응 피커 앵커=실제 트리거, 터치 시트 검색 autofocus 없음.
+- 검증: 웹 tsc/lint/unit · design_preflight · capture:design(피커 열림). `runtime-unverified`(실서버 반응 왕복은 기존 경로, 이번 티켓 비스코프).
+
+## Agent Hub 커넥션 도어벨 등록 UI (#1735, ADR-0171, 2026-08-24)
+
+- 연결 탭에 도어벨 섹션: URL+sender key 등록(write-only·마스킹), 해제 확인, last-fired 상대시각·lastStatus. 빈/로딩/성공/실패 + 게이트 닫힘(빈 404)을 등록 실패와 구분. 시험 발화 버튼은 WD-1 엔드포인트 부재로 적립.
+- 검증: `@momo/core` 1,706 tests · web 1,446 tests · tsc/lint · `design_preflight_web.sh` 12/12+core 5/5 · `capture:design` exit 0 (hosted-doorbell-{empty,loading,registered,error,gate-off}-{light,dark}.png). `runtime-unverified`(실서버 PUT/DELETE 왕복).
+
+## 언퍼얼 클라이언트 후속 고정 (#1720 항목 1·3·4 + U-8 Nit, 2026-08-24)
+
+- rowFocus의 구성원 0/有 정규화·focused 보존과 MutationObserver 재정규화, 행 안/밖 focusout 복원을 jsdom 12개 유닛으로 고정했다.
+- 언퍼얼 data URL 캐시는 48개와 32 MiB 병행 LRU 예산을 쓰며, 캡처 픽스처는 1200×630 실제 OG 비율·자연 크기 단언으로 교체했다. 폰 TypingBar의 웹 헤딩 인용도 현행화했다.
+- 웹 1,429 tests·폰 1,301 tests·양쪽 tsc/lint와 전체 `capture:design`(light/dark·desktop/mobile, exit 0)이 green이다. #1720의 서버 읽기 fan-out 배치(2항)는 비스코프로 남아 이슈를 열어 둔다.
 ## HD-1 Rust 허들 서버 복원 (#1757, ADR-0122, 2026-08-25)
 
 - Swift 정본의 start/join/leave/active 4 REST를 Rust/Axum으로 이식했다. `momo-messaging` 한 tenant tx가 기존 016/046 테이블의 lifecycle·audit·broadcast outbox를 함께 쓰며 단일 활성·재입장 이력·RLS FORCE를 보존한다. `schema_v0.sql`·마이그레이션 변경은 없다.

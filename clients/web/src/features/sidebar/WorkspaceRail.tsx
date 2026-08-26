@@ -1,4 +1,4 @@
-import type { FocusEventHandler, Ref } from "react";
+import { useRef, type FocusEventHandler, type Ref } from "react";
 import { PanelLeftOpen, Plus } from "lucide-react";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { useWorkspaceAvatar } from "./useWorkspaceAvatar";
@@ -47,11 +47,18 @@ export function WorkspaceRail({
   const tile = workspaceRailTile(workspace, workspaceId);
   const avatarDataUrl = useWorkspaceAvatar(avatarUrl);
   const openAddWorkspace = useOpenAddWorkspace();
+  const addWorkspaceRef = useRef<HTMLButtonElement>(null);
   return (
-    <nav
-      aria-label="워크스페이스"
+    // 56px 레일 열 (`--spacing-rail`). 안쪽 nav 는 44px 타일만 감싸므로
+    // 셸 게이트는 이 래퍼(`workspace-rail`)를 잰다 — nav 를 재면 44가 나온다.
+    <div
+      data-testid="workspace-rail"
       className="flex h-full w-rail shrink-0 flex-col items-center gap-2 border-r border-line bg-surface-sidebar py-2"
     >
+      <nav
+        aria-label="워크스페이스"
+        className="flex flex-col items-center gap-2"
+      >
       {/* 현재 워크스페이스 (R-1 §1). Discord's grammar: the active tile wears the
           long left accent bar AND the lit (selected) surface, so it cannot be
           mistaken for a tile that merely happens to be under the cursor. The
@@ -105,17 +112,25 @@ export function WorkspaceRail({
       {/* [+] 는 워크스페이스를 추가한다 (#4a-2). 셸이 소유한 다이얼로그를 액션
           자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
           을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
-          "현재"로 오인되지 않는다. */}
+          "현재"로 오인되지 않는다. 패널 열기는 이 nav 밖 — 워크스페이스 묶음과
+          패널 컨트롤을 가르기 위해서다 (M-4). */}
       <button
+        ref={addWorkspaceRef}
         type="button"
-        onClick={openAddWorkspace}
+        onClick={() => openAddWorkspace(addWorkspaceRef.current)}
         aria-label="워크스페이스 추가"
         title="워크스페이스 추가"
         data-testid="add-workspace"
         className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
       >
-        <Plus className="size-6" />
+        <Plus className="size-6" aria-hidden="true" />
       </button>
+
+      {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
+          "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,
+          끊김이라는 무거운 상태는 셸의 ConnectionBanner가 별도로 덮는다.
+          이 점은 사용자 프레즌스(가용성/away/dnd, ADR-0160 6b)가 아니다. */}
+    </nav>
 
       {showChannelPaneExpand && (
         <button
@@ -129,17 +144,12 @@ export function WorkspaceRail({
           aria-controls="sidebar-channel-pane"
           title="탐색 패널 열기"
           data-testid="sidebar-expand"
-          className="mt-auto flex size-rail-tile flex-col items-center justify-center gap-px rounded-md text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+          className="mt-auto flex size-rail-tile flex-col items-center justify-center gap-px rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
         >
           <PanelLeftOpen className="size-4" aria-hidden="true" />
           <span className="text-timestamp">열기</span>
         </button>
       )}
-
-      {/* 연결 상태 점은 하단 프로필 패널로 옮겨졌다(검수 #6 / 프레즌스 6a).
-          "내가 붙어 있는가"는 "내가 누구인가"의 자리 옆이 더 맞는 집이고,
-          끊김이라는 무거운 상태는 셸의 ConnectionBanner가 별도로 덮는다.
-          이 점은 사용자 프레즌스(가용성/away/dnd, ADR-0160 6b)가 아니다. */}
-    </nav>
+    </div>
   );
 }

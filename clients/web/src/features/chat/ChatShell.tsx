@@ -23,7 +23,15 @@ import {
   useInvalidateReadStates,
   useReadStates,
 } from "@/features/workspace/useWorkspace";
-import { watchForMessage, watchForMessageId } from "@/features/inbox/anchor";
+import {
+  anchorMissKind,
+  oldestLoadedSeq,
+  takeUrlAnchor,
+  urlAnchorForChannel,
+  watchForMessage,
+  watchForMessageId,
+  type UrlAnchor,
+} from "@/features/inbox/anchor";
 import {
   quoteDraftFor,
   quoteDraftStillValid,
@@ -36,6 +44,7 @@ import { CascadeProvider } from "@/features/timeline/cascadeRail";
 import { ThreadPanel } from "@/features/timeline/ThreadPanel";
 import { LongPressHint } from "@/features/timeline/LongPressHint";
 import { WorkPanel } from "@/features/work/WorkPanel";
+import { TerminalDock } from "@/features/work/TerminalDock";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
 import type { WorkScope } from "@momo/core/features/work/workSessionModel";
@@ -239,7 +248,19 @@ export function ChatShell() {
   // it unmounts it: held locally, the chosen range and the session being read
   // were thrown away on every close, and reopening dropped an all-workspace
   // view back to the current channel (frequently an empty list).
+  //
+  // TC-1 (#1758) 역할 구분 (헤더 ≠ WorkPanel):
+  //   * 헤더 SquareTerminal 은 하단 터미널 도크만 연다 (`open-terminal-dock`).
+  //     채널 컨텍스트의 관전 진입은 도크가 승계한다.
+  //   * 우측 WorkPanel 은 목록·인수·화면 관전/조작·원장이다. 헤더로 열지 않는다.
+  //     도달 경로: 타임라인 세션 카드 (`openWorkSession`) · `?work=` ·
+  //     사이드바 「작업 콘솔」(`/work`) 의 `open-work-panel` → `?work-panel=1`.
+  //   * 도크와 WorkPanel 은 XOR — 같은 세션의 ObserverTerminal 이중 마운트 금지.
+  //     도크는 채팅 열 안, 컴포저 위에 앉고 컴포저를 덮지 않는다.
   const [workOpen, setWorkOpen] = useState(false);
+  const [dockOpen, setDockOpen] = useState(false);
+  const terminalToggleRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => setDockOpen(false), [channelId]);
   const [workScope, setWorkScope] = useState<WorkScope>("channel");
   const [workSessionId, setWorkSessionId] = useState<string | null>(null);
   const [openingWorkThreadId, setOpeningWorkThreadId] = useState<string | null>(
@@ -268,6 +289,7 @@ export function ChatShell() {
   const openWorkSession = useCallback<OpenWorkSession>(
     (sessionId, intent) => {
       setThread(null);
+      setDockOpen(false);
       setWorkScope("channel");
       setWorkSessionId(sessionId);
       setWorkControlIntent(intent?.control === true ? sessionId : null);
@@ -275,6 +297,13 @@ export function ChatShell() {
     },
     []
   );
+
+  const closeDock = useCallback(() => {
+    setDockOpen(false);
+    // overlayHeld lesson: the opener lives outside the dock. Restore after
+    // unmount so Escape/닫기 does not dump focus onto the document body.
+    requestAnimationFrame(() => terminalToggleRef.current?.focus());
+  }, []);
 
   // A scope chip means "show me that list". The panel keeps its selected
   // session across close/reopen (returning to where you were), so while a
@@ -383,14 +412,18 @@ export function ChatShell() {
   // 보낸 것. `?seq=`와 `?msg=`는 v1부터 링크에 실려 다녔지만 아무도 읽지
   // 않았다 — 점프는 인박스·활동 행의 onClick이 직접 워처를 돌려서만 일어났고,
   // 그래서 그 주소를 복사해 새 탭에 붙여넣으면 채널만 열렸다(PR 918 R1 Low가
-  // `?msg=`에서 지적하고 `?seq=`도 같은 성질이라고 적어둔 그것). 둘은 같은
-  // 성질이므로 한 곳에서 함께 읽는다. onClick 경로는 그대로 둔다: 같은 주소를
-  // 두 번 누르면 파라미터가 바뀌지 않아 이 효과는 다시 돌지 않는다.
+  // `?msg=`에서 지적하고 `?seq=`도 같은 성질이라고 적어둔 그것). #1195가 둘을
+  // 한 곳에서 읽기 시작했다. 다만 읽자마자 채널 효과가 같은 커밋에서 앵커를
+  // 비워, 붙여넣은 콜드 오픈은 여전히 채널만 열렸다(design-review #1764 R2-B1).
+  // 앵커에 소속 채널을 함께 두면 그 소거가 「방을 옮겼을 때」만 일어나고,
+  // 이 PR(#1755)에서 붙여넣기 착지가 비로소 돈다. onClick 경로는 그대로 둔다:
+  // 같은 주소를 두 번 누르면 파라미터가 바뀌지 않아 이 효과는 다시 돌지 않는다.
   //
   // `?work=`는 작업 흐름 상세의 실행 이력이 쓰는 새 열쇠다. 작업 세션은 라우트가
   // 아니라 이 채널 표면 안의 패널이라, 링크가 채널과 세션을 함께 말한다.
   const [searchParams, setSearchParams] = useSearchParams();
   const anchorWork = searchParams.get("work");
+  const anchorWorkPanel = searchParams.get("work-panel");
   const anchorMsg = searchParams.get("msg");
   const anchorSeq = searchParams.get("seq");
   const anchorFirstMention = searchParams.get("firstMention");
@@ -444,6 +477,25 @@ export function ChatShell() {
     );
   }, [anchorControl, anchorWork, openWorkSession, setSearchParams]);
 
+  // 작업 콘솔(`/work`) 이 채널 우측 WorkPanel 을 여는 주소.
+  // 세션 id 없이 목록을 연다 — `?work=` 는 한 세션을 가리키고, 이 열쇠는
+  // 「그 채널의 작업 세션 원장」이다. 헤더 터미널 아이콘은 도크이므로
+  // 이 경로가 WorkPanel 의 제품 진입점이다 (#1758).
+  useEffect(() => {
+    if (anchorWorkPanel === null) return;
+    setThread(null);
+    setDockOpen(false);
+    setWorkOpen(true);
+    setSearchParams(
+      (current) => {
+        const next = new URLSearchParams(current);
+        next.delete("work-panel");
+        return next;
+      },
+      { replace: true }
+    );
+  }, [anchorWorkPanel, setSearchParams]);
+
   /**
    * 주소가 가리킨 자리를 **읽고 나면 지운다** (리뷰 B2, #1193).
    *
@@ -461,18 +513,17 @@ export function ChatShell() {
    * 두 번 가리켰다」를 두 번의 요청으로 만드는 자리이고, 폰의 `jumpTarget` 이
    * 같은 이유로 같은 값을 든다.
    */
-  const [urlAnchor, setUrlAnchor] = useState<{
-    msg: string | null;
-    seq: string | null;
-    token: number;
-  } | null>(null);
+  const [urlAnchor, setUrlAnchor] = useState<UrlAnchor | null>(null);
   useEffect(() => {
     if (anchorMsg === null && anchorSeq === null) return;
-    setUrlAnchor((previous) => ({
-      msg: anchorMsg,
-      seq: anchorSeq,
-      token: (previous?.token ?? 0) + 1,
-    }));
+    if (channelId === null) return;
+    setUrlAnchor((previous) =>
+      takeUrlAnchor(previous, {
+        channelId,
+        msg: anchorMsg,
+        seq: anchorSeq,
+      })
+    );
     setSearchParams(
       (current) => {
         const next = new URLSearchParams(current);
@@ -482,9 +533,12 @@ export function ChatShell() {
       },
       { replace: true }
     );
-  }, [anchorMsg, anchorSeq, setSearchParams]);
+  }, [anchorMsg, anchorSeq, channelId, setSearchParams]);
   // 방을 옮기면 앞선 주소가 가리키던 자리는 이 화면의 사실이 아니다.
-  useEffect(() => setUrlAnchor(null), [channelId]);
+  // 무조건 비우면 콜드 마운트에서 방금 담은 자기 채널 앵커도 죽는다.
+  useEffect(() => {
+    setUrlAnchor((current) => urlAnchorForChannel(current, channelId));
+  }, [channelId]);
 
   // 워처는 행이 실제로 마운트된 뒤에만 찾을 것이 있다. 가상 목록이라 첫 페이지가
   // 도착하기 전에는 DOM에 행이 하나도 없고, 워처의 3초 창은 그 사이에 지나간다.
@@ -536,14 +590,8 @@ export function ChatShell() {
       // 만료되는 쪽이 이미 도착한 점프에 대해 「못 찾았다」를 띄운다.
       quoteJumpRef.current?.();
       setAnchorMissed(null);
-      const missKind = (): "older" | "unknown" => {
-        if (seq === null) return "unknown";
-        const oldestLoaded = messages.reduce(
-          (min, message) => Math.min(min, message.seq),
-          Number.POSITIVE_INFINITY
-        );
-        return seq < oldestLoaded ? "older" : "unknown";
-      };
+      const missKind = (): "older" | "unknown" =>
+        anchorMissKind(seq, oldestLoadedSeq(messages));
       // 목록에게 먼저 묻는다 (리뷰 B1). 「없다」면 기다릴 것이 없으므로 3초를
       // 흘려보내지 않고 그 자리에서 사실을 말한다.
       if (timelineJump.current?.bringIntoView({ messageId }) === false) {
@@ -559,34 +607,43 @@ export function ChatShell() {
   useEffect(() => () => quoteJumpRef.current?.(), []);
 
   useEffect(() => {
-    if (!anchorReady || urlAnchor === null) return undefined;
-    const { msg, seq: rawSeq } = urlAnchor;
+    if (!anchorReady) return undefined;
+    const live = urlAnchorForChannel(urlAnchor, channelId);
+    if (live === null) return undefined;
+    const { msg, seq: rawSeq } = live;
 
     /**
      * 목표가 지금 로드된 창보다 **위쪽**인가. seq는 채널의 순서값이므로, 목표가
      * 가장 오래된 로드분보다 작으면 그것은 추측이 아니라 사실이다. seq를 모르면
      * (`?seq=` 없이 온 링크) 모른다고 답하고, 화면도 모르는 채로 말한다.
      */
-    const missKind = (): "older" | "unknown" => {
-      const target = rawSeq === null ? Number.NaN : Number(rawSeq);
-      if (!Number.isFinite(target)) return "unknown";
-      const oldestLoaded = messages.reduce(
-        (min, message) => Math.min(min, message.seq),
-        Number.POSITIVE_INFINITY
+    const missKind = (): "older" | "unknown" =>
+      anchorMissKind(
+        rawSeq === null ? null : Number(rawSeq),
+        oldestLoadedSeq(messages)
       );
-      return target < oldestLoaded ? "older" : "unknown";
-    };
     const onExpire = () => setAnchorMissed(missKind());
+    const nudge = () => {
+      if (msg !== null) {
+        timelineJump.current?.bringIntoView({ messageId: msg });
+        return;
+      }
+      if (rawSeq === null) return;
+      const seq = Number(rawSeq);
+      if (Number.isFinite(seq)) timelineJump.current?.bringIntoView({ seq });
+    };
 
     // 목록에게 먼저 묻는다 (리뷰 B1). 가상 창 밖의 행은 로드돼 있어도 DOM 에
     // 없으므로, 워처만 돌리면 「이미 들고 있는 줄」에 대고 「더 불러오세요」라고
     // 말하게 된다. 여기서 답이 갈린다: 옮겨 놓았거나, 정말로 없거나.
+    // 콜드 오픈에서는 첫 scrollToIndex가 align-to-bottom에 덮이므로, 워처가
+    // 매 틱 nudge로 다시 민다. 오버스캔에 걸린 행은 화면 안이 될 때까지 착지가 아니다.
     if (msg !== null) {
       if (timelineJump.current?.bringIntoView({ messageId: msg }) === false) {
         setAnchorMissed(missKind());
         return undefined;
       }
-      return watchForMessageId(msg, { onExpire });
+      return watchForMessageId(msg, { onExpire, nudge });
     }
     if (rawSeq !== null) {
       const seq = Number(rawSeq);
@@ -595,7 +652,7 @@ export function ChatShell() {
         setAnchorMissed(missKind());
         return undefined;
       }
-      return watchForMessage(seq, { onExpire });
+      return watchForMessage(seq, { onExpire, nudge });
     }
     return undefined;
     // `messages`는 의도적으로 빼 둔다: 새 메시지가 도착할 때마다 워처를 다시
@@ -855,28 +912,33 @@ export function ChatShell() {
               onRetry={timeline.reloadPins}
             />
           )}
-          {/* The tooltip and the accessible name are the same string: two
-              names for one control is two controls to a reader who hears one
-              and sees the other. */}
+          {/* TC-1 (#1758): 헤더 터미널 아이콘 = 하단 도크. WorkPanel 이 아니다.
+              WorkPanel 은 사이드바 「작업 콘솔」(`open-work-panel`) 과 세션
+              카드가 연다. 이 testid 를 `open-work-panel` 로 남기면 게이트가
+              도크를 패널로 착각한다. */}
           {stressCount === 0 && (
             <button
+              ref={terminalToggleRef}
               type="button"
               onClick={() => {
-                setThread(null);
-                setWorkOpen((open) => !open);
+                setWorkOpen(false);
+                setDockOpen((open) => !open);
               }}
-              aria-pressed={workOpen}
-              aria-label="작업 세션 패널"
-              title="작업 세션 패널"
-              data-testid="open-work-panel"
+              aria-pressed={dockOpen}
+              {...(dockOpen
+                ? { "aria-controls": "channel-terminal-dock" }
+                : {})}
+              aria-label="터미널"
+              title="터미널"
+              data-testid="open-terminal-dock"
               className={cn(
                 "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
-                workOpen
+                dockOpen
                   ? "bg-accent-soft text-accent"
                   : "text-ink-muted hover:bg-surface-hover"
               )}
             >
-              <SquareTerminal className="size-4" />
+              <SquareTerminal aria-hidden="true" className="size-4" />
             </button>
           )}
         </div>
@@ -920,7 +982,16 @@ export function ChatShell() {
           바닥 아래로 밀지 못한다, #1418)이 함께 필요하고, 같은 축을 두 곳에서
           적으면 순서가 이긴다. 라우트 상자의 `route-region`(#1413)과 같은
           장치이고, 그쪽이 못 보던 판(pane이 이 상자 **안쪽**에 설 때)을 든다. */}
-      <div ref={coveredRef} className="chat-region flex flex-1 flex-col">
+      <div
+        ref={coveredRef}
+        className="chat-region flex flex-1 flex-col"
+        data-url-anchor-msg={
+          urlAnchorForChannel(urlAnchor, channelId)?.msg ?? undefined
+        }
+        data-url-anchor-seq={
+          urlAnchorForChannel(urlAnchor, channelId)?.seq ?? undefined
+        }
+      >
         {stressCount === 0 && channelId !== null ? (
           <HuddleHeaderState
             workspaceId={workspaceId}
@@ -976,7 +1047,10 @@ export function ChatShell() {
           />
         )}
 
-        <div className="min-h-0 flex-1">
+        <div
+          className="flex-1 overflow-hidden timeline-strip"
+          data-testid="chat-timeline"
+        >
           {hasChannel ? (
             <Timeline
               messages={messages}
@@ -1039,7 +1113,7 @@ export function ChatShell() {
               actions={
                 <Button
                   size="sm"
-                  onClick={openCreateChannel}
+                  onClick={() => openCreateChannel()}
                   data-testid="chat-create-channel"
                 >
                   채널 만들기
@@ -1055,6 +1129,10 @@ export function ChatShell() {
             />
           )}
         </div>
+
+        {dockOpen && stressCount === 0 && (
+          <TerminalDock channelId={channelId} onClose={closeDock} />
+        )}
 
         {/* 폰에는 액션이 있다는 것을 말해 주는 것이 화면에 하나도 없었다
             (R2 H4). 손가락 기기에서만, 한 번만, 컴포저 바로 위에서. */}
@@ -1106,7 +1184,7 @@ export function ChatShell() {
         />
       )}
 
-      {workOpen && !thread && stressCount === 0 && !workPanelOpen && (
+      {workOpen && !thread && stressCount === 0 && !workPanelOpen && !dockOpen && (
         <WorkPanel
           channelId={channelId}
           scope={workScope}

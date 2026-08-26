@@ -4,6 +4,7 @@ import type { RosterMember } from "@momo/core/lib/api";
 import type { ComposerKeyIntent } from "@momo/core/features/chat/composerKeys";
 import { cn } from "@/design/lib/cn";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
+import { insertMentionTriggerAtComposerSelection } from "./composerInsertion";
 
 const MENTION_LIMIT = 6;
 
@@ -102,6 +103,22 @@ export function useMentionAutocomplete({
     setHighlight(0);
   };
 
+  const insertTrigger = () => {
+    const input = inputRef.current;
+    const fallback = value.length;
+    const inserted = insertMentionTriggerAtComposerSelection(value, {
+      start: input?.selectionStart ?? fallback,
+      end: input?.selectionEnd ?? fallback,
+    });
+    // 평범하게 @를 타이핑한 경로와 같은 상태 전이를 쓴다. 별도 popover 상태나
+    // 후보 store를 만들면 키보드 입력과 버튼 입력이 서로 다른 목록이 된다.
+    onTextChange(inserted.value, inserted.caret);
+    requestAnimationFrame(() => {
+      inputRef.current?.focus();
+      inputRef.current?.setSelectionRange(inserted.caret, inserted.caret);
+    });
+  };
+
   const handleIntent = (intent: ComposerKeyIntent): boolean => {
     switch (intent) {
       case "mention-accept": {
@@ -135,6 +152,7 @@ export function useMentionAutocomplete({
     setCaret,
     close,
     replaceValue,
+    insertTrigger,
     choose,
     onTextChange,
     handleIntent,
@@ -163,7 +181,7 @@ export function MentionAutocompleteList({
     <ul
       id={id}
       role="listbox"
-      aria-label="멤버 언급"
+      aria-label="멘션 선택"
       data-testid={testId}
       className={cn(
         "absolute bottom-full left-3 mb-2 w-pane-sm overflow-hidden rounded-md border border-line bg-surface-raised p-1 shadow-lg",

@@ -151,6 +151,7 @@ export function ObserverTerminal({
   wide,
   onWideChange,
   headingLevel = 4,
+  variant = "pane",
 }: {
   session: WorkSession;
   hostName: string | null;
@@ -158,7 +159,13 @@ export function ObserverTerminal({
   wide: boolean;
   onWideChange: (wide: boolean) => void;
   /** Follows the WorkSessionDetail heading in its route or panel context. */
-  headingLevel?: 3 | 4;
+  headingLevel?: 2 | 3 | 4;
+  /**
+   * `dock` is the channel-bottom terminal (#1758). Same observer stream, no
+   * stdin. The box fills the dock instead of a fixed 320px pane body, and it
+   * drops the pane hairline that would double the dock's own border.
+   */
+  variant?: "pane" | "dock";
 }) {
   const { session: auth, workspaceId } = useSession();
   const queryClient = useQueryClient();
@@ -352,6 +359,11 @@ export function ObserverTerminal({
     const fit = new runtime.FitAddon();
     terminal.loadAddon(fit);
     terminal.open(mount);
+    // 가로 스크롤은 xterm 의 `.xterm-viewport` 가 한다. 마운트 상자는
+    // overflow-hidden 이라 후보가 아니고, 면제 선언은 실제로 끄는 상자에 둔다
+    // (#1758 M-2). 하네스는 overflow-x:auto|scroll 상자만 보고 data-scroll-x 를
+    // 건너뛴다.
+    mount.querySelector(".xterm-viewport")?.setAttribute("data-scroll-x", "");
     // Local geometry only. There is no resize frame in this client, so the HOST
     // pty keeps the size it was created with: fitting changes how many rows this
     // browser draws, never how the host wraps the output it writes. Which is
@@ -819,11 +831,18 @@ export function ObserverTerminal({
   // over zero controls. The remedy at that width is the window, so the notice
   // says the window instead of pointing at a button that is not there.
   const paneAtFullWidth = wide || paneAtWindowWidth;
-  const Heading = headingLevel === 3 ? "h3" : "h4";
+  const Heading =
+    headingLevel === 2 ? "h2" : headingLevel === 3 ? "h3" : "h4";
+  const docked = variant === "dock";
 
   return (
     <section
-      className="border-b border-line px-4 py-2"
+      className={cn(
+        "px-4 py-2",
+        docked
+          ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+          : "border-b border-line"
+      )}
       data-testid="work-observer"
       data-phase={phase.kind}
       data-link={link ?? undefined}
@@ -1033,7 +1052,13 @@ export function ObserverTerminal({
       {/* The terminal stays mounted across a failure: those bytes really did
           arrive, and clearing them on a dropped socket would delete the only
           record of what the agent printed. */}
-      <div className={cn("pt-2", !showTerminal && "hidden")}>
+      <div
+        className={cn(
+          "pt-2",
+          !showTerminal && "hidden",
+          docked && "flex min-h-0 flex-1 flex-col"
+        )}
+      >
         {/* The frame and the terminal are two boxes on purpose.
             FitAddon measures its parent with `getComputedStyle().height`, which
             on a `box-sizing: border-box` element resolves to the BORDER box
@@ -1043,7 +1068,12 @@ export function ObserverTerminal({
             fixed height and ran away entirely against a content height: the
             box grew ~12 rows per frame, forever. So the mount carries no
             padding and no border, and the chrome lives out here. */}
-        <div className="rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring">
+        <div
+          className={cn(
+            "rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring",
+            docked && "flex min-h-0 flex-1 flex-col"
+          )}
+        >
           <div
             // The whole point of a read-only terminal is that it can be read:
             // focus reaches it (xterm puts a textarea inside), selection and
@@ -1056,9 +1086,12 @@ export function ObserverTerminal({
             // plus the counted summary underneath says the same thing in one
             // sentence, and xterm's own screenReaderMode stays off because it
             // would put that live region back.
+            //
             className={cn(
               "overflow-hidden bg-surface-raised font-mono text-meta text-ink",
-              !bodyFitsContent && "h-terminal-body"
+              docked
+                ? "min-h-0 flex-1"
+                : !bodyFitsContent && "h-terminal-body"
             )}
             ref={mountRef}
             role="group"
@@ -1206,6 +1239,21 @@ export function ObserverTerminal({
         )}
       </div>
     </section>
+  );
+}
+
+/** 가로 `notice === "folded"` 와 같은 문법의 세로 바닥 (#1758 R2-H2). */
+export const TERMINAL_SHORT_COPY =
+  "창이 낮아 터미널을 접었습니다. 창을 높이면 펼쳐집니다.";
+
+export function TerminalShortNotice() {
+  return (
+    <p
+      className="px-4 py-2 text-meta text-ink-muted"
+      data-testid="terminal-dock-short"
+    >
+      {TERMINAL_SHORT_COPY}
+    </p>
   );
 }
 

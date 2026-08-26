@@ -4,13 +4,16 @@ import { cn } from "@/design/lib/cn";
 
 // shadcn/ui new-york DropdownMenu (vendored, Radix primitive).
 //
-// Added in B11 R2 for the message row's single action entry point. The row used
-// to carry a six-button hover bar, which §6 rules out ("row-level actions live
-// in ContextMenu, not always-visible button rows") and which cost one tab stop
-// per button on every row of a virtualized list. A menu needs collision-aware
-// positioning, a focus scope, arrow-key roving, Escape, outside-dismiss and
-// focus return to the trigger; hand-rolling those inside a recycled row is how
-// you ship a menu that survives every case but the one nobody tried.
+// Added in B11 R2 for the message row's overflow entry point. The row used to
+// carry a six-button hover bar that §6 then forbade (always-visible button
+// rows, one tab stop per button on every virtualized row). #1743 reintroduces
+// a hover toolbar under a tighter contract: the toolbar is not mounted until
+// hover/focus-within, it is one WAI-ARIA composite, and this menu remains the
+// overflow (Edit/Delete live here, not on the bar). A menu still needs
+// collision-aware positioning, a focus scope, arrow-key roving, Escape,
+// outside-dismiss and focus return to the trigger; hand-rolling those inside
+// a recycled row is how you ship a menu that survives every case but the one
+// nobody tried.
 //
 // Same two house deviations as the Dialog: no animation (motion is feedback,
 // §4), and no decorative chrome.
@@ -70,9 +73,11 @@ export const DropdownMenuContent = React.forwardRef<
 DropdownMenuContent.displayName = MenuPrimitive.Content.displayName;
 
 /**
- * One row of the menu. `h-control` (32px) is the pointer measure: this menu is
- * opened by a mouse or a Tab, never by a thumb (the phone opens the sheet in
- * `MessageActions.tsx`, whose rows are 44px).
+ * One row of the menu. `h-control` (32px) is the pointer measure. On a phone
+ * (`tap-target`, width < 600px) the same row grows to 44px — the sheet-row
+ * measure `MessageActions.tsx` already uses. The profile card is a first-class
+ * phone-drawer entry, so this primitive can no longer claim it is never
+ * opened by a thumb.
  *
  * Radix moves focus with the arrow keys, so the highlight is a focus ring and a
  * background, not a separate "selected" concept.
@@ -109,7 +114,7 @@ export function menuRowClass({
   className?: string;
 }) {
   return cn(
-    "flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+    "tap-target flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
     layout === "stack"
       ? // `gap-2` between two lines of ONE item would read as a paragraph
         // break, so a stacked item sets its own vertical rhythm.
