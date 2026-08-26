@@ -253,7 +253,7 @@ if !info.ShouldWait { ...; os.Exit(0) }                                    // �
 
 ---
 
-## 1.5-보론 ★ "누구의 tailnet에 넣을 것인가"가 만드는 보안 문제 (RQ-2로 넘어가는 다리)
+### 1.11 ★ "누구의 tailnet에 넣을 것인가"가 만드는 보안 문제 (RQ-2로 넘어가는 다리)
 
 Tailnet의 **기본 정책은 allow-all**이다 [공식문서]:
 
@@ -347,7 +347,7 @@ Tailscale ToS(**최종 갱신 2026-08-25** — 바로 어제) [공식문서] htt
 > §2.7.2(a)(i) MSP는 *"acting as the Customer's **exclusive administrator** for the Tailscale Solution"*
 > §3.2.1 Deal registration 의무
 
-⇒ **"oort가 고객 대신 Tailscale을 운영한다"는 모델은 금지된 게 아니라 *계약을 요구*한다.** 다만 이건 셀프서브가 아니고(Quote/Order Form 필요), 유료 리셀 전제이며, oort가 각 고객의 "exclusive administrator"가 된다 — **§1.5-보론의 신뢰 문제가 계약으로 공식화될 뿐 해소되지 않는다.**
+⇒ **"oort가 고객 대신 Tailscale을 운영한다"는 모델은 금지된 게 아니라 *계약을 요구*한다.** 다만 이건 셀프서브가 아니고(Quote/Order Form 필요), 유료 리셀 전제이며, oort가 각 고객의 "exclusive administrator"가 된다 — **§1.11의 신뢰 문제가 계약으로 공식화될 뿐 해소되지 않는다.**
 
 **(b) Tailnet Creation API — 멀티테일넷 (Alpha)** [공식문서]
 > *"Create an **API-only tailnet** in the organization. **API-only tailnets have no human users and do not appear in the admin console.** Use them for applications and infrastructure that manage tailnets entirely through the API."*
@@ -356,7 +356,7 @@ Tailscale ToS(**최종 갱신 2026-08-25** — 바로 어제) [공식문서] htt
 > 블로그: *"A **per-customer or per-project tailnet** provides strong isolation… useful for **automation, OEM, and integration scenarios**."*
 > Pricing add-on: *"**Multiple tailnets** — Great option for **OEM**… **Contact sales**"*
 
-⇒ **이것이 우리 시나리오에 대한 Tailscale의 공식 답이다** — 고객마다 격리된 tailnet, 사람 사용자 0명, 전부 API. §1.5-보론의 상호도달·oort 접근권 문제도 tailnet 격리로 크게 완화된다.
+⇒ **이것이 우리 시나리오에 대한 Tailscale의 공식 답이다** — 고객마다 격리된 tailnet, 사람 사용자 0명, 전부 API. §1.11의 상호도달·oort 접근권 문제도 tailnet 격리로 크게 완화된다.
 ⇒ **그런데 상한이 10개**다. 고객 10곳이면 끝. 게다가 **alpha**(안정 인터페이스 아님)이고 **tagged devices only**라 §2.2의 과금 축을 그대로 물려받는다.
 
 ### 2.5 봇이 사용자 대신 Tailscale 계정을 만드는 것 (M5)
@@ -487,7 +487,7 @@ Tailscale ToS(**최종 갱신 2026-08-25** — 바로 어제) [공식문서] htt
 ### 3.5 Fable 권고
 
 1. **v1 = M1(사용자 자기 tailnet) + C1~C7.** oort 중앙 의존 0, 약관 깨끗, 사용자가 자기 인프라를 온전히 소유 — 셀프호스팅의 명분과 정합한다. 대가는 **브라우저 클릭 4~5회**(§2.6).
-2. **M2/M3(oort tailnet에 고객 노드 수용)은 채택 금지 권고.** ToS §2.1·§2.3 위반 소지 + §11.3으로 **배상 상한 배제** + Personal 플랜 비상업 명문 금지 + §1.5-보론의 신뢰 붕괴(기본 ACL allow-all·oort가 전 고객 서버에 네트워크 접근권). 굳이 간다면 **Channel Partner Agreement 체결이 전제**이며, 그건 v1의 규모에 맞지 않는다.
+2. **M2/M3(oort tailnet에 고객 노드 수용)은 채택 금지 권고.** ToS §2.1·§2.3 위반 소지 + §11.3으로 **배상 상한 배제** + Personal 플랜 비상업 명문 금지 + §1.11의 신뢰 붕괴(기본 ACL allow-all·oort가 전 고객 서버에 네트워크 접근권). 굳이 간다면 **Channel Partner Agreement 체결이 전제**이며, 그건 v1의 규모에 맞지 않는다.
 3. **A트랙을 "URL 상실 폴백"에서 "무계정 tier의 유일 구현"으로 재정의**하고, 별도 ADR로 승격 여부를 결정한다(oort가 데이터 경로에 들어가는 결정이므로 경계 변경 = ADR 필수).
 4. **다음 실측 1순위는 §1.8-F(WS soak) → §1.8-D(state 영속 URL 불변) → §1.8-E(파괴 실험) 순.** D는 B트랙 전제 확인, F는 생사 판정, E는 복구 폴백 존재 여부.
 5. **멀티테일넷 alpha(§2.4b)는 내부 파일럿용으로 신청 가치가 있다** — 상한 10개는 제품에는 못 쓰지만, "고객별 격리 tailnet"을 실측해 볼 수 있는 유일한 공식 경로다.
