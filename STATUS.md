@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## LiveKit env 게이트 오탐 수리 (#1781, 2026-08-26)
+
+- 판정(실측): 오탐. huddle profile 없이 `docker compose --env-file rust-smoke.env.example -f docker-compose.rust.yml config`는 LiveKit 키 공백·삭제 모두 rc=0. 렌더된 서비스에 livekit 없음. 맨몸 `config` 실패 목록에도 `MOMO_LIVEKIT_*` 0건.
+- 원인: `check_compose_env_templates.sh`가 entrypoint의 `$${VAR:?}`(compose 이스케이프 → 컨테이너 셸 `:?`)를 compose 보간 `${VAR:?}`로 오인. 템플릿 `KEY=` 빈 값 규칙은 진짜 `${VAR:?}`에는 유지.
+- 검증: 수리 전 정적 RED 8 rendering(이슈가 적은 4 + local-edge/backup 4) → 수리 후 compose-env GREEN + regression 12/12. huddle 없는 `up -d`(LiveKit 키 삭제, `-p momo-1781-judge`) api healthy · `/healthz` ok · livekit 컨테이너 0. `--profile huddle` + 키 없음이면 컨테이너가 `set MOMO_LIVEKIT_API_KEY`로 fail-fast.
+
 ## TC-1 채널 하단 터미널 도크 (#1758, 2026-08-26)
 
 - 조사: 작업 세션 원장(`GET …/work-sessions`)·이벤트 스레드·observer-grade 호스트 터미널 소켓은 실존. 웹은 `mode: "observer"`만 요청하고 stdin/resize/kill 인코더가 없다. 우측 WorkPanel은 목록·인수·화면 관전/조작·원장. 헤더 SquareTerminal은 이 티켓 전까지 그 패널을 열었다. 즉시 입력 왕복 터미널은 웹에 없다. 새 세션 POST도 웹 클라에 없다.

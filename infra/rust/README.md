@@ -81,6 +81,10 @@ cp infra/rust/rust-smoke.env.example infra/rust/rust-smoke.secrets.env
 2026-08-10 실측). 채워 두면 `up -d`의 `migrate` 서비스가 첫 부팅에 로그인을 만든다.
 계약은 §4-2.
 
+LiveKit 세 줄(`MOMO_LIVEKIT_API_KEY` · `MOMO_LIVEKIT_API_SECRET` · `MOMO_LIVEKIT_URL`)은
+템플릿에 빈 값으로 있고, 그대로 둔다. `--profile huddle`을 고르기 전까지 compose
+보간이 이 값을 요구하지 않는다(#1781). 허들을 켤 때는 §4-6.
+
 주의: `MOMO_APP_POSTGRES_PASSWORD` / `RELAY_POSTGRES_PASSWORD` 값은
 `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` 안의 비밀번호와 **같아야** 한다
 (runtime-roles가 전자로 롤 비번을 세팅하고, api/relay가 후자로 접속한다).
@@ -111,6 +115,7 @@ momorustbuild build            # 또는: docker build -f server-rust/Dockerfile 
 
 # (2) 기동 — depends_on이 순서를 강제한다:
 #     postgres(healthy) → runtime-roles(완료) → migrate(완료) → api/relay
+#     huddle profile 없음: LiveKit 키를 채우지 않아도 뜬다(#1781).
 momorustbuild up -d
 
 # (3) 마이그레이션 증거
@@ -250,6 +255,8 @@ momorust logs | grep -Ei 'jwt_hmac|cent_api_key|password|postgres://' && echo "L
 
 `rust-smoke.secrets.env`의 세 값을 채우고 다음처럼 profile을 명시한다. 키와 secret은
 LiveKit service와 API token issuer가 같은 값을 받으며, real secret은 커밋하지 않는다.
+profile을 켠 뒤에도 compose 보간은 `${VAR:-}`라 빈 값으로 `config`는 통과한다. 컨테이너
+entrypoint의 셸 `:?`가 키 없이 livekit을 띄우는 것을 막는다(#1781).
 
 ```sh
 momorust --profile huddle up -d livekit api
