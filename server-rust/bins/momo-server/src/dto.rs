@@ -868,8 +868,9 @@ pub struct CreateWorkSessionRequest {
 
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
 /// :23-38). `#1777` serves `ended` plus host-signed idle/running and
-/// `bindRemotePTY`. ACP events stay refused-by-name (follow-up requested in
-/// the #1777 PR). Observation is #1778.
+/// `bindRemotePTY`. `#1778` serves the human-owner `observation` toggle
+/// (`open` | `owner_only`). ACP events stay refused-by-name (follow-up
+/// requested in the #1777 PR).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateWorkSessionRequest {

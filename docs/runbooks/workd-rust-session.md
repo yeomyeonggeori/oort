@@ -31,6 +31,8 @@ scripts/verify_workd_rust.sh
 host-signed create + `bindRemotePTY` → `remoteAttachAvailable` false→true →
 controller attach(replay + live stdin) + 도크와 같은 observer attach
 WS(replay만. observer 에 stdin 을 넣으면 1008 `forbidden for observer`).
+이어서 소유자 `PATCH {observation:owner_only}` → 팀원 observer attach 403 →
+재개방 → attach 200 (#1778).
 
 PG 는 호스트 포트가 없으므로 `docker exec oort-postgres-1 psql` 로만 읽는다.
 
@@ -68,3 +70,15 @@ DATABASE_URL=postgres://momo:momo@127.0.0.1:15432/momo \
 
 무서명 400 · 타 호스트 403 · controlId 불일치 409 · 정상 서명 201/200 +
 `remoteAttachAvailable` false→true · idle/running 을 고정한다.
+
+관전 토글 (#1778) 은 같은 리그 PG 에 대고:
+
+```sh
+DATABASE_URL=postgres://momo:momo@127.0.0.1:15432/momo \
+  cargo test --manifest-path server-rust/Cargo.toml -p momo-server \
+    --test observation_toggle_conformance_pg \
+    -- --ignored --test-threads=1 --nocapture
+```
+
+소유자 200 · 비소유자 403 · `owner_only` 에서 teammate attach 403 · 재개방 후
+attach 200 · 감사 행을 고정한다.

@@ -545,6 +545,30 @@ pub async fn sweep_spent_observer_capabilities_in_tx(
     Ok(deleted)
 }
 
+/// Swift `updateObservation` (:1708-1712): closing the session to
+/// `owner_only` drops every live observer grant in the same transaction.
+///
+/// Kind-agnostic on purpose — a display observer is still an observer. The
+/// owner's own controller grant is `mode = 'controller'` and is left alone.
+pub async fn revoke_observer_capabilities_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<u64, T3Error> {
+    let deleted = sqlx::query(
+        "DELETE FROM terminal_attach_capability \
+          WHERE workspace_id = $1 \
+            AND work_session_id = $2 \
+            AND mode = 'observer'",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+    Ok(deleted)
+}
+
 /// A freshly minted grant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IssuedCapability {

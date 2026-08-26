@@ -36,8 +36,8 @@
 //! ## Named parity (#1777 closed the host-signed session arms)
 //!
 //! * Host-signed `POST …/work-sessions` (`controlId` ↔ dispatched spawn) and
-//!   `PATCH` idle/running + `bindRemotePTY` are served. Observation stays
-//!   refused-by-name (#1778). ACP event ingestion stays refused-by-name
+//!   `PATCH` idle/running + `bindRemotePTY` are served (#1777). Observation is
+//!   the human-owner PATCH (#1778). ACP event ingestion stays refused-by-name
 //!   (follow-up requested in the #1777 PR — no existing issue).
 //! * `resume` drops **one** Swift step now: the audit row (see the crate-level
 //!   note on `momo_db::audit`). The two that mattered are back — the
@@ -52,7 +52,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use momo_auth::{Principal, PrincipalKind};
+use momo_auth::{active_workspace_role, Principal, PrincipalKind};
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx;
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
@@ -68,11 +68,12 @@ use momo_t3::{
     create_resumed_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
     is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
     lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, parse_remote_pty_binding,
-    pause_usage_in_tx, remote_pty_host_status_in_tx, resolve_cloud_host_id, start_usage_in_tx,
-    terminate_in_tx, tool_lifecycle_payload, transition_tool_lifecycle_in_tx,
-    update_session_card_props_in_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx,
-    write_remote_pty_binding_in_tx, ControlWindowEndReason, NewWorkSession, RemotePtyBinding,
-    RemotePtyHostStatus, T3Error, T3LockLadder, TerminationReason, WorkSessionDetail,
+    pause_usage_in_tx, remote_pty_host_status_in_tx, resolve_cloud_host_id,
+    set_work_session_observation_in_tx, start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload,
+    transition_tool_lifecycle_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
+    work_tool_is_enabled_in_tx, write_remote_pty_binding_in_tx, ControlWindowEndReason,
+    NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
+    TerminationReason, WorkSessionDetail,
 };
 use serde_json::json;
 use uuid::Uuid;
@@ -83,8 +84,8 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    lifecycle_body, path_uuid, require_human, require_human_or_work_host, settle, t3_error,
-    tenant_tx, workspace_scope, Rejectable,
+    audit_via_token_id, lifecycle_body, path_uuid, require_human, require_human_or_work_host,
+    settle, t3_error, tenant_tx, workspace_scope, Rejectable,
 };
 use crate::work_host_auth::signed_request_unauthorized;
 use crate::AppState;
@@ -109,6 +110,17 @@ fn validated_tool(raw: &str) -> Result<String, ApiError> {
         Ok(value)
     } else {
         Err(ApiError::bad_request("invalid work tool key"))
+    }
+}
+
+/// Web wire + openapi `UpdateWorkSessionObservationRequest`: `open` | `owner_only`.
+fn validated_observation(raw: &str) -> Result<&'static str, ApiError> {
+    match raw {
+        "open" => Ok("open"),
+        "owner_only" => Ok("owner_only"),
+        _ => Err(ApiError::bad_request(
+            "observation must be open or owner_only",
+        )),
     }
 }
 
@@ -450,7 +462,7 @@ async fn create_in_tx(
 
 /// `PATCH /v1/workspaces/{ws}/work-sessions/{session}` (Swift `end`, :328-601).
 ///
-/// Dispatcher: bindRemotePTY, ACP (refused), observation (#1778, refused),
+/// Dispatcher: bindRemotePTY, ACP (refused), observation (human owner, #1778),
 /// idle/running, then the `status: "ended"` arm.
 pub async fn end(
     State(state): State<AppState>,
@@ -492,10 +504,13 @@ pub async fn end(
             "ACP event ingestion requires work host signature",
         ));
     }
-    if request.observation.is_some() {
-        return Err(ApiError::bad_request(
-            "observation updates are not served by momo-server yet",
-        ));
+    if let Some(observation) = request.observation.as_deref() {
+        if request.status.is_some() || request.exit_code.is_some() {
+            return Err(ApiError::bad_request(
+                "observation cannot be combined with lifecycle fields",
+            ));
+        }
+        return update_observation(state, principal, workspace_id, session_id, observation).await;
     }
     match request.status.as_deref() {
         Some("ended") => {}
@@ -790,6 +805,112 @@ async fn close_control_window_for_ended_session_in_tx(
         &window,
     )
     .await
+}
+
+// ---------------------------------------------------------------------------
+// observation (human owner, #1778)
+// ---------------------------------------------------------------------------
+
+/// Swift `updateObservation` (`WorkSessionRoutes.swift:1662-1761`).
+///
+/// Human session owner only. `open` ↔ `owner_only` is the existing consent
+/// model (ADR-0126 D1 / ADR-0004 증보 3 D3: 인간 observer는 이 토글 그대로).
+/// Closing to `owner_only` revokes live observer grants. Host-signed callers
+/// stay out — that arm is #1777's and does not speak observation.
+async fn update_observation(
+    state: AppState,
+    principal: Principal,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    raw: &str,
+) -> Result<Json<WorkSessionResponse>, ApiError> {
+    require_human(&principal, "observation requires a human bearer")?;
+    let observation = validated_observation(raw)?;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let detail = settle(
+        "work_sessions.observation",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                update_observation_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    via_token_id,
+                    session_id,
+                    observation,
+                )
+                .await
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(WorkSessionResponse {
+        work_session: session_dto(detail),
+    }))
+}
+
+async fn update_observation_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    session_id: Uuid,
+    observation: &'static str,
+) -> Rejectable<WorkSessionDetail> {
+    if active_workspace_role(conn, workspace_id, member_id)
+        .await
+        .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?
+        .is_none()
+    {
+        return Ok(Err(ApiError::forbidden("not an active workspace member")));
+    }
+
+    let Some((existing, _)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if existing.member_id != member_id {
+        return Ok(Err(ApiError::forbidden(
+            "only the session owner can change observation",
+        )));
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, existing.channel_id, member_id).await? {
+        return Ok(Err(ApiError::forbidden(
+            "active channel membership required",
+        )));
+    }
+
+    let Some(updated) =
+        set_work_session_observation_in_tx(conn, workspace_id, session_id, observation).await?
+    else {
+        return Ok(Err(ApiError::internal(
+            "work_sessions.observation",
+            "work session observation update failed",
+        )));
+    };
+
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, "work.session.observation")
+            .by(member_id)
+            .target("work_session", session_id)
+            .via_token(via_token_id)
+            .with_schema(
+                "momo.work.session.observation.v1",
+                json!({
+                    "session_id": session_id.to_string(),
+                    "observation": observation,
+                }),
+            ),
+    )
+    .await
+    .map_err(T3Error::from)?;
+
+    Ok(Ok(updated))
 }
 
 // ---------------------------------------------------------------------------
@@ -1575,6 +1696,10 @@ mod tests {
         assert!(validated_label("").is_err());
         assert!(validated_label(&"x".repeat(120)).is_ok());
         assert!(validated_label(&"x".repeat(121)).is_err());
+        assert_eq!(validated_observation("open").unwrap(), "open");
+        assert_eq!(validated_observation("owner_only").unwrap(), "owner_only");
+        assert!(validated_observation("closed").is_err());
+        assert!(validated_observation("ownerOnly").is_err());
     }
 
     #[test]

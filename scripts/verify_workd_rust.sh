@@ -70,10 +70,13 @@ TOOL_LABEL="MOMO-1777 rust workd"
 WS_ID="00000000-0000-7000-8000-000000000001"
 CHANNEL_ID="$(new_uuid)"
 OWNER_ID="$(new_uuid)"
+TEAMMATE_ID="$(new_uuid)"
 AGENT_ID="$(new_uuid)"
 RUN_ID="$(new_uuid)"
 OWNER_EMAIL="workd-rust-owner-$RUN_TAG@momo.local"
 OWNER_PASSWORD="owner-$(new_uuid)"
+TEAMMATE_EMAIL="workd-rust-teammate-$RUN_TAG@momo.local"
+TEAMMATE_PASSWORD="teammate-$(new_uuid)"
 RAW_MARKER="MOMO_WORKD_RUST_RAW_${RUN_TAG//-/_}"
 ATTACH_LIVE_MARKER="MOMO_WORKD_RUST_LIVE_${RUN_TAG//-/_}"
 ATTACH_LIVE_INPUT="echo MOMO_WORKD_RUST_LIVE_''${RUN_TAG//-/_}"
@@ -214,10 +217,14 @@ SET LOCAL row_security = off;
 INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
 VALUES
   ('$OWNER_ID', '$WS_ID', 'human', 'active', 'Workd Rust Owner', 'workd-rust-owner-$RUN_TAG'),
+  ('$TEAMMATE_ID', '$WS_ID', 'human', 'active', 'Workd Rust Teammate', 'workd-rust-teammate-$RUN_TAG'),
   ('$AGENT_ID', '$WS_ID', 'agent', 'active', 'Workd Rust Agent', 'workd-rust-agent-$RUN_TAG');
 INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash, tz)
-VALUES ('$OWNER_ID', '$WS_ID', '$OWNER_EMAIL', true,
-        momo_password_hash('$OWNER_PASSWORD'), 'UTC');
+VALUES
+  ('$OWNER_ID', '$WS_ID', '$OWNER_EMAIL', true,
+   momo_password_hash('$OWNER_PASSWORD'), 'UTC'),
+  ('$TEAMMATE_ID', '$WS_ID', '$TEAMMATE_EMAIL', true,
+   momo_password_hash('$TEAMMATE_PASSWORD'), 'UTC');
 INSERT INTO agent
   (member_id, workspace_id, model, base_url, system_prompt, owner_human_id)
 VALUES
@@ -226,6 +233,7 @@ VALUES
 INSERT INTO workspace_membership (workspace_id, member_id, role)
 VALUES
   ('$WS_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$TEAMMATE_ID', 'member'),
   ('$WS_ID', '$AGENT_ID', 'member');
 INSERT INTO channel (id, workspace_id, kind, name, topic, created_by)
 VALUES ('$CHANNEL_ID', '$WS_ID', 'public', 'hss-1777-$RUN_TAG', '', '$OWNER_ID');
@@ -234,6 +242,7 @@ VALUES ('$CHANNEL_ID', '$WS_ID', 0);
 INSERT INTO membership (workspace_id, channel_id, member_id, role)
 VALUES
   ('$WS_ID', '$CHANNEL_ID', '$OWNER_ID', 'owner'),
+  ('$WS_ID', '$CHANNEL_ID', '$TEAMMATE_ID', 'member'),
   ('$WS_ID', '$CHANNEL_ID', '$AGENT_ID', 'member');
 INSERT INTO agent_run
   (id, workspace_id, agent_member_id, channel_id, status, input,
@@ -529,6 +538,73 @@ if [ "$ATTACH_MODE" = "1" ]; then
     --timeout "$ASSERT_TIMEOUT" ||
     fail "dock observer attach: real PTY bytes did not reach the attach WS"
   note "GREEN dock observer — replay marker reached the observer socket"
+
+  # #1778 — owner observation toggle on the same live session.
+  RESPONSE_STATUS="$(curl -sS -o "$TMP_DIR/teammate-login.json" -w '%{http_code}' \
+    -X POST -H 'Content-Type: application/json' \
+    --data "$(jq -cn --arg e "$TEAMMATE_EMAIL" --arg p "$TEAMMATE_PASSWORD" --arg w "$WS_ID" \
+      '{email:$e,password:$p,workspace:$w}')" \
+    "$BASE_URL/v1/auth/login")"
+  RESPONSE_BODY="$(<"$TMP_DIR/teammate-login.json")"
+  expect_status 200 "teammate login"
+  TEAMMATE_TOKEN="$(jq -er '.accessToken' "$TMP_DIR/teammate-login.json")"
+
+  api "$TEAMMATE_TOKEN" PATCH \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"observation":"owner_only"}'
+  expect_status 403 "teammate cannot close observation"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    '.error.message == "only the session owner can change observation"' >/dev/null ||
+    fail "teammate PATCH did not use the owner-only sentence"
+
+  api "$OWNER_TOKEN" PATCH \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"observation":"owner_only"}'
+  expect_status 200 "owner closes observation"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    '.workSession.observation == "owner_only"' >/dev/null ||
+    fail "owner close did not persist owner_only"
+
+  api "$TEAMMATE_TOKEN" POST \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID/terminal-attach" \
+    '{"mode":"observer"}'
+  expect_status 403 "observer attach refused while owner_only"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    '.error.message == "session observation is owner-only"' >/dev/null ||
+    fail "closed observation did not refuse teammate attach"
+
+  got="$(sql_value <<SQL
+SELECT count(*) FROM audit_log
+ WHERE workspace_id='$WS_ID'
+   AND action='work.session.observation'
+   AND target_id='$SESSION_ID'
+   AND detail->>'observation'='owner_only'
+   AND detail->>'schema'='momo.work.session.observation.v1';
+SQL
+)"
+  [ "$got" = "1" ] || fail "owner_only audit row missing (got $got)"
+
+  api "$OWNER_TOKEN" PATCH \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID" \
+    '{"observation":"open"}'
+  expect_status 200 "owner reopens observation"
+  printf '%s' "$RESPONSE_BODY" | jq -e \
+    '.workSession.observation == "open"' >/dev/null ||
+    fail "owner reopen did not persist open"
+
+  api "$TEAMMATE_TOKEN" POST \
+    "/v1/workspaces/$WS_ID/work-sessions/$SESSION_ID/terminal-attach" \
+    '{"mode":"observer"}'
+  expect_status 200 "observer attach after reopen"
+  REOPEN_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -er '.capability_token')"
+  "$PYTHON_BIN" "$REPO_ROOT/scripts/terminal_attach_probe.py" \
+    --url "$ATTACH_ENDPOINT" \
+    --token "$REOPEN_TOKEN" \
+    --pty-id "$SESSION_ID" \
+    --expect-replay "$RAW_MARKER" \
+    --timeout "$ASSERT_TIMEOUT" ||
+    fail "reopened observer attach: real PTY bytes did not reach the attach WS"
+  note "GREEN #1778 — close 200, teammate attach 403, reopen 200, rewatch bytes"
 fi
 
 note "PASS"
