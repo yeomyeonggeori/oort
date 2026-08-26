@@ -442,8 +442,12 @@ tailscale funnel --bg --yes "${WEB_PORT}"
 
 공개 주소가 생긴 뒤에 **시크릿을 다시 만들지 말고** 이 한 줄을 실행한다.
 브라우저 Origin(`https://…`)과 RN 소켓 Origin(`wss://…`)을 같이 넣는다.
-첨부 업로드 base(`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`)도 같은 공개
-오리진으로 맞춘다. 두 번 실행해도 항목은 하나다. claim 수술된 env
+신규 설치의 첨부 base는 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`
+이라 요청 Host에서 파생된다(ADR-0169 증보 1). **`--public-origin`은 그
+센티널을 건드리지 않는다** — same-origin 이 공개 오리진도 이미 덮으므로,
+절대 URL로 내리면 터널 URL이 바뀔 때 다시 낡는다(#1788). 절대 URL로
+고정하려는 운영자는 그 값을 직접 적으면 되고 그때는 verbatim으로 남는다. 두 번 실행해도 항목은
+하나다. claim 수술된 env
 (`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)에서도 이 유지보수 경로는
 통과한다 — 「생성기를 다시 돌리지 않는다」(§1.4)는 시크릿 재생성·
 `--compose`에만 적용된다.

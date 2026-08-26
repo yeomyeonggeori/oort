@@ -263,11 +263,19 @@ impl DriveSettings {
     /// operator named one, otherwise loopback on the serving port — which is
     /// right for a stub, since nothing outside the host should be uploading to
     /// an in-memory archive.
+    ///
+    /// `local_base_url` is the archive's **boot-time** URL assembly only. When
+    /// the operator named `same-origin` the HTTP layer rewrites the capability
+    /// URL from the request (ADR-0169 증보 1); the archive still gets a
+    /// concrete placeholder so `create_resumable_upload` can mint a path.
     pub fn backend_config(&self, port: u16) -> momo_drive::DriveBackendConfig {
         let stub_base_url = env("MOMO_DRIVE_ARCHIVE_STUB_BASE_URL")
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}"));
-        let local_base_url =
-            env("MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL").unwrap_or_else(|| stub_base_url.clone());
+        let local_base = self.local_base(port, &stub_base_url);
+        let local_base_url = match &local_base {
+            crate::DriveLocalBase::SameOrigin => stub_base_url.clone(),
+            crate::DriveLocalBase::Fixed(url) => url.clone(),
+        };
         momo_drive::DriveBackendConfig {
             mode: self.backend.clone(),
             sa_key_path: self.sa_key_path.clone(),
@@ -276,6 +284,25 @@ impl DriveSettings {
             local_dir: self.local_dir.clone(),
             local_base_url,
         }
+    }
+
+    /// How local-archive capability URLs are advertised (ADR-0169 증보 1).
+    ///
+    /// Only `MOMO_DRIVE_ARCHIVE_BACKEND=local` ever returns [`crate::DriveLocalBase::SameOrigin`].
+    /// google / stub / empty stay `Fixed` so their URLs are never rewritten.
+    pub fn local_base(&self, port: u16, stub_fallback: &str) -> crate::DriveLocalBase {
+        if self.backend != momo_drive::LOCAL_BACKEND {
+            return crate::DriveLocalBase::Fixed(String::new());
+        }
+        let fallback = if stub_fallback.trim().is_empty() {
+            format!("http://127.0.0.1:{port}")
+        } else {
+            stub_fallback.trim_end_matches('/').to_string()
+        };
+        crate::DriveLocalBase::from_env_value(
+            env("MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL").as_deref(),
+            &fallback,
+        )
     }
 }
 
@@ -2331,6 +2358,26 @@ mod tests {
             Some("MOMO_DRIVE_LOCAL_DIR could not be created or is not writable")
         );
         let _ = std::fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn local_base_is_inert_unless_the_backend_is_local() {
+        let google = DriveSettings {
+            backend: "google".into(),
+            ..DriveSettings::default()
+        };
+        assert_eq!(
+            google.local_base(8080, "http://127.0.0.1:8080"),
+            crate::DriveLocalBase::Fixed(String::new())
+        );
+        let stub = DriveSettings {
+            backend: momo_drive::STUB_BACKEND.into(),
+            ..DriveSettings::default()
+        };
+        assert_eq!(
+            stub.local_base(8080, "http://127.0.0.1:8080"),
+            crate::DriveLocalBase::Fixed(String::new())
+        );
     }
 
     // -- B2.6 agent gateway ------------------------------------------------

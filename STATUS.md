@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
+
+- `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`이면 업로드 URL을 ADR-0167과 같은 `Host`+`X-Forwarded-Proto`(Caddy 정규화)에서 파생한다. 절대 URL은 verbatim. `MOMO_DRIVE_ARCHIVE_BACKEND` 선택 축은 무영향.
+- 생성기 기본값을 `same-origin`으로 옮김. `--public-origin`은 절대 URL 고정(기존 verbatim 경로).
+
 ## claim 모드 env 유지보수 경로 (#1790, 2026-08-26)
 
 - `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 `--public-origin` 유지보수가 비밀번호 검증을 건너뛰고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`·`CENTRIFUGO_ALLOWED_ORIGINS`를 갱신한다. `--compose`는 ADR-0166대로 비밀번호 키를 계속 요구한다.
