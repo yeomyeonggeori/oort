@@ -1,0 +1,29 @@
+[co-open] 900px 창, 스레드 열어 둔 채 작업 패널 개방 -> 컴포저 342px
+[work-pane] 900px 창, 작업 세션 pane 개방 -> pane 292px · 컴포저 342px · 플레이스홀더 1줄 (문장 전체 2줄, 빈 상자 39/39px) "release-2026-08-hotfix에 메시지 보내기"
+[work-pane] 1280px 창, 작업 세션 pane 개방 -> pane 320px · 컴포저 694px · 플레이스홀더 1줄 (문장 전체 1줄, 빈 상자 39/39px) "release-2026-08에 메시지 보내기, @⁠로 부르기"
+[head-clause] 900px 창, 긴 방 이름 -> 컴포저 342px (글 318px) · 머리 절 354px · word-break=keep-all · white-space=pre-wrap "release-2026-08-hotfix-canary-rollback에 메시지 보내기"
+[probe-ruler] 1280 -> 928px 창, 글자 14px -> 17.5px · 글 318px · 머리 절 250px · 문장 전체 339px "release-2026-08에 메시지 보내기"
+[thread-pane] 600px 창, 스레드 개방 -> 패널 360px (덮음 true · inert true) · 채널 컴포저 334px · 답글 컴포저 333px
+[thread-pane] 700px 창, 스레드 개방 -> 패널 460px (덮음 true · inert true) · 채널 컴포저 434px · 답글 컴포저 433px
+[thread-pane] 899px 창, 스레드 개방 -> 패널 659px (덮음 true · inert true) · 채널 컴포저 633px · 답글 컴포저 632px
+GATE PASS: delta arrival order, phase transitions, 승인 대기 vocabulary,
+           mid-run truncation notice, folded tool args, and volatile reopen
+           held across three skewed REST/frame timings, and one secondary
+           pane at a time kept the 900px chat surface usable.
+           The 작업 세션 pane inside the chat surface yields the same way:
+           composer above its floor at 900px, pane still 320px at 1280px,
+           and the empty composer never overflows its own box.
+           What it loses when it does not fit is a WHOLE clause: at 900px
+           the mention affordance is gone and nothing of it is left on the
+           line, while at 1280px the same box still carries it.
+           The ruler does not age either: with the root font a step larger
+           and the window then narrowed, the same box drops the clause it
+           no longer fits.
+           Below 900px the thread pane covers the channel instead of
+           standing beside it, the covered column leaves the tab order
+           with it, and both composers stay above their floor at 600,
+           700 and 899px. In that same band the thread drawer escapes
+           by keyboard like the 작업 세션 drawer: Escape inside the reply
+           composer closes it, and the close button hands the caret back to
+           the control that opened it rather than dropping it on body.
+rc=0

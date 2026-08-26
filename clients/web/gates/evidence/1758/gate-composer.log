@@ -1,0 +1,58 @@
+
+> momo-web@0.0.0 gate:composer
+> npm run build && node gates/gate-composer.mjs
+
+
+> momo-web@0.0.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 2094 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                               4.82 kB │ gzip:   2.39 kB
+dist/sw.js                                    7.57 kB
+dist/assets/terminalRuntime-6GBZ9nXN.css      5.24 kB │ gzip:   1.92 kB
+dist/assets/index-CBGPtWiH.css               42.91 kB │ gzip:   9.38 kB
+dist/assets/event-CNdo2oXa.js                 1.44 kB │ gzip:   0.69 kB
+dist/assets/core-DhEqZVGG.js                  2.44 kB │ gzip:   0.98 kB
+dist/assets/emojiCatalog-CX6tsjFf.js        176.39 kB │ gzip:  48.53 kB
+dist/assets/terminalRuntime-Du9Rgm6E.js     334.23 kB │ gzip:  84.74 kB
+dist/assets/huddleRuntime-ntSDHBiF.js       531.19 kB │ gzip: 138.62 kB
+dist/assets/index-Ch_lja2S.js             1,579.85 kB │ gzip: 459.13 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.82s
+[spacing] hint in actions=true · actions 40px = send 32px + pb 8px
+[emoji] 앞|뒤 -> 앞🎉|뒤, 입력창 포커스 복귀
+[grow] 한 줄 39px -> 감긴 한 문단 84px (행간 22.75px, 개행 0개)
+[draft] 채널 왕복 뒤 복원 210자
+[draft] 새로고침 뒤 복원 210자
+[offline] 전송 disabled=true · 입력창 disabled=false · 고지 true
+[hint] ↵ 전송 뒤 키 힌트 0개 · 입력창 0자
+[thread] 첨부 진입점 + @kim-intern 멘션 + Esc 한 층
+[deleted] 묘비 4개 심음 -> 화면 1줄 · 머리 행이 대신하는 수 4 · "삭제된 메시지 4개"
+[standin] 머리 행이 대신하는 id 목록 "0199cccc-0000-7000-8000-0000000000c2 0199cccc-0000-7000-8000-0000000000c3 0199cccc-0000-7000-8000-0000000000c4"
+[standin] 착지 틴트 true · 「못 찾음」 고지 0건
+[tone] 안읽음 라벨 rgb(165, 76, 8) · rule rgb(165, 76, 8) · 날짜 라벨 rgb(106, 101, 95) · 에이전트 rgb(74, 103, 133) · 역할 boundary
+[recovery] 화면 "재연결됨, 여기까지 복구" · 낭독 "연결이 다시 이어졌습니다. 이 줄 위까지 복구했습니다." · 진단 seq=264
+[card] 영수증 14px rgb(36, 33, 28) · 오프라인 12px rgb(138, 92, 0) (tone=blocked)
+[avatar] 32px (코어 32) · 사람 radius 3.35544e+07px · 에이전트 radius 6px (agent)
+[tap] 접기 토글 63x24px (기준 24) · 글자 12px
+[empty] 액션 2개: 첫 메시지 쓰기(write) > 멤버 추가하기(add-member)
+[empty] 첫 행동 → 캐럿이 컴포저에 도착
+GATE PASS: 쓰던 글은 채널 전환과 새로고침을 넘겼고, 끊긴 동안에는
+           막고 이유를 말했고, 감긴 한 문단이 상자를 키웠고, ↵를
+           배운 사람에게 설명이 사라졌고, 카드의 영수증이 안내보다
+           앞에 섰고, 경계의 색이 조용한 표지·에이전트와 갈렸고,
+           복구 표지에서 seq가 사라지고 낭독이 자리를 되찾았고,
+           묘비 넷이 한 줄로 접히고도 그 줄이 몇 개를 대신하는지
+           말했으며 그 줄이 인용의 착지점이 되었고, 손가락 타깃과
+           아바타가 각자의 바닥선을 넘었으며, 빈 채널의 맨 앞에 선
+           문이 첫 메시지로 열렸고, 이모지는 caret에 들어갔으며,
+           스레드도 멘션·첨부를 되찾고 24px 간격을 지켰다.
+rc=0

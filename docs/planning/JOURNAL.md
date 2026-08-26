@@ -4,6 +4,16 @@
 > 규칙: 항목당 5줄 이내. 새 항목은 맨 위에 추가하고 기존 항목은 수정하지 않는다. 결정·증거·계획의 정본이 아니다(그건 ADR/STATUS/ROADMAP) — 여기는 "무엇을 하다 어디서 멈췄나"만. 최신이 위.
 
 ---
+## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
+- 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
+- ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
+- 권고: 그록봇 제품 편입 고집 대신 역방향 소비(Remote MCP Tools, ADR-0163 경로)가 폴링·CDP·약관 3문제 동시 탈출. Cloud Agents는 코드 이그레스 결정(ADR-0150 계열) 선행. 결정 큐 Q-DIR/Q-MCP/Q-EGRESS 상신.
+
+## 2026-08-24 (Fable) · ★4차 집행 완결 — 2차 승격 창·v0.1.2 첫 멀티아치 재발행·#1716/#1720 랜딩
+- **v0.1.2 발행 폐곡선**(RELEASING 전 절차): main=d66ca97a → dispatch+owner 승인 2회(위임·자동 승인 감시) → 멀티아치 성공 → list digest 수거(앱 43babdbc…de6d·pg b09eb970…1626) → attestation 2본 PASS → 태그·Release → SELF_HOST §2-B 현행화(#1730). **첫 멀티아치 운영자 pin — Apple Silicon 네이티브 pull 성립. D8 함정 3종(실시간·보관소·claim)이 셀프호스터 이미지에 실림.** 언퍼얼은 포함·기본 꺼짐.
+- 2차 승격 창: #1721(docs)→선sync 짝→#1724(uxui)→#1725→#1726(engine)→최종 짝. 학습 절차(선sync)로 토폴로지 재실행 1회로 끝.
+- #1716 랜딩(#1729): 실측 크기 정본화(0-선언 개방·상한 실측 red proof·PG 12/12) — grok 4차 조기종료(ENOSPC)를 인수 완주. #1720 1·3·4항 랜딩(#1733): sol이 main 전진에 TRACKS 하드 가드로 정직 정지→sync 후 전달. 잔여=2항(fan-out 배치)만.
+- 운영: ENOSPC 4차 — **근본 원인=워크트리 50개 적체**(스테일 node_modules·딥 .build). 정리 판정=성재 큐. 각 회수로 14Gi+ 확보.
 ## 2026-08-24 (Fable) · ★ADR-0170 완결 — 언퍼얼 양 절반 랜딩(#1717 서버·#1719 클라). 성재 요청 기능 종단 완성
 - 서버 절반(#1717, grok 3,828줄): message_unfurl 원장(079)·SSRF 가드 워커·on/off·제거·프록시. 랜딩 중 fail-closed 게이트 2건(GHCR 고지·web-legacy 타입) 정당 적발→해소.
 - 클라 절반(#1719, sol 24파일): 카드·제거·2층 설정. **design-review FAIL(B1·H1)→수리 라운드(1413762d)→재판정 PASS(0·0)**. 수리가 로빙 기계 잠복 결함 2건을 근본 해소: ①비동기 마운트 구성원 정규화 누락(MutationObserver) ②정거장 이력 고착(focusout primary 복원) — 리뷰어 적대 반증 6경로 전부 방어. 레인 230프레임(다크 115) 완주 실증. 적립=#1720(rowFocus jsdom 고정·배치 API·바이트 예산).
@@ -2488,3 +2498,152 @@
 - **배포 창 5** (`a5193e5e`, live 검증 200/스탬프/presence 마커/401): 1차 실패 — prod 정본 centrifugo.json 통째 덮기(redis 엔진 전제·placeholder secret)로 centrifugo fatal→API 다운. 백업 복원으로 라이브 복구 후, presence 네임스페이스만 외과 삽입(recovery류 필드 strip — "history required for recovery" fatal 해소)+**checkconfig 사전 게이트**+자동 롤백 내장으로 완결. **교훈: 서버 config는 호스트 적응본 — 통째 덮기 금지, 백업+외과 삽입+기계 사전검증(checkconfig)이 표준.**
 - 검수앱: ~/Desktop/oort.app = --debug 빌드(a5193e5e) — dev 가드 런타임 실증("skipping update check", 매니페스트 접촉 0). 롤백 원천 차단.
 - 적립: #1281 매니페스트 재발행(성재 맥) · #1283 검색폭 · #1287/#1288 캡처 픽스처 · #1275 self-leave 권한. ADR-0124 증보1은 랜딩됨 — 성재 최종 승인 대기.
+
+## 2026-08-24 · Fable · 완전 자율 실시간 멘션 응답 3축 디깅 (성재 발제)
+- 발제: "현행 오픈소스 셀프호스트 구조에서 멘션→그록봇 응답이 가능한가" → "완전 자율 실시간 방식 + 업계(플러그인/커넥터/Slack/커뮤니티) 방향 디깅".
+- 병렬 리서치 3기(플랫폼·Grok 표면·프로토콜/커뮤니티) 완주 → **`research/2026-08-24-realtime-autonomous-mention-research.md`** 플러시.
+- 핵심 판정: ①업계 공통 구조 = push 전달 + warm 상주 런타임 + 런타임 상주 자격증명(예외 없음) ②oort는 push 전달을 이미 보유(`agentwork:` wake) — 빠진 조각은 Grok 런타임뿐 ③셀프호스트 비교군(Mattermost 등)은 "서버 내장 런타임 + 운영자 key + 봇=멤버"로 수렴 ④MCP server-wake 문은 2026-07-28 스펙에서 공식 폐쇄(sampling deprecated) ⑤Grok sanctioned 실시간 경로는 xAI API 단일 — 선행 노트(push-vs-cdp)의 Q-DIR (b) 재확증.
+- 신규 결정 큐: Q-SLOT(xAI provider를 managed A vs BYOA B 어디부터 — 권고 A 선행) · Q-LOOP(agent-authored message wake 배제 검증 티켓). 각주: 구독 OAuth 상시 데몬은 gray-zone — 상시 봇은 API key 경로 권고.
+
+## 2026-08-24 · Fable · 그록봇 유지 경로 재개통 — routine webhook 트리거 발견 (기준선 갱신)
+- 성재 발제("그록봇 포기 못해 — Slack 멘션 가능? 30초 폴링? 루틴 로그 남나?")로 웹 디깅 2기(Slack 트리거 실체 / 루틴 메커니즘). 정본 **`research/2026-08-24-grokbot-webhook-doorbell.md`**.
+- **⚠️ 기준선 폐기**: 그록봇 루틴에 `{type: webhook}` 트리거 존재 — 루틴별 전용 URL+API key, POST로 run 시작, v0.24(08-21)에서 UI 크래시 수정. 8/16 "웹훅/외부 트리거 전무" 판정 낡음(공식 docs는 아직 미기재 — undocumented 베타).
+- 3답: ①Slack 멘션→그록봇 회신 성립하나 bot-authored 트리거 회귀 반복(4→5→8월)·silent no-fire — oort 배달부로 비권장 ②30초 폴링 불성립(cron 최소 1분·usage 연소·자동 pause) ③run마다 채팅 안 불어남(봇당 대화 1개·Run history 20건 rolling·보고는 지시문 선택).
+- 권장: **webhook doorbell** — oort 멘션→webhook-sender POST(신호만)→루틴 run→Agent Port pull→message post. 준실시간(수십 초)·페르소나/VM/기억 유지·기존 wake-up 신뢰모델과 동형. fallback(타임아웃 감지+15분 sweep) 병설 필수.
+- 성재 결재 대기: SPIKE-WD(webhook doorbell 실측 폐곡선 1티켓) 착수 여부.
+
+## 2026-08-24 · Fable · 도어벨 실측 성공 → ADR-0171 기안·WD 파도 패킷 (성재 "해당 방향 리팩토링" 지시)
+- **SPIKE-WD 전반부 성공**: 성재 계정 그록봇에 `oort-doorbell-spike` webhook 루틴 생성(자연어 릴레이) → 무인증 401 확인 → **Bearer POST → HTTP 200 `{"success":true,"runUuid":…}` 0.95s** (T0=17:51:35 KST). endpoint=`api2.cursor.sh/automations/webhook/<uuid>` — Cursor Automations 인프라 판정 실증. ACK 지연 관측은 성재 보고 대기.
+- **ADR-0171 기안(Proposed)**: hosted 커넥션 단위 도어벨 — 신호만 페이로드(내용 0)·기존 webhook-sender 편입(신규 outbox 생산자 0)·60s 코얼레싱·best-effort+15분 스윕 폴백·`MOMO_DOORBELL_ENABLED` 기본 off·disconnect 동일 tx 소거. 기각: Slack 경유·1분 폴링·VM 내부 gateway.
+- **패킷**: `handoffs/2026-08-24-grokbot-doorbell-packet.md` — WD-1(server)·WD-2(Agent Hub UI)·WD-3(플레이북+프로덕션 루틴 지시문). E2E 수용 목표 p50 ≤ 90s. Issue 미발급(성재 승인 후).
+- **성재 검수 대기**: ①ADR-0171 Accept ②패킷 승인+워커 발사 신호 ③E2E 수용 런. 스파이크 key는 세션 한정 사용 — E2E 후 재발급/루틴 삭제로 무효화 예정.
+
+## 2026-08-24 · Fable · WD 파도 발사 — ADR-0171 Accepted·Issue 발급·grok WD-1 투입
+- 성재 승인("승인할게 작업 진행해줘") + **ACK 지연 실측 확정: 9초**(T0 08:51:35Z → 봇 자기보고 08:51:44Z) — ADR·패킷에 기록.
+- ADR-0171 **Accepted** 반영·패킷 `ready`. Issue: WD-1=#1734·WD-2=#1735·WD-3=#1736.
+- grok 워커 발사: 신선 워크트리 `momo-worktrees/wd1-doorbell`(origin/track/engine 5e1f5291 기반, 브랜치 `feat/1734-wd1-doorbell`) — 기존 engine 워크트리는 dirty+139커밋 뒤처짐이라 비접촉(⚠ 잔재 정리 별도 확인 필요). ADR·패킷 사본을 워커 브랜치 첫 커밋으로 랜딩 지시.
+- 파이프라인: WD-1 검수·머지 → WD-2(uxui·design-review) → WD-3(docs) → E2E 수용(멘션→도어벨→응답 p50≤90s — 도어벨 단독 9s라 여유).
+
+## 2026-08-24 · Fable · WD-1 랜딩 (PR #1737 → track/engine c36311c1) + WD-3 투입
+- **WD-1 검수 재판정 통과**: diff 실물 검토 — 마이그레이션 080 트리거 0·outbox INSERT 0(하드 룰)·RLS FORCE+자가검증·페이로드 byte 상수·시크릿 로그 비출현·`parse_outbound_url` 정책 재사용·disconnect 같은-tx `clear_hosted_doorbell_in_tx`(잠금 순서 준수)·AC1~7 red proof 테스트 실존. 게이트 재실행 전판 그린(fmt·clippy·유닛 28+8·PG admin 4/4+dispatch 4/4, DATABASE_URL 관례).
+- CI RED 1건 수리: 의존성 추가로 GHCR 고지 번들 stale → 재생성 커밋(f52e1596) → CI 전판 그린 → 머지. #1734 종결. ENGINE_HANDOFF **X-WD1 (ready)** 추가.
+- **WD-3(#1736) grok 워커 투입**(feat/1736-wd3-doorbell-docs — WD-1 랜딩 브랜치 기반, 실계약 문서화).
+- **WD-2(#1735)는 승격 게이트 대기**: 도어벨 openapi 생성 타입이 track/uxui로 가려면 engine→main 승격+sync 필요(성재 승인 사안) — X-WD1에 명시.
+
+## 2026-08-24 · Fable · WD-3 랜딩 (PR #1738 → track/engine 02f3712e) — 파도 2/3 완료
+- WD-3 검수 통과: SELF_HOST_AGENT.md §4 도어벨 증보 — API 경로·OpenAPI 오퍼레이션명·에러 문자열·drain 로그 철자까지 코드 자구 대조 일치. 프로덕션 루틴 지시문+15분 스윕(공유 cursor로 중복 무해)+usage/베타/Q-STRUCT 고지 수록. docs 게이트(493 facts) 재실행 그린. #1736 종결.
+- 파도 현황: WD-1·WD-3 track/engine 랜딩 완료. **잔여 = WD-2(#1735, 승격+sync 대기) + E2E 수용 런**.
+- E2E 선결 체인: engine→main 승격(성재 게이트) → (라이브 검증이면) publish-images+배포 창. 로컬/트랙 빌드 E2E는 승격 없이 가능 — 서버 flag on + hosted 커넥션 활성 + 도어벨 등록(REST) + 루틴 지시문 교체(릴레이).
+
+## 2026-08-24 · Fable · 승격 창 집행 (성재 "승격 ㄱㄱ") — WD 도어벨 main 랜딩·WD-2 투입
+- **engine→main 승격 PR #1739 머지**(main=1b4e1402) — WD-1 서버+WD-3 플레이북+ADR-0171 포함 14커밋.
+- sync 짝: **uxui-18 #1741 머지**(02bc7a6e — 충돌 4건 해소: STATUS.md union + GHCR 고지 번들 병합 트리 재생성 check PASS) · engine-22 #1740은 "main is ancestor of both tracks" 체크가 uxui sync 선행 전 실행돼 RED → uxui 랜딩 후 재실행 중.
+- **WD-2(#1735) grok 워커 투입**(wd2-doorbell-ui 워크트리, feat/1735-wd2-doorbell-ui — 도어벨 openapi 계약 전파 확인 후 발사). 스코프 판정: "벨 테스트" 버튼은 서버 시험 발화 엔드포인트 부재로 제외·후속 적립.
+
+## 2026-08-24 · Fable · 성재 발제: 호버 퀵액션 툴바 + 이모지 피커 고도화 — 리서치·티켓·패킷
+- 발제(스크린샷 3장): 호버만으로 우상단 액션 표시 + 이모지 모달 반영, Slack/MM 레퍼런스 탐색 포함.
+- 리서치 1기 완주 → `research/2026-08-24-hover-toolbar-emoji-picker-reference.md`. 핵심: 슬롯 3(3사 수렴)·recency-only 실패 실증(MM #19258)·shortcode 표준=iamcal/Slack·데이터=emojibase compact(en) 83kB gz 자작 권장·a11y=Nolan 패턴.
+- **충돌 2건 성문 해소**: ①B11(R1 6버튼 바 2회 리버트 — 탭스톱 150개·§6 위반) → 조건부 렌더+ARIA toolbar 계약으로 재도입, §6 정본 같은 PR 개정 ②#1688(고정 32종·중앙 모달) → 어휘·모달 supersede, 무라이브러리 유지.
+- 티켓: **UX-EB=#1742**(피커 고도화, 선행) · **UX-HT=#1743**(호버 툴바, 빈도 store 공유 후행). 패킷 `handoffs/2026-08-24-hover-toolbar-emoji-packet.md` ready. 워커 투입은 WD-2 완료 후(grok 병렬 1).
+
+## 2026-08-24 · Fable · 재개 — WD-2 마감·design-review 사이클 (PR #1744)
+- 정지점 복원: WD-2 워커 2세션 모두 조기 종료(구현 커밋 819c38ab·4상태 캡처까지 완료, push/PR 미완) → 오케스트레이터가 마감(게이트 재실행: tsc·lint(경고 5=비접촉 부채)·unit 1446 → PR #1744).
+- **design-review PASS(B0·H1·M5·N2)** — 실렌더 5상태 캡처·기계 프리플라이트 12/12. 수리 커밋 b5010f2e: **H-1**(400/409/404 계약 문구 닫힌 집합을 한국어 사상 — wire 원문 화면 비노출 red proof) · M-1(칩 성공/실패 낱말+원시코드 메타) · M-2(sender key 용어 단일·교체 라벨) · N-1(다시 입력).
+- **M-5 역방향 해소 교훈**: busy 낱말 스캐너 red-proof(confirmBusySplit·rawControlBusySplit)가 컴포넌트 소스 리터럴을 요구 — 리뷰 권고의 "상수 import" 가지는 하우스 관례와 충돌, "죽은 상수 삭제" 가지가 정답. 리뷰 지적을 코드로 재판정하는 규율이 잡아냄.
+- 적립 이슈 발급(M-3·M-4·N-2·벨테스트 문구 정리). 웹 1446+코어 1707 전판 그린, CI 감시 중 — 그린 시 track/uxui 머지→UX-EB 발사.
+
+## 2026-08-24 · Fable · 도어벨 E2E 수용 런 — 서버 폐곡선 GREEN, 벤더 엔드포인트 RED
+- 성재 "E2E 하자". 로컬 셀프호스트 리그(wd1-doorbell 빌드, MOMO_DOORBELL_ENABLED=true) 직접 수행. 증거 `claudedocs/e2e-doorbell-20260824/REPORT.md`.
+- **GREEN(우리 절반 전 구간)**: 멘션 POST→`hosted_agent_inbox_event` 적재→webhook-sender drain→**도어벨 POST 발화**(projection lastFired 23:44:24)→Agent Port `oort_inbox_read` 3건 pull(멘션 seq1·2+agent_job)→`oort_message_post` 응답 랜딩(general seq3). 상수 페이로드·마스킹·게이트 실동작.
+- **RED(벤더 밖)**: cursor webhook 엔드포인트가 오후 내내 500(`{"code":"internal"}`, 오전 200 페이로드도 동일 500) — cursor/그록봇 백엔드 장애. ADR-0171 D5 스윕 폴백이 대비한 실패 모드. 도어벨=가속기, durable inbox=GREEN이라 회수 가능.
+- 부트스트랩: 사람 릴레이가 페어링 TTL(~19분) 소진하는 마찰(값 누락 붙여넣기로 커넥션 1개 expired) → **오퍼레이터 루프백 부트스트랩**(pairing·active handshake를 mcp-method 헤더로 직접 — 그록봇과 바이트 동일 호출, 커스터디 모델 불변).
+- **셀프호스트 갭 2건 → #1747**: ①MOMO_HOSTED_DELIVERY_ENABLED compose 미배선(도어벨 켜도 멘션 미배달 조용한 실패) ②drive 볼륨 초기 권한(root 소유→api 부팅 루프). 둘 다 리그 수동 우회.
+- 도어벨 시크릿 무효화(DELETE 200). 그록봇 측 스파이크 루틴 key 재발급 권고 잔여(#27).
+- **UX-EB(#1742) 워커 완주 → PR #1746**(카탈로그 1914 glyph·gzip 48.5kB<120kB·radix popover 재사용·web 1462 tests). 워커 자체 design-review는 규율상 무효 — 독립 design-review 대기.
+
+## 2026-08-25 · Fable · E2E 잔재 회수 + UX-EB 검수 사이클 (성재 "다음 작업+E2E쪽 작업")
+- **E2E 리그 전량 회수**: cloudflared 터널·socat 브리지(`api`) 종료, `oort` 스택 down(**볼륨 보존**). 추가 발견 — 랜딩 완료 브랜치들의 게이트 잔재 스택 6개(1696·1698·1716·1734wd1·momo240·momo_main, 최장 26h 유휴 — 발열 이슈 패턴) 전부 down → **가동 컨테이너 0**. 볼륨/이미지 리클레임은 권한 차단으로 잔여(성재: momo-docker-reclaim.sh 직접 실행 또는 권한 허용).
+- **재시험 런북 정본**: `claudedocs/e2e-doorbell-20260824/RERUN.md` — 벤더 회복 프로브(무인증 POST 401=회복/500=장애)·리그 재기동 2경로(볼륨 재사용/main 기반)·#1747 랜딩 전 수동 우회 2건·수용 p50≤90s·종료 회수. 태스크 정리: #13(구 E2E, 도어벨 런으로 대체 수행)·#27(스파이크 폐곡선) 종결 — 잔여=성재의 그록봇 측 루틴 삭제/key 재발급.
+- **PR #1746(UX-EB) CI RED 진단·수리**: gitleaks가 `EMOJI_FREQUENCY_STORAGE_KEY`(localStorage **키 이름** 상수)를 generic-api-key 오탐 — pwa/store.ts:32 선례 동클래스로 fingerprint 등록(f29111fe) → **CI 전판 그린**(PR CI gate pass).
+- **독립 design-review 판정: FAIL (B1·H5·M5·N8)** — 정본 `claudedocs/design-review-1746/REPORT.md`+캡처 42장. 핵심: B-1 hover가 키보드 선택 가로채 Enter 오삽입(MentionAutocomplete 패턴이 정답)·H-2 전량 DOM 렌더(패킷 AC 위반, `:` 1글자에 1914건/34화면)·H-3 Esc 층 분리 미동작(React stopPropagation이 Radix DismissableLayer에 무효)·H-4 반응 피커 앵커 996px 이탈·H-5 터치 autofocus. **그렙 게이트 층은 12/12+5/5 clean — findings 전부 §5.3 비측정 축.** 워커 자체 리뷰 무효 규율이 실가치 입증.
+- **수리 사이클**: 폰 패리티 후속 **#1748** 발급(M-5 인용용) → grok 수리 워커 투입(uxeb 워크트리, findings 19건 전량+red-proof 3, 푸시 금지·오케스트레이터 재판정 후 푸시). 완료 시 diff 재판정→게이트→재리뷰→track/uxui 머지.
+
+## 2026-08-25 · Fable · UX-EB 3회전 랜딩 + 자원 대청소 집행 (성재 "알아서 처리·남은 작업 쭉")
+- **UX-EB(#1742) 랜딩**: PR #1746 → track/uxui **c2b779cf**. 리뷰 3회전 폐곡선 — R1 FAIL(B1·H5) → grok 수리 4커밋(dfb612d3~cfc23943: 커서 분리·gridWindow 96칸 창·Esc 층·앵커·autofocus·M/N 일괄) → **R2 FAIL(수리가 새 Blocker 2 생성**: 무선언 가로 스크롤 탭=capture:design exit 1+깃발 탭 소실 · 시트 포커스가 모달 밖=ADR-0112 D6) → 오케스트레이터 마감 90ae48aa(wrap 환원·sheetRef 포커스·창 위3/아래9 편향·빈 상태 복원) → **R3 PASS(Blocker 0·High 0)**. 리뷰 정본 3부+캡처 76+34장 `claudedocs/design-review-1746/`. 교훈: ①R1 게이트 3종(tsc·vitest·프리플라이트)에 **capture:design 레인이 빠져 있었다** — 수리 검수 게이트에 상시 포함할 것 ②수리 diff는 새 결함 축(이번엔 게이트 레인·포커스 소유)을 다시 열 수 있다 — 재리뷰는 표적이 아니라 신규 발굴 포함이어야.
+- **R3 부수 발견**: vitest 전량 red 2건=외부 프로젝트(omd-test-0820) vite preview가 4300/4301 점유(port squat) — PR 무관, 성재 기기 위생 항목.
+- **적립**: #1748(폰 피커 패리티) · soft 채움 3:1(시스템 미결, §5.3 존치) · N-7 탭 7+2 고아(수용, 근거 주석화).
+- **자원 대청소(성재 "워크트리·이미지 알아서" 승인 집행)**: Docker 이미지 8.5→3.1GB(-5.4GB: 게이트 이미지·dangling·미참조 Playwright 3.7GB)·볼륨 645→78MB(momo* 게이트 pgdata 7개 삭제, oort 리그 4개 보존)·리클레임 스크립트 pipefail 결함 패치. 워크트리 10→5(정본 2트랙+main+uxht+**wd1-doorbell 보존**=E2E 수동 우회 compose 실물, diff 백업 `rig-compose-bypass.diff`). 로컬 브랜치 538→183(정본 포함 355 일괄 삭제). 원격 추적 프룬.
+- **UX-HT(#1743) 발사**: uxht-hover-toolbar 워크트리(base=c2b779cf), grok 워커 가동 — 패킷 §2+UX-EB 리뷰 3부 필독 지시(탭스톱 red proof·조건부 렌더·단일 빈도 store·B11 주석+§6 개정 동반). 병행: 성재 검수용 track/uxui Tauri debug 재빌드.
+
+## 2026-08-25 (새벽2) · Fable · UX-HT 1차 리뷰 FAIL(B3) — 수리 방향 확정·재투입 + UX-CB 인테이크
+- **UX-HT PR #1750**: 워커 구현(78eba169+2156cfda) → 게이트 전녹(vitest 1491·capture 완주·CI 그린) → **독립 design-review FAIL: B3·H3·M5·N3** (`claudedocs/design-review-1750/REPORT.md`, 베이스 대조군 빌드까지 세운 계측).
+  - **B-1**: 툴바→피커 전 진입점 크래시 — frequencyStore 단일 snapshotCache가 소비자 2개(피커 32·툴바 3)에서 상호 축출→무한 렌더. **툴바가 이 store의 첫 번째 동시 소비자 추가 표면.**
+  - **B-2**: focus-within 경로 실붕괴 — W-4(행=정거장)와 조건부 마운트가 상호 무효화, 포커스 BODY 추락. 테스트 하네스가 전 행에 칩을 심어 이 갈래를 영원히 통과(사각).
+  - **B-3**: 툴바가 본문 20~26자 가림 + **그걸 재던 assertActionGutterClearsBody를 같은 커밋이 삭제**, 근거 주석("겹침은 계약")은 어느 정본에도 없음 — B11 R2 Blocker의 무승인 회귀.
+- **패턴 기록**: 2연속으로 워커 게이트-전녹 뒤 독립 리뷰가 상호작용 축 Blocker 적발(UX-EB B-1 hover가로채기 → UX-HT B-1/2/3). 기계 레인이 안 누르는 자리(새 진입점 클릭·구성원 0 행·본문 교차)가 반복 사각 — **capture 레인에 "새 진입점은 실제로 누른다" 원칙 편입 필요**(N-2 수리로 이번 PR에서 시작).
+- **수리 재투입**: 방향 확정본(`repair-brief-1750.md`) — B-1=store 전체랭킹 안정캐시+훅 useMemo 슬라이스·소비자2 red proof / B-2+H-1=rest 정거장=행·포커스 시 툴바 ⋯로 핸드오프·normalizeRow 순서 보장 / B-3+H-3+M-3=행 상단 경계 straddle+16px 거터+다크 §2.2 산술+px 자 부활 / H-2=마운트 중 슬롯 순위 동결. grok 수리 워커 가동 중.
+- **UX-CB(#1749) 인테이크**: 성재 실물 검수 발제 — 컴포저 buzz형 단일 그릇(상단 입력+하단 액션 행, Aa 발명 금지)+하단 패딩 정리. 패킷 `handoffs/2026-08-25-composer-buzz-restyle-packet.md` ready. UX-HT 랜딩 후 착수.
+- 부수: 리그 재기동(성재 QA용, owner@oort.local)·검수 앱 c2b779cf 재빌드 배치·외부 vite preview 포트 점유(4023/4024) 제거로 preview-guard 오염 해소.
+
+## 2026-08-25 (새벽3) · Fable · UX-HT 3회전 랜딩 (track/uxui ba914b7a) → UX-CB 발사
+- **UX-HT(#1743) 랜딩**: PR #1750 → track/uxui **ba914b7a**. 리뷰 3회전 — R1 FAIL(B3: store 크래시·focus 붕괴·본문 가림+자 삭제) → 수리1(5커밋: 안정 랭킹 캐시·⋯ 핸드오프·straddle -26px·슬롯 동결·로빙 통일) → R2 FAIL(수리가 만든 **B-4: 핸드오프가 마우스 드래그 선택 사멸**+클릭 fv 링·H-4 최상단 헤더 잘림) → 수리2(4커밋: `:focus-visible` 한정·아래 미러 뒤집기·드래그선택/뒤집기/탭스톱 기계 자 3종 신설) → **R3 PASS(B0·H0)**. vitest 1491→**1506**. 정본 3부 `claudedocs/design-review-1750/`.
+- **교훈 적립(파이프라인)**: ①"수리 방향 확정본" 브리프가 유효 — 라운드2·3 워커가 방향 이탈 0으로 완주 ②그래도 수리는 새 축(마우스 모달리티·상단 충돌)을 열 수 있다 — **재리뷰는 표적+신규발굴 겸용이 정본** ③이번에 신설된 기계 자 3종(드래그 선택·본문 교차 이웃 포함·행당 정거장 실측)이 §5.3 무검사 축을 셋 줄임.
+- **UX-CB(#1749) 발사**: uxcb-composer 워크트리(base=ba914b7a), grok 워커 가동 — 패킷+직전 두 사이클 교훈(새 진입점은 레인이 누른다·popover 트리거 앵커·키보드 모달리티 한정·§2.2 산술) 브리프 포함. uxht 워크트리·브랜치 회수 완료.
+
+## 2026-08-25 (아침) · Fable · UX-CB 3회전 랜딩 (track/uxui 31dc8a89) — UX 파도 3티켓 완결
+- **UX-CB(#1749) 랜딩**: PR #1751 → track/uxui **31dc8a89**. grok 402(Build 잔고 소진)로 **codex 워커 전환**(codex-fleet, 샌드박스 브라우저 게이트는 오케스트레이터 대행). 리뷰 3회전 — R1 FAIL(B1: [@]가 공백 뒤 캐럿에서만 동작·죽은 @ 잔류 / H2: 포커스 링이 그릇 분열·그릇 절반 비활성 면적) → 수리1(문맥 인지 " @" 삽입·그릇 focus-within·클릭 캐럿 포워딩·선택 보존·자 3건 계약화) → R2 FAIL(신규 B2: 워커가 고친 gate-typing 미실행 RED / B3: 그릇 opacity 수리가 스레드 빈 초안 전송 버튼을 원색으로 / H-1R: UA 파란 링 잔존) → 수리2(슬롯 대기 재설계·sending/빈초안 상태 분리·outline-none+그릇 링 단일) → **R3 PASS(B0·H0)**. vitest 1509→**1523**. 정본 3부 `claudedocs/design-review-1751/`.
+- **오케스트레이터 절차 교훈 적립**: codex 샌드박스는 Chromium 불가 — **대행 게이트 세트 = capture:design + gate-typing + gate:composer + gate-shell-layout 전부**(1차엔 capture만 대행해 gate-typing RED가 리뷰까지 갔다). 워커가 게이트 파일을 고치면 "끝까지 초록으로 돈 로그"가 커밋에 동반돼야 한다.
+- 자 결함 2건 오케스트레이터 직접 수리(0309db90): 입력 fv 스펙 오적용·Radix 배치 플레이크(정착 대기, 3연속 그린).
+- 적립: **#1752**(폰 컴포저 buzz형 동형 — M-3·M-5R 폰 작성중 문장 폭 거래 병기, 성재 판단 사안).
+- **UX 파도 완결**: UX-EB(c2b779cf)·UX-HT(ba914b7a)·UX-CB(31dc8a89) — 성재 발제 3건 전부 track/uxui 랜딩. 9회전 리뷰 누적: Blocker 7·High 10 실측 적발·전부 폐곡선. 검수 앱 재빌드 진행 중.
+
+## 2026-08-25 (오전) · Fable · buzz 정합 파도 인테이크 — 성재 검수 피드백 16장 전량 티켓화·2기 발사
+- 성재 발제(스크린샷 16장, 규율=전량 티켓화): 증거 정본 `claudedocs/buzz-feedback-20260825/`(27~41). 패킷 `handoffs/2026-08-25-buzz-alignment-packet.md`.
+- **허들 실체 조사(디깅)**: 스키마 생존(016·046)·**Rust 서버 미포팅**(server-rust 0건)·현행 compose LiveKit 부재·웹 UI 0건. #850의 "서버 완비"는 Swift 시대 기록 — 전제 정정 코멘트. 참조 구현은 `server/Sources/MomoServer/Routes/HuddleRoutes.swift`+`Huddles/`로 레포 생존.
+- **ADR-0172 기안·Accepted**(성재 지시 자체가 결정): 웹 아이콘 lucide-react 통일 — 이모지 무라이브러리(#1688)와 별개 축 성문.
+- 티켓 발급: **UX-D2=#1753**(스레드 보더·첫 메시지 호버 깨짐·cmdK 보더) · **UX-D1=#1754**(lucide 스윕) · **UX-D3=#1755**(⋯ 메뉴 보강 — 기능 실존분만) · **UX-D4=#1756**(사이드바: 프로필 카드·상태 조절(ADR-0160 기배선 UI화)·패널접기 상단·채널 호버 액션·섹션 접기) · **HD-1=#1757**(engine: 허들 REST 포팅+LiveKit compose) · **TC-1=#1758**(채널 하단 터미널 buzz형, T1~T3 기반) · **TC-2=#1759**(기획 적립: 작업 콘솔 팀 트래킹+원격 조작 — 보안/권한 ADR 선행).
+- **발사(병렬 2)**: codex D2(uxui, d2-thread-fix)+HD-1(engine, hd1-huddle). 순서: D2→D1→D3→D4→TC-1(uxui) · HD-1→#850 웹 허들(engine 랜딩+승격 후).
+
+## 2026-08-25 (낮) · Fable · 디스크 위기 회수 +34Gi(실효 109Gi) + 상시 회수 파이프라인 구축 (성재 지시)
+- 가용 10Gi까지 하락. 실측 회수: **Xcode DerivedData 21G**(Swift 퇴역 잔재+타 프로젝트 캐시 — 전부 재생성 가능) · cargo target 3곳 7.7G(wd1 4.1·uxui desktop 2.5·engine desktop 1.1, `cargo clean`) · engine/wd1 node_modules·Pods ~5G(`git clean -fdX` 경로 한정 — 시크릿 env 비접촉) · codex-fleet 런 232개 1.15G · git gc 16M. **가용 10Gi→44Gi→(퍼저블 반영)119Gi.** 잔존 대형: hd1-huddle target 10G(활성 — PG 게이트 대행 임박이라 보존).
+- 각주: `rm -rf`가 프로젝트 경로에서 권한 거부 — **정식 도구 우회가 정답이었다**(cargo clean·git clean -fdX). 이후 회수도 이 도구 어휘로.
+- **상시 파이프라인**: `~/.local/bin/momo-worktree-reclaim.sh`(랜딩 완료+clean 워크트리 자동 reap+브랜치 삭제·7일 codex 런·docker 연계·`--deep`=캐시까지·keep-list=`~/.config/momo/worktree-keep.list`(wd1 등재)) + **launchd 데일리 06:30**(com.momo.reclaim). 오케스트레이터 규율=머지 직후 즉시 회수, launchd=안전망. 메모리 정본 갱신.
+
+## 2026-08-25 (오후) · Fable · 재개 — HD-1 랜딩·engine 정본 복구·RA-6 터널 리서치
+- **HD-1(#1757) 랜딩**: PR #1760 → track/engine **46a1788e**. PG 컨포먼스 대행 PASS(15432 게이트 PG·마이그레이션 전체 적용·fail-closed/grant/단일활성/재입장/RLS 통합 red proof 5.21s). 커밋 한국어 재구성(서버/인프라 분할). **Policy integrity 게이트 첫 실전**: 워커의 local_gate.sh 커버리지 노트 1줄 현행화가 보호 경로 감지 → Fable 감사 판정 → 성재 지시("감사 코멘트 달아줘")로 `Policy-Integrity-Audit: <head>` 대행 게시+라벨 → 재평가 통과. hd1 워크트리(10G target 포함)·브랜치·게이트 PG 즉시 회수.
+- **engine 정본 워크트리 화석 발견·복구**: 152커밋 뒤처짐+dirty(CODEOWNERS 삭제·pr-ci.yml의 랜딩된 보호장치 역행 등 118파일 −55k줄) — 8/24 "잔재 정리 별도 확인" 그 건. 판정=버려진 작업 화석. **stash 백업 후 origin 복구**(stash: "engine 정본 워크트리 화석 diff 백업"). 필요 없다고 확정되면 stash drop은 성재 판정.
+- **D2(#1753)**: 대행 게이트 전녹(vitest 1530/1530) → PR #1761 → CI 그린·독립 design-review(dr-1753) 가동 중.
+- **RA-6 랜딩**: `research/2026-08-25-tunnel-scalability-pricing.md` — ①그록봇 IP=고정 근거 없음·미공개 Cloudflare WARP/Gateway급 대역(Cloudflare 소유이나 공개 anycast에 없음, Cursor ips.json 416개에도 없음)→**IP allowlist 불가** ②Tailscale Funnel=전 플랜 무료 확정(가격 락인 기우)·단 진짜 위험은 beta 3.9년·**WS 1001 이슈(GH #18827 Open)**·LE 인증서 34h rate limit(durable-but-resettable과 충돌 — state 영속화 완화) ③CF named tunnel 값어치=URL lock-in 소멸(Funnel 커스텀 도메인 공식 불가 GH #16478) ④한도 도달 플레이북 표. 성재 결정 2건 대기(§6).
+- 디스크: hd1 회수 반영 가용 **128Gi**.
+
+## 2026-08-25 (오후2) · Fable · D2 랜딩 (track/uxui 0e202e5e) — buzz 파도 2/8
+- **D2(#1753) 랜딩**: PR #1761 → track/uxui **0e202e5e**. 리뷰 2회전 — R1 PASS(B0)이나 H-1(⌘K 링이 그릇으로 이사만 해 화면 동일 픽셀 — 상시 포커스 모달의 링은 상시 점등) → 마감 수리(링 완전 제거+hairline·thread-empty 캡처 레인·호버/rest 프레임 분리) → **R2 PASS(B0·H0·회귀 0)**. 채널 straddle 수치는 UX-HT R3와 "한 자도 다르지 않음" 실측.
+- 캡처 레인 신설 과정의 학습 3연타: ①스레드 재열람은 스토어 캐시로 빈 상태 불가 → 자연 경로(툴바 [답글]) ②scrollIntoView가 Virtuoso 리마운트로 locator-실호버 어긋남 → 화면 안 last() 행 ③앞 레인의 행 포커스 잔존으로 툴바 2개(hover∨focus 계약) → 컴포저 클릭으로 포커스 정리 선행. 전부 레인 주석으로 성문.
+- 적립: M-3(폰 스레드 빈 상태 격 차이)·N-2(border-dashed 첫 등장 무자)·N-4(naked_focus 문자열 맹점).
+- **D1(#1754 lucide, ADR-0172) codex 워커 발사**(d1-lucide-icons, base 0e202e5e). d2 워크트리·브랜치 즉시 회수.
+
+## 2026-08-25 (오후3) · Fable · URL 안정성 인터뷰 수렴 + 계정·권한 감사 + D1 사이클
+- **우로보로스 인터뷰 수렴**(5라운드, 모호도 0.17): 셀프호스트 URL 안정성 제품 범위 확정 — 정본 `research/2026-08-25-selfhost-url-stability-interview.md`. 핵심: 3-Tier(B 그록봇 자동 프로비저닝+정체성 영속=기본 / A oort 고정 별칭=opt-in 폴백 / 숙련자 문서) · 불변식 "URL은 바뀌지 않는다"(성재 직관 승격) · 성공 기준(터미널 명령 0·15분·복구 5분) · RQ-1~7 도출. 다음: RA-7(RQ-1+2 실측) 발사 성재 신호 대기.
+- **계정·권한 5축 감사 랜딩**: `research/2026-08-25-selfhost-accounts-roles-audit.md` — 계정 발급 실존/패스워드 초기화 부재/멤버 라이프사이클 10경로 Rust 미이식/role 추가 무겁고 fail-closed 의도/커스텀 이름은 클라 상수 2곳으로 최경량. 티켓 후보 AC-1~4 적립(발급 대기).
+- **D1(#1754) 사이클**: 워커 실측 반전 — base가 이미 lucide 165곳 표준(손제작 기능 SVG 0) → 경계 가드+문서 정본화만 랜딩(무발명 판정 정확). ADR-0172 배경 실측 정정. PR #1762, 대행 게이트 전녹(vitest 1535), CI+독립 리뷰 가동 중. **D1 닫히면 성재 지시대로 정지.**
+
+## 2026-08-25 (저녁) · Fable · 정지점 — D1 머지 직전 동결 (성재 "바로 정지, 재개 가능하게")
+- D1(#1754) 리뷰 3회전 진행: R1 H2 → 수리(f0f37943) → R2 H2(잔량 수치 — 리뷰어 자기 grep 사각 자백, "손으로 센 수는 썩는다") → 수리(84b4d537, 1안=수 삭제·성질만·24px 복원·§5.2 스캔표면 참말). R3 최종 확인 발주 상태에서 **성재 지시로 머지 없이 동결**. 재개 절차·적립 6건은 태스크 #30에 성문.
+- 세션 랜딩 누계: HD-1(허들 서버, engine)·D2(스레드 표면, uxui). URL 안정성 인터뷰 확정본·계정권한 5축 감사·RA-6 랜딩.
+
+## 2026-08-26 (새벽) · Fable · 재개 — D1·D3 랜딩, 워커 레인 Cursor CLI 전환
+- **워커 레인 전환**: Codex CLI 공식 은퇴(성재 고지) → **cursor-agent + cursor-grok-4.6-high-fast**(kwak@dawn.kim 기로그인, 스모크 실증). 호출: `-p --trust -f`. 호스트 직접 실행이라 브라우저 게이트 워커 자가 실행 가능(대행 세트 불요). 메모리 정본 갱신. 죽어 있던 D3 codex 워커(exit 1)·고아 프로세스 정리.
+- **D1(#1754) 랜딩**: PR #1762 → track/uxui 4c913f77(동결 해제 후 머지). 적립 6건 승계 **#1763**.
+- **D3(#1755) 랜딩**: PR #1764 → track/uxui **1eb7c627**. 새 레인 첫 완주 — 사실 판정 정확(Mark unread=GREATEST 단조 적립·Copy link=기존 딥링크 재사용). 리뷰 3회전: R1 B1(**Tauri에서 열 수 없는 주소 복사** — absoluteApiBase가 정답, 옆 파일 패턴) → R2 B1(**콜드 오픈 착지 선재 버그**: ChatShell 채널 리셋 효과가 방금 파싱한 앵커를 소거 — #1195 머리말 "고쳤다"가 거짓이었음을 실측) → 수리(앵커 채널 소속화 urlAnchorForChannel) → **R3 PASS(3회전 13건 전부 폐곡선)**. **부수확: 붙여넣은 메시지 링크 콜드 착지가 제품 역사상 처음 실동작.** 코어 낱말 승격(copyLabels.ts — 웹·폰 단일 출처). vitest 1543→1554.
+- **D4(#1756 사이드바) 발사**(d4-sidebar, base 1eb7c627 — 프로필 카드·상태 조절(ADR-0160 기배선 UI화)·패널 접기 상단 이동·채널 호버 액션+섹션 접기).
+
+## 2026-08-26 (오전) · Fable · D4 랜딩 (track/uxui e1a0ca42) — 파도 최초 전 등급 0 판정
+- **D4(#1756) 랜딩**: PR #1765 → track/uxui **e1a0ca42**. 리뷰 3회전 — R1 FAIL(B1: 모델은 overlayOpen을 받는데 호출부가 리터럴 false — UX-HT가 푼 클래스의 배선 누락, +H2 폰 44px 강등·포커스 BODY) → 수리 14/14 → R2 PASS+H1(**overlayHeld ⌘K 누수** — 해제가 헤더 blur에만 걸려 팔레트 경로에서 영구 잔존, 전역 플래그가 DM 섹션까지 고정) → 수리(실닫힘+rAF 해제·섹션 스코프·양 경로 자 확장) → **R3 PASS 전 등급 0**(파도 최초 무결 판정). vitest 1563→1577. 커밋 한국어 재구성(soft-reset 재구성 — commit-tree+reset --hard는 권한 거부).
+- 상태 픽커의 ADR-0160 의미 우선 판정(buzz Offline 모사 대신 선언값 auto/away/dnd)이 리뷰에서 정당 확인.
+- **TC-1(#1758 하단 터미널 도크) 발사**(tc1-terminal, base e1a0ca42 — 선행 조사: 작업 세션이 조작 가능한가 관찰 전용인가가 스코프 분기·가짜 어포던스 금지·원격 조작은 TC-2 절대 금지).
+
+## 2026-08-26 (낮) · Fable · TC-1 랜딩 (track/uxui 264bb1dc) — buzz 정합 파도 uxui 6/6 완결
+- **TC-1(#1758) 랜딩**: PR #1766. 조사 판정=작업 세션은 관찰 전용 → **관전 터미널 도크 정직 축소**(입력 미발명). 리뷰 4회전: R1 B1(확대 640px 고정이 720/844에서 컴포저를 화면 밖으로·타임라인 0px) → 기하 재설계(세로 토큰 4종·양보 순서 터미널→띠→컴포저·**컴포저 ⊂ 뷰포트 하드 불변식**·기하 자 3높이) → R2 H2(확대 무동작 vh≤784·0줄 침묵) → 수리(확대=띠까지 실취득·이득 0=disabled·folded 동형 정직 문장) → R3 H1(크롬 상수 200이 폰 폭에서 사본 거짓 — §5.5①) → 수리(실높이 판정·상수 삭제) → **R4 PASS(B0·H0)**. vitest 1584→1585.
+- **워커 예고→실측 RED 5게이트**(헤더 트리거 의미 변경) 재배선 — 보호 단정 강도 유지·evidence 로그 커밋 동반(UX-CB B-2 교훈 제도화 첫 실전).
+- **buzz 정합 파도 uxui 완결(6/6)**: D2 0e202e5e·D1 4c913f77·D3 1eb7c627·D4 e1a0ca42·TC-1 264bb1dc(+HD-1 engine 46a1788e). 리뷰 누적 16회전, Blocker 9·High 15 실측 적발·전부 폐곡선. 잔여: #850 웹 허들(승격 후)·TC-2 기획·AC-1~4 발급 대기.
+- 검수 앱 재빌드 착수(track/uxui 264bb1dc).

@@ -6,7 +6,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from "react";
-import { SendHorizontal, Smile } from "lucide-react";
+import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import type {
   MessageAttachment,
   RequestRouting,
@@ -156,8 +156,8 @@ const MAX_ROWS = 6;
 export { COMPOSER_OFFLINE_COPY };
 
 /**
- * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 메타 행이고, 폰 DM에서는 기존처럼 그
- * 공유 행 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
+ * 컴포저 힌트 판. 데스크톱에서는 U-8 공유 액션 슬롯이고, 폰 DM에서는 기존처럼
+ * 그릇 바로 위의 상시 안내다. `sharedRow`가 두 배치의 경계를 DOM에도 남긴다.
  */
 function ComposerHint({
   directory,
@@ -173,18 +173,17 @@ function ComposerHint({
   return (
     <p
       id="composer-hint"
-      // px-6 = 폼의 p-3(12px) + 텍스트에어리어의 px-3(12px). 힌트의 첫 글자가
-      // 플레이스홀더의 첫 글자와 같은 세로선에 선다. px-4는 어느 쪽 모서리와도
-      // 맞지 않아 4px 어긋난 줄로 보였다.
-      //
-      // DM 문장이 없을 때는 줄 전체가 wide-only다(기존 동작 그대로). 안쪽
-      // span에만 걸면 좁은 폭에서 빈 <p>의 pb-2가 남아 8px 죽은 공간이 된다.
+      // 공유 판은 액션 아이콘과 보내기 사이에서 이미 예약된 가로폭만 쓴다. 별도
+      // 26px 행을 두면 ↵를 배운 뒤에도 타임라인과 그릇 사이에 죽은 밴드가 남는다.
+      // 폰 DM 판만 그릇 위에 서므로 기존 텍스트 기둥 인셋(px-6)을 유지한다.
       className={cn(
-        "px-6 pb-2 text-meta text-ink-muted",
+        sharedRow
+          ? "min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
+          : "px-6 pb-2 text-meta text-ink-muted",
         !dmAgent && "wide-only"
       )}
       data-testid="composer-hint"
-      data-composer-meta-row={sharedRow ? "" : undefined}
+      data-composer-meta-slot={sharedRow ? "" : undefined}
     >
       {dmAgent && (
         <span data-testid="composer-dm-hint">
@@ -255,10 +254,9 @@ function AgentActivityBar({
 
   return (
     <ul
-      // `px-6`은 바로 위 공유 메타 행(기본=힌트, 작성 중=사람)과 같은 값이다. 이 줄은
-      // 원래 `px-4`였고, 당시 힌트·작성 중·작업 중 3행이 서로 다른 세로선에 섰다
-      // (design-review PR 1059 H-3). 정답은 이 파일이 힌트 판에 이미 적어 뒀다:
-      // 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px.
+      // `px-6`은 폼의 `p-3` + 텍스트에어리어의 `px-3` = 24px이다. 작업 줄은
+      // textarea 텍스트 기둥에 서고, 작성 중·키 힌트는 #1749에서 액션 행 가운데
+      // 슬롯으로 내려갔다.
       className="flex flex-col gap-1 px-6 pb-2"
       // The offline sentence is a real list item below, so it is announced in
       // reading order rather than glued onto the list's name and read twice.
@@ -508,11 +506,11 @@ export function Composer({
   const turns = agentTurnsInChannel(signals, channelId, nowMs);
 
   /**
-   * 작성 중이 아닐 때 공유 메타 행을 힌트가 차지하는가 (U-8).
+   * 작성 중이 아닐 때 공유 액션 슬롯을 힌트가 차지하는가 (U-8 · #1749).
    *
-   * 폰에서 키 힌트는 원래 보이지 않는다. 그때는 `TypingLine`의 예약판이 같은 26px을
-   * 지켜, 사람의 타이핑이 시작돼도 폰 컴포저가 움직이지 않는다. DM 힌트는 폭과
-   * 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
+   * 폰에서 키 힌트는 원래 보이지 않는다. 빈 슬롯과 `TypingLine`은 모두 이미 높이가
+   * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
+   * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
   const metaMode = composerMetaMode({
     typistCount: typists.length,
@@ -739,7 +737,7 @@ export function Composer({
       onDrop={drop.onDrop}
       data-dragging={drop.dragging ? "" : undefined}
       className={cn(
-        "safe-area-bottom border-t border-line",
+        "safe-area-bottom shrink-0 border-t border-line",
         // 강조는 배경 한 겹이다. 점선 테두리와 가운데 정렬된 큼직한 안내는
         // 랜딩 페이지의 문법이고, 이 자리에서 필요한 것은 "여기 놓으면 된다"를
         // 말하는 최소한이다.
@@ -790,129 +788,8 @@ export function Composer({
         )
       )}
 
-      <form onSubmit={onSubmit} className="relative flex items-end gap-2 p-3">
-        <MentionAutocompleteList
-          id="composer-mention-list"
-          candidates={mentions.candidates}
-          highlight={mentions.highlight}
-          onChoose={mentions.choose}
-          testId="mention-list"
-          optionTestId="mention-option"
-        />
-
-        {/* 클립은 입력창 **왼쪽**이다. 전송이 오른쪽 끝을 갖는 것과 짝이고
-            (넣는 것은 앞, 보내는 것은 뒤), Slack·Discord·Linear 가 전부 같은
-            자리를 쓴다 — 이 자리는 배울 필요가 없는 자리다. */}
-        <AttachButton onPick={onFiles} disabled={offline} />
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="tap-target shrink-0"
-          disabled={offline}
-          aria-label="이모지 넣기"
-          title="이모지 넣기"
-          data-testid="composer-emoji-trigger"
-          onClick={(event) => {
-            mentions.close();
-            emoji.openPicker(event.currentTarget);
-          }}
-        >
-          <Smile aria-hidden="true" />
-        </Button>
-        <label className="sr-only" htmlFor="composer-input">
-          {composerFieldLabel(channelLabel, recipient)}
-        </label>
-        <textarea
-          id="composer-input"
-          ref={inputRef}
-          value={text}
-          // `rows`는 최소 높이만 정한다. 실제 높이는 `useAutoGrow`가 내용에서 재고,
-          // 그래서 접힌 줄까지 함께 자란다.
-          rows={MIN_ROWS}
-          onChange={(event) => {
-            const next = event.target.value;
-            mentions.onTextChange(next, event.target.selectionStart ?? 0);
-            // 초안은 **입력마다** 남는다. 디바운스를 걸지 않는 이유는 이 저장이
-            // 문자열 하나를 동기로 쓰는 일이고(같은 저장소에 세션 기록이 이미 이
-            // 방식으로 산다), 디바운스가 사는 창이 정확히 「마지막 몇 글자를
-            // 잃는 창」이기 때문이다.
-            // 「작성 중」은 **키에서만** 나간다 (ADR-0149). 타이머가 없으므로 입력이
-            // 멈추면 송신도 멈추고, 흐림·탭 전환·언마운트에 끌 것이 없다. 소멸은
-            // TTL이 하고 「정지」 신호는 계약에 없다.
-            typing.onInput();
-          }}
-          onSelect={(event) =>
-            mentions.setCaret(
-              (event.target as HTMLTextAreaElement).selectionStart ?? 0
-            )
-          }
-          onKeyDown={onKeyDown}
-          // 스크린샷을 ⌘V 로 넣는 것은 이 도구를 쓰는 사람이 하루에 몇 번씩 하는
-          // 일이다. 글이 함께 온 붙여넣기는 가로채지 않는다(`useComposerDropZone`).
-          onPaste={drop.onPaste}
-          // The composition window, in three lines. `compositionstart` closes
-          // the guard (a new session cannot be a stale commit), `compositionend`
-          // opens it, and any key release closes it again, which bounds the
-          // guard to the single keystroke that can sit between those two events.
-          onCompositionStart={() => {
-            justComposedRef.current = false;
-          }}
-          onCompositionEnd={() => {
-            justComposedRef.current = true;
-          }}
-          onKeyUp={() => {
-            justComposedRef.current = false;
-          }}
-          // A composition abandoned by clicking away leaves the guard raised;
-          // it must not still be raised when the caret comes back.
-          onBlur={() => {
-            justComposedRef.current = false;
-          }}
-          // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
-          // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
-          // 이 자리는 렌더만 한다. 좁은 상자에서 **무엇이 사라지는지**도 코어의
-          // 규칙이다(#1422): 절을 통째로 버리고 절 안에서는 자르지 않는다.
-          // `composer-placeholder` 의 `1lh`(#1418)는 그 뒤에 남는 마지막
-          // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
-          placeholder={placeholder}
-          aria-autocomplete="list"
-          aria-expanded={mentions.visible}
-          aria-controls={mentions.visible ? "composer-mention-list" : undefined}
-          aria-activedescendant={
-            mentions.visible
-              ? `composer-mention-list-option-${mentions.highlight}`
-              : undefined
-          }
-          aria-describedby={showComposerHint ? "composer-hint" : undefined}
-          data-testid="composer-input"
-          className="tap-target composer-placeholder min-w-0 flex-1 resize-none rounded-md border border-line-strong bg-transparent px-3 py-2 text-body leading-relaxed placeholder:text-ink-muted focus-visible:focus-ring"
-        />
-        <Button
-          type="submit"
-          size="icon"
-          className="tap-target"
-          // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
-          // 끝나므로, 막고 **왜**를 아래 한 줄이 말한다. 입력창은 잠그지 않는다:
-          // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
-          disabled={!canSend}
-          aria-label="메시지 보내기"
-          title={
-            offline
-              ? COMPOSER_OFFLINE_COPY
-              : (attachBlockCopy ??
-                (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
-          }
-          data-testid="composer-send"
-        >
-          <SendHorizontal />
-        </Button>
-      </form>
-
-      {/* 왜 못 보내는지는 버튼 옆이 아니라 버튼 **아래** 한 줄이다: 비활성 버튼은
-          자기가 왜 비활성인지 말하지 못하고, `title`은 포인터가 있어야 열린다.
-          토스트가 아닌 이유는 이 앱의 규율이다 — 문제가 있는 자리에 문장이 산다.
-          `role="status"`인 것은 이것이 사고가 아니라 상태라서다. */}
+      {/* 상태 행은 그릇 위에 선다. 힌트·작성 중 교대 슬롯은 액션 행 안으로 내려가
+          별도 26px 예약 띠를 만들지 않는다. 마지막 컨트롤 뒤에는 p-3+safe-area만 둔다. */}
       {offline && (
         <p
           role="status"
@@ -923,34 +800,6 @@ export function Composer({
         </p>
       )}
 
-      {/* Enter가 보내기가 된 이상, 줄바꿈이 어디로 갔는지 이 자리에서 말해야
-          한다. 한 줄이고, 입력창 바로 아래이며, 조용하다: 이 힌트는 알림이
-          아니라 키 배치의 설명이다. 폰에는 화면 키보드의 줄바꿈 키가 따로 있고
-          ⌘도 없으므로 좁은 폭에서는 접는다.
-
-          goal B13(QA H7): 에이전트와의 1:1 DM에서는 멘션 없이도 답한다는 사실이
-          한 조각 더 붙는다. 새 줄이 아니라 같은 줄인 이유 — 둘 다 "이 입력창이
-          어떻게 동작하는가"이고, 설명이 두 줄이 되는 순간 안내가 아니라 배너다.
-          이쪽은 wide-only가 아니다: ⌘ 없는 기기에도 이 규칙은 그대로 있고,
-          폰에서 멘션을 타이핑하는 수고는 오히려 더 크다.
-
-          감사 M-7: 키 배치 설명은 **배운 사람에게는 사라진다**(`sendHint.ts`).
-          DM 문장은 그 규칙 밖이다 — 그것은 키가 아니라 **이 방의 성질**이라 방마다
-          다르고, 한 번 배워서 끝나지 않는다. 두 조각이 모두 없거나 폰에서 키 조각이
-          접히는 판에는 `TypingLine`의 빈 판이 같은 26px을 예약한다. 힌트 문단을
-          빈 채로 남기지 않는 이유는 `aria-describedby`가 가리키는 빈 요소가
-          보조기술에 아무 말도 하지 않으면서 pb-2만 차지하기 때문이다.
-
-          U-8: 넓은 화면에서는 이 힌트와 작성 중 문장이 **동시에 서지 않는다.**
-          기본에는 힌트가 26px 공유 행을 쓰고, 사람이 쓰기 시작하면 같은 자리를
-          `TypingLine`이 쓴다. 폰의 DM 문장은 wide-only 키 힌트가 아니라 방의 성질이라
-          공유 대상에서 빠지고, 기존처럼 타이핑 행 위에 상시 남는다.
-
-          #1384: 키 조각의 문장과 이음쇠는 코어가 든다(`composerCopy.ts`의
-          「키보드 힌트의 표기법」). 이 앱의 키 힌트는 세 자리에 서 있었고
-          (여기 · `timeline/MessageEditor.tsx` · `sidebar/Sidebar.tsx`) 크기도
-          이음쇠도 문법도 갈라져 있었다. 여기 있던 쉼표가 가운뎃점이 된 것이
-          그 통일이고, 그것을 코어의 테스트가 전수로 잰다. */}
       {persistentPhoneDmHint && (
         <ComposerHint
           directory={directory}
@@ -959,34 +808,186 @@ export function Composer({
           sharedRow={false}
         />
       )}
-      {metaMode === "hint" ? (
-        <ComposerHint
-          directory={directory}
-          dmAgent={dmAgent}
-          keysHintNeeded={keysHintNeeded}
-          sharedRow
-        />
-      ) : (
-        <TypingLine
-          memberIds={metaMode === "typing" ? typists : []}
-          threshold={typingThreshold}
-          directory={directory}
-        />
-      )}
-
-      {/* 공유 메타 행에서 사람이 작성 중이면 바로 아래의 에이전트 작업 중 줄과
-          인접한다. 두 낱말의 대조축은 TypingLine의 머리 주석이 정본이다. */}
       <AgentActivityBar
         turns={turns}
         directory={directory}
         nowMs={nowMs}
         live={railLive}
       />
+
+      <form onSubmit={onSubmit} className="relative p-3">
+        <MentionAutocompleteList
+          id="composer-mention-list"
+          candidates={mentions.candidates}
+          highlight={mentions.highlight}
+          onChoose={mentions.choose}
+          testId="mention-list"
+          optionTestId="mention-option"
+        />
+        <div
+          className="rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring"
+          data-testid="composer-frame"
+          onClick={(event) => {
+            // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
+            // 입력 컨트롤의 일부이므로 액션 행의 빈 폭을 눌러도 캐럿을 돌려준다.
+            if (
+              event.target instanceof Element &&
+              event.target.closest("button")
+            ) {
+              return;
+            }
+            inputRef.current?.focus();
+          }}
+        >
+          <label className="sr-only" htmlFor="composer-input">
+            {composerFieldLabel(channelLabel, recipient)}
+          </label>
+          <textarea
+            id="composer-input"
+            ref={inputRef}
+            value={text}
+            // `rows`는 최소 높이만 정한다. 실제 높이는 `useAutoGrow`가 내용에서 재고,
+            // 그래서 접힌 줄까지 함께 자란다.
+            rows={MIN_ROWS}
+            onChange={(event) => {
+              const next = event.target.value;
+              mentions.onTextChange(next, event.target.selectionStart ?? 0);
+              // 초안은 **입력마다** 남는다. 디바운스를 걸지 않는 이유는 이 저장이
+              // 문자열 하나를 동기로 쓰는 일이고(같은 저장소에 세션 기록이 이미 이
+              // 방식으로 산다), 디바운스가 사는 창이 정확히 「마지막 몇 글자를
+              // 잃는 창」이기 때문이다.
+              // 「작성 중」은 **키에서만** 나간다 (ADR-0149). 타이머가 없으므로 입력이
+              // 멈추면 송신도 멈추고, 흐림·탭 전환·언마운트에 끌 것이 없다. 소멸은
+              // TTL이 하고 「정지」 신호는 계약에 없다.
+              typing.onInput();
+            }}
+            onSelect={(event) =>
+              mentions.setCaret(
+                (event.target as HTMLTextAreaElement).selectionStart ?? 0
+              )
+            }
+            onKeyDown={onKeyDown}
+            // 스크린샷을 ⌘V 로 넣는 것은 이 도구를 쓰는 사람이 하루에 몇 번씩 하는
+            // 일이다. 글이 함께 온 붙여넣기는 가로채지 않는다(`useComposerDropZone`).
+            onPaste={drop.onPaste}
+            // The composition window, in three lines. `compositionstart` closes
+            // the guard (a new session cannot be a stale commit), `compositionend`
+            // opens it, and any key release closes it again, which bounds the
+            // guard to the single keystroke that can sit between those two events.
+            onCompositionStart={() => {
+              justComposedRef.current = false;
+            }}
+            onCompositionEnd={() => {
+              justComposedRef.current = true;
+            }}
+            onKeyUp={() => {
+              justComposedRef.current = false;
+            }}
+            // A composition abandoned by clicking away leaves the guard raised;
+            // it must not still be raised when the caret comes back.
+            onBlur={() => {
+              justComposedRef.current = false;
+            }}
+            // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
+            // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
+            // 이 자리는 렌더만 한다. 좁은 상자에서 **무엇이 사라지는지**도 코어의
+            // 규칙이다(#1422): 절을 통째로 버리고 절 안에서는 자르지 않는다.
+            // `composer-placeholder` 의 `1lh`(#1418)는 그 뒤에 남는 마지막
+            // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
+            placeholder={placeholder}
+            aria-autocomplete="list"
+            aria-expanded={mentions.visible}
+            aria-controls={mentions.visible ? "composer-mention-list" : undefined}
+            aria-activedescendant={
+              mentions.visible
+                ? `composer-mention-list-option-${mentions.highlight}`
+                : undefined
+            }
+            aria-describedby={showComposerHint ? "composer-hint" : undefined}
+            data-testid="composer-input"
+            // 포커스 표시는 한 컨트롤인 바깥 그릇이 진다. 안쪽 textarea의 UA
+            // outline까지 남기면 그릇 안에 두 번째 상자가 생긴다.
+            className="tap-target composer-placeholder block w-full min-w-0 resize-none rounded-sm bg-transparent px-3 py-2 text-body leading-relaxed outline-none placeholder:text-ink-muted focus-visible:outline-none"
+          />
+          <div
+            className="flex items-center justify-between gap-2 pb-2 pl-1 pr-2"
+            data-testid="composer-actions"
+          >
+            <div className="flex items-center gap-1">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="tap-target shrink-0"
+                aria-label="멘션 넣기"
+                title="멘션 넣기"
+                data-testid="composer-mention-trigger"
+                onClick={mentions.insertTrigger}
+              >
+                <AtSign aria-hidden="true" />
+              </Button>
+              {/* 클립은 액션 행의 왼쪽이다. 넣는 것은 앞, 보내는 것은 뒤라는
+                  기존 순서를 한 그릇 안에서도 그대로 지킨다. */}
+              <AttachButton onPick={onFiles} disabled={offline} />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="tap-target shrink-0"
+                aria-label="이모지 넣기"
+                title="이모지 넣기"
+                data-testid="composer-emoji-trigger"
+                onClick={(event) => {
+                  mentions.close();
+                  emoji.openPicker(event.currentTarget);
+                }}
+              >
+                <Smile aria-hidden="true" />
+              </Button>
+            </div>
+            {metaMode === "hint" ? (
+              <ComposerHint
+                directory={directory}
+                dmAgent={dmAgent}
+                keysHintNeeded={keysHintNeeded}
+                sharedRow
+              />
+            ) : (
+              <TypingLine
+                memberIds={metaMode === "typing" ? typists : []}
+                threshold={typingThreshold}
+                directory={directory}
+              />
+            )}
+            <Button
+              type="submit"
+              size="icon"
+              className="tap-target shrink-0"
+              // 오프라인에서는 보낼 수 없다 (진단 H-10). 누르면 실패 행 하나를 만들고
+              // 끝나므로, 막고 **왜**를 위 한 줄이 말한다. 입력창은 잠그지 않는다:
+              // 연결이 끊겼다고 글을 못 쓸 이유가 없고, 그동안 쓴 것은 초안이 지킨다.
+              disabled={!canSend}
+              aria-label="메시지 보내기"
+              title={
+                offline
+                  ? COMPOSER_OFFLINE_COPY
+                  : (attachBlockCopy ??
+                    (isMobile ? "메시지 보내기" : "메시지 보내기 (Enter)"))
+              }
+              data-testid="composer-send"
+            >
+              <SendHorizontal />
+            </Button>
+          </div>
+        </div>
+      </form>
+
       <EmojiPickerDialog
         open={emoji.open}
         onOpenChange={emoji.setOpen}
         onPick={emoji.pick}
         opener={emoji.opener}
+        anchor={emoji.anchor}
         purpose="insert"
         testId="composer-emoji-picker"
       />

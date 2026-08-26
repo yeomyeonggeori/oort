@@ -1,5 +1,12 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { workspaceRailTile } from "./workspaceRailModel";
+
+const railSource = readFileSync(
+  fileURLToPath(new URL("./WorkspaceRail.tsx", import.meta.url)),
+  "utf8"
+);
 
 const WS_ID = "9f2a1c00-0000-4000-8000-000000000000";
 
@@ -66,5 +73,22 @@ describe("workspaceRailTile", () => {
       "abcd-ef"
     );
     expect(tile.initial).toBe("A");
+  });
+});
+
+describe("접힌 레일 묶음 (M-4)", () => {
+  it("패널 열기는 워크스페이스 nav 밖에 산다", () => {
+    const navOpen = railSource.indexOf('aria-label="워크스페이스"');
+    const navClose = railSource.indexOf("</nav>");
+    const expand = railSource.indexOf('data-testid="sidebar-expand"');
+    const add = railSource.indexOf('data-testid="add-workspace"');
+    expect(navOpen).toBeGreaterThan(-1);
+    expect(add).toBeGreaterThan(navOpen);
+    expect(add).toBeLessThan(navClose);
+    expect(expand).toBeGreaterThan(navClose);
+    expect(railSource).toContain("mt-auto flex size-rail-tile");
+    expect(railSource).toContain(
+      "border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+    );
   });
 });

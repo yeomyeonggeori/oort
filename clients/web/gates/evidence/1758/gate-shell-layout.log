@@ -1,0 +1,136 @@
+
+> momo-web@0.0.0 build
+> tsc -b && vite build
+
+vite v6.4.3 building for production...
+transforming...
+✓ 2094 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                               4.82 kB │ gzip:   2.39 kB
+dist/sw.js                                    7.57 kB
+dist/assets/terminalRuntime-6GBZ9nXN.css      5.24 kB │ gzip:   1.92 kB
+dist/assets/index-CBGPtWiH.css               42.91 kB │ gzip:   9.38 kB
+dist/assets/event-CNdo2oXa.js                 1.44 kB │ gzip:   0.69 kB
+dist/assets/core-DhEqZVGG.js                  2.44 kB │ gzip:   0.98 kB
+dist/assets/emojiCatalog-CX6tsjFf.js        176.39 kB │ gzip:  48.53 kB
+dist/assets/terminalRuntime-Du9Rgm6E.js     334.23 kB │ gzip:  84.74 kB
+dist/assets/huddleRuntime-ntSDHBiF.js       531.19 kB │ gzip: 138.62 kB
+dist/assets/index-Ch_lja2S.js             1,579.85 kB │ gzip: 459.13 kB
+
+(!) Some chunks are larger than 500 kB after minification. Consider:
+- Using dynamic import() to code-split the application
+- Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+- Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.
+✓ built in 1.83s
+ok   1280x800 채널  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 컴포저가 창 안에 남는다  {"bottom":747,"viewportHeight":800,"anchored":true}
+ok   1280x800 접기 전 56px 레일 + 184px 채널 패널  {"collapsed":false,"sidebarWidth":240,"mainWidth":1040,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"}
+ok   1280x800 작업 세션 패널을 먼저 열어 wide 상태와 DOM identity를 잡는다  {"marker":"shell-focus-1280x800","subtreeMarker":"shell-focus-1280x800","routeWidth":1040,"panelWidth":1040,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}
+ok   1280x800 접으면 레일만 남고 본문이 정확히 184px 넓어진다  {"before":{"collapsed":false,"sidebarWidth":240,"mainWidth":1040,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"},"collapsed":{"collapsed":true,"sidebarWidth":56,"mainWidth":1224,"railWidth":56,"paneDisplay":"none","visiblePaneFocusTargets":0,"focus":"sidebar-expand","expandText":"열기","expandName":"탐색 패널 열기","expandTitle":"탐색 패널 열기","expandHasIcon":true,"expandControls":"sidebar-channel-pane","expandExpanded":"false"}}
+ok   1280x800 접는 동안 같은 WorkPanel subtree와 wide 상태가 184px를 이어받는다  {"workBefore":{"marker":"shell-focus-1280x800","subtreeMarker":"shell-focus-1280x800","routeWidth":1040,"panelWidth":1040,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"},"workCollapsed":{"marker":"shell-focus-1280x800","subtreeMarker":"shell-focus-1280x800","routeWidth":1224,"panelWidth":1224,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}}
+ok   1280x800 다시 열면 240px 셸과 접기 버튼 포커스가 복구된다  {"collapsed":false,"sidebarWidth":240,"mainWidth":1040,"paneDisplay":"flex","focus":"sidebar-collapse"}
+ok   1280x800 다시 여는 동안에도 같은 WorkPanel subtree·wide·원래 geometry가 남는다  {"workBefore":{"marker":"shell-focus-1280x800","subtreeMarker":"shell-focus-1280x800","routeWidth":1040,"panelWidth":1040,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"},"workReopened":{"marker":"shell-focus-1280x800","subtreeMarker":"shell-focus-1280x800","routeWidth":1040,"panelWidth":1040,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}}
+ok   1280x800 라우트 변경 뒤에도 현재 셸 선택과 포커스가 유지된다  {"collapsed":true,"paneDisplay":"none","focus":"sidebar-expand"}
+ok   1280x800 인박스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 활동  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 멤버 디렉터리  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 계정  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 멤버와 초대  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 AI 연결  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 코드 실행 호스트  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 워크스페이스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 사용량  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 웹훅  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 설정 이벤트 구독  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":800,"navTop":45,"viewportHeight":800}
+ok   1280x800 다중-scope 동의 제목과 확인·취소 버튼이 열자마자 함께 보인다  {"panel":{"top":32,"bottom":768},"titleRect":{"top":49,"bottom":97},"buttonRects":[{"top":723,"bottom":751},{"top":723,"bottom":751}],"scrollboxOverflowY":"auto","scrollboxScrolls":true,"scrollTop":0,"titleInViewport":true,"titleInPanel":true,"installationSignalText":"워크스페이스 설치됨","installationSignalInViewport":true,"installationSignalInPanel":true,"firstBadgeText":"승인: 읽기 전용위험도: 읽기","firstBadgesVisible":true,"momoMarkFits":true,"contactCopyHonest":true,"buttonsInViewport":true,"buttonsInPanel":true}
+ok   1280x800 선택 0개면 고정 액션이 필요한 다음 행동을 읽히게 말한다  {"label":"권한을 하나 이상 선택","ariaDisabled":"true","opacity":"1","dimmed":false,"color":"rgb(236, 236, 241)","background":"rgb(51, 38, 26)","contrast":12.45}
+ok   1280x800 진행 중 확인 버튼은 흐려지거나 비활성으로 말하지 않는다  {"ariaBusy":"true","ariaDisabled":null,"dimmed":false,"label":"변경 중","checkboxAriaDisabled":"true","checkboxLabelCursor":"wait"}
+ok   1280x800 전량 권한 실패는 선택을 보존하고 같은 403 원인을 한 번만 말한다  {"dialogOpen":true,"error":"선택한 권한을 변경하지 못했습니다. 원인: 이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요. 영향받은 권한: notion 읽기 권한 (notion:read), notion 댓글 권한 (notion:comment), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)오류 닫기","policyCauseCount":1}
+ok   1280x800 Tab 랩 뒤 첫 체크박스 인셋 포커스 링과 위쪽 여백이 남는다  {"gapAboveElement":4,"outlineWidth":"2px","outlineOffset":"-2px"}
+ok   1280x800 전량 실패 뒤 취소해도 패널에 시도 기록이 남는다
+ok   1280x800 전량 허용 뒤 포커스가 회수 컨트롤로 간다
+ok   1280x800 설정 멤버와 초대 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   1280x800 설정 코드 실행 호스트 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   1280x800 설정 웹훅 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   1280x800 설정 이벤트 구독 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   1280x800 디렉터리 본문이 마지막 멤버까지 스크롤된다  {"rows":14,"reached":true,"shellScrollTop":0,"docScrollY":0,"docOverflowY":0,"navTop":45}
+ok   900x600 채널  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 컴포저가 창 안에 남는다  {"bottom":547,"viewportHeight":600,"anchored":true}
+ok   900x600 접기 전 56px 레일 + 184px 채널 패널  {"collapsed":false,"sidebarWidth":240,"mainWidth":660,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"}
+ok   900x600 작업 세션 패널을 먼저 열어 wide 상태와 DOM identity를 잡는다  {"marker":"shell-focus-900x600","subtreeMarker":"shell-focus-900x600","routeWidth":660,"panelWidth":660,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}
+ok   900x600 접으면 레일만 남고 본문이 정확히 184px 넓어진다  {"before":{"collapsed":false,"sidebarWidth":240,"mainWidth":660,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"},"collapsed":{"collapsed":true,"sidebarWidth":56,"mainWidth":844,"railWidth":56,"paneDisplay":"none","visiblePaneFocusTargets":0,"focus":"sidebar-expand","expandText":"열기","expandName":"탐색 패널 열기","expandTitle":"탐색 패널 열기","expandHasIcon":true,"expandControls":"sidebar-channel-pane","expandExpanded":"false"}}
+ok   900x600 접는 동안 같은 WorkPanel subtree와 wide 상태가 184px를 이어받는다  {"workBefore":{"marker":"shell-focus-900x600","subtreeMarker":"shell-focus-900x600","routeWidth":660,"panelWidth":660,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"},"workCollapsed":{"marker":"shell-focus-900x600","subtreeMarker":"shell-focus-900x600","routeWidth":844,"panelWidth":844,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}}
+ok   900x600 다시 열면 240px 셸과 접기 버튼 포커스가 복구된다  {"collapsed":false,"sidebarWidth":240,"mainWidth":660,"paneDisplay":"flex","focus":"sidebar-collapse"}
+ok   900x600 다시 여는 동안에도 같은 WorkPanel subtree·wide·원래 geometry가 남는다  {"workBefore":{"marker":"shell-focus-900x600","subtreeMarker":"shell-focus-900x600","routeWidth":660,"panelWidth":660,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"},"workReopened":{"marker":"shell-focus-900x600","subtreeMarker":"shell-focus-900x600","routeWidth":660,"panelWidth":660,"sameEdges":true,"panelWide":true,"widePressed":"true","wideToggleDisplay":"flex"}}
+ok   900x600 라우트 변경 뒤에도 현재 셸 선택과 포커스가 유지된다  {"collapsed":true,"paneDisplay":"none","focus":"sidebar-expand"}
+ok   900x600 인박스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 활동  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 멤버 디렉터리  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 계정  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 멤버와 초대  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 AI 연결  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 코드 실행 호스트  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 워크스페이스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 사용량  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 웹훅  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 설정 이벤트 구독  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":600,"navTop":45,"viewportHeight":600}
+ok   900x600 다중-scope 동의 제목과 확인·취소 버튼이 열자마자 함께 보인다  {"panel":{"top":32,"bottom":568},"titleRect":{"top":49,"bottom":97},"buttonRects":[{"top":523,"bottom":551},{"top":523,"bottom":551}],"scrollboxOverflowY":"auto","scrollboxScrolls":true,"scrollTop":0,"titleInViewport":true,"titleInPanel":true,"installationSignalText":"워크스페이스 설치됨","installationSignalInViewport":true,"installationSignalInPanel":true,"firstBadgeText":"승인: 읽기 전용위험도: 읽기","firstBadgesVisible":true,"momoMarkFits":true,"contactCopyHonest":true,"buttonsInViewport":true,"buttonsInPanel":true}
+ok   900x600 선택 0개면 고정 액션이 필요한 다음 행동을 읽히게 말한다  {"label":"권한을 하나 이상 선택","ariaDisabled":"true","opacity":"1","dimmed":false,"color":"rgb(236, 236, 241)","background":"rgb(51, 38, 26)","contrast":12.45}
+ok   900x600 진행 중 확인 버튼은 흐려지거나 비활성으로 말하지 않는다  {"ariaBusy":"true","ariaDisabled":null,"dimmed":false,"label":"변경 중","checkboxAriaDisabled":"true","checkboxLabelCursor":"wait"}
+ok   900x600 전량 권한 실패는 선택을 보존하고 같은 403 원인을 한 번만 말한다  {"dialogOpen":true,"error":"선택한 권한을 변경하지 못했습니다. 원인: 이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요. 영향받은 권한: notion 읽기 권한 (notion:read), notion 댓글 권한 (notion:comment), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)오류 닫기","policyCauseCount":1}
+ok   900x600 Tab 랩 뒤 첫 체크박스 인셋 포커스 링과 위쪽 여백이 남는다  {"gapAboveElement":4,"outlineWidth":"2px","outlineOffset":"-2px"}
+ok   900x600 전량 실패 뒤 취소해도 패널에 시도 기록이 남는다
+ok   900x600 전량 허용 뒤 포커스가 회수 컨트롤로 간다
+ok   900x600 설정 멤버와 초대 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   900x600 설정 코드 실행 호스트 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   900x600 설정 웹훅 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   900x600 설정 이벤트 구독 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   900x600 디렉터리 본문이 마지막 멤버까지 스크롤된다  {"rows":14,"reached":true,"shellScrollTop":0,"docScrollY":0,"docOverflowY":0,"navTop":45}
+ok   760x480 채널  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 컴포저가 창 안에 남는다  {"bottom":427,"viewportHeight":480,"anchored":true}
+ok   760x480 접기 전 56px 레일 + 184px 채널 패널  {"collapsed":false,"sidebarWidth":240,"mainWidth":520,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"}
+ok   760x480 작업 세션 패널을 먼저 열어 wide 상태와 DOM identity를 잡는다  {"marker":"shell-focus-760x480","subtreeMarker":"shell-focus-760x480","routeWidth":520,"panelWidth":520,"sameEdges":true,"panelWide":false,"widePressed":"false","wideToggleDisplay":"none"}
+ok   760x480 접으면 레일만 남고 본문이 정확히 184px 넓어진다  {"before":{"collapsed":false,"sidebarWidth":240,"mainWidth":520,"railWidth":56,"buttonText":"","buttonName":"탐색 패널 접기","buttonTitle":"탐색 패널 접기","buttonHasIcon":true,"buttonControls":"sidebar-channel-pane","buttonExpanded":"true"},"collapsed":{"collapsed":true,"sidebarWidth":56,"mainWidth":704,"railWidth":56,"paneDisplay":"none","visiblePaneFocusTargets":0,"focus":"sidebar-expand","expandText":"열기","expandName":"탐색 패널 열기","expandTitle":"탐색 패널 열기","expandHasIcon":true,"expandControls":"sidebar-channel-pane","expandExpanded":"false"}}
+ok   760x480 접는 동안 같은 WorkPanel subtree와 wide 상태가 184px를 이어받는다  {"workBefore":{"marker":"shell-focus-760x480","subtreeMarker":"shell-focus-760x480","routeWidth":520,"panelWidth":520,"sameEdges":true,"panelWide":false,"widePressed":"false","wideToggleDisplay":"none"},"workCollapsed":{"marker":"shell-focus-760x480","subtreeMarker":"shell-focus-760x480","routeWidth":704,"panelWidth":704,"sameEdges":true,"panelWide":false,"widePressed":"false","wideToggleDisplay":"none"}}
+ok   760x480 다시 열면 240px 셸과 접기 버튼 포커스가 복구된다  {"collapsed":false,"sidebarWidth":240,"mainWidth":520,"paneDisplay":"flex","focus":"sidebar-collapse"}
+ok   760x480 다시 여는 동안에도 같은 WorkPanel subtree·wide·원래 geometry가 남는다  {"workBefore":{"marker":"shell-focus-760x480","subtreeMarker":"shell-focus-760x480","routeWidth":520,"panelWidth":520,"sameEdges":true,"panelWide":false,"widePressed":"false","wideToggleDisplay":"none"},"workReopened":{"marker":"shell-focus-760x480","subtreeMarker":"shell-focus-760x480","routeWidth":520,"panelWidth":520,"sameEdges":true,"panelWide":false,"widePressed":"false","wideToggleDisplay":"none"}}
+ok   760x480 라우트 변경 뒤에도 현재 셸 선택과 포커스가 유지된다  {"collapsed":true,"paneDisplay":"none","focus":"sidebar-expand"}
+ok   760x480 인박스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 활동  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 멤버 디렉터리  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 계정  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 멤버와 초대  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 AI 연결  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 코드 실행 호스트  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 워크스페이스  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 사용량  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 웹훅  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 설정 이벤트 구독  {"docOverflowY":0,"docOverflowX":0,"docScrollY":0,"shellScrollTop":0,"shellHeight":480,"navTop":45,"viewportHeight":480}
+ok   760x480 다중-scope 동의 제목과 확인·취소 버튼이 열자마자 함께 보인다  {"panel":{"top":32,"bottom":448},"titleRect":{"top":49,"bottom":97},"buttonRects":[{"top":403,"bottom":431},{"top":403,"bottom":431}],"scrollboxOverflowY":"auto","scrollboxScrolls":true,"scrollTop":0,"titleInViewport":true,"titleInPanel":true,"installationSignalText":"워크스페이스 설치됨","installationSignalInViewport":true,"installationSignalInPanel":true,"firstBadgeText":"승인: 읽기 전용위험도: 읽기","firstBadgesVisible":true,"momoMarkFits":true,"contactCopyHonest":true,"buttonsInViewport":true,"buttonsInPanel":true}
+ok   760x480 선택 0개면 고정 액션이 필요한 다음 행동을 읽히게 말한다  {"label":"권한을 하나 이상 선택","ariaDisabled":"true","opacity":"1","dimmed":false,"color":"rgb(236, 236, 241)","background":"rgb(51, 38, 26)","contrast":12.45}
+ok   760x480 진행 중 확인 버튼은 흐려지거나 비활성으로 말하지 않는다  {"ariaBusy":"true","ariaDisabled":null,"dimmed":false,"label":"변경 중","checkboxAriaDisabled":"true","checkboxLabelCursor":"wait"}
+ok   760x480 전량 권한 실패는 선택을 보존하고 같은 403 원인을 한 번만 말한다  {"dialogOpen":true,"error":"선택한 권한을 변경하지 못했습니다. 원인: 이 앱은 워크스페이스 정책이나 내 역할상 변경할 수 없습니다. 관리자에게 정책과 권한을 확인하세요. 영향받은 권한: notion 읽기 권한 (notion:read), notion 댓글 권한 (notion:comment), notion 쓰기 권한 (notion:write), notion 관리 권한 (notion:admin)오류 닫기","policyCauseCount":1}
+ok   760x480 Tab 랩 뒤 첫 체크박스 인셋 포커스 링과 위쪽 여백이 남는다  {"gapAboveElement":4,"outlineWidth":"2px","outlineOffset":"-2px"}
+ok   760x480 전량 실패 뒤 취소해도 패널에 시도 기록이 남는다
+ok   760x480 전량 허용 뒤 포커스가 회수 컨트롤로 간다
+ok   760x480 출하 시드 GitHub도 제목과 확인 버튼이 열자마자 함께 보인다  {"title":"GitHub 앱에 권한을 허용할까요?","titleVisible":true,"confirmVisible":true,"firstBadgeText":"승인: 읽기 전용위험도: 읽기","firstBadgesVisible":true}
+ok   760x480 설정 멤버와 초대 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   760x480 설정 코드 실행 호스트 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   760x480 설정 웹훅 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   760x480 설정 이벤트 구독 마지막 컨트롤까지 스크롤된다  {"reached":true,"shellScrollTop":0,"docScrollY":0,"navTop":45}
+ok   760x480 디렉터리 본문이 마지막 멤버까지 스크롤된다  {"rows":14,"reached":true,"shellScrollTop":0,"docScrollY":0,"docOverflowY":0,"navTop":45}
+ok   390px 모바일은 데스크톱 접힘 상태를 무시하고 기존 서랍을 준비한다  {"shellColumns":"390px","paneDisplay":"flex","collapseCount":0,"expandCount":0,"drawerOpen":false,"focus":"open-sidebar-drawer"}
+ok   390px 모바일 서랍은 전체 채널/프로필 패널과 기존 포커스 첫 정거장을 연다  {"open":true,"sidebarWidth":280,"paneDisplay":"flex","paneWidth":224,"scrim":true,"focus":"close-sidebar-drawer"}
+ok   390px 모바일 Escape는 기존처럼 서랍을 닫고 opener로 포커스를 돌린다  {"open":false,"scrim":false,"focus":"open-sidebar-drawer"}
+ok   모바일에서 다시 넓어지면 숨은 opener 대신 현재 데스크톱 토글이 포커스를 받는다  {"collapsed":true,"paneDisplay":"none","focus":"sidebar-expand"}
+ok   390px 전환 때 route의 가시 포커스는 탐색 opener가 빼앗지 않는다  {"focus":"composer-input","focusVisible":true,"openerFocused":false}
+ok   760px 복귀 때도 route의 가시 포커스를 데스크톱 토글이 빼앗지 않는다  {"focus":"composer-input","focusVisible":true}
+ok   새 셸 마운트에는 접힘 상태가 저장되지 않는다  {"collapsed":false,"sidebarWidth":240,"paneDisplay":"flex","expandCount":0}
+ok   타임라인 1000행 가상화  {"atTop":{"rows":22,"seq":1},"atBottom":{"rows":23,"seq":978},"measuredScrollHeight":48758,"scrollerBottom":800,"viewportHeight":800,"docOverflowY":0}
+ok   연결 화면 짧은 창에서 로그인 버튼 도달  {"top":200,"bottom":232,"viewportHeight":380,"reached":true}
+
+screenshots: /Users/kwakseongjae/projects/momo-tracks/momo-worktrees/tc1-terminal/clients/web/artifacts/shell-layout
+
+GATE PASS: the shell held at every window size.
+rc=0

@@ -1,4 +1,5 @@
 import { createContext, useContext } from "react";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 
 // =============================================================================
 // 워크스페이스 추가 진입점 (검수 피드백 #4a-2).
@@ -16,9 +17,13 @@ import { createContext, useContext } from "react";
 // dialog opens or closes.
 // =============================================================================
 
-export const AddWorkspaceOpenContext = createContext<(() => void) | null>(null);
+export type OpenAddWorkspace = (opener?: DialogFocusTarget | null) => void;
 
-export function useOpenAddWorkspace(): () => void {
+export const AddWorkspaceOpenContext = createContext<OpenAddWorkspace | null>(
+  null
+);
+
+export function useOpenAddWorkspace(): OpenAddWorkspace {
   const open = useContext(AddWorkspaceOpenContext);
   if (!open) {
     throw new Error(

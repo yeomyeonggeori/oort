@@ -59,6 +59,10 @@
       "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
       "spdx_texts": ["MIT"]
     },
+    "saxes@6.0.0": {
+      "reason": "install tree has README+package sources and no LICENSE/COPYING file. lockfile and package.json SPDX ISC.",
+      "spdx_texts": ["ISC"]
+    },
     "stackback@0.0.2": {
       "reason": "install tree has no LICENSE file. lockfile SPDX MIT.",
       "spdx_texts": ["MIT"]

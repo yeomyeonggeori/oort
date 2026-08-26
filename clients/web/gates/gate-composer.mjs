@@ -43,7 +43,7 @@
 //   COMPOSER_GATE_PROVE_RED_TOMBSTONE=1 "the fold hides a count it refuses to state"
 //   COMPOSER_GATE_PROVE_RED_STANDIN=1   "a quote into a folded tombstone lands nowhere"
 //   COMPOSER_GATE_PROVE_RED_TAP=1       "a finger cannot reliably hit the fold toggle"
-//   COMPOSER_GATE_PROVE_RED_SPACING=1   "composer footer alignment arithmetic drifted"
+//   COMPOSER_GATE_PROVE_RED_SPACING=1   "composer action slot geometry drifted"
 //   COMPOSER_GATE_PROVE_RED_FIRST_ACTION=1
 //     "an empty channel offers no door to the first message" — 실측 F5 당시의
 //     화면 그대로다: 첫 행동 버튼을 DOM에서 걷어내면 멤버 추가 하나만 남는다.
@@ -640,40 +640,45 @@ async function exerciseComposer(browser) {
     );
   }
 
-  // ---- 12a. 패딩은 취향이 아니라 산술이다 (#1688) --------------------------
+  // ---- 12a. 힌트는 별도 행이 아니라 액션 행의 남는 폭을 쓴다 (#1749) --------
   if (proveRedSpacing) {
     await page.addStyleTag({
-      content: '[data-testid="composer-hint"]{padding-left:16px!important}',
+      content: '[data-testid="composer-hint"]{padding-bottom:26px!important}',
     });
   }
   const spacing = await page.evaluate(() => {
     const input = document.querySelector('[data-testid="composer-input"]');
-    const form = input?.closest("form");
     const hint = document.querySelector('[data-testid="composer-hint"]');
+    const actions = document.querySelector('[data-testid="composer-actions"]');
+    const send = document.querySelector('[data-testid="composer-send"]');
     if (
       !(input instanceof HTMLElement) ||
-      !(form instanceof HTMLElement) ||
-      !(hint instanceof HTMLElement)
+      !(hint instanceof HTMLElement) ||
+      !(actions instanceof HTMLElement) ||
+      !(send instanceof HTMLElement)
     ) {
       return null;
     }
+    const actionStyle = getComputedStyle(actions);
     return {
-      form: Number.parseFloat(getComputedStyle(form).paddingLeft),
-      input: Number.parseFloat(getComputedStyle(input).paddingLeft),
-      hint: Number.parseFloat(getComputedStyle(hint).paddingLeft),
+      insideActions: actions.contains(hint),
+      actions: Math.round(actions.getBoundingClientRect().height),
+      send: Math.round(send.getBoundingClientRect().height),
+      paddingBottom: Number.parseFloat(actionStyle.paddingBottom),
     };
   });
   if (
     spacing === null ||
-    Math.abs(spacing.hint - (spacing.form + spacing.input)) > 0.1
+    !spacing.insideActions ||
+    Math.abs(spacing.actions - (spacing.send + spacing.paddingBottom)) > 0.1
   ) {
     throw new Error(
-      "composer footer alignment arithmetic drifted: 힌트 px-6은 form p-3 + " +
-        `textarea px-3이어야 한다 (${JSON.stringify(spacing)})`
+      "composer action slot geometry drifted: 힌트는 아이콘과 보내기 사이에 있고 " +
+        `액션 행에 새 높이를 만들지 않아야 한다 (${JSON.stringify(spacing)})`
     );
   }
   console.log(
-    `[spacing] hint ${spacing.hint}px = form ${spacing.form}px + input ${spacing.input}px`
+    `[spacing] hint in actions=${spacing.insideActions} · actions ${spacing.actions}px = send ${spacing.send}px + pb ${spacing.paddingBottom}px`
   );
 
   // ---- 12b. 이모지는 선택 위치에 들어가고 캐럿이 입력으로 돌아온다 ---------
@@ -681,6 +686,7 @@ async function exerciseComposer(browser) {
   await input.evaluate((node) => node.setSelectionRange(1, 1));
   await page.getByTestId("composer-emoji-trigger").click();
   await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
+  await page.getByTestId("picker-insert-🎉").waitFor({ state: "visible" });
   await page.getByTestId("picker-insert-🎉").click();
   await wait(100);
   const inserted = await input.evaluate((node) => ({
