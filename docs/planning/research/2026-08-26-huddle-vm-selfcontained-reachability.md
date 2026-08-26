@@ -899,3 +899,37 @@ P1은 Tailscale Funnel 위에 서므로 **Funnel의 위험을 그대로 물려�
 또한 이 구조는 **ADR-0004와 정합한다** — 자격증명이 "사용자 → 자기 서버" 한 홉만 지나고 우리를 경유하지 않는다(제품 모델 검수 §급소 5의 경계 문장 그대로).
 
 ⇒ **조건이 「제로 설정」에서 「그록봇 안내 + 사용자 1회 가입」으로 완화됐다.** 이 전제에서 §⑨ 경로표를 다시 읽어야 하며, Tailscale·Cloudflare 계정을 요구하는 경로들이 **되살아난다.**
+
+---
+
+## ⑮ RP-2 급소 통과 — Funnel TLS 종단 TCP로 TLS 악수 성립 (2026-08-26 실측)
+
+**P1의 생사를 가르는 단계 2가 통과했다.**
+
+### 절차
+그록봇이 §2.2를 완주해 Funnel을 세우고(`cursor.<tailnet>.ts.net`, HTTP Funnel 8088에 연결), `tailscale funnel --bg --tls-terminated-tcp=8443 tcp://127.0.0.1:8443` 을 수락시켰다. VM 안 `127.0.0.1:8443` 에 **더미 TCP 리스너**를 띄운 뒤, 오케스트레이터가 **VM 바깥(로컬 맥)** 에서 악수를 걸었다.
+
+### 결과
+```
+CONNECTION ESTABLISHED
+Protocol version: TLSv1.3
+Ciphersuite: TLS_AES_128_GCM_SHA256
+Peer certificate: CN=cursor.<tailnet>.ts.net
+Verification: OK
+Negotiated TLS1.3 group: X25519MLKEM768
+```
+
+### 앞선 EOF의 정체 — 판정이 맞았다
+리스너 없이 걸었을 때는 `unexpected eof while reading` 로 끊겼다. 그때 **"TLS 불가가 아니라 뒤에 받을 것이 없어서"** 로 판정했고, 리스너 하나를 띄우자 즉시 악수가 성립했다. ⇒ **Funnel 의 TLS 종단 TCP 모드는 백엔드를 먼저 확보한 뒤 핸드셰이크를 완료한다.** 대조군도 함께 확인했다(HTTP Funnel 443 → 200, 8443 TCP → OPEN).
+
+### 함의
+1. **`turns:` 가 이 통로를 지날 수 있다** — TURN over TLS 는 진짜 TLS 이고 SNI 를 실으므로, Funnel 의 SNI 라우팅이 그대로 받는다. LiveKit 의 `external_tls: true` 가 "TLS 는 밖에서 끝나니 그래도 `turns:` 로 광고하라"는 뜻이라 이 조합과 정합한다.
+2. **성재 조건이 전부 유지된다** — 추가 가입 0(Tailscale 은 서버 URL 발급 단계에서 이미 쓴다) · 추가 설치 0 · 비용 0 · **TURN 은 VM 안**이라 미디어가 제3자를 경유하지 않는다.
+3. **인증서 검증까지 통과**했으므로 브라우저도 이 엔드포인트를 신뢰한다 — 자체서명 예외 처리가 필요 없다.
+
+### 남은 단계 (RP-2 3~7)
+더미 리스너 자리에 **LiveKit 내장 TURN** 을 앉힌다. `infra/livekit.yaml` 의 주석 처리된 TURN 블록을 `{enabled: true, external_tls: true, tls_port: 8443, domain: <node>.<tailnet>.ts.net}` 로 열고, compose 바인드와 CSP(`Caddyfile*` `connect-src`) 를 맞춘다. **서버 Rust 코드 0줄 · 웹 클라 코드 0줄**(§6.3 C6·C7).
+
+이후 확인할 것: JoinResponse `ice_servers` 에 `turns:` 가 실리는가 → `chrome://webrtc-internals` 에서 candidate pair 가 relay/tls 인가 → **서로 다른 망의 브라우저 2대 오디오 왕복** → 60분 soak(Funnel WS 1001 드롭이 TURNS TCP 세션에도 나타나는가) → 3·5인 대역폭.
+
+**⇒ P1 은 살아 있다. 미실측으로 남은 것은 "TURN 트래픽이 이 통로에서 실제로 미디어를 나르는가" 이며, TLS 계층의 의문은 해소됐다.**
