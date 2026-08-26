@@ -47,7 +47,9 @@ openssl version
 curl --version
 ```
 
-Rust·Node·`psql`·Cloudflare 계정은 필요 없다.
+Rust·Node·`psql`·Cloudflare 계정은 필요 없다. **기본 경로(§2)는
+Tailscale 계정 1개가 필요하다.** '계정 0개 + 고정 URL'은 이
+플레이북이 달성하지 못한다(RA-7).
 
 ---
 
@@ -224,6 +226,7 @@ v0.1.1 list digest(`main=1b79bc65`)는 #1651 claim 부트스트랩을 포함한�
 APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
 docker pull "$APP_REF"
 # bind 볼륨이 없으면 §1.3을 다시 밟는다 (기존 볼륨을 함부로 rm 하지 않는다)
+# Funnel state(/workspace/oort/ts-state)가 없으면 §2.2를 다시 밟는다 — URL이 바뀐다
 oort_compose up -d --pull missing --wait
 ```
 
@@ -247,21 +250,44 @@ scripts/self_host_pg_restore.sh --dump /workspace/oort-backups/oort-pg.dump
 
 ## 2. 환경 분기
 
-v1 외부 도달 = **cloudflared quick tunnel**(R-2 전면 GREEN: HTTP 200,
-agent-port 401, WS 프레임 왕복, 지연 중앙값 13ms). Cloudflare 계정 불요.
-URL은 기동마다 바뀐다.
+v1 외부 도달 = **Tailscale Funnel**(사용자 자기 tailnet, RA-7 M1).
+공개 주소는 `https://<machine>.<tailnet>.ts.net` 이고, **state가
+`/workspace` 아래 살아 있으면 재프로비저닝에도 같은 URL**이다.
+불변식은 "URL은 바뀌지 않는다"(인터뷰 확정본). 그록봇이 아래를 집행하고,
+사람은 브라우저만 만진다.
+
+근거: RA-7(정체성·ToS·조용한 실패) · 인터뷰 3-Tier · RA-6(Funnel 전
+플랜 무료·#18827·커스텀 도메인 불가) · RA-5(quick tunnel 1015).
+Funnel HTTP/WS 장시간 soak는 **이 플레이북 작성 시점에 미실측**이다
+(§2.7).
 
 데스크탑 Tauri Origin(`tauri://localhost`, `http://tauri.localhost`)은
-셀프호스트 env 기본 허용 목록에 있다 — **터널 URL로 데스크탑 접속은
-무설정 통과**. 웹 브라우저·RN이 터널 Origin으로 붙으려면 그 공개
-오리진을 Centrifugo 허용목록에 넣는다(§2.3). 로그인 응답의
+셀프호스트 env 기본 허용 목록에 있다 — **공개 URL로 데스크탑 접속은
+무설정 통과**. 웹 브라우저·RN이 그 Origin으로 붙으려면 공개 오리진을
+Centrifugo 허용목록에 넣는다(§2.3). 로그인 응답의
 `realtimeWebSocketUrl` 은 생성기 기본값 `same-origin`(ADR-0167)이
 요청 `Host` / `X-Forwarded-Proto` 에서 파생한다.
 
-### 2.1 공인 IP 판단
+### 2.1 경로 선택
 
-정보 단계다. 이 스택의 웹 엣지는 루프백 전용이라, 공인 IP가 있어도
-터널을 생략하지 않는다. named tunnel·도메인은 out of scope.
+| 경로 | 언제 | 계정 | URL |
+|---|---|---|---|
+| **B. Funnel (기본)** | 도메인 없음 · 고정 URL | Tailscale 1개 | 고정(state 영속 시) |
+| **quick tunnel (폴백)** | Funnel을 켤 수 없을 때만 | 없음 | 휘발 · production 금지(§2.5) |
+| **숙련자** | 자기 도메인·자기 인프라 | 자기 인프라 | 원천 고정(§2.6) |
+
+**M1만 쓴다.** 노드는 사용자 자기 tailnet에 들어간다. oort tailnet에
+고객 노드를 수용하는 모델(RA-7 M2/M3)은 Tailscale ToS §2.1·§2.3 위반
+소지이고 셀프호스팅의 독립 명분을 무너뜨리므로 채택하지 않는다.
+
+성공 기준(인터뷰 → RA-7 재정의): **사람 터미널 명령 0회** · 콜드 15분 ·
+복구 5분. **'계정 0개'는 달성하지 못한다.** Funnel은 tailnet 소속이
+전제이고, 고정 이름을 계정 없이 예약하는 무료 터널은 없다(RA-7 §2.10).
+사람 행동은 브라우저 클릭 4~5회(가입/로그인/노드·Funnel 승인. Disable
+key expiry는 권고 1회). claim 비밀번호 + 앱 로그인은 §3 예산이다.
+
+공인 IP는 정보 단계다. 이 스택의 웹 엣지는 루프백 전용이라, 공인
+주소가 있어도 Funnel을 생략하지 않는다.
 
 ```sh
 curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
@@ -270,30 +296,140 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 `ip=` 가 RFC1918/링크로컬이 아닌 공인 주소여도 §2.2로 간다. 그록봇 VM
 실측은 공인 inbound 없음.
 
-### 2.2 quick tunnel
+### 2.2 Tailscale Funnel (기본)
 
-cloudflared가 없으면 공식 linux/amd64 바이너리를 받는다(계정 불요):
+#### 2.2.1 불변식 — state
+
+**권장이 아니다.** Tailscale에서 노드 정체성은 계정도 hostname도 아니고
+state 안의 노드 키다. ServeConfig(funnel 설정)와 TLS 인증서가 같은
+state dir에 함께 있으므로, **한 묶음으로 복원되고 Let's Encrypt 재발급은
+0회**가 된다(RA-7 RQ-1).
+
+state를 잃으면 URL이 바뀌고, **되돌릴 수 없다** — 이름 자동회수 없음,
+삭제된 이름 재사용 불가(#1200), 같은 이름을 다른 노드가 이어받으면
+기존 방문자 브라우저가 CT 오류로 깨진다(#15702, closed as not planned).
+
+정본 경로: **`/workspace/oort/ts-state`**. Docker named volume이나
+`/var/lib/tailscale` 기본 위치에 두면 Update 때 패키지·이미지와 함께
+사라질 수 있다(RA-4). `/workspace` bind만 보수 기본이다.
 
 ```sh
-curl -fsSL -o /usr/local/bin/cloudflared \
-  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
-chmod +x /usr/local/bin/cloudflared
+mkdir -p /workspace/oort/ts-state
 ```
 
-터널은 엣지 포트로:
+**게이트:** 이 디렉터리가 있고 쓰기 가능하다. 재프로비저닝(그록봇
+Settings → Updates → Update, 또는 Reset)마다 **다른 명령을 치기 전에**
+이 경로가 살아 있는지 확인한다. 비어 있거나 없으면 여기서 멈추고
+사용자에게 URL 상실을 알린다. 새 노드를 같은 이름으로 다시 만들지
+않는다.
+
+#### 2.2.2 설치 · 로그인 · 서빙
+
+패키지는 Update 때 증발한다(RA-4 replaceable). 정체성은 state에만
+산다. 재설치는 같은 블록을 다시 밟되, **state를 지우지 않는다.**
+
+```sh
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+설치기가 기본 `--state=/var/lib/tailscale/tailscaled.state` 로 데몬을
+띄운다. 그 위치는 durable이 아니다. userspace networking은
+`/dev/net/tun`·`NET_ADMIN` 이 없는 그록봇 VM을 전제한다(RA-7).
+
+```sh
+# systemd 가 있으면 drop-in. 없으면 같은 인자로 tailscaled 를 직접 띄운다.
+mkdir -p /etc/systemd/system/tailscaled.service.d
+printf '%s\n' '[Service]' 'ExecStart=' \
+  'ExecStart=/usr/sbin/tailscaled --statedir=/workspace/oort/ts-state --socket=/run/tailscale/tailscaled.sock --tun=userspace-networking' \
+  > /etc/systemd/system/tailscaled.service.d/oort.conf
+systemctl daemon-reload
+systemctl restart tailscaled
+```
+
+`systemctl` 이 없으면 설치기가 연 데몬을 멈추고:
+
+```sh
+# systemctl 이 있을 때는 이 블록을 실행하지 않는다
+tailscaled --statedir=/workspace/oort/ts-state \
+  --tun=userspace-networking \
+  --socket=/run/tailscale/tailscaled.sock
+```
+
+백그라운드로 유지한다. `--statedir` 과 기본 `--state=파일` 을 같이
+주지 않는다.
+
+로그인(M1). `--hostname` 을 고정한다. 미지정 시 OS hostname 드리프트가
+URL을 바꾼다(RA-7 P3). 콘솔의 "Auto-generate from OS hostname" 은
+끈다.
+
+```sh
+# 대화형: 인쇄된 로그인 URL 을 사용자에게 보낸다. 원문 시크릿은 없다.
+tailscale up --hostname=oort-server
+```
+
+사용자가 브라우저에서 가입·로그인·노드 승인을 끝낼 때까지 기다린다.
+`tailscale status` 에 이 노드가 보일 때까지 §2.4로 가지 않는다.
+
+사용자가 auth key를 한 번만 붙여 넣으면 `--auth-key` 로 대체한다.
+키 원문을 회신·로그에 되풀이하지 않는다.
+
+```sh
+# OAuth client secret(tskey-client-…)을 TS_AUTHKEY 로 쓸 때
+# ?ephemeral=false 가 필수다. 빠지면 노드가 ephemeral 기본이 되어
+# 30~60분 뒤 URL 이 증발한다(RA-7 §2.1, kb/1111).
+# 이미 쿼리가 있으면 &ephemeral=false 를 붙인다.
+# 콘솔 reusable auth key(tskey-auth-…)는 생성 화면의 ephemeral 을 끈다.
+tailscale up --hostname=oort-server --auth-key="$TS_AUTHKEY"
+```
+
+Funnel. `--bg` 는 ServeConfig를 state에 써서 재시작 후 자동 재개한다.
+`--yes` 는 프롬프트를 건너뛴다. **종료코드로 성공을 판정하지 않는다.**
+tailnet에 HTTPS+funnel nodeAttr이 없으면 CLI는 사람 브라우저 URL을
+인쇄하거나, 비대화형에서 **조용히 종료코드 0으로 끝난다**(RA-7 §1.9).
 
 ```sh
 WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
-cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
+tailscale funnel --bg --yes "${WEB_PORT}"
 ```
 
-로그의 `https://<id>.trycloudflare.com` 이 터널 주소다. 이 프로세스를
-VM이 살아있는 동안 유지한다. URL을 재기동하면 바뀐다 — 사용자에게
-새 주소를 다시 회신한다.
+인쇄된 관리 콘솔 URL이 있으면 사용자에게 보낸다(Funnel 최초 활성 1클릭).
+로컬 `tailscale funnel status` / `serve status` 가 active 여도 외부
+도달의 증거가 아니다(RA-7 P8 — control plane 미동기화 시 TLS에서
+조용히 드롭, Open #19508).
+
+공개 주소는 `https://` + `tailscale status` 의 Self DNSName(끝의 `.`
+제거). 이름에 `-1` 접미사가 있으면 이미 충돌이다 — 여기서 멈추고
+새 이름으로 밀어붙이지 않는다.
+
+등가 형상(공식 컨테이너): `TS_STATE_DIR` 을
+`/workspace/oort/ts-state` 에 bind, `TS_HOSTNAME=oort-server`,
+`TS_AUTH_ONCE=true`, `TS_USERSPACE=true`, 호스트 루프백에 닿으려면
+`--network host`. CLI는 `docker exec` 로 위와 같다. 이미지 digest는
+우리 발행물이 아니라 **핀하지 않는다.**
+
+무인 서버는 노드 키 만료(기본 180일)를 끈다. 태그 없는 M1은 콘솔에서
+해당 노드 **Disable key expiry**(권고 1클릭). 안 끄면 만료 날 URL이
+죽는다(RA-7 P6). Tailnet Lock은 켜지 않는다(v1, RA-7 C7).
+
+**게이트:** `tailscale status` 에 이 노드가 있다. DNSName에 `-1` 이
+없다. `/workspace/oort/ts-state` 가 비어 있지 않다. 이 게이트는
+외부 도달이 아니다 — §2.4만 도달을 판정한다.
+
+#### 2.2.3 Update / Reset 뒤
+
+1. `/workspace/oort/ts-state` 가 남아 있는지 확인한다. 없으면 중단.
+2. tailscale 패키지/이미지가 없으면 §2.2.2 설치만 다시 한다. state를
+   포맷하거나 `tailscale logout` 하지 않는다.
+3. 같은 `--statedir` / `TS_STATE_DIR` 로 데몬을 살린다. `--bg` 설정이
+   있으면 funnel은 자동 재개한다. 명령을 다시 쳐도 무해한 편이지만
+   "Background configuration already exists" 면 그대로 둔다.
+4. §2.4를 다시 통과한다. URL이 baseline과 **글자 단위로 다르면**
+   사용자에게 상실을 알리고 새 주소를 회신한다(희귀 폴백). 같은
+   이름을 다른 노드에 붙이지 않는다.
 
 ### 2.3 공개 오리진 등록
 
-터널 주소가 생긴 뒤에 **시크릿을 다시 만들지 말고** 이 한 줄을 실행한다.
+공개 주소가 생긴 뒤에 **시크릿을 다시 만들지 말고** 이 한 줄을 실행한다.
 브라우저 Origin(`https://…`)과 RN 소켓 Origin(`wss://…`)을 같이 넣는다.
 두 번 실행해도 항목은 하나다.
 
@@ -311,27 +447,110 @@ scripts/self_host_env.sh --compose up -d
 
 ### 2.4 외부 도달성 자가검증
 
-VM **안에서** 터널 URL로 나갔다 들어온다(V-1이 로컬에서 증명한 같은
-표면).
+**성공 판정은 `tailscale funnel` 종료코드도, 로컬 `funnel status` 도
+아니다.** 외부에서의 **HTTP 200 + WebSocket 101** 두 실측만 본다
+(RA-7 C5·§1.9·P8). 둘 다 나오기 전에 핸드오프 회신을 보내지 않는다.
+
+`TUNNEL_URL` 은 `https://<machine>.<tailnet>.ts.net` (자리표시. 실값을
+문서에 쓰지 않는다). VM 안에서 같은 이름을 MagicDNS(100.x)로 풀면
+이 호출은 Funnel ingress가 아니라 Serve 경로다. 200/101이 나와도
+외부 방문자는 TLS에서 실패할 수 있다. 가능하면 공인 DNS로 풀고,
+안 되면 사용자 브라우저 1회가 외부 실측이다.
 
 ```sh
-# TUNNEL_URL = https://<id>.trycloudflare.com  (자리표시. 실값을 문서에 쓰지 않는다)
-curl -sS -o /tmp/oort-tunnel-healthz.body -w '%{http_code}\n' \
-  "${TUNNEL_URL}/healthz"
-curl -sS -D - -o /dev/null -X POST \
-  "${TUNNEL_URL}/v1/mcp/agent-port"
+# TUNNEL_URL = https://<machine>.<tailnet>.ts.net
+code=$(curl -sS --max-time 20 -o /tmp/oort-tunnel-healthz.body -w '%{http_code}' \
+  "${TUNNEL_URL}/healthz")
+test "$code" = 200
+
+ws_key=$(openssl rand -base64 16)
+curl -sS --max-time 20 -D /tmp/oort-tunnel-ws.hdr -o /dev/null \
+  -H 'Connection: Upgrade' \
+  -H 'Upgrade: websocket' \
+  -H 'Sec-WebSocket-Version: 13' \
+  -H "Sec-WebSocket-Key: ${ws_key}" \
+  "${TUNNEL_URL}/connection/websocket"
+ws_code=$(awk 'NR==1 { for (i = 1; i <= NF; i++) if ($i ~ /^[0-9][0-9][0-9]$/) { print $i; exit } }' \
+  /tmp/oort-tunnel-ws.hdr)
+test "$ws_code" = 101
 ```
+
+WS는 Origin 헤더를 붙이지 않는다(R-2: 무Origin → 101). 403이면 §2.3
+오리진을 다시 본다. 로그인 토큰은 이 게이트의 입력이 아니다.
 
 **게이트:**
 
 | 호출 | 기대 |
 |---|---|
 | `GET ${TUNNEL_URL}/healthz` | 200 |
-| `POST ${TUNNEL_URL}/v1/mcp/agent-port` | 401 + `WWW-Authenticate: Bearer scope="agent:port:connect"` |
+| `GET ${TUNNEL_URL}/connection/websocket` (Upgrade) | 101 |
 
-둘 중 하나라도 아니면 핸드오프 회신을 보내지 않는다. 터널 URL은
-**사실상 공개 주소**다. 주소를 아는 사람은 로그인 화면까지 도달한다.
-소유권은 claim 토큰이 가른다(ADR-0166). 초기 비밀번호는 없다.
+하나라도 아니면: tailscaled를 **한 번만** 재시작하고 같은 두 실측을
+다시 한다(P8 워크어라운드). 재시작으로 고쳐지면 부트스트랩에
+"프로비저닝 후 1회 재시작 + 외부 검증"이 필요한 환경이다. 그래도
+아니면 핸드오프를 보내지 않는다. CLI가 인쇄한 Funnel 승인 URL이
+남아 있으면 사용자에게 그 클릭을 요청한 뒤 재측정한다.
+
+루프백 `POST /v1/mcp/agent-port` 401은 §1.5가 이미 잰 표면이다. 터널
+성공 판정에 넣지 않는다.
+
+공개 URL은 **사실상 공개 주소**다. 주소를 아는 사람은 로그인 화면까지
+도달한다. 소유권은 claim 토큰이 가른다(ADR-0166). 초기 비밀번호는 없다.
+
+### 2.5 폴백 — cloudflared quick tunnel
+
+Funnel을 켤 수 없을 때만. **임시·개발용.** URL은 프로세스마다 휘발한다.
+그록봇 VM egress는 Cloudflare 대역을 공유하므로 quick tunnel 1015
+rate limit에 **구조적으로 노출**된다(RA-5). Cloudflare 공식도
+production 금지·SLA 없음. **이 경로로 핸드오프한 주소는 production이
+아니다.** 사용자에게 휘발·1015 위험을 같이 고지한다. 고정 URL이
+필요하면 Funnel 또는 §2.6이다.
+
+```sh
+curl -fsSL -o /usr/local/bin/cloudflared \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+chmod +x /usr/local/bin/cloudflared
+WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
+cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
+```
+
+로그의 `https://<id>.trycloudflare.com` 이 주소다. 재기동하면 바뀐다.
+§2.3·§2.4(200+101)는 같다. 1015/429면 재시도로 한도를 연장하지 말고
+멈춘다.
+
+### 2.6 숙련자 트랙
+
+자기 도메인이 있으면 URL 문제가 원천 부재다. 그록봇이 터널을 고르지
+않는다. 아래는 선택 매트릭스일 뿐 기본 경로가 아니다.
+
+| 경로 | 도메인 | 고정 URL | WS | 계정 |
+|---|---|---|---|---|
+| Tailscale Funnel | 불요 | 예(state 영속) | 예 — #18827 미실측 | Tailscale |
+| Cloudflare named tunnel | **필요** | 예 | 장시간 미실측 | Cloudflare |
+| 자기 리버스 프록시 | **필요** | 예 | 자기 인프라 | 자기 인프라 |
+| quick tunnel | 불요 | 아니오 | 예(R-2 실측) | 불요 |
+
+**CF named tunnel의 CF-origin 판정은 미확증**이다(RA-6 §2.3). 그록봇
+egress(Cloudflare 대역)가 자기 zone named tunnel에서 1015를 피하는지는
+이 문서가 사실로 쓰지 않는다. Funnel 앞 커스텀 도메인 CNAME은 공식
+미지원·#16478 closed as not planned(RA-6 §1.10) — 숙련자 경로로
+CNAME만 얹지 않는다.
+
+### 2.7 알려진 위험
+
+- **Funnel WebSocket `1001 Going Away` 드롭**(GH #18827, Open,
+  2026-02-27~, 스태프 무응답). Serve에서 10~40초 주기. Funnel도 같은
+  reverse-proxy 경로를 탄다(RA-6 — 추정). Centrifugo 실시간 레일
+  **직격 가능**. 우리 1시간+ soak는 **미실측**. 증상: 데스크탑 실시간이
+  반복해서 끊긴다. 확인: (1) `127.0.0.1:${WEB_PORT}/connection/websocket`
+  루프백은 유지되는가 (2) 공개 URL만 1001인가 (3) Centrifugo/클라
+  disconnect code. 루프백은 살아 있고 Funnel만 떨어지면 #18827 후보 —
+  조용히 quick tunnel로 바꾸지 말고 사용자에게 보고한다. 재현이
+  확정되면 Funnel 기본 경로는 이 인스턴스에서 성립하지 않는다.
+- Funnel은 2022-11 알파 이후 **3년 9개월째 beta**(RA-6). 대역폭 한도
+  비공개·SLA 없음. 용량 계획의 근거로 쓰지 않는다.
+- state 소실 시에만 Let's Encrypt 중복 인증서 한도(5장/7일, 리필
+  ≈34시간)가 의미 있다. state가 살아 있으면 재발급 호출 자체가 0회다.
 
 ---
 
@@ -371,8 +590,9 @@ oort를 이 컴퓨터(당신의 그록봇 VM)에 켜 두었습니다. 팀 공용
 
 5) 데이터가 사는 곳
    이 VM은 durable-but-resettable 입니다. 앱 Update 때 Docker 이미지는
-   사라지고, /workspace 파일은 남는 쪽입니다. 터널 주소는 재기동마다
-   바뀔 수 있습니다. 바뀌면 제가 새 주소를 다시 보냅니다.
+   사라지고, /workspace 파일은 남는 쪽입니다. 공개 주소는
+   /workspace/oort/ts-state 가 살아 있으면 바뀌지 않습니다. 그 경로를
+   잃으면 주소는 되돌릴 수 없고, 그때만 제가 새 주소를 보냅니다.
 
 6) 오늘 백업 (중요)
    그록 트라이얼이 잠기면 VM 자체에 못 들어갑니다(B7). 구독을 해지해도
