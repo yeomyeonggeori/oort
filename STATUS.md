@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 셀프호스트 첫 기동 갭 2건 (#1747, 2026-08-26)
+
+- `MOMO_HOSTED_DELIVERY_ENABLED`를 api·webhook-sender compose env에 옵트인 배선(`:-`). 도어벨만 켜고 이 선행 게이트가 빠지면 멘션이 hosted inbox로 안 가 조용히 실패한다. 미사용 스택에는 필수가 아니다.
+- ADR-0169 local 보관소 첫 기동: `local.override.yml` `drive-init`이 신선 볼륨을 uid 10001로 chown. 쓰기 실패 fail-fast는 유지.
+
 ## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
 
 - `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`이면 업로드 URL을 ADR-0167과 같은 `Host`+`X-Forwarded-Proto`(Caddy 정규화)에서 파생한다. 절대 URL은 verbatim. `MOMO_DRIVE_ARCHIVE_BACKEND` 선택 축은 무영향.
