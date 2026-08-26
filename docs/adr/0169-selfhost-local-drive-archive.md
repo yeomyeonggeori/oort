@@ -26,3 +26,37 @@
 
 - 셀프호스트 업그레이드 계약에 보관소 볼륨이 추가된다(플레이북 §백업 갱신 필요).
 - 라이브(호스티드)는 무영향 — google 경로 그대로.
+
+---
+
+## 증보 1 — 첨부 capability URL의 same-origin 파생 (2026-08-26)
+
+- Status: **Proposed** (성재 결재 대기). 근거: `docs/planning/research/2026-08-26-selfhost-product-model-review.md` 급소 3 · #1788 · #1790.
+
+### 발단
+로컬 보관소의 업로드 capability URL이 **부팅 시 고정된 env 값**으로 조립된다 — `server-rust/crates/momo-drive/src/local.rs:229`가 `format!("{}/__momo_stub/drive/uploads/{token}", self.base_url)`이고, `base_url`은 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`(부재 시 루프백 기본)이다.
+
+그 결과 **터널/원격 주소로 붙은 클라이언트는 `http://localhost:<port>/...`로 PUT하라는 URL을 받는다** — 자기 자신의 루프백이므로 업로드가 실패한다. 그록봇 VM 셀프호스팅(claim + quick tunnel)이 정확히 이 배치다.
+
+`--public-origin`이 이 키를 갱신하기는 한다(`scripts/self_host_env.sh:436-446`, #1696). 그러나 두 조건에서 결함이 살아 있다:
+1. **claim 모드에서는 그 갱신 경로 자체가 도달 불가**(#1790 — 비밀번호 검증이 앞을 막는다).
+2. **quick tunnel URL은 재기동마다 바뀐다** — env 고정 방식은 회전마다 "생성기 재실행 + 재기동"을 요구하므로 구조적으로 따라갈 수 없다.
+
+### Decision — capability URL은 요청 오리진에서 파생한다
+`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`에 **`same-origin` 센티널**을 도입하고, 그 값일 때 capability URL을 **요청 오리진에서 파생**한다. 절대 URL이 명시되면 **verbatim 유지**한다(ADR-0167과 대칭).
+
+**이것은 새 설계가 아니라 이미 문서화된 의도의 구현이다** — 셀프호스트 엣지가 `/__momo_stub/*`를 api로 프록시하며 주석에 이렇게 적어 뒀다(`infra/rust/Caddyfile.local:36-42`):
+> ADR-0169 — local archive PUT is **same-origin**. The capability URL the client is handed is `$origin/__momo_stub/...`
+
+구현만 부팅 고정 env로 어긋나 있었다.
+
+### 신뢰 경계 — ADR-0167을 준용한다
+Host 스푸핑 우려는 **ADR-0167이 이미 Accepted로 정리했다**: 파생 기준은 신뢰 프록시(Caddy)가 정규화한 `X-Forwarded-Proto`/`Host`이고, 악의 Host로 오염된 광고는 **그 요청자 자신의 응답에만** 실린다.
+
+capability URL도 정확히 같은 모양이다 — 광고되는 것은 **요청자 자신의 업로드 목적지**이므로, 오염의 피해자는 오염시킨 자신뿐이다(자해 외 피해자 없음). 따라서 **신규 ADR이 아니라 본 증보로 충분하다.**
+
+### Consequences
+- (+) **터널 URL 회전을 흡수한다** — 재생성·재기동 없이 원격 첨부가 성립한다. env 고정 방식이 구조적으로 못 하던 일이다.
+- (+) 엣지 주석이 선언한 same-origin 계약과 구현이 일치한다.
+- (+) #1790(claim 모드 유지보수 경로)의 수리는 여전히 필요하되, **더 이상 첨부 정상 동작의 전제가 아니다** — Centrifugo 오리진 등록을 위해 독립적으로 필요하다.
+- (−) 절대 URL 명시 배포는 동작 불변이므로 마이그레이션 부담은 없으나, `same-origin` 센티널을 쓰지 않는 기존 env는 이득도 없다 — 생성기 기본값을 센티널로 옮길지는 구현 티켓의 판정.
