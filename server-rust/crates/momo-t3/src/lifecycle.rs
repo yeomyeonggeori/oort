@@ -928,6 +928,63 @@ pub async fn is_active_channel_member_in_tx(
     Ok(found.is_some())
 }
 
+/// The list projection for one session (`WorkSessionRoutes.updateObservation`
+/// :1714-1757). Used after an observation write so the response carries the
+/// same `observerGrantCount` the list would — 0 when the owner just closed.
+pub async fn load_listed_work_session_detail_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let columns = list_columns();
+    let sql = format!(
+        "SELECT {columns} \
+           FROM work_session ws \
+           JOIN work_host h \
+             ON h.id = ws.host_id \
+            AND h.workspace_id = ws.workspace_id \
+          WHERE ws.workspace_id = $1 AND ws.id = $2"
+    );
+    let row = sqlx::query(&sql)
+        .bind(workspace_id)
+        .bind(session_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    row.as_ref().map(decode_detail).transpose()
+}
+
+/// Swift `updateObservation` write (`WorkSessionRoutes.swift:1704-1757`).
+///
+/// Sets `work_session.observation` to `open` or `owner_only`. Closing to
+/// `owner_only` revokes every observer capability in the same transaction.
+/// Returns the list-shaped row, or `None` if the session vanished under the
+/// lock — the route treats that as 500, matching Swift.
+pub async fn set_work_session_observation_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    observation: &str,
+) -> Result<Option<WorkSessionDetail>, T3Error> {
+    let updated = sqlx::query(
+        "UPDATE work_session SET observation = $3 \
+          WHERE workspace_id = $1 AND id = $2 \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(session_id)
+    .bind(observation)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if updated.is_none() {
+        return Ok(None);
+    }
+    if observation == "owner_only" {
+        crate::terminal_attach::revoke_observer_capabilities_in_tx(conn, workspace_id, session_id)
+            .await?;
+    }
+    load_listed_work_session_detail_in_tx(conn, workspace_id, session_id).await
+}
+
 /// The successor row of a resume (`WorkSessionRoutes.resume` :1884-1903): same
 /// thread, same tool/label, new host, `resumed_from_session_id` set.
 ///

@@ -1,8 +1,14 @@
 # oort 진행 현황
 
+## 소유자 관전 차단 토글 (#1778, 2026-08-26)
+
+- 인간 세션 소유자의 `PATCH …/work-sessions/{session}` `{observation: open|owner_only}`를 Swift `updateObservation` 문장 그대로 서빙한다. 비소유자 403, 호스트 서명 403(인간 경로 — #1777 팔 비접촉). `owner_only`는 같은 트랜잭션에서 observer capability를 회수한다.
+- ADR-0004 증보 3 D3 원문 정합: 비관측의 주어는 에이전트, 인간 observer는 기존 `open|owner_only` 모델 그대로. 웹 와이어 `{ observation }` 유지(신규 필드명 없음).
+- 감사 행 `work.session.observation` / `momo.work.session.observation.v1`. 하네스 `verify_workd_rust.sh`가 실 세션에서 차단→attach 403→재개방→attach 200을 잰다.
+
 ## host-signed 세션 변이 이식 (#1777, 2026-08-26)
 
-- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778.
+- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778에서 인간-소유자 경로로 닫힘.
 - 데몬 부팅용으로 `GET …/work-tool-profiles`(enabled 투영, CRUD 없음)를 같이 열었다. 없으면 `momo-workd`가 heartbeat 직후 `transport_failed`로 죽어 create에 도달하지 못한다.
 - 세션 생산 레시피: `scripts/verify_workd_rust.sh` + `docs/runbooks/workd-rust-session.md` (맥 로컬 workd ↔ Rust 리그). `remote_attach_available` false→true가 도크 생산자를 연다.
 

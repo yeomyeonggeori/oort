@@ -107,11 +107,12 @@ pub use lifecycle::{
     bind_cloud_host_in_tx, card_props, cloud_host_state_in_tx, create_resumed_work_session_in_tx,
     create_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
     is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
-    load_work_session_in_tx, lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx,
-    resolve_cloud_host_id, terminate, terminate_in_tx, tool_lifecycle_payload,
-    transition_cloud_host_in_tx, transition_tool_lifecycle_in_tx, update_session_card_props_in_tx,
-    with_t3_lifecycle_tx, work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState,
-    NewWorkSession, T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
+    load_listed_work_session_detail_in_tx, load_work_session_in_tx, lock_work_session_detail_in_tx,
+    mark_work_session_resumed_in_tx, resolve_cloud_host_id, set_work_session_observation_in_tx,
+    terminate, terminate_in_tx, tool_lifecycle_payload, transition_cloud_host_in_tx,
+    transition_tool_lifecycle_in_tx, update_session_card_props_in_tx, with_t3_lifecycle_tx,
+    work_session_scope_in_tx, work_tool_is_enabled_in_tx, CloudHostState, NewWorkSession,
+    T3LockLadder, TerminationReason, WorkSession, WorkSessionDetail,
 };
 /// The B0 provider vocabulary, re-exported because this crate's public API
 /// speaks it (`CloudProvisioner::capabilities`, `provision_instance`). A caller
@@ -148,11 +149,12 @@ pub use terminal_attach::{
     active_observer_capability_count_in_tx, is_valid_capability_token,
     issue_attach_capability_in_tx, lock_attach_target_in_tx, lock_display_binding_target_in_tx,
     mint_capability_token, parse_remote_pty_binding, remote_pty_host_status_in_tx,
-    sweep_spent_observer_capabilities_in_tx, validate_attach_capability_in_tx, validated_binding,
-    validated_display_binding, write_display_binding_in_tx, write_remote_pty_binding_in_tx,
-    AttachKind, AttachMode, AttachTarget, DisplayBindingTarget, IssuedCapability,
-    PtyBindingParseError, RemoteDisplayBinding, RemotePtyBinding, RemotePtyHostStatus,
-    ValidatedAttach, CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, HOST_DISPLAY_CAPABILITY_KEY,
+    revoke_observer_capabilities_in_tx, sweep_spent_observer_capabilities_in_tx,
+    validate_attach_capability_in_tx, validated_binding, validated_display_binding,
+    write_display_binding_in_tx, write_remote_pty_binding_in_tx, AttachKind, AttachMode,
+    AttachTarget, DisplayBindingTarget, IssuedCapability, PtyBindingParseError,
+    RemoteDisplayBinding, RemotePtyBinding, RemotePtyHostStatus, ValidatedAttach,
+    CAPABILITY_PREFIX, CAPABILITY_TTL_SECONDS, HOST_DISPLAY_CAPABILITY_KEY,
     OBSERVER_CAPABILITY_RETENTION,
 };
 pub use turn::{
