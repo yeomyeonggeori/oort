@@ -193,7 +193,7 @@ grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$local_fixture/infra/rust/local.
 # stub (boot-refused in staging) and not Google SA.
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$local_fixture/infra/rust/local.secrets.env"
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49100' \
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
@@ -291,7 +291,7 @@ test "$expected_cors" = "tauri://localhost,http://tauri.localhost"
 test "$expected_centrifugo" = "http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost"
 test "$expected_drive_backend" = "local"
 test "$expected_drive_dir" = "/var/lib/oort/drive"
-test "$expected_drive_base" = "http://localhost:49200"
+test "$expected_drive_base" = "same-origin"
 test "$expected_drive_volume" = "oort-drive"
 jq -e \
   --arg image "$GOOD_DIGEST" \
@@ -673,7 +673,7 @@ drive_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_PO
 run_generator "$drive_repair_fixture" "$drive_repair_fixture/repair-output" 49520 --local-build
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$drive_repair_env"
 grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$drive_repair_env"
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49520' "$drive_repair_env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' "$drive_repair_env"
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$drive_repair_env"
 test "$drive_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$drive_repair_env")"
 grep -Fq 'MOMO_DRIVE_ARCHIVE_BACKEND=local 를 추가했다' "$drive_repair_fixture/repair-output"

@@ -405,14 +405,11 @@ ensure_desktop_cors_allowlist() {
 # A value somebody typed (including a deliberately empty backend, which keeps
 # the 503 no-archive surface) is left exactly as it is.
 ensure_local_drive_archive() {
-  local web_port="8088" project count
-  if [ "$(env_key_count MOMO_WEB_PORT)" -eq 1 ]; then
-    web_port="$(normalize_port MOMO_WEB_PORT "$(env_value_once MOMO_WEB_PORT)")"
-  fi
+  local project count
   project="$(self_host_compose_project_name)"
   validate_project_name "$project"
   validate_env_scalar MOMO_DRIVE_LOCAL_DIR "$SELF_HOST_DRIVE_LOCAL_DIR"
-  validate_env_scalar MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "http://localhost:${web_port}"
+  validate_env_scalar MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "same-origin"
   validate_env_scalar DRIVE_VOLUME_NAME "${project}-drive"
 
   count="$(env_key_count MOMO_DRIVE_ARCHIVE_BACKEND)"
@@ -442,9 +439,9 @@ ensure_local_drive_archive() {
   [ "$count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
   if [ "$count" -eq 0 ]; then
-    printf 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s\n' "$web_port" >>"$ENV_FILE"
-    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s 를 추가했다 (시크릿은 그대로).\n' \
-      "$ENV_FILE" "$web_port" >&2
+    printf 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin\n' >>"$ENV_FILE"
+    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" >&2
   fi
 
   count="$(env_key_count DRIVE_VOLUME_NAME)"
@@ -583,6 +580,21 @@ ensure_public_origins() {
     "$ENV_FILE" >&2
   printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: %s\n' \
     "$(stack_restart_hint)" >&2
+}
+
+warn_if_legacy_localhost_drive_base() {
+  local count current
+  count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  [ "$count" -eq 1 ] || return 0
+  current="$(env_value_once MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  case "$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')" in
+    same-origin) return 0 ;;
+    http://localhost:*|https://localhost:*|http://127.0.0.1:*|https://127.0.0.1:*)
+      printf '[self-host] %s 의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 이 루프백을 가리킨다.\n' "$ENV_FILE" >&2
+      printf '[self-host] 원격 클라는 자기 localhost 로 첨부를 올린다 (ADR-0169 증보 1). 그 줄을\n' >&2
+      printf '[self-host] MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin 으로 고친 뒤 api 를 재시작하라.\n' >&2
+      ;;
+  esac
 }
 
 warn_if_legacy_localhost_realtime_ws() {
@@ -943,6 +955,7 @@ if [ -e "$ENV_FILE" ]; then
   ensure_public_origins
   ensure_local_drive_public_base
   warn_if_legacy_localhost_realtime_ws
+  warn_if_legacy_localhost_drive_base
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -1041,7 +1054,7 @@ CENTRIFUGO_ORIGINS="http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_
 CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
 DRIVE_LOCAL_DIR="$SELF_HOST_DRIVE_LOCAL_DIR"
 DRIVE_VOLUME="${PROJECT}-drive"
-DRIVE_LOCAL_BASE="http://localhost:$WEB_PORT"
+DRIVE_LOCAL_BASE="same-origin"
 if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
   DRIVE_LOCAL_BASE="${PUBLIC_ORIGINS[0]}"
 fi
@@ -1149,6 +1162,8 @@ PLATFORM_ADMIN_EMAILS=$OWNER_EMAIL
 # MOMO_ENV=staging 에서 부팅 거부라 쓰지 않는다. 운영 google 경로는 이
 # 파일을 읽지 않는다. 디렉터리는 api 컨테이너 안 경로이고, 호스트 볼륨
 # 이름은 DRIVE_VOLUME_NAME 이다. 백업 때 pg_dump 와 이 볼륨을 같이 가져가라.
+# same-origin: capability URL을 요청 Host/X-Forwarded-Proto에서 파생한다
+# (ADR-0169 증보 1 · 0167 준용). 절대 URL이면 verbatim.
 MOMO_DRIVE_ARCHIVE_BACKEND=local
 MOMO_DRIVE_LOCAL_DIR=$DRIVE_LOCAL_DIR
 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=$DRIVE_LOCAL_BASE
