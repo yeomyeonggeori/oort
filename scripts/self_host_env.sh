@@ -461,6 +461,18 @@ ensure_local_drive_public_base() {
   count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
   [ "$count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
+  # #1788 — same-origin 은 이미 모든 오리진을 덮는다. 공개 오리진 절대 URL로
+  # 내리면 터널 URL이 바뀔 때 다시 낡는다(ADR-0169 증보 1이 없애려던 바로 그
+  # 상태). 그러므로 센티널은 강등하지 않는다. 절대 URL로 고정하고 싶은 운영자는
+  # 그 값을 직접 적으면 되고, 그때는 verbatim으로 유지된다.
+  if [ "$count" -eq 1 ]; then
+    case "$(printf '%s' "$(env_value_once MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)" | tr '[:upper:]' '[:lower:]')" in
+      same-origin)
+        printf '[self-host] MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 은 same-origin 이라 그대로 둔다 (요청 오리진에서 파생 — 공개 오리진도 덮는다).\n' >&2
+        return 0
+        ;;
+    esac
+  fi
   rewrite_env_assignment MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "$origin"
   printf '[self-host] %s 의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 을 공개 오리진으로 맞췄다.\n' \
     "$ENV_FILE" >&2
