@@ -5,6 +5,13 @@
 
 ---
 
+## 2026-08-26 (Opus+Fable) · ★셀프호스팅 제품 모델 검수 — 허들 답 확정·#1788 기전 정정·파도 1 완주
+- 성재 확정 모델(그록봇 VM 셀프호스팅 + 클라우드=VM 유휴자원 + 로컬=랩탑 + 그록봇이 세팅 대행)을 **Fable 검수**(`research/2026-08-26-selfhost-product-model-review.md`, 급소 7개). 판정: **무게중심은 이미 코드 위에 서 있고 정면 충돌은 정확히 2곳** — 허들(2b)·서브도메인 릴레이(1b).
+- **허들 답(오케스트레이터 재판정 완료)**: 외부 SFU 연동이 정답. `MOMO_LIVEKIT_URL`이 임의 http/https/ws/wss를 수용하고(`config.rs:137-154` 루프백 제한 없음) join 응답이 **verbatim 광고**(`routes/huddles.rs:133`) ⇒ **서버 코드 0줄**, 미디어는 클라↔외부 SFU 직결이라 VM inbound 불요. 유일 걸림돌 = **CSP 한 줄**(`Caddyfile.local:57`·`Caddyfile:109` 둘 다 하드코딩 allowlist — 실측 확인). 허들이 "아웃오브박스"에서 "연동 항목"으로 바뀌는 것이 대가이나 **성재 모델 3번(추천만)과 오히려 정합**.
+- **#1788 기전 정정**: 최초 진단("--public-origin이 이 키를 갱신 안 함")은 **틀렸다** — `ensure_local_drive_public_base`가 #1696부터 실재(`self_host_env.sh:436-446`). 진짜 결함은 **claim 수술이 정본 env의 비밀번호 키를 mv로 제거**(`SELF_HOST_AGENT.md:141-148`)해 갱신 경로가 `validate_owner_password`(`:872`)에서 abort ⇒ `ensure_local_drive_public_base`(`:879`)에 영원히 도달 못 함. **플레이북 §1.4↔§2.3 내부 모순**(§1.4가 스스로 "생성기를 다시 돌리지 않는다"고 적어 두고 §2.3이 돌리라 한다). 티켓 본문·제목 정정 완료.
+- **급소 2**: "클라우드=VM 유휴자원"은 데이터 축은 **이미 성립**(pgdata·drive `/workspace` bind), 컴퓨트 축은 T3 어댑터 추가로 **안 된다**(wire adapter=cubesandbox 하나) — 맞는 그림은 **T2 workd**(`021_work_host.sql:23`). **TC-2와는 직교**(TC-2=관리형 표면, 이번 모델=셀프호스트).
+- 파도 1 **4/4 완주**: #1781·#1777(9a308276)·#1778(b1966a23)·#850. 결재석 G1~G5 + ADR 2건(0165 증보3 문안 완성·0169 증보1) + 로드맵 델타 D-a~D-f.
+
 ## 2026-08-26 (Opus) · ★NCP 비용 판정 + 셀프호스트 외부 의존 전수 감사 · 파도 1 완주(#1777·#1778)
 - **전수 감사**(`research/2026-08-26-selfhost-external-dependency-audit.md`): "우리 서버를 타는 자리"=4곳, 런타임 강제는 **실질 1곳(데스크톱 자동 업데이트 — 빌드타임 baked)**뿐. 이미지 pull=local-build 대안 1급, 푸시=기본 스택에 부재, display TURN=**문면만 oort 전용이고 코드는 호스트 미검증**(M7 판정 필요). 텔레메트리·분석·과금 콜백 **0건**. **사실 정정: 허들은 oort TURN을 타지 않는다 — livekit.yaml TURN 블록이 통째 주석이라 TURN이 아예 없다.**
 - **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
