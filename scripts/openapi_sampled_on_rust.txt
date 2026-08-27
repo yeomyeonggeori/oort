@@ -63,7 +63,7 @@
 #     자체가 없으므로 커버리지도 부채도 아니고, 필요한 것은 성문화다:
 #       GET /v1/workspaces/{ws} · POST /v1/workspaces
 #       POST|DELETE /v1/workspaces/{ws}/channels/{ch}/members[/{member}]
-#       GET|POST /v1/workspaces/{ws}/invites · POST …/channels/{ch}/agent-runs
+#       POST …/channels/{ch}/agent-runs
 #       POST|GET|DELETE /v1/workspaces/{ws}/devices[/{device}]
 #       GET …/work-sessions/{session}/reattach · GET …/usage/summary
 #       POST /v1/agent-runs/{run}/approval-decisions
@@ -146,10 +146,20 @@ GET /v1/workspaces/{workspaceId}/approvals
 POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
 
 # ── 가입 · 로스터 · 채널 (#1132/#1143 잔여 등재) ────────────────────────────
-# `/v1/join` 과 `/v1/claim` 이 미인증 쓰기다. 등재는 그 사실을 Rust 에서
-# 실측한다는 뜻이고, 초대 코드는 스펙에 없는 `…/invites` 대신 SQL 픽스처가 준다.
+# `/v1/join` 과 `/v1/claim` 이 미인증 쓰기다. 초대 admin 표면(#1769)은
+# create/list/status/revoke/regenerate/redeem 을 실제 REST 로 왕복한다.
+# create·regenerate 응답의 원문 코드는 표본에 남기지 않는다(redact + needle).
 POST /v1/join
 POST /v1/claim
+PATCH /v1/workspaces/{workspaceId}/members/me/password
+POST /v1/workspaces/{workspaceId}/members/{memberId}/password-reset
+GET /v1/workspaces/{workspaceId}/invites
+POST /v1/workspaces/{workspaceId}/invites
+GET /v1/workspaces/{workspaceId}/invites/{inviteId}
+DELETE /v1/workspaces/{workspaceId}/invites/{inviteId}
+POST /v1/workspaces/{workspaceId}/invites/{inviteId}/revoke
+POST /v1/workspaces/{workspaceId}/invites/{inviteId}/regenerate
+POST /v1/workspaces/{workspaceId}/invites/redeem
 GET /v1/workspaces/{workspaceId}/roster
 GET /v1/workspaces/{workspaceId}/members
 GET /v1/workspaces/{workspaceId}/channels

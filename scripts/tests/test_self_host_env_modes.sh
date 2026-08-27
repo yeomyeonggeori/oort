@@ -66,7 +66,7 @@ if [ "${1:-}" = "compose" ]; then
     file_image="$(awk -F= '$1 == "MOMO_RUST_IMAGE" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
     effective_image="${MOMO_RUST_IMAGE:-$file_image}"
     count=0
-    while [ "$count" -lt 7 ]; do
+    while [ "$count" -lt 8 ]; do
       printf '%s\n' "$effective_image"
       count=$((count + 1))
     done
@@ -193,7 +193,7 @@ grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$local_fixture/infra/rust/local.
 # stub (boot-refused in staging) and not Google SA.
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$local_fixture/infra/rust/local.secrets.env"
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49100' \
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
@@ -291,7 +291,7 @@ test "$expected_cors" = "tauri://localhost,http://tauri.localhost"
 test "$expected_centrifugo" = "http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost"
 test "$expected_drive_backend" = "local"
 test "$expected_drive_dir" = "/var/lib/oort/drive"
-test "$expected_drive_base" = "http://localhost:49200"
+test "$expected_drive_base" = "same-origin"
 test "$expected_drive_volume" = "oort-drive"
 jq -e \
   --arg image "$GOOD_DIGEST" \
@@ -323,6 +323,7 @@ jq -e \
     .services.api.environment.MOMO_DRIVE_LOCAL_DIR == $drive_dir and
     .services.api.environment.MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL == $drive_base and
     .volumes["drive-archive"].name == $drive_volume and
+    .services["drive-init"].image == $image and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and
@@ -337,7 +338,9 @@ real_count="$(printf '%s\n' "$real_images" | awk -v expected="$GOOD_DIGEST" '
   $0 == expected { count += 1 }
   END { print count + 0 }
 ')"
-test "$real_count" -eq 7
+# rust image services on rust.yml + local.override.yml:
+# runtime-roles migrate api relay webhook-sender agent-worker web-init drive-init
+test "$real_count" -eq 8
 
 # Caller argv cannot add a second config source or replace canonical
 # env/project/profile authority. A literal service-command argument with the
@@ -673,7 +676,7 @@ drive_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_PO
 run_generator "$drive_repair_fixture" "$drive_repair_fixture/repair-output" 49520 --local-build
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$drive_repair_env"
 grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$drive_repair_env"
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:49520' "$drive_repair_env"
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' "$drive_repair_env"
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$drive_repair_env"
 test "$drive_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$drive_repair_env")"
 grep -Fq 'MOMO_DRIVE_ARCHIVE_BACKEND=local 를 추가했다' "$drive_repair_fixture/repair-output"
@@ -864,9 +867,10 @@ run_generator "$public_fixture" "$public_fixture/origin-again" 49700 \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
   "$public_fixture/infra/rust/local.secrets.env"
 grep -Fq '이미 있다 (멱등)' "$public_fixture/origin-again"
-test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 2
+test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
 test "$(grep -c 'wss://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://cursor.tailb1aad3.ts.net' \
+# #1788: same-origin is not demoted to an absolute public URL.
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$public_fixture/infra/rust/local.secrets.env"
 
 # Create-time --public-origin lands in the first write; default localhost tokens stay.
@@ -900,6 +904,65 @@ grep -Fq 'ENV_FILE 없음' "$missing_public/output" || grep -Fq '없음' "$missi
 
 # Existing env without --public-origin still does not rewrite allowed origins.
 test "$public_before" != "$(hash_file "$public_fixture/infra/rust/local.secrets.env")"
+
+# #1790 — claim-mode env (password key removed, MOMO_BOOTSTRAP_CLAIM=1)
+# must reach the --public-origin maintenance path. --compose stays closed.
+claim_fixture="$(make_fixture claim-public-origin)"
+run_generator "$claim_fixture" "$claim_fixture/first-output" 49750 --local-build
+claim_env="$claim_fixture/infra/rust/local.secrets.env"
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
+  { print }
+  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
+' "$claim_env" >"$claim_fixture/claim.env"
+mv "$claim_fixture/claim.env" "$claim_env"
+chmod 600 "$claim_env"
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$claim_env"
+if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$claim_env"; then
+  echo "claim surgery left a password key" >&2
+  exit 1
+fi
+jwt_claim_before="$(sed -n 's/^JWT_HMAC=//p' "$claim_env")"
+run_generator "$claim_fixture" "$claim_fixture/origin-output" 49750 \
+  --public-origin https://example-tunnel.test
+grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49750 http://127.0.0.1:49750 tauri://localhost http://tauri.localhost https://example-tunnel.test wss://example-tunnel.test' \
+  "$claim_env"
+# #1788: claim-time --public-origin also leaves same-origin in place.
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' "$claim_env"
+test "$(sed -n 's/^JWT_HMAC=//p' "$claim_env")" = "$jwt_claim_before"
+grep -Fq '공개 오리진을 추가했다' "$claim_fixture/origin-output"
+grep -Fq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 은 same-origin 이라 그대로 둔다' "$claim_fixture/origin-output"
+if grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/origin-output"; then
+  echo "claim-mode next-steps unexpectedly recommended --compose" >&2
+  exit 1
+fi
+if grep -Fq '재시작: --compose' "$claim_fixture/origin-output"; then
+  echo "claim-mode origin refresh unexpectedly recommended --compose restart" >&2
+  exit 1
+fi
+if run_generator "$claim_fixture" "$claim_fixture/compose-output" 49750 --compose up -d; then
+  echo "claim-mode --compose unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'claim 모드' "$claim_fixture/compose-output"
+grep -Fq '비밀번호 키를 요구한다' "$claim_fixture/compose-output"
+
+# Password absence without the claim marker is still malformed.
+no_claim_fixture="$(make_fixture missing-password-no-claim)"
+run_generator "$no_claim_fixture" "$no_claim_fixture/first-output" 49760 --local-build
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  { print }
+' "$no_claim_fixture/infra/rust/local.secrets.env" >"$no_claim_fixture/stripped.env"
+mv "$no_claim_fixture/stripped.env" "$no_claim_fixture/infra/rust/local.secrets.env"
+if run_generator "$no_claim_fixture" "$no_claim_fixture/origin-output" 49760 \
+  --public-origin https://example-tunnel.test; then
+  echo "password-less env without claim marker unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다' \
+  "$no_claim_fixture/origin-output"
 
 echo "self-host image mode contract: PASS"
 

@@ -33,15 +33,12 @@
 //! first write**, so a rejected request commits a read-only transaction — the
 //! same effect Swift gets by throwing out of the closure.
 //!
-//! ## Named parity gaps (B2.3+, each excluded by the packet)
+//! ## Named parity (#1777 closed the host-signed session arms)
 //!
-//! * `PATCH` arms other than `status:"ended"` — idle/running transitions, ACP
-//!   events, observation changes and remote-PTY binding are all
-//!   **work-host-signed** paths (`transitionToolLifecycle` :702-704 begins
-//!   `guard principal.kind == .workHost`), and that authenticator is not ported.
-//!   They are refused by name (400) rather than silently ignored.
-//! * `create` by a signed work host (`controlId` + dispatched spawn control) —
-//!   same reason.
+//! * Host-signed `POST …/work-sessions` (`controlId` ↔ dispatched spawn) and
+//!   `PATCH` idle/running + `bindRemotePTY` are served (#1777). Observation is
+//!   the human-owner PATCH (#1778). ACP event ingestion stays refused-by-name
+//!   (follow-up requested in the #1777 PR — no existing issue).
 //! * `resume` drops **one** Swift step now: the audit row (see the crate-level
 //!   note on `momo_db::audit`). The two that mattered are back — the
 //!   `work_tier_policy` gate with `requireResumeTarget` (:1855-1871, #1139) and
@@ -55,24 +52,30 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Extension, Json};
-use momo_auth::Principal;
+use momo_auth::{active_workspace_role, Principal, PrincipalKind};
+use momo_db::audit::{write_audit, AuditEntry};
+use momo_db::sqlx;
 use momo_messaging::{cent_channel, send_message_in_tx, MessageType, NewMessage};
 use momo_outbox::{emit_outbox, OutboxKind};
 use momo_t3::work_control::{
-    control_event_payload, insert_work_control_in_tx, record_host_last_used_in_tx,
-    resume_target_rejection_in_tx, NewWorkControl, ResumeTargetRejection, KIND_SPAWN,
-    STATUS_DISPATCHED,
+    control_event_payload, dispatched_spawn_owner_in_tx, insert_work_control_in_tx,
+    record_host_last_used_in_tx, resume_target_rejection_in_tx, NewWorkControl,
+    ResumeTargetRejection, KIND_SPAWN, STATUS_DISPATCHED,
 };
 use momo_t3::{
     acquire_slot_in_tx, allocate_uuid_v7, card_props, close_control_window_in_tx,
     cloud_host_id_for_host, cloud_host_id_for_host_in_tx, cloud_host_id_for_session_in_tx,
     create_resumed_work_session_in_tx, create_work_session_with_id_in_tx, end_work_session_in_tx,
     is_active_channel_member_in_tx, lifecycle_payload, list_work_session_details_in_tx,
-    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, resolve_cloud_host_id,
-    start_usage_in_tx, terminate_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
-    work_tool_is_enabled_in_tx, ControlWindowEndReason, NewWorkSession, T3Error, T3LockLadder,
+    lock_work_session_detail_in_tx, mark_work_session_resumed_in_tx, parse_remote_pty_binding,
+    pause_usage_in_tx, remote_pty_host_status_in_tx, resolve_cloud_host_id,
+    set_work_session_observation_in_tx, start_usage_in_tx, terminate_in_tx, tool_lifecycle_payload,
+    transition_tool_lifecycle_in_tx, update_session_card_props_in_tx, work_session_scope_in_tx,
+    work_tool_is_enabled_in_tx, write_remote_pty_binding_in_tx, ControlWindowEndReason,
+    NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
     TerminationReason, WorkSessionDetail,
 };
+use serde_json::json;
 use uuid::Uuid;
 
 use crate::dto::{
@@ -81,9 +84,10 @@ use crate::dto::{
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
-    lifecycle_body, path_uuid, require_human, settle, t3_error, tenant_tx, workspace_scope,
-    Rejectable,
+    audit_via_token_id, lifecycle_body, path_uuid, require_human, require_human_or_work_host,
+    settle, t3_error, tenant_tx, workspace_scope, Rejectable,
 };
+use crate::work_host_auth::signed_request_unauthorized;
 use crate::AppState;
 
 // ---------------------------------------------------------------------------
@@ -106,6 +110,17 @@ fn validated_tool(raw: &str) -> Result<String, ApiError> {
         Ok(value)
     } else {
         Err(ApiError::bad_request("invalid work tool key"))
+    }
+}
+
+/// Web wire + openapi `UpdateWorkSessionObservationRequest`: `open` | `owner_only`.
+fn validated_observation(raw: &str) -> Result<&'static str, ApiError> {
+    match raw {
+        "open" => Ok("open"),
+        "owner_only" => Ok("owner_only"),
+        _ => Err(ApiError::bad_request(
+            "observation must be open or owner_only",
+        )),
     }
 }
 
@@ -199,13 +214,34 @@ pub async fn create(
     Path(workspace): Path<String>,
     Json(request): Json<CreateWorkSessionRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
-    require_human(&principal, "work sessions require a human or work host")?;
+    require_human_or_work_host(&principal, "work sessions require a human or work host")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
-    reject_unsupported_create(&request)?;
+    let host_signed = principal.kind == PrincipalKind::WorkHost;
+    if host_signed {
+        let Some(signing_host) = principal.token_id else {
+            return Err(signed_request_unauthorized());
+        };
+        if request.host_id != signing_host || request.control_id.is_none() {
+            return Err(ApiError::forbidden("work host session binding is invalid"));
+        }
+        if request.display_id.is_some() || request.display_endpoint.is_some() {
+            return Err(ApiError::bad_request(
+                "display binding requires work host signature",
+            ));
+        }
+    } else {
+        reject_unsupported_create(&request)?;
+    }
     let tool = validated_tool(&request.tool)?;
     let label = validated_label(&request.label)?;
+    let remote_pty = parse_remote_pty_binding(
+        request.pty_id.as_deref(),
+        request.attach_endpoint.as_deref(),
+    )
+    .map_err(|error| ApiError::bad_request(error.message()))?;
     let channel_id = request.channel_id;
     let host_id = request.host_id;
+    let control_id = request.control_id;
     let member_id = principal.member_id;
 
     // No lock: the id only chooses which advisory the transaction takes, and the
@@ -225,6 +261,8 @@ pub async fn create(
                 cloud_host_id,
                 &tool,
                 &label,
+                control_id,
+                remote_pty,
             )
             .await
         }) as _
@@ -268,6 +306,8 @@ async fn create_in_tx(
     expected_cloud_host_id: Option<Uuid>,
     tool: &str,
     label: &str,
+    control_id: Option<Uuid>,
+    remote_pty: Option<RemotePtyBinding>,
 ) -> Rejectable<WorkSessionDetail> {
     // ---- rejections first (nothing is written above this line) -------------
     if cloud_host_id_for_host_in_tx(conn, workspace_id, host_id).await? != expected_cloud_host_id {
@@ -281,14 +321,56 @@ async fn create_in_tx(
             "work tool is not registered or enabled",
         )));
     }
-    if !is_active_channel_member_in_tx(conn, workspace_id, channel_id, member_id).await? {
+    // Host-signed create: the owner is the requesting agent's human, never the
+    // host's own member_id. Human create keeps the bearer as owner.
+    let session_owner_member_id = if let Some(control_id) = control_id {
+        match dispatched_spawn_owner_in_tx(
+            conn,
+            workspace_id,
+            control_id,
+            channel_id,
+            host_id,
+            tool,
+            label,
+        )
+        .await?
+        {
+            Some(owner) => owner,
+            None => {
+                return Ok(Err(ApiError::new(
+                    StatusCode::CONFLICT,
+                    "spawn control is not dispatchable by this host",
+                )))
+            }
+        }
+    } else {
+        member_id
+    };
+    if remote_pty.is_some() {
+        match remote_pty_host_status_in_tx(conn, workspace_id, host_id).await? {
+            RemotePtyHostStatus::Capable => {}
+            RemotePtyHostStatus::NotFound => {
+                return Ok(Err(ApiError::forbidden("work host not found")))
+            }
+            RemotePtyHostStatus::NotCapable => {
+                return Ok(Err(ApiError::forbidden(
+                    "work host does not support terminal attach",
+                )))
+            }
+        }
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, channel_id, session_owner_member_id)
+        .await?
+    {
         return Ok(Err(ApiError::forbidden(
             "active channel membership required",
         )));
     }
     // Slot admission (`WorkPoolRoutes.acquireSlot`). Its 409 vocabulary is the
     // Swift one, not the domain error's Display.
-    if let Err(error) = acquire_slot_in_tx(conn, workspace_id, member_id, host_id).await {
+    if let Err(error) =
+        acquire_slot_in_tx(conn, workspace_id, session_owner_member_id, host_id).await
+    {
         return Ok(Err(match error {
             T3Error::SlotsExhausted { .. } => ApiError::new(StatusCode::CONFLICT, "pool_exhausted"),
             T3Error::MemberSlotLimit { .. } => ApiError::new(StatusCode::CONFLICT, "member_limit"),
@@ -309,7 +391,7 @@ async fn create_in_tx(
         workspace_id,
         NewMessage {
             channel_id,
-            author_member_id: member_id,
+            author_member_id: session_owner_member_id,
             message_type: MessageType::System,
             body: None,
             props: props.clone(),
@@ -330,7 +412,7 @@ async fn create_in_tx(
         session_id,
         NewWorkSession {
             channel_id,
-            member_id,
+            member_id: session_owner_member_id,
             host_id,
             root_message_id: card.message.id,
             tool: tool.to_string(),
@@ -338,6 +420,15 @@ async fn create_in_tx(
         },
     )
     .await?;
+
+    if let Some(binding) = remote_pty.as_ref() {
+        if !write_remote_pty_binding_in_tx(conn, workspace_id, session.id, binding).await? {
+            return Ok(Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "work session state changed; retry",
+            )));
+        }
+    }
 
     // Opens the T3 ledger + first `active` interval and moves the cloud host to
     // `running`. `None` = a T1/T2 host: same call site, no ledger.
@@ -369,8 +460,10 @@ async fn create_in_tx(
 // end
 // ---------------------------------------------------------------------------
 
-/// `PATCH /v1/workspaces/{ws}/work-sessions/{session}` (Swift `end`, :328-601),
-/// the `status: "ended"` arm.
+/// `PATCH /v1/workspaces/{ws}/work-sessions/{session}` (Swift `end`, :328-601).
+///
+/// Dispatcher: bindRemotePTY, ACP (refused), observation (human owner, #1778),
+/// idle/running, then the `status: "ended"` arm.
 pub async fn end(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -380,33 +473,86 @@ pub async fn end(
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let session_id = path_uuid(&session, "invalid work session id")?;
 
-    // The arms this batch does not serve, refused by name.
-    if request.pty_id.is_some() || request.attach_endpoint.is_some() {
-        return Err(ApiError::bad_request(
-            "remote PTY binding requires work host signature",
-        ));
-    }
     if request.display_id.is_some() || request.display_endpoint.is_some() {
         return Err(ApiError::bad_request(
             "display binding requires work host signature",
         ));
     }
+    if request.pty_id.is_some() || request.attach_endpoint.is_some() {
+        if request.status.is_some()
+            || request.exit_code.is_some()
+            || request.observation.is_some()
+            || request.event.is_some()
+        {
+            return Err(ApiError::bad_request(
+                "remote PTY binding cannot be combined with lifecycle fields",
+            ));
+        }
+        // Human unsigned path stays 400 (regression lock). A signed host is
+        // dispatched into bindRemotePTY.
+        if principal.kind != PrincipalKind::WorkHost {
+            return Err(ApiError::bad_request(
+                "remote PTY binding requires work host signature",
+            ));
+        }
+        return bind_remote_pty(state, principal, workspace_id, session_id, &request).await;
+    }
     if request.event.is_some() {
+        // TODO(follow-up): ACP event ingestion — no existing issue; request
+        // issued in the #1777 PR. Keep refused-by-name until that ticket.
         return Err(ApiError::bad_request(
             "ACP event ingestion requires work host signature",
         ));
     }
-    if request.observation.is_some() {
-        return Err(ApiError::bad_request(
-            "observation updates are not served by momo-server yet",
-        ));
+    if let Some(observation) = request.observation.as_deref() {
+        if request.status.is_some() || request.exit_code.is_some() {
+            return Err(ApiError::bad_request(
+                "observation cannot be combined with lifecycle fields",
+            ));
+        }
+        return update_observation(state, principal, workspace_id, session_id, observation).await;
     }
     match request.status.as_deref() {
         Some("ended") => {}
-        Some("idle") | Some("running") => {
-            return Err(ApiError::forbidden(
-                "tool lifecycle transitions require work host signature",
-            ))
+        Some("idle") => {
+            if principal.kind != PrincipalKind::WorkHost {
+                return Err(ApiError::forbidden(
+                    "tool lifecycle transitions require work host signature",
+                ));
+            }
+            let Some(exit_code) = request.exit_code else {
+                return Err(ApiError::bad_request("idle transition requires exitCode"));
+            };
+            return transition_lifecycle(
+                state,
+                principal,
+                workspace_id,
+                session_id,
+                "idle",
+                Some(exit_code),
+            )
+            .await;
+        }
+        Some("running") => {
+            if principal.kind != PrincipalKind::WorkHost {
+                return Err(ApiError::forbidden(
+                    "tool lifecycle transitions require work host signature",
+                ));
+            }
+            if request.exit_code.is_some() {
+                return Err(ApiError::bad_request(
+                    "running transition does not accept exitCode",
+                ));
+            }
+            return transition_lifecycle(
+                state,
+                principal,
+                workspace_id,
+                session_id,
+                "running",
+                None,
+            )
+            .await;
         }
         _ => {
             return Err(ApiError::bad_request(
@@ -416,6 +562,12 @@ pub async fn end(
     }
 
     let member_id = principal.member_id;
+    let signing_host_id = match principal.kind {
+        PrincipalKind::WorkHost => {
+            Some(principal.token_id.ok_or_else(signed_request_unauthorized)?)
+        }
+        _ => None,
+    };
     let exit_code = request.exit_code;
     let cloud_host_id = resolve_cloud_host_id(&state.pool, workspace_id, session_id)
         .await
@@ -427,6 +579,7 @@ pub async fn end(
                 conn,
                 workspace_id,
                 member_id,
+                signing_host_id,
                 session_id,
                 cloud_host_id,
                 exit_code,
@@ -463,6 +616,7 @@ async fn end_in_tx(
     conn: &mut momo_db::PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
+    signing_host_id: Option<Uuid>,
     session_id: Uuid,
     expected_cloud_host_id: Option<Uuid>,
     exit_code: Option<i32>,
@@ -481,12 +635,18 @@ async fn end_in_tx(
         // `t3_terminate` owns the `usage → session` rungs and must take them
         // after the prelude's `credit → cloud host`. Taking the session row here
         // would invert that order.
-        let Some((owner_member_id, _host_id, channel_id)) =
+        let Some((owner_member_id, host_id, channel_id)) =
             work_session_scope_in_tx(conn, workspace_id, session_id).await?
         else {
             return Ok(Err(ApiError::not_found("work session not found")));
         };
-        if owner_member_id != member_id {
+        if let Some(signing_host_id) = signing_host_id {
+            if host_id != signing_host_id {
+                return Ok(Err(ApiError::forbidden(
+                    "work host cannot end another host session",
+                )));
+            }
+        } else if owner_member_id != member_id {
             return Ok(Err(ApiError::forbidden(
                 "only the session owner can end it",
             )));
@@ -505,7 +665,13 @@ async fn end_in_tx(
     else {
         return Ok(Err(ApiError::not_found("work session not found")));
     };
-    if existing.member_id != member_id {
+    if let Some(signing_host_id) = signing_host_id {
+        if existing.host_id != signing_host_id {
+            return Ok(Err(ApiError::forbidden(
+                "work host cannot end another host session",
+            )));
+        }
+    } else if existing.member_id != member_id {
         return Ok(Err(ApiError::forbidden(
             "only the session owner can end it",
         )));
@@ -639,6 +805,464 @@ async fn close_control_window_for_ended_session_in_tx(
         &window,
     )
     .await
+}
+
+// ---------------------------------------------------------------------------
+// observation (human owner, #1778)
+// ---------------------------------------------------------------------------
+
+/// Swift `updateObservation` (`WorkSessionRoutes.swift:1662-1761`).
+///
+/// Human session owner only. `open` ↔ `owner_only` is the existing consent
+/// model (ADR-0126 D1 / ADR-0004 증보 3 D3: 인간 observer는 이 토글 그대로).
+/// Closing to `owner_only` revokes live observer grants. Host-signed callers
+/// stay out — that arm is #1777's and does not speak observation.
+async fn update_observation(
+    state: AppState,
+    principal: Principal,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    raw: &str,
+) -> Result<Json<WorkSessionResponse>, ApiError> {
+    require_human(&principal, "observation requires a human bearer")?;
+    let observation = validated_observation(raw)?;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let detail = settle(
+        "work_sessions.observation",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                update_observation_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    via_token_id,
+                    session_id,
+                    observation,
+                )
+                .await
+            })
+        })
+        .await,
+    )?;
+
+    Ok(Json(WorkSessionResponse {
+        work_session: session_dto(detail),
+    }))
+}
+
+async fn update_observation_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    via_token_id: Option<Uuid>,
+    session_id: Uuid,
+    observation: &'static str,
+) -> Rejectable<WorkSessionDetail> {
+    if active_workspace_role(conn, workspace_id, member_id)
+        .await
+        .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?
+        .is_none()
+    {
+        return Ok(Err(ApiError::forbidden("not an active workspace member")));
+    }
+
+    let Some((existing, _)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if existing.member_id != member_id {
+        return Ok(Err(ApiError::forbidden(
+            "only the session owner can change observation",
+        )));
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, existing.channel_id, member_id).await? {
+        return Ok(Err(ApiError::forbidden(
+            "active channel membership required",
+        )));
+    }
+
+    let Some(updated) =
+        set_work_session_observation_in_tx(conn, workspace_id, session_id, observation).await?
+    else {
+        return Ok(Err(ApiError::internal(
+            "work_sessions.observation",
+            "work session observation update failed",
+        )));
+    };
+
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, "work.session.observation")
+            .by(member_id)
+            .target("work_session", session_id)
+            .via_token(via_token_id)
+            .with_schema(
+                "momo.work.session.observation.v1",
+                json!({
+                    "session_id": session_id.to_string(),
+                    "observation": observation,
+                }),
+            ),
+    )
+    .await
+    .map_err(T3Error::from)?;
+
+    Ok(Ok(updated))
+}
+
+// ---------------------------------------------------------------------------
+// bindRemotePTY (host-signed)
+// ---------------------------------------------------------------------------
+
+/// Swift `bindRemotePTY` (`WorkSessionRoutes.swift:1567-1660`).
+async fn bind_remote_pty(
+    state: AppState,
+    principal: Principal,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    request: &UpdateWorkSessionRequest,
+) -> Result<Json<WorkSessionResponse>, ApiError> {
+    let Some(signing_host_id) = principal.token_id else {
+        return Err(signed_request_unauthorized());
+    };
+    let binding = parse_remote_pty_binding(
+        request.pty_id.as_deref(),
+        request.attach_endpoint.as_deref(),
+    )
+    .map_err(|error| ApiError::bad_request(error.message()))?
+    .ok_or_else(|| ApiError::bad_request("ptyId and attachEndpoint must be provided together"))?;
+
+    let detail = settle(
+        "work_sessions.bind_remote_pty",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                bind_remote_pty_in_tx(conn, workspace_id, session_id, signing_host_id, &binding)
+                    .await
+            })
+        })
+        .await,
+    )?;
+    Ok(Json(WorkSessionResponse {
+        work_session: session_dto(detail),
+    }))
+}
+
+async fn bind_remote_pty_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    signing_host_id: Uuid,
+    binding: &RemotePtyBinding,
+) -> Rejectable<WorkSessionDetail> {
+    let Some((existing, _)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if existing.host_id != signing_host_id {
+        return Ok(Err(ApiError::forbidden(
+            "work host cannot bind another host session",
+        )));
+    }
+    if existing.status != "running" && existing.status != "idle" {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "remote PTY binding requires a running or idle session",
+        )));
+    }
+    // Idempotent identical republish; a different pair is 409.
+    if existing.remote_attach_available {
+        let stored = sqlx::query(
+            "SELECT pty_id, attach_endpoint FROM work_session \
+              WHERE workspace_id = $1 AND id = $2",
+        )
+        .bind(workspace_id)
+        .bind(session_id)
+        .fetch_one(&mut *conn)
+        .await
+        .map_err(T3Error::from)?;
+        let pty_id: Option<String> =
+            sqlx::Row::try_get(&stored, "pty_id").map_err(T3Error::from)?;
+        let attach_endpoint: Option<String> =
+            sqlx::Row::try_get(&stored, "attach_endpoint").map_err(T3Error::from)?;
+        if pty_id.as_deref() != Some(binding.pty_id.as_str())
+            || attach_endpoint.as_deref() != Some(binding.attach_endpoint.as_str())
+        {
+            return Ok(Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "work session already has a different remote PTY binding",
+            )));
+        }
+        return Ok(Ok(existing));
+    }
+    match remote_pty_host_status_in_tx(conn, workspace_id, existing.host_id).await? {
+        RemotePtyHostStatus::Capable => {}
+        RemotePtyHostStatus::NotFound => {
+            return Ok(Err(ApiError::forbidden("work host not found")))
+        }
+        RemotePtyHostStatus::NotCapable => {
+            return Ok(Err(ApiError::forbidden(
+                "work host does not support terminal attach",
+            )))
+        }
+    }
+    if !write_remote_pty_binding_in_tx(conn, workspace_id, session_id, binding).await? {
+        return Ok(Err(ApiError::internal(
+            "work_sessions.bind_remote_pty",
+            "remote PTY binding update failed",
+        )));
+    }
+    let Some((updated, _)) = lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::internal(
+            "work_sessions.bind_remote_pty",
+            "remote PTY binding update failed",
+        )));
+    };
+    Ok(Ok(updated))
+}
+
+// ---------------------------------------------------------------------------
+// idle / running (host-signed)
+// ---------------------------------------------------------------------------
+
+/// Swift `transitionToolLifecycle` (`WorkSessionRoutes.swift:693-1036`).
+async fn transition_lifecycle(
+    state: AppState,
+    principal: Principal,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    target_status: &'static str,
+    exit_code: Option<i32>,
+) -> Result<Json<WorkSessionResponse>, ApiError> {
+    let Some(signing_host_id) = principal.token_id else {
+        return Err(signed_request_unauthorized());
+    };
+    let cloud_host_id = resolve_cloud_host_id(&state.pool, workspace_id, session_id)
+        .await
+        .map_err(|error| t3_error("work_sessions.transition.resolve", error))?;
+
+    let body = lifecycle_body(move |conn: &mut momo_db::PgConnection| {
+        Box::pin(async move {
+            transition_lifecycle_in_tx(
+                conn,
+                workspace_id,
+                signing_host_id,
+                session_id,
+                cloud_host_id,
+                target_status,
+                exit_code,
+            )
+            .await
+        }) as _
+    });
+
+    let detail = settle(
+        "work_sessions.transition",
+        match cloud_host_id {
+            Some(cloud_host_id) => {
+                momo_t3::with_t3_lifecycle_tx(
+                    &state.pool,
+                    workspace_id,
+                    T3LockLadder::host(cloud_host_id),
+                    body,
+                )
+                .await
+            }
+            None => tenant_tx(&state.pool, workspace_id, body).await,
+        },
+    )?;
+    Ok(Json(WorkSessionResponse {
+        work_session: session_dto(detail),
+    }))
+}
+
+async fn transition_lifecycle_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    signing_host_id: Uuid,
+    session_id: Uuid,
+    expected_cloud_host_id: Option<Uuid>,
+    target_status: &str,
+    exit_code: Option<i32>,
+) -> Rejectable<WorkSessionDetail> {
+    if cloud_host_id_for_session_in_tx(conn, workspace_id, session_id).await?
+        != expected_cloud_host_id
+    {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "work session cloud lifecycle changed; retry",
+        )));
+    }
+    let Some((existing, root_seq)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if existing.host_id != signing_host_id {
+        return Ok(Err(ApiError::forbidden(
+            "work host cannot update another host session",
+        )));
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, existing.channel_id, existing.member_id)
+        .await?
+    {
+        return Ok(Err(ApiError::forbidden(
+            "active channel membership required",
+        )));
+    }
+    if existing.status == target_status {
+        return Ok(Ok(existing));
+    }
+    let expected = if target_status == "idle" {
+        "running"
+    } else {
+        "idle"
+    };
+    if existing.status != expected {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            format!(
+                "work session cannot transition from {} to {target_status}",
+                existing.status
+            ),
+        )));
+    }
+
+    // T3: a paused daemon cannot ask to be woken (Swift :1083-1088). Idle
+    // pauses the usage ledger only — the provider pause/intent prelude is
+    // not ported (T1 workd never has a cloud host).
+    if let Some(cloud_host_id) = expected_cloud_host_id {
+        if target_status == "running" {
+            return Ok(Err(ApiError::new(
+                StatusCode::CONFLICT,
+                "paused oort Cloud sessions must be resumed by the human cloud resume endpoint",
+            )));
+        }
+        pause_usage_in_tx(conn, workspace_id, existing.host_id, Some(session_id)).await?;
+        let _ = cloud_host_id;
+    }
+
+    let Some(updated) =
+        transition_tool_lifecycle_in_tx(conn, workspace_id, session_id, target_status, exit_code)
+            .await?
+    else {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "work session state changed; retry",
+        )));
+    };
+
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_millis() as i64)
+        .unwrap_or(updated.started_at_ms);
+    let props = card_props(
+        updated.id,
+        &updated.tool,
+        &updated.label,
+        target_status,
+        None,
+        updated.exit_code,
+        None,
+        None,
+    );
+    update_session_card_props_in_tx(
+        conn,
+        workspace_id,
+        updated.root_message_id,
+        &props.to_string(),
+    )
+    .await?;
+
+    let channel = cent_channel(workspace_id, updated.channel_id);
+    let (event_type, event_seq, discriminator, _idle_message) = if target_status == "idle" {
+        let idle_card = send_message_in_tx(
+            conn,
+            workspace_id,
+            NewMessage {
+                channel_id: updated.channel_id,
+                author_member_id: updated.member_id,
+                message_type: MessageType::System,
+                body: Some("작업 완료 — idle 대기".into()),
+                props: json!({
+                    "kind": "work_session_idle",
+                    "session_id": updated.id.to_string(),
+                    "owner_member_id": updated.member_id.to_string(),
+                }),
+                root_id: Some(updated.root_message_id),
+                reply_to_id: None,
+                client_msg_id: None,
+                run_id: None,
+                hlc_ts: Some(now_ms),
+                hlc_count: None,
+            },
+        )
+        .await
+        .map_err(T3Error::from)?;
+        (
+            "work.session.idle",
+            idle_card.message.seq,
+            idle_card.message.id.to_string(),
+            Some(idle_card),
+        )
+    } else {
+        (
+            "work.session.resumed-to-running",
+            root_seq,
+            now_ms.to_string(),
+            None,
+        )
+    };
+
+    emit_outbox(
+        &mut *conn,
+        workspace_id,
+        OutboxKind::Broadcast,
+        "publish",
+        &tool_lifecycle_payload(
+            &channel,
+            event_type,
+            &updated,
+            event_seq,
+            now_ms,
+            &discriminator,
+        ),
+        Some(updated.channel_id),
+    )
+    .await
+    .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
+
+    write_audit(
+        conn,
+        &AuditEntry::new(workspace_id, event_type)
+            .by(updated.member_id)
+            .target("work_session", session_id)
+            .with_schema(
+                if target_status == "idle" {
+                    "momo.work.session.idle.v1"
+                } else {
+                    "momo.work.session.resumed_to_running.v1"
+                },
+                {
+                    let mut detail = json!({
+                        "session_id": session_id.to_string(),
+                        "host_id": updated.host_id.to_string(),
+                    });
+                    if let Some(exit_code) = exit_code {
+                        detail["exit_code"] = json!(exit_code);
+                    }
+                    detail
+                },
+            ),
+    )
+    .await
+    .map_err(T3Error::from)?;
+
+    Ok(Ok(updated))
 }
 
 // ---------------------------------------------------------------------------
@@ -1072,6 +1696,10 @@ mod tests {
         assert!(validated_label("").is_err());
         assert!(validated_label(&"x".repeat(120)).is_ok());
         assert!(validated_label(&"x".repeat(121)).is_err());
+        assert_eq!(validated_observation("open").unwrap(), "open");
+        assert_eq!(validated_observation("owner_only").unwrap(), "owner_only");
+        assert!(validated_observation("closed").is_err());
+        assert!(validated_observation("ownerOnly").is_err());
     }
 
     #[test]

@@ -201,7 +201,7 @@ boundary from every actual env-file key and canonical Compose interpolation,
 adds explicit Compose control keys, and preserves Docker daemon/context
 selection. A real `docker compose config` fixture proves ambient secret, DB/WS
 URL, three ports, project, image, and file/profile controls cannot replace the
-generated authority while all seven application consumers use the exact
+generated authority while all eight application consumers use the exact
 digest. Neither test dispatches a workflow nor pulls from GHCR.
 
 ### OpenAPI contract drift gate (MOMO-389)

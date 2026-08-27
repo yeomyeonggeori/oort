@@ -604,7 +604,7 @@ redact_json() {
   walk(
     if type == "object" then
       with_entries(
-        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature)$"))
+        if (.key | test("(?i)^(accessToken|refreshToken|token|password|secret|signature|claimPath)$"))
         then .value = "[REDACTED]"
         else . end
       )
@@ -1595,9 +1595,8 @@ echo "[openapi-rust] server health is green"
 #     running 하나, 사람의 「멈춰라」가 끝낼 queued 하나. 상태가 곧 자격이라
 #     한 행을 돌려 쓸 수 없다(control_run_binding_in_tx 는 queued|running 만 받는다).
 #   * pending 승인 하나 — 생산자는 agent worker 이고 이 부분집합엔 없다.
-#   * 초대 코드 하나 — `POST /v1/workspaces/{ws}/invites` 는 **스펙에 없는 라우트**라
-#     표본이 될 수 없다. 등재 대상 밖의 라우트를 픽스처로 쓰면 매니페스트가
-#     그것을 「샘플인데 미등재」로 잡으므로, 발급은 SQL 로 한다.
+#   * 초대 코드 하나 — `/v1/join` 표본용. admin 표면(#1769)은 아래 REST 로
+#     따로 발급하고, 그 원문은 needle 로 등록한 뒤에만 표본 파일에 쓴다.
 run_sql() {
   compose exec -T postgres psql -U "$PG_USER" -d "$PG_DB" \
     -v ON_ERROR_STOP=1 --no-psqlrc -q "$@"
@@ -1931,11 +1930,6 @@ printf '%s' "$GATE_PASSWORD" >"$LOGIN_PASSWORD_FILE"
 sample login post "/v1/auth/login" "/v1/auth/login" 200 \
   "$(jq -cn --arg e "$GATE_EMAIL" --rawfile p "$LOGIN_PASSWORD_FILE" --arg w "$WS" \
       '{email:$e,password:$p,workspace:$w}')"
-# ADR-0166: unknown token is 404 ErrorResponse. Happy-path consume is
-# claim_conformance_pg / verify_owner_claim.sh (this gate's owner already has
-# a password, so a 200 here would require a second tenant).
-sample claim-unknown post "/v1/claim" "/v1/claim" 404 \
-  '{"token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"unused-claim-password"}'
 ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -r '.accessToken // empty')"
 REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -r '.refreshToken // empty')"
 append_secret_with_derivatives "$ACCESS"
@@ -1945,6 +1939,13 @@ append_secret_with_derivatives "$REFRESH"
   redacted_body >&2
   exit 1
 }
+# ADR-0166: unknown token is 404 ErrorResponse. Happy-path consume is
+# claim_conformance_pg / verify_owner_claim.sh (this gate's owner already has
+# a password, so a 200 here would require a second tenant). Capture the
+# login pair first — sample() overwrites RESPONSE_BODY, and this 404 body
+# has no accessToken.
+sample claim-unknown post "/v1/claim" "/v1/claim" 404 \
+  '{"token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"unused-claim-password"}'
 
 # refresh 는 **단일 사용 회전**이다: 제시한 토큰은 원자적으로 revoke 되고 새 쌍이
 # 나온다. 그러므로 한 번만 부르고, 이후 전부 새 쌍을 쓴다.
@@ -1954,6 +1955,38 @@ ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
 REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
 append_secret_with_derivatives "$ACCESS"
 append_secret_with_derivatives "$REFRESH"
+
+# #1767 — wrong current password keeps this session alive (403). Happy-path
+# rotation is password_reset_conformance_pg. Issue a reset for the peer so
+# the 201 shape is sampled; register the raw token immediately.
+sample change-own-password patch \
+  "/v1/workspaces/{workspaceId}/members/me/password" \
+  "/v1/workspaces/$WS/members/me/password" 403 \
+  '{"currentPassword":"not-the-gate-password","newPassword":"unused-new-password"}' \
+  "$ACCESS"
+sample issue-password-reset post \
+  "/v1/workspaces/{workspaceId}/members/{memberId}/password-reset" \
+  "/v1/workspaces/$WS/members/$GATE_PEER_ID/password-reset" 201 \
+  "" "$ACCESS"
+RESET_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
+append_secret_with_derivatives "$RESET_TOKEN"
+[ -n "$RESET_TOKEN" ] || {
+  echo "[openapi-rust] password-reset 201 produced no token" >&2
+  redacted_body >&2
+  exit 1
+}
+# sample() redacts the `token` key by name, but claimPath embeds the raw
+# token. Rewrite the evidence file now that the needle exists.
+RESET_SAMPLE="$(jq -rs --arg name issue-password-reset \
+  'map(select(.name==$name)) | last | .body_file // empty' "$MANIFEST")"
+[ -n "$RESET_SAMPLE" ] && [ -f "$RESET_SAMPLE" ] && [ ! -L "$RESET_SAMPLE" ] || {
+  echo "[openapi-rust] password-reset sample file missing after 201" >&2
+  exit 1
+}
+RESET_SAMPLE_REDACTED="$RESET_SAMPLE.redacted"
+(umask 077; : >"$RESET_SAMPLE_REDACTED")
+redact_json <"$RESET_SAMPLE" >"$RESET_SAMPLE_REDACTED"
+mv "$RESET_SAMPLE_REDACTED" "$RESET_SAMPLE"
 
 # A malicious Agent Port may reflect the human bearer in an unexpected error
 # header and body. Exercise the exact gate_fail path and require zero registered
@@ -3595,6 +3628,95 @@ sample dms-list get "/v1/workspaces/{workspaceId}/dms" \
   "/v1/workspaces/$WS/dms" 200 "" "$ACCESS"
 guard_jq '(.channels | length) >= 1' "DM list contains the opened conversation"
 
+# ---------------------------------------------------------------------------
+# 초대 admin (#1769) — create/list/status/revoke/regenerate/redeem
+# 원문 코드는 needle 등록 후에만 표본으로 남긴다.
+# ---------------------------------------------------------------------------
+register_invite_code() {
+  local raw
+  raw="$(printf '%s' "$RESPONSE_BODY" | jq -er '.code // empty')" || return 1
+  [ -n "$raw" ] || return 1
+  append_secret_with_derivatives "$raw"
+}
+
+api post "/v1/workspaces/$WS/invites" '{"role":"member","maxUses":3}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-create "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+register_invite_code || {
+  echo "[openapi-rust] invite create omitted a one-time code" >&2
+  exit 1
+}
+INVITE_ADMIN_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
+canonical_uuid "$INVITE_ADMIN_ID" || {
+  echo "[openapi-rust] invite create omitted a canonical id" >&2
+  exit 1
+}
+record_sample invite-create post "/v1/workspaces/{workspaceId}/invites" 201
+guard_jq --arg id "$INVITE_ADMIN_ID" '
+  (.invite.id | ascii_downcase) == ($id | ascii_downcase)
+  and (.code | type == "string")
+  and (has("codeHash") | not)' \
+  "invite create returns metadata plus a one-time code"
+
+sample invite-list get "/v1/workspaces/{workspaceId}/invites" \
+  "/v1/workspaces/$WS/invites?limit=20" 200 "" "$ACCESS"
+guard_jq --arg id "$INVITE_ADMIN_ID" '
+  any(.invites[]; (.id | ascii_downcase) == ($id | ascii_downcase))
+  and (tostring | test("\"code\"") | not)' \
+  "invite list is preview-only"
+
+sample invite-get get "/v1/workspaces/{workspaceId}/invites/{inviteId}" \
+  "/v1/workspaces/$WS/invites/$INVITE_ADMIN_ID" 200 "" "$ACCESS"
+guard_jq --arg id "$INVITE_ADMIN_ID" '
+  (.invite.id | ascii_downcase) == ($id | ascii_downcase)
+  and (.redemptions | type == "array")
+  and (has("code") | not) and (.invite | has("code") | not)' \
+  "invite status is metadata plus redemptions"
+
+api post "/v1/workspaces/$WS/invites/$INVITE_ADMIN_ID/regenerate" "" "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-regenerate "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+register_invite_code || {
+  echo "[openapi-rust] invite regenerate omitted a one-time code" >&2
+  exit 1
+}
+INVITE_REGEN_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
+record_sample invite-regenerate post \
+  "/v1/workspaces/{workspaceId}/invites/{inviteId}/regenerate" 201
+
+api post "/v1/workspaces/$WS/invites" '{"role":"member","maxUses":1}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-revoke-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+register_invite_code || exit 1
+INVITE_REVOKE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
+sample invite-revoke post "/v1/workspaces/{workspaceId}/invites/{inviteId}/revoke" \
+  "/v1/workspaces/$WS/invites/$INVITE_REVOKE_ID/revoke" 200 \
+  '{"reason":"openapi rust gate"}' "$ACCESS"
+guard_jq '.revokedAtMs != null and .revocationReason == "openapi rust gate"' \
+  "POST revoke stamps revokedAtMs"
+
+api post "/v1/workspaces/$WS/invites" '{"role":"guest","maxUses":1}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-delete-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+register_invite_code || exit 1
+INVITE_DELETE_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er '.invite.id')"
+sample invite-delete delete "/v1/workspaces/{workspaceId}/invites/{inviteId}" \
+  "/v1/workspaces/$WS/invites/$INVITE_DELETE_ID" 200 "" "$ACCESS"
+guard_jq '.revokedAtMs != null' "DELETE revoke stamps revokedAtMs"
+
+api post "/v1/workspaces/$WS/invites" '{"role":"member","maxUses":2}' "$ACCESS"
+[ "$RESPONSE_STATUS" = "201" ] || gate_fail invite-redeem-fixture "expected HTTP 201, got $RESPONSE_STATUS" "$(redacted_body)"
+INVITE_REDEEM_CODE="$(printf '%s' "$RESPONSE_BODY" | jq -er '.code')"
+register_invite_code || exit 1
+INVITE_REDEEM_FILE="$TMP_DIR/invite-redeem-code.txt"
+(umask 077; : >"$INVITE_REDEEM_FILE")
+register_secret_file "$INVITE_REDEEM_FILE"
+printf '%s' "$INVITE_REDEEM_CODE" >"$INVITE_REDEEM_FILE"
+sample invite-redeem post "/v1/workspaces/{workspaceId}/invites/redeem" \
+  "/v1/workspaces/$WS/invites/redeem" 200 \
+  "$(jq -cn --rawfile c "$INVITE_REDEEM_FILE" '{code:$c}')" "$ACCESS"
+guard_jq '
+  (.redemptionId | type == "string")
+  and (.invite.usedCount == 1)
+  and (.invite | has("code") | not)' \
+  "member redeem increments usedCount and never echoes the code"
+
 INVITE_CODE_FILE="$TMP_DIR/invite-code.txt"
 JOIN_PASSWORD_FILE="$TMP_DIR/join-password.txt"
 (umask 077; : >"$INVITE_CODE_FILE"; : >"$JOIN_PASSWORD_FILE")
@@ -3941,7 +4063,11 @@ if [ -d "${CONCURRENT_DIR:-}" ] && [ ! -L "$CONCURRENT_DIR" ]; then
   done < <(find "$CONCURRENT_DIR" -type f -maxdepth 1 -print)
 fi
 
-for request_secret in "$LOGIN_PASSWORD_FILE" "$INVITE_CODE_FILE" "$JOIN_PASSWORD_FILE"; do
+for request_secret in \
+  "$LOGIN_PASSWORD_FILE" \
+  "$INVITE_CODE_FILE" \
+  "$JOIN_PASSWORD_FILE" \
+  "$INVITE_REDEEM_FILE"; do
   request_secret_index=-1
   for ((index = 0; index < ${#SECRET_FILES[@]}; index++)); do
     if [ "${SECRET_FILES[$index]}" = "$request_secret" ]; then

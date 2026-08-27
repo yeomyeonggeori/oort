@@ -1076,6 +1076,62 @@ pub async fn spawn_ack_session_matches_in_tx(
     Ok(found.is_some())
 }
 
+/// Swift `requireDispatchedSpawnControl` (`WorkSessionRoutes.swift:2557-2605`).
+///
+/// A signed work host may create only the session a dispatched spawn control
+/// already describes: same channel, same host, same tool/label, still unbound
+/// (`session_id IS NULL`). The session owner is the requesting agent's human
+/// owner — never a host-supplied identity. `None` is Swift's 409
+/// (`spawn control is not dispatchable by this host`).
+pub async fn dispatched_spawn_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    control_id: Uuid,
+    channel_id: Uuid,
+    host_id: Uuid,
+    tool: &str,
+    label: &str,
+) -> Result<Option<Uuid>, T3Error> {
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT a.owner_human_id \
+           FROM work_control wc \
+           JOIN member requester \
+             ON requester.id = wc.requester_member_id \
+            AND requester.workspace_id = wc.workspace_id \
+            AND requester.kind = 'agent' \
+            AND requester.status = 'active' \
+            AND requester.deleted_at IS NULL \
+           JOIN agent a \
+             ON a.member_id = requester.id \
+            AND a.workspace_id = requester.workspace_id \
+           JOIN member owner \
+             ON owner.id = a.owner_human_id \
+            AND owner.workspace_id = wc.workspace_id \
+            AND owner.kind = 'human' \
+            AND owner.status = 'active' \
+            AND owner.deleted_at IS NULL \
+          WHERE wc.id = $1 \
+            AND wc.workspace_id = $2 \
+            AND wc.channel_id = $3 \
+            AND wc.target_host_id = $4 \
+            AND wc.kind = 'spawn' \
+            AND wc.status = 'dispatched' \
+            AND wc.session_id IS NULL \
+            AND wc.payload->>'tool' = $5 \
+            AND wc.payload->>'label' = $6 \
+          FOR SHARE OF wc",
+    )
+    .bind(control_id)
+    .bind(workspace_id)
+    .bind(channel_id)
+    .bind(host_id)
+    .bind(tool)
+    .bind(label)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(owner)
+}
+
 // ---------------------------------------------------------------------------
 // auto-approve (ADR-0114 D5)
 // ---------------------------------------------------------------------------

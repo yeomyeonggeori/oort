@@ -183,7 +183,9 @@ docker build -f relay/PushRelay/Dockerfile -t momo-push-relay:dev .
 push 경로는 **오버레이 파일 2개**로만 존재한다. 지금 도는 도그푸딩 스택이 읽는
 `docker-compose.rust.yml`은 **한 줄도 바뀌지 않았다** — 평소의 `momorust up -d`는
 relay를 띄울 수도, 없는 이미지를 당길 수도, 새 변수에서 깨질 수도 없다.
-(`infra/rust`에는 `profiles:`가 원래 없다. 이 디렉터리의 관례는 파일 오버레이다.)
+LiveKit 시크릿도 요구하지 않는다: 기본 기동은 huddle profile이 없고, livekit
+entrypoint의 `$${VAR:?}`는 compose 보간이 아니라 컨테이너 셸 검사다(#1781).
+(`infra/rust`의 푸시 경로는 파일 오버레이다. huddle만 `profiles: ["huddle"]`이다.)
 
 ```bash
 alias momopush='docker compose \
