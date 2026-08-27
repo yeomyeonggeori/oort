@@ -694,6 +694,15 @@ pub async fn is_handle_banned_in_tx(
     Ok(banned)
 }
 
+/// Email-or-handle ban check used by public join and member-self redeem.
+pub async fn is_identity_banned_in_tx(
+    conn: &mut PgConnection,
+    email: &str,
+    handle: &str,
+) -> Result<bool, DbError> {
+    is_banned(conn, email, handle).await
+}
+
 async fn is_banned(conn: &mut PgConnection, email: &str, handle: &str) -> Result<bool, DbError> {
     // The `::text` casts are Swift's (`requireNotBanned` :543-544) and they are
     // load-bearing here for a different reason: `lower` is overloaded on
