@@ -2740,3 +2740,9 @@
 - **#1792 SPIKE-HD = 환경 차단 판정**: 스파이크 급소(Funnel 노드·외부 망 관측점 2대)가 성재 참여 없이는 불성립(로컬 tailscale 부재·그록봇 VM 비접촉 규율). 이슈에 필요 목록 코멘트 — 성재 준비 시 실행 시트 즉시 제공. 폴백 P2 기결재.
 - **⑥ #1768 발사**(w1768-lifecycle, base=#1819 반영): 10경로 이식 — #1798 `can_*_for` 사다리·매트릭스 픽스처 승계 계약, 마지막 owner 보호·정지 로그인 차단·밴 재가입 차단 red proof, outbox-only. 브리프 `2026-08-27-1768-member-lifecycle-brief.md`.
 - 성재 이월 소화: momo_notifier 난수 회전 완료(성재 직접 실행) — 리그 접촉 사고 잔여 0.
+
+## 2026-08-27 (밤2) · Fable · #1768 랜딩(실행플랜 완주) + SPIKE-HD 릴레이 가동
+- **#1768 랜딩·close**(PR #1821 → track/engine): Swift MemberLifecycleRoutes 10경로 이식 — can_* 사다리 5종(도메인 층·FOR UPDATE — #1805 교훈이 워커 관례로 정착 확인), Swift 오류 우선순위 보존(last-owner 가드 선행), suspend=토큰 revoke+로그인 403·ban=redeem 403, 직접 publish 0, red proof 선행 커밋 → 컨포먼스 49/49. 재검수=Swift 원문 줄 대조 PASS.
+- **랜딩 중 학습**: Cargo.lock 변경 PR은 GHCR 고지 번들 재생성 동반(manifest가 cargo_lock_sha256 커버) — 라이선스 레인이 깨어날 때만 드러나는 계약. 오케스트레이터가 재생성 커밋 대행(604dd71c, 게이트 산물), 이후 engine 브리프 관례에 추가할 것.
+- **이로써 post-audit 실행플랜 ①~⑥ 전 소화**(잔여=#1792 스파이크뿐). AC 4부작(#1767·#1768·#1769·#1770) 전부 랜딩 — 계정·권한 축 완결.
+- **SPIKE-HD(#1792) 가동**(성재 승인 — 그록봇 자연어 릴레이 경로 확정): ①외부 망(로컬 맥)에서 **급소 2단계 TLS 악수 선통과**(LE 정식 인증서·TLS1.3) ②그록봇 릴레이 1 관측 — 8443 Funnel 매핑 실존(백엔드=구 TLS 프로브 더미), livekit 미기동·MOMO_LIVEKIT_URL 미설정(VM 허들 첫 기동이 됨), 시그널=join 응답 직결 ③릴레이 2 발신 — 더미 철거+turn 활성+같은 오리진 /livekit 프록시(CSP 무변경 설계). 정본 claudedocs/spike-hd-funnel-turns/.
