@@ -121,6 +121,11 @@ tags:
     description: Hosted MCP JSON-RPC endpoints for agent bearers.
   - name: memories
     description: ADR-0129 workspace memory lifecycle, source links, and admin policy.
+  - name: workspace-settings
+    description: >
+      Operator-only workspace.settings bag (#1800). Owner/admin. Not exposed on
+      GET /v1/workspaces/{workspaceId}; members read individual keys through
+      derived projections. role_labels is reserved for AC-4 and rejected here.
 
 paths:
   /v1/auth/login:
@@ -735,6 +740,90 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {description: Workspace member not found, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
         "409": {description: The change would remove the last owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/settings:
+    get:
+      tags: [workspace-settings]
+      operationId: getWorkspaceSettings
+      summary: Read the workspace.settings bag.
+      description: >
+        Owner/admin only (`require_workspace_operator`). Returns the stored
+        jsonb object, or `{}` when the workspace has never written a key.
+        This is deliberately a sibling of `GET /v1/workspaces/{workspaceId}`,
+        which must not grow a `settings` field — the bag is an extensible
+        store that may later hold keys not every member may read.
+        `role_labels` is reserved for AC-4 (#1770) and is not accepted on
+        PATCH in this ticket.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: Current bag. Empty object when unset.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WorkspaceSettings"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Human owner/admin required. Agents and members/guests are refused.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Workspace not visible under the tenant GUC.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    patch:
+      tags: [workspace-settings]
+      operationId: patchWorkspaceSettings
+      summary: Merge top-level keys into workspace.settings.
+      description: >
+        Owner/admin only. RFC 7396-shaped top-level merge: specified keys
+        replace, omitted keys stay, `null` deletes the key. Unknown top-level
+        keys are 400. The starting allowlist is `allowed_agent_models` only
+        (string array, max 32 entries, each ≤ 64 bytes). `role_labels` is
+        reserved for AC-4 and is rejected. Serialized body over 8192 bytes is
+        413. There is no PUT whole-replace.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/PatchWorkspaceSettingsRequest"}
+      responses:
+        "200":
+          description: Merged bag.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WorkspaceSettings"}
+        "400":
+          description: Unknown key, malformed allowed_agent_models, or non-object body.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Human owner/admin required.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Workspace not visible under the tenant GUC.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "413":
+          description: Serialized PATCH body exceeds 8192 bytes.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/members/me:
     delete:
@@ -10472,6 +10561,37 @@ components:
         pins:
           type: array
           items: {$ref: "#/components/schemas/PinnedMessage"}
+
+    WorkspaceSettings:
+      type: object
+      description: >
+        Stored workspace.settings bag. Additional keys may appear after a later
+        ticket widens the allowlist. Today the only writable key is
+        allowed_agent_models. role_labels is reserved for AC-4 and is not
+        accepted on PATCH here.
+      additionalProperties: true
+      properties:
+        allowed_agent_models:
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 32
+
+    PatchWorkspaceSettingsRequest:
+      type: object
+      description: >
+        RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
+        is reserved for AC-4 (#1770) and is rejected. null deletes the key.
+      additionalProperties: false
+      properties:
+        allowed_agent_models:
+          nullable: true
+          type: array
+          items:
+            type: string
+            maxLength: 64
+          maxItems: 32
 
     UnfurlSettings:
       type: object

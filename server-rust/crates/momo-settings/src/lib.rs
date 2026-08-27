@@ -45,6 +45,7 @@
 //! | [`invite`] | `invite_code` create/list/read/revoke/regenerate/redeem | `Routes/InviteRoutes.swift` |
 //! | [`join`] | spending an invite (`POST /v1/join`) | `Routes/JoinRoutes.swift` |
 //! | [`workspace`] | tenant provisioning (`POST /v1/workspaces`) | `Routes/WorkspaceRoutes.create` |
+//! | [`workspace_settings`] | `workspace.settings` bag GET/PATCH (#1800) | no Swift ancestor |
 //!
 //! **B4.3 adds [`join`], the half that spends what [`invite`] mints.** It is in
 //! this crate and not another because `invite_code` has exactly one owner, and
@@ -64,6 +65,7 @@ pub mod provider;
 pub mod quota;
 pub mod tier;
 pub mod workspace;
+pub mod workspace_settings;
 
 pub use chain::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry,
@@ -113,4 +115,9 @@ pub use workspace::{
     normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
     workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
     WorkspaceProvisionRejected, WorkspaceSpecInvalid,
+};
+pub use workspace_settings::{
+    merge_workspace_settings, read_workspace_settings, read_workspace_settings_for_update,
+    write_workspace_settings, WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS,
+    MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
 };
