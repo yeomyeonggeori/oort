@@ -25,6 +25,7 @@ import { ApiError } from "../../lib/api";
 import { fetchWithDeadline } from "../../lib/http";
 import { absoluteApiBase, apiBase, coreSession } from "../../runtime/host";
 import { arrayField, responseRecord } from "../../lib/wire";
+import { parseRoleLabels, type RoleLabels } from "../directory/model";
 
 // Same deadline as the shared client (MOMO-609): settings is where someone
 // re-points a device at another server, so an address that answers nothing has
@@ -439,6 +440,12 @@ export interface WorkspaceIdentity {
    * `?v` changes on replacement, so a cache is never stale.
    */
   avatarUrl?: string;
+  /**
+   * Display-only role name overrides from GET /v1/workspaces/{ws}.
+   * Missing, null, or a non-object is `{}` (Korean defaults). The settings
+   * bag is never on this response.
+   */
+  roleLabels: RoleLabels;
 }
 
 export function createWorkspace(
@@ -460,7 +467,31 @@ export async function fetchWorkspace(
   if (!res.workspace || typeof res.workspace !== "object") {
     throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
   }
-  return res.workspace;
+  const workspace = res.workspace;
+  return {
+    ...workspace,
+    roleLabels: parseRoleLabels(
+      (workspace as WorkspaceIdentity & { roleLabels?: unknown }).roleLabels
+    ),
+  };
+}
+
+/**
+ * PATCH /v1/workspaces/{ws}/settings — top-level merge. `role_labels` is
+ * replaced whole: omit a role key to drop that override, `null` deletes the
+ * key (every default restored). Other settings keys are left untouched.
+ */
+export function patchWorkspaceSettings(
+  workspaceId: string,
+  body: { role_labels: RoleLabels | null }
+): Promise<unknown> {
+  return settingsRequest<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }
+  );
 }
 
 // --- 초대: GET/POST /v1/workspaces/:ws/invites ------------------------------

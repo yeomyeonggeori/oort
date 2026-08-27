@@ -2,7 +2,6 @@ import {
   ApiError,
   uuidEq,
   type Channel,
-  type MembershipRole,
   type RosterMember,
 } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
@@ -19,23 +18,71 @@ import { NetworkError } from "../../lib/http";
 // invented here.
 // =============================================================================
 
-const ROLE_LABEL: Readonly<Record<MembershipRole, string>> = {
+/** Wire roles that may carry a display override. Agent is never stored. */
+export const ROLE_KEYS = ["owner", "admin", "member", "guest"] as const;
+
+export type RoleKey = (typeof ROLE_KEYS)[number];
+
+/** Display-only overrides. Missing or empty key = the Korean default. */
+export type RoleLabels = Partial<Record<RoleKey, string>>;
+
+export const DEFAULT_ROLE_LABELS: Readonly<Record<RoleKey, string>> = {
   owner: "소유자",
   admin: "관리자",
   member: "멤버",
   guest: "게스트",
 };
 
+const EMPTY_ROLE_LABELS: RoleLabels = {};
+
+function trimmedOverride(
+  labels: RoleLabels | null | undefined,
+  role: RoleKey
+): string | undefined {
+  const raw = labels?.[role];
+  if (typeof raw !== "string") return undefined;
+  const value = raw.trim();
+  return value === "" ? undefined : value;
+}
+
 /**
  * Workspace role, for humans. Agents carry `member` on the wire like everyone
  * else, and repeating it under the 에이전트 heading would be noise, so an agent
  * row shows its owner attribution instead.
+ *
+ * `labels` is the workspace identity projection (`roleLabels`). A non-empty
+ * override wins; an absent, empty, or whitespace value falls back to the
+ * Korean default so a workspace without overrides paints the same pixels.
+ * Agent rows stay null even when a `member` override exists: the heading
+ * already said 에이전트, and the server does not store an agent label.
  */
-export function roleLabel(member: RosterMember): string | null {
+export function roleLabel(
+  member: RosterMember,
+  labels?: RoleLabels | null
+): string | null {
   if (member.kind === "agent") return null;
   const role = member.role;
   if (role === undefined) return null;
-  return ROLE_LABEL[role] ?? null;
+  return trimmedOverride(labels, role) ?? DEFAULT_ROLE_LABELS[role] ?? null;
+}
+
+/**
+ * Identity GET `roleLabels`: object whose keys ⊂ {owner,admin,member,guest}.
+ * Missing, null, or a non-object is `{}`. Unknown keys and empty values are
+ * dropped so a stale or partial projection cannot invent a label.
+ */
+export function parseRoleLabels(value: unknown): RoleLabels {
+  if (value == null) return EMPTY_ROLE_LABELS;
+  if (typeof value !== "object" || Array.isArray(value)) return EMPTY_ROLE_LABELS;
+  const out: RoleLabels = {};
+  for (const key of ROLE_KEYS) {
+    const raw = (value as Record<string, unknown>)[key];
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed === "") continue;
+    out[key] = trimmed;
+  }
+  return out;
 }
 
 /**
@@ -168,10 +215,11 @@ export function countLabel(
  */
 export function memberRowLabel(
   member: RosterMember,
-  ownerName: string | null
+  ownerName: string | null,
+  labels?: RoleLabels | null
 ): string {
   const parts = [`${member.displayName} @${member.handle}`];
-  const role = roleLabel(member);
+  const role = roleLabel(member, labels);
   if (role) parts.push(role);
   if (member.kind === "agent") {
     // On screen "agent" is the --agent token on the avatar and the name. Colour
