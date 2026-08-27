@@ -13,6 +13,7 @@
 
 | # | 상태 | 항목 | UI가 할 일 | 착수 포인터 (전부 main) |
 |---|---|---|---|---|
+| A-38 | `info` | **ACP 이벤트 릴레이가 서버에서 받는다 (#1785)** | **UXUI 추가 작업 없음.** 웹/코어는 이미 세션 스레드의 `props.kind=work_session_event`와 `agent.partial`/`agent.status`/`approval.*` 프레임을 읽는다. 서버가 host-signed PATCH `event`를 200으로 받고 원장에 남긴다. | `PATCH …/work-sessions/{session}` `{event}`, `momo.work_session.acp_event.v1` |
 | A-37 | `ready` | **역할 표시명 인스턴스 커스텀 (#1770 uxui)** | 설정 UI에서 4역할 표시명 편집(빈 값=기본 복원). `roleLabel()`/`INVITE_ROLES`가 `GET /v1/workspaces/{ws}` 의 `roleLabels` 를 우선하고 없으면 기본 한국어. 권한은 그대로라는 고지. 서버 절반은 이미 `role_labels` PATCH + identity 프로젝션. | #1770, `WorkspaceDto.roleLabels`, `PATCH …/settings` `role_labels` |
 | A-36 | `ready` | **비밀번호 재설정/변경 웹 표면 (#1767 후속)** | `ClaimPage`가 `password_reset` vs `owner_bootstrap` 문구를 분기한다(같은 `POST /v1/claim`). 설정에 본인 `PATCH …/members/me/password`(현재 비번 재확인·성공 시 새 토큰 쌍 저장). owner/admin 멤버 상세에서 reset 링크 발급(`POST …/members/{id}/password-reset`) — 원문 1회, out-of-band 전달(초대와 동일). 메일 없음. | #1767, `POST /v1/claim`, `PATCH …/members/me/password`, `POST …/members/{id}/password-reset` |
 | A-35 | `info` | **소유자 관전 토글이 서버에서 받는다 (#1778)** | **UXUI 추가 작업 없음.** 웹은 이미 `setWorkSessionObservation({observation})`를 호출한다. 서버가 인간-소유자 PATCH를 200으로 받고, `owner_only`에서 팀원 observer attach를 403한다. | `PATCH …/work-sessions/{session}` `{observation}`, ADR-0004 증보 3 D3 |
