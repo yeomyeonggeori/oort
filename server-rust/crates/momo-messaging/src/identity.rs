@@ -14,6 +14,7 @@
 //! (invariant #6) without this code passing `workspace_id` as a filter.
 
 use momo_db::DbError;
+use serde_json::{json, Value};
 use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
@@ -695,6 +696,9 @@ pub struct WorkspaceIdentity {
     /// `avatarUrl` is derived from it (`GET …/avatar/content?v={media}`), and its
     /// change on replacement is what busts the client's immutable cache.
     pub avatar_media_id: Option<Uuid>,
+    /// Member-readable `settings.role_labels` projection (`{}` when absent).
+    /// The rest of the settings bag is never carried on this type.
+    pub role_labels: Value,
 }
 
 /// Why a workspace read produced no workspace — the distinction Swift's
@@ -736,6 +740,11 @@ pub async fn read_workspace_for_active_member(
                 w.slug, \
                 w.name, \
                 w.avatar_media_id, \
+                CASE \
+                  WHEN jsonb_typeof(w.settings->'role_labels') = 'object' \
+                  THEN w.settings->'role_labels' \
+                  ELSE '{}'::jsonb \
+                END AS role_labels, \
                 floor(extract(epoch from w.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM (SELECT 1) AS anchor \
            LEFT JOIN workspace w \
@@ -764,6 +773,10 @@ pub async fn read_workspace_for_active_member(
             name: row.try_get("name")?,
             updated_at_ms: row.try_get("updated_at_ms")?,
             avatar_media_id: row.try_get("avatar_media_id")?,
+            role_labels: match row.try_get::<Value, _>("role_labels")? {
+                value @ Value::Object(_) => value,
+                _ => json!({}),
+            },
         })),
         None => {
             let exists: bool = row.try_get("workspace_exists")?;

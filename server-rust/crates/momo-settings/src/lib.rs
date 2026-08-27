@@ -45,7 +45,7 @@
 //! | [`invite`] | `invite_code` create/list/read/revoke/regenerate/redeem | `Routes/InviteRoutes.swift` |
 //! | [`join`] | spending an invite (`POST /v1/join`) | `Routes/JoinRoutes.swift` |
 //! | [`workspace`] | tenant provisioning (`POST /v1/workspaces`) | `Routes/WorkspaceRoutes.create` |
-//! | [`workspace_settings`] | `workspace.settings` bag GET/PATCH (#1800) | no Swift ancestor |
+//! | [`workspace_settings`] | `workspace.settings` bag GET/PATCH (#1800, `role_labels` #1770) | no Swift ancestor |
 //!
 //! **B4.3 adds [`join`], the half that spends what [`invite`] mints.** It is in
 //! this crate and not another because `invite_code` has exactly one owner, and
@@ -117,7 +117,8 @@ pub use workspace::{
     WorkspaceProvisionRejected, WorkspaceSpecInvalid,
 };
 pub use workspace_settings::{
-    merge_workspace_settings, read_workspace_settings, read_workspace_settings_for_update,
-    write_workspace_settings, WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS,
-    MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
+    merge_workspace_settings, project_role_labels, read_workspace_settings,
+    read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
+    ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
+    MAX_ROLE_LABEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES, ROLE_LABEL_KEYS,
 };
