@@ -4,6 +4,51 @@
 > 규칙: 항목당 5줄 이내. 새 항목은 맨 위에 추가하고 기존 항목은 수정하지 않는다. 결정·증거·계획의 정본이 아니다(그건 ADR/STATUS/ROADMAP) — 여기는 "무엇을 하다 어디서 멈췄나"만. 최신이 위.
 
 ---
+
+## 2026-08-27 (오후2) · Fable · ★DNS 급소 종료 + #1798 랜딩 → 정리·중단 (성재 "정리하고 중단")
+- **DNS 종료**: `app.oor7.com` A(101.79.11.189) 성재 삭제, 권위 NS(가비아)에서 소거 확인(삭제 45초 후 응답 중단, 8.8.8.8·1.1.1.1·ns.gabia 교차). 첫 확인 때 남아 있던 건 반영 지연이었음. 진단 삽화: 성재가 처음 연 가비아 존은 apex→216.150.1.1(Vercel)·www→vercel-dns인 **다른 도메인** — oor7.com은 apex·www 공백에 app만 매달려 3리졸버로 확정. **레포 밖 표면 노출 0.**
+- **#1798 랜딩**: PR #1798 → track/engine **094cdc87**, #1767 close. 패스워드 리셋 위계(ADR-0128 D2) 구멍 종료. cursor grok 4.6 워커 수리(d8d68b89): `can_issue_password_reset_for` 사다리+self 진입즉시 Forbidden, 행위자·대상 role 둘 다 같은 테넌트 트랜잭션 조회(라우트 require_admin 비단독). **워커 RED proof 정석**: 매트릭스 20칸 중 4칸(admin→owner 계열) 201→403, conformance 25 passed. Fable 재검수+CI 그린(fail=0) 확인 후 머지. 브리프의 매트릭스 표·정지 조건 절 상설 템플릿 첫 실전 완주.
+- **회수**: w1747·w1769·w1770·wfix·w1767 5기 reap(디스크 111Gi). `momo-worktree-reclaim.sh` infra 비-git 디렉터리 pipefail 결함 수리. 성재 위생 대상: `momo-worktrees/infra/rust/local.secrets.env`(리그 산물 추정 시크릿, 보존).
+- **정리·중단**: 재개 진입점 `handoffs/2026-08-27-fable-resume-checkpoint.md`. 다음 순서 ③#1800→④#1770→⑤(#1792 P2폴백∥#1785∥#1797)→⑥#1768(위계 헬퍼 패턴 승계). 실행 결재 전부 소진, 방향 기승인 — 다음 세션 ③부터 자율.
+
+## 2026-08-27 · Fable · ★성재 결재 5건 전부 판정 — #1799 랜딩·#1798 수리 워커 가동·#1803 완료
+- **결재 반영**(정본 `handoffs/2026-08-27-post-audit-execution-plan.md` §1.1): ①DNS=성재 직접(가비아, **유일 잔여** — dig 실측 101.79.11.189 여전히 응답) ②#1798 계약 승인+검수·머지 위임 ③허들 폴백=**P2 운영자 TURN**(P3 유료 배제, #1792 코멘트) ④#1768=순서 ⑥ 유지 ⑤#1803=Fable 검증 위임.
+- **#1799 랜딩**: track/engine **89298a2f**, #1769 close. 머지 전 같은 계열 위계 재점검 통과 — owner 초대 불가가 API 400+DB 제약(`invite_code_role_ck`) 이중 방어, admin의 revoke/regenerate는 신규 발급 경로라 탈취 계열 아님.
+- **#1798 수리 워커 발사**(cursor grok 4.6, w1767 워크트리): 결함 재확정(require_admin이 행위자만, in_tx 오류 집합에 대상 role 축 부재, self 차단 부재) → 브리프 `2026-08-27-1798-hierarchy-repair-brief.md` — **권한 매트릭스 표+정지 조건 절 상설 템플릿 첫 실전**. #1799 선랜딩으로 base sync 1회화(①② 순서 의도적 교환).
+- **#1803 완료**(e2b53eee): AGENTS/CODEX 헤더·런북 은퇴 배너·Caddyfile 고지. 정정: **CLAUDE.md 잔재 0건**(이슈 기재와 다름). STATUS.md 역사 기록은 원칙대로 보존.
+- 다음: 워커 완료 시 재검수(매트릭스 red proof 확인)→머지→#1800 발사. DNS 삭제는 성재 가비아 처리 후 dig 재확인.
+
+## 2026-08-26 (Opus) · ★리그 실기동이 검사가 됐다 — 결함 4건 발견·수리, 성재 테스트 빌드 인도
+- **성재가 만질 리그 인도**: `http://localhost:8188`(oort-t, 오늘 랜딩분 전부 + LiveKit 허들 프로파일). 접속정보는 바탕화면 파일로 전달(주소+계정+비번 동봉 — 예전 "주소만 주고 계정 안 알려준" 전례 반복 안 함). **도어벨 리그(8088)는 비접촉** — 프로젝트명·포트·볼륨 3중 분리로 나란히 운용.
+- **리그를 세우는 과정에서 결함 4건이 실기동으로 드러났다. 전부 "띄워봐야만 측정되는 축"이었다**(실패 양식 ㉠):
+  ①**#1795 compose 충돌 가드 오탐** — 자기 경로를 `REPO_ROOT`로 잡는데 도커 라벨은 `infra/rust`라 **절대 일치하지 않는다** ⇒ 자기 스택을 남의 것으로 보고 `up`·`down` 둘 다 막는 **교착**. 가드가 권하는 `down`조차 같은 가드에 막힌다. **문서화된 재시작 절차(§2.3)가 성립하지 않던 것.**
+  ②**#1790 printf 회귀(내가 오늘 랜딩한 것)** — `printf '--compose up -d'`가 bash에서 `invalid option`. **안내가 필요한 자리에서 안내가 통째로 빈다.** 모드 테스트가 claim 분기만 밟아 못 잡았다.
+  ③**#1747 갭3 적립** — 낡은 env로 오늘 코드를 돌리면 migrate가 죽는데 에러가 **어느 변수인지 말하지 않는다**(`MOMO_ENV` vs `MOMO_MIGRATE_ENV`). 그록봇이 스스로 못 푼다.
+  ④**#1747 갭2 실물 재현** — 신선 볼륨에서 api 재시작 루프. 수리 후 `drive-init` exit 0 + api healthy를 **볼륨 삭제 후 독립 재현**으로 확인.
+- PR: **#1794**(가드+printf, red/green 실기동) · **#1796**(#1747, 정책 게이트 감사 첨부). 워커가 테스트 기대값을 바꾼 건 **tip 테스트를 워커 트리에 대고 돌려 rc=1 실패를 확인**해 약화 아님을 실측 판정.
+- **허들 Funnel 스파이크 진행**: 그록봇이 §2.2 완주 — 공개주소 `cursor.tailb1aad3.ts.net`, HTTP Funnel **200**, 8443 TCP **OPEN**, 그러나 TLS 악수는 **EOF**. 판정: 불가가 아니라 **뒤에 리스너가 없어서**로 읽힌다(LiveKit TURN 미기동). 더미 리스너 후 재시도가 다음 단계.
+- **CDP 재개 요청은 거절**: 성재가 "너가 CDP로 직접 요청해라" 했으나 **성재 본인이 2026-08-22에 Cursor 약관(자동화 금지) 때문에 은퇴시킨 경로**다. 제3자 약관은 성재 허용으로 해소되지 않는다. 대안으로 **ADR-0171 도어벨(webhook)**을 제시했고, #1747이 랜딩되면 그 경로가 실제로 선다.
+
+## 2026-08-26 (Opus) · ★NCP 완전 철수 집행 + ADR 2건 결재 + 파도 1·2 랜딩 5건
+- **NCP oort 자원 0**: 서버 3대·블록스토리지 **360GB**·공인 IP 3개 전부 반납(`factsheet` 비접촉). 집행은 `~/.ncp/credentials.env` API 키 + VPC Server API — SSH·콘솔 로그인 미사용(pem 부재·자격증명 입력 금지). 가드 5중(번호·이름·IP·`momo` 접두사·`stopped`). **실측이 판정을 뒤집었다**: 비용 핵심이라던 cube+turn은 **이미 stopped**였고(앞선 SSH 차단을 방화벽으로 읽은 것이 오독), 켜져 있던 oort 서버는 `app.oor7.com` 하나였다. 그런데 **꺼진 300GB SSD가 요금만 내고 있었던 것**이 체감 비용의 정체. 재구축 스냅샷 정본화(`9c99c24f`). **잃은 것 = app.oor7.com 내부 알파 PG**(pem 부재로 덤프 불가, 성재가 알고 지시).
+- **ADR 2건 Accepted**: **0165 증보 3**(TURN 주어를 "oort 운영分"→"그 배포의 운영자 소유分"으로 재정의 + `D3-부재` 과도기 허용을 성재가 (가)로 결정) · **0169 증보 1**(첨부 capability URL의 same-origin 파생, **A 채택 + C 백엔드선택 하이브리드** 병기). 전자가 없으면 momo-turn 삭제가 Accepted ADR과 어긋났다.
+- **랜딩 5건**(track/engine `394c4d42`): #1781·#1777(터미널 축 개방)·#1778(관전 토글)·#1790(claim 모드 유지보수)·#1788(첨부 same-origin). 검수 적발 2건이 **문서-코드 상호무효화** 형태였다 — #1790은 §1.4가 "생성기 재실행 금지"라 해놓고 §2.3이 실행을 시킴, #1788은 `--public-origin`이 `same-origin`을 덮어써 **플레이북대로 따르면 수리가 원상복귀**. 둘 다 워커가 못 보고 문면 대조에서 잡혔다.
+- **허들 방향 확정**: RA-8 리서치(853줄) + RP-1 실측 — 그록봇 VM 매핑이 목적지마다 **포트뿐 아니라 공인 IP까지** 다름(로드밸런싱 NAT 풀, 둘 다 AWS) ⇒ **VM에 안정적 공인 신원 없음, 홀펀칭 사망**. 살아남는 건 안에서 밖으로 여는 터널뿐 ⇒ **#1792 SPIKE-HD**(Funnel TLS 종단 TCP로 LiveKit 내장 TURN 노출). #1789는 전제 오류로 close. **플레이북 §2.2가 이미 Funnel을 v1 기본으로 정해 뒀다는 성재 지적이 감사 오독을 교정**(추가 가입·설치 0).
+- 잔여: SPIKE-HD 실행(그록봇 Funnel 필요) · 랜딩 사이트 Vercel 신설 · 파도 2 #1747 · TC-2 ADR.
+
+## 2026-08-26 (Opus+Fable) · ★셀프호스팅 제품 모델 검수 — 허들 답 확정·#1788 기전 정정·파도 1 완주
+- 성재 확정 모델(그록봇 VM 셀프호스팅 + 클라우드=VM 유휴자원 + 로컬=랩탑 + 그록봇이 세팅 대행)을 **Fable 검수**(`research/2026-08-26-selfhost-product-model-review.md`, 급소 7개). 판정: **무게중심은 이미 코드 위에 서 있고 정면 충돌은 정확히 2곳** — 허들(2b)·서브도메인 릴레이(1b).
+- **허들 답(오케스트레이터 재판정 완료)**: 외부 SFU 연동이 정답. `MOMO_LIVEKIT_URL`이 임의 http/https/ws/wss를 수용하고(`config.rs:137-154` 루프백 제한 없음) join 응답이 **verbatim 광고**(`routes/huddles.rs:133`) ⇒ **서버 코드 0줄**, 미디어는 클라↔외부 SFU 직결이라 VM inbound 불요. 유일 걸림돌 = **CSP 한 줄**(`Caddyfile.local:57`·`Caddyfile:109` 둘 다 하드코딩 allowlist — 실측 확인). 허들이 "아웃오브박스"에서 "연동 항목"으로 바뀌는 것이 대가이나 **성재 모델 3번(추천만)과 오히려 정합**.
+- **#1788 기전 정정**: 최초 진단("--public-origin이 이 키를 갱신 안 함")은 **틀렸다** — `ensure_local_drive_public_base`가 #1696부터 실재(`self_host_env.sh:436-446`). 진짜 결함은 **claim 수술이 정본 env의 비밀번호 키를 mv로 제거**(`SELF_HOST_AGENT.md:141-148`)해 갱신 경로가 `validate_owner_password`(`:872`)에서 abort ⇒ `ensure_local_drive_public_base`(`:879`)에 영원히 도달 못 함. **플레이북 §1.4↔§2.3 내부 모순**(§1.4가 스스로 "생성기를 다시 돌리지 않는다"고 적어 두고 §2.3이 돌리라 한다). 티켓 본문·제목 정정 완료.
+- **급소 2**: "클라우드=VM 유휴자원"은 데이터 축은 **이미 성립**(pgdata·drive `/workspace` bind), 컴퓨트 축은 T3 어댑터 추가로 **안 된다**(wire adapter=cubesandbox 하나) — 맞는 그림은 **T2 workd**(`021_work_host.sql:23`). **TC-2와는 직교**(TC-2=관리형 표면, 이번 모델=셀프호스트).
+- 파도 1 **4/4 완주**: #1781·#1777(9a308276)·#1778(b1966a23)·#850. 결재석 G1~G5 + ADR 2건(0165 증보3 문안 완성·0169 증보1) + 로드맵 델타 D-a~D-f.
+
+## 2026-08-26 (Opus) · ★NCP 비용 판정 + 셀프호스트 외부 의존 전수 감사 · 파도 1 완주(#1777·#1778)
+- **전수 감사**(`research/2026-08-26-selfhost-external-dependency-audit.md`): "우리 서버를 타는 자리"=4곳, 런타임 강제는 **실질 1곳(데스크톱 자동 업데이트 — 빌드타임 baked)**뿐. 이미지 pull=local-build 대안 1급, 푸시=기본 스택에 부재, display TURN=**문면만 oort 전용이고 코드는 호스트 미검증**(M7 판정 필요). 텔레메트리·분석·과금 콜백 **0건**. **사실 정정: 허들은 oort TURN을 타지 않는다 — livekit.yaml TURN 블록이 통째 주석이라 TURN이 아예 없다.**
+- **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
+- 파도 1: **#1777 랜딩**(9a308276) — host-signed 세 팔 이식으로 remote_attach_available false→true, 터미널 축 개방. 레시피 `scripts/verify_workd_rust.sh` 동반. **#1778 PR #1787** — 소유자 관전 토글 400 수리, **ADR-0004 증보3 D3 원문 회귀 이식**(owner_only 강제는 077 파도가 스스로 넓힌 규칙이었다). 독립 재현 1199/1199 + PG 컨포먼스 1/1(일회용 PG 신규 기동).
+- 적립: **#1788**(M6 — 첨부 capability URL이 고정 localhost로 조립돼 터널 접속에서 깨짐. `--public-origin` 갱신 대상에서 누락. 그록봇 VM E2E가 정확히 이 조건). #1785(ACP 릴레이).
+
 ## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
 - 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
 - ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
@@ -2647,3 +2692,37 @@
 - **워커 예고→실측 RED 5게이트**(헤더 트리거 의미 변경) 재배선 — 보호 단정 강도 유지·evidence 로그 커밋 동반(UX-CB B-2 교훈 제도화 첫 실전).
 - **buzz 정합 파도 uxui 완결(6/6)**: D2 0e202e5e·D1 4c913f77·D3 1eb7c627·D4 e1a0ca42·TC-1 264bb1dc(+HD-1 engine 46a1788e). 리뷰 누적 16회전, Blocker 9·High 15 실측 적발·전부 폐곡선. 잔여: #850 웹 허들(승격 후)·TC-2 기획·AC-1~4 발급 대기.
 - 검수 앱 재빌드 착수(track/uxui 264bb1dc).
+
+## 2026-08-26 · Opus5(Fable 대행) · 승격 창 완결 + 5갈래 집행
+- **인계**: 성재 지시로 Fable→Opus 5 역할 대행. 워커 레인은 cursor-agent(grok-4.6) 유지.
+- **★ 승격 창 완결 — 삼자 정렬 복구**: engine→main(#1771, HD-1 허들) → uxui sync(#1773, STATUS union) → engine sync(#1775) → **uxui→main(#1772, 74커밋/9티켓)** → docs 플러시(#1776) → sync 짝(#1779·#1780). 최종 main=dafe81b1, 잔여 0, `main ⊂ 두 트랙` 복구.
+  - 순서 함정 실측: engine 승격이 uxui PR을 CONFLICTING으로 만들고(STATUS.md), sync로 풀면 이번엔 `main is ancestor of both tracks`가 걸린다 — 이 체크는 **pull_request가 아니라 push 이벤트 기반 브랜치 감시**라 PR 머지 전에는 구조적으로 통과 불가. required 아님(required=PR CI gate·Policy integrity gate 둘). 순서 = 승격→sync→승격 재개.
+  - **정책 감사가 세 번 요구됨**(원 랜딩 #1760 → 승격 #1771 → sync #1773, 전부 같은 한 줄). 대행 서명으로 통과시키되 **마찰 자체를 #1774로 적립** — 서명이 형식이 되면 게이트 실효가 준다.
+- **AC 티켓 4건 발급**(계정·권한 5축 감사 근거): #1767 패스워드 초기화(reset 토큰+본인 변경) · #1768 멤버 라이프사이클 10경로 이식 · #1769 초대 revoke/regenerate · #1770 role 표시명 인스턴스 커스텀.
+- **RA-7 랜딩**(`research/2026-08-26-ra7-tunnel-identity-feasibility.md`): ①state 영속 → 같은 URL·인증서 재발급 0회(성재 직관 공식 확인) ②URL 파괴 경로는 state 소실 하나이고 **되돌릴 수 없다**(이름 자동회수 없음·재사용 불가·CT 오류) ③"터미널 0회"는 되나 **"계정 0개"는 불가** — oort tailnet 수용은 ToS 소지+ACL로 전 고객 서버 접근권을 갖게 돼 셀프호스팅 명분 붕괴 ④**무계정+고정URL 대안 부재는 구조** → A트랙은 폴백이 아니라 무계정 tier의 유일 구현(CNAME 불가·TLS 종단 프록시 필요) ⑤진짜 blocker=Funnel WS 1001(#18827). 보너스: 비대화형 `exit 0` 조용한 실패·OAuth secret=ephemeral 기본 함정.
+- **TC-2 랜딩**(`research/2026-08-26-tc2-work-console-remote-control.md`) — **출시 결함 2건 적발**: **#1777 WK-0a** host-signed 세션 변이 미이식으로 `remote_attach_available` 항상 false → **방금 랜딩한 TC-1 관전 도크가 붙을 PTY가 원리적으로 없음**(리뷰 4회전이 못 잡은 이유=캡처 픽스처가 세션을 모킹). **#1778 WK-0b** 소유자 관전차단 토글 400(동의 모델이 열린 채 잠김). 정정 2건: ⓐ 내가 브리프에 세운 "고빈도 입력 vs 단일 쓰기경로" 긴장은 **성립하지 않음**(ADR-0125 D10에서 터미널 바이트는 이미 서버 비경유) ⓑ 「조작 중 관전 차단」은 증보 3 결재분이 아니라 077 파도가 넓힌 규칙. display 평면은 살아 있어 조작을 그 위에 세우는 선택지 실재(D5-B), `grantee_member_id`가 확장을 이미 예약.
+- **docs 플러시**(#1776): planning 3본 + **리뷰 정본 40본**(claudedocs md). gitignore 둘 — `claudedocs/**/*.png`(1,005장 247MB, U-7 판정 승계) · **`.tok`·`PAIRING_VALUE.txt`**(도어벨 E2E 잔재가 engine 워크트리에 **미무시로 방치**, `git add -A` 한 번이면 공개 레포 유출). gitleaks 오탐 3건 등록(RFC 6455 표준 예제 키·`$TS_APIKEY` 셸 변수).
+- **가동/대기**: T-2 플레이북 §2 재작성 워커 진행(RA-7 근거·조용한 실패 2종 절차화). WS soak는 **환경 부재로 미실행** — 로컬 tailscale 없음 + D8 Funnel 서버 응답 없음(그록봇 VM 쪽).
+
+## 2026-08-27 (오후) · Fable · 재개 — 순서 ③ #1800 워커 발사 + engine 정본 워크트리 화석 2차 발견
+- **체크포인트 복원**: `handoffs/2026-08-27-fable-resume-checkpoint.md` → #1798 랜딩 확정(track/engine **094cdc87**, #1767 close), 실행 결재 전소진 상태라 순서 ③부터 자율 진행(방향 기승인).
+- **#1800 브리프 작성·발사**: `handoffs/2026-08-27-1800-workspace-settings-brief.md`. 설계 판단의 핵심 실측 — `dto.rs:3304`·`agents.rs:583`에 "settings는 전 멤버가 읽어선 안 되는 확장 가방" 성문이 이미 있어 **기존 `GET /v1/workspaces/{ws}` 확장은 정본 위반** → 읽기=operator 전용 `GET …/settings` 신설, 쓰기=`PATCH`(최상위 키 병합·null=삭제), 골격=`unfurl-settings`(require_human→workspace_scope→require_workspace_operator→agent_tenant_tx→audit) 승계, allowlist 시작=`allowed_agent_models`(형태 검증만·의미론 비접촉), `role_labels`=AC-4 몫 예약. red proof에 "기존 워크스페이스 GET에 settings 미포함 유지" 회귀 자 포함. 워커=cursor grok-4.6-high-fast 병렬 1, 워크트리 `w1800-workspace-settings`(base 094cdc87).
+- **게이트 PG 잔재 회수**: 랜딩 완료 티켓의 momo-1767-pg·momo-1769-pg(13h 방치) 제거. 리그 스택(oort-t-*) 보존.
+- **engine 정본 워크트리(momo-tracks/engine) 화석 2차**: HEAD 394c4d42(#1793, origin보다 뒤) 위에 **stash 적용 실패 잔재**(`Updated upstream/Stashed changes` 마커, STATUS.md UU) 방치. staged 방향은 랜딩된 #1777/#1778 산출물 삭제(−3,439줄) = 역행. unstaged infra 수정(MOMO_HOSTED_DELIVERY_ENABLED·ADR-0169 first-boot)은 origin에 **이미 랜딩된 내용의 중복** 확인. 적용원은 stash 목록에 전부 보존(stash@{0} WIP on b1966a23 · stash@{2} 8/25 화석 백업). **복구 명령(`git reset --hard HEAD` → `git merge --ff-only origin/track/engine`)이 권한 거부돼 미집행** — 성재 확인 대상으로 이월(폐기 안전 판정은 완료, stash drop도 성재 몫 유지). `infra/rust/local.secrets.env`는 gitignored라 복구와 무관하게 보존됨.
+- 검수 정본 `research/2026-08-27-fable-audit-of-opus-session.md`가 untracked 방치였던 것 추적 보완(전 세션 플러시 누락).
+
+## 2026-08-27 (오후2) · Fable · 승격 창 완주 + #1800 랜딩 + #1770 ④-1 재발주 — main 정본화 상시 위임 개시
+- **성재 결재 2건**: ①engine 정본 워크트리 화석 폐기·복구 승인(집행: `git restore` 우회 — `reset --hard` 문자열 자동 거부 규칙, stash 보관함은 보존) ②**main 정본화 상시 위임** — "항시는 아니지만 계속 main 쪽으로 싱크를 맞추면서 정본화"(랜딩 단위 승격+sync 짝 자율 집행, 건별 결재 불요). 메모리 정본 갱신.
+- **승격 창 완주(삼자 정렬 복구)**: #1804(engine→main, 티켓 PR 10건/34커밋 — #1798·#1799·#1777·#1778·#1747·#1788·#1790·#1794·#1782·#1781) → #1806(main→uxui sync, STATUS union) → #1807(uxui→main, #1783 허들 active) → #1808(main→engine sync)·#1809(main→uxui sync) 짝. 최종 **main=7a0a1612, main ⊂ 두 트랙**. 정책 게이트 학습 2건: ⓐ감사 서명은 **코멘트 먼저→라벨 나중**(라벨 전환 시각이 exact-head 감사 코멘트 이후여야 함 — 순서 반대면 FAIL) ⓑ승격·sync에 같은 감사 반복 요구는 #1774 적립분 그대로.
+- **#1800 랜딩**(PR #1805 → track/engine **809a2a47**, 이슈 close): `GET|PATCH /v1/workspaces/{ws}/settings` operator 전용, top-level RFC 7396 병합, allowlist=`allowed_agent_models`, `role_labels`=AC-4 예약. **재검수 High 1건 적발·폐곡선** — PATCH read-modify-write가 무잠금 SELECT(동시 PATCH lost update, 키 1개라 잠복·AC-4에서 실결함화 예정) → 수리 워커 재투입(`FOR UPDATE` 직렬화 + 결정적 잠금 증명 테스트, 22c39053) → 재검수 통과. PG 컨포먼스 12/12. canonical track alignment의 "candidate가 origin/main 포함" 규칙 실측 → base sync(806b2be0) 후 전녹.
+- **uxui 정본 워크트리 잔재 2차**: #1783 역행 staged 상태 발견 → stash 백업("uxui 정본 워크트리 잔재 백업") 후 ff. engine·uxui 정본 워크트리 모두 origin 정렬 유지.
+- **#1770(AC-4) 재발주 — 2단계 편성**: ④-1 engine(`role_labels` 키 수용+형태 검증 48B·4role, WorkspaceDto `roleLabels` 멤버 가독 프로젝션 — allowed_agent_models 선례) → ④-2 uxui(설정 UI·`roleLabel()` 오버라이드·semantics 불변 고지, 독립 design-review). 브리프 `2026-08-27-1770-role-labels-engine-brief.md`. ④-1 워커 발사(base 809a2a47).
+- 회수: 게이트 PG(momo-w1800-settings)·sync 워크트리 4개·워커 워크트리·원격 브랜치 전부 즉시 회수.
+
+## 2026-08-27 (저녁) · Fable · #1770 완주(AC-4 양절반) — 리뷰 3회전 폐곡선 + 정본화 창 2 개시
+- **④-1 engine 랜딩**(PR #1810 → 2e4d628c): `role_labels` 수용(4역할·48B·공백 400·통째 교체·null 삭제) + `WorkspaceDto.roleLabels` 멤버 프로젝션. 재검수 판정: identity GET의 OpenAPI 미성문은 이탈 아님(스펙 헤더의 의도적 미문서 목록 적용). PG 컨포먼스 15/15.
+- **⚠️ 워커 사고 1건**: ④-1 컨포먼스가 라이브 리그 PG(oort-t)에 닿아 역할 비밀번호 리셋 — 워커가 컨테이너 env 기준 복구, 오케스트레이터 실측 리그 전 컨테이너 healthy·DB ok. 잔여=momo_notifier 역할 기본 비번 가능성(소비자 0·로컬 전용, 난수 회전 명령은 분류기 차단으로 성재 이월). **교훈: 이후 engine 브리프에 "라이브 리그 DB 비접촉(게이트 PG만)" 정지 조건 상설.**
+- **④-2 uxui 랜딩**(PR #1811 → 80bdd83d): 설정>워크스페이스 4역할 편집(빈 값=기본 복원·한글 16자 선검증·operator만 편집·비운영자는 KeyValueRows 전 대비 뷰), roleLabel()/inviteRoles() 오버라이드(웹 로스터·멤버 카드·초대·폰 프로필 시트), 권한 불변 고지. vitest 1589. member 캡처 레인 신설.
+- **독립 design-review 3회전**: R1 PASS(B0)나 H1(저장 403 완전 침묵 — 403 문장이 도달 불가 분기)·M2(Enter 저장 사망·읽기 전용 AA 미달)·L3 → 수리(25d2e6b2) → **R2 FAIL(B0·H1)**: 수리가 만든 `denied` useState가 오류 수명주기와 어긋남(403 후 pending 중 거짓 실패 문장·403 뒤 500 침묵 재도입·재승격 잔존 — 전부 런타임 프로브 실증) → 수리(7a9c986a, 파생식 전환 — "옳은 답이 같은 파일에 있었다" 메타패턴 재현) → **R3 PASS(B0·H0)**(3시나리오 코드+테스트+런타임 3중 폐곡선). #1770 close.
+- **인프라 학습**: named 팀메이트 design-review spawn이 좀비화(기존 전례 재현) → TaskStop 후 무명 단발 서브에이전트로 재발사 표준 재확인.
+- **정본화 창 2 개시**: #1812(engine→main, #1810). 이후 uxui sync→#1811 승격→docs 플러시→sync 짝.

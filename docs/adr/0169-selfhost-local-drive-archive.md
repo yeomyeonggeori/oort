@@ -29,14 +29,51 @@
 
 ---
 
-## 증보 1 — capability URL same-origin 파생 (Accepted 2026-08-26)
+## 증보 1 — 첨부 capability URL의 same-origin 파생 (2026-08-26)
 
-- Status: **Accepted** (2026-08-26 성재 승인)
-- 관련: ADR-0167(실시간 same-origin 광고 — **본 증보는 그 신뢰 경계를 준용한다**), #1788
-- 채택: A(요청 오리진 파생) + C(백엔드 선택 축 무영향) 하이브리드
+- Status: **Accepted** (성재 승인 2026-08-26 — 구조화 질의. **A(요청 오리진 파생) 채택 + C(백엔드 선택) 하이브리드 병기**). 근거: `docs/planning/research/2026-08-26-selfhost-product-model-review.md` 급소 3 · #1788 · #1790.
 
-`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`에 `same-origin` 센티널을 도입한다. 값이 `same-origin`이면 로컬 보관소의 업로드 capability URL을 **요청 시점에** 파생한다. 절대 `http(s)://` URL이 명시되면 verbatim 유지(기존 배포 불변, ADR-0167과 대칭).
+### 발단
+로컬 보관소의 업로드 capability URL이 **부팅 시 고정된 env 값**으로 조립된다 — `server-rust/crates/momo-drive/src/local.rs:229`가 `format!("{}/__momo_stub/drive/uploads/{token}", self.base_url)`이고, `base_url`은 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`(부재 시 루프백 기본)이다.
 
-파생 기준은 ADR-0167과 같다: 신뢰 프록시(Caddy)가 정규화한 `X-Forwarded-Proto` / `Host`. 원 요청 헤더를 그대로 믿지 않으며, `derive_same_origin_http_base`는 `derive_same_origin_ws_url`과 같은 `host_is_safe` · first-hop XFP 규칙을 쓴다. `MOMO_DRIVE_ARCHIVE_BACKEND`(`local`|`google`)는 이 증보로 바뀌지 않는다 — `local` 경로의 URL 조립만 고친다.
+그 결과 **터널/원격 주소로 붙은 클라이언트는 `http://localhost:<port>/...`로 PUT하라는 URL을 받는다** — 자기 자신의 루프백이므로 업로드가 실패한다. 그록봇 VM 셀프호스팅(claim + quick tunnel)이 정확히 이 배치다.
 
-생성기 기본값은 `same-origin`이다. `--public-origin https://host`는 절대 URL을 명시하므로 그 값이 verbatim으로 남는다.
+`--public-origin`이 이 키를 갱신하기는 한다(`scripts/self_host_env.sh:436-446`, #1696). 그러나 두 조건에서 결함이 살아 있다:
+1. **claim 모드에서는 그 갱신 경로 자체가 도달 불가**(#1790 — 비밀번호 검증이 앞을 막는다).
+2. **quick tunnel URL은 재기동마다 바뀐다** — env 고정 방식은 회전마다 "생성기 재실행 + 재기동"을 요구하므로 구조적으로 따라갈 수 없다.
+
+### Decision — capability URL은 요청 오리진에서 파생한다
+`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`에 **`same-origin` 센티널**을 도입하고, 그 값일 때 capability URL을 **요청 오리진에서 파생**한다. 절대 URL이 명시되면 **verbatim 유지**한다(ADR-0167과 대칭).
+
+**이것은 새 설계가 아니라 이미 문서화된 의도의 구현이다** — 셀프호스트 엣지가 `/__momo_stub/*`를 api로 프록시하며 주석에 이렇게 적어 뒀다(`infra/rust/Caddyfile.local:36-42`):
+> ADR-0169 — local archive PUT is **same-origin**. The capability URL the client is handed is `$origin/__momo_stub/...`
+
+구현만 부팅 고정 env로 어긋나 있었다.
+
+### 신뢰 경계 — ADR-0167을 준용한다
+Host 스푸핑 우려는 **ADR-0167이 이미 Accepted로 정리했다**: 파생 기준은 신뢰 프록시(Caddy)가 정규화한 `X-Forwarded-Proto`/`Host`이고, 악의 Host로 오염된 광고는 **그 요청자 자신의 응답에만** 실린다.
+
+capability URL도 정확히 같은 모양이다 — 광고되는 것은 **요청자 자신의 업로드 목적지**이므로, 오염의 피해자는 오염시킨 자신뿐이다(자해 외 피해자 없음). 따라서 **신규 ADR이 아니라 본 증보로 충분하다.**
+
+구현 확정(#1788 랜딩): `derive_same_origin_http_base`는 `derive_same_origin_ws_url`과 같은 `host_is_safe`·first-hop XFP 규칙을 쓴다 — 원 요청 헤더를 그대로 믿지 않는다.
+
+### 백엔드 선택은 그대로 간다 — 하이브리드 (성재 결정 2026-08-26)
+
+이 증보는 **`local` 백엔드의 URL 조립만** 고친다. **어디에 저장할지 고르는 축은 건드리지 않으며, 선택지로 계속 간다.**
+
+| 축 | 무엇 | 이 증보의 영향 |
+|---|---|---|
+| **어디에 저장하나** | `MOMO_DRIVE_ARCHIVE_BACKEND` = `local`(서버 자신의 디스크) · `google`(구글 드라이브). 호스팅 시점에 운영자가 고른다 | **무영향 — 그대로 유지·강화** |
+| **어느 주소로 올리라 하나** | capability URL 조립 | **이 증보가 고치는 것** |
+
+성재 결정: **A(요청 오리진 파생)를 기본으로 채택하되, C(클라우드 백엔드 연동)도 선택지로 병기한다.** 회사 정책상 외부 스토리지를 써야 하는 팀이 있으므로 선택을 없애지 않는다. 다만 **기본은 `local`**이며(셀프호스팅의 "내 데이터 내 서버" 명분), 클라우드 백엔드는 **"추천만 하고 가이드는 친절하게"**(제품 모델 §급소 5의 경계 문장) 방식으로 안내한다 — 자격증명은 사용자에서 자기 서버로 한 홉만 지나며 우리를 경유하지 않는다(ADR-0004).
+
+**용어 주의 (혼동 실사례 있음 — 성재 2026-08-26)**: 여기서 `local`은 **"서버가 도는 그 머신의 디스크"**다. 그록봇 VM에 호스팅하면 VM 디스크다. 성재의 3-축 모델("로컬=사용자 랩탑 자원 · 클라우드=그록봇 VM 유휴 자원")의 "로컬"과 **단어가 충돌한다** — 그 모델 기준으로 보면 `local` 백엔드로 VM 디스크에 쌓는 것은 오히려 "클라우드" 축이다. 문서에서 이 단어를 쓸 때는 어느 뜻인지 명시하라.
+
+**S3는 v0에서 기각됐다**(ADR-0151 option 2). 열려면 그 결정을 다시 봐야 한다.
+
+### Consequences
+- (+) **터널 URL 회전을 흡수한다** — 재생성·재기동 없이 원격 첨부가 성립한다. env 고정 방식이 구조적으로 못 하던 일이다.
+- (+) 엣지 주석이 선언한 same-origin 계약과 구현이 일치한다.
+- (+) #1790(claim 모드 유지보수 경로)의 수리는 여전히 필요하되, **더 이상 첨부 정상 동작의 전제가 아니다** — Centrifugo 오리진 등록을 위해 독립적으로 필요하다.
+- (−) 절대 URL 명시 배포는 동작 불변이므로 마이그레이션 부담은 없다. 구현 확정(#1788 랜딩): **생성기 기본값은 `same-origin`으로 옮겨졌다** — `--public-origin https://host`는 절대 URL 명시이므로 verbatim으로 남는다.
