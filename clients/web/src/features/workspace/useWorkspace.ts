@@ -6,6 +6,8 @@ import {
   listChannels,
   type Channel,
 } from "@momo/core/lib/api";
+import { fetchWorkspace } from "@momo/core/features/settings/api";
+import type { RoleLabels } from "@momo/core/features/directory/model";
 import { idKey, makeDirectory, type Directory } from "@momo/core/features/workspace/directory";
 
 // =============================================================================
@@ -23,6 +25,23 @@ import { idKey, makeDirectory, type Directory } from "@momo/core/features/worksp
 // =============================================================================
 
 export * from "@momo/core/features/workspace/directory";
+
+export const workspaceIdentityKey = (workspaceId: string) =>
+  ["settings", "workspace", workspaceId] as const;
+
+/**
+ * Display-only role name overrides from GET /v1/workspaces/{ws}.
+ * Shares the settings workspace query so the rail, directory, and settings
+ * panel read one cache. Missing projection is `{}` (Korean defaults).
+ */
+export function useRoleLabels(workspaceId: string): RoleLabels {
+  const query = useQuery({
+    queryKey: workspaceIdentityKey(workspaceId),
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+  });
+  return query.data?.roleLabels ?? {};
+}
 
 export function useDirectory(workspaceId: string) {
   const query = useQuery({

@@ -18,8 +18,8 @@ import {
   errorMessage,
   formatDay,
   INVITE_EXPIRY_DAYS,
-  INVITE_ROLES,
   inviteCardText,
+  inviteRoles,
   inviteStatus,
   isOperatorDenied,
   type InviteCardInput,
@@ -132,6 +132,8 @@ export function InviteSection({
     create.mutate();
   }
 
+  const roles = inviteRoles(workspace.data?.roleLabels);
+
   const lines = [
     "초대 링크를 발급해 사람을 이 워크스페이스로 부릅니다.",
     "코드는 발급 직후 한 번만 보입니다. 서버는 해시만 보관합니다.",
@@ -202,7 +204,7 @@ export function InviteSection({
                 </span>
                 <StatusChip tone={status.tone}>{status.label}</StatusChip>
                 <span className="text-meta text-ink-muted">
-                  {choiceLabel(INVITE_ROLES, invite.role)}
+                  {choiceLabel(roles, invite.role)}
                 </span>
                 <span className="text-meta text-ink-muted" data-numeric>
                   {invite.usedCount}/{invite.maxUses}명 사용
@@ -230,7 +232,7 @@ export function InviteSection({
         <ChoiceRadios
           name="invite-role"
           legend="역할"
-          choices={INVITE_ROLES}
+          choices={roles}
           value={role}
           onChange={setRole}
           busy={create.isPending}

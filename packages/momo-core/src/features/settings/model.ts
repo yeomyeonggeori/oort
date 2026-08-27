@@ -10,7 +10,13 @@
 // for character (macOS/iOS parse the same string).
 // =============================================================================
 
-import { ApiError } from "../../lib/api";
+import { ApiError, type MembershipRole } from "../../lib/api";
+import {
+  DEFAULT_ROLE_LABELS,
+  ROLE_KEYS,
+  type RoleKey,
+  type RoleLabels,
+} from "../directory/model";
 import { JOIN_SCHEME } from "../auth/deepLink";
 
 // --- catalogs ---------------------------------------------------------------
@@ -245,17 +251,95 @@ export function autoTargetLabel(
   return host.revokedAtMs ? `${host.displayName} (해지됨)` : host.displayName;
 }
 
-/** `InviteRoutes.normalizedRole`. */
+/** `InviteRoutes.normalizedRole`. Labels are defaults; use `inviteRoles`. */
 export const INVITE_ROLES: Choice[] = [
-  { id: "member", label: "멤버", detail: "채널을 읽고 씁니다." },
-  { id: "admin", label: "관리자", detail: "초대와 워크스페이스 설정을 다룹니다." },
-  { id: "guest", label: "게스트", detail: "초대받은 채널만 봅니다." },
+  { id: "member", label: DEFAULT_ROLE_LABELS.member, detail: "채널을 읽고 씁니다." },
+  { id: "admin", label: DEFAULT_ROLE_LABELS.admin, detail: "초대와 워크스페이스 설정을 다룹니다." },
+  { id: "guest", label: DEFAULT_ROLE_LABELS.guest, detail: "초대받은 채널만 봅니다." },
 ];
+
+/**
+ * Invite catalog with workspace `roleLabels` applied. Override wins; empty
+ * or absent keeps the Korean default so an unconfigured workspace matches
+ * `INVITE_ROLES` exactly.
+ */
+export function inviteRoles(labels?: RoleLabels | null): Choice[] {
+  return INVITE_ROLES.map((choice) => {
+    const role = choice.id as RoleKey;
+    const override = labels?.[role];
+    if (typeof override !== "string") return choice;
+    const trimmed = override.trim();
+    if (trimmed === "") return choice;
+    return { ...choice, label: trimmed };
+  });
+}
 
 export const INVITE_EXPIRY_DAYS = [1, 7, 30] as const;
 
 export function choiceLabel(choices: Choice[], id: string): string {
   return choices.find((c) => c.id === id)?.label ?? id;
+}
+
+/** Server `role_labels` value ceiling (UTF-8 bytes). */
+export const ROLE_LABEL_MAX_BYTES = 48;
+
+export function roleLabelUtf8Bytes(value: string): number {
+  return new TextEncoder().encode(value).length;
+}
+
+/**
+ * Client-side gate for one role display field. Empty is valid (restore
+ * default). Whitespace-only and over-long strings are refused here so the
+ * save does not wait for a server 400.
+ */
+export function roleLabelFieldError(raw: string): string | null {
+  if (raw.length === 0) return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return "공백만으로는 저장할 수 없습니다. 비우면 기본 이름이 쓰입니다.";
+  if (roleLabelUtf8Bytes(trimmed) > ROLE_LABEL_MAX_BYTES) {
+    return "역할 이름은 48바이트까지 쓸 수 있습니다.";
+  }
+  return null;
+}
+
+/**
+ * Rebuild the PATCH `role_labels` object from the four fields. Empty after
+ * trim is omitted (that role returns to the default). All four empty is
+ * `null` (delete the key, restore every default). The object is always the
+ * full intended set so a partial send cannot wipe another role's override.
+ */
+export function buildRoleLabelsPayload(
+  draft: Record<RoleKey, string>
+): RoleLabels | null {
+  const next: RoleLabels = {};
+  for (const key of ROLE_KEYS) {
+    const trimmed = draft[key].trim();
+    if (trimmed === "") continue;
+    next[key] = trimmed;
+  }
+  return Object.keys(next).length === 0 ? null : next;
+}
+
+export function draftFromRoleLabels(labels?: RoleLabels | null): Record<RoleKey, string> {
+  return {
+    owner: labels?.owner ?? "",
+    admin: labels?.admin ?? "",
+    member: labels?.member ?? "",
+    guest: labels?.guest ?? "",
+  };
+}
+
+export function roleLabelsEqual(a: RoleLabels | null, b: RoleLabels | null): boolean {
+  if (a === b) return true;
+  for (const key of ROLE_KEYS) {
+    if ((a?.[key] ?? "") !== (b?.[key] ?? "")) return false;
+  }
+  return true;
+}
+
+/** Owner or admin: the roles that may write workspace settings. */
+export function isWorkspaceOperator(role: MembershipRole | undefined): boolean {
+  return role === "owner" || role === "admin";
 }
 
 // --- provider link copy -----------------------------------------------------
@@ -403,6 +487,14 @@ export function buildInviteMailto(input: InviteCardInput): string {
 /** 403 on an operator surface is a permission answer, not a failure. */
 export function isOperatorDenied(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403;
+}
+
+/** Save failure on the role-label form. Never the wire 400 sentence. */
+export function roleLabelsSaveMessage(error: unknown): string {
+  if (isOperatorDenied(error)) {
+    return "역할 표시명은 오너나 관리자만 바꿀 수 있습니다.";
+  }
+  return "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
 
 export function isSlugConflict(error: unknown): boolean {

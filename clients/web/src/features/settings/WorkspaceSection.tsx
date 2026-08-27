@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -16,20 +16,39 @@ import {
   updateWorkspaceUnfurlSettings,
 } from "@momo/core/lib/api";
 import { ApiError } from "@momo/core/lib/api";
-import { createWorkspace, fetchWorkspace, type CreatedWorkspace } from "@momo/core/features/settings/api";
 import {
+  DEFAULT_ROLE_LABELS,
+  ROLE_KEYS,
+  type RoleKey,
+  type RoleLabels,
+} from "@momo/core/features/directory/model";
+import {
+  createWorkspace,
+  fetchWorkspace,
+  patchWorkspaceSettings,
+  type CreatedWorkspace,
+} from "@momo/core/features/settings/api";
+import {
+  buildRoleLabelsPayload,
+  draftFromRoleLabels,
   errorMessage,
   isOperatorDenied,
   isSlugConflict,
+  isWorkspaceOperator,
   normalizeSlug,
+  roleLabelFieldError,
+  roleLabelsEqual,
+  roleLabelsSaveMessage,
   slugError,
   workspaceNameError,
 } from "@momo/core/features/settings/model";
+import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   ConfirmButton,
   Field,
   KeyValueRows,
   OperatorNotice,
+  SaveButton,
   SectionShell,
   Subsection,
 } from "./SettingsFields";
@@ -204,7 +223,7 @@ function WorkspaceAvatarField({
     onSuccess: () => {
       setDenied(false);
       void client.invalidateQueries({
-        queryKey: ["settings", "workspace", workspaceId],
+        queryKey: workspaceIdentityKey(workspaceId),
       });
     },
     onError: (error) => {
@@ -343,6 +362,160 @@ function WorkspaceAvatarField({
  * leaving *is* signing out (multi-workspace switching is ADR-0161 4b-3). That
  * cost is stated in the question itself (3R M-2), not only in the body copy.
  */
+/**
+ * Four workspace role display names. Names only: the wire role and the
+ * permission ladder stay the same. Empty field + save drops that override.
+ */
+function RoleLabelsEditor({
+  workspaceId,
+  labels,
+  offline,
+}: {
+  workspaceId: string;
+  labels: RoleLabels;
+  offline: boolean;
+}) {
+  const { session } = useSession();
+  const directoryQuery = useDirectory(workspaceId);
+  const client = useQueryClient();
+  const self = memberFor(directoryQuery.directory, session.member.id);
+  const canEdit = isWorkspaceOperator(self?.role);
+  const [draft, setDraft] = useState(() => draftFromRoleLabels(labels));
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<RoleKey, string>>>(
+    {}
+  );
+
+  useEffect(() => {
+    setDraft(draftFromRoleLabels(labels));
+    setFieldErrors({});
+  }, [labels]);
+
+  const payload = buildRoleLabelsPayload(draft);
+  const dirty = !roleLabelsEqual(payload, Object.keys(labels).length === 0 ? null : labels);
+  const hasFieldError = ROLE_KEYS.some((key) => roleLabelFieldError(draft[key]));
+  const canSave = canEdit && dirty && !hasFieldError && !offline;
+
+  const save = useMutation({
+    mutationFn: (next: RoleLabels | null) =>
+      patchWorkspaceSettings(workspaceId, { role_labels: next }),
+    onSuccess: (_result, next) => {
+      const roleLabels = next ?? {};
+      client.setQueryData(
+        workspaceIdentityKey(workspaceId),
+        (current: { roleLabels?: RoleLabels } | undefined) =>
+          current ? { ...current, roleLabels } : current
+      );
+    },
+  });
+
+  const handleChange = (key: RoleKey, value: string) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+    setFieldErrors((current) => ({
+      ...current,
+      [key]: roleLabelFieldError(value) ?? undefined,
+    }));
+  };
+
+  const handleSave = () => {
+    if (!canSave || save.isPending) return;
+    const errors: Partial<Record<RoleKey, string>> = {};
+    for (const key of ROLE_KEYS) {
+      const error = roleLabelFieldError(draft[key]);
+      if (error) errors[key] = error;
+    }
+    setFieldErrors(errors);
+    if (Object.keys(errors).length > 0) return;
+    save.mutate(payload);
+  };
+
+  const readOnly = !canEdit;
+  const locked = readOnly || offline;
+
+  return (
+    <Subsection
+      title="역할 표시명"
+      lines={[
+        "이름만 바뀝니다. 권한은 그대로입니다. 소유자를 마스터로 불러도 권한 체계는 같습니다.",
+        "칸을 비우고 저장하면 기본 이름으로 돌아갑니다.",
+      ]}
+    >
+      {readOnly && directoryQuery.isSuccess && (
+        <OperatorNotice
+          who="역할 표시명은 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+        />
+      )}
+      <form
+        className="flex flex-col gap-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleSave();
+        }}
+        data-testid="workspace-role-labels"
+      >
+        {ROLE_KEYS.map((key) => {
+          const fieldId = `role-label-${key}`;
+          const error = fieldErrors[key];
+          return (
+            <Field
+              key={key}
+              label={DEFAULT_ROLE_LABELS[key]}
+              htmlFor={fieldId}
+              hint={
+                locked
+                  ? undefined
+                  : `${DEFAULT_ROLE_LABELS[key]}의 표시 이름입니다. 비우면 이 기본 이름이 쓰입니다.`
+              }
+              error={error}
+            >
+              <Input
+                id={fieldId}
+                name={fieldId}
+                value={draft[key]}
+                placeholder={DEFAULT_ROLE_LABELS[key]}
+                readOnly={locked}
+                aria-readonly={locked || undefined}
+                aria-disabled={locked || undefined}
+                className={cn(locked && "opacity-50")}
+                onChange={(event) => {
+                  if (locked) return;
+                  handleChange(key, event.target.value);
+                }}
+                data-testid={fieldId}
+              />
+            </Field>
+          );
+        })}
+        {offline && canEdit && (
+          <p className="text-meta text-ink-muted" id="workspace-role-labels-offline">
+            연결이 끊겨 지금은 표시 이름을 저장할 수 없습니다.
+          </p>
+        )}
+        {save.isError && !isOperatorDenied(save.error) && (
+          <p
+            className="text-meta text-danger"
+            role="alert"
+            data-testid="workspace-role-labels-save-error"
+          >
+            {roleLabelsSaveMessage(save.error)}
+          </p>
+        )}
+        {canEdit && (
+          <div className="flex flex-wrap items-center gap-2">
+            <SaveButton
+              label="표시명 저장"
+              canSave={canSave}
+              busy={save.isPending}
+              onSave={handleSave}
+              testId="workspace-role-labels-save"
+            />
+          </div>
+        )}
+      </form>
+    </Subsection>
+  );
+}
+
 function LeaveWorkspace({
   workspaceId,
   offline,
@@ -414,7 +587,7 @@ export function WorkspaceSection({
   offline: boolean;
 }) {
   const query = useQuery({
-    queryKey: ["settings", "workspace", workspaceId],
+    queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
   });
@@ -494,6 +667,14 @@ export function WorkspaceSection({
             ]}
           />
         </div>
+      )}
+
+      {query.data && (
+        <RoleLabelsEditor
+          workspaceId={workspaceId}
+          labels={query.data.roleLabels}
+          offline={offline}
+        />
       )}
 
       <WorkspaceUnfurlSetting workspaceId={workspaceId} offline={offline} />

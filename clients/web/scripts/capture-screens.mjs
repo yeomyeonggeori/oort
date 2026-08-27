@@ -1712,6 +1712,7 @@ async function installMocks(context) {
         slug: "momowebqa",
         name: "momo webqa",
         updatedAtMs: Date.now(),
+        roleLabels: {},
       },
     })
   );
@@ -6017,6 +6018,11 @@ async function captureScheme(browser, scheme) {
       .getByRole("heading", { name: heading, exact: true })
       .first()
       .waitFor({ state: "visible" });
+    if (section === "workspace") {
+      await settingsSweep
+        .getByTestId("workspace-role-labels")
+        .waitFor({ state: "visible" });
+    }
     await settingsSweep.waitForTimeout(250);
     // 에러 경계가 그려진 판을 "설정 캡처"로 커밋하지 않는다. 이 하네스가 이 섹션들을
     // 찍지 못하던 이유가 정확히 그것(라우트 부재 → 404 → 경계)이었으므로, 픽스처가

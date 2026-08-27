@@ -163,6 +163,7 @@ async function installMocks(context, { withAvatar }) {
           slug: "dawnlab",
           name: "새벽연구소",
           updatedAtMs: Date.now(),
+          roleLabels: {},
           ...(withAvatar
             ? { avatarUrl: `/v1/workspaces/${WORKSPACE_ID}/avatar/content?v=${AVATAR_MEDIA}` }
             : {}),
