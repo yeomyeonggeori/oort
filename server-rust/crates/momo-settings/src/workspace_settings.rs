@@ -1,18 +1,27 @@
-//! `workspace.settings` bag — operator GET/PATCH domain (#1800).
+//! `workspace.settings` bag — operator GET/PATCH domain (#1800, #1770).
 //!
 //! The column already exists (`schema_v0.sql`). This module is the only writer
 //! that goes through REST: top-level RFC 7396 merge, a closed allowlist, and
 //! hard size caps. Semantics of a stored key stay with the helper that already
-//! reads it (`momo_agent::allowed_agent_models`). `role_labels` is reserved for
-//! AC-4 and is rejected here.
+//! reads it (`momo_agent::allowed_agent_models`) or the identity projection
+//! (`project_role_labels`). Merge is top-level only: nested objects such as
+//! `role_labels` are replaced whole, not deep-merged.
 
 use momo_db::DbError;
-use serde_json::{Map, Value};
+use serde_json::{json, Map, Value};
 use sqlx::PgConnection;
 use uuid::Uuid;
 
-/// The only top-level key this surface accepts today.
-pub const ALLOWED_SETTINGS_KEYS: &[&str] = &["allowed_agent_models"];
+/// Writable top-level keys. `role_labels` is display-only — it never changes
+/// `is_admin` / `can_*` / RLS / the role wire value.
+pub const ALLOWED_SETTINGS_KEYS: &[&str] = &["allowed_agent_models", "role_labels"];
+
+/// Human membership roles that may carry a display override. Agent labels are
+/// a client `null` rule and are refused here.
+pub const ROLE_LABEL_KEYS: &[&str] = &["owner", "admin", "member", "guest"];
+
+/// UTF-8 byte cap for one role display string. 48 bytes covers Korean labels.
+pub const MAX_ROLE_LABEL_BYTES: usize = 48;
 
 /// Serialized PATCH body cap. Aligns with other JSON settings writes: far below
 /// Axum's 2 MiB default so jsonb cannot be used as an unbounded dump.
@@ -38,6 +47,12 @@ pub enum WorkspaceSettingsInvalid {
     AllowedAgentModelsCount,
     #[error("allowed_agent_models entry exceeds {MAX_ALLOWED_AGENT_MODEL_BYTES} bytes")]
     AllowedAgentModelsEntryLength,
+    #[error("role_labels must be an object of role → non-empty string")]
+    RoleLabelsShape,
+    #[error("unknown role_labels key: {0}")]
+    RoleLabelsUnknownRole(String),
+    #[error("role_labels value exceeds {MAX_ROLE_LABEL_BYTES} bytes")]
+    RoleLabelsEntryLength,
 }
 
 impl WorkspaceSettingsInvalid {
@@ -80,6 +95,7 @@ pub fn merge_workspace_settings(
 fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
     match key {
         "allowed_agent_models" => validate_allowed_agent_models(value),
+        "role_labels" => validate_role_labels(value),
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
 }
@@ -100,6 +116,36 @@ fn validate_allowed_agent_models(value: &Value) -> Result<(), WorkspaceSettingsI
         }
     }
     Ok(())
+}
+
+fn validate_role_labels(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
+    let Some(map) = value.as_object() else {
+        return Err(WorkspaceSettingsInvalid::RoleLabelsShape);
+    };
+    for (key, label) in map {
+        if !ROLE_LABEL_KEYS.contains(&key.as_str()) {
+            return Err(WorkspaceSettingsInvalid::RoleLabelsUnknownRole(key.clone()));
+        }
+        let Some(text) = label.as_str() else {
+            return Err(WorkspaceSettingsInvalid::RoleLabelsShape);
+        };
+        if text.trim().is_empty() {
+            return Err(WorkspaceSettingsInvalid::RoleLabelsShape);
+        }
+        if text.len() > MAX_ROLE_LABEL_BYTES {
+            return Err(WorkspaceSettingsInvalid::RoleLabelsEntryLength);
+        }
+    }
+    Ok(())
+}
+
+/// Member-readable projection of `settings.role_labels`. Missing or non-object
+/// values become `{}`. The rest of the bag is never returned.
+pub fn project_role_labels(settings: &Value) -> Value {
+    match settings.get("role_labels") {
+        Some(Value::Object(_)) => settings["role_labels"].clone(),
+        _ => json!({}),
+    }
 }
 
 /// Read the stored bag, or `None` when RLS hides the workspace row.
@@ -186,15 +232,92 @@ mod tests {
     }
 
     #[test]
-    fn unknown_and_reserved_keys_are_refused() {
-        assert!(matches!(
-            merge_workspace_settings(&json!({}), &json!({"role_labels": {}})),
-            Err(WorkspaceSettingsInvalid::UnknownKey(key)) if key == "role_labels"
-        ));
+    fn unknown_keys_are_refused() {
         assert!(matches!(
             merge_workspace_settings(&json!({}), &json!({"allowedAgentModels": ["x"]})),
             Err(WorkspaceSettingsInvalid::UnknownKey(_))
         ));
+        assert!(matches!(
+            merge_workspace_settings(&json!({}), &json!({"totally_unknown": true})),
+            Err(WorkspaceSettingsInvalid::UnknownKey(_))
+        ));
+    }
+
+    #[test]
+    fn role_labels_are_accepted_and_replaced_whole() {
+        let merged = merge_workspace_settings(
+            &json!({"role_labels": {"owner": "대표", "admin": "관리자"}}),
+            &json!({"role_labels": {"owner": "마스터"}}),
+        )
+        .unwrap();
+        assert_eq!(merged["role_labels"], json!({"owner": "마스터"}));
+        assert!(
+            merged["role_labels"].get("admin").is_none(),
+            "top-level merge replaces the object; omitted role keys drop"
+        );
+    }
+
+    #[test]
+    fn role_labels_null_deletes_the_key() {
+        let existing = json!({
+            "allowed_agent_models": ["hermes-agent"],
+            "role_labels": {"owner": "대표"}
+        });
+        let merged = merge_workspace_settings(&existing, &json!({"role_labels": null})).unwrap();
+        assert!(merged.get("role_labels").is_none());
+        assert_eq!(merged["allowed_agent_models"], json!(["hermes-agent"]));
+        assert_eq!(project_role_labels(&merged), json!({}));
+    }
+
+    #[test]
+    fn role_labels_shape_violations_are_refused() {
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": []})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsShape)
+        );
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": "owner"})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsShape)
+        );
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": {"owner": ""}})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsShape)
+        );
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": {"owner": "   "}})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsShape)
+        );
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": {"owner": 1}})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsShape)
+        );
+        assert!(matches!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": {"hermes": "봇"}})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsUnknownRole(key)) if key == "hermes"
+        ));
+        let too_long = "가".repeat(17); // 51 UTF-8 bytes
+        assert!(too_long.len() > MAX_ROLE_LABEL_BYTES);
+        assert_eq!(
+            merge_workspace_settings(&json!({}), &json!({"role_labels": {"owner": too_long}})),
+            Err(WorkspaceSettingsInvalid::RoleLabelsEntryLength)
+        );
+    }
+
+    #[test]
+    fn project_role_labels_is_the_one_key_or_empty() {
+        assert_eq!(project_role_labels(&json!({})), json!({}));
+        assert_eq!(
+            project_role_labels(&json!({"allowed_agent_models": ["secret"]})),
+            json!({})
+        );
+        assert_eq!(
+            project_role_labels(&json!({"role_labels": {"owner": "대표"}})),
+            json!({"owner": "대표"})
+        );
+        assert_eq!(
+            project_role_labels(&json!({"role_labels": "not-an-object"})),
+            json!({})
+        );
     }
 
     #[test]

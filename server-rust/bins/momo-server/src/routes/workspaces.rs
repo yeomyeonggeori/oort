@@ -67,6 +67,7 @@ fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
                 workspace.id, media_id
             )
         }),
+        role_labels: workspace.role_labels.clone(),
     }
 }
 
@@ -289,6 +290,7 @@ mod tests {
                 name: "모모".into(),
                 updated_at_ms: 1_700_000_000_123,
                 avatar_media_id: None,
+                role_labels: serde_json::json!({}),
             }),
         })
         .expect("serialize");
@@ -298,6 +300,11 @@ mod tests {
         assert_eq!(json["workspace"]["updatedAtMs"], 1_700_000_000_123_i64);
         // No avatar → the key is absent, not null (skip_serializing_if).
         assert!(json["workspace"].get("avatarUrl").is_none(), "{json}");
+        assert_eq!(json["workspace"]["roleLabels"], serde_json::json!({}));
+        assert!(
+            json["workspace"].get("settings").is_none(),
+            "identity must not grow a settings bag: {json}"
+        );
     }
 
     /// A set avatar surfaces as a versioned content path — the `?v={media}` is
@@ -310,10 +317,12 @@ mod tests {
             name: "모모".into(),
             updated_at_ms: 1_700_000_000_123,
             avatar_media_id: Some(Uuid::from_u128(42)),
+            role_labels: serde_json::json!({"owner": "마스터"}),
         });
         let url = dto.avatar_url.expect("avatar url present");
         assert!(url.starts_with("/v1/workspaces/"), "{url}");
         assert!(url.contains("/avatar/content?v="), "{url}");
         assert!(url.ends_with(&Uuid::from_u128(42).to_string()), "{url}");
+        assert_eq!(dto.role_labels, serde_json::json!({"owner": "마스터"}));
     }
 }

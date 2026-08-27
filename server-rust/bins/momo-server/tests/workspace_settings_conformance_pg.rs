@@ -2,8 +2,9 @@
 //!
 //! Red: 표면 부재(404)·전 멤버 우회·미지 키 수용·부분 병합이 다른 키를 지움.
 //! Green: operator GET/PATCH, RFC 7396 동형 최상위 병합, allowlist, 상한, audit,
-//! `GET /v1/workspaces/{ws}` 에 settings 미포함. PATCH 읽기는 `FOR UPDATE` 로
-//! 직렬화되어 동시 병합이 서로의 키를 지우지 않는다.
+//! `GET /v1/workspaces/{ws}` 에 settings bag 미포함(roleLabels 는 키별 파생).
+//! `role_labels` 는 수용(#1770) — 객체 통째 교체, null 은 키 삭제.
+//! PATCH 읽기는 `FOR UPDATE` 로 직렬화되어 동시 병합이 서로의 키를 지우지 않는다.
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -298,6 +299,17 @@ async fn patch_settings(
         .expect("PATCH settings")
 }
 
+async fn get_identity(http: &reqwest::Client, base: &str, workspace: Uuid, token: &str) -> Value {
+    let response = http
+        .get(format!("{base}/v1/workspaces/{workspace}"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("GET workspace identity");
+    assert_eq!(response.status(), 200, "identity GET");
+    response.json().await.expect("identity body")
+}
+
 async fn stored_settings(su: &PgPool, workspace: Uuid) -> Value {
     sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
         .bind(workspace)
@@ -349,6 +361,14 @@ async fn member_and_guest_are_forbidden_on_get_and_patch() {
         )
         .await;
         assert_eq!(patched.status(), 403, "PATCH as {email}");
+        let labels = patch_settings(
+            &http,
+            &url,
+            &token,
+            &json!({"role_labels": {"owner": "마스터"}}),
+        )
+        .await;
+        assert_eq!(labels.status(), 403, "role_labels PATCH as {email}");
     }
 }
 
@@ -552,7 +572,6 @@ async fn unknown_key_is_rejected() {
     let token = login(&http, &base, fixture.workspace, &fixture.owner.email).await;
     let url = settings_url(&base, fixture.workspace);
     for body in [
-        json!({"role_labels": {"owner": "대표"}}),
         json!({"totally_unknown": true}),
         json!({"allowedAgentModels": ["hermes-agent"]}),
     ] {
@@ -696,7 +715,161 @@ async fn workspace_identity_get_still_omits_settings() {
     let encoded = body.to_string();
     assert!(
         !encoded.contains("allowed_agent_models") && !encoded.contains("secret-to-members"),
-        "identity GET must not leak the bag: {encoded}"
+        "identity GET must not leak operator-only settings keys or their values: {encoded}"
+    );
+    assert_eq!(
+        body["workspace"]["roleLabels"],
+        json!({}),
+        "absent role_labels projects as empty object, not a bag leak: {body}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn role_labels_patch_round_trips_to_member_identity() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "role-labels").await;
+    write_settings_sql(
+        &su,
+        fixture.workspace,
+        json!({"allowed_agent_models": ["hermes-agent"]}),
+    )
+    .await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let owner = login(&http, &base, fixture.workspace, &fixture.owner.email).await;
+    let member = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+    let url = settings_url(&base, fixture.workspace);
+
+    let patched = patch_settings(
+        &http,
+        &url,
+        &owner,
+        &json!({"role_labels": {"owner": "마스터", "admin": "운영"}}),
+    )
+    .await;
+    assert_eq!(patched.status(), 200, "operator role_labels PATCH must 200");
+    let bag: Value = patched.json().await.expect("operator PATCH body");
+    assert_eq!(
+        bag["role_labels"],
+        json!({"owner": "마스터", "admin": "운영"})
+    );
+    assert_eq!(
+        bag["allowed_agent_models"],
+        json!(["hermes-agent"]),
+        "top-level merge must keep the other key"
+    );
+
+    let identity = get_identity(&http, &base, fixture.workspace, &member).await;
+    assert!(
+        identity["workspace"].get("settings").is_none(),
+        "derived roleLabels must not grow a settings bag: {identity}"
+    );
+    assert_eq!(
+        identity["workspace"]["roleLabels"],
+        json!({"owner": "마스터", "admin": "운영"})
+    );
+    let encoded = identity.to_string();
+    assert!(
+        !encoded.contains("allowed_agent_models") && !encoded.contains("hermes-agent"),
+        "identity GET must not leak the sibling settings key: {encoded}"
+    );
+
+    let replaced = patch_settings(
+        &http,
+        &url,
+        &owner,
+        &json!({"role_labels": {"owner": "마스터"}}),
+    )
+    .await;
+    assert_eq!(replaced.status(), 200);
+    let replaced_bag: Value = replaced.json().await.expect("replace body");
+    assert_eq!(replaced_bag["role_labels"], json!({"owner": "마스터"}));
+    assert!(
+        replaced_bag["role_labels"].get("admin").is_none(),
+        "object replace drops omitted role keys: {replaced_bag}"
+    );
+    let after_replace = get_identity(&http, &base, fixture.workspace, &member).await;
+    assert_eq!(
+        after_replace["workspace"]["roleLabels"],
+        json!({"owner": "마스터"})
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn role_labels_shape_violations_are_rejected() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "role-shape").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner.email).await;
+    let url = settings_url(&base, fixture.workspace);
+    let too_long = "가".repeat(17);
+    assert!(too_long.len() > 48, "49-byte+ UTF-8 fixture");
+    for body in [
+        json!({"role_labels": {"hermes": "봇"}}),
+        json!({"role_labels": {"owner": ""}}),
+        json!({"role_labels": {"owner": "   "}}),
+        json!({"role_labels": {"owner": too_long}}),
+        json!({"role_labels": {"owner": 1}}),
+        json!({"role_labels": ["owner"]}),
+        json!({"role_labels": "owner"}),
+    ] {
+        let patched = patch_settings(&http, &url, &token, &body).await;
+        assert_eq!(patched.status(), 400, "shape violation must 400: {body}");
+        assert_eq!(
+            stored_settings(&su, fixture.workspace).await,
+            json!({}),
+            "a refused role_labels PATCH must not mutate the bag"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn role_labels_null_restores_empty_identity_projection() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "role-null").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let owner = login(&http, &base, fixture.workspace, &fixture.owner.email).await;
+    let member = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+    let url = settings_url(&base, fixture.workspace);
+
+    let patched = patch_settings(
+        &http,
+        &url,
+        &owner,
+        &json!({"role_labels": {"guest": "손님"}}),
+    )
+    .await;
+    assert_eq!(patched.status(), 200);
+    assert_eq!(
+        get_identity(&http, &base, fixture.workspace, &member).await["workspace"]["roleLabels"],
+        json!({"guest": "손님"})
+    );
+
+    let deleted = patch_settings(&http, &url, &owner, &json!({"role_labels": null})).await;
+    assert_eq!(deleted.status(), 200);
+    let bag: Value = deleted.json().await.expect("null PATCH body");
+    assert!(
+        bag.get("role_labels").is_none(),
+        "null must delete the key: {bag}"
+    );
+    assert_eq!(
+        get_identity(&http, &base, fixture.workspace, &member).await["workspace"]["roleLabels"],
+        json!({}),
+        "deleted key restores the empty member projection"
     );
 }
 

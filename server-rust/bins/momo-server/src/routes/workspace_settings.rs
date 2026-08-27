@@ -5,7 +5,8 @@
 //! ```
 //!
 //! The bag is operator-only. Members who need one key get a derived projection
-//! (see `allowed-models`). `GET /v1/workspaces/{ws}` stays untouched.
+//! (`allowed-models`, and `WorkspaceDto.roleLabels` on `GET /v1/workspaces/{ws}`).
+//! That identity GET still must not grow a `settings` field.
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;

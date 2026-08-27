@@ -18,8 +18,9 @@ openapi: 3.0.3
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
 # and interactive Work Console control surfaces. Other routes (workspace
-# identity, legacy agent credential/run surfaces, cost projection, platform
-# admin, centrifugo proxy, health) remain intentionally undocumented here.
+# identity GET path, legacy agent credential/run surfaces, cost projection,
+# platform admin, centrifugo proxy, health) remain intentionally undocumented
+# here. WorkspaceDto (roleLabels) is the identity projection schema (#1770).
 # Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
 # documented separately in docs/api/openapi.operator.yaml.
 #
@@ -123,9 +124,10 @@ tags:
     description: ADR-0129 workspace memory lifecycle, source links, and admin policy.
   - name: workspace-settings
     description: >
-      Operator-only workspace.settings bag (#1800). Owner/admin. Not exposed on
-      GET /v1/workspaces/{workspaceId}; members read individual keys through
-      derived projections. role_labels is reserved for AC-4 and rejected here.
+      Operator-only workspace.settings bag (#1800/#1770). Owner/admin. The bag
+      is not exposed on GET /v1/workspaces/{workspaceId}; members read
+      individual keys through derived projections. role_labels is accepted on
+      PATCH and projected as WorkspaceDto.roleLabels.
 
 paths:
   /v1/auth/login:
@@ -752,8 +754,8 @@ paths:
         This is deliberately a sibling of `GET /v1/workspaces/{workspaceId}`,
         which must not grow a `settings` field — the bag is an extensible
         store that may later hold keys not every member may read.
-        `role_labels` is reserved for AC-4 (#1770) and is not accepted on
-        PATCH in this ticket.
+        Members read `role_labels` through `WorkspaceDto.roleLabels` on that
+        identity GET.
       security:
         - bearerAuth: []
       parameters:
@@ -783,10 +785,12 @@ paths:
       description: >
         Owner/admin only. RFC 7396-shaped top-level merge: specified keys
         replace, omitted keys stay, `null` deletes the key. Unknown top-level
-        keys are 400. The starting allowlist is `allowed_agent_models` only
-        (string array, max 32 entries, each ≤ 64 bytes). `role_labels` is
-        reserved for AC-4 and is rejected. Serialized body over 8192 bytes is
-        413. There is no PUT whole-replace.
+        keys are 400. Allowlist is `allowed_agent_models` (string array, max
+        32 entries, each ≤ 64 bytes) and `role_labels` (object whose keys
+        are `owner`/`admin`/`member`/`guest`, values non-empty strings ≤ 48
+        UTF-8 bytes). `role_labels` is replaced whole — omit a role key to
+        drop that override; `null` deletes the key (client default labels).
+        Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
       security:
         - bearerAuth: []
       parameters:
@@ -803,7 +807,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models, or non-object body.
+          description: Unknown key, malformed allowed_agent_models or role_labels, or non-object body.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -10566,9 +10570,8 @@ components:
       type: object
       description: >
         Stored workspace.settings bag. Additional keys may appear after a later
-        ticket widens the allowlist. Today the only writable key is
-        allowed_agent_models. role_labels is reserved for AC-4 and is not
-        accepted on PATCH here.
+        ticket widens the allowlist. Writable keys today are
+        allowed_agent_models and role_labels (#1770).
       additionalProperties: true
       properties:
         allowed_agent_models:
@@ -10577,12 +10580,15 @@ components:
             type: string
             maxLength: 64
           maxItems: 32
+        role_labels:
+          $ref: "#/components/schemas/RoleLabels"
 
     PatchWorkspaceSettingsRequest:
       type: object
       description: >
         RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels
-        is reserved for AC-4 (#1770) and is rejected. null deletes the key.
+        is a whole-object replace (nested keys are not deep-merged). null
+        deletes the named key.
       additionalProperties: false
       properties:
         allowed_agent_models:
@@ -10592,6 +10598,56 @@ components:
             type: string
             maxLength: 64
           maxItems: 32
+        role_labels:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/RoleLabels"
+          description: >
+            Display-only role name overrides. Keys ⊂ {owner, admin, member,
+            guest}. Values are non-empty strings, ≤ 48 UTF-8 bytes.
+            Whitespace-only is 400. Agent keys are refused. null deletes
+            the key (client default labels).
+
+    RoleLabels:
+      type: object
+      description: >
+        Display-only membership role name overrides. Does not change
+        permissions, RLS, or the role wire value. Empty object means client
+        defaults. Agent labels are a client null rule and are not stored.
+      additionalProperties: false
+      properties:
+        owner: {type: string, minLength: 1}
+        admin: {type: string, minLength: 1}
+        member: {type: string, minLength: 1}
+        guest: {type: string, minLength: 1}
+
+    WorkspaceDto:
+      type: object
+      description: >
+        GET /v1/workspaces/{workspaceId} workspace object. Identity plus the
+        member-readable roleLabels projection. The settings bag is never
+        included.
+      required: [id, slug, name, updatedAtMs, roleLabels]
+      properties:
+        id: {type: string, format: uuid}
+        slug: {type: string}
+        name: {type: string}
+        updatedAtMs: {type: integer, format: int64}
+        avatarUrl:
+          type: string
+          description: Versioned avatar content path, omitted when unset.
+        roleLabels:
+          allOf:
+            - $ref: "#/components/schemas/RoleLabels"
+          description: >
+            Projection of workspace.settings.role_labels. Empty object when
+            the key is absent. Display-only.
+
+    WorkspaceResponse:
+      type: object
+      required: [workspace]
+      properties:
+        workspace: {$ref: "#/components/schemas/WorkspaceDto"}
 
     UnfurlSettings:
       type: object
