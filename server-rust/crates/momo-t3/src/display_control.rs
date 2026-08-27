@@ -390,10 +390,9 @@ pub async fn open_control_window_in_tx(
 /// rather than at the call site so that "opening control closes the session" is
 /// one fact with one author, exactly as parking the runs is.
 ///
-/// The owner's own setting is never *lost*: nothing else in this server writes
-/// `work_session.observation` — `routes::work_sessions::patch` refuses the field
-/// by name — so the value read here is the one the owner chose, and the close
-/// path writes exactly it back.
+/// The owner's own setting is never *lost*: the human-owner PATCH (#1778) is
+/// the other writer of `work_session.observation`, and the value read here is
+/// the one that writer last chose. The close path writes exactly it back.
 async fn close_observation_for_control_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,

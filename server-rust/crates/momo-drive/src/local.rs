@@ -224,6 +224,10 @@ impl DriveArchive for LocalDriveArchive {
         }))
         .map_err(|_| DriveError::UpstreamFailure)?;
         atomic_write(&session, &body)?;
+        // Boot-time assembly only. When `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` is
+        // `same-origin`, momo-server rewrites this URL from the request's
+        // Caddy-normalized Host / X-Forwarded-Proto (ADR-0167 reused by
+        // ADR-0169 증보 1). An absolute env value stays verbatim here.
         Ok(DriveUploadSession {
             drive_file_id: file_id,
             upload_url: format!("{}/__momo_stub/drive/uploads/{token}", self.base_url),

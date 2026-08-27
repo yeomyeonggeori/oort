@@ -42,7 +42,7 @@
 //! | [`engine`] | `work_host_engine` per-workspace selection | `Provider/WorkHostEngineStore.swift` |
 //! | [`tier`] | `work_tier_policy` workspace default + member override | `Routes/WorkTierPolicyRoutes.swift` |
 //! | [`quota`] | `quota_snapshot` read side | `Routes/ProviderQuotaSnapshotRoutes.swift:list` |
-//! | [`invite`] | `invite_code` create/list/read | `Routes/InviteRoutes.swift` |
+//! | [`invite`] | `invite_code` create/list/read/revoke/regenerate/redeem | `Routes/InviteRoutes.swift` |
 //! | [`join`] | spending an invite (`POST /v1/join`) | `Routes/JoinRoutes.swift` |
 //! | [`workspace`] | tenant provisioning (`POST /v1/workspaces`) | `Routes/WorkspaceRoutes.create` |
 //!
@@ -77,15 +77,18 @@ pub use engine::{
     ALLOWED_ENGINES, DEFAULT_ENGINE,
 };
 pub use invite::{
-    clamp_invite_list_limit, create_invite, list_invites, normalized_invite_role, read_invite,
-    validated_expires_at_ms, validated_max_uses, CreatedInvite, InviteCode, InviteSpecInvalid,
+    clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
+    normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
+    regenerate_invite, revoke_invite, validated_expires_at_ms, validated_max_uses, CreatedInvite,
+    InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption, InviteSpecInvalid,
+    RedeemedInvite, RevokedInvite,
 };
 pub use join::{
-    fallback_handle, is_handle_banned_in_tx, is_valid_handle, normalized_invite_code,
-    normalized_join_display_name, normalized_join_email, normalized_join_password,
-    normalized_join_time_zone, normalized_requested_handle, redeem_invite_in_tx,
-    resolve_invite_workspace, role_rank, JoinError, JoinOutcome, JoinRejection, JoinRequestValues,
-    JoinSpecInvalid, JoinedMember, JoinedMembership,
+    fallback_handle, is_handle_banned_in_tx, is_identity_banned_in_tx, is_valid_handle,
+    normalized_invite_code, normalized_join_display_name, normalized_join_email,
+    normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
+    redeem_invite_in_tx, resolve_invite_workspace, role_rank, JoinError, JoinOutcome,
+    JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember, JoinedMembership,
 };
 pub use link::{
     decrypt_link, delete_link, read_link, reseal_link_credential, resolve_link, upsert_link,

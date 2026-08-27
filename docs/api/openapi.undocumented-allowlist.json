@@ -71,10 +71,6 @@
     },
     {
       "method": "get",
-      "path": "/v1/workspaces/{}/invites"
-    },
-    {
-      "method": "get",
       "path": "/v1/workspaces/{}/usage/summary"
     },
     {
@@ -128,22 +124,6 @@
     {
       "method": "post",
       "path": "/v1/workspaces/{}/devices"
-    },
-    {
-      "method": "post",
-      "path": "/v1/workspaces/{}/invites"
-    },
-    {
-      "method": "post",
-      "path": "/v1/workspaces/{}/invites/redeem"
-    },
-    {
-      "method": "post",
-      "path": "/v1/workspaces/{}/invites/{}/regenerate"
-    },
-    {
-      "method": "post",
-      "path": "/v1/workspaces/{}/invites/{}/revoke"
     },
     {
       "method": "put",

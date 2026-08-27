@@ -343,7 +343,10 @@ DB_VOLUME_NAME=oort-lab-pgdata
 기존 env 에 이 키가 없으면 `scripts/self_host_env.sh` 가 **그 줄만
 덧붙인다** — 시크릿은 다시 만들지 않는다. 반영에는 api 재시작이 필요하다
 (`scripts/self_host_env.sh --compose up -d`). 값을 비워 두면 첨부는 예전처럼
-503 `Drive archive is not configured` 이다.
+503 `Drive archive is not configured` 이다. 신선한 명명 볼륨은 root
+소유로 생긴다. `local.override.yml` 의 `drive-init` 이 첫 기동에서
+마운트 포인트를 uid 10001 로 chown 한다 — 쓰기 실패를 무시하지 않고,
+권한을 고친 뒤에야 api 가 뜬다.
 
 **백업 대상.** `pg_dump` 는 메시지·멤버만 가져온다. 첨부 파일을 살리려면
 같은 시점에 보관소 볼륨을 복사한다. 절차 한 줄은

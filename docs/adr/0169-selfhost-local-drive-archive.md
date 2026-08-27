@@ -26,3 +26,17 @@
 
 - 셀프호스트 업그레이드 계약에 보관소 볼륨이 추가된다(플레이북 §백업 갱신 필요).
 - 라이브(호스티드)는 무영향 — google 경로 그대로.
+
+---
+
+## 증보 1 — capability URL same-origin 파생 (Accepted 2026-08-26)
+
+- Status: **Accepted** (2026-08-26 성재 승인)
+- 관련: ADR-0167(실시간 same-origin 광고 — **본 증보는 그 신뢰 경계를 준용한다**), #1788
+- 채택: A(요청 오리진 파생) + C(백엔드 선택 축 무영향) 하이브리드
+
+`MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`에 `same-origin` 센티널을 도입한다. 값이 `same-origin`이면 로컬 보관소의 업로드 capability URL을 **요청 시점에** 파생한다. 절대 `http(s)://` URL이 명시되면 verbatim 유지(기존 배포 불변, ADR-0167과 대칭).
+
+파생 기준은 ADR-0167과 같다: 신뢰 프록시(Caddy)가 정규화한 `X-Forwarded-Proto` / `Host`. 원 요청 헤더를 그대로 믿지 않으며, `derive_same_origin_http_base`는 `derive_same_origin_ws_url`과 같은 `host_is_safe` · first-hop XFP 규칙을 쓴다. `MOMO_DRIVE_ARCHIVE_BACKEND`(`local`|`google`)는 이 증보로 바뀌지 않는다 — `local` 경로의 URL 조립만 고친다.
+
+생성기 기본값은 `same-origin`이다. `--public-origin https://host`는 절대 URL을 명시하므로 그 값이 verbatim으로 남는다.

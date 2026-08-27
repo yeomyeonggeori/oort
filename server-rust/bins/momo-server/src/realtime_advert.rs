@@ -42,7 +42,9 @@ impl std::fmt::Display for RealtimeAdvertError {
                 formatter.write_str("Host header is required for same-origin realtime")
             }
             Self::InvalidHost => formatter.write_str("Host header is not a safe authority"),
-            Self::InvalidScheme => formatter.write_str("derived realtime URL is not ws/wss"),
+            Self::InvalidScheme => {
+                formatter.write_str("derived same-origin URL is not a supported scheme")
+            }
         }
     }
 }
@@ -128,6 +130,96 @@ impl RealtimeAdvert {
     }
 }
 
+/// Local-archive capability URL base (ADR-0169 증보 1 / #1788).
+///
+/// Same opt-in as [`RealtimeAdvert`]: `same-origin` derives per request from
+/// the Caddy-normalized `Host` + `X-Forwarded-Proto` pair ([`derive_same_origin_http_base`]);
+/// an absolute `http(s)://` URL is advertised verbatim. Google / stub backends
+/// never select this enum — only `MOMO_DRIVE_ARCHIVE_BACKEND=local` does.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DriveLocalBase {
+    /// Boot-time absolute origin. Host / proto headers are ignored.
+    Fixed(String),
+    /// Per-request same-origin derivation (ADR-0167 trust boundary, reused).
+    SameOrigin,
+}
+
+impl std::fmt::Display for DriveLocalBase {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Fixed(url) => formatter.write_str(url),
+            Self::SameOrigin => formatter.write_str("same-origin"),
+        }
+    }
+}
+
+impl DriveLocalBase {
+    /// Parse `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`. `same-origin` is
+    /// case-insensitive; absolute http/https URLs with a host stay verbatim
+    /// after trim; everything else, including unset, is the caller-supplied
+    /// fallback (historically loopback on the serving port).
+    pub fn from_env_value(raw: Option<&str>, fallback: &str) -> Self {
+        if let Some(raw) = raw {
+            let trimmed = raw.trim();
+            if trimmed.eq_ignore_ascii_case("same-origin") {
+                return Self::SameOrigin;
+            }
+            if http_url_has_host(trimmed) {
+                return Self::Fixed(trimmed.trim_end_matches('/').to_string());
+            }
+        }
+        let fallback = fallback.trim();
+        if fallback.eq_ignore_ascii_case("same-origin") {
+            return Self::SameOrigin;
+        }
+        Self::Fixed(fallback.trim_end_matches('/').to_string())
+    }
+
+    /// The origin this request should put on a local capability URL.
+    pub fn advertise_from_headers(
+        &self,
+        headers: &HeaderMap,
+        connection_scheme: Option<&str>,
+    ) -> Result<String, RealtimeAdvertError> {
+        match self {
+            Self::Fixed(url) => Ok(url.clone()),
+            Self::SameOrigin => {
+                let forwarded_proto = headers
+                    .get("x-forwarded-proto")
+                    .and_then(|value| value.to_str().ok());
+                let host = headers
+                    .get(header::HOST)
+                    .and_then(|value| value.to_str().ok());
+                derive_same_origin_http_base(forwarded_proto, host, connection_scheme)
+            }
+        }
+    }
+
+    /// Rewrite a local-archive capability URL. Fixed leaves the archive's
+    /// boot-time URL alone. SameOrigin keeps the `/__momo_stub/drive/uploads/{token}`
+    /// path and prefixes the derived origin. A URL that is not a local
+    /// capability (Google's, or a miswired stub) is left untouched so the
+    /// backend-selection axis stays inert.
+    pub fn apply_to_upload_url(
+        &self,
+        headers: &HeaderMap,
+        connection_scheme: Option<&str>,
+        upload_url: &str,
+    ) -> Result<String, RealtimeAdvertError> {
+        match self {
+            Self::Fixed(_) => Ok(upload_url.to_string()),
+            Self::SameOrigin => {
+                const MARKER: &str = "/__momo_stub/drive/uploads/";
+                let Some(index) = upload_url.find(MARKER) else {
+                    return Ok(upload_url.to_string());
+                };
+                let origin = self.advertise_from_headers(headers, connection_scheme)?;
+                Ok(format!("{origin}{}", &upload_url[index..]))
+            }
+        }
+    }
+}
+
 /// Derive `ws(s)://<Host>/connection/websocket`.
 ///
 /// * `X-Forwarded-Proto` `https` → `wss`, `http` → `ws`. First CSV hop wins.
@@ -152,6 +244,32 @@ pub fn derive_same_origin_ws_url(
         return Err(RealtimeAdvertError::InvalidScheme);
     }
     Ok(format!("{scheme}://{host}/connection/websocket"))
+}
+
+/// Derive `http(s)://<Host>` with the **same** Host / XFP rules as
+/// [`derive_same_origin_ws_url`] (ADR-0167). #1788 reuses this; it does not
+/// invent a second trust boundary.
+///
+/// * `X-Forwarded-Proto` `https` → `https`, `http` → `http`. First CSV hop wins.
+/// * Missing / unusable proto falls back to `connection_scheme`, then `http`.
+/// * `Host` is preserved including its port. Control bytes are rejected.
+pub fn derive_same_origin_http_base(
+    forwarded_proto: Option<&str>,
+    host: Option<&str>,
+    connection_scheme: Option<&str>,
+) -> Result<String, RealtimeAdvertError> {
+    let host = host
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or(RealtimeAdvertError::MissingHost)?;
+    if !host_is_safe(host) {
+        return Err(RealtimeAdvertError::InvalidHost);
+    }
+    let scheme = http_scheme(forwarded_proto, connection_scheme);
+    if scheme != "http" && scheme != "https" {
+        return Err(RealtimeAdvertError::InvalidScheme);
+    }
+    Ok(format!("{scheme}://{host}"))
 }
 
 fn host_is_safe(host: &str) -> bool {
@@ -195,6 +313,30 @@ fn websocket_scheme(
         .and_then(http_like_to_ws)
         .or_else(|| first_hop(connection_scheme).and_then(http_like_to_ws))
         .unwrap_or("ws")
+}
+
+fn http_like_to_http(token: &str) -> Option<&'static str> {
+    match token.to_ascii_lowercase().as_str() {
+        "https" | "wss" => Some("https"),
+        "http" | "ws" => Some("http"),
+        _ => None,
+    }
+}
+
+fn http_scheme(forwarded_proto: Option<&str>, connection_scheme: Option<&str>) -> &'static str {
+    first_hop(forwarded_proto)
+        .and_then(http_like_to_http)
+        .or_else(|| first_hop(connection_scheme).and_then(http_like_to_http))
+        .unwrap_or("http")
+}
+
+fn http_url_has_host(trimmed: &str) -> bool {
+    let host = trimmed
+        .strip_prefix("http://")
+        .or_else(|| trimmed.strip_prefix("https://"))
+        .map(|rest| rest.split('/').next().unwrap_or(""))
+        .unwrap_or("");
+    !host.is_empty()
 }
 
 #[cfg(test)]
@@ -405,5 +547,149 @@ mod tests {
             "wss://rt.example/connection/websocket"
         );
         assert_eq!(RealtimeAdvert::SameOrigin.to_string(), "same-origin");
+    }
+
+    #[test]
+    fn drive_base_sentinel_parse_three_ways() {
+        assert_eq!(
+            DriveLocalBase::from_env_value(Some("same-origin"), "http://127.0.0.1:9"),
+            DriveLocalBase::SameOrigin
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(Some(" SAME-ORIGIN \n"), "http://127.0.0.1:9"),
+            DriveLocalBase::SameOrigin
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(Some("https://files.oor7.com"), "http://127.0.0.1:9"),
+            DriveLocalBase::Fixed("https://files.oor7.com".to_string())
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(
+                Some("  http://localhost:8088/  "),
+                "http://127.0.0.1:9"
+            ),
+            DriveLocalBase::Fixed("http://localhost:8088".to_string())
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(None, "http://127.0.0.1:8000"),
+            DriveLocalBase::Fixed("http://127.0.0.1:8000".to_string())
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(Some("ws://example.com"), "http://127.0.0.1:9"),
+            DriveLocalBase::Fixed("http://127.0.0.1:9".to_string())
+        );
+        assert_eq!(
+            DriveLocalBase::from_env_value(Some("http://"), "http://127.0.0.1:9"),
+            DriveLocalBase::Fixed("http://127.0.0.1:9".to_string())
+        );
+    }
+
+    #[test]
+    fn derive_http_xfp_https_is_https_and_http_is_http() {
+        assert_eq!(
+            derive_same_origin_http_base(Some("https"), Some("app.example"), None).unwrap(),
+            "https://app.example"
+        );
+        assert_eq!(
+            derive_same_origin_http_base(Some("http"), Some("app.example"), None).unwrap(),
+            "http://app.example"
+        );
+        assert_eq!(
+            derive_same_origin_http_base(Some("HTTPS"), Some("app.example"), None).unwrap(),
+            "https://app.example"
+        );
+        assert_eq!(
+            derive_same_origin_http_base(Some("https, http"), Some("app.example"), None).unwrap(),
+            "https://app.example"
+        );
+    }
+
+    #[test]
+    fn derive_http_preserves_host_port_and_rejects_injected_hosts() {
+        assert_eq!(
+            derive_same_origin_http_base(Some("http"), Some("192.168.1.20:8088"), None).unwrap(),
+            "http://192.168.1.20:8088"
+        );
+        assert_eq!(
+            derive_same_origin_http_base(
+                Some("https"),
+                Some("cursor.tailb1aad3.ts.net:8443"),
+                None
+            )
+            .unwrap(),
+            "https://cursor.tailb1aad3.ts.net:8443"
+        );
+        assert_eq!(
+            derive_same_origin_http_base(Some("https"), None, None),
+            Err(RealtimeAdvertError::MissingHost)
+        );
+        assert_eq!(
+            derive_same_origin_http_base(
+                Some("https"),
+                Some("evil.example\r\nX-Injected: yes"),
+                None
+            ),
+            Err(RealtimeAdvertError::InvalidHost)
+        );
+    }
+
+    #[test]
+    fn drive_red_proof_legacy_localhost_ignores_remote_host() {
+        let advert =
+            DriveLocalBase::from_env_value(Some("http://localhost:8088"), "http://127.0.0.1:9");
+        let url = advert
+            .apply_to_upload_url(
+                &headers("cursor.tailb1aad3.ts.net", Some("https")),
+                None,
+                "http://localhost:8088/__momo_stub/drive/uploads/tok",
+            )
+            .unwrap();
+        assert_eq!(url, "http://localhost:8088/__momo_stub/drive/uploads/tok");
+    }
+
+    #[test]
+    fn drive_red_proof_same_origin_derives_https_from_forwarded_host() {
+        let advert = DriveLocalBase::from_env_value(Some("same-origin"), "http://127.0.0.1:9");
+        let url = advert
+            .apply_to_upload_url(
+                &headers("cursor.tailb1aad3.ts.net", Some("https")),
+                None,
+                "http://127.0.0.1:9/__momo_stub/drive/uploads/tok",
+            )
+            .unwrap();
+        assert_eq!(
+            url,
+            "https://cursor.tailb1aad3.ts.net/__momo_stub/drive/uploads/tok"
+        );
+    }
+
+    #[test]
+    fn drive_red_proof_absolute_url_ignores_host() {
+        let advert =
+            DriveLocalBase::from_env_value(Some("https://files.oor7.com"), "http://127.0.0.1:9");
+        let url = advert
+            .apply_to_upload_url(
+                &headers("cursor.tailb1aad3.ts.net", Some("https")),
+                None,
+                "https://files.oor7.com/__momo_stub/drive/uploads/tok",
+            )
+            .unwrap();
+        assert_eq!(url, "https://files.oor7.com/__momo_stub/drive/uploads/tok");
+    }
+
+    #[test]
+    fn drive_same_origin_does_not_rewrite_a_google_capability_url() {
+        let advert = DriveLocalBase::SameOrigin;
+        let google = "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable";
+        assert_eq!(
+            advert
+                .apply_to_upload_url(
+                    &headers("cursor.tailb1aad3.ts.net", Some("https")),
+                    None,
+                    google
+                )
+                .unwrap(),
+            google
+        );
     }
 }

@@ -979,7 +979,7 @@ require("COMPOSE_CONTROL_KEYS" in self_host, "Compose control env must have an e
 require("run_self_host_compose" in self_host, "all rendered and printed Compose commands need one sanitized launcher")
 require("scripts/self_host_env.sh --compose" in self_host, "printed launch must use the sanitized Compose launcher")
 require("validate_compose_command_args" in self_host, "caller Compose argv must not replace canonical config sources")
-require("PUBLISHED_IMAGE_CONSUMERS=7" in self_host, "render verification must cover all seven image consumers")
+require("PUBLISHED_IMAGE_CONSUMERS=8" in self_host, "render verification must cover all eight image consumers")
 require("head -1" not in self_host, "security-critical env keys must not use first-value parsing")
 require("--local-build" in self_host_doc and "--published-image" in self_host_doc, "SELF_HOST must document both modes")
 require("@sha256:" in self_host_doc, "SELF_HOST must show immutable digest pinning")

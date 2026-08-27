@@ -49,9 +49,11 @@
 #
 # ## 규율
 #
-# * 이미 파일이 있으면 **절대 덮어쓰지 않는다.** 볼륨이 살아 있는 상태에서 시크릿을
-#   다시 만들면 DB 안의 롤 비밀번호와 env가 어긋나 스택이 부팅하지 못한다. 이 경우
-#   현재 로그인 정보만 다시 출력하고 끝낸다.
+# * 이미 파일이 있으면 **시크릿을 다시 만들지 않는다.** 볼륨이 살아 있는 상태에서
+#   시크릿을 다시 만들면 DB 안의 롤 비밀번호와 env가 어긋나 스택이 부팅하지 못한다.
+#   `--public-origin` 유지보수는 시크릿을 건드리지 않는다. claim 모드
+#   (`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)에서도 그 경로만 통과한다(#1790).
+#   `--compose`는 비밀번호 키를 계속 요구한다(ADR-0166).
 # * 값은 openssl로 만들고, 파일은 0600으로 쓴다. `*.secrets.env` 는 레포 전역
 #   gitignore 대상이다.
 # * 포트가 이미 쓰이고 있으면 **비어 있는 다음 포트를 골라** 알려 준다. 사람이
@@ -88,7 +90,9 @@ cd "$REPO_ROOT"
 
 ENV_FILE="infra/rust/local.secrets.env"
 CANONICAL_PUBLISHED_IMAGE="ghcr.io/yeomyeonggeori/oort"
-PUBLISHED_IMAGE_CONSUMERS=7
+# rust.yml + local.override.yml: runtime-roles migrate api relay
+# webhook-sender agent-worker web-init drive-init
+PUBLISHED_IMAGE_CONSUMERS=8
 REQUESTED_MODE=""
 REQUESTED_IMAGE=""
 REQUESTED_ACTION="prepare"
@@ -135,10 +139,14 @@ Usage:
 
 No argument is a backwards-compatible alias for --local-build.
 --public-origin may be repeated. It idempotently adds the origin (and its
-ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS; existing
-entries are preserved. On an existing env it does not regenerate secrets.
+ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS and rewrites
+MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL; existing Centrifugo tokens are preserved.
+On an existing env it does not regenerate secrets. Claim-mode env
+(MOMO_BOOTSTRAP_CLAIM=1, no owner password) may use this maintenance path;
+--compose still requires the password key (ADR-0166).
 After preparation, use --compose for every start/stop/log command so ambient
-Compose variables cannot override infra/rust/local.secrets.env.
+Compose variables cannot override infra/rust/local.secrets.env. Use the
+playbook's docker compose helper in claim mode instead of --compose.
 EOF
 }
 
@@ -262,6 +270,24 @@ env_value_once() {
   awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2) }' "$ENV_FILE"
 }
 
+# ADR-0166 claim bootstrap: the playbook strips MOMO_INITIAL_OWNER_PASSWORD
+# and writes MOMO_BOOTSTRAP_CLAIM=1. That absence is the contract, not a
+# malformed env. Other values (created/skipped) are migrate stdout, not this file.
+is_claim_bootstrap_env() {
+  [ "$(env_key_count MOMO_BOOTSTRAP_CLAIM)" -eq 1 ] || return 1
+  [ "$(env_value_once MOMO_BOOTSTRAP_CLAIM)" = "1" ]
+}
+
+stack_restart_hint() {
+  # 두 갈래 모두 %s 로 낸다. 비-claim 문자열은 `--` 로 시작하는데, bash printf 는
+  # 그것을 자기 옵션으로 읽어 `invalid option` 으로 죽는다(#1790 회귀).
+  if is_claim_bootstrap_env; then
+    printf '%s' 'docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출'
+  else
+    printf '%s' '--compose up -d'
+  fi
+}
+
 reject_duplicate_env_keys() {
   local duplicate
   duplicate="$(awk -F= '
@@ -345,7 +371,8 @@ ensure_operator_allowlist() {
   # that lands in the middle of rendered Compose JSON is worse than no notice.
   printf '[self-host] %s 에 PLATFORM_ADMIN_EMAILS=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$owner_email" >&2
-  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # #1607 — desktop CORS allowlist, for env files written before it existed.
@@ -372,7 +399,8 @@ ensure_desktop_cors_allowlist() {
   } >>"$ENV_FILE"
   printf '[self-host] %s 에 MOMO_CORS_ALLOWED_ORIGINS=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$SELF_HOST_DESKTOP_CORS_ORIGINS" >&2
-  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: --compose up -d\n' >&2
+  printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # #1696 / ADR-0169 — local file archive, for env files written before it existed.
@@ -381,14 +409,11 @@ ensure_desktop_cors_allowlist() {
 # A value somebody typed (including a deliberately empty backend, which keeps
 # the 503 no-archive surface) is left exactly as it is.
 ensure_local_drive_archive() {
-  local web_port="8088" project count
-  if [ "$(env_key_count MOMO_WEB_PORT)" -eq 1 ]; then
-    web_port="$(normalize_port MOMO_WEB_PORT "$(env_value_once MOMO_WEB_PORT)")"
-  fi
+  local project count
   project="$(self_host_compose_project_name)"
   validate_project_name "$project"
   validate_env_scalar MOMO_DRIVE_LOCAL_DIR "$SELF_HOST_DRIVE_LOCAL_DIR"
-  validate_env_scalar MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "http://localhost:${web_port}"
+  validate_env_scalar MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "same-origin"
   validate_env_scalar DRIVE_VOLUME_NAME "${project}-drive"
 
   count="$(env_key_count MOMO_DRIVE_ARCHIVE_BACKEND)"
@@ -418,9 +443,9 @@ ensure_local_drive_archive() {
   [ "$count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
   if [ "$count" -eq 0 ]; then
-    printf 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s\n' "$web_port" >>"$ENV_FILE"
-    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=http://localhost:%s 를 추가했다 (시크릿은 그대로).\n' \
-      "$ENV_FILE" "$web_port" >&2
+    printf 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin\n' >>"$ENV_FILE"
+    printf '[self-host] %s 에 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin 를 추가했다 (시크릿은 그대로).\n' \
+      "$ENV_FILE" >&2
   fi
 
   count="$(env_key_count DRIVE_VOLUME_NAME)"
@@ -440,6 +465,18 @@ ensure_local_drive_public_base() {
   count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
   [ "$count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 항목은 최대 한 번만 있어야 한다."
+  # #1788 — same-origin 은 이미 모든 오리진을 덮는다. 공개 오리진 절대 URL로
+  # 내리면 터널 URL이 바뀔 때 다시 낡는다(ADR-0169 증보 1이 없애려던 바로 그
+  # 상태). 그러므로 센티널은 강등하지 않는다. 절대 URL로 고정하고 싶은 운영자는
+  # 그 값을 직접 적으면 되고, 그때는 verbatim으로 유지된다.
+  if [ "$count" -eq 1 ]; then
+    case "$(printf '%s' "$(env_value_once MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)" | tr '[:upper:]' '[:lower:]')" in
+      same-origin)
+        printf '[self-host] MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 은 same-origin 이라 그대로 둔다 (요청 오리진에서 파생 — 공개 오리진도 덮는다).\n' >&2
+        return 0
+        ;;
+    esac
+  fi
   rewrite_env_assignment MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL "$origin"
   printf '[self-host] %s 의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 을 공개 오리진으로 맞췄다.\n' \
     "$ENV_FILE" >&2
@@ -557,7 +594,23 @@ ensure_public_origins() {
   rewrite_env_assignment CENTRIFUGO_ALLOWED_ORIGINS "$next"
   printf '[self-host] %s 의 CENTRIFUGO_ALLOWED_ORIGINS 에 공개 오리진을 추가했다.\n' \
     "$ENV_FILE" >&2
-  printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: --compose up -d\n' >&2
+  printf '[self-host] 브라우저 Origin(https)과 RN 소켓 Origin(wss)을 같이 넣는다. centrifugo 재시작: %s\n' \
+    "$(stack_restart_hint)" >&2
+}
+
+warn_if_legacy_localhost_drive_base() {
+  local count current
+  count="$(env_key_count MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  [ "$count" -eq 1 ] || return 0
+  current="$(env_value_once MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL)"
+  case "$(printf '%s' "$current" | tr '[:upper:]' '[:lower:]')" in
+    same-origin) return 0 ;;
+    http://localhost:*|https://localhost:*|http://127.0.0.1:*|https://127.0.0.1:*)
+      printf '[self-host] %s 의 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 이 루프백을 가리킨다.\n' "$ENV_FILE" >&2
+      printf '[self-host] 원격 클라는 자기 localhost 로 첨부를 올린다 (ADR-0169 증보 1). 그 줄을\n' >&2
+      printf '[self-host] MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin 으로 고친 뒤 api 를 재시작하라.\n' >&2
+      ;;
+  esac
 }
 
 warn_if_legacy_localhost_realtime_ws() {
@@ -593,7 +646,8 @@ warn_if_centrifugo_missing_desktop_origins() {
     "$ENV_FILE" >&2
   printf '[self-host] 데스크탑 실시간은 업그레이드 전 Origin 대조에서 403이 된다. 시크릿을\n' >&2
   printf '[self-host] 건드리지 말고 그 줄 끝에 " tauri://localhost http://tauri.localhost" 를\n' >&2
-  printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: --compose up -d\n' >&2
+  printf '[self-host] 추가한 뒤 centrifugo를 재시작하라: %s\n' \
+    "$(stack_restart_hint)" >&2
 }
 
 # Historical self-host volume name (#1613). Existing installs used the generator
@@ -677,6 +731,7 @@ guard_self_host_stack_collision() {
   local our_project our_volume our_wd id their_wd their_project
   local ids_project ids_volume
   local collisions=0
+  local our_compose_wd
   local -a reports=()
 
   our_project="$(self_host_compose_project_name)"
@@ -685,6 +740,12 @@ guard_self_host_stack_collision() {
   validate_env_scalar DB_VOLUME_NAME "$our_volume"
   our_wd="$(self_host_canonical_dir "$REPO_ROOT")" ||
     fail "이 체크아웃 경로를 정규화할 수 없다: $REPO_ROOT"
+  # docker compose 는 working_dir 라벨에 **첫 compose 파일의 디렉토리**를 적는다.
+  # 우리 파일들은 infra/rust 아래이므로 라벨은 REPO_ROOT 가 아니라 REPO_ROOT/infra/rust 다.
+  # REPO_ROOT 하나로만 비교하면 **자기 스택이 영원히 남의 것으로 보이고**, up 도 down 도
+  # 막혀 교착이 된다. 두 형태를 모두 자기 것으로 인정한다.
+  our_compose_wd="$(self_host_canonical_dir "$REPO_ROOT/infra/rust")" ||
+    fail "이 체크아웃의 compose 경로를 정규화할 수 없다: $REPO_ROOT/infra/rust"
 
   if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
     fail "docker daemon에 연결할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
@@ -704,7 +765,9 @@ guard_self_host_stack_collision() {
       fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
     their_project="$("$DOCKER_BIN" inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$id")" ||
       fail "컨테이너 $id 를 inspect할 수 없다 — 스택 충돌 여부를 확인할 수 없어 중단한다."
-    if self_host_same_workdir "$their_wd" "$our_wd" && [ "$their_project" = "$our_project" ]; then
+    if [ "$their_project" = "$our_project" ] &&
+       { self_host_same_workdir "$their_wd" "$our_wd" ||
+         self_host_same_workdir "$their_wd" "$our_compose_wd"; }; then
       continue
     fi
     collisions=$((collisions + 1))
@@ -825,6 +888,29 @@ print_next_steps() {
       ;;
     *) fail "저장된 MOMO_SELF_HOST_MODE가 잘못됐다: $mode" ;;
   esac
+  if is_claim_bootstrap_env; then
+    cat <<EOF
+
+[self-host] 준비됐다. 모드: $mode_summary
+[self-host] 이 env는 claim 모드다. --compose는 비밀번호 키를 요구하므로 거절한다.
+[self-host] 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다.
+[self-host] 주의: 이 quickstart는 로컬 named volume만 사용하며 production 백업/PITR가 아니다.
+[self-host] 운영 업그레이드는 pgBackRest 오버레이+서명된 fresh evidence gate를 따라야 한다.
+[self-host] 브라우저에서 열고 migrate가 출력한 /claim/<token> 으로 첫 비밀번호를 설정한다:
+
+  http://localhost:${web_port}
+  email    ${owner_email}
+
+[self-host] 비밀번호 키는 이 파일에 없다. 원문 토큰을 stdout·이슈에 다시 적지 않는다.
+[self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
+[self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
+[self-host] 패키징된 데스크탑 릴리스(tauri://localhost)는 같은 스택에 교차 오리진으로
+[self-host] 붙는다. 새 env 는 MOMO_CORS_ALLOWED_ORIGINS 와 CENTRIFUGO_ALLOWED_ORIGINS 에
+[self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
+[self-host] CORS가 필요 없다.
+EOF
+    return
+  fi
   cat <<EOF
 
 [self-host] 준비됐다. 모드: $mode_summary
@@ -859,7 +945,24 @@ if [ -e "$ENV_FILE" ]; then
   existing_image="$(env_value_once MOMO_RUST_IMAGE)"
   existing_web_port="$(env_value_once MOMO_WEB_PORT)"
   existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
-  existing_password="$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
+  password_count="$(env_key_count MOMO_INITIAL_OWNER_PASSWORD)"
+  [ "$password_count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_INITIAL_OWNER_PASSWORD 항목은 최대 한 번만 있어야 한다."
+  claim_count="$(env_key_count MOMO_BOOTSTRAP_CLAIM)"
+  [ "$claim_count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_BOOTSTRAP_CLAIM 항목은 최대 한 번만 있어야 한다."
+  if [ "$password_count" -eq 1 ]; then
+    validate_owner_password "$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
+  elif is_claim_bootstrap_env; then
+    # #1790 — password absence is normal in claim mode. Origin refresh and
+    # other existing-env maintenance may proceed. --compose stays closed
+    # (ADR-0166: the launcher still requires the password key).
+    if [ "$REQUESTED_ACTION" = "compose" ]; then
+      fail "${ENV_FILE}은 claim 모드다. --compose는 비밀번호 키를 요구한다(ADR-0166). 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다."
+    fi
+  else
+    fail "${ENV_FILE}의 MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다."
+  fi
   mode_count="$(env_key_count MOMO_SELF_HOST_MODE)"
   [ "$mode_count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_SELF_HOST_MODE 항목은 최대 한 번만 있어야 한다."
@@ -869,7 +972,6 @@ if [ -e "$ENV_FILE" ]; then
   fi
   validate_env_scalar MOMO_RUST_IMAGE "$existing_image"
   validate_owner_email "$existing_email"
-  validate_owner_password "$existing_password"
   existing_web_port="$(normalize_port MOMO_WEB_PORT "$existing_web_port")"
   ensure_operator_allowlist "$existing_email"
   ensure_desktop_cors_allowlist
@@ -878,6 +980,7 @@ if [ -e "$ENV_FILE" ]; then
   ensure_public_origins
   ensure_local_drive_public_base
   warn_if_legacy_localhost_realtime_ws
+  warn_if_legacy_localhost_drive_base
 
   # #1229로 이미 만든 로컬 파일은 mode marker가 없다. 이미지만 보고
   # 가역적으로 승격하되, digest가 없는 ref를 published로 추정하지 않는다.
@@ -976,7 +1079,7 @@ CENTRIFUGO_ORIGINS="http://localhost:$WEB_PORT http://127.0.0.1:$WEB_PORT $SELF_
 CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
 DRIVE_LOCAL_DIR="$SELF_HOST_DRIVE_LOCAL_DIR"
 DRIVE_VOLUME="${PROJECT}-drive"
-DRIVE_LOCAL_BASE="http://localhost:$WEB_PORT"
+DRIVE_LOCAL_BASE="same-origin"
 if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
   DRIVE_LOCAL_BASE="${PUBLIC_ORIGINS[0]}"
 fi
@@ -1084,6 +1187,8 @@ PLATFORM_ADMIN_EMAILS=$OWNER_EMAIL
 # MOMO_ENV=staging 에서 부팅 거부라 쓰지 않는다. 운영 google 경로는 이
 # 파일을 읽지 않는다. 디렉터리는 api 컨테이너 안 경로이고, 호스트 볼륨
 # 이름은 DRIVE_VOLUME_NAME 이다. 백업 때 pg_dump 와 이 볼륨을 같이 가져가라.
+# same-origin: capability URL을 요청 Host/X-Forwarded-Proto에서 파생한다
+# (ADR-0169 증보 1 · 0167 준용). 절대 URL이면 verbatim.
 MOMO_DRIVE_ARCHIVE_BACKEND=local
 MOMO_DRIVE_LOCAL_DIR=$DRIVE_LOCAL_DIR
 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=$DRIVE_LOCAL_BASE

@@ -673,9 +673,10 @@ fn claim_plan_sql() -> String {
               AND h.password_hash IS NOT NULL AND h.password_hash <> '' \
            ) THEN 'password' \
            WHEN EXISTS ( \
-             SELECT 1 FROM owner_claim c \
+             SELECT 1 FROM credential_claim c \
             WHERE c.workspace_id = '{SEEDED_WORKSPACE_ID}' \
               AND c.member_id = '{SEEDED_OWNER_MEMBER_ID}' \
+              AND c.kind = 'owner_bootstrap' \
               AND c.consumed_at IS NULL \
               AND c.expires_at > now() \
            ) THEN 'live' \

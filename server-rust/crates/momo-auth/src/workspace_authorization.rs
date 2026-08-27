@@ -51,6 +51,17 @@ impl WorkspaceRole {
     pub fn is_admin(self) -> bool {
         matches!(self, WorkspaceRole::Owner | WorkspaceRole::Admin)
     }
+
+    /// ADR-0128 D2 for operator password reset. Self is refused by the
+    /// caller; this is only the actor/target ladder. Owner may reset another
+    /// owner (the multi-owner unlock path). Admin may reset member/guest only.
+    pub fn can_issue_password_reset_for(self, target: Self) -> bool {
+        match self {
+            Self::Owner => true,
+            Self::Admin => matches!(target, Self::Member | Self::Guest),
+            Self::Member | Self::Guest => false,
+        }
+    }
 }
 
 /// The active workspace role of a member, or `None` when there is no active
@@ -127,5 +138,25 @@ mod tests {
             assert_eq!(role.as_db_label(), label);
         }
         assert!(WorkspaceRole::from_db_label("platform_admin").is_none());
+    }
+
+    #[test]
+    fn password_reset_ladder_matches_adr_0128_d2() {
+        use WorkspaceRole::{Admin, Guest, Member, Owner};
+        assert!(Owner.can_issue_password_reset_for(Owner));
+        assert!(Owner.can_issue_password_reset_for(Admin));
+        assert!(Owner.can_issue_password_reset_for(Member));
+        assert!(Owner.can_issue_password_reset_for(Guest));
+        assert!(!Admin.can_issue_password_reset_for(Owner));
+        assert!(!Admin.can_issue_password_reset_for(Admin));
+        assert!(Admin.can_issue_password_reset_for(Member));
+        assert!(Admin.can_issue_password_reset_for(Guest));
+        assert!(!Member.can_issue_password_reset_for(Owner));
+        assert!(!Member.can_issue_password_reset_for(Admin));
+        assert!(!Member.can_issue_password_reset_for(Member));
+        assert!(!Member.can_issue_password_reset_for(Guest));
+        assert!(!Guest.can_issue_password_reset_for(Owner));
+        assert!(!Guest.can_issue_password_reset_for(Member));
+        assert!(!Guest.can_issue_password_reset_for(Guest));
     }
 }
