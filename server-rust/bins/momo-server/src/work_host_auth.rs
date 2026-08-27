@@ -19,10 +19,14 @@
 //! [`is_allowed_signed_path`] is what both consult, so a path is signable in one
 //! place or neither. Adding the next route stays a one-line, visible decision.
 //!
-//! The **still-unported five** (each refused by absence, listed so the gap is
-//! named rather than discovered): `GET …/work-hosts/{host}/live-sessions`,
-//! `POST …/work-hosts/{host}/reconcile`, `GET …/work-tool-profiles`,
-//! `POST …/work-sessions`, `PATCH …/work-sessions/{session}`.
+//! The **still-unported two** (each refused by absence): `GET
+//! …/work-hosts/{host}/live-sessions`, `POST …/work-hosts/{host}/reconcile`.
+//! `#1777` ported the session-mutation pair (`POST …/work-sessions`,
+//! `PATCH …/work-sessions/{session}`) and the daemon-boot `GET
+//! …/work-tool-profiles` (enabled projection only — without it `momo-workd`
+//! exits at `transport_failed` before it can create a session). ACP event
+//! ingestion stays refused-by-name on that PATCH (follow-up requested in the
+//! #1777 PR). Observation is #1778.
 //!
 //! ## The check, in Swift's order (`:29-125`)
 //!
@@ -216,6 +220,24 @@ pub(crate) fn is_allowed_signed_path(method: &Method, path: &str) -> bool {
     {
         return true;
     }
+    // `POST …/work-sessions` (#1777) — host-signed create against a dispatched
+    // spawn control. The path names no host; the handler pins `hostId` in the
+    // body to the signer and the control's `target_host_id`.
+    if method == Method::POST && segments.len() == 4 && segments[3] == "work-sessions" {
+        return true;
+    }
+    // `PATCH …/work-sessions/{session}` (#1777) — bindRemotePTY, idle/running,
+    // and host-signed end. Same "path names a session" shape as display-binding:
+    // the pin lives in the handler against the session's `host_id`.
+    if method == Method::PATCH && segments.len() == 5 && segments[3] == "work-sessions" {
+        return true;
+    }
+    // `GET …/work-tool-profiles` (#1777) — the daemon's boot catalog. The path
+    // names no host; the handler serves the enabled projection to any signed
+    // host in the workspace (Swift `WorkToolProfileRoutes.list`).
+    if method == Method::GET && segments.len() == 4 && segments[3] == "work-tool-profiles" {
+        return true;
+    }
     false
 }
 
@@ -360,17 +382,26 @@ mod tests {
     }
 
     #[test]
-    fn exactly_three_paths_are_signable_and_the_method_is_part_of_the_rule() {
+    fn signed_allow_list_covers_the_ported_workd_loop_and_the_method_is_part_of_the_rule() {
         let ws = Uuid::from_u128(1);
         let host = Uuid::from_u128(2);
         let control = Uuid::from_u128(3);
         let validate = format!("/v1/workspaces/{ws}/work-hosts/{host}/terminal-attach/validate");
         let pending = format!("/v1/workspaces/{ws}/work-hosts/{host}/pending-controls");
         let ack = format!("/v1/workspaces/{ws}/work-controls/{control}/ack");
+        let create = format!("/v1/workspaces/{ws}/work-sessions");
+        let patch = format!("/v1/workspaces/{ws}/work-sessions/{host}");
+        let profiles = format!("/v1/workspaces/{ws}/work-tool-profiles");
 
         assert!(is_allowed_signed_path(&Method::POST, &validate));
         assert!(is_allowed_signed_path(&Method::GET, &pending));
         assert!(is_allowed_signed_path(&Method::POST, &ack));
+        assert!(is_allowed_signed_path(&Method::POST, &create));
+        assert!(is_allowed_signed_path(&Method::PATCH, &patch));
+        assert!(is_allowed_signed_path(&Method::GET, &profiles));
+        assert!(!is_allowed_signed_path(&Method::POST, &profiles));
+        assert!(!is_allowed_signed_path(&Method::GET, &create));
+        assert!(!is_allowed_signed_path(&Method::POST, &patch));
 
         // Method is part of the signed payload, and of the allow-list: the same
         // path under the wrong verb is a different request.
@@ -378,9 +409,10 @@ mod tests {
         assert!(!is_allowed_signed_path(&Method::POST, &pending));
         assert!(!is_allowed_signed_path(&Method::GET, &ack));
 
-        // The five Swift allow-lists that still have no handler here must NOT be
-        // signable: an authenticated 404 would be a promise this server cannot
-        // keep.
+        // The two Swift allow-lists that still have no handler here must NOT
+        // be signable: an authenticated 404 would be a promise this server
+        // cannot keep. work-tool-profiles GET landed in #1777 with the session
+        // arms — the daemon cannot boot without it.
         for (method, unported) in [
             (
                 Method::GET,
@@ -389,15 +421,6 @@ mod tests {
             (
                 Method::POST,
                 format!("/v1/workspaces/{ws}/work-hosts/{host}/reconcile"),
-            ),
-            (
-                Method::GET,
-                format!("/v1/workspaces/{ws}/work-tool-profiles"),
-            ),
-            (Method::POST, format!("/v1/workspaces/{ws}/work-sessions")),
-            (
-                Method::PATCH,
-                format!("/v1/workspaces/{ws}/work-sessions/{host}"),
             ),
         ] {
             assert!(
@@ -450,6 +473,18 @@ mod tests {
         // confusion that kept this route unported.
         assert_eq!(
             scoped_host_id_from_path(&format!("/v1/workspaces/{ws}/work-controls/{control}/ack")),
+            None
+        );
+        assert_eq!(
+            scoped_host_id_from_path(&format!("/v1/workspaces/{ws}/work-sessions")),
+            None
+        );
+        assert_eq!(
+            scoped_host_id_from_path(&format!("/v1/workspaces/{ws}/work-sessions/{control}")),
+            None
+        );
+        assert_eq!(
+            scoped_host_id_from_path(&format!("/v1/workspaces/{ws}/work-tool-profiles")),
             None
         );
         // A malformed host segment must NOT read as "no pin".

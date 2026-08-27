@@ -92,13 +92,19 @@ pub async fn claim(
             Box::pin(async move {
                 let mutation = consume_claim_in_tx(conn, workspace_id, &token, &password).await?;
                 if let ClaimMutation::Applied(ref outcome) = mutation {
+                    let (action, schema) =
+                        if outcome.claim_kind == momo_auth::CLAIM_KIND_PASSWORD_RESET {
+                            ("member.password_reset", "momo.member.password_reset.v1")
+                        } else {
+                            ("owner.claim", "momo.owner.claim.v1")
+                        };
                     write_audit(
                         conn,
-                        &AuditEntry::new(workspace_id, "owner.claim")
+                        &AuditEntry::new(workspace_id, action)
                             .by(outcome.member_id)
-                            .target("owner_claim", outcome.claim_id)
+                            .target("credential_claim", outcome.claim_id)
                             .via_token(None)
-                            .with_schema("momo.owner.claim.v1", serde_json::json!({})),
+                            .with_schema(schema, serde_json::json!({})),
                     )
                     .await?;
                 }

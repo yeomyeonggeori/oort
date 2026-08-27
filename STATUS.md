@@ -1,5 +1,77 @@
 # oort 진행 현황
 
+## role_labels 서버 수용 + 멤버 가독 프로젝션 (#1770 engine, 2026-08-27)
+
+- `PATCH /v1/workspaces/{ws}/settings` 가 `role_labels` 를 수용한다. 키 ⊂ `{owner,admin,member,guest}`, 값은 비어 있지 않은 문자열(48 UTF-8 바이트 상한). `null` 은 키 삭제(클라 기본 라벨). 객체는 top-level 병합이라 통째 교체.
+- `GET /v1/workspaces/{ws}` WorkspaceDto 에 `roleLabels` 파생 필드(없으면 `{}`). settings bag 통노출은 그대로 금지. 권한 사다리·RLS·role wire·`schema_v0.sql` 비접촉.
+- PG 컨포먼스 `workspace_settings_conformance_pg` 가 예약→수용 전환, 멤버 identity 왕복, 형태 위반 400, null 복원, 공존 병합, member/guest 403 을 잰다. uxui 절반(설정 UI·클라 오버라이드)은 별 브리프.
+
+## workspace.settings 읽기·쓰기 REST (#1800, 2026-08-27)
+
+- `GET|PATCH /v1/workspaces/{ws}/settings` — operator(owner/admin) 전용. 기존 `GET /v1/workspaces/{ws}` 는 비접촉(전 멤버 표면, bag 통째 노출 금지).
+- PATCH는 최상위 키 RFC 7396 동형 병합. allowlist는 `allowed_agent_models`(문자열 배열, 원소 32·64B 상한)와 `role_labels`(#1770).
+- 요청 본문 8KiB 초과는 413, 그 외 형태/미지 키는 400. audit `workspace_setting.updated`.
+- PG 컨포먼스 `workspace_settings_conformance_pg` 가 권한·RLS·병합·상한·identity 비노출을 잰다.
+
+## 패스워드 초기화 경로 (#1767, 2026-08-27)
+
+- `owner_claim`을 `credential_claim` + `kind`(`owner_bootstrap` | `password_reset`)로 일반화(081). token_hash 32B · TTL 24h · 단일 사용 · definer lookup 관례는 078 승계. `schema_v0.sql` 비접촉.
+- 운영자 발급: `POST …/members/{id}/password-reset` (owner/admin). 재발급은 이전 미소비 reset 을 `consumed_at`으로 무효화. 원문은 201 1회. 메일 없음 — out-of-band 전달.
+- ADR-0128 D2 위계(#1798 수리): `issue_password_reset_in_tx`가 같은 테넌트 트랜잭션에서 행위자·대상 role을 조회한다. owner는 타인(다른 owner 포함)만, admin은 member/guest만. 자기 자신은 403 — 본인 변경은 `PATCH …/members/me/password`.
+- 본인 변경: `PATCH …/members/me/password` — 현재 비번 재확인 · 멤버/IP 레이트리밋. 세션 회전: 해당 멤버의 모든 `kind=session` 토큰을 만료하고 새 쌍을 발급(agent bearer 비접촉).
+- `POST /v1/claim`이 두 kind를 소비. owner_bootstrap 회귀는 기존 경로 그대로.
+- 웹 ClaimPage kind 문구 분기는 후속 UXUI. 발급 응답 `claimPath=/claim/<token>`.
+
+## 역할 표시명 커스텀 UI (#1770 uxui, 2026-08-27)
+
+- GET `/v1/workspaces/{ws}` 의 `roleLabels`를 identity 쿼리에 실어 `roleLabel()`·`inviteRoles()`가 오버라이드 우선, 없으면 기존 한국어 기본 라벨을 쓴다. 에이전트 행은 계속 null. 권한 wire 값은 비접촉.
+- 설정 > 워크스페이스에 4역할 표시명 편집. 빈 칸 저장=해당 키 생략(기본 복원), 저장 payload는 4키 전량 재구성. 48바이트·공백만은 클라 선검증. owner/admin만 편집, member/guest는 읽기 전용(403 의존 없음).
+- 이름만 바뀌고 권한은 그대로임을 설정 화면이 고지. capture `settings-workspace`가 새 블록을 기다린다.
+- R2: 저장 403은 `save.isError && isOperatorDenied` 파생. 멤버 뷰는 KeyValueRows `prose` + capture `settings-workspace-member`.
+
+## 초대 revoke/regenerate/redeem REST 이식 (#1769, 2026-08-27)
+
+- Swift `InviteRoutes` 3경로를 Rust로 포팅: `POST …/revoke`(동일 핸들러 `DELETE …/invites/{id}`), `POST …/regenerate`, `POST …/redeem`. 운영자 상태 조회는 `GET …/invites/{id}`(usedCount + redemption 행).
+- 기존 `003_onboarding.sql` 재사용. revoke는 잔여 사용이 있는 미취소 코드만 새로 찍고, 소진된 코드는 409. regenerate는 구 코드를 즉시 `regenerated`로 무효화. 권한은 `is_admin()` 단일 권위.
+- 새 마이그레이션 없음. `runtime-unverified` 아님 — PG 컨포먼스가 거부/정상 경로를 실측.
+
+## 셀프호스트 첫 기동 갭 2건 (#1747, 2026-08-26)
+
+- `MOMO_HOSTED_DELIVERY_ENABLED`를 api·webhook-sender compose env에 옵트인 배선(`:-`). 도어벨만 켜고 이 선행 게이트가 빠지면 멘션이 hosted inbox로 안 가 조용히 실패한다. 미사용 스택에는 필수가 아니다.
+- ADR-0169 local 보관소 첫 기동: `local.override.yml` `drive-init`이 신선 볼륨을 uid 10001로 chown. 쓰기 실패 fail-fast는 유지.
+
+## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
+
+- `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`이면 업로드 URL을 ADR-0167과 같은 `Host`+`X-Forwarded-Proto`(Caddy 정규화)에서 파생한다. 절대 URL은 verbatim. `MOMO_DRIVE_ARCHIVE_BACKEND` 선택 축은 무영향.
+- 생성기 기본값을 `same-origin`으로 옮김. `--public-origin`은 절대 URL 고정(기존 verbatim 경로).
+
+## claim 모드 env 유지보수 경로 (#1790, 2026-08-26)
+
+- `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 `--public-origin` 유지보수가 비밀번호 검증을 건너뛰고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL`·`CENTRIFUGO_ALLOWED_ORIGINS`를 갱신한다. `--compose`는 ADR-0166대로 비밀번호 키를 계속 요구한다.
+- 비밀번호가 있는 env의 12–128자 dotenv-safe 검증은 그대로다. `docs/SELF_HOST_AGENT.md` §1.4↔§2.3 문면 정합.
+
+## 소유자 관전 차단 토글 (#1778, 2026-08-26)
+
+- 인간 세션 소유자의 `PATCH …/work-sessions/{session}` `{observation: open|owner_only}`를 Swift `updateObservation` 문장 그대로 서빙한다. 비소유자 403, 호스트 서명 403(인간 경로 — #1777 팔 비접촉). `owner_only`는 같은 트랜잭션에서 observer capability를 회수한다.
+- ADR-0004 증보 3 D3 원문 정합: 비관측의 주어는 에이전트, 인간 observer는 기존 `open|owner_only` 모델 그대로. 웹 와이어 `{ observation }` 유지(신규 필드명 없음).
+- 감사 행 `work.session.observation` / `momo.work.session.observation.v1`. 하네스 `verify_workd_rust.sh`가 실 세션에서 차단→attach 403→재개방→attach 200을 잰다.
+
+## host-signed 세션 변이 이식 (#1777, 2026-08-26)
+
+- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778에서 인간-소유자 경로로 닫힘.
+- 데몬 부팅용으로 `GET …/work-tool-profiles`(enabled 투영, CRUD 없음)를 같이 열었다. 없으면 `momo-workd`가 heartbeat 직후 `transport_failed`로 죽어 create에 도달하지 못한다.
+- 세션 생산 레시피: `scripts/verify_workd_rust.sh` + `docs/runbooks/workd-rust-session.md` (맥 로컬 workd ↔ Rust 리그). `remote_attach_available` false→true가 도크 생산자를 연다.
+
+## LiveKit env 게이트 오탐 수리 (#1781, 2026-08-26)
+
+- 판정(실측): 오탐. huddle profile 없이 `docker compose --env-file rust-smoke.env.example -f docker-compose.rust.yml config`는 LiveKit 키 공백·삭제 모두 rc=0. 렌더된 서비스에 livekit 없음. 맨몸 `config` 실패 목록에도 `MOMO_LIVEKIT_*` 0건.
+- 원인: `check_compose_env_templates.sh`가 entrypoint의 `$${VAR:?}`(compose 이스케이프 → 컨테이너 셸 `:?`)를 compose 보간 `${VAR:?}`로 오인. 템플릿 `KEY=` 빈 값 규칙은 진짜 `${VAR:?}`에는 유지.
+- 검증: 수리 전 정적 RED 8 rendering(이슈가 적은 4 + local-edge/backup 4) → 수리 후 compose-env GREEN + regression 12/12. huddle 없는 `up -d`(LiveKit 키 삭제, `-p momo-1781-judge`) api healthy · `/healthz` ok · livekit 컨테이너 0. `--profile huddle` + 키 없음이면 컨테이너가 `set MOMO_LIVEKIT_API_KEY`로 fail-fast.
+
+## #850-잔여 허들 active 응답 드리프트 (2026-08-26)
+
+- `fetchActiveHuddle`이 openapi 생략형(`{}`)과 구형 `huddle: null`을 모두 유휴로 읽는다. 픽스처를 실서버 모양으로 잠금. 리그 실기동은 `runtime-unverified`.
+
 ## TC-1 채널 하단 터미널 도크 (#1758, 2026-08-26)
 
 - 조사: 작업 세션 원장(`GET …/work-sessions`)·이벤트 스레드·observer-grade 호스트 터미널 소켓은 실존. 웹은 `mode: "observer"`만 요청하고 stdin/resize/kill 인코더가 없다. 우측 WorkPanel은 목록·인수·화면 관전/조작·원장. 헤더 SquareTerminal은 이 티켓 전까지 그 패널을 열었다. 즉시 입력 왕복 터미널은 웹에 없다. 새 세션 POST도 웹 클라에 없다.

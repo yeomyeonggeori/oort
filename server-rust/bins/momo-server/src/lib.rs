@@ -39,7 +39,7 @@ pub mod realtime_advert;
 pub mod routes;
 pub mod work_host_auth;
 
-pub use realtime_advert::{RealtimeAdvert, RealtimeAdvertError};
+pub use realtime_advert::{DriveLocalBase, RealtimeAdvert, RealtimeAdvertError};
 
 use std::sync::Arc;
 
@@ -218,6 +218,11 @@ pub struct AppState {
     /// mismatch branch: a test supplies its own archive without a test-only
     /// branch existing anywhere in the handlers.
     pub drive: Arc<dyn momo_drive::DriveArchive>,
+    /// ADR-0169 증보 1 — how local-archive capability URLs are advertised.
+    /// Default is Fixed-empty (no rewrite) so every existing `AppState::new`
+    /// call site keeps today's URL. `with_drive_local_base` opts into
+    /// same-origin derivation; google/stub never select `SameOrigin`.
+    pub drive_local_base: Arc<DriveLocalBase>,
     /// ADR-0122 / HD-1 — complete LiveKit issuer settings, or no huddle
     /// capability. The routes remain mounted in both cases so clients can tell
     /// 503 "not configured" from a server too old to know the path.
@@ -278,6 +283,7 @@ impl AppState {
             ephemeral: Arc::new(EphemeralState::default()),
             webhook: Arc::new(WebhookSettings::default()),
             drive: Arc::new(momo_drive::UnavailableDriveArchive),
+            drive_local_base: Arc::new(DriveLocalBase::Fixed(String::new())),
             livekit: None,
             ephemeral_grant_key: Arc::new(ephemeral_grant_key),
             turn: None,
@@ -303,6 +309,22 @@ impl AppState {
             .map_err(|error| ApiError::internal("realtime.advertise", error))
     }
 
+    /// Local-archive capability URL for this request (ADR-0169 증보 1).
+    ///
+    /// Fixed leaves the archive's boot-time URL alone. SameOrigin rewrites
+    /// through [`DriveLocalBase::apply_to_upload_url`], which is the 0167
+    /// Host / X-Forwarded-Proto pair — not the raw request URI.
+    pub fn advertised_local_upload_url(
+        &self,
+        headers: &HeaderMap,
+        connection_scheme: Option<&str>,
+        upload_url: String,
+    ) -> Result<String, ApiError> {
+        self.drive_local_base
+            .apply_to_upload_url(headers, connection_scheme, &upload_url)
+            .map_err(|error| ApiError::internal("drive.advertise", error))
+    }
+
     /// Attach the oort TURN relay's ephemeral-credential policy (LIVE-5a).
     ///
     /// A builder like every other, and the default it leaves alone is the one
@@ -319,6 +341,12 @@ impl AppState {
     /// configured", not one that quietly stores bytes somewhere nobody chose.
     pub fn with_drive(mut self, archive: Arc<dyn momo_drive::DriveArchive>) -> Self {
         self.drive = archive;
+        self
+    }
+
+    /// Attach the local-archive URL advertisement mode (ADR-0169 증보 1).
+    pub fn with_drive_local_base(mut self, base: DriveLocalBase) -> Self {
+        self.drive_local_base = Arc::new(base);
         self
     }
 
@@ -619,12 +647,30 @@ pub fn build_app(state: AppState) -> Router {
         // B4.1 — the settings panel's first read (workspace name + the rename
         // endpoint's concurrency token).
         .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
+        // #1800 — operator-only bag. Not folded into GET /{ws}: that surface is
+        // every member, and settings may later hold keys not every member may read.
+        .route(
+            "/v1/workspaces/{ws}/settings",
+            get(routes::workspace_settings::get).patch(routes::workspace_settings::patch),
+        )
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused
         // (409) so a workspace is never orphaned.
         .route(
             "/v1/workspaces/{ws}/members/me",
             delete(routes::workspaces::leave),
+        )
+        // #1767 — self password change. Separate path from leave so a PATCH
+        // cannot be read as a lifecycle mutation.
+        .route(
+            "/v1/workspaces/{ws}/members/me/password",
+            patch(routes::password::change_own_password),
+        )
+        // #1767 — operator-issued reset token. Raw token in the 201 once;
+        // operator delivers the /claim/<token> link out of band.
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/password-reset",
+            post(routes::password::issue_password_reset),
         )
         // B4.2 — 설정 표면 (diff matrix D-3). Three authorization tiers sit in
         // this block and the grouping is deliberate:
@@ -688,6 +734,22 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/invites",
             get(routes::invites::list).post(routes::invites::create),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/redeem",
+            post(routes::invites::redeem),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}",
+            get(routes::invites::get_one).delete(routes::invites::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}/revoke",
+            post(routes::invites::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}/regenerate",
+            post(routes::invites::regenerate),
         )
         // B4 — the Centrifugo connection token (Swift mounts it protected too:
         // `AuthRoutes.addProtected`, :46-49).
@@ -814,6 +876,11 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/work-auto-approvals/{tool}",
             put(routes::work_controls::enable_auto_approve)
                 .delete(routes::work_controls::disable_auto_approve),
+        )
+        // #1777: daemon-boot catalog. GET only — Swift CRUD stays unported.
+        .route(
+            "/v1/workspaces/{ws}/work-tool-profiles",
+            get(routes::work_tool_profiles::list),
         )
         // reattach + replay (ADR-0139)
         .route(

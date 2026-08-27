@@ -3,6 +3,7 @@ import {
   openDmErrorMessage,
   roleLabel,
   statusLabel,
+  type RoleLabels,
 } from '@momo/core/features/directory/model';
 import type { RosterMember } from '@momo/core/lib/api';
 import {
@@ -47,6 +48,7 @@ export function MemberProfileSheet({
   onClose,
   onOpenDm,
   onOpenAgent,
+  roleLabels,
 }: {
   member: RosterMember;
   directory: Directory;
@@ -57,13 +59,14 @@ export function MemberProfileSheet({
   onClose: () => void;
   onOpenDm: () => void;
   onOpenAgent?: () => void;
+  roleLabels?: RoleLabels;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const availability = dmAvailability(member, selfMemberId);
   const membershipStatus = statusLabel(member) ?? '활성';
-  const role = roleLabel(member);
+  const role = roleLabel(member, roleLabels);
   const owner = member.ownerHumanId
     ? memberFor(directory, member.ownerHumanId)
     : null;

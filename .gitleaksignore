@@ -202,3 +202,26 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 #   :203 · :204  [curl-auth-user]
 372ea1c33d41a75f69b598e1c1fd85b655c45501:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:203
 372ea1c33d41a75f69b598e1c1fd85b655c45501:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:204
+
+# ── U-7(#1689) 번들 브랜치의 오탐 (8건) ─────────────────────────────
+# `feat/1689-design-md-core-v2-book@272dd4c2` 는 U-7 판정에서 "번들 보존"으로
+# 남긴 브랜치다. 전 히스토리 스캔(--log-opts --all)이 그 트리를 훑으면서
+# `.omd-managed.json` 의 `managedDesignHashes` 를 토큰으로 오탐한다 — 키 이름이
+# "discord"·"sentry" 이고 값이 64자 hex(=SHA-256 자산 해시)라 룰이 걸린다.
+# 값은 해시이지 자격증명이 아니다. 나머지 둘도 같은 번들의 문서·스크립트다.
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/agents/omd-asset-curator.md:generic-api-key:150
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:coinbase-access-token:507
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:discord-api-token:528
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:generic-api-key:690
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:generic-api-key:792
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:generic-api-key:879
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/data/references/.omd-managed.json:sentry-access-token:776
+272dd4c22153dc437c02e02e9ac7f39b5e84648b:.claude/skills/omd-reference-capture/scripts/capture-reference-evidence.mjs:generic-api-key:124194
+
+# ── RA-7 문서 예제 명령 (3건, rebase 후 fingerprint) ────────────────
+# 값이 아니라 문법이다: RFC 6455 표준 예제 키(base64 "the sample nonce")와
+# `curl -u "$TS_APIKEY:"` 셸 변수 참조. 앞서 등록한 fingerprint 는 docs 브랜치
+# 커밋 기준이라 rebase 로 SHA 가 바뀌었다 — 두 벌 다 남긴다.
+83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:191
+83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:192
+83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:generic-api-key:157

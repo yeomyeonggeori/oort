@@ -42,9 +42,10 @@
 //! | [`engine`] | `work_host_engine` per-workspace selection | `Provider/WorkHostEngineStore.swift` |
 //! | [`tier`] | `work_tier_policy` workspace default + member override | `Routes/WorkTierPolicyRoutes.swift` |
 //! | [`quota`] | `quota_snapshot` read side | `Routes/ProviderQuotaSnapshotRoutes.swift:list` |
-//! | [`invite`] | `invite_code` create/list/read | `Routes/InviteRoutes.swift` |
+//! | [`invite`] | `invite_code` create/list/read/revoke/regenerate/redeem | `Routes/InviteRoutes.swift` |
 //! | [`join`] | spending an invite (`POST /v1/join`) | `Routes/JoinRoutes.swift` |
 //! | [`workspace`] | tenant provisioning (`POST /v1/workspaces`) | `Routes/WorkspaceRoutes.create` |
+//! | [`workspace_settings`] | `workspace.settings` bag GET/PATCH (#1800, `role_labels` #1770) | no Swift ancestor |
 //!
 //! **B4.3 adds [`join`], the half that spends what [`invite`] mints.** It is in
 //! this crate and not another because `invite_code` has exactly one owner, and
@@ -64,6 +65,7 @@ pub mod provider;
 pub mod quota;
 pub mod tier;
 pub mod workspace;
+pub mod workspace_settings;
 
 pub use chain::{
     attemptable_hops, cascade_plan, classify_probe_reason, decrypt_chain_entry,
@@ -77,15 +79,18 @@ pub use engine::{
     ALLOWED_ENGINES, DEFAULT_ENGINE,
 };
 pub use invite::{
-    clamp_invite_list_limit, create_invite, list_invites, normalized_invite_role, read_invite,
-    validated_expires_at_ms, validated_max_uses, CreatedInvite, InviteCode, InviteSpecInvalid,
+    clamp_invite_list_limit, create_invite, list_invite_redemptions, list_invites,
+    normalized_invite_role, normalized_revoke_reason, read_invite, redeem_invite_for_member,
+    regenerate_invite, revoke_invite, validated_expires_at_ms, validated_max_uses, CreatedInvite,
+    InviteCode, InviteMutationInvalid, InviteRedeemInvalid, InviteRedemption, InviteSpecInvalid,
+    RedeemedInvite, RevokedInvite,
 };
 pub use join::{
-    fallback_handle, is_handle_banned_in_tx, is_valid_handle, normalized_invite_code,
-    normalized_join_display_name, normalized_join_email, normalized_join_password,
-    normalized_join_time_zone, normalized_requested_handle, redeem_invite_in_tx,
-    resolve_invite_workspace, role_rank, JoinError, JoinOutcome, JoinRejection, JoinRequestValues,
-    JoinSpecInvalid, JoinedMember, JoinedMembership,
+    fallback_handle, is_handle_banned_in_tx, is_identity_banned_in_tx, is_valid_handle,
+    normalized_invite_code, normalized_join_display_name, normalized_join_email,
+    normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
+    redeem_invite_in_tx, resolve_invite_workspace, role_rank, JoinError, JoinOutcome,
+    JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember, JoinedMembership,
 };
 pub use link::{
     decrypt_link, delete_link, read_link, reseal_link_credential, resolve_link, upsert_link,
@@ -110,4 +115,10 @@ pub use workspace::{
     normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
     workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
     WorkspaceProvisionRejected, WorkspaceSpecInvalid,
+};
+pub use workspace_settings::{
+    merge_workspace_settings, project_role_labels, read_workspace_settings,
+    read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
+    ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
+    MAX_ROLE_LABEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES, ROLE_LABEL_KEYS,
 };

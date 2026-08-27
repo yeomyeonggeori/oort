@@ -263,6 +263,29 @@ const REVOKE_PRIVILEGED_SQL: &str = "UPDATE token \
         ) \
     RETURNING id";
 
+/// Revoke every still-live **session** token of one member (access + refresh).
+/// Agent bearers are left alone — password rotation is not a member exile.
+pub async fn revoke_member_session_tokens(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let rows = sqlx::query(
+        "UPDATE token \
+            SET revoked_at = COALESCE(revoked_at, now()) \
+          WHERE workspace_id = $1 \
+            AND actor_member_id = $2 \
+            AND kind = 'session' \
+            AND revoked_at IS NULL \
+        RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_all(&mut *conn)
+    .await?;
+    Ok(rows.len() as u64)
+}
+
 /// Revoke every still-live **session** token of one member that carries an
 /// instance-privileged scope, returning how many rows this call killed. Ports
 /// Swift `TokenStore.revokePrivilegedSessionTokens` (`TokenStore.swift:254-277`).

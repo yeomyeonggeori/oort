@@ -21,7 +21,7 @@
 | `infra/rust/caddy.override.yml` | 같음 | TLS 에지 + **web-init**(SPA를 이미지에서 볼륨으로) |
 | `infra/rust/cent-origin.override.yml` | 같음 | **centrifugo origin 허용목록** — 틀리면 전 클라이언트 403 |
 | `infra/rust/Caddyfile` | 같음 | 경로 분기 + **보안 헤더 5종**(#1213). `caddy.override.yml`이 `./Caddyfile:/etc/caddy/Caddyfile:ro`로 마운트 |
-| `infra/rust/rust-smoke.env.example` | `smoke.secrets.env` | `MOMO_RUST_IMAGE=ghcr.io/…@sha256:<digest>` 포함 — migrate evidence와 최종 기동이 같은 불변 digest를 사용 |
+| `infra/rust/rust-smoke.env.example` | `smoke.secrets.env` | `MOMO_RUST_IMAGE=ghcr.io/…@sha256:<digest>` 포함 — migrate evidence와 최종 기동이 같은 불변 digest를 사용. `MOMO_LIVEKIT_*` 세 줄은 템플릿에 빈 값으로 있고, huddle profile을 고르기 전까지 compose 보간 요구가 아니다(#1781) |
 | `infra/rust/push-relay.env.example` | `push-relay.secrets.env` | APNs `.p8` 호스트 경로 등 |
 | `infra/rust/overlays.env.example` | `overlays.secrets.env` | 오버레이 3개가 요구하는 키 (T3 · origin 목록 · caddy 포트) |
 | `infra/rust/docker-compose.backup.yml` | 같음 | PostgreSQL 18+pgBackRest digest · continuous WAL · encrypted repository · signed migrate evidence |

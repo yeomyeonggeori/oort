@@ -38,7 +38,7 @@
 
 use axum::body::Body;
 use axum::extract::{Path, State};
-use axum::http::{header, StatusCode};
+use axum::http::{header, HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::{Extension, Json};
 use momo_auth::Principal;
@@ -81,6 +81,8 @@ pub async fn avatar_create_upload(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
     Path(workspace): Path<String>,
+    uri: Uri,
+    headers: HeaderMap,
     Json(request): Json<CreateAvatarUploadRequest>,
 ) -> Result<impl IntoResponse, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
@@ -112,6 +114,8 @@ pub async fn avatar_create_upload(
         .create_resumable_upload(workspace_id, &name, &mime, request.size)
         .await
         .map_err(drive_error)?;
+    let upload_url =
+        state.advertised_local_upload_url(&headers, uri.scheme_str(), session.upload_url)?;
 
     let created: DbRejectable<Uuid> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
@@ -137,7 +141,7 @@ pub async fn avatar_create_upload(
         Json(AvatarUploadResponse {
             id: media_id.to_string(),
             status: "pending".to_string(),
-            upload_url: session.upload_url,
+            upload_url,
         }),
     ))
 }

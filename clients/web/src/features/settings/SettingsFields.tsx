@@ -470,10 +470,12 @@ export function SelectField({
  *
  * Both still swallow the click in the handler; a second Enter during a write
  * must not fire a duplicate save, and the guard is the handler's job precisely
- * because native `disabled` is not available (focus). The consumer side of the
- * same discipline: `canSave` must never be computed FROM the in-flight state
- * (`dirty && !save.isPending` smuggles the fold back through the prop);
- * `settingsFieldsBusy.test.ts` scans every call site for that.
+ * because native `disabled` is not available (focus). `type="submit"` so a
+ * field Enter inside a form reaches that same handler (the click+submit pair
+ * is the consumer's re-entry guard, not a second native disable). The consumer
+ * side of the same discipline: `canSave` must never be computed FROM the
+ * in-flight state (`dirty && !save.isPending` smuggles the fold back through
+ * the prop); `settingsFieldsBusy.test.ts` scans every call site for that.
  */
 export function SaveButton({
   label,
@@ -493,7 +495,7 @@ export function SaveButton({
 }) {
   return (
     <Button
-      type="button"
+      type="submit"
       size="sm"
       aria-disabled={!canSave || undefined}
       aria-busy={busy || undefined}

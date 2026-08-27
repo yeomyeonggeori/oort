@@ -81,6 +81,10 @@ cp infra/rust/rust-smoke.env.example infra/rust/rust-smoke.secrets.env
 2026-08-10 실측). 채워 두면 `up -d`의 `migrate` 서비스가 첫 부팅에 로그인을 만든다.
 계약은 §4-2.
 
+LiveKit 세 줄(`MOMO_LIVEKIT_API_KEY` · `MOMO_LIVEKIT_API_SECRET` · `MOMO_LIVEKIT_URL`)은
+템플릿에 빈 값으로 있고, 그대로 둔다. `--profile huddle`을 고르기 전까지 compose
+보간이 이 값을 요구하지 않는다(#1781). 허들을 켤 때는 §4-6.
+
 주의: `MOMO_APP_POSTGRES_PASSWORD` / `RELAY_POSTGRES_PASSWORD` 값은
 `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` 안의 비밀번호와 **같아야** 한다
 (runtime-roles가 전자로 롤 비번을 세팅하고, api/relay가 후자로 접속한다).
@@ -111,6 +115,7 @@ momorustbuild build            # 또는: docker build -f server-rust/Dockerfile 
 
 # (2) 기동 — depends_on이 순서를 강제한다:
 #     postgres(healthy) → runtime-roles(완료) → migrate(완료) → api/relay
+#     huddle profile 없음: LiveKit 키를 채우지 않아도 뜬다(#1781).
 momorustbuild up -d
 
 # (3) 마이그레이션 증거
@@ -250,6 +255,8 @@ momorust logs | grep -Ei 'jwt_hmac|cent_api_key|password|postgres://' && echo "L
 
 `rust-smoke.secrets.env`의 세 값을 채우고 다음처럼 profile을 명시한다. 키와 secret은
 LiveKit service와 API token issuer가 같은 값을 받으며, real secret은 커밋하지 않는다.
+profile을 켠 뒤에도 compose 보간은 `${VAR:-}`라 빈 값으로 `config`는 통과한다. 컨테이너
+entrypoint의 셸 `:?`가 키 없이 livekit을 띄우는 것을 막는다(#1781).
 
 ```sh
 momorust --profile huddle up -d livekit api
@@ -310,6 +317,8 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` | ✅ `webhook` (#1222, 선택) | `MOMO_ENV=local` **이면서** 이 값이 `1` 일 때만 `http://` 목적지를 받는다. 두 조건을 다 요구하므로 staging/prod 에서는 이 플래그가 효력을 가질 수 없다 |
 | `PROVIDER_LINK_MASTER_KEY`·`AGENT_*`·`HERMES_*`·`MEMORY_*`·`MOMO_ARCHIVE_BACKEND`·`MOMO_S3_*`·`MOMO_METRICS_*` | ❌ 미소비 | 해당 기능 배치에서 복귀. **부팅을 막지 않는다** |
 | `MOMO_CORS_ALLOWED_ORIGINS` | ✅ `cors` (DESK-1) | MOMO-605 계약 그대로 포팅. 빈값·미설정=미들웨어 미장착=완전 무변경. 이 줄이 "미소비"였던 동안 패키징된 데스크톱은 로그인이 아예 안 됐다 |
+| `MOMO_HOSTED_DELIVERY_ENABLED` | ✅ `agent_port` (HAP-E6) | 기본 off. 소문자 `true` 만 멘션→hosted inbox. 도어벨 선행 게이트. `${VAR:-}` — 미사용 스택에 필수 아님 |
+| `MOMO_DOORBELL_ENABLED` | ✅ `hosted_agent_doorbell` (ADR-0171) | 기본 off. 소문자 `true` 만 등록 REST. `${VAR:-}` |
 | `MOMO_AGENT_PORT_EXTERNAL_ORIGIN` | ✅ `agent_port` (#1363) | 선택 exact HTTPS origin. no-Origin native/server MCP 호출은 허용하고, Origin이 present하면 이 값과 exact match만 허용한다. Host/Forwarded 계열은 권위가 아니다 |
 | `MOMO_AGENT_PORT_RATE_LIMIT_WINDOW_SECONDS`·`_PER_TOKEN`·`_PER_AGENT`·`_PER_IP` | ✅ `agent_port` (#1363) | join limiter와 분리된 process-local sliding window. 기본 60s / 240 / 480 / 1200, 0=해당 축 비활성. token+agent 두 축은 한 프로세스 안에서 묶음으로 원자 admission하지만 quota-grade 공유 원장은 아니다. 프로세스 재시작은 counter를 초기화하고 replica끼리 상태를 공유하지 않아 N replicas의 실효 상한은 약 N배다. 첫 denial audit도 denied axis별 replica/window당 최대 1행이며 재시작 뒤 다시 기록될 수 있다. IP 축은 위조 가능한 전달 헤더를 신뢰하지 않고 socket peer만 쓰므로 현 Caddy 단일 프록시 배치에서는 방어용 proxy-global bucket이며 사용자별 quota가 아니다. limiter map은 window 내 서로 다른 key 수에 대한 global cap이 없으므로 API 직접 노출·source-IP rotation 환경의 메모리 DoS 방벽이 아니며, 그런 배치는 Caddy/edge의 connection·source cardinality 제한 또는 공유 limiter를 추가해야 한다 |
 
@@ -329,6 +338,7 @@ Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 | `WEBHOOK_DISABLE_AFTER_5XX` | ✅ (기본 5, 최소 1). 연속 목적지 5xx 가 이 수에 닿으면 구독을 자동 비활성하고 `event_subscription.auto_disabled` 감사행을 남긴다 |
 | `MOMO_ENV` / `MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP` / `LOG_LEVEL` | ✅ (api 와 같은 규칙) |
 | `MOMO_UNFURL_ENABLED` | ✅ (기본 0 — 옵트인). `1` 일 때만 링크 언퍼얼 drain 이 OG/Twitter fetch 를 한다 (ADR-0170). 워크스페이스 설정 off 는 fetch 자체를 생략한다 |
+| `MOMO_HOSTED_DELIVERY_ENABLED` | ✅ (기본 off — 옵트인). 소문자 `true` 일 때만 멘션이 hosted inbox 로 라우팅된다. 도어벨의 선행 게이트. `True`/`1`/`yes` 는 닫힘. compose 는 `${VAR:-}` 이라 이 기능을 안 쓰는 스택에는 필수가 아니다 |
 | `MOMO_DOORBELL_ENABLED` | ✅ (기본 off — 옵트인). 소문자 `true` 일 때만 hosted 커넥션 도어벨 등록 REST와 sender drain 이 열린다 (ADR-0171 D6). `True`/`1`/`yes` 는 닫힘 |
 
 migrate/runtime-roles는 prod의 스위치를 그대로 읽는다: `DATABASE_URL`,

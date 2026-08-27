@@ -18,12 +18,13 @@ import {
   errorMessage,
   formatDay,
   INVITE_EXPIRY_DAYS,
-  INVITE_ROLES,
   inviteCardText,
+  inviteRoles,
   inviteStatus,
   isOperatorDenied,
   type InviteCardInput,
 } from "@momo/core/features/settings/model";
+import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   ChoiceRadios,
   CopyButton,
@@ -81,7 +82,7 @@ export function InviteSection({
     retry: false,
   });
   const workspace = useQuery({
-    queryKey: ["settings", "workspace", workspaceId],
+    queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
   });
@@ -131,6 +132,8 @@ export function InviteSection({
     setIssued(null);
     create.mutate();
   }
+
+  const roles = inviteRoles(workspace.data?.roleLabels);
 
   const lines = [
     "초대 링크를 발급해 사람을 이 워크스페이스로 부릅니다.",
@@ -202,7 +205,7 @@ export function InviteSection({
                 </span>
                 <StatusChip tone={status.tone}>{status.label}</StatusChip>
                 <span className="text-meta text-ink-muted">
-                  {choiceLabel(INVITE_ROLES, invite.role)}
+                  {choiceLabel(roles, invite.role)}
                 </span>
                 <span className="text-meta text-ink-muted" data-numeric>
                   {invite.usedCount}/{invite.maxUses}명 사용
@@ -230,7 +233,7 @@ export function InviteSection({
         <ChoiceRadios
           name="invite-role"
           legend="역할"
-          choices={INVITE_ROLES}
+          choices={roles}
           value={role}
           onChange={setRole}
           busy={create.isPending}

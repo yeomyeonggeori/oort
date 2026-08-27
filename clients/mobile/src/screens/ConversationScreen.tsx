@@ -95,6 +95,7 @@ import {
   useChannels,
   useDirectory,
   useReadStates,
+  useRoleLabels,
 } from '../features/workspace/queries';
 import {useNow} from '../lib/useNow';
 import {useRealtime} from '../realtime/RealtimeProvider';
@@ -214,6 +215,7 @@ export default function ConversationScreen({
   const {directory} = useDirectory(workspaceId);
   const {groups} = useChannels(workspaceId);
   const readStates = useReadStates(workspaceId);
+  const roleLabels = useRoleLabels(workspaceId);
   const markRead = useMarkRead();
 
   const timeline = useTimeline(rail, workspaceId, channelId, member.id);
@@ -1308,6 +1310,7 @@ export default function ConversationScreen({
                 }
               : undefined
           }
+          roleLabels={roleLabels}
         />
       ) : null}
     </Screen>

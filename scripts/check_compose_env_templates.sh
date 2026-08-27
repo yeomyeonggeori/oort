@@ -18,12 +18,20 @@
 # `docker compose config` anyway so the static reading cannot drift away from
 # what compose actually does.
 #
-# Two traps worth naming, because both have already cost a red:
+# Three traps worth naming, because each has already cost a red:
 #   * Interpolation happens BEFORE profile filtering. A service behind
 #     `profiles: ["workhost"]` still demands its variables from an operator who
-#     will never select that profile.
+#     will never select that profile — when the requirement is a compose
+#     interpolation (`${VAR:?}`).
 #   * `${VAR:?}` rejects empty as well as unset. A template line ending in `=`
 #     is not a filled key, so this script does not count one.
+#   * `$${VAR:?}` is NOT compose interpolation. Compose turns `$$` into a
+#     literal `$` and hands `${VAR:?}` to the container shell. The huddle
+#     LiveKit entrypoint uses this form so an unselected profile never
+#     demands secrets (#1781). This script must not treat the escaped form
+#     as a template requirement. Empty `KEY=` is then correct for those
+#     keys: they are optional at compose time (`${VAR:-}`) and hard-required
+#     only inside the selected container.
 set -euo pipefail
 
 ROOT=""
@@ -97,9 +105,12 @@ fail() { echo "[compose-env] FAIL: $*" >&2; FAILURES=$((FAILURES + 1)); }
 
 # Variables a compose file demands. Full-line YAML comments are stripped first —
 # infra/rust/docker-compose.push.yml documents the `${VAR:?}` idiom in prose and
-# that sentence is not a requirement.
+# that sentence is not a requirement. `$${VAR:?}` is stripped next: compose
+# does not interpolate it (the first `$` escapes the second), so it is a
+# container-shell check, not an operator-template requirement (#1781).
 required_keys() {
   sed -E 's/^[[:space:]]*#.*$//' "$@" |
+    sed -E 's/\$\$\{/__COMPOSE_ESCAPED_{/g' |
     grep -oE '\$\{[A-Za-z_][A-Za-z0-9_]*:\?' |
     sed -E 's/^\$\{//; s/:\?$//' |
     LC_ALL=C sort -u
@@ -138,7 +149,7 @@ for row in "${RENDERINGS[@]}"; do
     echo "  env template(s): ${env_files[*]}" >&2
     while IFS= read -r key; do
       [ -n "$key" ] || continue
-      where="$(grep -HnE "\\\$\\{$key:\\?" "${compose_files[@]}" 2>/dev/null |
+      where="$(grep -HnE '(^|[^$])\$\{'"$key"':\?' "${compose_files[@]}" 2>/dev/null |
         grep -vE '^[^:]*:[0-9]+:[[:space:]]*#' | head -1 | cut -d: -f1,2)"
       echo "  - $key   required at ${where:-unknown}" >&2
     done <<<"$missing"
