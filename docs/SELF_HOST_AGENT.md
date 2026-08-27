@@ -731,9 +731,13 @@ URL·key 원문을 이 문서처럼 다시 적지 않는다. 등록(§4.3)에 �
 ### 4.2 oort 쪽 — 게이트를 연다
 
 등록 REST와 sender drain 은 `MOMO_DOORBELL_ENABLED` 가 **소문자 `true`**
-일 때만 열린다(ADR-0171 D6). 기본은 off. `True` / `TRUE` / `1` / `yes` /
-`on` 은 닫힘. 시크릿을 다시 만들지 말고 그 한 줄만 넣는다. api 와
-webhook-sender 둘 다 이 변수를 읽는다 — 한쪽만 재시작하면 등록은 되는데
+일 때만 열린다(ADR-0171 D6). 그 **선행 게이트**는
+`MOMO_HOSTED_DELIVERY_ENABLED` 다 — 같은 철자, 기본 off. 도어벨만 켜고
+이 값이 빠지거나 `true`가 아니면 멘션이 hosted inbox로 가지 않아
+(`hosted_delivery_not_enabled` skip) 울릴 대상이 없다. 켠 것처럼 보이는데
+아무 일도 안 일어나는 조용한 실패다. `True` / `TRUE` / `1` / `yes` /
+`on` 은 둘 다 닫힘. 시크릿을 다시 만들지 말고 그 두 줄만 넣는다. api 와
+webhook-sender 둘 다 두 변수를 읽는다 — 한쪽만 재시작하면 등록은 되는데
 발화가 없거나, 그 반대가 된다.
 
 ```sh
@@ -742,15 +746,22 @@ umask 077
 tmp="${ENV_FILE}.doorbell"
 awk '
   index($0, "MOMO_DOORBELL_ENABLED=") == 1 { next }
+  index($0, "MOMO_HOSTED_DELIVERY_ENABLED=") == 1 { next }
   { print }
-  END { print "MOMO_DOORBELL_ENABLED=true" }
+  END {
+    print "MOMO_HOSTED_DELIVERY_ENABLED=true"
+    print "MOMO_DOORBELL_ENABLED=true"
+  }
 ' "$ENV_FILE" >"$tmp"
 mv "$tmp" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 oort_compose up -d
 ```
 
-**게이트:** `oort_compose logs --tail 30 webhook-sender` 에
+**게이트:** `oort_compose exec api env` 와
+`oort_compose exec webhook-sender env` 에 두 줄이 `=true` 로 보인다
+(compose가 값을 전달하지 않으면 호스트 env에만 있고 컨테이너에는 없다).
+`oort_compose logs --tail 30 webhook-sender` 에
 `doorbell drain starting` 이 보인다. `doorbell drain idle
 (MOMO_DOORBELL_ENABLED!=true)` 이면 철자가 틀린 것이다 — 여기서 멈춘다.
 사람 관리자 세션으로 PUT 했는데 **본문 없는 404** 여도 같다(게이트 닫힘과
@@ -949,8 +960,9 @@ scripts/self_host_pg_dump.sh --output-dir /workspace/oort-backups
 - `DOCKER_DEFAULT_PLATFORM=linux/amd64` 전역 pin
 - `down -v` 를 데이터가 있는 볼륨에 실행
 - 도어벨 sender key·doorbell secret 을 회신 본문·이슈·커밋에 반복
-- `MOMO_DOORBELL_ENABLED` 를 `True` / `1` / `yes` 로 열려고 하기 (소문자
-  `true`만)
+- `MOMO_DOORBELL_ENABLED` 나 `MOMO_HOSTED_DELIVERY_ENABLED` 를
+  `True` / `1` / `yes` 로 열려고 하기 (소문자 `true`만). 도어벨만 켜고
+  hosted-delivery 를 빼면 멘션이 inbox 로 가지 않는다.
 
 실기동 E2E(D7)는 이 문서의 게이트가 아니다. 그 수용 런은 자연어 지시
 릴레이로 따로 한다. 여기의 게이트는 그록봇이 다음 층으로 넘어가도
