@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   ApiError,
+  activeHuddleFromWire,
   huddleFromWire,
   type Huddle,
 } from "../../lib/api";
+import { WireShapeError } from "../../lib/wire";
 import { asHuddleLifecycleFrame } from "../../lib/realtimeEvents";
 import {
   huddleErrorCopy,
@@ -85,6 +87,18 @@ describe("huddle wire parsing", () => {
     expect(huddleFromWire(ACTIVE)).toEqual(ACTIVE);
   });
 
+  it("treats an omitted active huddle field as idle, matching openapi", () => {
+    expect(activeHuddleFromWire({})).toBeNull();
+  });
+
+  it("still treats the legacy huddle:null envelope as idle", () => {
+    expect(activeHuddleFromWire({ huddle: null })).toBeNull();
+  });
+
+  it("decodes a present huddle on the active envelope", () => {
+    expect(activeHuddleFromWire({ huddle: ACTIVE })).toEqual(ACTIVE);
+  });
+
   it.each([
     null,
     {},
@@ -93,6 +107,10 @@ describe("huddle wire parsing", () => {
     { ...ACTIVE, startedAtMs: "yesterday" },
   ])("rejects malformed REST shapes: %j", (wire) => {
     expect(() => huddleFromWire(wire)).toThrow();
+  });
+
+  it("still rejects a present but unreadable huddle on the active envelope", () => {
+    expect(() => activeHuddleFromWire({ huddle: {} })).toThrow(WireShapeError);
   });
 
   it("parses all three exact Core event names and rejects type inversions", () => {
@@ -126,6 +144,22 @@ describe("huddle wire parsing", () => {
 });
 
 describe("huddle user states", () => {
+  it("maps an omitted active envelope to ready with no huddle", () => {
+    const huddle = activeHuddleFromWire({});
+    let state = initialHuddleProjection(ACTIVE.channelId);
+    state = reduceHuddleProjection(state, {
+      type: "load-started",
+      requestId: 1,
+    });
+    state = reduceHuddleProjection(state, {
+      type: "load-succeeded",
+      requestId: 1,
+      huddle,
+    });
+    expect(state.status).toBe("ready");
+    expect(state.active).toBeNull();
+  });
+
   it("treats 503 as operator configuration state, not a generic failure", () => {
     expect(huddleErrorKind(new ApiError(503, "허들 미구성"))).toBe(
       "unconfigured"
