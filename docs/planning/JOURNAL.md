@@ -2718,3 +2718,11 @@
 - **uxui 정본 워크트리 잔재 2차**: #1783 역행 staged 상태 발견 → stash 백업("uxui 정본 워크트리 잔재 백업") 후 ff. engine·uxui 정본 워크트리 모두 origin 정렬 유지.
 - **#1770(AC-4) 재발주 — 2단계 편성**: ④-1 engine(`role_labels` 키 수용+형태 검증 48B·4role, WorkspaceDto `roleLabels` 멤버 가독 프로젝션 — allowed_agent_models 선례) → ④-2 uxui(설정 UI·`roleLabel()` 오버라이드·semantics 불변 고지, 독립 design-review). 브리프 `2026-08-27-1770-role-labels-engine-brief.md`. ④-1 워커 발사(base 809a2a47).
 - 회수: 게이트 PG(momo-w1800-settings)·sync 워크트리 4개·워커 워크트리·원격 브랜치 전부 즉시 회수.
+
+## 2026-08-27 (저녁) · Fable · #1770 완주(AC-4 양절반) — 리뷰 3회전 폐곡선 + 정본화 창 2 개시
+- **④-1 engine 랜딩**(PR #1810 → 2e4d628c): `role_labels` 수용(4역할·48B·공백 400·통째 교체·null 삭제) + `WorkspaceDto.roleLabels` 멤버 프로젝션. 재검수 판정: identity GET의 OpenAPI 미성문은 이탈 아님(스펙 헤더의 의도적 미문서 목록 적용). PG 컨포먼스 15/15.
+- **⚠️ 워커 사고 1건**: ④-1 컨포먼스가 라이브 리그 PG(oort-t)에 닿아 역할 비밀번호 리셋 — 워커가 컨테이너 env 기준 복구, 오케스트레이터 실측 리그 전 컨테이너 healthy·DB ok. 잔여=momo_notifier 역할 기본 비번 가능성(소비자 0·로컬 전용, 난수 회전 명령은 분류기 차단으로 성재 이월). **교훈: 이후 engine 브리프에 "라이브 리그 DB 비접촉(게이트 PG만)" 정지 조건 상설.**
+- **④-2 uxui 랜딩**(PR #1811 → 80bdd83d): 설정>워크스페이스 4역할 편집(빈 값=기본 복원·한글 16자 선검증·operator만 편집·비운영자는 KeyValueRows 전 대비 뷰), roleLabel()/inviteRoles() 오버라이드(웹 로스터·멤버 카드·초대·폰 프로필 시트), 권한 불변 고지. vitest 1589. member 캡처 레인 신설.
+- **독립 design-review 3회전**: R1 PASS(B0)나 H1(저장 403 완전 침묵 — 403 문장이 도달 불가 분기)·M2(Enter 저장 사망·읽기 전용 AA 미달)·L3 → 수리(25d2e6b2) → **R2 FAIL(B0·H1)**: 수리가 만든 `denied` useState가 오류 수명주기와 어긋남(403 후 pending 중 거짓 실패 문장·403 뒤 500 침묵 재도입·재승격 잔존 — 전부 런타임 프로브 실증) → 수리(7a9c986a, 파생식 전환 — "옳은 답이 같은 파일에 있었다" 메타패턴 재현) → **R3 PASS(B0·H0)**(3시나리오 코드+테스트+런타임 3중 폐곡선). #1770 close.
+- **인프라 학습**: named 팀메이트 design-review spawn이 좀비화(기존 전례 재현) → TaskStop 후 무명 단발 서브에이전트로 재발사 표준 재확인.
+- **정본화 창 2 개시**: #1812(engine→main, #1810). 이후 uxui sync→#1811 승격→docs 플러시→sync 짝.
