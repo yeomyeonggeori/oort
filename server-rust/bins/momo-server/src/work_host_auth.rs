@@ -24,9 +24,8 @@
 //! `#1777` ported the session-mutation pair (`POST …/work-sessions`,
 //! `PATCH …/work-sessions/{session}`) and the daemon-boot `GET
 //! …/work-tool-profiles` (enabled projection only — without it `momo-workd`
-//! exits at `transport_failed` before it can create a session). ACP event
-//! ingestion stays refused-by-name on that PATCH (follow-up requested in the
-//! #1777 PR). Observation is #1778.
+//! exits at `transport_failed` before it can create a session). `#1785` serves
+//! ACP event ingestion on that same signed PATCH. Observation is #1778.
 //!
 //! ## The check, in Swift's order (`:29-125`)
 //!

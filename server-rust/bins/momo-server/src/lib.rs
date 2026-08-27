@@ -639,6 +639,14 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/channels/{ch}/members/{member}",
             delete(routes::channels::remove_member),
         )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/members/me",
+            delete(routes::member_lifecycle::leave_channel),
+        )
+        .route(
+            "/v1/workspaces/{ws}/channels/{ch}/members/{member}/role",
+            patch(routes::member_lifecycle::change_channel_role),
+        )
         // B4.1 — the roster. Not a feature: without it every message, mention
         // and sidebar row is labelled with a uuid prefix (diff matrix D-1).
         // Swift serves the same handler at both paths (`RosterRoutes.swift:18-19`).
@@ -671,6 +679,32 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/members/{member}/password-reset",
             post(routes::password::issue_password_reset),
+        )
+        // #1768 — ADR-0128 D2/D3. Role/status/ban mutations; leave `/me` stays
+        // the more specific sibling registered above.
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/role",
+            patch(routes::member_lifecycle::change_workspace_role),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/suspend",
+            post(routes::member_lifecycle::suspend),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/reinstate",
+            post(routes::member_lifecycle::reinstate),
+        )
+        .route(
+            "/v1/workspaces/{ws}/members/{member}",
+            delete(routes::member_lifecycle::remove),
+        )
+        .route(
+            "/v1/workspaces/{ws}/bans",
+            get(routes::member_lifecycle::list_bans).post(routes::member_lifecycle::create_ban),
+        )
+        .route(
+            "/v1/workspaces/{ws}/bans/{ban}",
+            delete(routes::member_lifecycle::delete_ban),
         )
         // B4.2 — 설정 표면 (diff matrix D-3). Three authorization tiers sit in
         // this block and the grouping is deliberate:
