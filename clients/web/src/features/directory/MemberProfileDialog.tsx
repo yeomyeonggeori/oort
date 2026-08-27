@@ -6,6 +6,7 @@ import {
   statusLabel,
 } from "@momo/core/features/directory/model";
 import { useSession } from "@/app/session";
+import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -79,14 +80,15 @@ function ReadyProfile({
   directory: Directory;
   close: () => void;
 }) {
-  const { session, connStatus } = useSession();
+  const { session, connStatus, workspaceId } = useSession();
+  const labels = useRoleLabels(workspaceId);
   const { pendingMemberId, error, openDm } = useOpenDm();
   const openAgentProfile = useOpenAgentProfile();
   const owner =
     member.kind === "agent"
       ? memberFor(directory, member.ownerHumanId)
       : null;
-  const role = roleLabel(member);
+  const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";
   const availability = dmAvailability(member, session.member.id);
   const offline = connStatus === "disconnected";

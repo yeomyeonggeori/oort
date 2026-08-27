@@ -9,8 +9,16 @@ import {
   errorMessage,
   formatDay,
   INVITE_ROLES,
+  buildRoleLabelsPayload,
+  draftFromRoleLabels,
   inviteCardText,
+  inviteRoles,
   inviteStatus,
+  isWorkspaceOperator,
+  ROLE_LABEL_MAX_BYTES,
+  roleLabelFieldError,
+  roleLabelsEqual,
+  roleLabelsSaveMessage,
   isOperatorDenied,
   isSlugConflict,
   maskedBearer,
@@ -205,6 +213,84 @@ describe("catalogs match the server enums", () => {
     ]);
     expect(choiceLabel(INVITE_ROLES, "member")).toBe("멤버");
     expect(choiceLabel(INVITE_ROLES, "unknown")).toBe("unknown");
+  });
+
+  it("overrides invite labels without changing role ids or details", () => {
+    const roles = inviteRoles({ admin: "리드", member: "  ", guest: "손님" });
+    expect(roles.map((r) => r.id)).toEqual(["member", "admin", "guest"]);
+    expect(choiceLabel(roles, "member")).toBe("멤버");
+    expect(choiceLabel(roles, "admin")).toBe("리드");
+    expect(choiceLabel(roles, "guest")).toBe("손님");
+    expect(roles.find((r) => r.id === "admin")?.detail).toBe(
+      INVITE_ROLES.find((r) => r.id === "admin")?.detail
+    );
+  });
+
+  it("leaves INVITE_ROLES unchanged when there are no overrides", () => {
+    expect(inviteRoles()).toEqual(INVITE_ROLES);
+    expect(inviteRoles({})).toEqual(INVITE_ROLES);
+  });
+});
+
+describe("role display override draft and payload", () => {
+  it("accepts empty (restore default) and rejects whitespace-only or over-long", () => {
+    expect(roleLabelFieldError("")).toBeNull();
+    expect(roleLabelFieldError("마스터")).toBeNull();
+    expect(roleLabelFieldError("   ")).toContain("공백만");
+    expect(roleLabelFieldError("가".repeat(16))).toBeNull();
+    expect(roleLabelFieldError("가".repeat(17))).toBe(
+      "역할 이름은 한글 기준 16자까지 쓸 수 있습니다."
+    );
+    expect(ROLE_LABEL_MAX_BYTES).toBe(48);
+  });
+
+  it("rebuilds the whole object and sends null when every field is empty", () => {
+    expect(
+      buildRoleLabelsPayload({
+        owner: "마스터",
+        admin: "",
+        member: "  동료  ",
+        guest: "   ",
+      })
+    ).toEqual({ owner: "마스터", member: "동료" });
+    expect(
+      buildRoleLabelsPayload({ owner: "", admin: "  ", member: "", guest: "" })
+    ).toBeNull();
+  });
+
+  it("round-trips stored labels into the four fields", () => {
+    expect(draftFromRoleLabels({ owner: "마스터" })).toEqual({
+      owner: "마스터",
+      admin: "",
+      member: "",
+      guest: "",
+    });
+    expect(draftFromRoleLabels(null)).toEqual({
+      owner: "",
+      admin: "",
+      member: "",
+      guest: "",
+    });
+    expect(roleLabelsEqual({ owner: "마스터" }, { owner: "마스터" })).toBe(true);
+    expect(roleLabelsEqual({ owner: "마스터" }, {})).toBe(false);
+    expect(roleLabelsEqual(null, {})).toBe(true);
+  });
+
+  it("treats owner and admin as operators, not member or guest", () => {
+    expect(isWorkspaceOperator("owner")).toBe(true);
+    expect(isWorkspaceOperator("admin")).toBe(true);
+    expect(isWorkspaceOperator("member")).toBe(false);
+    expect(isWorkspaceOperator("guest")).toBe(false);
+    expect(isWorkspaceOperator(undefined)).toBe(false);
+  });
+
+  it("maps a save failure without leaking the wire 400 sentence", () => {
+    expect(roleLabelsSaveMessage(new ApiError(403, "operator required"))).toContain(
+      "오너나 관리자"
+    );
+    expect(roleLabelsSaveMessage(new ApiError(400, "role_labels value exceeds 48 bytes"))).toBe(
+      "표시명을 저장하지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    );
   });
 });
 

@@ -10,6 +10,7 @@ import {
   memberRowLabel,
   normalizeQuery,
   openDmErrorMessage,
+  parseRoleLabels,
   roleLabel,
   statusLabel,
   switcherPeople,
@@ -89,6 +90,46 @@ describe("roleLabel", () => {
   it("leaves agents unlabelled: the 에이전트 section already says it", () => {
     expect(roleLabel(HERMES)).toBeNull();
     expect(roleLabel(INTERN_AGENT)).toBeNull();
+  });
+
+  it("prefers a workspace override and ignores empty or whitespace values", () => {
+    const labels = { owner: "마스터", admin: " 리드 ", member: "", guest: "   " };
+    expect(roleLabel(DEMO, labels)).toBe("마스터");
+    expect(roleLabel(SEONGJAE, labels)).toBe("리드");
+    expect(roleLabel(INTERN_HUMAN, labels)).toBe("멤버");
+    expect(roleLabel(member({ id: "g", role: "guest" }), labels)).toBe("게스트");
+  });
+
+  it("keeps the Korean default when the workspace has no overrides", () => {
+    expect(roleLabel(DEMO, {})).toBe("소유자");
+    expect(roleLabel(DEMO, undefined)).toBe("소유자");
+    expect(roleLabel(DEMO, null)).toBe("소유자");
+  });
+
+  it("never labels an agent even when a member override is stored", () => {
+    expect(roleLabel(HERMES, { member: "동료" })).toBeNull();
+    expect(roleLabel(INTERN_AGENT, { member: "동료" })).toBeNull();
+  });
+});
+
+describe("parseRoleLabels", () => {
+  it("returns {} when the projection is missing or not an object", () => {
+    expect(parseRoleLabels(undefined)).toEqual({});
+    expect(parseRoleLabels(null)).toEqual({});
+    expect(parseRoleLabels("마스터")).toEqual({});
+    expect(parseRoleLabels(["owner"])).toEqual({});
+  });
+
+  it("keeps known non-empty keys and drops the rest", () => {
+    expect(
+      parseRoleLabels({
+        owner: "마스터",
+        admin: "  ",
+        member: "동료",
+        guest: 1,
+        hermes: "에이전트",
+      })
+    ).toEqual({ owner: "마스터", member: "동료" });
   });
 });
 
@@ -218,6 +259,9 @@ describe("memberRowLabel", () => {
   it("names the human, the handle and the workspace role before the action", () => {
     expect(memberRowLabel(SEONGJAE, null)).toBe(
       "곽성재 @seongjae, 관리자, 다이렉트 메시지 열기"
+    );
+    expect(memberRowLabel(SEONGJAE, null, { admin: "리드" })).toBe(
+      "곽성재 @seongjae, 리드, 다이렉트 메시지 열기"
     );
   });
 

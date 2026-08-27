@@ -9,6 +9,13 @@
 - `POST /v1/claim`이 두 kind를 소비. owner_bootstrap 회귀는 기존 경로 그대로.
 - 웹 ClaimPage kind 문구 분기는 후속 UXUI. 발급 응답 `claimPath=/claim/<token>`.
 
+## 역할 표시명 커스텀 UI (#1770 uxui, 2026-08-27)
+
+- GET `/v1/workspaces/{ws}` 의 `roleLabels`를 identity 쿼리에 실어 `roleLabel()`·`inviteRoles()`가 오버라이드 우선, 없으면 기존 한국어 기본 라벨을 쓴다. 에이전트 행은 계속 null. 권한 wire 값은 비접촉.
+- 설정 > 워크스페이스에 4역할 표시명 편집. 빈 칸 저장=해당 키 생략(기본 복원), 저장 payload는 4키 전량 재구성. 48바이트·공백만은 클라 선검증. owner/admin만 편집, member/guest는 읽기 전용(403 의존 없음).
+- 이름만 바뀌고 권한은 그대로임을 설정 화면이 고지. capture `settings-workspace`가 새 블록을 기다린다.
+- R2: 저장 403은 `save.isError && isOperatorDenied` 파생. 멤버 뷰는 KeyValueRows `prose` + capture `settings-workspace-member`.
+
 ## 초대 revoke/regenerate/redeem REST 이식 (#1769, 2026-08-27)
 
 - Swift `InviteRoutes` 3경로를 Rust로 포팅: `POST …/revoke`(동일 핸들러 `DELETE …/invites/{id}`), `POST …/regenerate`, `POST …/redeem`. 운영자 상태 조회는 `GET …/invites/{id}`(usedCount + redemption 행).

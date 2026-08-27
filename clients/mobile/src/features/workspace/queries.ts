@@ -4,6 +4,8 @@ import {
   listChannels,
   type Channel,
 } from '@momo/core/lib/api';
+import {fetchWorkspace} from '@momo/core/features/settings/api';
+import type {RoleLabels} from '@momo/core/features/directory/model';
 import {
   idKey,
   makeDirectory,
@@ -40,7 +42,18 @@ export const workspaceKeys = {
   roster: (workspaceId: string) => ['roster', workspaceId] as const,
   channels: (workspaceId: string) => ['channels', workspaceId] as const,
   readState: (workspaceId: string) => ['read-state', workspaceId] as const,
+  identity: (workspaceId: string) =>
+    ['settings', 'workspace', workspaceId] as const,
 };
+
+export function useRoleLabels(workspaceId: string): RoleLabels {
+  const query = useQuery({
+    queryKey: workspaceKeys.identity(workspaceId),
+    queryFn: () => fetchWorkspace(workspaceId),
+    retry: false,
+  });
+  return query.data?.roleLabels ?? {};
+}
 
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
