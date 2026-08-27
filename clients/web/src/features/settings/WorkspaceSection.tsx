@@ -384,7 +384,6 @@ function RoleLabelsEditor({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<RoleKey, string>>>(
     {}
   );
-  const [denied, setDenied] = useState(false);
   // SaveButton is type=submit. A click fires onClick then the form submit, so
   // the same handler must no-op the second call in the same tick.
   const saveStarted = useRef(false);
@@ -403,7 +402,6 @@ function RoleLabelsEditor({
     mutationFn: (next: RoleLabels | null) =>
       patchWorkspaceSettings(workspaceId, { role_labels: next }),
     onSuccess: (_result, next) => {
-      setDenied(false);
       saveStarted.current = false;
       const roleLabels = next ?? {};
       client.setQueryData(
@@ -412,11 +410,11 @@ function RoleLabelsEditor({
           current ? { ...current, roleLabels } : current
       );
     },
-    onError: (error) => {
+    onError: () => {
       saveStarted.current = false;
-      if (isOperatorDenied(error)) setDenied(true);
     },
   });
+  const denied = save.isError && isOperatorDenied(save.error);
 
   const handleChange = (key: RoleKey, value: string) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -447,6 +445,7 @@ function RoleLabelsEditor({
     return {
       key: DEFAULT_ROLE_LABELS[key],
       value: override || DEFAULT_ROLE_LABELS[key],
+      prose: true,
     };
   });
 

@@ -152,30 +152,79 @@ function mountSection(options: {
   return host;
 }
 
+async function saveOwnerLabel(host: HTMLElement): Promise<HTMLButtonElement> {
+  const owner = host.querySelector(
+    '[data-testid="role-label-owner"]'
+  ) as HTMLInputElement | null;
+  expect(owner).not.toBeNull();
+  act(() => setInputValue(owner!, "마스터"));
+  const save = host.querySelector(
+    '[data-testid="workspace-role-labels-save"]'
+  ) as HTMLButtonElement | null;
+  expect(save).not.toBeNull();
+  await act(async () => {
+    save?.click();
+  });
+  return save!;
+}
+
+async function waitForSaveSettled(save: HTMLButtonElement) {
+  await vi.waitFor(() => {
+    expect(save.textContent).not.toContain("저장 중");
+  });
+}
+
 describe("RoleLabelsEditor 403 고지", () => {
   it("세션 중 강등된 운영자의 저장 403을 OperatorNotice로 보여 준다", async () => {
     const denied = new ApiError(403, "operator required");
     patchWorkspaceSettings.mockRejectedValue(denied);
     const host = mountSection({ role: "admin" });
-
-    const owner = host.querySelector(
-      '[data-testid="role-label-owner"]'
-    ) as HTMLInputElement | null;
-    expect(owner).not.toBeNull();
-    act(() => setInputValue(owner!, "마스터"));
-
-    const save = host.querySelector(
-      '[data-testid="workspace-role-labels-save"]'
-    ) as HTMLButtonElement | null;
-    expect(save).not.toBeNull();
-    await act(async () => {
-      save?.click();
-    });
+    const save = await saveOwnerLabel(host);
+    await waitForSaveSettled(save);
 
     const notice = host.querySelector('[data-testid="operator-notice"]');
     expect(notice).not.toBeNull();
     expect(notice?.textContent).toContain(roleLabelsSaveMessage(denied));
     expect(host.querySelector('[data-testid="workspace-role-labels-save-error"]')).toBeNull();
+  });
+
+  it("403 뒤 재시도 pending 중에는 실패 고지가 없다", async () => {
+    const denied = new ApiError(403, "operator required");
+    patchWorkspaceSettings
+      .mockRejectedValueOnce(denied)
+      .mockImplementationOnce(() => new Promise(() => undefined));
+    const host = mountSection({ role: "admin" });
+    const save = await saveOwnerLabel(host);
+    await waitForSaveSettled(save);
+    expect(host.querySelector('[data-testid="operator-notice"]')).not.toBeNull();
+
+    await act(async () => {
+      save.click();
+    });
+
+    expect(save.textContent).toContain("저장 중");
+    expect(host.querySelector('[data-testid="operator-notice"]')).toBeNull();
+    expect(host.querySelector('[data-testid="workspace-role-labels-save-error"]')).toBeNull();
+  });
+
+  it("403 뒤 500은 danger 인라인으로 보여 준다", async () => {
+    const denied = new ApiError(403, "operator required");
+    const serverError = new ApiError(500, "boom");
+    patchWorkspaceSettings
+      .mockRejectedValueOnce(denied)
+      .mockRejectedValueOnce(serverError);
+    const host = mountSection({ role: "admin" });
+    const save = await saveOwnerLabel(host);
+    await waitForSaveSettled(save);
+    await act(async () => {
+      save.click();
+    });
+    await waitForSaveSettled(save);
+
+    expect(host.querySelector('[data-testid="operator-notice"]')).toBeNull();
+    const inline = host.querySelector('[data-testid="workspace-role-labels-save-error"]');
+    expect(inline).not.toBeNull();
+    expect(inline?.textContent).toContain(roleLabelsSaveMessage(serverError));
   });
 });
 

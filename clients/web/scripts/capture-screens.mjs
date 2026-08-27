@@ -5535,6 +5535,42 @@ async function captureScheme(browser, scheme) {
   await nonAdmin.screenshot({ path: nonAdminShot });
   shots.push(nonAdminShot);
 
+  // 3a-6. 설정 > 워크스페이스, 멤버가 보는 역할 표시명 (#1770 R2 L-R2-1).
+  //       스윕 로그인 픽스처는 owner라 settings-workspace는 편집 폼만 남는다.
+  //       위 3a-5와 같은 roster remap으로 KeyValueRows 멤버 뷰를 찍는다.
+  //       403 저장 고지는 찍지 않는다: 워크스페이스 픽스처가 PATCH를 성공으로
+  //       답하고, 성공 경로를 꺾어 403을 만드는 것은 억지 모킹이다. 그 문장은
+  //       WorkspaceSection.test.tsx가 계약으로 붙잡는다.
+  const memberSettings = await context.newPage();
+  await memberSettings.route("**/v1/workspaces/*/roster", (route) =>
+    json(route, {
+      members: ROSTER.map((m) =>
+        m.id === ME ? { ...m, role: "member" } : m
+      ),
+    })
+  );
+  await memberSettings.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(memberSettings);
+  await memberSettings.evaluate('location.hash = "/settings?section=workspace"');
+  await memberSettings.getByTestId("settings-route").waitFor({ state: "visible" });
+  await memberSettings
+    .getByRole("heading", { name: "워크스페이스", exact: true })
+    .first()
+    .waitFor({ state: "visible" });
+  await memberSettings
+    .getByTestId("workspace-role-labels")
+    .waitFor({ state: "visible" });
+  const memberForm = await memberSettings.locator("#role-label-owner").count();
+  if (memberForm > 0) {
+    throw new Error(
+      `[설정 워크스페이스 멤버 ${scheme}] owner 폼이 그려졌다 — 롤 픽스처 누락`
+    );
+  }
+  await memberSettings.waitForTimeout(250);
+  const memberSettingsShot = `${OUT_DIR}/settings-workspace-member-${scheme}.png`;
+  await memberSettings.screenshot({ path: memberSettingsShot });
+  shots.push(memberSettingsShot);
+
   // 3b. 멤버 디렉터리 (MOMO-611): the roster as a list, the role labels, the
   //     human/agent split, and the row that opens the shared profile card.
   const directory = await context.newPage();
