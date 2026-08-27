@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 허들 TURN 광고 포트 리라이트 (#1825, 2026-08-28)
+
+- Funnel 셀프호스트에서 LiveKit v1.13.3 `external_tls`가 광고하는 `turns:<시그널호스트>:443`만 8443으로 바꾼다. username/credential/transport 불변. Cloud(`*.turn.livekit.cloud`)·stun·직결 candidate는 host/scheme 불일치로 미발동.
+- 주입은 livekit-client `rtcConfig.iceServers`가 JoinResponse credential을 덮어써서 불가 → connect 구간의 스코프된 `RTCPeerConnection` 셰임. 실브라우저 2대 왕복은 오케스트레이터 이월(`runtime-unverified`).
+
 ## 멤버 라이프사이클 10경로 Rust 이식 (#1768, 2026-08-27)
 
 - Swift `MemberLifecycleRoutes`의 경로·페이로드·에러 문장·권한 판정을 보존해 Rust로 이식. 마이그레이션 신설 없음 · `schema_v0.sql` 비접촉 · 026 원장 재사용.
