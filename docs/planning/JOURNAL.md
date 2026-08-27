@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-27 (오후2) · Fable · ★DNS 급소 종료 + #1798 랜딩 → 정리·중단 (성재 "정리하고 중단")
+- **DNS 종료**: `app.oor7.com` A(101.79.11.189) 성재 삭제, 권위 NS(가비아)에서 소거 확인(삭제 45초 후 응답 중단, 8.8.8.8·1.1.1.1·ns.gabia 교차). 첫 확인 때 남아 있던 건 반영 지연이었음. 진단 삽화: 성재가 처음 연 가비아 존은 apex→216.150.1.1(Vercel)·www→vercel-dns인 **다른 도메인** — oor7.com은 apex·www 공백에 app만 매달려 3리졸버로 확정. **레포 밖 표면 노출 0.**
+- **#1798 랜딩**: PR #1798 → track/engine **094cdc87**, #1767 close. 패스워드 리셋 위계(ADR-0128 D2) 구멍 종료. cursor grok 4.6 워커 수리(d8d68b89): `can_issue_password_reset_for` 사다리+self 진입즉시 Forbidden, 행위자·대상 role 둘 다 같은 테넌트 트랜잭션 조회(라우트 require_admin 비단독). **워커 RED proof 정석**: 매트릭스 20칸 중 4칸(admin→owner 계열) 201→403, conformance 25 passed. Fable 재검수+CI 그린(fail=0) 확인 후 머지. 브리프의 매트릭스 표·정지 조건 절 상설 템플릿 첫 실전 완주.
+- **회수**: w1747·w1769·w1770·wfix·w1767 5기 reap(디스크 111Gi). `momo-worktree-reclaim.sh` infra 비-git 디렉터리 pipefail 결함 수리. 성재 위생 대상: `momo-worktrees/infra/rust/local.secrets.env`(리그 산물 추정 시크릿, 보존).
+- **정리·중단**: 재개 진입점 `handoffs/2026-08-27-fable-resume-checkpoint.md`. 다음 순서 ③#1800→④#1770→⑤(#1792 P2폴백∥#1785∥#1797)→⑥#1768(위계 헬퍼 패턴 승계). 실행 결재 전부 소진, 방향 기승인 — 다음 세션 ③부터 자율.
+
 ## 2026-08-27 · Fable · ★성재 결재 5건 전부 판정 — #1799 랜딩·#1798 수리 워커 가동·#1803 완료
 - **결재 반영**(정본 `handoffs/2026-08-27-post-audit-execution-plan.md` §1.1): ①DNS=성재 직접(가비아, **유일 잔여** — dig 실측 101.79.11.189 여전히 응답) ②#1798 계약 승인+검수·머지 위임 ③허들 폴백=**P2 운영자 TURN**(P3 유료 배제, #1792 코멘트) ④#1768=순서 ⑥ 유지 ⑤#1803=Fable 검증 위임.
 - **#1799 랜딩**: track/engine **89298a2f**, #1769 close. 머지 전 같은 계열 위계 재점검 통과 — owner 초대 불가가 API 400+DB 제약(`invite_code_role_ck`) 이중 방어, admin의 revoke/regenerate는 신규 발급 경로라 탈취 계열 아님.
