@@ -478,17 +478,29 @@ function huddleResponse(value: unknown): Huddle {
   return huddleFromWire(source.huddle);
 }
 
+/**
+ * GET …/huddles/active envelope. OpenAPI omits `huddle` when idle
+ * ("otherwise the optional field is omitted"); older clients sent
+ * `huddle: null`. Both mean no active huddle. A present field still
+ * has to be a huddle DTO.
+ */
+export function activeHuddleFromWire(value: unknown): Huddle | null {
+  const source = responseRecord(value);
+  if (source.huddle == null) return null;
+  return huddleFromWire(source.huddle);
+}
+
 export async function fetchActiveHuddle(
   workspaceId: string,
   channelId: string
 ): Promise<Huddle | null> {
-  const source = await request<Record<string, unknown>>(
-    `/v1/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/channels/${encodeURIComponent(channelId)}/huddles/active`
+  return activeHuddleFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/channels/${encodeURIComponent(channelId)}/huddles/active`
+    )
   );
-  if (source.huddle === null) return null;
-  return huddleFromWire(source.huddle);
 }
 
 export async function startHuddle(
