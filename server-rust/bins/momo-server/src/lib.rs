@@ -729,6 +729,22 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/invites",
             get(routes::invites::list).post(routes::invites::create),
         )
+        .route(
+            "/v1/workspaces/{ws}/invites/redeem",
+            post(routes::invites::redeem),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}",
+            get(routes::invites::get_one).delete(routes::invites::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}/revoke",
+            post(routes::invites::revoke),
+        )
+        .route(
+            "/v1/workspaces/{ws}/invites/{invite}/regenerate",
+            post(routes::invites::regenerate),
+        )
         // B4 — the Centrifugo connection token (Swift mounts it protected too:
         // `AuthRoutes.addProtected`, :46-49).
         .route(

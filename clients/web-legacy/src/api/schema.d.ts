@@ -101,6 +101,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/invites": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List invite codes for a workspace (owner/admin).
+         * @description Newest-first. Projects a 6-character preview only — the raw code is never stored and is not returned here. `include_revoked=true` (or `includeRevoked=true`) includes revoked rows. `limit` clamps to 1..200 (default 50).
+         */
+        get: operations["listWorkspaceInvites"];
+        put?: never;
+        /**
+         * Create an invite code (owner/admin).
+         * @description The raw code is returned exactly once in this 201 body. The durable record is `sha256(raw)`. Examples and samples must never carry a live code.
+         */
+        post: operations["createWorkspaceInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/invites/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Redeem an invite code as an existing workspace member.
+         * @description Swift `InviteRoutes.redeem`. Distinct from public `POST /v1/join`. Does not create a member. The request carries the raw code; the response never echoes it.
+         */
+        post: operations["redeemWorkspaceInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/invites/{inviteId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read one invite and its redemptions (owner/admin).
+         * @description Redeem-status lookup. Returns usedCount / revokedAt plus the redemption audit rows. No raw code.
+         */
+        get: operations["getWorkspaceInvite"];
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an unused invite (owner/admin).
+         * @description Same handler as `POST …/revoke`. Exhausted codes (`usedCount >= maxUses`) are 409. Already-revoked is idempotent 200 without a second audit row. Optional JSON body `{reason}` is accepted; an empty body is a revoke with no reason.
+         */
+        delete: operations["deleteWorkspaceInvite"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/invites/{inviteId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke an unused invite (Swift path).
+         * @description Swift `POST …/revoke`. Same contract as `DELETE …/invites/{inviteId}`.
+         */
+        post: operations["revokeWorkspaceInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/invites/{inviteId}/regenerate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke the old code and mint a replacement (owner/admin).
+         * @description Copies role, maxUses, and metadata. Expiry resets to seven days. The previous code is immediately invalid. The new raw code is returned once; examples and samples must never carry a live code.
+         */
+        post: operations["regenerateWorkspaceInvite"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/claim": {
         parameters: {
             query?: never;
@@ -2829,6 +2937,46 @@ export interface components {
             /** Format: int64 */
             updatedAtMs: number;
         };
+        CreateInviteRequest: {
+            role?: components["schemas"]["MembershipRole"];
+            maxUses?: number;
+            /** Format: int64 */
+            expiresAtMs?: number;
+        };
+        CreateInviteResponse: {
+            invite: components["schemas"]["InviteCode"];
+            /** @description One-time raw invite code. Shown once at creation/regenerate. Never store this in examples, samples, or logs. */
+            code: string;
+        };
+        InviteListResponse: {
+            invites: components["schemas"]["InviteCode"][];
+        };
+        RevokeInviteRequest: {
+            reason?: string;
+        };
+        RedeemInviteRequest: {
+            /** @description Raw invite code supplied by the caller. Not echoed. */
+            code: string;
+            email?: string;
+        };
+        RedeemInviteResponse: {
+            invite: components["schemas"]["InviteCode"];
+            /** Format: uuid */
+            redemptionId: string;
+        };
+        InviteRedemption: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            memberId: string;
+            email?: string;
+            /** Format: int64 */
+            redeemedAtMs: number;
+        };
+        InviteStatusResponse: {
+            invite: components["schemas"]["InviteCode"];
+            redemptions: components["schemas"]["InviteRedemption"][];
+        };
         JoinResponse: {
             accessToken: string;
             refreshToken: string;
@@ -5318,6 +5466,8 @@ export interface components {
     parameters: {
         /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
         WorkspaceId: string;
+        /** @description Invite-code row UUID. Never a raw invite code. */
+        InviteId: string;
         /** @description Channel UUID. */
         ChannelId: string;
         /** @description Huddle UUID; also used as the LiveKit room name. */
@@ -5602,6 +5752,338 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    listWorkspaceInvites: {
+        parameters: {
+            query?: {
+                /** @description Literal `true` includes revoked rows. Camel alias `includeRevoked`. */
+                include_revoked?: string;
+                includeRevoked?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invite metadata list (no raw codes). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteListResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    createWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Created invite plus the one-time raw code. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateInviteResponse"];
+                };
+            };
+            /** @description Role, maxUses, or expiresAtMs rejected. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    redeemWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RedeemInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Invite metadata after the increment, plus redemption id. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RedeemInviteResponse"];
+                };
+            };
+            /** @description Code is invalid, expired, exhausted, revoked, or already redeemed. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Not a workspace member, or banned. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    getWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Invite-code row UUID. Never a raw invite code. */
+                inviteId: components["parameters"]["InviteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Invite metadata and redemption rows. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    deleteWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Invite-code row UUID. Never a raw invite code. */
+                inviteId: components["parameters"]["InviteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokeInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Current invite metadata after revoke. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteCode"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite is already consumed (no remaining uses). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    revokeWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Invite-code row UUID. Never a raw invite code. */
+                inviteId: components["parameters"]["InviteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["RevokeInviteRequest"];
+            };
+        };
+        responses: {
+            /** @description Current invite metadata after revoke. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteCode"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite not found in this workspace. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite is already consumed (no remaining uses). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    regenerateWorkspaceInvite: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                /** @description Invite-code row UUID. Never a raw invite code. */
+                inviteId: components["parameters"]["InviteId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Replacement invite plus the one-time raw code. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateInviteResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a workspace owner/admin. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Invite not found or already revoked. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     publicClaim: {
