@@ -10,8 +10,10 @@
 | 0 | VM oort 도달성 | ✅ | `GET /healthz` 200, `database: ok` (외부 망, 1.77s) — 8/26 "D8 응답 없음"은 해소 |
 | 1 | Funnel 8443 수락 | ✅ | 그록봇 관측(릴레이 1): `<host>:8443 → tcp://127.0.0.1:8443` 매핑 실존(HTTP Funnel `/`→8088 별도 유지). 로컬 8443 리스너 = **예전 TLS 프로브 파이썬 더미**(내 2단계 악수를 받아준 정체) — 백엔드만 더미→LiveKit 교체하면 됨 |
 | 2 | **외부 망 TLS 악수 (급소)** | ✅ **PASS** | `openssl s_client -connect <host>:8443 -servername <host>` → `subject=CN=<host>` · `issuer=Let's Encrypt YE2` · `TLSv1.3, Cipher TLS_AES_128_GCM_SHA256` · `Verify return code: 0 (ok)` (2026-08-27, 로컬 맥 외부 망) |
-| 3 | livekit.yaml turn + JoinResponse `turns:` 광고 | ⏳ | 릴레이 1 (VM 내부) |
-| 4 | 외부 브라우저 candidate pair=relay/tls | ⏳ | Fable 브라우저 자동화 (릴레이 1 완료 후) |
+| 3a | VM 배선 완료 | ✅ | 릴레이 2(그록봇): 더미 철거·turn 활성(`portTLS: 8443, externalTLS: true` 로그 실측)·livekit 127.0.0.1:8443/7880 바인드·**시그널=Funnel :10000**(Caddy /livekit 불가 — 컨테이너가 호스트 Caddyfile 미가독+7880 루프백 한정) · `MOMO_LIVEKIT_URL=wss://<host>:10000` · livekit healthy · curl 7880→200 |
+| 3b | 시그널 외부 도달 + CSP | ✅ | 외부 curl :10000 → 200 "OK". CSP가 :10000 차단(connect-src에 부재) 실측 → **Fable 자율 릴레이 3**(Grok Bot 데스크탑 앱 직접 제어 — 성재 지시 2026-08-27)로 그록봇이 connect-src에 해당 오리진 1개만 추가·리로드 → 외부 재검증: 헤더에 `wss://<host>:10000` 실림(와일드카드 0) |
+| 3c | JoinResponse `turns:` 광고 | ⏳ | 브라우저 join 필요(아래 4와 동일 전제) |
+| 4 | 외부 브라우저 candidate pair=relay/tls | ⏳ | **전제: VM oort 로그인 세션** — Fable은 자격 입력 불가(하드 룰), 성재 1회 로그인 후 Fable 자동화 |
 | 5 | 서로 다른 망 2대 오디오 왕복 | ⏳ | Fable 맥 + 성재 폰 LTE |
 | 6 | 60분 soak (1001 드롭 재현 여부) | ⏳ | Fable 관측 루프 |
 | 7 | 3·5인 대역폭 | ⏳ | 5 성립 후 |

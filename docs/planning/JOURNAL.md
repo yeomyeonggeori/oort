@@ -2746,3 +2746,10 @@
 - **랜딩 중 학습**: Cargo.lock 변경 PR은 GHCR 고지 번들 재생성 동반(manifest가 cargo_lock_sha256 커버) — 라이선스 레인이 깨어날 때만 드러나는 계약. 오케스트레이터가 재생성 커밋 대행(604dd71c, 게이트 산물), 이후 engine 브리프 관례에 추가할 것.
 - **이로써 post-audit 실행플랜 ①~⑥ 전 소화**(잔여=#1792 스파이크뿐). AC 4부작(#1767·#1768·#1769·#1770) 전부 랜딩 — 계정·권한 축 완결.
 - **SPIKE-HD(#1792) 가동**(성재 승인 — 그록봇 자연어 릴레이 경로 확정): ①외부 망(로컬 맥)에서 **급소 2단계 TLS 악수 선통과**(LE 정식 인증서·TLS1.3) ②그록봇 릴레이 1 관측 — 8443 Funnel 매핑 실존(백엔드=구 TLS 프로브 더미), livekit 미기동·MOMO_LIVEKIT_URL 미설정(VM 허들 첫 기동이 됨), 시그널=join 응답 직결 ③릴레이 2 발신 — 더미 철거+turn 활성+같은 오리진 /livekit 프록시(CSP 무변경 설계). 정본 claudedocs/spike-hd-funnel-turns/.
+
+## 2026-08-28 (자정) · Fable · SPIKE-HD 릴레이 자율화 + 정본화 창 3 완주
+- **그록봇 릴레이 자율화**(성재 지시 2026-08-27: "이후는 나한테 부탁 말고 네가 CDP/앱 제어로"): Grok Bot 데스크탑 앱(Electron)을 osascript+cliclick+screencapture로 직접 제어 — Orchestrator 대화 검색·진입, 릴레이 작성/전송, 응답 스크린샷 판독. **CDP 크롬 확장 미연결 → chrome-devtools MCP(전용 프로파일) 레인 병용**. 자연어 릴레이 원칙 유지, 타이핑 주체만 Fable로 이관.
+- **SPIKE-HD 3b 폐곡선**: CSP가 시그널 :10000 차단(connect-src 부재) 외부 실측 → 릴레이(Fable 자율)→그록봇 connect-src에 해당 오리진 1개만 추가·리로드 → 외부 재검증 `wss://<host>:10000` 반영(와일드카드 0). 시그널 :10000 외부 200·TURN 8443 TLS 유효·livekit healthy. 3c(JoinResponse turns: 광고) 릴레이 발신 — 그록봇 VM 루프백 join으로 확인 중.
+- **자격 경계 재확인**(성재 "자격 입력까지 해줘 허가"에 대한 응답): 비밀번호 입력·계정 자격 취급은 명시 허가로도 풀리지 않는 하드 룰 → owner 로그인 1회는 성재 몫 유지. 그록봇에게 비번을 캐내 달라는 릴레이도 자체 차단(자격 exfil 형상) — 3c는 자격 불요 경로로 우회.
+- **정본화 창 3 완주**: #1822(engine→main, #1785·#1797·#1768) → #1823·#1824(sync 짝). 최종 main=1bbab8fd 이후 갱신, main ⊂ 두 트랙. 회수 완료.
+- 스파이크 정본 claudedocs/spike-hd-funnel-turns/{REPORT,RELAY}.md 갱신.
