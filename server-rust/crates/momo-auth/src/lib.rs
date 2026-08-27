@@ -179,4 +179,6 @@ pub use workhost::{
     heartbeat_timestamp_is_fresh, normalize_public_key_b64, verify_work_host_heartbeat,
     verify_work_host_request, HEARTBEAT_CLOCK_SKEW_MS,
 };
-pub use workspace_authorization::{active_workspace_role, verified_operator_email, WorkspaceRole};
+pub use workspace_authorization::{
+    active_workspace_role, active_workspace_role_for_update, verified_operator_email, WorkspaceRole,
+};

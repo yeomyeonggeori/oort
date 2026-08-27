@@ -2017,6 +2017,72 @@ pub struct MembershipLifecycleResponse {
     pub status: String,
 }
 
+/// `PATCH …/members/{id}/role` and the channel sibling (#1768).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ChangeMembershipRoleRequest {
+    pub role: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MembershipRoleResponse {
+    pub member_id: String,
+    pub scope: String,
+    pub role: String,
+}
+
+/// `DELETE …/members/{id}` — body is optional (Swift `try? decode`).
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RemoveWorkspaceMemberRequest {
+    #[serde(default)]
+    pub ban: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateWorkspaceBanRequest {
+    pub email: Option<String>,
+    pub handle: Option<String>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBanDto {
+    pub id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub handle: Option<String>,
+    pub created_by: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub created_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBanResponse {
+    pub ban: WorkspaceBanDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceBanListResponse {
+    pub bans: Vec<WorkspaceBanDto>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChannelLeaveResponse {
+    pub channel_id: String,
+    pub member_id: String,
+    pub archived: bool,
+}
+
 // ---------------------------------------------------------------------------
 // workspace avatar media (ADR-0161 D5). The attachment DTOs re-aimed at a
 // workspace: same upload/complete shape, no channel/message binding.
