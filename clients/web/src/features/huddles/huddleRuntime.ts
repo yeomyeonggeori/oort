@@ -18,6 +18,7 @@ import {
   type RemoteTrack,
 } from "livekit-client";
 import { cspBlockedHost } from "@/features/work/observerStream";
+import { installHuddleTurnRewriteShim } from "./huddleTurnRewrite";
 
 class HuddleCspBlockedError extends Error {
   override name = "HuddleCspBlockedError";
@@ -90,6 +91,13 @@ export async function connectHuddleAudio(
       rejectPolicy?.(new HuddleCspBlockedError());
     };
     document.addEventListener("securitypolicyviolation", onViolation);
+    // JoinResponse iceServers carry the TURN credential. rtcConfig cannot
+    // rewrite them without dropping that credential (livekit-client keeps
+    // server iceServers only when rtcConfig.iceServers is unset), so the
+    // PeerConnection constructor is shimmed for this connect only.
+    const restoreTurnRewrite = installHuddleTurnRewriteShim(
+      options.livekitUrl
+    );
     try {
       await Promise.race([
         room.connect(options.livekitUrl, options.token, {
@@ -98,6 +106,7 @@ export async function connectHuddleAudio(
         policyRefusal,
       ]);
     } finally {
+      restoreTurnRewrite();
       document.removeEventListener("securitypolicyviolation", onViolation);
     }
     try {
