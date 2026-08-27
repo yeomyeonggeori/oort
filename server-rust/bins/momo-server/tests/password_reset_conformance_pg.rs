@@ -1,9 +1,11 @@
 //! #1767 — operator-issued password reset + self password change, against PG.
 //!
 //! Red: expired · reuse · cross-workspace token · current-password mismatch ·
-//! RLS isolation · reissue invalidates the previous live token.
+//! RLS isolation · reissue invalidates the previous live token · ADR-0128 D2
+//! hierarchy (admin→owner must not 201).
 //! Green: reset consume + login · owner_bootstrap still works on the same
-//! table · self password change rotates every session.
+//! table · self password change rotates every session · owner may reset any
+//! other human; admin may reset member/guest only; self is always 403.
 //!
 //! `#[ignore]` — needs a real Postgres. Run via `scripts/verify_owner_claim.sh`.
 
@@ -26,7 +28,13 @@ use uuid::Uuid;
 
 const TEST_JWT_SECRET: &str = "password-reset-conformance-secret";
 const OWNER_PASSWORD: &str = "owner-conformance-password";
+const OWNER_B_PASSWORD: &str = "owner-b-conformance-password";
+const ADMIN_PASSWORD: &str = "admin-conformance-password";
+const ADMIN_B_PASSWORD: &str = "admin-b-conformance-password";
 const MEMBER_PASSWORD: &str = "member-conformance-password";
+const MEMBER_B_PASSWORD: &str = "member-b-conformance-password";
+const GUEST_PASSWORD: &str = "guest-conformance-password";
+const GUEST_B_PASSWORD: &str = "guest-b-conformance-password";
 const RESET_PASSWORD: &str = "reset-conformance-password";
 const CHANGED_PASSWORD: &str = "changed-conformance-password";
 
@@ -191,6 +199,109 @@ async fn seed_human(
         email,
         password: password.to_string(),
     }
+}
+
+struct MatrixTenant {
+    workspace: Uuid,
+    owner: Person,
+    owner_other: Person,
+    admin: Person,
+    admin_other: Person,
+    member: Person,
+    member_other: Person,
+    guest: Person,
+    guest_other: Person,
+}
+
+async fn seed_matrix_tenant(su: &PgPool, slug_hint: &str) -> MatrixTenant {
+    let workspace = Uuid::new_v4();
+    sqlx::query("INSERT INTO workspace (id, slug, name) VALUES ($1, $2, $2)")
+        .bind(workspace)
+        .bind(format!("{slug_hint}-{workspace}"))
+        .execute(su)
+        .await
+        .expect("seed workspace");
+    MatrixTenant {
+        workspace,
+        owner: seed_human(su, workspace, "owner", "owner", OWNER_PASSWORD).await,
+        owner_other: seed_human(su, workspace, "owner-b", "owner", OWNER_B_PASSWORD).await,
+        admin: seed_human(su, workspace, "admin", "admin", ADMIN_PASSWORD).await,
+        admin_other: seed_human(su, workspace, "admin-b", "admin", ADMIN_B_PASSWORD).await,
+        member: seed_human(su, workspace, "member", "member", MEMBER_PASSWORD).await,
+        member_other: seed_human(su, workspace, "member-b", "member", MEMBER_B_PASSWORD).await,
+        guest: seed_human(su, workspace, "guest", "guest", GUEST_PASSWORD).await,
+        guest_other: seed_human(su, workspace, "guest-b", "guest", GUEST_B_PASSWORD).await,
+    }
+}
+
+fn matrix_person<'a>(tenant: &'a MatrixTenant, role: &str) -> &'a Person {
+    match role {
+        "owner" => &tenant.owner,
+        "owner_other" => &tenant.owner_other,
+        "admin" => &tenant.admin,
+        "admin_other" => &tenant.admin_other,
+        "member" => &tenant.member,
+        "member_other" => &tenant.member_other,
+        "guest" => &tenant.guest,
+        "guest_other" => &tenant.guest_other,
+        other => panic!("unknown matrix role {other}"),
+    }
+}
+
+async fn issue_password_reset(
+    http: &reqwest::Client,
+    base: &str,
+    workspace: Uuid,
+    access: &str,
+    target: Uuid,
+) -> (u16, Value) {
+    let response = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/members/{target}/password-reset"
+        ))
+        .bearer_auth(access)
+        .send()
+        .await
+        .expect("issue password-reset");
+    let status = response.status().as_u16();
+    let body: Value = response.json().await.unwrap_or(json!({}));
+    (status, body)
+}
+
+/// One ADR-0128 D2 cell: login as `actor_role`, issue reset for `target_role`
+/// (`self` = actor's own id; `owner` as target of an owner actor = the other owner).
+async fn hierarchy_cell(actor_role: &str, target_role: &str) -> (u16, Value) {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_matrix_tenant(&su, &format!("hier-{actor_role}-{target_role}")).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let actor = matrix_person(&tenant, actor_role);
+    let (login_status, login_body) = login(
+        &http,
+        &base,
+        tenant.workspace,
+        &actor.email,
+        &actor.password,
+    )
+    .await;
+    assert_eq!(
+        login_status, 200,
+        "matrix actor {actor_role} must login: {login_body}"
+    );
+    let access = login_body["accessToken"]
+        .as_str()
+        .expect("access")
+        .to_string();
+    let target_id = if target_role == "self" {
+        actor.id
+    } else if actor_role == target_role {
+        matrix_person(&tenant, &format!("{target_role}_other")).id
+    } else {
+        matrix_person(&tenant, target_role).id
+    };
+    issue_password_reset(&http, &base, tenant.workspace, &access, target_id).await
 }
 
 async fn seed_tenant(su: &PgPool, slug_hint: &str) -> Tenant {
@@ -734,3 +845,53 @@ async fn password_change_rate_limit_is_per_member() {
     assert_eq!(guess().await.status().as_u16(), 403);
     assert_eq!(guess().await.status().as_u16(), 429);
 }
+
+/// ADR-0128 D2 matrix: each cell is one ignored PG test (red proof first).
+macro_rules! hierarchy_cell_test {
+    ($name:ident, $actor:expr, $target:expr, $expected:expr) => {
+        #[tokio::test]
+        #[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+        async fn $name() {
+            let (status, body) = hierarchy_cell($actor, $target).await;
+            assert_eq!(status, $expected, "{} -> {}: {body}", $actor, $target);
+            if $expected == 403 {
+                let message = body["error"]["message"].as_str().unwrap_or("");
+                assert!(
+                    message == "workspace admin required"
+                        || message == "password reset not permitted"
+                        || message == "not a workspace member",
+                    "403 must use the closed ErrorResponse set, no raw role: {body}"
+                );
+            }
+        }
+    };
+}
+
+hierarchy_cell_test!(hierarchy_owner_resets_other_owner, "owner", "owner", 201);
+hierarchy_cell_test!(hierarchy_owner_resets_admin, "owner", "admin", 201);
+hierarchy_cell_test!(hierarchy_owner_resets_member, "owner", "member", 201);
+hierarchy_cell_test!(hierarchy_owner_resets_guest, "owner", "guest", 201);
+hierarchy_cell_test!(hierarchy_owner_cannot_reset_self, "owner", "self", 403);
+
+hierarchy_cell_test!(hierarchy_admin_cannot_reset_owner, "admin", "owner", 403);
+hierarchy_cell_test!(hierarchy_admin_cannot_reset_admin, "admin", "admin", 403);
+hierarchy_cell_test!(hierarchy_admin_resets_member, "admin", "member", 201);
+hierarchy_cell_test!(hierarchy_admin_resets_guest, "admin", "guest", 201);
+hierarchy_cell_test!(hierarchy_admin_cannot_reset_self, "admin", "self", 403);
+
+hierarchy_cell_test!(hierarchy_member_cannot_reset_owner, "member", "owner", 403);
+hierarchy_cell_test!(hierarchy_member_cannot_reset_admin, "member", "admin", 403);
+hierarchy_cell_test!(
+    hierarchy_member_cannot_reset_member,
+    "member",
+    "member",
+    403
+);
+hierarchy_cell_test!(hierarchy_member_cannot_reset_guest, "member", "guest", 403);
+hierarchy_cell_test!(hierarchy_member_cannot_reset_self, "member", "self", 403);
+
+hierarchy_cell_test!(hierarchy_guest_cannot_reset_owner, "guest", "owner", 403);
+hierarchy_cell_test!(hierarchy_guest_cannot_reset_admin, "guest", "admin", 403);
+hierarchy_cell_test!(hierarchy_guest_cannot_reset_member, "guest", "member", 403);
+hierarchy_cell_test!(hierarchy_guest_cannot_reset_guest, "guest", "guest", 403);
+hierarchy_cell_test!(hierarchy_guest_cannot_reset_self, "guest", "self", 403);
