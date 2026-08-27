@@ -90,7 +90,9 @@ cd "$REPO_ROOT"
 
 ENV_FILE="infra/rust/local.secrets.env"
 CANONICAL_PUBLISHED_IMAGE="ghcr.io/yeomyeonggeori/oort"
-PUBLISHED_IMAGE_CONSUMERS=7
+# rust.yml + local.override.yml: runtime-roles migrate api relay
+# webhook-sender agent-worker web-init drive-init
+PUBLISHED_IMAGE_CONSUMERS=8
 REQUESTED_MODE=""
 REQUESTED_IMAGE=""
 REQUESTED_ACTION="prepare"

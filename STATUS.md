@@ -5,6 +5,10 @@
 - Swift `InviteRoutes` 3경로를 Rust로 포팅: `POST …/revoke`(동일 핸들러 `DELETE …/invites/{id}`), `POST …/regenerate`, `POST …/redeem`. 운영자 상태 조회는 `GET …/invites/{id}`(usedCount + redemption 행).
 - 기존 `003_onboarding.sql` 재사용. revoke는 잔여 사용이 있는 미취소 코드만 새로 찍고, 소진된 코드는 409. regenerate는 구 코드를 즉시 `regenerated`로 무효화. 권한은 `is_admin()` 단일 권위.
 - 새 마이그레이션 없음. `runtime-unverified` 아님 — PG 컨포먼스가 거부/정상 경로를 실측.
+## 셀프호스트 첫 기동 갭 2건 (#1747, 2026-08-26)
+
+- `MOMO_HOSTED_DELIVERY_ENABLED`를 api·webhook-sender compose env에 옵트인 배선(`:-`). 도어벨만 켜고 이 선행 게이트가 빠지면 멘션이 hosted inbox로 안 가 조용히 실패한다. 미사용 스택에는 필수가 아니다.
+- ADR-0169 local 보관소 첫 기동: `local.override.yml` `drive-init`이 신선 볼륨을 uid 10001로 chown. 쓰기 실패 fail-fast는 유지.
 
 ## 로컬 첨부 capability URL same-origin 파생 (#1788, 2026-08-26)
 

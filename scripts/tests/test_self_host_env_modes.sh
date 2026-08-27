@@ -66,7 +66,7 @@ if [ "${1:-}" = "compose" ]; then
     file_image="$(awk -F= '$1 == "MOMO_RUST_IMAGE" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
     effective_image="${MOMO_RUST_IMAGE:-$file_image}"
     count=0
-    while [ "$count" -lt 7 ]; do
+    while [ "$count" -lt 8 ]; do
       printf '%s\n' "$effective_image"
       count=$((count + 1))
     done
@@ -323,6 +323,7 @@ jq -e \
     .services.api.environment.MOMO_DRIVE_LOCAL_DIR == $drive_dir and
     .services.api.environment.MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL == $drive_base and
     .volumes["drive-archive"].name == $drive_volume and
+    .services["drive-init"].image == $image and
     .services.web.image == "caddy:2-alpine" and
     .services.web.ports[0].published == "49200" and
     .services.api.ports[0].published == "49201" and
@@ -337,7 +338,9 @@ real_count="$(printf '%s\n' "$real_images" | awk -v expected="$GOOD_DIGEST" '
   $0 == expected { count += 1 }
   END { print count + 0 }
 ')"
-test "$real_count" -eq 7
+# rust image services on rust.yml + local.override.yml:
+# runtime-roles migrate api relay webhook-sender agent-worker web-init drive-init
+test "$real_count" -eq 8
 
 # Caller argv cannot add a second config source or replace canonical
 # env/project/profile authority. A literal service-command argument with the
@@ -864,9 +867,10 @@ run_generator "$public_fixture" "$public_fixture/origin-again" 49700 \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
   "$public_fixture/infra/rust/local.secrets.env"
 grep -Fq '이미 있다 (멱등)' "$public_fixture/origin-again"
-test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 2
+test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
 test "$(grep -c 'wss://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://cursor.tailb1aad3.ts.net' \
+# #1788: same-origin is not demoted to an absolute public URL.
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$public_fixture/infra/rust/local.secrets.env"
 
 # Create-time --public-origin lands in the first write; default localhost tokens stay.
@@ -924,10 +928,11 @@ run_generator "$claim_fixture" "$claim_fixture/origin-output" 49750 \
   --public-origin https://example-tunnel.test
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49750 http://127.0.0.1:49750 tauri://localhost http://tauri.localhost https://example-tunnel.test wss://example-tunnel.test' \
   "$claim_env"
-grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=https://example-tunnel.test' "$claim_env"
+# #1788: claim-time --public-origin also leaves same-origin in place.
+grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' "$claim_env"
 test "$(sed -n 's/^JWT_HMAC=//p' "$claim_env")" = "$jwt_claim_before"
 grep -Fq '공개 오리진을 추가했다' "$claim_fixture/origin-output"
-grep -Fq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 을 공개 오리진으로 맞췄다' "$claim_fixture/origin-output"
+grep -Fq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 은 same-origin 이라 그대로 둔다' "$claim_fixture/origin-output"
 if grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/origin-output"; then
   echo "claim-mode next-steps unexpectedly recommended --compose" >&2
   exit 1
