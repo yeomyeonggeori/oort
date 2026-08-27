@@ -384,6 +384,10 @@ function RoleLabelsEditor({
   const [fieldErrors, setFieldErrors] = useState<Partial<Record<RoleKey, string>>>(
     {}
   );
+  const [denied, setDenied] = useState(false);
+  // SaveButton is type=submit. A click fires onClick then the form submit, so
+  // the same handler must no-op the second call in the same tick.
+  const saveStarted = useRef(false);
 
   useEffect(() => {
     setDraft(draftFromRoleLabels(labels));
@@ -399,12 +403,18 @@ function RoleLabelsEditor({
     mutationFn: (next: RoleLabels | null) =>
       patchWorkspaceSettings(workspaceId, { role_labels: next }),
     onSuccess: (_result, next) => {
+      setDenied(false);
+      saveStarted.current = false;
       const roleLabels = next ?? {};
       client.setQueryData(
         workspaceIdentityKey(workspaceId),
         (current: { roleLabels?: RoleLabels } | undefined) =>
           current ? { ...current, roleLabels } : current
       );
+    },
+    onError: (error) => {
+      saveStarted.current = false;
+      if (isOperatorDenied(error)) setDenied(true);
     },
   });
 
@@ -417,7 +427,7 @@ function RoleLabelsEditor({
   };
 
   const handleSave = () => {
-    if (!canSave || save.isPending) return;
+    if (!canSave || save.isPending || saveStarted.current) return;
     const errors: Partial<Record<RoleKey, string>> = {};
     for (const key of ROLE_KEYS) {
       const error = roleLabelFieldError(draft[key]);
@@ -425,11 +435,20 @@ function RoleLabelsEditor({
     }
     setFieldErrors(errors);
     if (Object.keys(errors).length > 0) return;
+    saveStarted.current = true;
     save.mutate(payload);
   };
 
   const readOnly = !canEdit;
+  const confirmedNonOperator = readOnly && directoryQuery.isSuccess;
   const locked = readOnly || offline;
+  const effectiveRows = ROLE_KEYS.map((key) => {
+    const override = labels[key]?.trim();
+    return {
+      key: DEFAULT_ROLE_LABELS[key],
+      value: override || DEFAULT_ROLE_LABELS[key],
+    };
+  });
 
   return (
     <Subsection
@@ -439,79 +458,88 @@ function RoleLabelsEditor({
         "칸을 비우고 저장하면 기본 이름으로 돌아갑니다.",
       ]}
     >
-      {readOnly && directoryQuery.isSuccess && (
+      {(confirmedNonOperator || denied) && (
         <OperatorNotice
-          who="역할 표시명은 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+          who={
+            denied
+              ? roleLabelsSaveMessage(save.error)
+              : "역할 표시명은 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+          }
           contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
         />
       )}
-      <form
-        className="flex flex-col gap-3"
-        onSubmit={(event) => {
-          event.preventDefault();
-          handleSave();
-        }}
-        data-testid="workspace-role-labels"
-      >
-        {ROLE_KEYS.map((key) => {
-          const fieldId = `role-label-${key}`;
-          const error = fieldErrors[key];
-          return (
-            <Field
-              key={key}
-              label={DEFAULT_ROLE_LABELS[key]}
-              htmlFor={fieldId}
-              hint={
-                locked
-                  ? undefined
-                  : `${DEFAULT_ROLE_LABELS[key]}의 표시 이름입니다. 비우면 이 기본 이름이 쓰입니다.`
-              }
-              error={error}
+      {confirmedNonOperator ? (
+        <div data-testid="workspace-role-labels">
+          <KeyValueRows rows={effectiveRows} />
+        </div>
+      ) : (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSave();
+          }}
+          data-testid="workspace-role-labels"
+        >
+          {ROLE_KEYS.map((key) => {
+            const fieldId = `role-label-${key}`;
+            const error = fieldErrors[key];
+            return (
+              <Field
+                key={key}
+                label={DEFAULT_ROLE_LABELS[key]}
+                htmlFor={fieldId}
+                hint={
+                  locked
+                    ? undefined
+                    : `${DEFAULT_ROLE_LABELS[key]}의 표시 이름입니다. 비우면 이 기본 이름이 쓰입니다.`
+                }
+                error={error}
+              >
+                <Input
+                  id={fieldId}
+                  name={fieldId}
+                  value={draft[key]}
+                  placeholder={DEFAULT_ROLE_LABELS[key]}
+                  readOnly={locked}
+                  aria-readonly={locked || undefined}
+                  className={cn(locked && "opacity-50")}
+                  onChange={(event) => {
+                    if (locked) return;
+                    handleChange(key, event.target.value);
+                  }}
+                  data-testid={fieldId}
+                />
+              </Field>
+            );
+          })}
+          {offline && canEdit && (
+            <p className="text-meta text-ink-muted" id="workspace-role-labels-offline">
+              연결이 끊겨 지금은 표시 이름을 저장할 수 없습니다.
+            </p>
+          )}
+          {save.isError && !denied && (
+            <p
+              className="text-meta text-danger"
+              role="alert"
+              data-testid="workspace-role-labels-save-error"
             >
-              <Input
-                id={fieldId}
-                name={fieldId}
-                value={draft[key]}
-                placeholder={DEFAULT_ROLE_LABELS[key]}
-                readOnly={locked}
-                aria-readonly={locked || undefined}
-                aria-disabled={locked || undefined}
-                className={cn(locked && "opacity-50")}
-                onChange={(event) => {
-                  if (locked) return;
-                  handleChange(key, event.target.value);
-                }}
-                data-testid={fieldId}
+              {roleLabelsSaveMessage(save.error)}
+            </p>
+          )}
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-2">
+              <SaveButton
+                label="표시명 저장"
+                canSave={canSave}
+                busy={save.isPending}
+                onSave={handleSave}
+                testId="workspace-role-labels-save"
               />
-            </Field>
-          );
-        })}
-        {offline && canEdit && (
-          <p className="text-meta text-ink-muted" id="workspace-role-labels-offline">
-            연결이 끊겨 지금은 표시 이름을 저장할 수 없습니다.
-          </p>
-        )}
-        {save.isError && !isOperatorDenied(save.error) && (
-          <p
-            className="text-meta text-danger"
-            role="alert"
-            data-testid="workspace-role-labels-save-error"
-          >
-            {roleLabelsSaveMessage(save.error)}
-          </p>
-        )}
-        {canEdit && (
-          <div className="flex flex-wrap items-center gap-2">
-            <SaveButton
-              label="표시명 저장"
-              canSave={canSave}
-              busy={save.isPending}
-              onSave={handleSave}
-              testId="workspace-role-labels-save"
-            />
-          </div>
-        )}
-      </form>
+            </div>
+          )}
+        </form>
+      )}
     </Subsection>
   );
 }

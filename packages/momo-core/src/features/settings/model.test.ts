@@ -238,7 +238,9 @@ describe("role display override draft and payload", () => {
     expect(roleLabelFieldError("마스터")).toBeNull();
     expect(roleLabelFieldError("   ")).toContain("공백만");
     expect(roleLabelFieldError("가".repeat(16))).toBeNull();
-    expect(roleLabelFieldError("가".repeat(17))).toContain("48");
+    expect(roleLabelFieldError("가".repeat(17))).toBe(
+      "역할 이름은 한글 기준 16자까지 쓸 수 있습니다."
+    );
     expect(ROLE_LABEL_MAX_BYTES).toBe(48);
   });
 

@@ -24,6 +24,7 @@ import {
   isOperatorDenied,
   type InviteCardInput,
 } from "@momo/core/features/settings/model";
+import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   ChoiceRadios,
   CopyButton,
@@ -81,7 +82,7 @@ export function InviteSection({
     retry: false,
   });
   const workspace = useQuery({
-    queryKey: ["settings", "workspace", workspaceId],
+    queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
   });

@@ -297,7 +297,7 @@ export function roleLabelFieldError(raw: string): string | null {
   const trimmed = raw.trim();
   if (trimmed.length === 0) return "공백만으로는 저장할 수 없습니다. 비우면 기본 이름이 쓰입니다.";
   if (roleLabelUtf8Bytes(trimmed) > ROLE_LABEL_MAX_BYTES) {
-    return "역할 이름은 48바이트까지 쓸 수 있습니다.";
+    return "역할 이름은 한글 기준 16자까지 쓸 수 있습니다.";
   }
   return null;
 }
