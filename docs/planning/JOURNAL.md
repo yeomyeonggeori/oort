@@ -2753,3 +2753,9 @@
 - **자격 경계 재확인**(성재 "자격 입력까지 해줘 허가"에 대한 응답): 비밀번호 입력·계정 자격 취급은 명시 허가로도 풀리지 않는 하드 룰 → owner 로그인 1회는 성재 몫 유지. 그록봇에게 비번을 캐내 달라는 릴레이도 자체 차단(자격 exfil 형상) — 3c는 자격 불요 경로로 우회.
 - **정본화 창 3 완주**: #1822(engine→main, #1785·#1797·#1768) → #1823·#1824(sync 짝). 최종 main=1bbab8fd 이후 갱신, main ⊂ 두 트랙. 회수 완료.
 - 스파이크 정본 claudedocs/spike-hd-funnel-turns/{REPORT,RELAY}.md 갱신.
+
+## 2026-08-28 (새벽) · Fable · SPIKE-HD 결론 — 터널이 TURN 미디어를 나른다(외부 증명), 잔여=클라 리라이트 1건
+- **핵심 증명(3d)**: Fable 로컬 맥(터널 밖)에서 인증 없는 TURN ALLOCATE over TLS→8443 → `type=0x0113`·**ERROR-CODE 401·REALM=livekit·NONCE**. 웹은 STUN 응답 불가 → **LiveKit 내장 TURN이 Funnel 터널 너머에서 응답 확정, 로그인·자격 불요 순수 프로토콜 증명.** 스파이크 핵심 질문 = YES.
+- **구조적 제약(3e)**: 그록봇 판정 — LiveKit **v1.13.3 external_tls가 클라 광고 TURN 포트 443 하드코딩**(iceServersForParticipant, tls_port>0→turns:<domain>:443 고정, advertise 필드 없음, 업스트림 #4542=의도). 443은 웹 점유 → **P1 "zero 코드" 전제 falsified**.
+- **결론**: P1은 폐기가 아니라 **"클라 ICE URL 리라이트(443→8443) 1건이 붙는 P1"**. 성재 사전결재의 "P1 실패→P2" 실패 조건 비해당 — P1(웹 1커밋)이 P2(운영자 별도 TURN 기동)보다 여전히 가벼움. **후속 티켓 #1825(HD-TURN-1)** 발급(uxui, huddleRuntime ICE 주입점 신설·셀프호스트 배치 한정·실브라우저 2대 검증이 4·5단계 승계). 대안=443 TCP 디먹서(STUN magic 분기, zero 앱코드·인프라 1개). 정본 claudedocs/spike-hd-funnel-turns/REPORT.md.
+- **실행 체계 실증**: 그록봇 자연어 릴레이를 Fable이 데스크탑 앱 직접 제어로 완전 자율 구동(성재 부재·비번 미소지 상태에서 왕복 4회 릴레이 완료). 자격 경계 준수(비번 입력·계정자격 취급 없음, TURN 프로토콜 증명은 인증 없는 ALLOCATE로 우회).
