@@ -7,7 +7,7 @@
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
 > **실행 주체:** 기획은 성재(최종 승인)+Fable/GPT 5.6(병렬 planner), 공용 정본 통합은 `momo-main`(계약: `docs/planning/README.md`), **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**. **지금 세션이 기획/오케스트레이션이면 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽어라.** 동시 구현은 최대 **5 goal**(`docs/MULTI_SESSION_OPS.md`).
-> **현재 위치(2026-08):** 서버는 **Rust/Axum**(`server-rust/`, ADR-0145)으로 재작성돼 `app.oor7.com`에서 돌고 있고(런북 `docs/runbooks/ncp-rust-deploy.md`), 제품 표면은 **웹 + Tauri 데스크톱 + React Native 모바일**이다. **Swift 트리는 은퇴 중**(§0 아래 상자) — 그쪽에 새 기능을 얹지 마라. 최신 상태는 항상 `STATUS.md` 최상단이 정본이고, 이 문단은 방향만 가리킨다.
+> **현재 위치(2026-08):** 서버는 **Rust/Axum**(`server-rust/`, ADR-0145)이고, **호스티드 배포는 없다** — NCP 프로덕션은 2026-08-26 완전 철수(#1802·#1803). 실행 표면은 **셀프호스트 이미지(v0.1.2, `SELF_HOST.md`)와 로컬 리그**, 제품 표면은 **웹 + Tauri 데스크톱 + React Native 모바일**이다. **Swift 트리는 은퇴 중**(§0 아래 상자) — 그쪽에 새 기능을 얹지 마라. 최신 상태는 항상 `STATUS.md` 최상단이 정본이고, 이 문단은 방향만 가리킨다.
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
 ## -1. 트랙 파이프라인 (2026-07-18 성재 지시 — 최우선 규칙)
@@ -199,7 +199,7 @@ Closes #<issue>
 ## 7. 설계 맥락 + 런타임 미검증 + 게이트 + 라이선스
 **불변식(day-1 강제):** ①Postgres=SoT, Centrifugo=전송계층 ②쓰기경로 단일화(클라 직접 publish 금지) ③순서 SoT=`message.seq` ④에이전트=`member`(kind='agent'), 동일 REST/멱등 ⑤commit↔publish 무손실=transactional outbox ⑥seq=`channel_seq` 행카운터 `UPDATE...RETURNING`(시퀀스 금지), `client_msg_id` 멱등 ⑦멀티테넌시 `workspace→channel→membership`, 모든 행 `workspace_id`, RLS FORCE, tx마다 `SET LOCAL app.workspace_id`.
 
-**읽을 곳:** `STATUS.md`(항상 먼저) · `docs/adr/`(**결정 정본** — 특히 0100 거버넌스, 0101 에이전트 신원) · `docs/architecture/overview.md`(아키텍처 정본 — 어긋나는 변경은 같은 PR에서 갱신) · `docs/ux-bible/README.md`(UX 원칙 P1~P15 — UI 티켓 수용기준이 인용) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~04`(Apple CI/CD·setup·시크릿·티켓 — 은퇴 전제) · **`infra/rust/README.md`(현행 스택 기동 — 이미지+compose. §2 준비 절차는 수리 중, #1227)** · `docs/runbooks/ncp-rust-deploy.md`(라이브 배포 정본) · `docs/RUN.md`(은퇴 중 — Swift 기준 로컬 기동, 상단 배너 참조) · `legal/*`·`docs/legal/*`(법무).
+**읽을 곳:** `STATUS.md`(항상 먼저) · `docs/adr/`(**결정 정본** — 특히 0100 거버넌스, 0101 에이전트 신원) · `docs/architecture/overview.md`(아키텍처 정본 — 어긋나는 변경은 같은 PR에서 갱신) · `docs/ux-bible/README.md`(UX 원칙 P1~P15 — UI 티켓 수용기준이 인용) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~04`(Apple CI/CD·setup·시크릿·티켓 — 은퇴 전제) · **`infra/rust/README.md`(현행 스택 기동 — 이미지+compose. §2 준비 절차는 수리 중, #1227)** · `docs/runbooks/ncp-rust-deploy.md`(**은퇴** — NCP 철수 2026-08-26, 역사 기록) · `docs/RUN.md`(은퇴 중 — Swift 기준 로컬 기동, 상단 배너 참조) · `legal/*`·`docs/legal/*`(법무).
 
 **런타임 미검증:** Docker/psql로 가능한 PG18+Centrifugo 검증은 각 goal에서 실제 수행한다. hermes, APNs 등 외부 의존이 남으면 실제 의존성 또는 mock 준비를 먼저 검토하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + 절차를 문서에 남긴다(현행 스택 절차는 `infra/rust/README.md`).
 

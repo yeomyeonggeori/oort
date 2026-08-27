@@ -1,7 +1,8 @@
 import { ChevronRight } from "lucide-react";
 import { uuidEq, type RosterMember } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
-import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
+import { useSession } from "@/app/session";
+import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
 import {
   memberRowLabel,
@@ -50,9 +51,11 @@ export function MemberRow({
   selfMemberId: string;
   onOpenProfile: (member: RosterMember, opener: HTMLElement) => void;
 }) {
+  const { workspaceId } = useSession();
+  const labels = useRoleLabels(workspaceId);
   const isAgent = member.kind === "agent";
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
-  const role = roleLabel(member);
+  const role = roleLabel(member, labels);
   const status = statusLabel(member);
 
   const identity = (
@@ -92,7 +95,8 @@ export function MemberRow({
         data-directory-row=""
         aria-label={memberRowLabel(
           member,
-          owner?.displayName ?? null
+          owner?.displayName ?? null,
+          labels
         ).replace(
           "다이렉트 메시지 열기",
           uuidEq(member.id, selfMemberId) ? "나, 프로필 열기" : "프로필 열기"

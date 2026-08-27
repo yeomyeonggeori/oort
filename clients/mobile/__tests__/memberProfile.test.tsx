@@ -131,8 +131,15 @@ describe('사람 프로필 시트', () => {
     expect(screen.getByTestId('profile-name').props.children).toBe('김모모');
     expect(screen.getByTestId('profile-handle').props.children).toBe('@momo');
     expect(screen.getByTestId('profile-kind').props.children).toBe('사람');
+    expect(screen.getByText('멤버')).toBeTruthy();
     fireEvent.press(screen.getByTestId('profile-open-dm'));
     expect(onOpenDm).toHaveBeenCalledTimes(1);
+  });
+
+  it('워크스페이스 역할 표시명 오버라이드를 기본 라벨보다 먼저 쓴다', () => {
+    renderProfile(HUMAN, { roleLabels: { member: '동료' } });
+    expect(screen.getByText('동료')).toBeTruthy();
+    expect(screen.queryByText('멤버')).toBeNull();
   });
 
   it('에이전트는 기존 상세 화면의 문과 관리자 귀속을 얻는다', () => {

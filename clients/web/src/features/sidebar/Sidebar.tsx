@@ -40,6 +40,7 @@ import {
   unreadFor,
   useChannels,
   useDirectory,
+  workspaceIdentityKey,
   useReadStates,
   type Directory,
 } from "@/features/workspace/useWorkspace";
@@ -214,7 +215,7 @@ export function Sidebar({
   // 쿼리 키라 캐시를 나눠 써 중복 페치가 없다. 그전엔 이 자리에 selfName(사용자
   // 표시명)이 꽂혀 있어 현재 워크스페이스 타일이 사용자 이니셜을 그렸다.
   const workspaceQuery = useQuery({
-    queryKey: ["settings", "workspace", workspaceId],
+    queryKey: workspaceIdentityKey(workspaceId),
     queryFn: () => fetchWorkspace(workspaceId),
     retry: false,
   });

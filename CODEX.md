@@ -4,7 +4,7 @@
 > **⚠️ 사본이 둘이라는 사실 자체가 드리프트원이다.** 스택·명령·계약을 고칠 때는 **두 파일을 같은 PR에서** 고쳐라. 한쪽만 고치면 다음 사람은 낡은 쪽을 읽는다(#1226이 정리한 상태가 정확히 그것이었다).
 >
 > **실행 주체:** 기획은 성재(최종 승인)+Fable/GPT 5.6(병렬 planner), 공용 정본 통합은 `momo-main`이 맡고, **실제 구현은 Codex가 goal(= GitHub Issue)로 자율 실행**한다. 기획 세션은 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽는다.
-> **현재 위치(2026-08):** 서버는 **Rust/Axum**(`server-rust/`, ADR-0145)으로 재작성돼 `app.oor7.com`에서 돌고 있고, 제품 표면은 **웹 + Tauri 데스크톱 + React Native 모바일**이다. **Swift 트리는 은퇴 중**(§0 상자). 최신 상태는 `STATUS.md` 최상단이 정본.
+> **현재 위치(2026-08):** 서버는 **Rust/Axum**(`server-rust/`, ADR-0145)이고, **호스티드 배포는 없다** — NCP 프로덕션은 2026-08-26 완전 철수(#1802·#1803). 실행 표면은 **셀프호스트 이미지(v0.1.2)와 로컬 리그**, 제품 표면은 **웹 + Tauri 데스크톱 + React Native 모바일**이다. **Swift 트리는 은퇴 중**(§0 상자). 최신 상태는 `STATUS.md` 최상단이 정본.
 > **사실 표기 규칙:** `(검증됨)` = 공식문서/리포 교차확인 · `(추정)` = 설계/일정 판단 · `runtime-unverified` = 해당 goal에서 아직 e2e를 못 닫은 것. **법무 관련 텍스트는 법률 자문이 아님.**
 
 ---
@@ -261,7 +261,7 @@ oort는 5개 설계축 + 3개 보강(outbox / 비용회계 / APNs)을 단일 정
 - `docs/cicd/05-qa-release-gate.md` — **게이트(M7) 객관 통과기준 정본**(G-0~G-G).
 - `docs/cicd/03-store-readiness-gate.md` — 게이트 PASS 블록 기록 위치.
 - `docs/cicd/00~04` — Apple CI/CD 파이프라인·setup 런북·시크릿 인벤토리·Codex 티켓.
-- **`infra/rust/README.md` — 현행 스택 기동(이미지 + compose).** §2 준비 절차는 수리 중(#1227). 라이브 배포 정본은 `docs/runbooks/ncp-rust-deploy.md`.
+- **`infra/rust/README.md` — 현행 스택 기동(이미지 + compose).** §2 준비 절차는 수리 중(#1227). `docs/runbooks/ncp-rust-deploy.md`는 **은퇴**(NCP 철수 2026-08-26, 역사 기록).
 - `docs/RUN.md` — **은퇴 중**(Swift 기준 로컬 기동). 상단 배너를 먼저 읽어라. `legal/*`·`docs/legal/*` — 법무 선결(법률 자문 아님).
 
 ---
