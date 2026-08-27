@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## 멤버 라이프사이클 10경로 Rust 이식 (#1768, 2026-08-27)
+
+- Swift `MemberLifecycleRoutes`의 경로·페이로드·에러 문장·권한 판정을 보존해 Rust로 이식. 마이그레이션 신설 없음 · `schema_v0.sql` 비접촉 · 026 원장 재사용.
+- 위계는 `workspace_authorization.rs`의 `can_change_role_of`/`can_grant_role`/`can_suspend`/`can_remove`/`can_ban`. 판정은 도메인 층·같은 테넌트 트랜잭션에서 행위자·대상 role을 동시에 조회한다. 채널 role은 라벨(ADR-0128 D1).
+- 마지막 owner 강등·정지·추방은 409. 자기 자신 대상은 403 `members cannot manage themselves`. 정지는 토큰 revoke + 로그인 403 `member is suspended`. 밴은 join/redeem 403.
+- red proof: `membership_lifecycle_conformance_pg` 행위자×경로 매트릭스 + last-owner + suspend 로그인 + 밴 재가입 + RLS + audit. 실시간은 outbox/relay만(직접 publish 없음).
+
 ## ACP 이벤트 릴레이 이식 (#1785, 2026-08-27)
 
 - host-signed `PATCH …/work-sessions/{session}` `{event}`를 Swift `recordACPEvent` 그대로 서빙한다. 무서명 400 문장(`ACP event ingestion requires work host signature`)은 유지. 정상 서명은 세션 스레드에 `work_session_event` system message + `message.new`/`agent.*` outbox를 한 트랜잭션에 남긴다.
