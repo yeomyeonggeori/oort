@@ -77,6 +77,8 @@ export async function connectHuddleAudio(
     if (!intentionalDisconnect) options.onDisconnected();
   });
 
+  let restoreTurnRewrite: () => void = () => undefined;
+
   try {
     // Like the observer socket, a connect-src refusal may never reach the
     // socket callbacks. Listen on document before dialling so a deployment
@@ -94,10 +96,10 @@ export async function connectHuddleAudio(
     // JoinResponse iceServers carry the TURN credential. rtcConfig cannot
     // rewrite them without dropping that credential (livekit-client keeps
     // server iceServers only when rtcConfig.iceServers is unset), so the
-    // PeerConnection constructor is shimmed for this connect only.
-    const restoreTurnRewrite = installHuddleTurnRewriteShim(
-      options.livekitUrl
-    );
+    // PeerConnection constructor is shimmed for the huddle session.
+    // Host-gated: rewrite is turns:signalHost:443 only, so other PCs are
+    // unaffected while the shim stays installed.
+    restoreTurnRewrite = installHuddleTurnRewriteShim(options.livekitUrl);
     try {
       await Promise.race([
         room.connect(options.livekitUrl, options.token, {
@@ -106,7 +108,6 @@ export async function connectHuddleAudio(
         policyRefusal,
       ]);
     } finally {
-      restoreTurnRewrite();
       document.removeEventListener("securitypolicyviolation", onViolation);
     }
     try {
@@ -118,14 +119,22 @@ export async function connectHuddleAudio(
     }
   } catch (error) {
     intentionalDisconnect = true;
-    await room.disconnect();
+    try {
+      await room.disconnect();
+    } finally {
+      restoreTurnRewrite();
+    }
     throw error;
   }
 
   return {
     async disconnect() {
       intentionalDisconnect = true;
-      await room.disconnect();
+      try {
+        await room.disconnect();
+      } finally {
+        restoreTurnRewrite();
+      }
       for (const element of attachedAudio) element.remove();
       attachedAudio.clear();
     },

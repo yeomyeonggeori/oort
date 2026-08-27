@@ -232,18 +232,35 @@ describe("RTCPeerConnection shim", () => {
 });
 
 describe("huddleRuntime wiring", () => {
-  it("installs the shim around room.connect and restores in finally", () => {
+  it("installs the shim before connect and restores only at session end", () => {
     const source = readFileSync(
       new URL("./huddleRuntime.ts", import.meta.url),
       "utf8"
     );
-    expect(source).toMatch(/installHuddleTurnRewriteShim/);
-    expect(source).toMatch(/restoreTurnRewrite\(\)/);
-    const connectIndex = source.indexOf("room.connect(");
     const installIndex = source.indexOf("installHuddleTurnRewriteShim(");
-    const restoreIndex = source.indexOf("restoreTurnRewrite()");
+    const connectIndex = source.indexOf("room.connect(");
+    const connectFinallyIndex = source.indexOf("} finally {", connectIndex);
+    const micEnableIndex = source.indexOf("setMicrophoneEnabled(true)");
+    const catchIndex = source.indexOf("} catch (error) {");
+    const sessionDisconnectIndex = source.indexOf("async disconnect()");
+
     expect(installIndex).toBeGreaterThan(-1);
     expect(connectIndex).toBeGreaterThan(installIndex);
-    expect(restoreIndex).toBeGreaterThan(connectIndex);
+    expect(connectFinallyIndex).toBeGreaterThan(connectIndex);
+    expect(micEnableIndex).toBeGreaterThan(connectFinallyIndex);
+    expect(catchIndex).toBeGreaterThan(micEnableIndex);
+    expect(sessionDisconnectIndex).toBeGreaterThan(catchIndex);
+
+    const connectFinally = source.slice(connectFinallyIndex, micEnableIndex);
+    expect(connectFinally).toMatch(/removeEventListener/);
+    expect(connectFinally).not.toMatch(/restoreTurnRewrite\(\)/);
+
+    const catchPath = source.slice(catchIndex, sessionDisconnectIndex);
+    expect(catchPath).toMatch(/intentionalDisconnect = true/);
+    expect(catchPath).toMatch(/room\.disconnect\(\)/);
+    expect(catchPath).toMatch(/restoreTurnRewrite\(\)/);
+
+    const sessionDisconnect = source.slice(sessionDisconnectIndex);
+    expect(sessionDisconnect).toMatch(/restoreTurnRewrite\(\)/);
   });
 });
