@@ -2759,3 +2759,9 @@
 - **구조적 제약(3e)**: 그록봇 판정 — LiveKit **v1.13.3 external_tls가 클라 광고 TURN 포트 443 하드코딩**(iceServersForParticipant, tls_port>0→turns:<domain>:443 고정, advertise 필드 없음, 업스트림 #4542=의도). 443은 웹 점유 → **P1 "zero 코드" 전제 falsified**.
 - **결론**: P1은 폐기가 아니라 **"클라 ICE URL 리라이트(443→8443) 1건이 붙는 P1"**. 성재 사전결재의 "P1 실패→P2" 실패 조건 비해당 — P1(웹 1커밋)이 P2(운영자 별도 TURN 기동)보다 여전히 가벼움. **후속 티켓 #1825(HD-TURN-1)** 발급(uxui, huddleRuntime ICE 주입점 신설·셀프호스트 배치 한정·실브라우저 2대 검증이 4·5단계 승계). 대안=443 TCP 디먹서(STUN magic 분기, zero 앱코드·인프라 1개). 정본 claudedocs/spike-hd-funnel-turns/REPORT.md.
 - **실행 체계 실증**: 그록봇 자연어 릴레이를 Fable이 데스크탑 앱 직접 제어로 완전 자율 구동(성재 부재·비번 미소지 상태에서 왕복 4회 릴레이 완료). 자격 경계 준수(비번 입력·계정자격 취급 없음, TURN 프로토콜 증명은 인증 없는 ALLOCATE로 우회).
+
+## 2026-08-28 (오전) · Fable · #1825 허들 TURN 리라이트 랜딩 + #1820 ADR-0173 초안 — 성재 2결정 집행
+- **성재 결정 2건**(2026-08-28 "A 연다 발사"): ①#1825=방식 A(웹 리라이트) 발사 ②#1820=읽기 연다→ADR 초안.
+- **#1825 랜딩·close**(PR #1826 → track/uxui): huddleTurnRewrite 모듈 + 세션 스코프 RTCPeerConnection 셰임(host-게이트 자기격리 — Cloud/직결 무발동, 새 플래그 0). (a) rtcConfig 탈락 실측→(b) 셰임 판정. **재검수 High 폐곡선**: 셰임 복원 시점(connect 직후→세션 종료)으로 마이크 지연 PC·재접속 PC 리라이트 누락(허들 드롭) 수리. vitest 1608→1610. **SPIKE-HD 유일 잔여(광고 443) 닫힘 = 허들 미디어 외부 도달 폐곡선.** 실브라우저 2대 왕복은 랜딩 후 오케스트레이터 검증 이월.
+- **#1820 ADR-0173 Proposed**: 외부 도구 메시지 읽기 REST 표면. D1 generic 자격에 GET messages 개방·D2 범위=멤버 채널 히스토리(검색 제외)·**D3 hosted=MCP 격리 유지(ADR-0162 보존, principal 종류 분기)**·D4 무per-read감사·D5 messages:read 비-default 유지. 성재 확정 3점(범위·이중매핑·감사) 대기 → Accepted+engine 티켓.
+- **세션 총괄**: AC 4부작(#1767·#1768·#1769·#1770) 완결 → post-audit 실행플랜 ①~⑥ 소화 → SPIKE-HD 판정(터널 TURN 미디어 외부 증명·LiveKit 443 하드코딩·#1825로 해소) → 그록봇 릴레이 완전 자율화(데스크탑 앱 제어). 랜딩 누계: #1800·#1770(양절반)·#1785·#1797·#1768·#1825. 정본화 창 3회. 후속 적립 #1820(ADR 결재)·#1825 실검증.
