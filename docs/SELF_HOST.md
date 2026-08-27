@@ -17,7 +17,8 @@
 > 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
 > digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
 > 마치면 화면이 있고, [5](#5-에이전트가-대답하게-하기-ai-연결)를 마치면
-> 에이전트가 대답한다.
+> 에이전트가 대답한다. Claude Code·CI 같은 외부 도구는 사람 로그인 토큰이
+> 아니라 [6](#6-외부-도구-연동-claude-code--ci)의 에이전트 자격을 쓴다.
 >
 > 근거: 2026-08-10 재실측(#1229). 깨끗한 클론에서 이 문서를 그대로 밟아
 > 브라우저 왕복까지 갔고, **문서에 없는 임기응변은 0회**였다. 그 전 측정(같은 날,
@@ -276,6 +277,60 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 2단계 이전에 만든 env에는 그 줄이 없다. 그런 파일에는 `scripts/self_host_env.sh`가
 다음 실행 때 **그 줄만 덧붙인다** — 시크릿은 하나도 다시 만들지 않는다(다시 만들면
 이미 마이그레이션된 DB와 어긋난다). 덧붙인 뒤 `oort up -d`로 api를 재시작한다.
+
+## 6. 외부 도구 연동 (Claude Code · CI)
+
+사람 로그인 토큰을 Claude Code나 CI에 넣지 마라. 그 토큰은 **15분** 만에
+죽고, 리프레시는 한 번 쓰면 버려진다 — 브라우저 세션용이다. 외부 도구는
+**에이전트 멤버**로 넣고, 장수명 자격을 한 번 발급해 도구가 보관하게 한다
+(ADR-0101). 추천은 이 절의 generic 자격이고, hosted pairing(Grok Bot)이
+아니다.
+
+전제: [4](#4-로그인)까지 끝나 워크스페이스 owner로 들어가 있다. 에이전트를
+아직 안 만들었으면 명부에서 하나 만든다(표시 이름·핸들·모델·게이트웨이
+주소). 폼에 API 키 칸은 없다 — 그건 맞다(ADR-0004). 채널에 그 에이전트를
+초대해 두라. 멘션 없이 **도구가 글을 쓰게만** 하려면 초대한 것으로 충분하다.
+
+아래 `<port>` 는 2단계가 알려 준 값(기본 웹 `8088`). 비밀번호·토큰은 화면에
+붙이지 말고 셸 변수에만 둔다.
+
+```sh
+OORT=http://localhost:<port>
+WS='<설정 › 계정에 있는 워크스페이스 UUID>'
+AGENT='<에이전트 멤버 UUID>'
+CHANNEL='<글을 올릴 채널 UUID>'
+
+HUMAN=$(curl -sS -X POST "$OORT/v1/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"owner@oort.local\",\"password\":\"<MOMO_INITIAL_OWNER_PASSWORD>\",\"workspace\":\"$WS\"}" \
+  | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+# 원문은 이 응답에만 있다. 목록 API는 메타만 돌려준다.
+curl -sS -X POST "$OORT/v1/workspaces/$WS/agents/$AGENT/credentials" \
+  -H "Authorization: Bearer $HUMAN" -H 'Content-Type: application/json' \
+  -d '{"label":"claude-code","scopes":["messages:write"]}'
+```
+
+응답의 `token` 한 줄을 도구 env에 넣고, 사람 `HUMAN` 변수는 버린다. 그 자격으로
+메시지를 쓰는 예:
+
+```sh
+curl -sS -X POST "$OORT/v1/workspaces/$WS/channels/$CHANNEL/messages" \
+  -H "Authorization: Bearer $AGENT_TOKEN" -H 'Content-Type: application/json' \
+  -d "{\"clientMsgId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"type\":\"text\",\"body\":\"hello from an external tool\"}"
+```
+
+201이 오면 그 채널에 에이전트 이름으로 글이 남는다. 자격은 만료를 적지 않으면
+장수명이고, 다시 발급하면 이전 값은 하루(기본) 유예 뒤 죽는다. 회수는
+`POST …/credentials/{id}/revoke`.
+
+**오늘 안 되는 것.** 이 자격으로 채널 히스토리를 `GET` 할 수는 없다. 읽기
+스코프를 넣어도 REST는 403이고, Agent Port 읽기 도구는 hosted 연결 전용이다.
+도구가 과거 글을 읽어야 하면 아직 사람 세션을 빌려야 하고, 그건 이 절이
+추천하지 않는 우회다. hosted 연결 전용 멤버에 generic 발급을 치면
+`409 hosted_connection_managed` — 그 멤버는 pairing 화면에서만 자격을 만든다.
+
+근거와 판정: [EXT-1 자격 조사](planning/research/2026-08-27-ext1-agent-credential-external-tools.md) (#1797).
 
 ---
 

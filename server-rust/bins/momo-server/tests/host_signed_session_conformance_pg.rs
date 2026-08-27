@@ -19,6 +19,7 @@
 //! |---|---|
 //! | `hss_1_unsigned_and_foreign_host_are_refused_then_the_owner_flips_attach` | drop the host-signed create/bind arms, accept a human PTY field, or skip the `controlId` ↔ dispatched-spawn pin |
 //! | `hss_2_only_the_signing_host_may_move_running_and_idle` | let a human PATCH idle/running, or skip the host pin on the lifecycle arm |
+//! | `hss_3_host_signed_acp_event_lands_on_the_session_ledger` | refuse a valid signed ACP event, skip the unsigned 400 lock, or skip the thread-ledger write |
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -486,6 +487,31 @@ fn create_body(channel: Uuid, host_id: &str, control: Uuid) -> Value {
     })
 }
 
+fn valid_acp_event(session: &str, channel: Uuid) -> Value {
+    valid_acp_event_with_id(session, channel, Uuid::new_v4())
+}
+
+fn valid_acp_event_with_id(session: &str, channel: Uuid, event_id: Uuid) -> Value {
+    json!({
+        "event": {
+            "event_id": event_id,
+            "type": "agent.status",
+            "v": 1,
+            "ts": 1_784_678_400_000i64,
+            "payload": {
+                "run_id": session,
+                "work_session_id": session,
+                "channel_id": channel,
+                "phase": "thinking",
+                "run_status": "running",
+                "detail": "Plan ready",
+                "has_plan": true,
+                "plan": [{"content": "Implement relay"}],
+            }
+        }
+    })
+}
+
 #[tokio::test]
 #[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
 async fn hss_1_unsigned_and_foreign_host_are_refused_then_the_owner_flips_attach() {
@@ -727,19 +753,16 @@ async fn hss_1_unsigned_and_foreign_host_are_refused_then_the_owner_flips_attach
         "work session already has a different remote PTY binding"
     );
 
-    // ACP stays refused-by-name (follow-up requested in the #1777 PR).
-    let acp = signed_host(
-        &http,
-        &base,
-        &host_seed,
-        workspace,
-        &host_id,
-        "PATCH",
-        &session_path(workspace, &session),
-        &json!({"event": {"type": "session_info"}}),
-    )
-    .await;
-    let (status, message) = error_message(acp).await;
+    // Unsigned ACP stays closed by the current sentence (regression lock).
+    // The signed happy path is `hss_3`.
+    let unsigned_acp = http
+        .patch(format!("{base}{}", session_path(workspace, &session)))
+        .bearer_auth(&owner_token)
+        .json(&valid_acp_event(&session, fixture.channel))
+        .send()
+        .await
+        .expect("human ACP");
+    let (status, message) = error_message(unsigned_acp).await;
     assert_eq!(status, 400);
     assert_eq!(message, "ACP event ingestion requires work host signature");
 }
@@ -847,4 +870,162 @@ async fn hss_2_only_the_signing_host_may_move_running_and_idle() {
     assert_eq!(running.status(), 200);
     let running_body: Value = running.json().await.expect("running body");
     assert_eq!(running_body["workSession"]["status"], "running");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + bootstrap_roles.sql"]
+async fn hss_3_host_signed_acp_event_lands_on_the_session_ledger() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let fixture = seed_fixture(&su, &app_pool).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let workspace = fixture.workspace;
+
+    let owner_token = login(&http, &base, workspace, &fixture.owner_email).await;
+    let agent_token = agent_bearer(&su, &fixture).await;
+    let (host_id, host_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let (other_id, other_seed) = register_host(&http, &base, &owner_token, workspace, true).await;
+    let control = dispatch_spawn(
+        &http,
+        &base,
+        &owner_token,
+        &agent_token,
+        &fixture,
+        &host_id,
+        LABEL,
+    )
+    .await;
+
+    let created = signed_host(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        "POST",
+        &create_path(workspace),
+        &create_body(fixture.channel, &host_id, control),
+    )
+    .await;
+    assert_eq!(created.status(), 201);
+    let created_body: Value = created.json().await.expect("created");
+    let session = created_body["workSession"]["id"]
+        .as_str()
+        .expect("id")
+        .to_string();
+    let root = created_body["workSession"]["rootMessageId"]
+        .as_str()
+        .expect("root")
+        .to_string();
+
+    let unsigned = http
+        .patch(format!("{base}{}", session_path(workspace, &session)))
+        .bearer_auth(&owner_token)
+        .json(&valid_acp_event(&session, fixture.channel))
+        .send()
+        .await
+        .expect("human ACP");
+    let (status, message) = error_message(unsigned).await;
+    assert_eq!(status, 400);
+    assert_eq!(message, "ACP event ingestion requires work host signature");
+
+    let foreign = signed_host(
+        &http,
+        &base,
+        &other_seed,
+        workspace,
+        &other_id,
+        "PATCH",
+        &session_path(workspace, &session),
+        &valid_acp_event(&session, fixture.channel),
+    )
+    .await;
+    let (status, message) = error_message(foreign).await;
+    assert_eq!(status, 403);
+    assert_eq!(message, "work host cannot relay another host session");
+
+    let event_id = Uuid::new_v4();
+    let accepted = signed_host(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        "PATCH",
+        &session_path(workspace, &session),
+        &valid_acp_event_with_id(&session, fixture.channel, event_id),
+    )
+    .await;
+    assert_eq!(
+        accepted.status(),
+        200,
+        "a valid host-signed ACP event must be ingested"
+    );
+    let accepted_body: Value = accepted.json().await.expect("accepted body");
+    assert_eq!(accepted_body["workSession"]["id"], session);
+    assert_eq!(accepted_body["workSession"]["status"], "running");
+
+    let replies = http
+        .get(format!(
+            "{base}/v1/workspaces/{workspace}/channels/{}/messages/{root}/replies",
+            fixture.channel
+        ))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("re-read the session thread");
+    assert_eq!(replies.status(), 200, "the session ledger is readable");
+    let replies_body: Value = replies.json().await.expect("replies body");
+    let messages = replies_body["messages"].as_array().expect("messages array");
+    let landed = messages
+        .iter()
+        .find(|row| {
+            row["props"]["kind"] == "work_session_event"
+                && row["props"]["schema"] == "momo.work_session.acp_event.v1"
+                && row["props"]["event_id"]
+                    .as_str()
+                    .is_some_and(|id| id.eq_ignore_ascii_case(&event_id.to_string()))
+        })
+        .expect("the ACP event is on the session thread ledger");
+    assert_eq!(landed["type"], "system");
+    assert_eq!(landed["body"], "Plan ready");
+    assert_eq!(landed["props"]["source"], "acp");
+    assert_eq!(landed["props"]["event_type"], "agent.status");
+    assert_eq!(landed["props"]["event"]["phase"], "thinking");
+
+    let again = signed_host(
+        &http,
+        &base,
+        &host_seed,
+        workspace,
+        &host_id,
+        "PATCH",
+        &session_path(workspace, &session),
+        &valid_acp_event_with_id(&session, fixture.channel, event_id),
+    )
+    .await;
+    assert_eq!(again.status(), 200, "the same event_id is idempotent");
+    let again_replies = http
+        .get(format!(
+            "{base}/v1/workspaces/{workspace}/channels/{}/messages/{root}/replies",
+            fixture.channel
+        ))
+        .bearer_auth(&owner_token)
+        .send()
+        .await
+        .expect("re-read after retry");
+    let again_body: Value = again_replies.json().await.expect("retry replies");
+    let matching = again_body["messages"]
+        .as_array()
+        .expect("messages")
+        .iter()
+        .filter(|row| {
+            row["props"]["event_id"]
+                .as_str()
+                .is_some_and(|id| id.eq_ignore_ascii_case(&event_id.to_string()))
+        })
+        .count();
+    assert_eq!(matching, 1, "a retried event_id must not double-write");
 }
