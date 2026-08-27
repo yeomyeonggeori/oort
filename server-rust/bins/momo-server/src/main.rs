@@ -64,6 +64,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // whether a shared drive was named — never the key path's contents and
         // never a token.
         drive_backend = %config.drive.backend,
+        drive_local_base = %config.drive.local_base(
+            config.port,
+            &format!("http://127.0.0.1:{}", config.port)
+        ),
         drive_configured = config.drive.shared_drive_id.is_some()
             || config.drive.backend == momo_drive::LOCAL_BACKEND,
         livekit_configured = config.livekit.is_some(),
@@ -206,7 +210,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ADR-0151: the attachment surface answers 503 unless the operator named a
     // service-account key and a shared drive. The routes are mounted either way,
     // so "no archive here" is distinguishable from "no such route".
-    .with_drive(drive);
+    // ADR-0169 증보 1: local capability URLs follow the 0167 Host/XFP pair
+    // when the operator named `same-origin`; google/stub stay Fixed-empty.
+    .with_drive(drive)
+    .with_drive_local_base(
+        config
+            .drive
+            .local_base(config.port, &format!("http://127.0.0.1:{}", config.port)),
+    );
     let state = match config.livekit.clone() {
         Some(livekit) => state.with_livekit(livekit),
         None => state,

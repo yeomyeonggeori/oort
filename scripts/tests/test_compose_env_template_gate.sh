@@ -193,7 +193,29 @@ $GUARD_OUT"
 pass "commented prose and \${VAR:-default} do not become requirements"
 
 # =============================================================================
-# Case 8 — missing tool fails closed. A gate that turns itself off when its tool
+# Case 8 — #1781: `$${VAR:?}` is a container-shell requirement, not a compose
+# interpolation. The huddle LiveKit entrypoint writes this form so operators
+# who never select `--profile huddle` are not asked for secrets. A guard that
+# cannot tell `$$` from `$` turns every rust rendering red on the documented
+# empty template lines. Adding a new escaped requirement that no template
+# fills must stay green; inventing a requirement here is the false alarm.
+# =============================================================================
+tree="$(new_tree escaped-shell-required)"
+cat >>"$tree/infra/rust/docker-compose.rust.yml" <<'EOF'
+
+x-momo-1781-escape-probe: ": $${A_SHELL_ONLY:?set A_SHELL_ONLY}"
+EOF
+run_guard "$tree" --skip-docker
+[ "$GUARD_STATUS" -eq 0 ] || fail "guard treated \$\${VAR:?} as a compose requirement
+$GUARD_OUT"
+case "$GUARD_OUT" in
+  *"A_SHELL_ONLY"*) fail "guard named the escaped shell key A_SHELL_ONLY
+$GUARD_OUT" ;;
+esac
+pass "\$\${VAR:?} (compose-escaped shell required) does not become a template requirement"
+
+# =============================================================================
+# Case 9 — missing tool fails closed. A gate that turns itself off when its tool
 # is absent is a gate that reports green on the day it matters (#1236).
 # =============================================================================
 mkdir -p "$SANDBOX_ROOT/nodocker"

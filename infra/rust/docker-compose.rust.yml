@@ -251,6 +251,12 @@ services:
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
       # ADR-0171: exact lowercase `true` only. Unset = doorbell register routes 404.
       MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
+      # HAP-E6 / ADR-0162: prerequisite of the doorbell. Exact lowercase `true`
+      # only. Unset = mentions skip hosted inbox (`hosted_delivery_not_enabled`)
+      # so a doorbell that is "on" still has nothing to ring. Optional `:-`
+      # keeps this off for stacks that never open hosted delivery (#1781 class:
+      # do not make an unused flag required).
+      MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
       # ADR-0110: the ONLY authority for the realtime address handed to clients.
       # No default — a wrong guess silently points every client at nothing.
       MOMO_CENTRIFUGO_WS_URL: ${MOMO_CENTRIFUGO_WS_URL:?set MOMO_CENTRIFUGO_WS_URL}
@@ -441,6 +447,10 @@ services:
       MOMO_UNFURL_ENABLED: ${MOMO_UNFURL_ENABLED:-0}
       # ADR-0171: exact lowercase `true` only. Unset/anything else = no doorbell drain.
       MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
+      # Same optional pass-through as api. Sender drain consumes inbox rows the
+      # api only writes when this gate is open; without the variable here the
+      # two processes cannot be inspected or restarted as one unit.
+      MOMO_HOSTED_DELIVERY_ENABLED: ${MOMO_HOSTED_DELIVERY_ENABLED:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:

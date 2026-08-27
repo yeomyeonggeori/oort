@@ -45,6 +45,31 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.match-label: com.docker.compose.project
 
 services:
+  # ADR-0169 first-boot: a fresh named volume is root-owned, and the image
+  # USER is uid 10001. Without this one-shot the api fails closed
+  # (`MOMO_DRIVE_LOCAL_DIR ... not writable`) and restart-loops. chown the
+  # mount point only — a later write failure is still a boot error.
+  # Hosted google (caddy.override.yml) never includes this file, so it never
+  # grows a volume or an init.
+  drive-init:
+    image: ${MOMO_RUST_IMAGE:?set MOMO_RUST_IMAGE}
+    user: "0:0"
+    mem_limit: ${MOMO_DRIVE_INIT_MEM_LIMIT:-64m}
+    labels: *momo-janitor-labels
+    restart: "no"
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        dir="$${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}"
+        mkdir -p "$$dir"
+        chown 10001:10001 "$$dir"
+    environment:
+      MOMO_DRIVE_LOCAL_DIR: ${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}
+    volumes:
+      - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}
+    networks:
+      - private
+
   # ADR-0169 — local file archive. The api service is defined in
   # docker-compose.rust.yml; this overlay only adds the named volume so a
   # hosted google path (caddy.override.yml, no this file) never grows a
@@ -52,6 +77,9 @@ services:
   api:
     volumes:
       - drive-archive:${MOMO_DRIVE_LOCAL_DIR:-/var/lib/oort/drive}
+    depends_on:
+      drive-init:
+        condition: service_completed_successfully
 
   # SPA 스테이징 원샷. 이미지 안의 dist를 볼륨으로 **교체 복사**한다(merge 아님):
   # 다운그레이드가 새 청크를 남겨 두면 낡은 index.html이 없는 파일을 부른다.

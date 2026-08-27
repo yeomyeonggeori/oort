@@ -36,6 +36,8 @@ pub mod invites;
 pub mod join;
 pub mod messages;
 pub mod notification_rules;
+/// #1767 — operator-issued password reset + self password change.
+pub mod password;
 /// ADR-0160 — declared presence status ③ (durable). The availability ② half is
 /// in [`ephemeral`]; the connection ① half never reaches the server.
 pub mod presence;
@@ -59,6 +61,7 @@ pub mod work_controls;
 pub mod work_hosts;
 pub mod work_sessions;
 pub mod work_tier_policy;
+pub mod work_tool_profiles;
 /// ADR-0161 D5 — the workspace avatar media surface (upload session, completion,
 /// the content proxy), the attachment surface re-aimed at a workspace.
 pub mod workspace_avatar;

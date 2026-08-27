@@ -148,9 +148,12 @@ pub use jwt::{
     verify_app_access, verify_app_refresh, AppClaims, AuthError, Principal, PrincipalKind,
 };
 pub use owner_claim::{
-    consume_claim_in_tx, mint_owner_claim_token, normalized_claim_password, normalized_claim_token,
+    change_own_password_in_tx, consume_claim_in_tx, issue_password_reset_in_tx,
+    mint_owner_claim_token, normalized_claim_password, normalized_claim_token,
     resolve_claim_workspace, ClaimInputError, ClaimMutation, ClaimOutcome, ClaimSpecInvalid,
-    OWNER_CLAIM_TOKEN_LEN, OWNER_CLAIM_TTL_SECONDS,
+    IssuedPasswordReset, PasswordChangeMutation, PasswordResetIssueError,
+    CLAIM_KIND_OWNER_BOOTSTRAP, CLAIM_KIND_PASSWORD_RESET, OWNER_CLAIM_TOKEN_LEN,
+    OWNER_CLAIM_TTL_SECONDS,
 };
 pub use realtime::{
     realtime_info_string, sign_centrifugo_connection, CentrifugoConnectionClaims,
@@ -159,9 +162,9 @@ pub use realtime::{
 };
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, record_session_token,
-    revoke_privileged_session_tokens, revoke_token, token_state, without_privileged_scopes,
-    RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES, SCOPE_REALTIME_SUBSCRIBE,
-    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    revoke_member_session_tokens, revoke_privileged_session_tokens, revoke_token, token_state,
+    without_privileged_scopes, RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES,
+    SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{
     consume_work_host_request_id, load_work_host_signing_credential, WorkHostSigningCredential,

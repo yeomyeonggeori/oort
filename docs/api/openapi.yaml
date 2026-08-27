@@ -17,10 +17,9 @@ openapi: 3.0.3
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
-# and interactive Work
-# Console control surfaces. Other routes (invite admin,
-# workspace identity, legacy agent credential/run surfaces, cost projection, platform admin,
-# centrifugo proxy, health) remain intentionally undocumented here.
+# and interactive Work Console control surfaces. Other routes (workspace
+# identity, legacy agent credential/run surfaces, cost projection, platform
+# admin, centrifugo proxy, health) remain intentionally undocumented here.
 # Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
 # documented separately in docs/api/openapi.operator.yaml.
 #
@@ -66,8 +65,12 @@ tags:
     description: Session token issuance, rotation, revocation, realtime token.
   - name: join
     description: Public invite self-signup (no auth required).
+  - name: invites
+    description: Workspace invite-code admin (owner/admin) and member self-redeem.
   - name: claim
-    description: Public first-owner claim (ADR-0166). One-time token sets the owner password.
+    description: >
+      Public credential claim (ADR-0166 / #1767). One-time token sets a
+      password — first-owner bootstrap or operator-issued password reset.
   - name: roster
     description: Workspace member roster.
   - name: membership-admin
@@ -320,15 +323,264 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/invites:
+    get:
+      tags: [invites]
+      operationId: listWorkspaceInvites
+      summary: List invite codes for a workspace (owner/admin).
+      description: >
+        Newest-first. Projects a 6-character preview only — the raw code is
+        never stored and is not returned here. `include_revoked=true` (or
+        `includeRevoked=true`) includes revoked rows. `limit` clamps to 1..200
+        (default 50).
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: include_revoked
+          in: query
+          required: false
+          schema: {type: string}
+          description: Literal `true` includes revoked rows. Camel alias `includeRevoked`.
+        - name: includeRevoked
+          in: query
+          required: false
+          schema: {type: string}
+        - name: limit
+          in: query
+          required: false
+          schema: {type: integer, minimum: 1, maximum: 200, default: 50}
+      responses:
+        "200":
+          description: Invite metadata list (no raw codes).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteListResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+    post:
+      tags: [invites]
+      operationId: createWorkspaceInvite
+      summary: Create an invite code (owner/admin).
+      description: >
+        The raw code is returned exactly once in this 201 body. The durable
+        record is `sha256(raw)`. Examples and samples must never carry a live
+        code.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateInviteRequest"}
+      responses:
+        "201":
+          description: Created invite plus the one-time raw code.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateInviteResponse"}
+        "400":
+          description: Role, maxUses, or expiresAtMs rejected.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  /v1/workspaces/{workspaceId}/invites/redeem:
+    post:
+      tags: [invites]
+      operationId: redeemWorkspaceInvite
+      summary: Redeem an invite code as an existing workspace member.
+      description: >
+        Swift `InviteRoutes.redeem`. Distinct from public `POST /v1/join`.
+        Does not create a member. The request carries the raw code; the
+        response never echoes it.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RedeemInviteRequest"}
+      responses:
+        "200":
+          description: Invite metadata after the increment, plus redemption id.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/RedeemInviteResponse"}
+        "400":
+          description: Code is invalid, expired, exhausted, revoked, or already redeemed.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Not a workspace member, or banned.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  /v1/workspaces/{workspaceId}/invites/{inviteId}:
+    get:
+      tags: [invites]
+      operationId: getWorkspaceInvite
+      summary: Read one invite and its redemptions (owner/admin).
+      description: >
+        Redeem-status lookup. Returns usedCount / revokedAt plus the
+        redemption audit rows. No raw code.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "200":
+          description: Invite metadata and redemption rows.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteStatusResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Invite not found in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+    delete:
+      tags: [invites]
+      operationId: deleteWorkspaceInvite
+      summary: Revoke an unused invite (owner/admin).
+      description: >
+        Same handler as `POST …/revoke`. Exhausted codes (`usedCount >= maxUses`)
+        are 409. Already-revoked is idempotent 200 without a second audit row.
+        Optional JSON body `{reason}` is accepted; an empty body is a revoke
+        with no reason.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/InviteId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevokeInviteRequest"}
+      responses:
+        "200":
+          description: Current invite metadata after revoke.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteCode"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Invite not found in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Invite is already consumed (no remaining uses).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  /v1/workspaces/{workspaceId}/invites/{inviteId}/revoke:
+    post:
+      tags: [invites]
+      operationId: revokeWorkspaceInvite
+      summary: Revoke an unused invite (Swift path).
+      description: >
+        Swift `POST …/revoke`. Same contract as `DELETE …/invites/{inviteId}`.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/InviteId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RevokeInviteRequest"}
+      responses:
+        "200":
+          description: Current invite metadata after revoke.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/InviteCode"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Invite not found in this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Invite is already consumed (no remaining uses).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
+  /v1/workspaces/{workspaceId}/invites/{inviteId}/regenerate:
+    post:
+      tags: [invites]
+      operationId: regenerateWorkspaceInvite
+      summary: Revoke the old code and mint a replacement (owner/admin).
+      description: >
+        Copies role, maxUses, and metadata. Expiry resets to seven days. The
+        previous code is immediately invalid. The new raw code is returned
+        once; examples and samples must never carry a live code.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/InviteId"
+      responses:
+        "201":
+          description: Replacement invite plus the one-time raw code.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/CreateInviteResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a workspace owner/admin.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Invite not found or already revoked.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+
   /v1/claim:
     post:
       tags: [claim]
       operationId: publicClaim
-      summary: Consume a first-owner claim token and set the password (public, no auth).
+      summary: Consume a claim token and set the password (public, no auth).
       description: >
-        ADR-0166. Redeems a one-time 32-byte claim token issued by momo-migrate
-        claim mode, sets the seeded owner's password in the same transaction,
-        and issues a session token pair. The raw token is never stored (sha256
+        ADR-0166 / #1767. Redeems a one-time 32-byte claim token
+        (`owner_bootstrap` from momo-migrate, or `password_reset` issued by an
+        owner/admin). Sets the target human's password in the same transaction
+        and issues a session token pair. `password_reset` also revokes that
+        member's other session tokens. The raw token is never stored (sha256
         only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
       security: []
       requestBody:
@@ -501,6 +753,103 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {description: Caller is the last active owner, content: {application/json: {schema: {$ref: "#/components/schemas/ErrorResponse"}}}}
+
+  /v1/workspaces/{workspaceId}/members/me/password:
+    patch:
+      tags: [auth]
+      operationId: changeOwnPassword
+      summary: Change the caller's password after reconfirming the current one.
+      description: >
+        #1767. Requires the current password. On success every live session
+        token of this member is revoked and a fresh access/refresh pair is
+        issued (same LoginResponse shape as login/claim). Agent bearers are
+        not touched. Per-member and per-IP rate limited.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ChangePasswordRequest"
+      responses:
+        "200":
+          description: Password changed; previous sessions revoked; new pair issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoginResponse"
+        "400":
+          description: Password shape invalid, or new password equals current.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Current password is incorrect, or caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Caller has no password to change (use claim).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members/{memberId}/password-reset:
+    post:
+      tags: [membership-admin]
+      operationId: issuePasswordReset
+      summary: Issue a one-time password-reset claim for a human member.
+      description: >
+        #1767 / ADR-0128 D2. Owner or admin only. Hierarchy is judged in the
+        same tenant transaction as the issue (route-layer admin check is not
+        the authority): owner may reset any other human, including another
+        owner (the multi-owner unlock path); admin may reset member and guest
+        only. Self-reset is always 403 — use PATCH …/members/me/password.
+        Mints a 32-byte token (same shape as owner_bootstrap), stores sha256
+        only, TTL 24h, single use. Reissue consumes any previous live reset
+        token for that member. The raw token is in this 201 body once — the
+        operator delivers `/claim/<token>` out of band. There is no mailer.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - {name: memberId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        "201":
+          description: Reset token issued. Raw token is shown only here.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetClaimResponse"
+        "400":
+          description: Target is not a human member, or member id is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Workspace member not found.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Target member is not active.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
     delete:
@@ -6159,6 +6508,14 @@ components:
       schema:
         type: string
         format: uuid
+    InviteId:
+      name: inviteId
+      in: path
+      required: true
+      description: Invite-code row UUID. Never a raw invite code.
+      schema:
+        type: string
+        format: uuid
     ChannelId:
       name: channelId
       in: path
@@ -6753,10 +7110,42 @@ components:
           type: string
           description: >
             Raw 32-byte claim token (43-char base64url, no padding). Shown once
-            at bootstrap; the server stores only sha256.
+            at issue (migrate bootstrap or operator reset); the server stores
+            only sha256.
         password:
           type: string
-          description: Required, at most 1024 chars. Set on the first owner.
+          description: Required, at most 1024 chars.
+
+    ChangePasswordRequest:
+      type: object
+      additionalProperties: false
+      required: [currentPassword, newPassword]
+      properties:
+        currentPassword:
+          type: string
+          description: The caller's current password. Reconfirm is mandatory.
+        newPassword:
+          type: string
+          description: Replacement password, at most 1024 chars, must differ.
+
+    PasswordResetClaimResponse:
+      type: object
+      additionalProperties: false
+      required: [token, kind, expiresAtMs, claimPath]
+      properties:
+        token:
+          type: string
+          description: Raw 32-byte token. Present only on this 201.
+        kind:
+          type: string
+          enum: [password_reset]
+        expiresAtMs:
+          type: integer
+          format: int64
+        claimPath:
+          type: string
+          description: >
+            /claim/<token> — the existing ClaimPage route.
 
     LoginRequest:
       type: object
@@ -6972,6 +7361,93 @@ components:
         updatedAtMs:
           type: integer
           format: int64
+
+    CreateInviteRequest:
+      type: object
+      properties:
+        role:
+          $ref: "#/components/schemas/MembershipRole"
+        maxUses:
+          type: integer
+          minimum: 1
+          maximum: 10000
+        expiresAtMs:
+          type: integer
+          format: int64
+
+    CreateInviteResponse:
+      type: object
+      required: [invite, code]
+      properties:
+        invite:
+          $ref: "#/components/schemas/InviteCode"
+        code:
+          type: string
+          description: >
+            One-time raw invite code. Shown once at creation/regenerate.
+            Never store this in examples, samples, or logs.
+
+    InviteListResponse:
+      type: object
+      required: [invites]
+      properties:
+        invites:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteCode"
+
+    RevokeInviteRequest:
+      type: object
+      properties:
+        reason:
+          type: string
+
+    RedeemInviteRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          description: Raw invite code supplied by the caller. Not echoed.
+        email:
+          type: string
+
+    RedeemInviteResponse:
+      type: object
+      required: [invite, redemptionId]
+      properties:
+        invite:
+          $ref: "#/components/schemas/InviteCode"
+        redemptionId:
+          type: string
+          format: uuid
+
+    InviteRedemption:
+      type: object
+      required: [id, memberId, redeemedAtMs]
+      properties:
+        id:
+          type: string
+          format: uuid
+        memberId:
+          type: string
+          format: uuid
+        email:
+          type: string
+        redeemedAtMs:
+          type: integer
+          format: int64
+
+    InviteStatusResponse:
+      type: object
+      required: [invite, redemptions]
+      properties:
+        invite:
+          $ref: "#/components/schemas/InviteCode"
+        redemptions:
+          type: array
+          items:
+            $ref: "#/components/schemas/InviteRedemption"
 
     JoinResponse:
       type: object
