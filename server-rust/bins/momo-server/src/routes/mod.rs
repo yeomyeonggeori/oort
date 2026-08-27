@@ -34,6 +34,8 @@ pub mod hosted_agent_doorbell;
 pub mod huddles;
 pub mod invites;
 pub mod join;
+/// #1768 — ADR-0128 D2/D3 member lifecycle (role/suspend/remove/bans/channel leave).
+pub mod member_lifecycle;
 pub mod messages;
 pub mod notification_rules;
 /// #1767 — operator-issued password reset + self password change.
