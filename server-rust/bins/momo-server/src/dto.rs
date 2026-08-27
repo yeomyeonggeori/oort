@@ -888,8 +888,7 @@ pub struct CreateWorkSessionRequest {
 /// `PATCH …/work-sessions/{session}` request (Swift `UpdateWorkSessionRequest`,
 /// :23-38). `#1777` serves `ended` plus host-signed idle/running and
 /// `bindRemotePTY`. `#1778` serves the human-owner `observation` toggle
-/// (`open` | `owner_only`). ACP events stay refused-by-name (follow-up
-/// requested in the #1777 PR).
+/// (`open` | `owner_only`). `#1785` serves host-signed ACP event relay.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct UpdateWorkSessionRequest {
@@ -900,7 +899,7 @@ pub struct UpdateWorkSessionRequest {
     #[serde(default)]
     pub observation: Option<String>,
     #[serde(default)]
-    pub event: Option<Value>,
+    pub event: Option<WorkSessionAcpEvent>,
     #[serde(default)]
     pub pty_id: Option<String>,
     #[serde(default)]
@@ -910,6 +909,20 @@ pub struct UpdateWorkSessionRequest {
     pub display_id: Option<String>,
     #[serde(default)]
     pub display_endpoint: Option<String>,
+}
+
+/// Swift `WorkSessionACPEvent` (`WorkSessionRoutes.swift:40-51`). Wire keys
+/// stay snake_case (`event_id`, `v`, `ts`) because that is what the daemon
+/// already signs and sends.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkSessionAcpEvent {
+    pub event_id: Uuid,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    pub v: i64,
+    pub ts: i64,
+    pub payload: Value,
 }
 
 /// Swift `WorkToolProfileDTO` (`WorkToolProfileRoutes.swift:23-36`).

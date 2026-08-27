@@ -37,8 +37,8 @@
 //!
 //! * Host-signed `POST …/work-sessions` (`controlId` ↔ dispatched spawn) and
 //!   `PATCH` idle/running + `bindRemotePTY` are served (#1777). Observation is
-//!   the human-owner PATCH (#1778). ACP event ingestion stays refused-by-name
-//!   (follow-up requested in the #1777 PR — no existing issue).
+//!   the human-owner PATCH (#1778). ACP event ingestion is the host-signed
+//!   PATCH `event` arm (#1785).
 //! * `resume` drops **one** Swift step now: the audit row (see the crate-level
 //!   note on `momo_db::audit`). The two that mattered are back — the
 //!   `work_tier_policy` gate with `requireResumeTarget` (:1855-1871, #1139) and
@@ -47,6 +47,9 @@
 //!   client could not compensate for: the first made the client-side target
 //!   filter the *only* check in the system, and the second made 「인수」 a
 //!   promise about a ledger row rather than about a running tool.
+
+use std::collections::HashSet;
+use std::time::Duration;
 
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -75,12 +78,13 @@ use momo_t3::{
     NewWorkSession, RemotePtyBinding, RemotePtyHostStatus, T3Error, T3LockLadder,
     TerminationReason, WorkSessionDetail,
 };
-use serde_json::json;
+use serde_json::{json, Map, Value};
 use uuid::Uuid;
 
 use crate::dto::{
-    CreateWorkSessionRequest, ResumeWorkSessionRequest, UpdateWorkSessionRequest, WorkSessionDto,
-    WorkSessionListQuery, WorkSessionListResponse, WorkSessionResponse,
+    CreateWorkSessionRequest, ResumeWorkSessionRequest, UpdateWorkSessionRequest,
+    WorkSessionAcpEvent, WorkSessionDto, WorkSessionListQuery, WorkSessionListResponse,
+    WorkSessionResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -462,7 +466,7 @@ async fn create_in_tx(
 
 /// `PATCH /v1/workspaces/{ws}/work-sessions/{session}` (Swift `end`, :328-601).
 ///
-/// Dispatcher: bindRemotePTY, ACP (refused), observation (human owner, #1778),
+/// Dispatcher: bindRemotePTY, ACP (#1785), observation (human owner, #1778),
 /// idle/running, then the `status: "ended"` arm.
 pub async fn end(
     State(state): State<AppState>,
@@ -497,12 +501,22 @@ pub async fn end(
         }
         return bind_remote_pty(state, principal, workspace_id, session_id, &request).await;
     }
-    if request.event.is_some() {
-        // TODO(follow-up): ACP event ingestion — no existing issue; request
-        // issued in the #1777 PR. Keep refused-by-name until that ticket.
-        return Err(ApiError::bad_request(
-            "ACP event ingestion requires work host signature",
-        ));
+    if let Some(event) = request.event {
+        if request.status.is_some() || request.exit_code.is_some() || request.observation.is_some()
+        {
+            return Err(ApiError::bad_request(
+                "event cannot be combined with lifecycle fields",
+            ));
+        }
+        // Unsigned keeps the current 400 sentence (regression lock). Swift's
+        // in-handler check is 403 "ACP events require work host signature";
+        // #1777 kept the existing unsigned 400 for the other host-only arms.
+        if principal.kind != PrincipalKind::WorkHost {
+            return Err(ApiError::bad_request(
+                "ACP event ingestion requires work host signature",
+            ));
+        }
+        return record_acp_event(state, principal, workspace_id, session_id, event).await;
     }
     if let Some(observation) = request.observation.as_deref() {
         if request.status.is_some() || request.exit_code.is_some() {
@@ -911,6 +925,371 @@ async fn update_observation_in_tx(
     .map_err(T3Error::from)?;
 
     Ok(Ok(updated))
+}
+
+// ---------------------------------------------------------------------------
+// ACP event relay (host-signed, #1785)
+// ---------------------------------------------------------------------------
+
+const ACP_EVENT_RATE_WINDOW_SECONDS: u64 = 60;
+const MAXIMUM_ACP_EVENTS_PER_WINDOW: u32 = 240;
+const MAXIMUM_ACP_EVENT_BYTES: usize = 65_536;
+
+const FORBIDDEN_ACP_KEY_NEEDLES: &[&str] = &[
+    "_meta",
+    "credential",
+    "token",
+    "secret",
+    "environment",
+    "env",
+    "command",
+    "output",
+    "cwd",
+    "path",
+    "raw",
+];
+
+#[derive(Debug)]
+struct ValidatedAcpEvent {
+    channel_id: Uuid,
+    body: String,
+    safe_payload: Value,
+    props: Value,
+}
+
+/// Swift `recordACPEvent` (`WorkSessionRoutes.swift:1400-1555`).
+async fn record_acp_event(
+    state: AppState,
+    principal: Principal,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    event: WorkSessionAcpEvent,
+) -> Result<Json<WorkSessionResponse>, ApiError> {
+    let Some(signing_host_id) = principal.token_id else {
+        return Err(signed_request_unauthorized());
+    };
+    let encoded = serde_json::to_vec(&event)
+        .map_err(|_| ApiError::bad_request("invalid ACP event envelope"))?;
+    if encoded.len() > MAXIMUM_ACP_EVENT_BYTES {
+        return Err(ApiError::bad_request("ACP event exceeds 65536 bytes"));
+    }
+    let normalized = validated_acp_event(&event, session_id)?;
+    let key = format!("work-acp:{workspace_id}:{session_id}");
+    if !state
+        .rate_limit
+        .limiter
+        .check(
+            &key,
+            MAXIMUM_ACP_EVENTS_PER_WINDOW,
+            Duration::from_secs(ACP_EVENT_RATE_WINDOW_SECONDS),
+        )
+        .allowed
+    {
+        return Err(ApiError::new(
+            StatusCode::TOO_MANY_REQUESTS,
+            "ACP event rate limit exceeded",
+        ));
+    }
+
+    let detail = settle(
+        "work_sessions.record_acp_event",
+        tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                record_acp_event_in_tx(
+                    conn,
+                    workspace_id,
+                    session_id,
+                    signing_host_id,
+                    &event,
+                    &normalized,
+                )
+                .await
+            })
+        })
+        .await,
+    )?;
+    Ok(Json(WorkSessionResponse {
+        work_session: session_dto(detail),
+    }))
+}
+
+async fn record_acp_event_in_tx(
+    conn: &mut momo_db::PgConnection,
+    workspace_id: Uuid,
+    session_id: Uuid,
+    signing_host_id: Uuid,
+    event: &WorkSessionAcpEvent,
+    normalized: &ValidatedAcpEvent,
+) -> Rejectable<WorkSessionDetail> {
+    let Some((existing, _)) =
+        lock_work_session_detail_in_tx(conn, workspace_id, session_id).await?
+    else {
+        return Ok(Err(ApiError::not_found("work session not found")));
+    };
+    if existing.host_id != signing_host_id {
+        return Ok(Err(ApiError::forbidden(
+            "work host cannot relay another host session",
+        )));
+    }
+    if existing.status != "running" {
+        return Ok(Err(ApiError::new(
+            StatusCode::CONFLICT,
+            "work session is not running",
+        )));
+    }
+    if normalized.channel_id != existing.channel_id {
+        return Ok(Err(ApiError::bad_request(
+            "ACP event channel does not match session",
+        )));
+    }
+    if !is_active_channel_member_in_tx(conn, workspace_id, existing.channel_id, existing.member_id)
+        .await?
+    {
+        return Ok(Err(ApiError::forbidden(
+            "active channel membership required",
+        )));
+    }
+
+    let sent = send_message_in_tx(
+        conn,
+        workspace_id,
+        NewMessage {
+            channel_id: existing.channel_id,
+            author_member_id: existing.member_id,
+            message_type: MessageType::System,
+            body: Some(normalized.body.clone()),
+            props: normalized.props.clone(),
+            root_id: Some(existing.root_message_id),
+            reply_to_id: None,
+            client_msg_id: Some(event.event_id),
+            run_id: None,
+            hlc_ts: None,
+            hlc_count: None,
+        },
+    )
+    .await
+    .map_err(T3Error::from)?;
+
+    if !sent.deduped {
+        let channel = cent_channel(workspace_id, existing.channel_id);
+        emit_outbox(
+            &mut *conn,
+            workspace_id,
+            OutboxKind::Broadcast,
+            "publish",
+            &acp_event_payload(
+                &channel,
+                event,
+                &normalized.safe_payload,
+                sent.message.id,
+                existing.root_message_id,
+                sent.message.seq,
+            ),
+            Some(existing.channel_id),
+        )
+        .await
+        .map_err(|error| T3Error::from(momo_db::DbError::from(error)))?;
+    }
+
+    Ok(Ok(existing))
+}
+
+/// Swift `validatedACPEvent` (`WorkSessionRoutes.swift:2203-2291`).
+fn validated_acp_event(
+    event: &WorkSessionAcpEvent,
+    session_id: Uuid,
+) -> Result<ValidatedAcpEvent, ApiError> {
+    let Some(payload) = event.payload.as_object() else {
+        return Err(ApiError::bad_request("invalid ACP event envelope"));
+    };
+    if event.v != 1 || event.ts < 0 || contains_forbidden_acp_key(&event.payload) {
+        return Err(ApiError::bad_request("invalid ACP event envelope"));
+    }
+    let Some(channel_id) = payload
+        .get("channel_id")
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+    else {
+        return Err(ApiError::bad_request(
+            "ACP event session binding is invalid",
+        ));
+    };
+    if !uuid_field_eq(payload.get("run_id"), session_id)
+        || !uuid_field_eq(payload.get("work_session_id"), session_id)
+    {
+        return Err(ApiError::bad_request(
+            "ACP event session binding is invalid",
+        ));
+    }
+
+    let mut allowed: HashSet<&str> = ["run_id", "work_session_id", "channel_id", "agent_member_id"]
+        .into_iter()
+        .collect();
+    let body = match event.event_type.as_str() {
+        "agent.partial" => {
+            allowed.insert("text_delta");
+            let Some(text) = payload.get("text_delta").and_then(Value::as_str) else {
+                return Err(ApiError::bad_request("invalid ACP progress text"));
+            };
+            if text.is_empty() || text.len() > 4_096 {
+                return Err(ApiError::bad_request("invalid ACP progress text"));
+            }
+            text.to_string()
+        }
+        "agent.status" => {
+            allowed.extend([
+                "phase",
+                "run_status",
+                "detail",
+                "tool_call_name",
+                "has_plan",
+                "plan",
+                "terminal_event",
+                "exit_code",
+            ]);
+            let phase = payload.get("phase").and_then(Value::as_str);
+            let run_status = payload.get("run_status").and_then(Value::as_str);
+            if !matches!(phase, Some("thinking") | Some("streaming"))
+                || run_status != Some("running")
+            {
+                return Err(ApiError::bad_request("invalid ACP status projection"));
+            }
+            if let Some(detail) = payload.get("detail").and_then(Value::as_str) {
+                if detail.len() > 4_096 {
+                    return Err(ApiError::bad_request("ACP status detail is too large"));
+                }
+            }
+            if let Some(terminal) = payload.get("terminal_event").and_then(Value::as_str) {
+                if terminal != "created" && terminal != "ended" {
+                    return Err(ApiError::bad_request("invalid ACP terminal event"));
+                }
+            }
+            payload
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or("ACP session update")
+                .to_string()
+        }
+        "approval.requested" => {
+            allowed.extend(["action", "action_type", "status", "options"]);
+            let Some(options) = payload.get("options").and_then(Value::as_array) else {
+                return Err(ApiError::bad_request("invalid ACP approval request"));
+            };
+            if payload.get("action").and_then(Value::as_str) != Some("requested")
+                || payload.get("action_type").and_then(Value::as_str) != Some("tool_call")
+                || payload.get("status").and_then(Value::as_str) != Some("pending")
+                || options.is_empty()
+                || options.len() > 16
+            {
+                return Err(ApiError::bad_request("invalid ACP approval request"));
+            }
+            let option_allowed: HashSet<&str> = ["option_id", "name", "kind"].into_iter().collect();
+            for option in options {
+                let Some(item) = option.as_object() else {
+                    return Err(ApiError::bad_request("invalid ACP approval option"));
+                };
+                let option_keys: HashSet<&str> = item.keys().map(String::as_str).collect();
+                let option_id = item.get("option_id").and_then(Value::as_str);
+                let name = item.get("name").and_then(Value::as_str);
+                if !option_keys.is_subset(&option_allowed)
+                    || !option_id.is_some_and(|id| !id.is_empty() && id.len() <= 128)
+                    || !name.is_some_and(|name| !name.is_empty() && name.len() <= 256)
+                {
+                    return Err(ApiError::bad_request("invalid ACP approval option"));
+                }
+            }
+            "Approval requested".to_string()
+        }
+        "approval.decided" => {
+            allowed.extend(["action", "status", "option_id"]);
+            let status = payload.get("status").and_then(Value::as_str);
+            if payload.get("action").and_then(Value::as_str) != Some("decided")
+                || !matches!(status, Some("approved") | Some("rejected"))
+            {
+                return Err(ApiError::bad_request("invalid ACP approval decision"));
+            }
+            if status == Some("approved") {
+                "Approval granted".to_string()
+            } else {
+                "Approval rejected".to_string()
+            }
+        }
+        _ => return Err(ApiError::bad_request("unsupported ACP event type")),
+    };
+
+    let keys: HashSet<&str> = payload.keys().map(String::as_str).collect();
+    if !keys.is_subset(&allowed) {
+        return Err(ApiError::bad_request(
+            "ACP event contains non-summary fields",
+        ));
+    }
+
+    let safe_payload = Value::Object(payload.clone());
+    let props = json!({
+        "kind": "work_session_event",
+        "schema": "momo.work_session.acp_event.v1",
+        "source": "acp",
+        "event_id": event.event_id.to_string(),
+        "event_type": event.event_type,
+        "event_ts": event.ts,
+        "event": safe_payload.clone(),
+    });
+    Ok(ValidatedAcpEvent {
+        channel_id,
+        body,
+        safe_payload,
+        props,
+    })
+}
+
+/// Swift `acpEventPayload` (`WorkSessionRoutes.swift:2293-2317`).
+fn acp_event_payload(
+    channel: &str,
+    event: &WorkSessionAcpEvent,
+    safe_payload: &Value,
+    message_id: Uuid,
+    root_message_id: Uuid,
+    seq: i64,
+) -> Value {
+    let mut payload = match safe_payload {
+        Value::Object(object) => object.clone(),
+        _ => Map::new(),
+    };
+    payload.insert("event_id".into(), json!(event.event_id.to_string()));
+    payload.insert("message_id".into(), json!(message_id.to_string()));
+    payload.insert("root_message_id".into(), json!(root_message_id.to_string()));
+    json!({
+        "channel": channel,
+        "data": {
+            "type": event.event_type,
+            "v": 1,
+            "ts": event.ts,
+            "seq": seq,
+            "payload": payload,
+        },
+        "idempotency_key": format!("{channel}:acp:{}", event.event_id),
+    })
+}
+
+fn uuid_field_eq(value: Option<&Value>, expected: Uuid) -> bool {
+    value
+        .and_then(Value::as_str)
+        .and_then(|raw| Uuid::parse_str(raw).ok())
+        == Some(expected)
+}
+
+fn contains_forbidden_acp_key(value: &Value) -> bool {
+    match value {
+        Value::Object(object) => object.iter().any(|(key, child)| {
+            let lowered = key.to_ascii_lowercase();
+            FORBIDDEN_ACP_KEY_NEEDLES
+                .iter()
+                .any(|needle| lowered.contains(needle))
+                || contains_forbidden_acp_key(child)
+        }),
+        Value::Array(array) => array.iter().any(contains_forbidden_acp_key),
+        _ => false,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1785,6 +2164,74 @@ mod tests {
         assert_ne!(
             ended["idempotency_key"], started["idempotency_key"],
             "started and ended must not collapse onto one idempotency key"
+        );
+    }
+
+    #[test]
+    fn acp_event_validation_and_no_version_projection() {
+        assert_eq!(MAXIMUM_ACP_EVENTS_PER_WINDOW, 240);
+        assert_eq!(ACP_EVENT_RATE_WINDOW_SECONDS, 60);
+        assert_eq!(MAXIMUM_ACP_EVENT_BYTES, 65_536);
+
+        let session_id = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0531);
+        let channel_id = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0202);
+        let event_id = Uuid::from_u128(0x0000_0000_0000_7000_8000_0000_0000_0546);
+        let event = WorkSessionAcpEvent {
+            event_id,
+            event_type: "agent.status".into(),
+            v: 1,
+            ts: 1_784_678_400_000,
+            payload: json!({
+                "run_id": session_id,
+                "work_session_id": session_id,
+                "channel_id": channel_id,
+                "phase": "thinking",
+                "run_status": "running",
+                "detail": "Plan ready",
+                "has_plan": true,
+                "plan": [{"content": "Implement relay"}],
+            }),
+        };
+        let validated = validated_acp_event(&event, session_id).expect("valid status");
+        assert_eq!(validated.channel_id, channel_id);
+        assert_eq!(validated.body, "Plan ready");
+        assert_eq!(validated.props["kind"], "work_session_event");
+        assert_eq!(validated.props["schema"], "momo.work_session.acp_event.v1");
+
+        let payload = acp_event_payload(
+            "ch:ws00000000-0000-7000-8000-000000000001.00000000-0000-7000-8000-000000000202",
+            &event,
+            &validated.safe_payload,
+            Uuid::from_u128(1),
+            Uuid::from_u128(2),
+            77,
+        );
+        assert!(
+            payload.get("version").is_none(),
+            "message.new owns this seq; a second version would stale-skip one envelope"
+        );
+        assert_eq!(payload["data"]["type"], "agent.status");
+        assert_eq!(payload["data"]["seq"], 77);
+        assert_eq!(payload["data"]["v"], 1);
+
+        let forbidden = WorkSessionAcpEvent {
+            event_id: Uuid::new_v4(),
+            event_type: "agent.partial".into(),
+            v: 1,
+            ts: 1,
+            payload: json!({
+                "run_id": session_id,
+                "work_session_id": session_id,
+                "channel_id": channel_id,
+                "text_delta": "safe",
+                "_meta": {"acp": {"raw": "forbidden"}},
+            }),
+        };
+        assert_eq!(
+            validated_acp_event(&forbidden, session_id)
+                .unwrap_err()
+                .message,
+            "invalid ACP event envelope"
         );
     }
 

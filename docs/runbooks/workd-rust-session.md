@@ -69,7 +69,8 @@ DATABASE_URL=postgres://momo:momo@127.0.0.1:15432/momo \
 ```
 
 무서명 400 · 타 호스트 403 · controlId 불일치 409 · 정상 서명 201/200 +
-`remoteAttachAvailable` false→true · idle/running 을 고정한다.
+`remoteAttachAvailable` false→true · idle/running · host-signed ACP 이벤트
+200 + 세션 스레드 원장 반영(#1785)을 고정한다.
 
 관전 토글 (#1778) 은 같은 리그 PG 에 대고:
 

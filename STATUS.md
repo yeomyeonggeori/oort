@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## ACP 이벤트 릴레이 이식 (#1785, 2026-08-27)
+
+- host-signed `PATCH …/work-sessions/{session}` `{event}`를 Swift `recordACPEvent` 그대로 서빙한다. 무서명 400 문장(`ACP event ingestion requires work host signature`)은 유지. 정상 서명은 세션 스레드에 `work_session_event` system message + `message.new`/`agent.*` outbox를 한 트랜잭션에 남긴다.
+- 투영·소비면은 이미 `@momo/core` `parseWorkSessionEvent` / `eventFromFrame`이 읽는다. 서버는 수신·원장 반영까지. 표면 신축 없음.
+- red proof: 이식 전 정상 서명 이벤트 400 → 이식 후 무서명 400 · 타 호스트 403 · 정상 200 + 스레드 재조회 + `event_id` 멱등.
+
 ## role_labels 서버 수용 + 멤버 가독 프로젝션 (#1770 engine, 2026-08-27)
 
 - `PATCH /v1/workspaces/{ws}/settings` 가 `role_labels` 를 수용한다. 키 ⊂ `{owner,admin,member,guest}`, 값은 비어 있지 않은 문자열(48 UTF-8 바이트 상한). `null` 은 키 삭제(클라 기본 라벨). 객체는 top-level 병합이라 통째 교체.
@@ -58,7 +64,7 @@
 
 ## host-signed 세션 변이 이식 (#1777, 2026-08-26)
 
-- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778에서 인간-소유자 경로로 닫힘.
+- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 #1785에서 닫힘. observation은 #1778에서 인간-소유자 경로로 닫힘.
 - 데몬 부팅용으로 `GET …/work-tool-profiles`(enabled 투영, CRUD 없음)를 같이 열었다. 없으면 `momo-workd`가 heartbeat 직후 `transport_failed`로 죽어 create에 도달하지 못한다.
 - 세션 생산 레시피: `scripts/verify_workd_rust.sh` + `docs/runbooks/workd-rust-session.md` (맥 로컬 workd ↔ Rust 리그). `remote_attach_available` false→true가 도크 생산자를 연다.
 
