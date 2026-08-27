@@ -12,8 +12,19 @@
 1. **트래킹은 이미 서버에 있다.** `GET /work-sessions`가 「내가 멤버인 채널의 모든 사람 세션」을 소유자 무관하게 200행까지 돌려주고, 웹 `WorkConsoleRoute`가 그걸 이미 그린다. TC-2의 트래킹 절반은 신규 계약이 아니라 **표면 작업**이다.
 2. **원격 조작은 0이 아니라 "소유자 전용으로 이미 존재"한다.** PTY controller 등급도, 화면(display) controller 등급도 서버·웹에 실존한다. 없는 것은 **남의 세션에 대한 조작권**이며, 그것을 막는 것은 단 한 줄의 술어(`c.owner_member_id = ws.member_id`)다. 즉 TC-2는 새 전송 계층이 아니라 **권한 모델 확장** 문제다.
 3. **성재가 지목한 "핵심 긴장"은 실은 이미 해소되어 있다.** 단일 쓰기경로는 `message.seq`를 갖는 **영속 상태**의 경로이고, 터미널 바이트는 ADR-0125 D10에서 애초에 **서버 비경유**로 결정됐다. 키 입력이 PG를 지나간 적은 한 번도 없다. 진짜 질문은 *"키를 어떻게 PG에 태우나"*가 아니라 **"권한·동의·감사를 어디에 영속시키고, 바이트는 어느 평면에 둘 것인가"**다.
-4. **그러나 TC-2 이전에 이미 깨져 있는 것이 셋 있다** — ⑴ Rust 서버에 PTY 바인딩을 쓸 주체가 없어 `remote_attach_available`가 **항상 false**(관전 도크가 붙을 PTY가 원리적으로 없음) ⑵ 소유자의 관전 차단 토글이 **400을 뱉는다**(동의 모델이 열린 채 잠김) ⑶ 감사 행은 쓰이지만 **읽을 라우트가 Rust 서버에 없다**. 이 셋을 고치지 않고 조작권을 얹는 것은 잠금장치 없는 문에 손잡이를 다는 일이다.
+4. **그러나 TC-2 이전에 이미 깨져 있는 것이 셋 있다** — ⑴ 호스트 데몬이 `bindRemotePTY`를 실제로 호출하는데 Rust 서버가 **400으로 거절**해서 `remote_attach_available`가 **항상 false**(관전 도크가 붙을 PTY가 원리적으로 없음) ⑵ 소유자의 관전 차단 토글이 **400을 뱉는다**(동의 모델이 열린 채 잠김) ⑶ 감사 행은 쓰이지만 **읽을 라우트가 Rust 서버에 없다**. 이 셋을 고치지 않고 조작권을 얹는 것은 잠금장치 없는 문에 손잡이를 다는 일이다.
+
 5. **레퍼런스는 우리를 구해주지 않는다.** 조사한 10종 중 **GNU screen의 `writelock` 하나만** 실제 단일-writer 중재를 가진다. Live Share·Warp·sshx·Zellij·tmate 전부 「읽기전용 토큰 / 쓰기 토큰」 이분법이고, 쓰기를 둘 이상에게 주면 **락 없이 키가 그냥 섞인다**. 우리가 요청-승인 모델을 만들면 그건 차용이 아니라 **선행**이다 — 베낄 UX가 없다는 뜻이고, 설계 비용을 우리가 전부 낸다는 뜻이다.
+
+### 따름 정리 둘 (조사 중 나온 것 — 로드맵을 바꾼다)
+
+**㉮ — 두 평면의 비대칭.** PTY 평면은 Rust 서버에서 **통째로 죽어 있는 반면 display(화면) 평면은 끝에서 끝까지 살아 있다**: 호스트 바인딩 라우트·controller 등급·제어창 원장·에이전트 차단(2중)·oort 운영 TURN(도달성)·웹 조작 모듈이 전부 실존한다. **TC-2의 조작을 PTY가 아니라 display 위에 세우는 선택지가 실재하며, 비용 차이가 압도적이다**(→ D5-B). 대가는 범위 — display는 `type='cloud' AND provider='cubesandbox'` 한정이라 **팀원의 맥(T1)을 못 덮는다**.
+
+**㉯ — 스키마가 이미 TC-2를 예상하고 지어졌다.** `display_control_window`의 보유자 칼럼은 `owner_member_id`가 아니라 **`grantee_member_id`**이고, 마이그레이션이 그 이유를 명시했다:
+
+> `server/Migrations/076_display_control.sql:71-75` — *"v0 is the session owner and only the session owner (증보 3 D1) … but the column names the grantee rather than restating 'owner' **so that widening the grant later is a policy change and not a migration**."*
+
+즉 **「조작권을 소유자 밖으로 넓히는 일」은 이 시스템이 이미 예약해 둔 변경**이다. TC-2 ADR이 승인되면 스키마 변경 없이 술어 하나로 집행된다.
 
 ---
 
@@ -84,23 +95,50 @@
 | ⓒ | 사람 → **자기** 세션 **화면**(WebRTC) | **있다 — 웹에 완성되어 있다** | `issueControllerDisplayAttach` (`api.ts:2708-2733`) → `controlStream.ts` + `DisplayController.tsx`. **입력 데이터채널은 producer가 연다**, 클라는 `createDataChannel`을 갖지 않는다(`controlStream.ts:20-31`). 역시 **소유자 전용**(`routes/display_attach.rs:283-287`) |
 | ⓓ | **에이전트** → 세션 (줄 단위 입력) | **있다. 단 사람은 못 쓴다** | `POST /v1/workspaces/{ws}/work-controls` kind=`input`, payload `{text}` 1‥32768자. **agent bearer 전용** — 사람 bearer는 403 `work controls require an agent bearer` (`routes/work_controls.rs:170-178`). 호스트가 `GET …/work-hosts/{host}/pending-controls`로 **끌어간다**(`lib.rs:736`) |
 
-**ⓒ가 TC-2의 진짜 선례다.** LIVE-5 / ADR-0004 증보 3이 만든 `display_control_window`는 이미 「사람이 키보드를 쥐는 act」의 원장을 갖고 있다 — 여는 순간 **에이전트의 서버 경로가 거부**되고, 세션이 **`owner_only`로 강제 전환**되며(=관전자 차단), **90초 리스**로 자동 만료되고, 종료 사유(`returned` / `expired` / `session_ended`)가 남는다.
+**ⓒ가 TC-2의 진짜 선례다.** LIVE-5 / ADR-0004 증보 3이 만든 `display_control_window`는 이미 「사람이 키보드를 쥐는 act」의 원장을 갖고 있다:
+
+| 성질 | 구현 | 근거 |
+|---|---|---|
+| 에이전트 차단 | **두 곳에서 강제** — 요청 측 409 `work session is under human control`, **그리고 폴 측 보류**(열린 창이 있는 세션의 dispatched control을 데몬에게 내주지 않는다) | `routes/work_controls.rs:355-368` · `work_control.rs:463-470` |
+| 자동 만료 | 90초 리스, producer의 재검증이 갱신 | `display_control.rs:88-97` |
+| 종료 사유 원장 | `returned` / `expired` / `session_ended`, 세 경로 전부 **멱등 write** | `076_display_control.sql:92-95` |
+| 창은 하나뿐 | `display_control_window_open_uniq` 부분 유니크(`WHERE ended_at IS NULL`) | `076:107-109` |
+| 담을 수 없는 것 | 키·프레임·스크린샷·비밀번호 — **넣을 칼럼이 없다** | `display_control.rs:56-64` |
+
+**그런데 「조작 중 관전자 차단」은 ADR 결정이 아니다 — 정정.** 증보 3 D3 원문은 정반대를 말한다:
+
+> `docs/adr/0004-…md:214` — *"**비관측의 주어는 에이전트다** — 인간 observer의 관전은 기존 `observation(open|owner_only)` 권한 모델 그대로."*
+
+즉 **ADR은 「에이전트가 못 본다」만 결정했고, 「팀원이 못 본다」는 결정한 적이 없다.** 세션을 `owner_only`로 강제 전환하는 규칙은 **LIVE-5a(마이그레이션 077)가 구현 파도에서 스스로 추가한 것**이고, 그 논증은 ADR이 아니라 코드 주석에만 있다:
 
 > `display_control.rs:44-53` — *"the whole point of a control window is a person typing a password, and a teammate who pressed 관전 a minute earlier is watching that happen."*
 
-**이 문장이 TC-2와 정면 충돌한다.** oort는 이미 「조작 중에는 남이 못 본다」를 정본으로 결정했다. TC-2는 「남이 조작한다」를 요구한다. 두 문장을 같은 시스템에 둘 수 있는가가 이 ADR의 급소다(→ D4).
+> **이 정정이 D4의 무게를 크게 낮춘다.** TC-2는 Accepted ADR을 뒤집는 것이 아니라 **077이 ADR보다 넓게 잡은 규칙을 재검토**하는 것이다. 논증 자체는 여전히 유효하므로(비밀번호 문제는 실재한다) 결정은 필요하지만, 성재가 자기 결재를 번복하는 형태가 아니다.
 
 ### 1.6 축 A-5 — TC-2 이전에 **이미 깨져 있는 것 3종** (최중요)
 
 이 셋은 리서치 부산물이 아니라 **TC-2의 선결 조건**이다.
 
-#### 갭 ①: Rust 서버에 PTY 바인딩을 쓸 주체가 **없다** → 관전이 원리적으로 불가
+#### 갭 ①: 호스트 데몬이 PTY를 등록하려 하는데 Rust 서버가 **400으로 거절한다** → 관전이 원리적으로 불가
 
-`work_session.pty_id` / `attach_endpoint`에 값을 쓰는 문장이 `server-rust/` 전체에 **0건**이다. 그리고 두 입구가 명시적으로 거절한다:
+데몬은 **있다**. `workers/WorkHostDaemon/`(Swift 패키지)이 ADR-0139 D2의 링버퍼까지 구현해 두었다(`Sources/MomoACPHost/PTYReplayBuffer.swift:73` — 기본 256KiB, `replay_end`/`overflow` 제어 프레임 `:11-35`, env 상한 `MOMO_WORKD_PTY_RING_BYTES` 4KiB~16MiB).
+
+그리고 데몬은 실제로 바인딩을 **보낸다**:
+
+```swift
+// workers/WorkHostDaemon/Sources/WorkHostDaemon/WorkHostAPIClient.swift:282-295
+func bindRemotePTY(hostID:sessionID:ptyID:attachEndpoint:) async throws {
+    try await sendSigned(method: "PATCH",
+        path: "…/work-sessions/\(sessionID)",
+        body: BindRemotePTYRequest(ptyId: ptyID, attachEndpoint: attachEndpoint))
+}
+```
+
+Rust 서버는 이것을 **거절한다**:
 
 ```rust
-// server-rust/bins/momo-server/src/routes/work_sessions.rs:172-176  (create)
 // server-rust/bins/momo-server/src/routes/work_sessions.rs:383-387  (PATCH)
+// server-rust/bins/momo-server/src/routes/work_sessions.rs:172-176  (create)
 if request.pty_id.is_some() || request.attach_endpoint.is_some() {
     return Err(ApiError::bad_request(
         "remote PTY binding requires work host signature",
@@ -108,11 +146,22 @@ if request.pty_id.is_some() || request.attach_endpoint.is_some() {
 }
 ```
 
-`work_sessions.rs:36-40`이 이유를 적어 둔다 — 호스트 서명 팔(lifecycle 전이·ACP 이벤트·observation·remote-PTY 바인딩)이 **통째로 미이식**이다. **display 쪽만** host-signed `POST …/work-sessions/{session}/display-binding`이 실존한다(`lib.rs:810`); PTY에는 대응 라우트가 **없다**.
+그리고 이건 한 호출만의 문제가 아니다. **데몬의 세션 변이 호출 5종이 전부 막혀 있다:**
+
+| 데몬 호출 | 서버 응답 | 근거 |
+|---|---|---|
+| `bindRemotePTY` | 400 `remote PTY binding requires work host signature` | `WorkHostAPIClient.swift:282-295` → `work_sessions.rs:383-387` |
+| `reportSessionRunning` / `reportSessionIdle` | 403 `tool lifecycle transitions require work host signature` | `:252-267` → `work_sessions.rs:406-411` |
+| `relayACPEvent` | 400 `ACP event ingestion requires work host signature` | `:269-280` → `work_sessions.rs:394-398` |
+| (observation) | 400 `observation updates are not served by momo-server yet` | → `work_sessions.rs:399-402` |
+
+`work_sessions.rs:36-40`이 이유를 적어 둔다 — **호스트 서명 인증자(`work_host_auth`) 자체가 세션 PATCH 계열에 미이식**이다. `work_host_auth`는 존재하나(heartbeat·validate·display-binding에서 쓰인다) 이 라우트 계열의 allow-list에 없다. **display 쪽만** host-signed `POST …/work-sessions/{session}/display-binding`이 실존한다(`lib.rs:810`); PTY에는 대응 라우트가 **없다**.
 
 귀결: `remote_attach_available = (pty_id IS NOT NULL AND attach_endpoint IS NOT NULL)` (`lifecycle.rs:528-530`)가 **현행 Rust 서버에서 항상 false**다. TC-1 관전 도크·`ObserverTerminal`·capability 발급·호스트 validate 라우트 — **전부 생산자 없는 소비자**다.
 
-> **이것이 「TC-1이 관전으로 축소된 진짜 이유」를 재정의한다.** 원인은 "웹에 입력 인코더가 없어서"만이 아니다. **서버에 PTY를 등록할 길 자체가 없다.** 그리고 레포에 호스트 데몬 바이너리도 없다(`server-rust/bins/` = agent-worker·migrate·notifier·relay·server·webhook-sender). #857(데몬 셸 래핑·링버퍼·replay)은 Swift 시대 목표였다.
+> **이것이 「TC-1이 관전으로 축소된 진짜 이유」를 재정의한다.** 원인은 "웹에 입력 인코더가 없어서"만이 아니다. **호스트가 PTY를 등록할 길이 막혀 있다.** 데몬은 이미 그 문을 두드리고 있고 400을 받고 있다.
+>
+> **비대칭이 결정적이다.** display 평면은 같은 문제를 **이미 풀었다** — host-signed `display-binding` 라우트가 있고, controller 등급이 열려 있고(076), 제어창 원장이 있고(076/077), 도달성까지 oort 운영 TURN으로 해결했다(ADR-0165 증보 1·2: 대칭 NAT에서 P2P는 성립하지 않으므로 **oort 전용 공개 TURN 호스트가 required**, 제3자 TURN 금지). PTY 평면은 그중 **하나도** 없다.
 
 #### 갭 ②: 소유자의 관전 차단 스위치가 **400을 뱉는다** → 동의 모델이 열린 채 잠김
 
@@ -138,7 +187,9 @@ if request.observation.is_some() {
 
 `work_session.observation`을 쓰는 문장은 서버 전체에서 **`display_control.rs` 하나**뿐이고(제어창이 열릴 때 `owner_only`로 뒤집고 닫을 때 되돌린다 — `display_control.rs:397-425`), 그것은 사람이 부를 수 있는 스위치가 아니다.
 
-> **판정: 모든 세션이 기본 공개이고, 소유자에게 그것을 닫을 방법이 현재 없다.** 조작권을 논하기 전에 **관전의 동의 모델부터 고쳐야 한다.** 이건 TC-2 결정이 아니라 **버그**다.
+**계약은 이미 알려져 있다 — 이식만 안 됐다.** 이식 원본에 그대로 있다: `server/Sources/MomoServer/Routes/WorkSessionRoutes.swift:1663-1755` — human bearer + *"only the session owner can change observation"*(`:1695`), 그리고 닫으면 **이미 발급된 observer capability를 전부 무효화**한다. (`server/`는 배포 대상이 아니라 계약 원본이다 — `server/README.md:1-16`.)
+
+> **판정: 모든 세션이 기본 공개이고, 소유자에게 그것을 닫을 방법이 현재 없다.** 조작권을 논하기 전에 **관전의 동의 모델부터 고쳐야 한다.** 이건 TC-2 결정이 아니라 **이식 누락 버그**이고, 계약이 이미 문서화되어 있으므로 결정 비용이 0이다.
 
 #### 갭 ③: 감사 행은 쓰이지만 **읽을 라우트가 없다**
 
@@ -157,9 +208,13 @@ if request.observation.is_some() {
 |---|---|---|
 | **ADR-0126 D4 (v1 예약)** | `work_session.owner_kind: member|workspace`. workspace 소유 세션은 **admin이 operator를 위임/교대**하고 **controller capability가 operator에게 발급**된다 | **TC-2 소유권 절반의 예약석.** 2026-07-21에 성재가 방향을 이미 승인했고 v1으로 미뤘을 뿐이다. TC-2 ADR은 "새 경계"가 아니라 **"D4 실행 + 확장"**으로 기안할 수 있다 |
 | **ADR-0125 D10** | 원격 PTY attach는 **서버 raw 비경유** 직결. 서버 중계(B안)는 **기각**. 단 *"직결 불가 망(엄격 방화벽)에서는 서버 중계 폴백이 필요할 수 있으나 그 경우에도 E2E 암호화로 서버가 평문 raw를 못 보게(후속 결정)"* | 도달성 문제는 **이미 인지된 미결**이다. TC-2가 그 후속 결정을 소환한다 |
-| **ADR-0004 증보 3 / LIVE-5** | 제어창 = 에이전트 차단 + `owner_only` 강제 + 90초 리스 + 종료사유 원장. 키·프레임·비밀번호는 **둘 곳 자체가 없다** | 「사람이 키보드를 쥔다」의 원장 문법이 이미 있다. 사람→사람으로 확장할 때 **재사용 대상 1순위** |
+| **ADR-0004 증보 3 (2026-08-15 Accepted)** | D1: control = 기존 `AttachMode::Controller`의 display 적용, **「인수(takeover)」와 코드·카피 양쪽에서 구분**. D2: control 창 자격증명이 전사·audit·Memory Plane·Context Packet에 **비유입**. D3: **비관측의 주어는 에이전트** — 인간 관전은 기존 모델 그대로. D7: 범위 = `type='cloud' AND provider='cubesandbox'`, **BYOC fail-closed** | 「사람이 키보드를 쥔다」의 원장 문법이 이미 있다. 사람→사람 확장의 **재사용 대상 1순위**. D1이 이미 "control ≠ 인수" 구분을 명령하고 있다(→ D10) |
+| **LIVE-5a (마이그레이션 077)** | 제어창이 서면 `observation`을 `owner_only`로 밀어내고 닫힐 때 `prior_observation`으로 되돌린다 | **ADR보다 넓은 구현 파도 규칙.** TC-2가 재검토할 대상은 증보 3이 아니라 **이것**(→ D4) |
+| **ADR-0165 증보 1·2 (2026-08-15/17)** | 대칭 NAT에서 P2P는 성립하지 않는다 → **TURN required**, 그리고 **oort가 운영하는 전용 공개 호스트**여야 한다(제3자 TURN 금지, CubeSandbox 호스트 동거 금지). 템플릿이 라우팅 가능한 RFC1918 ICE base를 주입해야 candidate가 0이 아니게 된다 | **도달성 문제의 답이 display 평면에는 이미 있다.** PTY 평면에는 없다 — 이 비대칭이 D5-B의 근거 |
+| **ADR-0139 D2** | 링버퍼는 **호스트에** 산다(기본 256KiB), `connect(ptyID)` 시 replay 후 라이브 접합. 서버 영속(B안)은 *"실행 출력(토큰·키 혼입)의 저장·감사·삭제 정책이 따라오고 D10 정면 개정"*을 이유로 **기각** | 「스크롤백을 서버에 두자」는 유혹이 이미 한 번 기각됐다. TC-2에서 재론하면 그 기각 사유를 다시 넘어야 한다 |
 | **ADR-0149 (휘발 신호)** | PG 미접촉·outbox 우회·**서버가 직접 Centrifugo publish**. 가드 5종. **클라 publish는 계속 닫는다**(기각 B) | 방화벽 폴백 평면의 **완성된 설계 템플릿** |
-| **ADR-0154 D3 / 「인수」** | 호스트 상실 후 새 호스트로 **계보 재개**. 자격 = 앵커 채널 활성 멤버십 — **소유자가 아니어도 된다** | ⑴ **「인수」라는 낱말이 이미 점유되어 있다** — TC-2는 다른 낱말을 써야 한다 ⑵ **세션에 대한 교차-멤버 act의 선례가 이미 있다**(`work_sessions.rs:794-800`) |
+| **ADR-0154 D3 / 「인수」** | 호스트 상실 후 새 호스트로 **계보 재개**. 자격 = 앵커 채널 활성 멤버십 — **소유자가 아니어도 된다**(ADR-0143 D2/D3) | ⑴ **「인수」라는 낱말이 이미 점유되어 있고 증보 3 D1이 "control과 인수를 코드·카피 양쪽에서 구분하라"고 명령했다** — TC-2는 제3의 낱말을 써야 한다 ⑵ **세션에 대한 교차-멤버 act의 선례가 이미 있다**(`work_sessions.rs:793-800`) |
+| **마이그레이션 076의 칼럼 이름** | `display_control_window.grantee_member_id` — *"the column names the grantee rather than restating 'owner' so that **widening the grant later is a policy change and not a migration**"* (`076:71-75`) | **TC-2가 원하는 확장이 스키마에 이미 예약되어 있다.** 조작권을 소유자 밖으로 넓히는 데 마이그레이션이 필요 없다 |
 
 ### 1.8 전송 평면 사실 확인
 
@@ -332,13 +387,15 @@ v3  방화벽 폴백            해소안 2 (E2E 전제) — 별도 ADR
 
 **혼합안(권고 후보):** **가 + 나** — 상시는 위임(가)로, 위임 없는 급습은 요청-승인(나)로. 자유 동시(다)는 **열지 않는다**. 근거: 터미널은 문서가 아니라 **부작용 있는 명령의 입구**이고, 두 사람이 동시에 Enter를 치는 상태가 안전한 순간이 없다.
 
-### 4.2 자격증명 노출 — 정면 충돌 지점
+### 4.2 자격증명 노출 — 실질 난제 (단, ADR 충돌은 아니다)
 
-ADR-0004 증보 3이 이미 결정한 것:
-- **증보 3 D2** — 사용자 자격증명은 transcript·audit·Memory Plane·Context Packet 어디에도 유입되지 않는다. `display_control.rs`가 그것을 **"둘 곳이 없게 만드는 방식"**으로 보증한다(*"Keystrokes, frames, screenshots, a password, a 2FA code. 076 has no column that could, and this module has no function that would."*)
-- **증보 3 D3 / LIVE-5a(077)** — 제어창이 서면 세션이 **`owner_only`로 강제 전환**된다. 이유가 명문으로 적혀 있다: *"the whole point of a control window is a person typing a password, and a teammate who pressed 관전 a minute earlier is watching that happen."*
+두 층을 구분해야 한다.
 
-**TC-2는 이 결정을 뒤집으라고 요구한다.** 「팀원이 조작한다」는 곧 **팀원이 그 화면을 보면서 친다**는 뜻이고, 그 화면에 비밀번호가 뜰 수 있다.
+**층 1 — ADR이 결정한 것(TC-2가 건드리지 않는다).** 증보 3 D2: 사용자 자격증명은 transcript·audit·Memory Plane·Context Packet 어디에도 유입되지 않는다. `display_control.rs`가 그것을 **"둘 곳이 없게 만드는 방식"**으로 보증한다(*"Keystrokes, frames, screenshots, a password, a 2FA code. 076 has no column that could, and this module has no function that would."*). **위임 원장에도 그대로 승계하면 끝이다 — 결정 불요.**
+
+**층 2 — 077이 구현 파도에서 넓힌 것(TC-2가 재검토한다).** 제어창이 서면 `observation`이 `owner_only`로 강제 전환된다. 논거는 코드 주석에만 있다: *"the whole point of a control window is a person typing a password, and a teammate who pressed 관전 a minute earlier is watching that happen."*
+
+**논거는 유효하되 결정 지위는 아니다.** 증보 3 D3은 명시적으로 *"비관측의 주어는 에이전트다 — 인간 observer의 관전은 기존 `observation` 권한 모델 그대로"*라고 했다(`0004-…md:214`). 그러므로 TC-2가 다루는 것은 **결재 번복이 아니라 077 규칙의 사정거리 조정**이다. 실질 문제는 그대로 남는다: 「팀원이 조작한다」는 곧 **팀원이 그 화면을 보면서 친다**는 뜻이고, 그 화면에 비밀번호가 뜰 수 있다.
 
 선택지:
 1. **조작 창에서는 자격증명 입력을 금지한다**(사회적 규약 — 강제 불가, MS가 택한 길)
@@ -358,6 +415,20 @@ ADR-0004 증보 3이 이미 결정한 것:
 | 무엇이 남지 않아야 하는가 | 키·프레임·비밀번호 — **둘 곳이 없다**(증보 3 D2) | 이 성질을 **위임 원장에도 그대로 승계**. 위임 행에 payload 칼럼을 만들지 않는다 |
 | 조작 종료 사유 | display만 있다(`returned` / `expired` / `session_ended`) | PTY 위임에도 같은 어휘 |
 
+### 4.4 별건 관측 — RLS가 이 평면에서는 아무것도 지켜 주지 않는다
+
+`work_session` · `terminal_attach_capability` · `display_control_window` · `work_host` · `work_control` **다섯 테이블 전부**, RLS 정책이 `ws_isolation`(=`workspace_id = current_setting('app.workspace_id')`) **하나뿐**이다. 소유·관전·채널 멤버십·등급 규칙은 **100% 애플리케이션 SQL의 JOIN 술어**다.
+
+| 근거 | 위치 |
+|---|---|
+| `work_session` | `019_work_session.sql:46-58` |
+| `terminal_attach_capability` | `023_terminal_attach.sql:45-57` |
+| `display_control_window` | `076_display_control.sql:123-135` |
+| `work_host` | `021_work_host.sql:47-59` |
+| `work_control` | `020_work_control.sql:86-98` |
+
+귀결: **같은 테넌트 안의 직접 DB writer는 소유·관전·조작 규칙 전부를 우회한다.** 「RLS FORCE」 불변식은 여기서 **테넌트 격리만** 뜻하지 권한 격리를 뜻하지 않는다. TC-2가 조작권을 더하면서 그 규칙을 또 애플리케이션 JOIN에만 두면, **조작 권한의 강제도 같은 성질을 갖는다.** ADR에 명시할지(현행 유지) 아니면 조작 등급만 DB 술어로 끌어올릴지가 판단 대상이다.
+
 ---
 
 ## 5. 단계 로드맵
@@ -368,10 +439,13 @@ ADR-0004 증보 3이 이미 결정한 것:
 
 | # | 항목 | 근거 |
 |---|---|---|
-| 0-a | **host-signed PTY 바인딩 라우트** — `POST …/work-sessions/{session}/pty-binding` (display-binding의 PTY 쌍둥이). 없으면 `remote_attach_available`가 영원히 false | §1.6 갭 ① |
-| 0-b | **observation PATCH 팔 이식** — 소유자가 관전을 닫을 수 있게. 지금 웹 토글이 400을 받는다 | §1.6 갭 ② |
+| 0-a | **host-signed 세션 변이 계열 이식** — 최소 `bindRemotePTY`(display-binding의 PTY 쌍둥이), 이왕이면 lifecycle 전이·ACP 이벤트까지. **데몬은 이미 이 호출들을 보내고 400/403을 받고 있다.** 없으면 `remote_attach_available`가 영원히 false | §1.6 갭 ① |
+| 0-b | **observation PATCH 팔 이식** — 소유자가 관전을 닫을 수 있게. 지금 웹 토글이 400을 받는다. **계약은 이식 원본에 이미 있다**(`WorkSessionRoutes.swift:1663-1755`) — 설계 비용 0 | §1.6 갭 ② |
 | 0-c | **감사 읽기 표면** — 최소한 세션 소유자가 자기 세션 grant 이력을 읽는 경로 | §1.6 갭 ③ |
-| 0-d | (선택) 호스트 데몬의 PTY 생산자 — 레포에 없음. 0-a가 있어도 이걸 채울 주체가 필요 | `server-rust/bins/` 목록 |
+
+> **0-a·0-b는 결정이 아니라 이식이다.** 계약(권한 규칙·에러 문장·와이어 모양)이 전부 `server/`에 문서화되어 있고, 성재가 이미 승인한 ADR-0126 D1의 일부다. **ADR 없이 티켓으로 발급 가능**하다 — 이것이 TC-2 기획과 병행할 수 있는 이유다.
+>
+> **D5-B(display 우선)를 택하면 0-a는 v0에서 빠진다** — display-binding은 이미 살아 있으므로. 그때도 0-b·0-c는 남는다.
 
 ### 1단계 — **트래킹만** (조작 0)
 
@@ -383,9 +457,9 @@ ADR-0004 증보 3이 이미 결정한 것:
 
 ### 2단계 — **요청-승인 원격 조작** (좁은 창)
 
-- 위임/승인 원장 신설. `display_control_window`의 문법 재사용(리스·종료사유·idempotent close)
-- controller 술어를 "소유자 OR 유효 위임"으로 확장
-- 웹에 controller 인코더 신설 — **별도 모듈·별도 리뷰**(`controlStream.ts` 선례를 따른다)
+- **표면 선택(D5-B)이 여기서 비용을 가른다.** display를 택하면 `display_control_window`의 `grantee_member_id`를 소유자 외로 넓히는 것이 거의 전부다 — 076이 그 칼럼을 **의도적으로 "owner"가 아니라 "grantee"로 이름 지었다**(`076:72-76`: 넓히기가 마이그레이션이 아니라 정책이 되도록). PTY를 택하면 0-a부터 시작한다
+- controller 술어를 "소유자 OR 유효 위임"으로 확장 (`terminal_attach.rs:641`)
+- 웹에 PTY controller 인코더가 필요하면 **별도 모듈·별도 리뷰**(`controlStream.ts` 선례). display면 이미 있다
 - 소유자 상시 가시 표지 + 한 키 회수. 회수는 grant 행 삭제 → **재검증 주기 안에 소켓이 끊긴다**
 - 재검증 30초가 회수 지연 상한 — 이것이 허용 가능한가가 D8
 
@@ -406,20 +480,21 @@ ADR-0004 증보 3이 이미 결정한 것:
 
 | # | 결정 | 성격 | 후보 | 권고 | 왜 이게 결정인가 |
 |---|---|---|---|---|---|
-| **D0** | 0단계 선결 3종(PTY 바인딩·observation PATCH·감사 읽기)을 TC-2 **선행 조건**으로 못박는가 | [수리] | 가. 선행 필수 / 나. 병행 / 다. 별건 분리 | **가** | 셋이 없으면 관전이 원리적으로 불가하고(갭 ①), 동의 스위치가 400이며(②), 부인방지가 없다(③). 이 위에 조작권을 얹는 것은 잠금장치 없는 문에 손잡이를 다는 일 |
+| **D0** | 0단계 선결(host-signed 세션 변이 이식·observation PATCH·감사 읽기)을 TC-2 **선행 조건**으로 못박는가 | [수리] | 가. 선행 필수 / 나. 병행 / 다. 별건 분리 | **가** | 셋이 없으면 PTY 관전이 원리적으로 불가하고(갭 ①), 동의 스위치가 400이며(②), 부인방지가 없다(③). 이 위에 조작권을 얹는 것은 잠금장치 없는 문에 손잡이를 다는 일. **0-a는 D5-B가 display를 택하면 v0에서 빠진다**; 0-b·0-c는 어느 경우에도 남는다. 0-a·0-b는 계약이 이식 원본에 있어 **ADR 없이 티켓 발급 가능** |
 | **D1** | 「팀 터미널 트래킹」에 **새 서버 계약이 필요한가** | [신규] | 가. 불요(기존 목록 재사용) / 나. 전용 집계 라우트 신설 | **가** | `GET /work-sessions`가 소유자 무관 채널 스코프 전체를 이미 준다(§1.3). 신설은 두 번째 진실 원천을 만드는 일 |
 | **D2** | 조작권의 **주체 축**을 무엇으로 하는가 | [신규] | 가. 소유자 위임(소유 축) / 나. workspace role(admin 축) / 다. 채널 멤버십(관전과 동일 축) | **가**(+D9로 나 흡수) | oort의 작업세션 권한은 지금 **역할 기반이 아니다**(§1.4). 나를 택하면 이 시스템에 없던 축을 새로 연다 |
 | **D3** | **입력권 모델** | [신규] | 가. 요청-승인 단일 writer / 나. 사전 위임 상시 / 다. 자유 동시 / 라. 가+나 혼합 | **라**, 다는 **명시 기각** | 업계에 요청-승인 선례가 사실상 없다(§2.2 교훈 1) — 우리가 선행한다는 뜻이므로 비용을 인정하고 결정해야 한다. 다는 oort의 승인 원장 문법과 어긋난다 |
-| **D4** | **증보 3 D3(조작 중 `owner_only` 강제)을 사람↔사람 조작에서 어떻게 다루는가** | [신규] | 가. 그대로 유지(조작 중 제3자 관전 차단, 소유자는 봄) / 나. 조작자·소유자만 / 다. 완화 | **가 또는 나** | **이 ADR의 급소.** 「조작 중에는 남이 못 본다」가 이미 정본이고 TC-2는 그 반대를 요구한다. 두 문장이 같은 시스템에 서려면 명시적 화해가 필요 |
-| **D5** | **바이트 평면** | [신규] | 가. 직결 유지(해소안 1) / 나. 서버 경유 휘발(해소안 2) / 다. 줄 단위 제어(해소안 3) | **v0=다, v2=가, 나는 별도 ADR** | 지연 산수가 나를 v0에서 배제하고(§3.2), 자격증명 비유입이 나에 E2E를 전제로 요구한다 |
+| **D4** | **077의 「제어창 = `owner_only` 강제」 규칙을 사람↔사람 조작에서 어떻게 다루는가** | [수리/재검토] | 가. 그대로 유지(조작자+소유자만, 제3자 관전 차단) / 나. 조작 위임 세션에서는 해제 / 다. 소유자가 창마다 고른다 | **가 또는 다** | ~~ADR 뒤집기~~ **아니다** — 증보 3 D3은 *"비관측의 주어는 에이전트"*라고 명시하고 인간 관전은 기존 모델 그대로라고 못박았다(`0004-…md:214`). `owner_only` 강제는 **077이 스스로 넓힌 구현 규칙**이다. 비밀번호 논증은 유효하므로 결정은 필요하되, 성재의 결재 번복이 아니다 |
+| **D5-A** | **바이트 평면** | [신규] | 가. 직결 유지(해소안 1) / 나. 서버 경유 휘발(해소안 2) / 다. 줄 단위 제어(해소안 3) | **v0=다, v2=가, 나는 별도 ADR** | 지연 산수가 나를 v0에서 배제하고(§3.2), 자격증명 비유입이 나에 E2E를 전제로 요구한다 |
+| **D5-B** | **조작의 대상 표면을 PTY로 할 것인가 display(화면)로 할 것인가** | [신규] | 가. PTY / 나. display / 다. 둘 다 | **나 우선** | **비용 차이가 압도적이다.** display 평면은 호스트 바인딩 라우트·controller 등급·제어창 원장·에이전트 차단(2중)·oort 운영 TURN(도달성)·웹 조작 모듈이 **전부 실존**한다. PTY 평면은 **그중 하나도 없고** 데몬이 400을 받고 있다(§1.6 갭 ①). 단 display는 `type='cloud' AND provider='cubesandbox'`로 범위가 묶여 있고(증보 3 D7, BYOC fail-closed) T1(팀원 맥)을 못 덮는다 — **①의 답이 "부재 중 이어받기"면 T3만으로 충분하지 않을 수 있다** |
 | **D6** | 조작자는 **조작 순간 그 화면을 보고 있어야 하는가**(blind injection 금지) | [신규] | 가. 강제(관전 스트림 활성이 조작의 전제) / 나. 권고 | **가** | herdr 사고 실측(§2.3): 화면을 안 본 텍스트+Enter가 `1. Update now`를 확정시켰다. 상태 감지로는 못 막는다(blocked 재현율 1/5) |
 | **D7** | **고지에 신원을 싣는가** | [신규] | 가. 조작만 신원 / 나. 관전·조작 모두 신원 / 다. 현행 유지(카운트만) | **가 최소, 나 검토** | 현행은 카운트만(§1.2). 신원 없는 고지는 조작에서 무의미. 관전까지 넓히면 D0-b(관전 차단)와 함께 동의 모델이 완성됨 |
 | **D8** | **회수 지연 상한**을 얼마로 두는가 | [신규] | 가. 현행 30초 재검증 그대로 / 나. 조작 등급만 단축(예 5초) / 다. 즉시 끊기(호스트 push 채널 신설) | **나** | 관전 30초는 견딜 만하나 조작 30초는 길다. 다는 새 채널을 요구하므로 비용이 큼 |
 | **D9** | **ADR-0126 D4(workspace 소유 세션 + operator 위임)를 지금 실행하는가** | [실행] | 가. TC-2에 흡수 실행 / 나. 계속 v1 예약 | **가** | 2026-07-21에 방향이 이미 승인됐고 v1로 미뤄졌을 뿐. TC-2를 "새 경계"가 아니라 **"D4 실행 + 확장"**으로 기안하면 결정 부담이 크게 준다 |
-| **D10** | **낱말** — 이 act를 무엇이라 부르는가 | [신규] | 「인수」는 **사용 불가**(ADR-0154 D3이 호스트 상실 후 계보 재개에 점유) | 신어 필요 | 두 다른 act가 한 낱말을 쓰면 UI가 둘을 한 버튼 뒤에 둔다(ADR-0139 D3의 교훈) |
+| **D10** | **낱말** — 이 act를 무엇이라 부르는가 | [신규] | 「인수」는 **사용 불가**(계보 재개에 점유), 「조작(control)」은 **소유자 자기 세션**에 점유 | 제3의 낱말 필요 | 증보 3 D1이 이미 명령했다 — *"계보 인수(HandoffVerb takeover)와 **코드·카피 양쪽에서** 구분한다"*. 세 act가 두 낱말을 나눠 쓰면 UI가 둘을 한 버튼 뒤에 둔다(ADR-0139 D3의 교훈) |
 | **D11** | **v0 범위를 하나로 좁히는가** | [신규] | 가. 트래킹만 / 나. 트래킹+줄 단위 지시 / 다. 전부 | **가 또는 나** | ADR-0149의 규율: *"신호 하나로 가드 5개가 실제로 서는지 먼저 본다. 통로를 뚫는 결정과 통로에 무엇을 흘릴지는 다른 결정이다."* 같은 규율이 여기에도 적용된다 |
 
-### 불변식 대조표 (권고안 = D5-다(v0) → D5-가(v2) 기준)
+### 불변식 대조표 (권고안 = D5-A-다(v0 줄단위) → D5-A-가(v2 직결) + D5-B-나(display 우선) 기준)
 
 | 불변식 | 판정 |
 |---|---|
@@ -428,8 +503,9 @@ ADR-0004 증보 3이 이미 결정한 것:
 | 단일 쓰기경로 | **유지** — 바이트는 이 경로를 지난 적이 없고 지나게 하지 않는다 |
 | 순서 = `message.seq` | **유지** — 조작은 seq를 소비하지 않는다 |
 | 에이전트 = member | **⚠ 검토 필요** — 위임 대상에 에이전트를 포함하는가? 포함하면 "에이전트가 사람 터미널을 친다"가 되고, 이건 별도 결정(현행 `work_control`이 에이전트→자기 세션만 허용) |
-| RLS FORCE | **유지**(D5-가/다). **⚠ 주의**(D5-나: PG를 안 지나므로 격리가 공짜가 아님 — ADR-0149가 지목한 가장 깨지기 쉬운 자리) |
+| RLS FORCE | **유지**(D5-A-가/다). **⚠ 주의 ①**(D5-A-나: PG를 안 지나므로 격리가 공짜가 아님 — ADR-0149가 지목한 가장 깨지기 쉬운 자리). **⚠ 주의 ②**: 이 평면의 RLS는 애초에 **테넌트 격리만** 한다 — 소유·관전·조작 규칙은 전부 앱 계층 JOIN이다(§4.4) |
 | provider 자격증명 비유입(ADR-0004) | **유지**(가/다) / **❌ 위반 위험**(나, E2E 없이는) |
+| 증보 3 D2(control 창 자격증명 비유입) | **유지** — 위임 원장에 payload 칼럼을 만들지 않는 것으로 승계 |
 
 ---
 
@@ -437,13 +513,14 @@ ADR-0004 증보 3이 이미 결정한 것:
 
 | # | 물음 | 왜 성재 몫인가 |
 |---|---|---|
-| **①** | **동기 확인** — 「원격 조작」의 실제 필요는 ⑴ *팀원이 자리를 비웠을 때 대신 이어받기*인가 ⑵ *옆에서 실시간으로 같이 치기*인가 ⑶ *"그 세션에 이 지시 좀 넣어줘"*인가? | 셋의 설계가 **완전히 다르다**. ⑴=위임(D2-가·D9), ⑵=요청-승인 실시간(D3-라·D5-가), ⑶=줄 단위(D5-다, **가장 싸다**). 이 답 없이는 ADR을 기안할 수 없다 |
-| **②** | **D4** — 「조작 중에는 남이 못 본다」(증보 3 D3, 이미 정본)와 「팀원이 조작한다」를 어떻게 화해시키는가 | 본인이 승인한 결정을 뒤집거나 좁히는 일 |
-| **③** | **D0** — 선결 3종(PTY 바인딩·observation PATCH·감사 읽기)을 TC-2 앞에 세우는 데 동의하는가. 특히 **관전 차단 토글이 400을 뱉는 것은 현행 출시 결함**이다 | 우선순위·트랙 배정. 갭 ①은 관전 자체를 무효화하므로 TC-1의 가치에도 직결 |
+| **①** | **동기 확인** — 「원격 조작」의 실제 필요는 ⑴ *팀원이 자리를 비웠을 때 대신 이어받기*인가 ⑵ *옆에서 실시간으로 같이 치기*인가 ⑶ *"그 세션에 이 지시 좀 넣어줘"*인가? | 셋의 설계가 **완전히 다르다**. ⑴=위임(D2-가·D9), ⑵=요청-승인 실시간(D3-라·D5-A-가), ⑶=줄 단위(D5-A-다, **가장 싸다**). 이 답 없이는 ADR을 기안할 수 없다 |
+| **①-b** | **D5-B — 조작을 PTY 위에 세울 것인가, display(화면) 위에 세울 것인가** | 비용 차이가 압도적이다(display 평면은 이미 완성, PTY 평면은 전부 미구현). 그런데 display는 T3 클라우드 전용이라 **팀원의 맥(T1)을 못 덮는다** — ①의 답에 따라 갈린다 |
+| **②** | **D4** — 077의 「제어창 = 관전 차단」 규칙을 사람↔사람 조작에서 유지할 것인가. **참고: 이건 성재가 승인한 증보 3의 내용이 아니다** — 증보 3 D3은 *"비관측의 주어는 에이전트"*라고 명시했고, `owner_only` 강제는 LIVE-5a 구현 파도가 스스로 넓힌 규칙이다 | 결재 번복이 아니라 구현 규칙의 재검토. 다만 비밀번호 논증은 실재하므로 판단은 필요 |
+| **③** | **D0** — 선결 2~3종(host-signed 세션 변이 이식·observation PATCH·감사 읽기)을 TC-2 앞에 세우는 데 동의하는가. 특히 **관전 차단 토글이 400을 뱉는 것과 데몬의 PTY 바인딩이 400을 받는 것은 현행 출시 결함**이다 | 우선순위·트랙 배정. 0-a·0-b는 **ADR 없이 티켓 발급 가능**(계약이 이식 원본에 있음). 갭 ①은 관전 자체를 무효화하므로 TC-1의 가치에도 직결 |
 | **④** | **D9** — TC-2 ADR을 「신규 경계」가 아니라 **「ADR-0126 D4 실행 + 확장」**으로 기안해도 되는가 | 결정 성격 규정. 승인된 예약분의 집행이면 절차가 가벼워진다 |
 | **⑤** | **D11** — v0 범위. 트래킹만인가, 줄 단위 지시까지인가 | 범위는 항상 성재 몫 |
 | **⑥** | **자격증명 노출** — 위임 조작 중 화면에 비밀번호가 뜰 수 있다는 사실을 ⑴ 사회적 규약으로 둘 것인가 ⑵ L-cred 붙은 세션에만 위임 허용으로 강제할 것인가 | ADR-0004 경계의 재해석 |
-| **⑦** | **호스트 데몬** — 레포에 PTY 생산자가 없다. 이걸 만들 것인가, T3(클라우드) 전용으로 시작할 것인가 | 로드맵 전제. T3 전용이면 도달성 문제(§3.3 해소안 1 단①)도 함께 사라진다 |
+| **⑦** | **범위** — T3(클라우드) 전용으로 시작하는가, T1(팀원 맥)까지 덮는가 | T3 전용이면 도달성(§3.3 해소안 1 단①)·display 평면 재사용(D5-B)·증보 3 D7 범위가 **전부 정합**한다. T1까지 가면 데몬 이식(0-a)·도달성·PTY 평면 전체가 딸려온다 |
 | **⑧** | **D10 낱말** — 「인수」가 점유되어 있다. 새 낱말이 필요하다 | 제품 어휘는 성재와 함께 |
 
 ---
@@ -466,10 +543,17 @@ ADR-0004 증보 3이 이미 결정한 것:
 | 웹 display 조작 모듈(입력 데이터채널은 producer가 연다) | `clients/web/src/features/work/controlStream.ts:1-60` |
 | `work_control` kind=input `{text}` 1‥32768 | `crates/momo-t3/src/work_control.rs:242-262` · `server/Migrations/020_work_control.sql:44-49` |
 | work-controls는 agent bearer 전용 | `routes/work_controls.rs:170-178` |
-| 제어창 = 에이전트 차단 + `owner_only` 강제 + 90초 리스 | `crates/momo-t3/src/display_control.rs:1-72`, `:397-425` |
-| **갭 ①** PTY 바인딩 writer 부재 | `routes/work_sessions.rs:172-176`, `:383-387`, `:36-40` — `pty_id` writer 서버 전체 0건 |
-| **갭 ②** observation PATCH 400 · 기본값 open · 웹은 이미 호출 | `routes/work_sessions.rs:399-402` · `server/Migrations/024_observer_attach.sql:9-12` · `ObserverTerminal.tsx:766` |
+| 제어창 = 에이전트 차단(요청 409 + 폴 보류) + 90초 리스 + 단일 창 | `crates/momo-t3/src/display_control.rs:1-97` · `routes/work_controls.rs:355-368` · `work_control.rs:463-470` · `server/Migrations/076_display_control.sql:92-95`, `:107-109` |
+| 077이 `observation`을 밀어내고 되돌린다 | `server/Migrations/077_display_control_observation.sql:20-26`, `:52-65` · `display_control.rs:397-425` |
+| **증보 3 D3 — 비관측의 주어는 에이전트, 인간 관전은 기존 모델** | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md:213-214` |
+| **갭 ①** 데몬이 바인딩을 보내는데 서버가 400 | `workers/WorkHostDaemon/Sources/WorkHostAPIClient.swift:282-295`(+`:252-280`) → `routes/work_sessions.rs:172-176`, `:383-398`, `:406-411`, `:36-40` — `pty_id` writer 서버 전체 0건 |
+| 데몬 링버퍼(ADR-0139 D2 구현) | `workers/WorkHostDaemon/Sources/MomoACPHost/PTYReplayBuffer.swift:11-35`, `:73` |
+| **갭 ②** observation PATCH 400 · 기본값 open · 웹은 이미 호출 · 계약은 이식 원본에 존재 | `routes/work_sessions.rs:399-402` · `server/Migrations/024_observer_attach.sql:9-12` · `ObserverTerminal.tsx:766` · `server/Sources/MomoServer/Routes/WorkSessionRoutes.swift:1663-1755`(`:1695`) |
 | **갭 ③** 감사 읽기 라우트 부재 | `docs/api/openapi.yaml:643-667`에만 존재, `lib.rs` 라우트 표에 없음 |
+| RLS는 전 테이블 `ws_isolation` 하나뿐 | `019:46-58` · `020:86-98` · `021:47-59` · `023:45-57` · `076:123-135` |
+| `owner_kind` 칼럼 부재(ADR-0126 D4 미구현) | `server/Migrations/*.sql` grep 0건 |
+| guest가 어느 작업세션 경로에서도 구분되지 않음 | `momo-auth/src/workspace_authorization.rs:23-53` — `is_none()`/`is_admin()` 외 role 값 판독 없음; 유일 사용처 `routes/roster.rs:121` |
+| 자격 없이 계보 재개 가능(채널 멤버십만) | `routes/work_sessions.rs:793-800` (ADR-0143 D2/D3) |
 | Centrifugo 클라 publish 부재 | `infra/centrifugo.json` · `infra/prod/centrifugo.prod.json` |
 | 휘발 평면 선례(PG 쿼리 0건) | `routes/ephemeral.rs:1-56` |
 | 「인수」 = 계보 재개, 자격은 채널 멤버십 | `clients/web/src/features/work/TakeoverDisclosure.tsx:9-30` · `routes/work_sessions.rs:794-800` |

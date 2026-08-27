@@ -96,3 +96,41 @@ CubeSandbox microVM의 guest `eth0`는 **링크로컬 주소만** 갖는다(IPv4
 - (−) **템플릿에 신규 의무 2건**: `iproute2` rootfs 포함 + 부팅 시 ICE base 주입(`CAP_NET_ADMIN` — microVM PID1 보유로 충족). 컨테이너 배포엔 불요라 microVM 전용 분기다.
 - (−) ICE base `10.99.0.2/24`는 CubeNet/워크로드 대역과 무충돌이어야 한다(현재 `192.168.0.0/18`과 무충돌 실측 — 대역 변경 시 재확인 필요).
 - 잔여(미측정): **input delivery**(LIVE-3 control이 화면에 도달 — LIVE-5) · 실TLS 인증서(E2E는 자체서명) · 실서버 `validate` 결선(#1438은 `MOMO_DISPLAY_STUB_VALIDATE=1`로 미디어 도달성만 격리). 전부 `template.spec.json` `unverified`에 이름으로 남는다.
+
+---
+
+## 증보 3 — D3 주어 재정의: "oort 운영分"에서 "해당 배포 운영자 소유分"으로 (2026-08-26)
+
+- Status: **Accepted** (성재 승인 2026-08-26 — 구조화 질의. `D3-부재`의 과도기 처리를 (가)로 확정: 대체 TURN 준비를 momo-turn 정지의 전제조건으로 걸지 않는다). 근거: `docs/planning/research/2026-08-26-ncp-teardown-judgment.md` · `2026-08-26-selfhost-external-dependency-audit.md`(M7) · `2026-08-26-selfhost-product-model-review.md` 급소 7.
+
+### 발단
+1. **NCP 정리 판정**(2026-08-26)이 `momo-turn` 정지를 권고한다 — 증보 2의 `D3-turn`(`required · operator: oort`)이 상시 만족 불가능해진다.
+2. **셀프호스팅 제품 모델 확정**(성재, 2026-08-26) — 셀프호스터의 인스턴스에 "oort 운영分"은 **정의상 존재하지 않는다.** 조항이 그들에게 말이 되지 않는다.
+3. **코드는 이미 운영자 지정 TURN을 수용한다**(`server-rust/bins/momo-server/src/config.rs:1513-1515`) — 그리고 allow-list 부재가 **의도**임을 주석이 명시한다(`:1521-1525`: "강제 주체는 운영자 env + `verify_display_attach.sh` conformance이지, 이 프로세스가 배우고 또 배워야 할 호스트명이 아니다").
+
+전수 감사 M7이 이 괴리의 판정을 요구했다.
+
+### D3-재정의. TURN 신뢰 경계의 주어는 "그 배포의 운영자"다
+본문 D3 · 증보 1 D3-2 · 증보 2 D3-turn의 **"oort 운영分만"**을 다음으로 대체한다:
+
+> **display 평면의 TURN relay는 해당 oort 인스턴스의 운영자가 소유·통제하는 호스트여야 한다. 운영자가 통제하지 않는 제3자 TURN(공용 SaaS TURN, 타인의 coturn)은 금지한다.**
+
+Dawn 운영 배포에서는 운영자 = oort이므로 **기존 문면과 동치다** — 약화가 아니라 주어의 정확화다. 셀프호스트 배포에서는 운영자 = 셀프호스터이므로, 자기 coturn을 `MOMO_TURN_URLS`로 지정하는 현행 코드 동작이 비로소 문면과 정합한다. 금지의 실질(미디어가 신뢰 경계 밖을 경유하지 않는다 — egress·관측 경계)은 **불변**이다.
+
+### D3-강제. allow-list 부재는 의도이며 유지한다
+`config.rs:1521-1525`의 판정을 결정으로 승격한다: **프로세스는 TURN 호스트 신원을 검증하지 않는다.** 강제 주체는 ① 운영자 env(static-auth-secret 소유가 곧 통제 증명) ② Dawn 배포 한정 `verify_display_attach.sh` conformance. 셀프호스트 문서에는 "제3자 TURN 금지"를 **운영자 의무**로 명기한다.
+
+### D3-부재. TURN 미구성 = display 평면 fail-closed (성재 결정: 과도기 허용)
+`TurnCredentialPolicy` 부재 시 `ice_servers`는 빈 배열이고 display 도달성은 성립하지 않는다(`infra/rust/t3.override.yml:65-74`의 가역성 설계가 전제하는 동작). 이를 **결함이 아니라 정상 상태로 성문화**한다. `momo-turn` 정지 후 Dawn 배포의 display 평면은 "미구성"이며, TC-2/display 검증 창에만 재기동한다(NCP 판정 §2 묶음 A와 정합).
+
+**성재 결정 2026-08-26 — 과도기를 허용한다.** 대체 TURN 준비를 `momo-turn` 정지의 **전제조건으로 걸지 않는다.** 즉 정지 시점부터 대체 인프라가 설 때까지 Dawn 배포의 display 평면은 "미구성"으로 남으며, 이는 결함이 아니라 이 결정이 명시적으로 수용한 상태다.
+
+근거: ①display를 소비하는 TC-2가 기획 단계라 현재 사용자가 없다 ②재구축이 런북 기준 **2분**이라 되돌리기가 싸다(`docs/runbooks/turn-host-install.md`) ③전제조건으로 걸면 대체 TURN을 먼저 세워야 해서 NCP 비용 절감이 그만큼 미뤄진다 — 쓰지 않는 기능을 위해 비싼 호스트를 계속 켜 두는 것이 된다.
+
+**재개 조건**: TC-2 착수 또는 display 검증이 필요해지는 시점에 운영자 소유 TURN을 세운다(D3-재정의에 따라 "그 배포의 운영자 소유分"이면 족하다).
+
+### Consequences
+- (+) **NCP 정리가 정본과 어긋나지 않게 된다** — 이 증보 없이 `momo-turn`을 내리면 Accepted ADR이 요구하는 것이 현실에 없는 상태가 된다.
+- (+) 셀프호스터가 자기 coturn을 쓰는 현행 코드 동작이 문면과 정합한다.
+- (−) Dawn 배포의 display 평면이 당분간 "미구성"으로 남는다 — TC-2 착수 시 재기동이 선행 조건이 된다.
+- 불변: 제3자 TURN 금지의 실질. 바뀌는 것은 "제3자"의 기준점이 oort에서 **그 배포의 운영자**로 옮겨간 것뿐이다.
