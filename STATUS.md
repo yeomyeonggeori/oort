@@ -1,5 +1,18 @@
 # oort 진행 현황
 
+## role_labels 서버 수용 + 멤버 가독 프로젝션 (#1770 engine, 2026-08-27)
+
+- `PATCH /v1/workspaces/{ws}/settings` 가 `role_labels` 를 수용한다. 키 ⊂ `{owner,admin,member,guest}`, 값은 비어 있지 않은 문자열(48 UTF-8 바이트 상한). `null` 은 키 삭제(클라 기본 라벨). 객체는 top-level 병합이라 통째 교체.
+- `GET /v1/workspaces/{ws}` WorkspaceDto 에 `roleLabels` 파생 필드(없으면 `{}`). settings bag 통노출은 그대로 금지. 권한 사다리·RLS·role wire·`schema_v0.sql` 비접촉.
+- PG 컨포먼스 `workspace_settings_conformance_pg` 가 예약→수용 전환, 멤버 identity 왕복, 형태 위반 400, null 복원, 공존 병합, member/guest 403 을 잰다. uxui 절반(설정 UI·클라 오버라이드)은 별 브리프.
+
+## workspace.settings 읽기·쓰기 REST (#1800, 2026-08-27)
+
+- `GET|PATCH /v1/workspaces/{ws}/settings` — operator(owner/admin) 전용. 기존 `GET /v1/workspaces/{ws}` 는 비접촉(전 멤버 표면, bag 통째 노출 금지).
+- PATCH는 최상위 키 RFC 7396 동형 병합. allowlist는 `allowed_agent_models`(문자열 배열, 원소 32·64B 상한)와 `role_labels`(#1770).
+- 요청 본문 8KiB 초과는 413, 그 외 형태/미지 키는 400. audit `workspace_setting.updated`.
+- PG 컨포먼스 `workspace_settings_conformance_pg` 가 권한·RLS·병합·상한·identity 비노출을 잰다.
+
 ## 패스워드 초기화 경로 (#1767, 2026-08-27)
 
 - `owner_claim`을 `credential_claim` + `kind`(`owner_bootstrap` | `password_reset`)로 일반화(081). token_hash 32B · TTL 24h · 단일 사용 · definer lookup 관례는 078 승계. `schema_v0.sql` 비접촉.
