@@ -647,6 +647,12 @@ pub fn build_app(state: AppState) -> Router {
         // B4.1 — the settings panel's first read (workspace name + the rename
         // endpoint's concurrency token).
         .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
+        // #1800 — operator-only bag. Not folded into GET /{ws}: that surface is
+        // every member, and settings may later hold keys not every member may read.
+        .route(
+            "/v1/workspaces/{ws}/settings",
+            get(routes::workspace_settings::get).patch(routes::workspace_settings::patch),
+        )
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused
         // (409) so a workspace is never orphaned.

@@ -1975,6 +1975,10 @@ pub struct WorkspaceDto {
     /// what lets the client cache the bytes immutably.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
+    /// Member-readable projection of `workspace.settings.role_labels`. Empty
+    /// object when the key is absent. Display-only; the settings bag itself
+    /// is never included on this DTO (#1770).
+    pub role_labels: serde_json::Value,
 }
 
 /// Swift `WorkspaceResponse` (`DTOs.swift:777-779`). The client unwraps

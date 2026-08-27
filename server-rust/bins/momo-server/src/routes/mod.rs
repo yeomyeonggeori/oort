@@ -65,4 +65,6 @@ pub mod work_tool_profiles;
 /// ADR-0161 D5 — the workspace avatar media surface (upload session, completion,
 /// the content proxy), the attachment surface re-aimed at a workspace.
 pub mod workspace_avatar;
+/// #1800 — operator-only `workspace.settings` bag.
+pub mod workspace_settings;
 pub mod workspaces;
