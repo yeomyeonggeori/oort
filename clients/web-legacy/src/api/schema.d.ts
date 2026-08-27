@@ -334,7 +334,7 @@ export interface paths {
         put?: never;
         /**
          * Issue a one-time password-reset claim for a human member.
-         * @description #1767. Owner/admin only. Mints a 32-byte token (same shape as owner_bootstrap), stores sha256 only, TTL 24h, single use. Reissue consumes any previous live reset token for that member. The raw token is in this 201 body once — the operator delivers `/claim/<token>` out of band. There is no mailer.
+         * @description #1767 / ADR-0128 D2. Owner or admin only. Hierarchy is judged in the same tenant transaction as the issue (route-layer admin check is not the authority): owner may reset any other human, including another owner (the multi-owner unlock path); admin may reset member and guest only. Self-reset is always 403 — use PATCH …/members/me/password. Mints a 32-byte token (same shape as owner_bootstrap), stores sha256 only, TTL 24h, single use. Reissue consumes any previous live reset token for that member. The raw token is in this 201 body once — the operator delivers `/claim/<token>` out of band. There is no mailer.
          */
         post: operations["issuePasswordReset"];
         delete?: never;

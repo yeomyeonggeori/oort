@@ -12,6 +12,7 @@ use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 use crate::token_store::revoke_member_session_tokens;
+use crate::workspace_authorization::active_workspace_role;
 
 /// Sealed TTL (ADR-0166). 24 hours. Shared by both kinds — do not invent a
 /// second clock for password_reset.
@@ -73,6 +74,7 @@ pub enum PasswordResetIssueError {
     NotFound,
     NotHuman,
     NotActive,
+    Forbidden,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -232,12 +234,25 @@ pub async fn consume_claim_in_tx(
 
 /// Issue a password_reset claim for one active human. Reissue consumes any
 /// previous live token for that member first (single live row + audit trail).
+///
+/// Hierarchy (ADR-0128 D2) is judged here, in the same tenant transaction:
+/// actor and target roles are loaded under this `workspace_id` GUC. The
+/// route-layer `require_admin` is not the authority.
 pub async fn issue_password_reset_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    actor_id: Uuid,
     member_id: Uuid,
     token: &str,
 ) -> Result<Result<IssuedPasswordReset, PasswordResetIssueError>, sqlx::Error> {
+    if actor_id == member_id {
+        return Ok(Err(PasswordResetIssueError::Forbidden));
+    }
+
+    let Some(actor_role) = active_workspace_role(conn, workspace_id, actor_id).await? else {
+        return Ok(Err(PasswordResetIssueError::Forbidden));
+    };
+
     let target = sqlx::query(
         "SELECT m.kind::text AS kind, m.status::text AS status, \
                 m.deleted_at IS NOT NULL AS deleted \
@@ -265,6 +280,13 @@ pub async fn issue_password_reset_in_tx(
     }
     if deleted || status != "active" {
         return Ok(Err(PasswordResetIssueError::NotActive));
+    }
+
+    let Some(target_role) = active_workspace_role(conn, workspace_id, member_id).await? else {
+        return Ok(Err(PasswordResetIssueError::Forbidden));
+    };
+    if !actor_role.can_issue_password_reset_for(target_role) {
+        return Ok(Err(PasswordResetIssueError::Forbidden));
     }
 
     sqlx::query(

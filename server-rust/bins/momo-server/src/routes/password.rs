@@ -105,7 +105,9 @@ pub async fn issue_password_reset(
                 if let Err(rejection) = require_admin(conn, workspace_id, actor_id).await? {
                     return Ok(Err(rejection));
                 }
-                match issue_password_reset_in_tx(conn, workspace_id, target_id, &token).await? {
+                match issue_password_reset_in_tx(conn, workspace_id, actor_id, target_id, &token)
+                    .await?
+                {
                     Ok(issued) => {
                         write_audit(
                             conn,
@@ -133,6 +135,9 @@ pub async fn issue_password_reset(
                         StatusCode::CONFLICT,
                         "member is not active",
                     ))),
+                    Err(PasswordResetIssueError::Forbidden) => {
+                        Ok(Err(ApiError::forbidden("password reset not permitted")))
+                    }
                 }
             })
         }

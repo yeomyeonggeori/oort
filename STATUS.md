@@ -4,6 +4,7 @@
 
 - `owner_claim`을 `credential_claim` + `kind`(`owner_bootstrap` | `password_reset`)로 일반화(081). token_hash 32B · TTL 24h · 단일 사용 · definer lookup 관례는 078 승계. `schema_v0.sql` 비접촉.
 - 운영자 발급: `POST …/members/{id}/password-reset` (owner/admin). 재발급은 이전 미소비 reset 을 `consumed_at`으로 무효화. 원문은 201 1회. 메일 없음 — out-of-band 전달.
+- ADR-0128 D2 위계(#1798 수리): `issue_password_reset_in_tx`가 같은 테넌트 트랜잭션에서 행위자·대상 role을 조회한다. owner는 타인(다른 owner 포함)만, admin은 member/guest만. 자기 자신은 403 — 본인 변경은 `PATCH …/members/me/password`.
 - 본인 변경: `PATCH …/members/me/password` — 현재 비번 재확인 · 멤버/IP 레이트리밋. 세션 회전: 해당 멤버의 모든 `kind=session` 토큰을 만료하고 새 쌍을 발급(agent bearer 비접촉).
 - `POST /v1/claim`이 두 kind를 소비. owner_bootstrap 회귀는 기존 경로 그대로.
 - 웹 ClaimPage kind 문구 분기는 후속 UXUI. 발급 응답 `claimPath=/claim/<token>`.
