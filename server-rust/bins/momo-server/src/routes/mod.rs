@@ -36,6 +36,8 @@ pub mod invites;
 pub mod join;
 pub mod messages;
 pub mod notification_rules;
+/// #1767 — operator-issued password reset + self password change.
+pub mod password;
 /// ADR-0160 — declared presence status ③ (durable). The availability ② half is
 /// in [`ephemeral`]; the connection ① half never reaches the server.
 pub mod presence;

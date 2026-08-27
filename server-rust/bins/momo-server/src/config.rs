@@ -324,6 +324,11 @@ pub struct RateLimitConfig {
     /// `RATE_LIMIT_CLAIM_PER_IP` (default 30). 0 disables. Claim surface.
     /// Independent of join so invite traffic cannot starve first-owner setup.
     pub claim_per_ip_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER` (default 10). 0 disables.
+    /// Brute-force of the current-password reconfirm on PATCH …/me/password.
+    pub password_change_per_member_limit: u32,
+    /// `RATE_LIMIT_PASSWORD_CHANGE_PER_IP` (default 30). 0 disables.
+    pub password_change_per_ip_limit: u32,
 }
 
 impl Default for RateLimitConfig {
@@ -332,6 +337,8 @@ impl Default for RateLimitConfig {
             window_seconds: 60,
             per_ip_limit: 1200,
             claim_per_ip_limit: 30,
+            password_change_per_member_limit: 10,
+            password_change_per_ip_limit: 30,
         }
     }
 }
@@ -350,6 +357,12 @@ impl RateLimitConfig {
             claim_per_ip_limit: env("RATE_LIMIT_CLAIM_PER_IP")
                 .and_then(|value| value.trim().parse::<u32>().ok())
                 .unwrap_or(defaults.claim_per_ip_limit),
+            password_change_per_member_limit: env("RATE_LIMIT_PASSWORD_CHANGE_PER_MEMBER")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.password_change_per_member_limit),
+            password_change_per_ip_limit: env("RATE_LIMIT_PASSWORD_CHANGE_PER_IP")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(defaults.password_change_per_ip_limit),
         }
     }
 }
@@ -2152,6 +2165,8 @@ mod tests {
         assert_eq!(defaults.window_seconds, 60);
         assert_eq!(defaults.per_ip_limit, 1200);
         assert_eq!(defaults.claim_per_ip_limit, 30);
+        assert_eq!(defaults.password_change_per_member_limit, 10);
+        assert_eq!(defaults.password_change_per_ip_limit, 30);
         assert!(
             defaults.per_ip_limit > 0,
             "a default of 0 would ship the public join route unguarded"
@@ -2159,6 +2174,10 @@ mod tests {
         assert!(
             defaults.claim_per_ip_limit > 0,
             "a default of 0 would ship the public claim route unguarded"
+        );
+        assert!(
+            defaults.password_change_per_member_limit > 0,
+            "a default of 0 would ship PATCH …/me/password unguarded"
         );
     }
 

@@ -151,6 +151,8 @@ POST /v1/workspaces/{workspaceId}/approvals/{approvalId}/decision
 # create·regenerate 응답의 원문 코드는 표본에 남기지 않는다(redact + needle).
 POST /v1/join
 POST /v1/claim
+PATCH /v1/workspaces/{workspaceId}/members/me/password
+POST /v1/workspaces/{workspaceId}/members/{memberId}/password-reset
 GET /v1/workspaces/{workspaceId}/invites
 POST /v1/workspaces/{workspaceId}/invites
 GET /v1/workspaces/{workspaceId}/invites/{inviteId}

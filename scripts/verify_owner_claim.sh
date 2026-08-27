@@ -218,9 +218,10 @@ SELECT
       AND h.email = lower(btrim(:'check_email'))
       AND h.email_verified
       AND (h.password_hash IS NULL OR h.password_hash = '')),
-  (SELECT count(*)::text FROM owner_claim c
+  (SELECT count(*)::text FROM credential_claim c
     WHERE c.workspace_id = '00000000-0000-7000-8000-000000000001'
       AND c.member_id = '00000000-0000-7000-8000-000000000101'
+      AND c.kind = 'owner_bootstrap'
       AND c.consumed_at IS NULL
       AND c.expires_at > now() + interval '23 hours'
       AND c.expires_at < now() + interval '25 hours'
@@ -228,17 +229,19 @@ SELECT
 SQL
 )"
 claim_state="$(printf '%s' "$claim_state" | tr -d '[:space:]')"
-[ "$claim_state" = "1|1" ] || fail "migrate did not plant claim-pending owner + live owner_claim (got ${claim_state:-<empty>})"
+[ "$claim_state" = "1|1" ] || fail "migrate did not plant claim-pending owner + live owner_bootstrap claim (got ${claim_state:-<empty>})"
 rm -f -- "$MIGRATE_LOG"
 MIGRATE_LOG=""
-echo "[owner-claim] migrate-time bootstrap planted claim-pending owner + owner_claim"
+echo "[owner-claim] migrate-time bootstrap planted claim-pending owner + credential_claim(owner_bootstrap)"
 
 (
   cd server-rust
   cargo test -p momo-server --test claim_conformance_pg \
     -- --ignored --test-threads=1 --nocapture
+  cargo test -p momo-server --test password_reset_conformance_pg \
+    -- --ignored --test-threads=1 --nocapture
 )
 
 remove_owned
 CLEANUP_DONE=1
-echo "[owner-claim] PASS PG18 migrate-time bootstrap plus issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction contract"
+echo "[owner-claim] PASS PG18 migrate-time bootstrap plus issue/login-reject/consume/login/reuse/ttl/hash-only/log-redaction plus #1767 password-reset red/green"

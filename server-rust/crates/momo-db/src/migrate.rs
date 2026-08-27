@@ -388,19 +388,23 @@ mod tests {
     ///
     /// 080 is ADR-0171's hosted-connection doorbell sidecar. No outbox producer
     /// trigger — the sender polls `hosted_agent_inbox_counter`.
+    ///
+    /// 081 is #1767's `credential_claim`: 078's owner_claim generalized with
+    /// `kind` (`owner_bootstrap` | `password_reset`). Same hash/TTL/single-use
+    /// / definer lookup. schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_080() {
+    fn discovers_contiguous_migrations_001_to_081() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            80,
-            "expected 80 migrations under {}",
+            81,
+            "expected 81 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 80);
+        assert_eq!(migrations.last().unwrap().version, 81);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

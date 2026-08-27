@@ -654,6 +654,18 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/members/me",
             delete(routes::workspaces::leave),
         )
+        // #1767 — self password change. Separate path from leave so a PATCH
+        // cannot be read as a lifecycle mutation.
+        .route(
+            "/v1/workspaces/{ws}/members/me/password",
+            patch(routes::password::change_own_password),
+        )
+        // #1767 — operator-issued reset token. Raw token in the 201 once;
+        // operator delivers the /claim/<token> link out of band.
+        .route(
+            "/v1/workspaces/{ws}/members/{member}/password-reset",
+            post(routes::password::issue_password_reset),
+        )
         // B4.2 — 설정 표면 (diff matrix D-3). Three authorization tiers sit in
         // this block and the grouping is deliberate:
         //

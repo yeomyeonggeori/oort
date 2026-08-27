@@ -34,12 +34,31 @@ pub struct HealthResponse {
 // auth
 // ---------------------------------------------------------------------------
 
-/// `POST /v1/claim` request (ADR-0166). Public; the token is the only credential.
+/// `POST /v1/claim` request (ADR-0166 / #1767). Public; the token is the only credential.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClaimRequest {
     pub token: String,
     pub password: String,
+}
+
+/// `PATCH /v1/workspaces/{ws}/members/me/password` (#1767).
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// `POST /v1/workspaces/{ws}/members/{memberId}/password-reset` (#1767).
+/// The raw token leaves the server exactly once, like an invite code.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PasswordResetClaimResponse {
+    pub token: String,
+    pub kind: &'static str,
+    pub expires_at_ms: i64,
+    pub claim_path: String,
 }
 
 /// `POST /v1/auth/login` request (Swift `LoginRequest`). `platformAdminSecret`

@@ -1941,8 +1941,9 @@ append_secret_with_derivatives "$REFRESH"
 }
 # ADR-0166: unknown token is 404 ErrorResponse. Happy-path consume is
 # claim_conformance_pg / verify_owner_claim.sh (this gate's owner already has
-# a password, so a 200 here would require a second tenant). Sampled after the
-# login tokens are captured — this 404 body has no accessToken.
+# a password, so a 200 here would require a second tenant). Capture the
+# login pair first — sample() overwrites RESPONSE_BODY, and this 404 body
+# has no accessToken.
 sample claim-unknown post "/v1/claim" "/v1/claim" 404 \
   '{"token":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA","password":"unused-claim-password"}'
 
@@ -1954,6 +1955,38 @@ ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
 REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
 append_secret_with_derivatives "$ACCESS"
 append_secret_with_derivatives "$REFRESH"
+
+# #1767 — wrong current password keeps this session alive (403). Happy-path
+# rotation is password_reset_conformance_pg. Issue a reset for the peer so
+# the 201 shape is sampled; register the raw token immediately.
+sample change-own-password patch \
+  "/v1/workspaces/{workspaceId}/members/me/password" \
+  "/v1/workspaces/$WS/members/me/password" 403 \
+  '{"currentPassword":"not-the-gate-password","newPassword":"unused-new-password"}' \
+  "$ACCESS"
+sample issue-password-reset post \
+  "/v1/workspaces/{workspaceId}/members/{memberId}/password-reset" \
+  "/v1/workspaces/$WS/members/$GATE_PEER_ID/password-reset" 201 \
+  "" "$ACCESS"
+RESET_TOKEN="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
+append_secret_with_derivatives "$RESET_TOKEN"
+[ -n "$RESET_TOKEN" ] || {
+  echo "[openapi-rust] password-reset 201 produced no token" >&2
+  redacted_body >&2
+  exit 1
+}
+# sample() redacts the `token` key by name, but claimPath embeds the raw
+# token. Rewrite the evidence file now that the needle exists.
+RESET_SAMPLE="$(jq -rs --arg name issue-password-reset \
+  'map(select(.name==$name)) | last | .body_file // empty' "$MANIFEST")"
+[ -n "$RESET_SAMPLE" ] && [ -f "$RESET_SAMPLE" ] && [ ! -L "$RESET_SAMPLE" ] || {
+  echo "[openapi-rust] password-reset sample file missing after 201" >&2
+  exit 1
+}
+RESET_SAMPLE_REDACTED="$RESET_SAMPLE.redacted"
+(umask 077; : >"$RESET_SAMPLE_REDACTED")
+redact_json <"$RESET_SAMPLE" >"$RESET_SAMPLE_REDACTED"
+mv "$RESET_SAMPLE_REDACTED" "$RESET_SAMPLE"
 
 # A malicious Agent Port may reflect the human bearer in an unexpected error
 # header and body. Exercise the exact gate_fail path and require zero registered

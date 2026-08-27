@@ -219,8 +219,8 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Consume a first-owner claim token and set the password (public, no auth).
-         * @description ADR-0166. Redeems a one-time 32-byte claim token issued by momo-migrate claim mode, sets the seeded owner's password in the same transaction, and issues a session token pair. The raw token is never stored (sha256 only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
+         * Consume a claim token and set the password (public, no auth).
+         * @description ADR-0166 / #1767. Redeems a one-time 32-byte claim token (`owner_bootstrap` from momo-migrate, or `password_reset` issued by an owner/admin). Sets the target human's password in the same transaction and issues a session token pair. `password_reset` also revokes that member's other session tokens. The raw token is never stored (sha256 only). Reuse returns 409; expiry returns 410. Per-IP rate limited.
          */
         post: operations["publicClaim"];
         delete?: never;
@@ -298,6 +298,46 @@ export interface paths {
          * @description Human active members only. Removes all channel memberships and the workspace membership, transitions the caller to deleted, revokes every token, and preserves authored messages. The final active owner must transfer ownership before leaving.
          */
         delete: operations["leaveWorkspace"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/me/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Change the caller's password after reconfirming the current one.
+         * @description #1767. Requires the current password. On success every live session token of this member is revoked and a fresh access/refresh pair is issued (same LoginResponse shape as login/claim). Agent bearers are not touched. Per-member and per-IP rate limited.
+         */
+        patch: operations["changeOwnPassword"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/{memberId}/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a one-time password-reset claim for a human member.
+         * @description #1767 / ADR-0128 D2. Owner or admin only. Hierarchy is judged in the same tenant transaction as the issue (route-layer admin check is not the authority): owner may reset any other human, including another owner (the multi-owner unlock path); admin may reset member and guest only. Self-reset is always 403 — use PATCH …/members/me/password. Mints a 32-byte token (same shape as owner_bootstrap), stores sha256 only, TTL 24h, single use. Reissue consumes any previous live reset token for that member. The raw token is in this 201 body once — the operator delivers `/claim/<token>` out of band. There is no mailer.
+         */
+        post: operations["issuePasswordReset"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2764,10 +2804,26 @@ export interface components {
             memoryExternalProviderConsent: components["schemas"]["MemoryExternalProviderConsent"];
         };
         ClaimRequest: {
-            /** @description Raw 32-byte claim token (43-char base64url, no padding). Shown once at bootstrap; the server stores only sha256. */
+            /** @description Raw 32-byte claim token (43-char base64url, no padding). Shown once at issue (migrate bootstrap or operator reset); the server stores only sha256. */
             token: string;
-            /** @description Required, at most 1024 chars. Set on the first owner. */
+            /** @description Required, at most 1024 chars. */
             password: string;
+        };
+        ChangePasswordRequest: {
+            /** @description The caller's current password. Reconfirm is mandatory. */
+            currentPassword: string;
+            /** @description Replacement password, at most 1024 chars, must differ. */
+            newPassword: string;
+        };
+        PasswordResetClaimResponse: {
+            /** @description Raw 32-byte token. Present only on this 201. */
+            token: string;
+            /** @enum {string} */
+            kind: "password_reset";
+            /** Format: int64 */
+            expiresAtMs: number;
+            /** @description /claim/<token> — the existing ClaimPage route. */
+            claimPath: string;
         };
         LoginRequest: {
             /** @description Human member email within the workspace. */
@@ -6250,6 +6306,115 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
             /** @description Caller is the last active owner */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    changeOwnPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChangePasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Password changed; previous sessions revoked; new pair issued. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LoginResponse"];
+                };
+            };
+            /** @description Password shape invalid, or new password equals current. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Current password is incorrect, or caller is not a human member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Caller has no password to change (use claim). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    issuePasswordReset: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                memberId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reset token issued. Raw token is shown only here. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResetClaimResponse"];
+                };
+            };
+            /** @description Target is not a human member, or member id is invalid. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            403: components["responses"]["Forbidden"];
+            /** @description Workspace member not found. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Target member is not active. */
             409: {
                 headers: {
                     [name: string]: unknown;
