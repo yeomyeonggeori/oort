@@ -283,6 +283,30 @@ export interface paths {
         patch: operations["changeWorkspaceMemberRole"];
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the workspace.settings bag.
+         * @description Owner/admin only (`require_workspace_operator`). Returns the stored jsonb object, or `{}` when the workspace has never written a key. This is deliberately a sibling of `GET /v1/workspaces/{workspaceId}`, which must not grow a `settings` field — the bag is an extensible store that may later hold keys not every member may read. `role_labels` is reserved for AC-4 (#1770) and is not accepted on PATCH in this ticket.
+         */
+        get: operations["getWorkspaceSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Merge top-level keys into workspace.settings.
+         * @description Owner/admin only. RFC 7396-shaped top-level merge: specified keys replace, omitted keys stay, `null` deletes the key. Unknown top-level keys are 400. The starting allowlist is `allowed_agent_models` only (string array, max 32 entries, each ≤ 64 bytes). `role_labels` is reserved for AC-4 and is rejected. Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
+         */
+        patch: operations["patchWorkspaceSettings"];
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/members/me": {
         parameters: {
             query?: never;
@@ -4618,6 +4642,16 @@ export interface components {
         PinList: {
             pins: components["schemas"]["PinnedMessage"][];
         };
+        /** @description Stored workspace.settings bag. Additional keys may appear after a later ticket widens the allowlist. Today the only writable key is allowed_agent_models. role_labels is reserved for AC-4 and is not accepted on PATCH here. */
+        WorkspaceSettings: {
+            allowed_agent_models?: string[];
+        } & {
+            [key: string]: unknown;
+        };
+        /** @description RFC 7396-shaped top-level merge patch. Unknown keys 400. role_labels is reserved for AC-4 (#1770) and is rejected. null deletes the key. */
+        PatchWorkspaceSettingsRequest: {
+            allowed_agent_models?: string[] | null;
+        };
         UnfurlSettings: {
             enabled: boolean;
             /** Format: int64 */
@@ -6280,6 +6314,114 @@ export interface operations {
                     "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
+        };
+    };
+    getWorkspaceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current bag. Empty object when unset. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSettings"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human owner/admin required. Agents and members/guests are refused. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace not visible under the tenant GUC. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    patchWorkspaceSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PatchWorkspaceSettingsRequest"];
+            };
+        };
+        responses: {
+            /** @description Merged bag. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceSettings"];
+                };
+            };
+            /** @description Unknown key, malformed allowed_agent_models, or non-object body. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Human owner/admin required. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Workspace not visible under the tenant GUC. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Serialized PATCH body exceeds 8192 bytes. */
+            413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
         };
     };
     leaveWorkspace: {

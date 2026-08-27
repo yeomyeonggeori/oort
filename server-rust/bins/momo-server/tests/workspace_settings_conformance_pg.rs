@@ -274,7 +274,11 @@ fn settings_url(base: &str, workspace: Uuid) -> String {
 }
 
 async fn get_settings(http: &reqwest::Client, url: &str, token: &str) -> reqwest::Response {
-    http.get(url).bearer_auth(token).send().await.expect("GET settings")
+    http.get(url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .expect("GET settings")
 }
 
 async fn patch_settings(
@@ -416,7 +420,11 @@ async fn foreign_workspace_is_rejected_and_rls_hides_settings() {
     let http = reqwest::Client::new();
     let token = login(&http, &base, stranger.workspace, &stranger.owner.email).await;
     let foreign = get_settings(&http, &settings_url(&base, owner.workspace), &token).await;
-    assert_eq!(foreign.status(), 403, "path workspace ≠ credential workspace");
+    assert_eq!(
+        foreign.status(),
+        403,
+        "path workspace ≠ credential workspace"
+    );
     let patched = patch_settings(
         &http,
         &settings_url(&base, owner.workspace),
@@ -429,10 +437,11 @@ async fn foreign_workspace_is_rejected_and_rls_hides_settings() {
     let owner_workspace = owner.workspace;
     with_tenant_tx(&app, stranger.workspace, move |conn| {
         Box::pin(async move {
-            let rows: Vec<Value> = sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
-                .bind(owner_workspace)
-                .fetch_all(&mut *conn)
-                .await?;
+            let rows: Vec<Value> =
+                sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
+                    .bind(owner_workspace)
+                    .fetch_all(&mut *conn)
+                    .await?;
             assert!(
                 rows.is_empty(),
                 "foreign GUC must not see the owner's workspace.settings: {rows:?}"
@@ -445,10 +454,11 @@ async fn foreign_workspace_is_rejected_and_rls_hides_settings() {
 
     with_tenant_tx(&app, owner.workspace, move |conn| {
         Box::pin(async move {
-            let settings: Value = sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
-                .bind(owner_workspace)
-                .fetch_one(&mut *conn)
-                .await?;
+            let settings: Value =
+                sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
+                    .bind(owner_workspace)
+                    .fetch_one(&mut *conn)
+                    .await?;
             assert_eq!(settings["allowed_agent_models"], json!(["hermes-fast"]));
             Ok(())
         })
@@ -528,7 +538,12 @@ async fn unknown_key_is_rejected() {
     let su = superuser_pool().await;
     let app = momo_app_pool().await;
     let fixture = seed(&su, "unknown").await;
-    write_settings_sql(&su, fixture.workspace, json!({"allowed_agent_models": ["keep"]})).await;
+    write_settings_sql(
+        &su,
+        fixture.workspace,
+        json!({"allowed_agent_models": ["keep"]}),
+    )
+    .await;
     let base = start_server(app).await;
     let http = reqwest::Client::new();
     let token = login(&http, &base, fixture.workspace, &fixture.owner.email).await;

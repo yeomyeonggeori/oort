@@ -1988,6 +1988,18 @@ RESET_SAMPLE_REDACTED="$RESET_SAMPLE.redacted"
 redact_json <"$RESET_SAMPLE" >"$RESET_SAMPLE_REDACTED"
 mv "$RESET_SAMPLE_REDACTED" "$RESET_SAMPLE"
 
+# #1800 — operator bag. Empty GET then a one-key PATCH so both 200 shapes
+# are sampled. role_labels stays reserved and is not sent.
+sample workspace-settings-get get \
+  "/v1/workspaces/{workspaceId}/settings" \
+  "/v1/workspaces/$WS/settings" 200 \
+  "" "$ACCESS"
+sample workspace-settings-patch patch \
+  "/v1/workspaces/{workspaceId}/settings" \
+  "/v1/workspaces/$WS/settings" 200 \
+  '{"allowed_agent_models":["hermes-agent"]}' \
+  "$ACCESS"
+
 # A malicious Agent Port may reflect the human bearer in an unexpected error
 # header and body. Exercise the exact gate_fail path and require zero registered
 # secret needles in both its persisted failure line and emitted diagnostics.

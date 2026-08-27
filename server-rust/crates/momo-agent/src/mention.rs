@@ -320,11 +320,11 @@ pub fn effective_system_prompt(
 /// workspace whose `settings` has no `allowed_agent_models` key could offer —
 /// and could run — exactly one model: whatever `agent.model` already said.
 ///
-/// That was not an operator's decision. There is **no route on this server that
-/// writes `workspace.settings`** (grep `/v1/workspaces` in
-/// `bins/momo-server/src/lib.rs`), so the empty allow-list is the absence of a
-/// configuration surface, not a narrowing anyone chose. Treating it as a
-/// deliberate `[]` is what made a paid subscription's other models unreachable.
+/// That was not an operator's decision. The write surface is owner/admin
+/// `PATCH /v1/workspaces/{ws}/settings` (#1800); an unconfigured workspace still
+/// has no key, so the empty allow-list is the absence of a choice, not a
+/// narrowing anyone chose. Treating it as a deliberate `[]` is what made a paid
+/// subscription's other models unreachable.
 ///
 /// So: **when — and only when — the key is absent entirely**, the answer is
 /// widened to the measured provider catalog
