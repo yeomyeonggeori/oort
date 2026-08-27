@@ -13,8 +13,8 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
-    merge_workspace_settings, read_workspace_settings, write_workspace_settings,
-    WorkspaceSettingsInvalid,
+    merge_workspace_settings, read_workspace_settings, read_workspace_settings_for_update,
+    write_workspace_settings, WorkspaceSettingsInvalid,
 };
 use serde_json::{json, Value};
 
@@ -79,7 +79,7 @@ pub async fn patch(
         .unwrap_or_default();
     let outcome: DbRejectable<Value> = agent_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
-            let existing = match read_workspace_settings(conn, workspace_id).await? {
+            let existing = match read_workspace_settings_for_update(conn, workspace_id).await? {
                 Some(settings) => as_object(Some(settings)),
                 None => return Ok(Err(ApiError::not_found("workspace not found"))),
             };

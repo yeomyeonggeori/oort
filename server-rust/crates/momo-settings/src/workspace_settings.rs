@@ -115,6 +115,23 @@ pub async fn read_workspace_settings(
     Ok(settings)
 }
 
+/// PATCH-only read: take the row lock before the app merges.
+///
+/// Merge happens in-process, so an unlocked read lets two concurrent PATCHes
+/// each merge against the same snapshot and the later commit wipes the
+/// earlier one's keys.
+pub async fn read_workspace_settings_for_update(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<Value>, DbError> {
+    let settings: Option<Value> =
+        sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1 FOR UPDATE")
+            .bind(workspace_id)
+            .fetch_optional(conn)
+            .await?;
+    Ok(settings)
+}
+
 /// Replace the stored bag. `updated_at` advances so a later rename token moves.
 pub async fn write_workspace_settings(
     conn: &mut PgConnection,

@@ -2,7 +2,8 @@
 //!
 //! Red: 표면 부재(404)·전 멤버 우회·미지 키 수용·부분 병합이 다른 키를 지움.
 //! Green: operator GET/PATCH, RFC 7396 동형 최상위 병합, allowlist, 상한, audit,
-//! `GET /v1/workspaces/{ws}` 에 settings 미포함.
+//! `GET /v1/workspaces/{ws}` 에 settings 미포함. PATCH 읽기는 `FOR UPDATE` 로
+//! 직렬화되어 동시 병합이 서로의 키를 지우지 않는다.
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -13,12 +14,14 @@ use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
 
 use momo_db::migrate::{default_migrations_dir, run_migrations, SeedMode};
 use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
-use momo_db::{with_tenant_tx, PgPool};
+use momo_db::{rebind_tenant_guc, with_tenant_tx, PgPool};
 use momo_server::{build_app, AppState};
+use momo_settings::read_workspace_settings_for_update;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
@@ -695,4 +698,63 @@ async fn workspace_identity_get_still_omits_settings() {
         !encoded.contains("allowed_agent_models") && !encoded.contains("secret-to-members"),
         "identity GET must not leak the bag: {encoded}"
     );
+}
+
+/// Domain-layer lock proof: A's `FOR UPDATE` read keeps B's `FOR UPDATE` unread
+/// until A commits. HTTP cannot show this — a request is committed when it
+/// answers. Drop the lock and B finishes during the short wait.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn for_update_read_blocks_a_second_for_update() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "for-update").await;
+    let workspace = fixture.workspace;
+
+    let mut tx_a = app.begin().await.expect("begin A");
+    rebind_tenant_guc(&mut tx_a, workspace)
+        .await
+        .expect("bind A's tenant GUC");
+    sqlx::query("SET LOCAL lock_timeout = '30s'")
+        .execute(&mut *tx_a)
+        .await
+        .expect("arm A's hang guard");
+    let held = read_workspace_settings_for_update(&mut tx_a, workspace)
+        .await
+        .expect("A takes the row");
+    assert!(held.is_some(), "A must see the workspace row");
+
+    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel::<()>();
+    let app_b = app.clone();
+    let b = tokio::spawn(async move {
+        let mut tx_b = app_b.begin().await.expect("begin B");
+        rebind_tenant_guc(&mut tx_b, workspace)
+            .await
+            .expect("bind B's tenant GUC");
+        sqlx::query("SET LOCAL lock_timeout = '30s'")
+            .execute(&mut *tx_b)
+            .await
+            .expect("arm B's hang guard");
+        let _ = ready_tx.send(());
+        let settings = read_workspace_settings_for_update(&mut tx_b, workspace).await;
+        tx_b.commit().await.expect("commit B");
+        settings
+    });
+
+    ready_rx.await.expect("B reached the for-update");
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    assert!(
+        !b.is_finished(),
+        "B's for-update must still be blocked while A holds the row"
+    );
+
+    tx_a.commit().await.expect("commit A");
+    let settings = tokio::time::timeout(Duration::from_secs(5), b)
+        .await
+        .expect("B must finish after A commits")
+        .expect("B task")
+        .expect("B for-update");
+    assert!(settings.is_some(), "B must see the workspace row after A");
 }

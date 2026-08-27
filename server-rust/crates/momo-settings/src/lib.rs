@@ -117,7 +117,7 @@ pub use workspace::{
     WorkspaceProvisionRejected, WorkspaceSpecInvalid,
 };
 pub use workspace_settings::{
-    merge_workspace_settings, read_workspace_settings, write_workspace_settings,
-    WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS,
-    MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
+    merge_workspace_settings, read_workspace_settings, read_workspace_settings_for_update,
+    write_workspace_settings, WorkspaceSettingsInvalid, ALLOWED_SETTINGS_KEYS,
+    MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
 };
