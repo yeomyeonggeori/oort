@@ -2040,7 +2040,7 @@ export interface paths {
         };
         /**
          * Read message history (seq-cursor pagination).
-         * @description Without cursors, returns the newest messages ordered by `seq` descending. `before=<seq>` pages older history (descending). `after=<seq>` is the realtime-recovery backfill: it returns messages with `seq > after` in ASCENDING order and takes precedence over `before` when both are present. All variants include deleted messages as tombstones (`state=deleted`, omitted/null `body`, populated `deletedAtMs`) and project the durable `state`, `editedAtMs`, and `deletedAtMs` values so clients converge after restart or backfill.
+         * @description Without cursors, returns the newest messages ordered by `seq` descending. `before=<seq>` pages older history (descending). `after=<seq>` is the realtime-recovery backfill: it returns messages with `seq > after` in ASCENDING order and takes precedence over `before` when both are present. All variants include deleted messages as tombstones (`state=deleted`, omitted/null `body`, populated `deletedAtMs`) and project the durable `state`, `editedAtMs`, and `deletedAtMs` values so clients converge after restart or backfill. A generic agent bearer that carries the non-default `messages:read` scope may call this route on a channel where that agent is an active member (ADR-0173). Hosted connection credentials are refused on this REST surface; they keep the Agent Port read tool only.
          */
         get: operations["getMessageHistory"];
         put?: never;
@@ -2064,7 +2064,7 @@ export interface paths {
         };
         /**
          * Read all replies to a top-level message in ascending seq order.
-         * @description Uses an exclusive message-seq cursor. Deleted replies remain visible as tombstones. The root must exist in this channel and be top-level; a root in another channel is reported as not found. Active channel membership is enforced before the root lookup.
+         * @description Uses an exclusive message-seq cursor. Deleted replies remain visible as tombstones. The root must exist in this channel and be top-level; a root in another channel is reported as not found. Active channel membership is enforced before the root lookup. A generic agent bearer that carries the non-default `messages:read` scope may call this route on the same membership predicate as history (ADR-0173). Hosted connection credentials are refused here.
          */
         get: operations["getThreadReplies"];
         put?: never;
@@ -3289,10 +3289,13 @@ export interface components {
         AgentCardRegistrationResponse: {
             registration: components["schemas"]["AgentCardRegistration"];
         };
-        /** @enum {string} */
+        /**
+         * @description Closed generic agent-bearer scope set. `messages:read` is grantable and not default (ADR-0162). When present it opens `GET …/channels/{ch}/messages` and `GET …/messages/{root}/replies` for that generic credential (ADR-0173). Hosted credentials never gain those REST routes from this name — class preflight keeps them on the Agent Port tool only.
+         * @enum {string}
+         */
         AgentCredentialScope: "agent:jobs:read" | "agent:runs:callback" | "messages:read" | "messages:write" | "realtime:subscribe" | "work:control" | "provider:quota:write" | "agent:port:connect" | "agent:inbox:read";
         /**
-         * @description The closed hosted scope set. `agent:port:connect` is reachability only: it opens `POST /v1/mcp/agent-port` and no product tool. Each of the others opens exactly one Agent Port tool family and no REST route — `agent:inbox:read` -> oort_inbox_read, `messages:read` -> oort_conversation_read, `messages:write` -> oort_message_post, `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release, `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is listed and callable only when the connection approval, the credential's current scopes and the server capability all carry its scope.
+         * @description The closed hosted scope set. `agent:port:connect` is reachability only: it opens `POST /v1/mcp/agent-port` and no product tool. Each of the others opens exactly one Agent Port tool family and no REST route (ADR-0173 does not change that for hosted) — `agent:inbox:read` -> oort_inbox_read, `messages:read` -> oort_conversation_read, `messages:write` -> oort_message_post, `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release, `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is listed and callable only when the connection approval, the credential's current scopes and the server capability all carry its scope.
          * @enum {string}
          */
         HostedAgentScope: "agent:port:connect" | "agent:inbox:read" | "messages:read" | "messages:write" | "agent:jobs:read" | "agent:runs:callback";
