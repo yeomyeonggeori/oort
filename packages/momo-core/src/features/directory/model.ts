@@ -2,6 +2,7 @@ import {
   ApiError,
   uuidEq,
   type Channel,
+  type MembershipRole,
   type RosterMember,
 } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
@@ -64,6 +65,32 @@ export function roleLabel(
   const role = member.role;
   if (role === undefined) return null;
   return trimmedOverride(labels, role) ?? DEFAULT_ROLE_LABELS[role] ?? null;
+}
+
+/**
+ * Display name for a role key. Override wins; empty/absent falls back to the
+ * Korean default. Unlike `roleLabel`, this does not hide agent rows: a select
+ * option is a catalog entry, not a roster heading.
+ */
+export function roleKeyLabel(
+  role: RoleKey,
+  labels?: RoleLabels | null
+): string {
+  return trimmedOverride(labels, role) ?? DEFAULT_ROLE_LABELS[role];
+}
+
+/**
+ * The only client gates for the workspace-role control: viewer is an operator
+ * on the roster projection, and the target is not the viewer. Hierarchy and
+ * last-owner stay on the server.
+ */
+export function canChangeWorkspaceRole(
+  viewerRole: MembershipRole | undefined,
+  viewerMemberId: string,
+  targetMemberId: string
+): boolean {
+  if (viewerRole !== "owner" && viewerRole !== "admin") return false;
+  return !uuidEq(viewerMemberId, targetMemberId);
 }
 
 /**
@@ -359,4 +386,46 @@ export function openDmErrorMessage(error: unknown, name: string): string {
     return `${name}님과의 대화를 열지 못했습니다. ${error.message}`;
   }
   return `${name}님과의 다이렉트 메시지를 열지 못했습니다. 다시 시도하세요.`;
+}
+
+/**
+ * What went wrong changing a workspace role. The server is the authority; this
+ * only turns 400/403/409 (and transport absence) into a sentence. It does not
+ * pre-empt the hierarchy rules.
+ */
+export function changeWorkspaceRoleErrorMessage(error: unknown): string {
+  if (error instanceof ApiError) {
+    const wire = error.message;
+    if (
+      error.status === 409 ||
+      wire.includes("at least one owner")
+    ) {
+      return "마지막 소유자의 역할은 내릴 수 없습니다. 다른 멤버를 소유자로 지정한 뒤 다시 시도하세요.";
+    }
+    if (wire.includes("cannot manage themselves")) {
+      return "자기 자신의 역할은 바꿀 수 없습니다.";
+    }
+    if (wire.includes("equal or higher")) {
+      return "같거나 높은 역할의 멤버는 바꿀 수 없습니다.";
+    }
+    if (wire.includes("cannot grant admin or owner")) {
+      return "관리자는 관리자나 소유자 역할을 부여할 수 없습니다.";
+    }
+    if (error.status === 403) {
+      return "이 워크스페이스에서 역할을 바꿀 권한이 없습니다.";
+    }
+    if (error.status === 400) {
+      return "역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요.";
+    }
+    if (error.status === 404) {
+      return "이 멤버를 명부에서 찾지 못했습니다. 명부를 새로 고친 뒤 다시 시도하세요.";
+    }
+    if (error.status === 429) {
+      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
+    }
+  }
+  if (error instanceof NetworkError) {
+    return `역할을 바꾸지 못했습니다. ${error.message}`;
+  }
+  return "역할을 바꾸지 못했습니다. 다시 시도하세요.";
 }
