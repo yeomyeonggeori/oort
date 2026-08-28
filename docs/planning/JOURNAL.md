@@ -2796,3 +2796,12 @@
 - **S4 경로 재설계**: promotion/자격발급 UI 부재 확인 → owner curl 1회로 Comptest-fable admin 승격 시트 성재 제공(비번=성재 터미널). 승격 후 Fable이 generic 에이전트 생성+자격 발급+S4 5항 자율 대행.
 - 워커/트리: #1849 워커 회수 완료. 미해결=결함 B 진단(그록봇 앱 성재 사용 중이라 릴레이 대기)·성재 승격 curl.
 - 정본화 이월: #1849(track/uxui)는 결함 B 산출물과 묶어 한 승격 창으로 batch 예정(허들 축 폐곡선 시).
+
+## 2026-08-28 (밤) · Fable · 로컬 셀프호스트 전환 — 종합테스트 로컬 완주(S4·S1-lite·UI)·#1848/#1856a 랜딩·결함 B 실증
+- **재개·정렬**: 체크포인트(#1851) 단독 재개 → sync 짝 #1852·#1853 머지로 `main ⊂ 두 트랙` 복구. 이전 세션 scratchpad 3종(승격 시트·릴레이 문안·테스트 자격) 회수.
+- **#1848 랜딩 사이클**: 브리프 정본화(#1854) → grok 구현(PR #1855: momo-core changeWorkspaceMemberRole + MemberProfileDialog operator 컨트롤·낙관 갱신 금지·거부 문장 표면화) → Fable 재검수(서버 접점 3곳 실측 정합) + design-review 2회전 — **H-1**(busy-disabled 포커스 증발→하우스 busy 패턴 치환) · **H-2**(에이전트 대상 개방→kind 게이트, 브리프의 "동일 표면" 조항이 원인 — 기획 오류 자인) 수리 후 **B0·H0** 재검증 PASS → track/uxui 머지·#1848 close. 파생: **#1857**(서버 미차단 갭)·**#1858**(계정 메뉴 로그아웃 부재, 성재 발견 티켓화). 검수 앱 track/uxui 재빌드.
+- **그록봇 릴레이(왕복 1.5회 후 중단)**: 미발신 초안 발견→통합 문안(진단+승격)으로 교체 발신. 작업1 보고 수신 — **nodeIP=브리지 자동감지·CreatePermission 거부 로그 없음·SFU→relay 요청8/응답0** → **#1856** 발급. 작업2(승격)는 자동검토 카드 만료로 불발, 이후 그록봇 자체 오류(성재 고지)로 VM 경로 중단. 넛지 발신은 권한 분류기 차단 → 우회 없이 성재 이관.
+- **로컬 셀프호스팅 전환(성재 지시 "직접 입력해서 해봐")**: `oortv013`(발행 v0.1.3 digest pin, published-digest 모드) 기동 — 구 `oort`·`oort-t` 스택 비파괴 정지(볼륨 보존), 검수 앱 저장 주소(127.0.0.1:8088) 자동 승계. owner 자격 로컬 발급으로 **성재 대기 2건(승격 curl·릴레이) 구조 소멸**: invite→Comptest-fable join→admin 승격(PATCH 실측=#1855 와이어 계약 일치)→generic 에이전트+자격.
+- **테스트 실적**: **S4 5/5 PASS**(편차 기록: 단일 메시지 GET=라우트 부재 404 — 런시트 403 기대 오기, 시트 초판 body shape 결함 자기 수정) · **S1-lite PASS**(livekit-client 하네스+playwright 2컨텍스트 상호 오디오 바이트 실측) · **결함 B B-1 실증**: 기본 구성 동형 재현(PC 연결 실패) → `rtc.node_ip` 한 줄로 즉시 연결 — 대조 실험으로 "advertise IP=병인" 증명(#1856 코멘트) · **UI 워크스루**(Fable 직접): 발행 번들 로그인·명부·S4 게시물 렌더·**허들 2자 실 UI**(Live 배지·참가자 상호 표시) + 역할 UI(dev번들×v0.1.3 서버 — 강등→명부 반영→복원·self 게이트). 증거 4본 `claudedocs/comprehensive-test-20260828/`.
+- **#1856a 랜딩**(PR #1859→track/engine): livekit `MOMO_LIVEKIT_NODE_IP` 노브(빈 값=자동 감지 현행 유지)·생성 env 기본 127.0.0.1·기존 env 소급 주입 금지(LAN 오광고 방지 사유 명문)·게이트 신설(test_livekit_node_ip: compose render+entrypoint argv+실이미지 부팅 --node-ip≡rtc.node_ip). **정책 무결성 감사 제도 이행**: local_gate 1줄 추가로 게이트 발동 → momo-main 실감사 코멘트(Policy-Integrity-Audit)+라벨 → 그린. 게이트 2본 오케스트레이터 직접 재실행 PASS.
+- **가동/큐**: #1857 워커 진행 중 → #1858 → 성재 UXUI 피드백 티켓들(상시 순차 발사 위임). 보류: S2·S3·VM축(그록봇 복구 대기). 잔여 정리: infra/livekit.yaml 워킹트리 실험 수정(#1859 노브로 이행 예정).
