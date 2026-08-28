@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus, Settings } from "lucide-react";
+import { LogOut, Plus, Settings } from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
 import { presenceTriggerLabel } from "@momo/core/features/presence/model";
+import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import {
   DropdownMenu,
@@ -23,7 +24,8 @@ import {
 // under 600px; the connection bar and help sit outside it. The open panel is
 // a DropdownMenu (not a submenu, house rule #1383): declared status radios,
 // then the real workspace verb that already lives on the rail (+), then
-// settings.
+// settings, then logout (#1858). The card rewires AccountSection's existing
+// verb; it does not invent a second session path.
 //
 // Invented surfaces stay off this card:
 //   * workspace session swap (ADR-0161 4b-3) has not landed. The rail's [+]
@@ -51,6 +53,7 @@ export function ProfileCard({
   connected: boolean;
 }) {
   const navigate = useNavigate();
+  const { logout } = useSession();
   const openAddWorkspace = useOpenAddWorkspace();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const openingWorkspaceRef = useRef(false);
@@ -124,6 +127,14 @@ export function ProfileCard({
         >
           <Settings className="size-4" aria-hidden="true" />
           설정
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          data-testid="profile-logout"
+          onSelect={() => logout()}
+        >
+          <LogOut className="size-4" aria-hidden="true" />
+          로그아웃
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

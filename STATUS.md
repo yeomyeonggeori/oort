@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
+
+- 사이드바 `ProfileCard` 드롭다운 맨 아래(설정 뒤)에 「로그아웃」을 추가. `useSession().logout` 직접 호출, 확인 다이얼로그 없음, destructive 색 없음. 설정 > 계정 `data-testid="logout"` 은 유지.
+- red proof: 메뉴 열면 `profile-logout`이 설정 뒤, 선택·Arrow/Enter 시 logout 1회. 상태 3종·워크스페이스 추가·설정 회귀.
+
 ## 허들 TURN setConfiguration 경로 커버 (#1847, 2026-08-28)
 
 - #1825 세션 스코프 셰임이 생성자 config만 리라이트해 livekit-client의 빈 ctor → `setConfiguration(JoinResponse ICE)` 주입을 놓침. `RTCPeerConnection.prototype.setConfiguration`을 같은 host-게이트로 인터셉트. 생성자 경로·복원 시점(세션 종료)·Cloud/직결 무발동 유지. 새 플래그 없음.

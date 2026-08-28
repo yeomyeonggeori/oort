@@ -153,4 +153,17 @@ describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
     expect(profileCard).toContain('navigate("/settings")');
     expect(sidebar).not.toContain('data-testid="nav-settings"');
   });
+
+  it("로그아웃은 설정 뒤의 실존 동사다 (#1858)", () => {
+    expect(profileCard).toContain('data-testid="profile-logout"');
+    expect(profileCard).toContain("useSession");
+    expect(profileCard).toContain("onSelect={() => logout()}");
+    expect(profileCard).toContain("<LogOut className=\"size-4\" aria-hidden=\"true\" />");
+    expect(profileCard).toContain("로그아웃");
+    expect(profileCard).not.toContain("tone=\"danger\"");
+    const settings = profileCard.indexOf('data-testid="nav-settings"');
+    const logout = profileCard.indexOf('data-testid="profile-logout"');
+    expect(settings).toBeGreaterThan(-1);
+    expect(logout).toBeGreaterThan(settings);
+  });
 });
