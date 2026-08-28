@@ -96,7 +96,9 @@ export async function connectHuddleAudio(
     // JoinResponse iceServers carry the TURN credential. rtcConfig cannot
     // rewrite them without dropping that credential (livekit-client keeps
     // server iceServers only when rtcConfig.iceServers is unset), so the
-    // PeerConnection constructor is shimmed for the huddle session.
+    // PeerConnection constructor and prototype.setConfiguration are shimmed
+    // for the huddle session. livekit-client builds an empty PC then injects
+    // ICE via setConfiguration (#1847).
     // Host-gated: rewrite is turns:signalHost:443 only, so other PCs are
     // unaffected while the shim stays installed.
     restoreTurnRewrite = installHuddleTurnRewriteShim(options.livekitUrl);

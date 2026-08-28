@@ -18,7 +18,10 @@
 // Injection is a session-scoped RTCPeerConnection shim, not RoomConnectOptions
 // rtcConfig: livekit-client RTCEngine.makeRTCConfiguration keeps JoinResponse
 // iceServers only when `rtcConfig.iceServers` is unset, so a client-supplied
-// list would drop the JoinResponse username/credential.
+// list would drop the JoinResponse username/credential. The SDK constructs
+// the PC with empty iceServers and injects JoinResponse ICE via
+// setConfiguration (#1847), so the shim wraps the constructor and intercepts
+// RTCPeerConnection.prototype.setConfiguration.
 // =============================================================================
 
 /**
@@ -142,10 +145,19 @@ export const rewriteRtcConfiguration = (
   return { ...configuration, iceServers };
 };
 
+type SetConfigurationFn = (
+  this: RTCPeerConnection,
+  configuration?: RTCConfiguration,
+  ...rest: unknown[]
+) => void;
+
 /**
  * Install a huddle-scoped RTCPeerConnection wrapper that rewrites completed
- * ICE configs (constructor + setConfiguration). Returns a restore function
- * that is a no-op after the first call and never replaces a later wrapper.
+ * ICE configs (constructor + prototype setConfiguration). livekit-client
+ * constructs with empty iceServers and injects JoinResponse ICE via
+ * setConfiguration; a constructor-only subclass misses that path when the
+ * SDK holds a captured constructor. Returns a restore function that is a
+ * no-op after the first call and never replaces a later wrapper.
  */
 export const installHuddleTurnRewriteShim = (
   livekitUrl: string
@@ -156,6 +168,19 @@ export const installHuddleTurnRewriteShim = (
     return () => undefined;
   }
   const rewriteHost = signalHost;
+  const originalSetConfiguration = Original.prototype.setConfiguration as
+    | SetConfigurationFn
+    | undefined;
+  const interceptedSetConfiguration: SetConfigurationFn | undefined =
+    typeof originalSetConfiguration === "function"
+      ? function (configuration, ...rest) {
+          return originalSetConfiguration.call(
+            this,
+            rewriteRtcConfiguration(configuration, rewriteHost),
+            ...rest
+          );
+        }
+      : undefined;
 
   class HuddleTurnRewritePeerConnection extends Original {
     constructor(configuration?: RTCConfiguration) {
@@ -169,6 +194,10 @@ export const installHuddleTurnRewriteShim = (
     }
   }
 
+  if (interceptedSetConfiguration) {
+    Original.prototype.setConfiguration = interceptedSetConfiguration;
+  }
+
   globalThis.RTCPeerConnection =
     HuddleTurnRewritePeerConnection as typeof RTCPeerConnection;
 
@@ -176,6 +205,13 @@ export const installHuddleTurnRewriteShim = (
   return () => {
     if (restored) return;
     restored = true;
+    if (
+      interceptedSetConfiguration &&
+      originalSetConfiguration &&
+      Original.prototype.setConfiguration === interceptedSetConfiguration
+    ) {
+      Original.prototype.setConfiguration = originalSetConfiguration;
+    }
     if (globalThis.RTCPeerConnection === HuddleTurnRewritePeerConnection) {
       globalThis.RTCPeerConnection = Original;
     }
