@@ -44,6 +44,7 @@ fn lifecycle_http(error: MembershipLifecycleError) -> ApiError {
         MembershipLifecycleError::InvalidStoredRole => {
             ApiError::internal("membership_lifecycle.stored_role", message)
         }
+        MembershipLifecycleError::AgentRoleImmutable => ApiError::forbidden(message),
         _ => ApiError::forbidden(message),
     }
 }
@@ -536,5 +537,8 @@ mod tests {
             lifecycle_http(MembershipLifecycleError::DirectMessageLeaveForbidden).message,
             "direct message channels cannot be left"
         );
+        let agent_role = lifecycle_http(MembershipLifecycleError::AgentRoleImmutable);
+        assert_eq!(agent_role.message, "agent roles are fixed to member");
+        assert_eq!(agent_role.status, StatusCode::FORBIDDEN);
     }
 }
