@@ -2779,3 +2779,10 @@
 - **정본 패킷** `handoffs/2026-08-28-comprehensive-test-packet.md`: 준비 체인 ①~⑤(발행→#1837 문면→VM 갱신 릴레이→검수 앱 재빌드→자격 세팅) + 시나리오 S1~S5·PASS 기준. VM 수동 배선 5종 보존 목록 성문(**CSP connect-src=최고 위험** — 컨테이너 내부 수정이면 이미지 교체로 소실, 갱신 후 외부 헤더 재검증+재적용 릴레이 절차). 적립 메모: 생성기가 MOMO_LIVEKIT_URL 오리진을 CSP 자동 반영 안 하는 갭=티켓 후보.
 - **#1837 발급**(DOCS-V013, grok·게이트=발행 후 착수): §2-B digest pin — **선재 정합 결함 동반 수리**(현행 문면 라벨 v0.1.1·빌드커밋 1b79bc65·digest는 v0.1.2 값 혼재) + **§6 "읽기 스코프를 넣어도 REST는 403" 정정**(#1820 랜딩으로 거짓 판명 — 이번 검토의 실발견) + llms.txt 정합. 브리프 `2026-08-28-v013-docs-refresh-brief.md`(grep 증명 3종 완료 기준).
 - **성재 결재 대기**: v0.1.3 발행 창 승인=체인 개시 게이트. 승인 후 Fable이 dispatch·Release 생성→grok 발사→VM 릴레이·검수 앱 재빌드까지 자율, 성재 실작업은 4점(승인 클릭·owner 로그인 1회·폰 LTE 3분·종합 검수 세션)으로 최소화.
+
+## 2026-08-28 (오후2) · Fable · 종합 테스트 준비 체인 ①~④ 완주 — v0.1.3 발행·VM 갱신·실행 시트
+- **성재 "ㄱㄱ"로 체인 개시**: ① publish-images 디스패치(성재 env 승인 2회) → **v0.1.3 발행**(main=4d3085ad · 앱 `e0faed22…4868` · pg `49a589bd…d071` · attestation verify 2본 PASS · Release 생성). ② **#1837 랜딩·close**(PR #1841 — §2-B 3자 정합·§6 읽기 개방 정정·llms.txt 0건 실증, Fable 재검수 PASS) + 정본화(sync 짝 #1842·#1843, main ⊂ 두 트랙).
+- **③ VM 갱신 — 그록봇 릴레이 Fable 자율 집행**(성재 결재 "지금 바로 투입", 앱 제어 중 성재의 별도 그록봇 작업과 키보드 조율): 관측→pin 교체→pull→검증 6항 전부 성공. 데이터 볼륨·허들 배선 5종 보존, **CSP는 호스트 파일(infra/rust/Caddyfile.local)이라 무사**(패킷의 최고 위험 항목 해소). livekit은 orphan 유지 가동. 외부 검증(Fable 실측): healthz 200·CSP :10000 잔존·시그널 200·TURN 8443 TLS verify 0·**새 번들 서빙 실증**(8443 리라이트 상수+roleLabel 마커 grep).
+- **④ 검수 앱 재빌드**: main=4d3085ad Tauri debug → ~/Desktop/oort-uxui-review.app 교체. 함정 재현: node_modules 신선도(radix 신규 패키지) — npm install 후 그린.
+- **실행 시트** `claudedocs/comprehensive-test-20260828/RUNSHEET.md`: 준비 스탬프+⑤ 자격 발급 시트(owner 로그인=성재)+S1~S5 절차. **잔여=⑤(성재 ~2분) → S1-a는 Fable 선행 가능.**
+- 앱 제어 학습: 한글 IME가 cliclick 타이핑·osascript keystroke를 전부 자모 변환 — **텍스트 투입은 pbcopy+Edit 메뉴 Paste가 정석**(클립보드 백업·복원 동반). 검색창 타이핑은 IME 오염으로 불가, 사이드바 직접 클릭이 안전.
