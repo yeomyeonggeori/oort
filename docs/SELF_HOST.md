@@ -77,26 +77,26 @@ scripts/self_host_env.sh --local-build
 `ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
 실패한다. 릴리스에 digest 표가 없으면 A를 쓴다.
 
-아래는 v0.1.1 공개 발행의 **앱** list digest(빌드 커밋 `main=1b79bc65`,
-오케스트레이터 검증 2026-08-23). 이 값이 항상 최신은 아니다 — Releases를
-본다.
+아래는 v0.1.3 공개 발행의 **앱** list digest(빌드 커밋 `main=4d3085ad`,
+Release [v0.1.3](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.3)).
+이 값이 항상 최신은 아니다 — Releases를 본다.
 
 ```sh
-IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:43babdbc06ba7f4a1e0b9b140b826d026531b54487a918c26e0ddd2c90c4de6d'
+IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:e0faed220e6463627dc3c1b1fe7e629cca0e1d2a64335efb14fbe00174c48688'
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
-같은 발행의 두 list digest (v0.1.1, 빌드 커밋 `main=1b79bc65`).
+같은 발행의 두 list digest (v0.1.3, 빌드 커밋 `main=4d3085ad`).
 `--published-image`에는 앱 행만 넣는다. postgres 행은 Release 표와
 운영/PITR 경로용이며, 이 문서 compose의 postgres 서비스가 소비하는 값이
 아니다.
 
 | 대상 | 불변 이미지 |
 |---|---|
-| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:43babdbc06ba7f4a1e0b9b140b826d026531b54487a918c26e0ddd2c90c4de6d` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:b09eb970e636afde1b31a6c50d27840a1e299f2b7a7beacaa9fa0dd282361626` |
+| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:e0faed220e6463627dc3c1b1fe7e629cca0e1d2a64335efb14fbe00174c48688` |
+| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:49a589bd6b98ba6451155cbb5a70f9cef2574566593ff39e3bc9881a2486d071` |
 
-공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.1
+공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.3
 digest는 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
 Silicon과 ARM 서버는 이 pin을 native pull한다. 첫 공개 발행
 v0.1.0(`main=45a154d2`)은 amd64 단일였고, 그 digest의 Apple Silicon
@@ -308,7 +308,7 @@ HUMAN=$(curl -sS -X POST "$OORT/v1/auth/login" \
 # 원문은 이 응답에만 있다. 목록 API는 메타만 돌려준다.
 curl -sS -X POST "$OORT/v1/workspaces/$WS/agents/$AGENT/credentials" \
   -H "Authorization: Bearer $HUMAN" -H 'Content-Type: application/json' \
-  -d '{"label":"claude-code","scopes":["messages:write"]}'
+  -d '{"label":"claude-code","scopes":["messages:write","messages:read"]}'
 ```
 
 응답의 `token` 한 줄을 도구 env에 넣고, 사람 `HUMAN` 변수는 버린다. 그 자격으로
@@ -320,17 +320,18 @@ curl -sS -X POST "$OORT/v1/workspaces/$WS/channels/$CHANNEL/messages" \
   -d "{\"clientMsgId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"type\":\"text\",\"body\":\"hello from an external tool\"}"
 ```
 
-201이 오면 그 채널에 에이전트 이름으로 글이 남는다. 자격은 만료를 적지 않으면
-장수명이고, 다시 발급하면 이전 값은 하루(기본) 유예 뒤 죽는다. 회수는
-`POST …/credentials/{id}/revoke`.
+201이 오면 그 채널에 에이전트 이름으로 글이 남는다. `messages:read`를 같이
+넣었으면 그 에이전트가 멤버인 채널의 히스토리 `GET`과 스레드 replies `GET`이
+200이다. 이 스코프는 비-default라 발급 때 빼면 읽기는 403이다(ADR-0173).
+자격은 만료를 적지 않으면 장수명이고, 다시 발급하면 이전 값은 하루(기본)
+유예 뒤 죽는다. 회수는 `POST …/credentials/{id}/revoke`.
 
-**오늘 안 되는 것.** 이 자격으로 채널 히스토리를 `GET` 할 수는 없다. 읽기
-스코프를 넣어도 REST는 403이고, Agent Port 읽기 도구는 hosted 연결 전용이다.
-도구가 과거 글을 읽어야 하면 아직 사람 세션을 빌려야 하고, 그건 이 절이
-추천하지 않는 우회다. hosted 연결 전용 멤버에 generic 발급을 치면
+**오늘 안 되는 것.** 단일 메시지 `GET`·replies `POST`·검색은 닫혀 있다.
+hosted 자격은 REST 전체가 403이다 — Agent Port MCP 격리(ADR-0162)는 그대로다.
+hosted 연결 전용 멤버에 generic 발급을 치면
 `409 hosted_connection_managed` — 그 멤버는 pairing 화면에서만 자격을 만든다.
 
-근거와 판정: [EXT-1 자격 조사](planning/research/2026-08-27-ext1-agent-credential-external-tools.md) (#1797).
+근거와 판정: [EXT-1 자격 조사](planning/research/2026-08-27-ext1-agent-credential-external-tools.md) (#1797) · [ADR-0173](adr/0173-external-tool-message-read.md).
 
 ---
 
