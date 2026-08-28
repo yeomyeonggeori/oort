@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 에이전트 workspace role 변경 서버 거부 (#1857, 2026-08-28)
+
+- `change_workspace_role_in_tx`가 target `member.kind=agent`면 requested 값과 무관하게 403 `agent roles are fixed to member`. no-op(`member`)도 같은 문장. 사람 승격/강등·last-owner·self-manage 불변.
+- 채널 role(`change_channel_role_in_tx`)·suspend/remove는 비접촉. 클라 문장 매핑 없음(#1855가 컨트롤을 숨김).
+- red proof: `membership_lifecycle_conformance_pg` 에이전트 4역할 거부 + 사람 왕복, 단위 테스트는 variant 문장/HTTP 403.
+
 ## 로컬 허들 node_ip 노브 (#1856a / #1856, 2026-08-28)
 
 - huddle LiveKit entrypoint가 `MOMO_LIVEKIT_NODE_IP`가 있으면 `--node-ip`를 붙인다. 비면 자동 감지(기존 배치 무영향).
