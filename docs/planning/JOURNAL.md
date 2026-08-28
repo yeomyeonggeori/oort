@@ -2786,3 +2786,13 @@
 - **④ 검수 앱 재빌드**: main=4d3085ad Tauri debug → ~/Desktop/oort-uxui-review.app 교체. 함정 재현: node_modules 신선도(radix 신규 패키지) — npm install 후 그린.
 - **실행 시트** `claudedocs/comprehensive-test-20260828/RUNSHEET.md`: 준비 스탬프+⑤ 자격 발급 시트(owner 로그인=성재)+S1~S5 절차. **잔여=⑤(성재 ~2분) → S1-a는 Fable 선행 가능.**
 - 앱 제어 학습: 한글 IME가 cliclick 타이핑·osascript keystroke를 전부 자모 변환 — **텍스트 투입은 pbcopy+Edit 메뉴 Paste가 정석**(클립보드 백업·복원 동반). 검색창 타이핑은 IME 오염으로 불가, 사이드바 직접 클릭이 안전.
+
+## 2026-08-28 (저녁) · Fable · 종합 테스트 S1 실행 — 허들 결함 2겹 적발·A 폐곡선·B 진단
+- **성재 위임**: 자격 발급 owner 관문에서 "너가 올려줘" → 로그인된 세션 조작으로 진행(비번 미취급 유지). 종합 테스트 S1(허들) Fable 선행 실측.
+- **S1 실측(v0.1.3 실배포·외부 크롬 계측)**: 허들 미연결 — 결함 2겹. 증거 `claudedocs/comprehensive-test-20260828/S1-huddle-findings.md`.
+  - **결함 A(#1847→PR #1849 랜딩·폐곡선)**: #1825 셰임이 생성자 config만 리라이트 → livekit-client의 빈 ctor+`setConfiguration` 주입 경로 미발동(라이브 443 잔존·드롭 3회). 페이지 임시 패치로 8443 적용→TURN 할당 성공 실측=수리 방향 검증. grok가 `prototype.setConfiguration` 인터셉트 추가(host 게이트·idempotent), Fable 재검수 PASS(구현이 라이브 실측과 일치), track/uxui 랜딩. **단위 테스트가 생성자 픽스처만 짚어 못 잡은 함정 — #1777 동류.**
+  - **결함 B(진단 중)**: 8443 적용 후에도 relay(tls)↔SFU 내부(172.19.0.2:50025) 페어 요청 1회 만에 failed — TURN CreatePermission 거부 형상. 그록봇 진단 릴레이(livekit 로그·rtc 섹션·node/advertise IP) 발신 대기. S1-a/b/c는 B 해소 후 승계.
+- **부수 발견 2건**: ①Grok Bot=`hosted-agent` → S4 generic 자격 409 차단, **S4는 generic 에이전트 신설 필요** ②웹 명부 역할 변경 UI 부재 → **#1848**(서버 PATCH /role 미배선). admin 위임이 curl로만 가능.
+- **S4 경로 재설계**: promotion/자격발급 UI 부재 확인 → owner curl 1회로 Comptest-fable admin 승격 시트 성재 제공(비번=성재 터미널). 승격 후 Fable이 generic 에이전트 생성+자격 발급+S4 5항 자율 대행.
+- 워커/트리: #1849 워커 회수 완료. 미해결=결함 B 진단(그록봇 앱 성재 사용 중이라 릴레이 대기)·성재 승격 curl.
+- 정본화 이월: #1849(track/uxui)는 결함 B 산출물과 묶어 한 승격 창으로 batch 예정(허들 축 폐곡선 시).
