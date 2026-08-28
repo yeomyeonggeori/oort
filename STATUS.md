@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
+
+- `required_agent_scope`가 `GET …/channels/{ch}/messages`와 `GET …/messages/{root}/replies`를 `messages:read`에 매핑. 기본 스코프 집합·GRANTABLE·hosted 가드·핸들러 감사는 비접촉.
+- hosted 자격은 `AgentBearerClass` 선격리로 전 상태(active/grace/cleanup_pending) GET 403. 채널 경계는 사람 경로와 같은 `is_channel_member`(left_at).
+- red proof: 매핑 전 정상 GET 403 → 매핑 후 generic+`messages:read` 200. 사람 GET·페이지네이션 회귀 유지.
+
 ## 허들 TURN 광고 포트 리라이트 (#1825, 2026-08-28)
 
 - Funnel 셀프호스트에서 LiveKit v1.13.3 `external_tls`가 광고하는 `turns:<시그널호스트>:443`만 8443으로 바꾼다. username/credential/transport 불변. Cloud(`*.turn.livekit.cloud`)·stun·직결 candidate는 host/scheme 불일치로 미발동.
