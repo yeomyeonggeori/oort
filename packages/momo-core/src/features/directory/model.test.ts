@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { ApiError, uuidEq, type Channel, type RosterMember } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  canChangeWorkspaceRole,
+  changeWorkspaceRoleErrorMessage,
   countLabel,
   dmAvailability,
   groupDirectory,
@@ -11,6 +13,7 @@ import {
   normalizeQuery,
   openDmErrorMessage,
   parseRoleLabels,
+  roleKeyLabel,
   roleLabel,
   statusLabel,
   switcherPeople,
@@ -109,6 +112,46 @@ describe("roleLabel", () => {
   it("never labels an agent even when a member override is stored", () => {
     expect(roleLabel(HERMES, { member: "동료" })).toBeNull();
     expect(roleLabel(INTERN_AGENT, { member: "동료" })).toBeNull();
+  });
+});
+
+describe("roleKeyLabel", () => {
+  it("uses the Korean default and prefers a workspace override", () => {
+    expect(roleKeyLabel("owner")).toBe("소유자");
+    expect(roleKeyLabel("admin", { admin: "리드" })).toBe("리드");
+    expect(roleKeyLabel("member", { member: "  " })).toBe("멤버");
+    expect(roleKeyLabel("guest", { guest: "방문" })).toBe("방문");
+  });
+});
+
+describe("canChangeWorkspaceRole", () => {
+  it("hides the control from non-operators and from self", () => {
+    expect(canChangeWorkspaceRole("member", DEMO.id, INTERN_HUMAN)).toBe(false);
+    expect(canChangeWorkspaceRole("guest", DEMO.id, INTERN_HUMAN)).toBe(false);
+    expect(canChangeWorkspaceRole(undefined, DEMO.id, INTERN_HUMAN)).toBe(
+      false
+    );
+    expect(canChangeWorkspaceRole("owner", DEMO.id, DEMO)).toBe(false);
+    expect(
+      canChangeWorkspaceRole("admin", DEMO.id, {
+        ...DEMO,
+        id: DEMO.id.toUpperCase(),
+      })
+    ).toBe(false);
+  });
+
+  it("offers the control to an operator looking at a human who is not self", () => {
+    expect(canChangeWorkspaceRole("owner", DEMO.id, INTERN_HUMAN)).toBe(true);
+    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_HUMAN)).toBe(
+      true
+    );
+  });
+
+  it("hides the control when the target is an agent", () => {
+    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_AGENT)).toBe(
+      false
+    );
+    expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
   });
 });
 
@@ -505,6 +548,52 @@ describe("openDmErrorMessage", () => {
       new Error("x"),
     ]) {
       const message = openDmErrorMessage(error, "곽성재");
+      expect(message).not.toContain("죄송");
+      expect(message).not.toContain("알 수 없");
+    }
+  });
+});
+
+describe("changeWorkspaceRoleErrorMessage", () => {
+  it("turns last-owner 409 into a next-step sentence", () => {
+    expect(
+      changeWorkspaceRoleErrorMessage(
+        new ApiError(409, "workspace must retain at least one owner")
+      )
+    ).toBe(
+      "마지막 소유자의 역할은 내릴 수 없습니다. 다른 멤버를 소유자로 지정한 뒤 다시 시도하세요."
+    );
+  });
+
+  it("surfaces 403 hierarchy refusals without inventing extra gates", () => {
+    expect(
+      changeWorkspaceRoleErrorMessage(
+        new ApiError(403, "cannot manage an equal or higher role")
+      )
+    ).toBe("같거나 높은 역할의 멤버는 바꿀 수 없습니다.");
+    expect(
+      changeWorkspaceRoleErrorMessage(
+        new ApiError(403, "admins cannot grant admin or owner")
+      )
+    ).toBe("관리자는 관리자나 소유자 역할을 부여할 수 없습니다.");
+    expect(
+      changeWorkspaceRoleErrorMessage(new ApiError(403, "workspace admin required"))
+    ).toBe("이 워크스페이스에서 역할을 바꿀 권한이 없습니다.");
+  });
+
+  it("keeps 400 as a retryable form refusal", () => {
+    expect(
+      changeWorkspaceRoleErrorMessage(new ApiError(400, "role must be owner, admin, member, or guest"))
+    ).toBe("역할을 바꿀 수 없습니다. 다른 역할을 고른 뒤 다시 시도하세요.");
+  });
+
+  it("never apologises and never says 알 수 없는", () => {
+    for (const error of [
+      new ApiError(500, "x"),
+      new NetworkError("unreachable", 15_000),
+      new Error("x"),
+    ]) {
+      const message = changeWorkspaceRoleErrorMessage(error);
       expect(message).not.toContain("죄송");
       expect(message).not.toContain("알 수 없");
     }

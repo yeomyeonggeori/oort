@@ -2192,6 +2192,66 @@ export async function leaveWorkspace(
   return { memberId, status };
 }
 
+// ---- 워크스페이스 멤버 역할 (#1848 / ADR-0128 D2) ---------------------------
+// PATCH /v1/workspaces/{ws}/members/{member}/role
+// 채널 sibling(`…/channels/{ch}/members/{member}/role`)은 범위 밖.
+
+function isMembershipRole(value: string | undefined): value is MembershipRole {
+  return (
+    value === "owner" ||
+    value === "admin" ||
+    value === "member" ||
+    value === "guest"
+  );
+}
+
+/** `PATCH …/members/{id}/role` 200 body (openapi `MembershipRoleResponse`). */
+export interface WorkspaceMemberRoleChange {
+  memberId: string;
+  scope: "workspace";
+  role: MembershipRole;
+}
+
+export function workspaceMemberRoleFromWire(
+  value: unknown
+): WorkspaceMemberRoleChange {
+  const source = responseRecord(value);
+  const memberId = str(source, "memberId");
+  const scope = str(source, "scope");
+  const role = str(source, "role");
+  if (
+    memberId === undefined ||
+    scope !== "workspace" ||
+    !isMembershipRole(role)
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    memberId: memberId.toLowerCase(),
+    scope: "workspace",
+    role,
+  };
+}
+
+/**
+ * Change a workspace membership role. The server is the authority on hierarchy,
+ * last-owner, and self-management; this client only ships the requested label.
+ */
+export async function changeWorkspaceMemberRole(
+  workspaceId: string,
+  memberId: string,
+  role: MembershipRole
+): Promise<WorkspaceMemberRoleChange> {
+  return workspaceMemberRoleFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/members/${encodeURIComponent(memberId)}/role`,
+      { method: "PATCH", body: JSON.stringify({ role }) }
+    )
+  );
+}
+
 // ---- 휘발 신호: 「작성 중」 (ADR-0149) ---------------------------------------
 // POST /v1/workspaces/{ws}/channels/{ch}/typing/grant   ← 멤버십 읽기 1회
 // POST /v1/workspaces/{ws}/channels/{ch}/typing         ← 발행, **PG 미접촉**
