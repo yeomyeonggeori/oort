@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 허들 TURN setConfiguration 경로 커버 (#1847, 2026-08-28)
+
+- #1825 세션 스코프 셰임이 생성자 config만 리라이트해 livekit-client의 빈 ctor → `setConfiguration(JoinResponse ICE)` 주입을 놓침. `RTCPeerConnection.prototype.setConfiguration`을 같은 host-게이트로 인터셉트. 생성자 경로·복원 시점(세션 종료)·Cloud/직결 무발동 유지. 새 플래그 없음.
+- red proof: 빈 ctor + setConfiguration `turns:<host>:443` → `getConfiguration()` 8443. 복원 후 무변환. Cloud/host 불일치 무발동. 실브라우저 왕복은 오케스트레이터 이월(`runtime-unverified`).
+
 ## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
 
 - `required_agent_scope`가 `GET …/channels/{ch}/messages`와 `GET …/messages/{root}/replies`를 `messages:read`에 매핑. 기본 스코프 집합·GRANTABLE·hosted 가드·핸들러 감사는 비접촉.
