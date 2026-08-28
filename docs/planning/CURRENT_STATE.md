@@ -1,5 +1,20 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-08-28 스냅샷 70 (Fable · momo-main — ★로컬 셀프호스트 전환·종합테스트 로컬 완주(S4·S1-lite)·#1848 랜딩·결함 B 방향 실증).** 컴팩트 복원 진입점.
+>
+> **★ 세션 체인**: 체크포인트 재개 → 정렬 복구(sync #1852·#1853) → **#1848 랜딩 사이클**(브리프 #1854 → grok PR #1855, design-review 2회전 H2건 수리 → B0·H0, track/uxui f8bd8975) — 파생 **#1857**(서버가 에이전트 role 변경 미차단, H-2) · **#1858**(계정 메뉴 로그아웃 부재, 성재 검수 발견). 검수 앱 track/uxui 재빌드(~/Desktop, 역할 UI 포함).
+>
+> **★ 그록봇 릴레이(부분 성과 후 오류)**: 작업1 TURN 진단 수신 — **nodeIP=172.19.0.2(브리지 자동감지), CreatePermission 거부 로그 없음, SFU→relay 요청8·응답0** → #1856 발급. 작업2(승격 curl)는 자동검토 카드 만료로 불발 → 이후 그록봇 자체 오류(성재 고지) → **VM 경로 중단**.
+>
+> **★ 로컬 셀프호스팅 전환(성재 지시)**: `oortv013` compose — **발행 v0.1.3 digest pin**(published-digest 모드), web 8088/api 8080. 구 `oort`(doorbell 소산)·`oort-t`(engine 리그) 비파괴 정지(볼륨 보존). 검수 앱 저장 주소(127.0.0.1:8088)가 새 스택에 그대로 연결. **owner 자격 로컬 발급 → 성재 개입 0**: Comptest-fable(01a047bb…) 생성·admin 승격(#1848 서버 경로 실측), generic 에이전트(01a047bc…)+자격(read+write).
+>
+> **★ 테스트 실적**: **S4 5/5 PASS**(편차: 단일 메시지 GET=라우트 부재 404, 사람도 동일 — 런시트 403 기대가 오기) · **S1-lite PASS**(playwright 2컨텍스트 상호 오디오 실측) · **결함 B B-1 실증**: 기본(nodeIP=브리지) 연결 실패 → `rtc.node_ip: 127.0.0.1` 즉시 연결(대조 실험, #1856 코멘트) · **UI 워크스루**: 발행 번들 로그인·명부·S4 게시물 렌더·**허들 2자 실 UI**, 역할 UI는 dev번들×v0.1.3 서버로 강등/복원/self게이트 실측. 증거 `claudedocs/comprehensive-test-20260828/{S4-local-selfhost,S1-lite-local-huddle,UI-walkthrough-local,B-turn-diagnosis}.md`.
+>
+> **★ #1856a 랜딩**: PR #1859(track/engine) — livekit entrypoint `MOMO_LIVEKIT_NODE_IP` 노브(빈 값=현행)·생성 env 기본 127.0.0.1·소급 주입 금지. **정책 무결성 감사 제도 이행**(local_gate 1줄 추가 → Policy-Integrity-Audit 코멘트+라벨, momo-main 실감사). 게이트 오케스트레이터 재실행 PASS(v1.13.3 실부팅 --node-ip≡rtc.node_ip).
+>
+> **★ 가동/큐**: #1857 워커 진행 중 → #1858 → 성재 UXUI 피드백 티켓들(전량 티켓화·상시 순차 발사 위임 — 2026-08-28 "순서대로 ㄱㄱ"). **성재**: 검수 앱으로 피드백 남발(owner@oort.local, 비번=infra/rust/local.secrets.env)·그록봇 복구 시 고지(S2·S3·VM축 S1-a/b/c 재개). 로컬 실험 잔여: infra/livekit.yaml 워킹트리 node_ip 실험 수정(#1859 노브로 대체 예정, 미커밋).
+>
+> 이하 스냅샷 69:
 > **2026-08-28 스냅샷 69 (Fable · momo-main — ★종합 실테스트 준비 체계 확정: 정본 패킷·#1837 발급·v0.1.3 발행 창 결재 대기).** 컴팩트 복원 진입점.
 >
 > **★ 랜딩 누적(8/27~28)**: AC 4부작(#1767·#1768·#1769·#1770) 완결 · 외부 도구 이중(#1797 쓰기+#1820 읽기, **ADR-0173 Accepted**) · #1785 ACP 릴레이 · #1800 workspace settings · **#1825 허들 TURN 리라이트(SPIKE-HD 폐곡선)** · TC 수리(#1777·#1778). main=da953b7d(+이번 플러시), `main ⊂ 두 트랙`.

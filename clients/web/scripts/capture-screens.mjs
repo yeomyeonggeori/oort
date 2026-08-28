@@ -169,6 +169,7 @@ const MOBILE_TAP_TARGETS = [
   ["presence-option-dnd", "상태 방해 금지", "optional"],
   ["profile-add-workspace", "워크스페이스 추가", "optional"],
   ["nav-settings", "설정", "optional"],
+  ["profile-logout", "로그아웃", "optional"],
   // #1758 M-1 — 도크 닫기/확대는 빠져나오는 손가락 경로인데 28px였다.
   // optional: 도크가 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
   ["terminal-dock-close", "터미널 닫기", "optional"],
