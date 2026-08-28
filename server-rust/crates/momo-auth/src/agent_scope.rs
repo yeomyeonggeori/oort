@@ -56,12 +56,13 @@ pub const SCOPE_AGENT_PORT_CONNECT: &str = "agent:port:connect";
 /// gains one MCP tool and no HTTP surface at all, so an adapter cannot reuse the
 /// grant to reach a generic endpoint. Non-default in every credential grant.
 pub const SCOPE_AGENT_INBOX_READ: &str = "agent:inbox:read";
-/// `oort_conversation_read` on the Agent Port (ADR-0162 D3/D6, HAP-E5).
+/// `GET …/channels/{ch}/messages` and `GET …/messages/{root}/replies`
+/// (ADR-0173 EXT-1-READ), and `oort_conversation_read` on the Agent Port
+/// (ADR-0162 D3/D6, HAP-E5).
 ///
-/// The read counterpart to [`SCOPE_MESSAGES_WRITE`], and — like
-/// [`SCOPE_AGENT_INBOX_READ`] — mapped to no REST route. Reading a channel's
-/// history over HTTP remains unreachable with an agent bearer, which is the
-/// answer `an_unlisted_route_is_unreachable_with_an_agent_bearer` pins.
+/// Generic credentials that carry this grant reach those two REST reads.
+/// Hosted credentials never do — `AgentBearerClass` isolates them before this
+/// table is consulted. Non-default in every credential grant (ADR-0162 / D5).
 pub const SCOPE_MESSAGES_READ: &str = "messages:read";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
@@ -90,6 +91,37 @@ pub fn required_agent_scope(method: &str, path: &str) -> Option<&'static str> {
         && segments[5] == "messages"
     {
         return Some(SCOPE_MESSAGES_WRITE);
+    }
+
+    // GET /v1/workspaces/{ws}/channels/{ch}/messages — ADR-0173 EXT-1-READ.
+    //
+    // Same six-segment shape as the write above; the verb is what keeps the
+    // two acts apart. Search, a bare message id, and every other GET stay
+    // absent — this is a history page, not a read of the workspace.
+    if method == "GET"
+        && segments.len() == 6
+        && segments[0] == "v1"
+        && segments[1] == "workspaces"
+        && segments[3] == "channels"
+        && segments[5] == "messages"
+    {
+        return Some(SCOPE_MESSAGES_READ);
+    }
+
+    // GET /v1/workspaces/{ws}/channels/{ch}/messages/{root}/replies
+    //
+    // The thread page shares the history membership gate, so it shares the
+    // scope. A shorter or longer path (the message itself, a nested extra
+    // segment) is a different surface and stays closed.
+    if method == "GET"
+        && segments.len() == 8
+        && segments[0] == "v1"
+        && segments[1] == "workspaces"
+        && segments[3] == "channels"
+        && segments[5] == "messages"
+        && segments[7] == "replies"
+    {
+        return Some(SCOPE_MESSAGES_READ);
     }
 
     // PATCH /v1/workspaces/{ws}/messages/{id} — ADR-0158 증보 1 D7.
@@ -361,8 +393,8 @@ mod tests {
     }
 
     /// The fail-closed half, and the reason this is a list rather than a filter:
-    /// anything unlisted — including the *reads* that sit next to the listed
-    /// writes — is unreachable with an agent credential.
+    /// anything unlisted stays unreachable. ADR-0173 opened the two history
+    /// GETs; a single-message GET and every other neighbour stay closed.
     #[test]
     fn an_unlisted_route_is_unreachable_with_an_agent_bearer() {
         for (method, path) in [
@@ -371,10 +403,10 @@ mod tests {
                 "POST",
                 format!("/v1/workspaces/{WS}/channels/{RUN}/agent-runs"),
             ),
-            // reading a channel's history is not a listed agent capability
+            // a single message is not the history page ADR-0173 opened
             (
                 "GET",
-                format!("/v1/workspaces/{WS}/channels/{RUN}/messages"),
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages/{AGENT}"),
             ),
             // billing surfaces are never agent-reachable
             ("GET", format!("/v1/workspaces/{WS}/usage/summary")),
@@ -432,32 +464,61 @@ mod tests {
         ));
     }
 
-    /// **The two HAP-E5 scopes buy no HTTP surface at all.**
+    /// **ADR-0173 — `messages:read` opens the two history GETs, and nothing else.**
     ///
-    /// `agent:inbox:read` and `messages:read` exist only inside the Agent Port
-    /// tool catalog. If either ever appeared in the table above, a hosted
-    /// credential minted for one MCP tool would silently gain a REST route —
-    /// which is exactly the "recreate a generic principal" move ADR-0162 refuses.
+    /// `agent:inbox:read` still names no REST route. Hosted credentials never
+    /// consult this table on these paths (`AgentBearerClass` preflight), so
+    /// mapping the scope here does not recreate a generic principal for them.
     #[test]
-    fn the_mcp_only_scopes_open_no_rest_route() {
+    fn messages_read_opens_only_the_two_history_gets() {
+        assert_eq!(
+            required_agent_scope(
+                "GET",
+                &format!("/v1/workspaces/{WS}/channels/{RUN}/messages")
+            ),
+            Some(SCOPE_MESSAGES_READ)
+        );
+        assert_eq!(
+            required_agent_scope(
+                "GET",
+                &format!("/v1/workspaces/{WS}/channels/{RUN}/messages/{AGENT}/replies")
+            ),
+            Some(SCOPE_MESSAGES_READ)
+        );
+        assert_eq!(
+            required_agent_scope(
+                "get",
+                &format!("/v1/workspaces/{WS}/channels/{RUN}/messages")
+            ),
+            Some(SCOPE_MESSAGES_READ)
+        );
         for (method, path) in [
             (
                 "GET",
-                format!("/v1/workspaces/{WS}/channels/{RUN}/messages"),
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages/{AGENT}"),
+            ),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages/{AGENT}/replies"),
+            ),
+            (
+                "GET",
+                format!("/v1/workspaces/{WS}/channels/{RUN}/messages/{AGENT}/replies/extra"),
             ),
             ("POST", "/v1/mcp/agent-port".to_string()),
             ("GET", format!("/v1/workspaces/{WS}/agents/{AGENT}/inbox")),
         ] {
             assert_ne!(
                 required_agent_scope(method, &path),
-                Some(SCOPE_MESSAGES_READ)
+                Some(SCOPE_MESSAGES_READ),
+                "{method} {path}"
             );
             assert_ne!(
                 required_agent_scope(method, &path),
-                Some(SCOPE_AGENT_INBOX_READ)
+                Some(SCOPE_AGENT_INBOX_READ),
+                "{method} {path}"
             );
         }
-        // …and they are distinct names, not aliases of the write/connect scopes.
         for scope in [SCOPE_MESSAGES_READ, SCOPE_AGENT_INBOX_READ] {
             assert_ne!(scope, SCOPE_MESSAGES_WRITE);
             assert_ne!(scope, SCOPE_AGENT_PORT_CONNECT);
