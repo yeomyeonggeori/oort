@@ -47,6 +47,11 @@
 # 켠다. stub 은 MOMO_ENV=staging 에서 부팅 거부라 쓰지 않는다. 운영 google
 # 경로는 이 파일을 읽지 않는다.
 #
+# `MOMO_LIVEKIT_NODE_IP`(#1856)는 신규 생성 env에만 기본을 쓴다. 로컬
+# quickstart 브라우저는 같은 호스트라 `127.0.0.1`. 기존 파일에는 소급
+# 주입하지 않는다 — 이미 있는 env는 자동 감지를 유지한다. LAN/원격 클라
+# 배치면 그 호스트의 클라 도달 가능 IP로 바꾼다.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **시크릿을 다시 만들지 않는다.** 볼륨이 살아 있는 상태에서
@@ -1193,6 +1198,10 @@ MOMO_DRIVE_ARCHIVE_BACKEND=local
 MOMO_DRIVE_LOCAL_DIR=$DRIVE_LOCAL_DIR
 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=$DRIVE_LOCAL_BASE
 DRIVE_VOLUME_NAME=$DRIVE_VOLUME
+
+# --- 허들 / LiveKit (#1856) ------------------------------------------------
+# LAN/원격 클라 배치면 이 값을 그 호스트의 클라 도달 가능 IP로 바꿔라.
+MOMO_LIVEKIT_NODE_IP=127.0.0.1
 EOF
 chmod 600 "$ENV_FILE"
 

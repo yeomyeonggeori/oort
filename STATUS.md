@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 로컬 허들 node_ip 노브 (#1856a / #1856, 2026-08-28)
+
+- huddle LiveKit entrypoint가 `MOMO_LIVEKIT_NODE_IP`가 있으면 `--node-ip`를 붙인다. 비면 자동 감지(기존 배치 무영향).
+- 셀프호스트 생성 env만 `127.0.0.1` 기본. 기존 env 소급 주입 없음. VM TURN relay 페어는 #1856에 남음.
+
 ## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
 
 - `required_agent_scope`가 `GET …/channels/{ch}/messages`와 `GET …/messages/{root}/replies`를 `messages:read`에 매핑. 기본 스코프 집합·GRANTABLE·hosted 가드·핸들러 감사는 비접촉.

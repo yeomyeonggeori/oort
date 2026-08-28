@@ -125,10 +125,16 @@ services:
         : "$${MOMO_LIVEKIT_API_KEY:?set MOMO_LIVEKIT_API_KEY}"
         : "$${MOMO_LIVEKIT_API_SECRET:?set MOMO_LIVEKIT_API_SECRET}"
         export LIVEKIT_KEYS="$${MOMO_LIVEKIT_API_KEY}: $${MOMO_LIVEKIT_API_SECRET}"
-        exec /livekit-server --config=/etc/livekit/livekit.yaml
+        set -- /livekit-server --config=/etc/livekit/livekit.yaml
+        if [ -n "$${MOMO_LIVEKIT_NODE_IP:-}" ]; then
+          set -- "$$@" --node-ip "$${MOMO_LIVEKIT_NODE_IP}"
+        fi
+        exec "$$@"
     environment:
       MOMO_LIVEKIT_API_KEY: ${MOMO_LIVEKIT_API_KEY:-}
       MOMO_LIVEKIT_API_SECRET: ${MOMO_LIVEKIT_API_SECRET:-}
+      # #1856 — advertised ICE IP. Empty keeps LiveKit auto-detect (bridge).
+      MOMO_LIVEKIT_NODE_IP: ${MOMO_LIVEKIT_NODE_IP:-}
     ports:
       - "127.0.0.1:${LIVEKIT_PORT:-7880}:7880"
       - "127.0.0.1:${LIVEKIT_RTC_TCP_PORT:-7881}:7881"
