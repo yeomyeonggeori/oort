@@ -52,6 +52,58 @@ impl WorkspaceRole {
         matches!(self, WorkspaceRole::Owner | WorkspaceRole::Admin)
     }
 
+    /// Swift `WorkspaceRole.rank` (:12-18). Lower is higher privilege.
+    pub fn rank(self) -> i32 {
+        match self {
+            Self::Owner => 0,
+            Self::Admin => 1,
+            Self::Member => 2,
+            Self::Guest => 3,
+        }
+    }
+
+    /// Swift `WorkspaceRole.parse` (:23-28): trim, lowercase, closed vocabulary.
+    pub fn parse(raw: &str) -> Option<Self> {
+        Self::from_db_label(raw.trim().to_ascii_lowercase().as_str())
+    }
+
+    /// Target is strictly below the actor (Swift `requireCanManage` rank guard).
+    pub fn can_manage_target(self, target: Self) -> bool {
+        target.rank() > self.rank()
+    }
+
+    /// ADR-0128 D2 workspace/channel role change, actor vs current target role.
+    /// Self is refused by the caller. Admin/owner only; equal-or-higher is no.
+    pub fn can_change_role_of(self, target: Self) -> bool {
+        self.is_admin() && self.can_manage_target(target)
+    }
+
+    /// Swift `requireCanManage` requested-role arm: admin cannot grant admin/owner.
+    /// Owner may appoint any role, including owner.
+    pub fn can_grant_role(self, requested: Self) -> bool {
+        match self {
+            Self::Owner => true,
+            Self::Admin => requested.rank() > Self::Admin.rank(),
+            Self::Member | Self::Guest => false,
+        }
+    }
+
+    /// Suspend/reinstate ladder — same hierarchy as `requireCanManage` without
+    /// a requested role. Self is refused by the caller.
+    pub fn can_suspend(self, target: Self) -> bool {
+        self.is_admin() && self.can_manage_target(target)
+    }
+
+    /// Remove ladder — same as [`can_suspend`].
+    pub fn can_remove(self, target: Self) -> bool {
+        self.is_admin() && self.can_manage_target(target)
+    }
+
+    /// Ban ledger is workspace-admin only; there is no target member.
+    pub fn can_ban(self) -> bool {
+        self.is_admin()
+    }
+
     /// ADR-0128 D2 for operator password reset. Self is refused by the
     /// caller; this is only the actor/target ladder. Owner may reset another
     /// owner (the multi-owner unlock path). Admin may reset member/guest only.
@@ -86,6 +138,35 @@ pub async fn active_workspace_role(
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
           LIMIT 1",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .fetch_optional(&mut *conn)
+    .await?
+    .flatten();
+    Ok(role.as_deref().and_then(WorkspaceRole::from_db_label))
+}
+
+/// Swift `activeRole` `forUpdate` arm (:42-57). Same predicate as
+/// [`active_workspace_role`], locked so a concurrent suspend/remove cannot
+/// authorize on a role that is about to disappear.
+pub async fn active_workspace_role_for_update(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<Option<WorkspaceRole>, sqlx::Error> {
+    let role: Option<String> = sqlx::query_scalar(
+        "SELECT wm.role::text \
+           FROM workspace_membership wm \
+           JOIN member m \
+             ON m.workspace_id = wm.workspace_id \
+            AND m.id = wm.member_id \
+          WHERE wm.workspace_id = $1 \
+            AND wm.member_id = $2 \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+          LIMIT 1 \
+          FOR UPDATE OF wm, m",
     )
     .bind(workspace_id)
     .bind(member_id)
@@ -158,5 +239,45 @@ mod tests {
         assert!(!Guest.can_issue_password_reset_for(Owner));
         assert!(!Guest.can_issue_password_reset_for(Member));
         assert!(!Guest.can_issue_password_reset_for(Guest));
+    }
+
+    #[test]
+    fn lifecycle_ladders_match_swift_require_can_manage() {
+        use WorkspaceRole::{Admin, Guest, Member, Owner};
+        assert!(Owner.can_change_role_of(Admin));
+        assert!(Owner.can_change_role_of(Member));
+        assert!(Owner.can_change_role_of(Guest));
+        assert!(!Owner.can_change_role_of(Owner));
+        assert!(!Admin.can_change_role_of(Owner));
+        assert!(!Admin.can_change_role_of(Admin));
+        assert!(Admin.can_change_role_of(Member));
+        assert!(Admin.can_change_role_of(Guest));
+        assert!(!Member.can_change_role_of(Guest));
+        assert!(!Guest.can_change_role_of(Guest));
+
+        assert!(Owner.can_grant_role(Owner));
+        assert!(Owner.can_grant_role(Admin));
+        assert!(Admin.can_grant_role(Member));
+        assert!(Admin.can_grant_role(Guest));
+        assert!(!Admin.can_grant_role(Admin));
+        assert!(!Admin.can_grant_role(Owner));
+        assert!(!Member.can_grant_role(Guest));
+
+        assert!(Owner.can_suspend(Admin));
+        assert!(!Owner.can_suspend(Owner));
+        assert!(Admin.can_remove(Member));
+        assert!(!Admin.can_remove(Admin));
+        assert!(Owner.can_ban());
+        assert!(Admin.can_ban());
+        assert!(!Member.can_ban());
+        assert!(!Guest.can_ban());
+    }
+
+    #[test]
+    fn parse_accepts_the_closed_vocabulary_after_trim() {
+        assert_eq!(WorkspaceRole::parse(" Owner "), Some(WorkspaceRole::Owner));
+        assert_eq!(WorkspaceRole::parse("ADMIN"), Some(WorkspaceRole::Admin));
+        assert!(WorkspaceRole::parse("platform_admin").is_none());
+        assert!(WorkspaceRole::parse("").is_none());
     }
 }

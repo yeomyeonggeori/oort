@@ -60,6 +60,7 @@ pub mod engine;
 pub mod invite;
 pub mod join;
 pub mod link;
+pub mod membership_lifecycle;
 pub mod oauth;
 pub mod provider;
 pub mod quota;
@@ -95,6 +96,14 @@ pub use join::{
 pub use link::{
     decrypt_link, delete_link, read_link, reseal_link_credential, resolve_link, upsert_link,
     DecryptedProviderLink, ProviderSource, ResolvedProvider, StoredProviderLink,
+};
+pub use membership_lifecycle::{
+    change_channel_role_in_tx, change_workspace_role_in_tx, create_workspace_ban_in_tx,
+    delete_workspace_ban_in_tx, leave_channel_in_tx, list_workspace_bans_in_tx,
+    normalize_ban_identity, normalized_reason, remove_workspace_member_in_tx,
+    set_member_status_in_tx, BanRecord, ChannelLeaveApplied, ChannelRoleApplied,
+    MembershipLifecycleError, MembershipTarget, RemoveApplied, RoleChangeApplied,
+    StatusChangeApplied, StatusTransition,
 };
 pub use oauth::{
     LinkCredential, OpenAiOAuthCredential, ATTRIBUTION_NOTICE_KO, ATTRIBUTION_PERSONAL,

@@ -1,5 +1,29 @@
 # oort 진행 현황
 
+## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
+
+- `required_agent_scope`가 `GET …/channels/{ch}/messages`와 `GET …/messages/{root}/replies`를 `messages:read`에 매핑. 기본 스코프 집합·GRANTABLE·hosted 가드·핸들러 감사는 비접촉.
+- hosted 자격은 `AgentBearerClass` 선격리로 전 상태(active/grace/cleanup_pending) GET 403. 채널 경계는 사람 경로와 같은 `is_channel_member`(left_at).
+- red proof: 매핑 전 정상 GET 403 → 매핑 후 generic+`messages:read` 200. 사람 GET·페이지네이션 회귀 유지.
+
+## 허들 TURN 광고 포트 리라이트 (#1825, 2026-08-28)
+
+- Funnel 셀프호스트에서 LiveKit v1.13.3 `external_tls`가 광고하는 `turns:<시그널호스트>:443`만 8443으로 바꾼다. username/credential/transport 불변. Cloud(`*.turn.livekit.cloud`)·stun·직결 candidate는 host/scheme 불일치로 미발동.
+- 주입은 livekit-client `rtcConfig.iceServers`가 JoinResponse credential을 덮어써서 불가 → connect 구간의 스코프된 `RTCPeerConnection` 셰임. 실브라우저 2대 왕복은 오케스트레이터 이월(`runtime-unverified`).
+
+## 멤버 라이프사이클 10경로 Rust 이식 (#1768, 2026-08-27)
+
+- Swift `MemberLifecycleRoutes`의 경로·페이로드·에러 문장·권한 판정을 보존해 Rust로 이식. 마이그레이션 신설 없음 · `schema_v0.sql` 비접촉 · 026 원장 재사용.
+- 위계는 `workspace_authorization.rs`의 `can_change_role_of`/`can_grant_role`/`can_suspend`/`can_remove`/`can_ban`. 판정은 도메인 층·같은 테넌트 트랜잭션에서 행위자·대상 role을 동시에 조회한다. 채널 role은 라벨(ADR-0128 D1).
+- 마지막 owner 강등·정지·추방은 409. 자기 자신 대상은 403 `members cannot manage themselves`. 정지는 토큰 revoke + 로그인 403 `member is suspended`. 밴은 join/redeem 403.
+- red proof: `membership_lifecycle_conformance_pg` 행위자×경로 매트릭스 + last-owner + suspend 로그인 + 밴 재가입 + RLS + audit. 실시간은 outbox/relay만(직접 publish 없음).
+
+## ACP 이벤트 릴레이 이식 (#1785, 2026-08-27)
+
+- host-signed `PATCH …/work-sessions/{session}` `{event}`를 Swift `recordACPEvent` 그대로 서빙한다. 무서명 400 문장(`ACP event ingestion requires work host signature`)은 유지. 정상 서명은 세션 스레드에 `work_session_event` system message + `message.new`/`agent.*` outbox를 한 트랜잭션에 남긴다.
+- 투영·소비면은 이미 `@momo/core` `parseWorkSessionEvent` / `eventFromFrame`이 읽는다. 서버는 수신·원장 반영까지. 표면 신축 없음.
+- red proof: 이식 전 정상 서명 이벤트 400 → 이식 후 무서명 400 · 타 호스트 403 · 정상 200 + 스레드 재조회 + `event_id` 멱등.
+
 ## role_labels 서버 수용 + 멤버 가독 프로젝션 (#1770 engine, 2026-08-27)
 
 - `PATCH /v1/workspaces/{ws}/settings` 가 `role_labels` 를 수용한다. 키 ⊂ `{owner,admin,member,guest}`, 값은 비어 있지 않은 문자열(48 UTF-8 바이트 상한). `null` 은 키 삭제(클라 기본 라벨). 객체는 top-level 병합이라 통째 교체.
@@ -58,7 +82,7 @@
 
 ## host-signed 세션 변이 이식 (#1777, 2026-08-26)
 
-- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 현행 400(후속 이슈 발급 요청). observation은 #1778에서 인간-소유자 경로로 닫힘.
+- Rust가 데몬이 이미 보내던 host-signed create(`controlId` ↔ dispatched spawn)·idle/running·`bindRemotePTY`를 Swift 문장 그대로 서빙한다. 인간 경로의 무서명 pty/controlId 400은 유지. ACP 이벤트는 #1785에서 닫힘. observation은 #1778에서 인간-소유자 경로로 닫힘.
 - 데몬 부팅용으로 `GET …/work-tool-profiles`(enabled 투영, CRUD 없음)를 같이 열었다. 없으면 `momo-workd`가 heartbeat 직후 `transport_failed`로 죽어 create에 도달하지 못한다.
 - 세션 생산 레시피: `scripts/verify_workd_rust.sh` + `docs/runbooks/workd-rust-session.md` (맥 로컬 workd ↔ Rust 리그). `remote_attach_available` false→true가 도크 생산자를 연다.
 

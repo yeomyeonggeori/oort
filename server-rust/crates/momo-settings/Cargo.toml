@@ -11,6 +11,9 @@ rust-version.workspace = true
 # `with_provider_link_admin_tx` stay the only wiring points for the GUCs
 # (invariant #6).
 momo-db = { path = "../momo-db" }
+# #1768 — workspace-role ladders (`can_*_for`) are the single authority; this
+# crate owns the membership mutations that ask them inside the same tenant tx.
+momo-auth = { path = "../momo-auth" }
 
 sqlx.workspace = true
 uuid.workspace = true
