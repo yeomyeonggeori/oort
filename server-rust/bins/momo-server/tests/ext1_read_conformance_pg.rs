@@ -496,7 +496,7 @@ async fn seed_hosted_bearer(
     bearer
 }
 
-/// RED proof: mapping is absent, so generic + `messages:read` is still 403.
+/// GREEN: generic + `messages:read` reads its own active member channel.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL (pgvector/pg18) + momo_app role"]
 async fn ext1_read_generic_with_messages_read_gets_history() {
@@ -518,14 +518,11 @@ async fn ext1_read_generic_with_messages_read_gets_history() {
 
     let (status, body) =
         get_messages(&http, &base, &bearer, tenant.workspace, tenant.channel, "").await;
-    assert_eq!(
-        status.as_u16(),
-        403,
-        "RED: GET …/messages is unlisted for agent bearers: {body}"
-    );
+    assert_eq!(status.as_u16(), 200, "{body}");
+    assert_eq!(body["messages"][0]["body"], json!("hello"));
 }
 
-/// RED proof: replies share the same unlisted GET surface.
+/// GREEN: the same grant opens the thread page on that channel.
 #[tokio::test]
 #[ignore = "requires DATABASE_URL (pgvector/pg18) + momo_app role"]
 async fn ext1_read_generic_with_messages_read_gets_replies() {
@@ -556,11 +553,8 @@ async fn ext1_read_generic_with_messages_read_gets_replies() {
         root,
     )
     .await;
-    assert_eq!(
-        status.as_u16(),
-        403,
-        "RED: GET …/replies is unlisted for agent bearers: {body}"
-    );
+    assert_eq!(status.as_u16(), 200, "{body}");
+    assert_eq!(body["messages"][0]["body"], json!("reply"));
 }
 
 #[tokio::test]
