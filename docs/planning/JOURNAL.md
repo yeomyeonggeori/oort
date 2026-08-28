@@ -2726,3 +2726,49 @@
 - **독립 design-review 3회전**: R1 PASS(B0)나 H1(저장 403 완전 침묵 — 403 문장이 도달 불가 분기)·M2(Enter 저장 사망·읽기 전용 AA 미달)·L3 → 수리(25d2e6b2) → **R2 FAIL(B0·H1)**: 수리가 만든 `denied` useState가 오류 수명주기와 어긋남(403 후 pending 중 거짓 실패 문장·403 뒤 500 침묵 재도입·재승격 잔존 — 전부 런타임 프로브 실증) → 수리(7a9c986a, 파생식 전환 — "옳은 답이 같은 파일에 있었다" 메타패턴 재현) → **R3 PASS(B0·H0)**(3시나리오 코드+테스트+런타임 3중 폐곡선). #1770 close.
 - **인프라 학습**: named 팀메이트 design-review spawn이 좀비화(기존 전례 재현) → TaskStop 후 무명 단발 서브에이전트로 재발사 표준 재확인.
 - **정본화 창 2 개시**: #1812(engine→main, #1810). 이후 uxui sync→#1811 승격→docs 플러시→sync 짝.
+
+## 2026-08-27 (밤) · Fable · 정본화 창 2 종결 — 삼자 정렬 복구·docs 플러시 main 랜딩
+- **창 2 완주**: #1812(engine→main, #1810) → #1813(main→uxui sync) → #1814(uxui→main, #1811) → **#1815(docs 플러시→main)** → #1816·#1817(종결 sync 짝). 최종 **main=1bbab8fd, main ⊂ 두 트랙**.
+- **#1815 충돌 1건 판정**: ADR-0169 증보 1이 두 판본(기획 세션 장문판 vs #1793 랜딩 축약판) — 장문판(결정 맥락·하이브리드 표·용어 주의)을 본문으로 유지 + 축약판의 구현 확정 2건(derive_same_origin_http_base 규칙·생성기 기본값 same-origin 확정)을 반영해 해소.
+- **정책 게이트 감사 3회**(#1815 AGENTS/CODEX=#1803 반영, #1816·#1817 동일 변경 운반) — 전부 "코멘트→라벨" 순서로 통과. 동일 변경 반복 감사 마찰 재확인(#1774 적립분, 이번 창에서 5회).
+- 세션 누계: 티켓 3건 랜딩·close(#1800·#1770 양절반, +#1798·#1799는 전 세션분 승격), PR 14건(#1804~#1817), 승격 창 2회, 리뷰 3회전(H 2건 적발·폐곡선), 워커 5기(전부 회수), 트리 keep-list만 잔존.
+- 다음 실행 순서: **⑤ #1792 SPIKE-HD ∥ #1785 ACP 릴레이 ∥ #1797 에이전트 자격**(상호 독립, 워커 병렬 1이라 순차 발사) → ⑥ #1768 AC-2. 성재 이월 1건: 리그 momo_notifier 역할 비번 난수 회전(분류기 차단분).
+
+## 2026-08-27 (심야) · Fable · 순서 ⑤ 소화(2/3)·#1792 환경 차단 판정·⑥ #1768 발사
+- **#1785 랜딩·close**(PR #1818 → track/engine bd41f6b6): ACP 이벤트 릴레이 — Swift recordACPEvent 3함수 이식, 4타입·금칙 키 11종 재귀·64KiB·240/60s·event_id 멱등·same-tx outbox. 재검수: Swift 원본 줄 단위 대조 정합, 유일 미세 이탈(outbox idempotency_key가 event_id 기반)은 기능 동치 판정. red proof 3/3. 게이트 PG 격리 준수(리그 비접촉 상설 첫 실전 — 지켜짐).
+- **#1797 랜딩·close**(PR #1819, 조사형): **외부 도구=에이전트 멤버 경로가 쓰기·회전·유예까지 실측으로 선다. 읽기는 현재 계약상 닫힘**(스코프 표에 REST GET 부재·messages:read 비개방·Agent Port read는 hosted 전용) → 스코프 경계 변경이라 **#1820(EXT-1-READ, ADR 결재 선행)** 적립. ADR-0162 409는 일반 agent member 비해당. SELF_HOST §6 초안 랜딩. 재검수 정정 1건: 워커의 "게이트 RED=환경 드리프트" 진단은 오판 — clean 트리 12/12 PASS 재현, 실원인=워커 실측 스택 env 누출(PR 코멘트 기록).
+- **#1792 SPIKE-HD = 환경 차단 판정**: 스파이크 급소(Funnel 노드·외부 망 관측점 2대)가 성재 참여 없이는 불성립(로컬 tailscale 부재·그록봇 VM 비접촉 규율). 이슈에 필요 목록 코멘트 — 성재 준비 시 실행 시트 즉시 제공. 폴백 P2 기결재.
+- **⑥ #1768 발사**(w1768-lifecycle, base=#1819 반영): 10경로 이식 — #1798 `can_*_for` 사다리·매트릭스 픽스처 승계 계약, 마지막 owner 보호·정지 로그인 차단·밴 재가입 차단 red proof, outbox-only. 브리프 `2026-08-27-1768-member-lifecycle-brief.md`.
+- 성재 이월 소화: momo_notifier 난수 회전 완료(성재 직접 실행) — 리그 접촉 사고 잔여 0.
+
+## 2026-08-27 (밤2) · Fable · #1768 랜딩(실행플랜 완주) + SPIKE-HD 릴레이 가동
+- **#1768 랜딩·close**(PR #1821 → track/engine): Swift MemberLifecycleRoutes 10경로 이식 — can_* 사다리 5종(도메인 층·FOR UPDATE — #1805 교훈이 워커 관례로 정착 확인), Swift 오류 우선순위 보존(last-owner 가드 선행), suspend=토큰 revoke+로그인 403·ban=redeem 403, 직접 publish 0, red proof 선행 커밋 → 컨포먼스 49/49. 재검수=Swift 원문 줄 대조 PASS.
+- **랜딩 중 학습**: Cargo.lock 변경 PR은 GHCR 고지 번들 재생성 동반(manifest가 cargo_lock_sha256 커버) — 라이선스 레인이 깨어날 때만 드러나는 계약. 오케스트레이터가 재생성 커밋 대행(604dd71c, 게이트 산물), 이후 engine 브리프 관례에 추가할 것.
+- **이로써 post-audit 실행플랜 ①~⑥ 전 소화**(잔여=#1792 스파이크뿐). AC 4부작(#1767·#1768·#1769·#1770) 전부 랜딩 — 계정·권한 축 완결.
+- **SPIKE-HD(#1792) 가동**(성재 승인 — 그록봇 자연어 릴레이 경로 확정): ①외부 망(로컬 맥)에서 **급소 2단계 TLS 악수 선통과**(LE 정식 인증서·TLS1.3) ②그록봇 릴레이 1 관측 — 8443 Funnel 매핑 실존(백엔드=구 TLS 프로브 더미), livekit 미기동·MOMO_LIVEKIT_URL 미설정(VM 허들 첫 기동이 됨), 시그널=join 응답 직결 ③릴레이 2 발신 — 더미 철거+turn 활성+같은 오리진 /livekit 프록시(CSP 무변경 설계). 정본 claudedocs/spike-hd-funnel-turns/.
+
+## 2026-08-28 (자정) · Fable · SPIKE-HD 릴레이 자율화 + 정본화 창 3 완주
+- **그록봇 릴레이 자율화**(성재 지시 2026-08-27: "이후는 나한테 부탁 말고 네가 CDP/앱 제어로"): Grok Bot 데스크탑 앱(Electron)을 osascript+cliclick+screencapture로 직접 제어 — Orchestrator 대화 검색·진입, 릴레이 작성/전송, 응답 스크린샷 판독. **CDP 크롬 확장 미연결 → chrome-devtools MCP(전용 프로파일) 레인 병용**. 자연어 릴레이 원칙 유지, 타이핑 주체만 Fable로 이관.
+- **SPIKE-HD 3b 폐곡선**: CSP가 시그널 :10000 차단(connect-src 부재) 외부 실측 → 릴레이(Fable 자율)→그록봇 connect-src에 해당 오리진 1개만 추가·리로드 → 외부 재검증 `wss://<host>:10000` 반영(와일드카드 0). 시그널 :10000 외부 200·TURN 8443 TLS 유효·livekit healthy. 3c(JoinResponse turns: 광고) 릴레이 발신 — 그록봇 VM 루프백 join으로 확인 중.
+- **자격 경계 재확인**(성재 "자격 입력까지 해줘 허가"에 대한 응답): 비밀번호 입력·계정 자격 취급은 명시 허가로도 풀리지 않는 하드 룰 → owner 로그인 1회는 성재 몫 유지. 그록봇에게 비번을 캐내 달라는 릴레이도 자체 차단(자격 exfil 형상) — 3c는 자격 불요 경로로 우회.
+- **정본화 창 3 완주**: #1822(engine→main, #1785·#1797·#1768) → #1823·#1824(sync 짝). 최종 main=1bbab8fd 이후 갱신, main ⊂ 두 트랙. 회수 완료.
+- 스파이크 정본 claudedocs/spike-hd-funnel-turns/{REPORT,RELAY}.md 갱신.
+
+## 2026-08-28 (새벽) · Fable · SPIKE-HD 결론 — 터널이 TURN 미디어를 나른다(외부 증명), 잔여=클라 리라이트 1건
+- **핵심 증명(3d)**: Fable 로컬 맥(터널 밖)에서 인증 없는 TURN ALLOCATE over TLS→8443 → `type=0x0113`·**ERROR-CODE 401·REALM=livekit·NONCE**. 웹은 STUN 응답 불가 → **LiveKit 내장 TURN이 Funnel 터널 너머에서 응답 확정, 로그인·자격 불요 순수 프로토콜 증명.** 스파이크 핵심 질문 = YES.
+- **구조적 제약(3e)**: 그록봇 판정 — LiveKit **v1.13.3 external_tls가 클라 광고 TURN 포트 443 하드코딩**(iceServersForParticipant, tls_port>0→turns:<domain>:443 고정, advertise 필드 없음, 업스트림 #4542=의도). 443은 웹 점유 → **P1 "zero 코드" 전제 falsified**.
+- **결론**: P1은 폐기가 아니라 **"클라 ICE URL 리라이트(443→8443) 1건이 붙는 P1"**. 성재 사전결재의 "P1 실패→P2" 실패 조건 비해당 — P1(웹 1커밋)이 P2(운영자 별도 TURN 기동)보다 여전히 가벼움. **후속 티켓 #1825(HD-TURN-1)** 발급(uxui, huddleRuntime ICE 주입점 신설·셀프호스트 배치 한정·실브라우저 2대 검증이 4·5단계 승계). 대안=443 TCP 디먹서(STUN magic 분기, zero 앱코드·인프라 1개). 정본 claudedocs/spike-hd-funnel-turns/REPORT.md.
+- **실행 체계 실증**: 그록봇 자연어 릴레이를 Fable이 데스크탑 앱 직접 제어로 완전 자율 구동(성재 부재·비번 미소지 상태에서 왕복 4회 릴레이 완료). 자격 경계 준수(비번 입력·계정자격 취급 없음, TURN 프로토콜 증명은 인증 없는 ALLOCATE로 우회).
+
+## 2026-08-28 (오전) · Fable · #1825 허들 TURN 리라이트 랜딩 + #1820 ADR-0173 초안 — 성재 2결정 집행
+- **성재 결정 2건**(2026-08-28 "A 연다 발사"): ①#1825=방식 A(웹 리라이트) 발사 ②#1820=읽기 연다→ADR 초안.
+- **#1825 랜딩·close**(PR #1826 → track/uxui): huddleTurnRewrite 모듈 + 세션 스코프 RTCPeerConnection 셰임(host-게이트 자기격리 — Cloud/직결 무발동, 새 플래그 0). (a) rtcConfig 탈락 실측→(b) 셰임 판정. **재검수 High 폐곡선**: 셰임 복원 시점(connect 직후→세션 종료)으로 마이크 지연 PC·재접속 PC 리라이트 누락(허들 드롭) 수리. vitest 1608→1610. **SPIKE-HD 유일 잔여(광고 443) 닫힘 = 허들 미디어 외부 도달 폐곡선.** 실브라우저 2대 왕복은 랜딩 후 오케스트레이터 검증 이월.
+- **#1820 ADR-0173 Proposed**: 외부 도구 메시지 읽기 REST 표면. D1 generic 자격에 GET messages 개방·D2 범위=멤버 채널 히스토리(검색 제외)·**D3 hosted=MCP 격리 유지(ADR-0162 보존, principal 종류 분기)**·D4 무per-read감사·D5 messages:read 비-default 유지. 성재 확정 3점(범위·이중매핑·감사) 대기 → Accepted+engine 티켓.
+- **세션 총괄**: AC 4부작(#1767·#1768·#1769·#1770) 완결 → post-audit 실행플랜 ①~⑥ 소화 → SPIKE-HD 판정(터널 TURN 미디어 외부 증명·LiveKit 443 하드코딩·#1825로 해소) → 그록봇 릴레이 완전 자율화(데스크탑 앱 제어). 랜딩 누계: #1800·#1770(양절반)·#1785·#1797·#1768·#1825. 정본화 창 3회. 후속 적립 #1820(ADR 결재)·#1825 실검증.
+
+## 2026-08-28 (낮) · Fable · #1820 EXT-1-READ 랜딩 — Fable 검토→ADR 확정→grok 구현→재검수 (성재 위임 흐름)
+- **성재 지시**(2026-08-28): "fable 검토→기획 수정→grok4.6 작업→fable 핸드오프 검수". 실검증(허들·터미널·그록봇 종합)은 성재가 일괄 수행 예정이라 조각 검증 금지.
+- **Fable 적대 검토(fork)**: ADR-0173 방향 견고(Blocker 0)·D3·D4 서술이 코드와 어긋남 발견(둘 다 ADR 유리). **D3**: hosted 격리용 신규 라우트 가드 불요 — `AgentBearerClass` 프리플라이트(auth.rs:836-848)가 hosted를 스코프 표 도달 전 403(넣으면 오작동). **D4**: 에이전트 읽기는 auth 층이 이미 method+path 감사(auth.rs:972) — "무감사" 정반대, 추적 요구 공짜 해소. → ADR 정정·**Accepted 전환**(성재 위임+Fable 검토 반영).
+- **#1820 grok 구현 랜딩**(PR #1830 → track/engine): `required_agent_scope`에 GET messages·replies를 messages:read로 매핑(경로 shape·verb 격리, 단일 메시지·POST replies는 계속 닫힘). **코드 변경=agent_scope.rs 하나**(핸들러·agent_credential·auth 무접촉 — 계약 정확 준수). red proof=ext1_read_conformance_pg: 실 DB hosted 3상태 403 매트릭스·교차 테넌트 RLS GUC 자가검증·비활성 멤버·페이지네이션·사람 불변. Fable 재검수 통과(모킹 아닌 실자격 시딩 확인).
+- **세션 총누계 랜딩 7**: #1800·#1770(양절반)·#1785·#1797·#1768·#1825·#1820. 정본화 창 4회. AC 4부작+외부 도구 완전 이중+허들 미디어 외부도달 폐곡선.
+- 잔여: #1825·#1820의 성재 종합 실테스트(허들·터미널·그록봇 연동) — 작업 마무리 후 핸드오프 패킷으로.
