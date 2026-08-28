@@ -2765,3 +2765,10 @@
 - **#1825 랜딩·close**(PR #1826 → track/uxui): huddleTurnRewrite 모듈 + 세션 스코프 RTCPeerConnection 셰임(host-게이트 자기격리 — Cloud/직결 무발동, 새 플래그 0). (a) rtcConfig 탈락 실측→(b) 셰임 판정. **재검수 High 폐곡선**: 셰임 복원 시점(connect 직후→세션 종료)으로 마이크 지연 PC·재접속 PC 리라이트 누락(허들 드롭) 수리. vitest 1608→1610. **SPIKE-HD 유일 잔여(광고 443) 닫힘 = 허들 미디어 외부 도달 폐곡선.** 실브라우저 2대 왕복은 랜딩 후 오케스트레이터 검증 이월.
 - **#1820 ADR-0173 Proposed**: 외부 도구 메시지 읽기 REST 표면. D1 generic 자격에 GET messages 개방·D2 범위=멤버 채널 히스토리(검색 제외)·**D3 hosted=MCP 격리 유지(ADR-0162 보존, principal 종류 분기)**·D4 무per-read감사·D5 messages:read 비-default 유지. 성재 확정 3점(범위·이중매핑·감사) 대기 → Accepted+engine 티켓.
 - **세션 총괄**: AC 4부작(#1767·#1768·#1769·#1770) 완결 → post-audit 실행플랜 ①~⑥ 소화 → SPIKE-HD 판정(터널 TURN 미디어 외부 증명·LiveKit 443 하드코딩·#1825로 해소) → 그록봇 릴레이 완전 자율화(데스크탑 앱 제어). 랜딩 누계: #1800·#1770(양절반)·#1785·#1797·#1768·#1825. 정본화 창 3회. 후속 적립 #1820(ADR 결재)·#1825 실검증.
+
+## 2026-08-28 (낮) · Fable · #1820 EXT-1-READ 랜딩 — Fable 검토→ADR 확정→grok 구현→재검수 (성재 위임 흐름)
+- **성재 지시**(2026-08-28): "fable 검토→기획 수정→grok4.6 작업→fable 핸드오프 검수". 실검증(허들·터미널·그록봇 종합)은 성재가 일괄 수행 예정이라 조각 검증 금지.
+- **Fable 적대 검토(fork)**: ADR-0173 방향 견고(Blocker 0)·D3·D4 서술이 코드와 어긋남 발견(둘 다 ADR 유리). **D3**: hosted 격리용 신규 라우트 가드 불요 — `AgentBearerClass` 프리플라이트(auth.rs:836-848)가 hosted를 스코프 표 도달 전 403(넣으면 오작동). **D4**: 에이전트 읽기는 auth 층이 이미 method+path 감사(auth.rs:972) — "무감사" 정반대, 추적 요구 공짜 해소. → ADR 정정·**Accepted 전환**(성재 위임+Fable 검토 반영).
+- **#1820 grok 구현 랜딩**(PR #1830 → track/engine): `required_agent_scope`에 GET messages·replies를 messages:read로 매핑(경로 shape·verb 격리, 단일 메시지·POST replies는 계속 닫힘). **코드 변경=agent_scope.rs 하나**(핸들러·agent_credential·auth 무접촉 — 계약 정확 준수). red proof=ext1_read_conformance_pg: 실 DB hosted 3상태 403 매트릭스·교차 테넌트 RLS GUC 자가검증·비활성 멤버·페이지네이션·사람 불변. Fable 재검수 통과(모킹 아닌 실자격 시딩 확인).
+- **세션 총누계 랜딩 7**: #1800·#1770(양절반)·#1785·#1797·#1768·#1825·#1820. 정본화 창 4회. AC 4부작+외부 도구 완전 이중+허들 미디어 외부도달 폐곡선.
+- 잔여: #1825·#1820의 성재 종합 실테스트(허들·터미널·그록봇 연동) — 작업 마무리 후 핸드오프 패킷으로.
