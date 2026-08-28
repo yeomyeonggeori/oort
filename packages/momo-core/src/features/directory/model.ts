@@ -81,16 +81,19 @@ export function roleKeyLabel(
 
 /**
  * The only client gates for the workspace-role control: viewer is an operator
- * on the roster projection, and the target is not the viewer. Hierarchy and
- * last-owner stay on the server.
+ * on the roster projection, the target is a human, and the target is not the
+ * viewer. Hierarchy and last-owner stay on the server.
+ *
+ * 에이전트 역할은 상수 member(ADR-0004) — 서버 게이트는 #1857.
  */
 export function canChangeWorkspaceRole(
   viewerRole: MembershipRole | undefined,
   viewerMemberId: string,
-  targetMemberId: string
+  target: Pick<RosterMember, "id" | "kind">
 ): boolean {
   if (viewerRole !== "owner" && viewerRole !== "admin") return false;
-  return !uuidEq(viewerMemberId, targetMemberId);
+  if (target.kind !== "human") return false;
+  return !uuidEq(viewerMemberId, target.id);
 }
 
 /**

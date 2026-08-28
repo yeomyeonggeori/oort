@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import type { MembershipRole, RosterMember } from "@momo/core/lib/api";
 import {
   canChangeWorkspaceRole,
@@ -92,8 +92,6 @@ function RoleChangeField({
 }) {
   const current = member.role ?? "member";
   const [selected, setSelected] = useState<MembershipRole>(current);
-  const selectRef = useRef<HTMLSelectElement>(null);
-  const applyRef = useRef<HTMLButtonElement>(null);
   const describedBy = offline ? "member-profile-offline-reason" : undefined;
 
   useEffect(() => {
@@ -103,24 +101,16 @@ function RoleChangeField({
   const handleApply = async () => {
     if (busy || offline) return;
     await onApply(selected);
-    const apply = applyRef.current;
-    const select = selectRef.current;
-    if (apply && !apply.disabled) {
-      apply.focus();
-      return;
-    }
-    select?.focus();
   };
 
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className="min-w-0 flex-1">
         <Select
-          ref={selectRef}
           aria-label="역할"
           aria-busy={busy || undefined}
           aria-describedby={describedBy}
-          disabled={offline || busy}
+          disabled={offline}
           value={selected}
           data-testid="member-profile-role"
           onChange={(event) =>
@@ -135,12 +125,11 @@ function RoleChangeField({
         </Select>
       </div>
       <Button
-        ref={applyRef}
         type="button"
         variant="outline"
         aria-busy={busy || undefined}
         aria-describedby={describedBy}
-        disabled={offline || busy}
+        disabled={offline}
         data-testid="member-profile-role-apply"
         onClick={() => void handleApply()}
       >
@@ -172,7 +161,7 @@ function ReadyProfile({
   const canEditRole = canChangeWorkspaceRole(
     viewer?.role,
     session.member.id,
-    member.id
+    member
   );
   const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";

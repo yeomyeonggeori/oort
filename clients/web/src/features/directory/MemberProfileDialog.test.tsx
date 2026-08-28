@@ -386,11 +386,58 @@ describe("멤버 프로필 역할 변경", () => {
     ]);
   });
 
-  it("에이전트 행도 같은 셀렉트 표면을 쓴다", async () => {
+  it("에이전트 프로필에는 컨트롤이 없다", async () => {
     mountProfile({ viewer: OWNER, targetId: AGENT_ID });
+    const dialog = await waitForDialog();
+    expect(roleSelect()).toBeNull();
+    expect(applyButton()).toBeNull();
+    expect(dialog.textContent).not.toContain("역할 적용");
+  });
+
+  it("busy 중에는 잠그지 않고 적용 후에도 초점이 버튼에 남는다", async () => {
+    let resolvePatch: (value: unknown) => void = () => undefined;
+    changeWorkspaceMemberRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePatch = resolve;
+        })
+    );
+    fetchRoster.mockResolvedValue(
+      ROSTER.map((row) =>
+        row.id === MEMBER_ID ? { ...row, role: "admin" as const } : row
+      )
+    );
+    mountProfile({ viewer: OWNER, targetId: MEMBER_ID });
     await waitForDialog();
-    expect(roleSelect()).not.toBeNull();
-    expect(applyButton()).not.toBeNull();
+    await selectRole("admin");
+
+    const apply = applyButton();
+    expect(apply).not.toBeNull();
+    apply!.focus();
+    expect(document.activeElement).toBe(apply);
+
+    await applyRole();
+    await vi.waitFor(() => {
+      expect(applyButton()?.getAttribute("aria-busy")).toBe("true");
+    });
+    expect(roleSelect()?.disabled).toBe(false);
+    expect(applyButton()?.disabled).toBe(false);
+    expect(roleSelect()?.getAttribute("aria-busy")).toBe("true");
+    expect(applyButton()?.textContent).toBe("역할 적용 중");
+    expect(document.activeElement).toBe(applyButton());
+
+    await act(async () => {
+      resolvePatch({
+        memberId: MEMBER_ID,
+        scope: "workspace",
+        role: "admin",
+      });
+    });
+    await vi.waitFor(() => {
+      expect(applyButton()?.getAttribute("aria-busy")).toBeNull();
+    });
+    expect(document.activeElement).toBe(applyButton());
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("오프라인이면 컨트롤을 잠그고 기존 배너 사유를 가리킨다", async () => {

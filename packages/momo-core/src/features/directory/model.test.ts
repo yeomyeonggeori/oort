@@ -126,28 +126,32 @@ describe("roleKeyLabel", () => {
 
 describe("canChangeWorkspaceRole", () => {
   it("hides the control from non-operators and from self", () => {
-    expect(canChangeWorkspaceRole("member", DEMO.id, INTERN_HUMAN.id)).toBe(
+    expect(canChangeWorkspaceRole("member", DEMO.id, INTERN_HUMAN)).toBe(false);
+    expect(canChangeWorkspaceRole("guest", DEMO.id, INTERN_HUMAN)).toBe(false);
+    expect(canChangeWorkspaceRole(undefined, DEMO.id, INTERN_HUMAN)).toBe(
       false
     );
-    expect(canChangeWorkspaceRole("guest", DEMO.id, INTERN_HUMAN.id)).toBe(
-      false
-    );
-    expect(canChangeWorkspaceRole(undefined, DEMO.id, INTERN_HUMAN.id)).toBe(
-      false
-    );
-    expect(canChangeWorkspaceRole("owner", DEMO.id, DEMO.id)).toBe(false);
-    expect(canChangeWorkspaceRole("admin", DEMO.id, DEMO.id.toUpperCase())).toBe(
-      false
+    expect(canChangeWorkspaceRole("owner", DEMO.id, DEMO)).toBe(false);
+    expect(
+      canChangeWorkspaceRole("admin", DEMO.id, {
+        ...DEMO,
+        id: DEMO.id.toUpperCase(),
+      })
+    ).toBe(false);
+  });
+
+  it("offers the control to an operator looking at a human who is not self", () => {
+    expect(canChangeWorkspaceRole("owner", DEMO.id, INTERN_HUMAN)).toBe(true);
+    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_HUMAN)).toBe(
+      true
     );
   });
 
-  it("offers the control to an operator looking at someone else", () => {
-    expect(canChangeWorkspaceRole("owner", DEMO.id, INTERN_HUMAN.id)).toBe(
-      true
+  it("hides the control when the target is an agent", () => {
+    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_AGENT)).toBe(
+      false
     );
-    expect(canChangeWorkspaceRole("admin", SEONGJAE.id, INTERN_AGENT.id)).toBe(
-      true
-    );
+    expect(canChangeWorkspaceRole("owner", DEMO.id, HERMES)).toBe(false);
   });
 });
 
