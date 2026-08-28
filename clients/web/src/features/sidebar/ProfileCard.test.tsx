@@ -213,9 +213,7 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
     ]);
   });
 
-  it("로그아웃을 고르면 logout 을 한 번 부른다", async () => {
-    const logout = vi.fn();
-    mountCard(logout);
+  async function chooseLogout(): Promise<HTMLElement> {
     await openMenu();
     const logoutItem = document.querySelector(
       '[data-testid="profile-logout"]'
@@ -224,10 +222,62 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
     await act(async () => {
       logoutItem!.click();
     });
+    return vi.waitFor(() => {
+      const dialog = document.querySelector(
+        '[data-testid="profile-logout-confirm"]'
+      );
+      expect(dialog).not.toBeNull();
+      expect(dialog?.textContent).toContain(
+        "로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다."
+      );
+      expect(dialog?.textContent).toContain("로그아웃할까요?");
+      return dialog as HTMLElement;
+    });
+  }
+
+  it("로그아웃을 고르면 확인만 서고 logout 은 부르지 않는다", async () => {
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseLogout();
+    expect(logout).toHaveBeenCalledTimes(0);
+  });
+
+  it("확인을 누르면 logout 을 한 번 부른다", async () => {
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseLogout();
+    const confirm = document.querySelector(
+      '[data-testid="profile-logout-confirm-action"]'
+    ) as HTMLElement | null;
+    expect(confirm).not.toBeNull();
+    expect(confirm?.textContent).toContain("로그아웃");
+    await act(async () => {
+      confirm!.click();
+    });
     expect(logout).toHaveBeenCalledTimes(1);
   });
 
-  it("Arrow 와 Enter 로 로그아웃에 도달해 발동한다", async () => {
+  it("취소를 누르면 닫히고 logout 은 부르지 않는다", async () => {
+    const logout = vi.fn();
+    mountCard(logout);
+    await chooseLogout();
+    const cancel = document.querySelector(
+      '[data-testid="profile-logout-cancel"]'
+    ) as HTMLElement | null;
+    expect(cancel).not.toBeNull();
+    expect(cancel?.textContent).toContain("취소");
+    await act(async () => {
+      cancel!.click();
+    });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="profile-logout-confirm"]')
+      ).toBeNull();
+    });
+    expect(logout).toHaveBeenCalledTimes(0);
+  });
+
+  it("Arrow 와 Enter 로 로그아웃에 도달해 확인을 연다", async () => {
     const logout = vi.fn();
     mountCard(logout);
     await openMenu();
@@ -244,6 +294,19 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
       "profile-logout"
     );
     await pressKey("Enter");
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="profile-logout-confirm"]')
+      ).not.toBeNull();
+    });
+    expect(logout).toHaveBeenCalledTimes(0);
+    const confirm = document.querySelector(
+      '[data-testid="profile-logout-confirm-action"]'
+    ) as HTMLElement | null;
+    expect(confirm).not.toBeNull();
+    await act(async () => {
+      confirm!.click();
+    });
     expect(logout).toHaveBeenCalledTimes(1);
   });
 });

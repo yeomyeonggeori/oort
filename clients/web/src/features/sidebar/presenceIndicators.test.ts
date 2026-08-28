@@ -157,10 +157,12 @@ describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
   it("로그아웃은 설정 뒤의 실존 동사다 (#1858)", () => {
     expect(profileCard).toContain('data-testid="profile-logout"');
     expect(profileCard).toContain("useSession");
-    expect(profileCard).toContain("onSelect={() => logout()}");
+    expect(profileCard).toContain('tone="danger"');
+    expect(profileCard).toContain("setConfirmLogout(true)");
+    expect(profileCard).toContain("onClick={() => logout()}");
     expect(profileCard).toContain("<LogOut className=\"size-4\" aria-hidden=\"true\" />");
-    expect(profileCard).toContain("로그아웃");
-    expect(profileCard).not.toContain("tone=\"danger\"");
+    expect(profileCard).toContain("로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.");
+    expect(profileCard).toContain("로그아웃할까요?");
     const settings = profileCard.indexOf('data-testid="nav-settings"');
     const logout = profileCard.indexOf('data-testid="profile-logout"');
     expect(settings).toBeGreaterThan(-1);
