@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BF-A1 리액션 칩 이름 툴팁 (#1884, 2026-08-29)
+
+- `ReactionMap`이 이미 들고 있던 memberIds를 칩 툴팁/접근명으로 접는다. 서버 0. 코어 `formatReactionNames`: 나 포함 시 「나(내 반응 취소)」 맨 앞, 3명까지 이름, 초과·명부 미해석은 「외 N명」(실명 불명 표기 없음). 모호한 표시명은 `memberNameParts` 핸들.
+- 웹 칩은 기존 native `title` 관례(Radix Tooltip 의존 없음). aria-label은 카운트+이름 요약(+미반응 시 「나도 반응하기」). 로빙/토글 무변경.
+- red proof: core timeline 546 · web vitest 1714 · tsc · design_preflight_web · `CAPTURE_PORT=7477` capture:design (행당 탭 스톱 1) · `SHELL_GATE_PORT=7479 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BZ-6a-p1 온보딩 폴리시 (#1882, 2026-08-29)
 
 - S0 히어로 락업: OortMark 1.5×(144, 12vw 상한 192) + 워드마크 `oort`(`--font-onboarding-wordmark` 마크 1/3, clamp 48–64) + 소개 카피 1줄(`--spacing-onboarding-copy` 360, pane-sm 차용 아님). 궤도 드로잉→워드마크→카피 순차 페이드(reduced-motion 즉시). 산포 중앙 배제 원 반지름 32.
