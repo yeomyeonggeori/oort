@@ -257,12 +257,13 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
   배치 57곳, 그중 인접 레이블조차 없는 36곳**(QuickSwitcher 12곳 포함). 이 축을 재는
   기계는 없다(§5.3).
 
-**로컬 SVG 예외 목록은 아래 세 파일로 닫혀 있다.** 셋은 모두 같은 oort 브랜드 글리프이며
+**로컬 SVG 예외 목록은 아래 네 파일로 닫혀 있다.** 모두 oort 브랜드 글리프이며
 기능 아이콘이 아니다.
 
 | 파일 | 존치 사유 |
 |---|---|
 | `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크. 앱 안에서 `currentColor`를 상속한다. |
+| `clients/web/src/features/auth/OortCloudMarks.tsx` | S0 오르트 구름 산포(혜성·소행성·4촉 별) 라인아트. Lucide에 없는 도메인 글리프이고 기능 아이콘으로 재사용하지 않는다. |
 | `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
 | `clients/web/public/favicon.svg` | 브라우저가 직접 읽는 고정 파비콘 브랜드 자산. |
 

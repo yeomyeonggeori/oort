@@ -151,10 +151,11 @@ async function main() {
     const started = Date.now();
     await page.goto(origin, { waitUntil: "commit" });
 
-    // The connect screen is usable when the email field is there to be typed in.
+    // Stored server skips S0, so the first usable connect surface is S1
+    // (gateway). Email lives on S2 and is a click away, not part of boot.
     let elapsed = null;
     try {
-      await page.waitForSelector('[data-testid="login-email"]', {
+      await page.waitForSelector('[data-testid="onboarding-gateway"]', {
         state: "visible",
         timeout: CEILING_MS,
       });

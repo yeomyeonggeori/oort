@@ -54,6 +54,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.THEME_GATE_PORT || 5192);
@@ -157,6 +158,7 @@ function themeColorsOf(page) {
 }
 
 async function signIn(page) {
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("theme@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
