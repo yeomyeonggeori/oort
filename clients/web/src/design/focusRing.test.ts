@@ -206,10 +206,11 @@ describe("검수 #1 — 전면 치환", () => {
     }
   });
 
-  it("컴포저 그릇은 포인터 :focus-within 링이 아니라 focus-visible-within 이다", () => {
+  it("텍스트 입력 그릇은 포인터 :focus-within 링이 아니라 focus-visible-within 이다", () => {
     for (const file of [
       "../features/chat/Composer.tsx",
       "../features/timeline/ThreadComposer.tsx",
+      "../features/work/ObserverTerminal.tsx",
     ]) {
       const source = readFileSync(`${HERE}/${file}`, "utf8");
       expect(source, file).toContain("focus-visible-within:focus-ring");

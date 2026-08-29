@@ -4,6 +4,7 @@
 
 - 라이트 `--line`을 `#dcd8d0` → `#e4e0d8`로 한 단계 옅게. `--line-strong`은 라이트 `--surface-hover` 위 3.03:1이라 RGB +1이 2.99로 3:1이 깨져 그대로(다크 무접촉).
 - 컴포저 그릇은 `focus-within:focus-ring`을 떼고 `focus-visible-within:focus-ring`(Tab 모달리티 + 자식 `:focus-visible`). 마우스 클릭에서 보더 색·링 불변, Tab 진입에서만 기존 인셋 링. Input/Select/outline은 프리미티브 `focus-visible:focus-ring` 유지.
+- 관전 터미널 그릇도 같은 변형(1순위). xterm helper textarea는 클릭에도 `:focus-visible`이라 `:focus-within`이면 드래그 선택 순간 인셋 링이 서고 stdin 죽은 표면을 입력처럼 읽힌다. Tab 진입·이탈·복사는 `terminalOwnsKey` 그대로. 정본을 컴포저로 좁히지 않았다.
 - 정본 동기: design-system §2.2 · taste `tokens.md` · 폰 `lightPalette.border` 짝.
 
 ## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)

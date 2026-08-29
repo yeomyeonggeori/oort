@@ -83,7 +83,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 - **순흑·순백 없음.** 종이의 흰색은 `#fffefb`.
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
 - **`--line`은 나누고, `--line-strong`은 컨트롤을 그린다(3:1).** `tokens.css:33`. 라이트 `--line`은 `#e4e0d8`(#1866, `--surface` 위 1.22:1). 라이트 `--line-strong`은 `--surface-hover` 위 **3.03:1**이라 한 단계(RGB +1 → 2.99)도 못 옅힌다 — 버튼·입력·컴포저 그릇의 경계는 이 토큰이 지고, 3:1을 깨는 완화는 금지.
-- **텍스트 입력 그릇은 포인터 포커스에서 보더 색을 바꾸지 않는다** (#1866, buzz 동형). 컴포저(채널·스레드)는 `focus-visible-within:focus-ring`: Tab 모달리티와 자식 `:focus-visible`에서만 기존 인셋 링. 안쪽 textarea는 클릭에도 `:focus-visible`이 매치되므로 `:focus-within`만으로는 갈리지 않는다. Input/Select/outline 버튼은 프리미티브의 `focus-visible:focus-ring`이 그대로 진다.
+- **텍스트 입력 그릇은 포인터 포커스에서 보더 색을 바꾸지 않는다** (#1866, buzz 동형). 컴포저(채널·스레드)와 관전 터미널 그릇은 `focus-visible-within:focus-ring`: Tab 모달리티와 자식 `:focus-visible`에서만 기존 인셋 링. 안쪽 textarea(컴포저 입력, xterm `.xterm-helper-textarea`)는 클릭에도 `:focus-visible`이 매치되므로 `:focus-within`만으로는 갈리지 않는다. Input/Select/outline 버튼은 프리미티브의 `focus-visible:focus-ring`이 그대로 진다.
 - **위험 순서의 자는 대비가 아니라 채도(OKLab C)다** — `danger > warn > ink-muted`. AA를 한참 넘긴 두 톤은 대비 축에서 구분되지 않는다.
 - **스크림은 색이 아니라 방향이다** — 어느 스킴에서든 뒤를 어둡게 한다.
 - **상호작용 상태를 그리는 토큰은 정적인 그릇이 될 수 없다** (#1515) — 아래.

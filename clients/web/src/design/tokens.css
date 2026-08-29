@@ -705,13 +705,14 @@
  *
  * ## 텍스트 입력 그릇 (#1866)
  *
- * 컴포저처럼 textarea 를 감싼 그릇에 `focus-within:focus-ring` 을 두면 마우스
- * 클릭에도 인셋 accent 링이 보더를 덮어, 보더 색이 바뀐 것처럼 보인다. 안쪽
- * textarea 는 스펙상 포인터 포커스에도 `:focus-visible` 이 매치되므로
- * `:has(:focus-visible)` 만으로는 갈리지 않는다. `focus-visible-within` 은
- * Tab 모달리티(`data-focus-modality="keyboard"`, `focusModality.ts`)와 자식
- * `:focus-visible` 을 함께 요구한다. 컨트롤 프리미티브의 `focus-visible:focus-ring`
- * 은 그대로다.
+ * 컴포저·관전 터미널처럼 textarea 를 감싼 그릇에 `focus-within:focus-ring` 을
+ * 두면 마우스 클릭(터미널은 드래그 선택)에도 인셋 accent 링이 보더를 덮어,
+ * 보더 색이 바뀐 것처럼 보인다. 안쪽 textarea(컴포저 입력, xterm
+ * `.xterm-helper-textarea`)는 스펙상 포인터 포커스에도 `:focus-visible` 이
+ * 매치되므로 `:has(:focus-visible)` 만으로는 갈리지 않는다.
+ * `focus-visible-within` 은 Tab 모달리티(`data-focus-modality="keyboard"`,
+ * `focusModality.ts`)와 자식 `:focus-visible` 을 함께 요구한다. 컨트롤
+ * 프리미티브의 `focus-visible:focus-ring` 은 그대로다.
  * ========================================================================== */
 @custom-variant focus-visible-within {
   :root[data-focus-modality="keyboard"] &:has(:focus-visible) {
