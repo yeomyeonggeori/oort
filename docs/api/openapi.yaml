@@ -103,6 +103,10 @@ tags:
     description: Workspace-admin signed outbound event webhook subscriptions.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: reminders
+    description: >
+      ADR-0175 personal message reminders (later-alert). Human-only owner CRUD.
+      v1 has no outbox fan-out — clients poll the list.
   - name: unfurls
     description: >
       ADR-0170 link unfurl server surface. Workspace on/off, message-level
@@ -2029,6 +2033,209 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/reminders:
+    post:
+      tags: [reminders]
+      operationId: createMessageReminder
+      summary: Create a personal reminder on a channel message.
+      description: >
+        ADR-0175 / #1888. Human bearer only. The target message must live in
+        `channelId` and the caller must be a current channel member. `dueAtMs`
+        in the past is 400. v1 does not emit outbox — expiry is a client poll.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReminderRequest"
+      responses:
+        "201":
+          description: Reminder stored and audited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderResponse"
+        "400":
+          description: Invalid body, unknown field, or dueAtMs not in the future.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or not a channel member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Message not found in the named channel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [reminders]
+      operationId: listMessageReminders
+      summary: List the caller's own reminders, soonest due first.
+      description: >
+        Owner-scoped. `state=pending` (default) hides completed rows; `state=all`
+        returns both. Keyset pagination over `(due_at, id)` via `cursor` =
+        the previous page's last reminder id.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, all]
+            default: pending
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: The caller's reminder page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderListResponse"
+        "400":
+          description: Invalid state or cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/reminders/{reminderId}:
+    patch:
+      tags: [reminders]
+      operationId: updateMessageReminder
+      summary: Snooze a reminder or mark it complete.
+      description: >
+        Body is `{dueAtMs}` (snooze) or `{completed: true}`. Both, neither, or
+        `completed: false` is 400. Snoozing a completed row is 409. A reminder
+        that is not the caller's answers 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReminderRequest"
+      responses:
+        "200":
+          description: Updated reminder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderResponse"
+        "400":
+          description: Invalid body, unknown field, or dueAtMs not in the future.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reminder not found for this caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Completed reminder cannot be rescheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [reminders]
+      operationId: deleteMessageReminder
+      summary: Delete the caller's reminder.
+      description: Owner only. A reminder that is not the caller's answers 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Reminder deleted and audited.
+        "400":
+          description: Invalid reminder id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reminder not found for this caller.
           content:
             application/json:
               schema:
@@ -8684,6 +8891,53 @@ components:
           type: boolean
         mentionOverridesMute:
           type: boolean
+
+    CreateReminderRequest:
+      type: object
+      required: [channelId, messageId, dueAtMs]
+      additionalProperties: false
+      properties:
+        channelId: {type: string, format: uuid}
+        messageId: {type: string, format: uuid}
+        dueAtMs: {type: integer, format: int64}
+        note: {type: string, maxLength: 500}
+
+    UpdateReminderRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        dueAtMs: {type: integer, format: int64}
+        completed: {type: boolean}
+
+    Reminder:
+      type: object
+      required: [id, workspaceId, memberId, channelId, messageId, dueAtMs, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        memberId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        messageId: {type: string, format: uuid}
+        dueAtMs: {type: integer, format: int64}
+        note: {type: string}
+        completedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    ReminderResponse:
+      type: object
+      required: [reminder]
+      properties:
+        reminder: {$ref: "#/components/schemas/Reminder"}
+
+    ReminderListResponse:
+      type: object
+      required: [reminders]
+      properties:
+        reminders:
+          type: array
+          items: {$ref: "#/components/schemas/Reminder"}
+        nextCursor: {type: string, format: uuid}
 
     CreateChannelRequest:
       type: object

@@ -48,6 +48,8 @@ pub mod provider_settings;
 pub mod read_state;
 pub mod realtime;
 pub mod reattach;
+/// ADR-0175 / #1888 — personal message reminders (human-only, no outbox).
+pub mod reminders;
 pub mod roster;
 pub mod search;
 /// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).

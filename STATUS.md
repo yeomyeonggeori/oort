@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 메시지 리마인더 REST (#1888 / BF-B1 서버 절반, 2026-08-30)
+
+- `message_reminder`(082): id/workspace/member/channel/message/due_at/note≤500/completed_at. RLS FORCE 소유자 스코프(`app.workspace_id` + `app.member_id`). pending due 인덱스. `schema_v0.sql` 무접촉. **outbox 팬아웃 없음**(ADR-0175 v1=클라 폴링).
+- 사람 본인 CRUD: `POST/GET/PATCH/DELETE /v1/workspaces/{ws}/reminders`. 과거 due 400, 타인 404, 비멤버 채널 403, 에이전트 403. 감사 `reminder.created/updated/completed/deleted`.
+- red proof: `reminder_conformance_pg`. 클라 절반은 A-41.
+
 ## 자기 표시 이름 변경 REST (#1873 / BZ-4e, 2026-08-29)
 
 - `PATCH /v1/workspaces/{ws}/members/me` `{displayName}` — 사람 본인만. 정규화는 join의 `normalized_join_display_name`(400 `displayName is required`). 에이전트 자격은 allow-list 밖 403 + `require_human`. 핸들·역할·아바타 무접촉.

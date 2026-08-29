@@ -1866,6 +1866,75 @@ pub struct NotificationRulesResponse {
     pub mention_overrides_mute: bool,
 }
 
+// ---------------------------------------------------------------------------
+// reminders (ADR-0175 / #1888)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/reminders`. Closed-world camelCase.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateReminderRequest {
+    pub channel_id: String,
+    pub message_id: String,
+    pub due_at_ms: i64,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `PATCH /v1/workspaces/{ws}/reminders/{id}` — snooze (`dueAtMs`) or complete
+/// (`completed: true`). The route refuses both, neither, and `completed: false`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateReminderRequest {
+    #[serde(default)]
+    pub due_at_ms: Option<i64>,
+    #[serde(default)]
+    pub completed: Option<bool>,
+}
+
+/// `GET /v1/workspaces/{ws}/reminders?state=&cursor=&limit=`
+#[derive(Debug, Deserialize)]
+pub struct ListRemindersQuery {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// One reminder on the wire. `note` and `completedAtMs` are omitted when absent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub channel_id: String,
+    pub message_id: String,
+    pub due_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderResponse {
+    pub reminder: ReminderDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderListResponse {
+    pub reminders: Vec<ReminderDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 /// `POST …/channels/{ch}/members` request (Swift `AddChannelMemberRequest`,
 /// `DTOs.swift:523-538`).
 ///
@@ -4542,5 +4611,54 @@ mod tests {
         assert_eq!(json["member"]["handle"], "seongjae");
         assert_eq!(json["member"]["kind"], "human");
         assert!(json.get("handle").is_none(), "{json}");
+    }
+
+    #[test]
+    fn reminder_create_is_closed_world_camel_case() {
+        let parsed: CreateReminderRequest = serde_json::from_value(serde_json::json!({
+            "channelId": "c",
+            "messageId": "m",
+            "dueAtMs": 1,
+            "note": "later"
+        }))
+        .expect("parse");
+        assert_eq!(parsed.channel_id, "c");
+        assert_eq!(parsed.due_at_ms, 1);
+        assert_eq!(parsed.note.as_deref(), Some("later"));
+        assert!(
+            serde_json::from_value::<CreateReminderRequest>(serde_json::json!({
+                "channelId": "c",
+                "messageId": "m",
+                "dueAtMs": 1,
+                "memberId": "stolen"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reminder_patch_refuses_unknown_keys() {
+        let snooze: UpdateReminderRequest =
+            serde_json::from_value(serde_json::json!({"dueAtMs": 9})).expect("snooze");
+        assert_eq!(snooze.due_at_ms, Some(9));
+        assert_eq!(snooze.completed, None);
+        let done: UpdateReminderRequest =
+            serde_json::from_value(serde_json::json!({"completed": true})).expect("done");
+        assert_eq!(done.completed, Some(true));
+        assert!(serde_json::from_value::<UpdateReminderRequest>(
+            serde_json::json!({"dueAtMs": 9, "note": "no"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn reminder_list_omits_next_cursor_when_absent() {
+        let json = serde_json::to_value(ReminderListResponse {
+            reminders: Vec::new(),
+            next_cursor: None,
+        })
+        .expect("serialize");
+        assert!(json.get("nextCursor").is_none(), "{json}");
+        assert_eq!(json["reminders"], serde_json::json!([]));
     }
 }

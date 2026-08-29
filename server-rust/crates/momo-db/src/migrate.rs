@@ -392,19 +392,23 @@ mod tests {
     /// 081 is #1767's `credential_claim`: 078's owner_claim generalized with
     /// `kind` (`owner_bootstrap` | `password_reset`). Same hash/TTL/single-use
     /// / definer lookup. schema_v0.sql is not modified.
+    ///
+    /// 082 is ADR-0175's `message_reminder` (#1888 BF-B1 server half): owner-
+    /// scoped personal later-alert rows. schema_v0.sql is not modified; v1 has
+    /// no outbox fan-out.
     #[test]
-    fn discovers_contiguous_migrations_001_to_081() {
+    fn discovers_contiguous_migrations_001_to_082() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            81,
-            "expected 81 migrations under {}",
+            82,
+            "expected 82 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 81);
+        assert_eq!(migrations.last().unwrap().version, 82);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {
