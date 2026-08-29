@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   COMPOSER_SEED_EVENT,
+  DRAFTS_CHANGED_EVENT,
   clearAllDrafts,
   clearDraft,
   draftKey,
@@ -194,6 +195,10 @@ describe("컴포저 시드", () => {
       type: COMPOSER_SEED_EVENT,
       detail: { workspaceId: WS, channelId: CH_A, text: "@grokbot " },
     });
+  });
+
+  it("목록 갱신 사건 이름은 저장소가 정본이다", () => {
+    expect(DRAFTS_CHANGED_EVENT).toBe("momo:drafts-changed");
   });
 });
 

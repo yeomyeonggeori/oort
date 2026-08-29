@@ -236,6 +236,12 @@ export function clearDraft(workspaceId: string, channelId: string): void {
 export const COMPOSER_SEED_EVENT = "momo:composer-seed";
 
 /**
+ * 같은 탭의 초안 목록·사이드바 항법이 저장소 직접 쓰기(캡처 하네스)를
+ * 다시 읽게 하는 사건. `storage` 는 다른 탭에만 뜬다.
+ */
+export const DRAFTS_CHANGED_EVENT = "momo:drafts-changed";
+
+/**
  * 빈 입력창에만 심는다. 쓰다 만 글이 있으면 덮지 않고 false.
  * 저장과 사건을 한 함수에서 내는 이유는 저장만 하고 사건이 빠지면
  * 마운트된 컴포저가 초안을 영원히 못 보기 때문이다.
@@ -336,7 +342,7 @@ if (typeof window !== "undefined") {
   });
   // Same-tab writes that bypass `writeDraft` (캡처 하네스가 localStorage에
   // 직접 심는 경우). `storage` 사건은 다른 탭에만 뜬다.
-  window.addEventListener("momo:drafts-changed", () => {
+  window.addEventListener(DRAFTS_CHANGED_EVENT, () => {
     emitDraftsChanged();
   });
 }

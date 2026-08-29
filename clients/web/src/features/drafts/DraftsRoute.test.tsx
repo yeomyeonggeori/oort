@@ -102,6 +102,36 @@ function ComposerProbe() {
   return createElement("div", { "data-testid": "composer-probe" }, text);
 }
 
+async function deleteDraftRow(
+  host: HTMLElement,
+  channelId: string
+): Promise<void> {
+  const menu = host.querySelector(
+    `[data-testid="draft-row"][data-channel-id="${channelId}"] [data-testid="draft-row-menu"]`
+  ) as HTMLButtonElement | null;
+  expect(menu).not.toBeNull();
+  menu!.focus();
+  await act(async () => {
+    menu!.dispatchEvent(
+      new PointerEvent("pointerdown", { bubbles: true, cancelable: true })
+    );
+    menu!.click();
+  });
+  const del = await vi.waitFor(() => {
+    const item = document.querySelector(
+      '[data-testid="draft-row-delete"]'
+    ) as HTMLElement | null;
+    expect(item).not.toBeNull();
+    return item!;
+  });
+  await act(async () => {
+    del.click();
+  });
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 async function mountAt(path: string): Promise<HTMLElement> {
   const host = document.createElement("div");
   document.body.append(host);
@@ -214,6 +244,20 @@ describe("초안 패널 (#1901)", () => {
     expect(
       rows[0]?.querySelector('[data-testid="draft-row-preview"]')?.textContent
     ).toBe("PR 본문에 게이트 증거를 붙이고 두 번째 줄");
+    const firstLink = rows[0]?.querySelector("a");
+    expect(firstLink?.hasAttribute("aria-label")).toBe(false);
+    expect(firstLink?.getAttribute("aria-describedby")).toBe("drafts-row-hint");
+    expect(host.querySelector("#drafts-row-hint")?.textContent).toBe(
+      "초안 이어서 쓰기"
+    );
+    expect(firstLink?.textContent).toContain("엔진");
+    expect(firstLink?.textContent).toContain(
+      "PR 본문에 게이트 증거를 붙이고 두 번째 줄"
+    );
+    expect(host.querySelector('[role="toolbar"]')).toBeNull();
+    const menu = host.querySelector('[data-testid="draft-row-menu"]');
+    expect(menu?.className).toContain("hover:text-ink");
+    expect(menu?.parentElement?.className).toContain("bg-surface-raised");
   });
 
   it("행을 누르면 그 채널로 가고 컴포저가 초안을 읽는다", async () => {
@@ -260,6 +304,31 @@ describe("초안 패널 (#1901)", () => {
     });
     expect(host.textContent).toContain("아직 초안이 없습니다.");
     expect(host.textContent).toContain("쓰다 만 글은 자동으로 저장됩니다.");
+  });
+
+  it("지우면 이웃 행으로 포커스가 가고, 마지막이면 빈 상태 또는 헤딩에 착지한다", async () => {
+    writeDraft(WS, CH_GENERAL, "남을 초안", NOW);
+    writeDraft(WS, CH_ENGINE, "먼저 지울 초안", NOW + 4_000);
+    const host = await mountAt("/drafts");
+    await deleteDraftRow(host, CH_ENGINE);
+    await vi.waitFor(() => {
+      const remaining = host.querySelector(
+        `[data-testid="draft-row"][data-channel-id="${CH_GENERAL}"] a`
+      );
+      expect(remaining).not.toBeNull();
+      expect(document.activeElement).toBe(remaining);
+      expect(document.activeElement).not.toBe(document.body);
+    });
+    await deleteDraftRow(host, CH_GENERAL);
+    await vi.waitFor(() => {
+      const empty = host.querySelector('[data-testid="drafts-empty"]');
+      const heading = host.querySelector('[data-testid="drafts-heading"]');
+      expect(empty).not.toBeNull();
+      expect(
+        document.activeElement === empty || document.activeElement === heading
+      ).toBe(true);
+      expect(document.activeElement).not.toBe(document.body);
+    });
   });
 
   it("진입 시 초안 0이면 사용법 카피를 그린다", async () => {

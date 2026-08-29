@@ -39,6 +39,23 @@ const TOKENS_CSS = readFileSync(
   resolve(WEB_ROOT, "src/design/tokens.css"),
   "utf8"
 );
+const DRAFT_STORE_SRC = readFileSync(
+  resolve(WEB_ROOT, "src/features/chat/draftStore.ts"),
+  "utf8"
+);
+
+function exportedStringConst(source, name) {
+  const match = source.match(new RegExp(`export const ${name} = "([^"]+)";`));
+  if (match === null) {
+    throw new Error(`draftStore.ts의 ${name}을 읽지 못했다`);
+  }
+  return match[1];
+}
+
+const DRAFTS_CHANGED_EVENT = exportedStringConst(
+  DRAFT_STORE_SRC,
+  "DRAFTS_CHANGED_EVENT"
+);
 
 function pixelToken(name) {
   const match = TOKENS_CSS.match(
@@ -6286,7 +6303,7 @@ async function captureScheme(browser, scheme) {
       text: "hermes 온보딩 문구를 이어서",
       atMs: now - 3_600_000,
     }));
-    window.dispatchEvent(new Event("momo:drafts-changed"));
+    window.dispatchEvent(new Event("${DRAFTS_CHANGED_EVENT}"));
     window.dispatchEvent(new CustomEvent("momo:composer-seed", {
       detail: {
         workspaceId: "${WORKSPACE_ID}",

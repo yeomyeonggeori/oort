@@ -1,4 +1,4 @@
-import { useState, type FocusEvent } from "react";
+import { useLayoutEffect, useRef, useState, type FocusEvent } from "react";
 import { Link } from "react-router-dom";
 import {
   Hash,
@@ -37,6 +37,15 @@ import { useDraftsPanel } from "./useDraftsPanel";
 // 확인 없이 지운다. 실행 취소는 없으므로 지우는 손은 hover/⋯ 안에만 둔다.
 // =============================================================================
 
+const DRAFT_ROW_HINT_ID = "drafts-row-hint";
+
+// MessageActions hover toolbar: raised bowl + muted→ink on hover. The row
+// already washes to `surface-hover`, so the same fill on ⋯ is 1.00:1.
+const overflowBowlClass =
+  "absolute right-2 top-2 z-20 rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
+const overflowTriggerClass =
+  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
+
 function KindIcon({ kind }: { kind: DraftKind }) {
   const className = "size-4 text-ink-muted";
   if (kind === "dm") return <MessageSquare className={className} />;
@@ -44,21 +53,35 @@ function KindIcon({ kind }: { kind: DraftKind }) {
   return <Hash className={className} />;
 }
 
+function draftRowLink(
+  list: HTMLUListElement | null,
+  channelId: string
+): HTMLElement | null {
+  if (list === null) return null;
+  for (const row of list.querySelectorAll('[data-testid="draft-row"]')) {
+    if (row.getAttribute("data-channel-id") !== channelId) continue;
+    const link = row.querySelector("a");
+    return link instanceof HTMLElement ? link : null;
+  }
+  return null;
+}
+
 function DraftRow({
   item,
   nowMs,
+  onDelete,
+  onCloseAutoFocus,
 }: {
   item: DraftViewItem;
   nowMs: number;
+  onDelete: (item: DraftViewItem) => void;
+  onCloseAutoFocus: (event: Event) => void;
 }) {
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
   const [focusWithin, setFocusWithin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const showOverflow = hoverNone || hovered || focusWithin || menuOpen;
-  const destination = item.destination.handle
-    ? `${item.destination.text} ${item.destination.handle}`
-    : item.destination.text;
 
   const onFocus = (event: FocusEvent<HTMLLIElement>) => {
     if (
@@ -86,7 +109,7 @@ function DraftRow({
     >
       <Link
         to={channelPathForDraft(item.channelId)}
-        aria-label={`${destination} 초안 이어서 쓰기`}
+        aria-describedby={DRAFT_ROW_HINT_ID}
         className="flex gap-3 py-2 pl-4 pr-8 focus-visible:focus-ring"
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
@@ -124,11 +147,7 @@ function DraftRow({
         </span>
       </Link>
       {showOverflow ? (
-        <div
-          role="toolbar"
-          aria-label="초안 메뉴"
-          className="absolute right-2 top-2"
-        >
+        <div className={overflowBowlClass}>
           <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
             <DropdownMenuTrigger asChild>
               <button
@@ -136,17 +155,21 @@ function DraftRow({
                 aria-label="초안 메뉴"
                 title="초안 메뉴"
                 data-testid="draft-row-menu"
-                className="tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring data-[state=open]:bg-surface-hover"
+                className={overflowTriggerClass}
               >
                 <MoreHorizontal className="size-4" aria-hidden="true" />
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" data-testid="draft-row-menu-panel">
+            <DropdownMenuContent
+              align="end"
+              data-testid="draft-row-menu-panel"
+              onCloseAutoFocus={onCloseAutoFocus}
+            >
               <DropdownMenuItem
                 tone="danger"
                 data-testid="draft-row-delete"
                 onSelect={() => {
-                  clearDraft(item.workspaceId, item.channelId);
+                  onDelete(item);
                 }}
               >
                 <Trash2 className="size-4" aria-hidden="true" />
@@ -164,16 +187,74 @@ export function DraftsRoute() {
   const panel = useDraftsPanel();
   const offline = useOffline();
   const nowMs = Date.now();
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const emptyRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLUListElement>(null);
+  const pendingLandingRef = useRef<string | "empty" | null>(null);
+  const skipTriggerRestoreRef = useRef(false);
+  const itemsRef = useRef(panel.items);
+  itemsRef.current = panel.items;
+
+  const placePendingFocus = () => {
+    const landing = pendingLandingRef.current;
+    if (landing == null) return;
+    pendingLandingRef.current = null;
+    if (landing === "empty") {
+      emptyRef.current?.focus();
+      if (document.activeElement !== emptyRef.current) {
+        headingRef.current?.focus();
+      }
+      return;
+    }
+    const link = draftRowLink(listRef.current, landing);
+    if (link !== null) {
+      link.focus();
+      return;
+    }
+    headingRef.current?.focus();
+  };
+
+  const onDelete = (item: DraftViewItem) => {
+    const items = itemsRef.current;
+    const index = items.findIndex((row) => row.channelId === item.channelId);
+    const neighbor = items[index + 1] ?? items[index - 1] ?? null;
+    pendingLandingRef.current = neighbor?.channelId ?? "empty";
+    skipTriggerRestoreRef.current = true;
+    clearDraft(item.workspaceId, item.channelId);
+    window.setTimeout(placePendingFocus, 0);
+  };
+
+  const onCloseAutoFocus = (event: Event) => {
+    if (!skipTriggerRestoreRef.current) return;
+    skipTriggerRestoreRef.current = false;
+    event.preventDefault();
+    placePendingFocus();
+  };
+
+  useLayoutEffect(() => {
+    if (pendingLandingRef.current == null) return;
+    placePendingFocus();
+  }, [panel.items]);
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="drafts-route">
       <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <SidebarDrawerToggle />
-          <h1 className="text-body font-semibold">초안</h1>
+          <h1
+            ref={headingRef}
+            tabIndex={-1}
+            data-testid="drafts-heading"
+            className="text-body font-semibold focus-visible:focus-ring"
+          >
+            초안
+          </h1>
         </div>
         <span className="text-meta text-ink-muted">이 기기에 쓰다 만 글</span>
       </header>
+      <span id={DRAFT_ROW_HINT_ID} className="sr-only">
+        초안 이어서 쓰기
+      </span>
 
       {offline && (
         <InlineBanner
@@ -194,18 +275,26 @@ export function DraftsRoute() {
             testId="drafts-error"
           />
         ) : panel.items.length === 0 ? (
-          <EmptyInvite
-            headline="아직 초안이 없습니다."
-            detail="쓰다 만 글은 자동으로 저장됩니다."
-            testId="drafts-empty"
-          />
+          <div
+            ref={emptyRef}
+            tabIndex={-1}
+            data-testid="drafts-empty"
+            className="focus-visible:focus-ring"
+          >
+            <EmptyInvite
+              headline="아직 초안이 없습니다."
+              detail="쓰다 만 글은 자동으로 저장됩니다."
+            />
+          </div>
         ) : (
-          <ul data-testid="drafts-list">
+          <ul ref={listRef} data-testid="drafts-list">
             {panel.items.map((item) => (
               <DraftRow
                 key={`${item.workspaceId}:${item.channelId}`}
                 item={item}
                 nowMs={nowMs}
+                onDelete={onDelete}
+                onCloseAutoFocus={onCloseAutoFocus}
               />
             ))}
           </ul>
