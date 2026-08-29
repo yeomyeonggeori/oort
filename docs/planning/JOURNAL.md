@@ -2805,3 +2805,16 @@
 - **테스트 실적**: **S4 5/5 PASS**(편차 기록: 단일 메시지 GET=라우트 부재 404 — 런시트 403 기대 오기, 시트 초판 body shape 결함 자기 수정) · **S1-lite PASS**(livekit-client 하네스+playwright 2컨텍스트 상호 오디오 바이트 실측) · **결함 B B-1 실증**: 기본 구성 동형 재현(PC 연결 실패) → `rtc.node_ip` 한 줄로 즉시 연결 — 대조 실험으로 "advertise IP=병인" 증명(#1856 코멘트) · **UI 워크스루**(Fable 직접): 발행 번들 로그인·명부·S4 게시물 렌더·**허들 2자 실 UI**(Live 배지·참가자 상호 표시) + 역할 UI(dev번들×v0.1.3 서버 — 강등→명부 반영→복원·self 게이트). 증거 4본 `claudedocs/comprehensive-test-20260828/`.
 - **#1856a 랜딩**(PR #1859→track/engine): livekit `MOMO_LIVEKIT_NODE_IP` 노브(빈 값=자동 감지 현행 유지)·생성 env 기본 127.0.0.1·기존 env 소급 주입 금지(LAN 오광고 방지 사유 명문)·게이트 신설(test_livekit_node_ip: compose render+entrypoint argv+실이미지 부팅 --node-ip≡rtc.node_ip). **정책 무결성 감사 제도 이행**: local_gate 1줄 추가로 게이트 발동 → momo-main 실감사 코멘트(Policy-Integrity-Audit)+라벨 → 그린. 게이트 2본 오케스트레이터 직접 재실행 PASS.
 - **가동/큐**: #1857 워커 진행 중 → #1858 → 성재 UXUI 피드백 티켓들(상시 순차 발사 위임). 보류: S2·S3·VM축(그록봇 복구 대기). 잔여 정리: infra/livekit.yaml 워킹트리 실험 수정(#1859 노브로 이행 예정).
+
+## 2026-08-29 · Fable · BZ 시리즈 1차 파도 — 성재 대량 피드백 티켓화·5랜딩·grok 레인 전환·ADR-0174 기안
+- **인테이크**: 성재 검수 피드백(스크린샷 14종 — buzz 대비 UXUI 전반) 전량 티켓화 → BZ 시리즈 #1864~#1869 + 파생 #1873(rename REST)·#1876(폰 컴포저 윤곽)·#1600 좌표. buzz = Block 오픈소스(**Apache-2.0**, github.com/block/buzz) 확인 후 `~/projects/reference/buzz` 클론 — 워커 브리프마다 참조 경로 제공.
+- **워커 레인 전환(성재 지시)**: BZ-1은 cursor로 마감, 이후 전부 **grok build CLI grok-4.6**(`--permission-mode bypassPermissions`, 병렬 2 실증 — cursor와 인증 분리라 무충돌). grok 레인 첫 구현부터 정본 동기·레인 자가 실행을 스스로 수행하는 결 확인.
+- **랜딩 5건(각 design-review 2회전 폐곡선)**:
+  - **BZ-1 #1864→PR#1870**: 사이드바 접기 — 토글 타이틀바 고정·접힘 hidden+inert·모션 토큰 1호(--duration-sidebar, 정본 §2.6/§7 동기)·Tauri Overlay. R1 FAIL(증거 기계 2블로커: 캡처 레인 사망·게이트 자 불일치) → R2 PASS.
+  - **BZ-6a #1869→PR#1871**: 온보딩 3스텝 셸 + S0 오르트 랜딩("오르트 구름을 지나 들어온다" — 딥스페이스 단일 룩·산포 필드 30개체·마우스 반발·OortMark 궤도 드로잉·buzz 동형 전환 650/760ms). 선제 레인 정합(런 2) → R1 H2(카드 정렬·오류 복귀)+M3 → R2 전항 실측 PASS. 후속: 409 signIn 분기·폰 패리티 등재.
+  - **BZ-2 #1865→PR#1872**: 채널 헤더 1줄(토픽→⋮)+라운드 컨트롤 그룹. R1 FAIL(B1 390×라이브 겹침 — 상시 Blocker·H3) → 수리(flex 축소·Button 프리미티브·칩 ok-soft 채움·useRestoreFocusOnClose로 플레이키 게이트 12/12) → R2 PASS. gate:huddle 390×라이브 축 신설. 후속 Medium(390 칩 클립) 등재.
+  - **BZ-4e #1873→PR#1875(engine)**: PATCH members/me displayName — join 정규화 재사용·단일 쓰기경로·프레즌스 동형 outbox·conformance 4/4·ENGINE_HANDOFF A-40 등재.
+  - **BZ-3 #1866→PR#1874**: 라이트 --line 완화(--line-strong 3.03:1 실측 유지)·텍스트 입력 그릇 3종 focus-visible-within+모달리티 스탬프(마우스 무링·Tab 링). R1 H1(정본 일반문 vs 터미널 잔량) → 터미널 동일 변형 → R2 PASS(재발 가드 3그릇).
+- **온보딩 기획**: buzz 온보딩 실코드 전독(`research/2026-08-29-buzz-onboarding-research.md`) — 에셋=로고 1장 12KB뿐, 화려함 전부 코드(SVG 산포+CSS+rAF), 절정=웰컴 채널 에이전트 킥오프. 설계 v2.1(`bz6-onboarding-design.md`): Dawn 면 제거→오르트 우주 서사(성재 지시), grok imagine·meshy 불요 확정(지출 0), 투어 카드 폐기→김인턴 킥오프.
+- **ADR-0174 Proposed**(BZ-5 선행): 외양 커스터마이제이션 — 의미 토큰 불변·바인딩 층만 사용자 설정, v1 축(컬러 모드·큐레이션 액센트·폰트·밀도·라이브 프리뷰, 글래스 제외), 이-기기 저장, 기본=Dawn·온보딩 영향권 밖, 게이트 재정의(사전 검증 테마 허용 목록). **성재 확정 3점 대기**.
+- **가동/큐**: BZ-4(#1867 설정 전면+Profile, A-40 배선) 진행 중 → ADR 결재 후 BZ-5a → BZ-6b/6c. 검수 앱 재빌드 1회(BZ-1+6a 시점, 469f7c90) — BZ-4 랜딩 후 재빌드 예정. 교훈: 워크트리 회수는 PR 머지 확인 후(BZ-3에서 성급 회수→재생성 비용).
