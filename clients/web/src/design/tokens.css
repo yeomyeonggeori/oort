@@ -1814,7 +1814,16 @@
 
 .onboarding-landing {
   color-scheme: dark;
+  /* Fill the App slot (`main.tsx` flex-1 after PwaBanner). min-height: 100%
+     on the landing alone is 0 when the slide wrappers' height is auto. */
+  height: 100%;
   min-height: 100%;
+}
+
+.onboarding-slide:has(.onboarding-landing),
+.onboarding-slide:has(.onboarding-landing) .onboarding-transition-line,
+.onboarding-slide:has(.onboarding-landing) .onboarding-transition-content {
+  height: 100%;
 }
 
 .onboarding-mark {
@@ -1834,8 +1843,8 @@
   width: var(--onboarding-body-size);
   color: var(--onboarding-ink-faint);
   transform: translate(
-      var(--onboarding-wander-x, 0px),
-      var(--onboarding-wander-y, 0px)
+      calc(-50% + var(--onboarding-wander-x, 0px)),
+      calc(-50% + var(--onboarding-wander-y, 0px))
     )
     rotate(var(--onboarding-body-rotate, 0deg));
   animation: onboarding-twinkle 3.8s ease-in-out infinite;
@@ -2044,8 +2053,18 @@
     animation: none;
     filter: none;
     opacity: 1;
-    transform: none;
     will-change: auto;
+  }
+
+  .onboarding-mark,
+  .onboarding-transition-content {
+    transform: none;
+  }
+
+  /* Static pose stays; only wander/twinkle die. transform:none here would
+     also drop --onboarding-body-rotate and leave edge glyphs uncentered. */
+  .onboarding-cloud-body {
+    transform: translate(-50%, -50%) rotate(var(--onboarding-body-rotate, 0deg));
   }
 
   .onboarding-mark svg path:nth-of-type(2) {

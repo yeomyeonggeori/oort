@@ -3,7 +3,8 @@
 ## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)
 
 - ConnectPage를 S0 랜딩(단일 룩 딥스페이스 + OortMark 궤도 드로잉 + 산포 필드 + 2택) / S1 서버·초대 / S2 계정으로 감쌌다. 로그인·join·서버 검증·`momo.web.server.v1` 의미론은 기존 재사용. 저장 서버 또는 `/join?code=` 프리필이면 S0 생략.
-- red proof: S0 마크·30 산포·reduced-motion rAF 미기동, 2택→S1→S2·뒤로·2/3·3/3, 저장 서버 스킵, 딥링크 코드 경로, 스텝 뒤 login/join 호출. design-review는 오케스트레이터 이월.
+- capture/e2e/게이트 레인이 S0를 첫 페인트로 통과한다: `advanceToAccount`가 S0→S1→S2를 걷고, `capture:design`은 S0 프레임을 찍는다. 산포 글리프는 위치 중심(`translate(-50%,-50%)`)이고, 랜딩은 PWA 배너 아래 App 슬롯을 `height: 100%`로 채워 뷰포트 바닥에 2택이 앉는다.
+- red proof: S0 마크·30 산포·reduced-motion rAF 미기동, 2택→S1→S2·뒤로·2/3·3/3, 저장 서버 스킵, 딥링크 코드 경로, 스텝 뒤 login/join 호출. `capture:design`이 S0에서 `login-submit` 30s 타임아웃 → S0 프레임 후 S2 도달. design-review는 오케스트레이터 이월.
 
 ## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
 

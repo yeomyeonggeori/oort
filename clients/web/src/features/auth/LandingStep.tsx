@@ -28,7 +28,7 @@ export function LandingStep({
       <div className="relative flex flex-col items-center gap-3 p-6">
         <button
           type="button"
-          className="tap-target onboarding-focus-on-fill h-control-lg w-full max-w-sm rounded-sm bg-onboarding-accent px-4 text-body font-medium text-onboarding-on-accent focus-visible:focus-ring"
+          className="tap-target onboarding-focus-on-fill inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm bg-onboarding-accent px-4 text-body font-medium text-onboarding-on-accent focus-visible:focus-ring"
           data-testid="onboarding-choose-server"
           onClick={onChooseServer}
         >
@@ -36,7 +36,7 @@ export function LandingStep({
         </button>
         <button
           type="button"
-          className="tap-target onboarding-focus h-control-lg w-full max-w-sm rounded-sm border border-onboarding-line bg-transparent px-4 text-body font-medium text-onboarding-ink focus-visible:focus-ring"
+          className="tap-target onboarding-focus inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm border border-onboarding-line bg-transparent px-4 text-body font-medium text-onboarding-ink focus-visible:focus-ring"
           data-testid="onboarding-choose-invite"
           onClick={onChooseInvite}
         >
