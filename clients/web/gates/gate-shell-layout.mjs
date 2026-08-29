@@ -593,10 +593,14 @@ async function installMocks(context) {
  *  Search header (p-2 + control-sm + hairline) sits at 45. The titlebar
  *  (`h-control-lg`, border-box) adds 40 (#1864). */
 const NAV_RESTING_TOP = 85;
+/** Settings replaces the titlebar, so the section list rests at y=0. */
+const SETTINGS_NAV_RESTING_TOP = 0;
+const SETTINGS_NAV_PHONE_CAP = 308;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
   const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+  const settingsNav = document.querySelector('[data-testid="settings-nav"]');
   const shell = document.querySelector(".app-shell");
   return {
     docOverflowY: doc.scrollHeight - doc.clientHeight,
@@ -605,6 +609,11 @@ const SHELL_METRICS = `(() => {
     shellScrollTop: shell ? shell.scrollTop : null,
     shellHeight: shell ? Math.round(shell.getBoundingClientRect().height) : null,
     navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+    settingsSurface: shell?.hasAttribute("data-settings-surface") === true,
+    appNavHidden: !nav || nav.getClientRects().length === 0,
+    settingsNavTop: settingsNav
+      ? Math.round(settingsNav.getBoundingClientRect().top)
+      : null,
     viewportHeight: window.innerHeight,
   };
 })()`;
@@ -622,13 +631,18 @@ async function assertShellHeld(page, label, shotName) {
   await page.evaluate("window.scrollTo(0, 99999)");
   await page.waitForTimeout(150);
   const m = await page.evaluate(SHELL_METRICS);
-  const ok =
+  const held =
     m.docOverflowY === 0 &&
     m.docOverflowX === 0 &&
     m.docScrollY === 0 &&
     m.shellScrollTop === 0 &&
-    m.navTop === NAV_RESTING_TOP &&
     m.shellHeight === m.viewportHeight;
+  const ok = label.includes("설정")
+    ? held &&
+      m.settingsSurface === true &&
+      m.appNavHidden === true &&
+      m.settingsNavTop === SETTINGS_NAV_RESTING_TOP
+    : held && m.navTop === NAV_RESTING_TOP;
   check(label, ok, JSON.stringify(m));
   if (shotName) await page.screenshot({ path: `${OUT_DIR}/${shotName}.png` });
 }
@@ -1217,6 +1231,168 @@ async function assertPluginScopeConsent(page, size) {
   }
 }
 
+async function pressOpenSettings(page) {
+  await page.evaluate(`(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ",",
+      code: "Comma",
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      bubbles: true,
+      cancelable: true,
+    }));
+  })()`);
+}
+
+/**
+ * #1867 H-1 / M-1 / M-4. Settings is a full-surface swap, so these have to be
+ * measured on the live tree: ⌘, must not stack history, the phone nav cap must
+ * peek the next row, entry focus lands on the current section, and back returns
+ * the caret to the control that opened settings.
+ */
+async function measureSettingsSurface(browser) {
+  const desktop = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    colorScheme: SCHEME,
+    reducedMotion: "reduce",
+  });
+  await installMocks(desktop);
+  const page = await desktop.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("composer-input").focus();
+  await waitForPageCondition(
+    page,
+    'document.activeElement?.getAttribute("data-testid") === "composer-input"'
+  );
+  const beforeHash = await page.evaluate("location.hash");
+  await pressOpenSettings(page);
+  await waitForPageCondition(
+    page,
+    'Boolean(document.querySelector(\'[data-testid="settings-route"]\')) && document.activeElement?.getAttribute("data-testid") === "settings-nav-profile"'
+  );
+  const entered = await page.evaluate(`(() => ({
+    hash: location.hash,
+    focus: document.activeElement?.getAttribute("data-testid"),
+    settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+  }))()`);
+  check(
+    "설정 진입 시 포커스가 현재 섹션 버튼으로 간다",
+    entered.settings === true &&
+      entered.hash.includes("/settings") &&
+      entered.focus === "settings-nav-profile",
+    JSON.stringify(entered)
+  );
+  await pressOpenSettings(page);
+  await page.waitForTimeout(200);
+  await page.getByTestId("settings-back-to-app").click();
+  await waitForPageCondition(
+    page,
+    'document.querySelector(\'[data-testid="composer-input"]\') && document.activeElement?.getAttribute("data-testid") === "composer-input"'
+  );
+  const returned = await page.evaluate(`(() => ({
+    hash: location.hash,
+    focus: document.activeElement?.getAttribute("data-testid"),
+    settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+  }))()`);
+  check(
+    "⌘, 재입력은 히스토리를 겹쌓지 않고 돌아가기 한 번에 이전 포커스로 복귀한다",
+    returned.settings === false &&
+      returned.hash === beforeHash &&
+      returned.focus === "composer-input",
+    JSON.stringify({ beforeHash, entered, returned })
+  );
+  await page.screenshot({ path: `${OUT_DIR}/settings-focus-return.png` });
+
+  await go(page, "/settings?section=events");
+  await waitForPageCondition(
+    page,
+    'document.activeElement?.getAttribute("data-testid") === "settings-nav-events"'
+  );
+  const deep = await page.evaluate(`(() => ({
+    focus: document.activeElement?.getAttribute("data-testid"),
+    current: document.querySelector('[data-testid="settings-nav-events"]')?.getAttribute("aria-current"),
+  }))()`);
+  check(
+    "딥링크 진입 시 포커스가 그 섹션 버튼으로 간다",
+    deep.focus === "settings-nav-events" && deep.current === "page",
+    JSON.stringify(deep)
+  );
+  await desktop.close();
+
+  const phone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    colorScheme: SCHEME,
+    reducedMotion: "reduce",
+  });
+  await installMocks(phone);
+  const mobile = await phone.newPage();
+  await mobile.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(mobile);
+  await go(mobile, "/settings?section=profile");
+  const cap = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    if (!nav) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const items = [...nav.querySelectorAll('[data-testid^="settings-nav-"]')];
+    const vis = items.map((el) => {
+      const r = el.getBoundingClientRect();
+      const visible = Math.min(r.bottom, nr.bottom) - Math.max(r.top, nr.top);
+      return {
+        id: el.getAttribute("data-testid"),
+        h: Math.round(r.height),
+        vis: Math.round(Math.max(0, visible)),
+      };
+    });
+    return {
+      top: Math.round(nr.top),
+      height: Math.round(nr.height),
+      maxHeight: getComputedStyle(nav).maxBlockSize,
+      full: vis.filter((v) => v.vis >= v.h - 1 && v.vis > 0).map((v) => v.id),
+      peek: vis.filter((v) => v.vis > 8 && v.vis < v.h - 8).map((v) => v.id),
+      hidden: vis.filter((v) => v.vis <= 8).map((v) => v.id),
+      rows: vis,
+    };
+  })()`);
+  check(
+    "390px 설정 목록 캡이 다음 행을 반쯤 보여 주고 상단 y가 실값이다",
+    cap.missing !== true &&
+      cap.top === SETTINGS_NAV_RESTING_TOP &&
+      cap.height === SETTINGS_NAV_PHONE_CAP &&
+      cap.maxHeight === `${SETTINGS_NAV_PHONE_CAP}px` &&
+      cap.full.length >= 4 &&
+      cap.peek.length >= 1 &&
+      cap.hidden.length >= 1,
+    JSON.stringify(cap)
+  );
+  await mobile.getByTestId("settings-nav-events").click();
+  const scrolled = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    const el = document.querySelector('[data-testid="settings-nav-events"]');
+    if (!nav || !el) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      focus: document.activeElement?.getAttribute("data-testid"),
+      fully: r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      current: el.getAttribute("aria-current"),
+    };
+  })()`);
+  check(
+    "390px에서 고른 설정 섹션이 목록 안으로 스크롤된다",
+    scrolled.missing !== true &&
+      scrolled.focus === "settings-nav-events" &&
+      scrolled.fully === true &&
+      scrolled.current === "page",
+    JSON.stringify(scrolled)
+  );
+  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-cap.png` });
+  await phone.close();
+}
+
 async function measureSize(browser, size) {
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
@@ -1251,6 +1427,7 @@ async function measureSize(browser, size) {
     ["/inbox", "인박스", "inbox"],
     ["/activity", "활동", "activity"],
     ["/directory", "멤버 디렉터리", "directory"],
+    ["/settings?section=profile", "설정 프로필", "settings-profile"],
     ["/settings?section=account", "설정 계정", "settings-account"],
     ["/settings?section=members", "설정 멤버와 초대", "settings-members"],
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
@@ -1303,11 +1480,15 @@ async function measureSize(browser, size) {
       const r = btn.getBoundingClientRect();
       const shell = document.querySelector(".app-shell");
       const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+      const settingsNav = document.querySelector('[data-testid="settings-nav"]');
+      const shellEl = document.querySelector(".app-shell");
       return {
         reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
         shellScrollTop: shell ? shell.scrollTop : null,
         docScrollY: Math.round(window.scrollY),
         navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+        settingsSurface: shellEl?.hasAttribute("data-settings-surface") === true,
+        settingsNavPresent: Boolean(settingsNav),
       };
     })()`);
     check(
@@ -1315,7 +1496,8 @@ async function measureSize(browser, size) {
       reach.reached === true &&
         reach.shellScrollTop === 0 &&
         reach.docScrollY === 0 &&
-        reach.navTop === NAV_RESTING_TOP,
+        reach.settingsSurface === true &&
+        reach.settingsNavPresent === true,
       JSON.stringify(reach)
     );
     await page.screenshot({ path: `${OUT_DIR}/${size.name}-${shot}.png` });
@@ -1648,6 +1830,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       for (const size of SIZES) await measureSize(browser, size);
+      await measureSettingsSurface(browser);
       await measureSidebarDrawerIndependence(browser);
       if (!FOCUS_ONLY) {
         await measureTimeline(browser);

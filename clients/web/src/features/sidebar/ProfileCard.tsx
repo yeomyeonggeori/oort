@@ -5,6 +5,7 @@ import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
 import { presenceTriggerLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
+import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { Button } from "@/design/ui/button";
 import {
   Dialog,
@@ -132,7 +133,15 @@ export function ProfileCard({
           <DropdownMenuItem
             data-testid="nav-settings"
             title="설정 (⌘,)"
-            onSelect={() => navigate("/settings")}
+            onSelect={() => {
+              rememberSettingsOpener(
+                triggerRef.current ??
+                  document.querySelector<HTMLElement>(
+                    '[data-testid="profile-card"]'
+                  )
+              );
+              navigate("/settings");
+            }}
           >
             <Settings className="size-4" aria-hidden="true" />
             설정

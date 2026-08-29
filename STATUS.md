@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## BZ-4 설정 전면 페이지 + Profile (#1867, 2026-08-29)
+
+- `/settings` 진입 시 앱 사이드바·타이틀바를 설정 전용 레이아웃으로 대체한다. 좌측 섹션 사이드바(개인/워크스페이스/연결, 기존 섹션 명칭과 **그룹 내** 상대 순서 유지) + 「앱으로 돌아가기」. 기존 섹션 컴포넌트는 재사용.
+- Profile 섹션(개인 그룹 최상단): 아바타 현행 표시, 표시 이름 `changeMyDisplayName` PATCH 1회, 빈 이름 400은 한국어 다음 행동("표시 이름을 비울 수 없습니다…")으로 매핑하고 와이어 영어는 화면에 두지 않음. 성공 시 roster invalidate + 세션 멤버 교체(낙관 갱신 없음). 핸들은 읽기 전용.
+- design-review 수리 (#1880): 이미 `/settings`면 ⌘, no-op(히스토리 겹쌓임 없음, H-1), 전면 전환 포커스 진입/복귀(M-4), 폰 목록 캡 `--spacing-settings-nav` 308 + 선택 항목 scrollIntoView(M-1).
+- red proof: web vitest·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell. 통합 테스트는 PATCH 모킹(track/uxui에 #1873 서버 표면 미포함).
+
 ## BZ-3 라이트 보더·컴포저 포커스 (#1866, 2026-08-29)
 
 - 라이트 `--line`을 `#dcd8d0` → `#e4e0d8`로 한 단계 옅게. `--line-strong`은 라이트 `--surface-hover` 위 3.03:1이라 RGB +1이 2.99로 3:1이 깨져 그대로(다크 무접촉).

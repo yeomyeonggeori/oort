@@ -139,6 +139,7 @@ function sessionValue(
     realtime: null,
     connStatus,
     logout: () => undefined,
+    replaceSessionMember: () => undefined,
   };
 }
 

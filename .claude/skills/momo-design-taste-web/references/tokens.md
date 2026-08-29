@@ -329,7 +329,7 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
-compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
+compile: `w-pane-sm` 192px (mention and dropdown lists; a **width** floor),
 `w-pane` / `max-h-pane` 320px (thread panel, command list), `w-pane-picker` 384px
 (emoji picker popover, #1742, inside the 340-440 band), `max-w-pane-md`
 512px (the overlay measure: dialog panel and ⌘K palette), `max-w-pane-lg` 640px
@@ -343,6 +343,11 @@ new surface could still take an unnamed dimension. The dialog and the palette
 both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
 token file had never heard of the measure the two overlays share. They alternate
 at the same anchor, so it is one measure and it gets one name.
+
+`--spacing-settings-nav` 308px is the phone **height** cap of the settings
+section list (#1867 M-1). It is not a pane: borrowing `pane-sm` as max-block-size
+showed four of fourteen rows with no peek of the next. The number is this
+surface's row rhythm (tap-target 44 + chrome) so the fifth row is half visible.
 
 Body caps are a fifth axis: `max-h-diff-body` 400px (MOMO-620), the height a
 diff scrolls inside its card. It is not a pane (a pane is a width) and the rhythm

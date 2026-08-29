@@ -484,6 +484,7 @@ export function SaveButton({
   busy,
   onSave,
   testId,
+  size = "sm",
 }: {
   /** Verb-first and scope-bearing: two blocks on one panel need two names. */
   label: string;
@@ -492,11 +493,16 @@ export function SaveButton({
   busy?: boolean;
   onSave: () => void;
   testId?: string;
+  /**
+   * Profile's display-name save is a form primary (goal P3): `default` grows
+   * to 44px under 600px. Other settings saves stay `sm`.
+   */
+  size?: "sm" | "default";
 }) {
   return (
     <Button
       type="submit"
-      size="sm"
+      size={size}
       aria-disabled={!canSave || undefined}
       aria-busy={busy || undefined}
       className={cn(!canSave && "opacity-50")}

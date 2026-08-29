@@ -392,6 +392,25 @@
    * 단계가 아니다. */
   --spacing-pane-picker: 384px;
 
+  /* 설정 섹션 목록의 폰 높이 캡 (#1867 design-review M-1).
+   *
+   * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·
+   * 부차 패널이 양보할 때의 폭). 앞 판이 그 값을 이 목록의 max-block-size 로
+   * 빌려 썼고, 14개 행 리듬에서 4행만 보이며 다음 행의 스크롤 단서가 없었다.
+   * 축을 빌려 쓰지 않는다.
+   *
+   * 값은 이 표면의 행 리듬에서 나온다 (width < 600px, tap-target 44):
+   *   p-2 상하 16
+   *   「앱으로 돌아가기」 44 + 그 아래 pb-3 12
+   *   첫 그룹 라벨 18 (text-meta 1.125rem) + gap-1 4
+   *   개인 4행 (44×4 + gap-1×3 = 188)
+   *   넷째와 다섯째 사이 gap-1 4 + 다섯째 행의 절반 22
+   *   --------------------------------
+   *   308
+   * 다섯째가 반쯤 보여야 목록이 이어진다는 단서가 된다. 유틸 `settings-nav` 가
+   * 600px 미만에서만 이 값을 max-block-size 로 든다. */
+  --spacing-settings-nav: 308px;
+
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
    * 있다: pane 은 부차 표면이 **가져가는** 폭이고, 이것은 부차 표면이 옆에 설 때
    * **남겨야 하는** 폭이다. 빌려 쓰면 축이 섞인다.
@@ -808,6 +827,19 @@
     }
   }
 
+  /* 설정 전면 (#1867). 앱 사이드바·타이틀바 대신 설정 전용 열이 창을 채운다.
+   * 전환은 라우트가 맡고, 여기 그리드는 즉시 한 칸이 된다. */
+  &[data-settings-surface] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    transition: none;
+
+    > main {
+      grid-row: 1;
+      grid-column: 1;
+    }
+  }
+
   /* 폰 (B6). 240px 열은 390px 화면의 62%를 남기고, 그 남은 150px 안에 채널
    * 제목·타임라인·컴포저가 전부 들어가야 했다(성재 iPhone 실캡처). 그래서 이
    * 폭에서는 사이드바가 행을 나눠 갖지 않는다: 격자는 한 열이 되고 사이드바는
@@ -1142,9 +1174,9 @@
   }
 }
 
-/* 설정의 두 열 (B6). agent-hub-layout과 같은 성질의 표면이라 같은 답을 쓴다:
- * 192px 섹션 목록이 390px 폰에서 본문에 198px만 남기므로, 그 폭에서는 목록이
- * 본문 위로 올라가 가로로 눕는다. 넓은 창은 그대로 두 열이다. */
+/* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
+ * `--w-sidebar`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
+ * 본문 위로 올라가 가로로 눕는다. */
 @utility settings-layout {
   display: flex;
   min-block-size: 0;
@@ -1156,14 +1188,14 @@
 }
 
 @utility settings-nav {
-  inline-size: var(--spacing-pane-sm);
+  inline-size: var(--w-sidebar);
   flex-shrink: 0;
   overflow-y: auto;
   border-inline-end: 1px solid var(--line);
 
   @media (width < 600px) {
     inline-size: auto;
-    max-block-size: var(--spacing-pane-sm);
+    max-block-size: var(--spacing-settings-nav);
     border-inline-end: 0;
     border-block-end: 1px solid var(--line);
   }

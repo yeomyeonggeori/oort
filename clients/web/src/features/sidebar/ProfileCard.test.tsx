@@ -105,6 +105,7 @@ function sessionValue(logout: () => void): SessionContextValue {
     realtime: null,
     connStatus: "connected",
     logout,
+    replaceSessionMember: () => undefined,
   };
 }
 
