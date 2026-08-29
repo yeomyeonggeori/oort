@@ -1088,6 +1088,16 @@
   }
 }
 
+/* BF-A2 M-3: 상·하단 점프 필. 포인터는 28px(`h-control-sm`), 손가락은 44px.
+ * 문턱은 `tap-target`의 폭이 아니라 `hover: none` — 이 필은 자기 줄을 갖는
+ * 1급 컨트롤이라 `--touch-target`(24)이 아니라 `--tap-target`(44)이다.
+ * 폭 600 미만은 위 `tap-target` 유틸이 같은 수를 판다. */
+@media (hover: none) {
+  [data-unread-pill] {
+    min-block-size: var(--tap-target);
+  }
+}
+
 /* 24px 최소 타깃, hover가 없는 기기에서만 (design-review U4-5 M-1).
  *
  * 문턱이 `tap-target`과 다르다. 그쪽은 폭(`width < 600px`)으로 가르고 이쪽은

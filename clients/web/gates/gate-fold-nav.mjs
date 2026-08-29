@@ -721,10 +721,24 @@ async function exercisePointer(browser) {
         "그 행의 시각으로 가는 길이 없다 (리뷰 W-4)"
     );
   }
-  if (actionableStop !== null) {
+  // #1743 W-4: actionable rest 정거장도 행 자신이다. 자식 액션은 -1이라 행당
+  // 탭 스톱은 하나. 예전 단정(행에 tabindex가 있으면 실패)은 ⋯가 rest이던
+  // 시절의 것이고, 필 착지(M-2)가 그 정거장으로 포커스를 옮긴다.
+  if (actionableStop !== "0") {
     throw new Error(
-      `컨트롤이 있는 행까지 정거장을 얻었다 (tabindex=${actionableStop}): 행 하나가 ` +
-        "키보드에 청구하는 값이 둘이 됐다 (rowFocus.ts)"
+      `컨트롤이 있는 행의 rest 정거장이 행이 아니다 (tabindex=${actionableStop}): ` +
+        "actionable rest는 행 자신이다 (rowFocus.ts, #1743 W-4)"
+    );
+  }
+  const extraStops = await rowLocator(page, CONT_MSG).evaluate((row) =>
+    Array.from(row.querySelectorAll("[data-row-action]")).filter(
+      (el) => el.tabIndex >= 0
+    ).length
+  );
+  if (extraStops !== 0) {
+    throw new Error(
+      `컨트롤이 있는 행이 행 말고도 탭 스톱 ${extraStops}개를 더 청구한다: ` +
+        "행 하나가 키보드에 청구하는 값이 둘이 됐다 (rowFocus.ts)"
     );
   }
   // 그 정거장이 실제로 시각을 연다.
