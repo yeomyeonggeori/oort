@@ -4,6 +4,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  DESKTOP_NOTIFICATION_DEFAULT_DETAIL,
   DESKTOP_NOTIFICATION_DENIED_MESSAGE,
   DESKTOP_NOTIFICATION_ENABLE_LABEL,
   DESKTOP_NOTIFICATION_GRANTED_LABEL,
@@ -70,7 +71,7 @@ function mount(tree: ReactElement): HTMLElement {
 }
 
 describe("DesktopNotificationPermissionPanel", () => {
-  it("shows 켜짐 when permission is granted", () => {
+  it("shows 켜짐 in an --ok-soft vessel when permission is granted", () => {
     const host = mount(
       createElement(DesktopNotificationPermissionPanel, {
         permission: "granted",
@@ -82,13 +83,22 @@ describe("DesktopNotificationPermissionPanel", () => {
       '[data-testid="desktop-notifications-permission"]'
     );
     expect(panel?.getAttribute("data-state")).toBe("granted");
-    expect(panel?.textContent).toContain(DESKTOP_NOTIFICATION_GRANTED_LABEL);
+    const status = host.querySelector(
+      '[data-testid="desktop-notifications-granted"]'
+    );
+    expect(status?.getAttribute("role")).toBe("status");
+    expect(status?.textContent).toContain(DESKTOP_NOTIFICATION_GRANTED_LABEL);
+    const chip = host.querySelector(
+      '[data-testid="desktop-notifications-granted-chip"]'
+    );
+    expect(chip?.className).toContain("bg-ok-soft");
+    expect(chip?.className).not.toContain("border-ok");
     expect(
       host.querySelector('[data-testid="desktop-notifications-enable"]')
     ).toBeNull();
   });
 
-  it("shows 알림 켜기, then 요청 중, while default", () => {
+  it("shows 알림 켜기 as an intrinsic-width row button, then 요청 중", () => {
     const onRequest = vi.fn();
     const host = mount(
       createElement(DesktopNotificationPermissionPanel, {
@@ -97,10 +107,15 @@ describe("DesktopNotificationPermissionPanel", () => {
         onRequest,
       })
     );
+    expect(host.textContent).toContain(DESKTOP_NOTIFICATION_DEFAULT_DETAIL);
+    expect(host.textContent).not.toContain("밖으로");
     const button = host.querySelector(
       '[data-testid="desktop-notifications-enable"]'
     ) as HTMLButtonElement;
     expect(button.textContent).toBe(DESKTOP_NOTIFICATION_ENABLE_LABEL);
+    expect(button.parentElement?.className).toContain("flex-wrap");
+    expect(button.parentElement?.className).toContain("items-center");
+    expect(button.className).not.toContain("w-full");
     act(() => button.click());
     expect(onRequest).toHaveBeenCalledTimes(1);
 
@@ -120,7 +135,7 @@ describe("DesktopNotificationPermissionPanel", () => {
     expect(busy.getAttribute("aria-busy")).toBe("true");
   });
 
-  it("shows the browser-settings banner when denied", () => {
+  it("shows the macOS notification-settings sentence when denied", () => {
     const host = mount(
       createElement(DesktopNotificationPermissionPanel, {
         permission: "denied",
@@ -137,6 +152,9 @@ describe("DesktopNotificationPermissionPanel", () => {
       host.querySelector('[data-testid="desktop-notifications-denied"]')
         ?.textContent
     ).toBe(DESKTOP_NOTIFICATION_DENIED_MESSAGE);
+    expect(DESKTOP_NOTIFICATION_DENIED_MESSAGE).toContain("시스템 설정");
+    expect(DESKTOP_NOTIFICATION_DENIED_MESSAGE).not.toContain("브라우저");
+    expect(DESKTOP_NOTIFICATION_DENIED_MESSAGE).not.toContain("새로고침");
   });
 
   it("shows the unsupported banner for a webview without the shell", () => {
@@ -160,7 +178,7 @@ describe("DesktopNotificationPermissionPanel", () => {
 });
 
 describe("DesktopNotificationGroup", () => {
-  it("turns the request button to 요청 중, then 켜짐", async () => {
+  it("turns the request button to 요청 중, then moves focus onto 켜짐", async () => {
     let grant: ((value: string) => void) | null = null;
     requestPermission.mockImplementation(
       () =>
@@ -176,6 +194,8 @@ describe("DesktopNotificationGroup", () => {
       '[data-testid="desktop-notifications-enable"]'
     ) as HTMLButtonElement;
     expect(button.textContent).toBe(DESKTOP_NOTIFICATION_ENABLE_LABEL);
+    button.focus();
+    expect(document.activeElement).toBe(button);
 
     act(() => button.click());
     expect(
@@ -194,7 +214,63 @@ describe("DesktopNotificationGroup", () => {
         .querySelector('[data-testid="desktop-notifications-permission"]')
         ?.getAttribute("data-state")
     ).toBe("granted");
+    const granted = host.querySelector(
+      '[data-testid="desktop-notifications-granted"]'
+    );
+    expect(granted?.getAttribute("role")).toBe("status");
     expect(host.textContent).toContain(DESKTOP_NOTIFICATION_GRANTED_LABEL);
+    expect(document.activeElement).toBe(granted);
+    expect(document.activeElement).not.toBe(document.body);
+  });
+
+  it("re-reads permission when the window is focused again", async () => {
+    let native = "denied";
+    readPermission.mockImplementation(async () => native);
+    const host = mount(createElement(DesktopNotificationGroup));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      host
+        .querySelector('[data-testid="desktop-notifications-permission"]')
+        ?.getAttribute("data-state")
+    ).toBe("denied");
+
+    native = "granted";
+    await act(async () => {
+      window.dispatchEvent(new Event("focus"));
+      await Promise.resolve();
+    });
+    expect(
+      host
+        .querySelector('[data-testid="desktop-notifications-permission"]')
+        ?.getAttribute("data-state")
+    ).toBe("granted");
+  });
+
+  it("locks kind toggles to the unsupported reason", async () => {
+    readPermission.mockResolvedValue("unsupported");
+    const host = mount(createElement(DesktopNotificationGroup));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    const reason = host.querySelector(
+      '[data-testid="desktop-notifications-unsupported"]'
+    );
+    expect(reason?.textContent).toBe(DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE);
+    expect(reason?.id).toBeTruthy();
+    const mention = host.querySelector(
+      '[data-testid="desktop-notification-kind-mention"]'
+    ) as HTMLInputElement;
+    const approval = host.querySelector(
+      '[data-testid="desktop-notification-kind-approval"]'
+    ) as HTMLInputElement;
+    expect(mention.disabled).toBe(true);
+    expect(approval.disabled).toBe(true);
+    expect(mention.getAttribute("aria-describedby")).toContain(reason!.id);
+    expect(approval.getAttribute("aria-describedby")).toContain(reason!.id);
+    act(() => mention.click());
+    expect(mention.checked).toBe(true);
   });
 
   it("writes a kind toggle to this-device storage", async () => {
@@ -206,6 +282,7 @@ describe("DesktopNotificationGroup", () => {
       '[data-testid="desktop-notification-kind-mention"]'
     ) as HTMLInputElement;
     expect(mention.checked).toBe(true);
+    expect(mention.disabled).toBe(false);
     act(() => mention.click());
     expect(mention.checked).toBe(false);
     expect(

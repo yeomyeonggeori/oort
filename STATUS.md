@@ -2,10 +2,11 @@
 
 ## BF-A4 알림 설정 세분화 (#1887, 2026-08-30)
 
-- 설정 > 알림 규칙에 이 기기 알림 그룹: 권한 3분기(granted 켜짐 / default 「알림 켜기」·요청 중 / denied 브라우저 설정 배너) + 미지원(웹뷰·브라우저 탭). 발화는 기존대로 데스크톱 셸만.
-- 종류별 토글은 조사된 실존 2종만(멘션, 승인 요청). `momo.web.notifications.v1` 로컬 저장. 꺼진 종류는 `notifyThisDevice` → `kind-disabled` 로 미발화. DM·스레드·일반 채널 자리는 만들지 않음. 알림음 범위 밖.
-- 카피: 방해 금지·멘션 예외는 서버에 하나, 종류별 끔은 이 기기. DND PUT 회귀 유지.
-- red proof: 권한 패널 모킹 4분기 + 요청 버튼 라벨 전환, 종류 토글 → 발화 경로 미발화(멘션·승인 각각), DND PUT. web vitest 1803 · tsc · design_preflight_web · `CAPTURE_PORT=8077` capture:design (settings-notifications light/dark) · `SHELL_GATE_PORT=8079 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- 설정 > 알림 규칙에 이 기기 알림 그룹: 권한 3분기(granted 켜짐 / default 「알림 켜기」·요청 중 / denied macOS 시스템 설정 안내) + 미지원(웹뷰·브라우저 탭). 발화는 기존대로 데스크톱 셸만. 앱 포커스 복귀 시 OS 권한 재조회.
+- 종류별 토글은 조사된 실존 2종만(멘션, 승인 요청). `momo.web.notifications.v1` 로컬 저장. 꺼진 종류는 `notifyThisDevice` → `kind-disabled` 로 미발화. unsupported면 종류 그룹 잠금+공유 사유. DM·스레드·일반 채널 자리는 만들지 않음. 알림음 범위 밖.
+- 카피: 방해 금지·멘션 예외는 서버에 하나, 종류별 끔은 이 기기(섹션 머리에만). default 안내는 「앞에 없을 때」. DND PUT 회귀 유지.
+- design-review 수리: H-1 켜기 버튼 행 안 고유폭, H-2 denied OS 카피+재조회, H-3 grant 포커스→켜짐 status, M-1 레일 런타임 발화 테스트, M-2 unsupported 잠금, M-3 켜짐 `--ok-soft` 그릇, M-4/L-1 카피.
+- red proof: web vitest 1806 · tsc · design_preflight_web · `CAPTURE_PORT=8177` capture:design (settings-notifications light/dark) · `SHELL_GATE_PORT=8179 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BF-A3 허들 마이크 디바이스 선택 + 게인 (#1886, 2026-08-30)
 

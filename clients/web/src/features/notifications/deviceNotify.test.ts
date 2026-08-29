@@ -1,6 +1,3 @@
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MessageNewEvent } from "@momo/core/lib/realtimeEvents";
 import type { NotifyContext } from "@momo/core/features/notifications/model";
@@ -108,14 +105,5 @@ describe("notifyThisDevice", () => {
     const approval = notifyThisDevice(approvalEvent(), context());
     expect(approval.show).toBe(true);
     if (approval.show) expect(approval.notification.kind).toBe("approval");
-  });
-
-  it("is the helper DesktopNotifications consumes", () => {
-    const source = readFileSync(
-      join(dirname(fileURLToPath(import.meta.url)), "DesktopNotifications.tsx"),
-      "utf8"
-    );
-    expect(source).toContain("notifyThisDevice");
-    expect(source).not.toMatch(/notifyDecision\(/);
   });
 });
