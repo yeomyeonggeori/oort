@@ -1,7 +1,8 @@
 // =============================================================================
-// 선택 서식 트레이 좌표 (#1902). buzz SelectionFormattingTray 의 포털 상하 배치
-// + 뷰포트 클램프 문법만 옮긴다. TipTap coordsAtPos 는 없고, textarea 미러로
-// 선택 첫 줄의 화면 상자를 잰다.
+// 선택 서식 트레이 좌표 (#1902).
+// Ported from buzz SelectionFormattingTray (Apache-2.0): portal placement
+// above/below the selection and viewport clamp. TipTap coordsAtPos is not
+// available; a hidden textarea mirror measures the first selected line.
 // =============================================================================
 
 /** `--spacing-3`. 뷰포트 가장자리에서 트레이가 떨어질 최소 간격. */

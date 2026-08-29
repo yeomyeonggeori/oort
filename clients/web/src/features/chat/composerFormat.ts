@@ -15,6 +15,12 @@ export interface ComposerFormatResult {
   end: number;
 }
 
+export interface ComposerFormatItemState {
+  pressed: boolean;
+  disabled: boolean;
+  disabledReason: string | null;
+}
+
 const AFFIX: Record<
   Exclude<ComposerFormatKind, "link">,
   { prefix: string; suffix: string }
@@ -25,7 +31,19 @@ const AFFIX: Record<
 };
 
 /** 링크 삽입 뒤 고를 자리. 렌더러의 href 가 아니라 사람이 덮어쓸 자리표시. */
-export const COMPOSER_FORMAT_LINK_HREF = "url";
+export const COMPOSER_FORMAT_LINK_HREF = "링크주소";
+
+/** 자리표시가 아직 안 바뀐 동안 힌트 줄에만 띄운다. 전송은 막지 않는다. */
+export const COMPOSER_FORMAT_LINK_HINT = "링크 주소를 채워 보내세요";
+
+export const COMPOSER_FORMAT_ITALIC_DISABLED_REASON =
+  "기울임은 영문이나 숫자가 있는 선택에만 적용됩니다";
+
+/**
+ * 코어 파서와 같은 자 (`packages/momo-core/.../markdown.ts` `renderable`).
+ * `run === 2`(굵게)이거나 라틴/숫자가 있는 기울임만 렌더한다.
+ */
+const ITALIC_RENDERABLE = /[A-Za-z0-9]/;
 
 export function shouldShowComposerFormatTray({
   value,
@@ -64,6 +82,33 @@ function boundSelection(
 }
 
 /**
+ * 선택 안쪽으로 접사를 밀어 넣을 구간. 앞뒤 공백은 남기고, 줄을 넘는 선택은
+ * 줄 단위로 나눈다(빈 줄 제외). 코어는 닫는 접사 앞 공백을 거부하고 인라인을
+ * 줄 단위로만 파싱한다.
+ */
+export function formatLineSegments(
+  value: string,
+  from: number,
+  to: number
+): Array<{ from: number; to: number }> {
+  const segments: Array<{ from: number; to: number }> = [];
+  let cursor = from;
+  const inner = value.slice(from, to);
+  const parts = inner.split("\n");
+  for (let i = 0; i < parts.length; i += 1) {
+    const line = parts[i] ?? "";
+    let lineFrom = cursor;
+    let lineTo = cursor + line.length;
+    while (lineFrom < lineTo && /\s/.test(value[lineFrom] ?? "")) lineFrom += 1;
+    while (lineTo > lineFrom && /\s/.test(value[lineTo - 1] ?? "")) lineTo -= 1;
+    if (lineFrom < lineTo) segments.push({ from: lineFrom, to: lineTo });
+    cursor += line.length;
+    if (i < parts.length - 1) cursor += 1;
+  }
+  return segments;
+}
+
+/**
  * `*` / `**` / `` ` `` 처럼 같은 글자의 런은 더 긴 런의 일부가 아니어야 한다.
  * `**hello**` 에 기울임을 걸면 바깥 `*` 한 겹을 해제하는 것이 아니라
  * `***hello***` 로 감싼다.
@@ -80,13 +125,13 @@ function isExactRun(value: string, index: number, run: string): boolean {
   return true;
 }
 
-function unwrapAffix(
+function unwrapEdit(
   value: string,
   from: number,
   to: number,
   prefix: string,
   suffix: string
-): ComposerFormatResult | null {
+): { from: number; to: number; insert: string } | null {
   if (
     to - from > prefix.length + suffix.length &&
     isExactRun(value, from, prefix) &&
@@ -94,11 +139,7 @@ function unwrapAffix(
   ) {
     const inner = value.slice(from + prefix.length, to - suffix.length);
     if (inner.length > 0) {
-      return {
-        value: `${value.slice(0, from)}${inner}${value.slice(to)}`,
-        start: from,
-        end: from + inner.length,
-      };
+      return { from, to, insert: inner };
     }
   }
   const outerFrom = from - prefix.length;
@@ -109,29 +150,47 @@ function unwrapAffix(
     isExactRun(value, outerFrom, prefix) &&
     isExactRun(value, to, suffix)
   ) {
-    const selected = value.slice(from, to);
     return {
-      value: `${value.slice(0, outerFrom)}${selected}${value.slice(outerTo)}`,
-      start: outerFrom,
-      end: outerFrom + selected.length,
+      from: outerFrom,
+      to: outerTo,
+      insert: value.slice(from, to),
     };
   }
   return null;
 }
 
-function wrapAffix(
+type SegmentEdit = {
+  from: number;
+  to: number;
+  insert: string;
+  caretFrom: number;
+  caretTo: number;
+};
+
+function applySegmentEdits(
   value: string,
-  from: number,
-  to: number,
-  prefix: string,
-  suffix: string
+  edits: SegmentEdit[],
+  select: "span" | "first"
 ): ComposerFormatResult {
-  const selected = value.slice(from, to);
-  return {
-    value: `${value.slice(0, from)}${prefix}${selected}${suffix}${value.slice(to)}`,
-    start: from + prefix.length,
-    end: to + prefix.length,
-  };
+  let next = value;
+  let offset = 0;
+  let selStart = -1;
+  let selEnd = -1;
+  for (const edit of edits) {
+    const from = edit.from + offset;
+    const to = edit.to + offset;
+    next = `${next.slice(0, from)}${edit.insert}${next.slice(to)}`;
+    const caretStart = from + edit.caretFrom;
+    const caretEnd = from + edit.caretTo;
+    if (selStart < 0) {
+      selStart = caretStart;
+      selEnd = caretEnd;
+    } else if (select === "span") {
+      selEnd = caretEnd;
+    }
+    offset += edit.insert.length - (edit.to - edit.from);
+  }
+  return { value: next, start: selStart, end: selEnd };
 }
 
 const LINK_WHOLE = /^\[([^\]\n]+)\]\(([^)\n]*)\)$/;
@@ -181,32 +240,154 @@ function findLinkWrap(
   return null;
 }
 
-function toggleLink(
+function linkUnwrapEdit(
   value: string,
   from: number,
   to: number
-): ComposerFormatResult {
+): { from: number; to: number; insert: string } | null {
   const existing = findLinkWrap(value, from, to);
-  if (existing) {
-    return {
-      value: `${value.slice(0, existing.wrapFrom)}${existing.label}${value.slice(existing.wrapTo)}`,
-      start: existing.wrapFrom,
-      end: existing.wrapFrom + existing.label.length,
-    };
-  }
-  const selected = value.slice(from, to);
-  const insertion = `[${selected}](${COMPOSER_FORMAT_LINK_HREF})`;
-  const hrefStart = from + 1 + selected.length + 2;
+  if (!existing) return null;
   return {
-    value: `${value.slice(0, from)}${insertion}${value.slice(to)}`,
-    start: hrefStart,
-    end: hrefStart + COMPOSER_FORMAT_LINK_HREF.length,
+    from: existing.wrapFrom,
+    to: existing.wrapTo,
+    insert: existing.label,
+  };
+}
+
+function toggleLinkSegments(
+  value: string,
+  segments: Array<{ from: number; to: number }>
+): ComposerFormatResult | null {
+  const unwrapped = segments
+    .map((segment) => linkUnwrapEdit(value, segment.from, segment.to))
+    .filter((edit): edit is NonNullable<typeof edit> => edit !== null);
+  if (unwrapped.length === segments.length) {
+    return applySegmentEdits(
+      value,
+      unwrapped.map((edit) => ({
+        from: edit.from,
+        to: edit.to,
+        insert: edit.insert,
+        caretFrom: 0,
+        caretTo: edit.insert.length,
+      })),
+      "span"
+    );
+  }
+  const edits: SegmentEdit[] = [];
+  for (const segment of segments) {
+    if (linkUnwrapEdit(value, segment.from, segment.to)) continue;
+    const selected = value.slice(segment.from, segment.to);
+    const insertion = `[${selected}](${COMPOSER_FORMAT_LINK_HREF})`;
+    const hrefStart = 1 + selected.length + 2;
+    edits.push({
+      from: segment.from,
+      to: segment.to,
+      insert: insertion,
+      caretFrom: hrefStart,
+      caretTo: hrefStart + COMPOSER_FORMAT_LINK_HREF.length,
+    });
+  }
+  if (edits.length === 0) return null;
+  return applySegmentEdits(value, edits, "first");
+}
+
+function isItalicRenderable(inner: string): boolean {
+  // markdown.ts:249 `const renderable = run === 2 || /[A-Za-z0-9]/.test(inner)`
+  // 기울임은 run === 1 이므로 라틴/숫자 검사와 같다.
+  return ITALIC_RENDERABLE.test(inner);
+}
+
+function toggleAffixSegments(
+  value: string,
+  segments: Array<{ from: number; to: number }>,
+  prefix: string,
+  suffix: string,
+  kind: Exclude<ComposerFormatKind, "link">
+): ComposerFormatResult | null {
+  const unwrapped = segments
+    .map((segment) =>
+      unwrapEdit(value, segment.from, segment.to, prefix, suffix)
+    )
+    .filter((edit): edit is NonNullable<typeof edit> => edit !== null);
+  if (unwrapped.length === segments.length) {
+    return applySegmentEdits(
+      value,
+      unwrapped.map((edit) => ({
+        from: edit.from,
+        to: edit.to,
+        insert: edit.insert,
+        caretFrom: 0,
+        caretTo: edit.insert.length,
+      })),
+      "span"
+    );
+  }
+  const edits: SegmentEdit[] = [];
+  for (const segment of segments) {
+    if (unwrapEdit(value, segment.from, segment.to, prefix, suffix)) continue;
+    const inner = value.slice(segment.from, segment.to);
+    if (kind === "italic" && !isItalicRenderable(inner)) continue;
+    edits.push({
+      from: segment.from,
+      to: segment.to,
+      insert: `${prefix}${inner}${suffix}`,
+      caretFrom: prefix.length,
+      caretTo: prefix.length + inner.length,
+    });
+  }
+  if (edits.length === 0) return null;
+  if (edits.length > 1) {
+    for (const edit of edits) {
+      edit.caretFrom = 0;
+      edit.caretTo = edit.insert.length;
+    }
+  }
+  return applySegmentEdits(value, edits, "span");
+}
+
+export function composerFormatHasPendingLink(value: string): boolean {
+  return value.includes(`](${COMPOSER_FORMAT_LINK_HREF})`);
+}
+
+export function composerFormatItemState(
+  value: string,
+  selection: ComposerSelection,
+  kind: ComposerFormatKind
+): ComposerFormatItemState {
+  const { from, to } = boundSelection(value, selection);
+  const segments = formatLineSegments(value, from, to);
+  if (segments.length === 0) {
+    return { pressed: false, disabled: false, disabledReason: null };
+  }
+  if (kind === "link") {
+    const pressed = segments.every(
+      (segment) => findLinkWrap(value, segment.from, segment.to) !== null
+    );
+    return { pressed, disabled: false, disabledReason: null };
+  }
+  const { prefix, suffix } = AFFIX[kind];
+  const pressed = segments.every(
+    (segment) =>
+      unwrapEdit(value, segment.from, segment.to, prefix, suffix) !== null
+  );
+  if (kind !== "italic") {
+    return { pressed, disabled: false, disabledReason: null };
+  }
+  const canWrap = segments.some((segment) =>
+    isItalicRenderable(value.slice(segment.from, segment.to))
+  );
+  const disabled = !pressed && !canWrap;
+  return {
+    pressed,
+    disabled,
+    disabledReason: disabled ? COMPOSER_FORMAT_ITALIC_DISABLED_REASON : null,
   };
 }
 
 /**
  * 선택 영역에 서식을 걸거나, 이미 감싸져 있으면 푼다. 빈 선택·공백만 선택은
- * 무동작(`null`). 적용 뒤 선택은 접사 안쪽(링크는 url 자리)을 가리킨다.
+ * 무동작(`null`). 적용 뒤 선택은 접사 안쪽(링크는 자리표시)을 가리킨다.
  */
 export function toggleComposerFormat(
   value: string,
@@ -216,10 +397,9 @@ export function toggleComposerFormat(
   const { from, to } = boundSelection(value, selection);
   if (from === to) return null;
   if (value.slice(from, to).trim() === "") return null;
-  if (kind === "link") return toggleLink(value, from, to);
+  const segments = formatLineSegments(value, from, to);
+  if (segments.length === 0) return null;
+  if (kind === "link") return toggleLinkSegments(value, segments);
   const { prefix, suffix } = AFFIX[kind];
-  return (
-    unwrapAffix(value, from, to, prefix, suffix) ??
-    wrapAffix(value, from, to, prefix, suffix)
-  );
+  return toggleAffixSegments(value, segments, prefix, suffix, kind);
 }

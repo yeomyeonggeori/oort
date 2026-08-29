@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { parseInline } from "@momo/core/features/timeline/markdown";
 import {
+  parseInline,
+  parseMarkdown,
+} from "@momo/core/features/timeline/markdown";
+import {
+  COMPOSER_FORMAT_ITALIC_DISABLED_REASON,
+  COMPOSER_FORMAT_LINK_HINT,
   COMPOSER_FORMAT_LINK_HREF,
+  composerFormatHasPendingLink,
+  composerFormatItemState,
   shouldShowComposerFormatTray,
   toggleComposerFormat,
 } from "./composerFormat";
@@ -74,22 +81,26 @@ describe("컴포저 서식 토글 (#1902)", () => {
     ).toEqual({ value: "sha", start: 0, end: 3 });
   });
 
-  it("링크는 [선택](url) 을 넣고 url 자리를 고른 뒤, 같은 토글로 라벨만 남긴다", () => {
+  it("링크는 [선택](링크주소) 을 넣고 자리표시를 고른 뒤, 같은 토글로 라벨만 남긴다", () => {
     const applied = toggleComposerFormat(
       "런북",
       { start: 0, end: 2 },
       "link"
     );
+    const hrefEnd = 5 + COMPOSER_FORMAT_LINK_HREF.length;
     expect(applied).toEqual({
       value: `[런북](${COMPOSER_FORMAT_LINK_HREF})`,
       start: 5,
-      end: 8,
+      end: hrefEnd,
     });
+    expect(COMPOSER_FORMAT_LINK_HREF).toBe("링크주소");
     expect(applied!.value.slice(applied!.start, applied!.end)).toBe(
       COMPOSER_FORMAT_LINK_HREF
     );
+    expect(composerFormatHasPendingLink(applied!.value)).toBe(true);
+    expect(COMPOSER_FORMAT_LINK_HINT).toBe("링크 주소를 채워 보내세요");
     expect(
-      toggleComposerFormat(applied!.value, { start: 5, end: 8 }, "link")
+      toggleComposerFormat(applied!.value, { start: 5, end: hrefEnd }, "link")
     ).toEqual({ value: "런북", start: 0, end: 2 });
     const linked = "[런북](https://momo.example)";
     expect(
@@ -106,17 +117,88 @@ describe("컴포저 서식 토글 (#1902)", () => {
     ).toBeNull();
   });
 
-  it("여러 줄 선택은 양끝에 접사만 넣고 안쪽을 재선택한다", () => {
-    const body = "배포\n롤백";
+  it("끝 공백은 선택 안쪽으로 접사를 밀어 넣어 렌더러가 strong 을 읽는다", () => {
+    const applied = toggleComposerFormat(
+      "배포 일정 확정 그리고",
+      { start: 0, end: 9 },
+      "bold"
+    );
+    expect(applied).toEqual({
+      value: "**배포 일정 확정** 그리고",
+      start: 2,
+      end: 10,
+    });
+    expect(parseInline(applied!.value)).toEqual([
+      { kind: "strong", children: [text("배포 일정 확정")] },
+      text(" 그리고"),
+    ]);
+  });
+
+  it("두 줄 선택은 줄마다 감싸 렌더러가 각 줄을 strong 으로 읽는다", () => {
+    const body = "첫째 줄입니다\n둘째 줄입니다";
     const applied = toggleComposerFormat(
       body,
       { start: 0, end: body.length },
       "bold"
     );
     expect(applied).toEqual({
-      value: "**배포\n롤백**",
-      start: 2,
-      end: 2 + body.length,
+      value: "**첫째 줄입니다**\n**둘째 줄입니다**",
+      start: 0,
+      end: 23,
+    });
+    expect(parseMarkdown(applied!.value)).toEqual([
+      {
+        kind: "paragraph",
+        lines: [
+          [{ kind: "strong", children: [text("첫째 줄입니다")] }],
+          [{ kind: "strong", children: [text("둘째 줄입니다")] }],
+        ],
+      },
+    ]);
+    expect(
+      toggleComposerFormat(
+        applied!.value,
+        { start: 0, end: applied!.value.length },
+        "bold"
+      )
+    ).toEqual({ value: body, start: 0, end: body.length });
+  });
+
+  it("한국어만 있는 기울임은 코어가 렌더하지 않으므로 넣지 않는다", () => {
+    const korean = "배포 일정은 금요일에 확정합니다";
+    expect(
+      toggleComposerFormat(korean, { start: 0, end: korean.length }, "italic")
+    ).toBeNull();
+    expect(
+      composerFormatItemState(korean, { start: 0, end: korean.length }, "italic")
+    ).toEqual({
+      pressed: false,
+      disabled: true,
+      disabledReason: COMPOSER_FORMAT_ITALIC_DISABLED_REASON,
+    });
+    const mixed = toggleComposerFormat(
+      "배포는 freeze 상태입니다",
+      { start: 0, end: 16 },
+      "italic"
+    );
+    expect(mixed).toEqual({
+      value: "*배포는 freeze 상태입니다*",
+      start: 1,
+      end: 17,
+    });
+    expect(parseInline(mixed!.value)).toEqual([
+      { kind: "em", children: [text("배포는 freeze 상태입니다")] },
+    ]);
+    expect(
+      composerFormatItemState(
+        "배포는 freeze 상태입니다",
+        { start: 0, end: 16 },
+        "italic"
+      )
+    ).toEqual({
+      pressed: false,
+      disabled: false,
+      disabledReason: null,
     });
   });
 

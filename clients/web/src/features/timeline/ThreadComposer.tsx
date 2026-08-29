@@ -181,6 +181,7 @@ export function ThreadComposer({
         "safe-area-bottom border-t border-line",
         drop.dragging && "bg-accent-soft"
       )}
+      data-composer-shell=""
       data-testid="thread-composer"
     >
       <AttachmentTray
@@ -370,6 +371,8 @@ export function ThreadComposer({
       </div>
       <ComposerFormatTray
         open={format.open}
+        value={draft}
+        selectionEpoch={format.selectionEpoch}
         inputRef={ref}
         trayRef={format.trayRef}
         onApply={format.apply}

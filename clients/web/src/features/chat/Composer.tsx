@@ -99,6 +99,10 @@ import {
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
+import {
+  COMPOSER_FORMAT_LINK_HINT,
+  composerFormatHasPendingLink,
+} from "@/features/chat/composerFormat";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 // =============================================================================
@@ -165,13 +169,16 @@ function ComposerHint({
   directory,
   dmAgent,
   keysHintNeeded,
+  pendingLink,
   sharedRow,
 }: {
   directory: Directory;
   dmAgent: RosterMember | null;
   keysHintNeeded: boolean;
+  pendingLink: boolean;
   sharedRow: boolean;
 }) {
+  const lead = pendingLink || dmAgent;
   return (
     <p
       id="composer-hint"
@@ -182,13 +189,17 @@ function ComposerHint({
         sharedRow
           ? "min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
           : "px-6 pb-2 text-meta text-ink-muted",
-        !dmAgent && "wide-only"
+        !dmAgent && !pendingLink && "wide-only"
       )}
       data-testid="composer-hint"
       data-composer-meta-slot={sharedRow ? "" : undefined}
     >
+      {pendingLink && (
+        <span data-testid="composer-link-hint">{COMPOSER_FORMAT_LINK_HINT}</span>
+      )}
       {dmAgent && (
         <span data-testid="composer-dm-hint">
+          {pendingLink ? HINT_SEPARATOR : ""}
           멘션 없이 바로 말하면{" "}
           {agentLabelAsSubject(
             memberNameParts(directory, dmAgent.id, dmAgent.displayName)
@@ -198,7 +209,7 @@ function ComposerHint({
       )}
       {keysHintNeeded && (
         <span className="wide-only" data-testid="composer-keys-hint">
-          {dmAgent ? HINT_SEPARATOR : ""}
+          {lead ? HINT_SEPARATOR : ""}
           {COMPOSER_KEYS_HINT}
         </span>
       )}
@@ -521,11 +532,13 @@ export function Composer({
    * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
    * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
+  const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
     typistCount: typists.length,
     hasDmHint: dmAgent !== null,
     keysHintNeeded,
     isMobile,
+    hasPendingLink: pendingLink,
   });
   const persistentPhoneDmHint = keepPhoneDmHint({
     hasDmHint: dmAgent !== null,
@@ -757,6 +770,7 @@ export function Composer({
         // 말하는 최소한이다.
         drop.dragging && "bg-accent-soft"
       )}
+      data-composer-shell=""
       data-testid="composer"
     >
       {/* 첨부 트레이 (ADR-0151 D2). 인용 칩보다 **위**다: 순서는 여전히
@@ -819,6 +833,7 @@ export function Composer({
           directory={directory}
           dmAgent={dmAgent}
           keysHintNeeded={keysHintNeeded}
+          pendingLink={pendingLink}
           sharedRow={false}
         />
       )}
@@ -967,6 +982,7 @@ export function Composer({
                 directory={directory}
                 dmAgent={dmAgent}
                 keysHintNeeded={keysHintNeeded}
+                pendingLink={pendingLink}
                 sharedRow
               />
             ) : (
@@ -1001,6 +1017,8 @@ export function Composer({
 
       <ComposerFormatTray
         open={format.open}
+        value={text}
+        selectionEpoch={format.selectionEpoch}
         inputRef={inputRef}
         trayRef={format.trayRef}
         onApply={format.apply}

@@ -11,29 +11,40 @@ import { createPortal } from "react-dom";
 import { Bold, Code, Italic, Link } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
-import type { ComposerFormatKind } from "./composerFormat";
+import {
+  composerFormatItemState,
+  type ComposerFormatKind,
+} from "./composerFormat";
 import {
   clampFormatTrayPosition,
   getTextareaSelectionRect,
   type FormatTrayPosition,
 } from "./composerFormatPosition";
+import { nextComposerTabStop } from "./useComposerFormat";
 
 // Custom rather than a Radix Popover: that primitive moves focus and would
 // collapse the textarea selection this tray is formatting.
 
 export const COMPOSER_FORMAT_ITEM_CLASS =
-  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+  "flex size-control-sm items-center justify-center rounded-sm focus-visible:focus-ring";
 
 const ACTIONS: ReadonlyArray<{
   kind: ComposerFormatKind;
   label: string;
+  shortcut: string | null;
   Icon: typeof Bold;
   suffix: string;
 }> = [
-  { kind: "bold", label: "굵게", Icon: Bold, suffix: "bold" },
-  { kind: "italic", label: "기울임", Icon: Italic, suffix: "italic" },
-  { kind: "code", label: "인라인 코드", Icon: Code, suffix: "code" },
-  { kind: "link", label: "링크", Icon: Link, suffix: "link" },
+  { kind: "bold", label: "굵게", shortcut: "⌘B", Icon: Bold, suffix: "bold" },
+  {
+    kind: "italic",
+    label: "기울임",
+    shortcut: "⌘I",
+    Icon: Italic,
+    suffix: "italic",
+  },
+  { kind: "code", label: "인라인 코드", shortcut: null, Icon: Code, suffix: "code" },
+  { kind: "link", label: "링크", shortcut: null, Icon: Link, suffix: "link" },
 ];
 
 function applyTrayVars(
@@ -54,8 +65,19 @@ function applyTrayVars(
   );
 }
 
+function itemTitle(
+  label: string,
+  shortcut: string | null,
+  disabledReason: string | null
+): string {
+  if (disabledReason) return disabledReason;
+  return shortcut ? `${label} (${shortcut})` : label;
+}
+
 export function ComposerFormatTray({
   open,
+  value,
+  selectionEpoch,
   inputRef,
   trayRef,
   onApply,
@@ -63,6 +85,8 @@ export function ComposerFormatTray({
   testIdPrefix,
 }: {
   open: boolean;
+  value: string;
+  selectionEpoch: number;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   trayRef: MutableRefObject<HTMLDivElement | null>;
   onApply: (kind: ComposerFormatKind) => void;
@@ -71,6 +95,7 @@ export function ComposerFormatTray({
 }) {
   const [position, setPosition] = useState<FormatTrayPosition | null>(null);
   const [trayWidth, setTrayWidth] = useState(0);
+  const [activeIndex, setActiveIndex] = useState(0);
 
   const updatePosition = useCallback(() => {
     const textarea = inputRef.current;
@@ -100,7 +125,7 @@ export function ComposerFormatTray({
 
   useLayoutEffect(() => {
     updatePosition();
-  }, [updatePosition]);
+  }, [updatePosition, selectionEpoch]);
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -109,10 +134,12 @@ export function ComposerFormatTray({
     window.addEventListener("scroll", onViewport, true);
     const textarea = inputRef.current;
     textarea?.addEventListener("scroll", onViewport);
+    document.addEventListener("selectionchange", onViewport);
     return () => {
       window.removeEventListener("resize", onViewport);
       window.removeEventListener("scroll", onViewport, true);
       textarea?.removeEventListener("scroll", onViewport);
+      document.removeEventListener("selectionchange", onViewport);
     };
   }, [inputRef, open, updatePosition]);
 
@@ -132,6 +159,10 @@ export function ComposerFormatTray({
     return () => observer.disconnect();
   }, [open, trayRef, position]);
 
+  useLayoutEffect(() => {
+    if (open) setActiveIndex(0);
+  }, [open]);
+
   const onEscape = useCallback(() => {
     onDismiss();
     inputRef.current?.focus();
@@ -144,16 +175,47 @@ export function ComposerFormatTray({
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== "Tab" || !event.shiftKey) return;
     const buttons = [
-      ...(trayRef.current?.querySelectorAll("button") ?? []),
+      ...(trayRef.current?.querySelectorAll<HTMLButtonElement>("button") ?? []),
     ];
-    if (buttons[0] !== document.activeElement) return;
+    const index = buttons.findIndex((button) => button === document.activeElement);
+
+    if (
+      event.key === "ArrowRight" ||
+      event.key === "ArrowLeft" ||
+      event.key === "Home" ||
+      event.key === "End"
+    ) {
+      event.preventDefault();
+      if (buttons.length === 0) return;
+      let next = index < 0 ? 0 : index;
+      if (event.key === "ArrowRight") next = (index + 1 + buttons.length) % buttons.length;
+      if (event.key === "ArrowLeft") {
+        next = (index - 1 + buttons.length) % buttons.length;
+      }
+      if (event.key === "Home") next = 0;
+      if (event.key === "End") next = buttons.length - 1;
+      setActiveIndex(next);
+      buttons[next]?.focus();
+      return;
+    }
+
+    if (event.key !== "Tab") return;
     event.preventDefault();
-    inputRef.current?.focus();
+    if (event.shiftKey) {
+      inputRef.current?.focus();
+      return;
+    }
+    nextComposerTabStop(inputRef.current)?.focus();
   };
 
   if (!open || typeof document === "undefined") return null;
+
+  const textarea = inputRef.current;
+  const selection = {
+    start: textarea?.selectionStart ?? 0,
+    end: textarea?.selectionEnd ?? 0,
+  };
 
   return createPortal(
     <div
@@ -168,23 +230,37 @@ export function ComposerFormatTray({
       data-placement={position?.placement ?? "top"}
       onMouseDown={onMouseDown}
       onKeyDown={onKeyDown}
-      className={cn(
-        "composer-format-tray flex max-w-full items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
-      )}
+      className="composer-format-tray flex items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
     >
-      {ACTIONS.map(({ kind, label, Icon, suffix }) => (
-        <button
-          key={kind}
-          type="button"
-          aria-label={label}
-          title={label}
-          data-testid={`${testIdPrefix}-${suffix}`}
-          className={COMPOSER_FORMAT_ITEM_CLASS}
-          onClick={() => onApply(kind)}
-        >
-          <Icon className="size-4" aria-hidden="true" />
-        </button>
-      ))}
+      {ACTIONS.map(({ kind, label, shortcut, Icon, suffix }, index) => {
+        const item = composerFormatItemState(value, selection, kind);
+        const title = itemTitle(label, shortcut, item.disabledReason);
+        return (
+          <button
+            key={kind}
+            type="button"
+            data-toolbar-item=""
+            aria-label={label}
+            aria-pressed={item.pressed}
+            aria-disabled={item.disabled ? true : undefined}
+            title={title}
+            tabIndex={index === activeIndex ? 0 : -1}
+            data-testid={`${testIdPrefix}-${suffix}`}
+            className={cn(
+              COMPOSER_FORMAT_ITEM_CLASS,
+              item.pressed ? "bg-accent-soft text-ink" : "text-ink-muted",
+              !item.disabled && !item.pressed && "hover:bg-surface-hover hover:text-ink",
+              item.disabled && "opacity-50"
+            )}
+            onClick={() => {
+              if (item.disabled) return;
+              onApply(kind);
+            }}
+          >
+            <Icon className="size-4" aria-hidden="true" />
+          </button>
+        );
+      })}
     </div>,
     document.body
   );

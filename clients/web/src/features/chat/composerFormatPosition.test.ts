@@ -8,6 +8,11 @@ import {
   clampFormatTrayPosition,
 } from "./composerFormatPosition";
 
+const traySource = readFileSync(
+  fileURLToPath(new URL("./ComposerFormatTray.tsx", import.meta.url)),
+  "utf8"
+);
+
 const tokens = readFileSync(
   fileURLToPath(new URL("../../design/tokens.css", import.meta.url)),
   "utf8"
@@ -45,6 +50,11 @@ describe("선택 서식 트레이 좌표 (#1902)", () => {
     );
     expect(position.placement).toBe("bottom");
     expect(position.top).toBe(10 + 16 + FORMAT_TRAY_SELECTION_OFFSET);
+  });
+
+  it("트레이 클래스는 max-w-full 을 두지 않아 유틸리티 클램프가 산다", () => {
+    expect(tokens).toContain("max-inline-size: calc(100vw - var(--spacing-6))");
+    expect(traySource).not.toMatch(/composer-format-tray[^\n]*max-w-full/);
   });
 
   it("오른쪽 끝 선택은 트레이 반폭이 뷰포트를 넘지 않게 민다", () => {

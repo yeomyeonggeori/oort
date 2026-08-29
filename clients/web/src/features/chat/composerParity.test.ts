@@ -66,6 +66,8 @@ describe("컴포저 공용 표면 (#1688)", () => {
     for (const composer of [channel, thread]) {
       expect(composer).toContain("useComposerFormat");
       expect(composer).toContain("<ComposerFormatTray");
+      expect(composer).toContain('data-composer-shell=""');
+      expect(composer).toContain("selectionEpoch={format.selectionEpoch}");
       expect(composer).toContain("onValueChange: mentions.replaceValue");
       expect(composer).toContain("format.handleKeyDown(event)");
       expect(composer).toContain("format.dismiss()");

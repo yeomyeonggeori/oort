@@ -2,10 +2,11 @@
 
 ## BF-A7 컴포저 서식 최소셋 (#1902, 2026-08-30)
 
-- 채널·스레드 textarea에서 텍스트를 고르면 선택 위(공간 없으면 아래)에 부유 트레이(굵게/기울임/인라인 코드/링크). TipTap 없음. 접사는 momo-core markdown이 읽는 `** * \` []()` 만. 이미 감싸져 있으면 토글로 해제. 링크는 `[선택](url)` 뒤 url 자리 선택.
+- 채널·스레드 textarea에서 텍스트를 고르면 선택 위(공간 없으면 아래)에 부유 트레이(굵게/기울임/인라인 코드/링크). TipTap 없음. 접사는 momo-core markdown이 읽는 `** * \` []()` 만. 이미 감싸져 있으면 토글로 해제. 링크는 `[선택](링크주소)` 뒤 자리표시 선택.
+- design-review 수리 (#1909): Esc dismiss가 keyup sync에 안 되살아남, 한국어 기울임 거부(코어 renderable과 같은 자), 공백·줄 경계는 코어 closingIndex/줄 단위 파서와 같게, 트레이는 탭 한 정거장+방향키 로빙+aria-pressed, 선택은 좌표를 따라감, hover:none/pointer:coarse에서는 안 그림, 미치환 링크는 힌트만(전송은 그대로).
 - ⌘B/⌘I는 트레이 없이도 동작. 트레이 mousedown은 포커스를 빼앗지 않고, Tab으로 도달, Esc로 닫힘. @멘션 트리거 중에는 숨김. 전송·채널 전환·선택 해제 시 소멸. draftStore는 기존 replaceValue 경로.
-- 뷰포트 클램프는 buzz 문법. 좌표는 CSS 변수(인라인 style= 없음). 모션 없음(reduced-motion 즉시).
-- red proof: web vitest 1845 · tsc · design_preflight_web · `CAPTURE_PORT=8477` capture:design · `SHELL_GATE_PORT=8479 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- 뷰포트 클램프는 buzz 문법(Apache-2.0). 좌표는 CSS 변수(인라인 style= 없음). 모션 없음(reduced-motion 즉시).
+- red proof: web vitest 1853 · tsc · design_preflight_web · `CAPTURE_PORT=8477` capture:design · `SHELL_GATE_PORT=8479 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BF-A5 크로스채널 초안 패널 (#1901, 2026-08-30)
 
