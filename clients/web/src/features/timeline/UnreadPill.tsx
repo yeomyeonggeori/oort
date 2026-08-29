@@ -90,6 +90,10 @@ export function jumpLatestAriaLabel(newCount: number): string {
   return newCount > 0 ? `새 메시지 ${newCount}개 보기` : "최신 메시지로 이동";
 }
 
+/**
+ * 상단만 「위쪽의」를 붙인다. N이 동결이라 그 방향이 참이고, 두 필 접근명이
+ * 숫자만 다른 낭독을 가른다. 화면 문장은 화살표가 방향을 진다.
+ */
 export function jumpUnreadAriaLabel(count: number): string {
-  return jumpLatestAriaLabel(count);
+  return `위쪽의 새 메시지 ${count}개 보기`;
 }

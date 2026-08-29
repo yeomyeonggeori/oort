@@ -161,16 +161,15 @@ export function reconcileDividerRelation(input: {
 /**
  * 채널 epoch 안의 래치 (design-review H-1).
  *
- * 구분선이 한 번 창에 들어오면 상단 필을 다시 세우지 않는다. 동결
- * `lastReadSeq`는 구분선용으로 남고, 필이 그 숫자를 들고 부활하는 길이 이
- * 래치가 닫는다. 「바닥 도달로 커서가 전진」은 구분선을 지나 아래로 읽는
- * 동안 `in`을 통과하는 것과 같다 — 첫 착지(epoch 직후 바닥)는 래치하지
- * 않는다. 채널을 갈아타면 epoch와 함께 풀린다.
+ * 입력은 IntersectionObserver가 실측한 관계만. range 폴백 「in」은
+ * `increaseViewportBy` 오버스캔에 마운트된 구분선도 창 안으로 보고하므로
+ * 여기로 넣지 않는다. 상단 필 실행은 호출측에서 직접 무장한다. 채널을
+ * 갈아타면 epoch와 함께 풀린다.
  */
 export function shouldLatchUnreadJump(
-  relation: DividerViewportRelation
+  observed: DividerViewportRelation | null
 ): boolean {
-  return relation === "in";
+  return observed === "in";
 }
 
 /** 구분선이 창 **위쪽 밖**에 있고 동결 N이 있으며, 이 epoch에서 아직 래치되지 않았을 때만 상단 필이 선다. */

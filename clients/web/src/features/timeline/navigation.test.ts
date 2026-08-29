@@ -254,11 +254,23 @@ describe("relationFromIntersection", () => {
 });
 
 describe("shouldLatchUnreadJump", () => {
-  it("창 안에 들어온 것만 래치한다", () => {
+  it("IO가 실측한 창 안만 래치한다", () => {
     expect(shouldLatchUnreadJump("in")).toBe(true);
     expect(shouldLatchUnreadJump("above")).toBe(false);
     expect(shouldLatchUnreadJump("below")).toBe(false);
     expect(shouldLatchUnreadJump("absent")).toBe(false);
+    expect(shouldLatchUnreadJump(null)).toBe(false);
+  });
+
+  it("range 폴백 「in」은 래치 입력이 아니다", () => {
+    const rangeIn = reconcileDividerRelation({
+      dividerIndex: 10,
+      visibleStart: 8,
+      visibleEnd: 20,
+      observed: null,
+    });
+    expect(rangeIn).toBe("in");
+    expect(shouldLatchUnreadJump(null)).toBe(false);
   });
 });
 

@@ -64,7 +64,7 @@ describe("UnreadPill", () => {
     expect(button.tagName).toBe("BUTTON");
     expect(button.getAttribute("type")).toBe("button");
     expect(button.getAttribute("data-direction")).toBe("up");
-    expect(button.getAttribute("aria-label")).toBe("새 메시지 3개 보기");
+    expect(button.getAttribute("aria-label")).toBe("위쪽의 새 메시지 3개 보기");
     expect(button.textContent).toBe("새 메시지 3개 보기");
     expect(button.hasAttribute("data-unread-pill")).toBe(true);
     expect(button.className).toContain("shadow-lg");
@@ -109,6 +109,11 @@ describe("UnreadPill", () => {
   it("쌓인 것이 없으면 최신 이동 문장이다", () => {
     expect(jumpLatestAriaLabel(0)).toBe("최신 메시지로 이동");
     expect(jumpLatestLabel(0)).toBe("최신 메시지로 이동");
+  });
+
+  it("상단 접근명만 「위쪽의」를 붙인다", () => {
+    expect(jumpUnreadAriaLabel(5)).toBe("위쪽의 새 메시지 5개 보기");
+    expect(jumpLatestAriaLabel(5)).toBe("새 메시지 5개 보기");
   });
 });
 

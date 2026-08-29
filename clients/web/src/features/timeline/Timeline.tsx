@@ -473,12 +473,12 @@ export function Timeline({
     setUnreadJumpLatched(false);
   }, [epoch]);
 
-  // 구분선이 한 번 창에 들어오면 래치. 바닥까지 읽고 돌아와도 필은 다시
-  // 서지 않는다 (H-1). 첫 착지가 바닥인 것은 여기로 오지 않는다 — 그때
-  // 관계는 `above`다.
+  // 래치 무장은 IO가 실측한 「in」만. range 폴백 「in」은 오버스캔에 마운트만
+  // 된 구분선도 창 안이라고 보고한다 — 그 거짓으로 무장하면 위로 읽는 동안
+  // 필이 영구 소멸한다 (H-1 오발).
   useEffect(() => {
-    if (shouldLatchUnreadJump(dividerRelation)) setUnreadJumpLatched(true);
-  }, [dividerRelation]);
+    if (shouldLatchUnreadJump(observedRelation)) setUnreadJumpLatched(true);
+  }, [observedRelation]);
 
   useEffect(() => {
     if (dividerEl === null || scrollerEl === null) {

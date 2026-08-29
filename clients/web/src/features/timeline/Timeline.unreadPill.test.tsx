@@ -251,7 +251,7 @@ describe("Timeline unread jump pill", () => {
     const pill = root.querySelector("[data-testid='jump-unread']");
     expect(pill).not.toBeNull();
     expect(pill?.textContent).toBe("새 메시지 5개 보기");
-    expect(pill?.getAttribute("aria-label")).toBe("새 메시지 5개 보기");
+    expect(pill?.getAttribute("aria-label")).toBe("위쪽의 새 메시지 5개 보기");
 
     reportObserved("in");
     expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
@@ -435,7 +435,7 @@ describe("Timeline unread jump pill", () => {
     reportObserved("above");
     const pill = root.querySelector("[data-testid='jump-unread']");
     expect(pill?.textContent).toBe("새 메시지 5개 보기");
-    expect(pill?.getAttribute("aria-label")).toBe("새 메시지 5개 보기");
+    expect(pill?.getAttribute("aria-label")).toBe("위쪽의 새 메시지 5개 보기");
     expect(pill?.getAttribute("data-new-count")).toBe("5");
   });
 
@@ -484,6 +484,94 @@ describe("Timeline unread jump pill", () => {
     });
     const landed = root.querySelector("[data-testid='timeline-message'][data-seq='4']");
     expect(document.activeElement).toBe(landed);
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+  });
+
+  it("observed가 없을 때 range 「in」은 래치를 무장하지 않는다", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+
+    // 오버스캔 거짓: 구분선 첨자를 지나는 range. IO는 아직 침묵.
+    reportRange(divider - 1, divider + 4);
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+
+    // 구분선은 창 위쪽(오버스캔에만 마운트). 래치가 무장됐으면 필은 영구 소멸한다.
+    reportObserved("above");
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+
+    reportRange(divider + 2, divider + 6);
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+  });
+
+  it("채널 오픈 스윕이 구분선 첨자를 지나도 필이 선다", () => {
+    const messages = Array.from({ length: 24 }, (_, i) => message(i + 1));
+    const root = mountTimeline({
+      messages,
+      lastReadSeq: 3,
+      unreadCount: 21,
+    });
+    const items = buildTimelineItems(messages, {
+      lastReadSeq: 3,
+      unreadCount: 21,
+    });
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+
+    // virtuoso 초기 bottom 수렴: rangeChanged가 구분선 첨자를 스친다.
+    reportRange(divider - 1, divider + 4);
+    reportRange(items.length - 6, items.length - 1);
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+    expect(
+      root.querySelector("[data-testid='jump-unread']")?.getAttribute("data-new-count")
+    ).toBe("21");
+  });
+
+  it("IO 「in」에서만 래치가 무장되고 돌아와도 다시 서지 않는다", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+
+    reportObserved("in");
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+  });
+
+  it("상단 필 실행은 IO 「in」 없이 래치를 무장한다", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+    const pill = root.querySelector<HTMLButtonElement>(
+      "[data-testid='jump-unread']"
+    );
+    expect(pill).not.toBeNull();
+    act(() => {
+      pill?.click();
+    });
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
     expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
   });
 
