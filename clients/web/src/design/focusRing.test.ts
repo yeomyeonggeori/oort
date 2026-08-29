@@ -102,6 +102,19 @@ describe("검수 #1 — focus-ring 유틸", () => {
       expect(outlineOffsetPx(rule.body), candidate).toBeLessThan(0);
     }
   });
+
+  it("focus-visible-within:focus-ring 은 Tab 모달리티 + 자식 :focus-visible 에서만 같은 링을 낸다", async () => {
+    const css = await buildCss(["focus-visible-within:focus-ring"]);
+    const rule = focusRingRule(css, "focus-visible-within:focus-ring");
+    expect(rule.selector).toContain("data-focus-modality");
+    expect(rule.selector).toContain("keyboard");
+    expect(rule.selector).toContain(":focus-visible");
+    expect(rule.selector).not.toContain(":focus-within");
+    expect(rule.body).toMatch(
+      /outline:\s*2px solid var\(--focus-ring-ink,\s*var\(--accent\)\)/
+    );
+    expect(outlineOffsetPx(rule.body)).toBeLessThan(0);
+  });
 });
 
 describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review High)", () => {
@@ -189,6 +202,19 @@ describe("검수 #1 — 전면 치환", () => {
     for (const file of ["ui/button.tsx", "ui/input.tsx", "ui/select.tsx"]) {
       const source = readFileSync(`${HERE}/${file}`, "utf8");
       expect(source, file).toContain("focus-visible:focus-ring");
+      expect(source, file).not.toMatch(/focus:border/);
+    }
+  });
+
+  it("컴포저 그릇은 포인터 :focus-within 링이 아니라 focus-visible-within 이다", () => {
+    for (const file of [
+      "../features/chat/Composer.tsx",
+      "../features/timeline/ThreadComposer.tsx",
+    ]) {
+      const source = readFileSync(`${HERE}/${file}`, "utf8");
+      expect(source, file).toContain("focus-visible-within:focus-ring");
+      expect(source, file).not.toContain("focus-within:focus-ring");
+      expect(source, file).not.toMatch(/focus:border/);
     }
   });
 });

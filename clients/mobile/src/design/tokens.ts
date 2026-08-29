@@ -385,7 +385,7 @@ export const lightPalette: Palette = {
   bg: '#f7f6f3',
   surface: '#fffefb',
   surfacePressed: '#e7e3db',
-  border: '#dcd8d0',
+  border: '#e4e0d8',
   text: '#24211c',
   textMuted: '#6a655f',
   textFaint: '#84817d',

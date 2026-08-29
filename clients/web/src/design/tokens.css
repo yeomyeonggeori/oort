@@ -30,8 +30,11 @@
   --surface-sidebar: light-dark(#efece6, #1b1a1f);
   --surface-hover: light-dark(#e7e3db, #26252c);
 
-  /* --- lines: --line separates, --line-strong outlines controls (3:1) ---- */
-  --line: light-dark(#dcd8d0, #34323b);
+  /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
+   * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
+   * 라이트 --surface-hover 위 3.03:1 이라 RGB +1 이 2.99 로 3:1(WCAG 1.4.11)이
+   * 깨지므로 그대로 둔다. 다크 항 무접촉. */
+  --line: light-dark(#e4e0d8, #34323b);
   --line-strong: light-dark(#84817d, #6f6e73);
 
   /* --- text -------------------------------------------------------------- */
@@ -699,7 +702,22 @@
  *   - 클래스 목록에 `focus-visible:` 문자열이 남아 프리플라이트 `naked_focus` 가
  *     `outline-none` 라인(dropdown-menu 항목)에서 그대로 참이 된다.
  * focus-ring-on-fill 은 변수만 세우므로 변형 없이(bare) 채워진 컨트롤에 붙인다.
+ *
+ * ## 텍스트 입력 그릇 (#1866)
+ *
+ * 컴포저처럼 textarea 를 감싼 그릇에 `focus-within:focus-ring` 을 두면 마우스
+ * 클릭에도 인셋 accent 링이 보더를 덮어, 보더 색이 바뀐 것처럼 보인다. 안쪽
+ * textarea 는 스펙상 포인터 포커스에도 `:focus-visible` 이 매치되므로
+ * `:has(:focus-visible)` 만으로는 갈리지 않는다. `focus-visible-within` 은
+ * Tab 모달리티(`data-focus-modality="keyboard"`, `focusModality.ts`)와 자식
+ * `:focus-visible` 을 함께 요구한다. 컨트롤 프리미티브의 `focus-visible:focus-ring`
+ * 은 그대로다.
  * ========================================================================== */
+@custom-variant focus-visible-within {
+  :root[data-focus-modality="keyboard"] &:has(:focus-visible) {
+    @slot;
+  }
+}
 @utility focus-ring {
   outline: 2px solid var(--focus-ring-ink, var(--accent));
   outline-offset: -2px;

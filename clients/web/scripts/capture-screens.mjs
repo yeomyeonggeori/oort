@@ -2841,6 +2841,7 @@ async function assertComposerTabOrder(page, where) {
         activeOutlineStyle: activeStyle?.outlineStyle ?? null,
         outlineWidth: ringStyle?.outlineWidth ?? null,
         outlineStyle: ringStyle?.outlineStyle ?? null,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
       };
     })()`);
     walked.push(focus.testId);
@@ -2849,7 +2850,8 @@ async function assertComposerTabOrder(page, where) {
       !focus.focusVisible ||
       focus.outlineWidth !== "2px" ||
       focus.outlineStyle !== "solid" ||
-      (index === 0 && focus.activeOutlineStyle !== "none")
+      (index === 0 && focus.activeOutlineStyle !== "none") ||
+      (index === 0 && focus.modality !== "keyboard")
     ) {
       throw new Error(
         `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
@@ -2866,18 +2868,41 @@ async function assertComposerTabOrder(page, where) {
 /** 액션 행의 버튼 아닌 가운데 폭을 실제로 눌러 입력 캐럿이 돌아오는지 잰다. */
 async function assertComposerVesselClick(page, where, ids) {
   const input = page.getByTestId(ids.input);
+  const frame = page.getByTestId(ids.frame ?? "composer-frame");
+  const rest = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor };
+  });
   await input.fill("그릇 클릭 확인");
   await input.evaluate((element) => element.setSelectionRange(2, 2));
   await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
-  const proof = await input.evaluate((element) => ({
-    active: document.activeElement === element,
-    start: element.selectionStart,
-    end: element.selectionEnd,
-  }));
-  if (!proof.active || proof.start !== 2 || proof.end !== 2) {
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const frame = document.querySelector('[data-testid="${ids.frame ?? "composer-frame"}"]');
+    const frameStyle = frame ? getComputedStyle(frame) : null;
+    return {
+      active: document.activeElement === input,
+      start: input?.selectionStart ?? null,
+      end: input?.selectionEnd ?? null,
+      borderColor: frameStyle?.borderColor ?? null,
+      outlineWidth: frameStyle?.outlineWidth ?? null,
+      outlineStyle: frameStyle?.outlineStyle ?? null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
+    };
+  })()`);
+  if (
+    !proof.active ||
+    proof.start !== 2 ||
+    proof.end !== 2 ||
+    proof.borderColor !== rest.borderColor ||
+    proof.outlineStyle !== "none" ||
+    proof.modality !== "pointer"
+  ) {
     throw new Error(`컴포저 그릇 클릭 ${where}: ${JSON.stringify(proof)}`);
   }
-  console.log(`  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start}`);
+  console.log(
+    `  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start} · 포인터 보더 불변`
+  );
 }
 
 /** [@]를 포인터로 실제 누르고, 기존 listbox가 입력 기준 위치에서 열린 것을 잰다. */
@@ -2911,6 +2936,8 @@ async function assertMentionTrigger(page, where, ids) {
       frameOutlineStyle: frame
         ? getComputedStyle(frame).outlineStyle
         : null,
+      frameBorderColor: frame ? getComputedStyle(frame).borderColor : null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
       options: list?.querySelectorAll('[role="option"]').length ?? 0,
       leftDelta:
         inputRect && listRect ? Math.round(listRect.left - inputRect.left) : null,
@@ -2918,16 +2945,15 @@ async function assertMentionTrigger(page, where, ids) {
         inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
     };
   })()`);
-  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
-  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
-  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
+  // 텍스트 입력류는 스펙상 클릭에도 :focus-visible이 매치된다. 그릇 링은 Tab
+  // 모달리티에서만 선다(#1866). 포인터 경로의 [@]는 보더 색·아웃라인을 바꾸지 않는다.
   if (
     proof.value !== "배포 @ 확인" ||
     proof.active !== ids.input ||
     proof.focusVisible !== true ||
     proof.inputOutlineStyle !== "none" ||
-    proof.frameOutlineWidth !== "2px" ||
-    proof.frameOutlineStyle !== "solid" ||
+    proof.frameOutlineStyle !== "none" ||
+    proof.modality !== "pointer" ||
     proof.options < 1 ||
     Math.abs(proof.leftDelta) > 1 ||
     proof.gap < 0 ||
@@ -2936,7 +2962,7 @@ async function assertMentionTrigger(page, where, ids) {
     throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
   }
   console.log(
-    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, ring=frame`
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, pointer 그릇 무링`
   );
   return proof;
 }
@@ -4973,7 +4999,11 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, scheme, {
     input: "composer-input",
     actions: "composer-actions",
+    frame: "composer-frame",
   });
+  const pointerShot = `${OUT_DIR}/composer-pointer-${scheme}.png`;
+  await login.screenshot({ path: pointerShot });
+  shots.push(pointerShot);
 
   // 새 진입점은 캡처 레인이 실제로 누른다. 클릭이 @를 넣고 기존 listbox를 열며,
   // 포인터 경로의 프로그램 포커스가 :focus-visible 링을 지어내지 않는 데까지 한 자다.
@@ -5512,6 +5542,7 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, `thread ${scheme}`, {
     input: "thread-composer-input",
     actions: "thread-composer-actions",
+    frame: "thread-composer-frame",
   });
   await assertMentionTrigger(login, `thread ${scheme}`, {
     input: "thread-composer-input",

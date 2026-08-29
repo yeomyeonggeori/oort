@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BZ-3 라이트 보더·컴포저 포커스 (#1866, 2026-08-29)
+
+- 라이트 `--line`을 `#dcd8d0` → `#e4e0d8`로 한 단계 옅게. `--line-strong`은 라이트 `--surface-hover` 위 3.03:1이라 RGB +1이 2.99로 3:1이 깨져 그대로(다크 무접촉).
+- 컴포저 그릇은 `focus-within:focus-ring`을 떼고 `focus-visible-within:focus-ring`(Tab 모달리티 + 자식 `:focus-visible`). 마우스 클릭에서 보더 색·링 불변, Tab 진입에서만 기존 인셋 링. Input/Select/outline은 프리미티브 `focus-visible:focus-ring` 유지.
+- 정본 동기: design-system §2.2 · taste `tokens.md` · 폰 `lightPalette.border` 짝.
+
 ## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)
 
 - ConnectPage를 S0 랜딩(단일 룩 딥스페이스 + OortMark 궤도 드로잉 + 산포 필드 + 2택) / S1 서버·초대 / S2 계정으로 감쌌다. 로그인·join·서버 검증·`momo.web.server.v1` 의미론은 기존 재사용. 저장 서버 또는 `/join?code=` 프리필이면 S0 생략.
