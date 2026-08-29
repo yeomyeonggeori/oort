@@ -76,17 +76,18 @@ describe("workspaceRailTile", () => {
   });
 });
 
-describe("접힌 레일 묶음 (M-4)", () => {
-  it("패널 열기는 워크스페이스 nav 밖에 산다", () => {
+describe("레일 묶음 (M-4)", () => {
+  it("워크스페이스 nav 안에는 현재 타일과 추가만 산다", () => {
     const navOpen = railSource.indexOf('aria-label="워크스페이스"');
     const navClose = railSource.indexOf("</nav>");
-    const expand = railSource.indexOf('data-testid="sidebar-expand"');
     const add = railSource.indexOf('data-testid="add-workspace"');
+    const current = railSource.indexOf('data-testid="workspace-current"');
     expect(navOpen).toBeGreaterThan(-1);
+    expect(current).toBeGreaterThan(navOpen);
+    expect(current).toBeLessThan(navClose);
     expect(add).toBeGreaterThan(navOpen);
     expect(add).toBeLessThan(navClose);
-    expect(expand).toBeGreaterThan(navClose);
-    expect(railSource).toContain("mt-auto flex size-rail-tile");
+    expect(railSource).not.toContain("sidebar-expand");
     expect(railSource).toContain(
       "border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
     );

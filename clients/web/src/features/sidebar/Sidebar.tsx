@@ -8,7 +8,6 @@ import {
   Lock,
   MessageSquare,
   Milestone,
-  PanelLeftClose,
   Plus,
   Search,
   SquareTerminal,
@@ -20,6 +19,7 @@ import { useQuery } from "@tanstack/react-query";
 import { uuidEq, type Channel } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
+import { isSidebarTreeInert } from "@/app/sidebarPane";
 import { useInertWhile, useShellNav } from "@/app/shellNav";
 import {
   agentTurnsInChannel,
@@ -128,11 +128,11 @@ function AgentTurnBadge({
 export function Sidebar({
   onOpenQuickSwitcher,
   channelPaneCollapsed,
-  onChannelPaneCollapsedChange,
+  treeHidden,
 }: {
   onOpenQuickSwitcher: () => void;
   channelPaneCollapsed: boolean;
-  onChannelPaneCollapsedChange: (collapsed: boolean) => void;
+  treeHidden: boolean;
 }) {
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
@@ -140,70 +140,27 @@ export function Sidebar({
 
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
-  // 접근성 트리에서는 `inert`로 빠져야 한다. 보이지 않는 것을 읽을 수 있게 두면
-  // 스크린리더 사용자는 열지도 않은 서랍 안을 걷는다.
+  // 접근성 트리에서는 `inert`로 빠져야 한다. 데스크톱 접힘(#1864)도 같다: 폭 0
+  // 열 안의 검색·행·프로필로 Tab이 들어가면 안 된다. 접힘 전환이 끝나면
+  // `hidden`이 트리를 페인트/기하에서 빼 0폭 overflow 상자의 가로 스크롤을
+  // 남기지 않는다. 펼침은 hidden을 먼저 걷고 다음 프레임에 폭을 연다.
   const { isMobile, drawerOpen, closeDrawer } = useShellNav();
   const asDrawer = isMobile;
-  const drawerRef = useInertWhile<HTMLDivElement>(asDrawer && !drawerOpen);
+  const drawerRef = useInertWhile<HTMLDivElement>(
+    isSidebarTreeInert({
+      asDrawer,
+      drawerOpen,
+      collapsed: channelPaneCollapsed,
+    })
+  );
   const closeRef = useRef<HTMLButtonElement>(null);
-  const collapsePaneRef = useRef<HTMLButtonElement>(null);
-  const expandPaneRef = useRef<HTMLButtonElement>(null);
-  const previousCollapsedRef = useRef(channelPaneCollapsed);
-  const previousDrawerRef = useRef(asDrawer);
-  const desktopToggleFocusedRef = useRef(false);
   const collapsedSections = useSidebarSectionsCollapsed();
-
-  const onDesktopToggleBlur = (event: React.FocusEvent<HTMLButtonElement>) => {
-    const next = event.relatedTarget;
-    // Removing the focused desktop toggle during a breakpoint change reports
-    // body/null. Keep that fact until the effect below can hand it to the mobile
-    // opener. A real visible destination means the user already chose a better
-    // place, so the shell must not steal focus back.
-    if (
-      next instanceof HTMLElement &&
-      next !== document.body &&
-      next.getClientRects().length > 0
-    ) {
-      desktopToggleFocusedRef.current = false;
-    }
-  };
 
   // 열리면 캐럿이 서랍 안으로 들어간다. 첫 정거장은 닫기 버튼이다: 잘못 열었을
   // 때 되돌리는 길이 첫 번째여야 하고, 그 다음이 검색과 채널 목록이다.
   useEffect(() => {
     if (asDrawer && drawerOpen) closeRef.current?.focus();
   }, [asDrawer, drawerOpen]);
-
-  // 접는 버튼은 자기 패널과 함께 사라진다. React 커밋 뒤에도 포커스를 그
-  // 보이지 않는 노드에 두면 다음 Tab이 문서 처음으로 튀므로, 살아남는 레일
-  // 컨트롤로 명시적으로 넘긴다. 다시 열 때도 같은 왕복을 지켜 사용자가 방금
-  // 조작한 자리에서 계속 간다. 폰 서랍은 독립 상태라 접기 변화에 참여하지
-  // 않는다. 폭 전환으로 현재 토글이 사라지면서 포커스가 고립된 경우에만
-  // (본문의 살아 있는 포커스는 빼앗지 않고) 반대 폭의 현재 토글로 회수한다.
-  useEffect(() => {
-    const changed = previousCollapsedRef.current !== channelPaneCollapsed;
-    const movedToDrawer = !previousDrawerRef.current && asDrawer;
-    const returnedToDesktop = previousDrawerRef.current && !asDrawer;
-    previousCollapsedRef.current = channelPaneCollapsed;
-    previousDrawerRef.current = asDrawer;
-    const active = document.activeElement;
-    const focusStranded =
-      active === null ||
-      active === document.body ||
-      (active instanceof HTMLElement && active.getClientRects().length === 0);
-    if (asDrawer) {
-      if (movedToDrawer && desktopToggleFocusedRef.current && focusStranded) {
-        const opener = document.querySelector<HTMLButtonElement>(
-          '[data-testid="open-sidebar-drawer"]'
-        );
-        if (opener?.getClientRects().length) opener.focus();
-      }
-      desktopToggleFocusedRef.current = false;
-      return;
-    }
-    if (!changed && (!returnedToDesktop || !focusStranded)) return;
-    (channelPaneCollapsed ? expandPaneRef : collapsePaneRef).current?.focus();
-  }, [asDrawer, channelPaneCollapsed]);
 
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
@@ -380,7 +337,6 @@ export function Sidebar({
       id="sidebar-drawer"
       className="sidebar-drawer flex h-full"
       data-open={asDrawer && drawerOpen ? "" : undefined}
-      data-pane-collapsed={channelPaneCollapsed ? "" : undefined}
       data-testid="sidebar"
     >
       <WorkspaceRail
@@ -391,47 +347,19 @@ export function Sidebar({
         }}
         workspaceId={workspaceId}
         avatarUrl={workspaceQuery.data?.avatarUrl}
-        showChannelPaneExpand={channelPaneCollapsed && !asDrawer}
-        channelPaneExpandRef={expandPaneRef}
-        onExpandChannelPane={() => onChannelPaneCollapsedChange(false)}
-        onChannelPaneExpandFocus={() => {
-          desktopToggleFocusedRef.current = true;
-        }}
-        onChannelPaneExpandBlur={onDesktopToggleBlur}
+        hidden={treeHidden}
       />
 
       <div
         id="sidebar-channel-pane"
+        hidden={treeHidden}
         data-sidebar-channel-pane
         data-testid="sidebar-channel-pane"
         className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
       >
         <div className="flex items-center gap-2 border-b border-line p-2">
-          {/* Desktop-only. The control used to live under the identity row
-              (#1291); UX-D4 puts it at the top of the open pane (buzz 34·35).
-              Expand lives on the rail, outside the workspace nav, so the
-              two are a focus handoff rather than one seat. Icon-only: the
-              accessible name is unchanged so the shell gate still reads the
-              same aria-controls relationship. */}
-          {!asDrawer && (
-            <button
-              ref={collapsePaneRef}
-              type="button"
-              onClick={() => onChannelPaneCollapsedChange(true)}
-              onFocus={() => {
-                desktopToggleFocusedRef.current = true;
-              }}
-              onBlur={onDesktopToggleBlur}
-              aria-label="탐색 패널 접기"
-              aria-expanded="true"
-              aria-controls="sidebar-channel-pane"
-              title="탐색 패널 접기"
-              data-testid="sidebar-collapse"
-              className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-            >
-              <PanelLeftClose className="size-4" aria-hidden="true" />
-            </button>
-          )}
+          {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
+              접는 순간 입구가 사라진다. */}
           <Button
             variant="outline"
             size="sm"
@@ -691,7 +619,7 @@ export function Sidebar({
               the card, and only when the rail is unhealthy.
             UX-D4 (#1756) made the whole row the profile-card trigger: status
             radios, the rail's 워크스페이스 추가, and settings live in that
-            card. The collapse control moved to the pane header (buzz 34·35). */}
+            card. The collapse control lives on the titlebar (#1864). */}
         <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
           <ProfileCard
             workspaceId={workspaceId}
