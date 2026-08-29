@@ -539,8 +539,23 @@
    * 값이 180 인 것은 추측이되 근거 있는 추측이다: 자리는 `--spacing-pane`
    * (320px) 폭으로 잡히고 320x180 은 16:9 다. 사람들이 실제로 붙이는 것의
    * 대다수는 스크린샷이고 스크린샷은 16:9 근처라, 도착하는 순간의 이동이 흔한
-   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다. */
+   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다.
+   *
+   * 링크 프리뷰 히어로에 이 값을 고정 높이로 쓰지 마라. 그 카드는
+   * `max-w-pane-lg`(640) 안에 살고, 180 고정은 거기서 3.54:1 이 되어 OG
+   * 원본(1.91:1)의 절반을 버린다(#1903 H-2). 히어로는 `--aspect-og` +
+   * `--spacing-unfurl-hero` 상한이다. */
   --spacing-preview-frame: 180px;
+
+  /* 링크 프리뷰 rich 히어로의 높이 상한 (#1903 design-review H-2).
+   *
+   * 비율은 `--aspect-og`(1.91:1, OG 표준 캔버스 1200×630). 상한은 카드가
+   * 실제로 사는 최대 폭 `--spacing-pane-lg`(640) 을 그 비율로 나눈 값이다:
+   * 640 / 1.91 ≈ 335.1, 8px 격자로 올린 336. pane-lg 안에서는 비율이 이기고
+   * 상한은 묶이지 않는다. 첨부 미리보기 `--spacing-preview-frame`(180)을
+   * 여기서 빌려 쓰면 640 폭에서 3.54:1 이 되고, 그 토큰의 근거(320×16:9)는
+   * 이 자리의 거짓이 된다. */
+  --spacing-unfurl-hero: 336px;
 
   /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
    *
@@ -587,6 +602,11 @@
   --text-title--line-height: 1.5rem;
   --text-display: 1.25rem; /* 20px, at most one per surface */
   --text-display--line-height: 1.75rem;
+
+  /* 링크 프리뷰 rich 히어로 비율 (#1903 design-review H-2).
+   * Open Graph 권장 캔버스는 1.91:1 (1200×630). 카드 폭에 이 비율을 매고
+   * 높이 상한은 `--spacing-unfurl-hero`. 유틸 `aspect-og`. */
+  --aspect-og: 1.91 / 1;
 }
 
 @theme inline {

@@ -24,7 +24,6 @@ import { spawn } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 
@@ -68,61 +67,86 @@ function pixelToken(name) {
 const COMPOSER_FRAME_INSET = pixelToken("spacing-3");
 const ANCHOR_ALIGNMENT_TOLERANCE = pixelToken("spacing-1");
 
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c;
-  }
-  return table;
-})();
-
-function crc32(buffer) {
-  let c = 0xffffffff;
-  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return c ^ 0xffffffff;
-}
-
 /**
- * 1200×630 is the common OG thumbnail canvas. The old 1×1 black pixel could
- * neither exercise `object-cover` nor make an aspect-ratio regression visible
- * in the captured frame. The two-axis gradient makes both cropped edges and
- * the retained centre legible without importing an external asset.
+ * 1200×630 OG thumbnail for the capture unfurl. A rainbow gradient on this
+ * canvas became the largest chromatic object in chat-light/dark once rich
+ * was the default (#1903 M-3) — the §8-banned hero silhouette. This is a
+ * docs-site OG card: solid paper, a mark, Korean+English runbook copy.
  */
-function makeUnfurlPreviewPng(width, height) {
-  const raw = Buffer.alloc((width * 3 + 1) * height);
-  let at = 0;
-  for (let y = 0; y < height; y++) {
-    raw[at++] = 0;
-    for (let x = 0; x < width; x++) {
-      raw[at++] = 32 + Math.round((x / width) * 176);
-      raw[at++] = 52 + Math.round((y / height) * 140);
-      raw[at++] = 184 - Math.round((x / width) * 112);
-    }
-  }
-  const chunk = (type, body) => {
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(body.length);
-    const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(typed) >>> 0);
-    return Buffer.concat([length, typed, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
+let UNFURL_PREVIEW_PNG;
 
-const UNFURL_PREVIEW_PNG = makeUnfurlPreviewPng(1200, 630);
+async function prepareUnfurlPreviewPng(browser) {
+  if (UNFURL_PREVIEW_PNG) return;
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 630 },
+    deviceScaleFactor: 1,
+  });
+  await page.setContent(`<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 1200px; height: 630px; }
+    body {
+      position: relative;
+      background: #efece6;
+      color: #24211c;
+      font: 32px/1.35 "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+      box-sizing: border-box;
+      padding: 56px 64px 56px 80px;
+      display: flex;
+      flex-direction: column;
+    }
+    .rail {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 16px;
+      background: #a54c08;
+    }
+    .mark {
+      width: 48px; height: 48px;
+      background: #a54c08;
+      border-radius: 6px;
+    }
+    .kicker {
+      margin-top: 28px;
+      font-size: 22px;
+      color: #6a655f;
+    }
+    h1 {
+      margin: 12px 0 0;
+      font-size: 52px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin-top: 16px;
+      font-size: 26px;
+      color: #6a655f;
+    }
+    .bar {
+      margin-top: auto;
+      width: 160px;
+      height: 8px;
+      background: #a54c08;
+    }
+  </style>
+</head>
+<body>
+  <div class="rail"></div>
+  <div class="mark"></div>
+  <div class="kicker">docs.oor7.com · oort runbook</div>
+  <h1>게이트웨이 오류 대응 런북</h1>
+  <p class="sub">Gateway error runbook · 502 path and worker checks</p>
+  <div class="bar"></div>
+</body>
+</html>`);
+  UNFURL_PREVIEW_PNG = await page.screenshot({
+    type: "png",
+    clip: { x: 0, y: 0, width: 1200, height: 630 },
+  });
+  await page.close();
+}
 
 // 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
 // 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
@@ -1778,13 +1802,16 @@ async function installMocks(context) {
           : [],
     });
   });
-  await context.route("**/v1/workspaces/*/unfurls/*/image", (route) =>
-    route.fulfill({
+  await context.route("**/v1/workspaces/*/unfurls/*/image", (route) => {
+    if (!UNFURL_PREVIEW_PNG) {
+      throw new Error("언퍼얼 OG 픽스처 PNG가 아직 없다");
+    }
+    return route.fulfill({
       status: 200,
       contentType: "image/png",
       body: UNFURL_PREVIEW_PNG,
-    })
-  );
+    });
+  });
   await context.route("**/v1/workspaces/*/unfurl-settings", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     return json(route, {
@@ -6220,14 +6247,9 @@ async function captureScheme(browser, scheme) {
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
   await turns.getByTestId("composer-working").waitFor({ state: "visible" });
-  // The ADR-0135 D1 cascade notice, and this wait is a GATE rather than a
-  // convenience. The row it hangs on is the WORKER turn record in BODIES, which
-  // is the only shape a real cascade can land on; the seeded fallback in
-  // cascadeRail.tsx is keyed to that row's run id. If `turnRecordRunId` ever
-  // narrows back to the gateway schema, the capture stops here instead of
-  // shipping screenshots of a surface that cannot render in production, which
-  // is precisely how D1/F3 got through the gates the first time.
-  await turns.getByTestId("cascade-notice").waitFor({ state: "visible" });
+  // The rich frame is reserved before bytes arrive (#1903 H-1). Wait for
+  // the image so the shot shows the OG card, not the muted skeleton.
+  await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
@@ -6236,8 +6258,15 @@ async function captureScheme(browser, scheme) {
   //       적이 없다 — 렌더를 확인하지 못한 채 머지 리뷰까지 갔고, 거기서 구조적으로
   //       렌더 불가라는 것이 드러났다(D1/F3). 워커 턴 행에 붙은 모습을 두 스킴
   //       모두에서 남겨 다음 리뷰가 눈으로도 확인할 수 있게 한다.
-  await turns.getByTestId("cascade-notice").scrollIntoViewIfNeeded();
-  await turns.waitForTimeout(200);
+  //
+  // The notice itself is still a GATE: scrollTimelineRowIntoView dies if the
+  // worker-turn row is not in this build (the seeded fallback in cascadeRail
+  // is keyed to that row's run id).
+  await scrollTimelineRowIntoView(
+    turns,
+    "cascade-notice",
+    `agent-turns ${scheme}`
+  );
   const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
   await turns.screenshot({ path: cascadeShot });
   shots.push(cascadeShot);
@@ -7980,6 +8009,7 @@ async function main() {
   try {
     await waitForServer(ORIGIN);
     const browser = await chromium.launch();
+    await prepareUnfurlPreviewPng(browser);
     try {
       const all = [];
       // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여

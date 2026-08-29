@@ -384,6 +384,13 @@ export function ChoiceRadios({
               value={choice.id}
               checked={value === choice.id}
               onChange={() => onChange(choice.id)}
+              onClick={() => {
+                // HTML radios skip `change` when the already-selected option
+                // is clicked. Re-selecting the default still has to persist
+                // (link-preview L-2). Other consumers are idempotent on the
+                // same id.
+                if (choice.id === value) onChange(choice.id);
+              }}
               className="mt-1 accent-accent focus-visible:focus-ring"
             />
             <span className="flex min-w-0 flex-col gap-px">

@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## BF-A6 링크 프리뷰 Rich/Compact 선택 (#1903, 2026-08-30)
+
+- 설정 > 링크 미리보기를 접기 boolean에서 `rich | compact | off` 3값 라디오로. 저장 `momo.web.link-preview.v1`. 기존 `momo.web.link-previews-folded.v1`: `"true"`(카드 숨김)→`off`, `"false"`/unknown(compact 카드)→`compact`, 미저장→`rich`(미토글 기존 사용자 포함 의도적 기본 상향, 오케스트레이터 승인·성재 최종 확인 예정).
+- 타임라인 unfurl: 사진 카드는 OG 1.91:1(`aspect-og`) 히어로+`max-h-unfurl-hero` 상한. `imageUrl`이 있으면 첫 페인트부터 프레임 예약, fetch/디코드 실패만 compact 강등. 제거 X는 불투명 `bg-surface-raised` 칩. off는 미렌더. 카드 전체 단일 링크. 설정 변경은 스토어 구독으로 즉시 반영(스레드 패널 포함).
+- 서버 무접촉. runtime-unverified 아님. design-review #1913 수리: 제거 X 불투명 칩, rich 첫 페인트 프레임 예약, OG 1.91:1+`unfurl-hero` 상한, rich 메타 대칭 패딩, 미저장→rich 기록 정정, OG 픽스처 단색 런북 카드.
+- red proof: web vitest 1878 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8487` capture:design · `SHELL_GATE_PORT=8489 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-A7 컴포저 서식 최소셋 (#1902, 2026-08-30)
 
 - 채널·스레드 textarea에서 텍스트를 고르면 선택 위(공간 없으면 아래)에 부유 트레이(굵게/기울임/인라인 코드/링크). TipTap 없음. 접사는 momo-core markdown이 읽는 `** * \` []()` 만. 이미 감싸져 있으면 토글로 해제. 링크는 `[선택](링크주소)` 뒤 자리표시 선택.
