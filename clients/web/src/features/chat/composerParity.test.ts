@@ -62,6 +62,25 @@ describe("컴포저 공용 표면 (#1688)", () => {
     }
   });
 
+  it("채널과 스레드가 같은 선택 서식 트레이를 쓰고 초안 저장 경로를 우회하지 않는다 (#1902)", () => {
+    for (const composer of [channel, thread]) {
+      expect(composer).toContain("useComposerFormat");
+      expect(composer).toContain("<ComposerFormatTray");
+      expect(composer).toContain("onValueChange: mentions.replaceValue");
+      expect(composer).toContain("format.handleKeyDown(event)");
+      expect(composer).toContain("format.dismiss()");
+    }
+    expect(channel).toContain('testIdPrefix="composer-format"');
+    expect(thread).toContain('testIdPrefix="thread-composer-format"');
+    expect(channel).toContain("writeDraft(workspaceId, channelId, next)");
+    expect(channel).toMatch(
+      /useComposerFormat\([\s\S]*?onValueChange: mentions\.replaceValue/
+    );
+    expect(thread).toMatch(
+      /useComposerFormat\([\s\S]*?onValueChange: mentions\.replaceValue/
+    );
+  });
+
   it("채널과 스레드가 입력 다음에 @·첨부·이모지·보내기 한 벌을 둔다 (#1749)", () => {
     expect(channel).toMatch(
       /data-testid="composer-input"[\s\S]*?data-testid="composer-mention-trigger"[\s\S]*?<AttachButton[\s\S]*?data-testid="composer-emoji-trigger"[\s\S]*?data-testid="composer-send"/

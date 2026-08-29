@@ -1061,6 +1061,19 @@
   translate: 0 calc(100% - var(--spacing-row));
 }
 
+/* 컴포저 선택 서식 트레이 (#1902). 선택 영역 위(여유 없으면 아래)에 고정한다.
+ * 좌표는 JS가 --composer-format-left/top/shift 로 넣고, 뷰포트 클램프는
+ * composerFormatPosition.ts 가 진다. 인라인 style= 는 CSP/프리플라이트가 막는다.
+ * 모션은 없다: prefers-reduced-motion 에서도 같은 즉시 등장. */
+@utility composer-format-tray {
+  position: fixed;
+  z-index: 50;
+  inset-inline-start: var(--composer-format-left, 0px);
+  inset-block-start: var(--composer-format-top, 0px);
+  max-inline-size: calc(100vw - var(--spacing-6));
+  translate: -50% var(--composer-format-shift, 0%);
+}
+
 /* 그 반대. 손가락에게만 하는 말 (B11 R2): 길게 누르기를 알려 주는 한 줄은
  * hover가 있는 기기에서는 할 말이 없다. 거기엔 행 hover에 툴바가 보이기 때문이다. */
 @utility touch-only {
