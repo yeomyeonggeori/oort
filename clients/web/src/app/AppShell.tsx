@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
 import { Outlet, useLocation } from "react-router-dom";
 import type { LoginResponse } from "@momo/core/lib/api";
 import {
@@ -21,6 +21,7 @@ import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
+import { AppTitlebar } from "@/app/AppTitlebar";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
@@ -57,10 +58,12 @@ export function AppShell({
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  // 데스크톱의 184px 채널/프로필 패널은 필요할 때만 비킨다 (#1291).
-  // 저장소나 URL에 쓰지 않는 셸 수명 상태다: 라우트를 오가는 동안은 선택을
-  // 지키되 새 창·새 로그인까지 과거의 접힌 상태를 가져가지 않는다.
+  // 데스크톱 사이드바 접힘 (#1864). 저장소나 URL에 쓰지 않는 셸 수명 상태다:
+  // 라우트를 오가는 동안은 선택을 지키되 새 창·새 로그인까지 과거의 접힌
+  // 상태를 가져가지 않는다.
   const [sidebarPaneCollapsed, setSidebarPaneCollapsed] = useState(false);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const desktopToggleFocusedRef = useRef(false);
   // The route boundary resets when the user navigates: a failed channel must
   // not keep the next one from rendering.
   const routePath = useLocation().pathname;
@@ -85,6 +88,7 @@ export function AppShell({
   // `sidebar-drawer`). 상태는 여기 한 벌만 있고, 여는 컨트롤은 각 표면의 헤더가
   // `SidebarDrawerToggle`로 그린다.
   const isMobile = useIsMobileShell();
+  const previousMobileRef = useRef(isMobile);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   // 덮인 본문은 탭 순서에서 함께 빠진다. 이것이 초점 트랩이다 (shellNav.tsx).
@@ -154,6 +158,43 @@ export function AppShell({
   // 달았고, 같은 타깃 같은 단계의 리스너는 서로를 막지 못해 한 번의 Esc가 두 층을
   // 닫았다(design-review ADE 2단계 H1 ①). 스택이 그 문장을 자료구조로 만든다.
   useEscapeLayer(drawerOpen, closeDrawer);
+
+  const onDesktopToggleBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    const next = event.relatedTarget;
+    if (
+      next instanceof HTMLElement &&
+      next !== document.body &&
+      next.getClientRects().length > 0
+    ) {
+      desktopToggleFocusedRef.current = false;
+    }
+  };
+
+  // 폭이 서랍으로 바뀌면 타이틀바 토글이 `display: none`이 되어 포커스가
+  // 고립된다. 그때만 폰 opener로 넘기고, 본문이 이미 살아 있는 포커스를
+  // 갖고 있으면 빼앗지 않는다. 넓은 창으로 돌아오는 반대 왕복도 같다.
+  useEffect(() => {
+    const movedToDrawer = !previousMobileRef.current && isMobile;
+    const returnedToDesktop = previousMobileRef.current && !isMobile;
+    previousMobileRef.current = isMobile;
+    const active = document.activeElement;
+    const focusStranded =
+      active === null ||
+      active === document.body ||
+      (active instanceof HTMLElement && active.getClientRects().length === 0);
+    if (isMobile) {
+      if (movedToDrawer && desktopToggleFocusedRef.current && focusStranded) {
+        const opener = document.querySelector<HTMLButtonElement>(
+          '[data-testid="open-sidebar-drawer"]'
+        );
+        if (opener?.getClientRects().length) opener.focus();
+      }
+      desktopToggleFocusedRef.current = false;
+      return;
+    }
+    if (!returnedToDesktop || !focusStranded) return;
+    sidebarToggleRef.current?.focus();
+  }, [isMobile]);
 
   useEffect(() => {
     if (stress) return;
@@ -226,10 +267,18 @@ export function AppShell({
             className="app-shell"
             data-sidebar-collapsed={sidebarPaneCollapsed ? "" : undefined}
           >
+            <AppTitlebar
+              collapsed={sidebarPaneCollapsed}
+              onCollapsedChange={setSidebarPaneCollapsed}
+              toggleRef={sidebarToggleRef}
+              onToggleFocus={() => {
+                desktopToggleFocusedRef.current = true;
+              }}
+              onToggleBlur={onDesktopToggleBlur}
+            />
             <Sidebar
               onOpenQuickSwitcher={() => setSwitcherOpen(true)}
               channelPaneCollapsed={sidebarPaneCollapsed}
-              onChannelPaneCollapsedChange={setSidebarPaneCollapsed}
             />
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
              * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그

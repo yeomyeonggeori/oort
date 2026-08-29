@@ -1,5 +1,5 @@
-import { useRef, type FocusEventHandler, type Ref } from "react";
-import { PanelLeftOpen, Plus } from "lucide-react";
+import { useRef } from "react";
+import { Plus } from "lucide-react";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
 import { useWorkspaceAvatar } from "./useWorkspaceAvatar";
 import {
@@ -18,11 +18,6 @@ export function WorkspaceRail({
   workspace,
   workspaceId,
   avatarUrl,
-  showChannelPaneExpand,
-  channelPaneExpandRef,
-  onExpandChannelPane,
-  onChannelPaneExpandFocus,
-  onChannelPaneExpandBlur,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
   // NOT a bare string, on purpose: a bare string is exactly what let the shell
@@ -37,12 +32,6 @@ export function WorkspaceRail({
    * `data:` URL — an `<img src>` to the proxy cannot authenticate.
    */
   avatarUrl?: string;
-  /** Desktop-only reopen control; the mobile drawer remains an independent layer. */
-  showChannelPaneExpand: boolean;
-  channelPaneExpandRef: Ref<HTMLButtonElement>;
-  onExpandChannelPane: () => void;
-  onChannelPaneExpandFocus: () => void;
-  onChannelPaneExpandBlur: FocusEventHandler<HTMLButtonElement>;
 }) {
   const tile = workspaceRailTile(workspace, workspaceId);
   const avatarDataUrl = useWorkspaceAvatar(avatarUrl);
@@ -112,8 +101,7 @@ export function WorkspaceRail({
       {/* [+] 는 워크스페이스를 추가한다 (#4a-2). 셸이 소유한 다이얼로그를 액션
           자리에서 연다. 윤곽선은 컨트롤 윤곽선이라 --line 이 아니라 --line-strong(3:1)
           을 쓰고, 현재 타일과 같은 44px 사각형이되 액센트 바도 채운 표면도 없어
-          "현재"로 오인되지 않는다. 패널 열기는 이 nav 밖 — 워크스페이스 묶음과
-          패널 컨트롤을 가르기 위해서다 (M-4). */}
+          "현재"로 오인되지 않는다. 패널 접기는 타이틀바에 한 자리만 산다 (#1864). */}
       <button
         ref={addWorkspaceRef}
         type="button"
@@ -131,25 +119,6 @@ export function WorkspaceRail({
           끊김이라는 무거운 상태는 셸의 ConnectionBanner가 별도로 덮는다.
           이 점은 사용자 프레즌스(가용성/away/dnd, ADR-0160 6b)가 아니다. */}
     </nav>
-
-      {showChannelPaneExpand && (
-        <button
-          ref={channelPaneExpandRef}
-          type="button"
-          onClick={onExpandChannelPane}
-          onFocus={onChannelPaneExpandFocus}
-          onBlur={onChannelPaneExpandBlur}
-          aria-label="탐색 패널 열기"
-          aria-expanded="false"
-          aria-controls="sidebar-channel-pane"
-          title="탐색 패널 열기"
-          data-testid="sidebar-expand"
-          className="mt-auto flex size-rail-tile flex-col items-center justify-center gap-px rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-        >
-          <PanelLeftOpen className="size-4" aria-hidden="true" />
-          <span className="text-timestamp">열기</span>
-        </button>
-      )}
     </div>
   );
 }

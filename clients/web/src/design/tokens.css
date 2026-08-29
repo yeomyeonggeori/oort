@@ -236,6 +236,18 @@
    * 전체가 아니라 서랍이라는 사실이 보여야, 바깥을 눌러 닫을 자리도 함께 보인다. */
   --w-sidebar-drawer: 280px;
 
+  /* 데스크톱 사이드바 접힘/펼침 (#1864). 서랍 슬라이드(160ms)와 같은 축의 피드백
+   * 이되, 폭 전환은 한 박자 더 길어야 열이 사라지는 방향이 읽힌다. 장식 루프가
+   * 아니라 상태 변화 한 번이므로 200ms ease-out. prefers-reduced-motion 에서는
+   * `app-shell` 유틸이 이 값을 쓰지 않는다. */
+  --duration-sidebar: 200ms;
+
+  /* Overlay 타이틀바의 트래픽라이트 자리 (#1864). macOS 세 원(약 52px) +
+   * trafficLightPosition.x 16 + 토글과의 간격. 웹(브라우저)은 이 값을 쓰지 않고
+   * `app-titlebar`의 기본 인셋만 쓴다. 드래그 속성(`[data-tauri-drag-region]`)이
+   * 있을 때만 이 폭을 연다 — 렌더 트리는 같고 속성만 조건부(브리프). */
+  --titlebar-inset: 80px;
+
   /* 실제로 보이는 뷰포트 높이 (goal B9). 값은 src/app/viewportHeight.ts가 매
    * `visualViewport` 변화마다 다시 쓴다. 여기 있는 것은 **그 값이 아직 없을 때의
    * 답**이다: 스크립트가 돌기 전 첫 페인트, 그리고 visualViewport가 없는 옛
@@ -700,19 +712,33 @@
 @utility app-shell {
   display: grid;
   grid-template-columns: var(--w-sidebar) 1fr;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   block-size: 100%;
   min-block-size: 0;
   position: relative;
   overflow: clip;
 
-  /* 데스크톱 집중 모드 (#1291). 워크스페이스 문맥을 잃지 않도록 56px 레일은
-   * 남기고, 240px 셸 열에서 그 레일을 뺀 채널/프로필 패널 184px만 본문에
-   * 돌려준다. 전환을 두지 않는다: 콘텐츠가 움직이는 장식이 아니라 즉시 폭을
-   * 확보하는 셸 조작이고, 포커스 왕복은 Sidebar가 별도로 소유한다. */
+  /* 타이틀바가 빠져도(폰에서 display:none) 사이드바·본문은 둘째 행을 지킨다.
+   * auto-placement에 맡기면 타이틀바가 없는 순간 둘이 첫째 행(auto)으로 올라가
+   * 셸 높이가 내용이 된다. */
+  > .sidebar-drawer,
+  > main {
+    grid-row: 2;
+    min-inline-size: 0;
+  }
+
+  /* 데스크톱 접힘 (#1864). 사이드바 열을 0으로 접어 본문을 풀폭으로 돌린다.
+   * 토글은 첫째 행(타이틀바)에 남는다. 폭 전환은 `--duration-sidebar`이고,
+   * reduced-motion에서는 즉시 자리가 바뀐다. */
   @media (width >= 600px) {
+    transition: grid-template-columns var(--duration-sidebar) ease-out;
+
     &[data-sidebar-collapsed] {
-      grid-template-columns: var(--spacing-rail) 1fr;
+      grid-template-columns: 0px 1fr;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
     }
   }
 
@@ -723,6 +749,12 @@
    * `overflow: clip`이 닫힌 서랍을 잘라내므로 가로 스크롤은 생기지 않는다. */
   @media (width < 600px) {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+
+    > .sidebar-drawer,
+    > main {
+      grid-row: 1;
+    }
 
     /* 위쪽 안전 영역 (goal B9). `viewport-fit=cover`로 노치 아래까지 그리기로 한
      * 이상, 아래를 물러나는 규칙(safe-area-bottom)만 있고 위가 없는 것은 반쪽이다.
@@ -737,8 +769,8 @@
   }
 }
 
-/* 사이드바 서랍 (B6). 데스크탑에서는 아무것도 하지 않는다 — 사이드바는 격자의
- * 첫 열에 그대로 서고, 이 유틸리티는 폰에서만 규칙을 갖는다.
+/* 사이드바 서랍 (B6). 데스크톱은 격자의 첫 열이고, 접힐 때 overflow로 자른다.
+ * 폰에서만 절대 위치 서랍 규칙을 갖는다.
  *
  * 위치의 앵커는 `.app-shell`의 `position: relative`다. 그래서 서랍은 셸 밖으로
  * 나가지 못하고, 닫힌 상태의 `translateX(-100%)`도 문서 폭을 넓히지 못한다
@@ -749,13 +781,11 @@
  * 그보다 길어지면 대기가 된다. reduced-motion에서는 전환 없이 자리에 나타난다 —
  * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
 @utility sidebar-drawer {
-  /* 접힌 패널의 검색·채널·프로필은 보이지 않을 뿐 아니라 탭/AX 트리에서도
-   * 함께 빠져야 한다. 모바일에서는 이 규칙을 적용하지 않아 기존 280px 서랍이
-   * AppShell의 데스크톱 상태와 독립적으로 온전히 열린다. */
+  /* 데스크톱 접힘 (#1864): 그리드 열이 0으로 줄어드는 동안 레일·채널 트리가
+   * 밖으로 새지 않게 자른다. 탭/AX 는 `inert`(Sidebar)가 빼고, 이 규칙은 기하만
+   * 맡는다. 폰 서랍은 아래 블록이 절대 위치로 덮으므로 여기 규칙을 쓰지 않는다. */
   @media (width >= 600px) {
-    &[data-pane-collapsed] [data-sidebar-channel-pane] {
-      display: none;
-    }
+    overflow: hidden;
   }
 
   @media (width < 600px) {
@@ -793,6 +823,29 @@
   &:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -4px;
+  }
+}
+
+/* 앱 상단 줄 (#1864). 데스크톱에서만 선다: 토글이 사이드바 안에 있으면 접는
+ * 순간 입구가 사라진다. 트래픽라이트 옆 고정 자리(buzz). 웹에서는 같은 줄이
+ * 일반 상단 바이고, Tauri Overlay일 때만 `data-tauri-drag-region`이 인셋을 연다.
+ * 버튼은 그 속성을 갖지 않는다. */
+@utility app-titlebar {
+  display: flex;
+  grid-row: 1;
+  grid-column: 1 / -1;
+  align-items: center;
+  block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-2);
+  border-block-end: 1px solid var(--line);
+  background-color: var(--surface);
+
+  &[data-tauri-drag-region] {
+    padding-inline-start: var(--titlebar-inset);
+  }
+
+  @media (width < 600px) {
+    display: none;
   }
 }
 

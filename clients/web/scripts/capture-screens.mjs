@@ -2021,14 +2021,18 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("section-collapse-channels").press("Enter");
   await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
 
-  await page.getByTestId("sidebar-collapse").click();
-  await page.getByTestId("sidebar-expand").waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForFunction(
+    () => document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed")
+  );
   await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
   const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
   await page.screenshot({ path: collapsedShot });
   shots.push(collapsedShot);
-  await page.getByTestId("sidebar-expand").click();
-  await page.getByTestId("sidebar-collapse").waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForFunction(
+    () => !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed")
+  );
   await page.getByTestId("composer-input").hover();
 }
 

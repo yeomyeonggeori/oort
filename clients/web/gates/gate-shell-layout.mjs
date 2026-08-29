@@ -588,8 +588,10 @@ async function installMocks(context) {
   });
 }
 
-/** Resting y of the sidebar nav in a shell that has not been pushed anywhere. */
-const NAV_RESTING_TOP = 45;
+/** Resting y of the sidebar nav in a shell that has not been pushed anywhere.
+ *  Search header (p-2 + control-sm + hairline) sits at 45. The titlebar
+ *  (`h-control-lg`, border-box) adds 40 (#1864). */
+const NAV_RESTING_TOP = 85;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
@@ -653,35 +655,30 @@ async function go(page, hash) {
 }
 
 /**
- * #1291 desktop focus mode. The assertion is geometry + focus, not only the
- * presence of a button: the surviving rail must stay 56px, the route must gain
- * the channel/profile pane's actual 184px, and every focus target inside that
- * hidden pane must leave both the visual and keyboard paths.
- *
- * 56px 는 `[data-testid="workspace-rail"]` (`w-rail` / `--spacing-rail`) 이다.
- * 안쪽 `[aria-label="워크스페이스"]` nav 는 44px 타일(`--spacing-rail-tile`)만
- * 감싸므로, 그 폭을 재면 레일 단정이 타일 폭을 재게 된다. 56 숫자는 그대로다.
+ * #1864 desktop fold. The assertion is geometry + focus, not only the
+ * presence of a button: the sidebar track goes to 0, the route gains the
+ * full 240px, the titlebar toggle stays in place, and every focus target
+ * inside the hidden tree must leave both the visual and keyboard paths.
  *
  * The work-session pane then covers the newly widened chat surface. This is the
  * seam `/work` uses after #1290 lands too: both are children of the same second
  * shell track, so no route-specific width is inferred here.
  */
 async function assertDesktopSidebarFocusMode(page, size) {
-  const collapse = page.getByTestId("sidebar-collapse");
-  await collapse.waitFor({ state: "visible" });
+  const toggle = page.getByTestId("sidebar-toggle");
+  await toggle.waitFor({ state: "visible" });
   const before = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[data-testid="workspace-rail"]');
-    const button = document.querySelector('[data-testid="sidebar-collapse"]');
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
+    const button = document.querySelector('[data-testid="sidebar-toggle"]');
     const rect = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
       sidebarWidth: rect(sidebar),
       mainWidth: rect(main),
-      railWidth: rect(rail),
-      buttonText: button?.textContent?.trim(),
+      titlebarHoldsToggle: titlebar?.contains(button) ?? false,
       buttonName: button?.getAttribute("aria-label"),
       buttonTitle: button?.getAttribute("title"),
       buttonHasIcon: Boolean(button?.querySelector("svg")),
@@ -690,14 +687,14 @@ async function assertDesktopSidebarFocusMode(page, size) {
     };
   })()`);
   check(
-    `${size.name} 접기 전 56px 레일 + 184px 채널 패널`,
+    `${size.name} 접기 전 240px 사이드바와 상단 줄 토글`,
     before.collapsed === false &&
       before.sidebarWidth === 240 &&
-      before.railWidth === 56 &&
+      before.titlebarHoldsToggle === true &&
       before.buttonName === "탐색 패널 접기" &&
       before.buttonTitle === "탐색 패널 접기" &&
       before.buttonHasIcon === true &&
-      before.buttonControls === "sidebar-channel-pane" &&
+      before.buttonControls === "sidebar-drawer" &&
       before.buttonExpanded === "true",
     JSON.stringify(before)
   );
@@ -758,19 +755,19 @@ async function assertDesktopSidebarFocusMode(page, size) {
     JSON.stringify(workBefore)
   );
 
-  await collapse.click();
+  await toggle.click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const collapsed = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[data-testid="workspace-rail"]');
-    const expand = document.querySelector('[data-testid="sidebar-expand"]');
-    const focusable = pane ? Array.from(pane.querySelectorAll(
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
+    const button = document.querySelector('[data-testid="sidebar-toggle"]');
+    const treeFocusable = sidebar ? Array.from(sidebar.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     )).filter((element) => element.getClientRects().length > 0) : [];
     const width = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
@@ -778,75 +775,74 @@ async function assertDesktopSidebarFocusMode(page, size) {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
       sidebarWidth: width(sidebar),
       mainWidth: width(main),
-      railWidth: width(rail),
-      paneDisplay: pane ? getComputedStyle(pane).display : null,
-      visiblePaneFocusTargets: focusable.length,
+      titlebarHoldsToggle: titlebar?.contains(button) ?? false,
+      sidebarInert: sidebar?.hasAttribute("inert") ?? false,
+      visibleTreeFocusTargets: treeFocusable.length,
       focus: document.activeElement?.getAttribute("data-testid"),
-      expandText: expand?.textContent?.trim(),
-      expandName: expand?.getAttribute("aria-label"),
-      expandTitle: expand?.getAttribute("title"),
-      expandHasIcon: Boolean(expand?.querySelector("svg")),
-      expandControls: expand?.getAttribute("aria-controls"),
-      expandExpanded: expand?.getAttribute("aria-expanded"),
+      buttonName: button?.getAttribute("aria-label"),
+      buttonTitle: button?.getAttribute("title"),
+      buttonHasIcon: Boolean(button?.querySelector("svg")),
+      buttonControls: button?.getAttribute("aria-controls"),
+      buttonExpanded: button?.getAttribute("aria-expanded"),
+      paneDisplay: pane ? getComputedStyle(pane).display : null,
     };
   })()`);
   check(
-    `${size.name} 접으면 레일만 남고 본문이 정확히 184px 넓어진다`,
+    `${size.name} 접으면 사이드바가 0이고 본문이 정확히 240px 넓어진다`,
     collapsed.collapsed === true &&
-      collapsed.sidebarWidth === 56 &&
-      collapsed.railWidth === 56 &&
-      collapsed.mainWidth - before.mainWidth === 184 &&
-      collapsed.paneDisplay === "none" &&
-      collapsed.visiblePaneFocusTargets === 0 &&
-      collapsed.focus === "sidebar-expand" &&
-      collapsed.expandText?.includes("열기") &&
-      collapsed.expandName === "탐색 패널 열기" &&
-      collapsed.expandTitle === "탐색 패널 열기" &&
-      collapsed.expandHasIcon === true &&
-      collapsed.expandControls === "sidebar-channel-pane" &&
-      collapsed.expandExpanded === "false",
+      collapsed.sidebarWidth === 0 &&
+      collapsed.mainWidth - before.mainWidth === 240 &&
+      collapsed.titlebarHoldsToggle === true &&
+      collapsed.sidebarInert === true &&
+      collapsed.visibleTreeFocusTargets === 0 &&
+      collapsed.focus === "sidebar-toggle" &&
+      collapsed.buttonName === "탐색 패널 열기" &&
+      collapsed.buttonTitle === "탐색 패널 열기" &&
+      collapsed.buttonHasIcon === true &&
+      collapsed.buttonControls === "sidebar-drawer" &&
+      collapsed.buttonExpanded === "false",
     JSON.stringify({ before, collapsed })
   );
 
   const workCollapsed = await workSnapshot();
   check(
-    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 184px를 이어받는다`,
+    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 240px를 이어받는다`,
     workCollapsed.missing !== true &&
       workCollapsed.marker === workMarker &&
       workCollapsed.subtreeMarker === workMarker &&
       workCollapsed.panelWide === workBefore.panelWide &&
       workCollapsed.widePressed === workBefore.widePressed &&
-      workCollapsed.panelWidth - workBefore.panelWidth === 184 &&
-      workCollapsed.routeWidth - workBefore.routeWidth === 184 &&
+      workCollapsed.panelWidth - workBefore.panelWidth === 240 &&
+      workCollapsed.routeWidth - workBefore.routeWidth === 240 &&
       workCollapsed.panelWidth === workCollapsed.routeWidth &&
       workCollapsed.sameEdges === true,
     JSON.stringify({ workBefore, workCollapsed })
   );
   await page.screenshot({ path: `${OUT_DIR}/${size.name}-chat-focus-work-wide.png` });
 
-  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-collapse"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const reopened = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
-    const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
+    const sidebar = document.querySelector('[data-testid="sidebar"]');
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
-      sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
+      sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
       mainWidth: Math.round(shell.querySelector("main").getBoundingClientRect().width),
-      paneDisplay: getComputedStyle(pane).display,
+      sidebarInert: sidebar?.hasAttribute("inert") ?? false,
       focus: document.activeElement?.getAttribute("data-testid"),
     };
   })()`);
   check(
-    `${size.name} 다시 열면 240px 셸과 접기 버튼 포커스가 복구된다`,
+    `${size.name} 다시 열면 240px 셸과 상단 토글 포커스가 복구된다`,
     reopened.collapsed === false &&
       reopened.sidebarWidth === 240 &&
-      collapsed.mainWidth - reopened.mainWidth === 184 &&
-      reopened.paneDisplay !== "none" &&
-      reopened.focus === "sidebar-collapse",
+      collapsed.mainWidth - reopened.mainWidth === 240 &&
+      reopened.sidebarInert === false &&
+      reopened.focus === "sidebar-toggle",
     JSON.stringify(reopened)
   );
 
@@ -868,29 +864,29 @@ async function assertDesktopSidebarFocusMode(page, size) {
   // Route changes preserve the in-memory shell choice; they must not silently
   // reopen the pane. WorkPanel's DOM continuity was already proved above, while
   // the route itself intentionally changes subtree here.
-  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   await go(page, "/inbox");
   const afterRoute = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
+    sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
     focus: document.activeElement?.getAttribute("data-testid"),
   }))()`);
   check(
     `${size.name} 라우트 변경 뒤에도 현재 셸 선택과 포커스가 유지된다`,
     afterRoute.collapsed === true &&
-      afterRoute.paneDisplay === "none" &&
-      afterRoute.focus === "sidebar-expand",
+      afterRoute.sidebarWidth === 0 &&
+      afterRoute.focus === "sidebar-toggle",
     JSON.stringify(afterRoute)
   );
   await go(page, `/c/${GENERAL_ID}`);
-  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-collapse"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 }
 
@@ -1369,10 +1365,10 @@ async function measureSidebarDrawerIndependence(browser) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
-  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1380,11 +1376,12 @@ async function measureSidebarDrawerIndependence(browser) {
   const narrowBeforeOpen = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
+    const toggle = document.querySelector('[data-testid="sidebar-toggle"]');
     return {
       shellColumns: getComputedStyle(shell).gridTemplateColumns,
-      paneDisplay: getComputedStyle(pane).display,
-      collapseCount: document.querySelectorAll('[data-testid="sidebar-collapse"]').length,
-      expandCount: document.querySelectorAll('[data-testid="sidebar-expand"]').length,
+      paneDisplay: pane ? getComputedStyle(pane).display : null,
+      toggleDisplay: toggle ? getComputedStyle(toggle).display : null,
+      titlebarDisplay: getComputedStyle(document.querySelector('[data-testid="app-titlebar"]')).display,
       drawerOpen: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("data-open"),
       focus: document.activeElement?.getAttribute("data-testid"),
     };
@@ -1393,8 +1390,8 @@ async function measureSidebarDrawerIndependence(browser) {
     "390px 모바일은 데스크톱 접힘 상태를 무시하고 기존 서랍을 준비한다",
     narrowBeforeOpen.shellColumns === "390px" &&
       narrowBeforeOpen.paneDisplay !== "none" &&
-      narrowBeforeOpen.collapseCount === 0 &&
-      narrowBeforeOpen.expandCount === 0 &&
+      narrowBeforeOpen.toggleDisplay === "none" &&
+      narrowBeforeOpen.titlebarDisplay === "none" &&
       narrowBeforeOpen.drawerOpen === false &&
       narrowBeforeOpen.focus === "open-sidebar-drawer",
     JSON.stringify(narrowBeforeOpen)
@@ -1455,18 +1452,20 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.setViewportSize({ width: 760, height: 700 });
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const returnedWide = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
+    sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
+    sidebarInert: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("inert"),
     focus: document.activeElement?.getAttribute("data-testid"),
   }))()`);
   check(
     "모바일에서 다시 넓어지면 숨은 opener 대신 현재 데스크톱 토글이 포커스를 받는다",
     returnedWide.collapsed === true &&
-      returnedWide.paneDisplay === "none" &&
-      returnedWide.focus === "sidebar-expand",
+      returnedWide.sidebarWidth === 0 &&
+      returnedWide.sidebarInert === true &&
+      returnedWide.focus === "sidebar-toggle",
     JSON.stringify(returnedWide)
   );
 
@@ -1514,15 +1513,15 @@ async function measureSidebarDrawerIndependence(browser) {
   const remounted = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
     sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
-    expandCount: document.querySelectorAll('[data-testid="sidebar-expand"]').length,
+    sidebarInert: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("inert"),
+    toggleName: document.querySelector('[data-testid="sidebar-toggle"]')?.getAttribute("aria-label"),
   }))()`);
   check(
     "새 셸 마운트에는 접힘 상태가 저장되지 않는다",
     remounted.collapsed === false &&
       remounted.sidebarWidth === 240 &&
-      remounted.paneDisplay !== "none" &&
-      remounted.expandCount === 0,
+      remounted.sidebarInert === false &&
+      remounted.toggleName === "탐색 패널 접기",
     JSON.stringify(remounted)
   );
   await context.close();
