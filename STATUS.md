@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)
+
+- ConnectPage를 S0 랜딩(단일 룩 딥스페이스 + OortMark 궤도 드로잉 + 산포 필드 + 2택) / S1 서버·초대 / S2 계정으로 감쌌다. 로그인·join·서버 검증·`momo.web.server.v1` 의미론은 기존 재사용. 저장 서버 또는 `/join?code=` 프리필이면 S0 생략.
+- red proof: S0 마크·30 산포·reduced-motion rAF 미기동, 2택→S1→S2·뒤로·2/3·3/3, 저장 서버 스킵, 딥링크 코드 경로, 스텝 뒤 login/join 호출. design-review는 오케스트레이터 이월.
+
 ## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
 
 - 사이드바 `ProfileCard` 드롭다운 맨 아래(설정 뒤)에 「로그아웃」을 추가. `useSession().logout` 직접 호출, 확인 다이얼로그 없음, destructive 색 없음. 설정 > 계정 `data-testid="logout"` 은 유지.

@@ -645,3 +645,62 @@ describe("Dawn palette", () => {
     });
   }
 });
+
+/** `--onboarding-name: #hex;` — S0 single-look tokens, no light-dark pair. */
+function parseOnboardingTokens(source: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const re = /--(onboarding-[a-z-]+):\s*(#[0-9a-f]{6});/gi;
+  for (const m of source.matchAll(re)) out[m[1]] = m[2];
+  return out;
+}
+
+const ONBOARDING = parseOnboardingTokens(css);
+
+describe("onboarding S0 palette (single look)", () => {
+  it("declares the S0 tokens as one hex each", () => {
+    for (const name of [
+      "onboarding-space",
+      "onboarding-star",
+      "onboarding-ink",
+      "onboarding-ink-faint",
+      "onboarding-accent",
+      "onboarding-on-accent",
+      "onboarding-line",
+    ]) {
+      expect(ONBOARDING[name], name).toMatch(/^#[0-9a-f]{6}$/i);
+    }
+  });
+
+  it("uses no pure black or pure white", () => {
+    for (const [name, hex] of Object.entries(ONBOARDING)) {
+      expect(hex.toLowerCase(), name).not.toBe("#ffffff");
+      expect(hex.toLowerCase(), name).not.toBe("#000000");
+    }
+  });
+
+  it("keeps body copy and the accent readable on the space field", () => {
+    expect(
+      contrast(ONBOARDING["onboarding-ink"], ONBOARDING["onboarding-space"])
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(ONBOARDING["onboarding-accent"], ONBOARDING["onboarding-space"])
+    ).toBeGreaterThanOrEqual(4.5);
+    expect(
+      contrast(
+        ONBOARDING["onboarding-on-accent"],
+        ONBOARDING["onboarding-accent"]
+      )
+    ).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("keeps the S0 control outline at 3:1 on the space field", () => {
+    expect(
+      contrast(ONBOARDING["onboarding-line"], ONBOARDING["onboarding-space"])
+    ).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps the S0 accent out of the indigo/violet AI-tell band", () => {
+    const hue = hueAngle(ONBOARDING["onboarding-accent"]);
+    expect(hue > 265 && hue < 330, `accent hue ${hue.toFixed(0)}`).toBe(false);
+  });
+});
