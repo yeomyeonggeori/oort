@@ -32,6 +32,8 @@ import {
   useMentionAutocomplete,
 } from "@/features/chat/MentionAutocomplete";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
+import { useComposerFormat } from "@/features/chat/useComposerFormat";
+import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
   sendBlockCopy,
@@ -106,6 +108,14 @@ export function ThreadComposer({
     inputRef: ref,
     onValueChange: mentions.replaceValue,
   });
+  const format = useComposerFormat({
+    value: draft,
+    inputRef: ref,
+    mentionVisible: mentions.visible,
+    onValueChange: mentions.replaceValue,
+    enabled: !sending,
+    surfaceKey: `${workspaceId}:${channelId}:${rootId}`,
+  });
 
   // 트레이는 **이 스레드의 것**이다. 채널 컴포저와 열쇠가 다르므로, 스레드에 붙인
   // 파일이 패널을 닫는 순간 채널 입력창에 나타나는 일이 없다.
@@ -151,6 +161,7 @@ export function ThreadComposer({
       .then(() => {
         setDraft("");
         mentions.close();
+        format.dismiss();
         clearSurface(trayKey);
         onSent();
         ref.current?.focus();
@@ -170,6 +181,7 @@ export function ThreadComposer({
         "safe-area-bottom border-t border-line",
         drop.dragging && "bg-accent-soft"
       )}
+      data-composer-shell=""
       data-testid="thread-composer"
     >
       <AttachmentTray
@@ -241,11 +253,12 @@ export function ThreadComposer({
                   event.target.selectionStart ?? 0
                 )
               }
-              onSelect={(event) =>
+              onSelect={(event) => {
                 mentions.setCaret(
                   (event.target as HTMLTextAreaElement).selectionStart ?? 0
-                )
-              }
+                );
+                format.onSelect();
+              }}
               onPaste={drop.onPaste}
               onCompositionStart={() => {
                 justComposedRef.current = false;
@@ -255,13 +268,19 @@ export function ThreadComposer({
               }}
               onKeyUp={() => {
                 justComposedRef.current = false;
+                format.onSelect();
               }}
-              onBlur={() => {
+              onBlur={(event) => {
                 justComposedRef.current = false;
+                format.onBlur(event);
               }}
               onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
                 if (event.key !== "Enter" && event.key !== "Tab") {
                   justComposedRef.current = false;
+                }
+                if (format.handleKeyDown(event)) {
+                  event.preventDefault();
+                  return;
                 }
                 const intent = composerKeyIntent(
                   {
@@ -350,6 +369,16 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
+      <ComposerFormatTray
+        open={format.open}
+        value={draft}
+        selectionEpoch={format.selectionEpoch}
+        inputRef={ref}
+        trayRef={format.trayRef}
+        onApply={format.apply}
+        onDismiss={format.dismiss}
+        testIdPrefix="thread-composer-format"
+      />
       <EmojiPickerDialog
         open={emoji.open}
         onOpenChange={emoji.setOpen}

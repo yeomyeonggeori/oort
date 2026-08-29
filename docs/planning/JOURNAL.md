@@ -5,6 +5,12 @@
 
 ---
 
+## 2026-08-30 · Fable · ★ADR 3본 결재 집행 + BF 2차 개막 — A5·B1s·B2s 랜딩, A7 심사 중
+- **결재 반영**: 성재 "ADR 셋 다 ㄱ, 2차는 권장대로" → 0174·0175·0176 **Accepted**(#1900). 2차 취사 = A5→A7→A6→A8 순차, A9·A10 보류.
+- **랜딩 3건**: BF-A5 초안 패널(#1906→track/uxui, 2회전 B0·H0 — M3건: ⋯ hover 그릇·aria-label 정보 소거·삭제 후 포커스 착지, 전부 실측 닫힘, 파생 #1908 폰 패리티) · BF-B1s 리마인더 서버(#1905→track/engine, A-41 ready) · BF-B2s 커스텀 상태 서버(#1907→track/engine, A-42 ready).
+- **A7 컴포저 서식 트레이 발사**(#1909): 브리프에 "시작 시 git merge origin/main" 절차를 넣어 alignment 실패 왕복 선제 차단 — CI 그린, design-review 진행 중. 다음: A6 링크 프리뷰→A8 채널 인트로→클라 절반 B1(#1888)·B2(#1889)→BZ-5a(액센트 시안 성재 1회 확인).
+- 운영 메모: grok 레인 브리프에 정렬 선행 절차 상설화. gitleaks momo.web.* 패턴 allowlist 개선은 여전히 후보.
+
 ## 2026-08-27 (오후2) · Fable · ★DNS 급소 종료 + #1798 랜딩 → 정리·중단 (성재 "정리하고 중단")
 - **DNS 종료**: `app.oor7.com` A(101.79.11.189) 성재 삭제, 권위 NS(가비아)에서 소거 확인(삭제 45초 후 응답 중단, 8.8.8.8·1.1.1.1·ns.gabia 교차). 첫 확인 때 남아 있던 건 반영 지연이었음. 진단 삽화: 성재가 처음 연 가비아 존은 apex→216.150.1.1(Vercel)·www→vercel-dns인 **다른 도메인** — oor7.com은 apex·www 공백에 app만 매달려 3리졸버로 확정. **레포 밖 표면 노출 0.**
 - **#1798 랜딩**: PR #1798 → track/engine **094cdc87**, #1767 close. 패스워드 리셋 위계(ADR-0128 D2) 구멍 종료. cursor grok 4.6 워커 수리(d8d68b89): `can_issue_password_reset_for` 사다리+self 진입즉시 Forbidden, 행위자·대상 role 둘 다 같은 테넌트 트랜잭션 조회(라우트 require_admin 비단독). **워커 RED proof 정석**: 매트릭스 20칸 중 4칸(admin→owner 계열) 201→403, conformance 25 passed. Fable 재검수+CI 그린(fail=0) 확인 후 머지. 브리프의 매트릭스 표·정지 조건 절 상설 템플릿 첫 실전 완주.

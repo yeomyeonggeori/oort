@@ -97,6 +97,12 @@ import {
   useMentionAutocomplete,
 } from "@/features/chat/MentionAutocomplete";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
+import { useComposerFormat } from "@/features/chat/useComposerFormat";
+import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
+import {
+  COMPOSER_FORMAT_LINK_HINT,
+  composerFormatHasPendingLink,
+} from "@/features/chat/composerFormat";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 
 // =============================================================================
@@ -163,13 +169,16 @@ function ComposerHint({
   directory,
   dmAgent,
   keysHintNeeded,
+  pendingLink,
   sharedRow,
 }: {
   directory: Directory;
   dmAgent: RosterMember | null;
   keysHintNeeded: boolean;
+  pendingLink: boolean;
   sharedRow: boolean;
 }) {
+  const lead = pendingLink || dmAgent;
   return (
     <p
       id="composer-hint"
@@ -180,13 +189,17 @@ function ComposerHint({
         sharedRow
           ? "min-w-0 flex-1 truncate text-right text-meta text-ink-muted"
           : "px-6 pb-2 text-meta text-ink-muted",
-        !dmAgent && "wide-only"
+        !dmAgent && !pendingLink && "wide-only"
       )}
       data-testid="composer-hint"
       data-composer-meta-slot={sharedRow ? "" : undefined}
     >
+      {pendingLink && (
+        <span data-testid="composer-link-hint">{COMPOSER_FORMAT_LINK_HINT}</span>
+      )}
       {dmAgent && (
         <span data-testid="composer-dm-hint">
+          {pendingLink ? HINT_SEPARATOR : ""}
           멘션 없이 바로 말하면{" "}
           {agentLabelAsSubject(
             memberNameParts(directory, dmAgent.id, dmAgent.displayName)
@@ -196,7 +209,7 @@ function ComposerHint({
       )}
       {keysHintNeeded && (
         <span className="wide-only" data-testid="composer-keys-hint">
-          {dmAgent ? HINT_SEPARATOR : ""}
+          {lead ? HINT_SEPARATOR : ""}
           {COMPOSER_KEYS_HINT}
         </span>
       )}
@@ -430,6 +443,13 @@ export function Composer({
     inputRef,
     onValueChange: mentions.replaceValue,
   });
+  const format = useComposerFormat({
+    value: text,
+    inputRef,
+    mentionVisible: mentions.visible,
+    onValueChange: mentions.replaceValue,
+    surfaceKey: `${workspaceId}:${channelId}`,
+  });
   // Raised by `compositionend`, lowered by the next `keyup` (composerKeys.ts).
   // In WebKit, which is the Tauri shell's engine, `compositionend` is dispatched
   // BEFORE the keydown of the Enter that committed the composition, so by the
@@ -512,11 +532,13 @@ export function Composer({
    * 정해진 액션 행 안에서 바뀌므로 사람의 타이핑이 시작돼도 컴포저가 움직이지 않는다.
    * DM 힌트는 폭과 무관한 방의 성질이므로 기존처럼 폰에도 남는다.
    */
+  const pendingLink = composerFormatHasPendingLink(text);
   const metaMode = composerMetaMode({
     typistCount: typists.length,
     hasDmHint: dmAgent !== null,
     keysHintNeeded,
     isMobile,
+    hasPendingLink: pendingLink,
   });
   const persistentPhoneDmHint = keepPhoneDmHint({
     hasDmHint: dmAgent !== null,
@@ -639,6 +661,7 @@ export function Composer({
     // the composer to hold on to.
     setText("");
     mentions.close();
+    format.dismiss();
     routing.reset();
     onCancelQuote();
     // 화면에서 사라진 글은 저장소에서도 사라진다. 여기서 지우지 않으면 이 채널을
@@ -672,6 +695,10 @@ export function Composer({
     // clearing it before the decision changes nothing about this keystroke.
     if (event.key !== "Enter" && event.key !== "Tab") {
       justComposedRef.current = false;
+    }
+    if (format.handleKeyDown(event)) {
+      event.preventDefault();
+      return;
     }
     const intent = composerKeyIntent(
       {
@@ -743,6 +770,7 @@ export function Composer({
         // 말하는 최소한이다.
         drop.dragging && "bg-accent-soft"
       )}
+      data-composer-shell=""
       data-testid="composer"
     >
       {/* 첨부 트레이 (ADR-0151 D2). 인용 칩보다 **위**다: 순서는 여전히
@@ -805,6 +833,7 @@ export function Composer({
           directory={directory}
           dmAgent={dmAgent}
           keysHintNeeded={keysHintNeeded}
+          pendingLink={pendingLink}
           sharedRow={false}
         />
       )}
@@ -861,11 +890,12 @@ export function Composer({
               // TTL이 하고 「정지」 신호는 계약에 없다.
               typing.onInput();
             }}
-            onSelect={(event) =>
+            onSelect={(event) => {
               mentions.setCaret(
                 (event.target as HTMLTextAreaElement).selectionStart ?? 0
-              )
-            }
+              );
+              format.onSelect();
+            }}
             onKeyDown={onKeyDown}
             // 스크린샷을 ⌘V 로 넣는 것은 이 도구를 쓰는 사람이 하루에 몇 번씩 하는
             // 일이다. 글이 함께 온 붙여넣기는 가로채지 않는다(`useComposerDropZone`).
@@ -882,11 +912,13 @@ export function Composer({
             }}
             onKeyUp={() => {
               justComposedRef.current = false;
+              format.onSelect();
             }}
             // A composition abandoned by clicking away leaves the guard raised;
             // it must not still be raised when the caret comes back.
-            onBlur={() => {
+            onBlur={(event) => {
               justComposedRef.current = false;
+              format.onBlur(event);
             }}
             // 빈 상자는 **어디로 가는지**와 **@가 무엇인지**를 함께 말한다
             // (#1384). 문장과 그 문장을 고른 이유(폭 산술 포함)는 코어가 든다 —
@@ -950,6 +982,7 @@ export function Composer({
                 directory={directory}
                 dmAgent={dmAgent}
                 keysHintNeeded={keysHintNeeded}
+                pendingLink={pendingLink}
                 sharedRow
               />
             ) : (
@@ -982,6 +1015,16 @@ export function Composer({
         </div>
       </form>
 
+      <ComposerFormatTray
+        open={format.open}
+        value={text}
+        selectionEpoch={format.selectionEpoch}
+        inputRef={inputRef}
+        trayRef={format.trayRef}
+        onApply={format.apply}
+        onDismiss={format.dismiss}
+        testIdPrefix="composer-format"
+      />
       <EmojiPickerDialog
         open={emoji.open}
         onOpenChange={emoji.setOpen}
