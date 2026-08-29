@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BF-A2 상단 안읽음 점프 필 (#1885, 2026-08-29)
+
+- 읽음 구분선이 뷰포트 **위쪽 밖**일 때만 타임라인 상단 중앙에 「새 메시지 N개」+위 화살표 부유 필. 클릭/Enter → 구분선으로 스크롤(reduced-motion이면 auto). 구분선이 창에 들어오면 소멸, 채널 전환 시 리셋. 하단 jump-latest와 동시 표시 가능.
+- N은 `navigation.ts` `countNewerThan`(내 확정 전송 제외). 하단 필과 같은 `UnreadPill` 부품(direction up/down).
+- red proof: 구분선 위쪽만 표시·클릭 도달·진입 소멸·채널 리셋·reduced-motion·하단 필 회귀. web vitest 1745 · tsc · design_preflight_web · `CAPTURE_PORT=7577` capture:design (행당 탭 스톱 1) · `SHELL_GATE_PORT=7579 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-A1 리액션 칩 이름 툴팁 (#1884, 2026-08-29)
 
 - `ReactionMap`이 이미 들고 있던 memberIds를 칩 툴팁/접근명으로 접는다. 서버 0. 코어 `formatReactionNames`: 나 포함 시 「나(내 반응 취소)」 맨 앞, 3명까지 이름, 초과·명부 미해석은 「외 N명」(실명 불명 표기 없음). 모호한 표시명은 `memberNameParts` 핸들.
