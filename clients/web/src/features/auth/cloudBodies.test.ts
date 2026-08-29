@@ -1,7 +1,12 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { CLOUD_BODIES, isInEmptyCentre } from "./cloudBodies";
+import {
+  CLOUD_BODIES,
+  isInCtaBand,
+  isInCtaExclusion,
+  isInEmptyCentre,
+} from "./cloudBodies";
 
 const css = readFileSync(
   fileURLToPath(new URL("../../design/tokens.css", import.meta.url)),
@@ -12,6 +17,11 @@ describe("Oort cloud scatter", () => {
   it("places thirty line-art bodies on the outer shell", () => {
     expect(CLOUD_BODIES).toHaveLength(30);
     expect(CLOUD_BODIES.filter(isInEmptyCentre)).toEqual([]);
+  });
+
+  it("keeps rest poses out of the CTA band and the wander+repel pad", () => {
+    expect(CLOUD_BODIES.filter(isInCtaBand)).toEqual([]);
+    expect(CLOUD_BODIES.filter(isInCtaExclusion)).toEqual([]);
   });
 
   it("keeps size in the 22-36 band and uses three kinds in two tones", () => {

@@ -1,3 +1,4 @@
+import type { Ref } from "react";
 import { OortMark } from "@/design/brand/OortMark";
 import { OortCloudField } from "./OortCloudField";
 
@@ -8,9 +9,13 @@ import { OortCloudField } from "./OortCloudField";
 export function LandingStep({
   onChooseServer,
   onChooseInvite,
+  serverChoiceRef,
+  inviteChoiceRef,
 }: {
   onChooseServer: () => void;
   onChooseInvite: () => void;
+  serverChoiceRef?: Ref<HTMLButtonElement>;
+  inviteChoiceRef?: Ref<HTMLButtonElement>;
 }) {
   return (
     <div
@@ -27,6 +32,7 @@ export function LandingStep({
       </div>
       <div className="relative flex flex-col items-center gap-3 p-6">
         <button
+          ref={serverChoiceRef}
           type="button"
           className="tap-target onboarding-focus-on-fill inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm bg-onboarding-accent px-4 text-body font-medium text-onboarding-on-accent focus-visible:focus-ring"
           data-testid="onboarding-choose-server"
@@ -35,6 +41,7 @@ export function LandingStep({
           우리 팀 서버로 접속
         </button>
         <button
+          ref={inviteChoiceRef}
           type="button"
           className="tap-target onboarding-focus inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm border border-onboarding-line bg-transparent px-4 text-body font-medium text-onboarding-ink focus-visible:focus-ring"
           data-testid="onboarding-choose-invite"

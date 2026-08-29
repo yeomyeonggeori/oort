@@ -1,5 +1,10 @@
 import { useEffect, useRef } from "react";
-import { CLOUD_BODIES } from "./cloudBodies";
+import {
+  CLOUD_BODIES,
+  CLOUD_REPEL_STRENGTH,
+  CLOUD_WANDER_X,
+  CLOUD_WANDER_Y,
+} from "./cloudBodies";
 import { OortCloudMark } from "./OortCloudMarks";
 
 // Ported from buzz desktop LandingBees.tsx (Apache-2.0): per-body
@@ -7,9 +12,6 @@ import { OortCloudMark } from "./OortCloudMarks";
 // (HTML layer / compositor), not this rAF loop.
 
 const REPEL_RADIUS = 180;
-const REPEL_STRENGTH = 110;
-const WANDER_X = 26;
-const WANDER_Y = 20;
 const EASE = 0.12;
 
 export function OortCloudField() {
@@ -34,10 +36,10 @@ export function OortCloudField() {
         const body = CLOUD_BODIES[i];
         const phase = i * 1.7;
         const wx =
-          Math.sin(t * (0.7 + (i % 5) * 0.13) + phase) * WANDER_X +
+          Math.sin(t * (0.7 + (i % 5) * 0.13) + phase) * CLOUD_WANDER_X +
           Math.sin(t * 1.9 + phase * 2.1) * 6;
         const wy =
-          Math.cos(t * (0.6 + (i % 7) * 0.11) + phase) * WANDER_Y +
+          Math.cos(t * (0.6 + (i % 7) * 0.11) + phase) * CLOUD_WANDER_Y +
           Math.cos(t * 2.3 + phase * 1.3) * 5;
         let rx = 0;
         let ry = 0;
@@ -48,7 +50,8 @@ export function OortCloudField() {
           const oy = cy - p.y;
           const dist = Math.hypot(ox, oy);
           if (dist < REPEL_RADIUS && dist > 0.01) {
-            const push = ((REPEL_RADIUS - dist) / REPEL_RADIUS) * REPEL_STRENGTH;
+            const push =
+              ((REPEL_RADIUS - dist) / REPEL_RADIUS) * CLOUD_REPEL_STRENGTH;
             rx = (ox / dist) * push;
             ry = (oy / dist) * push;
           }

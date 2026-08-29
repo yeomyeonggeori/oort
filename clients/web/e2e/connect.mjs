@@ -120,6 +120,15 @@ try {
     urlAfterPrefill
   );
 
+  const deepLinkFocus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "deeplink-focus-lands-on-next",
+    deepLinkFocus === "onboarding-next",
+    `focused=${deepLinkFocus}`
+  );
+
   await page.click('[data-testid="onboarding-next"]');
   await page.waitForSelector('[data-testid="onboarding-account"]', {
     timeout: 5000,
@@ -154,6 +163,26 @@ try {
   record(
     "fresh-visit-opens-s0",
     (await page.locator('[data-testid="onboarding-landing"]').count()) === 1
+  );
+  await page.click('[data-testid="onboarding-choose-server"]');
+  await page.waitForSelector('[data-testid="onboarding-gateway"]');
+  const s0ToS1Focus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "s0-choice-focuses-server-field",
+    s0ToS1Focus === "login-server",
+    `focused=${s0ToS1Focus}`
+  );
+  await page.click('[data-testid="onboarding-back"]');
+  await page.waitForSelector('[data-testid="onboarding-landing"]');
+  const s1ToS0Focus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "s1-back-focuses-choice",
+    s1ToS0Focus === "onboarding-choose-server",
+    `focused=${s1ToS0Focus}`
   );
   await page.click('[data-testid="onboarding-choose-server"]');
   await page.waitForSelector('[data-testid="onboarding-gateway"]');

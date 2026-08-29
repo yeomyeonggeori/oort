@@ -1884,9 +1884,13 @@
   animation: onboarding-mark-float 8s ease-in-out 1.1s infinite;
 }
 
+/* Second path of OortMark is the orbit (two outer arcs). Bound to that
+   document order: do not reorder OortMark's paths. pathLength=1 on the
+   element normalizes the raw length (~23) so dasharray 1 draws the stroke
+   over the full 1.1s instead of snapping on (dasharray 64 > path length). */
 .onboarding-mark svg path:nth-of-type(2) {
-  stroke-dasharray: 64;
-  stroke-dashoffset: 64;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
   animation: onboarding-orbit-draw 1.1s ease-out forwards;
 }
 
@@ -1928,15 +1932,15 @@
 .onboarding-cloud-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 92%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
 .onboarding-cloud-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
 .onboarding-cloud-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
-.onboarding-cloud-body[data-onboarding-body="3"] { --onboarding-body-top: 88%; --onboarding-body-left: 77%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
-.onboarding-cloud-body[data-onboarding-body="4"] { --onboarding-body-top: 96%; --onboarding-body-left: 64%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
-.onboarding-cloud-body[data-onboarding-body="5"] { --onboarding-body-top: 93%; --onboarding-body-left: 75%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
-.onboarding-cloud-body[data-onboarding-body="6"] { --onboarding-body-top: 91%; --onboarding-body-left: 59%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
-.onboarding-cloud-body[data-onboarding-body="7"] { --onboarding-body-top: 93%; --onboarding-body-left: 45%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
-.onboarding-cloud-body[data-onboarding-body="8"] { --onboarding-body-top: 91%; --onboarding-body-left: 31%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
-.onboarding-cloud-body[data-onboarding-body="9"] { --onboarding-body-top: 84%; --onboarding-body-left: 18%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
-.onboarding-cloud-body[data-onboarding-body="10"] { --onboarding-body-top: 92%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
-.onboarding-cloud-body[data-onboarding-body="11"] { --onboarding-body-top: 83%; --onboarding-body-left: 13%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
+.onboarding-cloud-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
+.onboarding-cloud-body[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
+.onboarding-cloud-body[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
+.onboarding-cloud-body[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
+.onboarding-cloud-body[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
+.onboarding-cloud-body[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
+.onboarding-cloud-body[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
+.onboarding-cloud-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
+.onboarding-cloud-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
 .onboarding-cloud-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
 .onboarding-cloud-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 7%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
 .onboarding-cloud-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 6%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }

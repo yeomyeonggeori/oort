@@ -37,7 +37,7 @@ export function OnboardingSlideTransition({
         data-onboarding-direction={direction}
         data-onboarding-effect={effect}
       >
-        <div className={cn("onboarding-transition-content w-full", className)}>
+        <div className={cn("onboarding-transition-content", className)}>
           {children}
         </div>
       </div>

@@ -186,6 +186,7 @@ const MOBILE_TAP_TARGETS = [
 // AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 온보딩은 폰에서
 // 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
 const LOGIN_TAP_TARGETS = [
+  ["onboarding-back", "뒤로"],
   ["login-email", "이메일 입력"],
   ["login-password", "비밀번호 입력"],
   ["login-submit", "로그인 버튼"],
@@ -197,8 +198,10 @@ const LANDING_TAP_TARGETS = [
 ];
 
 const GATEWAY_TAP_TARGETS = [
+  ["onboarding-back", "뒤로"],
   ["login-server", "서버 주소 입력"],
   ["onboarding-next", "다음"],
+  ["connect-recent-server", "최근 접속", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -1769,6 +1772,79 @@ async function installMocks(context) {
   });
 }
 
+async function assertOnboardingCardCentered(page, where, testId) {
+  const m = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-testid="${testId}"]');
+    if (!card) return { missing: true };
+    const r = card.getBoundingClientRect();
+    return {
+      missing: false,
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      cardMid: r.left + r.width / 2,
+      viewMid: window.innerWidth / 2,
+    };
+  })()`);
+  if (m.missing) {
+    throw new Error(`카드 중앙 ${where}: ${testId} 없음`);
+  }
+  const delta = Math.abs(m.cardMid - m.viewMid);
+  if (delta > 8) {
+    throw new Error(
+      `카드 중앙 ${where}: ${testId} mid=${m.cardMid.toFixed(1)} view=${m.viewMid.toFixed(1)} ` +
+        `left=${m.left} width=${m.width} (delta ${delta.toFixed(1)}px)`
+    );
+  }
+  console.log(
+    `  card center ${where}: ${testId} left=${m.left} width=${m.width} delta=${delta.toFixed(1)}`
+  );
+}
+
+async function assertCloudMissesCta(page, where) {
+  const proof = await page.evaluate(`(() => {
+    const hitsOf = (testId) => {
+      const btn = document.querySelector('[data-testid="' + testId + '"]');
+      if (!btn) return { missing: true, hits: [] };
+      const b = btn.getBoundingClientRect();
+      const hits = [];
+      for (const el of document.querySelectorAll("[data-onboarding-body]")) {
+        const r = el.getBoundingClientRect();
+        const overlap = !(
+          r.right < b.left ||
+          r.left > b.right ||
+          r.bottom < b.top ||
+          r.top > b.bottom
+        );
+        if (overlap) {
+          hits.push({
+            body: el.getAttribute("data-onboarding-body"),
+            left: Math.round(r.left),
+            top: Math.round(r.top),
+            right: Math.round(r.right),
+            bottom: Math.round(r.bottom),
+          });
+        }
+      }
+      return { missing: false, hits };
+    };
+    return {
+      inviteHits: hitsOf("onboarding-choose-invite"),
+      serverHits: hitsOf("onboarding-choose-server"),
+    };
+  })()`);
+  if (proof.inviteHits.missing || proof.serverHits.missing) {
+    throw new Error(`S0 CTA ${where}: 선택 버튼 없음`);
+  }
+  if (proof.inviteHits.hits.length !== 0 || proof.serverHits.hits.length !== 0) {
+    throw new Error(
+      `S0 CTA ${where}: inviteHits=${proof.inviteHits.hits.length} ` +
+        `serverHits=${proof.serverHits.hits.length} ` +
+        JSON.stringify(proof)
+    );
+  }
+  console.log(`  S0 CTA ${where}: inviteHits 0 · serverHits 0`);
+}
+
 async function waitForServer(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -1808,6 +1884,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   if (scatter !== 30) {
     throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
   }
+  await assertCloudMissesCta(page, where);
   await page.getByTestId("onboarding-choose-server").focus();
   const landingFocus = await page.evaluate(
     `document.activeElement?.getAttribute("data-testid")`
@@ -1838,6 +1915,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   await page.getByTestId("onboarding-choose-server").click();
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
   await assertNoHorizontalOverflow(page, `gateway ${where}`);
+  await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
   if (tapTargets) {
     await assertTapTargets(page, `gateway ${where}`, GATEWAY_TAP_TARGETS);
   }
@@ -1846,6 +1924,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   await page.getByTestId("onboarding-next").click();
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
 }
 
 function isPresencePut(request) {

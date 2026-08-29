@@ -41,6 +41,7 @@ import { useDiscoveredServers, type DiscoveredServer } from "./discovery";
 import { LandingStep } from "./LandingStep";
 import { OnboardingSlideTransition } from "./OnboardingSlideTransition";
 import {
+  gatewayPrefillFocus,
   initialOnboarding,
   progressLabel,
   transitionFor,
@@ -59,6 +60,8 @@ import {
   type ConnectField,
   type ConnectMode,
 } from "@momo/core/features/auth/connectModel";
+
+type ShellFocus = ConnectField | "next" | "choose-server" | "choose-invite";
 
 // Reading this as: onboarding for internal team users on web+Tauri,
 // density 5/10, motion 4/10 (S0 landing only; S1/S2 stay the connect form).
@@ -150,7 +153,7 @@ export function ConnectPage({
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
-  const [pendingFocus, setPendingFocus] = useState<ConnectField | null>(null);
+  const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
 
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
   const discovered = useDiscoveredServers();
@@ -160,11 +163,16 @@ export function ConnectPage({
   const emailRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const codeRef = useRef<HTMLInputElement>(null);
+  const nextRef = useRef<HTMLButtonElement>(null);
+  const chooseServerRef = useRef<HTMLButtonElement>(null);
+  const chooseInviteRef = useRef<HTMLButtonElement>(null);
 
   const typed = useRef({ serverUrl, email, password });
   typed.current = { serverUrl, email, password };
+  const stepRef = useRef(step);
+  stepRef.current = step;
 
-  const focusLater = useCallback((field: ConnectField) => {
+  const focusLater = useCallback((field: ShellFocus) => {
     setPendingFocus(field);
   }, []);
 
@@ -181,15 +189,22 @@ export function ConnectPage({
 
   useEffect(() => {
     if (!pendingFocus) return;
-    const target = {
-      server: serverRef,
-      email: emailRef,
-      password: passwordRef,
-      code: codeRef,
+    const node = {
+      server: serverRef.current,
+      email: emailRef.current,
+      password: passwordRef.current,
+      code: codeRef.current,
+      next: nextRef.current,
+      "choose-server": chooseServerRef.current,
+      "choose-invite": chooseInviteRef.current,
     }[pendingFocus];
-    target.current?.focus();
+    // Stay pending until the step that owns the node has mounted. Clearing
+    // on a miss is what made the old single-form prefillFocus a silent no-op
+    // on S1 (email/password refs are not in the tree).
+    if (!node) return;
+    node.focus();
     setPendingFocus(null);
-  }, [pendingFocus]);
+  }, [pendingFocus, step]);
 
   useEffect(() => {
     if (!prefill) return;
@@ -197,24 +212,43 @@ export function ConnectPage({
       setServerUrl(prefill.serverUrl);
       setServerError(null);
     }
-    if (prefill.inviteCode !== "") {
+    const openedByInvite = prefill.inviteCode !== "";
+    if (openedByInvite) {
       setInviteCode(prefill.inviteCode);
       setMode("join");
       setPath("invite");
-      const move = transitionFor("landing", "gateway", reducedMotion);
-      setDirection(move.direction);
-      setEffect(move.effect);
-      setStep((current) => (current === "landing" ? "gateway" : current));
+      // Replay mask-reveal only when this link actually leaves S0. A cold
+      // start that already opened on S1 must not animate a step that did
+      // not change.
+      if (stepRef.current === "landing") {
+        const move = transitionFor("landing", "gateway", reducedMotion);
+        setDirection(move.direction);
+        setEffect(move.effect);
+        setStep("gateway");
+      }
     }
     setFailure(null);
-    focusLater(
-      prefillFocus({
-        serverUrl: prefill.serverUrl || typed.current.serverUrl,
-        email: typed.current.email,
-        password: typed.current.password,
-        requiresServer,
-      })
-    );
+    const serverUrlNow = prefill.serverUrl || typed.current.serverUrl;
+    const landsOnGateway = openedByInvite || stepRef.current === "gateway";
+    if (landsOnGateway) {
+      focusLater(
+        gatewayPrefillFocus({
+          serverUrl: serverUrlNow,
+          inviteCode: prefill.inviteCode,
+          requiresServer,
+          joinPath: openedByInvite,
+        })
+      );
+    } else {
+      focusLater(
+        prefillFocus({
+          serverUrl: serverUrlNow,
+          email: typed.current.email,
+          password: typed.current.password,
+          requiresServer,
+        })
+      );
+    }
   }, [prefill, requiresServer, focusLater, reducedMotion]);
 
   function selectDiscovered(server: DiscoveredServer) {
@@ -262,7 +296,12 @@ export function ConnectPage({
     } catch (err) {
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
       setFailure(next);
-      if (next.suggestSignIn) setMode("signIn");
+      if (next.onGateway) {
+        goTo("gateway");
+        focusLater("code");
+      } else if (next.suggestSignIn) {
+        setMode("signIn");
+      }
     } finally {
       setBusy(false);
     }
@@ -348,7 +387,7 @@ export function ConnectPage({
               <button
                 key={base}
                 type="button"
-                className="rounded-sm bg-muted-soft px-2 py-1 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
+                className="tap-target inline-flex items-center rounded-sm bg-muted-soft px-2 py-1 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
                 data-testid="connect-recent-server"
                 onClick={() => {
                   setServerUrl(base);
@@ -396,8 +435,21 @@ export function ConnectPage({
     </>
   );
 
+  const failureBanner =
+    failure === null ? null : (
+      <InlineBanner
+        tone="error"
+        message={failure.message}
+        actionLabel={failure.retryable && !busy ? "다시 시도" : undefined}
+        onAction={
+          failure.retryable && !busy ? () => void attempt() : undefined
+        }
+        testId="login-error"
+      />
+    );
+
   const gatewayCard = (
-    <Card className="w-full max-w-sm" data-testid="onboarding-gateway">
+    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-gateway">
       <CardHeader>
         <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
           <OortMark className="size-6 shrink-0 text-accent" />
@@ -427,7 +479,8 @@ export function ConnectPage({
               />
             </label>
           )}
-          <Button type="submit" data-testid="onboarding-next">
+          {failure?.onGateway && failureBanner}
+          <Button ref={nextRef} type="submit" data-testid="onboarding-next">
             다음
           </Button>
         </form>
@@ -439,7 +492,7 @@ export function ConnectPage({
   );
 
   const accountCard = (
-    <Card className="w-full max-w-sm" data-testid="onboarding-account">
+    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-account">
       <CardHeader>
         <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
           <OortMark className="size-6 shrink-0 text-accent" />
@@ -448,7 +501,7 @@ export function ConnectPage({
         <CardDescription>
           {mode === "join"
             ? "초대 코드로 워크스페이스에 참여합니다."
-            : "서버를 고른 뒤 로그인합니다."}
+            : "가입할 때 쓴 이메일로 로그인합니다."}
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
@@ -542,17 +595,7 @@ export function ConnectPage({
             )}
           </div>
           <div className="flex flex-col gap-3">
-            {failure && (
-              <InlineBanner
-                tone="error"
-                message={failure.message}
-                actionLabel={failure.retryable && !busy ? "다시 시도" : undefined}
-                onAction={
-                  failure.retryable && !busy ? () => void attempt() : undefined
-                }
-                testId="login-error"
-              />
-            )}
+            {failure && !failure.onGateway && failureBanner}
             <Button
               type="submit"
               disabled={busy || !online}
@@ -578,17 +621,23 @@ export function ConnectPage({
       direction={direction}
       effect={effect}
       containerClassName={step === "landing" ? "min-h-full" : undefined}
-      className={step === "landing" ? "min-h-full" : undefined}
+      className={
+        step === "landing" ? "min-h-full w-full" : "flex w-full justify-center"
+      }
     >
       {step === "landing" ? (
         <LandingStep
+          serverChoiceRef={chooseServerRef}
+          inviteChoiceRef={chooseInviteRef}
           onChooseServer={() => {
             setMode("signIn");
             goTo("gateway", "server");
+            focusLater("server");
           }}
           onChooseInvite={() => {
             setMode("join");
             goTo("gateway", "invite");
+            focusLater("code");
           }}
         />
       ) : step === "gateway" ? (
@@ -608,11 +657,18 @@ export function ConnectPage({
       <div className="flex items-center justify-between px-6 py-4">
         <button
           type="button"
-          className="rounded-sm text-body text-ink-muted underline underline-offset-4 focus-visible:focus-ring"
+          className="tap-target inline-flex items-center rounded-sm text-body text-ink-muted underline underline-offset-4 focus-visible:focus-ring"
           data-testid="onboarding-back"
           onClick={() => {
-            if (step === "account") goTo("gateway");
-            else goTo("landing");
+            if (step === "account") {
+              goTo("gateway");
+              focusLater(path === "invite" ? "code" : "server");
+            } else {
+              goTo("landing");
+              focusLater(
+                path === "invite" ? "choose-invite" : "choose-server"
+              );
+            }
           }}
         >
           뒤로

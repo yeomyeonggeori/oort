@@ -3,7 +3,8 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LoginResponse } from "@momo/core/lib/api";
+import { ApiError, type LoginResponse } from "@momo/core/lib/api";
+import { NetworkError } from "@momo/core/lib/http";
 import { setServerBase } from "@/lib/serverBase";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
@@ -150,18 +151,27 @@ describe("BZ-6a onboarding shell", () => {
     );
     expect(document.querySelector('[data-testid="login-server"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="login-invite-code"]')).toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
     click("onboarding-next");
     expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
       "3/3"
     );
     expect(document.querySelector('[data-testid="login-email"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-email");
     click("onboarding-back");
     expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
     click("onboarding-back");
     expect(document.querySelector('[data-testid="onboarding-landing"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "onboarding-choose-server"
+    );
     click("onboarding-choose-invite");
     expect(document.querySelector('[data-testid="login-invite-code"]')).not.toBeNull();
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "login-invite-code"
+    );
   });
 
   it("skips S0 when a server is already stored", () => {
@@ -183,6 +193,14 @@ describe("BZ-6a onboarding shell", () => {
     ) as HTMLInputElement | null;
     expect(code).not.toBeNull();
     expect(code?.value).toBe("Ab3-_x");
+    expect(
+      document
+        .querySelector("[data-onboarding-effect]")
+        ?.getAttribute("data-onboarding-effect")
+    ).toBe("none");
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "onboarding-next"
+    );
   });
 
   it("still signs in through the stepped form", async () => {
@@ -225,5 +243,57 @@ describe("BZ-6a onboarding shell", () => {
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
     expect(login).not.toHaveBeenCalled();
+  });
+
+  it("returns a code-status join failure to S1 with the banner on the code field", async () => {
+    window.history.replaceState(null, "", "/?code=Ab3-_x");
+    joinWithInvite.mockRejectedValue(new ApiError(404, "invite not found"));
+    mount();
+    click("onboarding-next");
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "new-pass");
+    await act(async () => {
+      click("login-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-testid="onboarding-account"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-invite-code"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="login-error"]')?.textContent).toContain(
+      "유효하지 않은 초대 코드"
+    );
+    expect(document.activeElement?.getAttribute("data-testid")).toBe(
+      "login-invite-code"
+    );
+  });
+
+  it("keeps a transport join failure on S2", async () => {
+    window.history.replaceState(null, "", "/?code=Ab3-_x");
+    joinWithInvite.mockRejectedValue(new NetworkError("unreachable", 15_000));
+    mount();
+    click("onboarding-next");
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "new-pass");
+    await act(async () => {
+      click("login-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="login-error"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="onboarding-gateway"]')).toBeNull();
+    expect(document.querySelector('[data-testid="login-error"]')?.textContent).toContain(
+      "서버에 닿지 못했습니다"
+    );
+  });
+
+  it("says S2 is about signing in, not picking a server", () => {
+    mount();
+    click("onboarding-choose-server");
+    click("onboarding-next");
+    expect(document.querySelector('[data-testid="onboarding-account"]')?.textContent).toContain(
+      "가입할 때 쓴 이메일로 로그인합니다."
+    );
   });
 });

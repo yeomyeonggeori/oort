@@ -34,6 +34,22 @@ export function progressLabel(step: OnboardingStep): string | null {
   return null;
 }
 
+/**
+ * Where S1 should land the cursor after a deep link (or any prefill that
+ * opened the gateway). Email/password live on S2, so the old single-form
+ * `prefillFocus` returning those fields is a silent no-op here.
+ */
+export function gatewayPrefillFocus(form: {
+  serverUrl: string;
+  inviteCode: string;
+  requiresServer: boolean;
+  joinPath: boolean;
+}): "server" | "code" | "next" {
+  if (form.requiresServer && form.serverUrl.trim() === "") return "server";
+  if (form.joinPath && form.inviteCode.trim() === "") return "code";
+  return "next";
+}
+
 export function transitionFor(
   from: OnboardingStep,
   to: OnboardingStep,

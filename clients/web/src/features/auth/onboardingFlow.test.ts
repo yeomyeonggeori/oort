@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  gatewayPrefillFocus,
   initialOnboarding,
   progressLabel,
   transitionFor,
@@ -22,6 +23,43 @@ describe("onboarding first step", () => {
     expect(
       initialOnboarding({ hasStoredServer: true, hasInvitePrefill: true })
     ).toEqual({ step: "gateway", path: "invite" });
+  });
+});
+
+describe("gateway prefill focus", () => {
+  it("lands on the first S1 field still empty, else the next button", () => {
+    expect(
+      gatewayPrefillFocus({
+        serverUrl: "",
+        inviteCode: "Ab3-_x",
+        requiresServer: true,
+        joinPath: true,
+      })
+    ).toBe("server");
+    expect(
+      gatewayPrefillFocus({
+        serverUrl: "https://team.example.com",
+        inviteCode: "",
+        requiresServer: true,
+        joinPath: true,
+      })
+    ).toBe("code");
+    expect(
+      gatewayPrefillFocus({
+        serverUrl: "https://team.example.com",
+        inviteCode: "Ab3-_x",
+        requiresServer: true,
+        joinPath: true,
+      })
+    ).toBe("next");
+    expect(
+      gatewayPrefillFocus({
+        serverUrl: "",
+        inviteCode: "",
+        requiresServer: false,
+        joinPath: false,
+      })
+    ).toBe("next");
   });
 });
 
