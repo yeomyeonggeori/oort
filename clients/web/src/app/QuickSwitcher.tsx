@@ -4,6 +4,7 @@ import { Command } from "cmdk";
 import {
   Activity,
   Bot,
+  FileText,
   Hash,
   Inbox,
   Lock,
@@ -35,6 +36,7 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
+import { useDraftsPanel } from "@/features/drafts/useDraftsPanel";
 import { InlineBanner } from "@/features/common/States";
 import {
   isSurfaceProvided,
@@ -99,6 +101,7 @@ export function QuickSwitcher({
   const { session, workspaceId } = useSession();
   const navigate = useNavigate();
   const location = useLocation();
+  const { showNav: showDrafts } = useDraftsPanel();
   const { groups } = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const { directory } = directoryQuery;
@@ -326,6 +329,17 @@ export function QuickSwitcher({
             <Inbox className="size-4 opacity-70" />
             인박스
           </Command.Item>
+          {showDrafts && (
+            <Command.Item
+              className={itemClass}
+              value="초안 drafts"
+              data-testid="switcher-drafts"
+              onSelect={() => go("/drafts")}
+            >
+              <FileText className="size-4 opacity-70" />
+              초안
+            </Command.Item>
+          )}
           <Command.Item className={itemClass} onSelect={() => go("/activity")}>
             <Activity className="size-4 opacity-70" />
             활동

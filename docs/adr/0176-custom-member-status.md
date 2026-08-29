@@ -1,6 +1,6 @@
 # ADR-0176: 사용자 커스텀 상태 (이모지+텍스트)
 
-- 상태: **Proposed** (성재 결재 대기)
+- 상태: **Accepted** (성재 승인 2026-08-30 — "ADR 셋 다 ㄱ")
 - 날짜: 2026-08-29
 - 발의: Fable (BF-B2 #1889 선행 — buzz 격차 후보 승인 "권장대로")
 - 관련: research/2026-08-29-buzz-ui-gap-candidates.md · buzz(Apache-2.0) features/user-status
