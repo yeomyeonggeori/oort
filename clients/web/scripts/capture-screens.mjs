@@ -1774,6 +1774,16 @@ async function installMocks(context) {
       updatedAtMs: Date.now() - 3_600_000,
     });
   });
+  await context.route("**/v1/workspaces/*/notification-rules", (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() || "{}");
+      return json(route, {
+        dnd: Boolean(body.dnd),
+        mentionOverridesMute: Boolean(body.mentionOverridesMute),
+      });
+    }
+    return json(route, { dnd: false, mentionOverridesMute: true });
+  });
 }
 
 async function assertOnboardingCardCentered(page, where, testId) {
@@ -6232,6 +6242,28 @@ async function captureScheme(browser, scheme) {
   const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
+
+  // BF-A4 (#1887): 설정 > 알림. Chromium 캡처는 셸이 아니므로 권한은 미지원
+  // 배너이고, 종류 토글과 서버 DND 그룹이 같은 리듬으로 선다.
+  const notificationsPage = await context.newPage();
+  await notificationsPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(notificationsPage);
+  await notificationsPage.evaluate(
+    'location.hash = "/settings?section=notifications"'
+  );
+  await notificationsPage
+    .getByTestId("desktop-notifications-permission")
+    .waitFor({ state: "visible" });
+  await notificationsPage
+    .getByTestId("desktop-notification-kinds")
+    .waitFor({ state: "visible" });
+  await notificationsPage
+    .getByTestId("notification-rules")
+    .waitFor({ state: "visible" });
+  const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  await notificationsPage.screenshot({ path: notificationsShot });
+  shots.push(notificationsShot);
+  await notificationsPage.close();
 
   // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
   //     agent runs. Shot at the top of the panel, where the engine card, the

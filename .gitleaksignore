@@ -231,3 +231,8 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 # 룰이 상수명 접미사만 보고 오탐.
 #   clients/web/src/features/huddles/micDeviceStore.ts:9  [generic-api-key]
 2661a90e5d07848459e599d3060abf9d83468663:clients/web/src/features/huddles/micDeviceStore.ts:generic-api-key:9
+
+# 2026-08-30 BF-A4(#1887) — localStorage 키 이름 상수 "momo.web.notifications.v1".
+# 자격증명 아님(momo.web.* 저장 키 명명 동형). generic-api-key 오탐.
+#   clients/web/src/features/notifications/preference.ts:17  [generic-api-key]
+7a73dc0cb0363b8f3a2a817d22834e413719d07a:clients/web/src/features/notifications/preference.ts:generic-api-key:17
