@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BF-A6 링크 프리뷰 Rich/Compact 선택 (#1903, 2026-08-30)
+
+- 설정 > 링크 미리보기를 접기 boolean에서 `rich | compact | off` 3값 라디오로. 저장 `momo.web.link-preview.v1`. 기존 `momo.web.link-previews-folded.v1`: `"true"`(카드 숨김)→`off`, `"false"`/unknown(compact 카드)→`compact`, 미저장→`rich`.
+- 타임라인 unfurl: 사진 카드는 `--spacing-preview-frame` 히어로+제목/도메인/설명 2줄. 이미지 없음·로드 실패는 compact 강등. off는 미렌더. 카드 전체 단일 링크. 설정 변경은 스토어 구독으로 즉시 반영(스레드 패널 포함).
+- 서버 무접촉. runtime-unverified 아님(web vitest·tsc·preflight·capture:design·gate:shell).
+
 ## BF-A7 컴포저 서식 최소셋 (#1902, 2026-08-30)
 
 - 채널·스레드 textarea에서 텍스트를 고르면 선택 위(공간 없으면 아래)에 부유 트레이(굵게/기울임/인라인 코드/링크). TipTap 없음. 접사는 momo-core markdown이 읽는 `** * \` []()` 만. 이미 감싸져 있으면 토글로 해제. 링크는 `[선택](링크주소)` 뒤 자리표시 선택.

@@ -9,7 +9,13 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/design/ui/dialog";
+import { cn } from "@/design/lib/cn";
 import { isDesktop, openExternalUrl } from "@/lib/tauri";
+import {
+  unfurlCardLayout,
+  useLinkPreviewPreference,
+  type LinkPreviewPreference,
+} from "./linkPreviewPreference";
 import { useUnfurlImage } from "./useUnfurlImage";
 
 function fallbackDomain(url: string): string {
@@ -20,11 +26,57 @@ function fallbackDomain(url: string): string {
   }
 }
 
-function UnfurlCard({ unfurl }: { unfurl: MessageUnfurl }) {
-  const image = useUnfurlImage(unfurl.imageUrl);
+function UnfurlMeta({
+  domain,
+  title,
+  description,
+}: {
+  domain: string;
+  title: string;
+  description?: string;
+}) {
+  return (
+    <span className="flex min-w-0 flex-1 flex-col gap-px p-3 pr-control-lg">
+      <span className="flex min-w-0 items-center gap-1 text-timestamp text-ink-muted">
+        <span className="truncate">{domain}</span>
+        <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
+      </span>
+      <span className="line-clamp-2 break-keep text-body font-medium text-ink">
+        {title}
+      </span>
+      {description ? (
+        <span className="line-clamp-2 break-keep text-meta text-ink-muted">
+          {description}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/**
+ * Presentational card. `image` is already a same-origin data URL, or null
+ * when the unfurl has no image / the fetch failed. Image decode failure is
+ * a local `brokenSrc` so rich still degrades without an empty hero.
+ */
+export function UnfurlCardView({
+  unfurl,
+  image,
+  preference,
+}: {
+  unfurl: MessageUnfurl;
+  image: string | null;
+  preference: Exclude<LinkPreviewPreference, "off">;
+}) {
   const [openFailed, setOpenFailed] = useState(false);
+  const [brokenSrc, setBrokenSrc] = useState<string | null>(null);
+  const ready = Boolean(image) && image !== brokenSrc;
+  const layout = unfurlCardLayout(preference, ready);
+  if (layout === "none") return null;
+
   const title = unfurl.title || unfurl.domain || fallbackDomain(unfurl.url);
   const domain = unfurl.domain || fallbackDomain(unfurl.url);
+  const rich = layout === "rich";
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       <a
@@ -35,8 +87,12 @@ function UnfurlCard({ unfurl }: { unfurl: MessageUnfurl }) {
         // 본문 URL 링크가 이미 가진 목적지의 액세서리라, 자연 탭 스톱으로 서면
         // 링크 메시지마다 키보드 여정이 카드 수만큼 늘어난다(리뷰 Blocker-1).
         data-row-action=""
-        className="flex min-w-0 flex-1 items-stretch rounded-md focus-visible:focus-ring"
+        className={cn(
+          "flex min-w-0 flex-1 rounded-md focus-visible:focus-ring",
+          rich ? "flex-col" : "items-stretch"
+        )}
         data-testid="unfurl-card"
+        data-layout={layout}
         onClick={(event) => {
           // WKWebView does not implement target=_blank. Keep the native anchor
           // in browsers and hand desktop clicks to the Tauri opener.
@@ -48,28 +104,25 @@ function UnfurlCard({ unfurl }: { unfurl: MessageUnfurl }) {
           });
         }}
       >
-        {image && (
+        {ready && image ? (
           <img
             src={image}
             alt=""
-            className="size-rail-tile shrink-0 self-center rounded-sm object-cover"
+            aria-hidden="true"
+            className={
+              rich
+                ? "h-preview-frame w-full object-cover"
+                : "size-rail-tile shrink-0 self-center rounded-sm object-cover"
+            }
             data-testid="unfurl-image"
+            onError={() => setBrokenSrc(image)}
           />
-        )}
-        <span className="flex min-w-0 flex-1 flex-col gap-px p-3 pr-control-lg">
-          <span className="flex min-w-0 items-center gap-1 text-timestamp text-ink-muted">
-            <span className="truncate">{domain}</span>
-            <ExternalLink className="size-3 shrink-0" aria-hidden="true" />
-          </span>
-          <span className="line-clamp-2 break-keep text-body font-medium text-ink">
-            {title}
-          </span>
-          {unfurl.description && (
-            <span className="line-clamp-2 break-keep text-meta text-ink-muted">
-              {unfurl.description}
-            </span>
-          )}
-        </span>
+        ) : null}
+        <UnfurlMeta
+          domain={domain}
+          title={title}
+          {...(unfurl.description ? { description: unfurl.description } : {})}
+        />
       </a>
       {openFailed && (
         <p
@@ -85,22 +138,39 @@ function UnfurlCard({ unfurl }: { unfurl: MessageUnfurl }) {
   );
 }
 
+function UnfurlCard({
+  unfurl,
+  preference,
+}: {
+  unfurl: MessageUnfurl;
+  preference: Exclude<LinkPreviewPreference, "off">;
+}) {
+  const image = useUnfurlImage(unfurl.imageUrl);
+  return (
+    <UnfurlCardView unfurl={unfurl} image={image} preference={preference} />
+  );
+}
+
 export function UnfurlCards({
   unfurls,
-  folded,
+  preference: preferenceProp,
   canRemove,
   onRemove,
 }: {
   unfurls: readonly MessageUnfurl[];
-  folded: boolean;
+  /** Test override. Live surfaces read the device store so a settings change
+   *  paints immediately, including ThreadPanel which never subscribed before. */
+  preference?: LinkPreviewPreference;
   canRemove: boolean;
   onRemove?: () => Promise<void>;
 }) {
+  const stored = useLinkPreviewPreference();
+  const preference = preferenceProp ?? stored;
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState(false);
   const [opener, setOpener] = useState<HTMLElement | null>(null);
-  if (folded) return null;
+  if (preference === "off") return null;
 
   const visible = unfurls
     .map(unfurlRenderState)
@@ -148,7 +218,7 @@ export function UnfurlCards({
             key={state.unfurl.id}
             className="relative flex overflow-hidden rounded-md border border-line bg-surface-raised"
           >
-            <UnfurlCard unfurl={state.unfurl} />
+            <UnfurlCard unfurl={state.unfurl} preference={preference} />
             {removeControl(index)}
           </div>
         )

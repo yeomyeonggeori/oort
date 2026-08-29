@@ -6220,14 +6220,11 @@ async function captureScheme(browser, scheme) {
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
   await turns.getByTestId("composer-working").waitFor({ state: "visible" });
-  // The ADR-0135 D1 cascade notice, and this wait is a GATE rather than a
-  // convenience. The row it hangs on is the WORKER turn record in BODIES, which
-  // is the only shape a real cascade can land on; the seeded fallback in
-  // cascadeRail.tsx is keyed to that row's run id. If `turnRecordRunId` ever
-  // narrows back to the gateway schema, the capture stops here instead of
-  // shipping screenshots of a surface that cannot render in production, which
-  // is precisely how D1/F3 got through the gates the first time.
-  await turns.getByTestId("cascade-notice").waitFor({ state: "visible" });
+  // Rich unfurl heroes grow after the image arrives (#1903). Settle that
+  // layout first: a compact-to-hero jump unmounts earlier rows from virtuoso,
+  // which is how `scrollIntoViewIfNeeded` died here (the same class
+  // `scrollTimelineRowIntoView` was written for).
+  await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
@@ -6236,8 +6233,15 @@ async function captureScheme(browser, scheme) {
   //       적이 없다 — 렌더를 확인하지 못한 채 머지 리뷰까지 갔고, 거기서 구조적으로
   //       렌더 불가라는 것이 드러났다(D1/F3). 워커 턴 행에 붙은 모습을 두 스킴
   //       모두에서 남겨 다음 리뷰가 눈으로도 확인할 수 있게 한다.
-  await turns.getByTestId("cascade-notice").scrollIntoViewIfNeeded();
-  await turns.waitForTimeout(200);
+  //
+  // The notice itself is still a GATE: scrollTimelineRowIntoView dies if the
+  // worker-turn row is not in this build (the seeded fallback in cascadeRail
+  // is keyed to that row's run id).
+  await scrollTimelineRowIntoView(
+    turns,
+    "cascade-notice",
+    `agent-turns ${scheme}`
+  );
   const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
   await turns.screenshot({ path: cascadeShot });
   shots.push(cascadeShot);

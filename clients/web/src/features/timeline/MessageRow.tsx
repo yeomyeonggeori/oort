@@ -260,7 +260,6 @@ export function MessageRow({
   deletedRepeat,
   deletedFoldedIds,
   unfurls = [],
-  foldLinkPreviews = false,
   runEnded = false,
   onOpenThread,
   onQuoteMessage,
@@ -296,8 +295,6 @@ export function MessageRow({
   deletedFoldedIds?: readonly string[];
   /** ADR-0170 projection for this row; failed/blocked are kept for quiet render. */
   unfurls?: readonly MessageUnfurl[];
-  /** Personal, device-local render choice. It never changes server fetching. */
-  foldLinkPreviews?: boolean;
   /**
    * ADR-0155 — 이 메시지를 쓴 run 이 **끝난 것을 보았는가**.
    *
@@ -829,7 +826,6 @@ export function MessageRow({
         {!deleted && unfurls.length > 0 && (
           <UnfurlCards
             unfurls={unfurls}
-            folded={foldLinkPreviews}
             canRemove={
               Boolean(actions?.onRemoveUnfurls) &&
               actions?.myMemberId.toLowerCase() ===

@@ -46,7 +46,6 @@ import {
   unfurlsFor,
   type UnfurlMap,
 } from "@momo/core/features/timeline/unfurl";
-import { useLinkPreviewsFolded } from "./linkPreviewPreference";
 import {
   AT_BOTTOM_SLACK_PX,
   countNewerThan,
@@ -271,7 +270,6 @@ export function Timeline({
   onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
-  const foldLinkPreviews = useLinkPreviewsFolded();
 
   // ADR-0148 - 라이브로 도착한 인용 답글의 원본을 화면에 이미 있는 행에서 푼다.
   //
@@ -688,7 +686,6 @@ export function Timeline({
               startsGroup={item.startsGroup}
               directory={directory}
               unfurls={unfurlsFor(unfurls ?? {}, item.message.id)}
-              foldLinkPreviews={foldLinkPreviews}
               actions={
                 actions && {
                   ...actions,
