@@ -201,7 +201,7 @@ export function ThreadComposer({
           />
           <div
             className={cn(
-              "rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring",
+              "rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring",
               sending && "opacity-50"
             )}
             aria-busy={sending}

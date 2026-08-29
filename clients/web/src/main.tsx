@@ -12,6 +12,7 @@ import { startPwa } from "@/features/pwa/store";
 import { initSessionStore } from "@/lib/session";
 import { releaseAfter, SESSION_HYDRATE_BUDGET_MS } from "@/app/boot";
 import { trackViewportHeight } from "@/app/viewportHeight";
+import { initFocusModality } from "@/design/focusModality";
 import { initTheme } from "@/design/theme";
 import "@/design/tokens.css";
 
@@ -25,6 +26,7 @@ trackViewportHeight();
 // 없다. 이 줄이 지키는 것은 그 스크립트가 오지 못한 경우(오프라인 콜드 스타트)와
 // 모듈이 가진 선택이 문서와 어긋나지 않는다는 사실이다.
 initTheme();
+initFocusModality(document);
 
 // StrictMode is intentionally OFF: its dev-only double-invocation would
 // double-subscribe the Centrifugo rail and make the realtime/resume demo

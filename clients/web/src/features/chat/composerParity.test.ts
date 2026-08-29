@@ -122,7 +122,9 @@ describe("컴포저 공용 표면 (#1688)", () => {
 
   it("그릇이 입력 포커스·빈 면적 클릭을 맡고 버튼은 자기 클릭을 지킨다 (#1749)", () => {
     for (const composer of [channel, thread]) {
-      expect(composer).toContain("focus-within:focus-ring");
+      expect(composer).toContain("focus-visible-within:focus-ring");
+      expect(composer).not.toContain("focus-within:focus-ring");
+      expect(composer).not.toContain("focus:border");
       expect(composer).toContain('event.target.closest("button")');
       expect(composer).toContain(".current?.focus()");
     }

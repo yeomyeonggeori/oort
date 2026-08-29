@@ -825,7 +825,7 @@ export function Composer({
           optionTestId="mention-option"
         />
         <div
-          className="rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring"
+          className="rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring"
           data-testid="composer-frame"
           onClick={(event) => {
             // 버튼과 그 자식(svg/path)은 자기 액션을 가진다. 나머지 그릇 면적은 한
