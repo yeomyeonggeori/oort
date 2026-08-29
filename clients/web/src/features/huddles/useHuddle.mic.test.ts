@@ -101,7 +101,10 @@ beforeEach(() => {
     setMicrophoneDeviceId,
     setMicrophoneGain,
   });
-  setMicrophoneDeviceId.mockResolvedValue(undefined);
+  setMicrophoneDeviceId.mockImplementation(async (deviceId: string) => ({
+    applied: true,
+    deviceId,
+  }));
   setMicrophoneMuted.mockResolvedValue(undefined);
   disconnectAudio.mockResolvedValue(undefined);
 });
@@ -146,6 +149,10 @@ function Probe({
     createElement("span", {
       "data-testid": "joined",
       children: huddleState.joined ? "yes" : "no",
+    }),
+    createElement("span", {
+      "data-testid": "device",
+      children: huddleState.microphoneDeviceId,
     }),
     createElement("button", {
       type: "button",
@@ -219,6 +226,35 @@ describe("useHuddle microphone persistence", () => {
     expect(connectHuddleAudio).toHaveBeenCalledTimes(2);
     expect(connectHuddleAudio.mock.calls[1]?.[0]).toEqual(
       expect.objectContaining({ microphoneDeviceId: "mic-2" })
+    );
+  });
+
+  it("does not persist until setDeviceId confirms, and aligns to getDeviceId on false", async () => {
+    writeHuddleMicDeviceId("mic-1");
+    setMicrophoneDeviceId.mockResolvedValueOnce({
+      applied: false,
+      deviceId: "mic-fallback",
+    });
+    const host = await mountProbe();
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='join']")?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>("[data-testid='switch']")?.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(setMicrophoneDeviceId).toHaveBeenCalledWith("mic-2");
+    expect(memory.get(HUDDLE_MIC_STORAGE_KEY)).toBe("mic-fallback");
+    expect(host.querySelector("[data-testid='device']")?.textContent).toBe(
+      "mic-fallback"
     );
   });
 });

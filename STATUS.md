@@ -4,7 +4,8 @@
 
 - 허들 라이브 컨트롤에 마이크 선택 메뉴. `useAudioInputDevices`가 `enumerateDevices`+`devicechange`로 audioinput을 갱신하고, 권한 전(빈 레이블)·거부·0개를 문장으로 가른다. 선택 deviceId는 `momo.web.huddle.mic.v1`에 기억되고 다음 참가 시 그 장치로 시작(부재 시 기본 폴백).
 - 트랙 교체는 livekit-client `setMicrophoneEnabled({ deviceId })` + `LocalAudioTrack.setDeviceId`. 입력 음량(0~100%)은 공식 게인 API가 없어 WebAudio GainNode를 `setProcessor`로 삽입.
-- red proof: 훅 열거·devicechange·권한 전 상태, 선택 시 setDeviceId 1회·저장·재참여 적용(모킹).
+- design-review 수리: B-2 `MicGainProcessor`가 init에서 AudioContext를 캐시해 livekit restart(audioContext 미전달)에서도 그래프를 재구축. B-1 390 joined는 음소거+캐럿 스플릿·Live/캐럿 wide-only. H-1 setDeviceId boolean 확인 후에만 persist. H-2 게인 항목 ←/→. H-3 `100%` nowrap+4ch. M-1 메뉴 `max-w-menu-available`. L-1 `gainPercent`/`gain01` 경계 명명.
+- red proof: livekit 실쉐이프 restart(audioContext 없음), setDeviceId false 정합, 게인 키보드 렌더 테스트, `gate:huddle` 390 그룹 내 컨트롤 상호 겹침 0.
 
 ## BF-A2 상단 안읽음 점프 필 (#1885, 2026-08-29)
 

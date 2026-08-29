@@ -8,6 +8,7 @@ const setMicrophoneEnabledMock = vi.fn();
 const getTrackPublicationMock = vi.fn();
 const switchActiveDeviceMock = vi.fn();
 const setDeviceIdMock = vi.fn();
+const getDeviceIdMock = vi.fn();
 const setAudioContextMock = vi.fn();
 const setProcessorMock = vi.fn();
 const stopProcessorMock = vi.fn();
@@ -60,6 +61,7 @@ function publishedMic() {
   return {
     audioTrack: {
       setDeviceId: setDeviceIdMock,
+      getDeviceId: getDeviceIdMock,
       setAudioContext: setAudioContextMock,
       setProcessor: setProcessorMock,
       stopProcessor: stopProcessorMock,
@@ -76,6 +78,7 @@ beforeEach(() => {
   getTrackPublicationMock.mockReset();
   switchActiveDeviceMock.mockReset();
   setDeviceIdMock.mockReset();
+  getDeviceIdMock.mockReset();
   setAudioContextMock.mockReset();
   setProcessorMock.mockReset();
   stopProcessorMock.mockReset();
@@ -85,6 +88,7 @@ beforeEach(() => {
   getTrackPublicationMock.mockReturnValue(publishedMic());
   switchActiveDeviceMock.mockResolvedValue(true);
   setDeviceIdMock.mockResolvedValue(true);
+  getDeviceIdMock.mockResolvedValue("mic-2");
   setProcessorMock.mockResolvedValue(undefined);
   stopProcessorMock.mockResolvedValue(undefined);
 });
@@ -167,10 +171,25 @@ describe("huddleRuntime microphone device", () => {
       onDisconnected: () => undefined,
     });
 
-    await session.setMicrophoneDeviceId("mic-2");
+    const result = await session.setMicrophoneDeviceId("mic-2");
     expect(setDeviceIdMock).toHaveBeenCalledTimes(1);
     expect(setDeviceIdMock).toHaveBeenCalledWith("mic-2");
+    expect(getDeviceIdMock).toHaveBeenCalled();
+    expect(result).toEqual({ applied: true, deviceId: "mic-2" });
     expect(switchActiveDeviceMock).not.toHaveBeenCalled();
+  });
+
+  it("reports applied=false and the real device when setDeviceId lands elsewhere", async () => {
+    setDeviceIdMock.mockResolvedValueOnce(false);
+    getDeviceIdMock.mockResolvedValueOnce("mic-fallback");
+    const session = await connectHuddleAudio({
+      livekitUrl: FUNNEL_SIGNAL,
+      token: "tok",
+      onDisconnected: () => undefined,
+    });
+
+    const result = await session.setMicrophoneDeviceId("mic-2");
+    expect(result).toEqual({ applied: false, deviceId: "mic-fallback" });
   });
 
   it("falls back to the default device when the selected id cannot restart", async () => {
@@ -231,7 +250,7 @@ describe("huddleRuntime microphone device", () => {
       const session = await connectHuddleAudio({
         livekitUrl: FUNNEL_SIGNAL,
         token: "tok",
-        microphoneGain: 0.5,
+        microphoneGain01: 0.5,
         onDisconnected: () => undefined,
       });
       expect(setAudioContextMock).toHaveBeenCalled();

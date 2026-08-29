@@ -74,8 +74,9 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     );
     expect(HUDDLE_CODE).toMatch(/data-testid="huddle-live"/);
     expect(HUDDLE_CODE).toMatch(/data-testid="huddle-participants"/);
-    expect(HUDDLE_CODE).toMatch(/testId="huddle-microphone"/);
+    expect(HUDDLE_CODE).toMatch(/data-testid="huddle-microphone"/);
     expect(HUDDLE_CODE).toMatch(/HuddleMicMenu/);
+    expect(HUDDLE_CODE).toMatch(/huddle-mic-cluster/);
     expect(HUDDLE_CODE).toMatch(/testId="huddle-leave"/);
   });
 

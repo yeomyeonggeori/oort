@@ -18,7 +18,9 @@
 //      measurable and the terminal-dock toggle inside the viewport;
 //   5. at 390x844 (live + joined) the right group stays inside the viewport,
 //      does not paint over the drawer toggle or channel hash, and the title
-//      still has a measurable width. Names yield; the Live chip keeps a count;
+//      still has a measurable width. Joined Live chip and mic picker yield
+//      (wide-only) so mute/leave do not paint over the member button.
+//      Controls inside the header do not overlap each other;
 //   6. after audio joined, a projection 500 cannot hide Live, microphone or exit.
 //
 // Red proofs:
@@ -324,6 +326,59 @@ async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
     const workToggle = document
       .querySelector("[data-testid='open-terminal-dock']")
       ?.getBoundingClientRect();
+    const controlIds = [
+      "open-sidebar-drawer",
+      "open-terminal-dock",
+      "open-pin-list",
+      "channel-member-count",
+      "huddle-live",
+      "huddle-microphone",
+      "huddle-mic-devices",
+      "huddle-leave",
+      "channel-title-menu",
+    ];
+    const boxes = [];
+    for (const id of controlIds) {
+      const node = document.querySelector(`[data-testid='${id}']`);
+      if (!node) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      boxes.push({
+        id,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+    if (hash && hash.width > 0 && hash.height > 0) {
+      boxes.push({
+        id: "channel-hash",
+        left: hash.left,
+        right: hash.right,
+        top: hash.top,
+        bottom: hash.bottom,
+        width: hash.width,
+        height: hash.height,
+      });
+    }
+    const overlaps = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i];
+        const b = boxes[j];
+        if (
+          a.left < b.right &&
+          a.right > b.left &&
+          a.top < b.bottom &&
+          a.bottom > b.top
+        ) {
+          overlaps.push(`${a.id}×${b.id}`);
+        }
+      }
+    }
     return {
       titleWidth: title?.width ?? 0,
       groupLeft: group?.left ?? -1,
@@ -335,6 +390,8 @@ async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
       toggleRight: toggle?.right ?? 0,
       overlapsToggle: overlap(group, toggle),
       overlapsHash: overlap(group, hash),
+      controlOverlaps: overlaps,
+      controlBoxes: boxes,
       scrollWidth: document.documentElement.scrollWidth,
       viewport: vpWidth,
     };
@@ -362,6 +419,11 @@ async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
   if (requireDrawer && geometry.overlapsToggle) {
     throw new Error(
       `control group overlapped the drawer toggle at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.controlOverlaps.length > 0) {
+    throw new Error(
+      `header controls overlapped each other at ${width}: ${JSON.stringify(geometry.controlOverlaps)} ${JSON.stringify(geometry.controlBoxes)}`
     );
   }
   if (geometry.scrollWidth > width) {
@@ -470,16 +532,30 @@ async function main() {
         height: 480,
         requireDrawer: false,
       });
-      await assertJoinedHeaderFits(page, {
+      const geo390 = await assertJoinedHeaderFits(page, {
         width: 390,
         height: 844,
         requireDrawer: true,
       });
-      if (await page.getByTestId("huddle-participants").isVisible()) {
-        throw new Error("participant names must yield at 390 so the Live chip can shrink");
+      console.log(
+        "ok  390 joined header overlap 0",
+        JSON.stringify({
+          overlaps: geo390.controlOverlaps,
+          boxes: geo390.controlBoxes,
+        })
+      );
+      if (await page.getByTestId("huddle-live").isVisible()) {
+        throw new Error(
+          "joined Live chip must yield at 390 so mute and leave do not cover the member button"
+        );
       }
-      if (!(await page.getByTestId("huddle-participant-count").isVisible())) {
-        throw new Error("the 390 Live chip must keep a participant count");
+      if (await page.getByTestId("huddle-mic-devices").isVisible()) {
+        throw new Error(
+          "mic picker caret must yield at 390 (folded into the mute split, wide-only)"
+        );
+      }
+      if (await page.getByTestId("huddle-participants").isVisible()) {
+        throw new Error("participant names must yield at 390");
       }
       await page.screenshot({
         path: resolve(outDir, "joined-390.png"),

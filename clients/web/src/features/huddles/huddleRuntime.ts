@@ -34,10 +34,15 @@ class HuddleMicrophoneError extends Error {
   }
 }
 
+export type MicrophoneDeviceSwitch = {
+  applied: boolean;
+  deviceId: string;
+};
+
 export interface HuddleAudioSession {
   disconnect: () => Promise<void>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
-  setMicrophoneDeviceId: (deviceId: string) => Promise<void>;
+  setMicrophoneDeviceId: (deviceId: string) => Promise<MicrophoneDeviceSwitch>;
   setMicrophoneGain: (gain01: number) => void;
 }
 
@@ -46,7 +51,7 @@ export interface ConnectHuddleAudioOptions {
   token: string;
   onDisconnected: () => void;
   microphoneDeviceId?: string | null;
-  microphoneGain?: number;
+  microphoneGain01?: number;
 }
 
 function publishedMicrophone(room: Room): LocalAudioTrack | undefined {
@@ -64,7 +69,7 @@ export async function connectHuddleAudio(
   const room = new Room({ adaptiveStream: false, dynacast: false });
   const attachedAudio = new Set<HTMLMediaElement>();
   let intentionalDisconnect = false;
-  const gain = new MicGainProcessor(options.microphoneGain ?? 1);
+  const gain = new MicGainProcessor(options.microphoneGain01 ?? 1);
   const audioContext = tryCreateAudioContext();
   let gainAttached = false;
 
@@ -146,6 +151,7 @@ export async function connectHuddleAudio(
       const microphone = publishedMicrophone(room);
       if (microphone && audioContext) {
         try {
+          gain.setAudioContext(audioContext);
           microphone.setAudioContext(audioContext);
           await microphone.setProcessor(gain);
           gainAttached = true;
@@ -206,16 +212,25 @@ export async function connectHuddleAudio(
       const target = deviceId.trim() === "" ? "default" : deviceId.trim();
       try {
         if (microphone) {
+          let applied = false;
           try {
-            await microphone.setDeviceId(target);
-            return;
+            applied = Boolean(await microphone.setDeviceId(target));
           } catch (switchError) {
             if (target === "default") throw switchError;
             await microphone.setDeviceId("default");
-            return;
+            applied = false;
           }
+          const actual = (await microphone.getDeviceId()) ?? "";
+          if (target === "default") {
+            return { applied: true, deviceId: actual };
+          }
+          return { applied, deviceId: actual };
         }
-        await room.switchActiveDevice("audioinput", target);
+        const switched = await room.switchActiveDevice("audioinput", target);
+        return {
+          applied: Boolean(switched),
+          deviceId: target === "default" ? "" : target,
+        };
       } catch (error) {
         throw new HuddleMicrophoneError(error);
       }
