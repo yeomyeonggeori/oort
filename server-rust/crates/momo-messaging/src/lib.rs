@@ -61,6 +61,8 @@ pub mod notification_rule;
 pub mod presence;
 pub mod read_state;
 pub mod refine;
+/// ADR-0175 / #1888 — personal message reminders (no outbox fan-out).
+pub mod reminder;
 pub mod search;
 pub mod workspace_avatar;
 
@@ -149,6 +151,14 @@ pub use refine::{
     HarnessRefine, HarnessRefineEdit, HarnessRefineInvalid, HarnessRefineTrigger,
     HARNESS_REFINE_EDITS_MAX, HARNESS_REFINE_ID_MAX_CHARS, HARNESS_REFINE_PROPS_KEY,
     HARNESS_REFINE_SCOPE, HARNESS_REFINE_SUMMARY_MAX_CHARS,
+};
+pub use reminder::{
+    authorize_reminder_message_in_tx, clamp_reminder_list_limit, complete_reminder_in_tx,
+    create_reminder_in_tx, delete_reminder_in_tx, get_own_reminder_in_tx, list_reminders_in_tx,
+    normalize_reminder_note, parse_reminder_list_state, reminder_due_at_from_ms,
+    snooze_reminder_in_tx, MessageReminder, ReminderDueInvalid, ReminderListState,
+    ReminderNoteInvalid, ReminderStateInvalid, ReminderTarget, REMINDER_LIST_LIMIT_DEFAULT,
+    REMINDER_LIST_LIMIT_MAX, REMINDER_NOTE_MAX_CHARS,
 };
 pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,

@@ -768,6 +768,16 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/notification-rules",
             get(routes::notification_rules::get).put(routes::notification_rules::put),
         )
+        // ADR-0175 / #1888 — personal message reminders. Human-only, owner
+        // scoped, no outbox fan-out (v1 is a client poll).
+        .route(
+            "/v1/workspaces/{ws}/reminders",
+            post(routes::reminders::create).get(routes::reminders::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/reminders/{id}",
+            patch(routes::reminders::update).delete(routes::reminders::delete),
+        )
         .route(
             "/v1/workspaces/{ws}/invites",
             get(routes::invites::list).post(routes::invites::create),

@@ -938,6 +938,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's own reminders, soonest due first.
+         * @description Owner-scoped. `state=pending` (default) hides completed rows; `state=all` returns both. Keyset pagination over `(due_at, id)` via `cursor` = the previous page's last reminder id.
+         */
+        get: operations["listMessageReminders"];
+        put?: never;
+        /**
+         * Create a personal reminder on a channel message.
+         * @description ADR-0175 / #1888. Human bearer only. The target message must live in `channelId` and the caller must be a current channel member. `dueAtMs` in the past is 400. v1 does not emit outbox — expiry is a client poll.
+         */
+        post: operations["createMessageReminder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/reminders/{reminderId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete the caller's reminder.
+         * @description Owner only. A reminder that is not the caller's answers 404.
+         */
+        delete: operations["deleteMessageReminder"];
+        options?: never;
+        head?: never;
+        /**
+         * Snooze a reminder or mark it complete.
+         * @description Body is `{dueAtMs}` (snooze) or `{completed: true}`. Both, neither, or `completed: false` is 400. Snoozing a completed row is 409. A reminder that is not the caller's answers 404.
+         */
+        patch: operations["updateMessageReminder"];
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles": {
         parameters: {
             query?: never;
@@ -3670,6 +3718,49 @@ export interface components {
         NotificationRulesResponse: {
             dnd: boolean;
             mentionOverridesMute: boolean;
+        };
+        CreateReminderRequest: {
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** Format: int64 */
+            dueAtMs: number;
+            note?: string;
+        };
+        UpdateReminderRequest: {
+            /** Format: int64 */
+            dueAtMs?: number;
+            completed?: boolean;
+        };
+        Reminder: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: uuid */
+            memberId: string;
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** Format: int64 */
+            dueAtMs: number;
+            note?: string;
+            /** Format: int64 */
+            completedAtMs?: number;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        ReminderResponse: {
+            reminder: components["schemas"]["Reminder"];
+        };
+        ReminderListResponse: {
+            reminders: components["schemas"]["Reminder"][];
+            /** Format: uuid */
+            nextCursor?: string;
         };
         CreateChannelRequest: {
             /** @enum {string} */
@@ -8394,6 +8485,226 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Active human membership required. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listMessageReminders: {
+        parameters: {
+            query?: {
+                state?: "pending" | "all";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's reminder page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderListResponse"];
+                };
+            };
+            /** @description Invalid state or cursor. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReminderRequest"];
+            };
+        };
+        responses: {
+            /** @description Reminder stored and audited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderResponse"];
+                };
+            };
+            /** @description Invalid body, unknown field, or dueAtMs not in the future. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer, inactive membership, or not a channel member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found in the named channel. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                reminderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminder deleted and audited. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid reminder id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reminder not found for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                reminderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateReminderRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated reminder. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderResponse"];
+                };
+            };
+            /** @description Invalid body, unknown field, or dueAtMs not in the future. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reminder not found for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Completed reminder cannot be rescheduled. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
