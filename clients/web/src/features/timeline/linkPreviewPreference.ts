@@ -20,7 +20,11 @@ import { useSyncExternalStore } from "react";
 //   new key valid            → as stored
 //   old "true"               → off
 //   old "false" / unknown    → compact  (they were seeing the compact card)
-//   no keys                  → rich     (new default; A6's hero is the product)
+//   no keys                  → rich
+//     미저장 → rich는 미토글 기존 사용자 포함 의도적 기본 상향
+//     (제품 결정, 오케스트레이터 승인·성재 최종 확인 예정).
+//     "미저장"은 신규 설치가 아니다. 옛 setter는 값이 바뀔 때만 썼으므로
+//     키가 없다는 것은 "이 설정을 한 번도 열지 않았다"이고, 그쪽이 다수다.
 // =============================================================================
 
 export const LINK_PREVIEW_PREFERENCES = ["rich", "compact", "off"] as const;
@@ -28,7 +32,9 @@ export type LinkPreviewPreference = (typeof LINK_PREVIEW_PREFERENCES)[number];
 
 export const LINK_PREVIEW_STORAGE_KEY = "momo.web.link-preview.v1";
 
-/** Boolean-era key. Read only to migrate; new writes go to the 3-value key. */
+/** Boolean-era key. Read only to migrate; new writes go to the 3-value key.
+ *  The old key is left in place on purpose (rollback). A valid 3-value key
+ *  wins, so nothing reads this after migration. */
 export const LINK_PREVIEW_FOLDED_STORAGE_KEY =
   "momo.web.link-previews-folded.v1";
 
@@ -70,15 +76,18 @@ export function migrateLinkPreviewPreference(
 }
 
 /**
- * What the card actually paints. A rich preference with no ready image is
- * compact: an empty hero is forbidden (missing URL and load failure alike).
+ * What the card actually paints. `showHeroFrame` is the caller's job:
+ * preference is rich AND an image URL exists AND fetch/decode has not failed.
+ * Bytes may still be loading — the frame is reserved either way (H-1). An
+ * empty hero is still forbidden: failure degrades to compact, and a missing
+ * URL never opens the frame.
  */
 export function unfurlCardLayout(
   preference: LinkPreviewPreference,
-  imageReady: boolean
+  showHeroFrame: boolean
 ): UnfurlCardLayout {
   if (preference === "off") return "none";
-  if (preference === "rich" && imageReady) return "rich";
+  if (preference === "rich" && showHeroFrame) return "rich";
   return "compact";
 }
 
@@ -130,7 +139,10 @@ export function setLinkPreviewPreference(
   next: LinkPreviewPreference,
   storage: PreferenceStorage | null = browserStorage()
 ): void {
-  if (next === preference) return;
+  // Always write, even when next equals the in-memory default. Choosing the
+  // default explicitly ("사진 카드" on a fresh store) must persist; otherwise
+  // the radio looks saved and a later default change would move this device.
+  const changed = next !== preference;
   preference = next;
   try {
     storage?.setItem(LINK_PREVIEW_STORAGE_KEY, next);
@@ -138,6 +150,7 @@ export function setLinkPreviewPreference(
     // Storage denial only narrows persistence to this tab; rendering still
     // follows the person's choice immediately.
   }
+  if (!changed) return;
   for (const listener of listeners) listener();
 }
 

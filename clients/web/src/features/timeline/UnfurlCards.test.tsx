@@ -1,8 +1,13 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
-import { UnfurlCardView, UnfurlCards } from "./UnfurlCards";
+import {
+  UNFURL_HERO_FRAME_CLASS,
+  UnfurlCardView,
+  UnfurlCards,
+} from "./UnfurlCards";
+import { resetUnfurlImagesForTest } from "./useUnfurlImage";
 
 const componentSource = readFileSync(
   new URL("./UnfurlCards.tsx", import.meta.url),
@@ -38,6 +43,8 @@ function html(
     />
   );
 }
+
+afterEach(() => resetUnfurlImagesForTest());
 
 describe("UnfurlCards", () => {
   it("renders the pending reserved slot", () => {
@@ -77,8 +84,33 @@ describe("UnfurlCards", () => {
       preference: "rich",
     });
     expect(output).toContain('data-layout="compact"');
+    expect(output).not.toContain("aspect-og");
     expect(output).not.toContain("h-preview-frame");
     expect(output).not.toContain('data-testid="unfurl-image"');
+    expect(output).not.toContain('data-testid="unfurl-hero"');
+  });
+
+  it("reserves the rich hero frame before image bytes arrive", () => {
+    const output = html(
+      [{ ...base, imageUrl: "/v1/workspaces/ws/unfurls/u-1/image" }],
+      { preference: "rich" }
+    );
+    expect(output).toContain('data-layout="rich"');
+    expect(output).toContain("aspect-og");
+    expect(output).toContain("max-h-unfurl-hero");
+    expect(output).toContain(UNFURL_HERO_FRAME_CLASS);
+    expect(output).toContain('data-testid="unfurl-hero"');
+    expect(output).not.toContain('data-testid="unfurl-image"');
+  });
+
+  it("gives the remove control an opaque token chip", () => {
+    const output = html([base], { canRemove: true });
+    const remove = output.match(
+      /<button(?=[^>]*data-testid="unfurl-remove")[^>]*>/
+    )?.[0];
+    expect(remove).toBeDefined();
+    expect(remove).toContain("bg-surface-raised");
+    expect(remove).toContain("border-line-strong");
   });
 
   it("withholds removal from non-authors", () => {
@@ -93,13 +125,21 @@ describe("UnfurlCards", () => {
 });
 
 describe("UnfurlCardView", () => {
+  const withImage: MessageUnfurl = {
+    ...base,
+    imageUrl: "/v1/workspaces/ws/unfurls/u-1/image",
+  };
+
   it("paints a hero image card when rich and the image is ready", () => {
     const output = renderToStaticMarkup(
-      <UnfurlCardView unfurl={base} image={PIXEL} preference="rich" />
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="rich" />
     );
     expect(output).toContain('data-layout="rich"');
-    expect(output).toContain("h-preview-frame");
+    expect(output).toContain(UNFURL_HERO_FRAME_CLASS);
+    expect(output).toContain("aspect-og");
+    expect(output).toContain("max-h-unfurl-hero");
     expect(output).toContain("object-cover");
+    expect(output).not.toContain("h-preview-frame");
     expect(output).toContain('data-testid="unfurl-image"');
     expect(output).toContain('aria-hidden="true"');
     expect(output).toContain('alt=""');
@@ -108,10 +148,12 @@ describe("UnfurlCardView", () => {
 
   it("keeps the compact thumb when compact and the image is ready", () => {
     const output = renderToStaticMarkup(
-      <UnfurlCardView unfurl={base} image={PIXEL} preference="compact" />
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="compact" />
     );
     expect(output).toContain('data-layout="compact"');
     expect(output).toContain("size-rail-tile");
+    expect(output).toContain("items-stretch");
+    expect(output).not.toContain("aspect-og");
     expect(output).not.toContain("h-preview-frame");
   });
 
@@ -121,11 +163,52 @@ describe("UnfurlCardView", () => {
     );
     expect(output).toContain('data-layout="compact"');
     expect(output).not.toContain('data-testid="unfurl-image"');
+    expect(output).not.toContain('data-testid="unfurl-hero"');
+  });
+
+  it("uses the same hero frame class before and after bytes arrive", () => {
+    const reserved = renderToStaticMarkup(
+      <UnfurlCardView unfurl={withImage} image={null} preference="rich" />
+    );
+    const ready = renderToStaticMarkup(
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="rich" />
+    );
+    expect(reserved).toContain('data-layout="rich"');
+    expect(ready).toContain('data-layout="rich"');
+    expect(reserved).toContain(UNFURL_HERO_FRAME_CLASS);
+    expect(ready).toContain(UNFURL_HERO_FRAME_CLASS);
+    expect(reserved).not.toContain('data-testid="unfurl-image"');
+    expect(ready).toContain('data-testid="unfurl-image"');
+  });
+
+  it("degrades rich to compact when fetch failed", () => {
+    const output = renderToStaticMarkup(
+      <UnfurlCardView
+        unfurl={withImage}
+        image={null}
+        imageFailed
+        preference="rich"
+      />
+    );
+    expect(output).toContain('data-layout="compact"');
+    expect(output).not.toContain('data-testid="unfurl-hero"');
+  });
+
+  it("pads the compact meta for the remove chip and not the rich meta", () => {
+    const compact = renderToStaticMarkup(
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="compact" />
+    );
+    const rich = renderToStaticMarkup(
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="rich" />
+    );
+    expect(compact).toContain("pr-control-lg");
+    expect(rich).not.toContain("pr-control-lg");
+    expect(rich).toContain("p-3");
   });
 
   it("is a single link with no nested tab stops", () => {
     const output = renderToStaticMarkup(
-      <UnfurlCardView unfurl={base} image={PIXEL} preference="rich" />
+      <UnfurlCardView unfurl={withImage} image={PIXEL} preference="rich" />
     );
     expect(output.match(/<a /g)).toHaveLength(1);
     expect(output).not.toContain("<button");

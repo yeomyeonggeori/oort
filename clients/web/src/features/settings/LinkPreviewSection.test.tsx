@@ -77,4 +77,23 @@ describe("LinkPreviewSection", () => {
     });
     expect(linkPreviewPreference()).toBe("off");
   });
+
+  it("writes the default when the already-selected radio is clicked", () => {
+    const host = mount(createElement(LinkPreviewSection));
+    expect(localStorage.getItem("momo.web.link-preview.v1")).toBeNull();
+    act(() => {
+      host.querySelector<HTMLInputElement>("#link-preview-rich")?.click();
+    });
+    expect(linkPreviewPreference()).toBe("rich");
+    expect(localStorage.getItem("momo.web.link-preview.v1")).toBe("rich");
+  });
+
+  it("keeps the device-scope sentence out of the save-state live region", () => {
+    const host = mount(createElement(LinkPreviewSection));
+    expect(host.textContent).toContain("이 기기에만 저장됩니다");
+    const statuses = [...host.querySelectorAll('[role="status"]')];
+    expect(
+      statuses.some((node) => node.textContent?.includes("이 기기에만 저장됩니다"))
+    ).toBe(false);
+  });
 });

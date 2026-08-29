@@ -49,9 +49,11 @@ export function LinkPreviewSection() {
         choices={CHOICES}
         value={preference}
         onChange={(id) => setLinkPreviewPreference(id as LinkPreviewPreference)}
-        hint="이 기기에만 저장됩니다. 다른 기기에서는 각자 고릅니다."
         testId="link-preview-choice"
       />
+      <p className="text-meta text-ink-muted">
+        이 기기에만 저장됩니다. 다른 기기에서는 각자 고릅니다.
+      </p>
     </SectionShell>
   );
 }

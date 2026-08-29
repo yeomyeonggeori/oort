@@ -35,7 +35,7 @@ describe("migrateLinkPreviewPreference", () => {
     expect(migrateLinkPreviewPreference(null, "old-value")).toBe("compact");
   });
 
-  it("defaults a fresh store to rich", () => {
+  it("defaults an unset store to rich, including never-toggled existing users", () => {
     expect(migrateLinkPreviewPreference(null, null)).toBe("rich");
     expect(migrateLinkPreviewPreference(undefined, undefined)).toBe(
       DEFAULT_LINK_PREVIEW_PREFERENCE
@@ -93,12 +93,25 @@ describe("boolean → 3-value round trip", () => {
 });
 
 describe("unfurlCardLayout", () => {
-  it("never paints a rich hero without a ready image", () => {
+  it("paints the rich frame when asked, and compact otherwise", () => {
     expect(unfurlCardLayout("rich", false)).toBe("compact");
     expect(unfurlCardLayout("rich", true)).toBe("rich");
     expect(unfurlCardLayout("compact", true)).toBe("compact");
     expect(unfurlCardLayout("compact", false)).toBe("compact");
     expect(unfurlCardLayout("off", true)).toBe("none");
     expect(unfurlCardLayout("off", false)).toBe("none");
+  });
+});
+
+describe("setLinkPreviewPreference", () => {
+  it("writes even when the chosen value is already the in-memory default", () => {
+    const storage = new MemoryStorage();
+    reloadLinkPreviewPreferenceForTest(storage);
+    expect(linkPreviewPreference()).toBe("rich");
+    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBeNull();
+
+    setLinkPreviewPreference("rich", storage);
+    expect(storage.getItem(LINK_PREVIEW_STORAGE_KEY)).toBe("rich");
+    expect(linkPreviewPreference()).toBe("rich");
   });
 });

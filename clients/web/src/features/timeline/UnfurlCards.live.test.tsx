@@ -7,6 +7,7 @@ import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { LinkPreviewSection } from "@/features/settings/LinkPreviewSection";
 import { UnfurlCardView, UnfurlCards } from "./UnfurlCards";
 import { reloadLinkPreviewPreferenceForTest } from "./linkPreviewPreference";
+import { resetUnfurlImagesForTest } from "./useUnfurlImage";
 
 const PIXEL =
   "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
@@ -35,6 +36,7 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   reloadLinkPreviewPreferenceForTest(localStorage);
+  resetUnfurlImagesForTest();
 });
 
 afterEach(() => {
@@ -45,6 +47,7 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   reloadLinkPreviewPreferenceForTest(null);
+  resetUnfurlImagesForTest();
 });
 
 function mount(tree: ReactElement): HTMLElement {
@@ -121,5 +124,6 @@ describe("rich image decode failure", () => {
     const after = host.querySelector('[data-testid="unfurl-card"]');
     expect(after?.getAttribute("data-layout")).toBe("compact");
     expect(host.querySelector('[data-testid="unfurl-image"]')).toBeNull();
+    expect(host.querySelector('[data-testid="unfurl-hero"]')).toBeNull();
   });
 });
