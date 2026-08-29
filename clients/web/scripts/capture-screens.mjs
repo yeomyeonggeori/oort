@@ -26,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
+import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -176,21 +177,31 @@ const MOBILE_TAP_TARGETS = [
   ["terminal-dock-expand", "터미널 크게 보기", "optional"],
 ];
 
-// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
+// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
+// S0 랜딩 / S1 게이트 / S2 계정 세 화면에 갈라져 있으므로 목록도 화면마다 따로다.
+// 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어 전부 optional로
+// 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지 않는다.
 //
-// 위 목록과 나누는 이유: 그쪽은 채팅 표면에만 있는 컨트롤을 **필수**로 재고, 이 넷은
-// 로그인 화면에만 있다. 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어
-// 전부 optional로 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지
-// 않는다. 각자 자기 화면에서 필수로 재는 편이 더 센 자다.
-//
-// 왜 이 넷인가: `--spacing-control`이 32px이라 로그인 폼 전체가 32px이었다. WCAG
-// 2.5.8 AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 로그인은 폰에서
+// `--spacing-control`이 32px이라 폼 컨트롤은 포인터에서 32px이다. WCAG 2.5.8
+// AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 온보딩은 폰에서
 // 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
 const LOGIN_TAP_TARGETS = [
-  ["login-server", "서버 주소 입력"],
+  ["onboarding-back", "뒤로"],
   ["login-email", "이메일 입력"],
   ["login-password", "비밀번호 입력"],
   ["login-submit", "로그인 버튼"],
+];
+
+const LANDING_TAP_TARGETS = [
+  ["onboarding-choose-server", "우리 팀 서버로 접속"],
+  ["onboarding-choose-invite", "초대 링크로 참여"],
+];
+
+const GATEWAY_TAP_TARGETS = [
+  ["onboarding-back", "뒤로"],
+  ["login-server", "서버 주소 입력"],
+  ["onboarding-next", "다음"],
+  ["connect-recent-server", "최근 접속", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -1761,6 +1772,79 @@ async function installMocks(context) {
   });
 }
 
+async function assertOnboardingCardCentered(page, where, testId) {
+  const m = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-testid="${testId}"]');
+    if (!card) return { missing: true };
+    const r = card.getBoundingClientRect();
+    return {
+      missing: false,
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      cardMid: r.left + r.width / 2,
+      viewMid: window.innerWidth / 2,
+    };
+  })()`);
+  if (m.missing) {
+    throw new Error(`카드 중앙 ${where}: ${testId} 없음`);
+  }
+  const delta = Math.abs(m.cardMid - m.viewMid);
+  if (delta > 8) {
+    throw new Error(
+      `카드 중앙 ${where}: ${testId} mid=${m.cardMid.toFixed(1)} view=${m.viewMid.toFixed(1)} ` +
+        `left=${m.left} width=${m.width} (delta ${delta.toFixed(1)}px)`
+    );
+  }
+  console.log(
+    `  card center ${where}: ${testId} left=${m.left} width=${m.width} delta=${delta.toFixed(1)}`
+  );
+}
+
+async function assertCloudMissesCta(page, where) {
+  const proof = await page.evaluate(`(() => {
+    const hitsOf = (testId) => {
+      const btn = document.querySelector('[data-testid="' + testId + '"]');
+      if (!btn) return { missing: true, hits: [] };
+      const b = btn.getBoundingClientRect();
+      const hits = [];
+      for (const el of document.querySelectorAll("[data-onboarding-body]")) {
+        const r = el.getBoundingClientRect();
+        const overlap = !(
+          r.right < b.left ||
+          r.left > b.right ||
+          r.bottom < b.top ||
+          r.top > b.bottom
+        );
+        if (overlap) {
+          hits.push({
+            body: el.getAttribute("data-onboarding-body"),
+            left: Math.round(r.left),
+            top: Math.round(r.top),
+            right: Math.round(r.right),
+            bottom: Math.round(r.bottom),
+          });
+        }
+      }
+      return { missing: false, hits };
+    };
+    return {
+      inviteHits: hitsOf("onboarding-choose-invite"),
+      serverHits: hitsOf("onboarding-choose-server"),
+    };
+  })()`);
+  if (proof.inviteHits.missing || proof.serverHits.missing) {
+    throw new Error(`S0 CTA ${where}: 선택 버튼 없음`);
+  }
+  if (proof.inviteHits.hits.length !== 0 || proof.serverHits.hits.length !== 0) {
+    throw new Error(
+      `S0 CTA ${where}: inviteHits=${proof.inviteHits.hits.length} ` +
+        `serverHits=${proof.serverHits.hits.length} ` +
+        JSON.stringify(proof)
+    );
+  }
+  console.log(`  S0 CTA ${where}: inviteHits 0 · serverHits 0`);
+}
+
 async function waitForServer(url, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {
@@ -1783,10 +1867,64 @@ async function signIn(page) {
   // 명시적인 초기화로 바꾼다.
   await page.evaluate("try { localStorage.clear(); } catch (e) {}");
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
-  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await signInThroughOnboarding(page, {
+    email: "seongjae@dawn.example",
+    password: "capture-only-not-a-credential",
+  });
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+}
+
+/**
+ * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
+ * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
+ */
+async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
+  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  const scatter = await page.locator("[data-onboarding-body]").count();
+  if (scatter !== 30) {
+    throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
+  }
+  await assertCloudMissesCta(page, where);
+  await page.getByTestId("onboarding-choose-server").focus();
+  const landingFocus = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (landingFocus !== "onboarding-choose-server") {
+    throw new Error(`S0 포커스 ${where}: ${landingFocus}`);
+  }
+  const fill = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="onboarding-landing"]');
+    const r = el.getBoundingClientRect();
+    return {
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      viewport: window.innerHeight,
+    };
+  })()`);
+  if (fill.bottom < fill.viewport - 1) {
+    throw new Error(
+      `S0 높이 ${where}: 랜딩 아랫변 ${fill.bottom}px / 뷰포트 ${fill.viewport}px (top ${fill.top})`
+    );
+  }
+  await assertNoHorizontalOverflow(page, `landing ${where}`);
+  if (tapTargets) {
+    await assertTapTargets(page, `landing ${where}`, LANDING_TAP_TARGETS);
+  }
+  if (shoot) await shoot("onboarding-landing");
+
+  await page.getByTestId("onboarding-choose-server").click();
+  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `gateway ${where}`);
+  await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
+  if (tapTargets) {
+    await assertTapTargets(page, `gateway ${where}`, GATEWAY_TAP_TARGETS);
+  }
+  if (shoot) await shoot("onboarding-gateway");
+
+  await page.getByTestId("onboarding-next").click();
+  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
 }
 
 function isPresencePut(request) {
@@ -4365,9 +4503,13 @@ async function captureMobile(browser, scheme) {
   };
 
   // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
+  //    BZ-6a: 첫 페인트는 S0. S1/S2를 찍은 뒤 기존 login 프레임은 계정 스텝이다.
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
-  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await walkOnboardingToAccount(page, `login ${scheme}`, {
+    tapTargets: true,
+    shoot: (name) => shoot(page, name),
+  });
   await assertNoHorizontalOverflow(page, `login ${scheme}`);
   // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
   // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
@@ -4739,10 +4881,17 @@ async function captureScheme(browser, scheme) {
   await installMocks(context);
   const shots = [];
 
-  // 1. login surface: Card / Input / Button / runtime badge tokens
+  // 1. login surface: BZ-6a S0 landing, then S1 gateway, then S2 account
+  //    (Card / Input / Button / runtime badge tokens).
   const login = await context.newPage();
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
-  await login.getByTestId("login-submit").waitFor({ state: "visible" });
+  await walkOnboardingToAccount(login, scheme, {
+    shoot: async (name) => {
+      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      await login.screenshot({ path });
+      shots.push(path);
+    },
+  });
   const loginShot = `${OUT_DIR}/login-${scheme}.png`;
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
@@ -6298,9 +6447,10 @@ async function captureTerminalDockScenes(browser, scheme) {
     // networkidle 을 기다리면 캡처가 영원히 멈춘다.
     if (boot === "pending") {
       await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
-      await page.getByTestId("login-email").fill("seongjae@dawn.example");
-      await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-      await page.getByTestId("login-submit").click();
+      await signInThroughOnboarding(page, {
+        email: "seongjae@dawn.example",
+        password: "capture-only-not-a-credential",
+      });
       await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
       await page.getByTestId("composer-input").waitFor({ state: "visible" });
     } else {

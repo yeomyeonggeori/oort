@@ -21,6 +21,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.AGENT_HUB_GATE_PORT || 5186);
@@ -401,6 +402,7 @@ async function installRoutes(context, timing) {
 
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("agent-hub@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();

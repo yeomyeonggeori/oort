@@ -78,6 +78,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { openWorkPanelViaConsole } from "./work-openers.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_PANEL_GATE_PORT || 5189);
@@ -511,6 +512,7 @@ async function publish(page, frame) {
 
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("work-panel@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();

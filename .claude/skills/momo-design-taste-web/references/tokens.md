@@ -59,6 +59,18 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
 | `--scrim` | `rgb(36 33 28 / 0.24)` | `rgb(9 8 11 / 0.62)` | the layer under a dialog or the ⌘K palette |
 
+S0 onboarding is the one surface that does **not** use `light-dark()`. It is a single look (deep space), declared once, measured in `tokens.contrast.test.ts` "onboarding S0 palette":
+
+| token | value | role |
+|---|---|---|
+| `--onboarding-space` | `#12111a` | S0 field |
+| `--onboarding-star` | `#4a4854` | 1px star dots |
+| `--onboarding-ink` | `#ececf1` | S0 copy |
+| `--onboarding-ink-faint` | `#9b98a3` | faint cloud bodies |
+| `--onboarding-accent` | `#f0a850` | mark + accent bodies |
+| `--onboarding-on-accent` | `#12111a` | label on the S0 filled choice |
+| `--onboarding-line` | `#8b8996` | S0 outline choice |
+
 `--scrim` is the one token that is not opaque, and the only one whose two
 schemes are not the same color at different lightness. It exists because a
 scrim is a **direction**, not a color: it must darken whatever it covers so the

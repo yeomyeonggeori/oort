@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)
+
+- ConnectPage를 S0 랜딩(단일 룩 딥스페이스 + OortMark 궤도 드로잉 + 산포 필드 + 2택) / S1 서버·초대 / S2 계정으로 감쌌다. 로그인·join·서버 검증·`momo.web.server.v1` 의미론은 기존 재사용. 저장 서버 또는 `/join?code=` 프리필이면 S0 생략.
+- capture/e2e/게이트 레인이 S0를 첫 페인트로 통과한다: `advanceToAccount`가 S0→S1→S2를 걷고, `capture:design`은 S0 프레임을 찍는다. 산포 글리프는 위치 중심(`translate(-50%,-50%)`)이고, 랜딩은 PWA 배너 아래 App 슬롯을 `height: 100%`로 채워 뷰포트 바닥에 2택이 앉는다.
+- design-review 수리 (#1871): S1/S2 카드 `mx-auto`(H-1), 초대 코드 4xx는 S1 배너+코드 포커스(H-2), 스텝 전환 포커스(M-1), CTA 배제 산포(M-2), 뒤로·최근칩 44(M-3), 궤도 pathLength(L-1), 딥링크 mask-reveal 억제(L-2), S2 카피. red proof: vitest 포커스/404 복귀, capture 카드 중앙·inviteHits 0, shell focus lane.
+
 ## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
 
 - 사이드바 `ProfileCard` 드롭다운 맨 아래(설정 뒤)에 「로그아웃」을 추가. `useSession().logout` 직접 호출, 확인 다이얼로그 없음, destructive 색 없음. 설정 > 계정 `data-testid="logout"` 은 유지.
