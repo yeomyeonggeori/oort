@@ -1013,6 +1013,18 @@
   }
 }
 
+/* Radix DropdownMenu sets this on the panel. A long row must truncate inside
+ * that box instead of growing the menu past the viewport (#1886 M-1). */
+@utility max-w-menu-available {
+  max-inline-size: var(--radix-dropdown-menu-content-available-width);
+}
+
+/* Four tabular figures ("100%"). ch follows the face; a pixel box does not
+ * (#1886 H-3). */
+@utility w-numeric-4 {
+  inline-size: 4ch;
+}
+
 /* 폭이 아니라 **입력 장치**로 가르는 자리 (B11 R2 · #1743).
  *
  * 메시지 행의 호버 툴바는 hover로 마운트된다. hover가 없는 기기에서 그것은

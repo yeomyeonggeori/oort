@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## BF-A3 허들 마이크 디바이스 선택 + 게인 (#1886, 2026-08-30)
+
+- 허들 라이브 컨트롤에 마이크 선택 메뉴. `useAudioInputDevices`가 `enumerateDevices`+`devicechange`로 audioinput을 갱신하고, 권한 전(빈 레이블)·거부·0개를 문장으로 가른다. 선택 deviceId는 `momo.web.huddle.mic.v1`에 기억되고 다음 참가 시 그 장치로 시작(부재 시 기본 폴백).
+- 트랙 교체는 livekit-client `setMicrophoneEnabled({ deviceId })` + `LocalAudioTrack.setDeviceId`. 입력 음량(0~100%)은 공식 게인 API가 없어 WebAudio GainNode를 `setProcessor`로 삽입.
+- design-review 수리: B-2 `MicGainProcessor`가 init에서 AudioContext를 캐시해 livekit restart(audioContext 미전달)에서도 그래프를 재구축. B-1 390 joined는 음소거+캐럿 스플릿·Live/캐럿 wide-only. H-1 setDeviceId boolean 확인 후에만 persist. H-2 게인 항목 ←/→. H-3 `100%` nowrap+4ch. M-1 메뉴 `max-w-menu-available`. L-1 `gainPercent`/`gain01` 경계 명명.
+- red proof: livekit 실쉐이프 restart(audioContext 없음), setDeviceId false 정합, 게인 키보드 렌더 테스트, `gate:huddle` 390 그룹 내 컨트롤 상호 겹침 0.
+
 ## BF-A2 상단 안읽음 점프 필 (#1885, 2026-08-29)
 
 - 읽음 구분선이 뷰포트 **위쪽 밖**일 때만 타임라인 상단 중앙에 「새 메시지 N개 보기」+위 화살표 부유 필. 클릭/Enter → 구분선으로 스크롤(reduced-motion이면 auto) 후 첫 안읽음 행 정거장에 포커스. 구분선 진입(또는 필 실행) 시 epoch 래치로 소멸, 채널 전환 시 리셋. 하단 jump-latest와 동시 표시 가능.

@@ -15,10 +15,12 @@ import {
   Room,
   RoomEvent,
   Track,
+  type LocalAudioTrack,
   type RemoteTrack,
 } from "livekit-client";
 import { cspBlockedHost } from "@/features/work/observerStream";
 import { installHuddleTurnRewriteShim } from "./huddleTurnRewrite";
+import { MicGainProcessor, tryCreateAudioContext } from "./micGain";
 
 class HuddleCspBlockedError extends Error {
   override name = "HuddleCspBlockedError";
@@ -32,15 +34,29 @@ class HuddleMicrophoneError extends Error {
   }
 }
 
+export type MicrophoneDeviceSwitch = {
+  applied: boolean;
+  deviceId: string;
+};
+
 export interface HuddleAudioSession {
   disconnect: () => Promise<void>;
   setMicrophoneMuted: (muted: boolean) => Promise<void>;
+  setMicrophoneDeviceId: (deviceId: string) => Promise<MicrophoneDeviceSwitch>;
+  setMicrophoneGain: (gain01: number) => void;
 }
 
 export interface ConnectHuddleAudioOptions {
   livekitUrl: string;
   token: string;
   onDisconnected: () => void;
+  microphoneDeviceId?: string | null;
+  microphoneGain01?: number;
+}
+
+function publishedMicrophone(room: Room): LocalAudioTrack | undefined {
+  return room.localParticipant.getTrackPublication(Track.Source.Microphone)
+    ?.audioTrack;
 }
 
 /**
@@ -53,6 +69,9 @@ export async function connectHuddleAudio(
   const room = new Room({ adaptiveStream: false, dynacast: false });
   const attachedAudio = new Set<HTMLMediaElement>();
   let intentionalDisconnect = false;
+  const gain = new MicGainProcessor(options.microphoneGain01 ?? 1);
+  const audioContext = tryCreateAudioContext();
+  let gainAttached = false;
 
   const attachAudio = (track: RemoteTrack) => {
     if (track.kind !== Track.Kind.Audio) return;
@@ -113,7 +132,34 @@ export async function connectHuddleAudio(
       document.removeEventListener("securitypolicyviolation", onViolation);
     }
     try {
-      await room.localParticipant.setMicrophoneEnabled(true);
+      // Preferred device is best-effort. An unplugged remembered id must not
+      // fail the join: fall back to the browser default with no error.
+      let published = false;
+      if (options.microphoneDeviceId) {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(true, {
+            deviceId: options.microphoneDeviceId,
+          });
+          published = true;
+        } catch (publishError) {
+          void publishError;
+        }
+      }
+      if (!published) {
+        await room.localParticipant.setMicrophoneEnabled(true);
+      }
+      const microphone = publishedMicrophone(room);
+      if (microphone && audioContext) {
+        try {
+          gain.setAudioContext(audioContext);
+          microphone.setAudioContext(audioContext);
+          await microphone.setProcessor(gain);
+          gainAttached = true;
+        } catch {
+          // Gain is additive. A processor the browser cannot run must not
+          // fail the join; device selection still works on the raw track.
+        }
+      }
     } catch (error) {
       // SecurityError only means microphone denial in this explicit media
       // capture phase. The connection phase has its own CSP classification.
@@ -125,6 +171,9 @@ export async function connectHuddleAudio(
       await room.disconnect();
     } finally {
       restoreTurnRewrite();
+      if (audioContext && audioContext.state !== "closed") {
+        void audioContext.close();
+      }
     }
     throw error;
   }
@@ -132,10 +181,21 @@ export async function connectHuddleAudio(
   return {
     async disconnect() {
       intentionalDisconnect = true;
+      const microphone = publishedMicrophone(room);
+      if (gainAttached && microphone) {
+        try {
+          await microphone.stopProcessor();
+        } catch {
+          // Session is ending; a processor that already tore down is fine.
+        }
+      }
       try {
         await room.disconnect();
       } finally {
         restoreTurnRewrite();
+        if (audioContext && audioContext.state !== "closed") {
+          void audioContext.close();
+        }
       }
       for (const element of attachedAudio) element.remove();
       attachedAudio.clear();
@@ -146,6 +206,37 @@ export async function connectHuddleAudio(
       } catch (error) {
         throw new HuddleMicrophoneError(error);
       }
+    },
+    async setMicrophoneDeviceId(deviceId: string) {
+      const microphone = publishedMicrophone(room);
+      const target = deviceId.trim() === "" ? "default" : deviceId.trim();
+      try {
+        if (microphone) {
+          let applied = false;
+          try {
+            applied = Boolean(await microphone.setDeviceId(target));
+          } catch (switchError) {
+            if (target === "default") throw switchError;
+            await microphone.setDeviceId("default");
+            applied = false;
+          }
+          const actual = (await microphone.getDeviceId()) ?? "";
+          if (target === "default") {
+            return { applied: true, deviceId: actual };
+          }
+          return { applied, deviceId: actual };
+        }
+        const switched = await room.switchActiveDevice("audioinput", target);
+        return {
+          applied: Boolean(switched),
+          deviceId: target === "default" ? "" : target,
+        };
+      } catch (error) {
+        throw new HuddleMicrophoneError(error);
+      }
+    },
+    setMicrophoneGain(gain01: number) {
+      gain.setGain(gain01);
     },
   };
 }

@@ -12,6 +12,7 @@ import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
 import type { Huddle } from "@momo/core/lib/api";
+import { HuddleMicMenu } from "./HuddleMicMenu";
 import { useHuddle, type HuddleController } from "./useHuddle";
 
 function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
@@ -115,21 +116,44 @@ export function HuddleHeaderControl({
         className="flex min-w-0 items-center justify-end gap-1"
         data-testid="huddle-surface"
       >
-        <HuddleLiveChip huddle={huddle.active} />
-        <HuddleIconButton
-          testId="huddle-microphone"
-          label={microphoneLabel}
-          busy={huddle.busy === "microphone"}
-          onClick={() => void huddle.toggleMicrophone()}
+        {/* 390 joined: Live and the picker caret yield so mute/leave stay
+            inside the header without covering the member button (#1886 B-1). */}
+        <div className="wide-only min-w-0">
+          <HuddleLiveChip huddle={huddle.active} />
+        </div>
+        <div
+          className="flex shrink-0 overflow-hidden rounded-sm border border-line-strong"
+          data-testid="huddle-mic-cluster"
         >
-          {huddle.busy === "microphone" ? (
-            <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
-          ) : huddle.muted ? (
-            <MicOff aria-hidden="true" className="size-4" />
-          ) : (
-            <Mic aria-hidden="true" className="size-4" />
-          )}
-        </HuddleIconButton>
+          <button
+            type="button"
+            onClick={() => void huddle.toggleMicrophone()}
+            aria-label={microphoneLabel}
+            title={microphoneLabel}
+            aria-busy={huddle.busy === "microphone" || undefined}
+            data-testid="huddle-microphone"
+            className="flex size-control shrink-0 items-center justify-center text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          >
+            {huddle.busy === "microphone" ? (
+              <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
+            ) : huddle.muted ? (
+              <MicOff aria-hidden="true" className="size-4" />
+            ) : (
+              <Mic aria-hidden="true" className="size-4" />
+            )}
+          </button>
+          <HuddleMicMenu
+            selectedDeviceId={huddle.microphoneDeviceId}
+            gainPercent={huddle.microphoneGainPercent}
+            busy={huddle.busy === "device"}
+            disabled={busy}
+            split
+            onSelectDevice={(deviceId) =>
+              void huddle.setMicrophoneDevice(deviceId)
+            }
+            onGainChange={huddle.setMicrophoneGain}
+          />
+        </div>
         <HuddleIconButton
           testId="huddle-leave"
           label="허들 나가기"
