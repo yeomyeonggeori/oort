@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -62,8 +69,27 @@ export function SettingsRoute() {
   const navRefs = useRef<
     Partial<Record<SettingsSectionId, HTMLButtonElement | null>>
   >({});
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const didEnterFocus = useRef(false);
 
   const close = useCallback(() => navigate(-1), [navigate]);
+
+  // 전면 전환 진입 포커스 (#1867 M-4): 현재 섹션 버튼, 없으면 h1.
+  useLayoutEffect(() => {
+    if (didEnterFocus.current) return;
+    didEnterFocus.current = true;
+    const target = navRefs.current[section] ?? headingRef.current;
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [section]);
+
+  // 선택 항목이 폰 캡 아래로 내려가 있으면 스크롤로 드러낸다 (#1867 M-1).
+  useEffect(() => {
+    navRefs.current[section]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [section]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -134,7 +160,9 @@ export function SettingsRoute() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
-      <h1 className="sr-only">설정</h1>
+      <h1 ref={headingRef} tabIndex={-1} className="sr-only">
+        설정
+      </h1>
       {IS_TAURI ? (
         <div
           className="wide-only h-control-lg shrink-0"

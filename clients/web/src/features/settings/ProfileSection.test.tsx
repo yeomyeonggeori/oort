@@ -217,7 +217,7 @@ describe("ProfileSection", () => {
     });
   });
 
-  it("400 문장을 InlineBanner에 그대로 보여 준다", async () => {
+  it("빈 이름 400은 한국어 다음 행동으로 보여 주고 와이어 영어는 숨긴다", async () => {
     changeMyDisplayName.mockRejectedValue(
       new ApiError(400, "displayName is required")
     );
@@ -237,9 +237,38 @@ describe("ProfileSection", () => {
       expect(
         host.querySelector('[data-testid="profile-display-name-error"]')
           ?.textContent
-      ).toBe("displayName is required");
+      ).toBe(
+        "표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요."
+      );
     });
+    expect(
+      host.querySelector('[data-testid="profile-display-name-error"]')
+        ?.textContent
+    ).not.toContain("displayName");
     expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
     expect(replaceSessionMember).not.toHaveBeenCalled();
+  });
+
+  it("매핑되지 않은 오류는 와이어 문장 대신 일반 폴백을 쓴다", async () => {
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    const { host } = mountSection();
+    const input = host.querySelector(
+      '[data-testid="profile-display-name"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "성재"));
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="profile-display-name-save"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-testid="profile-display-name-error"]')
+          ?.textContent
+      ).toBe("요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+    });
+    expect(host.textContent).not.toContain("engine boom");
   });
 });

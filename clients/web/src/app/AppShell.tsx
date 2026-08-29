@@ -15,6 +15,7 @@ import {
   useIsMobileShell,
 } from "@/app/shellNav";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
+import { restoreSettingsOpener } from "@/features/settings/settingsFocus";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
@@ -72,6 +73,7 @@ export function AppShell({
   // not keep the next one from rendering.
   const routePath = useLocation().pathname;
   const isSettingsSurface = routePath === "/settings";
+  const wasSettingsSurface = useRef(false);
 
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
@@ -157,6 +159,17 @@ export function AppShell({
     setDrawerOpen(false);
     closeAdeDrawer();
   }, [routePath]);
+  // 설정 전면은 이전 라우트를 언마운트하므로, 떠난 뒤에야 이전 포커스 자리
+  // (같은 testid의 새 노드)로 되돌린다 (#1867 M-4).
+  useEffect(() => {
+    if (isSettingsSurface) {
+      wasSettingsSurface.current = true;
+      return;
+    }
+    if (!wasSettingsSurface.current) return;
+    wasSettingsSurface.current = false;
+    restoreSettingsOpener();
+  }, [isSettingsSurface]);
   // 창이 넓어져 사이드바가 다시 열로 서면 서랍이라는 상태 자체가 사라진다.
   useEffect(() => {
     if (!isMobile) setDrawerOpen(false);

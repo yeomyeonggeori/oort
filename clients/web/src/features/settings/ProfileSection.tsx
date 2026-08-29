@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { changeMyDisplayName } from "@momo/core/lib/api";
-import { errorMessage } from "@momo/core/features/settings/model";
+import { displayNameSaveMessage } from "@momo/core/features/settings/model";
 import { useSession } from "@/app/session";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
@@ -48,7 +48,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       replaceSessionMember(member);
       setDraft(member.displayName);
     } catch (failure) {
-      setError(errorMessage(failure));
+      setError(displayNameSaveMessage(failure));
     } finally {
       saveStarted.current = false;
       setBusy(false);

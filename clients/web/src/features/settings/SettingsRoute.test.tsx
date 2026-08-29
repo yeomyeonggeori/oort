@@ -76,6 +76,7 @@ let mountedHost: HTMLElement | null = null;
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  HTMLElement.prototype.scrollIntoView = vi.fn();
 });
 
 beforeEach(() => {
@@ -213,6 +214,17 @@ describe("SettingsRoute 전면 레이아웃", () => {
         "settings-nav-members",
         "settings-nav-events",
       ])
+    );
+  });
+
+  it("진입 시 현재 섹션 버튼으로 포커스가 간다", () => {
+    const root = mountRoute("/settings");
+    expect(document.activeElement).toBe(
+      root.querySelector('[data-testid="settings-nav-profile"]')
+    );
+    const account = mountRoute("/settings?section=account");
+    expect(document.activeElement).toBe(
+      account.querySelector('[data-testid="settings-nav-account"]')
     );
   });
 

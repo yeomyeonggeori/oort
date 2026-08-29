@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import {
   Activity,
@@ -45,6 +45,7 @@ import {
   OPEN_QUICK_SWITCHER_SHORTCUT,
   OPEN_SETTINGS_SHORTCUT,
 } from "@/app/keyboardShortcuts";
+import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -97,6 +98,7 @@ export function QuickSwitcher({
 }) {
   const { session, workspaceId } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
   const { groups } = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const { directory } = directoryQuery;
@@ -202,21 +204,37 @@ export function QuickSwitcher({
         event.preventDefault();
         onOpenChange(!open);
       }
-      // ⌘, opens settings (R-1 §1 keyboard path).
+      // ⌘, opens settings (R-1 §1 keyboard path). Already on /settings it
+      // must not push another history entry: 「앱으로 돌아가기」 is navigate(-1),
+      // so a stacked /settings would eat the first click (#1867 H-1).
       if (OPEN_SETTINGS_SHORTCUT.matches(event)) {
         event.preventDefault();
+        const already = location.pathname === "/settings";
+        if (open) {
+          rememberSettingsOpener(restoreRef.current);
+          onOpenChange(false);
+        } else if (!already) {
+          rememberSettingsOpener();
+        }
+        if (already) return;
         navigate("/settings");
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange, navigate, formDialogOpen]);
+  }, [open, onOpenChange, navigate, formDialogOpen, location.pathname]);
 
   const searchProvided = isSurfaceProvided("messageSearch");
   // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
   const [typed, setTyped] = useState("");
 
   function go(path: string) {
+    const toSettings = path === "/settings" || path.startsWith("/settings?");
+    if (toSettings && location.pathname === "/settings") {
+      onOpenChange(false);
+      return;
+    }
+    if (toSettings) rememberSettingsOpener(restoreRef.current);
     onOpenChange(false);
     navigate(path);
   }
