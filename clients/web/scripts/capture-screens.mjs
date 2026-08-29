@@ -2023,7 +2023,9 @@ async function captureSidebarD4(page, scheme, shots) {
 
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForFunction(
-    () => document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed")
+    () =>
+      document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
+      document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
   const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
@@ -2031,7 +2033,9 @@ async function captureSidebarD4(page, scheme, shots) {
   shots.push(collapsedShot);
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForFunction(
-    () => !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed")
+    () =>
+      !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
+      !document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await page.getByTestId("composer-input").hover();
 }
@@ -2086,6 +2090,7 @@ async function assertNoHorizontalOverflow(page, where) {
       if (overflowX !== "auto" && overflowX !== "scroll") continue;
       // 가로로 끌리는 것이 이 상자의 일이다 (goal B11) — 위 주석 참조.
       if (el.hasAttribute("data-scroll-x")) continue;
+      if (el.closest("[hidden]")) continue;
       const over = el.scrollWidth - el.clientWidth;
       if (over <= 0) continue;
       // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은

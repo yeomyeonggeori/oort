@@ -18,6 +18,7 @@ export function WorkspaceRail({
   workspace,
   workspaceId,
   avatarUrl,
+  hidden = false,
 }: {
   // The tile draws the WORKSPACE (검수 피드백 #4a-1). It is a name-query object,
   // NOT a bare string, on purpose: a bare string is exactly what let the shell
@@ -32,6 +33,8 @@ export function WorkspaceRail({
    * `data:` URL — an `<img src>` to the proxy cannot authenticate.
    */
   avatarUrl?: string;
+  /** Desktop fold paint: leave the rail's grid item, hide this strip. */
+  hidden?: boolean;
 }) {
   const tile = workspaceRailTile(workspace, workspaceId);
   const avatarDataUrl = useWorkspaceAvatar(avatarUrl);
@@ -41,6 +44,7 @@ export function WorkspaceRail({
     // 56px 레일 열 (`--spacing-rail`). 안쪽 nav 는 44px 타일만 감싸므로
     // 셸 게이트는 이 래퍼(`workspace-rail`)를 잰다 — nav 를 재면 44가 나온다.
     <div
+      hidden={hidden}
       data-testid="workspace-rail"
       className="flex h-full w-rail shrink-0 flex-col items-center gap-2 border-r border-line bg-surface-sidebar py-2"
     >

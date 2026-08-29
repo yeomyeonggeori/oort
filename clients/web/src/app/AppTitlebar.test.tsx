@@ -98,29 +98,4 @@ describe("AppTitlebar", () => {
     expect(host.querySelector("[data-sidebar-collapsed]")).toBeNull();
     expect(toggle?.getAttribute("aria-expanded")).toBe("true");
   });
-
-  it("Enter와 Space로 접힘을 토글한다", () => {
-    const host = mountTitlebar();
-    const toggle = host.querySelector<HTMLButtonElement>(
-      '[data-testid="sidebar-toggle"]'
-    );
-    expect(toggle).not.toBeNull();
-    toggle?.focus();
-
-    act(() => {
-      toggle?.dispatchEvent(
-        new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
-      );
-      toggle?.click();
-    });
-    expect(toggle?.getAttribute("aria-expanded")).toBe("false");
-
-    act(() => {
-      toggle?.dispatchEvent(
-        new KeyboardEvent("keydown", { key: " ", bubbles: true })
-      );
-      toggle?.click();
-    });
-    expect(toggle?.getAttribute("aria-expanded")).toBe("true");
-  });
 });

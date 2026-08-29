@@ -28,6 +28,31 @@ export function isSidebarTreeInert({
   return (asDrawer && !drawerOpen) || (!asDrawer && collapsed);
 }
 
+export function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+/**
+ * After a desktop fold settles, the tree leaves paint and layout (`hidden`).
+ * The mobile drawer never takes this path: it is a translate overlay, not a
+ * 0-width column, and must stay in geometry so the existing drawer can open.
+ */
+export function shouldHideCollapsedSidebarTree({
+  asDrawer,
+  collapsed,
+  paintSettled,
+}: {
+  asDrawer: boolean;
+  collapsed: boolean;
+  paintSettled: boolean;
+}): boolean {
+  return !asDrawer && collapsed && paintSettled;
+}
+
 /** Drag region belongs on the titlebar row, never on the toggle itself. */
 export function titlebarDragProps(isTauri: boolean): {
   "data-tauri-drag-region"?: "";

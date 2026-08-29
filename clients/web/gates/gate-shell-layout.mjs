@@ -658,7 +658,9 @@ async function go(page, hash) {
  * #1864 desktop fold. The assertion is geometry + focus, not only the
  * presence of a button: the sidebar track goes to 0, the route gains the
  * full 240px, the titlebar toggle stays in place, and every focus target
- * inside the hidden tree must leave both the visual and keyboard paths.
+ * inside the folded tree must leave the keyboard path (`inert`) and, after
+ * the fold settles, leave paint (`hidden` / display:none). Clip+rect alone
+ * is not the contract: a clipped inert node still has client rects.
  *
  * The work-session pane then covers the newly widened chat surface. This is the
  * seam `/work` uses after #1290 lands too: both are children of the same second
@@ -758,7 +760,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
   await toggle.click();
   await waitForPageCondition(
     page,
-    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const collapsed = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
@@ -769,7 +771,11 @@ async function assertDesktopSidebarFocusMode(page, size) {
     const button = document.querySelector('[data-testid="sidebar-toggle"]');
     const treeFocusable = sidebar ? Array.from(sidebar.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((element) => element.getClientRects().length > 0) : [];
+    )).filter((element) => {
+      if (element.closest("[inert]")) return false;
+      if (element.closest("[hidden]")) return false;
+      return element.getClientRects().length > 0;
+    }) : [];
     const width = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
@@ -823,7 +829,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
   await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && !document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const reopened = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
@@ -867,7 +873,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
   await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   await go(page, "/inbox");
   const afterRoute = await page.evaluate(`(() => ({
@@ -886,7 +892,7 @@ async function assertDesktopSidebarFocusMode(page, size) {
   await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && !document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 }
 
@@ -1368,7 +1374,7 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1377,11 +1383,12 @@ async function measureSidebarDrawerIndependence(browser) {
     const shell = document.querySelector(".app-shell");
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
     const toggle = document.querySelector('[data-testid="sidebar-toggle"]');
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
     return {
       shellColumns: getComputedStyle(shell).gridTemplateColumns,
       paneDisplay: pane ? getComputedStyle(pane).display : null,
-      toggleDisplay: toggle ? getComputedStyle(toggle).display : null,
-      titlebarDisplay: getComputedStyle(document.querySelector('[data-testid="app-titlebar"]')).display,
+      toggleOffsetParent: toggle?.offsetParent === null,
+      titlebarDisplay: titlebar ? getComputedStyle(titlebar).display : null,
       drawerOpen: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("data-open"),
       focus: document.activeElement?.getAttribute("data-testid"),
     };
@@ -1390,7 +1397,7 @@ async function measureSidebarDrawerIndependence(browser) {
     "390px 모바일은 데스크톱 접힘 상태를 무시하고 기존 서랍을 준비한다",
     narrowBeforeOpen.shellColumns === "390px" &&
       narrowBeforeOpen.paneDisplay !== "none" &&
-      narrowBeforeOpen.toggleDisplay === "none" &&
+      narrowBeforeOpen.toggleOffsetParent === true &&
       narrowBeforeOpen.titlebarDisplay === "none" &&
       narrowBeforeOpen.drawerOpen === false &&
       narrowBeforeOpen.focus === "open-sidebar-drawer",

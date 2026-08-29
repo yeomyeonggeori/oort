@@ -22,6 +22,7 @@ import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { AppTitlebar } from "@/app/AppTitlebar";
+import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
@@ -88,6 +89,11 @@ export function AppShell({
   // `sidebar-drawer`). 상태는 여기 한 벌만 있고, 여는 컨트롤은 각 표면의 헤더가
   // `SidebarDrawerToggle`로 그린다.
   const isMobile = useIsMobileShell();
+  const sidebarPaint = useSidebarCollapsePaint({
+    collapsed: sidebarPaneCollapsed,
+    asDrawer: isMobile,
+    setCollapsed: setSidebarPaneCollapsed,
+  });
   const previousMobileRef = useRef(isMobile);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
@@ -264,12 +270,13 @@ export function AppShell({
         <AgentProfileProvider>
         <MemberProfileProvider>
           <div
+            ref={sidebarPaint.shellRef}
             className="app-shell"
-            data-sidebar-collapsed={sidebarPaneCollapsed ? "" : undefined}
+            data-sidebar-collapsed={sidebarPaint.trackCollapsed ? "" : undefined}
           >
             <AppTitlebar
               collapsed={sidebarPaneCollapsed}
-              onCollapsedChange={setSidebarPaneCollapsed}
+              onCollapsedChange={sidebarPaint.requestCollapsedChange}
               toggleRef={sidebarToggleRef}
               onToggleFocus={() => {
                 desktopToggleFocusedRef.current = true;
@@ -279,6 +286,7 @@ export function AppShell({
             <Sidebar
               onOpenQuickSwitcher={() => setSwitcherOpen(true)}
               channelPaneCollapsed={sidebarPaneCollapsed}
+              treeHidden={sidebarPaint.treeHidden}
             />
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
              * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그

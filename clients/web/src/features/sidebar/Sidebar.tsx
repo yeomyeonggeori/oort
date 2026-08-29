@@ -128,9 +128,11 @@ function AgentTurnBadge({
 export function Sidebar({
   onOpenQuickSwitcher,
   channelPaneCollapsed,
+  treeHidden,
 }: {
   onOpenQuickSwitcher: () => void;
   channelPaneCollapsed: boolean;
+  treeHidden: boolean;
 }) {
   const { session, workspaceId, connStatus } = useSession();
   const navigate = useNavigate();
@@ -139,7 +141,9 @@ export function Sidebar({
   // 폰에서 이 사이드바는 서랍이다 (goal B6). 닫혀 있는 동안에는 화면 밖으로
   // 밀려 있을 뿐 DOM에는 남아 있으므로(스크롤 위치와 마운트를 지킨다), 탭 순서와
   // 접근성 트리에서는 `inert`로 빠져야 한다. 데스크톱 접힘(#1864)도 같다: 폭 0
-  // 열 안의 검색·행·프로필로 Tab이 들어가면 안 된다.
+  // 열 안의 검색·행·프로필로 Tab이 들어가면 안 된다. 접힘 전환이 끝나면
+  // `hidden`이 트리를 페인트/기하에서 빼 0폭 overflow 상자의 가로 스크롤을
+  // 남기지 않는다. 펼침은 hidden을 먼저 걷고 다음 프레임에 폭을 연다.
   const { isMobile, drawerOpen, closeDrawer } = useShellNav();
   const asDrawer = isMobile;
   const drawerRef = useInertWhile<HTMLDivElement>(
@@ -343,10 +347,12 @@ export function Sidebar({
         }}
         workspaceId={workspaceId}
         avatarUrl={workspaceQuery.data?.avatarUrl}
+        hidden={treeHidden}
       />
 
       <div
         id="sidebar-channel-pane"
+        hidden={treeHidden}
         data-sidebar-channel-pane
         data-testid="sidebar-channel-pane"
         className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"

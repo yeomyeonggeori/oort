@@ -3,6 +3,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   isSidebarTreeInert,
+  prefersReducedMotion,
+  shouldHideCollapsedSidebarTree,
   sidebarPaneToggleCopy,
   titlebarDragProps,
 } from "./sidebarPane";
@@ -21,6 +23,10 @@ const railSource = readFileSync(
 );
 const titlebarSource = readFileSync(
   fileURLToPath(new URL("./AppTitlebar.tsx", import.meta.url)),
+  "utf8"
+);
+const paintSource = readFileSync(
+  fileURLToPath(new URL("./useSidebarCollapsePaint.ts", import.meta.url)),
   "utf8"
 );
 
@@ -79,6 +85,48 @@ describe("isSidebarTreeInert", () => {
   });
 });
 
+describe("shouldHideCollapsedSidebarTree", () => {
+  it("데스크톱 접힘이 Settled일 때만 hidden이다", () => {
+    expect(
+      shouldHideCollapsedSidebarTree({
+        asDrawer: false,
+        collapsed: true,
+        paintSettled: true,
+      })
+    ).toBe(true);
+    expect(
+      shouldHideCollapsedSidebarTree({
+        asDrawer: false,
+        collapsed: true,
+        paintSettled: false,
+      })
+    ).toBe(false);
+    expect(
+      shouldHideCollapsedSidebarTree({
+        asDrawer: false,
+        collapsed: false,
+        paintSettled: true,
+      })
+    ).toBe(false);
+  });
+
+  it("폰 서랍은 접혀도 hidden이 아니다", () => {
+    expect(
+      shouldHideCollapsedSidebarTree({
+        asDrawer: true,
+        collapsed: true,
+        paintSettled: true,
+      })
+    ).toBe(false);
+  });
+});
+
+describe("prefersReducedMotion", () => {
+  it("matchMedia가 없으면 거짓이다", () => {
+    expect(prefersReducedMotion()).toBe(false);
+  });
+});
+
 describe("titlebarDragProps", () => {
   it("웹에서는 드래그 속성을 붙이지 않는다", () => {
     expect(titlebarDragProps(false)).toEqual({});
@@ -100,6 +148,11 @@ describe("접힘 계약 (#1864)", () => {
     expect(sidebarSource).toContain('data-testid="open-quick-switcher"');
     expect(sidebarSource).toContain('testId="channel-item"');
     expect(sidebarSource).toContain("ProfileCard");
+    expect(sidebarSource).toContain("hidden={treeHidden}");
+    expect(railSource).toContain("hidden={hidden}");
+    expect(paintSource).toContain("transitionend");
+    expect(paintSource).toContain("prefersReducedMotion");
+    expect(paintSource).toContain("requestAnimationFrame");
     expect(railSource).not.toContain("sidebar-expand");
     expect(railSource).not.toContain("PanelLeftOpen");
   });
