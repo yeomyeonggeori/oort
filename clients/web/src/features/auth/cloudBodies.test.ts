@@ -17,7 +17,7 @@ const css = readFileSync(
 describe("Oort cloud scatter", () => {
   it("places thirty line-art bodies on the outer shell", () => {
     expect(CLOUD_BODIES).toHaveLength(30);
-    expect(CENTRE_RADIUS).toBeGreaterThanOrEqual(28);
+    expect(CENTRE_RADIUS).toBeGreaterThanOrEqual(32);
     expect(CLOUD_BODIES.filter(isInEmptyCentre)).toEqual([]);
   });
 

@@ -2,9 +2,10 @@
 
 ## BZ-6a-p1 온보딩 폴리시 (#1882, 2026-08-29)
 
-- S0 히어로 락업: OortMark 1.5×(144, 12vw 상한 192) + 워드마크 `oort` + 소개 카피 1줄. 궤도 드로잉→워드마크→카피 순차 페이드(reduced-motion 즉시). 산포 중앙 배제를 원 반지름 28로 확대.
+- S0 히어로 락업: OortMark 1.5×(144, 12vw 상한 192) + 워드마크 `oort`(`--font-onboarding-wordmark` 마크 1/3, clamp 48–64) + 소개 카피 1줄(`--spacing-onboarding-copy` 360, pane-sm 차용 아님). 궤도 드로잉→워드마크→카피 순차 페이드(reduced-motion 즉시). 산포 중앙 배제 원 반지름 32.
+- design-review 수리 (#1883): H-1 워드마크가 text-title(16)로 카피와 같은 단이던 것, M-1 카피 measure가 pane-sm(192)이라 1728에서도 2줄이던 것.
 - S1/S2 스텝 크롬: 뒤로(ArrowLeft+레이블, Button ghost, 44px)와 `n/3` 카운터를 상단 한 줄로. Tauri는 AppTitlebar와 같은 트래픽라이트 인셋+드래그(버튼 제외). 밑줄 링크 폐기.
-- red proof: web vitest 1709 · tsc · design_preflight_web · `CAPTURE_PORT=7177` capture:design (S0 lockup hits 0, S1 크롬 한 줄) · `SHELL_GATE_PORT=7179 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- red proof: web vitest 1711 · tsc · design_preflight_web · `CAPTURE_PORT=7377` capture:design (S0 lockup hits 0; 1280 워드마크 51.2px/마크 154, 390 48/144; 카피 265×22 1줄) · `SHELL_GATE_PORT=7379 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BZ-4 설정 전면 페이지 + Profile (#1867, 2026-08-29)
 

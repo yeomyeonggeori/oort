@@ -34,13 +34,13 @@ export function LandingStep({
             <OortMark className="text-onboarding-accent" />
           </div>
           <h1
-            className="onboarding-wordmark text-title font-semibold leading-none tracking-tight"
+            className="onboarding-wordmark font-semibold leading-none tracking-tight"
             data-testid="onboarding-wordmark"
           >
             oort
           </h1>
           <p
-            className="onboarding-tagline max-w-pane-sm break-keep text-body text-onboarding-ink"
+            className="onboarding-tagline max-w-onboarding-copy break-keep text-body text-onboarding-ink"
             data-testid="onboarding-tagline"
           >
             사람과 에이전트가 같은 자리에서 일하는 메신저.

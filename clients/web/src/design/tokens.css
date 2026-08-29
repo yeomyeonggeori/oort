@@ -245,6 +245,16 @@
   --onboarding-on-accent: #12111a;
   --onboarding-line: #8b8996;
 
+  /* S0 hero wordmark (#1882 H-1). Closed product scale tops at text-display
+   * 20px, which reads as a caption under the 144–192 mark (review: 30×16px
+   * "oort" next to a 154–192 mark, 2px off the 14px copy). The lockup beat is
+   * mark → name → copy; squat-test hierarchy has to be size, not just fade
+   * delay. Floor is 1/3 of `--spacing-onboarding-mark` (48). Same clamp
+   * recipe as `.onboarding-mark` (floor / 12vw / 4/3 cap) scaled by 1/3:
+   * 48 / 4vw / 64. Not a sixth `--text-*` role — S0 only, and `@theme
+   * --font-*` would be a family. */
+  --font-onboarding-wordmark: calc(var(--spacing-onboarding-mark) / 3);
+
   /* --- shell geometry ---------------------------------------------------- */
   --w-sidebar: 240px;
 
@@ -545,6 +555,19 @@
    * `.onboarding-mark`가 이 값과 12vw 사이에서 clamp하고, 상한은 같은 값의
    * 4/3(192)이라 큰 창에서 락업이 한없이 커지지 않는다. 제품 셸은 size-6. */
   --spacing-onboarding-mark: 144px;
+
+  /* S0 intro copy measure (#1882 M-1). pane-sm(192) is a dropdown/mention
+   * WIDTH floor; borrowing it wrapped this sentence onto two lines even at
+   * 1728. The lockup beat is mark → name → copy and the copy is one line
+   * whenever the viewport can hold it (390 inner 342 still clears the
+   * unwrapped run).
+   *
+   * Chromium capture:design (1280, `--font-sans`) measured the sentence at
+   * text-body 14px / keep-all as 265×22 (one line). Hangul-em upper bound
+   * is ~307 (20×14 + 5 spaces + period). 360 = that bound + ~4em face
+   * slack so a heavier KR face cannot re-wrap. Not a pane: this is the
+   * width of this one sentence, not a column. */
+  --spacing-onboarding-copy: 360px;
 
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
@@ -1988,6 +2011,11 @@
    Same 300ms fade as the step fade-in. backwards keeps them hidden until
    their delay; reduced-motion below drops this to opacity 1 immediately. */
 .onboarding-wordmark {
+  font-size: clamp(
+    var(--font-onboarding-wordmark),
+    4vw,
+    calc(var(--font-onboarding-wordmark) * 4 / 3)
+  );
   animation: onboarding-fade-in 300ms ease-out 1.1s backwards;
 }
 
@@ -2030,7 +2058,7 @@
   animation-delay: 0.45s;
 }
 
-.onboarding-cloud-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 92%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
+.onboarding-cloud-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
 .onboarding-cloud-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
 .onboarding-cloud-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
 .onboarding-cloud-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
@@ -2043,8 +2071,8 @@
 .onboarding-cloud-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
 .onboarding-cloud-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
 .onboarding-cloud-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
-.onboarding-cloud-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 7%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
-.onboarding-cloud-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 6%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
+.onboarding-cloud-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
+.onboarding-cloud-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
 .onboarding-cloud-body[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
 .onboarding-cloud-body[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
 .onboarding-cloud-body[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
@@ -2057,7 +2085,7 @@
 .onboarding-cloud-body[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
 .onboarding-cloud-body[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
 .onboarding-cloud-body[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
-.onboarding-cloud-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 93%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
+.onboarding-cloud-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
 .onboarding-cloud-body[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
 .onboarding-cloud-body[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
 

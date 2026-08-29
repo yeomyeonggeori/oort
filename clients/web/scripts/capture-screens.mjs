@@ -1895,6 +1895,43 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   if (tagline?.trim() !== "사람과 에이전트가 같은 자리에서 일하는 메신저.") {
     throw new Error(`S0 카피 ${where}: ${JSON.stringify(tagline)}`);
   }
+  const lockupMetrics = await page.evaluate(`(() => {
+    const mark = document.querySelector('[data-testid="onboarding-mark"]');
+    const word = document.querySelector('[data-testid="onboarding-wordmark"]');
+    const copy = document.querySelector('[data-testid="onboarding-tagline"]');
+    const markBox = mark.getBoundingClientRect();
+    const copyBox = copy.getBoundingClientRect();
+    const wordSize = parseFloat(getComputedStyle(word).fontSize);
+    const copySize = parseFloat(getComputedStyle(copy).fontSize);
+    const copyLh = parseFloat(getComputedStyle(copy).lineHeight);
+    return {
+      mark: Math.round(markBox.height),
+      wordFont: Math.round(wordSize * 10) / 10,
+      copyFont: Math.round(copySize * 10) / 10,
+      copyHeight: Math.round(copyBox.height),
+      copyLh: Math.round(copyLh * 10) / 10,
+      copyWidth: Math.round(copyBox.width),
+    };
+  })()`);
+  const wordRatio = lockupMetrics.wordFont / lockupMetrics.mark;
+  if (wordRatio < 0.24 || wordRatio > 0.36) {
+    throw new Error(
+      `S0 워드마크 위계 ${where}: ${lockupMetrics.wordFont}px / mark ${lockupMetrics.mark}px = ${wordRatio.toFixed(3)} (기대 1/4–1/3)`
+    );
+  }
+  if (lockupMetrics.wordFont <= lockupMetrics.copyFont + 4) {
+    throw new Error(
+      `S0 워드마크가 카피와 같은 단 ${where}: word ${lockupMetrics.wordFont}px copy ${lockupMetrics.copyFont}px`
+    );
+  }
+  if (lockupMetrics.copyHeight > lockupMetrics.copyLh + 1) {
+    throw new Error(
+      `S0 카피 2줄 ${where}: h=${lockupMetrics.copyHeight} lh=${lockupMetrics.copyLh} w=${lockupMetrics.copyWidth}`
+    );
+  }
+  console.log(
+    `  S0 lockup ${where}: mark ${lockupMetrics.mark}px · wordmark ${lockupMetrics.wordFont}px · copy ${lockupMetrics.copyFont}px ${lockupMetrics.copyWidth}×${lockupMetrics.copyHeight}`
+  );
   await page.getByTestId("onboarding-choose-server").focus();
   const landingFocus = await page.evaluate(
     `document.activeElement?.getAttribute("data-testid")`

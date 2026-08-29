@@ -25,10 +25,12 @@ export const CLOUD_REPEL_STRENGTH = 110;
 
 /**
  * Empty-centre radius, in percent of the field. #1869 used a 20-unit half-side
- * square (30–70). The #1882 hero lockup (1.5× mark + wordmark + copy) is taller
- * and wider, so rest poses sit outside a 28-unit circle around 50,50.
+ * square (30–70). The #1882 lockup grew twice: 1.5× mark, then H-1/M-1 (wordmark
+ * at 1/3 mark + one-line copy ~307px). Rest poses sit outside a 32-unit circle
+ * around 50,50. Capture AABB is the live check; this circle is the rest-pose
+ * heuristic. Closest live body hypot is still > 40.
  */
-export const CENTRE_RADIUS = 28;
+export const CENTRE_RADIUS = 32;
 
 /** Rest band of the two landing CTAs: top 86%+, centred 30–70. */
 const CTA_TOP = 86;
@@ -43,7 +45,7 @@ const CTA_PAD_Y =
   ((CLOUD_WANDER_X + CLOUD_REPEL_STRENGTH) / EXCLUSION_VIEWPORT.height) * 100;
 
 export const CLOUD_BODIES: readonly CloudBody[] = [
-  { index: 0, top: 50, left: 92, size: 22, rotate: -24, kind: "comet", tone: "accent" },
+  { index: 0, top: 50, left: 96, size: 22, rotate: -24, kind: "comet", tone: "accent" },
   { index: 1, top: 64, left: 91, size: 24, rotate: -7, kind: "asteroid", tone: "ink" },
   { index: 2, top: 77, left: 86, size: 26, rotate: 10, kind: "star", tone: "accent" },
   { index: 3, top: 81, left: 88, size: 28, rotate: -22, kind: "comet", tone: "ink" },
@@ -56,8 +58,8 @@ export const CLOUD_BODIES: readonly CloudBody[] = [
   { index: 10, top: 73, left: 8, size: 26, rotate: -1, kind: "asteroid", tone: "accent" },
   { index: 11, top: 66, left: 12, size: 28, rotate: 16, kind: "star", tone: "ink" },
   { index: 12, top: 67, left: 11, size: 30, rotate: -16, kind: "comet", tone: "accent" },
-  { index: 13, top: 54, left: 7, size: 32, rotate: 1, kind: "asteroid", tone: "ink" },
-  { index: 14, top: 40, left: 6, size: 34, rotate: 18, kind: "star", tone: "accent" },
+  { index: 13, top: 54, left: 4, size: 32, rotate: 1, kind: "asteroid", tone: "ink" },
+  { index: 14, top: 40, left: 4, size: 34, rotate: 18, kind: "star", tone: "accent" },
   { index: 15, top: 50, left: 4, size: 36, rotate: -14, kind: "comet", tone: "ink" },
   { index: 16, top: 35, left: 4, size: 22, rotate: 3, kind: "asteroid", tone: "accent" },
   { index: 17, top: 20, left: 10, size: 24, rotate: 20, kind: "star", tone: "ink" },
@@ -70,7 +72,7 @@ export const CLOUD_BODIES: readonly CloudBody[] = [
   { index: 24, top: 19, left: 79, size: 22, rotate: -8, kind: "comet", tone: "accent" },
   { index: 25, top: 12, left: 72, size: 24, rotate: 9, kind: "asteroid", tone: "ink" },
   { index: 26, top: 20, left: 84, size: 26, rotate: -23, kind: "star", tone: "accent" },
-  { index: 27, top: 32, left: 93, size: 28, rotate: -6, kind: "comet", tone: "ink" },
+  { index: 27, top: 32, left: 96, size: 28, rotate: -6, kind: "comet", tone: "ink" },
   { index: 28, top: 46, left: 96, size: 30, rotate: 11, kind: "asteroid", tone: "accent" },
   { index: 29, top: 61, left: 96, size: 32, rotate: -21, kind: "star", tone: "ink" },
 ];
