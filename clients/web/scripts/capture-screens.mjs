@@ -2841,6 +2841,7 @@ async function assertComposerTabOrder(page, where) {
         activeOutlineStyle: activeStyle?.outlineStyle ?? null,
         outlineWidth: ringStyle?.outlineWidth ?? null,
         outlineStyle: ringStyle?.outlineStyle ?? null,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
       };
     })()`);
     walked.push(focus.testId);
@@ -2849,7 +2850,8 @@ async function assertComposerTabOrder(page, where) {
       !focus.focusVisible ||
       focus.outlineWidth !== "2px" ||
       focus.outlineStyle !== "solid" ||
-      (index === 0 && focus.activeOutlineStyle !== "none")
+      (index === 0 && focus.activeOutlineStyle !== "none") ||
+      (index === 0 && focus.modality !== "keyboard")
     ) {
       throw new Error(
         `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
@@ -2866,18 +2868,163 @@ async function assertComposerTabOrder(page, where) {
 /** 액션 행의 버튼 아닌 가운데 폭을 실제로 눌러 입력 캐럿이 돌아오는지 잰다. */
 async function assertComposerVesselClick(page, where, ids) {
   const input = page.getByTestId(ids.input);
+  const frame = page.getByTestId(ids.frame ?? "composer-frame");
+  const rest = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor };
+  });
   await input.fill("그릇 클릭 확인");
   await input.evaluate((element) => element.setSelectionRange(2, 2));
   await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
-  const proof = await input.evaluate((element) => ({
-    active: document.activeElement === element,
-    start: element.selectionStart,
-    end: element.selectionEnd,
-  }));
-  if (!proof.active || proof.start !== 2 || proof.end !== 2) {
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const frame = document.querySelector('[data-testid="${ids.frame ?? "composer-frame"}"]');
+    const frameStyle = frame ? getComputedStyle(frame) : null;
+    return {
+      active: document.activeElement === input,
+      start: input?.selectionStart ?? null,
+      end: input?.selectionEnd ?? null,
+      borderColor: frameStyle?.borderColor ?? null,
+      outlineWidth: frameStyle?.outlineWidth ?? null,
+      outlineStyle: frameStyle?.outlineStyle ?? null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
+    };
+  })()`);
+  if (
+    !proof.active ||
+    proof.start !== 2 ||
+    proof.end !== 2 ||
+    proof.borderColor !== rest.borderColor ||
+    proof.outlineStyle !== "none" ||
+    proof.modality !== "pointer"
+  ) {
     throw new Error(`컴포저 그릇 클릭 ${where}: ${JSON.stringify(proof)}`);
   }
-  console.log(`  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start}`);
+  console.log(
+    `  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start} · 포인터 보더 불변`
+  );
+}
+
+const OBSERVER_ATTACH_ENDPOINT = "wss://127.0.0.1:28443/v1/observer-terminal";
+
+/** 캡처 레인이 xterm을 연 채로 포인터/Tab 링을 재게, grant + 소켓을 붙잡아 둔다. */
+async function mockObserverTerminalAttach(context) {
+  await context.route("**/work-sessions/*/terminal-attach", (route) =>
+    json(route, {
+      attach_endpoint: OBSERVER_ATTACH_ENDPOINT,
+      capability_token: `momo_terminal_attach_v1.${"a".repeat(43)}`,
+      pty_id: "pty-capture-1",
+    })
+  );
+  await context.routeWebSocket(/\/v1\/observer-terminal$/, () => {});
+}
+
+function readObserverTerminalVessel() {
+  return `(() => {
+      const frame = document.querySelector(
+        '[data-testid="work-observer-terminal-frame"]'
+      );
+      const textarea = document.querySelector(".xterm-helper-textarea");
+      const frameStyle = frame ? getComputedStyle(frame) : null;
+      return {
+        frame: Boolean(frame),
+        textarea: Boolean(textarea),
+        activeIsTextarea: document.activeElement === textarea,
+        activeClass: document.activeElement?.className ?? null,
+        focusVisible: textarea?.matches(":focus-visible") ?? false,
+        borderColor: frameStyle?.borderColor ?? null,
+        outlineWidth: frameStyle?.outlineWidth ?? null,
+        outlineStyle: frameStyle?.outlineStyle ?? null,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
+      };
+    })()`;
+}
+
+/**
+ * 관전 터미널 그릇 (#1866 design-review High). xterm helper textarea는 클릭에도
+ * :focus-visible이라 :focus-within이면 드래그 선택 순간 인셋 링이 선다. 컴포저와
+ * 같은 focus-visible-within + Tab 스탬프가 그걸 가른다. Tab 이탈은 포커스 트랩
+ * 회귀(MOMO-619)를 같이 잰다.
+ */
+async function assertObserverTerminalModality(page, where, shots, scheme) {
+  const start = page.getByTestId("work-observer-start");
+  await start.waitFor({ state: "visible" });
+  await start.click();
+  await page.locator(".xterm-helper-textarea").waitFor({
+    state: "attached",
+    timeout: 10_000,
+  });
+  const frame = page.getByTestId("work-observer-terminal-frame");
+  await frame.waitFor({ state: "visible" });
+  const rest = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor };
+  });
+
+  const box = await page.getByTestId("work-observer-terminal").boundingBox();
+  if (!box) {
+    throw new Error(`관전 터미널 상자 없음 ${where}`);
+  }
+  await page.mouse.move(box.x + 24, box.y + 16);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + 28);
+  const dragging = await page.evaluate(readObserverTerminalVessel());
+  await page.mouse.up();
+  if (
+    !dragging.frame ||
+    !dragging.textarea ||
+    !dragging.activeIsTextarea ||
+    dragging.borderColor !== rest.borderColor ||
+    dragging.outlineStyle !== "none" ||
+    dragging.modality !== "pointer"
+  ) {
+    throw new Error(
+      `관전 터미널 포인터 선택 ${where}: ${JSON.stringify(dragging)}`
+    );
+  }
+  if (shots && scheme) {
+    const pointerShot = `${OUT_DIR}/terminal-pointer-${scheme}.png`;
+    await page.screenshot({ path: pointerShot });
+    shots.push(pointerShot);
+  }
+
+  await page.keyboard.press("Tab");
+  const left = await page.evaluate(readObserverTerminalVessel());
+  if (left.activeIsTextarea) {
+    throw new Error(
+      `관전 터미널 Tab 이탈 실패(포커스 트랩) ${where}: ${JSON.stringify(left)}`
+    );
+  }
+
+  await page.keyboard.press("Shift+Tab");
+  const tabbed = await page.evaluate(readObserverTerminalVessel());
+  if (
+    !tabbed.activeIsTextarea ||
+    !tabbed.focusVisible ||
+    tabbed.outlineWidth !== "2px" ||
+    tabbed.outlineStyle !== "solid" ||
+    tabbed.modality !== "keyboard"
+  ) {
+    throw new Error(
+      `관전 터미널 Tab 진입 ${where}: ${JSON.stringify(tabbed)}`
+    );
+  }
+  if (shots && scheme) {
+    const focusShot = `${OUT_DIR}/terminal-focus-${scheme}.png`;
+    await page.screenshot({ path: focusShot });
+    shots.push(focusShot);
+  }
+
+  const stop = page.getByTestId("work-observer-stop");
+  if ((await stop.count()) > 0 && (await stop.isVisible())) {
+    await stop.click();
+    await page.getByTestId("work-observer-start").waitFor({ state: "visible" });
+  }
+
+  console.log(
+    `  observer terminal ${where}: 포인터 선택 무링 · Tab 진입 2px 링 · Tab 이탈`
+  );
+  return { rest, dragging, left, tabbed };
 }
 
 /** [@]를 포인터로 실제 누르고, 기존 listbox가 입력 기준 위치에서 열린 것을 잰다. */
@@ -2911,6 +3058,8 @@ async function assertMentionTrigger(page, where, ids) {
       frameOutlineStyle: frame
         ? getComputedStyle(frame).outlineStyle
         : null,
+      frameBorderColor: frame ? getComputedStyle(frame).borderColor : null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
       options: list?.querySelectorAll('[role="option"]').length ?? 0,
       leftDelta:
         inputRect && listRect ? Math.round(listRect.left - inputRect.left) : null,
@@ -2918,16 +3067,15 @@ async function assertMentionTrigger(page, where, ids) {
         inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
     };
   })()`);
-  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
-  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
-  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
+  // 텍스트 입력류는 스펙상 클릭에도 :focus-visible이 매치된다. 그릇 링은 Tab
+  // 모달리티에서만 선다(#1866). 포인터 경로의 [@]는 보더 색·아웃라인을 바꾸지 않는다.
   if (
     proof.value !== "배포 @ 확인" ||
     proof.active !== ids.input ||
     proof.focusVisible !== true ||
     proof.inputOutlineStyle !== "none" ||
-    proof.frameOutlineWidth !== "2px" ||
-    proof.frameOutlineStyle !== "solid" ||
+    proof.frameOutlineStyle !== "none" ||
+    proof.modality !== "pointer" ||
     proof.options < 1 ||
     Math.abs(proof.leftDelta) > 1 ||
     proof.gap < 0 ||
@@ -2936,7 +3084,7 @@ async function assertMentionTrigger(page, where, ids) {
     throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
   }
   console.log(
-    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, ring=frame`
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, pointer 그릇 무링`
   );
   return proof;
 }
@@ -4973,7 +5121,11 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, scheme, {
     input: "composer-input",
     actions: "composer-actions",
+    frame: "composer-frame",
   });
+  const pointerShot = `${OUT_DIR}/composer-pointer-${scheme}.png`;
+  await login.screenshot({ path: pointerShot });
+  shots.push(pointerShot);
 
   // 새 진입점은 캡처 레인이 실제로 누른다. 클릭이 @를 넣고 기존 listbox를 열며,
   // 포인터 경로의 프로그램 포커스가 :focus-visible 링을 지어내지 않는 데까지 한 자다.
@@ -5512,6 +5664,7 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, `thread ${scheme}`, {
     input: "thread-composer-input",
     actions: "thread-composer-actions",
+    frame: "thread-composer-frame",
   });
   await assertMentionTrigger(login, `thread ${scheme}`, {
     input: "thread-composer-input",
@@ -6523,6 +6676,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
         json(route, { workSessions: dockSessions })
       );
+      await mockObserverTerminalAttach(context);
     },
     async (page) => {
       await openDock(page);
@@ -6536,6 +6690,12 @@ async function captureTerminalDockScenes(browser, scheme) {
         throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
       }
       await page.getByTestId("work-observer").waitFor({ state: "visible" });
+      await assertObserverTerminalModality(
+        page,
+        `sessions ${scheme}`,
+        shots,
+        scheme
+      );
       const dock = page.getByTestId("terminal-dock");
       await page.getByTestId("terminal-dock-close").click();
       await dock.waitFor({ state: "detached" });

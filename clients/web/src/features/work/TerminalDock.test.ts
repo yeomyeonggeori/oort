@@ -36,6 +36,8 @@ describe("TC-1 terminal dock is observation-only UI on the existing session mode
     expect(DOCK_CODE).toMatch(/<ObserverTerminal/);
     expect(OBSERVER).toMatch(/variant\?: "pane" \| "dock"/);
     expect(OBSERVER).toMatch(/disableStdin: true/);
+    expect(OBSERVER).toContain("focus-visible-within:focus-ring");
+    expect(OBSERVER).not.toContain("focus-within:focus-ring");
   });
 
   it("declares tablist keyboard traversal and Escape close", () => {

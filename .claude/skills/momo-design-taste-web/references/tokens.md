@@ -21,7 +21,7 @@ half the muted text actually lands. Measured, then adjusted:
 | `--ok` (light) | `#1a7f37` | `#187533` | draft 4.31:1 on the sidebar. Now 4.91. |
 | `--warn` (light) | `#9a6700` | `#8a5c00` | draft 4.13:1 on the sidebar. Now 4.93. |
 | `--bg-raised` (light) | `#ffffff` | `#fffefb` | pure white is banned by SKILL §2. Warm paper white keeps the Dawn cast. |
-| `--border` | one token `#dcd8d0` | split `--line` + `--line-strong` | `#dcd8d0` is **1.32:1** on `--surface`. Fine as a separator, far below the 3:1 minimum for a control outline. Input and outline-button borders now use `--line-strong` (>= 3.0:1 everywhere). |
+| `--border` | one token `#dcd8d0` | split `--line` + `--line-strong` | The original `#dcd8d0` was **1.32:1** on `--surface`. Fine as a separator, far below the 3:1 minimum for a control outline. Input and outline-button borders now use `--line-strong` (>= 3.0:1 everywhere). Light `--line` is `#e4e0d8` since #1866 (1.22:1 on `--surface`). |
 | dark scheme | as drafted | as drafted | `#f0a850` amber and `#7fa0c4` slate-blue measured 8.94:1 and 6.63:1. No change needed. |
 
 Renames (semantic, so a component never reads like a raw color): `--bg` ->
@@ -39,8 +39,8 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--surface-raised` | `#fffefb` | `#201f24` | cards, dialogs, inputs |
 | `--surface-sidebar` | `#efece6` | `#1b1a1f` | sidebar, rail |
 | `--surface-hover` | `#e7e3db` | `#26252c` | row hover, pressed |
-| `--line` | `#dcd8d0` | `#34323b` | separators, card edges (decorative, no contrast floor) |
-| `--line-strong` | `#84817d` | `#6f6e73` | control outlines: input, outline button (>= 3:1) |
+| `--line` | `#e4e0d8` | `#34323b` | separators, card edges (decorative, no contrast floor). Lightened one step in #1866; dark untouched. |
+| `--line-strong` | `#84817d` | `#6f6e73` | control outlines: input, outline button, composer vessel (>= 3:1). Light is already **3.03:1** on `--surface-hover`; one RGB step drops to 2.99, so #1866 does not lighten it. |
 | `--ink` | `#24211c` | `#ececf1` | body text |
 | `--ink-muted` | `#6a655f` | `#9b98a3` | timestamps, meta, secondary |
 | `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon) |
