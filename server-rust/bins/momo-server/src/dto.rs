@@ -50,6 +50,22 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
+/// `PATCH /v1/workspaces/{ws}/members/me` (#1873). CamelCase only; unknown
+/// keys (handle, role, avatar, snake_case aliases) are refused so this surface
+/// cannot become a second write for identity fields it does not own.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameSelfMemberRequest {
+    pub display_name: String,
+}
+
+/// Envelope for the updated member summary — login/join `Member` shape.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfMemberResponse {
+    pub member: MemberDto,
+}
+
 /// `POST /v1/workspaces/{ws}/members/{memberId}/password-reset` (#1767).
 /// The raw token leaves the server exactly once, like an invite code.
 #[derive(Debug, Serialize)]
@@ -4480,5 +4496,51 @@ mod tests {
             json["invite"].get("code").is_none(),
             "the raw code leaves the server exactly once, from the create call: {json}"
         );
+    }
+
+    /// #1873 — camelCase body, closed world. A snake_case alias or a smuggled
+    /// handle/role/avatar key must not decode: those fields are out of scope.
+    #[test]
+    fn self_rename_request_is_camel_case_and_closed() {
+        let body: RenameSelfMemberRequest =
+            serde_json::from_value(serde_json::json!({"displayName": "  곽성재  "}))
+                .expect("camelCase decodes");
+        assert_eq!(body.display_name, "  곽성재  ");
+
+        assert!(
+            serde_json::from_value::<RenameSelfMemberRequest>(serde_json::json!({
+                "display_name": "곽성재"
+            }))
+            .is_err(),
+            "snake_case is not an alias on this surface"
+        );
+        for smuggled in [
+            serde_json::json!({"displayName": "곽성재", "handle": "stolen"}),
+            serde_json::json!({"displayName": "곽성재", "role": "owner"}),
+            serde_json::json!({"displayName": "곽성재", "avatarUrl": "https://example.invalid/a.png"}),
+        ] {
+            assert!(
+                serde_json::from_value::<RenameSelfMemberRequest>(smuggled.clone()).is_err(),
+                "unknown key must not decode: {smuggled}"
+            );
+        }
+    }
+
+    #[test]
+    fn self_rename_response_is_the_member_envelope() {
+        let json = serde_json::to_value(SelfMemberResponse {
+            member: MemberDto {
+                id: "m".into(),
+                workspace_id: "w".into(),
+                kind: "human".into(),
+                display_name: "곽성재".into(),
+                handle: "seongjae".into(),
+            },
+        })
+        .expect("serialize");
+        assert_eq!(json["member"]["displayName"], "곽성재");
+        assert_eq!(json["member"]["handle"], "seongjae");
+        assert_eq!(json["member"]["kind"], "human");
+        assert!(json.get("handle").is_none(), "{json}");
     }
 }

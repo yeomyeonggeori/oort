@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 자기 표시 이름 변경 REST (#1873 / BZ-4e, 2026-08-29)
+
+- `PATCH /v1/workspaces/{ws}/members/me` `{displayName}` — 사람 본인만. 정규화는 join의 `normalized_join_display_name`(400 `displayName is required`). 에이전트 자격은 allow-list 밖 403 + `require_human`. 핸들·역할·아바타 무접촉.
+- 단일 쓰기경로: tenant tx에서 `member.display_name`+`updated_at` UPDATE, audit `member.renamed`, 프레즌스 동형 `member.renamed` outbox를 본인 `ch:` 채널에만. 응답은 login/join `Member` 봉투.
+- red proof: `self_rename_conformance_pg` 본인 200+roster·정규화 400·에이전트 403·타 WS/비멤버 403·감사·outbox. `schema_v0.sql` 비접촉.
+
 ## 에이전트 workspace role 변경 서버 거부 (#1857, 2026-08-28)
 
 - `change_workspace_role_in_tx`가 target `member.kind=agent`면 requested 값과 무관하게 403 `agent roles are fixed to member`. no-op(`member`)도 같은 문장. 사람 승격/강등·last-owner·self-manage 불변.

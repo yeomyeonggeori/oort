@@ -664,9 +664,12 @@ pub fn build_app(state: AppState) -> Router {
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused
         // (409) so a workspace is never orphaned.
+        // #1873 — PATCH is the self display-name write (human only). Mounted on
+        // the same path so `/me` stays the caller's own row; a body cannot name
+        // another member.
         .route(
             "/v1/workspaces/{ws}/members/me",
-            delete(routes::workspaces::leave),
+            delete(routes::workspaces::leave).patch(routes::self_profile::rename_self),
         )
         // #1767 — self password change. Separate path from leave so a PATCH
         // cannot be read as a lifecycle mutation.

@@ -74,6 +74,8 @@ tags:
       password — first-owner bootstrap or operator-issued password reset.
   - name: roster
     description: Workspace member roster.
+  - name: membership
+    description: Caller-scoped membership writes (self-leave, self display name).
   - name: membership-admin
     description: ADR-0128 workspace/channel roles, suspension, removal, and bans.
   - name: agents
@@ -830,6 +832,50 @@ paths:
         "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/members/me:
+    patch:
+      tags: [membership]
+      operationId: renameSelfMember
+      summary: Change the caller's own display name.
+      description: >
+        #1873 / BZ-4e. Human active members only. Body is `{displayName}`
+        (camelCase, closed world). Normalization reuses the join rule
+        (`normalized_join_display_name`: trimmed, 1..100 chars); a violation
+        is 400 `displayName is required`. Handle, role, and avatar are not
+        writable here. Agent bearers are 403 — an agent's display name is
+        the agent profile path. Writes `member.display_name` and `updated_at`
+        in one tenant transaction with audit `member.renamed` and a
+        `member.renamed` outbox broadcast per co-member channel (presence
+        fan-out shape; no new rail).
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameSelfMemberRequest"
+      responses:
+        "200":
+          description: Display name updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SelfMemberResponse"
+        "400":
+          description: displayName failed join normalization (empty or longer than 100 chars after trim).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Caller is not a human live member of this workspace, or presented
+            an agent bearer (not on the agent-route allow-list).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     delete:
       tags: [membership]
       operationId: leaveWorkspace
@@ -7227,6 +7273,24 @@ components:
         newPassword:
           type: string
           description: Replacement password, at most 1024 chars, must differ.
+
+    RenameSelfMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          description: >
+            1..100 chars after trimming. Same rule and 400 sentence as join
+            (`displayName is required`). Handle/role/avatar are not accepted.
+
+    SelfMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          $ref: "#/components/schemas/Member"
 
     PasswordResetClaimResponse:
       type: object
