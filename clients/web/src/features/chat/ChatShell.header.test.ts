@@ -77,4 +77,34 @@ describe("BZ-2 right control group rearranges existing actions", () => {
     expect(HUDDLE_CODE).toMatch(/testId="huddle-microphone"/);
     expect(HUDDLE_CODE).toMatch(/testId="huddle-leave"/);
   });
+
+  it("lets the right group shrink so a live huddle cannot cover the title", () => {
+    expect(SHELL_CODE).toMatch(
+      /className="flex min-w-0 flex-1 items-center justify-end gap-2"/
+    );
+    const at = SHELL.indexOf('data-testid="channel-header-controls"');
+    const window = SHELL.slice(Math.max(0, at - 200), at);
+    expect(window).toMatch(/min-w-0/);
+    expect(window).not.toMatch(/shrink-0/);
+  });
+
+  it("draws huddle icon buttons with the outline icon primitive", () => {
+    expect(HUDDLE_CODE).toMatch(/variant="outline"/);
+    expect(HUDDLE_CODE).toMatch(/size="icon"/);
+    expect(HUDDLE_CODE).toMatch(/size-4 spinner-busy/);
+  });
+
+  it("paints Live as a shrinking status fill, not a control outline", () => {
+    expect(HUDDLE_CODE).toMatch(/bg-ok-soft/);
+    expect(HUDDLE_CODE).toMatch(/size-2 rounded-full bg-ok/);
+    expect(HUDDLE_CODE).toMatch(/wide-only/);
+    expect(HUDDLE_CODE).toMatch(/huddle-participant-count/);
+    expect(HUDDLE_CODE).not.toMatch(/max-w-action/);
+    expect(HUDDLE_CODE).not.toMatch(/<AudioLines[^/]*\/>\s*Live/);
+  });
+
+  it("restores dialog focus in the close commit, not a tick later", () => {
+    expect(CONTROLS_CODE).toMatch(/useRestoreFocusOnClose/);
+    expect(MENU_CODE).toMatch(/handingOffRef/);
+  });
 });

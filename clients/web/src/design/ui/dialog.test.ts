@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { restoreDialogOpenerFocus, type DialogFocusTarget } from "./dialog";
 
@@ -41,5 +42,15 @@ describe("opener 선택 규칙 (4R H-2)", () => {
     const focus = vi.fn();
     expect(restoreDialogOpenerFocus({ isConnected: false, focus })).toBe(false);
     expect(focus).not.toHaveBeenCalled();
+  });
+});
+
+describe("useRestoreFocusOnClose (#1865 H-3)", () => {
+  it("restores after the trap effect, not on Radix's close-auto-focus tick", () => {
+    const source = readFileSync(new URL("./dialog.tsx", import.meta.url), "utf8");
+    expect(source).toContain("useRestoreFocusOnClose");
+    expect(source).toContain("React.useEffect");
+    expect(source).not.toContain("useLayoutEffect");
+    expect(source).toContain("setTimeout(0)");
   });
 });

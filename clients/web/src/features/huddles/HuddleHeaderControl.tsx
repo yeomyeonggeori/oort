@@ -7,33 +7,43 @@ import {
   PhoneOff,
   RotateCw,
 } from "lucide-react";
+import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
-import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
 import type { Huddle } from "@momo/core/lib/api";
 import { useHuddle, type HuddleController } from "./useHuddle";
 
 function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
+  const names = huddle
+    ? huddle.participants.map((participant) => participant.displayName).join(", ")
+    : undefined;
   return (
     <div
-      className="flex h-control min-w-0 max-w-action items-center gap-1 rounded-sm border border-line-strong px-2 text-meta"
+      className="flex h-control min-w-0 items-center gap-1 overflow-hidden rounded-sm bg-ok-soft px-2 text-meta"
       data-testid="huddle-live"
+      title={names}
     >
       <span className="flex shrink-0 items-center gap-1 font-medium text-ok">
-        <AudioLines aria-hidden="true" className="size-4" />
+        <span className="size-2 rounded-full bg-ok" aria-hidden="true" />
         Live
       </span>
       {huddle && (
-        <span
-          className="min-w-0 truncate text-ink-muted"
-          data-testid="huddle-participants"
-          title={huddle.participants
-            .map((participant) => participant.displayName)
-            .join(", ")}
-        >
-          {huddleParticipantSummary(huddle)}
-        </span>
+        <>
+          <span
+            className="min-w-0 truncate text-ink-muted wide-only"
+            data-testid="huddle-participants"
+          >
+            {huddleParticipantSummary(huddle)}
+          </span>
+          <span
+            className="shrink-0 text-ink-muted mobile-only"
+            data-numeric
+            data-testid="huddle-participant-count"
+          >
+            {huddle.participants.length}
+          </span>
+        </>
       )}
     </div>
   );
@@ -53,17 +63,19 @@ function HuddleIconButton({
   children: ReactNode;
 }) {
   return (
-    <button
+    <Button
       type="button"
+      variant="outline"
+      size="icon"
       onClick={onClick}
       aria-label={label}
       title={label}
       aria-busy={busy || undefined}
       data-testid={testId}
-      className={channelHeaderControlClass()}
+      className="shrink-0 text-ink-muted"
     >
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -111,7 +123,7 @@ export function HuddleHeaderControl({
           onClick={() => void huddle.toggleMicrophone()}
         >
           {huddle.busy === "microphone" ? (
-            <Loader2 aria-hidden="true" className="spinner-busy" />
+            <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
           ) : huddle.muted ? (
             <MicOff aria-hidden="true" className="size-4" />
           ) : (
@@ -125,7 +137,7 @@ export function HuddleHeaderControl({
           onClick={() => void huddle.leave()}
         >
           {huddle.busy === "leave" ? (
-            <Loader2 aria-hidden="true" className="spinner-busy" />
+            <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
           ) : (
             <PhoneOff aria-hidden="true" className="size-4" />
           )}
@@ -182,7 +194,7 @@ export function HuddleHeaderControl({
         onClick={() => void huddle.startOrJoin()}
       >
         {huddle.busy === "start-or-join" ? (
-          <Loader2 aria-hidden="true" className="spinner-busy" />
+          <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
         ) : (
           <AudioLines aria-hidden="true" className="size-4" />
         )}

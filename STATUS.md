@@ -4,7 +4,8 @@
 
 - 채널 헤더에서 토픽 상시 노출을 제거하고 1줄 제목만 남긴다. 토픽은 ⋮ 메뉴 「주제 보기」가 기존 읽기 다이얼로그를 연다(갱신 라우트 없음, 편집 항목 없음).
 - 우측은 기존 기능만 라운드 사각 그룹으로 재배치: `[터미널] [고정] [👥 N] [허들] [⋮]`. 👥 N은 기존 멤버 목록 트리거. 허들 유휴는 아이콘 버튼, Live 배지·참가자는 유지.
-- red proof: web vitest 1650·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell·gate:channel-header·gate:huddle.
+- design-review 수리: 390 라이브에서 그룹이 줄어 서랍/해시와 겹치지 않음(B-1), Live 칩은 ok-soft 채움+점(H-2, M-1), 허들 버튼은 outline icon 프리미티브(H-1), 다이얼로그 닫힘은 layout에서 트리거로 복귀(H-3). `gate:huddle`에 390×라이브 축.
+- red proof: web vitest·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell·gate:channel-header×12·gate:huddle.
 
 ## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
 

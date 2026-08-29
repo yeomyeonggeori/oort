@@ -798,9 +798,9 @@ export function ChatShell() {
           사이드바 검색 줄(p-2 + control-sm + hairline)과 하단 경계를 맞춘다. */}
       <header
         data-testid="channel-header"
-        className="flex items-center justify-between gap-3 border-b border-line px-4 py-row"
+        className="flex min-w-0 items-center gap-3 border-b border-line px-4 py-row"
       >
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+        <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
@@ -863,7 +863,7 @@ export function ChatShell() {
             메시지 {messages.length}개
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -874,7 +874,7 @@ export function ChatShell() {
             </span>
           )}
           <div
-            className="flex shrink-0 items-center gap-1"
+            className="flex min-w-0 items-center gap-1"
             role="group"
             aria-label="채널 도구"
             data-testid="channel-header-controls"

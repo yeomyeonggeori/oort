@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { Users } from "lucide-react";
 import type { RosterMember } from "@momo/core/lib/api";
 import { normalizeChannelTopic } from "@momo/core/features/channels/model";
@@ -8,6 +8,8 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  restoreDialogOpenerFocus,
+  useRestoreFocusOnClose,
 } from "@/design/ui/dialog";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
@@ -34,7 +36,8 @@ export type ChannelMemberListStatus = "loading" | "ready" | "failed";
 // DialogTrigger를 함께 쓰면 Radix 기본 onCloseAutoFocus가 그 위에 겹쳐 복귀가
 // 어긋난다 — 정본 다이얼로그는 전부 프로그래매틱이다(dialog.tsx 머리말·
 // MessageActions.tsx:312). DialogContent는 항상 렌더해 Radix가 열림/닫힘·포탈
-// 마운트·close 시퀀스를 소유하게 둔다.
+// 마운트·close 시퀀스를 소유하게 둔다. 닫힘 복귀 자체는 useRestoreFocusOnClose가
+// 같은 커밋에서 처리한다. Radix onCloseAutoFocus는 한 틱 늦다 (#1865 H-3).
 // =============================================================================
 
 export function ChannelTopicDialog({
@@ -46,17 +49,22 @@ export function ChannelTopicDialog({
   topic: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  opener: HTMLElement | null;
+  opener: RefObject<HTMLElement | null>;
 }) {
   const normalized = normalizeChannelTopic(topic);
+  useRestoreFocusOnClose(open && normalized !== "", opener);
   if (normalized === "") return null;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        opener={opener}
+        opener={opener.current}
         className="gap-4 p-4"
         data-testid="channel-topic-dialog"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreDialogOpenerFocus(opener.current);
+        }}
       >
         <div className="flex min-w-0 flex-col gap-1">
           <DialogTitle>채널 토픽</DialogTitle>
@@ -151,6 +159,7 @@ export function ChannelMemberPanel({
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const addAfterClose = useRef(false);
   const [open, setOpen] = useState(false);
+  useRestoreFocusOnClose(open, triggerRef);
   const label = memberListLabel(status, members.length);
   const groups = useMemo(
     () => ({
@@ -204,6 +213,10 @@ export function ChannelMemberPanel({
         data-testid="channel-member-panel"
         data-roster-status={status}
         aria-busy={status === "loading" || undefined}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          restoreDialogOpenerFocus(triggerRef.current);
+        }}
       >
         <div className="flex flex-col gap-1 border-b border-line p-4">
           <DialogTitle>채널 멤버</DialogTitle>

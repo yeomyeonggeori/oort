@@ -81,6 +81,7 @@ export function ChannelHeaderMenu({
   const client = useQueryClient();
   const navigate = useNavigate();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const handingOffRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
@@ -156,6 +157,14 @@ export function ChannelHeaderMenu({
         <DropdownMenuContent
           align="end"
           data-testid="channel-title-menu-content"
+          onCloseAutoFocus={(event) => {
+            // 주제/나가기 다이얼로그로 넘기는 동안 트리거로 되돌리면, 닫힘
+            // 복귀가 다이얼로그 auto-focus와 같은 틱에서 싸운다 (#1865 H-3).
+            if (handingOffRef.current) {
+              event.preventDefault();
+              handingOffRef.current = false;
+            }
+          }}
         >
           {/* 알림 실패는 항목 위에 그 자리에서 선다(§5, 토스트가 아니다). 메뉴가
               열려 있어야 읽히므로, 아래 항목은 실패 시 preventDefault로 닫지
@@ -169,6 +178,7 @@ export function ChannelHeaderMenu({
                 data-testid="channel-topic"
                 onSelect={(event) => {
                   event.preventDefault();
+                  handingOffRef.current = true;
                   setOpen(false);
                   setTopicOpen(true);
                 }}
@@ -202,6 +212,7 @@ export function ChannelHeaderMenu({
                   // 파괴적 액션은 한 번의 무방비 클릭으로 발화하지 않는다(§6).
                   // 메뉴를 닫고 확인 다이얼로그로 넘긴다.
                   event.preventDefault();
+                  handingOffRef.current = true;
                   setOpen(false);
                   setLeaveError(null);
                   setConfirmLeave(true);
@@ -280,7 +291,7 @@ export function ChannelHeaderMenu({
           topic={topic}
           open={topicOpen}
           onOpenChange={setTopicOpen}
-          opener={triggerRef.current}
+          opener={triggerRef}
         />
       )}
     </>

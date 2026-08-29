@@ -16,7 +16,10 @@
 //      afterwards (the intentionally inverted response timing);
 //   4. at 760x480 joined controls have a finite width, leaving the channel title
 //      measurable and the terminal-dock toggle inside the viewport;
-//   5. after audio joined, a projection 500 cannot hide Live, microphone or exit.
+//   5. at 390x844 (live + joined) the right group stays inside the viewport,
+//      does not paint over the drawer toggle or channel hash, and the title
+//      still has a measurable width. Names yield; the Live chip keeps a count;
+//   6. after audio joined, a projection 500 cannot hide Live, microphone or exit.
 //
 // Red proofs:
 //   HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle
@@ -284,6 +287,89 @@ async function openSignedIn(context) {
   return page;
 }
 
+async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
+  await page.setViewportSize({ width, height });
+  const geometry = await page.evaluate((vpWidth) => {
+    const overlap = (a, b) =>
+      Boolean(
+        a &&
+          b &&
+          a.width > 0 &&
+          b.width > 0 &&
+          a.left < b.right &&
+          a.right > b.left &&
+          a.top < b.bottom &&
+          a.bottom > b.top
+      );
+    const header = document.querySelector("[data-testid='channel-header']");
+    const left = header?.children[0];
+    const title = header?.querySelector("h1")?.getBoundingClientRect();
+    const toggle = document
+      .querySelector("[data-testid='open-sidebar-drawer']")
+      ?.getBoundingClientRect();
+    const hash = left
+      ?.querySelector(":scope > span[aria-hidden='true']")
+      ?.getBoundingClientRect();
+    const group = document
+      .querySelector("[data-testid='channel-header-controls']")
+      ?.getBoundingClientRect();
+    const live = document
+      .querySelector("[data-testid='huddle-live']")
+      ?.getBoundingClientRect();
+    const menu = document
+      .querySelector("[data-testid='channel-title-menu']")
+      ?.getBoundingClientRect();
+    const workToggle = document
+      .querySelector("[data-testid='open-terminal-dock']")
+      ?.getBoundingClientRect();
+    return {
+      titleWidth: title?.width ?? 0,
+      groupLeft: group?.left ?? -1,
+      groupRight: group?.right ?? Number.POSITIVE_INFINITY,
+      liveRight: live?.right ?? Number.POSITIVE_INFINITY,
+      menuRight: menu?.right ?? Number.POSITIVE_INFINITY,
+      workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
+      hashRight: hash?.right ?? 0,
+      toggleRight: toggle?.right ?? 0,
+      overlapsToggle: overlap(group, toggle),
+      overlapsHash: overlap(group, hash),
+      scrollWidth: document.documentElement.scrollWidth,
+      viewport: vpWidth,
+    };
+  }, width);
+  if (geometry.titleWidth <= 0) {
+    throw new Error(
+      `joined header erased channel title at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.groupRight > width + 0.5 || geometry.menuRight > width + 0.5) {
+    throw new Error(
+      `control group escaped viewport at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.workToggleRight > width + 0.5) {
+    throw new Error(
+      `terminal-dock toggle escaped viewport at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.overlapsHash) {
+    throw new Error(
+      `control group overlapped the channel hash at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (requireDrawer && geometry.overlapsToggle) {
+    throw new Error(
+      `control group overlapped the drawer toggle at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.scrollWidth > width) {
+    throw new Error(
+      `joined header widened the document at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  return geometry;
+}
+
 async function main() {
   if (!existsSync(resolve(webRoot, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run npm run build first.");
@@ -377,23 +463,26 @@ async function main() {
       await page.getByTestId("huddle-join").click();
       await page.getByTestId("huddle-microphone").waitFor();
       await page.getByTestId("huddle-leave").waitFor();
-      await page.setViewportSize({ width: 760, height: 480 });
-      const geometry = await page.evaluate(() => {
-        const title = document.querySelector("h1")?.getBoundingClientRect();
-        const workToggle = document
-          .querySelector("[data-testid='open-terminal-dock']")
-          ?.getBoundingClientRect();
-        return {
-          titleWidth: title?.width ?? 0,
-          workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
-        };
+      await assertJoinedHeaderFits(page, {
+        width: 760,
+        height: 480,
+        requireDrawer: false,
       });
-      if (geometry.titleWidth <= 0) {
-        throw new Error(`joined header erased channel title: ${JSON.stringify(geometry)}`);
+      await assertJoinedHeaderFits(page, {
+        width: 390,
+        height: 844,
+        requireDrawer: true,
+      });
+      if (await page.getByTestId("huddle-participants").isVisible()) {
+        throw new Error("participant names must yield at 390 so the Live chip can shrink");
       }
-      if (geometry.workToggleRight > 760) {
-        throw new Error(`terminal-dock toggle escaped viewport: ${JSON.stringify(geometry)}`);
+      if (!(await page.getByTestId("huddle-participant-count").isVisible())) {
+        throw new Error("the 390 Live chip must keep a participant count");
       }
+      await page.screenshot({
+        path: resolve(outDir, "joined-390.png"),
+        fullPage: true,
+      });
 
       state.mode = "error";
       await page.evaluate(({ id, ch }) => {
@@ -478,7 +567,7 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: configuration, joined width/exit controls, projection failure isolation, and huddle_ended ordering hold."
+    "GATE PASS: configuration, joined width/exit controls (760 and 390 live), projection failure isolation, and huddle_ended ordering hold."
   );
 }
 
