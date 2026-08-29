@@ -934,6 +934,8 @@ export function MessageRow({
         {actions && (
           <ReactionChips
             chips={actions.chips}
+            directory={directory}
+            myMemberId={actions.myMemberId}
             disabled={deleted}
             onToggle={(emoji) => callbacks.onReact(emoji)}
             onOpenPicker={
