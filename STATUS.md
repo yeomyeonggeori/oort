@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BF-A8 채널 빈 상태 인트로 블록 (#1904, 2026-08-30)
+
+- 새 채널 첫 진입을 EmptyInvite 분기에서 빼, 타임라인 virtuoso **leading row**로 채널 아이콘+`#이름`+시작 카피+액션 카드(첫 메시지 쓰기, 권한 있으면 멤버 추가하기)를 그린다. 메시지 도착 시 같은 목록 안에서 인트로가 히스토리 맨 위에 남고 시프트 0(높이·스크롤 위치 불변). 오버레이/절대배치 없음.
+- 토픽이 있으면 인용, 없으면 기존 emptyChannelCopy 일반 카피. 생성 시각/생성자는 로컬에 있을 때만. DM은 아이콘·이름·카피만 교체, 초대 카드 없음. 스레드 패널 비대상. 초대 카드는 `canCreateChannel`(오너/관리자, role 미정이면 열어 두고 서버가 마지막 말).
+- 서버 무접촉. runtime-unverified 아님. red proof: web vitest 1893 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8497` capture:design · `SHELL_GATE_PORT=8499 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-A6 링크 프리뷰 Rich/Compact 선택 (#1903, 2026-08-30)
 
 - 설정 > 링크 미리보기를 접기 boolean에서 `rich | compact | off` 3값 라디오로. 저장 `momo.web.link-preview.v1`. 기존 `momo.web.link-previews-folded.v1`: `"true"`(카드 숨김)→`off`, `"false"`/unknown(compact 카드)→`compact`, 미저장→`rich`(미토글 기존 사용자 포함 의도적 기본 상향, 오케스트레이터 승인·성재 최종 확인 예정).

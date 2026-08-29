@@ -55,7 +55,10 @@ import {
   makeSyntheticMessages,
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
-import { canCreateChannelNow } from "@momo/core/features/channels/model";
+import {
+  canCreateChannel,
+  canCreateChannelNow,
+} from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -1091,7 +1094,17 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
+              channelName={labelParts?.text ?? label}
+              channelTopic={channel?.topic}
               peer={peer}
+              reachedStart={timeline.reachedStart}
+              canAddMember={
+                channel !== null &&
+                channel.kind !== "dm" &&
+                canCreateChannel(
+                  memberFor(directory, session.member.id)?.role
+                )
+              }
               onAddMember={() => {
                 if (channelId && channel)
                   openAddMember({ id: channelId, name: channel.name ?? label });

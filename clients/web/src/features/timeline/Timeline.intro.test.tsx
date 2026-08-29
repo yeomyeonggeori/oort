@@ -1,0 +1,240 @@
+// @vitest-environment jsdom
+
+import {
+  act,
+  createElement,
+  forwardRef,
+  useImperativeHandle,
+  type ReactElement,
+  type Ref,
+} from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Message, RosterMember } from "@momo/core/lib/api";
+import { makeDirectory } from "@momo/core/features/workspace/directory";
+import {
+  EMPTY_ADD_MEMBER_ACTION_LABEL,
+  EMPTY_WRITE_ACTION_LABEL,
+} from "@momo/core/features/timeline/model";
+import { Timeline } from "./Timeline";
+
+const virtuoso = vi.hoisted(() => ({
+  data: [] as { kind: string; key: string }[],
+}));
+
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: forwardRef(function MockVirtuoso(
+    props: {
+      data: { kind: string; key: string }[];
+      itemContent: (index: number, item: { kind: string; key: string }) => ReactElement;
+    },
+    ref: Ref<{ scrollToIndex: (opts: unknown) => void }>
+  ) {
+    virtuoso.data = props.data;
+    useImperativeHandle(ref, () => ({
+      scrollToIndex: () => undefined,
+    }));
+    return createElement(
+      "div",
+      { "data-testid": "timeline-virtuoso" },
+      props.data.map((item, index) =>
+        createElement("div", { key: item.key }, props.itemContent(index, item))
+      )
+    );
+  }),
+}));
+
+vi.mock("./MessageRow", () => ({
+  DayDivider: () => createElement("div", { "data-testid": "day-divider" }),
+  RecoveryDivider: () => createElement("div", { "data-testid": "recovery-divider" }),
+  UnreadDivider: () => createElement("div", { "data-testid": "unread-divider" }),
+  MessageRow: ({ message }: { message: { seq: number } }) =>
+    createElement("div", {
+      "data-testid": "timeline-message",
+      "data-seq": message.seq,
+    }),
+}));
+
+const reactActEnvironment = globalThis as typeof globalThis & {
+  IS_REACT_ACT_ENVIRONMENT?: boolean;
+};
+let mountedRoot: Root | null = null;
+let host: HTMLElement | null = null;
+
+const CHANNEL = "0199cccc-0000-7000-8000-000000000201";
+const OTHER = "00000000-0000-7000-8000-000000000101";
+const DIRECTORY = makeDirectory([]);
+
+function message(seq: number): Message {
+  return {
+    id: `0199cccc-0000-7000-8000-${String(seq).padStart(12, "0")}`,
+    channelId: CHANNEL,
+    seq,
+    authorMemberId: OTHER,
+    body: `메시지 ${seq}`,
+    type: "text",
+    state: "sent",
+    createdAtMs: 1_700_000_000_000 + seq * 1_000,
+    hlcTs: 1_700_000_000_000 + seq * 1_000,
+    hlcCount: 0,
+  };
+}
+
+function peer(over: Partial<RosterMember> = {}): RosterMember {
+  return {
+    id: "00000000-0000-7000-8000-0000000001aa",
+    workspaceId: "ws",
+    kind: "human",
+    status: "active",
+    displayName: "곽성재",
+    handle: "seongjae",
+    channelCount: 1,
+    channelIds: [CHANNEL],
+    capabilities: [],
+    createdAtMs: 1,
+    updatedAtMs: 1,
+    ...over,
+  };
+}
+
+beforeAll(() => {
+  reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+});
+
+beforeEach(() => {
+  virtuoso.data = [];
+});
+
+afterEach(() => {
+  if (mountedRoot) {
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+  }
+  host?.remove();
+  host = null;
+});
+
+function mount(
+  over: {
+    messages?: Message[];
+    channelKind?: "public" | "private" | "dm";
+    channelName?: string;
+    channelTopic?: string;
+    canAddMember?: boolean;
+    reachedStart?: boolean;
+    peer?: RosterMember | null;
+    onStartWriting?: () => void;
+    onAddMember?: () => void;
+  } = {}
+): HTMLElement {
+  if (host === null) {
+    host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+  }
+  act(() => {
+    mountedRoot?.render(
+      createElement(Timeline, {
+        messages: over.messages ?? [],
+        directory: DIRECTORY,
+        status: "ready",
+        channelKind: over.channelKind ?? "public",
+        channelName: over.channelName ?? "엔진",
+        channelTopic: over.channelTopic,
+        canAddMember: over.canAddMember ?? true,
+        reachedStart: over.reachedStart,
+        peer: over.peer,
+        onStartWriting: over.onStartWriting,
+        onAddMember: over.onAddMember,
+      })
+    );
+  });
+  return host;
+}
+
+describe("Timeline channel intro leading row", () => {
+  it("renders the intro as the virtuoso's first row on an empty channel", () => {
+    const root = mount();
+    expect(root.querySelector("[data-testid='timeline-virtuoso']")).not.toBeNull();
+    expect(virtuoso.data[0]?.kind).toBe("intro");
+    const intro = root.querySelector("[data-testid='timeline-empty']");
+    expect(intro).not.toBeNull();
+    expect(intro?.getAttribute("data-channel-intro")).toBe("");
+    expect(intro?.getAttribute("data-empty-kind")).toBe("channel");
+    expect(intro?.querySelector("#channel-intro-title")?.tagName).toBe("H2");
+    expect(intro?.querySelector("#channel-intro-title")?.textContent).toBe("#엔진");
+    const write = root.querySelector(
+      "[data-testid='timeline-empty-primary']"
+    ) as HTMLButtonElement | null;
+    const add = root.querySelector(
+      "[data-testid='timeline-empty-secondary']"
+    ) as HTMLButtonElement | null;
+    expect(write?.tagName).toBe("BUTTON");
+    expect(write?.textContent).toContain(EMPTY_WRITE_ACTION_LABEL);
+    expect(write?.dataset.actionKind).toBe("write");
+    expect(add?.textContent).toContain(EMPTY_ADD_MEMBER_ACTION_LABEL);
+    expect(add?.dataset.actionKind).toBe("add-member");
+  });
+
+  it("keeps the intro as the first row with unchanged height when a message arrives", () => {
+    const root = mount();
+    const scroller = root.querySelector("[data-testid='timeline-virtuoso']");
+    const intro = root.querySelector("[data-testid='timeline-empty']");
+    expect(scroller).not.toBeNull();
+    expect(intro).not.toBeNull();
+    const height = intro?.getBoundingClientRect().height;
+    const top = intro?.getBoundingClientRect().top;
+
+    mount({ messages: [message(1)], reachedStart: true, canAddMember: true });
+
+    expect(root.querySelector("[data-testid='timeline-virtuoso']")).toBe(scroller);
+    expect(virtuoso.data[0]?.kind).toBe("intro");
+    expect(virtuoso.data.some((item) => item.kind === "message")).toBe(true);
+    const still = root.querySelector("[data-channel-intro]");
+    expect(still).toBe(intro);
+    expect(still?.getBoundingClientRect().height).toBe(height);
+    expect(still?.getBoundingClientRect().top).toBe(top);
+    expect(root.querySelector("[data-testid='timeline-message']")).not.toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty']")).toBeNull();
+    expect(root.querySelector("[data-testid='message-channel-intro']")).toBe(intro);
+  });
+
+  it("hides the add-member card for a role that cannot add", () => {
+    const root = mount({ canAddMember: false });
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")).not.toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-secondary']")).toBeNull();
+  });
+
+  it("swaps icon, name, and copy on a DM and never offers add-member", () => {
+    const root = mount({
+      channelKind: "dm",
+      channelName: "곽성재",
+      peer: peer(),
+      canAddMember: true,
+    });
+    const intro = root.querySelector("[data-testid='timeline-empty']");
+    expect(intro?.getAttribute("data-empty-kind")).toBe("dm");
+    expect(intro?.querySelector("#channel-intro-title")?.textContent).toBe("곽성재");
+    expect(intro?.textContent).toContain("곽성재님과의 대화를 시작하세요.");
+    expect(intro?.querySelector("[data-testid='message-channel-intro-icon']")).not.toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-secondary']")).toBeNull();
+  });
+
+  it("focuses the composer when 첫 메시지 쓰기 is pressed", () => {
+    const composer = document.createElement("textarea");
+    composer.id = "composer-input";
+    composer.setAttribute("data-testid", "composer-input");
+    document.body.append(composer);
+    const root = mount({
+      onStartWriting: () => composer.focus(),
+    });
+    const write = root.querySelector(
+      "[data-testid='timeline-empty-primary']"
+    ) as HTMLButtonElement;
+    act(() => {
+      write.click();
+    });
+    expect(document.activeElement).toBe(composer);
+    composer.remove();
+  });
+});

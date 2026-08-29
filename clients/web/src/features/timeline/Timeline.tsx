@@ -16,16 +16,20 @@ import {
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
-import { Button } from "@/design/ui/button";
+import { InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   buildTimelineItems,
-  emptyChannelCopy,
-  type EmptyChannelAction,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
 } from "@momo/core/features/timeline/model";
+import {
+  CHANNEL_INTRO_ITEM,
+  buildChannelIntro,
+  shouldShowChannelIntro,
+  type ChannelIntroItem,
+} from "./channelIntro";
+import { ChannelIntroBlock } from "./ChannelIntroBlock";
 import {
   foldDeletedRuns,
   type DeletedFoldFields,
@@ -97,7 +101,7 @@ const START_INDEX = 1_000_000;
  * (`deletedFold.ts`) — 접기는 그리는 순간에만 일어나고 메시지 배열도 seq도
  * 커서도 그것을 모른다.
  */
-type FoldedItem = TimelineItem & DeletedFoldFields;
+type FoldedItem = (TimelineItem & DeletedFoldFields) | ChannelIntroItem;
 
 /** Oldest message currently in the stream, with its position. */
 function anchorOf(
@@ -154,8 +158,10 @@ function indexOfMessageId(items: FoldedItem[], messageId: string): number {
     (item) => item.kind === "message" && item.message.id.toLowerCase() === wanted
   );
   if (own >= 0) return own;
-  return items.findIndex((item) =>
-    (item.deletedFoldedIds ?? []).some((id) => id.toLowerCase() === wanted)
+  return items.findIndex(
+    (item) =>
+      item.kind === "message" &&
+      (item.deletedFoldedIds ?? []).some((id) => id.toLowerCase() === wanted)
   );
 }
 
@@ -211,12 +217,32 @@ export function Timeline({
   onResendPending,
   onAddMember,
   onStartWriting,
+  reachedStart = false,
+  canAddMember = false,
+  channelName,
+  channelTopic,
+  createdAtMs,
+  creatorName,
 }: {
   messages: Message[];
   directory: Directory;
   status: "loading" | "ready" | "error";
   /** Decides what "empty" means here: a channel gains members, a DM cannot. */
   channelKind?: Channel["kind"];
+  /** Visible channel / DM name. The intro titles itself from this. */
+  channelName?: string;
+  /** Channel topic, quoted as the intro body when present. */
+  channelTopic?: string;
+  /** Local-only; omitted from the intro when the client does not have it. */
+  createdAtMs?: number;
+  creatorName?: string;
+  /**
+   * Older history is exhausted. The intro is a leading row only at the start
+   * of the channel, never mid-window while a previous page is still loading.
+   */
+  reachedStart?: boolean;
+  /** Owner/admin (same helper as channel create). Hidden for everyone else. */
+  canAddMember?: boolean;
   /** The other participant, for a DM. */
   peer?: RosterMember | null;
   lastReadSeq?: number | null;
@@ -304,32 +330,59 @@ export function Timeline({
   //
   // `factsFor`가 여기 있는 이유: 접지 않을 조건(답글·반응)은 **목록만 안다.**
   // 롤업은 메시지가 들고 있고, 반응은 이 컴포넌트가 받은 표에서 온다.
-  const items = useMemo(
+  const showIntro = shouldShowChannelIntro({
+    status,
+    reachedStart,
+    messageCount: messages.length,
+  });
+  const intro = useMemo(
     () =>
-      foldDeletedRuns(
-        buildTimelineItems(messages, {
-          lastReadSeq,
-          unreadCount,
-          recoveryMarkers,
-          pending,
-        }),
-        (item) => ({
-          hasRollup: threadRollup(item.message) !== null,
-          hasReactions:
-            chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
-              .length > 0,
-        })
-      ),
+      buildChannelIntro({
+        kind: channelKind,
+        name: channelName ?? "",
+        topic: channelTopic,
+        peer: peer ?? null,
+        canAddMember: Boolean(canAddMember) && channelKind !== "dm",
+        createdAtMs,
+        creatorName,
+      }),
     [
-      messages,
-      lastReadSeq,
-      unreadCount,
-      recoveryMarkers,
-      pending,
-      reactions,
-      myMemberIdForFold,
+      channelKind,
+      channelName,
+      channelTopic,
+      peer,
+      canAddMember,
+      createdAtMs,
+      creatorName,
     ]
   );
+
+  const items = useMemo(() => {
+    const folded = foldDeletedRuns(
+      buildTimelineItems(messages, {
+        lastReadSeq,
+        unreadCount,
+        recoveryMarkers,
+        pending,
+      }),
+      (item) => ({
+        hasRollup: threadRollup(item.message) !== null,
+        hasReactions:
+          chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
+            .length > 0,
+      })
+    );
+    return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+  }, [
+    messages,
+    lastReadSeq,
+    unreadCount,
+    recoveryMarkers,
+    pending,
+    reactions,
+    myMemberIdForFold,
+    showIntro,
+  ]);
 
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
@@ -535,66 +588,14 @@ export function Timeline({
     );
   }
 
-  // A local echo counts as content: the first message in an empty channel must
-  // appear the moment it is sent, not after the server round trip finishes.
-  const empty = messages.length === 0 && items.length === 0;
+  // A local echo counts as content: it must appear under the intro the moment
+  // it is sent, not after the server round trip, and it must not remount the
+  // list (that remount was the empty-state layout shift).
+  const empty =
+    messages.length === 0 && (pending === undefined || pending.length === 0);
 
   if (status === "loading" && empty) {
     return <SkeletonRows rows={6} className="p-4" />;
-  }
-
-  if (status === "ready" && empty) {
-    const copy = emptyChannelCopy(channelKind, peer ?? null);
-    const secondary = copy.secondary;
-    const run = (action: EmptyChannelAction) =>
-      action.kind === "write" ? onStartWriting?.() : onAddMember?.();
-    return (
-      <EmptyInvite
-        headline={copy.headline}
-        detail={copy.detail}
-        actions={
-          // 두 버튼은 **동급이 아니다** (#1536). 첫 행동은 쓰기이고 멤버 추가는
-          // 그 다음이며, 위계는 §3 채움 순서가 그대로 진다: 주 액션은 --accent
-          // 채움, 보조는 --line-strong 윤곽.
-          //
-          // 주 액션이 채움인 근거는 바로 옆 형제다. 같은 창의 「아직 채널이
-          // 없습니다」가 자기 첫 행동(`채널 만들기`)에 이미 이 옷을 입힌다
-          // (`ChatShell.tsx`) — 한 창의 두 빈 상태가 같은 자리에서 다른 옷을
-          // 입으면 읽는 사람이 그 둘을 대조해야 한다.
-          //
-          // 멤버 추가는 옷을 그대로 둔다. #1536이 바꾼 것은 이 버튼이 아니라 그
-          // 앞에 선 것이므로, 이 버튼이 자기 모양까지 바꾸면 이 화면을 이미 아는
-          // 사람에게는 없어진 것처럼 읽힌다. 이 버튼은 이 클라에서 「채널에 멤버
-          // 추가」로 가는 유일한 문이기도 하다(코어 `emptyChannelCopy` 머리말 —
-          // 이름이 그 방의 동사를 따르는 이유도 거기 있다, #1573).
-          //
-          // 순서는 DOM 순서다: 탭이 첫 행동에 먼저 닿는다.
-          <>
-            <Button
-              size="sm"
-              onClick={() => run(copy.primary)}
-              data-testid="timeline-empty-primary"
-              data-action-kind={copy.primary.kind}
-            >
-              {copy.primary.label}
-            </Button>
-            {secondary && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => run(secondary)}
-                data-testid="timeline-empty-secondary"
-                data-action-kind={secondary.kind}
-              >
-                {secondary.label}
-              </Button>
-            )}
-          </>
-        }
-        testId="timeline-empty"
-        dataAttrs={{ "data-empty-kind": copy.surface }}
-      />
-    );
   }
 
   return (
@@ -651,6 +652,16 @@ export function Timeline({
         increaseViewportBy={{ top: 600, bottom: 600 }}
         computeItemKey={(_index, item: FoldedItem) => item.key}
         itemContent={(_index, item: FoldedItem) => {
+          if (item.kind === "intro") {
+            return (
+              <ChannelIntroBlock
+                intro={intro}
+                empty={empty}
+                onWrite={onStartWriting}
+                onAddMember={onAddMember}
+              />
+            );
+          }
           // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
           // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
           // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
