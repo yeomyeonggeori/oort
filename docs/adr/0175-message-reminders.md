@@ -1,6 +1,6 @@
 # ADR-0175: 메시지 리마인더 (나중에 알림)
 
-- 상태: **Proposed** (성재 결재 대기)
+- 상태: **Accepted** (성재 승인 2026-08-30 — "ADR 셋 다 ㄱ")
 - 날짜: 2026-08-29
 - 발의: Fable (BF-B1 #1888 선행 — buzz 격차 후보 승인 "권장대로")
 - 관련: research/2026-08-29-buzz-ui-gap-candidates.md · buzz(Apache-2.0) features/reminders
