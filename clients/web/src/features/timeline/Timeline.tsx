@@ -52,14 +52,17 @@ import {
   countNewerThan,
   countUnreadJump,
   dataIndexFromVirtuoso,
+  firstUnreadMessageSeq,
   reconcileDividerRelation,
   relationFromIntersection,
+  shouldLatchUnreadJump,
   shouldShowJumpUnread,
   timelineScrollBehavior,
   unreadDividerIndexOf,
   newestSeqOf,
   type DividerViewportRelation,
 } from "./navigation";
+import { scheduleFocusRowStationBySeq } from "./rowFocus";
 import {
   UnreadPill,
   UnreadPillDock,
@@ -428,7 +431,9 @@ export function Timeline({
     );
   }, [messages, myMemberId]);
 
-  const unreadJumpCount = countUnreadJump(messages, lastReadSeq, myMemberId);
+  // 상단 N은 연 순간의 동결 스냅샷 — 구분선과 같은 수 (M-1(a)). 라이브 꼬리는
+  // 하단 필이 센다. 사유는 `navigation.ts` (a)/(b).
+  const unreadJumpCount = countUnreadJump(unreadCount);
   const unreadDividerIndex = unreadDividerIndexOf(items);
   const firstItemIndexRef = useRef(firstItemIndex);
   firstItemIndexRef.current = firstItemIndex;
@@ -443,6 +448,7 @@ export function Timeline({
     useState<DividerViewportRelation | null>(null);
   const [dividerEl, setDividerEl] = useState<HTMLElement | null>(null);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  const [unreadJumpLatched, setUnreadJumpLatched] = useState(false);
 
   const dividerRelation = reconcileDividerRelation({
     dividerIndex: unreadDividerIndex,
@@ -450,17 +456,29 @@ export function Timeline({
     visibleEnd: renderedRange?.end ?? null,
     observed: observedRelation,
   });
-  const showJumpUnread = shouldShowJumpUnread(dividerRelation, unreadJumpCount);
+  const showJumpUnread = shouldShowJumpUnread(
+    dividerRelation,
+    unreadJumpCount,
+    unreadJumpLatched
+  );
 
-  // 채널을 갈아타면 기준선도, 위 필이 기대는 창 위치도 버린다. `epoch`가
-  // 바뀌는 것이 곧 「다른 대화」다.
+  // 채널을 갈아타면 기준선도, 위 필이 기대는 창 위치도, 래치도 버린다.
+  // `epoch`가 바뀌는 것이 곧 「다른 대화」다.
   useEffect(() => {
     baselineRef.current = null;
     setNewCount(0);
     setAtBottom(true);
     setRenderedRange(null);
     setObservedRelation(null);
+    setUnreadJumpLatched(false);
   }, [epoch]);
+
+  // 구분선이 한 번 창에 들어오면 래치. 바닥까지 읽고 돌아와도 필은 다시
+  // 서지 않는다 (H-1). 첫 착지가 바닥인 것은 여기로 오지 않는다 — 그때
+  // 관계는 `above`다.
+  useEffect(() => {
+    if (shouldLatchUnreadJump(dividerRelation)) setUnreadJumpLatched(true);
+  }, [dividerRelation]);
 
   useEffect(() => {
     if (dividerEl === null || scrollerEl === null) {
@@ -481,21 +499,27 @@ export function Timeline({
   }, [dividerEl, scrollerEl]);
 
   const jumpToLatest = useCallback(() => {
+    const seq = newestSeqRef.current;
     ref.current?.scrollToIndex({
       index: "LAST",
       align: "end",
       behavior: timelineScrollBehavior(prefersReducedMotion()),
     });
+    if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
   const jumpToUnread = useCallback(() => {
     const index = unreadIndexRef.current;
     if (index === null) return;
+    const seq = firstUnreadMessageSeq(itemsRef.current, index);
+    // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
+    setUnreadJumpLatched(true);
     ref.current?.scrollToIndex({
       index,
       align: "start",
       behavior: timelineScrollBehavior(prefersReducedMotion()),
     });
+    if (seq !== null) scheduleFocusRowStationBySeq(seq);
   }, []);
 
   const onScrollerRef = useCallback((node: HTMLElement | Window | null) => {

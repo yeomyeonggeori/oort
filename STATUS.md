@@ -2,9 +2,9 @@
 
 ## BF-A2 상단 안읽음 점프 필 (#1885, 2026-08-29)
 
-- 읽음 구분선이 뷰포트 **위쪽 밖**일 때만 타임라인 상단 중앙에 「새 메시지 N개」+위 화살표 부유 필. 클릭/Enter → 구분선으로 스크롤(reduced-motion이면 auto). 구분선이 창에 들어오면 소멸, 채널 전환 시 리셋. 하단 jump-latest와 동시 표시 가능.
-- N은 `navigation.ts` `countNewerThan`(내 확정 전송 제외). 하단 필과 같은 `UnreadPill` 부품(direction up/down).
-- red proof: 구분선 위쪽만 표시·클릭 도달·진입 소멸·채널 리셋·reduced-motion·하단 필 회귀. web vitest 1745 · tsc · design_preflight_web · `CAPTURE_PORT=7577` capture:design (행당 탭 스톱 1) · `SHELL_GATE_PORT=7579 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- 읽음 구분선이 뷰포트 **위쪽 밖**일 때만 타임라인 상단 중앙에 「새 메시지 N개 보기」+위 화살표 부유 필. 클릭/Enter → 구분선으로 스크롤(reduced-motion이면 auto) 후 첫 안읽음 행 정거장에 포커스. 구분선 진입(또는 필 실행) 시 epoch 래치로 소멸, 채널 전환 시 리셋. 하단 jump-latest와 동시 표시 가능.
+- N은 연 순간의 동결 `unreadCount`(구분선과 같음). 라이브 꼬리는 하단 필만 센다. 같은 `UnreadPill` 부품. hover:none에서 44px, `shadow-lg`.
+- design-review 수리: H-1 래치(다 읽고 복귀 시 미부활) · M-1(a) 동결 N · M-2 착지 포커스 · M-3 tap-target · L-1 동사 앞 · L-2 그림자. web vitest 1755 · tsc · design_preflight_web · `CAPTURE_PORT=7677` capture:design (jump-latest 140×44) · `SHELL_GATE_PORT=7679 SHELL_GATE_FOCUS_ONLY=1` gate:shell · `FOLD_GATE_PORT=7681` gate:fold.
 
 ## BF-A1 리액션 칩 이름 툴팁 (#1884, 2026-08-29)
 

@@ -8,6 +8,8 @@ import {
   newestSeqOf,
   reconcileDividerRelation,
   relationFromIntersection,
+  firstUnreadMessageSeq,
+  shouldLatchUnreadJump,
   shouldShowJumpUnread,
   timelineScrollBehavior,
   unreadDividerIndexOf,
@@ -120,18 +122,18 @@ describe("countNewerThan — 저자", () => {
 // 틀리면 구분선이 보이는데도 떠 있거나 위쪽에 쌓였는데도 안 뜬다.
 // ---------------------------------------------------------------------------
 describe("countUnreadJump", () => {
-  it("읽음 커서가 없으면 셀 것이 없다", () => {
-    expect(countUnreadJump(stream, null, ME)).toBe(0);
+  it("동결 스냅샷이 없으면 셀 것이 없다", () => {
+    expect(countUnreadJump(null)).toBe(0);
+    expect(countUnreadJump(0)).toBe(0);
+    expect(countUnreadJump(undefined)).toBe(0);
   });
 
-  it("커서를 기준선으로 countNewerThan을 재사용한다", () => {
+  it("구분선과 같은 수다 — 라이브 꼬리를 다시 세지 않는다", () => {
+    expect(countUnreadJump(5)).toBe(5);
+    // (b) 하단은 꼬리를 세고 (a) 상단은 연 순간의 N을 그대로 쓴다.
     const tail = [...stream, message(45), message(46)];
-    expect(countUnreadJump(tail, 44, ME)).toBe(2);
-    expect(countUnreadJump(tail, 44, ME)).toBe(countNewerThan(tail, 44, ME));
-  });
-
-  it("내 확정 전송은 상단 필의 N도 아니다", () => {
-    expect(countUnreadJump([...stream, mine(45)], 44, ME)).toBe(0);
+    expect(countNewerThan(tail, 44, ME)).toBe(2);
+    expect(countUnreadJump(5)).not.toBe(countNewerThan(tail, 44, ME));
   });
 });
 
@@ -251,6 +253,15 @@ describe("relationFromIntersection", () => {
   });
 });
 
+describe("shouldLatchUnreadJump", () => {
+  it("창 안에 들어온 것만 래치한다", () => {
+    expect(shouldLatchUnreadJump("in")).toBe(true);
+    expect(shouldLatchUnreadJump("above")).toBe(false);
+    expect(shouldLatchUnreadJump("below")).toBe(false);
+    expect(shouldLatchUnreadJump("absent")).toBe(false);
+  });
+});
+
 describe("shouldShowJumpUnread", () => {
   it("구분선이 위쪽 밖이고 N이 있을 때만 뜬다", () => {
     expect(shouldShowJumpUnread("above", 3)).toBe(true);
@@ -258,6 +269,32 @@ describe("shouldShowJumpUnread", () => {
     expect(shouldShowJumpUnread("below", 3)).toBe(false);
     expect(shouldShowJumpUnread("absent", 3)).toBe(false);
     expect(shouldShowJumpUnread("above", 0)).toBe(false);
+  });
+
+  it("래치되면 위쪽 밖이어도 다시 서지 않는다", () => {
+    expect(shouldShowJumpUnread("above", 3, true)).toBe(false);
+    expect(shouldShowJumpUnread("above", 3, false)).toBe(true);
+  });
+});
+
+describe("firstUnreadMessageSeq", () => {
+  it("구분선 다음 첫 메시지의 seq다", () => {
+    expect(
+      firstUnreadMessageSeq(
+        [
+          { kind: "day" },
+          { kind: "message", message: { seq: 3 } },
+          { kind: "unread" },
+          { kind: "message", message: { seq: 4 } },
+          { kind: "message", message: { seq: 5 } },
+        ],
+        2
+      )
+    ).toBe(4);
+  });
+
+  it("구분선이 없으면 착지가 없다", () => {
+    expect(firstUnreadMessageSeq([{ kind: "message", message: { seq: 1 } }], null)).toBeNull();
   });
 });
 

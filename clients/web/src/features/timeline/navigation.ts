@@ -69,17 +69,25 @@ export function countNewerThan(
 /**
  * 상단 「새 메시지 N개」 점프의 N.
  *
- * 하단 필과 **같은 산수**다 (`countNewerThan`): 읽음 커서보다 새 남의 말만 센다.
- * 구분선에 적힌 수는 서버 `unreadCount`(P7, 채널을 연 순간의 동결)이고, 이 수는
- * 그 기준선보다 새 것으로 점프 컨트롤이 말하는 개수다.
+ * ## (a) 상단 필 ≠ (b) 하단 필 — 같은 낱말, 다른 시각
+ *
+ * (a) 상단은 채널을 연 순간의 **동결 스냅샷**이다. 구분선이 쓰는 서버
+ * `unreadCount`(P7)와 같은 수다. 라이브로 아래에 붙는 신규는 세지 않는다.
+ * 그 수는 하단 필 (b)가 말한다. 한 숫자로 둘을 세면 구분선은 5개인데 상단이
+ * 「새 메시지 41개」라며 꼬리까지 끌어들이고, 낭독도 그 거짓을 읽는다
+ * (design-review M-1(a)).
+ *
+ * (b) 하단은 `countNewerThan`: 바닥을 떠난 뒤 꼬리에 붙은 **남의 말**. 기준선은
+ * 그 순간의 가장 새 seq이고, 내 확정 전송은 빼는 이유(M-3)가 여기 산다.
+ *
+ * 이 비대칭이 맞다. 위 필은 「그때 안 읽은 것」으로 구분선에 착지하고, 아래
+ * 필은 「지금 아래에 쌓인 것」으로 최신에 착지한다.
  */
 export function countUnreadJump(
-  messages: readonly Message[],
-  lastReadSeq: number | null | undefined,
-  myMemberId?: string
+  unreadCount: number | null | undefined
 ): number {
-  if (lastReadSeq == null) return 0;
-  return countNewerThan(messages, lastReadSeq, myMemberId);
+  if (unreadCount == null || unreadCount <= 0) return 0;
+  return unreadCount;
 }
 
 /** 안읽음 구분선이 지금 창의 어디에 있는가. */
@@ -150,12 +158,44 @@ export function reconcileDividerRelation(input: {
   );
 }
 
-/** 구분선이 창 **위쪽 밖**에 있고 셀 남의 말이 있을 때만 상단 필이 선다. */
+/**
+ * 채널 epoch 안의 래치 (design-review H-1).
+ *
+ * 구분선이 한 번 창에 들어오면 상단 필을 다시 세우지 않는다. 동결
+ * `lastReadSeq`는 구분선용으로 남고, 필이 그 숫자를 들고 부활하는 길이 이
+ * 래치가 닫는다. 「바닥 도달로 커서가 전진」은 구분선을 지나 아래로 읽는
+ * 동안 `in`을 통과하는 것과 같다 — 첫 착지(epoch 직후 바닥)는 래치하지
+ * 않는다. 채널을 갈아타면 epoch와 함께 풀린다.
+ */
+export function shouldLatchUnreadJump(
+  relation: DividerViewportRelation
+): boolean {
+  return relation === "in";
+}
+
+/** 구분선이 창 **위쪽 밖**에 있고 동결 N이 있으며, 이 epoch에서 아직 래치되지 않았을 때만 상단 필이 선다. */
 export function shouldShowJumpUnread(
   relation: DividerViewportRelation,
-  unreadJumpCount: number
+  unreadJumpCount: number,
+  latched = false
 ): boolean {
+  if (latched) return false;
   return relation === "above" && unreadJumpCount > 0;
+}
+
+/** 구분선 바로 아래 첫 메시지 seq. 상단 필 착지 정거장. */
+export function firstUnreadMessageSeq(
+  items: readonly { kind: string; message?: { seq: number } }[],
+  dividerIndex: number | null
+): number | null {
+  if (dividerIndex === null) return null;
+  for (let i = dividerIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item !== undefined && item.kind === "message" && item.message) {
+      return item.message.seq;
+    }
+  }
+  return null;
 }
 
 /** 점프 스크롤의 움직임. reduced-motion이면 즉시, 아니면 목적지가 보이게. */

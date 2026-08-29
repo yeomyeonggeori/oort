@@ -47,7 +47,17 @@ vi.mock("react-virtuoso", () => ({
     virtuoso.scrollerRef = props.scrollerRef ?? null;
     virtuoso.data = props.data;
     useImperativeHandle(ref, () => ({
-      scrollToIndex: (opts: unknown) => virtuoso.scrollToIndex(opts),
+      scrollToIndex: (opts: unknown) => {
+        virtuoso.scrollToIndex(opts);
+        if (
+          opts !== null &&
+          typeof opts === "object" &&
+          "done" in opts &&
+          typeof opts.done === "function"
+        ) {
+          opts.done();
+        }
+      },
     }));
     const scrollerRef = props.scrollerRef;
     useEffect(() => {
@@ -73,7 +83,12 @@ vi.mock("./MessageRow", () => ({
   RecoveryDivider: () => createElement("div", { "data-testid": "recovery-divider" }),
   UnreadDivider: ({ count }: { count: number }) =>
     createElement("div", { "data-testid": "unread-divider" }, `새 메시지 ${count}개`),
-  MessageRow: () => createElement("div", { "data-testid": "timeline-message" }),
+  MessageRow: ({ message }: { message: { seq: number } }) =>
+    createElement("div", {
+      "data-testid": "timeline-message",
+      "data-seq": message.seq,
+      tabIndex: 0,
+    }),
 }));
 
 type IoCallback = (entries: IntersectionObserverEntry[]) => void;
@@ -235,10 +250,8 @@ describe("Timeline unread jump pill", () => {
     reportObserved("above");
     const pill = root.querySelector("[data-testid='jump-unread']");
     expect(pill).not.toBeNull();
-    expect(pill?.textContent).toBe("새 메시지 5개");
-    expect(pill?.getAttribute("aria-label")).toBe(
-      "위쪽의 새 메시지 5개로 이동합니다"
-    );
+    expect(pill?.textContent).toBe("새 메시지 5개 보기");
+    expect(pill?.getAttribute("aria-label")).toBe("새 메시지 5개 보기");
 
     reportObserved("in");
     expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
@@ -262,21 +275,39 @@ describe("Timeline unread jump pill", () => {
     act(() => {
       pill?.click();
     });
-    expect(virtuoso.scrollToIndex).toHaveBeenCalledWith({
-      index: divider,
-      align: "start",
-      behavior: "smooth",
-    });
+    expect(virtuoso.scrollToIndex).toHaveBeenCalledWith(
+      expect.objectContaining({
+        index: divider,
+        align: "start",
+        behavior: "smooth",
+      })
+    );
+  });
 
+  it("reduced-motion이면 점프가 auto다", () => {
     reducedMotion = true;
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+    const pill = root.querySelector<HTMLButtonElement>(
+      "[data-testid='jump-unread']"
+    );
     act(() => {
       pill?.click();
     });
-    expect(virtuoso.scrollToIndex).toHaveBeenLastCalledWith({
-      index: divider,
-      align: "start",
-      behavior: "auto",
-    });
+    expect(virtuoso.scrollToIndex).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        index: divider,
+        align: "start",
+        behavior: "auto",
+      })
+    );
   });
 
   it("구분선이 창에 들어오면 소멸한다", () => {
@@ -385,24 +416,91 @@ describe("Timeline unread jump pill", () => {
     expect(root.querySelector("[data-testid='jump-latest']")).not.toBeNull();
   });
 
-  it("내 확정 전송만 있으면 상단 필을 띄우지 않는다", () => {
-    const messages = [1, 2, 3, 4, 5].map((seq) =>
-      seq > 3 ? { ...message(seq), authorMemberId: ME } : message(seq)
+  it("라이브 꼬리는 상단 N에 섞지 않는다 — 구분선과 같은 동결 수다", () => {
+    const messages = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((seq) =>
+      message(seq)
     );
     const root = mountTimeline({
       messages,
       lastReadSeq: 3,
-      unreadCount: 2,
-      myMemberId: ME,
+      unreadCount: 5,
     });
     const items = buildTimelineItems(messages, {
       lastReadSeq: 3,
-      unreadCount: 2,
+      unreadCount: 5,
     });
     const divider = unreadDividerIndexOf(items);
     if (divider === null) throw new Error("expected unread divider");
-    reportRange(divider + 1, divider + 3);
+    reportRange(divider + 2, divider + 8);
+    reportObserved("above");
+    const pill = root.querySelector("[data-testid='jump-unread']");
+    expect(pill?.textContent).toBe("새 메시지 5개 보기");
+    expect(pill?.getAttribute("aria-label")).toBe("새 메시지 5개 보기");
+    expect(pill?.getAttribute("data-new-count")).toBe("5");
+  });
+
+  it("구분선에 들어온 뒤 바닥까지 읽고 돌아와도 필이 다시 서지 않는다", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+
+    reportObserved("in");
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+
+    act(() => {
+      virtuoso.atBottomStateChange?.(true);
+    });
+    reportRange(divider + 2, divider + 6);
     reportObserved("above");
     expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+  });
+
+  it("Enter 실행 후 포커스가 첫 안읽음 행 정거장에 착지한다", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider + 2, divider + 6);
+    reportObserved("above");
+
+    const pill = root.querySelector<HTMLButtonElement>(
+      "[data-testid='jump-unread']"
+    );
+    expect(pill).not.toBeNull();
+    pill?.focus();
+    expect(document.activeElement).toBe(pill);
+    act(() => {
+      pill?.click();
+    });
+    const landed = root.querySelector("[data-testid='timeline-message'][data-seq='4']");
+    expect(document.activeElement).toBe(landed);
+    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
+  });
+
+  it("하단 필 실행 후 포커스가 최신 행 정거장에 착지한다", () => {
+    const root = mountTimeline({ lastReadSeq: null, unreadCount: 0 });
+    act(() => {
+      virtuoso.atBottomStateChange?.(false);
+    });
+    const pill = root.querySelector<HTMLButtonElement>(
+      "[data-testid='jump-latest']"
+    );
+    expect(pill).not.toBeNull();
+    pill?.focus();
+    act(() => {
+      pill?.click();
+    });
+    const landed = root.querySelector("[data-testid='timeline-message'][data-seq='8']");
+    expect(document.activeElement).toBe(landed);
   });
 });

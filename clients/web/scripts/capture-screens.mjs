@@ -175,6 +175,10 @@ const MOBILE_TAP_TARGETS = [
   // optional: 도크가 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
   ["terminal-dock-close", "터미널 닫기", "optional"],
   ["terminal-dock-expand", "터미널 크게 보기", "optional"],
+  // #1885 M-3 — 상·하단 점프 필. hover:none에서 44px. optional: 상단은
+  // 구분선이 창 위쪽일 때만, 하단은 바닥이 아닐 때만 존재한다.
+  ["jump-unread", "위쪽 새 메시지", "optional"],
+  ["jump-latest", "최신 메시지로", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라

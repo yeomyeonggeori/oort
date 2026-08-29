@@ -12,7 +12,7 @@ import { cn } from "@/design/lib/cn";
 
 /** 하단 jump-latest가 쓰던 클래스. 상단 필도 이 한 줄을 입는다. */
 export const UNREAD_PILL_CLASS =
-  "pointer-events-auto flex h-control-sm items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring";
+  "pointer-events-auto flex h-control-sm tap-target items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink shadow-lg hover:bg-surface-hover focus-visible:focus-ring";
 
 export function UnreadPill({
   direction,
@@ -34,6 +34,7 @@ export function UnreadPill({
     <button
       type="button"
       data-testid={testId}
+      data-unread-pill=""
       data-new-count={count}
       data-direction={direction}
       aria-label={accessibleLabel}
@@ -80,11 +81,8 @@ export function jumpLatestLabel(newCount: number): ReactNode {
 }
 
 export function jumpUnreadLabel(count: number): ReactNode {
-  return (
-    <>
-      새 메시지 <span data-numeric>{count}</span>개
-    </>
-  );
+  // 하단과 동형. 방향은 화살표가 진다 (design-review L-1).
+  return jumpLatestLabel(count);
 }
 
 /** 보이는 문장과 같은 이름. 새 aria-label을 붙이면 낭독이 달라진다. */
@@ -93,5 +91,5 @@ export function jumpLatestAriaLabel(newCount: number): string {
 }
 
 export function jumpUnreadAriaLabel(count: number): string {
-  return `위쪽의 새 메시지 ${count}개로 이동합니다`;
+  return jumpLatestAriaLabel(count);
 }

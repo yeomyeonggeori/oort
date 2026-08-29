@@ -64,10 +64,11 @@ describe("UnreadPill", () => {
     expect(button.tagName).toBe("BUTTON");
     expect(button.getAttribute("type")).toBe("button");
     expect(button.getAttribute("data-direction")).toBe("up");
-    expect(button.getAttribute("aria-label")).toBe(
-      "위쪽의 새 메시지 3개로 이동합니다"
-    );
-    expect(button.textContent).toBe("새 메시지 3개");
+    expect(button.getAttribute("aria-label")).toBe("새 메시지 3개 보기");
+    expect(button.textContent).toBe("새 메시지 3개 보기");
+    expect(button.hasAttribute("data-unread-pill")).toBe(true);
+    expect(button.className).toContain("shadow-lg");
+    expect(button.className).toContain("tap-target");
     expect(button.querySelector("[data-numeric]")?.textContent).toBe("3");
     expect(button.tabIndex).toBe(0);
     expect(button.className).toBe(UNREAD_PILL_CLASS);
