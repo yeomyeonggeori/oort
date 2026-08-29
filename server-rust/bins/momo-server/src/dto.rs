@@ -8,9 +8,28 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+/// Wire patch for an optional JSON field: omitted vs explicit `null` vs value.
+///
+/// `default` + this deserializer is what lets a `{status}`-only PUT leave the
+/// ADR-0176 columns alone, while `{statusEmoji: null}` clears them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OptionalPatch<T> {
+    #[default]
+    Absent,
+    Set(Option<T>),
+}
+
+fn deserialize_optional_patch<'de, D, T>(deserializer: D) -> Result<OptionalPatch<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(OptionalPatch::Set(Option::deserialize(deserializer)?))
+}
 
 /// ADR-0151 — re-exported rather than restated. The `attachments` array on a
 /// message is built in SQL (`momo_messaging::attachment::PAGED_ATTACHMENT_JOIN`)
@@ -2025,6 +2044,13 @@ pub struct RosterMemberDto {
     /// edge; the wire never carries the effective value, only this durable intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_status: Option<String>,
+    /// ADR-0176 custom status, human only, omitted when unset/expired/agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_emoji: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_expires_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -2377,12 +2403,17 @@ pub struct TypingSignalResponse {
 // Presence — ADR-0160 (사용자 프레즌스 6b)
 // ---------------------------------------------------------------------------
 
-/// `PUT /v1/workspaces/{ws}/presence` request body — the declared status ③.
+/// `PUT /v1/workspaces/{ws}/presence` request body — the declared status ③
+/// plus optional ADR-0176 custom-status fields.
 ///
 /// The member is the credential's, never the body's: there is no `memberId`
 /// field, the same discipline read-state keeps, so one person cannot set
 /// another's status. `deny_unknown_fields` refuses a smuggled owner id outright
 /// rather than ignoring it.
+///
+/// `status` stays required (ADR-0160 contract). Custom fields are a per-key
+/// patch: omitted = leave stored value, JSON `null` = clear, value = set.
+/// A `{status}`-only body is therefore bit-identical to the pre-0176 PUT.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetPresenceRequest {
@@ -2390,16 +2421,30 @@ pub struct SetPresenceRequest {
     /// with a sentence, not a serde reject, so the client learns which field was
     /// wrong.
     pub status: String,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_emoji: OptionalPatch<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_text: OptionalPatch<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_expires_at_ms: OptionalPatch<i64>,
 }
 
 /// `GET`/`PUT /v1/workspaces/{ws}/presence` response — the caller's own durable
 /// declared status. Availability(②) and the effective dot are **not** here: the
 /// server does not know if the caller is connected, and the effective value is
 /// computed at the render edge and never stored (ADR-0160 D3).
+///
+/// Custom-status keys are omitted when unset, expired, or empty (encodeIfPresent).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceStatusResponse {
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_emoji: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_expires_at_ms: Option<i64>,
 }
 
 /// `POST /v1/workspaces/{ws}/channels/{ch}/availability` request body — the
@@ -4660,5 +4705,45 @@ mod tests {
         .expect("serialize");
         assert!(json.get("nextCursor").is_none(), "{json}");
         assert_eq!(json["reminders"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn presence_put_is_closed_world_and_has_no_owner_field() {
+        let legacy: SetPresenceRequest =
+            serde_json::from_value(serde_json::json!({"status": "dnd"})).expect("legacy");
+        assert_eq!(legacy.status, "dnd");
+        assert!(matches!(legacy.status_emoji, OptionalPatch::Absent));
+        assert!(matches!(legacy.status_text, OptionalPatch::Absent));
+        assert!(matches!(legacy.status_expires_at_ms, OptionalPatch::Absent));
+
+        let patched: SetPresenceRequest = serde_json::from_value(serde_json::json!({
+            "status": "away",
+            "statusEmoji": "📅",
+            "statusText": "회의 중",
+            "statusExpiresAtMs": 1
+        }))
+        .expect("patch");
+        assert_eq!(patched.status, "away");
+        assert!(matches!(
+            patched.status_emoji,
+            OptionalPatch::Set(Some(ref value)) if value == "📅"
+        ));
+        assert!(matches!(
+            patched.status_text,
+            OptionalPatch::Set(Some(ref value)) if value == "회의 중"
+        ));
+        assert!(matches!(
+            patched.status_expires_at_ms,
+            OptionalPatch::Set(Some(1))
+        ));
+
+        assert!(
+            serde_json::from_value::<SetPresenceRequest>(serde_json::json!({
+                "status": "auto",
+                "memberId": "stolen"
+            }))
+            .is_err(),
+            "a memberId in the body is a smuggled owner"
+        );
     }
 }

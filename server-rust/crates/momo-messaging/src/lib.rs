@@ -138,8 +138,12 @@ pub use notification_rule::{
     get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
 };
 pub use presence::{
-    build_presence_payload, decode_optional_presence, presence_status_for,
-    set_presence_status_in_tx, PresenceStatus, PresenceUpdate, PRESENCE_BROADCAST_TYPE,
+    build_presence_payload, declared_presence_for, decode_optional_presence,
+    normalize_status_emoji, normalize_status_text, presence_status_for,
+    set_declared_presence_in_tx, set_presence_status_in_tx, status_expires_at_from_ms,
+    CustomStatus, CustomStatusInvalid, CustomStatusPatch, DeclaredPresence, PresenceStatus,
+    PresenceUpdate, StatusPatch, PRESENCE_BROADCAST_TYPE, STATUS_EMOJI_MAX_CHARS,
+    STATUS_TEXT_MAX_CHARS,
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,

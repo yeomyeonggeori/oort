@@ -396,19 +396,24 @@ mod tests {
     /// 082 is ADR-0175's `message_reminder` (#1888 BF-B1 server half): owner-
     /// scoped personal later-alert rows. schema_v0.sql is not modified; v1 has
     /// no outbox fan-out.
+    ///
+    /// 083 is ADR-0176's custom member status (#1889 BF-B2 server half): three
+    /// nullable columns on `member` (`status_emoji`/`status_text`/
+    /// `status_expires_at`) riding the existing presence write path. schema_v0.sql
+    /// is not modified; expiry is lazy-on-read, no sweeper.
     #[test]
-    fn discovers_contiguous_migrations_001_to_082() {
+    fn discovers_contiguous_migrations_001_to_083() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            82,
-            "expected 82 migrations under {}",
+            83,
+            "expected 83 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 82);
+        assert_eq!(migrations.last().unwrap().version, 83);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -266,6 +266,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's own declared presence and custom status.
+         * @description ADR-0160 ③ plus ADR-0176. Human bearer only. The member is the credential's — the path has no `memberId`. Custom-status fields are omitted when unset, empty, or `statusExpiresAtMs` has been reached (lazy delete; no sweeper job). Availability and the effective dot are not here.
+         */
+        get: operations["getPresenceStatus"];
+        /**
+         * Set the caller's own declared presence and optional custom status.
+         * @description Same PUT as ADR-0160. `status` remains required (`auto`/`away`/`dnd`). Optional `statusEmoji` / `statusText` / `statusExpiresAtMs` are a per-key patch — omitted leaves the stored value, JSON null clears, a value sets. Trimmed text is at most 80 characters; emoji is a length/code-point cap (≤32 scalars), not a strict emoji classifier. All three null clears the custom status. Broadcasts on the existing `type: presence` `ch:` rail. No audit row (personal intent; the original presence PUT was unaudited).
+         */
+        put: operations["setPresenceStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/members/{memberId}/role": {
         parameters: {
             query?: never;
@@ -3113,6 +3137,15 @@ export interface components {
              * @enum {string}
              */
             presenceStatus?: "auto" | "away" | "dnd";
+            /** @description ADR-0176 custom status emoji, human only. Omitted when unset, empty, expired (`statusExpiresAtMs` reached — lazy delete), or for an agent. */
+            statusEmoji?: string;
+            /** @description ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when unset, empty, expired, or for an agent. */
+            statusText?: string;
+            /**
+             * Format: int64
+             * @description ADR-0176 optional expiry as epoch milliseconds. Omitted when there is no visible custom status (including when the stamp has been reached).
+             */
+            statusExpiresAtMs?: number;
             /** Format: int64 */
             createdAtMs: number;
             /** Format: int64 */
@@ -3122,6 +3155,30 @@ export interface components {
             members: components["schemas"]["RosterMember"][];
             humanCount: number;
             agentCount: number;
+        };
+        SetPresenceRequest: {
+            /**
+             * @description ADR-0160 declared presence. Required so a pre-0176 body still decodes.
+             * @enum {string}
+             */
+            status: "auto" | "away" | "dnd";
+            /** @description ADR-0176. Omitted = leave stored value. JSON null = clear. Empty or whitespace-only is stored as cleared. Length/code-point cap only. */
+            statusEmoji?: string | null;
+            /** @description ADR-0176. Omitted = leave stored value. JSON null = clear. Trimmed; empty becomes cleared. Over 80 characters is 400. */
+            statusText?: string | null;
+            /**
+             * Format: int64
+             * @description ADR-0176 optional expiry. Omitted = leave stored value. JSON null = clear. A reached stamp is accepted on write and ignored on read.
+             */
+            statusExpiresAtMs?: number | null;
+        };
+        PresenceStatusResponse: {
+            /** @enum {string} */
+            status: "auto" | "away" | "dnd";
+            statusEmoji?: string;
+            statusText?: string;
+            /** Format: int64 */
+            statusExpiresAtMs?: number;
         };
         ChangeMembershipRoleRequest: {
             role: components["schemas"]["MembershipRole"];
@@ -6387,6 +6444,96 @@ export interface operations {
             };
             401: components["responses"]["Unauthorized"];
             403: components["responses"]["Forbidden"];
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getPresenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's durable declared status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresenceStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer (presence is human-only). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No live human presence for this member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    setPresenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPresenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored declared status (custom fields omitted when empty/expired). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresenceStatusResponse"];
+                };
+            };
+            /** @description Invalid status, overlong text/emoji, or unrepresentable expiry. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer, or not a live member of this workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
             429: components["responses"]["RateLimited"];
         };
     };

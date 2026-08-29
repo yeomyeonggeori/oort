@@ -503,6 +503,12 @@ pub struct RosterMember {
     /// declared status from here without a re-fetch (ADR-0160 D2), and computes
     /// the effective dot as `f(this, availability)` at the render edge.
     pub presence_status: Option<PresenceStatus>,
+    /// ADR-0176 custom status, human only, expire-filtered on read. `None` when
+    /// the member is an agent, the fields are unset, or `status_expires_at` has
+    /// been reached (lazy delete — the columns may still be set).
+    pub status_emoji: Option<String>,
+    pub status_text: Option<String>,
+    pub status_expires_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -536,6 +542,9 @@ fn decode_roster_member(row: &sqlx::postgres::PgRow) -> Result<RosterMember, sql
             row.try_get::<Option<String>, _>("presence_status")?
                 .as_deref(),
         ),
+        status_emoji: row.try_get("status_emoji")?,
+        status_text: row.try_get("status_text")?,
+        status_expires_at_ms: row.try_get("status_expires_at_ms")?,
         created_at_ms: row.try_get("created_at_ms")?,
         updated_at_ms: row.try_get("updated_at_ms")?,
     })
@@ -614,6 +623,18 @@ pub async fn list_workspace_roster(
                 a.max_run_steps, \
                 CASE WHEN m.kind = 'agent' THEN COALESCE(ap.paused, false) END AS paused, \
                 CASE WHEN m.kind = 'human' THEN m.presence_status::text END AS presence_status, \
+                CASE WHEN m.kind = 'human' \
+                      AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
+                      AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
+                     THEN m.status_emoji END AS status_emoji, \
+                CASE WHEN m.kind = 'human' \
+                      AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
+                      AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
+                     THEN m.status_text END AS status_text, \
+                CASE WHEN m.kind = 'human' \
+                      AND (m.status_expires_at IS NULL OR m.status_expires_at > now()) \
+                      AND (m.status_emoji IS NOT NULL OR m.status_text IS NOT NULL) \
+                     THEN floor(extract(epoch from m.status_expires_at) * 1000)::bigint END AS status_expires_at_ms, \
                 floor(extract(epoch from m.created_at) * 1000)::bigint AS created_at_ms, \
                 floor(extract(epoch from m.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM member m \
