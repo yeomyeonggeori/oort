@@ -12,6 +12,7 @@ import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
 import type { Huddle } from "@momo/core/lib/api";
+import { HuddleMicMenu } from "./HuddleMicMenu";
 import { useHuddle, type HuddleController } from "./useHuddle";
 
 function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
@@ -130,6 +131,14 @@ export function HuddleHeaderControl({
             <Mic aria-hidden="true" className="size-4" />
           )}
         </HuddleIconButton>
+        <HuddleMicMenu
+          selectedDeviceId={huddle.microphoneDeviceId}
+          gainPercent={huddle.microphoneGain}
+          busy={huddle.busy === "device"}
+          disabled={busy}
+          onSelectDevice={(deviceId) => void huddle.setMicrophoneDevice(deviceId)}
+          onGainChange={huddle.setMicrophoneGain}
+        />
         <HuddleIconButton
           testId="huddle-leave"
           label="허들 나가기"
