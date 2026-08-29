@@ -1,6 +1,6 @@
 # ADR-0174: 외양 커스터마이제이션 시스템 (Appearance) — 토큰 아키텍처와 게이트 재정의
 
-- 상태: **Proposed** (성재 결재 대기 — D1~D5)
+- 상태: **Accepted** (성재 승인 2026-08-30 — "ADR 셋 다 ㄱ")
 - 날짜: 2026-08-29
 - 발의: Fable (BZ-5 #1868 선행 — 성재 2026-08-29 지시 "buzz 세팅 경험 이식, 색·테마 전반 개선")
 - 관련: docs/design-system/README.md(정본) · momo-design-taste-web(게이트) · buzz(Apache-2.0) Appearance · #1868 · #1873(멤버 아바타·소개 ADR 후보 동반 상정)
