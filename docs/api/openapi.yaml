@@ -74,6 +74,11 @@ tags:
       password — first-owner bootstrap or operator-issued password reset.
   - name: roster
     description: Workspace member roster.
+  - name: presence
+    description: >
+      ADR-0160 declared presence (auto/away/dnd) plus ADR-0176 custom status
+      (emoji + text + optional expiry). Human-only; the path names no member
+      id. Changes ride the existing `type: presence` channel broadcast.
   - name: membership
     description: Caller-scoped membership writes (self-leave, self display name).
   - name: membership-admin
@@ -722,6 +727,91 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/presence:
+    get:
+      tags: [presence]
+      operationId: getPresenceStatus
+      summary: Read the caller's own declared presence and custom status.
+      description: >
+        ADR-0160 ③ plus ADR-0176. Human bearer only. The member is the
+        credential's — the path has no `memberId`. Custom-status fields are
+        omitted when unset, empty, or `statusExpiresAtMs` has been reached
+        (lazy delete; no sweeper job). Availability and the effective dot are
+        not here.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's durable declared status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer (presence is human-only).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No live human presence for this member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [presence]
+      operationId: setPresenceStatus
+      summary: Set the caller's own declared presence and optional custom status.
+      description: >
+        Same PUT as ADR-0160. `status` remains required (`auto`/`away`/`dnd`).
+        Optional `statusEmoji` / `statusText` / `statusExpiresAtMs` are a
+        per-key patch — omitted leaves the stored value, JSON null clears,
+        a value sets. Trimmed text is at most 80 characters; emoji is a
+        length/code-point cap (≤32 scalars), not a strict emoji classifier.
+        All three null clears the custom status. Broadcasts on the existing
+        `type: presence` `ch:` rail. No audit row (personal intent; the
+        original presence PUT was unaudited).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPresenceRequest"
+      responses:
+        "200":
+          description: Stored declared status (custom fields omitted when empty/expired).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceStatusResponse"
+        "400":
+          description: Invalid status, overlong text/emoji, or unrepresentable expiry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, or not a live member of this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -7950,6 +8040,23 @@ components:
             offline otherwise); `away`/`dnd` are the two manual overrides.
             Absent for agents (presence is human-only, their liveness is
             agent_run) and absent from a server too old to carry the column.
+        statusEmoji:
+          type: string
+          description: >
+            ADR-0176 custom status emoji, human only. Omitted when unset, empty,
+            expired (`statusExpiresAtMs` reached — lazy delete), or for an agent.
+        statusText:
+          type: string
+          maxLength: 80
+          description: >
+            ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when
+            unset, empty, expired, or for an agent.
+        statusExpiresAtMs:
+          type: integer
+          format: int64
+          description: >
+            ADR-0176 optional expiry as epoch milliseconds. Omitted when there is
+            no visible custom status (including when the stamp has been reached).
         createdAtMs:
           type: integer
           format: int64
@@ -7969,6 +8076,53 @@ components:
           type: integer
         agentCount:
           type: integer
+
+    SetPresenceRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [auto, away, dnd]
+          description: ADR-0160 declared presence. Required so a pre-0176 body still decodes.
+        statusEmoji:
+          type: string
+          nullable: true
+          maxLength: 32
+          description: >
+            ADR-0176. Omitted = leave stored value. JSON null = clear. Empty or
+            whitespace-only is stored as cleared. Length/code-point cap only.
+        statusText:
+          type: string
+          nullable: true
+          maxLength: 80
+          description: >
+            ADR-0176. Omitted = leave stored value. JSON null = clear. Trimmed;
+            empty becomes cleared. Over 80 characters is 400.
+        statusExpiresAtMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            ADR-0176 optional expiry. Omitted = leave stored value. JSON null =
+            clear. A reached stamp is accepted on write and ignored on read.
+
+    PresenceStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [auto, away, dnd]
+        statusEmoji:
+          type: string
+        statusText:
+          type: string
+          maxLength: 80
+        statusExpiresAtMs:
+          type: integer
+          format: int64
 
     # ---- Membership lifecycle (ADR-0128) ------------------------------------
     ChangeMembershipRoleRequest:

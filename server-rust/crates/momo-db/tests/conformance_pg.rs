@@ -61,17 +61,17 @@ async fn migration_runner_applies_all_66_and_matches_schema() {
 
     // discovery = exactly the versioned files, contiguous
     let migs = discover_migrations(&default_migrations_dir()).expect("discover");
-    assert_eq!(migs.len(), 82, "expected 82 migrations, got {}", migs.len());
+    assert_eq!(migs.len(), 83, "expected 83 migrations, got {}", migs.len());
 
     // THE runner — applies 001..061 in place via psql (incl. pgvector 028 and
     // the seed migrations' `\if` meta-commands). An ordering/role dependency or
     // a psql-rejected file would surface here as a real finding. Product default
     // seed mode (no legacy agent fixtures).
     let report = run_migrations(&database_url(), &default_migrations_dir(), SeedMode::None)
-        .expect("all 82 migrations apply on a fresh pgvector/pg18 DB");
+        .expect("all 83 migrations apply on a fresh pgvector/pg18 DB");
     assert_eq!(
         report.total(),
-        82,
+        83,
         "the runner must consider all 66 files (applying them, or SKIPping the \
          ones a previous run already recorded)"
     );

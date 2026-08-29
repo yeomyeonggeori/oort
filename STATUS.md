@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 커스텀 멤버 상태 REST (#1889 / BF-B2 서버 절반, 2026-08-30)
+
+- `member`에 nullable 3필드(083): `status_emoji`(≤32 스칼라)·`status_text`(trim ≤80)·`status_expires_at`. `schema_v0.sql` 무접촉. RLS는 기존 `member` ws_isolation 승계.
+- 같은 `PUT/GET /v1/workspaces/{ws}/presence` 바디 확장(형제 엔드포인트 없음 — 경로에 memberId가 없고 브로드캐스트가 이미 `type: presence` `ch:` 레일). omit=유지, JSON null=지우기. 만료는 읽기에서 무시(지연 삭제, 잡 없음). 사람만. 무감사(기존 프레즌스 PUT 관례).
+- red proof: `custom_status_conformance_pg`. 클라 절반은 A-42(프리셋 칩: 회의 중/이동 중/병가/휴가/재택).
+
 ## 메시지 리마인더 REST (#1888 / BF-B1 서버 절반, 2026-08-30)
 
 - `message_reminder`(082): id/workspace/member/channel/message/due_at/note≤500/completed_at. RLS FORCE 소유자 스코프(`app.workspace_id` + `app.member_id`). pending due 인덱스. `schema_v0.sql` 무접촉. **outbox 팬아웃 없음**(ADR-0175 v1=클라 폴링).
