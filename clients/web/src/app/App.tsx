@@ -11,6 +11,7 @@ import { SkeletonRows } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
+import { DraftsRoute } from "@/features/drafts/DraftsRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
@@ -126,6 +127,7 @@ export function App() {
           <Route index element={<ChatShell />} />
           <Route path="c/:channelId" element={<ChatShell />} />
           <Route path="inbox" element={<InboxRoute />} />
+          <Route path="drafts" element={<DraftsRoute />} />
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />

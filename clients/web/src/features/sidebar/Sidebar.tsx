@@ -73,6 +73,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
+import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
 
 // =============================================================================
 // Sidebar (R-1 §1): workspace header, the two global surfaces (인박스 / 활동),
@@ -427,6 +428,7 @@ export function Sidebar({
           <nav aria-label="워크스페이스 탐색">
             <ul className="flex flex-col px-2 py-2">
               <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
+              <DraftsNavItem />
               <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
               <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
               <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />

@@ -5,6 +5,9 @@ import {
   clearDraft,
   draftKey,
   pruneDrafts,
+  listDrafts,
+  listWorkspaceDrafts,
+  parseDraftKey,
   readDraft,
   seedComposerText,
   writeDraft,
@@ -191,5 +194,40 @@ describe("컴포저 시드", () => {
       type: COMPOSER_SEED_EVENT,
       detail: { workspaceId: WS, channelId: CH_A, text: "@grokbot " },
     });
+  });
+});
+
+describe("목록", () => {
+  it("열쇠에서 워크스페이스와 채널을 푼다", () => {
+    expect(parseDraftKey(draftKey(WS, CH_A))).toEqual({
+      workspaceId: WS,
+      channelId: CH_A,
+    });
+    expect(parseDraftKey("momo.web.session.v1")).toBeNull();
+  });
+
+  it("최근 수정순으로 모은다", () => {
+    writeDraft(WS, CH_A, "먼저 쓴 채널 초안", NOW);
+    writeDraft(WS, CH_B, "방금 고친 초안", NOW + 5_000);
+    expect(listDrafts(NOW + 5_000).map((row) => row.channelId)).toEqual([
+      CH_B,
+      CH_A,
+    ]);
+    expect(listDrafts(NOW + 5_000).map((row) => row.text)).toEqual([
+      "방금 고친 초안",
+      "먼저 쓴 채널 초안",
+    ]);
+  });
+
+  it("다른 워크스페이스 초안은 섞지 않는다", () => {
+    const other = "00000000-0000-7000-8000-000000000002";
+    writeDraft(WS, CH_A, "이쪽", NOW);
+    writeDraft(other, CH_B, "저쪽", NOW);
+    expect(listWorkspaceDrafts(WS, NOW).map((row) => row.text)).toEqual(["이쪽"]);
+  });
+
+  it("시한이 지난 초안은 목록에 올리지 않는다", () => {
+    writeDraft(WS, CH_A, "오래된 초안", NOW);
+    expect(listDrafts(NOW + DRAFT_TTL_MS + 1)).toEqual([]);
   });
 });

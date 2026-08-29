@@ -179,6 +179,7 @@ const MOBILE_TAP_TARGETS = [
   // 구분선이 창 위쪽일 때만, 하단은 바닥이 아닐 때만 존재한다.
   ["jump-unread", "위쪽 새 메시지", "optional"],
   ["jump-latest", "최신 메시지로", "optional"],
+  ["draft-row-menu", "초안 메뉴", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -6264,6 +6265,61 @@ async function captureScheme(browser, scheme) {
   await notificationsPage.screenshot({ path: notificationsShot });
   shots.push(notificationsShot);
   await notificationsPage.close();
+
+  // BF-A5 (#1901): 크로스채널 초안 패널. signIn이 localStorage를 비우므로
+  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다.
+  const draftsPage = await context.newPage();
+  await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(draftsPage);
+  await draftsPage.evaluate(`(() => {
+    const now = Date.now();
+    const prefix = "momo.draft.v1:${WORKSPACE_ID}:";
+    localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
+      text: "배포 롤백 근거를 정리하면",
+      atMs: now,
+    }));
+    localStorage.setItem(prefix + "00000000-0000-7000-8000-000000000202", JSON.stringify({
+      text: "PR 본문에 게이트 증거를 붙이고\\n두 번째 줄은 미리보기에서 한 줄로 접힌다",
+      atMs: now - 60_000,
+    }));
+    localStorage.setItem(prefix + "${DM_ID}", JSON.stringify({
+      text: "hermes 온보딩 문구를 이어서",
+      atMs: now - 3_600_000,
+    }));
+    window.dispatchEvent(new Event("momo:drafts-changed"));
+    window.dispatchEvent(new CustomEvent("momo:composer-seed", {
+      detail: {
+        workspaceId: "${WORKSPACE_ID}",
+        channelId: "${GENERAL_ID}",
+        text: "배포 롤백 근거를 정리하면",
+      },
+    }));
+  })()`);
+  await draftsPage.getByTestId("nav-drafts").waitFor({ state: "visible" });
+  await draftsPage.evaluate('location.hash = "/drafts"');
+  try {
+    await draftsPage.getByTestId("drafts-list").waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+  } catch (error) {
+    const dump = await draftsPage.evaluate(`(() => ({
+      hash: location.hash,
+      route: Boolean(document.querySelector('[data-testid="drafts-route"]')),
+      list: Boolean(document.querySelector('[data-testid="drafts-list"]')),
+      empty: Boolean(document.querySelector('[data-testid="drafts-empty"]')),
+      error: Boolean(document.querySelector('[data-testid="drafts-error"]')),
+      skeleton: Boolean(document.querySelector('[data-testid="skeleton-row"]')),
+      nav: Boolean(document.querySelector('[data-testid="nav-drafts"]')),
+      keys: Object.keys(localStorage).filter((key) => key.startsWith("momo.draft")),
+      text: (document.getElementById("app-route")?.innerText ?? "").slice(0, 400),
+    }))()`);
+    throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
+  }
+  const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
+  await draftsPage.screenshot({ path: draftsShot });
+  shots.push(draftsShot);
+  await draftsPage.close();
 
   // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
   //     agent runs. Shot at the top of the panel, where the engine card, the
