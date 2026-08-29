@@ -225,3 +225,9 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:191
 83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:curl-auth-user:192
 83375bd3e7faeaaa7f9df97feeae22440f140d48:docs/planning/research/2026-08-26-ra7-tunnel-identity-feasibility.md:generic-api-key:157
+
+# 2026-08-30 BF-A3(#1886) — localStorage 키 이름 상수. 값이 "momo.web.huddle.mic.v1"로
+# 자격증명이 아니라 저장소 키 명명(기존 momo.web.server.v1 동형)이다. generic-api-key
+# 룰이 상수명 접미사만 보고 오탐.
+#   clients/web/src/features/huddles/micDeviceStore.ts:9  [generic-api-key]
+2661a90e5d07848459e599d3060abf9d83468663:clients/web/src/features/huddles/micDeviceStore.ts:generic-api-key:9
