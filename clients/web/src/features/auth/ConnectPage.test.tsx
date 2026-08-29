@@ -124,6 +124,12 @@ describe("BZ-6a onboarding shell", () => {
     expect(document.querySelector('[data-testid="onboarding-landing"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="onboarding-mark"]')).not.toBeNull();
     expect(
+      document.querySelector('[data-testid="onboarding-wordmark"]')?.textContent
+    ).toBe("oort");
+    expect(
+      document.querySelector('[data-testid="onboarding-tagline"]')?.textContent
+    ).toBe("사람과 에이전트가 같은 자리에서 일하는 메신저.");
+    expect(
       document.querySelectorAll("[data-onboarding-body]")
     ).toHaveLength(30);
     expect(document.querySelector('[data-testid="onboarding-choose-server"]')).not.toBeNull();
@@ -146,9 +152,16 @@ describe("BZ-6a onboarding shell", () => {
     mount();
     click("onboarding-choose-server");
     expect(document.querySelector('[data-testid="onboarding-gateway"]')).not.toBeNull();
-    expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "2/3"
-    );
+    const chrome = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const progress = document.querySelector('[data-testid="onboarding-progress"]');
+    expect(chrome).not.toBeNull();
+    expect(chrome?.contains(back)).toBe(true);
+    expect(chrome?.contains(progress)).toBe(true);
+    expect(back?.textContent).toContain("뒤로");
+    expect(back?.querySelector("svg")).not.toBeNull();
+    expect(back?.className).not.toMatch(/underline/);
+    expect(progress?.textContent).toBe("2/3");
     expect(document.querySelector('[data-testid="login-server"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="login-invite-code"]')).toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");

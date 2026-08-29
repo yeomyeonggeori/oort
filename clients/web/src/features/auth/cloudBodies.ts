@@ -23,9 +23,12 @@ export const CLOUD_WANDER_Y = 20;
 /** Pointer-repel push (px). Must match the rAF loop in OortCloudField. */
 export const CLOUD_REPEL_STRENGTH = 110;
 
-/** Inner 40% square of the field, in percent (30–70 on both axes). */
-const CENTRE_MIN = 30;
-const CENTRE_MAX = 70;
+/**
+ * Empty-centre radius, in percent of the field. #1869 used a 20-unit half-side
+ * square (30–70). The #1882 hero lockup (1.5× mark + wordmark + copy) is taller
+ * and wider, so rest poses sit outside a 28-unit circle around 50,50.
+ */
+export const CENTRE_RADIUS = 28;
 
 /** Rest band of the two landing CTAs: top 86%+, centred 30–70. */
 const CTA_TOP = 86;
@@ -73,12 +76,7 @@ export const CLOUD_BODIES: readonly CloudBody[] = [
 ];
 
 export function isInEmptyCentre(body: CloudBody): boolean {
-  return (
-    body.left >= CENTRE_MIN &&
-    body.left <= CENTRE_MAX &&
-    body.top >= CENTRE_MIN &&
-    body.top <= CENTRE_MAX
-  );
+  return Math.hypot(body.left - 50, body.top - 50) < CENTRE_RADIUS;
 }
 
 /** Rest pose sits inside the CTA band (no drift). */

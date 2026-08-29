@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  CENTRE_RADIUS,
   CLOUD_BODIES,
   isInCtaBand,
   isInCtaExclusion,
@@ -16,6 +17,7 @@ const css = readFileSync(
 describe("Oort cloud scatter", () => {
   it("places thirty line-art bodies on the outer shell", () => {
     expect(CLOUD_BODIES).toHaveLength(30);
+    expect(CENTRE_RADIUS).toBeGreaterThanOrEqual(28);
     expect(CLOUD_BODIES.filter(isInEmptyCentre)).toEqual([]);
   });
 

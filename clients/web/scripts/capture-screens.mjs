@@ -1800,49 +1800,50 @@ async function assertOnboardingCardCentered(page, where, testId) {
   );
 }
 
-async function assertCloudMissesCta(page, where) {
+async function assertCloudMissesTarget(page, where, testId, label) {
   const proof = await page.evaluate(`(() => {
-    const hitsOf = (testId) => {
-      const btn = document.querySelector('[data-testid="' + testId + '"]');
-      if (!btn) return { missing: true, hits: [] };
-      const b = btn.getBoundingClientRect();
-      const hits = [];
-      for (const el of document.querySelectorAll("[data-onboarding-body]")) {
-        const r = el.getBoundingClientRect();
-        const overlap = !(
-          r.right < b.left ||
-          r.left > b.right ||
-          r.bottom < b.top ||
-          r.top > b.bottom
-        );
-        if (overlap) {
-          hits.push({
-            body: el.getAttribute("data-onboarding-body"),
-            left: Math.round(r.left),
-            top: Math.round(r.top),
-            right: Math.round(r.right),
-            bottom: Math.round(r.bottom),
-          });
-        }
+    const target = document.querySelector('[data-testid="${testId}"]');
+    if (!target) return { missing: true, hits: [] };
+    const b = target.getBoundingClientRect();
+    const hits = [];
+    for (const el of document.querySelectorAll("[data-onboarding-body]")) {
+      const r = el.getBoundingClientRect();
+      const overlap = !(
+        r.right < b.left ||
+        r.left > b.right ||
+        r.bottom < b.top ||
+        r.top > b.bottom
+      );
+      if (overlap) {
+        hits.push({
+          body: el.getAttribute("data-onboarding-body"),
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          right: Math.round(r.right),
+          bottom: Math.round(r.bottom),
+        });
       }
-      return { missing: false, hits };
-    };
-    return {
-      inviteHits: hitsOf("onboarding-choose-invite"),
-      serverHits: hitsOf("onboarding-choose-server"),
-    };
+    }
+    return { missing: false, hits };
   })()`);
-  if (proof.inviteHits.missing || proof.serverHits.missing) {
-    throw new Error(`S0 CTA ${where}: 선택 버튼 없음`);
+  if (proof.missing) {
+    throw new Error(`S0 ${label} ${where}: ${testId} 없음`);
   }
-  if (proof.inviteHits.hits.length !== 0 || proof.serverHits.hits.length !== 0) {
+  if (proof.hits.length !== 0) {
     throw new Error(
-      `S0 CTA ${where}: inviteHits=${proof.inviteHits.hits.length} ` +
-        `serverHits=${proof.serverHits.hits.length} ` +
-        JSON.stringify(proof)
+      `S0 ${label} ${where}: hits=${proof.hits.length} ` + JSON.stringify(proof)
     );
   }
-  console.log(`  S0 CTA ${where}: inviteHits 0 · serverHits 0`);
+  console.log(`  S0 ${label} ${where}: hits 0`);
+}
+
+async function assertCloudMissesCta(page, where) {
+  await assertCloudMissesTarget(page, where, "onboarding-choose-invite", "CTA invite");
+  await assertCloudMissesTarget(page, where, "onboarding-choose-server", "CTA server");
+}
+
+async function assertCloudMissesLockup(page, where) {
+  await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {
@@ -1885,6 +1886,15 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
     throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
   }
   await assertCloudMissesCta(page, where);
+  await assertCloudMissesLockup(page, where);
+  const wordmark = await page.getByTestId("onboarding-wordmark").textContent();
+  if (wordmark?.trim() !== "oort") {
+    throw new Error(`S0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
+  }
+  const tagline = await page.getByTestId("onboarding-tagline").textContent();
+  if (tagline?.trim() !== "사람과 에이전트가 같은 자리에서 일하는 메신저.") {
+    throw new Error(`S0 카피 ${where}: ${JSON.stringify(tagline)}`);
+  }
   await page.getByTestId("onboarding-choose-server").focus();
   const landingFocus = await page.evaluate(
     `document.activeElement?.getAttribute("data-testid")`
@@ -1914,6 +1924,25 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
 
   await page.getByTestId("onboarding-choose-server").click();
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
+  const chrome = await page.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const progress = document.querySelector('[data-testid="onboarding-progress"]');
+    return {
+      row: Boolean(row && back && progress && row.contains(back) && row.contains(progress)),
+      underline: back ? getComputedStyle(back).textDecorationLine : null,
+      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+    };
+  })()`);
+  if (!chrome.row) {
+    throw new Error(`S1 크롬 ${where}: 뒤로/카운터가 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  }
+  if (chrome.underline && chrome.underline !== "none") {
+    throw new Error(`S1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
+  }
+  if (chrome.backLabel !== "뒤로") {
+    throw new Error(`S1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
+  }
   await assertNoHorizontalOverflow(page, `gateway ${where}`);
   await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
   if (tapTargets) {

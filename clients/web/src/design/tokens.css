@@ -541,10 +541,10 @@
    * 있다는 사실이 스크롤바 없이도 읽힌다. */
   --spacing-tray-max: 240px;
 
-  /* S0 랜딩 마크 (BZ-6a / #1869). 24px 제품 마크를 4배(96)로 키운 자리.
-   * 리듬 스케일 최대가 32라 격자 밖이고, size-[96px]는 컴파일되지 않으므로
-   * 이름을 갖는다. 이 값만 랜딩이 쓰고 제품 셸은 size-6을 유지한다. */
-  --spacing-onboarding-mark: 96px;
+  /* S0 히어로 마크 (#1882). #1869의 96px(24px 제품 마크 ×4)를 1.5배한 바닥.
+   * `.onboarding-mark`가 이 값과 12vw 사이에서 clamp하고, 상한은 같은 값의
+   * 4/3(192)이라 큰 창에서 락업이 한없이 커지지 않는다. 제품 셸은 size-6. */
+  --spacing-onboarding-mark: 144px;
 
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
@@ -945,6 +945,27 @@
 
   @media (width < 600px) {
     display: none;
+  }
+}
+
+/* S1/S2 스텝 크롬 (#1882). AppTitlebar와 같은 트래픽라이트 인셋·드래그 계약이되
+ * 온보딩은 셸 그리드 밖이고 390px에서도 선다(app-titlebar는 600 미만에서 숨음).
+ * 버튼은 이 유틸을 갖지 않고 pointerdown을 멈춘다. */
+@utility onboarding-step-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-2);
+  border-block-end: 1px solid var(--line);
+  background-color: var(--surface);
+
+  &[data-tauri-drag-region] {
+    padding-inline-start: var(--titlebar-inset);
+  }
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
   }
 }
 
@@ -1932,7 +1953,25 @@
 }
 
 .onboarding-mark {
+  /* Hero floor 144 (#1882 1.5× of 96). 12vw at 1280 is 154, at 390 the
+     floor holds; 4/3 of the floor (192) is the large-window cap. */
+  width: clamp(
+    var(--spacing-onboarding-mark),
+    12vw,
+    calc(var(--spacing-onboarding-mark) * 4 / 3)
+  );
+  height: clamp(
+    var(--spacing-onboarding-mark),
+    12vw,
+    calc(var(--spacing-onboarding-mark) * 4 / 3)
+  );
   animation: onboarding-mark-float 8s ease-in-out 1.1s infinite;
+}
+
+.onboarding-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 /* Second path of OortMark is the orbit (two outer arcs). Bound to that
@@ -1943,6 +1982,17 @@
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
   animation: onboarding-orbit-draw 1.1s ease-out forwards;
+}
+
+/* Sequential reveal after the orbit draw: wordmark at 1.1s, copy at 1.4s.
+   Same 300ms fade as the step fade-in. backwards keeps them hidden until
+   their delay; reduced-motion below drops this to opacity 1 immediately. */
+.onboarding-wordmark {
+  animation: onboarding-fade-in 300ms ease-out 1.1s backwards;
+}
+
+.onboarding-tagline {
+  animation: onboarding-fade-in 300ms ease-out 1.4s backwards;
 }
 
 .onboarding-cloud-body {
@@ -2157,6 +2207,8 @@
 @media (prefers-reduced-motion: reduce) {
   .onboarding-mark,
   .onboarding-mark svg path:nth-of-type(2),
+  .onboarding-wordmark,
+  .onboarding-tagline,
   .onboarding-cloud-body,
   .onboarding-transition-content {
     animation: none;
@@ -2166,6 +2218,8 @@
   }
 
   .onboarding-mark,
+  .onboarding-wordmark,
+  .onboarding-tagline,
   .onboarding-transition-content {
     transform: none;
   }

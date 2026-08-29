@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## BZ-6a-p1 온보딩 폴리시 (#1882, 2026-08-29)
+
+- S0 히어로 락업: OortMark 1.5×(144, 12vw 상한 192) + 워드마크 `oort` + 소개 카피 1줄. 궤도 드로잉→워드마크→카피 순차 페이드(reduced-motion 즉시). 산포 중앙 배제를 원 반지름 28로 확대.
+- S1/S2 스텝 크롬: 뒤로(ArrowLeft+레이블, Button ghost, 44px)와 `n/3` 카운터를 상단 한 줄로. Tauri는 AppTitlebar와 같은 트래픽라이트 인셋+드래그(버튼 제외). 밑줄 링크 폐기.
+- red proof: web vitest 1709 · tsc · design_preflight_web · `CAPTURE_PORT=7177` capture:design (S0 lockup hits 0, S1 크롬 한 줄) · `SHELL_GATE_PORT=7179 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BZ-4 설정 전면 페이지 + Profile (#1867, 2026-08-29)
 
 - `/settings` 진입 시 앱 사이드바·타이틀바를 설정 전용 레이아웃으로 대체한다. 좌측 섹션 사이드바(개인/워크스페이스/연결, 기존 섹션 명칭과 **그룹 내** 상대 순서 유지) + 「앱으로 돌아가기」. 기존 섹션 컴포넌트는 재사용.
