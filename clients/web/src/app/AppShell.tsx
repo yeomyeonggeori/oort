@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import type { LoginResponse } from "@momo/core/lib/api";
+import type { LoginResponse, Member } from "@momo/core/lib/api";
 import {
   createRealtime,
   resolveSpikeRealtimeUrl,
@@ -45,16 +45,19 @@ import {
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
-// the sidebar beside whichever route is active. Channels, inbox, activity and
-// settings all mount inside this frame, so the connection survives navigation.
+// the sidebar beside whichever route is active. Settings (#1867) still mounts
+// inside this frame so the connection survives, but it replaces the app
+// sidebar and titlebar with its own layout.
 // =============================================================================
 
 export function AppShell({
   session,
   onLogout,
+  replaceSessionMember,
 }: {
   session: LoginResponse;
   onLogout: () => void;
+  replaceSessionMember: (member: Member) => void;
 }) {
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
@@ -68,6 +71,7 @@ export function AppShell({
   // The route boundary resets when the user navigates: a failed channel must
   // not keep the next one from rendering.
   const routePath = useLocation().pathname;
+  const isSettingsSurface = routePath === "/settings";
 
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
@@ -235,6 +239,7 @@ export function AppShell({
               ? "disconnected"
               : connStatus,
         logout: onLogout,
+        replaceSessionMember,
       }}
     >
       {/* app-shell is the named two-pane grid from tokens.css (sidebar 240px,
@@ -272,28 +277,39 @@ export function AppShell({
           <div
             ref={sidebarPaint.shellRef}
             className="app-shell"
-            data-sidebar-collapsed={sidebarPaint.trackCollapsed ? "" : undefined}
+            data-sidebar-collapsed={
+              isSettingsSurface
+                ? undefined
+                : sidebarPaint.trackCollapsed
+                  ? ""
+                  : undefined
+            }
+            data-settings-surface={isSettingsSurface ? "" : undefined}
           >
-            <AppTitlebar
-              collapsed={sidebarPaneCollapsed}
-              onCollapsedChange={sidebarPaint.requestCollapsedChange}
-              toggleRef={sidebarToggleRef}
-              onToggleFocus={() => {
-                desktopToggleFocusedRef.current = true;
-              }}
-              onToggleBlur={onDesktopToggleBlur}
-            />
-            <Sidebar
-              onOpenQuickSwitcher={() => setSwitcherOpen(true)}
-              channelPaneCollapsed={sidebarPaneCollapsed}
-              treeHidden={sidebarPaint.treeHidden}
-            />
+            {!isSettingsSurface && (
+              <AppTitlebar
+                collapsed={sidebarPaneCollapsed}
+                onCollapsedChange={sidebarPaint.requestCollapsedChange}
+                toggleRef={sidebarToggleRef}
+                onToggleFocus={() => {
+                  desktopToggleFocusedRef.current = true;
+                }}
+                onToggleBlur={onDesktopToggleBlur}
+              />
+            )}
+            {!isSettingsSurface && (
+              <Sidebar
+                onOpenQuickSwitcher={() => setSwitcherOpen(true)}
+                channelPaneCollapsed={sidebarPaneCollapsed}
+                treeHidden={sidebarPaint.treeHidden}
+              />
+            )}
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
              * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그
              * 순환이다. 아이콘도 글자도 없는 표면이지만 진짜 버튼인 이유는
              * 바깥을 눌러 닫는 것이 이 앱에서 유일하게 마우스로만 가능한 행동이
              * 되면 안 되기 때문이다. */}
-            {isMobile && drawerOpen && (
+            {isMobile && drawerOpen && !isSettingsSurface && (
               <button
                 type="button"
                 className="sidebar-scrim"
@@ -306,7 +322,7 @@ export function AppShell({
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
-              <ConnectionBanner />
+              {!isSettingsSurface && <ConnectionBanner />}
               {/* ADE 관제 요약 한 줄 (ADR-0154 D2, 이슈 1135). 연결 배너와 같은
                * 자리에 있고 이유도 같다: 재료의 절반이 워크스페이스 전역이라
                * 채널 헤더에 두면 지금 보고 있는 방 밖의 작업이 화면에서 사라진다.
@@ -314,7 +330,7 @@ export function AppShell({
                * 빈 자리도 남기지 않는다(근거는 코어 `adeSummarySegments` 주석).
                * `?stress=N`은 합성 행만 그리는 순수 스크롤 측정이라 소켓도 REST도
                * 없다: 여기서 원장을 부르면 그 측정이 네트워크까지 재게 된다. */}
-              {!stress && <AdeSummaryLine />}
+              {!stress && !isSettingsSurface && <AdeSummaryLine />}
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
@@ -351,11 +367,11 @@ export function AppShell({
                  * 대화 활동 줄과 에이전트 허브 둘이라 어느 한 라우트 안에 두면
                  * 다른 쪽에서 열 수 없고, 두 벌을 두면 같은 run에 대해 두 로그가
                  * 생긴다. */}
-                {!stress && <AgentWorkPanel />}
+                {!stress && !isSettingsSurface && <AgentWorkPanel />}
                 {/* 관제 서랍은 라우트 상자를 덮는다(tokens.css `ade-drawer`).
                  * 작업 패널과 형제인 것이 요점이다: 카드를 누르면 서랍이 닫히고
                  * 그 자리에 패널이 서므로 둘이 겹쳐 있는 순간이 없다. */}
-                {!stress && adeDrawerOpen && <AdeDrawer />}
+                {!stress && adeDrawerOpen && !isSettingsSurface && <AdeDrawer />}
               </div>
             </main>
           </div>

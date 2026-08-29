@@ -597,6 +597,7 @@ const NAV_RESTING_TOP = 85;
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
   const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+  const settingsNav = document.querySelector('[data-testid="settings-nav"]');
   const shell = document.querySelector(".app-shell");
   return {
     docOverflowY: doc.scrollHeight - doc.clientHeight,
@@ -605,6 +606,11 @@ const SHELL_METRICS = `(() => {
     shellScrollTop: shell ? shell.scrollTop : null,
     shellHeight: shell ? Math.round(shell.getBoundingClientRect().height) : null,
     navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+    settingsSurface: shell?.hasAttribute("data-settings-surface") === true,
+    appNavHidden: !nav || nav.getClientRects().length === 0,
+    settingsNavTop: settingsNav
+      ? Math.round(settingsNav.getBoundingClientRect().top)
+      : null,
     viewportHeight: window.innerHeight,
   };
 })()`;
@@ -622,13 +628,18 @@ async function assertShellHeld(page, label, shotName) {
   await page.evaluate("window.scrollTo(0, 99999)");
   await page.waitForTimeout(150);
   const m = await page.evaluate(SHELL_METRICS);
-  const ok =
+  const held =
     m.docOverflowY === 0 &&
     m.docOverflowX === 0 &&
     m.docScrollY === 0 &&
     m.shellScrollTop === 0 &&
-    m.navTop === NAV_RESTING_TOP &&
     m.shellHeight === m.viewportHeight;
+  const ok = label.includes("설정")
+    ? held &&
+      m.settingsSurface === true &&
+      m.appNavHidden === true &&
+      m.settingsNavTop !== null
+    : held && m.navTop === NAV_RESTING_TOP;
   check(label, ok, JSON.stringify(m));
   if (shotName) await page.screenshot({ path: `${OUT_DIR}/${shotName}.png` });
 }
@@ -1251,6 +1262,7 @@ async function measureSize(browser, size) {
     ["/inbox", "인박스", "inbox"],
     ["/activity", "활동", "activity"],
     ["/directory", "멤버 디렉터리", "directory"],
+    ["/settings?section=profile", "설정 프로필", "settings-profile"],
     ["/settings?section=account", "설정 계정", "settings-account"],
     ["/settings?section=members", "설정 멤버와 초대", "settings-members"],
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
@@ -1303,11 +1315,15 @@ async function measureSize(browser, size) {
       const r = btn.getBoundingClientRect();
       const shell = document.querySelector(".app-shell");
       const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+      const settingsNav = document.querySelector('[data-testid="settings-nav"]');
+      const shellEl = document.querySelector(".app-shell");
       return {
         reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
         shellScrollTop: shell ? shell.scrollTop : null,
         docScrollY: Math.round(window.scrollY),
         navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+        settingsSurface: shellEl?.hasAttribute("data-settings-surface") === true,
+        settingsNavPresent: Boolean(settingsNav),
       };
     })()`);
     check(
@@ -1315,7 +1331,8 @@ async function measureSize(browser, size) {
       reach.reached === true &&
         reach.shellScrollTop === 0 &&
         reach.docScrollY === 0 &&
-        reach.navTop === NAV_RESTING_TOP,
+        reach.settingsSurface === true &&
+        reach.settingsNavPresent === true,
       JSON.stringify(reach)
     );
     await page.screenshot({ path: `${OUT_DIR}/${size.name}-${shot}.png` });

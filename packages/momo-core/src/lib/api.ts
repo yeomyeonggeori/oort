@@ -699,19 +699,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return responseRecord(res.json<unknown>()) as T;
 }
 
+/** Login / join / PATCH members/me `member` object. */
+export function memberFromWire(value: unknown): Member {
+  const kind = str(value, "kind");
+  const id = str(value, "id");
+  const workspaceId = str(value, "workspaceId");
+  const displayName = str(value, "displayName");
+  const handle = str(value, "handle");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    (kind !== "human" && kind !== "agent") ||
+    displayName === undefined ||
+    handle === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return { id, workspaceId, kind, displayName, handle };
+}
+
 function loginResponseFromWire(value: unknown): LoginResponse {
   const source = responseRecord(value);
-  const member = record(source.member);
   if (
-    member === null ||
     typeof source.accessToken !== "string" ||
     typeof source.refreshToken !== "string" ||
-    typeof source.realtimeWebSocketUrl !== "string" ||
-    typeof member.id !== "string" ||
-    typeof member.workspaceId !== "string" ||
-    (member.kind !== "human" && member.kind !== "agent") ||
-    typeof member.displayName !== "string" ||
-    typeof member.handle !== "string"
+    typeof source.realtimeWebSocketUrl !== "string"
   ) {
     throw new WireShapeError();
   }
@@ -719,13 +731,7 @@ function loginResponseFromWire(value: unknown): LoginResponse {
     accessToken: source.accessToken,
     refreshToken: source.refreshToken,
     realtimeWebSocketUrl: source.realtimeWebSocketUrl,
-    member: {
-      id: member.id,
-      workspaceId: member.workspaceId,
-      kind: member.kind,
-      displayName: member.displayName,
-      handle: member.handle,
-    },
+    member: memberFromWire(source.member),
   };
 }
 
@@ -2170,6 +2176,25 @@ export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw new ApiError(res.status, `HTTP ${res.status}`);
   return res.blob();
+}
+
+// ---- 자기 표시 이름 (#1873 / BZ-4e) ----------------------------------------
+// PATCH /v1/workspaces/{ws}/members/me `{displayName}`
+// 사람 본인만. 정규화는 join과 같고, 위반은 400 `displayName is required`.
+// 응답 `{ member }` (login Member 형상). 핸들·역할·아바타는 이 표면의 것이 아니다.
+
+/** Change the signed-in human member's display name. */
+export async function changeMyDisplayName(
+  workspaceId: string,
+  displayName: string
+): Promise<Member> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+      { method: "PATCH", body: JSON.stringify({ displayName }) }
+    )
+  );
+  return memberFromWire(source.member);
 }
 
 // ---- 워크스페이스 나가기 (ADR-0161 D4) --------------------------------------

@@ -789,6 +789,19 @@
     }
   }
 
+  /* 설정 전면 (#1867). 앱 사이드바·타이틀바 대신 설정 전용 열이 창을 채운다.
+   * 전환은 라우트가 맡고, 여기 그리드는 즉시 한 칸이 된다. */
+  &[data-settings-surface] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    transition: none;
+
+    > main {
+      grid-row: 1;
+      grid-column: 1;
+    }
+  }
+
   /* 폰 (B6). 240px 열은 390px 화면의 62%를 남기고, 그 남은 150px 안에 채널
    * 제목·타임라인·컴포저가 전부 들어가야 했다(성재 iPhone 실캡처). 그래서 이
    * 폭에서는 사이드바가 행을 나눠 갖지 않는다: 격자는 한 열이 되고 사이드바는
@@ -1123,9 +1136,9 @@
   }
 }
 
-/* 설정의 두 열 (B6). agent-hub-layout과 같은 성질의 표면이라 같은 답을 쓴다:
- * 192px 섹션 목록이 390px 폰에서 본문에 198px만 남기므로, 그 폭에서는 목록이
- * 본문 위로 올라가 가로로 눕는다. 넓은 창은 그대로 두 열이다. */
+/* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
+ * `--w-sidebar`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
+ * 본문 위로 올라가 가로로 눕는다. */
 @utility settings-layout {
   display: flex;
   min-block-size: 0;
@@ -1137,7 +1150,7 @@
 }
 
 @utility settings-nav {
-  inline-size: var(--spacing-pane-sm);
+  inline-size: var(--w-sidebar);
   flex-shrink: 0;
   overflow-y: auto;
   border-inline-end: 1px solid var(--line);

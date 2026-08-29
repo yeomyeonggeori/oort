@@ -8,7 +8,12 @@ import {
   useSyncExternalStore,
 } from "react";
 import { BOOT_RESTORE_BUDGET_MS } from "@/app/boot";
-import { logout, restoreSession, type LoginResponse } from "@momo/core/lib/api";
+import {
+  logout,
+  restoreSession,
+  type LoginResponse,
+  type Member,
+} from "@momo/core/lib/api";
 import {
   clearSession,
   getAuthExpired,
@@ -30,6 +35,8 @@ export interface SessionContextValue {
   realtime: RealtimeHandle | null;
   connStatus: RealtimeStatus;
   logout: () => void;
+  /** Apply a server-confirmed self member. Never call this before the write lands. */
+  replaceSessionMember: (member: Member) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | null>(null);
@@ -56,6 +63,7 @@ export interface SessionLifecycle {
   session: LoginResponse | null;
   signIn: (session: LoginResponse) => void;
   signOut: () => void;
+  replaceSessionMember: (member: Member) => void;
 }
 
 /**
@@ -157,6 +165,12 @@ export function useRestoredSession(): SessionLifecycle {
     setStatus("signed-in");
   }, []);
 
+  const replaceSessionMember = useCallback((member: Member) => {
+    setSession((current) =>
+      current === null ? null : { ...current, member }
+    );
+  }, []);
+
   const signOut = useCallback(() => {
     // Fire and forget on purpose: the local wipe inside logout() is synchronous
     // and unconditional, so the user is out of the session before the network
@@ -171,5 +185,5 @@ export function useRestoredSession(): SessionLifecycle {
     setStatus("anonymous");
   }, []);
 
-  return { status, session, signIn, signOut };
+  return { status, session, signIn, signOut, replaceSessionMember };
 }

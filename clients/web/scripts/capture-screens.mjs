@@ -4851,8 +4851,24 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "inbox");
 
-  // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
-  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 다섯 프레임은 손대지 않은 표면에서
+  // 6. 설정 전면 (#1867). 앱 사이드바가 사라지고 섹션 목록이 본문 위로 접힌다.
+  await page.evaluate('location.hash = "/settings?section=profile"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  await page.getByTestId("settings-back-to-app").waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "프로필", exact: true }).waitFor({
+    state: "visible",
+  });
+  await page.waitForTimeout(250);
+  await assertNoHorizontalOverflow(page, `settings ${scheme}`);
+  await assertTapTargets(page, `settings ${scheme}`, [
+    ["settings-back-to-app", "앱으로 돌아가기"],
+    ["profile-display-name", "표시 이름 입력"],
+    ["profile-display-name-save", "표시 이름 저장"],
+  ]);
+  await shoot(page, "settings");
+
+  // 7. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
+  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 여섯 프레임은 손대지 않은 표면에서
   //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
   await page.evaluate('location.hash = "/"');
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
@@ -6189,6 +6205,7 @@ async function captureScheme(browser, scheme) {
   await settingsSweep.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(settingsSweep);
   for (const [section, heading, name] of [
+    ["profile", "프로필", "profile"],
     ["account", "계정", "account"],
     // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
