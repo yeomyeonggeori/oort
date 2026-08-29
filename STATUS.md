@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 채널 헤더 1줄 + 우측 라운드 컨트롤 (#1865, 2026-08-29)
+
+- 채널 헤더에서 토픽 상시 노출을 제거하고 1줄 제목만 남긴다. 토픽은 ⋮ 메뉴 「주제 보기」가 기존 읽기 다이얼로그를 연다(갱신 라우트 없음, 편집 항목 없음).
+- 우측은 기존 기능만 라운드 사각 그룹으로 재배치: `[터미널] [고정] [👥 N] [허들] [⋮]`. 👥 N은 기존 멤버 목록 트리거. 허들 유휴는 아이콘 버튼, Live 배지·참가자는 유지.
+- red proof: web vitest 1650·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell·gate:channel-header·gate:huddle.
+
 ## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
 
 - 사이드바 `ProfileCard` 드롭다운 맨 아래(설정 뒤)에 「로그아웃」을 추가. `useSession().logout` 직접 호출, 확인 다이얼로그 없음, destructive 색 없음. 설정 > 계정 `data-testid="logout"` 은 유지.

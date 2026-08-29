@@ -11,57 +11,50 @@ import {
 } from "@/design/ui/dialog";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { cn } from "@/design/lib/cn";
 
 export type ChannelMemberListStatus = "loading" | "ready" | "failed";
 
 // =============================================================================
-// 채널 헤더의 두 번째 문장과 멤버 패널 (#1680).
+// 채널 토픽 다이얼로그와 멤버 패널 (#1680 · #1865).
 //
-// 토픽은 채널 목록 응답에 이미 들어 있지만 이 클라이언트 어디에서도 그리지
-// 않았다. 서버 라우트 표에는 토픽을 갱신하는 경로가 없으므로 이 표면은 읽기만
-// 한다. 빈 토픽에 「추가」를 그리면 반드시 막다른 길이 되기 때문에 아무 컨트롤도
-// 내놓지 않는다. 긴 토픽은 헤더에서는 한 줄로 줄이고, 같은 버튼이 여는 다이얼로그
-// 안에서 280자 전체를 읽는다.
+// 토픽은 헤더에 상시 서지 않는다. ⋮ 메뉴의 「주제 보기」가 이 다이얼로그를 연다.
+// 서버 라우트 표에는 토픽을 갱신하는 경로가 없으므로 이 표면은 읽기만 한다. 빈
+// 토픽에 「추가」를 그리면 반드시 막다른 길이 되기 때문에 메뉴 항목도 다이얼로그도
+// 내놓지 않는다.
 //
 // 멤버 행은 이번 goal에서 동작하지 않는다. 프로필 카드 연결은 U-1 랜딩 뒤의 일이고,
 // 미리 버튼처럼 그리면 죽은 컨트롤이 된다. 그래서 목록은 ul/li로 읽히고, 키보드는
 // 실제 행동인 「멤버 추가」·「닫기」·실패 시 「다시 시도」만 순회한다. Dialog가
 // 포커스 스코프, Esc, 바깥 닫기와 트리거 복귀를 맡는다.
 //
-// 두 다이얼로그 모두 DialogTrigger 없이 프로그래매틱하게 연다(트리거 button에
-// onClick으로 setOpen). 이 앱의 커스텀 DialogContent는 opener를 받아 닫힐 때
-// 포커스를 그 엘리먼트로 돌려주는데, DialogTrigger를 함께 쓰면 Radix 기본
-// onCloseAutoFocus가 그 위에 겹쳐 복귀가 어긋난다 — 정본 다이얼로그는 전부
-// 프로그래매틱이다(dialog.tsx 머리말·MessageActions.tsx:312). DialogContent는
-// 항상 렌더해 Radix가 열림/닫힘·포탈 마운트·close 시퀀스를 소유하게 둔다.
+// 두 다이얼로그 모두 DialogTrigger 없이 프로그래매틱하게 연다. 이 앱의 커스텀
+// DialogContent는 opener를 받아 닫힐 때 포커스를 그 엘리먼트로 돌려주는데,
+// DialogTrigger를 함께 쓰면 Radix 기본 onCloseAutoFocus가 그 위에 겹쳐 복귀가
+// 어긋난다 — 정본 다이얼로그는 전부 프로그래매틱이다(dialog.tsx 머리말·
+// MessageActions.tsx:312). DialogContent는 항상 렌더해 Radix가 열림/닫힘·포탈
+// 마운트·close 시퀀스를 소유하게 둔다.
 // =============================================================================
 
-export function ChannelTopicControl({ topic }: { topic?: string }) {
-  const normalized = normalizeChannelTopic(topic ?? "");
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const [open, setOpen] = useState(false);
-
+export function ChannelTopicDialog({
+  topic,
+  open,
+  onOpenChange,
+  opener,
+}: {
+  topic: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  opener: HTMLElement | null;
+}) {
+  const normalized = normalizeChannelTopic(topic);
   if (normalized === "") return null;
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={() => setOpen(true)}
-        title={normalized}
-        aria-label={`토픽 전체 보기: ${normalized}`}
-        data-testid="channel-topic"
-        className={cn(
-          "block min-w-0 max-w-full truncate rounded-sm text-left text-meta text-ink-muted",
-          "hover:text-ink focus-visible:focus-ring"
-        )}
-      >
-        {normalized}
-      </button>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        opener={triggerRef.current}
+        opener={opener}
         className="gap-4 p-4"
         data-testid="channel-topic-dialog"
       >
@@ -79,7 +72,7 @@ export function ChannelTopicControl({ topic }: { topic?: string }) {
             type="button"
             variant="outline"
             size="sm"
-            onClick={() => setOpen(false)}
+            onClick={() => onOpenChange(false)}
             data-testid="channel-topic-close"
           >
             닫기
@@ -196,10 +189,7 @@ export function ChannelMemberPanel({
         title={label}
         data-testid="channel-member-count"
         data-roster-status={status}
-        className={cn(
-          "flex min-h-control-sm shrink-0 items-center gap-1 rounded-sm px-1 transition-colors",
-          "text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
-        )}
+        className={channelHeaderControlClass({ wide: true })}
       >
         <Users className="size-4" aria-hidden="true" />
         {status === "ready" && (

@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { EllipsisVertical, Loader2 } from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
@@ -17,6 +17,8 @@ import {
   CHANNEL_LEAVE_CONFIRM_TITLE,
   CHANNEL_LEAVE_LABEL,
   CHANNEL_MUTE_FAILURE,
+  CHANNEL_TOPIC_VIEW_LABEL,
+  normalizeChannelTopic,
 } from "@momo/core/features/channels/model";
 import {
   DropdownMenu,
@@ -33,15 +35,17 @@ import {
 } from "@/design/ui/dialog";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
-import { cn } from "@/design/lib/cn";
+import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 
 // =============================================================================
-// 채널명 메뉴 (검수 피드백 #3). 채널 이름 자체가 트리거다 — 사람이 채널에 대해
-// 무언가 하려 할 때 처음 보는 것이 이름이므로, 그 이름을 누르면 채널을 다루는
-// 항목이 선다. 헤더의 다른 버튼(고정 목록·작업 세션)이 이미 `dropdown-menu`로
+// 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
+// 그룹의 마지막이다. 헤더의 다른 버튼(고정 목록·터미널)이 이미 `dropdown-menu`로
 // 여닫히므로 같은 프리미티브를 쓴다 — 새 컨트롤 문법을 만들 이유가 없다.
 //
-// 세 항목 중 둘만 여기 있다:
+// 항목:
+//   * 주제 보기       — 토픽이 있을 때만. 기존 읽기 다이얼로그를 연다. 갱신
+//                       라우트가 없어 「편집」은 그리지 않는다.
 //   * 알림 끄기/켜기  — 누구나(활성 멤버). `notification_pref`는 자기 자신의
 //                       설정이라 권한을 묻지 않는다. 한 번의 왕복 동안 메뉴를
 //                       열어 두고(실패를 그 자리에서 말해야 하므로), 성공하면
@@ -66,8 +70,8 @@ export function ChannelHeaderMenu({
 }: {
   workspaceId: string;
   channel: Channel;
-  /** 화면에 보이는 채널 이름(labelParts.text ?? label). 트리거의 글자이자
-   *  확인 다이얼로그가 이름을 넣어 문장을 짓는 값. */
+  /** 화면에 보이는 채널 이름(labelParts.text ?? label). ⋮ 의 접근 이름과
+   *  나가기 확인 다이얼로그가 이름을 넣어 문장을 짓는 값. */
   title: string;
   selfMemberId: string;
   /** 로그인 멤버의 워크스페이스 역할. undefined면 아직 안 온 것이고, 그때는
@@ -76,10 +80,15 @@ export function ChannelHeaderMenu({
 }) {
   const client = useQueryClient();
   const navigate = useNavigate();
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
+  const [topicOpen, setTopicOpen] = useState(false);
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [muteError, setMuteError] = useState(false);
   const [leaveError, setLeaveError] = useState<string | null>(null);
+  const topic = normalizeChannelTopic(channel.topic ?? "");
+  const hasTopic = topic !== "";
+  const menuLabel = `${title} 채널 메뉴`;
 
   const muteMutation = useMutation({
     mutationFn: (muted: boolean) =>
@@ -134,26 +143,18 @@ export function ChannelHeaderMenu({
       >
         <DropdownMenuTrigger asChild>
           <button
+            ref={triggerRef}
             type="button"
             data-testid="channel-title-menu"
-            aria-label={`${title} 채널 메뉴`}
-            className={cn(
-              "group flex min-w-0 items-center gap-1 rounded-sm px-1 transition-colors",
-              "hover:bg-surface-hover data-[state=open]:bg-surface-hover",
-              "focus-visible:focus-ring"
-            )}
+            aria-label={menuLabel}
+            title={menuLabel}
+            className={channelHeaderControlClass()}
           >
-            <span className="min-w-0 truncate text-body font-semibold text-ink">
-              {title}
-            </span>
-            <ChevronDown
-              className="size-4 shrink-0 text-ink-muted"
-              aria-hidden="true"
-            />
+            <EllipsisVertical className="size-4" aria-hidden="true" />
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
-          align="start"
+          align="end"
           data-testid="channel-title-menu-content"
         >
           {/* 알림 실패는 항목 위에 그 자리에서 선다(§5, 토스트가 아니다). 메뉴가
@@ -161,6 +162,21 @@ export function ChannelHeaderMenu({
               않는다. */}
           {muteError && (
             <InlineBanner message={CHANNEL_MUTE_FAILURE} testId="channel-mute-error" />
+          )}
+          {hasTopic && (
+            <>
+              <DropdownMenuItem
+                data-testid="channel-topic"
+                onSelect={(event) => {
+                  event.preventDefault();
+                  setOpen(false);
+                  setTopicOpen(true);
+                }}
+              >
+                {CHANNEL_TOPIC_VIEW_LABEL}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+            </>
           )}
           <DropdownMenuItem
             data-testid="channel-mute-toggle"
@@ -258,6 +274,15 @@ export function ChannelHeaderMenu({
           </DialogContent>
         )}
       </Dialog>
+
+      {hasTopic && (
+        <ChannelTopicDialog
+          topic={topic}
+          open={topicOpen}
+          onOpenChange={setTopicOpen}
+          opener={triggerRef.current}
+        />
+      )}
     </>
   );
 }
