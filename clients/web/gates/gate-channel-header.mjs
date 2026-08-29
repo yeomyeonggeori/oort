@@ -1,15 +1,16 @@
 #!/usr/bin/env node
-// GATE: 채널 헤더 (검수 피드백 #3).
+// GATE: 채널 헤더 (검수 피드백 #3 · #1865).
 //
 // 이 게이트가 지키는 것은 헤더가 그려지는지가 아니라 **헤더가 하는 말과 각 액션이
 // 서버 진실을 따르는가**다.
 //
-//   1. 토픽은 읽힌다     긴 토픽은 헤더 한 줄에서 줄지만, 클릭·Enter로 연
-//                        다이얼로그에는 서버가 준 전체 문장이 선다.
+//   1. 헤더는 1줄이다    토픽은 헤더에 상시 서지 않는다. ⋮ 메뉴의 「주제 보기」가
+//                        기존 읽기 다이얼로그를 열고, 거기 서버가 준 전체 문장이
+//                        선다. 갱신 라우트가 없어 「편집」은 그리지 않는다.
 //   2. 인원수는 목록이다 헤더의 멤버 표시는 숫자 버튼이고, 사람·에이전트 목록과
 //                        기존 멤버 추가 다이얼로그로 이어진다. 좁은 폭에서도 남는다.
-//   3. 이름이 메뉴다     채널 이름을 누르면 채널을 다루는 메뉴가 선다. 항목은
-//                        알림 끄기/켜기와 채널 나가기 둘뿐이다 — 「이름 수정」은
+//   3. ⋮ 가 메뉴다       우측 라운드 그룹의 마지막이 채널을 다루는 메뉴다. 항목은
+//                        주제 보기·알림 끄기/켜기·채널 나가기다 — 「이름 수정」은
 //                        서버 라우트가 없어(2026-08-10 실측) 그리지 않는다.
 //   4. 낱말은 상태다     알림을 끄면 다음에 여는 메뉴의 낱말이 「켜기」로 뒤집힌다.
 //                        그 뒤집힘은 낙관적 추측이 아니라 서버가 저장한 muted를
@@ -20,6 +21,9 @@
 //   6. 권한 없는 문은 안 연다  서버 `remove_member`는 오너/관리자만 멤버십을 지울
 //                        수 있으므로, 일반 멤버의 메뉴에는 「나가기」가 아예 서지
 //                        않는다(확인 뒤 403으로 끝나는 막다른 길을 만들지 않는다).
+//   7. 컨트롤 그룹       우측은 [👥 N] [허들] [⋮] 순(기존 터미널·고정은 같은
+//                        문법으로 앞에 흡수). 각 버튼은 키보드로 닿고 aria-label
+//                        이 있다.
 //
 // 이름 붙은 red proof (버릴 워크트리에서만 돌린다):
 //   HEADER_GATE_PROVE_RED_COUNT=1 npm run gate:channel-header
@@ -57,15 +61,25 @@ function canonicalCopy(root) {
   const mute = /export const CHANNEL_MUTE_LABEL = "([^"]+)";/.exec(model);
   const unmute = /export const CHANNEL_UNMUTE_LABEL = "([^"]+)";/.exec(model);
   const leave = /export const CHANNEL_LEAVE_LABEL = "([^"]+)";/.exec(model);
-  if (!mute || !unmute || !leave) {
+  const topicView = /export const CHANNEL_TOPIC_VIEW_LABEL = "([^"]+)";/.exec(model);
+  if (!mute || !unmute || !leave || !topicView) {
     throw new Error(
       "채널 헤더 메뉴의 낱말을 코어에서 찾지 못했다: 게이트가 검사할 문자열의 정본이 사라졌다"
     );
   }
-  return { mute: mute[1], unmute: unmute[1], leave: leave[1] };
+  return {
+    mute: mute[1],
+    unmute: unmute[1],
+    leave: leave[1],
+    topicView: topicView[1],
+  };
 }
 
-const { mute: MUTE_LABEL, unmute: UNMUTE_LABEL } = canonicalCopy(webRoot);
+const {
+  mute: MUTE_LABEL,
+  unmute: UNMUTE_LABEL,
+  topicView: TOPIC_VIEW_LABEL,
+} = canonicalCopy(webRoot);
 
 const proveRedCount = process.env.HEADER_GATE_PROVE_RED_COUNT === "1";
 const proveRedRename = process.env.HEADER_GATE_PROVE_RED_RENAME === "1";
@@ -364,17 +378,54 @@ async function exercise(browser) {
   await installRealtimeSocket(page);
   await installRoutes(context, traffic, { selfRole: "owner" });
   await login(page);
+  await page.getByTestId("huddle-start").waitFor({ timeout: 15_000 });
 
-  // ---- 1. 토픽은 한 줄로 줄고, 전체 문장은 키보드로 읽힌다 --------------------
-  const topic = page.getByTestId("channel-topic");
-  if ((await topic.count()) !== 1 || (await topic.textContent()) !== CHANNEL_TOPIC) {
-    throw new Error("the channel topic was not rendered from the channel response");
+  // ---- 1. 헤더는 1줄이고, 토픽 전체는 ⋮ 메뉴에서 읽힌다 ----------------------
+  const headerBox = await page.getByTestId("channel-header").boundingBox();
+  if (!headerBox || headerBox.height > 52) {
+    throw new Error(
+      `the channel header must be a single row, height ${headerBox?.height}`
+    );
   }
-  const topicIsTruncated = await topic.evaluate(
-    (node) => node.scrollWidth > node.clientWidth
-  );
-  if (!topicIsTruncated) {
-    throw new Error("the long channel topic did not truncate inside the header");
+  if ((await page.getByTestId("channel-topic").count()) !== 0) {
+    throw new Error("the channel topic was still drawn in the always-visible header");
+  }
+  const controlOrder = await page.evaluate(() => {
+    const group = document.querySelector('[data-testid="channel-header-controls"]');
+    if (!group) return [];
+    const ids = [];
+    const walk = (root) => {
+      for (const child of root.children) {
+        const id = child.getAttribute("data-testid");
+        if (id) ids.push(id);
+        else walk(child);
+      }
+    };
+    walk(group);
+    return ids;
+  });
+  const memberIdx = controlOrder.indexOf("channel-member-count");
+  const huddleIdx = controlOrder.indexOf("huddle-surface");
+  const menuIdx = controlOrder.indexOf("channel-title-menu");
+  if (!(memberIdx >= 0 && huddleIdx > memberIdx && menuIdx > huddleIdx)) {
+    throw new Error(
+      `control group order must be members, huddle, overflow; got ${JSON.stringify(controlOrder)}`
+    );
+  }
+  const huddleStart = page.getByTestId("huddle-start");
+  if ((await huddleStart.getAttribute("aria-label")) !== "허들 시작") {
+    throw new Error("the idle huddle control must keep an aria-label for 허들 시작");
+  }
+
+  await openMenu(page);
+  const topic = page.getByTestId("channel-topic");
+  if ((await topic.count()) !== 1) {
+    throw new Error("the overflow menu did not offer 주제 보기");
+  }
+  if (((await topic.textContent()) ?? "").trim() !== TOPIC_VIEW_LABEL) {
+    throw new Error(
+      `the topic item must read "${TOPIC_VIEW_LABEL}", read "${(await topic.textContent())?.trim()}"`
+    );
   }
   await topic.focus();
   await page.keyboard.press("Enter");
@@ -385,8 +436,14 @@ async function exercise(browser) {
   }
   await page.keyboard.press("Escape");
   await topicDialog.waitFor({ state: "detached" });
-  if (!(await topic.evaluate((node) => node === document.activeElement))) {
-    throw new Error("closing the topic dialog with Escape did not return focus to its trigger");
+  if (
+    !(await page
+      .getByTestId("channel-title-menu")
+      .evaluate((node) => node === document.activeElement))
+  ) {
+    throw new Error(
+      "closing the topic dialog with Escape did not return focus to the overflow menu"
+    );
   }
 
   // ---- 2. 인원수는 숫자 버튼이고, 목록·추가 경로로 이어진다 --------------------
@@ -460,8 +517,11 @@ async function exercise(browser) {
   // The old `wide-only` count disappeared below 600px. Both context controls
   // remain reachable now, and the header still does not widen the document.
   await page.setViewportSize({ width: 390, height: 844 });
-  if (!(await countNode.isVisible()) || !(await topic.isVisible())) {
-    throw new Error("topic or member access disappeared at the narrow viewport");
+  if (
+    !(await countNode.isVisible()) ||
+    !(await page.getByTestId("channel-title-menu").isVisible())
+  ) {
+    throw new Error("member count or overflow menu disappeared at the narrow viewport");
   }
   const horizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth
@@ -480,7 +540,7 @@ async function exercise(browser) {
   await page.getByTestId("add-member-close").click();
   await addDialog.waitFor({ state: "detached" });
 
-  // ---- 3. 이름이 메뉴다, 그리고 「이름 수정」은 없다 ---------------------------
+  // ---- 3. ⋮ 가 메뉴다, 그리고 「이름 수정」은 없다 -----------------------------
   await openMenu(page);
   if (proveRedRename) {
     // red seam: 메뉴에 가짜 「이름 수정」 항목을 끼운다. 「rename 없음」 단언이
@@ -718,9 +778,10 @@ async function main() {
   } finally {
     await server.stop();
   }
-  console.log("GATE PASS: 헤더는 긴 토픽 전체 열람과 좁은 폭 멤버 목록을 열었고,");
+  console.log("GATE PASS: 헤더는 1줄이고 토픽은 ⋮ 메뉴에서 전체 열람되며,");
+  console.log("           우측 그룹은 멤버수·허들·⋮ 순이고 좁은 폭 멤버 목록을 열었다.");
   console.log("           명부 loading/ready/failed+재시도 및 멤버 추가 경로를 닫았다.");
-  console.log("           채널 이름 메뉴는 알림·나가기만 세웠으며(이름 수정 없음),");
+  console.log("           ⋮ 메뉴는 주제 보기·알림·나가기만 세웠으며(이름 수정 없음),");
   console.log("           알림은 서버 상태를 따르고 나가기는 확인·DELETE 뒤 이탈했다.");
 }
 

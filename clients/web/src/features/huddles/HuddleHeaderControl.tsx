@@ -11,7 +11,73 @@ import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { huddleParticipantSummary } from "@momo/core/features/huddles/huddleModel";
+import type { Huddle } from "@momo/core/lib/api";
 import { useHuddle, type HuddleController } from "./useHuddle";
+
+function HuddleLiveChip({ huddle }: { huddle: Huddle | null }) {
+  const names = huddle
+    ? huddle.participants.map((participant) => participant.displayName).join(", ")
+    : undefined;
+  return (
+    <div
+      className="flex h-control min-w-0 items-center gap-1 overflow-hidden rounded-sm bg-ok-soft px-2 text-meta"
+      data-testid="huddle-live"
+      title={names}
+    >
+      <span className="flex shrink-0 items-center gap-1 font-medium text-ok">
+        <span className="size-2 rounded-full bg-ok" aria-hidden="true" />
+        Live
+      </span>
+      {huddle && (
+        <>
+          <span
+            className="min-w-0 truncate text-ink-muted wide-only"
+            data-testid="huddle-participants"
+          >
+            {huddleParticipantSummary(huddle)}
+          </span>
+          <span
+            className="shrink-0 text-ink-muted mobile-only"
+            data-numeric
+            data-testid="huddle-participant-count"
+          >
+            {huddle.participants.length}
+          </span>
+        </>
+      )}
+    </div>
+  );
+}
+
+function HuddleIconButton({
+  testId,
+  label,
+  busy,
+  onClick,
+  children,
+}: {
+  testId: string;
+  label: string;
+  busy?: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="icon"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      aria-busy={busy || undefined}
+      data-testid={testId}
+      className="shrink-0 text-ink-muted"
+    >
+      {children}
+    </Button>
+  );
+}
 
 export function HuddleHeaderState({
   workspaceId,
@@ -43,66 +109,39 @@ export function HuddleHeaderControl({
   // its exit and microphone controls win over every projection state, including
   // a transient 500 or a later 503.
   if (huddle.joined) {
+    const microphoneLabel = huddle.muted ? "마이크 켜기" : "마이크 끄기";
     return (
       <div
-        className="flex min-w-0 max-w-pane items-center justify-end gap-2"
+        className="flex min-w-0 items-center justify-end gap-1"
         data-testid="huddle-surface"
       >
-        <div
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm bg-surface-hover px-2 py-1 text-meta"
-          data-testid="huddle-live"
-        >
-          <span className="flex shrink-0 items-center gap-1 font-medium text-ok">
-            <AudioLines aria-hidden="true" className="size-4" />
-            Live
-          </span>
-          {huddle.active && (
-            <span
-              className="min-w-0 truncate text-ink-muted"
-              data-testid="huddle-participants"
-              title={huddle.active.participants
-                .map((participant) => participant.displayName)
-                .join(", ")}
-            >
-              {huddleParticipantSummary(huddle.active)}
-            </span>
-          )}
-        </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="secondary"
-          className="shrink-0"
+        <HuddleLiveChip huddle={huddle.active} />
+        <HuddleIconButton
+          testId="huddle-microphone"
+          label={microphoneLabel}
+          busy={huddle.busy === "microphone"}
           onClick={() => void huddle.toggleMicrophone()}
-          aria-busy={huddle.busy === "microphone" || undefined}
-          aria-label={huddle.muted ? "마이크 켜기" : "마이크 끄기"}
-          data-testid="huddle-microphone"
         >
           {huddle.busy === "microphone" ? (
-            <Loader2 aria-hidden="true" className="spinner-busy" />
+            <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
           ) : huddle.muted ? (
-            <MicOff aria-hidden="true" />
+            <MicOff aria-hidden="true" className="size-4" />
           ) : (
-            <Mic aria-hidden="true" />
+            <Mic aria-hidden="true" className="size-4" />
           )}
-          {huddle.muted ? "마이크 켜기" : "마이크 끄기"}
-        </Button>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          className="shrink-0"
+        </HuddleIconButton>
+        <HuddleIconButton
+          testId="huddle-leave"
+          label="허들 나가기"
+          busy={huddle.busy === "leave"}
           onClick={() => void huddle.leave()}
-          aria-busy={huddle.busy === "leave" || undefined}
-          data-testid="huddle-leave"
         >
           {huddle.busy === "leave" ? (
-            <Loader2 aria-hidden="true" className="spinner-busy" />
+            <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
           ) : (
-            <PhoneOff aria-hidden="true" />
+            <PhoneOff aria-hidden="true" className="size-4" />
           )}
-          허들 나가기
-        </Button>
+        </HuddleIconButton>
         <span className="sr-only" aria-live="polite">
           {busy ? "허들 요청 처리 중" : ""}
         </span>
@@ -115,12 +154,12 @@ export function HuddleHeaderControl({
   if (huddle.status === "loading") {
     return (
       <p
-        className="flex shrink-0 items-center gap-2 text-meta text-ink-muted"
+        className="flex size-control shrink-0 items-center justify-center text-ink-muted"
         aria-busy="true"
         data-testid="huddle-loading"
       >
         <Loader2 aria-hidden="true" className="spinner-busy size-4" />
-        허들 확인 중
+        <span className="sr-only">허들 확인 중</span>
       </p>
     );
   }
@@ -131,60 +170,35 @@ export function HuddleHeaderControl({
 
   if (huddle.status === "error") {
     return (
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
+      <HuddleIconButton
+        testId="huddle-error-retry"
+        label="다시 불러오기"
         onClick={huddle.retry}
-        data-testid="huddle-error-retry"
       >
-        <RotateCw aria-hidden="true" />
-        다시 불러오기
-      </Button>
+        <RotateCw aria-hidden="true" className="size-4" />
+      </HuddleIconButton>
     );
   }
 
+  const startOrJoinLabel = huddle.active ? "허들 참가" : "허들 시작";
   return (
     <div
-      className="flex min-w-0 max-w-pane items-center justify-end gap-2"
+      className="flex min-w-0 items-center justify-end gap-1"
       data-testid="huddle-surface"
     >
-      {huddle.active && (
-        <div
-          className="flex min-w-0 flex-1 items-center gap-2 rounded-sm bg-surface-hover px-2 py-1 text-meta"
-          data-testid="huddle-live"
-        >
-          <span className="flex shrink-0 items-center gap-1 font-medium text-ok">
-            <AudioLines aria-hidden="true" className="size-4" />
-            Live
-          </span>
-          <span
-            className="min-w-0 truncate text-ink-muted"
-            data-testid="huddle-participants"
-            title={huddle.active.participants
-              .map((participant) => participant.displayName)
-              .join(", ")}
-          >
-            {huddleParticipantSummary(huddle.active)}
-          </span>
-        </div>
-      )}
-      <Button
-        type="button"
-        size="sm"
-        className="shrink-0"
-        variant={huddle.active ? "default" : "secondary"}
+      {huddle.active && <HuddleLiveChip huddle={huddle.active} />}
+      <HuddleIconButton
+        testId={huddle.active ? "huddle-join" : "huddle-start"}
+        label={startOrJoinLabel}
+        busy={huddle.busy === "start-or-join"}
         onClick={() => void huddle.startOrJoin()}
-        aria-busy={huddle.busy === "start-or-join" || undefined}
-        data-testid={huddle.active ? "huddle-join" : "huddle-start"}
       >
         {huddle.busy === "start-or-join" ? (
-          <Loader2 aria-hidden="true" className="spinner-busy" />
+          <Loader2 aria-hidden="true" className="size-4 spinner-busy" />
         ) : (
-          <AudioLines aria-hidden="true" />
+          <AudioLines aria-hidden="true" className="size-4" />
         )}
-        {huddle.active ? "허들 참가" : "허들 시작"}
-      </Button>
+      </HuddleIconButton>
       <span className="sr-only" aria-live="polite">
         {busy ? "허들 요청 처리 중" : ""}
       </span>

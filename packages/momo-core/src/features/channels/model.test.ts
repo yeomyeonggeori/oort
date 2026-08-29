@@ -6,6 +6,7 @@ import {
   CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
+  CHANNEL_TOPIC_VIEW_LABEL,
   CHANNEL_UNMUTE_LABEL,
   canCreateChannel,
   canCreateChannelNow,
@@ -227,12 +228,17 @@ describe("channelLeaveConfirmBody", () => {
 });
 
 describe("channel header menu labels", () => {
-  it("keeps the three action words distinct", () => {
+  it("keeps the action words distinct", () => {
     const words = new Set([
       CHANNEL_MUTE_LABEL,
       CHANNEL_UNMUTE_LABEL,
       CHANNEL_LEAVE_LABEL,
+      CHANNEL_TOPIC_VIEW_LABEL,
     ]);
-    expect(words.size).toBe(3);
+    expect(words.size).toBe(4);
+  });
+
+  it("names the topic item as view, because there is no topic PATCH", () => {
+    expect(CHANNEL_TOPIC_VIEW_LABEL).toBe("주제 보기");
   });
 });

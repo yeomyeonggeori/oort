@@ -60,9 +60,9 @@ import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
   ChannelMemberPanel,
-  ChannelTopicControl,
   type ChannelMemberListStatus,
 } from "@/features/channels/ChannelContextControls";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
   HuddleHeaderBanner,
   HuddleHeaderControl,
@@ -794,8 +794,13 @@ export function ChatShell() {
 
   const renderChannelHeader = (huddle: HuddleController | null) => (
     <>
-      <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* 1줄 헤더 (#1865). py-row(6)×2 + size-control(32) + 하단 경계 1px = 45,
+          사이드바 검색 줄(p-2 + control-sm + hairline)과 하단 경계를 맞춘다. */}
+      <header
+        data-testid="channel-header"
+        className="flex min-w-0 items-center gap-3 border-b border-line px-4 py-row"
+      >
+        <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
@@ -808,82 +813,57 @@ export function ChatShell() {
               <Hash className="size-4" />
             )}
           </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div className="flex min-w-0 items-center gap-2">
-              {/* 검수 피드백 #3 ②: 채널 이름을 누르면 채널을 다루는 메뉴가 선다.
-                  진짜 채널(공개/비공개)에서만 — DM은 이름을 바꾸거나 나갈 대상이
-                  아니고, 스트레스 픽스처는 뒤에 서버 행이 없다. h1은 그대로 제목의
-                  지표(landmark)로 남고, 트리거 버튼이 그 안에 산다. DM 헤더의 이름은
-                  상대 프로필 카드를 여는 트리거다(#1679). */}
-              {stressCount === 0 && channel && channel.kind !== "dm" ? (
-                <h1 className="flex min-w-0 items-center text-body font-semibold">
-                  <ChannelHeaderMenu
-                    workspaceId={workspaceId}
-                    channel={channel}
-                    title={labelParts?.text ?? label}
-                    selfMemberId={session.member.id}
-                    selfRole={memberFor(directory, session.member.id)?.role}
-                  />
-                </h1>
-              ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
-                <h1 className="flex min-w-0 items-center text-body font-semibold">
-                  <button
-                    type="button"
-                    data-testid="dm-profile-trigger"
-                    aria-label={`${label} 프로필 열기`}
-                    onClick={(event) =>
-                      openMemberProfile(peer.id, event.currentTarget)
-                    }
-                    className={cn(
-                      "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
-                      labelParts?.isAgent ? "text-agent" : "text-ink"
-                    )}
-                  >
-                    {labelParts?.text ?? label}
-                  </button>
-                </h1>
-              ) : (
-                <h1
-                  className={cn(
-                    "min-w-0 truncate text-body font-semibold",
-                    labelParts?.isAgent && stressCount === 0 && "text-agent"
-                  )}
-                >
-                  {stressCount > 0
-                    ? `스크롤 측정 (${stressCount})`
-                    : labelParts?.text ?? label}
-                </h1>
+          {/* 검수 피드백 #3 ② / #1865: 채널 이름은 한 줄 제목이다. 채널을 다루는
+              메뉴는 우측 ⋮ 로 옮겼다. 진짜 채널(공개/비공개)에서만 그 메뉴가
+              선다 — DM은 이름을 바꾸거나 나갈 대상이 아니고, 스트레스 픽스처는
+              뒤에 서버 행이 없다. DM 헤더의 이름은 상대 프로필 카드를 여는
+              트리거다(#1679). */}
+          {stressCount === 0 && channel && channel.kind !== "dm" ? (
+            <h1 className="min-w-0 truncate text-body font-semibold text-ink">
+              {labelParts?.text ?? label}
+            </h1>
+          ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
+            <h1 className="flex min-w-0 items-center text-body font-semibold">
+              <button
+                type="button"
+                data-testid="dm-profile-trigger"
+                aria-label={`${label} 프로필 열기`}
+                onClick={(event) =>
+                  openMemberProfile(peer.id, event.currentTarget)
+                }
+                className={cn(
+                  "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
+                  labelParts?.isAgent ? "text-agent" : "text-ink"
+                )}
+              >
+                {labelParts?.text ?? label}
+              </button>
+            </h1>
+          ) : (
+            <h1
+              className={cn(
+                "min-w-0 truncate text-body font-semibold",
+                labelParts?.isAgent && stressCount === 0 && "text-agent"
               )}
-              {stressCount === 0 && labelParts?.handle && (
-                <span
-                  className="shrink-0 text-meta text-ink-muted"
-                  data-testid="channel-handle"
-                >
-                  {labelParts.handle}
-                </span>
-              )}
-            </div>
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelTopicControl topic={channel.topic} />
-            )}
-          </div>
+            >
+              {stressCount > 0
+                ? `스크롤 측정 (${stressCount})`
+                : labelParts?.text ?? label}
+            </h1>
+          )}
+          {stressCount === 0 && labelParts?.handle && (
+            <span
+              className="shrink-0 text-meta text-ink-muted"
+              data-testid="channel-handle"
+            >
+              {labelParts.handle}
+            </span>
+          )}
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {stressCount === 0 && channel && channel.kind !== "dm" && (
-            <ChannelMemberPanel
-              channelName={channel.name ?? label}
-              members={channelMembers}
-              status={channelMemberListStatus}
-              offline={offline}
-              onRetry={() => void directoryQuery.refetch()}
-              onAddMember={() =>
-                openAddMember({ id: channel.id, name: channel.name ?? label })
-              }
-            />
-          )}
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -893,54 +873,74 @@ export function ChatShell() {
               재연결 {timeline.resume.resubscribeCount}회
             </span>
           )}
-          {huddle && (
-            <HuddleHeaderControl
-              huddle={huddle}
-              offline={offline}
-            />
-          )}
-          {/* 이슈 #1112 — 고정 목록. 작업 세션 토글 왼쪽에 두는 이유: 이것은
-              대화를 읽는 도구고 저것은 대화 밖의 일을 여는 문이다. 스트레스
-              픽스처에서는 뒤에 서버 행이 없으므로 내놓지 않는다 — 반응·액션과
-              같은 규칙. */}
-          {stressCount === 0 && channelId !== null && (
-            <PinListMenu
-              pins={timeline.pins}
-              status={timeline.pinsStatus}
-              directory={directory}
-              onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
-              onRetry={timeline.reloadPins}
-            />
-          )}
-          {/* TC-1 (#1758): 헤더 터미널 아이콘 = 하단 도크. WorkPanel 이 아니다.
-              WorkPanel 은 사이드바 「작업 콘솔」(`open-work-panel`) 과 세션
-              카드가 연다. 이 testid 를 `open-work-panel` 로 남기면 게이트가
-              도크를 패널로 착각한다. */}
-          {stressCount === 0 && (
-            <button
-              ref={terminalToggleRef}
-              type="button"
-              onClick={() => {
-                setWorkOpen(false);
-                setDockOpen((open) => !open);
-              }}
-              aria-pressed={dockOpen}
-              {...(dockOpen
-                ? { "aria-controls": "channel-terminal-dock" }
-                : {})}
-              aria-label="터미널"
-              title="터미널"
-              data-testid="open-terminal-dock"
-              className={cn(
-                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
-                dockOpen
-                  ? "bg-accent-soft text-accent"
-                  : "text-ink-muted hover:bg-surface-hover"
-              )}
-            >
-              <SquareTerminal aria-hidden="true" className="size-4" />
-            </button>
-          )}
+          <div
+            className="flex min-w-0 items-center gap-1"
+            role="group"
+            aria-label="채널 도구"
+            data-testid="channel-header-controls"
+          >
+            {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
+                채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
+                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다. */}
+            {stressCount === 0 && (
+              <button
+                ref={terminalToggleRef}
+                type="button"
+                onClick={() => {
+                  setWorkOpen(false);
+                  setDockOpen((open) => !open);
+                }}
+                aria-pressed={dockOpen}
+                {...(dockOpen
+                  ? { "aria-controls": "channel-terminal-dock" }
+                  : {})}
+                aria-label="터미널"
+                title="터미널"
+                data-testid="open-terminal-dock"
+                className={channelHeaderControlClass({ pressed: dockOpen })}
+              >
+                <SquareTerminal aria-hidden="true" className="size-4" />
+              </button>
+            )}
+            {/* 이슈 #1112 — 고정 목록. 스트레스 픽스처에서는 뒤에 서버 행이
+                없으므로 내놓지 않는다 — 반응·액션과 같은 규칙. */}
+            {stressCount === 0 && channelId !== null && (
+              <PinListMenu
+                pins={timeline.pins}
+                status={timeline.pinsStatus}
+                directory={directory}
+                onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
+                onRetry={timeline.reloadPins}
+              />
+            )}
+            {stressCount === 0 && channel && channel.kind !== "dm" && (
+              <ChannelMemberPanel
+                channelName={channel.name ?? label}
+                members={channelMembers}
+                status={channelMemberListStatus}
+                offline={offline}
+                onRetry={() => void directoryQuery.refetch()}
+                onAddMember={() =>
+                  openAddMember({ id: channel.id, name: channel.name ?? label })
+                }
+              />
+            )}
+            {huddle && (
+              <HuddleHeaderControl
+                huddle={huddle}
+                offline={offline}
+              />
+            )}
+            {stressCount === 0 && channel && channel.kind !== "dm" && (
+              <ChannelHeaderMenu
+                workspaceId={workspaceId}
+                channel={channel}
+                title={labelParts?.text ?? label}
+                selfMemberId={session.member.id}
+                selfRole={memberFor(directory, session.member.id)?.role}
+              />
+            )}
+          </div>
         </div>
       </header>
       {huddle && <HuddleHeaderBanner huddle={huddle} offline={offline} />}
