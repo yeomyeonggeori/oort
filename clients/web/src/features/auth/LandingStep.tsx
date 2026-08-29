@@ -5,6 +5,7 @@ import { OortCloudField } from "./OortCloudField";
 /**
  * S0: a single-look deep-space landing. Two choices, no progress bar.
  * The mark path is the product OortMark; only scale and colour change.
+ * Hero lockup is mark + wordmark "oort" + one-line intro (#1882).
  */
 export function LandingStep({
   onChooseServer,
@@ -24,10 +25,26 @@ export function LandingStep({
     >
       <div className="onboarding-starfield pointer-events-none absolute inset-0" />
       <OortCloudField />
-      <h1 className="sr-only">oort</h1>
       <div className="relative flex flex-1 flex-col items-center justify-center p-6">
-        <div className="onboarding-mark" data-testid="onboarding-mark">
-          <OortMark className="size-onboarding-mark text-onboarding-accent" />
+        <div
+          className="onboarding-lockup flex flex-col items-center gap-3 text-center"
+          data-testid="onboarding-lockup"
+        >
+          <div className="onboarding-mark" data-testid="onboarding-mark">
+            <OortMark className="text-onboarding-accent" />
+          </div>
+          <h1
+            className="onboarding-wordmark font-semibold leading-none tracking-tight"
+            data-testid="onboarding-wordmark"
+          >
+            oort
+          </h1>
+          <p
+            className="onboarding-tagline max-w-onboarding-copy break-keep text-body text-onboarding-ink"
+            data-testid="onboarding-tagline"
+          >
+            사람과 에이전트가 같은 자리에서 일하는 메신저.
+          </p>
         </div>
       </div>
       <div className="relative flex flex-col items-center gap-3 p-6">

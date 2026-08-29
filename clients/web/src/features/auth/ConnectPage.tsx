@@ -7,7 +7,7 @@ import {
   type FormEvent,
   type ReactNode,
 } from "react";
-import { FlaskConical } from "lucide-react";
+import { ArrowLeft, FlaskConical } from "lucide-react";
 import { joinWithInvite, login, type LoginResponse } from "@momo/core/lib/api";
 import { parseJoinFromPageUrl } from "@momo/core/features/auth/deepLink";
 import {
@@ -15,6 +15,7 @@ import {
   CONFIGURED_WORKSPACE,
   DEV_EMAIL,
   DEV_PASSWORD,
+  IS_TAURI,
   TEST_PREFILL_ACTIVE,
 } from "@/lib/env";
 import {
@@ -35,6 +36,7 @@ import {
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
+import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
 import { DiscoveredServerList } from "./DiscoveredServerList";
 import { useDiscoveredServers, type DiscoveredServer } from "./discovery";
@@ -654,11 +656,16 @@ export function ConnectPage({
 
   return (
     <div className="flex min-h-full flex-col bg-surface">
-      <div className="flex items-center justify-between px-6 py-4">
-        <button
+      <header
+        className="onboarding-step-chrome"
+        data-testid="onboarding-step-chrome"
+        {...titlebarDragProps(IS_TAURI)}
+      >
+        <Button
           type="button"
-          className="tap-target inline-flex items-center rounded-sm text-body text-ink-muted underline underline-offset-4 focus-visible:focus-ring"
+          variant="ghost"
           data-testid="onboarding-back"
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={() => {
             if (step === "account") {
               goTo("gateway");
@@ -671,8 +678,9 @@ export function ConnectPage({
             }
           }}
         >
+          <ArrowLeft aria-hidden="true" />
           뒤로
-        </button>
+        </Button>
         {progress && (
           <p
             className="text-meta text-ink-muted"
@@ -682,7 +690,7 @@ export function ConnectPage({
             {progress}
           </p>
         )}
-      </div>
+      </header>
       <div className="flex flex-1 items-center justify-center p-6">{slide}</div>
     </div>
   );

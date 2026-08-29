@@ -442,6 +442,8 @@ component must name a role and cannot reach for size inflation:
 | `text-title` | 16px | surface titles |
 | `text-display` | 20px | at most one per surface |
 
+S0 onboarding is not a sixth role. `--font-onboarding-wordmark` lives on `:root` (not `@theme --font-*`, which is a family, and not `--text-*`, which is the closed product scale). Floor is 1/3 of `--spacing-onboarding-mark` (48px); `.onboarding-wordmark` clamps 48 / 4vw / 64 so the lockup beat (mark → name → copy) is size, not just fade delay (#1882 H-1). `--spacing-onboarding-copy` 360px is the one-line measure of the S0 intro sentence, not a pane (#1882 M-1).
+
 A role and a color share the `text-` prefix but are **different axes**, and the
 class merge has to be told so. `cn()` (`src/design/lib/cn.ts`) extends
 tailwind-merge with the five roles as its `font-size` group; without that,
