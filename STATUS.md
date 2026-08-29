@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## BF-A4 알림 설정 세분화 (#1887, 2026-08-30)
+
+- 설정 > 알림 규칙에 이 기기 알림 그룹: 권한 3분기(granted 켜짐 / default 「알림 켜기」·요청 중 / denied 브라우저 설정 배너) + 미지원(웹뷰·브라우저 탭). 발화는 기존대로 데스크톱 셸만.
+- 종류별 토글은 조사된 실존 2종만(멘션, 승인 요청). `momo.web.notifications.v1` 로컬 저장. 꺼진 종류는 `notifyThisDevice` → `kind-disabled` 로 미발화. DM·스레드·일반 채널 자리는 만들지 않음. 알림음 범위 밖.
+- 카피: 방해 금지·멘션 예외는 서버에 하나, 종류별 끔은 이 기기. DND PUT 회귀 유지.
+- red proof: 권한 패널 모킹 4분기 + 요청 버튼 라벨 전환, 종류 토글 → 발화 경로 미발화(멘션·승인 각각), DND PUT. web vitest 1803 · tsc · design_preflight_web · `CAPTURE_PORT=8077` capture:design (settings-notifications light/dark) · `SHELL_GATE_PORT=8079 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-A3 허들 마이크 디바이스 선택 + 게인 (#1886, 2026-08-30)
 
 - 허들 라이브 컨트롤에 마이크 선택 메뉴. `useAudioInputDevices`가 `enumerateDevices`+`devicechange`로 audioinput을 갱신하고, 권한 전(빈 레이블)·거부·0개를 문장으로 가른다. 선택 deviceId는 `momo.web.huddle.mic.v1`에 기억되고 다음 참가 시 그 장치로 시작(부재 시 기본 폴백).

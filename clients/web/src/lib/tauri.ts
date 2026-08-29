@@ -238,13 +238,31 @@ export async function ensureNotificationPermission(): Promise<DesktopNotificatio
   permissionPromise ??= (async () => {
     const current = await notificationPermission();
     if (current !== "default") return current;
-    try {
-      return await invoke<DesktopNotificationPermission>("notification_request_permission");
-    } catch {
-      return "denied";
-    }
+    return requestNotificationPermission();
   })();
   return permissionPromise;
+}
+
+/**
+ * Ask the OS now. Settings uses this for the 「알림 켜기」 control; the fire
+ * path still goes through `ensureNotificationPermission` so a first banner can
+ * prompt when nobody opened settings.
+ *
+ * The result replaces the per-run cache, so a grant from settings is what
+ * `showNotification` sees on the next event.
+ */
+export async function requestNotificationPermission(): Promise<DesktopNotificationPermission> {
+  if (!IS_TAURI) return "denied";
+  let next: DesktopNotificationPermission;
+  try {
+    next = await invoke<DesktopNotificationPermission>(
+      "notification_request_permission"
+    );
+  } catch {
+    next = "denied";
+  }
+  permissionPromise = Promise.resolve(next);
+  return next;
 }
 
 /**
