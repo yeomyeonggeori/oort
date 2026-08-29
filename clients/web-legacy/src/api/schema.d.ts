@@ -324,7 +324,11 @@ export interface paths {
         delete: operations["leaveWorkspace"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change the caller's own display name.
+         * @description #1873 / BZ-4e. Human active members only. Body is `{displayName}` (camelCase, closed world). Normalization reuses the join rule (`normalized_join_display_name`: trimmed, 1..100 chars); a violation is 400 `displayName is required`. Handle, role, and avatar are not writable here. Agent bearers are 403 — an agent's display name is the agent profile path. Writes `member.display_name` and `updated_at` in one tenant transaction with audit `member.renamed` and a `member.renamed` outbox broadcast per co-member channel (presence fan-out shape; no new rail).
+         */
+        patch: operations["renameSelfMember"];
         trace?: never;
     };
     "/v1/workspaces/{workspaceId}/members/me/password": {
@@ -2838,6 +2842,13 @@ export interface components {
             currentPassword: string;
             /** @description Replacement password, at most 1024 chars, must differ. */
             newPassword: string;
+        };
+        RenameSelfMemberRequest: {
+            /** @description 1..100 chars after trimming. Same rule and 400 sentence as join (`displayName is required`). Handle/role/avatar are not accepted. */
+            displayName: string;
+        };
+        SelfMemberResponse: {
+            member: components["schemas"]["Member"];
         };
         PasswordResetClaimResponse: {
             /** @description Raw 32-byte token. Present only on this 201. */
@@ -6478,6 +6489,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Caller is the last active owner */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    renameSelfMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameSelfMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Display name updated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfMemberResponse"];
+                };
+            };
+            /** @description displayName failed join normalization (empty or longer than 100 chars after trim). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human live member of this workspace, or presented an agent bearer (not on the agent-route allow-list). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

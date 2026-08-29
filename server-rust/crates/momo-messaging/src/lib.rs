@@ -55,6 +55,7 @@ pub mod hosted_inbox;
 pub mod huddle;
 pub mod identity;
 pub mod interaction;
+pub mod member_rename;
 pub mod message;
 pub mod notification_rule;
 pub mod presence;
@@ -113,6 +114,10 @@ pub use interaction::{
     PinnedMessage, ReactionAction, ReactionDelta, ReactionEmojiInvalid, ReactionSnapshot,
     StreamCloseOutcome, StreamEdit, StreamOutcome, CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT,
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
+};
+pub use member_rename::{
+    build_member_renamed_payload, rename_own_display_name_in_tx, DisplayNameRename,
+    MEMBER_RENAMED_BROADCAST_TYPE,
 };
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,

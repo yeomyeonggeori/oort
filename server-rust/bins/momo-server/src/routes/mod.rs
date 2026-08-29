@@ -50,6 +50,8 @@ pub mod realtime;
 pub mod reattach;
 pub mod roster;
 pub mod search;
+/// #1873 — BZ-4e self display-name rename (`PATCH …/members/me`).
+pub mod self_profile;
 pub mod shared;
 pub mod terminal_attach;
 /// ADR-0170 — link unfurl settings, message-level remove, image proxy.
