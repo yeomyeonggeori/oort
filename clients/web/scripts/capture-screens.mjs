@@ -6976,6 +6976,52 @@ async function captureEmptyConversationScenes(browser, scheme) {
   return shots;
 }
 
+// 메시지가 있는 채널의 인트로 (#1904 design-review B-1). 빈 상태 레인은
+// empty=true만 찍어서, 히스토리 첫 행에 액션이 남는 화면이 증거 없이 지나갔다.
+// general은 픽스처 16행이라 열자마자 reachedStart이고, 인트로는 바닥 정렬 때문에
+// 창 위에 있으므로 목록을 머리까지 올린 뒤에 찍는다.
+async function captureNonemptyChannelIntroScenes(browser, scheme) {
+  const shots = [];
+  const CHANNEL_ID = CHANNELS[0].id;
+
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.evaluate((id) => {
+    window.location.hash = `#/c/${id}`;
+  }, CHANNEL_ID);
+  await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+  await scrollTimelineRowIntoView(
+    page,
+    "message-channel-intro",
+    `nonempty intro ${scheme}`
+  );
+  const intro = page.getByTestId("message-channel-intro");
+  const actionCount = await intro.locator("button").count();
+  if (actionCount !== 0) {
+    throw new Error(
+      `비어 있지 않은 인트로에 액션이 ${actionCount}개다 ${scheme}`
+    );
+  }
+  const text = await intro.innerText();
+  if (text.includes("첫 메시지")) {
+    throw new Error(`비어 있지 않은 인트로가 「첫 메시지」를 말한다 ${scheme}`);
+  }
+  await page.waitForTimeout(200);
+  const path = `${OUT_DIR}/channel-intro-nonempty-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  await context.close();
+  return shots;
+}
+
 // 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
 // scene, so its four states went to review unseen. Each state is shot in its
 // own context because the roster is a react-query cache: to make the SAME
@@ -6997,7 +7043,7 @@ async function captureAddMemberScenes(browser, scheme) {
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
 
-  async function shoot(name, overrideRoster, settleTestId) {
+  async function shoot(name, overrideRoster, settleTestId, entry = "intro") {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -7027,12 +7073,25 @@ async function captureAddMemberScenes(browser, scheme) {
     await page
       .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`)
       .click();
-    const empty = page.getByTestId("timeline-empty");
-    await empty.waitFor({ state: "visible" });
-    // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
-    // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
-    // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
-    await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+    if (entry === "header") {
+      // 로딩 장면은 로스터를 붙잡는다. 인트로의 「멤버 추가하기」는 로스터가
+      // 오기 전에 아무 말도 하지 않으므로(R2 M5) 여기서 열 수 없다. 헤더 멤버
+      // 목록이 같은 다이얼로그의 다른 문이다. 픽스처에 맞춰 제품 규칙을 낮추지
+      // 않는다 (#1904 H-1).
+      await page.getByTestId("channel-member-count").waitFor({ state: "visible" });
+      await page.getByTestId("channel-member-count").click();
+      await page
+        .getByTestId("channel-member-panel")
+        .waitFor({ state: "visible" });
+      await page.getByTestId("channel-member-add").click();
+    } else {
+      const empty = page.getByTestId("timeline-empty");
+      await empty.waitFor({ state: "visible" });
+      // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
+      // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
+      // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
+      await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+    }
     await page
       .getByTestId("add-channel-member-dialog")
       .waitFor({ state: "visible" });
@@ -7070,8 +7129,8 @@ async function captureAddMemberScenes(browser, scheme) {
   );
   // 로딩: 로스터 요청을 영영 붙잡아 스켈레톤이 화면에 남게 한다. 응답하지
   // 않으므로 fulfill이 없고, 컨텍스트가 닫히면 요청은 그대로 버려진다(닫힌
-  // 컨텍스트에 뒤늦게 응답해 터지는 일이 없다).
-  await shoot("loading", () => new Promise(() => {}));
+  // 컨텍스트에 뒤늦게 응답해 터지는 일이 없다). 진입은 헤더 문(위 entry).
+  await shoot("loading", () => new Promise(() => {}), null, "header");
 
   return shots;
 }
@@ -8021,6 +8080,7 @@ async function main() {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
+          all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
