@@ -129,7 +129,8 @@ export function PresenceStatusItems({
   const current: PresenceStatus = declared ?? "auto";
 
   const mutation = useMutation({
-    mutationFn: (status: PresenceStatus) => setPresenceStatus(workspaceId, status),
+    mutationFn: (status: PresenceStatus) =>
+      setPresenceStatus(workspaceId, { status }),
     onMutate: async (status) => {
       // Optimistic: paint the new status onto the roster cache the profile row
       // and every member surface read from, then reconcile with the server.

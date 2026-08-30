@@ -139,6 +139,17 @@ describe("프로필 카드 트리거는 코어 이름을 쓴다 (M-6)", () => {
   });
 });
 
+describe("프로필 카드 커스텀 상태 축 (#1889)", () => {
+  it("adds 상태 설정 as a sibling of the declared radios, not a replacement", () => {
+    expect(profileCard).toContain("PresenceStatusItems");
+    expect(profileCard).toContain("profile-set-status");
+    expect(profileCard).toContain("CUSTOM_STATUS_MENU_LABEL");
+    expect(profileCard).toContain("SetStatusDialog");
+    expect(profileCard).toContain("CustomStatusMark");
+    expect(profileCard).not.toContain("DropdownMenuSub");
+  });
+});
+
 describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
   it("서브메뉴를 들이지 않고 레일의 워크스페이스 추가를 연다", () => {
     expect(profileCard).not.toContain("DropdownMenuSub");

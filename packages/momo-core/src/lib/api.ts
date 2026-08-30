@@ -33,6 +33,12 @@ import {
   type WorkspaceUnfurlSettings,
 } from "../features/timeline/unfurl";
 import {
+  presenceWriteBody,
+  type PresenceSnapshot,
+  type PresenceWrite,
+} from "../features/presence/customStatus";
+// PresenceSnapshot / PresenceWrite are the GET/PUT shapes of the same surface.
+import {
   arrayField,
   bool,
   num,
@@ -42,6 +48,8 @@ import {
   stringArrayField,
   WireShapeError,
 } from "./wire";
+
+export type { PresenceSnapshot, PresenceWrite } from "../features/presence/customStatus";
 
 export interface Member {
   id: string;
@@ -126,6 +134,14 @@ export interface RosterMember {
    * default. Consumers go through `effectivePresence` rather than touching this.
    */
   presenceStatus?: PresenceStatus;
+  /**
+   * Custom status (ADR-0176), human only. Orthogonal to `presenceStatus`.
+   * ABSENT means there is nothing to show (unset, expired on the server, or
+   * an older projection). Consumers go through `visibleCustomStatus`.
+   */
+  statusEmoji?: string;
+  statusText?: string;
+  statusExpiresAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -160,6 +176,25 @@ function sanitizeRosterMember(value: unknown): unknown {
   // than surfaced as a value the effective-dot logic would then have to guess at.
   if ("presenceStatus" in row && !isPresenceStatus(row.presenceStatus)) {
     const { presenceStatus: _unknown, ...rest } = row;
+    row = rest;
+  }
+  // Custom-status columns follow the same drop-the-column rule: a bad value
+  // must not delete the member. Empty strings stay and `visibleCustomStatus`
+  // treats them as absence.
+  if ("statusEmoji" in row && typeof row.statusEmoji !== "string") {
+    const { statusEmoji: _bad, ...rest } = row;
+    row = rest;
+  }
+  if ("statusText" in row && typeof row.statusText !== "string") {
+    const { statusText: _bad, ...rest } = row;
+    row = rest;
+  }
+  if (
+    "statusExpiresAtMs" in row &&
+    (typeof row.statusExpiresAtMs !== "number" ||
+      !Number.isFinite(row.statusExpiresAtMs))
+  ) {
+    const { statusExpiresAtMs: _bad, ...rest } = row;
     row = rest;
   }
   return row;
@@ -1070,26 +1105,47 @@ export function effectivePresence(
   return available ? "online" : "offline";
 }
 
-/** Read the caller's own declared status (auto/away/dnd). */
-export async function fetchPresenceStatus(
-  workspaceId: string
-): Promise<PresenceStatus> {
-  const res = await request<{ status: string }>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`
-  );
-  return isPresenceStatus(res.status) ? res.status : "auto";
+function parsePresenceSnapshot(
+  value: unknown,
+  fallbackStatus: PresenceStatus
+): PresenceSnapshot {
+  const source = record(value) ?? {};
+  const status = isPresenceStatus(source.status) ? source.status : fallbackStatus;
+  const snapshot: PresenceSnapshot = { status };
+  const emoji = str(source, "statusEmoji");
+  const text = str(source, "statusText");
+  const expires = num(source, "statusExpiresAtMs");
+  if (emoji !== undefined && emoji.trim() !== "") snapshot.statusEmoji = emoji;
+  if (text !== undefined && text.trim() !== "") snapshot.statusText = text;
+  if (expires !== undefined) snapshot.statusExpiresAtMs = expires;
+  return snapshot;
 }
 
-/** Set the caller's own declared status. Broadcasts to co-members server-side. */
+/** Read the caller's own declared status (auto/away/dnd) plus custom fields. */
+export async function fetchPresenceStatus(
+  workspaceId: string
+): Promise<PresenceSnapshot> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`
+  );
+  return parsePresenceSnapshot(res, "auto");
+}
+
+/**
+ * Set the caller's own declared status and optional custom status.
+ * Untouched custom keys must be omitted so a declared-status write cannot
+ * clear emoji/text/expiry. JSON null clears a key. Broadcasts on the existing
+ * `type: presence` rail.
+ */
 export async function setPresenceStatus(
   workspaceId: string,
-  status: PresenceStatus
-): Promise<PresenceStatus> {
-  const res = await request<{ status: string }>(
+  write: PresenceWrite
+): Promise<PresenceSnapshot> {
+  const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`,
-    { method: "PUT", body: JSON.stringify({ status }) }
+    { method: "PUT", body: JSON.stringify(presenceWriteBody(write)) }
   );
-  return isPresenceStatus(res.status) ? res.status : status;
+  return parsePresenceSnapshot(res, write.status);
 }
 
 // ---- 에이전트 만들기 · 채널 배치 -------------------------------------------

@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)
+
+- ProfileCard 「상태 설정」 다이얼로그: 기존 이모지 피커 + 자유 텍스트 ≤80자 + 만료(지우지 않음/30분/1시간/오늘까지/시각 고르기) + 프리셋 칩 5종(회의 중/이동 중/병가/휴가/재택) + 지우기. PUT은 `status` 필수, 커스텀 3키 omit=유지·null=지우기.
+- 표시: ProfileCard·명부 행·멤버 프로필. 선언 프레즌스 3종(auto/away/dnd)과 별도 축 동시 표시. 만료 지난 상태는 클라에서 비표시(고정 now 주입). 명부 접근성 이름은 텍스트만(이모지 aria-hidden).
+- 서버 절반은 track/engine(#1907, A-42). 이 레인은 REST 소비층+모킹 red proof. 실서버 conformance는 main 승격 시. runtime-unverified: 라이브 PUT/roster/presence 브로드캐스트.
+- red proof: PUT omit vs null 자구 왕복(설정→roster 유지→지우기)·80자 입력 상한·만료 지난 비표시(고정 now)·프리셋 칩 5종 카피·선언 3종 라디오 회귀. web vitest 1934 · core 1803 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8517` capture:design · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-B1 클라 절반 메시지 리마인더 UI (#1888, 2026-08-30)
 
 - 메시지 ⋯/우클릭/시트에 「나중에 알림」(프리셋 5종 + 날짜·시간 커스텀 + 메모 ≤200자, 로컬 TZ). 인박스에 「나중에」 탭 도킹(A5 행 문법: 미리보기·채널·상대 만기·완료·스누즈). 원문 클릭은 기존 `?msg=` 점프.

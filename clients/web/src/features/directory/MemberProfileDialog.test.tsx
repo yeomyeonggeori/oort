@@ -247,6 +247,54 @@ async function applyRole() {
   });
 }
 
+describe("멤버 프로필 커스텀 상태 (#1889)", () => {
+  it("shows declared presence and custom status as separate facts", async () => {
+    const working = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "away",
+      statusEmoji: "🏠",
+      statusText: "재택",
+    });
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      roster: [OWNER, ADMIN, working, AGENT],
+    });
+    const dialog = await waitForDialog();
+    expect(dialog.textContent).toContain("자리 비움");
+    expect(dialog.textContent).toContain("재택");
+    expect(dialog.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
+      "🏠"
+    );
+    expect(dialog.textContent).toContain("활성");
+  });
+
+  it("does not draw an expired custom status", async () => {
+    const expired = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "auto",
+      statusEmoji: "📅",
+      statusText: "회의 중",
+      statusExpiresAtMs: 1,
+    });
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      roster: [OWNER, ADMIN, expired, AGENT],
+    });
+    const dialog = await waitForDialog();
+    expect(dialog.querySelector('[data-testid="custom-status"]')).toBeNull();
+    expect(dialog.textContent).toContain("온라인");
+    expect(dialog.textContent).not.toContain("회의 중");
+  });
+});
+
 describe("멤버 프로필 역할 변경", () => {
   it("비운영자 viewer는 컨트롤을 숨기고 읽기 전용 Fact를 유지한다", async () => {
     mountProfile({ viewer: INTERN, targetId: ADMIN_ID });

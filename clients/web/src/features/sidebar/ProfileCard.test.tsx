@@ -69,7 +69,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function rosterMember(): RosterMember {
+function rosterMember(over: Partial<RosterMember> = {}): RosterMember {
   return {
     id: MEMBER_ID,
     workspaceId: WS,
@@ -84,6 +84,7 @@ function rosterMember(): RosterMember {
     presenceStatus: "auto",
     createdAtMs: 0,
     updatedAtMs: 0,
+    ...over,
   };
 }
 
@@ -109,7 +110,10 @@ function sessionValue(logout: () => void): SessionContextValue {
   };
 }
 
-function mountCard(logout: () => void = () => undefined): HTMLElement {
+function mountCard(
+  logout: () => void = () => undefined,
+  selfMember: RosterMember = rosterMember()
+): HTMLElement {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity },
@@ -135,7 +139,7 @@ function mountCard(logout: () => void = () => undefined): HTMLElement {
           createElement(ProfileCard, {
             workspaceId: WS,
             selfMemberId: MEMBER_ID,
-            selfMember: rosterMember(),
+            selfMember,
             selfName: "곽성재",
             connected: true,
           })
@@ -172,6 +176,7 @@ function menuRowIds(): string[] {
       id === "presence-option-auto" ||
       id === "presence-option-away" ||
       id === "presence-option-dnd" ||
+      id === "profile-set-status" ||
       id === "profile-add-workspace" ||
       id === "nav-settings" ||
       id === "profile-logout"
@@ -204,10 +209,12 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
     const logoutItem = menu.querySelector('[data-testid="profile-logout"]');
     expect(logoutItem).not.toBeNull();
     expect(logoutItem?.textContent).toContain("로그아웃");
+    expect(menu.querySelector('[data-testid="profile-set-status"]')).not.toBeNull();
     expect(menuRowIds()).toEqual([
       "presence-option-auto",
       "presence-option-away",
       "presence-option-dnd",
+      "profile-set-status",
       "profile-add-workspace",
       "nav-settings",
       "profile-logout",
@@ -309,5 +316,64 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
       confirm!.click();
     });
     expect(logout).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProfileCard 커스텀 상태 (#1889)", () => {
+  it("shows custom status next to the presence badge, not instead of it", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "away",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+      })
+    );
+    expect(document.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="presence-control"]')?.getAttribute(
+        "data-effective"
+      )
+    ).toBe("away");
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
+      "📅"
+    );
+    expect(document.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe(
+      "회의 중"
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger?.getAttribute("aria-label")).toContain("자리 비움");
+    expect(trigger?.getAttribute("aria-label")).toContain("회의 중");
+    expect(trigger?.getAttribute("aria-label")).not.toContain("📅");
+  });
+
+  it("does not draw an expired custom status", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+        statusExpiresAtMs: 1,
+      })
+    );
+    expect(document.querySelector('[data-testid="custom-status"]')).toBeNull();
+    expect(document.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+  });
+
+  it("opens the status dialog from the menu without dropping presence radios", async () => {
+    mountCard();
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-testid="presence-option-auto"]')).not.toBeNull();
+    expect(menu.querySelector('[data-testid="presence-option-away"]')).not.toBeNull();
+    expect(menu.querySelector('[data-testid="presence-option-dnd"]')).not.toBeNull();
+    await act(async () => {
+      menu
+        .querySelector('[data-testid="profile-set-status"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="set-status-dialog"]')).not.toBeNull();
+    });
   });
 });

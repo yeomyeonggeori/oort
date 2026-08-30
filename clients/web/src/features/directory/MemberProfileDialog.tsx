@@ -9,6 +9,8 @@ import {
   statusLabel,
   type RoleLabels,
 } from "@momo/core/features/directory/model";
+import { visibleCustomStatus } from "@momo/core/features/presence/customStatus";
+import { declaredStatusLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
@@ -22,6 +24,7 @@ import {
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { Avatar } from "@/features/timeline/MessageRow";
+import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
 import {
   memberFor,
   useDirectory,
@@ -165,6 +168,11 @@ function ReadyProfile({
   );
   const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";
+  const custom = visibleCustomStatus(member, Date.now());
+  const declared =
+    member.kind === "human" && member.presenceStatus
+      ? declaredStatusLabel(member.presenceStatus)
+      : null;
   const availability = dmAvailability(member, session.member.id);
   const offline = connStatus === "disconnected";
   const opening = pendingMemberId === member.id;
@@ -206,7 +214,14 @@ function ReadyProfile({
             </span>
             <span className="truncate text-body text-ink-muted">
               @{member.handle}
+              {declared ? ` · ${declared}` : ""}
             </span>
+            {custom ? (
+              <CustomStatusMark
+                status={custom}
+                className="text-meta text-ink-muted"
+              />
+            ) : null}
           </span>
         </div>
 

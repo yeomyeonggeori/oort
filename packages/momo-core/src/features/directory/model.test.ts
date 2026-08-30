@@ -345,6 +345,38 @@ describe("memberRowLabel", () => {
     );
   });
 
+  it("includes custom status text and never the emoji", () => {
+    const working = member({
+      id: SEONGJAE.id,
+      displayName: SEONGJAE.displayName,
+      handle: SEONGJAE.handle,
+      role: "admin",
+      statusEmoji: "📅",
+      statusText: "회의 중",
+    });
+    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).toBe(
+      "곽성재 @seongjae, 관리자, 회의 중, 다이렉트 메시지 열기"
+    );
+    expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).not.toContain(
+      "📅"
+    );
+  });
+
+  it("omits an expired custom status from the accessible name", () => {
+    const expired = member({
+      id: SEONGJAE.id,
+      displayName: SEONGJAE.displayName,
+      handle: SEONGJAE.handle,
+      role: "admin",
+      statusEmoji: "📅",
+      statusText: "회의 중",
+      statusExpiresAtMs: 1,
+    });
+    expect(memberRowLabel(expired, null, undefined, 1_800_000_000_000)).toBe(
+      "곽성재 @seongjae, 관리자, 다이렉트 메시지 열기"
+    );
+  });
+
   it("ends with the action, so the row reads as a thing then a verb", () => {
     for (const m of ROSTER) {
       expect(memberRowLabel(m, DEMO.displayName)).toMatch(

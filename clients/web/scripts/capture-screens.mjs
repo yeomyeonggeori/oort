@@ -444,6 +444,8 @@ const ROSTER = [
     channelIds: CHANNEL_IDS,
     capabilities: [],
     presenceStatus: "auto",
+    statusEmoji: "📅",
+    statusText: "회의 중",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -477,6 +479,9 @@ const ROSTER = [
     channelCount: 2,
     channelIds: CHANNEL_IDS.slice(0, 2),
     capabilities: [],
+    presenceStatus: "away",
+    statusEmoji: "🏠",
+    statusText: "재택",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -1352,6 +1357,11 @@ async function installUnmockedFallback(context) {
 
 async function installMocks(context) {
   let declaredPresence = "auto";
+  let customStatus = {
+    statusEmoji: "📅",
+    statusText: "회의 중",
+    statusExpiresAtMs: undefined,
+  };
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
@@ -1525,7 +1535,31 @@ async function installMocks(context) {
         body.status === "dnd"
       ) {
         declaredPresence = body.status;
-        return json(route, { status: declaredPresence });
+        if (Object.prototype.hasOwnProperty.call(body, "statusEmoji")) {
+          customStatus.statusEmoji =
+            body.statusEmoji === null || body.statusEmoji === ""
+              ? undefined
+              : body.statusEmoji;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusText")) {
+          customStatus.statusText =
+            body.statusText === null || body.statusText === ""
+              ? undefined
+              : body.statusText;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusExpiresAtMs")) {
+          customStatus.statusExpiresAtMs =
+            typeof body.statusExpiresAtMs === "number"
+              ? body.statusExpiresAtMs
+              : undefined;
+        }
+        const response = { status: declaredPresence };
+        if (customStatus.statusEmoji) response.statusEmoji = customStatus.statusEmoji;
+        if (customStatus.statusText) response.statusText = customStatus.statusText;
+        if (customStatus.statusExpiresAtMs !== undefined) {
+          response.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+        }
+        return json(route, response);
       }
       return route.fulfill({
         status: 400,
@@ -1533,13 +1567,25 @@ async function installMocks(context) {
         body: JSON.stringify({ error: "invalid_status" }),
       });
     }
-    return json(route, { status: declaredPresence });
+    const own = { status: declaredPresence };
+    if (customStatus.statusEmoji) own.statusEmoji = customStatus.statusEmoji;
+    if (customStatus.statusText) own.statusText = customStatus.statusText;
+    if (customStatus.statusExpiresAtMs !== undefined) {
+      own.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+    }
+    return json(route, own);
   });
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
-          ? { ...member, presenceStatus: declaredPresence }
+          ? {
+              ...member,
+              presenceStatus: declaredPresence,
+              statusEmoji: customStatus.statusEmoji,
+              statusText: customStatus.statusText,
+              statusExpiresAtMs: customStatus.statusExpiresAtMs,
+            }
           : member
       ),
     })
