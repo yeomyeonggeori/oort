@@ -13,6 +13,12 @@ export const REMINDER_NOTE_MAX = 200;
 
 export const REMINDERS_POLL_MS = 30_000;
 
+/**
+ * Hidden-window / return-from-background due arrivals fire one OS banner
+ * apiece until this many. Above it, a single "밀린 알림 n건" summary.
+ */
+export const DUE_NOTIFY_BURST_CAP = 3;
+
 export type ReminderListState = "pending" | "all";
 
 export interface MessageReminder {
@@ -85,8 +91,8 @@ export function reminderPreviewText(reminder: MessageReminder): string {
  * count forward so a list of upcoming reminders is not all "방금".
  */
 export function reminderDueLabel(dueAtMs: number, nowMs: number): string {
+  if (dueAtMs <= nowMs) return "기한 지남";
   const minutes = Math.round((dueAtMs - nowMs) / 60_000);
-  if (minutes <= 0) return "기한 지남";
   if (minutes < 1) return "곧";
   if (minutes < 60) return `${minutes}분 후`;
   const hours = Math.round(minutes / 60);
@@ -100,6 +106,13 @@ export interface DueArrivalPlan {
   /** Every currently overdue pending row. List badge / highlight. */
   badgeIds: string[];
   nextWatermarkMs: number;
+  /**
+   * When more than `DUE_NOTIFY_BURST_CAP` rows crossed due at once, fire one
+   * summary instead of a stack. `notifyIds` is empty in that case.
+   */
+  backlogCount?: number;
+  /** Rows that would have been notified, so the session can mark them announced. */
+  backlogIds?: string[];
 }
 
 /**
@@ -127,20 +140,31 @@ export function dueArrivalPlan(args: {
       nextWatermarkMs: args.nowMs,
     };
   }
-  const notifyIds = overdue
-    .filter(
-      (row) =>
-        row.dueAtMs > args.watermarkMs! && !args.announcedIds.has(row.id)
-    )
-    .map((row) => row.id);
+  const crossed = overdue.filter(
+    (row) => row.dueAtMs > args.watermarkMs! && !args.announcedIds.has(row.id)
+  );
+  if (crossed.length > DUE_NOTIFY_BURST_CAP) {
+    return {
+      notifyIds: [],
+      badgeIds,
+      nextWatermarkMs: args.nowMs,
+      backlogCount: crossed.length,
+      backlogIds: crossed.map((row) => row.id),
+    };
+  }
   return {
-    notifyIds,
+    notifyIds: crossed.map((row) => row.id),
     badgeIds,
     nextWatermarkMs: args.nowMs,
   };
 }
 
-export function reminderFailureMessage(error: unknown): string {
+export type ReminderFailureVerb = "create" | "snooze" | "complete" | "delete";
+
+export function reminderFailureMessage(
+  error: unknown,
+  verb: ReminderFailureVerb = "create"
+): string {
   const status =
     error && typeof error === "object" && "status" in error
       ? Number((error as { status: unknown }).status)
@@ -150,9 +174,18 @@ export function reminderFailureMessage(error: unknown): string {
     return "그 알림을 찾지 못했습니다. 목록을 다시 불러 보세요.";
   }
   if (status === 403) {
-    return "이 계정으로는 알림을 만들 수 없습니다.";
+    return verb === "create"
+      ? "이 계정으로는 알림을 만들 수 없습니다."
+      : "이 계정으로는 그 알림을 바꿀 수 없습니다.";
   }
+  if (verb === "snooze") return "알림을 미루지 못했습니다. 다시 시도하세요.";
+  if (verb === "complete") return "알림을 완료하지 못했습니다. 다시 시도하세요.";
+  if (verb === "delete") return "알림을 지우지 못했습니다. 다시 시도하세요.";
   return "알림을 저장하지 못했습니다. 다시 시도하세요.";
+}
+
+export function reminderBacklogNotificationBody(count: number): string {
+  return `밀린 알림 ${count}건`;
 }
 
 export function reminderLoadFailureMessage(): string {
@@ -170,6 +203,11 @@ export const REMINDER_COMPLETE_LABEL = "완료";
 export const REMINDER_SNOOZE_LABEL = "미루기";
 export const REMINDER_DELETE_LABEL = "지우기";
 export const REMINDER_CUSTOM_LABEL = "날짜와 시간 고르기";
+export const REMINDER_SNOOZE_COMMIT_LABEL = "알림 미루기";
+export const REMINDER_UNKNOWN_CHANNEL_LABEL = "알 수 없는 채널";
+export const REMINDER_COMPLETE_CONFIRM_TITLE = "이 알림을 완료할까요?";
+export const REMINDER_COMPLETE_CONFIRM_DETAIL =
+  "완료한 알림은 목록에서 사라지고 되돌릴 수 없습니다.";
 
 function optionalMs(source: unknown, key: string): number | undefined {
   const value = num(source, key);
@@ -219,11 +257,16 @@ export function parseReminder(value: unknown): MessageReminder | null {
 }
 
 export function parseReminderPage(value: unknown): ReminderPage {
-  const source = record(value) ?? {};
-  const wrapped = arrayField(source, "reminders") ?? [];
-  const reminders = wrapped
-    .map((row) => parseReminder(row))
-    .filter((row): row is MessageReminder => row !== null);
+  const source = record(value);
+  if (source === null) throw new WireShapeError();
+  const wrapped = arrayField(source, "reminders");
+  if (wrapped === null) throw new WireShapeError();
+  const reminders: MessageReminder[] = [];
+  for (const row of wrapped) {
+    const parsed = parseReminder(row);
+    if (parsed === null) throw new WireShapeError();
+    reminders.push(parsed);
+  }
   const nextCursor = str(source, "nextCursor");
   return nextCursor === undefined ? { reminders } : { reminders, nextCursor };
 }

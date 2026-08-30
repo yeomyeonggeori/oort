@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { MessageReminder } from "@momo/core/features/reminders/model";
 import { reminderNotifyDecision, reminderNotificationBody } from "./dueNotify";
+import { reminderBacklogNotificationBody } from "@momo/core/features/reminders/model";
 
 const reminder: MessageReminder = {
   id: "r-1",
@@ -53,5 +54,6 @@ describe("reminderNotifyDecision", () => {
         messagePreview: "```secret```",
       })
     ).toBe("코드");
+    expect(reminderBacklogNotificationBody(4)).toBe("밀린 알림 4건");
   });
 });

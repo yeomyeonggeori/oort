@@ -1,7 +1,10 @@
 import { useEffect, useRef } from "react";
 import { useSession } from "@/app/session";
 import { dueArrivalPlan } from "@momo/core/features/reminders/model";
-import { fireReminderNotification } from "./dueNotify";
+import {
+  fireReminderBacklogNotification,
+  fireReminderNotification,
+} from "./dueNotify";
 import { useReminders } from "./useReminders";
 import { readReminderWatermark, writeReminderWatermark } from "./watermark";
 
@@ -17,6 +20,14 @@ export function ReminderDueWatcher() {
   const lastStampRef = useRef<number>(0);
 
   useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void query.refetch();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [query.refetch]);
+
+  useEffect(() => {
     const page = query.data;
     if (!page) return;
     if (query.dataUpdatedAt === lastStampRef.current) return;
@@ -29,6 +40,14 @@ export function ReminderDueWatcher() {
       announcedIds: announcedRef.current,
     });
     writeReminderWatermark(workspaceId, plan.nextWatermarkMs);
+    if (plan.backlogCount !== undefined && plan.backlogIds) {
+      void fireReminderBacklogNotification(
+        plan.backlogCount,
+        announcedRef.current,
+        plan.backlogIds
+      );
+      return;
+    }
     for (const id of plan.notifyIds) {
       const reminder = page.reminders.find((row) => row.id === id);
       if (!reminder) continue;

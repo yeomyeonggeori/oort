@@ -100,11 +100,9 @@ import { selectionIsWithinRow } from "./messageContextMenuModel";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
-import { queryClient } from "@/app/queryClient";
-import { createReminder } from "@momo/core/features/reminders/api";
 import { reminderFailureMessage } from "@momo/core/features/reminders/model";
 import { RemindDialog } from "@/features/reminders/RemindDialog";
-import { remindersQueryKey } from "@/features/reminders/useReminders";
+import { useReminderMutations } from "@/features/reminders/useReminders";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -372,9 +370,9 @@ export function MessageRow({
   const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [remindOpen, setRemindOpen] = useState(false);
-  const [remindPending, setRemindPending] = useState(false);
   const [remindError, setRemindError] = useState<string | null>(null);
   const { workspaceId } = useSession();
+  const reminderMutations = useReminderMutations(workspaceId);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -1033,30 +1031,31 @@ export function MessageRow({
           />
           <RemindDialog
             open={remindOpen}
-            onOpenChange={setRemindOpen}
+            onOpenChange={(open) => {
+              setRemindOpen(open);
+              if (!open) setRemindError(null);
+            }}
             mode="create"
             preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
-            pending={remindPending}
+            pending={reminderMutations.create.isPending}
             error={remindError}
             onCommit={(dueAtMs, note) => {
               setRemindError(null);
-              setRemindPending(true);
-              void createReminder(workspaceId, {
-                channelId: message.channelId,
-                messageId: message.id,
-                dueAtMs,
-                note,
-              })
-                .then(() => {
-                  void queryClient.invalidateQueries({
-                    queryKey: remindersQueryKey(workspaceId),
-                  });
-                  setRemindOpen(false);
-                })
-                .catch((error: unknown) => {
-                  setRemindError(reminderFailureMessage(error));
-                })
-                .finally(() => setRemindPending(false));
+              reminderMutations.create.mutate(
+                {
+                  channelId: message.channelId,
+                  messageId: message.id,
+                  dueAtMs,
+                  note,
+                  messagePreview: message.body?.trim() || PIN_EMPTY_BODY_TEXT,
+                },
+                {
+                  onSuccess: () => setRemindOpen(false),
+                  onError: (error: unknown) => {
+                    setRemindError(reminderFailureMessage(error, "create"));
+                  },
+                }
+              );
             }}
           />
         </>

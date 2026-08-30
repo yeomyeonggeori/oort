@@ -1,11 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { WireShapeError } from "../../lib/wire";
 import {
   clampReminderNote,
   dueArrivalPlan,
+  DUE_NOTIFY_BURST_CAP,
   parseReminder,
   parseReminderPage,
   parseReminderResponse,
+  reminderBacklogNotificationBody,
   reminderDueLabel,
+  reminderFailureMessage,
   reminderIsOverdue,
   reminderNoteForWire,
   reminderPreviewText,
@@ -56,6 +60,13 @@ describe("reminder due labels and preview", () => {
     expect(
       reminderIsOverdue(row({ dueAtMs: NOW - 1, completedAtMs: NOW }), NOW)
     ).toBe(false);
+  });
+
+  it("calls the last 30 seconds upcoming, not overdue, and keeps 곧 reachable", () => {
+    expect(reminderDueLabel(NOW + 20_000, NOW)).toBe("곧");
+    expect(reminderIsOverdue(row({ dueAtMs: NOW + 20_000 }), NOW)).toBe(false);
+    expect(reminderDueLabel(NOW + 1, NOW)).toBe("곧");
+    expect(reminderDueLabel(NOW, NOW)).toBe("기한 지남");
   });
 
   it("prefers the source preview, then the note, then a generic label", () => {
@@ -114,6 +125,36 @@ describe("dueArrivalPlan watermark", () => {
     expect(plan.notifyIds).toEqual([]);
     expect(plan.badgeIds).toEqual(["new"]);
   });
+
+  it("collapses a return-from-background burst into one summary above the cap", () => {
+    const burst = Array.from({ length: DUE_NOTIFY_BURST_CAP + 1 }, (_, i) =>
+      row({ id: `burst-${i}`, dueAtMs: NOW - 1_000 })
+    );
+    const plan = dueArrivalPlan({
+      reminders: burst,
+      nowMs: NOW,
+      watermarkMs: NOW - 30_000,
+      announcedIds: new Set(),
+    });
+    expect(plan.notifyIds).toEqual([]);
+    expect(plan.backlogCount).toBe(DUE_NOTIFY_BURST_CAP + 1);
+    expect(plan.backlogIds).toHaveLength(DUE_NOTIFY_BURST_CAP + 1);
+    expect(reminderBacklogNotificationBody(4)).toBe("밀린 알림 4건");
+  });
+
+  it("still fires individual arrivals at the cap", () => {
+    const burst = Array.from({ length: DUE_NOTIFY_BURST_CAP }, (_, i) =>
+      row({ id: `cap-${i}`, dueAtMs: NOW - 1_000 })
+    );
+    const plan = dueArrivalPlan({
+      reminders: burst,
+      nowMs: NOW,
+      watermarkMs: NOW - 30_000,
+      announcedIds: new Set(),
+    });
+    expect(plan.notifyIds).toHaveLength(DUE_NOTIFY_BURST_CAP);
+    expect(plan.backlogCount).toBeUndefined();
+  });
 });
 
 describe("reminder wire parse", () => {
@@ -147,8 +188,34 @@ describe("reminder wire parse", () => {
     expect(parseReminderResponse(wire).id).toBe("r-1");
   });
 
-  it("drops a row that is missing a required field", () => {
+  it("treats a single malformed row as unusable, not as an empty list", () => {
     expect(parseReminder({ ...wire, dueAtMs: undefined })).toBeNull();
-    expect(parseReminderPage({ reminders: [{ id: "x" }] }).reminders).toEqual([]);
+    expect(() => parseReminderPage({ reminders: [{ id: "x" }] })).toThrow(
+      WireShapeError
+    );
+    expect(() => parseReminderPage({ reminders: [] })).not.toThrow();
+    expect(parseReminderPage({ reminders: [] }).reminders).toEqual([]);
+    expect(() =>
+      parseReminderPage({ due_at_ms: NOW, reminders: undefined })
+    ).toThrow(WireShapeError);
+  });
+});
+
+describe("reminderFailureMessage names the verb that failed", () => {
+  const fail = (status: number) => ({ status });
+
+  it("keeps create copy as the default and swaps the closing verb", () => {
+    expect(reminderFailureMessage(fail(500))).toBe(
+      "알림을 저장하지 못했습니다. 다시 시도하세요."
+    );
+    expect(reminderFailureMessage(fail(500), "delete")).toBe(
+      "알림을 지우지 못했습니다. 다시 시도하세요."
+    );
+    expect(reminderFailureMessage(fail(500), "snooze")).toBe(
+      "알림을 미루지 못했습니다. 다시 시도하세요."
+    );
+    expect(reminderFailureMessage(fail(500), "complete")).toBe(
+      "알림을 완료하지 못했습니다. 다시 시도하세요."
+    );
   });
 });

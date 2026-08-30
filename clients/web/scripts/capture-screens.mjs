@@ -221,6 +221,12 @@ const MOBILE_TAP_TARGETS = [
   ["jump-unread", "위쪽 새 메시지", "optional"],
   ["jump-latest", "최신 메시지로", "optional"],
   ["draft-row-menu", "초안 메뉴", "optional"],
+  // #1888 B-1/H-3 — 리마인더 행의 완료·미루기·⋯. optional: 나중에 탭에만.
+  ["reminder-complete", "알림 완료", "optional"],
+  ["reminder-snooze", "알림 미루기", "optional"],
+  ["reminder-row-menu", "알림 메뉴", "optional"],
+  ["reminder-complete-commit", "알림 완료 확인", "optional"],
+  ["reminder-delete-commit", "알림 지우기 확인", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -3400,6 +3406,38 @@ async function waitForInboxSettled(page, where) {
   return settled;
 }
 
+async function waitForRemindersSettled(page, where) {
+  await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+  await page.waitForSelector(
+    '[data-testid="reminders-list"], [data-testid="reminders-empty"], [data-testid="reminders-error"]',
+    { state: "visible" }
+  );
+  const settled = await page.evaluate(`(() => {
+    for (const id of ["reminders-list", "reminders-empty", "reminders-error"]) {
+      if (document.querySelector('[data-testid="' + id + '"]')) return id;
+    }
+    return null;
+  })()`);
+  if (settled === "reminders-error") {
+    throw new Error(
+      `[${where}] 리마인더가 오류로 정착했다 — 이 화면은 찍지 않는다`
+    );
+  }
+  if (settled !== "reminders-list") {
+    throw new Error(
+      `[${where}] 리마인더 목록이 없다 (정착=${settled}) — 목 또는 탭이 빠졌다`
+    );
+  }
+  const overdue = await page
+    .locator('[data-testid="reminder-row"][data-due="overdue"]')
+    .count();
+  if (overdue < 1) {
+    throw new Error(`[${where}] 만기 행이 없다 — 픽스처가 빠졌다`);
+  }
+  console.log(`  reminders ${where}: ${settled}로 정착, overdue ${overdue}`);
+  return settled;
+}
+
 /**
  * 반복된 「일시정지」 알림이 한 줄로 접혔는가 (goal P3 1-2).
  *
@@ -3686,6 +3724,106 @@ async function assertHoverToolbarClearsBodyText(page, where) {
   console.log(
     `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0(자기+이웃) · 상단 ${info[0].fromTop}px · straddle ${info[0].straddle || "top"}`
   );
+}
+
+/**
+ * 리마인더 행 ⋯ 그릇 ∩ 본문 텍스트 Range = 0 (#1888 B-2).
+ * 타임라인 `assertHoverToolbarClearsBodyText` 와 같은 자.
+ */
+async function assertReminderOverflowClearsBodyText(page, where) {
+  const info = await page.evaluate(`(() => {
+    function intersects(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+    function hitChars(barRect, body) {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let chars = 0;
+      let area = 0;
+      let sample = "";
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const r = range.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (!intersects(barRect, r)) continue;
+          chars += 1;
+          const w = Math.min(barRect.right, r.right) - Math.max(barRect.left, r.left);
+          const h = Math.min(barRect.bottom, r.bottom) - Math.max(barRect.top, r.top);
+          area += Math.max(0, w) * Math.max(0, h);
+          if (sample.length < 24) sample += text[i];
+        }
+      }
+      return { chars, area: Math.round(area), sample };
+    }
+    const bowls = Array.from(
+      document.querySelectorAll('[data-testid="reminder-overflow-bowl"]')
+    ).filter((bowl) => bowl.querySelector('[data-testid="reminder-row-menu"]'));
+    return bowls.map((bowl) => {
+      const row = bowl.closest('[data-testid="reminder-row"]');
+      if (!row) return { chars: -1, area: -1, sample: "" };
+      const t = bowl.getBoundingClientRect();
+      const body = row.querySelector("[data-reminder-row-body]");
+      const due = row.querySelector('[data-testid="reminder-row-due"]');
+      let worst = { chars: 0, area: 0, sample: "", width: Math.round(t.width) };
+      for (const el of [body, due].filter(Boolean)) {
+        const hit = hitChars(t, el);
+        if (hit.chars > worst.chars) worst = { ...worst, ...hit };
+      }
+      return worst;
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[리마인더 ⋯ 본문 ${where}] 잴 그릇이 없다`);
+  }
+  const hit = info.find((item) => item.chars > 0);
+  if (hit) {
+    throw new Error(
+      `[리마인더 ⋯ 본문 ${where}] 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
+    );
+  }
+  console.log(
+    `  리마인더 ⋯ 본문 ${where}: ${info.length}개, 글자 교차 0 · 그릇 ${info[0].width}px`
+  );
+}
+
+async function assertReminderKeyboardDelete(page, where) {
+  const tab = page.getByTestId("inbox-tab-reminders");
+  await tab.focus();
+  let last = "";
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press("Tab");
+    const proof = await page.evaluate(`(() => {
+      const el = document.activeElement;
+      return {
+        testId: el?.getAttribute("data-testid") || "",
+        menu: document.querySelectorAll('[data-testid="reminder-row-menu"]').length,
+      };
+    })()`);
+    last = proof.testId;
+    if (proof.testId === "reminder-row-link" && proof.menu === 0) {
+      await page
+        .getByTestId("reminder-row-menu")
+        .first()
+        .waitFor({ state: "visible", timeout: 1_000 });
+    }
+    if (proof.testId === "reminder-row-menu") break;
+  }
+  if (last !== "reminder-row-menu") {
+    throw new Error(
+      `[리마인더 키보드 ${where}] ⋯에 닿지 못했다 (last=${last})`
+    );
+  }
+  await page.keyboard.press("Enter");
+  await page.getByTestId("reminder-row-menu-panel").waitFor({ state: "visible" });
+  await page.getByTestId("reminder-row-delete").waitFor({ state: "visible" });
+  await page.getByTestId("reminder-row-delete").press("Enter");
+  await page.getByTestId("reminder-delete-dialog").waitFor({ state: "visible" });
+  console.log(`  리마인더 키보드 지우기 ${where}: ⋯ Tab · 다이얼로그`);
 }
 
 /**
@@ -5156,6 +5294,20 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "inbox");
 
+  // 5b. 나중에 알림 (#1888). 390에서 ⋯ 그릇이 본문을 덮지 않는지, 완료·미루기가
+  //     44 타깃인지, 만기 행이 칩 그릇을 입는지. hover:none 이라 ⋯는 상시 마운트.
+  await page.evaluate('location.hash = "/inbox?filter=reminders"');
+  await waitForRemindersSettled(page, `mobile ${scheme}`);
+  await assertNoHorizontalOverflow(page, `reminders ${scheme}`);
+  await assertReminderOverflowClearsBodyText(page, `mobile ${scheme}`);
+  await assertTapTargets(page, `reminders ${scheme}`, [
+    ["open-sidebar-drawer", "채널 목록 열기"],
+    ["reminder-complete", "알림 완료"],
+    ["reminder-snooze", "알림 미루기"],
+    ["reminder-row-menu", "알림 메뉴"],
+  ]);
+  await shoot(page, "reminders");
+
   // 6. 설정 전면 (#1867). 앱 사이드바가 사라지고 섹션 목록이 본문 위로 접힌다.
   await page.evaluate('location.hash = "/settings?section=profile"');
   await page.getByTestId("settings-route").waitFor({ state: "visible" });
@@ -6398,6 +6550,30 @@ async function captureScheme(browser, scheme) {
   await draftsPage.screenshot({ path: draftsShot });
   shots.push(draftsShot);
   await draftsPage.close();
+
+  // BF-B1 (#1888): 인박스 나중에 탭. 두 스킴 + 만기 행. ⋯는 호버로 띄운 뒤
+  // 본문 교차 0을 재고, 키보드만으로 지우기 다이얼로그까지 간다.
+  const remindersPage = await context.newPage();
+  await remindersPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(remindersPage);
+  await remindersPage.evaluate('location.hash = "/inbox?filter=reminders"');
+  await waitForRemindersSettled(remindersPage, `desktop ${scheme}`);
+  await assertNoHorizontalOverflow(remindersPage, `reminders ${scheme}`);
+  const overdueRow = remindersPage
+    .locator('[data-testid="reminder-row"][data-due="overdue"]')
+    .first();
+  await overdueRow.hover();
+  await remindersPage
+    .getByTestId("reminder-row-menu")
+    .first()
+    .waitFor({ state: "visible" });
+  await assertReminderOverflowClearsBodyText(remindersPage, `desktop ${scheme}`);
+  const remindersShot = `${OUT_DIR}/reminders-${scheme}.png`;
+  await remindersPage.screenshot({ path: remindersShot });
+  shots.push(remindersShot);
+  await remindersPage.getByRole("heading", { name: "인박스" }).hover();
+  await assertReminderKeyboardDelete(remindersPage, scheme);
+  await remindersPage.close();
 
   // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
   //     agent runs. Shot at the top of the panel, where the engine card, the

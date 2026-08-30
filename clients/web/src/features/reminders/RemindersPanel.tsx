@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FocusEvent } from "react";
 import { Link } from "react-router-dom";
 import { Bell, MoreHorizontal, Trash2 } from "lucide-react";
 import { uuidEq } from "@momo/core/lib/api";
@@ -18,6 +18,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -33,13 +34,17 @@ import {
   reminderIsOverdue,
   reminderLoadFailureMessage,
   reminderPreviewText,
+  REMINDER_COMPLETE_CONFIRM_DETAIL,
+  REMINDER_COMPLETE_CONFIRM_TITLE,
   REMINDER_COMPLETE_LABEL,
   REMINDER_CUSTOM_LABEL,
   REMINDER_DELETE_LABEL,
   REMINDER_EMPTY_DETAIL,
   REMINDER_EMPTY_HEADLINE,
   REMINDER_SNOOZE_LABEL,
+  REMINDER_UNKNOWN_CHANNEL_LABEL,
   type MessageReminder,
+  type ReminderFailureVerb,
 } from "@momo/core/features/reminders/model";
 import {
   reminderPresetDueAtMs,
@@ -73,6 +78,9 @@ export function RemindersPanel() {
   const offline = useOffline();
   const [snoozeTarget, setSnoozeTarget] = useState<MessageReminder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<MessageReminder | null>(null);
+  const [completeTarget, setCompleteTarget] = useState<MessageReminder | null>(
+    null
+  );
   const [actionError, setActionError] = useState<string | null>(null);
   const nowMs = Date.now();
 
@@ -82,26 +90,36 @@ export function RemindersPanel() {
   );
   const labelFor = (channelId: string) => {
     const channel = channels.find((item) => uuidEq(item.id, channelId));
-    if (!channel) return channelId.slice(0, 8);
+    if (!channel) return REMINDER_UNKNOWN_CHANNEL_LABEL;
     return channelLabel(channel, directory, session.member.id);
   };
 
-  const run = async (work: () => Promise<unknown>) => {
+  const dialogOpen =
+    snoozeTarget !== null || deleteTarget !== null || completeTarget !== null;
+
+  const run = async (
+    work: () => Promise<unknown>,
+    verb: ReminderFailureVerb
+  ): Promise<boolean> => {
     setActionError(null);
     try {
       await work();
+      return true;
     } catch (error: unknown) {
-      setActionError(reminderFailureMessage(error));
+      setActionError(reminderFailureMessage(error, verb));
+      return false;
     }
   };
 
   const snoozePreset = (reminder: MessageReminder, id: ReminderPresetId) => {
     if (offline) return;
-    void run(() =>
-      mutations.snooze.mutateAsync({
-        id: reminder.id,
-        dueAtMs: reminderPresetDueAtMs(id, Date.now()),
-      })
+    void run(
+      () =>
+        mutations.snooze.mutateAsync({
+          id: reminder.id,
+          dueAtMs: reminderPresetDueAtMs(id, Date.now()),
+        }),
+      "snooze"
     );
   };
 
@@ -132,7 +150,7 @@ export function RemindersPanel() {
 
   return (
     <div data-testid="reminders-panel">
-      {actionError && (
+      {actionError && !dialogOpen && (
         <InlineBanner
           message={actionError}
           actionLabel="닫기"
@@ -153,19 +171,29 @@ export function RemindersPanel() {
               mutations.snooze.isPending ||
               mutations.remove.isPending
             }
-            onComplete={() =>
-              void run(() => mutations.complete.mutateAsync(reminder.id))
-            }
+            onComplete={() => {
+              setActionError(null);
+              setCompleteTarget(reminder);
+            }}
             onSnoozePreset={(id) => snoozePreset(reminder, id)}
-            onSnoozeCustom={() => setSnoozeTarget(reminder)}
-            onDelete={() => setDeleteTarget(reminder)}
+            onSnoozeCustom={() => {
+              setActionError(null);
+              setSnoozeTarget(reminder);
+            }}
+            onDelete={() => {
+              setActionError(null);
+              setDeleteTarget(reminder);
+            }}
           />
         ))}
       </ul>
       <RemindDialog
         open={snoozeTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setSnoozeTarget(null);
+          if (!open) {
+            setSnoozeTarget(null);
+            setActionError(null);
+          }
         }}
         mode="snooze"
         preview={snoozeTarget ? reminderPreviewText(snoozeTarget) : undefined}
@@ -174,15 +202,21 @@ export function RemindersPanel() {
         onCommit={(dueAtMs) => {
           if (snoozeTarget === null) return;
           const id = snoozeTarget.id;
-          void run(() => mutations.snooze.mutateAsync({ id, dueAtMs })).then(
-            () => setSnoozeTarget(null)
-          );
+          void run(
+            () => mutations.snooze.mutateAsync({ id, dueAtMs }),
+            "snooze"
+          ).then((ok) => {
+            if (ok) setSnoozeTarget(null);
+          });
         }}
       />
       <Dialog
         open={deleteTarget !== null}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open) {
+            setDeleteTarget(null);
+            setActionError(null);
+          }
         }}
       >
         <DialogContent data-testid="reminder-delete-dialog" className="gap-3 p-4">
@@ -190,11 +224,17 @@ export function RemindersPanel() {
           <DialogDescription>
             지운 알림은 되돌릴 수 없습니다. 원문 메시지는 그대로 있습니다.
           </DialogDescription>
+          {actionError && (
+            <InlineBanner message={actionError} testId="reminder-delete-error" />
+          )}
           <div className="flex justify-end gap-2 pt-1">
             <Button
               variant="secondary"
               data-testid="reminder-delete-cancel"
-              onClick={() => setDeleteTarget(null)}
+              onClick={() => {
+                setDeleteTarget(null);
+                setActionError(null);
+              }}
             >
               취소
             </Button>
@@ -205,12 +245,65 @@ export function RemindersPanel() {
               onClick={() => {
                 if (deleteTarget === null) return;
                 const id = deleteTarget.id;
-                void run(() => mutations.remove.mutateAsync(id)).then(() =>
-                  setDeleteTarget(null)
+                void run(() => mutations.remove.mutateAsync(id), "delete").then(
+                  (ok) => {
+                    if (ok) setDeleteTarget(null);
+                  }
                 );
               }}
             >
               {mutations.remove.isPending ? "지우는 중…" : REMINDER_DELETE_LABEL}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={completeTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setCompleteTarget(null);
+            setActionError(null);
+          }
+        }}
+      >
+        <DialogContent
+          data-testid="reminder-complete-dialog"
+          className="gap-3 p-4"
+        >
+          <DialogTitle>{REMINDER_COMPLETE_CONFIRM_TITLE}</DialogTitle>
+          <DialogDescription>{REMINDER_COMPLETE_CONFIRM_DETAIL}</DialogDescription>
+          {actionError && (
+            <InlineBanner
+              message={actionError}
+              testId="reminder-complete-error"
+            />
+          )}
+          <div className="flex justify-end gap-2 pt-1">
+            <Button
+              variant="secondary"
+              data-testid="reminder-complete-cancel"
+              onClick={() => {
+                setCompleteTarget(null);
+                setActionError(null);
+              }}
+            >
+              취소
+            </Button>
+            <Button
+              data-testid="reminder-complete-commit"
+              disabled={mutations.complete.isPending || offline}
+              onClick={() => {
+                if (completeTarget === null) return;
+                const id = completeTarget.id;
+                void run(
+                  () => mutations.complete.mutateAsync(id),
+                  "complete"
+                ).then((ok) => {
+                  if (ok) setCompleteTarget(null);
+                });
+              }}
+            >
+              {mutations.complete.isPending ? "완료 중…" : REMINDER_COMPLETE_LABEL}
             </Button>
           </div>
         </DialogContent>
@@ -220,7 +313,7 @@ export function RemindersPanel() {
 }
 
 const overflowBowlClass =
-  "absolute right-2 top-2 z-20 rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
+  "rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
 const overflowTriggerClass =
   "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
 
@@ -247,72 +340,138 @@ function ReminderRow({
 }) {
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
+  const [focusWithin, setFocusWithin] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const overdue = reminderIsOverdue(reminder, nowMs);
-  const showOverflow = hoverNone || hovered || menuOpen;
+  const showOverflow = hoverNone || hovered || focusWithin || menuOpen;
   const to = reminderPath(reminder);
+
+  const onFocus = (event: FocusEvent<HTMLLIElement>) => {
+    if (
+      event.target instanceof HTMLElement &&
+      event.target.matches(":focus-visible")
+    ) {
+      setFocusWithin(true);
+    }
+  };
+  const onBlur = (event: FocusEvent<HTMLLIElement>) => {
+    const next = event.relatedTarget;
+    if (next instanceof Node && event.currentTarget.contains(next)) return;
+    setFocusWithin(false);
+  };
 
   return (
     <li
-      className={cn(
-        "relative border-b border-line transition-colors hover:bg-surface-hover focus-within:bg-surface-hover",
-        overdue && "bg-warn-soft"
-      )}
+      className="relative border-b border-line transition-colors hover:bg-surface-hover focus-within:bg-surface-hover"
       data-testid="reminder-row"
       data-due={overdue ? "overdue" : "upcoming"}
       data-reminder-id={reminder.id}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onFocusCapture={onFocus}
+      onBlurCapture={onBlur}
     >
-      <Link
-        to={to}
-        onClick={() => {
-          if (reminder.messageSeq !== undefined) {
-            watchForMessage(reminder.messageSeq);
-          }
-        }}
-        className="flex gap-3 py-2 pl-4 pr-8 focus-visible:focus-ring"
-        data-testid="reminder-row-link"
-      >
-        <span className="shrink-0 pt-1" aria-hidden="true">
-          <Bell className={cn("size-4", overdue ? "text-warn" : "text-ink-muted")} />
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 flex-wrap items-baseline gap-2">
-            <span
-              className="min-w-0 truncate text-body font-semibold text-ink"
-              data-testid="reminder-row-preview"
-            >
-              {reminderPreviewText(reminder)}
-            </span>
-            <span
-              className="min-w-0 truncate text-meta text-ink-muted"
-              data-testid="reminder-row-channel"
-            >
-              {sourceLabel}
-            </span>
-            <span
-              className={cn(
-                "shrink-0 text-timestamp",
-                overdue ? "text-warn" : "text-ink-muted"
-              )}
-              data-numeric
-              data-testid="reminder-row-due"
-            >
-              {reminderDueLabel(reminder.dueAtMs, nowMs)}
-            </span>
+      <div className="flex items-start gap-2 py-2 pl-4 pr-2">
+        <Link
+          to={to}
+          onClick={() => {
+            if (reminder.messageSeq !== undefined) {
+              watchForMessage(reminder.messageSeq);
+            }
+          }}
+          className="flex min-w-0 flex-1 gap-3 focus-visible:focus-ring"
+          data-testid="reminder-row-link"
+        >
+          <span className="shrink-0 pt-1" aria-hidden="true">
+            <Bell
+              className={cn("size-4", overdue ? "text-warn" : "text-ink-muted")}
+            />
           </span>
-          {reminder.note ? (
-            <span className="truncate text-body text-ink-muted">
-              {reminder.note}
+          <span
+            className="flex min-w-0 flex-1 flex-col"
+            data-reminder-row-body=""
+          >
+            <span className="flex min-w-0 items-baseline gap-2">
+              <span
+                className="min-w-0 truncate text-body font-semibold text-ink"
+                data-testid="reminder-row-preview"
+              >
+                {reminderPreviewText(reminder)}
+              </span>
+              <span
+                className="min-w-0 truncate text-meta text-ink-muted"
+                data-testid="reminder-row-channel"
+              >
+                {sourceLabel}
+              </span>
             </span>
-          ) : null}
-        </span>
-      </Link>
+            {reminder.note ? (
+              <span className="truncate text-body text-ink-muted">
+                {reminder.note}
+              </span>
+            ) : null}
+          </span>
+        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <span
+            className={cn(
+              overdue
+                ? cn(CHIP_CLASS, "bg-warn-soft text-warn")
+                : "shrink-0 text-timestamp text-ink-muted"
+            )}
+            data-numeric
+            data-testid="reminder-row-due"
+          >
+            {reminderDueLabel(reminder.dueAtMs, nowMs)}
+          </span>
+          <div
+            className="flex w-overflow-bowl shrink-0 justify-end"
+            data-testid="reminder-overflow-bowl"
+          >
+            {showOverflow ? (
+              <div className={overflowBowlClass}>
+                <DropdownMenu
+                  open={menuOpen}
+                  onOpenChange={setMenuOpen}
+                  modal={false}
+                >
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label="알림 메뉴"
+                      title="알림 메뉴"
+                      data-testid="reminder-row-menu"
+                      data-row-action="primary"
+                      className={overflowTriggerClass}
+                    >
+                      <MoreHorizontal className="size-4" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    data-testid="reminder-row-menu-panel"
+                  >
+                    <DropdownMenuItem
+                      tone="danger"
+                      data-testid="reminder-row-delete"
+                      disabled={offline || pending}
+                      onSelect={onDelete}
+                    >
+                      <Trash2 className="size-4" aria-hidden="true" />
+                      {REMINDER_DELETE_LABEL}
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
       <div className="flex flex-wrap items-center gap-2 px-4 pb-2">
         <Button
           size="sm"
           variant="secondary"
+          className="tap-target"
           disabled={offline || pending}
           onClick={onComplete}
           data-testid="reminder-complete"
@@ -324,6 +483,7 @@ function ReminderRow({
             <Button
               size="sm"
               variant="ghost"
+              className="tap-target"
               disabled={offline || pending}
               data-testid="reminder-snooze"
             >
@@ -350,34 +510,6 @@ function ReminderRow({
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
-      {showOverflow ? (
-        <div className={overflowBowlClass}>
-          <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                aria-label="알림 메뉴"
-                title="알림 메뉴"
-                data-testid="reminder-row-menu"
-                className={overflowTriggerClass}
-              >
-                <MoreHorizontal className="size-4" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" data-testid="reminder-row-menu-panel">
-              <DropdownMenuItem
-                tone="danger"
-                data-testid="reminder-row-delete"
-                disabled={offline || pending}
-                onSelect={onDelete}
-              >
-                <Trash2 className="size-4" aria-hidden="true" />
-                {REMINDER_DELETE_LABEL}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ) : null}
     </li>
   );
 }

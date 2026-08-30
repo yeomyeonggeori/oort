@@ -19,8 +19,10 @@ vi.mock("@/features/common/useOffline", () => ({
   useOffline: () => false,
 }));
 
+const hoverNone = vi.hoisted(() => ({ current: true }));
+
 vi.mock("@/features/emoji/useHoverNone", () => ({
-  useHoverNone: () => true,
+  useHoverNone: () => hoverNone.current,
 }));
 
 const remindersState: {
@@ -162,9 +164,33 @@ async function mount(): Promise<HTMLElement> {
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  HTMLElement.prototype.hasPointerCapture = () => false;
+  HTMLElement.prototype.setPointerCapture = () => undefined;
+  HTMLElement.prototype.releasePointerCapture = () => undefined;
+  if (typeof globalThis.PointerEvent === "undefined") {
+    globalThis.PointerEvent = class PointerEvent extends MouseEvent {
+      constructor(type: string, init?: MouseEventInit) {
+        super(type, init);
+      }
+    } as unknown as typeof PointerEvent;
+  }
 });
 
+function stubFocusVisible(el: HTMLElement, visible: boolean) {
+  const proto = HTMLElement.prototype.matches;
+  return vi.spyOn(el, "matches").mockImplementation(function (
+    this: HTMLElement,
+    selectors: string
+  ) {
+    if (selectors === ":focus-visible") {
+      return visible && document.activeElement === this;
+    }
+    return proto.call(this, selectors);
+  });
+}
+
 beforeEach(() => {
+  hoverNone.current = true;
   remindersState.isLoading = false;
   remindersState.isError = false;
   remindersState.data = { reminders: [] };
@@ -238,12 +264,93 @@ describe("RemindersPanel", () => {
     expect(host.querySelector('[data-testid="reminder-row-due"]')?.textContent).toBe(
       "기한 지남"
     );
+    expect(row?.className).not.toContain("bg-warn-soft");
+    expect(
+      host.querySelector('[data-testid="reminder-row-due"]')?.className
+    ).toContain("bg-warn-soft");
     const completeButton = host.querySelector(
       '[data-testid="reminder-complete"]'
     ) as HTMLButtonElement;
     await act(async () => {
       completeButton.click();
     });
+    expect(complete).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="reminder-complete-dialog"]')).not.toBeNull();
+    const commit = document.querySelector(
+      '[data-testid="reminder-complete-commit"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      commit.click();
+    });
     expect(complete).toHaveBeenCalledWith("r-1");
+  });
+
+  it("keeps the delete dialog open and names the verb when DELETE fails", async () => {
+    remove.mockRejectedValueOnce({ status: 500 });
+    remindersState.data = { reminders: [reminder()] };
+    const host = await mount();
+    const menu = host.querySelector(
+      '[data-testid="reminder-row-menu"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      menu.dispatchEvent(
+        new PointerEvent("pointerdown", { bubbles: true, cancelable: true })
+      );
+      menu.click();
+    });
+    const del = await vi.waitFor(() => {
+      const item = document.querySelector(
+        '[data-testid="reminder-row-delete"]'
+      ) as HTMLElement | null;
+      expect(item).not.toBeNull();
+      return item!;
+    });
+    await act(async () => {
+      del.click();
+    });
+    expect(document.querySelector('[data-testid="reminder-delete-dialog"]')).not.toBeNull();
+    const commit = document.querySelector(
+      '[data-testid="reminder-delete-commit"]'
+    ) as HTMLButtonElement;
+    await act(async () => {
+      commit.click();
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[data-testid="reminder-delete-dialog"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="reminder-delete-error"]')?.textContent
+    ).toContain("알림을 지우지 못했습니다");
+    expect(
+      document.querySelector('[data-testid="reminder-delete-error"]')?.textContent
+    ).not.toContain("저장하지 못했습니다");
+  });
+
+  it("mounts ⋯ when the row is keyboard-focused so 지우기 is reachable", async () => {
+    hoverNone.current = false;
+    remindersState.data = { reminders: [reminder()] };
+    const host = await mount();
+    expect(host.querySelector('[data-testid="reminder-row-menu"]')).toBeNull();
+    const link = host.querySelector(
+      '[data-testid="reminder-row-link"]'
+    ) as HTMLAnchorElement;
+    const spy = stubFocusVisible(link, true);
+    await act(async () => {
+      link.focus();
+      link.dispatchEvent(new FocusEvent("focusin", { bubbles: true }));
+    });
+    expect(host.querySelector('[data-testid="reminder-row-menu"]')).not.toBeNull();
+    spy.mockRestore();
+  });
+
+  it("does not show a UUID fragment when the channel is unresolved", async () => {
+    remindersState.data = {
+      reminders: [
+        reminder({ channelId: "00000000-0000-7000-8000-000000000999" }),
+      ],
+    };
+    const host = await mount();
+    expect(host.querySelector('[data-testid="reminder-row-channel"]')?.textContent).toBe(
+      "알 수 없는 채널"
+    );
   });
 });

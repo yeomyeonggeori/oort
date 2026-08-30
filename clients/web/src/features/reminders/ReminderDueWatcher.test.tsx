@@ -14,18 +14,30 @@ const NOW = 1_800_000_000_000;
 const fire = vi.hoisted(() =>
   vi.fn(async (_reminder: unknown, _announced: unknown) => true)
 );
+const fireBacklog = vi.hoisted(() =>
+  vi.fn(async (_count: unknown, _announced: unknown, _ids: unknown) => true)
+);
 
 vi.mock("./dueNotify", () => ({
   fireReminderNotification: (reminder: MessageReminder, announced: Set<string>) =>
     fire(reminder, announced),
+  fireReminderBacklogNotification: (
+    count: number,
+    announced: Set<string>,
+    ids: readonly string[]
+  ) => fireBacklog(count, announced, ids),
 }));
+
+const refetch = vi.fn(async () => undefined);
 
 const remindersState: {
   data: { reminders: MessageReminder[] } | undefined;
   dataUpdatedAt: number;
+  refetch: () => Promise<unknown>;
 } = {
   data: { reminders: [] },
   dataUpdatedAt: 1,
+  refetch,
 };
 
 vi.mock("./useReminders", () => ({
@@ -97,6 +109,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   fire.mockClear();
+  fireBacklog.mockClear();
+  refetch.mockClear();
   localStorage.clear();
   remindersState.data = { reminders: [] };
   remindersState.dataUpdatedAt = 1;
@@ -144,5 +158,18 @@ describe("ReminderDueWatcher", () => {
       expect.objectContaining({ id: "fresh" }),
       expect.any(Set)
     );
+  });
+
+  it("refetches as soon as the window becomes visible again", async () => {
+    remindersState.data = { reminders: [reminder()] };
+    await mount();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(refetch).toHaveBeenCalled();
   });
 });

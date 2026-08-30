@@ -382,11 +382,21 @@ export function InboxRoute() {
           <SidebarDrawerToggle />
           <h1 className="text-body font-semibold">인박스</h1>
         </div>
+        {/* 탭이 하나뿐이면 탭 줄을 세우지 않는다 (goal B12). 고를 것이 없는
+            고르개는 컨트롤이 아니라 장식이고, 남은 하나에 이미 있는 이름을
+            한 번 더 적을 뿐이다.
+            이 클라는 나중에 탭을 항상 붙이므로 보이는 탭은 최소 멘션+나중
+            둘이다. 가드는 보이는 탭(webFilters)을 본다: 서버 탭이 멘션 하나뿐
+            이어도 나중에와 고를 것이 있으므로 줄을 세운다. 서버 탭 수로
+            되돌리면 나중에로 가는 길이 사라진다. */}
         {webFilters.length > 1 && (
           <FilterTabs
             spec={webInboxFilterTabs(webFilters)}
             value={filter}
             onChange={(next) => setParams({ filter: next }, { replace: true })}
+            // 2R M3: 행 수가 아니라 **결정할 수 있는 행 수**. 배지는 "지금
+            // 당신이 해야 할 일이 몇 개인가"를 말하는 자리이고, 결정할 수 없는
+            // 행이 그 수에 들어가면 사람은 인박스를 열고 셀 것을 찾지 못한다.
             counts={{
               "needs-action": decidableCount(needsAction.items),
               mentions: mentionCount,
@@ -461,6 +471,8 @@ export function InboxRoute() {
             filter={filter}
             feed={feed}
             onMarkRead={filter === "mentions" ? onMarkRead : undefined}
+            // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
+            // 결정의 기록이고, 멘션 행은 승인이 아니다.
             renderActions={
               filter === "needs-action" ? renderApprovalActions : undefined
             }

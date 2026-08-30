@@ -21,6 +21,7 @@ import {
   REMINDER_CUSTOM_LABEL,
   REMINDER_MENU_LABEL,
   REMINDER_NOTE_MAX,
+  REMINDER_SNOOZE_COMMIT_LABEL,
 } from "@momo/core/features/reminders/model";
 
 // Reading this as: message overflow / inbox snooze dialog for internal team
@@ -199,7 +200,13 @@ export function RemindDialog({
             data-testid="remind-dialog-custom-commit"
             onClick={commitCustom}
           >
-            {pending ? "저장 중…" : "이 시각에 알림"}
+            {pending
+              ? mode === "snooze"
+                ? "미루는 중…"
+                : "저장 중…"
+              : mode === "snooze"
+                ? REMINDER_SNOOZE_COMMIT_LABEL
+                : "이 시각에 알림"}
           </Button>
         </div>
       </DialogContent>

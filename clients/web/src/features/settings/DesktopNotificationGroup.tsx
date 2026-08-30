@@ -54,7 +54,8 @@ export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<{
   {
     id: "reminder",
     name: "나중에 알림",
-    description: "직접 잡아 둔 메시지 기한이 된 때.",
+    description:
+      "직접 잡아 둔 메시지 기한이 된 때. 창이 가려져 있어도 이 기기가 확인합니다.",
   },
 ];
 

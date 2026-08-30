@@ -28,6 +28,12 @@ export function useReminders(workspaceId: string) {
     queryKey: remindersQueryKey(workspaceId),
     queryFn: () => listReminders(workspaceId, { state: "pending" }),
     refetchInterval: REMINDERS_POLL_MS,
+    // Mentions/approvals fire while the window is hidden. This list is the
+    // due-arrival detector, so the 30s cadence must keep walking there too.
+    refetchIntervalInBackground: true,
+    // Global queryClient turns window-focus refetch off. Coming back from a
+    // minimized/covered window must not wait another 30s for the first check.
+    refetchOnWindowFocus: "always",
     retry: false,
   });
 }
