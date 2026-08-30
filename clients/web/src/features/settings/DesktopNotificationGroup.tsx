@@ -4,7 +4,6 @@ import { cn } from "@/design/lib/cn";
 import { isDesktop } from "@/lib/tauri";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { InlineBanner, SkeletonRows } from "@/features/common/States";
-import type { NotifyKind } from "@momo/core/features/notifications/model";
 import {
   readDesktopNotificationPermission,
   requestDesktopNotificationPermission,
@@ -13,6 +12,7 @@ import {
 import {
   setDesktopNotificationKind,
   useDesktopNotificationKinds,
+  type DesktopNotifyKind,
 } from "@/features/notifications/preference";
 import { SettingsToggleRow, Subsection } from "./SettingsFields";
 
@@ -37,7 +37,7 @@ export const DESKTOP_NOTIFICATION_UNSUPPORTED_MESSAGE =
   "이 화면에서는 데스크톱 알림을 쓸 수 없습니다. 데스크톱 앱을 쓰면 알림이 옵니다.";
 
 export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<{
-  id: NotifyKind;
+  id: DesktopNotifyKind;
   name: string;
   description: string;
 }> = [
@@ -50,6 +50,11 @@ export const DESKTOP_NOTIFICATION_KIND_ROWS: ReadonlyArray<{
     id: "approval",
     name: "승인 요청",
     description: "내 결정이 필요한 승인 요청.",
+  },
+  {
+    id: "reminder",
+    name: "나중에 알림",
+    description: "직접 잡아 둔 메시지 기한이 된 때.",
   },
 ];
 
@@ -228,7 +233,7 @@ export function DesktopNotificationGroup() {
       <Subsection
         title="이 기기 알림"
         lines={[
-          "데스크톱 알림은 이 앱이 앞에 없을 때 멘션과 승인 요청을 알려 줍니다.",
+          "데스크톱 알림은 이 앱이 앞에 없을 때 멘션과 승인 요청을 알려 줍니다. 나중에 알림은 만기가 되면 앱이 앞에 있어도 알려 줍니다.",
         ]}
       >
         <div data-testid="desktop-notifications-permission-host">

@@ -22,6 +22,7 @@ const available: MessageActionAvailability = {
   quote: true,
   react: true,
   pin: true,
+  remind: true,
   edit: true,
   delete: true,
 };
@@ -42,6 +43,7 @@ const AUTHOR_KEYS: MessageActionItemKey[] = [
   "copy",
   "copy-link",
   "pin",
+  "remind",
   "edit",
   "delete",
 ];
@@ -59,9 +61,9 @@ describe("메시지 액션 세 표면", () => {
     expect(bySurface[0]).toEqual(AUTHOR_KEYS);
   });
 
-  it("저자 인벤토리는 기존 13항목 순서를 유지한 채 링크 복사만 복사 뒤에 더한다", () => {
+  it("저자 인벤토리는 고정 뒤에 나중에 알림을 두고 링크 복사는 복사 뒤에 둔다", () => {
     const keys = messageActionItems(available, copyReady).map((item) => item.key);
-    expect(keys).toHaveLength(14);
+    expect(keys).toHaveLength(15);
     expect(keys.indexOf("copy-link")).toBe(keys.indexOf("copy") + 1);
     expect(keys.slice(0, keys.indexOf("copy") + 1)).toEqual([
       ...QUICK_REACTIONS.map((emoji) => `react:${emoji}` as const),
@@ -72,9 +74,14 @@ describe("메시지 액션 세 표면", () => {
     ]);
     expect(keys.slice(keys.indexOf("copy-link") + 1)).toEqual([
       "pin",
+      "remind",
       "edit",
       "delete",
     ]);
+    expect(
+      messageActionItems(available, copyReady).find((item) => item.key === "remind")
+        ?.label
+    ).toBe("나중에 알림");
   });
 
   it("권한 차등은 저자만 고치기/지우기를 갖고 묘비는 비어 있다", () => {
@@ -82,7 +89,7 @@ describe("메시지 액션 세 표면", () => {
       { ...available, edit: false, delete: false },
       copyReady
     ).map((item) => item.key);
-    expect(other).toHaveLength(12);
+    expect(other).toHaveLength(13);
     expect(other).not.toContain("edit");
     expect(other).not.toContain("delete");
     expect(other).toContain("copy");
@@ -94,6 +101,7 @@ describe("메시지 액션 세 표면", () => {
         quote: false,
         react: false,
         pin: false,
+        remind: false,
         edit: false,
         delete: false,
       },
@@ -172,6 +180,7 @@ describe("메시지 액션 세 표면", () => {
     expect(actionKeepsMenuOpen("copy-link")).toBe(true);
     expect(actionKeepsMenuOpen("react-more")).toBe(true);
     expect(actionKeepsMenuOpen("delete")).toBe(false);
+    expect(actionKeepsMenuOpen("remind")).toBe(false);
   });
 });
 

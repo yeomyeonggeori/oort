@@ -1541,6 +1541,38 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: READ_STATES })
   );
+  // BF-B1 (#1888). Same 30s poll as read-state; without this pair the catch-all
+  // 404s and the 나중에 tab is an error instead of a list.
+  await context.route("**/v1/workspaces/*/reminders*", (route) => {
+    const now = Date.now();
+    return json(route, {
+      reminders: [
+        {
+          id: "00000000-0000-7000-8000-000000000801",
+          workspaceId: WORKSPACE_ID,
+          memberId: ME,
+          channelId: GENERAL_ID,
+          messageId: "00000000-0000-7000-8000-000000000501",
+          dueAtMs: now + 30 * 60_000,
+          createdAtMs: now - 5 * 60_000,
+          note: "배포 후 한 줄만 확인",
+          messagePreview: "스테이징 배포 체크리스트 공유합니다",
+          seq: 42,
+        },
+        {
+          id: "00000000-0000-7000-8000-000000000802",
+          workspaceId: WORKSPACE_ID,
+          memberId: ME,
+          channelId: GENERAL_ID,
+          messageId: "00000000-0000-7000-8000-000000000502",
+          dueAtMs: now - 10 * 60_000,
+          createdAtMs: now - 3 * 60 * 60_000,
+          messagePreview: "내일 스탠드업 안건 초안",
+          seq: 18,
+        },
+      ],
+    });
+  });
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
     json(route, READ_STATES[0])
   );

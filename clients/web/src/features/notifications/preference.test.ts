@@ -25,6 +25,7 @@ describe("desktop notification kinds preference", () => {
     expect(Object.keys(desktopNotificationKinds()).sort()).toEqual([
       "approval",
       "mention",
+      "reminder",
     ]);
   });
 
@@ -35,12 +36,14 @@ describe("desktop notification kinds preference", () => {
     expect(JSON.parse(storage.getItem(DESKTOP_NOTIFICATION_STORAGE_KEY) ?? "")).toEqual({
       mention: false,
       approval: true,
+      reminder: true,
     });
 
     reloadDesktopNotificationKindsForTest(storage);
     expect(desktopNotificationKinds()).toEqual({
       mention: false,
       approval: true,
+      reminder: true,
     });
   });
 
@@ -55,6 +58,7 @@ describe("desktop notification kinds preference", () => {
     expect(desktopNotificationKinds()).toEqual({
       mention: false,
       approval: true,
+      reminder: true,
     });
   });
 });

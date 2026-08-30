@@ -1,6 +1,9 @@
 import { useSyncExternalStore } from "react";
 import type { NotifyKind } from "@momo/core/features/notifications/model";
 
+/** A4 kinds plus the reminder poll (A-41). Mentions/approvals ride message.new. */
+export type DesktopNotifyKind = NotifyKind | "reminder";
+
 // =============================================================================
 // This-device desktop notification kinds (BF-A4 / #1887).
 //
@@ -8,7 +11,8 @@ import type { NotifyKind } from "@momo/core/features/notifications/model";
 //   mention  — server-recorded `props.mention_member_ids`
 //   approval — pending `approval_request`
 // Ordinary channel traffic, a DM without a mention, a thread reply without a
-// mention, and an edit never become a banner. There is no third kind to store.
+// mention, and an edit never become a banner. Reminder dues are a third kind
+// and ride the 30s poll, not message.new.
 //
 // Workspace DND and the mention-exception live on the server. These switches
 // are localStorage, key shape `momo.web.*`, this origin only.
@@ -16,11 +20,12 @@ import type { NotifyKind } from "@momo/core/features/notifications/model";
 
 export const DESKTOP_NOTIFICATION_STORAGE_KEY = "momo.web.notifications.v1";
 
-export type DesktopNotificationKinds = Record<NotifyKind, boolean>;
+export type DesktopNotificationKinds = Record<DesktopNotifyKind, boolean>;
 
 export const DEFAULT_DESKTOP_NOTIFICATION_KINDS: DesktopNotificationKinds = {
   mention: true,
   approval: true,
+  reminder: true,
 };
 
 interface PreferenceStorage {
@@ -55,6 +60,10 @@ function parseKinds(raw: string | null): DesktopNotificationKinds {
         typeof record.approval === "boolean"
           ? record.approval
           : DEFAULT_DESKTOP_NOTIFICATION_KINDS.approval,
+      reminder:
+        typeof record.reminder === "boolean"
+          ? record.reminder
+          : DEFAULT_DESKTOP_NOTIFICATION_KINDS.reminder,
     };
   } catch {
     return { ...DEFAULT_DESKTOP_NOTIFICATION_KINDS };
@@ -102,7 +111,7 @@ function write(
 }
 
 export function setDesktopNotificationKind(
-  kind: NotifyKind,
+  kind: DesktopNotifyKind,
   enabled: boolean,
   storage: PreferenceStorage | null = browserStorage()
 ): void {
