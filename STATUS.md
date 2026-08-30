@@ -4,8 +4,9 @@
 
 - `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.
 - 컬러 모드 System/Light/Dark는 기존 ChoiceRadios를 `momo.web.appearance.v1` JSON으로 이관(옛 `momo.web.theme.v1` 읽기 전용 이관). 액센트 스와치 44·radio·focus-visible.
-- 대비 전수: `catalog.contrast.test.ts`가 `tokens.contrast.test.ts` 액센트 가족 축을 파생(채움 순서 1.15·danger dE·전경 7종·muted-soft 그릇·ok/warn 거리·후보 간 dE). 테마 추가=테스트 추가. red proof 상주. S0·`.brand-lockup`은 Dawn 고정(D4).
-- D5: `design_preflight_web.sh`가 `tokens.css`·`tokens.contrast.test.ts`·`themes/*` 경로 끝만 면제(합성 입력 자가시험). 캡처는 계산색 정착 대기.
+- 대비 전수: `catalog.contrast.test.ts`가 `tokens.contrast.test.ts` 액센트 가족 축을 파생(채움 순서 1.15·danger dE·전경 7종·muted-soft 그릇·ok/warn/danger 거리·후보 간 dE). 테마 추가=테스트 추가. red proof 상주. S0·`.brand-lockup`은 Dawn 고정(D4).
+- D5: `design_preflight_web.sh`가 `tokens.css`·`tokens.contrast.test.ts`·`themes/*` 경로 끝만 면제(합성 입력 자가시험). 캡처는 `--accent`/`--accent-soft` 정착 + 유한 애니메이션 idle 대기.
+- #1922 R2: 혜성은 붉은 사분면 밖(라이트 플럼 `#8b005a` · 다크 이온 청록 `#6de89b`). 옛 라즈베리/주황 쌍은 danger 충돌 red proof.
 - 서버 무접촉. runtime-unverified 아님. 시안: `accent-<id>-{light,dark}.png`.
 
 ## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)

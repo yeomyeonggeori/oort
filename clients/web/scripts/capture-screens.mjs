@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync, copyFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -8500,11 +8500,15 @@ async function captureHostedDoorbellScenes(browser, scheme) {
  * `data-accent` flipping is not the same as paint. Buttons carry
  * `transition-colors` (150ms) even under reduced motion, so wait until a
  * filled control's computed background equals `var(--token)`.
+ *
+ * `selector` is a CSS selector, not a test id: the selected channel row is
+ * one of several `[data-testid="channel-item"]` nodes, and only the
+ * `aria-current="page"` one paints `--accent-soft`.
  */
-async function waitUntilTokenPaint(page, testId, cssVar) {
+async function waitUntilTokenPaint(page, selector, cssVar) {
   await page.waitForFunction(
-    ({ testId: id, cssVar: token }) => {
-      const el = document.querySelector(`[data-testid="${id}"]`);
+    ({ selector: sel, cssVar: token }) => {
+      const el = document.querySelector(sel);
       if (!el) return false;
       const probe = document.createElement("span");
       probe.style.backgroundColor = `var(${token})`;
@@ -8516,9 +8520,49 @@ async function waitUntilTokenPaint(page, testId, cssVar) {
       if (target === "rgba(0, 0, 0, 0)" || target === "transparent") return false;
       return getComputedStyle(el).backgroundColor === target;
     },
-    { testId, cssVar },
+    { selector, cssVar },
     { timeout: 8_000 }
   );
+}
+
+/**
+ * Hash navigation and `data-accent` both start 150ms color transitions.
+ * Dawn is a no-op accent change, so `--accent` probes would pass on the
+ * first tick while the selected row is still mid-transition. Finite
+ * running animations (not the infinite caret/spin) must be gone.
+ */
+async function waitUntilAnimationsIdle(page) {
+  await page.waitForFunction(
+    () =>
+      document.getAnimations().filter((animation) => {
+        if (animation.playState !== "running") return false;
+        const timing =
+          animation.effect && typeof animation.effect.getTiming === "function"
+            ? animation.effect.getTiming()
+            : null;
+        if (timing && timing.iterations === Infinity) return false;
+        return true;
+      }).length === 0,
+    { timeout: 8_000 }
+  );
+}
+
+/** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
+async function screenshotSettled(page, path) {
+  let previous = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const buffer = await page.screenshot({
+      type: "png",
+      animations: "disabled",
+      caret: "hide",
+    });
+    if (previous !== null && Buffer.compare(previous, buffer) === 0) {
+      writeFileSync(path, buffer);
+      return;
+    }
+    previous = buffer;
+  }
+  writeFileSync(path, previous);
 }
 
 async function captureAccentCandidates(browser, scheme) {
@@ -8541,12 +8585,23 @@ async function captureAccentCandidates(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  await page.evaluate(() => document.fonts.ready);
+  // Header lucide strokes AA at 1 RGB across Chromium launches. They are not
+  // accent surfaces. Hide the cluster; keep the send *fill*.
+  await page.addStyleTag({
+    content: `[data-testid="channel-header-controls"] { visibility: hidden; }
+[data-testid="composer-send"] svg { opacity: 0; }`,
+  });
   // Empty public channel: selected sidebar row, enabled primary fill, and the
   // general mention badge share one frame. Timeline unfurl cards (baked amber)
   // do not dominate.
   await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
   await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
   await page.getByTestId("mention-badge").waitFor({ state: "visible" });
+  await page
+    .locator('[data-testid="channel-item"][aria-current="page"]')
+    .waitFor({ state: "visible" });
+  await waitUntilAnimationsIdle(page);
   const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
   mkdirSync(previewDir, { recursive: true });
   const shots = [];
@@ -8554,10 +8609,16 @@ async function captureAccentCandidates(browser, scheme) {
     await page.evaluate((accentId) => {
       document.documentElement.setAttribute("data-accent", accentId);
     }, id);
-    await waitUntilTokenPaint(page, "timeline-empty-primary", "--accent");
-    await waitUntilTokenPaint(page, "mention-badge", "--accent");
+    await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
+    await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
+    await waitUntilTokenPaint(
+      page,
+      '[data-testid="channel-item"][aria-current="page"]',
+      "--accent-soft"
+    );
+    await waitUntilAnimationsIdle(page);
     const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
-    await page.screenshot({ path });
+    await screenshotSettled(page, path);
     copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
     shots.push(path);
   }
@@ -8635,10 +8696,14 @@ async function main() {
     try {
       const all = [];
       // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여
-      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. 기본값은 여전히 둘 다이므로
-      // 게이트가 보는 것은 달라지지 않는다.
+      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. `accent`는 시안 10장만.
+      // 기본값은 여전히 둘 다이므로 게이트가 보는 것은 달라지지 않는다.
       const profile = process.env.CAPTURE_PROFILE || "all";
-      if (profile !== "mobile") {
+      if (profile === "accent") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureAccentCandidates(browser, scheme)));
+        }
+      } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
@@ -8655,7 +8720,7 @@ async function main() {
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop") {
+      if (profile !== "desktop" && profile !== "accent") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureMobile(browser, scheme)));
         }

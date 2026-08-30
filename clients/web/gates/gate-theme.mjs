@@ -131,7 +131,12 @@ function nonDefaultAccentId() {
     resolve(webRoot, "src/design/themes/index.ts"),
     "utf8"
   );
-  const ids = [...src.matchAll(/id: "([a-z]+)"/g)].map((match) => match[1]);
+  const classMatch = src.match(/export const ACCENT_ID_CHAR_CLASS = "([^"]+)"/);
+  if (!classMatch) fail("ACCENT_ID_CHAR_CLASS를 카탈로그에서 읽지 못했다");
+  const ACCENT_ID_CHAR_CLASS = classMatch[1];
+  const ids = [
+    ...src.matchAll(new RegExp(`id: "([${ACCENT_ID_CHAR_CLASS}]+)"`, "g")),
+  ].map((match) => match[1]);
   const other = ids.find((id) => id !== "dawn");
   if (!other) fail("카탈로그에 기본이 아닌 액센트가 없다");
   return other;

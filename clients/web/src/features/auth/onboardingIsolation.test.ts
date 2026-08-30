@@ -10,7 +10,7 @@ const tokens = readFileSync(
   new URL("../../design/tokens.css", import.meta.url),
   "utf8"
 );
-const srcRoot = fileURLToPath(new URL("..", import.meta.url));
+const srcRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {

@@ -1,7 +1,7 @@
-/* 혜성 — comet fireball. Raspberry in light, horizon orange in dark. */
+/* 혜성 — comet. Plum coma in light, ion-tail teal in dark. */
 :root[data-accent="hyeseong"],
 [data-accent-swatch="hyeseong"] {
-  --accent: light-dark(#ae083e, #fe6600);
-  --accent-soft: light-dark(#f6e0e2, #3a1c12);
+  --accent: light-dark(#8b005a, #6de89b);
+  --accent-soft: light-dark(#f1e0e8, #1e2724);
   --on-accent: light-dark(#fffefb, #17161a);
 }

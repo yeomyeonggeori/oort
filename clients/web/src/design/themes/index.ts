@@ -10,12 +10,12 @@ import.meta.glob("./*.css", { eager: true });
 // theme that is not in this list (or a list row without a file) fails closed.
 //
 // Dawn is always first and the default. The candidate set is a 시안 until
-// 성재 confirms it. Ids are lowercase ASCII letters only — theme-boot.js and
-// the capture scrape share ACCENT_ID_CHAR_CLASS, and the catalog test pins
-// the three together.
+// 성재 confirms it. Ids are lowercase ASCII letters only — theme-boot.js,
+// the capture scrape, and the theme gate share ACCENT_ID_CHAR_CLASS, and the
+// catalog test pins the four together.
 // =============================================================================
 
-/** Character class shared with public/theme-boot.js and capture-screens.mjs. */
+/** Character class shared with theme-boot.js, capture-screens.mjs, and gate-theme.mjs. */
 export const ACCENT_ID_CHAR_CLASS = "a-z";
 export const ACCENT_ID_RE = new RegExp(`^[${ACCENT_ID_CHAR_CLASS}]+$`);
 

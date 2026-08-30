@@ -47,6 +47,10 @@ const CAPTURE = readFileSync(
   new URL("../../../scripts/capture-screens.mjs", import.meta.url),
   "utf8"
 );
+const GATE = readFileSync(
+  new URL("../../../gates/gate-theme.mjs", import.meta.url),
+  "utf8"
+);
 const DAWN = parseLightDarkTokens(TOKENS_CSS);
 
 const BINDING_TOKENS = ["accent", "accent-soft", "on-accent"] as const;
@@ -120,10 +124,12 @@ function isBlueFamily(hex: string): boolean {
   );
 }
 
-/** Dawn's worst accent↔ok/warn distance. Bindings may not undercut it. */
+const STATUS_DISTANCE_TOKENS = ["ok", "warn", "danger"] as const;
+
+/** Dawn's worst accent↔ok/warn/danger distance. Bindings may not undercut it. */
 function statusDistanceFloor(): number {
   const distances = SCHEMES.flatMap((scheme) =>
-    (["ok", "warn"] as const).map((token) =>
+    STATUS_DISTANCE_TOKENS.map((token) =>
       Number(
         deltaE(pickDawn("accent", scheme.index), pickDawn(token, scheme.index)).toFixed(
           3
@@ -207,7 +213,7 @@ export function accentBindingFailures(binding: AccentBinding): string[] {
       );
     }
 
-    for (const status of ["ok", "warn"] as const) {
+    for (const status of STATUS_DISTANCE_TOKENS) {
       const distance = Number(deltaE(accent, pick(status)).toFixed(3));
       if (distance < STATUS_DELTA_E_FLOOR) {
         fails.push(
@@ -258,12 +264,14 @@ describe("accent theme catalog", () => {
     );
   });
 
-  it("uses one accent id character class in the catalog, boot, and capture", () => {
+  it("uses one accent id character class in the catalog, boot, capture, and theme gate", () => {
     for (const theme of ACCENT_THEMES) {
       expect(theme.id).toMatch(ACCENT_ID_RE);
     }
     expect(BOOT).toContain(`/^[${ACCENT_ID_CHAR_CLASS}]+$/`);
     expect(CAPTURE).toContain(`id: "([${ACCENT_ID_CHAR_CLASS}]+)"`);
+    expect(GATE).toContain("ACCENT_ID_CHAR_CLASS");
+    expect(GATE).toContain('id: "([${ACCENT_ID_CHAR_CLASS}]+)"');
   });
 
   it("does not rebind onboarding or agent tokens", () => {
@@ -377,6 +385,18 @@ describe("red proof: a failing binding fails this table", () => {
     };
     const fails = accentBindingFailures(okTwin);
     expect(fails.some((line) => line.includes("accent vs ok deltaE"))).toBe(
+      true
+    );
+  });
+
+  it("rejects an accent that collides with danger worse than Dawn", () => {
+    const dangerTwin: AccentBinding = {
+      accent: ["#ae083e", "#fe6600"],
+      "accent-soft": ["#f6e0e2", "#3a1c12"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const fails = accentBindingFailures(dangerTwin);
+    expect(fails.some((line) => line.includes("accent vs danger deltaE"))).toBe(
       true
     );
   });
