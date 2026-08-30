@@ -8565,66 +8565,92 @@ async function screenshotSettled(page, path) {
   writeFileSync(path, previous);
 }
 
-async function captureAccentCandidates(browser, scheme) {
+const ACCENT_CAPTURE_ARGS = [
+  "--disable-lcd-text",
+  "--disable-font-subpixel-positioning",
+  "--font-render-hinting=none",
+  "--force-color-profile=srgb",
+  "--disable-gpu",
+];
+
+async function captureAccentCandidates(_sharedBrowser, scheme) {
   const ids = accentCatalogIds();
-  const context = await browser.newContext({
-    viewport: VIEWPORT,
-    deviceScaleFactor: 1,
-    colorScheme: scheme,
-    reducedMotion: "reduce",
-  });
-  await installMocks(context);
-  const emptyChannelId = CHANNELS[3].id;
-  // Last-registered route wins: this channel stays empty so unfurl cards cannot
-  // dominate the 시안 frame.
-  await context.route(
-    `**/channels/${emptyChannelId}/messages*`,
-    (route) => json(route, { messages: [] })
-  );
-  const page = await context.newPage();
-  await page.goto(ORIGIN, { waitUntil: "networkidle" });
-  await signIn(page);
-  await page.getByTestId("channel-list").waitFor({ state: "visible" });
-  await page.evaluate(() => document.fonts.ready);
-  // Header lucide strokes AA at 1 RGB across Chromium launches. They are not
-  // accent surfaces. Hide the cluster; keep the send *fill*.
-  await page.addStyleTag({
-    content: `[data-testid="channel-header-controls"] { visibility: hidden; }
-[data-testid="composer-send"] svg { opacity: 0; }`,
-  });
-  // Empty public channel: selected sidebar row, enabled primary fill, and the
-  // general mention badge share one frame. Timeline unfurl cards (baked amber)
-  // do not dominate.
-  await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
-  await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
-  await page.getByTestId("mention-badge").waitFor({ state: "visible" });
-  await page
-    .locator('[data-testid="channel-item"][aria-current="page"]')
-    .waitFor({ state: "visible" });
-  await waitUntilAnimationsIdle(page);
-  const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
-  mkdirSync(previewDir, { recursive: true });
-  const shots = [];
-  for (const id of ids) {
-    await page.evaluate((accentId) => {
-      document.documentElement.setAttribute("data-accent", accentId);
-    }, id);
-    await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
-    await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
-    await waitUntilTokenPaint(
-      page,
-      '[data-testid="channel-item"][aria-current="page"]',
-      "--accent-soft"
+  // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
+  // launches (R3-M1). Software raster + no LCD keeps chrome visible and
+  // two capture:design runs byte-identical.
+  const browser = await chromium.launch({ args: ACCENT_CAPTURE_ARGS });
+  try {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    const emptyChannelId = CHANNELS[3].id;
+    // Last-registered route wins: this channel stays empty so unfurl cards cannot
+    // dominate the 시안 frame.
+    await context.route(
+      `**/channels/${emptyChannelId}/messages*`,
+      (route) => json(route, { messages: [] })
     );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("channel-list").waitFor({ state: "visible" });
+    // Empty public channel: selected sidebar row, enabled primary fill, and the
+    // general mention badge share one frame. Timeline unfurl cards (baked amber)
+    // do not dominate.
+    await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
+    await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
+    await page.getByTestId("mention-badge").waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="channel-item"][aria-current="page"]')
+      .waitFor({ state: "visible" });
+    await page.evaluate(() => document.fonts.ready);
+    // Product chrome stays visible (R3-M1). Lucide 16px strokes and the 2px
+    // rail marker AA at 1 RGB across Chromium launches; snap those glyphs
+    // so two capture:design runs stay byte-identical without hiding chrome.
+    await page.addStyleTag({
+      content: `svg { shape-rendering: crispEdges; }
+[data-testid="workspace-current"] .bg-accent,
+[data-testid="channel-item"][aria-current="page"] {
+  transform: translateZ(0);
+}`,
+    });
     await waitUntilAnimationsIdle(page);
-    const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
-    await screenshotSettled(page, path);
-    copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
-    shots.push(path);
+    const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
+    mkdirSync(previewDir, { recursive: true });
+    const shots = [];
+    for (const id of ids) {
+      await page.evaluate((accentId) => {
+        document.documentElement.setAttribute("data-accent", accentId);
+      }, id);
+      await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
+      await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
+      await waitUntilTokenPaint(
+        page,
+        '[data-testid="channel-item"][aria-current="page"]',
+        "--accent-soft"
+      );
+      await waitUntilAnimationsIdle(page);
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          })
+      );
+      const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+      await screenshotSettled(page, path);
+      copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
+      shots.push(path);
+    }
+    await page.close();
+    await context.close();
+    return shots;
+  } finally {
+    await browser.close();
   }
-  await page.close();
-  await context.close();
-  return shots;
 }
 
 async function captureConsent(browser, scheme) {

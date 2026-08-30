@@ -142,8 +142,22 @@ function statusDistanceFloor(): number {
 
 const STATUS_DELTA_E_FLOOR = statusDistanceFloor();
 
+/**
+ * Light↔dark hue drift per candidate. The original four stay in-family;
+ * Dawn is the largest at 19.8°. Bound is that measured max rounded up.
+ * Comet's 163.8° plum/mint pair (R3-H1) is the regression this ruler
+ * exists to catch; old dark `#6de89b` is the red proof below.
+ */
+const SCHEME_HUE_DRIFT_MAX_DEG = 20;
+
 export function accentBindingFailures(binding: AccentBinding): string[] {
   const fails: string[] = [];
+  const schemeDrift = hueGap(binding.accent[0], binding.accent[1]);
+  if (schemeDrift > SCHEME_HUE_DRIFT_MAX_DEG) {
+    fails.push(
+      `light↔dark hue drift ${schemeDrift.toFixed(1)} (need ≤ ${SCHEME_HUE_DRIFT_MAX_DEG})`
+    );
+  }
   for (const scheme of SCHEMES) {
     const pick = (token: string) => pickOverlay(binding, token, scheme.index);
     const accent = pick("accent");
@@ -310,6 +324,16 @@ describe("every accent binding meets the accent-family table", () => {
     });
   }
 
+  it("keeps each candidate's light and dark halves in one hue family", () => {
+    for (const { id, binding } of bindings) {
+      const drift = hueGap(binding.accent[0], binding.accent[1]);
+      expect(
+        drift,
+        `${id} light↔dark hue drift ${drift.toFixed(1)}`
+      ).toBeLessThanOrEqual(SCHEME_HUE_DRIFT_MAX_DEG);
+    }
+  });
+
   it("keeps swatch neighbours a different colour", () => {
     for (const scheme of SCHEMES) {
       for (let i = 0; i < bindings.length; i += 1) {
@@ -397,6 +421,18 @@ describe("red proof: a failing binding fails this table", () => {
     };
     const fails = accentBindingFailures(dangerTwin);
     expect(fails.some((line) => line.includes("accent vs danger deltaE"))).toBe(
+      true
+    );
+  });
+
+  it("rejects a pair whose dark half is a different colour", () => {
+    const mintTail: AccentBinding = {
+      accent: ["#8b005a", "#6de89b"],
+      "accent-soft": ["#f1e0e8", "#1e2724"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const fails = accentBindingFailures(mintTail);
+    expect(fails.some((line) => line.includes("light↔dark hue drift"))).toBe(
       true
     );
   });

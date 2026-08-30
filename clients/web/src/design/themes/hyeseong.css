@@ -1,7 +1,7 @@
-/* 혜성 — comet. Plum coma in light, ion-tail teal in dark. */
+/* 혜성 — comet. Plum coma in both schemes. */
 :root[data-accent="hyeseong"],
 [data-accent-swatch="hyeseong"] {
-  --accent: light-dark(#8b005a, #6de89b);
-  --accent-soft: light-dark(#f1e0e8, #1e2724);
+  --accent: light-dark(#8b005a, #ff4bcc);
+  --accent-soft: light-dark(#f1e0e8, #33242d);
   --on-accent: light-dark(#fffefb, #17161a);
 }
