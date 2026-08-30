@@ -365,6 +365,42 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     expect(trigger?.getAttribute("aria-label")).toContain("🤒");
   });
 
+  it("keeps a quiet mark on the card when the status is text-only (#1889 R2-M2)", async () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusText: "고객사 미팅",
+      })
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(document.querySelector('[data-testid="custom-status-glyph"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')).toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+    expect(trigger?.getAttribute("aria-label")).toContain("고객사 미팅");
+    const menu = await openMenu();
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.textContent
+    ).toContain("고객사 미팅");
+  });
+
+  it("caps the open menu so a long status cannot set its width (#1889 R2-B1)", async () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText:
+          "3분기 게이트웨이 점검 중, 오후 6시 이후 응답이 늦습니다. 급하면 전화 주세요, 이 채널로만 남겨 주세요. urgent only 내일 6시",
+      })
+    );
+    const menu = await openMenu();
+    expect(menu.className).toContain("max-w-pane-sm");
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.className
+    ).toMatch(/break-words/);
+  });
+
   it("hides a custom status when the clock crosses expiry while mounted", async () => {
     vi.useFakeTimers();
     const start = 1_800_000_000_000;

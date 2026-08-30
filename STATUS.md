@@ -3,9 +3,9 @@
 ## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)
 
 - ProfileCard 「상태 설정」 다이얼로그: 기존 이모지 피커 + 자유 텍스트 ≤80자 + 만료(지우지 않음/30분/1시간/오늘까지/시각 고르기) + 프리셋 칩 5종 + 지우기. PUT은 `status` 필수, 커스텀 3키 omit=유지·null=지우기.
-- design-review #1920 수리: 오류 배너가 roster 롤백에 안 지워짐(열림 사건만 시드)·만기 시각 한 번 깨움·시드=visibleCustomStatus·타인 auto를 온라인이라 안 함·카드 이모지 전용·이모지 단독 접근성·폰 tap-target(RemindDialog 동형)·저장 중…·캡처 장면.
+- design-review #1920 R2 수리: 프로필 메뉴를 pane-sm에 고정(80자 머리가 390을 밀던 M-1 회귀)·글만 있는 상태에 말풍선 표식·폰 캡처가 시트로 RemindDialog를 염·오프라인/시각 고르기 장면. R1 배너·만기 타이머·시드·auto 침묵·a11y·44는 유지.
 - 서버 절반은 track/engine(#1907, A-42). runtime-unverified: 라이브 PUT/roster/presence 브로드캐스트. 선행 P-1(390 서랍 z)·P-2(#1919) 손대지 않음.
-- red proof: PUT 500 배너+초안 보존 · fake timers 만기 리렌더 · 만기 시드 거부 · 타인 auto 비표기 · 이모지 단독 a11y. web vitest 1948 · core 1807 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8517` capture:design (set-status-dialog/error 두 스킴, 390 tap 44) · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- red proof: 80자 픽스처에서 메뉴 right≤390·✓ 가시. web vitest · core vitest · tsc · design_preflight_web · `CAPTURE_PORT=8517` capture:design · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BF-B1 클라 절반 메시지 리마인더 UI (#1888, 2026-08-30)
 

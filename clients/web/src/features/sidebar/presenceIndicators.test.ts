@@ -148,6 +148,11 @@ describe("프로필 카드 커스텀 상태 축 (#1889)", () => {
     expect(profileCard).toContain("CustomStatusMark");
     expect(profileCard).not.toContain("DropdownMenuSub");
   });
+
+  it("caps the menu at pane-sm so status copy cannot widen it (#1889 R2-B1)", () => {
+    expect(profileCard).toContain("max-w-pane-sm");
+    expect(profileCard).toContain("profile-card-status-head");
+  });
 });
 
 describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {

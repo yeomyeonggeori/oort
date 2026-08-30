@@ -103,7 +103,7 @@ export function ProfileCard({
               <span className="truncate text-body" data-testid="self-name">
                 {selfName}
               </span>
-              {custom?.emoji ? (
+              {custom ? (
                 <CustomStatusMark
                   status={custom}
                   emojiOnly
@@ -118,6 +118,10 @@ export function ProfileCard({
           side="top"
           sideOffset={8}
           data-testid="profile-card-menu"
+          // Menu measure is the menu's (pane-sm), not the user's status
+          // sentence. Without a cap the head's wrap never fires and an
+          // 80-char status pushes the panel past a 390 viewport (#1889 R2-B1).
+          className="max-w-pane-sm"
           onCloseAutoFocus={(event) => {
             // The add-workspace item hands the next layer a dialog. If this
             // menu yanks focus back to the card, Esc lands on the trigger and
@@ -131,7 +135,7 @@ export function ProfileCard({
           {statusHead ? (
             <DropdownMenuLabel
               data-testid="profile-card-status-head"
-              className="break-words whitespace-normal font-normal"
+              className="max-w-full min-w-0 break-words whitespace-normal font-normal"
             >
               {statusHead}
             </DropdownMenuLabel>

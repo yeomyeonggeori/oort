@@ -1,9 +1,13 @@
 import type { VisibleCustomStatus } from "@momo/core/features/presence/customStatus";
+import { MessageCircle } from "lucide-react";
 import { cn } from "@/design/lib/cn";
 
 // Custom status (ADR-0176) is a second axis next to declared presence.
 // Emoji is decorative when text is present. An emoji-only status is the
 // accessible fact, so the glyph stays in the tree (design-review #1889 M-2).
+// A text-only status still needs a quiet mark on the sidebar card
+// (design-review #1889 R2-M2); the bubble is decorative, names stay on
+// the trigger.
 
 export function CustomStatusMark({
   status,
@@ -13,12 +17,12 @@ export function CustomStatusMark({
 }: {
   status: VisibleCustomStatus;
   className?: string;
-  /** Sidebar card: emoji only. Text lives on title / menu head / profile. */
+  /** Sidebar card: emoji (or a quiet bubble if the status is text-only). */
   emojiOnly?: boolean;
   /** Profile dialog: wrap instead of truncating mid-word. */
   wrap?: boolean;
 }) {
-  if (emojiOnly && !status.emoji) return null;
+  if (emojiOnly && !status.emoji && !status.text) return null;
   const text = emojiOnly ? undefined : status.text;
   return (
     <span
@@ -29,6 +33,13 @@ export function CustomStatusMark({
       )}
       data-testid="custom-status"
     >
+      {emojiOnly && !status.emoji ? (
+        <MessageCircle
+          aria-hidden="true"
+          className="size-3 shrink-0"
+          data-testid="custom-status-glyph"
+        />
+      ) : null}
       {status.emoji ? (
         <span
           aria-hidden={text ? true : undefined}

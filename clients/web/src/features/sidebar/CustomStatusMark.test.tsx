@@ -52,4 +52,13 @@ describe("CustomStatusMark a11y (#1889 M-2)", () => {
     expect(emoji?.textContent).toBe("🤒");
     expect(emoji?.getAttribute("aria-hidden")).toBeNull();
   });
+
+  it("draws a quiet bubble when the card has text and no emoji (#1889 R2-M2)", () => {
+    mountMark({ text: "고객사 미팅" }, { emojiOnly: true });
+    const glyph = document.querySelector('[data-testid="custom-status-glyph"]');
+    expect(glyph).not.toBeNull();
+    expect(glyph?.getAttribute("aria-hidden")).toBe("true");
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')).toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+  });
 });
