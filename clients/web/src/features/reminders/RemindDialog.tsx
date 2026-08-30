@@ -125,7 +125,7 @@ export function RemindDialog({
               rows={2}
               disabled={pending || offline}
               onChange={(event) => setNote(event.target.value)}
-              className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+              className="tap-target w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
               placeholder="왜 다시 보는지"
               data-testid="remind-note"
             />
@@ -139,6 +139,7 @@ export function RemindDialog({
               type="button"
               size="sm"
               variant="secondary"
+              className="tap-target"
               disabled={pending || offline}
               onClick={() => commitPreset(preset.id)}
               data-testid={`remind-preset-${preset.id}`}

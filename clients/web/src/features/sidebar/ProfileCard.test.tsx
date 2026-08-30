@@ -66,6 +66,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -320,7 +321,7 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
 });
 
 describe("ProfileCard 커스텀 상태 (#1889)", () => {
-  it("shows custom status next to the presence badge, not instead of it", () => {
+  it("shows the emoji on the card and the text on title plus menu head", async () => {
     mountCard(
       () => undefined,
       rosterMember({
@@ -338,13 +339,54 @@ describe("ProfileCard 커스텀 상태 (#1889)", () => {
     expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
       "📅"
     );
-    expect(document.querySelector('[data-testid="custom-status-text"]')?.textContent).toBe(
-      "회의 중"
-    );
+    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
     const trigger = document.querySelector('[data-testid="profile-card"]');
     expect(trigger?.getAttribute("aria-label")).toContain("자리 비움");
     expect(trigger?.getAttribute("aria-label")).toContain("회의 중");
     expect(trigger?.getAttribute("aria-label")).not.toContain("📅");
+    const menu = await openMenu();
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.textContent
+    ).toContain("회의 중");
+  });
+
+  it("keeps an emoji-only status in the card's accessible name", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "🤒",
+      })
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
+      "🤒"
+    );
+    expect(trigger?.getAttribute("aria-label")).toContain("🤒");
+  });
+
+  it("hides a custom status when the clock crosses expiry while mounted", async () => {
+    vi.useFakeTimers();
+    const start = 1_800_000_000_000;
+    vi.setSystemTime(start);
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+        statusExpiresAtMs: start + 5_000,
+      })
+    );
+    expect(document.querySelector('[data-testid="custom-status"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(document.querySelector('[data-testid="custom-status"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(document.querySelector('[data-testid="custom-status"]')).toBeNull();
   });
 
   it("does not draw an expired custom status", () => {

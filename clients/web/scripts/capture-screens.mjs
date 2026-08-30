@@ -227,6 +227,23 @@ const MOBILE_TAP_TARGETS = [
   ["reminder-row-menu", "알림 메뉴", "optional"],
   ["reminder-complete-commit", "알림 완료 확인", "optional"],
   ["reminder-delete-commit", "알림 지우기 확인", "optional"],
+  // #1889 M-3 — 상태 설정 다이얼로그의 1급 컨트롤. 프리셋 칩과 이모지 칸이
+  // size=sm(28)이라 폰에서 tap-target을 각자 단다. optional: 다이얼로그가
+  // 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["set-status-emoji", "상태 이모지", "optional"],
+  ["set-status-preset-meeting", "상태 프리셋 회의 중", "optional"],
+  ["set-status-preset-commute", "상태 프리셋 이동 중", "optional"],
+  ["set-status-preset-sick", "상태 프리셋 병가", "optional"],
+  ["set-status-preset-vacation", "상태 프리셋 휴가", "optional"],
+  ["set-status-preset-wfh", "상태 프리셋 재택", "optional"],
+  ["set-status-text", "상태 글", "optional"],
+  // 같은 결정, 형제 RemindDialog (#1888 랜딩분).
+  ["remind-preset-30m", "알림 프리셋 30분", "optional"],
+  ["remind-preset-1h", "알림 프리셋 1시간", "optional"],
+  ["remind-preset-3h", "알림 프리셋 3시간", "optional"],
+  ["remind-preset-tomorrow-9", "알림 프리셋 내일 9시", "optional"],
+  ["remind-preset-next-monday-9", "알림 프리셋 다음 주 월요일", "optional"],
+  ["remind-note", "알림 메모", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -5247,10 +5264,13 @@ async function captureMobile(browser, scheme) {
   await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
   await assertTapTargets(page, `drawer profile ${scheme}`);
   await shoot(page, "sidebar-profile-card");
-  // 첫 Esc 는 카드, 둘째는 서랍. 메뉴가 열려 있는 동안 escape 층은 양보한다
-  // (`role="menu"` — UX-D4, 서랍이 카드를 삼키던 자리).
+  await page.getByTestId("profile-set-status").click();
+  await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+  await assertTapTargets(page, `set-status ${scheme}`);
+  await shoot(page, "set-status-dialog");
   await page.keyboard.press("Escape");
-  await page.getByTestId("profile-card-menu").waitFor({ state: "hidden" });
+  await page.getByTestId("set-status-dialog").waitFor({ state: "hidden" });
+  // 첫 Esc 는 상태 다이얼로그, 둘째는 서랍. 메뉴는 상태 항목을 고르며 이미 닫힘.
 
   // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
   // 여기서 실제로 걷는다.
@@ -7276,6 +7296,54 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   return shots;
 }
 
+// #1889 M-4 — 상태 설정 다이얼로그. 기본 + PUT 500 오류, 두 스킴.
+async function captureSetStatusScenes(browser, scheme) {
+  const shots = [];
+
+  async function shoot(name, failPut = false) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    if (failPut) {
+      await context.route("**/v1/workspaces/*/presence", async (route) => {
+        if (route.request().method() === "PUT") {
+          return route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { message: "presence write failed" } }),
+          });
+        }
+        return route.fallback();
+      });
+    }
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("profile-card").click();
+    await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+    await page.getByTestId("profile-set-status").click();
+    await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+    if (failPut) {
+      await page.getByTestId("set-status-save").click();
+      await page.getByTestId("set-status-error").waitFor({ state: "visible" });
+    } else {
+      await page.waitForTimeout(200);
+    }
+    const path = `${OUT_DIR}/set-status-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("dialog");
+  await shoot("error", true);
+  return shots;
+}
+
 // 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
 // scene, so its four states went to review unseen. Each state is shot in its
 // own context because the roster is a react-query cache: to make the SAME
@@ -7284,15 +7352,6 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
 // query mid-session does not. The POST that adds a member is the members mock
 // installMocks already carries (**/channels/*/members**), so a click in the
 // normal shot lands on a real 2xx.
-//
-// The entry point IS the real one: release-notes is emptied of messages so the
-// 빈 채널 "멤버 추가하기" button — the exact control this batch rewired — is on
-// screen to click. release-notes is a good target because HERMES is in every
-// channel (renders the "멤버" already-in row) while the rest are addable.
-//
-// #1536 이후 그 버튼은 빈 채널의 **보조** 액션이다(첫 행동은 「첫 메시지 쓰기」).
-// 이 레인이 이름으로 집는 것은 그대로이고, 덕분에 이 레인은 강등된 문이 여전히
-// 열린다는 것까지 매 캡처마다 실제로 눌러 확인하는 자리가 됐다.
 async function captureAddMemberScenes(browser, scheme) {
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
@@ -8336,6 +8395,7 @@ async function main() {
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
+          all.push(...(await captureSetStatusScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));

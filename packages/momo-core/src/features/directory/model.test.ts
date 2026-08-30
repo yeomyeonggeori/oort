@@ -345,7 +345,7 @@ describe("memberRowLabel", () => {
     );
   });
 
-  it("includes custom status text and never the emoji", () => {
+  it("includes custom status text and not the emoji when both are present", () => {
     const working = member({
       id: SEONGJAE.id,
       displayName: SEONGJAE.displayName,
@@ -359,6 +359,19 @@ describe("memberRowLabel", () => {
     );
     expect(memberRowLabel(working, null, undefined, 1_800_000_000_000)).not.toContain(
       "📅"
+    );
+  });
+
+  it("includes the emoji in the accessible name when that is the only fact", () => {
+    const emojiOnly = member({
+      id: SEONGJAE.id,
+      displayName: SEONGJAE.displayName,
+      handle: SEONGJAE.handle,
+      role: "admin",
+      statusEmoji: "🤒",
+    });
+    expect(memberRowLabel(emojiOnly, null, undefined, 1_800_000_000_000)).toBe(
+      "곽성재 @seongjae, 관리자, 🤒, 다이렉트 메시지 열기"
     );
   });
 

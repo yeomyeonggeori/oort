@@ -2,10 +2,10 @@
 
 ## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)
 
-- ProfileCard 「상태 설정」 다이얼로그: 기존 이모지 피커 + 자유 텍스트 ≤80자 + 만료(지우지 않음/30분/1시간/오늘까지/시각 고르기) + 프리셋 칩 5종(회의 중/이동 중/병가/휴가/재택) + 지우기. PUT은 `status` 필수, 커스텀 3키 omit=유지·null=지우기.
-- 표시: ProfileCard·명부 행·멤버 프로필. 선언 프레즌스 3종(auto/away/dnd)과 별도 축 동시 표시. 만료 지난 상태는 클라에서 비표시(고정 now 주입). 명부 접근성 이름은 텍스트만(이모지 aria-hidden).
-- 서버 절반은 track/engine(#1907, A-42). 이 레인은 REST 소비층+모킹 red proof. 실서버 conformance는 main 승격 시. runtime-unverified: 라이브 PUT/roster/presence 브로드캐스트.
-- red proof: PUT omit vs null 자구 왕복(설정→roster 유지→지우기)·80자 입력 상한·만료 지난 비표시(고정 now)·프리셋 칩 5종 카피·선언 3종 라디오 회귀. web vitest 1934 · core 1803 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8517` capture:design · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- ProfileCard 「상태 설정」 다이얼로그: 기존 이모지 피커 + 자유 텍스트 ≤80자 + 만료(지우지 않음/30분/1시간/오늘까지/시각 고르기) + 프리셋 칩 5종 + 지우기. PUT은 `status` 필수, 커스텀 3키 omit=유지·null=지우기.
+- design-review #1920 수리: 오류 배너가 roster 롤백에 안 지워짐(열림 사건만 시드)·만기 시각 한 번 깨움·시드=visibleCustomStatus·타인 auto를 온라인이라 안 함·카드 이모지 전용·이모지 단독 접근성·폰 tap-target(RemindDialog 동형)·저장 중…·캡처 장면.
+- 서버 절반은 track/engine(#1907, A-42). runtime-unverified: 라이브 PUT/roster/presence 브로드캐스트. 선행 P-1(390 서랍 z)·P-2(#1919) 손대지 않음.
+- red proof: PUT 500 배너+초안 보존 · fake timers 만기 리렌더 · 만기 시드 거부 · 타인 auto 비표기 · 이모지 단독 a11y. web vitest 1948 · core 1807 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8517` capture:design (set-status-dialog/error 두 스킴, 390 tap 44) · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BF-B1 클라 절반 메시지 리마인더 UI (#1888, 2026-08-30)
 

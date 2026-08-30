@@ -290,8 +290,66 @@ describe("멤버 프로필 커스텀 상태 (#1889)", () => {
     });
     const dialog = await waitForDialog();
     expect(dialog.querySelector('[data-testid="custom-status"]')).toBeNull();
-    expect(dialog.textContent).toContain("온라인");
+    expect(dialog.textContent).not.toContain("온라인");
     expect(dialog.textContent).not.toContain("회의 중");
+  });
+
+  it("does not assert 온라인 for auto, and still names away/dnd", async () => {
+    const auto = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "auto",
+    });
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      roster: [OWNER, ADMIN, auto, AGENT],
+    });
+    const dialog = await waitForDialog();
+    expect(dialog.textContent).toContain("@intern-kim");
+    expect(dialog.textContent).not.toContain("온라인");
+  });
+
+  it("wraps a long custom status instead of truncating mid-word", async () => {
+    const long = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      presenceStatus: "dnd",
+      statusText: "urgent outage bridge",
+    });
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      roster: [OWNER, ADMIN, long, AGENT],
+    });
+    const dialog = await waitForDialog();
+    expect(dialog.textContent).toContain("방해 금지");
+    const text = dialog.querySelector('[data-testid="custom-status-text"]');
+    expect(text?.className).toContain("break-words");
+    expect(text?.className).not.toContain("truncate");
+  });
+
+  it("keeps an emoji-only status in the accessibility tree", async () => {
+    const emojiOnly = rosterMember({
+      id: MEMBER_ID,
+      displayName: "김인턴",
+      handle: "intern-kim",
+      role: "member",
+      statusEmoji: "🤒",
+    });
+    mountProfile({
+      viewer: OWNER,
+      targetId: MEMBER_ID,
+      roster: [OWNER, ADMIN, emojiOnly, AGENT],
+    });
+    const dialog = await waitForDialog();
+    const emoji = dialog.querySelector('[data-testid="custom-status-emoji"]');
+    expect(emoji?.textContent).toBe("🤒");
+    expect(emoji?.getAttribute("aria-hidden")).toBeNull();
   });
 });
 

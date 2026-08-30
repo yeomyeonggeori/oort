@@ -2,11 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { LogOut, Plus, Settings, Smile } from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
-import {
-  customStatusAccessibleText,
-  CUSTOM_STATUS_MENU_LABEL,
-  visibleCustomStatus,
-} from "@momo/core/features/presence/customStatus";
+import { CUSTOM_STATUS_MENU_LABEL } from "@momo/core/features/presence/customStatus";
 import { presenceTriggerLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
@@ -32,6 +28,7 @@ import {
   PresenceStatusItems,
 } from "./PresenceControl";
 import { SetStatusDialog } from "./SetStatusDialog";
+import { useCustomStatusView } from "./useCustomStatusView";
 
 // =============================================================================
 // Bottom identity card (UX-D4 #1756, buzz 36). The trigger is the identity
@@ -77,15 +74,14 @@ export function ProfileCard({
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [setStatusOpen, setSetStatusOpen] = useState(false);
   const effective = effectivePresence(selfMember?.presenceStatus, connected);
-  const custom = selfMember
-    ? visibleCustomStatus(selfMember, Date.now())
-    : null;
-  const customName = selfMember
-    ? customStatusAccessibleText(selfMember, Date.now())
-    : null;
+  const { visible: custom, accessible: customName } =
+    useCustomStatusView(selfMember);
   const triggerName = customName
     ? `${selfName}. ${presenceTriggerLabel(effective)}. ${customName}`
     : `${selfName}. ${presenceTriggerLabel(effective)}`;
+  const statusHead = custom
+    ? [custom.emoji, custom.text].filter(Boolean).join(" ")
+    : null;
 
   return (
     <>
@@ -107,9 +103,10 @@ export function ProfileCard({
               <span className="truncate text-body" data-testid="self-name">
                 {selfName}
               </span>
-              {custom ? (
+              {custom?.emoji ? (
                 <CustomStatusMark
                   status={custom}
+                  emojiOnly
                   className="text-meta text-ink-muted"
                 />
               ) : null}
@@ -131,6 +128,14 @@ export function ProfileCard({
             }
           }}
         >
+          {statusHead ? (
+            <DropdownMenuLabel
+              data-testid="profile-card-status-head"
+              className="break-words whitespace-normal font-normal"
+            >
+              {statusHead}
+            </DropdownMenuLabel>
+          ) : null}
           <PresenceStatusItems
             workspaceId={workspaceId}
             selfMemberId={selfMemberId}

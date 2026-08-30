@@ -19,8 +19,10 @@ import {
   CUSTOM_STATUS_EXPIRY_LABEL,
   CUSTOM_STATUS_PRESETS,
   CUSTOM_STATUS_SAVE_LABEL,
+  CUSTOM_STATUS_SAVING_LABEL,
   CUSTOM_STATUS_TEXT_LABEL,
   CUSTOM_STATUS_TEXT_MAX,
+  CUSTOM_STATUS_TEXT_PLACEHOLDER,
   customExpiryAtMs,
   customStatusClearFailureMessage,
   customStatusFailureMessage,
@@ -28,6 +30,7 @@ import {
   localTimeInputValue,
   STATUS_EXPIRY_OPTIONS,
   statusExpiryAtMs,
+  visibleCustomStatus,
   type StatusExpiryChoice,
 } from "@momo/core/features/presence/customStatus";
 import { Button } from "@/design/ui/button";
@@ -71,6 +74,29 @@ function applyCustomToRoster(
   });
 }
 
+function seedExpiryFields(
+  expiresAtMs: number | undefined,
+  now: number
+): {
+  expiry: StatusExpiryChoice;
+  date: string;
+  time: string;
+} {
+  const placeholder = now + 60 * 60_000;
+  if (expiresAtMs === undefined || expiresAtMs < now) {
+    return {
+      expiry: "none",
+      date: localDateInputValue(placeholder),
+      time: localTimeInputValue(placeholder),
+    };
+  }
+  return {
+    expiry: "custom",
+    date: localDateInputValue(expiresAtMs),
+    time: localTimeInputValue(expiresAtMs),
+  };
+}
+
 export function SetStatusDialog({
   open,
   onOpenChange,
@@ -95,6 +121,7 @@ export function SetStatusDialog({
   const dateId = useId();
   const timeId = useId();
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
+  const seededOpenRef = useRef(false);
   const [emoji, setEmoji] = useState("");
   const [text, setText] = useState("");
   const [expiry, setExpiry] = useState<StatusExpiryChoice>("none");
@@ -105,26 +132,38 @@ export function SetStatusDialog({
   const [failed, setFailed] = useState<string | null>(null);
 
   const declared: PresenceStatus = selfMember?.presenceStatus ?? "auto";
+  const clock = nowMs ?? Date.now();
+  const storedVisible = selfMember
+    ? visibleCustomStatus(selfMember, clock)
+    : null;
+  const canClear = storedVisible !== null;
 
   useEffect(() => {
-    if (!open) return;
-    setEmoji(selfMember?.statusEmoji ?? "");
-    setText(selfMember?.statusText ?? "");
+    if (!open) {
+      seededOpenRef.current = false;
+      return;
+    }
+    if (seededOpenRef.current) return;
+    seededOpenRef.current = true;
+    // Seed on the open event only. Roster identity changes (optimistic
+    // write, error rollback) must not wipe the draft or the error banner
+    // (design-review #1889 B-1). The seed walks the same read-edge as the
+    // card and directory (H-2): an expired stamp does not come back.
+    const now = nowMs ?? Date.now();
+    const visible = selfMember ? visibleCustomStatus(selfMember, now) : null;
+    setEmoji(visible?.emoji ?? "");
+    setText(visible?.text ?? "");
     setFailed(null);
     setCustomError(null);
     setPickerOpen(false);
-    const expires = selfMember?.statusExpiresAtMs;
-    if (expires === undefined) {
-      setExpiry("none");
-      const seed = Date.now() + 60 * 60_000;
-      setDate(localDateInputValue(seed));
-      setTime(localTimeInputValue(seed));
-      return;
-    }
-    setExpiry("custom");
-    setDate(localDateInputValue(expires));
-    setTime(localTimeInputValue(expires));
-  }, [open, selfMember]);
+    const seeded = seedExpiryFields(
+      visible ? selfMember?.statusExpiresAtMs : undefined,
+      now
+    );
+    setExpiry(seeded.expiry);
+    setDate(seeded.date);
+    setTime(seeded.time);
+  }, [open, selfMember, nowMs]);
 
   const mutation = useMutation({
     mutationFn: (write: Parameters<typeof setPresenceStatus>[1]) =>
@@ -242,6 +281,7 @@ export function SetStatusDialog({
               type="button"
               variant="outline"
               size="sm"
+              className="tap-target"
               disabled={busy}
               aria-label={CUSTOM_STATUS_EMOJI_LABEL}
               data-testid="set-status-emoji"
@@ -258,6 +298,7 @@ export function SetStatusDialog({
                 type="button"
                 variant="ghost"
                 size="sm"
+                className="tap-target"
                 disabled={busy}
                 data-testid="set-status-emoji-clear"
                 onClick={() => setEmoji("")}
@@ -278,6 +319,7 @@ export function SetStatusDialog({
                 type="button"
                 size="sm"
                 variant="secondary"
+                className="tap-target"
                 disabled={busy}
                 data-testid={`set-status-preset-${preset.id}`}
                 onClick={() => {
@@ -293,7 +335,7 @@ export function SetStatusDialog({
 
           <div className="flex min-w-0 flex-col gap-1">
             <label htmlFor={textId} className="text-meta text-ink-muted">
-              {CUSTOM_STATUS_TEXT_LABEL} ({CUSTOM_STATUS_TEXT_MAX}자)
+              {CUSTOM_STATUS_TEXT_LABEL} (선택, {CUSTOM_STATUS_TEXT_MAX}자)
             </label>
             <textarea
               id={textId}
@@ -301,8 +343,9 @@ export function SetStatusDialog({
               maxLength={CUSTOM_STATUS_TEXT_MAX}
               rows={2}
               disabled={busy}
+              placeholder={CUSTOM_STATUS_TEXT_PLACEHOLDER}
               onChange={(event) => setText(event.target.value)}
-              className="w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
+              className="tap-target w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50"
               data-testid="set-status-text"
             />
           </div>
@@ -376,7 +419,7 @@ export function SetStatusDialog({
             <Button
               type="button"
               variant="outline"
-              disabled={busy}
+              disabled={busy || !canClear}
               data-testid="set-status-clear"
               onClick={() =>
                 void commit(
@@ -393,7 +436,9 @@ export function SetStatusDialog({
               data-testid="set-status-save"
               onClick={save}
             >
-              {CUSTOM_STATUS_SAVE_LABEL}
+              {mutation.isPending
+                ? CUSTOM_STATUS_SAVING_LABEL
+                : CUSTOM_STATUS_SAVE_LABEL}
             </Button>
           </div>
         </DialogContent>

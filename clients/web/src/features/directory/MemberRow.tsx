@@ -1,11 +1,11 @@
 import { ChevronRight } from "lucide-react";
 import { uuidEq, type RosterMember } from "@momo/core/lib/api";
-import { visibleCustomStatus } from "@momo/core/features/presence/customStatus";
 import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
+import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import {
   memberRowLabel,
   roleLabel,
@@ -59,7 +59,7 @@ export function MemberRow({
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
   const role = roleLabel(member, labels);
   const status = statusLabel(member);
-  const custom = visibleCustomStatus(member, Date.now());
+  const { visible: custom, nowMs } = useCustomStatusView(member);
 
   const identity = (
     <span className="flex min-w-0 flex-1 flex-col">
@@ -105,7 +105,8 @@ export function MemberRow({
         aria-label={memberRowLabel(
           member,
           owner?.displayName ?? null,
-          labels
+          labels,
+          nowMs
         ).replace(
           "다이렉트 메시지 열기",
           uuidEq(member.id, selfMemberId) ? "나, 프로필 열기" : "프로필 열기"

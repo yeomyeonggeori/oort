@@ -36,9 +36,11 @@ export const STATUS_EXPIRY_OPTIONS: readonly {
 export const CUSTOM_STATUS_DIALOG_TITLE = "상태 설정";
 export const CUSTOM_STATUS_MENU_LABEL = "상태 설정";
 export const CUSTOM_STATUS_SAVE_LABEL = "상태 저장";
+export const CUSTOM_STATUS_SAVING_LABEL = "저장 중…";
 export const CUSTOM_STATUS_CLEAR_LABEL = "상태 지우기";
 export const CUSTOM_STATUS_CANCEL_LABEL = "취소";
 export const CUSTOM_STATUS_TEXT_LABEL = "상태 글";
+export const CUSTOM_STATUS_TEXT_PLACEHOLDER = "지금 하는 일";
 export const CUSTOM_STATUS_EMOJI_LABEL = "상태 이모지 고르기";
 export const CUSTOM_STATUS_EMOJI_CLEAR_LABEL = "이모지 지우기";
 export const CUSTOM_STATUS_EXPIRY_LABEL = "만료";
@@ -47,7 +49,11 @@ export const CUSTOM_STATUS_DIALOG_DESCRIPTION =
 
 export interface PresenceWrite {
   status: PresenceStatus;
-  /** Present = patch. `null` clears. Omitted leaves the stored value. */
+  /**
+   * Present = patch. `null` clears. Omitted leaves the stored value.
+   * A present key is `string | null` only: `undefined` is not a wire
+   * value and must not be read as a clear (design-review #1889 N-1).
+   */
   statusEmoji?: string | null;
   statusText?: string | null;
   statusExpiresAtMs?: number | null;
@@ -84,14 +90,14 @@ export function clampStatusEmoji(raw: string): string {
   return scalars.slice(0, CUSTOM_STATUS_EMOJI_MAX).join("");
 }
 
-function optionalStringForWire(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
+function optionalStringForWire(value: string | null): string | null {
+  if (value === null) return null;
   const clamped = clampStatusText(value);
   return clamped === "" ? null : clamped;
 }
 
-function optionalEmojiForWire(value: string | null | undefined): string | null {
-  if (value === null || value === undefined) return null;
+function optionalEmojiForWire(value: string | null): string | null {
+  if (value === null) return null;
   const clamped = clampStatusEmoji(value);
   return clamped === "" ? null : clamped;
 }
@@ -99,19 +105,18 @@ function optionalEmojiForWire(value: string | null | undefined): string | null {
 /**
  * PUT JSON body. Keys that are absent on `write` stay absent (keep). Keys that
  * are present, including `null`, are serialized so `JSON.stringify` emits
- * `null` rather than dropping them (clear).
+ * `null` rather than dropping them (clear). `undefined` is omit, not clear.
  */
 export function presenceWriteBody(write: PresenceWrite): Record<string, unknown> {
   const body: Record<string, unknown> = { status: write.status };
-  if ("statusEmoji" in write) {
+  if (write.statusEmoji !== undefined) {
     body.statusEmoji = optionalEmojiForWire(write.statusEmoji);
   }
-  if ("statusText" in write) {
+  if (write.statusText !== undefined) {
     body.statusText = optionalStringForWire(write.statusText);
   }
-  if ("statusExpiresAtMs" in write) {
-    const value = write.statusExpiresAtMs;
-    body.statusExpiresAtMs = value === undefined ? null : value;
+  if (write.statusExpiresAtMs !== undefined) {
+    body.statusExpiresAtMs = write.statusExpiresAtMs;
   }
   return body;
 }
@@ -144,12 +149,21 @@ export function visibleCustomStatus(
   return visible;
 }
 
-/** Accessible name fragment: text only. Emoji is decorative on the row. */
+/**
+ * Accessible name fragment for a visible custom status.
+ *
+ * Text is the fact when it is present (emoji stays decorative next to it).
+ * An emoji-only status has no other words, so the emoji itself is the name
+ * (design-review #1889 M-2).
+ */
 export function customStatusAccessibleText(
   row: CustomStatusFields,
   nowMs: number
 ): string | null {
-  return visibleCustomStatus(row, nowMs)?.text ?? null;
+  const visible = visibleCustomStatus(row, nowMs);
+  if (!visible) return null;
+  if (visible.text) return visible.text;
+  return visible.emoji ?? null;
 }
 
 export function statusExpiryAtMs(

@@ -66,12 +66,24 @@ describe("presenceWriteBody (omit vs null)", () => {
           status: "auto",
           statusEmoji: "  ",
           statusText: "   ",
-          statusExpiresAtMs: undefined,
+          statusExpiresAtMs: null,
         })
       )
     ).toBe(
       '{"status":"auto","statusEmoji":null,"statusText":null,"statusExpiresAtMs":null}'
     );
+  });
+
+  it("does not treat an undefined field as a clear", () => {
+    expect(
+      JSON.stringify(
+        presenceWriteBody({
+          status: "auto",
+          statusText: undefined,
+          statusExpiresAtMs: undefined,
+        })
+      )
+    ).toBe('{"status":"auto"}');
   });
 });
 
@@ -116,14 +128,17 @@ describe("visibleCustomStatus", () => {
 });
 
 describe("customStatusAccessibleText", () => {
-  it("exposes the text and never the emoji", () => {
+  it("exposes the text and not the emoji when both are present", () => {
     expect(
       customStatusAccessibleText(
         { statusEmoji: "📅", statusText: "회의 중" },
         NOW
       )
     ).toBe("회의 중");
-    expect(customStatusAccessibleText({ statusEmoji: "📅" }, NOW)).toBeNull();
+  });
+
+  it("exposes the emoji when that is the only fact", () => {
+    expect(customStatusAccessibleText({ statusEmoji: "📅" }, NOW)).toBe("📅");
   });
 });
 

@@ -24,4 +24,9 @@ describe("reminder query and create mutation wiring", () => {
   it("snooze commit names the verb 알림 미루기", () => {
     expect(DIALOG).toContain("REMINDER_SNOOZE_COMMIT_LABEL");
   });
+
+  it("grows first-class form controls to the phone tap target", () => {
+    expect(DIALOG).toContain('className="tap-target"');
+    expect(DIALOG).toContain("tap-target w-full resize-y");
+  });
 });
