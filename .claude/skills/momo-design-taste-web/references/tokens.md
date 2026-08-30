@@ -43,7 +43,7 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--line-strong` | `#84817d` | `#6f6e73` | control outlines: input, outline button, composer vessel (>= 3:1). Light is already **3.03:1** on `--surface-hover`; one RGB step drops to 2.99, so #1866 does not lighten it. |
 | `--ink` | `#24211c` | `#ececf1` | body text |
 | `--ink-muted` | `#6a655f` | `#9b98a3` | timestamps, meta, secondary |
-| `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon) |
+| `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon). Default binding (Dawn / 새벽). Curated alternatives rebind this pair from `src/design/themes/` via `data-accent` (ADR-0174). |
 | `--accent-soft` | `#f4e7d6` | `#33261a` | selected row (sidebar, work console, ⌘K) |
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
@@ -592,6 +592,11 @@ pins one scheme; the screenshot capture uses browser-level
 `prefers-color-scheme` emulation instead, so captures exercise the same
 `light-dark()` path the product uses and nothing is themed specially for the
 shot.
+
+Accent bindings are a second stamp: `:root[data-accent="<id>"]` redefines
+`--accent` / `--accent-soft` / `--on-accent` only. The default id is `dawn`.
+Onboarding S0 and `.brand-lockup` pin those three tokens back to Dawn
+(ADR-0174 D4). Preference lives in `momo.web.appearance.v1` on this device.
 
 ## 7. Adding a token
 

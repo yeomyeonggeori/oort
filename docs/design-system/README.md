@@ -69,7 +69,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | # | 파일 | 정의하는 것 | 누구를 따르나 |
 |---|---|---|---|
-| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** |
+| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** (의미 토큰) |
+| 1b | `clients/web/src/design/themes/` | `--accent` / `--accent-soft` / `--on-accent` 바인딩 (라이트·다크 쌍) | ①의 의미 토큰을 **재바인딩**. 컴포넌트는 여기 hex를 읽지 않는다 (ADR-0174 D1) |
 | 2 | `clients/mobile/src/design/tokens.ts` | 색(×2스킴) · space · radius · font · line · TOUCH_TARGET | ①을 번역 |
 | 3 | `packages/momo-core/src/features/timeline/divider.ts` | `ROW_SPACE` — 타임라인 행 간 거리 | 없음(이 축의 정본). 웹·폰이 각자 소비 |
 | 4 | ~~`clients/macOS/Sources/MomoMac/Theme.swift`~~ | (삭제됨 — PR #1253) | 정본 토큰 파일은 위 1~3의 셋뿐이다 |
@@ -78,7 +79,9 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **여명(Dawn) 팔레트.** 웹이 두 스킴을 `light-dark()` 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 폰은 두 상수로 나눠 들고, `clients/mobile/__tests__/paletteContrast.test.ts`가 웹 `tokens.css`를 `readFileSync`로 읽어 **바이트 단위로** 대조한다(짝 15쌍 + 스크림).
 
-규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `paletteContrast.test.ts`):
+컴포넌트는 의미 토큰(`--accent` · `--surface` · `--ink` …)만 소비한다. 사용자가 고르는 액센트는 `src/design/themes/`의 바인딩 층이 `:root[data-accent]`로 `--accent` / `--accent-soft` / `--on-accent`만 재정의한다(ADR-0174 D1). 기본 바인딩은 항상 새벽(호박)이고 목록의 첫 값이다. 온보딩 S0과 브랜드 락업(`.brand-lockup`)은 이 재정의의 영향권 밖이다(D4). 후보 세트는 구현 시안이며 성재 확인 전에 정본이 아니다.
+
+규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `themes/catalog.contrast.test.ts` · `paletteContrast.test.ts`):
 
 - **순흑·순백 없음.** 종이의 흰색은 `#fffefb`.
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
@@ -87,7 +90,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 - **위험 순서의 자는 대비가 아니라 채도(OKLab C)다** — `danger > warn > ink-muted`. AA를 한참 넘긴 두 톤은 대비 축에서 구분되지 않는다.
 - **스크림은 색이 아니라 방향이다** — 어느 스킴에서든 뒤를 어둡게 한다.
 - **상호작용 상태를 그리는 토큰은 정적인 그릇이 될 수 없다** (#1515) — 아래.
-- **hex 리터럴 0.** 웹은 프리플라이트 그렙이(ESLint 규칙도 있지만 어느 게이트도 안 돌린다 — §5.4, 그리고 그 셀렉터는 6자리 hex만 본다), 폰은 `conversationHygiene.test.tsx:519`가 `src/` 전수에서 센다.
+- **hex 리터럴 0 (컴포넌트).** 웹은 프리플라이트 그렙이 `tokens.css`와 `src/design/themes/`만 허용한다. 테마 디렉토리는 **사전 검증된 바인딩 외 금지**이지 일반 raw color 면제가 아니다(ADR-0174 D5). 폰은 `conversationHygiene.test.tsx:519`가 `src/` 전수에서 센다.
 
 #### 상태 토큰과 그릇 토큰은 갈라져 있다 (#1515 / design-review #1514 H-2)
 
@@ -478,3 +481,4 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |
 | 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
+| 8 | 액센트 후보 세트 확정 | ADR-0174 D2. BZ-5a가 시안을 산출하고, 성재 확인 후 머지 |

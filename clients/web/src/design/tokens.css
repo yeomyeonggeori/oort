@@ -9,7 +9,9 @@
  *
  * Contract (mirrored in .claude/skills/momo-design-taste-web/references/tokens.md
  * and verified mechanically by src/design/tokens.contrast.test.ts):
- *   - one accent per surface (--accent, 호박/amber horizon)
+ *   - one accent per surface (--accent, default 호박/amber horizon). Curated
+ *     bindings in src/design/themes/ rebind --accent/--accent-soft/--on-accent
+ *     via :root[data-accent]; components still consume the semantic tokens.
  *   - agent identity is --agent (predawn slate-blue) on avatar/badge only
  *   - every foreground token meets WCAG AA (>= 4.5:1) on every surface token,
  *     in BOTH schemes; --line-strong (control borders) meets >= 3:1
@@ -19,6 +21,8 @@
  *
  * Scheme selection follows the OS by default (color-scheme: light dark).
  * :root[data-theme="light"|"dark"] pins it (used by the screenshot capture).
+ * :root[data-accent] rebinds the accent family (ADR-0174). S0 and .brand-lockup
+ * pin that family back to Dawn.
  * ========================================================================== */
 
 :root {
@@ -315,6 +319,17 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+}
+
+/* ADR-0174 D4: custom accent does not recolor S0 or the brand lockup.
+ * Values match the Dawn pair in :root. S0 paints with `--onboarding-*`;
+ * `.brand-lockup` is the Connect/Claim mark+wordmark that still uses
+ * `--accent`. */
+.onboarding-landing,
+.brand-lockup {
+  --accent: light-dark(#a54c08, #f0a850);
+  --accent-soft: light-dark(#f4e7d6, #33261a);
+  --on-accent: light-dark(#fffefb, #17161a);
 }
 
 @theme {

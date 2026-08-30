@@ -1,0 +1,7 @@
+/* 티탄 — peat / Titan haze. Between Dawn amber and warn, not a blue. */
+:root[data-accent="titan"],
+[data-accent-swatch="titan"] {
+  --accent: light-dark(#884c00, #e8904c);
+  --accent-soft: light-dark(#f6e6d8, #342721);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

@@ -36,6 +36,12 @@
 # Excluded by design:
 #   - src/design/tokens.css          the token definition; raw hex is its job
 #   - src/design/tokens.contrast.test.ts  the verifier; the hex IS the assertion
+#   - src/design/themes/             pre-validated accent bindings (ADR-0174 D5).
+#                                    Raw color outside this directory is still
+#                                    forbidden. Adding a file here is not a
+#                                    license to paint components; it is a
+#                                    license to rebind `--accent` after the
+#                                    contrast table has measured the pair.
 #   - any line carrying the marker `design-preflight-allow` (deliberate,
 #     reviewed exception, justify it in the PR body)
 #   - a GitHub issue reference inside raw_color (`#1137`); see ISSUE_REF_RE
@@ -99,8 +105,10 @@ if [ ! -d "$SRC" ]; then
   exit 2
 fi
 
-# Token definition + its verifier are the two files allowed to name raw values.
-TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):'
+# Token definition + its verifier + pre-validated theme bindings (ADR-0174 D5).
+# themes/ is an allowlist of binding files, not a general raw-color exemption:
+# a hex outside tokens.css / tokens.contrast.test.ts / themes/ is still a fail.
+TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts|themes/)'
 # Deliberate reviewed exception marker.
 ALLOW_RE='design-preflight-allow'
 
@@ -176,7 +184,7 @@ KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus e
 label_for() {
   case "$1" in
     emdash)        echo "em-dash (—/–) in a user-visible string (SKILL §7: binary fail, use , : ( ) or a line break)" ;;
-    raw_color)     echo "raw color literal outside src/design/tokens.css (use a Dawn token utility)" ;;
+    raw_color)     echo "raw color literal outside src/design/tokens.css and src/design/themes/ (use a Dawn token utility or a pre-validated theme binding)" ;;
     inline_style)  echo "inline style attribute (SKILL §1: the shipped style-src carries 'unsafe-inline' for xterm.js only, components author no styles)" ;;
     arbitrary_tw)  echo "arbitrary Tailwind value (spacing is {4,8,12,16,24,32}px, radius is sm/md/lg)" ;;
     ai_gradient)   echo "gradient / indigo-violet family on a product surface (AI-tell, SKILL §8)" ;;
@@ -410,7 +418,7 @@ fi
 
 echo "== design pre-flight (web), SKILL momo-design-taste-web §10 =="
 echo "   scanned: $SRC, $HTML"
-echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts"
+echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts, src/design/themes/ (pre-validated bindings only)"
 echo "   emdash·progress_word·latin_particle: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511"
 echo ""
 

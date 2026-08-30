@@ -1,0 +1,7 @@
+/* 유성 — meteor gold-green. Between warn and 감람, not a blue. */
+:root[data-accent="yuseong"],
+[data-accent-swatch="yuseong"] {
+  --accent: light-dark(#696900, #c3b946);
+  --accent-soft: light-dark(#eceada, #2c2a21);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

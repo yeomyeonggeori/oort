@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
 /** `--name: light-dark(#aaa, #bbb);` -> { name: [light, dark] } */
-function parseLightDarkTokens(source: string): Record<string, [string, string]> {
+export function parseLightDarkTokens(source: string): Record<string, [string, string]> {
   const out: Record<string, [string, string]> = {};
   const re =
     /--([a-z-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
@@ -116,7 +116,7 @@ export function chroma(hex: string): number {
 }
 
 /** Shortest angular distance between two hues, in degrees. */
-function hueGap(a: string, b: string): number {
+export function hueGap(a: string, b: string): number {
   const d = Math.abs(hueAngle(a) - hueAngle(b)) % 360;
   return d > 180 ? 360 - d : d;
 }
@@ -127,7 +127,7 @@ function hueGap(a: string, b: string): number {
  * moves it TOWARD the accent on the one axis the order is measured on, so the
  * order has to be bought without merging the two fills into one colour.
  */
-function deltaE(a: string, b: string): number {
+export function deltaE(a: string, b: string): number {
   const [aA, aB] = oklabAB(a);
   const [bA, bB] = oklabAB(b);
   return Math.hypot(oklabL(a) - oklabL(b), aA - bA, aB - bB);

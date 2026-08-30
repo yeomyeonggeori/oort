@@ -1,0 +1,7 @@
+/* 감람 — olivine green (meteorite mineral). Far from slate-blue identity. */
+:root[data-accent="gamram"],
+[data-accent-swatch="gamram"] {
+  --accent: light-dark(#3c700c, #8cb858);
+  --accent-soft: light-dark(#e6ecdc, #272d23);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

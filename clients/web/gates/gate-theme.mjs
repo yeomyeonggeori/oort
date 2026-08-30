@@ -199,7 +199,7 @@ async function main() {
         await context.addInitScript(() => {
           const original = Storage.prototype.setItem;
           Storage.prototype.setItem = function (key, value) {
-            if (key === "momo.web.theme.v1") return;
+            if (key === "momo.web.appearance.v1") return;
             return original.call(this, key, value);
           };
         });
@@ -273,7 +273,7 @@ async function main() {
       if ((await stampOf(page)) !== "light") {
         fail(
           "새로고침하니 고정이 풀렸다. 이 선택은 localStorage " +
-            "(momo.web.theme.v1)에 남아야 한다."
+            "(momo.web.appearance.v1)에 남아야 한다."
         );
       }
       if (await surfaceOf(page) !== pinnedLight) {
@@ -377,7 +377,10 @@ async function main() {
       });
       await installRoutes(lightOs);
       await lightOs.addInitScript(() => {
-        localStorage.setItem("momo.web.theme.v1", "dark");
+        localStorage.setItem(
+          "momo.web.appearance.v1",
+          JSON.stringify({ scheme: "dark", accent: "dawn" })
+        );
       });
       const darkPage = await lightOs.newPage();
       await darkPage.goto(origin, { waitUntil: "networkidle" });

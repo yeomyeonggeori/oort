@@ -12,7 +12,7 @@ Three files carry the load, and they are checked in, not aspirational:
 
 | what | where |
 |---|---|
-| token definition | `clients/web/src/design/tokens.css` |
+| token definition | `clients/web/src/design/tokens.css` (semantic) + `clients/web/src/design/themes/` (accent bindings, ADR-0174) |
 | token reference + measured contrast | `references/tokens.md` |
 | mechanical pre-flight | `scripts/design_preflight_web.sh` |
 
@@ -42,14 +42,17 @@ Do NOT default to: purple/blue/indigo AI gradients, glassy hero cards, three-equ
 
 Full palette, measured contrast, spacing/radius/text scales, and the procedure for adding a token: **`references/tokens.md`**. Do not restate hex values anywhere else, and do not copy them into a component.
 
-The identity is "Dawn" (night to first light): warm paper surfaces, a single amber accent (호박, the horizon at first light), and a predawn slate-blue reserved for agents. Indigo/violet is not merely discouraged: Tailwind's stock palette is cleared in `tokens.css`, so `bg-indigo-500` does not compile.
+The identity is "Dawn" (night to first light): warm paper surfaces, a single amber accent (호박, the horizon at first light) as the **default** binding, and a predawn slate-blue reserved for agents. Indigo/violet is not merely discouraged: Tailwind's stock palette is cleared in `tokens.css`, so `bg-indigo-500` does not compile.
+
+Components still consume **semantic tokens only**. A curated accent rebinds `--accent` / `--accent-soft` / `--on-accent` via `:root[data-accent=…]` in `src/design/themes/`. That directory is the only other place raw hex may live, and only as a pre-validated binding (ADR-0174 D5). Arbitrary color pickers and hex in components stay forbidden.
 
 Rules:
 - **Zero raw hex / `rgb()` / `hsl()` literals in component files.** Color reaches a component only as a token utility (`bg-surface`, `text-ink-muted`, `border-line-strong`).
 - **ONE accent per surface** = `--accent`. Agent identity uses `--agent` on avatar/badge only, never a different bubble shape or row background tint. Status colors from `--danger` / `--ok` / `--warn` only.
 - **Color Consistency Lock**: once a surface accent is set, the whole surface uses it. Sections do not invert theme. One theme per color scheme.
 - **No pure `#000000` / `#ffffff`.** The light "paper" white is `#fffefb`. Use the surface tokens; they adapt to scheme via `light-dark()`.
-- **Contrast is verified, not eyeballed.** `clients/web/src/design/tokens.contrast.test.ts` measures every foreground against every surface in both schemes (AA 4.5:1, control borders 3:1) and asserts the agent/accent hue gap and the empty indigo band. Retuning a hex without running `npm test` is not a change, it is a guess.
+- **Contrast is verified, not eyeballed.** `clients/web/src/design/tokens.contrast.test.ts` measures every foreground against every surface in both schemes (AA 4.5:1, control borders 3:1) and asserts the agent/accent hue gap and the empty indigo band. Accent bindings are measured the same way in `src/design/themes/catalog.contrast.test.ts` (adding a theme file without a passing pair fails closed). Retuning a hex without running `npm test` is not a change, it is a guess.
+- **S0 and the brand lockup are outside custom accent** (ADR-0174 D4). They keep the Dawn pair.
 - **Real translucency via `backdrop-filter` + token overlay**, never a semi-transparent solid pretending to be glass, and never as decoration.
 
 ## 3. Tailwind scale (fixed, compiler-enforced)
@@ -140,7 +143,7 @@ Ten categories (nine grep + one AST, see 10.1), **hard zero** (unlike the mac ra
 | 9 | `hype` | filler-hype vocabulary |
 | 10 | `pure_bw` | `bg-black` / `bg-white` / `#000000` / `#ffffff` |
 
-`src/design/tokens.css` and `tokens.contrast.test.ts` are excluded (defining and measuring raw values is their job). A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
+`src/design/tokens.css`, `tokens.contrast.test.ts`, and `src/design/themes/` are excluded (defining, measuring, and rebinding raw values is their job). The themes directory is **pre-validated bindings only**, not a general raw-color exemption: a hex in a component is still a fail. A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
 
 ### 10.1 The AST stage: core, and the web `emdash` category (issue #1141)
 

@@ -42,6 +42,20 @@ const DRAFT_STORE_SRC = readFileSync(
   resolve(WEB_ROOT, "src/features/chat/draftStore.ts"),
   "utf8"
 );
+const ACCENT_CATALOG_SRC = readFileSync(
+  resolve(WEB_ROOT, "src/design/themes/index.ts"),
+  "utf8"
+);
+
+function accentCatalogIds() {
+  const ids = [...ACCENT_CATALOG_SRC.matchAll(/id: "([a-z]+)"/g)].map(
+    (match) => match[1]
+  );
+  if (ids.length === 0 || ids[0] !== "dawn") {
+    throw new Error("accent catalog must list dawn first");
+  }
+  return ids;
+}
 
 function exportedStringConst(source, name) {
   const match = source.match(new RegExp(`export const ${name} = "([^"]+)";`));
@@ -2051,8 +2065,50 @@ async function signIn(page) {
  * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
  * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
  */
+async function assertOnboardingIgnoresAccent(page, where) {
+  const readLanding = () =>
+    page.evaluate(() => {
+      const landing = document.querySelector('[data-testid="onboarding-landing"]');
+      const cta = document.querySelector('[data-testid="onboarding-choose-server"]');
+      if (!landing || !cta) return null;
+      const landingStyle = getComputedStyle(landing);
+      const ctaStyle = getComputedStyle(cta);
+      return {
+        space: landingStyle.backgroundColor,
+        ink: landingStyle.color,
+        onboardingAccent: landingStyle.getPropertyValue("--onboarding-accent").trim(),
+        ctaBg: ctaStyle.backgroundColor,
+      };
+    });
+  const before = await readLanding();
+  if (!before?.onboardingAccent) {
+    throw new Error(`S0 격리 ${where}: 랜딩 토큰을 읽지 못했다`);
+  }
+  const other = accentCatalogIds().find((id) => id !== "dawn") ?? "seongun";
+  await page.evaluate((id) => {
+    document.documentElement.setAttribute("data-accent", id);
+  }, other);
+  const after = await readLanding();
+  if (
+    !after ||
+    after.space !== before.space ||
+    after.ink !== before.ink ||
+    after.onboardingAccent !== before.onboardingAccent ||
+    after.ctaBg !== before.ctaBg
+  ) {
+    throw new Error(
+      `S0 격리 ${where}: data-accent=${other} 가 랜딩을 바꿨다 ` +
+        `${JSON.stringify({ before, after })}`
+    );
+  }
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-accent", "dawn");
+  });
+}
+
 async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
   await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await assertOnboardingIgnoresAccent(page, where);
   const scatter = await page.locator("[data-onboarding-body]").count();
   if (scatter !== 30) {
     throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
@@ -8415,6 +8471,38 @@ async function captureHostedDoorbellScenes(browser, scheme) {
  * (ChoiceList, KeyValueRows, InlineBanner, EmptyInvite, Button) are already shot
  * elsewhere in both schemes.
  */
+async function captureAccentCandidates(browser, scheme) {
+  const ids = accentCatalogIds();
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 1,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  const shots = [];
+  for (const id of ids) {
+    await page.evaluate((accentId) => {
+      document.documentElement.setAttribute("data-accent", accentId);
+    }, id);
+    await page.waitForFunction(
+      (accentId) =>
+        document.documentElement.getAttribute("data-accent") === accentId,
+      id
+    );
+    const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+  }
+  await page.close();
+  await context.close();
+  return shots;
+}
+
 async function captureConsent(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -8499,6 +8587,7 @@ async function main() {
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
           all.push(...(await captureConsent(browser, scheme)));
+          all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
