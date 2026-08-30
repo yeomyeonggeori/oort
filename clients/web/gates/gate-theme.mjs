@@ -49,7 +49,7 @@
 // (src/design/tokens.contrast.test.ts)이 나눠 갖는다.
 // =============================================================================
 
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -124,6 +124,17 @@ async function installRoutes(context) {
 
 function fail(message) {
   throw new Error(message);
+}
+
+function nonDefaultAccentId() {
+  const src = readFileSync(
+    resolve(webRoot, "src/design/themes/index.ts"),
+    "utf8"
+  );
+  const ids = [...src.matchAll(/id: "([a-z]+)"/g)].map((match) => match[1]);
+  const other = ids.find((id) => id !== "dawn");
+  if (!other) fail("카탈로그에 기본이 아닌 액센트가 없다");
+  return other;
 }
 
 /** `rgb(r, g, b)` -> WCAG 상대 휘도. 값이 아니라 방향을 재기 위한 자다. */
@@ -331,6 +342,57 @@ async function main() {
         );
       }
 
+      // ---- ③b FOUC: 액센트 스탬프도 앱보다 먼저 있다 ----------------------
+      // 시드를 기본값(dawn)으로 두면 스탬프가 깨져도 이 게이트는 초록이다.
+      const accentId = nonDefaultAccentId();
+      const accentOs = await browser.newContext({
+        viewport: { width: 1280, height: 900 },
+        reducedMotion: "reduce",
+        colorScheme: "light",
+      });
+      await installRoutes(accentOs);
+      await accentOs.addInitScript((id) => {
+        localStorage.setItem(
+          "momo.web.appearance.v1",
+          JSON.stringify({ scheme: "dark", accent: id })
+        );
+      }, accentId);
+      const accentPage = await accentOs.newPage();
+      const accentHeld = [];
+      await accentPage.route("**/assets/*.js", async (route) => {
+        accentHeld.push(route);
+      });
+      await accentPage.goto(origin, { waitUntil: "commit" });
+      await accentPage.waitForFunction(
+        () => document.getElementById("root") !== null,
+        undefined,
+        { timeout: 5_000 }
+      );
+      const earlyAccent = await accentPage.evaluate(() => ({
+        accent: document.documentElement.getAttribute("data-accent"),
+        stamp: document.documentElement.getAttribute("data-theme"),
+        rendered: (document.getElementById("root")?.childElementCount ?? -1) > 0,
+      }));
+      await accentPage.unroute("**/assets/*.js");
+      for (const route of accentHeld) await route.continue().catch(() => {});
+      if (earlyAccent.rendered) {
+        fail(
+          "액센트 첫 페인트 창에서 앱이 이미 그려졌다. 이 창에서는 FOUC를 볼 수 없다."
+        );
+      }
+      if (earlyAccent.accent !== accentId) {
+        fail(
+          `번들이 도착하기 전의 문서에 data-accent=${earlyAccent.accent}다 ` +
+            `(시드 ${accentId}). 액센트 스탬프는 defer가 아닌 /theme-boot.js가 붙여야 한다.`
+        );
+      }
+      if (earlyAccent.stamp !== "dark") {
+        fail(
+          `액센트 시드와 함께 저장한 다크 스탬프가 없다(${earlyAccent.stamp})`
+        );
+      }
+      await accentOs.close();
+
       await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
       await openThemePanel(page);
 
@@ -403,6 +465,7 @@ async function main() {
           `  시스템(OS 다크) 배경   ${systemDark}`,
           `  라이트 고정 배경       ${pinnedLight}`,
           `  첫 페인트 스탬프       ${early.stamp} (React 미렌더 상태에서 측정)`,
+          `  첫 페인트 액센트       ${earlyAccent.accent} (시드 ${accentId}, 미렌더)`,
           `  캡처                   ${systemShot}`,
           `                         ${lightShot}`,
           `                         ${darkShot}`,

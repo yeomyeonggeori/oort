@@ -50,13 +50,13 @@ export function AppearanceSection() {
   const hint =
     choice === "system"
       ? `지금 이 기기의 시스템은 ${system === "dark" ? "다크" : "라이트"}입니다.`
-      : "이 브라우저에만 저장됩니다. 다른 기기에서는 각자 고릅니다.";
+      : "다른 기기에서는 각자 고릅니다.";
 
   return (
     <SectionShell
       title="테마"
       lines={[
-        "이 앱을 밝게 볼지 어둡게 볼지, 그리고 액센트 색을 고릅니다.",
+        "이 앱을 밝게 볼지 어둡게 볼지, 그리고 액센트 색을 고릅니다. 이 브라우저에만 저장됩니다.",
       ]}
     >
       <ChoiceRadios
@@ -93,9 +93,7 @@ export function AppearanceSection() {
             </label>
           ))}
         </div>
-        <p role="status" className="pt-1 text-meta text-ink-muted">
-          기본은 새벽입니다. 이 브라우저에만 저장됩니다.
-        </p>
+        <p className="pt-1 text-meta text-ink-muted">기본은 새벽입니다.</p>
       </fieldset>
     </SectionShell>
   );

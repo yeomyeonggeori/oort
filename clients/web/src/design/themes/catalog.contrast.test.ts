@@ -1,84 +1,52 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { ACCENT_THEMES, DEFAULT_ACCENT_ID } from "./index";
-
-function parseLightDarkTokens(source: string): Record<string, [string, string]> {
-  const out: Record<string, [string, string]> = {};
-  const re =
-    /--([a-z-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
-  for (const m of source.matchAll(re)) out[m[1]] = [m[2], m[3]];
-  return out;
-}
-
-function channels(hex: string): [number, number, number] {
-  const v = hex.replace("#", "");
-  return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) / 255) as [
-    number,
-    number,
-    number,
-  ];
-}
-
-function linearize(hex: string): [number, number, number] {
-  return channels(hex).map((c) =>
-    c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
-  ) as [number, number, number];
-}
-
-function luminance(hex: string): number {
-  const [r, g, b] = linearize(hex);
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function oklabAB(hex: string): [number, number] {
-  const [r, g, b] = linearize(hex);
-  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  return [
-    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
-    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
-  ];
-}
-
-function oklabL(hex: string): number {
-  const [r, g, b] = linearize(hex);
-  const l = Math.cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
-  const m = Math.cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
-  const s = Math.cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
-  return 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
-}
-
-function hueAngle(hex: string): number {
-  const [A, B] = oklabAB(hex);
-  return (((Math.atan2(B, A) * 180) / Math.PI) + 360) % 360;
-}
-
-function hueGap(a: string, b: string): number {
-  const d = Math.abs(hueAngle(a) - hueAngle(b)) % 360;
-  return d > 180 ? 360 - d : d;
-}
-
-function deltaE(a: string, b: string): number {
-  const [aA, aB] = oklabAB(a);
-  const [bA, bB] = oklabAB(b);
-  return Math.hypot(oklabL(a) - oklabL(b), aA - bA, aB - bB);
-}
-
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-}
+import {
+  ACCENT_DANGER_FILL_CHROMA_RATIO_MIN,
+  ACCENT_DANGER_FILL_DELTA_E_MIN,
+  AGENT_DELTA_E_MIN,
+  AGENT_HUE_GAP_MIN,
+  CHIP_VESSEL_MIN_CONTRAST,
+  CHIP_VESSEL_MIN_DISTANCE,
+  CHIP_VESSEL_SURFACES,
+  CONTROL_SURFACES,
+  chroma,
+  contrast,
+  deltaE,
+  FOREGROUNDS,
+  hueAngle,
+  hueGap,
+  parseLightDarkTokens,
+  SURFACES,
+} from "../tokens.contrast.test";
+import {
+  ACCENT_ID_CHAR_CLASS,
+  ACCENT_ID_RE,
+  ACCENT_THEMES,
+  DEFAULT_ACCENT_ID,
+} from "./index";
 
 /**
  * Accent theme bindings are not "checked by eye". Every CSS file in this
  * directory (except swatches.css) is an input: adding a theme without a
  * passing pair fails this file. ADR-0174 D5 — 테마 추가 = 대비 테스트 추가.
+ *
+ * Axes are *derived* from tokens.contrast.test.ts: the formulas and the
+ * accent-family tables are imported, not rewritten. A binding that rebinds
+ * `--accent` / `--accent-soft` inherits every contract those tokens held on
+ * `:root`.
  */
 
 const THEME_DIR = fileURLToPath(new URL(".", import.meta.url));
 const TOKENS_CSS = readFileSync(new URL("../tokens.css", import.meta.url), "utf8");
+const BOOT = readFileSync(
+  new URL("../../../public/theme-boot.js", import.meta.url),
+  "utf8"
+);
+const CAPTURE = readFileSync(
+  new URL("../../../scripts/capture-screens.mjs", import.meta.url),
+  "utf8"
+);
 const DAWN = parseLightDarkTokens(TOKENS_CSS);
 
 const BINDING_TOKENS = ["accent", "accent-soft", "on-accent"] as const;
@@ -88,33 +56,10 @@ const SCHEMES = [
   { name: "dark", index: 1 as const },
 ];
 
-const SURFACES = [
-  "surface",
-  "surface-raised",
-  "surface-sidebar",
-  "surface-hover",
-  "agent-soft",
-  "muted-soft",
-  "ok-soft",
-  "warn-soft",
-  "danger-soft",
-] as const;
-
-const CONTROL_SURFACES = [
-  "surface",
-  "surface-raised",
-  "surface-sidebar",
-  "surface-hover",
-] as const;
-
-const TEXT_ON_SOFT = ["ink", "ink-muted", "accent"] as const;
-
 const BLUE_HUE_MIN = 185;
 const BLUE_HUE_MAX = 265;
 const INDIGO_HUE_MIN = 265;
 const INDIGO_HUE_MAX = 330;
-const AGENT_HUE_GAP = 90;
-const AGENT_DELTA_E = 0.08;
 
 type Pair = [string, string];
 
@@ -156,6 +101,17 @@ function pickDawn(token: string, index: 0 | 1): string {
   return pair[index];
 }
 
+function pickOverlay(
+  binding: AccentBinding,
+  token: string,
+  index: 0 | 1
+): string {
+  if (token === "accent" || token === "accent-soft" || token === "on-accent") {
+    return binding[token][index];
+  }
+  return pickDawn(token, index);
+}
+
 function isBlueFamily(hex: string): boolean {
   const hue = hueAngle(hex);
   return (
@@ -164,13 +120,29 @@ function isBlueFamily(hex: string): boolean {
   );
 }
 
+/** Dawn's worst accent↔ok/warn distance. Bindings may not undercut it. */
+function statusDistanceFloor(): number {
+  const distances = SCHEMES.flatMap((scheme) =>
+    (["ok", "warn"] as const).map((token) =>
+      Number(
+        deltaE(pickDawn("accent", scheme.index), pickDawn(token, scheme.index)).toFixed(
+          3
+        )
+      )
+    )
+  );
+  return Math.min(...distances);
+}
+
+const STATUS_DELTA_E_FLOOR = statusDistanceFloor();
+
 export function accentBindingFailures(binding: AccentBinding): string[] {
   const fails: string[] = [];
   for (const scheme of SCHEMES) {
-    const accent = binding.accent[scheme.index];
-    const soft = binding["accent-soft"][scheme.index];
-    const onAccent = binding["on-accent"][scheme.index];
-    const agent = pickDawn("agent", scheme.index);
+    const pick = (token: string) => pickOverlay(binding, token, scheme.index);
+    const accent = pick("accent");
+    const soft = pick("accent-soft");
+    const onAccent = pick("on-accent");
     const label = scheme.name;
 
     for (const hex of [accent, soft, onAccent]) {
@@ -179,22 +151,18 @@ export function accentBindingFailures(binding: AccentBinding): string[] {
       }
     }
 
-    for (const bg of SURFACES) {
-      const ratio = contrast(accent, pickDawn(bg, scheme.index));
-      if (ratio < 4.5) {
-        fails.push(
-          `${label} accent on ${bg} ${ratio.toFixed(2)} (need 4.5:1 text)`
-        );
+    for (const fg of FOREGROUNDS) {
+      for (const bg of SURFACES) {
+        const ratio = contrast(pick(fg), pick(bg));
+        if (ratio < 4.5) {
+          fails.push(
+            `${label} ${fg} on ${bg} ${ratio.toFixed(2)} (need 4.5:1 text)`
+          );
+        }
       }
     }
-    const onOwnSoft = contrast(accent, soft);
-    if (onOwnSoft < 4.5) {
-      fails.push(
-        `${label} accent on accent-soft ${onOwnSoft.toFixed(2)} (need 4.5:1 text)`
-      );
-    }
     for (const bg of CONTROL_SURFACES) {
-      const ratio = contrast(accent, pickDawn(bg, scheme.index));
+      const ratio = contrast(accent, pick(bg));
       if (ratio < 3) {
         fails.push(
           `${label} accent on ${bg} ${ratio.toFixed(2)} (need 3:1 control)`
@@ -205,28 +173,70 @@ export function accentBindingFailures(binding: AccentBinding): string[] {
     if (fill < 4.5) {
       fails.push(`${label} on-accent on accent ${fill.toFixed(2)}`);
     }
-    for (const fg of TEXT_ON_SOFT) {
-      const color = fg === "accent" ? accent : pickDawn(fg, scheme.index);
-      const ratio = contrast(color, soft);
-      if (ratio < 4.5) {
-        fails.push(`${label} ${fg} on accent-soft ${ratio.toFixed(2)}`);
-      }
+
+    const fillRatio = Number(
+      (chroma(accent) / chroma(pick("danger-fill"))).toFixed(2)
+    );
+    if (fillRatio < ACCENT_DANGER_FILL_CHROMA_RATIO_MIN) {
+      fails.push(
+        `${label} accent vs danger-fill chroma ${fillRatio} (need ${ACCENT_DANGER_FILL_CHROMA_RATIO_MIN})`
+      );
+    }
+    const fillDistance = Number(
+      deltaE(pick("danger-fill"), accent).toFixed(3)
+    );
+    if (fillDistance < ACCENT_DANGER_FILL_DELTA_E_MIN) {
+      fails.push(
+        `${label} danger-fill vs accent deltaE ${fillDistance} (need ${ACCENT_DANGER_FILL_DELTA_E_MIN})`
+      );
     }
 
-    const gap = hueGap(accent, agent);
-    if (gap < AGENT_HUE_GAP) {
-      fails.push(`${label} agent hue gap ${gap.toFixed(0)} (need ${AGENT_HUE_GAP})`);
+    const gap = hueGap(accent, pick("agent"));
+    if (gap < AGENT_HUE_GAP_MIN) {
+      fails.push(`${label} agent hue gap ${gap.toFixed(0)} (need ${AGENT_HUE_GAP_MIN})`);
     }
-    const distance = deltaE(accent, agent);
-    if (distance < AGENT_DELTA_E) {
+    const agentDistance = deltaE(accent, pick("agent"));
+    if (agentDistance < AGENT_DELTA_E_MIN) {
       fails.push(
-        `${label} agent deltaE ${distance.toFixed(3)} (need ${AGENT_DELTA_E})`
+        `${label} agent deltaE ${agentDistance.toFixed(3)} (need ${AGENT_DELTA_E_MIN})`
       );
     }
     if (isBlueFamily(accent)) {
       fails.push(
         `${label} accent hue ${hueAngle(accent).toFixed(0)} sits in the blue/indigo band`
       );
+    }
+
+    for (const status of ["ok", "warn"] as const) {
+      const distance = Number(deltaE(accent, pick(status)).toFixed(3));
+      if (distance < STATUS_DELTA_E_FLOOR) {
+        fails.push(
+          `${label} accent vs ${status} deltaE ${distance} (need ${STATUS_DELTA_E_FLOOR})`
+        );
+      }
+    }
+
+    for (const [vessel, surfaces] of CHIP_VESSEL_SURFACES) {
+      if (!(surfaces as readonly string[]).includes("accent-soft")) continue;
+      const ratio = contrast(pick(vessel), soft);
+      const distance = deltaE(pick(vessel), soft);
+      if (ratio < CHIP_VESSEL_MIN_CONTRAST) {
+        fails.push(
+          `${label} ${vessel} on accent-soft contrast ${ratio.toFixed(3)}`
+        );
+      }
+      if (distance < CHIP_VESSEL_MIN_DISTANCE) {
+        fails.push(
+          `${label} ${vessel} on accent-soft OKLab distance ${distance.toFixed(4)}`
+        );
+      }
+    }
+    for (const [vessel] of CHIP_VESSEL_SURFACES) {
+      if (pick(vessel) === soft) {
+        fails.push(
+          `${label} ${vessel} is the value accent-soft paints interaction with`
+        );
+      }
     }
   }
   return fails;
@@ -246,6 +256,14 @@ describe("accent theme catalog", () => {
     expect(files).toEqual(
       [...ACCENT_THEMES.map((theme) => `${theme.id}.css`)].sort()
     );
+  });
+
+  it("uses one accent id character class in the catalog, boot, and capture", () => {
+    for (const theme of ACCENT_THEMES) {
+      expect(theme.id).toMatch(ACCENT_ID_RE);
+    }
+    expect(BOOT).toContain(`/^[${ACCENT_ID_CHAR_CLASS}]+$/`);
+    expect(CAPTURE).toContain(`id: "([${ACCENT_ID_CHAR_CLASS}]+)"`);
   });
 
   it("does not rebind onboarding or agent tokens", () => {
@@ -273,7 +291,7 @@ describe("accent theme catalog", () => {
   });
 });
 
-describe("every accent binding meets AA, control 3:1, and agent distance", () => {
+describe("every accent binding meets the accent-family table", () => {
   it("has at least Dawn so the suite is not vacuous", () => {
     expect(bindings.length).toBeGreaterThan(0);
   });
@@ -283,9 +301,28 @@ describe("every accent binding meets AA, control 3:1, and agent distance", () =>
       expect(accentBindingFailures(binding), id).toEqual([]);
     });
   }
+
+  it("keeps swatch neighbours a different colour", () => {
+    for (const scheme of SCHEMES) {
+      for (let i = 0; i < bindings.length; i += 1) {
+        for (let j = i + 1; j < bindings.length; j += 1) {
+          const distance = Number(
+            deltaE(
+              bindings[i].binding.accent[scheme.index],
+              bindings[j].binding.accent[scheme.index]
+            ).toFixed(3)
+          );
+          expect(
+            distance,
+            `${bindings[i].id} vs ${bindings[j].id} ${scheme.name}`
+          ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_DELTA_E_MIN);
+        }
+      }
+    }
+  });
 });
 
-describe("red proof: a low-contrast binding fails this table", () => {
+describe("red proof: a failing binding fails this table", () => {
   it("rejects a pale accent that cannot clear AA on surface", () => {
     const pale: AccentBinding = {
       accent: ["#f4e7d6", "#33261a"],
@@ -294,5 +331,75 @@ describe("red proof: a low-contrast binding fails this table", () => {
     };
     const fails = accentBindingFailures(pale);
     expect(fails.some((line) => line.includes("4.5"))).toBe(true);
+  });
+
+  it("rejects a desaturated fill that loses the accent > danger-fill order", () => {
+    const quiet: AccentBinding = {
+      accent: ["#884c00", "#e8904c"],
+      "accent-soft": ["#f6e6d8", "#342721"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const fails = accentBindingFailures(quiet);
+    expect(
+      fails.some((line) => line.includes("accent vs danger-fill chroma"))
+    ).toBe(true);
+  });
+
+  it("rejects an accent that sits on the agent or in the indigo band", () => {
+    const agent: AccentBinding = {
+      accent: ["#4a6785", "#7fa0c4"],
+      "accent-soft": ["#e6ebf2", "#1e2836"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const agentFails = accentBindingFailures(agent);
+    expect(
+      agentFails.some(
+        (line) => line.includes("agent hue gap") || line.includes("agent deltaE")
+      )
+    ).toBe(true);
+
+    const indigo: AccentBinding = {
+      accent: ["#6b3fa0", "#c49ae8"],
+      "accent-soft": ["#eee6f4", "#2c2434"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const indigoFails = accentBindingFailures(indigo);
+    expect(
+      indigoFails.some((line) => line.includes("blue/indigo band"))
+    ).toBe(true);
+  });
+
+  it("rejects an accent that collides with ok or warn worse than Dawn", () => {
+    const okTwin: AccentBinding = {
+      accent: ["#187533", "#57ab5a"],
+      "accent-soft": ["#e0f4e2", "#243323"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const fails = accentBindingFailures(okTwin);
+    expect(fails.some((line) => line.includes("accent vs ok deltaE"))).toBe(
+      true
+    );
+  });
+
+  it("rejects two swatch neighbours that share a colour", () => {
+    expect(
+      Number(deltaE("#a54c08", "#884c00").toFixed(3))
+    ).toBeLessThan(ACCENT_DANGER_FILL_DELTA_E_MIN);
+  });
+
+  it("rejects an accent-soft that swallows the muted-soft vessel", () => {
+    const merged: AccentBinding = {
+      accent: ["#a54c08", "#f0a850"],
+      "accent-soft": ["#f3efe8", "#302e36"],
+      "on-accent": ["#fffefb", "#17161a"],
+    };
+    const fails = accentBindingFailures(merged);
+    expect(
+      fails.some(
+        (line) =>
+          line.includes("muted-soft on accent-soft") ||
+          line.includes("muted-soft is the value accent-soft")
+      )
+    ).toBe(true);
   });
 });

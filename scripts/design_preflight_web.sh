@@ -108,7 +108,9 @@ fi
 # Token definition + its verifier + pre-validated theme bindings (ADR-0174 D5).
 # themes/ is an allowlist of binding files, not a general raw-color exemption:
 # a hex outside tokens.css / tokens.contrast.test.ts / themes/ is still a fail.
-TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts|themes/)'
+# Path-end colons keep the exemption on the three token places. Without them
+# `themes/` matches any line that *mentions* the directory (#1868 H-2).
+TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):|src/design/themes/[^:]*:'
 # Deliberate reviewed exception marker.
 ALLOW_RE='design-preflight-allow'
 
@@ -327,6 +329,38 @@ CASES
     return 1
   fi
   echo "RESULT: PASS, raw_color tells issue references from colors."
+
+  echo ""
+  echo "== token-file exemption stays on the three path-ends =="
+  local leak=0 kept dropped
+  while IFS='|' read -r want line; do
+    [ -z "${want:-}" ] && continue
+    case "$want" in \#*) continue ;; esac
+    kept=0
+    if printf '%s\n' "$line" | filter_common | grep -q .; then
+      kept=1
+    fi
+    dropped=$((1 - kept))
+    if [ "$dropped" = "$want" ]; then
+      echo "OK    exempt=$want  $line"
+    else
+      echo "FAIL  exempt=$want kept=$kept  $line"
+      leak=1
+    fi
+  done <<'EXEMPT_CASES'
+# 1 = filtered (exempt), 0 = still inspected
+1|clients/web/src/design/tokens.css:3:  --x: #ff0000;
+1|clients/web/src/design/tokens.contrast.test.ts:7: const x = "#ff0000";
+1|clients/web/src/design/themes/dawn.css:4: --accent: #ff0000;
+0|clients/web/src/design/tokens.css.ts:3:export const ACCENT = "#ff0000";
+0|clients/web/src/design/tokens.contrast.test.tsx:7:const x = "#ff0000";
+0|clients/web/src/features/chat/Bubble.tsx:12: // 팔레트 정본은 src/design/themes/ 를 본다  const c = "#ff0000";
+EXEMPT_CASES
+  if [ "$leak" -ne 0 ]; then
+    echo "RESULT: FAIL, token-file exemption leaked off the three places."
+    return 1
+  fi
+  echo "RESULT: PASS, token-file exemption does not leak."
   return 0
 }
 

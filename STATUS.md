@@ -2,10 +2,10 @@
 
 ## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
 
-- `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 감람, 티탄, 유성. 성재 확정 전 머지 금지.
+- `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.
 - 컬러 모드 System/Light/Dark는 기존 ChoiceRadios를 `momo.web.appearance.v1` JSON으로 이관(옛 `momo.web.theme.v1` 읽기 전용 이관). 액센트 스와치 44·radio·focus-visible.
-- 대비 전수: `themes/catalog.contrast.test.ts`가 테마 CSS 파일 열거를 입력으로 AA 4.5 / 컨트롤 3:1 / `--agent` hue≥90·deltaE. 테마 추가=테스트 추가. 낮은 대비 바인딩 red proof 유지. S0·`.brand-lockup`은 Dawn 고정(D4).
-- D5: `design_preflight_web.sh`가 `src/design/themes/`를 사전 검증 바인딩 허용 목록으로만 연다(게이트 약화 아님).
+- 대비 전수: `catalog.contrast.test.ts`가 `tokens.contrast.test.ts` 액센트 가족 축을 파생(채움 순서 1.15·danger dE·전경 7종·muted-soft 그릇·ok/warn 거리·후보 간 dE). 테마 추가=테스트 추가. red proof 상주. S0·`.brand-lockup`은 Dawn 고정(D4).
+- D5: `design_preflight_web.sh`가 `tokens.css`·`tokens.contrast.test.ts`·`themes/*` 경로 끝만 면제(합성 입력 자가시험). 캡처는 계산색 정착 대기.
 - 서버 무접촉. runtime-unverified 아님. 시안: `accent-<id>-{light,dark}.png`.
 
 ## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)

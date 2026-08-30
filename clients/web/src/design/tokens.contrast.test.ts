@@ -115,6 +115,13 @@ export function chroma(hex: string): number {
   return Math.hypot(...oklabAB(hex));
 }
 
+/** Accent fill must outrank the destructive fill (MOMO-642 R1 H-2). */
+export const ACCENT_DANGER_FILL_CHROMA_RATIO_MIN = 1.15;
+/** Two fills on one screen stay different colours. */
+export const ACCENT_DANGER_FILL_DELTA_E_MIN = 0.08;
+export const AGENT_HUE_GAP_MIN = 90;
+export const AGENT_DELTA_E_MIN = 0.08;
+
 /** Shortest angular distance between two hues, in degrees. */
 export function hueGap(a: string, b: string): number {
   const d = Math.abs(hueAngle(a) - hueAngle(b)) % 360;
@@ -153,7 +160,7 @@ const SCHEMES = [
 ] as const;
 
 /** Surfaces any body text can land on. */
-const SURFACES = [
+export const SURFACES = [
   "surface",
   "surface-raised",
   "surface-sidebar",
@@ -198,7 +205,7 @@ const SURFACES = [
  * 아니다.** 지금 1.046 을 그대로 두는 것은 불가능해서가 아니라 그 거래를 거절한
  * 것이다 — 실제로 관제 줄에 칩이 서는 날이 오면 그때 이 문단을 다시 읽고 정하면 된다.
  */
-const CHIP_VESSEL_SURFACES = [
+export const CHIP_VESSEL_SURFACES = [
   ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
   ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
   ["warn-soft", ["surface", "surface-hover", "surface-raised"]],
@@ -237,11 +244,11 @@ const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
  * 팔레트의 실측에서 나왔다: 라이트 --surface 위가 최악이고 1.061 / 0.0207 이다.
  * 고치기 전 --surface-hover 위의 그 칩은 1.000 / 0.0000 이었다.
  */
-const CHIP_VESSEL_MIN_CONTRAST = 1.05;
-const CHIP_VESSEL_MIN_DISTANCE = 0.02;
+export const CHIP_VESSEL_MIN_CONTRAST = 1.05;
+export const CHIP_VESSEL_MIN_DISTANCE = 0.02;
 
 /** Foregrounds that render text or meaningful glyphs. */
-const FOREGROUNDS = [
+export const FOREGROUNDS = [
   "ink",
   "ink-muted",
   "accent",
@@ -261,7 +268,7 @@ const FOREGROUNDS = [
  * a measured fact instead of something a reviewer has to remember: file a
  * surface in the wrong list, or improve a token without moving it, and it fails.
  */
-const CONTROL_SURFACES = [
+export const CONTROL_SURFACES = [
   "surface",
   "surface-raised",
   "surface-sidebar",
@@ -443,7 +450,7 @@ describe("Dawn palette", () => {
             hueGap(pick("agent", scheme.index), pick("accent", scheme.index))
           ),
           `agent vs accent hue gap (${scheme.name})`
-        ).toBeGreaterThanOrEqual(90);
+        ).toBeGreaterThanOrEqual(AGENT_HUE_GAP_MIN);
       });
 
       // The risk hierarchy is an ORDER, not a taste: --danger > --warn >
@@ -488,7 +495,7 @@ describe("Dawn palette", () => {
         expect(
           Number((c("accent") / c("danger-fill")).toFixed(2)),
           `accent vs danger-fill chroma (${scheme.name})`
-        ).toBeGreaterThanOrEqual(1.15);
+        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_CHROMA_RATIO_MIN);
       });
 
       // Quieter, not merged. Lowering the destructive fill's chroma walks it
@@ -504,7 +511,7 @@ describe("Dawn palette", () => {
             ).toFixed(3)
           ),
           `danger-fill vs accent deltaE (${scheme.name})`
-        ).toBeGreaterThanOrEqual(0.08);
+        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_DELTA_E_MIN);
       });
 
       // ...and still recognisably the risk colour. A fill allowed to drift out

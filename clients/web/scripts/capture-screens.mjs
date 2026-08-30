@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -259,6 +259,8 @@ const MOBILE_TAP_TARGETS = [
   ["remind-preset-tomorrow-9", "알림 프리셋 내일 9시", "optional"],
   ["remind-preset-next-monday-9", "알림 프리셋 다음 주 월요일", "optional"],
   ["remind-note", "알림 메모", "optional"],
+  // #1868 N-4 — 설정 > 테마 액센트 스와치. optional: 테마 섹션이 열린 프레임에서만.
+  ["accent-swatch-dawn", "액센트 새벽", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -5526,6 +5528,21 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "settings");
 
+  await page.evaluate('location.hash = "/inbox"');
+  await page.waitForTimeout(200);
+  await page.evaluate('location.hash = "/settings?section=appearance"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "테마", exact: true }).waitFor({
+    state: "visible",
+  });
+  await page.getByTestId("accent-swatch-dawn").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `settings appearance ${scheme}`);
+  await assertTapTargets(page, `settings appearance ${scheme}`, [
+    ["settings-back-to-app", "앱으로 돌아가기"],
+    ["accent-swatch-dawn", "액센트 새벽"],
+  ]);
+  await shoot(page, "settings-appearance");
+
   // 7. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
   //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 여섯 프레임은 손대지 않은 표면에서
   //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
@@ -6997,6 +7014,14 @@ async function captureScheme(browser, scheme) {
       .getByRole("heading", { name: heading, exact: true })
       .first()
       .waitFor({ state: "visible" });
+    if (section === "appearance") {
+      await settingsSweep.getByTestId("accent-swatch-dawn").waitFor({
+        state: "visible",
+      });
+      await assertTapTargets(settingsSweep, `appearance ${scheme}`, [
+        ["accent-swatch-dawn", "액센트 새벽"],
+      ]);
+    }
     if (section === "workspace") {
       await settingsSweep
         .getByTestId("workspace-role-labels")
@@ -8471,6 +8496,31 @@ async function captureHostedDoorbellScenes(browser, scheme) {
  * (ChoiceList, KeyValueRows, InlineBanner, EmptyInvite, Button) are already shot
  * elsewhere in both schemes.
  */
+/**
+ * `data-accent` flipping is not the same as paint. Buttons carry
+ * `transition-colors` (150ms) even under reduced motion, so wait until a
+ * filled control's computed background equals `var(--token)`.
+ */
+async function waitUntilTokenPaint(page, testId, cssVar) {
+  await page.waitForFunction(
+    ({ testId: id, cssVar: token }) => {
+      const el = document.querySelector(`[data-testid="${id}"]`);
+      if (!el) return false;
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = `var(${token})`;
+      probe.style.position = "absolute";
+      probe.style.left = "-9999px";
+      document.body.appendChild(probe);
+      const target = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      if (target === "rgba(0, 0, 0, 0)" || target === "transparent") return false;
+      return getComputedStyle(el).backgroundColor === target;
+    },
+    { testId, cssVar },
+    { timeout: 8_000 }
+  );
+}
+
 async function captureAccentCandidates(browser, scheme) {
   const ids = accentCatalogIds();
   const context = await browser.newContext({
@@ -8480,22 +8530,35 @@ async function captureAccentCandidates(browser, scheme) {
     reducedMotion: "reduce",
   });
   await installMocks(context);
+  const emptyChannelId = CHANNELS[3].id;
+  // Last-registered route wins: this channel stays empty so unfurl cards cannot
+  // dominate the 시안 frame.
+  await context.route(
+    `**/channels/${emptyChannelId}/messages*`,
+    (route) => json(route, { messages: [] })
+  );
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  // Empty public channel: selected sidebar row, enabled primary fill, and the
+  // general mention badge share one frame. Timeline unfurl cards (baked amber)
+  // do not dominate.
+  await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
+  await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
+  await page.getByTestId("mention-badge").waitFor({ state: "visible" });
+  const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
+  mkdirSync(previewDir, { recursive: true });
   const shots = [];
   for (const id of ids) {
     await page.evaluate((accentId) => {
       document.documentElement.setAttribute("data-accent", accentId);
     }, id);
-    await page.waitForFunction(
-      (accentId) =>
-        document.documentElement.getAttribute("data-accent") === accentId,
-      id
-    );
+    await waitUntilTokenPaint(page, "timeline-empty-primary", "--accent");
+    await waitUntilTokenPaint(page, "mention-badge", "--accent");
     const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
     await page.screenshot({ path });
+    copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
     shots.push(path);
   }
   await page.close();
