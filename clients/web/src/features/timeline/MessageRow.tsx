@@ -54,6 +54,7 @@ import {
   canEditMessage,
   canPinMessage,
   canReactToMessage,
+  canRemindMessage,
   canReplyToMessage,
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
@@ -98,6 +99,10 @@ import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel
 import { selectionIsWithinRow } from "./messageContextMenuModel";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
+import { useSession } from "@/app/session";
+import { reminderFailureMessage } from "@momo/core/features/reminders/model";
+import { RemindDialog } from "@/features/reminders/RemindDialog";
+import { useReminderMutations } from "@/features/reminders/useReminders";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -364,6 +369,10 @@ export function MessageRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [remindError, setRemindError] = useState<string | null>(null);
+  const { workspaceId } = useSession();
+  const reminderMutations = useReminderMutations(workspaceId);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -456,6 +465,7 @@ export function MessageRow({
     // 이슈 #1112. 작성자 관문이 없다 — 고정은 채널의 사실이고, 푸는 것도 누구나
     // 할 수 있다(서버가 같은 규칙을 강제한다).
     pin: Boolean(actions) && canPinMessage(message),
+    remind: Boolean(actions) && canRemindMessage(message),
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
@@ -507,6 +517,10 @@ export function MessageRow({
       void Promise.resolve(actions.onTogglePin(message)).catch(
         (error: unknown) => setRowError(pinFailureMessage(error))
       );
+    },
+    onRemind: () => {
+      setRemindError(null);
+      setRemindOpen(true);
     },
     onEdit: () => {
       setEditError(null);
@@ -1013,6 +1027,35 @@ export function MessageRow({
                   setConfirmOpen(false);
                 })
                 .finally(() => setDeletePending(false));
+            }}
+          />
+          <RemindDialog
+            open={remindOpen}
+            onOpenChange={(open) => {
+              setRemindOpen(open);
+              if (!open) setRemindError(null);
+            }}
+            mode="create"
+            preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
+            pending={reminderMutations.create.isPending}
+            error={remindError}
+            onCommit={(dueAtMs, note) => {
+              setRemindError(null);
+              reminderMutations.create.mutate(
+                {
+                  channelId: message.channelId,
+                  messageId: message.id,
+                  dueAtMs,
+                  note,
+                  messagePreview: message.body?.trim() || PIN_EMPTY_BODY_TEXT,
+                },
+                {
+                  onSuccess: () => setRemindOpen(false),
+                  onError: (error: unknown) => {
+                    setRemindError(reminderFailureMessage(error, "create"));
+                  },
+                }
+              );
             }}
           />
         </>

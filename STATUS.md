@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## BF-B1 클라 절반 메시지 리마인더 UI (#1888, 2026-08-30)
+
+- 메시지 ⋯/우클릭/시트에 「나중에 알림」(프리셋 5종 + 날짜·시간 커스텀 + 메모 ≤200자, 로컬 TZ). 인박스에 「나중에」 탭 도킹(A5 행 문법: 미리보기·채널·상대 만기·완료·스누즈). 원문 클릭은 기존 `?msg=` 점프.
+- 만기는 read-state와 같은 30s react-query 리듬(쿼리 분리, 에러 격리). outbox 없음. 첫 진입 워터마크(`momo.web.reminders.watermark.v1`)는 과거 만기를 알림 없이 목록 배지. A4 종류 토글에 「나중에 알림」 가산.
+- design-review #1918 수리: ⋯ 키보드 도달·390 본문 교차 0(`w-overflow-bowl` 한 값)·숨김 창 폴링+가시성 복귀 페치·누적 만기 상한 3·만기 칩 그릇(행 워시 아님)·완료/미루기 tap-target·실패 시 다이얼로그 유지+동사별 오류·완료 확인·채널 UUID 금지·목록 파서 fail-closed.
+- 서버 절반은 track/engine(#1905). 이 레인은 REST 소비층+모킹 red proof. 실서버 conformance는 main 승격 시. runtime-unverified: 라이브 CRUD.
+- red proof: 프리셋 경계(월요 00:30은 오늘 9시가 아님)·CRUD 왕복 모킹·워터마크 알림 0·폴링 만기 알림 경로·행→메시지 점프. web vitest · tsc · design_preflight_web · `CAPTURE_PORT=8507` capture:design · `SHELL_GATE_PORT=8509 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
 ## BF-A8 채널 빈 상태 인트로 블록 (#1904, 2026-08-30)
 
 - 새 채널 첫 진입을 EmptyInvite 분기에서 빼, 타임라인 virtuoso **leading row**로 채널 아이콘+이름+시작 카피+액션 카드(첫 메시지 쓰기, 권한 있으면 멤버 추가하기)를 그린다. 메시지 도착 시 같은 목록 안에서 인트로가 히스토리 맨 위에 남고, 같은 DOM 노드를 유지하며 scrollTop은 불변. 바닥 정렬 목록이라 뷰포트 top은 새 행만큼 올라가는 것이 정상 동작(높이 0·scrollTop 0·동일 노드는 참). 액션과 「첫 메시지」 계열 문장은 empty일 때만. 비어 있지 않은 인트로는 이름·토픽·시작점만 말한다.

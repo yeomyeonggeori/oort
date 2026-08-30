@@ -17,6 +17,16 @@ import {
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
 import { FilterTabs } from "@/features/common/FilterTabs";
+import { reminderIsOverdue } from "@momo/core/features/reminders/model";
+import { RemindersPanel } from "@/features/reminders/RemindersPanel";
+import { useReminders } from "@/features/reminders/useReminders";
+import {
+  parseWebInboxFilter,
+  webInboxFilterTabs,
+  webInboxPanelId,
+  webInboxTabId,
+  withRemindersTab,
+} from "@/features/reminders/inboxTab";
 import { FeedList } from "./FeedRow";
 import {
   ApprovalActions,
@@ -40,11 +50,7 @@ import {
 } from "./approvalsPanel";
 import {
   availableInboxFilters,
-  INBOX_FILTER_TABS,
-  panelId,
-  parseFilter,
   relativeLabel,
-  tabId,
   type FeedItem,
   type InboxFilter,
 } from "@momo/core/features/inbox/model";
@@ -228,7 +234,11 @@ export function InboxRoute() {
     () => availableInboxFilters((surface) => isSurfaceProvided(surface)),
     []
   );
-  const filter = parseFilter(params.get("filter"), availableFilters);
+  const webFilters = useMemo(
+    () => withRemindersTab(availableFilters),
+    [availableFilters]
+  );
+  const filter = parseWebInboxFilter(params.get("filter"), availableFilters);
   const approvalsProvided = isSurfaceProvided("approvals");
   // 2R H1: 「에이전트」 탭의 나머지 절반. 정적 판정으로 묻는다 — 요청을 보내
   // 405를 받아 보고 알아낼 필요가 없는 사실이다.
@@ -251,6 +261,10 @@ export function InboxRoute() {
     ownedBy: session.member.id,
   });
   const mentionCount = useMentionCount();
+  const reminders = useReminders(session.member.workspaceId);
+  const reminderDueCount = (reminders.data?.reminders ?? []).filter((row) =>
+    reminderIsOverdue(row, Date.now())
+  ).length;
 
   const markRead = useMarkRead();
   const unreadChannels = useUnreadMentionChannels();
@@ -275,12 +289,14 @@ export function InboxRoute() {
    */
   const [decisionTick, setDecisionTick] = useState(0);
 
-  const feed =
-    filter === "needs-action"
-      ? needsAction
-      : filter === "mentions"
-        ? mentions
-        : agents;
+  const feed: Feed | null =
+    filter === "reminders"
+      ? null
+      : filter === "needs-action"
+        ? needsAction
+        : filter === "mentions"
+          ? mentions
+          : agents;
 
   // 2R L1: 결정 영수증은 **그 목록에 대한 답**이다. 탭을 옮기면 그 답이 가리키던
   // 행은 화면에 없는데 줄만 남아, 멘션 목록 위에 "승인을 기록했습니다"가 떠 있는
@@ -368,10 +384,14 @@ export function InboxRoute() {
         </div>
         {/* 탭이 하나뿐이면 탭 줄을 세우지 않는다 (goal B12). 고를 것이 없는
             고르개는 컨트롤이 아니라 장식이고, 남은 하나에 이미 있는 이름을
-            한 번 더 적을 뿐이다. */}
-        {availableFilters.length > 1 && (
+            한 번 더 적을 뿐이다.
+            이 클라는 나중에 탭을 항상 붙이므로 보이는 탭은 최소 멘션+나중
+            둘이다. 가드는 보이는 탭(webFilters)을 본다: 서버 탭이 멘션 하나뿐
+            이어도 나중에와 고를 것이 있으므로 줄을 세운다. 서버 탭 수로
+            되돌리면 나중에로 가는 길이 사라진다. */}
+        {webFilters.length > 1 && (
           <FilterTabs
-            spec={{ ...INBOX_FILTER_TABS, values: availableFilters }}
+            spec={webInboxFilterTabs(webFilters)}
             value={filter}
             onChange={(next) => setParams({ filter: next }, { replace: true })}
             // 2R M3: 행 수가 아니라 **결정할 수 있는 행 수**. 배지는 "지금
@@ -380,6 +400,7 @@ export function InboxRoute() {
             counts={{
               "needs-action": decidableCount(needsAction.items),
               mentions: mentionCount,
+              reminders: reminderDueCount,
             }}
           />
         )}
@@ -407,9 +428,9 @@ export function InboxRoute() {
         <InlineBanner
           tone="neutral"
           message={
-            feed.updatedAtMs > 0
+            (feed?.updatedAtMs ?? reminders.dataUpdatedAt) > 0
               ? `오프라인, 마지막 동기화 ${relativeLabel(
-                  feed.updatedAtMs,
+                  feed?.updatedAtMs ?? reminders.dataUpdatedAt,
                   Date.now()
                 )}. 아래는 그때의 상태입니다.`
               : "오프라인. 아직 이 목록을 한 번도 받지 못했습니다."
@@ -436,26 +457,30 @@ export function InboxRoute() {
       )}
 
       <div
-        {...(availableFilters.length > 1
+        {...(webFilters.length > 1
           ? {
               role: "tabpanel",
-              id: panelId(filter),
-              "aria-labelledby": tabId(filter),
+              id: webInboxPanelId(filter),
+              "aria-labelledby": webInboxTabId(filter),
             }
           : {})}
         className="min-h-0 flex-1 overflow-y-auto"
       >
-        <FeedPanel
-          filter={filter}
-          feed={feed}
-          onMarkRead={filter === "mentions" ? onMarkRead : undefined}
-          // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
-          // 결정의 기록이고, 멘션 행은 승인이 아니다.
-          renderActions={
-            filter === "needs-action" ? renderApprovalActions : undefined
-          }
-          listRef={listRef}
-        />
+        {filter !== "reminders" && feed !== null ? (
+          <FeedPanel
+            filter={filter}
+            feed={feed}
+            onMarkRead={filter === "mentions" ? onMarkRead : undefined}
+            // 결정 컨트롤은 결정 대기 탭에만. 에이전트 탭의 승인 행은 이미 끝난
+            // 결정의 기록이고, 멘션 행은 승인이 아니다.
+            renderActions={
+              filter === "needs-action" ? renderApprovalActions : undefined
+            }
+            listRef={listRef}
+          />
+        ) : (
+          <RemindersPanel />
+        )}
       </div>
 
       {/* 컴포저와 같은 이유의 안전 영역 (goal B6): 이것도 셸의 마지막 줄이고,

@@ -305,6 +305,14 @@ export function canPinMessage(message: Message): boolean {
   return isActionable(message);
 }
 
+/**
+ * ADR-0175 — 나중에 알림. Anyone may remind themselves of a live message.
+ * A tombstone or a failed send has no server row to hang a reminder on.
+ */
+export function canRemindMessage(message: Message): boolean {
+  return isActionable(message);
+}
+
 /** What a row may offer, all six answers together. */
 export interface MessageActionAvailability {
   reply: boolean;
@@ -318,6 +326,11 @@ export interface MessageActionAvailability {
   react: boolean;
   /** 이슈 #1112 — 판정은 {@link canPinMessage}. */
   pin: boolean;
+  /**
+   * ADR-0175. Optional so a phone surface that has not consumed A-41 yet
+   * still type-checks; missing is off.
+   */
+  remind?: boolean;
   edit: boolean;
   delete: boolean;
 }
@@ -333,6 +346,7 @@ export function hasAnyAction(available: MessageActionAvailability): boolean {
     available.quote ||
     available.react ||
     available.pin ||
+    available.remind === true ||
     available.edit ||
     available.delete
   );

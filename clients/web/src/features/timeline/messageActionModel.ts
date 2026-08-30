@@ -6,6 +6,7 @@ import {
   copyLinkActionLabel,
   copyMessageActionLabel,
 } from "@momo/core/features/timeline/copyLabels";
+import { REMINDER_MENU_LABEL } from "@momo/core/features/reminders/model";
 
 export type MessageActionItemKey =
   | `react:${string}`
@@ -15,6 +16,7 @@ export type MessageActionItemKey =
   | "copy"
   | "copy-link"
   | "pin"
+  | "remind"
   | "edit"
   | "delete";
 
@@ -47,7 +49,8 @@ export interface MessageActionCopyState {
  *                   action; both are verb phrases, same as the phone sheet.
  *   * copy-link   — `#/c/{ch}?msg=&seq=` already lands (ChatShell + searchHitPath).
  *   * mark unread — PUT read-state is monotone (`GREATEST`). Accrued.
- *   * remind later / report — no surface. Accrued.
+ *   * remind later — ADR-0175 / #1888. 「나중에 알림」 in this inventory.
+ *   * report — no surface. Accrued.
  */
 export function messageActionItems(
   available: MessageActionAvailability,
@@ -100,6 +103,13 @@ export function messageActionItems(
       key: "pin",
       testKey: "pin",
       label: pinActionLabel(pinned),
+    });
+  }
+  if (available.remind) {
+    items.push({
+      key: "remind",
+      testKey: "remind",
+      label: REMINDER_MENU_LABEL,
     });
   }
   if (available.edit) {

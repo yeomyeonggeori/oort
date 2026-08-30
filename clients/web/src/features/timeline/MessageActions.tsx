@@ -1,4 +1,5 @@
 import {
+  Bell,
   Copy,
   Link,
   MessageSquareReply,
@@ -116,6 +117,8 @@ export interface MessageActionCallbacks {
    * request disagree.
    */
   onPin: () => void;
+  /** ADR-0175 — open the later-reminder dialog for this row. */
+  onRemind: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -139,6 +142,8 @@ function actionIcon(item: MessageActionItem, pinned: boolean) {
       ) : (
         <Pin className="size-4" aria-hidden="true" />
       );
+    case "remind":
+      return <Bell className="size-4" aria-hidden="true" />;
     case "edit":
       return <Pencil className="size-4" aria-hidden="true" />;
     case "delete":
@@ -173,6 +178,9 @@ function invokeAction(
       return;
     case "pin":
       callbacks.onPin();
+      return;
+    case "remind":
+      callbacks.onRemind();
       return;
     case "edit":
       callbacks.onEdit();
