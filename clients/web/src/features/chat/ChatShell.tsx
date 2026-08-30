@@ -5,6 +5,8 @@ import {
   fetchMessages,
   updateReadState,
   uuidEq,
+  type Channel,
+  type MembershipRole,
   type Message,
   type WorkSession,
 } from "@momo/core/lib/api";
@@ -55,10 +57,7 @@ import {
   makeSyntheticMessages,
 } from "@momo/core/features/timeline/stress";
 import { Composer } from "@/features/chat/Composer";
-import {
-  canCreateChannel,
-  canCreateChannelNow,
-} from "@momo/core/features/channels/model";
+import { canCreateChannelNow } from "@momo/core/features/channels/model";
 import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
@@ -100,6 +99,22 @@ const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
 // 어긋나면 화면에 없는 컨트롤로 Tab이 걸어 들어간다. 한 곳에만 적어 다음 사람이
 // 한쪽만 옮기지 못하게 한다 (#1421 N1).
 const DRAWER_OVERLAY_QUERY = "(width < 900px)";
+
+/**
+ * Offer "멤버 추가하기" on this channel?
+ *
+ * Same admin/owner predicate as channel create (`canCreateChannelNow`). While
+ * the roster is in flight the answer is silence: a card that appears and then
+ * vanishes is worse than one that arrives a beat late (R2 M5).
+ */
+export function canAddChannelMemberNow(
+  rosterSettled: boolean,
+  role: MembershipRole | undefined,
+  kind: Channel["kind"] | undefined | null
+): boolean {
+  if (kind == null || kind === "dm") return false;
+  return canCreateChannelNow(rosterSettled, role);
+}
 
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
@@ -1094,17 +1109,15 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
-              channelName={labelParts?.text ?? label}
+              channelName={label}
               channelTopic={channel?.topic}
               peer={peer}
               reachedStart={timeline.reachedStart}
-              canAddMember={
-                channel !== null &&
-                channel.kind !== "dm" &&
-                canCreateChannel(
-                  memberFor(directory, session.member.id)?.role
-                )
-              }
+              canAddMember={canAddChannelMemberNow(
+                !directoryQuery.isPending,
+                memberFor(directory, session.member.id)?.role,
+                channel?.kind
+              )}
               onAddMember={() => {
                 if (channelId && channel)
                   openAddMember({ id: channelId, name: channel.name ?? label });

@@ -16,6 +16,7 @@ import {
   EMPTY_ADD_MEMBER_ACTION_LABEL,
   EMPTY_WRITE_ACTION_LABEL,
 } from "@momo/core/features/timeline/model";
+import { CHANNEL_INTRO_STARTED, DM_INTRO_STARTED } from "./channelIntro";
 import { Timeline } from "./Timeline";
 
 const virtuoso = vi.hoisted(() => ({
@@ -44,16 +45,20 @@ vi.mock("react-virtuoso", () => ({
   }),
 }));
 
-vi.mock("./MessageRow", () => ({
-  DayDivider: () => createElement("div", { "data-testid": "day-divider" }),
-  RecoveryDivider: () => createElement("div", { "data-testid": "recovery-divider" }),
-  UnreadDivider: () => createElement("div", { "data-testid": "unread-divider" }),
-  MessageRow: ({ message }: { message: { seq: number } }) =>
-    createElement("div", {
-      "data-testid": "timeline-message",
-      "data-seq": message.seq,
-    }),
-}));
+vi.mock("./MessageRow", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./MessageRow")>();
+  return {
+    ...actual,
+    DayDivider: () => createElement("div", { "data-testid": "day-divider" }),
+    RecoveryDivider: () => createElement("div", { "data-testid": "recovery-divider" }),
+    UnreadDivider: () => createElement("div", { "data-testid": "unread-divider" }),
+    MessageRow: ({ message }: { message: { seq: number } }) =>
+      createElement("div", {
+        "data-testid": "timeline-message",
+        "data-seq": message.seq,
+      }),
+  };
+});
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -161,8 +166,10 @@ describe("Timeline channel intro leading row", () => {
     expect(intro).not.toBeNull();
     expect(intro?.getAttribute("data-channel-intro")).toBe("");
     expect(intro?.getAttribute("data-empty-kind")).toBe("channel");
-    expect(intro?.querySelector("#channel-intro-title")?.tagName).toBe("H2");
-    expect(intro?.querySelector("#channel-intro-title")?.textContent).toBe("#엔진");
+    const heading = intro?.querySelector("h2");
+    expect(heading?.textContent).toBe("엔진");
+    expect(heading?.getAttribute("title")).toBe("엔진");
+    expect(heading?.id).toBe("");
     const write = root.querySelector(
       "[data-testid='timeline-empty-primary']"
     ) as HTMLButtonElement | null;
@@ -172,18 +179,20 @@ describe("Timeline channel intro leading row", () => {
     expect(write?.tagName).toBe("BUTTON");
     expect(write?.textContent).toContain(EMPTY_WRITE_ACTION_LABEL);
     expect(write?.dataset.actionKind).toBe("write");
+    expect(write?.getAttribute("aria-label")).toBeNull();
     expect(add?.textContent).toContain(EMPTY_ADD_MEMBER_ACTION_LABEL);
     expect(add?.dataset.actionKind).toBe("add-member");
   });
 
-  it("keeps the intro as the first row with unchanged height when a message arrives", () => {
+  it("keeps the intro node and scrollTop when a message arrives, without empty-state copy", () => {
     const root = mount();
-    const scroller = root.querySelector("[data-testid='timeline-virtuoso']");
-    const intro = root.querySelector("[data-testid='timeline-empty']");
+    const scroller = root.querySelector(
+      "[data-testid='timeline-virtuoso']"
+    ) as HTMLElement | null;
+    const intro = root.querySelector("[data-channel-intro]");
     expect(scroller).not.toBeNull();
     expect(intro).not.toBeNull();
-    const height = intro?.getBoundingClientRect().height;
-    const top = intro?.getBoundingClientRect().top;
+    const scrollTop = scroller?.scrollTop;
 
     mount({ messages: [message(1)], reachedStart: true, canAddMember: true });
 
@@ -192,11 +201,14 @@ describe("Timeline channel intro leading row", () => {
     expect(virtuoso.data.some((item) => item.kind === "message")).toBe(true);
     const still = root.querySelector("[data-channel-intro]");
     expect(still).toBe(intro);
-    expect(still?.getBoundingClientRect().height).toBe(height);
-    expect(still?.getBoundingClientRect().top).toBe(top);
+    expect(scroller?.scrollTop).toBe(scrollTop);
     expect(root.querySelector("[data-testid='timeline-message']")).not.toBeNull();
     expect(root.querySelector("[data-testid='timeline-empty']")).toBeNull();
     expect(root.querySelector("[data-testid='message-channel-intro']")).toBe(intro);
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-secondary']")).toBeNull();
+    expect(still?.textContent).toContain(CHANNEL_INTRO_STARTED);
+    expect(still?.textContent).not.toContain("첫 메시지");
   });
 
   it("hides the add-member card for a role that cannot add", () => {
@@ -208,16 +220,38 @@ describe("Timeline channel intro leading row", () => {
   it("swaps icon, name, and copy on a DM and never offers add-member", () => {
     const root = mount({
       channelKind: "dm",
-      channelName: "곽성재",
+      channelName: "곽성재 @seongjae",
       peer: peer(),
       canAddMember: true,
     });
     const intro = root.querySelector("[data-testid='timeline-empty']");
     expect(intro?.getAttribute("data-empty-kind")).toBe("dm");
-    expect(intro?.querySelector("#channel-intro-title")?.textContent).toBe("곽성재");
+    expect(intro?.querySelector("h2")?.textContent).toBe("곽성재 @seongjae");
     expect(intro?.textContent).toContain("곽성재님과의 대화를 시작하세요.");
+    expect(intro?.textContent).toContain(
+      "여기 쓴 메시지는 둘만 봅니다. 참여자는 이 둘로 고정됩니다."
+    );
     expect(intro?.querySelector("[data-testid='message-channel-intro-icon']")).not.toBeNull();
     expect(root.querySelector("[data-testid='timeline-empty-secondary']")).toBeNull();
+  });
+
+  it("paints an agent DM title with --agent and keeps the contract without write copy when history exists", () => {
+    const root = mount({
+      channelKind: "dm",
+      channelName: "hermes",
+      peer: peer({ kind: "agent", displayName: "hermes", handle: "hermes" }),
+      messages: [message(1)],
+      reachedStart: true,
+      canAddMember: true,
+    });
+    const intro = root.querySelector("[data-testid='message-channel-intro']");
+    const heading = intro?.querySelector("h2");
+    expect(heading?.textContent).toBe("hermes");
+    expect(heading?.className).toContain("text-agent");
+    expect(intro?.textContent).toContain(DM_INTRO_STARTED);
+    expect(intro?.textContent).toContain("여기 쓴 메시지는 둘만 봅니다");
+    expect(intro?.textContent).not.toContain("첫");
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
   });
 
   it("focuses the composer when 첫 메시지 쓰기 is pressed", () => {

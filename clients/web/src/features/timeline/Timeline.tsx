@@ -221,8 +221,6 @@ export function Timeline({
   canAddMember = false,
   channelName,
   channelTopic,
-  createdAtMs,
-  creatorName,
 }: {
   messages: Message[];
   directory: Directory;
@@ -233,9 +231,6 @@ export function Timeline({
   channelName?: string;
   /** Channel topic, quoted as the intro body when present. */
   channelTopic?: string;
-  /** Local-only; omitted from the intro when the client does not have it. */
-  createdAtMs?: number;
-  creatorName?: string;
   /**
    * Older history is exhausted. The intro is a leading row only at the start
    * of the channel, never mid-window while a previous page is still loading.
@@ -335,6 +330,11 @@ export function Timeline({
     reachedStart,
     messageCount: messages.length,
   });
+  // A local echo counts as content: it must appear under the intro the moment
+  // it is sent, not after the server round trip, and it must not remount the
+  // list (that remount was the empty-state layout shift).
+  const empty =
+    messages.length === 0 && (pending === undefined || pending.length === 0);
   const intro = useMemo(
     () =>
       buildChannelIntro({
@@ -343,18 +343,9 @@ export function Timeline({
         topic: channelTopic,
         peer: peer ?? null,
         canAddMember: Boolean(canAddMember) && channelKind !== "dm",
-        createdAtMs,
-        creatorName,
+        empty,
       }),
-    [
-      channelKind,
-      channelName,
-      channelTopic,
-      peer,
-      canAddMember,
-      createdAtMs,
-      creatorName,
-    ]
+    [channelKind, channelName, channelTopic, peer, canAddMember, empty]
   );
 
   const items = useMemo(() => {
@@ -588,12 +579,6 @@ export function Timeline({
     );
   }
 
-  // A local echo counts as content: it must appear under the intro the moment
-  // it is sent, not after the server round trip, and it must not remount the
-  // list (that remount was the empty-state layout shift).
-  const empty =
-    messages.length === 0 && (pending === undefined || pending.length === 0);
-
   if (status === "loading" && empty) {
     return <SkeletonRows rows={6} className="p-4" />;
   }
@@ -657,6 +642,7 @@ export function Timeline({
               <ChannelIntroBlock
                 intro={intro}
                 empty={empty}
+                peer={peer}
                 onWrite={onStartWriting}
                 onAddMember={onAddMember}
               />

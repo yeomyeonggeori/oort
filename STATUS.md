@@ -2,9 +2,9 @@
 
 ## BF-A8 채널 빈 상태 인트로 블록 (#1904, 2026-08-30)
 
-- 새 채널 첫 진입을 EmptyInvite 분기에서 빼, 타임라인 virtuoso **leading row**로 채널 아이콘+`#이름`+시작 카피+액션 카드(첫 메시지 쓰기, 권한 있으면 멤버 추가하기)를 그린다. 메시지 도착 시 같은 목록 안에서 인트로가 히스토리 맨 위에 남고 시프트 0(높이·스크롤 위치 불변). 오버레이/절대배치 없음.
-- 토픽이 있으면 인용, 없으면 기존 emptyChannelCopy 일반 카피. 생성 시각/생성자는 로컬에 있을 때만. DM은 아이콘·이름·카피만 교체, 초대 카드 없음. 스레드 패널 비대상. 초대 카드는 `canCreateChannel`(오너/관리자, role 미정이면 열어 두고 서버가 마지막 말).
-- 서버 무접촉. runtime-unverified 아님. red proof: web vitest 1893 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8497` capture:design · `SHELL_GATE_PORT=8499 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+- 새 채널 첫 진입을 EmptyInvite 분기에서 빼, 타임라인 virtuoso **leading row**로 채널 아이콘+이름+시작 카피+액션 카드(첫 메시지 쓰기, 권한 있으면 멤버 추가하기)를 그린다. 메시지 도착 시 같은 목록 안에서 인트로가 히스토리 맨 위에 남고, 같은 DOM 노드를 유지하며 scrollTop은 불변. 바닥 정렬 목록이라 뷰포트 top은 새 행만큼 올라가는 것이 정상 동작(높이 0·scrollTop 0·동일 노드는 참). 액션과 「첫 메시지」 계열 문장은 empty일 때만. 비어 있지 않은 인트로는 이름·토픽·시작점만 말한다.
+- 토픽이 있으면 인용, 없으면 empty일 때 emptyChannelCopy 일반 카피·히스토리가 있으면 「이 채널의 시작입니다」. 생성 시각/생성자는 채널 모델에 없어 그리지 않는다. DM은 Avatar+이름(+@handle)+DM 계약 문장, 에이전트는 `--agent`. 초대 카드 없음. 스레드 패널 비대상. 초대 카드는 `canCreateChannelNow`(로스터 미착이면 침묵, 정착 후 오너/관리자).
+- 서버 무접촉. runtime-unverified 아님. red proof: web vitest 1904 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8497` capture:design · `SHELL_GATE_PORT=8499 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
 
 ## BF-A6 링크 프리뷰 Rich/Compact 선택 (#1903, 2026-08-30)
 
