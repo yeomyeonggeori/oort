@@ -227,6 +227,24 @@ const MOBILE_TAP_TARGETS = [
   ["reminder-row-menu", "알림 메뉴", "optional"],
   ["reminder-complete-commit", "알림 완료 확인", "optional"],
   ["reminder-delete-commit", "알림 지우기 확인", "optional"],
+  // #1889 M-3 — 상태 설정 다이얼로그의 1급 컨트롤. 프리셋 칩과 이모지 칸이
+  // size=sm(28)이라 폰에서 tap-target을 각자 단다. optional: 다이얼로그가
+  // 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["set-status-emoji", "상태 이모지", "optional"],
+  ["set-status-preset-meeting", "상태 프리셋 회의 중", "optional"],
+  ["set-status-preset-commute", "상태 프리셋 이동 중", "optional"],
+  ["set-status-preset-sick", "상태 프리셋 병가", "optional"],
+  ["set-status-preset-vacation", "상태 프리셋 휴가", "optional"],
+  ["set-status-preset-wfh", "상태 프리셋 재택", "optional"],
+  ["set-status-text", "상태 글", "optional"],
+  // 같은 결정, 형제 RemindDialog (#1888 랜딩분). optional: 폰 캡처가 시트에서
+  // 「나중에 알림」으로 연 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["remind-preset-30m", "알림 프리셋 30분", "optional"],
+  ["remind-preset-1h", "알림 프리셋 1시간", "optional"],
+  ["remind-preset-3h", "알림 프리셋 3시간", "optional"],
+  ["remind-preset-tomorrow-9", "알림 프리셋 내일 9시", "optional"],
+  ["remind-preset-next-monday-9", "알림 프리셋 다음 주 월요일", "optional"],
+  ["remind-note", "알림 메모", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -431,6 +449,17 @@ const OAUTH_CONSENT_PREVIEW = {
 // design: the agent row is where --agent (predawn slate-blue) is visible at all,
 // and the unread/mention badges are the only place --accent lands in the
 // sidebar. Without these the capture would review a surface nobody ships.
+//
+// #1889 R2-B1: a 4-char 「회의 중」 hid the 80-char menu-width axis. One self
+// fixture sits at the text ceiling so wrap-vs-widen cannot hide again.
+const SELF_STATUS_TEXT =
+  "3분기 게이트웨이 점검 중, 오후 6시 이후 응답이 늦습니다. 급하면 전화 주세요, 이 채널로만 남겨 주세요. urgent only 내일 6시";
+if (SELF_STATUS_TEXT.length < 70 || SELF_STATUS_TEXT.length > 80) {
+  throw new Error(
+    `레인 상태 픽스처가 80자 한도 근처가 아니다: ${SELF_STATUS_TEXT.length}`
+  );
+}
+
 const ROSTER = [
   {
     id: ME,
@@ -444,6 +473,8 @@ const ROSTER = [
     channelIds: CHANNEL_IDS,
     capabilities: [],
     presenceStatus: "auto",
+    statusEmoji: "📅",
+    statusText: SELF_STATUS_TEXT,
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -477,6 +508,9 @@ const ROSTER = [
     channelCount: 2,
     channelIds: CHANNEL_IDS.slice(0, 2),
     capabilities: [],
+    presenceStatus: "away",
+    statusEmoji: "🏠",
+    statusText: "재택",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -1352,6 +1386,11 @@ async function installUnmockedFallback(context) {
 
 async function installMocks(context) {
   let declaredPresence = "auto";
+  let customStatus = {
+    statusEmoji: "📅",
+    statusText: SELF_STATUS_TEXT,
+    statusExpiresAtMs: undefined,
+  };
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
@@ -1525,7 +1564,31 @@ async function installMocks(context) {
         body.status === "dnd"
       ) {
         declaredPresence = body.status;
-        return json(route, { status: declaredPresence });
+        if (Object.prototype.hasOwnProperty.call(body, "statusEmoji")) {
+          customStatus.statusEmoji =
+            body.statusEmoji === null || body.statusEmoji === ""
+              ? undefined
+              : body.statusEmoji;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusText")) {
+          customStatus.statusText =
+            body.statusText === null || body.statusText === ""
+              ? undefined
+              : body.statusText;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusExpiresAtMs")) {
+          customStatus.statusExpiresAtMs =
+            typeof body.statusExpiresAtMs === "number"
+              ? body.statusExpiresAtMs
+              : undefined;
+        }
+        const response = { status: declaredPresence };
+        if (customStatus.statusEmoji) response.statusEmoji = customStatus.statusEmoji;
+        if (customStatus.statusText) response.statusText = customStatus.statusText;
+        if (customStatus.statusExpiresAtMs !== undefined) {
+          response.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+        }
+        return json(route, response);
       }
       return route.fulfill({
         status: 400,
@@ -1533,13 +1596,25 @@ async function installMocks(context) {
         body: JSON.stringify({ error: "invalid_status" }),
       });
     }
-    return json(route, { status: declaredPresence });
+    const own = { status: declaredPresence };
+    if (customStatus.statusEmoji) own.statusEmoji = customStatus.statusEmoji;
+    if (customStatus.statusText) own.statusText = customStatus.statusText;
+    if (customStatus.statusExpiresAtMs !== undefined) {
+      own.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+    }
+    return json(route, own);
   });
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
-          ? { ...member, presenceStatus: declaredPresence }
+          ? {
+              ...member,
+              presenceStatus: declaredPresence,
+              statusEmoji: customStatus.statusEmoji,
+              statusText: customStatus.statusText,
+              statusExpiresAtMs: customStatus.statusExpiresAtMs,
+            }
           : member
       ),
     })
@@ -2205,6 +2280,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("profile-card").click();
   const menu = page.getByTestId("profile-card-menu");
   await menu.waitFor({ state: "visible" });
+  await assertProfileMenuFitsViewport(page, `sidebar profile ${scheme}`);
   const anchor = await page.evaluate(`(() => {
     const trigger = document.querySelector('[data-testid="profile-card"]');
     const panel = document.querySelector('[data-testid="profile-card-menu"]');
@@ -2947,6 +3023,54 @@ async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
   console.log(
     `  tap targets ${where}: ` +
       measured.map((r) => `${r.testId} ${r.width}x${r.height}`).join(", ")
+  );
+}
+
+/**
+ * #1889 R2-B1. The profile menu's width is the menu's (pane-sm), not the
+ * user's status sentence. An 80-char head must wrap inside that box: right
+ * stays in the viewport and the declared-presence check stays visible.
+ */
+async function assertProfileMenuFitsViewport(page, where) {
+  const paneSm = pixelToken("spacing-pane-sm");
+  const fit = await page.evaluate(`(() => {
+    const menu = document.querySelector('[data-testid="profile-card-menu"]');
+    const check = document.querySelector('[data-testid="presence-option-auto"] svg');
+    if (!menu) return { missing: true };
+    const r = menu.getBoundingClientRect();
+    const c = check ? check.getBoundingClientRect() : null;
+    const vw = window.innerWidth;
+    return {
+      x: Math.round(r.x),
+      w: Math.round(r.width),
+      right: Math.round(r.right),
+      vw,
+      checkRight: c ? Math.round(c.right) : null,
+      checkVisible: Boolean(
+        c && c.width > 0 && c.left >= 0 && c.right <= vw + 0.5
+      ),
+    };
+  })()`);
+  if (fit.missing) {
+    throw new Error(`프로필 메뉴 ${where}: 메뉴가 없다`);
+  }
+  if (fit.w > paneSm) {
+    throw new Error(
+      `프로필 메뉴 ${where}: 폭 ${fit.w}px가 pane-sm(${paneSm})을 넘긴다`
+    );
+  }
+  if (fit.right > fit.vw) {
+    throw new Error(
+      `프로필 메뉴 ${where}: right ${fit.right} > vw ${fit.vw}`
+    );
+  }
+  if (!fit.checkVisible) {
+    throw new Error(
+      `프로필 메뉴 ${where}: 선언 ✓가 뷰포트 밖이다 ${JSON.stringify(fit)}`
+    );
+  }
+  console.log(
+    `  profile menu ${where}: w=${fit.w} right=${fit.right} vs vw=${fit.vw}, check right=${fit.checkRight}`
   );
 }
 
@@ -5125,6 +5249,18 @@ async function captureMobile(browser, scheme) {
     .getByTestId("delete-message-dialog")
     .waitFor({ state: "hidden" });
 
+  // (2b) 나중에 알림 (#1889 R2-M1). RemindDialog 44 주장은 장면이 없으면
+  //      허용목록만 초록이다. 시트의 「나중에 알림」이 폰의 실진입점.
+  await openSheet();
+  await page.getByTestId("sheet-remind").click();
+  await page.getByTestId("remind-dialog").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `remind dialog ${scheme}`);
+  await assertTapTargets(page, `remind dialog ${scheme}`);
+  await shoot(page, "remind-dialog");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("remind-dialog").waitFor({ state: "hidden" });
+
   // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
   //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
   await page.getByTestId("thread-anchor").first().click();
@@ -5199,12 +5335,22 @@ async function captureMobile(browser, scheme) {
 
   await page.getByTestId("profile-card").click();
   await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+  await assertProfileMenuFitsViewport(page, `drawer profile ${scheme}`);
   await assertTapTargets(page, `drawer profile ${scheme}`);
   await shoot(page, "sidebar-profile-card");
-  // 첫 Esc 는 카드, 둘째는 서랍. 메뉴가 열려 있는 동안 escape 층은 양보한다
-  // (`role="menu"` — UX-D4, 서랍이 카드를 삼키던 자리).
+  await page.getByTestId("profile-set-status").click();
+  await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+  await assertTapTargets(page, `set-status ${scheme}`);
+  await shoot(page, "set-status-dialog");
+  // #1889 R2-N2: 「시각 고르기」는 390에서 다이얼로그를 키우는 유일한 분기.
+  await page.getByTestId("set-status-expiry").selectOption("custom");
+  await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
+  await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
+  await assertTapTargets(page, `set-status custom ${scheme}`);
+  await shoot(page, "set-status-custom");
   await page.keyboard.press("Escape");
-  await page.getByTestId("profile-card-menu").waitFor({ state: "hidden" });
+  await page.getByTestId("set-status-dialog").waitFor({ state: "hidden" });
+  // 첫 Esc 는 상태 다이얼로그, 둘째는 서랍. 메뉴는 상태 항목을 고르며 이미 닫힘.
 
   // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
   // 여기서 실제로 걷는다.
@@ -7230,6 +7376,64 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   return shots;
 }
 
+// #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
+// 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
+async function captureSetStatusScenes(browser, scheme) {
+  const shots = [];
+
+  async function shoot(name, { failPut = false, offline = false, customExpiry = false } = {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    if (failPut) {
+      await context.route("**/v1/workspaces/*/presence", async (route) => {
+        if (route.request().method() === "PUT") {
+          return route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { message: "presence write failed" } }),
+          });
+        }
+        return route.fallback();
+      });
+    }
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("profile-card").click();
+    await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+    await page.getByTestId("profile-set-status").click();
+    await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+    if (failPut) {
+      await page.getByTestId("set-status-save").click();
+      await page.getByTestId("set-status-error").waitFor({ state: "visible" });
+    } else if (offline) {
+      await context.setOffline(true);
+      await page.getByTestId("set-status-offline").waitFor({ state: "visible" });
+    } else if (customExpiry) {
+      await page.getByTestId("set-status-expiry").selectOption("custom");
+      await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
+      await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
+    } else {
+      await page.waitForTimeout(200);
+    }
+    const path = `${OUT_DIR}/set-status-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("dialog");
+  await shoot("error", { failPut: true });
+  await shoot("offline", { offline: true });
+  await shoot("custom", { customExpiry: true });
+  return shots;
+}
+
 // 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
 // scene, so its four states went to review unseen. Each state is shot in its
 // own context because the roster is a react-query cache: to make the SAME
@@ -8290,6 +8494,7 @@ async function main() {
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
+          all.push(...(await captureSetStatusScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));

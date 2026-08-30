@@ -6,6 +6,7 @@ import {
   type RosterMember,
 } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { customStatusAccessibleText } from "../presence/customStatus";
 
 // =============================================================================
 // 멤버 디렉터리 model (parity G-3/G-4). Everything on this surface that can be
@@ -246,7 +247,8 @@ export function countLabel(
 export function memberRowLabel(
   member: RosterMember,
   ownerName: string | null,
-  labels?: RoleLabels | null
+  labels?: RoleLabels | null,
+  nowMs: number = Date.now()
 ): string {
   const parts = [`${member.displayName} @${member.handle}`];
   const role = roleLabel(member, labels);
@@ -260,6 +262,8 @@ export function memberRowLabel(
   }
   const status = statusLabel(member);
   if (status) parts.push(status);
+  const custom = customStatusAccessibleText(member, nowMs);
+  if (custom) parts.push(custom);
   return `${parts.join(", ")}, 다이렉트 메시지 열기`;
 }
 

@@ -1,7 +1,8 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { LogOut, Plus, Settings } from "lucide-react";
+import { LogOut, Plus, Settings, Smile } from "lucide-react";
 import { effectivePresence, type RosterMember } from "@momo/core/lib/api";
+import { CUSTOM_STATUS_MENU_LABEL } from "@momo/core/features/presence/customStatus";
 import { presenceTriggerLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useOpenAddWorkspace } from "@/features/workspace/useAddWorkspace";
@@ -21,19 +22,23 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
+import { CustomStatusMark } from "./CustomStatusMark";
 import {
   PresenceBadge,
   PresenceStatusItems,
 } from "./PresenceControl";
+import { SetStatusDialog } from "./SetStatusDialog";
+import { useCustomStatusView } from "./useCustomStatusView";
 
 // =============================================================================
 // Bottom identity card (UX-D4 #1756, buzz 36). The trigger is the identity
 // cluster (avatar + name + badge). `tap-target` grows that button to the row
 // under 600px; the connection bar and help sit outside it. The open panel is
 // a DropdownMenu (not a submenu, house rule #1383): declared status radios,
-// then the real workspace verb that already lives on the rail (+), then
-// settings, then logout (#1858). The card rewires AccountSection's existing
-// verb; it does not invent a second session path.
+// then custom status (#1889, a second axis, not a replacement), then the
+// real workspace verb that already lives on the rail (+), then settings,
+// then logout (#1858). The card rewires AccountSection's existing verb; it
+// does not invent a second session path.
 //
 // Invented surfaces stay off this card:
 //   * workspace session swap (ADR-0161 4b-3) has not landed. The rail's [+]
@@ -67,8 +72,16 @@ export function ProfileCard({
   const openingWorkspaceRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [confirmLogout, setConfirmLogout] = useState(false);
+  const [setStatusOpen, setSetStatusOpen] = useState(false);
   const effective = effectivePresence(selfMember?.presenceStatus, connected);
-  const triggerName = `${selfName}. ${presenceTriggerLabel(effective)}`;
+  const { visible: custom, accessible: customName } =
+    useCustomStatusView(selfMember);
+  const triggerName = customName
+    ? `${selfName}. ${presenceTriggerLabel(effective)}. ${customName}`
+    : `${selfName}. ${presenceTriggerLabel(effective)}`;
+  const statusHead = custom
+    ? [custom.emoji, custom.text].filter(Boolean).join(" ")
+    : null;
 
   return (
     <>
@@ -86,8 +99,17 @@ export function ProfileCard({
             className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left hover:bg-surface-hover focus-visible:focus-ring"
           >
             <PresenceBadge selfName={selfName} effective={effective} />
-            <span className="min-w-0 flex-1 truncate text-body" data-testid="self-name">
-              {selfName}
+            <span className="flex min-w-0 flex-1 flex-col">
+              <span className="truncate text-body" data-testid="self-name">
+                {selfName}
+              </span>
+              {custom ? (
+                <CustomStatusMark
+                  status={custom}
+                  emojiOnly
+                  className="text-meta text-ink-muted"
+                />
+              ) : null}
             </span>
           </button>
         </DropdownMenuTrigger>
@@ -96,6 +118,10 @@ export function ProfileCard({
           side="top"
           sideOffset={8}
           data-testid="profile-card-menu"
+          // Menu measure is the menu's (pane-sm), not the user's status
+          // sentence. Without a cap the head's wrap never fires and an
+          // 80-char status pushes the panel past a 390 viewport (#1889 R2-B1).
+          className="max-w-pane-sm"
           onCloseAutoFocus={(event) => {
             // The add-workspace item hands the next layer a dialog. If this
             // menu yanks focus back to the card, Esc lands on the trigger and
@@ -106,12 +132,28 @@ export function ProfileCard({
             }
           }}
         >
+          {statusHead ? (
+            <DropdownMenuLabel
+              data-testid="profile-card-status-head"
+              className="max-w-full min-w-0 break-words whitespace-normal font-normal"
+            >
+              {statusHead}
+            </DropdownMenuLabel>
+          ) : null}
           <PresenceStatusItems
             workspaceId={workspaceId}
             selfMemberId={selfMemberId}
             selfMember={selfMember}
             onWrote={() => setOpen(false)}
           />
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            data-testid="profile-set-status"
+            onSelect={() => setSetStatusOpen(true)}
+          >
+            <Smile className="size-4" aria-hidden="true" />
+            {CUSTOM_STATUS_MENU_LABEL}
+          </DropdownMenuItem>
           <DropdownMenuSeparator />
           {/* Title over a visible row, not a submenu (#1383). The one real
               verb is the rail's 추가; switching workspaces is accrued. */}
@@ -163,6 +205,15 @@ export function ProfileCard({
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
+
+      <SetStatusDialog
+        open={setStatusOpen}
+        onOpenChange={setSetStatusOpen}
+        workspaceId={workspaceId}
+        selfMemberId={selfMemberId}
+        selfMember={selfMember}
+        opener={triggerRef.current}
+      />
 
       <Dialog open={confirmLogout} onOpenChange={setConfirmLogout}>
         {confirmLogout && (

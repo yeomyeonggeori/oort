@@ -66,10 +66,11 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
-function rosterMember(): RosterMember {
+function rosterMember(over: Partial<RosterMember> = {}): RosterMember {
   return {
     id: MEMBER_ID,
     workspaceId: WS,
@@ -84,6 +85,7 @@ function rosterMember(): RosterMember {
     presenceStatus: "auto",
     createdAtMs: 0,
     updatedAtMs: 0,
+    ...over,
   };
 }
 
@@ -109,7 +111,10 @@ function sessionValue(logout: () => void): SessionContextValue {
   };
 }
 
-function mountCard(logout: () => void = () => undefined): HTMLElement {
+function mountCard(
+  logout: () => void = () => undefined,
+  selfMember: RosterMember = rosterMember()
+): HTMLElement {
   const client = new QueryClient({
     defaultOptions: {
       queries: { retry: false, staleTime: Infinity },
@@ -135,7 +140,7 @@ function mountCard(logout: () => void = () => undefined): HTMLElement {
           createElement(ProfileCard, {
             workspaceId: WS,
             selfMemberId: MEMBER_ID,
-            selfMember: rosterMember(),
+            selfMember,
             selfName: "곽성재",
             connected: true,
           })
@@ -172,6 +177,7 @@ function menuRowIds(): string[] {
       id === "presence-option-auto" ||
       id === "presence-option-away" ||
       id === "presence-option-dnd" ||
+      id === "profile-set-status" ||
       id === "profile-add-workspace" ||
       id === "nav-settings" ||
       id === "profile-logout"
@@ -204,10 +210,12 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
     const logoutItem = menu.querySelector('[data-testid="profile-logout"]');
     expect(logoutItem).not.toBeNull();
     expect(logoutItem?.textContent).toContain("로그아웃");
+    expect(menu.querySelector('[data-testid="profile-set-status"]')).not.toBeNull();
     expect(menuRowIds()).toEqual([
       "presence-option-auto",
       "presence-option-away",
       "presence-option-dnd",
+      "profile-set-status",
       "profile-add-workspace",
       "nav-settings",
       "profile-logout",
@@ -309,5 +317,141 @@ describe("ProfileCard 로그아웃 (#1858)", () => {
       confirm!.click();
     });
     expect(logout).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("ProfileCard 커스텀 상태 (#1889)", () => {
+  it("shows the emoji on the card and the text on title plus menu head", async () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "away",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+      })
+    );
+    expect(document.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+    expect(
+      document.querySelector('[data-testid="presence-control"]')?.getAttribute(
+        "data-effective"
+      )
+    ).toBe("away");
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
+      "📅"
+    );
+    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(trigger?.getAttribute("aria-label")).toContain("자리 비움");
+    expect(trigger?.getAttribute("aria-label")).toContain("회의 중");
+    expect(trigger?.getAttribute("aria-label")).not.toContain("📅");
+    const menu = await openMenu();
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.textContent
+    ).toContain("회의 중");
+  });
+
+  it("keeps an emoji-only status in the card's accessible name", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "🤒",
+      })
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')?.textContent).toBe(
+      "🤒"
+    );
+    expect(trigger?.getAttribute("aria-label")).toContain("🤒");
+  });
+
+  it("keeps a quiet mark on the card when the status is text-only (#1889 R2-M2)", async () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusText: "고객사 미팅",
+      })
+    );
+    const trigger = document.querySelector('[data-testid="profile-card"]');
+    expect(document.querySelector('[data-testid="custom-status-glyph"]')).not.toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-emoji"]')).toBeNull();
+    expect(document.querySelector('[data-testid="custom-status-text"]')).toBeNull();
+    expect(trigger?.getAttribute("aria-label")).toContain("고객사 미팅");
+    const menu = await openMenu();
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.textContent
+    ).toContain("고객사 미팅");
+  });
+
+  it("caps the open menu so a long status cannot set its width (#1889 R2-B1)", async () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText:
+          "3분기 게이트웨이 점검 중, 오후 6시 이후 응답이 늦습니다. 급하면 전화 주세요, 이 채널로만 남겨 주세요. urgent only 내일 6시",
+      })
+    );
+    const menu = await openMenu();
+    expect(menu.className).toContain("max-w-pane-sm");
+    expect(
+      menu.querySelector('[data-testid="profile-card-status-head"]')?.className
+    ).toMatch(/break-words/);
+  });
+
+  it("hides a custom status when the clock crosses expiry while mounted", async () => {
+    vi.useFakeTimers();
+    const start = 1_800_000_000_000;
+    vi.setSystemTime(start);
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+        statusExpiresAtMs: start + 5_000,
+      })
+    );
+    expect(document.querySelector('[data-testid="custom-status"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(document.querySelector('[data-testid="custom-status"]')).not.toBeNull();
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+    expect(document.querySelector('[data-testid="custom-status"]')).toBeNull();
+  });
+
+  it("does not draw an expired custom status", () => {
+    mountCard(
+      () => undefined,
+      rosterMember({
+        presenceStatus: "auto",
+        statusEmoji: "📅",
+        statusText: "회의 중",
+        statusExpiresAtMs: 1,
+      })
+    );
+    expect(document.querySelector('[data-testid="custom-status"]')).toBeNull();
+    expect(document.querySelector('[data-testid="presence-control"]')).not.toBeNull();
+  });
+
+  it("opens the status dialog from the menu without dropping presence radios", async () => {
+    mountCard();
+    const menu = await openMenu();
+    expect(menu.querySelector('[data-testid="presence-option-auto"]')).not.toBeNull();
+    expect(menu.querySelector('[data-testid="presence-option-away"]')).not.toBeNull();
+    expect(menu.querySelector('[data-testid="presence-option-dnd"]')).not.toBeNull();
+    await act(async () => {
+      menu
+        .querySelector('[data-testid="profile-set-status"]')
+        ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="set-status-dialog"]')).not.toBeNull();
+    });
   });
 });
