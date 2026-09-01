@@ -69,6 +69,7 @@ export function InlineBanner({
   actionBusy = false,
   separator = true,
   heading = false,
+  className,
   testId,
 }: {
   tone?: "error" | "neutral";
@@ -114,6 +115,14 @@ export function InlineBanner({
    * (PR 918 R1 Low).
    */
   heading?: boolean;
+  /**
+   * 이 배너가 **남의 패딩 축 위에** 설 때 그 자를 맞추는 자리. 유일한 현재
+   * 소비자는 메뉴 안의 배너다: 메뉴 행은 `px-2` 인데 이 상자의 기본은 `px-4`
+   * 라, 배너 첫 글자가 항목 첫 글자보다 8px 오른쪽에 섰다(design-review
+   * #1937 N-3 실측 21px 대 13px). 색·역할·기하는 여기 것이고, 바깥 표면이
+   * 정하는 것은 그 표면의 자뿐이다.
+   */
+  className?: string;
   testId?: string;
 }) {
   const Message = heading ? "h1" : "span";
@@ -131,7 +140,8 @@ export function InlineBanner({
         separator && "border-b",
         tone === "error"
           ? "border-danger text-danger"
-          : "border-line bg-surface-hover text-ink"
+          : "border-line bg-surface-hover text-ink",
+        className
       )}
     >
       {icon && (

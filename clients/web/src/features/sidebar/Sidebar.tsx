@@ -56,7 +56,9 @@ import {
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
+import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
+import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
 import { sectionUnreadTotals } from "./sidebarSectionModel";
@@ -240,6 +242,18 @@ export function Sidebar({
     [openId, readStates.byChannel]
   );
 
+  // 행이 보여 주는 안 읽음과 메뉴가 내놓는 「읽음 처리」는 같은 사실이어야 한다
+  // (BT-1 / #1929). 배지를 0으로 접는 그 규칙 — 읽고 있는 채널은 읽은 것이다
+  // (`openChannel.ts`) — 을 메뉴도 함께 읽는다. 배지가 없는 행이 「읽음 처리」를
+  // 내놓으면 둘 중 하나는 거짓말이다.
+  const readStateFor = useCallback(
+    (channel: Channel) => {
+      if (openId !== null && uuidEq(channel.id, openId)) return null;
+      return unreadFor(readStates.byChannel, channel.id);
+    },
+    [openId, readStates.byChannel]
+  );
+
   const unreadChannels = useMemo(
     () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
     [ordered, unreadCountFor]
@@ -277,18 +291,17 @@ export function Sidebar({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [unreadChannels, navigate]);
 
-  /** Roving arrow traversal across every row in the sidebar. */
+  /**
+   * Roving arrow traversal across every row in the sidebar.
+   *
+   * 규칙과 그 **경계**는 `sidebarRoving.ts` 가 갖는다. 경계가 정본에 있어야
+   * 하는 이유는 그 파일 머리말에 있다 — 요약하면, 행이 연 컨텍스트 메뉴는
+   * 포털이라 DOM 으로는 밖에 있는데 React 트리로는 여기 자손이라, 메뉴 안에서
+   * 누른 ↓ 가 여기까지 올라와 메뉴를 지우고 캐럿을 남의 행으로 옮겼다
+   * (design-review #1937 B-1 실측).
+   */
   const onNavKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const rows = Array.from(
-      navRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []
-    );
-    if (rows.length === 0) return;
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    const next = rows[(Math.max(index, 0) + step + rows.length) % rows.length];
-    event.preventDefault();
-    next?.focus();
+    roveSidebarRows(navRef.current, event);
   }, []);
 
   function rowFor(channel: Channel) {
@@ -328,6 +341,21 @@ export function Sidebar({
         }
         testId="channel-item"
         dataAttrs={{ "data-channel-id": channel.id }}
+        // 행에서 바로 조작하는 문 (BT-1 / #1929). 트리거는 링크를 감싸는
+        // block 상자이고 탭 정거장이 아니라, 로빙 tabindex 도 ⌥↑↓ 순회도
+        // 정거장이 늘지 않는다.
+        wrapLink={(link) => (
+          <SidebarRowContextMenu
+            workspaceId={workspaceId}
+            channel={channel}
+            title={label.text}
+            selfMemberId={session.member.id}
+            selfRole={selfMember?.role}
+            readState={readStateFor(channel)}
+          >
+            {link}
+          </SidebarRowContextMenu>
+        )}
       />
     );
   }

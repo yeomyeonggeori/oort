@@ -25,6 +25,12 @@ const CONTROLS = readFileSync(
   "utf8"
 );
 const CONTROLS_CODE = codeOnly(CONTROLS);
+const ACTION_MODEL_CODE = codeOnly(
+  readFileSync(new URL("./channelActionModel.ts", import.meta.url), "utf8")
+);
+const ACTION_MENU_CODE = codeOnly(
+  readFileSync(new URL("./channelActions.tsx", import.meta.url), "utf8")
+);
 
 describe("BZ-2 channel header is one title row", () => {
   it("does not keep the topic in the always-visible header", () => {
@@ -35,11 +41,18 @@ describe("BZ-2 channel header is one title row", () => {
   });
 
   it("opens the existing topic dialog from the overflow menu", () => {
-    expect(MENU_CODE).toMatch(/CHANNEL_TOPIC_VIEW_LABEL/);
-    expect(MENU_CODE).toMatch(/data-testid="channel-topic"/);
+    // BT-1 (#1929): 항목의 낱말·열쇠는 이제 채널 액션 정본이 갖고, 이 파일에
+    // 남는 것은 헤더가 헤더인 부분이다. 주장은 그대로다 — ⋮ 가 **기존** 읽기
+    // 다이얼로그를 연다. 그래서 단정은 사실이 옮겨 간 자리를 따라간다.
     expect(MENU_CODE).toMatch(/<ChannelTopicDialog/);
     expect(MENU_CODE).toMatch(/EllipsisVertical/);
+    expect(MENU_CODE).toMatch(/surface="header"/);
+    expect(MENU_CODE).toMatch(/prefix="channel"/);
     expect(MENU).toMatch(/data-testid="channel-title-menu"/);
+    // `channel-topic` = prefix + testKey. 두 조각이 각자 자기 자리에 있다.
+    expect(ACTION_MODEL_CODE).toMatch(/CHANNEL_TOPIC_VIEW_LABEL/);
+    expect(ACTION_MODEL_CODE).toMatch(/key: "topic", testKey: "topic"/);
+    expect(ACTION_MENU_CODE).toMatch(/`\$\{prefix\}-\$\{item\.testKey\}`/);
   });
 });
 
