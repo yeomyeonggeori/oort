@@ -23,7 +23,16 @@ import { ComposerAutocompleteList } from "./ComposerAutocompleteList";
 import { useComposerAutocomplete } from "./useComposerAutocomplete";
 
 // =============================================================================
-// `:` 만 비동기 소스다 (design-review #1930 H-2).
+// `:` 만 비동기 소스다 (design-review #1930 H-2), 그리고 그 상태가 내미는 손이
+// **실제 컨테이너 안에서** 무엇을 하는가 (R2 B-1·M-5).
+//
+// R2 가 이 파일의 하네스를 결함으로 세웠다. 앞 판 `Probe` 는 `div > (목록,
+// textarea)` 였는데 진짜 채널 컴포저는 `form > (목록, …textarea)` 다. 목록의
+// **자리 자체가 계약**이다 — 폼 안이라 그 안의 버튼은 기본값 `submit` 이 되고,
+// 「다시 시도」 한 번이 쓰던 초안을 채널로 보냈다(실측). 하네스가 그 자리를
+// 지우면 이 파일이 앞으로 어떤 상태를 더 그려도 같은 부류를 계속 통과시킨다.
+// 그래서 지금 `Probe` 는 컨테이너를 데이터로 받고, 채널(폼)과 스레드(폼 없음)
+// 두 판을 같은 시험이 함께 돈다.
 //
 // 리뷰가 실브라우저에서 잰 세 시나리오를 여기에 그대로 세운다:
 //
@@ -67,6 +76,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 let sent: string[] = [];
+let submitted: string[] = [];
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
@@ -74,6 +84,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   sent = [];
+  submitted = [];
   vi.mocked(loadCatalog).mockReset();
 });
 
@@ -92,7 +103,14 @@ function OuterLayer({ onEscape }: { onEscape: () => void }) {
   return null;
 }
 
-function Probe() {
+/**
+ * 두 컴포저의 컨테이너를 그대로 재현한다.
+ *
+ * `form` = 채널 컴포저(`Composer.tsx` 의 `<form onSubmit={onSubmit} className=
+ * "relative p-3">` 안에 목록이 산다), `div` = 스레드 컴포저(폼이 없다). 같은
+ * 컨트롤이 두 컨테이너에서 다른 일을 하면 계약 ⑥(동형)이 깨진 것이다.
+ */
+function Probe({ container = "form" }: { container?: "form" | "div" }) {
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const auto = useComposerAutocomplete({
@@ -103,8 +121,18 @@ function Probe() {
     onValueChange: setValue,
   });
   return createElement(
-    "div",
-    null,
+    container,
+    container === "form"
+      ? {
+          "data-testid": "probe-form",
+          onSubmit: (event: { preventDefault: () => void }) => {
+            // 진짜 컴포저의 `onSubmit` 이 하는 일: 본문을 보내고 입력창을 비운다.
+            event.preventDefault();
+            submitted.push(value);
+            setValue("");
+          },
+        }
+      : null,
     createElement(ComposerAutocompleteList, {
       id: "probe-list",
       kind: auto.kind,
@@ -148,6 +176,12 @@ function Probe() {
       },
     })
   );
+}
+
+function statusButtons(): HTMLButtonElement[] {
+  return [
+    ...(statusBox()?.querySelectorAll<HTMLButtonElement>("button") ?? []),
+  ];
 }
 
 function mount(node: ReactElement): HTMLElement {
@@ -273,6 +307,62 @@ describe("`:` 의 비동기 상태를 목록 기계가 그린다 (#1930 H-2)", (
     expect(outer).not.toHaveBeenCalled();
     press(input(), "Escape");
     expect(outer).toHaveBeenCalledTimes(1);
+  });
+
+  it("「다시 시도」는 폼 안에서도 제출이 아니다 — 초안이 그대로 산다 (R2 B-1)", async () => {
+    vi.mocked(loadCatalog).mockRejectedValue(new Error("chunk"));
+    mount(createElement(Probe, { container: "form" }));
+    typeAll(input(), ":thu");
+    await settle();
+    const [retry] = statusButtons();
+    expect(retry).toBeDefined();
+    // 이 상자는 컴포저의 제출 경로 **위에** 산다. 그 사실이 계약이라 함께 잰다.
+    expect(retry.form).toBe(
+      document.querySelector("[data-testid='probe-form']")
+    );
+    // 격이 없으면 DOM 기본값은 `submit` 이고, 그 한 번의 클릭이 쓰던 글을 보낸다.
+    expect(retry.type).toBe("button");
+    vi.mocked(loadCatalog).mockResolvedValue(CATALOG);
+    act(() => retry.click());
+    await settle();
+    expect(submitted).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(input().value).toBe(":thu");
+    expect(listBox()?.getAttribute("aria-label")).toBe("이모지 선택");
+  });
+
+  it("사유 상자 안의 컨트롤은 전부 제출 격이 아니다 (R2 B-1 일반형)", async () => {
+    vi.mocked(loadCatalog).mockRejectedValue(new Error("chunk"));
+    mount(createElement(Probe, { container: "form" }));
+    typeAll(input(), ":thu");
+    await settle();
+    const buttons = statusButtons();
+    expect(buttons.length).toBeGreaterThan(0);
+    for (const button of buttons) {
+      expect(button.type, button.textContent ?? "").toBe("button");
+    }
+  });
+
+  it("스레드(폼 없음)와 채널(폼)이 같은 클릭에 같은 답을 낸다 (계약 ⑥)", async () => {
+    for (const container of ["form", "div"] as const) {
+      vi.mocked(loadCatalog).mockReset();
+      vi.mocked(loadCatalog).mockRejectedValue(new Error("chunk"));
+      sent = [];
+      submitted = [];
+      mount(createElement(Probe, { container }));
+      typeAll(input(), ":thu");
+      await settle();
+      vi.mocked(loadCatalog).mockResolvedValue(CATALOG);
+      act(() => statusButtons()[0]?.click());
+      await settle();
+      expect(input().value, container).toBe(":thu");
+      expect(submitted, container).toEqual([]);
+      expect(listBox(), container).not.toBeNull();
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+      host?.remove();
+      host = null;
+    }
   });
 
   it("`@` 는 비동기 소스가 아니므로 사유 상자를 만들지 않는다", () => {

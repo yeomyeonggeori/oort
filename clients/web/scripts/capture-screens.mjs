@@ -3836,6 +3836,100 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
 }
 
 /**
+ * 카탈로그가 죽은 판의 사유 상자와 「다시 시도」 (design-review #1930 B-1·H-3).
+ *
+ * 이 장면이 없어서 두 결함이 초록을 뚫고 나갔다. `:` 만 비동기 소스인데 레인은
+ * 성공 경로만 열었고, 단위 시험은 `loadCatalog` 자체를 모킹해 로더의 현실을 보지
+ * 않았다. 그래서 여기서는 **실제로 청크를 끊는다**:
+ *
+ *   1. 카탈로그 요청을 abort → `:thu` 가 사유 상자(오류)를 세운다.
+ *   2. 그 상자의 「다시 시도」가 **제출 버튼이 아니다**(B-1). 컴포저의 `<form>`
+ *      안이라 `type` 이 없으면 클릭이 폼을 제출해 쓰던 초안이 채널로 나갔다.
+ *      클릭 뒤 초안이 그대로 있고 POST /messages 가 0건이어야 한다.
+ *   3. 차단을 풀고 누르면 **실제로 다시 실린다**(H-3). 실패한 dynamic import 는
+ *      모듈 맵이 기억하므로, 재시도가 자산 URL 을 `fetch` 로 다시 받지 않으면
+ *      이 대기는 영원히 안 끝난다.
+ *
+ * 이 장면은 `:thu` 성공 장면보다 **먼저** 돈다: 카탈로그가 한 번 실리면 그 뒤로는
+ * 이 판을 만들 수 없다.
+ */
+async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  const posted = [];
+  const watch = (request) => {
+    if (request.method() === "POST" && request.url().includes("/messages")) {
+      posted.push(request.url());
+    }
+  };
+  page.on("request", watch);
+  const block = (route) => route.abort();
+  await context.route("**/emojiCatalog-*", block);
+  const input = page.getByTestId("composer-input");
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(":thu", { delay: 15 });
+  const box = page.getByTestId("composer-emoji-list-status");
+  await box.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="composer-emoji-list-status"]')
+        ?.getAttribute("data-status") === "error"
+  );
+  const proof = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="composer-emoji-list-status"]');
+    const button = box?.querySelector("button");
+    const input = document.querySelector('[data-testid="composer-input"]');
+    return {
+      status: box?.getAttribute("data-status") ?? null,
+      text: box?.textContent ?? "",
+      buttonType: button?.type ?? null,
+      buttonTypeAttr: button?.getAttribute("type") ?? null,
+      inForm: Boolean(button?.form),
+      listWidth: Math.round(box?.getBoundingClientRect().width ?? 0),
+      value: input?.value ?? null,
+    };
+  })()`);
+  if (
+    proof.status !== "error" ||
+    !proof.text.includes("이모지 목록을 불러오지 못했습니다.") ||
+    !proof.text.includes("다시 시도") ||
+    proof.buttonType !== "button" ||
+    !proof.inForm ||
+    proof.value !== ":thu"
+  ) {
+    throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
+  }
+  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  await context.unroute("**/emojiCatalog-*", block);
+  await box.locator("button").click();
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
+  const after = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const list = document.querySelector('[data-testid="composer-emoji-list"]');
+    return {
+      value: input?.value ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      status: document.querySelector('[data-testid="composer-emoji-list-status"]'),
+    };
+  })()`);
+  page.off("request", watch);
+  if (after.value !== ":thu" || after.options < 1 || posted.length > 0) {
+    throw new Error(
+      `다시 시도 ${scheme}: ${JSON.stringify({ ...after, posted })}`
+    );
+  }
+  console.log(
+    `  이모지 카탈로그 실패 ${scheme}: 오류 상자 ${proof.listWidth}px · 버튼 격 ${proof.buttonType} · 다시 시도 뒤 후보 ${after.options} · 초안 보존 "${after.value}" · 전송 ${posted.length}건`
+  );
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
  * 후보 행이 자유 텍스트 방 이름을 **실제로 담는지** 잰다 (design-review #1930).
  *
  * jsdom 은 폭을 재지 않는다. 그래서 앞 판의 「긴 채널 이름도 자르지 않고 넣는다」
@@ -6154,6 +6248,8 @@ async function captureScheme(browser, scheme) {
       shot: "composer-channel-kinds",
     }
   );
+  // 성공 경로보다 먼저: 카탈로그가 한 번 실리면 실패 판을 못 만든다 (#1930 H-3).
+  await captureComposerCatalogFailure(login, context, scheme, shots);
   await captureComposerTrigger(
     login,
     scheme,

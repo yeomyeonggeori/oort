@@ -56,9 +56,11 @@ type EmojiCatalogState = {
  * `:thu` + Enter 가 평문 `:thu` 로 전송되고(같은 키 입력의 뜻을 네트워크
  * 경주가 정한다), 청크를 끊으면 영구 침묵이고, 한글 질의도 같은 침묵으로 끝난다.
  *
- * 재시도가 필요한 이유: `loadCatalog` 는 실패한 promise 를 지우므로 다음 `:`
- * 질의에서 조용히 다시 시도된다. 사람이 다시 칠 이유를 모르는 것이 문제라
- * 「다시 시도」가 그 재시도를 **말로** 만든다.
+ * 재시도가 필요한 이유(R1 의 이 자리 주석은 틀렸다 — R2 H-3): 실패한 dynamic
+ * import 는 브라우저 모듈 맵이 영구히 기억하므로 「다음 `:` 질의에서 조용히
+ * 낫는다」는 성립하지 않는다. 재요청을 만드는 것은 `loadCatalog` 안의 자산
+ * 재적재 경로이고(`features/emoji/catalog.ts`), 이 버튼은 그것을 부른다 —
+ * 피커의 「다시 시도」와 **같은 함수**다.
  */
 function useEmojiCatalog(active: boolean): EmojiCatalogState {
   const [entries, setEntries] = useState<readonly CatalogEmoji[]>(NO_CATALOG);

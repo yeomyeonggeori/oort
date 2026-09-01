@@ -75,7 +75,14 @@ export function ComposerAutocompleteList({
         // `aria-activedescendant` 도 이것을 가리키지 않고, 입력창의
         // `aria-expanded` 는 여전히 후보가 있을 때만 참이다. 로딩 중의 Enter 가
         // 평문 전송이라는 뜻이 그 배선과 같은 사실이어야 한다.
-        className={cn(PANEL_CLASS, "w-pane max-w-full", className)}
+        //
+        // 폭은 **후보 목록과 같다** (design-review #1930 N-6). 앞 판은 문장이
+        // 들어갈 자리를 벌려 `w-pane`(320)을 썼고, 그래서 같은 트리거의 같은
+        // 자리가 상태에 따라 192↔320 으로 커졌다 작아졌다. 자리의 폭은 그
+        // 자리의 것이지 지금 그 안에 무엇이 있느냐의 것이 아니다. 192 에서도
+        // 문장은 읽힌다(실측: 오류 3줄 + 「다시 시도」 나란히, 무결과 3줄) —
+        // 배너·무결과 상자에 `px-2` 를 주어 후보 행의 자와 맞추면 된다.
+        className={cn(PANEL_CLASS, "w-pane-sm", className)}
         // 목록 자리의 클릭은 캐럿을 뺏지 않는다. 「다시 시도」를 누른 뒤에도
         // 사람은 쓰던 문장 안에 있어야 한다(후보 행의 mousedown 과 같은 규율).
         onMouseDown={(event) => event.preventDefault()}
@@ -88,6 +95,9 @@ export function ComposerAutocompleteList({
             actionLabel={copy.retry}
             onAction={onRetry}
             separator={false}
+            // 배너의 기본 `px-4` 는 자기 상자에 혼자 설 때의 자다. 여기서는 후보
+            // 행(`px-2`)의 자를 따른다 — 그 자리에 번갈아 서는 두 상자다.
+            className="px-2"
             testId={`${testId}-error`}
           />
         ) : (
