@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-01 · Fable · ★정본 경량화 재편 + 3중 감사(버즈 패리티·셀프호스트·차별화) 완주
+
+- 성재 3지시 집행: ①문서 경량화 — PR #1924 main 랜딩, 아카이브 로테이션 체계 신설(docs/archive/README.md 정본) ②버즈 패리티 감사 ③셀프호스팅 완결성+차별화 진단 — 정본 research/2026-09-01-{buzz-parity,selfhost-core,differentiator}-audit.md.
+- 핵심 발견: buzz도 에이전트=멤버 스키마 구현 — 실차별은 RLS·fail-closed 승인·비용원장·A2A 게이트 넷(buzz 0건). 셀프호스트 blocker 5(웹훅 ingress·work host·공개 엣지·TURN·CSP 중 3건 신규 티켓화). 버즈 사각 14(사이드바 조직화 최대).
+- 집행: #1300·#1275 close(부기, 코드 재검증)·#1895/#1274 정정 코멘트·신규 티켓 #1925~#1927. 오케스트레이터 스팟 재판정 7건 전부 일치.
+- 다음: 성재 결재 — 기존 3건(액센트/승격/A6) + 감사 후속 파도 취사. 워커 레인 유휴 유지.
+
 ## 2026-08-30 (심야) · Fable · ★BZ-5a 4회전 완주 — 시안 성재 제시, 승인 큐 전량 소진
 - **BZ-5a(#1868/PR #1922) design-review 4회전**: R1 FAIL(B2 — 티탄·유성 채움 위계 역전+시안이 전이 도중 캡처, H2 — 자 부분상속+게이트 RE 콜론 소실) → R2 FAIL(danger 축 누락·기준 프레임 미정착) → R3 FAIL(혜성 라이트/다크 이색 쌍 163.8° 표류 — 일몰 자동 전환 시 조용한 변색) → **R4 PASS(B0·H0)**. 최종 후보: 새벽(기본)·성운·홍염·혜성(자주 가족 복귀)·감람. 자 신설 다수(danger/ok/warn 거리·pairwise·스킴 표류 상한·캡처 결정성 3회 바이트 동일·게이트 --selftest).
 - **정책 무결성 감사 완료**(momo-main): TOKEN_FILE_RE 확장은 ADR-0174 D5 문면, 콜론 소실은 수리+자가시험 상주 — 약화 없음. audit 코멘트+라벨 부착.
@@ -116,7 +123,3 @@
 - **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
 - **U-7 판정 집행**: DESIGN.md·OMD.md 등 문서 6파일+.gitignore만 랜딩(#1695 merged, track/uxui=35074dbd)·번들 583파일은 비버전관리. #1693 close·#1689 종결. 전체 번들은 feat/1689-design-md-core-v2-book@272dd4c2 보존.
 - **ADR-0168 Proposed 기안**(M-2 선행 — expo-image-picker+document-picker 낱개, D1 연장). rescue stash=역행 패치 확증(패치 보험 `scratchpad/uxui-rescue-…patch.gz`)·drop만 성재 1커맨드 필요. 남은 성재 큐: ADR-0167/0168 Accept·T-9 발사·U-3/M-1 실체감(선택).
-## 2026-08-23 (Fable) · ★Docker Desktop 반복 hung 근본해결=Colima 전환 + UXUI 재연 앱 빌드
-- 성재 "도커 데스크탑 자꾸 문제(재설치 3회)—원인 파악·해결 or 대안 적용". **근본원인=AppTranslocation**: `/Applications/Docker.app` quarantine(Homebrew Cask)→Gatekeeper가 격리 임시사본에서 실행→소켓 경로 꼬여 데몬 hung. brew cask가 매 설치 quarantine 재부착→재설치 반복 무의미. xattr 제거는 sandbox ACL로 권한막힘.
-- **해결=Colima 전환**(정본 메모리 `docker-desktop-translocation-colima.md`): brew install colima→`colima start --vm-type vz --cpu4 --memory8 --disk60`(Apple Virtualization)→context 자동전환·compose v2 플러그인 링크·자동시작 등록·Docker Desktop 로그인항목 제거. **안정성 실증: hello-world·amd64 에뮬·momo dev스택(pg18+centrifugo) healthy·CPU 0.04%**(Docker Desktop 146~214% 발열 대비 극명). hung 0.
-- **UXUI 재연 앱 빌드**: track/uxui(배치1+2 web) Tauri debug 빌드→`~/Desktop/oort-uxui-review.app`(quarantine 제거·ad-hoc). 재연 백엔드=D8 Funnel 서버(healthz 200·실시간 wss 수리됨) 재사용(로컬 스택 불필요 — UXUI는 web·서버 API 무변경). 성재: 앱 실행→cursor.tailb1aad3.ts.net→owner 로그인.

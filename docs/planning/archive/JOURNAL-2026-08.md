@@ -2,6 +2,10 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-23 (Fable) · ★Docker Desktop 반복 hung 근본해결=Colima 전환 + UXUI 재연 앱 빌드
+- 성재 "도커 데스크탑 자꾸 문제(재설치 3회)—원인 파악·해결 or 대안 적용". **근본원인=AppTranslocation**: `/Applications/Docker.app` quarantine(Homebrew Cask)→Gatekeeper가 격리 임시사본에서 실행→소켓 경로 꼬여 데몬 hung. brew cask가 매 설치 quarantine 재부착→재설치 반복 무의미. xattr 제거는 sandbox ACL로 권한막힘.
+- **해결=Colima 전환**(정본 메모리 `docker-desktop-translocation-colima.md`): brew install colima→`colima start --vm-type vz --cpu4 --memory8 --disk60`(Apple Virtualization)→context 자동전환·compose v2 플러그인 링크·자동시작 등록·Docker Desktop 로그인항목 제거. **안정성 실증: hello-world·amd64 에뮬·momo dev스택(pg18+centrifugo) healthy·CPU 0.04%**(Docker Desktop 146~214% 발열 대비 극명). hung 0.
+- **UXUI 재연 앱 빌드**: track/uxui(배치1+2 web) Tauri debug 빌드→`~/Desktop/oort-uxui-review.app`(quarantine 제거·ad-hoc). 재연 백엔드=D8 Funnel 서버(healthz 200·실시간 wss 수리됨) 재사용(로컬 스택 불필요 — UXUI는 web·서버 API 무변경). 성재: 앱 실행→cursor.tailb1aad3.ts.net→owner 로그인.
 ## 2026-08-23 (Fable) · UXUI 배치 2 검수·랜딩 4/5 + U-7 보류 + 재연 docker hung — Fable 재개 체크포인트
 - 성재 지시: docker 내가 재기동·재연 준비 / 지금 도는 작업 끝나면 체크포인트·정지(Fable 재개).
 - **배치 2 랜딩 4/5**(sol 워커): U-5(#1687 단축키 도움말·드리프트 가드)·C-1(#1685 멘션 코어+웹/폰·회귀0)·U-4(#1688 컴포저 이모지/스레드/패딩 — 검수 수리1: 이모지 후 textarea 포커스 복귀, gate-composer 적발)·U-3(#1686 라이트박스 — CI 자동머지 대기). 각 리베이스 STATUS 인접충돌 해소·게이트 PASS.
