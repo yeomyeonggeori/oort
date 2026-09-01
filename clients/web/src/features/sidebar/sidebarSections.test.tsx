@@ -485,7 +485,10 @@ describe("B-1 — 배치를 못 읽은 동안에는 아무것도 쓰지 않는�
       });
     }
     expect(handle?.canEdit()).toBe(true);
-    expect(sectionIds(host)).toEqual(["channels", "sec-1", "dms"]);
+    // 「별표」가 맨 위에 함께 선다 (BT-5 #1933): 이 픽스처의 payload 가 별표를
+    // 하나 싣고 있고, 파생이 그것을 섹션으로 조립한다. BT-4 는 그 칸을 받아서
+    // 돌려보내기만 했으므로 목록이 셋이었다.
+    expect(sectionIds(host)).toEqual(["starred", "channels", "sec-1", "dms"]);
 
     await act(async () => handle?.create("두 번째"));
     await settleSave();

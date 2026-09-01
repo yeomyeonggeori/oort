@@ -11,7 +11,10 @@ import {
   normalizeChannelTopic,
 } from "@momo/core/features/channels/model";
 import { copyLinkActionLabel } from "@momo/core/features/timeline/copyLabels";
-import { SECTION_MOVE_GROUP_LABEL } from "@momo/core/features/sidebar/sidebarSections";
+import {
+  channelStarToggleLabel,
+  SECTION_MOVE_GROUP_LABEL,
+} from "@momo/core/features/sidebar/sidebarSections";
 import type { Channel, MembershipRole } from "@momo/core/lib/api";
 
 // =============================================================================
@@ -37,12 +40,18 @@ import type { Channel, MembershipRole } from "@momo/core/lib/api";
 // 않는다. 그래서 인벤토리는 하나, 표면별 열쇠 집합은 둘이다 —
 // `messageActionItemsForSurface` 와 같은 갈래.
 //
-// ## 예약된 자리에 들어온 것 (BT-4 / #1932, ADR-0177 Accepted)
+// ## 예약된 자리에 들어온 것 (BT-4 / #1932 · BT-5 / #1933, ADR-0177 Accepted)
 //
 // 이 문단은 원래 「별표·섹션 이동이 들어올 자리는 열쇠 하나·분기 하나·SURFACE_KEYS
-// 항목 하나」라고 예약해 둔 자리다. 섹션 이동이 그대로 그 세 줄로 들어왔다:
-// `move-to-section` 열쇠, `channelActionItems` 의 분기 하나, `SURFACE_KEYS.row` 의
-// 항목 하나. 별표 자리는 BT-5(#1933) 몫으로 여전히 비어 있고, 같은 세 줄이다.
+// 항목 하나」라고 예약해 둔 자리다. 섹션 이동이 그대로 그 세 줄로 들어왔고
+// (`move-to-section`), 별표도 같은 세 줄로 들어왔다(`star`). 광고한 확장점이
+// 실제로 그만큼만 들었다는 것이 이 표의 값이다.
+//
+// **별표는 행 메뉴에만 선다** (BT-5 실사 판정). 헤더 ⋮ 를 열어 두는 길도 있었지만
+// 그 메뉴는 정의상 **이미 그 채널 안에 있는 사람**의 것이고, 별표는 사이드바를
+// 정리하는 손짓이다 - BT-4 가 섹션 이동을 행에만 둔 그 이유가 그대로 같은 축에
+// 적용된다(바로 아래 `SURFACE_KEYS.row` 산문). 별표를 헤더에 세우면 「채널을 열지
+// 않고 조작한다」는 이 티켓의 문법이 「열어도 되고 안 열어도 되고」로 흐려진다.
 //
 // ### 왜 서브메뉴가 아닌가
 //
@@ -66,6 +75,7 @@ export type ChannelActionKey =
   | "topic"
   | "mark-read"
   | "mute"
+  | "star"
   | "move-to-section"
   | "copy-link"
   | "copy-name"
@@ -122,6 +132,7 @@ export interface ChannelActionAvailability {
   topic: boolean;
   markRead: boolean;
   mute: boolean;
+  star: boolean;
   moveToSection: boolean;
   copyLink: boolean;
   copyName: boolean;
@@ -133,6 +144,8 @@ export interface ChannelActionState {
   muted: boolean;
   copiedLink: boolean;
   copiedName: boolean;
+  /** 이 채널에 별표가 붙어 있는가 (ADR-0177 / BT-5). 낱말이 이 값으로 뒤집힌다. */
+  starred?: boolean;
   /**
    * 이 사람이 만든 커스텀 섹션들(ADR-0177 D1 - 멤버 소유). 비어 있으면
    * 「섹션으로 이동」은 목적지가 기본 섹션 하나뿐이라 무리가 되지 않고, 그래서
@@ -163,12 +176,18 @@ export function channelActionAvailability(input: {
   unreadCount: number;
   /** 이 사람의 커스텀 섹션 수(ADR-0177). 0이면 옮길 곳이 없다. */
   sectionCount?: number;
+  /** 별표를 받을 손이 있는가. 없으면 눌러도 아무 일이 없는 항목이 된다. */
+  canStar?: boolean;
 }): ChannelActionAvailability {
   const isDm = input.channel.kind === "dm";
   return {
     topic: !isDm && normalizeChannelTopic(input.channel.topic ?? "") !== "",
     // 이미 다 읽은 채널에 「읽음 처리」는 아무 일도 하지 않는 항목이다.
     markRead: input.unreadCount > 0,
+    // **DM 은 별표를 받지 않는다.** 별표 섹션은 파생이고, 그 파생이 세는 것은
+    // 비-DM 채널뿐이다(`deriveSidebarSections` — `byId` 에 DM 이 없다). 문을 열면
+    // payload 에는 적히는데 화면에는 아무 일도 일어나지 않는다.
+    star: !isDm && (input.canStar ?? false),
     mute: true,
     // **DM 은 옮기지 않는다** (ADR-0177 D4). 기본 섹션 두 종은 「채널」과 「DM」
     // 이고 DM 은 그 중 하나에 고정이다 - 커스텀 섹션에 DM 을 넣는 문을 열면
@@ -214,16 +233,27 @@ export function channelActionItems(
       separatorBefore: items.length > 0 && items[items.length - 1].key === "topic",
     });
   }
+  // 무리 셋째: **사이드바를 정리하는 것**(별표 · 배치). 앞의 둘(읽음 · 알림)이
+  // 「이 채널의 상태」라면 이 둘은 「내 목록에서의 자리」다 — 그래서 구분선은 별표
+  // 앞에 한 번만 서고, 배치는 별표와 같은 무리에 붙는다.
+  if (available.star) {
+    items.push({
+      key: "star",
+      testKey: "star",
+      label: channelStarToggleLabel(state.starred ?? false),
+      separatorBefore: items.length > 0,
+    });
+  }
   if (available.moveToSection) {
-    // 무리 하나(제목 + 라디오 행들). 상태를 바꾸는 무리의 끝에 서고, 구분선은
-    // 그 다음 무리(밖으로 꺼내는 것)가 이고 있으므로 여기서는 세우지 않는다.
+    // 무리 하나(제목 + 라디오 행들).
     items.push({
       key: "move-to-section",
       testKey: "move-to-section",
       label: SECTION_MOVE_GROUP_LABEL,
       sections: state.sections ?? [],
       currentSectionId: state.currentSectionId ?? null,
-      separatorBefore: items.length > 0,
+      separatorBefore:
+        items.length > 0 && items[items.length - 1].key !== "star",
     });
   }
   if (available.copyLink) {
@@ -269,6 +299,7 @@ const SURFACE_KEYS: Record<ChannelActionSurface, ReadonlySet<ChannelActionKey>> 
   row: new Set<ChannelActionKey>([
     "mark-read",
     "mute",
+    "star",
     "move-to-section",
     "copy-link",
     "copy-name",
@@ -307,7 +338,17 @@ export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   // 반영되고 저장은 디바운스로 뒤따르므로(ADR-0177 D2 - 이벤트가 없어 서버 답을
   // 기다릴 이유도 없다), 메뉴가 남아 있어 봐야 방금 고른 답만 다시 보여 준다.
   // 저장이 실패하면 사이드바가 배너로 말한다 - 그때 이 메뉴는 이미 없다.
-  return key !== "leave" && key !== "topic" && key !== "move-to-section";
+  //
+  // `star` 도 같은 갈래이고, 한 가지가 더 있다: 별표를 붙이면 그 행이 **다른
+  // 섹션으로 옮겨 간다**(파생 「별표」가 맨 위에서 가져간다). 이 메뉴를 이고 있는
+  // 트리거는 옮겨 가면서 언마운트되므로, 남기려 해도 남지 않는다 - 닫히는 것이
+  // 실제로 일어나는 일이고, 화면이 그렇게 말하는 편이 정직하다.
+  return (
+    key !== "leave" &&
+    key !== "topic" &&
+    key !== "star" &&
+    key !== "move-to-section"
+  );
 }
 
 /**

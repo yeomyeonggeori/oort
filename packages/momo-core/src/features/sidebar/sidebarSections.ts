@@ -44,12 +44,17 @@
 // payload 에서 다른 사이드바를 그린다 — 이 파일 머리말이 스스로 「로밍을 하는
 // 이유 자체를 없앤다」고 적은 그 실패다.
 //
-// **이 티켓은 동작을 바꾸지 않는다.** 고르는 것은 폰 티켓(또는 BT-5)의 일이고,
-// 갈래는 셋이다: ①기본 섹션 목록을 입력으로 받는다(호출부가 자기 표면의 기본
-// 섹션을 넘긴다) ②에이전트를 세 번째 기본 섹션으로 계약에 올린다(웹도 그리게
-// 된다 — 웹은 에이전트를 전역 목적지 행으로 이미 갖고 있어 중복이다) ③폰이 이
-// 함수를 커스텀 섹션에만 쓰고 기본 셋은 자기가 계속 조립한다. 각자 다시
-// 판정하지 말고 이 문단을 근거로 한 번에 결정할 것.
+// **BT-4 도 BT-5 도 이 동작을 바꾸지 않았다.** 갈래는 셋이다: ①기본 섹션 목록을
+// 입력으로 받는다(호출부가 자기 표면의 기본 섹션을 넘긴다) ②에이전트를 세 번째
+// 기본 섹션으로 계약에 올린다(웹도 그리게 된다 — 웹은 에이전트를 전역 목적지
+// 행으로 이미 갖고 있어 중복이다) ③폰이 이 함수를 커스텀 섹션에만 쓰고 기본 셋은
+// 자기가 계속 조립한다.
+//
+// **임자는 폰 티켓이다** (design-review #1933 N-3). BT-5 는 이 결정을 하지 않았고
+// (계약 밖이다), 대신 파생 섹션 종류를 하나 더 늘렸다 — `"starred"` 는 payload 에
+// 없는 파생이라, 폰이 이 함수를 소비하는 날 **갈림의 폭이 그만큼 넓어져 있다**:
+// 위 세 갈래를 기본 두 종이 아니라 세 종(별표·채널·DM) 위에서 재야 한다. 각자
+// 다시 판정하지 말고 이 문단을 근거로 한 번에 결정할 것.
 // =============================================================================
 
 import { record, num, str, stringArrayField } from "../../lib/wire";
@@ -81,9 +86,21 @@ export interface SidebarSectionPrefs {
 export interface SidebarPrefs {
   version: number;
   sections: SidebarSectionPrefs[];
-  /** BT-5(#1933)가 쓸 자리. BT-4 는 받아서 그대로 돌려보낸다(ADR-0177 D5). */
+  /**
+   * 별표 채널 id (ADR-0177 D3). **배치가 아니라 표식**이라 `sections` 와 겹칠 수
+   * 있고, 겹치는 것이 정상이다 - 별표를 떼면 적혀 있던 그 배치로 돌아간다
+   * (`toggleStarredChannel` 머리말).
+   */
   starredChannelIds: string[];
-  /** BT-5 의 A-Z / 최근 정렬. 값은 BT-5 가 정한다. */
+  /**
+   * 렌더 차례 (BT-5 #1933). 값은 `SIDEBAR_SORT_MODES` 의 낱말이고, 없으면
+   * 「사용자 지정」이다.
+   *
+   * **사이드바 하나에 하나**다. 필드가 문자열 한 칸이기 때문이고(서버
+   * `momo-messaging/src/sidebar_prefs.rs`: `section_sort: Option<String>`,
+   * 32자 상한, `deny_unknown_fields`), 섹션별 지도를 실으려면 payload v1 계약
+   * 자체를 바꿔야 한다 - 그것은 클라 티켓이 할 일이 아니다(ADR-0177 D3).
+   */
   sectionSort?: string;
 }
 
@@ -215,12 +232,171 @@ export const SECTION_MOVE_GROUP_LABEL = "섹션으로 이동";
  * 하나로 만드는 길도 있었지만, 그러면 포인터 쪽이 **어떻게** 옮기는지를 잃는다.
  */
 export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
+  // 포인터 문장이 문 **둘**을 든다 (BT-5 #1933): 끌어다 놓기가 생겼고, 그것이
+  // 대개 먼저 시도되는 손짓이다. 우클릭을 지우지 않는 이유는 그것이 키보드로도
+  // 닿는 유일한 경로이기 때문이다(메뉴 키 / Shift+F10 → 「섹션으로 이동」).
+  //
+  // 그런데 문이 둘이 되면서 문장이 길어졌고, 이 문장은 **섹션마다 되풀이된다**
+  // (design-review #1933 M-3 실측: 183px 목록 폭에서 세 줄, 빈 섹션 다섯이 한
+  // 화면에 겹쳐 보였다 — 상한은 50이다). 되풀이 자체는 BT-4 가 세운 모양이고 그
+  // 자리에는 이유가 있다: 빈 섹션이 아무 말도 하지 않으면 방금 만든 섹션이 고장난
+  // 것처럼 보인다. 이 티켓이 만든 것은 **길이**뿐이므로 길이만 되돌린다 —
+  // 「이 섹션으로」를 뺀다. 이 줄은 바로 그 섹션 **안에** 서 있어서 어디로
+  // 옮기는지는 자리가 이미 말하고 있었다. BT-4 의 문장보다 짧으면서 문은 여전히
+  // 둘이다.
   return pointerCanHover
-    ? "채널 행을 우클릭해 이 섹션으로 옮길 수 있습니다."
+    ? "채널 행을 끌어다 놓거나 우클릭해 옮깁니다."
     : "이 섹션은 비어 있습니다. 채널은 넓은 화면에서 옮길 수 있습니다.";
 }
 /** 배치를 풀고 기본 섹션으로 되돌리는 항목. */
 export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
+
+/**
+ * 터치 표면의 「별표」 섹션이 하는 말 (design-review #1933 M-1).
+ *
+ * 별표는 **로밍한다**(ADR-0177 D2). 그래서 넓은 화면에서 붙인 별표가 폰 서랍에
+ * 섹션으로 그려지는데, 그 표면에는 떼는 문이 없다 — 행 컨텍스트 메뉴가
+ * `hover: none` 에서 닫혀 있고(BT-1) 끌어다 놓기도 손가락에는 발화하지 않는다.
+ * 실측: 별표 섹션이 행 둘과 함께 서고 `[data-section-action]` 도 `draggable` 도 0.
+ *
+ * 죽은 컨트롤은 아니다 — 누를 수 있는 척하는 것이 하나도 없다. 그런데 BT-4 H-1 이
+ * 세운 규율은 「표면이 자기 문에 대해 **참말**을 한다」이고, 새 개념 하나가 그
+ * 규율 밖에 섰다. 그래서 빈 커스텀 섹션이 터치에서 하는 말과 **같은 문법**으로
+ * 사정을 적는다: 없는 동작을 지시하지 않고, 그 문이 어디 있는지만 말한다.
+ */
+export const SIDEBAR_STARRED_TOUCH_HINT = "별표는 넓은 화면에서 뗄 수 있습니다.";
+
+// ---------------------------------------------------------------------------
+// 별표 (BT-5 / #1933)
+// ---------------------------------------------------------------------------
+
+/** 별표 채널이 서는 파생 섹션. 맨 위, 삭제도 이름변경도 되지 않는다. */
+export const BASE_STARRED_SECTION_ID = "starred";
+export const BASE_STARRED_SECTION_TITLE = "별표";
+
+/** 낱말은 상태다 - 알림 토글(`channelMuteToggleLabel`)과 같은 문법. */
+export const CHANNEL_STAR_LABEL = "별표 붙이기";
+export const CHANNEL_UNSTAR_LABEL = "별표 떼기";
+
+export function channelStarToggleLabel(starred: boolean): string {
+  return starred ? CHANNEL_UNSTAR_LABEL : CHANNEL_STAR_LABEL;
+}
+
+export function isChannelStarred(
+  prefs: SidebarPrefs,
+  channelId: string
+): boolean {
+  const key = idKey(channelId);
+  return prefs.starredChannelIds.some((id) => idKey(id) === key);
+}
+
+/**
+ * 별표를 붙이거나 뗀다.
+ *
+ * **배치는 건드리지 않는다.** 별표는 「이 채널이 어디에 속하는가」가 아니라
+ * 「지금 자주 본다」는 표식이라, 붙였다 떼면 사람이 만든 배치가 그대로 돌아와야
+ * 한다. `placeChannelInSection` 이 반대로 하는 것(먼저 모든 섹션에서 뺀 다음
+ * 넣는다)과 짝이 되는 결정이고, 그래서 두 함수는 payload 의 다른 칸을 만진다.
+ *
+ * 그 대신 **렌더는 겹치지 않는다**: `deriveSidebarSections` 에서 별표 섹션이
+ * 먼저 채널을 가져가므로(같은 파일의 겹침 규칙 - 앞선 섹션이 갖는다) 한 채널이
+ * 목록에 두 번 그려지지 않는다. 사람이 보는 것은 「위로 올라갔다」이고, payload
+ * 가 기억하는 것은 「원래 자리」다.
+ */
+export function toggleStarredChannel(
+  prefs: SidebarPrefs,
+  channelId: string
+): SidebarPrefs {
+  const key = idKey(channelId);
+  const starred = prefs.starredChannelIds.some((id) => idKey(id) === key);
+  return {
+    ...prefs,
+    starredChannelIds: starred
+      ? prefs.starredChannelIds.filter((id) => idKey(id) !== key)
+      : [...prefs.starredChannelIds, channelId],
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 정렬 (BT-5 / #1933)
+// ---------------------------------------------------------------------------
+
+/**
+ * 렌더 차례. **두 값이다** — ADR-0177 D5 는 「A-Z/Recent」라 적었고, 이 티켓은
+ * Recent 를 싣지 않는다. 그 판정의 근거는 기억이 아니라 실사다:
+ *
+ *   · buzz 에는 문법이 실물로 있다(`desktop/src/features/sidebar/lib/
+ *     channelSortPreference.ts` — `ChannelSortMode = "alpha" | "recent"`).
+ *   · 그런데 그 정렬의 **자**는 `channel.lastMessageAt` 이고, oort 의 `Channel`
+ *     에는 그런 칸이 없다(`lib/api.ts`). 읽음 투영(`ReadState`)도 시각을 싣지
+ *     않고, `seq` 는 채널 안에서만 뜻이 있어 채널끼리 비교할 수 없다.
+ *
+ * 즉 Recent 를 지금 넣으면 **가나다 목록에 「최근」이라는 이름을 붙이는 일**이
+ * 된다. 서버가 채널마다 마지막 활동 시각을 실어 주는 날 값 하나와 비교 함수
+ * 하나가 늘어날 뿐이므로(이 파일 한 곳), 그날까지 이름을 미리 만들지 않는다.
+ */
+export const SIDEBAR_SORT_MANUAL = "manual";
+export const SIDEBAR_SORT_ALPHA = "alpha";
+export const SIDEBAR_SORT_MODES = [
+  SIDEBAR_SORT_MANUAL,
+  SIDEBAR_SORT_ALPHA,
+] as const;
+export type SidebarSortMode = (typeof SIDEBAR_SORT_MODES)[number];
+
+/**
+ * 이 설정의 이름 — 문에도, 그 안의 무리 제목에도 같은 낱말이 선다.
+ *
+ * 「이 섹션의 정렬」이 아닌 이유: `sectionSort` 는 payload 에 한 칸뿐이라 값도
+ * 하나다(`SidebarPrefs.sectionSort` 머리말). 섹션마다 같은 라디오를 세워 두고
+ * 섹션의 이름으로 부르면, 하나를 바꿀 때 전부 바뀌는 것이 결함으로 읽힌다.
+ *
+ * 「사이드바 정렬」도 아닌 이유 (design-review #1933 N-2): 이 차례는 **채널을
+ * 이고 있는 섹션들**(별표·기본 「채널」·커스텀)에만 걸리고 DM 에는 걸리지 않는다 —
+ * DM 행의 이름은 `channel.name` 이 아니라 명부에서 조립되는 사람 이름이라 코어가
+ * 보지 못한다(`deriveSidebarSections` 의 DM 문단). 「사이드바」라고 부르면 낱말이
+ * 약속을 실제보다 넓게 한다.
+ */
+export const SIDEBAR_SORT_GROUP_LABEL = "채널 정렬";
+
+export function sidebarSortModeLabel(mode: SidebarSortMode): string {
+  return mode === SIDEBAR_SORT_ALPHA ? "가나다" : "사용자 지정";
+}
+
+/** 모르는 낱말은 「사용자 지정」이다 - 남이 쓴 값이 목록을 흔들지 않는다. */
+export function sidebarSortMode(prefs: SidebarPrefs): SidebarSortMode {
+  return prefs.sectionSort === SIDEBAR_SORT_ALPHA
+    ? SIDEBAR_SORT_ALPHA
+    : SIDEBAR_SORT_MANUAL;
+}
+
+/**
+ * 정렬을 바꾼 payload. 「사용자 지정」은 **칸을 지운다** - 서버도 빈 값을 부재로
+ * 접으므로(`a_blank_section_sort_becomes_absent_rather_than_empty`), 기본값을
+ * 굳이 적어 두면 왕복마다 뜻 없는 낱말이 하나 오간다.
+ */
+export function withSidebarSortMode(
+  prefs: SidebarPrefs,
+  mode: SidebarSortMode
+): SidebarPrefs {
+  const next = { ...prefs };
+  if (mode === SIDEBAR_SORT_ALPHA) next.sectionSort = SIDEBAR_SORT_ALPHA;
+  else delete next.sectionSort;
+  return next;
+}
+
+// ---------------------------------------------------------------------------
+// 섹션 차례 (BT-5 / #1933)
+// ---------------------------------------------------------------------------
+
+/**
+ * ⋮ 메뉴의 섹션 순서 항목. DnD 와 **같은 결과**에 닿는 키보드 경로다.
+ *
+ * 동사구인 것은 형제들 때문이다 (design-review #1933 N-1): 같은 메뉴에 「이름
+ * 바꾸기」·「섹션 삭제」가 서고, 이 레포의 메뉴 항목은 대체로 동사구다(섹션으로
+ * 이동 · 별표 붙이기 · 읽음 처리하기). 방향만 적으면 그 둘과 어긋난 꼴이 된다.
+ */
+export const SECTION_MOVE_UP_LABEL = "위로 옮기기";
+export const SECTION_MOVE_DOWN_LABEL = "아래로 옮기기";
 
 export const SIDEBAR_PREFS_SAVE_FAILURE =
   "섹션 변경을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -294,7 +470,7 @@ export function canCreateSidebarSection(prefs: SidebarPrefs): boolean {
 // 파생
 // ---------------------------------------------------------------------------
 
-export type SidebarSectionKind = "channels" | "dms" | "custom";
+export type SidebarSectionKind = "starred" | "channels" | "dms" | "custom";
 
 export interface RenderedSidebarSection {
   id: string;
@@ -313,8 +489,16 @@ export interface RenderedSidebarSection {
  * 그러면 호출부에 단정이 남지 않고, 깨질 때 깨지는 곳은 이 함수 안이다.
  */
 export interface DerivedSidebarSections {
-  /** 그릴 차례 그대로: 기본 「채널」 → 커스텀 → 「다이렉트 메시지」. */
+  /**
+   * 그릴 차례 그대로: 「별표」 → 기본 「채널」 → 커스텀 → 「다이렉트 메시지」.
+   *
+   * **별표가 비면 이 배열에 없다**(BT-5 #1933). 빈 그릇을 그리지 않는 판정을
+   * 표면마다 다시 하면 웹과 폰이 갈라지고, 그때 갈라지는 것은 「비었다」의 뜻이
+   * 아니라 목록의 길이다 - ⌥↑↓ 순회도 unread 집계도 이 배열을 센다.
+   */
   sections: RenderedSidebarSection[];
+  /** 「별표」. 파생이다 - payload 에 이 섹션은 없다(`starredChannelIds` 뿐). */
+  starred: RenderedSidebarSection;
   /** 기본 「채널」. 삭제도 이름변경도 되지 않는다(D4). */
   base: RenderedSidebarSection;
   /** 커스텀 섹션들, `order` 차례. */
@@ -325,6 +509,37 @@ export interface DerivedSidebarSections {
 
 function idKey(id: string): string {
   return id.trim().toLowerCase();
+}
+
+/** 이름 없는 채널은 자기 id 로 줄을 선다 - 비교가 `undefined` 를 만나지 않는다. */
+function sortName(channel: Channel): string {
+  return (channel.name ?? "").trim() || channel.id;
+}
+
+/**
+ * 「가나다」의 자. 같은 이름이 둘이면 id 가 가른다 - 정렬이 렌더마다 흔들리면
+ * 그것은 정렬이 아니다.
+ *
+ * `localeCompare(…, "ko")` 는 이 레포가 사람 이름을 세울 때 이미 쓰는 자다
+ * (`features/directory/model.ts`). 코드유닛 비교를 쓰면 「ㄱ」과 「가」가 갈리고
+ * 라틴·한글 섞인 목록이 사람이 기대하는 차례와 어긋난다.
+ */
+function compareBySortName(a: Channel, b: Channel): number {
+  const byName = sortName(a).localeCompare(sortName(b), "ko");
+  return byName !== 0 ? byName : a.id.localeCompare(b.id);
+}
+
+/**
+ * 렌더 차례만 바꾼다. **저장값은 손대지 않는다** - 「가나다」로 보다가 「사용자
+ * 지정」으로 돌아오면 사람이 만든 차례가 그대로 있어야 한다(BT-5 red proof).
+ */
+function inRenderOrder(
+  channels: Channel[],
+  mode: SidebarSortMode
+): Channel[] {
+  return mode === SIDEBAR_SORT_ALPHA
+    ? [...channels].sort(compareBySortName)
+    : channels;
 }
 
 function orderedSections(prefs: SidebarPrefs): SidebarSectionPrefs[] {
@@ -362,8 +577,34 @@ export function deriveSidebarSections(input: {
 }): DerivedSidebarSections {
   const byId = new Map<string, Channel>();
   for (const channel of input.channels) byId.set(idKey(channel.id), channel);
+  const mode = sidebarSortMode(input.prefs);
 
   const claimed = new Set<string>();
+
+  // 별표가 **먼저** 가져간다 (BT-5 #1933). 위 겹침 규칙(앞선 섹션이 갖는다)에
+  // 별표를 태우는 것이지 새 규칙을 세우는 것이 아니다 - 그래서 별표를 붙인
+  // 채널이 목록에 두 번 그려지지 않고, payload 의 배치는 그대로 남는다
+  // (`toggleStarredChannel` 머리말).
+  //
+  // DM 은 여기 오지 않는다: `byId` 가 비-DM 채널만 담으므로 payload 에 DM id 가
+  // 적혀 있어도 조용히 빠지고, 「다이렉트 메시지」에 남는다. 아래 커스텀 섹션이
+  // DM 을 다루는 방식과 같은 자리·같은 이유다(ADR-0177 D4 기본 섹션 두 종).
+  const starredChannels: Channel[] = [];
+  for (const rawId of input.prefs.starredChannelIds) {
+    const key = idKey(rawId);
+    if (claimed.has(key)) continue;
+    const channel = byId.get(key);
+    if (!channel) continue;
+    claimed.add(key);
+    starredChannels.push(channel);
+  }
+  const starred: RenderedSidebarSection = {
+    id: BASE_STARRED_SECTION_ID,
+    kind: "starred",
+    title: BASE_STARRED_SECTION_TITLE,
+    channels: inRenderOrder(starredChannels, mode),
+  };
+
   const custom: RenderedSidebarSection[] = [];
   for (const section of orderedSections(input.prefs)) {
     const channels: Channel[] = [];
@@ -381,7 +622,7 @@ export function deriveSidebarSections(input: {
       id: section.id,
       kind: "custom",
       title: section.name,
-      channels,
+      channels: inRenderOrder(channels, mode),
     });
   }
 
@@ -389,17 +630,33 @@ export function deriveSidebarSections(input: {
     id: BASE_CHANNELS_SECTION_ID,
     kind: "channels",
     title: BASE_CHANNELS_SECTION_TITLE,
-    channels: input.channels.filter(
-      (channel) => !claimed.has(idKey(channel.id))
+    channels: inRenderOrder(
+      input.channels.filter((channel) => !claimed.has(idKey(channel.id))),
+      mode
     ),
   };
+  // DM 은 서버 차례 그대로다. 「가나다」가 재는 것은 `channel.name` 인데 DM 행의
+  // 이름은 그 칸이 아니라 **명부에서 조립된 사람 이름**이라(웹의
+  // `channelLabelParts`), 여기서 세우면 화면에 적힌 것과 다른 차례가 나온다.
+  // 코어가 못 보는 이름으로 줄을 세우느니 세우지 않는다.
   const dms: RenderedSidebarSection = {
     id: BASE_DMS_SECTION_ID,
     kind: "dms",
     title: BASE_DMS_SECTION_TITLE,
     channels: [...input.dms],
   };
-  return { sections: [base, ...custom, dms], base, custom, dms };
+  return {
+    sections: [
+      ...(starred.channels.length > 0 ? [starred] : []),
+      base,
+      ...custom,
+      dms,
+    ],
+    starred,
+    base,
+    custom,
+    dms,
+  };
 }
 
 /** 이 채널이 지금 어느 커스텀 섹션에 있는가. 없으면 `null`(기본 섹션). */
@@ -450,6 +707,84 @@ export function createSidebarSection(
       { id, name: name.trim(), order, channelIds: [] },
     ],
   };
+}
+
+/**
+ * 섹션 차례를 다시 매긴다 (BT-5 / #1933).
+ *
+ * `order` 를 0..n-1 로 **다시 번호 매기는** 이유는 이 함수들이 자리바꿈을 하기
+ * 때문이다: 원래 수를 유지한 채 두 값을 맞바꾸면 payload 의 다른 곳에서 만들어진
+ * 같은 `order` (`createSidebarSection` 은 최대+1 을 쓴다)와 만나 안정 정렬의
+ * 눈에만 보이는 차례가 생기고, 그 차례는 이 함수가 약속한 것이 아니다.
+ */
+function withSectionOrder(
+  prefs: SidebarPrefs,
+  ordered: SidebarSectionPrefs[]
+): SidebarPrefs {
+  return {
+    ...prefs,
+    sections: ordered.map((section, index) => ({ ...section, order: index })),
+  };
+}
+
+function movedWithin(
+  ordered: SidebarSectionPrefs[],
+  from: number,
+  to: number
+): SidebarSectionPrefs[] {
+  const next = [...ordered];
+  const [item] = next.splice(from, 1);
+  next.splice(to, 0, item);
+  return next;
+}
+
+/** 이 방향으로 한 칸 갈 자리가 있는가. 없으면 메뉴가 그 항목을 비활성으로 든다. */
+export function canMoveSidebarSection(
+  prefs: SidebarPrefs,
+  id: string,
+  delta: -1 | 1
+): boolean {
+  const ordered = orderedSections(prefs);
+  const index = ordered.findIndex((section) => section.id === id);
+  if (index < 0) return false;
+  const next = index + delta;
+  return next >= 0 && next < ordered.length;
+}
+
+/**
+ * 한 칸 위/아래. **키보드가 DnD 와 같은 결과에 닿는 경로**다(BT-5 계약 3항) -
+ * 끌어다 놓기가 유일한 문이면 그 기능은 포인터 전용 기능이다.
+ */
+export function moveSidebarSection(
+  prefs: SidebarPrefs,
+  id: string,
+  delta: -1 | 1
+): SidebarPrefs {
+  const ordered = orderedSections(prefs);
+  const index = ordered.findIndex((section) => section.id === id);
+  if (index < 0) return prefs;
+  const next = index + delta;
+  if (next < 0 || next >= ordered.length) return prefs;
+  return withSectionOrder(prefs, movedWithin(ordered, index, next));
+}
+
+/**
+ * `id` 를 `targetId` 가 지금 서 있는 자리로 옮긴다 (드롭이 부르는 것).
+ *
+ * 「위/아래 한 칸」과 같은 자를 쓰므로 두 문이 같은 payload 에 닿는다 - 드롭이
+ * 자기 계산을 따로 갖고 있으면 그 사본이 언젠가 메뉴와 다른 답을 낸다.
+ */
+export function reorderSidebarSection(
+  prefs: SidebarPrefs,
+  id: string,
+  targetId: string
+): SidebarPrefs {
+  if (id === targetId) return prefs;
+  const ordered = orderedSections(prefs);
+  const from = ordered.findIndex((section) => section.id === id);
+  const to = ordered.findIndex((section) => section.id === targetId);
+  if (from < 0 || to < 0) return prefs;
+  return withSectionOrder(prefs, movedWithin(ordered, from, to));
 }
 
 export function renameSidebarSection(

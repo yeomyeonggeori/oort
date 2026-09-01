@@ -7,18 +7,26 @@ import {
 } from "@momo/core/features/sidebar/api";
 import {
   canCreateSidebarSection,
+  canMoveSidebarSection,
   createSidebarSection,
   deleteSidebarSection,
   emptySidebarPrefs,
+  isChannelStarred,
+  moveSidebarSection,
   placeChannelInSection,
   renameSidebarSection,
+  reorderSidebarSection,
   sectionIdForChannel,
   sidebarChannelRefCapMessage,
   sidebarChannelRefCount,
+  sidebarSortMode,
+  toggleStarredChannel,
+  withSidebarSortMode,
   SIDEBAR_CHANNEL_REF_MAX,
   SIDEBAR_PREFS_LOAD_FAILURE,
   SIDEBAR_PREFS_SAVE_FAILURE,
   type SidebarPrefs,
+  type SidebarSortMode,
 } from "@momo/core/features/sidebar/sidebarSections";
 
 // =============================================================================
@@ -98,6 +106,18 @@ export interface SidebarPrefsController {
   deleteSection: (id: string) => void;
   moveChannel: (channelId: string, sectionId: string | null) => void;
   sectionIdFor: (channelId: string) => string | null;
+  /**
+   * 별표·정렬·섹션 차례 (BT-5 / #1933). 전부 위의 것들과 **같은 문**을 지난다 -
+   * `schedule` 하나가 부트스트랩 게이트(B-1)·참조 상한(M-3)·디바운스·롤백을
+   * 지고 있으므로, 새 쓰기 경로를 만들면 그 넷을 전부 다시 만들어야 한다.
+   */
+  isStarred: (channelId: string) => boolean;
+  toggleStar: (channelId: string) => void;
+  sortMode: SidebarSortMode;
+  setSortMode: (mode: SidebarSortMode) => void;
+  canMoveSection: (id: string, delta: -1 | 1) => boolean;
+  moveSection: (id: string, delta: -1 | 1) => void;
+  reorderSection: (id: string, targetId: string) => void;
 }
 
 export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
@@ -185,8 +205,19 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
     [flush, knowsServerTruth]
   );
 
-  // 창을 닫거나 워크스페이스를 갈아타는 것이 방금 만든 섹션을 삼키지 않게, 남은
-  // 것을 즉시 흘려보낸다. 마운트 시점의 함수만 쓰므로 의존성은 비어 있다.
+  // 남은 것을 즉시 흘려보낸다. `schedule` 이 세운 타이머를 먼저 걷는 이유는 같은
+  // payload 가 두 번 나가지 않게 하기 위해서다.
+  const flushNow = useCallback(() => {
+    if (timer.current !== null) {
+      clearTimeout(timer.current);
+      timer.current = null;
+    }
+    const payload = pending.current;
+    if (payload) flush(payload);
+  }, [flush]);
+
+  // 워크스페이스를 갈아타거나 셸이 내려갈 때. 마운트 시점의 함수만 쓰므로
+  // 의존성은 비어 있다.
   useEffect(
     () => () => {
       if (timer.current !== null) clearTimeout(timer.current);
@@ -196,6 +227,38 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
+
+  // ## 2초 창이 새로고침을 못 견뎠다 (design-review #1933 M-4)
+  //
+  // 위 언마운트 flush 는 **React 가 내려갈 때**만 돈다. 그런데 탭을 닫거나 주소를
+  // 갈아 끼우는 것은 React 를 내려 주지 않는다 - 실측: 정렬을 바꾸고 별표를 붙인
+  // 뒤 1.2초 만에 새로고침하면 서버가 받은 payload 에 그 둘이 **없다**(2.6초
+  // 기다리면 살아 있다). 조용히 사라지고 아무 말도 없다.
+  //
+  // 별표가 이 창에 새로 노출된 이유는 손짓의 모양 때문이다: 「붙이고 바로 창을
+  // 닫는」 것이 별표의 정상 사용이라, 2초는 그 사이에 통째로 들어간다. 그래서
+  // 수리를 **훅 층에** 둔다 - 여기 한 곳이면 BT-4 의 모든 편집(섹션 생성·이름·
+  // 삭제·배치)이 함께 닫힌다.
+  //
+  // 신호는 둘이다. `pagehide` 는 탭이 실제로 떠날 때(뒤로/앞으로 캐시 포함),
+  // `visibilitychange → hidden` 은 그보다 먼저·더 자주 온다 - 모바일 사파리는
+  // 앱을 백그라운드로 보낼 때 `pagehide` 를 주지 않는 경로가 있고, 그때 이 탭은
+  // 다시 깨어나지 못할 수도 있다. 둘 다 듣고 `flushNow` 가 타이머를 걷으므로 두
+  // 번 불려도 PUT 은 한 번이다(`pending` 이 비면 아무 일도 하지 않는다).
+  //
+  // `beforeunload` 는 쓰지 않는다: 그것은 사람에게 확인 창을 띄우는 자리이고,
+  // 사이드바 정리 하나가 창을 닫는 손을 붙잡을 이유가 없다.
+  useEffect(() => {
+    function onHidden() {
+      if (document.visibilityState === "hidden") flushNow();
+    }
+    window.addEventListener("pagehide", flushNow);
+    document.addEventListener("visibilitychange", onHidden);
+    return () => {
+      window.removeEventListener("pagehide", flushNow);
+      document.removeEventListener("visibilitychange", onHidden);
+    };
+  }, [flushNow]);
 
   const createSection = useCallback(
     (name: string) => schedule(createSidebarSection(prefs, name)),
@@ -218,6 +281,31 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
     (channelId: string) => sectionIdForChannel(prefs, channelId),
     [prefs]
   );
+  const isStarred = useCallback(
+    (channelId: string) => isChannelStarred(prefs, channelId),
+    [prefs]
+  );
+  const toggleStar = useCallback(
+    (channelId: string) => schedule(toggleStarredChannel(prefs, channelId)),
+    [prefs, schedule]
+  );
+  const setSortMode = useCallback(
+    (mode: SidebarSortMode) => schedule(withSidebarSortMode(prefs, mode)),
+    [prefs, schedule]
+  );
+  const canMoveSection = useCallback(
+    (id: string, delta: -1 | 1) => canMoveSidebarSection(prefs, id, delta),
+    [prefs]
+  );
+  const moveSection = useCallback(
+    (id: string, delta: -1 | 1) => schedule(moveSidebarSection(prefs, id, delta)),
+    [prefs, schedule]
+  );
+  const reorderSection = useCallback(
+    (id: string, targetId: string) =>
+      schedule(reorderSidebarSection(prefs, id, targetId)),
+    [prefs, schedule]
+  );
 
   const refetch = query.refetch;
   const retryLoad = useCallback(() => {
@@ -239,6 +327,13 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       deleteSection,
       moveChannel,
       sectionIdFor,
+      isStarred,
+      toggleStar,
+      sortMode: sidebarSortMode(prefs),
+      setSortMode,
+      canMoveSection,
+      moveSection,
+      reorderSection,
     }),
     [
       prefs,
@@ -250,6 +345,12 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       deleteSection,
       moveChannel,
       sectionIdFor,
+      isStarred,
+      toggleStar,
+      setSortMode,
+      canMoveSection,
+      moveSection,
+      reorderSection,
     ]
   );
 }

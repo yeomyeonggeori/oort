@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { MoreHorizontal } from "lucide-react";
+import { ArrowUpDown, Check, MoreHorizontal } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,9 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
@@ -22,6 +25,8 @@ import {
   SECTION_DELETE_CONFIRM_LABEL,
   SECTION_DELETE_CONFIRM_TITLE,
   SECTION_DELETE_LABEL,
+  SECTION_MOVE_DOWN_LABEL,
+  SECTION_MOVE_UP_LABEL,
   SECTION_NAME_FIELD_LABEL,
   SECTION_NAME_PLACEHOLDER,
   SECTION_RENAME_LABEL,
@@ -29,7 +34,11 @@ import {
   sectionDeleteConfirmBody,
   sidebarSectionNameIssue,
   sidebarSectionNameIssueMessage,
+  sidebarSortModeLabel,
   SIDEBAR_SECTION_NAME_MAX,
+  SIDEBAR_SORT_GROUP_LABEL,
+  SIDEBAR_SORT_MODES,
+  type SidebarSortMode,
 } from "@momo/core/features/sidebar/sidebarSections";
 
 // =============================================================================
@@ -253,26 +262,121 @@ export function SectionDeleteConfirmDialog({
 }
 
 /**
- * 커스텀 섹션 헤더의 ⋮ - 이름 바꾸기와 삭제.
+ * 「채널 정렬」 (BT-5 / #1933, design-review R1 M-2·N-2).
  *
- * 기본 섹션(채널 · DM)에는 서지 않는다: ADR-0177 D4 가 그 둘을 삭제 불가 ·
- * 이름변경 불가로 못박았으므로, 열면 두 항목 다 회색인 메뉴가 될 뿐이다.
+ * ## 이 문이 섹션 ⋮ 에서 나온 이유
+ *
+ * 첫 판은 이 무리를 기본 「채널」 섹션의 ⋮ 안에 넣었다. 그러자 **이름과 내용이
+ * 어긋났다**: 스크린리더는 「채널 섹션 메뉴」라 읽는데 열면 안의 것은 사이드바
+ * 전체에 걸리는 설정이었고, 눈으로는 같은 ⋯ 글리프가 섹션마다 다른 메뉴를 열었다
+ * (채널=정렬만 · 커스텀=차례/이름/삭제 · 별표·DM=없음). 정렬을 찾는 사람이 커스텀
+ * 섹션의 ⋯ 을 먼저 열면 그 문은 거기 없다.
+ *
+ * 그래서 문을 갈랐다. **글리프가 다르고**(⇅ 대 ⋯) 이름이 자기 범위를 말한다 —
+ * 두 문이 한 헤더에 나란히 서도 무엇이 무엇인지 보고 알 수 있다. 자리는 그대로
+ * 기본 「채널」 헤더인데, 그 헤더는 이미 사이드바의 선반이기 때문이다(「새 섹션」도
+ * 채널 섹션의 일이 아니라 사이드바의 일이고 같은 자리에 산다).
+ *
+ * 낱말이 「사이드바 정렬」이 아닌 이유는 코어 `SIDEBAR_SORT_GROUP_LABEL` 머리말에
+ * 있다(DM 은 이 차례를 타지 않는다).
+ *
+ * 라디오·제목·체크의 문법은 행 메뉴의 「섹션으로 이동」과 한 벌이다
+ * (`ChannelSectionMoveGroup`): 여럿 중 하나이므로 `aria-checked` 가 들려야 하고,
+ * Radix 의 Label 은 aria 를 걸어 주지 않으므로 `useId` 로 되짚는다.
+ */
+export function SidebarSortMenu({
+  mode,
+  onChange,
+  onOpenChange,
+}: {
+  mode: SidebarSortMode;
+  onChange: (next: SidebarSortMode) => void;
+  /** 열려 있는 동안 헤더의 호버 클러스터를 붙들어 둔다. */
+  onOpenChange: (open: boolean) => void;
+}) {
+  const labelId = useId();
+  return (
+    <DropdownMenu onOpenChange={onOpenChange}>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={SIDEBAR_SORT_GROUP_LABEL}
+          title={SIDEBAR_SORT_GROUP_LABEL}
+          data-section-action=""
+          data-testid="sidebar-sort-menu"
+          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        >
+          <ArrowUpDown className="size-4" aria-hidden="true" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" data-testid="sidebar-sort-menu-content">
+        <DropdownMenuLabel id={labelId} data-testid="sidebar-sort-label">
+          {SIDEBAR_SORT_GROUP_LABEL}
+        </DropdownMenuLabel>
+        <DropdownMenuRadioGroup
+          aria-labelledby={labelId}
+          value={mode}
+          onValueChange={(next) => onChange(next as SidebarSortMode)}
+        >
+          {SIDEBAR_SORT_MODES.map((value) => (
+            <DropdownMenuRadioItem
+              key={value}
+              value={value}
+              data-testid={`sidebar-sort-${value}`}
+            >
+              <span className="min-w-0 flex-1 truncate">
+                {sidebarSortModeLabel(value)}
+              </span>
+              {/* 체크는 캘러가 그린다(`DropdownMenuRadioItem` 독스트링). 귀가 듣는
+                  `aria-checked` 와 같은 사실을 눈에 말하는 자리다. */}
+              {value === mode && (
+                <Check
+                  className="size-4 shrink-0 text-ink-muted"
+                  aria-hidden="true"
+                />
+              )}
+            </DropdownMenuRadioItem>
+          ))}
+        </DropdownMenuRadioGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * 커스텀 섹션 헤더의 ⋮ — 차례 · 이름 바꾸기 · 삭제.
+ *
+ * BT-4 가 세운 그대로 **커스텀 섹션에만** 선다: 기본 두 종은 삭제 불가·이름변경
+ * 불가이고(ADR-0177 D4) 차례도 고정이라, 열면 항목이 전부 회색인 메뉴가 될 뿐이다.
+ * BT-5 가 한동안 여기에 정렬을 얹었다가 도로 뺐다 — 그 판정과 근거는 위
+ * `SidebarSortMenu` 머리말에 있다(design-review R1 M-2).
+ *
  * 호버 클러스터의 규약(`data-section-action`)을 그대로 입어 rest 에서는 DOM 에
  * 없고, 열려 있는 동안에는 `overlayOpen` 이 헤더를 붙들어 둔다.
  */
 export function SidebarSectionMenu({
   sectionId,
   title,
+  order,
   onOpenChange,
   onRename,
   onDelete,
 }: {
   sectionId: string;
   title: string;
+  /**
+   * 섹션 차례를 바꾸는 키보드 경로 (BT-5 계약 3항). 끌어다 놓기와 **같은 코어
+   * 함수**에 닿으므로 두 문이 같은 payload 를 만든다.
+   */
+  order?: {
+    canUp: boolean;
+    canDown: boolean;
+    onMove: (delta: -1 | 1) => void;
+  };
   /** 열려 있는 동안 헤더의 호버 클러스터를 붙들어 둔다. */
   onOpenChange: (open: boolean) => void;
-  onRename: (opener: HTMLElement | null) => void;
-  onDelete: (opener: HTMLElement | null) => void;
+  onRename?: (opener: HTMLElement | null) => void;
+  onDelete?: (opener: HTMLElement | null) => void;
 }) {
   const trigger = useRef<HTMLButtonElement>(null);
   return (
@@ -291,20 +395,52 @@ export function SidebarSectionMenu({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" data-testid={`section-menu-${sectionId}-content`}>
-        <DropdownMenuItem
-          data-testid={`section-menu-${sectionId}-rename`}
-          onSelect={() => onRename(trigger.current)}
-        >
-          {SECTION_RENAME_LABEL}
-        </DropdownMenuItem>
-        <DropdownMenuSeparator />
-        <DropdownMenuItem
-          tone="danger"
-          data-testid={`section-menu-${sectionId}-delete`}
-          onSelect={() => onDelete(trigger.current)}
-        >
-          {SECTION_DELETE_LABEL}
-        </DropdownMenuItem>
+        {order && (
+          <>
+            {/* 끝에 닿은 방향은 **비활성으로 남는다**. 지우지 않는 이유가 「새
+                섹션」의 상한과 같지는 않다 - 여기서는 사유를 문장으로 들 필요가
+                없다. 「위로」가 회색인 까닭은 이 섹션이 맨 위라는 것이고, 그
+                사실은 목록 자체가 이미 보여 준다. 그래도 항목이 서 있어야
+                차례를 바꾸는 길이 **있다**는 것을 다음에 열었을 때도 안다. */}
+            <DropdownMenuItem
+              disabled={!order.canUp}
+              data-testid={`section-menu-${sectionId}-up`}
+              onSelect={() => order.onMove(-1)}
+            >
+              {SECTION_MOVE_UP_LABEL}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              disabled={!order.canDown}
+              data-testid={`section-menu-${sectionId}-down`}
+              onSelect={() => order.onMove(1)}
+            >
+              {SECTION_MOVE_DOWN_LABEL}
+            </DropdownMenuItem>
+          </>
+        )}
+        {onRename && (
+          <>
+            {order && <DropdownMenuSeparator />}
+            <DropdownMenuItem
+              data-testid={`section-menu-${sectionId}-rename`}
+              onSelect={() => onRename(trigger.current)}
+            >
+              {SECTION_RENAME_LABEL}
+            </DropdownMenuItem>
+          </>
+        )}
+        {onDelete && (
+          <>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              tone="danger"
+              data-testid={`section-menu-${sectionId}-delete`}
+              onSelect={() => onDelete(trigger.current)}
+            >
+              {SECTION_DELETE_LABEL}
+            </DropdownMenuItem>
+          </>
+        )}
       </DropdownMenuContent>
     </DropdownMenu>
   );

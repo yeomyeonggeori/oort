@@ -369,6 +369,80 @@ describe("행 메뉴 열림 표식", () => {
   });
 });
 
+/**
+ * 드롭 표지가 서는 두 바닥 (BT-5 / #1933).
+ *
+ * 표식은 두 겹이다 — 자기 채움(`--surface-hover`)과 그 위의 아웃라인. 아웃라인
+ * 밑에 실제로 깔리는 색은 그 채움이고, 채움이 칠해지기 전 한 프레임의 바닥은 열
+ * 자체(`--surface-sidebar`)다. 위 「행 메뉴 열림 표식」과 같은 규율로, 색 이름은
+ * 여기 적지 않고 **출하되는 클래스에서 읽어** 잰다.
+ */
+const DROP_TARGET_SURFACES = ["surface-sidebar", "surface-hover"] as const;
+
+const SECTION_SOURCE = readFileSync(
+  new URL("../features/sidebar/SidebarRow.tsx", import.meta.url),
+  "utf8"
+);
+const FOCUS_RING_SOURCE = readFileSync(
+  new URL("./tokens.css", import.meta.url),
+  "utf8"
+);
+
+/** `outline-<낱말>` 중 색이 아닌 것들. 꼴(파선)은 위 단정이 따로 잰다. */
+const OUTLINE_STYLE_WORDS = new Set([
+  "dashed",
+  "solid",
+  "dotted",
+  "double",
+  "none",
+  "hidden",
+  "offset",
+]);
+
+function dropTargetToken(): string {
+  const found = [
+    ...SECTION_SOURCE.matchAll(/data-\[drop-target\]:outline-([a-z-]+)/g),
+  ]
+    .map((match) => match[1])
+    .filter((word) => !OUTLINE_STYLE_WORDS.has(word));
+  if (found.length !== 1) {
+    throw new Error(
+      `드롭 표지의 아웃라인 색을 하나로 못 읽었다: ${JSON.stringify(found)}`
+    );
+  }
+  return found[0];
+}
+
+describe("드롭 표지", () => {
+  it("색이 아니라 꼴로 포커스 링과 갈린다", () => {
+    // 링은 실선 2px `--accent` 이고 배경을 건드리지 않는다. 표식은 같은 색을
+    // 쓰되 **파선**이고 채움이 함께 바뀐다 - 드래그 중인 프레임에는 캐럿이 든
+    // 행과 받는 섹션이 한 화면에 함께 선다(실캡처).
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:bg-surface-hover/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:outline\b/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:outline-dashed/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:-outline-offset-2/);
+    // 링 쪽은 파선이 아니다 - 두 표식이 한 꼴로 수렴하는 날 여기서 터진다.
+    expect(FOCUS_RING_SOURCE).not.toMatch(/outline-style:\s*dashed/);
+  });
+
+  it("선 색이 두 바닥·두 스킴 전부에서 3:1 을 넘는다", () => {
+    const token = dropTargetToken();
+    for (const scheme of SCHEMES) {
+      for (const surface of DROP_TARGET_SURFACES) {
+        const ratio = contrast(
+          pick(token, scheme.index),
+          pick(surface, scheme.index)
+        );
+        expect(
+          Number(ratio.toFixed(2)),
+          `--${token} on --${surface} (${scheme.name})`
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+});
+
 describe("Dawn palette", () => {
   it("declares every semantic token exactly once, as light-dark()", () => {
     const expected = [
