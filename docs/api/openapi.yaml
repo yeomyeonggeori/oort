@@ -4669,6 +4669,10 @@ paths:
         caller has left. Ordering is newest first by created time, then channel
         sequence; the opaque cursor preserves that keyset across new inserts.
         Search is limited to 30 requests per authenticated member per minute.
+        `channel` narrows the search to one channel the caller belongs to
+        (#1931); its absence is the workspace-wide search this route has always
+        been. The cursor carries the scope it was minted under, so a page cannot
+        be resumed against a different one.
       security:
         - bearerAuth: []
       parameters:
@@ -4690,7 +4694,19 @@ paths:
           in: query
           schema:
             type: string
-          description: Opaque keyset cursor returned as `nextCursor`.
+          description: >
+            Opaque keyset cursor returned as `nextCursor`. It is bound to the
+            scope that produced it: replaying a `channel`-scoped cursor without
+            `channel` (or against another channel) is a 400, not a wider page.
+        - name: channel
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Optional channel scope (#1931). A blank value is the workspace
+            scope; a channel the caller is not a member of — and one that does
+            not exist — are the same 404.
       responses:
         "200":
           description: Membership-filtered message search page.
@@ -4699,7 +4715,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceMessageSearchResponse"
         "400":
-          description: Query shorter than two characters or malformed cursor.
+          description: >
+            Query shorter than two characters, malformed cursor, malformed
+            `channel`, or a cursor replayed under a different scope.
           content:
             application/json:
               schema:
@@ -4708,6 +4726,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            The named `channel` is not one the caller may read. A channel that
+            does not exist answers identically, so the pair is not a membership
+            oracle.
           content:
             application/json:
               schema:

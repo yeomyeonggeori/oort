@@ -1,0 +1,492 @@
+# momo(oort) — 릴리스 ROADMAP 원문 아카이브 (2026-08-03 개정판까지)
+
+> 2026-09-01 경량화 재편 때 이동한 **직전 판 전문**(불변). §0(2026-08-03 현재 위치)은 이후 사실로 대체됐고, §1~§7의 M0~M8 체계는 축으로 대체됐다 — 단 **스토어 제출·공증·법무·CI/CD 체크리스트는 여전히 유효한 보류 목록**이며 축 셋이 폰에서 돈 뒤 다시 태운다(현행 정본: 루트 `ROADMAP.md`).
+
+---
+
+# momo(oort) — 릴리스 ROADMAP
+
+> **v0의 단위는 마일스톤 번호가 아니라 축이다** (2026-08-03 성재 승인).
+> ADR-0137 D5가 자른 셋 — **관전 · 승인 · 대화** — 이 **폰에서 한 번씩 도는 것**이 v0다. 스토어는 그 뒤.
+>
+> **왜 바뀌었나:** 기존 M0~M8은 "Swift 5패키지 → macOS 공증 → iOS 스토어"를 전제로 짜였는데, 서버 재작성(ADR-0145)이 그 전제를 관통했다. 번호와 실체가 계속 어긋나므로 축으로 센다. **M0~M8 절(§1~§7)은 폐기하지 않고 아래에 남겨 둔다** — 스토어·법무·CI/CD 항목은 여전히 유효하고, 그 부분은 축 작업이 끝난 뒤 다시 태운다.
+>
+> **실행 주체:** 계획은 기획 레이어(`docs/planning/README.md`), 구현은 worker가 핸드오프 패킷으로 수행(`AGENTS.md`). 결정 거버넌스는 ADR-0100.
+>
+> **불변식(스토어 게이트):** 🔒 **스토어/공증 배포(external TestFlight 포함)는 사용성 검수 게이트(§4)가 PASS 된 후에만 진행한다.**
+>
+> **사실 근거:** Apple 1차 출처(2026 기준) 교차확인. 추정은 `(추정)` 표기. **법무 항목은 법률 자문이 아님 — 외부 변호사 1회 검토 필요.**
+
+---
+
+## 0. 현재 위치 (2026-08-03)
+
+**출시 전 · 사용자 0 · 내부 도그푸드 단계.** 서버는 재작성 중이고, 그 위에 얹을 클라이언트 셋이 동시에 서 있다.
+
+### v0 = 축 셋이 폰에서 도는 것
+
+| 축 | 서버 | 웹 | 모바일 |
+|---|---|---|---|
+| **대화** | ✅ | ✅ | ✅ |
+| **관전**(작업 세션) | ✅ | ✅ | 🚧 goal RN-A1 |
+| **승인**(툴콜) | ✅ **2026-08-03 폐곡선**(#979) | 부분 | ❌ |
+
+**모바일 5 feature vs 웹 23이 지금의 가장 큰 격차다.** 서버가 주는 에이전트 운영·작업 관전을 폰이 표면화하지 않으면, 그건 에이전트 네이티브 메신저가 아니라 봇이 있는 채팅이다(ADR-0101이 거부한 자리). 진단 정본 = `docs/planning/2026-08-03-roadmap-diagnosis.md`.
+
+### 런칭 보조축 — Bring your hosted agent (병렬 · ADR-0162 Accepted)
+
+> **이 축은 v0의 관전·승인·대화 임계경로를 대체하거나 늦추지 않는다.** 이미 호스팅된 외부 에이전트를 oort 팀메이트로 데려오는 진입 장벽을 낮춰 런칭 메시지와 초기 유입을 보강하는 병렬 축이다. 제품 약속은 벤더 중립인 **“Bring your hosted agent”**이고, Grok Bot은 첫 설정 프리셋이자 실증 대상으로 둔다. ADR-0162의 보안·lifecycle 경계는 2026-08-12 성재 승인으로 Accepted됐고, HAP-E1~E7·UX1~4·Grok E2E는 #1358~#1369와 `BUILD_TICKETS.md`에 결속됐다. 첫 wave는 custom static bearer만 지원하며, OAuth AS/동의 표면은 #1368/#1369가 모두 닫힐 때까지 광고하지 않는다.
+
+| 권장 순서 | 실질 작업 | 기대효과 | 진행 게이트 |
+|---|---|---|---|
+| **R. 계약 교정 — 완료** | #1343에서 코드·공식 자료를 다시 대조하고, 원격 MCP·기존 agent gateway·credential·pairing 경계를 ADR과 실행계획에 고정했다. ACP live-chain은 #1345의 별도 감사 레인, managed/self-host catalog는 ADR-0163의 deferred 결정 레인으로 분리했다. | 이미 있는 원장·게이트웨이를 중복 구축하거나 Grok 전용 코어를 만드는 일을 막는다. | #1343 완료 · ADR-0162 Accepted |
+| **0. Grok trial-first 실측 — 완료** | 공식 앱·personal account에서 구매 없이 Bot 1개와 기본 채팅을 만들었다. 공식 MIT `Create Plugin`으로 비공개 로컬 plugin에 공개 Agent Port URL을 등록했고, Grok/Cursor loader의 `POST initialize`와 `GET`이 아직 없는 Rust route에서 HTTP/2 404로 끝나는 것을 확인했다. 비활성 monthly routine의 수동 Test run은 약 1분 뒤 성공했으며 routine 삭제와 connector uninstall의 서로 다른 잔여 동작도 측정했다. | 결제 없이 Grok 쪽 custom MCP transport와 routine 표면이 실제로 존재함을 확인하고, 실패 지점을 provider 추정이 아니라 oort route 부재로 좁혔다. connector UI 제거 뒤 로컬 plugin source가 남는다는 사실도 해제 UX의 이중 확인 근거가 됐다. | #1344 측정 완료; auth/pairing/tool call/full E2E는 HAP-E2/E3 및 Grok E2E로 이관 |
+| **1. 범용 연결 기반** | #1358에서 에이전트 credential 발급·회전·폐기를, #1363에서 modern MCP 2026-07-28 core와 exact 2025-11-25 sessionless adapter를, #1364에서 만료되는 1회 pairing proof를 추가한다. Grok 0.16.0 compatibility는 실제 initialize version이 일치할 때만 claim한다. 봇이 proof를 들고 먼저 접속하고 사람이 감지 결과를 확인한다. v0는 `1 Bot=1 connection=1 dedicated agent member=1 routine`으로 격리하고, 별도 active credential proof와 전용 member unpause 뒤에만 협업 권한을 연다. 외부 봇 목록 스크래핑은 하지 않는다. | 어떤 hosted agent든 같은 보안 경계와 최소 권한으로 연결할 수 있고, 한 연결의 해제가 다른 runtime을 멈추지 않으며 Grok 정책 변화가 코어를 흔들지 않는다. | binding 완료; #1358/#1363은 #1344 ADR landing 뒤 `status:ready`; OAuth는 #1368→#1369 후속 |
+| **2. 인박스·게이트웨이 접합** | 채널별 `message.seq` 충돌을 피하는 durable agent inbox cursor를 만들고 기존 gateway의 lease·dedupe·complete·message write 경로에 얇게 연결한다. 새 작업 원장은 만들지 않는다. | 외부 에이전트가 여러 채널의 일을 유실·중복 없이 가져가고 결과를 oort의 기존 감사·메시지 흐름에 남긴다. | runtime DB/MCP replay·idempotency 증거 |
+| **3. 연결·해제 UX** | 웹/Tauri 에이전트 허브에서 제공자 선택 → 설정값/코드 → 대기 → 감지 → 이름·채널·권한 확인 → 별도 active credential 검증과 전용 member unpause → 활성화 → 테스트 멘션을 제공한다. v0은 **1 Bot = 1 connection = 1 dedicated agent member = 1 deterministic routine**이며 모바일은 상태 읽기 전용이다. | “설치형 봇을 새로 운영”하지 않고 이미 쓰는 에이전트를 팀메이트로 데려오며, 한 연결의 해제가 다른 runtime을 멈추지 않는 경험을 짧고 설명 가능하게 만든다. | 엔진 handoff 후 UXUI goal + design review |
+| **4. 정리 폐곡선·Grok 증거** | 해제 즉시 로컬 credential을 폐기하고 새 job·write를 막은 뒤 `cleanup_pending`에서 Grok routine, MCP connector와 setup이 만든 local plugin source를 서로 다른 정리 대상으로 안내·확인한다. 공개 삭제 API가 없으면 사용자 확인으로 닫고, 기존 멤버·메시지·작업 이력은 보존한다. 마지막으로 Grok 1개 봇의 pair→work→disconnect를 증거화한다. | 접근권한은 즉시 끊으면서 외부 자동화 잔재를 숨기지 않는다. 검증된 범위만 “Grok Bot도 연결” 메시지로 말할 수 있다. | #1344 cleanup 관측 + 후속 real E2E; 자동·연쇄 삭제 주장 금지 |
+
+**ACP·셀프호스팅 경계:** `work_tool_profile` 원장과 Rust T3 소비 경로는 이미 존재한다. #1345는 이를 “부재”로 전제하지 않고, 퇴역한 Swift `MomoACPHost` 이후의 현행 stdio ACP/BYOA 포장·호스팅 갭을 재감사한다. 이 레인은 hosted-agent 원격 MCP 런칭 보조축의 선행조건이 아니며, 공통 credential·catalog 계약이 생길 때만 의존성을 연결한다.
+
+### 서버 — Rust/Axum 재작성 진행 중 (ADR-0145)
+
+```
+Swift(server/)         52 route files · 137 라우트 · 42k LOC   ← 이식 원본, 실행 대상 아님
+Rust(server-rust/)     65 라우트(82 엔드포인트) · 58k LOC       ← 배포되는 것
+```
+
+> 라우트 수 단위 = **유니크 경로**(메서드 병합), 2026-08-04 멀티라인 안전 실측(`rg -oU '\.route\s*\('`). 종전 "156/58"은 단위 불명이라 정정 — 검증 정본 `docs/planning/2026-08-04-handover-verification-and-roadmap-adjustment.md` §1.1.
+
+**선 것**: auth · 메시지(발신·이력·수정·삭제·답글) · 채널 · 반응 · read-state · DM · 검색 · roster · 초대 · realtime 토큰 · devices · provider link/chain · **에이전트**(생성·프로필·pause·allowed-models·게이트웨이 잡) · **agent-runs** · **work-hosts**(등록·heartbeat·BYOC·cloud·terminal-attach) · **work-sessions**(목록·생성·조회·resume·reattach) · work-tier-policy · usage/credits · **승인**(목록·결정·재개).
+
+**안 선 것(대표)**: work-controls · work-auto-approvals · workstream · plugins · MCP · Drive · huddles · **첨부(attachments 3경로 — 클라 표면도 3층 전무, ADR-0150 후보)** · agent-run cancel.
+
+**불변식은 재작성 대상이 아니다** — 59 마이그레이션 중 44개가 트리거·제약·RLS로 DB에 박아뒀고, 마이그레이션은 언어 독립이라 그대로 재사용한다(ADR-0145). 재작성은 "앱 계층 번역"이다.
+
+**Swift 서버 삭제 시점 = 라우트 parity 도달 시 일괄**(2026-08-03 성재 승인). 그때까지 `server/`는 **이식 원본**으로만 살아 있고 실행 대상이 아니다.
+
+### 클라이언트
+
+| 대상 | 상태 | 정본 |
+|---|---|---|
+| **웹** | 서 있음 · 23 feature · 배포됨 | React |
+| **데스크톱** | Tauri 셸 + 같은 React 앱 · 패키징됨 | ADR-0133 |
+| **모바일(iOS)** | 서 있음 · 5 feature · 실기기 검수 중 · NSE 포함 · **EAS 미사용** | ADR-0137 |
+| 모바일(Android) | 미착수 — **iOS v0 TestFlight 직후**(지금 열면 FCM 체인을 두 번 짓는다) | ADR-0137 §6-b |
+| `clients/macOS`·`clients/iOS`(Swift) | **레거시** — 유지보수 대상 아님 | — |
+
+### 푸시
+
+APNs 자격증명 **종단 증명 완료**(Apple이 `apns_id`와 함께 `400 BadDeviceToken` 반환 = provider token 수용). PushRelay 배포됨. payload는 **id-only**(ADR-0120 D2-A). `.p8`는 App Store 배포자만 보유하고, 자체호스팅 서버는 전부 Dawn 운영 PushRelay를 경유한다(D1-A).
+
+### 재작성 중에도 클라이언트는 병행한다 (2026-08-03 성재 승인)
+
+ADR-0145 본문은 *"수 주 기능 정지"*를 적었으나 **실제로는 병행해 왔고 그게 나았다** — 재작성이 메신저 코어를 이미 넘겨서 클라가 붙을 표면이 있었다. 단 **클라는 Rust가 이미 주는 라우트만 쓴다.**
+
+### 이 로드맵에서 떨어져 나간 것
+
+MOMO-2xx AWS 내부 알파 레인 · 72h soak · local dogfood 체크리스트는 **Swift 서버 시절의 전제**다. 재작성 후 다시 세워야 하며 그대로 되살리면 안 된다.
+
+**Phase 0 baseline 상세는 `STATUS.md`. 빌드 백로그는 `BUILD_TICKETS.md`. 정본 스키마는 `schema_v0.sql`(이동·수정 금지, 확장은 `server/Migrations/00N_*.sql` 신규 파일).**
+
+---
+
+## ⚠️ 아래 §1~§7은 **M0~M8 번호 체계** — 축으로 대체됨 (2026-08-03)
+
+번호와 실체가 어긋나므로 **진행 상태의 근거로 읽지 마라.** 다만 **스토어 제출·공증·법무·CI/CD 항목은 여전히 유효**하고, 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다. 현재 위치는 위 §0이 정본이다.
+
+> 📌 **마일스톤 번호 매핑(기존 `scripts/github/milestones.tsv`와의 정합):** 본 ROADMAP은 가이드의 M0~M8 9단계 backbone이다. 기존 GitHub 마일스톤 7개(M0~M6)는 본 backbone의 **부분집합**이며, 본 문서가 상위 정본이다. 매핑은 §6 참조. (TSV는 이 ROADMAP에 맞춰 갱신 가능.)
+
+---
+
+## 1. 마일스톤 표 (~~정본~~ — 축으로 대체됨, §0 참조)
+
+> 트랙: 🖥 데스크탑(macOS) · 📱 모바일(iOS) · ⚙️ 공유/백엔드. 데스크탑·모바일은 **공유 Swift 코어(MomoCore)** 위에서 병렬 진행.
+>
+> **⚠️ 2026-07-27 정정 — 아래 표의 트랙 전제는 낡았다.** ADR-0133(UI 스택 SwiftUI→TS/React+Tauri, Accepted)과 **ADR-0137(모바일 React Native, Accepted 2026-07-27)** 로 공유 코어가 **Swift `MomoCore`에서 TS `packages/momo-core`로 이동**한다. macOS SwiftUI는 은퇴했고(기본 다운로드 = Tauri momo-next), iOS SwiftUI 킷은 **버그픽스 전용 동결 후 RN으로 교체**된다(ADR-0123은 0137이 대체). Android 트랙이 신설된다. 표의 M5(iOS)·M8(App Store) 행은 그 문법으로 다시 읽어야 하며, 실제 착수 순서는 **#837 스파이크 판정 이후** 확정된다. 정본은 ADR-0137 §이행 순서.
+
+| ID | 이름 | 트랙 | 목표(goal) | 핵심 산출물 | 종료 기준(exit) | 의존 |
+|---|---|---|---|---|---|---|
+| **M0** | Foundation (완료) | ⚙️ | 리포 골격 + 5개 Swift 패키지 컴파일 + 정본 스키마/인프라/마이그레이션 파일 | `swift build` green ×5, schema_v0.sql, infra/*, Migrations/* | 컴파일 green ×5 + 파일 정합 (=Phase 0 baseline, **달성됨**) | — |
+| **M1** | Backend 런타임 + 배포(staging) | ⚙️ | docker(PG18+Centrifugo v6+hermes)에서 서버 런타임 검증 + staging 배포(TLS/리버스프록시/시크릿/백업/모니터링) | 동작하는 staging 스택, local alpha runner, RUN 런북 갱신 | 런타임 e2e PASS(아래 G-0) + local alpha evidence + staging URL 헬스 green | M0 |
+| **M2** | 멀티팀 온보딩 | ⚙️ | 워크스페이스 스핀업 + 스핀업별 고유 초대코드 → 자가가입 + 플랫폼 관리자 전체 추적 | `003_onboarding.sql`, 온보딩 REST, 관리자 추적 뷰 | 3개+ 팀(10인=1팀) 격리 + 초대코드 자가가입 e2e + 관리자 전역 조회 | M1 |
+| **M3** | 데스크탑 v0 UX (D/B/C 실데이터) | 🖥 | macOS 클라가 D Live Tool-Call · B 비용 호흡 · C 승인 인박스를 **실데이터**로 렌더 | MomoMac 실데이터 바인딩(VM↔LiveBackend) + `m3-dbc` local gate evidence | D/B/C 3경험이 local gate 실데이터/fixture 경로로 동작하고, external staging/Hermes는 별도 host-runtime 후속으로 남김 | M1 (data), M0 (UI 골격) |
+| **M4** | 데스크탑 패키징 | 🖥 | macOS Xcode `.app` + Developer ID 서명 + 공증(notarytool) + DMG + Sparkle 자동업데이트 | `MomoMac.xcodeproj`, 공증 `.dmg`, appcast | 공증 `.dmg`가 타 맥에서 Gatekeeper 통과(`spctl --assess`) + Sparkle 업데이트 1회 | M3, (M8-선결: 게이트) |
+| **M5** | iOS 앱 | 📱 | iOS Xcode App 타깃 + Push capability + 계정 삭제 + UGC 모더레이션 + privacy manifest | `MomoiOS.xcodeproj`, App Privacy, 모더레이션 4종 | 실기기에서 G-1/G-2 시나리오 통과(로그인→채널→메시지→에이전트 응답) | M3 (공유 UX), M2 (멀티팀) |
+| **M6** | CI/CD | ⚙️ | fastlane(match/pilot/deliver/notarytool) + ASC API Key + GitHub Actions 자동화. 단, 2026-06-26부터 과금 방지를 위해 Actions는 disabled/manual-only이고 local gate가 우선 | `.github/workflows/{ci-build,release-ios,release-macos}.yml`, `fastlane/*`, `docs/LOCAL_PR_GATE.md` | local gate evidence 운영 + CI 재활성 시 green + (게이트 전) release 워크플로우 dry-run 성공 | M0 (skeleton), C1/C2(M4/M5 프로젝트), owner approval |
+| **M7** | QA · 사용성 검수 게이트 🔒 | ⚙️ | "사용 가능 완전 판명" 객관 통과기준(크래시-free/e2e/접근성/성능/베타/Enterprise Trust) 측정·PASS | 계측(Sentry/MetricKit), XCUITest, PASS 기록 | **G-0~G-H 전부 PASS + 증거 첨부** (`05-qa-release-gate.md`) | M1,M3,M4,M5,M6 |
+| **M8** | 스토어 제출 (App Store + Developer ID) | 🖥📱 | macOS 공증 DMG 공개 다운로드 + iOS App Store 업로드/심사/배포 | 공개 다운로드 페이지, App Store 출시 | App Store 승인·배포 + 공증 DMG 공개 + Sparkle 라이브 | **M7 (게이트 PASS 필수)**, M4, M5, M6 |
+
+### 1.1 Local AI · Agent Protocol · Trust overlay
+
+이 overlay는 기존 M1~M8 backbone을 깨지 않고, momo의 포지션을 "채팅앱"에서 "context/memory/policy가 있는 agent work OS"로 끌어올리는 제품·운영 축이다.
+
+| Ticket | Milestone | 역할 | 종료 기준 |
+|---|---|---|---|
+| `MOMO-110` | M1 | Local LLM/agent protocol/Google Workspace/trust 리서치와 로드맵 문서화 | `research/10-local-ai-protocol-trust/*`, ROADMAP/BACKLOG/STATUS 갱신 |
+| `MOMO-154` | M1 | GitHub Actions 자동 실행 차단 + local gate 우선순위 격상 | 원격 workflow disabled, workflow 파일 manual-only, 운영 문서/STATUS 갱신 |
+| `MOMO-111` | M1 | GitHub Actions 비주요 기간용 local PR gate | `scripts/local_gate.sh --profile docs|swift|diagnostics|staging-smoke|host-runtime|backup|local-alpha|runtime-db|runtime-relay|runtime-live|runtime-agent|external-agent-provider|macos-ui|m3-dbc|all` + PR evidence 출력 |
+| `MOMO-112` | M1 | 5개+ Codex session/worktree 운영 자동화 | `scripts/goal_status.sh` board + `goal_claim/release` + `.conductor/setup.sh` + handoff/충돌 방지 정본 |
+| `MOMO-115` | M1 | runtime-relay local gate 자동화 | `scripts/verify_relay.sh` + `local_gate --profile runtime-relay`로 server send→outbox pending→relay claim→Centrifugo history→outbox done→`version=message.seq` evidence |
+| `MOMO-199` | M1 | stale local worktree read-only audit | `scripts/goal_status.sh`가 closed issue/merged PR 연결 worktree를 `done-candidate`/`stale-warning`으로 분리하고 안전 cleanup command만 안내 |
+| `MOMO-209` | M1 | stale worktree Docker Compose janitor | `scripts/compose_janitor.sh`가 stale `momo_` worktree Compose container/network를 dry-run 우선으로 목록화하고 명시적 `--cleanup`에서만 제거 |
+| `MOMO-005` | M1 | staging/prod compose skeleton | Caddy 자동 TLS, PostgreSQL 18, Redis, Centrifugo v6 Redis engine, api/relay/worker compose skeleton |
+| `MOMO-006` | M1 | SOPS/age + pgBackRest skeleton | secret template, pgBackRest config/cron, PITR rehearsal runbook; 실제 host rehearsal은 `runtime-unverified` |
+| `MOMO-007` | M1 | local/staging smoke 운영 gate | `scripts/verify_staging_smoke.sh` + `local_gate --profile staging-smoke`; 실제 URL/TLS/PITR는 host-runtime |
+| `MOMO-216` | M1 | internal single-node hosting smoke gate v0 | `infra/prod/docker-compose.internal-smoke.yml` + `internal-smoke.env.example` + `scripts/verify_internal_hosting_smoke.sh`; `local_gate --profile staging-smoke`에 포함, public TLS/DNS는 `runtime-unverified(public TLS/DNS)` |
+| `MOMO-220` | M1 | internal single-node host-runtime smoke v0 | `scripts/verify_internal_host_runtime.sh` + `local_gate --profile host-runtime`; local images로 prod+internal-smoke boot, migrate idempotency, `/health`, REST send, relay publish, mock Hermes agent roundtrip 검증. public TLS/DNS/registry/SOPS/PITR는 `runtime-unverified(public host)` |
+| `MOMO-221` | M1 | production secret/bootstrap hardening v0 | `scripts/prod_env_preflight.sh` + staging/internal-smoke/host-runtime verifier 연결; prod/internal-host placeholder/dev-insecure/default secret fail-fast, internal-smoke local placeholder 허용 경계와 SOPS operator checklist 문서화 |
+| `MOMO-222` | M1 | Backup/PITR restore rehearsal gate v0 | `scripts/verify_backup_restore_rehearsal.sh` + `local_gate --profile backup`; repo-local PG18 dump→separate restore→marker checksum→markdown/json evidence. `host-runtime`에도 포함, real pgBackRest PITR는 `runtime-unverified(public host)` |
+| `MOMO-229` | M1 | Public host preflight + deploy evidence packet v0 | `scripts/prod_env_preflight.sh --evidence-dir` + `local_gate --profile staging-smoke`; public/staging env shape, pinned registry images, SOPS/age source, named DB/Redis volumes, pgBackRest/WAL/PITR required env를 fail-fast하고 redacted markdown/json evidence 생성 |
+| `MOMO-233` | M1/M7 준비 | AWS internal alpha stack v0 | `docs/AWS_INTERNAL_ALPHA.md` + `infra/prod/aws-internal-alpha.env.example` + `scripts/aws_internal_alpha_preflight.sh`; 최소/권장/분리 topology, Lightsail vs EC2 추천/비용, 보안그룹, DNS/TLS, backup/restore, image-based deploy/rollback을 static preflight로 고정 |
+| `MOMO-237` | M1/M7 준비 | Local Docker alpha RC gate v0 | `scripts/local_gate.sh --profile local-alpha`; AWS 생성 전 local Docker image boot/migrate/health/message/relay/mock Kim Intern, backup restore, macOS real-backend smoke, diagnostics bundle을 한 packet으로 수집 |
+| `MOMO-239` | M1/M7 준비 | Local one-person alpha gate + AWS promotion threshold | `docs/INTERNAL_ALPHA.md` one-person dogfood checklist + `docs/AWS_INTERNAL_ALPHA.md` promotion precondition + `docs/LOCAL_PR_GATE.md` docs evidence boundary; AWS는 local gate, 1인 soak, credentialed external agent runtime smoke, no P0/P1, diagnostics evidence가 모두 PASS일 때만 `AWS_READY` |
+| `MOMO-241` | M1/M7 준비 | Local 3-Day Alpha Test Pack | `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`; Day 0 readiness, Day 1 messenger, Day 2 agent runtime, Day 3 soak/final decision, bug severity, recovery, evidence layout, MOMO-246 final report template |
+| `MOMO-242` | M1/M7 준비 | External Agent Runtime Smoke | momo agent member가 external runtime/provider와 최소 1왕복을 수행하는 credentialed smoke; provider token은 momo 밖에 두고 readiness/degraded evidence만 redacted 처리 |
+| `MOMO-256` | M1/M7 준비 | Local Hermes Agent Bridge v0 | Hermes runtime seed를 `member.kind='agent'` + `@hermes`로 정렬하고, local loopback OpenAI-compatible provider로 mention→agent_job→AgentWorker SSE→usage ledger→durable message를 검증 |
+| `MOMO-257` | M1/M7 준비 | Local Hermes/Codex OAuth provider setup | 사용자가 provider에서 Codex/OpenAI OAuth 또는 provider token을 직접 설정하고, momo는 local loopback endpoint + Hermes-facing bearer만 받아 `@hermes` credentialed smoke를 수행하는 runbook/wrapper/Command Center evidence |
+| `MOMO-243` | M3/M7 준비 | In-App Alpha Command Center | macOS 앱 안에서 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태와 오늘 테스트할 항목을 보여주는 내부 alpha surface |
+| `MOMO-244` | M3/M4 준비 | Dev Update Channel v0 | local manifest/file URL 기반 current/available version surface + operator-assisted update/relaunch flow |
+| `MOMO-253` | M3/M7 준비 | macOS dogfood UX shell polish | post-login UI를 channel/member/approval 중심으로 단순화하고 session/profile/language/update/invite/logout controls를 sidebar footer profile menu로 이동 |
+| `MOMO-259` | M3/M7 준비 | macOS shell/layout/performance polish | root `NavigationSplitView` swap을 제거하고 optional inspector, lightweight profile menu, direct language menu, appearance preference, quick tooltip을 보강 |
+| `MOMO-334` | M3/M7 준비 | Dogfood Hermes invite roster UX v0 | Hermes는 초대 전 기본 roster에서 숨기고, 멤버 `+` → 사람/에이전트 초대 분기 → `@hermes` profile/alias/endpoint 확인 → channel member 표시로 연결. 기존 gateway mention path는 유지 |
+| `MOMO-335` | M3/M7 준비 | Mention autocomplete + Hermes working indicator | 현재 채널에 초대된 member/agent만 `@` 후보로 표시하고, Hermes mention 후 agent pending/running 상태를 timeline + member row working badge로 보여준다 |
+| `MOMO-260` | M3/M7 준비 | Workspace/member/agent profile settings v0 | 서버 설정을 workspace header inspector로 분리하고, member/agent profile editor에서 로컬 표시 이름·avatar·presence badge draft를 관리한다. 서버 영속 API는 후속 |
+| `MOMO-262` | M3/M7 준비 | Agent Pairing Wizard v0 | 멤버 `+`의 에이전트 초대에서 Hermes alias/display name/loopback endpoint/model/scope를 확인하고 pairing manifest/invite code copy/export와 non-loopback HTTP fail-closed guidance를 제공한다. provider OAuth/API key는 momo에 저장하지 않음 |
+| `MOMO-261` | M3/M7 준비 | Approval/Command Center/typing activity UX | 에이전트 승인함/Command Center의 의미와 닫기 흐름을 명확히 하고, 사람 typing indicator와 에이전트 working status badge를 macOS dogfood shell에 추가한다 |
+| `MOMO-264` | M3/M7 준비 | macOS native profile/settings/downloads UX | profile footer는 launcher로 축소하고 Profile/Settings/Downloads/Updates를 우측 설정 surface로 분리해 프로필 이미지, 언어/appearance, workspace icon, 다운로드 폴더/이력, update status를 다국어로 제공 |
+| `MOMO-245` | M1/M7 준비 | Local Soak/Resource Monitor | `scripts/local_soak_monitor.sh`; 72h local dogfood 중 API/Centrifugo/DB/outbox/relay/worker/Docker/macOS 상태를 repo 밖 evidence로 주기 수집하고 `summary.md`에 PASS/WARN/FAIL + P0/P1 기준 기록 |
+| `MOMO-246` | M1/M7 준비 | 72h Local Alpha Dogfood Run | MOMO-241~245 merge 후 momo-main tracking issue로 실제 72h run을 기록하고 `AWS_READY`/`BLOCKED`/`NEEDS_MORE_LOCAL` 중 하나로 판정. MOMO-336 이후에는 첫 local solo dogfood entry blocker가 아니라 AWS/pre-production promotion evidence로 취급 |
+| `MOMO-336` | M1/M7 준비 | Local Solo Hermes Dogfood Start Gate | full 72h soak 대신 local stack, fresh session, explicit Hermes invite, `@hermes` roundtrip PASS, activity visibility, diagnostics/resource evidence, open P0/P1 0으로 `START_SOLO` / `BLOCKED` / `NEEDS_FIX` 판단 |
+| `LSA-001` | M1/M7 준비 | Redesign-aligned local solo alpha readiness | `docs/LOCAL_SOLO_ALPHA_ROADMAP.md` + local runner/docs/app defaults; MOMO-300/301/302 이후 fresh login, generated `CENT_PROXY_SECRET`, migration 007 idempotency, rate-limit/context expectations, and local-alpha evidence are aligned before more dogfood work |
+| `MOMO-319` | M1/M7 준비 | Local gate/verifier hardening for solo alpha | repo-local verifier-owned port/process-tree cleanup + fixture-scoped DB cleanup; `runtime-agent` full gate repeatability restored before local solo dogfood |
+| `MOMO-320` | M1/M7 준비 | Local runtime env drift guard | stale generated `.env.worktree`가 `CENT_API_KEY`/`CENT_TOKEN_HMAC`/`CENT_PROXY_SECRET`/`JWT_HMAC`를 누락해 Centrifugo publish 401을 만들지 않도록 runtime gate가 generated env를 재생성하거나 custom `ENV_FILE` 누락을 명확히 fail-fast |
+| `MOMO-227` | M1 | Kim Intern runtime config + health/status visibility v0 | `AGENT_PROVIDER_MODE` local/internal-host/external Hermes contract, staging/prod/internal-host external-provider fail-fast, `/v1/agent-runtime/status` secret-redacted projection, macOS compact Kim Intern availability chip, host-runtime status/redaction evidence |
+| `MOMO-230` | M1 | External Kim Intern/Hermes provider smoke gate v0 | `scripts/verify_external_agent_provider.sh` + `local_gate --profile external-agent-provider`; credentials가 있으면 OpenAI-compatible SSE preflight + local server/worker/relay `@김인턴` 1왕복, 없으면 `runtime-unverified(external provider credentials)` evidence |
+| `MOMO-234` | M1 | Hermes Codex OAuth provider boundary v0 | `docs/adr/0004-codex-oauth-hermes-provider-boundary.md` + external provider verifier evidence/guard; Codex OAuth access/refresh token은 provider-owned이고 momo app/API/DB/local gate에는 저장/전달하지 않음 |
+| `MOMO-236` | M1 | Hermes internal alpha invite smoke v0 | Kim Intern seeded/admin invite contract(active agent member + `#agent-lab` membership) + macOS/API status boundary + `external-agent-provider` invite precondition evidence; credentials 없으면 explicit `runtime-unverified(external provider credentials)` skip |
+| `MOMO-238` | M1 | Local Hermes GPT provider loopback contract | `docs/external-agent-provider/local-hermes-gpt.md` + server/worker/verifier guard; local-only `http://127.0.0.1:<port>/v1`/`localhost` allowed only with `MOMO_ENV=local AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`, non-loopback HTTP and Codex/OpenAI credential leakage fail fast |
+| `MOMO-242` | M1 | External agent runtime smoke contract | `docs/external-agent-provider/README.md` + `local_alpha_runner --external-smoke`; provider-neutral secret env, mock/local/external 차이, `/v1/agent-runtime/status.degradedReason`, credentialed channel message→agent response smoke 경계를 고정 |
+| `MOMO-256` | M1 | Local Hermes Agent Bridge v0 | `006_local_hermes_agent_seed.sql` + `scripts/verify_local_hermes_bridge.sh` + macOS `@hermes` alias; mock fallback과 real local provider evidence를 분리하고 non-loopback HTTP는 opt-in 없이는 fail-closed |
+| `MOMO-257` | M1 | Local Hermes/Codex OAuth provider setup | `docs/external-agent-provider/local-hermes-codex-oauth-setup.md` + `scripts/verify_local_hermes_credentialed_smoke.sh`; user-owned provider login/token 경계, out-of-repo env, loopback fail-closed, Command Center provider setup 상태 |
+| `MOMO-325` | M1 | Hermes Gateway Native Platform Integration v1 | Hermes가 momo를 Slack/Telegram-style platform으로 보고 `agent.job`를 상시 sync하되, final response/usage/audit는 momo REST→Postgres→outbox ledger로 기록; `scripts/momo hermes-gateway-*` + mock gateway harness |
+| `MOMO-326` | M1 | Real Hermes gateway plugin load + credentialed local smoke | 실제 Hermes CLI/plugin directory/provider login 경계를 user-owned로 두고 `scripts/momo hermes-gateway-smoke --real [--trigger]` evidence로 설치/플러그인/OAuth/momo gateway-mode/`@hermes` same-channel response를 분리 검증 |
+| `MOMO-337` | M1 | Per-agent bearer server auth v1 | human admin이 agent-scoped credential을 1회 발급하고 realtime/pending/callback/message가 token actor·scope·revocation을 강제. legacy shared secret은 명시 이관 flag에서만 허용 |
+| `MOMO-338` | M1 | Hermes adapter bearer single path | human operator login/shared secret을 제거하고 `MOMO_AGENT_TOKEN` 하나로 realtime-first `agentwork:` + bounded queue/recovery/callback/message를 처리. user-visible exact-channel `agent:` progress와 private self-only work stream을 분리하고 actor/channel mismatch, revoked bearer, non-loopback plaintext는 fail-closed |
+| `MOMO-339` | M3 | Pairing credential issue/rotate UI | macOS pairing wizard가 agent credential 원문 1회 표시·copy와 상태/회전/폐기를 제공하되 manifest와 evidence에는 secret을 넣지 않음 |
+| `MOMO-341` | M1 | Gateway pending durable claim/lease | 동일 agent gateway 인스턴스가 겹쳐도 provider turn이 한 번만 실행되도록 원자 claim, bounded lease, crash takeover를 서버 SoT로 보장 |
+| `MOMO-224` | M1 | internal alpha diagnostics/observability bundle v0 | `scripts/collect_diagnostics.sh` + `local_gate --profile diagnostics`; server/relay/worker/Centrifugo/macOS/local-gate evidence와 redacted env shape/commit을 directory + tar.gz + summary.md로 수집 |
+| `MOMO-225` | M1 | Internal alpha combined local gate v0 | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha`; host-runtime boot/health/migrate/message/relay/mock Kim Intern, backup restore rehearsal, MomoMacDevApp real-backend process/window, diagnostics bundle path를 한 evidence packet으로 수집 |
+| `MOMO-228` | M3/M7 준비 | internal alpha runbook and feedback packet v0 | `docs/INTERNAL_ALPHA.md` + RUN/INDEX/LOCAL_PR_GATE/STATUS/ROADMAP/BUILD_TICKETS 연결; local stack, MomoMacDevApp, invite/join, 김인턴, diagnostics, bug report, known limitations를 팀원용 절차로 고정 |
+| `MOMO-231` | M3/M7 준비 | internal alpha feedback intake + triage workflow v0 | GitHub `Internal alpha feedback` template + `docs/INTERNAL_ALPHA_FEEDBACK.md` + `status:needs-triage` board; severity/evidence/labels/milestone을 buildable goal과 worker handoff로 연결 |
+| `MOMO-235` | M3/M4 준비 | macOS alpha update channel v0 | Sparkle 2 alpha channel ADR/runbook + SwiftPM/Xcode-host visible `Updates` placeholder; real appcast/install remains M4 signed/notarized follow-up |
+| `MOMO-243` | M3/M7 준비 | In-App Alpha Command Center | macOS detail pane에서 Server/Realtime/Agent Runtime/Invites/Diagnostics/Updates 상태, 오늘 테스트할 것, 가능한 기능/known limitations를 앱 안에 표시 |
+| `MOMO-244` | M3/M4 준비 | Dev Update Channel v0 | `Updates` reads local/file manifest metadata, compares current/available version, shows latest/update/failure states, and provides operator-assisted download/relaunch guidance for dogfood builds |
+| `MOMO-150` | M1.5 | Hermes/Kim Intern/openclaw agent runtime 분석 | `research/11-agent-runtime/*` + runtime gap/roadmap 정리 |
+| `MOMO-151` | M1.5 | Context Packet v0 심화 | `research/11-agent-runtime/04-context-packet-v0.md` + mention/command/message-action fixtures |
+| `MOMO-152` | M1.5 | Memory Plane v0 심화 | `research/11-agent-runtime/05-memory-plane-v0.md` + typed memory/retrieval permission fixtures |
+| `MOMO-153` | M1.5 | Capability Cache v0 | `research/11-agent-runtime/06-capability-cache-v0.md` + agent/plugin/MCP capability cache, tool schema refs, invalidation, policy/capability version |
+| `MOMO-180` | M1.5 | Agentic Work OS 시장/레포 topology 정렬 | `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md` + `docs/adr/0001-agentic-work-os-repo-topology.md`; core monorepo 유지, plugin/catalog/SDK/MCP/landing repo split 기준, dev/e2e/prod deploy layering |
+| `MOMO-181` | M1.5 | Plugin manifest v0 + catalog split criteria | `research/12-agentic-work-os/02-plugin-manifest-v0.md` + JSON fixtures; `plugin_id`/tools/scopes/runtime boundary/license/provenance, capability grants, approval metadata gate, audit/source/signature policy와 `momo-plugins`/first-party plugin/SDK repo split 기준 |
+| `MOMO-182` | M1.5 | Docker compose layer ADR/dev-e2e-prod plan | `docs/adr/0002-docker-compose-layering.md`; dev/e2e/prod/install/upgrade/backup 경계, image-based prod deploy, optional external DB/TLS/agent runtime 방향 |
+| `MOMO-186` | M1.5 | Deterministic e2e compose stack for local gates | `infra/docker-compose.e2e.yml` + `infra/e2e/bootstrap_roles.sql`; api/relay/worker/mock-Hermes/Postgres/Centrifugo boundary와 `local_gate --profile docs` config validation |
+| `MOMO-183` | M1.5 | First-party plugin repo strategy | `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`; GitHub/GitHub Issues → Google Workspace → Jira-like work items → Docs connector 우선순위, repo split 순서, plugin surface/audit/source/approval contract |
+| `MOMO-184` | M1.5 | Agent host positioning/product messaging | `research/12-agentic-work-os/03-agent-host-positioning.md` + README reusable copy; channel timeline execution ledger 중심 제품 문장 |
+| `MOMO-120` | M2 | Context Packet v0 | `{goal,constraints,decisions,sources,permissions,budget,redactions}` 스펙/fixture |
+| `MOMO-121` | M2 | Memory Plane v0 | typed memory(decision/preference/artifact/task_state/source_ref) + 권한/삭제 모델 |
+| `MOMO-122` | M2 | Google Workspace connector v0 | `research/11-agent-runtime/12-google-workspace-connector-v0.md` + Drive/Gmail/Calendar fixtures; per-user OAuth + read-mostly sync + approval-gated writes |
+| `MOMO-123` | M2 | Google Workspace enterprise admin | `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md` + enterprise admin install/DWD/scope inventory/audit export/revoke fixtures |
+| `MOMO-130` | M3 | macOS Foundation Models capability probe | 완료: `canImport`/availability/fallback 경로 + MomoMac state surface |
+| `MOMO-131` | M3 | Local Context Copilot | 진행 중: macOS sidebar preview shell + Foundation Models/fallback route + source-preserving deterministic preview |
+| `MOMO-132` | M3 | Agent Protocol v0 | `agent_request/context_packet/tool_call/approval/tool_result/usage/audit` DB/wire/Swift/card 정합 |
+| `MOMO-133` | M3 | Google Workspace "ask my work" UX | source citation + approval-gated external writes |
+| `MOMO-134` | M3 | build-macos-apps 기반 macOS dev run loop | 완료: `scripts/macos_dev_run.sh` dev `.app` staging + Codex Run action + `--verify/--logs` + local gate opt-in |
+| `MOMO-160` | M2 | A2A-style agent_run lifecycle alignment | `research/11-agent-runtime/07-agent-run-lifecycle-v0.md` + Task/Message/Artifact/status mapping |
+| `MOMO-161` | M2 | approval pause/resume runtime | `research/11-agent-runtime/08-approval-pause-resume-runtime.md` + worker pause slice; server decision endpoint/resume job contract is MOMO-167, approved deterministic resume executor is MOMO-178 |
+| `MOMO-166` | M2 | approval decision server contract v0 | `research/11-agent-runtime/10-approval-decision-server-contract-v0.md` + request/response fixtures; connects MOMO-161 runtime checkpoint to MOMO-171 macOS decision intent |
+| `MOMO-167` | M2 | approval decision endpoint runtime | server REST decision endpoint + `approval_decision` idempotency ledger + audit/outbox resume contract + `runtime-db` verifier |
+| `MOMO-178` | M2 | AgentWorker approved tool resume executor v0 | `method='resume_approval'` worker branch + fail-closed approved metadata/frozen payload checks + deterministic mock tool_result/audit runtime smoke |
+| `MOMO-162` | M2 | Hermes adapter contract verification | `research/11-agent-runtime/11-hermes-adapter-contract-v0.md` + fixtures; AgentWorker SSE product default, platform adapter optional interop |
+| `MOMO-168` | M2 | Hermes adapter repo-local smoke harness | `adapters/hermes/tests/smoke_momo_adapter.py` + `local_gate --profile docs`; live Hermes plugin load/e2e remains runtime-unverified |
+| `MOMO-163` | M2 | inbound MCP server v0 | governed search/fetch/post/approval-safe tool call surface + resources/prompts/fixtures |
+| `MOMO-172` | M2 | inbound MCP server v0 skeleton/spec-to-code bridge | server registry/routes/stub + endpoint/security docs |
+| `MOMO-170` | M3 | macOS agent protocol cards | `tool_call`/approval/result/artifact cards + Context Packet/Memory/Capability/source/cost badges + SwiftUI fixture contract |
+| `MOMO-171` | M3 | macOS approval_request card decisions | Approve/Reject buttons call `ChatBackend.decideApproval(ApprovalDecisionRequest)` and reconcile receipt/realtime state |
+| `MOMO-174` | M3 | local LLM context compaction | 완료: source-preserving Context Packet compaction v1 + availability-safe Foundation Models route + deterministic fallback |
+| `MOMO-177` | M3 | macOS MomoServer REST ChatBackend v0 | 완료: `MOMO_SERVER_BASE_URL` dev config로 REST login/history/send 사용, LiveChatBackend fallback 유지 |
+| `MOMO-197` | M3 | Server channel list + macOS dynamic channel loading v0 | 완료: `GET /v1/workspaces/{ws}/channels` + macOS REST bootstrap server channel list, LiveChatBackend fallback 유지 |
+| `MOMO-214` | M2/M3 | Channel create + membership management runtime v0 | owner/admin `POST /channels`, member add/remove endpoints, human/agent channel membership, `channel_seq` provisioning, cross-workspace guard; `scripts/verify_channel_management.sh` + `runtime-db` local gate |
+| `MOMO-179` | M3 | Realtime client subscription contract v0 | `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md` + fixtures; exact channel/token boundary, MomoCore event mapping, `message.seq` replay/gap-fill/reconnect; live SwiftCentrifuge remains runtime-unverified |
+| `MOMO-192` | M3 | Server realtime-token endpoint v0 | `POST /v1/auth/realtime-token` protected by app access JWT; active member recheck under tenant RLS; short-lived Centrifugo connection JWT with member/workspace claims; subscribe proxy keeps channel membership boundary |
+| `MOMO-193` | M3 | SwiftCentrifuge RealtimeSubscriptionDriver v0 | `MomoCore` realtime driver/replay controller + macOS REST backend injection seam; duplicate/gap/backfill tests pass; actual SwiftCentrifuge adapter/live e2e remains runtime-unverified |
+| `MOMO-196` | M3 | Realtime WebSocket live subscribe verifier v0 | `scripts/verify_realtime_live.sh` + `local_gate --profile runtime-live`; dev compose PG/Centrifugo + host API/relay + `api:8080` proxy token→subscribe→REST send→live `message.new` with `payload.message.seq` evidence; SwiftCentrifuge adapter/reconnect UX remains runtime-unverified |
+| `MOMO-198` | M3 | D/B/C real-data readiness spec | `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`; stale MOMO-020/021/022 blockers remapped to current code and MOMO-200~204 follow-up slices |
+| `MOMO-200` | M3 | macOS SwiftCentrifuge live adapter | SwiftCentrifuge 0.9.0 MIT dependency + `/v1/auth/realtime-token` connection token getter + `ch:ws<workspace>.<channel>` `RealtimeEnvelopeSubscriptionTransport` injection; `runtime-live` channel subscribe evidence PASS; `agent:` live boundary is covered by MOMO-212, production reconnect UX polish remains follow-up |
+| `MOMO-201` | M3 | D Live Tool-Call fixture/local gate | 완료: mock SSE/runtime fixture emits `agent.partial` tool-call progress with bounded args + final `tool_result`/`message.new`; MomoMac reconciles progress card to final `message.seq` timeline |
+| `MOMO-202` | M3 | Cost projection + CostSnapshot binding | 완료: `GET /v1/workspaces/{ws}/channels/{ch}/cost-snapshots` server-owned projection + macOS `CostSnapshot` binding; runtime-agent endpoint evidence |
+| `MOMO-203` | M3 | Approval pending projection + inbox gate | `GET /v1/workspaces/{ws}/approvals?status=pending` server-owned read model + macOS C inbox initial load + receipt/`approval.decided` reconciliation; two-workspace/member guard covered by `runtime-db` |
+| `MOMO-204` | M3 | Combined M3 D/B/C local gate profile | `scripts/local_gate.sh --profile m3-dbc`가 D tool-call, B cost projection, C approval decision, macOS REST/UI evidence를 한 block으로 수집; #12(MOMO-020)는 profile PASS+merge 후 close-ready |
+| `MOMO-205` | M3 | macOS real-backend dev app smoke gate | `scripts/verify_macos_real_backend_ui.sh` + `local_gate --profile macos-ui`; Docker+migrate+host MomoServer REST login/channel list/history/send plus approval/cost fixture evidence, with `LOCAL_GATE_LAUNCH_UI=1` process/window launch still opt-in |
+| `MOMO-207` | M3 | macOS realtime reconnect status UX | 완료: `MomoCore` realtime status model + SwiftCentrifuge lifecycle status stream + `ChatViewModel` retry + MomoMac Live/REST fallback banner; swift/macos-ui gates PASS |
+| `MOMO-212` | M3 | Agent channel live subscription verifier v0 | 완료: Centrifugo `agent:ws<workspace>.<channel>.<agentMember>` subscribe proxy + exact-channel membership guard + `scripts/verify_agent_live_channel.sh`; authorized member receives `agent.status`/`agent.partial`, invalid token/different-channel/other-workspace/direct publish denied; private `agentwork:` WebSocket/relay evidence 포함 |
+| `MOMO-213` | M3 | macOS real-server session/onboarding UI v0 | `MomoMacDevApp` first-run/session surface can enter server URL/email/password/optional invite code, login or `/v1/join`, and open the existing channel/timeline/approval/cost UI against a real MomoServer while preserving explicit demo fallback |
+| `MOMO-218` | M3 | macOS channel management UI v0 | macOS real-server sidebar can create public/private channels and add/remove human/agent members using MOMO-214 REST endpoints; roster projection carries active `channelIds`; `macos-ui` smoke covers channel create + agent add/remove |
+| `MOMO-215` | M3 | Agent mention routing e2e v0 | 완료: REST `POST /messages`의 `@김인턴`/agent mention이 same-channel `agent_run` + `agent_job`으로 이어지고, duplicate `client_msg_id`는 job dedupe, non-channel agent는 audit no-op, mock SSE는 `agent:` progress + final channel `message.new`로 reconcile |
+| `MOMO-217` | M2/M3 | Auth password verification runtime hardening v0 | `POST /v1/auth/login` password stub 제거, pgcrypto `momo_password_hash`/`momo_password_verify`, demo/join 계정 password_hash 검증, platform admin secret 분리, `runtime-db`/`swift` local gate |
+| `MOMO-219` | M3 | macOS agent mention UX v0 | 완료: macOS agent roster click/context action inserts `@김인턴`/`@kim-intern`, optimistic/progress/final reconcile is visible, REST fallback refreshes durable final history, LiveChatBackend has deterministic Kim Intern mention response |
+| `MOMO-223` | M3 | macOS session/account/server switch + logout polish v0 | 완료: session bar/details에서 server/workspace/member/realtime fallback 상태를 확인하고, Switch/Log Out이 token/workspace/channel/realtime cache와 password-sensitive state를 지운 뒤 chooser로 돌아간다 |
+| `MOMO-226` | M3 | macOS invite/admin onboarding real-backend polish v0 | 완료: real-server session bar에서 invite create/list/revoke compact admin surface를 제공하고, `/v1/join` second-user smoke 후 workspace/channel/member state load를 `macos-ui` evidence에 포함 |
+| `MOMO-232` | M3 | macOS internal alpha usability polish v0 | 진행: invite admin 중복 submit/progress/retry/copy-code, session switch/logout stale-state cleanup, recoverable error retry/dismiss, Kim Intern provider chip mode/diagnostics polish |
+| `MOMO-235` | M3/M4 | macOS alpha update channel v0 | 완료: `Updates` placeholder surface, Sparkle 2 alpha-channel ADR/runbook, appcast/signing/notary/DMG secret boundary를 정리. Real Sparkle install proof는 signed/notarized M4 artifact 후속 |
+| `MOMO-243` | M3/M7 준비 | 완료: `Alpha Command Center` detail pane이 dogfood 중 사용 가능한 기능, degraded/failed 상태, 테스트 체크리스트, known limitations를 앱 안에서 노출 |
+| `MOMO-244` | M3/M4 | Dev Update Channel v0 | 진행: local/file manifest 기반 current/available version 표시, update/latest/failure 상태, operator-assisted download/relaunch CTA, manifest fixture/runbook을 추가. Sparkle/Developer ID/notary/DMG/self-replace updater는 후속 |
+| `MOMO-253` | M3/M7 준비 | 완료: macOS post-login shell을 넓은 sidebar + bottom profile menu + hidden diagnostics/detail pane 중심으로 단순화하고 first-run/icon/localization UX는 유지 |
+| `MOMO-259` | M3/M7 준비 | 진행: macOS root layout을 안정화해 우측 inspector open/close 시 sidebar/toolbar 재배치를 막고 profile menu/language/appearance/tooltip 체감을 개선 |
+| `MOMO-140` | M7 | Enterprise Trust Gate | SOC2/ISO/Pentest/SBOM/threat model/security whitepaper evidence를 QA gate 입력화 |
+
+### 1.2 Agentic Work OS ecosystem overlay
+
+MOMO-180은 Paca/OpenHands/Linear/Rovo/GitHub Copilot/Slack/MCP/A2A 흐름을 기준으로 momo의 생태계 방향을 고정한다. MOMO-184는 이를 제품 메시지로 압축해 "Paca를 복제하지 않고, 채널 타임라인을 context/approval/cost/audit execution ledger로 만드는 self-hosted enterprise agent host"를 reusable copy로 고정한다.
+
+로드맵 영향:
+
+- `momo` core monorepo는 M3/M4까지 유지한다. server/relay/worker/clients/schema/protocol이 아직 함께 움직이므로 조기 split은 금지한다.
+- repo split은 ecosystem surface부터 시작한다: `momo-plugins`, first-party plugin repos, plugin SDK repos, `momo-mcp`, `momo-landing`, private `momo-signing`.
+- plugin v0는 `research/12-agentic-work-os/02-plugin-manifest-v0.md`를 정본으로 manifest/capability grants/Context Packet `tool_grants`/Capability Cache `plugin_tool_schema`/approval metadata gate/audit/source/signature/catalog 중심으로 먼저 고정한다. WASM runtime은 M5+ 후속 선택지이며, v0 기본값은 governed connector + approval/cost/audit ledger다.
+- first-party plugin 순서는 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`를 정본으로 둔다: `momo-plugin-github`(GitHub/GitHub Issues) → private-first `momo-plugin-google-workspace` → neutral `momo-plugin-work-items` → `momo-plugin-docs`. 각 plugin은 slash command, message context action, approval card, source provider, audit event를 Manifest v0 / Context Packet `tool_grants` / Capability Cache / Memory Plane permission model에 연결해야 한다.
+- Docker/deploy는 `docs/adr/0002-docker-compose-layering.md`를 정본으로 dev/e2e/prod/install/backup layer를 분리한다. 실제 prod deploy, image publish, installer 구현은 후속 티켓에서만 수행한다.
+- product messaging은 `research/12-agentic-work-os/03-agent-host-positioning.md`를 정본으로 둔다. 핵심 문장: channel timeline execution ledger, first-class agent member, protocol surface, self-hosted trust boundary, local LLM future.
+
+후속 빌더블 후보:
+
+- `MOMO-181`: Plugin manifest/catalog split criteria.
+- `MOMO-182`: Docker compose layer ADR/dev-e2e-prod plan. 완료 후 정본은 `docs/adr/0002-docker-compose-layering.md`.
+- `MOMO-186`: Deterministic e2e compose stack. 완료 후 정본은 `infra/docker-compose.e2e.yml` + docs/static local gate config validation.
+- `MOMO-183`: First-party plugin repo strategy. 완료 후 정본은 `research/12-agentic-work-os/03-first-party-plugin-repo-strategy.md`.
+- `MOMO-184`: Agent host positioning/product messaging. 완료 후 정본은 `research/12-agentic-work-os/03-agent-host-positioning.md`.
+
+### 1.3 재설계 2026-07 overlay (MOMO-300~323)
+
+2026-07-06 전체 코드베이스 진단 + 레퍼런스 리서치로 확정된 재설계 트랙. **M0~M8 backbone과 M7 게이트 불변식은 불변**이며, 기존 마일스톤 위에 얹는 overlay다. 진단/설계 정본은 `research/13-redesign/01~03`, **실행 팔로업 보드는 `research/13-redesign/00-execution-tracker.md`**(재설계 티켓 종료 시 STATUS.md와 함께 갱신). 티켓 상세는 `docs/BACKLOG.md` §4 재설계 섹션.
+
+핵심 진단: 에이전트 네이티브 코어(스키마/outbox/비용/승인)는 경쟁력이 있으나 ①디자인 시스템 부재 ②메신저 테이블스테이크스(스레드/검색/파일/마크다운) 미티켓화 ③에이전트 단발 컨텍스트(히스토리 미전달) ④MCP 스텁/프로토콜 고립 ⑤보안 갭(proxy 미인증/revocation/rate limit/BYOK) ⑥온디바이스 AI 반쪽.
+
+| Phase | 티켓 | Milestone | 내용 |
+|---|---|---|---|
+| **Phase 0** 게이트/도구 | MOMO-316(P0)·318 → 317 → 319 | M1 | diff 기반 `--auto` 프로파일 + compose `--wait` + BuildKit/worktree 빌드 캐시 + 디자인 pre-flight/스냅샷. 이후 전 PR의 게이트 비용을 낮추는 선행 투자 |
+| **Phase 1** P0 코어 | MOMO-300·301·302·303·304 | M1/M3 | 보안 3종(proxy 인증/revocation/rate limit), depth/round 스키마+루프가드 실쿼리, **컨텍스트 조립 v1**(단일 메시지 폐기), MomoDS 토큰 4층, 마크다운/편집/멘션 |
+| **Phase 2** P1 확장 | MOMO-305·306·307·308·309·310·321·323 + engine foundation/GWS IDs pending ADR-0113~0116 | M2/M3 | 스레드/unread/알림, 검색(Cmd+K)/리액션, Context Broker 실조립, MCP JSON-RPC 실구현, BYOK provider_config, minimum Capability/Memory 이후 advanced pgvector RAG, **파일/출처=Google Drive**. MOMO-320은 완료된 env drift 전용이며 Drive ID로 재사용하지 않음 |
+| **Phase 3** P2 마감 | MOMO-311·312·313·314·315·319·322 | M3+ | FoundationModels 압축/트리아지, 음성 입력(SpeechTranscriber ko_KR), A2A Agent Card, reversibility 렌더(MOMO-091 선행 슬라이스), audit redaction/보존, 김인턴 위키 |
+
+로드맵 영향:
+- M3(데스크탑 v0 UX)의 실질 내용이 D/B/C 실데이터 + **MomoDS/코어 UX(303~306)**로 확장된다. Phase 1의 P0 4건(300/301/302/303)은 M3 본격 진입 전 게이트로 취급한다.
+- 파일/출처 저장은 자체 오브젝트 스토리지보다 Google Drive connector를 우선 검토한다. 다만 **workspace archive/shared-drive 경로는 ADR-0113/0116 결정 전 동결**하고, v0 권고는 per-user selected-file read/citation vertical이다. 기존 archive 초안은 새 ID를 받아야 하며 MOMO-320을 재사용하지 않는다.
+- UI 작업은 `.claude/skills/momo-design-taste/` skill + design-review 에이전트 리포트(Blocker 0)를 PR evidence로 포함한다(사람 리뷰는 High 이하 판정만).
+
+### 1.4 Agent Work Surface overlay (ADR-0111 · 2026-07-13 성재 발제)
+
+메신저 안에서 에이전트에게 실제 업무(터미널·코드 작업)를 시키고 실행 전 과정이 채널 타임라인에 원장으로 남는 표면. §1.2의 "execution ledger" 포지셔닝의 첫 사용자 체감 구현이다. 정본: `docs/adr/0111-agent-work-surface.md` (**Accepted**, 2026-07-13). 실제 Codex app-server interactive transport는 후속 ADR-0114에서 ADR-0102/0111 amendment로 결정한다.
+
+- 핵심 결정(적용됨): Work=`agent_run` 확장(새 실행 개체 금지) · 실행은 항상 에이전트 호스트(BYOA gateway, momo 서버는 코드 실행 안 함, ADR-0004 유지) · codex sandbox 정책→승인 티어 매핑(349 재사용) · 특화 라우팅 v0=초대된 에이전트 중 capability 배지 명시 선택 · 코드 특화 레퍼런스=Apache-2.0 codex CLI 기반 `codex-workbench` adapter.
+- 파생 배치 완료: MOMO-362(work run 계약) → 363(codex-workbench adapter), 364(Work UI)·365(capability 배지)가 2026-07-13 main에 랜딩했다. 실제 interactive Codex app-server approval relay는 ADR-0114/E-WORK-1 후속이다.
+- 신규 인프라·스키마 변경 0으로 시작(agent_run input convention + `agent.config.capabilities`). 후속 결정 예약: managed 실행 노드, 자동 라우팅, momo-plugin-github 합류.
+
+### 1.5 Workspace-first Messenger + Superapp Shell overlay (PLN-20260715-01)
+
+2026-07-14 실창 QA와 PLN-20260714-02 엔진 감사를 합쳐, 제품 표면을 **workspace/server → channel/DM → timeline → governed Work** 순서로 읽히게 한다. 정본 proposal/handoff는 `docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`와 `docs/planning/handoffs/2026-07-15-workspace-first-superapp-shell.md`다.
+
+- **UX 즉시 체인:** MOMO-383 `#387` workspace-first sidebar/header/menu + ADR-0118 active-member read/owner-admin rename(**PR #389, main `9c1fc7a` merge**) → MOMO-384 `#390` native channel creation sheet + root window-level tooltip(**PR #394 fresh correctness/security/performance+design review Blocker/High 0, worker `status:needs-review`, merge 전**) → MOMO-385 `#391` member inspector + one-click DM(**PR #406 review fixes·worker gates PASS, `status:needs-review`, merge 전**) → MOMO-386 `#392` RLS workspace search + result jump. MOMO-392 `#398`은 이 체인의 macOS channel chrome/context navigation polish이며 MOMO-386 backend를 선행 구현하지 않는다.
+- **검색 계약:** 현재 앱의 channel별 최근 200개 client scan은 제품 검색이 아니다. MOMO-386에서 workspace-scoped server query, RLS, sender/channel/timestamp/excerpt, `from:`/`in:`/`@handle` modifier를 구현한다. 그 전까지 MOMO-392의 workspace search entry는 localized unavailable/roadmap state와 `⌘K` 대안만 제공하고 결과를 꾸며내지 않는다.
+- **채널 chrome 계약:** 48pt 한 줄 channel identity, `unifiedCompact` titlebar, 실제 content-layout inset, 표준/좁은/wide 무겹침을 유지한다. Downloads는 앱 업데이트/로컬 폴더 surface만 열고 attachment download를 암시하지 않는다. 상시 gear 대신 selected/hover quick action, context menu, keyboard, VoiceOver 동등 경로를 사용한다.
+- **MOMO-402 UX polish:** pane별 이중 inset/border/rounding을 회수해 left/center/right header를 하나의 toolbar 기준선 아래 독립 surface로 정렬했다. roster는 역할·presence 그룹으로 바꾸고 Dock unread badge와 app toolbar Downloads popover를 추가했다. security-scoped 폴더와 영속 history/action surface는 준비됐으며 실제 attachment record 공급은 MOMO-394 선행을 유지한다.
+- **MOMO-405 onboarding:** M3 첫 진입을 Signal Architecture 콘셉트의 반응형 native macOS flow로 교체한다. 사용자는 초대 참여·기존 로그인·로컬 체험·설치된 self-hosted 서버 연결 중 실제 목적을 먼저 고르고, compact/stacked/bounded split에서 같은 인증 계약을 사용한다. 서버 provisioning을 암시하지 않으며 일반 사용자에게 alpha 구현 상태를 노출하지 않는다.
+- **MOMO-396 composer polish:** 56pt 단일 composer surface와 채널 membership 기반 `@` 후보 overlay를 제공한다. overlay는 timeline을 재배치하지 않고 최대 6행을 composer 위 8pt 간격으로 표시하며 keyboard/mouse 선택을 지원한다. 실제 파일 DnD/첨부는 MOMO-394 storage·credential ADR 뒤에만 연결한다.
+- **다중 workspace:** Discord식 rail은 ADR-0117이 account/session/token/server identity persistence와 switch semantics를 결정한 뒤 구현한다. 결정 전 가짜 workspace rail은 만들지 않는다.
+- **Work Console:** MOMO-375는 transcript/activity drawer까지만 허용한다. `Control+backtick` command input, Codex/Claude/OpenCode process, cwd/repo/worktree, sandbox/approval relay는 ADR-0114 승인 뒤 새 builder로 분리한다. momo 서버는 command process나 upstream credential을 보관하지 않는다.
+- **엔진 병렬 planning:** ADR-0113 credential/capability/action trust + ADR-0116 context/memory retention을 먼저 draft하고, ADR-0114 interactive Work host, ADR-0115 signed webhook ingress를 잇는다. 각 engine PR은 기본적으로 `clients/macOS/**`를 잠근다.
+
+### 1.6 플랫폼 확장 overlay (ADR-0119/0120/0121 · 2026-07-15 Accepted, 성재 발제)
+
+메신저 이해도·슈퍼앱·인프라 발제(2026-07-15)의 리서치(`research/15-platform-expansion/`, 바이블 `docs/architecture/bible/`)가 ADR 3건으로 정본화됐다. 실행은 Fable이 엔진/인프라 트랙 한정 momo-main 겸임(성재 승인)으로 오케스트레이션하며, UX 트랙(momo-main·성재, `clients/macOS/**`)과 파일군을 분리한다. M0~M8 backbone 불변 — 전부 overlay.
+
+- **🌐 웹 트랙 신설 (ADR-0119, iOS보다 선행 — 성재 확정):** 서버 대표 도메인(`APP_DOMAIN`)이 SPA와 `/v1` 프록시를 같은 오리진에서 서빙 — "서버 URL이 곧 웹 주소". v0 스코프는 "초대받은 사람이 브라우저로 합류해 대화"(기본 모드만). 첫 배치: MOMO-389(OpenAPI 계약 정본+drift 게이트) → MOMO-390(Caddy APP_DOMAIN+정적 서빙) → MOMO-391(clients/web 스캐폴드+로그인/타임라인). 패킷: `docs/planning/handoffs/2026-07-15-adr-0119-web-track.md`. W-4(작성/승인 왕복)·W-5(초대 웹 합류)는 391 랜딩 후 발급.
+- **푸시 (ADR-0120):** Dawn 운영 오픈소스 PushRelay + id-only 페이로드(대화 내용 Dawn 비경유) + outbox 소비 단일 notifier(판정 한 곳, P9) + 전면 무료·rate limit. 서버측 P-1(등록 REST)/P-2(notifier)는 iOS 앱 전 선행 가능 — 웹 첫 배치 뒤 발급. relay 배포·Apple Developer 계정은 별도 실행 결정.
+- **셀프호스팅 배포판 (ADR-0121):** install/upgrade 스크립트(ADR-0002 승계)+"5분 설치" 문서+단일노드 상한 명시, universal link 초대(웹 랜딩 우선, 검증은 셀프호스트 서버), BM=Zulip 모델(전 기능 무료, 수익은 호스팅/relay/지원), 기본 공개 서버 비내장. S 배치는 웹 배치 랜딩 후 순차.
+- **리전:** 멀티 리전은 비채택이 업계 표준(Slack 코어도 단일 리전) — 단일 노드+확장 레버(`docs/DEPLOY.md` §11) 유지가 결정이다.
+
+### 1.7 dsh 벤치마크 overlay (2026-08-18 · 전권 위임 편성 — 정본 `docs/planning/research/2026-08-18-deepseek-harness-dsh-benchmark.md`)
+
+DeepSeek Harness(MIT·5일 153k★) 종합 분석의 차용 후보 A~H를 기존 축에 **상보 편입**(LIVE-5·환경 폐곡선 비침해가 원칙).
+
+| 시점 | 후보 | 티켓 |
+|---|---|---|
+| 다음 위생 파도(즉시 가능) | A docs-코드 드리프트 게이트 · B 온보딩 첫 성공 N분 실측 · H 반면교사 렛슨 | #1525 · #1526 · #1527 |
+| LIVE-5 완주 후 | C 추적성 계약 성문화("모델이 본 것=로그", ADR 증보) · D 훅 택소노미 명명 | 미발급(C가 D 선행) |
+| 세션 표면 심화 | E Trajectory 표면(replay 1단계 권장→fork는 별도 결정) — LIVE-5b 세션 표면과 연접 | 미발급(ADR 선행) |
+| 환경 폐곡선(커서 B) 합석 | F Code Mode×T3(코드로 툴 배칭 — 실행=CubeSandbox 재사용) | 미발급(ADR 선행) |
+| 플랫폼 확장 overlay 개장 시 | G 플러그인 생태 청사진(catalog CI·poison-guard 동형+권한 매니페스트=trust gap 교정판) | 청사진=정본 문서 §3-G |
+
+반면교사 4건(컨텍스트 비대·이중 주입·플러그인 피로·벤치마크 불투명)은 §4 — 우리 규율의 외부 실증으로 유지.
+
+### 비용 / 기간 (정확 수치 · Apple 1차 출처, 2026 기준)
+
+| 항목 | 비용 | 비고 |
+|---|---|---|
+| Apple Developer Program (조직) | **$99 USD/년** | 법인격 + D-U-N-S Number 필요. [출처: developer.apple.com/help/account/membership/program-enrollment/] |
+| D-U-N-S Number | **무료**, Apple 반영 최대 영업일 2일(D&B 최대 5영업일, expedite 불가) | 회사/교육기관만 필수, 개인 불필요. [developer.apple.com/help/account/membership/D-U-N-S/] |
+| iOS 업로드 SDK 요건 | 비용 0 (게이트) | **2026-04-28부터 iOS 26 SDK + Xcode 26 이상으로 빌드해야 App Store Connect 업로드 가능.** [developer.apple.com/news/?id=fxu2qp7b] |
+| privacy manifest | 비용 0 (필수) | 2024-11-12부터 데이터 수집/required-reason API/특정 SDK 포함 시 제출 필수. [developer.apple.com/news/?id=pvszzano] |
+| macOS 공증 | 비용 0 (Developer ID 포함) | altool 폐기(2023-11-01) → **notarytool 유일 경로**. [developer.apple.com/documentation/security/customizing-the-notarization-workflow] |
+| App Review 심사기간 | — | 다수 24~48h 내 결과 `(추정 — Apple 미보장, UGC/첫제출은 더 김)`. |
+| TestFlight | 비용 0 | 내부 ≤100(심사 없음), 외부 ≤10,000(첫 빌드 Beta App Review), 빌드 90일 만료. |
+| GitHub Actions macOS 러너 | $0.062/분 (2026 인하 후) | 무료 쿼터는 macOS 10x 승수 → Free 2,000분 ≈ macOS 200분/월. |
+| VPS (staging/prod 1대) | ~$30~50/월 `(추정)` | 전용 vCPU 4코어/16GB급. 주문 시점 단가 재확인. |
+
+> 도메인 10~20/yr · PostgreSQL 셀프호스트 0 · 백업 오브젝트스토리지 월 $1 미만~수달러 `(추정)`.
+
+---
+
+## 2. 의존 그래프
+
+### 2.1 마일스톤 레벨
+
+```
+        ┌──────────────────────────── 공유 Swift 코어 (MomoCore) ────────────────────────────┐
+        │                                                                                      │
+M0 ─────┼──► M1(런타임+staging) ──► M2(멀티팀 온보딩) ──┐                                       │
+Foundation │         │                                  │                                       │
+(완료)     │         └──► M3(데스크탑 v0 UX, D/B/C) ─────┤                                       │
+        │                          │                    │                                       │
+        │            ┌─────────────┴──────────┐         │                                       │
+        │            ▼ (🖥 데스크탑 트랙)       ▼ (📱 모바일 트랙)                                │
+        │          M4(패키징: Xcode/공증/DMG/Sparkle)  M5(iOS 앱: Push/계정삭제/UGC/manifest)    │
+        │            │                          │       │                                       │
+        └────────────┼──────────────┬──────────┘       │                                       │
+                     │              │                   │                                       │
+M6(CI/CD: fastlane/ASC Key) ────────┴───────────────────┤  (M4/M5 Xcode 프로젝트 = C1/C2 선결)   │
+                                                         │                                       │
+                                                         ▼                                       │
+                                  ┌──────────────────────────────────────────┐                  │
+                                  │  M7  QA · 사용성 검수 게이트 🔒            │                  │
+                                  │  (M1·M3·M4·M5·M6 전부 입력)                │                  │
+                                  │  G-0 런타임 e2e · G-A 크래시-free ·        │                  │
+                                  │  G-B e2e 8/8 · G-C 접근성 · G-D 성능 ·     │                  │
+                                  │  G-E 베타 · G-F 피드백 · G-G 릴리스준비     │                  │
+                                  │  G-H Enterprise Trust evidence              │                  │
+                                  └────────────────────┬─────────────────────┘                  │
+                                                       │ PASS만 통과                            │
+                                                       ▼                                         │
+                                  ┌──────────────────────────────────────────┐                  │
+                                  │  M8  스토어 제출                          │ ◄────────────────┘
+                                  │  🖥 Developer ID 공증 DMG 공개 다운로드 + Sparkle 라이브       │
+                                  │  📱 App Store Connect 업로드 → App Review → phased/즉시 배포   │
+                                  └──────────────────────────────────────────┘
+```
+
+### 2.2 임계 경로(critical path)
+
+```
+M0 → M1 → M2 → M5(iOS) → M7(게이트) → M8(App Store)   ← 모바일 임계 경로
+M0 → M1 → M3 → M4(공증) → M7(게이트) → M8(공증 DMG)    ← 데스크탑 임계 경로
+```
+
+- **데스크탑/모바일 병렬:** M3 이후 M4(🖥)와 M5(📱)는 **공유 코어(MomoCore) 위에서 병렬**. M6(CI/CD)도 병렬로 진행하되 release 잡 활성화는 M4/M5의 Xcode 프로젝트(C1/C2), 게이트(M7), owner approval에 종속된다. 현재 Actions는 비용 방지를 위해 disabled/manual-only다.
+- **🔒 게이트 컷:** M4·M5·M6가 기술적으로 "배포 가능" 상태여도, **M7 PASS 전에는 M8(external TestFlight 포함)을 절대 진행하지 않는다.** 이것이 본 로드맵의 단일 차단 불변식.
+
+---
+
+## 3. 트랙 분리 (데스크탑 / 모바일 / 공유)
+
+### 3.1 ⚙️ 공유 / 백엔드 트랙
+- **MomoCore**(`clients/Core`): 모델 + `ChatBackend`/`AgentTransport` 프로토콜 — 데스크탑/모바일 공유 단일 진실원천.
+- **백엔드 런타임/배포**(M1): AWS 전에 local alpha runner로 `main` 기준 내부 알파 evidence를 먼저 수집한 뒤, 단일 강력 VPS + docker-compose + Caddy(자동 TLS) + Centrifugo Redis 엔진 + PG18 + pgBackRest(PITR) + SOPS/age 시크릿 + 경량 모니터링으로 승격한다. staging/prod 분리. MOMO-007의 `staging-smoke` local gate가 prod compose/Caddy/Centrifugo/secrets/pgBackRest checklist를 실제 VPS 시크릿 없이 먼저 검증하고, MOMO-221의 prod env preflight가 placeholder/dev-insecure/default secret bootstrap을 fail-fast로 막으며, MOMO-222의 `backup` gate가 repo-local restore evidence를 만든다. MOMO-227부터 agent runtime provider는 `AGENT_PROVIDER_MODE`로 local mock/internal-host mock/external runtime 경계를 명시하고, staging/prod/internal-host에서 unsafe external provider config를 fail-fast 처리하며, `/v1/agent-runtime/status`와 macOS compact status surface로 secret-redacted availability를 노출한다. MOMO-230은 real external provider side effect를 기본 mock gate에서 분리해 `external-agent-provider` opt-in profile로 닫는다. MOMO-234는 Codex OAuth access/refresh token이 provider-owned이며 momo app/API/DB/local gate에 저장/전달되지 않는 credential boundary를 ADR과 verifier fail-fast guard로 고정한다. MOMO-236은 provider 연결 가능성과 별도로 agent member가 `#agent-lab`에 초대되어 있어야 한다는 내부 알파 precondition을 고정한다. MOMO-242는 이 흐름을 provider-neutral external agent runtime smoke 계약으로 묶고, local alpha runner의 `--external-smoke` 위임과 redacted `degradedReason` status를 추가한다. MOMO-256은 `Hermes`/`@hermes` runtime path를 준비하고 MOMO-334는 dogfood UI에서 사용자가 초대한 뒤 roster에 표시되게 한다. MOMO-325는 AgentWorker SSE 경로를 유지하면서 Hermes gateway가 momo platform adapter로 상시 sync하는 native path를 추가하되, `agent_run`/final message/usage/audit SoT는 momo REST→Postgres→outbox에 남긴다. MOMO-245는 72시간 local soak 중 health/backlog/resource/app 상태를 lightweight evidence로 축적해 AWS 승격 판단의 데이터 원천으로 둔다. 실제 URL/TLS/pgBackRest stanza·WAL·time-target PITR restore는 public host-runtime으로 닫고, credentials 없는 real provider smoke는 `runtime-unverified(external provider credentials)`로 남긴다.
+- **Agentic Work OS ecosystem**(M1.5~M4): Paca류 task/board OS를 복제하지 않고, momo는 channel timeline을 agent execution ledger로 유지한다. 정본은 `research/12-agentic-work-os/01-agentic-work-os-market-analysis.md`와 `docs/adr/0001-agentic-work-os-repo-topology.md`. repo split은 core monorepo 안정화 이후 plugin catalog/SDK/MCP/landing/signing 경계부터 진행한다.
+- **멀티팀 온보딩**(M2): `003_onboarding.sql` 첫 slice는 `invite_code` + redemption audit로 시작한다(MOMO-010). invite code 운영 REST(create/list/revoke + authenticated redeem 최소 slice)는 MOMO-011에서 완료했고, macOS에서 먼저 확인 가능한 invite UI thin slice는 MOMO-012, production `/v1/join` self-signup member/human/membership 생성 + audit_log는 MOMO-014에서 서버 runtime slice로 추가했다. `platform_admin` 전역 추적은 MOMO-013에서 별도 BYPASSRLS + SELECT-only read path로 추가했고 runtime-db local gate에서 2개+ workspace 전역 조회를 검증한다. MOMO-176은 normal tenant token + active membership guard + RLS 경로로 workspace human/agent roster REST를 추가해 M2/M3 실데이터 surface를 열었고, MOMO-214는 owner/admin channel create + human/agent member add/remove runtime path를 같은 tenant/RLS 원칙으로 추가한다. `schema_v0.sql` 정본은 수정 금지, 신규 마이그레이션으로만 확장한다.
+
+- **Context Broker + Memory Plane**(M2~M3): 서버 agent로 바로 넘기지 않고 messenger layer가 권한, 컨텍스트 범위, source refs, cost budget, redaction, local/server model routing을 결정한다. 정본: `research/10-local-ai-protocol-trust/01-local-llm-context-broker.md`.
+- **Agent Runtime Spec**(M1.5~M3): Hermes/Kim Intern/openclaw를 기준으로 memory/cache/protocol gap을 메우고, momo가 agent host로서 context/capability/execution/ledger 4-plane을 소유한다. Context Packet v0 정본은 `research/11-agent-runtime/04-context-packet-v0.md`, Memory Plane v0 정본은 `research/11-agent-runtime/05-memory-plane-v0.md`, Capability Cache v0 정본은 `research/11-agent-runtime/06-capability-cache-v0.md`, Agent Run Lifecycle v0 정본은 `research/11-agent-runtime/07-agent-run-lifecycle-v0.md`, Approval Pause/Resume v0 정본은 `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, Approval Decision Server Contract v0 정본은 `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`, MOMO-167은 이 contract의 server runtime endpoint/ledger/resume job slice이며, Hermes Adapter Contract v0 정본은 `research/11-agent-runtime/11-hermes-adapter-contract-v0.md`이다. runtime gap/roadmap 정본은 `research/11-agent-runtime/*`.
+- **Agent Protocol v0**(M3): `agent_request`, `context_packet`, `tool_call`, `approval_request`, `tool_result`, `usage_ledger`, `audit_log`를 DB/wire/Swift/macOS card에서 동일 의미로 유지한다. Approval은 client-only card가 아니라 `agent_run.status='awaiting_approval'`로 멈추는 protocol checkpoint다. 정본: `research/10-local-ai-protocol-trust/02-agent-protocol-google-workspace.md`, `research/11-agent-runtime/02-memory-cache-protocol-gaps.md`, `research/11-agent-runtime/08-approval-pause-resume-runtime.md`, `research/11-agent-runtime/10-approval-decision-server-contract-v0.md`.
+- **Google Workspace connector**(M2~M3): v0는 per-user OAuth + read-mostly sync(Drive changes/selected excerpts, Gmail thread/search, Calendar availability/events)로 시작하고, Context Packet `sources`, Memory Plane `external_source_ref`, Capability Cache `tool_grants`로만 투영한다. external write는 approval card 뒤에 둔다. Domain-wide delegation은 기본값이 아니라 enterprise-only 옵션이며 admin consent, service account boundary, scope inventory, delegated user, audit export, revoke/delete는 `research/11-agent-runtime/13-google-workspace-enterprise-admin-v0.md`가 정본이다. per-user OAuth 정본: `research/11-agent-runtime/12-google-workspace-connector-v0.md`.
+- **Local PR gate / multi-session ops**(M1): GitHub Actions는 현재 비용/결제 이슈로 disabled/manual-only이며, PR body local evidence와 worktree branch lock을 하드 운영 규칙으로 둔다. `runtime-relay`는 MOMO-115부터 Docker compose/migrate/server send/outbox/relay/Centrifugo evidence까지 자동화되고, `runtime-live`는 MOMO-196부터 dev compose PG/Centrifugo + host API/relay + `api:8080` proxy 기반 live WebSocket subscribe evidence까지 자동화된다. MOMO-186부터 docs/static local gate는 `infra/docker-compose.e2e.yml` config validation으로 e2e stack boundary drift도 잡는다. MOMO-199부터 `scripts/goal_status.sh`는 closed issue/merged PR 연결 worktree를 read-only로 audit하고, clean/pushed candidate에만 cleanup command를 출력한다. MOMO-209부터 `scripts/compose_janitor.sh`는 stale `momo_` worktree Docker Compose container/network를 dry-run 우선으로 목록화하고 명시적 cleanup에서만 제거한다. 정본: `docs/LOCAL_PR_GATE.md`, `docs/MULTI_SESSION_OPS.md`.
+### 3.2 🖥 데스크탑 트랙 (macOS)
+- **v0 UX**(M3): D/B/C 실데이터 바인딩. MOMO-204부터 `scripts/local_gate.sh --profile m3-dbc`가 M3 exit용 combined local evidence를 수집하며, 오래된 MOMO-020 staging/Hermes 문구는 이 local-gate 기준으로 재판정한다.
+- **Dogfood shell UX**(M3): MOMO-253/259/263/264/261에서 post-login macOS shell을 dogfood 가능한 메신저 chrome으로 정리한다. 원칙은 “대화에 필요한 것은 기본 노출, 개발/진단/승인/업데이트는 숨겨진 surface”다. 작은 창에서는 우측 Command Center/Approvals를 layout-consuming 3rd column이 아니라 overlay drawer로 열고, 넓은 창에서만 inspector column처럼 붙인다. Profile footer는 가벼운 launcher로 축소하고, Profile/Settings/Downloads/Updates는 macOS Settings에 가까운 우측 설정 surface로 분리한다. Server/workspace/profile image는 dogfood v0 local display draft 후 backend persistence로 승격한다. MOMO-261은 이 shell 위에 approval semantics, human typing indicator, Hermes/agent working badge를 얹어 1인 Hermes loop의 진행 상태를 명확히 보여준다.
+- **Local LLM UX**(M3): Foundation Models availability probe는 `MomoMac` target 안에서 완료했다(MOMO-130). MOMO-131은 macOS sidebar에서 local summarization/classification/context compaction/PII redaction preview shell을 추가하고, 미지원 OS와 CI/local gate는 deterministic fallback/stub으로 green 유지한다. MOMO-174는 source id/URI/citation을 보존하는 Context Packet compaction v1과 availability-safe Foundation Models generation wrapper를 추가했다.
+- **macOS 개발 loop**(M3): `build-macos-apps` 플러그인은 SwiftPM build/test/triage와 GUI 실행 표준화에 사용한다. MOMO-134에서 repo convention에 맞춘 `scripts/macos_dev_run.sh`가 `dist/MomoMacDevApp.app`을 staging하고 Codex Run action 및 `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile macos-ui`와 연결된다.
+- **REST 실데이터 바인딩**(M3): MOMO-177에서 `MomoMacDevApp`은 `MOMO_SERVER_BASE_URL` 설정 시 MomoServer REST `/v1/auth/login` + message history/send를 사용한다. MOMO-197에서 서버 `GET /v1/workspaces/{ws}/channels`와 macOS REST bootstrap dynamic channel loading을 추가해 demo-fixed channel list 의존을 제거했다. MOMO-205에서 `macos-ui` local gate는 Docker+migrate+host MomoServer REST login/channel list/history/send와 approval/cost structured history evidence를 남기며, UI process/window launch는 `LOCAL_GATE_LAUNCH_UI=1` opt-in으로 유지한다. MOMO-213에서 env-only 의존을 낮추고 앱 안 session/onboarding UI가 server URL/email/password/optional invite code를 받아 login 또는 `/v1/join` 후 기존 D/B/C UI로 진입한다. MOMO-217에서 demo/join account password_hash verification을 닫았고, MOMO-223에서 session/account/server switch, logout, reconnect/fallback status polish를 닫았다. MOMO-226에서 real-server session chrome에 invite create/list/revoke admin surface를 추가하고, `macos-ui` smoke가 fresh invite second-user join 및 workspace/channel/member state load까지 검증한다.
+- **Realtime subscription contract/driver**(M3): MOMO-179는 SwiftCentrifuge 구현 전 `ch:ws<workspace>.<channel>` / `agent:ws<workspace>.<channel>.<agent>` naming, realtime-token, subscribe proxy, `RealtimeEnvelope`, `message.seq` replay/backfill 경계를 고정했다. MOMO-193/196/200/207은 Core driver, repo-local WebSocket, SwiftCentrifuge, macOS 상태 UX를 순서대로 닫았다. MOMO-212/MOMO-338은 exact-channel observable `agent:` progress와 self-only private `agentwork:` job을 분리하고 실제 Centrifugo WebSocket/OutboxRelay evidence를 추가했다. MOMO-215/219는 자연어 `@agent` mention에서 mock SSE progress와 final durable `message.new`가 `agent:`/`ch:` surface로 돌아오는 제품 경로와 macOS roster/composer를 닫았다. Presence/APNs는 후속 범위다. 정본: `research/11-agent-runtime/14-realtime-client-subscription-contract-v0.md`, `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`.
+- **Onboarding dev UX**(M2/M3 bridge): MOMO-012는 실제 서버 join API 전에도 `MomoMacDevApp`에서 invite code 입력, join 성공/실패, workspace join 상태를 `LiveChatBackend` stub으로 확인할 수 있게 한다.
+- **Agent protocol cards**(M3): `MOMO-170`은 macOS timeline에서 `tool_call`, `approval_request`, `tool_result`, `artifact`, cost, memory citation, source badge를 Context Packet/Memory Plane/Capability Cache projection으로 렌더하는 v0 contract다. `MOMO-171`은 `approval_request` 카드의 Approve/Reject 개발 UX를 `ChatBackend` approval decision 계약에 연결한다. `MOMO-198`은 old D/B/C tickets를 그대로 닫지 않고 MOMO-200~204의 builder-friendly blockers로 쪼갠다. 정본: `research/11-agent-runtime/07-macos-agent-protocol-cards-v0.md`, `research/11-agent-runtime/15-m3-dbc-real-data-readiness.md`.
+- **패키징**(M4): 정본 ADR = `docs/adr/0003-macos-packaging-architecture.md`, alpha update channel ADR = `docs/adr/0005-macos-alpha-update-channel-v0.md`. SwiftPM `MomoMacDevApp`은 개발/로컬 게이트용으로 유지한다. MOMO-211부터 릴리스용 Xcode `MomoMac.app` thin host가 `clients/macOS/MomoMac.xcodeproj`에 있으며 `MomoMac`/`MomoCore`를 로컬 SwiftPM 의존으로 소비하고 무서명 build gate를 통과한다. 이후 순서: bottom-up codesign(`--options runtime --timestamp`) → Developer ID Application → create-dmg → **notarytool submit --wait** → stapler staple → `spctl` 검증 → Sparkle 2(EdDSA, appcast). **App Store 트랙과 별개**(공증=직접배포, App Store≠공증).
+- **배포 채널 순서:** Developer ID 공증 DMG + Sparkle 먼저, Mac App Store는 추후(샌드박스 강제·심사·Sparkle 불가).
+
+### 3.3 📱 모바일 트랙 (iOS)
+- **iOS 앱**(M5): Xcode App 타깃 + explicit Bundle ID + Push capability + APNs(.p8 ES256) + **계정 삭제(5.1.1(v))** + **UGC 모더레이션 4종(필터/신고/차단/공개연락처, 1.2)** + EULA 무관용 + **PrivacyInfo.xcprivacy**.
+- **업로드 요건:** 2026-04-28부터 iOS 26 SDK + Xcode 26 이상.
+- **배포:** Archive → Validate → Distribute → TestFlight(내부 즉시 / 외부 첫 빌드 Beta App Review) → App Review → 배포. (외부 TestFlight·제출은 **게이트 PASS 후**.)
+
+---
+
+## 4. 🔒 사용성 검수 게이트 (M7) — 스토어 제출 선행
+
+> **정본 객관 통과기준:** `docs/cicd/05-qa-release-gate.md`. 체크리스트(무엇): `docs/cicd/03-store-readiness-gate.md`.
+> **불변식:** 아래 **전부 PASS + 증거 첨부** → 03 상단에 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록 → 그 이후에만 M8 release 트리거. **기록 없는 release = 규칙 위반.**
+
+| 게이트 | 통과기준 | 방법/도구 |
+|---|---|---|
+| **G-0 런타임 e2e** | docker 기동 → migrate 멱등 → `/health` → seq 갭리스 → outbox→relay→publish 왕복 → RLS 격리 → `@hermes`/agent 멘션 SSE 1왕복 + reserve/reconcile + backup restore rehearsal evidence | M1 staging/local gates |
+| **G-A 크래시-free** | 세션 ≥ 99.5% AND 유저 ≥ 99.0% `(추정 임계)` + 신규 P0/P1 crash 0 | Sentry Release Health / MetricKit |
+| **G-B 핵심플로우 e2e** | 8/8 PASS, 치명 결함 0 | XCUITest + 수동 스모크 |
+| **G-C 접근성** | `performAccessibilityAudit` 치명 위반 0 + VoiceOver 핵심플로우 조작 가능 | Xcode 15+ audit |
+| **G-D 성능** | 콜드 런치 p90 < 2s `(추정 임계)`, hang ≈ 0 (실기기·Release) | XCTMetric / MetricKit |
+| **G-E 베타** | iOS TestFlight(내부≤100/외부≤10,000) + macOS 공증 DMG 비공개 베타 통과 | TestFlight / spctl |
+| **G-F 베타 피드백** | 전수 트리아지, P0/P1 잔여 0 | TestFlight + ASC API |
+| **G-G 릴리스 준비** | 메타/프라이버시/암호화 신고(ITSAppUsesNonExemptEncryption)/버전·빌드번호 100% | 05 §9 체크리스트 |
+| **G-H Enterprise Trust** | threat model + SBOM/license scan + secret scanning + pentest/VDP 계획 + SOC2/ISO readiness evidence | `MOMO-140`, `research/10-local-ai-protocol-trust/03-enterprise-trust-local-ops.md` |
+
+---
+
+## 5. 법무 선결 (법률 자문 아님 — 외부 변호사 1회 검토 필수)
+
+> 산출물: `legal/*`, `docs/legal/*`, `NOTICE`. 아래는 스토어/공증 배포의 **선결**이며 M2(개인정보처리방침)~M7(App Privacy)~M8(제출)에 걸쳐 게이팅한다.
+
+- **L0 등록 주체 + D-U-N-S**: 개인 vs 법인 결정. 법인은 D-U-N-S 무료·약 7영업일(expedite 불가). 사람 handoff와 Codex 산출물 경계는 `docs/legal/01-entity-apple-runbook.md`. [developer.apple.com/help/account/membership/D-U-N-S/]
+- **L1 Apple 등록 + 비용**: Apple Developer Program $99/년. 실제 계약 동의·결제·Team ID 확보는 사람 `[manual]`. (M8 선결)
+- **L3 개인정보처리방침 URL**: 모든 앱 필수(미수집도). (M2~M7 선결)
+- **L5 App Privacy 라벨**: 제3자/LLM(hermes) 전송 포함 정직 신고. privacy manifest와 일관. (M7 선결)
+- **L6 한국 법규**: 부가통신 신고는 자본금 1억원 이하 면제(전기통신사업법 시행령 30조). 위치 미수집이라 위치기반서비스 비해당 `(추정 — 법인화 시 재확인)`.
+- **L7 NOTICE(Apache 2.0 귀속)** + **L8 에이전트 LLM 제3자 전송 고지**(온보딩 동의 + 승인 인박스 고지).
+- **EULA**: UGC(채팅) 앱 → objectionable content 무관용 명시(1.2). 외부 변호사 검토.
+
+---
+
+## 6. 에픽 ↔ 마일스톤 ↔ 기존 GitHub 마일스톤 매핑
+
+| ROADMAP 마일스톤 | 에픽(이 문서) | 기존 `milestones.tsv` 매핑 |
+|---|---|---|
+| M0 Foundation | EP-FND | M0 Phase0 (Phase 0 baseline) |
+| M1 Backend 런타임+배포 | EP-RT, EP-DEPLOY | M0 Phase0 런타임 검증 (런타임 부분) |
+| M2 멀티팀 온보딩 | EP-TENANCY, EP-ADMIN, EP-LEGAL(L0/L1·L3/L5) | M2 멀티팀/테넌시 |
+| M3 데스크탑 v0 UX | EP-UX-DBC | M1 v0 데모 (D/B/C) |
+| M4 데스크탑 패키징 | EP-MAC-PKG | M4 데스크탑 공증 배포 |
+| M5 iOS 앱 | EP-IOS, EP-UGC, EP-LEGAL(L7/EULA) | M5 iOS 앱스토어 (앱 부분) |
+| M6 CI/CD | EP-CICD | (신규 — TSV에 추가 권장) |
+| M7 QA·게이트 | EP-QA-GATE | M3 검수 게이트 |
+| M8 스토어 제출 | EP-STORE | M4/M5 (제출 부분) |
+| (후속) v1 프리미티브 P1~P6 | EP-PRIMITIVES | M6 v1 경험 |
+
+> 표기 규약(Codex 입력): 각 티켓은 `MOMO-NNN`. `acceptance`는 모두 체크 가능한 동사구. `platform` ∈ {shared, backend, macos, ios, ci, legal}. `labels`는 `scripts/github/labels.tsv` 택소노미 사용.
+
+---
+
+## 7. Codex 작업 컨벤션 (요약)
+
+- **다음 티켓 선택법:** `deps`가 전부 done인 가장 낮은 의존 깊이를 고른다. `legal`/`manual` 티켓은 Codex가 파일/문서만 준비하고 실제 발급/계약은 런북으로 사람에게 위임 표시.
+- **수용기준 등급:** `[swift]`=`swift build` green · `[infra]`=파일 존재+정합 · `[sql]`=정본 정합 · `[xcode]`=`xcodebuild` 산출 · `[ci]`=워크플로우 syntax/lint · `[runtime]`=docker/psql 필요(미가용 시 `runtime-unverified` 표기) · `[manual]`=사람 1회.
+- **정합 원칙:** 이전 티켓 산출물을 깨지 말 것. `schema_v0.sql`은 정본(이동·수정 금지) — 확장은 `server/Migrations/00N_*.sql` 신규 + RLS DO-block ARRAY에 신규 테이블 등록.
+- **DoD 기록:** 각 티켓 종료 시 검증 명령 결과를 `STATUS.md`에 기록. 미검증은 정직 표기(`runtime-unverified`).
+- **🔒 release:** 게이트(M7) PASS + 03 PASS 블록 기록 전 `release-*.yml` 트리거 금지(태그 자제 또는 environment protection).
+
+---
+
+> 정본 참조: `STATUS.md`(현재 상태) · `BUILD_TICKETS.md`(빌드 백로그) · `schema_v0.sql`(스키마) · `docs/cicd/*`(CI/CD·게이트) · `legal/*`·`docs/legal/*`(법무) · `research/07-deepdive/04·05`(스펙·경험).

@@ -8,6 +8,7 @@
 
 use std::collections::BTreeMap;
 
+use momo_messaging::SearchScope;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -2525,8 +2526,8 @@ pub struct ReadStateListResponseDto {
 
 /// `GET …/search/messages` query string. Parsed leniently like
 /// [`HistoryQuery`]: a garbage `limit` falls back to the default rather than
-/// 400-ing, matching Swift's `Int($0) ?? 20`. `q` and `cursor` *are* validated,
-/// because an unusable value there changes which rows come back.
+/// 400-ing, matching Swift's `Int($0) ?? 20`. `q`, `cursor` and `channel` *are*
+/// validated, because an unusable value there changes which rows come back.
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
     #[serde(default)]
@@ -2535,13 +2536,45 @@ pub struct SearchQuery {
     pub limit: Option<String>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Optional channel scope (#1931 / BT-3). Absent — or present and blank —
+    /// is the workspace scope this route has always had.
+    #[serde(default)]
+    pub channel: Option<String>,
 }
 
 impl SearchQuery {
     pub fn limit(&self) -> Option<i64> {
         self.limit.as_deref().and_then(|raw| raw.parse().ok())
     }
+
+    /// The requested scope, or `Err` when `channel` is present but not a UUID.
+    ///
+    /// **`?channel=` with no value is the workspace scope, not a 400.** That is
+    /// what a client sends the moment it clears the chip by emptying the field
+    /// instead of dropping the key, and there is no channel in it to narrow to,
+    /// so widening is the only coherent reading. Nothing rides on the leniency:
+    /// a cursor minted under a channel scope is still refused at the workspace
+    /// scope (`SearchScope::accept_cursor`), so a client that blanks the
+    /// parameter mid-page gets a 400 rather than a silently wider page.
+    ///
+    /// A *malformed* value is a 400, not a 404: it names no channel that could
+    /// exist or not exist, so it is a bad request in the same sense
+    /// `workspace_scope`'s unparseable `{ws}` is — the 404 is reserved for the
+    /// well-formed id the caller may not read.
+    pub fn scope(&self) -> Result<SearchScope, SearchRequestInvalidChannel> {
+        match self.channel.as_deref().map(str::trim) {
+            None | Some("") => Ok(SearchScope::Workspace),
+            Some(raw) => Uuid::parse_str(raw)
+                .map(SearchScope::Channel)
+                .map_err(|_| SearchRequestInvalidChannel),
+        }
+    }
 }
+
+/// `channel=` was present and is not a UUID (#1931). A unit type rather than a
+/// message: the route owns the 400 wording, like every other parse guard here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchRequestInvalidChannel;
 
 /// Swift `WorkspaceMessageSearchHitDTO` (:268-276). `createdAtMs` is
 /// milliseconds on the wire even though the cursor keeps microseconds.
@@ -4488,6 +4521,7 @@ mod tests {
             q: Some("needle".into()),
             limit: Some("nonsense".into()),
             cursor: None,
+            channel: None,
         };
         assert_eq!(
             query.limit(),
@@ -4498,8 +4532,32 @@ mod tests {
             q: None,
             limit: Some("7".into()),
             cursor: None,
+            channel: None,
         };
         assert_eq!(sized.limit(), Some(7));
+    }
+
+    /// `channel=` is the one query parameter here that is *not* parsed leniently
+    /// past a malformed value: an unusable channel changes which rows come back,
+    /// so it is a 400 rather than a silent widening to the workspace.
+    #[test]
+    fn a_malformed_channel_scope_is_refused_while_a_blank_one_widens() {
+        let query = |channel: Option<&str>| SearchQuery {
+            q: Some("needle".into()),
+            limit: None,
+            cursor: None,
+            channel: channel.map(str::to_string),
+        };
+        let channel = Uuid::from_u128(0xc0ffee);
+        assert_eq!(query(None).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(query(Some("  ")).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(
+            query(Some(&format!(" {channel} "))).scope(),
+            Ok(SearchScope::Channel(channel)),
+            "a query string is whitespace-prone; the id inside it is the scope"
+        );
+        assert!(query(Some("42")).scope().is_err());
+        assert!(query(Some(&format!("{channel}x"))).scope().is_err());
     }
 
     /// Swift's hand-written join decoder accepts two spellings of `displayName`

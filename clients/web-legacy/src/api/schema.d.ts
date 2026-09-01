@@ -1925,7 +1925,7 @@ export interface paths {
         };
         /**
          * Search messages in channels where the caller is an active member.
-         * @description Read-only v0 substring search backed by the existing partial GIN trigram index. Results exclude deleted/body-less messages and channels where the caller has left. Ordering is newest first by created time, then channel sequence; the opaque cursor preserves that keyset across new inserts. Search is limited to 30 requests per authenticated member per minute.
+         * @description Read-only v0 substring search backed by the existing partial GIN trigram index. Results exclude deleted/body-less messages and channels where the caller has left. Ordering is newest first by created time, then channel sequence; the opaque cursor preserves that keyset across new inserts. Search is limited to 30 requests per authenticated member per minute. `channel` narrows the search to one channel the caller belongs to (#1931); its absence is the workspace-wide search this route has always been. The cursor carries the scope it was minted under, so a page cannot be resumed against a different one.
          */
         get: operations["searchWorkspaceMessages"];
         put?: never;
@@ -11539,8 +11539,10 @@ export interface operations {
             query: {
                 q: string;
                 limit?: number;
-                /** @description Opaque keyset cursor returned as `nextCursor`. */
+                /** @description Opaque keyset cursor returned as `nextCursor`. It is bound to the scope that produced it: replaying a `channel`-scoped cursor without `channel` (or against another channel) is a 400, not a wider page. */
                 cursor?: string;
+                /** @description Optional channel scope (#1931). A blank value is the workspace scope; a channel the caller is not a member of — and one that does not exist — are the same 404. */
+                channel?: string;
             };
             header?: never;
             path: {
@@ -11560,7 +11562,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMessageSearchResponse"];
                 };
             };
-            /** @description Query shorter than two characters or malformed cursor. */
+            /** @description Query shorter than two characters, malformed cursor, malformed `channel`, or a cursor replayed under a different scope. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11572,6 +11574,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Workspace scope mismatch. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The named `channel` is not one the caller may read. A channel that does not exist answers identically, so the pair is not a membership oracle. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

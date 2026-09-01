@@ -37,7 +37,7 @@ use momo_messaging::{
     active_workspace_role, canonical_participants, create_channel, dm_participant_key,
     list_direct_messages, list_read_state, open_direct_message_in_tx, search_messages,
     send_message, send_message_with_mentions_in_tx, update_read_cursor_in_tx, ChannelKind,
-    NewChannel, NewMessage, OpenedDirectMessage, SearchCursor, SendExtras,
+    NewChannel, NewMessage, OpenedDirectMessage, SearchCursor, SearchScope, SendExtras,
 };
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -779,7 +779,9 @@ async fn d2_b12_4_search_returns_body_hits() {
     .expect("foreign message");
 
     let page = with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { search_messages(conn, ws, seeker, "quick", None, 20).await })
+        Box::pin(async move {
+            search_messages(conn, ws, seeker, SearchScope::Workspace, "quick", None, 20).await
+        })
     })
     .await
     .expect("search");
@@ -823,7 +825,9 @@ async fn d2_b12_4_search_returns_body_hits() {
     .await
     .expect("decoy message");
     let literal = with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { search_messages(conn, ws, seeker, "50%", None, 20).await })
+        Box::pin(async move {
+            search_messages(conn, ws, seeker, SearchScope::Workspace, "50%", None, 20).await
+        })
     })
     .await
     .expect("literal search");
@@ -848,7 +852,18 @@ async fn d2_b12_4_search_returns_body_hits() {
         .await
         .expect("tombstone");
     let after_delete = with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { search_messages(conn, ws, seeker, "ephemeral", None, 20).await })
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Workspace,
+                "ephemeral",
+                None,
+                20,
+            )
+            .await
+        })
     })
     .await
     .expect("search after delete");
@@ -873,14 +888,27 @@ async fn d2_b12_4_search_returns_body_hits() {
     .await
     .expect("page 2 row");
     let first_page = with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { search_messages(conn, ws, seeker, "paging", None, 1).await })
+        Box::pin(async move {
+            search_messages(conn, ws, seeker, SearchScope::Workspace, "paging", None, 1).await
+        })
     })
     .await
     .expect("first page");
     assert_eq!(first_page.hits.len(), 1);
     let cursor: SearchCursor = first_page.next_cursor.expect("more rows remain");
     let second_page = with_tenant_tx(&app, ws, move |conn| {
-        Box::pin(async move { search_messages(conn, ws, seeker, "paging", Some(cursor), 1).await })
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Workspace,
+                "paging",
+                Some(cursor),
+                1,
+            )
+            .await
+        })
     })
     .await
     .expect("second page");
@@ -892,6 +920,178 @@ async fn d2_b12_4_search_returns_body_hits() {
     assert!(
         second_page.next_cursor.is_none(),
         "two matches, page size one: the second page is the last"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// BT-3 (#1931) — the channel scope narrows, and its cursor stays inside it
+// ---------------------------------------------------------------------------
+
+/// Two channels the caller belongs to, the **same needle in both**. That pairing
+/// is the whole point of the fixture: with one channel, or with the needle in
+/// only one of them, a `channel=` parameter that was silently ignored would pass
+/// this test. Here it cannot — the workspace scope must see both hits and the
+/// channel scope exactly one, so any answer that does not read the parameter is
+/// wrong under one of the two assertions.
+///
+/// It also walks a page boundary inside the channel scope, because a scope that
+/// is applied to page 1 and forgotten on page 2 is the subtler version of the
+/// same bug.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn bt3_channel_scope_searches_that_channel_and_only_that_channel() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    let ws = Uuid::new_v4();
+    let seeker = Uuid::new_v4();
+    seed_workspace(&su, ws).await;
+    seed_member(&su, ws, seeker, "human", "seeker").await;
+
+    let here = create_channel(
+        &app,
+        ws,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: "here".into(),
+            topic: None,
+            created_by: seeker,
+        },
+    )
+    .await
+    .expect("create the scoped channel");
+    let elsewhere = create_channel(
+        &app,
+        ws,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: "elsewhere".into(),
+            topic: None,
+            created_by: seeker,
+        },
+    )
+    .await
+    .expect("create the sibling channel");
+
+    for (channel, body) in [
+        (here.id, "scoped needle one"),
+        (here.id, "scoped needle two"),
+        (elsewhere.id, "scoped needle three"),
+    ] {
+        send_message(&app, ws, NewMessage::text(channel, seeker, body))
+            .await
+            .expect("seed a hit");
+    }
+
+    // The workspace scope is unchanged: it still sees every channel's hits.
+    let everywhere = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Workspace,
+                "scoped needle",
+                None,
+                20,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("workspace search");
+    assert_eq!(
+        everywhere.hits.len(),
+        3,
+        "the default scope is still every channel the caller belongs to"
+    );
+
+    // The channel scope drops the sibling channel's hit — and only it.
+    let narrowed = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Channel(here.id),
+                "scoped needle",
+                None,
+                20,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("channel search");
+    assert_eq!(
+        narrowed.hits.len(),
+        2,
+        "a channel-scoped search returns that channel's hits and no others"
+    );
+    assert!(
+        narrowed.hits.iter().all(|hit| hit.channel_id == here.id),
+        "a hit from another channel means the predicate never reached the query: {:?}",
+        narrowed
+            .hits
+            .iter()
+            .map(|hit| hit.channel_id)
+            .collect::<Vec<_>>()
+    );
+
+    // Paging inside the scope: page 1 mints a cursor sealed to this channel, and
+    // page 2 stays inside it rather than falling back to the workspace walk.
+    let first = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Channel(here.id),
+                "scoped needle",
+                None,
+                1,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("first scoped page");
+    assert_eq!(first.hits.len(), 1);
+    assert_eq!(first.hits[0].channel_id, here.id);
+    let cursor: SearchCursor = first.next_cursor.expect("a second scoped page remains");
+    assert_eq!(
+        cursor.scope_channel_id,
+        Some(here.id),
+        "the cursor must carry the scope it was minted under"
+    );
+
+    let second = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move {
+            search_messages(
+                conn,
+                ws,
+                seeker,
+                SearchScope::Channel(here.id),
+                "scoped needle",
+                Some(cursor),
+                1,
+            )
+            .await
+        })
+    })
+    .await
+    .expect("second scoped page");
+    assert_eq!(second.hits.len(), 1);
+    assert_eq!(
+        second.hits[0].channel_id, here.id,
+        "the sibling channel's hit must not appear on page 2 either — a scope \
+         applied only to the first page is the quiet version of no scope at all"
+    );
+    assert_ne!(second.hits[0].message_id, first.hits[0].message_id);
+    assert!(
+        second.next_cursor.is_none(),
+        "two hits in the channel, page size one: the second page is the last"
     );
 }
 
@@ -951,14 +1151,30 @@ async fn d2_b12_5_rls_blocks_cross_tenant_breadth_reads() {
                 let foreign_dms = list_direct_messages(conn, ws_b, b1).await?.len();
                 let own_states = list_read_state(conn, ws_a, a1).await?.len();
                 let foreign_states = list_read_state(conn, ws_b, b1).await?.len();
-                let own_hits = search_messages(conn, ws_a, a1, "alpha-needle-a", None, 20)
-                    .await?
-                    .hits
-                    .len();
-                let foreign_hits = search_messages(conn, ws_a, a1, "bravo-needle-b", None, 20)
-                    .await?
-                    .hits
-                    .len();
+                let own_hits = search_messages(
+                    conn,
+                    ws_a,
+                    a1,
+                    SearchScope::Workspace,
+                    "alpha-needle-a",
+                    None,
+                    20,
+                )
+                .await?
+                .hits
+                .len();
+                let foreign_hits = search_messages(
+                    conn,
+                    ws_a,
+                    a1,
+                    SearchScope::Workspace,
+                    "bravo-needle-b",
+                    None,
+                    20,
+                )
+                .await?
+                .hits
+                .len();
                 Ok::<_, DbError>((
                     own_dms,
                     foreign_dms,
@@ -993,10 +1209,18 @@ async fn d2_b12_5_rls_blocks_cross_tenant_breadth_reads() {
     let (b_dms, b_hits) = with_tenant_tx(&app, ws_b, move |conn| {
         Box::pin(async move {
             let dms = list_direct_messages(conn, ws_b, b1).await?.len();
-            let hits = search_messages(conn, ws_b, b1, "bravo-needle-b", None, 20)
-                .await?
-                .hits
-                .len();
+            let hits = search_messages(
+                conn,
+                ws_b,
+                b1,
+                SearchScope::Workspace,
+                "bravo-needle-b",
+                None,
+                20,
+            )
+            .await?
+            .hits
+            .len();
             Ok::<_, DbError>((dms, hits))
         })
     })
