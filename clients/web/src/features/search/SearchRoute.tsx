@@ -18,6 +18,7 @@ import {
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
+import { FilterTabs } from "@/features/common/FilterTabs";
 import { uuidEq, type MessageSearchHit } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
@@ -26,12 +27,17 @@ import {
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
+  ESCALATE_TO_WORKSPACE_DETAIL,
+  ESCALATE_TO_WORKSPACE_LABEL,
   leadsWithEllipsis,
   trailsWithEllipsis,
   noResultsCopy,
   NO_RESULTS_SCOPE_NOTE,
+  searchPlaceholder,
+  searchScopeTabs,
   SHORT_QUERY_HINT,
   snippetSegments,
+  type SearchChannelContext,
 } from "@momo/core/features/search/searchModel";
 import { useMessageSearch } from "./useMessageSearch";
 
@@ -135,21 +141,53 @@ export function SearchRoute() {
   // ⌘K 팔레트가 이름으로 못 찾았을 때 친 말을 그대로 들고 넘어온다. 넘겨받고도
   // 빈 상자를 보여주면 그 인계는 인계가 아니라 초기화다.
   const [params] = useSearchParams();
-  const search = useMessageSearch(params.get("q") ?? "");
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const channels = useMemo(
+    () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
+    [channelsQuery.groups]
+  );
+
+  // `?channel=`은 채널에서 들어왔다는 인계다 (#1931). 팔레트의 「이 채널에서
+  // 검색」이 싣고, 이 표면이 범위 칩의 기본값으로 받는다.
+  //
+  // 못 푼 id를 조용히 버리지 않는다: 그러면 사람이 고른 범위를 화면이 되돌리고,
+  // 되돌린 사실은 아무 데도 적히지 않는다. 이름만 id 앞자리로 대신하고(행이
+  // 이미 그렇게 한다) 범위는 그대로 둔 채 서버에 묻는다 — 읽을 수 없는 채널이면
+  // 서버가 404로 답하고 그것이 참말이다.
+  const scopedChannel: SearchChannelContext | null = useMemo(() => {
+    const requested = params.get("channel");
+    if (requested === null || requested.trim() === "") return null;
+    const channel = channels.find((c) => uuidEq(c.id, requested));
+    if (!channel) {
+      return {
+        channelId: requested,
+        label: requested.slice(0, 8),
+        isDirect: false,
+      };
+    }
+    return {
+      channelId: channel.id,
+      label: channelLabel(channel, directoryQuery.directory, session.member.id),
+      isDirect: channel.kind === "dm",
+    };
+    // 첫 렌더의 주소만 읽는다. 목록이 늦게 도착해 이름이 채워지는 것은 반영해야
+    // 하므로 `channels`/`directory`는 의존성에 남는다.
+  }, [params, channels, directoryQuery.directory, session.member.id]);
+
+  const search = useMessageSearch(params.get("q") ?? "", scopedChannel);
+  const scopeTabs = useMemo(
+    () => searchScopeTabs(scopedChannel),
+    [scopedChannel]
+  );
 
   // 도착하면 캐럿이 입력 상자에 있다. 검색 표면에 와서 처음 하는 일은 언제나
   // 타자이고, 멤버 디렉터리가 같은 이유로 같은 것을 한다.
   useEffect(() => {
     inputRef.current?.focus();
   }, []);
-
-  const channels = useMemo(
-    () => [...channelsQuery.groups.channels, ...channelsQuery.groups.dms],
-    [channelsQuery.groups]
-  );
 
   const nowMs = Date.now();
 
@@ -196,14 +234,46 @@ export function SearchRoute() {
             onChange={(event) => search.setRaw(event.target.value)}
             // 이 밭의 이름도 이 표면의 이름이다 (이슈 #1146 N4).
             aria-label={SEARCH_SURFACE_NAME}
-            placeholder="메시지 내용으로 검색"
+            // 범위를 좁혀 뒀다면 안내문이 그 채널의 **이름**을 말한다. 칩은
+            // 「이 채널에서」까지만 말할 수 있고(알약이 이름 길이를 따라
+            // 출렁이면 안 되므로), 「이 채널」이 어느 채널인지는 여기서 답한다.
+            placeholder={searchPlaceholder(search.scope, scopedChannel)}
             className="ps-8"
             data-testid="search-input"
           />
         </div>
+
+        {/* 범위 칩은 채널을 들고 왔을 때만 있다. 좁힐 대상이 없는 자리에
+            「이 채널에서」를 세우면 누를 수 없는 칩이 하나 생기고, 그것은
+            컨트롤이 아니라 장식이다.
+
+            인박스 탭·작업 흐름 필터와 **같은 컨트롤**이다(FilterTabs): 값만
+            이 표면의 것이고 키보드 계약(정거장 1개, ←/→ 이동)과 기하는 그
+            컨트롤의 것이다. */}
+        {scopedChannel !== null && (
+          <div className="mt-2">
+            <FilterTabs
+              spec={scopeTabs}
+              value={search.scope}
+              onChange={search.setScope}
+            />
+          </div>
+        )}
       </form>
 
-      <div className="min-h-0 flex-1 overflow-y-auto">
+      {/* 범위 칩이 지배하는 패널. 탭은 선택된 값만 자기 패널을 가리키므로
+          (FilterTabs) 여기 id는 하나면 되고, 실제로 이 표면의 결과 자리는
+          범위와 무관하게 하나다. */}
+      <div
+        className="min-h-0 flex-1 overflow-y-auto"
+        {...(scopedChannel === null
+          ? {}
+          : {
+              id: scopeTabs.panelId(search.scope),
+              role: "tabpanel",
+              "aria-labelledby": scopeTabs.tabId(search.scope),
+            })}
+      >
         {search.phase === "idle" && (
           <EmptyInvite
             headline="메시지를 검색합니다."
@@ -242,13 +312,43 @@ export function SearchRoute() {
             />
           ))}
 
-        {search.phase === "empty" && (
-          <EmptyInvite
-            headline={noResultsCopy(search.query)}
-            detail={NO_RESULTS_SCOPE_NOTE}
-            testId="search-empty"
-          />
-        )}
+        {search.phase === "empty" &&
+          // 좁힌 범위에서 빈손인 것과 전체에서 빈손인 것은 다른 소식이다.
+          // 앞은 「옆 채널을 보라」이고 뒤는 「내가 속한 곳에는 없다」인데, 한
+          // 문장으로 뭉뚱그리면 앞의 경우에 사람이 검색을 그만둔다.
+          (search.scope === "channel" && scopedChannel !== null ? (
+            <EmptyInvite
+              headline={noResultsCopy(
+                search.query,
+                search.scope,
+                scopedChannel
+              )}
+              detail={ESCALATE_TO_WORKSPACE_DETAIL}
+              // 승격은 **한 번의 누름**이다. 문구만 두고 컨트롤을 두지 않으면
+              // 「전체에서 찾아보세요」는 칩을 다시 찾아 누르라는 숙제이고,
+              // 이 표면은 방금 그 사람의 질의를 이미 들고 있다. 질의는 그대로
+              // 남으므로 다시 칠 일도 없다.
+              actions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => search.setScope("workspace")}
+                  data-testid="search-empty-escalate"
+                >
+                  {ESCALATE_TO_WORKSPACE_LABEL}
+                </Button>
+              }
+              testId="search-empty"
+              dataAttrs={{ "data-scope": "channel" }}
+            />
+          ) : (
+            <EmptyInvite
+              headline={noResultsCopy(search.query)}
+              detail={NO_RESULTS_SCOPE_NOTE}
+              testId="search-empty"
+              dataAttrs={{ "data-scope": "workspace" }}
+            />
+          ))}
 
         {search.phase === "results" && (
           <>

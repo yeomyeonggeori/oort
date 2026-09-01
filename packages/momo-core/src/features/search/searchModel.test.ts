@@ -1,15 +1,25 @@
 import { describe, expect, it } from "vitest";
 import {
+  channelIdInPath,
   clampQueryForCopy,
+  defaultSearchScope,
   isSearchable,
   leadsWithEllipsis,
   noResultsCopy,
   normalizeQuery,
   QUERY_COPY_MAX_CHARS,
+  scopedChannelId,
   searchPhase,
+  searchPlaceholder,
+  searchQueryKey,
+  searchRoutePath,
+  searchScopeLabel,
+  searchScopeTabs,
   SEARCH_MIN_CHARS,
+  SEARCH_SCOPES,
   snippetSegments,
   trailsWithEllipsis,
+  type SearchChannelContext,
 } from "./searchModel";
 
 // 계약의 출처는 서버 두 파일이다:
@@ -218,5 +228,215 @@ describe("결과 없음 문구", () => {
 
   it("짧은 질의는 그대로 둔다", () => {
     expect(clampQueryForCopy("배포")).toBe("배포");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 검색 범위 (BT-3 / #1931)
+// ---------------------------------------------------------------------------
+
+const CHANNEL: SearchChannelContext = {
+  channelId: "0199C0FF-EE00-7000-8000-000000000001",
+  label: "#배포",
+  isDirect: false,
+};
+const DM: SearchChannelContext = {
+  channelId: "0199C0FF-EE00-7000-8000-000000000002",
+  label: "김인턴",
+  isDirect: true,
+};
+
+describe("검색 범위", () => {
+  it("채널 문맥을 들고 오면 그 채널이 기본이다", () => {
+    expect(defaultSearchScope(CHANNEL)).toBe("channel");
+    expect(defaultSearchScope(DM)).toBe("channel");
+    // 문맥 없이 들어오면 좁힐 대상이 없다.
+    expect(defaultSearchScope(null)).toBe("workspace");
+  });
+
+  it("칩은 둘, 기본값이 먼저다", () => {
+    expect(SEARCH_SCOPES).toEqual(["channel", "workspace"]);
+  });
+
+  it("DM이면 「채널」이 아니라 「대화」다", () => {
+    expect(searchScopeLabel("channel", CHANNEL)).toBe("이 채널에서");
+    expect(searchScopeLabel("channel", DM)).toBe("이 대화에서");
+    expect(searchScopeLabel("workspace", CHANNEL)).toBe("전체");
+    expect(searchScopeLabel("workspace", DM)).toBe("전체");
+  });
+
+  it("칩에는 채널 이름을 넣지 않는다", () => {
+    // 알약 폭이 이름을 따라 출렁이고 긴 이름은 잘린다. 이름이 실제로 도움이
+    // 되는 자리는 안내문과 빈 결과 문구다.
+    const long: SearchChannelContext = {
+      ...CHANNEL,
+      label: "#프로젝트-알림-정말-긴-이름",
+    };
+    expect(searchScopeLabel("channel", long)).not.toContain(long.label);
+    // 대신 tablist의 접근성 이름이 그 이름을 든다 — 이쪽은 잘리지 않는다.
+    expect(searchScopeTabs(long).label).toContain(long.label);
+  });
+
+  it("탭 명세는 공용 컨트롤이 요구하는 네 규칙을 다 채운다", () => {
+    const spec = searchScopeTabs(CHANNEL);
+    for (const scope of spec.values) {
+      expect(spec.tabId(scope)).toMatch(/^search-scope-tab-/);
+      expect(spec.testId(scope)).toBe(`search-scope-${scope}`);
+      expect(spec.labelFor(scope).length).toBeGreaterThan(0);
+    }
+    // 결과 패널은 하나다: 범위를 바꿔도 목록은 같은 자리에서 갈린다.
+    expect(spec.panelId("channel")).toBe(spec.panelId("workspace"));
+  });
+
+  it("문맥이 없으면 채널 칩이 어느 채널도 가리키지 못한다", () => {
+    // 그때 칩은 화면에 없어야 하고, 실수로 렌더돼도 요청은 좁혀지지 않는다.
+    expect(scopedChannelId("channel", null)).toBeUndefined();
+  });
+});
+
+describe("범위 → 요청 파라미터", () => {
+  it("전체 범위는 channel= 을 아예 붙이지 않는다", () => {
+    expect(scopedChannelId("workspace", CHANNEL)).toBeUndefined();
+  });
+
+  it("채널 범위는 그 채널 id를 싣는다", () => {
+    expect(scopedChannelId("channel", CHANNEL)).toBe(CHANNEL.channelId);
+    expect(scopedChannelId("channel", DM)).toBe(DM.channelId);
+  });
+});
+
+describe("범위 전환은 커서를 버린다", () => {
+  const WS = "0199A000-0000-7000-8000-00000000000A";
+
+  it("범위가 다르면 캐시 키가 다르다", () => {
+    const wide = searchQueryKey(WS, "배포", undefined);
+    const narrow = searchQueryKey(WS, "배포", CHANNEL.channelId);
+    // 이것이 커서 초기화의 전부다. 키가 같으면 tanstack이 이전 범위의 페이지와
+    // 커서를 그대로 들고 있다가 다음 「더 보기」에 그 커서를 실어 보내고, 서버가
+    // 스코프 봉인 400으로 답한다 — 사람 눈에는 검색이 고장 난 것으로 보인다.
+    expect(narrow).not.toEqual(wide);
+  });
+
+  it("채널이 다르면 캐시 키도 다르다", () => {
+    expect(searchQueryKey(WS, "배포", CHANNEL.channelId)).not.toEqual(
+      searchQueryKey(WS, "배포", DM.channelId)
+    );
+  });
+
+  it("전체 범위 키는 자리를 비우지 않는다", () => {
+    // `undefined`를 그대로 두면 직렬화에서 그 자리가 사라져 옛 3원소 키와
+    // 같아진다 — 좁힌 페이지가 전체 캐시에 섞인다.
+    const wide = searchQueryKey(WS, "배포", undefined);
+    expect(wide).toHaveLength(4);
+    expect(wide[3]).toBeNull();
+  });
+
+  it("같은 요청이면 같은 키다", () => {
+    expect(searchQueryKey(WS, "배포", CHANNEL.channelId)).toEqual(
+      searchQueryKey(WS.toLowerCase(), "배포", CHANNEL.channelId.toLowerCase())
+    );
+  });
+});
+
+describe("빈 결과는 범위를 말한다", () => {
+  it("전체에서 빈손이면 지금까지의 그 문장이다", () => {
+    expect(noResultsCopy("배포")).toBe(
+      "'배포'가 들어간 메시지를 찾지 못했습니다."
+    );
+    expect(noResultsCopy("배포", "workspace", CHANNEL)).toBe(
+      "'배포'가 들어간 메시지를 찾지 못했습니다."
+    );
+  });
+
+  it("좁힌 범위에서 빈손이면 어디서 못 찾았는지 말한다", () => {
+    // 「찾지 못했습니다」로만 끝내면 워크스페이스 전체에서 없다는 뜻으로 읽히고,
+    // 사람은 옆 채널에 있는 말을 찾기를 그만둔다.
+    const copy = noResultsCopy("배포", "channel", CHANNEL);
+    expect(copy).toContain("이 채널에는");
+    expect(copy).toContain("'배포'가");
+    expect(copy).not.toBe("'배포'가 들어간 메시지를 찾지 못했습니다.");
+  });
+
+  it("DM이면 「이 대화에는」이다", () => {
+    expect(noResultsCopy("배포", "channel", DM)).toContain("이 대화에는");
+  });
+
+  it("좁힌 문구에서도 조사는 골라 붙인다", () => {
+    expect(noResultsCopy("로그인", "channel", CHANNEL)).toContain("'로그인'이");
+    expect(noResultsCopy("deploy", "channel", DM)).toContain("'deploy'가");
+    expect(noResultsCopy("배포", "channel", CHANNEL)).not.toMatch(
+      /\(가\)|\(이\)/
+    );
+  });
+
+  it("좁힌 문구도 붙여넣은 문단을 헤드라인으로 만들지 않는다", () => {
+    const copy = noResultsCopy("가".repeat(400), "channel", CHANNEL);
+    expect(copy.length).toBeLessThan(120);
+    expect(copy).toContain("…");
+  });
+});
+
+describe("입력 안내문", () => {
+  it("좁혀 있으면 어느 채널인지 이름으로 말한다", () => {
+    expect(searchPlaceholder("channel", CHANNEL)).toBe("#배포에서 검색");
+    expect(searchPlaceholder("channel", DM)).toBe("김인턴님과의 대화에서 검색");
+  });
+
+  it("전체이거나 문맥이 없으면 지금까지의 안내문이다", () => {
+    expect(searchPlaceholder("workspace", CHANNEL)).toBe("메시지 내용으로 검색");
+    expect(searchPlaceholder("channel", null)).toBe("메시지 내용으로 검색");
+  });
+});
+
+describe("검색 표면으로 가는 주소", () => {
+  it("질의도 범위도 없으면 맨 주소다", () => {
+    expect(searchRoutePath("")).toBe("/search");
+    expect(searchRoutePath("   ")).toBe("/search");
+  });
+
+  it("질의는 서버와 같은 방식으로 다듬어 싣는다", () => {
+    expect(searchRoutePath("  배포  ")).toBe("/search?q=%EB%B0%B0%ED%8F%AC");
+  });
+
+  it("채널을 실으면 도착한 표면이 그 채널로 좁힌다", () => {
+    const path = searchRoutePath("배포", CHANNEL.channelId);
+    expect(path).toContain(`channel=${CHANNEL.channelId}`);
+    expect(path).toContain("q=");
+  });
+
+  it("질의 없이 범위만 넘길 수도 있다", () => {
+    // 채널에서 ⌘K를 열고 아무것도 치지 않은 채 고른 경우.
+    expect(searchRoutePath("", CHANNEL.channelId)).toBe(
+      `/search?channel=${CHANNEL.channelId}`
+    );
+  });
+
+  it("이스케이프는 한 곳에서만 일어난다", () => {
+    // 조립이 두 곳이 되면 한쪽만 이스케이프를 잊는 일이 가능해진다.
+    expect(searchRoutePath("a&b=c")).toBe("/search?q=a%26b%3Dc");
+  });
+});
+
+describe("지금 서 있는 채널", () => {
+  it("채널 주소에서만 답한다", () => {
+    expect(channelIdInPath("/c/0199c0ff-ee00-7000-8000-000000000001")).toBe(
+      "0199c0ff-ee00-7000-8000-000000000001"
+    );
+    expect(channelIdInPath("/c/abc/")).toBe("abc");
+  });
+
+  it("채널이 아닌 곳에서는 null이다", () => {
+    for (const path of ["/", "/inbox", "/search", "/directory", "/c", "/c/"]) {
+      expect(channelIdInPath(path)).toBeNull();
+    }
+  });
+
+  it("채널 하위 표면은 채널이 아니다", () => {
+    // 라우트가 자라도 이 판정이 자동으로 넓어지지 않는다.
+    expect(channelIdInPath("/c/abc/thread/def")).toBeNull();
+  });
+
+  it("주소에 인코딩된 id를 되돌린다", () => {
+    expect(channelIdInPath(`/c/${encodeURIComponent("a b")}`)).toBe("a b");
   });
 });

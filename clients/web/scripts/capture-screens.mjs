@@ -8034,6 +8034,149 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   return shots;
 }
 
+// BT-3 (#1931) — 검색 범위 칩. 좁힌 결과 · 넓힌 결과 · 좁힌 빈손(승격 버튼),
+// 두 스킴.
+//
+// 목이 **범위를 실제로 읽는다**: `channel=`이 있으면 그 채널 히트만 돌려준다.
+// 목이 파라미터를 무시하면 두 프레임이 같은 그림이 되고, 그때 캡처는 초록인데
+// 칩은 죽은 컨트롤이다. 그래서 프레임을 찍기 전에 행 수를 센다 — 스크린샷은
+// 「목록이 안 바뀌었다」를 보여주지 못한다(MOBILE_TAP_TARGETS와 같은 이유).
+async function captureSearchScopeScenes(browser, scheme) {
+  const shots = [];
+  const HERE = GENERAL_ID; // general
+  const THERE = CHANNELS[1].id; // 엔진
+  const NEEDLE = "배포";
+  // 이 질의는 어느 채널에도 없다. 좁힌 빈손 프레임이 그 위에 선다.
+  const MISSING = "아무데도없는말";
+
+  function hit(channelId, seq, snippet) {
+    return {
+      channelId,
+      messageId: `019f9b00-0000-7000-8000-00000000${String(seq).padStart(4, "0")}`,
+      seq,
+      authorMemberId: ME,
+      createdAtMs: Date.parse("2026-08-31T09:12:00Z") + seq * 60_000,
+      snippet,
+      matchOffset: snippet.indexOf(NEEDLE) < 0 ? 0 : snippet.indexOf(NEEDLE),
+    };
+  }
+
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  await context.route("**/v1/workspaces/*/search/messages*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const q = params.get("q") ?? "";
+    const channel = params.get("channel");
+    if (q === MISSING) return json(route, { hits: [] });
+    const all = [
+      hit(HERE, 41, "금요일 배포 준비 끝났습니다. 롤백 절차만 한 번 더 볼게요."),
+      hit(HERE, 38, "배포 창은 오후 6시로 잡았습니다."),
+      hit(THERE, 12, "엔진 쪽 배포는 다음 주로 미룹니다."),
+    ];
+    const hits =
+      channel === null
+        ? all
+        : all.filter((row) => row.channelId.toLowerCase() === channel.toLowerCase());
+    return json(route, { hits });
+  });
+
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+
+  async function goSearch(query, channelId) {
+    await page.evaluate(
+      ([q, id]) => {
+        const params = new URLSearchParams({ q });
+        if (id) params.set("channel", id);
+        window.location.hash = `#/search?${params.toString()}`;
+      },
+      [query, channelId ?? ""]
+    );
+    await page.getByTestId("search-route").waitFor({ state: "visible" });
+  }
+
+  async function rowCount() {
+    return page.getByTestId("search-hit").count();
+  }
+
+  await goSearch(NEEDLE, HERE);
+  await page.getByTestId("search-scope-channel").waitFor({ state: "visible" });
+  await page.getByTestId("search-results").waitFor({ state: "visible" });
+  const narrowed = await rowCount();
+  if (narrowed !== 2) {
+    throw new Error(`좁힌 검색 행 수 ${scheme}: ${narrowed} (2여야 함)`);
+  }
+  await page.waitForTimeout(200);
+  const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
+  await page.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+
+  // 칩을 실제로 누른다. 프레임만 찍고 누르지 않으면 죽은 칩도 초록이다.
+  await page.getByTestId("search-scope-workspace").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
+  );
+  await page.waitForTimeout(200);
+  const wideShot = `${OUT_DIR}/search-scope-workspace-${scheme}.png`;
+  await page.screenshot({ path: wideShot });
+  shots.push(wideShot);
+
+  // 키보드 계약은 공용 탭 컨트롤의 것이다(정거장 1개, ←/→ 이동). 이 표면이
+  // 그것을 실제로 물려받았는지 여기서 잰다.
+  await page.getByTestId("search-scope-workspace").focus();
+  await page.keyboard.press("ArrowLeft");
+  const afterArrow = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (afterArrow !== "search-scope-channel") {
+    throw new Error(
+      `범위 칩 ←/→ 이동 ${scheme}: ${afterArrow} (search-scope-channel 이어야 함)`
+    );
+  }
+
+  // 좁힌 빈손 — 그리고 승격 버튼이 실제로 넓히는지.
+  //
+  // 주소를 다시 밀지 않고 **화면 위에서** 만든다. 같은 라우트 안에서 해시만
+  // 바꾸면 라우트가 다시 마운트되지 않으므로 `?q=`는 첫 렌더의 값 그대로다
+  // (useMessageSearch: "초기값은 첫 렌더에서만 읽는다"). 사람이 하는 일도
+  // 이쪽이다: 칩으로 좁히고, 입력을 갈아 친다.
+  await page.getByTestId("search-scope-channel").click();
+  await page.getByTestId("search-input").fill(MISSING);
+  const empty = page.getByTestId("search-empty");
+  await empty.waitFor({ state: "visible" });
+  const emptyText = await empty.innerText();
+  if (!emptyText.includes("이 채널에는")) {
+    throw new Error(`좁힌 빈손이 범위를 말하지 않는다 ${scheme}: ${emptyText}`);
+  }
+  await page.waitForTimeout(200);
+  const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
+  await page.screenshot({ path: emptyShot });
+  shots.push(emptyShot);
+
+  await page.getByTestId("search-empty-escalate").click();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector('[data-testid="search-empty"]')?.textContent ?? ""
+      ).includes("이 채널에는") === false
+  );
+  const escalated = await page.getByTestId("search-empty-escalate").count();
+  if (escalated !== 0) {
+    throw new Error(
+      `승격 뒤에도 승격 버튼이 남아 있다 ${scheme}: 넓힐 곳이 없는데 컨트롤이 있다`
+    );
+  }
+
+  await context.close();
+  return shots;
+}
+
 // #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
 // 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
 async function captureSetStatusScenes(browser, scheme) {
@@ -9153,6 +9296,7 @@ async function main() {
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureSetStatusScenes(browser, scheme)));
+          all.push(...(await captureSearchScopeScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));

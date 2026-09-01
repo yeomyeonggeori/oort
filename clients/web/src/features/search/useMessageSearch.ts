@@ -7,7 +7,17 @@ import {
   type MessageSearchPage,
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
-import { isSearchable, normalizeQuery, searchPhase, type SearchPhase } from "@momo/core/features/search/searchModel";
+import {
+  defaultSearchScope,
+  isSearchable,
+  normalizeQuery,
+  scopedChannelId,
+  searchPhase,
+  searchQueryKey,
+  type SearchChannelContext,
+  type SearchPhase,
+  type SearchScope,
+} from "@momo/core/features/search/searchModel";
 
 // =============================================================================
 // 검색 질의 하나의 수명 (goal B12 H5).
@@ -45,6 +55,9 @@ export interface MessageSearch {
   setRaw: (next: string) => void;
   /** 실제로 서버에 보낸 질의. 강조와 문구가 이 값을 쓴다. */
   query: string;
+  /** 지금 고른 범위. 칩·안내문·빈 결과 문구가 함께 읽는다 (#1931). */
+  scope: SearchScope;
+  setScope: (next: SearchScope) => void;
   phase: SearchPhase;
   hits: MessageSearchHit[];
   hasMore: boolean;
@@ -54,11 +67,25 @@ export interface MessageSearch {
   error: unknown;
 }
 
-export function useMessageSearch(initialQuery = ""): MessageSearch {
+export function useMessageSearch(
+  initialQuery = "",
+  /**
+   * 채널에서 들어왔다는 사실. `null`이면 범위 칩이 없다 — 좁힐 대상이 없는
+   * 자리에 「이 채널에서」를 세우면 누를 수 없는 칩이 하나 생긴다.
+   */
+  channel: SearchChannelContext | null = null
+): MessageSearch {
   const { workspaceId } = useSession();
   // 초기값은 첫 렌더에서만 읽는다. 이후 주소가 바뀌어도 사람이 치고 있는 값을
   // 덮지 않는다.
   const [raw, setRaw] = useState(initialQuery);
+  // 범위도 같은 규칙이다: 도착할 때 한 번 정해지고, 그 뒤로는 사람이 칩으로
+  // 바꾼다. 채널을 들고 왔으면 그 채널이 기본 — ⌘K에서 「이 채널에서 검색」을
+  // 고른 사람에게 전체 결과를 먼저 보여주면 방금 고른 것을 화면이 되돌린 것이다.
+  const [scope, setScope] = useState<SearchScope>(() =>
+    defaultSearchScope(channel)
+  );
+  const channelId = scopedChannelId(scope, channel);
   // 넘겨받은 질의는 기다릴 이유가 없다: 사람은 이미 팔레트에서 다 쳤고,
   // 디바운스는 타자 중인 손을 위한 것이다.
   const debounced = useDebounced(raw, raw === initialQuery ? 0 : DEBOUNCE_MS);
@@ -66,11 +93,15 @@ export function useMessageSearch(initialQuery = ""): MessageSearch {
   const enabled = isSearchable(debounced);
 
   const result = useInfiniteQuery<MessageSearchPage>({
-    queryKey: ["message-search", workspaceId.toLowerCase(), query],
+    // 범위가 키의 일부다 — 그것이 커서 초기화의 전부다(searchQueryKey의 주석).
+    // 여기서 키를 손으로 조립하면 그 규칙이 두 벌로 갈라지고, 갈라진 쪽은
+    // 「더 보기」를 눌러야만 틀린 것이 드러난다.
+    queryKey: searchQueryKey(workspaceId, query, channelId),
     queryFn: ({ pageParam, signal }) =>
       searchMessages(workspaceId, query, {
         limit: SEARCH_LIMIT_DEFAULT,
         ...(typeof pageParam === "string" ? { cursor: pageParam } : {}),
+        ...(channelId === undefined ? {} : { channelId }),
         signal,
       }),
     enabled,
@@ -102,6 +133,8 @@ export function useMessageSearch(initialQuery = ""): MessageSearch {
     raw,
     setRaw,
     query,
+    scope,
+    setScope,
     phase,
     hits,
     hasMore: result.hasNextPage,

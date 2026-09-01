@@ -43,6 +43,11 @@ import {
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import {
+  channelIdInPath,
+  searchRoutePath,
+  searchScopeLabel,
+} from "@momo/core/features/search/searchModel";
+import {
   OPEN_NEW_DM_SHORTCUT,
   OPEN_QUICK_SWITCHER_SHORTCUT,
   OPEN_SETTINGS_SHORTCUT,
@@ -158,6 +163,22 @@ export function QuickSwitcher({
     () => switcherPeople(directory.members, session.member.id, peersWithDm),
     [directory.members, session.member.id, peersWithDm]
   );
+
+  // 지금 서 있는 채널 — 「이 채널에서 검색」이 뜻하는 그 채널 (#1931).
+  //
+  // 주소로 판정한다. 팔레트는 채널 표면의 자식이 아니라 셸의 형제이므로 열려
+  // 있는 채널을 prop으로 받을 길이 없고, 주소는 그 사실의 정본이다. 목록에서
+  // 못 찾은 id는 **버린다**: 이름을 모르는 채널을 「이 채널에서 검색」이라고
+  // 부를 수는 있어도, 그 줄은 사람이 어디로 가는지 모르는 채로 누르는 줄이 된다.
+  const currentChannel = useMemo(() => {
+    const channelId = channelIdInPath(location.pathname);
+    if (channelId === null) return null;
+    return (
+      [...groups.channels, ...groups.dms].find(
+        (channel) => channel.id.toLowerCase() === channelId.toLowerCase()
+      ) ?? null
+    );
+  }, [location.pathname, groups.channels, groups.dms]);
 
   // A failed DM belongs to the attempt that failed, not to the palette. The
   // palette outlives its openings — cmdk unmounts the dialog contents but this
@@ -311,18 +332,42 @@ export function QuickSwitcher({
               // 것이 맞지만, 이것은 **이름으로 못 찾았을 때 쓰라고 있는** 항목이라
               // 걸러져 사라지면 정확히 필요한 순간에 없다.
               forceMount
-              onSelect={() =>
-                go(
-                  typed.trim() === ""
-                    ? "/search"
-                    : `/search?q=${encodeURIComponent(typed.trim())}`
-                )
-              }
+              onSelect={() => go(searchRoutePath(typed))}
             >
               <Search className="size-4 opacity-70" />
               {typed.trim() === ""
                 ? SEARCH_SURFACE_NAME
                 : `'${typed.trim()}' ${SEARCH_SURFACE_NAME}`}
+            </Command.Item>
+          )}
+          {/* 채널 안에서 ⌘K를 열었다면 「이 채널에서」로 곧장 갈 수 있다
+              (BT-3 / #1931). 이 줄이 검색 범위의 **유일한 진입 배선**이다:
+              범위 자체는 표면의 칩이 쥐고 있고, 여기서 하는 일은 도착할 때의
+              기본값을 주소에 실어 보내는 것뿐이다.
+
+              위 줄과 나란히 두되 `forceMount`는 주지 않는다. 위 줄은 「이름으로
+              못 찾았을 때 쓰라고 있는」 항목이라 걸러지면 안 되지만, 이 줄은
+              범위를 좁히는 편의라 사람이 채널 이름을 치고 있는 중에는 사라지는
+              편이 맞다. */}
+          {searchProvided && currentChannel !== null && (
+            <Command.Item
+              className={itemClass}
+              value={`${SEARCH_SURFACE_NAME} 이 채널에서 검색 search in this channel`}
+              data-testid="switcher-message-search-channel"
+              onSelect={() => go(searchRoutePath(typed, currentChannel.id))}
+            >
+              <Search className="size-4 opacity-70" />
+              {/* 칩과 **같은 말**이다(searchScopeLabel). 진입점이 「이
+                  채널에서」라 하고 도착한 표면의 칩이 다른 말을 하면, 사람은
+                  자기가 고른 것이 반영됐는지 매번 대조해야 한다. */}
+              {searchScopeLabel("channel", {
+                channelId: currentChannel.id,
+                label: currentChannel.name ?? "",
+                isDirect: currentChannel.kind === "dm",
+              })}{" "}
+              {typed.trim() === ""
+                ? SEARCH_SURFACE_NAME
+                : `'${typed.trim()}' 찾기`}
             </Command.Item>
           )}
           <Command.Item className={itemClass} onSelect={() => go("/inbox")}>

@@ -11,6 +11,7 @@
 // =============================================================================
 
 import { attachParticle } from "../../lib/koreanParticle";
+import type { FilterTabsSpec } from "../common/filterTabs";
 
 /** 서버가 400으로 거절하는 문턱(`q must contain at least 2 characters`). */
 export const SEARCH_MIN_CHARS = 2;
@@ -41,6 +42,175 @@ export function isSearchable(raw: string): boolean {
  */
 export const SHORT_QUERY_HINT = `${SEARCH_MIN_CHARS}자 이상 입력하면 찾기 시작합니다.`;
 
+// ---- 검색 범위 (BT-3 / #1931) ------------------------------------------------
+//
+// 서버가 `channel=<uuid>`를 받는다. 없으면 지금까지의 워크스페이스 검색이고,
+// 있으면 그 채널 하나만 훑는다(비멤버·비존재 채널은 404). 계약 원문:
+//   server-rust/bins/momo-server/src/routes/search.rs
+//
+// 여기 있는 것은 **어휘와 규칙**뿐이다. 칩을 그리는 일은 웹의 공용 탭 컨트롤이
+// 한다(clients/web/src/features/common/FilterTabs.tsx) — 이 표면이 세 번째
+// 호출자다.
+
+export type SearchScope = "channel" | "workspace";
+
+/**
+ * 칩 순서. 「이 채널에서」가 먼저인 이유는 그것이 채널 문맥에서 들어왔을 때의
+ * **기본값**이고, 기본값이 두 번째 칸에 앉아 있으면 사람은 자기가 무엇을 고른
+ * 상태인지 매번 읽어서 알아내야 한다.
+ */
+export const SEARCH_SCOPES: readonly SearchScope[] = ["channel", "workspace"];
+
+/**
+ * 채널 문맥에서 들어왔다는 사실 그 자체.
+ *
+ * `null`이면 채널 칩이 없다 — 사이드바나 주소창으로 곧장 검색에 온 사람에게
+ * 「이 채널에서」는 어느 채널도 가리키지 않는 말이고, 누를 수 없는 칩은 화면에
+ * 있을 이유가 없다.
+ */
+export interface SearchChannelContext {
+  channelId: string;
+  /** 사람이 그 채널을 부르는 이름 — `channelLabel`이 준 그 한 줄. */
+  label: string;
+  /** DM이면 「채널」이 아니라 「대화」다. */
+  isDirect: boolean;
+}
+
+/**
+ * 칩에 적히는 말.
+ *
+ * 채널 **이름**을 칩에 넣지 않는다. 알약 폭이 이름 길이를 따라 출렁이고, 긴
+ * 이름은 `#프로젝트-알림-…`처럼 잘려서 어느 채널인지 되레 알 수 없게 된다.
+ * 이름이 실제로 도움이 되는 자리는 입력 상자의 안내문과 빈 결과 문구이고,
+ * 거기서는 잘리지 않는다 — [`searchPlaceholder`], [`noResultsCopy`].
+ */
+export function searchScopeLabel(
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): string {
+  if (scope === "workspace") return "전체";
+  return context?.isDirect ? "이 대화에서" : "이 채널에서";
+}
+
+/**
+ * 범위 칩 두 개 = 인박스 탭·작업 흐름 필터와 **같은 컨트롤**이다.
+ *
+ * `role="group"` + `aria-pressed` 버튼 둘을 손으로 만들 수도 있지만, 그 값은
+ * 이미 실측됐다(작업 흐름 1R H2): 탭 정거장이 값 개수만큼 늘고, ←/→ 이동이
+ * 없어지고, 선택 알약이 그 표면의 다른 배지와 픽셀 단위로 같아진다. 두 번째
+ * 구현이 아니라 세 번째 호출자여야 한다.
+ */
+export function searchScopeTabs(
+  context: SearchChannelContext | null
+): FilterTabsSpec<SearchScope> {
+  return {
+    // tablist의 접근성 이름이 「무엇을 고르는 두 버튼인가」를 말한다. 채널
+    // 이름은 여기에 실린다 — 칩과 달리 이 문자열은 잘리지 않는다.
+    label: context === null ? "검색 범위" : `검색 범위(${context.label})`,
+    values: SEARCH_SCOPES,
+    labelFor: (scope) => searchScopeLabel(scope, context),
+    tabId: (scope) => `search-scope-tab-${scope}`,
+    panelId: () => "search-results-panel",
+    testId: (scope) => `search-scope-${scope}`,
+  };
+}
+
+/**
+ * 이 범위로 보낼 `channel=` 값. 워크스페이스 범위면 파라미터를 아예 붙이지
+ * 않는다(빈 문자열이 아니라 부재다 — 서버는 둘을 같게 읽지만, 부재가 이 요청의
+ * 참말이다).
+ */
+export function scopedChannelId(
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): string | undefined {
+  if (scope === "workspace" || context === null) return undefined;
+  return context.channelId;
+}
+
+/**
+ * 채널 문맥을 들고 왔으면 그 채널이 기본, 아니면 전체.
+ *
+ * 채널에서 ⌘K로 「이 채널에서 검색」을 고른 사람에게 전체 결과를 먼저 보여주면,
+ * 그 사람이 방금 고른 것을 화면이 되돌린 것이다.
+ */
+export function defaultSearchScope(
+  context: SearchChannelContext | null
+): SearchScope {
+  return context === null ? "workspace" : "channel";
+}
+
+/**
+ * 이 검색 요청을 식별하는 캐시 키.
+ *
+ * **범위가 키의 일부인 것이 커서 초기화의 전부다.** 커서는 자기가 걷던 결과
+ * 집합에서만 뜻이 있고(서버가 스코프를 커서에 봉인해 바꿔치기를 400으로 막는다),
+ * 범위를 바꾸는 것은 다른 결과 집합으로 옮겨 가는 일이다. 키가 같으면 tanstack이
+ * 이전 범위의 페이지와 커서를 그대로 들고 있다가 다음 「더 보기」에 그 커서를
+ * 실어 보내고, 서버는 400으로 답한다 — 사람 눈에는 범위를 바꿨더니 검색이
+ * 고장 난 것으로 보인다. 키를 갈면 페이지도 커서도 함께 버려진다.
+ *
+ * 워크스페이스 id를 소문자로 눕히는 것은 기존 규칙 그대로다(대소문자만 다른 두
+ * 문자열이 같은 워크스페이스의 캐시를 둘로 쪼개지 않게).
+ */
+export function searchQueryKey(
+  workspaceId: string,
+  query: string,
+  channelId: string | undefined
+): readonly unknown[] {
+  return [
+    "message-search",
+    workspaceId.toLowerCase(),
+    query,
+    // `undefined`가 아니라 `null`이다: tanstack의 키 직렬화는 `undefined`를
+    // 가진 자리를 지우므로, 그러면 워크스페이스 범위 키와 3원소 옛 키가 같아진다.
+    channelId === undefined ? null : channelId.toLowerCase(),
+  ];
+}
+
+/**
+ * 이 검색으로 데려가는 주소.
+ *
+ * 팔레트가 `/search?q=…`를 손으로 이어 붙이고 있었고, 범위가 생기면서 그 조립이
+ * 두 곳이 됐다(전체용 하나, 채널용 하나). 두 곳이 되는 순간 한쪽만 이스케이프를
+ * 잊는 일이 가능해지므로, 조립은 여기 한 번만 있다.
+ */
+export function searchRoutePath(query: string, channelId?: string): string {
+  const params = new URLSearchParams();
+  const trimmed = normalizeQuery(query);
+  if (trimmed !== "") params.set("q", trimmed);
+  if (channelId !== undefined) params.set("channel", channelId);
+  const suffix = params.toString();
+  return suffix === "" ? "/search" : `/search?${suffix}`;
+}
+
+/**
+ * 지금 보고 있는 채널의 id — 없으면 `null`.
+ *
+ * 검색 어휘에 이 함수가 사는 이유는 그것을 묻는 곳이 여기뿐이기 때문이다:
+ * 「이 채널에서 검색」이 **어느 채널을** 뜻하는지는 주소가 답한다. 팔레트가
+ * `pathname.split("/")`을 직접 하면 라우트 모양(`/c/:channelId`)을 아는 곳이
+ * 하나 늘고, 그 하나는 라우트가 바뀌는 날 조용히 틀린다.
+ */
+export function channelIdInPath(pathname: string): string | null {
+  const segments = pathname.split("/").filter((part) => part !== "");
+  if (segments.length !== 2 || segments[0] !== "c") return null;
+  const raw = decodeURIComponent(segments[1]);
+  return raw === "" ? null : raw;
+}
+
+/** 입력 상자의 안내문. 범위를 문장으로 한 번 더 말한다. */
+export function searchPlaceholder(
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): string {
+  const target = scopedChannelId(scope, context) === undefined ? null : context;
+  if (target === null) return "메시지 내용으로 검색";
+  return target.isDirect
+    ? `${target.label}님과의 대화에서 검색`
+    : `${target.label}에서 검색`;
+}
+
 /**
  * 결과가 없을 때 할 말.
  *
@@ -50,15 +220,39 @@ export const SHORT_QUERY_HINT = `${SEARCH_MIN_CHARS}자 이상 입력하면 찾�
  * has not left"). 그 사실을 말하지 않으면 사용자는 "그런 말은 오간 적 없다"로
  * 읽고 검색을 그만두는데, 실제로는 자기가 속하지 않은 채널에 있을 수 있다.
  */
-export function noResultsCopy(query: string): string {
+export function noResultsCopy(
+  query: string,
+  scope: SearchScope = "workspace",
+  context: SearchChannelContext | null = null
+): string {
   // 조사는 골라 붙인다. `'…말'가 들어간`은 기계가 독자 앞에서 결정을 거부한
   // 것이고, 그 결정은 마지막으로 **발음되는** 음절만으로 완전히 판정된다.
   // 규칙은 이 레포에 이미 있다(lib/koreanParticle, mac에서 이식·호출처 7곳):
   // 뒤따옴표 같은 문장부호를 발음에서 빼므로 `'배포'가`와 `'로그인'이`가 그대로
   // 나온다. 여기서 두 번째 규칙을 세우면 같은 판정이 두 벌로 갈라진다.
   const quoted = `'${clampQueryForCopy(query)}'`;
-  return `${attachParticle(quoted, "subject")} 들어간 메시지를 찾지 못했습니다.`;
+  const subject = attachParticle(quoted, "subject");
+  // 범위를 좁혀 놓고 「찾지 못했습니다」로만 끝내면, 그 말은 워크스페이스
+  // 전체에서 못 찾았다는 뜻으로 읽힌다 — 사람은 검색을 그만두는데 실제로는
+  // 옆 채널에 있을 수 있다. **어디서** 못 찾았는지가 이 문장의 절반이다.
+  if (scopedChannelId(scope, context) === undefined) {
+    return `${subject} 들어간 메시지를 찾지 못했습니다.`;
+  }
+  const where = context?.isDirect ? "이 대화에는" : "이 채널에는";
+  return `${subject} 들어간 메시지가 ${where} 없습니다.`;
 }
+
+/**
+ * 좁힌 범위에서 빈손일 때 붙는 안내와, 그 안내가 가리키는 **실제 컨트롤**의 이름.
+ *
+ * 문구만 두고 컨트롤을 두지 않으면 「전체에서 찾아보세요」는 사람에게 칩을 다시
+ * 찾아 누르라는 숙제이고, 이 표면은 방금 그 사람의 질의를 이미 들고 있다. 그래서
+ * 승격은 한 번의 누름이다 — 라우트가 이 라벨로 버튼을 세우고 범위만 갈아 끼운다
+ * (질의는 그대로 남으므로 다시 칠 필요가 없다).
+ */
+export const ESCALATE_TO_WORKSPACE_DETAIL =
+  "다른 채널에 있었을 수 있습니다. 같은 말로 전체를 찾아볼 수 있습니다.";
+export const ESCALATE_TO_WORKSPACE_LABEL = "전체에서 찾기";
 
 /**
  * 문구에 실을 질의의 최대 길이.
