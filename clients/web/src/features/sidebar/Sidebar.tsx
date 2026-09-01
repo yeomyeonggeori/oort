@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -7,6 +7,7 @@ import {
   Inbox,
   Lock,
   MessageSquare,
+  FolderPlus,
   Milestone,
   Plus,
   Search,
@@ -62,6 +63,20 @@ import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
 import { sectionUnreadTotals } from "./sidebarSectionModel";
+import { useSidebarPrefs } from "./useSidebarPrefs";
+import {
+  SectionDeleteConfirmDialog,
+  SectionNameDialog,
+  SidebarSectionMenu,
+} from "./SidebarSectionDialogs";
+import {
+  deriveSidebarSections,
+  SECTION_CREATE_TITLE,
+  sidebarEmptySectionHint,
+  sidebarSectionCapMessage,
+  SIDEBAR_PREFS_LOAD_RETRY_LABEL,
+} from "@momo/core/features/sidebar/sidebarSections";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
   useSidebarSectionsCollapsed,
@@ -72,6 +87,7 @@ import {
   showsConnectionBar,
 } from "./connStatusIndicator";
 import { Button } from "@/design/ui/button";
+import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { cn } from "@/design/lib/cn";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
@@ -215,9 +231,65 @@ export function Sidebar({
   const rosterSettled = !directoryQuery.isPending;
   const canCreate = canCreateChannelNow(rosterSettled, selfMember?.role);
 
+  // 사이드바 조직화 (ADR-0177 / BT-4 #1932). 부트스트랩 GET 이 도착하기 전에는
+  // 배치가 비어 있고, 그때 파생은 오늘까지의 두 섹션과 정확히 같은 것을 돌려준다
+  // - 그래서 로딩 중에도 목록이 흔들리지 않는다.
+  const sidebarPrefs = useSidebarPrefs(workspaceId);
+  const derived = useMemo(
+    () =>
+      deriveSidebarSections({
+        prefs: sidebarPrefs.prefs,
+        channels,
+        dms,
+      }),
+    [sidebarPrefs.prefs, channels, dms]
+  );
+  // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
+  // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
+  const renderedSections = derived.sections;
+  const baseChannelSection = derived.base;
+  const customSections = derived.custom;
+  const dmSection = derived.dms;
+
+  // 터치 표면에는 배치의 문(행 컨텍스트 메뉴)이 없다 - BT-1 이 서랍 스크롤과의
+  // 충돌 때문에 의도적으로 닫아 둔 자리다. 그런데 만들기·이름 바꾸기·삭제는
+  // 열려 있었다: 만들 수는 있는데 쓸 수 없는 그릇이고, 화면은 쓸 수 있다고
+  // 말했다(design-review #1932 H-1). 배치를 줄 수 없는 표면에서는 섹션 편집
+  // 자체를 내밀지 않는다. 로밍해 온 섹션은 그대로 그린다 - 읽는 것은 언제나
+  // 참이고, 그 채널들을 여는 것이 폰에서 이 섹션이 하는 일이다.
+  const touchSurface = useHoverNone();
+  const canEditSections = sidebarPrefs.canEdit && !touchSurface;
+  // 행 메뉴의 「섹션으로 이동」이 내미는 목적지들. 코어가 정한 차례 그대로다.
+  const sectionChoices = useMemo(
+    () => customSections.map((section) => ({ id: section.id, label: section.title })),
+    [customSections]
+  );
+
+  // 섹션 CRUD 의 열림 상태. 다이얼로그는 사이드바 트리 **밖에** 산다 - 섹션을
+  // 지우는 다이얼로그가 그 섹션의 서브트리 안에 있으면 확인을 누르는 순간 자기가
+  // 함께 언마운트된다(#1937 H-1 이 채널 나가기에서 치른 값).
+  const [nameDialog, setNameDialog] = useState<{
+    mode: "create" | "rename";
+    sectionId: string | null;
+    name: string;
+    opener: DialogFocusTarget | null;
+  } | null>(null);
+  const [deleteDialog, setDeleteDialog] = useState<{
+    sectionId: string;
+    name: string;
+    opener: DialogFocusTarget | null;
+  } | null>(null);
+  // 메뉴가 열려 있는 섹션. 그동안 그 헤더의 호버 클러스터를 붙들어 둔다.
+  const [openSectionMenu, setOpenSectionMenu] = useState<string | null>(null);
+  const newSectionRef = useRef<HTMLButtonElement>(null);
+
   // ⌥↑/⌥↓: jump between channels that actually have unread (P11 / Slack
-  // grammar). Ordering follows the rendered list so the traversal is visible.
-  const ordered = useMemo(() => [...channels, ...dms], [channels, dms]);
+  // grammar). Ordering follows the rendered list so the traversal is visible -
+  // 커스텀 섹션이 생기면 순회도 그 차례로 함께 옮겨간다(ADR-0177 D4 통합).
+  const ordered = useMemo(
+    () => renderedSections.flatMap((section) => section.channels),
+    [renderedSections]
+  );
 
   // 지금 읽고 있는 채널 (goal B8 H10). ChatShell이 커서를 올리는 PUT은 왕복이
   // 걸리고 실패할 수도 있으므로, 그 사이 사이드바는 화면에 떠 있는 그 채널에
@@ -260,13 +332,26 @@ export function Sidebar({
   );
   // ⌥↓ walks this list even when a section is folded. The collapsed header
   // therefore carries the same aggregate the keyboard already visits (M-2).
-  const channelUnread = useMemo(
-    () => sectionUnreadTotals(channels.map(unreadCountFor)),
-    [channels, unreadCountFor]
-  );
-  const dmUnread = useMemo(
-    () => sectionUnreadTotals(dms.map(unreadCountFor)),
-    [dms, unreadCountFor]
+  //
+  // 커스텀 섹션도 같은 자를 쓴다: 접힌 헤더가 이고 있는 수는 그 섹션이 **실제로
+  // 그리는 행들**의 합이어야 하고, 배치가 그 목록을 바꾼다.
+  const unreadBySection = useMemo(() => {
+    const totals = new Map<
+      string,
+      { unreadCount: number; mentionCount: number }
+    >();
+    for (const section of renderedSections) {
+      totals.set(
+        section.id,
+        sectionUnreadTotals(section.channels.map(unreadCountFor))
+      );
+    }
+    return totals;
+  }, [renderedSections, unreadCountFor]);
+  const sectionUnread = useCallback(
+    (id: string) =>
+      unreadBySection.get(id) ?? { unreadCount: 0, mentionCount: 0 },
+    [unreadBySection]
   );
 
   useEffect(() => {
@@ -352,6 +437,13 @@ export function Sidebar({
             selfMemberId={session.member.id}
             selfRole={selfMember?.role}
             readState={readStateFor(channel)}
+            sections={canEditSections ? sectionChoices : undefined}
+            currentSectionId={sidebarPrefs.sectionIdFor(channel.id)}
+            onMoveToSection={
+              canEditSections
+                ? (sectionId) => sidebarPrefs.moveChannel(channel.id, sectionId)
+                : undefined
+            }
           >
             {link}
           </SidebarRowContextMenu>
@@ -510,18 +602,49 @@ export function Sidebar({
               )}
             </ul>
 
+            {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
+ 
+                · 읽기 실패(design-review #1932 B-1): 배치를 한 번도 못 읽었다.
+                  이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
+                  그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
+                  이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
+                  주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
+                  액션 문법이다.
+                · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
+                  없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
+ 
+                둘을 겹쳐 세우지 않는 이유: 읽지 못한 상태에서 훅이 쓰기를 거절할
+                때 그 사유가 곧 읽기 실패라, 배너 둘이 같은 문장을 두 번 말하게
+                된다. 읽기 실패가 더 근본이므로 그것이 이긴다. */}
+            {sidebarPrefs.loadError ? (
+              <InlineBanner
+                message={sidebarPrefs.loadError}
+                actionLabel={SIDEBAR_PREFS_LOAD_RETRY_LABEL}
+                onAction={sidebarPrefs.retryLoad}
+                testId="sidebar-prefs-load-error"
+              />
+            ) : sidebarPrefs.error ? (
+              <InlineBanner
+                message={sidebarPrefs.error}
+                actionLabel="닫기"
+                onAction={sidebarPrefs.dismissError}
+                testId="sidebar-prefs-error"
+              />
+            ) : null}
+
             <SidebarSection
-              title="채널"
-              sectionId="channels"
-              collapsed={collapsedSections.channels}
+              title={baseChannelSection.title}
+              sectionId={baseChannelSection.id}
+              collapsed={collapsedSections[baseChannelSection.id] === true}
               onCollapsedChange={(next) =>
-                setSidebarSectionCollapsed("channels", next)
+                setSidebarSectionCollapsed(baseChannelSection.id, next)
               }
-              overlayOpen={createChannelOpen}
-              unreadCount={channelUnread.unreadCount}
-              mentionCount={channelUnread.mentionCount}
+              overlayOpen={createChannelOpen || nameDialog?.mode === "create"}
+              unreadCount={sectionUnread(baseChannelSection.id).unreadCount}
+              mentionCount={sectionUnread(baseChannelSection.id).mentionCount}
               action={
-                canCreate ? (
+                <>
+                  {canCreate ? (
                   /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
                      크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
                      셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
@@ -538,11 +661,52 @@ export function Sidebar({
                   >
                     <Plus className="size-4" aria-hidden="true" />
                   </button>
-                ) : rosterSettled ? undefined : (
-                  /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
-                     때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
-                  <span aria-hidden="true" className="block size-control-sm" />
-                )
+                  ) : rosterSettled ? null : (
+                    /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
+                       때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
+                    <span aria-hidden="true" className="block size-control-sm" />
+                  )}
+                  {/* 섹션을 만드는 문은 여기 하나다 (ADR-0177 D4). 채널을 만드는
+                      +와 나란히 서지만 다른 일이다: +는 워크스페이스에 방을
+                      만들고, 이것은 **내 사이드바**를 정리한다. 그래서 권한을
+                      묻지 않는다 - 섹션은 멤버 소유라 누구나 만들 수 있다(D1).
+
+                      **문이 서는 조건은 `canEditSections` 하나다**(B-1/H-1):
+                      배치를 읽지 못한 동안에도, 배치를 줄 수 없는 표면에서도 이
+                      문은 없다. 상한(50)은 다르다 - 그때는 문을 지우지 않고
+                      비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
+                      아직 못 찾은 문을 사람은 구분하지 못한다. */}
+                  {canEditSections && (
+                    <button
+                      ref={newSectionRef}
+                      type="button"
+                      disabled={!sidebarPrefs.canCreate}
+                      onClick={() =>
+                        setNameDialog({
+                          mode: "create",
+                          sectionId: null,
+                          name: "",
+                          opener: newSectionRef.current,
+                        })
+                      }
+                      aria-label={
+                        sidebarPrefs.canCreate
+                          ? SECTION_CREATE_TITLE
+                          : sidebarSectionCapMessage()
+                      }
+                      title={
+                        sidebarPrefs.canCreate
+                          ? SECTION_CREATE_TITLE
+                          : sidebarSectionCapMessage()
+                      }
+                      data-testid="new-section"
+                      data-section-action=""
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <FolderPlus className="size-4" aria-hidden="true" />
+                    </button>
+                  )}
+                </>
               }
             >
               {channelsQuery.isLoading && <SkeletonRows rows={4} />}
@@ -581,21 +745,93 @@ export function Sidebar({
                   testId="channels-empty"
                 />
               )}
-              {channels.map(rowFor)}
+              {baseChannelSection.channels.map(rowFor)}
             </SidebarSection>
+
+            {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
+                코어의 `deriveSidebarSections` 머리말에 있다 - 섹션 하나를 만들
+                때 목록의 대부분이 아래로 밀리지 않게. 접기·unread 집계·호버
+                액션·⌥↑↓ 는 기본 섹션과 **같은 기계**를 탄다: 이 루프가 넘기는
+                프롭이 위 SidebarSection 이 받는 것과 한 벌이다. */}
+            {customSections.map((section) => (
+              <SidebarSection
+                key={section.id}
+                title={section.title}
+                sectionId={section.id}
+                collapsed={collapsedSections[section.id] === true}
+                onCollapsedChange={(next) =>
+                  setSidebarSectionCollapsed(section.id, next)
+                }
+                overlayOpen={
+                  openSectionMenu === section.id ||
+                  nameDialog?.sectionId === section.id ||
+                  deleteDialog?.sectionId === section.id
+                }
+                unreadCount={sectionUnread(section.id).unreadCount}
+                mentionCount={sectionUnread(section.id).mentionCount}
+                action={
+                  canEditSections ? (
+                  <SidebarSectionMenu
+                    sectionId={section.id}
+                    title={section.title}
+                    onOpenChange={(open) =>
+                      setOpenSectionMenu(open ? section.id : null)
+                    }
+                    onRename={(opener) =>
+                      setNameDialog({
+                        mode: "rename",
+                        sectionId: section.id,
+                        name: section.title,
+                        opener,
+                      })
+                    }
+                    onDelete={(opener) =>
+                      setDeleteDialog({
+                        sectionId: section.id,
+                        name: section.title,
+                        opener,
+                      })
+                    }
+                  />
+                  ) : undefined
+                }
+              >
+                {/* **로딩은 빈 상태가 아니다** (design-review #1932 H-2). 채널
+                    목록이 오는 동안 이 자리는 「비었다」고 말했고, 바로 스무 줄
+                    위에서 기본 섹션은 같은 프레임에 스켈레톤을 그리고 있었다.
+                    실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
+                    사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
+                    쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
+                {channelsQuery.isLoading && <SkeletonRows rows={2} />}
+                {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
+                    섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
+                    터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
+                    채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
+                    기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
+                    번의 실패가 N개의 문장이 된다. */}
+                {!channelsQuery.isLoading &&
+                  !channelsQuery.error &&
+                  section.channels.length === 0 && (
+                    <li className="px-2 py-1 text-meta text-ink-muted">
+                      {sidebarEmptySectionHint(!touchSurface)}
+                    </li>
+                  )}
+                {section.channels.map(rowFor)}
+              </SidebarSection>
+            ))}
 
             {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). 그때의 시작 경로는
                 위의 멤버 행과 ⌘⇧K다. */}
-            {dms.length > 0 && (
+            {dmSection.channels.length > 0 && (
               <SidebarSection
-                title="다이렉트 메시지"
-                sectionId="dms"
-                collapsed={collapsedSections.dms}
+                title={dmSection.title}
+                sectionId={dmSection.id}
+                collapsed={collapsedSections[dmSection.id] === true}
                 onCollapsedChange={(next) =>
-                  setSidebarSectionCollapsed("dms", next)
+                  setSidebarSectionCollapsed(dmSection.id, next)
                 }
-                unreadCount={dmUnread.unreadCount}
-                mentionCount={dmUnread.mentionCount}
+                unreadCount={sectionUnread(dmSection.id).unreadCount}
+                mentionCount={sectionUnread(dmSection.id).mentionCount}
                 action={
                   <Link
                     to="/directory"
@@ -609,7 +845,7 @@ export function Sidebar({
                   </Link>
                 }
               >
-                {dms.map(rowFor)}
+                {dmSection.channels.map(rowFor)}
               </SidebarSection>
             )}
 
@@ -679,6 +915,37 @@ export function Sidebar({
           <ShortcutHelpDialog />
         </div>
       </div>
+
+      {/* 섹션 다이얼로그는 목록 **밖에** 산다. 안에 두면 삭제 확인이 자기가 지우는
+          섹션의 서브트리 안에 있게 되고, 확인을 누르는 순간 함께 언마운트된다 -
+          #1937 H-1 이 채널 나가기에서 정확히 그 값을 치렀다. */}
+      <SectionNameDialog
+        mode={nameDialog?.mode ?? "create"}
+        open={nameDialog !== null}
+        initialName={nameDialog?.name ?? ""}
+        opener={nameDialog?.opener ?? null}
+        onOpenChange={(next) => {
+          if (!next) setNameDialog(null);
+        }}
+        onSubmit={(name) => {
+          if (nameDialog?.mode === "rename" && nameDialog.sectionId) {
+            sidebarPrefs.renameSection(nameDialog.sectionId, name);
+          } else {
+            sidebarPrefs.createSection(name);
+          }
+        }}
+      />
+      <SectionDeleteConfirmDialog
+        open={deleteDialog !== null}
+        name={deleteDialog?.name ?? ""}
+        opener={deleteDialog?.opener ?? null}
+        onOpenChange={(next) => {
+          if (!next) setDeleteDialog(null);
+        }}
+        onConfirm={() => {
+          if (deleteDialog) sidebarPrefs.deleteSection(deleteDialog.sectionId);
+        }}
+      />
     </div>
   );
 }

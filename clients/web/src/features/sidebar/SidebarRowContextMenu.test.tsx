@@ -133,11 +133,18 @@ function mountRow({
   readState = readStateFixture(),
   selfRole = "owner",
   title = "general",
+  sections,
+  currentSectionId = null,
+  onMoveToSection,
 }: {
   channel?: Channel;
   readState?: ReadState | null;
   selfRole?: MembershipRole;
   title?: string;
+  /** ADR-0177 / BT-4 #1932 — 「섹션으로 이동」의 목적지들. 없으면 무리가 서지 않는다. */
+  sections?: { id: string | null; label: string }[];
+  currentSectionId?: string | null;
+  onMoveToSection?: (sectionId: string | null) => void;
 } = {}): HTMLElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -185,6 +192,9 @@ function mountRow({
                   selfMemberId: ME,
                   selfRole,
                   readState,
+                  sections,
+                  currentSectionId,
+                  onMoveToSection,
                   children: link,
                 }),
             }),
@@ -818,5 +828,139 @@ describe("터치 표면", () => {
     act(() => link.focus());
     pressKey(link, "F10", { shiftKey: true });
     expect(menu()).toBeNull();
+  });
+});
+
+// =============================================================================
+// 「섹션으로 이동」 (ADR-0177 D4 / BT-4 #1932)
+// =============================================================================
+
+describe("섹션으로 이동", () => {
+  const SECTIONS = [
+    { id: "sec-1", label: "출시 준비" },
+    // 80자 한글. 메뉴가 창 밖으로 밀리지 않는지까지 이 픽스처가 건다.
+    { id: "sec-2", label: "긴급대응".repeat(20) },
+  ];
+
+  it("목적지가 없으면 무리 자체가 서지 않는다", () => {
+    // 섹션을 하나도 만들지 않은 사람에게 「채널 섹션으로」 하나만 있는 라디오는
+    // 아무 선택지도 아니다. 첫 섹션을 만드는 문은 사이드바 헤더의 「새 섹션」이다.
+    mountRow({ sections: [], onMoveToSection: () => undefined });
+    rightClick();
+    expect(item("move-to-section")).toBeNull();
+  });
+
+  it("옮길 손이 없으면 서지 않는다", () => {
+    mountRow({ sections: SECTIONS });
+    rightClick();
+    expect(item("move-to-section")).toBeNull();
+  });
+
+  it("DM 행에는 서지 않는다", () => {
+    // 기본 섹션 두 종 중 DM 은 고정이다(ADR-0177 D4). 코어의 파생이 커스텀
+    // 섹션의 DM id 를 무시하므로, 문을 열면 눌러도 아무 일이 없는 라디오가 된다.
+    mountRow({
+      channel: channelFixture({ kind: "dm", name: undefined }),
+      title: "김인턴",
+      sections: SECTIONS,
+      onMoveToSection: () => undefined,
+    });
+    rightClick();
+    expect(item("move-to-section")).toBeNull();
+  });
+
+  it("제목 하나와 목적지들이 라디오로 선다 (서브메뉴가 아니다)", () => {
+    mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
+    rightClick();
+    const label = item("move-to-section");
+    expect(label?.textContent).toBe("섹션으로 이동");
+    // 이 레포는 서브메뉴를 이슈 번호까지 달아 금지한다(dropdown-menu.tsx 머리말).
+    // 그 대체물이 「화면에 남는 행들 위의 제목」이고, 그래서 목적지는 열지 않아도
+    // 전부 보인다.
+    expect(menu()?.querySelectorAll('[role="menuitemradio"]').length).toBe(3);
+    expect(
+      document.querySelector('[data-testid="channel-row-section-base"]')
+        ?.textContent
+    ).toBe("채널 섹션으로");
+    expect(
+      document.querySelector('[data-testid="channel-row-section-sec-1"]')
+        ?.textContent
+    ).toBe("출시 준비");
+  });
+
+  it("지금 속한 섹션이 체크로 들린다", () => {
+    mountRow({
+      sections: SECTIONS,
+      currentSectionId: "sec-1",
+      onMoveToSection: () => undefined,
+    });
+    rightClick();
+    expect(
+      document
+        .querySelector('[data-testid="channel-row-section-sec-1"]')
+        ?.getAttribute("aria-checked")
+    ).toBe("true");
+    expect(
+      document
+        .querySelector('[data-testid="channel-row-section-base"]')
+        ?.getAttribute("aria-checked")
+    ).toBe("false");
+  });
+
+  it("배치가 없으면 기본 섹션이 체크다", () => {
+    mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
+    rightClick();
+    expect(
+      document
+        .querySelector('[data-testid="channel-row-section-base"]')
+        ?.getAttribute("aria-checked")
+    ).toBe("true");
+  });
+
+  it("고르면 그 섹션으로 옮기고 메뉴가 닫힌다", () => {
+    const moved: (string | null)[] = [];
+    mountRow({
+      sections: SECTIONS,
+      onMoveToSection: (id) => moved.push(id),
+    });
+    rightClick();
+    act(() => {
+      document
+        .querySelector<HTMLElement>('[data-testid="channel-row-section-sec-2"]')
+        ?.click();
+    });
+    expect(moved).toEqual(["sec-2"]);
+    // 저장은 디바운스로 뒤따르므로(ADR-0177 D2 — 이벤트가 없어 기다릴 답이 없다)
+    // 메뉴가 남아 봐야 방금 고른 답만 다시 보여 준다.
+    expect(menu()).toBeNull();
+  });
+
+  it("기본 섹션을 고르면 배치가 풀린다", () => {
+    const moved: (string | null)[] = [];
+    mountRow({
+      sections: SECTIONS,
+      currentSectionId: "sec-1",
+      onMoveToSection: (id) => moved.push(id),
+    });
+    rightClick();
+    act(() => {
+      document
+        .querySelector<HTMLElement>('[data-testid="channel-row-section-base"]')
+        ?.click();
+    });
+    expect(moved).toEqual([null]);
+  });
+
+  it("무리는 이름을 갖는다", () => {
+    // Radix 의 Label 은 aria 를 하나도 걸어 주지 않는다. 제목이 그냥 장식이면
+    // 스크린리더에는 이름 없는 라디오 무리가 선다.
+    mountRow({ sections: SECTIONS, onMoveToSection: () => undefined });
+    rightClick();
+    const group = menu()?.querySelector('[role="group"][aria-labelledby]');
+    expect(group).not.toBeNull();
+    const labelledBy = group?.getAttribute("aria-labelledby") ?? "";
+    expect(document.getElementById(labelledBy)?.textContent).toBe(
+      "섹션으로 이동"
+    );
   });
 });

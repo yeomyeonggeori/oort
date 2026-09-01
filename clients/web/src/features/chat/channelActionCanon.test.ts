@@ -195,3 +195,29 @@ describe("게이트가 실제로 파일을 읽고 있다", () => {
     expect(canon).toMatch(/setChannelNotificationPref\(/);
   });
 });
+
+// =============================================================================
+// N-1 (design-review #1932) — 무리도 표면 분기를 탄다
+// =============================================================================
+
+describe("섹션 이동 무리의 그릇", () => {
+  it("`surface` 로 그릇을 고르고, 컨텍스트 메뉴를 하드코딩하지 않는다", () => {
+    // `channelActionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·SURFACE_KEYS
+    // 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 `move-to-section` 을 넣는
+    // 사람이 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하면, 광고한 확장점이
+    // 실제로는 그것보다 비쌌던 것이다.
+    const code = fileCode("features/chat/channelActions.tsx");
+    const group = code.slice(code.indexOf("function ChannelSectionMoveGroup"));
+    const body = group.slice(0, group.indexOf("\nfunction "));
+    for (const picked of [
+      "surface === \"header\" ? DropdownMenuLabel : ContextMenuLabel",
+      "surface === \"header\" ? DropdownMenuRadioGroup : ContextMenuRadioGroup",
+      "surface === \"header\" ? DropdownMenuRadioItem : ContextMenuRadioItem",
+    ]) {
+      expect(body).toContain(picked);
+    }
+    // 고른 뒤에는 그릇 이름이 본문에 다시 나오지 않는다.
+    expect(body).not.toContain("<ContextMenuRadioItem");
+    expect(body).not.toContain("<ContextMenuLabel");
+  });
+});

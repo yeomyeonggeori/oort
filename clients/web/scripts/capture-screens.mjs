@@ -1963,6 +1963,27 @@ async function installMocks(context) {
       updatedAtMs: Date.now() - 3_600_000,
     });
   });
+  // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
+  //
+  // GET 의 기본값은 **빈 payload** 다. 여기에 커스텀 섹션을 심으면 이 파일의
+  // 기존 사이드바 프레임이 전부 한 칸씩 달라지므로, 섹션은 장면이 UI 로 직접
+  // 만들고 끝나기 전에 지운다(`captureSidebarSections` 꼬리). PUT 은 서버처럼
+  // 통째로 되돌려 준다.
+  await context.route(
+    "**/v1/workspaces/*/members/me/sidebar-prefs",
+    (route) => {
+      if (route.request().method() === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        return json(route, {
+          prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
+          updatedAtMs: Date.now(),
+        });
+      }
+      return json(route, {
+        prefs: { version: 1, sections: [], starredChannelIds: [] },
+      });
+    }
+  );
   await context.route("**/v1/workspaces/*/notification-rules", (route) => {
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() || "{}");
@@ -2797,6 +2818,8 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("section-collapse-channels").press("Enter");
   await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
 
+  await captureCustomSection(page, scheme, shots);
+
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForFunction(
     () =>
@@ -2814,6 +2837,255 @@ async function captureSidebarD4(page, scheme, shots) {
       !document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await page.getByTestId("composer-input").hover();
+}
+
+/**
+ * 섹션 편집 컨트롤 하나의 크기 (design-review #1932 N-3).
+ *
+ * 리뷰는 이 둘(`new-section` · `section-menu-*`)을 `MOBILE_TAP_TARGETS` 에
+ * 올리라고 했다. 그런데 H-1 을 닫으면서 그 둘은 **터치 표면에 존재하지 않게**
+ * 됐다 - 배치를 줄 수 없는 표면에는 섹션 편집 문도 내밀지 않는다. 없는 것을 폰
+ * 허용목록에 `optional` 로 올리면 언제나 건너뛰는 항목이 되고, 그것은 재는 척하는
+ * 목록이다(§5.5② 「허용목록 밖은 재지 않는다」의 반대 실패).
+ *
+ * 그래서 **사는 자리에서** 잰다: 포인터 표면의 하우스 아이콘 버튼 규격
+ * `size-control-sm`(28px), 바로 옆 `new-channel` 이 쓰는 그 수다. 각 컨트롤은
+ * 자기 헤더가 호버돼 있을 때만 마운트되므로 한 번에 하나씩 부른다.
+ */
+async function assertSectionControlSize(page, scheme, testId) {
+  const controlSm = pixelToken("spacing-control-sm");
+  const box = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="${testId}"]');
+    if (!el) return { missing: true };
+    const r = el.getBoundingClientRect();
+    return { width: Math.round(r.width), height: Math.round(r.height) };
+  })()`);
+  if (box.missing || box.height < controlSm || box.width < controlSm) {
+    throw new Error(
+      `섹션 편집 컨트롤 ${scheme}: ${testId} ${JSON.stringify(box)} (최소 ${controlSm}px)`
+    );
+  }
+  console.log(
+    `  섹션 편집 컨트롤 ${scheme}: ${testId} ${box.width}x${box.height}`
+  );
+}
+
+/**
+ * 커스텀 섹션 한 바퀴 (ADR-0177 D4 / BT-4 #1932).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 「새 섹션」 → 이름 → 행 우클릭의
+ * 「섹션으로 이동」 → 삭제. 그래야 이 프레임들이 사람이 실제로 걷는 길의 사진이
+ * 되고, 끝에 지우므로 뒤따르는 장면들의 사이드바가 그대로 남는다.
+ *
+ * 이름은 긴 한글이다. 80자 상한이 있는 자리이고, 좁은 사이드바에서 잘림이
+ * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
+ */
+async function captureCustomSection(page, scheme, shots) {
+  // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
+  // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
+  const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
+
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-section").waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "new-section");
+  await page.getByTestId("new-section").click();
+  const dialog = page.getByTestId("sidebar-section-name-dialog");
+  await dialog.waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
+  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  await page.screenshot({ path: createShot });
+  shots.push(createShot);
+  await page.getByTestId("sidebar-section-name-submit").click();
+  await dialog.waitFor({ state: "detached" });
+
+  const section = page.getByTestId("sidebar-section-sec-1");
+  await section.waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `custom section ${scheme}`);
+
+  // 방금 만든 섹션은 비어 있고, 비어 있다고 말한다.
+  const emptyRows = await section
+    .locator('[data-testid="channel-item"]')
+    .count();
+  if (emptyRows !== 0) {
+    throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
+  }
+
+  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  const row = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await row.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await page
+    .getByTestId("channel-row-move-to-section")
+    .waitFor({ state: "visible" });
+  const radios = await page
+    .getByTestId("channel-row-menu")
+    .locator('[role="menuitemradio"]')
+    .count();
+  if (radios !== 2) {
+    throw new Error(
+      `섹션 라디오 개수 ${scheme}: ${radios} (기본 + 커스텀 = 2 이어야 함)`
+    );
+  }
+  const baseChecked = await page
+    .getByTestId("channel-row-section-base")
+    .getAttribute("aria-checked");
+  if (baseChecked !== "true") {
+    throw new Error(
+      `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
+    );
+  }
+  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  const menuBox = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const r = el.getBoundingClientRect();
+    return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
+  })()`);
+  if (menuBox.right > menuBox.view) {
+    throw new Error(
+      `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  await page.getByTestId("channel-row-section-sec-1").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
+  // 사실을 말하는지 여기서 함께 본다.
+  //
+  // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
+  // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
+  await section.locator('[data-testid="channel-item"]').first().click({
+    button: "right",
+  });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const nowChecked = await page
+    .getByTestId("channel-row-section-sec-1")
+    .getAttribute("aria-checked");
+  const checkGlyphs = await page
+    .getByTestId("channel-row-section-sec-1")
+    .locator("svg")
+    .count();
+  if (nowChecked !== "true" || checkGlyphs !== 1) {
+    throw new Error(
+      `배치 뒤 체크 ${scheme}: aria-checked=${nowChecked} 체크표시=${checkGlyphs}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  await section
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+
+  await assertSectionControlSize(page, scheme, "section-menu-sec-1");
+  await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
+  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  await page.screenshot({ path: filledShot });
+  shots.push(filledShot);
+
+  // 지우고 나간다. 확인 문장이 「채널은 사라지지 않는다」를 말하는지도 여기서 본다.
+  await page.getByTestId("section-menu-sec-1").click();
+  await page.getByTestId("section-menu-sec-1-delete").click();
+  const confirm = page.getByTestId("sidebar-section-delete-confirm");
+  await confirm.waitFor({ state: "visible" });
+  // design-review #1932 M-1 — 제목은 고정 문장이고 이름은 본문이 진다. 80자
+  // 이름이 제목에 들어가면 물음이 셋째 줄 끝에 도착한다.
+  const confirmCopy = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="sidebar-section-delete-confirm"]');
+    const title = box.querySelector("h2, [id$='-title']") ?? box.firstElementChild.firstElementChild;
+    return {
+      title: (title.textContent ?? "").trim(),
+      body: (box.textContent ?? "").trim(),
+    };
+  })()`);
+  if (confirmCopy.title.includes(LONG_NAME.slice(0, 12))) {
+    throw new Error(
+      `삭제 확인 제목이 섹션 이름을 담았다 ${scheme}: ${confirmCopy.title}`
+    );
+  }
+  if (!confirmCopy.body.includes(LONG_NAME)) {
+    throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
+  }
+  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  await page.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await page.getByTestId("sidebar-section-delete-action").click();
+  await confirm.waitFor({ state: "detached" });
+  await section.waitFor({ state: "detached" });
+  // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+}
+
+/**
+ * 배치를 **한 번도 못 읽었을 때** (design-review #1932 B-1).
+ *
+ * 리뷰의 손 프로브가 잡은 그 자리를 캡처 레인 안으로 들여 회귀로 잠근다: GET 이
+ * 500 이면 예전 화면은 「섹션이 아직 없다」와 똑같이 생겼고, 그 위의 편집 하나가
+ * 서버의 배치를 통째로 지웠다(PUT 은 패치가 아니다).
+ *
+ * 자기 페이지에서 돈다 - 메인 페이지의 라우트를 갈아 끼우고 되돌리는 대신
+ * `context.newPage()` 로 이 표면만 다르게 세운다(3a-3 빈 워크스페이스와 같은 결).
+ * PUT 은 세어서 **0** 임을 단정한다: 문이 닫혔다는 것보다 강한 사실은 「아무것도
+ * 나가지 않았다」이고, 소실은 나간 PUT 이 만든다.
+ */
+async function captureSidebarPrefsUnavailable(context, scheme, shots) {
+  const page = await context.newPage();
+  let puts = 0;
+  await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
+    if (route.request().method() === "PUT") {
+      puts += 1;
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "boom" } }),
+    });
+  });
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+
+  const banner = page.getByTestId("sidebar-prefs-load-error");
+  await banner.waitFor({ state: "visible" });
+
+  // 편집 문은 서지 않는다. 헤더를 호버해도(= 호버 클러스터를 열어도) 없다.
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const doors = await page.getByTestId("new-section").count();
+  if (doors !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 「새 섹션」이 서 있다 ${scheme}: ${doors}개`
+    );
+  }
+
+  const shot = `${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 재시도 문은 있다: 닫힌 이유를 말했으면 되돌아갈 길도 줘야 한다.
+  const retry = banner.getByRole("button", { name: "다시 시도" });
+  await retry.waitFor({ state: "visible" });
+  await retry.click();
+  await banner.waitFor({ state: "visible" });
+
+  if (puts !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 PUT 이 나갔다 ${scheme}: ${puts}건 (서버 배치가 지워진다)`
+    );
+  }
+  await page.close();
 }
 
 /**
@@ -5936,6 +6208,25 @@ async function captureMobile(browser, scheme) {
     `  drawer ${scheme}: ${drawer.width}px 서랍 + ${drawer.peek}px 잔여, 행 ${drawer.rowHeight}px, 본문 inert=${drawer.mainInert}`
   );
   await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
+
+  // ADR-0177 / design-review #1932 H-1 — 배치의 문(행 컨텍스트 메뉴)이 없는
+  // 표면에는 섹션을 **만드는** 문도 없다. 만들 수는 있는데 쓸 수 없는 그릇을
+  // 내밀지 않는다. 터치에서는 호버 클러스터가 **언제나** 마운트되므로
+  // (`shouldShowSectionActions` 의 `!pointerCanHover` 갈래) 아무것도 누르지 않고
+  // 세는 것이 맞다 - 헤더를 누르면 섹션이 접혀 이 프레임이 달라진다.
+  const touchDoors = await page.evaluate(`(() => ({
+    newSection: document.querySelectorAll('[data-testid="new-section"]').length,
+    sectionMenus: document.querySelectorAll('[data-testid^="section-menu-"]').length,
+  }))()`);
+  if (touchDoors.newSection !== 0 || touchDoors.sectionMenus !== 0) {
+    throw new Error(
+      `터치 서랍에 섹션 편집 문이 서 있다 ${scheme}: ${JSON.stringify(touchDoors)}`
+    );
+  }
+  console.log(
+    `  섹션 편집 문 (터치) ${scheme}: 새 섹션 ${touchDoors.newSection} · 섹션 메뉴 ${touchDoors.sectionMenus}`
+  );
+
   await shoot(page, "sidebar-drawer");
 
   await page.getByTestId("profile-card").click();
@@ -6183,6 +6474,7 @@ async function captureScheme(browser, scheme) {
   shots.push(chatShot);
 
   await captureSidebarD4(login, scheme, shots);
+  await captureSidebarPrefsUnavailable(context, scheme, shots);
 
   // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
   // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.

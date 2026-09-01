@@ -12,7 +12,10 @@ import {
   ChannelLeaveConfirmDialog,
   useChannelActions,
 } from "@/features/chat/channelActions";
-import { channelActionMenuLabel } from "@/features/chat/channelActionModel";
+import {
+  channelActionMenuLabel,
+  type ChannelSectionChoice,
+} from "@/features/chat/channelActionModel";
 
 // =============================================================================
 // 사이드바 행의 우클릭 메뉴 (BT-1 / #1929).
@@ -92,6 +95,9 @@ export function SidebarRowContextMenu({
   selfMemberId,
   selfRole,
   readState,
+  sections,
+  currentSectionId = null,
+  onMoveToSection,
 }: {
   /** 이 행의 링크. 트리거 상자가 이것을 감싼다. */
   children: ReactElement;
@@ -103,6 +109,14 @@ export function SidebarRowContextMenu({
   selfRole: MembershipRole | undefined;
   /** 서버 read-state 투영의 이 채널 항목. 없으면 「읽음 처리」가 서지 않는다. */
   readState: ReadState | null;
+  /**
+   * 이 사람의 커스텀 섹션들과 이 채널이 지금 속한 곳 (ADR-0177 / BT-4 #1932).
+   * 「섹션으로 이동」은 이 셋이 다 있을 때만 선다 - 목적지가 없거나 옮길 손이
+   * 없으면 눌러도 아무 일이 없는 라디오가 된다.
+   */
+  sections?: ChannelSectionChoice[];
+  currentSectionId?: string | null;
+  onMoveToSection?: (sectionId: string | null) => void;
 }) {
   const [open, setOpen] = useState(false);
   const touchSurface = useHoverNone();
@@ -115,6 +129,9 @@ export function SidebarRowContextMenu({
     selfRole,
     readState,
     onActionSucceeded: () => setOpen(false),
+    sections,
+    currentSectionId,
+    onMoveToSection,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
