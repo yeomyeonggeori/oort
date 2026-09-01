@@ -15,6 +15,35 @@
 //! filtering afterwards, so search can never become a read-side hole around a
 //! private channel. See `momo_messaging::search` for the pg_trgm reasoning.
 //!
+//! ## The optional `channel=` scope (#1931 / BT-3)
+//!
+//! `channel=<uuid>` narrows the search to one channel. Three guards, in this
+//! order, and the order is the existing route's:
+//!   1. the workspace scope and the caller's active workspace role — unchanged,
+//!      and still first, so a non-member never learns whether a channel id
+//!      resolves;
+//!   2. the caller's **channel** membership, checked explicitly with
+//!      `is_channel_member`. RLS plus the membership JOIN already make an
+//!      unauthorized channel return nothing, so this check does not decide what
+//!      the caller may read — it decides what they are *told*. An empty 200
+//!      would answer "this channel has no matches" for a channel they may not
+//!      read at all, and that is a membership oracle. A **404** is the answer,
+//!      and it is the same 404 a channel that does not exist gets: both come
+//!      from `is_channel_member` returning false, so the two cases are
+//!      indistinguishable by construction rather than by care (`reminder.rs`
+//!      makes the same choice for the same reason);
+//!   3. the cursor's sealed scope (`SearchScope::accept_cursor`).
+//!
+//! ## Agent bearers: unchanged, deliberately
+//!
+//! `GET …/search/messages` is **absent** from `momo_auth::required_agent_scope`,
+//! so no agent credential reaches this route in either scope, and #1931 does not
+//! change that. The allow-list is closed by default (`agent_scope.rs`): adding a
+//! query parameter to a human route is not a reason to open it to agents, and
+//! ADR-0173 opened exactly two reads (`messages`, `replies`) and named neither
+//! search. Removing search from an agent's reach is equally out of scope — it is
+//! already out of reach. So: no edit to the table, and this paragraph is why.
+//!
 //! ## Measured deviation: no per-member rate limit
 //!
 //! Swift wraps this route in the **shared** `SlidingWindowRateLimiter` instance
@@ -30,7 +59,7 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_messaging::{
     active_workspace_role, clamp_search_limit, decode_search_cursor, encode_search_cursor,
-    normalize_query, search_messages, SearchHit, SearchPage,
+    is_channel_member, normalize_query, search_messages, SearchHit, SearchPage, SearchScope,
 };
 
 use crate::dto::{SearchQuery, WorkspaceMessageSearchHitDto, WorkspaceMessageSearchResponse};
@@ -51,7 +80,7 @@ fn hit_dto(hit: &SearchHit) -> WorkspaceMessageSearchHitDto {
     }
 }
 
-/// `GET /v1/workspaces/{ws}/search/messages?q=&limit=&cursor=`
+/// `GET /v1/workspaces/{ws}/search/messages?q=&limit=&cursor=&channel=`
 pub async fn messages(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,
@@ -59,6 +88,9 @@ pub async fn messages(
     Query(query): Query<SearchQuery>,
 ) -> Result<Json<WorkspaceMessageSearchResponse>, ApiError> {
     let workspace_id = workspace_scope(&workspace, &principal)?;
+    let scope = query
+        .scope()
+        .map_err(|_| ApiError::bad_request("invalid channel id"))?;
     let needle = normalize_query(query.q.as_deref())
         .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?;
     let limit = clamp_search_limit(query.limit());
@@ -66,6 +98,7 @@ pub async fn messages(
         None => None,
         Some(raw) => Some(
             decode_search_cursor(raw)
+                .and_then(|cursor| scope.accept_cursor(cursor))
                 .map_err(|invalid| ApiError::bad_request(invalid.to_string()))?,
         ),
     };
@@ -79,10 +112,19 @@ pub async fn messages(
                 {
                     return Ok(Err(ApiError::forbidden("not an active workspace member")));
                 }
+                // Layered over RLS and over the membership JOIN, not instead of
+                // them: those two decide what comes back, this one decides that
+                // an unreadable channel is a 404 rather than an empty page.
+                if let SearchScope::Channel(channel_id) = scope {
+                    if !is_channel_member(conn, channel_id, principal.member_id).await? {
+                        return Ok(Err(ApiError::not_found("channel not found")));
+                    }
+                }
                 Ok(Ok(search_messages(
                     conn,
                     workspace_id,
                     principal.member_id,
+                    scope,
                     &needle,
                     cursor,
                     limit,
@@ -164,7 +206,76 @@ mod tests {
             q: Some("hi".into()),
             limit: Some("banana".into()),
             cursor: None,
+            channel: None,
         };
         assert_eq!(clamp_search_limit(query.limit()), 20);
+    }
+
+    fn scoped(channel: Option<&str>) -> SearchQuery {
+        SearchQuery {
+            q: Some("hi".into()),
+            limit: None,
+            cursor: None,
+            channel: channel.map(str::to_string),
+        }
+    }
+
+    /// The three readings of `channel=` (#1931): absent and blank are the
+    /// workspace scope the route has always had, a UUID narrows, and anything
+    /// else is a 400 — never a 404, which would claim a channel was looked for.
+    #[test]
+    fn the_channel_parameter_has_exactly_three_readings() {
+        let channel = Uuid::from_u128(0xc0ffee);
+        assert_eq!(scoped(None).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(scoped(Some("")).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(scoped(Some("   ")).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(
+            scoped(Some(&channel.to_string())).scope(),
+            Ok(SearchScope::Channel(channel))
+        );
+        assert_eq!(
+            scoped(Some(&channel.to_string().to_uppercase())).scope(),
+            Ok(SearchScope::Channel(channel)),
+            "Foundation renders UUIDs uppercase; the same channel is the same scope"
+        );
+
+        let rejected = scoped(Some("not-a-uuid"))
+            .scope()
+            .map_err(|_| ApiError::bad_request("invalid channel id"))
+            .expect_err("a malformed channel id");
+        assert_eq!(rejected.status, StatusCode::BAD_REQUEST);
+        assert_eq!(rejected.message, "invalid channel id");
+    }
+
+    /// A cursor is bound to the walk it was minted in, and the route refuses the
+    /// swap with a 400 that names the real problem.
+    #[test]
+    fn a_cursor_from_another_scope_is_a_400_not_a_different_page() {
+        let channel = Uuid::from_u128(0xc0ffee);
+        let page_one = hit().cursor(SearchScope::Channel(channel));
+        let encoded = encode_search_cursor(&page_one);
+
+        assert_eq!(
+            decode_search_cursor(&encoded)
+                .and_then(|cursor| SearchScope::Channel(channel).accept_cursor(cursor)),
+            Ok(page_one),
+            "its own scope resumes"
+        );
+
+        for swapped in [
+            SearchScope::Workspace,
+            SearchScope::Channel(Uuid::from_u128(1)),
+        ] {
+            let error = decode_search_cursor(&encoded)
+                .and_then(|cursor| swapped.accept_cursor(cursor))
+                .map_err(|invalid| ApiError::bad_request(invalid.to_string()))
+                .expect_err("a cursor from another scope");
+            assert_eq!(error.status, StatusCode::BAD_REQUEST);
+            assert_eq!(
+                error.message, "cursor was minted for a different search scope",
+                "the client swapped scopes mid-page; \"invalid cursor\" would \
+                 send them hunting for a corruption bug they do not have"
+            );
+        }
     }
 }

@@ -167,7 +167,7 @@ pub use reminder::{
 pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
-    SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+    SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
