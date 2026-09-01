@@ -28,10 +28,15 @@ import {
   emptySidebarPrefs,
   SIDEBAR_SORT_ALPHA,
   SIDEBAR_SORT_MANUAL,
+  SIDEBAR_STARRED_TOUCH_HINT,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
-import { SidebarSectionMenu } from "./SidebarSectionDialogs";
+import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
+import {
+  SidebarSectionMenu,
+  SidebarSortMenu,
+} from "./SidebarSectionDialogs";
 import { roveSidebarRows } from "./sidebarRoving";
 import {
   reloadSidebarSectionPreferenceForTest,
@@ -43,6 +48,7 @@ import {
   useSidebarDrag,
   type SidebarDropAction,
 } from "./sidebarDnd";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   SIDEBAR_PREFS_SAVE_DEBOUNCE_MS,
   useSidebarPrefs,
@@ -76,12 +82,24 @@ import {
 // =============================================================================
 
 const WS = "00000000-0000-7000-8000-000000000001";
+const ME = "00000000-0000-7000-8000-000000000101";
 const GENERAL = "00000000-0000-7000-8000-000000000201";
 const RELEASE = "00000000-0000-7000-8000-000000000202";
 const RANDOM = "00000000-0000-7000-8000-000000000203";
 
 const fetchSidebarPrefs = vi.hoisted(() => vi.fn());
 const putSidebarPrefs = vi.hoisted(() => vi.fn());
+
+const setChannelNotificationPref = vi.hoisted(() => vi.fn());
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    setChannelNotificationPref: (ws: string, ch: string, muted: boolean) =>
+      setChannelNotificationPref(ws, ch, muted) as Promise<boolean>,
+  };
+});
 
 vi.mock("@momo/core/features/sidebar/api", async (importOriginal) => {
   const actual =
@@ -124,6 +142,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  setChannelNotificationPref.mockReset();
+  setChannelNotificationPref.mockResolvedValue(true);
   fetchSidebarPrefs.mockReset();
   fetchSidebarPrefs.mockResolvedValue(emptySidebarPrefs());
   putSidebarPrefs.mockReset();
@@ -131,8 +151,13 @@ beforeEach(() => {
     Promise.resolve(prefs)
   );
   reloadSidebarSectionPreferenceForTest(null);
+  stubPointerSurface();
+});
+
+/** 포인터 하드웨어가 기본. 터치 시험만 뒤집는다(BT-1·BT-4 와 같은 손잡이). */
+function stubPointerSurface(hoverNone = false) {
   vi.stubGlobal("matchMedia", (query: string) => ({
-    matches: false,
+    matches: hoverNone && query.includes("hover: none"),
     media: query,
     addEventListener: () => undefined,
     removeEventListener: () => undefined,
@@ -140,7 +165,7 @@ beforeEach(() => {
     removeListener: () => undefined,
     dispatchEvent: () => false,
   }));
-});
+}
 
 afterEach(() => {
   if (mountedRoot) {
@@ -210,7 +235,8 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
     },
     [prefs]
   );
-  const canEdit = prefs.canEdit && enabled;
+  const touchSurface = useHoverNone();
+  const canEdit = prefs.canEdit && enabled && !touchSurface;
   const drag = useSidebarDrag({ enabled: canEdit, onDrop });
   handle = {
     prefs: () => prefs.prefs,
@@ -223,8 +249,13 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
   };
   const collapsed = useSidebarSectionsCollapsed();
 
+  const sectionChoices = derived.custom.map((section) => ({
+    id: section.id,
+    label: section.title,
+  }));
+
   function rowsOf(section: (typeof derived.sections)[number]) {
-    return section.channels.map((channel) =>
+    const rows = section.channels.map((channel) =>
       createElement(SidebarRow, {
         key: channel.id,
         to: `/c/${channel.id}`,
@@ -240,8 +271,43 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
                 sectionId: prefs.sectionIdFor(channel.id),
               })
             : undefined,
+        // **진짜 행 메뉴**를 단다 (design-review R1 H-1). 이 시험이 재려는 것은
+        // 「고른 뒤 캐럿이 어디 있는가」이고, 그 답은 트리거가 행과 함께
+        // 언마운트되는 실제 배선에서만 나온다 - 가짜 버튼으로는 결함이 재현되지
+        // 않는다.
+        wrapLink: (link) =>
+          createElement(SidebarRowContextMenu, {
+            workspaceId: WS,
+            channel,
+            title: channel.name ?? channel.id,
+            selfMemberId: ME,
+            selfRole: "owner",
+            readState: null,
+            sections: canEdit ? sectionChoices : undefined,
+            currentSectionId: prefs.sectionIdFor(channel.id),
+            onMoveToSection: canEdit
+              ? (sectionId: string | null) =>
+                  prefs.moveChannel(channel.id, sectionId)
+              : undefined,
+            starred: prefs.isStarred(channel.id),
+            onToggleStar: canEdit
+              ? () => prefs.toggleStar(channel.id)
+              : undefined,
+            children: link,
+          }),
       })
     );
+    if (section.kind !== "starred" || !touchSurface) return rows;
+    // 터치 표면의 별표 섹션은 자기 사정을 말한다 (R1 M-1). Sidebar.tsx 와 같은
+    // 자리·같은 문장이다.
+    return [
+      ...rows,
+      createElement(
+        "li",
+        { key: "starred-touch-hint", className: "px-2 py-1 text-meta text-ink-muted" },
+        SIDEBAR_STARRED_TOUCH_HINT
+      ),
+    ];
   }
 
   return createElement(
@@ -291,13 +357,9 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
                   onOpenChange: () => undefined,
                 })
               : canEdit && section.kind === "channels"
-                ? createElement(SidebarSectionMenu, {
-                    sectionId: section.id,
-                    title: section.title,
-                    sort: {
-                      mode: prefs.sortMode,
-                      onChange: prefs.setSortMode,
-                    },
+                ? createElement(SidebarSortMenu, {
+                    mode: prefs.sortMode,
+                    onChange: prefs.setSortMode,
                     onOpenChange: () => undefined,
                   })
                 : undefined,
@@ -387,6 +449,37 @@ function openSectionMenu(sectionId: string): void {
     menuItem(`section-menu-${sectionId}`).dispatchEvent(
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
     );
+  });
+}
+
+/** 정렬 문. 기본 「채널」 머리글에 살고 섹션 ⋮ 와 다른 컨트롤이다(R1 M-2). */
+function openSortMenu(): void {
+  hoverHeader("channels");
+  act(() => {
+    menuItem("sidebar-sort-menu").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Enter", bubbles: true })
+    );
+  });
+}
+
+/** 행 우클릭. 브라우저가 쏘는 것과 같은 이벤트다. */
+function rightClick(row: HTMLElement): void {
+  act(() => {
+    row.dispatchEvent(
+      new MouseEvent("contextmenu", {
+        bubbles: true,
+        cancelable: true,
+        clientX: 16,
+        clientY: 16,
+      })
+    );
+  });
+}
+
+/** rAF 한 프레임. 포커스 인계가 서는 자리다(`sidebarRowFocus.ts`). */
+function nextFrame(): void {
+  act(() => {
+    vi.advanceTimersByTime(32);
   });
 }
 
@@ -526,12 +619,13 @@ describe("red proof 2 — 정렬", () => {
     const host = await mount();
     // 커스텀 섹션이 하나도 없어도 서 있다 — 섹션을 만들어야 열리는 설정이 아니다.
     hoverHeader("channels");
-    expect(
-      host.querySelector('[data-testid="section-menu-channels"]')
-    ).not.toBeNull();
-    openSectionMenu("channels");
-    const alpha = menuItem("section-menu-channels-sort-alpha");
-    const manual = menuItem("section-menu-channels-sort-manual");
+    // 문이 자기 글리프·자기 이름을 갖는다 (R1 M-2): 섹션 ⋮ 가 아니다.
+    expect(host.querySelector('[data-testid="sidebar-sort-menu"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="section-menu-channels"]')).toBeNull();
+    openSortMenu();
+    expect(menuItem("sidebar-sort-label").textContent).toBe("채널 정렬");
+    const alpha = menuItem("sidebar-sort-alpha");
+    const manual = menuItem("sidebar-sort-manual");
     expect(manual.getAttribute("aria-checked")).toBe("true");
     expect(alpha.getAttribute("aria-checked")).toBe("false");
 
@@ -814,6 +908,209 @@ describe("red proof 5 — 드래그가 기존 기계를 깨지 않는다", () =>
   });
 });
 
+describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () => {
+  function menuRow(testKey: string): HTMLElement {
+    const found = document.querySelector<HTMLElement>(
+      `[data-testid="channel-row-${testKey}"]`
+    );
+    if (!found) throw new Error(`행 메뉴 항목이 없다: ${testKey}`);
+    return found;
+  }
+
+  it("별표를 붙이면 옮겨간 그 행이 캐럿을 받는다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    const row = rowEl(RELEASE);
+    row.focus();
+    rightClick(row);
+    act(() => menuRow("star").click());
+    // 트리거가 행과 함께 언마운트되므로 이 순간 캐럿은 갈 곳을 잃는다.
+    nextFrame();
+
+    // 행은 「별표」 섹션에 다시 섰고, 캐럿이 그 행 위에 있다.
+    expect(channelsIn("starred")).toEqual([RELEASE]);
+    expect(document.activeElement).toBe(rowEl(RELEASE));
+    expect(sectionEl("starred").contains(document.activeElement)).toBe(true);
+  });
+
+  it("별표를 떼도 같다 — 두 방향 모두", async () => {
+    vi.useFakeTimers();
+    await mount();
+    await act(async () => handle?.toggleStar(RELEASE));
+    const starredRow = rowEl(RELEASE);
+    starredRow.focus();
+    rightClick(starredRow);
+    act(() => menuRow("star").click());
+    nextFrame();
+
+    expect(sectionIds()).not.toContain("starred");
+    expect(document.activeElement).toBe(rowEl(RELEASE));
+    expect(sectionEl("channels").contains(document.activeElement)).toBe(true);
+  });
+
+  it("「섹션으로 이동」도 함께 닫힌다 (BT-4 승계 구멍)", async () => {
+    vi.useFakeTimers();
+    await mount();
+    await withSection();
+    const row = rowEl(RELEASE);
+    row.focus();
+    rightClick(row);
+    act(() => {
+      document
+        .querySelector<HTMLElement>('[data-testid="channel-row-section-sec-1"]')
+        ?.click();
+    });
+    nextFrame();
+
+    expect(channelsIn("sec-1")).toEqual([RELEASE]);
+    expect(document.activeElement).toBe(rowEl(RELEASE));
+    expect(sectionEl("sec-1").contains(document.activeElement)).toBe(true);
+  });
+
+  it("대조군 — 행을 옮기지 않는 「알림」은 캐럿을 건드리지 않는다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    const row = rowEl(RELEASE);
+    row.focus();
+    rightClick(row);
+    const before = document.activeElement;
+    act(() => menuRow("mute-toggle").click());
+    nextFrame();
+
+    // 메뉴가 열린 채로 남고(왕복이 그 자리에서 실패를 말해야 한다) 캐럿도
+    // 그대로다 - 인계는 **옮기는 액션에만** 걸린다.
+    expect(document.activeElement).toBe(before);
+    expect(rowEl(RELEASE).parentElement).not.toBeNull();
+  });
+
+  it("옮긴 뒤에도 ↑/↓ 로빙이 새 이웃 사이를 걷는다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    const row = rowEl(GENERAL);
+    row.focus();
+    rightClick(row);
+    act(() => menuRow("star").click());
+    nextFrame();
+    await act(async () => handle?.toggleStar(RANDOM));
+
+    expect(channelsIn("starred")).toEqual([GENERAL, RANDOM]);
+    let moved = false;
+    act(() => {
+      moved = roveSidebarRows(navRoot, {
+        key: "ArrowDown",
+        target: rowEl(GENERAL),
+        preventDefault: () => undefined,
+      });
+    });
+    expect(moved).toBe(true);
+    expect(document.activeElement).toBe(rowEl(RANDOM));
+  });
+});
+
+describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () => {
+  it("떼는 문이 없는 표면에서 그 사실을 문장으로 든다", async () => {
+    vi.useFakeTimers();
+    stubPointerSurface(true);
+    fetchSidebarPrefs.mockResolvedValue({
+      ...emptySidebarPrefs(),
+      starredChannelIds: [RELEASE],
+    } satisfies SidebarPrefs);
+    await mount();
+
+    // 로밍해 온 별표는 그려진다 - 읽는 것은 언제나 참이다.
+    expect(channelsIn("starred")).toEqual([RELEASE]);
+    // 그런데 손잡이도 문도 없다.
+    expect(rowEl(RELEASE).getAttribute("draggable")).toBeNull();
+    expect(
+      sectionEl("starred").querySelectorAll("[data-section-action]").length
+    ).toBe(0);
+    // 그래서 사정을 말한다.
+    expect(sectionEl("starred").textContent).toContain(
+      SIDEBAR_STARRED_TOUCH_HINT
+    );
+  });
+
+  it("포인터 표면에서는 그 문장이 서지 않는다", async () => {
+    vi.useFakeTimers();
+    fetchSidebarPrefs.mockResolvedValue({
+      ...emptySidebarPrefs(),
+      starredChannelIds: [RELEASE],
+    } satisfies SidebarPrefs);
+    await mount();
+    expect(sectionEl("starred").textContent).not.toContain(
+      SIDEBAR_STARRED_TOUCH_HINT
+    );
+  });
+});
+
+describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
+  it("탭이 숨으면 남은 편집이 즉시 나간다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    await act(async () => handle?.toggleStar(RELEASE));
+    await act(async () => handle?.setSortMode(SIDEBAR_SORT_ALPHA));
+    // 아직 디바운스 창 안이다.
+    await act(async () => {
+      vi.advanceTimersByTime(1200);
+    });
+    expect(putSidebarPrefs).not.toHaveBeenCalled();
+
+    act(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        get: () => "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
+    const saved = putSidebarPrefs.mock.calls[0][1] as SidebarPrefs;
+    expect(saved.starredChannelIds).toEqual([RELEASE]);
+    expect(saved.sectionSort).toBe(SIDEBAR_SORT_ALPHA);
+
+    // 남은 타이머가 같은 payload 를 한 번 더 보내지 않는다.
+    await act(async () => {
+      vi.advanceTimersByTime(SIDEBAR_PREFS_SAVE_DEBOUNCE_MS);
+    });
+    expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+  });
+
+  it("탭을 떠나는 신호(pagehide)도 같은 문을 쓴다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    await act(async () => handle?.toggleStar(GENERAL));
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
+    expect(
+      (putSidebarPrefs.mock.calls[0][1] as SidebarPrefs).starredChannelIds
+    ).toEqual([GENERAL]);
+  });
+
+  it("보낼 것이 없으면 아무것도 나가지 않는다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    act(() => {
+      window.dispatchEvent(new Event("pagehide"));
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(putSidebarPrefs).not.toHaveBeenCalled();
+  });
+});
+
 describe("하네스와 출하 배선", () => {
   // jsdom 아래에서는 `new URL(…, import.meta.url)` 이 jsdom 의 URL 이라
   // `fileURLToPath` 가 받지 않는다. 문자열을 먼저 경로로 바꾸고 이어 붙인다.
@@ -842,6 +1139,11 @@ describe("하네스와 출하 배선", () => {
     expect(source).toContain("sidebarPrefs.reorderSection(");
     expect(source).toContain("sidebarPrefs.moveSection(");
     expect(source).toContain("sidebarPrefs.setSortMode");
+    // R1 M-2: 정렬은 자기 문에 산다(섹션 ⋮ 가 아니다).
+    expect(source).toContain("<SidebarSortMenu");
+    expect(source).not.toMatch(/SidebarSectionMenu[\s\S]{0,200}sort=\{/);
+    // R1 M-1: 터치의 별표 섹션이 사정을 말한다.
+    expect(source).toContain("SIDEBAR_STARRED_TOUCH_HINT");
     expect(source).not.toContain("putSidebarPrefs");
   });
 });

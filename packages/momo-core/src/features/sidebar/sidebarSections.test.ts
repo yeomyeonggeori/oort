@@ -12,6 +12,10 @@ import {
   reorderSidebarSection,
   sidebarSortMode,
   sidebarSortModeLabel,
+  SECTION_MOVE_DOWN_LABEL,
+  SECTION_MOVE_UP_LABEL,
+  SIDEBAR_SORT_GROUP_LABEL,
+  SIDEBAR_STARRED_TOUCH_HINT,
   toggleStarredChannel,
   withSidebarSortMode,
   SIDEBAR_SORT_ALPHA,
@@ -725,5 +729,50 @@ describe("BT-5 섹션 차례", () => {
     expect(moved.sections.map((s) => s.order).sort((a, b) => a - b)).toEqual(
       Array.from({ length: SIDEBAR_SECTION_MAX }, (_, i) => i)
     );
+  });
+});
+
+describe("BT-5 R1 — design-review 수리의 낱말", () => {
+  // M-1: 별표는 로밍하는데 터치에는 떼는 문이 없다. 표면이 그 사실을 말한다.
+  it("터치의 별표 섹션이 없는 동작을 지시하지 않고 사정만 말한다", () => {
+    expect(SIDEBAR_STARRED_TOUCH_HINT).toContain("별표");
+    expect(SIDEBAR_STARRED_TOUCH_HINT).toContain("넓은 화면");
+    // 우클릭도 끌기도 그 표면에 없다 - 지시하면 없는 문을 가리킨 것이 된다.
+    expect(SIDEBAR_STARRED_TOUCH_HINT).not.toContain("우클릭");
+    expect(SIDEBAR_STARRED_TOUCH_HINT).not.toContain("끌어");
+  });
+
+  // M-3: 문이 둘이 되며 길어진 문장이 섹션마다 되풀이됐다. 길이만 되돌린다.
+  it("빈 섹션 문장이 BT-4 의 것보다 짧으면서 문은 여전히 둘이다", () => {
+    const hint = sidebarEmptySectionHint(true);
+    expect(hint).toContain("끌어다");
+    expect(hint).toContain("우클릭");
+    expect([...hint].length).toBeLessThan(
+      [...("채널 행을 우클릭해 이 섹션으로 옮길 수 있습니다.")].length
+    );
+    // 이 줄은 그 섹션 안에 서 있으므로 「이 섹션으로」를 다시 말하지 않는다.
+    expect(hint).not.toContain("이 섹션으로");
+  });
+
+  // N-1: 같은 메뉴의 형제들이 동사구다(이름 바꾸기 · 섹션 삭제).
+  it("차례 항목이 동사구다", () => {
+    expect(SECTION_MOVE_UP_LABEL).toContain("옮기기");
+    expect(SECTION_MOVE_DOWN_LABEL).toContain("옮기기");
+  });
+
+  // N-2: 이 차례는 DM 을 타지 않는다. 낱말이 그보다 넓게 약속하면 안 된다.
+  it("정렬의 이름이 사이드바 전체를 약속하지 않는다", () => {
+    expect(SIDEBAR_SORT_GROUP_LABEL).not.toContain("사이드바");
+    expect(SIDEBAR_SORT_GROUP_LABEL).toContain("채널");
+    // 그리고 실제로 DM 은 서버 차례 그대로다(위 정렬 시험이 값으로 잰다).
+    const derived = deriveSidebarSections({
+      prefs: withSidebarSortMode(emptySidebarPrefs(), SIDEBAR_SORT_ALPHA),
+      channels: [],
+      dms: [dm("99999999-9999-4999-8999-999999999999"), DM_ONE],
+    });
+    expect(derived.dms.channels.map((c) => c.id)).toEqual([
+      "99999999-9999-4999-8999-999999999999",
+      DM_ONE.id,
+    ]);
   });
 });

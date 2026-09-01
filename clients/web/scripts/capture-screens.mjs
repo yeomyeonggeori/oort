@@ -2994,6 +2994,7 @@ async function captureCustomSection(page, scheme, shots) {
   await page.screenshot({ path: filledShot });
   shots.push(filledShot);
 
+  await captureSortDoor(page, scheme, shots);
   await captureSectionDropMarker(page, scheme, shots);
   await captureStarredSection(page, scheme, shots);
 
@@ -3036,6 +3037,51 @@ async function captureCustomSection(page, scheme, shots) {
     .locator('[data-testid="channel-item"]')
     .first()
     .waitFor({ state: "visible" });
+}
+
+/**
+ * 정렬의 문 (BT-5 / #1933, design-review R1 M-2).
+ *
+ * 이 문은 한동안 기본 「채널」 섹션의 ⋮ 안에 있었고, 그때 스크린리더는 그것을
+ * 「채널 섹션 메뉴」라 읽었다 — 사이드바 전체에 걸리는 설정인데. 눈으로도 같은 ⋯
+ * 글리프가 섹션마다 다른 메뉴를 열었다. 그래서 문을 갈랐고, 이 장면이 그 판정을
+ * 레인 안으로 들여 잠근다: **자기 글리프·자기 이름**이고, 섹션 ⋮ 는 그 자리에
+ * 없다.
+ */
+async function captureSortDoor(page, scheme, shots) {
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  const door = page.getByTestId("sidebar-sort-menu");
+  await door.waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "sidebar-sort-menu");
+  const name = await door.getAttribute("aria-label");
+  if (name !== "채널 정렬") {
+    throw new Error(`정렬 문의 이름 ${scheme}: ${name}`);
+  }
+  // 기본 섹션에는 ⋮ 가 없다 — 그 메뉴는 커스텀 섹션의 것이다(BT-4 그대로).
+  const sectionMenu = await page.getByTestId("section-menu-channels").count();
+  if (sectionMenu !== 0) {
+    throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
+  }
+
+  await door.click();
+  const content = page.getByTestId("sidebar-sort-menu-content");
+  await content.waitFor({ state: "visible" });
+  const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
+  if (label !== "채널 정렬") {
+    throw new Error(`정렬 무리의 제목 ${scheme}: ${label}`);
+  }
+  const checked = await page
+    .getByTestId("sidebar-sort-manual")
+    .getAttribute("aria-checked");
+  if (checked !== "true") {
+    throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
+  }
+  await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-sort-menu-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  await page.keyboard.press("Escape");
+  await content.waitFor({ state: "detached" });
 }
 
 /**

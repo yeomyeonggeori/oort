@@ -68,6 +68,7 @@ import {
   SectionDeleteConfirmDialog,
   SectionNameDialog,
   SidebarSectionMenu,
+  SidebarSortMenu,
 } from "./SidebarSectionDialogs";
 import {
   deriveSidebarSections,
@@ -75,6 +76,7 @@ import {
   sidebarEmptySectionHint,
   sidebarSectionCapMessage,
   SIDEBAR_PREFS_LOAD_RETRY_LABEL,
+  SIDEBAR_STARRED_TOUCH_HINT,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { useSidebarDrag, type SidebarDropAction } from "./sidebarDnd";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -713,6 +715,16 @@ export function Sidebar({
                 {starredSection.channels.map((channel) =>
                   rowFor(channel, { inStarredSection: true })
                 )}
+                {/* 터치에는 **떼는 문이 없다**, 그리고 그 사실을 말한다
+                    (design-review R1 M-1). 별표는 로밍하므로 넓은 화면에서 붙인
+                    것이 폰 서랍에 그려지는데, 그 표면에는 행 메뉴도 드래그도 없다.
+                    빈 커스텀 섹션이 터치에서 하는 말과 같은 문법·같은 자리다 -
+                    표면이 자기 문에 대해 참말을 한다(BT-4 H-1 규율). */}
+                {touchSurface && (
+                  <li className="px-2 py-1 text-meta text-ink-muted">
+                    {SIDEBAR_STARRED_TOUCH_HINT}
+                  </li>
+                )}
               </SidebarSection>
             )}
 
@@ -805,6 +817,11 @@ export function Sidebar({
                       커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
                       열리는 설정이 아니다.
 
+                      **자기 글리프와 자기 이름을 갖는다**(design-review R1 M-2):
+                      섹션 ⋮ 안에 들어 있던 동안에는 스크린리더가 「채널 섹션 메뉴」로
+                      읽었고, 같은 ⋯ 이 섹션마다 다른 메뉴를 열었다. 근거는
+                      `SidebarSortMenu` 머리말에 있다.
+
                       **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
                       자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
                       아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
@@ -813,13 +830,9 @@ export function Sidebar({
                       치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
                       아니라 폰의 설정 표면이다. */}
                   {canEditSections && (
-                    <SidebarSectionMenu
-                      sectionId={baseChannelSection.id}
-                      title={baseChannelSection.title}
-                      sort={{
-                        mode: sidebarPrefs.sortMode,
-                        onChange: sidebarPrefs.setSortMode,
-                      }}
+                    <SidebarSortMenu
+                      mode={sidebarPrefs.sortMode}
+                      onChange={sidebarPrefs.setSortMode}
                       onOpenChange={(open) =>
                         setOpenSectionMenu(open ? baseChannelSection.id : null)
                       }

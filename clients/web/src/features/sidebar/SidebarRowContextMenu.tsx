@@ -1,4 +1,4 @@
-import { useState, type ReactElement } from "react";
+import { useCallback, useState, type ReactElement } from "react";
 import type { Channel, MembershipRole, ReadState } from "@momo/core/lib/api";
 import {
   ContextMenu,
@@ -16,6 +16,7 @@ import {
   channelActionMenuLabel,
   type ChannelSectionChoice,
 } from "@/features/chat/channelActionModel";
+import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 
 // =============================================================================
 // 사이드바 행의 우클릭 메뉴 (BT-1 / #1929).
@@ -49,6 +50,18 @@ import {
 //     메뉴 대신 바텀 시트). 시트는 자기 표면이라 이 티켓 몫이 아니고, 그동안 폰의
 //     문은 채널을 연 뒤의 헤더 ⋮ 로 그대로 있다. 그래서 `(hover: none)` 에서는
 //     트리거를 아예 `disabled` 로 둔다 — 반쯤 열리는 문을 만들지 않는다.
+//
+// ## 행을 옮기는 항목은 캐럿을 데리고 간다 (design-review #1933 H-1)
+//
+// 이 메뉴의 세 항목은 그 행을 **다른 섹션으로 옮긴다** — 「별표 붙이기」·「별표
+// 떼기」·「섹션으로 이동」. 그런데 트리거가 행 안에 살아서 행이 옮겨 가면 함께
+// 언마운트되고, Radix 의 닫힘 복귀는 돌려줄 트리거를 잃는다. 실측: 키보드로 고른
+// 뒤 `activeElement === BODY`, 사이드바로 돌아오는 데 18탭.
+//
+// 셋이 한 파일을 지나가므로 수리도 한 자리다: 아래 `handOffFocus` 가 세 손잡이를
+// 감싸고, 규칙과 그 근거는 `sidebarRowFocus.ts` 가 갖는다. 「알림」처럼 행을
+// 옮기지 않는 항목은 감싸지 않는다 — 그것들은 메뉴가 열린 채로 남고 캐럿도
+// 제자리다(대조군).
 //
 // ## 로빙 tabindex 와 ⌥↑↓
 //
@@ -129,6 +142,12 @@ export function SidebarRowContextMenu({
   const [open, setOpen] = useState(false);
   const touchSurface = useHoverNone();
   const enabled = !touchSurface;
+  // H-1 의 수리가 사는 한 자리. 손잡이를 감싸는 쪽을 고른 이유는 그것이 **행을
+  // 옮기는 액션**의 집합과 정확히 같기 때문이다 - 열쇠 목록을 따로 두면 다음에
+  // 옮기는 항목이 늘 때 그 목록을 갱신하는 것을 잊는다.
+  const handOffFocus = useCallback(() => {
+    scheduleSidebarChannelRowFocus(channel.id);
+  }, [channel.id]);
   const actions = useChannelActions({
     workspaceId,
     channel,
@@ -139,9 +158,19 @@ export function SidebarRowContextMenu({
     onActionSucceeded: () => setOpen(false),
     sections,
     currentSectionId,
-    onMoveToSection,
+    onMoveToSection: onMoveToSection
+      ? (sectionId) => {
+          onMoveToSection(sectionId);
+          handOffFocus();
+        }
+      : undefined,
     starred,
-    onToggleStar,
+    onToggleStar: onToggleStar
+      ? () => {
+          onToggleStar();
+          handOffFocus();
+        }
+      : undefined,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
