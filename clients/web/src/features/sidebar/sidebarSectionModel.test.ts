@@ -105,11 +105,29 @@ describe("countSectionActionTabStops", () => {
 });
 
 describe("채널 만들기 오버레이 스코프 (R2-1)", () => {
+  // BT-4(#1932) 로 섹션이 데이터가 되면서 `sectionId="dms"` 라는 리터럴이 사라졌다
+  // (`sectionId={dmSection.id}`). 지키는 사실은 그대로다: **워크스페이스 전역**
+  // 열림 상태인 `createChannelOpen` 은 채널 섹션 하나에만 붙는다. 커스텀 섹션이
+  // 자기 메뉴·다이얼로그로 `overlayOpen` 을 갖는 것은 정반대의 것이라(자기
+  // 오버레이) 이 규칙에 걸리지 않는다.
   it("전역 열림 상태는 채널 섹션에만 배선한다", () => {
     expect(sidebarSource).toContain("useCreateChannelOpen");
-    expect(sidebarSource).toContain("overlayOpen={createChannelOpen}");
-    const dmBlock = sidebarSource.split('sectionId="dms"')[1] ?? "";
+
+    const overlayProps = sidebarSource.match(/overlayOpen=\{[^}]*\}/g) ?? [];
+    const globalFlagUses = overlayProps.filter((prop) =>
+      prop.includes("createChannelOpen")
+    );
+    expect(globalFlagUses).toHaveLength(1);
+    // 그 하나는 기본 채널 섹션의 것이다.
+    const channelBlock =
+      sidebarSource.split("sectionId={baseChannelSection.id}")[1] ?? "";
+    expect(channelBlock.slice(0, channelBlock.indexOf("</SidebarSection>"))).toContain(
+      globalFlagUses[0]
+    );
+
+    const dmBlock = sidebarSource.split("sectionId={dmSection.id}")[1] ?? "";
     const dmHeader = dmBlock.slice(0, dmBlock.indexOf("</SidebarSection>"));
+    expect(dmHeader).not.toBe("");
     expect(dmHeader).not.toContain("overlayOpen");
   });
 });

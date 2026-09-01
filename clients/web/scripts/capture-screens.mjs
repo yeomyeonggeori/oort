@@ -1963,6 +1963,27 @@ async function installMocks(context) {
       updatedAtMs: Date.now() - 3_600_000,
     });
   });
+  // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
+  //
+  // GET 의 기본값은 **빈 payload** 다. 여기에 커스텀 섹션을 심으면 이 파일의
+  // 기존 사이드바 프레임이 전부 한 칸씩 달라지므로, 섹션은 장면이 UI 로 직접
+  // 만들고 끝나기 전에 지운다(`captureSidebarSections` 꼬리). PUT 은 서버처럼
+  // 통째로 되돌려 준다.
+  await context.route(
+    "**/v1/workspaces/*/members/me/sidebar-prefs",
+    (route) => {
+      if (route.request().method() === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        return json(route, {
+          prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
+          updatedAtMs: Date.now(),
+        });
+      }
+      return json(route, {
+        prefs: { version: 1, sections: [], starredChannelIds: [] },
+      });
+    }
+  );
   await context.route("**/v1/workspaces/*/notification-rules", (route) => {
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() || "{}");
@@ -2797,6 +2818,8 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("section-collapse-channels").press("Enter");
   await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
 
+  await captureCustomSection(page, scheme, shots);
+
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForFunction(
     () =>
@@ -2814,6 +2837,141 @@ async function captureSidebarD4(page, scheme, shots) {
       !document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await page.getByTestId("composer-input").hover();
+}
+
+/**
+ * 커스텀 섹션 한 바퀴 (ADR-0177 D4 / BT-4 #1932).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 「새 섹션」 → 이름 → 행 우클릭의
+ * 「섹션으로 이동」 → 삭제. 그래야 이 프레임들이 사람이 실제로 걷는 길의 사진이
+ * 되고, 끝에 지우므로 뒤따르는 장면들의 사이드바가 그대로 남는다.
+ *
+ * 이름은 긴 한글이다. 80자 상한이 있는 자리이고, 좁은 사이드바에서 잘림이
+ * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
+ */
+async function captureCustomSection(page, scheme, shots) {
+  // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
+  // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
+  const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
+
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-section").click();
+  const dialog = page.getByTestId("sidebar-section-name-dialog");
+  await dialog.waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
+  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  await page.screenshot({ path: createShot });
+  shots.push(createShot);
+  await page.getByTestId("sidebar-section-name-submit").click();
+  await dialog.waitFor({ state: "detached" });
+
+  const section = page.getByTestId("sidebar-section-sec-1");
+  await section.waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `custom section ${scheme}`);
+
+  // 방금 만든 섹션은 비어 있고, 비어 있다고 말한다.
+  const emptyRows = await section
+    .locator('[data-testid="channel-item"]')
+    .count();
+  if (emptyRows !== 0) {
+    throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
+  }
+
+  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  const row = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await row.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await page
+    .getByTestId("channel-row-move-to-section")
+    .waitFor({ state: "visible" });
+  const radios = await page
+    .getByTestId("channel-row-menu")
+    .locator('[role="menuitemradio"]')
+    .count();
+  if (radios !== 2) {
+    throw new Error(
+      `섹션 라디오 개수 ${scheme}: ${radios} (기본 + 커스텀 = 2 이어야 함)`
+    );
+  }
+  const baseChecked = await page
+    .getByTestId("channel-row-section-base")
+    .getAttribute("aria-checked");
+  if (baseChecked !== "true") {
+    throw new Error(
+      `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
+    );
+  }
+  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  const menuBox = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const r = el.getBoundingClientRect();
+    return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
+  })()`);
+  if (menuBox.right > menuBox.view) {
+    throw new Error(
+      `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  await page.getByTestId("channel-row-section-sec-1").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
+  // 사실을 말하는지 여기서 함께 본다.
+  //
+  // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
+  // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
+  await section.locator('[data-testid="channel-item"]').first().click({
+    button: "right",
+  });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const nowChecked = await page
+    .getByTestId("channel-row-section-sec-1")
+    .getAttribute("aria-checked");
+  const checkGlyphs = await page
+    .getByTestId("channel-row-section-sec-1")
+    .locator("svg")
+    .count();
+  if (nowChecked !== "true" || checkGlyphs !== 1) {
+    throw new Error(
+      `배치 뒤 체크 ${scheme}: aria-checked=${nowChecked} 체크표시=${checkGlyphs}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  await section
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
+  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  await page.screenshot({ path: filledShot });
+  shots.push(filledShot);
+
+  // 지우고 나간다. 확인 문장이 「채널은 사라지지 않는다」를 말하는지도 여기서 본다.
+  await page.getByTestId("section-menu-sec-1").click();
+  await page.getByTestId("section-menu-sec-1-delete").click();
+  const confirm = page.getByTestId("sidebar-section-delete-confirm");
+  await confirm.waitFor({ state: "visible" });
+  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  await page.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await page.getByTestId("sidebar-section-delete-action").click();
+  await confirm.waitFor({ state: "detached" });
+  await section.waitFor({ state: "detached" });
+  // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
 }
 
 /**

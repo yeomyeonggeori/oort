@@ -1,7 +1,7 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useId, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Loader2 } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
@@ -26,7 +26,13 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/design/ui/dropdown-menu";
-import { ContextMenuItem, ContextMenuSeparator } from "@/design/ui/context-menu";
+import {
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuRadioGroup,
+  ContextMenuRadioItem,
+  ContextMenuSeparator,
+} from "@/design/ui/context-menu";
 import {
   Dialog,
   DialogContent,
@@ -38,6 +44,7 @@ import { InlineBanner } from "@/features/common/States";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
+import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
 import { useInvalidateReadStates } from "@/features/workspace/useWorkspace";
 import {
@@ -49,6 +56,7 @@ import {
   type ChannelActionKey,
   type ChannelActionState,
   type ChannelActionSurface,
+  type ChannelSectionChoice,
 } from "./channelActionModel";
 
 // =============================================================================
@@ -81,6 +89,17 @@ export interface ChannelActionTarget {
   readState?: ReadState | null;
   /** 왕복이 성공했을 때 표면이 자기 메뉴를 닫는다. */
   onActionSucceeded: () => void;
+  /**
+   * 이 사람의 커스텀 섹션들과 이 채널이 지금 속한 곳 (ADR-0177 / BT-4 #1932).
+   *
+   * 옵션인 이유: 헤더 ⋮ 는 섹션을 다루지 않고(`SURFACE_KEYS.header`), 사이드바
+   * 밖에서 이 훅을 쓰는 표면도 배치를 모른 채 나머지 액션을 그대로 쓸 수 있어야
+   * 한다. 없으면 「섹션으로 이동」이 그냥 서지 않는다.
+   */
+  sections?: ChannelSectionChoice[];
+  currentSectionId?: string | null;
+  /** 목적지를 고르면 부른다. 저장은 사이드바가 디바운스로 뒤따른다. */
+  onMoveToSection?: (sectionId: string | null) => void;
 }
 
 export interface ChannelActions {
@@ -99,6 +118,8 @@ export interface ChannelActions {
   error: string | null;
   clearError: () => void;
   run: (key: ChannelActionKey) => void;
+  /** 「섹션으로 이동」의 라디오 행이 고른 목적지. 표면이 없으면 아무 일도 없다. */
+  moveToSection: (sectionId: string | null) => void;
   leave: {
     confirmOpen: boolean;
     open: () => void;
@@ -117,6 +138,9 @@ export function useChannelActions({
   selfRole,
   readState = null,
   onActionSucceeded,
+  sections,
+  currentSectionId = null,
+  onMoveToSection,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -227,14 +251,19 @@ export function useChannelActions({
         channel,
         selfRole,
         unreadCount: readState?.unreadCount ?? 0,
+        // 옮길 곳을 **부를 수 있는 표면**이 없으면 항목도 없다. 목적지 목록만
+        // 있고 손잡이가 없으면 눌러도 아무 일이 없는 라디오가 된다.
+        sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
       }),
-    [channel, selfRole, readState?.unreadCount]
+    [channel, selfRole, readState?.unreadCount, sections?.length, onMoveToSection]
   );
 
   const state: ChannelActionState = {
     muted: channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
+    sections,
+    currentSectionId,
   };
 
   function runCopy(copy: () => Promise<boolean>) {
@@ -281,7 +310,10 @@ export function useChannelActions({
         return;
       case "topic":
       case "leave":
-        // 다이얼로그로 넘어가는 항목은 표면이 자기 복귀를 챙긴다.
+      case "move-to-section":
+        // 다이얼로그로 넘어가는 항목과 무리 항목은 표면이 자기 복귀를 챙긴다.
+        // 「섹션으로 이동」은 **행 하나가 아니라 무리**라 고를 것이 여기 없다 -
+        // 어느 목적지인지는 라디오 행이 알고, 그것을 `moveToSection` 이 받는다.
         return;
     }
   }
@@ -300,6 +332,10 @@ export function useChannelActions({
     error,
     clearError: () => setError(null),
     run,
+    moveToSection: (sectionId) => {
+      setError(null);
+      onMoveToSection?.(sectionId);
+    },
     leave: {
       confirmOpen: confirmLeave,
       open: () => {
@@ -315,6 +351,92 @@ export function useChannelActions({
       confirm: () => leaveMutation.mutate(),
     },
   };
+}
+
+/**
+ * 「섹션으로 이동」 — 제목 하나와 그 아래 라디오 행들 (ADR-0177 D4 / BT-4 #1932).
+ *
+ * 서브메뉴가 아닌 이유는 `channelActionModel.ts` 머리말에 있다(요약: 이 레포는
+ * 서브메뉴를 이슈 번호까지 달아 금지하고, 그 문단이 대체물로 「화면에 남는 행들
+ * 위의 제목」을 지정한다). 라디오인 이유는 배치가 **여럿 중 하나**라서다 -
+ * 지금 속한 섹션이 `aria-checked` 로 들려야 하고, 그것은 체크 표시가 눈에
+ * 말하는 것과 같은 사실이다.
+ *
+ * 제목은 `useId` 로 자기 id 를 갖고 그룹이 `aria-labelledby` 로 되짚는다.
+ * Radix 의 Label 은 aria 를 하나도 걸어 주지 않으므로(`DropdownMenuLabel`
+ * 독스트링), 이 두 줄이 없으면 무리가 스크린리더에 이름 없이 선다.
+ *
+ * 행 메뉴에만 서므로 그릇은 컨텍스트 메뉴 하나다 - 헤더 ⋮ 는 `SURFACE_KEYS` 가
+ * 이 열쇠를 주지 않는다.
+ */
+function ChannelSectionMoveGroup({
+  prefix,
+  item,
+  actions,
+  onHandOff,
+}: {
+  prefix: string;
+  item: ChannelActionItem;
+  actions: ChannelActions;
+  onHandOff: (key: ChannelActionKey) => void;
+}) {
+  const labelId = useId();
+  const choices = item.sections ?? [];
+  // 값은 문자열이어야 한다(Radix RadioGroup). 기본 섹션의 `null` 은 채널 id 가
+  // 될 수 없는 낱말 하나로 적는다 - 커스텀 섹션 id 는 `sec-<수>` 꼴이라 절대
+  // 겹치지 않는다.
+  const BASE = "\u0000base";
+  const current = item.currentSectionId ?? BASE;
+  return (
+    <>
+      <ContextMenuLabel id={labelId} data-testid={`${prefix}-${item.testKey}`}>
+        {item.label}
+      </ContextMenuLabel>
+      <ContextMenuRadioGroup
+        aria-labelledby={labelId}
+        value={current}
+        onValueChange={(next) => {
+          onHandOff(item.key);
+          actions.moveToSection(next === BASE ? null : next);
+        }}
+      >
+        {[{ id: null, label: SECTION_MOVE_TO_BASE_LABEL }, ...choices].map(
+          (choice) => {
+            const value = choice.id ?? BASE;
+            return (
+              <ContextMenuRadioItem
+                key={value}
+                value={value}
+                data-testid={`${prefix}-section-${choice.id ?? "base"}`}
+              >
+                {/* 긴 한글 섹션 이름(최대 80자)이 메뉴를 창 밖으로 밀지 않는다.
+                    `max-w-pane`(320) 은 이 레포가 이미 목록 하나의 폭으로 들고
+                    있는 수이고, 자른 자리의 전체 이름은 title 이 든다 - 사이드바
+                    행이 같은 축에서 같은 것을 한다. */}
+                <span
+                  className="min-w-0 max-w-pane flex-1 truncate"
+                  title={choice.label}
+                >
+                  {choice.label}
+                </span>
+                {/* 체크는 **캘러가 그린다** (`DropdownMenuRadioItem` 독스트링:
+                    "It does NOT reserve an indicator gutter"). `aria-checked` 가
+                    귀에 말하는 것과 같은 사실을 눈에 말하는 자리이고, 없으면
+                    스크린리더만 지금 자리를 안다. `PresenceControl` 이 같은 것을
+                    같은 아이콘·같은 잉크로 그린다. */}
+                {value === current && (
+                  <Check
+                    className="size-4 shrink-0 text-ink-muted"
+                    aria-hidden="true"
+                  />
+                )}
+              </ContextMenuRadioItem>
+            );
+          }
+        )}
+      </ContextMenuRadioGroup>
+    </>
+  );
 }
 
 /**
@@ -414,13 +536,22 @@ export function ChannelActionMenuItems({
       {actions.items(surface).map((item) => (
         <Fragment key={item.key}>
           {item.separatorBefore && <Separator />}
-          <ChannelActionMenuRow
-            surface={surface}
-            prefix={prefix}
-            item={item}
-            actions={actions}
-            onHandOff={onHandOff}
-          />
+          {item.sections ? (
+            <ChannelSectionMoveGroup
+              prefix={prefix}
+              item={item}
+              actions={actions}
+              onHandOff={onHandOff}
+            />
+          ) : (
+            <ChannelActionMenuRow
+              surface={surface}
+              prefix={prefix}
+              item={item}
+              actions={actions}
+              onHandOff={onHandOff}
+            />
+          )}
         </Fragment>
       ))}
     </>

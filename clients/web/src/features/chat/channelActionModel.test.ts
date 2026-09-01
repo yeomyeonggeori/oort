@@ -308,3 +308,106 @@ describe("channelActionKeepsMenuOpen", () => {
     expect(channelActionKeepsMenuOpen("topic")).toBe(false);
   });
 });
+
+// =============================================================================
+// 섹션 이동 — 예약해 둔 자리에 들어온 것 (ADR-0177 D4 / BT-4 #1932)
+// =============================================================================
+
+describe("섹션으로 이동", () => {
+  const SECTIONS = [
+    { id: "sec-1", label: "출시 준비" },
+    { id: "sec-2", label: "읽은 것" },
+  ];
+  const WITH_SECTIONS: ChannelActionState = {
+    ...REST,
+    sections: SECTIONS,
+    currentSectionId: "sec-1",
+  };
+
+  it("섹션이 없으면 어포던스도 없다", () => {
+    const available = channelActionAvailability({
+      channel: channel(),
+      selfRole: "member",
+      unreadCount: 0,
+      sectionCount: 0,
+    });
+    expect(available.moveToSection).toBe(false);
+    expect(
+      channelActionItems(available, REST).map((item) => item.key)
+    ).not.toContain("move-to-section");
+  });
+
+  it("DM 은 옮기지 않는다", () => {
+    // 기본 섹션 두 종 중 DM 은 고정이다(ADR-0177 D4). 코어의 파생이 커스텀
+    // 섹션의 DM id 를 무시하므로 문을 열면 눌러도 아무 일이 없는 항목이 된다.
+    expect(
+      channelActionAvailability({
+        channel: channel({ kind: "dm", name: undefined }),
+        selfRole: "member",
+        unreadCount: 0,
+        sectionCount: 3,
+      }).moveToSection
+    ).toBe(false);
+  });
+
+  it("행 메뉴에만 서고 헤더 ⋮ 에는 서지 않는다", () => {
+    const available = channelActionAvailability({
+      channel: channel(),
+      selfRole: "member",
+      unreadCount: 0,
+      sectionCount: 2,
+    });
+    const rowKeys = channelActionItemsForSurface(
+      "row",
+      available,
+      WITH_SECTIONS
+    ).map((item) => item.key);
+    const headerKeys = channelActionItemsForSurface(
+      "header",
+      available,
+      WITH_SECTIONS
+    ).map((item) => item.key);
+    expect(rowKeys).toContain("move-to-section");
+    // 채널을 열어 둔 사람에게 「이 채널을 어디에 둘까」는 다른 물음이다.
+    expect(headerKeys).not.toContain("move-to-section");
+  });
+
+  it("항목이 목적지와 지금 자리를 함께 싣는다", () => {
+    const available = channelActionAvailability({
+      channel: channel(),
+      selfRole: "member",
+      unreadCount: 0,
+      sectionCount: 2,
+    });
+    const move = channelActionItems(available, WITH_SECTIONS).find(
+      (item) => item.key === "move-to-section"
+    );
+    expect(move?.label).toBe("섹션으로 이동");
+    expect(move?.sections).toEqual(SECTIONS);
+    expect(move?.currentSectionId).toBe("sec-1");
+  });
+
+  it("정본 차례에서 상태 무리의 끝에 선다", () => {
+    const available = channelActionAvailability({
+      channel: channel({ topic: "출시 일정" }),
+      selfRole: "owner",
+      unreadCount: 3,
+      sectionCount: 1,
+    });
+    expect(channelActionItems(available, WITH_SECTIONS).map((i) => i.key)).toEqual([
+      "topic",
+      "mark-read",
+      "mute",
+      "move-to-section",
+      "copy-link",
+      "copy-name",
+      "leave",
+    ]);
+  });
+
+  it("목적지를 고르면 메뉴가 닫힌다", () => {
+    // 저장은 디바운스로 뒤따르므로(ADR-0177 D2 - 이벤트가 없어 기다릴 답이 없다)
+    // 메뉴가 남아 봐야 방금 고른 답만 다시 보여 준다. 실패는 사이드바가 말한다.
+    expect(channelActionKeepsMenuOpen("move-to-section")).toBe(false);
+  });
+});
