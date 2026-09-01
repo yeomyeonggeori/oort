@@ -671,6 +671,15 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/workspaces/{ws}/members/me",
             delete(routes::workspaces::leave).patch(routes::self_profile::rename_self),
         )
+        // ADR-0177 / #1932 — the caller's own sidebar organization (custom
+        // sections + channel placement + stars). Human-only and member-owned:
+        // `/me` is the entire addressing scheme, so no request can name another
+        // member's layout. Separate path from the `/me` PATCH above because this
+        // is a personal *preference* blob, not an identity field.
+        .route(
+            "/v1/workspaces/{ws}/members/me/sidebar-prefs",
+            get(routes::sidebar_prefs::get).put(routes::sidebar_prefs::put),
+        )
         // #1767 — self password change. Separate path from leave so a PATCH
         // cannot be read as a lifecycle mutation.
         .route(

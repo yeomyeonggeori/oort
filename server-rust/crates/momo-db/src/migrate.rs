@@ -401,19 +401,24 @@ mod tests {
     /// nullable columns on `member` (`status_emoji`/`status_text`/
     /// `status_expires_at`) riding the existing presence write path. schema_v0.sql
     /// is not modified; expiry is lazy-on-read, no sweeper.
+    ///
+    /// 084 is ADR-0177's `member_sidebar_prefs` (#1932 BT-4 server half): one
+    /// JSONB blob per (workspace, member) holding that member's custom sidebar
+    /// sections, channel placement and stars. `ws_isolation` RLS as D2 names;
+    /// schema_v0.sql is not modified; no outbox fan-out.
     #[test]
-    fn discovers_contiguous_migrations_001_to_083() {
+    fn discovers_contiguous_migrations_001_to_084() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            83,
-            "expected 83 migrations under {}",
+            84,
+            "expected 84 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 83);
+        assert_eq!(migrations.last().unwrap().version, 84);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

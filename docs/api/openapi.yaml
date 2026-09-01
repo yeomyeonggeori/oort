@@ -112,6 +112,12 @@ tags:
     description: >
       ADR-0175 personal message reminders (later-alert). Human-only owner CRUD.
       v1 has no outbox fan-out — clients poll the list.
+  - name: sidebar
+    description: >
+      ADR-0177 member-owned sidebar organization — custom sections, channel
+      placement and stars, roamed per member. Human-only; no outbox fan-out in
+      v1 (other devices converge on the bootstrap GET). Collapse state stays on
+      the device (D4).
   - name: unfurls
     description: >
       ADR-0170 link unfurl server surface. Workspace on/off, message-level
@@ -2123,6 +2129,93 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
+    get:
+      tags: [sidebar]
+      operationId: getSidebarPrefs
+      summary: Read the caller's own sidebar organization.
+      description: >
+        ADR-0177 D1/D2. The signed-in member's custom sidebar sections, the
+        channels they placed in each, and their starred channels — never a
+        memberId from the request. A member who has never saved reads the empty
+        v1 default (`{version:1, sections:[], starredChannelIds:[]}`) rather than
+        a 404, so the client bootstraps down one path. Human-only: an agent has
+        no sidebar. Collapse state is NOT here — ADR-0177 D4 keeps it on the
+        device.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's stored sidebar prefs, or the empty v1 default.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidebarPrefsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required (agent bearers are refused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [sidebar]
+      operationId: updateSidebarPrefs
+      summary: Replace the caller's own sidebar organization.
+      description: >
+        ADR-0177 D3. Replaces the whole payload; this is not a patch. The server
+        validates shape and size only — at most 50 sections, section names at
+        most 80 **characters**, at most 500 channel references across the whole
+        payload, and `version` must be 1. Channel membership is deliberately NOT
+        verified: a section may name a channel the member has left or one that
+        was deleted, and the client filters dead ids at render time (tolerant
+        contract, ADR-0177 D3). No event is emitted (D2) — other devices
+        converge on their next bootstrap GET.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSidebarPrefsRequest"
+      responses:
+        "200":
+          description: The stored sidebar prefs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidebarPrefsResponse"
+        "400":
+          description: A cap or the payload version was violated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required (agent bearers are refused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The body is not a sidebar-prefs payload (unknown or missing key).
           content:
             application/json:
               schema:
@@ -9072,6 +9165,83 @@ components:
           type: boolean
         mentionOverridesMute:
           type: boolean
+
+    SidebarSection:
+      type: object
+      required: [id, name, order, channelIds]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Client-minted section id, unique within the payload.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: >
+            Section label, trimmed. The cap is 80 **characters**, not bytes — an
+            80-character Korean name is 240 bytes and is legal.
+        order:
+          type: integer
+          format: int32
+          description: The member's own ordering. The server never renumbers it.
+        channelIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: >
+            Channels the member placed in this section. NOT a membership list —
+            an id here may name a channel that no longer exists.
+
+    SidebarPrefs:
+      type: object
+      required: [version]
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+          enum: [1]
+          description: Payload version. Required; only 1 is accepted (ADR-0177 D3).
+        sections:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SidebarSection"
+        starredChannelIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: >
+            BT-5 (#1933) owns the star UI; the schema accepts the field from
+            BT-4 so no migration is needed when that lands (ADR-0177 D5).
+        sectionSort:
+          type: string
+          maxLength: 32
+          description: >
+            Reserved for BT-5's A–Z / Recent sort. Round-tripped verbatim; the
+            server does not enumerate the values.
+
+    UpdateSidebarPrefsRequest:
+      type: object
+      required: [prefs]
+      additionalProperties: false
+      properties:
+        prefs:
+          $ref: "#/components/schemas/SidebarPrefs"
+
+    SidebarPrefsResponse:
+      type: object
+      required: [prefs]
+      properties:
+        prefs:
+          $ref: "#/components/schemas/SidebarPrefs"
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: >
+            When the row was last written. Omitted for a member who has never
+            saved. Observability, not a concurrency token — v1 is
+            last-write-wins between the member's own devices.
 
     CreateReminderRequest:
       type: object

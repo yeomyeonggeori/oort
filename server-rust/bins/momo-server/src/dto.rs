@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use momo_messaging::SearchScope;
+use momo_messaging::{SearchScope, SidebarPrefs};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -1884,6 +1884,37 @@ pub struct UpdateNotificationRulesRequest {
 pub struct NotificationRulesResponse {
     pub dnd: bool,
     pub mention_overrides_mute: bool,
+}
+
+// ---------------------------------------------------------------------------
+// sidebar prefs (ADR-0177 / #1932)
+// ---------------------------------------------------------------------------
+
+/// `PUT …/members/me/sidebar-prefs` request (ADR-0177 D3).
+///
+/// The payload travels under a `prefs` key on the way in *and* on the way out,
+/// so the client can read a response and hand it straight back on the next save.
+/// A flat body would have made `updatedAtMs` an unknown field on the echo, and
+/// `deny_unknown_fields` would then have refused the one round-trip the client
+/// most obviously wants to make.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateSidebarPrefsRequest {
+    pub prefs: SidebarPrefs,
+}
+
+/// `GET/PUT …/members/me/sidebar-prefs` response (ADR-0177 D3).
+///
+/// `updatedAtMs` is omitted for a member who has never saved — the same
+/// `encodeIfPresent` rule the rest of this file follows. It is observability,
+/// not a concurrency token: v1 is last-write-wins because the only writer is the
+/// member's own devices (ADR-0177 D1).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarPrefsResponse {
+    pub prefs: SidebarPrefs,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
 }
 
 // ---------------------------------------------------------------------------

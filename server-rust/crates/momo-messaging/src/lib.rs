@@ -64,6 +64,8 @@ pub mod refine;
 /// ADR-0175 / #1888 — personal message reminders (no outbox fan-out).
 pub mod reminder;
 pub mod search;
+/// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
+pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
 pub use attachment::{
@@ -168,6 +170,11 @@ pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
     SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+};
+pub use sidebar_prefs::{
+    get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,
+    SidebarPrefsInvalid, SidebarSection, StoredSidebarPrefs, CHANNEL_REF_MAX, SECTION_ID_MAX_CHARS,
+    SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
