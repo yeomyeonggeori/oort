@@ -176,7 +176,8 @@ export function SidebarRowContextMenu({
           //
           // 포커스 링(--accent · 2px)과는 색도 두께도 달라 「캐럿이 여기 있다」와
           // 「이 행의 메뉴가 열려 있다」가 섞이지 않는다. 이 선택은 주석이 아니라
-          // `rowMenuMarker.test.ts` 가 이 파일의 클래스에서 토큰을 읽어 잰다.
+          // `tokens.contrast.test.ts` 의 `describe("행 메뉴 열림 표식")` 이 이
+          // 파일의 클래스에서 토큰을 읽어 잰다.
           className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-ink-muted"
           onKeyDown={(event) => {
             if (!enabled || !isContextMenuSummonKey(event)) return;

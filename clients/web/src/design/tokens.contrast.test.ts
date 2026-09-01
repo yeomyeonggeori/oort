@@ -284,12 +284,23 @@ function pick(token: string, index: 0 | 1): string {
 }
 
 /**
- * 행 메뉴의 「열림」 표식이 서는 두 바닥.
+ * 행 메뉴의 「열림」 표식이 서는 **세** 바닥.
  *
- * 보통은 `--surface-sidebar`, **지금 열려 있는 채널**이면 알파 없는
- * `--accent-soft`. 후자가 design-review #1937 R2 M-1 이 잡은 자리다.
+ * 인셋 아웃라인 밑에 실제로 깔리는 색이 세 가지다:
+ *   · `--surface-hover` — 열린 트리거 자신의 채움(`data-[state=open]:bg-…`).
+ *     비활성 행에서는 이것이 바닥이다(실측 `spanBg` / 링크는 투명).
+ *   · `--accent-soft` — **지금 열려 있는 채널**의 행. 알파가 없어 위 채움을
+ *     덮는다. design-review #1937 R2 M-1 이 잡은 자리다.
+ *   · `--surface-sidebar` — 그 둘이 어느 것도 칠해지지 않은 열의 바탕.
+ *
+ * 세 칸으로 적는 것이 이 가드의 이름값이다: 재는 값이 「실제 바닥」이므로 목록도
+ * 실제 바닥이어야 한다 (design-review #1937 R3 N-2).
  */
-const ROW_MENU_MARKER_SURFACES = ["surface-sidebar", "accent-soft"] as const;
+const ROW_MENU_MARKER_SURFACES = [
+  "surface-sidebar",
+  "surface-hover",
+  "accent-soft",
+] as const;
 
 const ROW_MENU_TRIGGER_SOURCE = readFileSync(
   new URL("../features/sidebar/SidebarRowContextMenu.tsx", import.meta.url),
@@ -327,7 +338,7 @@ describe("행 메뉴 열림 표식", () => {
     );
   });
 
-  it("선 색이 두 바닥·두 스킴 전부에서 3:1 을 넘는다", () => {
+  it("선 색이 세 바닥·두 스킴 전부에서 3:1 을 넘는다", () => {
     const token = rowMenuMarkerToken();
     for (const scheme of SCHEMES) {
       for (const surface of ROW_MENU_MARKER_SURFACES) {
