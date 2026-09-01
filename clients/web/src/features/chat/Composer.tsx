@@ -8,6 +8,7 @@ import {
 } from "react";
 import { AtSign, SendHorizontal, Smile } from "lucide-react";
 import type {
+  Channel,
   MessageAttachment,
   RequestRouting,
   RosterMember,
@@ -92,10 +93,8 @@ import {
   sendBlockReason,
 } from "@momo/core/features/attachments/model";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
-import {
-  MentionAutocompleteList,
-  useMentionAutocomplete,
-} from "@/features/chat/MentionAutocomplete";
+import { ComposerAutocompleteList } from "@/features/chat/ComposerAutocompleteList";
+import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
 import { useComposerFormat } from "@/features/chat/useComposerFormat";
 import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
@@ -374,6 +373,7 @@ export function Composer({
   workspaceId,
   channelId,
   directory,
+  channels,
   channelLabel,
   recipient,
   dmAgent,
@@ -386,6 +386,11 @@ export function Composer({
   /** Scopes the agent working signal to this channel; sending goes via onSend. */
   channelId: string;
   directory: Directory;
+  /**
+   * `#` 자동완성의 후보 (#1930). 이미 받아 둔 채널 스토어를 그대로 받는다 —
+   * 컴포저가 자기 질의를 서버에 다시 묻지 않는다.
+   */
+  channels: Channel[];
   channelLabel: string;
   /**
    * 이 label 이 **방 이름인가 사람 이름인가** (#1384). DM 의 label 은 상대의
@@ -427,27 +432,28 @@ export function Composer({
   // 그 글자를 덮어쓴다.
   const [text, setText] = useState(() => readDraft(workspaceId, channelId));
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const mentions = useMentionAutocomplete({
+  const autocomplete = useComposerAutocomplete({
     value: text,
     members: directory.members,
+    channels,
     inputRef,
     onValueChange: (next) => {
       setText(next);
       writeDraft(workspaceId, channelId, next);
     },
   });
-  const setMentionCaret = mentions.setCaret;
-  const closeMentions = mentions.close;
+  const setAutocompleteCaret = autocomplete.setCaret;
+  const closeAutocomplete = autocomplete.close;
   const emoji = useComposerEmoji({
     value: text,
     inputRef,
-    onValueChange: mentions.replaceValue,
+    onValueChange: autocomplete.replaceValue,
   });
   const format = useComposerFormat({
     value: text,
     inputRef,
-    mentionVisible: mentions.visible,
-    onValueChange: mentions.replaceValue,
+    autocompleteVisible: autocomplete.visible,
+    onValueChange: autocomplete.replaceValue,
     surfaceKey: `${workspaceId}:${channelId}`,
   });
   // Raised by `compositionend`, lowered by the next `keyup` (composerKeys.ts).
@@ -606,8 +612,8 @@ export function Composer({
   useEffect(() => {
     const restored = readDraft(workspaceId, channelId);
     setText(restored);
-    setMentionCaret(restored.length);
-    closeMentions();
+    setAutocompleteCaret(restored.length);
+    closeAutocomplete();
     const save = () => writeDraft(workspaceId, channelId, textRef.current);
     window.addEventListener("pagehide", save);
     const onSeed = (event: Event) => {
@@ -622,8 +628,8 @@ export function Composer({
       }
       if (textRef.current.trim() !== "") return;
       setText(detail.text);
-      setMentionCaret(detail.text.length);
-      closeMentions();
+      setAutocompleteCaret(detail.text.length);
+      closeAutocomplete();
     };
     window.addEventListener(COMPOSER_SEED_EVENT, onSeed);
     return () => {
@@ -631,7 +637,7 @@ export function Composer({
       window.removeEventListener(COMPOSER_SEED_EVENT, onSeed);
       save();
     };
-  }, [workspaceId, channelId, setMentionCaret, closeMentions]);
+  }, [workspaceId, channelId, setAutocompleteCaret, closeAutocomplete]);
 
   /**
    * 지금 이 전송이 나갈 수 있는가.
@@ -660,7 +666,7 @@ export function Composer({
     // including its failure state and its retry, so there is nothing left for
     // the composer to hold on to.
     setText("");
-    mentions.close();
+    autocomplete.close();
     format.dismiss();
     routing.reset();
     onCancelQuote();
@@ -710,14 +716,14 @@ export function Composer({
         composing: isComposingEvent(event.nativeEvent),
       },
       {
-        mentionsOpen: mentions.visible,
+        mentionsOpen: autocomplete.visible,
         justComposed: justComposedRef.current,
         enterSends: !isMobile,
         quoteOpen: quote !== null,
       }
     );
 
-    if (mentions.handleIntent(intent)) {
+    if (autocomplete.handleIntent(intent)) {
       event.preventDefault();
       return;
     }
@@ -845,13 +851,16 @@ export function Composer({
       />
 
       <form onSubmit={onSubmit} className="relative p-3">
-        <MentionAutocompleteList
-          id="composer-mention-list"
-          candidates={mentions.candidates}
-          highlight={mentions.highlight}
-          onChoose={mentions.choose}
-          testId="mention-list"
-          optionTestId="mention-option"
+        <ComposerAutocompleteList
+          id={`composer-${autocomplete.slug}-list`}
+          kind={autocomplete.kind}
+          candidates={autocomplete.candidates}
+          highlight={autocomplete.highlight}
+          onChoose={autocomplete.choose}
+          // 사이드바가 이미 `channel-list` 를 쓴다. 컴포저의 목록은 표면 이름을
+          // 앞에 달아 셋 다 유일하게 둔다(DOM id 와 같은 문자열).
+          testId={`composer-${autocomplete.slug}-list`}
+          optionTestId={`composer-${autocomplete.slug}-option`}
         />
         <div
           className="rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring"
@@ -880,7 +889,7 @@ export function Composer({
             rows={MIN_ROWS}
             onChange={(event) => {
               const next = event.target.value;
-              mentions.onTextChange(next, event.target.selectionStart ?? 0);
+              autocomplete.onTextChange(next, event.target.selectionStart ?? 0);
               // 초안은 **입력마다** 남는다. 디바운스를 걸지 않는 이유는 이 저장이
               // 문자열 하나를 동기로 쓰는 일이고(같은 저장소에 세션 기록이 이미 이
               // 방식으로 산다), 디바운스가 사는 창이 정확히 「마지막 몇 글자를
@@ -891,7 +900,7 @@ export function Composer({
               typing.onInput();
             }}
             onSelect={(event) => {
-              mentions.setCaret(
+              autocomplete.setCaret(
                 (event.target as HTMLTextAreaElement).selectionStart ?? 0
               );
               format.onSelect();
@@ -928,11 +937,13 @@ export function Composer({
             // 방어선이다 — 머리 절 하나도 안 드는 폭에서 글리프 반노출을 막는다.
             placeholder={placeholder}
             aria-autocomplete="list"
-            aria-expanded={mentions.visible}
-            aria-controls={mentions.visible ? "composer-mention-list" : undefined}
+            aria-expanded={autocomplete.visible}
+            aria-controls={
+              autocomplete.visible ? `composer-${autocomplete.slug}-list` : undefined
+            }
             aria-activedescendant={
-              mentions.visible
-                ? `composer-mention-list-option-${mentions.highlight}`
+              autocomplete.visible
+                ? `composer-${autocomplete.slug}-list-option-${autocomplete.highlight}`
                 : undefined
             }
             aria-describedby={showComposerHint ? "composer-hint" : undefined}
@@ -954,7 +965,7 @@ export function Composer({
                 aria-label="멘션 넣기"
                 title="멘션 넣기"
                 data-testid="composer-mention-trigger"
-                onClick={mentions.insertTrigger}
+                onClick={autocomplete.insertTrigger}
               >
                 <AtSign aria-hidden="true" />
               </Button>
@@ -970,7 +981,7 @@ export function Composer({
                 title="이모지 넣기"
                 data-testid="composer-emoji-trigger"
                 onClick={(event) => {
-                  mentions.close();
+                  autocomplete.close();
                   emoji.openPicker(event.currentTarget);
                 }}
               >

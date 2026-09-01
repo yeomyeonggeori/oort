@@ -13,7 +13,7 @@ import {
   toggleComposerFormat,
 } from "./composerFormat";
 import { readDraft, writeDraft } from "./draftStore";
-import { mentionQueryAt } from "./MentionAutocomplete";
+import { mentionQueryAt } from "./composerAutocomplete";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const CH = "00000000-0000-7000-8000-0000000000a1";
@@ -226,7 +226,7 @@ describe("선택 서식 트레이 표시 (#1902)", () => {
         value: "배포 롤백",
         start: 0,
         end: 2,
-        mentionVisible: false,
+        autocompleteVisible: false,
       })
     ).toBe(true);
     expect(
@@ -234,7 +234,7 @@ describe("선택 서식 트레이 표시 (#1902)", () => {
         value: "배포 롤백",
         start: 2,
         end: 2,
-        mentionVisible: false,
+        autocompleteVisible: false,
       })
     ).toBe(false);
     expect(
@@ -242,7 +242,7 @@ describe("선택 서식 트레이 표시 (#1902)", () => {
         value: "배포 롤백",
         start: 0,
         end: 2,
-        mentionVisible: true,
+        autocompleteVisible: true,
       })
     ).toBe(false);
     expect(mentionQueryAt("@her", 4)).toEqual({ start: 0, text: "her" });
@@ -251,7 +251,7 @@ describe("선택 서식 트레이 표시 (#1902)", () => {
         value: "@her",
         start: 0,
         end: 4,
-        mentionVisible: false,
+        autocompleteVisible: false,
       })
     ).toBe(false);
   });

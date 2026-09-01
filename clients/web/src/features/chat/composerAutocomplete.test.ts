@@ -48,6 +48,8 @@ const ALL_SOURCES = sourceFiles(SRC).filter(
 
 const rel = (path: string) => path.slice(SRC.length);
 
+const MACHINE = "/features/chat/composerAutocomplete.ts";
+
 describe("트리거 파서는 하나다 (#1930)", () => {
   it("세 트리거가 한 표에서만 정의된다", () => {
     expect(COMPOSER_TRIGGER_SPECS.map((spec) => spec.char)).toEqual([
@@ -62,22 +64,54 @@ describe("트리거 파서는 하나다 (#1930)", () => {
     ]);
   });
 
-  it("트리거 글자를 뒤로 훑는 코드가 한 파일에만 있다", () => {
-    const scanners = ALL_SOURCES.filter((path) => {
+  it("트리거 세 글자와 앵커 규율을 함께 아는 파일이 하나뿐이다", () => {
+    // 자동완성 파서의 지문: 세 트리거 글자를 **함께** 알고, 「줄 시작이거나 공백
+    // 뒤에서만 연다」는 앵커 시험(`!/\s/.test(...)`)을 한다. 둘 다 하는 파일이
+    // 둘이 되는 순간 buzz 처럼 규율이 갈라진 것이다. (URL authority 를 쪼개느라
+    // `lastIndexOf("@")` 를 쓰는 파일들은 앵커 시험을 하지 않으므로 지문이 아니다.)
+    const parsers = ALL_SOURCES.filter((path) => {
       const source = readFileSync(path, "utf8");
-      return (
-        /lastIndexOf\("[@#:]"\)/.test(source) ||
-        /export function \w*TriggerQueryAt/.test(source)
+      const knowsTriggers = ['"@"', '"#"', '":"'].every((literal) =>
+        source.includes(literal)
       );
+      return knowsTriggers && source.includes("!/\\s/.test(");
     }).map(rel);
-    expect(scanners).toEqual(["/features/chat/composerAutocomplete.ts"]);
+    expect(parsers).toEqual([MACHINE]);
   });
 
-  it("`@` 전용 파서는 남지 않고, 멘션 질의는 같은 기계에서 갈라진다", () => {
+  it("트리거 표도 파서도 한 번만 선언된다", () => {
+    const declaring = (needle: string) =>
+      ALL_SOURCES.filter((path) =>
+        readFileSync(path, "utf8").includes(needle)
+      ).map(rel);
+    expect(declaring("export const COMPOSER_TRIGGER_SPECS")).toEqual([MACHINE]);
+    expect(declaring("export function composerTriggerQueryAt")).toEqual([MACHINE]);
+  });
+
+  it("소비자는 앵커 규율을 다시 쓰지 않는다", () => {
+    const consumers = ALL_SOURCES.filter(
+      (path) =>
+        rel(path) !== MACHINE &&
+        /from "(\.\/|@\/features\/chat\/)composerAutocomplete"/.test(
+          readFileSync(path, "utf8")
+        )
+    );
+    expect(consumers.length).toBeGreaterThan(0);
+    for (const path of consumers) {
+      expect(readFileSync(path, "utf8"), rel(path)).not.toContain("!/\\s/.test(");
+    }
+  });
+
+  it("트리거별 자동완성 파일이 따로 생기지 않는다", () => {
     expect(
-      ALL_SOURCES.map(rel).filter((path) => path.includes("MentionAutocomplete"))
+      ALL_SOURCES.map(rel).filter((path) =>
+        /(Mention|Channel|Emoji)Autocomplete/.test(path)
+      )
     ).toEqual([]);
-    const machine = readFileSync(`${SRC}/features/chat/composerAutocomplete.ts`, "utf8");
+  });
+
+  it("멘션 질의는 같은 기계에서 갈라진다", () => {
+    const machine = readFileSync(`${SRC}${MACHINE}`, "utf8");
     expect(machine).toMatch(
       /export function mentionQueryAt[\s\S]{0,320}composerTriggerQueryAt\(/
     );
@@ -272,6 +306,15 @@ describe("`:` 이모지 자동완성 (#1930)", () => {
     expect(row.base).toBe("👍️");
   });
 
+  it("흐린 자리는 지금 친 글자가 맞춘 숏코드를 보인다", async () => {
+    const catalog = await loadCatalog();
+    const [thumb] = emojiCandidates(catalog, "thumbsup", 0);
+    expect(thumb.hint).toBe(":thumbsup:");
+    // 카탈로그의 첫 숏코드는 `+1` 이다. 그것을 그대로 쓰면 `:thumbsup` 을 친
+    // 사람이 `:+1:` 이라고 적힌 줄을 보게 된다.
+    expect(thumb.hint).not.toBe(":+1:");
+  });
+
   it("긴 질의도 규칙을 통과한다", async () => {
     const catalog = await loadCatalog();
     expect(emojiCandidates(catalog, "thumbsupthumbsup", 0)).toEqual([]);
@@ -332,11 +375,17 @@ function member(
 ): RosterMember {
   return {
     id,
-    handle,
-    displayName,
+    workspaceId: "w1",
     kind: "human",
     status,
-  } as RosterMember;
+    displayName,
+    handle,
+    channelCount: 0,
+    channelIds: [],
+    capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
+  };
 }
 
 function channel(id: string, name: string | undefined): Channel {

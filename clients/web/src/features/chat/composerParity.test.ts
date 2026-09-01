@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
-import { insertMention, mentionQueryAt } from "./MentionAutocomplete";
+import { insertMention, mentionQueryAt } from "./composerAutocomplete";
 import { insertMentionTriggerAtComposerSelection } from "./composerInsertion";
 
 const source = (relative: string) =>
@@ -10,11 +10,13 @@ const source = (relative: string) =>
 
 const channel = source("./Composer.tsx");
 const thread = source("../timeline/ThreadComposer.tsx");
-const mention = source("./MentionAutocomplete.tsx");
+const machine = source("./composerAutocomplete.ts");
+const list = source("./ComposerAutocompleteList.tsx");
 const actions = source("../timeline/MessageActions.tsx");
 const picker = source("../emoji/EmojiPickerDialog.tsx");
 const panel = source("../emoji/EmojiPickerPanel.tsx");
 const row = source("../timeline/MessageRow.tsx");
+const shell = source("./ChatShell.tsx");
 const tokens = source("../../design/tokens.css");
 
 function spacing(step: string): number {
@@ -53,13 +55,21 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(actions).toContain("useFrequentEmojis");
   });
 
-  it("채널과 스레드가 같은 멘션 목록·첨부 트레이를 쓴다", () => {
+  it("채널과 스레드가 같은 자동완성 목록·첨부 트레이를 쓴다", () => {
     for (const composer of [channel, thread]) {
-      expect(composer).toContain("useMentionAutocomplete");
-      expect(composer).toContain("<MentionAutocompleteList");
+      expect(composer).toContain("useComposerAutocomplete");
+      expect(composer).toContain("<ComposerAutocompleteList");
       expect(composer).toContain("<AttachButton");
       expect(composer).toContain("<AttachmentTray");
+      // 세 트리거의 후보 소스도 한 벌이다: 두 컴포저가 같은 채널 스토어를
+      // 기계에 넘긴다. 한쪽만 넘기면 스레드에서 `#` 이 조용히 빈 목록이 된다.
+      expect(composer).toMatch(
+        /useComposerAutocomplete\([\s\S]*?channels,/
+      );
     }
+    // 그리고 그 스토어는 셸이 이미 들고 있던 것이다 — 새 서버 표면이 아니다.
+    expect(shell).toContain("channels={channelsQuery.groups.channels}");
+    expect(shell.match(/channels=\{channelsQuery\.groups\.channels\}/g)).toHaveLength(2);
   });
 
   it("채널과 스레드가 같은 선택 서식 트레이를 쓰고 초안 저장 경로를 우회하지 않는다 (#1902)", () => {
@@ -68,7 +78,7 @@ describe("컴포저 공용 표면 (#1688)", () => {
       expect(composer).toContain("<ComposerFormatTray");
       expect(composer).toContain('data-composer-shell=""');
       expect(composer).toContain("selectionEpoch={format.selectionEpoch}");
-      expect(composer).toContain("onValueChange: mentions.replaceValue");
+      expect(composer).toContain("onValueChange: autocomplete.replaceValue");
       expect(composer).toContain("format.handleKeyDown(event)");
       expect(composer).toContain("format.dismiss()");
     }
@@ -76,10 +86,10 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(thread).toContain('testIdPrefix="thread-composer-format"');
     expect(channel).toContain("writeDraft(workspaceId, channelId, next)");
     expect(channel).toMatch(
-      /useComposerFormat\([\s\S]*?onValueChange: mentions\.replaceValue/
+      /useComposerFormat\([\s\S]*?onValueChange: autocomplete\.replaceValue/
     );
     expect(thread).toMatch(
-      /useComposerFormat\([\s\S]*?onValueChange: mentions\.replaceValue/
+      /useComposerFormat\([\s\S]*?onValueChange: autocomplete\.replaceValue/
     );
   });
 
@@ -109,7 +119,7 @@ describe("컴포저 공용 표면 (#1688)", () => {
       text: "",
     });
     for (const composer of [channel, thread]) {
-      expect(composer).toContain("mentions.insertTrigger");
+      expect(composer).toContain("autocomplete.insertTrigger");
     }
   });
 
@@ -170,12 +180,14 @@ describe("컴포저 공용 표면 (#1688)", () => {
   });
 
   it("[@] 포인터 삽입은 키 입력 전용 작성 중 신호를 내보내지 않고 용어를 맞춘다", () => {
-    expect(channel).toContain("onClick={mentions.insertTrigger}");
+    expect(channel).toContain("onClick={autocomplete.insertTrigger}");
     expect(channel).not.toMatch(
-      /onClick=\{\(\) => \{\s*mentions\.insertTrigger\(\);\s*typing\.onInput\(\)/
+      /onClick=\{\(\) => \{\s*autocomplete\.insertTrigger\(\);\s*typing\.onInput\(\)/
     );
-    expect(mention).toContain('aria-label="멘션 선택"');
-    expect(mention).not.toContain('aria-label="멤버 언급"');
+    // 접근 이름은 이제 트리거 표의 데이터다(#1930). 목록은 그 표만 읽는다.
+    expect(machine).toContain('listLabel: "멘션 선택"');
+    expect(machine).not.toContain('listLabel: "멤버 언급"');
+    expect(list).toContain("aria-label={composerTriggerSpec(kind).listLabel}");
   });
 });
 

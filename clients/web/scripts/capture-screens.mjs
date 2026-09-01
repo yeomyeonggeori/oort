@@ -3764,6 +3764,65 @@ async function assertMentionTrigger(page, where, ids) {
   return proof;
 }
 
+/**
+ * `#`·`:` 자동완성이 실제로 열린 프레임 (#1930).
+ *
+ * 두 트리거에는 [@] 같은 버튼이 없다 — 글자를 치는 것이 유일한 경로이므로 캡처도
+ * 그 경로로 친다(`fill` 은 한 번에 값을 갈아 끼워 사람이 지나가는 중간 상태를
+ * 건너뛴다). 목록이 떴다는 것만 보지 않고 **어느 트리거의 목록인지**(접근 이름)와
+ * 입력이 그 목록을 가리키고 있는지(aria-controls/activedescendant)까지 잰다:
+ * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
+ */
+async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(trigger.typed, { delay: 15 });
+  const list = page.getByTestId(trigger.list);
+  await list.waitFor({ state: "visible" });
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    const first = list?.querySelector('[role="option"]');
+    return {
+      value: input?.value ?? null,
+      label: list?.getAttribute("aria-label") ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      expanded: input?.getAttribute("aria-expanded") ?? null,
+      controls: input?.getAttribute("aria-controls") ?? null,
+      listId: list?.id ?? null,
+      active: input?.getAttribute("aria-activedescendant") ?? null,
+      firstId: first?.id ?? null,
+      firstText: first?.textContent ?? null,
+    };
+  })()`);
+  if (
+    proof.value !== trigger.typed ||
+    proof.label !== trigger.label ||
+    proof.options < 1 ||
+    proof.expanded !== "true" ||
+    proof.controls === null ||
+    proof.controls !== proof.listId ||
+    proof.active !== proof.firstId ||
+    proof.options < (trigger.minOptions ?? 1) ||
+    (trigger.expectFirst !== undefined &&
+      !(proof.firstText ?? "").includes(trigger.expectFirst))
+  ) {
+    throw new Error(
+      `${trigger.typed} 자동완성 ${scheme}: ${JSON.stringify(proof)}`
+    );
+  }
+  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  console.log(
+    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText}`
+  );
+  await page.keyboard.press("Escape");
+  await list.waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
 async function assertEmojiAnchor(page, where, triggerId, pickerId) {
   // Radix 포지셔닝은 비동기라 open 직후 rect가 미배치(0,0)일 수 있다 — 배치가
@@ -5991,14 +6050,46 @@ async function captureScheme(browser, scheme) {
   const mentionProof = await assertMentionTrigger(login, scheme, {
     input: "composer-input",
     trigger: "composer-mention-trigger",
-    list: "mention-list",
+    list: "composer-mention-list",
   });
   const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
-  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-mention-list").waitFor({ state: "hidden" });
   await login.getByTestId("composer-input").fill("");
+
+  // 같은 기계의 나머지 두 트리거 (#1930). `#`는 채널 목록, `:`는 피커와 같은
+  // 이모지 검색 열을 그린다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#rel",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      expectFirst: "#release-notes",
+      shot: "composer-channel-autocomplete",
+    }
+  );
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: ":thu",
+      list: "composer-emoji-list",
+      label: "이모지 선택",
+      // 이모지는 이름을 박아 두지 않는다 — 후보와 순위의 정본은 피커의
+      // `filterEmojis` 이고 그 동일성은 단위 시험이 잰다. 여기서 잴 것은 목록이
+      // 실제로 여러 줄을 그리고 aria 배선이 그 목록을 가리킨다는 사실이다.
+      minOptions: 2,
+      shot: "composer-emoji-autocomplete",
+    }
+  );
 
   // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
   // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.

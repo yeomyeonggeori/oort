@@ -54,10 +54,10 @@ function mount(node: ReactElement): HTMLElement {
 }
 
 function Probe({
-  mentionVisible = false,
+  autocompleteVisible = false,
   initial = "배포 롤백 근거",
 }: {
-  mentionVisible?: boolean;
+  autocompleteVisible?: boolean;
   initial?: string;
 }) {
   const [value, setValue] = useState(initial);
@@ -65,7 +65,7 @@ function Probe({
   const format = useComposerFormat({
     value,
     inputRef,
-    mentionVisible,
+    autocompleteVisible,
     onValueChange: (next) => setValue(next),
     surfaceKey: "probe",
   });
@@ -228,7 +228,7 @@ describe("컴포저 선택 서식 트레이 (#1902)", () => {
   });
 
   it("멘션 목록이 열려 있으면 선택이 있어도 트레이를 올리지 않는다", () => {
-    mount(createElement(Probe, { mentionVisible: true }));
+    mount(createElement(Probe, { autocompleteVisible: true }));
     const input = document.querySelector<HTMLTextAreaElement>(
       "[data-testid='probe-input']"
     );

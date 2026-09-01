@@ -17,7 +17,7 @@ import {
 } from "@momo/core/features/chat/composerKeys";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { resetEmojiFrequencyForTests, getEmojiFrequency } from "@/features/emoji/frequencyStore";
-import { resetEscapeLayers } from "@/design/ui/escapeLayer";
+import { resetEscapeLayers, useEscapeLayer } from "@/design/ui/escapeLayer";
 import { ComposerAutocompleteList } from "./ComposerAutocompleteList";
 import { useComposerAutocomplete } from "./useComposerAutocomplete";
 
@@ -50,6 +50,8 @@ const MEMBERS: RosterMember[] = [
     channelCount: 1,
     channelIds: ["c1"],
     capabilities: [],
+    createdAtMs: 0,
+    updatedAtMs: 0,
   },
 ];
 
@@ -99,6 +101,18 @@ function mount(node: ReactElement): HTMLElement {
     mountedRoot?.render(node);
   });
   return host;
+}
+
+/**
+ * 이 컴포저를 **덮고 있는** 층. 스레드 패널이 그 자리다.
+ *
+ * Probe 보다 먼저 선 형제라서 Esc 층 스택의 **아래**에 깔린다. 목록이 자기 층을
+ * 잡지 않으면 Esc 한 번이 목록과 이 층을 함께 닫고, 그것이 #1930 이전 자동완성이
+ * 겪던 사고다.
+ */
+function OuterLayer({ onEscape }: { onEscape: () => void }) {
+  useEscapeLayer(true, onEscape);
+  return null;
 }
 
 function Probe() {
@@ -174,6 +188,16 @@ const VALUE_SETTER = Object.getOwnPropertyDescriptor(
   HTMLTextAreaElement.prototype,
   "value"
 )?.set;
+
+/** 본문과 캐럿을 한 번에 놓는다. 문장 **가운데**에서 고르는 판을 만들 때 쓴다. */
+function setValueAt(node: HTMLTextAreaElement, value: string, caret: number) {
+  node.focus();
+  act(() => {
+    VALUE_SETTER?.call(node, value);
+    node.setSelectionRange(caret, caret);
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+}
 
 function typeAll(node: HTMLTextAreaElement, text: string) {
   node.focus();
@@ -279,14 +303,48 @@ describe("한 목록 기계가 세 트리거를 그린다 (#1930)", () => {
     expect(list()).toBeNull();
   });
 
-  it("Esc 는 목록만 닫고 캐럿을 입력창에 남긴다", () => {
+  it("문장 가운데에서 고르면 넣은 자리 바로 뒤에 캐럿이 선다", () => {
     mount(createElement(Probe));
+    setValueAt(input(), "@her 확인", 4);
+    expect(options()).toHaveLength(1);
+    press(input(), "Enter");
+    flushFrames();
+    expect(input().value).toBe("@hermes  확인");
+    expect(input().selectionStart).toBe("@hermes ".length);
+    expect(input().selectionEnd).toBe("@hermes ".length);
+  });
+
+  it("포커스가 입력창을 떠나 있어도 삽입이 되돌린다", () => {
+    mount(createElement(Probe));
+    typeAll(input(), "#rel");
+    act(() => input().blur());
+    expect(document.activeElement).not.toBe(input());
+    press(input(), "Enter");
+    flushFrames();
+    expect(input().value).toBe("#release-notes ");
+    expect(document.activeElement).toBe(input());
+  });
+
+  it("Esc 는 목록만 닫고 덮인 층까지 닫지 않는다", () => {
+    const outer = vi.fn();
+    mount(
+      createElement(
+        "div",
+        null,
+        createElement(OuterLayer, { onEscape: outer, key: "outer" }),
+        createElement(Probe, { key: "probe" })
+      )
+    );
     typeAll(input(), "#rel");
     expect(list()).not.toBeNull();
     press(input(), "Escape");
     expect(list()).toBeNull();
+    expect(outer).not.toHaveBeenCalled();
     expect(input().value).toBe("#rel");
     expect(document.activeElement).toBe(input());
+    // 목록이 물러난 뒤의 Esc 는 그 아래 층의 것이다.
+    press(input(), "Escape");
+    expect(outer).toHaveBeenCalledTimes(1);
   });
 
   it("코드 서식 안에서는 세 트리거 다 목록을 열지 않는다", async () => {

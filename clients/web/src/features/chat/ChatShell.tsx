@@ -1168,6 +1168,7 @@ export function ChatShell() {
             workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}
+            channels={channelsQuery.groups.channels}
             channelLabel={label}
             // 조사를 정하는 사실 (#1384): DM 의 label 은 방 이름이 아니라 상대
             // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. `peer` 로
@@ -1188,6 +1189,7 @@ export function ChatShell() {
           channelId={channelId}
           root={thread}
           directory={directory}
+          channels={channelsQuery.groups.channels}
           reactions={timeline.reactions}
           pins={timeline.pins}
           actions={{

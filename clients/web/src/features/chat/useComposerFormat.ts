@@ -71,19 +71,19 @@ export function focusComposerFormatTray(
 
 /**
  * 채널·스레드 컴포저가 같은 선택 서식 상태를 쓴다. 값 반영은 호출측
- * `onValueChange`(채널은 draftStore 가 붙은 mentions.replaceValue)에 맡긴다.
+ * `onValueChange`(채널은 draftStore 가 붙은 autocomplete.replaceValue)에 맡긴다.
  */
 export function useComposerFormat({
   value,
   inputRef,
-  mentionVisible,
+  autocompleteVisible,
   onValueChange,
   enabled = true,
   surfaceKey,
 }: {
   value: string;
   inputRef: RefObject<HTMLTextAreaElement | null>;
-  mentionVisible: boolean;
+  autocompleteVisible: boolean;
   onValueChange: (value: string, caret: number) => void;
   enabled?: boolean;
   /** 채널·스레드 전환에 트레이를 접는다. */
@@ -93,7 +93,7 @@ export function useComposerFormat({
   const [selectionEpoch, setSelectionEpoch] = useState(0);
   const trayRef = useRef<HTMLDivElement | null>(null);
   const valueRef = useRef(value);
-  const mentionVisibleRef = useRef(mentionVisible);
+  const autocompleteVisibleRef = useRef(autocompleteVisible);
   const enabledRef = useRef(enabled);
   const openRef = useRef(open);
   const dismissedRangeRef = useRef<string | null>(null);
@@ -102,7 +102,7 @@ export function useComposerFormat({
   );
   const hideForTouch = useOsSelectionCallout();
   valueRef.current = value;
-  mentionVisibleRef.current = mentionVisible;
+  autocompleteVisibleRef.current = autocompleteVisible;
   enabledRef.current = enabled;
   openRef.current = open;
 
@@ -128,7 +128,7 @@ export function useComposerFormat({
       value: valueRef.current,
       start,
       end,
-      mentionVisible: mentionVisibleRef.current,
+      autocompleteVisible: autocompleteVisibleRef.current,
     });
     setOpen(show);
     if (show) setSelectionEpoch((n) => n + 1);
@@ -156,14 +156,14 @@ export function useComposerFormat({
         value,
         start: pending.start,
         end: pending.end,
-        mentionVisible: mentionVisibleRef.current,
+        autocompleteVisible: autocompleteVisibleRef.current,
       });
       setOpen(show && !hideForTouch);
       if (show && !hideForTouch) setSelectionEpoch((n) => n + 1);
       return;
     }
     sync();
-  }, [value, mentionVisible, hideForTouch, inputRef, sync]);
+  }, [value, autocompleteVisible, hideForTouch, inputRef, sync]);
 
   useEffect(() => {
     const onSelectionChange = () => {
@@ -258,7 +258,7 @@ export function useComposerFormat({
         !event.altKey &&
         !event.shiftKey &&
         openRef.current &&
-        !mentionVisibleRef.current
+        !autocompleteVisibleRef.current
       ) {
         const first = focusComposerFormatTray(trayRef.current);
         if (first) return true;
