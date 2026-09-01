@@ -56,6 +56,7 @@ import {
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
+import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
@@ -240,6 +241,18 @@ export function Sidebar({
     [openId, readStates.byChannel]
   );
 
+  // 행이 보여 주는 안 읽음과 메뉴가 내놓는 「읽음 처리」는 같은 사실이어야 한다
+  // (BT-1 / #1929). 배지를 0으로 접는 그 규칙 — 읽고 있는 채널은 읽은 것이다
+  // (`openChannel.ts`) — 을 메뉴도 함께 읽는다. 배지가 없는 행이 「읽음 처리」를
+  // 내놓으면 둘 중 하나는 거짓말이다.
+  const readStateFor = useCallback(
+    (channel: Channel) => {
+      if (openId !== null && uuidEq(channel.id, openId)) return null;
+      return unreadFor(readStates.byChannel, channel.id);
+    },
+    [openId, readStates.byChannel]
+  );
+
   const unreadChannels = useMemo(
     () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
     [ordered, unreadCountFor]
@@ -328,6 +341,21 @@ export function Sidebar({
         }
         testId="channel-item"
         dataAttrs={{ "data-channel-id": channel.id }}
+        // 행에서 바로 조작하는 문 (BT-1 / #1929). 트리거는 링크를 감싸는
+        // block 상자이고 탭 정거장이 아니라, 로빙 tabindex 도 ⌥↑↓ 순회도
+        // 정거장이 늘지 않는다.
+        wrapLink={(link) => (
+          <SidebarRowContextMenu
+            workspaceId={workspaceId}
+            channel={channel}
+            title={label.text}
+            selfMemberId={session.member.id}
+            selfRole={selfMember?.role}
+            readState={readStateFor(channel)}
+          >
+            {link}
+          </SidebarRowContextMenu>
+        )}
       />
     );
   }

@@ -1433,9 +1433,29 @@ async function installMocks(context) {
   // an unarchived channel already carries the name, which is the frame that
   // matters because the rejection has to land under the name field, and 201
   // with the created row otherwise.
+  // BT-1 (#1929): 사이드바 행 메뉴가 알림을 끄면 서버가 그것을 **기억해야**
+  // 낱말이 다음에 열 때 뒤집힌다. 무효화 뒤 재조회가 같은 값을 돌려주면 캡처는
+  // 「눌렀지만 아무 일도 없었다」를 초록으로 넘긴다.
+  const mutedChannels = new Set();
+  await context.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) => {
+      const url = new URL(route.request().url());
+      const id = url.pathname.split("/").at(-2);
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.muted) mutedChannels.add(id);
+      else mutedChannels.delete(id);
+      return json(route, { muted: Boolean(body.muted) });
+    }
+  );
   await context.route("**/v1/workspaces/*/channels", (route) => {
     if (route.request().method() !== "POST") {
-      return json(route, { channels: [...CHANNELS, DM_CHANNEL] });
+      return json(route, {
+        channels: [...CHANNELS, DM_CHANNEL].map((channel) => ({
+          ...channel,
+          muted: mutedChannels.has(channel.id),
+        })),
+      });
     }
     const body = JSON.parse(route.request().postData() ?? "{}");
     if (CHANNELS.some((c) => c.name === body.name)) {
@@ -2210,12 +2230,172 @@ async function assertSectionActionsAtRest(page, scheme, where) {
   }
 }
 
+function isMutePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/notification-pref");
+  } catch {
+    return false;
+  }
+}
+
+function isReadStatePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/read-state");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * BT-1 (#1929): 사이드바 행의 우클릭 메뉴. 두 스킴에서 **열린 프레임**을 찍고,
+ * 찍기 전에 그것이 죽은 컨트롤이 아님을 누른다.
+ *
+ * 여기서 재는 것 넷:
+ *   ① 우클릭이 그 행의 메뉴를 열고, 열려 있는 동안 행이 자기가 임자임을 말한다.
+ *   ② 키보드에도 같은 문이 있다 (Shift+F10) — 그리고 Esc 뒤 캐럿이 **그 행으로**
+ *      돌아온다. BODY 추락은 회귀다.
+ *   ③ 알림 토글이 실제로 PUT 하고, 서버가 기억한 값을 따라 낱말이 뒤집힌다.
+ *   ④ 「읽음 처리」가 그 채널의 `latest_seq` 를 광고한다.
+ */
+async function captureSidebarRowMenu(page, scheme, shots) {
+  // 안 읽음이 있는 행을 고른다: 다섯 항목이 전부 서는 유일한 상태이고,
+  // 「읽음 처리」를 누를 수 있는 유일한 행이다.
+  const unreadChannelId = CHANNELS[1].id;
+  const row = page.locator(`[data-channel-id="${unreadChannelId}"]`);
+  await row.waitFor({ state: "visible" });
+
+  // 행이 두 줄로 흩어지지 않았는가 (실측 회귀): `asChild` 트리거가 NavLink 의
+  // 함수 className 을 문자열로 이어 붙이면 행은 flex 도 패딩도 잃는다. 캡처가
+  // 그 결함을 한 번 통과시켰으므로, 이제 프레임을 찍기 전에 기하를 잰다.
+  const rowBox = await row.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return {
+      height: Math.round(rect.height),
+      display: style.display,
+      paddingLeft: style.paddingLeft,
+    };
+  });
+  if (rowBox.display !== "flex" || rowBox.height > 40) {
+    throw new Error(
+      `사이드바 행 기하 ${scheme}: ${JSON.stringify(rowBox)} (flex · 한 줄이어야 함)`
+    );
+  }
+
+  await row.click({ button: "right" });
+  const menu = page.getByTestId("channel-row-menu");
+  await menu.waitFor({ state: "visible" });
+  const owner = await row.evaluate((el) =>
+    el.closest("[data-row-menu-trigger]")?.getAttribute("data-state")
+  );
+  if (owner !== "open") {
+    throw new Error(
+      `행 메뉴가 열렸는데 행 자리가 임자라고 말하지 않는다 ${scheme}: ${owner}`
+    );
+  }
+  const items = await menu
+    .locator("[data-testid^='channel-row-']")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid"))
+    );
+  const expected = [
+    "channel-row-mark-read",
+    "channel-row-mute-toggle",
+    "channel-row-copy-link",
+    "channel-row-copy-name",
+    "channel-row-leave",
+  ];
+  if (JSON.stringify(items) !== JSON.stringify(expected)) {
+    throw new Error(
+      `행 메뉴 항목 ${scheme}: ${JSON.stringify(items)} (${JSON.stringify(expected)} 여야 함)`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  // ④ 읽음 처리 — 채널을 열지 않고 그 채널의 latest_seq 를 광고한다.
+  const readPut = page.waitForRequest(isReadStatePut);
+  await page.getByTestId("channel-row-mark-read").click();
+  const readBody = (await readPut).postDataJSON();
+  if (readBody?.last_read_seq !== 42) {
+    throw new Error(
+      `읽음 처리 PUT ${scheme}: ${JSON.stringify(readBody)} (last_read_seq 42 여야 함)`
+    );
+  }
+  await menu.waitFor({ state: "hidden" });
+
+  // ② 키보드에도 같은 문이 있다. hover 없이 행에 캐럿을 두고 Shift+F10.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    (id) =>
+      document.activeElement?.getAttribute("data-channel-id") === id,
+    unreadChannelId,
+    { timeout: 4_000 }
+  ).catch(() => {
+    throw new Error(
+      `행 메뉴 Esc 후 포커스가 그 행으로 돌아오지 않았다 ${scheme}`
+    );
+  });
+
+  // ③ 알림 토글 왕복. 낱말은 서버가 기억한 값을 따른다.
+  await row.click({ button: "right" });
+  await menu.waitFor({ state: "visible" });
+  const mutePut = page.waitForRequest(isMutePut);
+  await page.getByTestId("channel-row-mute-toggle").click();
+  const muteBody = (await mutePut).postDataJSON();
+  if (muteBody?.muted !== true) {
+    throw new Error(
+      `행 메뉴 알림 PUT ${scheme}: ${JSON.stringify(muteBody)} ({muted:true} 여야 함)`
+    );
+  }
+  if ("memberId" in muteBody) {
+    throw new Error("알림 몸통이 남을 지목했다 — 자기 것만 끌 수 있다");
+  }
+  await menu.waitFor({ state: "hidden" });
+  await page.waitForFunction(
+    (id) => {
+      const target = document.querySelector(`[data-channel-id="${id}"]`);
+      if (target?.getAttribute("data-state") !== "open") {
+        target?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
+        );
+      }
+      const item = document.querySelector(
+        '[data-testid="channel-row-mute-toggle"]'
+      );
+      return item?.getAttribute("data-muted") === "";
+    },
+    unreadChannelId,
+    { timeout: 6_000 }
+  ).catch(() => {
+    throw new Error(
+      `알림 낱말이 저장된 상태를 따라 뒤집히지 않았다 ${scheme}`
+    );
+  });
+  // 되돌린다: 뒤따르는 장면이 음소거된 채널을 물려받지 않게.
+  const unmutePut = page.waitForRequest(isMutePut);
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await unmutePut;
+  await menu.waitFor({ state: "hidden" });
+  await page.getByTestId("composer-input").hover();
+}
+
 /**
  * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
   await assertSectionActionsAtRest(page, scheme, "첫 줄");
+
+  await captureSidebarRowMenu(page, scheme, shots);
+  await assertSectionActionsAtRest(page, scheme, "행 메뉴 왕복 후");
 
   const restHeader = await page
     .getByTestId("sidebar-section-channels-header")

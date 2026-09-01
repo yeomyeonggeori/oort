@@ -153,6 +153,43 @@ export function channelLeaveFailureMessage(error: unknown): string {
   return "채널에서 나가지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
 
+// ---- 행에서 채널을 조작하는 낱말 (BT-1 / #1929) ------------------------------
+//
+// 채널 액션은 헤더 ⋮ 메뉴에만 있었다 — 「채널을 열지 않고 조작한다」는 문법이
+// 아예 없었고, 사이드바 행 우클릭이 그 문을 연다. 두 표면이 같은 일을 하므로
+// 낱말은 여기 한 벌뿐이다: `copyLabels.ts`가 메시지 쪽에서 같은 이유로 이미
+// 코어에 있고(웹 메뉴와 폰 시트가 갈라졌던 자리), 링크 복사의 낱말은 그 파일
+// 것을 그대로 든다 — 같은 뜻에 두 번째 이름을 만들지 않는다.
+
+/** 이 채널의 안 읽음을 서버에 광고한다. 채널을 열지 않고. */
+export const CHANNEL_MARK_READ_LABEL = "읽음 처리하기";
+
+/** 읽음 광고가 실패했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
+export const CHANNEL_MARK_READ_FAILURE =
+  "읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+
+/** 채널 이름(또는 DM 상대의 이름)을 클립보드에 올린다. */
+export const CHANNEL_COPY_NAME_LABEL = "이름 복사하기";
+
+/** 이름이 클립보드에 올라간 뒤의 영수증. */
+export const CHANNEL_COPY_NAME_DONE_LABEL = "이름 복사됨";
+
+/** 복사 항목의 낱말도 상태다 — `copyLinkActionLabel`과 같은 결. */
+export function channelCopyNameLabel(copied: boolean): string {
+  return copied ? CHANNEL_COPY_NAME_DONE_LABEL : CHANNEL_COPY_NAME_LABEL;
+}
+
+/**
+ * 클립보드 자체가 없는 런타임에서 하는 말. 다시 눌러도 같으므로 「다시
+ * 시도」라고 말하지 않는다 — `MessageRow`의 형제 문장과 같은 판정이다.
+ */
+export const CHANNEL_COPY_UNAVAILABLE =
+  "복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다.";
+
+/** 클립보드는 있는데 쓰기가 실패했을 때. 다시 누르면 될 수 있다. */
+export const CHANNEL_COPY_FAILURE =
+  "복사하지 못했습니다. 같은 항목을 다시 눌러 보세요.";
+
 /**
  * May this member create a channel at all?
  *

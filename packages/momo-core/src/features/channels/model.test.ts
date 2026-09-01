@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  CHANNEL_COPY_FAILURE,
+  CHANNEL_COPY_NAME_DONE_LABEL,
+  CHANNEL_COPY_NAME_LABEL,
+  CHANNEL_COPY_UNAVAILABLE,
   CHANNEL_LEAVE_LABEL,
+  CHANNEL_MARK_READ_FAILURE,
+  CHANNEL_MARK_READ_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
@@ -12,6 +18,7 @@ import {
   canCreateChannelNow,
   canLeaveChannel,
   channelLeaveConfirmBody,
+  channelCopyNameLabel,
   channelLeaveFailureMessage,
   channelMuteToggleLabel,
   channelNameIssue,
@@ -240,5 +247,34 @@ describe("channel header menu labels", () => {
 
   it("names the topic item as view, because there is no topic PATCH", () => {
     expect(CHANNEL_TOPIC_VIEW_LABEL).toBe("주제 보기");
+  });
+});
+
+// ---- BT-1 (#1929): 행에서 채널을 조작하는 낱말 -------------------------------
+
+describe("channelCopyNameLabel", () => {
+  it("낱말이 상태다: 복사 전과 후가 다른 문장이다", () => {
+    expect(channelCopyNameLabel(false)).toBe(CHANNEL_COPY_NAME_LABEL);
+    expect(channelCopyNameLabel(true)).toBe(CHANNEL_COPY_NAME_DONE_LABEL);
+    expect(CHANNEL_COPY_NAME_LABEL).not.toBe(CHANNEL_COPY_NAME_DONE_LABEL);
+  });
+
+  it("동사구다: 메뉴의 형제 항목들과 같은 꼴", () => {
+    // 「메시지 복사하기」·「링크 복사하기」·「채널 나가기」와 같은 결.
+    expect(CHANNEL_COPY_NAME_LABEL.endsWith("하기")).toBe(true);
+    expect(CHANNEL_MARK_READ_LABEL.endsWith("하기")).toBe(true);
+  });
+});
+
+describe("복사·읽음 실패 문장", () => {
+  it("클립보드가 없을 때와 쓰기가 실패했을 때를 갈라 말한다", () => {
+    // 다시 눌러도 같은 경우에 「다시」라고 말하면 거짓말이 된다.
+    expect(CHANNEL_COPY_UNAVAILABLE).not.toContain("다시");
+    expect(CHANNEL_COPY_FAILURE).toContain("다시");
+    expect(CHANNEL_COPY_UNAVAILABLE).not.toBe(CHANNEL_COPY_FAILURE);
+  });
+
+  it("읽음 실패는 그 자리에서 다음 행동을 준다", () => {
+    expect(CHANNEL_MARK_READ_FAILURE).toContain("다시 시도");
   });
 });

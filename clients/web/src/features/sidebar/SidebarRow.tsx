@@ -1,4 +1,10 @@
-import { useEffect, useState, type FocusEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  type FocusEvent,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { NavLink } from "react-router-dom";
 import { cn } from "@/design/lib/cn";
@@ -43,6 +49,13 @@ export interface SidebarRowProps {
   trailing?: ReactNode;
   testId?: string;
   dataAttrs?: Record<string, string>;
+  /**
+   * 행의 링크를 감싸는 손 (BT-1 / #1929). 채널 행은 이것으로 우클릭 메뉴의
+   * 트리거가 된다. 렌더 프롭인 이유: `<li>` 의 임자는 여기 남기면서도 이
+   * 컴포넌트가 「채널이 무엇인지」를 알 필요는 없다 — 인박스·활동 같은 전역 행은
+   * 이 프롭 없이 예전 그대로다.
+   */
+  wrapLink?: (link: ReactElement) => ReactElement;
 }
 
 export function SidebarRow({
@@ -56,63 +69,63 @@ export function SidebarRow({
   trailing,
   testId,
   dataAttrs,
+  wrapLink,
 }: SidebarRowProps) {
   const hasUnread = unreadCount > 0;
   const hasMention = mentionCount > 0;
-  return (
-    <li>
-      <NavLink
-        to={to}
-        data-sidebar-row=""
-        data-testid={testId}
-        {...dataAttrs}
-        className={({ isActive }) =>
-          cn(rowClass, isActive ? activeClass : inactiveClass)
-        }
-      >
-        <span className="shrink-0 opacity-70" aria-hidden="true">
-          {icon}
-        </span>
-        <span className="flex min-w-0 flex-1 items-baseline gap-1">
-          <span
-            className={cn(
-              "min-w-0 truncate",
-              hasUnread && "font-semibold",
-              agent && "text-agent"
-            )}
-          >
-            {label}
-          </span>
-          {handle && (
-            <span
-              className="min-w-0 truncate text-meta text-ink-muted"
-              data-testid="row-handle"
-            >
-              {handle}
-            </span>
+  const link = (
+    <NavLink
+      to={to}
+      data-sidebar-row=""
+      data-testid={testId}
+      {...dataAttrs}
+      className={({ isActive }) =>
+        cn(rowClass, isActive ? activeClass : inactiveClass)
+      }
+    >
+      <span className="shrink-0 opacity-70" aria-hidden="true">
+        {icon}
+      </span>
+      <span className="flex min-w-0 flex-1 items-baseline gap-1">
+        <span
+          className={cn(
+            "min-w-0 truncate",
+            hasUnread && "font-semibold",
+            agent && "text-agent"
           )}
+        >
+          {label}
         </span>
-        {trailing}
-        {hasMention ? (
+        {handle && (
           <span
-            className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
-            data-numeric
-            data-testid="mention-badge"
+            className="min-w-0 truncate text-meta text-ink-muted"
+            data-testid="row-handle"
           >
-            {mentionCount}
+            {handle}
           </span>
-        ) : hasUnread ? (
-          <span
-            className="shrink-0 text-timestamp text-ink-muted"
-            data-numeric
-            data-testid="unread-count"
-          >
-            {unreadCount}
-          </span>
-        ) : null}
-      </NavLink>
-    </li>
+        )}
+      </span>
+      {trailing}
+      {hasMention ? (
+        <span
+          className="shrink-0 rounded-sm bg-accent px-1 text-timestamp font-medium text-on-accent"
+          data-numeric
+          data-testid="mention-badge"
+        >
+          {mentionCount}
+        </span>
+      ) : hasUnread ? (
+        <span
+          className="shrink-0 text-timestamp text-ink-muted"
+          data-numeric
+          data-testid="unread-count"
+        >
+          {unreadCount}
+        </span>
+      ) : null}
+    </NavLink>
   );
+  return <li>{wrapLink ? wrapLink(link) : link}</li>;
 }
 
 /**
