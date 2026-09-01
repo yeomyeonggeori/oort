@@ -26,6 +26,7 @@ import {
   emojiGridPadRows,
   emojiGridWindow,
 } from "./gridWindow";
+import { EMOJI_CATALOG_COPY } from "./copy";
 import { filterEmojis, isEmojiSearchQuery } from "./search";
 import { useEmojiSkinTone } from "./skinToneStore";
 
@@ -404,18 +405,18 @@ export function EmojiPickerPanel({
           <InlineBanner
             message={
               browserOffline
-                ? "지금 오프라인입니다. 연결되면 다시 여세요."
-                : "이모지 목록을 불러오지 못했습니다."
+                ? EMOJI_CATALOG_COPY.offline
+                : EMOJI_CATALOG_COPY.error
             }
-            actionLabel="다시 시도"
+            actionLabel={EMOJI_CATALOG_COPY.retry}
             onAction={onRetry}
             separator={false}
             testId="emoji-catalog-error"
           />
         ) : visible.length === 0 && searching ? (
           <EmptyInvite
-            headline="찾는 이모지가 없습니다"
-            detail="영문 이름이나 :code:로 검색하세요. 한글 검색은 아직 없습니다."
+            headline={EMOJI_CATALOG_COPY.emptyHeadline}
+            detail={EMOJI_CATALOG_COPY.emptyDetail}
             className="px-0 py-4"
             testId="emoji-search-empty"
             actions={

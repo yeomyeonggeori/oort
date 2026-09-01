@@ -399,6 +399,17 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000202", workspaceId: WORKSPACE_ID, kind: "public", name: "엔진", muted: false },
   { id: "00000000-0000-7000-8000-000000000203", workspaceId: WORKSPACE_ID, kind: "private", name: "김인턴작업", muted: false },
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
+  // 자유 텍스트 방 이름 (#1930 M-1). 채널 `name` 은 스키마상 자유 텍스트라 한글도
+  // 공백도 담고, 컴포저 후보 행은 폭 192(`w-pane-sm`) 안에서 그것을 담아야 한다.
+  // 이 줄이 없으면 그 행을 재는 프레임이 영문 짧은 이름만 보게 된다.
+  {
+    id: "00000000-0000-7000-8000-000000000205",
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "2026-하반기-릴리스-준비-회고-및-후속-작업",
+    topic: "회고 기록과 후속 작업",
+    muted: false,
+  },
 ];
 
 // The DM the directory opens onto (MOMO-611). It is in the fixture so the
@@ -3764,6 +3775,212 @@ async function assertMentionTrigger(page, where, ids) {
   return proof;
 }
 
+/**
+ * `#`·`:` 자동완성이 실제로 열린 프레임 (#1930).
+ *
+ * 두 트리거에는 [@] 같은 버튼이 없다 — 글자를 치는 것이 유일한 경로이므로 캡처도
+ * 그 경로로 친다(`fill` 은 한 번에 값을 갈아 끼워 사람이 지나가는 중간 상태를
+ * 건너뛴다). 목록이 떴다는 것만 보지 않고 **어느 트리거의 목록인지**(접근 이름)와
+ * 입력이 그 목록을 가리키고 있는지(aria-controls/activedescendant)까지 잰다:
+ * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
+ */
+async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(trigger.typed, { delay: 15 });
+  const list = page.getByTestId(trigger.list);
+  await list.waitFor({ state: "visible" });
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    const first = list?.querySelector('[role="option"]');
+    return {
+      value: input?.value ?? null,
+      label: list?.getAttribute("aria-label") ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      expanded: input?.getAttribute("aria-expanded") ?? null,
+      controls: input?.getAttribute("aria-controls") ?? null,
+      listId: list?.id ?? null,
+      active: input?.getAttribute("aria-activedescendant") ?? null,
+      firstId: first?.id ?? null,
+      firstText: first?.textContent ?? null,
+    };
+  })()`);
+  if (
+    proof.value !== trigger.typed ||
+    proof.label !== trigger.label ||
+    proof.options < 1 ||
+    proof.expanded !== "true" ||
+    proof.controls === null ||
+    proof.controls !== proof.listId ||
+    proof.active !== proof.firstId ||
+    proof.options < (trigger.minOptions ?? 1) ||
+    (trigger.expectFirst !== undefined &&
+      !(proof.firstText ?? "").includes(trigger.expectFirst))
+  ) {
+    throw new Error(
+      `${trigger.typed} 자동완성 ${scheme}: ${JSON.stringify(proof)}`
+    );
+  }
+  if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
+  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  console.log(
+    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText}`
+  );
+  await page.keyboard.press("Escape");
+  await list.waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 카탈로그가 죽은 판의 사유 상자와 「다시 시도」 (design-review #1930 B-1·H-3).
+ *
+ * 이 장면이 없어서 두 결함이 초록을 뚫고 나갔다. `:` 만 비동기 소스인데 레인은
+ * 성공 경로만 열었고, 단위 시험은 `loadCatalog` 자체를 모킹해 로더의 현실을 보지
+ * 않았다. 그래서 여기서는 **실제로 청크를 끊는다**:
+ *
+ *   1. 카탈로그 요청을 abort → `:thu` 가 사유 상자(오류)를 세운다.
+ *   2. 그 상자의 「다시 시도」가 **제출 버튼이 아니다**(B-1). 컴포저의 `<form>`
+ *      안이라 `type` 이 없으면 클릭이 폼을 제출해 쓰던 초안이 채널로 나갔다.
+ *      클릭 뒤 초안이 그대로 있고 POST /messages 가 0건이어야 한다.
+ *   3. 차단을 풀고 누르면 **실제로 다시 실린다**(H-3). 실패한 dynamic import 는
+ *      모듈 맵이 기억하므로, 재시도가 자산 URL 을 `fetch` 로 다시 받지 않으면
+ *      이 대기는 영원히 안 끝난다.
+ *
+ * 이 장면은 `:thu` 성공 장면보다 **먼저** 돈다: 카탈로그가 한 번 실리면 그 뒤로는
+ * 이 판을 만들 수 없다.
+ */
+async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  const posted = [];
+  const watch = (request) => {
+    if (request.method() === "POST" && request.url().includes("/messages")) {
+      posted.push(request.url());
+    }
+  };
+  page.on("request", watch);
+  const block = (route) => route.abort();
+  await context.route("**/emojiCatalog-*", block);
+  const input = page.getByTestId("composer-input");
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(":thu", { delay: 15 });
+  const box = page.getByTestId("composer-emoji-list-status");
+  await box.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="composer-emoji-list-status"]')
+        ?.getAttribute("data-status") === "error"
+  );
+  const proof = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="composer-emoji-list-status"]');
+    const button = box?.querySelector("button");
+    const input = document.querySelector('[data-testid="composer-input"]');
+    return {
+      status: box?.getAttribute("data-status") ?? null,
+      text: box?.textContent ?? "",
+      buttonType: button?.type ?? null,
+      buttonTypeAttr: button?.getAttribute("type") ?? null,
+      inForm: Boolean(button?.form),
+      listWidth: Math.round(box?.getBoundingClientRect().width ?? 0),
+      value: input?.value ?? null,
+    };
+  })()`);
+  if (
+    proof.status !== "error" ||
+    !proof.text.includes("이모지 목록을 불러오지 못했습니다.") ||
+    !proof.text.includes("다시 시도") ||
+    proof.buttonType !== "button" ||
+    !proof.inForm ||
+    proof.value !== ":thu"
+  ) {
+    throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
+  }
+  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  await context.unroute("**/emojiCatalog-*", block);
+  await box.locator("button").click();
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
+  const after = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const list = document.querySelector('[data-testid="composer-emoji-list"]');
+    return {
+      value: input?.value ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      status: document.querySelector('[data-testid="composer-emoji-list-status"]'),
+    };
+  })()`);
+  page.off("request", watch);
+  if (after.value !== ":thu" || after.options < 1 || posted.length > 0) {
+    throw new Error(
+      `다시 시도 ${scheme}: ${JSON.stringify({ ...after, posted })}`
+    );
+  }
+  console.log(
+    `  이모지 카탈로그 실패 ${scheme}: 오류 상자 ${proof.listWidth}px · 버튼 격 ${proof.buttonType} · 다시 시도 뒤 후보 ${after.options} · 초안 보존 "${after.value}" · 전송 ${posted.length}건`
+  );
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 후보 행이 자유 텍스트 방 이름을 **실제로 담는지** 잰다 (design-review #1930).
+ *
+ * jsdom 은 폭을 재지 않는다. 그래서 앞 판의 「긴 채널 이름도 자르지 않고 넣는다」
+ * 시험은 삽입 문자열만 재고 초록이었고, 화면에서는 말줄임이 사람이 친 글자를
+ * 먹고(`#2026-하반기-릴리…`) 주제 칸이 폭 0px 로 소멸했다(M-1 실측). 여기서
+ * 재는 것은 그 두 가지다: 이름이 두 줄로 감싸고 잘리지 않는가, 주제가 폭을
+ * 갖는가. 같은 프레임에서 비공개 방의 격 글리프(M-2)도 함께 본다.
+ */
+async function assertComposerRows(page, scheme, trigger) {
+  const rows = await page.evaluate(`(() => {
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((option) => {
+      const spans = [...option.querySelectorAll('span')];
+      const lead = spans[0];
+      const hint = spans[1] ?? null;
+      const leadRect = lead.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(lead).lineHeight) || 1;
+      return {
+        text: option.textContent,
+        lock: Boolean(option.querySelector('svg')),
+        leadLines: Math.round(leadRect.height / line),
+        leadClipped:
+          lead.scrollHeight > lead.clientHeight + 1 ||
+          lead.scrollWidth > lead.clientWidth + 1,
+        hintW: hint ? Math.round(hint.getBoundingClientRect().width) : null,
+      };
+    });
+  })()`);
+  const find = (needle) => rows.find((row) => (row.text ?? "").includes(needle));
+  const wrapped = find(trigger.rows.wrapped);
+  if (
+    !wrapped ||
+    wrapped.leadLines < 2 ||
+    wrapped.leadClipped ||
+    !(wrapped.hintW > 0)
+  ) {
+    throw new Error(
+      `${trigger.typed} 긴 이름 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  const locked = find(trigger.rows.locked);
+  if (!locked || !locked.lock || (locked.text ?? "").includes("#")) {
+    throw new Error(
+      `${trigger.typed} 비공개 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  console.log(
+    `  자동완성 행 ${scheme}: 긴 이름 ${wrapped.leadLines}줄 · 주제 ${wrapped.hintW}px · 비공개 자물쇠 ${locked.lock}`
+  );
+}
+
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
 async function assertEmojiAnchor(page, where, triggerId, pickerId) {
   // Radix 포지셔닝은 비동기라 open 직후 rect가 미배치(0,0)일 수 있다 — 배치가
@@ -5991,14 +6208,67 @@ async function captureScheme(browser, scheme) {
   const mentionProof = await assertMentionTrigger(login, scheme, {
     input: "composer-input",
     trigger: "composer-mention-trigger",
-    list: "mention-list",
+    list: "composer-mention-list",
   });
   const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
-  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-mention-list").waitFor({ state: "hidden" });
   await login.getByTestId("composer-input").fill("");
+
+  // 같은 기계의 나머지 두 트리거 (#1930). `#`는 채널 목록, `:`는 피커와 같은
+  // 이모지 검색 열을 그린다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#rel",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      expectFirst: "#release-notes",
+      shot: "composer-channel-autocomplete",
+    }
+  );
+  // 같은 목록의 두 결함을 한 프레임이 진다 (#1930 M-1·M-2): 자유 텍스트 방
+  // 이름이 행 안에서 감싸고, 비공개 방이 사이드바와 같은 자물쇠로 그려진다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      minOptions: 4,
+      rows: { wrapped: "회고", locked: "김인턴작업" },
+      shot: "composer-channel-kinds",
+    }
+  );
+  // 성공 경로보다 먼저: 카탈로그가 한 번 실리면 실패 판을 못 만든다 (#1930 H-3).
+  await captureComposerCatalogFailure(login, context, scheme, shots);
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: ":thu",
+      list: "composer-emoji-list",
+      label: "이모지 선택",
+      // 후보와 순위의 정본은 피커의 `filterEmojis` 이고 그 동일성은 단위 시험이
+      // 잰다. 여기서 잴 것은 목록이 실제로 여러 줄을 그리고 aria 배선이 그
+      // 목록을 가리킨다는 사실 — 그리고 **첫 줄이 Enter 의 기본값이라는 사실**
+      // 이다(#1930 H-1). 앞 판의 이 프레임은 `:thu` 첫 줄로 🫰 를 찍었고 마지막
+      // 줄이 리투아니아 국기였다. 지금 첫 줄은 친 글자를 숏코드로 맞춘 줄이다.
+      minOptions: 2,
+      expectFirst: ":thumbsup:",
+      shot: "composer-emoji-autocomplete",
+    }
+  );
 
   // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
   // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.

@@ -2,6 +2,11 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-23 (Fable) · ★재개 큐 소진: UXUI 재연 QA 대행 5/7 PASS + U-7 스코프드 랜딩 + ADR-0168 기안
+- 성재 "검수 요청 부분 알아서 처리" → **재연 QA를 Fable이 브라우저 자동화로 대행**: 로컬 프록시(localhost:23080, 정적=track/uxui dist·/v1=D8 포워딩)로 same-origin 리그 구성. U-5·U-2·C-1·U-1·U-4 전부 PASS(포커스 복귀 수리분 실렌더 재확인 포함). 증거 11샷+리포트 `claudedocs/uxui-qa-d8-20260823/`.
+- **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
+- **U-7 판정 집행**: DESIGN.md·OMD.md 등 문서 6파일+.gitignore만 랜딩(#1695 merged, track/uxui=35074dbd)·번들 583파일은 비버전관리. #1693 close·#1689 종결. 전체 번들은 feat/1689-design-md-core-v2-book@272dd4c2 보존.
+- **ADR-0168 Proposed 기안**(M-2 선행 — expo-image-picker+document-picker 낱개, D1 연장). rescue stash=역행 패치 확증(패치 보험 `scratchpad/uxui-rescue-…patch.gz`)·drop만 성재 1커맨드 필요. 남은 성재 큐: ADR-0167/0168 Accept·T-9 발사·U-3/M-1 실체감(선택).
 ## 2026-08-23 (Fable) · ★Docker Desktop 반복 hung 근본해결=Colima 전환 + UXUI 재연 앱 빌드
 - 성재 "도커 데스크탑 자꾸 문제(재설치 3회)—원인 파악·해결 or 대안 적용". **근본원인=AppTranslocation**: `/Applications/Docker.app` quarantine(Homebrew Cask)→Gatekeeper가 격리 임시사본에서 실행→소켓 경로 꼬여 데몬 hung. brew cask가 매 설치 quarantine 재부착→재설치 반복 무의미. xattr 제거는 sandbox ACL로 권한막힘.
 - **해결=Colima 전환**(정본 메모리 `docker-desktop-translocation-colima.md`): brew install colima→`colima start --vm-type vz --cpu4 --memory8 --disk60`(Apple Virtualization)→context 자동전환·compose v2 플러그인 링크·자동시작 등록·Docker Desktop 로그인항목 제거. **안정성 실증: hello-world·amd64 에뮬·momo dev스택(pg18+centrifugo) healthy·CPU 0.04%**(Docker Desktop 146~214% 발열 대비 극명). hung 0.
