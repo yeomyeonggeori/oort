@@ -15,7 +15,13 @@ import {
   sidebarChannelRefCount,
   sidebarPrefsFromWire,
   sidebarPrefsToWire,
+  sectionDeleteConfirmBody,
+  SECTION_DELETE_CONFIRM_TITLE,
+  sidebarChannelRefCapMessage,
+  sidebarEmptySectionHint,
+  sidebarSectionCapMessage,
   sidebarSectionNameIssue,
+  SIDEBAR_CHANNEL_REF_MAX,
   SIDEBAR_SECTION_MAX,
   SIDEBAR_SECTION_NAME_MAX,
   type SidebarPrefs,
@@ -142,7 +148,7 @@ describe("이름 검증", () => {
 
 describe("파생", () => {
   it("배치가 없으면 오늘과 같은 두 섹션이다", () => {
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs: emptySidebarPrefs(),
       channels: [GENERAL, RELEASE],
       dms: [DM_ONE],
@@ -159,7 +165,7 @@ describe("파생", () => {
     const prefs = prefsWith([
       { id: "sec-1", name: "출시 준비", order: 0, channelIds: [RELEASE.id] },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [GENERAL, RELEASE],
       dms: [DM_ONE],
@@ -179,7 +185,7 @@ describe("파생", () => {
       { id: "b", name: "나중", order: 9, channelIds: [] },
       { id: "a", name: "먼저", order: 1, channelIds: [] },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [],
       dms: [],
@@ -203,7 +209,7 @@ describe("파생", () => {
         channelIds: [DEAD, RELEASE.id, DEAD],
       },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [GENERAL, RELEASE],
       dms: [],
@@ -212,7 +218,7 @@ describe("파생", () => {
     // 채널 목록을 잠깐 못 받아온 것과 채널이 사라진 것은 구분되지 않는다.
     // 그러니 배치는 살려 둔다 - 채널이 돌아오면 배치도 함께 돌아온다.
     expect(prefs.sections[0].channelIds).toContain(DEAD);
-    const back = deriveSidebarSections({
+    const { sections: back } = deriveSidebarSections({
       prefs,
       channels: [GENERAL, RELEASE, channel(DEAD, "돌아온 채널")],
       dms: [],
@@ -224,7 +230,7 @@ describe("파생", () => {
     const prefs = prefsWith([
       { id: "sec-1", name: "출시 준비", order: 0, channelIds: [RELEASE.id] },
     ]);
-    const rendered = deriveSidebarSections({ prefs, channels: [], dms: [] });
+    const { sections: rendered } = deriveSidebarSections({ prefs, channels: [], dms: [] });
     expect(rendered.map((s) => s.id)).toContain("sec-1");
     expect(rendered[1].channels).toEqual([]);
   });
@@ -234,7 +240,7 @@ describe("파생", () => {
       { id: "second", name: "둘째", order: 5, channelIds: [GENERAL.id] },
       { id: "first", name: "첫째", order: 1, channelIds: [GENERAL.id] },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [GENERAL],
       dms: [],
@@ -249,7 +255,7 @@ describe("파생", () => {
     const prefs = prefsWith([
       { id: "sec-1", name: "사람들", order: 0, channelIds: [DM_ONE.id] },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [GENERAL],
       dms: [DM_ONE],
@@ -267,7 +273,7 @@ describe("파생", () => {
         channelIds: [GENERAL.id.toUpperCase()],
       },
     ]);
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs,
       channels: [GENERAL],
       dms: [],
@@ -304,7 +310,7 @@ describe("변경", () => {
       "sec-1"
     );
     const after = deleteSidebarSection(prefs, "sec-1");
-    const rendered = deriveSidebarSections({
+    const { sections: rendered } = deriveSidebarSections({
       prefs: after,
       channels: [GENERAL, RELEASE],
       dms: [],
@@ -338,7 +344,7 @@ describe("변경", () => {
         prefs: released,
         channels: [GENERAL],
         dms: [],
-      })[0].channels
+      }).base.channels
     ).toEqual([GENERAL]);
   });
 
@@ -378,7 +384,7 @@ describe("실전 크기 payload", () => {
     }
     prefs = placeChannelInSection(prefs, DEAD, "sec-3");
 
-    const rendered = deriveSidebarSections({ prefs, channels, dms: [DM_ONE] });
+    const { sections: rendered } = deriveSidebarSections({ prefs, channels, dms: [DM_ONE] });
     expect(rendered).toHaveLength(10);
     expect(rendered[0].id).toBe(BASE_CHANNELS_SECTION_ID);
     // 배치되지 않은 여덟 개만 기본 섹션에 남는다.
@@ -396,5 +402,41 @@ describe("실전 크기 payload", () => {
     const drawn = rendered.flatMap((s) => s.channels.map((c) => c.id));
     expect(new Set(drawn).size).toBe(drawn.length);
     expect(drawn).toHaveLength(channels.length + 1);
+  });
+});
+
+// =============================================================================
+// design-review #1932 R1 — 낱말의 계약
+// =============================================================================
+
+describe("낱말", () => {
+  // M-1: 제목은 고정, 이름은 본문. 80자 이름이 제목에 들어가면 물음이 셋째 줄
+  // 끝에 도착한다 — `ChannelLeaveConfirmDialog` 가 정확히 그 이유로 이렇게 한다.
+  it("삭제 확인의 제목은 이름을 담지 않는다", () => {
+    const long = "긴급대응".repeat(20);
+    expect(SECTION_DELETE_CONFIRM_TITLE).not.toContain(long);
+    expect([...SECTION_DELETE_CONFIRM_TITLE].length).toBeLessThan(20);
+    // 그리고 본문이 이름과 **무엇이 사라지지 않는지**를 함께 진다.
+    const body = sectionDeleteConfirmBody(long);
+    expect(body).toContain(long);
+    expect(body).toContain("채널 섹션으로 돌아가고");
+    expect(body).toContain("나가지는 않습니다");
+  });
+
+  // M-3: 상한 셋 중 둘이 말이 없었다. 이제 셋 다 자기 수를 든다.
+  it("상한 문장이 자기 수를 든다", () => {
+    expect(sidebarSectionCapMessage()).toContain(String(SIDEBAR_SECTION_MAX));
+    expect(sidebarChannelRefCapMessage()).toContain(
+      String(SIDEBAR_CHANNEL_REF_MAX)
+    );
+  });
+
+  // H-1: 터치에는 우클릭이 없다(BT-1 이 hover:none 에서 행 메뉴를 닫아 두었다).
+  it("빈 섹션 문장이 표면마다 다르고, 없는 동작을 지시하지 않는다", () => {
+    expect(sidebarEmptySectionHint(true)).toContain("우클릭");
+    expect(sidebarEmptySectionHint(false)).not.toContain("우클릭");
+    expect(sidebarEmptySectionHint(false)).not.toBe(
+      sidebarEmptySectionHint(true)
+    );
   });
 });

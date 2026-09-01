@@ -17,7 +17,13 @@ import type { Channel } from "@momo/core/lib/api";
 import {
   deriveSidebarSections,
   emptySidebarPrefs,
+  sidebarChannelRefCapMessage,
+  sidebarEmptySectionHint,
+  sidebarSectionCapMessage,
+  SIDEBAR_CHANNEL_REF_MAX,
+  SIDEBAR_PREFS_LOAD_FAILURE,
   SIDEBAR_PREFS_SAVE_FAILURE,
+  SIDEBAR_SECTION_MAX,
   type SidebarPrefs,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
@@ -128,6 +134,11 @@ interface Handle {
   remove: (id: string) => void;
   rename: (id: string, name: string) => void;
   error: () => string | null;
+  loadError: () => string | null;
+  status: () => string;
+  canEdit: () => boolean;
+  canCreate: () => boolean;
+  retryLoad: () => void;
 }
 let handle: Handle | null = null;
 
@@ -139,7 +150,7 @@ function Harness({ unread }: { unread?: Record<string, number> }) {
         prefs: prefs.prefs,
         channels: CHANNELS,
         dms: [],
-      }),
+      }).sections,
     [prefs.prefs]
   );
   handle = {
@@ -148,6 +159,11 @@ function Harness({ unread }: { unread?: Record<string, number> }) {
     remove: prefs.deleteSection,
     rename: prefs.renameSection,
     error: () => prefs.error,
+    loadError: () => prefs.loadError,
+    status: () => prefs.status,
+    canEdit: () => prefs.canEdit,
+    canCreate: () => prefs.canCreate,
+    retryLoad: prefs.retryLoad,
   };
   const collapsed = useSidebarSectionsCollapsed();
   return createElement(
@@ -405,5 +421,161 @@ describe("저장 실패", () => {
     await settleSave();
     expect(putSidebarPrefs).toHaveBeenCalledTimes(2);
     expect(sectionIds(host)).toEqual(["channels", "sec-1", "dms"]);
+  });
+});
+
+// =============================================================================
+// design-review #1932 R1 수리분
+// =============================================================================
+
+describe("B-1 — 배치를 못 읽은 동안에는 아무것도 쓰지 않는다", () => {
+  it("GET 이 실패하면 편집 문이 닫히고 PUT 이 한 건도 나가지 않는다", async () => {
+    vi.useFakeTimers();
+    // 서버에 실제로 있는 것: 다른 기기에서 만든 섹션 둘. PUT 은 통째 교체라
+    // 빈 payload 기준의 저장 하나가 이 둘을 지운다 — 그 경로를 막는 시험이다.
+    fetchSidebarPrefs.mockRejectedValue(new Error("boom"));
+    await mount();
+
+    expect(handle?.status()).toBe("error");
+    expect(handle?.canEdit()).toBe(false);
+    expect(handle?.loadError()).toBe(SIDEBAR_PREFS_LOAD_FAILURE);
+
+    // 문이 닫혔는데도 훅을 부르면(다음 표면·경합) 훅이 거절한다. 두 겹이다.
+    await act(async () => handle?.create("리뷰 프로브"));
+    await act(async () => handle?.move(GENERAL, "sec-1"));
+    await settleSave();
+    expect(putSidebarPrefs).not.toHaveBeenCalled();
+    expect(handle?.error()).toBe(SIDEBAR_PREFS_LOAD_FAILURE);
+  });
+
+  it("GET 이 아직 안 왔을 때도 같다", async () => {
+    vi.useFakeTimers();
+    // 영원히 걸리는 GET = 리뷰 프로브의 「6초」를 끝까지 민 것.
+    fetchSidebarPrefs.mockImplementation(() => new Promise(() => undefined));
+    await mount();
+
+    expect(handle?.status()).toBe("loading");
+    expect(handle?.canEdit()).toBe(false);
+    // 로딩은 실패가 아니다: 배너를 세우지 않는다.
+    expect(handle?.loadError()).toBeNull();
+
+    await act(async () => handle?.create("리뷰 프로브"));
+    await settleSave();
+    expect(putSidebarPrefs).not.toHaveBeenCalled();
+  });
+
+  it("재시도가 성공하면 문이 열리고 그때부터 쓴다", async () => {
+    vi.useFakeTimers();
+    fetchSidebarPrefs.mockRejectedValueOnce(new Error("boom"));
+    fetchSidebarPrefs.mockResolvedValue({
+      version: 1,
+      sections: [
+        { id: "sec-1", name: "출시 준비", order: 0, channelIds: [RELEASE] },
+      ],
+      starredChannelIds: [GENERAL],
+    } satisfies SidebarPrefs);
+    const host = await mount();
+    expect(handle?.canEdit()).toBe(false);
+
+    await act(async () => handle?.retryLoad());
+    for (let i = 0; i < 5; i += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(1);
+        await Promise.resolve();
+      });
+    }
+    expect(handle?.canEdit()).toBe(true);
+    expect(sectionIds(host)).toEqual(["channels", "sec-1", "dms"]);
+
+    await act(async () => handle?.create("두 번째"));
+    await settleSave();
+    const saved = putSidebarPrefs.mock.calls[0][1] as SidebarPrefs;
+    // 서버가 갖고 있던 섹션과 별표가 저장에 살아 있다 — 이것이 B-1 이 지운 것이다.
+    expect(saved.sections.map((s) => s.name)).toEqual(["출시 준비", "두 번째"]);
+    expect(saved.starredChannelIds).toEqual([GENERAL]);
+  });
+
+  it("한 번 읽은 뒤의 배경 재조회 실패는 편집을 막지 않는다", async () => {
+    vi.useFakeTimers();
+    await mount();
+    expect(handle?.canEdit()).toBe(true);
+    // 서버 진실을 이미 손에 들었으므로 통째 교체가 지울 것이 없다. 위험한 것은
+    // 「한 번도 못 읽었다」 하나뿐이고, 그 갈림이 `isError` 가 아니라 데이터다.
+    await act(async () => handle?.create("가"));
+    await settleSave();
+    expect(putSidebarPrefs).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("M-3 — 상한이 말한다", () => {
+  it("채널 참조 500 초과는 왕복 전에 막고 무엇이 한계인지 말한다", async () => {
+    vi.useFakeTimers();
+    const packed: SidebarPrefs = {
+      version: 1,
+      sections: [
+        {
+          id: "sec-1",
+          name: "가득",
+          order: 0,
+          channelIds: Array.from({ length: SIDEBAR_CHANNEL_REF_MAX }, (_, i) =>
+            `${String(i + 1).padStart(8, "0")}-0000-4000-8000-000000000000`
+          ),
+        },
+      ],
+      starredChannelIds: [],
+    };
+    fetchSidebarPrefs.mockResolvedValue(packed);
+    await mount();
+
+    // 한 개만 더 넣어도 상한을 넘는다.
+    await act(async () => handle?.move(GENERAL, "sec-1"));
+    await settleSave();
+    expect(putSidebarPrefs).not.toHaveBeenCalled();
+    expect(handle?.error()).toBe(sidebarChannelRefCapMessage());
+    expect(handle?.error()).toContain(String(SIDEBAR_CHANNEL_REF_MAX));
+  });
+
+  it("섹션 50개에 닿으면 문은 남고 사유가 이름이 된다", async () => {
+    vi.useFakeTimers();
+    fetchSidebarPrefs.mockResolvedValue({
+      version: 1,
+      sections: Array.from({ length: SIDEBAR_SECTION_MAX }, (_, i) => ({
+        id: `sec-${i + 1}`,
+        name: `섹션 ${i + 1}`,
+        order: i,
+        channelIds: [],
+      })),
+      starredChannelIds: [],
+    } satisfies SidebarPrefs);
+    await mount();
+    // 편집은 여전히 허용된다(이름 바꾸기·삭제·배치). 막힌 것은 만들기 하나다.
+    expect(handle?.canEdit()).toBe(true);
+    expect(handle?.canCreate()).toBe(false);
+    expect(sidebarSectionCapMessage()).toContain(String(SIDEBAR_SECTION_MAX));
+  });
+});
+
+describe("H-1 — 빈 섹션 문장은 그 표면이 실제로 가진 것을 말한다", () => {
+  it("포인터와 터치가 다른 문장을 쓴다", () => {
+    expect(sidebarEmptySectionHint(true)).toContain("우클릭");
+    // 터치에는 우클릭이 없다(BT-1 이 행 컨텍스트 메뉴를 hover:none 에서 닫아
+    // 두었다). 없는 동작을 지시하지 않는다.
+    expect(sidebarEmptySectionHint(false)).not.toContain("우클릭");
+    expect(sidebarEmptySectionHint(false)).toContain("비어 있습니다");
+  });
+});
+
+describe("N-2 — 기본 두 섹션은 계약이고, 타입이 그렇게 말한다", () => {
+  it("파생이 base·custom·dms 를 이름으로 돌려준다", () => {
+    const derived = deriveSidebarSections({
+      prefs: emptySidebarPrefs(),
+      channels: CHANNELS,
+      dms: [],
+    });
+    // 캐스트 없이 읽힌다 — 없는 날을 `undefined.title` 로 만들지 않는다.
+    expect(derived.base.id).toBe("channels");
+    expect(derived.dms.id).toBe("dms");
+    expect(derived.custom).toEqual([]);
+    expect(derived.sections).toEqual([derived.base, derived.dms]);
   });
 });

@@ -29,6 +29,27 @@
 //
 // ADR-0177 D4: 접힘은 기기 성향이라 클라 localStorage 가 정본이고, 구조만
 // 로밍한다. `payload` 에 접힘을 넣지 말 것.
+//
+// ## 미해결 갈림 — 기본 섹션이 웹은 둘, 폰은 셋이다 (design-review #1932 M-2)
+//
+// 아래 `deriveSidebarSections` 는 기본 섹션을 「채널」·「DM」 **둘**로 못박는다.
+// ADR-0177 D4 가 적은 것이 그 둘이기 때문이다. 그런데 폰은 이미
+// `clients/mobile/src/features/sidebar/rows.ts` 에서 **셋**을 출하하고 있다 —
+// 「채널 / 다이렉트 메시지 / 에이전트」. 에이전트 섹션은 그 파일이 자기 몫이라고
+// 방어까지 해 둔 결정이고, 이 티켓(BT-4)의 범위는 웹이라 폰은 아직 이 함수를
+// 소비하지 않는다. 그래서 **오늘은 결함이 아니다.**
+//
+// 이름을 붙여 두는 이유는 이 함수를 폰이 소비하는 날 갈라지기 때문이다: 지금
+// 모양 그대로 소비하면 에이전트 섹션이 계약 밖으로 밀리고, 그러면 두 클라가 같은
+// payload 에서 다른 사이드바를 그린다 — 이 파일 머리말이 스스로 「로밍을 하는
+// 이유 자체를 없앤다」고 적은 그 실패다.
+//
+// **이 티켓은 동작을 바꾸지 않는다.** 고르는 것은 폰 티켓(또는 BT-5)의 일이고,
+// 갈래는 셋이다: ①기본 섹션 목록을 입력으로 받는다(호출부가 자기 표면의 기본
+// 섹션을 넘긴다) ②에이전트를 세 번째 기본 섹션으로 계약에 올린다(웹도 그리게
+// 된다 — 웹은 에이전트를 전역 목적지 행으로 이미 갖고 있어 중복이다) ③폰이 이
+// 함수를 커스텀 섹션에만 쓰고 기본 셋은 자기가 계속 조립한다. 각자 다시
+// 판정하지 말고 이 문단을 근거로 한 번에 결정할 것.
 // =============================================================================
 
 import { record, num, str, stringArrayField } from "../../lib/wire";
@@ -156,28 +177,93 @@ export const BASE_DMS_SECTION_ID = "dms";
 export const BASE_CHANNELS_SECTION_TITLE = "채널";
 export const BASE_DMS_SECTION_TITLE = "다이렉트 메시지";
 
-export const SECTION_CREATE_LABEL = "새 섹션";
 export const SECTION_CREATE_TITLE = "새 섹션 만들기";
 export const SECTION_RENAME_LABEL = "이름 바꾸기";
 export const SECTION_RENAME_TITLE = "섹션 이름 바꾸기";
 export const SECTION_DELETE_LABEL = "섹션 삭제";
 export const SECTION_NAME_FIELD_LABEL = "섹션 이름";
-export const SECTION_NAME_PLACEHOLDER = "예: 읽은 것";
-/** 삭제는 채널을 지우지 않는다. 그 사실을 확인 자리에서 말해야 한다. */
+export const SECTION_NAME_PLACEHOLDER = "예: 출시 준비";
 export const SECTION_DELETE_CONFIRM_LABEL = "삭제";
-export function sectionDeleteConfirmTitle(name: string): string {
-  return `${name} 섹션을 삭제할까요?`;
+
+/**
+ * 삭제 확인의 **제목은 고정 문장**이고 이름은 본문이 진다.
+ *
+ * design-review #1932 M-1: 처음에는 제목이 `${name} 섹션을 삭제할까요?` 였고,
+ * 80자(상한) 한글 이름에서 제목이 세 줄이 되며 정작 물음이 셋째 줄 끝에
+ * 도착했다. 이 파일이 문법을 빌려 왔다고 적은 `ChannelLeaveConfirmDialog` 가
+ * 반대로 한다 — 제목은 `CHANNEL_LEAVE_CONFIRM_TITLE` 고정, 가변 이름은
+ * `channelLeaveConfirmBody` 가 진다. 같은 자리에 같은 규칙을 쓴다.
+ */
+export const SECTION_DELETE_CONFIRM_TITLE = "이 섹션을 삭제할까요?";
+
+/** 삭제는 채널을 지우지 않는다. 그 사실을 확인 자리에서 말해야 한다. */
+export function sectionDeleteConfirmBody(name: string): string {
+  return `${name} 섹션이 사이드바에서 사라집니다. 이 섹션의 채널은 채널 섹션으로 돌아가고, 채널에서 나가지는 않습니다.`;
 }
-export const SECTION_DELETE_CONFIRM_BODY =
-  "이 섹션의 채널은 채널 섹션으로 돌아갑니다. 채널에서 나가지는 않습니다.";
 
 /** 행 메뉴의 배치 무리 이름. */
 export const SECTION_MOVE_GROUP_LABEL = "섹션으로 이동";
+
+/**
+ * 빈 섹션이 하는 말 — **표면마다 다르다** (design-review #1932 H-1).
+ *
+ * 하나뿐이던 문장은 "채널 행을 우클릭해…" 였고, 그 동작은 터치 표면에 존재하지
+ * 않는다(BT-1 이 서랍 스크롤과의 충돌 때문에 행 컨텍스트 메뉴를 `hover: none`
+ * 에서 의도적으로 닫아 두었다). 화면이 없는 동작을 지시하고 있었다.
+ *
+ * 두 문장인 이유는 두 표면이 실제로 다른 것을 가졌기 때문이다. 낱말을 흐려서
+ * 하나로 만드는 길도 있었지만, 그러면 포인터 쪽이 **어떻게** 옮기는지를 잃는다.
+ */
+export function sidebarEmptySectionHint(pointerCanHover: boolean): string {
+  return pointerCanHover
+    ? "채널 행을 우클릭해 이 섹션으로 옮길 수 있습니다."
+    : "이 섹션은 비어 있습니다. 채널은 넓은 화면에서 옮길 수 있습니다.";
+}
 /** 배치를 풀고 기본 섹션으로 되돌리는 항목. */
 export const SECTION_MOVE_TO_BASE_LABEL = "채널 섹션으로";
 
 export const SIDEBAR_PREFS_SAVE_FAILURE =
   "섹션 변경을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
+
+/**
+ * 부트스트랩 GET 이 실패했을 때 (design-review #1932 B-1).
+ *
+ * 이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 「배치를 못 읽었다」를 똑같이
+ * 그렸고, PUT 이 통째 교체라서 그 상태의 편집 하나가 다른 기기에서 만든 섹션
+ * 전부를 지웠다. **빈 값과 「모른다」는 같은 것이 아니다** — 문장이 그 둘을 가른다.
+ */
+//
+// 한 문장이고 짧다. 이 배너는 240px 사이드바 열 **안**에 서고 그 안에서 다시
+// 「다시 시도」와 폭을 나눈다 - 두 문장짜리 첫 판은 실캡처에서 한 줄에 한 낱말씩
+// 여덟 줄이 됐다. 형제 배너("채널을 불러오지 못했습니다.")와 같은 길이로 맞춘다.
+// 「그래서 지금 무엇을 못 하는가」는 문장이 아니라 **문이 없는 것**이 말한다.
+// 낱말이 「섹션」인 것도 그 자리 때문이다: 바로 아래 형제 배너가 「채널을…」이라
+// 말하므로 둘이 나란히 서도 무엇이 실패했는지 갈린다. 이 기능의 다른 모든 문장이
+// 쓰는 낱말이기도 하다(새 섹션 · 섹션 이름 · 섹션 삭제 · 섹션으로 이동).
+export const SIDEBAR_PREFS_LOAD_FAILURE = "섹션을 불러오지 못했습니다.";
+export const SIDEBAR_PREFS_LOAD_RETRY_LABEL = "다시 시도";
+
+/**
+ * 섹션 상한에 닿았을 때 (design-review #1932 M-3).
+ *
+ * 문을 지우지 않고 **비활성으로 남기고 사유를 든다**: 사라진 문과 아직 못 찾은
+ * 문을 사람은 구분하지 못한다. 이 문장이 그 컨트롤의 접근가능 이름이 된다.
+ */
+export function sidebarSectionCapMessage(): string {
+  return `섹션은 ${SIDEBAR_SECTION_MAX}개까지 만들 수 있습니다.`;
+}
+
+/**
+ * 채널 참조 상한을 넘겼을 때 (design-review #1932 M-3).
+ *
+ * `sidebarChannelRefCount` 는 「저장 전에 여기서 먼저 세어 400 을 왕복 없이
+ * 막는다」고 적어 두고 호출부가 없었다. 이제 `useSidebarPrefs` 가 모든 편집에
+ * 이것을 걸고, 넘긴 편집은 **적용되지 않는다** — 적용한 뒤 저장이 실패하고
+ * 롤백되면 사람은 무엇이 한계였는지 끝내 듣지 못한다.
+ */
+export function sidebarChannelRefCapMessage(): string {
+  return `한 사이드바에 담을 수 있는 채널은 ${SIDEBAR_CHANNEL_REF_MAX}개까지입니다.`;
+}
 
 export type SidebarSectionNameIssue = "empty" | "too-long";
 
@@ -217,6 +303,26 @@ export interface RenderedSidebarSection {
   channels: Channel[];
 }
 
+/**
+ * 파생의 결과. 배열 하나가 아니라 **이름 붙은 셋 + 렌더 차례**다.
+ *
+ * design-review #1932 N-2: 웹은 `sections.find(s => s.kind === "channels")` 에
+ * `as RenderedSidebarSection` 을 붙여 「언제나 있다」는 계약을 캐스트로 주장하고
+ * 있었다. 캐스트는 그 계약이 깨지는 날을 `undefined.title` 런타임 예외로 바꾸고,
+ * 사이드바는 셸 전체가 딸린 트리다. 계약이 참이면 **타입이 그렇게 말하면 된다** —
+ * 그러면 호출부에 단정이 남지 않고, 깨질 때 깨지는 곳은 이 함수 안이다.
+ */
+export interface DerivedSidebarSections {
+  /** 그릴 차례 그대로: 기본 「채널」 → 커스텀 → 「다이렉트 메시지」. */
+  sections: RenderedSidebarSection[];
+  /** 기본 「채널」. 삭제도 이름변경도 되지 않는다(D4). */
+  base: RenderedSidebarSection;
+  /** 커스텀 섹션들, `order` 차례. */
+  custom: RenderedSidebarSection[];
+  /** 기본 「다이렉트 메시지」. */
+  dms: RenderedSidebarSection;
+}
+
 function idKey(id: string): string {
   return id.trim().toLowerCase();
 }
@@ -253,7 +359,7 @@ export function deriveSidebarSections(input: {
   channels: readonly Channel[];
   /** 살아 있는 DM. */
   dms: readonly Channel[];
-}): RenderedSidebarSection[] {
+}): DerivedSidebarSections {
   const byId = new Map<string, Channel>();
   for (const channel of input.channels) byId.set(idKey(channel.id), channel);
 
@@ -293,7 +399,7 @@ export function deriveSidebarSections(input: {
     title: BASE_DMS_SECTION_TITLE,
     channels: [...input.dms],
   };
-  return [base, ...custom, dms];
+  return { sections: [base, ...custom, dms], base, custom, dms };
 }
 
 /** 이 채널이 지금 어느 커스텀 섹션에 있는가. 없으면 `null`(기본 섹션). */

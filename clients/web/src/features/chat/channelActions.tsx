@@ -24,6 +24,9 @@ import {
 } from "@momo/core/features/channels/model";
 import {
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
 } from "@/design/ui/dropdown-menu";
 import {
@@ -366,15 +369,22 @@ export function useChannelActions({
  * Radix 의 Label 은 aria 를 하나도 걸어 주지 않으므로(`DropdownMenuLabel`
  * 독스트링), 이 두 줄이 없으면 무리가 스크린리더에 이름 없이 선다.
  *
- * 행 메뉴에만 서므로 그릇은 컨텍스트 메뉴 하나다 - 헤더 ⋮ 는 `SURFACE_KEYS` 가
- * 이 열쇠를 주지 않는다.
+ * 그릇은 **표면이 고른다** (design-review #1932 N-1). 오늘 이 무리는 행 메뉴에만
+ * 서고(`SURFACE_KEYS.header` 가 이 열쇠를 주지 않는다) 그래서 컨텍스트 메뉴를
+ * 하드코딩해도 안전했다. 그런데 이 파일의 형제 컴포넌트는 전부 `surface` 로 갈라
+ * 그릇을 고르고, `channelActionModel.ts` 는 확장점을 「열쇠 하나·분기 하나·
+ * SURFACE_KEYS 항목 하나」라고 광고한다. 그 한 줄을 믿고 헤더에 이 열쇠를 넣는
+ * 사람은 Radix 루트 없는 컨텍스트 메뉴 조각을 렌더하게 된다 - 광고한 확장점이
+ * 실제로 그만큼만 드는 것이 이 분기의 값이다.
  */
 function ChannelSectionMoveGroup({
+  surface,
   prefix,
   item,
   actions,
   onHandOff,
 }: {
+  surface: ChannelActionSurface;
   prefix: string;
   item: ChannelActionItem;
   actions: ChannelActions;
@@ -387,12 +397,17 @@ function ChannelSectionMoveGroup({
   // 겹치지 않는다.
   const BASE = "\u0000base";
   const current = item.currentSectionId ?? BASE;
+  const Label = surface === "header" ? DropdownMenuLabel : ContextMenuLabel;
+  const RadioGroup =
+    surface === "header" ? DropdownMenuRadioGroup : ContextMenuRadioGroup;
+  const RadioItem =
+    surface === "header" ? DropdownMenuRadioItem : ContextMenuRadioItem;
   return (
     <>
-      <ContextMenuLabel id={labelId} data-testid={`${prefix}-${item.testKey}`}>
+      <Label id={labelId} data-testid={`${prefix}-${item.testKey}`}>
         {item.label}
-      </ContextMenuLabel>
-      <ContextMenuRadioGroup
+      </Label>
+      <RadioGroup
         aria-labelledby={labelId}
         value={current}
         onValueChange={(next) => {
@@ -404,7 +419,7 @@ function ChannelSectionMoveGroup({
           (choice) => {
             const value = choice.id ?? BASE;
             return (
-              <ContextMenuRadioItem
+              <RadioItem
                 key={value}
                 value={value}
                 data-testid={`${prefix}-section-${choice.id ?? "base"}`}
@@ -430,11 +445,11 @@ function ChannelSectionMoveGroup({
                     aria-hidden="true"
                   />
                 )}
-              </ContextMenuRadioItem>
+              </RadioItem>
             );
           }
         )}
-      </ContextMenuRadioGroup>
+      </RadioGroup>
     </>
   );
 }
@@ -538,6 +553,7 @@ export function ChannelActionMenuItems({
           {item.separatorBefore && <Separator />}
           {item.sections ? (
             <ChannelSectionMoveGroup
+              surface={surface}
               prefix={prefix}
               item={item}
               actions={actions}

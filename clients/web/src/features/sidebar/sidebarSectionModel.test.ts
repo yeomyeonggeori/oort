@@ -142,3 +142,72 @@ describe("sectionUnreadTotals", () => {
     ).toEqual({ unreadCount: 7, mentionCount: 1 });
   });
 });
+
+// =============================================================================
+// design-review #1932 R1 — 배선 회귀 (소스 스캔).
+//
+// 이 셋은 **행동 시험이 닿지 않는 자리**다. Sidebar 는 세션·셸 내비·여러 쿼리가
+// 딸린 트리라 단위 시험이 통째로 마운트하지 않고, 그래서 「이 프롭이 저 가드
+// 안에 있는가」는 렌더로 물을 수 없다. 이 파일이 위에서 R2-1 오버레이 스코프를
+// 같은 방식으로 이미 지키고 있고(`channelActionCanon.test.ts` 도 같은 갈래),
+// 실브라우저 쪽 자는 캡처 레인이 든다(`sidebar-prefs-unavailable-*` 프레임과
+// 터치 서랍의 편집 문 0건 단정).
+// =============================================================================
+
+describe("B-1 — 배치를 못 읽은 표면에는 편집 문이 없다", () => {
+  it("편집 가능 여부가 한 곳에서 계산된다", () => {
+    // `canEdit`(부트스트랩 정착) 과 `!touchSurface`(배치를 줄 수 있는 표면) 둘
+    // 다여야 한다. 두 조건이 흩어지면 다음 문이 하나만 보고 열린다.
+    expect(sidebarSource).toContain(
+      "const canEditSections = sidebarPrefs.canEdit && !touchSurface;"
+    );
+  });
+
+  it("「새 섹션」과 섹션 메뉴가 그 가드 안에 있다", () => {
+    const door = sidebarSource.slice(
+      0,
+      sidebarSource.indexOf('data-testid="new-section"')
+    );
+    // 문 바로 앞의 마지막 조건이 그 가드다.
+    expect(door.lastIndexOf("canEditSections &&")).toBeGreaterThan(
+      door.lastIndexOf("sidebarPrefs.canCreate &&")
+    );
+    expect(sidebarSource).toContain("canEditSections ? (");
+  });
+
+  it("행 메뉴의 배치도 같은 가드를 탄다", () => {
+    expect(sidebarSource).toContain(
+      "sections={canEditSections ? sectionChoices : undefined}"
+    );
+  });
+
+  it("읽기 실패가 자기 배너를 갖고, 저장 실패 배너와 겹치지 않는다", () => {
+    // 저장 실패 배너와 **다른 자리**다: 하나는 「방금 한 것이 저장되지 않았다」,
+    // 다른 하나는 「아직 아무것도 모른다」이고 뒤에 오는 행동이 다르다.
+    expect(sidebarSource).toContain('testId="sidebar-prefs-load-error"');
+    expect(sidebarSource).toContain("sidebarPrefs.retryLoad");
+    // 하나만 선다: 읽지 못한 상태에서 훅이 쓰기를 거절하면 그 사유가 곧 읽기
+    // 실패라, 두 배너가 같은 문장을 두 번 말하게 된다.
+    expect(sidebarSource).toContain("sidebarPrefs.loadError ? (");
+    expect(sidebarSource).toContain(") : sidebarPrefs.error ? (");
+  });
+});
+
+describe("H-2 — 커스텀 섹션에서도 로딩은 빈 상태가 아니다", () => {
+  it("본문이 기본 섹션과 같은 스켈레톤을 그린다", () => {
+    const custom = sidebarSource.slice(
+      sidebarSource.indexOf("{customSections.map((section) => (")
+    );
+    const body = custom.slice(0, custom.indexOf("</SidebarSection>"));
+    expect(body).toContain("channelsQuery.isLoading && <SkeletonRows");
+    // 그리고 빈 상태 문장은 로딩·오류가 아닐 때만 선다.
+    expect(body).toContain("!channelsQuery.isLoading &&");
+    expect(body).toContain("!channelsQuery.error &&");
+  });
+
+  it("빈 상태 문장은 코어가 표면별로 고른다", () => {
+    // 문장을 여기 하드코딩하면 터치 갈래가 웹에만 생기고 폰이 다시 짠다.
+    expect(sidebarSource).toContain("sidebarEmptySectionHint(!touchSurface)");
+    expect(sidebarSource).not.toContain("채널 행을 우클릭해");
+  });
+});

@@ -72,8 +72,11 @@ import {
 import {
   deriveSidebarSections,
   SECTION_CREATE_TITLE,
-  type RenderedSidebarSection,
+  sidebarEmptySectionHint,
+  sidebarSectionCapMessage,
+  SIDEBAR_PREFS_LOAD_RETRY_LABEL,
 } from "@momo/core/features/sidebar/sidebarSections";
+import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
   useSidebarSectionsCollapsed,
@@ -232,7 +235,7 @@ export function Sidebar({
   // 배치가 비어 있고, 그때 파생은 오늘까지의 두 섹션과 정확히 같은 것을 돌려준다
   // - 그래서 로딩 중에도 목록이 흔들리지 않는다.
   const sidebarPrefs = useSidebarPrefs(workspaceId);
-  const renderedSections = useMemo(
+  const derived = useMemo(
     () =>
       deriveSidebarSections({
         prefs: sidebarPrefs.prefs,
@@ -241,15 +244,21 @@ export function Sidebar({
       }),
     [sidebarPrefs.prefs, channels, dms]
   );
-  const baseChannelSection = renderedSections.find(
-    (section) => section.kind === "channels"
-  ) as RenderedSidebarSection;
-  const customSections = renderedSections.filter(
-    (section) => section.kind === "custom"
-  );
-  const dmSection = renderedSections.find(
-    (section) => section.kind === "dms"
-  ) as RenderedSidebarSection;
+  // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
+  // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
+  const renderedSections = derived.sections;
+  const baseChannelSection = derived.base;
+  const customSections = derived.custom;
+  const dmSection = derived.dms;
+
+  // 터치 표면에는 배치의 문(행 컨텍스트 메뉴)이 없다 - BT-1 이 서랍 스크롤과의
+  // 충돌 때문에 의도적으로 닫아 둔 자리다. 그런데 만들기·이름 바꾸기·삭제는
+  // 열려 있었다: 만들 수는 있는데 쓸 수 없는 그릇이고, 화면은 쓸 수 있다고
+  // 말했다(design-review #1932 H-1). 배치를 줄 수 없는 표면에서는 섹션 편집
+  // 자체를 내밀지 않는다. 로밍해 온 섹션은 그대로 그린다 - 읽는 것은 언제나
+  // 참이고, 그 채널들을 여는 것이 폰에서 이 섹션이 하는 일이다.
+  const touchSurface = useHoverNone();
+  const canEditSections = sidebarPrefs.canEdit && !touchSurface;
   // 행 메뉴의 「섹션으로 이동」이 내미는 목적지들. 코어가 정한 차례 그대로다.
   const sectionChoices = useMemo(
     () => customSections.map((section) => ({ id: section.id, label: section.title })),
@@ -428,10 +437,12 @@ export function Sidebar({
             selfMemberId={session.member.id}
             selfRole={selfMember?.role}
             readState={readStateFor(channel)}
-            sections={sectionChoices}
+            sections={canEditSections ? sectionChoices : undefined}
             currentSectionId={sidebarPrefs.sectionIdFor(channel.id)}
-            onMoveToSection={(sectionId) =>
-              sidebarPrefs.moveChannel(channel.id, sectionId)
+            onMoveToSection={
+              canEditSections
+                ? (sectionId) => sidebarPrefs.moveChannel(channel.id, sectionId)
+                : undefined
             }
           >
             {link}
@@ -591,17 +602,35 @@ export function Sidebar({
               )}
             </ul>
 
-            {/* 저장 실패는 사이드바가 그 자리에서 말한다 (§5, 토스트가 아니다).
-                되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이 없으면
-                사람이 방금 만든 섹션이 조용히 사라진 것으로만 보인다. */}
-            {sidebarPrefs.error && (
+            {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
+ 
+                · 읽기 실패(design-review #1932 B-1): 배치를 한 번도 못 읽었다.
+                  이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
+                  그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
+                  이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
+                  주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
+                  액션 문법이다.
+                · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
+                  없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
+ 
+                둘을 겹쳐 세우지 않는 이유: 읽지 못한 상태에서 훅이 쓰기를 거절할
+                때 그 사유가 곧 읽기 실패라, 배너 둘이 같은 문장을 두 번 말하게
+                된다. 읽기 실패가 더 근본이므로 그것이 이긴다. */}
+            {sidebarPrefs.loadError ? (
+              <InlineBanner
+                message={sidebarPrefs.loadError}
+                actionLabel={SIDEBAR_PREFS_LOAD_RETRY_LABEL}
+                onAction={sidebarPrefs.retryLoad}
+                testId="sidebar-prefs-load-error"
+              />
+            ) : sidebarPrefs.error ? (
               <InlineBanner
                 message={sidebarPrefs.error}
                 actionLabel="닫기"
                 onAction={sidebarPrefs.dismissError}
                 testId="sidebar-prefs-error"
               />
-            )}
+            ) : null}
 
             <SidebarSection
               title={baseChannelSection.title}
@@ -640,11 +669,18 @@ export function Sidebar({
                   {/* 섹션을 만드는 문은 여기 하나다 (ADR-0177 D4). 채널을 만드는
                       +와 나란히 서지만 다른 일이다: +는 워크스페이스에 방을
                       만들고, 이것은 **내 사이드바**를 정리한다. 그래서 권한을
-                      묻지 않는다 - 섹션은 멤버 소유라 누구나 만들 수 있다(D1). */}
-                  {sidebarPrefs.canCreate && (
+                      묻지 않는다 - 섹션은 멤버 소유라 누구나 만들 수 있다(D1).
+
+                      **문이 서는 조건은 `canEditSections` 하나다**(B-1/H-1):
+                      배치를 읽지 못한 동안에도, 배치를 줄 수 없는 표면에서도 이
+                      문은 없다. 상한(50)은 다르다 - 그때는 문을 지우지 않고
+                      비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
+                      아직 못 찾은 문을 사람은 구분하지 못한다. */}
+                  {canEditSections && (
                     <button
                       ref={newSectionRef}
                       type="button"
+                      disabled={!sidebarPrefs.canCreate}
                       onClick={() =>
                         setNameDialog({
                           mode: "create",
@@ -653,11 +689,19 @@ export function Sidebar({
                           opener: newSectionRef.current,
                         })
                       }
-                      aria-label={SECTION_CREATE_TITLE}
-                      title={SECTION_CREATE_TITLE}
+                      aria-label={
+                        sidebarPrefs.canCreate
+                          ? SECTION_CREATE_TITLE
+                          : sidebarSectionCapMessage()
+                      }
+                      title={
+                        sidebarPrefs.canCreate
+                          ? SECTION_CREATE_TITLE
+                          : sidebarSectionCapMessage()
+                      }
                       data-testid="new-section"
                       data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
                     >
                       <FolderPlus className="size-4" aria-hidden="true" />
                     </button>
@@ -726,6 +770,7 @@ export function Sidebar({
                 unreadCount={sectionUnread(section.id).unreadCount}
                 mentionCount={sectionUnread(section.id).mentionCount}
                 action={
+                  canEditSections ? (
                   <SidebarSectionMenu
                     sectionId={section.id}
                     title={section.title}
@@ -748,15 +793,29 @@ export function Sidebar({
                       })
                     }
                   />
+                  ) : undefined
                 }
               >
-                {/* 빈 섹션은 만든 직후의 정상 상태다. 「채널을 여기로 옮기세요」
-                    한 줄이 없으면 방금 만든 섹션이 고장난 것처럼 보인다. */}
-                {section.channels.length === 0 && (
-                  <li className="px-2 py-1 text-meta text-ink-muted">
-                    채널 행을 우클릭해 이 섹션으로 옮길 수 있습니다.
-                  </li>
-                )}
+                {/* **로딩은 빈 상태가 아니다** (design-review #1932 H-2). 채널
+                    목록이 오는 동안 이 자리는 「비었다」고 말했고, 바로 스무 줄
+                    위에서 기본 섹션은 같은 프레임에 스켈레톤을 그리고 있었다.
+                    실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
+                    사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
+                    쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
+                {channelsQuery.isLoading && <SkeletonRows rows={2} />}
+                {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
+                    섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
+                    터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
+                    채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
+                    기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
+                    번의 실패가 N개의 문장이 된다. */}
+                {!channelsQuery.isLoading &&
+                  !channelsQuery.error &&
+                  section.channels.length === 0 && (
+                    <li className="px-2 py-1 text-meta text-ink-muted">
+                      {sidebarEmptySectionHint(!touchSurface)}
+                    </li>
+                  )}
                 {section.channels.map(rowFor)}
               </SidebarSection>
             ))}

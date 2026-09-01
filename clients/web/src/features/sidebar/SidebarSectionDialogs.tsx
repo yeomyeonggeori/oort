@@ -19,14 +19,14 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import {
   SECTION_CREATE_TITLE,
-  SECTION_DELETE_CONFIRM_BODY,
   SECTION_DELETE_CONFIRM_LABEL,
+  SECTION_DELETE_CONFIRM_TITLE,
   SECTION_DELETE_LABEL,
   SECTION_NAME_FIELD_LABEL,
   SECTION_NAME_PLACEHOLDER,
   SECTION_RENAME_LABEL,
   SECTION_RENAME_TITLE,
-  sectionDeleteConfirmTitle,
+  sectionDeleteConfirmBody,
   sidebarSectionNameIssue,
   sidebarSectionNameIssueMessage,
   SIDEBAR_SECTION_NAME_MAX,
@@ -211,9 +211,13 @@ export function SectionDeleteConfirmDialog({
           className="gap-4 p-4"
           data-testid="sidebar-section-delete-confirm"
         >
+          {/* 제목은 고정, 이름은 본문 (design-review #1932 M-1). 80자 이름이
+              제목에 들어가면 물음이 셋째 줄 끝에 도착한다 - 이 다이얼로그가
+              문법을 빌려 온 `ChannelLeaveConfirmDialog` 가 정확히 그 이유로
+              반대로 한다. */}
           <div className="flex flex-col gap-1">
-            <DialogTitle>{sectionDeleteConfirmTitle(name)}</DialogTitle>
-            <DialogDescription>{SECTION_DELETE_CONFIRM_BODY}</DialogDescription>
+            <DialogTitle>{SECTION_DELETE_CONFIRM_TITLE}</DialogTitle>
+            <DialogDescription>{sectionDeleteConfirmBody(name)}</DialogDescription>
           </div>
           <div className="flex items-center justify-end gap-2">
             <Button
