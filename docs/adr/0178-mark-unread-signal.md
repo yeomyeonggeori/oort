@@ -1,6 +1,6 @@
 # ADR-0178: mark-unread — 단조 read-state 위의 별도 신호
 
-- 상태: **Proposed** (2026-09-01, Fable 기안 — 성재 결재 대기)
+- 상태: **Accepted** (2026-09-01 성재 결재 — 기안 Fable)
 - 발제: 2026-09-01 버즈 패리티 감사 B4 (`docs/planning/research/2026-09-01-buzz-parity-audit.md` §4 순위 3) — `messageActionModel.ts` 주석이 "mark unread — PUT read-state is monotone(GREATEST). Accrued."로 자기 기록
 - 관련: 우로보로스 인터뷰 interview_20260901_052920
 
