@@ -49,6 +49,7 @@ import {
   type SidebarDropAction,
 } from "./sidebarDnd";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
+import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 import {
   SIDEBAR_PREFS_SAVE_DEBOUNCE_MS,
   useSidebarPrefs,
@@ -227,8 +228,10 @@ function Harness({ enabled = true }: { enabled?: boolean }) {
     (action: SidebarDropAction) => {
       if (action.type === "place") {
         prefs.moveChannel(action.channelId, action.sectionId);
+        scheduleSidebarChannelRowFocus(action.channelId);
       } else if (action.type === "star") {
         prefs.toggleStar(action.channelId);
+        scheduleSidebarChannelRowFocus(action.channelId);
       } else {
         prefs.reorderSection(action.sectionId, action.targetId);
       }
@@ -476,6 +479,29 @@ function rightClick(row: HTMLElement): void {
   });
 }
 
+/**
+ * 이 파일의 가짜 시계. **rAF 까지 명시로 세운다.**
+ *
+ * 포커스 인계는 프레임 하나 뒤에 선다(`sidebarRowFocus.ts` 의 「왜 rAF 인가」).
+ * 그런데 `vi.useFakeTimers()` 의 기본 목록에 rAF 가 들어오는지는 이 파일이
+ * 정하는 것이 아니고, 실제로 파일 전체를 돌릴 때와 한 시험만 돌릴 때 답이
+ * 달랐다 — 같은 단정이 앞뒤 시험에 따라 초록도 붉음도 됐다. 재는 것을 시계에게
+ * 맡기지 않고 여기서 못박는다.
+ */
+function useSidebarFakeTimers(): void {
+  vi.useFakeTimers({
+    toFake: [
+      "setTimeout",
+      "clearTimeout",
+      "setInterval",
+      "clearInterval",
+      "Date",
+      "requestAnimationFrame",
+      "cancelAnimationFrame",
+    ],
+  });
+}
+
 /** rAF 한 프레임. 포커스 인계가 서는 자리다(`sidebarRowFocus.ts`). */
 function nextFrame(): void {
   act(() => {
@@ -538,7 +564,7 @@ async function withSection(name = LONG_NAME) {
 
 describe("red proof 1 — 별표", () => {
   it("토글이 payload 에 닿고 파생 섹션이 등장·소멸한다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     expect(sectionIds()).toEqual(["channels", "dms"]);
 
@@ -561,7 +587,7 @@ describe("red proof 1 — 별표", () => {
   });
 
   it("별표를 붙여도 배치는 그대로고, 떼면 그 자리로 돌아온다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     await act(async () => handle?.move(RELEASE, "sec-1"));
@@ -578,7 +604,7 @@ describe("red proof 1 — 별표", () => {
   });
 
   it("별표 섹션은 커스텀 섹션이 여럿이어도 맨 위를 지킨다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection("가");
     await withSection("나");
@@ -591,7 +617,7 @@ describe("red proof 1 — 별표", () => {
 
 describe("red proof 2 — 정렬", () => {
   it("렌더 순서만 바뀌고 저장된 배치는 그대로다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     await act(async () => handle?.move(GENERAL, "sec-1"));
@@ -615,7 +641,7 @@ describe("red proof 2 — 정렬", () => {
   });
 
   it("정렬의 문은 기본 「채널」 헤더 하나이고, 지금 값이 체크로 들린다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     const host = await mount();
     // 커스텀 섹션이 하나도 없어도 서 있다 — 섹션을 만들어야 열리는 설정이 아니다.
     hoverHeader("channels");
@@ -636,7 +662,7 @@ describe("red proof 2 — 정렬", () => {
 
 describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   it("드래그 → 드롭이 배치를 한 번 바꾼다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
 
@@ -660,7 +686,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   });
 
   it("경계 밖 드롭은 무동작이다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     // 먼저 정착시킨다: 「무동작」의 자는 payload 만이 아니라 **나간 PUT 의 수**다.
@@ -690,7 +716,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   });
 
   it("Esc 가 드래그를 취소한다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     const before = handle?.prefs();
@@ -713,7 +739,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   });
 
   it("별표 섹션은 받고, 그 안의 행은 끌리지 않는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     fireDrag(rowEl(RELEASE), "dragstart");
     // 별표 섹션은 비어 있는 동안 렌더되지 않는다. 문은 행 메뉴다.
@@ -732,7 +758,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   });
 
   it("섹션 머리글 드래그가 섹션 차례를 바꾼다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection("가");
     await withSection("나");
@@ -760,7 +786,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
   });
 
   it("문이 닫힌 표면에는 손잡이도 구역도 없다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount({ enabled: false });
     expect(rowEl(RELEASE).getAttribute("draggable")).toBeNull();
     fireDrag(rowEl(RELEASE), "dragstart");
@@ -805,7 +831,7 @@ describe("red proof 3 — 끌어다 놓기 (실 DOM)", () => {
 
 describe("red proof 4 — 키보드가 같은 결과에 닿는다", () => {
   it("⋮ 「위로」만으로 드롭과 같은 최종 배치에 도달한다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection("가");
     await withSection("나");
@@ -850,7 +876,7 @@ describe("red proof 4 — 키보드가 같은 결과에 닿는다", () => {
   });
 
   it("끝에 닿은 방향은 비활성이다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection("가");
     await withSection("나");
@@ -866,7 +892,7 @@ describe("red proof 4 — 키보드가 같은 결과에 닿는다", () => {
 
 describe("red proof 5 — 드래그가 기존 기계를 깨지 않는다", () => {
   it("드래그 중에도 ↑/↓ 로빙이 그대로 돈다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     const rows = () =>
       Array.from(document.querySelectorAll<HTMLElement>("[data-sidebar-row]"));
@@ -891,7 +917,7 @@ describe("red proof 5 — 드래그가 기존 기계를 깨지 않는다", () =>
   });
 
   it("드래그 중에도 접기가 그대로 동작한다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     fireDrag(rowEl(RELEASE), "dragstart");
@@ -918,7 +944,7 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
   }
 
   it("별표를 붙이면 옮겨간 그 행이 캐럿을 받는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     const row = rowEl(RELEASE);
     row.focus();
@@ -934,7 +960,7 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
   });
 
   it("별표를 떼도 같다 — 두 방향 모두", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await act(async () => handle?.toggleStar(RELEASE));
     const starredRow = rowEl(RELEASE);
@@ -949,7 +975,7 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
   });
 
   it("「섹션으로 이동」도 함께 닫힌다 (BT-4 승계 구멍)", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await withSection();
     const row = rowEl(RELEASE);
@@ -967,8 +993,43 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
     expect(sectionEl("sec-1").contains(document.activeElement)).toBe(true);
   });
 
+  it("드롭도 같은 규칙을 따른다 — 넷째 문 (R2-1)", async () => {
+    useSidebarFakeTimers();
+    await mount();
+    await withSection();
+
+    // 실측 재현: 링크의 mousedown 이 캐럿을 **끌리는 행**으로 옮긴다. 그래서
+    // 다른 행에 캐럿이 있었더라도 드롭 뒤 잃는 것은 이 행이다.
+    rowEl(GENERAL).focus();
+    rowEl(RELEASE).focus();
+    fireDrag(rowEl(RELEASE), "dragstart");
+    fireDrag(sectionEl("sec-1"), "dragover");
+    fireDrag(sectionEl("sec-1"), "drop");
+    nextFrame();
+
+    expect(channelsIn("sec-1")).toEqual([RELEASE]);
+    expect(document.activeElement).toBe(rowEl(RELEASE));
+    expect(sectionEl("sec-1").contains(document.activeElement)).toBe(true);
+  });
+
+  it("별표 구역에 떨어뜨려도 캐럿이 따라간다 (R2-1)", async () => {
+    useSidebarFakeTimers();
+    await mount();
+    await act(async () => handle?.toggleStar(GENERAL));
+
+    rowEl(RELEASE).focus();
+    fireDrag(rowEl(RELEASE), "dragstart");
+    fireDrag(sectionEl("starred"), "dragover");
+    fireDrag(sectionEl("starred"), "drop");
+    nextFrame();
+
+    expect(channelsIn("starred")).toEqual([GENERAL, RELEASE]);
+    expect(document.activeElement).toBe(rowEl(RELEASE));
+    expect(sectionEl("starred").contains(document.activeElement)).toBe(true);
+  });
+
   it("대조군 — 행을 옮기지 않는 「알림」은 캐럿을 건드리지 않는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     const row = rowEl(RELEASE);
     row.focus();
@@ -977,14 +1038,19 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
     act(() => menuRow("mute-toggle").click());
     nextFrame();
 
-    // 메뉴가 열린 채로 남고(왕복이 그 자리에서 실패를 말해야 한다) 캐럿도
-    // 그대로다 - 인계는 **옮기는 액션에만** 걸린다.
+    // 재는 것은 **캐럿 불변** 하나다: 인계는 행을 옮기는 액션에만 걸리므로
+    // 「알림」은 캐럿을 건드리지 않는다.
+    //
+    // 메뉴는 왕복이 성공하면 닫힌다 (design-review R2-3 정정) — 이 표면이
+    // `onActionSucceeded: () => setOpen(false)` 를 넘기기 때문이다. 열린 채로
+    // 남는 것은 **실패했을 때**이고(그때 배너를 읽어야 한다), 그 갈래는 이
+    // 시험의 과녁이 아니다. 어느 쪽이든 이 행은 제자리에 남는다.
     expect(document.activeElement).toBe(before);
     expect(rowEl(RELEASE).parentElement).not.toBeNull();
   });
 
   it("옮긴 뒤에도 ↑/↓ 로빙이 새 이웃 사이를 걷는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     const row = rowEl(GENERAL);
     row.focus();
@@ -1009,7 +1075,7 @@ describe("R1 H-1 — 행을 옮기는 액션은 캐럿을 데리고 간다", () 
 
 describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () => {
   it("떼는 문이 없는 표면에서 그 사실을 문장으로 든다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     stubPointerSurface(true);
     fetchSidebarPrefs.mockResolvedValue({
       ...emptySidebarPrefs(),
@@ -1031,7 +1097,7 @@ describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () 
   });
 
   it("포인터 표면에서는 그 문장이 서지 않는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     fetchSidebarPrefs.mockResolvedValue({
       ...emptySidebarPrefs(),
       starredChannelIds: [RELEASE],
@@ -1045,7 +1111,7 @@ describe("R1 M-1 — 터치의 별표 섹션이 자기 사정을 말한다", () 
 
 describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
   it("탭이 숨으면 남은 편집이 즉시 나간다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await act(async () => handle?.toggleStar(RELEASE));
     await act(async () => handle?.setSortMode(SIDEBAR_SORT_ALPHA));
@@ -1083,7 +1149,7 @@ describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
   });
 
   it("탭을 떠나는 신호(pagehide)도 같은 문을 쓴다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     await act(async () => handle?.toggleStar(GENERAL));
     act(() => {
@@ -1099,7 +1165,7 @@ describe("R1 M-4 — 2초 창이 새로고침을 삼키지 않는다", () => {
   });
 
   it("보낼 것이 없으면 아무것도 나가지 않는다", async () => {
-    vi.useFakeTimers();
+    useSidebarFakeTimers();
     await mount();
     act(() => {
       window.dispatchEvent(new Event("pagehide"));
@@ -1142,8 +1208,53 @@ describe("하네스와 출하 배선", () => {
     // R1 M-2: 정렬은 자기 문에 산다(섹션 ⋮ 가 아니다).
     expect(source).toContain("<SidebarSortMenu");
     expect(source).not.toMatch(/SidebarSectionMenu[\s\S]{0,200}sort=\{/);
-    // R1 M-1: 터치의 별표 섹션이 사정을 말한다.
-    expect(source).toContain("SIDEBAR_STARRED_TOUCH_HINT");
+    // R1 M-1 · R2-2: 터치의 별표 섹션이 사정을 말한다 — **조건까지** 읽는다.
+    //
+    // 앞 회전의 단정은 `toContain("SIDEBAR_STARRED_TOUCH_HINT")` 하나였고, 그
+    // 문자열은 **임포트 줄만으로도** 참이었다. 그래서 출하 코드의 `touchSurface`
+    // 를 `!touchSurface` 로 뒤집으면 — 즉 문장이 정확히 **반대 표면**에 서면 —
+    // 웹 스위트도 tsc 도 캡처 레인도 전부 초록이었다(리뷰 실측 R2-2). 하네스는
+    // 자기가 그린 `<li>` 를 읽고 있었으니 사본이 사본을 재고 있었던 것이다.
+    //
+    // 그래서 여기서 재는 것은 **문장이 어느 조건 아래 서 있는가**다. 부정
+    // (`!touchSurface`)이면 캡처 그룹이 비지 않으므로 그 자리에서 붉어진다.
+    const starredHintGuard = /\{(!?)touchSurface && \([\s\S]{0,400}?SIDEBAR_STARRED_TOUCH_HINT/.exec(
+      source
+    );
+    expect(starredHintGuard, "터치 별표 문장의 조건을 못 찾았다").not.toBeNull();
+    expect(starredHintGuard?.[1], "문장이 포인터 표면에 서 있다").toBe("");
+    // 그리고 그 자리는 「별표」 섹션 안이다 - 다른 섹션에 붙으면 다른 사정을
+    // 말하는 문장이 된다.
+    const starredBlock = source.slice(
+      source.indexOf("starredSection.channels.map"),
+      source.indexOf("<SidebarSection\n              title={baseChannelSection.title}")
+    );
+    expect(starredBlock).toContain("SIDEBAR_STARRED_TOUCH_HINT");
+
+    // R2-1: 드롭도 같은 인계를 부른다(넷째 문) — **가지별로** 읽는다.
+    //
+    // 처음 쓴 단정은 「`moveChannel` 근처 600자 안에 인계가 있다」였고, 그 자는
+    // 거짓말을 했다: `place` 가지에서 인계를 지워도 바로 아래 `star` 가지의
+    // 호출이 그 창 안에 들어와 초록이었다(사보타지 실측). 가지를 잘라서 각자
+    // 자기 몫을 갖고 있는지 본다.
+    const dropBody = source.slice(
+      source.indexOf("const onSidebarDrop"),
+      source.indexOf("const drag = useSidebarDrag")
+    );
+    const placeBranch = dropBody.slice(
+      dropBody.indexOf('if (action.type === "place")'),
+      dropBody.indexOf('} else if (action.type === "star")')
+    );
+    const starBranch = dropBody.slice(
+      dropBody.indexOf('} else if (action.type === "star")'),
+      dropBody.indexOf("      } else {")
+    );
+    expect(placeBranch, "배치 드롭이 캐럿을 두고 간다").toContain(
+      "scheduleSidebarChannelRowFocus(action.channelId)"
+    );
+    expect(starBranch, "별표 드롭이 캐럿을 두고 간다").toContain(
+      "scheduleSidebarChannelRowFocus(action.channelId)"
+    );
     expect(source).not.toContain("putSidebarPrefs");
   });
 });

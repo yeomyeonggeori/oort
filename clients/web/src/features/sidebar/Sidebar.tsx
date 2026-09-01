@@ -79,6 +79,7 @@ import {
   SIDEBAR_STARRED_TOUCH_HINT,
 } from "@momo/core/features/sidebar/sidebarSections";
 import { useSidebarDrag, type SidebarDropAction } from "./sidebarDnd";
+import { scheduleSidebarChannelRowFocus } from "./sidebarRowFocus";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -277,9 +278,19 @@ export function Sidebar({
     (action: SidebarDropAction) => {
       if (action.type === "place") {
         sidebarPrefs.moveChannel(action.channelId, action.sectionId);
+        // **행을 옮기는 액션은 캐럿을 데리고 간다** — 이 규칙의 넷째 문
+        // (design-review R2-1). 행 메뉴의 셋은 R1 에서 닫혔는데 드롭만 남아
+        // 있었다: 실측으로 링크의 mousedown 이 캐럿을 끌리는 행으로 옮기고,
+        // 그 행이 옮겨가면서 캐럿이 `<body>` 에 떨어졌다 — **끌지 않은 다른
+        // 행에 캐럿이 있었어도** 같았다. 정본은 행 메뉴와 같은 모듈이다.
+        scheduleSidebarChannelRowFocus(action.channelId);
       } else if (action.type === "star") {
         sidebarPrefs.toggleStar(action.channelId);
+        scheduleSidebarChannelRowFocus(action.channelId);
       } else {
+        // 섹션 차례는 행을 옮기지 않는다 — 옮겨 가는 것은 머리글이고, 머리글은
+        // 정거장이 아니다(접기 버튼이 자기 자리에 그대로 남는다). 넘길 캐럿이
+        // 없으므로 여기서는 부르지 않는다.
         sidebarPrefs.reorderSection(action.sectionId, action.targetId);
       }
     },
