@@ -180,6 +180,41 @@ export function channelCopyNameLabel(copied: boolean): string {
 }
 
 /**
+ * 메뉴 안에서 실패 문장을 인 상자의 이름 (design-review #1937 N-5).
+ *
+ * `role="menu"` 의 직계 자식은 menuitem/group/separator 여야 하는데 실패 배너는
+ * `role="alert"` 이다. `group` 한 겹으로 구조를 맞추면 그 group 은 이름을 가져야
+ * 하고, 그 이름이 이 문장이다.
+ */
+export const CHANNEL_ACTION_ERROR_GROUP_LABEL = "이 메뉴의 알림";
+
+/**
+ * 왕복이 도는 동안 그 항목이 하는 말 (design-review #1937 N-1).
+ *
+ * 낱말이 바뀌고 `aria-busy` 가 서는 것이 「지금 일어나는 중」의 표시다 —
+ * `States.tsx` 가 같은 축에 대해 「never disabled and never dimmed」이라 적어
+ * 두었고, 회색이 된 컨트롤은 「지금 일어나는 중」이 아니라 「너는 이걸 하면 안
+ * 된다」로 읽힌다. 꼴은 「명사 + 중」이거나 고유어 어간 + 「는 중」이다.
+ */
+export function channelMuteToggleBusyLabel(muted: boolean): string {
+  return muted ? "알림 켜는 중" : "알림 끄는 중";
+}
+
+/** 읽음 광고가 도는 동안. */
+export const CHANNEL_MARK_READ_BUSY_LABEL = "읽음 처리 중";
+
+/**
+ * 이 행의 메뉴가 스크린리더에게 자기를 부르는 이름 (design-review #1937 M-1).
+ *
+ * DM 에 「채널 메뉴」라고 말하지 않는다. 헤더 ⋮ 는 DM 에 아예 서지 않아서
+ * 이 낱말이 DM 에 붙는 자리는 사이드바 행이 처음이고, 이 제품이 그 표면을
+ * 부르는 이름은 사이드바 섹션 제목과 같은 「다이렉트 메시지」다.
+ */
+export function channelMenuAccessibleLabel(name: string, isDm: boolean): string {
+  return `${name} ${isDm ? "다이렉트 메시지" : "채널"} 메뉴`;
+}
+
+/**
  * 클립보드 자체가 없는 런타임에서 하는 말. 다시 눌러도 같으므로 「다시
  * 시도」라고 말하지 않는다 — `MessageRow`의 형제 문장과 같은 판정이다.
  */

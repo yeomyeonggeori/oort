@@ -58,6 +58,7 @@ import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
+import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
 import { sectionUnreadTotals } from "./sidebarSectionModel";
@@ -290,18 +291,17 @@ export function Sidebar({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [unreadChannels, navigate]);
 
-  /** Roving arrow traversal across every row in the sidebar. */
+  /**
+   * Roving arrow traversal across every row in the sidebar.
+   *
+   * 규칙과 그 **경계**는 `sidebarRoving.ts` 가 갖는다. 경계가 정본에 있어야
+   * 하는 이유는 그 파일 머리말에 있다 — 요약하면, 행이 연 컨텍스트 메뉴는
+   * 포털이라 DOM 으로는 밖에 있는데 React 트리로는 여기 자손이라, 메뉴 안에서
+   * 누른 ↓ 가 여기까지 올라와 메뉴를 지우고 캐럿을 남의 행으로 옮겼다
+   * (design-review #1937 B-1 실측).
+   */
   const onNavKeyDown = useCallback((event: React.KeyboardEvent) => {
-    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
-    const rows = Array.from(
-      navRef.current?.querySelectorAll<HTMLElement>("[data-sidebar-row]") ?? []
-    );
-    if (rows.length === 0) return;
-    const index = rows.indexOf(document.activeElement as HTMLElement);
-    const step = event.key === "ArrowDown" ? 1 : -1;
-    const next = rows[(Math.max(index, 0) + step + rows.length) % rows.length];
-    event.preventDefault();
-    next?.focus();
+    roveSidebarRows(navRef.current, event);
   }, []);
 
   function rowFor(channel: Channel) {

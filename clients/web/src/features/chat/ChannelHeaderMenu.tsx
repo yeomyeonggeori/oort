@@ -14,6 +14,7 @@ import {
   ChannelLeaveConfirmDialog,
   useChannelActions,
 } from "./channelActions";
+import { channelActionMenuLabel } from "./channelActionModel";
 
 // =============================================================================
 // 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
@@ -30,8 +31,8 @@ import {
 //   * 채널 나가기     — 오너/관리자에게만(`canLeaveChannel`). 서버 `remove_member`가
 //                       오너/관리자만 멤버십을 지울 수 있게 막으므로, 일반 멤버에게
 //                       내놓으면 확인 뒤 403으로 끝나는 막다른 길이다. 파괴적이라
-//                       확인 다이얼로그를 거치고, 사이드바에서는 낙관적으로 지운
-//                       뒤 실패하면 되돌린다.
+//                       확인 다이얼로그를 거치고, 그 다이얼로그가 왕복 내내 서서
+//                       「나가는 중」과 실패를 말한다(design-review #1937 H-1).
 //
 // 「이름 수정」은 없다. 서버에 채널 이름을 바꾸는 라우트가 없어(2026-08-10 실측)
 // 누를 수 없는 항목을 그리지 않는다 — 코어 model.ts 머리말에 그 실측을 남겨 두었고
@@ -40,7 +41,7 @@ import {
 // ## 이 파일에 실행부가 없는 이유 (BT-1 / #1929)
 //
 // 위 세 항목의 인벤토리는 `channelActionModel.ts`, 그 실행(알림 PUT · 나가기
-// DELETE + 낙관 삭제 + 되돌리기 · 확인 다이얼로그)은 `channelActions.tsx`가
+// DELETE · 확인 다이얼로그)은 `channelActions.tsx`가
 // 갖는다. 같은 일을 하는 두 번째 표면(사이드바 행 우클릭)이 생겼기 때문이고,
 // 두 표면이 실행을 각자 들면 다음 수리는 한쪽에만 들어간다. 이 파일에 남는 것은
 // **헤더가 헤더인 부분**뿐이다: ⋮ 트리거, 주제 다이얼로그로 넘기는 손, 그리고
@@ -73,7 +74,7 @@ export function ChannelHeaderMenu({
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
   const topic = normalizeChannelTopic(channel.topic ?? "");
-  const menuLabel = `${title} 채널 메뉴`;
+  const menuLabel = channelActionMenuLabel(title, channel);
 
   const actions = useChannelActions({
     workspaceId,

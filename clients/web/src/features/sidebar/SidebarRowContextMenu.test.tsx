@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, createElement } from "react";
+import { act, createElement, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -19,6 +19,7 @@ import {
 } from "@momo/core/features/timeline/copyLabels";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { SidebarRow } from "./SidebarRow";
+import { roveSidebarRows } from "./sidebarRoving";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -47,6 +48,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+let navRoot: HTMLElement | null = null;
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
@@ -99,6 +101,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  navRoot = null;
   resetEscapeLayers();
   vi.unstubAllGlobals();
 });
@@ -152,7 +155,21 @@ function mountRow({
         createElement(
           QueryClientProvider,
           { client },
+          // Sidebar.tsx 와 **같은 배선**이다: 로빙 정본이 걸린 상자 안에 행이
+          // 산다. 이 상자가 없으면 B-1(포털 키가 로빙까지 올라온다)은 시험대에
+          // 오르지도 않는다 — 결함이 살던 자리가 바로 이 조합이다.
           createElement(
+            "div",
+            {
+              "data-testid": "nav-root",
+              ref: (node: HTMLDivElement | null): void => {
+                navRoot = node;
+              },
+              onKeyDown: (event: ReactKeyboardEvent) => {
+                roveSidebarRows(navRoot, event);
+              },
+            },
+            createElement(
             "ul",
             null,
             createElement(SidebarRow, {
@@ -170,7 +187,16 @@ function mountRow({
                   readState,
                   children: link,
                 }),
+            }),
+            // 포털 키가 로빙까지 올라오면 캐럿이 **이 행**으로 튄다. 결함의
+            // 착지점을 시험대에 함께 올려 둔다.
+            createElement(SidebarRow, {
+              to: "/activity",
+              icon: null,
+              label: "활동",
+              testId: "nav-activity",
             })
+            )
           )
         )
       )
@@ -533,6 +559,209 @@ describe("키보드로 열고 Esc 로 닫는다", () => {
       link.dispatchEvent(event);
     });
     expect(event.defaultPrevented).toBe(true);
+  });
+});
+
+describe("메뉴 안의 화살표 순회 (design-review #1937 B-1)", () => {
+  /** Radix 의 로빙은 포커스 이동을 setTimeout 에 태운다. */
+  async function arrow(key: "ArrowDown" | "ArrowUp") {
+    pressKey(document.activeElement, key);
+    await flush();
+  }
+
+  it("↓ 두 번이면 두 번째 항목에 서고, Enter 가 그것을 실행한다", async () => {
+    // 결함: 포털된 메뉴의 키가 React 트리로 사이드바 로빙 핸들러까지 올라와,
+    // ↓ 한 번에 메뉴가 닫히고 캐럿이 「활동」으로 튀었다. 다섯 항목 중 어느
+    // 것도 키보드로 실행할 수 없었다. 형상은 헤더 게이트가 이미 쓰는 것과
+    // 같다: 항목에 서서 Enter.
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    expect(menu()).not.toBeNull();
+    await flush();
+    // Radix 는 열면서 첫 항목에 캐럿을 둔다.
+    expect(document.activeElement).toBe(item("mark-read"));
+
+    await arrow("ArrowDown");
+    expect(menu()).not.toBeNull();
+    expect(document.activeElement).toBe(item("mute-toggle"));
+
+    pressKey(document.activeElement, "Enter");
+    await flush();
+    expect(setChannelNotificationPref).toHaveBeenCalledTimes(1);
+    expect(setChannelNotificationPref).toHaveBeenCalledWith(WS, CHANNEL_ID, true);
+  });
+
+  it("↓ 로 다섯 항목을 끝까지 걸어도 메뉴가 살아 있다", async () => {
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    const walked = [
+      document.activeElement?.getAttribute("data-testid"),
+    ];
+    for (let step = 0; step < 4; step += 1) {
+      await arrow("ArrowDown");
+      walked.push(document.activeElement?.getAttribute("data-testid") ?? null);
+    }
+    expect(walked).toEqual([
+      "channel-row-mark-read",
+      "channel-row-mute-toggle",
+      "channel-row-copy-link",
+      "channel-row-copy-name",
+      "channel-row-leave",
+    ]);
+    expect(menu()).not.toBeNull();
+  });
+
+  it("↑ 도 메뉴 밖으로 나가지 않는다", async () => {
+    // 헤더 ⋮ 와 같은 그릇이라 감기지 않는다(`loop` 미설정). 재는 것은 감김이
+    // 아니라 **밖으로 새지 않는 것**이다 — 결함은 정확히 그 새는 자리였다.
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    await arrow("ArrowUp");
+    expect(menu()).not.toBeNull();
+    expect(menu()?.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(link);
+  });
+
+  it("메뉴 안의 ↓ 는 사이드바 행 순회를 깨우지 않는다", async () => {
+    // 결함의 착지점을 이름으로 짚는다: 예전에는 캐럿이 여기로 갔다.
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "F10", { shiftKey: true });
+    await flush();
+    await arrow("ArrowDown");
+    const activity = document.querySelector('[data-testid="nav-activity"]');
+    expect(activity).not.toBeNull();
+    expect(document.activeElement).not.toBe(activity);
+    expect(menu()?.contains(document.activeElement)).toBe(true);
+  });
+
+  it("메뉴가 닫혀 있을 때는 ↓ 가 여전히 행 사이를 걷는다", () => {
+    // 경계를 세운 값이 순회를 죽이는 것이면 안 된다.
+    mountRow();
+    const link = row();
+    act(() => link.focus());
+    pressKey(link, "ArrowDown");
+    expect(document.activeElement).toBe(
+      document.querySelector('[data-testid="nav-activity"]')
+    );
+  });
+});
+
+describe("design-review #1937 R1 수리", () => {
+  it("M-1: DM 행의 메뉴는 자기를 「채널 메뉴」라 부르지 않는다", () => {
+    mountRow({
+      channel: channelFixture({ kind: "dm", name: undefined }),
+      title: "이도현",
+    });
+    rightClick();
+    expect(menu()?.getAttribute("aria-label")).toBe("이도현 다이렉트 메시지 메뉴");
+    expect(menu()?.getAttribute("aria-label")).not.toContain("채널");
+  });
+
+  it("M-1: 채널 행은 그대로 「채널 메뉴」다", () => {
+    mountRow();
+    rightClick();
+    expect(menu()?.getAttribute("aria-label")).toBe("general 채널 메뉴");
+  });
+
+  it("N-1: 왕복 중에 잠그지도 흐리지도 않고, 낱말과 aria-busy 로 말한다", async () => {
+    // `States.tsx` 의 규율: never disabled, never dimmed. 회색이 된 컨트롤은
+    // 「지금 일어나는 중」이 아니라 「너는 이걸 하면 안 된다」로 읽힌다.
+    setChannelNotificationPref.mockReturnValue(new Promise(() => undefined));
+    mountRow();
+    rightClick();
+    expect(item("mute-toggle")?.textContent?.trim()).toBe(CHANNEL_MUTE_LABEL);
+    clickItem("mute-toggle");
+    await flush();
+    const busyRow = item("mute-toggle");
+    expect(busyRow?.getAttribute("aria-busy")).toBe("true");
+    expect(busyRow?.textContent?.trim()).toBe("알림 끄는 중");
+    expect(busyRow?.hasAttribute("disabled")).toBe(false);
+    // 흐림 규칙(`data-[disabled]:opacity-50`)은 이 그릇에 늘 적혀 있지만 그
+    // 변형의 열쇠가 없으므로 발동하지 않는다 — 잠그지 않으면 흐려지지도 않는다.
+    expect(busyRow?.className).toContain("data-[disabled]:opacity-50");
+    expect(busyRow?.hasAttribute("data-disabled")).toBe(false);
+  });
+
+  it("N-1: 왕복 중 같은 항목을 다시 눌러도 두 번째 PUT 은 나가지 않는다", async () => {
+    setChannelNotificationPref.mockReturnValue(new Promise(() => undefined));
+    mountRow();
+    rightClick();
+    clickItem("mute-toggle");
+    await flush();
+    clickItem("mute-toggle");
+    await flush();
+    expect(setChannelNotificationPref).toHaveBeenCalledTimes(1);
+  });
+
+  it("N-1: 읽음 처리도 같은 규율을 따른다", async () => {
+    updateReadState.mockReturnValue(new Promise(() => undefined));
+    mountRow();
+    rightClick();
+    clickItem("mark-read");
+    await flush();
+    const busyRow = item("mark-read");
+    expect(busyRow?.getAttribute("aria-busy")).toBe("true");
+    expect(busyRow?.textContent?.trim()).toBe("읽음 처리 중");
+    expect(busyRow?.getAttribute("data-disabled")).toBeNull();
+  });
+
+  it("N-3: 오류 배너의 왼쪽 자가 메뉴 행과 같다", async () => {
+    setChannelNotificationPref.mockRejectedValue(new Error("nope"));
+    mountRow();
+    rightClick();
+    clickItem("mute-toggle");
+    await flush();
+    const banner = document.querySelector<HTMLElement>(
+      '[data-testid="channel-row-action-error"]'
+    );
+    expect(banner).not.toBeNull();
+    const classes = banner?.className.split(/\s+/) ?? [];
+    // 배너의 기본 `px-4` 는 메뉴 행(`px-2`)과 다른 축이라 첫 글자가 8px 밀렸다.
+    expect(classes).toContain("px-2");
+    expect(classes).not.toContain("px-4");
+  });
+
+  it("N-5: role=alert 배너가 menu 의 직계 자식이 아니다", async () => {
+    setChannelNotificationPref.mockRejectedValue(new Error("nope"));
+    mountRow();
+    rightClick();
+    clickItem("mute-toggle");
+    await flush();
+    const banner = document.querySelector<HTMLElement>(
+      '[data-testid="channel-row-action-error"]'
+    );
+    expect(banner?.getAttribute("role")).toBe("alert");
+    expect(banner?.parentElement?.getAttribute("role")).toBe("group");
+    expect(banner?.parentElement?.getAttribute("aria-label")).toBeTruthy();
+    // 그 group 이 menu 의 자식이다 — menu 의 직계 자식으로 허용되는 역할.
+    expect(banner?.parentElement?.parentElement?.getAttribute("role")).toBe("menu");
+    // 화살표 순회는 이 상자를 지나간다: 항목 수집 표식이 없다.
+    expect(
+      banner?.parentElement?.hasAttribute("data-radix-collection-item")
+    ).toBe(false);
+  });
+
+  it("N-4: 열림 표식이 배경 하나에 얹혀 있지 않다", () => {
+    // 활성 행의 `bg-accent-soft` 는 알파가 없어 트리거 상자의 배경을 덮는다.
+    // 그때도 남는 표식이 있어야 키보드로 연 메뉴가 어느 행의 것인지 말한다.
+    mountRow();
+    rightClick();
+    const classes = trigger().className.split(/\s+/);
+    expect(classes).toContain("data-[state=open]:bg-surface-hover");
+    expect(classes).toContain("data-[state=open]:outline");
+    expect(classes).toContain("data-[state=open]:outline-line-strong");
+    // 포커스 링(--accent)과 다른 색이어야 두 사실이 섞이지 않는다.
+    expect(trigger().className).not.toContain("data-[state=open]:outline-accent");
   });
 });
 

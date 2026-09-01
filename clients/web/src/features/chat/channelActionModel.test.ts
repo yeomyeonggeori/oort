@@ -16,6 +16,7 @@ import {
   channelActionItems,
   channelActionItemsForSurface,
   channelActionKeepsMenuOpen,
+  channelActionMenuLabel,
   type ChannelActionKey,
   type ChannelActionState,
 } from "./channelActionModel";
@@ -255,6 +256,42 @@ describe("channelActionItemsForSurface", () => {
       REST
     );
     expect(keysOf(dm)).toEqual(["mark-read", "mute", "copy-link", "copy-name"]);
+  });
+});
+
+describe("진행 낱말과 메뉴 이름 (design-review #1937)", () => {
+  const ALL = channelActionAvailability({
+    channel: channel({ topic: "배포 로그" }),
+    selfRole: "owner",
+    unreadCount: 2,
+  });
+
+  it("왕복이 있는 항목만 진행 낱말을 든다", () => {
+    const busy = new Map(
+      channelActionItems(ALL, REST).map((i) => [i.key, i.busyLabel])
+    );
+    expect(busy.get("mark-read")).toBe("읽음 처리 중");
+    expect(busy.get("mute")).toBe("알림 끄는 중");
+    // 복사는 영수증이 낱말을 바꾸고, 다이얼로그 인계는 왕복이 아니다.
+    expect(busy.get("copy-link")).toBeUndefined();
+    expect(busy.get("copy-name")).toBeUndefined();
+    expect(busy.get("topic")).toBeUndefined();
+    expect(busy.get("leave")).toBeUndefined();
+  });
+
+  it("진행 낱말도 방향을 지킨다", () => {
+    const muted = channelActionItems(ALL, { ...REST, muted: true });
+    expect(muted.find((i) => i.key === "mute")?.busyLabel).toBe("알림 켜는 중");
+  });
+
+  it("메뉴 이름이 DM 을 「채널」이라 부르지 않는다", () => {
+    expect(channelActionMenuLabel("이도현", { kind: "dm" })).toBe(
+      "이도현 다이렉트 메시지 메뉴"
+    );
+    expect(channelActionMenuLabel("general", { kind: "public" })).toBe(
+      "general 채널 메뉴"
+    );
+    expect(channelActionMenuLabel("비밀", { kind: "private" })).toContain("채널");
   });
 });
 

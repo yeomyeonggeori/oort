@@ -2327,42 +2327,60 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   }
   await menu.waitFor({ state: "hidden" });
 
-  // ② 키보드에도 같은 문이 있다. hover 없이 행에 캐럿을 두고 Shift+F10.
+  // ② 키보드에도 같은 문이 있고, **그 방에는 바닥이 있다**
+  //    (design-review #1937 B-1). 예전 캡처는 「Shift+F10 → 곧바로 Escape」만
+  //    걸어서 그 사이의 화살표를 한 번도 누르지 않았고, 그래서 ↓ 한 번에 메뉴가
+  //    사라지고 캐럿이 「활동」으로 튀는 결함을 통과시켰다. 이제 항목에 서서
+  //    Enter 로 실행한다 — 헤더 게이트가 이미 쓰는 그 형상.
   await row.focus();
   await page.keyboard.press("Shift+F10");
   await menu.waitFor({ state: "visible" });
-  await page.keyboard.press("Escape");
-  await menu.waitFor({ state: "detached" });
   await page.waitForFunction(
-    (id) =>
-      document.activeElement?.getAttribute("data-channel-id") === id,
-    unreadChannelId,
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mark-read",
+    undefined,
     { timeout: 4_000 }
-  ).catch(() => {
+  ).catch(async () => {
     throw new Error(
-      `행 메뉴 Esc 후 포커스가 그 행으로 돌아오지 않았다 ${scheme}`
+      `키보드로 연 메뉴의 첫 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} (channel-row-mark-read 여야 함)`
     );
   });
-
-  // ③ 알림 토글 왕복. 낱말은 서버가 기억한 값을 따른다.
-  await row.click({ button: "right" });
-  await menu.waitFor({ state: "visible" });
-  const mutePut = page.waitForRequest(isMutePut);
-  await page.getByTestId("channel-row-mute-toggle").click();
-  const muteBody = (await mutePut).postDataJSON();
-  if (muteBody?.muted !== true) {
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mute-toggle",
+    undefined,
+    { timeout: 4_000 }
+  ).catch(async () => {
     throw new Error(
-      `행 메뉴 알림 PUT ${scheme}: ${JSON.stringify(muteBody)} ({muted:true} 여야 함)`
+      `메뉴 안 ↓ 한 번 뒤 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} · 메뉴 ${await menu.count()} (channel-row-mute-toggle 여야 함)`
+    );
+  });
+  const kbdMutePut = page.waitForRequest(isMutePut);
+  await page.keyboard.press("Enter");
+  const kbdMuteBody = (await kbdMutePut).postDataJSON();
+  if (kbdMuteBody?.muted !== true) {
+    throw new Error(
+      `키보드로 실행한 알림 PUT ${scheme}: ${JSON.stringify(kbdMuteBody)} ({muted:true} 여야 함)`
     );
   }
-  if ("memberId" in muteBody) {
+  if ("memberId" in kbdMuteBody) {
     throw new Error("알림 몸통이 남을 지목했다 — 자기 것만 끌 수 있다");
   }
   await menu.waitFor({ state: "hidden" });
+
+  // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
   await page.waitForFunction(
     (id) => {
       const target = document.querySelector(`[data-channel-id="${id}"]`);
-      if (target?.getAttribute("data-state") !== "open") {
+      const box = target?.closest("[data-row-menu-trigger]");
+      if (box?.getAttribute("data-state") !== "open") {
         target?.dispatchEvent(
           new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
         );
@@ -2384,6 +2402,170 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await page.getByTestId("channel-row-mute-toggle").click();
   await unmutePut;
   await menu.waitFor({ state: "hidden" });
+
+  // ④ Esc 는 메뉴만 닫고 캐럿을 그 행으로 돌려준다.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    (id) => document.activeElement?.getAttribute("data-channel-id") === id,
+    unreadChannelId,
+    { timeout: 4_000 }
+  ).catch(() => {
+    throw new Error(
+      `행 메뉴 Esc 후 포커스가 그 행으로 돌아오지 않았다 ${scheme}`
+    );
+  });
+
+  // ⑤ 열림 표식은 **활성 행에서도** 보여야 한다 (design-review #1937 N-4).
+  //    지금 열려 있는 채널의 행은 불투명한 --accent-soft 를 입고 있어서 배경
+  //    표식을 통째로 덮는다. 그때가 하필 키보드로 연 메뉴가 어느 행의 것인지
+  //    말하는 유일한 표식이 필요한 순간이다.
+  //    캡처는 인덱스(`#/`)에 서 있어서 어느 행도 활성이 아니다 — 그래서 이
+  //    장면은 먼저 그 채널로 들어가 행을 실제로 활성으로 만든 뒤 잰다. 재고
+  //    나서 인덱스로 돌아온다(뒤따르는 장면의 전제를 바꾸지 않는다).
+  await page.evaluate((id) => {
+    window.location.hash = `/c/${id}`;
+  }, GENERAL_ID);
+  const activeRow = page.locator(`[data-channel-id="${GENERAL_ID}"]`);
+  await activeRow.waitFor({ state: "visible" });
+  await page
+    .waitForFunction(
+      (id) =>
+        document
+          .querySelector(`[data-channel-id="${id}"]`)
+          ?.getAttribute("aria-current") === "page",
+      GENERAL_ID,
+      { timeout: 4_000 }
+    )
+    .catch(() => {
+      throw new Error(`활성 행을 만들지 못했다 ${scheme}`);
+    });
+  await activeRow.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  // 전이가 끝난 뒤에 잰다: `transition-colors` 한가운데서 재면 방금 활성이 된
+  // 행의 배경이 아직 투명하다.
+  await page.waitForTimeout(400);
+  const marker = await activeRow.evaluate((el) => {
+    const box = el.closest("[data-row-menu-trigger]");
+    const boxStyle = box ? getComputedStyle(box) : null;
+    return {
+      state: box?.getAttribute("data-state") ?? null,
+      outlineWidth: boxStyle ? parseFloat(boxStyle.outlineWidth) : 0,
+      outlineStyle: boxStyle?.outlineStyle ?? "none",
+      rowBackground: getComputedStyle(el).backgroundColor,
+      ariaCurrent: el.getAttribute("aria-current"),
+    };
+  });
+  if (
+    marker.state !== "open" ||
+    marker.outlineStyle === "none" ||
+    !(marker.outlineWidth > 0)
+  ) {
+    throw new Error(
+      `활성 행의 열림 표식 ${scheme}: ${JSON.stringify(marker)} (아웃라인이 서야 함)`
+    );
+  }
+  if (/rgba\(0, 0, 0, 0\)|transparent/.test(marker.rowBackground)) {
+    throw new Error(
+      `활성 행이 활성으로 안 그려졌다 ${scheme}: ${JSON.stringify(marker)} — 이 장면이 재려던 겹침이 없다`
+    );
+  }
+  const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
+  await page.screenshot({ path: activeShot });
+  shots.push(activeShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.evaluate(() => {
+    window.location.hash = "/";
+  });
+  await page.waitForFunction(
+    (id) =>
+      document
+        .querySelector(`[data-channel-id="${id}"]`)
+        ?.getAttribute("aria-current") === null,
+    GENERAL_ID,
+    { timeout: 4_000 }
+  );
+
+  // ⑥ 오류 상태를 **실제로 일으켜** 그 자리에서 잰다 (design-review #1937
+  //    N-3 · N-5). 알림 PUT 을 한 번 503 으로 돌려주면 메뉴 안에 배너가 선다.
+  //      · N-3: 배너의 첫 글자가 항목의 첫 글자와 같은 왼쪽 자에 서는가.
+  //             (실측 결함: 21px 대 13px — 배너의 `px-4` 와 메뉴 행의 `px-2`)
+  //      · N-5: `role="alert"` 이 `role="menu"` 의 직계 자식이 아닌가.
+  await page.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "unavailable" } }),
+      })
+  );
+  const quietRow = page.locator(`[data-channel-id="${CHANNELS[2].id}"]`);
+  await quietRow.waitFor({ state: "visible" });
+  await quietRow.click({ button: "right" });
+  await menu.waitFor({ state: "visible" });
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await page
+    .getByTestId("channel-row-action-error")
+    .waitFor({ state: "visible", timeout: 6_000 });
+  const banner = await page.evaluate(`(() => {
+    const textLeft = (node) => {
+      if (!node) return null;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return Math.round(range.getBoundingClientRect().left);
+    };
+    const box = document.querySelector('[data-testid="channel-row-action-error"]');
+    const item = document.querySelector('[data-testid="channel-row-mute-toggle"]');
+    return {
+      bannerRole: box?.getAttribute("role") ?? null,
+      parentRole: box?.parentElement?.getAttribute("role") ?? null,
+      grandParentRole: box?.parentElement?.parentElement?.getAttribute("role") ?? null,
+      parentNamed: Boolean(box?.parentElement?.getAttribute("aria-label")),
+      bannerTextLeft: textLeft(box?.querySelector("span")),
+      itemTextLeft: textLeft(item),
+      itemBusy: item?.getAttribute("aria-busy") ?? null,
+      itemDisabled: item?.getAttribute("data-disabled") ?? null,
+      text: (box?.textContent ?? "").trim(),
+    };
+  })()`);
+  if (
+    banner.bannerTextLeft === null ||
+    banner.itemTextLeft === null ||
+    Math.abs(banner.bannerTextLeft - banner.itemTextLeft) > 1
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 왼쪽 자 ${scheme}: ${JSON.stringify(banner)} (항목과 같아야 함)`
+    );
+  }
+  if (
+    banner.bannerRole !== "alert" ||
+    banner.parentRole !== "group" ||
+    banner.grandParentRole !== "menu" ||
+    !banner.parentNamed
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 aria 구조 ${scheme}: ${JSON.stringify(banner)} (alert < group < menu, group 에 이름)`
+    );
+  }
+  // 실패한 뒤에도 그 항목은 잠기지도 흐려지지도 않는다 (N-1).
+  if (banner.itemDisabled !== null || banner.itemBusy !== null) {
+    throw new Error(
+      `실패 뒤 항목 상태 ${scheme}: ${JSON.stringify(banner)} (잠금·진행 표시가 남으면 안 된다)`
+    );
+  }
+  const errorShot = `${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`;
+  await page.screenshot({ path: errorShot });
+  shots.push(errorShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.unroute("**/v1/workspaces/*/channels/*/notification-pref");
+
   await page.getByTestId("composer-input").hover();
 }
 

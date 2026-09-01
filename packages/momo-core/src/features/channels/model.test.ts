@@ -7,6 +7,7 @@ import {
   CHANNEL_COPY_NAME_LABEL,
   CHANNEL_COPY_UNAVAILABLE,
   CHANNEL_LEAVE_LABEL,
+  CHANNEL_MARK_READ_BUSY_LABEL,
   CHANNEL_MARK_READ_FAILURE,
   CHANNEL_MARK_READ_LABEL,
   CHANNEL_MUTE_LABEL,
@@ -17,9 +18,11 @@ import {
   canCreateChannel,
   canCreateChannelNow,
   canLeaveChannel,
-  channelLeaveConfirmBody,
   channelCopyNameLabel,
+  channelLeaveConfirmBody,
   channelLeaveFailureMessage,
+  channelMenuAccessibleLabel,
+  channelMuteToggleBusyLabel,
   channelMuteToggleLabel,
   channelNameIssue,
   channelNameIssueMessage,
@@ -276,5 +279,46 @@ describe("복사·읽음 실패 문장", () => {
 
   it("읽음 실패는 그 자리에서 다음 행동을 준다", () => {
     expect(CHANNEL_MARK_READ_FAILURE).toContain("다시 시도");
+  });
+});
+
+// ---- design-review #1937 R1: 진행 낱말과 DM 낱말 -----------------------------
+
+describe("channelMuteToggleBusyLabel", () => {
+  it("왕복 중에도 방향을 말한다: 끄는 중과 켜는 중이 다르다", () => {
+    expect(channelMuteToggleBusyLabel(false)).toBe("알림 끄는 중");
+    expect(channelMuteToggleBusyLabel(true)).toBe("알림 켜는 중");
+  });
+
+  it("쉬는 낱말과 진행 낱말이 서로 다르다 — 바뀐 낱말이 곧 진행 표시다", () => {
+    expect(channelMuteToggleBusyLabel(false)).not.toBe(CHANNEL_MUTE_LABEL);
+    expect(channelMuteToggleBusyLabel(true)).not.toBe(CHANNEL_UNMUTE_LABEL);
+    expect(CHANNEL_MARK_READ_BUSY_LABEL).not.toBe(CHANNEL_MARK_READ_LABEL);
+  });
+
+  it("진행 낱말꼴을 지킨다: 「명사 + 하는 중」을 쓰지 않는다", () => {
+    // 프리플라이트 분류 11 이 재는 그 축. 「읽음 처리하는 중」이 아니라
+    // 「읽음 처리 중」이다.
+    for (const label of [
+      channelMuteToggleBusyLabel(false),
+      channelMuteToggleBusyLabel(true),
+      CHANNEL_MARK_READ_BUSY_LABEL,
+    ]) {
+      expect(label).not.toMatch(/하는 중$/);
+      expect(label.endsWith("중")).toBe(true);
+    }
+  });
+});
+
+describe("channelMenuAccessibleLabel", () => {
+  it("DM 을 「채널」이라 부르지 않는다", () => {
+    expect(channelMenuAccessibleLabel("이도현", true)).toBe(
+      "이도현 다이렉트 메시지 메뉴"
+    );
+    expect(channelMenuAccessibleLabel("이도현", true)).not.toContain("채널");
+  });
+
+  it("채널은 채널이라 부른다", () => {
+    expect(channelMenuAccessibleLabel("general", false)).toBe("general 채널 메뉴");
   });
 });

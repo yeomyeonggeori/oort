@@ -110,6 +110,38 @@ describe("실행부는 한 벌이다", () => {
   });
 });
 
+describe("한 곳의 수리가 두 표면을 함께 닫는다 (design-review #1937)", () => {
+  it("나가기의 낙관 삭제는 정본에서 걷혔다 — 되돌릴 것을 만들지 않는다", () => {
+    // H-1: `onMutate` 가 목록을 먼저 편집하면 그 행이 언마운트되고, 확인
+    // 다이얼로그가 함께 죽어 「나가는 중」과 실패 배너가 화면에 도달하지 못했다.
+    // 두 표면이 같은 결함을 갖고 있었고 이 파일 하나를 고쳐 둘이 닫혔다.
+    const canon = fileCode(CANON);
+    expect(canon).not.toMatch(/onMutate/);
+    expect(canon).not.toMatch(/cancelQueries/);
+    // 목록 편집은 서버가 답한 뒤다.
+    const success = canon.slice(canon.indexOf("leaveMutation"));
+    expect(success).toMatch(/onSuccess[\s\S]{0,600}setQueryData/);
+  });
+
+  it("표면 어느 쪽도 자기 나가기 흐름을 갖지 않는다", () => {
+    for (const path of [HEADER, ROW]) {
+      const code = fileCode(path);
+      expect(code).toMatch(/ChannelLeaveConfirmDialog/);
+      expect(code).not.toMatch(/setQueryData/);
+      expect(code).not.toMatch(/aria-busy/);
+    }
+  });
+
+  it("메뉴 항목을 잠그는 코드가 정본에도 표면에도 없다", () => {
+    // N-1: `States.tsx` 규율 — never disabled, never dimmed. 진행은 낱말과
+    // `aria-busy` 가 말한다.
+    const canon = fileCode(CANON);
+    expect(canon).toMatch(/"aria-busy": busy \|\| undefined/);
+    expect(canon).not.toMatch(/disabled: /);
+    expect(canon).toMatch(/busyLabel/);
+  });
+});
+
 describe("두 표면이 같은 모델을 소비한다", () => {
   it("헤더 ⋮ 도 행 우클릭도 항목을 스스로 짓지 않는다", () => {
     for (const path of [HEADER, ROW]) {

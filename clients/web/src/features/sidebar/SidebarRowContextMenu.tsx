@@ -12,6 +12,7 @@ import {
   ChannelLeaveConfirmDialog,
   useChannelActions,
 } from "@/features/chat/channelActions";
+import { channelActionMenuLabel } from "@/features/chat/channelActionModel";
 
 // =============================================================================
 // 사이드바 행의 우클릭 메뉴 (BT-1 / #1929).
@@ -115,8 +116,16 @@ export function SidebarRowContextMenu({
     readState,
     onActionSucceeded: () => setOpen(false),
   });
-  // 메뉴가 열려 있는 동안 Esc 의 임자는 이 메뉴다. 아래 층(폰 서랍·작업 패널)이
-  // 같은 한 번으로 함께 닫히지 않게 층을 세운다 — 메시지 행과 같은 규율.
+  // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
+  // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
+  // `escapeLayer.ts` 의 `dialogIsOpen()` 술어다: 그것이
+  // `[role="menu"][data-state="open"]` 을 이미 「가장 위」로 판정해
+  // `runTopEscapeLayer(blocked=true)` 가 즉시 물러나고, Esc 는 Radix 가 가져간다.
+  //
+  // 그런데도 세우는 이유는 하나다. `escapeIsClaimed()` — 층을 열지 **않는**
+  // 표면(설정 라우트의 뒤로 가기)이 「지금 화면에 층이 있나」를 묻는 그 술어 —
+  // 는 스택 길이도 함께 읽는다. 이 줄은 그 원장의 한 항목이고, 앞 문단이 그
+  // 사실을 적어 두는 자리다. `MessageActions.tsx` 가 같은 줄을 갖고 있다.
   useEscapeLayer(open, () => setOpen(false));
 
   return (
@@ -141,7 +150,16 @@ export function SidebarRowContextMenu({
         <ContextMenuTrigger
           disabled={!enabled}
           data-row-menu-trigger=""
-          className="block rounded-sm data-[state=open]:bg-surface-hover"
+          // 열림 표식이 **두 겹**이다 (design-review #1937 N-4). 배경만으로는
+          // 활성 행에서 사라진다: 링크의 `bg-accent-soft` 는 알파가 없어 이
+          // 상자의 배경을 통째로 덮고, 하필 그때가 **키보드로 연 메뉴가 어느
+          // 행의 것인지 말하는 유일한 표식**이 필요한 순간이다(포인터는 hover
+          // 가 대신 말해 준다). 그래서 배경 위에 인셋 아웃라인을 함께 세운다 —
+          // 아웃라인은 자식의 배경 위에 그려지고, `--line-strong` 은 두 스킴에서
+          // 어느 표면 위에서도 3:1 을 지키는 그 선 색이다. 포커스 링(--accent)
+          // 과는 다른 색이라 「캐럿이 여기 있다」와 「이 행의 메뉴가 열려 있다」가
+          // 섞이지 않는다.
+          className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-line-strong"
           onKeyDown={(event) => {
             if (!enabled || !isContextMenuSummonKey(event)) return;
             // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면
@@ -154,7 +172,7 @@ export function SidebarRowContextMenu({
         </ContextMenuTrigger>
         <ContextMenuContent
           data-testid="channel-row-menu"
-          aria-label={`${title} 채널 메뉴`}
+          aria-label={channelActionMenuLabel(title, channel)}
         >
           <ChannelActionMenuItems
             surface="row"

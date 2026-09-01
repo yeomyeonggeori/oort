@@ -1,9 +1,12 @@
 import {
   canLeaveChannel,
   CHANNEL_LEAVE_LABEL,
+  CHANNEL_MARK_READ_BUSY_LABEL,
   CHANNEL_MARK_READ_LABEL,
   CHANNEL_TOPIC_VIEW_LABEL,
   channelCopyNameLabel,
+  channelMenuAccessibleLabel,
+  channelMuteToggleBusyLabel,
   channelMuteToggleLabel,
   normalizeChannelTopic,
 } from "@momo/core/features/channels/model";
@@ -54,6 +57,12 @@ export interface ChannelActionItem {
   /** `data-testid` 접미사. 표면이 접두사를 붙인다(`channel-` / `channel-row-`). */
   testKey: string;
   label: string;
+  /**
+   * 왕복이 도는 동안 이 항목이 하는 말 (design-review #1937 N-1). 없으면
+   * 낱말이 바뀌지 않는다 — 왕복이 없는 항목(복사·다이얼로그 인계)이 그렇다.
+   * 잠그거나 흐리게 하는 대신 **낱말과 `aria-busy`** 가 진행을 말한다.
+   */
+  busyLabel?: string;
   /** 파괴적 액션. 메뉴 행이 --danger 를 입는다. */
   tone?: "danger";
   /** 이 항목 위에 구분선을 세운다. 무리가 바뀌는 자리에서만. */
@@ -135,6 +144,7 @@ export function channelActionItems(
       key: "mark-read",
       testKey: "mark-read",
       label: CHANNEL_MARK_READ_LABEL,
+      busyLabel: CHANNEL_MARK_READ_BUSY_LABEL,
       separatorBefore: items.length > 0,
     });
   }
@@ -143,6 +153,7 @@ export function channelActionItems(
       key: "mute",
       testKey: "mute-toggle",
       label: channelMuteToggleLabel(state.muted),
+      busyLabel: channelMuteToggleBusyLabel(state.muted),
       separatorBefore: items.length > 0 && items[items.length - 1].key === "topic",
     });
   }
@@ -220,4 +231,19 @@ export function channelActionItemsForSurface(
  */
 export function channelActionKeepsMenuOpen(key: ChannelActionKey): boolean {
   return key !== "leave" && key !== "topic";
+}
+
+/**
+ * 이 메뉴가 스크린리더에게 자기를 부르는 이름 (design-review #1937 M-1).
+ *
+ * 낱말은 코어가 갖고, 여기서 정하는 것은 **어느 낱말인가** 하나뿐이다 —
+ * `channelActionAvailability` 가 이미 읽는 그 `kind === "dm"` 을 다시 읽는다.
+ * 헤더 ⋮ 는 DM 에 서지 않으므로(ChatShell 의 `kind !== "dm"`) 이 갈래가 실제로
+ * 갈라지는 자리는 사이드바 행뿐이고, 그래서 이 낱말이 DM 에 붙는 것도 처음이다.
+ */
+export function channelActionMenuLabel(
+  title: string,
+  channel: Pick<Channel, "kind">
+): string {
+  return channelMenuAccessibleLabel(title, channel.kind === "dm");
 }
