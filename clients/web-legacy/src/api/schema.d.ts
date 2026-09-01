@@ -962,6 +962,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/members/me/sidebar-prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's own sidebar organization.
+         * @description ADR-0177 D1/D2. The signed-in member's custom sidebar sections, the channels they placed in each, and their starred channels — never a memberId from the request. A member who has never saved reads the empty v1 default (`{version:1, sections:[], starredChannelIds:[]}`) rather than a 404, so the client bootstraps down one path. Human-only: an agent has no sidebar. Collapse state is NOT here — ADR-0177 D4 keeps it on the device.
+         */
+        get: operations["getSidebarPrefs"];
+        /**
+         * Replace the caller's own sidebar organization.
+         * @description ADR-0177 D3. Replaces the whole payload; this is not a patch. The server validates shape and size only — at most 50 sections, section names at most 80 **characters**, at most 500 channel references across the whole payload, and `version` must be 1. Channel membership is deliberately NOT verified: a section may name a channel the member has left or one that was deleted, and the client filters dead ids at render time (tolerant contract, ADR-0177 D3). No event is emitted (D2) — other devices converge on their next bootstrap GET.
+         */
+        put: operations["updateSidebarPrefs"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/reminders": {
         parameters: {
             query?: never;
@@ -3775,6 +3799,42 @@ export interface components {
         NotificationRulesResponse: {
             dnd: boolean;
             mentionOverridesMute: boolean;
+        };
+        SidebarSection: {
+            /** @description Client-minted section id, unique within the payload. */
+            id: string;
+            /** @description Section label, trimmed. The cap is 80 **characters**, not bytes — an 80-character Korean name is 240 bytes and is legal. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The member's own ordering. The server never renumbers it.
+             */
+            order: number;
+            /** @description Channels the member placed in this section. NOT a membership list — an id here may name a channel that no longer exists. */
+            channelIds: string[];
+        };
+        SidebarPrefs: {
+            /**
+             * @description Payload version. Required; only 1 is accepted (ADR-0177 D3).
+             * @enum {integer}
+             */
+            version: 1;
+            sections?: components["schemas"]["SidebarSection"][];
+            /** @description BT-5 (#1933) owns the star UI; the schema accepts the field from BT-4 so no migration is needed when that lands (ADR-0177 D5). */
+            starredChannelIds?: string[];
+            /** @description Reserved for BT-5's A–Z / Recent sort. Round-tripped verbatim; the server does not enumerate the values. */
+            sectionSort?: string;
+        };
+        UpdateSidebarPrefsRequest: {
+            prefs: components["schemas"]["SidebarPrefs"];
+        };
+        SidebarPrefsResponse: {
+            prefs: components["schemas"]["SidebarPrefs"];
+            /**
+             * Format: int64
+             * @description When the row was last written. Omitted for a member who has never saved. Observability, not a concurrency token — v1 is last-write-wins between the member's own devices.
+             */
+            updatedAtMs?: number;
         };
         CreateReminderRequest: {
             /** Format: uuid */
@@ -8632,6 +8692,96 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Active human membership required. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getSidebarPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's stored sidebar prefs, or the empty v1 default. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidebarPrefsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required (agent bearers are refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateSidebarPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSidebarPrefsRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored sidebar prefs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidebarPrefsResponse"];
+                };
+            };
+            /** @description A cap or the payload version was violated. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required (agent bearers are refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not a sidebar-prefs payload (unknown or missing key). */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
