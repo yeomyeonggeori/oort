@@ -103,6 +103,12 @@ export interface ChannelActionTarget {
   currentSectionId?: string | null;
   /** 목적지를 고르면 부른다. 저장은 사이드바가 디바운스로 뒤따른다. */
   onMoveToSection?: (sectionId: string | null) => void;
+  /**
+   * 별표 (ADR-0177 / BT-5 #1933). 낱말이 이 값으로 뒤집히고, 손이 없으면
+   * 항목 자체가 서지 않는다 - 배치와 같은 규율이다.
+   */
+  starred?: boolean;
+  onToggleStar?: () => void;
 }
 
 export interface ChannelActions {
@@ -144,6 +150,8 @@ export function useChannelActions({
   sections,
   currentSectionId = null,
   onMoveToSection,
+  starred = false,
+  onToggleStar,
 }: ChannelActionTarget): ChannelActions {
   const client = useQueryClient();
   const navigate = useNavigate();
@@ -257,14 +265,23 @@ export function useChannelActions({
         // 옮길 곳을 **부를 수 있는 표면**이 없으면 항목도 없다. 목적지 목록만
         // 있고 손잡이가 없으면 눌러도 아무 일이 없는 라디오가 된다.
         sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
+        canStar: Boolean(onToggleStar),
       }),
-    [channel, selfRole, readState?.unreadCount, sections?.length, onMoveToSection]
+    [
+      channel,
+      selfRole,
+      readState?.unreadCount,
+      sections?.length,
+      onMoveToSection,
+      onToggleStar,
+    ]
   );
 
   const state: ChannelActionState = {
     muted: channel.muted,
     copiedLink: linkCopy.copied,
     copiedName: nameCopy.copied,
+    starred,
     sections,
     currentSectionId,
   };
@@ -310,6 +327,12 @@ export function useChannelActions({
         return;
       case "copy-name":
         runCopy(nameCopy.copy);
+        return;
+      case "star":
+        // 왕복이 없다. 별표는 사이드바 payload 의 한 칸이고 저장은 디바운스가
+        // 뒤따르므로(ADR-0177 D2), 여기서 기다릴 것도 되돌릴 것도 없다.
+        setError(null);
+        onToggleStar?.();
         return;
       case "topic":
       case "leave":
@@ -488,11 +511,15 @@ function ChannelActionMenuRow({
       // 위 배너를 읽을 수 있게 열린 채로 둔다. 파괴적 액션은 한 번의 무방비
       // 클릭으로 발화하지 않는다(§6) — 표면이 다이얼로그로 넘긴다.
       event.preventDefault();
-      if (channelActionKeepsMenuOpen(item.key)) {
-        actions.run(item.key);
-      } else {
-        onHandOff(item.key);
-      }
+      // 메뉴를 닫는 항목도 **여기서** 발화한다 (BT-5 #1933). 앞 판은 닫는 쪽을
+      // `onHandOff` 에게만 넘겼고, 그래서 「닫고 나서 무엇을 하는가」가 표면마다
+      // 흩어져 있었다 - 별표가 그 자리에 들어오면 사이드바 행 메뉴 안에 실행이
+      // 하나 더 생겼을 것이고, 이 파일의 존재 이유(실행부 하나)가 그만큼 깎인다.
+      // `run` 은 다이얼로그로 넘기는 열쇠(주제·나가기·배치 무리)에 대해 아무
+      // 일도 하지 않으므로(그 파일의 `switch`), 이 한 줄은 오늘의 동작을 바꾸지
+      // 않으면서 실행의 자리를 하나로 되돌린다.
+      if (!channelActionKeepsMenuOpen(item.key)) onHandOff(item.key);
+      actions.run(item.key);
     },
     children: busy ? item.busyLabel ?? item.label : item.label,
   };

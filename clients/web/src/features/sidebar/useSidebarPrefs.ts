@@ -7,18 +7,26 @@ import {
 } from "@momo/core/features/sidebar/api";
 import {
   canCreateSidebarSection,
+  canMoveSidebarSection,
   createSidebarSection,
   deleteSidebarSection,
   emptySidebarPrefs,
+  isChannelStarred,
+  moveSidebarSection,
   placeChannelInSection,
   renameSidebarSection,
+  reorderSidebarSection,
   sectionIdForChannel,
   sidebarChannelRefCapMessage,
   sidebarChannelRefCount,
+  sidebarSortMode,
+  toggleStarredChannel,
+  withSidebarSortMode,
   SIDEBAR_CHANNEL_REF_MAX,
   SIDEBAR_PREFS_LOAD_FAILURE,
   SIDEBAR_PREFS_SAVE_FAILURE,
   type SidebarPrefs,
+  type SidebarSortMode,
 } from "@momo/core/features/sidebar/sidebarSections";
 
 // =============================================================================
@@ -98,6 +106,18 @@ export interface SidebarPrefsController {
   deleteSection: (id: string) => void;
   moveChannel: (channelId: string, sectionId: string | null) => void;
   sectionIdFor: (channelId: string) => string | null;
+  /**
+   * 별표·정렬·섹션 차례 (BT-5 / #1933). 전부 위의 것들과 **같은 문**을 지난다 -
+   * `schedule` 하나가 부트스트랩 게이트(B-1)·참조 상한(M-3)·디바운스·롤백을
+   * 지고 있으므로, 새 쓰기 경로를 만들면 그 넷을 전부 다시 만들어야 한다.
+   */
+  isStarred: (channelId: string) => boolean;
+  toggleStar: (channelId: string) => void;
+  sortMode: SidebarSortMode;
+  setSortMode: (mode: SidebarSortMode) => void;
+  canMoveSection: (id: string, delta: -1 | 1) => boolean;
+  moveSection: (id: string, delta: -1 | 1) => void;
+  reorderSection: (id: string, targetId: string) => void;
 }
 
 export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
@@ -218,6 +238,31 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
     (channelId: string) => sectionIdForChannel(prefs, channelId),
     [prefs]
   );
+  const isStarred = useCallback(
+    (channelId: string) => isChannelStarred(prefs, channelId),
+    [prefs]
+  );
+  const toggleStar = useCallback(
+    (channelId: string) => schedule(toggleStarredChannel(prefs, channelId)),
+    [prefs, schedule]
+  );
+  const setSortMode = useCallback(
+    (mode: SidebarSortMode) => schedule(withSidebarSortMode(prefs, mode)),
+    [prefs, schedule]
+  );
+  const canMoveSection = useCallback(
+    (id: string, delta: -1 | 1) => canMoveSidebarSection(prefs, id, delta),
+    [prefs]
+  );
+  const moveSection = useCallback(
+    (id: string, delta: -1 | 1) => schedule(moveSidebarSection(prefs, id, delta)),
+    [prefs, schedule]
+  );
+  const reorderSection = useCallback(
+    (id: string, targetId: string) =>
+      schedule(reorderSidebarSection(prefs, id, targetId)),
+    [prefs, schedule]
+  );
 
   const refetch = query.refetch;
   const retryLoad = useCallback(() => {
@@ -239,6 +284,13 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       deleteSection,
       moveChannel,
       sectionIdFor,
+      isStarred,
+      toggleStar,
+      sortMode: sidebarSortMode(prefs),
+      setSortMode,
+      canMoveSection,
+      moveSection,
+      reorderSection,
     }),
     [
       prefs,
@@ -250,6 +302,12 @@ export function useSidebarPrefs(workspaceId: string): SidebarPrefsController {
       deleteSection,
       moveChannel,
       sectionIdFor,
+      isStarred,
+      toggleStar,
+      setSortMode,
+      canMoveSection,
+      moveSection,
+      reorderSection,
     ]
   );
 }

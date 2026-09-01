@@ -17,6 +17,10 @@ import {
   COPY_LINK_ACTION_LABEL,
   COPY_LINK_DONE_LABEL,
 } from "@momo/core/features/timeline/copyLabels";
+import {
+  CHANNEL_STAR_LABEL,
+  CHANNEL_UNSTAR_LABEL,
+} from "@momo/core/features/sidebar/sidebarSections";
 import { resetEscapeLayers } from "@/design/ui/escapeLayer";
 import { SidebarRow } from "./SidebarRow";
 import { roveSidebarRows } from "./sidebarRoving";
@@ -136,6 +140,8 @@ function mountRow({
   sections,
   currentSectionId = null,
   onMoveToSection,
+  starred = false,
+  onToggleStar,
 }: {
   channel?: Channel;
   readState?: ReadState | null;
@@ -145,6 +151,9 @@ function mountRow({
   sections?: { id: string | null; label: string }[];
   currentSectionId?: string | null;
   onMoveToSection?: (sectionId: string | null) => void;
+  /** ADR-0177 / BT-5 #1933 — 별표. 손이 없으면 항목이 서지 않는다. */
+  starred?: boolean;
+  onToggleStar?: () => void;
 } = {}): HTMLElement {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } },
@@ -195,6 +204,8 @@ function mountRow({
                   sections,
                   currentSectionId,
                   onMoveToSection,
+                  starred,
+                  onToggleStar,
                   children: link,
                 }),
             }),
@@ -962,5 +973,79 @@ describe("섹션으로 이동", () => {
     expect(document.getElementById(labelledBy)?.textContent).toBe(
       "섹션으로 이동"
     );
+  });
+});
+
+// =============================================================================
+// 별표 (ADR-0177 D5 / BT-5 #1933)
+// =============================================================================
+
+describe("별표", () => {
+  it("손이 없으면 항목이 서지 않는다", () => {
+    // 배치와 같은 규율(BT-4): 목적지도 손잡이도 없는 항목은 눌러도 아무 일이
+    // 없는 행이고, 그것은 없는 것보다 나쁘다.
+    mountRow();
+    rightClick();
+    expect(item("star")).toBeNull();
+  });
+
+  it("DM 행에는 서지 않는다", () => {
+    // 별표 섹션은 파생이고 그 파생이 세는 것은 비-DM 채널뿐이다
+    // (`deriveSidebarSections`). 문을 열면 payload 에만 적히고 화면은 그대로다.
+    mountRow({
+      channel: channelFixture({ kind: "dm", name: undefined }),
+      title: "김인턴",
+      onToggleStar: () => undefined,
+    });
+    rightClick();
+    expect(item("star")).toBeNull();
+  });
+
+  it("낱말이 상태다 — 붙어 있으면 「떼기」", () => {
+    mountRow({ onToggleStar: () => undefined });
+    rightClick();
+    expect(item("star")?.textContent).toBe(CHANNEL_STAR_LABEL);
+    act(() => {
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    });
+
+    if (mountedRoot) act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    mountedHost?.remove();
+    mountRow({ starred: true, onToggleStar: () => undefined });
+    rightClick();
+    expect(item("star")?.textContent).toBe(CHANNEL_UNSTAR_LABEL);
+  });
+
+  it("고르면 토글이 발화하고 메뉴가 닫힌다", () => {
+    let toggles = 0;
+    mountRow({ onToggleStar: () => (toggles += 1) });
+    rightClick();
+    act(() => {
+      item("star")?.click();
+    });
+    expect(toggles).toBe(1);
+    // 별표를 붙이면 그 행이 「별표」 섹션으로 옮겨 가면서 트리거가 언마운트된다.
+    // 남기려 해도 남지 않으므로, 닫히는 것이 실제로 일어나는 일이다.
+    expect(menu()).toBeNull();
+  });
+
+  it("사이드바 정리 무리로 배치와 나란히 선다", () => {
+    mountRow({
+      onToggleStar: () => undefined,
+      sections: [{ id: "sec-1", label: "출시 준비" }],
+      onMoveToSection: () => undefined,
+    });
+    rightClick();
+    const order = Array.from(
+      menu()?.querySelectorAll<HTMLElement>(
+        '[data-testid="channel-row-mute-toggle"],[data-testid="channel-row-star"],[data-testid="channel-row-move-to-section"]'
+      ) ?? []
+    ).map((el) => el.dataset.testid);
+    expect(order).toEqual([
+      "channel-row-mute-toggle",
+      "channel-row-star",
+      "channel-row-move-to-section",
+    ]);
   });
 });

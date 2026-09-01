@@ -98,6 +98,8 @@ export function SidebarRowContextMenu({
   sections,
   currentSectionId = null,
   onMoveToSection,
+  starred = false,
+  onToggleStar,
 }: {
   /** 이 행의 링크. 트리거 상자가 이것을 감싼다. */
   children: ReactElement;
@@ -117,6 +119,12 @@ export function SidebarRowContextMenu({
   sections?: ChannelSectionChoice[];
   currentSectionId?: string | null;
   onMoveToSection?: (sectionId: string | null) => void;
+  /**
+   * 별표 (ADR-0177 / BT-5 #1933). 배치와 같은 규율: 손이 없으면 항목도 없다.
+   * 실행은 `channelActions` 가 갖는다 - 이 파일은 그릇과 입력만 정한다.
+   */
+  starred?: boolean;
+  onToggleStar?: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const touchSurface = useHoverNone();
@@ -132,6 +140,8 @@ export function SidebarRowContextMenu({
     sections,
     currentSectionId,
     onMoveToSection,
+    starred,
+    onToggleStar,
   });
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라

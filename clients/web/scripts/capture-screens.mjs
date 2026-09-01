@@ -2332,9 +2332,13 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     .evaluateAll((nodes) =>
       nodes.map((node) => node.getAttribute("data-testid"))
     );
+  // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
+  // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
+  // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
   const expected = [
     "channel-row-mark-read",
     "channel-row-mute-toggle",
+    "channel-row-star",
     "channel-row-copy-link",
     "channel-row-copy-name",
     "channel-row-leave",
@@ -2990,7 +2994,14 @@ async function captureCustomSection(page, scheme, shots) {
   await page.screenshot({ path: filledShot });
   shots.push(filledShot);
 
+  await captureSectionDropMarker(page, scheme, shots);
+  await captureStarredSection(page, scheme, shots);
+
   // 지우고 나간다. 확인 문장이 「채널은 사라지지 않는다」를 말하는지도 여기서 본다.
+  // 위 두 장면이 포인터를 다른 자리로 옮겼으므로 호버 클러스터를 다시 연다 -
+  // ⋮ 는 rest 에서 DOM 에 없다(UX-HT 계약).
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
   await page.getByTestId("section-menu-sec-1").click();
   await page.getByTestId("section-menu-sec-1-delete").click();
   const confirm = page.getByTestId("sidebar-section-delete-confirm");
@@ -3025,6 +3036,113 @@ async function captureCustomSection(page, scheme, shots) {
     .locator('[data-testid="channel-item"]')
     .first()
     .waitFor({ state: "visible" });
+}
+
+/**
+ * 드래그 중의 드롭 표지 (BT-5 / #1933).
+ *
+ * 네이티브 HTML5 드래그는 Playwright 의 마우스로 발화하지 않는다(브라우저가 OS
+ * 드래그 세션을 열어야 한다). 그래서 **드래그 이벤트를 그대로 쏜다** — 출하되는
+ * 코드가 듣는 것이 바로 그 이벤트이므로, 사진에 찍히는 것은 실제로 사람이 보게
+ * 되는 프레임이다. 좌표를 흉내 내는 것이 아니라 판정의 정본(대상 요소)을 그대로
+ * 쓰는 것이고, 그 점이 이 티켓이 라이브러리 없는 손구현을 고른 값이다
+ * (`sidebarDnd.ts` 머리말).
+ *
+ * 표지가 **토큰만** 쓰는지는 여기서 눈으로, `tokens.contrast.test.ts` 의
+ * 「드롭 표지」가 수로 잰다.
+ */
+async function captureSectionDropMarker(page, scheme, shots) {
+  await page.evaluate(`(() => {
+    const row = document.querySelector(
+      '[data-testid="sidebar-section-channels"] [data-testid="channel-item"]'
+    );
+    if (!row) throw new Error("기본 섹션에 끌 행이 없다");
+    row.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+  })()`);
+  // `dragover` 는 **되풀이해서** 쏜다 — 실제 드래그가 그렇게 생겼기 때문이다
+  // (포인터가 움직이는 동안 계속 발화한다). 한 번만 쏘면 `dragstart` 의 상태
+  // 갱신이 아직 렌더에 닿기 전이라 그 한 번이 헛나갈 수 있고, 그것은 이 화면의
+  // 결함이 아니라 이벤트를 한 틱에 몰아 쏜 자국이다.
+  await page.waitForFunction(`(() => {
+    const target = document.querySelector('[data-testid="sidebar-section-sec-1"]');
+    if (!target) return false;
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true }));
+    return target.hasAttribute("data-drop-target");
+  })()`);
+  // 표지는 **하나**다: 받는 자리 하나가 「여기에 놓인다」고 말한다.
+  const marked = await page.locator("[data-drop-target]").count();
+  if (marked !== 1) {
+    throw new Error(`드롭 표지 개수 ${scheme}: ${marked} (하나여야 함)`);
+  }
+  await assertNoHorizontalOverflow(page, `drop marker ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-drop-target-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // Esc 가 드래그의 것이다(BT-5 계약 3항). 표지가 사라지는 것으로 그것을 본다.
+  await page.keyboard.press("Escape");
+  await page.locator("[data-drop-target]").waitFor({ state: "detached" });
+}
+
+/**
+ * 별표 섹션 (ADR-0177 D5 / BT-5 #1933).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 행 우클릭 → 「별표 붙이기」. 그래야 이
+ * 프레임이 사람이 걷는 길의 사진이 되고, 끝에 떼므로 뒤따르는 장면의 사이드바가
+ * 그대로 남는다(같은 함수의 섹션 만들기·지우기와 같은 규율).
+ */
+async function captureStarredSection(page, scheme, shots) {
+  const base = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await base.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const starLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (starLabel !== "별표 붙이기") {
+    throw new Error(`별표 항목의 낱말 ${scheme}: ${starLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+
+  const starred = page.getByTestId("sidebar-section-starred");
+  await starred.waitFor({ state: "visible" });
+  // **맨 위**다. 파생 섹션의 순위는 코어가 정하고, 그 사실이 화면에서도 참인지를
+  // 여기서 본다.
+  const first = await page.evaluate(`(() => {
+    const sections = Array.from(
+      document.querySelectorAll('[data-testid^="sidebar-section-"]')
+    ).filter((el) => !el.dataset.testid.endsWith("-header"));
+    return sections[0]?.dataset.testid ?? null;
+  })()`);
+  if (first !== "sidebar-section-starred") {
+    throw new Error(`별표 섹션이 맨 위가 아니다 ${scheme}: ${first}`);
+  }
+  // 한 채널이 두 번 그려지지 않는다 — 별표가 렌더 순위를 먼저 가져간다.
+  const duplicated = await page.evaluate(`(() => {
+    const ids = Array.from(
+      document.querySelectorAll("[data-channel-id]")
+    ).map((el) => el.dataset.channelId);
+    return ids.length - new Set(ids).size;
+  })()`);
+  if (duplicated !== 0) {
+    throw new Error(`별표 뒤 중복 행 ${scheme}: ${duplicated}`);
+  }
+  await assertNoHorizontalOverflow(page, `starred section ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-starred-section-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 떼고 나간다. 낱말이 상태라는 것도 여기서 함께 본다.
+  const starredRow = starred.locator('[data-testid="channel-item"]').first();
+  await starredRow.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const unstarLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (unstarLabel !== "별표 떼기") {
+    throw new Error(`별표 뒤 항목의 낱말 ${scheme}: ${unstarLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await starred.waitFor({ state: "detached" });
 }
 
 /**

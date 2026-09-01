@@ -76,6 +76,7 @@ import {
   sidebarSectionCapMessage,
   SIDEBAR_PREFS_LOAD_RETRY_LABEL,
 } from "@momo/core/features/sidebar/sidebarSections";
+import { useSidebarDrag, type SidebarDropAction } from "./sidebarDnd";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   setSidebarSectionCollapsed,
@@ -247,6 +248,7 @@ export function Sidebar({
   // 캐스트 없음 (design-review #1932 N-2): 기본 두 섹션이 언제나 있다는 것은
   // 코어의 계약이고, 이제 **타입이** 그렇게 말한다.
   const renderedSections = derived.sections;
+  const starredSection = derived.starred;
   const baseChannelSection = derived.base;
   const customSections = derived.custom;
   const dmSection = derived.dms;
@@ -264,6 +266,27 @@ export function Sidebar({
     () => customSections.map((section) => ({ id: section.id, label: section.title })),
     [customSections]
   );
+
+  // 끌어다 놓기 (BT-5 #1933). 문이 서는 조건은 편집 문과 **같은 하나**다
+  // (`canEditSections`): 배치를 못 읽은 상태에서도, 터치 표면에서도 손잡이가
+  // 없다. 떨어진 결과는 전부 위 훅의 변경 함수로 되돌아가므로 저장 경로는
+  // 하나로 남는다(ADR-0177 D2 디바운스·롤백·배너를 그대로 탄다).
+  const onSidebarDrop = useCallback(
+    (action: SidebarDropAction) => {
+      if (action.type === "place") {
+        sidebarPrefs.moveChannel(action.channelId, action.sectionId);
+      } else if (action.type === "star") {
+        sidebarPrefs.toggleStar(action.channelId);
+      } else {
+        sidebarPrefs.reorderSection(action.sectionId, action.targetId);
+      }
+    },
+    [sidebarPrefs]
+  );
+  const drag = useSidebarDrag({
+    enabled: canEditSections,
+    onDrop: onSidebarDrop,
+  });
 
   // 섹션 CRUD 의 열림 상태. 다이얼로그는 사이드바 트리 **밖에** 산다 - 섹션을
   // 지우는 다이얼로그가 그 섹션의 서브트리 안에 있으면 확인을 누르는 순간 자기가
@@ -389,7 +412,21 @@ export function Sidebar({
     roveSidebarRows(navRef.current, event);
   }, []);
 
-  function rowFor(channel: Channel) {
+  /**
+   * 한 채널 행. `options.inStarredSection` 은 이 행이 **파생 「별표」 섹션에**
+   * 그려지고 있다는 뜻이고, 그때는 끌 수 없다 (BT-5 #1933).
+   *
+   * 판정은 「눌러서 아무 일도 없는 문은 문이 아니다」다: 별표 섹션이 렌더 순위를
+   * 먼저 가져가므로(코어 `deriveSidebarSections`), 별표 붙은 행을 다른 섹션에
+   * 떨어뜨려도 payload 의 배치만 바뀌고 **화면에서는 아무 일도 일어나지 않는다**.
+   * 사람은 그것을 실패로 읽는다. 배치를 바꾸고 싶으면 별표를 떼거나, 행 메뉴의
+   * 「섹션으로 이동」 라디오를 쓴다 - 그 무리는 별표 행에도 그대로 서 있고 지금
+   * 배치가 체크로 들린다.
+   */
+  function rowFor(
+    channel: Channel,
+    options: { inStarredSection?: boolean } = {}
+  ) {
     const counts = unreadCountFor(channel);
     // A DM row is named after a person, and this workspace holds two members
     // called 김인턴, so the row carries the handle whenever the name alone does
@@ -399,10 +436,24 @@ export function Sidebar({
       directoryQuery.directory,
       session.member.id
     );
+    const currentSectionId = sidebarPrefs.sectionIdFor(channel.id);
+    const canDragRow =
+      canEditSections &&
+      channel.kind !== "dm" &&
+      options.inStarredSection !== true;
     return (
       <SidebarRow
         key={channel.id}
         to={`/c/${channel.id}`}
+        dragProps={
+          canDragRow
+            ? drag.dragProps({
+                kind: "channel",
+                channelId: channel.id,
+                sectionId: currentSectionId,
+              })
+            : undefined
+        }
         icon={
           channel.kind === "dm" ? (
             <MessageSquare className="size-4" />
@@ -438,10 +489,16 @@ export function Sidebar({
             selfRole={selfMember?.role}
             readState={readStateFor(channel)}
             sections={canEditSections ? sectionChoices : undefined}
-            currentSectionId={sidebarPrefs.sectionIdFor(channel.id)}
+            currentSectionId={currentSectionId}
             onMoveToSection={
               canEditSections
                 ? (sectionId) => sidebarPrefs.moveChannel(channel.id, sectionId)
+                : undefined
+            }
+            starred={sidebarPrefs.isStarred(channel.id)}
+            onToggleStar={
+              canEditSections
+                ? () => sidebarPrefs.toggleStar(channel.id)
                 : undefined
             }
           >
@@ -632,6 +689,33 @@ export function Sidebar({
               />
             ) : null}
 
+            {/* 「별표」는 **파생**이다 (ADR-0177 D5 / BT-5 #1933): payload 에 이
+                섹션은 없고 `starredChannelIds` 뿐이며, 코어가 그것을 목록으로
+                조립한다. 맨 위에 서고, 비면 코어가 아예 내놓지 않는다 - 빈 그릇을
+                그리지 않는 판정이 표면이 아니라 파생에 있어야 웹과 폰이 같은 수의
+                섹션을 센다(`DerivedSidebarSections.sections` 머리말).
+
+                이름 바꾸기도 삭제도 차례 바꾸기도 없다(기본 섹션 문법), 그래서
+                ⋮ 가 없다. 대신 드롭은 받는다 - 여기 떨어뜨리는 것은 배치가 아니라
+                별표를 붙이는 일이고, 그 뜻은 `resolveSidebarDrop` 이 갖는다. */}
+            {starredSection.channels.length > 0 && (
+              <SidebarSection
+                title={starredSection.title}
+                sectionId={starredSection.id}
+                collapsed={collapsedSections[starredSection.id] === true}
+                onCollapsedChange={(next) =>
+                  setSidebarSectionCollapsed(starredSection.id, next)
+                }
+                unreadCount={sectionUnread(starredSection.id).unreadCount}
+                mentionCount={sectionUnread(starredSection.id).mentionCount}
+                dropProps={drag.dropProps({ kind: "starred", sectionId: null })}
+              >
+                {starredSection.channels.map((channel) =>
+                  rowFor(channel, { inStarredSection: true })
+                )}
+              </SidebarSection>
+            )}
+
             <SidebarSection
               title={baseChannelSection.title}
               sectionId={baseChannelSection.id}
@@ -639,7 +723,12 @@ export function Sidebar({
               onCollapsedChange={(next) =>
                 setSidebarSectionCollapsed(baseChannelSection.id, next)
               }
-              overlayOpen={createChannelOpen || nameDialog?.mode === "create"}
+              dropProps={drag.dropProps({ kind: "channels", sectionId: null })}
+              overlayOpen={
+                createChannelOpen ||
+                nameDialog?.mode === "create" ||
+                openSectionMenu === baseChannelSection.id
+              }
               unreadCount={sectionUnread(baseChannelSection.id).unreadCount}
               mentionCount={sectionUnread(baseChannelSection.id).mentionCount}
               action={
@@ -706,6 +795,36 @@ export function Sidebar({
                       <FolderPlus className="size-4" aria-hidden="true" />
                     </button>
                   )}
+                  {/* 정렬의 문은 **여기 하나**다 (BT-5 #1933). 값이 사이드바 전체에
+                      하나뿐이라(payload 의 `sectionSort` 한 칸) 섹션마다 같은
+                      라디오를 세우면 「이 섹션의 정렬」로 읽히고, 하나를 바꿀 때
+                      전부 바뀌는 것이 결함이 된다. 이 헤더인 이유는 그것이 이미
+                      **사이드바의 선반**이기 때문이다 - 「새 섹션」도 채널 섹션의
+                      일이 아니라 사이드바의 일이고 같은 자리에 산다.
+
+                      커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
+                      열리는 설정이 아니다.
+
+                      **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
+                      자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
+                      아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
+                      상시 마운트라(`shouldShowSectionActions`) 240px 서랍의 머리글에
+                      아이콘이 하나 더 영구히 서고, 그 값을 두 번째 순위의 설정이
+                      치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
+                      아니라 폰의 설정 표면이다. */}
+                  {canEditSections && (
+                    <SidebarSectionMenu
+                      sectionId={baseChannelSection.id}
+                      title={baseChannelSection.title}
+                      sort={{
+                        mode: sidebarPrefs.sortMode,
+                        onChange: sidebarPrefs.setSortMode,
+                      }}
+                      onOpenChange={(open) =>
+                        setOpenSectionMenu(open ? baseChannelSection.id : null)
+                      }
+                    />
+                  )}
                 </>
               }
             >
@@ -745,7 +864,7 @@ export function Sidebar({
                   testId="channels-empty"
                 />
               )}
-              {baseChannelSection.channels.map(rowFor)}
+              {baseChannelSection.channels.map((channel) => rowFor(channel))}
             </SidebarSection>
 
             {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
@@ -769,11 +888,29 @@ export function Sidebar({
                 }
                 unreadCount={sectionUnread(section.id).unreadCount}
                 mentionCount={sectionUnread(section.id).mentionCount}
+                // 커스텀 섹션은 **둘 다** 한다: 채널을 받고(배치), 자기가 끌려
+                // 가면 차례가 바뀐다. 두 뜻이 한 구역에 겹치는 것이 아니라
+                // 「무엇이 떨어졌는가」가 가른다(`resolveSidebarDrop`).
+                dropProps={drag.dropProps({
+                  kind: "custom",
+                  sectionId: section.id,
+                })}
+                headerDragProps={
+                  canEditSections
+                    ? drag.dragProps({ kind: "section", sectionId: section.id })
+                    : undefined
+                }
                 action={
                   canEditSections ? (
                   <SidebarSectionMenu
                     sectionId={section.id}
                     title={section.title}
+                    order={{
+                      canUp: sidebarPrefs.canMoveSection(section.id, -1),
+                      canDown: sidebarPrefs.canMoveSection(section.id, 1),
+                      onMove: (delta) =>
+                        sidebarPrefs.moveSection(section.id, delta),
+                    }}
                     onOpenChange={(open) =>
                       setOpenSectionMenu(open ? section.id : null)
                     }
@@ -816,7 +953,7 @@ export function Sidebar({
                       {sidebarEmptySectionHint(!touchSurface)}
                     </li>
                   )}
-                {section.channels.map(rowFor)}
+                {section.channels.map((channel) => rowFor(channel))}
               </SidebarSection>
             ))}
 
@@ -845,7 +982,7 @@ export function Sidebar({
                   </Link>
                 }
               >
-                {dmSection.channels.map(rowFor)}
+                {dmSection.channels.map((channel) => rowFor(channel))}
               </SidebarSection>
             )}
 

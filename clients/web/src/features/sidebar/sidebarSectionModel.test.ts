@@ -73,11 +73,14 @@ describe("UX-HT 계약 (소스)", () => {
   });
 
   it("rest 헤더는 컨트롤 높이를 바닥선으로 예약한다 (M-1 / R2-2)", () => {
+    // BT-5(#1933)가 이 클래스 목록을 `cn(...)` 으로 바꿨다 - 커스텀 섹션 머리글이
+    // 끌리는 손잡이라 커서 하나가 조건부로 붙는다. 재는 것은 그대로 **바닥선**
+    // 이므로, 문자열 한 벌 대신 그 낱말을 찾는다.
     expect(sectionSource).toContain(
-      'className="flex min-h-control-sm items-center gap-1 px-2"'
+      '"flex min-h-control-sm items-center gap-1 px-2"'
     );
     expect(sectionSource).not.toMatch(
-      /className="flex h-control-sm items-center gap-1 px-2"/
+      /"flex h-control-sm items-center gap-1 px-2"/
     );
     expect(sectionSource).not.toMatch(/rounded-sm py-1 text-left text-meta/);
   });
