@@ -155,11 +155,29 @@ export function SidebarRowContextMenu({
           // 상자의 배경을 통째로 덮고, 하필 그때가 **키보드로 연 메뉴가 어느
           // 행의 것인지 말하는 유일한 표식**이 필요한 순간이다(포인터는 hover
           // 가 대신 말해 준다). 그래서 배경 위에 인셋 아웃라인을 함께 세운다 —
-          // 아웃라인은 자식의 배경 위에 그려지고, `--line-strong` 은 두 스킴에서
-          // 어느 표면 위에서도 3:1 을 지키는 그 선 색이다. 포커스 링(--accent)
-          // 과는 다른 색이라 「캐럿이 여기 있다」와 「이 행의 메뉴가 열려 있다」가
-          // 섞이지 않는다.
-          className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-line-strong"
+          // 아웃라인은 자식의 배경 위에 그려진다.
+          //
+          // ## 선 색이 `--ink-muted` 인 이유 (design-review R2 M-1)
+          //
+          // 처음에는 `--line-strong` 이었고, 그 자리에 「어느 표면 위에서도 3:1
+          // 을 지킨다」고 적었다. **거짓이었다.** 이 레포가 그 반례를 이미 이름
+          // 대어 적어 두고 있다 — `tokens.contrast.test.ts` 의 `CONTROL_SURFACES`
+          // 산문: *"`--line-strong` lands at 2.90:1 on `--accent-soft` … under
+          // the 3:1 non-text minimum"*. 그 문장이 `--accent-soft` 를 컨트롤 경계
+          // 표에서 뺀 이유이고, 이 표식은 하필 **그 표면 위에** 서는 것이 존재
+          // 이유다. 다크 실측 2.90:1(라이트 3.18:1)로, 자를 못 넘긴 상태 표시였다.
+          //
+          // 세 갈래(①3:1 넘는 선 ②헤어라인 아닌 표식 ③분류표 편입) 중 ①이다.
+          // 값이 옆 파일에 이미 있었기 때문이다: `--ink-muted` 는 **모든**
+          // `SURFACES` 위에서 4.5:1 을 넘어야 한다는 단정을 이미 지고 있고
+          // (`accent-soft` 도 그 목록에 있다), 실측은 accent-soft 위 라이트
+          // 4.74 · 다크 5.17 이다. ②는 새 시각 언어를 하나 만들고, ③은 이 표식
+          // 하나 때문에 컨트롤 경계 분류표의 뜻을 바꾼다 — 둘 다 값이 크다.
+          //
+          // 포커스 링(--accent · 2px)과는 색도 두께도 달라 「캐럿이 여기 있다」와
+          // 「이 행의 메뉴가 열려 있다」가 섞이지 않는다. 이 선택은 주석이 아니라
+          // `rowMenuMarker.test.ts` 가 이 파일의 클래스에서 토큰을 읽어 잰다.
+          className="block rounded-sm data-[state=open]:bg-surface-hover data-[state=open]:outline data-[state=open]:outline-1 data-[state=open]:-outline-offset-1 data-[state=open]:outline-ink-muted"
           onKeyDown={(event) => {
             if (!enabled || !isContextMenuSummonKey(event)) return;
             // 브라우저의 네이티브 소환을 막고 같은 문으로 들어간다. 막지 않으면

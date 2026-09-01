@@ -87,8 +87,14 @@ export interface ChannelActions {
   available: ChannelActionAvailability;
   state: ChannelActionState;
   items: (surface: ChannelActionSurface) => ChannelActionItem[];
-  /** 왕복 중인 항목. 그 행만 잠근다(메뉴 전체가 아니라). */
-  pending: ChannelActionKey | null;
+  /**
+   * 이 항목의 왕복이 도는 중인가.
+   *
+   * 슬롯 하나(`pending: key | null`)가 아니라 항목별 물음이다 — 알림과 읽음은
+   * 서로 다른 서버 표면이라 **동시에** 돌 수 있고, 슬롯 하나면 둘 중 하나만
+   * 「하는 중」이라 말한다(design-review R2 M-2 의 형제 축).
+   */
+  isPending: (key: ChannelActionKey) => boolean;
   /** 항목 자리에서 하는 말(§5, 토스트가 아니다). 메뉴가 열려 있어야 읽힌다. */
   error: string | null;
   clearError: () => void;
@@ -249,9 +255,17 @@ export function useChannelActions({
     // 끄는 중」인 항목을 한 번 더 누르는 것은 두 번째 PUT 이 아니라 같은 한 번의
     // 재확인이다. 잠근 컨트롤은 「하면 안 된다」로 읽히지만, 받고 무시하는
     // 컨트롤은 아무 말도 하지 않는다 — 낱말이 이미 말하고 있다.
-    if (muteMutation.isPending || markReadMutation.isPending) {
-      if (key === "mute" || key === "mark-read") return;
-    }
+    //
+    // **같은 열쇠에만 건다** (design-review R2 M-2). 처음에는 「둘 중 하나라도
+    // 돌고 있으면 둘 다 막는다」였고, 그래서 알림이 도는 동안 「읽음 처리하기」가
+    // **조용한 무동작**이었다(실측: 클릭해도 read-state PUT 0건, 낱말도 배너도
+    // 변화 없음). 그 항목은 낱말도 `aria-busy` 도 쉬는 상태였으니 화면은 「눌러도
+    // 된다」고 말하고 있었고, 잠금을 걷어낸 자리에 잠금보다 나쁜 것이 들어온
+    // 것이다 — 회색은 최소한 말은 한다. 위 근거가 든 것은 「같은 항목의
+    // 재확인」뿐이므로 가드도 딱 거기까지다. 두 왕복이 겹치는 것은 서로 다른
+    // 서버 표면이라 문제가 없다.
+    if (key === "mute" && muteMutation.isPending) return;
+    if (key === "mark-read" && markReadMutation.isPending) return;
     switch (key) {
       case "mute":
         muteMutation.mutate(!channel.muted);
@@ -272,17 +286,17 @@ export function useChannelActions({
     }
   }
 
-  const pending: ChannelActionKey | null = muteMutation.isPending
-    ? "mute"
-    : markReadMutation.isPending
-      ? "mark-read"
-      : null;
+  function isPending(key: ChannelActionKey): boolean {
+    if (key === "mute") return muteMutation.isPending;
+    if (key === "mark-read") return markReadMutation.isPending;
+    return false;
+  }
 
   return {
     available,
     state,
     items: (surface) => channelActionItemsForSurface(surface, available, state),
-    pending,
+    isPending,
     error,
     clearError: () => setError(null),
     run,
@@ -320,7 +334,7 @@ function ChannelActionMenuRow({
   actions: ChannelActions;
   onHandOff: (key: ChannelActionKey) => void;
 }) {
-  const busy = actions.pending === item.key;
+  const busy = actions.isPending(item.key);
   const props = {
     "data-testid": `${prefix}-${item.testKey}`,
     "data-muted":

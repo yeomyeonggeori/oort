@@ -703,6 +703,45 @@ describe("design-review #1937 R1 수리", () => {
     expect(setChannelNotificationPref).toHaveBeenCalledTimes(1);
   });
 
+  it("M-2(r2): 알림 왕복 중에도 형제 항목은 자기 일을 한다", async () => {
+    // 실측 결함(r2-cross-action-probe): 가드가 형제까지 삼켜 왕복 중
+    // 「읽음 처리하기」가 **조용한 무동작**이었다 — 낱말도 `aria-busy` 도 쉬는
+    // 상태라 화면은 「눌러도 된다」고 말하는데 누르면 아무 일도 없었다.
+    setChannelNotificationPref.mockReturnValue(new Promise(() => undefined));
+    // 읽음도 붙잡아 둔다: 왕복이 끝나면 메뉴가 닫혀 상태를 볼 수 없다.
+    updateReadState.mockReturnValue(new Promise(() => undefined));
+    mountRow();
+    rightClick();
+    clickItem("mute-toggle");
+    await flush();
+    // 알림은 도는 중이고, 읽음 항목은 쉬는 낱말을 이고 있다.
+    expect(item("mute-toggle")?.getAttribute("aria-busy")).toBe("true");
+    expect(item("mark-read")?.textContent?.trim()).toBe(CHANNEL_MARK_READ_LABEL);
+    expect(item("mark-read")?.getAttribute("aria-busy")).toBeNull();
+
+    clickItem("mark-read");
+    await flush();
+    // 쉬는 낱말을 이고 있었으면 눌렸을 때 일을 해야 한다.
+    expect(updateReadState).toHaveBeenCalledTimes(1);
+    expect(updateReadState).toHaveBeenCalledWith(WS, CHANNEL_ID, 47);
+    expect(item("mark-read")?.getAttribute("aria-busy")).toBe("true");
+    expect(item("mark-read")?.textContent?.trim()).toBe("읽음 처리 중");
+    // 형제의 왕복은 서로 다른 서버 표면이라 겹쳐도 문제가 없다: 둘 다 돈다.
+    expect(item("mute-toggle")?.getAttribute("aria-busy")).toBe("true");
+    expect(setChannelNotificationPref).toHaveBeenCalledTimes(1);
+  });
+
+  it("M-2(r2): 가드는 여전히 **같은 항목의** 재확인만 막는다", async () => {
+    setChannelNotificationPref.mockReturnValue(new Promise(() => undefined));
+    mountRow();
+    rightClick();
+    clickItem("mute-toggle");
+    await flush();
+    clickItem("mute-toggle");
+    await flush();
+    expect(setChannelNotificationPref).toHaveBeenCalledTimes(1);
+  });
+
   it("N-1: 읽음 처리도 같은 규율을 따른다", async () => {
     updateReadState.mockReturnValue(new Promise(() => undefined));
     mountRow();
@@ -759,8 +798,10 @@ describe("design-review #1937 R1 수리", () => {
     const classes = trigger().className.split(/\s+/);
     expect(classes).toContain("data-[state=open]:bg-surface-hover");
     expect(classes).toContain("data-[state=open]:outline");
-    expect(classes).toContain("data-[state=open]:outline-line-strong");
-    // 포커스 링(--accent)과 다른 색이어야 두 사실이 섞이지 않는다.
+    expect(classes).toContain("data-[state=open]:-outline-offset-1");
+    // 어느 색이어야 하는가는 여기서 묻지 않는다: 그 물음은 대비의 물음이고,
+    // `tokens.contrast.test.ts` 의 「행 메뉴 열림 표식」이 이 파일의 클래스에서
+    // 토큰을 읽어 두 바닥·두 스킴으로 잰다 (design-review R2 M-1).
     expect(trigger().className).not.toContain("data-[state=open]:outline-accent");
   });
 });

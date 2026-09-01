@@ -2452,12 +2452,30 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   const marker = await activeRow.evaluate((el) => {
     const box = el.closest("[data-row-menu-trigger]");
     const boxStyle = box ? getComputedStyle(box) : null;
+    // WCAG 2.1 상대 휘도. 브라우저가 이미 `light-dark()` 를 이 스킴으로 풀어
+    // 놓았으므로, 여기서 재는 것은 **화면에 실제로 선 두 색**이다.
+    const channels = (color) =>
+      (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (color) => {
+      const [r, g, b] = channels(color).map((v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const rowBackground = getComputedStyle(el).backgroundColor;
+    const outlineColor = boxStyle?.outlineColor ?? "";
+    const [hi, lo] = [luminance(outlineColor), luminance(rowBackground)].sort(
+      (a, b) => b - a
+    );
     return {
       state: box?.getAttribute("data-state") ?? null,
       outlineWidth: boxStyle ? parseFloat(boxStyle.outlineWidth) : 0,
       outlineStyle: boxStyle?.outlineStyle ?? "none",
-      rowBackground: getComputedStyle(el).backgroundColor,
+      outlineColor,
+      rowBackground,
       ariaCurrent: el.getAttribute("aria-current"),
+      contrast: Number(((hi + 0.05) / (lo + 0.05)).toFixed(2)),
     };
   });
   if (
@@ -2472,6 +2490,14 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   if (/rgba\(0, 0, 0, 0\)|transparent/.test(marker.rowBackground)) {
     throw new Error(
       `활성 행이 활성으로 안 그려졌다 ${scheme}: ${JSON.stringify(marker)} — 이 장면이 재려던 겹침이 없다`
+    );
+  }
+  //    아웃라인이 **있다**는 것만으로는 부족하다. 앞 회전의 표식은 있었고,
+  //    다크에서 이 채움 위 2.90:1 이었다(design-review R2 M-1). 그러므로 이
+  //    장면은 존재가 아니라 **대비**를 잰다 — 두 스킴 다.
+  if (!(marker.contrast >= 3)) {
+    throw new Error(
+      `활성 행 위 열림 표식 대비 ${scheme}: ${JSON.stringify(marker)} (비텍스트 3:1 이상이어야 함)`
     );
   }
   const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
