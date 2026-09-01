@@ -212,6 +212,9 @@ export function ThreadComposer({
             onChoose={autocomplete.choose}
             testId={`thread-${autocomplete.slug}-list`}
             optionTestId={`thread-${autocomplete.slug}-option`}
+            status={autocomplete.status}
+            offline={autocomplete.offline}
+            onRetry={autocomplete.retryCatalog}
             className="left-0"
           />
           <div

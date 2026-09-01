@@ -1,6 +1,7 @@
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { CatalogEmoji, SkinTone } from "@/features/emoji/catalog";
 import { displayGlyph } from "@/features/emoji/catalog";
+import { EMOJI_CATALOG_COPY } from "@/features/emoji/copy";
 import { filterEmojis, normalizeEmojiQuery } from "@/features/emoji/search";
 import type { ComposerInsertion } from "./composerInsertion";
 
@@ -20,6 +21,32 @@ import type { ComposerInsertion } from "./composerInsertion";
 
 export type ComposerTriggerKind = "mention" | "channel" | "emoji";
 
+/**
+ * 후보 소스가 **비동기**인 트리거가 드는 문장 (design-review #1930 H-2).
+ *
+ * `@`·`#` 의 후보는 이미 받아 둔 스토어에서 즉시 온다. `:` 만 다르다 — 카탈로그
+ * 는 176KB 청크이고 `:` 질의가 처음 열릴 때 dynamic import 된다. 그래서 이
+ * 트리거에만 「아직 없다」와 「없다」가 서로 다른 사실이고, 그 차이를 화면이
+ * 말하지 않으면 같은 키 입력의 결과를 네트워크 경주가 정한다.
+ *
+ * 그 차이는 트리거 **데이터**로 산다(계약 ①). 목록 기계는 이 값이 있는 트리거
+ * 에서만 로딩·오류·무결과를 그리고, `@`·`#` 는 예전처럼 후보가 없으면 아무것도
+ * 그리지 않는다.
+ */
+export interface ComposerDeferredCopy {
+  error: string;
+  offline: string;
+  retry: string;
+  emptyHeadline: string;
+  emptyDetail: string;
+}
+
+/**
+ * 목록이 지금 그릴 것. `ready` 는 후보 목록(0줄이면 아무것도 아니다)이고,
+ * 나머지 셋은 비동기 소스를 든 트리거에서만 생긴다.
+ */
+export type ComposerListStatus = "ready" | "loading" | "error" | "empty";
+
 export interface ComposerTriggerSpec {
   kind: ComposerTriggerKind;
   /** 이 질의를 여는 한 글자. */
@@ -36,6 +63,13 @@ export interface ComposerTriggerSpec {
   listLabel: string;
   /** DOM id·testid 의 조각. */
   slug: string;
+  /**
+   * 후보 소스가 비동기라는 사실과, 그때 화면이 할 말. 없으면 동기 소스다.
+   *
+   * 문장은 피커가 이미 쓰던 것이다(`features/emoji/copy.ts`) — 같은 사고를 두
+   * 표면이 다른 말로 설명하지 않게.
+   */
+  deferred?: ComposerDeferredCopy;
 }
 
 export const COMPOSER_TRIGGER_SPECS: readonly ComposerTriggerSpec[] = [
@@ -53,7 +87,14 @@ export const COMPOSER_TRIGGER_SPECS: readonly ComposerTriggerSpec[] = [
     listLabel: "채널 선택",
     slug: "channel",
   },
-  { kind: "emoji", char: ":", minQuery: 2, listLabel: "이모지 선택", slug: "emoji" },
+  {
+    kind: "emoji",
+    char: ":",
+    minQuery: 2,
+    listLabel: "이모지 선택",
+    slug: "emoji",
+    deferred: EMOJI_CATALOG_COPY,
+  },
 ];
 
 const SPEC_BY_CHAR = new Map(
@@ -80,7 +121,13 @@ export interface ComposerTriggerQuery {
   text: string;
 }
 
-/** `@` 질의. 선택 서식 트레이(#1902)가 이 모양으로 읽는다. */
+/**
+ * `@` 질의. `mentionQueryAt` 이 돌려주는 모양이다.
+ *
+ * #1930 이전에는 선택 서식 트레이(#1902)가 이 모양으로 읽었지만, 지금 트레이는
+ * `composerTriggerQueryAt` 을 직접 부른다(`composerFormat.ts`). 남은 호출자는
+ * 시험뿐이고 그것이 이 타입이 사는 이유다 — 아래 `mentionQueryAt` 참조.
+ */
 export interface MentionQuery {
   start: number;
   text: string;
@@ -136,7 +183,8 @@ export function composerTriggerQueryAt(
   options?: {
     /**
      * 코드 억제를 끈다. 문법만 묻는 자리(`mentionQueryAt`)를 위한 것이고,
-     * 자동완성 기계는 절대 쓰지 않는다.
+     * 자동완성 기계도 서식 트레이도 쓰지 않는다 — 제품 코드에서 이 옵션을 켜는
+     * 호출자는 없다(#1930 N-1 실측).
      */
     allowInCode?: boolean;
   }
@@ -161,10 +209,16 @@ export function composerTriggerQueryAt(
 /**
  * 캐럿의 `@` 질의, 없으면 null. 같은 기계에서 멘션만 갈라 본다.
  *
- * 코드 억제를 끄고 부르는 이유: 이 함수의 소비자는 선택 서식 트레이이고,
- * 트레이가 묻는 것은 「지금 멘션을 치는 중인가」라는 **문법** 질문이다. 코드
- * 안 선택에 서식을 걸지 말지는 트레이가 스스로 정할 일이지 멘션 문법이 답할
- * 것이 아니다.
+ * **소비자는 시험이다** (#1930 N-1). 앞 판 주석은 선택 서식 트레이를 소비자로
+ * 지목했지만 트레이는 `composerTriggerQueryAt` 을 직접 부르고(`composerFormat.ts`),
+ * 그 전환에는 관측 가능한 결과가 하나 붙어 있다: 코드 서식 **안** 의 선택에서
+ * 이제 트레이가 뜬다(전엔 코드 안이라 목록도 없는데 `@` 를 낀 선택이면 트레이도
+ * 잃었다). 그 사실은 `composerFormat.test.ts` 가 적는다.
+ *
+ * 그래도 이 함수를 지운다는 뜻은 아니다. `@` 회귀 0(계약 ②)을 재는 정본 시험표가
+ * 이 모양을 그대로 들고 있고, 그 표가 #1930 이전 값과 한 글자도 다르지 않다는
+ * 사실이 통합의 증거다. 코드 억제를 끄는 것도 그래서다 — 이 함수가 답하는 것은
+ * 「지금 멘션을 치는 중인가」라는 **문법** 질문이지 「목록을 열까」가 아니다.
  */
 export function mentionQueryAt(value: string, caret: number): MentionQuery | null {
   const query = composerTriggerQueryAt(value, caret, { allowInCode: true });
@@ -172,13 +226,24 @@ export function mentionQueryAt(value: string, caret: number): MentionQuery | nul
   return { start: query.start, text: query.text };
 }
 
+/**
+ * 후보 행의 격을 말하는 글리프. 지금은 비공개 방 하나다.
+ *
+ * 사이드바·⌘K 가 이미 쓰는 그 자물쇠이고, 거기서 자물쇠는 `#` 를 **대신한다**
+ * (`#이름` 은 이 제품에서 공개 방의 표기다). 목록 기계는 글리프를 문자열로 들지
+ * 않는다 — 아이콘은 표면의 것이고, 후보는 어느 격인지만 말한다.
+ */
+export type ComposerCandidateMark = "private-channel";
+
 /** 후보 한 줄. 세 트리거가 같은 모양으로 그려지고 같은 방식으로 삽입된다. */
 export interface ComposerCandidate {
   kind: ComposerTriggerKind;
   /** 목록 key. 멤버 id · 채널 id · 이모지 글리프. */
   id: string;
-  /** 왼쪽 자리. `@handle` · `#name` · 이모지 글리프. */
+  /** 왼쪽 자리. `@handle` · `#name`(비공개는 자물쇠 + 이름) · 이모지 글리프. */
   lead: string;
+  /** 이름 앞에 설 격 글리프. 없으면 이름만. */
+  mark?: ComposerCandidateMark;
   /** 오른쪽 흐린 자리. 사람 이름 · 채널 주제 · 이모지 숏코드. */
   hint: string;
   /** 트리거 자리부터 캐럿까지를 대체할 문자열. 뒤 공백을 포함한다. */
@@ -269,9 +334,15 @@ export function memberCandidates(
 //    검색·인박스 미리보기의 모든 호출부로 관통시켜야 한다.
 //
 // 그래서 v1 은 「삽입 = `#이름` 평문 + 후보 선택 UX」까지다. 삽입 직렬화는 멘션과
-// 동형이라(트리거 글자 + 이름 + 공백) 나중에 문법이 서면 이미 쓰여 있는 글이
-// 그대로 링크가 된다. `/c/{id}` 딥링크 문법(`features/inbox/anchor.ts`
-// `channelPath`)은 그때 재사용할 자리이고, 후속 티켓이 든다.
+// 동형이다(트리거 글자 + 이름 + 공백). `/c/{id}` 딥링크 문법
+// (`features/inbox/anchor.ts` `channelPath`)은 후속 티켓이 재사용할 자리다.
+//
+// **다만 이미 쓰인 글이 저절로 링크가 되지는 않는다** (design-review #1930 M-3).
+// 위 1번이 적은 그 자유 텍스트가 그 이유다: `#엔진 팀 회의 ` 처럼 공백 든 이름은
+// 파서 규율 1(질의에 공백이 없다)이 첫 공백에서 끊으므로 「트리거 글자 + 이름 +
+// 공백」 문법으로 **다시 읽히지 않는다**. 후속 문법은 그 경우의 직렬화를 새로
+// 정하고(따옴표든 id 든), 이미 저장된 본문에 대한 **마이그레이션을 함께 져야
+// 한다**. 이 줄이 없으면 다음 사람이 「동형이니 그냥 켜면 된다」로 읽는다.
 export function channelCandidates(
   channels: Channel[],
   query: string,
@@ -279,37 +350,56 @@ export function channelCandidates(
 ): ComposerCandidate[] {
   return matchChannels(channels, query, limit).map((channel) => {
     const name = channel.name ?? "";
+    // 비공개 방은 후보로 **남고**, 격을 글리프로 말한다 (design-review #1930
+    // M-2). 정보 누출이 아니다 — 이 스토어에는 내가 든 방만 있고, 같은 방이
+    // 왼쪽 사이드바에 이미 자물쇠로 그려져 있다. 앞 판은 그 방을 컴포저에서만
+    // `#김인턴작업` 으로 그려서, 한 화면 안에 같은 방의 두 표기가 있었다.
+    const priv = channel.kind === "private";
     return {
       kind: "channel" as const,
       id: channel.id,
-      lead: `#${name}`,
+      lead: priv ? name : `#${name}`,
+      ...(priv ? { mark: "private-channel" as const } : {}),
       hint: channel.topic ?? "",
+      // 삽입은 두 격이 같다: v1 의 삽입은 평문이고 `#` 는 사람이 읽는 표기다.
       insert: `#${name} `,
     };
   });
 }
 
 /**
- * 이모지 후보. **피커와 같은 열**이어야 한다.
- *
- * 순위를 여기서 다시 매기지 않고 `filterEmojis` 가 돌려준 순서를 그대로 자른다.
- * 검색 결과의 순서는 피커가 이미 정해 둔 사실이고, 같은 질의에 두 표면이 다른
- * 첫 번째를 내놓으면 사람이 외운 근육이 표면마다 갈라진다.
- */
-/**
- * 오른쪽 흐린 자리에 **지금 친 글자가 맞춘 그 숏코드**를 보인다.
+ * 오른쪽 흐린 자리에 **지금 친 글자가 맞춘 그 이름**을 보인다.
  *
  * 첫 숏코드를 그냥 쓰면 `:thu` 가 👍 를 맞춰 놓고 `:+1:` 이라고 적는다 —
  * 사람이 방금 친 글자와 화면이 보여 주는 이름이 다르면 그 줄이 왜 거기 있는지
- * 알 수 없다. 못 맞추면(이름·키워드로 걸린 줄) 첫 숏코드로 돌아간다.
+ * 알 수 없다.
+ *
+ * 순위(#1930 H-1)가 서고도 이름·키워드로 걸린 줄은 남는다: `:thu` 의 여섯 줄
+ * 끝자락에 🇱🇹(이름 `flag: Lithuania`)과 ⚡(키워드 `thunder`)가 그대로 산다.
+ * 앞 판은 그 줄에 첫 숏코드(`:flag-lt:`·`:zap:`)를 적어서 「왜 여기 있나」에
+ * 답하지 못했다(design-review #1930 N-3). 그래서 폴백은 첫 숏코드가 아니라
+ * **실제로 걸린 그 글자**다 — 숏코드 > 이름 > 키워드 순으로 묻는다.
  */
-function matchedShortcode(entry: CatalogEmoji, needle: string): string {
-  const matched = needle
-    ? entry.shortcodes.find((code) => code.includes(needle))
-    : undefined;
-  const code = matched ?? entry.shortcodes[0];
-  return code ? `:${code}:` : entry.name;
+function matchedLabel(entry: CatalogEmoji, needle: string): string {
+  if (needle) {
+    const code = entry.shortcodes.find((item) => item.includes(needle));
+    if (code) return `:${code}:`;
+    if (entry.name.toLowerCase().includes(needle)) return entry.name;
+    const keyword = entry.keywords.find((word) => word.includes(needle));
+    if (keyword) return keyword;
+  }
+  const first = entry.shortcodes[0];
+  return first ? `:${first}:` : entry.name;
 }
+
+/**
+ * 이모지 후보. **피커와 같은 열**이어야 한다.
+ *
+ * 순위를 여기서 다시 매기지 않고 `filterEmojis` 가 돌려준 순서를 그대로 자른다.
+ * 검색 결과의 순서와 그 순위는 `features/emoji/search.ts` 가 지는 정본이고
+ * (#1930 H-1 로 그 정본에 등급이 섰다), 같은 질의에 두 표면이 다른 첫 번째를
+ * 내놓으면 사람이 외운 근육이 표면마다 갈라진다.
+ */
 
 export function emojiCandidates(
   entries: readonly CatalogEmoji[],
@@ -326,7 +416,7 @@ export function emojiCandidates(
         kind: "emoji" as const,
         id: entry.glyph,
         lead: shown,
-        hint: matchedShortcode(entry, needle),
+        hint: matchedLabel(entry, needle),
         insert: `${shown} `,
         base: entry.glyph,
       };
@@ -354,7 +444,12 @@ export function insertComposerCandidate(
   };
 }
 
-/** 멘션 삽입. #1930 이전과 한 글자도 다르지 않은 결과를 낸다. */
+/**
+ * 멘션 삽입. #1930 이전과 한 글자도 다르지 않은 결과를 낸다.
+ *
+ * `mentionQueryAt` 과 같은 자리다: 제품 코드는 `insertComposerCandidate` 를
+ * 지나가고, 이 함수는 그 동형성을 재는 시험이 든다(#1930 N-1).
+ */
 export function insertMention(
   value: string,
   caret: number,

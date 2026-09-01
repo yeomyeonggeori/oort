@@ -207,6 +207,7 @@ const CHANNELS: Channel[] = [
   channel("c4", LONG_NAME),
   { ...channel("c5", "옛채널"), archivedAtMs: 1 },
   { ...channel("c6", undefined), kind: "dm", dmKey: "k" },
+  { ...channel("c7", "김인턴작업"), kind: "private" },
 ];
 
 describe("`#` 채널 자동완성 (#1930)", () => {
@@ -231,6 +232,8 @@ describe("`#` 채널 자동완성 (#1930)", () => {
       "엔진",
       "release-notes",
       LONG_NAME,
+      // 비공개 방은 내가 든 방이므로 후보다(#1930 M-2).
+      "김인턴작업",
     ]);
     expect(matchChannels(CHANNELS, "옛채널")).toEqual([]);
   });
@@ -259,6 +262,22 @@ describe("`#` 채널 자동완성 (#1930)", () => {
       value: `다음은 #${LONG_NAME} `,
       caret: `다음은 #${LONG_NAME} `.length,
     });
+  });
+
+  it("비공개 방은 후보로 남고 격을 글리프로 말한다 (M-2)", () => {
+    const [row] = channelCandidates(CHANNELS, "김인턴");
+    expect(row).toMatchObject({
+      kind: "channel",
+      id: "c7",
+      // `#이름` 은 공개 방의 표기다. 사이드바·⌘K 가 그 자리에 자물쇠를 그린다.
+      lead: "김인턴작업",
+      mark: "private-channel",
+      // 삽입은 두 격이 같다(v1 은 평문이다).
+      insert: "#김인턴작업 ",
+    });
+    const [open] = channelCandidates(CHANNELS, "release");
+    expect(open.lead).toBe("#release-notes");
+    expect(open.mark).toBeUndefined();
   });
 
   it("후보 수는 멘션과 같은 한 상한을 쓴다", () => {
@@ -313,6 +332,27 @@ describe("`:` 이모지 자동완성 (#1930)", () => {
     // 카탈로그의 첫 숏코드는 `+1` 이다. 그것을 그대로 쓰면 `:thumbsup` 을 친
     // 사람이 `:+1:` 이라고 적힌 줄을 보게 된다.
     expect(thumb.hint).not.toBe(":+1:");
+  });
+
+  it("이름·키워드로 걸린 줄은 흐린 자리에 그 이름과 키워드를 적는다 (N-3)", async () => {
+    const catalog = await loadCatalog();
+    const hints = new Map(
+      emojiCandidates(catalog, "thu", 0).map((row) => [row.id, row.hint])
+    );
+    // 순위가 서고도 남는 두 줄. 앞 판은 여기에 첫 숏코드를 적어서
+    // `:flag-lt:`·`:zap:` 라고만 말했고, 그 줄이 왜 거기 있는지는 화면 어디에도
+    // 없었다.
+    expect(hints.get("🇱🇹")).toBe("flag: Lithuania");
+    expect(hints.get("⚡️")).toBe("thunder");
+    // 숏코드로 걸린 줄은 그대로 숏코드다.
+    expect(hints.get("👍️")).toBe(":thumbsup:");
+  });
+
+  it("첫 줄은 숏코드로 걸린 줄이다 (H-1 정본 순위 소비)", async () => {
+    const catalog = await loadCatalog();
+    const [first] = emojiCandidates(catalog, "thu", 0);
+    expect(first.id).toBe("👍️");
+    expect(first.hint).toBe(":thumbsup:");
   });
 
   it("긴 질의도 규칙을 통과한다", async () => {

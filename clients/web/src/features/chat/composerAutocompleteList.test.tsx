@@ -65,7 +65,21 @@ const CHANNELS: Channel[] = [
     topic: "릴리스 공지",
     muted: false,
   },
-  { id: "c3", workspaceId: "w1", kind: "public", name: LONG_NAME, muted: false },
+  {
+    id: "c3",
+    workspaceId: "w1",
+    kind: "public",
+    name: LONG_NAME,
+    topic: "릴리스 회고 기록과 후속 작업",
+    muted: false,
+  },
+  {
+    id: "c4",
+    workspaceId: "w1",
+    kind: "private",
+    name: "김인턴작업",
+    muted: false,
+  },
 ];
 
 beforeAll(async () => {
@@ -268,6 +282,43 @@ describe("한 목록 기계가 세 트리거를 그린다 (#1930)", () => {
     press(input(), "Enter");
     flushFrames();
     expect(input().value).toBe(`#${LONG_NAME} `);
+  });
+
+  it("긴 이름의 행은 이름을 감싸고 주제 칸을 0px 로 죽이지 않는다 (M-1)", () => {
+    mount(createElement(Probe));
+    typeAll(input(), "#회고");
+    const [row] = options();
+    const spans = [...row.querySelectorAll("span")];
+    expect(spans).toHaveLength(2);
+    const [lead, hint] = spans;
+    expect(lead.textContent).toBe(`#${LONG_NAME}`);
+    expect(hint.textContent).toBe("릴리스 회고 기록과 후속 작업");
+    // 행이 감싼다: 이름은 한 줄에 갇히지 않고(두 줄까지), 주제는 자기 줄에서
+    // 자른다. jsdom 은 폭을 재지 않으므로 그 기하는 캡처 레인이 잰다
+    // (`capture-screens.mjs` 의 `#` 장면 — 두 줄 · 안 잘림 · 힌트 폭 > 0).
+    expect(row.className).toContain("flex-wrap");
+    expect(lead.className).toContain("line-clamp-2");
+    expect(lead.className).toContain("break-words");
+    expect(lead.className).not.toContain("truncate");
+    expect(hint.className).toContain("truncate");
+  });
+
+  it("주제가 없는 방은 빈 칸을 만들지 않는다 (M-1)", () => {
+    mount(createElement(Probe));
+    typeAll(input(), "#gen");
+    expect(options()[0].querySelectorAll("span")).toHaveLength(1);
+  });
+
+  it("비공개 방은 사이드바와 같은 자물쇠로 그려진다 (M-2)", () => {
+    mount(createElement(Probe));
+    typeAll(input(), "#김인턴");
+    const [row] = options();
+    expect(row.querySelector("svg")).not.toBeNull();
+    expect(row.textContent).toBe("김인턴작업");
+    // 삽입은 그대로 `#이름` 평문이다.
+    press(input(), "Enter");
+    flushFrames();
+    expect(input().value).toBe("#김인턴작업 ");
   });
 
   it("↑↓ 는 강조와 aria-activedescendant 를 함께 옮긴다", () => {

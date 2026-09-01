@@ -187,7 +187,11 @@ describe("컴포저 공용 표면 (#1688)", () => {
     // 접근 이름은 이제 트리거 표의 데이터다(#1930). 목록은 그 표만 읽는다.
     expect(machine).toContain('listLabel: "멘션 선택"');
     expect(machine).not.toContain('listLabel: "멤버 언급"');
-    expect(list).toContain("aria-label={composerTriggerSpec(kind).listLabel}");
+    // 목록은 트리거 표에서 읽은 그 spec 하나만 본다(접근 이름도, 비동기
+    // 소스의 문장도 — #1930 H-2 로 spec 이 문장을 하나 더 든다).
+    expect(list).toContain("const spec = composerTriggerSpec(kind);");
+    expect(list).toContain("aria-label={spec.listLabel}");
+    expect(list).not.toMatch(/aria-label="[^"]/);
   });
 });
 

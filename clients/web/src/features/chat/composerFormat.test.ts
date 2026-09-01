@@ -255,6 +255,49 @@ describe("선택 서식 트레이 표시 (#1902)", () => {
       })
     ).toBe(false);
   });
+
+  it("`#`·`:` 트리거도 같은 자 하나로 물러난다 (#1930 N-2)", () => {
+    // 주석이 이유로 드는 그 자리다: 억제가 트리거마다 갈라지면 `@` 만 물러나고
+    // `#` 위에서는 트레이와 목록이 같은 자리에 겹친다. 세 글자를 함께 잰다.
+    for (const value of ["@her", "#gen", ":thu"]) {
+      expect(
+        shouldShowComposerFormatTray({
+          value,
+          start: 0,
+          end: value.length,
+          autocompleteVisible: false,
+        }),
+        value
+      ).toBe(false);
+    }
+    // 트리거 글자가 아니면 같은 모양의 선택도 트레이를 올린다(과잉 억제 아님).
+    expect(
+      shouldShowComposerFormatTray({
+        value: "!gen",
+        start: 0,
+        end: 4,
+        autocompleteVisible: false,
+      })
+    ).toBe(true);
+  });
+
+  it("코드 서식 안 선택에서는 이제 트레이가 뜬다 (#1930 N-1 전환)", () => {
+    // 앞 판의 억제는 `mentionQueryAt`(코드 억제 없음)에 물었다. 그래서 코드
+    // 안에 `@` 를 낀 선택은 목록이 열리지도 않는데 트레이까지 잃었다. 지금
+    // 억제는 자동완성 파서에 묻고, 그 파서는 코드 안에서 질의를 열지 않는다.
+    const value = "`x @her";
+    // 멘션 **문법**으로는 여전히 열린 질의다(트레이가 묻던 그 함수).
+    expect(mentionQueryAt(value, 7)).toEqual({ start: 3, text: "her" });
+    // 자동완성 파서는 코드 안이라 열지 않고, 그래서 트레이가 물러날 이유가 없다.
+    expect(
+      shouldShowComposerFormatTray({
+        value,
+        start: 3,
+        end: 7,
+        autocompleteVisible: false,
+      })
+    ).toBe(true);
+  });
 });
 
 describe("서식 적용은 초안 저장 경로를 그대로 쓴다 (#1902)", () => {

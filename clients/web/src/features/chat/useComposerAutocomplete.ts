@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState, type RefObject } from "react
 import type { Channel, RosterMember } from "@momo/core/lib/api";
 import type { ComposerKeyIntent } from "@momo/core/features/chat/composerKeys";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
+import { useBrowserOffline } from "@/features/common/useOffline";
 import type { CatalogEmoji } from "@/features/emoji/catalog";
 import { loadCatalog } from "@/features/emoji/catalog";
 import { recordEmojiUse } from "@/features/emoji/frequencyStore";
@@ -14,6 +15,7 @@ import {
   insertComposerCandidate,
   memberCandidates,
   type ComposerCandidate,
+  type ComposerListStatus,
   type ComposerTriggerKind,
 } from "./composerAutocomplete";
 import { insertMentionTriggerAtComposerSelection } from "./composerInsertion";
@@ -35,32 +37,56 @@ import { insertMentionTriggerAtComposerSelection } from "./composerInsertion";
 const NO_CANDIDATES: ComposerCandidate[] = [];
 const NO_CATALOG: readonly CatalogEmoji[] = [];
 
+type EmojiCatalogState = {
+  entries: readonly CatalogEmoji[];
+  status: "idle" | "loading" | "ready" | "error";
+  retry: () => void;
+};
+
 /**
  * 이모지 질의가 실제로 열렸을 때만 카탈로그를 싣는다.
  *
  * 정적 import 를 쓰지 않는 이유는 피커와 같다: 카탈로그는 부팅 예산이 감당할
  * 크기가 아니고(`loadCatalog` 는 그래서 dynamic import 다), `:` 를 한 번도 치지
  * 않는 사람은 이 파일을 내려받을 이유가 없다.
+ *
+ * **싣는 중과 못 실은 것을 밖으로 낸다** (design-review #1930 H-2). 앞 판은
+ * 실패 경로가 빈 `catch` 였고 로딩도 상태가 아니어서, 화면은 두 경우를 「일치가
+ * 없다」와 같은 침묵으로 그렸다. 실측 셋이 그 침묵의 값이다: 청크를 3초 늦추면
+ * `:thu` + Enter 가 평문 `:thu` 로 전송되고(같은 키 입력의 뜻을 네트워크
+ * 경주가 정한다), 청크를 끊으면 영구 침묵이고, 한글 질의도 같은 침묵으로 끝난다.
+ *
+ * 재시도가 필요한 이유: `loadCatalog` 는 실패한 promise 를 지우므로 다음 `:`
+ * 질의에서 조용히 다시 시도된다. 사람이 다시 칠 이유를 모르는 것이 문제라
+ * 「다시 시도」가 그 재시도를 **말로** 만든다.
  */
-function useEmojiCatalog(active: boolean): readonly CatalogEmoji[] {
+function useEmojiCatalog(active: boolean): EmojiCatalogState {
   const [entries, setEntries] = useState<readonly CatalogEmoji[]>(NO_CATALOG);
+  const [status, setStatus] = useState<EmojiCatalogState["status"]>("idle");
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     if (!active || entries.length > 0) return;
     let live = true;
+    setStatus("loading");
     void loadCatalog().then(
       (catalog) => {
-        if (live) setEntries(catalog);
+        if (!live) return;
+        setEntries(catalog);
+        setStatus("ready");
       },
       () => {
         // 못 실으면 이모지 후보만 없다. `@`·`#` 은 카탈로그와 무관하므로
-        // 여기서 목록 기계 전체를 세우지 않는다.
+        // 여기서 목록 기계 전체를 세우지 않는다 — 이 트리거의 목록만 사유를
+        // 말한다.
+        if (live) setStatus("error");
       }
     );
     return () => {
       live = false;
     };
-  }, [active, entries.length]);
-  return entries;
+  }, [active, entries.length, attempt]);
+  const retry = useCallback(() => setAttempt((count) => count + 1), []);
+  return { entries, status: entries.length > 0 ? "ready" : status, retry };
 }
 
 export function useComposerAutocomplete({
@@ -81,23 +107,50 @@ export function useComposerAutocomplete({
   const [highlight, setHighlight] = useState(0);
   const [open, setOpen] = useState(false);
   const [tone] = useEmojiSkinTone();
+  // 카탈로그 실패의 사유를 가르는 신호. 피커가 같은 문장 앞에서 같은 것을 묻는다
+  // (`EmojiPickerPanel`, `useBrowserOffline`): 랜선이 빠진 것과 청크가 깨진 것은
+  // 사람이 할 일이 다르다. 레일의 `disconnected` 까지 보는 `useOffline` 을 쓰지
+  // 않는 이유는 이 훅이 세션 없이도 서는 자리(스레드 컴포저 시험)이기 때문이다.
+  const offline = useBrowserOffline();
   const query = open ? composerTriggerQueryAt(value, caret) : null;
   const kind: ComposerTriggerKind | null = query?.kind ?? null;
   const queryText = query?.text ?? null;
   const catalog = useEmojiCatalog(kind === "emoji");
+  const entries = catalog.entries;
   const candidates = useMemo(() => {
     if (kind === null || queryText === null) return NO_CANDIDATES;
     if (kind === "mention") return memberCandidates(members, queryText);
     if (kind === "channel") return channelCandidates(channels, queryText);
-    return emojiCandidates(catalog, queryText, tone);
-  }, [kind, queryText, members, channels, catalog, tone]);
+    return emojiCandidates(entries, queryText, tone);
+  }, [kind, queryText, members, channels, entries, tone]);
   const visible = candidates.length > 0;
-  const slug = composerTriggerSpec(kind ?? "mention").slug;
+  const spec = composerTriggerSpec(kind ?? "mention");
+  const slug = spec.slug;
+
+  /**
+   * 후보 목록 말고 목록 자리가 그릴 것.
+   *
+   * 비동기 소스를 든 트리거(`spec.deferred`)에서만 `ready` 밖으로 나간다.
+   * `visible` 은 건드리지 않는다 — 로딩 중의 Enter 는 예전처럼 **평문 전송**
+   * 이어야 한다(목록이 없으면 키는 컴포저의 것이다). 바뀌는 것은 그동안 화면이
+   * 침묵하지 않는다는 사실뿐이다.
+   */
+  const status: ComposerListStatus =
+    kind === null || spec.deferred === undefined
+      ? "ready"
+      : catalog.status === "loading" || catalog.status === "idle"
+        ? "loading"
+        : catalog.status === "error"
+          ? "error"
+          : candidates.length === 0
+            ? "empty"
+            : "ready";
 
   const close = useCallback(() => setOpen(false), []);
   // textarea의 keydown보다 먼저 받는 공용 층이다. 스레드 패널의 Esc까지 함께
-  // 닫히지 않게 이 목록 하나만 물러나고 전파를 끊는다.
-  useEscapeLayer(visible, close);
+  // 닫히지 않게 이 목록 하나만 물러나고 전파를 끊는다. 사유를 말하는 상자도
+  // 화면에 선 것이므로 같은 층을 잡는다 — Esc 한 번이 그것을 치운다.
+  useEscapeLayer(visible || status !== "ready", close);
 
   const replaceValue = (next: string, nextCaret: number) => {
     onValueChange(next);
@@ -180,6 +233,12 @@ export function useComposerAutocomplete({
     slug,
     candidates,
     visible,
+    /** 후보 대신 그릴 것(로딩·오류·무결과). 비동기 트리거에서만 움직인다. */
+    status,
+    /** 오류 상자의 「다시 시도」. */
+    retryCatalog: catalog.retry,
+    /** 오류 문장을 가른다(브라우저가 아는 사실). */
+    offline,
     highlight,
     setCaret,
     close,

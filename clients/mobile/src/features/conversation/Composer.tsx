@@ -461,7 +461,9 @@ export function composerColumnBudget(
 // `ScrollView` 다).
 //
 // **이 결정은 표면 한정이다.** 웹은 같은 물음에 다르게 답한다 — 상한 없이
-// `MENTION_LIMIT`(6) 을 전부 띄운다(`clients/web/src/features/chat/Composer.tsx`).
+// 후보 상한(6) 을 전부 띄운다(웹의 `COMPOSER_CANDIDATE_LIMIT`,
+// `clients/web/src/features/chat/composerAutocomplete.ts` — #1930 이 세 트리거의
+// 한 상한으로 옮겼다).
 // 다른 답이 정당한 이유는 기제가 달라서다: 웹의 팝오버는 `absolute bottom-full`
 // 이라 대화 열을 **안 먹고**, 그래서 「도크 ≤ 대화 열」이라는 이 절의 불변식 자체가
 // 거기서는 걸리지 않는다. 이 넷은 열을 나눠 갖는 표면의 답이지 제품 전체의 답이

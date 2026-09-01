@@ -861,6 +861,9 @@ export function Composer({
           // 앞에 달아 셋 다 유일하게 둔다(DOM id 와 같은 문자열).
           testId={`composer-${autocomplete.slug}-list`}
           optionTestId={`composer-${autocomplete.slug}-option`}
+          status={autocomplete.status}
+          offline={autocomplete.offline}
+          onRetry={autocomplete.retryCatalog}
         />
         <div
           className="rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring"

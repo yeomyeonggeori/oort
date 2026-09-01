@@ -399,6 +399,17 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000202", workspaceId: WORKSPACE_ID, kind: "public", name: "엔진", muted: false },
   { id: "00000000-0000-7000-8000-000000000203", workspaceId: WORKSPACE_ID, kind: "private", name: "김인턴작업", muted: false },
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
+  // 자유 텍스트 방 이름 (#1930 M-1). 채널 `name` 은 스키마상 자유 텍스트라 한글도
+  // 공백도 담고, 컴포저 후보 행은 폭 192(`w-pane-sm`) 안에서 그것을 담아야 한다.
+  // 이 줄이 없으면 그 행을 재는 프레임이 영문 짧은 이름만 보게 된다.
+  {
+    id: "00000000-0000-7000-8000-000000000205",
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "2026-하반기-릴리스-준비-회고-및-후속-작업",
+    topic: "회고 기록과 후속 작업",
+    muted: false,
+  },
 ];
 
 // The DM the directory opens onto (MOMO-611). It is in the fixture so the
@@ -3812,6 +3823,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
       `${trigger.typed} 자동완성 ${scheme}: ${JSON.stringify(proof)}`
     );
   }
+  if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
   const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
   await page.screenshot({ path: shot });
   shots.push(shot);
@@ -3821,6 +3833,58 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
   await page.keyboard.press("Escape");
   await list.waitFor({ state: "hidden" });
   await input.fill("");
+}
+
+/**
+ * 후보 행이 자유 텍스트 방 이름을 **실제로 담는지** 잰다 (design-review #1930).
+ *
+ * jsdom 은 폭을 재지 않는다. 그래서 앞 판의 「긴 채널 이름도 자르지 않고 넣는다」
+ * 시험은 삽입 문자열만 재고 초록이었고, 화면에서는 말줄임이 사람이 친 글자를
+ * 먹고(`#2026-하반기-릴리…`) 주제 칸이 폭 0px 로 소멸했다(M-1 실측). 여기서
+ * 재는 것은 그 두 가지다: 이름이 두 줄로 감싸고 잘리지 않는가, 주제가 폭을
+ * 갖는가. 같은 프레임에서 비공개 방의 격 글리프(M-2)도 함께 본다.
+ */
+async function assertComposerRows(page, scheme, trigger) {
+  const rows = await page.evaluate(`(() => {
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((option) => {
+      const spans = [...option.querySelectorAll('span')];
+      const lead = spans[0];
+      const hint = spans[1] ?? null;
+      const leadRect = lead.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(lead).lineHeight) || 1;
+      return {
+        text: option.textContent,
+        lock: Boolean(option.querySelector('svg')),
+        leadLines: Math.round(leadRect.height / line),
+        leadClipped:
+          lead.scrollHeight > lead.clientHeight + 1 ||
+          lead.scrollWidth > lead.clientWidth + 1,
+        hintW: hint ? Math.round(hint.getBoundingClientRect().width) : null,
+      };
+    });
+  })()`);
+  const find = (needle) => rows.find((row) => (row.text ?? "").includes(needle));
+  const wrapped = find(trigger.rows.wrapped);
+  if (
+    !wrapped ||
+    wrapped.leadLines < 2 ||
+    wrapped.leadClipped ||
+    !(wrapped.hintW > 0)
+  ) {
+    throw new Error(
+      `${trigger.typed} 긴 이름 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  const locked = find(trigger.rows.locked);
+  if (!locked || !locked.lock || (locked.text ?? "").includes("#")) {
+    throw new Error(
+      `${trigger.typed} 비공개 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  console.log(
+    `  자동완성 행 ${scheme}: 긴 이름 ${wrapped.leadLines}줄 · 주제 ${wrapped.hintW}px · 비공개 자물쇠 ${locked.lock}`
+  );
 }
 
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
@@ -6074,6 +6138,22 @@ async function captureScheme(browser, scheme) {
       shot: "composer-channel-autocomplete",
     }
   );
+  // 같은 목록의 두 결함을 한 프레임이 진다 (#1930 M-1·M-2): 자유 텍스트 방
+  // 이름이 행 안에서 감싸고, 비공개 방이 사이드바와 같은 자물쇠로 그려진다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      minOptions: 4,
+      rows: { wrapped: "회고", locked: "김인턴작업" },
+      shot: "composer-channel-kinds",
+    }
+  );
   await captureComposerTrigger(
     login,
     scheme,
@@ -6083,10 +6163,13 @@ async function captureScheme(browser, scheme) {
       typed: ":thu",
       list: "composer-emoji-list",
       label: "이모지 선택",
-      // 이모지는 이름을 박아 두지 않는다 — 후보와 순위의 정본은 피커의
-      // `filterEmojis` 이고 그 동일성은 단위 시험이 잰다. 여기서 잴 것은 목록이
-      // 실제로 여러 줄을 그리고 aria 배선이 그 목록을 가리킨다는 사실이다.
+      // 후보와 순위의 정본은 피커의 `filterEmojis` 이고 그 동일성은 단위 시험이
+      // 잰다. 여기서 잴 것은 목록이 실제로 여러 줄을 그리고 aria 배선이 그
+      // 목록을 가리킨다는 사실 — 그리고 **첫 줄이 Enter 의 기본값이라는 사실**
+      // 이다(#1930 H-1). 앞 판의 이 프레임은 `:thu` 첫 줄로 🫰 를 찍었고 마지막
+      // 줄이 리투아니아 국기였다. 지금 첫 줄은 친 글자를 숏코드로 맞춘 줄이다.
       minOptions: 2,
+      expectFirst: ":thumbsup:",
       shot: "composer-emoji-autocomplete",
     }
   );
