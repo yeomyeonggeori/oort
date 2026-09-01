@@ -8045,6 +8045,11 @@ async function captureSearchScopeScenes(browser, scheme) {
   const shots = [];
   const HERE = GENERAL_ID; // general
   const THERE = CHANNELS[1].id; // 엔진
+  // 브리프 ①이 명시한 두 갈래를 이 레인이 직접 본다(R1 M-3). 둘 다 이 파일에
+  // 이미 있던 픽스처다 — DM 은 hermes, 긴 이름은 #1930 이 「짧은 픽스처」 재발
+  // 방지용으로 넣어 둔 40자 그 줄이다. 사진이 없어서 「다이렉트 메시지님과의」
+  // (R1 H-2)가 캡처 레인이 아니라 리뷰어 프로브에서 나왔다.
+  const LONG = CHANNELS[4].id; // 2026-하반기-릴리스-준비-회고-및-후속-작업
   const NEEDLE = "배포";
   // 이 질의는 어느 채널에도 없다. 좁힌 빈손 프레임이 그 위에 선다.
   const MISSING = "아무데도없는말";
@@ -8089,7 +8094,14 @@ async function captureSearchScopeScenes(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
 
+  // 같은 라우트 안에서 해시만 바꾸면 라우트가 다시 마운트되지 않아 `?q=`가
+  // 첫 렌더의 값 그대로다(useMessageSearch: "초기값은 첫 렌더에서만 읽는다").
+  // 그래서 채널을 한 번 거쳐 실제로 떠났다 온다 — 사람이 ⌘K로 오는 경로와 같다.
   async function goSearch(query, channelId) {
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, GENERAL_ID);
+    await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
     await page.evaluate(
       ([q, id]) => {
         const params = new URLSearchParams({ q });
@@ -8141,18 +8153,16 @@ async function captureSearchScopeScenes(browser, scheme) {
   }
 
   // 좁힌 빈손 — 그리고 승격 버튼이 실제로 넓히는지.
-  //
-  // 주소를 다시 밀지 않고 **화면 위에서** 만든다. 같은 라우트 안에서 해시만
-  // 바꾸면 라우트가 다시 마운트되지 않으므로 `?q=`는 첫 렌더의 값 그대로다
-  // (useMessageSearch: "초기값은 첫 렌더에서만 읽는다"). 사람이 하는 일도
-  // 이쪽이다: 칩으로 좁히고, 입력을 갈아 친다.
-  await page.getByTestId("search-scope-channel").click();
-  await page.getByTestId("search-input").fill(MISSING);
+  await goSearch(MISSING, HERE);
   const empty = page.getByTestId("search-empty");
   await empty.waitFor({ state: "visible" });
   const emptyText = await empty.innerText();
-  if (!emptyText.includes("이 채널에는")) {
-    throw new Error(`좁힌 빈손이 범위를 말하지 않는다 ${scheme}: ${emptyText}`);
+  // 범위만이 아니라 **어느 채널인지**를 말해야 한다(R1 H-1). 이 화면에는 행이
+  // 없으므로 행 메타가 이름을 대신 메워 주지 않고, 안내문은 질의가 있어 안 보인다.
+  if (!emptyText.includes("general에는")) {
+    throw new Error(
+      `좁힌 빈손이 어느 채널인지 말하지 않는다 ${scheme}: ${emptyText}`
+    );
   }
   await page.waitForTimeout(200);
   const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
@@ -8164,7 +8174,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     () =>
       (
         document.querySelector('[data-testid="search-empty"]')?.textContent ?? ""
-      ).includes("이 채널에는") === false
+      ).includes("에는 없습니다") === false
   );
   const escalated = await page.getByTestId("search-empty-escalate").count();
   if (escalated !== 0) {
@@ -8172,6 +8182,63 @@ async function captureSearchScopeScenes(browser, scheme) {
       `승격 뒤에도 승격 버튼이 남아 있다 ${scheme}: 넓힐 곳이 없는데 컨트롤이 있다`
     );
   }
+  // 승격은 주소에도 적힌다(R1 M-2). 화면만 넓어지고 주소가 `channel=…`에
+  // 남아 있으면, 새로고침이 사람의 결정을 조용히 되돌린다.
+  const widenedHash = await page.evaluate(() => window.location.hash);
+  if (!widenedHash.includes("scope=all") || !widenedHash.includes("channel=")) {
+    throw new Error(
+      `승격 뒤 주소가 화면과 다른 말을 한다 ${scheme}: ${widenedHash}`
+    );
+  }
+
+  // DM 분기 — 「이 대화에서」와 존칭 문장. `channelLabel` 이 사람 이름을 주는
+  // 정상 경로이고, 이름이 아닌 값을 줄 때 존칭이 붙지 않는 갈래는 vitest 가
+  // 잰다(SearchRoute.scope.test.tsx).
+  await goSearch(MISSING, DM_ID);
+  const dmEmpty = page.getByTestId("search-empty");
+  await dmEmpty.waitFor({ state: "visible" });
+  const dmText = await dmEmpty.innerText();
+  if (!dmText.includes("님과의 대화에는")) {
+    throw new Error(`DM 빈손이 사람 이름으로 말하지 않는다 ${scheme}: ${dmText}`);
+  }
+  const dmChip = await page.getByTestId("search-scope-channel").innerText();
+  if (dmChip.trim() !== "이 대화에서") {
+    throw new Error(`DM 칩이 「채널」이라 부른다 ${scheme}: ${dmChip}`);
+  }
+  await page.waitForTimeout(200);
+  const dmShot = `${OUT_DIR}/search-scope-dm-${scheme}.png`;
+  await page.screenshot({ path: dmShot });
+  shots.push(dmShot);
+
+  // 긴 채널 이름 — 빈손 문장이 40자 이름을 지고도 문서를 옆으로 밀지 않는가.
+  // 이름을 칩이 아니라 문장이 지기로 한 선택(R1 H-1)의 대가를 여기서 잰다.
+  await goSearch(MISSING, LONG);
+  const longEmpty = page.getByTestId("search-empty");
+  await longEmpty.waitFor({ state: "visible" });
+  const longText = await longEmpty.innerText();
+  if (!longText.includes("2026-하반기-릴리스-준비-회고-및-후속-작업에는")) {
+    throw new Error(
+      `긴 이름이 빈손 문장에 실리지 않았다 ${scheme}: ${longText}`
+    );
+  }
+  const overflow = await page.evaluate(
+    `(() => ({ doc: document.documentElement.scrollWidth, win: window.innerWidth }))()`
+  );
+  if (overflow.doc > overflow.win) {
+    throw new Error(
+      `긴 이름이 문서를 옆으로 밀었다 ${scheme}: ${overflow.doc} > ${overflow.win}`
+    );
+  }
+  // 칩은 이름을 지지 않기로 한 그 결정 그대로다 — 알약이 이름 길이를 따라
+  // 출렁이면 R1 H-1 의 수리가 칩 폭 문제를 다시 연 것이 된다.
+  const longChip = await page.getByTestId("search-scope-channel").innerText();
+  if (longChip.trim() !== "이 채널에서") {
+    throw new Error(`긴 이름이 칩으로 새어 들어갔다 ${scheme}: ${longChip}`);
+  }
+  await page.waitForTimeout(200);
+  const longShot = `${OUT_DIR}/search-scope-long-name-${scheme}.png`;
+  await page.screenshot({ path: longShot });
+  shots.push(longShot);
 
   await context.close();
   return shots;

@@ -10,6 +10,7 @@
 //   server-rust/crates/momo-messaging/src/search.rs
 // =============================================================================
 
+import { ApiError } from "../../lib/api";
 import { attachParticle } from "../../lib/koreanParticle";
 import type { FilterTabsSpec } from "../common/filterTabs";
 
@@ -70,10 +71,31 @@ export const SEARCH_SCOPES: readonly SearchScope[] = ["channel", "workspace"];
  */
 export interface SearchChannelContext {
   channelId: string;
-  /** 사람이 그 채널을 부르는 이름 — `channelLabel`이 준 그 한 줄. */
-  label: string;
+  /**
+   * 사람이 그 채널을 부르는 이름 — `channelLabel`이 준 그 한 줄. **아직 모르면
+   * `null`이다**(목록이 안 왔거나, 볼 수 없는 채널이거나).
+   *
+   * 내부 id를 잘라 이름 자리에 넣지 않는다(R1 M-1). 행 메타 셀이 못 푼 id를
+   * 잘라 보여 주는 것은 **표의 한 칸**이라 진단으로 읽히지만, 여기 값은 문장과
+   * 접근성 이름으로 들어간다 — `019f9c99에서 검색`은 사람에게 아무것도 말하지
+   * 않으면서 내부 식별자를 화면에 세운다. 모르면 모른다고 하고, 이름 없는
+   * 문장으로 물러난다.
+   */
+  label: string | null;
   /** DM이면 「채널」이 아니라 「대화」다. */
   isDirect: boolean;
+  /**
+   * 이 DM의 상대 **사람**의 표시 이름. 디렉터리에서 그 행을 실제로 찾았을
+   * 때만 채운다.
+   *
+   * `label`과 따로 있는 이유가 R1 H-2다: 존칭은 문자열이 아니라 **사람**에게
+   * 붙는다. DM의 `label`은 사람 이름이 아닐 수 있고(디렉터리 미도착이면
+   * 「다이렉트 메시지」, 동명이인이면 「김민지 @minji」), 거기에 「님」을
+   * 기계적으로 붙이면 「다이렉트 메시지님과의 대화」와 「@minji님」이 난다.
+   * 사람 행을 찾았을 때만 존칭 문장을 쓰고, 못 찾으면 존칭 없는 문장으로
+   * 물러난다.
+   */
+  peer: string | null;
 }
 
 /**
@@ -105,8 +127,11 @@ export function searchScopeTabs(
 ): FilterTabsSpec<SearchScope> {
   return {
     // tablist의 접근성 이름이 「무엇을 고르는 두 버튼인가」를 말한다. 채널
-    // 이름은 여기에 실린다 — 칩과 달리 이 문자열은 잘리지 않는다.
-    label: context === null ? "검색 범위" : `검색 범위(${context.label})`,
+    // 이름은 여기에 실린다 — 칩과 달리 이 문자열은 잘리지 않는다. 이름을
+    // 모르면 이름 없이 말한다(R1 M-1): 접근성 이름은 눈으로 읽는 문장보다
+    // 내부 식별자를 숨기기 더 쉬운 자리가 아니라, 오히려 확인이 어려운 자리다.
+    label:
+      context?.label == null ? "검색 범위" : `검색 범위(${context.label})`,
     values: SEARCH_SCOPES,
     labelFor: (scope) => searchScopeLabel(scope, context),
     tabId: (scope) => `search-scope-tab-${scope}`,
@@ -140,6 +165,62 @@ export function defaultSearchScope(
   return context === null ? "workspace" : "channel";
 }
 
+// ---- 범위는 주소에 산다 (R1 M-2) --------------------------------------------
+//
+// 1차 판본의 범위는 `useState`였고, 그래서 승격한 뒤의 **주소가 화면과 반대말을
+// 했다**: 주소는 `channel=…`인데 화면은 전체 결과였다. 그 상태에서 새로고침하면
+// 기본값이 다시 채널을 골라 사람이 방금 내린 결정을 조용히 되돌리고, 그 되돌림은
+// 아무 데도 적히지 않는다. 링크를 붙여넣은 동료도 다른 화면을 본다.
+//
+// 그래서 범위는 상태가 아니라 **주소에서 파생된다** — `?status=`를 그렇게 쓰는
+// 작업 흐름 목록과 같은 문법이다(WorkstreamListRoute).
+//
+// 파라미터가 둘인 이유: 하나로는 승격 상태를 적을 수 없다. `channel=`만 쓰고
+// 승격에서 지우면 「#배포에서 왔지만 지금은 전체를 보고 있다」가 주소에 적히지
+// 못하고, 그 순간 범위 칩 자체가 사라져 되돌아갈 길이 없어진다 — 두 값을 늘
+// 함께 보여 주는 공용 탭 컨트롤(FilterTabs)의 문법과도 어긋난다. 그래서
+// `channel=`은 **어느 채널에서 왔는가**(칩의 존재)를, `scope=all`은 **지금 무엇을
+// 고른 상태인가**를 적는다.
+
+/** 어느 채널 문맥에서 왔는가. */
+export const SEARCH_CHANNEL_PARAM = "channel";
+/** 그 문맥 안에서 지금 고른 범위. 부재는 「그 채널」(문맥의 기본값)이다. */
+export const SEARCH_SCOPE_PARAM = "scope";
+/** `scope=`가 워크스페이스 범위를 뜻할 때의 값. */
+export const SEARCH_SCOPE_ALL = "all";
+
+/**
+ * 주소가 말하는 범위.
+ *
+ * 문맥이 없으면 좁힐 대상이 없으므로 `scope=`가 무엇이든 전체다 — 파라미터
+ * 하나만 손으로 지운 주소가 「채널 범위인데 채널이 없다」는 상태를 만들 수 없게.
+ */
+export function parseSearchScope(
+  rawScope: string | null,
+  context: SearchChannelContext | null
+): SearchScope {
+  if (context === null) return "workspace";
+  return rawScope === SEARCH_SCOPE_ALL ? "workspace" : defaultSearchScope(context);
+}
+
+/**
+ * 이 범위를 고른 뒤의 검색 파라미터. 호출자가 `setParams`에 그대로 넘긴다.
+ *
+ * `q`처럼 이 표면이 이미 들고 있는 다른 값은 건드리지 않는다: 범위를 바꾸는 일이
+ * 질의를 지우면 승격은 한 번의 누름이 아니게 된다.
+ */
+export function searchScopeParams(
+  current: URLSearchParams,
+  scope: SearchScope
+): URLSearchParams {
+  const next = new URLSearchParams(current);
+  if (scope === "workspace") next.set(SEARCH_SCOPE_PARAM, SEARCH_SCOPE_ALL);
+  // 기본값은 적지 않는다. `?channel=…` 하나만 든 주소(⌘K가 만드는 그것)와
+  // 칩으로 채널을 다시 고른 주소가 같은 문자열이어야, 같은 화면이 같은 링크다.
+  else next.delete(SEARCH_SCOPE_PARAM);
+  return next;
+}
+
 /**
  * 이 검색 요청을 식별하는 캐시 키.
  *
@@ -169,6 +250,34 @@ export function searchQueryKey(
 }
 
 /**
+ * ⌘K 팔레트의 검색 줄에 적히는 말 (R1 N-1).
+ *
+ * 두 줄이 **한 함수**에서 나온다. 1차 판본은 전체 줄이 「'배포' 메시지 검색」,
+ * 채널 줄이 「이 채널에서 '배포' 찾기」라, 같은 그룹에 나란히 선 두 줄이 같은
+ * 행동을 다른 동사로 불렀고 채널 줄은 상태에 따라 동사가 또 바뀌었다. 표면
+ * 이름이 한 줄에서 온다고 못 박아 둔 이 파일의 규율(#1146 N4)과 결이 다르다.
+ *
+ * 범위 이름은 [`searchScopeLabel`]에서 든다 — 팔레트가 「이 채널에서」라 하고
+ * 도착한 표면의 칩이 다른 말을 하면 사람은 자기가 고른 것이 반영됐는지 매번
+ * 대조해야 한다. 「에서」는 받침으로 갈리지 않아 조사 판정이 필요 없다.
+ *
+ * 표면 이름(「메시지 검색」)은 여기 없다. 그것은 그룹 머리글이 한 번 말한다.
+ */
+export function searchEntryLabel(
+  scope: SearchScope,
+  context: SearchChannelContext | null,
+  query: string
+): string {
+  const named = searchScopeLabel(scope, context);
+  const where = scope === "workspace" ? `${named}에서` : named;
+  const trimmed = normalizeQuery(query);
+  // 팔레트 줄에도 문단이 붙여넣기될 수 있다. 빈 결과 문구와 같은 자로 자른다.
+  return trimmed === ""
+    ? `${where} 검색`
+    : `${where} '${clampQueryForCopy(trimmed)}' 검색`;
+}
+
+/**
  * 이 검색으로 데려가는 주소.
  *
  * 팔레트가 `/search?q=…`를 손으로 이어 붙이고 있었고, 범위가 생기면서 그 조립이
@@ -179,7 +288,7 @@ export function searchRoutePath(query: string, channelId?: string): string {
   const params = new URLSearchParams();
   const trimmed = normalizeQuery(query);
   if (trimmed !== "") params.set("q", trimmed);
-  if (channelId !== undefined) params.set("channel", channelId);
+  if (channelId !== undefined) params.set(SEARCH_CHANNEL_PARAM, channelId);
   const suffix = params.toString();
   return suffix === "" ? "/search" : `/search?${suffix}`;
 }
@@ -199,16 +308,58 @@ export function channelIdInPath(pathname: string): string | null {
   return raw === "" ? null : raw;
 }
 
-/** 입력 상자의 안내문. 범위를 문장으로 한 번 더 말한다. */
+/** 이 범위가 실제로 좁히고 있는 채널, 아니면 `null`. */
+function narrowedTo(
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): SearchChannelContext | null {
+  return scopedChannelId(scope, context) === undefined ? null : context;
+}
+
+/**
+ * 좁힌 범위를 사람이 부르는 이름 — 조사 없이, 이름만.
+ *
+ * 세 갈래이고 순서가 규칙이다(R1 H-2 / M-1):
+ *   1. DM이고 상대 **사람**을 찾았다 → `김인턴님` (존칭은 여기서만 붙는다)
+ *   2. 이름은 아는데 사람은 아니다(공개/비공개 채널, 또는 상대를 못 찾은 DM의
+ *      채널 이름) → 그 이름 그대로
+ *   3. 이름을 모른다 → `null`. 부르는 이가 문장을 이름 없이 짓는다.
+ */
+export function scopeChannelName(
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): string | null {
+  const target = narrowedTo(scope, context);
+  if (target === null) return null;
+  if (target.isDirect) return target.peer === null ? null : `${target.peer}님`;
+  return target.label;
+}
+
+/**
+ * 입력 상자의 안내문. 범위를 문장으로 한 번 더 말한다.
+ *
+ * 이 자리는 **질의가 비었을 때만** 보인다. 그래서 이것 하나로는 「어느 채널을
+ * 찾고 있는가」를 답할 수 없고(빈손 화면은 정의상 질의가 있는 화면이다),
+ * [`noResultsCopy`]가 그 답을 함께 진다 — R1 H-1이 짚은 자리다.
+ */
 export function searchPlaceholder(
   scope: SearchScope,
   context: SearchChannelContext | null
 ): string {
-  const target = scopedChannelId(scope, context) === undefined ? null : context;
+  const target = narrowedTo(scope, context);
   if (target === null) return "메시지 내용으로 검색";
+  const named = scopeChannelName(scope, context);
+  if (named === null) {
+    // 이름을 모르는 채로 좁혀 있다. 무엇을 좁혔는지는 칩이 말하고 있으므로
+    // 안내문은 그 말을 되풀이한다 — 없는 이름을 지어내지 않는다.
+    return target.isDirect ? "이 대화에서 검색" : "이 채널에서 검색";
+  }
+  // 「과/와」는 짝이 갈리는 조사이지만 여기서는 갈리지 않는다: DM의 `named`는
+  // 언제나 「…님」으로 끝나고 ㅁ은 받침이라 답이 늘 「과」다. 사람 이름을 그대로
+  // 쓰던 판본이었다면 lib/koreanParticle을 불렀어야 한다.
   return target.isDirect
-    ? `${target.label}님과의 대화에서 검색`
-    : `${target.label}에서 검색`;
+    ? `${named}과의 대화에서 검색`
+    : `${named}에서 검색`;
 }
 
 /**
@@ -238,7 +389,23 @@ export function noResultsCopy(
   if (scopedChannelId(scope, context) === undefined) {
     return `${subject} 들어간 메시지를 찾지 못했습니다.`;
   }
-  const where = context?.isDirect ? "이 대화에는" : "이 채널에는";
+  // **어느** 채널에서 못 찾았는지를 이 문장이 진다(R1 H-1).
+  //
+  // 1차 판본은 「이 채널에는」으로만 말했고, 그 화면에는 채널 이름이 어디에도
+  // 없었다. 결과가 **있을** 때는 행마다 채널 이름이 붙어 우연히 메워지는데,
+  // 정작 어디서 못 찾았는지가 중요한 것은 결과가 **없는** 쪽이다. 안내문
+  // (`searchPlaceholder`)은 질의가 있으면 안 보이므로 그 자리를 대신할 수 없다.
+  //
+  // 이름을 모르면 이름 없이 말한다 — 내부 id를 문장에 세우지 않는다(R1 M-1).
+  const named = scopeChannelName(scope, context);
+  const where =
+    named === null
+      ? context?.isDirect
+        ? "이 대화에는"
+        : "이 채널에는"
+      : context?.isDirect
+        ? `${named}과의 대화에는`
+        : `${named}에는`;
   return `${subject} 들어간 메시지가 ${where} 없습니다.`;
 }
 
@@ -253,6 +420,58 @@ export function noResultsCopy(
 export const ESCALATE_TO_WORKSPACE_DETAIL =
   "다른 채널에 있었을 수 있습니다. 같은 말로 전체를 찾아볼 수 있습니다.";
 export const ESCALATE_TO_WORKSPACE_LABEL = "전체에서 찾기";
+
+// ---- 좁힌 범위에서 서버가 거절했을 때 (R1 B-3) --------------------------------
+//
+// 서버는 **비멤버·비존재·타 워크스페이스 채널에 모두 404**로 답한다(#1940). 셋을
+// 구분할 수 없게 만든 것이 서버 쪽 설계이고(멤버십 오라클 방지), 클라가 할 일은
+// 그 하나의 404를 사람 말로 옮기는 것이다.
+//
+// 왜 이것이 `serverSaysAbsent`로 가면 안 되는가: 그 판정은 `404 | 405 | 501`을
+// 「이 서버에 그 기능이 없다」로 읽는다. 그 독법은 표면 전체를 물을 때는 맞지만
+// **채널 하나를 물었을 때는 정반대의 거짓말**이 된다 — 서버는 방금 전체 범위로
+// 결과를 돌려줬으므로 검색을 제공하고 있고, 없는 것은 그 채널을 볼 자격이다.
+// 1차 판본이 그 갈래로 흘러 「이 서버는 아직 메시지 검색을 제공하지 않습니다 /
+// 채널을 열어 직접 찾아보세요」를 그렸다. 두 문장 다 틀렸고, 뒤 문장은 하필
+// **바로 그 채널을 열 수 없다**는 조건에서 채널을 열라고 한다.
+
+/**
+ * 좁힌 범위에서 서버가 「그 채널은 못 본다」고 답했는가.
+ *
+ * 범위가 채널일 때의 404만 이 갈래다. 워크스페이스 범위의 404는 여전히 표면
+ * 미제공 이야기이므로 기존 판정(`serverSaysAbsent`)이 그대로 가져간다.
+ */
+export function isChannelScopeRefusal(
+  error: unknown,
+  scope: SearchScope,
+  context: SearchChannelContext | null
+): boolean {
+  if (scopedChannelId(scope, context) === undefined) return false;
+  return error instanceof ApiError && error.status === 404;
+}
+
+/**
+ * 그 거절을 사람에게 옮긴 문장.
+ *
+ * 이름을 부르지 않는다. 볼 수 없는 채널의 이름을 화면에 세우는 것은 그 자체로
+ * 얇은 누설이고(없어진 채널인지 못 들어가는 채널인지도 서버가 일부러 구분해 주지
+ * 않는다), 못 푼 id를 대신 세우는 것은 M-1이 막은 그 문장이다.
+ */
+export function channelScopeRefusalCopy(
+  context: SearchChannelContext | null
+): { headline: string; detail: string } {
+  const what = context?.isDirect ? "이 대화의" : "이 채널의";
+  return {
+    // 「을/를」을 피해 「…의 메시지는」으로 짓는다. 앞말이 「대화」인지
+    // 「채널」인지에 따라 조사가 갈리지 않는 형태여야 이 문장이 두 갈래에서
+    // 같은 규칙으로 선다.
+    headline: `${what} 메시지는 찾을 수 없습니다.`,
+    // 세 가지 이유가 하나의 404로 온다. 어느 것인지 모르면서 하나를 고르면
+    // 화면이 서버가 하지 않은 말을 하게 되므로, 셋을 셋으로 말한다.
+    detail:
+      "나갔거나, 없어졌거나, 처음부터 볼 수 없는 곳입니다. 같은 말로 전체를 찾아볼 수 있습니다.",
+  };
+}
 
 /**
  * 문구에 실을 질의의 최대 길이.

@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { ApiError } from "../../lib/api";
 import {
   channelIdInPath,
+  channelScopeRefusalCopy,
   clampQueryForCopy,
   defaultSearchScope,
+  isChannelScopeRefusal,
+  parseSearchScope,
   isSearchable,
   leadsWithEllipsis,
   noResultsCopy,
@@ -11,9 +15,14 @@ import {
   scopedChannelId,
   searchPhase,
   searchPlaceholder,
+  scopeChannelName,
   searchQueryKey,
   searchRoutePath,
+  SEARCH_CHANNEL_PARAM,
+  SEARCH_SCOPE_ALL,
+  SEARCH_SCOPE_PARAM,
   searchScopeLabel,
+  searchScopeParams,
   searchScopeTabs,
   SEARCH_MIN_CHARS,
   SEARCH_SCOPES,
@@ -239,11 +248,34 @@ const CHANNEL: SearchChannelContext = {
   channelId: "0199C0FF-EE00-7000-8000-000000000001",
   label: "#배포",
   isDirect: false,
+  peer: null,
 };
 const DM: SearchChannelContext = {
   channelId: "0199C0FF-EE00-7000-8000-000000000002",
   label: "김인턴",
   isDirect: true,
+  peer: "김인턴",
+};
+/** 디렉터리가 아직 안 왔거나 실패한 DM — `channelLabel`이 사람 이름을 못 준다. */
+const DM_NO_PEER: SearchChannelContext = {
+  channelId: "0199C0FF-EE00-7000-8000-000000000003",
+  label: "다이렉트 메시지",
+  isDirect: true,
+  peer: null,
+};
+/** 동명이인이라 라벨에 핸들이 붙은 DM. 사람 이름은 라벨이 아니라 `peer`다. */
+const DM_AMBIGUOUS: SearchChannelContext = {
+  channelId: "0199C0FF-EE00-7000-8000-000000000004",
+  label: "김민지 @minji",
+  isDirect: true,
+  peer: "김민지",
+};
+/** 목록에서 못 푼 채널 — 이름을 모른다. 내부 id로 대신하지 않는다. */
+const UNRESOLVED: SearchChannelContext = {
+  channelId: "0199C0FF-EE00-7000-8000-000000000005",
+  label: null,
+  isDirect: false,
+  peer: null,
 };
 
 describe("검색 범위", () => {
@@ -348,17 +380,32 @@ describe("빈 결과는 범위를 말한다", () => {
     );
   });
 
-  it("좁힌 범위에서 빈손이면 어디서 못 찾았는지 말한다", () => {
-    // 「찾지 못했습니다」로만 끝내면 워크스페이스 전체에서 없다는 뜻으로 읽히고,
-    // 사람은 옆 채널에 있는 말을 찾기를 그만둔다.
+  it("좁힌 범위에서 빈손이면 **어느 채널에서** 못 찾았는지 말한다", () => {
+    // R1 H-1: 「이 채널에는」으로만 말하던 판본에서는 그 화면 어디에도 채널
+    // 이름이 없었다. 결과가 있을 때는 행마다 이름이 붙어 우연히 메워지고,
+    // 정작 어디서 못 찾았는지가 중요한 것은 결과가 없는 쪽이다.
     const copy = noResultsCopy("배포", "channel", CHANNEL);
-    expect(copy).toContain("이 채널에는");
+    expect(copy).toContain("#배포에는");
     expect(copy).toContain("'배포'가");
     expect(copy).not.toBe("'배포'가 들어간 메시지를 찾지 못했습니다.");
   });
 
-  it("DM이면 「이 대화에는」이다", () => {
-    expect(noResultsCopy("배포", "channel", DM)).toContain("이 대화에는");
+  it("DM이면 사람 이름과 존칭으로 말한다", () => {
+    expect(noResultsCopy("배포", "channel", DM)).toContain(
+      "김인턴님과의 대화에는"
+    );
+  });
+
+  it("이름을 모르면 이름 없이 말한다", () => {
+    // 못 푼 채널·디렉터리 미도착 DM. 내부 id를 문장에 세우지 않는다(R1 M-1).
+    const unresolved = noResultsCopy("배포", "channel", UNRESOLVED);
+    expect(unresolved).toContain("이 채널에는");
+    expect(unresolved).not.toContain(UNRESOLVED.channelId.slice(0, 8));
+
+    const noPeer = noResultsCopy("배포", "channel", DM_NO_PEER);
+    expect(noPeer).toContain("이 대화에는");
+    // 「다이렉트 메시지님과의 대화에는」은 사람 이름이 아닌 것에 존칭을 붙인 말이다.
+    expect(noPeer).not.toContain("다이렉트 메시지님");
   });
 
   it("좁힌 문구에서도 조사는 골라 붙인다", () => {
@@ -385,6 +432,157 @@ describe("입력 안내문", () => {
   it("전체이거나 문맥이 없으면 지금까지의 안내문이다", () => {
     expect(searchPlaceholder("workspace", CHANNEL)).toBe("메시지 내용으로 검색");
     expect(searchPlaceholder("channel", null)).toBe("메시지 내용으로 검색");
+  });
+});
+
+describe("존칭은 사람에게만 붙는다", () => {
+  it("상대를 못 찾은 DM은 존칭 없는 문장으로 물러난다", () => {
+    // R1 H-2: `channelLabel`은 상대를 못 찾으면 「다이렉트 메시지」를 돌려준다.
+    // 거기에 「님」을 기계적으로 붙이면 「다이렉트 메시지님과의 대화에서 검색」이
+    // 난다 — 디렉터리가 늦거나 실패하는, 흔한 상태에서.
+    expect(searchPlaceholder("channel", DM_NO_PEER)).toBe("이 대화에서 검색");
+    expect(searchPlaceholder("channel", DM_NO_PEER)).not.toContain("님");
+    expect(scopeChannelName("channel", DM_NO_PEER)).toBeNull();
+  });
+
+  it("동명이인이라 핸들이 붙은 라벨에도 존칭이 핸들 뒤에 붙지 않는다", () => {
+    // 라벨은 「김민지 @minji」이지만 사람 이름은 「김민지」다. 라벨에 붙이면
+    // 「김민지 @minji님과의 대화에서 검색」이 난다.
+    expect(searchPlaceholder("channel", DM_AMBIGUOUS)).toBe(
+      "김민지님과의 대화에서 검색"
+    );
+    expect(searchPlaceholder("channel", DM_AMBIGUOUS)).not.toContain("@minji님");
+  });
+
+  it("채널에는 존칭이 없다", () => {
+    expect(searchPlaceholder("channel", CHANNEL)).not.toContain("님");
+    expect(scopeChannelName("channel", CHANNEL)).toBe("#배포");
+  });
+});
+
+describe("이름을 모르는 채널", () => {
+  it("안내문이 내부 id를 세우지 않는다", () => {
+    // R1 M-1: 1차 판본은 「019f9c99에서 검색」이라 적었다. 사람에게 아무것도
+    // 말하지 않으면서 내부 식별자를 문장에 세운다.
+    const copy = searchPlaceholder("channel", UNRESOLVED);
+    expect(copy).toBe("이 채널에서 검색");
+    expect(copy).not.toContain(UNRESOLVED.channelId.slice(0, 8));
+  });
+
+  it("접근성 이름도 내부 id를 세우지 않는다", () => {
+    const label = searchScopeTabs(UNRESOLVED).label;
+    expect(label).toBe("검색 범위");
+    expect(label).not.toContain(UNRESOLVED.channelId.slice(0, 8));
+  });
+
+  it("이름을 알 때는 접근성 이름이 그것을 든다", () => {
+    expect(searchScopeTabs(CHANNEL).label).toBe("검색 범위(#배포)");
+  });
+});
+
+describe("좁힌 범위의 404는 「기능 미제공」이 아니다", () => {
+  const notFound = new ApiError(404, "channel not found");
+
+  it("범위가 채널일 때의 404만 이 갈래다", () => {
+    // R1 B-3: 1차 판본은 이 404를 `serverSaysAbsent`(404·405·501)로 흘려
+    // 「이 서버는 아직 메시지 검색을 제공하지 않습니다」를 그렸다. 서버는 방금
+    // 전체 범위로 결과를 돌려줬으므로 그 문장은 거짓이다.
+    expect(isChannelScopeRefusal(notFound, "channel", CHANNEL)).toBe(true);
+    expect(isChannelScopeRefusal(notFound, "workspace", CHANNEL)).toBe(false);
+    expect(isChannelScopeRefusal(notFound, "channel", null)).toBe(false);
+  });
+
+  it("다른 상태 코드와 네트워크 실패는 이 갈래가 아니다", () => {
+    // 405·501은 여전히 표면 미제공 이야기이고, 5xx·네트워크는 아무도 「없다」고
+    // 말하지 않은 것이다.
+    for (const status of [401, 403, 405, 500, 501, 503]) {
+      expect(
+        isChannelScopeRefusal(new ApiError(status, "…"), "channel", CHANNEL)
+      ).toBe(false);
+    }
+    expect(isChannelScopeRefusal(new Error("offline"), "channel", CHANNEL)).toBe(
+      false
+    );
+  });
+
+  it("문장이 볼 수 없는 채널의 이름을 부르지 않는다", () => {
+    const copy = channelScopeRefusalCopy(CHANNEL);
+    expect(copy.headline).toBe("이 채널의 메시지는 찾을 수 없습니다.");
+    expect(copy.headline).not.toContain(CHANNEL.label!);
+    // 「채널을 열어 직접 찾아보세요」는 이 오류의 조건 자체와 모순된다.
+    expect(copy.detail).not.toContain("채널을 열어");
+    expect(copy.detail).toContain("전체를 찾아볼 수 있습니다");
+  });
+
+  it("DM이면 「대화」로 말한다", () => {
+    expect(channelScopeRefusalCopy(DM).headline).toBe(
+      "이 대화의 메시지는 찾을 수 없습니다."
+    );
+  });
+});
+
+describe("범위는 주소에 산다", () => {
+  it("문맥이 있고 scope=가 없으면 그 채널이다", () => {
+    expect(parseSearchScope(null, CHANNEL)).toBe("channel");
+  });
+
+  it("scope=all 이면 전체다", () => {
+    expect(parseSearchScope(SEARCH_SCOPE_ALL, CHANNEL)).toBe("workspace");
+  });
+
+  it("문맥이 없으면 scope=가 무엇이든 전체다", () => {
+    // 파라미터 하나만 손으로 지운 주소가 「채널 범위인데 채널이 없다」는 상태를
+    // 만들 수 없어야 한다.
+    expect(parseSearchScope(null, null)).toBe("workspace");
+    expect(parseSearchScope(SEARCH_SCOPE_ALL, null)).toBe("workspace");
+  });
+
+  it("모르는 값은 기본값으로 읽는다", () => {
+    expect(parseSearchScope("banana", CHANNEL)).toBe("channel");
+  });
+
+  it("승격은 주소에 적히고, 다시 좁히면 지워진다", () => {
+    // R1 M-2: 1차 판본은 범위가 `useState`라, 승격한 뒤의 주소가 화면과 반대말을
+    // 했다(주소는 channel=…, 화면은 전체 결과). 새로고침하면 기본값이 채널을
+    // 다시 골라 사람이 방금 내린 결정을 조용히 되돌렸다.
+    const start = new URLSearchParams({
+      q: "배포",
+      [SEARCH_CHANNEL_PARAM]: CHANNEL.channelId,
+    });
+    const widened = searchScopeParams(start, "workspace");
+    expect(widened.get(SEARCH_SCOPE_PARAM)).toBe(SEARCH_SCOPE_ALL);
+    // 문맥은 남는다 — 칩이 사라지면 되돌아갈 길이 없다.
+    expect(widened.get(SEARCH_CHANNEL_PARAM)).toBe(CHANNEL.channelId);
+    expect(widened.get("q")).toBe("배포");
+
+    const narrowed = searchScopeParams(widened, "channel");
+    expect(narrowed.get(SEARCH_SCOPE_PARAM)).toBeNull();
+    expect(narrowed.get(SEARCH_CHANNEL_PARAM)).toBe(CHANNEL.channelId);
+  });
+
+  it("주소를 되읽으면 같은 범위가 나온다", () => {
+    // 새로고침·공유·뒤로가기가 같은 화면을 여는 것은 이 왕복이 닫힌다는 뜻이다.
+    for (const scope of ["channel", "workspace"] as const) {
+      const written = searchScopeParams(
+        new URLSearchParams({ [SEARCH_CHANNEL_PARAM]: CHANNEL.channelId }),
+        scope
+      );
+      expect(parseSearchScope(written.get(SEARCH_SCOPE_PARAM), CHANNEL)).toBe(
+        scope
+      );
+    }
+  });
+
+  it("⌘K가 만드는 주소와 칩으로 되좁힌 주소가 같다", () => {
+    // 같은 화면이 같은 링크여야 붙여넣기가 뜻을 갖는다.
+    const fromPalette = new URLSearchParams(
+      searchRoutePath("배포", CHANNEL.channelId).split("?")[1]
+    );
+    const fromChip = searchScopeParams(
+      searchScopeParams(fromPalette, "workspace"),
+      "channel"
+    );
+    expect(fromChip.toString()).toBe(fromPalette.toString());
   });
 });
 

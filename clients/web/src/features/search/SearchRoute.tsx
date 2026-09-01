@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Search } from "lucide-react";
 import { useSession } from "@/app/session";
@@ -14,6 +14,7 @@ import { searchHitPath } from "@/features/inbox/anchor";
 import { relativeLabel } from "@momo/core/features/inbox/model";
 import {
   channelLabel,
+  dmPeer,
   memberFor,
   useChannels,
   useDirectory,
@@ -27,17 +28,24 @@ import {
 } from "@momo/core/features/capabilities/serverSurfaces";
 import { SurfaceUnavailableSection } from "@/features/capabilities/SurfaceUnavailable";
 import {
+  channelScopeRefusalCopy,
   ESCALATE_TO_WORKSPACE_DETAIL,
   ESCALATE_TO_WORKSPACE_LABEL,
+  isChannelScopeRefusal,
   leadsWithEllipsis,
   trailsWithEllipsis,
   noResultsCopy,
   NO_RESULTS_SCOPE_NOTE,
+  parseSearchScope,
   searchPlaceholder,
+  searchScopeParams,
   searchScopeTabs,
+  SEARCH_CHANNEL_PARAM,
+  SEARCH_SCOPE_PARAM,
   SHORT_QUERY_HINT,
   snippetSegments,
   type SearchChannelContext,
+  type SearchScope,
 } from "@momo/core/features/search/searchModel";
 import { useMessageSearch } from "./useMessageSearch";
 
@@ -140,7 +148,7 @@ export function SearchRoute() {
   const { session, workspaceId } = useSession();
   // ⌘K 팔레트가 이름으로 못 찾았을 때 친 말을 그대로 들고 넘어온다. 넘겨받고도
   // 빈 상자를 보여주면 그 인계는 인계가 아니라 초기화다.
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const channelsQuery = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -154,30 +162,46 @@ export function SearchRoute() {
   // 검색」이 싣고, 이 표면이 범위 칩의 기본값으로 받는다.
   //
   // 못 푼 id를 조용히 버리지 않는다: 그러면 사람이 고른 범위를 화면이 되돌리고,
-  // 되돌린 사실은 아무 데도 적히지 않는다. 이름만 id 앞자리로 대신하고(행이
-  // 이미 그렇게 한다) 범위는 그대로 둔 채 서버에 묻는다 — 읽을 수 없는 채널이면
-  // 서버가 404로 답하고 그것이 참말이다.
+  // 되돌린 사실은 아무 데도 적히지 않는다. 범위는 그대로 둔 채 서버에 묻는다 —
+  // 읽을 수 없는 채널이면 서버가 404로 답하고 그것이 참말이다(그 404를 받는
+  // 갈래는 아래 `isChannelScopeRefusal`이다).
+  //
+  // 다만 **이름은 지어내지 않는다**(R1 M-1): 못 풀었으면 `label: null`이고,
+  // 문장과 접근성 이름은 이름 없이 선다. 내부 id를 잘라 넣던 자리였다.
   const scopedChannel: SearchChannelContext | null = useMemo(() => {
-    const requested = params.get("channel");
+    const requested = params.get(SEARCH_CHANNEL_PARAM);
     if (requested === null || requested.trim() === "") return null;
     const channel = channels.find((c) => uuidEq(c.id, requested));
     if (!channel) {
-      return {
-        channelId: requested,
-        label: requested.slice(0, 8),
-        isDirect: false,
-      };
+      return { channelId: requested, label: null, isDirect: false, peer: null };
     }
+    // DM 상대는 **사람 행 자체**로 든다. 라벨은 상대를 못 찾으면 「다이렉트
+    // 메시지」, 동명이인이면 「김민지 @minji」라, 거기에 존칭을 붙이면 사람이
+    // 아닌 것에 「님」이 붙는다(R1 H-2).
+    const peer =
+      channel.kind === "dm"
+        ? dmPeer(channel, directoryQuery.directory, session.member.id)
+        : null;
     return {
       channelId: channel.id,
       label: channelLabel(channel, directoryQuery.directory, session.member.id),
       isDirect: channel.kind === "dm",
+      peer: peer?.displayName ?? null,
     };
-    // 첫 렌더의 주소만 읽는다. 목록이 늦게 도착해 이름이 채워지는 것은 반영해야
-    // 하므로 `channels`/`directory`는 의존성에 남는다.
   }, [params, channels, directoryQuery.directory, session.member.id]);
 
-  const search = useMessageSearch(params.get("q") ?? "", scopedChannel);
+  // 범위는 주소가 쥔다 (R1 M-2) — 작업 흐름 목록이 `?status=`를 쥐는 그 문법.
+  // 칩을 누르면 주소가 바뀌고, 화면은 바뀐 주소를 다시 읽는다. 그래서
+  // 새로고침·공유·뒤로가기에서 화면과 주소가 같은 말을 한다.
+  const scope = parseSearchScope(params.get(SEARCH_SCOPE_PARAM), scopedChannel);
+  const setScope = useCallback(
+    (next: SearchScope) => {
+      setParams(searchScopeParams(params, next), { replace: true });
+    },
+    [params, setParams]
+  );
+
+  const search = useMessageSearch(params.get("q") ?? "", scopedChannel, scope);
   const scopeTabs = useMemo(
     () => searchScopeTabs(scopedChannel),
     [scopedChannel]
@@ -237,7 +261,7 @@ export function SearchRoute() {
             // 범위를 좁혀 뒀다면 안내문이 그 채널의 **이름**을 말한다. 칩은
             // 「이 채널에서」까지만 말할 수 있고(알약이 이름 길이를 따라
             // 출렁이면 안 되므로), 「이 채널」이 어느 채널인지는 여기서 답한다.
-            placeholder={searchPlaceholder(search.scope, scopedChannel)}
+            placeholder={searchPlaceholder(scope, scopedChannel)}
             className="ps-8"
             data-testid="search-input"
           />
@@ -252,11 +276,7 @@ export function SearchRoute() {
             컨트롤의 것이다. */}
         {scopedChannel !== null && (
           <div className="mt-2">
-            <FilterTabs
-              spec={scopeTabs}
-              value={search.scope}
-              onChange={search.setScope}
-            />
+            <FilterTabs spec={scopeTabs} value={scope} onChange={setScope} />
           </div>
         )}
       </form>
@@ -269,9 +289,9 @@ export function SearchRoute() {
         {...(scopedChannel === null
           ? {}
           : {
-              id: scopeTabs.panelId(search.scope),
+              id: scopeTabs.panelId(scope),
               role: "tabpanel",
-              "aria-labelledby": scopeTabs.tabId(search.scope),
+              "aria-labelledby": scopeTabs.tabId(scope),
             })}
       >
         {search.phase === "idle" && (
@@ -291,10 +311,35 @@ export function SearchRoute() {
         )}
 
         {search.phase === "error" &&
-          // 미제공과 장애는 다른 문장이다. 이 서버가 검색 라우트를 싣고 있다는
-          // 것은 판정표의 사실이지만, 표가 서버보다 앞서 갔을 수 있다. 그때는
-          // 오류가 아니라 미제공으로 접는다 (이중 방어의 (b)).
-          (serverSaysAbsent(search.error) ? (
+          // 세 갈래다. 순서가 규칙이다.
+          //
+          // (a) **좁힌 범위의 404 = 그 채널을 볼 수 없다** (R1 B-3). 미제공
+          //     판정보다 먼저 본다. `serverSaysAbsent`는 404를 「이 서버에 그
+          //     기능이 없다」로 읽는데, 채널 하나를 물었을 때 그 독법은 정반대의
+          //     거짓말이 된다 — 서버는 검색을 제공하고 있고, 없는 것은 그 채널을
+          //     볼 자격이다. 회복은 빈손 화면과 **같은 문법**이다(같은 라벨의
+          //     같은 버튼): 화면이 두 곳에서 같은 탈출구를 다르게 부르지 않는다.
+          // (b) 미제공과 장애는 다른 문장이다. 이 서버가 검색 라우트를 싣고
+          //     있다는 것은 판정표의 사실이지만, 표가 서버보다 앞서 갔을 수
+          //     있다. 그때는 오류가 아니라 미제공으로 접는다 (이중 방어의 (b)).
+          // (c) 나머지는 장애다.
+          (isChannelScopeRefusal(search.error, scope, scopedChannel) ? (
+            <EmptyInvite
+              headline={channelScopeRefusalCopy(scopedChannel).headline}
+              detail={channelScopeRefusalCopy(scopedChannel).detail}
+              actions={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setScope("workspace")}
+                  data-testid="search-scope-refused-escalate"
+                >
+                  {ESCALATE_TO_WORKSPACE_LABEL}
+                </Button>
+              }
+              testId="search-scope-refused"
+            />
+          ) : serverSaysAbsent(search.error) ? (
             <SurfaceUnavailableSection
               surface="messageSearch"
               testId="search-unavailable"
@@ -316,13 +361,9 @@ export function SearchRoute() {
           // 좁힌 범위에서 빈손인 것과 전체에서 빈손인 것은 다른 소식이다.
           // 앞은 「옆 채널을 보라」이고 뒤는 「내가 속한 곳에는 없다」인데, 한
           // 문장으로 뭉뚱그리면 앞의 경우에 사람이 검색을 그만둔다.
-          (search.scope === "channel" && scopedChannel !== null ? (
+          (scope === "channel" && scopedChannel !== null ? (
             <EmptyInvite
-              headline={noResultsCopy(
-                search.query,
-                search.scope,
-                scopedChannel
-              )}
+              headline={noResultsCopy(search.query, scope, scopedChannel)}
               detail={ESCALATE_TO_WORKSPACE_DETAIL}
               // 승격은 **한 번의 누름**이다. 문구만 두고 컨트롤을 두지 않으면
               // 「전체에서 찾아보세요」는 칩을 다시 찾아 누르라는 숙제이고,
@@ -332,7 +373,7 @@ export function SearchRoute() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => search.setScope("workspace")}
+                  onClick={() => setScope("workspace")}
                   data-testid="search-empty-escalate"
                 >
                   {ESCALATE_TO_WORKSPACE_LABEL}

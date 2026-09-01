@@ -8,7 +8,6 @@ import {
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
 import {
-  defaultSearchScope,
   isSearchable,
   normalizeQuery,
   scopedChannelId,
@@ -55,9 +54,6 @@ export interface MessageSearch {
   setRaw: (next: string) => void;
   /** 실제로 서버에 보낸 질의. 강조와 문구가 이 값을 쓴다. */
   query: string;
-  /** 지금 고른 범위. 칩·안내문·빈 결과 문구가 함께 읽는다 (#1931). */
-  scope: SearchScope;
-  setScope: (next: SearchScope) => void;
   phase: SearchPhase;
   hits: MessageSearchHit[];
   hasMore: boolean;
@@ -73,18 +69,21 @@ export function useMessageSearch(
    * 채널에서 들어왔다는 사실. `null`이면 범위 칩이 없다 — 좁힐 대상이 없는
    * 자리에 「이 채널에서」를 세우면 누를 수 없는 칩이 하나 생긴다.
    */
-  channel: SearchChannelContext | null = null
+  channel: SearchChannelContext | null = null,
+  /**
+   * 지금 고른 범위. **이 훅이 쥐고 있지 않다** — 주소가 쥔다(R1 M-2).
+   *
+   * `useState`로 들고 있던 판본에서는 승격한 뒤의 주소가 화면과 반대말을 했고,
+   * 새로고침이 사람의 결정을 조용히 되돌렸다. 질의(`raw`)와 성질이 다른 값이다:
+   * 질의는 입력 상자가 화면에 들고 있어 주소가 뒤처져도 모순이 아니지만, 범위는
+   * 화면 어디에도 「주소와 다르다」고 적힐 자리가 없다.
+   */
+  scope: SearchScope = "workspace"
 ): MessageSearch {
   const { workspaceId } = useSession();
   // 초기값은 첫 렌더에서만 읽는다. 이후 주소가 바뀌어도 사람이 치고 있는 값을
   // 덮지 않는다.
   const [raw, setRaw] = useState(initialQuery);
-  // 범위도 같은 규칙이다: 도착할 때 한 번 정해지고, 그 뒤로는 사람이 칩으로
-  // 바꾼다. 채널을 들고 왔으면 그 채널이 기본 — ⌘K에서 「이 채널에서 검색」을
-  // 고른 사람에게 전체 결과를 먼저 보여주면 방금 고른 것을 화면이 되돌린 것이다.
-  const [scope, setScope] = useState<SearchScope>(() =>
-    defaultSearchScope(channel)
-  );
   const channelId = scopedChannelId(scope, channel);
   // 넘겨받은 질의는 기다릴 이유가 없다: 사람은 이미 팔레트에서 다 쳤고,
   // 디바운스는 타자 중인 손을 위한 것이다.
@@ -133,8 +132,6 @@ export function useMessageSearch(
     raw,
     setRaw,
     query,
-    scope,
-    setScope,
     phase,
     hits,
     hasMore: result.hasNextPage,
