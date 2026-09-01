@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-01 (오후) · Fable · ★BT 파도 개막 — 인터뷰·ADR 2본 결재·BT-1 랜딩(3회전)·BT-2 PR 정지점
+
+- 성재 지시 "우로보로스로 계획 구체화 후 작업까지, 구현=Opus 5" → 인터뷰 수렴: BT 파도 6장 2단(정본 2026-09-01-bt-wave-plan.md), ADR-0177/0178 기안→성재 실시간 결재 Accepted(PR #1936).
+- BT-1(#1929): PR #1937 리뷰 3회전(B1 포털 화살표·H1 다이얼로그 자살 → 전량 마감 B0·H0·M0) → track/uxui 머지·close.
+- BT-2(#1930): 워커 완주 → **PR #1938 생성 시점 성재 지시로 정지**(리뷰 미발사). 재개 절차는 스냅샷 78.
+- 운영: tmux swarm 고착 복구법 실증(kill-server). 워커 레인 Opus 5 Agent 전환 완료.
+
 ## 2026-09-01 · Fable · ★정본 경량화 재편 + 3중 감사(버즈 패리티·셀프호스트·차별화) 완주
 
 - 성재 3지시 집행: ①문서 경량화 — PR #1924 main 랜딩, 아카이브 로테이션 체계 신설(docs/archive/README.md 정본) ②버즈 패리티 감사 ③셀프호스팅 완결성+차별화 진단 — 정본 research/2026-09-01-{buzz-parity,selfhost-core,differentiator}-audit.md.
@@ -118,8 +125,3 @@
 - **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
 - **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
 - 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.
-## 2026-08-23 (Fable) · ★재개 큐 소진: UXUI 재연 QA 대행 5/7 PASS + U-7 스코프드 랜딩 + ADR-0168 기안
-- 성재 "검수 요청 부분 알아서 처리" → **재연 QA를 Fable이 브라우저 자동화로 대행**: 로컬 프록시(localhost:23080, 정적=track/uxui dist·/v1=D8 포워딩)로 same-origin 리그 구성. U-5·U-2·C-1·U-1·U-4 전부 PASS(포커스 복귀 수리분 실렌더 재확인 포함). 증거 11샷+리포트 `claudedocs/uxui-qa-d8-20260823/`.
-- **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
-- **U-7 판정 집행**: DESIGN.md·OMD.md 등 문서 6파일+.gitignore만 랜딩(#1695 merged, track/uxui=35074dbd)·번들 583파일은 비버전관리. #1693 close·#1689 종결. 전체 번들은 feat/1689-design-md-core-v2-book@272dd4c2 보존.
-- **ADR-0168 Proposed 기안**(M-2 선행 — expo-image-picker+document-picker 낱개, D1 연장). rescue stash=역행 패치 확증(패치 보험 `scratchpad/uxui-rescue-…patch.gz`)·drop만 성재 1커맨드 필요. 남은 성재 큐: ADR-0167/0168 Accept·T-9 발사·U-3/M-1 실체감(선택).
