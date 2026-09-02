@@ -12,6 +12,7 @@ import {
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
+  nextAdvertisedChannelId,
 } from "@/features/chat/advertiseReadState";
 import {
   foldInVisitMark,
@@ -284,10 +285,19 @@ export function ChatShell() {
     );
     advertiseReadState(workspaceId, channelId, newestSeq, reason)
       .then(() => {
-        advertisedChannelRef.current = channelId;
+        advertisedChannelRef.current = nextAdvertisedChannelId(
+          advertisedChannelRef.current,
+          channelId,
+          true
+        );
         invalidateReadStates();
       })
       .catch(() => {
+        advertisedChannelRef.current = nextAdvertisedChannelId(
+          advertisedChannelRef.current,
+          channelId,
+          false
+        );
         if (markedRef.current === key) markedRef.current = null;
       });
   }, [

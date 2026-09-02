@@ -86,7 +86,7 @@ describe("shouldShowHoverToolbar", () => {
   });
 });
 
-describe("행 배너 「닫기」와 이웃 툴바 기하 (M-6)", () => {
+describe("행 배너 「닫기」와 이웃 툴바 기하 (M-6, geometry-probe-only)", () => {
   it("probe 400 배너의 「닫기」와 위 straddle 툴바가 겹치면 실패한다", () => {
     const close = { left: 1840, right: 1973, top: 674, bottom: 706 };
     const toolbar = { left: 1693, right: 1973, top: 700, bottom: 750 };

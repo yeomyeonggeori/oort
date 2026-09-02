@@ -8483,7 +8483,8 @@ async function captureTerminalDockScenes(browser, scheme) {
 /**
  * BT-6 (#1934): timeline with a mark-unread (divider above a known seq).
  * Own context so shared READ_STATES are not rewritten. Overlay only GET/PUT.
- * Dedicated all-read #general + seeded mark so the only divider is the mark's.
+ * Dedicated all-read #general. Starts unmarked so the ⋯ click (not a seeded
+ * GET mark) is what plants the divider.
  */
 const MARK_UNREAD_SEQ = 1408;
 const MARK_UNREAD_LATEST = 1416;
@@ -8515,7 +8516,7 @@ async function captureMarkUnreadScenes(browser, scheme) {
     origin: ORIGIN,
   });
   await installMocks(context);
-  let cleared = false;
+  let cleared = true;
   await context.route("**/v1/workspaces/*/read-state", (route) => {
     if (route.request().method() !== "GET") return route.fallback();
     return json(route, { read_states: markUnreadReadStates(cleared) });

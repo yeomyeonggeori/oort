@@ -114,6 +114,7 @@ import {
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
+import { useTimelineLive } from "./timelineLiveRegion";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -374,6 +375,7 @@ export function MessageRow({
   // the message lives where the problem is.
   const [rowError, setRowError] = useState<string | null>(null);
   const [rowAnnouncement, setRowAnnouncement] = useState("");
+  const timelineLive = useTimelineLive();
   const [neighborBannerOpen, setNeighborBannerOpen] = useState(false);
   // The three overlays a row can raise. Local because they are per-row and
   // transient: hoisting them would make the timeline re-render every message
@@ -540,6 +542,7 @@ export function MessageRow({
     onMarkUnread: () => {
       setRowError(null);
       setRowAnnouncement("");
+      timelineLive.announce("");
       void markUnread
         .run({
           channelId: message.channelId,
@@ -548,6 +551,7 @@ export function MessageRow({
         })
         .then(() => {
           setRowAnnouncement(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
+          timelineLive.announce(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
         })
         .catch((error: unknown) =>
           setRowError(
@@ -614,6 +618,29 @@ export function MessageRow({
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
+  useEffect(() => {
+    if (!rowHovered && !rowFocused) return undefined;
+    const node = rowRef.current;
+    if (!node) return undefined;
+    const sample = () => {
+      setNeighborBannerOpen(previousMessageRowHasOpenBanner(node));
+    };
+    sample();
+    const root =
+      node.closest("[data-testid='timeline-virtuoso']") ??
+      node.closest("[data-virtuoso-scroller]") ??
+      node.closest("[data-message-scroll-container]") ??
+      node.parentElement;
+    if (!root) return undefined;
+    const observer = new MutationObserver(sample);
+    observer.observe(root, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-row-banner"],
+    });
+    return () => observer.disconnect();
+  }, [rowHovered, rowFocused]);
+
   // `data-message-id` is the row's second published identity (MOMO-677).
   // `seq` orders the channel and is what the inbox jumps by; a projection
   // that knows a message only by id (the workstream anchor thread) has no
@@ -648,12 +675,7 @@ export function MessageRow({
       data-actionable={actionable ? "true" : undefined}
       data-row-banner={rowError ? "open" : undefined}
       onKeyDown={onRowKeyDown}
-      onMouseEnter={() => {
-        setRowHovered(true);
-        if (rowRef.current) {
-          setNeighborBannerOpen(previousMessageRowHasOpenBanner(rowRef.current));
-        }
-      }}
+      onMouseEnter={() => setRowHovered(true)}
       onMouseLeave={() => setRowHovered(false)}
       onFocusCapture={() => setRowFocused(true)}
       onBlurCapture={(event) => {
@@ -687,9 +709,15 @@ export function MessageRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
-      <span className="sr-only" aria-live="polite" data-testid="message-row-live">
-        {rowAnnouncement}
-      </span>
+      {!timelineLive.hasRegion && (
+        <span
+          className="sr-only"
+          aria-live="polite"
+          data-testid="message-row-live"
+        >
+          {rowAnnouncement}
+        </span>
+      )}
       {actions && showHoverToolbar && (
         <MessageHoverToolbar
           available={available}

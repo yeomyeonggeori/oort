@@ -21,6 +21,19 @@ describe("행 배너 「닫기」와 이웃 툴바 (M-6)", () => {
     expect(previousMessageRowHasOpenBanner(first)).toBe(false);
   });
 
+  it("호버 유지 중에 이웃 배너 속성이 열리면 다시 읽힌다 (N-6)", () => {
+    const root = document.createElement("div");
+    root.setAttribute("data-testid", "timeline-virtuoso");
+    const first = document.createElement("article");
+    first.setAttribute("data-testid", "timeline-message");
+    const second = document.createElement("article");
+    second.setAttribute("data-testid", "timeline-message");
+    root.append(first, second);
+    expect(previousMessageRowHasOpenBanner(second)).toBe(false);
+    first.setAttribute("data-row-banner", "open");
+    expect(previousMessageRowHasOpenBanner(second)).toBe(true);
+  });
+
   it("이웃 배너가 열린 행은 툴바를 달지 않아 「닫기」와 교차하지 않는다", () => {
     const show = shouldShowHoverToolbar({
       pointerCanHover: true,

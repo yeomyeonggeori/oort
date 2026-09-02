@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
+  nextAdvertisedChannelId,
   readIntentWire,
 } from "./advertiseReadState";
 
@@ -74,6 +75,19 @@ describe("channelReadAdvertisementReason", () => {
     expect(channelReadAdvertisementReason("ch-a", "ch-a")).toBe("arrival_flush");
     expect(channelReadAdvertisementReason("ch-a", "ch-b")).toBe("channel_open");
     expect(channelReadAdvertisementReason("CH-A", "ch-a")).toBe("arrival_flush");
+  });
+});
+
+describe("nextAdvertisedChannelId (M-1)", () => {
+  it("PUT 실패 뒤에도 다음 광고는 명시 열람이다", () => {
+    const afterFail = nextAdvertisedChannelId(null, "ch-a", false);
+    expect(channelReadAdvertisementReason(afterFail, "ch-a")).toBe(
+      "channel_open"
+    );
+    const afterOk = nextAdvertisedChannelId(afterFail, "ch-a", true);
+    expect(channelReadAdvertisementReason(afterOk, "ch-a")).toBe(
+      "arrival_flush"
+    );
   });
 });
 

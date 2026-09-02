@@ -33,14 +33,8 @@ const ACTION_MENU_CODE = codeOnly(
 );
 
 describe("explicit_open 광고 재시도 (M-1)", () => {
-  it("advertisedChannelRef 는 PUT 성공 뒤에만 고정한다", () => {
-    const effect = SHELL_CODE.slice(
-      SHELL_CODE.indexOf("channelReadAdvertisementReason")
-    );
-    const thenAt = effect.indexOf(".then(");
-    const assignAt = effect.indexOf("advertisedChannelRef.current = channelId");
-    expect(thenAt).toBeGreaterThan(0);
-    expect(assignAt).toBeGreaterThan(thenAt);
+  it("셸은 PUT 성공 헬퍼로만 광고 채널을 고정한다", () => {
+    expect(SHELL_CODE).toContain("nextAdvertisedChannelId");
   });
 });
 

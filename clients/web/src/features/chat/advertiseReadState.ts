@@ -66,6 +66,15 @@ export function channelReadAdvertisementReason(
   return "arrival_flush";
 }
 
+/** PUT 성공 뒤에만 광고된 채널 id 를 고정한다. 실패면 다음도 명시 열람. */
+export function nextAdvertisedChannelId(
+  previous: string | null,
+  channelId: string,
+  putSucceeded: boolean
+): string | null {
+  return putSucceeded ? channelId : previous;
+}
+
 export function advertiseReadState(
   workspaceId: string,
   channelId: string,
