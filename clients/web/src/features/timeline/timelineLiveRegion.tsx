@@ -1,21 +1,5 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useMemo,
-  useState,
-  type ReactNode,
-} from "react";
-
-type TimelineLive = {
-  announce: (text: string) => void;
-  hasRegion: boolean;
-};
-
-const TimelineLiveContext = createContext<TimelineLive>({
-  announce: () => undefined,
-  hasRegion: false,
-});
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { TimelineLiveContext } from "./timelineLiveContext";
 
 /**
  * One polite live region for the timeline (N-4). Rows announce into this
@@ -43,8 +27,4 @@ export function TimelineLiveRegionProvider({
       </span>
     </TimelineLiveContext.Provider>
   );
-}
-
-export function useTimelineLive(): TimelineLive {
-  return useContext(TimelineLiveContext);
 }

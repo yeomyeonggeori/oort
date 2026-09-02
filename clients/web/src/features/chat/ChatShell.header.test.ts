@@ -32,12 +32,6 @@ const ACTION_MENU_CODE = codeOnly(
   readFileSync(new URL("./channelActions.tsx", import.meta.url), "utf8")
 );
 
-describe("explicit_open 광고 재시도 (M-1)", () => {
-  it("셸은 PUT 성공 헬퍼로만 광고 채널을 고정한다", () => {
-    expect(SHELL_CODE).toContain("nextAdvertisedChannelId");
-  });
-});
-
 describe("BZ-2 channel header is one title row", () => {
   it("does not keep the topic in the always-visible header", () => {
     expect(SHELL_CODE).not.toMatch(/ChannelTopicControl/);

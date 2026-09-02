@@ -114,7 +114,7 @@ import {
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
-import { useTimelineLive } from "./timelineLiveRegion";
+import { useTimelineLive } from "./timelineLiveContext";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
