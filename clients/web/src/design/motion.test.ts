@@ -26,7 +26,6 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const require_ = createRequire(import.meta.url);
 const MOTION_CSS = readFileSync(new URL("./motion.css", import.meta.url), "utf8");
 const TOKENS_CSS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
-const MOTION_TS = readFileSync(new URL("./motion.ts", import.meta.url), "utf8");
 const BUTTON_TSX = readFileSync(new URL("./ui/button.tsx", import.meta.url), "utf8");
 
 const LADDER = {
@@ -79,6 +78,29 @@ async function buildCss(candidates: string[]): Promise<string> {
   return compiler.build(candidates);
 }
 
+function classTokens(className: string): string[] {
+  return className.split(/\s+/).filter(Boolean);
+}
+
+/** Tailwind v4 가 셀렉터에 쓰는 이스케이프. compile-probe 와 같은 자. */
+function escapedClassSelector(candidate: string): string {
+  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
+}
+
+function lastPressOrColorsTransition(css: string): {
+  selector: string;
+  body: string;
+} {
+  const rules = [
+    ...css.matchAll(/(\.press|\.transition-colors)\s*\{([^}]*)\}/g),
+  ].filter((match) => /transition-property:/.test(match[2]));
+  if (rules.length === 0) {
+    throw new Error(".press / .transition-colors 에 transition-property 가 없다");
+  }
+  const last = rules[rules.length - 1];
+  return { selector: last[1], body: last[2] };
+}
+
 describe("ADR-0179 D1 duration 사다리", () => {
   it.each(Object.entries(LADDER))("--motion-%s 는 %s", (name, value) => {
     expect(MOTION_CSS).toMatch(new RegExp(`--motion-${name}:\\s*${value}`));
@@ -104,17 +126,37 @@ describe("ADR-0179 D3 도착 값", () => {
 });
 
 describe("ADR-0179 D4 모달 상수", () => {
-  it("열림 200·닫힘 150 은 motion.ts 한 곳에만 산다", () => {
-    expect(MODAL_OVERLAY_MOTION).toMatch(/\bduration-200\b/);
-    expect(MODAL_OVERLAY_MOTION).toMatch(/\bduration-150\b/);
-    expect(MODAL_CONTENT_MOTION).toMatch(/\bduration-200\b/);
-    expect(MODAL_CONTENT_MOTION).toMatch(/\bduration-150\b/);
-    expect(MODAL_OVERLAY_MOTION).toMatch(/motion-reduce:animate-none/);
-    expect(MODAL_CONTENT_MOTION).toMatch(/motion-reduce:animate-none/);
-    expect(POPOVER_MOTION).toMatch(/\bmotion-standard\b/);
-    expect(POPOVER_MOTION).toMatch(/\bmotion-fast\b/);
-    expect(MOTION_TS).toMatch(/duration-200/);
-    expect(MOTION_TS).toMatch(/duration-150/);
+  it("열림 200·닫힘 150 은 motion.css 한 곳에 산다 (사다리 밖 예외 2호)", () => {
+    expect(MOTION_CSS).toMatch(/--motion-modal-open:\s*200ms/);
+    expect(MOTION_CSS).toMatch(/--motion-modal-close:\s*150ms/);
+  });
+
+  it.each([
+    ["MODAL_OVERLAY_MOTION", MODAL_OVERLAY_MOTION],
+    ["MODAL_CONTENT_MOTION", MODAL_CONTENT_MOTION],
+    ["POPOVER_MOTION", POPOVER_MOTION],
+  ] as const)("%s 의 모든 클래스가 규칙을 낸다", async (name, className) => {
+    const tokens = classTokens(className);
+    expect(tokens.length, name).toBeGreaterThan(0);
+    expect(tokens, `${name} 은 ease-out/ease-in 을 들지 않는다`).not.toContain(
+      "ease-out"
+    );
+    expect(tokens).not.toContain("ease-in");
+
+    for (const token of tokens) {
+      const css = await buildCss([token]);
+      const selector = escapedClassSelector(token);
+      expect(
+        css.includes(selector),
+        `${name}: ${token} 이 규칙을 내지 않는다 (no rule emitted)`
+      ).toBe(true);
+      const from = css.indexOf(selector);
+      const snippet = css.slice(from, from + 280);
+      expect(
+        snippet,
+        `${name}: ${token} 규칙에 Tailwind ease-out/in 금지`
+      ).not.toMatch(/--ease-out\b|--ease-in\b/);
+    }
   });
 });
 
@@ -144,6 +186,37 @@ describe("ADR-0179 D5 눌림 단일점", () => {
     expect(css).toMatch(/scale\(\s*0\.98\s*\)/);
     expect(css).toMatch(/--motion-instant/);
   });
+
+  it("Button 은 press 만 들고, 마지막 transition-property 에 transform 이 있고 outline-color 는 없다", async () => {
+    const className = buttonVariants({ variant: "default" });
+    expect(className).toContain("press");
+    expect(className.split(/\s+/)).not.toContain("transition-colors");
+
+    const css = await buildCss(classTokens(className));
+    const last = lastPressOrColorsTransition(css);
+    expect(last.selector, "캐스케이드 마지막 소유자는 press").toBe(".press");
+    expect(last.body).toMatch(/transform/);
+    expect(last.body).not.toMatch(/outline-color/);
+  });
+
+  it("press 와 transition-colors 가 함께여도 press 가 이긴다", async () => {
+    const css = await buildCss(["transition-colors", "press"]);
+    const last = lastPressOrColorsTransition(css);
+    expect(last.selector).toBe(".press");
+    expect(last.body).toMatch(/transform/);
+    expect(last.body).not.toMatch(/outline-color/);
+  });
+
+  it("press 목록에 outline-color 가 들어가면 붉다 (M-1 / #1210 D3)", async () => {
+    const css = await buildCss(["press"]);
+    const pressRules = [...css.matchAll(/\.press\s*\{([^}]*)\}/g)].filter(
+      (match) => /transition-property:/.test(match[1])
+    );
+    expect(pressRules.length).toBeGreaterThan(0);
+    for (const rule of pressRules) {
+      expect(rule[1]).not.toMatch(/outline-color/);
+    }
+  });
 });
 
 describe("ADR-0179 D6 엘리베이션 이름", () => {
@@ -171,12 +244,30 @@ describe("ADR-0179 D10 사다리 밖 ms 리터럴", () => {
     expect(TOKENS_CSS).toMatch(/@import\s+"\.\/motion\.css"/);
   });
 
-  it("motion.css 의 ms 리터럴은 사다리와 reduced-motion 0 뿐이다", () => {
-    const allowed = new Set(["0ms", "120ms", "180ms", "240ms", "500ms"]);
+  it("motion.css 의 ms 리터럴은 사다리·reduced-motion 0·모달 200/150 뿐이다", () => {
+    const allowed = new Set([
+      "0ms",
+      "120ms",
+      "180ms",
+      "240ms",
+      "500ms",
+      "200ms",
+      "150ms",
+    ]);
     const found = msLiterals(codeOnly(MOTION_CSS));
     for (const value of found) {
       expect(allowed.has(value), `motion.css off-ladder ${value}`).toBe(true);
     }
+  });
+
+  it("Tailwind 기본 transition 이 사다리 instant/standard ease 를 따른다", async () => {
+    const css = await buildCss(["transition"]);
+    expect(css).toMatch(
+      /--default-transition-duration:\s*var\(--motion-instant\)/
+    );
+    expect(css).toMatch(
+      /--default-transition-timing-function:\s*var\(--motion-ease-standard\)/
+    );
   });
 
   it("tokens.css 의 ms 리터럴은 온보딩 예외 블록 밖 0건이다", () => {
