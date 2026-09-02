@@ -492,6 +492,7 @@ export function Timeline({
   const [dividerEl, setDividerEl] = useState<HTMLElement | null>(null);
   const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
   const [unreadJumpLatched, setUnreadJumpLatched] = useState(false);
+  const [alignSettled, setAlignSettled] = useState(false);
 
   const dividerRelation = reconcileDividerRelation({
     dividerIndex: unreadDividerIndex,
@@ -514,14 +515,49 @@ export function Timeline({
     setRenderedRange(null);
     setObservedRelation(null);
     setUnreadJumpLatched(false);
+    setAlignSettled(false);
   }, [epoch]);
 
-  // 래치 무장은 IO가 실측한 「in」만. range 폴백 「in」은 오버스캔에 마운트만
-  // 된 구분선도 창 안이라고 보고한다 — 그 거짓으로 무장하면 위로 읽는 동안
-  // 필이 영구 소멸한다 (H-1 오발).
+  // virtuoso alignToBottom 이 끝나는 동안 구분선이 잠깐 창 안에 있다
+  // (H-5: scrollTop 1557 에서 in, 15ms 뒤 바닥에서 above). 그 in 으로
+  // 래치하면 필이 이 epoch 에서 다시 안 선다. scrollTop 이 두 프레임
+  // 같으면 정렬이 끝난 것으로 본다.
   useEffect(() => {
-    if (shouldLatchUnreadJump(observedRelation)) setUnreadJumpLatched(true);
-  }, [observedRelation]);
+    if (scrollerEl === null) return undefined;
+    let cancelled = false;
+    let last = scrollerEl.scrollTop;
+    let stable = 0;
+    let raf = 0;
+    const tick = () => {
+      if (cancelled) return;
+      const top = scrollerEl.scrollTop;
+      if (top === last) {
+        stable += 1;
+        if (stable >= 2) {
+          setAlignSettled(true);
+          return;
+        }
+      } else {
+        stable = 0;
+        last = top;
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+    };
+  }, [scrollerEl, epoch]);
+
+  // 래치 무장은 정렬이 끝난 뒤 IO가 실측한 「in」만. range 폴백 「in」은
+  // 오버스캔에 마운트만 된 구분선도 창 안이라고 보고한다 — 그 거짓으로
+  // 무장하면 위로 읽는 동안 필이 영구 소멸한다 (H-1 오발).
+  useEffect(() => {
+    if (shouldLatchUnreadJump(observedRelation, alignSettled)) {
+      setUnreadJumpLatched(true);
+    }
+  }, [observedRelation, alignSettled]);
 
   useEffect(() => {
     if (dividerEl === null || scrollerEl === null) {

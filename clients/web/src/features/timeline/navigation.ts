@@ -167,9 +167,10 @@ export function reconcileDividerRelation(input: {
  * 갈아타면 epoch와 함께 풀린다.
  */
 export function shouldLatchUnreadJump(
-  observed: DividerViewportRelation | null
+  observed: DividerViewportRelation | null,
+  alignSettled = true
 ): boolean {
-  return observed === "in";
+  return alignSettled && observed === "in";
 }
 
 /** 구분선이 창 **위쪽 밖**에 있고 동결 N이 있으며, 이 epoch에서 아직 래치되지 않았을 때만 상단 필이 선다. */
