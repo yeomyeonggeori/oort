@@ -1,5 +1,5 @@
 import type { ComposerSelection } from "./composerInsertion";
-import { mentionQueryAt } from "./MentionAutocomplete";
+import { composerTriggerQueryAt } from "./composerAutocomplete";
 
 // =============================================================================
 // 컴포저 선택 서식 (#1902). textarea 의 selectionStart/End 에 마크다운 접사를
@@ -49,23 +49,25 @@ export function shouldShowComposerFormatTray({
   value,
   start,
   end,
-  mentionVisible,
+  autocompleteVisible,
 }: {
   value: string;
   start: number;
   end: number;
-  mentionVisible: boolean;
+  autocompleteVisible: boolean;
 }): boolean {
   const from = Math.min(start, end);
   const to = Math.max(start, end);
   if (from === to) return false;
   if (value.slice(from, to).trim() === "") return false;
-  if (mentionVisible) return false;
-  // @ 트리거 중이면 목록이 비어도 트레이를 올리지 않는다. 선택이 멘션 쿼리와
-  // 겹치면 자동완성이 서식보다 앞선다.
+  if (autocompleteVisible) return false;
+  // 트리거 중이면 목록이 비어도 트레이를 올리지 않는다. 선택이 자동완성 질의와
+  // 겹치면 자동완성이 서식보다 앞선다. 판정은 `@`·`#`·`:` 를 함께 아는 한
+  // 파서에게 묻는다(#1930): 억제 규율이 트리거마다 갈라지면 `@` 만 물러나고
+  // `#` 위에서는 트레이와 목록이 같은 자리에 겹친다.
   if (
-    mentionQueryAt(value, from) !== null ||
-    mentionQueryAt(value, to) !== null
+    composerTriggerQueryAt(value, from) !== null ||
+    composerTriggerQueryAt(value, to) !== null
   ) {
     return false;
   }

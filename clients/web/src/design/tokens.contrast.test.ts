@@ -264,9 +264,18 @@ export const FOREGROUNDS = [
  * The two tinted surfaces are deliberately absent: `--line-strong` lands at
  * 2.90:1 on `--accent-soft` and 2.94:1 on `--agent-soft` in dark, under the 3:1
  * non-text minimum. They carry TEXT, which the 4.5:1 assertion above already
- * covers, and nothing with an outline. The membership test below turns that into
- * a measured fact instead of something a reviewer has to remember: file a
- * surface in the wrong list, or improve a token without moving it, and it fails.
+ * covers. The membership test below turns that into a measured fact instead of
+ * something a reviewer has to remember: file a surface in the wrong list, or
+ * improve a token without moving it, and it fails.
+ *
+ * 이 산문은 「그리고 아웃라인을 인 것은 아무것도 없다」로 끝났었다. 그 문장이
+ * 거짓이 되는 순간을 이 레포가 한 번 겪었다 (design-review #1937 R2 M-1):
+ * 사이드바 행의 「메뉴 열림」 표식이 하필 `--accent-soft` 위에 인셋 아웃라인을
+ * 세웠고, 고른 색이 `--line-strong` 이었다 — 위 두 숫자가 그 결함의 값이다.
+ * 컨트롤 경계 분류는 그대로다(그 표식은 컨트롤이 아니라 일시적 상태 표시다).
+ * 대신 그 표식이 자기 바닥 위에서 3:1 을 넘는지를 아래 「행 메뉴 열림 표식」이
+ * **컴포넌트의 클래스에서 토큰 이름을 읽어** 잰다. 산문이 지키던 자리를 자가
+ * 이어받았다.
  */
 export const CONTROL_SURFACES = [
   "surface",
@@ -280,6 +289,166 @@ function pick(token: string, index: 0 | 1): string {
   if (!pair) throw new Error(`token --${token} missing from tokens.css`);
   return pair[index];
 }
+
+/**
+ * 행 메뉴의 「열림」 표식이 서는 **세** 바닥.
+ *
+ * 인셋 아웃라인 밑에 실제로 깔리는 색이 세 가지다:
+ *   · `--surface-hover` — 열린 트리거 자신의 채움(`data-[state=open]:bg-…`).
+ *     비활성 행에서는 이것이 바닥이다(실측 `spanBg` / 링크는 투명).
+ *   · `--accent-soft` — **지금 열려 있는 채널**의 행. 알파가 없어 위 채움을
+ *     덮는다. design-review #1937 R2 M-1 이 잡은 자리다.
+ *   · `--surface-sidebar` — 그 둘이 어느 것도 칠해지지 않은 열의 바탕.
+ *
+ * 세 칸으로 적는 것이 이 가드의 이름값이다: 재는 값이 「실제 바닥」이므로 목록도
+ * 실제 바닥이어야 한다 (design-review #1937 R3 N-2).
+ */
+const ROW_MENU_MARKER_SURFACES = [
+  "surface-sidebar",
+  "surface-hover",
+  "accent-soft",
+] as const;
+
+const ROW_MENU_TRIGGER_SOURCE = readFileSync(
+  new URL("../features/sidebar/SidebarRowContextMenu.tsx", import.meta.url),
+  "utf8"
+);
+
+/**
+ * 출하되는 클래스 목록에서 표식의 **선 색 토큰 이름**을 읽는다.
+ *
+ * 이름을 여기 적어 두지 않는 이유가 이 단정의 전부다: 앞 회전은 대비를
+ * **주석으로** 주장했고("어느 표면 위에서도 3:1"), 그 주장은 거짓이었으며 반례는
+ * 바로 위 `CONTROL_SURFACES` 산문에 소수점까지 적혀 있었다. 사본을 두면 사본이
+ * 거짓말하므로, 색을 바꾸면 이 시험이 **새 색을** 재고 표식을 지우면 터진다.
+ */
+function rowMenuMarkerToken(): string {
+  const match = /data-\[state=open\]:outline-([a-z-]+)/.exec(
+    ROW_MENU_TRIGGER_SOURCE
+  );
+  if (!match) {
+    throw new Error(
+      "행 메뉴 열림 표식의 아웃라인 색을 못 찾았다 — 표식을 지웠거나 클래스 꼴이 바뀌었다"
+    );
+  }
+  return match[1];
+}
+
+describe("행 메뉴 열림 표식", () => {
+  it("두 겹이다 — 불투명한 활성 행이 배경 한 겹을 덮는다", () => {
+    expect(ROW_MENU_TRIGGER_SOURCE).toMatch(
+      /data-\[state=open\]:bg-surface-hover/
+    );
+    expect(ROW_MENU_TRIGGER_SOURCE).toMatch(/data-\[state=open\]:outline\b/);
+    expect(ROW_MENU_TRIGGER_SOURCE).toMatch(
+      /data-\[state=open\]:-outline-offset-1/
+    );
+  });
+
+  it("선 색이 세 바닥·두 스킴 전부에서 3:1 을 넘는다", () => {
+    const token = rowMenuMarkerToken();
+    for (const scheme of SCHEMES) {
+      for (const surface of ROW_MENU_MARKER_SURFACES) {
+        const ratio = contrast(
+          pick(token, scheme.index),
+          pick(surface, scheme.index)
+        );
+        expect(
+          Number(ratio.toFixed(2)),
+          `--${token} on --${surface} (${scheme.name})`
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it("앞 회전이 골랐던 --line-strong 은 그 자를 못 넘는다", () => {
+    // 반례를 함께 잠근다: 위 단정의 초록이 「자가 헐거워서」일 수 없게.
+    const dark = contrast(pick("line-strong", 1), pick("accent-soft", 1));
+    expect(Number(dark.toFixed(2))).toBe(2.9);
+    expect(rowMenuMarkerToken()).not.toBe("line-strong");
+  });
+
+  it("포커스 링과 다른 색·다른 두께다", () => {
+    // 포커스 링은 `--accent` 2px 인셋. 표식이 같으면 「캐럿이 여기 있다」와
+    // 「이 행의 메뉴가 열려 있다」를 구별할 수 없다.
+    expect(rowMenuMarkerToken()).not.toBe("accent");
+    expect(ROW_MENU_TRIGGER_SOURCE).toMatch(/data-\[state=open\]:outline-1\b/);
+  });
+});
+
+/**
+ * 드롭 표지가 서는 두 바닥 (BT-5 / #1933).
+ *
+ * 표식은 두 겹이다 — 자기 채움(`--surface-hover`)과 그 위의 아웃라인. 아웃라인
+ * 밑에 실제로 깔리는 색은 그 채움이고, 채움이 칠해지기 전 한 프레임의 바닥은 열
+ * 자체(`--surface-sidebar`)다. 위 「행 메뉴 열림 표식」과 같은 규율로, 색 이름은
+ * 여기 적지 않고 **출하되는 클래스에서 읽어** 잰다.
+ */
+const DROP_TARGET_SURFACES = ["surface-sidebar", "surface-hover"] as const;
+
+const SECTION_SOURCE = readFileSync(
+  new URL("../features/sidebar/SidebarRow.tsx", import.meta.url),
+  "utf8"
+);
+const FOCUS_RING_SOURCE = readFileSync(
+  new URL("./tokens.css", import.meta.url),
+  "utf8"
+);
+
+/** `outline-<낱말>` 중 색이 아닌 것들. 꼴(파선)은 위 단정이 따로 잰다. */
+const OUTLINE_STYLE_WORDS = new Set([
+  "dashed",
+  "solid",
+  "dotted",
+  "double",
+  "none",
+  "hidden",
+  "offset",
+]);
+
+function dropTargetToken(): string {
+  const found = [
+    ...SECTION_SOURCE.matchAll(/data-\[drop-target\]:outline-([a-z-]+)/g),
+  ]
+    .map((match) => match[1])
+    .filter((word) => !OUTLINE_STYLE_WORDS.has(word));
+  if (found.length !== 1) {
+    throw new Error(
+      `드롭 표지의 아웃라인 색을 하나로 못 읽었다: ${JSON.stringify(found)}`
+    );
+  }
+  return found[0];
+}
+
+describe("드롭 표지", () => {
+  it("색이 아니라 꼴로 포커스 링과 갈린다", () => {
+    // 링은 실선 2px `--accent` 이고 배경을 건드리지 않는다. 표식은 같은 색을
+    // 쓰되 **파선**이고 채움이 함께 바뀐다 - 드래그 중인 프레임에는 캐럿이 든
+    // 행과 받는 섹션이 한 화면에 함께 선다(실캡처).
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:bg-surface-hover/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:outline\b/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:outline-dashed/);
+    expect(SECTION_SOURCE).toMatch(/data-\[drop-target\]:-outline-offset-2/);
+    // 링 쪽은 파선이 아니다 - 두 표식이 한 꼴로 수렴하는 날 여기서 터진다.
+    expect(FOCUS_RING_SOURCE).not.toMatch(/outline-style:\s*dashed/);
+  });
+
+  it("선 색이 두 바닥·두 스킴 전부에서 3:1 을 넘는다", () => {
+    const token = dropTargetToken();
+    for (const scheme of SCHEMES) {
+      for (const surface of DROP_TARGET_SURFACES) {
+        const ratio = contrast(
+          pick(token, scheme.index),
+          pick(surface, scheme.index)
+        );
+        expect(
+          Number(ratio.toFixed(2)),
+          `--${token} on --${surface} (${scheme.name})`
+        ).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+});
 
 describe("Dawn palette", () => {
   it("declares every semantic token exactly once, as light-dark()", () => {

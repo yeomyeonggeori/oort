@@ -1,7 +1,7 @@
 import { useCallback, useRef } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
-import { fetchThreadReplies, type Message } from "@momo/core/lib/api";
+import { fetchThreadReplies, type Channel, type Message } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
 import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
@@ -22,6 +22,7 @@ export function ThreadPanel({
   channelId,
   root,
   directory,
+  channels,
   actions,
   reactions,
   pins,
@@ -32,6 +33,8 @@ export function ThreadPanel({
   channelId: string;
   root: Message;
   directory: Directory;
+  /** 답글 컴포저의 `#` 후보 (#1930). 채널 컴포저와 같은 목록을 내려 준다. */
+  channels: Channel[];
   /**
    * B11 — the same actions the channel row offers, so a reply is edited,
    * deleted and reacted to exactly where it is read. Omitted by the work
@@ -193,6 +196,7 @@ export function ThreadPanel({
           channelId={channelId}
           rootId={root.id}
           directory={directory}
+          channels={channels}
           onSent={() => void query.refetch()}
         />
       )}

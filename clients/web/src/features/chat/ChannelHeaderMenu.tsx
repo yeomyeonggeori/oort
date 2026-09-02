@@ -1,42 +1,20 @@
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { EllipsisVertical, Loader2 } from "lucide-react";
-import {
-  removeChannelMember,
-  setChannelNotificationPref,
-  uuidEq,
-  type Channel,
-  type MembershipRole,
-} from "@momo/core/lib/api";
-import {
-  canLeaveChannel,
-  channelLeaveConfirmBody,
-  channelLeaveFailureMessage,
-  channelMuteToggleLabel,
-  CHANNEL_LEAVE_CONFIRM_TITLE,
-  CHANNEL_LEAVE_LABEL,
-  CHANNEL_MUTE_FAILURE,
-  CHANNEL_TOPIC_VIEW_LABEL,
-  normalizeChannelTopic,
-} from "@momo/core/features/channels/model";
+import { EllipsisVertical } from "lucide-react";
+import { type Channel, type MembershipRole } from "@momo/core/lib/api";
+import { normalizeChannelTopic } from "@momo/core/features/channels/model";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogTitle,
-} from "@/design/ui/dialog";
-import { Button } from "@/design/ui/button";
-import { InlineBanner } from "@/features/common/States";
 import { ChannelTopicDialog } from "@/features/channels/ChannelContextControls";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
+import {
+  ChannelActionMenuItems,
+  ChannelLeaveConfirmDialog,
+  useChannelActions,
+} from "./channelActions";
+import { channelActionMenuLabel } from "./channelActionModel";
 
 // =============================================================================
 // 채널 헤더 ⋮ 메뉴 (검수 피드백 #3 · #1865). 트리거는 헤더 우측 라운드 버튼
@@ -53,12 +31,25 @@ import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl"
 //   * 채널 나가기     — 오너/관리자에게만(`canLeaveChannel`). 서버 `remove_member`가
 //                       오너/관리자만 멤버십을 지울 수 있게 막으므로, 일반 멤버에게
 //                       내놓으면 확인 뒤 403으로 끝나는 막다른 길이다. 파괴적이라
-//                       확인 다이얼로그를 거치고, 사이드바에서는 낙관적으로 지운
-//                       뒤 실패하면 되돌린다.
+//                       확인 다이얼로그를 거치고, 그 다이얼로그가 왕복 내내 서서
+//                       「나가는 중」과 실패를 말한다(design-review #1937 H-1).
 //
 // 「이름 수정」은 없다. 서버에 채널 이름을 바꾸는 라우트가 없어(2026-08-10 실측)
 // 누를 수 없는 항목을 그리지 않는다 — 코어 model.ts 머리말에 그 실측을 남겨 두었고
 // 별도 티켓으로 뺀다.
+//
+// ## 이 파일에 실행부가 없는 이유 (BT-1 / #1929)
+//
+// 위 세 항목의 인벤토리는 `channelActionModel.ts`, 그 실행(알림 PUT · 나가기
+// DELETE · 확인 다이얼로그)은 `channelActions.tsx`가
+// 갖는다. 같은 일을 하는 두 번째 표면(사이드바 행 우클릭)이 생겼기 때문이고,
+// 두 표면이 실행을 각자 들면 다음 수리는 한쪽에만 들어간다. 이 파일에 남는 것은
+// **헤더가 헤더인 부분**뿐이다: ⋮ 트리거, 주제 다이얼로그로 넘기는 손, 그리고
+// 다이얼로그로 넘어가는 동안의 포커스 복귀 억제(#1865 H-3).
+//
+// 헤더의 항목이 늘지 않은 것도 판정이다. 「읽음 처리」는 지금 읽고 있는 채널에
+// 대고 할 말이 아니고(ChatShell이 이미 커서를 민다), 「이름 복사」는 행에서
+// 목록을 훑는 사람의 물음이다. 표면별 열쇠 집합은 모델의 표 하나에 있다.
 // =============================================================================
 
 export function ChannelHeaderMenu({
@@ -78,58 +69,20 @@ export function ChannelHeaderMenu({
    *  나가기를 내놓고 서버가 답하게 둔다(`canLeaveChannel`). */
   selfRole: MembershipRole | undefined;
 }) {
-  const client = useQueryClient();
-  const navigate = useNavigate();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const handingOffRef = useRef(false);
   const [open, setOpen] = useState(false);
   const [topicOpen, setTopicOpen] = useState(false);
-  const [confirmLeave, setConfirmLeave] = useState(false);
-  const [muteError, setMuteError] = useState(false);
-  const [leaveError, setLeaveError] = useState<string | null>(null);
   const topic = normalizeChannelTopic(channel.topic ?? "");
-  const hasTopic = topic !== "";
-  const menuLabel = `${title} 채널 메뉴`;
+  const menuLabel = channelActionMenuLabel(title, channel);
 
-  const muteMutation = useMutation({
-    mutationFn: (muted: boolean) =>
-      setChannelNotificationPref(workspaceId, channel.id, muted),
-    onSuccess: () => {
-      setMuteError(false);
-      setOpen(false);
-      // 서버가 진실이다: 무효화하면 새 muted가 흘러 내려와 다음에 열 때 낱말이
-      // 뒤집힌다.
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-    },
-    onError: () => setMuteError(true),
-  });
-
-  const leaveMutation = useMutation({
-    mutationFn: () => removeChannelMember(workspaceId, channel.id, selfMemberId),
-    onMutate: async () => {
-      // 낙관적: 사이드바에서 이 채널을 지금 지운다. 실패하면 스냅샷으로 되돌린다.
-      await client.cancelQueries({ queryKey: ["channels", workspaceId] });
-      const previous = client.getQueryData<Channel[]>(["channels", workspaceId]);
-      client.setQueryData<Channel[]>(["channels", workspaceId], (current) =>
-        current?.filter((c) => !uuidEq(c.id, channel.id))
-      );
-      return { previous };
-    },
-    onSuccess: () => {
-      setLeaveError(null);
-      setConfirmLeave(false);
-      // 명부의 channelIds도 이 편집으로 바뀌었다.
-      void client.invalidateQueries({ queryKey: ["channels", workspaceId] });
-      void client.invalidateQueries({ queryKey: ["roster", workspaceId] });
-      // 방금 나온 채널에 머무를 수 없다. 인덱스가 남은 첫 채널로 착지시킨다.
-      navigate("/");
-    },
-    onError: (error, _variables, context) => {
-      if (context?.previous) {
-        client.setQueryData(["channels", workspaceId], context.previous);
-      }
-      setLeaveError(channelLeaveFailureMessage(error));
-    },
+  const actions = useChannelActions({
+    workspaceId,
+    channel,
+    title,
+    selfMemberId,
+    selfRole,
+    onActionSucceeded: () => setOpen(false),
   });
 
   return (
@@ -138,8 +91,8 @@ export function ChannelHeaderMenu({
         open={open}
         onOpenChange={(next) => {
           setOpen(next);
-          // 닫히면 이전 알림 실패는 다음 열기까지 따라오지 않는다.
-          if (!next) setMuteError(false);
+          // 닫히면 이전 실패는 다음 열기까지 따라오지 않는다.
+          if (!next) actions.clearError();
         }}
       >
         <DropdownMenuTrigger asChild>
@@ -166,127 +119,27 @@ export function ChannelHeaderMenu({
             }
           }}
         >
-          {/* 알림 실패는 항목 위에 그 자리에서 선다(§5, 토스트가 아니다). 메뉴가
-              열려 있어야 읽히므로, 아래 항목은 실패 시 preventDefault로 닫지
-              않는다. */}
-          {muteError && (
-            <InlineBanner message={CHANNEL_MUTE_FAILURE} testId="channel-mute-error" />
-          )}
-          {hasTopic && (
-            <>
-              <DropdownMenuItem
-                data-testid="channel-topic"
-                onSelect={(event) => {
-                  event.preventDefault();
-                  handingOffRef.current = true;
-                  setOpen(false);
-                  setTopicOpen(true);
-                }}
-              >
-                {CHANNEL_TOPIC_VIEW_LABEL}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
-          )}
-          <DropdownMenuItem
-            data-testid="channel-mute-toggle"
-            data-muted={channel.muted ? "" : undefined}
-            disabled={muteMutation.isPending}
-            onSelect={(event) => {
-              // 한 번의 REST 왕복 동안 메뉴를 열어 둔다(PinListMenu의 「다시
-              // 시도」와 같은 규율): 성공하면 onSuccess가 닫고, 실패하면 위 배너를
-              // 읽을 수 있게 열린 채로 둔다.
-              event.preventDefault();
-              muteMutation.mutate(!channel.muted);
+          <ChannelActionMenuItems
+            surface="header"
+            prefix="channel"
+            actions={actions}
+            onHandOff={(key) => {
+              handingOffRef.current = true;
+              setOpen(false);
+              if (key === "topic") setTopicOpen(true);
+              if (key === "leave") actions.leave.open();
             }}
-          >
-            {channelMuteToggleLabel(channel.muted)}
-          </DropdownMenuItem>
-          {canLeaveChannel(selfRole) && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                tone="danger"
-                data-testid="channel-leave"
-                onSelect={(event) => {
-                  // 파괴적 액션은 한 번의 무방비 클릭으로 발화하지 않는다(§6).
-                  // 메뉴를 닫고 확인 다이얼로그로 넘긴다.
-                  event.preventDefault();
-                  handingOffRef.current = true;
-                  setOpen(false);
-                  setLeaveError(null);
-                  setConfirmLeave(true);
-                }}
-              >
-                {CHANNEL_LEAVE_LABEL}
-              </DropdownMenuItem>
-            </>
-          )}
+          />
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <Dialog
-        open={confirmLeave}
-        onOpenChange={(next) => {
-          setConfirmLeave(next);
-          if (!next) setLeaveError(null);
-        }}
-      >
-        {confirmLeave && (
-          <DialogContent
-            className="gap-4 p-4"
-            data-testid="channel-leave-confirm"
-            onEscapeKeyDown={(event) => {
-              if (leaveMutation.isPending) event.preventDefault();
-            }}
-            onInteractOutside={(event) => {
-              if (leaveMutation.isPending) event.preventDefault();
-            }}
-          >
-            <div className="flex flex-col gap-1">
-              <DialogTitle>{CHANNEL_LEAVE_CONFIRM_TITLE}</DialogTitle>
-              <DialogDescription>
-                {channelLeaveConfirmBody(title)}
-              </DialogDescription>
-            </div>
-            {leaveError && (
-              <InlineBanner
-                separator={false}
-                message={leaveError}
-                testId="channel-leave-error"
-              />
-            )}
-            {/* 표준 테두리 버튼, 후행 정렬, 기본(파괴) 액션이 마지막(§8). */}
-            <div className="flex items-center justify-end gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={leaveMutation.isPending}
-                onClick={() => setConfirmLeave(false)}
-                data-testid="channel-leave-cancel"
-              >
-                취소
-              </Button>
-              <Button
-                type="button"
-                variant="destructive"
-                size="sm"
-                aria-busy={leaveMutation.isPending || undefined}
-                onClick={() => leaveMutation.mutate()}
-                data-testid="channel-leave-confirm-action"
-              >
-                {leaveMutation.isPending && (
-                  <Loader2 aria-hidden="true" className="spinner-busy" />
-                )}
-                {leaveMutation.isPending ? "나가는 중" : CHANNEL_LEAVE_LABEL}
-              </Button>
-            </div>
-          </DialogContent>
-        )}
-      </Dialog>
+      <ChannelLeaveConfirmDialog
+        actions={actions}
+        title={title}
+        testId="channel-leave-confirm"
+      />
 
-      {hasTopic && (
+      {topic !== "" && (
         <ChannelTopicDialog
           topic={topic}
           open={topicOpen}

@@ -69,6 +69,7 @@ export function InlineBanner({
   actionBusy = false,
   separator = true,
   heading = false,
+  className,
   testId,
 }: {
   tone?: "error" | "neutral";
@@ -114,6 +115,14 @@ export function InlineBanner({
    * (PR 918 R1 Low).
    */
   heading?: boolean;
+  /**
+   * 이 배너가 **남의 패딩 축 위에** 설 때 그 자를 맞추는 자리. 유일한 현재
+   * 소비자는 메뉴 안의 배너다: 메뉴 행은 `px-2` 인데 이 상자의 기본은 `px-4`
+   * 라, 배너 첫 글자가 항목 첫 글자보다 8px 오른쪽에 섰다(design-review
+   * #1937 N-3 실측 21px 대 13px). 색·역할·기하는 여기 것이고, 바깥 표면이
+   * 정하는 것은 그 표면의 자뿐이다.
+   */
+  className?: string;
   testId?: string;
 }) {
   const Message = heading ? "h1" : "span";
@@ -131,7 +140,8 @@ export function InlineBanner({
         separator && "border-b",
         tone === "error"
           ? "border-danger text-danger"
-          : "border-line bg-surface-hover text-ink"
+          : "border-line bg-surface-hover text-ink",
+        className
       )}
     >
       {icon && (
@@ -154,7 +164,21 @@ export function InlineBanner({
         )}
       </div>
       {actionLabel && onAction && (
+        // `type="button"` 은 장식이 아니다 (design-review #1930 B-1).
+        //
+        // 이 배너는 폼 **안**에도 산다(컴포저의 자동완성 사유 상자가 그 자리다).
+        // `design/ui/button.tsx` 는 shadcn 원본 그대로 `type` 을 정하지 않으므로
+        // DOM 기본값 `submit` 이 되고, 그러면 「다시 시도」 한 번이 그 폼을
+        // 제출한다 — 실측에서 사람이 쓰던 초안이 채널로 나가고 입력창이 비워졌다.
+        //
+        // 프리미티브의 기본값을 바꾸지 않는 이유: 이 레포의 `<Button>` 호출부는
+        // 206 곳이고 폼은 스무 남짓인데 그중 몇은 제출 격을 명시하지 않은 채
+        // Enter 제출에 기대고 있어, 기본값 전환은 그 전부를 실사해야 하는 별개
+        // 작업이다. 반면 **이 자리의 격은 여기서 이미 안다**: 인라인 배너의
+        // 액션은 「다시 불러오기」·「닫기」 류이고(레포 전수 확인: 전부 refetch
+        // 또는 dismiss) 어떤 폼의 제출도 아니다.
         <Button
+          type="button"
           variant="outline"
           size="sm"
           className="shrink-0"

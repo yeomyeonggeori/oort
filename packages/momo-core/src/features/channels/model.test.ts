@@ -2,7 +2,14 @@ import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
 import {
+  CHANNEL_COPY_FAILURE,
+  CHANNEL_COPY_NAME_DONE_LABEL,
+  CHANNEL_COPY_NAME_LABEL,
+  CHANNEL_COPY_UNAVAILABLE,
   CHANNEL_LEAVE_LABEL,
+  CHANNEL_MARK_READ_BUSY_LABEL,
+  CHANNEL_MARK_READ_FAILURE,
+  CHANNEL_MARK_READ_LABEL,
   CHANNEL_MUTE_LABEL,
   CHANNEL_NAME_MAX,
   CHANNEL_TOPIC_MAX,
@@ -11,8 +18,11 @@ import {
   canCreateChannel,
   canCreateChannelNow,
   canLeaveChannel,
+  channelCopyNameLabel,
   channelLeaveConfirmBody,
   channelLeaveFailureMessage,
+  channelMenuAccessibleLabel,
+  channelMuteToggleBusyLabel,
   channelMuteToggleLabel,
   channelNameIssue,
   channelNameIssueMessage,
@@ -240,5 +250,75 @@ describe("channel header menu labels", () => {
 
   it("names the topic item as view, because there is no topic PATCH", () => {
     expect(CHANNEL_TOPIC_VIEW_LABEL).toBe("주제 보기");
+  });
+});
+
+// ---- BT-1 (#1929): 행에서 채널을 조작하는 낱말 -------------------------------
+
+describe("channelCopyNameLabel", () => {
+  it("낱말이 상태다: 복사 전과 후가 다른 문장이다", () => {
+    expect(channelCopyNameLabel(false)).toBe(CHANNEL_COPY_NAME_LABEL);
+    expect(channelCopyNameLabel(true)).toBe(CHANNEL_COPY_NAME_DONE_LABEL);
+    expect(CHANNEL_COPY_NAME_LABEL).not.toBe(CHANNEL_COPY_NAME_DONE_LABEL);
+  });
+
+  it("동사구다: 메뉴의 형제 항목들과 같은 꼴", () => {
+    // 「메시지 복사하기」·「링크 복사하기」·「채널 나가기」와 같은 결.
+    expect(CHANNEL_COPY_NAME_LABEL.endsWith("하기")).toBe(true);
+    expect(CHANNEL_MARK_READ_LABEL.endsWith("하기")).toBe(true);
+  });
+});
+
+describe("복사·읽음 실패 문장", () => {
+  it("클립보드가 없을 때와 쓰기가 실패했을 때를 갈라 말한다", () => {
+    // 다시 눌러도 같은 경우에 「다시」라고 말하면 거짓말이 된다.
+    expect(CHANNEL_COPY_UNAVAILABLE).not.toContain("다시");
+    expect(CHANNEL_COPY_FAILURE).toContain("다시");
+    expect(CHANNEL_COPY_UNAVAILABLE).not.toBe(CHANNEL_COPY_FAILURE);
+  });
+
+  it("읽음 실패는 그 자리에서 다음 행동을 준다", () => {
+    expect(CHANNEL_MARK_READ_FAILURE).toContain("다시 시도");
+  });
+});
+
+// ---- design-review #1937 R1: 진행 낱말과 DM 낱말 -----------------------------
+
+describe("channelMuteToggleBusyLabel", () => {
+  it("왕복 중에도 방향을 말한다: 끄는 중과 켜는 중이 다르다", () => {
+    expect(channelMuteToggleBusyLabel(false)).toBe("알림 끄는 중");
+    expect(channelMuteToggleBusyLabel(true)).toBe("알림 켜는 중");
+  });
+
+  it("쉬는 낱말과 진행 낱말이 서로 다르다 — 바뀐 낱말이 곧 진행 표시다", () => {
+    expect(channelMuteToggleBusyLabel(false)).not.toBe(CHANNEL_MUTE_LABEL);
+    expect(channelMuteToggleBusyLabel(true)).not.toBe(CHANNEL_UNMUTE_LABEL);
+    expect(CHANNEL_MARK_READ_BUSY_LABEL).not.toBe(CHANNEL_MARK_READ_LABEL);
+  });
+
+  it("진행 낱말꼴을 지킨다: 「명사 + 하는 중」을 쓰지 않는다", () => {
+    // 프리플라이트 분류 11 이 재는 그 축. 「읽음 처리하는 중」이 아니라
+    // 「읽음 처리 중」이다.
+    for (const label of [
+      channelMuteToggleBusyLabel(false),
+      channelMuteToggleBusyLabel(true),
+      CHANNEL_MARK_READ_BUSY_LABEL,
+    ]) {
+      expect(label).not.toMatch(/하는 중$/);
+      expect(label.endsWith("중")).toBe(true);
+    }
+  });
+});
+
+describe("channelMenuAccessibleLabel", () => {
+  it("DM 을 「채널」이라 부르지 않는다", () => {
+    expect(channelMenuAccessibleLabel("이도현", true)).toBe(
+      "이도현 다이렉트 메시지 메뉴"
+    );
+    expect(channelMenuAccessibleLabel("이도현", true)).not.toContain("채널");
+  });
+
+  it("채널은 채널이라 부른다", () => {
+    expect(channelMenuAccessibleLabel("general", false)).toBe("general 채널 메뉴");
   });
 });

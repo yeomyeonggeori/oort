@@ -415,6 +415,17 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000202", workspaceId: WORKSPACE_ID, kind: "public", name: "엔진", muted: false },
   { id: "00000000-0000-7000-8000-000000000203", workspaceId: WORKSPACE_ID, kind: "private", name: "김인턴작업", muted: false },
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
+  // 자유 텍스트 방 이름 (#1930 M-1). 채널 `name` 은 스키마상 자유 텍스트라 한글도
+  // 공백도 담고, 컴포저 후보 행은 폭 192(`w-pane-sm`) 안에서 그것을 담아야 한다.
+  // 이 줄이 없으면 그 행을 재는 프레임이 영문 짧은 이름만 보게 된다.
+  {
+    id: "00000000-0000-7000-8000-000000000205",
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "2026-하반기-릴리스-준비-회고-및-후속-작업",
+    topic: "회고 기록과 후속 작업",
+    muted: false,
+  },
 ];
 
 // The DM the directory opens onto (MOMO-611). It is in the fixture so the
@@ -1449,9 +1460,29 @@ async function installMocks(context) {
   // an unarchived channel already carries the name, which is the frame that
   // matters because the rejection has to land under the name field, and 201
   // with the created row otherwise.
+  // BT-1 (#1929): 사이드바 행 메뉴가 알림을 끄면 서버가 그것을 **기억해야**
+  // 낱말이 다음에 열 때 뒤집힌다. 무효화 뒤 재조회가 같은 값을 돌려주면 캡처는
+  // 「눌렀지만 아무 일도 없었다」를 초록으로 넘긴다.
+  const mutedChannels = new Set();
+  await context.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) => {
+      const url = new URL(route.request().url());
+      const id = url.pathname.split("/").at(-2);
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.muted) mutedChannels.add(id);
+      else mutedChannels.delete(id);
+      return json(route, { muted: Boolean(body.muted) });
+    }
+  );
   await context.route("**/v1/workspaces/*/channels", (route) => {
     if (route.request().method() !== "POST") {
-      return json(route, { channels: [...CHANNELS, DM_CHANNEL] });
+      return json(route, {
+        channels: [...CHANNELS, DM_CHANNEL].map((channel) => ({
+          ...channel,
+          muted: mutedChannels.has(channel.id),
+        })),
+      });
     }
     const body = JSON.parse(route.request().postData() ?? "{}");
     if (CHANNELS.some((c) => c.name === body.name)) {
@@ -1948,6 +1979,27 @@ async function installMocks(context) {
       updatedAtMs: Date.now() - 3_600_000,
     });
   });
+  // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
+  //
+  // GET 의 기본값은 **빈 payload** 다. 여기에 커스텀 섹션을 심으면 이 파일의
+  // 기존 사이드바 프레임이 전부 한 칸씩 달라지므로, 섹션은 장면이 UI 로 직접
+  // 만들고 끝나기 전에 지운다(`captureSidebarSections` 꼬리). PUT 은 서버처럼
+  // 통째로 되돌려 준다.
+  await context.route(
+    "**/v1/workspaces/*/members/me/sidebar-prefs",
+    (route) => {
+      if (route.request().method() === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        return json(route, {
+          prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
+          updatedAtMs: Date.now(),
+        });
+      }
+      return json(route, {
+        prefs: { version: 1, sections: [], starredChannelIds: [] },
+      });
+    }
+  );
   await context.route("**/v1/workspaces/*/notification-rules", (route) => {
     if (route.request().method() === "PUT") {
       const body = JSON.parse(route.request().postData() || "{}");
@@ -2268,12 +2320,384 @@ async function assertSectionActionsAtRest(page, scheme, where) {
   }
 }
 
+function isMutePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/notification-pref");
+  } catch {
+    return false;
+  }
+}
+
+function isReadStatePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/read-state");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * BT-1 (#1929): 사이드바 행의 우클릭 메뉴. 두 스킴에서 **열린 프레임**을 찍고,
+ * 찍기 전에 그것이 죽은 컨트롤이 아님을 누른다.
+ *
+ * 여기서 재는 것 넷:
+ *   ① 우클릭이 그 행의 메뉴를 열고, 열려 있는 동안 행이 자기가 임자임을 말한다.
+ *   ② 키보드에도 같은 문이 있다 (Shift+F10) — 그리고 Esc 뒤 캐럿이 **그 행으로**
+ *      돌아온다. BODY 추락은 회귀다.
+ *   ③ 알림 토글이 실제로 PUT 하고, 서버가 기억한 값을 따라 낱말이 뒤집힌다.
+ *   ④ 「읽음 처리」가 그 채널의 `latest_seq` 를 광고한다.
+ */
+async function captureSidebarRowMenu(page, scheme, shots) {
+  // 안 읽음이 있는 행을 고른다: 다섯 항목이 전부 서는 유일한 상태이고,
+  // 「읽음 처리」를 누를 수 있는 유일한 행이다.
+  const unreadChannelId = CHANNELS[1].id;
+  const row = page.locator(`[data-channel-id="${unreadChannelId}"]`);
+  await row.waitFor({ state: "visible" });
+
+  // 행이 두 줄로 흩어지지 않았는가 (실측 회귀): `asChild` 트리거가 NavLink 의
+  // 함수 className 을 문자열로 이어 붙이면 행은 flex 도 패딩도 잃는다. 캡처가
+  // 그 결함을 한 번 통과시켰으므로, 이제 프레임을 찍기 전에 기하를 잰다.
+  const rowBox = await row.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return {
+      height: Math.round(rect.height),
+      display: style.display,
+      paddingLeft: style.paddingLeft,
+    };
+  });
+  if (rowBox.display !== "flex" || rowBox.height > 40) {
+    throw new Error(
+      `사이드바 행 기하 ${scheme}: ${JSON.stringify(rowBox)} (flex · 한 줄이어야 함)`
+    );
+  }
+
+  await row.click({ button: "right" });
+  const menu = page.getByTestId("channel-row-menu");
+  await menu.waitFor({ state: "visible" });
+  const owner = await row.evaluate((el) =>
+    el.closest("[data-row-menu-trigger]")?.getAttribute("data-state")
+  );
+  if (owner !== "open") {
+    throw new Error(
+      `행 메뉴가 열렸는데 행 자리가 임자라고 말하지 않는다 ${scheme}: ${owner}`
+    );
+  }
+  const items = await menu
+    .locator("[data-testid^='channel-row-']")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid"))
+    );
+  // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
+  // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
+  // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
+  const expected = [
+    "channel-row-mark-read",
+    "channel-row-mute-toggle",
+    "channel-row-star",
+    "channel-row-copy-link",
+    "channel-row-copy-name",
+    "channel-row-leave",
+  ];
+  if (JSON.stringify(items) !== JSON.stringify(expected)) {
+    throw new Error(
+      `행 메뉴 항목 ${scheme}: ${JSON.stringify(items)} (${JSON.stringify(expected)} 여야 함)`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  // ④ 읽음 처리 — 채널을 열지 않고 그 채널의 latest_seq 를 광고한다.
+  const readPut = page.waitForRequest(isReadStatePut);
+  await page.getByTestId("channel-row-mark-read").click();
+  const readBody = (await readPut).postDataJSON();
+  if (readBody?.last_read_seq !== 42) {
+    throw new Error(
+      `읽음 처리 PUT ${scheme}: ${JSON.stringify(readBody)} (last_read_seq 42 여야 함)`
+    );
+  }
+  await menu.waitFor({ state: "hidden" });
+
+  // ② 키보드에도 같은 문이 있고, **그 방에는 바닥이 있다**
+  //    (design-review #1937 B-1). 예전 캡처는 「Shift+F10 → 곧바로 Escape」만
+  //    걸어서 그 사이의 화살표를 한 번도 누르지 않았고, 그래서 ↓ 한 번에 메뉴가
+  //    사라지고 캐럿이 「활동」으로 튀는 결함을 통과시켰다. 이제 항목에 서서
+  //    Enter 로 실행한다 — 헤더 게이트가 이미 쓰는 그 형상.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mark-read",
+    undefined,
+    { timeout: 4_000 }
+  ).catch(async () => {
+    throw new Error(
+      `키보드로 연 메뉴의 첫 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} (channel-row-mark-read 여야 함)`
+    );
+  });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mute-toggle",
+    undefined,
+    { timeout: 4_000 }
+  ).catch(async () => {
+    throw new Error(
+      `메뉴 안 ↓ 한 번 뒤 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} · 메뉴 ${await menu.count()} (channel-row-mute-toggle 여야 함)`
+    );
+  });
+  const kbdMutePut = page.waitForRequest(isMutePut);
+  await page.keyboard.press("Enter");
+  const kbdMuteBody = (await kbdMutePut).postDataJSON();
+  if (kbdMuteBody?.muted !== true) {
+    throw new Error(
+      `키보드로 실행한 알림 PUT ${scheme}: ${JSON.stringify(kbdMuteBody)} ({muted:true} 여야 함)`
+    );
+  }
+  if ("memberId" in kbdMuteBody) {
+    throw new Error("알림 몸통이 남을 지목했다 — 자기 것만 끌 수 있다");
+  }
+  await menu.waitFor({ state: "hidden" });
+
+  // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
+  await page.waitForFunction(
+    (id) => {
+      const target = document.querySelector(`[data-channel-id="${id}"]`);
+      const box = target?.closest("[data-row-menu-trigger]");
+      if (box?.getAttribute("data-state") !== "open") {
+        target?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
+        );
+      }
+      const item = document.querySelector(
+        '[data-testid="channel-row-mute-toggle"]'
+      );
+      return item?.getAttribute("data-muted") === "";
+    },
+    unreadChannelId,
+    { timeout: 6_000 }
+  ).catch(() => {
+    throw new Error(
+      `알림 낱말이 저장된 상태를 따라 뒤집히지 않았다 ${scheme}`
+    );
+  });
+  // 되돌린다: 뒤따르는 장면이 음소거된 채널을 물려받지 않게.
+  const unmutePut = page.waitForRequest(isMutePut);
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await unmutePut;
+  await menu.waitFor({ state: "hidden" });
+
+  // ④ Esc 는 메뉴만 닫고 캐럿을 그 행으로 돌려준다.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    (id) => document.activeElement?.getAttribute("data-channel-id") === id,
+    unreadChannelId,
+    { timeout: 4_000 }
+  ).catch(() => {
+    throw new Error(
+      `행 메뉴 Esc 후 포커스가 그 행으로 돌아오지 않았다 ${scheme}`
+    );
+  });
+
+  // ⑤ 열림 표식은 **활성 행에서도** 보여야 한다 (design-review #1937 N-4).
+  //    지금 열려 있는 채널의 행은 불투명한 --accent-soft 를 입고 있어서 배경
+  //    표식을 통째로 덮는다. 그때가 하필 키보드로 연 메뉴가 어느 행의 것인지
+  //    말하는 유일한 표식이 필요한 순간이다.
+  //    캡처는 인덱스(`#/`)에 서 있어서 어느 행도 활성이 아니다 — 그래서 이
+  //    장면은 먼저 그 채널로 들어가 행을 실제로 활성으로 만든 뒤 잰다. 재고
+  //    나서 인덱스로 돌아온다(뒤따르는 장면의 전제를 바꾸지 않는다).
+  await page.evaluate((id) => {
+    window.location.hash = `/c/${id}`;
+  }, GENERAL_ID);
+  const activeRow = page.locator(`[data-channel-id="${GENERAL_ID}"]`);
+  await activeRow.waitFor({ state: "visible" });
+  await page
+    .waitForFunction(
+      (id) =>
+        document
+          .querySelector(`[data-channel-id="${id}"]`)
+          ?.getAttribute("aria-current") === "page",
+      GENERAL_ID,
+      { timeout: 4_000 }
+    )
+    .catch(() => {
+      throw new Error(`활성 행을 만들지 못했다 ${scheme}`);
+    });
+  await activeRow.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  // 전이가 끝난 뒤에 잰다: `transition-colors` 한가운데서 재면 방금 활성이 된
+  // 행의 배경이 아직 투명하다.
+  await page.waitForTimeout(400);
+  const marker = await activeRow.evaluate((el) => {
+    const box = el.closest("[data-row-menu-trigger]");
+    const boxStyle = box ? getComputedStyle(box) : null;
+    // WCAG 2.1 상대 휘도. 브라우저가 이미 `light-dark()` 를 이 스킴으로 풀어
+    // 놓았으므로, 여기서 재는 것은 **화면에 실제로 선 두 색**이다.
+    const channels = (color) =>
+      (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (color) => {
+      const [r, g, b] = channels(color).map((v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const rowBackground = getComputedStyle(el).backgroundColor;
+    const outlineColor = boxStyle?.outlineColor ?? "";
+    const [hi, lo] = [luminance(outlineColor), luminance(rowBackground)].sort(
+      (a, b) => b - a
+    );
+    return {
+      state: box?.getAttribute("data-state") ?? null,
+      outlineWidth: boxStyle ? parseFloat(boxStyle.outlineWidth) : 0,
+      outlineStyle: boxStyle?.outlineStyle ?? "none",
+      outlineColor,
+      rowBackground,
+      ariaCurrent: el.getAttribute("aria-current"),
+      contrast: Number(((hi + 0.05) / (lo + 0.05)).toFixed(2)),
+    };
+  });
+  if (
+    marker.state !== "open" ||
+    marker.outlineStyle === "none" ||
+    !(marker.outlineWidth > 0)
+  ) {
+    throw new Error(
+      `활성 행의 열림 표식 ${scheme}: ${JSON.stringify(marker)} (아웃라인이 서야 함)`
+    );
+  }
+  if (/rgba\(0, 0, 0, 0\)|transparent/.test(marker.rowBackground)) {
+    throw new Error(
+      `활성 행이 활성으로 안 그려졌다 ${scheme}: ${JSON.stringify(marker)} — 이 장면이 재려던 겹침이 없다`
+    );
+  }
+  //    아웃라인이 **있다**는 것만으로는 부족하다. 앞 회전의 표식은 있었고,
+  //    다크에서 이 채움 위 2.90:1 이었다(design-review R2 M-1). 그러므로 이
+  //    장면은 존재가 아니라 **대비**를 잰다 — 두 스킴 다.
+  if (!(marker.contrast >= 3)) {
+    throw new Error(
+      `활성 행 위 열림 표식 대비 ${scheme}: ${JSON.stringify(marker)} (비텍스트 3:1 이상이어야 함)`
+    );
+  }
+  const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
+  await page.screenshot({ path: activeShot });
+  shots.push(activeShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.evaluate(() => {
+    window.location.hash = "/";
+  });
+  await page.waitForFunction(
+    (id) =>
+      document
+        .querySelector(`[data-channel-id="${id}"]`)
+        ?.getAttribute("aria-current") === null,
+    GENERAL_ID,
+    { timeout: 4_000 }
+  );
+
+  // ⑥ 오류 상태를 **실제로 일으켜** 그 자리에서 잰다 (design-review #1937
+  //    N-3 · N-5). 알림 PUT 을 한 번 503 으로 돌려주면 메뉴 안에 배너가 선다.
+  //      · N-3: 배너의 첫 글자가 항목의 첫 글자와 같은 왼쪽 자에 서는가.
+  //             (실측 결함: 21px 대 13px — 배너의 `px-4` 와 메뉴 행의 `px-2`)
+  //      · N-5: `role="alert"` 이 `role="menu"` 의 직계 자식이 아닌가.
+  await page.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "unavailable" } }),
+      })
+  );
+  const quietRow = page.locator(`[data-channel-id="${CHANNELS[2].id}"]`);
+  await quietRow.waitFor({ state: "visible" });
+  await quietRow.click({ button: "right" });
+  await menu.waitFor({ state: "visible" });
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await page
+    .getByTestId("channel-row-action-error")
+    .waitFor({ state: "visible", timeout: 6_000 });
+  const banner = await page.evaluate(`(() => {
+    const textLeft = (node) => {
+      if (!node) return null;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return Math.round(range.getBoundingClientRect().left);
+    };
+    const box = document.querySelector('[data-testid="channel-row-action-error"]');
+    const item = document.querySelector('[data-testid="channel-row-mute-toggle"]');
+    return {
+      bannerRole: box?.getAttribute("role") ?? null,
+      parentRole: box?.parentElement?.getAttribute("role") ?? null,
+      grandParentRole: box?.parentElement?.parentElement?.getAttribute("role") ?? null,
+      parentNamed: Boolean(box?.parentElement?.getAttribute("aria-label")),
+      bannerTextLeft: textLeft(box?.querySelector("span")),
+      itemTextLeft: textLeft(item),
+      itemBusy: item?.getAttribute("aria-busy") ?? null,
+      itemDisabled: item?.getAttribute("data-disabled") ?? null,
+      text: (box?.textContent ?? "").trim(),
+    };
+  })()`);
+  if (
+    banner.bannerTextLeft === null ||
+    banner.itemTextLeft === null ||
+    Math.abs(banner.bannerTextLeft - banner.itemTextLeft) > 1
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 왼쪽 자 ${scheme}: ${JSON.stringify(banner)} (항목과 같아야 함)`
+    );
+  }
+  if (
+    banner.bannerRole !== "alert" ||
+    banner.parentRole !== "group" ||
+    banner.grandParentRole !== "menu" ||
+    !banner.parentNamed
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 aria 구조 ${scheme}: ${JSON.stringify(banner)} (alert < group < menu, group 에 이름)`
+    );
+  }
+  // 실패한 뒤에도 그 항목은 잠기지도 흐려지지도 않는다 (N-1).
+  if (banner.itemDisabled !== null || banner.itemBusy !== null) {
+    throw new Error(
+      `실패 뒤 항목 상태 ${scheme}: ${JSON.stringify(banner)} (잠금·진행 표시가 남으면 안 된다)`
+    );
+  }
+  const errorShot = `${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`;
+  await page.screenshot({ path: errorShot });
+  shots.push(errorShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.unroute("**/v1/workspaces/*/channels/*/notification-pref");
+
+  await page.getByTestId("composer-input").hover();
+}
+
 /**
  * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
   await assertSectionActionsAtRest(page, scheme, "첫 줄");
+
+  await captureSidebarRowMenu(page, scheme, shots);
+  await assertSectionActionsAtRest(page, scheme, "행 메뉴 왕복 후");
 
   const restHeader = await page
     .getByTestId("sidebar-section-channels-header")
@@ -2456,6 +2880,8 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("section-collapse-channels").press("Enter");
   await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
 
+  await captureCustomSection(page, scheme, shots);
+
   await page.getByTestId("sidebar-toggle").click();
   await page.waitForFunction(
     () =>
@@ -2473,6 +2899,415 @@ async function captureSidebarD4(page, scheme, shots) {
       !document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await page.getByTestId("composer-input").hover();
+}
+
+/**
+ * 섹션 편집 컨트롤 하나의 크기 (design-review #1932 N-3).
+ *
+ * 리뷰는 이 둘(`new-section` · `section-menu-*`)을 `MOBILE_TAP_TARGETS` 에
+ * 올리라고 했다. 그런데 H-1 을 닫으면서 그 둘은 **터치 표면에 존재하지 않게**
+ * 됐다 - 배치를 줄 수 없는 표면에는 섹션 편집 문도 내밀지 않는다. 없는 것을 폰
+ * 허용목록에 `optional` 로 올리면 언제나 건너뛰는 항목이 되고, 그것은 재는 척하는
+ * 목록이다(§5.5② 「허용목록 밖은 재지 않는다」의 반대 실패).
+ *
+ * 그래서 **사는 자리에서** 잰다: 포인터 표면의 하우스 아이콘 버튼 규격
+ * `size-control-sm`(28px), 바로 옆 `new-channel` 이 쓰는 그 수다. 각 컨트롤은
+ * 자기 헤더가 호버돼 있을 때만 마운트되므로 한 번에 하나씩 부른다.
+ */
+async function assertSectionControlSize(page, scheme, testId) {
+  const controlSm = pixelToken("spacing-control-sm");
+  const box = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="${testId}"]');
+    if (!el) return { missing: true };
+    const r = el.getBoundingClientRect();
+    return { width: Math.round(r.width), height: Math.round(r.height) };
+  })()`);
+  if (box.missing || box.height < controlSm || box.width < controlSm) {
+    throw new Error(
+      `섹션 편집 컨트롤 ${scheme}: ${testId} ${JSON.stringify(box)} (최소 ${controlSm}px)`
+    );
+  }
+  console.log(
+    `  섹션 편집 컨트롤 ${scheme}: ${testId} ${box.width}x${box.height}`
+  );
+}
+
+/**
+ * 커스텀 섹션 한 바퀴 (ADR-0177 D4 / BT-4 #1932).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 「새 섹션」 → 이름 → 행 우클릭의
+ * 「섹션으로 이동」 → 삭제. 그래야 이 프레임들이 사람이 실제로 걷는 길의 사진이
+ * 되고, 끝에 지우므로 뒤따르는 장면들의 사이드바가 그대로 남는다.
+ *
+ * 이름은 긴 한글이다. 80자 상한이 있는 자리이고, 좁은 사이드바에서 잘림이
+ * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
+ */
+async function captureCustomSection(page, scheme, shots) {
+  // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
+  // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
+  const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
+
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-section").waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "new-section");
+  await page.getByTestId("new-section").click();
+  const dialog = page.getByTestId("sidebar-section-name-dialog");
+  await dialog.waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
+  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  await page.screenshot({ path: createShot });
+  shots.push(createShot);
+  await page.getByTestId("sidebar-section-name-submit").click();
+  await dialog.waitFor({ state: "detached" });
+
+  const section = page.getByTestId("sidebar-section-sec-1");
+  await section.waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `custom section ${scheme}`);
+
+  // 방금 만든 섹션은 비어 있고, 비어 있다고 말한다.
+  const emptyRows = await section
+    .locator('[data-testid="channel-item"]')
+    .count();
+  if (emptyRows !== 0) {
+    throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
+  }
+
+  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  const row = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await row.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await page
+    .getByTestId("channel-row-move-to-section")
+    .waitFor({ state: "visible" });
+  const radios = await page
+    .getByTestId("channel-row-menu")
+    .locator('[role="menuitemradio"]')
+    .count();
+  if (radios !== 2) {
+    throw new Error(
+      `섹션 라디오 개수 ${scheme}: ${radios} (기본 + 커스텀 = 2 이어야 함)`
+    );
+  }
+  const baseChecked = await page
+    .getByTestId("channel-row-section-base")
+    .getAttribute("aria-checked");
+  if (baseChecked !== "true") {
+    throw new Error(
+      `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
+    );
+  }
+  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  const menuBox = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const r = el.getBoundingClientRect();
+    return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
+  })()`);
+  if (menuBox.right > menuBox.view) {
+    throw new Error(
+      `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  await page.getByTestId("channel-row-section-sec-1").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
+  // 사실을 말하는지 여기서 함께 본다.
+  //
+  // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
+  // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
+  await section.locator('[data-testid="channel-item"]').first().click({
+    button: "right",
+  });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const nowChecked = await page
+    .getByTestId("channel-row-section-sec-1")
+    .getAttribute("aria-checked");
+  const checkGlyphs = await page
+    .getByTestId("channel-row-section-sec-1")
+    .locator("svg")
+    .count();
+  if (nowChecked !== "true" || checkGlyphs !== 1) {
+    throw new Error(
+      `배치 뒤 체크 ${scheme}: aria-checked=${nowChecked} 체크표시=${checkGlyphs}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  await section
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+
+  await assertSectionControlSize(page, scheme, "section-menu-sec-1");
+  await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
+  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  await page.screenshot({ path: filledShot });
+  shots.push(filledShot);
+
+  await captureSortDoor(page, scheme, shots);
+  await captureSectionDropMarker(page, scheme, shots);
+  await captureStarredSection(page, scheme, shots);
+
+  // 지우고 나간다. 확인 문장이 「채널은 사라지지 않는다」를 말하는지도 여기서 본다.
+  // 위 두 장면이 포인터를 다른 자리로 옮겼으므로 호버 클러스터를 다시 연다 -
+  // ⋮ 는 rest 에서 DOM 에 없다(UX-HT 계약).
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+  await page.getByTestId("section-menu-sec-1").click();
+  await page.getByTestId("section-menu-sec-1-delete").click();
+  const confirm = page.getByTestId("sidebar-section-delete-confirm");
+  await confirm.waitFor({ state: "visible" });
+  // design-review #1932 M-1 — 제목은 고정 문장이고 이름은 본문이 진다. 80자
+  // 이름이 제목에 들어가면 물음이 셋째 줄 끝에 도착한다.
+  const confirmCopy = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="sidebar-section-delete-confirm"]');
+    const title = box.querySelector("h2, [id$='-title']") ?? box.firstElementChild.firstElementChild;
+    return {
+      title: (title.textContent ?? "").trim(),
+      body: (box.textContent ?? "").trim(),
+    };
+  })()`);
+  if (confirmCopy.title.includes(LONG_NAME.slice(0, 12))) {
+    throw new Error(
+      `삭제 확인 제목이 섹션 이름을 담았다 ${scheme}: ${confirmCopy.title}`
+    );
+  }
+  if (!confirmCopy.body.includes(LONG_NAME)) {
+    throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
+  }
+  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  await page.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await page.getByTestId("sidebar-section-delete-action").click();
+  await confirm.waitFor({ state: "detached" });
+  await section.waitFor({ state: "detached" });
+  // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+}
+
+/**
+ * 정렬의 문 (BT-5 / #1933, design-review R1 M-2).
+ *
+ * 이 문은 한동안 기본 「채널」 섹션의 ⋮ 안에 있었고, 그때 스크린리더는 그것을
+ * 「채널 섹션 메뉴」라 읽었다 — 사이드바 전체에 걸리는 설정인데. 눈으로도 같은 ⋯
+ * 글리프가 섹션마다 다른 메뉴를 열었다. 그래서 문을 갈랐고, 이 장면이 그 판정을
+ * 레인 안으로 들여 잠근다: **자기 글리프·자기 이름**이고, 섹션 ⋮ 는 그 자리에
+ * 없다.
+ */
+async function captureSortDoor(page, scheme, shots) {
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  const door = page.getByTestId("sidebar-sort-menu");
+  await door.waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "sidebar-sort-menu");
+  const name = await door.getAttribute("aria-label");
+  if (name !== "채널 정렬") {
+    throw new Error(`정렬 문의 이름 ${scheme}: ${name}`);
+  }
+  // 기본 섹션에는 ⋮ 가 없다 — 그 메뉴는 커스텀 섹션의 것이다(BT-4 그대로).
+  const sectionMenu = await page.getByTestId("section-menu-channels").count();
+  if (sectionMenu !== 0) {
+    throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
+  }
+
+  await door.click();
+  const content = page.getByTestId("sidebar-sort-menu-content");
+  await content.waitFor({ state: "visible" });
+  const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
+  if (label !== "채널 정렬") {
+    throw new Error(`정렬 무리의 제목 ${scheme}: ${label}`);
+  }
+  const checked = await page
+    .getByTestId("sidebar-sort-manual")
+    .getAttribute("aria-checked");
+  if (checked !== "true") {
+    throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
+  }
+  await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-sort-menu-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  await page.keyboard.press("Escape");
+  await content.waitFor({ state: "detached" });
+}
+
+/**
+ * 드래그 중의 드롭 표지 (BT-5 / #1933).
+ *
+ * 네이티브 HTML5 드래그는 Playwright 의 마우스로 발화하지 않는다(브라우저가 OS
+ * 드래그 세션을 열어야 한다). 그래서 **드래그 이벤트를 그대로 쏜다** — 출하되는
+ * 코드가 듣는 것이 바로 그 이벤트이므로, 사진에 찍히는 것은 실제로 사람이 보게
+ * 되는 프레임이다. 좌표를 흉내 내는 것이 아니라 판정의 정본(대상 요소)을 그대로
+ * 쓰는 것이고, 그 점이 이 티켓이 라이브러리 없는 손구현을 고른 값이다
+ * (`sidebarDnd.ts` 머리말).
+ *
+ * 표지가 **토큰만** 쓰는지는 여기서 눈으로, `tokens.contrast.test.ts` 의
+ * 「드롭 표지」가 수로 잰다.
+ */
+async function captureSectionDropMarker(page, scheme, shots) {
+  await page.evaluate(`(() => {
+    const row = document.querySelector(
+      '[data-testid="sidebar-section-channels"] [data-testid="channel-item"]'
+    );
+    if (!row) throw new Error("기본 섹션에 끌 행이 없다");
+    row.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+  })()`);
+  // `dragover` 는 **되풀이해서** 쏜다 — 실제 드래그가 그렇게 생겼기 때문이다
+  // (포인터가 움직이는 동안 계속 발화한다). 한 번만 쏘면 `dragstart` 의 상태
+  // 갱신이 아직 렌더에 닿기 전이라 그 한 번이 헛나갈 수 있고, 그것은 이 화면의
+  // 결함이 아니라 이벤트를 한 틱에 몰아 쏜 자국이다.
+  await page.waitForFunction(`(() => {
+    const target = document.querySelector('[data-testid="sidebar-section-sec-1"]');
+    if (!target) return false;
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true }));
+    return target.hasAttribute("data-drop-target");
+  })()`);
+  // 표지는 **하나**다: 받는 자리 하나가 「여기에 놓인다」고 말한다.
+  const marked = await page.locator("[data-drop-target]").count();
+  if (marked !== 1) {
+    throw new Error(`드롭 표지 개수 ${scheme}: ${marked} (하나여야 함)`);
+  }
+  await assertNoHorizontalOverflow(page, `drop marker ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-drop-target-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // Esc 가 드래그의 것이다(BT-5 계약 3항). 표지가 사라지는 것으로 그것을 본다.
+  await page.keyboard.press("Escape");
+  await page.locator("[data-drop-target]").waitFor({ state: "detached" });
+}
+
+/**
+ * 별표 섹션 (ADR-0177 D5 / BT-5 #1933).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 행 우클릭 → 「별표 붙이기」. 그래야 이
+ * 프레임이 사람이 걷는 길의 사진이 되고, 끝에 떼므로 뒤따르는 장면의 사이드바가
+ * 그대로 남는다(같은 함수의 섹션 만들기·지우기와 같은 규율).
+ */
+async function captureStarredSection(page, scheme, shots) {
+  const base = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await base.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const starLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (starLabel !== "별표 붙이기") {
+    throw new Error(`별표 항목의 낱말 ${scheme}: ${starLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+
+  const starred = page.getByTestId("sidebar-section-starred");
+  await starred.waitFor({ state: "visible" });
+  // **맨 위**다. 파생 섹션의 순위는 코어가 정하고, 그 사실이 화면에서도 참인지를
+  // 여기서 본다.
+  const first = await page.evaluate(`(() => {
+    const sections = Array.from(
+      document.querySelectorAll('[data-testid^="sidebar-section-"]')
+    ).filter((el) => !el.dataset.testid.endsWith("-header"));
+    return sections[0]?.dataset.testid ?? null;
+  })()`);
+  if (first !== "sidebar-section-starred") {
+    throw new Error(`별표 섹션이 맨 위가 아니다 ${scheme}: ${first}`);
+  }
+  // 한 채널이 두 번 그려지지 않는다 — 별표가 렌더 순위를 먼저 가져간다.
+  const duplicated = await page.evaluate(`(() => {
+    const ids = Array.from(
+      document.querySelectorAll("[data-channel-id]")
+    ).map((el) => el.dataset.channelId);
+    return ids.length - new Set(ids).size;
+  })()`);
+  if (duplicated !== 0) {
+    throw new Error(`별표 뒤 중복 행 ${scheme}: ${duplicated}`);
+  }
+  await assertNoHorizontalOverflow(page, `starred section ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-starred-section-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 떼고 나간다. 낱말이 상태라는 것도 여기서 함께 본다.
+  const starredRow = starred.locator('[data-testid="channel-item"]').first();
+  await starredRow.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const unstarLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (unstarLabel !== "별표 떼기") {
+    throw new Error(`별표 뒤 항목의 낱말 ${scheme}: ${unstarLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await starred.waitFor({ state: "detached" });
+}
+
+/**
+ * 배치를 **한 번도 못 읽었을 때** (design-review #1932 B-1).
+ *
+ * 리뷰의 손 프로브가 잡은 그 자리를 캡처 레인 안으로 들여 회귀로 잠근다: GET 이
+ * 500 이면 예전 화면은 「섹션이 아직 없다」와 똑같이 생겼고, 그 위의 편집 하나가
+ * 서버의 배치를 통째로 지웠다(PUT 은 패치가 아니다).
+ *
+ * 자기 페이지에서 돈다 - 메인 페이지의 라우트를 갈아 끼우고 되돌리는 대신
+ * `context.newPage()` 로 이 표면만 다르게 세운다(3a-3 빈 워크스페이스와 같은 결).
+ * PUT 은 세어서 **0** 임을 단정한다: 문이 닫혔다는 것보다 강한 사실은 「아무것도
+ * 나가지 않았다」이고, 소실은 나간 PUT 이 만든다.
+ */
+async function captureSidebarPrefsUnavailable(context, scheme, shots) {
+  const page = await context.newPage();
+  let puts = 0;
+  await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
+    if (route.request().method() === "PUT") {
+      puts += 1;
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "boom" } }),
+    });
+  });
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+
+  const banner = page.getByTestId("sidebar-prefs-load-error");
+  await banner.waitFor({ state: "visible" });
+
+  // 편집 문은 서지 않는다. 헤더를 호버해도(= 호버 클러스터를 열어도) 없다.
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const doors = await page.getByTestId("new-section").count();
+  if (doors !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 「새 섹션」이 서 있다 ${scheme}: ${doors}개`
+    );
+  }
+
+  const shot = `${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 재시도 문은 있다: 닫힌 이유를 말했으면 되돌아갈 길도 줘야 한다.
+  const retry = banner.getByRole("button", { name: "다시 시도" });
+  await retry.waitFor({ state: "visible" });
+  await retry.click();
+  await banner.waitFor({ state: "visible" });
+
+  if (puts !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 PUT 이 나갔다 ${scheme}: ${puts}건 (서버 배치가 지워진다)`
+    );
+  }
+  await page.close();
 }
 
 /**
@@ -3432,6 +4267,212 @@ async function assertMentionTrigger(page, where, ids) {
     `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, pointer 그릇 무링`
   );
   return proof;
+}
+
+/**
+ * `#`·`:` 자동완성이 실제로 열린 프레임 (#1930).
+ *
+ * 두 트리거에는 [@] 같은 버튼이 없다 — 글자를 치는 것이 유일한 경로이므로 캡처도
+ * 그 경로로 친다(`fill` 은 한 번에 값을 갈아 끼워 사람이 지나가는 중간 상태를
+ * 건너뛴다). 목록이 떴다는 것만 보지 않고 **어느 트리거의 목록인지**(접근 이름)와
+ * 입력이 그 목록을 가리키고 있는지(aria-controls/activedescendant)까지 잰다:
+ * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
+ */
+async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(trigger.typed, { delay: 15 });
+  const list = page.getByTestId(trigger.list);
+  await list.waitFor({ state: "visible" });
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    const first = list?.querySelector('[role="option"]');
+    return {
+      value: input?.value ?? null,
+      label: list?.getAttribute("aria-label") ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      expanded: input?.getAttribute("aria-expanded") ?? null,
+      controls: input?.getAttribute("aria-controls") ?? null,
+      listId: list?.id ?? null,
+      active: input?.getAttribute("aria-activedescendant") ?? null,
+      firstId: first?.id ?? null,
+      firstText: first?.textContent ?? null,
+    };
+  })()`);
+  if (
+    proof.value !== trigger.typed ||
+    proof.label !== trigger.label ||
+    proof.options < 1 ||
+    proof.expanded !== "true" ||
+    proof.controls === null ||
+    proof.controls !== proof.listId ||
+    proof.active !== proof.firstId ||
+    proof.options < (trigger.minOptions ?? 1) ||
+    (trigger.expectFirst !== undefined &&
+      !(proof.firstText ?? "").includes(trigger.expectFirst))
+  ) {
+    throw new Error(
+      `${trigger.typed} 자동완성 ${scheme}: ${JSON.stringify(proof)}`
+    );
+  }
+  if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
+  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  console.log(
+    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText}`
+  );
+  await page.keyboard.press("Escape");
+  await list.waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 카탈로그가 죽은 판의 사유 상자와 「다시 시도」 (design-review #1930 B-1·H-3).
+ *
+ * 이 장면이 없어서 두 결함이 초록을 뚫고 나갔다. `:` 만 비동기 소스인데 레인은
+ * 성공 경로만 열었고, 단위 시험은 `loadCatalog` 자체를 모킹해 로더의 현실을 보지
+ * 않았다. 그래서 여기서는 **실제로 청크를 끊는다**:
+ *
+ *   1. 카탈로그 요청을 abort → `:thu` 가 사유 상자(오류)를 세운다.
+ *   2. 그 상자의 「다시 시도」가 **제출 버튼이 아니다**(B-1). 컴포저의 `<form>`
+ *      안이라 `type` 이 없으면 클릭이 폼을 제출해 쓰던 초안이 채널로 나갔다.
+ *      클릭 뒤 초안이 그대로 있고 POST /messages 가 0건이어야 한다.
+ *   3. 차단을 풀고 누르면 **실제로 다시 실린다**(H-3). 실패한 dynamic import 는
+ *      모듈 맵이 기억하므로, 재시도가 자산 URL 을 `fetch` 로 다시 받지 않으면
+ *      이 대기는 영원히 안 끝난다.
+ *
+ * 이 장면은 `:thu` 성공 장면보다 **먼저** 돈다: 카탈로그가 한 번 실리면 그 뒤로는
+ * 이 판을 만들 수 없다.
+ */
+async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  const posted = [];
+  const watch = (request) => {
+    if (request.method() === "POST" && request.url().includes("/messages")) {
+      posted.push(request.url());
+    }
+  };
+  page.on("request", watch);
+  const block = (route) => route.abort();
+  await context.route("**/emojiCatalog-*", block);
+  const input = page.getByTestId("composer-input");
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(":thu", { delay: 15 });
+  const box = page.getByTestId("composer-emoji-list-status");
+  await box.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="composer-emoji-list-status"]')
+        ?.getAttribute("data-status") === "error"
+  );
+  const proof = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="composer-emoji-list-status"]');
+    const button = box?.querySelector("button");
+    const input = document.querySelector('[data-testid="composer-input"]');
+    return {
+      status: box?.getAttribute("data-status") ?? null,
+      text: box?.textContent ?? "",
+      buttonType: button?.type ?? null,
+      buttonTypeAttr: button?.getAttribute("type") ?? null,
+      inForm: Boolean(button?.form),
+      listWidth: Math.round(box?.getBoundingClientRect().width ?? 0),
+      value: input?.value ?? null,
+    };
+  })()`);
+  if (
+    proof.status !== "error" ||
+    !proof.text.includes("이모지 목록을 불러오지 못했습니다.") ||
+    !proof.text.includes("다시 시도") ||
+    proof.buttonType !== "button" ||
+    !proof.inForm ||
+    proof.value !== ":thu"
+  ) {
+    throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
+  }
+  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  await context.unroute("**/emojiCatalog-*", block);
+  await box.locator("button").click();
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
+  const after = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const list = document.querySelector('[data-testid="composer-emoji-list"]');
+    return {
+      value: input?.value ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      status: document.querySelector('[data-testid="composer-emoji-list-status"]'),
+    };
+  })()`);
+  page.off("request", watch);
+  if (after.value !== ":thu" || after.options < 1 || posted.length > 0) {
+    throw new Error(
+      `다시 시도 ${scheme}: ${JSON.stringify({ ...after, posted })}`
+    );
+  }
+  console.log(
+    `  이모지 카탈로그 실패 ${scheme}: 오류 상자 ${proof.listWidth}px · 버튼 격 ${proof.buttonType} · 다시 시도 뒤 후보 ${after.options} · 초안 보존 "${after.value}" · 전송 ${posted.length}건`
+  );
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 후보 행이 자유 텍스트 방 이름을 **실제로 담는지** 잰다 (design-review #1930).
+ *
+ * jsdom 은 폭을 재지 않는다. 그래서 앞 판의 「긴 채널 이름도 자르지 않고 넣는다」
+ * 시험은 삽입 문자열만 재고 초록이었고, 화면에서는 말줄임이 사람이 친 글자를
+ * 먹고(`#2026-하반기-릴리…`) 주제 칸이 폭 0px 로 소멸했다(M-1 실측). 여기서
+ * 재는 것은 그 두 가지다: 이름이 두 줄로 감싸고 잘리지 않는가, 주제가 폭을
+ * 갖는가. 같은 프레임에서 비공개 방의 격 글리프(M-2)도 함께 본다.
+ */
+async function assertComposerRows(page, scheme, trigger) {
+  const rows = await page.evaluate(`(() => {
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((option) => {
+      const spans = [...option.querySelectorAll('span')];
+      const lead = spans[0];
+      const hint = spans[1] ?? null;
+      const leadRect = lead.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(lead).lineHeight) || 1;
+      return {
+        text: option.textContent,
+        lock: Boolean(option.querySelector('svg')),
+        leadLines: Math.round(leadRect.height / line),
+        leadClipped:
+          lead.scrollHeight > lead.clientHeight + 1 ||
+          lead.scrollWidth > lead.clientWidth + 1,
+        hintW: hint ? Math.round(hint.getBoundingClientRect().width) : null,
+      };
+    });
+  })()`);
+  const find = (needle) => rows.find((row) => (row.text ?? "").includes(needle));
+  const wrapped = find(trigger.rows.wrapped);
+  if (
+    !wrapped ||
+    wrapped.leadLines < 2 ||
+    wrapped.leadClipped ||
+    !(wrapped.hintW > 0)
+  ) {
+    throw new Error(
+      `${trigger.typed} 긴 이름 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  const locked = find(trigger.rows.locked);
+  if (!locked || !locked.lock || (locked.text ?? "").includes("#")) {
+    throw new Error(
+      `${trigger.typed} 비공개 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  console.log(
+    `  자동완성 행 ${scheme}: 긴 이름 ${wrapped.leadLines}줄 · 주제 ${wrapped.hintW}px · 비공개 자물쇠 ${locked.lock}`
+  );
 }
 
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
@@ -5389,6 +6430,25 @@ async function captureMobile(browser, scheme) {
     `  drawer ${scheme}: ${drawer.width}px 서랍 + ${drawer.peek}px 잔여, 행 ${drawer.rowHeight}px, 본문 inert=${drawer.mainInert}`
   );
   await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
+
+  // ADR-0177 / design-review #1932 H-1 — 배치의 문(행 컨텍스트 메뉴)이 없는
+  // 표면에는 섹션을 **만드는** 문도 없다. 만들 수는 있는데 쓸 수 없는 그릇을
+  // 내밀지 않는다. 터치에서는 호버 클러스터가 **언제나** 마운트되므로
+  // (`shouldShowSectionActions` 의 `!pointerCanHover` 갈래) 아무것도 누르지 않고
+  // 세는 것이 맞다 - 헤더를 누르면 섹션이 접혀 이 프레임이 달라진다.
+  const touchDoors = await page.evaluate(`(() => ({
+    newSection: document.querySelectorAll('[data-testid="new-section"]').length,
+    sectionMenus: document.querySelectorAll('[data-testid^="section-menu-"]').length,
+  }))()`);
+  if (touchDoors.newSection !== 0 || touchDoors.sectionMenus !== 0) {
+    throw new Error(
+      `터치 서랍에 섹션 편집 문이 서 있다 ${scheme}: ${JSON.stringify(touchDoors)}`
+    );
+  }
+  console.log(
+    `  섹션 편집 문 (터치) ${scheme}: 새 섹션 ${touchDoors.newSection} · 섹션 메뉴 ${touchDoors.sectionMenus}`
+  );
+
   await shoot(page, "sidebar-drawer");
 
   await page.getByTestId("profile-card").click();
@@ -5651,6 +6711,7 @@ async function captureScheme(browser, scheme) {
   shots.push(chatShot);
 
   await captureSidebarD4(login, scheme, shots);
+  await captureSidebarPrefsUnavailable(context, scheme, shots);
 
   // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
   // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.
@@ -5676,14 +6737,67 @@ async function captureScheme(browser, scheme) {
   const mentionProof = await assertMentionTrigger(login, scheme, {
     input: "composer-input",
     trigger: "composer-mention-trigger",
-    list: "mention-list",
+    list: "composer-mention-list",
   });
   const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
-  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-mention-list").waitFor({ state: "hidden" });
   await login.getByTestId("composer-input").fill("");
+
+  // 같은 기계의 나머지 두 트리거 (#1930). `#`는 채널 목록, `:`는 피커와 같은
+  // 이모지 검색 열을 그린다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#rel",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      expectFirst: "#release-notes",
+      shot: "composer-channel-autocomplete",
+    }
+  );
+  // 같은 목록의 두 결함을 한 프레임이 진다 (#1930 M-1·M-2): 자유 텍스트 방
+  // 이름이 행 안에서 감싸고, 비공개 방이 사이드바와 같은 자물쇠로 그려진다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      minOptions: 4,
+      rows: { wrapped: "회고", locked: "김인턴작업" },
+      shot: "composer-channel-kinds",
+    }
+  );
+  // 성공 경로보다 먼저: 카탈로그가 한 번 실리면 실패 판을 못 만든다 (#1930 H-3).
+  await captureComposerCatalogFailure(login, context, scheme, shots);
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: ":thu",
+      list: "composer-emoji-list",
+      label: "이모지 선택",
+      // 후보와 순위의 정본은 피커의 `filterEmojis` 이고 그 동일성은 단위 시험이
+      // 잰다. 여기서 잴 것은 목록이 실제로 여러 줄을 그리고 aria 배선이 그
+      // 목록을 가리킨다는 사실 — 그리고 **첫 줄이 Enter 의 기본값이라는 사실**
+      // 이다(#1930 H-1). 앞 판의 이 프레임은 `:thu` 첫 줄로 🫰 를 찍었고 마지막
+      // 줄이 리투아니아 국기였다. 지금 첫 줄은 친 글자를 숏코드로 맞춘 줄이다.
+      minOptions: 2,
+      expectFirst: ":thumbsup:",
+      shot: "composer-emoji-autocomplete",
+    }
+  );
 
   // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
   // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.
@@ -7457,6 +8571,216 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   return shots;
 }
 
+// BT-3 (#1931) — 검색 범위 칩. 좁힌 결과 · 넓힌 결과 · 좁힌 빈손(승격 버튼),
+// 두 스킴.
+//
+// 목이 **범위를 실제로 읽는다**: `channel=`이 있으면 그 채널 히트만 돌려준다.
+// 목이 파라미터를 무시하면 두 프레임이 같은 그림이 되고, 그때 캡처는 초록인데
+// 칩은 죽은 컨트롤이다. 그래서 프레임을 찍기 전에 행 수를 센다 — 스크린샷은
+// 「목록이 안 바뀌었다」를 보여주지 못한다(MOBILE_TAP_TARGETS와 같은 이유).
+async function captureSearchScopeScenes(browser, scheme) {
+  const shots = [];
+  const HERE = GENERAL_ID; // general
+  const THERE = CHANNELS[1].id; // 엔진
+  // 브리프 ①이 명시한 두 갈래를 이 레인이 직접 본다(R1 M-3). 둘 다 이 파일에
+  // 이미 있던 픽스처다 — DM 은 hermes, 긴 이름은 #1930 이 「짧은 픽스처」 재발
+  // 방지용으로 넣어 둔 40자 그 줄이다. 사진이 없어서 「다이렉트 메시지님과의」
+  // (R1 H-2)가 캡처 레인이 아니라 리뷰어 프로브에서 나왔다.
+  const LONG = CHANNELS[4].id; // 2026-하반기-릴리스-준비-회고-및-후속-작업
+  const NEEDLE = "배포";
+  // 이 질의는 어느 채널에도 없다. 좁힌 빈손 프레임이 그 위에 선다.
+  const MISSING = "아무데도없는말";
+
+  function hit(channelId, seq, snippet) {
+    return {
+      channelId,
+      messageId: `019f9b00-0000-7000-8000-00000000${String(seq).padStart(4, "0")}`,
+      seq,
+      authorMemberId: ME,
+      createdAtMs: Date.parse("2026-08-31T09:12:00Z") + seq * 60_000,
+      snippet,
+      matchOffset: snippet.indexOf(NEEDLE) < 0 ? 0 : snippet.indexOf(NEEDLE),
+    };
+  }
+
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  await context.route("**/v1/workspaces/*/search/messages*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const q = params.get("q") ?? "";
+    const channel = params.get("channel");
+    if (q === MISSING) return json(route, { hits: [] });
+    const all = [
+      hit(HERE, 41, "금요일 배포 준비 끝났습니다. 롤백 절차만 한 번 더 볼게요."),
+      hit(HERE, 38, "배포 창은 오후 6시로 잡았습니다."),
+      hit(THERE, 12, "엔진 쪽 배포는 다음 주로 미룹니다."),
+    ];
+    const hits =
+      channel === null
+        ? all
+        : all.filter((row) => row.channelId.toLowerCase() === channel.toLowerCase());
+    return json(route, { hits });
+  });
+
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+
+  // 같은 라우트 안에서 해시만 바꾸면 라우트가 다시 마운트되지 않아 `?q=`가
+  // 첫 렌더의 값 그대로다(useMessageSearch: "초기값은 첫 렌더에서만 읽는다").
+  // 그래서 채널을 한 번 거쳐 실제로 떠났다 온다 — 사람이 ⌘K로 오는 경로와 같다.
+  async function goSearch(query, channelId) {
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, GENERAL_ID);
+    await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+    await page.evaluate(
+      ([q, id]) => {
+        const params = new URLSearchParams({ q });
+        if (id) params.set("channel", id);
+        window.location.hash = `#/search?${params.toString()}`;
+      },
+      [query, channelId ?? ""]
+    );
+    await page.getByTestId("search-route").waitFor({ state: "visible" });
+  }
+
+  async function rowCount() {
+    return page.getByTestId("search-hit").count();
+  }
+
+  await goSearch(NEEDLE, HERE);
+  await page.getByTestId("search-scope-channel").waitFor({ state: "visible" });
+  await page.getByTestId("search-results").waitFor({ state: "visible" });
+  const narrowed = await rowCount();
+  if (narrowed !== 2) {
+    throw new Error(`좁힌 검색 행 수 ${scheme}: ${narrowed} (2여야 함)`);
+  }
+  await page.waitForTimeout(200);
+  const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
+  await page.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+
+  // 칩을 실제로 누른다. 프레임만 찍고 누르지 않으면 죽은 칩도 초록이다.
+  await page.getByTestId("search-scope-workspace").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
+  );
+  await page.waitForTimeout(200);
+  const wideShot = `${OUT_DIR}/search-scope-workspace-${scheme}.png`;
+  await page.screenshot({ path: wideShot });
+  shots.push(wideShot);
+
+  // 키보드 계약은 공용 탭 컨트롤의 것이다(정거장 1개, ←/→ 이동). 이 표면이
+  // 그것을 실제로 물려받았는지 여기서 잰다.
+  await page.getByTestId("search-scope-workspace").focus();
+  await page.keyboard.press("ArrowLeft");
+  const afterArrow = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (afterArrow !== "search-scope-channel") {
+    throw new Error(
+      `범위 칩 ←/→ 이동 ${scheme}: ${afterArrow} (search-scope-channel 이어야 함)`
+    );
+  }
+
+  // 좁힌 빈손 — 그리고 승격 버튼이 실제로 넓히는지.
+  await goSearch(MISSING, HERE);
+  const empty = page.getByTestId("search-empty");
+  await empty.waitFor({ state: "visible" });
+  const emptyText = await empty.innerText();
+  // 범위만이 아니라 **어느 채널인지**를 말해야 한다(R1 H-1). 이 화면에는 행이
+  // 없으므로 행 메타가 이름을 대신 메워 주지 않고, 안내문은 질의가 있어 안 보인다.
+  if (!emptyText.includes("general에는")) {
+    throw new Error(
+      `좁힌 빈손이 어느 채널인지 말하지 않는다 ${scheme}: ${emptyText}`
+    );
+  }
+  await page.waitForTimeout(200);
+  const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
+  await page.screenshot({ path: emptyShot });
+  shots.push(emptyShot);
+
+  await page.getByTestId("search-empty-escalate").click();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector('[data-testid="search-empty"]')?.textContent ?? ""
+      ).includes("에는 없습니다") === false
+  );
+  const escalated = await page.getByTestId("search-empty-escalate").count();
+  if (escalated !== 0) {
+    throw new Error(
+      `승격 뒤에도 승격 버튼이 남아 있다 ${scheme}: 넓힐 곳이 없는데 컨트롤이 있다`
+    );
+  }
+  // 승격은 주소에도 적힌다(R1 M-2). 화면만 넓어지고 주소가 `channel=…`에
+  // 남아 있으면, 새로고침이 사람의 결정을 조용히 되돌린다.
+  const widenedHash = await page.evaluate(() => window.location.hash);
+  if (!widenedHash.includes("scope=all") || !widenedHash.includes("channel=")) {
+    throw new Error(
+      `승격 뒤 주소가 화면과 다른 말을 한다 ${scheme}: ${widenedHash}`
+    );
+  }
+
+  // DM 분기 — 「이 대화에서」와 존칭 문장. `channelLabel` 이 사람 이름을 주는
+  // 정상 경로이고, 이름이 아닌 값을 줄 때 존칭이 붙지 않는 갈래는 vitest 가
+  // 잰다(SearchRoute.scope.test.tsx).
+  await goSearch(MISSING, DM_ID);
+  const dmEmpty = page.getByTestId("search-empty");
+  await dmEmpty.waitFor({ state: "visible" });
+  const dmText = await dmEmpty.innerText();
+  if (!dmText.includes("님과의 대화에는")) {
+    throw new Error(`DM 빈손이 사람 이름으로 말하지 않는다 ${scheme}: ${dmText}`);
+  }
+  const dmChip = await page.getByTestId("search-scope-channel").innerText();
+  if (dmChip.trim() !== "이 대화에서") {
+    throw new Error(`DM 칩이 「채널」이라 부른다 ${scheme}: ${dmChip}`);
+  }
+  await page.waitForTimeout(200);
+  const dmShot = `${OUT_DIR}/search-scope-dm-${scheme}.png`;
+  await page.screenshot({ path: dmShot });
+  shots.push(dmShot);
+
+  // 긴 채널 이름 — 빈손 문장이 40자 이름을 지고도 문서를 옆으로 밀지 않는가.
+  // 이름을 칩이 아니라 문장이 지기로 한 선택(R1 H-1)의 대가를 여기서 잰다.
+  await goSearch(MISSING, LONG);
+  const longEmpty = page.getByTestId("search-empty");
+  await longEmpty.waitFor({ state: "visible" });
+  const longText = await longEmpty.innerText();
+  if (!longText.includes("2026-하반기-릴리스-준비-회고-및-후속-작업에는")) {
+    throw new Error(
+      `긴 이름이 빈손 문장에 실리지 않았다 ${scheme}: ${longText}`
+    );
+  }
+  const overflow = await page.evaluate(
+    `(() => ({ doc: document.documentElement.scrollWidth, win: window.innerWidth }))()`
+  );
+  if (overflow.doc > overflow.win) {
+    throw new Error(
+      `긴 이름이 문서를 옆으로 밀었다 ${scheme}: ${overflow.doc} > ${overflow.win}`
+    );
+  }
+  // 칩은 이름을 지지 않기로 한 그 결정 그대로다 — 알약이 이름 길이를 따라
+  // 출렁이면 R1 H-1 의 수리가 칩 폭 문제를 다시 연 것이 된다.
+  const longChip = await page.getByTestId("search-scope-channel").innerText();
+  if (longChip.trim() !== "이 채널에서") {
+    throw new Error(`긴 이름이 칩으로 새어 들어갔다 ${scheme}: ${longChip}`);
+  }
+  await page.waitForTimeout(200);
+  const longShot = `${OUT_DIR}/search-scope-long-name-${scheme}.png`;
+  await page.screenshot({ path: longShot });
+  shots.push(longShot);
+
+  await context.close();
+  return shots;
+}
+
 // #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
 // 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
 async function captureSetStatusScenes(browser, scheme) {
@@ -8737,6 +10061,7 @@ async function main() {
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
           all.push(...(await captureSetStatusScenes(browser, scheme)));
+          all.push(...(await captureSearchScopeScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));

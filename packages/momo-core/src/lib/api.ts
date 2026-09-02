@@ -1842,14 +1842,27 @@ function searchHitFromWire(value: unknown): MessageSearchHit | null {
   };
 }
 
+/**
+ * `channelId` narrows the search to one channel (BT-3 / #1931). It is left OFF
+ * the query string when absent rather than sent empty: the server reads `?
+ * channel=` as the workspace scope too, but an absent parameter is what this
+ * request actually means, and a cursor minted under one scope is refused under
+ * the other — so the two spellings must not blur here.
+ */
 export async function searchMessages(
   workspaceId: string,
   query: string,
-  options: { limit?: number; cursor?: string; signal?: AbortSignal } = {}
+  options: {
+    limit?: number;
+    cursor?: string;
+    channelId?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<MessageSearchPage> {
   const params = new URLSearchParams({ q: query });
   params.set("limit", String(options.limit ?? SEARCH_LIMIT_DEFAULT));
   if (options.cursor !== undefined) params.set("cursor", options.cursor);
+  if (options.channelId !== undefined) params.set("channel", options.channelId);
   const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
