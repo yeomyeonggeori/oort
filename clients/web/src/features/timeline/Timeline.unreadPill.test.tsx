@@ -393,6 +393,27 @@ describe("Timeline unread jump pill", () => {
     ).toBe("최신 메시지로 이동");
   });
 
+  it("오버스캔에 마운트된 구분선은 필을 무장한다 (M-8)", () => {
+    const root = mountTimeline();
+    const items = buildTimelineItems(
+      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
+      { lastReadSeq: 3, unreadCount: 5 }
+    );
+    const divider = unreadDividerIndexOf(items);
+    if (divider === null) throw new Error("expected unread divider");
+    reportRange(divider, divider + 4);
+    act(() => {
+      ioCallback?.([
+        {
+          isIntersecting: true,
+          rootBounds: { top: 85, bottom: 800, height: 715 } as DOMRectReadOnly,
+          boundingClientRect: { top: -283, bottom: -249 },
+        } as IntersectionObserverEntry,
+      ]);
+    });
+    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
+  });
+
   it("구분선이 가상화로 빠져도 range가 위쪽이면 뜬다", () => {
     virtuoso.renderUnread = false;
     const root = mountTimeline();

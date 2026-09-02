@@ -4,6 +4,7 @@ import {
   countNewerThan,
   countUnreadJump,
   dataIndexFromVirtuoso,
+  dividerRectRelation,
   dividerViewportRelation,
   newestSeqOf,
   reconcileDividerRelation,
@@ -250,6 +251,32 @@ describe("relationFromIntersection", () => {
         boundingClientRect: { top: 520, bottom: 560 },
       })
     ).toBe("below");
+  });
+
+  it("오버스캔에 마운트된 구분선은 isIntersecting이어도 above다 (M-8)", () => {
+    expect(
+      relationFromIntersection({
+        isIntersecting: true,
+        rootBounds: { top: 85, bottom: 800 },
+        boundingClientRect: { top: -283, bottom: -249 },
+      })
+    ).toBe("above");
+    expect(shouldLatchUnreadJump("above")).toBe(false);
+    expect(shouldShowJumpUnread("above", 4)).toBe(true);
+  });
+});
+
+describe("dividerRectRelation", () => {
+  const viewport = { top: 85, bottom: 800 };
+
+  it("뷰포트 위면 above, 겹치면 in, 아래면 below다", () => {
+    expect(dividerRectRelation({ top: -283, bottom: -249 }, viewport)).toBe(
+      "above"
+    );
+    expect(dividerRectRelation({ top: 90, bottom: 120 }, viewport)).toBe("in");
+    expect(dividerRectRelation({ top: 820, bottom: 850 }, viewport)).toBe(
+      "below"
+    );
   });
 });
 
