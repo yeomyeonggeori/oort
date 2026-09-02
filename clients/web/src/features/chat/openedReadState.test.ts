@@ -49,4 +49,23 @@ describe("재열람 방문은 연 순간의 마크 경계를 지킨다 (B-1)", (
     expect(visit.lastReadSeq).toBe(MARK_AT_3_CURSOR_10.dividerCursor);
     expect(visit.unreadCount).toBe(MARK_AT_3_CURSOR_10.count);
   });
+
+  it("방문 중 나중 마크 B 는 구분선을 B 로 옮기고, 열람의 null 은 지우지 않는다 (H-3)", () => {
+    const atOpen = markAt3Cursor10();
+    const frozen = freezeOpenedRead(atOpen.channelId, atOpen);
+    const laterMark = foldInVisitMark(frozen, {
+      ...atOpen,
+      markedUnreadBeforeSeq: 7,
+    });
+    const atB = timelineUnreadFromOpened(laterMark);
+    expect(atB.lastReadSeq).toBe(6);
+    expect(atB.unreadCount).toBe(4);
+    const afterOpenNull = foldInVisitMark(laterMark, {
+      ...atOpen,
+      markedUnreadBeforeSeq: null,
+    });
+    const stillB = timelineUnreadFromOpened(afterOpenNull);
+    expect(stillB.lastReadSeq).toBe(6);
+    expect(stillB.unreadCount).toBe(4);
+  });
 });

@@ -13,6 +13,11 @@ import {
   markAboveCursor,
   markAt3Cursor10,
 } from "@momo/core/features/readState/proof";
+import {
+  foldInVisitMark,
+  freezeOpenedRead,
+  timelineUnreadFromOpened,
+} from "../chat/openedReadState";
 import { countUnreadJump } from "./navigation";
 import {
   sidebarUnreadCounts,
@@ -102,6 +107,36 @@ describe("마크가 커서보다 위면 min 이 소비자에도 보인다", () =
     const index = items.findIndex((item) => item.kind === "unread");
     const next = items[index + 1];
     expect(next?.kind === "message" && next.message.seq).toBe(11);
+  });
+});
+
+describe("방문 중 나중 마크 B (H-3)", () => {
+  it("구분선·필·배지가 B 에 같고, 열람 null 은 지우지 않는다", () => {
+    const atOpen = markAt3Cursor10();
+    const frozen = freezeOpenedRead(atOpen.channelId, atOpen);
+    const liveB = { ...atOpen, markedUnreadBeforeSeq: 7 };
+    const visiting = foldInVisitMark(frozen, liveB);
+    const visit = timelineUnreadFromOpened(visiting);
+    expect(visit.lastReadSeq).toBe(6);
+    expect(visit.unreadCount).toBe(4);
+    const items = buildTimelineItems(STREAM.slice(0, 10), {
+      lastReadSeq: visit.lastReadSeq,
+      unreadCount: visit.unreadCount,
+    });
+    const index = items.findIndex((item) => item.kind === "unread");
+    const next = items[index + 1];
+    expect(next?.kind === "message" && next.message.seq).toBe(7);
+    expect(countUnreadJump(visit.unreadCount)).toBe(4);
+    expect(
+      sidebarUnreadCounts(liveB.channelId, null, liveB).unreadCount
+    ).toBe(4);
+    const afterNull = foldInVisitMark(visiting, {
+      ...atOpen,
+      markedUnreadBeforeSeq: null,
+    });
+    const still = timelineUnreadFromOpened(afterNull);
+    expect(still.lastReadSeq).toBe(6);
+    expect(still.unreadCount).toBe(4);
   });
 });
 
