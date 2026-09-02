@@ -5,6 +5,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 OORT_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
+export OORT_ROOT
 
 usage() {
   cat <<'EOF'
@@ -33,6 +34,7 @@ fi
 case "$cmd" in
   doctor)
     # shellcheck source=lib/oort_doctor.sh
+    # shellcheck disable=SC1091
     . "$SCRIPT_DIR/lib/oort_doctor.sh"
     oort_doctor "$@"
     ;;
