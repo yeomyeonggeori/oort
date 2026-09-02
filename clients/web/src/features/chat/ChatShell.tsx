@@ -12,7 +12,6 @@ import {
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
-  consumeUserClearedUnread,
   nextAdvertisedChannelId,
 } from "@/features/chat/advertiseReadState";
 import {
@@ -238,9 +237,7 @@ export function ChatShell() {
     const read = unreadFor(readStates.byChannel, channelId);
     const source = consumeVisitMarkRolledBack(channelId)
       ? "rollback"
-      : consumeUserClearedUnread(channelId)
-        ? "user_clear"
-        : "open_advertisement";
+      : "open_advertisement";
     setOpenedWith((current) => {
       if (!current || !uuidEq(current.channelId, channelId)) return current;
       if (

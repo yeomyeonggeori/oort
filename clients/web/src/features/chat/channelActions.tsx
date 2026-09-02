@@ -11,10 +11,7 @@ import {
   type ReadState,
 } from "@momo/core/lib/api";
 import { composedUnreadCount } from "@momo/core/features/readState/model";
-import {
-  advertiseReadState,
-  noteUserClearedUnread,
-} from "@/features/chat/advertiseReadState";
+import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   channelLeaveConfirmBody,
   channelLeaveFailureMessage,
@@ -209,7 +206,6 @@ export function useChannelActions({
     onSuccess: (state) => {
       setError(null);
       onActionSucceeded();
-      noteUserClearedUnread(channel.id);
       applyReadStateToCache(client, workspaceId, state);
       invalidateReadStates();
     },

@@ -15,7 +15,7 @@ import {
 // cursor-based.
 // =============================================================================
 
-export type VisitNullSource = "open_advertisement" | "user_clear" | "rollback";
+export type VisitNullSource = "open_advertisement" | "rollback";
 
 export interface OpenedReadSnapshot {
   channelId: string;
@@ -68,9 +68,9 @@ export function freezeOpenedRead(
 }
 
 /**
- * Ignore only the open's own `null` (`absorbOpenNull`). A rejected mark
- * (`rollback`) restores the visit boundary from before that optimistic
- * adopt. A user clear (sidebar 「읽음 처리」) drops the visit boundary.
+ * Ignore only the open's own `null` (`open_advertisement` / `absorbOpenNull`).
+ * A rejected mark (`rollback`) restores the visit boundary from before that
+ * optimistic adopt. No surface offers 「읽음 처리」 for the open channel.
  */
 export function foldInVisitMark(
   opened: OpenedReadSnapshot,
@@ -94,7 +94,7 @@ export function foldInVisitMark(
       absorbOpenNull: true,
     };
   }
-  if (source === "user_clear" || !opened.absorbOpenNull) {
+  if (!opened.absorbOpenNull) {
     return { ...opened, markSeq: null, absorbOpenNull: false };
   }
   return opened;
