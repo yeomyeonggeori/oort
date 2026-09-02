@@ -24,6 +24,7 @@ import {
   dayDividerSegments,
   recoveryDividerLabel,
   recoveryDividerSegments,
+  unreadDividerLabel,
   unreadDividerSegments,
   DIVIDER_LABEL_SIDE,
   DIVIDER_TONE,
@@ -77,7 +78,10 @@ import {
 } from "./MessageActions";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
-import { shouldShowHoverToolbar } from "./hoverToolbarModel";
+import {
+  previousMessageRowHasOpenBanner,
+  shouldShowHoverToolbar,
+} from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { messageShareUrl } from "@/features/inbox/anchor";
 import { absoluteApiBase } from "@/lib/serverBase";
@@ -102,7 +106,10 @@ import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
 import { reminderFailureMessage } from "@momo/core/features/reminders/model";
-import { markUnreadFailureMessage } from "@momo/core/features/readState/copy";
+import {
+  MARK_UNREAD_SUCCESS_ANNOUNCEMENT,
+  markUnreadFailureMessage,
+} from "@momo/core/features/readState/copy";
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
@@ -365,6 +372,8 @@ export function MessageRow({
   // delete). B8: a Korean sentence, never the wire string, and never a toast —
   // the message lives where the problem is.
   const [rowError, setRowError] = useState<string | null>(null);
+  const [rowAnnouncement, setRowAnnouncement] = useState("");
+  const [neighborBannerOpen, setNeighborBannerOpen] = useState(false);
   // The three overlays a row can raise. Local because they are per-row and
   // transient: hoisting them would make the timeline re-render every message
   // when one of them opens a sheet.
@@ -529,11 +538,15 @@ export function MessageRow({
     },
     onMarkUnread: () => {
       setRowError(null);
+      setRowAnnouncement("");
       void markUnread
         .run({
           channelId: message.channelId,
           lastReadSeq: message.seq,
           seq: message.seq,
+        })
+        .then(() => {
+          setRowAnnouncement(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
         })
         .catch((error: unknown) =>
           setRowError(
@@ -596,6 +609,7 @@ export function MessageRow({
     rowFocused,
     overlayOpen: pickerOpen || actionMenuOpen || contextMenuOpen,
     selecting: selectionWithinRow,
+    neighborBannerOpen,
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
 
@@ -631,8 +645,14 @@ export function MessageRow({
       }
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
+      data-row-banner={rowError ? "open" : undefined}
       onKeyDown={onRowKeyDown}
-      onMouseEnter={() => setRowHovered(true)}
+      onMouseEnter={() => {
+        setRowHovered(true);
+        if (rowRef.current) {
+          setNeighborBannerOpen(previousMessageRowHasOpenBanner(rowRef.current));
+        }
+      }}
       onMouseLeave={() => setRowHovered(false)}
       onFocusCapture={() => setRowFocused(true)}
       onBlurCapture={(event) => {
@@ -666,6 +686,9 @@ export function MessageRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
+      <span className="sr-only" aria-live="polite" data-testid="message-row-live">
+        {rowAnnouncement}
+      </span>
       {actions && showHoverToolbar && (
         <MessageHoverToolbar
           available={available}
@@ -975,13 +998,18 @@ export function MessageRow({
           />
         )}
         {rowError && (
-          <InlineBanner
-            message={rowError}
-            separator={false}
-            actionLabel="닫기"
-            onAction={() => setRowError(null)}
-            testId="message-action-error"
-          />
+          <div
+            data-testid="message-action-error-slot"
+            className="relative z-30 pb-8"
+          >
+            <InlineBanner
+              message={rowError}
+              separator={false}
+              actionLabel="닫기"
+              onAction={() => setRowError(null)}
+              testId="message-action-error"
+            />
+          </div>
         )}
         {failed && (
           // The retry lives on the row, not in a banner far from it (R-1 §3
@@ -1212,6 +1240,10 @@ export function UnreadDivider({ count }: { count: number }) {
       segments={unreadDividerSegments(count)}
       tone={DIVIDER_TONE.unread}
       padClass={MARKER_DIVIDER_PAD_CLASS}
+      extra={{
+        "aria-label": unreadDividerLabel(count),
+        role: "separator",
+      }}
     />
   );
 }

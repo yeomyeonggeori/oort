@@ -1,8 +1,8 @@
 import {
   Bell,
   Copy,
-  EyeOff,
   Link,
+  Mail,
   MessageSquareReply,
   MoreHorizontal,
   Pencil,
@@ -148,7 +148,7 @@ function actionIcon(item: MessageActionItem, pinned: boolean) {
     case "remind":
       return <Bell className="size-4" aria-hidden="true" />;
     case "mark-unread":
-      return <EyeOff className="size-4" aria-hidden="true" />;
+      return <Mail className="size-4" aria-hidden="true" />;
     case "edit":
       return <Pencil className="size-4" aria-hidden="true" />;
     case "delete":

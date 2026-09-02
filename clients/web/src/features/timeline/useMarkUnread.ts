@@ -24,9 +24,11 @@ export function useMarkUnread(workspaceId: string): {
     async run({ channelId, lastReadSeq, seq }) {
       const queryKey = ["read-state", workspaceId] as const;
       const previous = client.getQueryData<ReadState[]>(queryKey);
-      const cursor =
-        previous?.find((row) => uuidEq(row.channelId, channelId))
-          ?.lastReadSeq ?? lastReadSeq;
+      const previousRow = previous?.find((row) =>
+        uuidEq(row.channelId, channelId)
+      );
+      const cursor = previousRow?.lastReadSeq ?? lastReadSeq;
+      await client.cancelQueries({ queryKey });
       client.setQueryData<ReadState[]>(queryKey, (current) => {
         if (!current) return current;
         return current.map((row) =>
@@ -45,8 +47,13 @@ export function useMarkUnread(workspaceId: string): {
         );
         applyReadStateToCache(client, workspaceId, next);
       } catch (error) {
-        if (previous !== undefined) {
-          client.setQueryData(queryKey, previous);
+        if (previousRow !== undefined) {
+          client.setQueryData<ReadState[]>(queryKey, (current) => {
+            if (!current) return current;
+            return current.map((row) =>
+              uuidEq(row.channelId, channelId) ? previousRow : row
+            );
+          });
         }
         throw new Error(markUnreadFailureMessage(error));
       }
