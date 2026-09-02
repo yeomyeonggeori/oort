@@ -1,7 +1,8 @@
 # 서버/이미지 릴리스 (RELEASING.md)
 
 > **이 문서 하나로 서버 이미지 릴리스를 완주한다.** 범위는 `v0.x` 태그 +
-> GitHub Release + GHCR 불변 digest 표 + `docs/SELF_HOST.md` 문면이다.
+> GitHub Release + GHCR 불변 digest 표 + `releases/latest.json` +
+> `docs/SELF_HOST.md` 문면이다.
 > 데스크탑 Tauri next 채널은 **다른 절차**다 — [§데스크탑 next 채널과의 경계](#데스크탑-next-채널과의-경계).
 > 공개 데스크탑 설치 파일(dmg)은 서버 `v0.x` Release 의 **자산**으로 붙인다 —
 > [§데스크탑 dmg 공개 릴리스](#데스크탑-dmg-공개-릴리스). 실공증·실업로드는
@@ -19,7 +20,7 @@
 ## 한 줄 순서
 
 **승격 → 발행(dispatch · owner 승인) → digest 수거 → 태그(빌드 커밋에) →
-Release(digest 표) → SELF_HOST 문면 갱신.**
+Release(digest 표) → 매니페스트 생성·커밋 → SELF_HOST 문면 확인.**
 
 릴리스는 **main 기준**이다. 태그는 승격 커밋에 앉힌다 — track 브랜치 HEAD가
 아니다.
@@ -144,16 +145,39 @@ list digest 를 pin 칸에 두고 아키별 digest 를 같은 표에 남긴다. 
 
 ---
 
-## 6. SELF_HOST 문면 갱신
+## 6. 릴리스 매니페스트 (`releases/latest.json`)
 
-[`docs/SELF_HOST.md`](SELF_HOST.md) §2-B 의 digest 예시를 이번 Release 표의
-**앱** 행으로 맞춘다. 문면은 「예시 + 최신 값은 GitHub Releases」를 유지한다.
-`latest` / `sha-<commit>` 를 넣지 않는다. `--published-image` 는 앱 이미지만
-받는다 — postgres digest 는 Release 표와 운영/PITR 경로용이다.
+Release 표의 list digest를 기계가독 JSON으로 옮긴다. 셀프호스트 문면은 이
+파일을 읽고, 산문에 digest hex를 다시 적지 않는다.
+
+태그는 이미 원격에 있어야 한다. 생성기는 GitHub Release 본문의 앱·postgres
+list pin을 읽고, GHCR에서 그 list의 linux/amd64·linux/arm64 이미지
+매니페스트 digest를 조회한다. 추측 금지.
+
+```sh
+scripts/release_manifest.sh v0.1.4
+git add releases/latest.json
+# CHANGELOG 최신 칸이 같은 버전인지 확인한 뒤
+scripts/check_release_manifest.sh
+git commit -m "chore(release): refresh releases/latest.json for v0.1.4"
+```
+
+재실행은 바이트 동일해야 한다. `docs/SELF_HOST*.md`와 `README.md`에
+digest 리터럴을 되넣으면 `scripts/check_release_manifest.sh`가 거절한다.
+
+---
+
+## 7. SELF_HOST 문면 확인
+
+[`docs/SELF_HOST.md`](SELF_HOST.md) §2-B 는 매니페스트를 읽는 명령을 유지한다.
+digest hex를 산문에 되넣지 않는다. `latest` / `sha-<commit>` 를 넣지 않는다.
+`--published-image` 는 앱 이미지만 받는다 — postgres digest 는 Release 표와
+운영/PITR 경로용이다.
 
 셀프호스트 생성 명령은 바뀌지 않는다:
 
 ```sh
+IMAGE_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 

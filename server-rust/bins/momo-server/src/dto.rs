@@ -170,6 +170,58 @@ pub struct MemberDto {
     pub handle: String,
 }
 
+/// `POST /v1/auth/device-link` 201 (ADR-0180). `token` is the raw voucher and
+/// appears only on this response.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLinkIssueResponse {
+    pub id: String,
+    pub token: String,
+    pub expires_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sas: Option<String>,
+    pub deep_link: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceLinkRedeemRequest {
+    pub token: String,
+    pub device: DeviceLinkDevice,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLinkDevice {
+    pub name: String,
+    pub platform: String,
+}
+
+/// LoginResponse plus the D4 SAS hold flag.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLinkRedeemResponse {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub member: MemberDto,
+    pub realtime_web_socket_url: String,
+    pub pending_sas: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLinkStatusResponse {
+    pub status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceLinkDevice>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceLinkConfirmResponse {
+    pub status: &'static str,
+}
+
 // ---------------------------------------------------------------------------
 // messages
 // ---------------------------------------------------------------------------

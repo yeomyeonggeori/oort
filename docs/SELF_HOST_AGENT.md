@@ -75,24 +75,27 @@ cd oort-track-engine
 
 ### 1.2 GHCR 고정 digest
 
-정본은 [`SELF_HOST.md`](SELF_HOST.md) §2-B / GitHub Releases다. 아래는 그
-표의 **실값**이다(`latest`·`sha-*` 태그는 받지 않는다).
+정본은 [`releases/latest.json`](../releases/latest.json)이다
+([`SELF_HOST.md`](SELF_HOST.md) §2-B / GitHub Releases가 출처).
+`latest`·`sha-*` 태그는 받지 않는다. 산문에 digest hex를 다시 적지 않는다.
 
-| 대상 | 불변 이미지 |
-|---|---|
-| 앱 (`--published-image`가 소비) | `ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:b41a3ff9fe24aa5adb740f1159d0c9298d8b483296a9dee86dc6d2c0b4a9fa53` |
+```sh
+jq -r '
+  "앱\t\(.images.app.ref)@\(.images.app.digest_list)",
+  "PostgreSQL 18 + pgBackRest\t\(.images.postgres.ref)@\(.images.postgres.digest_list)"
+' releases/latest.json
+```
 
 postgres 행은 Release 표·운영/PITR용이다. **이 플레이북 compose의 postgres
 서비스는 소비하지 않는다**(§2-B 주석·V-1 #1650과 동일). 앱만 pin한다.
 
-공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.1
-digest는 그 list digest다. 그록봇 VM(실측 amd64)과 Apple Silicon 모두
+공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 매니페스트
+`digest_list`가 그 list digest다. 그록봇 VM(실측 amd64)과 Apple Silicon 모두
 native pull한다. 전역 `DOCKER_DEFAULT_PLATFORM` 은 켜지 않는다(V-1:
 centrifugo 로컬 index가 거절된다). 앱은 list digest 그대로 받는다.
 
 ```sh
-APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
+APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 docker pull "$APP_REF"
 ```
 
@@ -128,7 +131,7 @@ fi
 
 ```sh
 scripts/self_host_env.sh --published-image \
-  ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e
+  "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 ```
 
 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를 쓴다. ADR-0166 claim 모드는
@@ -234,7 +237,7 @@ v0.1.1 list digest(`main=1b79bc65`)는 #1651 claim 부트스트랩을 포함한�
 이미지가 사라진 뒤, **같은 env를 다시 만들지 말고**:
 
 ```sh
-APP_REF='ghcr.io/yeomyeonggeori/oort@sha256:62843b1a59d04da9c43878ef27d4e35d2350f242f4bdd32d328c21fd0645f23e'
+APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 docker pull "$APP_REF"
 # bind 볼륨이 없으면 §1.3을 다시 밟는다 (기존 볼륨을 함부로 rm 하지 않는다)
 # Funnel state(/workspace/oort/ts-state)가 없으면 §2.2를 다시 밟는다 — URL이 바뀐다

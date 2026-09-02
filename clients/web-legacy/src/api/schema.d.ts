@@ -81,6 +81,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/device-link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Issue a one-time QR device-link token (ADR-0180).
+         * @description Human members only. The raw token appears on this 201 exactly once and is stored as sha256. TTL 120s, single-use. `sas` is present only in public-origin mode (MOMO_CENTRIFUGO_WS_URL=same-origin against a non-loopback Host). The voucher cannot call any API.
+         */
+        post: operations["issueDeviceLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/device-link/redeem": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Consume a device-link token and issue a session (public).
+         * @description Public for the same reason as `/v1/join` and `/v1/claim`: the phone holds a one-time voucher and no bearer. Per-IP rate limited. Returns a LoginResponse-shaped session plus `pendingSas`. In public-origin mode the access token is 401 until the issuer confirms SAS.
+         */
+        post: operations["redeemDeviceLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/device-link/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll a device-link token the caller issued.
+         * @description Issuer session only. v1 has no outbox event; the desktop polls this (≤2s) for consumed/expired/pending.
+         */
+        get: operations["getDeviceLink"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/device-link/{id}/confirm-sas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm SAS and activate the redeemed session.
+         * @description Issuer session only. Required in public-origin mode after redeem. Idempotent once confirmed. 409 when SAS is not required or the token has not been redeemed.
+         */
+        post: operations["confirmDeviceLinkSas"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/join": {
         parameters: {
             query?: never;
@@ -2976,6 +3056,48 @@ export interface components {
             member: components["schemas"]["Member"];
             /** @description The ONLY authority for the realtime WebSocket address (ADR-0110). Never derive it from the API origin. */
             realtimeWebSocketUrl: string;
+        };
+        DeviceLinkIssueResponse: {
+            /** Format: uuid */
+            id: string;
+            /** @description Raw 32-byte base64url voucher. Present only on this 201. */
+            token: string;
+            /**
+             * Format: int64
+             * @description Unix milliseconds when the voucher expires (TTL 120s).
+             */
+            expiresAt: number;
+            /** @description Four-digit SAS. Omitted in loopback/LAN mode. */
+            sas?: string;
+            /** @description `oort://link?server=<percent-encoded base>&token=<base64url>`. */
+            deepLink: string;
+        };
+        DeviceLinkRedeemRequest: {
+            token: string;
+            device: components["schemas"]["DeviceLinkDevice"];
+        };
+        DeviceLinkDevice: {
+            /** @description 1..64 characters after trim. */
+            name: string;
+            /** @description 1..32 characters after trim (e.g. ios, android, web). */
+            platform: string;
+        };
+        DeviceLinkRedeemResponse: {
+            accessToken: string;
+            refreshToken: string;
+            member: components["schemas"]["Member"];
+            realtimeWebSocketUrl: string;
+            /** @description True in public-origin mode until the issuer confirms SAS. Access is 401 while true. */
+            pendingSas: boolean;
+        };
+        DeviceLinkStatusResponse: {
+            /** @enum {string} */
+            status: "pending" | "consumed" | "expired";
+            device?: components["schemas"]["DeviceLinkDevice"];
+        };
+        DeviceLinkConfirmResponse: {
+            /** @enum {string} */
+            status: "confirmed";
         };
         RefreshRequest: {
             refreshToken: string;
@@ -5974,6 +6096,171 @@ export interface operations {
                 };
             };
             429: components["responses"]["RateLimited"];
+        };
+    };
+    issueDeviceLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Link token issued; raw token present only here. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceLinkIssueResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    redeemDeviceLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeviceLinkRedeemRequest"];
+            };
+        };
+        responses: {
+            /** @description Session issued. `pendingSas` true holds access until confirm. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceLinkRedeemResponse"];
+                };
+            };
+            /** @description Unknown, expired, or issuer-revoked token. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Token has already been used. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getDeviceLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceLinkStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown id, or not this issuer session. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    confirmDeviceLinkSas: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session activated (or already confirmed). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeviceLinkConfirmResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Unknown id, or not this issuer session. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description SAS is not required, or the token has not been redeemed. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
         };
     };
     publicJoin: {
