@@ -366,4 +366,40 @@ mod tests {
             merge_workspace_settings(&json!({}), &json!({"allowed_agent_models": []})).unwrap();
         assert_eq!(merged, json!({"allowed_agent_models": []}));
     }
+
+    /// ADR-0181 D8 / #1960: `welcome_prompt` is a writable settings key.
+    #[test]
+    fn welcome_prompt_is_an_allowed_key() {
+        let copy = "무엇을 만들고 계세요? 하나 가져오시면 같이 시작해요";
+        let merged = merge_workspace_settings(&json!({}), &json!({"welcome_prompt": copy}));
+        assert!(merged.is_ok(), "{merged:?}");
+        assert_eq!(merged.unwrap()["welcome_prompt"], json!(copy));
+    }
+
+    /// Proof ⑦: 2001 characters is 400, and it is a prompt-length error — not
+    /// an unknown-key refusal that would also happen to be 400.
+    #[test]
+    fn welcome_prompt_rejects_2001_characters() {
+        let too_long = "가".repeat(2001);
+        let err = merge_workspace_settings(&json!({}), &json!({"welcome_prompt": too_long}))
+            .expect_err("2001 chars must refuse");
+        let msg = err.to_string();
+        assert!(
+            !msg.starts_with("unknown settings key"),
+            "must be a prompt-length error, not an unknown-key error: {msg}"
+        );
+        assert!(
+            msg.contains("2000"),
+            "error must name the 2000-character cap: {msg}"
+        );
+    }
+
+    /// ADR-0181 D3 / #1960: `welcome_agent_member_id` is a writable uuid key.
+    #[test]
+    fn welcome_agent_member_id_accepts_a_uuid_string() {
+        let id = "00000000-0000-0000-0000-000000000001";
+        let merged = merge_workspace_settings(&json!({}), &json!({"welcome_agent_member_id": id}));
+        assert!(merged.is_ok(), "{merged:?}");
+        assert_eq!(merged.unwrap()["welcome_agent_member_id"], json!(id));
+    }
 }
