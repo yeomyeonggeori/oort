@@ -1,5 +1,6 @@
 import { Pin } from "lucide-react";
 import { cn } from "@/design/lib/cn";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -101,11 +102,9 @@ export function PinListMenu({
           title={label}
           data-testid="open-pin-list"
           data-pin-count={entries.length}
-          className={cn(
-            "flex shrink-0 items-center gap-1 rounded-sm px-1 transition-colors focus-visible:focus-ring",
-            "min-h-control-sm text-ink-muted hover:bg-surface-hover",
-            "data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
-          )}
+          className={channelHeaderControlClass({
+            wide: status === "ready" && entries.length > 0,
+          })}
         >
           <Pin className="size-4" aria-hidden="true" />
           {/* 0개일 때 숫자를 그리지 않는다: 「고정 0개」는 아무것도 알리지 않으면서

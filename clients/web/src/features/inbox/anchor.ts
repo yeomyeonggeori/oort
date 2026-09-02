@@ -124,6 +124,24 @@ export function messageShareUrl(
 }
 
 /**
+ * Paste-anywhere URL for a **channel** (BT-1 / #1929).
+ *
+ * `messageShareUrl`의 형제이고, 같은 두 규율을 그대로 쓴다: HashRouter 가
+ * 해시를 말하므로 주소는 origin + pathname + `#` + 라우트이고, origin 은
+ * `absoluteApiBase()` 가 이름 붙인 것 — 「남에게 건네는 주소」다. Tauri 릴리스
+ * 셸의 페이지 origin(`tauri://localhost`)은 아무도 열 수 없다.
+ *
+ * 다른 점은 실리는 열쇠뿐이다: 채널 링크에는 자리(`msg`/`seq`)가 없다. 사이드바
+ * 행이 아는 것은 「이 채널」까지이고, 없는 자리를 지어내면 착지가 거짓말을 한다.
+ */
+export function channelShareUrl(
+  channelId: string,
+  location: Pick<Location, "origin" | "pathname">
+): string {
+  return `${location.origin}${location.pathname}#${channelPath(channelId)}`;
+}
+
+/**
  * 주소가 가리킨 자리. 소속 채널을 함께 든다 — 방을 옮길 때만 소거하고,
  * 콜드 마운트에서 읽기 효과와 채널 효과가 같은 커밋에 돌아도 자기 채널
  * 앵커는 살아 있어야 붙여넣은 링크가 점프한다 (#1755 / design-review #1764 R2-B1).

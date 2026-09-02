@@ -80,7 +80,7 @@
 - **color.line-strong.dark**: `#6f6e73` — CSS --line-strong 다크, 3:1 컨트롤 경계. D-OORT-1
 - **color.line-strong.light**: `#84817d` — CSS --line-strong 라이트, 3:1 컨트롤 경계. D-OORT-1
 - **color.line.dark**: `#34323b` — CSS --line 다크, 컨테이너 분리선. D-OORT-1
-- **color.line.light**: `#dcd8d0` — CSS --line 라이트, 컨테이너 분리선. D-OORT-1
+- **color.line.light**: `#e4e0d8` — CSS --line 라이트, 컨테이너 분리선. D-OORT-1
 - **color.muted-soft.dark**: `#302e36` — CSS --muted-soft 다크, 상태와 분리된 중립 칩 그릇. D-OORT-1
 - **color.muted-soft.light**: `#f3efe8` — CSS --muted-soft 라이트, 상태와 분리된 중립 칩 그릇. D-OORT-1
 - **color.ok-soft.dark**: `#243323` — CSS --ok-soft 다크, 측정 결과 칩 그릇. D-OORT-1

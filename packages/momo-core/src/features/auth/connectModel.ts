@@ -11,6 +11,17 @@ export type ConnectMode = "signIn" | "join";
 
 export type ConnectField = "server" | "email" | "password" | "code";
 
+/** HTTP statuses whose copy is about the invite code, not the password. */
+const INVITE_CODE_STATUSES = new Set([403, 404, 409, 410]);
+
+/**
+ * Join failures that belong on S1 with the code field, not on S2 (which has
+ * no code field). Password / transport / 5xx stay on the account step.
+ */
+export function joinFailureBelongsOnGateway(cause: unknown): boolean {
+  return cause instanceof ApiError && INVITE_CODE_STATUSES.has(cause.status);
+}
+
 /**
  * Where the cursor goes after a deep link filled what it could. The link
  * carries server and code, so the person should land on the first thing still
@@ -32,6 +43,11 @@ export function prefillFocus(form: {
 /** A failure the connect screen can state plainly, with what to do next. */
 export interface ConnectFailure {
   message: string;
+  /**
+   * Invite-code verdicts (404/409/410/403) render on S1 next to the code
+   * field. Password and transport failures stay on S2.
+   */
+  onGateway?: boolean;
   /** The invite is spent or wrong, and signing in is the way forward. */
   suggestSignIn: boolean;
   /**
@@ -73,6 +89,14 @@ function transportFailure(cause: unknown): ConnectFailure | null {
  * per-status copy, never to a raw English string in front of the user.
  */
 export function joinFailureCopy(cause: unknown): ConnectFailure {
+  const copied = joinFailureCopyBody(cause);
+  if (joinFailureBelongsOnGateway(cause)) {
+    return { ...copied, onGateway: true };
+  }
+  return copied;
+}
+
+function joinFailureCopyBody(cause: unknown): ConnectFailure {
   const transport = transportFailure(cause);
   if (transport) return transport;
   const failure = cause as ApiError;

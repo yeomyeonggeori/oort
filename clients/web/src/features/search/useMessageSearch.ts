@@ -7,7 +7,16 @@ import {
   type MessageSearchPage,
 } from "@momo/core/lib/api";
 import { useSession } from "@/app/session";
-import { isSearchable, normalizeQuery, searchPhase, type SearchPhase } from "@momo/core/features/search/searchModel";
+import {
+  isSearchable,
+  normalizeQuery,
+  scopedChannelId,
+  searchPhase,
+  searchQueryKey,
+  type SearchChannelContext,
+  type SearchPhase,
+  type SearchScope,
+} from "@momo/core/features/search/searchModel";
 
 // =============================================================================
 // 검색 질의 하나의 수명 (goal B12 H5).
@@ -54,11 +63,28 @@ export interface MessageSearch {
   error: unknown;
 }
 
-export function useMessageSearch(initialQuery = ""): MessageSearch {
+export function useMessageSearch(
+  initialQuery = "",
+  /**
+   * 채널에서 들어왔다는 사실. `null`이면 범위 칩이 없다 — 좁힐 대상이 없는
+   * 자리에 「이 채널에서」를 세우면 누를 수 없는 칩이 하나 생긴다.
+   */
+  channel: SearchChannelContext | null = null,
+  /**
+   * 지금 고른 범위. **이 훅이 쥐고 있지 않다** — 주소가 쥔다(R1 M-2).
+   *
+   * `useState`로 들고 있던 판본에서는 승격한 뒤의 주소가 화면과 반대말을 했고,
+   * 새로고침이 사람의 결정을 조용히 되돌렸다. 질의(`raw`)와 성질이 다른 값이다:
+   * 질의는 입력 상자가 화면에 들고 있어 주소가 뒤처져도 모순이 아니지만, 범위는
+   * 화면 어디에도 「주소와 다르다」고 적힐 자리가 없다.
+   */
+  scope: SearchScope = "workspace"
+): MessageSearch {
   const { workspaceId } = useSession();
   // 초기값은 첫 렌더에서만 읽는다. 이후 주소가 바뀌어도 사람이 치고 있는 값을
   // 덮지 않는다.
   const [raw, setRaw] = useState(initialQuery);
+  const channelId = scopedChannelId(scope, channel);
   // 넘겨받은 질의는 기다릴 이유가 없다: 사람은 이미 팔레트에서 다 쳤고,
   // 디바운스는 타자 중인 손을 위한 것이다.
   const debounced = useDebounced(raw, raw === initialQuery ? 0 : DEBOUNCE_MS);
@@ -66,11 +92,15 @@ export function useMessageSearch(initialQuery = ""): MessageSearch {
   const enabled = isSearchable(debounced);
 
   const result = useInfiniteQuery<MessageSearchPage>({
-    queryKey: ["message-search", workspaceId.toLowerCase(), query],
+    // 범위가 키의 일부다 — 그것이 커서 초기화의 전부다(searchQueryKey의 주석).
+    // 여기서 키를 손으로 조립하면 그 규칙이 두 벌로 갈라지고, 갈라진 쪽은
+    // 「더 보기」를 눌러야만 틀린 것이 드러난다.
+    queryKey: searchQueryKey(workspaceId, query, channelId),
     queryFn: ({ pageParam, signal }) =>
       searchMessages(workspaceId, query, {
         limit: SEARCH_LIMIT_DEFAULT,
         ...(typeof pageParam === "string" ? { cursor: pageParam } : {}),
+        ...(channelId === undefined ? {} : { channelId }),
         signal,
       }),
     enabled,

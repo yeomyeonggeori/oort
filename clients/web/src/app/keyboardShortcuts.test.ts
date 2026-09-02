@@ -153,6 +153,7 @@ describe("registration drift guard", () => {
     expect(quickSwitcher).toContain("OPEN_NEW_DM_SHORTCUT.matches(event)");
     expect(quickSwitcher).toContain("OPEN_QUICK_SWITCHER_SHORTCUT.matches(event)");
     expect(quickSwitcher).toContain("OPEN_SETTINGS_SHORTCUT.matches(event)");
+    expect(quickSwitcher).toContain('location.pathname === "/settings"');
 
     expect(source("../features/inbox/InboxHotkeys.tsx")).toContain(
       "OPEN_INBOX_SHORTCUT.matches(event)"

@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from "react";
+
 // =============================================================================
 // 쓰다 만 글은 채널을 옮겨도 남는다 (U4-f · 진단 H-10).
 //
@@ -60,12 +62,69 @@ interface StoredDraft {
 }
 
 /**
+ * 저장소에 남아 있는 초안 한 줄. `{ text, atMs }` 스키마는 그대로이고, 열쇠에서
+ * 워크스페이스·채널을 풀어 목록이 읽기만 한다. 스레드 컴포저 본문은 이 저장소에
+ * 없다(채널 열쇠만 쓴다).
+ */
+export interface DraftRecord {
+  key: string;
+  workspaceId: string;
+  channelId: string;
+  text: string;
+  atMs: number;
+}
+
+const listeners = new Set<() => void>();
+let draftsEpoch = 0;
+
+function emitDraftsChanged(): void {
+  draftsEpoch += 1;
+  for (const listener of listeners) listener();
+}
+
+function subscribeDrafts(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+function draftsEpochSnapshot(): number {
+  return draftsEpoch;
+}
+
+/** 같은 탭의 초안 목록·사이드바 항법이 저장소 변화를 다시 읽게 한다. */
+export function useDraftsEpoch(): number {
+  return useSyncExternalStore(
+    subscribeDrafts,
+    draftsEpochSnapshot,
+    draftsEpochSnapshot
+  );
+}
+
+/**
  * 초안 하나의 열쇠. 워크스페이스까지 넣는 이유는 채널 id 가 워크스페이스마다
  * 새로 발급되기 때문이 아니라, **같은 기기에서 두 워크스페이스를 오가는 사람**의
  * 초안이 섞이지 않게 하기 위해서다.
  */
 export function draftKey(workspaceId: string, channelId: string): string {
   return `${PREFIX}${workspaceId.toLowerCase()}:${channelId.toLowerCase()}`;
+}
+
+/** 저장 열쇠에서 워크스페이스·채널을 푼다. 형식이 아니면 `null`. */
+export function parseDraftKey(
+  key: string
+): { workspaceId: string; channelId: string } | null {
+  if (!key.startsWith(PREFIX)) return null;
+  const rest = key.slice(PREFIX.length);
+  const colon = rest.indexOf(":");
+  if (colon <= 0 || colon === rest.length - 1) return null;
+  const workspaceId = rest.slice(0, colon);
+  const channelId = rest.slice(colon + 1);
+  if (workspaceId === "" || channelId === "" || channelId.includes(":")) {
+    return null;
+  }
+  return { workspaceId, channelId };
 }
 
 function readRaw(key: string): string | null {
@@ -134,6 +193,7 @@ export function readDraft(
   if (draft === null) return "";
   if (nowMs - draft.atMs > DRAFT_TTL_MS) {
     writeRaw(key, null);
+    emitDraftsChanged();
     return "";
   }
   return draft.text;
@@ -154,15 +214,18 @@ export function writeDraft(
   const key = draftKey(workspaceId, channelId);
   if (text === "") {
     writeRaw(key, null);
+    emitDraftsChanged();
     return;
   }
   writeRaw(key, JSON.stringify({ text, atMs: nowMs } satisfies StoredDraft));
   pruneDrafts(nowMs);
+  emitDraftsChanged();
 }
 
 /** 보냈다. 화면에서 사라진 글은 저장소에서도 사라진다. */
 export function clearDraft(workspaceId: string, channelId: string): void {
   writeRaw(draftKey(workspaceId, channelId), null);
+  emitDraftsChanged();
 }
 
 /**
@@ -171,6 +234,12 @@ export function clearDraft(workspaceId: string, channelId: string): void {
  * 이 이름으로만 복원한다.
  */
 export const COMPOSER_SEED_EVENT = "momo:composer-seed";
+
+/**
+ * 같은 탭의 초안 목록·사이드바 항법이 저장소 직접 쓰기(캡처 하네스)를
+ * 다시 읽게 하는 사건. `storage` 는 다른 탭에만 뜬다.
+ */
+export const DRAFTS_CHANGED_EVENT = "momo:drafts-changed";
 
 /**
  * 빈 입력창에만 심는다. 쓰다 만 글이 있으면 덮지 않고 false.
@@ -200,6 +269,7 @@ export function seedComposerText(
 /** 로그아웃. 이 기기에 남은 초안을 전부 지운다. */
 export function clearAllDrafts(): void {
   for (const key of draftKeys()) writeRaw(key, null);
+  emitDraftsChanged();
 }
 
 /**
@@ -210,17 +280,69 @@ export function clearAllDrafts(): void {
  */
 export function pruneDrafts(nowMs: number = Date.now()): void {
   const entries: { key: string; atMs: number }[] = [];
+  let removed = false;
   for (const key of draftKeys()) {
     const draft = parse(readRaw(key));
     if (draft === null || nowMs - draft.atMs > DRAFT_TTL_MS) {
       writeRaw(key, null);
+      removed = true;
       continue;
     }
     entries.push({ key, atMs: draft.atMs });
   }
-  if (entries.length <= MAX_DRAFTS) return;
-  entries.sort((a, b) => a.atMs - b.atMs);
-  for (const entry of entries.slice(0, entries.length - MAX_DRAFTS)) {
-    writeRaw(entry.key, null);
+  if (entries.length > MAX_DRAFTS) {
+    entries.sort((a, b) => a.atMs - b.atMs);
+    for (const entry of entries.slice(0, entries.length - MAX_DRAFTS)) {
+      writeRaw(entry.key, null);
+      removed = true;
+    }
   }
+  if (removed) emitDraftsChanged();
+}
+
+/**
+ * 이 기기에 살아 있는 초안. 시한이 지난 항목은 세지 않는다. 읽는 함수라
+ * 저장소를 지우지 않는다(`useSyncExternalStore`의 스냅샷이 부수효과를 내면
+ * 구독이 재귀한다). 청소는 `pruneDrafts`와 `readDraft`가 진다.
+ */
+export function listDrafts(nowMs: number = Date.now()): DraftRecord[] {
+  const out: DraftRecord[] = [];
+  for (const key of draftKeys()) {
+    const ids = parseDraftKey(key);
+    if (ids === null) continue;
+    const draft = parse(readRaw(key));
+    if (draft === null) continue;
+    if (nowMs - draft.atMs > DRAFT_TTL_MS) continue;
+    out.push({
+      key,
+      workspaceId: ids.workspaceId,
+      channelId: ids.channelId,
+      text: draft.text,
+      atMs: draft.atMs,
+    });
+  }
+  out.sort((a, b) => b.atMs - a.atMs);
+  return out;
+}
+
+/** 지금 워크스페이스의 초안만. 다른 워크스페이스 글은 섞지 않는다. */
+export function listWorkspaceDrafts(
+  workspaceId: string,
+  nowMs: number = Date.now()
+): DraftRecord[] {
+  const needle = workspaceId.toLowerCase();
+  return listDrafts(nowMs).filter((draft) => draft.workspaceId === needle);
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (event) => {
+    if (event.key === null || event.key.startsWith(PREFIX)) {
+      emitDraftsChanged();
+    }
+  });
+  // Same-tab writes that bypass `writeDraft` (캡처 하네스가 localStorage에
+  // 직접 심는 경우). `storage` 사건은 다른 탭에만 뜬다.
+  window.addEventListener(DRAFTS_CHANGED_EVENT, () => {
+    emitDraftsChanged();
+  });
 }

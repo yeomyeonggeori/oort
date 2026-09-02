@@ -25,6 +25,7 @@
 //   npm run preview -- --host 127.0.0.1     # or npm run dev
 //   MOMO_EMAIL=... MOMO_PASSWORD=... npm run smoke
 import { chromium } from "playwright";
+import { advanceToAccount, ONBOARDING_SURFACE } from "./advanceOnboarding.mjs";
 
 const BASE = (process.env.MOMO_WEB_BASE || "http://127.0.0.1:5173").replace(
   /\/+$/,
@@ -55,6 +56,7 @@ let result = { smoke: "r1-timeline", base: BASE };
 try {
   // ---- 1) login ------------------------------------------------------------
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await advanceToAccount(page);
   await page.fill('[data-testid="login-email"]', email);
   await page.fill('[data-testid="login-password"]', password);
   // goal B13 R2 High 1: the workspace box is collapsed by default now (its right
@@ -208,7 +210,9 @@ try {
       .waitForSelector('[data-testid="channel-list"]', { timeout: 20000 })
       .then(() => "resumed", () => "timeout"),
     page
-      .waitForSelector('[data-testid="login-email"]', { timeout: 20000 })
+      .locator(ONBOARDING_SURFACE)
+      .first()
+      .waitFor({ state: "visible", timeout: 20000 })
       .then(() => "logged-out", () => "timeout"),
   ]);
   record("session-resume", resumeOutcome === "resumed", resumeOutcome);

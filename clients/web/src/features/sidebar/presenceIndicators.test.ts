@@ -139,6 +139,22 @@ describe("프로필 카드 트리거는 코어 이름을 쓴다 (M-6)", () => {
   });
 });
 
+describe("프로필 카드 커스텀 상태 축 (#1889)", () => {
+  it("adds 상태 설정 as a sibling of the declared radios, not a replacement", () => {
+    expect(profileCard).toContain("PresenceStatusItems");
+    expect(profileCard).toContain("profile-set-status");
+    expect(profileCard).toContain("CUSTOM_STATUS_MENU_LABEL");
+    expect(profileCard).toContain("SetStatusDialog");
+    expect(profileCard).toContain("CustomStatusMark");
+    expect(profileCard).not.toContain("DropdownMenuSub");
+  });
+
+  it("caps the menu at pane-sm so status copy cannot widen it (#1889 R2-B1)", () => {
+    expect(profileCard).toContain("max-w-pane-sm");
+    expect(profileCard).toContain("profile-card-status-head");
+  });
+});
+
 describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
   it("서브메뉴를 들이지 않고 레일의 워크스페이스 추가를 연다", () => {
     expect(profileCard).not.toContain("DropdownMenuSub");
@@ -152,5 +168,20 @@ describe("프로필 카드는 실존 표면만 재배선한다 (UX-D4)", () => {
     expect(profileCard).toContain('data-testid="nav-settings"');
     expect(profileCard).toContain('navigate("/settings")');
     expect(sidebar).not.toContain('data-testid="nav-settings"');
+  });
+
+  it("로그아웃은 설정 뒤의 실존 동사다 (#1858)", () => {
+    expect(profileCard).toContain('data-testid="profile-logout"');
+    expect(profileCard).toContain("useSession");
+    expect(profileCard).toContain('tone="danger"');
+    expect(profileCard).toContain("setConfirmLogout(true)");
+    expect(profileCard).toContain("onClick={() => logout()}");
+    expect(profileCard).toContain("<LogOut className=\"size-4\" aria-hidden=\"true\" />");
+    expect(profileCard).toContain("로그아웃하면 이 기기에 쓰다 만 초안이 지워집니다.");
+    expect(profileCard).toContain("로그아웃할까요?");
+    const settings = profileCard.indexOf('data-testid="nav-settings"');
+    const logout = profileCard.indexOf('data-testid="profile-logout"');
+    expect(settings).toBeGreaterThan(-1);
+    expect(logout).toBeGreaterThan(settings);
   });
 });

@@ -22,6 +22,7 @@ import { mkdirSync, existsSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -253,6 +254,7 @@ async function scrollTo(page, selector) {
 async function openUsage(context, beforeUsage) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();

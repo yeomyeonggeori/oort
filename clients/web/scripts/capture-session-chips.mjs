@@ -39,6 +39,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { openTerminalDock } from "../gates/work-openers.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SESSION_CHIPS_CAPTURE_PORT || 5198);
@@ -614,6 +615,7 @@ async function openPanel(context) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();

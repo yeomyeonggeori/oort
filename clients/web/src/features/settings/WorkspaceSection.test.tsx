@@ -97,6 +97,7 @@ function sessionValue(): SessionContextValue {
     realtime: null,
     connStatus: "connected",
     logout: () => undefined,
+    replaceSessionMember: () => undefined,
   };
 }
 

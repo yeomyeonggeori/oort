@@ -12,6 +12,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORK_CONSOLE_GATE_PORT || 5192);
@@ -546,11 +547,10 @@ async function openConsole(context, { displayProducer = false } = {}) {
   // it the class the realtime stub overwrites.
   if (displayProducer) await installDisplayProducer(page, displayLiveHost);
   await page.goto(origin, { waitUntil: "domcontentloaded" });
-  const submit = page.getByTestId("login-submit");
-  await submit.waitFor({ timeout: 30_000 });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("gate@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
-  await submit.click();
+  await page.getByTestId("login-submit").click();
   await page.getByTestId("nav-work-console").waitFor();
   await page.getByTestId("nav-work-console").click();
   await page.getByTestId("work-console-route").waitFor();

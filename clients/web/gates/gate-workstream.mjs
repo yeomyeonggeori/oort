@@ -104,6 +104,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount, ONBOARDING_SURFACE } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.WORKSTREAM_GATE_PORT || 5188);
@@ -645,16 +646,17 @@ async function installRoutes(context, state) {
 
 async function login(page) {
   await page.goto(origin, { waitUntil: "domcontentloaded" });
-  const submit = page.getByTestId("login-submit");
+  const connect = page.locator(ONBOARDING_SURFACE);
   const nav = page.getByTestId("nav-workstreams");
   await Promise.race([
-    submit.waitFor({ timeout: 30_000 }).catch(() => {}),
+    connect.first().waitFor({ timeout: 30_000 }).catch(() => {}),
     nav.waitFor({ timeout: 30_000 }).catch(() => {}),
   ]);
-  if ((await submit.count()) > 0) {
+  if ((await connect.count()) > 0) {
+    await advanceToAccount(page);
     await page.getByTestId("login-email").fill("workstream@example.test");
     await page.getByTestId("login-password").fill("gate-only");
-    await submit.click();
+    await page.getByTestId("login-submit").click();
   }
   await nav.waitFor();
 }

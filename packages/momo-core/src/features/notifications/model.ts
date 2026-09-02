@@ -47,7 +47,9 @@ export type NotifySkip =
   /** Already announced this run. */
   | "duplicate"
   /** Replayed by a reconnect, not live. */
-  | "stale";
+  | "stale"
+  /** This device turned this kind off. */
+  | "kind-disabled";
 
 export interface DesktopNotification {
   kind: NotifyKind;
@@ -168,6 +170,11 @@ export interface NotifyContext {
   actorFor: (memberId: string) => string;
   nowMs: number;
   maxAgeMs?: number;
+  /**
+   * Device-local kind mute. Absent means every notifiable kind is on.
+   * The web layer reads `momo.web.notifications.v1` and passes that here.
+   */
+  kindEnabled?: (kind: NotifyKind) => boolean;
 }
 
 /**
@@ -188,6 +195,9 @@ export function notifyDecision(
     return { show: false, skip: "self" };
   }
   if (context.isMuted(message.channelId)) return { show: false, skip: "muted" };
+  if (context.kindEnabled && !context.kindEnabled(kind)) {
+    return { show: false, skip: "kind-disabled" };
+  }
 
   const maxAgeMs = context.maxAgeMs ?? MAX_AGE_MS;
   // hlc_ts of 0 means the server did not stamp one; a live frame is the honest

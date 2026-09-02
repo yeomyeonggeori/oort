@@ -1,11 +1,11 @@
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type MutableRefObject,
 } from "react";
-import { ArrowDown } from "lucide-react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import {
   threadRollup,
@@ -13,18 +13,23 @@ import {
   type Message,
   type RosterMember,
 } from "@momo/core/lib/api";
+import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
-import { Button } from "@/design/ui/button";
+import { InlineBanner, SkeletonRows } from "@/features/common/States";
 import {
   buildTimelineItems,
-  emptyChannelCopy,
-  type EmptyChannelAction,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineItem,
 } from "@momo/core/features/timeline/model";
+import {
+  CHANNEL_INTRO_ITEM,
+  buildChannelIntro,
+  shouldShowChannelIntro,
+  type ChannelIntroItem,
+} from "./channelIntro";
+import { ChannelIntroBlock } from "./ChannelIntroBlock";
 import {
   foldDeletedRuns,
   type DeletedFoldFields,
@@ -38,6 +43,7 @@ import {
   UnreadDivider,
   type MessageRowActions,
 } from "./MessageRow";
+import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -45,12 +51,30 @@ import {
   unfurlsFor,
   type UnfurlMap,
 } from "@momo/core/features/timeline/unfurl";
-import { useLinkPreviewsFolded } from "./linkPreviewPreference";
 import {
   AT_BOTTOM_SLACK_PX,
   countNewerThan,
+  countUnreadJump,
+  dataIndexFromVirtuoso,
+  firstUnreadMessageSeq,
+  reconcileDividerRelation,
+  relationFromIntersection,
+  shouldLatchUnreadJump,
+  shouldShowJumpUnread,
+  timelineScrollBehavior,
+  unreadDividerIndexOf,
   newestSeqOf,
+  type DividerViewportRelation,
 } from "./navigation";
+import { scheduleFocusRowStationBySeq } from "./rowFocus";
+import {
+  UnreadPill,
+  UnreadPillDock,
+  jumpLatestAriaLabel,
+  jumpLatestLabel,
+  jumpUnreadAriaLabel,
+  jumpUnreadLabel,
+} from "./UnreadPill";
 
 // =============================================================================
 // Timeline (R-1 §3). Virtualised by react-virtuoso, ordered by seq only, with
@@ -78,7 +102,7 @@ const START_INDEX = 1_000_000;
  * (`deletedFold.ts`) — 접기는 그리는 순간에만 일어나고 메시지 배열도 seq도
  * 커서도 그것을 모른다.
  */
-type FoldedItem = TimelineItem & DeletedFoldFields;
+type FoldedItem = (TimelineItem & DeletedFoldFields) | ChannelIntroItem;
 
 /** Oldest message currently in the stream, with its position. */
 function anchorOf(
@@ -135,8 +159,10 @@ function indexOfMessageId(items: FoldedItem[], messageId: string): number {
     (item) => item.kind === "message" && item.message.id.toLowerCase() === wanted
   );
   if (own >= 0) return own;
-  return items.findIndex((item) =>
-    (item.deletedFoldedIds ?? []).some((id) => id.toLowerCase() === wanted)
+  return items.findIndex(
+    (item) =>
+      item.kind === "message" &&
+      (item.deletedFoldedIds ?? []).some((id) => id.toLowerCase() === wanted)
   );
 }
 
@@ -148,20 +174,24 @@ interface AnchorState {
   epoch: number;
 }
 
-// ---- 항법 (U4-j · 진단 M-9) --------------------------------------------------
+// ---- 항법 (U4-j · 진단 M-9 · BF-A2) -----------------------------------------
 //
 // 진단이 실측한 것: `ref`는 선언되고 전달만 될 뿐 **한 번도 역참조되지 않았다**.
 // 위로 올라가 읽다가 현재로 돌아오려면 손으로 끝까지 밀어야 했다.
 //
-// 두 컨트롤이 아니라 **한 컨트롤의 두 문장**이다. 자리도 같고 하는 일도 같다
-// (맨 아래로 간다). 다른 것은 그 사이에 새 메시지가 왔는가뿐이고, 그것을 아는
-// 사람에게 두 개의 버튼을 세우면 같은 자리에서 두 번 고르게 만드는 일이 된다.
+// 아래 필은 **한 컨트롤의 두 문장**이다. 자리도 같고 하는 일도 같다 (맨 아래로
+// 간다). 다른 것은 그 사이에 새 메시지가 왔는가뿐이고, 그것을 아는 사람에게 두
+// 개의 버튼을 세우면 같은 자리에서 두 번 고르게 만드는 일이 된다.
+//
+// 위 필은 다른 목적지다: 읽음 구분선(가장 오래된 안읽음). 오래 비운 뒤 바닥에
+// 떨어진 사람에게 그 줄로 되돌아가는 문이다. 아래 필과 동시에 떠도 역할이
+// 갈라진다 (위=과거, 아래=최신).
 //
 // `followOutput="auto"`와의 계약: 바닥에 있으면 virtuoso가 스스로 따라가므로
-// 이 컨트롤은 아예 뜨지 않는다. 읽던 중(바닥이 아닌 상태)에는 화면이 **움직이지
-// 않아야** 하고 — 읽던 줄이 밀려나는 것은 새 메시지가 저지를 수 있는 가장 나쁜
-// 일이다 — 대신 아래에 몇 개가 쌓였는지를 이 줄이 말한다. 그 산수는 조용히
-// 틀릴 수 있어서 따로 산다: `navigation.ts`.
+// 아래 컨트롤은 아예 뜨지 않는다. 읽던 중(바닥이 아닌 상태)에는 화면이
+// **움직이지 않아야** 하고 — 읽던 줄이 밀려나는 것은 새 메시지가 저지를 수 있는
+// 가장 나쁜 일이다 — 대신 아래에 몇 개가 쌓였는지를 이 줄이 말한다. 그 산수는
+// 조용히 틀릴 수 있어서 따로 산다: `navigation.ts`.
 
 export function Timeline({
   messages,
@@ -188,12 +218,27 @@ export function Timeline({
   onResendPending,
   onAddMember,
   onStartWriting,
+  reachedStart = false,
+  canAddMember = false,
+  channelName,
+  channelTopic,
 }: {
   messages: Message[];
   directory: Directory;
   status: "loading" | "ready" | "error";
   /** Decides what "empty" means here: a channel gains members, a DM cannot. */
   channelKind?: Channel["kind"];
+  /** Visible channel / DM name. The intro titles itself from this. */
+  channelName?: string;
+  /** Channel topic, quoted as the intro body when present. */
+  channelTopic?: string;
+  /**
+   * Older history is exhausted. The intro is a leading row only at the start
+   * of the channel, never mid-window while a previous page is still loading.
+   */
+  reachedStart?: boolean;
+  /** Owner/admin (same helper as channel create). Hidden for everyone else. */
+  canAddMember?: boolean;
   /** The other participant, for a DM. */
   peer?: RosterMember | null;
   lastReadSeq?: number | null;
@@ -247,7 +292,6 @@ export function Timeline({
   onStartWriting?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
-  const foldLinkPreviews = useLinkPreviewsFolded();
 
   // ADR-0148 - 라이브로 도착한 인용 답글의 원본을 화면에 이미 있는 행에서 푼다.
   //
@@ -282,32 +326,55 @@ export function Timeline({
   //
   // `factsFor`가 여기 있는 이유: 접지 않을 조건(답글·반응)은 **목록만 안다.**
   // 롤업은 메시지가 들고 있고, 반응은 이 컴포넌트가 받은 표에서 온다.
-  const items = useMemo(
+  const showIntro = shouldShowChannelIntro({
+    status,
+    reachedStart,
+    messageCount: messages.length,
+  });
+  // A local echo counts as content: it must appear under the intro the moment
+  // it is sent, not after the server round trip, and it must not remount the
+  // list (that remount was the empty-state layout shift).
+  const empty =
+    messages.length === 0 && (pending === undefined || pending.length === 0);
+  const intro = useMemo(
     () =>
-      foldDeletedRuns(
-        buildTimelineItems(messages, {
-          lastReadSeq,
-          unreadCount,
-          recoveryMarkers,
-          pending,
-        }),
-        (item) => ({
-          hasRollup: threadRollup(item.message) !== null,
-          hasReactions:
-            chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
-              .length > 0,
-        })
-      ),
-    [
-      messages,
-      lastReadSeq,
-      unreadCount,
-      recoveryMarkers,
-      pending,
-      reactions,
-      myMemberIdForFold,
-    ]
+      buildChannelIntro({
+        kind: channelKind,
+        name: channelName ?? "",
+        topic: channelTopic,
+        peer: peer ?? null,
+        canAddMember: Boolean(canAddMember) && channelKind !== "dm",
+        empty,
+      }),
+    [channelKind, channelName, channelTopic, peer, canAddMember, empty]
   );
+
+  const items = useMemo(() => {
+    const folded = foldDeletedRuns(
+      buildTimelineItems(messages, {
+        lastReadSeq,
+        unreadCount,
+        recoveryMarkers,
+        pending,
+      }),
+      (item) => ({
+        hasRollup: threadRollup(item.message) !== null,
+        hasReactions:
+          chipsFor(reactions ?? {}, item.message.id, myMemberIdForFold)
+            .length > 0,
+      })
+    );
+    return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+  }, [
+    messages,
+    lastReadSeq,
+    unreadCount,
+    recoveryMarkers,
+    pending,
+    reactions,
+    myMemberIdForFold,
+    showIntro,
+  ]);
 
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
   // 내려 보낸다. 행마다 구독하면 아무 run 이나 끝날 때 화면의 모든 줄이 다시 그려지고,
@@ -407,12 +474,100 @@ export function Timeline({
     );
   }, [messages, myMemberId]);
 
-  // 채널을 갈아타면 기준선도 버린다. `epoch`가 바뀌는 것이 곧 「다른 대화」다.
+  // 상단 N은 연 순간의 동결 스냅샷 — 구분선과 같은 수 (M-1(a)). 라이브 꼬리는
+  // 하단 필이 센다. 사유는 `navigation.ts` (a)/(b).
+  const unreadJumpCount = countUnreadJump(unreadCount);
+  const unreadDividerIndex = unreadDividerIndexOf(items);
+  const firstItemIndexRef = useRef(firstItemIndex);
+  firstItemIndexRef.current = firstItemIndex;
+  const unreadIndexRef = useRef(unreadDividerIndex);
+  unreadIndexRef.current = unreadDividerIndex;
+
+  const [renderedRange, setRenderedRange] = useState<{
+    start: number;
+    end: number;
+  } | null>(null);
+  const [observedRelation, setObservedRelation] =
+    useState<DividerViewportRelation | null>(null);
+  const [dividerEl, setDividerEl] = useState<HTMLElement | null>(null);
+  const [scrollerEl, setScrollerEl] = useState<HTMLElement | null>(null);
+  const [unreadJumpLatched, setUnreadJumpLatched] = useState(false);
+
+  const dividerRelation = reconcileDividerRelation({
+    dividerIndex: unreadDividerIndex,
+    visibleStart: renderedRange?.start ?? null,
+    visibleEnd: renderedRange?.end ?? null,
+    observed: observedRelation,
+  });
+  const showJumpUnread = shouldShowJumpUnread(
+    dividerRelation,
+    unreadJumpCount,
+    unreadJumpLatched
+  );
+
+  // 채널을 갈아타면 기준선도, 위 필이 기대는 창 위치도, 래치도 버린다.
+  // `epoch`가 바뀌는 것이 곧 「다른 대화」다.
   useEffect(() => {
     baselineRef.current = null;
     setNewCount(0);
     setAtBottom(true);
+    setRenderedRange(null);
+    setObservedRelation(null);
+    setUnreadJumpLatched(false);
   }, [epoch]);
+
+  // 래치 무장은 IO가 실측한 「in」만. range 폴백 「in」은 오버스캔에 마운트만
+  // 된 구분선도 창 안이라고 보고한다 — 그 거짓으로 무장하면 위로 읽는 동안
+  // 필이 영구 소멸한다 (H-1 오발).
+  useEffect(() => {
+    if (shouldLatchUnreadJump(observedRelation)) setUnreadJumpLatched(true);
+  }, [observedRelation]);
+
+  useEffect(() => {
+    if (dividerEl === null || scrollerEl === null) {
+      setObservedRelation(null);
+      return undefined;
+    }
+    const io = new IntersectionObserver(
+      (entries) => {
+        const entry = entries[0];
+        if (entry === undefined) return;
+        const next = relationFromIntersection(entry);
+        if (next !== null) setObservedRelation(next);
+      },
+      { root: scrollerEl, threshold: 0 }
+    );
+    io.observe(dividerEl);
+    return () => io.disconnect();
+  }, [dividerEl, scrollerEl]);
+
+  const jumpToLatest = useCallback(() => {
+    const seq = newestSeqRef.current;
+    ref.current?.scrollToIndex({
+      index: "LAST",
+      align: "end",
+      behavior: timelineScrollBehavior(prefersReducedMotion()),
+    });
+    if (seq !== null) scheduleFocusRowStationBySeq(seq);
+  }, []);
+
+  const jumpToUnread = useCallback(() => {
+    const index = unreadIndexRef.current;
+    if (index === null) return;
+    const seq = firstUnreadMessageSeq(itemsRef.current, index);
+    // 실행 자체가 진입이다. IO가 늦어도 이 epoch에서 필을 다시 세우지 않는다.
+    setUnreadJumpLatched(true);
+    ref.current?.scrollToIndex({
+      index,
+      align: "start",
+      behavior: timelineScrollBehavior(prefersReducedMotion()),
+    });
+    if (seq !== null) scheduleFocusRowStationBySeq(seq);
+  }, []);
+
+  const onScrollerRef = useCallback((node: HTMLElement | Window | null) => {
+    setScrollerEl(node instanceof HTMLElement ? node : null);
+  }, []);
 
   if (status === "error") {
     return (
@@ -425,72 +580,15 @@ export function Timeline({
     );
   }
 
-  // A local echo counts as content: the first message in an empty channel must
-  // appear the moment it is sent, not after the server round trip finishes.
-  const empty = messages.length === 0 && items.length === 0;
-
   if (status === "loading" && empty) {
     return <SkeletonRows rows={6} className="p-4" />;
-  }
-
-  if (status === "ready" && empty) {
-    const copy = emptyChannelCopy(channelKind, peer ?? null);
-    const secondary = copy.secondary;
-    const run = (action: EmptyChannelAction) =>
-      action.kind === "write" ? onStartWriting?.() : onAddMember?.();
-    return (
-      <EmptyInvite
-        headline={copy.headline}
-        detail={copy.detail}
-        actions={
-          // 두 버튼은 **동급이 아니다** (#1536). 첫 행동은 쓰기이고 멤버 추가는
-          // 그 다음이며, 위계는 §3 채움 순서가 그대로 진다: 주 액션은 --accent
-          // 채움, 보조는 --line-strong 윤곽.
-          //
-          // 주 액션이 채움인 근거는 바로 옆 형제다. 같은 창의 「아직 채널이
-          // 없습니다」가 자기 첫 행동(`채널 만들기`)에 이미 이 옷을 입힌다
-          // (`ChatShell.tsx`) — 한 창의 두 빈 상태가 같은 자리에서 다른 옷을
-          // 입으면 읽는 사람이 그 둘을 대조해야 한다.
-          //
-          // 멤버 추가는 옷을 그대로 둔다. #1536이 바꾼 것은 이 버튼이 아니라 그
-          // 앞에 선 것이므로, 이 버튼이 자기 모양까지 바꾸면 이 화면을 이미 아는
-          // 사람에게는 없어진 것처럼 읽힌다. 이 버튼은 이 클라에서 「채널에 멤버
-          // 추가」로 가는 유일한 문이기도 하다(코어 `emptyChannelCopy` 머리말 —
-          // 이름이 그 방의 동사를 따르는 이유도 거기 있다, #1573).
-          //
-          // 순서는 DOM 순서다: 탭이 첫 행동에 먼저 닿는다.
-          <>
-            <Button
-              size="sm"
-              onClick={() => run(copy.primary)}
-              data-testid="timeline-empty-primary"
-              data-action-kind={copy.primary.kind}
-            >
-              {copy.primary.label}
-            </Button>
-            {secondary && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => run(secondary)}
-                data-testid="timeline-empty-secondary"
-                data-action-kind={secondary.kind}
-              >
-                {secondary.label}
-              </Button>
-            )}
-          </>
-        }
-        testId="timeline-empty"
-        dataAttrs={{ "data-empty-kind": copy.surface }}
-      />
-    );
   }
 
   return (
     // `relative`는 아래 항법 컨트롤이 붙을 자리다. 컨트롤이 타임라인 **안**에
     // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
     <div className="relative h-full">
+      <TimelineLiveRegionProvider>
       <Virtuoso
         key={epoch}
         ref={ref}
@@ -506,6 +604,17 @@ export function Timeline({
         alignToBottom
         followOutput="auto"
         startReached={onStartReached}
+        scrollerRef={onScrollerRef}
+        rangeChanged={({ startIndex, endIndex }) => {
+          const first = firstItemIndexRef.current;
+          const start = dataIndexFromVirtuoso(startIndex, first);
+          const end = dataIndexFromVirtuoso(endIndex, first);
+          setRenderedRange((prev) =>
+            prev !== null && prev.start === start && prev.end === end
+              ? prev
+              : { start, end }
+          );
+        }}
         // 바닥의 여유 (U4-j). 0이면 마지막 행의 자기 여백 몇 픽셀만으로도 「바닥이
         // 아님」이 되어, 아무도 스크롤하지 않았는데 항법 컨트롤이 떴다 사라진다.
         atBottomThreshold={AT_BOTTOM_SLACK_PX}
@@ -530,6 +639,17 @@ export function Timeline({
         increaseViewportBy={{ top: 600, bottom: 600 }}
         computeItemKey={(_index, item: FoldedItem) => item.key}
         itemContent={(_index, item: FoldedItem) => {
+          if (item.kind === "intro") {
+            return (
+              <ChannelIntroBlock
+                intro={intro}
+                empty={empty}
+                peer={peer}
+                onWrite={onStartWriting}
+                onAddMember={onAddMember}
+              />
+            );
+          }
           // 「오늘/어제」는 지금이 언제인지를 알아야 나온다 (H-4). 렌더 시각을 그대로
           // 쓰는 것은 `Sidebar`가 이미 하는 것과 같다. 1Hz 시계를 붙이지 않는 이유는
           // 그 시계가 가상 리스트 전체를 초당 한 번 다시 그리기 때문이다 — 하루에 한
@@ -538,7 +658,13 @@ export function Timeline({
           if (item.kind === "day") {
             return <DayDivider atMs={item.atMs} nowMs={Date.now()} />;
           }
-          if (item.kind === "unread") return <UnreadDivider count={item.count} />;
+          if (item.kind === "unread") {
+            return (
+              <div ref={setDividerEl} data-unread-anchor="">
+                <UnreadDivider count={item.count} />
+              </div>
+            );
+          }
           if (item.kind === "recovery") {
             return <RecoveryDivider seq={item.seq} source={item.source} />;
           }
@@ -559,7 +685,6 @@ export function Timeline({
               startsGroup={item.startsGroup}
               directory={directory}
               unfurls={unfurlsFor(unfurls ?? {}, item.message.id)}
-              foldLinkPreviews={foldLinkPreviews}
               actions={
                 actions && {
                   ...actions,
@@ -585,49 +710,34 @@ export function Timeline({
           );
         }}
       />
+      {showJumpUnread && (
+        <UnreadPillDock side="top">
+          <UnreadPill
+            direction="up"
+            testId="jump-unread"
+            count={unreadJumpCount}
+            label={jumpUnreadLabel(unreadJumpCount)}
+            accessibleLabel={jumpUnreadAriaLabel(unreadJumpCount)}
+            onClick={jumpToUnread}
+          />
+        </UnreadPillDock>
+      )}
       {!atBottom && (
         // 컨트롤은 떠 있고 그 아래 타임라인은 계속 눌린다: 감싼 상자는 클릭을
         // 통과시키고 버튼만 받는다. 그러지 않으면 이 줄이 덮은 폭만큼 마지막
         // 메시지가 눌리지 않는 띠가 된다.
-        <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
-          <button
-            type="button"
-            data-testid="jump-latest"
-            data-new-count={newCount}
-            onClick={() => {
-              ref.current?.scrollToIndex({
-                index: "LAST",
-                align: "end",
-                // 움직임은 피드백이다: 어디로 가는지가 보여야 「맨 아래로
-                // 뛰었다」가 읽힌다. 그것을 원하지 않는다고 말한 사람에게는
-                // 즉시 도착한다 — 목적지는 같고 가는 길만 다르다.
-                behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-                  .matches
-                  ? "auto"
-                  : "smooth",
-              });
-            }}
-            className="pointer-events-auto flex h-control-sm items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <ArrowDown className="size-4 shrink-0" aria-hidden="true" />
-            {/* 라벨은 **한 조각**이다. 조각을 나누어 flex의 자식으로 두면 `gap-2`가
-                낱말 사이에도 8px씩 들어가 「새 메시지  1  개 보기」가 된다 — 같은
-                레포가 구분선에서 이미 겪은 「7월  29일」과 같은 종류의 벌어짐이다. */}
-            <span>
-              {newCount > 0 ? (
-                // 안읽음 구분선과 **같은 낱말**을 쓴다(코어 `unreadDividerSegments`:
-                // 「새 메시지 N개, 여기까지 읽음」). 같은 것을 가리키는 두 자리가
-                // 서로 다른 이름을 쓰면 읽는 사람이 그 둘을 대조해야 한다.
-                <>
-                  새 메시지 <span data-numeric>{newCount}</span>개 보기
-                </>
-              ) : (
-                "최신 메시지로 이동"
-              )}
-            </span>
-          </button>
-        </div>
+        <UnreadPillDock side="bottom">
+          <UnreadPill
+            direction="down"
+            testId="jump-latest"
+            count={newCount}
+            label={jumpLatestLabel(newCount)}
+            accessibleLabel={jumpLatestAriaLabel(newCount)}
+            onClick={jumpToLatest}
+          />
+        </UnreadPillDock>
       )}
+      </TimelineLiveRegionProvider>
     </div>
   );
 }

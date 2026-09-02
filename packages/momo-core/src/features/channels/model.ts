@@ -82,18 +82,22 @@ export function channelTopicIssueMessage(issue: ChannelTopicIssue): string {
 }
 
 // =============================================================================
-// 채널 헤더 메뉴 (검수 피드백 #3). 채널 이름을 누르면 서는 메뉴의 낱말과, 어떤
-// 항목이 서는가의 규칙. 낱말을 코어에 두는 이유는 만들기 폼과 같다: 두 클라(그리고
-// 게이트)가 한 문장을 읽게 한다.
+// 채널 헤더 메뉴 (검수 피드백 #3, #1865). 헤더 우측 ⋮ 이 여는 메뉴의 낱말과,
+// 어떤 항목이 서는가의 규칙. 낱말을 코어에 두는 이유는 만들기 폼과 같다: 두
+// 클라(그리고 게이트)가 한 문장을 읽게 한다.
 //
 // 「이름 수정」은 이 메뉴에 없다. 2026-08-10 서버 라우트 전수 실측에서 채널 이름을
 // 바꾸는 라우트(`PATCH …/channels/{ch}` 류)가 없었고, 누를 수 없는 항목을 그리는
 // 것은 없는 항목보다 나쁘다. 별도 티켓으로 남긴다.
+//
+// 토픽도 같은 이유다: 읽기 다이얼로그는 있고, 갱신 라우트는 없다. 항목 이름은
+// 「주제 보기」이지 「편집」이 아니다. 빈 토픽에는 항목 자체를 그리지 않는다.
 // =============================================================================
 
 export const CHANNEL_MUTE_LABEL = "알림 끄기";
 export const CHANNEL_UNMUTE_LABEL = "알림 켜기";
 export const CHANNEL_LEAVE_LABEL = "채널 나가기";
+export const CHANNEL_TOPIC_VIEW_LABEL = "주제 보기";
 
 /** 항목의 낱말은 상태다: 켜져 있으면 「끄기」, 꺼져 있으면 「켜기」. */
 export function channelMuteToggleLabel(muted: boolean): string {
@@ -148,6 +152,78 @@ export function channelLeaveFailureMessage(error: unknown): string {
   }
   return "채널에서 나가지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
+
+// ---- 행에서 채널을 조작하는 낱말 (BT-1 / #1929) ------------------------------
+//
+// 채널 액션은 헤더 ⋮ 메뉴에만 있었다 — 「채널을 열지 않고 조작한다」는 문법이
+// 아예 없었고, 사이드바 행 우클릭이 그 문을 연다. 두 표면이 같은 일을 하므로
+// 낱말은 여기 한 벌뿐이다: `copyLabels.ts`가 메시지 쪽에서 같은 이유로 이미
+// 코어에 있고(웹 메뉴와 폰 시트가 갈라졌던 자리), 링크 복사의 낱말은 그 파일
+// 것을 그대로 든다 — 같은 뜻에 두 번째 이름을 만들지 않는다.
+
+/** 이 채널의 안 읽음을 서버에 광고한다. 채널을 열지 않고. */
+export const CHANNEL_MARK_READ_LABEL = "읽음 처리하기";
+
+/** 읽음 광고가 실패했을 때, 그 항목 자리에서 하는 말(토스트가 아니다). */
+export const CHANNEL_MARK_READ_FAILURE =
+  "읽음 처리를 하지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+
+/** 채널 이름(또는 DM 상대의 이름)을 클립보드에 올린다. */
+export const CHANNEL_COPY_NAME_LABEL = "이름 복사하기";
+
+/** 이름이 클립보드에 올라간 뒤의 영수증. */
+export const CHANNEL_COPY_NAME_DONE_LABEL = "이름 복사됨";
+
+/** 복사 항목의 낱말도 상태다 — `copyLinkActionLabel`과 같은 결. */
+export function channelCopyNameLabel(copied: boolean): string {
+  return copied ? CHANNEL_COPY_NAME_DONE_LABEL : CHANNEL_COPY_NAME_LABEL;
+}
+
+/**
+ * 메뉴 안에서 실패 문장을 인 상자의 이름 (design-review #1937 N-5).
+ *
+ * `role="menu"` 의 직계 자식은 menuitem/group/separator 여야 하는데 실패 배너는
+ * `role="alert"` 이다. `group` 한 겹으로 구조를 맞추면 그 group 은 이름을 가져야
+ * 하고, 그 이름이 이 문장이다.
+ */
+export const CHANNEL_ACTION_ERROR_GROUP_LABEL = "이 메뉴의 알림";
+
+/**
+ * 왕복이 도는 동안 그 항목이 하는 말 (design-review #1937 N-1).
+ *
+ * 낱말이 바뀌고 `aria-busy` 가 서는 것이 「지금 일어나는 중」의 표시다 —
+ * `States.tsx` 가 같은 축에 대해 「never disabled and never dimmed」이라 적어
+ * 두었고, 회색이 된 컨트롤은 「지금 일어나는 중」이 아니라 「너는 이걸 하면 안
+ * 된다」로 읽힌다. 꼴은 「명사 + 중」이거나 고유어 어간 + 「는 중」이다.
+ */
+export function channelMuteToggleBusyLabel(muted: boolean): string {
+  return muted ? "알림 켜는 중" : "알림 끄는 중";
+}
+
+/** 읽음 광고가 도는 동안. */
+export const CHANNEL_MARK_READ_BUSY_LABEL = "읽음 처리 중";
+
+/**
+ * 이 행의 메뉴가 스크린리더에게 자기를 부르는 이름 (design-review #1937 M-1).
+ *
+ * DM 에 「채널 메뉴」라고 말하지 않는다. 헤더 ⋮ 는 DM 에 아예 서지 않아서
+ * 이 낱말이 DM 에 붙는 자리는 사이드바 행이 처음이고, 이 제품이 그 표면을
+ * 부르는 이름은 사이드바 섹션 제목과 같은 「다이렉트 메시지」다.
+ */
+export function channelMenuAccessibleLabel(name: string, isDm: boolean): string {
+  return `${name} ${isDm ? "다이렉트 메시지" : "채널"} 메뉴`;
+}
+
+/**
+ * 클립보드 자체가 없는 런타임에서 하는 말. 다시 눌러도 같으므로 「다시
+ * 시도」라고 말하지 않는다 — `MessageRow`의 형제 문장과 같은 판정이다.
+ */
+export const CHANNEL_COPY_UNAVAILABLE =
+  "복사하지 못했습니다. 이 브라우저에서는 클립보드를 쓸 수 없습니다.";
+
+/** 클립보드는 있는데 쓰기가 실패했을 때. 다시 누르면 될 수 있다. */
+export const CHANNEL_COPY_FAILURE =
+  "복사하지 못했습니다. 같은 항목을 다시 눌러 보세요.";
 
 /**
  * May this member create a channel at all?

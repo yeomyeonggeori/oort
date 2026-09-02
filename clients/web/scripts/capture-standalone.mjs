@@ -26,6 +26,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -285,7 +286,7 @@ async function runWorkerChecks(browser) {
   // 오프라인: 셸은 뜨고, 데이터는 없다.
   await context.setOffline(true);
   await page.reload({ waitUntil: "domcontentloaded" });
-  await page.getByTestId("login-submit").waitFor({ state: "visible", timeout: 15_000 });
+  await page.getByTestId("onboarding-landing").waitFor({ state: "visible", timeout: 15_000 });
   const apiOffline = await page.evaluate(async () => {
     try {
       const res = await fetch("/v1/workspaces/x/channels");
@@ -451,6 +452,7 @@ async function captureSignedInShell(browser, { standalone, scheme = "light" }) {
     });
     await page.addStyleTag({ content: `#root { ${SAFE_AREA_TOP_DECLARATION}; }` });
   }
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
   await page.getByTestId("login-submit").click();
