@@ -186,6 +186,21 @@ assert_no_secret_leak "valid human" "$HUM"
 assert_no_secret_leak "valid human stderr" "$HUMERR"
 pass "valid human output has no secret tokens"
 
+# Generator does not backfill MOMO_LIVEKIT_NODE_IP on existing env (#1856).
+NOLK="$SANDBOX/nolivekit.env"
+awk 'index($0, "MOMO_LIVEKIT_NODE_IP=") != 1 { print }' "$VALID" >"$NOLK"
+chmod 600 "$NOLK"
+OUT="$SANDBOX/nolivekit.json"
+ERR="$SANDBOX/nolivekit.err"
+code="$(run_doctor "$NOLK" "$OUT" "$ERR" --json)"
+[ "$code" = "0" ] || fail "missing LIVEKIT exit $code (want 0); stderr=$(cat "$ERR")"
+[ "$(jq -r '.summary.verdict' "$OUT")" = "PASS" ] || fail "missing LIVEKIT should not FAIL verdict"
+[ "$(check_field "$OUT" env.required_keys status)" = "pass" ] || \
+  fail "LIVEKIT must not be a required-keys blocker"
+[ "$(check_field "$OUT" env.livekit_node_ip status)" = "skip" ] || \
+  fail "LIVEKIT missing should skip: $(check_field "$OUT" env.livekit_node_ip status)"
+pass "MOMO_LIVEKIT_NODE_IP absent on old env is skip, not blocker"
+
 # -----------------------------------------------------------------------------
 # 2. MOMO_DOORBELL_ENABLED=True → fail major, fix mentions lowercase true
 # -----------------------------------------------------------------------------

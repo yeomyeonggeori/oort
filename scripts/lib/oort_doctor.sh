@@ -313,6 +313,11 @@ oort_doctor_check_env() {
     if [ "$key" = "MOMO_INITIAL_OWNER_PASSWORD" ] && [ "$claim" = "1" ]; then
       continue
     fi
+    # #1856: generator writes this on create only and will not backfill an
+    # existing env (auto-detect stays). Missing is not a silent-failure key.
+    if [ "$key" = "MOMO_LIVEKIT_NODE_IP" ]; then
+      continue
+    fi
     if ! oort_doctor_has "$key"; then
       missing="${missing} ${key}"
     fi
@@ -327,6 +332,15 @@ EOF
     oort_doctor_record env.required_keys blocker fail \
       "생성기 키 누락:${missing}" \
       "scripts/self_host_env.sh 로 생성한 env를 쓰거나 빠진 키를 채워라."
+  fi
+
+  if oort_doctor_has MOMO_LIVEKIT_NODE_IP; then
+    oort_doctor_record env.livekit_node_ip minor pass \
+      "MOMO_LIVEKIT_NODE_IP present" ""
+  else
+    oort_doctor_record env.livekit_node_ip minor skip \
+      "MOMO_LIVEKIT_NODE_IP 없음 — 생성기는 기존 env에 소급 주입하지 않는다 (huddle 자동 감지)" \
+      "LAN/원격이면 클라가 닿는 IP 로 넣고 api를 재시작하라."
   fi
 
   oort_doctor_check_true_gate env.bool.doorbell MOMO_DOORBELL_ENABLED
