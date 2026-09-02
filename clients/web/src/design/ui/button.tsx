@@ -94,4 +94,9 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
 );
 Button.displayName = "Button";
 
+/** DS-2 red proof: a new ui/ export must turn the gallery test red. */
+export function GalleryDummyProbe() {
+  return null;
+}
+
 export { buttonVariants };
