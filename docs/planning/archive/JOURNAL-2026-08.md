@@ -2,6 +2,18 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-23 (Fable) · ★성재 일괄 위임("다 승인할게") 집행 — ADR 2건 Accept·워커 2기 발사·U-8 티켓
+- **컴포저 하단 패딩 질문 해부(성재)**: 밴드=힌트 행 26px+상시 예약 타이핑 라인 행 26px(H-2 자리예약 설계). Slack식 한 행 스왑 제안 → **U-8=#1699** 티켓화(즉흥 수리 금지 규율).
+- **승인 집행**: ADR-0167·0168 **Accepted**(위임 기록 명시) · rescue stash **drop 완료**(보험 패치 스크래치패드) · **T-9(#1678) grok 워커 발사**(track/engine, acceptEdits, 감시자 무장) · **M-2=#1700 발급+패킷**(`handoffs/2026-08-23-m2-photo-picker-packet.md`)+**sol 워커 발사**(goal_claim, feat/1700-picker-p0-adr-0168, 감시자+stall 감지).
+- **합류 릴레이(큐④)**: 토큰 2회 붙여넣기만 성재 몫으로 남긴 릴레이 킷 완성 `claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md`(1회용 pairing/active 자격증명은 Fable 비대행 경계).
+- 운영: ENOSPC 재발(tauri 빌드) → engine 구 target 3.6G+tauri target 회수, 26Gi 확보. main repo server-rust/target 12G는 QA 서버 가동 중이라 보존(세션 말미 회수 후보). #1696·#1698 방향은 승인됨 — ADR 기안=다음 순번.
+
+## 2026-08-23 (Fable) · ★실결함 수리 랜딩(#1697)+기본 기능 4축 검수+실시간 리그 성립
+- **U-3 실결함 수리**: 라이트박스 512px 스트립 — cn()의 tailwind-merge가 하우스 측정명 미인지→max-w-none 패배. 수리=단어형 --spacing-* 19종 전량 등록+정본 파싱 가드 테스트(#1697 merged, track/uxui=7124598b). design-review PASS(Blocker 0·H-1/M-1 커밋 내 종결). 레드 프루프 2건 실측.
+- **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
+- **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
+- 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.
+
 ## 2026-08-23 (Fable) · ★재개 큐 소진: UXUI 재연 QA 대행 5/7 PASS + U-7 스코프드 랜딩 + ADR-0168 기안
 - 성재 "검수 요청 부분 알아서 처리" → **재연 QA를 Fable이 브라우저 자동화로 대행**: 로컬 프록시(localhost:23080, 정적=track/uxui dist·/v1=D8 포워딩)로 same-origin 리그 구성. U-5·U-2·C-1·U-1·U-4 전부 PASS(포커스 복귀 수리분 실렌더 재확인 포함). 증거 11샷+리포트 `claudedocs/uxui-qa-d8-20260823/`.
 - **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
