@@ -60,7 +60,11 @@ export default tseslint.config(
   {
     // The palette verifier is the one place allowed to name hex values: it
     // parses tokens.css and measures it, so the literals ARE the assertion.
-    files: ["src/design/tokens.contrast.test.ts"],
+    files: [
+      "src/design/tokens.contrast.test.ts",
+      // 같은 성격: 액센트 카탈로그 대비 시험은 측정할 hex 자체를 들어야 한다 (ADR-0174 D5, BZ-5a #1868).
+      "src/design/themes/catalog.contrast.test.ts",
+    ],
     rules: { "no-restricted-syntax": "off" },
   },
   {

@@ -7865,7 +7865,7 @@ async function captureScheme(browser, scheme) {
       state: "visible",
       timeout: 10_000,
     });
-  } catch (error) {
+  } catch {
     const dump = await draftsPage.evaluate(`(() => ({
       hash: location.hash,
       route: Boolean(document.querySelector('[data-testid="drafts-route"]')),
