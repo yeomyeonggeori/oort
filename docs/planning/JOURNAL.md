@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-02 (저녁) · Fable · ★ADR 4본 기안(0179~0182 Proposed) + 워커 레인 grok 4.6 개정 — G0 발사 go 대기
+
+- 성재 "ADR 기안부터 시작 · 워커는 grok 4.6": D-7 개정(Opus 5 Agent → grok 4.6), ROADMAP·편성 정본·BT-6 브리프(개정 1: 이어받기 좌표) 반영.
+- 기안: **ADR-0179** 표현 축(duration 120/180/240/500·easing 2·도착 규격·비대칭·눌림 정본·엘리베이션 이름·밀도/가상 rem·하이브리드 motion/react·reduced-motion 이중·강제 기제 5) · **ADR-0180** 기기 연결 1회용 QR 링크 토큰(교환권·TTL 120s·`oort://link`·공개 오리진 모드만 SAS·감사/해제) · **ADR-0181** 웰컴 킥오프 오프너=agent-worker `RunTrigger::Welcome`(가입 tx 트리거·멱등 키·provider-required 정적 경로·원장 귀속·120s 백스톱) · **ADR-0182** 일시 확인 3형(in-place·상태줄·지속 카드)+결정 트리+preflight `ephemeral`.
+- 다음(go 후): 성재 Accept → G0(BT-6 이어받기 grok 워커 → #1922 머지·A6 상향 → 승격 → v0.1.4) → 티켓·패킷(UX-R0~R1e·DS-1·2·SH-1~3a·M0s/w/m·P1~P4) → W1.
+
 ## 2026-09-02 (오후) · Fable · ★인터뷰 전량 승인 → 출시 프로그램 편성 정본 + ROADMAP 정렬 (착수 전)
 
 - 성재: 브리프 §8 권고 전부 승인 + 모바일 발제(QR만 찍으면 연동, iOS 전용) + 이미지 에셋(gpt/grok/OpenRouter) + "작업 말고 계획 구체화·로드맵 정렬 먼저".
@@ -125,7 +131,3 @@
 - sol 워커 완주(1288 tests·PR #1702·정지 계약 준수) → 오케스트레이터 검수: 공유 코어 가산 무해(웹 tsc+첨부 23 그린)·project-shape 보정 스코프드·PHPicker selection-only라 권한 키 불요 판단 타당.
 - design-review 1차 PASS(High 2: picker 제시 레이스·iOS 낭독 무음) → **오케스트레이터 수리 065cb6a6**(onDismiss+폴백 이원화·draftAnnouncement+announce 배선, 레드 프루프 3/3) → **재판정 PASS(0·0)** → 머지. Medium 4·Nit 5·실기 미검증은 **#1703** 적립.
 - 이로써 UXUI 완성도 파도 8 goal(U-1~5·7·C-1·M-1+M-2) **전량 랜딩**. 남은 실기 확증=iOS 시뮬레이터 세션(Slow Animations 오독 주의 — 재판정 주석).
-## 2026-08-23 (Fable) · ★T-9 폐곡선 — #1701 머지(track/engine=462efd67)·#1678 close
-- grok 워커 커밋(13파일·+806) 인수 검수: 유닛 283·red-proof 통합 3분기·생성기 멱등·docs 493 facts 전부 그린 → PR #1701 CI 그린 → 머지. ENGINE_HANDOFF **A-29 info**(UXUI 소비 작업 없음 — 클라 verbatim 불변). ADR-0167 집행 완결, D8 P1 원천 수리 폐곡선.
-- 운영 사고 복구: 호스트 ENOSPC 여파로 Colima VM containerd 블롭 I/O 에러(컨테이너 좀비化) → VM 재시작으로 완전 복구(pgdata 무손실·api 브리지 재기동). **교훈: 호스트 디스크 고갈은 VM 스파스 디스크를 통해 컨테이너층까지 전파된다 — 대형 빌드 전 df 확인.**
-- ADR-0169(로컬 보관소)·ADR-0170(언퍼얼) Proposed 기안·티켓(#1696/#1698) 링크. M-2 sol 워커 계속 가동 중.
