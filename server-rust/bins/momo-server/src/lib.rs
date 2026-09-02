@@ -39,7 +39,10 @@ pub mod realtime_advert;
 pub mod routes;
 pub mod work_host_auth;
 
-pub use realtime_advert::{DriveLocalBase, RealtimeAdvert, RealtimeAdvertError};
+pub use realtime_advert::{
+    host_is_loopback_or_lan, requires_device_link_sas, DriveLocalBase, RealtimeAdvert,
+    RealtimeAdvertError,
+};
 
 use std::sync::Arc;
 
@@ -813,6 +816,19 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/realtime-token",
             post(routes::realtime::issue_token),
         )
+        // ADR-0180 — human issuer only. The phone redeem half is public (below).
+        .route(
+            "/v1/auth/device-link",
+            post(routes::device_link::issue),
+        )
+        .route(
+            "/v1/auth/device-link/{id}",
+            get(routes::device_link::status),
+        )
+        .route(
+            "/v1/auth/device-link/{id}/confirm-sas",
+            post(routes::device_link::confirm_sas),
+        )
         // ADR-0149 (SRV-T2) — 「작성 중」. The first surface on this server whose
         // handler does not go through Postgres, and the pair is what makes that
         // safe: the grant route does the ONE membership read (under RLS, with
@@ -1291,6 +1307,15 @@ pub fn build_app(state: AppState) -> Router {
             post(routes::claim::claim).route_layer(axum::middleware::from_fn_with_state(
                 state.clone(),
                 rate_limit::per_ip_claim,
+            )),
+        )
+        // ADR-0180: public for the same construction reason as `/v1/join` and
+        // `/v1/claim`. The phone holds a one-time voucher and no bearer.
+        .route(
+            "/v1/auth/device-link/redeem",
+            post(routes::device_link::redeem).route_layer(axum::middleware::from_fn_with_state(
+                state.clone(),
+                rate_limit::per_ip_device_link,
             )),
         )
         .merge(protected);

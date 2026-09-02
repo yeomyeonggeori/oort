@@ -1,0 +1,28 @@
+{
+  "version": "v0.1.4",
+  "released_at": "2026-09-02",
+  "images": {
+    "app": {
+      "ref": "ghcr.io/yeomyeonggeori/oort",
+      "digest_list": "sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "digests": {
+        "amd64": "sha256:8cfd514eb4b0b7c7b7e1a9bf6386b7257716fef80a15dbcf65b53a9c531bb331",
+        "arm64": "sha256:97ce6e8919bb45d8007cb13dfdbbee9f3f07ef0dd943ec7d5474fc39d7b26d84"
+      }
+    },
+    "postgres": {
+      "ref": "ghcr.io/yeomyeonggeori/oort-postgres",
+      "digest_list": "sha256:563ee793c3e8fb9417dfc8bd6b72fdfa70680d48de81c3633d75b820f507e3b5",
+      "digests": {
+        "amd64": "sha256:3b8af712b819cde1eb5155ecafa44d8c60f78af33e4f4bfa7b9c85ae982398fe",
+        "arm64": "sha256:2e402ce1356f65c347220211bf01fc70904500ba7ffbc729cac25e11eb3e70d3"
+      }
+    }
+  },
+  "attestation": {
+    "verify_cmd": "gh attestation verify \"oci://ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f\" --repo yeomyeonggeori/oort --predicate-type https://slsa.dev/provenance/v1"
+  },
+  "sources": {
+    "release_url": "https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.4"
+  }
+}

@@ -11,6 +11,9 @@ Desktop Tauri next (`0.1.0-next.N`) is a different train —
 
 ## [Unreleased]
 
+### Added
+- Committed release manifest `releases/latest.json` with generate/drift scripts so self-host docs read digest pins from the file instead of prose (#1954).
+
 ## [0.1.4] - 2026-09-02
 
 GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.4>. Tag target: `main=e39e9427`. Multi-arch (linux/amd64 + linux/arm64) manifest lists, SLSA v1 provenance verified. Source notes: [`docs/planning/research/2026-09-02-v0-1-4-release-notes.md`](docs/planning/research/2026-09-02-v0-1-4-release-notes.md).

@@ -12,6 +12,8 @@
 //! Derivation lives in **one** function ([`derive_same_origin_ws_url`]) so the
 //! three advertisement sites cannot drift.
 
+use std::net::IpAddr;
+
 use axum::http::header;
 use axum::http::HeaderMap;
 
@@ -74,6 +76,13 @@ impl From<&str> for RealtimeAdvert {
 }
 
 impl RealtimeAdvert {
+    /// ADR-0167 public-origin mode: the process was booted with
+    /// `MOMO_CENTRIFUGO_WS_URL=same-origin` (what `--public-origin` writes).
+    /// No new env var — this is the existing advert enum.
+    pub fn is_public_origin_mode(&self) -> bool {
+        matches!(self, Self::SameOrigin)
+    }
+
     /// Parse `MOMO_CENTRIFUGO_WS_URL` (already trimmed-empty-as-absent by the
     /// env helper). `same-origin` is case-insensitive; absolute ws/wss URLs are
     /// kept verbatim after trim; everything else is the loopback fallback.
@@ -270,6 +279,47 @@ pub fn derive_same_origin_http_base(
         return Err(RealtimeAdvertError::InvalidScheme);
     }
     Ok(format!("{scheme}://{host}"))
+}
+
+/// Hostname of a `Host` header, port stripped. IPv6 `[::1]:port` is handled.
+pub fn hostname_of_host_header(host: &str) -> &str {
+    let host = host.trim();
+    if let Some(rest) = host.strip_prefix('[') {
+        if let Some(end) = rest.find(']') {
+            return &rest[..end];
+        }
+    }
+    if let Some((name, port)) = host.rsplit_once(':') {
+        if !port.is_empty() && port.bytes().all(|byte| byte.is_ascii_digit()) {
+            return name;
+        }
+    }
+    host
+}
+
+/// Loopback / RFC1918 / link-local — SAS is omitted here (ADR-0180 D4).
+pub fn host_is_loopback_or_lan(host: &str) -> bool {
+    let hostname = hostname_of_host_header(host);
+    if hostname.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    match hostname.parse::<IpAddr>() {
+        Ok(IpAddr::V4(addr)) => addr.is_loopback() || addr.is_private() || addr.is_link_local(),
+        Ok(IpAddr::V6(addr)) => {
+            addr.is_loopback() || addr.is_unique_local() || addr.is_unicast_link_local()
+        }
+        Err(_) => false,
+    }
+}
+
+/// SAS is required only in public-origin mode against a non-loopback, non-LAN
+/// Host. Fixed (split-domain) advert is not this mode — see NOTES.
+pub fn requires_device_link_sas(advert: &RealtimeAdvert, host: Option<&str>) -> bool {
+    advert.is_public_origin_mode()
+        && host
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .is_some_and(|host| !host_is_loopback_or_lan(host))
 }
 
 fn host_is_safe(host: &str) -> bool {
@@ -691,5 +741,22 @@ mod tests {
                 .unwrap(),
             google
         );
+    }
+
+    #[test]
+    fn device_link_sas_only_in_public_origin_against_a_public_host() {
+        let same = RealtimeAdvert::SameOrigin;
+        let fixed = RealtimeAdvert::Fixed("ws://127.0.0.1:8000/connection/websocket".into());
+        assert!(requires_device_link_sas(&same, Some("app.example.com")));
+        assert!(requires_device_link_sas(
+            &same,
+            Some("cursor.tailb1aad3.ts.net:8443")
+        ));
+        assert!(!requires_device_link_sas(&same, Some("127.0.0.1:1234")));
+        assert!(!requires_device_link_sas(&same, Some("localhost:8088")));
+        assert!(!requires_device_link_sas(&same, Some("192.168.1.20:8088")));
+        assert!(!requires_device_link_sas(&same, Some("10.0.0.4")));
+        assert!(!requires_device_link_sas(&fixed, Some("app.example.com")));
+        assert!(!requires_device_link_sas(&same, None));
     }
 }
