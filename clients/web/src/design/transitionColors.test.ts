@@ -40,13 +40,17 @@ const CORE_PROPERTIES = [
 ] as const;
 
 /** `@import "tailwindcss"` 를 디스크에서 실제로 읽어 준다. */
-async function loadStylesheet() {
-  const path = require_.resolve("tailwindcss/index.css");
-  return {
-    path,
-    base: dirname(path),
-    content: readFileSync(path, "utf8"),
-  };
+async function loadStylesheet(id: string, base: string) {
+  if (id === "tailwindcss") {
+    const path = require_.resolve("tailwindcss/index.css");
+    return {
+      path,
+      base: dirname(path),
+      content: readFileSync(path, "utf8"),
+    };
+  }
+  const path = id.startsWith(".") ? `${base}/${id.replace(/^\.\//, "")}` : id;
+  return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
 async function buildCss(source: string, candidates: string[]): Promise<string> {
@@ -122,6 +126,9 @@ describe("#1210 D3 — transition-colors", () => {
       }
     }
     expect(withRing).toBeGreaterThan(inPrimitives);
-    expect(inPrimitives).toBe(3);
+    // button 은 press 가 전이 목록을 진다(ADR-0179 D5). 남은 프리미티브는
+    // input·select 둘. 이 숫자가 둘로 준 것이 유틸리티 층 수리를 약화하지는
+    // 않는다 — withRing 이 여전히 더 크다.
+    expect(inPrimitives).toBe(2);
   });
 });
