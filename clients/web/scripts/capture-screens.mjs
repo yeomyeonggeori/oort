@@ -8524,7 +8524,11 @@ async function captureMarkUnreadScenes(browser, scheme) {
     const req = route.request();
     if (req.method() !== "PUT") return route.fallback();
     const body = req.postDataJSON() || {};
-    if (body.read_intent === "explicit_open") cleared = true;
+    if (body.read_intent === "explicit_open") {
+      cleared = true;
+    } else if (typeof body.mark_unread_before_seq === "number") {
+      cleared = false;
+    }
     const general = markUnreadReadStates(cleared).find(
       (row) => row.channel_id === GENERAL_ID
     );
@@ -8543,25 +8547,34 @@ async function captureMarkUnreadScenes(browser, scheme) {
       document.querySelector('[data-testid="timeline-virtuoso"]');
     if (scroller) scroller.scrollTop = 0;
   })()`);
+  const marked = page.locator(
+    `[data-testid="timeline-message"][data-seq="${MARK_UNREAD_SEQ}"]`
+  );
+  await marked.waitFor({ state: "visible" });
+  await marked.evaluate((row) => {
+    row.scrollIntoView({ block: "center" });
+  });
+  await marked.hover();
+  await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
+  await page.getByTestId("message-actions-trigger").click();
+  await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  const markItem = page.getByTestId("menu-mark-unread");
+  if ((await markItem.count()) !== 1) {
+    throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
+  }
+  await markItem.click();
   const proof = await page.waitForFunction(`(() => {
     const seq = ${MARK_UNREAD_SEQ};
-    const scroller =
-      document.querySelector("[data-virtuoso-scroller]") ||
-      document.querySelector('[data-testid="timeline-virtuoso"]');
     const row = document.querySelector(
       '[data-testid="timeline-message"][data-seq="' + seq + '"]'
     );
     const divider = document.querySelector('[data-testid="unread-divider"]');
-    if (!scroller || !row || !divider) {
-      if (scroller && !row) scroller.scrollTop = Math.max(0, scroller.scrollTop - 40);
-      return null;
-    }
-    row.scrollIntoView({ block: "center" });
+    if (!row || !divider) return null;
     const d = divider.getBoundingClientRect();
     const r = row.getBoundingClientRect();
     if (d.height <= 0 || r.height <= 0) return null;
     if (d.top < 0 || r.bottom > window.innerHeight) return null;
-    if (Math.abs(d.bottom - r.top) > 4) return null;
+    if (d.bottom - r.top > 8 || r.top - d.bottom > 24) return null;
     const pill = document.querySelector('[data-testid="jump-unread"]');
     const pillRect = pill ? pill.getBoundingClientRect() : null;
     const pillVisible = Boolean(
@@ -8571,13 +8584,10 @@ async function captureMarkUnreadScenes(browser, scheme) {
       dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
       pillVisible,
       pillText: pillVisible ? (pill.textContent || "").replace(/\\s+/g, " ").trim() : "",
-      dividerTop: Math.round(d.top),
+      dividerBottom: Math.round(d.bottom),
       rowTop: Math.round(r.top),
     };
   })()`);
-  if (!proof) {
-    throw new Error(`마크 캡처 ${scheme}: 구분선이 seq ${MARK_UNREAD_SEQ} 위에 서지 않는다`);
-  }
   const state = await proof.jsonValue();
   if (!state || !state.dividerText.includes("새 메시지")) {
     throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
