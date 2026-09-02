@@ -8,25 +8,47 @@ import type {RosterMember} from '@momo/core/lib/api';
 // It is not there. `@momo/core/features/routing/mentionTargets` holds the
 // SEND-time half of mentions — `mentionedHandles`, `mentionedAgents`,
 // `mentionRoutingTarget` — which answers "who does this finished text call?".
-// The COMPOSE-time half, "what is the person typing right now", lives in
-// `clients/web/src/features/chat/Composer.tsx` as two exported functions, and a
-// client may not import another client (`__tests__/projectShape.test.ts`
-// enforces it).
+// The COMPOSE-time half, "what is the person typing right now", lives in the
+// web client, and a client may not import another client
+// (`__tests__/projectShape.test.ts` enforces it).
 //
-// So these are ported, character for character, rather than re-invented — the
-// rules are subtle enough that a fresh implementation would differ: a mid-word
-// `@` is not a mention (`a@b` is an email, not a call), a space closes the
-// token, and matching is over handle AND display name while the ACCEPTED value
-// is always the handle.
+// These rules started as a character-for-character port of that web code: a
+// mid-word `@` is not a mention (`a@b` is an email, not a call), a space closes
+// the token, and matching is over handle AND display name while the ACCEPTED
+// value is always the handle.
+//
+// ## The two have SINCE DIVERGED — this file is no longer a copy (#1930 M-4)
+//
+// The web half moved out of `Composer.tsx` into one parser for three triggers
+// (`clients/web/src/features/chat/composerAutocomplete.ts`,
+// `composerTriggerQueryAt`), and that move changed behaviour this file does not
+// have. Measured by design-review #1930:
+//
+//   · **After a failed anchor** the web parser keeps scanning backwards (an `@`
+//     that is not at a word start is ordinary body text, so `@hermes:` keeps
+//     the open mention query). This file stops at `lastIndexOf('@')` and
+//     returns null.
+//   · **Inside code formatting** (`` `…` `` and ``` fences) the web parser opens
+//     nothing. This file has no such suppression — the phone has no format tray
+//     (#1902) yet, so it never had the question.
+//   · `MENTION_LIMIT` below is the web's old name. The web constant is now
+//     `COMPOSER_CANDIDATE_LIMIT` and it is shared by `@`, `#` and `:`; the
+//     phone has neither `#` nor `:`.
+//
+// Nothing here is a bug on this surface, and #1930 deliberately did NOT touch
+// the phone. What the comment must not do is keep claiming the two are the same
+// file: the next person reading "ported, character for character" would fix one
+// side and believe both moved.
 //
 // **This is a core gap and it is reported as one in the PR.** Both halves of
 // mention handling are pure string work over `RosterMember`, neither knows what
 // a DOM or a TextInput is, and the second half being in a client is the reason
 // it had to be copied to reach a third one. `momo-core` is frozen for this
-// batch, so extracting it is a follow-up rather than a drive-by.
+// batch, so extracting it is a follow-up rather than a drive-by — and that
+// extraction is now the only thing that can make the two agree again.
 // =============================================================================
 
-/** How many candidates the list offers. The web value, so the two agree. */
+/** How many candidates the list offers. The web `COMPOSER_CANDIDATE_LIMIT`. */
 const MENTION_LIMIT = 6;
 
 export interface MentionQuery {

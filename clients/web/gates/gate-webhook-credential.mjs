@@ -70,6 +70,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.WEBHOOK_GATE_PORT || 5187);
@@ -269,6 +270,7 @@ async function heapHasSecret(cdp) {
 }
 
 async function signIn(page) {
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("gate-only-not-a-credential");
   await page.getByTestId("login-submit").click();

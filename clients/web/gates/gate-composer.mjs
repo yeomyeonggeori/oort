@@ -56,6 +56,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -590,6 +591,7 @@ function rowLocator(page, messageId) {
 
 async function login(page) {
   await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("composer@example.test");
   await page.getByTestId("login-password").fill("gate-only");
   await page.getByTestId("login-submit").click();

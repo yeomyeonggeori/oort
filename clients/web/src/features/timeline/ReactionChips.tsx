@@ -1,6 +1,12 @@
+import { useMemo } from "react";
 import { Smile } from "lucide-react";
 import { cn } from "@/design/lib/cn";
+import type { Directory } from "@momo/core/features/workspace/directory";
 import type { ReactionChip } from "@momo/core/features/timeline/reactions";
+import {
+  formatReactionNames,
+  reactionChipAccessibleName,
+} from "@momo/core/features/timeline/reactionNames";
 
 // =============================================================================
 // Reaction chips (B11) — the row of 👍 3 under a message.
@@ -17,11 +23,15 @@ import type { ReactionChip } from "@momo/core/features/timeline/reactions";
 
 export function ReactionChips({
   chips,
+  directory,
+  myMemberId,
   onToggle,
   onOpenPicker,
   disabled,
 }: {
   chips: ReactionChip[];
+  directory: Directory;
+  myMemberId: string | undefined;
   onToggle: (emoji: string) => void;
   /** Absent on a row that may not be reacted to (a tombstone). */
   onOpenPicker?: (opener: HTMLButtonElement) => void;
@@ -34,38 +44,14 @@ export function ReactionChips({
       data-testid="reaction-chips"
     >
       {chips.map((chip) => (
-        <button
+        <ReactionChipButton
           key={chip.emoji}
-          type="button"
+          chip={chip}
+          directory={directory}
+          myMemberId={myMemberId}
           disabled={disabled}
-          data-testid="reaction-chip"
-          // 이 행의 로빙 그룹 구성원 (rowFocus.ts). 반응이 다섯 개 달린 메시지가
-          // 키보드로 지나가는 데 다섯 번의 Tab을 요구하지 않게 하는 표시다.
-          data-row-action=""
-          data-emoji={chip.emoji}
-          data-mine={chip.mine ? "true" : "false"}
-          aria-pressed={chip.mine}
-          // The accessible name says what the click will do, because the glyph
-          // and the number alone do not: a screen reader user cannot see the
-          // emphasis that tells a sighted user which way the toggle goes.
-          aria-label={
-            chip.mine
-              ? `${chip.emoji} 반응 ${chip.count}개, 내 반응 취소`
-              : `${chip.emoji} 반응 ${chip.count}개, 나도 반응하기`
-          }
-          onClick={() => onToggle(chip.emoji)}
-          className={cn(
-            "tap-target flex items-center gap-1 rounded-sm border px-2 py-px text-meta transition-colors focus-visible:focus-ring disabled:opacity-50",
-            chip.mine
-              ? "border-accent bg-accent-soft text-ink"
-              : "border-line bg-surface-raised text-ink-muted hover:bg-surface-hover"
-          )}
-        >
-          <span aria-hidden="true">{chip.emoji}</span>
-          <span aria-hidden="true" data-numeric>
-            {chip.count}
-          </span>
-        </button>
+          onToggle={onToggle}
+        />
       ))}
       {onOpenPicker && (
         // The add button lives at the end of an existing row only. On a message
@@ -86,5 +72,63 @@ export function ReactionChips({
         </button>
       )}
     </div>
+  );
+}
+
+function ReactionChipButton({
+  chip,
+  directory,
+  myMemberId,
+  disabled,
+  onToggle,
+}: {
+  chip: ReactionChip;
+  directory: Directory;
+  myMemberId: string | undefined;
+  disabled?: boolean;
+  onToggle: (emoji: string) => void;
+}) {
+  // chipsFor reuses the map's memberIds array, so this identity is stable
+  // across parent renders that did not change who reacted.
+  const names = useMemo(
+    () => formatReactionNames(chip.memberIds ?? [], directory, myMemberId),
+    [chip.memberIds, directory, myMemberId]
+  );
+  const accessibleName = useMemo(
+    () =>
+      reactionChipAccessibleName(chip.emoji, chip.count, names, chip.mine),
+    [chip.emoji, chip.count, names, chip.mine]
+  );
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      data-testid="reaction-chip"
+      // 이 행의 로빙 그룹 구성원 (rowFocus.ts). 반응이 다섯 개 달린 메시지가
+      // 키보드로 지나가는 데 다섯 번의 Tab을 요구하지 않게 하는 표시다.
+      data-row-action=""
+      data-emoji={chip.emoji}
+      data-mine={chip.mine ? "true" : "false"}
+      aria-pressed={chip.mine}
+      // Native `title` is the house tooltip (FeedRow, huddle Live chip,
+      // toolbar react). @radix-ui/react-tooltip is not a dependency; a
+      // chip-only primitive would be the first. The attribute is present on
+      // hover and keyboard focus; the screen reader reads aria-label.
+      title={names || undefined}
+      aria-label={accessibleName}
+      onClick={() => onToggle(chip.emoji)}
+      className={cn(
+        "tap-target flex items-center gap-1 rounded-sm border px-2 py-px text-meta transition-colors focus-visible:focus-ring disabled:opacity-50",
+        chip.mine
+          ? "border-accent bg-accent-soft text-ink"
+          : "border-line bg-surface-raised text-ink-muted hover:bg-surface-hover"
+      )}
+    >
+      <span aria-hidden="true">{chip.emoji}</span>
+      <span aria-hidden="true" data-numeric>
+        {chip.count}
+      </span>
+    </button>
   );
 }

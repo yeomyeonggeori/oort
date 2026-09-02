@@ -253,6 +253,48 @@ describe("notifyDecision: suppression", () => {
       notifyDecision(event(), context({ isAnnounced: () => true }))
     ).toEqual({ show: false, skip: "duplicate" });
   });
+
+  it("does not fire a mention this device turned off", () => {
+    expect(
+      notifyDecision(
+        event(),
+        context({ kindEnabled: (kind) => kind !== "mention" })
+      )
+    ).toEqual({ show: false, skip: "kind-disabled" });
+  });
+
+  it("does not fire an approval this device turned off", () => {
+    expect(
+      notifyDecision(
+        event({
+          type: "approval_request",
+          author_member_id: AGENT,
+          props: { approval_id: "019F8338-025E-7873-93A3-C1FBA9149185" },
+        }),
+        context({ kindEnabled: (kind) => kind !== "approval" })
+      )
+    ).toEqual({ show: false, skip: "kind-disabled" });
+  });
+
+  it("still fires the other kind when one is off", () => {
+    const mention = notifyDecision(
+      event(),
+      context({ kindEnabled: (kind) => kind === "mention" })
+    );
+    expect(mention.show).toBe(true);
+    if (mention.show) expect(mention.notification.kind).toBe("mention");
+
+    const approval = notifyDecision(
+      event({
+        type: "approval_request",
+        author_member_id: AGENT,
+        props: { approval_id: "019F8338-025E-7873-93A3-C1FBA9149185" },
+      }),
+      context({ kindEnabled: (kind) => kind === "approval" })
+    );
+    expect(approval.show).toBe(true);
+    if (approval.show) expect(approval.notification.kind).toBe("approval");
+  });
 });
 
 describe("notifyDecision: approval copy", () => {

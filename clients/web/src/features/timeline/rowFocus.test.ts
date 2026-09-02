@@ -4,6 +4,9 @@ import { act, createElement, useRef } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+  focusRowStation,
+  focusRowStationBySeq,
+  scheduleFocusRowStationBySeq,
   handoffRowFocusToPreferred,
   isKeyboardRowFocus,
   nextRovingIndex,
@@ -301,5 +304,57 @@ describe("useRowRovingFocus DOM lifecycle", () => {
     );
     expect(primary.tabIndex).toBe(0);
     expect(secondary.tabIndex).toBe(-1);
+  });
+});
+
+describe("focusRowStation", () => {
+  it("actionable rest 정거장인 행 자신에 포커스를 둔다", () => {
+    const row = document.createElement("div");
+    row.dataset.actionable = "true";
+    row.dataset.testid = "timeline-message";
+    row.dataset.seq = "12";
+    const primary = action("primary");
+    row.append(primary);
+    document.body.append(row);
+
+    focusRowStation(row);
+
+    expect(document.activeElement).toBe(row);
+    expect(row.tabIndex).toBe(0);
+    expect(primary.tabIndex).toBe(-1);
+  });
+
+  it("data-seq로 착지 행을 고른다", () => {
+    const row = document.createElement("div");
+    row.dataset.testid = "timeline-message";
+    row.dataset.seq = "41";
+    document.body.append(row);
+
+    expect(focusRowStationBySeq(41)).toBe(true);
+    expect(document.activeElement).toBe(row);
+    expect(focusRowStationBySeq(99)).toBe(false);
+  });
+
+  it("아직 없는 행은 기한 안에 재시도한다", () => {
+    const times: number[] = [];
+    let now = 0;
+    scheduleFocusRowStationBySeq(7, {
+      now: () => now,
+      untilMs: 100,
+      schedule: (fn, ms) => {
+        times.push(ms);
+        now += ms;
+        fn();
+        return 0;
+      },
+    });
+    expect(times.length).toBeGreaterThan(0);
+
+    const row = document.createElement("div");
+    row.dataset.testid = "timeline-message";
+    row.dataset.seq = "8";
+    document.body.append(row);
+    scheduleFocusRowStationBySeq(8);
+    expect(document.activeElement).toBe(row);
   });
 });

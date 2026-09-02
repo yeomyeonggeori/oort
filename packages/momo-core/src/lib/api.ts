@@ -33,6 +33,12 @@ import {
   type WorkspaceUnfurlSettings,
 } from "../features/timeline/unfurl";
 import {
+  presenceWriteBody,
+  type PresenceSnapshot,
+  type PresenceWrite,
+} from "../features/presence/customStatus";
+// PresenceSnapshot / PresenceWrite are the GET/PUT shapes of the same surface.
+import {
   arrayField,
   bool,
   num,
@@ -42,6 +48,8 @@ import {
   stringArrayField,
   WireShapeError,
 } from "./wire";
+
+export type { PresenceSnapshot, PresenceWrite } from "../features/presence/customStatus";
 
 export interface Member {
   id: string;
@@ -126,6 +134,14 @@ export interface RosterMember {
    * default. Consumers go through `effectivePresence` rather than touching this.
    */
   presenceStatus?: PresenceStatus;
+  /**
+   * Custom status (ADR-0176), human only. Orthogonal to `presenceStatus`.
+   * ABSENT means there is nothing to show (unset, expired on the server, or
+   * an older projection). Consumers go through `visibleCustomStatus`.
+   */
+  statusEmoji?: string;
+  statusText?: string;
+  statusExpiresAtMs?: number;
   createdAtMs: number;
   updatedAtMs: number;
 }
@@ -160,6 +176,25 @@ function sanitizeRosterMember(value: unknown): unknown {
   // than surfaced as a value the effective-dot logic would then have to guess at.
   if ("presenceStatus" in row && !isPresenceStatus(row.presenceStatus)) {
     const { presenceStatus: _unknown, ...rest } = row;
+    row = rest;
+  }
+  // Custom-status columns follow the same drop-the-column rule: a bad value
+  // must not delete the member. Empty strings stay and `visibleCustomStatus`
+  // treats them as absence.
+  if ("statusEmoji" in row && typeof row.statusEmoji !== "string") {
+    const { statusEmoji: _bad, ...rest } = row;
+    row = rest;
+  }
+  if ("statusText" in row && typeof row.statusText !== "string") {
+    const { statusText: _bad, ...rest } = row;
+    row = rest;
+  }
+  if (
+    "statusExpiresAtMs" in row &&
+    (typeof row.statusExpiresAtMs !== "number" ||
+      !Number.isFinite(row.statusExpiresAtMs))
+  ) {
+    const { statusExpiresAtMs: _bad, ...rest } = row;
     row = rest;
   }
   return row;
@@ -209,6 +244,27 @@ export interface ReadState {
   latestSeq: number;
   unreadCount: number;
   mentionCount: number;
+  /**
+   * ADR-0178 D2. Inclusive seq from which this channel is unread. Wire name
+   * `marked_unread_before_seq` (always present on a current server, JSON
+   * `null` when unmarked). Missing on an older server is treated as unmarked.
+   * Do not compose this field here — `effectiveUnreadStartSeq` in
+   * `features/readState/model.ts` is the only composition point.
+   */
+  markedUnreadBeforeSeq: number | null;
+}
+
+/** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
+export type ReadIntent = "explicit_open" | "background";
+
+export interface UpdateReadStateOptions {
+  /** D5. Set the mark-unread signal to this existing channel seq. */
+  markUnreadBeforeSeq?: number;
+  /**
+   * D6. Send only `"explicit_open"`. Do not send `"background"` — omitting
+   * the field is the wire form of background.
+   */
+  readIntent?: "explicit_open";
 }
 
 /** Thread rollup embedded in a message page (snake_case on the wire). */
@@ -699,19 +755,31 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return responseRecord(res.json<unknown>()) as T;
 }
 
+/** Login / join / PATCH members/me `member` object. */
+export function memberFromWire(value: unknown): Member {
+  const kind = str(value, "kind");
+  const id = str(value, "id");
+  const workspaceId = str(value, "workspaceId");
+  const displayName = str(value, "displayName");
+  const handle = str(value, "handle");
+  if (
+    id === undefined ||
+    workspaceId === undefined ||
+    (kind !== "human" && kind !== "agent") ||
+    displayName === undefined ||
+    handle === undefined
+  ) {
+    throw new WireShapeError();
+  }
+  return { id, workspaceId, kind, displayName, handle };
+}
+
 function loginResponseFromWire(value: unknown): LoginResponse {
   const source = responseRecord(value);
-  const member = record(source.member);
   if (
-    member === null ||
     typeof source.accessToken !== "string" ||
     typeof source.refreshToken !== "string" ||
-    typeof source.realtimeWebSocketUrl !== "string" ||
-    typeof member.id !== "string" ||
-    typeof member.workspaceId !== "string" ||
-    (member.kind !== "human" && member.kind !== "agent") ||
-    typeof member.displayName !== "string" ||
-    typeof member.handle !== "string"
+    typeof source.realtimeWebSocketUrl !== "string"
   ) {
     throw new WireShapeError();
   }
@@ -719,13 +787,7 @@ function loginResponseFromWire(value: unknown): LoginResponse {
     accessToken: source.accessToken,
     refreshToken: source.refreshToken,
     realtimeWebSocketUrl: source.realtimeWebSocketUrl,
-    member: {
-      id: member.id,
-      workspaceId: member.workspaceId,
-      kind: member.kind,
-      displayName: member.displayName,
-      handle: member.handle,
-    },
+    member: memberFromWire(source.member),
   };
 }
 
@@ -1064,26 +1126,47 @@ export function effectivePresence(
   return available ? "online" : "offline";
 }
 
-/** Read the caller's own declared status (auto/away/dnd). */
-export async function fetchPresenceStatus(
-  workspaceId: string
-): Promise<PresenceStatus> {
-  const res = await request<{ status: string }>(
-    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`
-  );
-  return isPresenceStatus(res.status) ? res.status : "auto";
+function parsePresenceSnapshot(
+  value: unknown,
+  fallbackStatus: PresenceStatus
+): PresenceSnapshot {
+  const source = record(value) ?? {};
+  const status = isPresenceStatus(source.status) ? source.status : fallbackStatus;
+  const snapshot: PresenceSnapshot = { status };
+  const emoji = str(source, "statusEmoji");
+  const text = str(source, "statusText");
+  const expires = num(source, "statusExpiresAtMs");
+  if (emoji !== undefined && emoji.trim() !== "") snapshot.statusEmoji = emoji;
+  if (text !== undefined && text.trim() !== "") snapshot.statusText = text;
+  if (expires !== undefined) snapshot.statusExpiresAtMs = expires;
+  return snapshot;
 }
 
-/** Set the caller's own declared status. Broadcasts to co-members server-side. */
+/** Read the caller's own declared status (auto/away/dnd) plus custom fields. */
+export async function fetchPresenceStatus(
+  workspaceId: string
+): Promise<PresenceSnapshot> {
+  const res = await request<unknown>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`
+  );
+  return parsePresenceSnapshot(res, "auto");
+}
+
+/**
+ * Set the caller's own declared status and optional custom status.
+ * Untouched custom keys must be omitted so a declared-status write cannot
+ * clear emoji/text/expiry. JSON null clears a key. Broadcasts on the existing
+ * `type: presence` rail.
+ */
 export async function setPresenceStatus(
   workspaceId: string,
-  status: PresenceStatus
-): Promise<PresenceStatus> {
-  const res = await request<{ status: string }>(
+  write: PresenceWrite
+): Promise<PresenceSnapshot> {
+  const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId.toLowerCase())}/presence`,
-    { method: "PUT", body: JSON.stringify({ status }) }
+    { method: "PUT", body: JSON.stringify(presenceWriteBody(write)) }
   );
-  return isPresenceStatus(res.status) ? res.status : status;
+  return parsePresenceSnapshot(res, write.status);
 }
 
 // ---- 에이전트 만들기 · 채널 배치 -------------------------------------------
@@ -1523,6 +1606,18 @@ interface WireReadState {
   latest_seq: number;
   unread_count: number;
   mention_count: number;
+  marked_unread_before_seq?: number | null;
+}
+
+function markedUnreadBeforeSeqFromWire(
+  wire: WireReadState
+): number | null {
+  const value = wire.marked_unread_before_seq;
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  return null;
 }
 
 function toReadState(wire: WireReadState): ReadState {
@@ -1532,6 +1627,7 @@ function toReadState(wire: WireReadState): ReadState {
     latestSeq: wire.latest_seq,
     unreadCount: wire.unread_count,
     mentionCount: wire.mention_count,
+    markedUnreadBeforeSeq: markedUnreadBeforeSeqFromWire(wire),
   };
 }
 
@@ -1556,17 +1652,30 @@ export async function fetchReadStates(
 /**
  * Advance the caller's read cursor. The server clamps to
  * `max(current, min(requested, latestSeq))`, so it can never regress.
+ *
+ * Optional `markUnreadBeforeSeq` / `readIntent` are ADR-0178 D5/D6.
+ * `readIntent` is sent only as `"explicit_open"`; omitting the field is
+ * background. Product code must go through `advertiseReadState` so the
+ * reason is classified in one place.
  */
 export async function updateReadState(
   workspaceId: string,
   channelId: string,
-  lastReadSeq: number
+  lastReadSeq: number,
+  options?: UpdateReadStateOptions
 ): Promise<ReadState> {
+  const body: Record<string, unknown> = { last_read_seq: lastReadSeq };
+  if (options?.markUnreadBeforeSeq !== undefined) {
+    body.mark_unread_before_seq = options.markUnreadBeforeSeq;
+  }
+  if (options?.readIntent === "explicit_open") {
+    body.read_intent = "explicit_open";
+  }
   const res = await request<WireReadState>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/read-state`,
-    { method: "PUT", body: JSON.stringify({ last_read_seq: lastReadSeq }) }
+    { method: "PUT", body: JSON.stringify(body) }
   );
   return toReadState(res);
 }
@@ -1780,14 +1889,27 @@ function searchHitFromWire(value: unknown): MessageSearchHit | null {
   };
 }
 
+/**
+ * `channelId` narrows the search to one channel (BT-3 / #1931). It is left OFF
+ * the query string when absent rather than sent empty: the server reads `?
+ * channel=` as the workspace scope too, but an absent parameter is what this
+ * request actually means, and a cursor minted under one scope is refused under
+ * the other — so the two spellings must not blur here.
+ */
 export async function searchMessages(
   workspaceId: string,
   query: string,
-  options: { limit?: number; cursor?: string; signal?: AbortSignal } = {}
+  options: {
+    limit?: number;
+    cursor?: string;
+    channelId?: string;
+    signal?: AbortSignal;
+  } = {}
 ): Promise<MessageSearchPage> {
   const params = new URLSearchParams({ q: query });
   params.set("limit", String(options.limit ?? SEARCH_LIMIT_DEFAULT));
   if (options.cursor !== undefined) params.set("cursor", options.cursor);
+  if (options.channelId !== undefined) params.set("channel", options.channelId);
   const res = await request<unknown>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
@@ -2172,6 +2294,25 @@ export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
   return res.blob();
 }
 
+// ---- 자기 표시 이름 (#1873 / BZ-4e) ----------------------------------------
+// PATCH /v1/workspaces/{ws}/members/me `{displayName}`
+// 사람 본인만. 정규화는 join과 같고, 위반은 400 `displayName is required`.
+// 응답 `{ member }` (login Member 형상). 핸들·역할·아바타는 이 표면의 것이 아니다.
+
+/** Change the signed-in human member's display name. */
+export async function changeMyDisplayName(
+  workspaceId: string,
+  displayName: string
+): Promise<Member> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+      { method: "PATCH", body: JSON.stringify({ displayName }) }
+    )
+  );
+  return memberFromWire(source.member);
+}
+
 // ---- 워크스페이스 나가기 (ADR-0161 D4) --------------------------------------
 // DELETE /v1/workspaces/{ws}/members/me — 마지막 owner 는 409(먼저 이전).
 // 채널 나가기(removeChannelMember)와는 다른 상위 개념이다.
@@ -2190,6 +2331,66 @@ export async function leaveWorkspace(
   const status = str(source, "status");
   if (memberId === undefined || status === undefined) throw new WireShapeError();
   return { memberId, status };
+}
+
+// ---- 워크스페이스 멤버 역할 (#1848 / ADR-0128 D2) ---------------------------
+// PATCH /v1/workspaces/{ws}/members/{member}/role
+// 채널 sibling(`…/channels/{ch}/members/{member}/role`)은 범위 밖.
+
+function isMembershipRole(value: string | undefined): value is MembershipRole {
+  return (
+    value === "owner" ||
+    value === "admin" ||
+    value === "member" ||
+    value === "guest"
+  );
+}
+
+/** `PATCH …/members/{id}/role` 200 body (openapi `MembershipRoleResponse`). */
+export interface WorkspaceMemberRoleChange {
+  memberId: string;
+  scope: "workspace";
+  role: MembershipRole;
+}
+
+export function workspaceMemberRoleFromWire(
+  value: unknown
+): WorkspaceMemberRoleChange {
+  const source = responseRecord(value);
+  const memberId = str(source, "memberId");
+  const scope = str(source, "scope");
+  const role = str(source, "role");
+  if (
+    memberId === undefined ||
+    scope !== "workspace" ||
+    !isMembershipRole(role)
+  ) {
+    throw new WireShapeError();
+  }
+  return {
+    memberId: memberId.toLowerCase(),
+    scope: "workspace",
+    role,
+  };
+}
+
+/**
+ * Change a workspace membership role. The server is the authority on hierarchy,
+ * last-owner, and self-management; this client only ships the requested label.
+ */
+export async function changeWorkspaceMemberRole(
+  workspaceId: string,
+  memberId: string,
+  role: MembershipRole
+): Promise<WorkspaceMemberRoleChange> {
+  return workspaceMemberRoleFromWire(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(
+        workspaceId
+      )}/members/${encodeURIComponent(memberId)}/role`,
+      { method: "PATCH", body: JSON.stringify({ role }) }
+    )
+  );
 }
 
 // ---- 휘발 신호: 「작성 중」 (ADR-0149) ---------------------------------------

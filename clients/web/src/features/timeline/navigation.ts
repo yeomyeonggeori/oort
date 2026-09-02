@@ -65,3 +65,159 @@ export function countNewerThan(
   }
   return count;
 }
+
+/**
+ * 상단 「새 메시지 N개」 점프의 N.
+ *
+ * ## (a) 상단 필 ≠ (b) 하단 필 — 같은 낱말, 다른 시각
+ *
+ * (a) 상단은 채널을 연 순간의 **동결 스냅샷**이다. 구분선이 쓰는 서버
+ * `unreadCount`(P7)와 같은 수다. 라이브로 아래에 붙는 신규는 세지 않는다.
+ * 그 수는 하단 필 (b)가 말한다. 한 숫자로 둘을 세면 구분선은 5개인데 상단이
+ * 「새 메시지 41개」라며 꼬리까지 끌어들이고, 낭독도 그 거짓을 읽는다
+ * (design-review M-1(a)).
+ *
+ * (b) 하단은 `countNewerThan`: 바닥을 떠난 뒤 꼬리에 붙은 **남의 말**. 기준선은
+ * 그 순간의 가장 새 seq이고, 내 확정 전송은 빼는 이유(M-3)가 여기 산다.
+ *
+ * 이 비대칭이 맞다. 위 필은 「그때 안 읽은 것」으로 구분선에 착지하고, 아래
+ * 필은 「지금 아래에 쌓인 것」으로 최신에 착지한다.
+ */
+export function countUnreadJump(
+  unreadCount: number | null | undefined
+): number {
+  if (unreadCount == null || unreadCount <= 0) return 0;
+  return unreadCount;
+}
+
+/** 안읽음 구분선이 지금 창의 어디에 있는가. */
+export type DividerViewportRelation = "above" | "in" | "below" | "absent";
+
+/** 스트림에서 안읽음 구분선의 데이터 첨자. 없으면 `null`. */
+export function unreadDividerIndexOf(
+  items: readonly { kind: string }[]
+): number | null {
+  const index = items.findIndex((item) => item.kind === "unread");
+  return index < 0 ? null : index;
+}
+
+/**
+ * virtuoso `rangeChanged` / `itemContent` 번호를 데이터 배열 첨자로.
+ *
+ * `firstItemIndex`가 앞에 얹힌 번호면 빼고, 이미 첨자면 그대로 둔다.
+ */
+export function dataIndexFromVirtuoso(
+  virtuosoIndex: number,
+  firstItemIndex: number
+): number {
+  return virtuosoIndex >= firstItemIndex
+    ? virtuosoIndex - firstItemIndex
+    : virtuosoIndex;
+}
+
+/**
+ * 구분선과 창의 관계. `dividerIndex`와 visible range는 **데이터 배열 첨자**.
+ */
+export function dividerViewportRelation(
+  dividerIndex: number | null,
+  visibleStart: number,
+  visibleEnd: number
+): DividerViewportRelation {
+  if (dividerIndex === null) return "absent";
+  if (dividerIndex < visibleStart) return "above";
+  if (dividerIndex > visibleEnd) return "below";
+  return "in";
+}
+
+/**
+ * IO가 실측한 관계와 렌더 range를 합친다.
+ *
+ * virtuoso `increaseViewportBy` 때문에 range만 보면 창 600px 밖의 구분선도
+ * 「안」이 된다. 구분선이 DOM에 있으면 IO가 이기고, 가상화로 빠져 있으면 range가
+ * 위/아래만 정직하게 안다.
+ */
+export function reconcileDividerRelation(input: {
+  dividerIndex: number | null;
+  visibleStart: number | null;
+  visibleEnd: number | null;
+  observed: DividerViewportRelation | null;
+}): DividerViewportRelation {
+  if (input.dividerIndex === null) return "absent";
+  if (
+    input.observed === "above" ||
+    input.observed === "in" ||
+    input.observed === "below"
+  ) {
+    return input.observed;
+  }
+  if (input.visibleStart === null || input.visibleEnd === null) return "absent";
+  return dividerViewportRelation(
+    input.dividerIndex,
+    input.visibleStart,
+    input.visibleEnd
+  );
+}
+
+/**
+ * 채널 epoch 안의 래치 (design-review H-1).
+ *
+ * 입력은 IntersectionObserver가 실측한 관계만. range 폴백 「in」은
+ * `increaseViewportBy` 오버스캔에 마운트된 구분선도 창 안으로 보고하므로
+ * 여기로 넣지 않는다. 상단 필 실행은 호출측에서 직접 무장한다. 채널을
+ * 갈아타면 epoch와 함께 풀린다.
+ */
+export function shouldLatchUnreadJump(
+  observed: DividerViewportRelation | null
+): boolean {
+  return observed === "in";
+}
+
+/** 구분선이 창 **위쪽 밖**에 있고 동결 N이 있으며, 이 epoch에서 아직 래치되지 않았을 때만 상단 필이 선다. */
+export function shouldShowJumpUnread(
+  relation: DividerViewportRelation,
+  unreadJumpCount: number,
+  latched = false
+): boolean {
+  if (latched) return false;
+  return relation === "above" && unreadJumpCount > 0;
+}
+
+/** 구분선 바로 아래 첫 메시지 seq. 상단 필 착지 정거장. */
+export function firstUnreadMessageSeq(
+  items: readonly { kind: string; message?: { seq: number } }[],
+  dividerIndex: number | null
+): number | null {
+  if (dividerIndex === null) return null;
+  for (let i = dividerIndex + 1; i < items.length; i++) {
+    const item = items[i];
+    if (item !== undefined && item.kind === "message" && item.message) {
+      return item.message.seq;
+    }
+  }
+  return null;
+}
+
+/** 점프 스크롤의 움직임. reduced-motion이면 즉시, 아니면 목적지가 보이게. */
+export function timelineScrollBehavior(
+  reducedMotion: boolean
+): "auto" | "smooth" {
+  return reducedMotion ? "auto" : "smooth";
+}
+
+/**
+ * IntersectionObserver 한 줄로 위/안/아래를 가른다.
+ *
+ * `isIntersecting`이면 창 안(한 픽셀이어도 소멸). 아니면 root와 비교해 위/아래.
+ */
+export function relationFromIntersection(entry: {
+  isIntersecting: boolean;
+  rootBounds: Pick<DOMRectReadOnly, "top" | "bottom"> | null;
+  boundingClientRect: Pick<DOMRectReadOnly, "top" | "bottom">;
+}): DividerViewportRelation | null {
+  if (entry.isIntersecting) return "in";
+  const root = entry.rootBounds;
+  if (root === null) return null;
+  if (entry.boundingClientRect.bottom <= root.top) return "above";
+  if (entry.boundingClientRect.top >= root.bottom) return "below";
+  return "in";
+}

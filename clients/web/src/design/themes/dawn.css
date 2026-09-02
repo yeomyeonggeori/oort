@@ -1,0 +1,9 @@
+/* Dawn / 새벽 — default amber binding (ADR-0174 D1).
+ * Values are the tokens.css :root pair; restated so the catalog is uniform
+ * and catalog.contrast.test.ts can treat every file as an input. */
+:root[data-accent="dawn"],
+[data-accent-swatch="dawn"] {
+  --accent: light-dark(#a54c08, #f0a850);
+  --accent-soft: light-dark(#f4e7d6, #33261a);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

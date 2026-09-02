@@ -54,6 +54,11 @@ const COPY = {
     description: "메시지에 넣을 이모지를 고르세요.",
     itemPrefix: "picker-insert",
   },
+  status: {
+    title: "상태 이모지",
+    description: "상태에 붙일 이모지를 고르세요.",
+    itemPrefix: "picker-status",
+  },
 } as const;
 
 export function EmojiPickerDialog({

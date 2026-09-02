@@ -23,11 +23,36 @@ export function shouldShowHoverToolbar(input: {
   rowFocused: boolean;
   overlayOpen: boolean;
   selecting: boolean;
+  /** Previous message row has an open InlineBanner; do not straddle its 「닫기」. */
+  neighborBannerOpen?: boolean;
 }): boolean {
   if (!input.pointerCanHover || input.editing) return false;
+  if (input.neighborBannerOpen) return false;
   if (input.overlayOpen) return true;
   if (input.selecting) return false;
   return input.rowHovered || input.rowFocused;
+}
+
+export function rectsIntersect(
+  a: Pick<DOMRect, "left" | "right" | "top" | "bottom">,
+  b: Pick<DOMRect, "left" | "right" | "top" | "bottom">
+): boolean {
+  return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+}
+
+/** Previous *message* row in this list has an open row banner. */
+export function previousMessageRowHasOpenBanner(row: Element): boolean {
+  const root =
+    row.closest("[data-testid='timeline-virtuoso']") ??
+    row.closest("[data-virtuoso-scroller]") ??
+    row.parentElement;
+  if (!root) return false;
+  const messages = Array.from(
+    root.querySelectorAll('[data-testid="timeline-message"]')
+  );
+  const index = messages.indexOf(row);
+  if (index <= 0) return false;
+  return messages[index - 1]?.getAttribute("data-row-banner") === "open";
 }
 
 /** Tab stops owned by a mounted toolbar. Red proof: this is 0 or 1, never more. */

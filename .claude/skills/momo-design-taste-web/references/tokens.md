@@ -21,7 +21,7 @@ half the muted text actually lands. Measured, then adjusted:
 | `--ok` (light) | `#1a7f37` | `#187533` | draft 4.31:1 on the sidebar. Now 4.91. |
 | `--warn` (light) | `#9a6700` | `#8a5c00` | draft 4.13:1 on the sidebar. Now 4.93. |
 | `--bg-raised` (light) | `#ffffff` | `#fffefb` | pure white is banned by SKILL §2. Warm paper white keeps the Dawn cast. |
-| `--border` | one token `#dcd8d0` | split `--line` + `--line-strong` | `#dcd8d0` is **1.32:1** on `--surface`. Fine as a separator, far below the 3:1 minimum for a control outline. Input and outline-button borders now use `--line-strong` (>= 3.0:1 everywhere). |
+| `--border` | one token `#dcd8d0` | split `--line` + `--line-strong` | The original `#dcd8d0` was **1.32:1** on `--surface`. Fine as a separator, far below the 3:1 minimum for a control outline. Input and outline-button borders now use `--line-strong` (>= 3.0:1 everywhere). Light `--line` is `#e4e0d8` since #1866 (1.22:1 on `--surface`). |
 | dark scheme | as drafted | as drafted | `#f0a850` amber and `#7fa0c4` slate-blue measured 8.94:1 and 6.63:1. No change needed. |
 
 Renames (semantic, so a component never reads like a raw color): `--bg` ->
@@ -39,11 +39,11 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--surface-raised` | `#fffefb` | `#201f24` | cards, dialogs, inputs |
 | `--surface-sidebar` | `#efece6` | `#1b1a1f` | sidebar, rail |
 | `--surface-hover` | `#e7e3db` | `#26252c` | row hover, pressed |
-| `--line` | `#dcd8d0` | `#34323b` | separators, card edges (decorative, no contrast floor) |
-| `--line-strong` | `#84817d` | `#6f6e73` | control outlines: input, outline button (>= 3:1) |
+| `--line` | `#e4e0d8` | `#34323b` | separators, card edges (decorative, no contrast floor). Lightened one step in #1866; dark untouched. |
+| `--line-strong` | `#84817d` | `#6f6e73` | control outlines: input, outline button, composer vessel (>= 3:1). Light is already **3.03:1** on `--surface-hover`; one RGB step drops to 2.99, so #1866 does not lighten it. |
 | `--ink` | `#24211c` | `#ececf1` | body text |
 | `--ink-muted` | `#6a655f` | `#9b98a3` | timestamps, meta, secondary |
-| `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon) |
+| `--accent` | `#a54c08` | `#f0a850` | **the** accent: 호박(amber horizon). Default binding (Dawn / 새벽). Curated alternatives rebind this pair from `src/design/themes/` via `data-accent` (ADR-0174). |
 | `--accent-soft` | `#f4e7d6` | `#33261a` | selected row (sidebar, work console, ⌘K) |
 | `--on-accent` | `#fffefb` | `#17161a` | label on a filled accent |
 | `--agent` | `#4a6785` | `#7fa0c4` | agent identity: predawn slate-blue |
@@ -58,6 +58,18 @@ palette for dark mode, so the two schemes cannot drift apart.
 | `--ok` | `#187533` | `#57ab5a` | connected, done |
 | `--warn` | `#8a5c00` | `#d4a72c` | connecting, stalled |
 | `--scrim` | `rgb(36 33 28 / 0.24)` | `rgb(9 8 11 / 0.62)` | the layer under a dialog or the ⌘K palette |
+
+S0 onboarding is the one surface that does **not** use `light-dark()`. It is a single look (deep space), declared once, measured in `tokens.contrast.test.ts` "onboarding S0 palette":
+
+| token | value | role |
+|---|---|---|
+| `--onboarding-space` | `#12111a` | S0 field |
+| `--onboarding-star` | `#4a4854` | 1px star dots |
+| `--onboarding-ink` | `#ececf1` | S0 copy |
+| `--onboarding-ink-faint` | `#9b98a3` | faint cloud bodies |
+| `--onboarding-accent` | `#f0a850` | mark + accent bodies |
+| `--onboarding-on-accent` | `#12111a` | label on the S0 filled choice |
+| `--onboarding-line` | `#8b8996` | S0 outline choice |
 
 `--scrim` is the one token that is not opaque, and the only one whose two
 schemes are not the same color at different lightness. It exists because a
@@ -317,7 +329,7 @@ Control heights are a separate axis from spacing: `h-control-sm` 28px,
 
 Panes are a third axis. A secondary column is wider than any rhythm step, so it
 gets a **name** rather than an off-grid number, and `w-[320px]` still does not
-compile: `w-pane-sm` 192px (settings section nav, mention and dropdown lists),
+compile: `w-pane-sm` 192px (mention and dropdown lists; a **width** floor),
 `w-pane` / `max-h-pane` 320px (thread panel, command list), `w-pane-picker` 384px
 (emoji picker popover, #1742, inside the 340-440 band), `max-w-pane-md`
 512px (the overlay measure: dialog panel and ⌘K palette), `max-w-pane-lg` 640px
@@ -331,6 +343,11 @@ new surface could still take an unnamed dimension. The dialog and the palette
 both sat on Tailwind's stock `max-w-lg`, the same 512px wearing no name, so the
 token file had never heard of the measure the two overlays share. They alternate
 at the same anchor, so it is one measure and it gets one name.
+
+`--spacing-settings-nav` 308px is the phone **height** cap of the settings
+section list (#1867 M-1). It is not a pane: borrowing `pane-sm` as max-block-size
+showed four of fourteen rows with no peek of the next. The number is this
+surface's row rhythm (tap-target 44 + chrome) so the fifth row is half visible.
 
 Body caps are a fifth axis: `max-h-diff-body` 400px (MOMO-620), the height a
 diff scrolls inside its card. It is not a pane (a pane is a width) and the rhythm
@@ -424,6 +441,8 @@ component must name a role and cannot reach for size inflation:
 | `text-body` | 14px | message body, controls |
 | `text-title` | 16px | surface titles |
 | `text-display` | 20px | at most one per surface |
+
+S0 onboarding is not a sixth role. `--font-onboarding-wordmark` lives on `:root` (not `@theme --font-*`, which is a family, and not `--text-*`, which is the closed product scale). Floor is 1/3 of `--spacing-onboarding-mark` (48px); `.onboarding-wordmark` clamps 48 / 4vw / 64 so the lockup beat (mark → name → copy) is size, not just fade delay (#1882 H-1). `--spacing-onboarding-copy` 360px is the one-line measure of the S0 intro sentence, not a pane (#1882 M-1).
 
 A role and a color share the `text-` prefix but are **different axes**, and the
 class merge has to be told so. `cn()` (`src/design/lib/cn.ts`) extends
@@ -573,6 +592,11 @@ pins one scheme; the screenshot capture uses browser-level
 `prefers-color-scheme` emulation instead, so captures exercise the same
 `light-dark()` path the product uses and nothing is themed specially for the
 shot.
+
+Accent bindings are a second stamp: `:root[data-accent="<id>"]` redefines
+`--accent` / `--accent-soft` / `--on-accent` only. The default id is `dawn`.
+Onboarding S0 and `.brand-lockup` pin those three tokens back to Dawn
+(ADR-0174 D4). Preference lives in `momo.web.appearance.v1` on this device.
 
 ## 7. Adding a token
 

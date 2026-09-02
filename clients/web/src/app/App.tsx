@@ -11,6 +11,7 @@ import { SkeletonRows } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
+import { DraftsRoute } from "@/features/drafts/DraftsRoute";
 import { ActivityRoute } from "@/features/activity/ActivityRoute";
 import { DirectoryRoute } from "@/features/directory/DirectoryRoute";
 import { SettingsRoute } from "@/features/settings/SettingsRoute";
@@ -31,7 +32,8 @@ import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
 // have to resolve identically in both runtimes (ADR-0133 "one codebase").
 export function App() {
-  const { status, session, signIn, signOut } = useRestoredSession();
+  const { status, session, signIn, signOut, replaceSessionMember } =
+    useRestoredSession();
 
   // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
   // the connect screen is the reader most likely to need the build that fixes
@@ -100,6 +102,7 @@ export function App() {
             >
               <AppShell
                 session={session}
+                replaceSessionMember={replaceSessionMember}
                 onLogout={() => {
                   // Cached workspace data belongs to the session that is ending,
                   // so it goes with it: no roster, channel or read-state row from
@@ -124,6 +127,7 @@ export function App() {
           <Route index element={<ChatShell />} />
           <Route path="c/:channelId" element={<ChatShell />} />
           <Route path="inbox" element={<InboxRoute />} />
+          <Route path="drafts" element={<DraftsRoute />} />
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />

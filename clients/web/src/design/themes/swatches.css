@@ -1,0 +1,25 @@
+/* Accent swatch chrome (ADR-0174 D2). Color comes from [data-accent-swatch]
+ * rebinding --accent / --on-accent on the control itself; no inline style. */
+.accent-swatch {
+  min-block-size: var(--tap-target);
+  min-inline-size: var(--tap-target);
+}
+
+.accent-swatch-chip {
+  width: var(--spacing-6);
+  height: var(--spacing-6);
+  background-color: var(--accent);
+}
+
+.accent-swatch:has(:checked) {
+  border-color: var(--ink);
+  background-color: var(--surface-hover);
+  box-shadow:
+    0 0 0 2px var(--surface),
+    0 0 0 3px var(--ink);
+}
+
+.accent-swatch:has(:focus-visible) {
+  outline: 2px solid var(--focus-ring-ink, var(--accent));
+  outline-offset: -2px;
+}

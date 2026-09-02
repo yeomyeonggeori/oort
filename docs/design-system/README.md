@@ -69,7 +69,8 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | # | 파일 | 정의하는 것 | 누구를 따르나 |
 |---|---|---|---|
-| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** |
+| 1 | `clients/web/src/design/tokens.css` | 색 · 간격(리듬 + 이름 축) · 반경 · 텍스트 롤 · 셸 기하 · 터치 타깃 | **아무도 안 따름 = 정본** (의미 토큰) |
+| 1b | `clients/web/src/design/themes/` | `--accent` / `--accent-soft` / `--on-accent` 바인딩 (라이트·다크 쌍) | ①의 의미 토큰을 **재바인딩**. 컴포넌트는 여기 hex를 읽지 않는다 (ADR-0174 D1) |
 | 2 | `clients/mobile/src/design/tokens.ts` | 색(×2스킴) · space · radius · font · line · TOUCH_TARGET | ①을 번역 |
 | 3 | `packages/momo-core/src/features/timeline/divider.ts` | `ROW_SPACE` — 타임라인 행 간 거리 | 없음(이 축의 정본). 웹·폰이 각자 소비 |
 | 4 | ~~`clients/macOS/Sources/MomoMac/Theme.swift`~~ | (삭제됨 — PR #1253) | 정본 토큰 파일은 위 1~3의 셋뿐이다 |
@@ -78,15 +79,18 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **여명(Dawn) 팔레트.** 웹이 두 스킴을 `light-dark()` 한 줄에 적으므로 두 항이 갈라질 자리가 없다. 폰은 두 상수로 나눠 들고, `clients/mobile/__tests__/paletteContrast.test.ts`가 웹 `tokens.css`를 `readFileSync`로 읽어 **바이트 단위로** 대조한다(짝 15쌍 + 스크림).
 
-규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `paletteContrast.test.ts`):
+컴포넌트는 의미 토큰(`--accent` · `--surface` · `--ink` …)만 소비한다. 사용자가 고르는 액센트는 `src/design/themes/`의 바인딩 층이 `:root[data-accent]`로 `--accent` / `--accent-soft` / `--on-accent`만 재정의한다(ADR-0174 D1). 기본 바인딩은 항상 새벽(호박)이고 목록의 첫 값이다. 온보딩 S0과 브랜드 락업(`.brand-lockup`)은 이 재정의의 영향권 밖이다(D4). 후보 세트는 구현 시안이며 성재 확인 전에 정본이 아니다.
+
+규율 (출처: `tokens.css` 머리 주석 · `tokens.contrast.test.ts` · `themes/catalog.contrast.test.ts` · `paletteContrast.test.ts`):
 
 - **순흑·순백 없음.** 종이의 흰색은 `#fffefb`.
 - **인디고/네온 보라 금지.** 에이전트는 새벽 남색(`--agent`)이고, `tokens.css`가 *"never neon AI purple"*이라고 적는다.
-- **`--line`은 나누고, `--line-strong`은 컨트롤을 그린다(3:1).** `tokens.css:33`.
+- **`--line`은 나누고, `--line-strong`은 컨트롤을 그린다(3:1).** `tokens.css:33`. 라이트 `--line`은 `#e4e0d8`(#1866, `--surface` 위 1.22:1). 라이트 `--line-strong`은 `--surface-hover` 위 **3.03:1**이라 한 단계(RGB +1 → 2.99)도 못 옅힌다 — 버튼·입력·컴포저 그릇의 경계는 이 토큰이 지고, 3:1을 깨는 완화는 금지.
+- **텍스트 입력 그릇은 포인터 포커스에서 보더 색을 바꾸지 않는다** (#1866, buzz 동형). 컴포저(채널·스레드)와 관전 터미널 그릇은 `focus-visible-within:focus-ring`: Tab 모달리티와 자식 `:focus-visible`에서만 기존 인셋 링. 안쪽 textarea(컴포저 입력, xterm `.xterm-helper-textarea`)는 클릭에도 `:focus-visible`이 매치되므로 `:focus-within`만으로는 갈리지 않는다. Input/Select/outline 버튼은 프리미티브의 `focus-visible:focus-ring`이 그대로 진다.
 - **위험 순서의 자는 대비가 아니라 채도(OKLab C)다** — `danger > warn > ink-muted`. AA를 한참 넘긴 두 톤은 대비 축에서 구분되지 않는다.
 - **스크림은 색이 아니라 방향이다** — 어느 스킴에서든 뒤를 어둡게 한다.
 - **상호작용 상태를 그리는 토큰은 정적인 그릇이 될 수 없다** (#1515) — 아래.
-- **hex 리터럴 0.** 웹은 프리플라이트 그렙이(ESLint 규칙도 있지만 어느 게이트도 안 돌린다 — §5.4, 그리고 그 셀렉터는 6자리 hex만 본다), 폰은 `conversationHygiene.test.tsx:519`가 `src/` 전수에서 센다.
+- **hex 리터럴 0 (컴포넌트).** 웹은 프리플라이트 그렙이 `tokens.css`와 `src/design/themes/`만 허용한다. 테마 디렉토리는 **사전 검증된 바인딩 외 금지**이지 일반 raw color 면제가 아니다(ADR-0174 D5). 폰은 `conversationHygiene.test.tsx:519`가 `src/` 전수에서 센다.
 
 #### 상태 토큰과 그릇 토큰은 갈라져 있다 (#1515 / design-review #1514 H-2)
 
@@ -202,14 +206,15 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 - 웹: 고도는 두 단뿐 — `shadow-sm`(카드)과 `shadow-lg`(떠 있는 표면). `tokens.css`에 그림자 토큰은 **없고**, 웹은 Tailwind 기본 스케일을 쓴다. 그 사실이 코드에만 있었으므로 `clients/web/src/design/designSystem.test.ts`가 실제 사용 어휘를 두 단으로 잠근다.
 - 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
 
-**모션에도 토큰 축이 없다.** `tokens.css`에 손으로 적힌 값 전부(실측):
+**모션은 전면 토큰 축이 없고, 사이드바 폭 전환만 이름 붙은 1호 토큰을 쓴다.** `tokens.css`에 적힌 값(실측):
 
 | | 값 | 자리 |
 |---|---|---|
+| `--duration-sidebar` | `200ms` ease-out (데스크톱 사이드바 접힘 폭 전환). `prefers-reduced-motion`에서는 `app-shell`이 이 값을 쓰지 않는다 | `:243` · `:734` |
 | 전이(transition) | `160ms`(서랍) · `120ms`(업로드 막대) | `:397` · `:1268` |
 | 애니메이션 | `1.1s`(캐럿) · `0.9s`/`1.6s`(스피너, 뒤는 reduced-motion 판) · `1.1s`/`3.2s`(업로드 드리프트) | `:974` · `:986`/`:989` · `:1290`/`:1312` |
 
-폰은 거의 백지다. 2026-07-28 갭 감사가 `instant 0 / fast 120 / standard 180 / slow 240`을 권고했고 아직 채택되지 않았다 — **미결 결정**(감사 §C-6). 지금 지켜지는 규칙은 스킬 §4 하나다: 모든 애니메이션은 상태 변화의 피드백이고(<200ms), 비자명한 모션은 `prefers-reduced-motion`으로 감싼다.
+폰은 거의 백지다. 2026-07-28 갭 감사가 `instant 0 / fast 120 / standard 180 / slow 240`을 권고했고 아직 채택되지 않았다 — 사이드바 1호만 #1864에서 신설했고 전면 스케일은 **계속 미결**(감사 §C-6). 지금 지켜지는 규칙은 스킬 §4 하나다: 모든 애니메이션은 상태 변화의 피드백이고(<200ms), 비자명한 모션은 `prefers-reduced-motion`으로 감싼다.
 
 ### 2.7 터치 타깃
 
@@ -256,12 +261,13 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
   배치 57곳, 그중 인접 레이블조차 없는 36곳**(QuickSwitcher 12곳 포함). 이 축을 재는
   기계는 없다(§5.3).
 
-**로컬 SVG 예외 목록은 아래 세 파일로 닫혀 있다.** 셋은 모두 같은 oort 브랜드 글리프이며
+**로컬 SVG 예외 목록은 아래 네 파일로 닫혀 있다.** 모두 oort 브랜드 글리프이며
 기능 아이콘이 아니다.
 
 | 파일 | 존치 사유 |
 |---|---|
 | `clients/web/src/design/brand/OortMark.tsx` | Lucide에 없는 제품 브랜드 마크. 앱 안에서 `currentColor`를 상속한다. |
+| `clients/web/src/features/auth/OortCloudMarks.tsx` | S0 오르트 구름 산포(혜성·소행성·4촉 별) 라인아트. Lucide에 없는 도메인 글리프이고 기능 아이콘으로 재사용하지 않는다. |
 | `clients/web/public/oort-mark.svg` | CSS가 닿지 않는 문서·배포·링크 미리보기용 정적 브랜드 자산. |
 | `clients/web/public/favicon.svg` | 브라우저가 직접 읽는 고정 파비콘 브랜드 자산. |
 
@@ -469,9 +475,10 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | # | 결정 | 지금 상태 |
 |---|---|---|
 | 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |
-| 2 | 모션 토큰을 신설할 것인가 | 미채택. 선점 비용이 지금 가장 싸다 |
+| 2 | 모션 토큰을 신설할 것인가 | 부분 결정: 사이드바 전환 1호 토큰 신설(#1864), 전면 토큰화는 계속 미결 |
 | 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |
 | 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |
 | 6 | 폰 taste 스킬 방언 · design-review 계약 재조준 | ADR-0159 D4 — Swift 삭제 배치에 흡수 |
 | 7 | `light-dark()`의 실제 브라우저 하한선 | Tauri macOS는 WKWebView(OS 버전에 묶임). **미확인** |
+| 8 | 액센트 후보 세트 확정 | ADR-0174 D2. BZ-5a가 시안을 산출하고, 성재 확인 후 머지 |

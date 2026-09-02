@@ -29,6 +29,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const PORT = Number(process.env.SCROLL_GATE_PORT || 5185);
@@ -122,6 +123,7 @@ const page = await context.newPage();
 // ---- cold start: fresh navigation timing to first rendered row -------------
 const navStart = Date.now();
 await page.goto(`${BASE}/?stress=1000`, { waitUntil: "domcontentloaded" });
+await advanceToAccount(page);
 await page.fill('[data-testid="login-email"]', LIVE ? email : "seongjae@dawn.example");
 await page.fill(
   '[data-testid="login-password"]',

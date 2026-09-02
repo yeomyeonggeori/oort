@@ -86,23 +86,37 @@ function readAsDataUrl(blob: Blob): Promise<string> {
   });
 }
 
-export function useUnfurlImage(imageUrl: string | undefined): string | null {
-  const [dataUrl, setDataUrl] = useState<string | null>(
-    imageUrl ? previews.peek(imageUrl) ?? null : null
+export type UnfurlImageStatus =
+  | { kind: "absent" }
+  | { kind: "loading" }
+  | { kind: "ready"; dataUrl: string }
+  | { kind: "failed" };
+
+function statusFor(imageUrl: string | undefined): UnfurlImageStatus {
+  if (!imageUrl) return { kind: "absent" };
+  const cached = previews.peek(imageUrl);
+  if (cached) return { kind: "ready", dataUrl: cached };
+  return { kind: "loading" };
+}
+
+export function useUnfurlImage(imageUrl: string | undefined): UnfurlImageStatus {
+  const [status, setStatus] = useState<UnfurlImageStatus>(() =>
+    statusFor(imageUrl)
   );
+  const [trackedUrl, setTrackedUrl] = useState(imageUrl);
+  if (imageUrl !== trackedUrl) {
+    setTrackedUrl(imageUrl);
+    setStatus(statusFor(imageUrl));
+  }
 
   useEffect(() => {
-    if (!imageUrl) {
-      setDataUrl(null);
-      return;
-    }
+    if (!imageUrl) return;
     const cached = previews.get(imageUrl);
     if (cached) {
-      setDataUrl(cached);
+      setStatus({ kind: "ready", dataUrl: cached });
       return;
     }
     let live = true;
-    setDataUrl(null);
     let request = inflight.get(imageUrl);
     if (!request) {
       request = fetchUnfurlImage(imageUrl)
@@ -116,17 +130,17 @@ export function useUnfurlImage(imageUrl: string | undefined): string | null {
     }
     request
       .then((url) => {
-        if (live) setDataUrl(url);
+        if (live) setStatus({ kind: "ready", dataUrl: url });
       })
       .catch(() => {
-        if (live) setDataUrl(null);
+        if (live) setStatus({ kind: "failed" });
       });
     return () => {
       live = false;
     };
   }, [imageUrl]);
 
-  return dataUrl;
+  return status;
 }
 
 export function resetUnfurlImagesForTest(): void {

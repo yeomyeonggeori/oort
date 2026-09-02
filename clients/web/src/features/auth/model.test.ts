@@ -14,7 +14,12 @@ import {
   urlWithoutJoinParams,
 } from "@momo/core/features/auth/deepLink";
 import { discoveredServers } from "./discovery";
-import { joinFailureCopy, prefillFocus, signInFailureCopy } from "@momo/core/features/auth/connectModel";
+import {
+  joinFailureBelongsOnGateway,
+  joinFailureCopy,
+  prefillFocus,
+  signInFailureCopy,
+} from "@momo/core/features/auth/connectModel";
 
 // The connect surface is mostly decisions about untrusted text: a URL someone
 // typed, a link someone forwarded, a service record a shell reported. Those are
@@ -293,6 +298,22 @@ describe("failure copy", () => {
       new ApiError(409, "invite already redeemed for this email")
     );
     expect(failure.suggestSignIn).toBe(true);
+    expect(failure.onGateway).toBe(true);
+  });
+
+  it("marks invite-code statuses as S1 failures and leaves the rest on S2", () => {
+    for (const status of [403, 404, 409, 410]) {
+      const err = new ApiError(status, "invite");
+      expect(joinFailureBelongsOnGateway(err)).toBe(true);
+      expect(joinFailureCopy(err).onGateway).toBe(true);
+    }
+    expect(joinFailureBelongsOnGateway(new ApiError(401, "invalid"))).toBe(
+      false
+    );
+    expect(joinFailureCopy(new ApiError(401, "invalid")).onGateway).toBeUndefined();
+    expect(
+      joinFailureCopy(new NetworkError("unreachable", 15_000)).onGateway
+    ).toBeUndefined();
   });
 
   it("never shows a raw transport failure as an invite verdict", () => {
