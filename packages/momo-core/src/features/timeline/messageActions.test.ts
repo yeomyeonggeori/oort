@@ -6,6 +6,8 @@ import {
   canEditMessage,
   canPinMessage,
   canReactToMessage,
+  canMarkUnreadMessage,
+  canRemindMessage,
   canReplyToMessage,
   emptyTimeline,
   hasAnyAction,
@@ -103,6 +105,11 @@ describe("action affordances", () => {
     expect(canReplyToMessage(theirs)).toBe(true);
   });
 
+  it("offers 나중에 알림 on a live message, with no authorship gate", () => {
+    expect(canRemindMessage(msg(1))).toBe(true);
+    expect(canRemindMessage(msg(1, { authorMemberId: OTHER }))).toBe(true);
+  });
+
   it("offers nothing on a tombstone, its author included", () => {
     const gone = msg(1, { state: "deleted", body: undefined });
     expect(canEditMessage(gone, ME)).toBe(false);
@@ -110,12 +117,16 @@ describe("action affordances", () => {
     expect(canReactToMessage(gone)).toBe(false);
     expect(canReplyToMessage(gone)).toBe(false);
     expect(canQuoteMessage(gone)).toBe(false);
+    expect(canRemindMessage(gone)).toBe(false);
+    expect(canMarkUnreadMessage(gone)).toBe(false);
     expect(
       hasAnyAction({
         reply: canReplyToMessage(gone),
         quote: canQuoteMessage(gone),
         react: canReactToMessage(gone),
         pin: canPinMessage(gone),
+        remind: canRemindMessage(gone),
+        markUnread: canMarkUnreadMessage(gone),
         edit: canEditMessage(gone, ME),
         delete: canDeleteMessage(gone, ME),
       })

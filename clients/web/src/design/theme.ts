@@ -1,15 +1,31 @@
 import { useSyncExternalStore } from "react";
+import {
+  ACCENT_ATTRIBUTE,
+  DEFAULT_ACCENT_ID,
+  normalizeAccentId,
+  type AccentId,
+} from "./themes";
+
+export type { AccentId } from "./themes";
+export {
+  ACCENT_ATTRIBUTE,
+  ACCENT_THEMES,
+  DEFAULT_ACCENT_ID,
+  isAccentId,
+  normalizeAccentId,
+} from "./themes";
 
 // =============================================================================
-// 테마 선택 (U2 · 웹 모드 전환).
+// 외양 선택 (U2 + ADR-0174 · 컬러 모드와 액센트 바인딩).
 //
 // 발단: tokens.css는 처음부터 두 스킴을 갖고 있었지만(`color-scheme: light dark`
 // + `light-dark()`), 그것을 고르는 자리가 앱 안에 없었다. 라이트로 보고 싶은
 // 사람은 OS 설정을 바꾸는 수밖에 없었고, 그것은 이 앱 하나 때문에 모든 앱의
-// 밝기를 바꾸라는 말이다.
+// 밝기를 바꾸라는 말이다. BZ-5a가 그 자리 위에 액센트 바인딩을 얹는다: 컴포넌트는
+// 계속 `--accent`만 읽고, 루트의 `data-accent`가 값만 바꾼다.
 //
-// **스탬프 문법은 새로 만들지 않았다.** tokens.css에 이미 있던 두 규칙이 정본이고,
-// 지금까지는 캡처 하네스만 그것을 알고 있었다:
+// **스킴 스탬프 문법은 새로 만들지 않았다.** tokens.css에 이미 있던 두 규칙이
+// 정본이고, 지금까지는 캡처 하네스만 그것을 알고 있었다:
 //
 //     :root[data-theme="light"] { color-scheme: light; }
 //     :root[data-theme="dark"]  { color-scheme: dark; }
@@ -18,9 +34,8 @@ import { useSyncExternalStore } from "react";
 // 스탬프하는 것만으로 팔레트 전체가 한쪽으로 고정된다. 팔레트를 두 벌 갖지 않는다
 // 는 tokens.css의 계약이 그대로 유지되고, 이 파일이 아는 색은 **하나도 없다**.
 //
-// 저장은 localStorage이고 키는 `momo.web.*` 관례를 따른다(serverBase·session·pwa와
-// 같은 접두). 값은 세 개뿐이며 기본값은 언제나 "system"이다: 아무것도 고르지 않은
-// 사람은 OS를 따르던 지금까지의 행동을 그대로 받는다.
+// 저장은 localStorage `momo.web.appearance.v1`(ADR-0174 D3, 이 기기). 옛 키
+// `momo.web.theme.v1`은 스킴만 있던 시절의 값이고, 읽을 때만 이관한다.
 //
 // 첫 페인트는 이 모듈이 책임지지 않는다 — 못 한다. 번들은 defer이므로 여기가
 // 실행될 때는 이미 한 프레임이 그려졌을 수 있고, 그 프레임이 반대 스킴이면 그것이
@@ -31,7 +46,15 @@ import { useSyncExternalStore } from "react";
 
 export type ThemeChoice = "system" | "light" | "dark";
 
-/** 저장 위치. 동결층이므로 접두는 `momo.`로 남는다(oort 리브랜딩과 무관). */
+export type AppearanceState = {
+  scheme: ThemeChoice;
+  accent: AccentId;
+};
+
+/** 정본 저장 위치 (ADR-0174 D3). 동결층이므로 접두는 `momo.`로 남는다. */
+export const APPEARANCE_STORAGE_KEY = "momo.web.appearance.v1";
+
+/** 스킴만 저장하던 시절의 키. 읽기 이관 전용, 새 쓰기는 하지 않는다. */
 export const THEME_STORAGE_KEY = "momo.web.theme.v1";
 
 /** 루트에 찍는 이름. tokens.css의 `:root[data-theme=...]`가 읽는 그 이름이다. */
@@ -86,6 +109,12 @@ const THEME_COLOR_SELECTOR = "meta[name='theme-color'][media]";
  * 이지 선택이 아니고, 둘이 어긋나지 않는지는 theme.test.ts가 그 파일을 읽어서
  * 확인한다.
  */
+export function applyAccent(accent: AccentId, doc?: ThemeDocument): void {
+  const target = doc ?? (typeof document === "undefined" ? null : document);
+  if (!target) return;
+  target.documentElement.setAttribute(ACCENT_ATTRIBUTE, accent);
+}
+
 export function applyTheme(choice: ThemeChoice, doc?: ThemeDocument): void {
   const target = doc ?? (typeof document === "undefined" ? null : document);
   if (!target) return;
@@ -121,28 +150,85 @@ export function applyTheme(choice: ThemeChoice, doc?: ThemeDocument): void {
 
 // ---- 저장된 선택 -------------------------------------------------------------
 
-function readStorage(): ThemeChoice {
+const DEFAULT_APPEARANCE: AppearanceState = {
+  scheme: "system",
+  accent: DEFAULT_ACCENT_ID,
+};
+
+export function parseAppearance(raw: string | null | undefined): AppearanceState | null {
+  if (raw == null || raw === "") return null;
   try {
-    if (typeof localStorage === "undefined") return "system";
-    return normalizeThemeChoice(localStorage.getItem(THEME_STORAGE_KEY));
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed == null || typeof parsed !== "object") return null;
+    const record = parsed as { scheme?: unknown; accent?: unknown };
+    return {
+      scheme: normalizeThemeChoice(
+        typeof record.scheme === "string" ? record.scheme : null
+      ),
+      accent: normalizeAccentId(
+        typeof record.accent === "string" ? record.accent : null
+      ),
+    };
   } catch {
-    return "system";
+    return null;
   }
 }
 
-function writeStorage(choice: ThemeChoice): void {
+export function serializeAppearance(state: AppearanceState): string {
+  return JSON.stringify({ scheme: state.scheme, accent: state.accent });
+}
+
+/**
+ * 정본 키의 JSON, 없으면 옛 스킴 키. 모르는 값은 기본값(시스템 + 새벽).
+ */
+export function migrateAppearance(
+  storedNew: string | null | undefined,
+  storedLegacyScheme: string | null | undefined
+): AppearanceState {
+  const parsed = parseAppearance(storedNew);
+  if (parsed) return parsed;
+  if (storedLegacyScheme == null || storedLegacyScheme === "") {
+    return DEFAULT_APPEARANCE;
+  }
+  return {
+    scheme: normalizeThemeChoice(storedLegacyScheme),
+    accent: DEFAULT_ACCENT_ID,
+  };
+}
+
+function readStorage(): AppearanceState {
+  try {
+    if (typeof localStorage === "undefined") return DEFAULT_APPEARANCE;
+    return migrateAppearance(
+      localStorage.getItem(APPEARANCE_STORAGE_KEY),
+      localStorage.getItem(THEME_STORAGE_KEY)
+    );
+  } catch {
+    return DEFAULT_APPEARANCE;
+  }
+}
+
+function writeStorage(state: AppearanceState): void {
   try {
     if (typeof localStorage === "undefined") return;
-    localStorage.setItem(THEME_STORAGE_KEY, choice);
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, serializeAppearance(state));
   } catch {
     // 저장이 막힌 브라우저(프라이빗 모드, 임베디드 웹뷰 정책): 고른 것은 이 탭이
-    // 살아 있는 동안 유지되고 새로고침하면 시스템으로 돌아간다. 그 외에는 아무것도
+    // 살아 있는 동안 유지되고 새로고침하면 기본값으로 돌아간다. 그 외에는 아무것도
     // 나빠지지 않으므로 사람에게 알릴 실패가 아니다.
   }
 }
 
-let choice: ThemeChoice = readStorage();
+let appearance: AppearanceState = readStorage();
 const listeners = new Set<() => void>();
+
+function commit(next: AppearanceState): void {
+  appearance = next;
+  writeStorage(next);
+  applyTheme(next.scheme);
+  applyAccent(next.accent);
+  for (const listener of listeners) listener();
+}
 
 export function subscribeTheme(listener: () => void): () => void {
   listeners.add(listener);
@@ -152,16 +238,28 @@ export function subscribeTheme(listener: () => void): () => void {
 }
 
 export function getTheme(): ThemeChoice {
-  return choice;
+  return appearance.scheme;
 }
 
-/** 고른 것을 저장하고 화면에 바로 적용한다. 저장 버튼이 없는 설정이다. */
+export function getAccent(): AccentId {
+  return appearance.accent;
+}
+
+export function getAppearance(): AppearanceState {
+  return appearance;
+}
+
+/** 고른 스킴을 저장하고 화면에 바로 적용한다. 저장 버튼이 없는 설정이다. */
 export function setTheme(next: ThemeChoice): void {
-  if (next === choice) return;
-  choice = next;
-  writeStorage(next);
-  applyTheme(next);
-  for (const listener of listeners) listener();
+  if (next === appearance.scheme) return;
+  commit({ scheme: next, accent: appearance.accent });
+}
+
+/** 고른 액센트를 저장하고 화면에 바로 적용한다. 기본(새벽)으로 되돌리는 길도 여기. */
+export function setAccent(next: AccentId): void {
+  const accent = normalizeAccentId(next);
+  if (accent === appearance.accent) return;
+  commit({ scheme: appearance.scheme, accent });
 }
 
 /**
@@ -170,11 +268,24 @@ export function setTheme(next: ThemeChoice): void {
  * 적용이다.
  */
 export function initTheme(): void {
-  applyTheme(choice);
+  applyTheme(appearance.scheme);
+  applyAccent(appearance.accent);
 }
 
 export function useThemeChoice(): ThemeChoice {
   return useSyncExternalStore(subscribeTheme, getTheme, getTheme);
+}
+
+export function useAccentId(): AccentId {
+  return useSyncExternalStore(subscribeTheme, getAccent, getAccent);
+}
+
+/** 시험이 저장소와 모듈 상태를 같은 자리에서 다시 읽게 한다. */
+export function reloadAppearanceForTest(): void {
+  appearance = readStorage();
+  applyTheme(appearance.scheme);
+  applyAccent(appearance.accent);
+  for (const listener of listeners) listener();
 }
 
 // ---- 지금 이 기기의 시스템은 어느 쪽인가 -------------------------------------

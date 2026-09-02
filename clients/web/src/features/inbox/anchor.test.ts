@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   anchorMissKind,
   channelPath,
+  channelShareUrl,
   messageAnchorPath,
   messageShareUrl,
   foldedStandInSelector,
@@ -85,6 +86,36 @@ describe("messageShareUrl", () => {
     expect(url).not.toContain("agentwork");
     expect(url.startsWith("http://127.0.0.1:5178/#/c/")).toBe(true);
     expect(url).toContain("seq=812");
+  });
+});
+
+describe("channelShareUrl", () => {
+  const CHANNEL = "00000000-0000-7000-8000-000000000201";
+
+  it("자리 없는 채널 링크: `#/c/{id}` 하나만 싣는다", () => {
+    expect(
+      channelShareUrl(CHANNEL, { origin: "https://app.oor7.com", pathname: "/" })
+    ).toBe("https://app.oor7.com/#/c/00000000-0000-7000-8000-000000000201");
+  });
+
+  it("자리를 지어내지 않는다: msg도 seq도 없다", () => {
+    const url = channelShareUrl(CHANNEL, {
+      origin: "https://app.oor7.com",
+      pathname: "/",
+    });
+    expect(url).not.toContain("msg=");
+    expect(url).not.toContain("seq=");
+  });
+
+  it("건네는 주소의 origin은 서버 base다. Tauri 번들 origin이 아니다", () => {
+    const handed = channelShareUrl(CHANNEL, {
+      origin: "https://app.oor7.com",
+      pathname: "/",
+    });
+    expect(handed).not.toContain("tauri://");
+    expect(
+      channelShareUrl(CHANNEL, { origin: "tauri://localhost", pathname: "/" })
+    ).toContain("tauri://");
   });
 });
 

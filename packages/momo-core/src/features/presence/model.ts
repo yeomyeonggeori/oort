@@ -50,6 +50,25 @@ export function declaredStatusLabel(status: PresenceStatus): string {
   }
 }
 
+/**
+ * Declared presence as shown on someone else's profile, not on the self radio.
+ *
+ * `away` and `dnd` are durable facts the person set, so naming them is true.
+ * `auto` is not named: it means "defer to live availability", and the web
+ * roster has no availability boolean for other members (design-review #1889
+ * H-3). `declaredStatusLabel` words `auto` as 온라인 because that is what it
+ * renders **while this client is connected** — that function is the self
+ * radio's copy, not a roster fact.
+ */
+export function otherMemberDeclaredPresenceLabel(
+  status: PresenceStatus | undefined
+): string | null {
+  if (status === "away" || status === "dnd") {
+    return declaredStatusLabel(status);
+  }
+  return null;
+}
+
 /** The label for an effective value, for the indicator's accessible name. */
 export function effectivePresenceLabel(effective: EffectivePresence): string {
   switch (effective) {

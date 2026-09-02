@@ -160,6 +160,12 @@ export interface ReactionChip {
   count: number;
   /** Drives the emphasised style AND the toggle direction of a click. */
   mine: boolean;
+  /**
+   * Who reacted, insertion order, already case-folded. The same array the map
+   * holds (not a copy), so a tooltip memo can key on identity. Optional only
+   * for hand-built fixtures; `chipsFor` always fills it.
+   */
+  memberIds?: string[];
 }
 
 /**
@@ -182,6 +188,7 @@ export function chipsFor(
       emoji,
       count: memberIds.length,
       mine: mine !== undefined && memberIds.includes(mine),
+      memberIds,
     });
   }
   return chips;

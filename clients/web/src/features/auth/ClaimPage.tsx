@@ -92,7 +92,7 @@ export function ClaimPage({
     <div className="flex min-h-full items-center justify-center p-6">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
+          <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
             <OortMark className="size-6 shrink-0 text-accent" />
             <span className="text-title">oort</span>
           </h1>

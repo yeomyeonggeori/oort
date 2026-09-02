@@ -1,7 +1,175 @@
 # oort 진행 현황
 
+## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)
+
+- momo-core `effectiveUnreadStartSeq` 단일점 (ADR-0178 D3). 배지·UnreadDivider·UnreadPill·⌥↑↓ 가 이 함수만 소비. 서버 `unread_count` 는 접지 않음.
+- 메시지 ⋯ 「여기부터 안 읽음」: PUT `mark_unread_before_seq`, `read_intent` 생략. 낙관 반영, 400/403 롤백+행 배너.
+- 채널 명시 열람·사이드바 「읽음 처리」는 `read_intent: "explicit_open"`. 도착 중 플러시·인박스 멘션 광고는 생략(background). 서버 `marked_unread_before_seq: null` 이 로컬 마크를 지움.
+- 서버 절반은 track/engine PR #1961. runtime-unverified: 라이브 PUT/GET 왕복(이 레인은 모킹).
+- runtime-unverified / 폰 소비 공백: `clients/mobile/src/features/sidebar/rows.ts:179` 와 `clients/mobile/src/screens/ConversationScreen.tsx:388` 이 서버 `unreadCount` 원문을 읽어, 데스크톱 마크가 폰에서는 다 읽음으로 보인다. 이 PR 에서 폰 소비는 구현하지 않음.
+- red proof: 마크 3/커서 10 공유 픽스처 · explicit_open vs 도착 플러시 · null 수렴 · 400 롤백. D3 합성 AST 게이트(별칭·헬퍼 포함).
+- R3: 방문 중 나중 마크는 구분선·필을 옮기고 열람 `null` 은 지우지 않음. 타임라인 polite live 영역은 하나.
+- 안읽음 필 재방문 무장은 이 PR 이전부터 있는 비결정 결함이며 이 PR 이 바꾸지 않는다 (#1966).
+- R5: 마크 PUT 400 이면 방문 경계를 낙관 이전으로 되돌린다. 롤백 `null` 은 열람 광고가 아니다.
+
+## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
+
+- `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.
+- 컬러 모드 System/Light/Dark는 기존 ChoiceRadios를 `momo.web.appearance.v1` JSON으로 이관(옛 `momo.web.theme.v1` 읽기 전용 이관). 액센트 스와치 44·radio·focus-visible.
+- 대비 전수: `catalog.contrast.test.ts`가 `tokens.contrast.test.ts` 액센트 가족 축을 파생(채움 순서 1.15·danger dE·전경 7종·muted-soft 그릇·ok/warn/danger 거리·후보 간 dE). 테마 추가=테스트 추가. red proof 상주. S0·`.brand-lockup`은 Dawn 고정(D4).
+- D5: `design_preflight_web.sh`가 `tokens.css`·`tokens.contrast.test.ts`·`themes/*` 경로 끝만 면제(합성 입력 자가시험). 캡처는 `--accent`/`--accent-soft` 정착 + 유한 애니메이션 idle 대기.
+- #1922 R3: 혜성 다크를 라이트 자주 가족으로 복귀(`#8b005a`/`#ff4bcc`, 표류 8.5°). 옛 민트 `#6de89b`는 스킴 간 표류 red proof(상한 20°, 근거=새벽 19.8°). 시안 크롬 복원.
+- 서버 무접촉. runtime-unverified 아님. 시안: `accent-<id>-{light,dark}.png`.
 > **랜딩 증거 원장(newest-first).** 항목=랜딩 단위, 원문 불변.
 > **로테이션(2026-09-01 재편):** 이 파일은 당월+직전월 항목만 담는다. 월초 플러시 때 `momo-main`이 그 이전 달 항목을 `docs/archive/STATUS-YYYY-MM.md`로 원문 그대로 이동한다. 과거 추적은 `docs/archive/README.md` 색인.
+
+## BF-B2 클라 절반 커스텀 상태 UI (#1889, 2026-08-30)
+
+- ProfileCard 「상태 설정」 다이얼로그: 기존 이모지 피커 + 자유 텍스트 ≤80자 + 만료(지우지 않음/30분/1시간/오늘까지/시각 고르기) + 프리셋 칩 5종 + 지우기. PUT은 `status` 필수, 커스텀 3키 omit=유지·null=지우기.
+- design-review #1920 R2 수리: 프로필 메뉴를 pane-sm에 고정(80자 머리가 390을 밀던 M-1 회귀)·글만 있는 상태에 말풍선 표식·폰 캡처가 시트로 RemindDialog를 염·오프라인/시각 고르기 장면. R1 배너·만기 타이머·시드·auto 침묵·a11y·44는 유지.
+- 서버 절반은 track/engine(#1907, A-42). runtime-unverified: 라이브 PUT/roster/presence 브로드캐스트. 선행 P-1(390 서랍 z)·P-2(#1919) 손대지 않음.
+- red proof: 80자 픽스처에서 메뉴 right≤390·✓ 가시. web vitest · core vitest · tsc · design_preflight_web · `CAPTURE_PORT=8517` capture:design · `SHELL_GATE_PORT=8519 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-B1 클라 절반 메시지 리마인더 UI (#1888, 2026-08-30)
+
+- 메시지 ⋯/우클릭/시트에 「나중에 알림」(프리셋 5종 + 날짜·시간 커스텀 + 메모 ≤200자, 로컬 TZ). 인박스에 「나중에」 탭 도킹(A5 행 문법: 미리보기·채널·상대 만기·완료·스누즈). 원문 클릭은 기존 `?msg=` 점프.
+- 만기는 read-state와 같은 30s react-query 리듬(쿼리 분리, 에러 격리). outbox 없음. 첫 진입 워터마크(`momo.web.reminders.watermark.v1`)는 과거 만기를 알림 없이 목록 배지. A4 종류 토글에 「나중에 알림」 가산.
+- design-review #1918 수리: ⋯ 키보드 도달·390 본문 교차 0(`w-overflow-bowl` 한 값)·숨김 창 폴링+가시성 복귀 페치·누적 만기 상한 3·만기 칩 그릇(행 워시 아님)·완료/미루기 tap-target·실패 시 다이얼로그 유지+동사별 오류·완료 확인·채널 UUID 금지·목록 파서 fail-closed.
+- 서버 절반은 track/engine(#1905). 이 레인은 REST 소비층+모킹 red proof. 실서버 conformance는 main 승격 시. runtime-unverified: 라이브 CRUD.
+- red proof: 프리셋 경계(월요 00:30은 오늘 9시가 아님)·CRUD 왕복 모킹·워터마크 알림 0·폴링 만기 알림 경로·행→메시지 점프. web vitest · tsc · design_preflight_web · `CAPTURE_PORT=8507` capture:design · `SHELL_GATE_PORT=8509 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-A8 채널 빈 상태 인트로 블록 (#1904, 2026-08-30)
+
+- 새 채널 첫 진입을 EmptyInvite 분기에서 빼, 타임라인 virtuoso **leading row**로 채널 아이콘+이름+시작 카피+액션 카드(첫 메시지 쓰기, 권한 있으면 멤버 추가하기)를 그린다. 메시지 도착 시 같은 목록 안에서 인트로가 히스토리 맨 위에 남고, 같은 DOM 노드를 유지하며 scrollTop은 불변. 바닥 정렬 목록이라 뷰포트 top은 새 행만큼 올라가는 것이 정상 동작(높이 0·scrollTop 0·동일 노드는 참). 액션과 「첫 메시지」 계열 문장은 empty일 때만. 비어 있지 않은 인트로는 이름·토픽·시작점만 말한다.
+- 토픽이 있으면 인용, 없으면 empty일 때 emptyChannelCopy 일반 카피·히스토리가 있으면 「이 채널의 시작입니다」. 생성 시각/생성자는 채널 모델에 없어 그리지 않는다. DM은 Avatar+이름(+@handle)+DM 계약 문장, 에이전트는 `--agent`. 초대 카드 없음. 스레드 패널 비대상. 초대 카드는 `canCreateChannelNow`(로스터 미착이면 침묵, 정착 후 오너/관리자).
+- 서버 무접촉. runtime-unverified 아님. red proof: web vitest 1904 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8497` capture:design · `SHELL_GATE_PORT=8499 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-A6 링크 프리뷰 Rich/Compact 선택 (#1903, 2026-08-30)
+
+- 설정 > 링크 미리보기를 접기 boolean에서 `rich | compact | off` 3값 라디오로. 저장 `momo.web.link-preview.v1`. 기존 `momo.web.link-previews-folded.v1`: `"true"`(카드 숨김)→`off`, `"false"`/unknown(compact 카드)→`compact`, 미저장→`rich`(미토글 기존 사용자 포함 의도적 기본 상향, 오케스트레이터 승인·성재 최종 확인 예정).
+- 타임라인 unfurl: 사진 카드는 OG 1.91:1(`aspect-og`) 히어로+`max-h-unfurl-hero` 상한. `imageUrl`이 있으면 첫 페인트부터 프레임 예약, fetch/디코드 실패만 compact 강등. 제거 X는 불투명 `bg-surface-raised` 칩. off는 미렌더. 카드 전체 단일 링크. 설정 변경은 스토어 구독으로 즉시 반영(스레드 패널 포함).
+- 서버 무접촉. runtime-unverified 아님. design-review #1913 수리: 제거 X 불투명 칩, rich 첫 페인트 프레임 예약, OG 1.91:1+`unfurl-hero` 상한, rich 메타 대칭 패딩, 미저장→rich 기록 정정, OG 픽스처 단색 런북 카드.
+- red proof: web vitest 1878 · tsc · design_preflight_web 12/12 · `CAPTURE_PORT=8487` capture:design · `SHELL_GATE_PORT=8489 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-A7 컴포저 서식 최소셋 (#1902, 2026-08-30)
+
+- 채널·스레드 textarea에서 텍스트를 고르면 선택 위(공간 없으면 아래)에 부유 트레이(굵게/기울임/인라인 코드/링크). TipTap 없음. 접사는 momo-core markdown이 읽는 `** * \` []()` 만. 이미 감싸져 있으면 토글로 해제. 링크는 `[선택](링크주소)` 뒤 자리표시 선택.
+- design-review 수리 (#1909): Esc dismiss가 keyup sync에 안 되살아남, 한국어 기울임 거부(코어 renderable과 같은 자), 공백·줄 경계는 코어 closingIndex/줄 단위 파서와 같게, 트레이는 탭 한 정거장+방향키 로빙+aria-pressed, 선택은 좌표를 따라감, hover:none/pointer:coarse에서는 안 그림, 미치환 링크는 힌트만(전송은 그대로).
+- ⌘B/⌘I는 트레이 없이도 동작. 트레이 mousedown은 포커스를 빼앗지 않고, Tab으로 도달, Esc로 닫힘. @멘션 트리거 중에는 숨김. 전송·채널 전환·선택 해제 시 소멸. draftStore는 기존 replaceValue 경로.
+- 뷰포트 클램프는 buzz 문법(Apache-2.0). 좌표는 CSS 변수(인라인 style= 없음). 모션 없음(reduced-motion 즉시).
+- red proof: web vitest 1853 · tsc · design_preflight_web · `CAPTURE_PORT=8477` capture:design · `SHELL_GATE_PORT=8479 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-A5 크로스채널 초안 패널 (#1901, 2026-08-30)
+
+- 사이드바 인박스 옆에 「초안」. 이 워크스페이스에 살아 있는 초안이 0이면 숨긴다. `/drafts` 목록은 draftStore를 읽기만 하고 채널명·1줄 미리보기·상대시간을 최근 수정순으로 그린다. 행 클릭은 `/c/{id}`로 가며 기존 컴포저 복원을 재사용한다.
+- 삭제는 확인 없음(로컬 초안), hover/⋯ 메뉴 안에만. 삭제·이탈 채널의 고아는 목록·항법에서 숨기고 출처 불명으로 두지 않는다. 저장소 자동 삭제는 하지 않는다(로딩 중 빈 목록이 살아 있는 초안을 지우는 길을 막기 위해). 고아는 TTL·정원·해당 채널 `readDraft`가 정리. 스레드 컴포저 본문은 이 저장소에 없어 목록에 못 올린다(스키마 무변경).
+- 빈 상태: 「아직 초안이 없습니다. / 쓰다 만 글은 자동으로 저장됩니다.」
+- design-review 수리: M1 ⋯ raised 그릇+hover:text-ink, M2 행 링크 이름=보이는 텍스트(힌트는 describedby), M3 삭제 후 이웃 행/빈·헤딩 포커스, L1 단일 toolbar 제거, L4 `DRAFTS_CHANGED_EVENT`.
+
+## BF-A4 알림 설정 세분화 (#1887, 2026-08-30)
+
+- 설정 > 알림 규칙에 이 기기 알림 그룹: 권한 3분기(granted 켜짐 / default 「알림 켜기」·요청 중 / denied macOS 시스템 설정 안내) + 미지원(웹뷰·브라우저 탭). 발화는 기존대로 데스크톱 셸만. 앱 포커스 복귀 시 OS 권한 재조회.
+- 종류별 토글은 조사된 실존 2종만(멘션, 승인 요청). `momo.web.notifications.v1` 로컬 저장. 꺼진 종류는 `notifyThisDevice` → `kind-disabled` 로 미발화. unsupported면 종류 그룹 잠금+공유 사유. DM·스레드·일반 채널 자리는 만들지 않음. 알림음 범위 밖.
+- 카피: 방해 금지·멘션 예외는 서버에 하나, 종류별 끔은 이 기기(섹션 머리에만). default 안내는 「앞에 없을 때」. DND PUT 회귀 유지.
+- design-review 수리: H-1 켜기 버튼 행 안 고유폭, H-2 denied OS 카피+재조회, H-3 grant 포커스→켜짐 status, M-1 레일 런타임 발화 테스트, M-2 unsupported 잠금, M-3 켜짐 `--ok-soft` 그릇, M-4/L-1 카피.
+- red proof: web vitest 1806 · tsc · design_preflight_web · `CAPTURE_PORT=8177` capture:design (settings-notifications light/dark) · `SHELL_GATE_PORT=8179 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BF-A3 허들 마이크 디바이스 선택 + 게인 (#1886, 2026-08-30)
+
+- 허들 라이브 컨트롤에 마이크 선택 메뉴. `useAudioInputDevices`가 `enumerateDevices`+`devicechange`로 audioinput을 갱신하고, 권한 전(빈 레이블)·거부·0개를 문장으로 가른다. 선택 deviceId는 `momo.web.huddle.mic.v1`에 기억되고 다음 참가 시 그 장치로 시작(부재 시 기본 폴백).
+- 트랙 교체는 livekit-client `setMicrophoneEnabled({ deviceId })` + `LocalAudioTrack.setDeviceId`. 입력 음량(0~100%)은 공식 게인 API가 없어 WebAudio GainNode를 `setProcessor`로 삽입.
+- design-review 수리: B-2 `MicGainProcessor`가 init에서 AudioContext를 캐시해 livekit restart(audioContext 미전달)에서도 그래프를 재구축. B-1 390 joined는 음소거+캐럿 스플릿·Live/캐럿 wide-only. H-1 setDeviceId boolean 확인 후에만 persist. H-2 게인 항목 ←/→. H-3 `100%` nowrap+4ch. M-1 메뉴 `max-w-menu-available`. L-1 `gainPercent`/`gain01` 경계 명명.
+- red proof: livekit 실쉐이프 restart(audioContext 없음), setDeviceId false 정합, 게인 키보드 렌더 테스트, `gate:huddle` 390 그룹 내 컨트롤 상호 겹침 0.
+
+## BF-A2 상단 안읽음 점프 필 (#1885, 2026-08-29)
+
+- 읽음 구분선이 뷰포트 **위쪽 밖**일 때만 타임라인 상단 중앙에 「새 메시지 N개 보기」+위 화살표 부유 필. 클릭/Enter → 구분선으로 스크롤(reduced-motion이면 auto) 후 첫 안읽음 행 정거장에 포커스. 구분선 진입(또는 필 실행) 시 epoch 래치로 소멸, 채널 전환 시 리셋. 하단 jump-latest와 동시 표시 가능.
+- N은 연 순간의 동결 `unreadCount`(구분선과 같음). 라이브 꼬리는 하단 필만 센다. 같은 `UnreadPill` 부품. hover:none에서 44px, `shadow-lg`.
+- H-1 오발 수리: 래치 무장은 IO 실측 「in」과 상단 필 실행만. range 폴백 「in」(오버스캔 마운트)은 표시 판정에만 쓰고 무장하지 않는다. 상단 접근명 「위쪽의 새 메시지 N개 보기」. web vitest 1761 · tsc · design_preflight_web · `CAPTURE_PORT=7777` capture:design (chat jump-unread 140×44) · `SHELL_GATE_PORT=7779 SHELL_GATE_FOCUS_ONLY=1` gate:shell · `FOLD_GATE_PORT=7781` gate:fold.
+
+## BF-A1 리액션 칩 이름 툴팁 (#1884, 2026-08-29)
+
+- `ReactionMap`이 이미 들고 있던 memberIds를 칩 툴팁/접근명으로 접는다. 서버 0. 코어 `formatReactionNames`: 나 포함 시 「나(내 반응 취소)」 맨 앞, 3명까지 이름, 초과·명부 미해석은 「외 N명」(실명 불명 표기 없음). 모호한 표시명은 `memberNameParts` 핸들.
+- 웹 칩은 기존 native `title` 관례(Radix Tooltip 의존 없음). aria-label은 카운트+이름 요약(+미반응 시 「나도 반응하기」). 로빙/토글 무변경.
+- red proof: core timeline 546 · web vitest 1714 · tsc · design_preflight_web · `CAPTURE_PORT=7477` capture:design (행당 탭 스톱 1) · `SHELL_GATE_PORT=7479 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BZ-6a-p1 온보딩 폴리시 (#1882, 2026-08-29)
+
+- S0 히어로 락업: OortMark 1.5×(144, 12vw 상한 192) + 워드마크 `oort`(`--font-onboarding-wordmark` 마크 1/3, clamp 48–64) + 소개 카피 1줄(`--spacing-onboarding-copy` 360, pane-sm 차용 아님). 궤도 드로잉→워드마크→카피 순차 페이드(reduced-motion 즉시). 산포 중앙 배제 원 반지름 32.
+- design-review 수리 (#1883): H-1 워드마크가 text-title(16)로 카피와 같은 단이던 것, M-1 카피 measure가 pane-sm(192)이라 1728에서도 2줄이던 것.
+- S1/S2 스텝 크롬: 뒤로(ArrowLeft+레이블, Button ghost, 44px)와 `n/3` 카운터를 상단 한 줄로. Tauri는 AppTitlebar와 같은 트래픽라이트 인셋+드래그(버튼 제외). 밑줄 링크 폐기.
+- red proof: web vitest 1711 · tsc · design_preflight_web · `CAPTURE_PORT=7377` capture:design (S0 lockup hits 0; 1280 워드마크 51.2px/마크 154, 390 48/144; 카피 265×22 1줄) · `SHELL_GATE_PORT=7379 SHELL_GATE_FOCUS_ONLY=1` gate:shell.
+
+## BZ-4 설정 전면 페이지 + Profile (#1867, 2026-08-29)
+
+- `/settings` 진입 시 앱 사이드바·타이틀바를 설정 전용 레이아웃으로 대체한다. 좌측 섹션 사이드바(개인/워크스페이스/연결, 기존 섹션 명칭과 **그룹 내** 상대 순서 유지) + 「앱으로 돌아가기」. 기존 섹션 컴포넌트는 재사용.
+- Profile 섹션(개인 그룹 최상단): 아바타 현행 표시, 표시 이름 `changeMyDisplayName` PATCH 1회, 빈 이름 400은 한국어 다음 행동("표시 이름을 비울 수 없습니다…")으로 매핑하고 와이어 영어는 화면에 두지 않음. 성공 시 roster invalidate + 세션 멤버 교체(낙관 갱신 없음). 핸들은 읽기 전용.
+- design-review 수리 (#1880): 이미 `/settings`면 ⌘, no-op(히스토리 겹쌓임 없음, H-1), 전면 전환 포커스 진입/복귀(M-4), 폰 목록 캡 `--spacing-settings-nav` 308 + 선택 항목 scrollIntoView(M-1).
+- red proof: web vitest·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell. 통합 테스트는 PATCH 모킹(track/uxui에 #1873 서버 표면 미포함).
+
+## BZ-3 라이트 보더·컴포저 포커스 (#1866, 2026-08-29)
+
+- 라이트 `--line`을 `#dcd8d0` → `#e4e0d8`로 한 단계 옅게. `--line-strong`은 라이트 `--surface-hover` 위 3.03:1이라 RGB +1이 2.99로 3:1이 깨져 그대로(다크 무접촉).
+- 컴포저 그릇은 `focus-within:focus-ring`을 떼고 `focus-visible-within:focus-ring`(Tab 모달리티 + 자식 `:focus-visible`). 마우스 클릭에서 보더 색·링 불변, Tab 진입에서만 기존 인셋 링. Input/Select/outline은 프리미티브 `focus-visible:focus-ring` 유지.
+- 관전 터미널 그릇도 같은 변형(1순위). xterm helper textarea는 클릭에도 `:focus-visible`이라 `:focus-within`이면 드래그 선택 순간 인셋 링이 서고 stdin 죽은 표면을 입력처럼 읽힌다. Tab 진입·이탈·복사는 `terminalOwnsKey` 그대로. 정본을 컴포저로 좁히지 않았다.
+- 정본 동기: design-system §2.2 · taste `tokens.md` · 폰 `lightPalette.border` 짝.
+
+## 채널 헤더 1줄 + 우측 라운드 컨트롤 (#1865, 2026-08-29)
+
+- 채널 헤더에서 토픽 상시 노출을 제거하고 1줄 제목만 남긴다. 토픽은 ⋮ 메뉴 「주제 보기」가 기존 읽기 다이얼로그를 연다(갱신 라우트 없음, 편집 항목 없음).
+- 우측은 기존 기능만 라운드 사각 그룹으로 재배치: `[터미널] [고정] [👥 N] [허들] [⋮]`. 👥 N은 기존 멤버 목록 트리거. 허들 유휴는 아이콘 버튼, Live 배지·참가자는 유지.
+- design-review 수리: 390 라이브에서 그룹이 줄어 서랍/해시와 겹치지 않음(B-1), Live 칩은 ok-soft 채움+점(H-2, M-1), 허들 버튼은 outline icon 프리미티브(H-1), 다이얼로그 닫힘은 layout에서 트리거로 복귀(H-3). `gate:huddle`에 390×라이브 축.
+- red proof: web vitest·tsc·design_preflight·capture:design·`SHELL_GATE_FOCUS_ONLY` gate:shell·gate:channel-header×12·gate:huddle.
+
+## BZ-6a 온보딩 스텝 셸 + S0 오르트 랜딩 (#1869, 2026-08-29)
+
+- ConnectPage를 S0 랜딩(단일 룩 딥스페이스 + OortMark 궤도 드로잉 + 산포 필드 + 2택) / S1 서버·초대 / S2 계정으로 감쌌다. 로그인·join·서버 검증·`momo.web.server.v1` 의미론은 기존 재사용. 저장 서버 또는 `/join?code=` 프리필이면 S0 생략.
+- capture/e2e/게이트 레인이 S0를 첫 페인트로 통과한다: `advanceToAccount`가 S0→S1→S2를 걷고, `capture:design`은 S0 프레임을 찍는다. 산포 글리프는 위치 중심(`translate(-50%,-50%)`)이고, 랜딩은 PWA 배너 아래 App 슬롯을 `height: 100%`로 채워 뷰포트 바닥에 2택이 앉는다.
+- design-review 수리 (#1871): S1/S2 카드 `mx-auto`(H-1), 초대 코드 4xx는 S1 배너+코드 포커스(H-2), 스텝 전환 포커스(M-1), CTA 배제 산포(M-2), 뒤로·최근칩 44(M-3), 궤도 pathLength(L-1), 딥링크 mask-reveal 억제(L-2), S2 카피. red proof: vitest 포커스/404 복귀, capture 카드 중앙·inviteHits 0, shell focus lane.
+
+## 프로필 메뉴 로그아웃 (#1858, 2026-08-28)
+
+- 사이드바 `ProfileCard` 드롭다운 맨 아래(설정 뒤)에 「로그아웃」을 추가. `useSession().logout` 직접 호출, 확인 다이얼로그 없음, destructive 색 없음. 설정 > 계정 `data-testid="logout"` 은 유지.
+- red proof: 메뉴 열면 `profile-logout`이 설정 뒤, 선택·Arrow/Enter 시 logout 1회. 상태 3종·워크스페이스 추가·설정 회귀.
+
+## 허들 TURN setConfiguration 경로 커버 (#1847, 2026-08-28)
+
+- #1825 세션 스코프 셰임이 생성자 config만 리라이트해 livekit-client의 빈 ctor → `setConfiguration(JoinResponse ICE)` 주입을 놓침. `RTCPeerConnection.prototype.setConfiguration`을 같은 host-게이트로 인터셉트. 생성자 경로·복원 시점(세션 종료)·Cloud/직결 무발동 유지. 새 플래그 없음.
+- red proof: 빈 ctor + setConfiguration `turns:<host>:443` → `getConfiguration()` 8443. 복원 후 무변환. Cloud/host 불일치 무발동. 실브라우저 왕복은 오케스트레이터 이월(`runtime-unverified`).
+## mark-unread 신호 서버 절반 (#1934 / BT-6, ADR-0178, 2026-09-02)
+
+- `read_state.marked_unread_before_seq` nullable bigint (085). `schema_v0.sql` 무접촉. `last_read_seq` GREATEST 불변(D1). 서버는 마크를 `unread_count`에 접지 않음(D3 합성은 momo-core 단일점).
+- `PUT …/read-state` 본문 가산: `mark_unread_before_seq`(채널 실존 seq, 미래·비존재 400) + `read_intent` enum `[explicit_open, background]` (optional, default=background, D6). explicit_open만 같은 tx에서 마크 삭제. 구식/백그라운드 광고는 마크 불변.
+- GET/list·realtime payload에 `marked_unread_before_seq` 항상 존재(미표시는 `null`). red proof: `mark_unread_conformance_pg` + `d2_b12_2b`. 클라 절반은 별 PR.
+
+## 커스텀 멤버 상태 REST (#1889 / BF-B2 서버 절반, 2026-08-30)
+
+- `member`에 nullable 3필드(083): `status_emoji`(≤32 스칼라)·`status_text`(trim ≤80)·`status_expires_at`. `schema_v0.sql` 무접촉. RLS는 기존 `member` ws_isolation 승계.
+- 같은 `PUT/GET /v1/workspaces/{ws}/presence` 바디 확장(형제 엔드포인트 없음 — 경로에 memberId가 없고 브로드캐스트가 이미 `type: presence` `ch:` 레일). omit=유지, JSON null=지우기. 만료는 읽기에서 무시(지연 삭제, 잡 없음). 사람만. 무감사(기존 프레즌스 PUT 관례).
+- red proof: `custom_status_conformance_pg`. 클라 절반은 A-42(프리셋 칩: 회의 중/이동 중/병가/휴가/재택).
+
+## 메시지 리마인더 REST (#1888 / BF-B1 서버 절반, 2026-08-30)
+
+- `message_reminder`(082): id/workspace/member/channel/message/due_at/note≤500/completed_at. RLS FORCE 소유자 스코프(`app.workspace_id` + `app.member_id`). pending due 인덱스. `schema_v0.sql` 무접촉. **outbox 팬아웃 없음**(ADR-0175 v1=클라 폴링).
+- 사람 본인 CRUD: `POST/GET/PATCH/DELETE /v1/workspaces/{ws}/reminders`. 과거 due 400, 타인 404, 비멤버 채널 403, 에이전트 403. 감사 `reminder.created/updated/completed/deleted`.
+- red proof: `reminder_conformance_pg`. 클라 절반은 A-41.
+
+## 자기 표시 이름 변경 REST (#1873 / BZ-4e, 2026-08-29)
+
+- `PATCH /v1/workspaces/{ws}/members/me` `{displayName}` — 사람 본인만. 정규화는 join의 `normalized_join_display_name`(400 `displayName is required`). 에이전트 자격은 allow-list 밖 403 + `require_human`. 핸들·역할·아바타 무접촉.
+- 단일 쓰기경로: tenant tx에서 `member.display_name`+`updated_at` UPDATE, audit `member.renamed`, 프레즌스 동형 `member.renamed` outbox를 본인 `ch:` 채널에만. 응답은 login/join `Member` 봉투.
+- red proof: `self_rename_conformance_pg` 본인 200+roster·정규화 400·에이전트 403·타 WS/비멤버 403·감사·outbox. `schema_v0.sql` 비접촉.
+
+## 에이전트 workspace role 변경 서버 거부 (#1857, 2026-08-28)
+
+- `change_workspace_role_in_tx`가 target `member.kind=agent`면 requested 값과 무관하게 403 `agent roles are fixed to member`. no-op(`member`)도 같은 문장. 사람 승격/강등·last-owner·self-manage 불변.
+- 채널 role(`change_channel_role_in_tx`)·suspend/remove는 비접촉. 클라 문장 매핑 없음(#1855가 컨트롤을 숨김).
+- red proof: `membership_lifecycle_conformance_pg` 에이전트 4역할 거부 + 사람 왕복, 단위 테스트는 variant 문장/HTTP 403.
+
+## 로컬 허들 node_ip 노브 (#1856a / #1856, 2026-08-28)
+
+- huddle LiveKit entrypoint가 `MOMO_LIVEKIT_NODE_IP`가 있으면 `--node-ip`를 붙인다. 비면 자동 감지(기존 배치 무영향).
+- 셀프호스트 생성 env만 `127.0.0.1` 기본. 기존 env 소급 주입 없음. VM TURN relay 페어는 #1856에 남음.
 
 ## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
 

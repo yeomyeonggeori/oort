@@ -87,6 +87,9 @@ fn roster_dto(member: &RosterMember) -> RosterMemberDto {
         presence_status: member
             .presence_status
             .map(|status| status.as_db_label().to_string()),
+        status_emoji: member.status_emoji.clone(),
+        status_text: member.status_text.clone(),
+        status_expires_at_ms: member.status_expires_at_ms,
         created_at_ms: member.created_at_ms,
         updated_at_ms: member.updated_at_ms,
     }
@@ -208,6 +211,9 @@ mod tests {
             // Presence is the mirror image: a human carries a declared status,
             // an agent carries NULL here (프레즌스 사람 전용, ADR-0160 D4).
             presence_status: (kind == MemberKind::Human).then_some(PresenceStatus::Auto),
+            status_emoji: None,
+            status_text: None,
+            status_expires_at_ms: None,
             created_at_ms: 1_700_000_000_000,
             updated_at_ms: 1_700_000_000_001,
         }
@@ -285,6 +291,25 @@ mod tests {
             agent.get("presenceStatus").is_none(),
             "an agent has no declared presence, its liveness is agent_run: {agent}"
         );
+        assert!(agent.get("statusEmoji").is_none(), "{agent}");
+        assert!(agent.get("statusText").is_none(), "{agent}");
+    }
+
+    #[test]
+    fn a_human_custom_status_is_omitted_when_empty_and_present_when_set() {
+        let empty =
+            serde_json::to_value(roster_dto(&member(MemberKind::Human))).expect("serialize");
+        assert!(empty.get("statusEmoji").is_none(), "{empty}");
+        assert!(empty.get("statusText").is_none(), "{empty}");
+
+        let mut busy = member(MemberKind::Human);
+        busy.status_emoji = Some("📅".into());
+        busy.status_text = Some("회의 중".into());
+        busy.status_expires_at_ms = Some(1_700_000_000_000);
+        let json = serde_json::to_value(roster_dto(&busy)).expect("serialize");
+        assert_eq!(json["statusEmoji"], "📅");
+        assert_eq!(json["statusText"], "회의 중");
+        assert_eq!(json["statusExpiresAtMs"], 1_700_000_000_000i64);
     }
 
     /// goal SRV-R2: an agent row always carries `paused`, **including when it is

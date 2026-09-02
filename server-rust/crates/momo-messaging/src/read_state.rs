@@ -65,18 +65,94 @@ pub struct ReadState {
     pub latest_seq: i64,
     pub unread_count: i64,
     pub mention_count: i32,
+    /// ADR-0178 D2 mark-unread signal: "unread from this seq onward", or
+    /// `None` when the member has left no mark.
+    ///
+    /// Deliberately **raw**. The server does not fold this into
+    /// `unread_count`, and no consumer here composes it with the cursor: D3
+    /// puts the composition `min(mark, last_read + 1)` in exactly one
+    /// `momo-core` function so that badge, divider, pill and ⌥↑↓ navigation
+    /// cannot drift apart by each doing their own arithmetic.
+    pub marked_unread_before_seq: Option<i64>,
+}
+
+/// Why a read-state advertisement was sent (ADR-0178 D4).
+///
+/// ## This enum exists because the seq alone cannot tell you
+///
+/// Before it, `PUT read-state` carried one integer, and three different events
+/// produced byte-identical requests: the reader **opening** the channel, a
+/// message **arriving** while it stayed open, and a client **flushing** a
+/// coalesced cursor on its way out (including the phone's
+/// `AppState != active` flush). D4 needs the first to clear a mark and the
+/// other two to leave it alone, so the intent has to be *stated*, not inferred.
+///
+/// Every seq-derived guess was tried and each one breaks a red proof:
+///
+/// * *"clear when the cursor advanced"* — re-opening a channel whose head has
+///   not moved does not advance, so the mark would survive an explicit read;
+///   and a message arriving while the channel is open does advance, so the
+///   mark would die on arrival.
+/// * *"clear when the advertised seq is at or past the mark"* — D3's
+///   composition only does work when `mark <= last_read_seq`, so *every* device
+///   replaying its own cursor satisfies this. It clears the mark on exactly the
+///   stale re-advertisement D4 exists to survive.
+///
+/// [`ReadIntent::Background`] is the [`Default`] on purpose: an older client
+/// (or the retiring Swift server) that has never heard of this field sends
+/// nothing, and a mark that lingers is something the reader can undo, while a
+/// mark that vanishes silently is the multi-device bug the whole ADR is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ReadIntent {
+    /// The interaction that *is* viewing the channel: opening it, switching to
+    /// it, or pressing an explicit "mark read". Clears the mark (D4).
+    ExplicitOpen,
+    /// Everything else — auto-advance on arrival, coalesced flush on leave,
+    /// app-background transitions, another device replaying its cursor. Never
+    /// touches the mark.
+    #[default]
+    Background,
+}
+
+/// What a read-state write does to `marked_unread_before_seq`.
+///
+/// There is no `Clear` variant, and that is ADR-0178 D5 in the type system:
+/// "해제는 별도 동사 없이 D4의 열람 경로가 수행" — the only way to drop a mark is
+/// to actually read the channel. A caller cannot spell "unmark" directly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MarkUnreadWrite {
+    /// Leave the mark exactly as it is.
+    #[default]
+    Leave,
+    /// Set the mark to this seq. Validated against the channel first: a seq
+    /// that is in the future, or that never existed here, is rejected rather
+    /// than stored (D5).
+    Set(i64),
+}
+
+/// The three ways a read-state write can end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadCursorOutcome {
+    Updated(ReadCursorUpdate),
+    /// Not a live member of the channel — Swift's 403. An authorization
+    /// outcome, not a failure, so it must not roll the transaction back.
+    NotAMember,
+    /// [`MarkUnreadWrite::Set`] named a seq this channel has never handed out
+    /// (or has not reached yet) — a 400. Returned **before any write**, so the
+    /// rejected request leaves nothing behind.
+    MarkSeqNotInChannel(i64),
 }
 
 /// Outcome of [`update_read_cursor_in_tx`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReadCursorUpdate {
     pub state: ReadState,
-    /// `true` when this call moved the cursor forward — the only case that
-    /// emits a broadcast, so a client polling PUT with an unchanged cursor does
-    /// not flood every one of its own devices.
+    /// `true` when this call moved the cursor forward. A mark-only write still
+    /// emits a broadcast (`outbox_id` is Some) even when this is false — marking
+    /// unread behind an already-advanced cursor is the normal case.
     pub advanced: bool,
-    /// The `outbox.id` of the emitted read-state broadcast, or `None` when the
-    /// cursor did not move.
+    /// The `outbox.id` of the emitted read-state broadcast, or `None` when
+    /// neither the cursor nor the mark changed.
     pub outbox_id: Option<i64>,
 }
 
@@ -132,13 +208,29 @@ pub fn build_read_state_payload(
             "latest_seq": state.latest_seq,
             "unread_count": state.unread_count,
             "mention_count": state.mention_count,
+            // ADR-0178: the realtime projection carries the same fields the GET
+            // projection does. Omitting the mark here would let a second device
+            // apply a read-state frame that silently un-marks the channel on
+            // that surface until the next full fetch disagreed with it.
+            "marked_unread_before_seq": state.marked_unread_before_seq,
         },
     });
     let envelope = BroadcastPayload {
         channel: channel.clone(),
         data,
         version: None,
-        idempotency_key: Some(format!("{channel}:{channel_id}:{}", state.last_read_seq)),
+        // The mark is part of the key because a mark can change while the
+        // cursor does not (marking unread behind an already-advanced cursor is
+        // the *normal* case). Keyed on the seq alone, that frame would collide
+        // with the previous one and be deduped away.
+        idempotency_key: Some(format!(
+            "{channel}:{channel_id}:{}:{}",
+            state.last_read_seq,
+            match state.marked_unread_before_seq {
+                Some(seq) => seq.to_string(),
+                None => "-".to_string(),
+            }
+        )),
     };
     serde_json::to_value(envelope).expect("read-state payload serializes")
 }
@@ -150,6 +242,7 @@ fn decode_read_state(row: &sqlx::postgres::PgRow) -> Result<ReadState, sqlx::Err
         latest_seq: row.try_get("latest_seq")?,
         unread_count: row.try_get("unread_count")?,
         mention_count: row.try_get("mention_count")?,
+        marked_unread_before_seq: row.try_get("marked_unread_before_seq")?,
     })
 }
 
@@ -169,7 +262,8 @@ pub async fn list_read_state(
                 COALESCE(cs.last_seq, 0)::bigint AS latest_seq, \
                 GREATEST(COALESCE(cs.last_seq, 0) - COALESCE(rs.last_read_seq, 0), 0)::bigint \
                   AS unread_count, \
-                COALESCE(rs.mention_count, 0)::int AS mention_count \
+                COALESCE(rs.mention_count, 0)::int AS mention_count, \
+                rs.marked_unread_before_seq \
            FROM membership ms \
            JOIN channel c \
              ON c.id = ms.channel_id \
@@ -203,10 +297,10 @@ pub async fn list_read_state(
 /// (Swift's 403) — an authorization outcome, not a failure, so it must not roll
 /// the transaction back.
 ///
-/// The membership row is taken `FOR UPDATE` first: it is the per-(member,
-/// channel) serialization key that exists even before a `read_state` row does,
-/// which is what stops two concurrent first-writes from both deciding they
-/// advanced the cursor and emitting two broadcasts.
+/// This is the pre-ADR-0178 shape, kept because it is the *safe* one: it leaves
+/// any mark-unread signal untouched ([`MarkUnreadWrite::Leave`]) and advertises
+/// itself as [`ReadIntent::Background`]. Callers that actually know why the
+/// cursor moved use [`update_read_cursor_with_intent_in_tx`].
 pub async fn update_read_cursor_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -214,6 +308,57 @@ pub async fn update_read_cursor_in_tx(
     member_id: Uuid,
     requested_last_read_seq: i64,
 ) -> Result<Option<ReadCursorUpdate>, DbError> {
+    match update_read_cursor_with_intent_in_tx(
+        conn,
+        workspace_id,
+        channel_id,
+        member_id,
+        requested_last_read_seq,
+        MarkUnreadWrite::Leave,
+        ReadIntent::Background,
+    )
+    .await?
+    {
+        ReadCursorOutcome::Updated(update) => Ok(Some(update)),
+        ReadCursorOutcome::NotAMember => Ok(None),
+        // Unreachable by construction: validation only runs for
+        // `MarkUnreadWrite::Set`, which this wrapper never passes.
+        ReadCursorOutcome::MarkSeqNotInChannel(seq) => {
+            unreachable!("Leave cannot reject a mark seq ({seq})")
+        }
+    }
+}
+
+/// The full ADR-0178 read-state write: advance the cursor, optionally set the
+/// mark-unread signal, and — only for an explicit open — clear it.
+///
+/// The membership row is taken `FOR UPDATE` first: it is the per-(member,
+/// channel) serialization key that exists even before a `read_state` row does,
+/// which is what stops two concurrent first-writes from both deciding they
+/// advanced the cursor and emitting two broadcasts.
+///
+/// ## The three writes, and why they are independent
+///
+/// `last_read_seq` merges with `GREATEST` and never moves backwards (D1). The
+/// mark is written by plain assignment and is *not* part of that merge — that
+/// independence is the entire mechanism: a stale device replaying an old cursor
+/// loses the `GREATEST` race, and because it carries no mark instruction and no
+/// explicit-open intent, it also leaves the mark exactly where it was.
+///
+/// When a request both sets a mark and claims an explicit open, **the set
+/// wins.** Setting a mark is a thing a person just did on purpose; clearing is
+/// an inference drawn from their having opened the channel. The deliberate act
+/// outranks the inference.
+#[allow(clippy::too_many_arguments)]
+pub async fn update_read_cursor_with_intent_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    channel_id: Uuid,
+    member_id: Uuid,
+    requested_last_read_seq: i64,
+    mark: MarkUnreadWrite,
+    intent: ReadIntent,
+) -> Result<ReadCursorOutcome, DbError> {
     let head_row = sqlx::query(
         "SELECT cs.last_seq \
            FROM membership ms \
@@ -236,41 +381,84 @@ pub async fn update_read_cursor_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(head_row) = head_row else {
-        return Ok(None);
+        return Ok(ReadCursorOutcome::NotAMember);
     };
     let latest_seq: i64 = head_row.try_get("last_seq").map_err(DbError::from)?;
     let bounded = effective_cursor(0, requested_last_read_seq, latest_seq);
 
-    let previous_seq: i64 = sqlx::query_scalar(
-        "SELECT last_read_seq FROM read_state \
+    // D5 validation runs BEFORE the first write, so a rejected mark leaves the
+    // cursor untouched too. One `EXISTS` covers both refusals the ADR names:
+    // a future seq has no row yet, and a seq this channel never handed out has
+    // no row at all. Soft-deleted messages still count — the seq was really
+    // issued here, it is a real position in the ordering, and refusing it would
+    // turn "someone deleted the message you marked from" into a 400 on a
+    // boundary the reader legitimately chose.
+    if let MarkUnreadWrite::Set(seq) = mark {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS ( \
+               SELECT 1 FROM message \
+                WHERE channel_id = $1 AND seq = $2 \
+             )",
+        )
+        .bind(channel_id)
+        .bind(seq)
+        .fetch_one(&mut *conn)
+        .await?;
+        if !exists {
+            return Ok(ReadCursorOutcome::MarkSeqNotInChannel(seq));
+        }
+    }
+
+    let previous = sqlx::query(
+        "SELECT last_read_seq, marked_unread_before_seq FROM read_state \
           WHERE channel_id = $1 AND member_id = $2 \
           FOR UPDATE",
     )
     .bind(channel_id)
     .bind(member_id)
     .fetch_optional(&mut *conn)
-    .await?
-    .unwrap_or(0);
+    .await?;
+    let (previous_seq, previous_mark): (i64, Option<i64>) = match previous {
+        Some(row) => (
+            row.try_get("last_read_seq").map_err(DbError::from)?,
+            row.try_get("marked_unread_before_seq")
+                .map_err(DbError::from)?,
+        ),
+        None => (0, None),
+    };
+
+    // What this write means for the mark. Note the third arm: `Leave` +
+    // `Background` is the overwhelmingly common request and it must be a no-op
+    // on this column no matter what seq it carries.
+    let next_mark: Option<i64> = match (mark, intent) {
+        (MarkUnreadWrite::Set(seq), _) => Some(seq),
+        (MarkUnreadWrite::Leave, ReadIntent::ExplicitOpen) => None,
+        (MarkUnreadWrite::Leave, ReadIntent::Background) => previous_mark,
+    };
 
     let effective_seq: i64 = sqlx::query_scalar(
         "INSERT INTO read_state \
            (workspace_id, channel_id, member_id, last_read_seq, \
-            last_read_at, mention_count, updated_at) \
-         VALUES ($1, $2, $3, $4, now(), 0, now()) \
+            last_read_at, mention_count, updated_at, marked_unread_before_seq) \
+         VALUES ($1, $2, $3, $4, now(), 0, now(), $5) \
          ON CONFLICT (channel_id, member_id) DO UPDATE \
             SET last_read_seq = GREATEST(read_state.last_read_seq, EXCLUDED.last_read_seq), \
                 last_read_at = CASE \
                   WHEN EXCLUDED.last_read_seq > read_state.last_read_seq THEN now() \
                   ELSE read_state.last_read_at END, \
                 updated_at = CASE \
-                  WHEN EXCLUDED.last_read_seq > read_state.last_read_seq THEN now() \
-                  ELSE read_state.updated_at END \
+                  WHEN EXCLUDED.last_read_seq > read_state.last_read_seq \
+                    OR EXCLUDED.marked_unread_before_seq IS DISTINCT FROM \
+                       read_state.marked_unread_before_seq THEN now() \
+                  ELSE read_state.updated_at END, \
+                marked_unread_before_seq = EXCLUDED.marked_unread_before_seq \
          RETURNING last_read_seq",
     )
     .bind(workspace_id)
     .bind(channel_id)
     .bind(member_id)
     .bind(bounded)
+    .bind(next_mark)
     .fetch_one(&mut *conn)
     .await?;
 
@@ -310,10 +498,14 @@ pub async fn update_read_cursor_in_tx(
         latest_seq,
         unread_count: unread_count(latest_seq, effective_seq),
         mention_count,
+        marked_unread_before_seq: next_mark,
     };
 
     let advanced = effective_seq > previous_seq;
-    let outbox_id = if advanced {
+    // A mark change is worth publishing even when the cursor stood still: it is
+    // precisely the case where another device is showing a stale surface.
+    let mark_changed = next_mark != previous_mark;
+    let outbox_id = if advanced || mark_changed {
         let payload = build_read_state_payload(
             workspace_id,
             member_id,
@@ -335,7 +527,7 @@ pub async fn update_read_cursor_in_tx(
         None
     };
 
-    Ok(Some(ReadCursorUpdate {
+    Ok(ReadCursorOutcome::Updated(ReadCursorUpdate {
         state,
         advanced,
         outbox_id,
@@ -597,6 +789,7 @@ mod tests {
             latest_seq: 9,
             unread_count: 4,
             mention_count: 2,
+            marked_unread_before_seq: None,
         };
         let payload = build_read_state_payload(ws, member, &state, 1234);
 
@@ -609,6 +802,11 @@ mod tests {
         assert_eq!(inner["latest_seq"], json!(9));
         assert_eq!(inner["unread_count"], json!(4));
         assert_eq!(inner["mention_count"], json!(2));
+        assert!(
+            inner.get("marked_unread_before_seq").is_some(),
+            "the realtime projection carries the mark key: {inner}"
+        );
+        assert!(inner["marked_unread_before_seq"].is_null());
         assert_eq!(
             inner["channel_id"],
             json!(state.channel_id.to_string().to_uppercase())
@@ -616,7 +814,7 @@ mod tests {
         assert_eq!(
             payload["idempotency_key"],
             json!(format!(
-                "{}:{}:5",
+                "{}:{}:5:-",
                 read_state_channel(member),
                 state.channel_id.to_string().to_uppercase()
             ))
@@ -624,6 +822,45 @@ mod tests {
         // A read cursor is not an ordered channel event — Swift emits no
         // `version`, and BroadcastPayload omits a None.
         assert!(payload.get("version").is_none());
+    }
+
+    #[test]
+    fn a_mark_change_gets_its_own_idempotency_key() {
+        let ws = Uuid::from_u128(1);
+        let member = Uuid::from_u128(2);
+        let unmarked = ReadState {
+            channel_id: Uuid::from_u128(3),
+            last_read_seq: 5,
+            latest_seq: 9,
+            unread_count: 4,
+            mention_count: 0,
+            marked_unread_before_seq: None,
+        };
+        let marked = ReadState {
+            marked_unread_before_seq: Some(3),
+            ..unmarked.clone()
+        };
+        let without = build_read_state_payload(ws, member, &unmarked, 1);
+        let with = build_read_state_payload(ws, member, &marked, 1);
+        assert_ne!(
+            without["idempotency_key"], with["idempotency_key"],
+            "a mark behind an unchanged cursor must not collide with the previous frame"
+        );
+        assert_eq!(
+            with["data"]["payload"]["marked_unread_before_seq"],
+            json!(3)
+        );
+        assert_eq!(
+            with["data"]["payload"]["unread_count"],
+            json!(4),
+            "D3: the server projection does not fold the mark into unread_count"
+        );
+    }
+
+    #[test]
+    fn read_intent_defaults_to_background() {
+        assert_eq!(ReadIntent::default(), ReadIntent::Background);
+        assert_eq!(MarkUnreadWrite::default(), MarkUnreadWrite::Leave);
     }
 
     #[test]

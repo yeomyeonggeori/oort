@@ -82,7 +82,14 @@ const DM_AGENT_KIM = channel({
 });
 
 function readState(overrides: Partial<ReadState> & {channelId: string}): ReadState {
-  return {lastReadSeq: 0, latestSeq: 0, unreadCount: 0, mentionCount: 0, ...overrides};
+  return {
+    lastReadSeq: 0,
+    latestSeq: 0,
+    unreadCount: 0,
+    mentionCount: 0,
+    markedUnreadBeforeSeq: null,
+    ...overrides,
+  };
 }
 
 function input(overrides: Partial<SidebarInput> = {}): SidebarInput {

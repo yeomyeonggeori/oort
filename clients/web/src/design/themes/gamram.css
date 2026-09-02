@@ -1,0 +1,7 @@
+/* 감람 — forest olivine. Darkened off `--ok` so the two greens stay two greens. */
+:root[data-accent="gamram"],
+[data-accent-swatch="gamram"] {
+  --accent: light-dark(#005400, #8cb858);
+  --accent-soft: light-dark(#dcefda, #272d23);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

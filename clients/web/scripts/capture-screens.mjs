@@ -21,11 +21,11 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { deflateSync } from "node:zlib";
 import { chromium } from "playwright";
+import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -37,6 +37,37 @@ const VIEWPORT = { width: 1280, height: 800 };
 const TOKENS_CSS = readFileSync(
   resolve(WEB_ROOT, "src/design/tokens.css"),
   "utf8"
+);
+const DRAFT_STORE_SRC = readFileSync(
+  resolve(WEB_ROOT, "src/features/chat/draftStore.ts"),
+  "utf8"
+);
+const ACCENT_CATALOG_SRC = readFileSync(
+  resolve(WEB_ROOT, "src/design/themes/index.ts"),
+  "utf8"
+);
+
+function accentCatalogIds() {
+  const ids = [...ACCENT_CATALOG_SRC.matchAll(/id: "([a-z]+)"/g)].map(
+    (match) => match[1]
+  );
+  if (ids.length === 0 || ids[0] !== "dawn") {
+    throw new Error("accent catalog must list dawn first");
+  }
+  return ids;
+}
+
+function exportedStringConst(source, name) {
+  const match = source.match(new RegExp(`export const ${name} = "([^"]+)";`));
+  if (match === null) {
+    throw new Error(`draftStore.ts의 ${name}을 읽지 못했다`);
+  }
+  return match[1];
+}
+
+const DRAFTS_CHANGED_EVENT = exportedStringConst(
+  DRAFT_STORE_SRC,
+  "DRAFTS_CHANGED_EVENT"
 );
 
 function pixelToken(name) {
@@ -50,61 +81,86 @@ function pixelToken(name) {
 const COMPOSER_FRAME_INSET = pixelToken("spacing-3");
 const ANCHOR_ALIGNMENT_TOLERANCE = pixelToken("spacing-1");
 
-const CRC_TABLE = (() => {
-  const table = new Int32Array(256);
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table[n] = c;
-  }
-  return table;
-})();
-
-function crc32(buffer) {
-  let c = 0xffffffff;
-  for (const byte of buffer) c = CRC_TABLE[(c ^ byte) & 0xff] ^ (c >>> 8);
-  return c ^ 0xffffffff;
-}
-
 /**
- * 1200×630 is the common OG thumbnail canvas. The old 1×1 black pixel could
- * neither exercise `object-cover` nor make an aspect-ratio regression visible
- * in the captured frame. The two-axis gradient makes both cropped edges and
- * the retained centre legible without importing an external asset.
+ * 1200×630 OG thumbnail for the capture unfurl. A rainbow gradient on this
+ * canvas became the largest chromatic object in chat-light/dark once rich
+ * was the default (#1903 M-3) — the §8-banned hero silhouette. This is a
+ * docs-site OG card: solid paper, a mark, Korean+English runbook copy.
  */
-function makeUnfurlPreviewPng(width, height) {
-  const raw = Buffer.alloc((width * 3 + 1) * height);
-  let at = 0;
-  for (let y = 0; y < height; y++) {
-    raw[at++] = 0;
-    for (let x = 0; x < width; x++) {
-      raw[at++] = 32 + Math.round((x / width) * 176);
-      raw[at++] = 52 + Math.round((y / height) * 140);
-      raw[at++] = 184 - Math.round((x / width) * 112);
-    }
-  }
-  const chunk = (type, body) => {
-    const length = Buffer.alloc(4);
-    length.writeUInt32BE(body.length);
-    const typed = Buffer.concat([Buffer.from(type, "ascii"), body]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(typed) >>> 0);
-    return Buffer.concat([length, typed, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8;
-  ihdr[9] = 2;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk("IHDR", ihdr),
-    chunk("IDAT", deflateSync(raw)),
-    chunk("IEND", Buffer.alloc(0)),
-  ]);
-}
+let UNFURL_PREVIEW_PNG;
 
-const UNFURL_PREVIEW_PNG = makeUnfurlPreviewPng(1200, 630);
+async function prepareUnfurlPreviewPng(browser) {
+  if (UNFURL_PREVIEW_PNG) return;
+  const page = await browser.newPage({
+    viewport: { width: 1200, height: 630 },
+    deviceScaleFactor: 1,
+  });
+  await page.setContent(`<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <style>
+    html, body { margin: 0; width: 1200px; height: 630px; }
+    body {
+      position: relative;
+      background: #efece6;
+      color: #24211c;
+      font: 32px/1.35 "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+      box-sizing: border-box;
+      padding: 56px 64px 56px 80px;
+      display: flex;
+      flex-direction: column;
+    }
+    .rail {
+      position: absolute;
+      left: 0; top: 0; bottom: 0;
+      width: 16px;
+      background: #a54c08;
+    }
+    .mark {
+      width: 48px; height: 48px;
+      background: #a54c08;
+      border-radius: 6px;
+    }
+    .kicker {
+      margin-top: 28px;
+      font-size: 22px;
+      color: #6a655f;
+    }
+    h1 {
+      margin: 12px 0 0;
+      font-size: 52px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    .sub {
+      margin-top: 16px;
+      font-size: 26px;
+      color: #6a655f;
+    }
+    .bar {
+      margin-top: auto;
+      width: 160px;
+      height: 8px;
+      background: #a54c08;
+    }
+  </style>
+</head>
+<body>
+  <div class="rail"></div>
+  <div class="mark"></div>
+  <div class="kicker">docs.oor7.com · oort runbook</div>
+  <h1>게이트웨이 오류 대응 런북</h1>
+  <p class="sub">Gateway error runbook · 502 path and worker checks</p>
+  <div class="bar"></div>
+</body>
+</html>`);
+  UNFURL_PREVIEW_PNG = await page.screenshot({
+    type: "png",
+    clip: { x: 0, y: 0, width: 1200, height: 630 },
+  });
+  await page.close();
+}
 
 // 폰 프로파일 (goal B6). 390x844는 iPhone 14/15의 CSS 뷰포트이고, 이 티켓을 연
 // 실캡처를 찍은 그 기기다. deviceScaleFactor 3 · hasTouch · isMobile까지 켜는
@@ -169,27 +225,69 @@ const MOBILE_TAP_TARGETS = [
   ["presence-option-dnd", "상태 방해 금지", "optional"],
   ["profile-add-workspace", "워크스페이스 추가", "optional"],
   ["nav-settings", "설정", "optional"],
+  ["profile-logout", "로그아웃", "optional"],
   // #1758 M-1 — 도크 닫기/확대는 빠져나오는 손가락 경로인데 28px였다.
   // optional: 도크가 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
   ["terminal-dock-close", "터미널 닫기", "optional"],
   ["terminal-dock-expand", "터미널 크게 보기", "optional"],
+  // #1885 M-3 — 상·하단 점프 필. hover:none에서 44px. optional: 상단은
+  // 구분선이 창 위쪽일 때만, 하단은 바닥이 아닐 때만 존재한다.
+  ["jump-unread", "위쪽 새 메시지", "optional"],
+  ["jump-latest", "최신 메시지로", "optional"],
+  ["draft-row-menu", "초안 메뉴", "optional"],
+  // #1888 B-1/H-3 — 리마인더 행의 완료·미루기·⋯. optional: 나중에 탭에만.
+  ["reminder-complete", "알림 완료", "optional"],
+  ["reminder-snooze", "알림 미루기", "optional"],
+  ["reminder-row-menu", "알림 메뉴", "optional"],
+  ["reminder-complete-commit", "알림 완료 확인", "optional"],
+  ["reminder-delete-commit", "알림 지우기 확인", "optional"],
+  // #1889 M-3 — 상태 설정 다이얼로그의 1급 컨트롤. 프리셋 칩과 이모지 칸이
+  // size=sm(28)이라 폰에서 tap-target을 각자 단다. optional: 다이얼로그가
+  // 열린 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["set-status-emoji", "상태 이모지", "optional"],
+  ["set-status-preset-meeting", "상태 프리셋 회의 중", "optional"],
+  ["set-status-preset-commute", "상태 프리셋 이동 중", "optional"],
+  ["set-status-preset-sick", "상태 프리셋 병가", "optional"],
+  ["set-status-preset-vacation", "상태 프리셋 휴가", "optional"],
+  ["set-status-preset-wfh", "상태 프리셋 재택", "optional"],
+  ["set-status-text", "상태 글", "optional"],
+  // 같은 결정, 형제 RemindDialog (#1888 랜딩분). optional: 폰 캡처가 시트에서
+  // 「나중에 알림」으로 연 프레임에서만 존재하고, 그 프레임이 자를 다시 부른다.
+  ["remind-preset-30m", "알림 프리셋 30분", "optional"],
+  ["remind-preset-1h", "알림 프리셋 1시간", "optional"],
+  ["remind-preset-3h", "알림 프리셋 3시간", "optional"],
+  ["remind-preset-tomorrow-9", "알림 프리셋 내일 9시", "optional"],
+  ["remind-preset-next-monday-9", "알림 프리셋 다음 주 월요일", "optional"],
+  ["remind-note", "알림 메모", "optional"],
+  // #1868 N-4 — 설정 > 테마 액센트 스와치. optional: 테마 섹션이 열린 프레임에서만.
+  ["accent-swatch-dawn", "액센트 새벽", "optional"],
 ];
 
-// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4).
+// 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
+// S0 랜딩 / S1 게이트 / S2 계정 세 화면에 갈라져 있으므로 목록도 화면마다 따로다.
+// 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어 전부 optional로
+// 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지 않는다.
 //
-// 위 목록과 나누는 이유: 그쪽은 채팅 표면에만 있는 컨트롤을 **필수**로 재고, 이 넷은
-// 로그인 화면에만 있다. 한 목록에 섞으면 어느 화면에서 재든 절반이 "없음"이 되어
-// 전부 optional로 내려앉고, 그러면 있어야 할 컨트롤이 사라져도 아무도 실패하지
-// 않는다. 각자 자기 화면에서 필수로 재는 편이 더 센 자다.
-//
-// 왜 이 넷인가: `--spacing-control`이 32px이라 로그인 폼 전체가 32px이었다. WCAG
-// 2.5.8 AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 로그인은 폰에서
+// `--spacing-control`이 32px이라 폼 컨트롤은 포인터에서 32px이다. WCAG 2.5.8
+// AA(24×24)는 통과하지만 Apple HIG의 44pt는 통과하지 못하고, 온보딩은 폰에서
 // 가장 먼저 만나는 화면이라 여기서 잘못 눌린 칸이 이 제품의 첫인상이 된다.
 const LOGIN_TAP_TARGETS = [
-  ["login-server", "서버 주소 입력"],
+  ["onboarding-back", "뒤로"],
   ["login-email", "이메일 입력"],
   ["login-password", "비밀번호 입력"],
   ["login-submit", "로그인 버튼"],
+];
+
+const LANDING_TAP_TARGETS = [
+  ["onboarding-choose-server", "우리 팀 서버로 접속"],
+  ["onboarding-choose-invite", "초대 링크로 참여"],
+];
+
+const GATEWAY_TAP_TARGETS = [
+  ["onboarding-back", "뒤로"],
+  ["login-server", "서버 주소 입력"],
+  ["onboarding-next", "다음"],
+  ["connect-recent-server", "최근 접속", "optional"],
 ];
 
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
@@ -317,6 +415,17 @@ const CHANNELS = [
   { id: "00000000-0000-7000-8000-000000000202", workspaceId: WORKSPACE_ID, kind: "public", name: "엔진", muted: false },
   { id: "00000000-0000-7000-8000-000000000203", workspaceId: WORKSPACE_ID, kind: "private", name: "김인턴작업", muted: false },
   { id: "00000000-0000-7000-8000-000000000204", workspaceId: WORKSPACE_ID, kind: "public", name: "release-notes", muted: false },
+  // 자유 텍스트 방 이름 (#1930 M-1). 채널 `name` 은 스키마상 자유 텍스트라 한글도
+  // 공백도 담고, 컴포저 후보 행은 폭 192(`w-pane-sm`) 안에서 그것을 담아야 한다.
+  // 이 줄이 없으면 그 행을 재는 프레임이 영문 짧은 이름만 보게 된다.
+  {
+    id: "00000000-0000-7000-8000-000000000205",
+    workspaceId: WORKSPACE_ID,
+    kind: "public",
+    name: "2026-하반기-릴리스-준비-회고-및-후속-작업",
+    topic: "회고 기록과 후속 작업",
+    muted: false,
+  },
 ];
 
 // The DM the directory opens onto (MOMO-611). It is in the fixture so the
@@ -367,6 +476,17 @@ const OAUTH_CONSENT_PREVIEW = {
 // design: the agent row is where --agent (predawn slate-blue) is visible at all,
 // and the unread/mention badges are the only place --accent lands in the
 // sidebar. Without these the capture would review a surface nobody ships.
+//
+// #1889 R2-B1: a 4-char 「회의 중」 hid the 80-char menu-width axis. One self
+// fixture sits at the text ceiling so wrap-vs-widen cannot hide again.
+const SELF_STATUS_TEXT =
+  "3분기 게이트웨이 점검 중, 오후 6시 이후 응답이 늦습니다. 급하면 전화 주세요, 이 채널로만 남겨 주세요. urgent only 내일 6시";
+if (SELF_STATUS_TEXT.length < 70 || SELF_STATUS_TEXT.length > 80) {
+  throw new Error(
+    `레인 상태 픽스처가 80자 한도 근처가 아니다: ${SELF_STATUS_TEXT.length}`
+  );
+}
+
 const ROSTER = [
   {
     id: ME,
@@ -380,6 +500,8 @@ const ROSTER = [
     channelIds: CHANNEL_IDS,
     capabilities: [],
     presenceStatus: "auto",
+    statusEmoji: "📅",
+    statusText: SELF_STATUS_TEXT,
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -413,6 +535,9 @@ const ROSTER = [
     channelCount: 2,
     channelIds: CHANNEL_IDS.slice(0, 2),
     capabilities: [],
+    presenceStatus: "away",
+    statusEmoji: "🏠",
+    statusText: "재택",
     createdAtMs: 0,
     updatedAtMs: 0,
   },
@@ -1288,6 +1413,11 @@ async function installUnmockedFallback(context) {
 
 async function installMocks(context) {
   let declaredPresence = "auto";
+  let customStatus = {
+    statusEmoji: "📅",
+    statusText: SELF_STATUS_TEXT,
+    statusExpiresAtMs: undefined,
+  };
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
@@ -1330,9 +1460,29 @@ async function installMocks(context) {
   // an unarchived channel already carries the name, which is the frame that
   // matters because the rejection has to land under the name field, and 201
   // with the created row otherwise.
+  // BT-1 (#1929): 사이드바 행 메뉴가 알림을 끄면 서버가 그것을 **기억해야**
+  // 낱말이 다음에 열 때 뒤집힌다. 무효화 뒤 재조회가 같은 값을 돌려주면 캡처는
+  // 「눌렀지만 아무 일도 없었다」를 초록으로 넘긴다.
+  const mutedChannels = new Set();
+  await context.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) => {
+      const url = new URL(route.request().url());
+      const id = url.pathname.split("/").at(-2);
+      const body = JSON.parse(route.request().postData() ?? "{}");
+      if (body.muted) mutedChannels.add(id);
+      else mutedChannels.delete(id);
+      return json(route, { muted: Boolean(body.muted) });
+    }
+  );
   await context.route("**/v1/workspaces/*/channels", (route) => {
     if (route.request().method() !== "POST") {
-      return json(route, { channels: [...CHANNELS, DM_CHANNEL] });
+      return json(route, {
+        channels: [...CHANNELS, DM_CHANNEL].map((channel) => ({
+          ...channel,
+          muted: mutedChannels.has(channel.id),
+        })),
+      });
     }
     const body = JSON.parse(route.request().postData() ?? "{}");
     if (CHANNELS.some((c) => c.name === body.name)) {
@@ -1461,7 +1611,31 @@ async function installMocks(context) {
         body.status === "dnd"
       ) {
         declaredPresence = body.status;
-        return json(route, { status: declaredPresence });
+        if (Object.prototype.hasOwnProperty.call(body, "statusEmoji")) {
+          customStatus.statusEmoji =
+            body.statusEmoji === null || body.statusEmoji === ""
+              ? undefined
+              : body.statusEmoji;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusText")) {
+          customStatus.statusText =
+            body.statusText === null || body.statusText === ""
+              ? undefined
+              : body.statusText;
+        }
+        if (Object.prototype.hasOwnProperty.call(body, "statusExpiresAtMs")) {
+          customStatus.statusExpiresAtMs =
+            typeof body.statusExpiresAtMs === "number"
+              ? body.statusExpiresAtMs
+              : undefined;
+        }
+        const response = { status: declaredPresence };
+        if (customStatus.statusEmoji) response.statusEmoji = customStatus.statusEmoji;
+        if (customStatus.statusText) response.statusText = customStatus.statusText;
+        if (customStatus.statusExpiresAtMs !== undefined) {
+          response.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+        }
+        return json(route, response);
       }
       return route.fulfill({
         status: 400,
@@ -1469,13 +1643,25 @@ async function installMocks(context) {
         body: JSON.stringify({ error: "invalid_status" }),
       });
     }
-    return json(route, { status: declaredPresence });
+    const own = { status: declaredPresence };
+    if (customStatus.statusEmoji) own.statusEmoji = customStatus.statusEmoji;
+    if (customStatus.statusText) own.statusText = customStatus.statusText;
+    if (customStatus.statusExpiresAtMs !== undefined) {
+      own.statusExpiresAtMs = customStatus.statusExpiresAtMs;
+    }
+    return json(route, own);
   });
   await context.route("**/v1/workspaces/*/roster", (route) =>
     json(route, {
       members: ROSTER.map((member) =>
         member.id === ME
-          ? { ...member, presenceStatus: declaredPresence }
+          ? {
+              ...member,
+              presenceStatus: declaredPresence,
+              statusEmoji: customStatus.statusEmoji,
+              statusText: customStatus.statusText,
+              statusExpiresAtMs: customStatus.statusExpiresAtMs,
+            }
           : member
       ),
     })
@@ -1483,6 +1669,38 @@ async function installMocks(context) {
   await context.route("**/v1/workspaces/*/read-state", (route) =>
     json(route, { read_states: READ_STATES })
   );
+  // BF-B1 (#1888). Same 30s poll as read-state; without this pair the catch-all
+  // 404s and the 나중에 tab is an error instead of a list.
+  await context.route("**/v1/workspaces/*/reminders*", (route) => {
+    const now = Date.now();
+    return json(route, {
+      reminders: [
+        {
+          id: "00000000-0000-7000-8000-000000000801",
+          workspaceId: WORKSPACE_ID,
+          memberId: ME,
+          channelId: GENERAL_ID,
+          messageId: "00000000-0000-7000-8000-000000000501",
+          dueAtMs: now + 30 * 60_000,
+          createdAtMs: now - 5 * 60_000,
+          note: "배포 후 한 줄만 확인",
+          messagePreview: "스테이징 배포 체크리스트 공유합니다",
+          seq: 42,
+        },
+        {
+          id: "00000000-0000-7000-8000-000000000802",
+          workspaceId: WORKSPACE_ID,
+          memberId: ME,
+          channelId: GENERAL_ID,
+          messageId: "00000000-0000-7000-8000-000000000502",
+          dueAtMs: now - 10 * 60_000,
+          createdAtMs: now - 3 * 60 * 60_000,
+          messagePreview: "내일 스탠드업 안건 초안",
+          seq: 18,
+        },
+      ],
+    });
+  });
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) =>
     json(route, READ_STATES[0])
   );
@@ -1744,13 +1962,16 @@ async function installMocks(context) {
           : [],
     });
   });
-  await context.route("**/v1/workspaces/*/unfurls/*/image", (route) =>
-    route.fulfill({
+  await context.route("**/v1/workspaces/*/unfurls/*/image", (route) => {
+    if (!UNFURL_PREVIEW_PNG) {
+      throw new Error("언퍼얼 OG 픽스처 PNG가 아직 없다");
+    }
+    return route.fulfill({
       status: 200,
       contentType: "image/png",
       body: UNFURL_PREVIEW_PNG,
-    })
-  );
+    });
+  });
   await context.route("**/v1/workspaces/*/unfurl-settings", (route) => {
     const body = JSON.parse(route.request().postData() || "{}");
     return json(route, {
@@ -1758,6 +1979,111 @@ async function installMocks(context) {
       updatedAtMs: Date.now() - 3_600_000,
     });
   });
+  // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
+  //
+  // GET 의 기본값은 **빈 payload** 다. 여기에 커스텀 섹션을 심으면 이 파일의
+  // 기존 사이드바 프레임이 전부 한 칸씩 달라지므로, 섹션은 장면이 UI 로 직접
+  // 만들고 끝나기 전에 지운다(`captureSidebarSections` 꼬리). PUT 은 서버처럼
+  // 통째로 되돌려 준다.
+  await context.route(
+    "**/v1/workspaces/*/members/me/sidebar-prefs",
+    (route) => {
+      if (route.request().method() === "PUT") {
+        const body = JSON.parse(route.request().postData() || "{}");
+        return json(route, {
+          prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
+          updatedAtMs: Date.now(),
+        });
+      }
+      return json(route, {
+        prefs: { version: 1, sections: [], starredChannelIds: [] },
+      });
+    }
+  );
+  await context.route("**/v1/workspaces/*/notification-rules", (route) => {
+    if (route.request().method() === "PUT") {
+      const body = JSON.parse(route.request().postData() || "{}");
+      return json(route, {
+        dnd: Boolean(body.dnd),
+        mentionOverridesMute: Boolean(body.mentionOverridesMute),
+      });
+    }
+    return json(route, { dnd: false, mentionOverridesMute: true });
+  });
+}
+
+async function assertOnboardingCardCentered(page, where, testId) {
+  const m = await page.evaluate(`(() => {
+    const card = document.querySelector('[data-testid="${testId}"]');
+    if (!card) return { missing: true };
+    const r = card.getBoundingClientRect();
+    return {
+      missing: false,
+      left: Math.round(r.left),
+      width: Math.round(r.width),
+      cardMid: r.left + r.width / 2,
+      viewMid: window.innerWidth / 2,
+    };
+  })()`);
+  if (m.missing) {
+    throw new Error(`카드 중앙 ${where}: ${testId} 없음`);
+  }
+  const delta = Math.abs(m.cardMid - m.viewMid);
+  if (delta > 8) {
+    throw new Error(
+      `카드 중앙 ${where}: ${testId} mid=${m.cardMid.toFixed(1)} view=${m.viewMid.toFixed(1)} ` +
+        `left=${m.left} width=${m.width} (delta ${delta.toFixed(1)}px)`
+    );
+  }
+  console.log(
+    `  card center ${where}: ${testId} left=${m.left} width=${m.width} delta=${delta.toFixed(1)}`
+  );
+}
+
+async function assertCloudMissesTarget(page, where, testId, label) {
+  const proof = await page.evaluate(`(() => {
+    const target = document.querySelector('[data-testid="${testId}"]');
+    if (!target) return { missing: true, hits: [] };
+    const b = target.getBoundingClientRect();
+    const hits = [];
+    for (const el of document.querySelectorAll("[data-onboarding-body]")) {
+      const r = el.getBoundingClientRect();
+      const overlap = !(
+        r.right < b.left ||
+        r.left > b.right ||
+        r.bottom < b.top ||
+        r.top > b.bottom
+      );
+      if (overlap) {
+        hits.push({
+          body: el.getAttribute("data-onboarding-body"),
+          left: Math.round(r.left),
+          top: Math.round(r.top),
+          right: Math.round(r.right),
+          bottom: Math.round(r.bottom),
+        });
+      }
+    }
+    return { missing: false, hits };
+  })()`);
+  if (proof.missing) {
+    throw new Error(`S0 ${label} ${where}: ${testId} 없음`);
+  }
+  if (proof.hits.length !== 0) {
+    throw new Error(
+      `S0 ${label} ${where}: hits=${proof.hits.length} ` + JSON.stringify(proof)
+    );
+  }
+  console.log(`  S0 ${label} ${where}: hits 0`);
+}
+
+async function assertCloudMissesCta(page, where) {
+  await assertCloudMissesTarget(page, where, "onboarding-choose-invite", "CTA invite");
+  await assertCloudMissesTarget(page, where, "onboarding-choose-server", "CTA server");
+}
+
+async function assertCloudMissesLockup(page, where) {
+  await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
 }
 
 async function waitForServer(url, timeoutMs = 30_000) {
@@ -1782,10 +2108,171 @@ async function signIn(page) {
   // 명시적인 초기화로 바꾼다.
   await page.evaluate("try { localStorage.clear(); } catch (e) {}");
   await page.reload({ waitUntil: "networkidle" });
-  await page.getByTestId("login-email").fill("seongjae@dawn.example");
-  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await signInThroughOnboarding(page, {
+    email: "seongjae@dawn.example",
+    password: "capture-only-not-a-credential",
+  });
   await page.getByTestId("channel-list").waitFor({ state: "visible" });
+}
+
+/**
+ * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
+ * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
+ */
+async function assertOnboardingIgnoresAccent(page, where) {
+  const readLanding = () =>
+    page.evaluate(() => {
+      const landing = document.querySelector('[data-testid="onboarding-landing"]');
+      const cta = document.querySelector('[data-testid="onboarding-choose-server"]');
+      if (!landing || !cta) return null;
+      const landingStyle = getComputedStyle(landing);
+      const ctaStyle = getComputedStyle(cta);
+      return {
+        space: landingStyle.backgroundColor,
+        ink: landingStyle.color,
+        onboardingAccent: landingStyle.getPropertyValue("--onboarding-accent").trim(),
+        ctaBg: ctaStyle.backgroundColor,
+      };
+    });
+  const before = await readLanding();
+  if (!before?.onboardingAccent) {
+    throw new Error(`S0 격리 ${where}: 랜딩 토큰을 읽지 못했다`);
+  }
+  const other = accentCatalogIds().find((id) => id !== "dawn") ?? "seongun";
+  await page.evaluate((id) => {
+    document.documentElement.setAttribute("data-accent", id);
+  }, other);
+  const after = await readLanding();
+  if (
+    !after ||
+    after.space !== before.space ||
+    after.ink !== before.ink ||
+    after.onboardingAccent !== before.onboardingAccent ||
+    after.ctaBg !== before.ctaBg
+  ) {
+    throw new Error(
+      `S0 격리 ${where}: data-accent=${other} 가 랜딩을 바꿨다 ` +
+        `${JSON.stringify({ before, after })}`
+    );
+  }
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-accent", "dawn");
+  });
+}
+
+async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
+  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await assertOnboardingIgnoresAccent(page, where);
+  const scatter = await page.locator("[data-onboarding-body]").count();
+  if (scatter !== 30) {
+    throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
+  }
+  await assertCloudMissesCta(page, where);
+  await assertCloudMissesLockup(page, where);
+  const wordmark = await page.getByTestId("onboarding-wordmark").textContent();
+  if (wordmark?.trim() !== "oort") {
+    throw new Error(`S0 워드마크 ${where}: ${JSON.stringify(wordmark)}`);
+  }
+  const tagline = await page.getByTestId("onboarding-tagline").textContent();
+  if (tagline?.trim() !== "사람과 에이전트가 같은 자리에서 일하는 메신저.") {
+    throw new Error(`S0 카피 ${where}: ${JSON.stringify(tagline)}`);
+  }
+  const lockupMetrics = await page.evaluate(`(() => {
+    const mark = document.querySelector('[data-testid="onboarding-mark"]');
+    const word = document.querySelector('[data-testid="onboarding-wordmark"]');
+    const copy = document.querySelector('[data-testid="onboarding-tagline"]');
+    const markBox = mark.getBoundingClientRect();
+    const copyBox = copy.getBoundingClientRect();
+    const wordSize = parseFloat(getComputedStyle(word).fontSize);
+    const copySize = parseFloat(getComputedStyle(copy).fontSize);
+    const copyLh = parseFloat(getComputedStyle(copy).lineHeight);
+    return {
+      mark: Math.round(markBox.height),
+      wordFont: Math.round(wordSize * 10) / 10,
+      copyFont: Math.round(copySize * 10) / 10,
+      copyHeight: Math.round(copyBox.height),
+      copyLh: Math.round(copyLh * 10) / 10,
+      copyWidth: Math.round(copyBox.width),
+    };
+  })()`);
+  const wordRatio = lockupMetrics.wordFont / lockupMetrics.mark;
+  if (wordRatio < 0.24 || wordRatio > 0.36) {
+    throw new Error(
+      `S0 워드마크 위계 ${where}: ${lockupMetrics.wordFont}px / mark ${lockupMetrics.mark}px = ${wordRatio.toFixed(3)} (기대 1/4–1/3)`
+    );
+  }
+  if (lockupMetrics.wordFont <= lockupMetrics.copyFont + 4) {
+    throw new Error(
+      `S0 워드마크가 카피와 같은 단 ${where}: word ${lockupMetrics.wordFont}px copy ${lockupMetrics.copyFont}px`
+    );
+  }
+  if (lockupMetrics.copyHeight > lockupMetrics.copyLh + 1) {
+    throw new Error(
+      `S0 카피 2줄 ${where}: h=${lockupMetrics.copyHeight} lh=${lockupMetrics.copyLh} w=${lockupMetrics.copyWidth}`
+    );
+  }
+  console.log(
+    `  S0 lockup ${where}: mark ${lockupMetrics.mark}px · wordmark ${lockupMetrics.wordFont}px · copy ${lockupMetrics.copyFont}px ${lockupMetrics.copyWidth}×${lockupMetrics.copyHeight}`
+  );
+  await page.getByTestId("onboarding-choose-server").focus();
+  const landingFocus = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (landingFocus !== "onboarding-choose-server") {
+    throw new Error(`S0 포커스 ${where}: ${landingFocus}`);
+  }
+  const fill = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="onboarding-landing"]');
+    const r = el.getBoundingClientRect();
+    return {
+      top: Math.round(r.top),
+      bottom: Math.round(r.bottom),
+      viewport: window.innerHeight,
+    };
+  })()`);
+  if (fill.bottom < fill.viewport - 1) {
+    throw new Error(
+      `S0 높이 ${where}: 랜딩 아랫변 ${fill.bottom}px / 뷰포트 ${fill.viewport}px (top ${fill.top})`
+    );
+  }
+  await assertNoHorizontalOverflow(page, `landing ${where}`);
+  if (tapTargets) {
+    await assertTapTargets(page, `landing ${where}`, LANDING_TAP_TARGETS);
+  }
+  if (shoot) await shoot("onboarding-landing");
+
+  await page.getByTestId("onboarding-choose-server").click();
+  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
+  const chrome = await page.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const progress = document.querySelector('[data-testid="onboarding-progress"]');
+    return {
+      row: Boolean(row && back && progress && row.contains(back) && row.contains(progress)),
+      underline: back ? getComputedStyle(back).textDecorationLine : null,
+      backLabel: back?.textContent?.replace(/\\s+/g, " ").trim() ?? null,
+    };
+  })()`);
+  if (!chrome.row) {
+    throw new Error(`S1 크롬 ${where}: 뒤로/카운터가 한 줄이 아님 ${JSON.stringify(chrome)}`);
+  }
+  if (chrome.underline && chrome.underline !== "none") {
+    throw new Error(`S1 크롬 ${where}: 뒤로가 밑줄 ${chrome.underline}`);
+  }
+  if (chrome.backLabel !== "뒤로") {
+    throw new Error(`S1 크롬 ${where}: 뒤로 레이블 ${JSON.stringify(chrome.backLabel)}`);
+  }
+  await assertNoHorizontalOverflow(page, `gateway ${where}`);
+  await assertOnboardingCardCentered(page, `gateway ${where}`, "onboarding-gateway");
+  if (tapTargets) {
+    await assertTapTargets(page, `gateway ${where}`, GATEWAY_TAP_TARGETS);
+  }
+  if (shoot) await shoot("onboarding-gateway");
+
+  await page.getByTestId("onboarding-next").click();
+  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
+  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
 }
 
 function isPresencePut(request) {
@@ -1833,12 +2320,384 @@ async function assertSectionActionsAtRest(page, scheme, where) {
   }
 }
 
+function isMutePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/notification-pref");
+  } catch {
+    return false;
+  }
+}
+
+function isReadStatePut(request) {
+  if (request.method() !== "PUT") return false;
+  try {
+    return new URL(request.url()).pathname.endsWith("/read-state");
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * BT-1 (#1929): 사이드바 행의 우클릭 메뉴. 두 스킴에서 **열린 프레임**을 찍고,
+ * 찍기 전에 그것이 죽은 컨트롤이 아님을 누른다.
+ *
+ * 여기서 재는 것 넷:
+ *   ① 우클릭이 그 행의 메뉴를 열고, 열려 있는 동안 행이 자기가 임자임을 말한다.
+ *   ② 키보드에도 같은 문이 있다 (Shift+F10) — 그리고 Esc 뒤 캐럿이 **그 행으로**
+ *      돌아온다. BODY 추락은 회귀다.
+ *   ③ 알림 토글이 실제로 PUT 하고, 서버가 기억한 값을 따라 낱말이 뒤집힌다.
+ *   ④ 「읽음 처리」가 그 채널의 `latest_seq` 를 광고한다.
+ */
+async function captureSidebarRowMenu(page, scheme, shots) {
+  // 안 읽음이 있는 행을 고른다: 다섯 항목이 전부 서는 유일한 상태이고,
+  // 「읽음 처리」를 누를 수 있는 유일한 행이다.
+  const unreadChannelId = CHANNELS[1].id;
+  const row = page.locator(`[data-channel-id="${unreadChannelId}"]`);
+  await row.waitFor({ state: "visible" });
+
+  // 행이 두 줄로 흩어지지 않았는가 (실측 회귀): `asChild` 트리거가 NavLink 의
+  // 함수 className 을 문자열로 이어 붙이면 행은 flex 도 패딩도 잃는다. 캡처가
+  // 그 결함을 한 번 통과시켰으므로, 이제 프레임을 찍기 전에 기하를 잰다.
+  const rowBox = await row.evaluate((el) => {
+    const rect = el.getBoundingClientRect();
+    const style = getComputedStyle(el);
+    return {
+      height: Math.round(rect.height),
+      display: style.display,
+      paddingLeft: style.paddingLeft,
+    };
+  });
+  if (rowBox.display !== "flex" || rowBox.height > 40) {
+    throw new Error(
+      `사이드바 행 기하 ${scheme}: ${JSON.stringify(rowBox)} (flex · 한 줄이어야 함)`
+    );
+  }
+
+  await row.click({ button: "right" });
+  const menu = page.getByTestId("channel-row-menu");
+  await menu.waitFor({ state: "visible" });
+  const owner = await row.evaluate((el) =>
+    el.closest("[data-row-menu-trigger]")?.getAttribute("data-state")
+  );
+  if (owner !== "open") {
+    throw new Error(
+      `행 메뉴가 열렸는데 행 자리가 임자라고 말하지 않는다 ${scheme}: ${owner}`
+    );
+  }
+  const items = await menu
+    .locator("[data-testid^='channel-row-']")
+    .evaluateAll((nodes) =>
+      nodes.map((node) => node.getAttribute("data-testid"))
+    );
+  // BT-5(#1933)가 「별표」를 사이드바 정리 무리의 첫 항목으로 들여놨다. 배치
+  // (「섹션으로 이동」)는 커스텀 섹션이 하나도 없는 이 시점에는 서지 않는다 —
+  // 목적지가 없는 라디오 무리는 선택지가 아니기 때문이다(BT-4).
+  const expected = [
+    "channel-row-mark-read",
+    "channel-row-mute-toggle",
+    "channel-row-star",
+    "channel-row-copy-link",
+    "channel-row-copy-name",
+    "channel-row-leave",
+  ];
+  if (JSON.stringify(items) !== JSON.stringify(expected)) {
+    throw new Error(
+      `행 메뉴 항목 ${scheme}: ${JSON.stringify(items)} (${JSON.stringify(expected)} 여야 함)`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  // ④ 읽음 처리 — 채널을 열지 않고 그 채널의 latest_seq 를 광고한다.
+  const readPut = page.waitForRequest(isReadStatePut);
+  await page.getByTestId("channel-row-mark-read").click();
+  const readBody = (await readPut).postDataJSON();
+  if (readBody?.last_read_seq !== 42) {
+    throw new Error(
+      `읽음 처리 PUT ${scheme}: ${JSON.stringify(readBody)} (last_read_seq 42 여야 함)`
+    );
+  }
+  await menu.waitFor({ state: "hidden" });
+
+  // ② 키보드에도 같은 문이 있고, **그 방에는 바닥이 있다**
+  //    (design-review #1937 B-1). 예전 캡처는 「Shift+F10 → 곧바로 Escape」만
+  //    걸어서 그 사이의 화살표를 한 번도 누르지 않았고, 그래서 ↓ 한 번에 메뉴가
+  //    사라지고 캐럿이 「활동」으로 튀는 결함을 통과시켰다. 이제 항목에 서서
+  //    Enter 로 실행한다 — 헤더 게이트가 이미 쓰는 그 형상.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mark-read",
+    undefined,
+    { timeout: 4_000 }
+  ).catch(async () => {
+    throw new Error(
+      `키보드로 연 메뉴의 첫 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} (channel-row-mark-read 여야 함)`
+    );
+  });
+  await page.keyboard.press("ArrowDown");
+  await page.waitForFunction(
+    () =>
+      document.activeElement?.getAttribute("data-testid") ===
+      "channel-row-mute-toggle",
+    undefined,
+    { timeout: 4_000 }
+  ).catch(async () => {
+    throw new Error(
+      `메뉴 안 ↓ 한 번 뒤 정거장 ${scheme}: ${await page.evaluate(
+        `document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName`
+      )} · 메뉴 ${await menu.count()} (channel-row-mute-toggle 여야 함)`
+    );
+  });
+  const kbdMutePut = page.waitForRequest(isMutePut);
+  await page.keyboard.press("Enter");
+  const kbdMuteBody = (await kbdMutePut).postDataJSON();
+  if (kbdMuteBody?.muted !== true) {
+    throw new Error(
+      `키보드로 실행한 알림 PUT ${scheme}: ${JSON.stringify(kbdMuteBody)} ({muted:true} 여야 함)`
+    );
+  }
+  if ("memberId" in kbdMuteBody) {
+    throw new Error("알림 몸통이 남을 지목했다 — 자기 것만 끌 수 있다");
+  }
+  await menu.waitFor({ state: "hidden" });
+
+  // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
+  await page.waitForFunction(
+    (id) => {
+      const target = document.querySelector(`[data-channel-id="${id}"]`);
+      const box = target?.closest("[data-row-menu-trigger]");
+      if (box?.getAttribute("data-state") !== "open") {
+        target?.dispatchEvent(
+          new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
+        );
+      }
+      const item = document.querySelector(
+        '[data-testid="channel-row-mute-toggle"]'
+      );
+      return item?.getAttribute("data-muted") === "";
+    },
+    unreadChannelId,
+    { timeout: 6_000 }
+  ).catch(() => {
+    throw new Error(
+      `알림 낱말이 저장된 상태를 따라 뒤집히지 않았다 ${scheme}`
+    );
+  });
+  // 되돌린다: 뒤따르는 장면이 음소거된 채널을 물려받지 않게.
+  const unmutePut = page.waitForRequest(isMutePut);
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await unmutePut;
+  await menu.waitFor({ state: "hidden" });
+
+  // ④ Esc 는 메뉴만 닫고 캐럿을 그 행으로 돌려준다.
+  await row.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.waitForFunction(
+    (id) => document.activeElement?.getAttribute("data-channel-id") === id,
+    unreadChannelId,
+    { timeout: 4_000 }
+  ).catch(() => {
+    throw new Error(
+      `행 메뉴 Esc 후 포커스가 그 행으로 돌아오지 않았다 ${scheme}`
+    );
+  });
+
+  // ⑤ 열림 표식은 **활성 행에서도** 보여야 한다 (design-review #1937 N-4).
+  //    지금 열려 있는 채널의 행은 불투명한 --accent-soft 를 입고 있어서 배경
+  //    표식을 통째로 덮는다. 그때가 하필 키보드로 연 메뉴가 어느 행의 것인지
+  //    말하는 유일한 표식이 필요한 순간이다.
+  //    캡처는 인덱스(`#/`)에 서 있어서 어느 행도 활성이 아니다 — 그래서 이
+  //    장면은 먼저 그 채널로 들어가 행을 실제로 활성으로 만든 뒤 잰다. 재고
+  //    나서 인덱스로 돌아온다(뒤따르는 장면의 전제를 바꾸지 않는다).
+  await page.evaluate((id) => {
+    window.location.hash = `/c/${id}`;
+  }, GENERAL_ID);
+  const activeRow = page.locator(`[data-channel-id="${GENERAL_ID}"]`);
+  await activeRow.waitFor({ state: "visible" });
+  await page
+    .waitForFunction(
+      (id) =>
+        document
+          .querySelector(`[data-channel-id="${id}"]`)
+          ?.getAttribute("aria-current") === "page",
+      GENERAL_ID,
+      { timeout: 4_000 }
+    )
+    .catch(() => {
+      throw new Error(`활성 행을 만들지 못했다 ${scheme}`);
+    });
+  await activeRow.focus();
+  await page.keyboard.press("Shift+F10");
+  await menu.waitFor({ state: "visible" });
+  // 전이가 끝난 뒤에 잰다: `transition-colors` 한가운데서 재면 방금 활성이 된
+  // 행의 배경이 아직 투명하다.
+  await page.waitForTimeout(400);
+  const marker = await activeRow.evaluate((el) => {
+    const box = el.closest("[data-row-menu-trigger]");
+    const boxStyle = box ? getComputedStyle(box) : null;
+    // WCAG 2.1 상대 휘도. 브라우저가 이미 `light-dark()` 를 이 스킴으로 풀어
+    // 놓았으므로, 여기서 재는 것은 **화면에 실제로 선 두 색**이다.
+    const channels = (color) =>
+      (color.match(/[\d.]+/g) ?? []).slice(0, 3).map(Number);
+    const luminance = (color) => {
+      const [r, g, b] = channels(color).map((v) => {
+        const c = v / 255;
+        return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+      });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    const rowBackground = getComputedStyle(el).backgroundColor;
+    const outlineColor = boxStyle?.outlineColor ?? "";
+    const [hi, lo] = [luminance(outlineColor), luminance(rowBackground)].sort(
+      (a, b) => b - a
+    );
+    return {
+      state: box?.getAttribute("data-state") ?? null,
+      outlineWidth: boxStyle ? parseFloat(boxStyle.outlineWidth) : 0,
+      outlineStyle: boxStyle?.outlineStyle ?? "none",
+      outlineColor,
+      rowBackground,
+      ariaCurrent: el.getAttribute("aria-current"),
+      contrast: Number(((hi + 0.05) / (lo + 0.05)).toFixed(2)),
+    };
+  });
+  if (
+    marker.state !== "open" ||
+    marker.outlineStyle === "none" ||
+    !(marker.outlineWidth > 0)
+  ) {
+    throw new Error(
+      `활성 행의 열림 표식 ${scheme}: ${JSON.stringify(marker)} (아웃라인이 서야 함)`
+    );
+  }
+  if (/rgba\(0, 0, 0, 0\)|transparent/.test(marker.rowBackground)) {
+    throw new Error(
+      `활성 행이 활성으로 안 그려졌다 ${scheme}: ${JSON.stringify(marker)} — 이 장면이 재려던 겹침이 없다`
+    );
+  }
+  //    아웃라인이 **있다**는 것만으로는 부족하다. 앞 회전의 표식은 있었고,
+  //    다크에서 이 채움 위 2.90:1 이었다(design-review R2 M-1). 그러므로 이
+  //    장면은 존재가 아니라 **대비**를 잰다 — 두 스킴 다.
+  if (!(marker.contrast >= 3)) {
+    throw new Error(
+      `활성 행 위 열림 표식 대비 ${scheme}: ${JSON.stringify(marker)} (비텍스트 3:1 이상이어야 함)`
+    );
+  }
+  const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
+  await page.screenshot({ path: activeShot });
+  shots.push(activeShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.evaluate(() => {
+    window.location.hash = "/";
+  });
+  await page.waitForFunction(
+    (id) =>
+      document
+        .querySelector(`[data-channel-id="${id}"]`)
+        ?.getAttribute("aria-current") === null,
+    GENERAL_ID,
+    { timeout: 4_000 }
+  );
+
+  // ⑥ 오류 상태를 **실제로 일으켜** 그 자리에서 잰다 (design-review #1937
+  //    N-3 · N-5). 알림 PUT 을 한 번 503 으로 돌려주면 메뉴 안에 배너가 선다.
+  //      · N-3: 배너의 첫 글자가 항목의 첫 글자와 같은 왼쪽 자에 서는가.
+  //             (실측 결함: 21px 대 13px — 배너의 `px-4` 와 메뉴 행의 `px-2`)
+  //      · N-5: `role="alert"` 이 `role="menu"` 의 직계 자식이 아닌가.
+  await page.route(
+    "**/v1/workspaces/*/channels/*/notification-pref",
+    (route) =>
+      route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({ error: { message: "unavailable" } }),
+      })
+  );
+  const quietRow = page.locator(`[data-channel-id="${CHANNELS[2].id}"]`);
+  await quietRow.waitFor({ state: "visible" });
+  await quietRow.click({ button: "right" });
+  await menu.waitFor({ state: "visible" });
+  await page.getByTestId("channel-row-mute-toggle").click();
+  await page
+    .getByTestId("channel-row-action-error")
+    .waitFor({ state: "visible", timeout: 6_000 });
+  const banner = await page.evaluate(`(() => {
+    const textLeft = (node) => {
+      if (!node) return null;
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return Math.round(range.getBoundingClientRect().left);
+    };
+    const box = document.querySelector('[data-testid="channel-row-action-error"]');
+    const item = document.querySelector('[data-testid="channel-row-mute-toggle"]');
+    return {
+      bannerRole: box?.getAttribute("role") ?? null,
+      parentRole: box?.parentElement?.getAttribute("role") ?? null,
+      grandParentRole: box?.parentElement?.parentElement?.getAttribute("role") ?? null,
+      parentNamed: Boolean(box?.parentElement?.getAttribute("aria-label")),
+      bannerTextLeft: textLeft(box?.querySelector("span")),
+      itemTextLeft: textLeft(item),
+      itemBusy: item?.getAttribute("aria-busy") ?? null,
+      itemDisabled: item?.getAttribute("data-disabled") ?? null,
+      text: (box?.textContent ?? "").trim(),
+    };
+  })()`);
+  if (
+    banner.bannerTextLeft === null ||
+    banner.itemTextLeft === null ||
+    Math.abs(banner.bannerTextLeft - banner.itemTextLeft) > 1
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 왼쪽 자 ${scheme}: ${JSON.stringify(banner)} (항목과 같아야 함)`
+    );
+  }
+  if (
+    banner.bannerRole !== "alert" ||
+    banner.parentRole !== "group" ||
+    banner.grandParentRole !== "menu" ||
+    !banner.parentNamed
+  ) {
+    throw new Error(
+      `메뉴 안 배너의 aria 구조 ${scheme}: ${JSON.stringify(banner)} (alert < group < menu, group 에 이름)`
+    );
+  }
+  // 실패한 뒤에도 그 항목은 잠기지도 흐려지지도 않는다 (N-1).
+  if (banner.itemDisabled !== null || banner.itemBusy !== null) {
+    throw new Error(
+      `실패 뒤 항목 상태 ${scheme}: ${JSON.stringify(banner)} (잠금·진행 표시가 남으면 안 된다)`
+    );
+  }
+  const errorShot = `${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`;
+  await page.screenshot({ path: errorShot });
+  shots.push(errorShot);
+  await page.keyboard.press("Escape");
+  await menu.waitFor({ state: "detached" });
+  await page.unroute("**/v1/workspaces/*/channels/*/notification-pref");
+
+  await page.getByTestId("composer-input").hover();
+}
+
 /**
  * UX-D4 (#1756): 새 진입점을 실제로 누른다. 스크린샷만 찍고 클릭하지 않으면
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
   await assertSectionActionsAtRest(page, scheme, "첫 줄");
+
+  await captureSidebarRowMenu(page, scheme, shots);
+  await assertSectionActionsAtRest(page, scheme, "행 메뉴 왕복 후");
 
   const restHeader = await page
     .getByTestId("sidebar-section-channels-header")
@@ -1903,6 +2762,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("profile-card").click();
   const menu = page.getByTestId("profile-card-menu");
   await menu.waitFor({ state: "visible" });
+  await assertProfileMenuFitsViewport(page, `sidebar profile ${scheme}`);
   const anchor = await page.evaluate(`(() => {
     const trigger = document.querySelector('[data-testid="profile-card"]');
     const panel = document.querySelector('[data-testid="profile-card-menu"]');
@@ -2020,15 +2880,434 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("section-collapse-channels").press("Enter");
   await page.getByTestId("channel-item").first().waitFor({ state: "visible" });
 
-  await page.getByTestId("sidebar-collapse").click();
-  await page.getByTestId("sidebar-expand").waitFor({ state: "visible" });
+  await captureCustomSection(page, scheme, shots);
+
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForFunction(
+    () =>
+      document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
+      document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
+  );
   await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
   const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
   await page.screenshot({ path: collapsedShot });
   shots.push(collapsedShot);
-  await page.getByTestId("sidebar-expand").click();
-  await page.getByTestId("sidebar-collapse").waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-toggle").click();
+  await page.waitForFunction(
+    () =>
+      !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
+      !document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
+  );
   await page.getByTestId("composer-input").hover();
+}
+
+/**
+ * 섹션 편집 컨트롤 하나의 크기 (design-review #1932 N-3).
+ *
+ * 리뷰는 이 둘(`new-section` · `section-menu-*`)을 `MOBILE_TAP_TARGETS` 에
+ * 올리라고 했다. 그런데 H-1 을 닫으면서 그 둘은 **터치 표면에 존재하지 않게**
+ * 됐다 - 배치를 줄 수 없는 표면에는 섹션 편집 문도 내밀지 않는다. 없는 것을 폰
+ * 허용목록에 `optional` 로 올리면 언제나 건너뛰는 항목이 되고, 그것은 재는 척하는
+ * 목록이다(§5.5② 「허용목록 밖은 재지 않는다」의 반대 실패).
+ *
+ * 그래서 **사는 자리에서** 잰다: 포인터 표면의 하우스 아이콘 버튼 규격
+ * `size-control-sm`(28px), 바로 옆 `new-channel` 이 쓰는 그 수다. 각 컨트롤은
+ * 자기 헤더가 호버돼 있을 때만 마운트되므로 한 번에 하나씩 부른다.
+ */
+async function assertSectionControlSize(page, scheme, testId) {
+  const controlSm = pixelToken("spacing-control-sm");
+  const box = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="${testId}"]');
+    if (!el) return { missing: true };
+    const r = el.getBoundingClientRect();
+    return { width: Math.round(r.width), height: Math.round(r.height) };
+  })()`);
+  if (box.missing || box.height < controlSm || box.width < controlSm) {
+    throw new Error(
+      `섹션 편집 컨트롤 ${scheme}: ${testId} ${JSON.stringify(box)} (최소 ${controlSm}px)`
+    );
+  }
+  console.log(
+    `  섹션 편집 컨트롤 ${scheme}: ${testId} ${box.width}x${box.height}`
+  );
+}
+
+/**
+ * 커스텀 섹션 한 바퀴 (ADR-0177 D4 / BT-4 #1932).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 「새 섹션」 → 이름 → 행 우클릭의
+ * 「섹션으로 이동」 → 삭제. 그래야 이 프레임들이 사람이 실제로 걷는 길의 사진이
+ * 되고, 끝에 지우므로 뒤따르는 장면들의 사이드바가 그대로 남는다.
+ *
+ * 이름은 긴 한글이다. 80자 상한이 있는 자리이고, 좁은 사이드바에서 잘림이
+ * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
+ */
+async function captureCustomSection(page, scheme, shots) {
+  // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
+  // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
+  const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
+
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-section").waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "new-section");
+  await page.getByTestId("new-section").click();
+  const dialog = page.getByTestId("sidebar-section-name-dialog");
+  await dialog.waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
+  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  await page.screenshot({ path: createShot });
+  shots.push(createShot);
+  await page.getByTestId("sidebar-section-name-submit").click();
+  await dialog.waitFor({ state: "detached" });
+
+  const section = page.getByTestId("sidebar-section-sec-1");
+  await section.waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `custom section ${scheme}`);
+
+  // 방금 만든 섹션은 비어 있고, 비어 있다고 말한다.
+  const emptyRows = await section
+    .locator('[data-testid="channel-item"]')
+    .count();
+  if (emptyRows !== 0) {
+    throw new Error(`새 섹션이 비어 있지 않다 ${scheme}: ${emptyRows}`);
+  }
+
+  // 행 우클릭 → 「섹션으로 이동」. 서브메뉴가 아니라 제목 + 라디오 무리다.
+  const row = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await row.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  await page
+    .getByTestId("channel-row-move-to-section")
+    .waitFor({ state: "visible" });
+  const radios = await page
+    .getByTestId("channel-row-menu")
+    .locator('[role="menuitemradio"]')
+    .count();
+  if (radios !== 2) {
+    throw new Error(
+      `섹션 라디오 개수 ${scheme}: ${radios} (기본 + 커스텀 = 2 이어야 함)`
+    );
+  }
+  const baseChecked = await page
+    .getByTestId("channel-row-section-base")
+    .getAttribute("aria-checked");
+  if (baseChecked !== "true") {
+    throw new Error(
+      `배치 전 기본 섹션이 체크가 아니다 ${scheme}: ${baseChecked}`
+    );
+  }
+  // 80자 이름이 메뉴를 창 밖으로 밀지 않는다.
+  const menuBox = await page.evaluate(`(() => {
+    const el = document.querySelector('[data-testid="channel-row-menu"]');
+    const r = el.getBoundingClientRect();
+    return { right: Math.round(r.right), width: Math.round(r.width), view: window.innerWidth };
+  })()`);
+  if (menuBox.right > menuBox.view) {
+    throw new Error(
+      `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
+    );
+  }
+  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  await page.screenshot({ path: menuShot });
+  shots.push(menuShot);
+
+  await page.getByTestId("channel-row-section-sec-1").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
+  // 사실을 말하는지 여기서 함께 본다.
+  //
+  // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
+  // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
+  await section.locator('[data-testid="channel-item"]').first().click({
+    button: "right",
+  });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const nowChecked = await page
+    .getByTestId("channel-row-section-sec-1")
+    .getAttribute("aria-checked");
+  const checkGlyphs = await page
+    .getByTestId("channel-row-section-sec-1")
+    .locator("svg")
+    .count();
+  if (nowChecked !== "true" || checkGlyphs !== 1) {
+    throw new Error(
+      `배치 뒤 체크 ${scheme}: aria-checked=${nowChecked} 체크표시=${checkGlyphs}`
+    );
+  }
+  await page.keyboard.press("Escape");
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+  await section
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+
+  await assertSectionControlSize(page, scheme, "section-menu-sec-1");
+  await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
+  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  await page.screenshot({ path: filledShot });
+  shots.push(filledShot);
+
+  await captureSortDoor(page, scheme, shots);
+  await captureSectionDropMarker(page, scheme, shots);
+  await captureStarredSection(page, scheme, shots);
+
+  // 지우고 나간다. 확인 문장이 「채널은 사라지지 않는다」를 말하는지도 여기서 본다.
+  // 위 두 장면이 포인터를 다른 자리로 옮겼으므로 호버 클러스터를 다시 연다 -
+  // ⋮ 는 rest 에서 DOM 에 없다(UX-HT 계약).
+  await page.getByTestId("sidebar-section-sec-1-header").hover();
+  await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
+  await page.getByTestId("section-menu-sec-1").click();
+  await page.getByTestId("section-menu-sec-1-delete").click();
+  const confirm = page.getByTestId("sidebar-section-delete-confirm");
+  await confirm.waitFor({ state: "visible" });
+  // design-review #1932 M-1 — 제목은 고정 문장이고 이름은 본문이 진다. 80자
+  // 이름이 제목에 들어가면 물음이 셋째 줄 끝에 도착한다.
+  const confirmCopy = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="sidebar-section-delete-confirm"]');
+    const title = box.querySelector("h2, [id$='-title']") ?? box.firstElementChild.firstElementChild;
+    return {
+      title: (title.textContent ?? "").trim(),
+      body: (box.textContent ?? "").trim(),
+    };
+  })()`);
+  if (confirmCopy.title.includes(LONG_NAME.slice(0, 12))) {
+    throw new Error(
+      `삭제 확인 제목이 섹션 이름을 담았다 ${scheme}: ${confirmCopy.title}`
+    );
+  }
+  if (!confirmCopy.body.includes(LONG_NAME)) {
+    throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
+  }
+  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  await page.screenshot({ path: deleteShot });
+  shots.push(deleteShot);
+  await page.getByTestId("sidebar-section-delete-action").click();
+  await confirm.waitFor({ state: "detached" });
+  await section.waitFor({ state: "detached" });
+  // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
+  await page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first()
+    .waitFor({ state: "visible" });
+}
+
+/**
+ * 정렬의 문 (BT-5 / #1933, design-review R1 M-2).
+ *
+ * 이 문은 한동안 기본 「채널」 섹션의 ⋮ 안에 있었고, 그때 스크린리더는 그것을
+ * 「채널 섹션 메뉴」라 읽었다 — 사이드바 전체에 걸리는 설정인데. 눈으로도 같은 ⋯
+ * 글리프가 섹션마다 다른 메뉴를 열었다. 그래서 문을 갈랐고, 이 장면이 그 판정을
+ * 레인 안으로 들여 잠근다: **자기 글리프·자기 이름**이고, 섹션 ⋮ 는 그 자리에
+ * 없다.
+ */
+async function captureSortDoor(page, scheme, shots) {
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  const door = page.getByTestId("sidebar-sort-menu");
+  await door.waitFor({ state: "visible" });
+  await assertSectionControlSize(page, scheme, "sidebar-sort-menu");
+  const name = await door.getAttribute("aria-label");
+  if (name !== "채널 정렬") {
+    throw new Error(`정렬 문의 이름 ${scheme}: ${name}`);
+  }
+  // 기본 섹션에는 ⋮ 가 없다 — 그 메뉴는 커스텀 섹션의 것이다(BT-4 그대로).
+  const sectionMenu = await page.getByTestId("section-menu-channels").count();
+  if (sectionMenu !== 0) {
+    throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
+  }
+
+  await door.click();
+  const content = page.getByTestId("sidebar-sort-menu-content");
+  await content.waitFor({ state: "visible" });
+  const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
+  if (label !== "채널 정렬") {
+    throw new Error(`정렬 무리의 제목 ${scheme}: ${label}`);
+  }
+  const checked = await page
+    .getByTestId("sidebar-sort-manual")
+    .getAttribute("aria-checked");
+  if (checked !== "true") {
+    throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
+  }
+  await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-sort-menu-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  await page.keyboard.press("Escape");
+  await content.waitFor({ state: "detached" });
+}
+
+/**
+ * 드래그 중의 드롭 표지 (BT-5 / #1933).
+ *
+ * 네이티브 HTML5 드래그는 Playwright 의 마우스로 발화하지 않는다(브라우저가 OS
+ * 드래그 세션을 열어야 한다). 그래서 **드래그 이벤트를 그대로 쏜다** — 출하되는
+ * 코드가 듣는 것이 바로 그 이벤트이므로, 사진에 찍히는 것은 실제로 사람이 보게
+ * 되는 프레임이다. 좌표를 흉내 내는 것이 아니라 판정의 정본(대상 요소)을 그대로
+ * 쓰는 것이고, 그 점이 이 티켓이 라이브러리 없는 손구현을 고른 값이다
+ * (`sidebarDnd.ts` 머리말).
+ *
+ * 표지가 **토큰만** 쓰는지는 여기서 눈으로, `tokens.contrast.test.ts` 의
+ * 「드롭 표지」가 수로 잰다.
+ */
+async function captureSectionDropMarker(page, scheme, shots) {
+  await page.evaluate(`(() => {
+    const row = document.querySelector(
+      '[data-testid="sidebar-section-channels"] [data-testid="channel-item"]'
+    );
+    if (!row) throw new Error("기본 섹션에 끌 행이 없다");
+    row.dispatchEvent(new DragEvent("dragstart", { bubbles: true, cancelable: true }));
+  })()`);
+  // `dragover` 는 **되풀이해서** 쏜다 — 실제 드래그가 그렇게 생겼기 때문이다
+  // (포인터가 움직이는 동안 계속 발화한다). 한 번만 쏘면 `dragstart` 의 상태
+  // 갱신이 아직 렌더에 닿기 전이라 그 한 번이 헛나갈 수 있고, 그것은 이 화면의
+  // 결함이 아니라 이벤트를 한 틱에 몰아 쏜 자국이다.
+  await page.waitForFunction(`(() => {
+    const target = document.querySelector('[data-testid="sidebar-section-sec-1"]');
+    if (!target) return false;
+    target.dispatchEvent(new DragEvent("dragover", { bubbles: true, cancelable: true }));
+    return target.hasAttribute("data-drop-target");
+  })()`);
+  // 표지는 **하나**다: 받는 자리 하나가 「여기에 놓인다」고 말한다.
+  const marked = await page.locator("[data-drop-target]").count();
+  if (marked !== 1) {
+    throw new Error(`드롭 표지 개수 ${scheme}: ${marked} (하나여야 함)`);
+  }
+  await assertNoHorizontalOverflow(page, `drop marker ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-drop-target-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // Esc 가 드래그의 것이다(BT-5 계약 3항). 표지가 사라지는 것으로 그것을 본다.
+  await page.keyboard.press("Escape");
+  await page.locator("[data-drop-target]").waitFor({ state: "detached" });
+}
+
+/**
+ * 별표 섹션 (ADR-0177 D5 / BT-5 #1933).
+ *
+ * 픽스처를 심지 않고 **UI 로 만든다**: 행 우클릭 → 「별표 붙이기」. 그래야 이
+ * 프레임이 사람이 걷는 길의 사진이 되고, 끝에 떼므로 뒤따르는 장면의 사이드바가
+ * 그대로 남는다(같은 함수의 섹션 만들기·지우기와 같은 규율).
+ */
+async function captureStarredSection(page, scheme, shots) {
+  const base = page
+    .getByTestId("sidebar-section-channels")
+    .locator('[data-testid="channel-item"]')
+    .first();
+  await base.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const starLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (starLabel !== "별표 붙이기") {
+    throw new Error(`별표 항목의 낱말 ${scheme}: ${starLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
+
+  const starred = page.getByTestId("sidebar-section-starred");
+  await starred.waitFor({ state: "visible" });
+  // **맨 위**다. 파생 섹션의 순위는 코어가 정하고, 그 사실이 화면에서도 참인지를
+  // 여기서 본다.
+  const first = await page.evaluate(`(() => {
+    const sections = Array.from(
+      document.querySelectorAll('[data-testid^="sidebar-section-"]')
+    ).filter((el) => !el.dataset.testid.endsWith("-header"));
+    return sections[0]?.dataset.testid ?? null;
+  })()`);
+  if (first !== "sidebar-section-starred") {
+    throw new Error(`별표 섹션이 맨 위가 아니다 ${scheme}: ${first}`);
+  }
+  // 한 채널이 두 번 그려지지 않는다 — 별표가 렌더 순위를 먼저 가져간다.
+  const duplicated = await page.evaluate(`(() => {
+    const ids = Array.from(
+      document.querySelectorAll("[data-channel-id]")
+    ).map((el) => el.dataset.channelId);
+    return ids.length - new Set(ids).size;
+  })()`);
+  if (duplicated !== 0) {
+    throw new Error(`별표 뒤 중복 행 ${scheme}: ${duplicated}`);
+  }
+  await assertNoHorizontalOverflow(page, `starred section ${scheme}`);
+  const shot = `${OUT_DIR}/sidebar-starred-section-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 떼고 나간다. 낱말이 상태라는 것도 여기서 함께 본다.
+  const starredRow = starred.locator('[data-testid="channel-item"]').first();
+  await starredRow.click({ button: "right" });
+  await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
+  const unstarLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
+  if (unstarLabel !== "별표 떼기") {
+    throw new Error(`별표 뒤 항목의 낱말 ${scheme}: ${unstarLabel}`);
+  }
+  await page.getByTestId("channel-row-star").click();
+  await starred.waitFor({ state: "detached" });
+}
+
+/**
+ * 배치를 **한 번도 못 읽었을 때** (design-review #1932 B-1).
+ *
+ * 리뷰의 손 프로브가 잡은 그 자리를 캡처 레인 안으로 들여 회귀로 잠근다: GET 이
+ * 500 이면 예전 화면은 「섹션이 아직 없다」와 똑같이 생겼고, 그 위의 편집 하나가
+ * 서버의 배치를 통째로 지웠다(PUT 은 패치가 아니다).
+ *
+ * 자기 페이지에서 돈다 - 메인 페이지의 라우트를 갈아 끼우고 되돌리는 대신
+ * `context.newPage()` 로 이 표면만 다르게 세운다(3a-3 빈 워크스페이스와 같은 결).
+ * PUT 은 세어서 **0** 임을 단정한다: 문이 닫혔다는 것보다 강한 사실은 「아무것도
+ * 나가지 않았다」이고, 소실은 나간 PUT 이 만든다.
+ */
+async function captureSidebarPrefsUnavailable(context, scheme, shots) {
+  const page = await context.newPage();
+  let puts = 0;
+  await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
+    if (route.request().method() === "PUT") {
+      puts += 1;
+      return route.fulfill({ status: 500, contentType: "application/json", body: "{}" });
+    }
+    return route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { message: "boom" } }),
+    });
+  });
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("channel-list").waitFor({ state: "visible" });
+
+  const banner = page.getByTestId("sidebar-prefs-load-error");
+  await banner.waitFor({ state: "visible" });
+
+  // 편집 문은 서지 않는다. 헤더를 호버해도(= 호버 클러스터를 열어도) 없다.
+  await page.getByTestId("sidebar-section-channels-header").hover();
+  await page.getByTestId("new-channel").waitFor({ state: "visible" });
+  const doors = await page.getByTestId("new-section").count();
+  if (doors !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 「새 섹션」이 서 있다 ${scheme}: ${doors}개`
+    );
+  }
+
+  const shot = `${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  // 재시도 문은 있다: 닫힌 이유를 말했으면 되돌아갈 길도 줘야 한다.
+  const retry = banner.getByRole("button", { name: "다시 시도" });
+  await retry.waitFor({ state: "visible" });
+  await retry.click();
+  await banner.waitFor({ state: "visible" });
+
+  if (puts !== 0) {
+    throw new Error(
+      `배치를 못 읽은 상태에서 PUT 이 나갔다 ${scheme}: ${puts}건 (서버 배치가 지워진다)`
+    );
+  }
+  await page.close();
 }
 
 /**
@@ -2081,6 +3360,7 @@ async function assertNoHorizontalOverflow(page, where) {
       if (overflowX !== "auto" && overflowX !== "scroll") continue;
       // 가로로 끌리는 것이 이 상자의 일이다 (goal B11) — 위 주석 참조.
       if (el.hasAttribute("data-scroll-x")) continue;
+      if (el.closest("[hidden]")) continue;
       const over = el.scrollWidth - el.clientWidth;
       if (over <= 0) continue;
       // 상자 이름만으로는 고칠 자리를 못 찾는다: 타임라인이 끌린다는 것은
@@ -2640,6 +3920,54 @@ async function assertTapTargets(page, where, targets = MOBILE_TAP_TARGETS) {
 }
 
 /**
+ * #1889 R2-B1. The profile menu's width is the menu's (pane-sm), not the
+ * user's status sentence. An 80-char head must wrap inside that box: right
+ * stays in the viewport and the declared-presence check stays visible.
+ */
+async function assertProfileMenuFitsViewport(page, where) {
+  const paneSm = pixelToken("spacing-pane-sm");
+  const fit = await page.evaluate(`(() => {
+    const menu = document.querySelector('[data-testid="profile-card-menu"]');
+    const check = document.querySelector('[data-testid="presence-option-auto"] svg');
+    if (!menu) return { missing: true };
+    const r = menu.getBoundingClientRect();
+    const c = check ? check.getBoundingClientRect() : null;
+    const vw = window.innerWidth;
+    return {
+      x: Math.round(r.x),
+      w: Math.round(r.width),
+      right: Math.round(r.right),
+      vw,
+      checkRight: c ? Math.round(c.right) : null,
+      checkVisible: Boolean(
+        c && c.width > 0 && c.left >= 0 && c.right <= vw + 0.5
+      ),
+    };
+  })()`);
+  if (fit.missing) {
+    throw new Error(`프로필 메뉴 ${where}: 메뉴가 없다`);
+  }
+  if (fit.w > paneSm) {
+    throw new Error(
+      `프로필 메뉴 ${where}: 폭 ${fit.w}px가 pane-sm(${paneSm})을 넘긴다`
+    );
+  }
+  if (fit.right > fit.vw) {
+    throw new Error(
+      `프로필 메뉴 ${where}: right ${fit.right} > vw ${fit.vw}`
+    );
+  }
+  if (!fit.checkVisible) {
+    throw new Error(
+      `프로필 메뉴 ${where}: 선언 ✓가 뷰포트 밖이다 ${JSON.stringify(fit)}`
+    );
+  }
+  console.log(
+    `  profile menu ${where}: w=${fit.w} right=${fit.right} vs vw=${fit.vw}, check right=${fit.checkRight}`
+  );
+}
+
+/**
  * UX-CB의 닫힌 탭 예산. 캡처 레인이 실제 DOM을 걷는다: 정적 소스에서 버튼 이름만
  * 세면 hidden file input이나 disabled 전송 버튼을 놓치고도 초록이 된다.
  */
@@ -2693,6 +4021,7 @@ async function assertComposerTabOrder(page, where) {
         activeOutlineStyle: activeStyle?.outlineStyle ?? null,
         outlineWidth: ringStyle?.outlineWidth ?? null,
         outlineStyle: ringStyle?.outlineStyle ?? null,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
       };
     })()`);
     walked.push(focus.testId);
@@ -2701,7 +4030,8 @@ async function assertComposerTabOrder(page, where) {
       !focus.focusVisible ||
       focus.outlineWidth !== "2px" ||
       focus.outlineStyle !== "solid" ||
-      (index === 0 && focus.activeOutlineStyle !== "none")
+      (index === 0 && focus.activeOutlineStyle !== "none") ||
+      (index === 0 && focus.modality !== "keyboard")
     ) {
       throw new Error(
         `컴포저 키보드 초점 ${where} ${index + 1}/${expected.length}: ${JSON.stringify(focus)}`
@@ -2718,18 +4048,163 @@ async function assertComposerTabOrder(page, where) {
 /** 액션 행의 버튼 아닌 가운데 폭을 실제로 눌러 입력 캐럿이 돌아오는지 잰다. */
 async function assertComposerVesselClick(page, where, ids) {
   const input = page.getByTestId(ids.input);
+  const frame = page.getByTestId(ids.frame ?? "composer-frame");
+  const rest = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor };
+  });
   await input.fill("그릇 클릭 확인");
   await input.evaluate((element) => element.setSelectionRange(2, 2));
   await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
-  const proof = await input.evaluate((element) => ({
-    active: document.activeElement === element,
-    start: element.selectionStart,
-    end: element.selectionEnd,
-  }));
-  if (!proof.active || proof.start !== 2 || proof.end !== 2) {
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const frame = document.querySelector('[data-testid="${ids.frame ?? "composer-frame"}"]');
+    const frameStyle = frame ? getComputedStyle(frame) : null;
+    return {
+      active: document.activeElement === input,
+      start: input?.selectionStart ?? null,
+      end: input?.selectionEnd ?? null,
+      borderColor: frameStyle?.borderColor ?? null,
+      outlineWidth: frameStyle?.outlineWidth ?? null,
+      outlineStyle: frameStyle?.outlineStyle ?? null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
+    };
+  })()`);
+  if (
+    !proof.active ||
+    proof.start !== 2 ||
+    proof.end !== 2 ||
+    proof.borderColor !== rest.borderColor ||
+    proof.outlineStyle !== "none" ||
+    proof.modality !== "pointer"
+  ) {
     throw new Error(`컴포저 그릇 클릭 ${where}: ${JSON.stringify(proof)}`);
   }
-  console.log(`  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start}`);
+  console.log(
+    `  composer vessel ${where}: 액션 행 빈 폭 → 입력 캐럿 ${proof.start} · 포인터 보더 불변`
+  );
+}
+
+const OBSERVER_ATTACH_ENDPOINT = "wss://127.0.0.1:28443/v1/observer-terminal";
+
+/** 캡처 레인이 xterm을 연 채로 포인터/Tab 링을 재게, grant + 소켓을 붙잡아 둔다. */
+async function mockObserverTerminalAttach(context) {
+  await context.route("**/work-sessions/*/terminal-attach", (route) =>
+    json(route, {
+      attach_endpoint: OBSERVER_ATTACH_ENDPOINT,
+      capability_token: `momo_terminal_attach_v1.${"a".repeat(43)}`,
+      pty_id: "pty-capture-1",
+    })
+  );
+  await context.routeWebSocket(/\/v1\/observer-terminal$/, () => {});
+}
+
+function readObserverTerminalVessel() {
+  return `(() => {
+      const frame = document.querySelector(
+        '[data-testid="work-observer-terminal-frame"]'
+      );
+      const textarea = document.querySelector(".xterm-helper-textarea");
+      const frameStyle = frame ? getComputedStyle(frame) : null;
+      return {
+        frame: Boolean(frame),
+        textarea: Boolean(textarea),
+        activeIsTextarea: document.activeElement === textarea,
+        activeClass: document.activeElement?.className ?? null,
+        focusVisible: textarea?.matches(":focus-visible") ?? false,
+        borderColor: frameStyle?.borderColor ?? null,
+        outlineWidth: frameStyle?.outlineWidth ?? null,
+        outlineStyle: frameStyle?.outlineStyle ?? null,
+        modality: document.documentElement.getAttribute("data-focus-modality"),
+      };
+    })()`;
+}
+
+/**
+ * 관전 터미널 그릇 (#1866 design-review High). xterm helper textarea는 클릭에도
+ * :focus-visible이라 :focus-within이면 드래그 선택 순간 인셋 링이 선다. 컴포저와
+ * 같은 focus-visible-within + Tab 스탬프가 그걸 가른다. Tab 이탈은 포커스 트랩
+ * 회귀(MOMO-619)를 같이 잰다.
+ */
+async function assertObserverTerminalModality(page, where, shots, scheme) {
+  const start = page.getByTestId("work-observer-start");
+  await start.waitFor({ state: "visible" });
+  await start.click();
+  await page.locator(".xterm-helper-textarea").waitFor({
+    state: "attached",
+    timeout: 10_000,
+  });
+  const frame = page.getByTestId("work-observer-terminal-frame");
+  await frame.waitFor({ state: "visible" });
+  const rest = await frame.evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderColor: style.borderColor };
+  });
+
+  const box = await page.getByTestId("work-observer-terminal").boundingBox();
+  if (!box) {
+    throw new Error(`관전 터미널 상자 없음 ${where}`);
+  }
+  await page.mouse.move(box.x + 24, box.y + 16);
+  await page.mouse.down();
+  await page.mouse.move(box.x + 120, box.y + 28);
+  const dragging = await page.evaluate(readObserverTerminalVessel());
+  await page.mouse.up();
+  if (
+    !dragging.frame ||
+    !dragging.textarea ||
+    !dragging.activeIsTextarea ||
+    dragging.borderColor !== rest.borderColor ||
+    dragging.outlineStyle !== "none" ||
+    dragging.modality !== "pointer"
+  ) {
+    throw new Error(
+      `관전 터미널 포인터 선택 ${where}: ${JSON.stringify(dragging)}`
+    );
+  }
+  if (shots && scheme) {
+    const pointerShot = `${OUT_DIR}/terminal-pointer-${scheme}.png`;
+    await page.screenshot({ path: pointerShot });
+    shots.push(pointerShot);
+  }
+
+  await page.keyboard.press("Tab");
+  const left = await page.evaluate(readObserverTerminalVessel());
+  if (left.activeIsTextarea) {
+    throw new Error(
+      `관전 터미널 Tab 이탈 실패(포커스 트랩) ${where}: ${JSON.stringify(left)}`
+    );
+  }
+
+  await page.keyboard.press("Shift+Tab");
+  const tabbed = await page.evaluate(readObserverTerminalVessel());
+  if (
+    !tabbed.activeIsTextarea ||
+    !tabbed.focusVisible ||
+    tabbed.outlineWidth !== "2px" ||
+    tabbed.outlineStyle !== "solid" ||
+    tabbed.modality !== "keyboard"
+  ) {
+    throw new Error(
+      `관전 터미널 Tab 진입 ${where}: ${JSON.stringify(tabbed)}`
+    );
+  }
+  if (shots && scheme) {
+    const focusShot = `${OUT_DIR}/terminal-focus-${scheme}.png`;
+    await page.screenshot({ path: focusShot });
+    shots.push(focusShot);
+  }
+
+  const stop = page.getByTestId("work-observer-stop");
+  if ((await stop.count()) > 0 && (await stop.isVisible())) {
+    await stop.click();
+    await page.getByTestId("work-observer-start").waitFor({ state: "visible" });
+  }
+
+  console.log(
+    `  observer terminal ${where}: 포인터 선택 무링 · Tab 진입 2px 링 · Tab 이탈`
+  );
+  return { rest, dragging, left, tabbed };
 }
 
 /** [@]를 포인터로 실제 누르고, 기존 listbox가 입력 기준 위치에서 열린 것을 잰다. */
@@ -2763,6 +4238,8 @@ async function assertMentionTrigger(page, where, ids) {
       frameOutlineStyle: frame
         ? getComputedStyle(frame).outlineStyle
         : null,
+      frameBorderColor: frame ? getComputedStyle(frame).borderColor : null,
+      modality: document.documentElement.getAttribute("data-focus-modality"),
       options: list?.querySelectorAll('[role="option"]').length ?? 0,
       leftDelta:
         inputRect && listRect ? Math.round(listRect.left - inputRect.left) : null,
@@ -2770,16 +4247,15 @@ async function assertMentionTrigger(page, where, ids) {
         inputRect && listRect ? Math.round(inputRect.top - listRect.bottom) : null,
     };
   })()`);
-  // 텍스트 입력류는 스펙상 포커스되면 모달리티와 무관하게 항상 :focus-visible에
-  // 매치된다(키보드 입력 요소 특례). 포인터 무링 계약은 버튼의 것이지 입력의
-  // 것이 아니다 — 여기서는 포커스가 입력으로 돌아왔고 링이 산다는 사실을 잰다.
+  // 텍스트 입력류는 스펙상 클릭에도 :focus-visible이 매치된다. 그릇 링은 Tab
+  // 모달리티에서만 선다(#1866). 포인터 경로의 [@]는 보더 색·아웃라인을 바꾸지 않는다.
   if (
     proof.value !== "배포 @ 확인" ||
     proof.active !== ids.input ||
     proof.focusVisible !== true ||
     proof.inputOutlineStyle !== "none" ||
-    proof.frameOutlineWidth !== "2px" ||
-    proof.frameOutlineStyle !== "solid" ||
+    proof.frameOutlineStyle !== "none" ||
+    proof.modality !== "pointer" ||
     proof.options < 1 ||
     Math.abs(proof.leftDelta) > 1 ||
     proof.gap < 0 ||
@@ -2788,9 +4264,215 @@ async function assertMentionTrigger(page, where, ids) {
     throw new Error(`[@] 발동 ${where}: ${JSON.stringify(proof)}`);
   }
   console.log(
-    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, ring=frame`
+    `  mention trigger ${where}: ${proof.value} · 후보 ${proof.options} · 입력 기준 left ${proof.leftDelta}px / gap ${proof.gap}px · input fv=true, pointer 그릇 무링`
   );
   return proof;
+}
+
+/**
+ * `#`·`:` 자동완성이 실제로 열린 프레임 (#1930).
+ *
+ * 두 트리거에는 [@] 같은 버튼이 없다 — 글자를 치는 것이 유일한 경로이므로 캡처도
+ * 그 경로로 친다(`fill` 은 한 번에 값을 갈아 끼워 사람이 지나가는 중간 상태를
+ * 건너뛴다). 목록이 떴다는 것만 보지 않고 **어느 트리거의 목록인지**(접근 이름)와
+ * 입력이 그 목록을 가리키고 있는지(aria-controls/activedescendant)까지 잰다:
+ * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
+ */
+async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  const input = page.getByTestId(ids.input);
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(trigger.typed, { delay: 15 });
+  const list = page.getByTestId(trigger.list);
+  await list.waitFor({ state: "visible" });
+  const proof = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="${ids.input}"]');
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    const first = list?.querySelector('[role="option"]');
+    return {
+      value: input?.value ?? null,
+      label: list?.getAttribute("aria-label") ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      expanded: input?.getAttribute("aria-expanded") ?? null,
+      controls: input?.getAttribute("aria-controls") ?? null,
+      listId: list?.id ?? null,
+      active: input?.getAttribute("aria-activedescendant") ?? null,
+      firstId: first?.id ?? null,
+      firstText: first?.textContent ?? null,
+    };
+  })()`);
+  if (
+    proof.value !== trigger.typed ||
+    proof.label !== trigger.label ||
+    proof.options < 1 ||
+    proof.expanded !== "true" ||
+    proof.controls === null ||
+    proof.controls !== proof.listId ||
+    proof.active !== proof.firstId ||
+    proof.options < (trigger.minOptions ?? 1) ||
+    (trigger.expectFirst !== undefined &&
+      !(proof.firstText ?? "").includes(trigger.expectFirst))
+  ) {
+    throw new Error(
+      `${trigger.typed} 자동완성 ${scheme}: ${JSON.stringify(proof)}`
+    );
+  }
+  if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
+  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+  console.log(
+    `  자동완성 ${trigger.typed} ${scheme}: ${proof.label} · 후보 ${proof.options} · 첫 줄 ${proof.firstText}`
+  );
+  await page.keyboard.press("Escape");
+  await list.waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 카탈로그가 죽은 판의 사유 상자와 「다시 시도」 (design-review #1930 B-1·H-3).
+ *
+ * 이 장면이 없어서 두 결함이 초록을 뚫고 나갔다. `:` 만 비동기 소스인데 레인은
+ * 성공 경로만 열었고, 단위 시험은 `loadCatalog` 자체를 모킹해 로더의 현실을 보지
+ * 않았다. 그래서 여기서는 **실제로 청크를 끊는다**:
+ *
+ *   1. 카탈로그 요청을 abort → `:thu` 가 사유 상자(오류)를 세운다.
+ *   2. 그 상자의 「다시 시도」가 **제출 버튼이 아니다**(B-1). 컴포저의 `<form>`
+ *      안이라 `type` 이 없으면 클릭이 폼을 제출해 쓰던 초안이 채널로 나갔다.
+ *      클릭 뒤 초안이 그대로 있고 POST /messages 가 0건이어야 한다.
+ *   3. 차단을 풀고 누르면 **실제로 다시 실린다**(H-3). 실패한 dynamic import 는
+ *      모듈 맵이 기억하므로, 재시도가 자산 URL 을 `fetch` 로 다시 받지 않으면
+ *      이 대기는 영원히 안 끝난다.
+ *
+ * 이 장면은 `:thu` 성공 장면보다 **먼저** 돈다: 카탈로그가 한 번 실리면 그 뒤로는
+ * 이 판을 만들 수 없다.
+ */
+async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  const posted = [];
+  const watch = (request) => {
+    if (request.method() === "POST" && request.url().includes("/messages")) {
+      posted.push(request.url());
+    }
+  };
+  page.on("request", watch);
+  const block = (route) => route.abort();
+  await context.route("**/emojiCatalog-*", block);
+  const input = page.getByTestId("composer-input");
+  await input.fill("");
+  await input.click();
+  await page.keyboard.type(":thu", { delay: 15 });
+  const box = page.getByTestId("composer-emoji-list-status");
+  await box.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () =>
+      document
+        .querySelector('[data-testid="composer-emoji-list-status"]')
+        ?.getAttribute("data-status") === "error"
+  );
+  const proof = await page.evaluate(`(() => {
+    const box = document.querySelector('[data-testid="composer-emoji-list-status"]');
+    const button = box?.querySelector("button");
+    const input = document.querySelector('[data-testid="composer-input"]');
+    return {
+      status: box?.getAttribute("data-status") ?? null,
+      text: box?.textContent ?? "",
+      buttonType: button?.type ?? null,
+      buttonTypeAttr: button?.getAttribute("type") ?? null,
+      inForm: Boolean(button?.form),
+      listWidth: Math.round(box?.getBoundingClientRect().width ?? 0),
+      value: input?.value ?? null,
+    };
+  })()`);
+  if (
+    proof.status !== "error" ||
+    !proof.text.includes("이모지 목록을 불러오지 못했습니다.") ||
+    !proof.text.includes("다시 시도") ||
+    proof.buttonType !== "button" ||
+    !proof.inForm ||
+    proof.value !== ":thu"
+  ) {
+    throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
+  }
+  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  await page.screenshot({ path: shot });
+  shots.push(shot);
+
+  await context.unroute("**/emojiCatalog-*", block);
+  await box.locator("button").click();
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
+  const after = await page.evaluate(`(() => {
+    const input = document.querySelector('[data-testid="composer-input"]');
+    const list = document.querySelector('[data-testid="composer-emoji-list"]');
+    return {
+      value: input?.value ?? null,
+      options: list?.querySelectorAll('[role="option"]').length ?? 0,
+      status: document.querySelector('[data-testid="composer-emoji-list-status"]'),
+    };
+  })()`);
+  page.off("request", watch);
+  if (after.value !== ":thu" || after.options < 1 || posted.length > 0) {
+    throw new Error(
+      `다시 시도 ${scheme}: ${JSON.stringify({ ...after, posted })}`
+    );
+  }
+  console.log(
+    `  이모지 카탈로그 실패 ${scheme}: 오류 상자 ${proof.listWidth}px · 버튼 격 ${proof.buttonType} · 다시 시도 뒤 후보 ${after.options} · 초안 보존 "${after.value}" · 전송 ${posted.length}건`
+  );
+  await page.keyboard.press("Escape");
+  await page.getByTestId("composer-emoji-list").waitFor({ state: "hidden" });
+  await input.fill("");
+}
+
+/**
+ * 후보 행이 자유 텍스트 방 이름을 **실제로 담는지** 잰다 (design-review #1930).
+ *
+ * jsdom 은 폭을 재지 않는다. 그래서 앞 판의 「긴 채널 이름도 자르지 않고 넣는다」
+ * 시험은 삽입 문자열만 재고 초록이었고, 화면에서는 말줄임이 사람이 친 글자를
+ * 먹고(`#2026-하반기-릴리…`) 주제 칸이 폭 0px 로 소멸했다(M-1 실측). 여기서
+ * 재는 것은 그 두 가지다: 이름이 두 줄로 감싸고 잘리지 않는가, 주제가 폭을
+ * 갖는가. 같은 프레임에서 비공개 방의 격 글리프(M-2)도 함께 본다.
+ */
+async function assertComposerRows(page, scheme, trigger) {
+  const rows = await page.evaluate(`(() => {
+    const list = document.querySelector('[data-testid="${trigger.list}"]');
+    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((option) => {
+      const spans = [...option.querySelectorAll('span')];
+      const lead = spans[0];
+      const hint = spans[1] ?? null;
+      const leadRect = lead.getBoundingClientRect();
+      const line = parseFloat(getComputedStyle(lead).lineHeight) || 1;
+      return {
+        text: option.textContent,
+        lock: Boolean(option.querySelector('svg')),
+        leadLines: Math.round(leadRect.height / line),
+        leadClipped:
+          lead.scrollHeight > lead.clientHeight + 1 ||
+          lead.scrollWidth > lead.clientWidth + 1,
+        hintW: hint ? Math.round(hint.getBoundingClientRect().width) : null,
+      };
+    });
+  })()`);
+  const find = (needle) => rows.find((row) => (row.text ?? "").includes(needle));
+  const wrapped = find(trigger.rows.wrapped);
+  if (
+    !wrapped ||
+    wrapped.leadLines < 2 ||
+    wrapped.leadClipped ||
+    !(wrapped.hintW > 0)
+  ) {
+    throw new Error(
+      `${trigger.typed} 긴 이름 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  const locked = find(trigger.rows.locked);
+  if (!locked || !locked.lock || (locked.text ?? "").includes("#")) {
+    throw new Error(
+      `${trigger.typed} 비공개 행 ${scheme}: ${JSON.stringify(rows)}`
+    );
+  }
+  console.log(
+    `  자동완성 행 ${scheme}: 긴 이름 ${wrapped.leadLines}줄 · 주제 ${wrapped.hintW}px · 비공개 자물쇠 ${locked.lock}`
+  );
 }
 
 /** 이모지 popover의 세로 변이 실제 트리거 버튼에서 시작하는지 잰다. */
@@ -2944,6 +4626,38 @@ async function waitForInboxSettled(page, where) {
     throw new Error(`[${where}] 인박스가 오류로 정착했다 — 이 화면은 찍지 않는다`);
   }
   console.log(`  inbox ${where}: ${settled}로 정착`);
+  return settled;
+}
+
+async function waitForRemindersSettled(page, where) {
+  await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+  await page.waitForSelector(
+    '[data-testid="reminders-list"], [data-testid="reminders-empty"], [data-testid="reminders-error"]',
+    { state: "visible" }
+  );
+  const settled = await page.evaluate(`(() => {
+    for (const id of ["reminders-list", "reminders-empty", "reminders-error"]) {
+      if (document.querySelector('[data-testid="' + id + '"]')) return id;
+    }
+    return null;
+  })()`);
+  if (settled === "reminders-error") {
+    throw new Error(
+      `[${where}] 리마인더가 오류로 정착했다 — 이 화면은 찍지 않는다`
+    );
+  }
+  if (settled !== "reminders-list") {
+    throw new Error(
+      `[${where}] 리마인더 목록이 없다 (정착=${settled}) — 목 또는 탭이 빠졌다`
+    );
+  }
+  const overdue = await page
+    .locator('[data-testid="reminder-row"][data-due="overdue"]')
+    .count();
+  if (overdue < 1) {
+    throw new Error(`[${where}] 만기 행이 없다 — 픽스처가 빠졌다`);
+  }
+  console.log(`  reminders ${where}: ${settled}로 정착, overdue ${overdue}`);
   return settled;
 }
 
@@ -3233,6 +4947,106 @@ async function assertHoverToolbarClearsBodyText(page, where) {
   console.log(
     `  호버 툴바 본문 ${where}: ${info.length}개, 글자 교차 0(자기+이웃) · 상단 ${info[0].fromTop}px · straddle ${info[0].straddle || "top"}`
   );
+}
+
+/**
+ * 리마인더 행 ⋯ 그릇 ∩ 본문 텍스트 Range = 0 (#1888 B-2).
+ * 타임라인 `assertHoverToolbarClearsBodyText` 와 같은 자.
+ */
+async function assertReminderOverflowClearsBodyText(page, where) {
+  const info = await page.evaluate(`(() => {
+    function intersects(a, b) {
+      return a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+    }
+    function hitChars(barRect, body) {
+      const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+      let chars = 0;
+      let area = 0;
+      let sample = "";
+      while (walker.nextNode()) {
+        const node = walker.currentNode;
+        const text = node.textContent || "";
+        for (let i = 0; i < text.length; i++) {
+          if (text[i] === "\\n" || text[i] === " ") continue;
+          const range = document.createRange();
+          range.setStart(node, i);
+          range.setEnd(node, i + 1);
+          const r = range.getBoundingClientRect();
+          if (r.width === 0 && r.height === 0) continue;
+          if (!intersects(barRect, r)) continue;
+          chars += 1;
+          const w = Math.min(barRect.right, r.right) - Math.max(barRect.left, r.left);
+          const h = Math.min(barRect.bottom, r.bottom) - Math.max(barRect.top, r.top);
+          area += Math.max(0, w) * Math.max(0, h);
+          if (sample.length < 24) sample += text[i];
+        }
+      }
+      return { chars, area: Math.round(area), sample };
+    }
+    const bowls = Array.from(
+      document.querySelectorAll('[data-testid="reminder-overflow-bowl"]')
+    ).filter((bowl) => bowl.querySelector('[data-testid="reminder-row-menu"]'));
+    return bowls.map((bowl) => {
+      const row = bowl.closest('[data-testid="reminder-row"]');
+      if (!row) return { chars: -1, area: -1, sample: "" };
+      const t = bowl.getBoundingClientRect();
+      const body = row.querySelector("[data-reminder-row-body]");
+      const due = row.querySelector('[data-testid="reminder-row-due"]');
+      let worst = { chars: 0, area: 0, sample: "", width: Math.round(t.width) };
+      for (const el of [body, due].filter(Boolean)) {
+        const hit = hitChars(t, el);
+        if (hit.chars > worst.chars) worst = { ...worst, ...hit };
+      }
+      return worst;
+    });
+  })()`);
+  if (info.length === 0) {
+    throw new Error(`[리마인더 ⋯ 본문 ${where}] 잴 그릇이 없다`);
+  }
+  const hit = info.find((item) => item.chars > 0);
+  if (hit) {
+    throw new Error(
+      `[리마인더 ⋯ 본문 ${where}] 본문 ${hit.chars}자(${hit.area}px²)를 덮는다 「${hit.sample}」`
+    );
+  }
+  console.log(
+    `  리마인더 ⋯ 본문 ${where}: ${info.length}개, 글자 교차 0 · 그릇 ${info[0].width}px`
+  );
+}
+
+async function assertReminderKeyboardDelete(page, where) {
+  const tab = page.getByTestId("inbox-tab-reminders");
+  await tab.focus();
+  let last = "";
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press("Tab");
+    const proof = await page.evaluate(`(() => {
+      const el = document.activeElement;
+      return {
+        testId: el?.getAttribute("data-testid") || "",
+        menu: document.querySelectorAll('[data-testid="reminder-row-menu"]').length,
+      };
+    })()`);
+    last = proof.testId;
+    if (proof.testId === "reminder-row-link" && proof.menu === 0) {
+      await page
+        .getByTestId("reminder-row-menu")
+        .first()
+        .waitFor({ state: "visible", timeout: 1_000 });
+    }
+    if (proof.testId === "reminder-row-menu") break;
+  }
+  if (last !== "reminder-row-menu") {
+    throw new Error(
+      `[리마인더 키보드 ${where}] ⋯에 닿지 못했다 (last=${last})`
+    );
+  }
+  await page.keyboard.press("Enter");
+  await page.getByTestId("reminder-row-menu-panel").waitFor({ state: "visible" });
+  await page.getByTestId("reminder-row-delete").waitFor({ state: "visible" });
+  await page.getByTestId("reminder-row-delete").press("Enter");
+  await page.getByTestId("reminder-delete-dialog").waitFor({ state: "visible" });
+  console.log(`  리마인더 키보드 지우기 ${where}: ⋯ Tab · 다이얼로그`);
 }
 
 /**
@@ -4355,9 +6169,13 @@ async function captureMobile(browser, scheme) {
   };
 
   // 1. 연결 화면. 셸 밖의 유일한 표면이고, 폰에서 문서가 스크롤해도 되는 자리다.
+  //    BZ-6a: 첫 페인트는 S0. S1/S2를 찍은 뒤 기존 login 프레임은 계정 스텝이다.
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
-  await page.getByTestId("login-submit").waitFor({ state: "visible" });
+  await walkOnboardingToAccount(page, `login ${scheme}`, {
+    tapTargets: true,
+    shoot: (name) => shoot(page, name),
+  });
   await assertNoHorizontalOverflow(page, `login ${scheme}`);
   // goal P3 1-4: 폼의 1급 컨트롤은 이 폭에서 44px다. 데스크탑 프레임은 같은
   // 컨트롤을 32px로 찍으므로, 두 프레임이 함께 "토큰이 아니라 폭이 결정한다"를
@@ -4530,6 +6348,18 @@ async function captureMobile(browser, scheme) {
     .getByTestId("delete-message-dialog")
     .waitFor({ state: "hidden" });
 
+  // (2b) 나중에 알림 (#1889 R2-M1). RemindDialog 44 주장은 장면이 없으면
+  //      허용목록만 초록이다. 시트의 「나중에 알림」이 폰의 실진입점.
+  await openSheet();
+  await page.getByTestId("sheet-remind").click();
+  await page.getByTestId("remind-dialog").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await assertNoHorizontalOverflow(page, `remind dialog ${scheme}`);
+  await assertTapTargets(page, `remind dialog ${scheme}`);
+  await shoot(page, "remind-dialog");
+  await page.keyboard.press("Escape");
+  await page.getByTestId("remind-dialog").waitFor({ state: "hidden" });
+
   // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
   //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
   await page.getByTestId("thread-anchor").first().click();
@@ -4600,16 +6430,45 @@ async function captureMobile(browser, scheme) {
     `  drawer ${scheme}: ${drawer.width}px 서랍 + ${drawer.peek}px 잔여, 행 ${drawer.rowHeight}px, 본문 inert=${drawer.mainInert}`
   );
   await assertNoHorizontalOverflow(page, `drawer ${scheme}`);
+
+  // ADR-0177 / design-review #1932 H-1 — 배치의 문(행 컨텍스트 메뉴)이 없는
+  // 표면에는 섹션을 **만드는** 문도 없다. 만들 수는 있는데 쓸 수 없는 그릇을
+  // 내밀지 않는다. 터치에서는 호버 클러스터가 **언제나** 마운트되므로
+  // (`shouldShowSectionActions` 의 `!pointerCanHover` 갈래) 아무것도 누르지 않고
+  // 세는 것이 맞다 - 헤더를 누르면 섹션이 접혀 이 프레임이 달라진다.
+  const touchDoors = await page.evaluate(`(() => ({
+    newSection: document.querySelectorAll('[data-testid="new-section"]').length,
+    sectionMenus: document.querySelectorAll('[data-testid^="section-menu-"]').length,
+  }))()`);
+  if (touchDoors.newSection !== 0 || touchDoors.sectionMenus !== 0) {
+    throw new Error(
+      `터치 서랍에 섹션 편집 문이 서 있다 ${scheme}: ${JSON.stringify(touchDoors)}`
+    );
+  }
+  console.log(
+    `  섹션 편집 문 (터치) ${scheme}: 새 섹션 ${touchDoors.newSection} · 섹션 메뉴 ${touchDoors.sectionMenus}`
+  );
+
   await shoot(page, "sidebar-drawer");
 
   await page.getByTestId("profile-card").click();
   await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+  await assertProfileMenuFitsViewport(page, `drawer profile ${scheme}`);
   await assertTapTargets(page, `drawer profile ${scheme}`);
   await shoot(page, "sidebar-profile-card");
-  // 첫 Esc 는 카드, 둘째는 서랍. 메뉴가 열려 있는 동안 escape 층은 양보한다
-  // (`role="menu"` — UX-D4, 서랍이 카드를 삼키던 자리).
+  await page.getByTestId("profile-set-status").click();
+  await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+  await assertTapTargets(page, `set-status ${scheme}`);
+  await shoot(page, "set-status-dialog");
+  // #1889 R2-N2: 「시각 고르기」는 390에서 다이얼로그를 키우는 유일한 분기.
+  await page.getByTestId("set-status-expiry").selectOption("custom");
+  await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
+  await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
+  await assertTapTargets(page, `set-status custom ${scheme}`);
+  await shoot(page, "set-status-custom");
   await page.keyboard.press("Escape");
-  await page.getByTestId("profile-card-menu").waitFor({ state: "hidden" });
+  await page.getByTestId("set-status-dialog").waitFor({ state: "hidden" });
+  // 첫 Esc 는 상태 다이얼로그, 둘째는 서랍. 메뉴는 상태 항목을 고르며 이미 닫힘.
 
   // Esc로 닫힌다. 닫히는 길이 셋(닫기 버튼·스크림·Esc)이라는 주장 중 하나를
   // 여기서 실제로 걷는다.
@@ -4699,8 +6558,53 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "inbox");
 
-  // 6. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
-  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 다섯 프레임은 손대지 않은 표면에서
+  // 5b. 나중에 알림 (#1888). 390에서 ⋯ 그릇이 본문을 덮지 않는지, 완료·미루기가
+  //     44 타깃인지, 만기 행이 칩 그릇을 입는지. hover:none 이라 ⋯는 상시 마운트.
+  await page.evaluate('location.hash = "/inbox?filter=reminders"');
+  await waitForRemindersSettled(page, `mobile ${scheme}`);
+  await assertNoHorizontalOverflow(page, `reminders ${scheme}`);
+  await assertReminderOverflowClearsBodyText(page, `mobile ${scheme}`);
+  await assertTapTargets(page, `reminders ${scheme}`, [
+    ["open-sidebar-drawer", "채널 목록 열기"],
+    ["reminder-complete", "알림 완료"],
+    ["reminder-snooze", "알림 미루기"],
+    ["reminder-row-menu", "알림 메뉴"],
+  ]);
+  await shoot(page, "reminders");
+
+  // 6. 설정 전면 (#1867). 앱 사이드바가 사라지고 섹션 목록이 본문 위로 접힌다.
+  await page.evaluate('location.hash = "/settings?section=profile"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  await page.getByTestId("settings-back-to-app").waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "프로필", exact: true }).waitFor({
+    state: "visible",
+  });
+  await page.waitForTimeout(250);
+  await assertNoHorizontalOverflow(page, `settings ${scheme}`);
+  await assertTapTargets(page, `settings ${scheme}`, [
+    ["settings-back-to-app", "앱으로 돌아가기"],
+    ["profile-display-name", "표시 이름 입력"],
+    ["profile-display-name-save", "표시 이름 저장"],
+  ]);
+  await shoot(page, "settings");
+
+  await page.evaluate('location.hash = "/inbox"');
+  await page.waitForTimeout(200);
+  await page.evaluate('location.hash = "/settings?section=appearance"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "테마", exact: true }).waitFor({
+    state: "visible",
+  });
+  await page.getByTestId("accent-swatch-dawn").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `settings appearance ${scheme}`);
+  await assertTapTargets(page, `settings appearance ${scheme}`, [
+    ["settings-back-to-app", "앱으로 돌아가기"],
+    ["accent-swatch-dawn", "액센트 새벽"],
+  ]);
+  await shoot(page, "settings-appearance");
+
+  // 7. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
+  //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 여섯 프레임은 손대지 않은 표면에서
   //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
   await page.evaluate('location.hash = "/"');
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
@@ -4729,10 +6633,17 @@ async function captureScheme(browser, scheme) {
   await installMocks(context);
   const shots = [];
 
-  // 1. login surface: Card / Input / Button / runtime badge tokens
+  // 1. login surface: BZ-6a S0 landing, then S1 gateway, then S2 account
+  //    (Card / Input / Button / runtime badge tokens).
   const login = await context.newPage();
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
-  await login.getByTestId("login-submit").waitFor({ state: "visible" });
+  await walkOnboardingToAccount(login, scheme, {
+    shoot: async (name) => {
+      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      await login.screenshot({ path });
+      shots.push(path);
+    },
+  });
   const loginShot = `${OUT_DIR}/login-${scheme}.png`;
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
@@ -4800,6 +6711,7 @@ async function captureScheme(browser, scheme) {
   shots.push(chatShot);
 
   await captureSidebarD4(login, scheme, shots);
+  await captureSidebarPrefsUnavailable(context, scheme, shots);
 
   // UX-CB 4상태 중 rest의 계산 스타일과 닫힌 탭 예산. 새 [@]은 목록에 적어 둔
   // 이름이 아니라 이 페이지에서 실제로 Tab이 멎는 한 정거장이어야 한다.
@@ -4814,21 +6726,78 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, scheme, {
     input: "composer-input",
     actions: "composer-actions",
+    frame: "composer-frame",
   });
+  const pointerShot = `${OUT_DIR}/composer-pointer-${scheme}.png`;
+  await login.screenshot({ path: pointerShot });
+  shots.push(pointerShot);
 
   // 새 진입점은 캡처 레인이 실제로 누른다. 클릭이 @를 넣고 기존 listbox를 열며,
   // 포인터 경로의 프로그램 포커스가 :focus-visible 링을 지어내지 않는 데까지 한 자다.
   const mentionProof = await assertMentionTrigger(login, scheme, {
     input: "composer-input",
     trigger: "composer-mention-trigger",
-    list: "mention-list",
+    list: "composer-mention-list",
   });
   const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
-  await login.getByTestId("mention-list").waitFor({ state: "hidden" });
+  await login.getByTestId("composer-mention-list").waitFor({ state: "hidden" });
   await login.getByTestId("composer-input").fill("");
+
+  // 같은 기계의 나머지 두 트리거 (#1930). `#`는 채널 목록, `:`는 피커와 같은
+  // 이모지 검색 열을 그린다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#rel",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      expectFirst: "#release-notes",
+      shot: "composer-channel-autocomplete",
+    }
+  );
+  // 같은 목록의 두 결함을 한 프레임이 진다 (#1930 M-1·M-2): 자유 텍스트 방
+  // 이름이 행 안에서 감싸고, 비공개 방이 사이드바와 같은 자물쇠로 그려진다.
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: "#",
+      list: "composer-channel-list",
+      label: "채널 선택",
+      minOptions: 4,
+      rows: { wrapped: "회고", locked: "김인턴작업" },
+      shot: "composer-channel-kinds",
+    }
+  );
+  // 성공 경로보다 먼저: 카탈로그가 한 번 실리면 실패 판을 못 만든다 (#1930 H-3).
+  await captureComposerCatalogFailure(login, context, scheme, shots);
+  await captureComposerTrigger(
+    login,
+    scheme,
+    shots,
+    { input: "composer-input" },
+    {
+      typed: ":thu",
+      list: "composer-emoji-list",
+      label: "이모지 선택",
+      // 후보와 순위의 정본은 피커의 `filterEmojis` 이고 그 동일성은 단위 시험이
+      // 잰다. 여기서 잴 것은 목록이 실제로 여러 줄을 그리고 aria 배선이 그
+      // 목록을 가리킨다는 사실 — 그리고 **첫 줄이 Enter 의 기본값이라는 사실**
+      // 이다(#1930 H-1). 앞 판의 이 프레임은 `:thu` 첫 줄로 🫰 를 찍었고 마지막
+      // 줄이 리투아니아 국기였다. 지금 첫 줄은 친 글자를 숏코드로 맞춘 줄이다.
+      minOptions: 2,
+      expectFirst: ":thumbsup:",
+      shot: "composer-emoji-autocomplete",
+    }
+  );
 
   // disabled/offline: 입력·[@]·이모지는 로컬 초안을 계속 만들고, 네트워크를 여는
   // 첨부와 보내기만 막힌다는 기존 의미를 렌더 상태로 확인한다.
@@ -5353,6 +7322,7 @@ async function captureScheme(browser, scheme) {
   await assertComposerVesselClick(login, `thread ${scheme}`, {
     input: "thread-composer-input",
     actions: "thread-composer-actions",
+    frame: "thread-composer-frame",
   });
   await assertMentionTrigger(login, `thread ${scheme}`, {
     input: "thread-composer-input",
@@ -5794,14 +7764,9 @@ async function captureScheme(browser, scheme) {
   await turns.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await turns.getByTestId("agent-turn-badge").first().waitFor({ state: "visible" });
   await turns.getByTestId("composer-working").waitFor({ state: "visible" });
-  // The ADR-0135 D1 cascade notice, and this wait is a GATE rather than a
-  // convenience. The row it hangs on is the WORKER turn record in BODIES, which
-  // is the only shape a real cascade can land on; the seeded fallback in
-  // cascadeRail.tsx is keyed to that row's run id. If `turnRecordRunId` ever
-  // narrows back to the gateway schema, the capture stops here instead of
-  // shipping screenshots of a surface that cannot render in production, which
-  // is precisely how D1/F3 got through the gates the first time.
-  await turns.getByTestId("cascade-notice").waitFor({ state: "visible" });
+  // The rich frame is reserved before bytes arrive (#1903 H-1). Wait for
+  // the image so the shot shows the OG card, not the muted skeleton.
+  await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
@@ -5810,8 +7775,15 @@ async function captureScheme(browser, scheme) {
   //       적이 없다 — 렌더를 확인하지 못한 채 머지 리뷰까지 갔고, 거기서 구조적으로
   //       렌더 불가라는 것이 드러났다(D1/F3). 워커 턴 행에 붙은 모습을 두 스킴
   //       모두에서 남겨 다음 리뷰가 눈으로도 확인할 수 있게 한다.
-  await turns.getByTestId("cascade-notice").scrollIntoViewIfNeeded();
-  await turns.waitForTimeout(200);
+  //
+  // The notice itself is still a GATE: scrollTimelineRowIntoView dies if the
+  // worker-turn row is not in this build (the seeded fallback in cascadeRail
+  // is keyed to that row's run id).
+  await scrollTimelineRowIntoView(
+    turns,
+    "cascade-notice",
+    `agent-turns ${scheme}`
+  );
   const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
   await turns.screenshot({ path: cascadeShot });
   shots.push(cascadeShot);
@@ -5834,6 +7806,107 @@ async function captureScheme(browser, scheme) {
   const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
+
+  // BF-A4 (#1887): 설정 > 알림. Chromium 캡처는 셸이 아니므로 권한은 미지원
+  // 배너이고, 종류 토글과 서버 DND 그룹이 같은 리듬으로 선다.
+  const notificationsPage = await context.newPage();
+  await notificationsPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(notificationsPage);
+  await notificationsPage.evaluate(
+    'location.hash = "/settings?section=notifications"'
+  );
+  await notificationsPage
+    .getByTestId("desktop-notifications-permission")
+    .waitFor({ state: "visible" });
+  await notificationsPage
+    .getByTestId("desktop-notification-kinds")
+    .waitFor({ state: "visible" });
+  await notificationsPage
+    .getByTestId("notification-rules")
+    .waitFor({ state: "visible" });
+  const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  await notificationsPage.screenshot({ path: notificationsShot });
+  shots.push(notificationsShot);
+  await notificationsPage.close();
+
+  // BF-A5 (#1901): 크로스채널 초안 패널. signIn이 localStorage를 비우므로
+  // 로그인한 뒤에 심고, 같은 탭 구독이 다시 읽도록 사건을 낸다.
+  const draftsPage = await context.newPage();
+  await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(draftsPage);
+  await draftsPage.evaluate(`(() => {
+    const now = Date.now();
+    const prefix = "momo.draft.v1:${WORKSPACE_ID}:";
+    localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
+      text: "배포 롤백 근거를 정리하면",
+      atMs: now,
+    }));
+    localStorage.setItem(prefix + "00000000-0000-7000-8000-000000000202", JSON.stringify({
+      text: "PR 본문에 게이트 증거를 붙이고\\n두 번째 줄은 미리보기에서 한 줄로 접힌다",
+      atMs: now - 60_000,
+    }));
+    localStorage.setItem(prefix + "${DM_ID}", JSON.stringify({
+      text: "hermes 온보딩 문구를 이어서",
+      atMs: now - 3_600_000,
+    }));
+    window.dispatchEvent(new Event("${DRAFTS_CHANGED_EVENT}"));
+    window.dispatchEvent(new CustomEvent("momo:composer-seed", {
+      detail: {
+        workspaceId: "${WORKSPACE_ID}",
+        channelId: "${GENERAL_ID}",
+        text: "배포 롤백 근거를 정리하면",
+      },
+    }));
+  })()`);
+  await draftsPage.getByTestId("nav-drafts").waitFor({ state: "visible" });
+  await draftsPage.evaluate('location.hash = "/drafts"');
+  try {
+    await draftsPage.getByTestId("drafts-list").waitFor({
+      state: "visible",
+      timeout: 10_000,
+    });
+  } catch {
+    const dump = await draftsPage.evaluate(`(() => ({
+      hash: location.hash,
+      route: Boolean(document.querySelector('[data-testid="drafts-route"]')),
+      list: Boolean(document.querySelector('[data-testid="drafts-list"]')),
+      empty: Boolean(document.querySelector('[data-testid="drafts-empty"]')),
+      error: Boolean(document.querySelector('[data-testid="drafts-error"]')),
+      skeleton: Boolean(document.querySelector('[data-testid="skeleton-row"]')),
+      nav: Boolean(document.querySelector('[data-testid="nav-drafts"]')),
+      keys: Object.keys(localStorage).filter((key) => key.startsWith("momo.draft")),
+      text: (document.getElementById("app-route")?.innerText ?? "").slice(0, 400),
+    }))()`);
+    throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
+  }
+  const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
+  await draftsPage.screenshot({ path: draftsShot });
+  shots.push(draftsShot);
+  await draftsPage.close();
+
+  // BF-B1 (#1888): 인박스 나중에 탭. 두 스킴 + 만기 행. ⋯는 호버로 띄운 뒤
+  // 본문 교차 0을 재고, 키보드만으로 지우기 다이얼로그까지 간다.
+  const remindersPage = await context.newPage();
+  await remindersPage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(remindersPage);
+  await remindersPage.evaluate('location.hash = "/inbox?filter=reminders"');
+  await waitForRemindersSettled(remindersPage, `desktop ${scheme}`);
+  await assertNoHorizontalOverflow(remindersPage, `reminders ${scheme}`);
+  const overdueRow = remindersPage
+    .locator('[data-testid="reminder-row"][data-due="overdue"]')
+    .first();
+  await overdueRow.hover();
+  await remindersPage
+    .getByTestId("reminder-row-menu")
+    .first()
+    .waitFor({ state: "visible" });
+  await assertReminderOverflowClearsBodyText(remindersPage, `desktop ${scheme}`);
+  const remindersShot = `${OUT_DIR}/reminders-${scheme}.png`;
+  await remindersPage.screenshot({ path: remindersShot });
+  shots.push(remindersShot);
+  await remindersPage.getByRole("heading", { name: "인박스" }).hover();
+  await assertReminderKeyboardDelete(remindersPage, scheme);
+  await remindersPage.close();
 
   // 3g. 설정 > 코드 실행 호스트 (MOMO-617): the three blocks that decide where an
   //     agent runs. Shot at the top of the panel, where the engine card, the
@@ -6030,6 +8103,7 @@ async function captureScheme(browser, scheme) {
   await settingsSweep.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(settingsSweep);
   for (const [section, heading, name] of [
+    ["profile", "프로필", "profile"],
     ["account", "계정", "account"],
     // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
@@ -6054,6 +8128,14 @@ async function captureScheme(browser, scheme) {
       .getByRole("heading", { name: heading, exact: true })
       .first()
       .waitFor({ state: "visible" });
+    if (section === "appearance") {
+      await settingsSweep.getByTestId("accent-swatch-dawn").waitFor({
+        state: "visible",
+      });
+      await assertTapTargets(settingsSweep, `appearance ${scheme}`, [
+        ["accent-swatch-dawn", "액센트 새벽"],
+      ]);
+    }
     if (section === "workspace") {
       await settingsSweep
         .getByTestId("workspace-role-labels")
@@ -6288,9 +8370,10 @@ async function captureTerminalDockScenes(browser, scheme) {
     // networkidle 을 기다리면 캡처가 영원히 멈춘다.
     if (boot === "pending") {
       await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
-      await page.getByTestId("login-email").fill("seongjae@dawn.example");
-      await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-      await page.getByTestId("login-submit").click();
+      await signInThroughOnboarding(page, {
+        email: "seongjae@dawn.example",
+        password: "capture-only-not-a-credential",
+      });
       await page.getByTestId("open-terminal-dock").waitFor({ state: "visible" });
       await page.getByTestId("composer-input").waitFor({ state: "visible" });
     } else {
@@ -6363,6 +8446,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       await context.route("**/v1/workspaces/*/work-sessions*", (route) =>
         json(route, { workSessions: dockSessions })
       );
+      await mockObserverTerminalAttach(context);
     },
     async (page) => {
       await openDock(page);
@@ -6376,6 +8460,12 @@ async function captureTerminalDockScenes(browser, scheme) {
         throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
       }
       await page.getByTestId("work-observer").waitFor({ state: "visible" });
+      await assertObserverTerminalModality(
+        page,
+        `sessions ${scheme}`,
+        shots,
+        scheme
+      );
       const dock = page.getByTestId("terminal-dock");
       await page.getByTestId("terminal-dock-close").click();
       await dock.waitFor({ state: "detached" });
@@ -6387,6 +8477,227 @@ async function captureTerminalDockScenes(browser, scheme) {
     }
   );
 
+  return shots;
+}
+
+/**
+ * BT-6 (#1934): timeline with a mark-unread (divider above a known seq).
+ * Own context so shared READ_STATES are not rewritten. Overlay only GET/PUT.
+ * Dedicated all-read #general. Starts unmarked so the ⋯ click (not a seeded
+ * GET mark) is what plants the divider.
+ */
+const MARK_UNREAD_SEQ = 1408;
+const MARK_UNREAD_LATEST = 1416;
+const ENGINE_ID = CHANNELS[1].id;
+
+async function waitForScrollerAlignSettled(page, label) {
+  await page.evaluate(`(() => {
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return;
+    scroller.removeAttribute("data-capture-scroll-top");
+    scroller.removeAttribute("data-capture-stable-frames");
+  })()`);
+  try {
+    await page.waitForFunction(
+      `(() => {
+        const scroller =
+          document.querySelector("[data-virtuoso-scroller]") ||
+          document.querySelector('[data-testid="timeline-virtuoso"]');
+        if (!scroller) return false;
+        const top = String(scroller.scrollTop);
+        const prev = scroller.getAttribute("data-capture-scroll-top");
+        const frames = Number(
+          scroller.getAttribute("data-capture-stable-frames") || "0"
+        );
+        if (prev === top) {
+          const next = frames + 1;
+          scroller.setAttribute("data-capture-stable-frames", String(next));
+          return next >= 12;
+        }
+        scroller.setAttribute("data-capture-scroll-top", top);
+        scroller.setAttribute("data-capture-stable-frames", "0");
+        return false;
+      })()`,
+      undefined,
+      { polling: "raf", timeout: 15_000 }
+    );
+  } catch (error) {
+    throw new Error(
+      `타임라인 정렬이 끝나지 않는다 ${label}: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+function markUnreadProofExpr() {
+  return `(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    const divider = document.querySelector('[data-testid="unread-divider"]');
+    if (!scroller || !row || !divider) return null;
+    const s = scroller.getBoundingClientRect();
+    const d = divider.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    if (d.height <= 0 || r.height <= 0) return null;
+    if (d.bottom < s.top || d.top > s.bottom) return null;
+    if (r.bottom < s.top || r.top > s.bottom) return null;
+    if (d.bottom - r.top > 8 || r.top - d.bottom > 24) return null;
+    const active = document.activeElement;
+    if (!(active instanceof Element) || !row.contains(active)) return null;
+    const pill = document.querySelector('[data-testid="jump-unread"]');
+    const pillRect = pill ? pill.getBoundingClientRect() : null;
+    const pillVisible = Boolean(
+      pillRect &&
+        pillRect.height > 0 &&
+        pillRect.bottom > s.top &&
+        pillRect.top < s.bottom
+    );
+    return {
+      dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
+      pillVisible,
+      pillText: pillVisible
+        ? (pill.textContent || "").replace(/\\s+/g, " ").trim()
+        : "",
+      dividerBottom: Math.round(d.bottom),
+      rowTop: Math.round(r.top),
+      focus: active.getAttribute("data-testid"),
+    };
+  })()`;
+}
+
+function markUnreadReadStates(cleared) {
+  return READ_STATES.map((row) =>
+    row.channel_id === GENERAL_ID
+      ? {
+          channel_id: GENERAL_ID,
+          last_read_seq: MARK_UNREAD_LATEST,
+          latest_seq: MARK_UNREAD_LATEST,
+          unread_count: 0,
+          mention_count: 0,
+          marked_unread_before_seq: cleared ? null : MARK_UNREAD_SEQ,
+        }
+      : { ...row, marked_unread_before_seq: null }
+  );
+}
+
+async function captureMarkUnreadScenes(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
+  await installMocks(context);
+  let cleared = true;
+  await context.route("**/v1/workspaces/*/read-state", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, { read_states: markUnreadReadStates(cleared) });
+  });
+  await context.route("**/v1/workspaces/*/channels/*/read-state", (route) => {
+    const req = route.request();
+    if (req.method() !== "PUT") return route.fallback();
+    const body = req.postDataJSON() || {};
+    if (body.read_intent === "explicit_open") {
+      cleared = true;
+    } else if (typeof body.mark_unread_before_seq === "number") {
+      cleared = false;
+    }
+    const general = markUnreadReadStates(cleared).find(
+      (row) => row.channel_id === GENERAL_ID
+    );
+    return json(route, {
+      ...general,
+      last_read_seq: body.last_read_seq ?? MARK_UNREAD_LATEST,
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} open`);
+  await page.evaluate(`location.hash = "/c/${ENGINE_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} 엔진`);
+  await page.evaluate(`location.hash = "/c/${GENERAL_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} general`);
+  await page.waitForFunction(`(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    if (!row) {
+      if (scroller) scroller.scrollTop = 0;
+      return false;
+    }
+    const box = row.getBoundingClientRect();
+    const root = scroller
+      ? scroller.getBoundingClientRect()
+      : { top: 0, bottom: window.innerHeight };
+    if (box.height <= 0 || box.top < root.top + 8 || box.bottom > root.bottom - 8) {
+      row.scrollIntoView({ block: "center" });
+      return false;
+    }
+    return true;
+  })()`);
+  await waitForScrollerAlignSettled(page, `${scheme} centre 1408`);
+  const marked = page.locator(
+    `[data-testid="timeline-message"][data-seq="${MARK_UNREAD_SEQ}"]`
+  );
+  await marked.hover();
+  await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
+  await page.getByTestId("message-actions-trigger").click();
+  await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  const markItem = page.getByTestId("menu-mark-unread");
+  if ((await markItem.count()) !== 1) {
+    throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
+  }
+  await markItem.click();
+  await waitForScrollerAlignSettled(page, `${scheme} after mark`);
+  const proof = await page.waitForFunction(
+    markUnreadProofExpr(),
+    undefined,
+    { polling: "raf", timeout: 15_000 }
+  );
+  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  const state = await proof.jsonValue();
+  if (!state || !state.dividerText.includes("새 메시지")) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
+  }
+  if (!state.focus) {
+    throw new Error(`마크 캡처 ${scheme}: 포커스가 행을 떠났다 ${JSON.stringify(state)}`);
+  }
+  const countMatch = state.dividerText.match(/(\d+)/);
+  if (!countMatch) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 수가 없다 「${state.dividerText}」`);
+  }
+  if (state.pillVisible && !state.pillText.includes(countMatch[1])) {
+    throw new Error(
+      `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
+    );
+  }
+  await assertComposerVisible(page, `mark-unread ${scheme}`);
+  await assertNoHorizontalOverflow(page, `mark-unread ${scheme}`);
+  console.log(
+    `  mark-unread ${scheme}: divider 「${state.dividerText}」 pill=${state.pillVisible ? state.pillText : "hidden"}`
+  );
+  await page.close();
+  await context.close();
   return shots;
 }
 
@@ -6435,6 +8746,320 @@ async function captureEmptyConversationScenes(browser, scheme) {
   return shots;
 }
 
+// 메시지가 있는 채널의 인트로 (#1904 design-review B-1). 빈 상태 레인은
+// empty=true만 찍어서, 히스토리 첫 행에 액션이 남는 화면이 증거 없이 지나갔다.
+// general은 픽스처 16행이라 열자마자 reachedStart이고, 인트로는 바닥 정렬 때문에
+// 창 위에 있으므로 목록을 머리까지 올린 뒤에 찍는다.
+async function captureNonemptyChannelIntroScenes(browser, scheme) {
+  const shots = [];
+  const CHANNEL_ID = CHANNELS[0].id;
+
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.evaluate((id) => {
+    window.location.hash = `#/c/${id}`;
+  }, CHANNEL_ID);
+  await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+  await scrollTimelineRowIntoView(
+    page,
+    "message-channel-intro",
+    `nonempty intro ${scheme}`
+  );
+  const intro = page.getByTestId("message-channel-intro");
+  const actionCount = await intro.locator("button").count();
+  if (actionCount !== 0) {
+    throw new Error(
+      `비어 있지 않은 인트로에 액션이 ${actionCount}개다 ${scheme}`
+    );
+  }
+  const text = await intro.innerText();
+  if (text.includes("첫 메시지")) {
+    throw new Error(`비어 있지 않은 인트로가 「첫 메시지」를 말한다 ${scheme}`);
+  }
+  await page.waitForTimeout(200);
+  const path = `${OUT_DIR}/channel-intro-nonempty-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  await context.close();
+  return shots;
+}
+
+// BT-3 (#1931) — 검색 범위 칩. 좁힌 결과 · 넓힌 결과 · 좁힌 빈손(승격 버튼),
+// 두 스킴.
+//
+// 목이 **범위를 실제로 읽는다**: `channel=`이 있으면 그 채널 히트만 돌려준다.
+// 목이 파라미터를 무시하면 두 프레임이 같은 그림이 되고, 그때 캡처는 초록인데
+// 칩은 죽은 컨트롤이다. 그래서 프레임을 찍기 전에 행 수를 센다 — 스크린샷은
+// 「목록이 안 바뀌었다」를 보여주지 못한다(MOBILE_TAP_TARGETS와 같은 이유).
+async function captureSearchScopeScenes(browser, scheme) {
+  const shots = [];
+  const HERE = GENERAL_ID; // general
+  const THERE = CHANNELS[1].id; // 엔진
+  // 브리프 ①이 명시한 두 갈래를 이 레인이 직접 본다(R1 M-3). 둘 다 이 파일에
+  // 이미 있던 픽스처다 — DM 은 hermes, 긴 이름은 #1930 이 「짧은 픽스처」 재발
+  // 방지용으로 넣어 둔 40자 그 줄이다. 사진이 없어서 「다이렉트 메시지님과의」
+  // (R1 H-2)가 캡처 레인이 아니라 리뷰어 프로브에서 나왔다.
+  const LONG = CHANNELS[4].id; // 2026-하반기-릴리스-준비-회고-및-후속-작업
+  const NEEDLE = "배포";
+  // 이 질의는 어느 채널에도 없다. 좁힌 빈손 프레임이 그 위에 선다.
+  const MISSING = "아무데도없는말";
+
+  function hit(channelId, seq, snippet) {
+    return {
+      channelId,
+      messageId: `019f9b00-0000-7000-8000-00000000${String(seq).padStart(4, "0")}`,
+      seq,
+      authorMemberId: ME,
+      createdAtMs: Date.parse("2026-08-31T09:12:00Z") + seq * 60_000,
+      snippet,
+      matchOffset: snippet.indexOf(NEEDLE) < 0 ? 0 : snippet.indexOf(NEEDLE),
+    };
+  }
+
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  await context.route("**/v1/workspaces/*/search/messages*", (route) => {
+    const params = new URL(route.request().url()).searchParams;
+    const q = params.get("q") ?? "";
+    const channel = params.get("channel");
+    if (q === MISSING) return json(route, { hits: [] });
+    const all = [
+      hit(HERE, 41, "금요일 배포 준비 끝났습니다. 롤백 절차만 한 번 더 볼게요."),
+      hit(HERE, 38, "배포 창은 오후 6시로 잡았습니다."),
+      hit(THERE, 12, "엔진 쪽 배포는 다음 주로 미룹니다."),
+    ];
+    const hits =
+      channel === null
+        ? all
+        : all.filter((row) => row.channelId.toLowerCase() === channel.toLowerCase());
+    return json(route, { hits });
+  });
+
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+
+  // 같은 라우트 안에서 해시만 바꾸면 라우트가 다시 마운트되지 않아 `?q=`가
+  // 첫 렌더의 값 그대로다(useMessageSearch: "초기값은 첫 렌더에서만 읽는다").
+  // 그래서 채널을 한 번 거쳐 실제로 떠났다 온다 — 사람이 ⌘K로 오는 경로와 같다.
+  async function goSearch(query, channelId) {
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, GENERAL_ID);
+    await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+    await page.evaluate(
+      ([q, id]) => {
+        const params = new URLSearchParams({ q });
+        if (id) params.set("channel", id);
+        window.location.hash = `#/search?${params.toString()}`;
+      },
+      [query, channelId ?? ""]
+    );
+    await page.getByTestId("search-route").waitFor({ state: "visible" });
+  }
+
+  async function rowCount() {
+    return page.getByTestId("search-hit").count();
+  }
+
+  await goSearch(NEEDLE, HERE);
+  await page.getByTestId("search-scope-channel").waitFor({ state: "visible" });
+  await page.getByTestId("search-results").waitFor({ state: "visible" });
+  const narrowed = await rowCount();
+  if (narrowed !== 2) {
+    throw new Error(`좁힌 검색 행 수 ${scheme}: ${narrowed} (2여야 함)`);
+  }
+  await page.waitForTimeout(200);
+  const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
+  await page.screenshot({ path: narrowShot });
+  shots.push(narrowShot);
+
+  // 칩을 실제로 누른다. 프레임만 찍고 누르지 않으면 죽은 칩도 초록이다.
+  await page.getByTestId("search-scope-workspace").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
+  );
+  await page.waitForTimeout(200);
+  const wideShot = `${OUT_DIR}/search-scope-workspace-${scheme}.png`;
+  await page.screenshot({ path: wideShot });
+  shots.push(wideShot);
+
+  // 키보드 계약은 공용 탭 컨트롤의 것이다(정거장 1개, ←/→ 이동). 이 표면이
+  // 그것을 실제로 물려받았는지 여기서 잰다.
+  await page.getByTestId("search-scope-workspace").focus();
+  await page.keyboard.press("ArrowLeft");
+  const afterArrow = await page.evaluate(
+    `document.activeElement?.getAttribute("data-testid")`
+  );
+  if (afterArrow !== "search-scope-channel") {
+    throw new Error(
+      `범위 칩 ←/→ 이동 ${scheme}: ${afterArrow} (search-scope-channel 이어야 함)`
+    );
+  }
+
+  // 좁힌 빈손 — 그리고 승격 버튼이 실제로 넓히는지.
+  await goSearch(MISSING, HERE);
+  const empty = page.getByTestId("search-empty");
+  await empty.waitFor({ state: "visible" });
+  const emptyText = await empty.innerText();
+  // 범위만이 아니라 **어느 채널인지**를 말해야 한다(R1 H-1). 이 화면에는 행이
+  // 없으므로 행 메타가 이름을 대신 메워 주지 않고, 안내문은 질의가 있어 안 보인다.
+  if (!emptyText.includes("general에는")) {
+    throw new Error(
+      `좁힌 빈손이 어느 채널인지 말하지 않는다 ${scheme}: ${emptyText}`
+    );
+  }
+  await page.waitForTimeout(200);
+  const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
+  await page.screenshot({ path: emptyShot });
+  shots.push(emptyShot);
+
+  await page.getByTestId("search-empty-escalate").click();
+  await page.waitForFunction(
+    () =>
+      (
+        document.querySelector('[data-testid="search-empty"]')?.textContent ?? ""
+      ).includes("에는 없습니다") === false
+  );
+  const escalated = await page.getByTestId("search-empty-escalate").count();
+  if (escalated !== 0) {
+    throw new Error(
+      `승격 뒤에도 승격 버튼이 남아 있다 ${scheme}: 넓힐 곳이 없는데 컨트롤이 있다`
+    );
+  }
+  // 승격은 주소에도 적힌다(R1 M-2). 화면만 넓어지고 주소가 `channel=…`에
+  // 남아 있으면, 새로고침이 사람의 결정을 조용히 되돌린다.
+  const widenedHash = await page.evaluate(() => window.location.hash);
+  if (!widenedHash.includes("scope=all") || !widenedHash.includes("channel=")) {
+    throw new Error(
+      `승격 뒤 주소가 화면과 다른 말을 한다 ${scheme}: ${widenedHash}`
+    );
+  }
+
+  // DM 분기 — 「이 대화에서」와 존칭 문장. `channelLabel` 이 사람 이름을 주는
+  // 정상 경로이고, 이름이 아닌 값을 줄 때 존칭이 붙지 않는 갈래는 vitest 가
+  // 잰다(SearchRoute.scope.test.tsx).
+  await goSearch(MISSING, DM_ID);
+  const dmEmpty = page.getByTestId("search-empty");
+  await dmEmpty.waitFor({ state: "visible" });
+  const dmText = await dmEmpty.innerText();
+  if (!dmText.includes("님과의 대화에는")) {
+    throw new Error(`DM 빈손이 사람 이름으로 말하지 않는다 ${scheme}: ${dmText}`);
+  }
+  const dmChip = await page.getByTestId("search-scope-channel").innerText();
+  if (dmChip.trim() !== "이 대화에서") {
+    throw new Error(`DM 칩이 「채널」이라 부른다 ${scheme}: ${dmChip}`);
+  }
+  await page.waitForTimeout(200);
+  const dmShot = `${OUT_DIR}/search-scope-dm-${scheme}.png`;
+  await page.screenshot({ path: dmShot });
+  shots.push(dmShot);
+
+  // 긴 채널 이름 — 빈손 문장이 40자 이름을 지고도 문서를 옆으로 밀지 않는가.
+  // 이름을 칩이 아니라 문장이 지기로 한 선택(R1 H-1)의 대가를 여기서 잰다.
+  await goSearch(MISSING, LONG);
+  const longEmpty = page.getByTestId("search-empty");
+  await longEmpty.waitFor({ state: "visible" });
+  const longText = await longEmpty.innerText();
+  if (!longText.includes("2026-하반기-릴리스-준비-회고-및-후속-작업에는")) {
+    throw new Error(
+      `긴 이름이 빈손 문장에 실리지 않았다 ${scheme}: ${longText}`
+    );
+  }
+  const overflow = await page.evaluate(
+    `(() => ({ doc: document.documentElement.scrollWidth, win: window.innerWidth }))()`
+  );
+  if (overflow.doc > overflow.win) {
+    throw new Error(
+      `긴 이름이 문서를 옆으로 밀었다 ${scheme}: ${overflow.doc} > ${overflow.win}`
+    );
+  }
+  // 칩은 이름을 지지 않기로 한 그 결정 그대로다 — 알약이 이름 길이를 따라
+  // 출렁이면 R1 H-1 의 수리가 칩 폭 문제를 다시 연 것이 된다.
+  const longChip = await page.getByTestId("search-scope-channel").innerText();
+  if (longChip.trim() !== "이 채널에서") {
+    throw new Error(`긴 이름이 칩으로 새어 들어갔다 ${scheme}: ${longChip}`);
+  }
+  await page.waitForTimeout(200);
+  const longShot = `${OUT_DIR}/search-scope-long-name-${scheme}.png`;
+  await page.screenshot({ path: longShot });
+  shots.push(longShot);
+
+  await context.close();
+  return shots;
+}
+
+// #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
+// 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
+async function captureSetStatusScenes(browser, scheme) {
+  const shots = [];
+
+  async function shoot(name, { failPut = false, offline = false, customExpiry = false } = {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    if (failPut) {
+      await context.route("**/v1/workspaces/*/presence", async (route) => {
+        if (route.request().method() === "PUT") {
+          return route.fulfill({
+            status: 500,
+            contentType: "application/json",
+            body: JSON.stringify({ error: { message: "presence write failed" } }),
+          });
+        }
+        return route.fallback();
+      });
+    }
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("profile-card").click();
+    await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
+    await page.getByTestId("profile-set-status").click();
+    await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
+    if (failPut) {
+      await page.getByTestId("set-status-save").click();
+      await page.getByTestId("set-status-error").waitFor({ state: "visible" });
+    } else if (offline) {
+      await context.setOffline(true);
+      await page.getByTestId("set-status-offline").waitFor({ state: "visible" });
+    } else if (customExpiry) {
+      await page.getByTestId("set-status-expiry").selectOption("custom");
+      await page.getByTestId("set-status-custom-date").waitFor({ state: "visible" });
+      await page.getByTestId("set-status-custom-time").waitFor({ state: "visible" });
+    } else {
+      await page.waitForTimeout(200);
+    }
+    const path = `${OUT_DIR}/set-status-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  await shoot("dialog");
+  await shoot("error", { failPut: true });
+  await shoot("offline", { offline: true });
+  await shoot("custom", { customExpiry: true });
+  return shots;
+}
+
 // 채널에 멤버 추가 다이얼로그 (검수 #2 / design-review F-4). This dialog had no
 // scene, so its four states went to review unseen. Each state is shot in its
 // own context because the roster is a react-query cache: to make the SAME
@@ -6456,7 +9081,7 @@ async function captureAddMemberScenes(browser, scheme) {
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
 
-  async function shoot(name, overrideRoster, settleTestId) {
+  async function shoot(name, overrideRoster, settleTestId, entry = "intro") {
     const context = await browser.newContext({
       viewport: VIEWPORT,
       deviceScaleFactor: 2,
@@ -6486,12 +9111,25 @@ async function captureAddMemberScenes(browser, scheme) {
     await page
       .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`)
       .click();
-    const empty = page.getByTestId("timeline-empty");
-    await empty.waitFor({ state: "visible" });
-    // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
-    // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
-    // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
-    await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+    if (entry === "header") {
+      // 로딩 장면은 로스터를 붙잡는다. 인트로의 「멤버 추가하기」는 로스터가
+      // 오기 전에 아무 말도 하지 않으므로(R2 M5) 여기서 열 수 없다. 헤더 멤버
+      // 목록이 같은 다이얼로그의 다른 문이다. 픽스처에 맞춰 제품 규칙을 낮추지
+      // 않는다 (#1904 H-1).
+      await page.getByTestId("channel-member-count").waitFor({ state: "visible" });
+      await page.getByTestId("channel-member-count").click();
+      await page
+        .getByTestId("channel-member-panel")
+        .waitFor({ state: "visible" });
+      await page.getByTestId("channel-member-add").click();
+    } else {
+      const empty = page.getByTestId("timeline-empty");
+      await empty.waitFor({ state: "visible" });
+      // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
+      // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
+      // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
+      await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+    }
     await page
       .getByTestId("add-channel-member-dialog")
       .waitFor({ state: "visible" });
@@ -6529,8 +9167,8 @@ async function captureAddMemberScenes(browser, scheme) {
   );
   // 로딩: 로스터 요청을 영영 붙잡아 스켈레톤이 화면에 남게 한다. 응답하지
   // 않으므로 fulfill이 없고, 컨텍스트가 닫히면 요청은 그대로 버려진다(닫힌
-  // 컨텍스트에 뒤늦게 응답해 터지는 일이 없다).
-  await shoot("loading", () => new Promise(() => {}));
+  // 컨텍스트에 뒤늦게 응답해 터지는 일이 없다). 진입은 헤더 문(위 entry).
+  await shoot("loading", () => new Promise(() => {}), null, "header");
 
   return shots;
 }
@@ -7403,6 +10041,163 @@ async function captureHostedDoorbellScenes(browser, scheme) {
  * (ChoiceList, KeyValueRows, InlineBanner, EmptyInvite, Button) are already shot
  * elsewhere in both schemes.
  */
+/**
+ * `data-accent` flipping is not the same as paint. Buttons carry
+ * `transition-colors` (150ms) even under reduced motion, so wait until a
+ * filled control's computed background equals `var(--token)`.
+ *
+ * `selector` is a CSS selector, not a test id: the selected channel row is
+ * one of several `[data-testid="channel-item"]` nodes, and only the
+ * `aria-current="page"` one paints `--accent-soft`.
+ */
+async function waitUntilTokenPaint(page, selector, cssVar) {
+  await page.waitForFunction(
+    ({ selector: sel, cssVar: token }) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = `var(${token})`;
+      probe.style.position = "absolute";
+      probe.style.left = "-9999px";
+      document.body.appendChild(probe);
+      const target = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      if (target === "rgba(0, 0, 0, 0)" || target === "transparent") return false;
+      return getComputedStyle(el).backgroundColor === target;
+    },
+    { selector, cssVar },
+    { timeout: 8_000 }
+  );
+}
+
+/**
+ * Hash navigation and `data-accent` both start 150ms color transitions.
+ * Dawn is a no-op accent change, so `--accent` probes would pass on the
+ * first tick while the selected row is still mid-transition. Finite
+ * running animations (not the infinite caret/spin) must be gone.
+ */
+async function waitUntilAnimationsIdle(page) {
+  await page.waitForFunction(
+    () =>
+      document.getAnimations().filter((animation) => {
+        if (animation.playState !== "running") return false;
+        const timing =
+          animation.effect && typeof animation.effect.getTiming === "function"
+            ? animation.effect.getTiming()
+            : null;
+        if (timing && timing.iterations === Infinity) return false;
+        return true;
+      }).length === 0,
+    { timeout: 8_000 }
+  );
+}
+
+/** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
+async function screenshotSettled(page, path) {
+  let previous = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const buffer = await page.screenshot({
+      type: "png",
+      animations: "disabled",
+      caret: "hide",
+    });
+    if (previous !== null && Buffer.compare(previous, buffer) === 0) {
+      writeFileSync(path, buffer);
+      return;
+    }
+    previous = buffer;
+  }
+  writeFileSync(path, previous);
+}
+
+const ACCENT_CAPTURE_ARGS = [
+  "--disable-lcd-text",
+  "--disable-font-subpixel-positioning",
+  "--font-render-hinting=none",
+  "--force-color-profile=srgb",
+  "--disable-gpu",
+];
+
+async function captureAccentCandidates(_sharedBrowser, scheme) {
+  const ids = accentCatalogIds();
+  // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
+  // launches (R3-M1). Software raster + no LCD keeps chrome visible and
+  // two capture:design runs byte-identical.
+  const browser = await chromium.launch({ args: ACCENT_CAPTURE_ARGS });
+  try {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    const emptyChannelId = CHANNELS[3].id;
+    // Last-registered route wins: this channel stays empty so unfurl cards cannot
+    // dominate the 시안 frame.
+    await context.route(
+      `**/channels/${emptyChannelId}/messages*`,
+      (route) => json(route, { messages: [] })
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("channel-list").waitFor({ state: "visible" });
+    // Empty public channel: selected sidebar row, enabled primary fill, and the
+    // general mention badge share one frame. Timeline unfurl cards (baked amber)
+    // do not dominate.
+    await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
+    await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
+    await page.getByTestId("mention-badge").waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="channel-item"][aria-current="page"]')
+      .waitFor({ state: "visible" });
+    await page.evaluate(() => document.fonts.ready);
+    // Product chrome stays visible (R3-M1). Lucide 16px strokes and the 2px
+    // rail marker AA at 1 RGB across Chromium launches; snap those glyphs
+    // so two capture:design runs stay byte-identical without hiding chrome.
+    await page.addStyleTag({
+      content: `svg { shape-rendering: crispEdges; }
+[data-testid="workspace-current"] .bg-accent,
+[data-testid="channel-item"][aria-current="page"] {
+  transform: translateZ(0);
+}`,
+    });
+    await waitUntilAnimationsIdle(page);
+    const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
+    mkdirSync(previewDir, { recursive: true });
+    const shots = [];
+    for (const id of ids) {
+      await page.evaluate((accentId) => {
+        document.documentElement.setAttribute("data-accent", accentId);
+      }, id);
+      await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
+      await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
+      await waitUntilTokenPaint(
+        page,
+        '[data-testid="channel-item"][aria-current="page"]',
+        "--accent-soft"
+      );
+      await waitUntilAnimationsIdle(page);
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          })
+      );
+      const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+      await screenshotSettled(page, path);
+      copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
+      shots.push(path);
+    }
+    await page.close();
+    await context.close();
+    return shots;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function captureConsent(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -7468,27 +10263,37 @@ async function main() {
   try {
     await waitForServer(ORIGIN);
     const browser = await chromium.launch();
+    await prepareUnfurlPreviewPng(browser);
     try {
       const all = [];
       // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여
-      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. 기본값은 여전히 둘 다이므로
-      // 게이트가 보는 것은 달라지지 않는다.
+      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. `accent`는 시안 10장만.
+      // 기본값은 여전히 둘 다이므로 게이트가 보는 것은 달라지지 않는다.
       const profile = process.env.CAPTURE_PROFILE || "all";
-      if (profile !== "mobile") {
+      if (profile === "accent") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureAccentCandidates(browser, scheme)));
+        }
+      } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
+          all.push(...(await captureMarkUnreadScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
+          all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));
+          all.push(...(await captureSetStatusScenes(browser, scheme)));
+          all.push(...(await captureSearchScopeScenes(browser, scheme)));
           all.push(...(await captureHostedPairingScenes(browser, scheme)));
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
           all.push(...(await captureConsent(browser, scheme)));
+          all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop") {
+      if (profile !== "desktop" && profile !== "accent") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureMobile(browser, scheme)));
         }

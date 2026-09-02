@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type FocusEvent } from "react";
 import { Outlet, useLocation } from "react-router-dom";
-import type { LoginResponse } from "@momo/core/lib/api";
+import type { LoginResponse, Member } from "@momo/core/lib/api";
 import {
   createRealtime,
   resolveSpikeRealtimeUrl,
@@ -15,12 +15,15 @@ import {
   useIsMobileShell,
 } from "@/app/shellNav";
 import { restoreDialogOpenerFocus } from "@/design/ui/dialog";
+import { restoreSettingsOpener } from "@/features/settings/settingsFocus";
 import { useEscapeLayer } from "@/design/ui/escapeLayer";
 import { queryClient } from "@/app/queryClient";
 import { resetRouteQueries } from "@/app/retryScope";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ConnectionBanner } from "@/features/common/ConnectionBanner";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
+import { AppTitlebar } from "@/app/AppTitlebar";
+import { useSidebarCollapsePaint } from "@/app/useSidebarCollapsePaint";
 import { Sidebar } from "@/features/sidebar/Sidebar";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
@@ -29,6 +32,7 @@ import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
 import { MemberProfileProvider } from "@/features/directory/MemberProfileDialog";
 import { InboxHotkeys } from "@/features/inbox/InboxHotkeys";
 import { DesktopNotifications } from "@/features/notifications/DesktopNotifications";
+import { ReminderDueWatcher } from "@/features/reminders/ReminderDueWatcher";
 import { AgentWorkingRail } from "@/features/agents/AgentWorkingRail";
 import { AgentWorkPanel } from "@/features/agents/AgentWorkPanel";
 import { useWorkPanelTarget } from "@/features/agents/workLogStore";
@@ -43,27 +47,34 @@ import {
 
 // =============================================================================
 // Signed-in shell: owns the single realtime rail for the session and renders
-// the sidebar beside whichever route is active. Channels, inbox, activity and
-// settings all mount inside this frame, so the connection survives navigation.
+// the sidebar beside whichever route is active. Settings (#1867) still mounts
+// inside this frame so the connection survives, but it replaces the app
+// sidebar and titlebar with its own layout.
 // =============================================================================
 
 export function AppShell({
   session,
   onLogout,
+  replaceSessionMember,
 }: {
   session: LoginResponse;
   onLogout: () => void;
+  replaceSessionMember: (member: Member) => void;
 }) {
   const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
   const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
   const [switcherOpen, setSwitcherOpen] = useState(false);
-  // 데스크톱의 184px 채널/프로필 패널은 필요할 때만 비킨다 (#1291).
-  // 저장소나 URL에 쓰지 않는 셸 수명 상태다: 라우트를 오가는 동안은 선택을
-  // 지키되 새 창·새 로그인까지 과거의 접힌 상태를 가져가지 않는다.
+  // 데스크톱 사이드바 접힘 (#1864). 저장소나 URL에 쓰지 않는 셸 수명 상태다:
+  // 라우트를 오가는 동안은 선택을 지키되 새 창·새 로그인까지 과거의 접힌
+  // 상태를 가져가지 않는다.
   const [sidebarPaneCollapsed, setSidebarPaneCollapsed] = useState(false);
+  const sidebarToggleRef = useRef<HTMLButtonElement>(null);
+  const desktopToggleFocusedRef = useRef(false);
   // The route boundary resets when the user navigates: a failed channel must
   // not keep the next one from rendering.
   const routePath = useLocation().pathname;
+  const isSettingsSurface = routePath === "/settings";
+  const wasSettingsSurface = useRef(false);
 
   // The pure-scroll gate (?stress=N) renders synthetic rows and must not open
   // a socket, otherwise the frame profile measures the network too.
@@ -85,6 +96,12 @@ export function AppShell({
   // `sidebar-drawer`). 상태는 여기 한 벌만 있고, 여는 컨트롤은 각 표면의 헤더가
   // `SidebarDrawerToggle`로 그린다.
   const isMobile = useIsMobileShell();
+  const sidebarPaint = useSidebarCollapsePaint({
+    collapsed: sidebarPaneCollapsed,
+    asDrawer: isMobile,
+    setCollapsed: setSidebarPaneCollapsed,
+  });
+  const previousMobileRef = useRef(isMobile);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const drawerOpenerRef = useRef<HTMLElement | null>(null);
   // 덮인 본문은 탭 순서에서 함께 빠진다. 이것이 초점 트랩이다 (shellNav.tsx).
@@ -143,6 +160,17 @@ export function AppShell({
     setDrawerOpen(false);
     closeAdeDrawer();
   }, [routePath]);
+  // 설정 전면은 이전 라우트를 언마운트하므로, 떠난 뒤에야 이전 포커스 자리
+  // (같은 testid의 새 노드)로 되돌린다 (#1867 M-4).
+  useEffect(() => {
+    if (isSettingsSurface) {
+      wasSettingsSurface.current = true;
+      return;
+    }
+    if (!wasSettingsSurface.current) return;
+    wasSettingsSurface.current = false;
+    restoreSettingsOpener();
+  }, [isSettingsSurface]);
   // 창이 넓어져 사이드바가 다시 열로 서면 서랍이라는 상태 자체가 사라진다.
   useEffect(() => {
     if (!isMobile) setDrawerOpen(false);
@@ -154,6 +182,43 @@ export function AppShell({
   // 달았고, 같은 타깃 같은 단계의 리스너는 서로를 막지 못해 한 번의 Esc가 두 층을
   // 닫았다(design-review ADE 2단계 H1 ①). 스택이 그 문장을 자료구조로 만든다.
   useEscapeLayer(drawerOpen, closeDrawer);
+
+  const onDesktopToggleBlur = (event: FocusEvent<HTMLButtonElement>) => {
+    const next = event.relatedTarget;
+    if (
+      next instanceof HTMLElement &&
+      next !== document.body &&
+      next.getClientRects().length > 0
+    ) {
+      desktopToggleFocusedRef.current = false;
+    }
+  };
+
+  // 폭이 서랍으로 바뀌면 타이틀바 토글이 `display: none`이 되어 포커스가
+  // 고립된다. 그때만 폰 opener로 넘기고, 본문이 이미 살아 있는 포커스를
+  // 갖고 있으면 빼앗지 않는다. 넓은 창으로 돌아오는 반대 왕복도 같다.
+  useEffect(() => {
+    const movedToDrawer = !previousMobileRef.current && isMobile;
+    const returnedToDesktop = previousMobileRef.current && !isMobile;
+    previousMobileRef.current = isMobile;
+    const active = document.activeElement;
+    const focusStranded =
+      active === null ||
+      active === document.body ||
+      (active instanceof HTMLElement && active.getClientRects().length === 0);
+    if (isMobile) {
+      if (movedToDrawer && desktopToggleFocusedRef.current && focusStranded) {
+        const opener = document.querySelector<HTMLButtonElement>(
+          '[data-testid="open-sidebar-drawer"]'
+        );
+        if (opener?.getClientRects().length) opener.focus();
+      }
+      desktopToggleFocusedRef.current = false;
+      return;
+    }
+    if (!returnedToDesktop || !focusStranded) return;
+    sidebarToggleRef.current?.focus();
+  }, [isMobile]);
 
   useEffect(() => {
     if (stress) return;
@@ -188,6 +253,7 @@ export function AppShell({
               ? "disconnected"
               : connStatus,
         logout: onLogout,
+        replaceSessionMember,
       }}
     >
       {/* app-shell is the named two-pane grid from tokens.css (sidebar 240px,
@@ -223,20 +289,41 @@ export function AppShell({
         <AgentProfileProvider>
         <MemberProfileProvider>
           <div
+            ref={sidebarPaint.shellRef}
             className="app-shell"
-            data-sidebar-collapsed={sidebarPaneCollapsed ? "" : undefined}
+            data-sidebar-collapsed={
+              isSettingsSurface
+                ? undefined
+                : sidebarPaint.trackCollapsed
+                  ? ""
+                  : undefined
+            }
+            data-settings-surface={isSettingsSurface ? "" : undefined}
           >
-            <Sidebar
-              onOpenQuickSwitcher={() => setSwitcherOpen(true)}
-              channelPaneCollapsed={sidebarPaneCollapsed}
-              onChannelPaneCollapsedChange={setSidebarPaneCollapsed}
-            />
+            {!isSettingsSurface && (
+              <AppTitlebar
+                collapsed={sidebarPaneCollapsed}
+                onCollapsedChange={sidebarPaint.requestCollapsedChange}
+                toggleRef={sidebarToggleRef}
+                onToggleFocus={() => {
+                  desktopToggleFocusedRef.current = true;
+                }}
+                onToggleBlur={onDesktopToggleBlur}
+              />
+            )}
+            {!isSettingsSurface && (
+              <Sidebar
+                onOpenQuickSwitcher={() => setSwitcherOpen(true)}
+                channelPaneCollapsed={sidebarPaneCollapsed}
+                treeHidden={sidebarPaint.treeHidden}
+              />
+            )}
             {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
              * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그
              * 순환이다. 아이콘도 글자도 없는 표면이지만 진짜 버튼인 이유는
              * 바깥을 눌러 닫는 것이 이 앱에서 유일하게 마우스로만 가능한 행동이
              * 되면 안 되기 때문이다. */}
-            {isMobile && drawerOpen && (
+            {isMobile && drawerOpen && !isSettingsSurface && (
               <button
                 type="button"
                 className="sidebar-scrim"
@@ -249,7 +336,7 @@ export function AppShell({
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.
                * 그래서 이 줄은 라우트 위, 셸 안에 한 벌만 있다. */}
-              <ConnectionBanner />
+              {!isSettingsSurface && <ConnectionBanner />}
               {/* ADE 관제 요약 한 줄 (ADR-0154 D2, 이슈 1135). 연결 배너와 같은
                * 자리에 있고 이유도 같다: 재료의 절반이 워크스페이스 전역이라
                * 채널 헤더에 두면 지금 보고 있는 방 밖의 작업이 화면에서 사라진다.
@@ -257,7 +344,7 @@ export function AppShell({
                * 빈 자리도 남기지 않는다(근거는 코어 `adeSummarySegments` 주석).
                * `?stress=N`은 합성 행만 그리는 순수 스크롤 측정이라 소켓도 REST도
                * 없다: 여기서 원장을 부르면 그 측정이 네트워크까지 재게 된다. */}
-              {!stress && <AdeSummaryLine />}
+              {!stress && !isSettingsSurface && <AdeSummaryLine />}
               {/* 라우트 하나가 던져도 사이드바·⌘K·설정·로그아웃은 살아 있어야
                * 한다. 앱 루트 경계만 있으면 채팅에서 난 오류가 셸을 통째로
                * 지워 사용자가 다른 화면으로 갈 길까지 사라진다. 실패는 그것을
@@ -294,11 +381,11 @@ export function AppShell({
                  * 대화 활동 줄과 에이전트 허브 둘이라 어느 한 라우트 안에 두면
                  * 다른 쪽에서 열 수 없고, 두 벌을 두면 같은 run에 대해 두 로그가
                  * 생긴다. */}
-                {!stress && <AgentWorkPanel />}
+                {!stress && !isSettingsSurface && <AgentWorkPanel />}
                 {/* 관제 서랍은 라우트 상자를 덮는다(tokens.css `ade-drawer`).
                  * 작업 패널과 형제인 것이 요점이다: 카드를 누르면 서랍이 닫히고
                  * 그 자리에 패널이 서므로 둘이 겹쳐 있는 순간이 없다. */}
-                {!stress && adeDrawerOpen && <AdeDrawer />}
+                {!stress && adeDrawerOpen && !isSettingsSurface && <AdeDrawer />}
               </div>
             </main>
           </div>
@@ -308,6 +395,7 @@ export function AppShell({
            * request reaches the OS while the window is in the background
            * (MOMO-607). */}
           {!stress && <DesktopNotifications />}
+          {!stress && <ReminderDueWatcher />}
           {/* Renders nothing; watches every agent's progress channel so the
            * sidebar badge and the composer line describe the same turn
            * (MOMO-613). Exactly one writer to the turn store is ever mounted. */}

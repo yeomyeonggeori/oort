@@ -36,6 +36,12 @@
 # Excluded by design:
 #   - src/design/tokens.css          the token definition; raw hex is its job
 #   - src/design/tokens.contrast.test.ts  the verifier; the hex IS the assertion
+#   - src/design/themes/             pre-validated accent bindings (ADR-0174 D5).
+#                                    Raw color outside this directory is still
+#                                    forbidden. Adding a file here is not a
+#                                    license to paint components; it is a
+#                                    license to rebind `--accent` after the
+#                                    contrast table has measured the pair.
 #   - any line carrying the marker `design-preflight-allow` (deliberate,
 #     reviewed exception, justify it in the PR body)
 #   - a GitHub issue reference inside raw_color (`#1137`); see ISSUE_REF_RE
@@ -99,8 +105,12 @@ if [ ! -d "$SRC" ]; then
   exit 2
 fi
 
-# Token definition + its verifier are the two files allowed to name raw values.
-TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):'
+# Token definition + its verifier + pre-validated theme bindings (ADR-0174 D5).
+# themes/ is an allowlist of binding files, not a general raw-color exemption:
+# a hex outside tokens.css / tokens.contrast.test.ts / themes/ is still a fail.
+# Path-end colons keep the exemption on the three token places. Without them
+# `themes/` matches any line that *mentions* the directory (#1868 H-2).
+TOKEN_FILE_RE='src/design/(tokens\.css|tokens\.contrast\.test\.ts):|src/design/themes/[^:]*:'
 # Deliberate reviewed exception marker.
 ALLOW_RE='design-preflight-allow'
 
@@ -176,7 +186,7 @@ KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus e
 label_for() {
   case "$1" in
     emdash)        echo "em-dash (—/–) in a user-visible string (SKILL §7: binary fail, use , : ( ) or a line break)" ;;
-    raw_color)     echo "raw color literal outside src/design/tokens.css (use a Dawn token utility)" ;;
+    raw_color)     echo "raw color literal outside src/design/tokens.css and src/design/themes/ (use a Dawn token utility or a pre-validated theme binding)" ;;
     inline_style)  echo "inline style attribute (SKILL §1: the shipped style-src carries 'unsafe-inline' for xterm.js only, components author no styles)" ;;
     arbitrary_tw)  echo "arbitrary Tailwind value (spacing is {4,8,12,16,24,32}px, radius is sm/md/lg)" ;;
     ai_gradient)   echo "gradient / indigo-violet family on a product surface (AI-tell, SKILL §8)" ;;
@@ -319,6 +329,38 @@ CASES
     return 1
   fi
   echo "RESULT: PASS, raw_color tells issue references from colors."
+
+  echo ""
+  echo "== token-file exemption stays on the three path-ends =="
+  local leak=0 kept dropped
+  while IFS='|' read -r want line; do
+    [ -z "${want:-}" ] && continue
+    case "$want" in \#*) continue ;; esac
+    kept=0
+    if printf '%s\n' "$line" | filter_common | grep -q .; then
+      kept=1
+    fi
+    dropped=$((1 - kept))
+    if [ "$dropped" = "$want" ]; then
+      echo "OK    exempt=$want  $line"
+    else
+      echo "FAIL  exempt=$want kept=$kept  $line"
+      leak=1
+    fi
+  done <<'EXEMPT_CASES'
+# 1 = filtered (exempt), 0 = still inspected
+1|clients/web/src/design/tokens.css:3:  --x: #ff0000;
+1|clients/web/src/design/tokens.contrast.test.ts:7: const x = "#ff0000";
+1|clients/web/src/design/themes/dawn.css:4: --accent: #ff0000;
+0|clients/web/src/design/tokens.css.ts:3:export const ACCENT = "#ff0000";
+0|clients/web/src/design/tokens.contrast.test.tsx:7:const x = "#ff0000";
+0|clients/web/src/features/chat/Bubble.tsx:12: // 팔레트 정본은 src/design/themes/ 를 본다  const c = "#ff0000";
+EXEMPT_CASES
+  if [ "$leak" -ne 0 ]; then
+    echo "RESULT: FAIL, token-file exemption leaked off the three places."
+    return 1
+  fi
+  echo "RESULT: PASS, token-file exemption does not leak."
   return 0
 }
 
@@ -410,7 +452,7 @@ fi
 
 echo "== design pre-flight (web), SKILL momo-design-taste-web §10 =="
 echo "   scanned: $SRC, $HTML"
-echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts"
+echo "   excluded: src/design/tokens.css, src/design/tokens.contrast.test.ts, src/design/themes/ (pre-validated bindings only)"
 echo "   emdash·progress_word·latin_particle: AST (문자열 리터럴·JSX 텍스트만, *.test.ts(x)·*.d.ts 제외) — #1141·#1511"
 echo ""
 

@@ -16,7 +16,12 @@
 //      afterwards (the intentionally inverted response timing);
 //   4. at 760x480 joined controls have a finite width, leaving the channel title
 //      measurable and the terminal-dock toggle inside the viewport;
-//   5. after audio joined, a projection 500 cannot hide Live, microphone or exit.
+//   5. at 390x844 (live + joined) the right group stays inside the viewport,
+//      does not paint over the drawer toggle or channel hash, and the title
+//      still has a measurable width. Joined Live chip and mic picker yield
+//      (wide-only) so mute/leave do not paint over the member button.
+//      Controls inside the header do not overlap each other;
+//   6. after audio joined, a projection 500 cannot hide Live, microphone or exit.
 //
 // Red proofs:
 //   HUDDLE_GATE_PROVE_RED_503=1 npm run gate:huddle
@@ -27,6 +32,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const port = Number(process.env.HUDDLE_GATE_PORT || 5183);
@@ -277,11 +283,155 @@ async function openSignedIn(context) {
   const page = await context.newPage();
   await installRealtimeSocket(page);
   await page.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("huddle@example.test");
   await page.getByTestId("login-password").fill("not-a-secret");
   await page.getByTestId("login-submit").click();
   await page.waitForSelector("nav[aria-label='워크스페이스 탐색']");
   return page;
+}
+
+async function assertJoinedHeaderFits(page, { width, height, requireDrawer }) {
+  await page.setViewportSize({ width, height });
+  const geometry = await page.evaluate((vpWidth) => {
+    const overlap = (a, b) =>
+      Boolean(
+        a &&
+          b &&
+          a.width > 0 &&
+          b.width > 0 &&
+          a.left < b.right &&
+          a.right > b.left &&
+          a.top < b.bottom &&
+          a.bottom > b.top
+      );
+    const header = document.querySelector("[data-testid='channel-header']");
+    const left = header?.children[0];
+    const title = header?.querySelector("h1")?.getBoundingClientRect();
+    const toggle = document
+      .querySelector("[data-testid='open-sidebar-drawer']")
+      ?.getBoundingClientRect();
+    const hash = left
+      ?.querySelector(":scope > span[aria-hidden='true']")
+      ?.getBoundingClientRect();
+    const group = document
+      .querySelector("[data-testid='channel-header-controls']")
+      ?.getBoundingClientRect();
+    const live = document
+      .querySelector("[data-testid='huddle-live']")
+      ?.getBoundingClientRect();
+    const menu = document
+      .querySelector("[data-testid='channel-title-menu']")
+      ?.getBoundingClientRect();
+    const workToggle = document
+      .querySelector("[data-testid='open-terminal-dock']")
+      ?.getBoundingClientRect();
+    const controlIds = [
+      "open-sidebar-drawer",
+      "open-terminal-dock",
+      "open-pin-list",
+      "channel-member-count",
+      "huddle-live",
+      "huddle-microphone",
+      "huddle-mic-devices",
+      "huddle-leave",
+      "channel-title-menu",
+    ];
+    const boxes = [];
+    for (const id of controlIds) {
+      const node = document.querySelector(`[data-testid='${id}']`);
+      if (!node) continue;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) continue;
+      boxes.push({
+        id,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+      });
+    }
+    if (hash && hash.width > 0 && hash.height > 0) {
+      boxes.push({
+        id: "channel-hash",
+        left: hash.left,
+        right: hash.right,
+        top: hash.top,
+        bottom: hash.bottom,
+        width: hash.width,
+        height: hash.height,
+      });
+    }
+    const overlaps = [];
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) {
+        const a = boxes[i];
+        const b = boxes[j];
+        if (
+          a.left < b.right &&
+          a.right > b.left &&
+          a.top < b.bottom &&
+          a.bottom > b.top
+        ) {
+          overlaps.push(`${a.id}×${b.id}`);
+        }
+      }
+    }
+    return {
+      titleWidth: title?.width ?? 0,
+      groupLeft: group?.left ?? -1,
+      groupRight: group?.right ?? Number.POSITIVE_INFINITY,
+      liveRight: live?.right ?? Number.POSITIVE_INFINITY,
+      menuRight: menu?.right ?? Number.POSITIVE_INFINITY,
+      workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
+      hashRight: hash?.right ?? 0,
+      toggleRight: toggle?.right ?? 0,
+      overlapsToggle: overlap(group, toggle),
+      overlapsHash: overlap(group, hash),
+      controlOverlaps: overlaps,
+      controlBoxes: boxes,
+      scrollWidth: document.documentElement.scrollWidth,
+      viewport: vpWidth,
+    };
+  }, width);
+  if (geometry.titleWidth <= 0) {
+    throw new Error(
+      `joined header erased channel title at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.groupRight > width + 0.5 || geometry.menuRight > width + 0.5) {
+    throw new Error(
+      `control group escaped viewport at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.workToggleRight > width + 0.5) {
+    throw new Error(
+      `terminal-dock toggle escaped viewport at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.overlapsHash) {
+    throw new Error(
+      `control group overlapped the channel hash at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (requireDrawer && geometry.overlapsToggle) {
+    throw new Error(
+      `control group overlapped the drawer toggle at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  if (geometry.controlOverlaps.length > 0) {
+    throw new Error(
+      `header controls overlapped each other at ${width}: ${JSON.stringify(geometry.controlOverlaps)} ${JSON.stringify(geometry.controlBoxes)}`
+    );
+  }
+  if (geometry.scrollWidth > width) {
+    throw new Error(
+      `joined header widened the document at ${width}: ${JSON.stringify(geometry)}`
+    );
+  }
+  return geometry;
 }
 
 async function main() {
@@ -377,23 +527,40 @@ async function main() {
       await page.getByTestId("huddle-join").click();
       await page.getByTestId("huddle-microphone").waitFor();
       await page.getByTestId("huddle-leave").waitFor();
-      await page.setViewportSize({ width: 760, height: 480 });
-      const geometry = await page.evaluate(() => {
-        const title = document.querySelector("h1")?.getBoundingClientRect();
-        const workToggle = document
-          .querySelector("[data-testid='open-terminal-dock']")
-          ?.getBoundingClientRect();
-        return {
-          titleWidth: title?.width ?? 0,
-          workToggleRight: workToggle?.right ?? Number.POSITIVE_INFINITY,
-        };
+      await assertJoinedHeaderFits(page, {
+        width: 760,
+        height: 480,
+        requireDrawer: false,
       });
-      if (geometry.titleWidth <= 0) {
-        throw new Error(`joined header erased channel title: ${JSON.stringify(geometry)}`);
+      const geo390 = await assertJoinedHeaderFits(page, {
+        width: 390,
+        height: 844,
+        requireDrawer: true,
+      });
+      console.log(
+        "ok  390 joined header overlap 0",
+        JSON.stringify({
+          overlaps: geo390.controlOverlaps,
+          boxes: geo390.controlBoxes,
+        })
+      );
+      if (await page.getByTestId("huddle-live").isVisible()) {
+        throw new Error(
+          "joined Live chip must yield at 390 so mute and leave do not cover the member button"
+        );
       }
-      if (geometry.workToggleRight > 760) {
-        throw new Error(`terminal-dock toggle escaped viewport: ${JSON.stringify(geometry)}`);
+      if (await page.getByTestId("huddle-mic-devices").isVisible()) {
+        throw new Error(
+          "mic picker caret must yield at 390 (folded into the mute split, wide-only)"
+        );
       }
+      if (await page.getByTestId("huddle-participants").isVisible()) {
+        throw new Error("participant names must yield at 390");
+      }
+      await page.screenshot({
+        path: resolve(outDir, "joined-390.png"),
+        fullPage: true,
+      });
 
       state.mode = "error";
       await page.evaluate(({ id, ch }) => {
@@ -478,7 +645,7 @@ async function main() {
     await server.stop();
   }
   console.log(
-    "GATE PASS: configuration, joined width/exit controls, projection failure isolation, and huddle_ended ordering hold."
+    "GATE PASS: configuration, joined width/exit controls (760 and 390 live), projection failure isolation, and huddle_ended ordering hold."
   );
 }
 

@@ -228,6 +228,62 @@ export function normalizeRow(
 }
 
 /**
+ * 필 실행 뒤 착지 행의 로빙 정거장으로 포커스를 옮긴다 (design-review M-2).
+ *
+ * 필은 실행과 함께 언마운트되므로, 옮기지 않으면 브라우저가 BODY로 떨어뜨린다.
+ * 정거장은 `normalizeRow`가 이미 아는 것: 컨트롤 없는 행·actionable rest는 행
+ * 자신, 그 외는 tabIndex 0인 구성원. `preventScroll` — 스크롤은 virtuoso가
+ * 방금 했고, 포커스가 한 번 더 밀면 바닥 판정이 흔들린다.
+ */
+export function focusRowStation(root: HTMLElement): void {
+  normalizeRow(root);
+  const station =
+    root.tabIndex === 0
+      ? root
+      : (rowActionItems(root).find((el) => el.tabIndex === 0) ?? root);
+  station.focus({ preventScroll: true });
+}
+
+/** 타임라인 행의 공개 신원(`data-seq`). 착지 정거장을 seq로 고른다. */
+export function focusRowStationBySeq(
+  seq: number,
+  doc: Document = document
+): boolean {
+  const row = doc.querySelector<HTMLElement>(
+    `[data-testid="timeline-message"][data-seq="${String(seq)}"]`
+  );
+  if (!row) return false;
+  focusRowStation(row);
+  return true;
+}
+
+/**
+ * 가상 목록은 스크롤이 끝난 뒤에야 행을 마운트한다. `scrollToIndex`에는
+ * `done`이 없으므로(virtuoso `LocationOptions`), 짧은 재시도로 같은 착지를 닫는다.
+ */
+export function scheduleFocusRowStationBySeq(
+  seq: number,
+  options?: {
+    doc?: Document;
+    now?: () => number;
+    schedule?: (fn: () => void, ms: number) => number;
+    untilMs?: number;
+  }
+): void {
+  const doc = options?.doc ?? document;
+  const now = options?.now ?? Date.now;
+  const schedule =
+    options?.schedule ?? ((fn, ms) => window.setTimeout(fn, ms));
+  const deadline = now() + (options?.untilMs ?? 1_500);
+  const tick = () => {
+    if (focusRowStationBySeq(seq, doc)) return;
+    if (now() >= deadline) return;
+    schedule(tick, 50);
+  };
+  tick();
+}
+
+/**
  * 행이 키보드로 포커스를 들고 있는가. 마우스 mousedown 포커스는
  * `:focus-visible`이 아니라서 여기서 거짓이다.
  */

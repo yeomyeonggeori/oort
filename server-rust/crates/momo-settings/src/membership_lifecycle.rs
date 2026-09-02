@@ -34,6 +34,7 @@ pub enum MembershipLifecycleError {
     EmailOrHandleRequired,
     InvalidEmail,
     InvalidHandle,
+    AgentRoleImmutable,
 }
 
 impl MembershipLifecycleError {
@@ -58,6 +59,7 @@ impl MembershipLifecycleError {
             Self::EmailOrHandleRequired => "email or handle is required",
             Self::InvalidEmail => "email is invalid",
             Self::InvalidHandle => "handle must be 2-32 chars of a-z, 0-9, _ or -",
+            Self::AgentRoleImmutable => "agent roles are fixed to member",
         }
     }
 }
@@ -95,6 +97,7 @@ impl StatusTransition {
 pub struct MembershipTarget {
     pub membership_id: Uuid,
     pub role: WorkspaceRole,
+    pub kind: String,
     pub status: String,
     pub email: Option<String>,
     pub handle: String,
@@ -217,7 +220,7 @@ async fn load_target(
     member_id: Uuid,
 ) -> Result<Result<MembershipTarget, MembershipLifecycleError>, DbError> {
     let row = sqlx::query(
-        "SELECT wm.id, wm.role::text, m.status::text, h.email, m.handle \
+        "SELECT wm.id, wm.role::text, m.kind::text, m.status::text, h.email, m.handle \
            FROM workspace_membership wm \
            JOIN member m ON m.workspace_id = wm.workspace_id AND m.id = wm.member_id \
            LEFT JOIN human h ON h.workspace_id = m.workspace_id AND h.member_id = m.id \
@@ -238,6 +241,7 @@ async fn load_target(
     Ok(Ok(MembershipTarget {
         membership_id: row.try_get("id")?,
         role,
+        kind: row.try_get("kind")?,
         status: row.try_get("status")?,
         email: row.try_get("email")?,
         handle: row.try_get("handle")?,
@@ -298,6 +302,9 @@ pub async fn change_workspace_role_in_tx(
         Ok(target) => target,
         Err(error) => return Ok(Err(error)),
     };
+    if target.kind == "agent" {
+        return Ok(Err(MembershipLifecycleError::AgentRoleImmutable));
+    }
     if target.role == WorkspaceRole::Owner && requested != WorkspaceRole::Owner {
         if let Err(error) = refuse_last_owner(conn, workspace_id, target_id).await? {
             return Ok(Err(error));
@@ -706,4 +713,17 @@ fn decode_ban(row: &sqlx::postgres::PgRow) -> Result<BanRecord, sqlx::Error> {
         reason: row.try_get("reason")?,
         created_at_ms: row.try_get("created_at_ms")?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn agent_role_immutable_sentence_is_closed() {
+        assert_eq!(
+            MembershipLifecycleError::AgentRoleImmutable.as_swift_message(),
+            "agent roles are fixed to member"
+        );
+    }
 }

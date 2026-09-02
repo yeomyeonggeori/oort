@@ -27,9 +27,10 @@ const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
 /**
  * The named measures from tokens.css `@theme { --spacing-* }` that are words,
  * not numbers: marker(2) · row(6) · control-sm/control/control-lg(28/32/40) ·
- * action-sm/action(96/144) · chat-min · rail 3종 · pane 5종 · diff-body ·
- * terminal-body · terminal-dock 3종 · terminal-floor · timeline-strip ·
- * preview-frame · tray-max.
+ * action-sm/action(96/144) · chat-min · rail 3종 · pane 5종 · settings-nav ·
+ * diff-body · terminal-body · terminal-dock 3종 · terminal-floor ·
+ * timeline-strip · preview-frame · unfurl-hero · tray-max · onboarding-mark ·
+ * onboarding-copy · overflow-bowl.
  * `--spacing-px`만 뺀다 — `w-px`류는
  * stock Tailwind라 tailwind-merge가 이미 안다. 이 목록과 tokens.css의 일치는
  * cn.test.ts가 정본을 읽어 단정한다.
@@ -60,6 +61,7 @@ export const NAMED_MEASURES = [
   "pane-md",
   "pane-lg",
   "pane-picker",
+  "settings-nav",
   "diff-body",
   "terminal-body",
   "terminal-dock",
@@ -68,7 +70,11 @@ export const NAMED_MEASURES = [
   "terminal-floor",
   "timeline-strip",
   "preview-frame",
+  "unfurl-hero",
   "tray-max",
+  "onboarding-mark",
+  "onboarding-copy",
+  "overflow-bowl",
 ] as const;
 
 const twMerge = extendTailwindMerge({

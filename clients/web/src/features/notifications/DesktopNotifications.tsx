@@ -12,20 +12,22 @@ import {
 import { actorToken } from "@momo/core/features/inbox/model";
 import {
   armOpen,
-  notifyDecision,
   openTarget,
   rememberAnnounced,
   type ArmedOpen,
 } from "@momo/core/features/notifications/model";
+import { notifyThisDevice } from "./deviceNotify";
 
 // =============================================================================
 // Desktop notification rail (MOMO-607, ADR-0133 P2) — the trigger MOMO-603 left
 // as a seam ("wiring which events notify is the web layer's job").
 //
 // Renders nothing. It watches the realtime rail for the two events addressed to
-// a person, asks `./model.ts` whether either is worth an interruption, and hands
-// the survivors to the shell bridge. Every rule lives in the pure model; this
-// file is the impure half — subscriptions, window focus, and the OS call.
+// a person (mention, pending approval — there is no DM/thread/ordinary-channel
+// kind), asks `deviceNotify` whether either is worth an interruption, and hands
+// the survivors to the shell bridge. Device kind toggles live in
+// `preference.ts`; every other rule lives in the core model. This file is the
+// impure half — subscriptions, window focus, and the OS call.
 //
 // In a browser it does nothing at all: no notification, and no extra Centrifugo
 // subscription either, so the web build pays nothing for a desktop capability.
@@ -83,7 +85,7 @@ export function DesktopNotifications() {
   const handle = useCallback((event: MessageNewEvent) => {
     const current = contextRef.current;
     const nowMs = Date.now();
-    const decision = notifyDecision(event, {
+    const decision = notifyThisDevice(event, {
       isDesktop: isDesktop(),
       windowFocused: focusedRef.current,
       selfMemberId: current.selfId,

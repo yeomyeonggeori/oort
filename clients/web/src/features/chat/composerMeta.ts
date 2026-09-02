@@ -12,8 +12,10 @@ export function composerMetaMode(options: {
   hasDmHint: boolean;
   keysHintNeeded: boolean;
   isMobile: boolean;
+  hasPendingLink?: boolean;
 }): ComposerMetaMode {
   if (options.typistCount > 0) return "typing";
+  if (options.hasPendingLink) return "hint";
   if (
     !options.isMobile &&
     (options.hasDmHint || options.keysHintNeeded)

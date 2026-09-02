@@ -28,6 +28,38 @@ export function restoreDialogOpenerFocus(opener: DialogFocusTarget | null): bool
   return true;
 }
 
+type DialogOpener =
+  | DialogFocusTarget
+  | null
+  | React.RefObject<DialogFocusTarget | null>;
+
+function resolveDialogOpener(opener: DialogOpener): DialogFocusTarget | null {
+  if (opener && "current" in opener) return opener.current;
+  return opener;
+}
+
+/**
+ * Restores focus after Radix's trap `useEffect` cleanup and before its
+ * `onCloseAutoFocus` `setTimeout(0)`. Layout is too early: the trap is still
+ * listening and pulls the caret back into the unmounting panel. The timeout is
+ * too late: Playwright sees `detached` on the next animation frame (#1865 H-3).
+ */
+export function useRestoreFocusOnClose(open: boolean, opener: DialogOpener): void {
+  const wasOpen = React.useRef(false);
+  const openerRef = React.useRef<DialogFocusTarget | null>(null);
+  const resolved = resolveDialogOpener(opener);
+  if (resolved) openerRef.current = resolved;
+  React.useEffect(() => {
+    if (open) {
+      wasOpen.current = true;
+      return;
+    }
+    if (!wasOpen.current) return;
+    wasOpen.current = false;
+    restoreDialogOpenerFocus(openerRef.current);
+  }, [open]);
+}
+
 /**
  * The scrim. `bg-scrim`, not `bg-ink/20`: the overlay's job is to push the page
  * back, and ink is nearly white in dark mode, so borrowing it there brightened

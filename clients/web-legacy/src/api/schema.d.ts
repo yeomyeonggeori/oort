@@ -266,6 +266,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspaceId}/presence": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's own declared presence and custom status.
+         * @description ADR-0160 ③ plus ADR-0176. Human bearer only. The member is the credential's — the path has no `memberId`. Custom-status fields are omitted when unset, empty, or `statusExpiresAtMs` has been reached (lazy delete; no sweeper job). Availability and the effective dot are not here.
+         */
+        get: operations["getPresenceStatus"];
+        /**
+         * Set the caller's own declared presence and optional custom status.
+         * @description Same PUT as ADR-0160. `status` remains required (`auto`/`away`/`dnd`). Optional `statusEmoji` / `statusText` / `statusExpiresAtMs` are a per-key patch — omitted leaves the stored value, JSON null clears, a value sets. Trimmed text is at most 80 characters; emoji is a length/code-point cap (≤32 scalars), not a strict emoji classifier. All three null clears the custom status. Broadcasts on the existing `type: presence` `ch:` rail. No audit row (personal intent; the original presence PUT was unaudited).
+         */
+        put: operations["setPresenceStatus"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspaceId}/members/{memberId}/role": {
         parameters: {
             query?: never;
@@ -324,7 +348,11 @@ export interface paths {
         delete: operations["leaveWorkspace"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Change the caller's own display name.
+         * @description #1873 / BZ-4e. Human active members only. Body is `{displayName}` (camelCase, closed world). Normalization reuses the join rule (`normalized_join_display_name`: trimmed, 1..100 chars); a violation is 400 `displayName is required`. Handle, role, and avatar are not writable here. Agent bearers are 403 — an agent's display name is the agent profile path. Writes `member.display_name` and `updated_at` in one tenant transaction with audit `member.renamed` and a `member.renamed` outbox broadcast per co-member channel (presence fan-out shape; no new rail).
+         */
+        patch: operations["renameSelfMember"];
         trace?: never;
     };
     "/v1/workspaces/{workspaceId}/members/me/password": {
@@ -932,6 +960,78 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/members/me/sidebar-prefs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the caller's own sidebar organization.
+         * @description ADR-0177 D1/D2. The signed-in member's custom sidebar sections, the channels they placed in each, and their starred channels — never a memberId from the request. A member who has never saved reads the empty v1 default (`{version:1, sections:[], starredChannelIds:[]}`) rather than a 404, so the client bootstraps down one path. Human-only: an agent has no sidebar. Collapse state is NOT here — ADR-0177 D4 keeps it on the device.
+         */
+        get: operations["getSidebarPrefs"];
+        /**
+         * Replace the caller's own sidebar organization.
+         * @description ADR-0177 D3. Replaces the whole payload; this is not a patch. The server validates shape and size only — at most 50 sections, section names at most 80 **characters**, at most 500 channel references across the whole payload, and `version` must be 1. Channel membership is deliberately NOT verified: a section may name a channel the member has left or one that was deleted, and the client filters dead ids at render time (tolerant contract, ADR-0177 D3). No event is emitted (D2) — other devices converge on their next bootstrap GET.
+         */
+        put: operations["updateSidebarPrefs"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/reminders": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the caller's own reminders, soonest due first.
+         * @description Owner-scoped. `state=pending` (default) hides completed rows; `state=all` returns both. Keyset pagination over `(due_at, id)` via `cursor` = the previous page's last reminder id.
+         */
+        get: operations["listMessageReminders"];
+        put?: never;
+        /**
+         * Create a personal reminder on a channel message.
+         * @description ADR-0175 / #1888. Human bearer only. The target message must live in `channelId` and the caller must be a current channel member. `dueAtMs` in the past is 400. v1 does not emit outbox — expiry is a client poll.
+         */
+        post: operations["createMessageReminder"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspaceId}/reminders/{reminderId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete the caller's reminder.
+         * @description Owner only. A reminder that is not the caller's answers 404.
+         */
+        delete: operations["deleteMessageReminder"];
+        options?: never;
+        head?: never;
+        /**
+         * Snooze a reminder or mark it complete.
+         * @description Body is `{dueAtMs}` (snooze) or `{completed: true}`. Both, neither, or `completed: false` is 400. Snoozing a completed row is 409. A reminder that is not the caller's answers 404.
+         */
+        patch: operations["updateMessageReminder"];
         trace?: never;
     };
     "/v1/workspaces/{workspaceId}/channels/{channelId}/huddles": {
@@ -1849,7 +1949,7 @@ export interface paths {
         };
         /**
          * Search messages in channels where the caller is an active member.
-         * @description Read-only v0 substring search backed by the existing partial GIN trigram index. Results exclude deleted/body-less messages and channels where the caller has left. Ordering is newest first by created time, then channel sequence; the opaque cursor preserves that keyset across new inserts. Search is limited to 30 requests per authenticated member per minute.
+         * @description Read-only v0 substring search backed by the existing partial GIN trigram index. Results exclude deleted/body-less messages and channels where the caller has left. Ordering is newest first by created time, then channel sequence; the opaque cursor preserves that keyset across new inserts. Search is limited to 30 requests per authenticated member per minute. `channel` narrows the search to one channel the caller belongs to (#1931); its absence is the workspace-wide search this route has always been. The cursor carries the scope it was minted under, so a page cannot be resumed against a different one.
          */
         get: operations["searchWorkspaceMessages"];
         put?: never;
@@ -2105,7 +2205,7 @@ export interface paths {
         get?: never;
         /**
          * Advance the caller's read cursor for a channel.
-         * @description Monotonic: the effective cursor is `max(current, min(requested, latestSeq))` — it never moves backward and never beyond the channel head. The cursor owner is always the authenticated principal; no member id is accepted in the body.
+         * @description Monotonic: the effective cursor is `max(current, min(requested, latestSeq))` — it never moves backward and never beyond the channel head (ADR-0109, ADR-0178 D1). The cursor owner is always the authenticated principal; no member id is accepted in the body. Optional `mark_unread_before_seq` sets the mark-unread signal (D5); optional `read_intent` (`explicit_open` or `background`, default `background`) is the D6 discriminator that decides whether this advertisement clears the mark.
          */
         put: operations["updateReadState"];
         post?: never;
@@ -2839,6 +2939,13 @@ export interface components {
             /** @description Replacement password, at most 1024 chars, must differ. */
             newPassword: string;
         };
+        RenameSelfMemberRequest: {
+            /** @description 1..100 chars after trimming. Same rule and 400 sentence as join (`displayName is required`). Handle/role/avatar are not accepted. */
+            displayName: string;
+        };
+        SelfMemberResponse: {
+            member: components["schemas"]["Member"];
+        };
         PasswordResetClaimResponse: {
             /** @description Raw 32-byte token. Present only on this 201. */
             token: string;
@@ -3054,6 +3161,15 @@ export interface components {
              * @enum {string}
              */
             presenceStatus?: "auto" | "away" | "dnd";
+            /** @description ADR-0176 custom status emoji, human only. Omitted when unset, empty, expired (`statusExpiresAtMs` reached — lazy delete), or for an agent. */
+            statusEmoji?: string;
+            /** @description ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when unset, empty, expired, or for an agent. */
+            statusText?: string;
+            /**
+             * Format: int64
+             * @description ADR-0176 optional expiry as epoch milliseconds. Omitted when there is no visible custom status (including when the stamp has been reached).
+             */
+            statusExpiresAtMs?: number;
             /** Format: int64 */
             createdAtMs: number;
             /** Format: int64 */
@@ -3063,6 +3179,30 @@ export interface components {
             members: components["schemas"]["RosterMember"][];
             humanCount: number;
             agentCount: number;
+        };
+        SetPresenceRequest: {
+            /**
+             * @description ADR-0160 declared presence. Required so a pre-0176 body still decodes.
+             * @enum {string}
+             */
+            status: "auto" | "away" | "dnd";
+            /** @description ADR-0176. Omitted = leave stored value. JSON null = clear. Empty or whitespace-only is stored as cleared. Length/code-point cap only. */
+            statusEmoji?: string | null;
+            /** @description ADR-0176. Omitted = leave stored value. JSON null = clear. Trimmed; empty becomes cleared. Over 80 characters is 400. */
+            statusText?: string | null;
+            /**
+             * Format: int64
+             * @description ADR-0176 optional expiry. Omitted = leave stored value. JSON null = clear. A reached stamp is accepted on write and ignored on read.
+             */
+            statusExpiresAtMs?: number | null;
+        };
+        PresenceStatusResponse: {
+            /** @enum {string} */
+            status: "auto" | "away" | "dnd";
+            statusEmoji?: string;
+            statusText?: string;
+            /** Format: int64 */
+            statusExpiresAtMs?: number;
         };
         ChangeMembershipRoleRequest: {
             role: components["schemas"]["MembershipRole"];
@@ -3659,6 +3799,85 @@ export interface components {
         NotificationRulesResponse: {
             dnd: boolean;
             mentionOverridesMute: boolean;
+        };
+        SidebarSection: {
+            /** @description Client-minted section id, unique within the payload. */
+            id: string;
+            /** @description Section label, trimmed. The cap is 80 **characters**, not bytes — an 80-character Korean name is 240 bytes and is legal. */
+            name: string;
+            /**
+             * Format: int32
+             * @description The member's own ordering. The server never renumbers it.
+             */
+            order: number;
+            /** @description Channels the member placed in this section. NOT a membership list — an id here may name a channel that no longer exists. */
+            channelIds: string[];
+        };
+        SidebarPrefs: {
+            /**
+             * @description Payload version. Required; only 1 is accepted (ADR-0177 D3).
+             * @enum {integer}
+             */
+            version: 1;
+            sections?: components["schemas"]["SidebarSection"][];
+            /** @description BT-5 (#1933) owns the star UI; the schema accepts the field from BT-4 so no migration is needed when that lands (ADR-0177 D5). */
+            starredChannelIds?: string[];
+            /** @description Reserved for BT-5's A–Z / Recent sort. Round-tripped verbatim; the server does not enumerate the values. */
+            sectionSort?: string;
+        };
+        UpdateSidebarPrefsRequest: {
+            prefs: components["schemas"]["SidebarPrefs"];
+        };
+        SidebarPrefsResponse: {
+            prefs: components["schemas"]["SidebarPrefs"];
+            /**
+             * Format: int64
+             * @description When the row was last written. Omitted for a member who has never saved. Observability, not a concurrency token — v1 is last-write-wins between the member's own devices.
+             */
+            updatedAtMs?: number;
+        };
+        CreateReminderRequest: {
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** Format: int64 */
+            dueAtMs: number;
+            note?: string;
+        };
+        UpdateReminderRequest: {
+            /** Format: int64 */
+            dueAtMs?: number;
+            completed?: boolean;
+        };
+        Reminder: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            workspaceId: string;
+            /** Format: uuid */
+            memberId: string;
+            /** Format: uuid */
+            channelId: string;
+            /** Format: uuid */
+            messageId: string;
+            /** Format: int64 */
+            dueAtMs: number;
+            note?: string;
+            /** Format: int64 */
+            completedAtMs?: number;
+            /** Format: int64 */
+            createdAtMs: number;
+            /** Format: int64 */
+            updatedAtMs: number;
+        };
+        ReminderResponse: {
+            reminder: components["schemas"]["Reminder"];
+        };
+        ReminderListResponse: {
+            reminders: components["schemas"]["Reminder"][];
+            /** Format: uuid */
+            nextCursor?: string;
         };
         CreateChannelRequest: {
             /** @enum {string} */
@@ -4910,6 +5129,17 @@ export interface components {
         UpdateReadStateRequest: {
             /** Format: int64 */
             last_read_seq: number;
+            /**
+             * Format: int64
+             * @description ADR-0178 D5. Set the mark-unread signal to this seq ("treat this channel as unread from this seq onward, inclusive"). The seq must already exist as a message in this channel; a future or unknown seq is 400. Independent of last_read_seq — GREATEST on the cursor is unchanged (D1). Absent on ordinary cursor advertisements.
+             */
+            mark_unread_before_seq?: number;
+            /**
+             * @description ADR-0178 D6. Why this advertisement was sent. `explicit_open` (channel mount/switch, explicit "mark read") clears the mark in the same transaction. `background` (the default, including when the field is absent) never touches the mark — that is the safety direction, so a stale replay from another device, or a client that predates this field, cannot silently erase a mark.
+             * @default background
+             * @enum {string}
+             */
+            read_intent: "explicit_open" | "background";
         };
         ReadState: {
             /** Format: uuid */
@@ -4918,9 +5148,17 @@ export interface components {
             last_read_seq: number;
             /** Format: int64 */
             latest_seq: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description `latest_seq - last_read_seq`, floored at zero. The server does not fold `marked_unread_before_seq` into this number (ADR-0178 D3 — composition lives in momo-core only).
+             */
             unread_count: number;
             mention_count: number;
+            /**
+             * Format: int64
+             * @description ADR-0178 D2. Inclusive seq from which this channel should be treated as unread. Always present; JSON null when unmarked, so a client can tell "no mark" from "this server is too old to have the concept".
+             */
+            marked_unread_before_seq: number | null;
         };
         ReadStateListResponse: {
             read_states: components["schemas"]["ReadState"][];
@@ -6288,6 +6526,96 @@ export interface operations {
             429: components["responses"]["RateLimited"];
         };
     };
+    getPresenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's durable declared status. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresenceStatusResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer (presence is human-only). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description No live human presence for this member. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    setPresenceStatus: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPresenceRequest"];
+            };
+        };
+        responses: {
+            /** @description Stored declared status (custom fields omitted when empty/expired). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PresenceStatusResponse"];
+                };
+            };
+            /** @description Invalid status, overlong text/emoji, or unrepresentable expiry. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer, or not a live member of this workspace. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
     changeWorkspaceMemberRole: {
         parameters: {
             query?: never;
@@ -6478,6 +6806,52 @@ export interface operations {
             403: components["responses"]["Forbidden"];
             /** @description Caller is the last active owner */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+        };
+    };
+    renameSelfMember: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameSelfMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Display name updated. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfMemberResponse"];
+                };
+            };
+            /** @description displayName failed join normalization (empty or longer than 100 chars after trim). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Caller is not a human live member of this workspace, or presented an agent bearer (not on the agent-route allow-list). */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -8337,6 +8711,316 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Active human membership required. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    getSidebarPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's stored sidebar prefs, or the empty v1 default. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidebarPrefsResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required (agent bearers are refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateSidebarPrefs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSidebarPrefsRequest"];
+            };
+        };
+        responses: {
+            /** @description The stored sidebar prefs. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SidebarPrefsResponse"];
+                };
+            };
+            /** @description A cap or the payload version was violated. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Active human membership required (agent bearers are refused). */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The body is not a sidebar-prefs payload (unknown or missing key). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    listMessageReminders: {
+        parameters: {
+            query?: {
+                state?: "pending" | "all";
+                cursor?: string;
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's reminder page. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderListResponse"];
+                };
+            };
+            /** @description Invalid state or cursor. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    createMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateReminderRequest"];
+            };
+        };
+        responses: {
+            /** @description Reminder stored and audited. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderResponse"];
+                };
+            };
+            /** @description Invalid body, unknown field, or dueAtMs not in the future. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer, inactive membership, or not a channel member. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Message not found in the named channel. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    deleteMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                reminderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Reminder deleted and audited. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid reminder id. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reminder not found for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            429: components["responses"]["RateLimited"];
+        };
+    };
+    updateMessageReminder: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Workspace UUID. Must equal the workspace bound into the access token; any other value is rejected with 403 (tenant isolation, L4 §1.3). */
+                workspaceId: components["parameters"]["WorkspaceId"];
+                reminderId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateReminderRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated reminder. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReminderResponse"];
+                };
+            };
+            /** @description Invalid body, unknown field, or dueAtMs not in the future. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            401: components["responses"]["Unauthorized"];
+            /** @description Agent bearer or inactive membership. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Reminder not found for this caller. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description Completed reminder cannot be rescheduled. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11024,8 +11708,10 @@ export interface operations {
             query: {
                 q: string;
                 limit?: number;
-                /** @description Opaque keyset cursor returned as `nextCursor`. */
+                /** @description Opaque keyset cursor returned as `nextCursor`. It is bound to the scope that produced it: replaying a `channel`-scoped cursor without `channel` (or against another channel) is a 400, not a wider page. */
                 cursor?: string;
+                /** @description Optional channel scope (#1931). A blank value is the workspace scope; a channel the caller is not a member of — and one that does not exist — are the same 404. */
+                channel?: string;
             };
             header?: never;
             path: {
@@ -11045,7 +11731,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceMessageSearchResponse"];
                 };
             };
-            /** @description Query shorter than two characters or malformed cursor. */
+            /** @description Query shorter than two characters, malformed cursor, malformed `channel`, or a cursor replayed under a different scope. */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -11057,6 +11743,15 @@ export interface operations {
             401: components["responses"]["Unauthorized"];
             /** @description Workspace scope mismatch. */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ErrorResponse"];
+                };
+            };
+            /** @description The named `channel` is not one the caller may read. A channel that does not exist answers identically, so the pair is not a membership oracle. */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -11926,7 +12621,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReadState"];
                 };
             };
-            /** @description last_read_seq must be non-negative, or invalid ids. */
+            /** @description last_read_seq must be non-negative; mark_unread_before_seq must name a message that already exists in this channel; read_intent must be explicit_open or background; or the ids are invalid. */
             400: {
                 headers: {
                     [name: string]: unknown;

@@ -24,6 +24,7 @@ import {
   dayDividerSegments,
   recoveryDividerLabel,
   recoveryDividerSegments,
+  unreadDividerLabel,
   unreadDividerSegments,
   DIVIDER_LABEL_SIDE,
   DIVIDER_TONE,
@@ -46,14 +47,17 @@ import {
   DIVIDER_GAP_CLASS,
   DIVIDER_RULE_CLASS,
   MARKER_DIVIDER_PAD_CLASS,
+  ROW_BANNER_STRADDLE_PAD_CLASS,
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
 } from "./spacing";
 import {
   canDeleteMessage,
   canEditMessage,
+  canMarkUnreadMessage,
   canPinMessage,
   canReactToMessage,
+  canRemindMessage,
   canReplyToMessage,
   hasAnyAction,
 } from "@momo/core/features/timeline/model";
@@ -75,7 +79,10 @@ import {
 } from "./MessageActions";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
-import { shouldShowHoverToolbar } from "./hoverToolbarModel";
+import {
+  previousMessageRowHasOpenBanner,
+  shouldShowHoverToolbar,
+} from "./hoverToolbarModel";
 import { useClipboardCopy } from "@/design/hooks/useClipboardCopy";
 import { messageShareUrl } from "@/features/inbox/anchor";
 import { absoluteApiBase } from "@/lib/serverBase";
@@ -98,6 +105,16 @@ import { workSessionIdleNotice } from "@momo/core/features/work/workSessionModel
 import { selectionIsWithinRow } from "./messageContextMenuModel";
 import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
+import { useSession } from "@/app/session";
+import { reminderFailureMessage } from "@momo/core/features/reminders/model";
+import {
+  MARK_UNREAD_SUCCESS_ANNOUNCEMENT,
+  markUnreadFailureMessage,
+} from "@momo/core/features/readState/copy";
+import { RemindDialog } from "@/features/reminders/RemindDialog";
+import { useReminderMutations } from "@/features/reminders/useReminders";
+import { useMarkUnread } from "./useMarkUnread";
+import { useTimelineLive } from "./timelineLiveContext";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -260,7 +277,6 @@ export function MessageRow({
   deletedRepeat,
   deletedFoldedIds,
   unfurls = [],
-  foldLinkPreviews = false,
   runEnded = false,
   onOpenThread,
   onQuoteMessage,
@@ -296,8 +312,6 @@ export function MessageRow({
   deletedFoldedIds?: readonly string[];
   /** ADR-0170 projection for this row; failed/blocked are kept for quiet render. */
   unfurls?: readonly MessageUnfurl[];
-  /** Personal, device-local render choice. It never changes server fetching. */
-  foldLinkPreviews?: boolean;
   /**
    * ADR-0155 — 이 메시지를 쓴 run 이 **끝난 것을 보았는가**.
    *
@@ -360,6 +374,9 @@ export function MessageRow({
   // delete). B8: a Korean sentence, never the wire string, and never a toast —
   // the message lives where the problem is.
   const [rowError, setRowError] = useState<string | null>(null);
+  const [rowAnnouncement, setRowAnnouncement] = useState("");
+  const timelineLive = useTimelineLive();
+  const [neighborBannerOpen, setNeighborBannerOpen] = useState(false);
   // The three overlays a row can raise. Local because they are per-row and
   // transient: hoisting them would make the timeline re-render every message
   // when one of them opens a sheet.
@@ -367,6 +384,11 @@ export function MessageRow({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerOpener, setPickerOpener] = useState<HTMLElement | null>(null);
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [remindOpen, setRemindOpen] = useState(false);
+  const [remindError, setRemindError] = useState<string | null>(null);
+  const { workspaceId } = useSession();
+  const reminderMutations = useReminderMutations(workspaceId);
+  const markUnread = useMarkUnread(workspaceId);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -459,6 +481,8 @@ export function MessageRow({
     // 이슈 #1112. 작성자 관문이 없다 — 고정은 채널의 사실이고, 푸는 것도 누구나
     // 할 수 있다(서버가 같은 규칙을 강제한다).
     pin: Boolean(actions) && canPinMessage(message),
+    remind: Boolean(actions) && canRemindMessage(message),
+    markUnread: Boolean(actions) && canMarkUnreadMessage(message),
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
@@ -510,6 +534,32 @@ export function MessageRow({
       void Promise.resolve(actions.onTogglePin(message)).catch(
         (error: unknown) => setRowError(pinFailureMessage(error))
       );
+    },
+    onRemind: () => {
+      setRemindError(null);
+      setRemindOpen(true);
+    },
+    onMarkUnread: () => {
+      setRowError(null);
+      setRowAnnouncement("");
+      timelineLive.announce("");
+      void markUnread
+        .run({
+          channelId: message.channelId,
+          lastReadSeq: message.seq,
+          seq: message.seq,
+        })
+        .then(() => {
+          setRowAnnouncement(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
+          timelineLive.announce(MARK_UNREAD_SUCCESS_ANNOUNCEMENT);
+        })
+        .catch((error: unknown) =>
+          setRowError(
+            error instanceof Error
+              ? error.message
+              : markUnreadFailureMessage(error)
+          )
+        );
     },
     onEdit: () => {
       setEditError(null);
@@ -564,8 +614,32 @@ export function MessageRow({
     rowFocused,
     overlayOpen: pickerOpen || actionMenuOpen || contextMenuOpen,
     selecting: selectionWithinRow,
+    neighborBannerOpen,
   });
   useHoverToolbarFocusHandoff(rowRef, showHoverToolbar, rowFocused);
+
+  useEffect(() => {
+    if (!rowHovered && !rowFocused) return undefined;
+    const node = rowRef.current;
+    if (!node) return undefined;
+    const sample = () => {
+      setNeighborBannerOpen(previousMessageRowHasOpenBanner(node));
+    };
+    sample();
+    const root =
+      node.closest("[data-testid='timeline-virtuoso']") ??
+      node.closest("[data-virtuoso-scroller]") ??
+      node.closest("[data-message-scroll-container]") ??
+      node.parentElement;
+    if (!root) return undefined;
+    const observer = new MutationObserver(sample);
+    observer.observe(root, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ["data-row-banner"],
+    });
+    return () => observer.disconnect();
+  }, [rowHovered, rowFocused]);
 
   // `data-message-id` is the row's second published identity (MOMO-677).
   // `seq` orders the channel and is what the inbox jumps by; a projection
@@ -599,6 +673,7 @@ export function MessageRow({
       }
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
+      data-row-banner={rowError ? "open" : undefined}
       onKeyDown={onRowKeyDown}
       onMouseEnter={() => setRowHovered(true)}
       onMouseLeave={() => setRowHovered(false)}
@@ -634,6 +709,15 @@ export function MessageRow({
         startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
       )}
     >
+      {!timelineLive.hasRegion && (
+        <span
+          className="sr-only"
+          aria-live="polite"
+          data-testid="message-row-live"
+        >
+          {rowAnnouncement}
+        </span>
+      )}
       {actions && showHoverToolbar && (
         <MessageHoverToolbar
           available={available}
@@ -829,7 +913,6 @@ export function MessageRow({
         {!deleted && unfurls.length > 0 && (
           <UnfurlCards
             unfurls={unfurls}
-            folded={foldLinkPreviews}
             canRemove={
               Boolean(actions?.onRemoveUnfurls) &&
               actions?.myMemberId.toLowerCase() ===
@@ -934,6 +1017,8 @@ export function MessageRow({
         {actions && (
           <ReactionChips
             chips={actions.chips}
+            directory={directory}
+            myMemberId={actions.myMemberId}
             disabled={deleted}
             onToggle={(emoji) => callbacks.onReact(emoji)}
             onOpenPicker={
@@ -942,13 +1027,18 @@ export function MessageRow({
           />
         )}
         {rowError && (
-          <InlineBanner
-            message={rowError}
-            separator={false}
-            actionLabel="닫기"
-            onAction={() => setRowError(null)}
-            testId="message-action-error"
-          />
+          <div
+            data-testid="message-action-error-slot"
+            className={cn("relative z-30", ROW_BANNER_STRADDLE_PAD_CLASS)}
+          >
+            <InlineBanner
+              message={rowError}
+              separator={false}
+              actionLabel="닫기"
+              onAction={() => setRowError(null)}
+              testId="message-action-error"
+            />
+          </div>
         )}
         {failed && (
           // The retry lives on the row, not in a banner far from it (R-1 §3
@@ -1015,6 +1105,35 @@ export function MessageRow({
                   setConfirmOpen(false);
                 })
                 .finally(() => setDeletePending(false));
+            }}
+          />
+          <RemindDialog
+            open={remindOpen}
+            onOpenChange={(open) => {
+              setRemindOpen(open);
+              if (!open) setRemindError(null);
+            }}
+            mode="create"
+            preview={message.body?.trim() || PIN_EMPTY_BODY_TEXT}
+            pending={reminderMutations.create.isPending}
+            error={remindError}
+            onCommit={(dueAtMs, note) => {
+              setRemindError(null);
+              reminderMutations.create.mutate(
+                {
+                  channelId: message.channelId,
+                  messageId: message.id,
+                  dueAtMs,
+                  note,
+                  messagePreview: message.body?.trim() || PIN_EMPTY_BODY_TEXT,
+                },
+                {
+                  onSuccess: () => setRemindOpen(false),
+                  onError: (error: unknown) => {
+                    setRemindError(reminderFailureMessage(error, "create"));
+                  },
+                }
+              );
             }}
           />
         </>
@@ -1150,6 +1269,10 @@ export function UnreadDivider({ count }: { count: number }) {
       segments={unreadDividerSegments(count)}
       tone={DIVIDER_TONE.unread}
       padClass={MARKER_DIVIDER_PAD_CLASS}
+      extra={{
+        "aria-label": unreadDividerLabel(count),
+        role: "separator",
+      }}
     />
   );
 }

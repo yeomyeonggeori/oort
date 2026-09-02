@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { AtSign, SendHorizontal, Smile } from "lucide-react";
-import { sendThreadReply } from "@momo/core/lib/api";
+import { sendThreadReply, type Channel } from "@momo/core/lib/api";
 import {
   composerKeyIntent,
   isComposingEvent,
@@ -27,11 +27,11 @@ import {
   useAttachmentSurface,
 } from "@/features/attachments/draftStore";
 import { useComposerDropZone } from "@/features/attachments/useComposerDropZone";
-import {
-  MentionAutocompleteList,
-  useMentionAutocomplete,
-} from "@/features/chat/MentionAutocomplete";
+import { ComposerAutocompleteList } from "@/features/chat/ComposerAutocompleteList";
+import { useComposerAutocomplete } from "@/features/chat/useComposerAutocomplete";
 import { useComposerEmoji } from "@/features/chat/useComposerEmoji";
+import { useComposerFormat } from "@/features/chat/useComposerFormat";
+import { ComposerFormatTray } from "@/features/chat/ComposerFormatTray";
 import { EmojiPickerDialog } from "@/features/emoji/EmojiPickerDialog";
 import {
   sendBlockCopy,
@@ -80,12 +80,15 @@ export function ThreadComposer({
   channelId,
   rootId,
   directory,
+  channels,
   onSent,
 }: {
   workspaceId: string;
   channelId: string;
   rootId: string;
   directory: Directory;
+  /** `#` 자동완성의 후보 (#1930). 채널 컴포저와 같은 스토어, 같은 규율. */
+  channels: Channel[];
   /** Refetch the thread; the reply also arrives on the realtime rail. */
   onSent: () => void;
 }) {
@@ -95,16 +98,25 @@ export function ThreadComposer({
   const ref = useRef<HTMLTextAreaElement | null>(null);
   const justComposedRef = useRef(false);
   const isMobile = useIsMobileShell();
-  const mentions = useMentionAutocomplete({
+  const autocomplete = useComposerAutocomplete({
     value: draft,
     members: directory.members,
+    channels,
     inputRef: ref,
     onValueChange: setDraft,
   });
   const emoji = useComposerEmoji({
     value: draft,
     inputRef: ref,
-    onValueChange: mentions.replaceValue,
+    onValueChange: autocomplete.replaceValue,
+  });
+  const format = useComposerFormat({
+    value: draft,
+    inputRef: ref,
+    autocompleteVisible: autocomplete.visible,
+    onValueChange: autocomplete.replaceValue,
+    enabled: !sending,
+    surfaceKey: `${workspaceId}:${channelId}:${rootId}`,
   });
 
   // 트레이는 **이 스레드의 것**이다. 채널 컴포저와 열쇠가 다르므로, 스레드에 붙인
@@ -150,7 +162,8 @@ export function ThreadComposer({
     })
       .then(() => {
         setDraft("");
-        mentions.close();
+        autocomplete.close();
+        format.dismiss();
         clearSurface(trayKey);
         onSent();
         ref.current?.focus();
@@ -170,6 +183,7 @@ export function ThreadComposer({
         "safe-area-bottom border-t border-line",
         drop.dragging && "bg-accent-soft"
       )}
+      data-composer-shell=""
       data-testid="thread-composer"
     >
       <AttachmentTray
@@ -190,18 +204,22 @@ export function ThreadComposer({
           />
         )}
         <div className="relative">
-          <MentionAutocompleteList
-            id="thread-mention-list"
-            candidates={mentions.candidates}
-            highlight={mentions.highlight}
-            onChoose={mentions.choose}
-            testId="thread-mention-list"
-            optionTestId="thread-mention-option"
+          <ComposerAutocompleteList
+            id={`thread-${autocomplete.slug}-list`}
+            kind={autocomplete.kind}
+            candidates={autocomplete.candidates}
+            highlight={autocomplete.highlight}
+            onChoose={autocomplete.choose}
+            testId={`thread-${autocomplete.slug}-list`}
+            optionTestId={`thread-${autocomplete.slug}-option`}
+            status={autocomplete.status}
+            offline={autocomplete.offline}
+            onRetry={autocomplete.retryCatalog}
             className="left-0"
           />
           <div
             className={cn(
-              "rounded-md border border-line-strong bg-surface-raised focus-within:focus-ring",
+              "rounded-md border border-line-strong bg-surface-raised focus-visible-within:focus-ring",
               sending && "opacity-50"
             )}
             aria-busy={sending}
@@ -227,25 +245,28 @@ export function ThreadComposer({
               placeholder={THREAD_COMPOSER_PLACEHOLDER}
               aria-label={THREAD_COMPOSER_PLACEHOLDER}
               aria-autocomplete="list"
-              aria-expanded={mentions.visible}
-              aria-controls={mentions.visible ? "thread-mention-list" : undefined}
+              aria-expanded={autocomplete.visible}
+              aria-controls={
+                autocomplete.visible ? `thread-${autocomplete.slug}-list` : undefined
+              }
               aria-activedescendant={
-                mentions.visible
-                  ? `thread-mention-list-option-${mentions.highlight}`
+                autocomplete.visible
+                  ? `thread-${autocomplete.slug}-list-option-${autocomplete.highlight}`
                   : undefined
               }
               data-testid="thread-composer-input"
               onChange={(event) =>
-                mentions.onTextChange(
+                autocomplete.onTextChange(
                   event.target.value,
                   event.target.selectionStart ?? 0
                 )
               }
-              onSelect={(event) =>
-                mentions.setCaret(
+              onSelect={(event) => {
+                autocomplete.setCaret(
                   (event.target as HTMLTextAreaElement).selectionStart ?? 0
-                )
-              }
+                );
+                format.onSelect();
+              }}
               onPaste={drop.onPaste}
               onCompositionStart={() => {
                 justComposedRef.current = false;
@@ -255,13 +276,19 @@ export function ThreadComposer({
               }}
               onKeyUp={() => {
                 justComposedRef.current = false;
+                format.onSelect();
               }}
-              onBlur={() => {
+              onBlur={(event) => {
                 justComposedRef.current = false;
+                format.onBlur(event);
               }}
               onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
                 if (event.key !== "Enter" && event.key !== "Tab") {
                   justComposedRef.current = false;
+                }
+                if (format.handleKeyDown(event)) {
+                  event.preventDefault();
+                  return;
                 }
                 const intent = composerKeyIntent(
                   {
@@ -273,12 +300,12 @@ export function ThreadComposer({
                     composing: isComposingEvent(event.nativeEvent),
                   },
                   {
-                    mentionsOpen: mentions.visible,
+                    mentionsOpen: autocomplete.visible,
                     justComposed: justComposedRef.current,
                     enterSends: !isMobile,
                   }
                 );
-                if (mentions.handleIntent(intent)) {
+                if (autocomplete.handleIntent(intent)) {
                   event.preventDefault();
                   return;
                 }
@@ -304,7 +331,7 @@ export function ThreadComposer({
                   aria-label="멘션 넣기"
                   title="멘션 넣기"
                   data-testid="thread-composer-mention-trigger"
-                  onClick={mentions.insertTrigger}
+                  onClick={autocomplete.insertTrigger}
                 >
                   <AtSign aria-hidden="true" />
                 </Button>
@@ -323,7 +350,7 @@ export function ThreadComposer({
                   title="이모지 넣기"
                   data-testid="thread-composer-emoji-trigger"
                   onClick={(event) => {
-                    mentions.close();
+                    autocomplete.close();
                     emoji.openPicker(event.currentTarget);
                   }}
                 >
@@ -350,6 +377,16 @@ export function ThreadComposer({
           </div>
         </div>
       </div>
+      <ComposerFormatTray
+        open={format.open}
+        value={draft}
+        selectionEpoch={format.selectionEpoch}
+        inputRef={ref}
+        trayRef={format.trayRef}
+        onApply={format.apply}
+        onDismiss={format.dismiss}
+        testIdPrefix="thread-composer-format"
+      />
       <EmojiPickerDialog
         open={emoji.open}
         onOpenChange={emoji.setOpen}
