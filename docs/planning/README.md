@@ -1,22 +1,22 @@
 # oort 기획 운영 계약 (Planning Layer Contract)
 
 > 생성: 2026-07-10 · 정본 등급: **기획 레이어 운영 정본** (구현 계약은 `AGENTS.md`, 결정 거버넌스는 ADR-0100)
-> **이 문서 하나만 읽으면 어떤 기획 세션(Fable, GPT 5.6, 사람)이든 oort에서 기획을 시작할 수 있다.**
+> **이 문서 하나만 읽으면 어떤 기획 세션(planner 레인 — 현재 값은 `docs/planning/PIPELINE.md`)이든 oort에서 기획을 시작할 수 있다.**
 
 ## 0. 역할 4분할
 
 | 레이어 | 주체 | 하는 일 | 하지 않는 일 |
 |---|---|---|---|
 | **제품 오너** | 성재 | ADR Accept/Reject, 로드맵 정본 반영 승인, 우선순위 최종 결정 | 구현 세부를 채팅 안에서만 확정 |
-| **기획 (planning)** | Fable **및/또는** GPT 5.6 | 서로 다른 planning ID를 병렬 claim → 리서치 → ADR 기안 → 티켓/핸드오프 제안 → 이탈 판정 제안 | 직접 구현, 승인 전 공용 정본/Issue 발급 |
-| **통합·오케스트레이터 (momo-main)** | GPT 5.6 또는 Fable 중 현재 main 담당 | 병렬 기획 결과 **순차 통합** → 상태판 → 코드리뷰 → 순차 머지 → 이탈 추출·리서치 → 기획 보고 | 제품 오너 대신 ADR 승인, 여러 planner 결과를 무검토 병합 |
-| **구현 (worker)** | Codex worker, 최대 **5 동시** | goal(=GitHub Issue) claim → worktree 구현 → 게이트 → PR + 이탈 보고 → handoff 후 정지 | merge, 이슈 close, 로드맵/백로그 조정 |
+| **기획 (planning)** | planner 레인(`PIPELINE.md` §1) | 서로 다른 planning ID를 병렬 claim → 리서치 → ADR 기안 → 티켓/핸드오프 제안 → 이탈 판정 제안 | 직접 구현, 승인 전 공용 정본/Issue 발급 |
+| **통합·오케스트레이터 (momo-main)** | 현재 main 담당 planner(`PIPELINE.md` §1) | 병렬 기획 결과 **순차 통합** → 상태판 → 코드리뷰 → 순차 머지 → 이탈 추출·리서치 → 기획 보고 | 제품 오너 대신 ADR 승인, 여러 planner 결과를 무검토 병합 |
+| **구현 (worker)** | worker 레인 — 현재 값·병렬 상한은 `PIPELINE.md` §1·§2 | goal(=GitHub Issue) claim → worktree 구현 → 게이트 → PR + 이탈 보고 → handoff 후 정지 | merge, 이슈 close, 로드맵/백로그 조정 |
 
-승인 권한: **ADR Accepted와 로드맵 정본 반영은 항상 성재가 최종 승인**한다. Fable/GPT 5.6은 동등한 planner이며, `momo-main`이 유일한 sync/integration authority다.
+승인 권한: **ADR Accepted와 로드맵 정본 반영은 항상 product-owner(성재)가 최종 승인**한다. 복수 planner는 동등하며, `momo-main`이 유일한 sync/integration authority다.
 
 한 세션이 planner와 `momo-main`을 겸임할 수는 있지만, 각 change set에서 어느 역할로 행동하는지 `JOURNAL.md`에 적는다. 병렬 planner 산출물을 통합할 때는 자기 초안도 다른 planner 초안과 동일하게 리뷰한다.
 
-## 1. 기획 세션 진입/종료 절차 (누가 와도 동일 — Fable ↔ GPT 5.6 싱크 장치)
+## 1. 기획 세션 진입/종료 절차 (누가 와도 동일 — planner 간 싱크 장치)
 
 **진입:**
 1. `scripts/planning_context.sh` 또는 **`docs/planning/CURRENT_STATE.md`** — 현재 결정, 활성 planning owner, 구현 handoff, dirty-tree 위험을 복원한다. GitHub Issue/PR/worktree 실시간 보드까지 필요하면 `scripts/planning_context.sh --github`를 쓴다.
@@ -74,7 +74,7 @@ Work in its own worktree, run the required local gate, open one PR, move it to s
 
 ## 3. 병렬 실행 규칙
 
-- 동시 구현 **최대 5 goal**. 초과분은 `status:ready`로 대기.
+- 동시 구현 상한은 `PIPELINE.md` §2(현재 2). 초과분은 `status:ready`로 대기.
 - 레인 분리·충돌 회피·worktree 절차는 `docs/MULTI_SESSION_OPS.md` §0/§4가 정본. 같은 파일군을 만지는 goal 2개를 동시에 풀지 않는다 — 의존 순서대로 발급.
 - 병렬 배치를 풀 때 기획은 **머지 순서(의존 그래프)** 를 패킷에 명시한다.
 

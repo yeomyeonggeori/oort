@@ -33,7 +33,7 @@
 | 2 | [`AGENTS.md`](../AGENTS.md) | Codex 자율작업 **운영 계약**(빌드·검증 명령, DoD, 다음 티켓 선택법, 브랜치/PR). 충돌 시 최우선. |
 | 3 | [`ROADMAP.md`](../ROADMAP.md) | 릴리스 계획 정본. **v0의 단위는 마일스톤 번호가 아니라 축**이다(상단 축 절이 현행, M0~M8 §1~§7은 은퇴 전제의 역사 기록). |
 | 4 | [`docs/BACKLOG.md`](BACKLOG.md) | 티켓 정본(MOMO-NNN) — GitHub 이슈 변환원. |
-| 5 | [`CODEX.md`](../CODEX.md) | 사람·도구가 읽는 풀 가이드(AGENTS.md와 핵심 동일 — 사본이 둘이라 **같은 PR에서 함께** 고친다). |
+| 5 | [`docs/planning/PIPELINE.md`](planning/PIPELINE.md) | 레인(역할)·현재 값(모델·도구)·병렬 상한·워크트리 경로의 유일 정본. (`CODEX.md`는 2026-09-02 AGENTS.md로 병합, 스텁만 존재.) |
 
 ---
 
@@ -46,7 +46,7 @@
 | [`STATUS.md`](../STATUS.md) | 현재 빌드/검증 상태 | 작업 후 **반드시 갱신** |
 | [`BUILD_TICKETS.md`](../BUILD_TICKETS.md) | Phase 0 + v0 데모 의존순 빌드 백로그 + 수용기준 등급 정의 | 빌드 STEPS |
 | [`AGENTS.md`](../AGENTS.md) | Codex 자동 머지 운영 계약 | **운영 정본(최우선)** |
-| [`CODEX.md`](../CODEX.md) | Codex 자율실행 풀 가이드 | AGENTS.md와 동일 핵심 |
+| [`CODEX.md`](../CODEX.md) | (스텁) AGENTS.md로 병합됨 | 링크 호환용 |
 | [`README.md`](../README.md) | 제품 1줄 + 불변식 + 정직성 표(✅🚧💭) + 아키텍처 | 진입점 |
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | 기여 정본(영문, DCO·라이선스 게이트). 한국어 원문 [`CONTRIBUTING.ko.md`](../CONTRIBUTING.ko.md) | 커뮤니티 |
 | [`CODE_OF_CONDUCT.md`](../CODE_OF_CONDUCT.md) | Contributor Covenant v2.1. 신고 경로=`SECURITY.md` | 커뮤니티 |
