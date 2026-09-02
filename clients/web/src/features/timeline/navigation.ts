@@ -167,10 +167,9 @@ export function reconcileDividerRelation(input: {
  * 갈아타면 epoch와 함께 풀린다.
  */
 export function shouldLatchUnreadJump(
-  observed: DividerViewportRelation | null,
-  alignSettled = true
+  observed: DividerViewportRelation | null
 ): boolean {
-  return alignSettled && observed === "in";
+  return observed === "in";
 }
 
 /** 구분선이 창 **위쪽 밖**에 있고 동결 N이 있으며, 이 epoch에서 아직 래치되지 않았을 때만 상단 필이 선다. */
@@ -206,33 +205,19 @@ export function timelineScrollBehavior(
 }
 
 /**
- * 구분선 사각형이 뷰포트와 겹치는가. 마운트(오버스캔)가 아니라 보이는
- * 위치만 「안」이다.
- */
-export function dividerRectRelation(
-  divider: Pick<DOMRectReadOnly, "top" | "bottom">,
-  viewport: Pick<DOMRectReadOnly, "top" | "bottom">
-): DividerViewportRelation {
-  if (divider.bottom <= viewport.top) return "above";
-  if (divider.top >= viewport.bottom) return "below";
-  return "in";
-}
-
-/**
  * IntersectionObserver 한 줄로 위/안/아래를 가른다.
  *
- * rootBounds가 있으면 사각형이 이긴다. virtuoso 정렬 중 `isIntersecting`
- * 이 true여도 오버스캔에만 마운트된 구분선은 창 위/아래로 본다 (M-8).
+ * `isIntersecting`이면 창 안(한 픽셀이어도 소멸). 아니면 root와 비교해 위/아래.
  */
 export function relationFromIntersection(entry: {
   isIntersecting: boolean;
   rootBounds: Pick<DOMRectReadOnly, "top" | "bottom"> | null;
   boundingClientRect: Pick<DOMRectReadOnly, "top" | "bottom">;
 }): DividerViewportRelation | null {
-  const root = entry.rootBounds;
-  if (root !== null) {
-    return dividerRectRelation(entry.boundingClientRect, root);
-  }
   if (entry.isIntersecting) return "in";
-  return null;
+  const root = entry.rootBounds;
+  if (root === null) return null;
+  if (entry.boundingClientRect.bottom <= root.top) return "above";
+  if (entry.boundingClientRect.top >= root.bottom) return "below";
+  return "in";
 }

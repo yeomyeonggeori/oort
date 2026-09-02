@@ -94,8 +94,6 @@ vi.mock("./MessageRow", () => ({
 type IoCallback = (entries: IntersectionObserverEntry[]) => void;
 let ioCallback: IoCallback | null = null;
 let reducedMotion = false;
-let rafImmediate = true;
-let rafQueue: FrameRequestCallback[] = [];
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -136,17 +134,6 @@ beforeEach(() => {
   virtuoso.data = [];
   ioCallback = null;
   reducedMotion = false;
-  rafImmediate = true;
-  rafQueue = [];
-  vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
-    if (rafImmediate) {
-      cb(0);
-      return 1;
-    }
-    rafQueue.push(cb);
-    return rafQueue.length;
-  });
-  vi.stubGlobal("cancelAnimationFrame", () => undefined);
   vi.stubGlobal(
     "IntersectionObserver",
     class {
@@ -191,10 +178,8 @@ function mountTimeline(
     lastReadSeq?: number | null;
     unreadCount?: number;
     myMemberId?: string;
-    holdAlign?: boolean;
   } = {}
 ): HTMLElement {
-  rafImmediate = over.holdAlign !== true;
   host = document.createElement("div");
   document.body.append(host);
   mountedRoot = createRoot(host);
@@ -406,38 +391,6 @@ describe("Timeline unread jump pill", () => {
     expect(
       root.querySelector("[data-testid='jump-latest']")?.textContent
     ).toBe("최신 메시지로 이동");
-  });
-
-  it("정렬 중 in 다음 15ms 뒤 above 가 필을 무장한다 (H-5)", () => {
-    const root = mountTimeline({ holdAlign: true });
-    const items = buildTimelineItems(
-      [1, 2, 3, 4, 5, 6, 7, 8].map((seq) => message(seq)),
-      { lastReadSeq: 3, unreadCount: 5 }
-    );
-    const divider = unreadDividerIndexOf(items);
-    if (divider === null) throw new Error("expected unread divider");
-    reportRange(divider, divider + 4);
-    const scroller = { top: 85, bottom: 694, height: 609 } as DOMRectReadOnly;
-    act(() => {
-      ioCallback?.([
-        {
-          isIntersecting: true,
-          rootBounds: scroller,
-          boundingClientRect: { top: 144, bottom: 178 },
-        } as IntersectionObserverEntry,
-      ]);
-    });
-    expect(root.querySelector("[data-testid='jump-unread']")).toBeNull();
-    act(() => {
-      ioCallback?.([
-        {
-          isIntersecting: false,
-          rootBounds: scroller,
-          boundingClientRect: { top: -284, bottom: -250 },
-        } as IntersectionObserverEntry,
-      ]);
-    });
-    expect(root.querySelector("[data-testid='jump-unread']")).not.toBeNull();
   });
 
   it("구분선이 가상화로 빠져도 range가 위쪽이면 뜬다", () => {

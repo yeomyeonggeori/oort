@@ -4,7 +4,6 @@ import {
   countNewerThan,
   countUnreadJump,
   dataIndexFromVirtuoso,
-  dividerRectRelation,
   dividerViewportRelation,
   newestSeqOf,
   reconcileDividerRelation,
@@ -252,39 +251,6 @@ describe("relationFromIntersection", () => {
       })
     ).toBe("below");
   });
-
-  it("정렬 중 창 안 in 다음 15ms 뒤 above 는 래치 없이 필을 무장한다 (H-5)", () => {
-    const mid = relationFromIntersection({
-      isIntersecting: true,
-      rootBounds: { top: 85, bottom: 694 },
-      boundingClientRect: { top: 144, bottom: 178 },
-    });
-    expect(mid).toBe("in");
-    expect(shouldLatchUnreadJump(mid, false)).toBe(false);
-    const later = relationFromIntersection({
-      isIntersecting: false,
-      rootBounds: { top: 85, bottom: 694 },
-      boundingClientRect: { top: -284, bottom: -250 },
-    });
-    expect(later).toBe("above");
-    if (later !== "above") throw new Error("expected above");
-    expect(shouldLatchUnreadJump(later, false)).toBe(false);
-    expect(shouldShowJumpUnread(later, 4, false)).toBe(true);
-  });
-});
-
-describe("dividerRectRelation", () => {
-  const viewport = { top: 85, bottom: 800 };
-
-  it("뷰포트 위면 above, 겹치면 in, 아래면 below다", () => {
-    expect(dividerRectRelation({ top: -283, bottom: -249 }, viewport)).toBe(
-      "above"
-    );
-    expect(dividerRectRelation({ top: 90, bottom: 120 }, viewport)).toBe("in");
-    expect(dividerRectRelation({ top: 820, bottom: 850 }, viewport)).toBe(
-      "below"
-    );
-  });
 });
 
 describe("shouldLatchUnreadJump", () => {
@@ -294,11 +260,6 @@ describe("shouldLatchUnreadJump", () => {
     expect(shouldLatchUnreadJump("below")).toBe(false);
     expect(shouldLatchUnreadJump("absent")).toBe(false);
     expect(shouldLatchUnreadJump(null)).toBe(false);
-  });
-
-  it("초기 정렬이 끝나기 전의 in 은 래치하지 않는다 (H-5)", () => {
-    expect(shouldLatchUnreadJump("in", false)).toBe(false);
-    expect(shouldLatchUnreadJump("in", true)).toBe(true);
   });
 
   it("range 폴백 「in」은 래치 입력이 아니다", () => {
