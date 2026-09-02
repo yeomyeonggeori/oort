@@ -150,6 +150,15 @@ scripts/self_host_env.sh   # writes your env file and prints your first login
 # then run the compose line it prints, and open the local address it names
 ```
 
+To pull the published image instead of building locally, read the list digest
+from [`releases/latest.json`](releases/latest.json) — do not paste a digest
+out of a document:
+
+```sh
+IMAGE_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
+scripts/self_host_env.sh --published-image "$IMAGE_REF"
+```
+
 Three commands, no branches, and no promised minute count — measured from a
 clean clone to a message round-trip in the browser: about a minute on a warm
 Docker cache. The full walk-through, what each step does, and how to stop or

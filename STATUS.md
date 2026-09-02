@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-1 릴리스 매니페스트 `releases/latest.json` (#1954, 2026-09-02)
+
+- 커밋된 `releases/latest.json`(v0.1.4 list digest, GHCR 아키별 이미지 매니페스트 digest 실측) + `scripts/release_manifest.sh` / `scripts/check_release_manifest.sh`. SELF_HOST·AGENT·README는 매니페스트를 읽고 산문 digest 0.
+- red proof: digest 한 글자·`@sha256:` 잔여·CHANGELOG version 불일치. 생성기 재실행 바이트 동일. `scripts/local_gate.sh` 편입은 이 티켓에서 하지 않음(오케스트레이터).
+- runtime-unverified 아님(GHCR inspect·attestation verify PASS, 생성기 멱등).
+
 ## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)
 
 - momo-core `effectiveUnreadStartSeq` 단일점 (ADR-0178 D3). 배지·UnreadDivider·UnreadPill·⌥↑↓ 가 이 함수만 소비. 서버 `unread_count` 는 접지 않음.
