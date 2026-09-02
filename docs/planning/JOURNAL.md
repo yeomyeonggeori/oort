@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-02 · Fable · ★재개 복원 + 출시 재진단·두 기둥(Buzz급 UXUI·압도적 셀프호스팅) 브리프 — 인터뷰 대기
+
+- 복원: 루트가 8/28 브랜치 잔재 상태 → stash@{0} 보존 후 origin/main(df6bc4d3) 정렬, 트랙 워크트리 ff. 중단점=BT-6(#1934) 서버 절반 미커밋(wbt6-server), 클라 미착수.
+- 탐색 4기(웹 클라 UX·셀프호스팅/배포·buzz 레퍼런스·문서/파이프라인) + 9/1 감사 합본 → `research/2026-09-02-launch-rediagnosis-two-pillars-brief.md`. 근원 5(모션 축 0·active 11곳·온보딩 절정 부재·⌘K 내비 전용·에이전트 표면 4곳 분산·금지 위주 시스템).
+- 편성안: UX-R0~R6 · SH-1~9 · P1~P8, 게이트 G1/G2 재정의. 성재 인터뷰 Q1~Q11(§8) 답 대기 — 답 후 ADR-0179(모션 축)·킥오프 오프너·토스트 정책 ADR 기안 + 티켓/패킷.
+- 다음: BT-6 이어받기 완주(go 신호) → 결재 3건 → 승격 → v0.1.4.
+
 ## 2026-09-01 (오후) · Fable · ★BT 파도 개막 — 인터뷰·ADR 2본 결재·BT-1 랜딩(3회전)·BT-2 PR 정지점
 
 - 성재 지시 "우로보로스로 계획 구체화 후 작업까지, 구현=Opus 5" → 인터뷰 수렴: BT 파도 6장 2단(정본 2026-09-01-bt-wave-plan.md), ADR-0177/0178 기안→성재 실시간 결재 Accepted(PR #1936).
@@ -120,8 +127,3 @@
 - **승인 집행**: ADR-0167·0168 **Accepted**(위임 기록 명시) · rescue stash **drop 완료**(보험 패치 스크래치패드) · **T-9(#1678) grok 워커 발사**(track/engine, acceptEdits, 감시자 무장) · **M-2=#1700 발급+패킷**(`handoffs/2026-08-23-m2-photo-picker-packet.md`)+**sol 워커 발사**(goal_claim, feat/1700-picker-p0-adr-0168, 감시자+stall 감지).
 - **합류 릴레이(큐④)**: 토큰 2회 붙여넣기만 성재 몫으로 남긴 릴레이 킷 완성 `claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md`(1회용 pairing/active 자격증명은 Fable 비대행 경계).
 - 운영: ENOSPC 재발(tauri 빌드) → engine 구 target 3.6G+tauri target 회수, 26Gi 확보. main repo server-rust/target 12G는 QA 서버 가동 중이라 보존(세션 말미 회수 후보). #1696·#1698 방향은 승인됨 — ADR 기안=다음 순번.
-## 2026-08-23 (Fable) · ★실결함 수리 랜딩(#1697)+기본 기능 4축 검수+실시간 리그 성립
-- **U-3 실결함 수리**: 라이트박스 512px 스트립 — cn()의 tailwind-merge가 하우스 측정명 미인지→max-w-none 패배. 수리=단어형 --spacing-* 19종 전량 등록+정본 파싱 가드 테스트(#1697 merged, track/uxui=7124598b). design-review PASS(Blocker 0·H-1/M-1 커밋 내 종결). 레드 프루프 2건 실측.
-- **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
-- **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
-- 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.

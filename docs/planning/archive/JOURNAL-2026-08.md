@@ -2,6 +2,12 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-23 (Fable) · ★실결함 수리 랜딩(#1697)+기본 기능 4축 검수+실시간 리그 성립
+- **U-3 실결함 수리**: 라이트박스 512px 스트립 — cn()의 tailwind-merge가 하우스 측정명 미인지→max-w-none 패배. 수리=단어형 --spacing-* 19종 전량 등록+정본 파싱 가드 테스트(#1697 merged, track/uxui=7124598b). design-review PASS(Blocker 0·H-1/M-1 커밋 내 종결). 레드 프루프 2건 실측.
+- **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
+- **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
+- 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.
+
 ## 2026-08-23 (Fable) · ★재개 큐 소진: UXUI 재연 QA 대행 5/7 PASS + U-7 스코프드 랜딩 + ADR-0168 기안
 - 성재 "검수 요청 부분 알아서 처리" → **재연 QA를 Fable이 브라우저 자동화로 대행**: 로컬 프록시(localhost:23080, 정적=track/uxui dist·/v1=D8 포워딩)로 same-origin 리그 구성. U-5·U-2·C-1·U-1·U-4 전부 PASS(포커스 복귀 수리분 실렌더 재확인 포함). 증거 11샷+리포트 `claudedocs/uxui-qa-d8-20260823/`.
 - **실측 발견**: D8 셀프호스트 파일 보관소 미연결(no-archive)→첨부 전 계열(U-3 라이트박스·M-2) E2E 원천 불가 — 서버측 보관소 구성 티켓 후보. 이모지 피커 상단중앙 위치는 관찰 소견(Low).
