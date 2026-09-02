@@ -27,7 +27,7 @@ export function LandingStep({
       <OortCloudField />
       <div className="relative flex flex-1 flex-col items-center justify-center p-6">
         <div
-          className="onboarding-lockup flex flex-col items-center gap-3 text-center"
+          className="brand-lockup onboarding-lockup flex flex-col items-center gap-3 text-center"
           data-testid="onboarding-lockup"
         >
           <div className="onboarding-mark" data-testid="onboarding-mark">

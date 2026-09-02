@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -42,6 +42,20 @@ const DRAFT_STORE_SRC = readFileSync(
   resolve(WEB_ROOT, "src/features/chat/draftStore.ts"),
   "utf8"
 );
+const ACCENT_CATALOG_SRC = readFileSync(
+  resolve(WEB_ROOT, "src/design/themes/index.ts"),
+  "utf8"
+);
+
+function accentCatalogIds() {
+  const ids = [...ACCENT_CATALOG_SRC.matchAll(/id: "([a-z]+)"/g)].map(
+    (match) => match[1]
+  );
+  if (ids.length === 0 || ids[0] !== "dawn") {
+    throw new Error("accent catalog must list dawn first");
+  }
+  return ids;
+}
 
 function exportedStringConst(source, name) {
   const match = source.match(new RegExp(`export const ${name} = "([^"]+)";`));
@@ -245,6 +259,8 @@ const MOBILE_TAP_TARGETS = [
   ["remind-preset-tomorrow-9", "알림 프리셋 내일 9시", "optional"],
   ["remind-preset-next-monday-9", "알림 프리셋 다음 주 월요일", "optional"],
   ["remind-note", "알림 메모", "optional"],
+  // #1868 N-4 — 설정 > 테마 액센트 스와치. optional: 테마 섹션이 열린 프레임에서만.
+  ["accent-swatch-dawn", "액센트 새벽", "optional"],
 ];
 
 // 연결 화면의 폼 1급 컨트롤 (goal P3 1-4). BZ-6a 이후 한 폼이 아니라
@@ -2103,8 +2119,50 @@ async function signIn(page) {
  * S0 → S1 → S2. Capture photographs S0 (new surface) plus the split connect
  * cards. Tap-target lists are mobile-only; desktop still asserts overflow.
  */
+async function assertOnboardingIgnoresAccent(page, where) {
+  const readLanding = () =>
+    page.evaluate(() => {
+      const landing = document.querySelector('[data-testid="onboarding-landing"]');
+      const cta = document.querySelector('[data-testid="onboarding-choose-server"]');
+      if (!landing || !cta) return null;
+      const landingStyle = getComputedStyle(landing);
+      const ctaStyle = getComputedStyle(cta);
+      return {
+        space: landingStyle.backgroundColor,
+        ink: landingStyle.color,
+        onboardingAccent: landingStyle.getPropertyValue("--onboarding-accent").trim(),
+        ctaBg: ctaStyle.backgroundColor,
+      };
+    });
+  const before = await readLanding();
+  if (!before?.onboardingAccent) {
+    throw new Error(`S0 격리 ${where}: 랜딩 토큰을 읽지 못했다`);
+  }
+  const other = accentCatalogIds().find((id) => id !== "dawn") ?? "seongun";
+  await page.evaluate((id) => {
+    document.documentElement.setAttribute("data-accent", id);
+  }, other);
+  const after = await readLanding();
+  if (
+    !after ||
+    after.space !== before.space ||
+    after.ink !== before.ink ||
+    after.onboardingAccent !== before.onboardingAccent ||
+    after.ctaBg !== before.ctaBg
+  ) {
+    throw new Error(
+      `S0 격리 ${where}: data-accent=${other} 가 랜딩을 바꿨다 ` +
+        `${JSON.stringify({ before, after })}`
+    );
+  }
+  await page.evaluate(() => {
+    document.documentElement.setAttribute("data-accent", "dawn");
+  });
+}
+
 async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot } = {}) {
   await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await assertOnboardingIgnoresAccent(page, where);
   const scatter = await page.locator("[data-onboarding-body]").count();
   if (scatter !== 30) {
     throw new Error(`S0 산포 ${where}: ${scatter}개체 (기대 30)`);
@@ -6530,6 +6588,21 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "settings");
 
+  await page.evaluate('location.hash = "/inbox"');
+  await page.waitForTimeout(200);
+  await page.evaluate('location.hash = "/settings?section=appearance"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  await page.getByRole("heading", { name: "테마", exact: true }).waitFor({
+    state: "visible",
+  });
+  await page.getByTestId("accent-swatch-dawn").waitFor({ state: "visible" });
+  await assertNoHorizontalOverflow(page, `settings appearance ${scheme}`);
+  await assertTapTargets(page, `settings appearance ${scheme}`, [
+    ["settings-back-to-app", "앱으로 돌아가기"],
+    ["accent-swatch-dawn", "액센트 새벽"],
+  ]);
+  await shoot(page, "settings-appearance");
+
   // 7. 긴 무공백 토큰 스트레스 (goal B9). 마지막에 서는 이유는 이 단계가 DOM을
   //    되돌릴 수 없게 바꾸기 때문이다 — 앞의 여섯 프레임은 손대지 않은 표면에서
   //    찍히고, 이 한 장만 스트레스가 걸린 채로 남는다.
@@ -8055,6 +8128,14 @@ async function captureScheme(browser, scheme) {
       .getByRole("heading", { name: heading, exact: true })
       .first()
       .waitFor({ state: "visible" });
+    if (section === "appearance") {
+      await settingsSweep.getByTestId("accent-swatch-dawn").waitFor({
+        state: "visible",
+      });
+      await assertTapTargets(settingsSweep, `appearance ${scheme}`, [
+        ["accent-swatch-dawn", "액센트 새벽"],
+      ]);
+    }
     if (section === "workspace") {
       await settingsSweep
         .getByTestId("workspace-role-labels")
@@ -9739,6 +9820,163 @@ async function captureHostedDoorbellScenes(browser, scheme) {
  * (ChoiceList, KeyValueRows, InlineBanner, EmptyInvite, Button) are already shot
  * elsewhere in both schemes.
  */
+/**
+ * `data-accent` flipping is not the same as paint. Buttons carry
+ * `transition-colors` (150ms) even under reduced motion, so wait until a
+ * filled control's computed background equals `var(--token)`.
+ *
+ * `selector` is a CSS selector, not a test id: the selected channel row is
+ * one of several `[data-testid="channel-item"]` nodes, and only the
+ * `aria-current="page"` one paints `--accent-soft`.
+ */
+async function waitUntilTokenPaint(page, selector, cssVar) {
+  await page.waitForFunction(
+    ({ selector: sel, cssVar: token }) => {
+      const el = document.querySelector(sel);
+      if (!el) return false;
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = `var(${token})`;
+      probe.style.position = "absolute";
+      probe.style.left = "-9999px";
+      document.body.appendChild(probe);
+      const target = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      if (target === "rgba(0, 0, 0, 0)" || target === "transparent") return false;
+      return getComputedStyle(el).backgroundColor === target;
+    },
+    { selector, cssVar },
+    { timeout: 8_000 }
+  );
+}
+
+/**
+ * Hash navigation and `data-accent` both start 150ms color transitions.
+ * Dawn is a no-op accent change, so `--accent` probes would pass on the
+ * first tick while the selected row is still mid-transition. Finite
+ * running animations (not the infinite caret/spin) must be gone.
+ */
+async function waitUntilAnimationsIdle(page) {
+  await page.waitForFunction(
+    () =>
+      document.getAnimations().filter((animation) => {
+        if (animation.playState !== "running") return false;
+        const timing =
+          animation.effect && typeof animation.effect.getTiming === "function"
+            ? animation.effect.getTiming()
+            : null;
+        if (timing && timing.iterations === Infinity) return false;
+        return true;
+      }).length === 0,
+    { timeout: 8_000 }
+  );
+}
+
+/** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
+async function screenshotSettled(page, path) {
+  let previous = null;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const buffer = await page.screenshot({
+      type: "png",
+      animations: "disabled",
+      caret: "hide",
+    });
+    if (previous !== null && Buffer.compare(previous, buffer) === 0) {
+      writeFileSync(path, buffer);
+      return;
+    }
+    previous = buffer;
+  }
+  writeFileSync(path, previous);
+}
+
+const ACCENT_CAPTURE_ARGS = [
+  "--disable-lcd-text",
+  "--disable-font-subpixel-positioning",
+  "--font-render-hinting=none",
+  "--force-color-profile=srgb",
+  "--disable-gpu",
+];
+
+async function captureAccentCandidates(_sharedBrowser, scheme) {
+  const ids = accentCatalogIds();
+  // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
+  // launches (R3-M1). Software raster + no LCD keeps chrome visible and
+  // two capture:design runs byte-identical.
+  const browser = await chromium.launch({ args: ACCENT_CAPTURE_ARGS });
+  try {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 1,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    const emptyChannelId = CHANNELS[3].id;
+    // Last-registered route wins: this channel stays empty so unfurl cards cannot
+    // dominate the 시안 frame.
+    await context.route(
+      `**/channels/${emptyChannelId}/messages*`,
+      (route) => json(route, { messages: [] })
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.getByTestId("channel-list").waitFor({ state: "visible" });
+    // Empty public channel: selected sidebar row, enabled primary fill, and the
+    // general mention badge share one frame. Timeline unfurl cards (baked amber)
+    // do not dominate.
+    await page.evaluate(`location.hash = "/c/${emptyChannelId}"`);
+    await page.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
+    await page.getByTestId("mention-badge").waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="channel-item"][aria-current="page"]')
+      .waitFor({ state: "visible" });
+    await page.evaluate(() => document.fonts.ready);
+    // Product chrome stays visible (R3-M1). Lucide 16px strokes and the 2px
+    // rail marker AA at 1 RGB across Chromium launches; snap those glyphs
+    // so two capture:design runs stay byte-identical without hiding chrome.
+    await page.addStyleTag({
+      content: `svg { shape-rendering: crispEdges; }
+[data-testid="workspace-current"] .bg-accent,
+[data-testid="channel-item"][aria-current="page"] {
+  transform: translateZ(0);
+}`,
+    });
+    await waitUntilAnimationsIdle(page);
+    const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
+    mkdirSync(previewDir, { recursive: true });
+    const shots = [];
+    for (const id of ids) {
+      await page.evaluate((accentId) => {
+        document.documentElement.setAttribute("data-accent", accentId);
+      }, id);
+      await waitUntilTokenPaint(page, '[data-testid="timeline-empty-primary"]', "--accent");
+      await waitUntilTokenPaint(page, '[data-testid="mention-badge"]', "--accent");
+      await waitUntilTokenPaint(
+        page,
+        '[data-testid="channel-item"][aria-current="page"]',
+        "--accent-soft"
+      );
+      await waitUntilAnimationsIdle(page);
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          })
+      );
+      const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+      await screenshotSettled(page, path);
+      copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
+      shots.push(path);
+    }
+    await page.close();
+    await context.close();
+    return shots;
+  } finally {
+    await browser.close();
+  }
+}
+
 async function captureConsent(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -9808,10 +10046,14 @@ async function main() {
     try {
       const all = [];
       // 한 프로파일만 돌리는 문 (goal B9). 폰 기하를 고치는 동안 1280 프레임 60여
-      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. 기본값은 여전히 둘 다이므로
-      // 게이트가 보는 것은 달라지지 않는다.
+      // 장을 매번 다시 찍는 것은 측정이 아니라 대기다. `accent`는 시안 10장만.
+      // 기본값은 여전히 둘 다이므로 게이트가 보는 것은 달라지지 않는다.
       const profile = process.env.CAPTURE_PROFILE || "all";
-      if (profile !== "mobile") {
+      if (profile === "accent") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureAccentCandidates(browser, scheme)));
+        }
+      } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
@@ -9824,11 +10066,12 @@ async function main() {
           all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
           all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
           all.push(...(await captureConsent(browser, scheme)));
+          all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop") {
+      if (profile !== "desktop" && profile !== "accent") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureMobile(browser, scheme)));
         }

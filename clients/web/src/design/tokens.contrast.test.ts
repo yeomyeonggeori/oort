@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 const css = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
 
 /** `--name: light-dark(#aaa, #bbb);` -> { name: [light, dark] } */
-function parseLightDarkTokens(source: string): Record<string, [string, string]> {
+export function parseLightDarkTokens(source: string): Record<string, [string, string]> {
   const out: Record<string, [string, string]> = {};
   const re =
     /--([a-z-]+):\s*light-dark\(\s*(#[0-9a-f]{6})\s*,\s*(#[0-9a-f]{6})\s*\)/gi;
@@ -115,8 +115,15 @@ export function chroma(hex: string): number {
   return Math.hypot(...oklabAB(hex));
 }
 
+/** Accent fill must outrank the destructive fill (MOMO-642 R1 H-2). */
+export const ACCENT_DANGER_FILL_CHROMA_RATIO_MIN = 1.15;
+/** Two fills on one screen stay different colours. */
+export const ACCENT_DANGER_FILL_DELTA_E_MIN = 0.08;
+export const AGENT_HUE_GAP_MIN = 90;
+export const AGENT_DELTA_E_MIN = 0.08;
+
 /** Shortest angular distance between two hues, in degrees. */
-function hueGap(a: string, b: string): number {
+export function hueGap(a: string, b: string): number {
   const d = Math.abs(hueAngle(a) - hueAngle(b)) % 360;
   return d > 180 ? 360 - d : d;
 }
@@ -127,7 +134,7 @@ function hueGap(a: string, b: string): number {
  * moves it TOWARD the accent on the one axis the order is measured on, so the
  * order has to be bought without merging the two fills into one colour.
  */
-function deltaE(a: string, b: string): number {
+export function deltaE(a: string, b: string): number {
   const [aA, aB] = oklabAB(a);
   const [bA, bB] = oklabAB(b);
   return Math.hypot(oklabL(a) - oklabL(b), aA - bA, aB - bB);
@@ -153,7 +160,7 @@ const SCHEMES = [
 ] as const;
 
 /** Surfaces any body text can land on. */
-const SURFACES = [
+export const SURFACES = [
   "surface",
   "surface-raised",
   "surface-sidebar",
@@ -198,7 +205,7 @@ const SURFACES = [
  * 아니다.** 지금 1.046 을 그대로 두는 것은 불가능해서가 아니라 그 거래를 거절한
  * 것이다 — 실제로 관제 줄에 칩이 서는 날이 오면 그때 이 문단을 다시 읽고 정하면 된다.
  */
-const CHIP_VESSEL_SURFACES = [
+export const CHIP_VESSEL_SURFACES = [
   ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
   ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
   ["warn-soft", ["surface", "surface-hover", "surface-raised"]],
@@ -237,11 +244,11 @@ const CHIP_VESSEL_MIN_SIBLING_DISTANCE = 0.02;
  * 팔레트의 실측에서 나왔다: 라이트 --surface 위가 최악이고 1.061 / 0.0207 이다.
  * 고치기 전 --surface-hover 위의 그 칩은 1.000 / 0.0000 이었다.
  */
-const CHIP_VESSEL_MIN_CONTRAST = 1.05;
-const CHIP_VESSEL_MIN_DISTANCE = 0.02;
+export const CHIP_VESSEL_MIN_CONTRAST = 1.05;
+export const CHIP_VESSEL_MIN_DISTANCE = 0.02;
 
 /** Foregrounds that render text or meaningful glyphs. */
-const FOREGROUNDS = [
+export const FOREGROUNDS = [
   "ink",
   "ink-muted",
   "accent",
@@ -270,7 +277,7 @@ const FOREGROUNDS = [
  * **컴포넌트의 클래스에서 토큰 이름을 읽어** 잰다. 산문이 지키던 자리를 자가
  * 이어받았다.
  */
-const CONTROL_SURFACES = [
+export const CONTROL_SURFACES = [
   "surface",
   "surface-raised",
   "surface-sidebar",
@@ -612,7 +619,7 @@ describe("Dawn palette", () => {
             hueGap(pick("agent", scheme.index), pick("accent", scheme.index))
           ),
           `agent vs accent hue gap (${scheme.name})`
-        ).toBeGreaterThanOrEqual(90);
+        ).toBeGreaterThanOrEqual(AGENT_HUE_GAP_MIN);
       });
 
       // The risk hierarchy is an ORDER, not a taste: --danger > --warn >
@@ -657,7 +664,7 @@ describe("Dawn palette", () => {
         expect(
           Number((c("accent") / c("danger-fill")).toFixed(2)),
           `accent vs danger-fill chroma (${scheme.name})`
-        ).toBeGreaterThanOrEqual(1.15);
+        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_CHROMA_RATIO_MIN);
       });
 
       // Quieter, not merged. Lowering the destructive fill's chroma walks it
@@ -673,7 +680,7 @@ describe("Dawn palette", () => {
             ).toFixed(3)
           ),
           `danger-fill vs accent deltaE (${scheme.name})`
-        ).toBeGreaterThanOrEqual(0.08);
+        ).toBeGreaterThanOrEqual(ACCENT_DANGER_FILL_DELTA_E_MIN);
       });
 
       // ...and still recognisably the risk colour. A fill allowed to drift out

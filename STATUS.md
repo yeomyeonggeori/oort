@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
+
+- `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.
+- 컬러 모드 System/Light/Dark는 기존 ChoiceRadios를 `momo.web.appearance.v1` JSON으로 이관(옛 `momo.web.theme.v1` 읽기 전용 이관). 액센트 스와치 44·radio·focus-visible.
+- 대비 전수: `catalog.contrast.test.ts`가 `tokens.contrast.test.ts` 액센트 가족 축을 파생(채움 순서 1.15·danger dE·전경 7종·muted-soft 그릇·ok/warn/danger 거리·후보 간 dE). 테마 추가=테스트 추가. red proof 상주. S0·`.brand-lockup`은 Dawn 고정(D4).
+- D5: `design_preflight_web.sh`가 `tokens.css`·`tokens.contrast.test.ts`·`themes/*` 경로 끝만 면제(합성 입력 자가시험). 캡처는 `--accent`/`--accent-soft` 정착 + 유한 애니메이션 idle 대기.
+- #1922 R3: 혜성 다크를 라이트 자주 가족으로 복귀(`#8b005a`/`#ff4bcc`, 표류 8.5°). 옛 민트 `#6de89b`는 스킴 간 표류 red proof(상한 20°, 근거=새벽 19.8°). 시안 크롬 복원.
+- 서버 무접촉. runtime-unverified 아님. 시안: `accent-<id>-{light,dark}.png`.
 > **랜딩 증거 원장(newest-first).** 항목=랜딩 단위, 원문 불변.
 > **로테이션(2026-09-01 재편):** 이 파일은 당월+직전월 항목만 담는다. 월초 플러시 때 `momo-main`이 그 이전 달 항목을 `docs/archive/STATUS-YYYY-MM.md`로 원문 그대로 이동한다. 과거 추적은 `docs/archive/README.md` 색인.
 

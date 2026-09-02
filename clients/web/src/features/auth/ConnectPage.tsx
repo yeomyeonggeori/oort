@@ -453,7 +453,7 @@ export function ConnectPage({
   const gatewayCard = (
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-gateway">
       <CardHeader>
-        <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
+        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
           <OortMark className="size-6 shrink-0 text-accent" />
           <span className="text-title">oort</span>
         </h1>
@@ -496,7 +496,7 @@ export function ConnectPage({
   const accountCard = (
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-account">
       <CardHeader>
-        <h1 className="flex items-center gap-2 font-semibold leading-none tracking-tight">
+        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
           <OortMark className="size-6 shrink-0 text-accent" />
           <span className="text-title">oort</span>
         </h1>

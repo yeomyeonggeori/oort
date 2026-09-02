@@ -236,3 +236,8 @@ faebfcaf14c702e75af3ba5dafd6b98743467ac8:clients/mobile/ios/Podfile.lock:generic
 # 자격증명 아님(momo.web.* 저장 키 명명 동형). generic-api-key 오탐.
 #   clients/web/src/features/notifications/preference.ts:17  [generic-api-key]
 7a73dc0cb0363b8f3a2a817d22834e413719d07a:clients/web/src/features/notifications/preference.ts:generic-api-key:17
+
+# momo.web.appearance.v1 — localStorage 키 상수(외양 설정, ADR-0174 D3). 시크릿 아님 — generic-api-key 오탐 (선례: micDeviceStore.ts·notifications/preference.ts 트리아지와 동일 패턴)
+c0f0b2a27a9af23a6c5248709f77953f0dfe9f5f:clients/web/gates/gate-theme.mjs:generic-api-key:202
+c0f0b2a27a9af23a6c5248709f77953f0dfe9f5f:clients/web/public/theme-boot.js:generic-api-key:19
+c0f0b2a27a9af23a6c5248709f77953f0dfe9f5f:clients/web/src/design/theme.ts:generic-api-key:55
