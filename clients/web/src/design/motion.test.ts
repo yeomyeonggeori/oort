@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,6 +42,34 @@ const BUTTON_VARIANTS = [
   "destructive",
   "outline",
 ] as const;
+
+/**
+ * H-1 runtime probe needs a Playwright Chromium binary. Local gates and the
+ * design-review lane have it; GitHub Actions `vitest` does not run
+ * `playwright install`, and `.github/**` is out of this ticket. Missing
+ * package or missing executable → skip (never a silent green: warn + skipIf).
+ */
+function detectChromium(): { ok: true } | { ok: false; path: string } {
+  try {
+    const { chromium } = require_("playwright") as typeof import("playwright");
+    const exe = chromium.executablePath();
+    if (!existsSync(exe)) return { ok: false, path: exe };
+    return { ok: true };
+  } catch (err) {
+    return {
+      ok: false,
+      path: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+const chromiumAvailability = detectChromium();
+const chromiumAvailable = chromiumAvailability.ok;
+if (!chromiumAvailable) {
+  console.warn(
+    `H-1 runtime probe skipped: Playwright Chromium executable missing (${chromiumAvailability.path})`
+  );
+}
 
 /** 주석을 벗긴 소스. 주석은 옛 값과 반례를 그대로 인용한다. */
 function codeOnly(source: string): string {
@@ -187,6 +215,10 @@ describe("ADR-0179 D5 눌림 단일점", () => {
     expect(css).toMatch(/--motion-instant/);
   });
 
+  // (a) static H-1 proof — compile the real Button class list. Always runs.
+  // (a) static H-1 proof — always runs (CI included). Compiles the real
+  // buttonVariants base list through Tailwind; last transition-property
+  // owner is .press, contains transform, excludes outline-color.
   it("Button 은 press 만 들고, 마지막 transition-property 에 transform 이 있고 outline-color 는 없다", async () => {
     const className = buttonVariants({ variant: "default" });
     expect(className).toContain("press");
@@ -218,43 +250,60 @@ describe("ADR-0179 D5 눌림 단일점", () => {
     }
   });
 
-  it("mousedown 에서 transform 전이가 돈다 (H-1 runtime)", async () => {
-    const className = buttonVariants({ variant: "secondary" });
-    const css = await buildCss(classTokens(className));
-    const { chromium } = await import("playwright");
-    const browser = await chromium.launch();
-    try {
-      const page = await browser.newPage();
-      await page.setContent(
-        `<!doctype html><html><head><style>${css}</style></head><body><button id="b" class="${className}">변경 저장</button></body></html>`
-      );
-      const el = page.locator("#b");
-      await el.evaluate((node) => {
-        const target = node as HTMLElement & { __ev: string[] };
-        target.__ev = [];
-        for (const type of ["transitionrun", "transitionend"] as const) {
-          node.addEventListener(type, (event) => {
-            target.__ev.push(`${type}:${(event as TransitionEvent).propertyName}`);
-          });
-        }
-      });
-      const box = await el.boundingBox();
-      if (!box) throw new Error("button box missing");
-      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-      await page.mouse.down();
-      await page.waitForTimeout(180);
-      const events = await el.evaluate(
-        (node) => (node as HTMLElement & { __ev: string[] }).__ev
-      );
-      expect(
-        events.some((entry) => entry.startsWith("transitionrun:transform")),
-        `events=${events.join(" ")}`
-      ).toBe(true);
-      await page.mouse.up();
-    } finally {
-      await browser.close();
-    }
-  }, 20_000);
+  // (b) runtime H-1 probe. Runs in local gates (developer machines and the
+  // design-review lane have the browser). CI unit-test lane does not
+  // `playwright install`; this skip is the recorded gap — DS-3 3짝 캡처가
+  // 런타임 모션 측정을 인수한다.
+  it.skipIf(!chromiumAvailable)(
+    "mousedown 에서 transform 전이가 돈다 (H-1 runtime)",
+    async () => {
+      const className = buttonVariants({ variant: "secondary" });
+      const css = await buildCss(classTokens(className));
+      let chromium: typeof import("playwright").chromium;
+      try {
+        ({ chromium } = await import("playwright"));
+      } catch (err) {
+        throw new Error(
+          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body><button id="b" class="${className}">변경 저장</button></body></html>`
+        );
+        const el = page.locator("#b");
+        await el.evaluate((node) => {
+          const target = node as HTMLElement & { __ev: string[] };
+          target.__ev = [];
+          for (const type of ["transitionrun", "transitionend"] as const) {
+            node.addEventListener(type, (event) => {
+              target.__ev.push(
+                `${type}:${(event as TransitionEvent).propertyName}`
+              );
+            });
+          }
+        });
+        const box = await el.boundingBox();
+        if (!box) throw new Error("button box missing");
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down();
+        await page.waitForTimeout(180);
+        const events = await el.evaluate(
+          (node) => (node as HTMLElement & { __ev: string[] }).__ev
+        );
+        expect(
+          events.some((entry) => entry.startsWith("transitionrun:transform")),
+          `events=${events.join(" ")}`
+        ).toBe(true);
+        await page.mouse.up();
+      } finally {
+        await browser.close();
+      }
+    },
+    20_000
+  );
 });
 
 describe("ADR-0179 D6 엘리베이션 이름", () => {
