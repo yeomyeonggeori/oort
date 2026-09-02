@@ -7,6 +7,7 @@ import { DECLARED_ONLY_REASON } from "@momo/core/features/agents/toolCatalog";
 import type { AgentToolCatalogEntry } from "@momo/core/features/agents/toolCatalog";
 import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import { INLINE_CONFIRM_MS } from "@/design/ui/inlineConfirm";
+import { UNKNOWN_TOOL_CHIP } from "./enabledToolsModel";
 import {
   EnabledToolsSection,
   type EnabledToolsSectionProps,
@@ -231,6 +232,85 @@ describe("EnabledToolsSection", () => {
     expect(toggle(host, "web.search").checked).toBe(true);
   });
 
+  it("B-1: rest 저장은 aria-disabled 이고 흐리며, dirty 면 풀린다", () => {
+    const style = document.createElement("style");
+    style.textContent = ".opacity-50 { opacity: 0.5; }";
+    document.head.append(style);
+    const { host } = mount();
+    const button = host.querySelector<HTMLButtonElement>(
+      '[data-testid="agent-hub-enabled-tools-save"]'
+    );
+    expect(button).not.toBeNull();
+    expect(button?.getAttribute("aria-disabled")).toBe("true");
+    expect(button?.className).toMatch(/\bopacity-50\b/);
+    expect(Number(getComputedStyle(button!).opacity)).toBeLessThan(1);
+    act(() => {
+      toggle(host, LONG_NAME).click();
+    });
+    expect(button?.getAttribute("aria-disabled")).toBeNull();
+    expect(button?.className).not.toMatch(/\bopacity-50\b/);
+    style.remove();
+  });
+
+  it("H-2: shell 이 카탈로그에 없으면 실행 가능 칩을 달지 않는다", () => {
+    const { host } = mount({
+      enabledTools: ["work.session.spawn", "shell"],
+    });
+    const row = host.querySelector('[data-testid="agent-hub-tool-row-shell"]');
+    expect(row?.textContent).toContain(UNKNOWN_TOOL_CHIP);
+    expect(row?.textContent).not.toContain("실행 가능");
+  });
+
+  it("H-3: 켜진 토글의 클래스 목록에 on-fill 포커스 링이 있다", () => {
+    const { host } = mount();
+    const checked = toggle(host, "work.session.spawn");
+    const row = host.querySelector(
+      '[data-testid="agent-hub-tool-row-work.session.spawn"]'
+    );
+    const classes = `${checked.className} ${row?.className ?? ""}`;
+    expect(classes).toContain("focus-ring-on-fill");
+  });
+
+  it("H-4: 이름 클릭이 토글하고, 잠긴 행은 hover 틴트가 없다", () => {
+    const { host } = mount();
+    const name = host.querySelector("#agent-hub-tool-0-name");
+    expect(toggle(host, LONG_NAME).checked).toBe(false);
+    act(() => {
+      (name as HTMLElement).click();
+    });
+    expect(toggle(host, LONG_NAME).checked).toBe(true);
+    const locked = host.querySelector(
+      '[data-testid="agent-hub-tool-row-work.session.resume"]'
+    );
+    expect(locked?.className).not.toMatch(/hover:bg-surface-hover/);
+    expect(locked?.className).toMatch(/cursor-default/);
+  });
+
+  it("M-1: 빈 카탈로그는 한 문장이고 저장 버튼이 없다", () => {
+    const { host } = mount({ catalog: [], enabledTools: [] });
+    expect(host.textContent).toContain("이 서버가 공개한 도구가 없습니다");
+    expect(
+      host.querySelector('[data-testid="agent-hub-enabled-tools-save"]')
+    ).toBeNull();
+  });
+
+  it("M-2: 첫 토글에서 Tab 한 번에 저장으로 간다", () => {
+    const { host } = mount();
+    const first = toggle(host, LONG_NAME);
+    const save = host.querySelector<HTMLButtonElement>(
+      '[data-testid="agent-hub-enabled-tools-save"]'
+    );
+    const tabbable = [
+      ...host.querySelectorAll<HTMLElement>("input, button"),
+    ].filter((el) => el.tabIndex !== -1);
+    const index = tabbable.indexOf(first);
+    expect(index).toBeGreaterThan(-1);
+    expect(tabbable[index + 1]).toBe(save);
+    expect(
+      tabbable.filter((el) => el.hasAttribute("data-tool-toggle"))
+    ).toHaveLength(1);
+  });
+
   it("화살표로 토글을 로빙하고 Space 로 켜며 ⌘↵ 로 저장한다", async () => {
     const { host, save } = mount();
     const first = toggle(host, LONG_NAME);
@@ -290,12 +370,12 @@ describe("EnabledToolsSection", () => {
     await act(async () => {
       button?.click();
     });
-    expect(button?.textContent).toContain("저장됨");
+    expect(button?.textContent).toContain("도구 변경 저장됨");
     expect(button?.getAttribute("aria-live")).toBe("polite");
     act(() => {
       vi.advanceTimersByTime(INLINE_CONFIRM_MS);
     });
-    expect(button?.textContent).toContain("저장");
+    expect(button?.textContent).toContain("도구 변경 저장");
     expect(button?.textContent).not.toContain("저장됨");
   });
 });

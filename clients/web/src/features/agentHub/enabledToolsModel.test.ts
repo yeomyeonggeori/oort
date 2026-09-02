@@ -1,11 +1,16 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { DECLARED_ONLY_REASON } from "@momo/core/features/agents/toolCatalog";
 import type { AgentToolCatalogEntry } from "@momo/core/features/agents/toolCatalog";
+import type { AgentProfile } from "@momo/core/lib/api";
 import {
+  INSTRUCTION_BYTE_LIMIT,
+  UNKNOWN_TOOL_REASON,
   enabledToolsFromRows,
   isToolToggleLocked,
   mergeToolRows,
   toggleToolRow,
+  toolsProfilePut,
 } from "./enabledToolsModel";
 
 const LONG_NAME =
@@ -54,7 +59,18 @@ describe("mergeToolRows", () => {
     expect(unknown?.unknown).toBe(true);
     expect(unknown?.enabled).toBe(true);
     expect(unknown?.requiresApproval).toBe(true);
-    expect(unknown?.executable).toBe(true);
+    expect(unknown?.executable).toBe(false);
+    expect(unknown?.unavailableReason).toBe(UNKNOWN_TOOL_REASON);
+  });
+
+  it("H-2: enabledTools 의 shell 이 카탈로그에 없으면 실행 가능이 아니다", () => {
+    const rows = mergeToolRows(CATALOG, ["shell"]);
+    const shell = rows.find((row) => row.name === "shell");
+    expect(shell?.unknown).toBe(true);
+    expect(shell?.executable).toBe(false);
+    expect(isToolToggleLocked(shell!, false)).toBe(false);
+    const off = toggleToolRow(rows, "shell", false);
+    expect(enabledToolsFromRows(off)).toEqual([]);
   });
 });
 
@@ -84,5 +100,78 @@ describe("toggleToolRow", () => {
     if (!spawn) return;
     expect(isToolToggleLocked(spawn, false)).toBe(false);
     expect(isToolToggleLocked(spawn, true)).toBe(true);
+  });
+});
+
+function savedProfile(over: Partial<AgentProfile> = {}): AgentProfile {
+  return {
+    agentMemberId: "AGENT",
+    workspaceId: "WS",
+    instructions: "저장된 지시문",
+    modelPref: "hermes-agent",
+    effortPref: "high",
+    enabledTools: ["work.session.spawn"],
+    triggers: { mention: true },
+    paused: false,
+    version: 1,
+    updatedBy: "ME",
+    updatedAtMs: 1,
+    ...over,
+  };
+}
+
+describe("toolsProfilePut", () => {
+  it("H-1: 도구 PUT 은 저장된 프로필 필드만 싣고 초안을 인자로 받지 않는다", () => {
+    const saved = savedProfile();
+    const built = toolsProfilePut(saved, ["work.session.spawn", LONG_NAME]);
+    expect(built.ok).toBe(true);
+    if (!built.ok) return;
+    expect(built.input.instructions).toBe("저장된 지시문");
+    expect(built.input.modelPref).toBe("hermes-agent");
+    expect(built.input.effortPref).toBe("high");
+    expect(built.input.enabledTools).toEqual([
+      "work.session.spawn",
+      LONG_NAME,
+    ]);
+    expect(toolsProfilePut.length).toBe(2);
+  });
+
+  it("H-1: 도구 PUT 경로도 8KB 지시문 가드를 돌린다", () => {
+    const huge = "한".repeat(INSTRUCTION_BYTE_LIMIT);
+    const built = toolsProfilePut(savedProfile({ instructions: huge }), [
+      "work.session.spawn",
+    ]);
+    expect(built.ok).toBe(false);
+    if (built.ok) return;
+    expect(built.message).toContain("8KB");
+  });
+});
+
+describe("AgentHubRoute tools save wiring", () => {
+  it("H-1: 도구 저장 콜백은 지시문/모델 초안을 싣지 않는다", () => {
+    const source = readFileSync(
+      new URL("./AgentHubRoute.tsx", import.meta.url),
+      "utf8"
+    );
+    const start = source.indexOf("<EnabledToolsSection");
+    const end = source.indexOf("<PermissionsSection");
+    expect(start).toBeGreaterThan(-1);
+    const block = source.slice(start, end);
+    expect(block).toContain("toolsProfilePut(handle.profile");
+    expect(block).not.toContain("currentInstructions");
+    expect(block).not.toContain("currentDraft");
+  });
+});
+
+describe("M-3 StatusChip vessel", () => {
+  it("중립 칩은 muted-soft 그릇과 ink-muted 테두리를 쓴다", () => {
+    const source = readFileSync(
+      new URL("./AgentHubRoute.tsx", import.meta.url),
+      "utf8"
+    );
+    const start = source.indexOf("function StatusChip");
+    const chip = source.slice(start, start + 800);
+    expect(chip).toContain("bg-muted-soft");
+    expect(chip).toContain("border-ink-muted");
   });
 });

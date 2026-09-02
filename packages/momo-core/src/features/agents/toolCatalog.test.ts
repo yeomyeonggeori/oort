@@ -88,13 +88,14 @@ describe("parseAgentToolCatalog", () => {
     expect(parsed?.[0]?.unavailableReason).toBe(DECLARED_ONLY_REASON);
   });
 
-  it("이름이나 설명이 빈 항목은 건너뛰고, 빈 배열은 부재가 아니다", () => {
+  it("이름 없는 항목만 건너뛰고, 빈 설명은 유지한다", () => {
     expect(parseAgentToolCatalog({ tools: [] })).toEqual([]);
     expect(
       parseAgentToolCatalog({
         tools: [
           { name: "", description: "x", executable: true },
           { name: "ok.tool", description: "   ", executable: true },
+          { name: "blank.tool", description: "", executable: false },
           {
             name: "kept.tool",
             description: "한 줄 설명이 있는 도구입니다.",
@@ -104,6 +105,20 @@ describe("parseAgentToolCatalog", () => {
         ],
       })
     ).toEqual([
+      {
+        name: "ok.tool",
+        description: "",
+        executable: true,
+        requiresApproval: true,
+        unavailableReason: null,
+      },
+      {
+        name: "blank.tool",
+        description: "",
+        executable: false,
+        requiresApproval: true,
+        unavailableReason: DECLARED_ONLY_REASON,
+      },
       {
         name: "kept.tool",
         description: "한 줄 설명이 있는 도구입니다.",

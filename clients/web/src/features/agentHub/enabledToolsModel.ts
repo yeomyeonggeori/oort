@@ -1,3 +1,7 @@
+import type {
+  AgentProfile,
+  AgentProfileInput,
+} from "@momo/core/lib/api";
 import type { AgentToolCatalogEntry } from "@momo/core/features/agents/toolCatalog";
 
 export interface ToolRow extends AgentToolCatalogEntry {
@@ -62,7 +66,35 @@ export function sameToolSet(left: readonly string[], right: readonly string[]): 
 }
 
 export function isToolRoveKey(key: string): boolean {
-  return key === "ArrowDown" || key === "ArrowUp";
+  return (
+    key === "ArrowDown" ||
+    key === "ArrowUp" ||
+    key === "Home" ||
+    key === "End"
+  );
+}
+
+export const INSTRUCTION_BYTE_LIMIT = 8_192;
+
+export const UNKNOWN_TOOL_CHIP = "이 서버 목록에 없음";
+export const UNKNOWN_TOOL_REASON =
+  "이 서버가 공개한 도구 목록에 없는 이름입니다.";
+
+/** RED stub (#1957 R2 H-1): omits saved routing fields and the 8KB guard. */
+export function toolsProfilePut(
+  profile: AgentProfile | null,
+  enabledTools: string[]
+):
+  | { ok: true; input: AgentProfileInput }
+  | { ok: false; message: string } {
+  return {
+    ok: true,
+    input: {
+      instructions: profile?.instructions ?? "",
+      enabledTools,
+      triggers: profile?.triggers ?? { mention: true },
+    },
+  };
 }
 
 export function roveToolToggles(

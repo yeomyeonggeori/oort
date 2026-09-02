@@ -3,6 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { COPY_FEEDBACK_MS } from "@/design/hooks/useClipboardCopy";
 import { INLINE_CONFIRM_MS, useInlineConfirm } from "./inlineConfirm";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -63,5 +64,10 @@ describe("useInlineConfirm", () => {
       vi.advanceTimersByTime(1);
     });
     expect(latest?.confirmed).toBe(false);
+  });
+
+  it("M-4: 복사 확인과 in-place confirm 이 같은 1.6s 를 쓴다", () => {
+    expect(COPY_FEEDBACK_MS).toBe(INLINE_CONFIRM_MS);
+    expect(COPY_FEEDBACK_MS).toBe(1_600);
   });
 });
