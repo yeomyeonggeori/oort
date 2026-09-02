@@ -55,12 +55,17 @@ pub mod hosted_inbox;
 pub mod huddle;
 pub mod identity;
 pub mod interaction;
+pub mod member_rename;
 pub mod message;
 pub mod notification_rule;
 pub mod presence;
 pub mod read_state;
 pub mod refine;
+/// ADR-0175 / #1888 — personal message reminders (no outbox fan-out).
+pub mod reminder;
 pub mod search;
+/// ADR-0177 / #1932 — member-owned sidebar sections (no outbox fan-out).
+pub mod sidebar_prefs;
 pub mod workspace_avatar;
 
 pub use attachment::{
@@ -114,6 +119,10 @@ pub use interaction::{
     StreamCloseOutcome, StreamEdit, StreamOutcome, CHANNEL_PIN_LIMIT, MESSAGE_REACTION_LIMIT,
     OPENING_STREAM_REV, REACTION_EMOJI_MAX_CHARS, STREAM_PROPS_KEY,
 };
+pub use member_rename::{
+    build_member_renamed_payload, rename_own_display_name_in_tx, DisplayNameRename,
+    MEMBER_RENAMED_BROADCAST_TYPE,
+};
 pub use message::{
     agent_auto_reply_streak_in_tx, agent_context_window_in_tx, build_broadcast_payload,
     build_thread_updated_payload, cent_channel, clamp_history_limit, clamp_replies_limit,
@@ -131,13 +140,18 @@ pub use notification_rule::{
     get_notification_rule_in_tx, set_notification_rule_in_tx, NotificationRule,
 };
 pub use presence::{
-    build_presence_payload, decode_optional_presence, presence_status_for,
-    set_presence_status_in_tx, PresenceStatus, PresenceUpdate, PRESENCE_BROADCAST_TYPE,
+    build_presence_payload, declared_presence_for, decode_optional_presence,
+    normalize_status_emoji, normalize_status_text, presence_status_for,
+    set_declared_presence_in_tx, set_presence_status_in_tx, status_expires_at_from_ms,
+    CustomStatus, CustomStatusInvalid, CustomStatusPatch, DeclaredPresence, PresenceStatus,
+    PresenceUpdate, StatusPatch, PRESENCE_BROADCAST_TYPE, STATUS_EMOJI_MAX_CHARS,
+    STATUS_TEXT_MAX_CHARS,
 };
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,
     mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
-    update_read_cursor_in_tx, ReadCursorUpdate, ReadState, MENTION_PROPS_KEY,
+    update_read_cursor_in_tx, update_read_cursor_with_intent_in_tx, MarkUnreadWrite,
+    ReadCursorOutcome, ReadCursorUpdate, ReadIntent, ReadState, MENTION_PROPS_KEY,
 };
 pub use refine::{
     harness_refine_client_msg_id, harness_refine_input_props, validate_harness_refine,
@@ -145,10 +159,23 @@ pub use refine::{
     HARNESS_REFINE_EDITS_MAX, HARNESS_REFINE_ID_MAX_CHARS, HARNESS_REFINE_PROPS_KEY,
     HARNESS_REFINE_SCOPE, HARNESS_REFINE_SUMMARY_MAX_CHARS,
 };
+pub use reminder::{
+    authorize_reminder_message_in_tx, clamp_reminder_list_limit, complete_reminder_in_tx,
+    create_reminder_in_tx, delete_reminder_in_tx, get_own_reminder_in_tx, list_reminders_in_tx,
+    normalize_reminder_note, parse_reminder_list_state, reminder_due_at_from_ms,
+    snooze_reminder_in_tx, MessageReminder, ReminderDueInvalid, ReminderListState,
+    ReminderNoteInvalid, ReminderStateInvalid, ReminderTarget, REMINDER_LIST_LIMIT_DEFAULT,
+    REMINDER_LIST_LIMIT_MAX, REMINDER_NOTE_MAX_CHARS,
+};
 pub use search::{
     clamp_search_limit, decode_search_cursor, encode_search_cursor, literal_like_pattern,
     normalize_query, search_messages, SearchCursor, SearchHit, SearchPage, SearchRequestInvalid,
-    SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+    SearchScope, SEARCH_LIMIT_DEFAULT, SEARCH_LIMIT_MAX, SEARCH_QUERY_MIN_CHARS,
+};
+pub use sidebar_prefs::{
+    get_sidebar_prefs_in_tx, set_sidebar_prefs_in_tx, validate_sidebar_prefs, SidebarPrefs,
+    SidebarPrefsInvalid, SidebarSection, StoredSidebarPrefs, CHANNEL_REF_MAX, SECTION_ID_MAX_CHARS,
+    SECTION_MAX, SECTION_NAME_MAX_CHARS, SECTION_SORT_MAX_CHARS, SIDEBAR_PREFS_VERSION,
 };
 pub use workspace_avatar::{
     create_pending_avatar_upload_in_tx, load_avatar_media_in_tx, read_current_avatar_media_in_tx,
