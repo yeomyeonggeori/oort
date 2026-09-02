@@ -199,6 +199,42 @@ async fn seed_human(
     }
 }
 
+async fn seed_agent(su: &PgPool, workspace: Uuid, owner: Uuid) -> Uuid {
+    let agent = Uuid::new_v4();
+    let handle = format!("agent-{}", &agent.to_string()[..8]);
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle) \
+         VALUES ($1, $2, 'agent', $3, $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(&handle)
+    .execute(su)
+    .await
+    .expect("seed agent member");
+    sqlx::query(
+        "INSERT INTO agent (member_id, workspace_id, model, base_url, \
+                            max_concurrent_runs, max_run_steps, owner_human_id) \
+         VALUES ($1, $2, 'hermes-agent', 'https://gateway.invalid/v1', 2, 50, $3)",
+    )
+    .bind(agent)
+    .bind(workspace)
+    .bind(owner)
+    .execute(su)
+    .await
+    .expect("seed agent");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) \
+         VALUES ($1, $2, 'member')",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .execute(su)
+    .await
+    .expect("seed agent workspace membership");
+    agent
+}
+
 async fn seed_channel_membership(
     su: &PgPool,
     workspace: Uuid,
@@ -1062,4 +1098,73 @@ async fn channel_member_who_is_channel_admin_can_change_a_lower_label() {
     assert_eq!(status, 200, "{body}");
     assert_eq!(body["scope"], "channel");
     assert_eq!(body["role"], "member");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn owner_cannot_change_an_agent_workspace_role_including_noop_member() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app_pool = momo_app_pool().await;
+    let tenant = seed_matrix_tenant(&su, "agent-role").await;
+    let agent = seed_agent(&su, tenant.workspace, tenant.owner.id).await;
+    let base = start_server(app_pool).await;
+    let http = reqwest::Client::new();
+    let owner = access_token(&http, &base, tenant.workspace, &tenant.owner).await;
+
+    for requested in ["admin", "owner", "guest", "member"] {
+        let (status, body) = send(
+            http.patch(format!(
+                "{base}/v1/workspaces/{}/members/{agent}/role",
+                tenant.workspace
+            ))
+            .bearer_auth(&owner)
+            .json(&json!({ "role": requested })),
+        )
+        .await;
+        assert_eq!(status, 403, "agent PATCH {requested}: {body}");
+        assert_eq!(
+            error_message(&body),
+            "agent roles are fixed to member",
+            "agent PATCH {requested} must keep one refusal surface"
+        );
+    }
+
+    let stored: String = sqlx::query_scalar(
+        "SELECT role::text FROM workspace_membership \
+          WHERE workspace_id = $1 AND member_id = $2",
+    )
+    .bind(tenant.workspace)
+    .bind(agent)
+    .fetch_one(&su)
+    .await
+    .expect("agent workspace role");
+    assert_eq!(
+        stored, "member",
+        "rejected PATCHes must not mutate the agent"
+    );
+
+    let promote = send(
+        http.patch(format!(
+            "{base}/v1/workspaces/{}/members/{}/role",
+            tenant.workspace, tenant.member.id
+        ))
+        .bearer_auth(&owner)
+        .json(&json!({ "role": "admin" })),
+    )
+    .await;
+    assert_eq!(promote.0, 200, "{}", promote.1);
+    assert_eq!(promote.1["role"], "admin");
+
+    let demote = send(
+        http.patch(format!(
+            "{base}/v1/workspaces/{}/members/{}/role",
+            tenant.workspace, tenant.member.id
+        ))
+        .bearer_auth(&owner)
+        .json(&json!({ "role": "member" })),
+    )
+    .await;
+    assert_eq!(demote.0, 200, "{}", demote.1);
+    assert_eq!(demote.1["role"], "member");
 }

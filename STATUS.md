@@ -136,6 +136,40 @@
 
 - #1825 세션 스코프 셰임이 생성자 config만 리라이트해 livekit-client의 빈 ctor → `setConfiguration(JoinResponse ICE)` 주입을 놓침. `RTCPeerConnection.prototype.setConfiguration`을 같은 host-게이트로 인터셉트. 생성자 경로·복원 시점(세션 종료)·Cloud/직결 무발동 유지. 새 플래그 없음.
 - red proof: 빈 ctor + setConfiguration `turns:<host>:443` → `getConfiguration()` 8443. 복원 후 무변환. Cloud/host 불일치 무발동. 실브라우저 왕복은 오케스트레이터 이월(`runtime-unverified`).
+## mark-unread 신호 서버 절반 (#1934 / BT-6, ADR-0178, 2026-09-02)
+
+- `read_state.marked_unread_before_seq` nullable bigint (085). `schema_v0.sql` 무접촉. `last_read_seq` GREATEST 불변(D1). 서버는 마크를 `unread_count`에 접지 않음(D3 합성은 momo-core 단일점).
+- `PUT …/read-state` 본문 가산: `mark_unread_before_seq`(채널 실존 seq, 미래·비존재 400) + `read_intent` enum `[explicit_open, background]` (optional, default=background, D6). explicit_open만 같은 tx에서 마크 삭제. 구식/백그라운드 광고는 마크 불변.
+- GET/list·realtime payload에 `marked_unread_before_seq` 항상 존재(미표시는 `null`). red proof: `mark_unread_conformance_pg` + `d2_b12_2b`. 클라 절반은 별 PR.
+
+## 커스텀 멤버 상태 REST (#1889 / BF-B2 서버 절반, 2026-08-30)
+
+- `member`에 nullable 3필드(083): `status_emoji`(≤32 스칼라)·`status_text`(trim ≤80)·`status_expires_at`. `schema_v0.sql` 무접촉. RLS는 기존 `member` ws_isolation 승계.
+- 같은 `PUT/GET /v1/workspaces/{ws}/presence` 바디 확장(형제 엔드포인트 없음 — 경로에 memberId가 없고 브로드캐스트가 이미 `type: presence` `ch:` 레일). omit=유지, JSON null=지우기. 만료는 읽기에서 무시(지연 삭제, 잡 없음). 사람만. 무감사(기존 프레즌스 PUT 관례).
+- red proof: `custom_status_conformance_pg`. 클라 절반은 A-42(프리셋 칩: 회의 중/이동 중/병가/휴가/재택).
+
+## 메시지 리마인더 REST (#1888 / BF-B1 서버 절반, 2026-08-30)
+
+- `message_reminder`(082): id/workspace/member/channel/message/due_at/note≤500/completed_at. RLS FORCE 소유자 스코프(`app.workspace_id` + `app.member_id`). pending due 인덱스. `schema_v0.sql` 무접촉. **outbox 팬아웃 없음**(ADR-0175 v1=클라 폴링).
+- 사람 본인 CRUD: `POST/GET/PATCH/DELETE /v1/workspaces/{ws}/reminders`. 과거 due 400, 타인 404, 비멤버 채널 403, 에이전트 403. 감사 `reminder.created/updated/completed/deleted`.
+- red proof: `reminder_conformance_pg`. 클라 절반은 A-41.
+
+## 자기 표시 이름 변경 REST (#1873 / BZ-4e, 2026-08-29)
+
+- `PATCH /v1/workspaces/{ws}/members/me` `{displayName}` — 사람 본인만. 정규화는 join의 `normalized_join_display_name`(400 `displayName is required`). 에이전트 자격은 allow-list 밖 403 + `require_human`. 핸들·역할·아바타 무접촉.
+- 단일 쓰기경로: tenant tx에서 `member.display_name`+`updated_at` UPDATE, audit `member.renamed`, 프레즌스 동형 `member.renamed` outbox를 본인 `ch:` 채널에만. 응답은 login/join `Member` 봉투.
+- red proof: `self_rename_conformance_pg` 본인 200+roster·정규화 400·에이전트 403·타 WS/비멤버 403·감사·outbox. `schema_v0.sql` 비접촉.
+
+## 에이전트 workspace role 변경 서버 거부 (#1857, 2026-08-28)
+
+- `change_workspace_role_in_tx`가 target `member.kind=agent`면 requested 값과 무관하게 403 `agent roles are fixed to member`. no-op(`member`)도 같은 문장. 사람 승격/강등·last-owner·self-manage 불변.
+- 채널 role(`change_channel_role_in_tx`)·suspend/remove는 비접촉. 클라 문장 매핑 없음(#1855가 컨트롤을 숨김).
+- red proof: `membership_lifecycle_conformance_pg` 에이전트 4역할 거부 + 사람 왕복, 단위 테스트는 variant 문장/HTTP 403.
+
+## 로컬 허들 node_ip 노브 (#1856a / #1856, 2026-08-28)
+
+- huddle LiveKit entrypoint가 `MOMO_LIVEKIT_NODE_IP`가 있으면 `--node-ip`를 붙인다. 비면 자동 감지(기존 배치 무영향).
+- 셀프호스트 생성 env만 `127.0.0.1` 기본. 기존 env 소급 주입 없음. VM TURN relay 페어는 #1856에 남음.
 
 ## generic 자격 메시지 읽기 REST (#1820 / ADR-0173, 2026-08-28)
 

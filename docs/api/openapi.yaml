@@ -74,6 +74,13 @@ tags:
       password — first-owner bootstrap or operator-issued password reset.
   - name: roster
     description: Workspace member roster.
+  - name: presence
+    description: >
+      ADR-0160 declared presence (auto/away/dnd) plus ADR-0176 custom status
+      (emoji + text + optional expiry). Human-only; the path names no member
+      id. Changes ride the existing `type: presence` channel broadcast.
+  - name: membership
+    description: Caller-scoped membership writes (self-leave, self display name).
   - name: membership-admin
     description: ADR-0128 workspace/channel roles, suspension, removal, and bans.
   - name: agents
@@ -101,6 +108,16 @@ tags:
     description: Workspace-admin signed outbound event webhook subscriptions.
   - name: messages
     description: Channel messages — the single write path (REST -> PG -> outbox).
+  - name: reminders
+    description: >
+      ADR-0175 personal message reminders (later-alert). Human-only owner CRUD.
+      v1 has no outbox fan-out — clients poll the list.
+  - name: sidebar
+    description: >
+      ADR-0177 member-owned sidebar organization — custom sections, channel
+      placement and stars, roamed per member. Human-only; no outbox fan-out in
+      v1 (other devices converge on the bootstrap GET). Collapse state stays on
+      the device (D4).
   - name: unfurls
     description: >
       ADR-0170 link unfurl server surface. Workspace on/off, message-level
@@ -719,6 +736,91 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/workspaces/{workspaceId}/presence:
+    get:
+      tags: [presence]
+      operationId: getPresenceStatus
+      summary: Read the caller's own declared presence and custom status.
+      description: >
+        ADR-0160 ③ plus ADR-0176. Human bearer only. The member is the
+        credential's — the path has no `memberId`. Custom-status fields are
+        omitted when unset, empty, or `statusExpiresAtMs` has been reached
+        (lazy delete; no sweeper job). Availability and the effective dot are
+        not here.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's durable declared status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer (presence is human-only).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: No live human presence for this member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [presence]
+      operationId: setPresenceStatus
+      summary: Set the caller's own declared presence and optional custom status.
+      description: >
+        Same PUT as ADR-0160. `status` remains required (`auto`/`away`/`dnd`).
+        Optional `statusEmoji` / `statusText` / `statusExpiresAtMs` are a
+        per-key patch — omitted leaves the stored value, JSON null clears,
+        a value sets. Trimmed text is at most 80 characters; emoji is a
+        length/code-point cap (≤32 scalars), not a strict emoji classifier.
+        All three null clears the custom status. Broadcasts on the existing
+        `type: presence` `ch:` rail. No audit row (personal intent; the
+        original presence PUT was unaudited).
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetPresenceRequest"
+      responses:
+        "200":
+          description: Stored declared status (custom fields omitted when empty/expired).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PresenceStatusResponse"
+        "400":
+          description: Invalid status, overlong text/emoji, or unrepresentable expiry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, or not a live member of this workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
   /v1/workspaces/{workspaceId}/members/{memberId}/role:
     patch:
       tags: [membership-admin]
@@ -830,6 +932,50 @@ paths:
         "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/members/me:
+    patch:
+      tags: [membership]
+      operationId: renameSelfMember
+      summary: Change the caller's own display name.
+      description: >
+        #1873 / BZ-4e. Human active members only. Body is `{displayName}`
+        (camelCase, closed world). Normalization reuses the join rule
+        (`normalized_join_display_name`: trimmed, 1..100 chars); a violation
+        is 400 `displayName is required`. Handle, role, and avatar are not
+        writable here. Agent bearers are 403 — an agent's display name is
+        the agent profile path. Writes `member.display_name` and `updated_at`
+        in one tenant transaction with audit `member.renamed` and a
+        `member.renamed` outbox broadcast per co-member channel (presence
+        fan-out shape; no new rail).
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenameSelfMemberRequest"
+      responses:
+        "200":
+          description: Display name updated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SelfMemberResponse"
+        "400":
+          description: displayName failed join normalization (empty or longer than 100 chars after trim).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Caller is not a human live member of this workspace, or presented
+            an agent bearer (not on the agent-route allow-list).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     delete:
       tags: [membership]
       operationId: leaveWorkspace
@@ -1983,6 +2129,296 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Active human membership required.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/members/me/sidebar-prefs:
+    get:
+      tags: [sidebar]
+      operationId: getSidebarPrefs
+      summary: Read the caller's own sidebar organization.
+      description: >
+        ADR-0177 D1/D2. The signed-in member's custom sidebar sections, the
+        channels they placed in each, and their starred channels — never a
+        memberId from the request. A member who has never saved reads the empty
+        v1 default (`{version:1, sections:[], starredChannelIds:[]}`) rather than
+        a 404, so the client bootstraps down one path. Human-only: an agent has
+        no sidebar. Collapse state is NOT here — ADR-0177 D4 keeps it on the
+        device.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The caller's stored sidebar prefs, or the empty v1 default.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidebarPrefsResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required (agent bearers are refused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    put:
+      tags: [sidebar]
+      operationId: updateSidebarPrefs
+      summary: Replace the caller's own sidebar organization.
+      description: >
+        ADR-0177 D3. Replaces the whole payload; this is not a patch. The server
+        validates shape and size only — at most 50 sections, section names at
+        most 80 **characters**, at most 500 channel references across the whole
+        payload, and `version` must be 1. Channel membership is deliberately NOT
+        verified: a section may name a channel the member has left or one that
+        was deleted, and the client filters dead ids at render time (tolerant
+        contract, ADR-0177 D3). No event is emitted (D2) — other devices
+        converge on their next bootstrap GET.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateSidebarPrefsRequest"
+      responses:
+        "200":
+          description: The stored sidebar prefs.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SidebarPrefsResponse"
+        "400":
+          description: A cap or the payload version was violated.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Active human membership required (agent bearers are refused).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: The body is not a sidebar-prefs payload (unknown or missing key).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/reminders:
+    post:
+      tags: [reminders]
+      operationId: createMessageReminder
+      summary: Create a personal reminder on a channel message.
+      description: >
+        ADR-0175 / #1888. Human bearer only. The target message must live in
+        `channelId` and the caller must be a current channel member. `dueAtMs`
+        in the past is 400. v1 does not emit outbox — expiry is a client poll.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateReminderRequest"
+      responses:
+        "201":
+          description: Reminder stored and audited.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderResponse"
+        "400":
+          description: Invalid body, unknown field, or dueAtMs not in the future.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer, inactive membership, or not a channel member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Message not found in the named channel.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    get:
+      tags: [reminders]
+      operationId: listMessageReminders
+      summary: List the caller's own reminders, soonest due first.
+      description: >
+        Owner-scoped. `state=pending` (default) hides completed rows; `state=all`
+        returns both. Keyset pagination over `(due_at, id)` via `cursor` =
+        the previous page's last reminder id.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: state
+          in: query
+          schema:
+            type: string
+            enum: [pending, all]
+            default: pending
+        - name: cursor
+          in: query
+          schema:
+            type: string
+            format: uuid
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        "200":
+          description: The caller's reminder page.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderListResponse"
+        "400":
+          description: Invalid state or cursor.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}/reminders/{reminderId}:
+    patch:
+      tags: [reminders]
+      operationId: updateMessageReminder
+      summary: Snooze a reminder or mark it complete.
+      description: >
+        Body is `{dueAtMs}` (snooze) or `{completed: true}`. Both, neither, or
+        `completed: false` is 400. Snoozing a completed row is 409. A reminder
+        that is not the caller's answers 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateReminderRequest"
+      responses:
+        "200":
+          description: Updated reminder.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReminderResponse"
+        "400":
+          description: Invalid body, unknown field, or dueAtMs not in the future.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reminder not found for this caller.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Completed reminder cannot be rescheduled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+    delete:
+      tags: [reminders]
+      operationId: deleteMessageReminder
+      summary: Delete the caller's reminder.
+      description: Owner only. A reminder that is not the caller's answers 404.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - name: reminderId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Reminder deleted and audited.
+        "400":
+          description: Invalid reminder id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Agent bearer or inactive membership.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Reminder not found for this caller.
           content:
             application/json:
               schema:
@@ -4326,6 +4762,10 @@ paths:
         caller has left. Ordering is newest first by created time, then channel
         sequence; the opaque cursor preserves that keyset across new inserts.
         Search is limited to 30 requests per authenticated member per minute.
+        `channel` narrows the search to one channel the caller belongs to
+        (#1931); its absence is the workspace-wide search this route has always
+        been. The cursor carries the scope it was minted under, so a page cannot
+        be resumed against a different one.
       security:
         - bearerAuth: []
       parameters:
@@ -4347,7 +4787,19 @@ paths:
           in: query
           schema:
             type: string
-          description: Opaque keyset cursor returned as `nextCursor`.
+          description: >
+            Opaque keyset cursor returned as `nextCursor`. It is bound to the
+            scope that produced it: replaying a `channel`-scoped cursor without
+            `channel` (or against another channel) is a 400, not a wider page.
+        - name: channel
+          in: query
+          schema:
+            type: string
+            format: uuid
+          description: >
+            Optional channel scope (#1931). A blank value is the workspace
+            scope; a channel the caller is not a member of — and one that does
+            not exist — are the same 404.
       responses:
         "200":
           description: Membership-filtered message search page.
@@ -4356,7 +4808,9 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceMessageSearchResponse"
         "400":
-          description: Query shorter than two characters or malformed cursor.
+          description: >
+            Query shorter than two characters, malformed cursor, malformed
+            `channel`, or a cursor replayed under a different scope.
           content:
             application/json:
               schema:
@@ -4365,6 +4819,15 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Workspace scope mismatch.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            The named `channel` is not one the caller may read. A channel that
+            does not exist answers identically, so the pair is not a membership
+            oracle.
           content:
             application/json:
               schema:
@@ -5104,8 +5567,12 @@ paths:
       description: >
         Monotonic: the effective cursor is
         `max(current, min(requested, latestSeq))` — it never moves backward
-        and never beyond the channel head. The cursor owner is always the
-        authenticated principal; no member id is accepted in the body.
+        and never beyond the channel head (ADR-0109, ADR-0178 D1). The
+        cursor owner is always the authenticated principal; no member id is
+        accepted in the body. Optional `mark_unread_before_seq` sets the
+        mark-unread signal (D5); optional `read_intent` (`explicit_open` or
+        `background`, default `background`) is the D6 discriminator that
+        decides whether this advertisement clears the mark.
       security:
         - bearerAuth: []
       parameters:
@@ -5125,7 +5592,10 @@ paths:
               schema:
                 $ref: "#/components/schemas/ReadState"
         "400":
-          description: last_read_seq must be non-negative, or invalid ids.
+          description: >
+            last_read_seq must be non-negative; mark_unread_before_seq must
+            name a message that already exists in this channel; read_intent
+            must be explicit_open or background; or the ids are invalid.
           content:
             application/json:
               schema:
@@ -7228,6 +7698,24 @@ components:
           type: string
           description: Replacement password, at most 1024 chars, must differ.
 
+    RenameSelfMemberRequest:
+      type: object
+      additionalProperties: false
+      required: [displayName]
+      properties:
+        displayName:
+          type: string
+          description: >
+            1..100 chars after trimming. Same rule and 400 sentence as join
+            (`displayName is required`). Handle/role/avatar are not accepted.
+
+    SelfMemberResponse:
+      type: object
+      required: [member]
+      properties:
+        member:
+          $ref: "#/components/schemas/Member"
+
     PasswordResetClaimResponse:
       type: object
       additionalProperties: false
@@ -7679,6 +8167,23 @@ components:
             offline otherwise); `away`/`dnd` are the two manual overrides.
             Absent for agents (presence is human-only, their liveness is
             agent_run) and absent from a server too old to carry the column.
+        statusEmoji:
+          type: string
+          description: >
+            ADR-0176 custom status emoji, human only. Omitted when unset, empty,
+            expired (`statusExpiresAtMs` reached — lazy delete), or for an agent.
+        statusText:
+          type: string
+          maxLength: 80
+          description: >
+            ADR-0176 custom status text (trimmed, ≤80), human only. Omitted when
+            unset, empty, expired, or for an agent.
+        statusExpiresAtMs:
+          type: integer
+          format: int64
+          description: >
+            ADR-0176 optional expiry as epoch milliseconds. Omitted when there is
+            no visible custom status (including when the stamp has been reached).
         createdAtMs:
           type: integer
           format: int64
@@ -7698,6 +8203,53 @@ components:
           type: integer
         agentCount:
           type: integer
+
+    SetPresenceRequest:
+      type: object
+      required: [status]
+      additionalProperties: false
+      properties:
+        status:
+          type: string
+          enum: [auto, away, dnd]
+          description: ADR-0160 declared presence. Required so a pre-0176 body still decodes.
+        statusEmoji:
+          type: string
+          nullable: true
+          maxLength: 32
+          description: >
+            ADR-0176. Omitted = leave stored value. JSON null = clear. Empty or
+            whitespace-only is stored as cleared. Length/code-point cap only.
+        statusText:
+          type: string
+          nullable: true
+          maxLength: 80
+          description: >
+            ADR-0176. Omitted = leave stored value. JSON null = clear. Trimmed;
+            empty becomes cleared. Over 80 characters is 400.
+        statusExpiresAtMs:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            ADR-0176 optional expiry. Omitted = leave stored value. JSON null =
+            clear. A reached stamp is accepted on write and ignored on read.
+
+    PresenceStatusResponse:
+      type: object
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [auto, away, dnd]
+        statusEmoji:
+          type: string
+        statusText:
+          type: string
+          maxLength: 80
+        statusExpiresAtMs:
+          type: integer
+          format: int64
 
     # ---- Membership lifecycle (ADR-0128) ------------------------------------
     ChangeMembershipRoleRequest:
@@ -8620,6 +9172,130 @@ components:
           type: boolean
         mentionOverridesMute:
           type: boolean
+
+    SidebarSection:
+      type: object
+      required: [id, name, order, channelIds]
+      additionalProperties: false
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 64
+          description: Client-minted section id, unique within the payload.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+          description: >
+            Section label, trimmed. The cap is 80 **characters**, not bytes — an
+            80-character Korean name is 240 bytes and is legal.
+        order:
+          type: integer
+          format: int32
+          description: The member's own ordering. The server never renumbers it.
+        channelIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: >
+            Channels the member placed in this section. NOT a membership list —
+            an id here may name a channel that no longer exists.
+
+    SidebarPrefs:
+      type: object
+      required: [version]
+      additionalProperties: false
+      properties:
+        version:
+          type: integer
+          enum: [1]
+          description: Payload version. Required; only 1 is accepted (ADR-0177 D3).
+        sections:
+          type: array
+          maxItems: 50
+          items:
+            $ref: "#/components/schemas/SidebarSection"
+        starredChannelIds:
+          type: array
+          items: {type: string, format: uuid}
+          description: >
+            BT-5 (#1933) owns the star UI; the schema accepts the field from
+            BT-4 so no migration is needed when that lands (ADR-0177 D5).
+        sectionSort:
+          type: string
+          maxLength: 32
+          description: >
+            Reserved for BT-5's A–Z / Recent sort. Round-tripped verbatim; the
+            server does not enumerate the values.
+
+    UpdateSidebarPrefsRequest:
+      type: object
+      required: [prefs]
+      additionalProperties: false
+      properties:
+        prefs:
+          $ref: "#/components/schemas/SidebarPrefs"
+
+    SidebarPrefsResponse:
+      type: object
+      required: [prefs]
+      properties:
+        prefs:
+          $ref: "#/components/schemas/SidebarPrefs"
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: >
+            When the row was last written. Omitted for a member who has never
+            saved. Observability, not a concurrency token — v1 is
+            last-write-wins between the member's own devices.
+
+    CreateReminderRequest:
+      type: object
+      required: [channelId, messageId, dueAtMs]
+      additionalProperties: false
+      properties:
+        channelId: {type: string, format: uuid}
+        messageId: {type: string, format: uuid}
+        dueAtMs: {type: integer, format: int64}
+        note: {type: string, maxLength: 500}
+
+    UpdateReminderRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        dueAtMs: {type: integer, format: int64}
+        completed: {type: boolean}
+
+    Reminder:
+      type: object
+      required: [id, workspaceId, memberId, channelId, messageId, dueAtMs, createdAtMs, updatedAtMs]
+      properties:
+        id: {type: string, format: uuid}
+        workspaceId: {type: string, format: uuid}
+        memberId: {type: string, format: uuid}
+        channelId: {type: string, format: uuid}
+        messageId: {type: string, format: uuid}
+        dueAtMs: {type: integer, format: int64}
+        note: {type: string}
+        completedAtMs: {type: integer, format: int64}
+        createdAtMs: {type: integer, format: int64}
+        updatedAtMs: {type: integer, format: int64}
+
+    ReminderResponse:
+      type: object
+      required: [reminder]
+      properties:
+        reminder: {$ref: "#/components/schemas/Reminder"}
+
+    ReminderListResponse:
+      type: object
+      required: [reminders]
+      properties:
+        reminders:
+          type: array
+          items: {$ref: "#/components/schemas/Reminder"}
+        nextCursor: {type: string, format: uuid}
 
     CreateChannelRequest:
       type: object
@@ -11065,10 +11741,37 @@ components:
           type: integer
           format: int64
           minimum: 0
+        mark_unread_before_seq:
+          type: integer
+          format: int64
+          minimum: 1
+          description: >
+            ADR-0178 D5. Set the mark-unread signal to this seq ("treat this
+            channel as unread from this seq onward, inclusive"). The seq must
+            already exist as a message in this channel; a future or unknown
+            seq is 400. Independent of last_read_seq — GREATEST on the cursor
+            is unchanged (D1). Absent on ordinary cursor advertisements.
+        read_intent:
+          type: string
+          enum: [explicit_open, background]
+          default: background
+          description: >
+            ADR-0178 D6. Why this advertisement was sent. `explicit_open`
+            (channel mount/switch, explicit "mark read") clears the mark in
+            the same transaction. `background` (the default, including when
+            the field is absent) never touches the mark — that is the safety
+            direction, so a stale replay from another device, or a client
+            that predates this field, cannot silently erase a mark.
 
     ReadState:
       type: object
-      required: [channel_id, last_read_seq, latest_seq, unread_count, mention_count]
+      required:
+        - channel_id
+        - last_read_seq
+        - latest_seq
+        - unread_count
+        - mention_count
+        - marked_unread_before_seq
       properties:
         channel_id:
           type: string
@@ -11082,8 +11785,21 @@ components:
         unread_count:
           type: integer
           format: int64
+          description: >
+            `latest_seq - last_read_seq`, floored at zero. The server does
+            not fold `marked_unread_before_seq` into this number (ADR-0178
+            D3 — composition lives in momo-core only).
         mention_count:
           type: integer
+        marked_unread_before_seq:
+          type: integer
+          format: int64
+          nullable: true
+          description: >
+            ADR-0178 D2. Inclusive seq from which this channel should be
+            treated as unread. Always present; JSON null when unmarked, so a
+            client can tell "no mark" from "this server is too old to have
+            the concept".
 
     ReadStateListResponse:
       type: object
