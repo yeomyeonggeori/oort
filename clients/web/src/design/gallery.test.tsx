@@ -191,9 +191,12 @@ describe("src/design/ui export 전수", () => {
     const exports = uiComponentExports();
     expect(exports.length).toBeGreaterThan(0);
     const host = renderGallery();
+    const root = host.ownerDocument ?? document;
     const missing = exports
       .map((entry) => entry.name)
-      .filter((name) => host.querySelector(`[data-gallery-export="${name}"]`) === null);
+      .filter(
+        (name) => root.querySelector(`[data-gallery-export="${name}"]`) === null
+      );
     expect(missing, `갤러리 누락: ${missing.join(", ")}`).toEqual([]);
   });
 

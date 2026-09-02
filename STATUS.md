@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
+
+- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy 등록. production dist 에 `design-gallery` 0건. `src/design/ui/` PascalCase export 전수 렌더 가드. hover/active/focus-visible 과 `data-preview` 는 `:is()` 한 몸.
+- 캡처 장면 `design-gallery-{light,dark}.png`. 세션·서버 불요. 새 명명 유틸리티 없음. runtime-unverified 아님(jsdom 렌더 + production grep + capture:design).
+- NOTES(DS-1 입력): busy 는 `aria-busy` 만(시각 유틸 없음). Card/Input/Select 패널은 hover 채움이 없음. press 는 Button 전용(행·칩은 DS-1).
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).

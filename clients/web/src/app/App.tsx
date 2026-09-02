@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
 import { useRestoredSession } from "@/app/session";
@@ -27,6 +27,28 @@ import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
 import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
 import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
+
+const DESIGN_GALLERY_ENABLED =
+  import.meta.env.MODE === "design" ||
+  import.meta.env.VITE_DESIGN_GALLERY === "1";
+
+const DesignGalleryPage = DESIGN_GALLERY_ENABLED
+  ? lazy(() => import("@/design/Gallery").then((mod) => ({ default: mod.Gallery })))
+  : null;
+
+function DesignGalleryRoute() {
+  if (!DesignGalleryPage) return null;
+  return (
+    <Route
+      path="design"
+      element={
+        <Suspense fallback={<SkeletonRows rows={4} className="p-6" />}>
+          <DesignGalleryPage />
+        </Suspense>
+      }
+    />
+  );
+}
 
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
@@ -72,6 +94,16 @@ export function App() {
   }
 
   if (!session) {
+    if (DESIGN_GALLERY_ENABLED) {
+      return (
+        <HashRouter>
+          <Routes>
+            {DesignGalleryRoute()}
+            <Route path="*" element={<ConnectPage onLoggedIn={signIn} />} />
+          </Routes>
+        </HashRouter>
+      );
+    }
     return <ConnectPage onLoggedIn={signIn} />;
   }
 
@@ -173,6 +205,7 @@ export function App() {
             }
           />
           <Route path="settings" element={<SettingsRoute />} />
+          {DesignGalleryRoute()}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

@@ -10246,6 +10246,38 @@ async function captureConsent(browser, scheme) {
   return shots;
 }
 
+async function captureDesignGallery(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await page.goto(`${ORIGIN}/#/design`, { waitUntil: "networkidle" });
+  const gallery = page.getByTestId("design-gallery");
+  await gallery.waitFor({ state: "visible" });
+  await page.evaluate((next) => {
+    document.documentElement.setAttribute("data-theme", next);
+    const node = document.querySelector("[data-testid=design-gallery]");
+    if (node) document.body.replaceChildren(node);
+    document.documentElement.style.height = "auto";
+    document.body.style.height = "auto";
+    document.body.style.overflow = "visible";
+  }, scheme);
+  await page.evaluate(() => document.fonts.ready);
+  const path = `${OUT_DIR}/design-gallery-${scheme}.png`;
+  await page.screenshot({
+    path,
+    fullPage: true,
+    animations: "disabled",
+    caret: "hide",
+  });
+  await page.close();
+  await context.close();
+  return [path];
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -10276,6 +10308,7 @@ async function main() {
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureDesignGallery(browser, scheme)));
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
           all.push(...(await captureMarkUnreadScenes(browser, scheme)));
