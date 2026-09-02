@@ -32,6 +32,18 @@ const ACTION_MENU_CODE = codeOnly(
   readFileSync(new URL("./channelActions.tsx", import.meta.url), "utf8")
 );
 
+describe("explicit_open 광고 재시도 (M-1)", () => {
+  it("advertisedChannelRef 는 PUT 성공 뒤에만 고정한다", () => {
+    const effect = SHELL_CODE.slice(
+      SHELL_CODE.indexOf("channelReadAdvertisementReason")
+    );
+    const thenAt = effect.indexOf(".then(");
+    const assignAt = effect.indexOf("advertisedChannelRef.current = channelId");
+    expect(thenAt).toBeGreaterThan(0);
+    expect(assignAt).toBeGreaterThan(thenAt);
+  });
+});
+
 describe("BZ-2 channel header is one title row", () => {
   it("does not keep the topic in the always-visible header", () => {
     expect(SHELL_CODE).not.toMatch(/ChannelTopicControl/);

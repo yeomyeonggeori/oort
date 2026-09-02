@@ -10,13 +10,15 @@ import {
   type WorkSession,
 } from "@momo/core/lib/api";
 import {
-  composedUnreadCount,
-  unreadDividerCursorSeq,
-} from "@momo/core/features/readState/model";
-import {
   advertiseReadState,
   channelReadAdvertisementReason,
 } from "@/features/chat/advertiseReadState";
+import {
+  foldInVisitMark,
+  freezeOpenedRead,
+  timelineUnreadFromOpened,
+  type OpenedReadSnapshot,
+} from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -207,54 +209,52 @@ export function ChatShell() {
     stressCount > 0 ? null : channelId
   );
 
-  // Unread boundary is the cursor as it stood when the channel was OPENED:
-  // advancing the cursor below must not erase the divider under the reader.
-  const [openedWith, setOpenedWith] = useState<{
-    channelId: string;
-    lastReadSeq: number | null;
-    unreadCount: number;
-  } | null>(null);
+  // Unread boundary is the row as it stood when the channel was OPENED
+  // (cursor AND mark). Advancing the cursor, or the open's own
+  // explicit_open clearing the server mark, must not erase the divider
+  // under the reader for this visit (P7, #1934 B-1).
+  const [openedWith, setOpenedWith] = useState<OpenedReadSnapshot | null>(
+    null
+  );
+  const [frozenFor, setFrozenFor] = useState<string | null>(null);
   const markedRef = useRef<string | null>(null);
   const advertisedChannelRef = useRef<string | null>(null);
+
+  if (
+    channelId !== null &&
+    (frozenFor === null || !uuidEq(frozenFor, channelId))
+  ) {
+    setFrozenFor(channelId);
+    setOpenedWith(
+      freezeOpenedRead(channelId, unreadFor(readStates.byChannel, channelId))
+    );
+  }
 
   useEffect(() => {
     if (channelId === null) return;
     const read = unreadFor(readStates.byChannel, channelId);
     setOpenedWith((current) => {
-      if (current && uuidEq(current.channelId, channelId)) return current;
-      if (!read) return { channelId, lastReadSeq: null, unreadCount: 0 };
-      return {
-        channelId,
-        lastReadSeq: read.lastReadSeq,
-        unreadCount: read.unreadCount,
-      };
+      if (!current || !uuidEq(current.channelId, channelId)) return current;
+      if (
+        current.lastReadSeq === null &&
+        read &&
+        advertisedChannelRef.current !== channelId
+      ) {
+        return freezeOpenedRead(channelId, read);
+      }
+      return foldInVisitMark(current, read);
     });
   }, [channelId, readStates.byChannel]);
-
-  const liveMark =
-    channelId === null
-      ? null
-      : (unreadFor(readStates.byChannel, channelId)?.markedUnreadBeforeSeq ??
-        null);
 
   const timelineUnread = useMemo(() => {
     if (
       !openedWith ||
-      openedWith.lastReadSeq === null ||
       (channelId !== null && !uuidEq(openedWith.channelId, channelId))
     ) {
       return { lastReadSeq: null as number | null, unreadCount: 0 };
     }
-    const frozen = {
-      lastReadSeq: openedWith.lastReadSeq,
-      latestSeq: openedWith.lastReadSeq + openedWith.unreadCount,
-      markedUnreadBeforeSeq: liveMark,
-    };
-    return {
-      lastReadSeq: unreadDividerCursorSeq(frozen),
-      unreadCount: composedUnreadCount(frozen),
-    };
-  }, [openedWith, channelId, liveMark]);
+    return timelineUnreadFromOpened(openedWith);
+  }, [openedWith, channelId]);
 
   // Advance the server read cursor once history is on screen (P7: the server
   // owns unread, so the client reports a position instead of counting).
@@ -273,6 +273,8 @@ export function ChatShell() {
   const newestSeq = timeline.state.newestSeq;
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
+    if (readStates.isPending) return;
+    if (!openedWith || !uuidEq(openedWith.channelId, channelId)) return;
     const key = `${channelId}:${newestSeq}`;
     if (markedRef.current === key) return;
     markedRef.current = key;
@@ -280,13 +282,23 @@ export function ChatShell() {
       advertisedChannelRef.current,
       channelId
     );
-    advertisedChannelRef.current = channelId;
     advertiseReadState(workspaceId, channelId, newestSeq, reason)
-      .then(() => invalidateReadStates())
+      .then(() => {
+        advertisedChannelRef.current = channelId;
+        invalidateReadStates();
+      })
       .catch(() => {
         if (markedRef.current === key) markedRef.current = null;
       });
-  }, [workspaceId, channelId, newestSeq, stressCount, invalidateReadStates]);
+  }, [
+    workspaceId,
+    channelId,
+    newestSeq,
+    stressCount,
+    invalidateReadStates,
+    openedWith,
+    readStates.isPending,
+  ]);
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
