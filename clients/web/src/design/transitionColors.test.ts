@@ -40,13 +40,17 @@ const CORE_PROPERTIES = [
 ] as const;
 
 /** `@import "tailwindcss"` 를 디스크에서 실제로 읽어 준다. */
-async function loadStylesheet() {
-  const path = require_.resolve("tailwindcss/index.css");
-  return {
-    path,
-    base: dirname(path),
-    content: readFileSync(path, "utf8"),
-  };
+async function loadStylesheet(id: string, base: string) {
+  if (id === "tailwindcss") {
+    const path = require_.resolve("tailwindcss/index.css");
+    return {
+      path,
+      base: dirname(path),
+      content: readFileSync(path, "utf8"),
+    };
+  }
+  const path = id.startsWith(".") ? `${base}/${id.replace(/^\.\//, "")}` : id;
+  return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
 async function buildCss(source: string, candidates: string[]): Promise<string> {
