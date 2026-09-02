@@ -1,6 +1,6 @@
 # ADR-0180: 기기 연결 — 1회용 QR 링크 토큰으로 폰 세션 발급
 
-- 상태: **Proposed** (2026-09-02 기안 Fable — 성재 결재 대기. 2026-09-02 모바일 발제 "QR만 찍으면 연동, iOS 전용" + 편성 D-10)
+- 상태: **Accepted** (2026-09-02 성재 결재 — "2~5까지는 승인". 기안 Fable 같은 날 2026-09-02 모바일 발제 "QR만 찍으면 연동, iOS 전용" + 편성 D-10)
 - 발제: `docs/planning/2026-09-02-launch-program-plan.md` §6 M0 / 브리프 §3 UX-R2
 - 관련: ADR-0162(hosted pairing — 15분 1회용 pairing 값 선례) · ADR-0166(첫 소유자 claim token — 1회용·TTL·소비 시 무효 선례) · ADR-0004(자격 비유입) · ADR-0167(same-origin·`--public-origin`) · ADR-0120(푸시 — `devices` 라우트는 푸시 등록용, 본 ADR 비접촉) · `docs/onboarding-deeplink.md`(`oort://join` 정본) · buzz `desktop/src-tauri/src/commands/pairing.rs`(NIP-AB: QR→SAS→릴레이 신원 전송)
 
