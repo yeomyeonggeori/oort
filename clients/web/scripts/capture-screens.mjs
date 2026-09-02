@@ -8488,6 +8488,87 @@ async function captureTerminalDockScenes(browser, scheme) {
  */
 const MARK_UNREAD_SEQ = 1408;
 const MARK_UNREAD_LATEST = 1416;
+const ENGINE_ID = CHANNELS[1].id;
+
+async function waitForScrollerAlignSettled(page, label) {
+  await page.evaluate(`(() => {
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return;
+    scroller.removeAttribute("data-capture-scroll-top");
+    scroller.removeAttribute("data-capture-stable-frames");
+  })()`);
+  try {
+    await page.waitForFunction(
+      `(() => {
+        const scroller =
+          document.querySelector("[data-virtuoso-scroller]") ||
+          document.querySelector('[data-testid="timeline-virtuoso"]');
+        if (!scroller) return false;
+        const top = String(scroller.scrollTop);
+        const prev = scroller.getAttribute("data-capture-scroll-top");
+        const frames = Number(
+          scroller.getAttribute("data-capture-stable-frames") || "0"
+        );
+        if (prev === top) {
+          const next = frames + 1;
+          scroller.setAttribute("data-capture-stable-frames", String(next));
+          return next >= 2;
+        }
+        scroller.setAttribute("data-capture-scroll-top", top);
+        scroller.setAttribute("data-capture-stable-frames", "0");
+        return false;
+      })()`,
+      { polling: "raf", timeout: 15_000 }
+    );
+  } catch (error) {
+    throw new Error(
+      `타임라인 정렬이 끝나지 않는다 ${label}: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+function markUnreadProofExpr() {
+  return `(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    const divider = document.querySelector('[data-testid="unread-divider"]');
+    if (!scroller || !row || !divider) return null;
+    const s = scroller.getBoundingClientRect();
+    const d = divider.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    if (d.height <= 0 || r.height <= 0) return null;
+    if (d.bottom < s.top || d.top > s.bottom) return null;
+    if (r.bottom < s.top || r.top > s.bottom) return null;
+    if (d.bottom - r.top > 8 || r.top - d.bottom > 24) return null;
+    const active = document.activeElement;
+    if (!(active instanceof Element) || !row.contains(active)) return null;
+    const pill = document.querySelector('[data-testid="jump-unread"]');
+    const pillRect = pill ? pill.getBoundingClientRect() : null;
+    const pillVisible = Boolean(
+      pillRect &&
+        pillRect.height > 0 &&
+        pillRect.bottom > s.top &&
+        pillRect.top < s.bottom
+    );
+    return {
+      dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
+      pillVisible,
+      pillText: pillVisible
+        ? (pill.textContent || "").replace(/\\s+/g, " ").trim()
+        : "",
+      dividerBottom: Math.round(d.bottom),
+      rowTop: Math.round(r.top),
+      focus: active.getAttribute("data-testid"),
+    };
+  })()`;
+}
 
 function markUnreadReadStates(cleared) {
   return READ_STATES.map((row) =>
@@ -8542,6 +8623,13 @@ async function captureMarkUnreadScenes(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
   await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} open`);
+  await page.evaluate(`location.hash = "/c/${ENGINE_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} 엔진`);
+  await page.evaluate(`location.hash = "/c/${GENERAL_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} general`);
   await page.waitForFunction(`(() => {
     const seq = ${MARK_UNREAD_SEQ};
     const scroller =
@@ -8555,12 +8643,16 @@ async function captureMarkUnreadScenes(browser, scheme) {
       return false;
     }
     const box = row.getBoundingClientRect();
-    if (box.height <= 0 || box.top < 80 || box.bottom > window.innerHeight - 80) {
+    const root = scroller
+      ? scroller.getBoundingClientRect()
+      : { top: 0, bottom: window.innerHeight };
+    if (box.height <= 0 || box.top < root.top + 8 || box.bottom > root.bottom - 8) {
       row.scrollIntoView({ block: "center" });
       return false;
     }
     return true;
   })()`);
+  await waitForScrollerAlignSettled(page, `${scheme} centre 1408`);
   const marked = page.locator(
     `[data-testid="timeline-message"][data-seq="${MARK_UNREAD_SEQ}"]`
   );
@@ -8573,31 +8665,11 @@ async function captureMarkUnreadScenes(browser, scheme) {
     throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
   }
   await markItem.click();
-  const proof = await page.waitForFunction(`(() => {
-    const seq = ${MARK_UNREAD_SEQ};
-    const row = document.querySelector(
-      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
-    );
-    const divider = document.querySelector('[data-testid="unread-divider"]');
-    if (!row || !divider) return null;
-    const d = divider.getBoundingClientRect();
-    const r = row.getBoundingClientRect();
-    if (d.height <= 0 || r.height <= 0) return null;
-    if (d.top < 0 || r.bottom > window.innerHeight) return null;
-    if (d.bottom - r.top > 8 || r.top - d.bottom > 24) return null;
-    const pill = document.querySelector('[data-testid="jump-unread"]');
-    const pillRect = pill ? pill.getBoundingClientRect() : null;
-    const pillVisible = Boolean(
-      pillRect && pillRect.height > 0 && pillRect.bottom > 0 && pillRect.top < window.innerHeight
-    );
-    return {
-      dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
-      pillVisible,
-      pillText: pillVisible ? (pill.textContent || "").replace(/\\s+/g, " ").trim() : "",
-      dividerBottom: Math.round(d.bottom),
-      rowTop: Math.round(r.top),
-    };
-  })()`);
+  await waitForScrollerAlignSettled(page, `${scheme} after mark`);
+  const proof = await page.waitForFunction(markUnreadProofExpr(), {
+    polling: "raf",
+    timeout: 15_000,
+  });
   const state = await proof.jsonValue();
   if (!state || !state.dividerText.includes("새 메시지")) {
     throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
@@ -8610,6 +8682,15 @@ async function captureMarkUnreadScenes(browser, scheme) {
     throw new Error(
       `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
     );
+  }
+  const still = await page.evaluate(markUnreadProofExpr());
+  if (!still || still.dividerText !== state.dividerText) {
+    throw new Error(
+      `마크 캡처 ${scheme}: 스크린샷 직전 구분선이 사라졌다 ${JSON.stringify(still)}`
+    );
+  }
+  if (!still.focus) {
+    throw new Error(`마크 캡처 ${scheme}: 포커스가 행을 떠났다`);
   }
   await assertComposerVisible(page, `mark-unread ${scheme}`);
   await assertNoHorizontalOverflow(page, `mark-unread ${scheme}`);
