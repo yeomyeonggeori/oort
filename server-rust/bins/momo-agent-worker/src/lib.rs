@@ -99,9 +99,11 @@ use momo_agent::tools::{
     ApprovalReason, ToolCall, ACTION_TYPE_TOOL_CALL, TOOL_AUDIT_SCHEMA, WORK_SESSION_SPAWN,
 };
 use momo_agent::{
-    approval_reason, consume_run_step_in_tx, finish_run_in_tx, lock_gateway_run_in_tx,
-    mark_run_started_in_tx, park_run_for_approval_in_tx, record_run_usage_in_tx,
-    GatewayRunSnapshot, RunStatus, RunUsageReport, AUDIT_APPROVAL_REQUESTED,
+    approval_reason, consume_run_step_in_tx, create_agent_run_in_tx, finish_run_in_tx,
+    lock_gateway_run_in_tx, mark_run_started_in_tx, park_run_for_approval_in_tx,
+    record_run_usage_in_tx, welcome_run_input, GatewayRunSnapshot, NewAgentRun, RunStatus,
+    RunTrigger, RunUsageReport, WelcomeKind, AUDIT_APPROVAL_REQUESTED, PROVIDER_REQUIRED_BODY,
+    WELCOME_AUDIT_PROVIDER_REQUIRED, WELCOME_AUDIT_SCHEMA,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::sqlx::postgres::PgListener;
@@ -115,8 +117,8 @@ use momo_outbox::{
     NOTIFY_CHANNEL,
 };
 use momo_settings::{
-    decrypt_link, read_link, reseal_link_credential, resolve_link, seal_bearer, LinkCredential,
-    OpenAiOAuthCredential, ProviderSource,
+    decrypt_link, is_unsafe_secret, read_link, reseal_link_credential, resolve_link, seal_bearer,
+    LinkCredential, OpenAiOAuthCredential, ProviderSource,
 };
 use serde_json::{json, Value};
 use tokio::sync::mpsc;
@@ -150,6 +152,16 @@ enum ToolDisposition {
     },
     /// G3's budget is spent. The loop stops here.
     StepExhausted,
+}
+
+/// ADR-0181 welcome job pre-flight: create the opener run, or post the static
+/// provider-required message without consuming the opener marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WelcomePrep {
+    Ready,
+    StaticPosted,
+    Failed,
+    Requeued,
 }
 
 /// What a `work.session.spawn` approval needs to know before it is raised.
@@ -481,7 +493,7 @@ impl AgentWorker {
     // -----------------------------------------------------------------------
 
     async fn process(&self, job: ClaimedAgentJob) -> Settlement {
-        let payload: AgentJobPayload = match serde_json::from_str(&job.payload) {
+        let mut payload: AgentJobPayload = match serde_json::from_str(&job.payload) {
             Ok(payload) => payload,
             Err(error) => {
                 // A malformed payload can never succeed. Failing it permanently
@@ -503,6 +515,15 @@ impl AgentWorker {
             channel_id = %payload.channel_id,
             "processing agent_job"
         );
+
+        if payload.is_welcome() {
+            match self.prepare_welcome(&job, &mut payload).await {
+                WelcomePrep::Ready => {}
+                WelcomePrep::StaticPosted => return Settlement::Skipped,
+                WelcomePrep::Failed => return Settlement::Failed,
+                WelcomePrep::Requeued => return Settlement::Requeued,
+            }
+        }
 
         // A job without a run has no state machine to move and no ledger row to
         // write; Swift's `finalizeStreamingMessage` returns early on exactly
@@ -2134,6 +2155,240 @@ impl AgentWorker {
             // after its lease expires, and the run_id-keyed message idempotency
             // makes that harmless.
             tracing::error!(outbox_id = id, error = %error, "mark_done failed");
+        }
+    }
+
+    fn provider_is_configured(&self, transport: &ResolvedTransport) -> bool {
+        if transport.endpoint.source == ProviderSource::Database.as_str() {
+            let bearer = transport.endpoint.bearer.trim();
+            return !bearer.is_empty() && !is_unsafe_secret(bearer);
+        }
+        self.config.provider.key_configured()
+    }
+
+    async fn prepare_welcome(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &mut AgentJobPayload,
+    ) -> WelcomePrep {
+        if payload.welcome_kind.as_deref() == Some(WelcomeKind::Closer.as_key()) {
+            self.settle_done(job.id, Some("welcome closer reserved"))
+                .await;
+            return WelcomePrep::StaticPosted;
+        }
+        let transport = self.resolve_transport().await;
+        if !self.provider_is_configured(&transport) {
+            return self
+                .commit_provider_required(job, payload, &transport)
+                .await;
+        }
+        match self
+            .ensure_welcome_run(job, payload, WelcomeKind::Opener)
+            .await
+        {
+            Ok(run_id) => {
+                payload.run_id = Some(run_id);
+                WelcomePrep::Ready
+            }
+            Err(error) => {
+                tracing::warn!(
+                    outbox_id = job.id,
+                    error = %error,
+                    "welcome opener run create failed"
+                );
+                match self
+                    .settle_retryable(
+                        job,
+                        &format!("welcome opener: {error}"),
+                        &transport.endpoint,
+                    )
+                    .await
+                {
+                    Settlement::Failed => WelcomePrep::Failed,
+                    _ => WelcomePrep::Requeued,
+                }
+            }
+        }
+    }
+
+    async fn ensure_welcome_run(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        kind: WelcomeKind,
+    ) -> Result<Uuid, DbError> {
+        let Some(member_id) = payload.author_member_id else {
+            return Err(DbError::from(momo_db::sqlx::Error::Protocol(
+                "welcome job missing author_member_id".into(),
+            )));
+        };
+        let workspace_id = job.workspace_id;
+        let agent_member_id = payload.agent_member_id;
+        let channel_id = payload.channel_id;
+        let prompt = payload.prompt.clone();
+        let max_steps = payload.max_steps.unwrap_or(50);
+        let trigger = RunTrigger::Welcome {
+            workspace_id,
+            member_id,
+            agent_member_id,
+            channel_id,
+            kind,
+        };
+        let idempotency_key = trigger.idempotency_key();
+        let input = welcome_run_input(
+            workspace_id,
+            member_id,
+            agent_member_id,
+            channel_id,
+            kind,
+            &prompt,
+            &idempotency_key,
+        );
+        with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let created = create_agent_run_in_tx(
+                    conn,
+                    workspace_id,
+                    NewAgentRun {
+                        channel_id,
+                        trigger,
+                        parent_run_id: None,
+                        max_steps,
+                        depth: 0,
+                        input,
+                    },
+                )
+                .await?;
+                Ok(created.id)
+            })
+        })
+        .await
+    }
+
+    async fn commit_provider_required(
+        &self,
+        job: &ClaimedAgentJob,
+        payload: &AgentJobPayload,
+        transport: &ResolvedTransport,
+    ) -> WelcomePrep {
+        let Some(member_id) = payload.author_member_id else {
+            self.settle_failed(job.id, "welcome job missing author_member_id")
+                .await;
+            return WelcomePrep::Failed;
+        };
+        let workspace_id = job.workspace_id;
+        let agent_member_id = payload.agent_member_id;
+        let channel_id = payload.channel_id;
+        let max_steps = payload.max_steps.unwrap_or(50);
+        let trigger = RunTrigger::Welcome {
+            workspace_id,
+            member_id,
+            agent_member_id,
+            channel_id,
+            kind: WelcomeKind::ProviderRequired,
+        };
+        let idempotency_key = trigger.idempotency_key();
+        let input = welcome_run_input(
+            workspace_id,
+            member_id,
+            agent_member_id,
+            channel_id,
+            WelcomeKind::ProviderRequired,
+            PROVIDER_REQUIRED_BODY,
+            &idempotency_key,
+        );
+        let outcome = with_tenant_tx(&self.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let created = create_agent_run_in_tx(
+                    conn,
+                    workspace_id,
+                    NewAgentRun {
+                        channel_id,
+                        trigger,
+                        parent_run_id: None,
+                        max_steps,
+                        depth: 0,
+                        input,
+                    },
+                )
+                .await?;
+                if !created.created {
+                    return Ok(created.id);
+                }
+                mark_run_started_in_tx(conn, created.id).await?;
+                send_message_in_tx(
+                    conn,
+                    workspace_id,
+                    NewMessage {
+                        channel_id,
+                        author_member_id: agent_member_id,
+                        message_type: MessageType::Text,
+                        body: Some(PROVIDER_REQUIRED_BODY.to_string()),
+                        props: json!({
+                            "run_id": created.id,
+                            "source": "agent_worker.welcome.provider_required.v1",
+                            "welcome_kind": "provider-required",
+                            "author_member_id": member_id,
+                        }),
+                        root_id: None,
+                        reply_to_id: None,
+                        client_msg_id: Some(created.id),
+                        run_id: Some(created.id),
+                        hlc_ts: None,
+                        hlc_count: None,
+                    },
+                )
+                .await?;
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, WELCOME_AUDIT_PROVIDER_REQUIRED)
+                        .by(agent_member_id)
+                        .about(member_id)
+                        .run(created.id)
+                        .with_schema(
+                            WELCOME_AUDIT_SCHEMA,
+                            json!({
+                                "kind": "provider-required",
+                                "channel_id": channel_id,
+                            }),
+                        ),
+                )
+                .await?;
+                finish_run_in_tx(
+                    conn,
+                    created.id,
+                    true,
+                    &json!({ "source": "welcome.provider_required" }),
+                    None,
+                )
+                .await?;
+                Ok(created.id)
+            })
+        })
+        .await;
+        match outcome {
+            Ok(_) => {
+                self.settle_done(job.id, None).await;
+                WelcomePrep::StaticPosted
+            }
+            Err(error) => {
+                tracing::warn!(
+                    outbox_id = job.id,
+                    error = %error,
+                    "welcome provider-required commit failed"
+                );
+                match self
+                    .settle_retryable(
+                        job,
+                        &format!("welcome provider-required: {error}"),
+                        &transport.endpoint,
+                    )
+                    .await
+                {
+                    Settlement::Failed => WelcomePrep::Failed,
+                    _ => WelcomePrep::Requeued,
+                }
+            }
         }
     }
 

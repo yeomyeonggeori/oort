@@ -129,5 +129,6 @@ pub use workspace_settings::{
     merge_workspace_settings, project_role_labels, read_workspace_settings,
     read_workspace_settings_for_update, write_workspace_settings, WorkspaceSettingsInvalid,
     ALLOWED_SETTINGS_KEYS, MAX_ALLOWED_AGENT_MODELS, MAX_ALLOWED_AGENT_MODEL_BYTES,
-    MAX_ROLE_LABEL_BYTES, MAX_WORKSPACE_SETTINGS_JSON_BYTES, ROLE_LABEL_KEYS,
+    MAX_ROLE_LABEL_BYTES, MAX_WELCOME_PROMPT_CHARS, MAX_WORKSPACE_SETTINGS_JSON_BYTES,
+    ROLE_LABEL_KEYS,
 };
