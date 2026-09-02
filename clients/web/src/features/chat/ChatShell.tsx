@@ -16,6 +16,7 @@ import {
   nextAdvertisedChannelId,
 } from "@/features/chat/advertiseReadState";
 import {
+  consumeVisitMarkRolledBack,
   foldInVisitMark,
   freezeOpenedRead,
   timelineUnreadFromOpened,
@@ -235,6 +236,11 @@ export function ChatShell() {
   useEffect(() => {
     if (channelId === null) return;
     const read = unreadFor(readStates.byChannel, channelId);
+    const source = consumeVisitMarkRolledBack(channelId)
+      ? "rollback"
+      : consumeUserClearedUnread(channelId)
+        ? "user_clear"
+        : "open_advertisement";
     setOpenedWith((current) => {
       if (!current || !uuidEq(current.channelId, channelId)) return current;
       if (
@@ -244,11 +250,7 @@ export function ChatShell() {
       ) {
         return freezeOpenedRead(channelId, read);
       }
-      return foldInVisitMark(
-        current,
-        read,
-        consumeUserClearedUnread(channelId) ? "user_clear" : "open_advertisement"
-      );
+      return foldInVisitMark(current, read, source);
     });
   }, [channelId, readStates.byChannel]);
 

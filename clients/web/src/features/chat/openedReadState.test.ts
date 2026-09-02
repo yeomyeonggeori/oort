@@ -69,6 +69,39 @@ describe("재열람 방문은 연 순간의 마크 경계를 지킨다 (B-1)", (
     expect(afterUserClear.markSeq).toBeNull();
   });
 
+  it("400 롤백은 낙관 마크를 방문 이전 경계로 되돌린다 (H-6)", () => {
+    const unmarked = {
+      ...markAt3Cursor10(),
+      markedUnreadBeforeSeq: null,
+    };
+    const frozen = freezeOpenedRead(unmarked.channelId, unmarked);
+    const visiting = foldInVisitMark(frozen, markAt3Cursor10());
+    expect(timelineUnreadFromOpened(visiting).unreadCount).toBe(
+      MARK_AT_3_CURSOR_10.count
+    );
+    const afterRollback = foldInVisitMark(visiting, unmarked, "rollback");
+    expect(timelineUnreadFromOpened(afterRollback).unreadCount).toBe(0);
+    expect(afterRollback.markSeq).toBeNull();
+  });
+
+  it("롤백은 열람 때 있던 마크를 지우지 않는다 (H-6)", () => {
+    const atOpen = markAt3Cursor10();
+    const frozen = freezeOpenedRead(atOpen.channelId, atOpen);
+    const later = foldInVisitMark(frozen, {
+      ...atOpen,
+      markedUnreadBeforeSeq: 7,
+    });
+    expect(timelineUnreadFromOpened(later).unreadCount).toBe(4);
+    const afterRollback = foldInVisitMark(
+      later,
+      { ...atOpen, markedUnreadBeforeSeq: null },
+      "rollback"
+    );
+    const restored = timelineUnreadFromOpened(afterRollback);
+    expect(restored.lastReadSeq).toBe(MARK_AT_3_CURSOR_10.dividerCursor);
+    expect(restored.unreadCount).toBe(MARK_AT_3_CURSOR_10.count);
+  });
+
   it("방문 중 나중 마크 B 는 구분선을 B 로 옮기고, 열람의 null 은 지우지 않는다 (H-3)", () => {
     const atOpen = markAt3Cursor10();
     const frozen = freezeOpenedRead(atOpen.channelId, atOpen);

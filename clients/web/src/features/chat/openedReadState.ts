@@ -15,7 +15,7 @@ import {
 // cursor-based.
 // =============================================================================
 
-export type VisitNullSource = "open_advertisement" | "user_clear";
+export type VisitNullSource = "open_advertisement" | "user_clear" | "rollback";
 
 export interface OpenedReadSnapshot {
   channelId: string;
@@ -25,6 +25,22 @@ export interface OpenedReadSnapshot {
   markSeq: number | null;
   /** When true, a live `null` is treated as the open's own explicit_open. */
   absorbOpenNull: boolean;
+  /** Visit mark before the latest in-visit adopt. A 400 rollback restores this. */
+  revertMarkSeq: number | null;
+}
+
+const rolledBackVisits = new Set<string>();
+
+/** 마크 PUT 이 거절되면 방문 경계를 낙관 이전으로 되돌린다 (H-6). */
+export function noteVisitMarkRolledBack(channelId: string): void {
+  rolledBackVisits.add(channelId.toLowerCase());
+}
+
+export function consumeVisitMarkRolledBack(channelId: string): boolean {
+  const key = channelId.toLowerCase();
+  if (!rolledBackVisits.has(key)) return false;
+  rolledBackVisits.delete(key);
+  return true;
 }
 
 export function freezeOpenedRead(
@@ -38,6 +54,7 @@ export function freezeOpenedRead(
       latestSeq: 0,
       markSeq: null,
       absorbOpenNull: true,
+      revertMarkSeq: null,
     };
   }
   return {
@@ -46,12 +63,14 @@ export function freezeOpenedRead(
     latestSeq: read.latestSeq,
     markSeq: read.markedUnreadBeforeSeq,
     absorbOpenNull: true,
+    revertMarkSeq: read.markedUnreadBeforeSeq,
   };
 }
 
 /**
- * Ignore only the open's own `null` (`absorbOpenNull`). A user clear
- * (sidebar 「읽음 처리」) must drop the visit boundary.
+ * Ignore only the open's own `null` (`absorbOpenNull`). A rejected mark
+ * (`rollback`) restores the visit boundary from before that optimistic
+ * adopt. A user clear (sidebar 「읽음 처리」) drops the visit boundary.
  */
 export function foldInVisitMark(
   opened: OpenedReadSnapshot,
@@ -61,7 +80,19 @@ export function foldInVisitMark(
   if (!live || opened.lastReadSeq === null) return opened;
   const incoming = freezeOpenedRead(opened.channelId, live);
   if (typeof incoming.markSeq === "number") {
-    return { ...opened, markSeq: incoming.markSeq, absorbOpenNull: true };
+    return {
+      ...opened,
+      markSeq: incoming.markSeq,
+      absorbOpenNull: true,
+      revertMarkSeq: opened.markSeq,
+    };
+  }
+  if (source === "rollback") {
+    return {
+      ...opened,
+      markSeq: opened.revertMarkSeq,
+      absorbOpenNull: true,
+    };
   }
   if (source === "user_clear" || !opened.absorbOpenNull) {
     return { ...opened, markSeq: null, absorbOpenNull: false };

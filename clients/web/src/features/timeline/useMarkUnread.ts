@@ -2,6 +2,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { uuidEq, type ReadState } from "@momo/core/lib/api";
 import { markUnreadFailureMessage } from "@momo/core/features/readState/copy";
 import { advertiseReadState } from "@/features/chat/advertiseReadState";
+import { noteVisitMarkRolledBack } from "@/features/chat/openedReadState";
 import { applyReadStateToCache } from "@/features/workspace/useWorkspace";
 
 export interface MarkUnreadInput {
@@ -47,6 +48,7 @@ export function useMarkUnread(workspaceId: string): {
         );
         applyReadStateToCache(client, workspaceId, next);
       } catch (error) {
+        noteVisitMarkRolledBack(channelId);
         if (previousRow !== undefined) {
           client.setQueryData<ReadState[]>(queryKey, (current) => {
             if (!current) return current;
