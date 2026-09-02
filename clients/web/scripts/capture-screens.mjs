@@ -8520,6 +8520,7 @@ async function waitForScrollerAlignSettled(page, label) {
         scroller.setAttribute("data-capture-stable-frames", "0");
         return false;
       })()`,
+      undefined,
       { polling: "raf", timeout: 15_000 }
     );
   } catch (error) {
@@ -8666,10 +8667,11 @@ async function captureMarkUnreadScenes(browser, scheme) {
   }
   await markItem.click();
   await waitForScrollerAlignSettled(page, `${scheme} after mark`);
-  const proof = await page.waitForFunction(markUnreadProofExpr(), {
-    polling: "raf",
-    timeout: 15_000,
-  });
+  const proof = await page.waitForFunction(
+    markUnreadProofExpr(),
+    undefined,
+    { polling: "raf", timeout: 15_000 }
+  );
   const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
   await page.screenshot({ path });
   shots.push(path);
