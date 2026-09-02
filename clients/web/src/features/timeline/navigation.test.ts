@@ -267,6 +267,7 @@ describe("relationFromIntersection", () => {
       boundingClientRect: { top: -284, bottom: -250 },
     });
     expect(later).toBe("above");
+    if (later !== "above") throw new Error("expected above");
     expect(shouldLatchUnreadJump(later, false)).toBe(false);
     expect(shouldShowJumpUnread(later, 4, false)).toBe(true);
   });
