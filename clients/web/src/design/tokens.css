@@ -9,7 +9,9 @@
  *
  * Contract (mirrored in .claude/skills/momo-design-taste-web/references/tokens.md
  * and verified mechanically by src/design/tokens.contrast.test.ts):
- *   - one accent per surface (--accent, 호박/amber horizon)
+ *   - one accent per surface (--accent, default 호박/amber horizon). Curated
+ *     bindings in src/design/themes/ rebind --accent/--accent-soft/--on-accent
+ *     via :root[data-accent]; components still consume the semantic tokens.
  *   - agent identity is --agent (predawn slate-blue) on avatar/badge only
  *   - every foreground token meets WCAG AA (>= 4.5:1) on every surface token,
  *     in BOTH schemes; --line-strong (control borders) meets >= 3:1
@@ -19,6 +21,8 @@
  *
  * Scheme selection follows the OS by default (color-scheme: light dark).
  * :root[data-theme="light"|"dark"] pins it (used by the screenshot capture).
+ * :root[data-accent] rebinds the accent family (ADR-0174). S0 and .brand-lockup
+ * pin that family back to Dawn.
  * ========================================================================== */
 
 :root {
@@ -30,8 +34,11 @@
   --surface-sidebar: light-dark(#efece6, #1b1a1f);
   --surface-hover: light-dark(#e7e3db, #26252c);
 
-  /* --- lines: --line separates, --line-strong outlines controls (3:1) ---- */
-  --line: light-dark(#dcd8d0, #34323b);
+  /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
+   * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
+   * 라이트 --surface-hover 위 3.03:1 이라 RGB +1 이 2.99 로 3:1(WCAG 1.4.11)이
+   * 깨지므로 그대로 둔다. 다크 항 무접촉. */
+  --line: light-dark(#e4e0d8, #34323b);
   --line-strong: light-dark(#84817d, #6f6e73);
 
   /* --- text -------------------------------------------------------------- */
@@ -227,6 +234,31 @@
   --ok: light-dark(#187533, #57ab5a);
   --warn: light-dark(#8a5c00, #d4a72c);
 
+  /* --- onboarding S0, single look (BZ-6a / #1869) -----------------------
+   *
+   * S0 is the one surface that does not follow OS light/dark. It is a deep
+   * space field the person walks through, then S1/S2 return to Dawn tokens.
+   * Values are one hex each on purpose: a light-dark() pair here would be a
+   * second look. Measured in tokens.contrast.test.ts against this surface
+   * only, not mixed into the Dawn pair table. */
+  --onboarding-space: #12111a;
+  --onboarding-star: #4a4854;
+  --onboarding-ink: #ececf1;
+  --onboarding-ink-faint: #9b98a3;
+  --onboarding-accent: #f0a850;
+  --onboarding-on-accent: #12111a;
+  --onboarding-line: #8b8996;
+
+  /* S0 hero wordmark (#1882 H-1). Closed product scale tops at text-display
+   * 20px, which reads as a caption under the 144–192 mark (review: 30×16px
+   * "oort" next to a 154–192 mark, 2px off the 14px copy). The lockup beat is
+   * mark → name → copy; squat-test hierarchy has to be size, not just fade
+   * delay. Floor is 1/3 of `--spacing-onboarding-mark` (48). Same clamp
+   * recipe as `.onboarding-mark` (floor / 12vw / 4/3 cap) scaled by 1/3:
+   * 48 / 4vw / 64. Not a sixth `--text-*` role — S0 only, and `@theme
+   * --font-*` would be a family. */
+  --font-onboarding-wordmark: calc(var(--spacing-onboarding-mark) / 3);
+
   /* --- shell geometry ---------------------------------------------------- */
   --w-sidebar: 240px;
 
@@ -235,6 +267,18 @@
    * (iPhone 14/15의 CSS 폭)에서 뒤 표면을 110px 남기는 값이다: 덮은 것이 화면
    * 전체가 아니라 서랍이라는 사실이 보여야, 바깥을 눌러 닫을 자리도 함께 보인다. */
   --w-sidebar-drawer: 280px;
+
+  /* 데스크톱 사이드바 접힘/펼침 (#1864). 서랍 슬라이드(160ms)와 같은 축의 피드백
+   * 이되, 폭 전환은 한 박자 더 길어야 열이 사라지는 방향이 읽힌다. 장식 루프가
+   * 아니라 상태 변화 한 번이므로 200ms ease-out. prefers-reduced-motion 에서는
+   * `app-shell` 유틸이 이 값을 쓰지 않는다. */
+  --duration-sidebar: 200ms;
+
+  /* Overlay 타이틀바의 트래픽라이트 자리 (#1864). macOS 세 원(약 52px) +
+   * trafficLightPosition.x 16 + 토글과의 간격. 웹(브라우저)은 이 값을 쓰지 않고
+   * `app-titlebar`의 기본 인셋만 쓴다. 드래그 속성(`[data-tauri-drag-region]`)이
+   * 있을 때만 이 폭을 연다 — 렌더 트리는 같고 속성만 조건부(브리프). */
+  --titlebar-inset: 80px;
 
   /* 실제로 보이는 뷰포트 높이 (goal B9). 값은 src/app/viewportHeight.ts가 매
    * `visualViewport` 변화마다 다시 쓴다. 여기 있는 것은 **그 값이 아직 없을 때의
@@ -275,6 +319,17 @@
 
 :root[data-theme="dark"] {
   color-scheme: dark;
+}
+
+/* ADR-0174 D4: custom accent does not recolor S0 or the brand lockup.
+ * Values match the Dawn pair in :root. S0 paints with `--onboarding-*`;
+ * `.brand-lockup` is the Connect/Claim mark+wordmark that still uses
+ * `--accent`. */
+.onboarding-landing,
+.brand-lockup {
+  --accent: light-dark(#a54c08, #f0a850);
+  --accent-soft: light-dark(#f4e7d6, #33261a);
+  --on-accent: light-dark(#fffefb, #17161a);
 }
 
 @theme {
@@ -324,6 +379,15 @@
   --spacing-control: 32px;
   --spacing-control-lg: 40px;
 
+  /* 인박스 리마인더 행의 ⋯ 그릇 (#1888 B-2).
+   *
+   * 그릇은 tap-target(44, 600px 미만) + p-px×2 + border 1px×2 = 48. 행은
+   * `pr-8`(32)만 비우고 있어 390에서 「후」가 불투명한 그릇 아래로 사라졌다.
+   * 리듬 단계 8(32)로는 24px이 모자라고, 그릇 폭과 행이 비우는 칸이 **한 값**에서
+   * 나와야 해서 이름을 갖는다. 높이가 아니라 가로 예약이고, 컨트롤 크로마라
+   * --spacing-control 가족과 같은 축이다. `w-overflow-bowl`이 그 칸이다. */
+  --spacing-overflow-bowl: 48px;
+
   /* 결정 버튼의 최소 가로 (MOMO-642 2). 다이얼로그의 주 버튼이 라벨로 결정 상태를
    * 말하면("권한을 하나 이상 선택" -> "선택한 권한 허용") 그 라벨이 바뀔 때마다
    * 버튼 폭이 바뀌고, 오른쪽 정렬된 푸터는 옆의 취소 버튼을 포인터 아래에서
@@ -361,6 +425,25 @@
    * 패킷 340-440 구간의 가운데 384. pane(320)과 pane-md(512) 사이이며 리듬
    * 단계가 아니다. */
   --spacing-pane-picker: 384px;
+
+  /* 설정 섹션 목록의 폰 높이 캡 (#1867 design-review M-1).
+   *
+   * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·
+   * 부차 패널이 양보할 때의 폭). 앞 판이 그 값을 이 목록의 max-block-size 로
+   * 빌려 썼고, 14개 행 리듬에서 4행만 보이며 다음 행의 스크롤 단서가 없었다.
+   * 축을 빌려 쓰지 않는다.
+   *
+   * 값은 이 표면의 행 리듬에서 나온다 (width < 600px, tap-target 44):
+   *   p-2 상하 16
+   *   「앱으로 돌아가기」 44 + 그 아래 pb-3 12
+   *   첫 그룹 라벨 18 (text-meta 1.125rem) + gap-1 4
+   *   개인 4행 (44×4 + gap-1×3 = 188)
+   *   넷째와 다섯째 사이 gap-1 4 + 다섯째 행의 절반 22
+   *   --------------------------------
+   *   308
+   * 다섯째가 반쯤 보여야 목록이 이어진다는 단서가 된다. 유틸 `settings-nav` 가
+   * 600px 미만에서만 이 값을 max-block-size 로 든다. */
+  --spacing-settings-nav: 308px;
 
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
    * 있다: pane 은 부차 표면이 **가져가는** 폭이고, 이것은 부차 표면이 옆에 설 때
@@ -480,8 +563,23 @@
    * 값이 180 인 것은 추측이되 근거 있는 추측이다: 자리는 `--spacing-pane`
    * (320px) 폭으로 잡히고 320x180 은 16:9 다. 사람들이 실제로 붙이는 것의
    * 대다수는 스크린샷이고 스크린샷은 16:9 근처라, 도착하는 순간의 이동이 흔한
-   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다. */
+   * 경우에 0 이 된다. 144(=action)였을 때 그 이동은 항상 36px 이었다.
+   *
+   * 링크 프리뷰 히어로에 이 값을 고정 높이로 쓰지 마라. 그 카드는
+   * `max-w-pane-lg`(640) 안에 살고, 180 고정은 거기서 3.54:1 이 되어 OG
+   * 원본(1.91:1)의 절반을 버린다(#1903 H-2). 히어로는 `--aspect-og` +
+   * `--spacing-unfurl-hero` 상한이다. */
   --spacing-preview-frame: 180px;
+
+  /* 링크 프리뷰 rich 히어로의 높이 상한 (#1903 design-review H-2).
+   *
+   * 비율은 `--aspect-og`(1.91:1, OG 표준 캔버스 1200×630). 상한은 카드가
+   * 실제로 사는 최대 폭 `--spacing-pane-lg`(640) 을 그 비율로 나눈 값이다:
+   * 640 / 1.91 ≈ 335.1, 8px 격자로 올린 336. pane-lg 안에서는 비율이 이기고
+   * 상한은 묶이지 않는다. 첨부 미리보기 `--spacing-preview-frame`(180)을
+   * 여기서 빌려 쓰면 640 폭에서 3.54:1 이 되고, 그 토큰의 근거(320×16:9)는
+   * 이 자리의 거짓이 된다. */
+  --spacing-unfurl-hero: 336px;
 
   /* 첨부 트레이가 먹을 수 있는 최대 높이 (#1202 · design-review B-2).
    *
@@ -491,6 +589,24 @@
    * 함정이다. 240px 는 칩 넷이 온전히 보이고 다섯째가 반쯤 걸리는 높이라, 더
    * 있다는 사실이 스크롤바 없이도 읽힌다. */
   --spacing-tray-max: 240px;
+
+  /* S0 히어로 마크 (#1882). #1869의 96px(24px 제품 마크 ×4)를 1.5배한 바닥.
+   * `.onboarding-mark`가 이 값과 12vw 사이에서 clamp하고, 상한은 같은 값의
+   * 4/3(192)이라 큰 창에서 락업이 한없이 커지지 않는다. 제품 셸은 size-6. */
+  --spacing-onboarding-mark: 144px;
+
+  /* S0 intro copy measure (#1882 M-1). pane-sm(192) is a dropdown/mention
+   * WIDTH floor; borrowing it wrapped this sentence onto two lines even at
+   * 1728. The lockup beat is mark → name → copy and the copy is one line
+   * whenever the viewport can hold it (390 inner 342 still clears the
+   * unwrapped run).
+   *
+   * Chromium capture:design (1280, `--font-sans`) measured the sentence at
+   * text-body 14px / keep-all as 265×22 (one line). Hangul-em upper bound
+   * is ~307 (20×14 + 5 spaces + period). 360 = that bound + ~4em face
+   * slack so a heavier KR face cannot re-wrap. Not a pane: this is the
+   * width of this one sentence, not a column. */
+  --spacing-onboarding-copy: 360px;
 
   /* --- radius: three steps, nothing else --------------------------------- */
   --radius-*: initial;
@@ -510,6 +626,11 @@
   --text-title--line-height: 1.5rem;
   --text-display: 1.25rem; /* 20px, at most one per surface */
   --text-display--line-height: 1.75rem;
+
+  /* 링크 프리뷰 rich 히어로 비율 (#1903 design-review H-2).
+   * Open Graph 권장 캔버스는 1.91:1 (1200×630). 카드 폭에 이 비율을 매고
+   * 높이 상한은 `--spacing-unfurl-hero`. 유틸 `aspect-og`. */
+  --aspect-og: 1.91 / 1;
 }
 
 @theme inline {
@@ -543,6 +664,13 @@
   --color-on-danger-fill: var(--on-danger-fill);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
+  --color-onboarding-space: var(--onboarding-space);
+  --color-onboarding-star: var(--onboarding-star);
+  --color-onboarding-ink: var(--onboarding-ink);
+  --color-onboarding-ink-faint: var(--onboarding-ink-faint);
+  --color-onboarding-accent: var(--onboarding-accent);
+  --color-onboarding-on-accent: var(--onboarding-on-accent);
+  --color-onboarding-line: var(--onboarding-line);
 }
 
 /* =============================================================================
@@ -660,13 +788,49 @@
  *   - 클래스 목록에 `focus-visible:` 문자열이 남아 프리플라이트 `naked_focus` 가
  *     `outline-none` 라인(dropdown-menu 항목)에서 그대로 참이 된다.
  * focus-ring-on-fill 은 변수만 세우므로 변형 없이(bare) 채워진 컨트롤에 붙인다.
+ *
+ * ## 텍스트 입력 그릇 (#1866)
+ *
+ * 컴포저·관전 터미널처럼 textarea 를 감싼 그릇에 `focus-within:focus-ring` 을
+ * 두면 마우스 클릭(터미널은 드래그 선택)에도 인셋 accent 링이 보더를 덮어,
+ * 보더 색이 바뀐 것처럼 보인다. 안쪽 textarea(컴포저 입력, xterm
+ * `.xterm-helper-textarea`)는 스펙상 포인터 포커스에도 `:focus-visible` 이
+ * 매치되므로 `:has(:focus-visible)` 만으로는 갈리지 않는다.
+ * `focus-visible-within` 은 Tab 모달리티(`data-focus-modality="keyboard"`,
+ * `focusModality.ts`)와 자식 `:focus-visible` 을 함께 요구한다. 컨트롤
+ * 프리미티브의 `focus-visible:focus-ring` 은 그대로다.
  * ========================================================================== */
+@custom-variant focus-visible-within {
+  :root[data-focus-modality="keyboard"] &:has(:focus-visible) {
+    @slot;
+  }
+}
 @utility focus-ring {
   outline: 2px solid var(--focus-ring-ink, var(--accent));
   outline-offset: -2px;
 }
 @utility focus-ring-on-fill {
   --focus-ring-ink: var(--on-accent);
+}
+
+@utility onboarding-focus {
+  --focus-ring-ink: var(--onboarding-accent);
+}
+
+@utility onboarding-focus-on-fill {
+  --focus-ring-ink: var(--onboarding-on-accent);
+}
+
+/* S0 star field: sparse 1px dots. Lives here so the component never names a
+ * gradient or a raw colour. 48px is the gap that keeps the field sparse
+ * rather than a texture; it is not a rhythm step. */
+@utility onboarding-starfield {
+  background-color: var(--onboarding-space);
+  background-image: radial-gradient(
+    var(--onboarding-star) 1px,
+    transparent 1px
+  );
+  background-size: 48px 48px;
 }
 
 /* Two-pane shell geometry as a named utility, so no component needs an
@@ -700,19 +864,46 @@
 @utility app-shell {
   display: grid;
   grid-template-columns: var(--w-sidebar) 1fr;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   block-size: 100%;
   min-block-size: 0;
   position: relative;
   overflow: clip;
 
-  /* 데스크톱 집중 모드 (#1291). 워크스페이스 문맥을 잃지 않도록 56px 레일은
-   * 남기고, 240px 셸 열에서 그 레일을 뺀 채널/프로필 패널 184px만 본문에
-   * 돌려준다. 전환을 두지 않는다: 콘텐츠가 움직이는 장식이 아니라 즉시 폭을
-   * 확보하는 셸 조작이고, 포커스 왕복은 Sidebar가 별도로 소유한다. */
+  /* 타이틀바가 빠져도(폰에서 display:none) 사이드바·본문은 둘째 행을 지킨다.
+   * auto-placement에 맡기면 타이틀바가 없는 순간 둘이 첫째 행(auto)으로 올라가
+   * 셸 높이가 내용이 된다. */
+  > .sidebar-drawer,
+  > main {
+    grid-row: 2;
+    min-inline-size: 0;
+  }
+
+  /* 데스크톱 접힘 (#1864). 사이드바 열을 0으로 접어 본문을 풀폭으로 돌린다.
+   * 토글은 첫째 행(타이틀바)에 남는다. 폭 전환은 `--duration-sidebar`이고,
+   * reduced-motion에서는 즉시 자리가 바뀐다. */
   @media (width >= 600px) {
+    transition: grid-template-columns var(--duration-sidebar) ease-out;
+
     &[data-sidebar-collapsed] {
-      grid-template-columns: var(--spacing-rail) 1fr;
+      grid-template-columns: 0px 1fr;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      transition: none;
+    }
+  }
+
+  /* 설정 전면 (#1867). 앱 사이드바·타이틀바 대신 설정 전용 열이 창을 채운다.
+   * 전환은 라우트가 맡고, 여기 그리드는 즉시 한 칸이 된다. */
+  &[data-settings-surface] {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    transition: none;
+
+    > main {
+      grid-row: 1;
+      grid-column: 1;
     }
   }
 
@@ -723,6 +914,12 @@
    * `overflow: clip`이 닫힌 서랍을 잘라내므로 가로 스크롤은 생기지 않는다. */
   @media (width < 600px) {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+
+    > .sidebar-drawer,
+    > main {
+      grid-row: 1;
+    }
 
     /* 위쪽 안전 영역 (goal B9). `viewport-fit=cover`로 노치 아래까지 그리기로 한
      * 이상, 아래를 물러나는 규칙(safe-area-bottom)만 있고 위가 없는 것은 반쪽이다.
@@ -737,8 +934,8 @@
   }
 }
 
-/* 사이드바 서랍 (B6). 데스크탑에서는 아무것도 하지 않는다 — 사이드바는 격자의
- * 첫 열에 그대로 서고, 이 유틸리티는 폰에서만 규칙을 갖는다.
+/* 사이드바 서랍 (B6). 데스크톱은 격자의 첫 열이고, 접힐 때 overflow로 자른다.
+ * 폰에서만 절대 위치 서랍 규칙을 갖는다.
  *
  * 위치의 앵커는 `.app-shell`의 `position: relative`다. 그래서 서랍은 셸 밖으로
  * 나가지 못하고, 닫힌 상태의 `translateX(-100%)`도 문서 폭을 넓히지 못한다
@@ -749,13 +946,12 @@
  * 그보다 길어지면 대기가 된다. reduced-motion에서는 전환 없이 자리에 나타난다 —
  * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
 @utility sidebar-drawer {
-  /* 접힌 패널의 검색·채널·프로필은 보이지 않을 뿐 아니라 탭/AX 트리에서도
-   * 함께 빠져야 한다. 모바일에서는 이 규칙을 적용하지 않아 기존 280px 서랍이
-   * AppShell의 데스크톱 상태와 독립적으로 온전히 열린다. */
+  /* 데스크톱 접힘 (#1864): 그리드 열이 0으로 줄어드는 동안 레일·채널 트리가
+   * 밖으로 새지 않게 자른다. 탭/AX 는 `inert`(Sidebar)가 빼고, 전환이 끝나면
+   * `hidden`이 트리를 레이아웃에서 제거한다. 이 규칙은 전환 중의 기하만 맡는다.
+   * 폰 서랍은 아래 블록이 절대 위치로 덮으므로 여기 규칙을 쓰지 않는다. */
   @media (width >= 600px) {
-    &[data-pane-collapsed] [data-sidebar-channel-pane] {
-      display: none;
-    }
+    overflow: hidden;
   }
 
   @media (width < 600px) {
@@ -796,6 +992,50 @@
   }
 }
 
+/* 앱 상단 줄 (#1864). 데스크톱에서만 선다: 토글이 사이드바 안에 있으면 접는
+ * 순간 입구가 사라진다. 트래픽라이트 옆 고정 자리(buzz). 웹에서는 같은 줄이
+ * 일반 상단 바이고, Tauri Overlay일 때만 `data-tauri-drag-region`이 인셋을 연다.
+ * 버튼은 그 속성을 갖지 않는다. */
+@utility app-titlebar {
+  display: flex;
+  grid-row: 1;
+  grid-column: 1 / -1;
+  align-items: center;
+  block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-2);
+  border-block-end: 1px solid var(--line);
+  background-color: var(--surface);
+
+  &[data-tauri-drag-region] {
+    padding-inline-start: var(--titlebar-inset);
+  }
+
+  @media (width < 600px) {
+    display: none;
+  }
+}
+
+/* S1/S2 스텝 크롬 (#1882). AppTitlebar와 같은 트래픽라이트 인셋·드래그 계약이되
+ * 온보딩은 셸 그리드 밖이고 390px에서도 선다(app-titlebar는 600 미만에서 숨음).
+ * 버튼은 이 유틸을 갖지 않고 pointerdown을 멈춘다. */
+@utility onboarding-step-chrome {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-block-size: var(--spacing-control-lg);
+  padding-inline: var(--spacing-2);
+  border-block-end: 1px solid var(--line);
+  background-color: var(--surface);
+
+  &[data-tauri-drag-region] {
+    padding-inline-start: var(--titlebar-inset);
+  }
+
+  @media (width < 600px) {
+    min-block-size: var(--tap-target);
+  }
+}
+
 /* 폰에서만 서는 컨트롤 (B6). 햄버거와 서랍 닫기 버튼이 그것인데, 둘 다 넓은 창
  * 에서는 **할 일이 없는** 컨트롤이다(사이드바가 이미 열에 서 있다). 살아 있는
  * 것처럼 보이지만 아무 일도 하지 않는 버튼을 두지 않는 것은 pane-wide-toggle이
@@ -815,6 +1055,18 @@
   @media (width < 600px) {
     display: none;
   }
+}
+
+/* Radix DropdownMenu sets this on the panel. A long row must truncate inside
+ * that box instead of growing the menu past the viewport (#1886 M-1). */
+@utility max-w-menu-available {
+  max-inline-size: var(--radix-dropdown-menu-content-available-width);
+}
+
+/* Four tabular figures ("100%"). ch follows the face; a pixel box does not
+ * (#1886 H-3). */
+@utility w-numeric-4 {
+  inline-size: 4ch;
 }
 
 /* 폭이 아니라 **입력 장치**로 가르는 자리 (B11 R2 · #1743).
@@ -853,6 +1105,19 @@
   translate: 0 calc(100% - var(--spacing-row));
 }
 
+/* 컴포저 선택 서식 트레이 (#1902). 선택 영역 위(여유 없으면 아래)에 고정한다.
+ * 좌표는 JS가 --composer-format-left/top/shift 로 넣고, 뷰포트 클램프는
+ * composerFormatPosition.ts 가 진다. 인라인 style= 는 CSP/프리플라이트가 막는다.
+ * 모션은 없다: prefers-reduced-motion 에서도 같은 즉시 등장. */
+@utility composer-format-tray {
+  position: fixed;
+  z-index: 50;
+  inset-inline-start: var(--composer-format-left, 0px);
+  inset-block-start: var(--composer-format-top, 0px);
+  max-inline-size: calc(100vw - var(--spacing-6));
+  translate: -50% var(--composer-format-shift, 0%);
+}
+
 /* 그 반대. 손가락에게만 하는 말 (B11 R2): 길게 누르기를 알려 주는 한 줄은
  * hover가 있는 기기에서는 할 말이 없다. 거기엔 행 hover에 툴바가 보이기 때문이다. */
 @utility touch-only {
@@ -889,6 +1154,16 @@
   @media (width < 600px) {
     min-block-size: var(--tap-target);
     min-inline-size: var(--tap-target);
+  }
+}
+
+/* BF-A2 M-3: 상·하단 점프 필. 포인터는 28px(`h-control-sm`), 손가락은 44px.
+ * 문턱은 `tap-target`의 폭이 아니라 `hover: none` — 이 필은 자기 줄을 갖는
+ * 1급 컨트롤이라 `--touch-target`(24)이 아니라 `--tap-target`(44)이다.
+ * 폭 600 미만은 위 `tap-target` 유틸이 같은 수를 판다. */
+@media (hover: none) {
+  [data-unread-pill] {
+    min-block-size: var(--tap-target);
   }
 }
 
@@ -1022,9 +1297,9 @@
   }
 }
 
-/* 설정의 두 열 (B6). agent-hub-layout과 같은 성질의 표면이라 같은 답을 쓴다:
- * 192px 섹션 목록이 390px 폰에서 본문에 198px만 남기므로, 그 폭에서는 목록이
- * 본문 위로 올라가 가로로 눕는다. 넓은 창은 그대로 두 열이다. */
+/* 설정의 두 열 (B6 / #1867). 앱 사이드바를 대체하므로 넓은 창의 목록 폭은
+ * `--w-sidebar`(240px)다. 390px 폰에서는 그 열이 본문을 밀어내므로 목록이
+ * 본문 위로 올라가 가로로 눕는다. */
 @utility settings-layout {
   display: flex;
   min-block-size: 0;
@@ -1036,14 +1311,14 @@
 }
 
 @utility settings-nav {
-  inline-size: var(--spacing-pane-sm);
+  inline-size: var(--w-sidebar);
   flex-shrink: 0;
   overflow-y: auto;
   border-inline-end: 1px solid var(--line);
 
   @media (width < 600px) {
     inline-size: auto;
-    max-block-size: var(--spacing-pane-sm);
+    max-block-size: var(--spacing-settings-nav);
     border-inline-end: 0;
     border-block-end: 1px solid var(--line);
   }
@@ -1753,6 +2028,317 @@
   50.01%,
   100% {
     opacity: 0;
+  }
+}
+
+/* =============================================================================
+ * Onboarding S0 motion + S0/S1/S2 slide (BZ-6a / #1869).
+ *
+ * Slide timings and fill-mode are the buzz port: line-slide 650ms
+ * cubic-bezier(0.22,1,0.36,1), mask-reveal 760ms, fill-mode backwards so a
+ * finished reveal does not leave a transform containing-block (buzz comment
+ * on fixed-positioned footers). Reduced motion drops every animation.
+ * ========================================================================== */
+
+.onboarding-landing {
+  color-scheme: dark;
+  /* Fill the App slot (`main.tsx` flex-1 after PwaBanner). min-height: 100%
+     on the landing alone is 0 when the slide wrappers' height is auto. */
+  height: 100%;
+  min-height: 100%;
+}
+
+.onboarding-slide:has(.onboarding-landing),
+.onboarding-slide:has(.onboarding-landing) .onboarding-transition-line,
+.onboarding-slide:has(.onboarding-landing) .onboarding-transition-content {
+  height: 100%;
+}
+
+.onboarding-mark {
+  /* Hero floor 144 (#1882 1.5× of 96). 12vw at 1280 is 154, at 390 the
+     floor holds; 4/3 of the floor (192) is the large-window cap. */
+  width: clamp(
+    var(--spacing-onboarding-mark),
+    12vw,
+    calc(var(--spacing-onboarding-mark) * 4 / 3)
+  );
+  height: clamp(
+    var(--spacing-onboarding-mark),
+    12vw,
+    calc(var(--spacing-onboarding-mark) * 4 / 3)
+  );
+  animation: onboarding-mark-float 8s ease-in-out 1.1s infinite;
+}
+
+.onboarding-mark svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Second path of OortMark is the orbit (two outer arcs). Bound to that
+   document order: do not reorder OortMark's paths. pathLength=1 on the
+   element normalizes the raw length (~23) so dasharray 1 draws the stroke
+   over the full 1.1s instead of snapping on (dasharray 64 > path length). */
+.onboarding-mark svg path:nth-of-type(2) {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: onboarding-orbit-draw 1.1s ease-out forwards;
+}
+
+/* Sequential reveal after the orbit draw: wordmark at 1.1s, copy at 1.4s.
+   Same 300ms fade as the step fade-in. backwards keeps them hidden until
+   their delay; reduced-motion below drops this to opacity 1 immediately. */
+.onboarding-wordmark {
+  font-size: clamp(
+    var(--font-onboarding-wordmark),
+    4vw,
+    calc(var(--font-onboarding-wordmark) * 4 / 3)
+  );
+  animation: onboarding-fade-in 300ms ease-out 1.1s backwards;
+}
+
+.onboarding-tagline {
+  animation: onboarding-fade-in 300ms ease-out 1.4s backwards;
+}
+
+.onboarding-cloud-body {
+  position: absolute;
+  top: var(--onboarding-body-top);
+  left: var(--onboarding-body-left);
+  width: var(--onboarding-body-size);
+  color: var(--onboarding-ink-faint);
+  transform: translate(
+      calc(-50% + var(--onboarding-wander-x, 0px)),
+      calc(-50% + var(--onboarding-wander-y, 0px))
+    )
+    rotate(var(--onboarding-body-rotate, 0deg));
+  animation: onboarding-twinkle 3.8s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.onboarding-cloud-body[data-onboarding-tone="accent"] {
+  color: var(--onboarding-accent);
+}
+
+.onboarding-cloud-body:nth-child(3n) {
+  animation-duration: 3.2s;
+}
+
+.onboarding-cloud-body:nth-child(3n + 1) {
+  animation-duration: 4.1s;
+}
+
+.onboarding-cloud-body:nth-child(3n + 2) {
+  animation-duration: 3.6s;
+}
+
+.onboarding-cloud-body:nth-child(odd) {
+  animation-delay: 0.45s;
+}
+
+.onboarding-cloud-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
+.onboarding-cloud-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
+.onboarding-cloud-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
+.onboarding-cloud-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
+.onboarding-cloud-body[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
+.onboarding-cloud-body[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
+.onboarding-cloud-body[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
+.onboarding-cloud-body[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
+.onboarding-cloud-body[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
+.onboarding-cloud-body[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
+.onboarding-cloud-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
+.onboarding-cloud-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
+.onboarding-cloud-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
+.onboarding-cloud-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
+.onboarding-cloud-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
+.onboarding-cloud-body[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
+.onboarding-cloud-body[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
+.onboarding-cloud-body[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
+.onboarding-cloud-body[data-onboarding-body="18"] { --onboarding-body-top: 16%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -12deg; }
+.onboarding-cloud-body[data-onboarding-body="19"] { --onboarding-body-top: 8%; --onboarding-body-left: 37%; --onboarding-body-size: 28px; --onboarding-body-rotate: 5deg; }
+.onboarding-cloud-body[data-onboarding-body="20"] { --onboarding-body-top: 11%; --onboarding-body-left: 27%; --onboarding-body-size: 30px; --onboarding-body-rotate: 22deg; }
+.onboarding-cloud-body[data-onboarding-body="21"] { --onboarding-body-top: 4%; --onboarding-body-left: 41%; --onboarding-body-size: 32px; --onboarding-body-rotate: -10deg; }
+.onboarding-cloud-body[data-onboarding-body="22"] { --onboarding-body-top: 2%; --onboarding-body-left: 56%; --onboarding-body-size: 34px; --onboarding-body-rotate: 7deg; }
+.onboarding-cloud-body[data-onboarding-body="23"] { --onboarding-body-top: 5%; --onboarding-body-left: 71%; --onboarding-body-size: 36px; --onboarding-body-rotate: 24deg; }
+.onboarding-cloud-body[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
+.onboarding-cloud-body[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
+.onboarding-cloud-body[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
+.onboarding-cloud-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
+.onboarding-cloud-body[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
+.onboarding-cloud-body[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
+
+.onboarding-transition-line[data-onboarding-effect="fade"]
+  > .onboarding-transition-content {
+  animation: onboarding-fade-in 300ms ease-out backwards;
+}
+
+.onboarding-transition-line[data-onboarding-effect="line-slide"]
+  > .onboarding-transition-content {
+  animation-duration: 650ms;
+  animation-fill-mode: backwards;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.onboarding-transition-line[data-onboarding-effect="line-slide"][data-onboarding-direction="forward"]
+  > .onboarding-transition-content {
+  animation-name: onboarding-line-slide-forward;
+}
+
+.onboarding-transition-line[data-onboarding-effect="line-slide"][data-onboarding-direction="backward"]
+  > .onboarding-transition-content {
+  animation-name: onboarding-line-slide-backward;
+}
+
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-down"],
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-up"] {
+  overflow: visible;
+}
+
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-down"]
+  > .onboarding-transition-content,
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-up"]
+  > .onboarding-transition-content {
+  /* `backwards` (not `both`): the reveal ends on an identity transform, so
+     holding it forward is visually a no-op but leaves a lingering transform
+     that establishes a containing block and traps `position: fixed`
+     descendants. Reverting to no transform at rest looks identical and
+     frees fixed positioning. Ported from buzz (Apache-2.0). */
+  animation-duration: 760ms;
+  animation-fill-mode: backwards;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+  transform-origin: 50% 70%;
+}
+
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-down"]
+  > .onboarding-transition-content {
+  animation-name: onboarding-mask-reveal-down;
+}
+
+.onboarding-transition-line[data-onboarding-effect="mask-reveal-up"]
+  > .onboarding-transition-content {
+  animation-name: onboarding-mask-reveal-up;
+}
+
+@keyframes onboarding-orbit-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes onboarding-mark-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1.5deg);
+  }
+}
+
+@keyframes onboarding-twinkle {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes onboarding-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes onboarding-line-slide-forward {
+  from {
+    opacity: 0;
+    transform: translateX(48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-line-slide-backward {
+  from {
+    opacity: 0;
+    transform: translateX(-48px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes onboarding-mask-reveal-up {
+  from {
+    filter: blur(8px);
+    opacity: 0;
+    transform: translate3d(0, 30px, 0) scale(0.985);
+  }
+  56% {
+    filter: blur(2px);
+    opacity: 0.86;
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes onboarding-mask-reveal-down {
+  from {
+    filter: blur(8px);
+    opacity: 0;
+    transform: translate3d(0, -30px, 0) scale(0.985);
+  }
+  56% {
+    filter: blur(2px);
+    opacity: 0.86;
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .onboarding-mark,
+  .onboarding-mark svg path:nth-of-type(2),
+  .onboarding-wordmark,
+  .onboarding-tagline,
+  .onboarding-cloud-body,
+  .onboarding-transition-content {
+    animation: none;
+    filter: none;
+    opacity: 1;
+    will-change: auto;
+  }
+
+  .onboarding-mark,
+  .onboarding-wordmark,
+  .onboarding-tagline,
+  .onboarding-transition-content {
+    transform: none;
+  }
+
+  /* Static pose stays; only wander/twinkle die. transform:none here would
+     also drop --onboarding-body-rotate and leave edge glyphs uncentered. */
+  .onboarding-cloud-body {
+    transform: translate(-50%, -50%) rotate(var(--onboarding-body-rotate, 0deg));
+  }
+
+  .onboarding-mark svg path:nth-of-type(2) {
+    stroke-dashoffset: 0;
   }
 }
 

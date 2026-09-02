@@ -39,6 +39,7 @@ import {
   workHostStatus,
   workHostTypeLabel,
   workspaceNameError,
+  displayNameSaveMessage,
   workTierPolicySaveMessage,
 } from "./model";
 
@@ -374,6 +375,23 @@ describe("auto target eligibility (mirrors requireAllowedTarget)", () => {
   it("keeps the raw host id out of the sentence", () => {
     const missing = "019f0000-0000-0000-0000-000000000000";
     expect(autoTargetLabel(missing, [])).not.toContain(missing);
+  });
+});
+
+describe("프로필 표시 이름 error copy", () => {
+  it("maps the empty-name 400 and never leaks the wire sentence", () => {
+    expect(
+      displayNameSaveMessage(new ApiError(400, "displayName is required"))
+    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요.");
+    expect(
+      displayNameSaveMessage(new ApiError(400, "displayName is required"))
+    ).not.toContain("displayName");
+    expect(displayNameSaveMessage(new ApiError(500, "displayName is required"))).toBe(
+      "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    );
+    expect(displayNameSaveMessage(new Error("network"))).toBe(
+      "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
+    );
   });
 });
 

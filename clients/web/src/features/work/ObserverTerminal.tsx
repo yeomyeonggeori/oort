@@ -1070,15 +1070,20 @@ export function ObserverTerminal({
             padding and no border, and the chrome lives out here. */}
         <div
           className={cn(
-            "rounded-sm border border-line bg-surface-raised p-2 focus-within:focus-ring",
+            "rounded-sm border border-line bg-surface-raised p-2 focus-visible-within:focus-ring",
             docked && "flex min-h-0 flex-1 flex-col"
           )}
+          data-testid="work-observer-terminal-frame"
         >
           <div
             // The whole point of a read-only terminal is that it can be read:
             // focus reaches it (xterm puts a textarea inside), selection and
             // scrolling work, and with stdin disabled a keystroke does nothing.
             // The ring is on the frame because xterm owns the inner elements.
+            // Same modality transform as the composer (#1866): pointer
+            // click-drag to copy must not paint an inset ring on a stdin-dead
+            // surface; Tab still does. xterm's helper textarea is tabIndex 0
+            // and :focus-visible on click, so :focus-within cannot split them.
             //
             // `role="log"` used to be here and is deliberately gone (R1 M5):
             // log carries an implicit aria-live="polite", which handed a screen

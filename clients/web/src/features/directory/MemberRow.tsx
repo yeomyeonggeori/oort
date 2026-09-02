@@ -4,6 +4,8 @@ import { cn } from "@/design/lib/cn";
 import { useSession } from "@/app/session";
 import { memberFor, type Directory, useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Avatar } from "@/features/timeline/MessageRow";
+import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
+import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import {
   memberRowLabel,
   roleLabel,
@@ -57,6 +59,7 @@ export function MemberRow({
   const owner = isAgent ? memberFor(directory, member.ownerHumanId) : null;
   const role = roleLabel(member, labels);
   const status = statusLabel(member);
+  const { visible: custom, nowMs } = useCustomStatusView(member);
 
   const identity = (
     <span className="flex min-w-0 flex-1 flex-col">
@@ -73,6 +76,12 @@ export function MemberRow({
         {role && <span className="text-meta text-ink-muted">{role}</span>}
         {status && <span className="text-meta text-warn">{status}</span>}
       </span>
+      {custom ? (
+        <CustomStatusMark
+          status={custom}
+          className="text-meta text-ink-muted"
+        />
+      ) : null}
       {owner && (
         <span className="text-meta text-ink-muted">
           {owner.displayName} 님이 관리
@@ -96,7 +105,8 @@ export function MemberRow({
         aria-label={memberRowLabel(
           member,
           owner?.displayName ?? null,
-          labels
+          labels,
+          nowMs
         ).replace(
           "다이렉트 메시지 열기",
           uuidEq(member.id, selfMemberId) ? "나, 프로필 열기" : "프로필 열기"

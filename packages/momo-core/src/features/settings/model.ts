@@ -513,6 +513,26 @@ function statusOf(error: unknown): number {
 }
 
 /**
+ * Profile 표시 이름 저장 answers in Korean, not in the wire message.
+ *
+ * PATCH /members/me speaks operator English ("displayName is required"), which
+ * is the right thing to log and the wrong thing to put on the form. The one
+ * status this client can provoke (empty name → 400) gets copy that says what
+ * happened and the next move; anything unmapped falls back to the generic line
+ * rather than leaking the wire string.
+ */
+export function displayNameSaveMessage(error: unknown): string {
+  if (
+    error instanceof ApiError &&
+    error.status === 400 &&
+    error.message === "displayName is required"
+  ) {
+    return "표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요.";
+  }
+  return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
+}
+
+/**
  * 코드 실행 호스트 surfaces answer in Korean, not in the wire message.
  *
  * WorkTierPolicyRoutes and WorkHostRoutes speak operator English ("auto target

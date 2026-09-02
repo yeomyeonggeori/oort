@@ -3,6 +3,7 @@ import { effectivePresence, isPresenceStatus } from "../../lib/api";
 import {
   declaredStatusLabel,
   effectivePresenceLabel,
+  otherMemberDeclaredPresenceLabel,
   presenceTriggerLabel,
   PRESENCE_MENU_LABEL,
   PRESENCE_OPTIONS,
@@ -64,6 +65,13 @@ describe("presence copy", () => {
     expect(presenceTriggerLabel("away").startsWith(PRESENCE_MENU_LABEL)).toBe(
       true
     );
+  });
+
+  it("does not name auto as 온라인 on someone else's profile", () => {
+    expect(otherMemberDeclaredPresenceLabel("auto")).toBeNull();
+    expect(otherMemberDeclaredPresenceLabel(undefined)).toBeNull();
+    expect(otherMemberDeclaredPresenceLabel("away")).toBe("자리 비움");
+    expect(otherMemberDeclaredPresenceLabel("dnd")).toBe("방해 금지");
   });
 });
 

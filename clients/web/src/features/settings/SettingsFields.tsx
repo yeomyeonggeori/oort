@@ -17,6 +17,62 @@ import { choiceRadiosHintId } from "./fieldIds";
 // typed key-value lists, no card per row: elevation is reserved for grouping.
 // =============================================================================
 
+/**
+ * One on/off row in a bordered settings group. The NAME is the checkbox's
+ * accessible name; the sentence is its description. Kept apart so a screen
+ * reader does not run the whole paragraph together as one label.
+ */
+export function SettingsToggleRow({
+  testId,
+  name,
+  description,
+  checked,
+  disabled,
+  describedBy,
+  onToggle,
+}: {
+  testId: string;
+  name: string;
+  description: string;
+  checked: boolean;
+  disabled?: boolean;
+  /** Id of a shared reason (offline, etc.) pointed at by several rows. */
+  describedBy?: string;
+  onToggle: (next: boolean) => void;
+}) {
+  const nameId = `${testId}-name`;
+  const descId = `${testId}-desc`;
+  return (
+    <div
+      className={cn(
+        "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0",
+        checked ? "bg-accent-soft" : "hover:bg-surface-hover"
+      )}
+      data-state={checked ? "on" : "off"}
+    >
+      <input
+        type="checkbox"
+        id={testId}
+        checked={checked}
+        disabled={disabled}
+        aria-labelledby={nameId}
+        aria-describedby={describedBy ? `${descId} ${describedBy}` : descId}
+        onChange={(event) => onToggle(event.target.checked)}
+        className="mt-1 accent-accent focus-visible:focus-ring"
+        data-testid={testId}
+      />
+      <label htmlFor={testId} className="flex min-w-0 cursor-pointer flex-col gap-px">
+        <span id={nameId} className="text-body text-ink">
+          {name}
+        </span>
+        <span id={descId} className="break-keep text-meta text-ink-muted">
+          {description}
+        </span>
+      </label>
+    </div>
+  );
+}
+
 /** Section title plus the one or two lines that explain what it governs. */
 export function SectionShell({
   title,
@@ -328,6 +384,13 @@ export function ChoiceRadios({
               value={choice.id}
               checked={value === choice.id}
               onChange={() => onChange(choice.id)}
+              onClick={() => {
+                // HTML radios skip `change` when the already-selected option
+                // is clicked. Re-selecting the default still has to persist
+                // (link-preview L-2). Other consumers are idempotent on the
+                // same id.
+                if (choice.id === value) onChange(choice.id);
+              }}
               className="mt-1 accent-accent focus-visible:focus-ring"
             />
             <span className="flex min-w-0 flex-col gap-px">
@@ -484,6 +547,7 @@ export function SaveButton({
   busy,
   onSave,
   testId,
+  size = "sm",
 }: {
   /** Verb-first and scope-bearing: two blocks on one panel need two names. */
   label: string;
@@ -492,11 +556,16 @@ export function SaveButton({
   busy?: boolean;
   onSave: () => void;
   testId?: string;
+  /**
+   * Profile's display-name save is a form primary (goal P3): `default` grows
+   * to 44px under 600px. Other settings saves stay `sm`.
+   */
+  size?: "sm" | "default";
 }) {
   return (
     <Button
       type="submit"
-      size="sm"
+      size={size}
       aria-disabled={!canSave || undefined}
       aria-busy={busy || undefined}
       className={cn(!canSave && "opacity-50")}

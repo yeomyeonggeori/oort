@@ -52,9 +52,10 @@ const SHIPPED_SOURCES = filesUnder(SRC_DIR, /\.tsx?$/)
   }));
 
 describe("ADR-0172 lucide 아이콘 경계", () => {
-  it("기능 표면의 raw SVG는 oort 브랜드 마크 한 곳만 남는다", () => {
+  it("기능 표면의 raw SVG는 oort 브랜드 글리프만 남는다", () => {
     expect(LOCAL_SVG_COMPONENTS).toEqual([
       "src/design/brand/OortMark.tsx",
+      "src/features/auth/OortCloudMarks.tsx",
     ]);
   });
 

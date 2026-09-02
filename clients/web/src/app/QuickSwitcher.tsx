@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import {
   Activity,
   Bot,
+  FileText,
   Hash,
   Inbox,
   Lock,
@@ -35,16 +36,23 @@ import {
   useOpenAgentProfile,
 } from "@/features/routing/useAgentProfile";
 import { useAddWorkspaceOpen } from "@/features/workspace/useAddWorkspace";
+import { useDraftsPanel } from "@/features/drafts/useDraftsPanel";
 import { InlineBanner } from "@/features/common/States";
 import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
 import {
+  channelIdInPath,
+  searchEntryLabel,
+  searchRoutePath,
+} from "@momo/core/features/search/searchModel";
+import {
   OPEN_NEW_DM_SHORTCUT,
   OPEN_QUICK_SWITCHER_SHORTCUT,
   OPEN_SETTINGS_SHORTCUT,
 } from "@/app/keyboardShortcuts";
+import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -97,6 +105,8 @@ export function QuickSwitcher({
 }) {
   const { session, workspaceId } = useSession();
   const navigate = useNavigate();
+  const location = useLocation();
+  const { showNav: showDrafts } = useDraftsPanel();
   const { groups } = useChannels(workspaceId);
   const directoryQuery = useDirectory(workspaceId);
   const { directory } = directoryQuery;
@@ -154,6 +164,22 @@ export function QuickSwitcher({
     [directory.members, session.member.id, peersWithDm]
   );
 
+  // 지금 서 있는 채널 — 「이 채널에서 검색」이 뜻하는 그 채널 (#1931).
+  //
+  // 주소로 판정한다. 팔레트는 채널 표면의 자식이 아니라 셸의 형제이므로 열려
+  // 있는 채널을 prop으로 받을 길이 없고, 주소는 그 사실의 정본이다. 목록에서
+  // 못 찾은 id는 **버린다**: 이름을 모르는 채널을 「이 채널에서 검색」이라고
+  // 부를 수는 있어도, 그 줄은 사람이 어디로 가는지 모르는 채로 누르는 줄이 된다.
+  const currentChannel = useMemo(() => {
+    const channelId = channelIdInPath(location.pathname);
+    if (channelId === null) return null;
+    return (
+      [...groups.channels, ...groups.dms].find(
+        (channel) => channel.id.toLowerCase() === channelId.toLowerCase()
+      ) ?? null
+    );
+  }, [location.pathname, groups.channels, groups.dms]);
+
   // A failed DM belongs to the attempt that failed, not to the palette. The
   // palette outlives its openings — cmdk unmounts the dialog contents but this
   // component stays — so nothing else would ever clear the banner, and a ⌘K
@@ -202,21 +228,37 @@ export function QuickSwitcher({
         event.preventDefault();
         onOpenChange(!open);
       }
-      // ⌘, opens settings (R-1 §1 keyboard path).
+      // ⌘, opens settings (R-1 §1 keyboard path). Already on /settings it
+      // must not push another history entry: 「앱으로 돌아가기」 is navigate(-1),
+      // so a stacked /settings would eat the first click (#1867 H-1).
       if (OPEN_SETTINGS_SHORTCUT.matches(event)) {
         event.preventDefault();
+        const already = location.pathname === "/settings";
+        if (open) {
+          rememberSettingsOpener(restoreRef.current);
+          onOpenChange(false);
+        } else if (!already) {
+          rememberSettingsOpener();
+        }
+        if (already) return;
         navigate("/settings");
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [open, onOpenChange, navigate, formDialogOpen]);
+  }, [open, onOpenChange, navigate, formDialogOpen, location.pathname]);
 
   const searchProvided = isSurfaceProvided("messageSearch");
   // 팔레트에 친 말. 메시지 검색으로 넘길 때 그대로 들고 간다.
   const [typed, setTyped] = useState("");
 
   function go(path: string) {
+    const toSettings = path === "/settings" || path.startsWith("/settings?");
+    if (toSettings && location.pathname === "/settings") {
+      onOpenChange(false);
+      return;
+    }
+    if (toSettings) rememberSettingsOpener(restoreRef.current);
     onOpenChange(false);
     navigate(path);
   }
@@ -276,38 +318,97 @@ export function QuickSwitcher({
             : "일치하는 채널이나 사람이 없습니다. 다른 이름으로 검색하세요."}
         </Command.Empty>
 
-        <Command.Group heading="이동">
-          {/* 메시지 검색은 팔레트 안에서 실행되지 않고 자기 표면으로 데려간다
-              (goal B12 H5). 이 리스트는 이미 받아 둔 목록을 cmdk가 동기로 걸러
-              내는 자리라, 서버에 묻고 기다리는 검색을 여기 끼워 넣으면 로딩·
-              오류·빈 결과가 갈 곳이 없다. 편승은 진입점까지다. */}
-          {searchProvided && (
+        {/* 메시지 검색은 팔레트 안에서 실행되지 않고 자기 표면으로 데려간다
+            (goal B12 H5). 이 리스트는 이미 받아 둔 목록을 cmdk가 동기로 걸러
+            내는 자리라, 서버에 묻고 기다리는 검색을 여기 끼워 넣으면 로딩·
+            오류·빈 결과가 갈 곳이 없다. 편승은 진입점까지다.
+
+            **자기 그룹으로 나와 앉은 이유** (R1 B-2, base 결함): cmdk는 이름이
+            아무것도 안 맞으면 그 그룹에 `hidden`을 걸고, `forceMount`된 항목은
+            DOM에 남지만 상자가 0×0이 된다. 「이동」 안에 있던 동안 이 줄은
+            **키보드는 닿는데 눈은 못 보는 컨트롤**이었고(Enter는 동작했다),
+            바로 위 `Command.Empty`의 문장은 화면에 없는 곳을 가리켰다. 항목의
+            `forceMount`만으로는 고쳐지지 않는다 — 그룹도 함께 살아남아야 한다.
+            (cmdk의 `Item`은 `props.forceMount ?? groupContext.forceMount`라
+            그룹의 값을 물려받는다. 그래서 실제로 일하는 것은 아래 그룹의
+            `forceMount`이고, 항목에 쓴 것은 이 줄이 언젠가 그룹 밖으로
+            옮겨져도 혼자 살아남게 하는 보험이다.)
+
+            그리고 그 생존이 여기서는 예외가 아니라 규칙이다: 이 두 줄은 정확히
+            **이름으로 못 찾았을 때 쓰라고 있는** 줄들이라, 걸러져 사라지면
+            필요한 바로 그 순간에 없다. 「이동」의 나머지 항목은 반대로 이름이
+            안 맞으면 사라지는 것이 맞으므로 그 그룹에 남는다.
+
+            그룹 머리글이 표면 이름을 **한 번** 말하고(#1146 N4), 두 줄은 각자
+            범위만 말한다. `Command.Empty`가 「아래 {SEARCH_SURFACE_NAME}에서
+            찾을 수 있습니다」라고 가리키는 그 이름이 이 머리글이다. */}
+        {searchProvided && (
+          <Command.Group heading={SEARCH_SURFACE_NAME} forceMount>
             <Command.Item
               className={itemClass}
-              value={`${SEARCH_SURFACE_NAME} 검색 찾기 search messages`}
+              value={`${SEARCH_SURFACE_NAME} 전체에서 검색 찾기 search messages everywhere`}
               data-testid="switcher-message-search"
-              // 이 줄만 `forceMount`다. 나머지 항목은 이름이 안 맞으면 사라지는
-              // 것이 맞지만, 이것은 **이름으로 못 찾았을 때 쓰라고 있는** 항목이라
-              // 걸러져 사라지면 정확히 필요한 순간에 없다.
               forceMount
-              onSelect={() =>
-                go(
-                  typed.trim() === ""
-                    ? "/search"
-                    : `/search?q=${encodeURIComponent(typed.trim())}`
-                )
-              }
+              onSelect={() => go(searchRoutePath(typed))}
             >
               <Search className="size-4 opacity-70" />
-              {typed.trim() === ""
-                ? SEARCH_SURFACE_NAME
-                : `'${typed.trim()}' ${SEARCH_SURFACE_NAME}`}
+              {/* 두 줄이 같은 동사를 쓴다(R1 N-1). 같은 그룹에 나란히 선 두
+                  줄이 같은 행동을 「검색」과 「찾기」로 갈라 부르던 자리다.
+                  범위 이름은 표면의 칩과 **같은 한 줄**에서 온다
+                  (`searchScopeLabel`) — 진입점이 「이 채널에서」라 하고 도착한
+                  칩이 다른 말을 하면 사람은 매번 대조해야 한다. */}
+              {searchEntryLabel("workspace", null, typed)}
             </Command.Item>
-          )}
+            {/* 채널 안에서 ⌘K를 열었다면 「이 채널에서」로 곧장 갈 수 있다
+                (BT-3 / #1931). 이 줄이 검색 범위의 **유일한 진입 배선**이다:
+                범위 자체는 표면의 칩이 쥐고 있고, 여기서 하는 일은 도착할 때의
+                범위를 주소에 실어 보내는 것뿐이다.
+
+                형제 줄과 **같은 규율**로 산다(R1 B-1). 1차 판본은 이 줄에만
+                `forceMount`를 주지 않았고, 그래서 사람이 **찾으려는 말**을 치는
+                순간 떨어져 나갔다 — 질의가 컨트롤 자기 이름과 겹칠 때만 사는
+                줄이었다. 「질의를 들고 채널 범위로 인계」가 이 줄의 용도인데
+                질의가 있으면 없어졌으니, 의도와 렌더가 서로 반대였다. */}
+            {currentChannel !== null && (
+              <Command.Item
+                className={itemClass}
+                value={`${SEARCH_SURFACE_NAME} 이 채널에서 검색 찾기 search in this channel`}
+                data-testid="switcher-message-search-channel"
+                forceMount
+                onSelect={() => go(searchRoutePath(typed, currentChannel.id))}
+              >
+                <Search className="size-4 opacity-70" />
+                {searchEntryLabel(
+                  "channel",
+                  {
+                    channelId: currentChannel.id,
+                    label: currentChannel.name ?? null,
+                    isDirect: currentChannel.kind === "dm",
+                    peer: null,
+                  },
+                  typed
+                )}
+              </Command.Item>
+            )}
+          </Command.Group>
+        )}
+
+        <Command.Group heading="이동">
           <Command.Item className={itemClass} onSelect={() => go("/inbox")}>
             <Inbox className="size-4 opacity-70" />
             인박스
           </Command.Item>
+          {showDrafts && (
+            <Command.Item
+              className={itemClass}
+              value="초안 drafts"
+              data-testid="switcher-drafts"
+              onSelect={() => go("/drafts")}
+            >
+              <FileText className="size-4 opacity-70" />
+              초안
+            </Command.Item>
+          )}
           <Command.Item className={itemClass} onSelect={() => go("/activity")}>
             <Activity className="size-4 opacity-70" />
             활동

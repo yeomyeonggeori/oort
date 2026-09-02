@@ -5,6 +5,7 @@ import { PICKER_EMOJI } from "@/features/emoji/EmojiPickerDialog";
 import {
   HOVER_TOOLBAR_REACTION_SEED,
   HOVER_TOOLBAR_SLOT_COUNT,
+  rectsIntersect,
   shouldShowHoverToolbar,
   toolbarClipsScrollerTop,
 } from "./hoverToolbarModel";
@@ -55,6 +56,19 @@ describe("shouldShowHoverToolbar", () => {
     ).toBe(true);
   });
 
+  it("이웃 행 배너가 열려 있으면 툴바를 달지 않는다", () => {
+    expect(
+      shouldShowHoverToolbar({ ...rest, rowHovered: true, neighborBannerOpen: true })
+    ).toBe(false);
+    expect(
+      shouldShowHoverToolbar({
+        ...rest,
+        overlayOpen: true,
+        neighborBannerOpen: true,
+      })
+    ).toBe(false);
+  });
+
   it("터치와 편집 중에는 절대 안 뜬다", () => {
     expect(
       shouldShowHoverToolbar({ ...rest, pointerCanHover: false, rowHovered: true })
@@ -70,6 +84,21 @@ describe("shouldShowHoverToolbar", () => {
       })
     ).toBe(false);
   });
+});
+
+describe("행 배너 「닫기」와 이웃 툴바 기하 (M-6, geometry-probe-only)", () => {
+  it("probe 400 배너의 「닫기」와 위 straddle 툴바가 겹치면 실패한다", () => {
+    const close = { left: 1840, right: 1973, top: 674, bottom: 706 };
+    const toolbar = { left: 1693, right: 1973, top: 700, bottom: 750 };
+    expect(rectsIntersect(close, toolbar)).toBe(true);
+  });
+
+  it("배너 아래에 스트래들 띠를 비우면 「닫기」와 툴바가 겹치지 않는다", () => {
+    const close = { left: 1840, right: 1973, top: 642, bottom: 674 };
+    const toolbar = { left: 1693, right: 1973, top: 700, bottom: 750 };
+    expect(rectsIntersect(close, toolbar)).toBe(false);
+  });
+
 });
 
 describe("toolbarClipsScrollerTop", () => {

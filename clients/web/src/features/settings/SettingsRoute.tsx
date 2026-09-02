@@ -1,15 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { ArrowLeft } from "lucide-react";
 import { useSession } from "@/app/session";
-import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { queryClient } from "@/app/queryClient";
 import { resetSettingsQueries } from "@/app/retryScope";
-import { Button } from "@/design/ui/button";
+import { titlebarDragProps } from "@/app/sidebarPane";
 import { escapeIsClaimed } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
+import { IS_TAURI } from "@/lib/env";
 import { isDesktop } from "@/lib/tauri";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
@@ -20,82 +28,27 @@ import { EventSubscriptionSection } from "./EventSubscriptionSection";
 import { InviteSection } from "./InviteSection";
 import { NotificationRulesSection } from "./NotificationRulesSection";
 import { PluginSection } from "@/features/plugins/PluginSection";
+import { ProfileSection } from "./ProfileSection";
 import { UsageSection } from "./UsageSection";
 import { WebhookSection } from "./WebhookSection";
 import { WorkHostSection } from "./WorkHostSection";
 import { WorkspaceSection } from "./WorkspaceSection";
+import {
+  DEFAULT_SETTINGS_SECTION,
+  SETTINGS_GROUPS,
+  SETTINGS_SECTIONS,
+  type SettingsSectionId,
+} from "./settingsNav";
 
 // =============================================================================
-// 설정 셸 (R-1 §5): a full-screen route with a left nav and a right panel, not
-// a modal. "패널 수는 죄": the operator sections are grouped under one quiet
-// heading rather than spread across tabs, and there is no tour.
+// 설정 셸 (R-1 §5 / #1867): 앱 사이드바·타이틀바를 대체하는 전면 레이아웃.
+// 왼쪽은 섹션 전용 사이드바, 최상단은 앱으로 돌아가기, 본문은 기존 섹션 재사용.
 //
 // Operator gating is answered by the server, not guessed by the client: each
 // operator section calls its own GET and swaps in the "서버 운영자에게 문의"
 // notice on a 403, so a member who cannot change a setting is told who can
 // instead of being handed a form whose save is guaranteed to fail.
 // =============================================================================
-
-type SectionId =
-  | "account"
-  | "appearance"
-  | "link-previews"
-  | "notifications"
-  | "updates"
-  | "ai"
-  | "code"
-  | "workspace"
-  | "plugins"
-  | "events"
-  | "usage"
-  | "webhooks"
-  | "members";
-
-/**
- * The two groups are a SCOPE, not a permission: 나 is what only affects the
- * signed-in member, 워크스페이스 is what the whole tenant shares. Permission is
- * answered per panel by the server (each operator section swaps in the "서버
- * 운영자에게 문의" notice on a 403), so the nav must not double as a gate.
- *
- * The group used to be called 운영, which read as operator-only and put 사용량
- * behind an expectation that is false: every member may read the workspace's
- * costs (AX-7 1층 계약: "워크스페이스에서 발생하는 과금은 사용자가 전부 트래킹").
- * A member who can read a panel should not have to disbelieve the sidebar to
- * open it.
- */
-interface SectionMeta {
-  id: SectionId;
-  label: string;
-  group: "나" | "워크스페이스";
-  /** Only in the desktop shell: a browser tab has no app bundle to update. */
-  desktopOnly?: boolean;
-}
-
-const SECTIONS: SectionMeta[] = [
-  { id: "account", label: "계정", group: "나" },
-  // 테마는 이 기기에만 저장되는 선택이라 워크스페이스가 아니라 나에 속한다
-  // (src/design/theme.ts). 계정 바로 아래인 것은 순서가 곧 빈도이기 때문이다.
-  { id: "appearance", label: "테마", group: "나" },
-  { id: "link-previews", label: "링크 미리보기", group: "나" },
-  { id: "notifications", label: "알림 규칙", group: "나" },
-  { id: "updates", label: "업데이트", group: "나", desktopOnly: true },
-  { id: "ai", label: "AI 연결", group: "워크스페이스" },
-  { id: "code", label: "코드 실행 호스트", group: "워크스페이스" },
-  { id: "workspace", label: "워크스페이스", group: "워크스페이스" },
-  { id: "plugins", label: "앱", group: "워크스페이스" },
-  { id: "usage", label: "사용량", group: "워크스페이스" },
-  // 웹훅은 앱 바로 뒤에 선다: 둘 다 "바깥과 무엇을 주고받는가"이고, 이 순서가
-  // 곧 그 이웃 관계다. 멤버와 초대 앞인 것은 사람이 아니라 시스템을 들이는
-  // 표면이기 때문이다.
-  { id: "webhooks", label: "웹훅", group: "워크스페이스" },
-  { id: "members", label: "멤버와 초대", group: "워크스페이스" },
-  // 마지막인 것은 빈도 순서다 (#1202): 한 번 붙이고 나면 다시 열 일이 드물고,
-  // 여는 사람은 오너나 관리자뿐이다. 이름이 '외부 전송'이 아니라 '이벤트 구독'인
-  // 것은 서버가 그 이름으로 부르기 때문이다 (openapi event-subscriptions).
-  { id: "events", label: "이벤트 구독", group: "워크스페이스" },
-];
-
-const GROUPS: SectionMeta["group"][] = ["나", "워크스페이스"];
 
 export function SettingsRoute() {
   const { session, workspaceId } = useSession();
@@ -104,18 +57,39 @@ export function SettingsRoute() {
   // panel instead of "open 설정 and click the fourth item".
   const [params] = useSearchParams();
   const sections = useMemo(
-    () => SECTIONS.filter((item) => !item.desktopOnly || isDesktop()),
+    () => SETTINGS_SECTIONS.filter((item) => !item.desktopOnly || isDesktop()),
     []
   );
   const requested = params.get("section");
-  const [section, setSection] = useState<SectionId>(() =>
+  const [section, setSection] = useState<SettingsSectionId>(() =>
     sections.some((item) => item.id === requested)
-      ? (requested as SectionId)
-      : "account"
+      ? (requested as SettingsSectionId)
+      : DEFAULT_SETTINGS_SECTION
   );
-  const navRefs = useRef<Partial<Record<SectionId, HTMLButtonElement | null>>>({});
+  const navRefs = useRef<
+    Partial<Record<SettingsSectionId, HTMLButtonElement | null>>
+  >({});
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
+  const didEnterFocus = useRef(false);
 
   const close = useCallback(() => navigate(-1), [navigate]);
+
+  // 전면 전환 진입 포커스 (#1867 M-4): 현재 섹션 버튼, 없으면 h1.
+  useLayoutEffect(() => {
+    if (didEnterFocus.current) return;
+    didEnterFocus.current = true;
+    const target = navRefs.current[section] ?? headingRef.current;
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [section]);
+
+  // 선택 항목이 폰 캡 아래로 내려가 있으면 스크롤로 드러낸다 (#1867 M-1).
+  useEffect(() => {
+    navRefs.current[section]?.scrollIntoView({
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [section]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -186,15 +160,17 @@ export function SettingsRoute() {
 
   return (
     <div className="flex min-w-0 flex-1 flex-col" data-testid="settings-route">
-      <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <SidebarDrawerToggle />
-          <h1 className="text-body font-semibold">설정</h1>
-        </div>
-        <Button variant="ghost" size="sm" onClick={close}>
-          닫기
-        </Button>
-      </header>
+      <h1 ref={headingRef} tabIndex={-1} className="sr-only">
+        설정
+      </h1>
+      {IS_TAURI ? (
+        <div
+          className="wide-only h-control-lg shrink-0"
+          aria-hidden="true"
+          data-testid="settings-drag-region"
+          {...titlebarDragProps(true)}
+        />
+      ) : null}
 
       {offline && (
         <InlineBanner
@@ -204,16 +180,28 @@ export function SettingsRoute() {
         />
       )}
 
-      {/* 폰에서는 두 열이 되지 못한다 (goal B6): 192px 섹션 목록이 390px 화면의
-          본문에 198px만 남긴다. 그 폭에서는 목록이 본문 **위로** 올라가고, 본문이
+      {/* 폰에서는 두 열이 되지 못한다 (goal B6): 240px 섹션 목록이 390px 화면의
+          본문을 밀어내므로, 그 폭에서는 목록이 본문 **위로** 올라가고, 본문이
           남은 높이를 전부 받는다 (tokens.css settings-layout / settings-nav). */}
       <div className="settings-layout">
         <nav
           aria-label="설정 섹션"
           onKeyDown={onNavKeyDown}
           className="settings-nav p-2"
+          data-testid="settings-nav"
         >
-          {GROUPS.map((group) => (
+          <div className="pb-3">
+            <button
+              type="button"
+              onClick={close}
+              data-testid="settings-back-to-app"
+              className="tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
+              앱으로 돌아가기
+            </button>
+          </div>
+          {SETTINGS_GROUPS.map((group) => (
             <div key={group} className="flex flex-col gap-1 pb-3">
               <p className="px-2 text-meta text-ink-muted">{group}</p>
               <ul className="flex flex-col gap-1">
@@ -226,6 +214,7 @@ export function SettingsRoute() {
                       }}
                       onClick={() => setSection(item.id)}
                       aria-current={section === item.id ? "page" : undefined}
+                      data-testid={`settings-nav-${item.id}`}
                       className={cn(
                         "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
                         section === item.id
@@ -243,7 +232,7 @@ export function SettingsRoute() {
         </nav>
 
         <div
-          className="min-w-0 flex-1 overflow-y-auto p-4"
+          className="min-w-0 flex-1 overflow-y-auto p-6"
           data-settings-scroll-viewport
         >
           <RenderErrorBoundary
@@ -258,6 +247,7 @@ export function SettingsRoute() {
             // inputs to mean anything, so the cache goes first.
             onRetry={() => resetSettingsQueries(queryClient)}
           >
+          {section === "profile" && <ProfileSection offline={offline} />}
           {section === "account" && <AccountSection />}
           {section === "appearance" && <AppearanceSection />}
           {section === "link-previews" && <LinkPreviewSection />}

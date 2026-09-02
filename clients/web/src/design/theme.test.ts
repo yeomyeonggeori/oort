@@ -3,8 +3,15 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  ACCENT_ATTRIBUTE,
+  APPEARANCE_STORAGE_KEY,
+  applyAccent,
   applyTheme,
+  migrateAppearance,
+  normalizeAccentId,
   normalizeThemeChoice,
+  parseAppearance,
+  serializeAppearance,
   SYSTEM_COLOR_ATTRIBUTE,
   THEME_ATTRIBUTE,
   THEME_STORAGE_KEY,
@@ -181,20 +188,63 @@ describe("tokens.css already knows the stamp", () => {
   });
 });
 
+describe("appearance storage", () => {
+  it("serializes scheme and accent together", () => {
+    expect(
+      parseAppearance(serializeAppearance({ scheme: "dark", accent: "seongun" }))
+    ).toEqual({ scheme: "dark", accent: "seongun" });
+  });
+
+  it("treats unknown accents as Dawn", () => {
+    expect(normalizeAccentId("indigo")).toBe("dawn");
+    expect(normalizeAccentId(null)).toBe("dawn");
+  });
+
+  it("migrates the legacy scheme key into appearance.v1", () => {
+    expect(migrateAppearance(null, "dark")).toEqual({
+      scheme: "dark",
+      accent: "dawn",
+    });
+    expect(migrateAppearance(null, "system")).toEqual({
+      scheme: "system",
+      accent: "dawn",
+    });
+    expect(
+      migrateAppearance(
+        serializeAppearance({ scheme: "light", accent: "gamram" }),
+        "dark"
+      )
+    ).toEqual({ scheme: "light", accent: "gamram" });
+  });
+});
+
+describe("applyAccent", () => {
+  it("stamps data-accent including Dawn", () => {
+    const doc = fakeDocument(false);
+    applyAccent("dawn", doc);
+    expect(doc.documentElement.getAttribute(ACCENT_ATTRIBUTE)).toBe("dawn");
+    applyAccent("seongun", doc);
+    expect(doc.documentElement.getAttribute(ACCENT_ATTRIBUTE)).toBe("seongun");
+  });
+});
+
 describe("the pre-paint boot script mirrors this module", () => {
   it("reads the same storage key", () => {
+    expect(BOOT).toContain(`"${APPEARANCE_STORAGE_KEY}"`);
     expect(BOOT).toContain(`"${THEME_STORAGE_KEY}"`);
   });
 
-  it("writes the same two attribute names", () => {
+  it("writes the same attribute names", () => {
     expect(BOOT).toContain(`"${THEME_ATTRIBUTE}"`);
     expect(BOOT).toContain(`"${SYSTEM_COLOR_ATTRIBUTE}"`);
+    expect(BOOT).toContain(`"${ACCENT_ATTRIBUTE}"`);
   });
 
-  it("treats only light and dark as pins", () => {
-    // "system"과 미지의 값이 같은 답(스탬프 없음)을 받는다는 것이 이 파일의
-    // 전부다. 그 판정이 여기서 갈라지면 부팅과 런타임이 서로 다른 화면을 그린다.
-    expect(BOOT).toMatch(/stored\s*!==\s*"light"\s*&&\s*stored\s*!==\s*"dark"/);
+  it("treats only light and dark as scheme pins", () => {
+    // "system"과 미지의 값이 같은 답(스킴 스탬프 없음)을 받는다는 것이 이
+    // 파일의 전부다. 그 판정이 여기서 갈라지면 부팅과 런타임이 서로 다른
+    // 화면을 그린다.
+    expect(BOOT).toMatch(/scheme\s*!==\s*"light"\s*&&\s*scheme\s*!==\s*"dark"/);
   });
 });
 

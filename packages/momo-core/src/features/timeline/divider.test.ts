@@ -9,6 +9,7 @@ import {
   recoveryDividerLabel,
   recoveryDividerSegments,
   ROW_SPACE,
+  unreadDividerLabel,
   unreadDividerSegments,
   DIVIDER_TONE,
   DIVIDER_TONE_SPEC,
@@ -169,6 +170,7 @@ describe("unread / recovery", () => {
     expect(dividerText(unreadDividerSegments(3))).toBe(
       "새 메시지 3개, 여기까지 읽음"
     );
+    expect(unreadDividerLabel(3)).toBe("새 메시지 3개, 여기까지 읽음");
   });
 
   /**

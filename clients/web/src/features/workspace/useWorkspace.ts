@@ -1,10 +1,11 @@
 import { useMemo } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import {
   fetchReadStates,
   fetchRoster,
   listChannels,
   type Channel,
+  type ReadState,
 } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import type { RoleLabels } from "@momo/core/features/directory/model";
@@ -94,4 +95,26 @@ export function useReadStates(workspaceId: string) {
 export function useInvalidateReadStates(workspaceId: string) {
   const client = useQueryClient();
   return () => client.invalidateQueries({ queryKey: ["read-state", workspaceId] });
+}
+
+/**
+ * Replace one channel's row with the server's answer. `marked_unread_before_seq:
+ * null` drops a local mark — the client does not guess.
+ */
+export function applyReadStateToCache(
+  client: QueryClient,
+  workspaceId: string,
+  incoming: ReadState
+): void {
+  client.setQueryData<ReadState[]>(["read-state", workspaceId], (current) => {
+    if (!current) return [incoming];
+    const key = idKey(incoming.channelId);
+    let found = false;
+    const next = current.map((row) => {
+      if (idKey(row.channelId) !== key) return row;
+      found = true;
+      return incoming;
+    });
+    return found ? next : [...next, incoming];
+  });
 }

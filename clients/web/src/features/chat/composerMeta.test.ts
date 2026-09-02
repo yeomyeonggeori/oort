@@ -51,6 +51,27 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
     expect(composerMetaMode(phoneDm)).toBe("empty");
   });
 
+  it("링크 자리표시가 남아 있으면 작성 중이 아닐 때 힌트 슬롯을 연다", () => {
+    expect(
+      composerMetaMode({
+        typistCount: 0,
+        hasDmHint: false,
+        keysHintNeeded: false,
+        isMobile: true,
+        hasPendingLink: true,
+      })
+    ).toBe("hint");
+    expect(
+      composerMetaMode({
+        typistCount: 1,
+        hasDmHint: false,
+        keysHintNeeded: false,
+        isMobile: false,
+        hasPendingLink: true,
+      })
+    ).toBe("typing");
+  });
+
   it("힌트·작성 중·빈 판은 액션 행의 가로 슬롯만 쓰고 예약 세로 행을 만들지 않는다", () => {
     expect(composer).toContain(
       '"min-w-0 flex-1 truncate text-right text-meta text-ink-muted"'
@@ -68,5 +89,8 @@ describe("컴포저 공유 액션 슬롯 (U-8 · #1749)", () => {
     expect(composer).toMatch(
       /data-testid="composer-actions"[\s\S]*?<ComposerHint[\s\S]*?<TypingLine/
     );
+    expect(composer).toContain("COMPOSER_FORMAT_LINK_HINT");
+    expect(composer).toContain("composerFormatHasPendingLink");
+    expect(composer).toContain('data-testid="composer-link-hint"');
   });
 });

@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { Message } from "@momo/core/lib/api";
-import { countNewerThan, newestSeqOf } from "./navigation";
+import {
+  countNewerThan,
+  countUnreadJump,
+  dataIndexFromVirtuoso,
+  dividerViewportRelation,
+  newestSeqOf,
+  reconcileDividerRelation,
+  relationFromIntersection,
+  firstUnreadMessageSeq,
+  shouldLatchUnreadJump,
+  shouldShowJumpUnread,
+  timelineScrollBehavior,
+  unreadDividerIndexOf,
+} from "./navigation";
 
 // 「아래 새 메시지 N개」가 참인가. 이 산수가 틀려도 화면은 멀쩡해 보이고 사람만
 // 잘못 안다 — 그래서 화면이 아니라 숫자를 잰다 (진단 M-9).
@@ -101,5 +114,205 @@ describe("countNewerThan — 저자", () => {
   it("저자를 모르면 빼지 않는다 — 남의 말을 놓치는 쪽이 더 나쁘다", () => {
     // 행 액션이 없는 표면(작업 세션 기록)에는 `myMemberId`가 없다.
     expect(countNewerThan([...stream, mine(45)], 44)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BF-A2 — 상단 「새 메시지 N개」. 산수가 틀리면 필이 거짓을 말하고, 창 위치가
+// 틀리면 구분선이 보이는데도 떠 있거나 위쪽에 쌓였는데도 안 뜬다.
+// ---------------------------------------------------------------------------
+describe("countUnreadJump", () => {
+  it("동결 스냅샷이 없으면 셀 것이 없다", () => {
+    expect(countUnreadJump(null)).toBe(0);
+    expect(countUnreadJump(0)).toBe(0);
+    expect(countUnreadJump(undefined)).toBe(0);
+  });
+
+  it("구분선과 같은 수다 — 라이브 꼬리를 다시 세지 않는다", () => {
+    expect(countUnreadJump(5)).toBe(5);
+    // (b) 하단은 꼬리를 세고 (a) 상단은 연 순간의 N을 그대로 쓴다.
+    const tail = [...stream, message(45), message(46)];
+    expect(countNewerThan(tail, 44, ME)).toBe(2);
+    expect(countUnreadJump(5)).not.toBe(countNewerThan(tail, 44, ME));
+  });
+});
+
+describe("unreadDividerIndexOf", () => {
+  it("구분선이 없으면 null이다", () => {
+    expect(unreadDividerIndexOf([{ kind: "message" }, { kind: "day" }])).toBeNull();
+  });
+
+  it("첫 안읽음 항목의 첨자를 돌려준다", () => {
+    expect(
+      unreadDividerIndexOf([
+        { kind: "day" },
+        { kind: "message" },
+        { kind: "unread" },
+        { kind: "message" },
+      ])
+    ).toBe(2);
+  });
+});
+
+describe("dataIndexFromVirtuoso", () => {
+  it("firstItemIndex가 앞에 얹히면 뺀다", () => {
+    expect(dataIndexFromVirtuoso(1_000_007, 1_000_000)).toBe(7);
+  });
+
+  it("이미 데이터 첨자면 그대로 둔다", () => {
+    expect(dataIndexFromVirtuoso(7, 1_000_000)).toBe(7);
+  });
+});
+
+describe("dividerViewportRelation", () => {
+  it("구분선이 없으면 absent이다", () => {
+    expect(dividerViewportRelation(null, 0, 10)).toBe("absent");
+  });
+
+  it("창 시작보다 앞이면 위쪽 밖이다", () => {
+    expect(dividerViewportRelation(2, 8, 20)).toBe("above");
+  });
+
+  it("창 끝보다 뒤면 아래쪽 밖이다", () => {
+    expect(dividerViewportRelation(21, 8, 20)).toBe("below");
+  });
+
+  it("창 안에 있으면 in이다", () => {
+    expect(dividerViewportRelation(10, 8, 20)).toBe("in");
+    expect(dividerViewportRelation(8, 8, 20)).toBe("in");
+    expect(dividerViewportRelation(20, 8, 20)).toBe("in");
+  });
+});
+
+describe("reconcileDividerRelation", () => {
+  it("IO가 위쪽을 실측하면 range의 「안」(오버스캔)을 이긴다", () => {
+    expect(
+      reconcileDividerRelation({
+        dividerIndex: 10,
+        visibleStart: 8,
+        visibleEnd: 20,
+        observed: "above",
+      })
+    ).toBe("above");
+  });
+
+  it("구분선이 DOM에 없으면 range가 위/아래를 안다", () => {
+    expect(
+      reconcileDividerRelation({
+        dividerIndex: 2,
+        visibleStart: 40,
+        visibleEnd: 55,
+        observed: null,
+      })
+    ).toBe("above");
+  });
+
+  it("range를 아직 모르면 필을 띄우지 않는다", () => {
+    expect(
+      reconcileDividerRelation({
+        dividerIndex: 2,
+        visibleStart: null,
+        visibleEnd: null,
+        observed: null,
+      })
+    ).toBe("absent");
+  });
+});
+
+describe("relationFromIntersection", () => {
+  const root = { top: 100, bottom: 500 };
+
+  it("겹치면 창 안이다", () => {
+    expect(
+      relationFromIntersection({
+        isIntersecting: true,
+        rootBounds: root,
+        boundingClientRect: { top: 90, bottom: 120 },
+      })
+    ).toBe("in");
+  });
+
+  it("완전히 위면 above이다", () => {
+    expect(
+      relationFromIntersection({
+        isIntersecting: false,
+        rootBounds: root,
+        boundingClientRect: { top: 10, bottom: 40 },
+      })
+    ).toBe("above");
+  });
+
+  it("완전히 아래면 below이다", () => {
+    expect(
+      relationFromIntersection({
+        isIntersecting: false,
+        rootBounds: root,
+        boundingClientRect: { top: 520, bottom: 560 },
+      })
+    ).toBe("below");
+  });
+});
+
+describe("shouldLatchUnreadJump", () => {
+  it("IO가 실측한 창 안만 래치한다", () => {
+    expect(shouldLatchUnreadJump("in")).toBe(true);
+    expect(shouldLatchUnreadJump("above")).toBe(false);
+    expect(shouldLatchUnreadJump("below")).toBe(false);
+    expect(shouldLatchUnreadJump("absent")).toBe(false);
+    expect(shouldLatchUnreadJump(null)).toBe(false);
+  });
+
+  it("range 폴백 「in」은 래치 입력이 아니다", () => {
+    const rangeIn = reconcileDividerRelation({
+      dividerIndex: 10,
+      visibleStart: 8,
+      visibleEnd: 20,
+      observed: null,
+    });
+    expect(rangeIn).toBe("in");
+    expect(shouldLatchUnreadJump(null)).toBe(false);
+  });
+});
+
+describe("shouldShowJumpUnread", () => {
+  it("구분선이 위쪽 밖이고 N이 있을 때만 뜬다", () => {
+    expect(shouldShowJumpUnread("above", 3)).toBe(true);
+    expect(shouldShowJumpUnread("in", 3)).toBe(false);
+    expect(shouldShowJumpUnread("below", 3)).toBe(false);
+    expect(shouldShowJumpUnread("absent", 3)).toBe(false);
+    expect(shouldShowJumpUnread("above", 0)).toBe(false);
+  });
+
+  it("래치되면 위쪽 밖이어도 다시 서지 않는다", () => {
+    expect(shouldShowJumpUnread("above", 3, true)).toBe(false);
+    expect(shouldShowJumpUnread("above", 3, false)).toBe(true);
+  });
+});
+
+describe("firstUnreadMessageSeq", () => {
+  it("구분선 다음 첫 메시지의 seq다", () => {
+    expect(
+      firstUnreadMessageSeq(
+        [
+          { kind: "day" },
+          { kind: "message", message: { seq: 3 } },
+          { kind: "unread" },
+          { kind: "message", message: { seq: 4 } },
+          { kind: "message", message: { seq: 5 } },
+        ],
+        2
+      )
+    ).toBe(4);
+  });
+
+  it("구분선이 없으면 착지가 없다", () => {
+    expect(firstUnreadMessageSeq([{ kind: "message", message: { seq: 1 } }], null)).toBeNull();
+  });
+});
+
+describe("timelineScrollBehavior", () => {
+  it("reduced-motion이면 즉시, 아니면 smooth다", () => {
+    expect(timelineScrollBehavior(true)).toBe("auto");
+    expect(timelineScrollBehavior(false)).toBe("smooth");
   });
 });

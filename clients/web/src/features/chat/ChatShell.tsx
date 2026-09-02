@@ -3,11 +3,24 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
   fetchMessages,
-  updateReadState,
   uuidEq,
+  type Channel,
+  type MembershipRole,
   type Message,
   type WorkSession,
 } from "@momo/core/lib/api";
+import {
+  advertiseReadState,
+  channelReadAdvertisementReason,
+  nextAdvertisedChannelId,
+} from "@/features/chat/advertiseReadState";
+import {
+  consumeVisitMarkRolledBack,
+  foldInVisitMark,
+  freezeOpenedRead,
+  timelineUnreadFromOpened,
+  type OpenedReadSnapshot,
+} from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -60,9 +73,9 @@ import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { useOpenAddChannelMember } from "@/features/channels/useAddChannelMember";
 import {
   ChannelMemberPanel,
-  ChannelTopicControl,
   type ChannelMemberListStatus,
 } from "@/features/channels/ChannelContextControls";
+import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import {
   HuddleHeaderBanner,
   HuddleHeaderControl,
@@ -97,6 +110,22 @@ const WORK_THREAD_ROOT_PAGE_LIMIT = 25;
 // 어긋나면 화면에 없는 컨트롤로 Tab이 걸어 들어간다. 한 곳에만 적어 다음 사람이
 // 한쪽만 옮기지 못하게 한다 (#1421 N1).
 const DRAWER_OVERLAY_QUERY = "(width < 900px)";
+
+/**
+ * Offer "멤버 추가하기" on this channel?
+ *
+ * Same admin/owner predicate as channel create (`canCreateChannelNow`). While
+ * the roster is in flight the answer is silence: a card that appears and then
+ * vanishes is worse than one that arrives a beat late (R2 M5).
+ */
+export function canAddChannelMemberNow(
+  rosterSettled: boolean,
+  role: MembershipRole | undefined,
+  kind: Channel["kind"] | undefined | null
+): boolean {
+  if (kind == null || kind === "dm") return false;
+  return canCreateChannelNow(rosterSettled, role);
+}
 
 export function ChatShell() {
   const { session, workspaceId, realtime, connStatus } = useSession();
@@ -182,31 +211,62 @@ export function ChatShell() {
     stressCount > 0 ? null : channelId
   );
 
-  // Unread boundary is the cursor as it stood when the channel was OPENED:
-  // advancing the cursor below must not erase the divider under the reader.
-  const [openedWith, setOpenedWith] = useState<{
-    channelId: string;
-    lastReadSeq: number | null;
-    unreadCount: number;
-  } | null>(null);
+  // Unread boundary is the row as it stood when the channel was OPENED
+  // (cursor AND mark). Advancing the cursor, or the open's own
+  // explicit_open clearing the server mark, must not erase the divider
+  // under the reader for this visit (P7, #1934 B-1).
+  const [openedWith, setOpenedWith] = useState<OpenedReadSnapshot | null>(
+    null
+  );
+  const [frozenFor, setFrozenFor] = useState<string | null>(null);
   const markedRef = useRef<string | null>(null);
+  const advertisedChannelRef = useRef<string | null>(null);
+
+  if (
+    channelId !== null &&
+    (frozenFor === null || !uuidEq(frozenFor, channelId))
+  ) {
+    setFrozenFor(channelId);
+    setOpenedWith(
+      freezeOpenedRead(channelId, unreadFor(readStates.byChannel, channelId))
+    );
+  }
 
   useEffect(() => {
     if (channelId === null) return;
     const read = unreadFor(readStates.byChannel, channelId);
+    const source = consumeVisitMarkRolledBack(channelId)
+      ? "rollback"
+      : "open_advertisement";
     setOpenedWith((current) => {
-      if (current && uuidEq(current.channelId, channelId)) return current;
-      if (!read) return { channelId, lastReadSeq: null, unreadCount: 0 };
-      return {
-        channelId,
-        lastReadSeq: read.lastReadSeq,
-        unreadCount: read.unreadCount,
-      };
+      if (!current || !uuidEq(current.channelId, channelId)) return current;
+      if (
+        current.lastReadSeq === null &&
+        read &&
+        advertisedChannelRef.current !== channelId
+      ) {
+        return freezeOpenedRead(channelId, read);
+      }
+      return foldInVisitMark(current, read, source);
     });
   }, [channelId, readStates.byChannel]);
 
+  const timelineUnread = useMemo(() => {
+    if (
+      !openedWith ||
+      (channelId !== null && !uuidEq(openedWith.channelId, channelId))
+    ) {
+      return { lastReadSeq: null as number | null, unreadCount: 0 };
+    }
+    return timelineUnreadFromOpened(openedWith);
+  }, [openedWith, channelId]);
+
   // Advance the server read cursor once history is on screen (P7: the server
   // owns unread, so the client reports a position instead of counting).
+  //
+  // ADR-0178 D6: the first PUT after the open channel id changes is
+  // `explicit_open` (clears a mark). Later PUTs while that channel stays
+  // open are background (arrival / coalesced flush) and omit `read_intent`.
   //
   // goal B8 H10: the failure branch used to keep `markedRef` pointing at the
   // seq whose PUT had just failed, so this effect refused to try that seq
@@ -218,15 +278,41 @@ export function ChatShell() {
   const newestSeq = timeline.state.newestSeq;
   useEffect(() => {
     if (stressCount > 0 || newestSeq === null || channelId === null) return;
+    if (readStates.isPending) return;
+    if (!openedWith || !uuidEq(openedWith.channelId, channelId)) return;
     const key = `${channelId}:${newestSeq}`;
     if (markedRef.current === key) return;
     markedRef.current = key;
-    updateReadState(workspaceId, channelId, newestSeq)
-      .then(() => invalidateReadStates())
+    const reason = channelReadAdvertisementReason(
+      advertisedChannelRef.current,
+      channelId
+    );
+    advertiseReadState(workspaceId, channelId, newestSeq, reason)
+      .then(() => {
+        advertisedChannelRef.current = nextAdvertisedChannelId(
+          advertisedChannelRef.current,
+          channelId,
+          true
+        );
+        invalidateReadStates();
+      })
       .catch(() => {
+        advertisedChannelRef.current = nextAdvertisedChannelId(
+          advertisedChannelRef.current,
+          channelId,
+          false
+        );
         if (markedRef.current === key) markedRef.current = null;
       });
-  }, [workspaceId, channelId, newestSeq, stressCount, invalidateReadStates]);
+  }, [
+    workspaceId,
+    channelId,
+    newestSeq,
+    stressCount,
+    invalidateReadStates,
+    openedWith,
+    readStates.isPending,
+  ]);
 
   const [thread, setThread] = useState<Message | null>(null);
   useEffect(() => setThread(null), [channelId]);
@@ -794,8 +880,13 @@ export function ChatShell() {
 
   const renderChannelHeader = (huddle: HuddleController | null) => (
     <>
-      <header className="flex min-h-control-lg items-center justify-between gap-3 border-b border-line px-4 py-2">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
+      {/* 1줄 헤더 (#1865). py-row(6)×2 + size-control(32) + 하단 경계 1px = 45,
+          사이드바 검색 줄(p-2 + control-sm + hairline)과 하단 경계를 맞춘다. */}
+      <header
+        data-testid="channel-header"
+        className="flex min-w-0 items-center gap-3 border-b border-line px-4 py-row"
+      >
+        <div className="flex min-w-0 items-center gap-2">
           {/* 폰에서 채널 목록으로 돌아가는 길 (goal B6). 사이드바가 열이 아니라
               서랍이므로, 목록은 이 컨트롤로만 다시 열린다. */}
           <SidebarDrawerToggle />
@@ -808,82 +899,57 @@ export function ChatShell() {
               <Hash className="size-4" />
             )}
           </span>
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
-            <div className="flex min-w-0 items-center gap-2">
-              {/* 검수 피드백 #3 ②: 채널 이름을 누르면 채널을 다루는 메뉴가 선다.
-                  진짜 채널(공개/비공개)에서만 — DM은 이름을 바꾸거나 나갈 대상이
-                  아니고, 스트레스 픽스처는 뒤에 서버 행이 없다. h1은 그대로 제목의
-                  지표(landmark)로 남고, 트리거 버튼이 그 안에 산다. DM 헤더의 이름은
-                  상대 프로필 카드를 여는 트리거다(#1679). */}
-              {stressCount === 0 && channel && channel.kind !== "dm" ? (
-                <h1 className="flex min-w-0 items-center text-body font-semibold">
-                  <ChannelHeaderMenu
-                    workspaceId={workspaceId}
-                    channel={channel}
-                    title={labelParts?.text ?? label}
-                    selfMemberId={session.member.id}
-                    selfRole={memberFor(directory, session.member.id)?.role}
-                  />
-                </h1>
-              ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
-                <h1 className="flex min-w-0 items-center text-body font-semibold">
-                  <button
-                    type="button"
-                    data-testid="dm-profile-trigger"
-                    aria-label={`${label} 프로필 열기`}
-                    onClick={(event) =>
-                      openMemberProfile(peer.id, event.currentTarget)
-                    }
-                    className={cn(
-                      "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
-                      labelParts?.isAgent ? "text-agent" : "text-ink"
-                    )}
-                  >
-                    {labelParts?.text ?? label}
-                  </button>
-                </h1>
-              ) : (
-                <h1
-                  className={cn(
-                    "min-w-0 truncate text-body font-semibold",
-                    labelParts?.isAgent && stressCount === 0 && "text-agent"
-                  )}
-                >
-                  {stressCount > 0
-                    ? `스크롤 측정 (${stressCount})`
-                    : labelParts?.text ?? label}
-                </h1>
+          {/* 검수 피드백 #3 ② / #1865: 채널 이름은 한 줄 제목이다. 채널을 다루는
+              메뉴는 우측 ⋮ 로 옮겼다. 진짜 채널(공개/비공개)에서만 그 메뉴가
+              선다 — DM은 이름을 바꾸거나 나갈 대상이 아니고, 스트레스 픽스처는
+              뒤에 서버 행이 없다. DM 헤더의 이름은 상대 프로필 카드를 여는
+              트리거다(#1679). */}
+          {stressCount === 0 && channel && channel.kind !== "dm" ? (
+            <h1 className="min-w-0 truncate text-body font-semibold text-ink">
+              {labelParts?.text ?? label}
+            </h1>
+          ) : stressCount === 0 && channel?.kind === "dm" && peer ? (
+            <h1 className="flex min-w-0 items-center text-body font-semibold">
+              <button
+                type="button"
+                data-testid="dm-profile-trigger"
+                aria-label={`${label} 프로필 열기`}
+                onClick={(event) =>
+                  openMemberProfile(peer.id, event.currentTarget)
+                }
+                className={cn(
+                  "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
+                  labelParts?.isAgent ? "text-agent" : "text-ink"
+                )}
+              >
+                {labelParts?.text ?? label}
+              </button>
+            </h1>
+          ) : (
+            <h1
+              className={cn(
+                "min-w-0 truncate text-body font-semibold",
+                labelParts?.isAgent && stressCount === 0 && "text-agent"
               )}
-              {stressCount === 0 && labelParts?.handle && (
-                <span
-                  className="shrink-0 text-meta text-ink-muted"
-                  data-testid="channel-handle"
-                >
-                  {labelParts.handle}
-                </span>
-              )}
-            </div>
-            {stressCount === 0 && channel && channel.kind !== "dm" && (
-              <ChannelTopicControl topic={channel.topic} />
-            )}
-          </div>
+            >
+              {stressCount > 0
+                ? `스크롤 측정 (${stressCount})`
+                : labelParts?.text ?? label}
+            </h1>
+          )}
+          {stressCount === 0 && labelParts?.handle && (
+            <span
+              className="shrink-0 text-meta text-ink-muted"
+              data-testid="channel-handle"
+            >
+              {labelParts.handle}
+            </span>
+          )}
           <span className="sr-only" data-testid="message-count">
             메시지 {messages.length}개
           </span>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {stressCount === 0 && channel && channel.kind !== "dm" && (
-            <ChannelMemberPanel
-              channelName={channel.name ?? label}
-              members={channelMembers}
-              status={channelMemberListStatus}
-              offline={offline}
-              onRetry={() => void directoryQuery.refetch()}
-              onAddMember={() =>
-                openAddMember({ id: channel.id, name: channel.name ?? label })
-              }
-            />
-          )}
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           {timeline.resume.resubscribeCount > 0 && (
             <span
               className="text-timestamp text-ink-muted"
@@ -893,54 +959,74 @@ export function ChatShell() {
               재연결 {timeline.resume.resubscribeCount}회
             </span>
           )}
-          {huddle && (
-            <HuddleHeaderControl
-              huddle={huddle}
-              offline={offline}
-            />
-          )}
-          {/* 이슈 #1112 — 고정 목록. 작업 세션 토글 왼쪽에 두는 이유: 이것은
-              대화를 읽는 도구고 저것은 대화 밖의 일을 여는 문이다. 스트레스
-              픽스처에서는 뒤에 서버 행이 없으므로 내놓지 않는다 — 반응·액션과
-              같은 규칙. */}
-          {stressCount === 0 && channelId !== null && (
-            <PinListMenu
-              pins={timeline.pins}
-              status={timeline.pinsStatus}
-              directory={directory}
-              onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
-              onRetry={timeline.reloadPins}
-            />
-          )}
-          {/* TC-1 (#1758): 헤더 터미널 아이콘 = 하단 도크. WorkPanel 이 아니다.
-              WorkPanel 은 사이드바 「작업 콘솔」(`open-work-panel`) 과 세션
-              카드가 연다. 이 testid 를 `open-work-panel` 로 남기면 게이트가
-              도크를 패널로 착각한다. */}
-          {stressCount === 0 && (
-            <button
-              ref={terminalToggleRef}
-              type="button"
-              onClick={() => {
-                setWorkOpen(false);
-                setDockOpen((open) => !open);
-              }}
-              aria-pressed={dockOpen}
-              {...(dockOpen
-                ? { "aria-controls": "channel-terminal-dock" }
-                : {})}
-              aria-label="터미널"
-              title="터미널"
-              data-testid="open-terminal-dock"
-              className={cn(
-                "flex size-control-sm shrink-0 items-center justify-center rounded-sm transition-colors focus-visible:focus-ring",
-                dockOpen
-                  ? "bg-accent-soft text-accent"
-                  : "text-ink-muted hover:bg-surface-hover"
-              )}
-            >
-              <SquareTerminal aria-hidden="true" className="size-4" />
-            </button>
-          )}
+          <div
+            className="flex min-w-0 items-center gap-1"
+            role="group"
+            aria-label="채널 도구"
+            data-testid="channel-header-controls"
+          >
+            {/* TC-1 (#1758): 헤더 SquareTerminal 은 하단 터미널 도크만 연다.
+                채널 컨텍스트의 관전 진입은 도크가 승계한다. 이 testid 를
+                `open-work-panel` 로 남기면 게이트가 도크를 패널로 착각한다. */}
+            {stressCount === 0 && (
+              <button
+                ref={terminalToggleRef}
+                type="button"
+                onClick={() => {
+                  setWorkOpen(false);
+                  setDockOpen((open) => !open);
+                }}
+                aria-pressed={dockOpen}
+                {...(dockOpen
+                  ? { "aria-controls": "channel-terminal-dock" }
+                  : {})}
+                aria-label="터미널"
+                title="터미널"
+                data-testid="open-terminal-dock"
+                className={channelHeaderControlClass({ pressed: dockOpen })}
+              >
+                <SquareTerminal aria-hidden="true" className="size-4" />
+              </button>
+            )}
+            {/* 이슈 #1112 — 고정 목록. 스트레스 픽스처에서는 뒤에 서버 행이
+                없으므로 내놓지 않는다 — 반응·액션과 같은 규칙. */}
+            {stressCount === 0 && channelId !== null && (
+              <PinListMenu
+                pins={timeline.pins}
+                status={timeline.pinsStatus}
+                directory={directory}
+                onJump={(messageId, seq) => onJumpToMessage(messageId, seq)}
+                onRetry={timeline.reloadPins}
+              />
+            )}
+            {stressCount === 0 && channel && channel.kind !== "dm" && (
+              <ChannelMemberPanel
+                channelName={channel.name ?? label}
+                members={channelMembers}
+                status={channelMemberListStatus}
+                offline={offline}
+                onRetry={() => void directoryQuery.refetch()}
+                onAddMember={() =>
+                  openAddMember({ id: channel.id, name: channel.name ?? label })
+                }
+              />
+            )}
+            {huddle && (
+              <HuddleHeaderControl
+                huddle={huddle}
+                offline={offline}
+              />
+            )}
+            {stressCount === 0 && channel && channel.kind !== "dm" && (
+              <ChannelHeaderMenu
+                workspaceId={workspaceId}
+                channel={channel}
+                title={labelParts?.text ?? label}
+                selfMemberId={session.member.id}
+                selfRole={memberFor(directory, session.member.id)?.role}
+              />
+            )}
+          </div>
         </div>
       </header>
       {huddle && <HuddleHeaderBanner huddle={huddle} offline={offline} />}
@@ -1056,8 +1142,8 @@ export function ChatShell() {
               messages={messages}
               directory={directory}
               status={stressCount > 0 ? "ready" : timeline.status}
-              lastReadSeq={openedWith?.lastReadSeq ?? null}
-              unreadCount={openedWith?.unreadCount ?? 0}
+              lastReadSeq={timelineUnread.lastReadSeq}
+              unreadCount={timelineUnread.unreadCount}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
               // B11 — the stress fixture renders synthetic rows with no server
@@ -1091,7 +1177,15 @@ export function ChatShell() {
               onResend={stressCount > 0 ? undefined : onResend}
               onResendPending={stressCount > 0 ? undefined : timeline.resend}
               channelKind={channel?.kind}
+              channelName={label}
+              channelTopic={channel?.topic}
               peer={peer}
+              reachedStart={timeline.reachedStart}
+              canAddMember={canAddChannelMemberNow(
+                !directoryQuery.isPending,
+                memberFor(directory, session.member.id)?.role,
+                channel?.kind
+              )}
               onAddMember={() => {
                 if (channelId && channel)
                   openAddMember({ id: channelId, name: channel.name ?? label });
@@ -1142,6 +1236,7 @@ export function ChatShell() {
             workspaceId={workspaceId}
             channelId={channelId}
             directory={directory}
+            channels={channelsQuery.groups.channels}
             channelLabel={label}
             // 조사를 정하는 사실 (#1384): DM 의 label 은 방 이름이 아니라 상대
             // 이름이라 「hermes에」가 아니라 「hermes에게」여야 한다. `peer` 로
@@ -1162,6 +1257,7 @@ export function ChatShell() {
           channelId={channelId}
           root={thread}
           directory={directory}
+          channels={channelsQuery.groups.channels}
           reactions={timeline.reactions}
           pins={timeline.pins}
           actions={{

@@ -35,6 +35,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
 import { openWorkPanelViaConsole } from "./work-openers.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 import {
   buildExactSourceBeforePreview,
   matchesInsetFocusRing,
@@ -588,12 +589,18 @@ async function installMocks(context) {
   });
 }
 
-/** Resting y of the sidebar nav in a shell that has not been pushed anywhere. */
-const NAV_RESTING_TOP = 45;
+/** Resting y of the sidebar nav in a shell that has not been pushed anywhere.
+ *  Search header (p-2 + control-sm + hairline) sits at 45. The titlebar
+ *  (`h-control-lg`, border-box) adds 40 (#1864). */
+const NAV_RESTING_TOP = 85;
+/** Settings replaces the titlebar, so the section list rests at y=0. */
+const SETTINGS_NAV_RESTING_TOP = 0;
+const SETTINGS_NAV_PHONE_CAP = 308;
 
 const SHELL_METRICS = `(() => {
   const doc = document.scrollingElement || document.documentElement;
   const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+  const settingsNav = document.querySelector('[data-testid="settings-nav"]');
   const shell = document.querySelector(".app-shell");
   return {
     docOverflowY: doc.scrollHeight - doc.clientHeight,
@@ -602,6 +609,11 @@ const SHELL_METRICS = `(() => {
     shellScrollTop: shell ? shell.scrollTop : null,
     shellHeight: shell ? Math.round(shell.getBoundingClientRect().height) : null,
     navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+    settingsSurface: shell?.hasAttribute("data-settings-surface") === true,
+    appNavHidden: !nav || nav.getClientRects().length === 0,
+    settingsNavTop: settingsNav
+      ? Math.round(settingsNav.getBoundingClientRect().top)
+      : null,
     viewportHeight: window.innerHeight,
   };
 })()`;
@@ -619,18 +631,24 @@ async function assertShellHeld(page, label, shotName) {
   await page.evaluate("window.scrollTo(0, 99999)");
   await page.waitForTimeout(150);
   const m = await page.evaluate(SHELL_METRICS);
-  const ok =
+  const held =
     m.docOverflowY === 0 &&
     m.docOverflowX === 0 &&
     m.docScrollY === 0 &&
     m.shellScrollTop === 0 &&
-    m.navTop === NAV_RESTING_TOP &&
     m.shellHeight === m.viewportHeight;
+  const ok = label.includes("설정")
+    ? held &&
+      m.settingsSurface === true &&
+      m.appNavHidden === true &&
+      m.settingsNavTop === SETTINGS_NAV_RESTING_TOP
+    : held && m.navTop === NAV_RESTING_TOP;
   check(label, ok, JSON.stringify(m));
   if (shotName) await page.screenshot({ path: `${OUT_DIR}/${shotName}.png` });
 }
 
 async function signIn(page) {
+  await advanceToAccount(page);
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("gate-only-not-a-credential");
   await page.getByTestId("login-submit").click();
@@ -653,35 +671,32 @@ async function go(page, hash) {
 }
 
 /**
- * #1291 desktop focus mode. The assertion is geometry + focus, not only the
- * presence of a button: the surviving rail must stay 56px, the route must gain
- * the channel/profile pane's actual 184px, and every focus target inside that
- * hidden pane must leave both the visual and keyboard paths.
- *
- * 56px 는 `[data-testid="workspace-rail"]` (`w-rail` / `--spacing-rail`) 이다.
- * 안쪽 `[aria-label="워크스페이스"]` nav 는 44px 타일(`--spacing-rail-tile`)만
- * 감싸므로, 그 폭을 재면 레일 단정이 타일 폭을 재게 된다. 56 숫자는 그대로다.
+ * #1864 desktop fold. The assertion is geometry + focus, not only the
+ * presence of a button: the sidebar track goes to 0, the route gains the
+ * full 240px, the titlebar toggle stays in place, and every focus target
+ * inside the folded tree must leave the keyboard path (`inert`) and, after
+ * the fold settles, leave paint (`hidden` / display:none). Clip+rect alone
+ * is not the contract: a clipped inert node still has client rects.
  *
  * The work-session pane then covers the newly widened chat surface. This is the
  * seam `/work` uses after #1290 lands too: both are children of the same second
  * shell track, so no route-specific width is inferred here.
  */
 async function assertDesktopSidebarFocusMode(page, size) {
-  const collapse = page.getByTestId("sidebar-collapse");
-  await collapse.waitFor({ state: "visible" });
+  const toggle = page.getByTestId("sidebar-toggle");
+  await toggle.waitFor({ state: "visible" });
   const before = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[data-testid="workspace-rail"]');
-    const button = document.querySelector('[data-testid="sidebar-collapse"]');
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
+    const button = document.querySelector('[data-testid="sidebar-toggle"]');
     const rect = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
       sidebarWidth: rect(sidebar),
       mainWidth: rect(main),
-      railWidth: rect(rail),
-      buttonText: button?.textContent?.trim(),
+      titlebarHoldsToggle: titlebar?.contains(button) ?? false,
       buttonName: button?.getAttribute("aria-label"),
       buttonTitle: button?.getAttribute("title"),
       buttonHasIcon: Boolean(button?.querySelector("svg")),
@@ -690,14 +705,14 @@ async function assertDesktopSidebarFocusMode(page, size) {
     };
   })()`);
   check(
-    `${size.name} 접기 전 56px 레일 + 184px 채널 패널`,
+    `${size.name} 접기 전 240px 사이드바와 상단 줄 토글`,
     before.collapsed === false &&
       before.sidebarWidth === 240 &&
-      before.railWidth === 56 &&
+      before.titlebarHoldsToggle === true &&
       before.buttonName === "탐색 패널 접기" &&
       before.buttonTitle === "탐색 패널 접기" &&
       before.buttonHasIcon === true &&
-      before.buttonControls === "sidebar-channel-pane" &&
+      before.buttonControls === "sidebar-drawer" &&
       before.buttonExpanded === "true",
     JSON.stringify(before)
   );
@@ -758,95 +773,98 @@ async function assertDesktopSidebarFocusMode(page, size) {
     JSON.stringify(workBefore)
   );
 
-  await collapse.click();
+  await toggle.click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const collapsed = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const sidebar = document.querySelector('[data-testid="sidebar"]');
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
     const main = shell?.querySelector("main");
-    const rail = document.querySelector('[data-testid="workspace-rail"]');
-    const expand = document.querySelector('[data-testid="sidebar-expand"]');
-    const focusable = pane ? Array.from(pane.querySelectorAll(
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
+    const button = document.querySelector('[data-testid="sidebar-toggle"]');
+    const treeFocusable = sidebar ? Array.from(sidebar.querySelectorAll(
       'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    )).filter((element) => element.getClientRects().length > 0) : [];
+    )).filter((element) => {
+      if (element.closest("[inert]")) return false;
+      if (element.closest("[hidden]")) return false;
+      return element.getClientRects().length > 0;
+    }) : [];
     const width = (element) => element ? Math.round(element.getBoundingClientRect().width) : null;
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
       sidebarWidth: width(sidebar),
       mainWidth: width(main),
-      railWidth: width(rail),
-      paneDisplay: pane ? getComputedStyle(pane).display : null,
-      visiblePaneFocusTargets: focusable.length,
+      titlebarHoldsToggle: titlebar?.contains(button) ?? false,
+      sidebarInert: sidebar?.hasAttribute("inert") ?? false,
+      visibleTreeFocusTargets: treeFocusable.length,
       focus: document.activeElement?.getAttribute("data-testid"),
-      expandText: expand?.textContent?.trim(),
-      expandName: expand?.getAttribute("aria-label"),
-      expandTitle: expand?.getAttribute("title"),
-      expandHasIcon: Boolean(expand?.querySelector("svg")),
-      expandControls: expand?.getAttribute("aria-controls"),
-      expandExpanded: expand?.getAttribute("aria-expanded"),
+      buttonName: button?.getAttribute("aria-label"),
+      buttonTitle: button?.getAttribute("title"),
+      buttonHasIcon: Boolean(button?.querySelector("svg")),
+      buttonControls: button?.getAttribute("aria-controls"),
+      buttonExpanded: button?.getAttribute("aria-expanded"),
+      paneDisplay: pane ? getComputedStyle(pane).display : null,
     };
   })()`);
   check(
-    `${size.name} 접으면 레일만 남고 본문이 정확히 184px 넓어진다`,
+    `${size.name} 접으면 사이드바가 0이고 본문이 정확히 240px 넓어진다`,
     collapsed.collapsed === true &&
-      collapsed.sidebarWidth === 56 &&
-      collapsed.railWidth === 56 &&
-      collapsed.mainWidth - before.mainWidth === 184 &&
-      collapsed.paneDisplay === "none" &&
-      collapsed.visiblePaneFocusTargets === 0 &&
-      collapsed.focus === "sidebar-expand" &&
-      collapsed.expandText?.includes("열기") &&
-      collapsed.expandName === "탐색 패널 열기" &&
-      collapsed.expandTitle === "탐색 패널 열기" &&
-      collapsed.expandHasIcon === true &&
-      collapsed.expandControls === "sidebar-channel-pane" &&
-      collapsed.expandExpanded === "false",
+      collapsed.sidebarWidth === 0 &&
+      collapsed.mainWidth - before.mainWidth === 240 &&
+      collapsed.titlebarHoldsToggle === true &&
+      collapsed.sidebarInert === true &&
+      collapsed.visibleTreeFocusTargets === 0 &&
+      collapsed.focus === "sidebar-toggle" &&
+      collapsed.buttonName === "탐색 패널 열기" &&
+      collapsed.buttonTitle === "탐색 패널 열기" &&
+      collapsed.buttonHasIcon === true &&
+      collapsed.buttonControls === "sidebar-drawer" &&
+      collapsed.buttonExpanded === "false",
     JSON.stringify({ before, collapsed })
   );
 
   const workCollapsed = await workSnapshot();
   check(
-    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 184px를 이어받는다`,
+    `${size.name} 접는 동안 같은 WorkPanel subtree와 wide 상태가 240px를 이어받는다`,
     workCollapsed.missing !== true &&
       workCollapsed.marker === workMarker &&
       workCollapsed.subtreeMarker === workMarker &&
       workCollapsed.panelWide === workBefore.panelWide &&
       workCollapsed.widePressed === workBefore.widePressed &&
-      workCollapsed.panelWidth - workBefore.panelWidth === 184 &&
-      workCollapsed.routeWidth - workBefore.routeWidth === 184 &&
+      workCollapsed.panelWidth - workBefore.panelWidth === 240 &&
+      workCollapsed.routeWidth - workBefore.routeWidth === 240 &&
       workCollapsed.panelWidth === workCollapsed.routeWidth &&
       workCollapsed.sameEdges === true,
     JSON.stringify({ workBefore, workCollapsed })
   );
   await page.screenshot({ path: `${OUT_DIR}/${size.name}-chat-focus-work-wide.png` });
 
-  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-collapse"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && !document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const reopened = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
-    const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
+    const sidebar = document.querySelector('[data-testid="sidebar"]');
     return {
       collapsed: shell?.hasAttribute("data-sidebar-collapsed") ?? null,
-      sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
+      sidebarWidth: Math.round(sidebar.getBoundingClientRect().width),
       mainWidth: Math.round(shell.querySelector("main").getBoundingClientRect().width),
-      paneDisplay: getComputedStyle(pane).display,
+      sidebarInert: sidebar?.hasAttribute("inert") ?? false,
       focus: document.activeElement?.getAttribute("data-testid"),
     };
   })()`);
   check(
-    `${size.name} 다시 열면 240px 셸과 접기 버튼 포커스가 복구된다`,
+    `${size.name} 다시 열면 240px 셸과 상단 토글 포커스가 복구된다`,
     reopened.collapsed === false &&
       reopened.sidebarWidth === 240 &&
-      collapsed.mainWidth - reopened.mainWidth === 184 &&
-      reopened.paneDisplay !== "none" &&
-      reopened.focus === "sidebar-collapse",
+      collapsed.mainWidth - reopened.mainWidth === 240 &&
+      reopened.sidebarInert === false &&
+      reopened.focus === "sidebar-toggle",
     JSON.stringify(reopened)
   );
 
@@ -868,29 +886,29 @@ async function assertDesktopSidebarFocusMode(page, size) {
   // Route changes preserve the in-memory shell choice; they must not silently
   // reopen the pane. WorkPanel's DOM continuity was already proved above, while
   // the route itself intentionally changes subtree here.
-  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   await go(page, "/inbox");
   const afterRoute = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
+    sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
     focus: document.activeElement?.getAttribute("data-testid"),
   }))()`);
   check(
     `${size.name} 라우트 변경 뒤에도 현재 셸 선택과 포커스가 유지된다`,
     afterRoute.collapsed === true &&
-      afterRoute.paneDisplay === "none" &&
-      afterRoute.focus === "sidebar-expand",
+      afterRoute.sidebarWidth === 0 &&
+      afterRoute.focus === "sidebar-toggle",
     JSON.stringify(afterRoute)
   );
   await go(page, `/c/${GENERAL_ID}`);
-  await page.getByTestId("sidebar-expand").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-collapse"]\')'
+    '!document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && !document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 }
 
@@ -1213,6 +1231,168 @@ async function assertPluginScopeConsent(page, size) {
   }
 }
 
+async function pressOpenSettings(page) {
+  await page.evaluate(`(() => {
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: ",",
+      code: "Comma",
+      metaKey: true,
+      ctrlKey: false,
+      altKey: false,
+      shiftKey: false,
+      bubbles: true,
+      cancelable: true,
+    }));
+  })()`);
+}
+
+/**
+ * #1867 H-1 / M-1 / M-4. Settings is a full-surface swap, so these have to be
+ * measured on the live tree: ⌘, must not stack history, the phone nav cap must
+ * peek the next row, entry focus lands on the current section, and back returns
+ * the caret to the control that opened settings.
+ */
+async function measureSettingsSurface(browser) {
+  const desktop = await browser.newContext({
+    viewport: { width: 1280, height: 800 },
+    colorScheme: SCHEME,
+    reducedMotion: "reduce",
+  });
+  await installMocks(desktop);
+  const page = await desktop.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("composer-input").waitFor({ state: "visible" });
+  await page.getByTestId("composer-input").focus();
+  await waitForPageCondition(
+    page,
+    'document.activeElement?.getAttribute("data-testid") === "composer-input"'
+  );
+  const beforeHash = await page.evaluate("location.hash");
+  await pressOpenSettings(page);
+  await waitForPageCondition(
+    page,
+    'Boolean(document.querySelector(\'[data-testid="settings-route"]\')) && document.activeElement?.getAttribute("data-testid") === "settings-nav-profile"'
+  );
+  const entered = await page.evaluate(`(() => ({
+    hash: location.hash,
+    focus: document.activeElement?.getAttribute("data-testid"),
+    settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+  }))()`);
+  check(
+    "설정 진입 시 포커스가 현재 섹션 버튼으로 간다",
+    entered.settings === true &&
+      entered.hash.includes("/settings") &&
+      entered.focus === "settings-nav-profile",
+    JSON.stringify(entered)
+  );
+  await pressOpenSettings(page);
+  await page.waitForTimeout(200);
+  await page.getByTestId("settings-back-to-app").click();
+  await waitForPageCondition(
+    page,
+    'document.querySelector(\'[data-testid="composer-input"]\') && document.activeElement?.getAttribute("data-testid") === "composer-input"'
+  );
+  const returned = await page.evaluate(`(() => ({
+    hash: location.hash,
+    focus: document.activeElement?.getAttribute("data-testid"),
+    settings: Boolean(document.querySelector('[data-testid="settings-route"]')),
+  }))()`);
+  check(
+    "⌘, 재입력은 히스토리를 겹쌓지 않고 돌아가기 한 번에 이전 포커스로 복귀한다",
+    returned.settings === false &&
+      returned.hash === beforeHash &&
+      returned.focus === "composer-input",
+    JSON.stringify({ beforeHash, entered, returned })
+  );
+  await page.screenshot({ path: `${OUT_DIR}/settings-focus-return.png` });
+
+  await go(page, "/settings?section=events");
+  await waitForPageCondition(
+    page,
+    'document.activeElement?.getAttribute("data-testid") === "settings-nav-events"'
+  );
+  const deep = await page.evaluate(`(() => ({
+    focus: document.activeElement?.getAttribute("data-testid"),
+    current: document.querySelector('[data-testid="settings-nav-events"]')?.getAttribute("aria-current"),
+  }))()`);
+  check(
+    "딥링크 진입 시 포커스가 그 섹션 버튼으로 간다",
+    deep.focus === "settings-nav-events" && deep.current === "page",
+    JSON.stringify(deep)
+  );
+  await desktop.close();
+
+  const phone = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    colorScheme: SCHEME,
+    reducedMotion: "reduce",
+  });
+  await installMocks(phone);
+  const mobile = await phone.newPage();
+  await mobile.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(mobile);
+  await go(mobile, "/settings?section=profile");
+  const cap = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    if (!nav) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const items = [...nav.querySelectorAll('[data-testid^="settings-nav-"]')];
+    const vis = items.map((el) => {
+      const r = el.getBoundingClientRect();
+      const visible = Math.min(r.bottom, nr.bottom) - Math.max(r.top, nr.top);
+      return {
+        id: el.getAttribute("data-testid"),
+        h: Math.round(r.height),
+        vis: Math.round(Math.max(0, visible)),
+      };
+    });
+    return {
+      top: Math.round(nr.top),
+      height: Math.round(nr.height),
+      maxHeight: getComputedStyle(nav).maxBlockSize,
+      full: vis.filter((v) => v.vis >= v.h - 1 && v.vis > 0).map((v) => v.id),
+      peek: vis.filter((v) => v.vis > 8 && v.vis < v.h - 8).map((v) => v.id),
+      hidden: vis.filter((v) => v.vis <= 8).map((v) => v.id),
+      rows: vis,
+    };
+  })()`);
+  check(
+    "390px 설정 목록 캡이 다음 행을 반쯤 보여 주고 상단 y가 실값이다",
+    cap.missing !== true &&
+      cap.top === SETTINGS_NAV_RESTING_TOP &&
+      cap.height === SETTINGS_NAV_PHONE_CAP &&
+      cap.maxHeight === `${SETTINGS_NAV_PHONE_CAP}px` &&
+      cap.full.length >= 4 &&
+      cap.peek.length >= 1 &&
+      cap.hidden.length >= 1,
+    JSON.stringify(cap)
+  );
+  await mobile.getByTestId("settings-nav-events").click();
+  const scrolled = await mobile.evaluate(`(() => {
+    const nav = document.querySelector('[data-testid="settings-nav"]');
+    const el = document.querySelector('[data-testid="settings-nav-events"]');
+    if (!nav || !el) return { missing: true };
+    const nr = nav.getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    return {
+      focus: document.activeElement?.getAttribute("data-testid"),
+      fully: r.top >= nr.top - 1 && r.bottom <= nr.bottom + 1,
+      current: el.getAttribute("aria-current"),
+    };
+  })()`);
+  check(
+    "390px에서 고른 설정 섹션이 목록 안으로 스크롤된다",
+    scrolled.missing !== true &&
+      scrolled.focus === "settings-nav-events" &&
+      scrolled.fully === true &&
+      scrolled.current === "page",
+    JSON.stringify(scrolled)
+  );
+  await mobile.screenshot({ path: `${OUT_DIR}/390x844-settings-nav-cap.png` });
+  await phone.close();
+}
+
 async function measureSize(browser, size) {
   const context = await browser.newContext({
     viewport: { width: size.width, height: size.height },
@@ -1247,6 +1427,7 @@ async function measureSize(browser, size) {
     ["/inbox", "인박스", "inbox"],
     ["/activity", "활동", "activity"],
     ["/directory", "멤버 디렉터리", "directory"],
+    ["/settings?section=profile", "설정 프로필", "settings-profile"],
     ["/settings?section=account", "설정 계정", "settings-account"],
     ["/settings?section=members", "설정 멤버와 초대", "settings-members"],
     ["/settings?section=ai", "설정 AI 연결", "settings-ai"],
@@ -1299,11 +1480,15 @@ async function measureSize(browser, size) {
       const r = btn.getBoundingClientRect();
       const shell = document.querySelector(".app-shell");
       const nav = document.querySelector('[aria-label="워크스페이스 탐색"]');
+      const settingsNav = document.querySelector('[data-testid="settings-nav"]');
+      const shellEl = document.querySelector(".app-shell");
       return {
         reached: r.top >= 0 && r.bottom <= window.innerHeight + 1,
         shellScrollTop: shell ? shell.scrollTop : null,
         docScrollY: Math.round(window.scrollY),
         navTop: nav ? Math.round(nav.getBoundingClientRect().top) : null,
+        settingsSurface: shellEl?.hasAttribute("data-settings-surface") === true,
+        settingsNavPresent: Boolean(settingsNav),
       };
     })()`);
     check(
@@ -1311,7 +1496,8 @@ async function measureSize(browser, size) {
       reach.reached === true &&
         reach.shellScrollTop === 0 &&
         reach.docScrollY === 0 &&
-        reach.navTop === NAV_RESTING_TOP,
+        reach.settingsSurface === true &&
+        reach.settingsNavPresent === true,
       JSON.stringify(reach)
     );
     await page.screenshot({ path: `${OUT_DIR}/${size.name}-${shot}.png` });
@@ -1369,10 +1555,10 @@ async function measureSidebarDrawerIndependence(browser) {
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
-  await page.getByTestId("sidebar-collapse").click();
+  await page.getByTestId("sidebar-toggle").click();
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") && document.querySelector(\'[data-testid="sidebar-channel-pane"]\')?.hasAttribute("hidden") && document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
 
   await page.setViewportSize({ width: 390, height: 844 });
@@ -1380,11 +1566,13 @@ async function measureSidebarDrawerIndependence(browser) {
   const narrowBeforeOpen = await page.evaluate(`(() => {
     const shell = document.querySelector(".app-shell");
     const pane = document.querySelector('[data-testid="sidebar-channel-pane"]');
+    const toggle = document.querySelector('[data-testid="sidebar-toggle"]');
+    const titlebar = document.querySelector('[data-testid="app-titlebar"]');
     return {
       shellColumns: getComputedStyle(shell).gridTemplateColumns,
-      paneDisplay: getComputedStyle(pane).display,
-      collapseCount: document.querySelectorAll('[data-testid="sidebar-collapse"]').length,
-      expandCount: document.querySelectorAll('[data-testid="sidebar-expand"]').length,
+      paneDisplay: pane ? getComputedStyle(pane).display : null,
+      toggleOffsetParent: toggle?.offsetParent === null,
+      titlebarDisplay: titlebar ? getComputedStyle(titlebar).display : null,
       drawerOpen: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("data-open"),
       focus: document.activeElement?.getAttribute("data-testid"),
     };
@@ -1393,8 +1581,8 @@ async function measureSidebarDrawerIndependence(browser) {
     "390px 모바일은 데스크톱 접힘 상태를 무시하고 기존 서랍을 준비한다",
     narrowBeforeOpen.shellColumns === "390px" &&
       narrowBeforeOpen.paneDisplay !== "none" &&
-      narrowBeforeOpen.collapseCount === 0 &&
-      narrowBeforeOpen.expandCount === 0 &&
+      narrowBeforeOpen.toggleOffsetParent === true &&
+      narrowBeforeOpen.titlebarDisplay === "none" &&
       narrowBeforeOpen.drawerOpen === false &&
       narrowBeforeOpen.focus === "open-sidebar-drawer",
     JSON.stringify(narrowBeforeOpen)
@@ -1455,18 +1643,20 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.setViewportSize({ width: 760, height: 700 });
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="sidebar-expand"]\')'
+    'document.activeElement === document.querySelector(\'[data-testid="sidebar-toggle"]\')'
   );
   const returnedWide = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
+    sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
+    sidebarInert: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("inert"),
     focus: document.activeElement?.getAttribute("data-testid"),
   }))()`);
   check(
     "모바일에서 다시 넓어지면 숨은 opener 대신 현재 데스크톱 토글이 포커스를 받는다",
     returnedWide.collapsed === true &&
-      returnedWide.paneDisplay === "none" &&
-      returnedWide.focus === "sidebar-expand",
+      returnedWide.sidebarWidth === 0 &&
+      returnedWide.sidebarInert === true &&
+      returnedWide.focus === "sidebar-toggle",
     JSON.stringify(returnedWide)
   );
 
@@ -1504,25 +1694,25 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.reload({ waitUntil: "networkidle" });
   await waitForPageCondition(
     page,
-    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="login-email"]\')'
+    'document.querySelector(\'[data-testid="channel-list"]\') || document.querySelector(\'[data-testid="onboarding-landing"]\') || document.querySelector(\'[data-testid="onboarding-gateway"]\') || document.querySelector(\'[data-testid="onboarding-account"]\')'
   );
-  if (await page.getByTestId("login-email").isVisible().catch(() => false)) {
-    await signIn(page);
-  } else {
+  if (await page.getByTestId("channel-list").isVisible().catch(() => false)) {
     await page.getByTestId("channel-list").waitFor({ state: "visible" });
+  } else {
+    await signIn(page);
   }
   const remounted = await page.evaluate(`(() => ({
     collapsed: document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed"),
     sidebarWidth: Math.round(document.querySelector('[data-testid="sidebar"]').getBoundingClientRect().width),
-    paneDisplay: getComputedStyle(document.querySelector('[data-testid="sidebar-channel-pane"]')).display,
-    expandCount: document.querySelectorAll('[data-testid="sidebar-expand"]').length,
+    sidebarInert: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("inert"),
+    toggleName: document.querySelector('[data-testid="sidebar-toggle"]')?.getAttribute("aria-label"),
   }))()`);
   check(
     "새 셸 마운트에는 접힘 상태가 저장되지 않는다",
     remounted.collapsed === false &&
       remounted.sidebarWidth === 240 &&
-      remounted.paneDisplay !== "none" &&
-      remounted.expandCount === 0,
+      remounted.sidebarInert === false &&
+      remounted.toggleName === "탐색 패널 접기",
     JSON.stringify(remounted)
   );
   await context.close();
@@ -1596,6 +1786,19 @@ async function measureConnect(browser) {
   await installMocks(context);
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  const landingChoice = page.getByTestId("onboarding-choose-server");
+  await landingChoice.waitFor({ state: "visible" });
+  await landingChoice.scrollIntoViewIfNeeded();
+  await page.waitForTimeout(150);
+  const landingReach = await page.evaluate(`(() => {
+    const r = document.querySelector('[data-testid="onboarding-choose-server"]').getBoundingClientRect();
+    return { top: Math.round(r.top), bottom: Math.round(r.bottom),
+             viewportHeight: window.innerHeight,
+             reached: r.top >= 0 && r.bottom <= window.innerHeight };
+  })()`);
+  check("연결 화면 짧은 창에서 S0 선택 도달", landingReach.reached === true, JSON.stringify(landingReach));
+  await page.screenshot({ path: `${OUT_DIR}/connect-landing-short-window.png` });
+  await advanceToAccount(page);
   const submit = page.getByTestId("login-submit");
   await submit.waitFor({ state: "visible" });
   await submit.scrollIntoViewIfNeeded();
@@ -1627,6 +1830,7 @@ async function main() {
     const browser = await chromium.launch();
     try {
       for (const size of SIZES) await measureSize(browser, size);
+      await measureSettingsSurface(browser);
       await measureSidebarDrawerIndependence(browser);
       if (!FOCUS_ONLY) {
         await measureTimeline(browser);

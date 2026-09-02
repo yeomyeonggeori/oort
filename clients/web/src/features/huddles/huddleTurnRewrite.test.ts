@@ -24,12 +24,17 @@ class FakePeerConnection {
   setConfiguration(configuration?: RTCConfiguration): void {
     this.configuration = configuration;
   }
+  getConfiguration(): RTCConfiguration {
+    return this.configuration ?? {};
+  }
 }
 
 const originalPeerConnection = globalThis.RTCPeerConnection;
+const originalSetConfiguration = FakePeerConnection.prototype.setConfiguration;
 
 afterEach(() => {
   globalThis.RTCPeerConnection = originalPeerConnection;
+  FakePeerConnection.prototype.setConfiguration = originalSetConfiguration;
 });
 
 describe("signal host parsing", () => {
@@ -219,6 +224,113 @@ describe("RTCPeerConnection shim", () => {
     expect(globalThis.RTCPeerConnection).toBe(FakePeerConnection);
     restore();
     expect(globalThis.RTCPeerConnection).toBe(FakePeerConnection);
+  });
+
+  it("rewrites JoinResponse iceServers injected via setConfiguration after an empty constructor", () => {
+    globalThis.RTCPeerConnection =
+      FakePeerConnection as unknown as typeof RTCPeerConnection;
+    // livekit-client may hold the constructor captured at module load, so the
+    // session PC is not the subclass wrapper — only a prototype intercept
+    // sees setConfiguration.
+    const CapturedPeerConnection = FakePeerConnection;
+    const restore = installHuddleTurnRewriteShim(FUNNEL_SIGNAL);
+
+    const peer = new CapturedPeerConnection();
+    expect(peer.getConfiguration().iceServers).toBeUndefined();
+
+    peer.setConfiguration({
+      iceServers: [
+        {
+          urls: FUNNEL_TURNS_443,
+          username: USERNAME,
+          credential: CREDENTIAL,
+        },
+      ],
+    });
+
+    expect(peer.getConfiguration().iceServers).toEqual([
+      {
+        urls: FUNNEL_TURNS_8443,
+        username: USERNAME,
+        credential: CREDENTIAL,
+      },
+    ]);
+
+    restore();
+  });
+
+  it("restores prototype setConfiguration so later calls are not rewritten", () => {
+    globalThis.RTCPeerConnection =
+      FakePeerConnection as unknown as typeof RTCPeerConnection;
+    const originalSetConfiguration = FakePeerConnection.prototype.setConfiguration;
+    const restore = installHuddleTurnRewriteShim(FUNNEL_SIGNAL);
+
+    expect(FakePeerConnection.prototype.setConfiguration).not.toBe(
+      originalSetConfiguration
+    );
+
+    restore();
+    expect(FakePeerConnection.prototype.setConfiguration).toBe(
+      originalSetConfiguration
+    );
+    restore();
+    expect(FakePeerConnection.prototype.setConfiguration).toBe(
+      originalSetConfiguration
+    );
+
+    const peer = new FakePeerConnection();
+    peer.setConfiguration({
+      iceServers: [
+        {
+          urls: FUNNEL_TURNS_443,
+          username: USERNAME,
+          credential: CREDENTIAL,
+        },
+      ],
+    });
+    expect(peer.getConfiguration().iceServers?.[0]?.urls).toBe(
+      FUNNEL_TURNS_443
+    );
+  });
+
+  it("does not rewrite Cloud or host-mismatched setConfiguration iceServers", () => {
+    globalThis.RTCPeerConnection =
+      FakePeerConnection as unknown as typeof RTCPeerConnection;
+    const CapturedPeerConnection = FakePeerConnection;
+    const cloudTurns = "turns:global.turn.livekit.cloud:443?transport=tcp";
+    const otherHostTurns = "turns:other.example:443?transport=tcp";
+
+    const restoreCloud = installHuddleTurnRewriteShim(
+      "wss://proj.livekit.cloud"
+    );
+    const cloudPeer = new CapturedPeerConnection();
+    cloudPeer.setConfiguration({
+      iceServers: [
+        {
+          urls: cloudTurns,
+          username: USERNAME,
+          credential: CREDENTIAL,
+        },
+      ],
+    });
+    expect(cloudPeer.getConfiguration().iceServers?.[0]?.urls).toBe(cloudTurns);
+    restoreCloud();
+
+    const restoreFunnel = installHuddleTurnRewriteShim(FUNNEL_SIGNAL);
+    const mismatchPeer = new CapturedPeerConnection();
+    mismatchPeer.setConfiguration({
+      iceServers: [
+        {
+          urls: otherHostTurns,
+          username: USERNAME,
+          credential: CREDENTIAL,
+        },
+      ],
+    });
+    expect(mismatchPeer.getConfiguration().iceServers?.[0]?.urls).toBe(
+      otherHostTurns
+    );
+    restoreFunnel();
   });
 
   it("does not install when the signal URL has no host", () => {

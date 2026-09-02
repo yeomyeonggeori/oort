@@ -24,7 +24,7 @@ import {
 import {
   matchMembers,
   mentionQueryAt,
-} from "@/features/chat/MentionAutocomplete";
+} from "@/features/chat/composerAutocomplete";
 import type { RosterMember } from "@momo/core/lib/api";
 
 const DAY = new Date(2026, 6, 25, 14, 0, 0).getTime();

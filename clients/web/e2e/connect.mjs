@@ -8,8 +8,10 @@
 //                        `?join=oort://join?server=...&code=...`, asserts both
 //                        fields are prefilled and the invite code is GONE from
 //                        the address bar afterwards (it is a bearer secret).
-//   validation           `ws://...` is rejected inline, at the field, and no
-//                        request leaves the page.
+//                        BZ-6a: invite prefill skips S0 and opens S1; email
+//                        and the join submit live on S2.
+//   validation           `ws://...` is rejected inline on S1, at the field, and
+//                        no request leaves the page.
 //   dynamic base         Two halves. First a base that cannot answer
 //                        (127.0.0.1:1) makes login fail with the network copy,
 //                        which is only possible if requests stopped being
@@ -18,7 +20,7 @@
 //                        survives a reload.
 //   browser silence      The discovery card must not exist off the desktop
 //                        shell (no mDNS in a web page).
-//   offline              The banner appears and the submit is disabled.
+//   offline              The banner appears on S2 and the submit is disabled.
 //
 // The absolute base used here is the preview origin itself, ON PURPOSE: the
 // momowebqa REST server sends no CORS headers and does not answer preflight
@@ -36,6 +38,10 @@
 //   npm run preview -- --host 127.0.0.1
 //   MOMO_EMAIL=... MOMO_PASSWORD=... node e2e/connect.mjs
 import { chromium } from "playwright";
+import {
+  ONBOARDING_SURFACE,
+  advanceToAccount,
+} from "./advanceOnboarding.mjs";
 
 const BASE = (process.env.MOMO_WEB_BASE || "http://127.0.0.1:5173").replace(
   /\/+$/,
@@ -53,6 +59,18 @@ const steps = [];
 function record(name, ok, detail) {
   steps.push({ step: name, ok, ...(detail ? { detail } : {}) });
   if (!ok) throw new Error(`${name} failed: ${detail ?? "assertion"}`);
+}
+
+async function openGateway(page) {
+  await page.locator(ONBOARDING_SURFACE).first().waitFor({ timeout: 20_000 });
+  const landing = page.getByTestId("onboarding-landing");
+  const account = page.getByTestId("onboarding-account");
+  if (await landing.isVisible()) {
+    await page.getByTestId("onboarding-choose-server").click();
+  } else if (await account.isVisible()) {
+    await page.getByTestId("onboarding-back").click();
+  }
+  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
 }
 
 const browser = await chromium.launch({ headless: true });
@@ -75,6 +93,10 @@ try {
     waitUntil: "domcontentloaded",
   });
   await page.waitForSelector('[data-testid="login-server"]', { timeout: 20000 });
+  record(
+    "deeplink-skips-s0",
+    (await page.locator('[data-testid="onboarding-landing"]').count()) === 0
+  );
 
   const prefilledServer = await page.inputValue('[data-testid="login-server"]');
   record(
@@ -90,6 +112,27 @@ try {
     `code-length=${prefilledCode.length}`
   );
 
+  const urlAfterPrefill = page.url();
+  record(
+    "deeplink-code-stripped-from-history",
+    !urlAfterPrefill.includes("not-a-real-invite-code") &&
+      !urlAfterPrefill.includes("join="),
+    urlAfterPrefill
+  );
+
+  const deepLinkFocus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "deeplink-focus-lands-on-next",
+    deepLinkFocus === "onboarding-next",
+    `focused=${deepLinkFocus}`
+  );
+
+  await page.click('[data-testid="onboarding-next"]');
+  await page.waitForSelector('[data-testid="onboarding-account"]', {
+    timeout: 5000,
+  });
   const focused = await page.evaluate(
     () => document.activeElement?.getAttribute("data-testid") ?? "none"
   );
@@ -97,14 +140,6 @@ try {
     "deeplink-focus-lands-on-first-missing-field",
     focused === "login-email",
     `focused=${focused}`
-  );
-
-  const urlAfterPrefill = page.url();
-  record(
-    "deeplink-code-stripped-from-history",
-    !urlAfterPrefill.includes("not-a-real-invite-code") &&
-      !urlAfterPrefill.includes("join="),
-    urlAfterPrefill
   );
 
   const submitLabel = await page.textContent('[data-testid="login-submit"]');
@@ -122,15 +157,42 @@ try {
 
   // ---- 3) server URL validation is inline and blocks the request ----------
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
+  await page.waitForSelector('[data-testid="onboarding-landing"]', {
+    timeout: 20000,
+  });
+  record(
+    "fresh-visit-opens-s0",
+    (await page.locator('[data-testid="onboarding-landing"]').count()) === 1
+  );
+  await page.click('[data-testid="onboarding-choose-server"]');
+  await page.waitForSelector('[data-testid="onboarding-gateway"]');
+  const s0ToS1Focus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "s0-choice-focuses-server-field",
+    s0ToS1Focus === "login-server",
+    `focused=${s0ToS1Focus}`
+  );
+  await page.click('[data-testid="onboarding-back"]');
+  await page.waitForSelector('[data-testid="onboarding-landing"]');
+  const s1ToS0Focus = await page.evaluate(
+    () => document.activeElement?.getAttribute("data-testid") ?? "none"
+  );
+  record(
+    "s1-back-focuses-choice",
+    s1ToS0Focus === "onboarding-choose-server",
+    `focused=${s1ToS0Focus}`
+  );
+  await page.click('[data-testid="onboarding-choose-server"]');
+  await page.waitForSelector('[data-testid="onboarding-gateway"]');
   let requestsDuringValidation = 0;
   const countV1 = (request) => {
     if (request.url().includes("/v1/")) requestsDuringValidation += 1;
   };
   page.on("request", countV1);
   await page.fill('[data-testid="login-server"]', "ws://momo.example.com");
-  await page.fill('[data-testid="login-email"]', email);
-  await page.fill('[data-testid="login-password"]', password);
-  await page.click('[data-testid="login-submit"]');
+  await page.click('[data-testid="onboarding-next"]');
   await page.waitForSelector('[data-testid="login-server-error"]', { timeout: 5000 });
   const fieldError = await page.textContent('[data-testid="login-server-error"]');
   await page.waitForTimeout(500);
@@ -149,6 +211,10 @@ try {
   // ---- 4) a bare host is accepted and read as https, not blocked by the
   //         browser's own url validity check ---------------------------------
   await page.fill('[data-testid="login-server"]', "127.0.0.1:1");
+  await page.click('[data-testid="onboarding-next"]');
+  await page.waitForSelector('[data-testid="login-submit"]', { timeout: 5000 });
+  await page.fill('[data-testid="login-email"]', email);
+  await page.fill('[data-testid="login-password"]', password);
   await page.click('[data-testid="login-submit"]');
   await page.waitForSelector('[data-testid="login-error"]', { timeout: 20000 });
   record(
@@ -158,7 +224,12 @@ try {
   );
 
   // ---- 5) the base is really dynamic: an unreachable one must fail --------
+  await openGateway(page);
   await page.fill('[data-testid="login-server"]', "http://127.0.0.1:1");
+  await page.click('[data-testid="onboarding-next"]');
+  await page.waitForSelector('[data-testid="login-submit"]', { timeout: 5000 });
+  await page.fill('[data-testid="login-email"]', email);
+  await page.fill('[data-testid="login-password"]', password);
   await page.click('[data-testid="login-submit"]');
   await page.waitForSelector('[data-testid="login-error"]', { timeout: 20000 });
   const deadBaseError = await page.textContent('[data-testid="login-error"]');
@@ -181,7 +252,10 @@ try {
   );
 
   // ---- 6) an explicit, reachable base logs in and survives a reload -------
+  await openGateway(page);
   await page.fill('[data-testid="login-server"]', `${BASE}/`);
+  await page.click('[data-testid="onboarding-next"]');
+  await page.waitForSelector('[data-testid="login-submit"]', { timeout: 5000 });
   await page.fill('[data-testid="login-email"]', email);
   await page.fill('[data-testid="login-password"]', password);
   await page.click('[data-testid="login-submit"]');
@@ -203,7 +277,7 @@ try {
   // ---- 7) offline state ---------------------------------------------------
   await page.evaluate(() => localStorage.clear());
   await page.goto(BASE, { waitUntil: "domcontentloaded" });
-  await page.waitForSelector('[data-testid="login-submit"]', { timeout: 20000 });
+  await advanceToAccount(page);
   await context.setOffline(true);
   await page.waitForSelector('[data-testid="connect-offline"]', { timeout: 5000 });
   const submitDisabled = await page.isDisabled('[data-testid="login-submit"]');

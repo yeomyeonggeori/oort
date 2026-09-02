@@ -44,6 +44,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount, ONBOARDING_SURFACE } from "../e2e/advanceOnboarding.mjs";
 import {
   openTerminalDock,
   openWorkPanelViaConsole,
@@ -461,16 +462,17 @@ async function loginPage(context) {
   // races the first render: it can read 0 for a login form that is about to
   // appear, skip sign-in, and then wait forever for the shell. Wait until ONE
   // of the two possible surfaces actually exists before deciding which one.
-  const loginSubmit = page.getByTestId("login-submit");
+  const connect = page.locator(ONBOARDING_SURFACE);
   const terminalToggle = page.getByTestId("open-terminal-dock");
   await Promise.race([
-    loginSubmit.waitFor({ timeout: 30_000 }).catch(() => {}),
+    connect.first().waitFor({ timeout: 30_000 }).catch(() => {}),
     terminalToggle.waitFor({ timeout: 30_000 }).catch(() => {}),
   ]);
-  if ((await loginSubmit.count()) > 0) {
+  if ((await connect.count()) > 0) {
+    await advanceToAccount(page);
     await page.getByTestId("login-email").fill("gate@example.test");
     await page.getByTestId("login-password").fill("not-a-secret");
-    await loginSubmit.click();
+    await page.getByTestId("login-submit").click();
   }
   await terminalToggle.waitFor();
   return page;

@@ -1,0 +1,7 @@
+/* 홍염 — solar prominence. Deep wine, far from Dawn amber and the rose nebula. */
+:root[data-accent="hongyeom"],
+[data-accent-swatch="hongyeom"] {
+  --accent: light-dark(#66002c, #fe5a94);
+  --accent-soft: light-dark(#f4e0e6, #34202a);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

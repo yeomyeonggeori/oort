@@ -1,13 +1,19 @@
-import { useCallback, useState, type ReactNode } from "react";
-import type { RosterMember } from "@momo/core/lib/api";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import type { MembershipRole, RosterMember } from "@momo/core/lib/api";
 import {
+  canChangeWorkspaceRole,
   dmAvailability,
+  ROLE_KEYS,
+  roleKeyLabel,
   roleLabel,
   statusLabel,
+  type RoleLabels,
 } from "@momo/core/features/directory/model";
+import { otherMemberDeclaredPresenceLabel } from "@momo/core/features/presence/model";
 import { useSession } from "@/app/session";
 import { useRoleLabels } from "@/features/workspace/useWorkspace";
 import { Button } from "@/design/ui/button";
+import { Select } from "@/design/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -17,11 +23,14 @@ import {
 import { EmptyInvite, InlineBanner } from "@/features/common/States";
 import { useOpenAgentProfile } from "@/features/routing/useAgentProfile";
 import { Avatar } from "@/features/timeline/MessageRow";
+import { CustomStatusMark } from "@/features/sidebar/CustomStatusMark";
+import { useCustomStatusView } from "@/features/sidebar/useCustomStatusView";
 import {
   memberFor,
   useDirectory,
   type Directory,
 } from "@/features/workspace/useWorkspace";
+import { useChangeWorkspaceRole } from "./useChangeWorkspaceRole";
 import { useOpenDm } from "./useOpenDm";
 import {
   OpenMemberProfileContext,
@@ -71,6 +80,68 @@ function Fact({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
+function RoleChangeField({
+  member,
+  labels,
+  offline,
+  busy,
+  onApply,
+}: {
+  member: RosterMember;
+  labels: RoleLabels;
+  offline: boolean;
+  busy: boolean;
+  onApply: (role: MembershipRole) => Promise<boolean>;
+}) {
+  const current = member.role ?? "member";
+  const [selected, setSelected] = useState<MembershipRole>(current);
+  const describedBy = offline ? "member-profile-offline-reason" : undefined;
+
+  useEffect(() => {
+    setSelected(member.role ?? "member");
+  }, [member.role]);
+
+  const handleApply = async () => {
+    if (busy || offline) return;
+    await onApply(selected);
+  };
+
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="min-w-0 flex-1">
+        <Select
+          aria-label="역할"
+          aria-busy={busy || undefined}
+          aria-describedby={describedBy}
+          disabled={offline}
+          value={selected}
+          data-testid="member-profile-role"
+          onChange={(event) =>
+            setSelected(event.currentTarget.value as MembershipRole)
+          }
+        >
+          {ROLE_KEYS.map((role) => (
+            <option key={role} value={role}>
+              {roleKeyLabel(role, labels)}
+            </option>
+          ))}
+        </Select>
+      </div>
+      <Button
+        type="button"
+        variant="outline"
+        aria-busy={busy || undefined}
+        aria-describedby={describedBy}
+        disabled={offline}
+        data-testid="member-profile-role-apply"
+        onClick={() => void handleApply()}
+      >
+        {busy ? "역할 적용 중" : "역할 적용"}
+      </Button>
+    </div>
+  );
+}
+
 function ReadyProfile({
   member,
   directory,
@@ -83,13 +154,27 @@ function ReadyProfile({
   const { session, connStatus, workspaceId } = useSession();
   const labels = useRoleLabels(workspaceId);
   const { pendingMemberId, error, openDm } = useOpenDm();
+  const roleChange = useChangeWorkspaceRole();
   const openAgentProfile = useOpenAgentProfile();
   const owner =
     member.kind === "agent"
       ? memberFor(directory, member.ownerHumanId)
       : null;
+  const viewer = memberFor(directory, session.member.id);
+  const canEditRole = canChangeWorkspaceRole(
+    viewer?.role,
+    session.member.id,
+    member
+  );
   const role = roleLabel(member, labels);
   const status = statusLabel(member) ?? "활성";
+  const { visible: custom } = useCustomStatusView(member);
+  // away/dnd only. `auto` is not 온라인: roster has no live availability
+  // boolean for others (`declaredStatusLabel` is the self radio).
+  const declared =
+    member.kind === "human"
+      ? otherMemberDeclaredPresenceLabel(member.presenceStatus)
+      : null;
   const availability = dmAvailability(member, session.member.id);
   const offline = connStatus === "disconnected";
   const opening = pendingMemberId === member.id;
@@ -131,7 +216,15 @@ function ReadyProfile({
             </span>
             <span className="truncate text-body text-ink-muted">
               @{member.handle}
+              {declared ? ` · ${declared}` : ""}
             </span>
+            {custom ? (
+              <CustomStatusMark
+                status={custom}
+                wrap
+                className="text-meta text-ink-muted"
+              />
+            ) : null}
           </span>
         </div>
 
@@ -140,7 +233,21 @@ function ReadyProfile({
             {member.kind === "agent" ? "에이전트" : "사람"}
           </Fact>
           <Fact term="상태">{status}</Fact>
-          {role && <Fact term="역할">{role}</Fact>}
+          {(canEditRole || role) && (
+            <Fact term="역할">
+              {canEditRole ? (
+                <RoleChangeField
+                  member={member}
+                  labels={labels}
+                  offline={offline}
+                  busy={roleChange.pending}
+                  onApply={(next) => roleChange.apply(member, next)}
+                />
+              ) : (
+                role
+              )}
+            </Fact>
+          )}
           {member.kind === "agent" && (
             <Fact term="관리">
               {owner ? `${owner.displayName} 님` : "관리자 정보 없음"}
@@ -148,6 +255,16 @@ function ReadyProfile({
           )}
         </dl>
 
+        {roleChange.error && (
+          <InlineBanner
+            message={roleChange.error}
+            actionLabel="다시 시도"
+            actionBusy={roleChange.pending}
+            onAction={() => void roleChange.retry()}
+            separator={false}
+            testId="member-profile-role-error"
+          />
+        )}
         {error?.memberId === member.id && (
           <InlineBanner
             message={error.message}
@@ -238,7 +355,7 @@ function MemberProfilePanel({
       <div className="flex flex-col gap-1 border-b border-line p-4">
         <DialogTitle>{title}</DialogTitle>
         <DialogDescription className="sr-only">
-          멤버 정보와 다이렉트 메시지 동작을 확인합니다.
+          멤버 정보와 역할, 다이렉트 메시지 동작을 확인합니다.
         </DialogDescription>
       </div>
 

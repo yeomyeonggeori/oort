@@ -22,6 +22,10 @@ import type {
 import type { HuddleAudioSession } from "./huddleRuntime";
 import { loadHuddleRuntime } from "./huddleRuntimeLoader";
 import {
+  readHuddleMicDeviceId,
+  writeHuddleMicDeviceId,
+} from "./micDeviceStore";
+import {
   huddleErrorCopy,
   huddleErrorKind,
   initialHuddleProjection,
@@ -29,8 +33,14 @@ import {
   reduceHuddleProjection,
   type HuddleErrorKind,
 } from "@momo/core/features/huddles/huddleModel";
+import { clampGainPercent, gainPercentTo01 } from "./micGain";
 
-export type HuddleBusyAction = "start-or-join" | "leave" | "microphone" | null;
+export type HuddleBusyAction =
+  | "start-or-join"
+  | "leave"
+  | "microphone"
+  | "device"
+  | null;
 
 export interface HuddleController {
   status: ReturnType<typeof initialHuddleProjection>["status"];
@@ -39,10 +49,14 @@ export interface HuddleController {
   muted: boolean;
   busy: HuddleBusyAction;
   notice: string | null;
+  microphoneDeviceId: string;
+  microphoneGainPercent: number;
   retry: () => void;
   startOrJoin: () => Promise<void>;
   leave: () => Promise<void>;
   toggleMicrophone: () => Promise<void>;
+  setMicrophoneDevice: (deviceId: string) => Promise<void>;
+  setMicrophoneGain: (gainPercent: number) => void;
 }
 
 interface JoinedSession {
@@ -69,6 +83,10 @@ export function useHuddle(
   const [muted, setMuted] = useState(false);
   const [busy, setBusy] = useState<HuddleBusyAction>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [microphoneDeviceId, setMicrophoneDeviceId] = useState(
+    () => readHuddleMicDeviceId() ?? ""
+  );
+  const [microphoneGainPercent, setMicrophoneGainPercent] = useState(100);
   const requestIdRef = useRef(0);
   const activationRef = useRef(0);
   const joinAttemptHuddleRef = useRef<string | null>(null);
@@ -119,6 +137,7 @@ export function useHuddle(
       setJoinedVersion((value) => value + 1);
       clearExpiry();
       setMuted(false);
+      setMicrophoneGainPercent(100);
       await disconnectAudio();
       if (!joined) return;
       try {
@@ -195,6 +214,7 @@ export function useHuddle(
           setJoinedVersion((value) => value + 1);
           clearExpiry();
           setMuted(false);
+          setMicrophoneGainPercent(100);
           void disconnectAudio();
           setNotice("허들이 종료되어 오디오 연결을 닫았습니다.");
         } else if (endedJoinAttempt) {
@@ -310,6 +330,8 @@ export function useHuddle(
       connectedAudio = await runtime.connectHuddleAudio({
         livekitUrl: joined.livekitUrl,
         token: joined.token,
+        microphoneDeviceId: readHuddleMicDeviceId(),
+        microphoneGain01: 1,
         onDisconnected: () => {
           void leaveForReason("connection");
         },
@@ -326,6 +348,8 @@ export function useHuddle(
       joinedRef.current = joinedForRollback;
       setJoinedVersion((value) => value + 1);
       setMuted(false);
+      setMicrophoneGainPercent(100);
+      setMicrophoneDeviceId(readHuddleMicDeviceId() ?? "");
       dispatch({ type: "huddle-updated", huddle: joined.huddle });
       scheduleExpiry(joined.expiresAtMs);
     } catch (error) {
@@ -405,6 +429,41 @@ export function useHuddle(
     }
   }, [busy, muted]);
 
+  const setMicrophoneDevice = useCallback(async (deviceId: string) => {
+    if (busy || !audioRef.current) return;
+    const previousId = microphoneDeviceId;
+    setBusy("device");
+    setNotice(null);
+    setMicrophoneDeviceId(deviceId);
+    try {
+      const result = await audioRef.current.setMicrophoneDeviceId(deviceId);
+      if (!mountedRef.current) return;
+      if (result.applied) {
+        writeHuddleMicDeviceId(deviceId === "" ? null : deviceId);
+        setMicrophoneDeviceId(deviceId);
+        return;
+      }
+      const actual = result.deviceId.trim();
+      const normalized =
+        actual === "" || actual === "default" ? "" : actual;
+      setMicrophoneDeviceId(normalized);
+      writeHuddleMicDeviceId(normalized === "" ? null : normalized);
+    } catch (error) {
+      if (mountedRef.current) {
+        setMicrophoneDeviceId(previousId);
+        setNotice(huddleErrorCopy(huddleErrorKind(error, "microphone")));
+      }
+    } finally {
+      if (mountedRef.current) setBusy(null);
+    }
+  }, [busy, microphoneDeviceId]);
+
+  const setMicrophoneGain = useCallback((gainPercent: number) => {
+    const next = clampGainPercent(gainPercent);
+    setMicrophoneGainPercent(next);
+    audioRef.current?.setMicrophoneGain(gainPercentTo01(next));
+  }, []);
+
   // joinedVersion intentionally makes the ref-backed lifecycle reactive.
   void joinedVersion;
   const currentChannel =
@@ -418,9 +477,13 @@ export function useHuddle(
     muted,
     busy,
     notice,
+    microphoneDeviceId,
+    microphoneGainPercent,
     retry: refresh,
     startOrJoin,
     leave,
     toggleMicrophone,
+    setMicrophoneDevice,
+    setMicrophoneGain,
   };
 }

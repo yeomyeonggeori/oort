@@ -20,6 +20,11 @@ export function loadHuddleRuntime(): Promise<HuddleRuntime> {
       connectHuddleAudio: async () => ({
         disconnect: async () => undefined,
         setMicrophoneMuted: async () => undefined,
+        setMicrophoneDeviceId: async (deviceId) => ({
+          applied: true,
+          deviceId,
+        }),
+        setMicrophoneGain: () => undefined,
       }),
     });
   }

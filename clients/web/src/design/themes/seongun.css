@@ -1,0 +1,7 @@
+/* 성운 — dusty rose. Far from slate-blue identity and the indigo band. */
+:root[data-accent="seongun"],
+[data-accent-swatch="seongun"] {
+  --accent: light-dark(#9c447c, #f890bc);
+  --accent-soft: light-dark(#f2e6ea, #34262f);
+  --on-accent: light-dark(#fffefb, #17161a);
+}

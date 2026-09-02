@@ -103,6 +103,7 @@ const available: MessageActionAvailability = {
   quote: true,
   react: true,
   pin: true,
+  remind: true,
   edit: true,
   delete: true,
 };
@@ -114,6 +115,7 @@ const callbacks: MessageActionCallbacks = {
   onCopyLink: () => undefined,
   onReact: () => undefined,
   onPin: () => undefined,
+  onRemind: () => undefined,
   onEdit: () => undefined,
   onDelete: () => undefined,
 };

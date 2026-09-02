@@ -44,6 +44,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { startGuardedPreview } from "./preview-guard.mjs";
+import { advanceToAccount } from "../e2e/advanceOnboarding.mjs";
 
 const webRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -627,6 +628,7 @@ async function installRoutes(context, archive, sink) {
 
 async function login(page_) {
   await page_.goto(origin, { waitUntil: "networkidle" });
+  await advanceToAccount(page_);
   await page_.getByTestId("login-email").fill("attach@example.test");
   await page_.getByTestId("login-password").fill("gate-only");
   await page_.getByTestId("login-submit").click();

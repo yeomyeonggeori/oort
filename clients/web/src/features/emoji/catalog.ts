@@ -60,17 +60,65 @@ export function parseCatalog(raw: RawCatalog): CatalogEmoji[] {
   });
 }
 
+// -----------------------------------------------------------------------------
+// 카탈로그 적재와 **재시도** (design-review #1930 H-3).
+//
+// 앞 판은 `import()` 하나였고, 실패하면 `catalogPromise` 를 지워서 「다음에 다시
+// 부르면 다시 싣는다」고 적었다. **그것은 참이 아니었다.** 실패한 dynamic import
+// 는 브라우저 모듈 맵에 그 specifier 의 실패로 **영구히** 기억되므로, 같은
+// specifier 로 다시 부르면 네트워크에 아무것도 안 나가고 기억된 실패가 즉시
+// 되던져진다(리뷰 실측: 청크를 끊은 세션에서 요청은 평생 1건, 피커의 「다시
+// 시도」도 컴포저의 것도 배너를 못 걷었다).
+//
+// 그래서 재시도는 **다른 문**을 쓴다: 같은 파일을 자산 URL 로 가리켜
+// `fetch(..., { cache: "reload" })` 로 다시 받는다. 모듈 맵도 HTTP 캐시도 지나지
+// 않으므로 실제 요청이 나가고, 서버가 살아났으면 목록이 되살아난다. 두 표면이
+// 같은 이 함수를 부르므로 피커와 컴포저의 「다시 시도」가 한 번에 참이 된다
+// (문장을 `copy.ts` 한 자리에 모은 그 이유와 같다).
+//
+// 첫 적재를 `fetch` 로 통일하지 않는 이유: `import()` 는 번들러가 이 청크를
+// 코드 분할·프리로드·해시 무효화의 정본으로 다루는 자리이고, 실패하지 않는
+// 평상시 경로를 자산 URL 수동 조립으로 바꾸면 그 계약을 이 파일이 대신 지게
+// 된다. 바뀐 것은 「실패한 뒤」뿐이다.
+//
+// 대가는 하나, 정직하게 적는다: 빌드 산출물에 같은 데이터가 두 벌 실린다
+// (`emojiCatalog-*.js` 청크 + `emojiCatalog-*.json` 자산). **내려받는 것은 언제나
+// 한 벌**이고 두 번째는 첫 벌이 죽었을 때만 두드리는 문이라 부팅 예산은 그대로다.
+// -----------------------------------------------------------------------------
+
+/** 재시도가 두드리는 문. 번들러가 이 파일을 자산으로 함께 낸다. */
+const CATALOG_URL = new URL("./emojiCatalog.json", import.meta.url).href;
+
 let catalogPromise: Promise<CatalogEmoji[]> | undefined;
+/** 모듈 맵이 이 specifier 를 실패로 기억한다 — 이후 적재는 `fetch` 로 간다. */
+let importFailed = false;
+
+async function importCatalog(): Promise<CatalogEmoji[]> {
+  const mod = await import("./emojiCatalog.json");
+  return parseCatalog(mod.default as RawCatalog);
+}
+
+async function refetchCatalog(): Promise<CatalogEmoji[]> {
+  const response = await fetch(CATALOG_URL, { cache: "reload" });
+  if (!response.ok) throw new Error(`emoji catalog ${response.status}`);
+  return parseCatalog((await response.json()) as RawCatalog);
+}
 
 export function loadCatalog(): Promise<CatalogEmoji[]> {
-  catalogPromise ??= import("./emojiCatalog.json").then(
-    (mod) => parseCatalog(mod.default as RawCatalog),
-    (error) => {
+  catalogPromise ??= (importFailed ? refetchCatalog() : importCatalog()).catch(
+    (error: unknown) => {
       catalogPromise = undefined;
+      importFailed = true;
       throw error;
     }
   );
   return catalogPromise;
+}
+
+/** 시험 전용. 모듈 맵 흉내까지 지우고 첫 적재 상태로 되돌린다. */
+export function resetCatalogForTests(): void {
+  catalogPromise = undefined;
+  importFailed = false;
 }
 
 /** Strip VS16 so 👍 and 👍️ compare as the same picker identity. */

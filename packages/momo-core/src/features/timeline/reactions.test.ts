@@ -37,7 +37,12 @@ describe("normalizeReactionSnapshot", () => {
     ]);
     // …and it is findable by the id the timeline actually holds.
     expect(chipsFor(map, MESSAGE_LOWER, ME_LOWER)).toEqual([
-      { emoji: "👍", count: 2, mine: true },
+      {
+        emoji: "👍",
+        count: 2,
+        mine: true,
+        memberIds: [ME_LOWER, OTHER_UPPER.toLowerCase()],
+      },
     ]);
   });
 
@@ -117,7 +122,12 @@ describe("applyReactionDelta", () => {
   it("keeps the other members when one of several leaves", () => {
     const map = add(add(), OTHER_UPPER);
     expect(chipsFor(map, MESSAGE_LOWER, ME_LOWER)).toEqual([
-      { emoji: "👍", count: 2, mine: true },
+      {
+        emoji: "👍",
+        count: 2,
+        mine: true,
+        memberIds: [ME_LOWER, OTHER_UPPER.toLowerCase()],
+      },
     ]);
     const afterMine = applyReactionDelta(map, {
       messageId: MESSAGE_LOWER,
@@ -126,7 +136,12 @@ describe("applyReactionDelta", () => {
       action: "removed",
     });
     expect(chipsFor(afterMine, MESSAGE_LOWER, ME_LOWER)).toEqual([
-      { emoji: "👍", count: 1, mine: false },
+      {
+        emoji: "👍",
+        count: 1,
+        mine: false,
+        memberIds: [OTHER_UPPER.toLowerCase()],
+      },
     ]);
   });
 
@@ -140,7 +155,7 @@ describe("applyReactionDelta", () => {
     });
     expect(chipsFor(map, MESSAGE_LOWER, ME_LOWER)).toHaveLength(1);
     expect(chipsFor(map, other, ME_LOWER)).toEqual([
-      { emoji: "🎉", count: 1, mine: true },
+      { emoji: "🎉", count: 1, mine: true, memberIds: [ME_LOWER] },
     ]);
   });
 });
@@ -158,6 +173,15 @@ describe("chipsFor", () => {
     expect(chipsFor(map, MESSAGE_UPPER, OTHER_UPPER)[0].mine).toBe(true);
     // A signed-out / unknown viewer owns nothing.
     expect(chipsFor(map, MESSAGE_UPPER, undefined)[0].mine).toBe(false);
+  });
+
+  it("keeps the map's member id list on the chip, already folded", () => {
+    const map = normalizeReactionSnapshot({
+      [MESSAGE_UPPER]: { "👍": [ME_UPPER, OTHER_UPPER] },
+    });
+    const [chip] = chipsFor(map, MESSAGE_LOWER, ME_LOWER);
+    expect(chip.memberIds).toEqual([ME_LOWER, OTHER_UPPER.toLowerCase()]);
+    expect(chip.memberIds).toBe(map[MESSAGE_LOWER]["👍"]);
   });
 });
 
