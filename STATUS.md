@@ -15,6 +15,12 @@
 - H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
 
+## SH-3a `scripts/oort doctor` (#1955, 2026-09-02)
+
+- 셀프호스트 설치 판정 1개: `scripts/oort doctor [--env] [--json] [--strict]`. 필수 키는 `self_host_env.sh` 생성 heredoc에서 파생. 소문자 `true` 게이트(doorbell/hosted-delivery)·언퍼얼 `1`·`PLATFORM_ADMIN_EMAILS`·provider master key·drive backend·WS URL·role 비번↔DATABASE_URL. 시크릿은 이름·길이 class·형식만.
+- 스택 미기동이면 compose/`/healthz`/agent-port/outbox/migrate 는 skip+안내(설치 전 preflight). exit 0/1/2, `--strict` 는 major→2.
+- runtime-unverified 아님(픽스처 하네스). 로컬 `oortv013` 스택 실측은 PR 본문.
+
 ## M0s 기기 연결 서버 절반 — 1회용 QR 링크 토큰 (#1959, 2026-09-02)
 
 - `POST /v1/auth/device-link` 발급 · `POST …/redeem` 소비 · `GET …/{id}` 폴링 · `POST …/{id}/confirm-sas`. 마이그레이션 086 `device_link_token` + `token.device_label`/`pending_sas`. `schema_v0.sql` 무접촉.
