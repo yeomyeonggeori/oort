@@ -284,6 +284,160 @@ paths:
         "429":
           $ref: "#/components/responses/RateLimited"
 
+  /v1/auth/device-link:
+    post:
+      tags: [auth]
+      operationId: issueDeviceLink
+      summary: Issue a one-time QR device-link token (ADR-0180).
+      description: >
+        Human members only. The raw token appears on this 201 exactly once and
+        is stored as sha256. TTL 120s, single-use. `sas` is present only in
+        public-origin mode (MOMO_CENTRIFUGO_WS_URL=same-origin against a
+        non-loopback Host). The voucher cannot call any API.
+      security:
+        - bearerAuth: []
+      responses:
+        "201":
+          description: Link token issued; raw token present only here.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkIssueResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/device-link/redeem:
+    post:
+      tags: [auth]
+      operationId: redeemDeviceLink
+      summary: Consume a device-link token and issue a session (public).
+      description: >
+        Public for the same reason as `/v1/join` and `/v1/claim`: the phone
+        holds a one-time voucher and no bearer. Per-IP rate limited. Returns
+        a LoginResponse-shaped session plus `pendingSas`. In public-origin
+        mode the access token is 401 until the issuer confirms SAS.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeviceLinkRedeemRequest"
+      responses:
+        "200":
+          description: Session issued. `pendingSas` true holds access until confirm.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkRedeemResponse"
+        "401":
+          description: Unknown, expired, or issuer-revoked token.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Token has already been used.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/auth/device-link/{id}:
+    get:
+      tags: [auth]
+      operationId: getDeviceLink
+      summary: Poll a device-link token the caller issued.
+      description: >
+        Issuer session only. v1 has no outbox event; the desktop polls this
+        (≤2s) for consumed/expired/pending.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Current status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown id, or not this issuer session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/auth/device-link/{id}/confirm-sas:
+    post:
+      tags: [auth]
+      operationId: confirmDeviceLinkSas
+      summary: Confirm SAS and activate the redeemed session.
+      description: >
+        Issuer session only. Required in public-origin mode after redeem.
+        Idempotent once confirmed. 409 when SAS is not required or the token
+        has not been redeemed.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Session activated (or already confirmed).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceLinkConfirmResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown id, or not this issuer session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: SAS is not required, or the token has not been redeemed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/join:
     post:
       tags: [join]
@@ -7775,6 +7929,90 @@ components:
           description: >
             The ONLY authority for the realtime WebSocket address (ADR-0110).
             Never derive it from the API origin.
+
+    DeviceLinkIssueResponse:
+      type: object
+      additionalProperties: false
+      required: [id, token, expiresAt, deepLink]
+      properties:
+        id:
+          type: string
+          format: uuid
+        token:
+          type: string
+          description: Raw 32-byte base64url voucher. Present only on this 201.
+        expiresAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds when the voucher expires (TTL 120s).
+        sas:
+          type: string
+          description: Four-digit SAS. Omitted in loopback/LAN mode.
+        deepLink:
+          type: string
+          description: >
+            `oort://link?server=<percent-encoded base>&token=<base64url>`.
+
+    DeviceLinkRedeemRequest:
+      type: object
+      additionalProperties: false
+      required: [token, device]
+      properties:
+        token:
+          type: string
+        device:
+          $ref: "#/components/schemas/DeviceLinkDevice"
+
+    DeviceLinkDevice:
+      type: object
+      additionalProperties: false
+      required: [name, platform]
+      properties:
+        name:
+          type: string
+          description: 1..64 characters after trim.
+        platform:
+          type: string
+          description: 1..32 characters after trim (e.g. ios, android, web).
+
+    DeviceLinkRedeemResponse:
+      type: object
+      additionalProperties: false
+      required: [accessToken, refreshToken, member, realtimeWebSocketUrl, pendingSas]
+      properties:
+        accessToken:
+          type: string
+        refreshToken:
+          type: string
+        member:
+          $ref: "#/components/schemas/Member"
+        realtimeWebSocketUrl:
+          type: string
+        pendingSas:
+          type: boolean
+          description: >
+            True in public-origin mode until the issuer confirms SAS. Access
+            is 401 while true.
+
+    DeviceLinkStatusResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [pending, consumed, expired]
+        device:
+          $ref: "#/components/schemas/DeviceLinkDevice"
+
+    DeviceLinkConfirmResponse:
+      type: object
+      additionalProperties: false
+      required: [status]
+      properties:
+        status:
+          type: string
+          enum: [confirmed]
 
     RefreshRequest:
       type: object

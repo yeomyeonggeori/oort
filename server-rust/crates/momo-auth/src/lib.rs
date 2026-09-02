@@ -63,6 +63,7 @@
 pub mod agent_bearer;
 pub mod agent_credential;
 pub mod agent_scope;
+pub mod device_link;
 pub mod ephemeral_grant;
 pub mod hosted_connection;
 pub mod hosted_disconnect;
@@ -99,6 +100,14 @@ pub use agent_credential::{
 pub use agent_scope::{
     is_gateway_callback_route, required_agent_scope, SCOPE_AGENT_INBOX_READ, SCOPE_AGENT_JOBS_READ,
     SCOPE_AGENT_PORT_CONNECT, SCOPE_AGENT_RUNS_CALLBACK, SCOPE_MESSAGES_READ, SCOPE_MESSAGES_WRITE,
+};
+pub use device_link::{
+    confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
+    issue_device_link_in_tx, mint_device_link_token, normalized_device_link_token,
+    normalized_device_name, normalized_device_platform, resolve_device_link_workspace,
+    DeviceLinkConfirm, DeviceLinkInputError, DeviceLinkMutation, DeviceLinkSpecInvalid,
+    DeviceLinkStatus, DeviceLinkStatusKind, IssuedDeviceLink, RedeemedDeviceLink, RedeemedSession,
+    DEVICE_LINK_TOKEN_LEN, DEVICE_LINK_TTL_SECONDS,
 };
 pub use ephemeral_grant::{
     ephemeral_grant_key, sign_ephemeral_grant, verify_ephemeral_grant, EphemeralGrantClaims,
@@ -162,8 +171,9 @@ pub use realtime::{
 };
 pub use token_store::{
     carries_privileged_scope, has_active_realtime_credential, record_session_token,
-    revoke_member_session_tokens, revoke_privileged_session_tokens, revoke_token, token_state,
-    without_privileged_scopes, RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES,
+    record_session_token_with_device, revoke_member_session_tokens,
+    revoke_privileged_session_tokens, revoke_token, token_state, without_privileged_scopes,
+    DeviceSessionRecord, RevokeOutcome, TokenRejection, TokenState, PRIVILEGED_SCOPES,
     SCOPE_REALTIME_SUBSCRIBE, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 pub use work_host_request::{

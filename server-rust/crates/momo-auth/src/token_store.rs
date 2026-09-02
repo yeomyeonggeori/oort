@@ -35,6 +35,8 @@ pub enum TokenRejection {
     Revoked,
     Expired,
     Unknown,
+    /// ADR-0180 D4: the session exists but the issuer has not confirmed SAS.
+    Pending,
 }
 
 impl TokenRejection {
@@ -44,6 +46,7 @@ impl TokenRejection {
             TokenRejection::Revoked => "token has been revoked",
             TokenRejection::Expired => "token has expired",
             TokenRejection::Unknown => "unknown token",
+            TokenRejection::Pending => "token has not been activated",
         }
     }
 }
@@ -63,6 +66,7 @@ pub enum TokenState {
     Active { id: Uuid },
     Revoked { id: Uuid },
     Expired { id: Uuid },
+    Pending { id: Uuid },
     Unknown,
 }
 
@@ -74,6 +78,7 @@ impl TokenState {
             TokenState::Active { id } => Ok(id),
             TokenState::Revoked { .. } => Err(TokenRejection::Revoked),
             TokenState::Expired { .. } => Err(TokenRejection::Expired),
+            TokenState::Pending { .. } => Err(TokenRejection::Pending),
             TokenState::Unknown => Err(TokenRejection::Unknown),
         }
     }
@@ -81,9 +86,10 @@ impl TokenState {
     /// The row id, when the token is known at all (for audit callers).
     pub fn token_id(self) -> Option<Uuid> {
         match self {
-            TokenState::Active { id } | TokenState::Revoked { id } | TokenState::Expired { id } => {
-                Some(id)
-            }
+            TokenState::Active { id }
+            | TokenState::Revoked { id }
+            | TokenState::Expired { id }
+            | TokenState::Pending { id } => Some(id),
             TokenState::Unknown => None,
         }
     }
@@ -116,7 +122,8 @@ pub async fn token_state(
     let row = sqlx::query(
         "SELECT id, \
                 revoked_at IS NOT NULL AS revoked, \
-                (expires_at IS NOT NULL AND expires_at < now()) AS expired \
+                (expires_at IS NOT NULL AND expires_at < now()) AS expired, \
+                pending_sas AS pending \
            FROM token \
           WHERE token_hash = digest($1::text, 'sha256') \
           LIMIT 1",
@@ -134,6 +141,9 @@ pub async fn token_state(
     }
     if row.try_get::<bool, _>("expired")? {
         return Ok(TokenState::Expired { id });
+    }
+    if row.try_get::<bool, _>("pending")? {
+        return Ok(TokenState::Pending { id });
     }
     Ok(TokenState::Active { id })
 }
@@ -171,6 +181,53 @@ pub async fn record_session_token(
     .execute(&mut *conn)
     .await?;
     Ok(())
+}
+
+/// ADR-0180 extras on a freshly minted session row.
+pub struct DeviceSessionRecord<'a> {
+    pub raw_token: &'a str,
+    pub label: &'a str,
+    pub scopes: &'a [String],
+    pub expires_at_unix: i64,
+    pub device_label: Option<&'a str>,
+    pub pending_sas: bool,
+}
+
+/// Record a session token with the ADR-0180 device-link extras: an optional
+/// device label and a pending-SAS gate. Returns the new `token.id` so the
+/// link row can name the pair it just minted.
+pub async fn record_session_token_with_device(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    record: DeviceSessionRecord<'_>,
+) -> Result<Uuid, sqlx::Error> {
+    let inserted: Option<Uuid> = sqlx::query_scalar(
+        "INSERT INTO token \
+           (workspace_id, kind, actor_member_id, token_hash, scopes, label, \
+            expires_at, device_label, pending_sas) \
+         VALUES \
+           ($1, 'session', $2, digest($3::text, 'sha256'), $4, $5, to_timestamp($6), $7, $8) \
+         ON CONFLICT (token_hash) DO NOTHING \
+         RETURNING id",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(record.raw_token)
+    .bind(record.scopes)
+    .bind(record.label)
+    .bind(record.expires_at_unix as f64)
+    .bind(record.device_label)
+    .bind(record.pending_sas)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(id) = inserted {
+        return Ok(id);
+    }
+    sqlx::query_scalar("SELECT id FROM token WHERE token_hash = digest($1::text, 'sha256') LIMIT 1")
+        .bind(record.raw_token)
+        .fetch_one(&mut *conn)
+        .await
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +405,7 @@ const ACTIVE_REALTIME_CREDENTIAL_SQL: &str = "SELECT EXISTS( \
           AND t.actor_member_id = $2 \
           AND t.workspace_id = $3 \
           AND t.revoked_at IS NULL \
+          AND NOT t.pending_sas \
           AND (t.expires_at IS NULL OR t.expires_at > now()) \
           AND ( \
             (m.kind = 'human' AND t.kind = 'session' AND t.label = 'access') \
@@ -395,6 +453,10 @@ mod tests {
         assert_eq!(TokenRejection::Revoked.message(), "token has been revoked");
         assert_eq!(TokenRejection::Expired.message(), "token has expired");
         assert_eq!(TokenRejection::Unknown.message(), "unknown token");
+        assert_eq!(
+            TokenRejection::Pending.message(),
+            "token has not been activated"
+        );
     }
 
     #[test]
@@ -413,6 +475,10 @@ mod tests {
         assert_eq!(
             TokenState::Unknown.require_active(),
             Err(TokenRejection::Unknown)
+        );
+        assert_eq!(
+            TokenState::Pending { id }.require_active(),
+            Err(TokenRejection::Pending)
         );
     }
 
@@ -501,6 +567,7 @@ mod tests {
             "t.kind = 'agent_bearer'",
             SCOPE_REALTIME_SUBSCRIBE,
             "t.revoked_at IS NULL",
+            "NOT t.pending_sas",
             "m.status = 'active'",
         ] {
             assert!(
