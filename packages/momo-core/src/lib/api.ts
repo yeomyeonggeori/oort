@@ -1653,20 +1653,29 @@ export async function fetchReadStates(
  * Advance the caller's read cursor. The server clamps to
  * `max(current, min(requested, latestSeq))`, so it can never regress.
  *
- * Optional `markUnreadBeforeSeq` / `readIntent` are ADR-0178 D5/D6. RED
- * (#1934): the extra keys are not yet on the wire. GREEN serializes them.
+ * Optional `markUnreadBeforeSeq` / `readIntent` are ADR-0178 D5/D6.
+ * `readIntent` is sent only as `"explicit_open"`; omitting the field is
+ * background. Product code must go through `advertiseReadState` so the
+ * reason is classified in one place.
  */
 export async function updateReadState(
   workspaceId: string,
   channelId: string,
   lastReadSeq: number,
-  _options?: UpdateReadStateOptions
+  options?: UpdateReadStateOptions
 ): Promise<ReadState> {
+  const body: Record<string, unknown> = { last_read_seq: lastReadSeq };
+  if (options?.markUnreadBeforeSeq !== undefined) {
+    body.mark_unread_before_seq = options.markUnreadBeforeSeq;
+  }
+  if (options?.readIntent === "explicit_open") {
+    body.read_intent = "explicit_open";
+  }
   const res = await request<WireReadState>(
     `/v1/workspaces/${encodeURIComponent(
       workspaceId
     )}/channels/${encodeURIComponent(channelId)}/read-state`,
-    { method: "PUT", body: JSON.stringify({ last_read_seq: lastReadSeq }) }
+    { method: "PUT", body: JSON.stringify(body) }
   );
   return toReadState(res);
 }

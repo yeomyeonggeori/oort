@@ -22,12 +22,15 @@ export interface UnreadCountInput extends UnreadCompositionInput {
 /**
  * Inclusive seq where unread begins. `null`/`undefined` mark means unmarked.
  *
- * RED (#1934): the `min` is not here yet. GREEN restores ADR-0178 D3.
+ * This is the only place that may do arithmetic on `markedUnreadBeforeSeq`.
  */
 export function effectiveUnreadStartSeq(
   readState: UnreadCompositionInput
 ): number {
-  return readState.lastReadSeq + 1;
+  const cursorStart = readState.lastReadSeq + 1;
+  const mark = readState.markedUnreadBeforeSeq;
+  if (mark == null) return cursorStart;
+  return Math.min(mark, cursorStart);
 }
 
 /**
