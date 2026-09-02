@@ -1,6 +1,6 @@
 # ADR-0179: 표현 축 신설 — 모션·눌림·엘리베이션·밀도
 
-- 상태: **Proposed** (2026-09-02 기안 Fable — 성재 결재 대기. 방향은 2026-09-02 인터뷰 Q1·Q3 권고 승인으로 기승인)
+- 상태: **Accepted** (2026-09-02 성재 결재 — "2~5까지는 승인". 기안 Fable 같은 날 방향은 2026-09-02 인터뷰 Q1·Q3 권고 승인으로 기승인)
 - 발제: `docs/planning/research/2026-09-02-launch-rediagnosis-two-pillars-brief.md` §2 근원 R1·R2·R6 / 편성 `docs/planning/2026-09-02-launch-program-plan.md` D-1·UX-R0·DS-0
 - 관련: ADR-0159(오르트 구름 디자인 시스템 — §2.6 "모션은 전면 토큰 축이 없다") · ADR-0174(외양 커스터마이제이션 — 밀도·폰트는 BZ-5b) · ADR-0172(아이콘) · ADR-0137 D5(폰 v0) · buzz `desktop/src/shared/styles/globals/motion.css`(Apache-2.0)
 
