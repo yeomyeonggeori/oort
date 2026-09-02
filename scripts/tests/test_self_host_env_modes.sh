@@ -196,6 +196,8 @@ grep -Fxq 'MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive' "$local_fixture/infra/rust/
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$local_fixture/infra/rust/local.secrets.env"
+# #1856 — local huddle advertises loopback. New files only.
+grep -Fxq 'MOMO_LIVEKIT_NODE_IP=127.0.0.1' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
@@ -218,6 +220,7 @@ published_output="$published_fixture/output"
 run_generator "$published_fixture" "$published_output" 49200 --published-image "$GOOD_DIGEST"
 grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq "MOMO_RUST_IMAGE=$GOOD_DIGEST" "$published_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_LIVEKIT_NODE_IP=127.0.0.1' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
   "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost' \
@@ -527,6 +530,45 @@ if run_generator "$duplicate_fixture" "$duplicate_fixture/output" 49390 \
 fi
 grep -Fq '중복 env 키' "$duplicate_fixture/output"
 test "$duplicate_before" = "$(hash_file "$duplicate_fixture/infra/rust/local.secrets.env")"
+
+# #1856 — the same exact-once guard rejects a duplicated node_ip line.
+duplicate_nodeip_fixture="$(make_fixture duplicate-node-ip-key)"
+run_generator "$duplicate_nodeip_fixture" "$duplicate_nodeip_fixture/first-output" 49392 \
+  --local-build
+printf '%s\n' 'MOMO_LIVEKIT_NODE_IP=10.0.0.1' >>"$duplicate_nodeip_fixture/infra/rust/local.secrets.env"
+duplicate_nodeip_before="$(hash_file "$duplicate_nodeip_fixture/infra/rust/local.secrets.env")"
+if run_generator "$duplicate_nodeip_fixture" "$duplicate_nodeip_fixture/output" 49392 \
+  --local-build; then
+  echo "duplicate MOMO_LIVEKIT_NODE_IP unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '중복 env 키' "$duplicate_nodeip_fixture/output"
+test "$duplicate_nodeip_before" = "$(hash_file "$duplicate_nodeip_fixture/infra/rust/local.secrets.env")"
+
+# #1856 — an env written before the knob existed is left alone. Unlike
+# PLATFORM_ADMIN_EMAILS this is not a repair key: backfilling 127.0.0.1 onto
+# a LAN/remote install would advertise the wrong ICE candidate.
+legacy_nodeip_fixture="$(make_fixture legacy-node-ip)"
+run_generator "$legacy_nodeip_fixture" "$legacy_nodeip_fixture/first-output" 49394 \
+  --local-build
+legacy_nodeip_env="$legacy_nodeip_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_LIVEKIT_NODE_IP=127.0.0.1' "$legacy_nodeip_env"
+awk 'index($0, "MOMO_LIVEKIT_NODE_IP=") != 1 { print }' \
+  "$legacy_nodeip_env" >"$legacy_nodeip_fixture/stripped.env"
+mv "$legacy_nodeip_fixture/stripped.env" "$legacy_nodeip_env"
+if grep -q '^MOMO_LIVEKIT_NODE_IP=' "$legacy_nodeip_env"; then
+  echo "fixture setup failed: MOMO_LIVEKIT_NODE_IP still present" >&2
+  exit 1
+fi
+legacy_nodeip_before="$(hash_file "$legacy_nodeip_env")"
+run_generator "$legacy_nodeip_fixture" "$legacy_nodeip_fixture/rerun-output" 49394 \
+  --local-build
+if grep -q '^MOMO_LIVEKIT_NODE_IP=' "$legacy_nodeip_env"; then
+  echo "existing env was backfilled with MOMO_LIVEKIT_NODE_IP" >&2
+  exit 1
+fi
+test "$legacy_nodeip_before" = "$(hash_file "$legacy_nodeip_env")"
+grep -Fq '이미 있다' "$legacy_nodeip_fixture/rerun-output"
 
 # Reject arithmetic expressions before Bash arithmetic or /dev/tcp sees them.
 port_fixture="$(make_fixture malicious-port)"

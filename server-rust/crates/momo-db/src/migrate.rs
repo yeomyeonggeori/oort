@@ -392,19 +392,37 @@ mod tests {
     /// 081 is #1767's `credential_claim`: 078's owner_claim generalized with
     /// `kind` (`owner_bootstrap` | `password_reset`). Same hash/TTL/single-use
     /// / definer lookup. schema_v0.sql is not modified.
+    ///
+    /// 082 is ADR-0175's `message_reminder` (#1888 BF-B1 server half): owner-
+    /// scoped personal later-alert rows. schema_v0.sql is not modified; v1 has
+    /// no outbox fan-out.
+    ///
+    /// 083 is ADR-0176's custom member status (#1889 BF-B2 server half): three
+    /// nullable columns on `member` (`status_emoji`/`status_text`/
+    /// `status_expires_at`) riding the existing presence write path. schema_v0.sql
+    /// is not modified; expiry is lazy-on-read, no sweeper.
+    ///
+    /// 084 is ADR-0177's `member_sidebar_prefs` (#1932 BT-4 server half): one
+    /// JSONB blob per (workspace, member) holding that member's custom sidebar
+    /// sections, channel placement and stars. `ws_isolation` RLS as D2 names;
+    /// schema_v0.sql is not modified; no outbox fan-out.
+    ///
+    /// 085 is ADR-0178's mark-unread signal (#1934 BT-6 server half): nullable
+    /// `read_state.marked_unread_before_seq`. schema_v0.sql is not modified;
+    /// last_read_seq GREATEST is unchanged.
     #[test]
-    fn discovers_contiguous_migrations_001_to_081() {
+    fn discovers_contiguous_migrations_001_to_085() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            81,
-            "expected 81 migrations under {}",
+            85,
+            "expected 85 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 81);
+        assert_eq!(migrations.last().unwrap().version, 85);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

@@ -664,9 +664,21 @@ pub fn build_app(state: AppState) -> Router {
         // ADR-0161 D4 — self-leave. The higher-scoped sibling of channel leave:
         // ends the caller's whole workspace membership. The last owner is refused
         // (409) so a workspace is never orphaned.
+        // #1873 — PATCH is the self display-name write (human only). Mounted on
+        // the same path so `/me` stays the caller's own row; a body cannot name
+        // another member.
         .route(
             "/v1/workspaces/{ws}/members/me",
-            delete(routes::workspaces::leave),
+            delete(routes::workspaces::leave).patch(routes::self_profile::rename_self),
+        )
+        // ADR-0177 / #1932 — the caller's own sidebar organization (custom
+        // sections + channel placement + stars). Human-only and member-owned:
+        // `/me` is the entire addressing scheme, so no request can name another
+        // member's layout. Separate path from the `/me` PATCH above because this
+        // is a personal *preference* blob, not an identity field.
+        .route(
+            "/v1/workspaces/{ws}/members/me/sidebar-prefs",
+            get(routes::sidebar_prefs::get).put(routes::sidebar_prefs::put),
         )
         // #1767 — self password change. Separate path from leave so a PATCH
         // cannot be read as a lifecycle mutation.
@@ -764,6 +776,16 @@ pub fn build_app(state: AppState) -> Router {
         .route(
             "/v1/workspaces/{ws}/notification-rules",
             get(routes::notification_rules::get).put(routes::notification_rules::put),
+        )
+        // ADR-0175 / #1888 — personal message reminders. Human-only, owner
+        // scoped, no outbox fan-out (v1 is a client poll).
+        .route(
+            "/v1/workspaces/{ws}/reminders",
+            post(routes::reminders::create).get(routes::reminders::list),
+        )
+        .route(
+            "/v1/workspaces/{ws}/reminders/{id}",
+            patch(routes::reminders::update).delete(routes::reminders::delete),
         )
         .route(
             "/v1/workspaces/{ws}/invites",

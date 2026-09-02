@@ -8,9 +8,29 @@
 
 use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use momo_messaging::{ReadIntent, SearchScope, SidebarPrefs};
+use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
+
+/// Wire patch for an optional JSON field: omitted vs explicit `null` vs value.
+///
+/// `default` + this deserializer is what lets a `{status}`-only PUT leave the
+/// ADR-0176 columns alone, while `{statusEmoji: null}` clears them.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub enum OptionalPatch<T> {
+    #[default]
+    Absent,
+    Set(Option<T>),
+}
+
+fn deserialize_optional_patch<'de, D, T>(deserializer: D) -> Result<OptionalPatch<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(OptionalPatch::Set(Option::deserialize(deserializer)?))
+}
 
 /// ADR-0151 — re-exported rather than restated. The `attachments` array on a
 /// message is built in SQL (`momo_messaging::attachment::PAGED_ATTACHMENT_JOIN`)
@@ -48,6 +68,22 @@ pub struct ClaimRequest {
 pub struct ChangePasswordRequest {
     pub current_password: String,
     pub new_password: String,
+}
+
+/// `PATCH /v1/workspaces/{ws}/members/me` (#1873). CamelCase only; unknown
+/// keys (handle, role, avatar, snake_case aliases) are refused so this surface
+/// cannot become a second write for identity fields it does not own.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameSelfMemberRequest {
+    pub display_name: String,
+}
+
+/// Envelope for the updated member summary — login/join `Member` shape.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelfMemberResponse {
+    pub member: MemberDto,
 }
 
 /// `POST /v1/workspaces/{ws}/members/{memberId}/password-reset` (#1767).
@@ -1850,6 +1886,106 @@ pub struct NotificationRulesResponse {
     pub mention_overrides_mute: bool,
 }
 
+// ---------------------------------------------------------------------------
+// sidebar prefs (ADR-0177 / #1932)
+// ---------------------------------------------------------------------------
+
+/// `PUT …/members/me/sidebar-prefs` request (ADR-0177 D3).
+///
+/// The payload travels under a `prefs` key on the way in *and* on the way out,
+/// so the client can read a response and hand it straight back on the next save.
+/// A flat body would have made `updatedAtMs` an unknown field on the echo, and
+/// `deny_unknown_fields` would then have refused the one round-trip the client
+/// most obviously wants to make.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateSidebarPrefsRequest {
+    pub prefs: SidebarPrefs,
+}
+
+/// `GET/PUT …/members/me/sidebar-prefs` response (ADR-0177 D3).
+///
+/// `updatedAtMs` is omitted for a member who has never saved — the same
+/// `encodeIfPresent` rule the rest of this file follows. It is observability,
+/// not a concurrency token: v1 is last-write-wins because the only writer is the
+/// member's own devices (ADR-0177 D1).
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SidebarPrefsResponse {
+    pub prefs: SidebarPrefs,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub updated_at_ms: Option<i64>,
+}
+
+// ---------------------------------------------------------------------------
+// reminders (ADR-0175 / #1888)
+// ---------------------------------------------------------------------------
+
+/// `POST /v1/workspaces/{ws}/reminders`. Closed-world camelCase.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CreateReminderRequest {
+    pub channel_id: String,
+    pub message_id: String,
+    pub due_at_ms: i64,
+    #[serde(default)]
+    pub note: Option<String>,
+}
+
+/// `PATCH /v1/workspaces/{ws}/reminders/{id}` — snooze (`dueAtMs`) or complete
+/// (`completed: true`). The route refuses both, neither, and `completed: false`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UpdateReminderRequest {
+    #[serde(default)]
+    pub due_at_ms: Option<i64>,
+    #[serde(default)]
+    pub completed: Option<bool>,
+}
+
+/// `GET /v1/workspaces/{ws}/reminders?state=&cursor=&limit=`
+#[derive(Debug, Deserialize)]
+pub struct ListRemindersQuery {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+    #[serde(default)]
+    pub limit: Option<String>,
+}
+
+/// One reminder on the wire. `note` and `completedAtMs` are omitted when absent.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderDto {
+    pub id: String,
+    pub workspace_id: String,
+    pub member_id: String,
+    pub channel_id: String,
+    pub message_id: String,
+    pub due_at_ms: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completed_at_ms: Option<i64>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderResponse {
+    pub reminder: ReminderDto,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReminderListResponse {
+    pub reminders: Vec<ReminderDto>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
 /// `POST …/channels/{ch}/members` request (Swift `AddChannelMemberRequest`,
 /// `DTOs.swift:523-538`).
 ///
@@ -1940,6 +2076,13 @@ pub struct RosterMemberDto {
     /// edge; the wire never carries the effective value, only this durable intent.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub presence_status: Option<String>,
+    /// ADR-0176 custom status, human only, omitted when unset/expired/agent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_emoji: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_expires_at_ms: Option<i64>,
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
 }
@@ -2292,12 +2435,17 @@ pub struct TypingSignalResponse {
 // Presence — ADR-0160 (사용자 프레즌스 6b)
 // ---------------------------------------------------------------------------
 
-/// `PUT /v1/workspaces/{ws}/presence` request body — the declared status ③.
+/// `PUT /v1/workspaces/{ws}/presence` request body — the declared status ③
+/// plus optional ADR-0176 custom-status fields.
 ///
 /// The member is the credential's, never the body's: there is no `memberId`
 /// field, the same discipline read-state keeps, so one person cannot set
 /// another's status. `deny_unknown_fields` refuses a smuggled owner id outright
 /// rather than ignoring it.
+///
+/// `status` stays required (ADR-0160 contract). Custom fields are a per-key
+/// patch: omitted = leave stored value, JSON `null` = clear, value = set.
+/// A `{status}`-only body is therefore bit-identical to the pre-0176 PUT.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SetPresenceRequest {
@@ -2305,16 +2453,30 @@ pub struct SetPresenceRequest {
     /// with a sentence, not a serde reject, so the client learns which field was
     /// wrong.
     pub status: String,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_emoji: OptionalPatch<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_text: OptionalPatch<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_patch")]
+    pub status_expires_at_ms: OptionalPatch<i64>,
 }
 
 /// `GET`/`PUT /v1/workspaces/{ws}/presence` response — the caller's own durable
 /// declared status. Availability(②) and the effective dot are **not** here: the
 /// server does not know if the caller is connected, and the effective value is
 /// computed at the render edge and never stored (ADR-0160 D3).
+///
+/// Custom-status keys are omitted when unset, expired, or empty (encodeIfPresent).
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresenceStatusResponse {
     pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_emoji: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub status_expires_at_ms: Option<i64>,
 }
 
 /// `POST /v1/workspaces/{ws}/channels/{ch}/availability` request body — the
@@ -2371,6 +2533,39 @@ pub struct OpenDirectMessageResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateReadStateRequestDto {
     pub last_read_seq: i64,
+    /// ADR-0178 D5 — set the mark-unread signal to this seq. Absent on the
+    /// overwhelming majority of requests (every ordinary cursor advance).
+    #[serde(default)]
+    pub mark_unread_before_seq: Option<i64>,
+    /// ADR-0178 D4 — why this advertisement was sent.
+    ///
+    /// Absent means [`ReadIntentDto::Background`], and that default is the
+    /// safety property, not a convenience: every client that predates this
+    /// field, plus the retiring Swift server, sends nothing, and none of them
+    /// may silently erase a mark someone left on purpose.
+    #[serde(default)]
+    pub read_intent: Option<ReadIntentDto>,
+}
+
+/// Wire spelling of [`momo_messaging::ReadIntent`].
+///
+/// `deny_unknown_variants` is what `serde` does by default for enums, and here
+/// that strictness is wanted: a typo'd intent must be a loud 400, not a silent
+/// downgrade to whichever behaviour the typo happened to resemble.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadIntentDto {
+    ExplicitOpen,
+    Background,
+}
+
+impl From<ReadIntentDto> for ReadIntent {
+    fn from(dto: ReadIntentDto) -> Self {
+        match dto {
+            ReadIntentDto::ExplicitOpen => ReadIntent::ExplicitOpen,
+            ReadIntentDto::Background => ReadIntent::Background,
+        }
+    }
 }
 
 /// Swift `ReadStateDTO` (:301-315) — snake_case for the same reason.
@@ -2381,6 +2576,10 @@ pub struct ReadStateDto {
     pub latest_seq: i64,
     pub unread_count: i64,
     pub mention_count: i32,
+    /// ADR-0178 D2. Always present (`null` when unmarked) rather than skipped:
+    /// a client distinguishing "no mark" from "this server is too old to have
+    /// the concept" needs the key to be there.
+    pub marked_unread_before_seq: Option<i64>,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
@@ -2395,8 +2594,8 @@ pub struct ReadStateListResponseDto {
 
 /// `GET …/search/messages` query string. Parsed leniently like
 /// [`HistoryQuery`]: a garbage `limit` falls back to the default rather than
-/// 400-ing, matching Swift's `Int($0) ?? 20`. `q` and `cursor` *are* validated,
-/// because an unusable value there changes which rows come back.
+/// 400-ing, matching Swift's `Int($0) ?? 20`. `q`, `cursor` and `channel` *are*
+/// validated, because an unusable value there changes which rows come back.
 #[derive(Debug, Deserialize)]
 pub struct SearchQuery {
     #[serde(default)]
@@ -2405,13 +2604,45 @@ pub struct SearchQuery {
     pub limit: Option<String>,
     #[serde(default)]
     pub cursor: Option<String>,
+    /// Optional channel scope (#1931 / BT-3). Absent — or present and blank —
+    /// is the workspace scope this route has always had.
+    #[serde(default)]
+    pub channel: Option<String>,
 }
 
 impl SearchQuery {
     pub fn limit(&self) -> Option<i64> {
         self.limit.as_deref().and_then(|raw| raw.parse().ok())
     }
+
+    /// The requested scope, or `Err` when `channel` is present but not a UUID.
+    ///
+    /// **`?channel=` with no value is the workspace scope, not a 400.** That is
+    /// what a client sends the moment it clears the chip by emptying the field
+    /// instead of dropping the key, and there is no channel in it to narrow to,
+    /// so widening is the only coherent reading. Nothing rides on the leniency:
+    /// a cursor minted under a channel scope is still refused at the workspace
+    /// scope (`SearchScope::accept_cursor`), so a client that blanks the
+    /// parameter mid-page gets a 400 rather than a silently wider page.
+    ///
+    /// A *malformed* value is a 400, not a 404: it names no channel that could
+    /// exist or not exist, so it is a bad request in the same sense
+    /// `workspace_scope`'s unparseable `{ws}` is — the 404 is reserved for the
+    /// well-formed id the caller may not read.
+    pub fn scope(&self) -> Result<SearchScope, SearchRequestInvalidChannel> {
+        match self.channel.as_deref().map(str::trim) {
+            None | Some("") => Ok(SearchScope::Workspace),
+            Some(raw) => Uuid::parse_str(raw)
+                .map(SearchScope::Channel)
+                .map_err(|_| SearchRequestInvalidChannel),
+        }
+    }
 }
+
+/// `channel=` was present and is not a UUID (#1931). A unit type rather than a
+/// message: the route owns the 400 wording, like every other parse guard here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SearchRequestInvalidChannel;
 
 /// Swift `WorkspaceMessageSearchHitDTO` (:268-276). `createdAtMs` is
 /// milliseconds on the wire even though the cursor keeps microseconds.
@@ -4343,6 +4574,7 @@ mod tests {
                 latest_seq: 2,
                 unread_count: 1,
                 mention_count: 0,
+                marked_unread_before_seq: None,
             }],
         })
         .expect("serialize");
@@ -4350,6 +4582,41 @@ mod tests {
         assert!(json.get("readStates").is_none(), "{json}");
         assert_eq!(json["read_states"][0]["channel_id"], "c");
         assert_eq!(json["read_states"][0]["last_read_seq"], 1);
+        assert!(
+            json["read_states"][0]
+                .get("marked_unread_before_seq")
+                .is_some(),
+            "the mark key is always present: {json}"
+        );
+        assert!(json["read_states"][0]["marked_unread_before_seq"].is_null());
+    }
+
+    #[test]
+    fn unknown_read_intent_is_rejected_and_absent_is_background() {
+        let unknown: Result<UpdateReadStateRequestDto, _> = serde_json::from_value(
+            serde_json::json!({"last_read_seq": 1, "read_intent": "stale_flush"}),
+        );
+        assert!(
+            unknown.is_err(),
+            "a typo'd intent must not silently become background"
+        );
+
+        let absent: UpdateReadStateRequestDto =
+            serde_json::from_value(serde_json::json!({"last_read_seq": 1})).expect("decode");
+        assert_eq!(absent.read_intent, None);
+        assert_eq!(
+            absent.read_intent.map(ReadIntent::from).unwrap_or_default(),
+            ReadIntent::Background
+        );
+
+        let open: UpdateReadStateRequestDto = serde_json::from_value(serde_json::json!({
+            "last_read_seq": 1,
+            "read_intent": "explicit_open",
+            "mark_unread_before_seq": 3,
+        }))
+        .expect("decode");
+        assert_eq!(open.read_intent, Some(ReadIntentDto::ExplicitOpen));
+        assert_eq!(open.mark_unread_before_seq, Some(3));
     }
 
     #[test]
@@ -4358,6 +4625,7 @@ mod tests {
             q: Some("needle".into()),
             limit: Some("nonsense".into()),
             cursor: None,
+            channel: None,
         };
         assert_eq!(
             query.limit(),
@@ -4368,8 +4636,32 @@ mod tests {
             q: None,
             limit: Some("7".into()),
             cursor: None,
+            channel: None,
         };
         assert_eq!(sized.limit(), Some(7));
+    }
+
+    /// `channel=` is the one query parameter here that is *not* parsed leniently
+    /// past a malformed value: an unusable channel changes which rows come back,
+    /// so it is a 400 rather than a silent widening to the workspace.
+    #[test]
+    fn a_malformed_channel_scope_is_refused_while_a_blank_one_widens() {
+        let query = |channel: Option<&str>| SearchQuery {
+            q: Some("needle".into()),
+            limit: None,
+            cursor: None,
+            channel: channel.map(str::to_string),
+        };
+        let channel = Uuid::from_u128(0xc0ffee);
+        assert_eq!(query(None).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(query(Some("  ")).scope(), Ok(SearchScope::Workspace));
+        assert_eq!(
+            query(Some(&format!(" {channel} "))).scope(),
+            Ok(SearchScope::Channel(channel)),
+            "a query string is whitespace-prone; the id inside it is the scope"
+        );
+        assert!(query(Some("42")).scope().is_err());
+        assert!(query(Some(&format!("{channel}x"))).scope().is_err());
     }
 
     /// Swift's hand-written join decoder accepts two spellings of `displayName`
@@ -4479,6 +4771,141 @@ mod tests {
         assert!(
             json["invite"].get("code").is_none(),
             "the raw code leaves the server exactly once, from the create call: {json}"
+        );
+    }
+
+    /// #1873 — camelCase body, closed world. A snake_case alias or a smuggled
+    /// handle/role/avatar key must not decode: those fields are out of scope.
+    #[test]
+    fn self_rename_request_is_camel_case_and_closed() {
+        let body: RenameSelfMemberRequest =
+            serde_json::from_value(serde_json::json!({"displayName": "  곽성재  "}))
+                .expect("camelCase decodes");
+        assert_eq!(body.display_name, "  곽성재  ");
+
+        assert!(
+            serde_json::from_value::<RenameSelfMemberRequest>(serde_json::json!({
+                "display_name": "곽성재"
+            }))
+            .is_err(),
+            "snake_case is not an alias on this surface"
+        );
+        for smuggled in [
+            serde_json::json!({"displayName": "곽성재", "handle": "stolen"}),
+            serde_json::json!({"displayName": "곽성재", "role": "owner"}),
+            serde_json::json!({"displayName": "곽성재", "avatarUrl": "https://example.invalid/a.png"}),
+        ] {
+            assert!(
+                serde_json::from_value::<RenameSelfMemberRequest>(smuggled.clone()).is_err(),
+                "unknown key must not decode: {smuggled}"
+            );
+        }
+    }
+
+    #[test]
+    fn self_rename_response_is_the_member_envelope() {
+        let json = serde_json::to_value(SelfMemberResponse {
+            member: MemberDto {
+                id: "m".into(),
+                workspace_id: "w".into(),
+                kind: "human".into(),
+                display_name: "곽성재".into(),
+                handle: "seongjae".into(),
+            },
+        })
+        .expect("serialize");
+        assert_eq!(json["member"]["displayName"], "곽성재");
+        assert_eq!(json["member"]["handle"], "seongjae");
+        assert_eq!(json["member"]["kind"], "human");
+        assert!(json.get("handle").is_none(), "{json}");
+    }
+
+    #[test]
+    fn reminder_create_is_closed_world_camel_case() {
+        let parsed: CreateReminderRequest = serde_json::from_value(serde_json::json!({
+            "channelId": "c",
+            "messageId": "m",
+            "dueAtMs": 1,
+            "note": "later"
+        }))
+        .expect("parse");
+        assert_eq!(parsed.channel_id, "c");
+        assert_eq!(parsed.due_at_ms, 1);
+        assert_eq!(parsed.note.as_deref(), Some("later"));
+        assert!(
+            serde_json::from_value::<CreateReminderRequest>(serde_json::json!({
+                "channelId": "c",
+                "messageId": "m",
+                "dueAtMs": 1,
+                "memberId": "stolen"
+            }))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn reminder_patch_refuses_unknown_keys() {
+        let snooze: UpdateReminderRequest =
+            serde_json::from_value(serde_json::json!({"dueAtMs": 9})).expect("snooze");
+        assert_eq!(snooze.due_at_ms, Some(9));
+        assert_eq!(snooze.completed, None);
+        let done: UpdateReminderRequest =
+            serde_json::from_value(serde_json::json!({"completed": true})).expect("done");
+        assert_eq!(done.completed, Some(true));
+        assert!(serde_json::from_value::<UpdateReminderRequest>(
+            serde_json::json!({"dueAtMs": 9, "note": "no"})
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn reminder_list_omits_next_cursor_when_absent() {
+        let json = serde_json::to_value(ReminderListResponse {
+            reminders: Vec::new(),
+            next_cursor: None,
+        })
+        .expect("serialize");
+        assert!(json.get("nextCursor").is_none(), "{json}");
+        assert_eq!(json["reminders"], serde_json::json!([]));
+    }
+
+    #[test]
+    fn presence_put_is_closed_world_and_has_no_owner_field() {
+        let legacy: SetPresenceRequest =
+            serde_json::from_value(serde_json::json!({"status": "dnd"})).expect("legacy");
+        assert_eq!(legacy.status, "dnd");
+        assert!(matches!(legacy.status_emoji, OptionalPatch::Absent));
+        assert!(matches!(legacy.status_text, OptionalPatch::Absent));
+        assert!(matches!(legacy.status_expires_at_ms, OptionalPatch::Absent));
+
+        let patched: SetPresenceRequest = serde_json::from_value(serde_json::json!({
+            "status": "away",
+            "statusEmoji": "📅",
+            "statusText": "회의 중",
+            "statusExpiresAtMs": 1
+        }))
+        .expect("patch");
+        assert_eq!(patched.status, "away");
+        assert!(matches!(
+            patched.status_emoji,
+            OptionalPatch::Set(Some(ref value)) if value == "📅"
+        ));
+        assert!(matches!(
+            patched.status_text,
+            OptionalPatch::Set(Some(ref value)) if value == "회의 중"
+        ));
+        assert!(matches!(
+            patched.status_expires_at_ms,
+            OptionalPatch::Set(Some(1))
+        ));
+
+        assert!(
+            serde_json::from_value::<SetPresenceRequest>(serde_json::json!({
+                "status": "auto",
+                "memberId": "stolen"
+            }))
+            .is_err(),
+            "a memberId in the body is a smuggled owner"
         );
     }
 }
