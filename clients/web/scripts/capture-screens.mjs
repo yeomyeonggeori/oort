@@ -8481,10 +8481,28 @@ async function captureTerminalDockScenes(browser, scheme) {
 }
 
 /**
- * BT-6 (#1934): timeline with a mark-unread (divider + top pill). Own context
- * so existing READ_STATES fixtures are not rewritten. Overlay only the
- * read-state GET/PUT for this scene.
+ * BT-6 (#1934): timeline with a mark-unread (divider above a known seq).
+ * Own context so shared READ_STATES are not rewritten. Overlay only GET/PUT.
+ * Dedicated all-read #general + seeded mark so the only divider is the mark's.
  */
+const MARK_UNREAD_SEQ = 1408;
+const MARK_UNREAD_LATEST = 1416;
+
+function markUnreadReadStates(cleared) {
+  return READ_STATES.map((row) =>
+    row.channel_id === GENERAL_ID
+      ? {
+          channel_id: GENERAL_ID,
+          last_read_seq: MARK_UNREAD_LATEST,
+          latest_seq: MARK_UNREAD_LATEST,
+          unread_count: 0,
+          mention_count: 0,
+          marked_unread_before_seq: cleared ? null : MARK_UNREAD_SEQ,
+        }
+      : { ...row, marked_unread_before_seq: null }
+  );
+}
+
 async function captureMarkUnreadScenes(browser, scheme) {
   const shots = [];
   const context = await browser.newContext({
@@ -8497,71 +8515,90 @@ async function captureMarkUnreadScenes(browser, scheme) {
     origin: ORIGIN,
   });
   await installMocks(context);
-  let markSeq = null;
+  let cleared = false;
   await context.route("**/v1/workspaces/*/read-state", (route) => {
     if (route.request().method() !== "GET") return route.fallback();
-    return json(route, {
-      read_states: READ_STATES.map((row) => ({
-        ...row,
-        marked_unread_before_seq:
-          row.channel_id === GENERAL_ID ? markSeq : null,
-      })),
-    });
+    return json(route, { read_states: markUnreadReadStates(cleared) });
   });
   await context.route("**/v1/workspaces/*/channels/*/read-state", (route) => {
     const req = route.request();
     if (req.method() !== "PUT") return route.fallback();
     const body = req.postDataJSON() || {};
-    if (body.read_intent === "explicit_open") {
-      markSeq = null;
-    } else if (typeof body.mark_unread_before_seq === "number") {
-      markSeq = body.mark_unread_before_seq;
-    }
+    if (body.read_intent === "explicit_open") cleared = true;
+    const general = markUnreadReadStates(cleared).find(
+      (row) => row.channel_id === GENERAL_ID
+    );
     return json(route, {
-      ...READ_STATES[0],
-      last_read_seq: body.last_read_seq ?? READ_STATES[0].last_read_seq,
-      marked_unread_before_seq: markSeq,
+      ...general,
+      last_read_seq: body.last_read_seq ?? MARK_UNREAD_LATEST,
     });
   });
   const page = await context.newPage();
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
   await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
-  const topSeq = await pinActionableRowToScrollerTop(page);
-  if (!topSeq) {
-    throw new Error(`마크 캡처 ${scheme}: 스크롤러 상단에 붙일 행이 없다`);
-  }
-  const early = page.locator(
-    `[data-testid="timeline-message"][data-seq="${topSeq}"]`
-  );
-  await early.waitFor({ state: "visible" });
-  await early.hover();
-  await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
-  await page.getByTestId("message-actions-trigger").click();
-  await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
-  const markItem = page.getByTestId("menu-mark-unread");
-  if ((await markItem.count()) !== 1) {
-    throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${topSeq})`);
-  }
-  await markItem.click();
-  await page.getByTestId("unread-divider").waitFor({ state: "visible" });
   await page.evaluate(`(() => {
-    const rows = document.querySelectorAll('[data-testid="timeline-message"]');
-    const last = rows[rows.length - 1];
-    if (last) last.scrollIntoView({ block: "end" });
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (scroller) scroller.scrollTop = 0;
   })()`);
-  await page.waitForTimeout(400);
-  try {
-    await page.getByTestId("jump-unread").waitFor({
-      state: "visible",
-      timeout: 4_000,
-    });
-  } catch {
-    // Divider still proves the mark even if the pill did not arm.
+  const proof = await page.waitForFunction(`(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    const divider = document.querySelector('[data-testid="unread-divider"]');
+    if (!scroller || !row || !divider) {
+      if (scroller && !row) scroller.scrollTop = Math.max(0, scroller.scrollTop - 40);
+      return null;
+    }
+    row.scrollIntoView({ block: "center" });
+    const d = divider.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    if (d.height <= 0 || r.height <= 0) return null;
+    if (d.top < 0 || r.bottom > window.innerHeight) return null;
+    if (Math.abs(d.bottom - r.top) > 4) return null;
+    const pill = document.querySelector('[data-testid="jump-unread"]');
+    const pillRect = pill ? pill.getBoundingClientRect() : null;
+    const pillVisible = Boolean(
+      pillRect && pillRect.height > 0 && pillRect.bottom > 0 && pillRect.top < window.innerHeight
+    );
+    return {
+      dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
+      pillVisible,
+      pillText: pillVisible ? (pill.textContent || "").replace(/\\s+/g, " ").trim() : "",
+      dividerTop: Math.round(d.top),
+      rowTop: Math.round(r.top),
+    };
+  })()`);
+  if (!proof) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선이 seq ${MARK_UNREAD_SEQ} 위에 서지 않는다`);
   }
+  const state = await proof.jsonValue();
+  if (!state || !state.dividerText.includes("새 메시지")) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
+  }
+  const countMatch = state.dividerText.match(/(\d+)/);
+  if (!countMatch) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 수가 없다 「${state.dividerText}」`);
+  }
+  if (state.pillVisible && !state.pillText.includes(countMatch[1])) {
+    throw new Error(
+      `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
+    );
+  }
+  await assertComposerVisible(page, `mark-unread ${scheme}`);
+  await assertNoHorizontalOverflow(page, `mark-unread ${scheme}`);
   const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
   await page.screenshot({ path });
   shots.push(path);
+  console.log(
+    `  mark-unread ${scheme}: divider 「${state.dividerText}」 pill=${state.pillVisible ? state.pillText : "hidden"}`
+  );
   await page.close();
   await context.close();
   return shots;
