@@ -319,6 +319,32 @@ export function scanComposition(
 
   const taintedDecls = new Set<ts.Node>();
   const taintedProps = new Set<string>(IDENT_NAMES);
+  const taintedFns = new Set<string>();
+
+  function addFn(name: string): boolean {
+    if (taintedFns.has(name)) return false;
+    taintedFns.add(name);
+    return true;
+  }
+
+  function enclosingFnName(node: ts.Node): string | undefined {
+    let current: ts.Node | undefined = node;
+    while (current) {
+      if (ts.isFunctionDeclaration(current) && current.name) {
+        return current.name.text;
+      }
+      if (
+        (ts.isFunctionExpression(current) || ts.isArrowFunction(current)) &&
+        current.parent &&
+        ts.isVariableDeclaration(current.parent) &&
+        ts.isIdentifier(current.parent.name)
+      ) {
+        return current.parent.name.text;
+      }
+      current = current.parent;
+    }
+    return undefined;
+  }
 
   function addDecl(node: ts.Node): boolean {
     if (taintedDecls.has(node)) return false;
@@ -369,6 +395,10 @@ export function scanComposition(
         isTaintedExpr(inner.whenTrue) || isTaintedExpr(inner.whenFalse)
       );
     }
+    if (ts.isCallExpression(inner) || ts.isCallChain(inner)) {
+      const name = calleeName(inner.expression);
+      if (name && taintedFns.has(name) && !CORE_CALLEES.has(name)) return true;
+    }
     return false;
   }
 
@@ -417,6 +447,21 @@ export function scanComposition(
 
       if (ts.isShorthandPropertyAssignment(n) && isTaintedExpr(n.name)) {
         changed = addProp(n.name.text) || changed;
+      }
+
+      if (ts.isReturnStatement(n) && n.expression && isTaintedExpr(n.expression)) {
+        const fnName = enclosingFnName(n);
+        if (fnName) changed = addFn(fnName) || changed;
+      }
+
+      if (
+        (ts.isArrowFunction(n) || ts.isFunctionExpression(n)) &&
+        n.body &&
+        !ts.isBlock(n.body) &&
+        isTaintedExpr(n.body)
+      ) {
+        const fnName = enclosingFnName(n);
+        if (fnName) changed = addFn(fnName) || changed;
       }
 
       if (ts.isCallExpression(n) || ts.isCallChain(n)) {
@@ -605,6 +650,13 @@ export function s(row: { markedUnreadBeforeSeq: number | null; lastReadSeq: numb
   const f = e;
   return m == null ? f : (m < f ? m : f);
 }`,
+  returnValueTaint: `function pick(row: { markedUnreadBeforeSeq: number | null }) {
+  return row.markedUnreadBeforeSeq;
+}
+export function s(row: { markedUnreadBeforeSeq: number | null; lastReadSeq: number }) {
+  const m = pick(row);
+  return Math.min(m ?? Infinity, row.lastReadSeq + 1);
+}`,
 } as const;
 
 describe("D3 합성은 momo-core 함수 한 곳뿐이다", () => {
@@ -644,7 +696,7 @@ describe("게이트는 사보타주 5형을 잡고 패스스루 3형은 놓아 �
 });
 
 describe("게이트는 창 밖 별칭 4형을 잡는다 (M-7)", () => {
-  it("rename-alias / 창 밖 별칭 / 헬퍼 / 구조분해 개명이 각각 걸린다", () => {
+  it("rename-alias / 창 밖 별칭 / 헬퍼 / 구조분해 개명 / 반환값 오염이 각각 걸린다", () => {
     for (const [name, snippet] of Object.entries(ALIAS_FORMS)) {
       expect(scanComposition(snippet).length, name).toBeGreaterThan(0);
     }
