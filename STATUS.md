@@ -6,6 +6,7 @@
 - 메시지 ⋯ 「여기부터 안 읽음」: PUT `mark_unread_before_seq`, `read_intent` 생략. 낙관 반영, 400/403 롤백+행 배너.
 - 채널 명시 열람·사이드바 「읽음 처리」는 `read_intent: "explicit_open"`. 도착 중 플러시·인박스 멘션 광고는 생략(background). 서버 `marked_unread_before_seq: null` 이 로컬 마크를 지움.
 - 서버 절반은 track/engine PR #1961. runtime-unverified: 라이브 PUT/GET 왕복(이 레인은 모킹).
+- runtime-unverified / 폰 소비 공백: `clients/mobile/src/features/sidebar/rows.ts:179` 와 `clients/mobile/src/screens/ConversationScreen.tsx:388` 이 서버 `unreadCount` 원문을 읽어, 데스크톱 마크가 폰에서는 다 읽음으로 보인다. 이 PR 에서 폰 소비는 구현하지 않음.
 - red proof: 마크 3/커서 10 공유 픽스처 · explicit_open vs 도착 플러시 · null 수렴 · 400 롤백. 합성 grep 게이트.
 
 ## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
