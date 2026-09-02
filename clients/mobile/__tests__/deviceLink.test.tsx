@@ -148,10 +148,10 @@ describe('ConnectScreen device-link redeem', () => {
     );
     const first = render(<ConnectScreen />);
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
-    expect(screen.getByTestId('device-link-failure')).toHaveTextContent(
-      DEVICE_LINK_EXPIRED_COPY,
+    expect(screen.getByText(DEVICE_LINK_EXPIRED_COPY)).toBeTruthy();
+    expect(screen.getByTestId('device-link-failure-retry')).toHaveTextContent(
+      'QR 다시 찍기',
     );
-    expect(screen.getByTestId('device-link-retry')).toHaveTextContent('QR 다시 찍기');
     first.unmount();
 
     fetchMock.mockResolvedValueOnce(
@@ -160,17 +160,13 @@ describe('ConnectScreen device-link redeem', () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
     const second = render(<ConnectScreen />);
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
-    expect(screen.getByTestId('device-link-failure')).toHaveTextContent(
-      DEVICE_LINK_USED_COPY,
-    );
+    expect(screen.getByText(DEVICE_LINK_USED_COPY)).toBeTruthy();
     second.unmount();
 
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue('oort://link?token=nope');
     const third = render(<ConnectScreen />);
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
-    expect(screen.getByTestId('device-link-failure')).toHaveTextContent(
-      DEVICE_LINK_MALFORMED_COPY,
-    );
+    expect(screen.getByText(DEVICE_LINK_MALFORMED_COPY)).toBeTruthy();
     const sentences = new Set([
       DEVICE_LINK_EXPIRED_COPY,
       DEVICE_LINK_USED_COPY,
@@ -200,9 +196,7 @@ describe('ConnectScreen device-link redeem', () => {
 
     await waitFor(() => expect(screen.getByTestId('device-link-sas')).toBeTruthy());
     expect(screen.getByTestId('device-link-sas-digits')).toHaveTextContent('4821');
-    expect(screen.getByTestId('device-link-sas')).toHaveTextContent(
-      DEVICE_LINK_SAS_WAIT_COPY,
-    );
+    expect(screen.getByText(DEVICE_LINK_SAS_WAIT_COPY)).toBeTruthy();
     await keychainSettled();
     expect(keychainItems.size).toBe(0);
 
@@ -239,8 +233,14 @@ describe('ConnectScreen device-link redeem', () => {
     );
     await keychainSettled();
 
-    const leakedStore = storeHoldsLiteral(DEVICE_LINK_TOKEN);
-    const leakedLogs = captureHoldsLiteral(capture.lines, DEVICE_LINK_TOKEN);
+    const leakedStore =
+      storeHoldsLiteral(DEVICE_LINK_TOKEN) ||
+      storeHoldsLiteral(LOGIN_BODY.accessToken) ||
+      storeHoldsLiteral(LOGIN_BODY.refreshToken);
+    const leakedLogs =
+      captureHoldsLiteral(capture.lines, DEVICE_LINK_TOKEN) ||
+      captureHoldsLiteral(capture.lines, LOGIN_BODY.accessToken) ||
+      captureHoldsLiteral(capture.lines, LOGIN_BODY.refreshToken);
     capture.restore();
     expect(leakedStore).toBe(false);
     expect(leakedLogs).toBe(false);

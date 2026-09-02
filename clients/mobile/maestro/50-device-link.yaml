@@ -1,0 +1,45 @@
+appId: app.momo.ios
+name: 50-device-link
+# NO flow-level `env:` block — same reason as 00-login.yaml: Maestro 2.8 lets a
+# flow's own `env:` win over `--env` on the command line.
+#
+#   SERVER_URL DEVICE_LINK
+#
+# DEVICE_LINK is a full `oort://link?server=…&token=…` URL. The scanner is
+# bypassed on purpose: a simulator has no QR to point at. Production paths are
+# ConnectScreen 「QR로 연결」(expo-camera) and the OS camera app opening the same
+# URL (ADR-0180 D2). This flow injects the deep link after Metro is attached.
+#
+# Debug Metro limitation (same as 00-login): a COLD openLink relaunches without
+# RCT_jsLocation and lands on a red "No script URL provided" box. The flow
+# therefore launches first, waits for the connect screen, then openLink as a
+# WARM hand-off. If that Linking event does not reach JS on this build, the
+# redeem/SAS path is unmeasured — do not call the flow green.
+---
+# 50-device-link — oort://link 투입 → redeem → (SAS 대기 또는 채널 목록).
+- launchApp:
+    appId: app.momo.ios
+    clearState: true
+
+- runFlow: subflows/dismiss-system-alerts.yaml
+
+- extendedWaitUntil:
+    visible:
+      id: "server-url-input"
+    timeout: 180000
+
+- assertVisible: "oort에 연결"
+- assertVisible:
+    id: "qr-connect-button"
+
+# Scanner bypass: inject the voucher URL. Do not type the token into a field.
+- openLink: ${DEVICE_LINK}
+
+- runFlow: subflows/dismiss-system-alerts.yaml
+
+# Public-origin redeem shows the four SAS digits and waits. Loopback redeem
+# lands in the workspace. Either outcome proves the link was consumed.
+- extendedWaitUntil:
+    visible:
+      id: "device-link-sas|sidebar-list|device-link-failure"
+    timeout: 60000

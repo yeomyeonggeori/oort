@@ -1,5 +1,6 @@
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { sha256Utf8 } from "../../lib/sha256";
 import type { ConnectFailure } from "./connectModel";
 
 // =============================================================================
@@ -10,6 +11,8 @@ import type { ConnectFailure } from "./connectModel";
 
 /** 32 CSPRNG bytes, base64url, no padding. */
 export const DEVICE_LINK_TOKEN_LEN = 43;
+
+const TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;
 
 export const DEVICE_LINK_EXPIRED_COPY =
   "이 연결 코드는 만료됐거나 알 수 없습니다.";
@@ -24,30 +27,31 @@ export const DEVICE_LINK_PERMISSION_COPY =
 export const DEVICE_LINK_RETRY_LABEL = "QR 다시 찍기";
 export const DEVICE_LINK_QR_LABEL = "QR로 연결";
 export const DEVICE_LINK_ADDRESS_FALLBACK_LABEL = "주소로 연결";
+export const DEVICE_LINK_SAS_RETRY_LABEL = "다시 확인";
+
+export class DeviceLinkFormatError extends Error {
+  constructor() {
+    super(DEVICE_LINK_MALFORMED_COPY);
+    this.name = "DeviceLinkFormatError";
+  }
+}
 
 export function isDeviceLinkToken(raw: string): boolean {
-  void raw;
-  return false;
+  return TOKEN_RE.test(raw);
 }
 
+/**
+ * Four-digit SAS the issuer also shows. Same formula as the server INSERT:
+ * `lpad(((get_byte(digest,0)*256 + get_byte(digest,1)) % 10000)::text, 4, '0')`
+ * on `digest(token, 'sha256')`. Used when redeem omits `sas` (OpenAPI does).
+ */
 export function deviceLinkSasDigits(token: string): string {
-  void token;
-  return "0000";
+  const digest = sha256Utf8(token);
+  const n = ((digest[0] ?? 0) * 256 + (digest[1] ?? 0)) % 10000;
+  return n.toString().padStart(4, "0");
 }
 
-export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
-  void cause;
-  return {
-    message: "not implemented",
-    suggestSignIn: false,
-    retryable: false,
-  };
-}
-
-/** Transport copy is shared with the connect screen; keep the type imported. */
-export function deviceLinkTransportFailure(
-  cause: unknown
-): ConnectFailure | null {
+function transportFailure(cause: unknown): ConnectFailure | null {
   if (cause instanceof NetworkError) {
     return { message: cause.message, suggestSignIn: false, retryable: true };
   }
@@ -57,4 +61,52 @@ export function deviceLinkTransportFailure(
     suggestSignIn: false,
     retryable: false,
   };
+}
+
+export function deviceLinkFailureCopy(cause: unknown): ConnectFailure {
+  if (cause instanceof DeviceLinkFormatError) {
+    return {
+      message: DEVICE_LINK_MALFORMED_COPY,
+      suggestSignIn: false,
+      retryable: false,
+    };
+  }
+  const transport = transportFailure(cause);
+  if (transport) return transport;
+  const failure = cause as ApiError;
+  switch (failure.status) {
+    case 401:
+      return {
+        message: DEVICE_LINK_EXPIRED_COPY,
+        suggestSignIn: false,
+        retryable: false,
+      };
+    case 409:
+      return {
+        message: DEVICE_LINK_USED_COPY,
+        suggestSignIn: false,
+        retryable: false,
+      };
+    case 400:
+      return {
+        message: DEVICE_LINK_MALFORMED_COPY,
+        suggestSignIn: false,
+        retryable: false,
+      };
+    case 429:
+      return {
+        message: "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.",
+        suggestSignIn: false,
+        retryable: false,
+      };
+    default:
+      return {
+        message:
+          failure.status >= 500
+            ? "서버에서 오류가 났습니다. 잠시 뒤에 다시 시도하세요."
+            : DEVICE_LINK_MALFORMED_COPY,
+        suggestSignIn: false,
+        retryable: failure.status >= 500,
+      };
+  }
 }

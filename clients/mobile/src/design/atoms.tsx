@@ -427,10 +427,12 @@ export function Sentence(
 export function FailureBanner({
   message,
   onRetry,
+  retryLabel = '다시 시도',
   testID,
 }: {
   message: string;
   onRetry?: () => void;
+  retryLabel?: string;
   testID?: string;
 }): React.JSX.Element {
   const styles = useStyles(buildStyles);
@@ -443,7 +445,7 @@ export function FailureBanner({
           onPress={onRetry}
           style={({pressed}) => [styles.retry, pressed && styles.pressed]}
           testID={testID ? `${testID}-retry` : undefined}>
-          <Text style={styles.retryLabel}>다시 시도</Text>
+          <Text style={styles.retryLabel}>{retryLabel}</Text>
         </Pressable>
       ) : null}
     </View>

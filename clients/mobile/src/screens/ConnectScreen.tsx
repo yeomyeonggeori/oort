@@ -1,4 +1,11 @@
-import {joinWithInvite, login} from '@momo/core/lib/api';
+import {
+  activateDeviceLinkSession,
+  joinWithInvite,
+  login,
+  probeDeviceLinkAccess,
+  redeemDeviceLink,
+  type LoginResponse,
+} from '@momo/core/lib/api';
 import {
   joinFailureCopy,
   prefillFocus,
@@ -7,6 +14,16 @@ import {
   type ConnectField,
   type ConnectMode,
 } from '@momo/core/features/auth/connectModel';
+import {
+  DEVICE_LINK_PERMISSION_COPY,
+  DEVICE_LINK_QR_LABEL,
+  DEVICE_LINK_RETRY_LABEL,
+  DEVICE_LINK_SAS_RETRY_LABEL,
+  DEVICE_LINK_SAS_WAIT_COPY,
+  deviceLinkFailureCopy,
+  deviceLinkSasDigits,
+} from '@momo/core/features/auth/deviceLinkModel';
+import type {DeviceLinkPrefill} from '@momo/core/features/auth/deepLink';
 import NetInfo from '@react-native-community/netinfo';
 import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {
@@ -22,7 +39,13 @@ import {
 import {FailureBanner, NoticeBlock, PrimaryButton, Screen} from '../design/atoms';
 import {font, radius, SAFE_GUTTER, space, TOUCH_TARGET, type Palette} from '../design/tokens';
 import {usePalette, useStyles} from '../design/theme';
+import {
+  arrivalFromDeviceLinkUrl,
+  useDeviceLinkArrival,
+} from '../deeplink/deviceLink';
 import {useJoinPrefill} from '../deeplink/joinLink';
+import {DEVICE_LINK_DEVICE} from '../features/deviceLink/deviceIdentity';
+import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
 import {
@@ -34,8 +57,9 @@ import {
 } from '../storage/serverBase';
 
 // =============================================================================
-// The one screen a signed-out person sees. Two jobs behind one form: signing in,
-// and redeeming an invite (`oort://join?server=…&code=…`).
+// The one screen a signed-out person sees. Three jobs behind one form: signing
+// in, redeeming an invite (`oort://join?server=…&code=…`), and consuming a
+// device-link voucher (`oort://link?server=…&token=…`, ADR-0180 D7).
 //
 // ## Everything that decides is in the core
 //
@@ -85,6 +109,7 @@ export default function ConnectScreen({
   const styles = useStyles(buildStyles);
   const palette = usePalette();
   const prefill = useJoinPrefill();
+  const deviceLinkArrival = useDeviceLinkArrival();
 
   const [mode, setMode] = useState<ConnectMode>('signIn');
   // Synchronous local state. See the note above before changing any of these.
@@ -100,6 +125,14 @@ export default function ConnectScreen({
   const [inviteCode, setInviteCode] = useState('');
   const [phase, setPhase] = useState<Phase>(IDLE);
   const [online, setOnline] = useState(true);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [permissionDenied, setPermissionDenied] = useState(false);
+  const [linkFailure, setLinkFailure] = useState<ConnectFailure | null>(null);
+  const [sasWait, setSasWait] = useState<{
+    session: LoginResponse;
+    sas: string;
+  } | null>(null);
+  const consumedLink = useRef<string | null>(null);
 
   const fields = useRef<Partial<Record<ConnectField, TextInput | null>>>({});
 
@@ -192,8 +225,133 @@ export default function ConnectScreen({
     setPhase(IDLE);
   }, []);
 
+  const redeemPrefill = useCallback(async (link: DeviceLinkPrefill) => {
+    setScannerOpen(false);
+    setLinkFailure(null);
+    setPermissionDenied(false);
+    setServerBase(link.serverUrl);
+    setServerUrl(link.serverUrl);
+    try {
+      const result = await redeemDeviceLink(link.token, DEVICE_LINK_DEVICE);
+      if (!result.pendingSas) return;
+      setSasWait({
+        session: result.session,
+        sas: result.sas ?? deviceLinkSasDigits(link.token),
+      });
+    } catch (error) {
+      setLinkFailure(deviceLinkFailureCopy(error));
+    }
+  }, []);
+
+  const applyArrival = useCallback(
+    (arrival: {kind: 'prefill'; prefill: DeviceLinkPrefill} | {kind: 'malformed'}) => {
+      if (arrival.kind === 'malformed') {
+        setScannerOpen(false);
+        setSasWait(null);
+        setLinkFailure(deviceLinkFailureCopy(new Error('malformed')));
+        return;
+      }
+      const key = `${arrival.prefill.serverUrl}\0${arrival.prefill.token}`;
+      if (consumedLink.current === key) return;
+      consumedLink.current = key;
+      void redeemPrefill(arrival.prefill);
+    },
+    [redeemPrefill],
+  );
+
+  useEffect(() => {
+    if (!deviceLinkArrival) return;
+    applyArrival(deviceLinkArrival);
+  }, [deviceLinkArrival, applyArrival]);
+
+  const onScan = useCallback(
+    (data: string) => {
+      const arrival = arrivalFromDeviceLinkUrl(data);
+      if (!arrival) {
+        applyArrival({kind: 'malformed'});
+        return;
+      }
+      applyArrival(arrival);
+    },
+    [applyArrival],
+  );
+
+  const retryQr = useCallback(() => {
+    consumedLink.current = null;
+    setLinkFailure(null);
+    setSasWait(null);
+    setScannerOpen(true);
+  }, []);
+
+  const probeSas = useCallback(async () => {
+    if (!sasWait) return;
+    const outcome = await probeDeviceLinkAccess(
+      sasWait.session.accessToken,
+      sasWait.session.member.workspaceId,
+    );
+    if (outcome === 'active') {
+      activateDeviceLinkSession(sasWait.session);
+    }
+  }, [sasWait]);
+
+  useEffect(() => {
+    if (!sasWait) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      const outcome = await probeDeviceLinkAccess(
+        sasWait.session.accessToken,
+        sasWait.session.member.workspaceId,
+      );
+      if (cancelled) return;
+      if (outcome === 'active') {
+        activateDeviceLinkSession(sasWait.session);
+        return;
+      }
+      timer = setTimeout(() => {
+        void tick();
+      }, 2000);
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [sasWait]);
+
+  if (sasWait) {
+    return (
+      <Screen>
+        <View style={styles.sas} testID="device-link-sas">
+          <Text style={styles.title}>기기 연결</Text>
+          <Text
+            style={styles.sasDigits}
+            accessibilityLabel={`확인 번호 ${sasWait.sas}`}
+            testID="device-link-sas-digits">
+            {sasWait.sas}
+          </Text>
+          <Text style={styles.subtitle}>{DEVICE_LINK_SAS_WAIT_COPY}</Text>
+          <PrimaryButton
+            label={DEVICE_LINK_SAS_RETRY_LABEL}
+            onPress={() => void probeSas()}
+            testID="device-link-sas-retry"
+          />
+        </View>
+      </Screen>
+    );
+  }
+
   return (
     <Screen>
+      <QrScannerSheet
+        visible={scannerOpen}
+        onClose={() => setScannerOpen(false)}
+        onScan={onScan}
+        onPermissionDenied={() => {
+          setScannerOpen(false);
+          setPermissionDenied(true);
+        }}
+      />
       <KeyboardAvoidingView
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -210,6 +368,35 @@ export default function ConnectScreen({
               ? '초대 코드로 워크스페이스에 참여합니다.'
               : 'oort는 셀프호스팅입니다. 연결할 서버 주소를 입력하세요.'}
           </Text>
+
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={DEVICE_LINK_QR_LABEL}
+            onPress={() => {
+              setLinkFailure(null);
+              setPermissionDenied(false);
+              setScannerOpen(true);
+            }}
+            style={({pressed}) => [styles.qrButton, pressed && styles.togglePressed]}
+            testID="qr-connect-button">
+            <Text style={styles.toggleLabel}>{DEVICE_LINK_QR_LABEL}</Text>
+          </Pressable>
+
+          {permissionDenied ? (
+            <NoticeBlock
+              headline={DEVICE_LINK_PERMISSION_COPY}
+              testID="qr-permission-denied"
+            />
+          ) : null}
+
+          {linkFailure ? (
+            <FailureBanner
+              message={linkFailure.message}
+              retryLabel={DEVICE_LINK_RETRY_LABEL}
+              onRetry={retryQr}
+              testID="device-link-failure"
+            />
+          ) : null}
 
           {sessionExpired ? (
             <NoticeBlock headline={SESSION_EXPIRED_NOTICE} testID="session-expired" />
@@ -418,4 +605,25 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   togglePressed: {backgroundColor: color.surfacePressed},
   toggleLabel: {color: color.accentText, fontSize: font.label, fontWeight: '600'},
+  qrButton: {
+    minHeight: TOUCH_TARGET,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: color.border,
+    backgroundColor: color.surface,
+  },
+  sas: {
+    flex: 1,
+    paddingHorizontal: SAFE_GUTTER,
+    paddingTop: space.xl,
+    gap: space.lg,
+  },
+  sasDigits: {
+    fontSize: font.title,
+    fontWeight: '600',
+    letterSpacing: space.sm,
+    color: color.text,
+  },
 });

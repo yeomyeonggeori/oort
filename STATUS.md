@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## M0m 기기 연결 폰 절반 — ConnectScreen 「QR로 연결」 (#1990, 2026-09-02)
+
+- `oort://link` 파서(join 동형: 순서 무관·`momo://` 흡수·미지 파라미터 무시·잘못된 server 거부) + `POST /v1/auth/device-link/redeem` + `pendingSas` SAS 대기(서버 `sas` 또는 토큰 SHA-256 파생 4자리). 세션은 활성화 후 키체인만.
+- 카메라 권한 거부 → 문장 안내 + 「주소로 연결」 폴백. 만료 401 / 재사용 409 / 형식 오류 세 문장, 재시도 「QR 다시 찍기」.
+- runtime-unverified: 실기기 카메라·OS 카메라 앱 딥링크 왕복, Maestro `50-device-link.yaml`(시뮬레이터 스캐너 우회는 딥링크 투입).
+
 ## M0s 기기 연결 서버 절반 — 1회용 QR 링크 토큰 (#1959, 2026-09-02)
 
 - `POST /v1/auth/device-link` 발급 · `POST …/redeem` 소비 · `GET …/{id}` 폴링 · `POST …/{id}/confirm-sas`. 마이그레이션 086 `device_link_token` + `token.device_label`/`pending_sas`. `schema_v0.sql` 무접촉.

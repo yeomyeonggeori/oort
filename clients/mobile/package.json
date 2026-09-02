@@ -20,6 +20,7 @@
     "@tanstack/react-query": "^5.59.0",
     "centrifuge": "^5.7.0",
     "expo": "^57.0.9",
+    "expo-camera": "~57.0.4",
     "expo-clipboard": "^57.0.1",
     "expo-document-picker": "~57.0.1",
     "expo-file-system": "57.0.1",

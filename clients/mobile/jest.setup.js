@@ -302,6 +302,25 @@ jest.mock('react-native-safe-area-context', () => {
 // asserting about 복사 is WHAT LANDED — the markdown source a person can paste
 // back, not the rendered text — and a `jest.fn()` that records a call without
 // keeping the value cannot answer that.
+jest.mock('expo-camera', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const state = {
+    permission: {granted: true, canAskAgain: true, status: 'granted'},
+  };
+  return {
+    __state: state,
+    __reset: () => {
+      state.permission = {granted: true, canAskAgain: true, status: 'granted'};
+    },
+    useCameraPermissions: () => [
+      state.permission,
+      async () => state.permission,
+    ],
+    CameraView: props => React.createElement(View, {testID: props.testID ?? 'qr-camera-view'}),
+  };
+});
+
 jest.mock('expo-clipboard', () => {
   const box = {value: null};
   return {

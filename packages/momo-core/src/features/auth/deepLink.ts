@@ -66,6 +66,25 @@ export const JOIN_SCHEME = "oort";
  */
 const ACCEPTED_SCHEMES = [JOIN_SCHEME, "momo"] as const;
 const JOIN_ACTION = "join";
+const LINK_ACTION = "link";
+
+function schemeAction(url: URL): string {
+  return url.hostname !== ""
+    ? url.hostname.toLowerCase()
+    : (url.pathname.split("/").filter(Boolean)[0] ?? "").toLowerCase();
+}
+
+function parseAcceptedScheme(raw: string): URL | null {
+  let url: URL;
+  try {
+    url = new URL(raw.trim());
+  } catch {
+    return null;
+  }
+  const protocol = url.protocol.toLowerCase();
+  if (!ACCEPTED_SCHEMES.some((scheme) => protocol === `${scheme}:`)) return null;
+  return url;
+}
 
 function firstParam(params: URLSearchParams, name: string): string {
   for (const [key, value] of params) {
@@ -97,19 +116,9 @@ function prefillFrom(params: URLSearchParams): JoinPrefill | null {
  * (`oort:join`), the first path segment. Same rule as the mac parser.
  */
 export function parseJoinDeepLink(raw: string): JoinPrefill | null {
-  let url: URL;
-  try {
-    url = new URL(raw.trim());
-  } catch {
-    return null;
-  }
-  const protocol = url.protocol.toLowerCase();
-  if (!ACCEPTED_SCHEMES.some((scheme) => protocol === `${scheme}:`)) return null;
-  const action =
-    url.hostname !== ""
-      ? url.hostname.toLowerCase()
-      : (url.pathname.split("/").filter(Boolean)[0] ?? "").toLowerCase();
-  if (action !== JOIN_ACTION) return null;
+  const url = parseAcceptedScheme(raw);
+  if (!url) return null;
+  if (schemeAction(url) !== JOIN_ACTION) return null;
   return prefillFrom(url.searchParams);
 }
 
@@ -186,13 +195,30 @@ export interface DeviceLinkPrefill {
   token: string;
 }
 
-const LINK_ACTION = "link";
+/**
+ * True when the URL is a device-link *action* (`oort://link` / `momo://link`),
+ * even if `server` or `token` is unusable. The connect screen uses this to
+ * tell "malformed link" from "not our URL".
+ */
+export function isDeviceLinkAction(raw: string): boolean {
+  const url = parseAcceptedScheme(raw);
+  return url !== null && schemeAction(url) === LINK_ACTION;
+}
+
+function deviceLinkPrefillFrom(params: URLSearchParams): DeviceLinkPrefill | null {
+  const serverUrl = validatedServer(firstParam(params, "server"));
+  const token = firstParam(params, "token");
+  if (serverUrl === "" || token === "") return null;
+  return { serverUrl, token };
+}
 
 /**
  * Parse a device-link URL. Null when it is not one, is missing a parameter,
  * or carries a `server` that does not validate as a base URL.
  */
 export function parseDeviceLinkDeepLink(raw: string): DeviceLinkPrefill | null {
-  void raw;
-  return null;
+  const url = parseAcceptedScheme(raw);
+  if (!url) return null;
+  if (schemeAction(url) !== LINK_ACTION) return null;
+  return deviceLinkPrefillFrom(url.searchParams);
 }

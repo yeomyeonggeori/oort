@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../../lib/api";
 import { NetworkError } from "../../lib/http";
+import { sha256Utf8 } from "../../lib/sha256";
 import {
   parseDeviceLinkDeepLink,
   type DeviceLinkPrefill,
@@ -98,6 +99,15 @@ describe("device-link redeem copy", () => {
 });
 
 describe("device-link SAS digits", () => {
+  it("hashes UTF-8 the same way Postgres digest(text) does", () => {
+    const hex = Array.from(sha256Utf8("abc"))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+    expect(hex).toBe(
+      "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+    );
+  });
+
   it("matches the server hash formula for a known token", () => {
     const token = "dEv1c3L1nkT0kenF1xtureDoN0tL0gOrSt0reXXXXXX";
     expect(token).toHaveLength(DEVICE_LINK_TOKEN_LEN);
