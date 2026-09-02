@@ -25,3 +25,9 @@
 ## 완료 절차
 - engine: cargo test·기존 서버 게이트 → 커밋(#1934) → `git push -u origin feat/bt6-mark-unread-server` → `gh pr create --base track/engine` → 클라 절반으로.
 - uxui: web vitest·core vitest·tsc·design_preflight_web.sh·CAPTURE_PORT=8587 capture:design(마크 상태 타임라인 프레임 두 스킴)·SHELL_GATE_PORT=8589 SHELL_GATE_FOCUS_ONLY=1 gate:shell → 커밋(#1934) → `git push -u origin feat/bt6-mark-unread-client` → `gh pr create --base track/uxui` → 정지. 마지막 출력에 PR URL 2건·변경 요약.
+
+## 개정 1 (2026-09-02) — 이어받기·워커 레인 grok 4.6
+
+- 워커 = **grok 4.6**(성재 2026-09-02 지시). 시작 절차 동일(`git merge origin/main --no-edit`).
+- **서버 절반은 `momo-worktrees/wbt6-server`에 미커밋 상태로 존재한다** — `server/Migrations/085_mark_unread_signal.sql`(신규) · `crates/momo-messaging/src/read_state.rs`(+222: `ReadIntent`·`update_read_cursor_with_intent_in_tx`·`MarkUnreadWrite`·`ReadCursorOutcome`) · `bins/momo-server/src/dto.rs`(`mark_unread_before_seq`·`read_intent` DTO, `ReadStateDto.marked_unread_before_seq`). 폐기하지 말고 **그 위에서** 라우트 배선(read_state 라우트가 intent를 받아 같은 tx로 마크 삭제)·프로젝션·red proof ①~④를 완주한다. 기존 diff의 설계 주석(D4 판별자 필요 근거)은 ADR-0178 개정 1과 일치한다 — 문면 정정 불요.
+- 클라 절반은 `wbt6-client`(origin/track/uxui 정렬 상태)에서 시작.
