@@ -47,6 +47,7 @@ import {
   DIVIDER_GAP_CLASS,
   DIVIDER_RULE_CLASS,
   MARKER_DIVIDER_PAD_CLASS,
+  ROW_BANNER_STRADDLE_PAD_CLASS,
   ROW_CONTINUATION_PAD_CLASS,
   ROW_GROUP_START_PAD_CLASS,
 } from "./spacing";
@@ -1000,7 +1001,7 @@ export function MessageRow({
         {rowError && (
           <div
             data-testid="message-action-error-slot"
-            className="relative z-30 pb-8"
+            className={cn("relative z-30", ROW_BANNER_STRADDLE_PAD_CLASS)}
           >
             <InlineBanner
               message={rowError}
