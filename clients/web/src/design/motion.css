@@ -1,11 +1,11 @@
 /*
- * ADR-0179 motion ladder (D1 · D2 · D3 values · D6 names · D9 reduced-motion).
+ * ADR-0179 motion ladder (D1 · D2 · D3 values · D4 modal durations · D6 names · D9).
  *
- * Numbers live here and in motion.ts (modal open 200 / close 150). Anywhere
- * else a `\d+ms` literal in tsx/css is a preflight `raw_motion` violation.
+ * Numbers live here and in motion.ts. Anywhere else a `\d+ms` literal in
+ * tsx/css is a preflight `raw_motion` violation.
  *
- * Onboarding 650/760 ms stays in tokens.css — ADR-0159 single-look exception,
- * the only ladder exception besides the modal constants. Do not extend it.
+ * Onboarding 650/760/300 ms stays in tokens.css — ADR-0159 single-look
+ * exception. Do not extend it.
  */
 
 :root {
@@ -14,6 +14,10 @@
   --motion-fast: 180ms;
   --motion-standard: 240ms;
   --motion-arrival: 500ms;
+
+  /* D4 exception 2: modal open/close. Surfaces read motion.ts constants. */
+  --motion-modal-open: 200ms;
+  --motion-modal-close: 150ms;
 
   /* D2 easing: direct for feedback, confident deceleration for arrival. */
   --motion-ease-standard: cubic-bezier(0.25, 1, 0.5, 1);
@@ -30,6 +34,79 @@
   --elevation-float: var(--shadow-lg);
 }
 
+@keyframes motion-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes motion-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes motion-zoom-in {
+  from {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes motion-zoom-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.95);
+  }
+}
+
+/* Enter/exit vocabulary. No tw-animate-css: these are the classes motion.ts
+ * assembles. Duration 0 under reduced-motion (D9) via the token override. */
+@utility motion-enter {
+  animation: motion-fade-in var(--motion-standard) var(--motion-ease-standard)
+    both;
+}
+@utility motion-exit {
+  animation: motion-fade-out var(--motion-fast) var(--motion-ease-standard) both;
+}
+@utility motion-enter-zoom {
+  animation: motion-zoom-in var(--motion-standard) var(--motion-ease-standard)
+    both;
+}
+@utility motion-exit-zoom {
+  animation: motion-zoom-out var(--motion-fast) var(--motion-ease-standard) both;
+}
+@utility motion-modal-enter {
+  animation: motion-fade-in var(--motion-modal-open) var(--motion-ease-standard)
+    both;
+}
+@utility motion-modal-exit {
+  animation: motion-fade-out var(--motion-modal-close) var(--motion-ease-standard)
+    both;
+}
+@utility motion-modal-enter-zoom {
+  animation: motion-zoom-in var(--motion-modal-open) var(--motion-ease-standard)
+    both;
+}
+@utility motion-modal-exit-zoom {
+  animation: motion-zoom-out var(--motion-modal-close)
+    var(--motion-ease-standard) both;
+}
+
 /* D9: duration 0 — the state still lands. Onboarding rAF fields are untouched. */
 @media (prefers-reduced-motion: reduce) {
   :root {
@@ -37,5 +114,7 @@
     --motion-fast: 0ms;
     --motion-standard: 0ms;
     --motion-arrival: 0ms;
+    --motion-modal-open: 0ms;
+    --motion-modal-close: 0ms;
   }
 }
