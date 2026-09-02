@@ -197,24 +197,61 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 짝이 없으므로 폰 쪽은 **관계로** 잰다(#1163·#1186이 accent 파생과 상태 3가족에 쓴 방식): 줄 상자는 자기가 담는 글자보다 크고, 머리줄 상자(`head`)는 묘비 상자(`label`)보다 얇으며, 다섯 크기와 네 줄 상자는 겹치지 않고 한 방향으로 간다.
 
-### 2.6 그림자·모션 — 축이 없는 두 자리
+### 2.6 그림자·모션 — 두 축의 정의
+
+> ADR-0179 (Accepted 2026-09-02). 웹 토큰·상수·눌림 단일점·강제 기제는 UX-R0(#1958). 표면 이관(모달·패널·도착·스켈레톤)은 UX-R1a~e. 밀도·가상 rem은 BZ-5b. 폰 파생은 M1a.
 
 **그림자는 이 시스템에서 유일하게 두 클라를 가로질러 대조할 수 없는 축이다.** RN은 그림자에 세 개의 별개 API를 갖는다: `boxShadow`(New Architecture 전용) · `shadowOffset/Opacity/Radius`(iOS 전용) · `elevation`(Android 전용, z-order까지 바꾼다). 한 CSS 문자열이 그 셋으로 번역되지 않는다 — Skyscanner는 파이프라인을 제대로 만들고도 안드로이드 그림자가 전부 `undefined`였다(감사 §A-1-3).
 
-그래서 지키는 것은 패리티가 아니라 **어휘**다:
+그래서 지키는 것은 패리티가 아니라 **어휘**다. 고도는 두 단이고, ADR-0179 D6이 이름을 준다:
 
-- 웹: 고도는 두 단뿐 — `shadow-sm`(카드)과 `shadow-lg`(떠 있는 표면). `tokens.css`에 그림자 토큰은 **없고**, 웹은 Tailwind 기본 스케일을 쓴다. 그 사실이 코드에만 있었으므로 `clients/web/src/design/designSystem.test.ts`가 실제 사용 어휘를 두 단으로 잠근다.
-- 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
-
-**모션은 전면 토큰 축이 없고, 사이드바 폭 전환만 이름 붙은 1호 토큰을 쓴다.** `tokens.css`에 적힌 값(실측):
-
-| | 값 | 자리 |
+| 이름 | 클래스 | 자리 |
 |---|---|---|
-| `--duration-sidebar` | `200ms` ease-out (데스크톱 사이드바 접힘 폭 전환). `prefers-reduced-motion`에서는 `app-shell`이 이 값을 쓰지 않는다 | `:243` · `:734` |
-| 전이(transition) | `160ms`(서랍) · `120ms`(업로드 막대) | `:397` · `:1268` |
-| 애니메이션 | `1.1s`(캐럿) · `0.9s`/`1.6s`(스피너, 뒤는 reduced-motion 판) · `1.1s`/`3.2s`(업로드 드리프트) | `:974` · `:986`/`:989` · `:1290`/`:1312` |
+| `--elevation-rest` | `shadow-sm` | 카드. Tailwind v4 `--shadow-sm` |
+| `--elevation-float` | `shadow-lg` | 떠 있는 표면(팝오버·팔레트·드로어). Tailwind v4 `--shadow-lg` + `backdrop-blur` 5px 스크림 |
 
-폰은 거의 백지다. 2026-07-28 갭 감사가 `instant 0 / fast 120 / standard 180 / slow 240`을 권고했고 아직 채택되지 않았다 — 사이드바 1호만 #1864에서 신설했고 전면 스케일은 **계속 미결**(감사 §C-6). 지금 지켜지는 규칙은 스킬 §4 하나다: 모든 애니메이션은 상태 변화의 피드백이고(<200ms), 비자명한 모션은 `prefers-reduced-motion`으로 감싼다.
+3단은 들이지 않는다(ADR-0159 D5). 웹 클래스는 그대로 `shadow-sm`/`shadow-lg`이고, 이름은 `clients/web/src/design/motion.css`가 진다. `designSystem.test.ts`가 그 두 이름과 클래스 어휘를 잠근다. 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
+
+**모션은 전면 토큰 축이다.** 손기입 `\d+ms`·`duration-[0-9]+`는 `motion.css`(사다리 + 모달 200/150)와 `motion.ts`(클래스 조립)에만 산다. Tailwind 기본 `transition` 은 `@theme`의 `--default-transition-duration: var(--motion-instant)` / `--default-transition-timing-function: var(--motion-ease-standard)` 가 사다리에 묶는다. 그 밖 tsx/css의 리터럴은 프리플라이트 `raw_motion` 위반이다.
+
+| 토큰 | 값 | 자리 |
+|---|---|---|
+| `--motion-instant` | 120ms | 피드백 — 눌림·색·툴팁 |
+| `--motion-fast` | 180ms | 작은 표면 — 팝오버·드롭다운·칩 |
+| `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입·사이드바 접기·**드로어**(`--duration-sidebar`도 이 값) |
+| `--motion-arrival` | 500ms | 합성 도착 — 새 메시지·첫 진입 (키프레임 이관은 UX-R1) |
+| `--motion-modal-open` / `--motion-modal-close` | 200ms / 150ms | D4 예외 2호. `motion.ts`의 `MODAL_*_MOTION` 이 소비 |
+| `--motion-ease-standard` | `cubic-bezier(0.25, 1, 0.5, 1)` | 기존 `ease-out` 손기입의 흡수처 |
+| `--motion-ease-arrival` | `cubic-bezier(0.16, 1, 0.3, 1)` | 도착 전용 |
+| `--motion-distance-arrival` | 0.75rem | 도착 translateY (값만. 재생은 UX-R1) |
+| `--motion-blur-arrival` | 2px | 도착 blur (값만) |
+
+비대칭: 사라짐은 나타남보다 짧다. 모달만 열림 200 / 닫힘 150. 온보딩 예외 블록(`tokens.css` `Onboarding S0 motion` … 다음 `@layer base`)의 사다리 밖 값:
+
+| 값 | 자리 |
+|---|---|
+| 650ms | line-slide |
+| 760ms | mask-reveal |
+| 300ms ×3 | `onboarding-fade-in` (wordmark · tagline · fade effect) |
+
+**이 목록 말고 사다리 밖 값을 늘리지 마라.**
+
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1.
+
+reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
+
+루프 애니메이션(캐럿 1.1s, 스피너 0.9s/1.6s, 업로드 드리프트 1.1s/3.2s)은 사다리가 아니라 **정보가 곧 움직임인 자리**라 초 단위로 남는다(SKILL §4).
+
+폰 사다리는 웹과 이름·값이 같다. 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+
+아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
+
+| 항목 | ADR | 티켓 |
+|---|---|---|
+| `hover:`만 있고 `active:`가 없는 신규 표면 preflight | D5 | DS-4 |
+| 캡처 `waitForAnimations(page)` | D10 ③ | DS-3 |
+| rest/hover/active 3짝 캡처 레인 | D10 ④ | DS-3 |
+| 폰 모션·밀도 값 파생 + 바이트 대조 | D10 ⑤ | M1a |
 
 ### 2.7 터치 타깃
 
@@ -351,7 +388,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | 층 | 어디 | 무엇 |
 |---|---|---|
-| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 12분류 + 코어 5분류, **하드 제로** |
+| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 13분류 + 코어 5분류, **하드 제로** |
 | **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |
 | **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |
 | **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |
@@ -366,7 +403,8 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **간격** | `--spacing: initial`(격자 밖 *단계*만 차단) + 프리플라이트 `arbitrary_tw`(임의값) + `spacing.test.ts`(코어 값 ↔ 클래스) + `designSystem.test.ts`(리듬 8단계 고정·이름 축 근거 강제) | `designSystem.test.ts` **`src/` 전수 스윕** + `conversationVisual.test.tsx:229`(2파일 심층) | `designSystem.test.ts` — 웹 CSS 파싱 ✅ (#1211) |
 | **반경** | `--radius-*: initial`(이름 단계만) + `arbitrary_tw`(`rounded-[9px]`) + `designSystem.test.ts`(3단계·순서) | `designSystem.test.ts` 전수 스윕 | `designSystem.test.ts` — 짝 1 · 분기 1(상한 포함) ✅ (#1211) |
 | **타이포** | `--text-*: initial`(이름 단계만) + `arbitrary_tw`(`text-[13px]`) + `designSystem.test.ts`(롤마다 줄 높이·크기 중복 금지) | `designSystem.test.ts` 전수 스윕(`fontSize`·`lineHeight`) | `designSystem.test.ts` — 짝 1 · 나머지 관계 ✅ (#1211) |
-| **그림자** | `designSystem.test.ts` — 어휘 두 단으로 잠금 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
+| **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
+| **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion` | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
 | **위계** | §3.3 표 | 동 | — |
@@ -475,7 +513,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | # | 결정 | 지금 상태 |
 |---|---|---|
 | 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |
-| 2 | 모션 토큰을 신설할 것인가 | 부분 결정: 사이드바 전환 1호 토큰 신설(#1864), 전면 토큰화는 계속 미결 |
+| 2 | 모션 토큰을 신설할 것인가 | **결정됨** ADR-0179. UX-R0(#1958)이 사다리·눌림·강제 기제를 랜딩. 표면 이관은 UX-R1a~e |
 | 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |
 | 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |

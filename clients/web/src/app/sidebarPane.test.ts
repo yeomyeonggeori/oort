@@ -159,10 +159,13 @@ describe("접힘 계약 (#1864)", () => {
 
   it("접힘 폭은 0이고 reduced-motion은 즉시 전환한다", () => {
     const shellBlock = tokensCss.slice(tokensCss.indexOf("@utility app-shell"));
-    expect(tokensCss).toContain("--duration-sidebar: 200ms;");
-    expect(shellBlock).toContain(
-      "transition: grid-template-columns var(--duration-sidebar) ease-out"
+    expect(tokensCss).toContain(
+      "--duration-sidebar: var(--motion-standard);"
     );
+    expect(shellBlock).toContain(
+      "transition: grid-template-columns var(--duration-sidebar)"
+    );
+    expect(shellBlock).toContain("var(--motion-ease-standard)");
     expect(shellBlock).toContain("grid-template-columns: 0px 1fr;");
     expect(shellBlock).toContain(
       "@media (prefers-reduced-motion: reduce)"
