@@ -24,6 +24,10 @@ import { describe, expect, it } from "vitest";
 
 const TOKENS_CSS_PATH = fileURLToPath(new URL("./tokens.css", import.meta.url));
 const CSS = readFileSync(TOKENS_CSS_PATH, "utf8");
+const MOTION_CSS = readFileSync(
+  fileURLToPath(new URL("./motion.css", import.meta.url)),
+  "utf8"
+);
 
 const UI_DIR = fileURLToPath(new URL("./ui", import.meta.url));
 const SRC_DIR = fileURLToPath(new URL("..", import.meta.url));
@@ -332,13 +336,16 @@ describe("그림자 축", () => {
   // §A-1-7 · Skyscanner 가 파이프라인을 제대로 만들고도 안드로이드 그림자가 전부
   // `undefined` 였다).
   //
-  // 그래서 여기서 지키는 것은 패리티가 아니라 **어휘**다. `tokens.css` 는 색·간격·
-  // 반경·타이포 네 축의 기본 스케일을 지웠지만 그림자 축은 지우지 않았다 — Tailwind
-  // 기본 그림자(`shadow-xs` … `shadow-2xl`)가 전부 살아 있다. 고도가 두 단이라는
-  // 사실은 코드에만 있고 토큰에는 없으므로, 그 사실을 여기서 잰다.
+  // ADR-0179 D6 이 그 두 단에 이름을 준다: rest = 카드(`shadow-sm`), float =
+  // 떠 있는 표면(`shadow-lg`). 클래스는 그대로 sm/lg 이고, 이름은 motion.css 의
+  // `--elevation-rest` / `--elevation-float` 가 Tailwind `--shadow-sm` /
+  // `--shadow-lg` 를 가리킨다. 3단은 들이지 않는다.
   const ALLOWED_ELEVATIONS = ["sm", "lg"] as const;
 
-  it("고도는 두 단뿐이다 — 카드(sm)와 떠 있는 표면(lg)", () => {
+  it("고도는 rest·float 두 이름이고, 클래스는 sm/lg 가 그 이름을 쓴다", () => {
+    expect(MOTION_CSS).toMatch(/--elevation-rest:\s*var\(--shadow-sm\)/);
+    expect(MOTION_CSS).toMatch(/--elevation-float:\s*var\(--shadow-lg\)/);
+
     const used = new Set<string>();
     for (const file of tsxFiles(SRC_DIR)) {
       for (const found of codeOnly(readFileSync(file, "utf8")).matchAll(
