@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
+
+- ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120).
+- 강제: `motion.test.ts` + preflight `raw_motion`(온보딩 블록·motion.ts allowlist). 폰 무접촉(M1a). `motion/react` 미도입(D8는 첫 소비자 티켓). 표면 이관은 UX-R1a~e.
+- runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
+
 ## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)
 
 - momo-core `effectiveUnreadStartSeq` 단일점 (ADR-0178 D3). 배지·UnreadDivider·UnreadPill·⌥↑↓ 가 이 함수만 소비. 서버 `unread_count` 는 접지 않음.
