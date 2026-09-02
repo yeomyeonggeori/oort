@@ -3,6 +3,26 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-02 (저녁) · Fable · ★ADR 4본 기안(0179~0182 Proposed) + 워커 레인 grok 4.6 개정 — G0 발사 go 대기
+
+- 성재 "ADR 기안부터 시작 · 워커는 grok 4.6": D-7 개정(Opus 5 Agent → grok 4.6), ROADMAP·편성 정본·BT-6 브리프(개정 1: 이어받기 좌표) 반영.
+- 기안: **ADR-0179** 표현 축(duration 120/180/240/500·easing 2·도착 규격·비대칭·눌림 정본·엘리베이션 이름·밀도/가상 rem·하이브리드 motion/react·reduced-motion 이중·강제 기제 5) · **ADR-0180** 기기 연결 1회용 QR 링크 토큰(교환권·TTL 120s·`oort://link`·공개 오리진 모드만 SAS·감사/해제) · **ADR-0181** 웰컴 킥오프 오프너=agent-worker `RunTrigger::Welcome`(가입 tx 트리거·멱등 키·provider-required 정적 경로·원장 귀속·120s 백스톱) · **ADR-0182** 일시 확인 3형(in-place·상태줄·지속 카드)+결정 트리+preflight `ephemeral`.
+- 다음(go 후): 성재 Accept → G0(BT-6 이어받기 grok 워커 → #1922 머지·A6 상향 → 승격 → v0.1.4) → 티켓·패킷(UX-R0~R1e·DS-1·2·SH-1~3a·M0s/w/m·P1~P4) → W1.
+
+## 2026-09-02 (오후) · Fable · ★인터뷰 전량 승인 → 출시 프로그램 편성 정본 + ROADMAP 정렬 (착수 전)
+
+- 성재: 브리프 §8 권고 전부 승인 + 모바일 발제(QR만 찍으면 연동, iOS 전용) + 이미지 에셋(gpt/grok/OpenRouter) + "작업 말고 계획 구체화·로드맵 정렬 먼저".
+- 실사: 폰 11화면·47컴포넌트, `oort://join` 프리필·키체인 세션 有, QR/카메라 0. buzz 페어링=QR→SAS→릴레이 신원 전송 → 우리는 "1회용 기기 링크 토큰"으로 번역(ADR-0180 후보).
+- 정본 `2026-09-02-launch-program-plan.md`: D-1~D-13 고정, 4레인(UX-R·DS·SH·M·P) 티켓 분해, 게이트 G0~G3, ADR 큐 4본, 에셋 파이프라인, 파도 순서 W1~W6. 판정: **M0 QR 연결은 G1 창 안, M1 패리티는 G1 이후**. ROADMAP §1·§2 교체.
+- 다음(go 후): ADR 4본 기안 → G0(BT-6 이어받기·결재 3건·승격·v0.1.4) → 티켓·패킷 → W1 발사.
+
+## 2026-09-02 · Fable · ★재개 복원 + 출시 재진단·두 기둥(Buzz급 UXUI·압도적 셀프호스팅) 브리프 — 인터뷰 대기
+
+- 복원: 루트가 8/28 브랜치 잔재 상태 → stash@{0} 보존 후 origin/main(df6bc4d3) 정렬, 트랙 워크트리 ff. 중단점=BT-6(#1934) 서버 절반 미커밋(wbt6-server), 클라 미착수.
+- 탐색 4기(웹 클라 UX·셀프호스팅/배포·buzz 레퍼런스·문서/파이프라인) + 9/1 감사 합본 → `research/2026-09-02-launch-rediagnosis-two-pillars-brief.md`. 근원 5(모션 축 0·active 11곳·온보딩 절정 부재·⌘K 내비 전용·에이전트 표면 4곳 분산·금지 위주 시스템).
+- 편성안: UX-R0~R6 · SH-1~9 · P1~P8, 게이트 G1/G2 재정의. 성재 인터뷰 Q1~Q11(§8) 답 대기 — 답 후 ADR-0179(모션 축)·킥오프 오프너·토스트 정책 ADR 기안 + 티켓/패킷.
+- 다음: BT-6 이어받기 완주(go 신호) → 결재 3건 → 승격 → v0.1.4.
+
 ## 2026-09-01 (오후) · Fable · ★BT 파도 개막 — 인터뷰·ADR 2본 결재·BT-1 랜딩(3회전)·BT-2 PR 정지점
 
 - 성재 지시 "우로보로스로 계획 구체화 후 작업까지, 구현=Opus 5" → 인터뷰 수렴: BT 파도 6장 2단(정본 2026-09-01-bt-wave-plan.md), ADR-0177/0178 기안→성재 실시간 결재 Accepted(PR #1936).
@@ -111,17 +131,3 @@
 - sol 워커 완주(1288 tests·PR #1702·정지 계약 준수) → 오케스트레이터 검수: 공유 코어 가산 무해(웹 tsc+첨부 23 그린)·project-shape 보정 스코프드·PHPicker selection-only라 권한 키 불요 판단 타당.
 - design-review 1차 PASS(High 2: picker 제시 레이스·iOS 낭독 무음) → **오케스트레이터 수리 065cb6a6**(onDismiss+폴백 이원화·draftAnnouncement+announce 배선, 레드 프루프 3/3) → **재판정 PASS(0·0)** → 머지. Medium 4·Nit 5·실기 미검증은 **#1703** 적립.
 - 이로써 UXUI 완성도 파도 8 goal(U-1~5·7·C-1·M-1+M-2) **전량 랜딩**. 남은 실기 확증=iOS 시뮬레이터 세션(Slow Animations 오독 주의 — 재판정 주석).
-## 2026-08-23 (Fable) · ★T-9 폐곡선 — #1701 머지(track/engine=462efd67)·#1678 close
-- grok 워커 커밋(13파일·+806) 인수 검수: 유닛 283·red-proof 통합 3분기·생성기 멱등·docs 493 facts 전부 그린 → PR #1701 CI 그린 → 머지. ENGINE_HANDOFF **A-29 info**(UXUI 소비 작업 없음 — 클라 verbatim 불변). ADR-0167 집행 완결, D8 P1 원천 수리 폐곡선.
-- 운영 사고 복구: 호스트 ENOSPC 여파로 Colima VM containerd 블롭 I/O 에러(컨테이너 좀비化) → VM 재시작으로 완전 복구(pgdata 무손실·api 브리지 재기동). **교훈: 호스트 디스크 고갈은 VM 스파스 디스크를 통해 컨테이너층까지 전파된다 — 대형 빌드 전 df 확인.**
-- ADR-0169(로컬 보관소)·ADR-0170(언퍼얼) Proposed 기안·티켓(#1696/#1698) 링크. M-2 sol 워커 계속 가동 중.
-## 2026-08-23 (Fable) · ★성재 일괄 위임("다 승인할게") 집행 — ADR 2건 Accept·워커 2기 발사·U-8 티켓
-- **컴포저 하단 패딩 질문 해부(성재)**: 밴드=힌트 행 26px+상시 예약 타이핑 라인 행 26px(H-2 자리예약 설계). Slack식 한 행 스왑 제안 → **U-8=#1699** 티켓화(즉흥 수리 금지 규율).
-- **승인 집행**: ADR-0167·0168 **Accepted**(위임 기록 명시) · rescue stash **drop 완료**(보험 패치 스크래치패드) · **T-9(#1678) grok 워커 발사**(track/engine, acceptEdits, 감시자 무장) · **M-2=#1700 발급+패킷**(`handoffs/2026-08-23-m2-photo-picker-packet.md`)+**sol 워커 발사**(goal_claim, feat/1700-picker-p0-adr-0168, 감시자+stall 감지).
-- **합류 릴레이(큐④)**: 토큰 2회 붙여넣기만 성재 몫으로 남긴 릴레이 킷 완성 `claudedocs/e2e-d8-desktop-20260823/agent-join-relay-kit.md`(1회용 pairing/active 자격증명은 Fable 비대행 경계).
-- 운영: ENOSPC 재발(tauri 빌드) → engine 구 target 3.6G+tauri target 회수, 26Gi 확보. main repo server-rust/target 12G는 QA 서버 가동 중이라 보존(세션 말미 회수 후보). #1696·#1698 방향은 승인됨 — ADR 기안=다음 순번.
-## 2026-08-23 (Fable) · ★실결함 수리 랜딩(#1697)+기본 기능 4축 검수+실시간 리그 성립
-- **U-3 실결함 수리**: 라이트박스 512px 스트립 — cn()의 tailwind-merge가 하우스 측정명 미인지→max-w-none 패배. 수리=단어형 --spacing-* 19종 전량 등록+정본 파싱 가드 테스트(#1697 merged, track/uxui=7124598b). design-review PASS(Blocker 0·H-1/M-1 커밋 내 종결). 레드 프루프 2건 실측.
-- **기본 기능 4축(성재 요청)**: 타이핑 인디케이터 PASS(2계정 실측 "…님이 작성 중", ADR-0149 계약 확인)·패딩 격자 준수(off-grid 0)·폰 드로어 애니메이션 PASS(160ms ease-out·reduced-motion·스크림 버튼·inert)·**언퍼얼 미구현 확정→#1698 원장 티켓**(ADR 선행 명시).
-- **실시간 로컬 리그 성립**: 5173 오리진+socat api 브리지(centrifugo 구독 프록시→호스트 서버 — 없으면 WS 붙되 전 구독 조용히 실패, 리그 함정으로 기록)+qa2 계정 시드. 라이브 도착·프레즌스·타이핑 전 레일 GREEN.
-- 사고 수습: 레드 프루프 중 bare `git stash pop`이 공유 스태시의 rescue-20260823을 오적용→복구 완료(스태시 무손실·동일 SHA). **교훈: 워크트리 공유 스태시에서 bare pop 금지, 반드시 stash@{n} 지정.** 검수 앱 재빌드(수리분 포함) 진행.
