@@ -8542,19 +8542,28 @@ async function captureMarkUnreadScenes(browser, scheme) {
   await page.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(page);
   await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
-  await page.evaluate(`(() => {
+  await page.waitForFunction(`(() => {
+    const seq = ${MARK_UNREAD_SEQ};
     const scroller =
       document.querySelector("[data-virtuoso-scroller]") ||
       document.querySelector('[data-testid="timeline-virtuoso"]');
-    if (scroller) scroller.scrollTop = 0;
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    if (!row) {
+      if (scroller) scroller.scrollTop = 0;
+      return false;
+    }
+    const box = row.getBoundingClientRect();
+    if (box.height <= 0 || box.top < 80 || box.bottom > window.innerHeight - 80) {
+      row.scrollIntoView({ block: "center" });
+      return false;
+    }
+    return true;
   })()`);
   const marked = page.locator(
     `[data-testid="timeline-message"][data-seq="${MARK_UNREAD_SEQ}"]`
   );
-  await marked.waitFor({ state: "visible" });
-  await marked.evaluate((row) => {
-    row.scrollIntoView({ block: "center" });
-  });
   await marked.hover();
   await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
   await page.getByTestId("message-actions-trigger").click();
