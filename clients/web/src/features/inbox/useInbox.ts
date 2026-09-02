@@ -4,11 +4,11 @@ import {
   fetchAgentRuns,
   fetchApprovals,
   fetchMessages,
-  updateReadState,
   uuidEq,
   type ApprovalStatus,
   type Message,
 } from "@momo/core/lib/api";
+import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import { useSession } from "@/app/session";
 import {
   channelLabel,
@@ -333,7 +333,12 @@ export function useMarkRead(): (channelId: string, seq: number) => Promise<void>
   const client = useQueryClient();
   return useCallback(
     async (channelId: string, seq: number) => {
-      await updateReadState(workspaceId, channelId, seq);
+      await advertiseReadState(
+        workspaceId,
+        channelId,
+        seq,
+        "inbox_mention"
+      );
       invalidateReadStates();
       await client.invalidateQueries({
         queryKey: ["inbox-mentions", workspaceId],

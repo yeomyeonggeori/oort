@@ -43,6 +43,7 @@ import {
   UnreadDivider,
   type MessageRowActions,
 } from "./MessageRow";
+import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { PendingRow } from "./PendingRow";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
@@ -587,6 +588,7 @@ export function Timeline({
     // `relative`는 아래 항법 컨트롤이 붙을 자리다. 컨트롤이 타임라인 **안**에
     // 사는 이유: 그 줄이 가리키는 곳도, 눌렀을 때 움직이는 것도 이 스크롤러다.
     <div className="relative h-full">
+      <TimelineLiveRegionProvider>
       <Virtuoso
         key={epoch}
         ref={ref}
@@ -735,6 +737,7 @@ export function Timeline({
           />
         </UnreadPillDock>
       )}
+      </TimelineLiveRegionProvider>
     </div>
   );
 }

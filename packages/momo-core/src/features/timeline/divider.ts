@@ -279,6 +279,13 @@ export function unreadDividerSegments(count: number): DividerSegment[] {
   ];
 }
 
+/** Screen-reader label for the unread boundary. Same words as the visible segments. */
+export function unreadDividerLabel(count: number): string {
+  return unreadDividerSegments(count)
+    .map((segment) => segment.text)
+    .join("");
+}
+
 /**
  * 어느 레일이 틈을 메웠는가.
  *

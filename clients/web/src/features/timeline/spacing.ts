@@ -90,6 +90,12 @@ export const ROW_GROUP_START_PAD_CLASS = "pt-3 pb-row";
  */
 export const ROW_CONTINUATION_PAD_CLASS = "py-row";
 
+/**
+ * 행 배너 「닫기」가 다음 행 호버 툴바 straddle 띠에 덮이지 않게 비우는 아래 여백.
+ * 툴바 키(~control-sm + 테두리)에서 `--spacing-row` 겹침을 뺀 값에 가깝다.
+ */
+export const ROW_BANNER_STRADDLE_PAD_CLASS = "pb-8";
+
 /** `py-row` → 6 같은 변환. 테스트와 이 파일이 같은 규칙을 쓰게 한다. */
 export function spacingPx(className: string): number {
   const suffix = className.slice(className.indexOf("-") + 1);

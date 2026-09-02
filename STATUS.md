@@ -1,5 +1,17 @@
 # oort 진행 현황
 
+## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)
+
+- momo-core `effectiveUnreadStartSeq` 단일점 (ADR-0178 D3). 배지·UnreadDivider·UnreadPill·⌥↑↓ 가 이 함수만 소비. 서버 `unread_count` 는 접지 않음.
+- 메시지 ⋯ 「여기부터 안 읽음」: PUT `mark_unread_before_seq`, `read_intent` 생략. 낙관 반영, 400/403 롤백+행 배너.
+- 채널 명시 열람·사이드바 「읽음 처리」는 `read_intent: "explicit_open"`. 도착 중 플러시·인박스 멘션 광고는 생략(background). 서버 `marked_unread_before_seq: null` 이 로컬 마크를 지움.
+- 서버 절반은 track/engine PR #1961. runtime-unverified: 라이브 PUT/GET 왕복(이 레인은 모킹).
+- runtime-unverified / 폰 소비 공백: `clients/mobile/src/features/sidebar/rows.ts:179` 와 `clients/mobile/src/screens/ConversationScreen.tsx:388` 이 서버 `unreadCount` 원문을 읽어, 데스크톱 마크가 폰에서는 다 읽음으로 보인다. 이 PR 에서 폰 소비는 구현하지 않음.
+- red proof: 마크 3/커서 10 공유 픽스처 · explicit_open vs 도착 플러시 · null 수렴 · 400 롤백. D3 합성 AST 게이트(별칭·헬퍼 포함).
+- R3: 방문 중 나중 마크는 구분선·필을 옮기고 열람 `null` 은 지우지 않음. 타임라인 polite live 영역은 하나.
+- 안읽음 필 재방문 무장은 이 PR 이전부터 있는 비결정 결함이며 이 PR 이 바꾸지 않는다 (#1966).
+- R5: 마크 PUT 400 이면 방문 경계를 낙관 이전으로 되돌린다. 롤백 `null` 은 열람 광고가 아니다.
+
 ## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
 
 - `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.

@@ -6,6 +6,7 @@ import {
   canEditMessage,
   canPinMessage,
   canReactToMessage,
+  canMarkUnreadMessage,
   canRemindMessage,
   canReplyToMessage,
   emptyTimeline,
@@ -117,6 +118,7 @@ describe("action affordances", () => {
     expect(canReplyToMessage(gone)).toBe(false);
     expect(canQuoteMessage(gone)).toBe(false);
     expect(canRemindMessage(gone)).toBe(false);
+    expect(canMarkUnreadMessage(gone)).toBe(false);
     expect(
       hasAnyAction({
         reply: canReplyToMessage(gone),
@@ -124,6 +126,7 @@ describe("action affordances", () => {
         react: canReactToMessage(gone),
         pin: canPinMessage(gone),
         remind: canRemindMessage(gone),
+        markUnread: canMarkUnreadMessage(gone),
         edit: canEditMessage(gone, ME),
         delete: canDeleteMessage(gone, ME),
       })

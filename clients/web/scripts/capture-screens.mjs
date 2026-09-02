@@ -8480,6 +8480,227 @@ async function captureTerminalDockScenes(browser, scheme) {
   return shots;
 }
 
+/**
+ * BT-6 (#1934): timeline with a mark-unread (divider above a known seq).
+ * Own context so shared READ_STATES are not rewritten. Overlay only GET/PUT.
+ * Dedicated all-read #general. Starts unmarked so the ⋯ click (not a seeded
+ * GET mark) is what plants the divider.
+ */
+const MARK_UNREAD_SEQ = 1408;
+const MARK_UNREAD_LATEST = 1416;
+const ENGINE_ID = CHANNELS[1].id;
+
+async function waitForScrollerAlignSettled(page, label) {
+  await page.evaluate(`(() => {
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    if (!scroller) return;
+    scroller.removeAttribute("data-capture-scroll-top");
+    scroller.removeAttribute("data-capture-stable-frames");
+  })()`);
+  try {
+    await page.waitForFunction(
+      `(() => {
+        const scroller =
+          document.querySelector("[data-virtuoso-scroller]") ||
+          document.querySelector('[data-testid="timeline-virtuoso"]');
+        if (!scroller) return false;
+        const top = String(scroller.scrollTop);
+        const prev = scroller.getAttribute("data-capture-scroll-top");
+        const frames = Number(
+          scroller.getAttribute("data-capture-stable-frames") || "0"
+        );
+        if (prev === top) {
+          const next = frames + 1;
+          scroller.setAttribute("data-capture-stable-frames", String(next));
+          return next >= 12;
+        }
+        scroller.setAttribute("data-capture-scroll-top", top);
+        scroller.setAttribute("data-capture-stable-frames", "0");
+        return false;
+      })()`,
+      undefined,
+      { polling: "raf", timeout: 15_000 }
+    );
+  } catch (error) {
+    throw new Error(
+      `타임라인 정렬이 끝나지 않는다 ${label}: ${error instanceof Error ? error.message : error}`
+    );
+  }
+}
+
+function markUnreadProofExpr() {
+  return `(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    const divider = document.querySelector('[data-testid="unread-divider"]');
+    if (!scroller || !row || !divider) return null;
+    const s = scroller.getBoundingClientRect();
+    const d = divider.getBoundingClientRect();
+    const r = row.getBoundingClientRect();
+    if (d.height <= 0 || r.height <= 0) return null;
+    if (d.bottom < s.top || d.top > s.bottom) return null;
+    if (r.bottom < s.top || r.top > s.bottom) return null;
+    if (d.bottom - r.top > 8 || r.top - d.bottom > 24) return null;
+    const active = document.activeElement;
+    if (!(active instanceof Element) || !row.contains(active)) return null;
+    const pill = document.querySelector('[data-testid="jump-unread"]');
+    const pillRect = pill ? pill.getBoundingClientRect() : null;
+    const pillVisible = Boolean(
+      pillRect &&
+        pillRect.height > 0 &&
+        pillRect.bottom > s.top &&
+        pillRect.top < s.bottom
+    );
+    return {
+      dividerText: (divider.textContent || "").replace(/\\s+/g, " ").trim(),
+      pillVisible,
+      pillText: pillVisible
+        ? (pill.textContent || "").replace(/\\s+/g, " ").trim()
+        : "",
+      dividerBottom: Math.round(d.bottom),
+      rowTop: Math.round(r.top),
+      focus: active.getAttribute("data-testid"),
+    };
+  })()`;
+}
+
+function markUnreadReadStates(cleared) {
+  return READ_STATES.map((row) =>
+    row.channel_id === GENERAL_ID
+      ? {
+          channel_id: GENERAL_ID,
+          last_read_seq: MARK_UNREAD_LATEST,
+          latest_seq: MARK_UNREAD_LATEST,
+          unread_count: 0,
+          mention_count: 0,
+          marked_unread_before_seq: cleared ? null : MARK_UNREAD_SEQ,
+        }
+      : { ...row, marked_unread_before_seq: null }
+  );
+}
+
+async function captureMarkUnreadScenes(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
+  await installMocks(context);
+  let cleared = true;
+  await context.route("**/v1/workspaces/*/read-state", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, { read_states: markUnreadReadStates(cleared) });
+  });
+  await context.route("**/v1/workspaces/*/channels/*/read-state", (route) => {
+    const req = route.request();
+    if (req.method() !== "PUT") return route.fallback();
+    const body = req.postDataJSON() || {};
+    if (body.read_intent === "explicit_open") {
+      cleared = true;
+    } else if (typeof body.mark_unread_before_seq === "number") {
+      cleared = false;
+    }
+    const general = markUnreadReadStates(cleared).find(
+      (row) => row.channel_id === GENERAL_ID
+    );
+    return json(route, {
+      ...general,
+      last_read_seq: body.last_read_seq ?? MARK_UNREAD_LATEST,
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} open`);
+  await page.evaluate(`location.hash = "/c/${ENGINE_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} 엔진`);
+  await page.evaluate(`location.hash = "/c/${GENERAL_ID}"`);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await waitForScrollerAlignSettled(page, `${scheme} general`);
+  await page.waitForFunction(`(() => {
+    const seq = ${MARK_UNREAD_SEQ};
+    const scroller =
+      document.querySelector("[data-virtuoso-scroller]") ||
+      document.querySelector('[data-testid="timeline-virtuoso"]');
+    const row = document.querySelector(
+      '[data-testid="timeline-message"][data-seq="' + seq + '"]'
+    );
+    if (!row) {
+      if (scroller) scroller.scrollTop = 0;
+      return false;
+    }
+    const box = row.getBoundingClientRect();
+    const root = scroller
+      ? scroller.getBoundingClientRect()
+      : { top: 0, bottom: window.innerHeight };
+    if (box.height <= 0 || box.top < root.top + 8 || box.bottom > root.bottom - 8) {
+      row.scrollIntoView({ block: "center" });
+      return false;
+    }
+    return true;
+  })()`);
+  await waitForScrollerAlignSettled(page, `${scheme} centre 1408`);
+  const marked = page.locator(
+    `[data-testid="timeline-message"][data-seq="${MARK_UNREAD_SEQ}"]`
+  );
+  await marked.hover();
+  await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
+  await page.getByTestId("message-actions-trigger").click();
+  await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  const markItem = page.getByTestId("menu-mark-unread");
+  if ((await markItem.count()) !== 1) {
+    throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
+  }
+  await markItem.click();
+  await waitForScrollerAlignSettled(page, `${scheme} after mark`);
+  const proof = await page.waitForFunction(
+    markUnreadProofExpr(),
+    undefined,
+    { polling: "raf", timeout: 15_000 }
+  );
+  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  const state = await proof.jsonValue();
+  if (!state || !state.dividerText.includes("새 메시지")) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
+  }
+  if (!state.focus) {
+    throw new Error(`마크 캡처 ${scheme}: 포커스가 행을 떠났다 ${JSON.stringify(state)}`);
+  }
+  const countMatch = state.dividerText.match(/(\d+)/);
+  if (!countMatch) {
+    throw new Error(`마크 캡처 ${scheme}: 구분선 수가 없다 「${state.dividerText}」`);
+  }
+  if (state.pillVisible && !state.pillText.includes(countMatch[1])) {
+    throw new Error(
+      `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
+    );
+  }
+  await assertComposerVisible(page, `mark-unread ${scheme}`);
+  await assertNoHorizontalOverflow(page, `mark-unread ${scheme}`);
+  console.log(
+    `  mark-unread ${scheme}: divider 「${state.dividerText}」 pill=${state.pillVisible ? state.pillText : "hidden"}`
+  );
+  await page.close();
+  await context.close();
+  return shots;
+}
+
 // 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
@@ -10057,6 +10278,7 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
+          all.push(...(await captureMarkUnreadScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));

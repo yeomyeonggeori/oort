@@ -40,8 +40,12 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     setChannelNotificationPref: (ws: string, ch: string, muted: boolean) =>
       setChannelNotificationPref(ws, ch, muted) as Promise<boolean>,
-    updateReadState: (ws: string, ch: string, seq: number) =>
-      updateReadState(ws, ch, seq) as Promise<unknown>,
+    updateReadState: (
+      ws: string,
+      ch: string,
+      seq: number,
+      options?: unknown
+    ) => updateReadState(ws, ch, seq, options) as Promise<unknown>,
     removeChannelMember: (ws: string, ch: string, member: string) =>
       removeChannelMember(ws, ch, member) as Promise<unknown>,
   };
@@ -128,6 +132,7 @@ function readStateFixture(over: Partial<ReadState> = {}): ReadState {
     latestSeq: 47,
     unreadCount: 7,
     mentionCount: 0,
+    markedUnreadBeforeSeq: null,
     ...over,
   };
 }
@@ -425,14 +430,35 @@ describe("읽음 처리", () => {
     clickItem("mark-read");
     await flush();
     expect(updateReadState).toHaveBeenCalledTimes(1);
-    expect(updateReadState).toHaveBeenCalledWith(WS, CHANNEL_ID, 47);
+    expect(updateReadState).toHaveBeenCalledWith(WS, CHANNEL_ID, 47, {
+      readIntent: "explicit_open",
+    });
   });
 
   it("이미 다 읽은 채널에는 항목 자체가 없다", () => {
-    mountRow({ readState: readStateFixture({ unreadCount: 0 }) });
+    mountRow({
+      readState: readStateFixture({
+        lastReadSeq: 47,
+        latestSeq: 47,
+        unreadCount: 0,
+      }),
+    });
     rightClick();
     expect(item("mark-read")).toBeNull();
     expect(labels()[0]).toBe(CHANNEL_MUTE_LABEL);
+  });
+
+  it("서버 unread_count 가 0 이어도 마크가 있으면 「읽음 처리」가 선다", () => {
+    mountRow({
+      readState: readStateFixture({
+        lastReadSeq: 47,
+        latestSeq: 47,
+        unreadCount: 0,
+        markedUnreadBeforeSeq: 3,
+      }),
+    });
+    rightClick();
+    expect(item("mark-read")).not.toBeNull();
   });
 
   it("투영이 이 채널을 싣지 않았으면 광고하지 않는다", async () => {
@@ -744,7 +770,9 @@ describe("design-review #1937 R1 수리", () => {
     await flush();
     // 쉬는 낱말을 이고 있었으면 눌렸을 때 일을 해야 한다.
     expect(updateReadState).toHaveBeenCalledTimes(1);
-    expect(updateReadState).toHaveBeenCalledWith(WS, CHANNEL_ID, 47);
+    expect(updateReadState).toHaveBeenCalledWith(WS, CHANNEL_ID, 47, {
+      readIntent: "explicit_open",
+    });
     expect(item("mark-read")?.getAttribute("aria-busy")).toBe("true");
     expect(item("mark-read")?.textContent?.trim()).toBe("읽음 처리 중");
     // 형제의 왕복은 서로 다른 서버 표면이라 겹쳐도 문제가 없다: 둘 다 돈다.

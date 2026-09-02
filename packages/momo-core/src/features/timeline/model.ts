@@ -313,6 +313,11 @@ export function canRemindMessage(message: Message): boolean {
   return isActionable(message);
 }
 
+/** ADR-0178. A live row with a seq. Tombstones and failed sends have none to mark from. */
+export function canMarkUnreadMessage(message: Message): boolean {
+  return isActionable(message);
+}
+
 /** What a row may offer, all six answers together. */
 export interface MessageActionAvailability {
   reply: boolean;
@@ -331,6 +336,11 @@ export interface MessageActionAvailability {
    * still type-checks; missing is off.
    */
   remind?: boolean;
+  /**
+   * ADR-0178. Optional so a phone surface that has not consumed BT-6 yet
+   * still type-checks; missing is off.
+   */
+  markUnread?: boolean;
   edit: boolean;
   delete: boolean;
 }
@@ -347,6 +357,7 @@ export function hasAnyAction(available: MessageActionAvailability): boolean {
     available.react ||
     available.pin ||
     available.remind === true ||
+    available.markUnread === true ||
     available.edit ||
     available.delete
   );

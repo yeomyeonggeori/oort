@@ -63,6 +63,10 @@ import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
 import { sectionUnreadTotals } from "./sidebarSectionModel";
+import {
+  sidebarUnreadCounts,
+  unreadChannelsInOrder,
+} from "./sidebarUnread";
 import { useSidebarPrefs } from "./useSidebarPrefs";
 import {
   SectionDeleteConfirmDialog,
@@ -337,16 +341,12 @@ export function Sidebar({
     channels[0]?.id ?? dms[0]?.id ?? null
   );
   const unreadCountFor = useCallback(
-    (channel: Channel) => {
-      if (openId !== null && uuidEq(channel.id, openId)) {
-        return { unreadCount: 0, mentionCount: 0 };
-      }
-      const read = unreadFor(readStates.byChannel, channel.id);
-      return {
-        unreadCount: read?.unreadCount ?? 0,
-        mentionCount: read?.mentionCount ?? 0,
-      };
-    },
+    (channel: Channel) =>
+      sidebarUnreadCounts(
+        channel.id,
+        openId,
+        unreadFor(readStates.byChannel, channel.id)
+      ),
     [openId, readStates.byChannel]
   );
 
@@ -363,8 +363,11 @@ export function Sidebar({
   );
 
   const unreadChannels = useMemo(
-    () => ordered.filter((c) => unreadCountFor(c).unreadCount > 0),
-    [ordered, unreadCountFor]
+    () =>
+      unreadChannelsInOrder(ordered, openId, (id) =>
+        unreadFor(readStates.byChannel, id)
+      ),
+    [ordered, openId, readStates.byChannel]
   );
   // ⌥↓ walks this list even when a section is folded. The collapsed header
   // therefore carries the same aggregate the keyboard already visits (M-2).
