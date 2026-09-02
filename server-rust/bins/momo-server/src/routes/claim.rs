@@ -84,6 +84,7 @@ pub async fn claim(
     let Some(workspace_id) = resolved else {
         return Err(mutation_error(ClaimMutation::NotFound));
     };
+    let gateway_enabled = state.agent_gateway.enabled();
 
     let mutation = with_tenant_tx(&state.pool, workspace_id, {
         let token = token.clone();
@@ -107,6 +108,15 @@ pub async fn claim(
                             .with_schema(schema, serde_json::json!({})),
                     )
                     .await?;
+                    if outcome.claim_kind == momo_auth::CLAIM_KIND_OWNER_BOOTSTRAP {
+                        crate::routes::welcome::enqueue_welcome_kickoff_in_tx(
+                            conn,
+                            workspace_id,
+                            outcome.member_id,
+                            gateway_enabled,
+                        )
+                        .await?;
+                    }
                 }
                 Ok::<_, DbError>(mutation)
             })

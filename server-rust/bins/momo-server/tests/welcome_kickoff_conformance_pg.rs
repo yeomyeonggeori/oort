@@ -435,26 +435,36 @@ async fn proof_1_and_3_same_member_twice_is_one_opener_rejoin_does_not_retrigger
     let base = start_server(momo_app_pool().await).await;
     let http = reqwest::Client::new();
     let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
-    let code = issue_invite(&http, &base, &token, fixture.workspace, 5).await;
+    let first_code = issue_invite(&http, &base, &token, fixture.workspace, 5).await;
     let email = format!("ada-{}@welcome.test", Uuid::new_v4());
 
-    let (first_status, first_body) = post_join(&http, &base, join_payload(&code, &email)).await;
+    let (first_status, first_body) =
+        post_join(&http, &base, join_payload(&first_code, &email)).await;
     assert_eq!(first_status, 201, "first join creates: {first_body}");
     assert_eq!(first_body["createdMember"], json!(true));
 
-    let (second_status, second_body) = post_join(&http, &base, join_payload(&code, &email)).await;
+    // A second unused invite: the same code is 409 already-redeemed, not a rejoin.
+    let rejoin_code = issue_invite(&http, &base, &token, fixture.workspace, 5).await;
+    let (second_status, second_body) =
+        post_join(&http, &base, join_payload(&rejoin_code, &email)).await;
     assert_eq!(second_status, 200, "rejoin is 200: {second_body}");
     assert_eq!(second_body["createdMember"], json!(false));
-
-    assert_eq!(
-        count_runs_like(&su, fixture.workspace, "opener").await,
-        1,
-        "same member joining twice must produce exactly one opener run"
-    );
     assert_eq!(
         count_welcome_jobs(&su, fixture.workspace).await,
         1,
         "rejoin must not enqueue a second welcome job"
+    );
+
+    let mock = Arc::new(MockChatProvider::echo());
+    worker(mock, true)
+        .await
+        .drain_once()
+        .await
+        .expect("drain opener");
+    assert_eq!(
+        count_runs_like(&su, fixture.workspace, "opener").await,
+        1,
+        "same member joining twice must produce exactly one opener run"
     );
 }
 

@@ -14,7 +14,12 @@ use uuid::Uuid;
 
 /// Writable top-level keys. `role_labels` is display-only — it never changes
 /// `is_admin` / `can_*` / RLS / the role wire value.
-pub const ALLOWED_SETTINGS_KEYS: &[&str] = &["allowed_agent_models", "role_labels"];
+pub const ALLOWED_SETTINGS_KEYS: &[&str] = &[
+    "allowed_agent_models",
+    "role_labels",
+    "welcome_agent_member_id",
+    "welcome_prompt",
+];
 
 /// Human membership roles that may carry a display override. Agent labels are
 /// a client `null` rule and are refused here.
@@ -32,6 +37,9 @@ pub const MAX_ALLOWED_AGENT_MODELS: usize = 32;
 
 /// Upper bound on one model id, bytes not chars — model ids are ASCII.
 pub const MAX_ALLOWED_AGENT_MODEL_BYTES: usize = 64;
+
+/// ADR-0181 D8: welcome prompt character cap (proof ⑦ is 2001 chars → 400).
+pub const MAX_WELCOME_PROMPT_CHARS: usize = 2000;
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum WorkspaceSettingsInvalid {
@@ -53,6 +61,12 @@ pub enum WorkspaceSettingsInvalid {
     RoleLabelsUnknownRole(String),
     #[error("role_labels value exceeds {MAX_ROLE_LABEL_BYTES} bytes")]
     RoleLabelsEntryLength,
+    #[error("welcome_agent_member_id must be a uuid")]
+    WelcomeAgentMemberIdShape,
+    #[error("welcome_prompt must be a string")]
+    WelcomePromptShape,
+    #[error("welcome_prompt must be at most {MAX_WELCOME_PROMPT_CHARS} characters")]
+    WelcomePromptLength,
 }
 
 impl WorkspaceSettingsInvalid {
@@ -96,6 +110,8 @@ fn validate_settings_value(key: &str, value: &Value) -> Result<(), WorkspaceSett
     match key {
         "allowed_agent_models" => validate_allowed_agent_models(value),
         "role_labels" => validate_role_labels(value),
+        "welcome_agent_member_id" => validate_welcome_agent_member_id(value),
+        "welcome_prompt" => validate_welcome_prompt(value),
         _ => Err(WorkspaceSettingsInvalid::UnknownKey(key.to_string())),
     }
 }
@@ -135,6 +151,25 @@ fn validate_role_labels(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
         if text.len() > MAX_ROLE_LABEL_BYTES {
             return Err(WorkspaceSettingsInvalid::RoleLabelsEntryLength);
         }
+    }
+    Ok(())
+}
+
+fn validate_welcome_agent_member_id(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
+    let Some(text) = value.as_str() else {
+        return Err(WorkspaceSettingsInvalid::WelcomeAgentMemberIdShape);
+    };
+    Uuid::parse_str(text)
+        .map(|_| ())
+        .map_err(|_| WorkspaceSettingsInvalid::WelcomeAgentMemberIdShape)
+}
+
+fn validate_welcome_prompt(value: &Value) -> Result<(), WorkspaceSettingsInvalid> {
+    let Some(text) = value.as_str() else {
+        return Err(WorkspaceSettingsInvalid::WelcomePromptShape);
+    };
+    if text.chars().count() > MAX_WELCOME_PROMPT_CHARS {
+        return Err(WorkspaceSettingsInvalid::WelcomePromptLength);
     }
     Ok(())
 }
