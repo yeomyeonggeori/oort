@@ -225,12 +225,12 @@ describe('ConnectScreen device-link redeem', () => {
       }
       return jsonResponse(500, {error: {message: 'unexpected'}});
     });
-    fireEvent.press(screen.getByTestId('device-link-sas-retry'));
-    await keychainSettled();
-    await waitFor(() =>
-      expect(keychainItems.get('app.momo.ios.rn.session')?.password).toBe(
-        'refresh-token-device-link',
-      ),
+    await waitFor(
+      () =>
+        expect(keychainItems.get('app.momo.ios.rn.session')?.password).toBe(
+          'refresh-token-device-link',
+        ),
+      {timeout: 5000},
     );
   });
 
@@ -295,9 +295,29 @@ describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
   });
 
   it('stops polling at the token TTL and speaks the expiry sentence', async () => {
-    await renderPendingSas();
     jest.useFakeTimers();
     try {
+      jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
+      fetchMock.mockImplementation(async (url: string) => {
+        if (String(url).endsWith('/v1/auth/device-link/redeem')) {
+          return jsonResponse(200, {
+            ...LOGIN_BODY,
+            pendingSas: true,
+            sas: '4821',
+          });
+        }
+        if (String(url).includes('/v1/workspaces/')) {
+          return jsonResponse(401, {error: {message: 'token has not been activated'}});
+        }
+        return jsonResponse(500, {error: {message: 'unexpected'}});
+      });
+      render(<ConnectScreen />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('device-link-sas')).toBeTruthy();
       const before = jest.getTimerCount();
       await act(async () => {
         jest.advanceTimersByTime(120_000);
@@ -339,13 +359,18 @@ describe('R2 H-2 SAS offline and unreachable states', () => {
     render(<ConnectScreen />);
     await waitFor(() => expect(screen.getByTestId('device-link-sas')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
+    const probesWhenPaused = fetchMock.mock.calls.filter(call =>
+      String(call[0]).includes('/workspaces'),
+    ).length;
     jest.useFakeTimers();
     try {
-      const paused = jest.getTimerCount();
       await act(async () => {
         jest.advanceTimersByTime(6_000);
       });
-      expect(jest.getTimerCount()).toBe(paused);
+      const probesAfter = fetchMock.mock.calls.filter(call =>
+        String(call[0]).includes('/workspaces'),
+      ).length;
+      expect(probesAfter).toBe(probesWhenPaused);
     } finally {
       jest.useRealTimers();
     }

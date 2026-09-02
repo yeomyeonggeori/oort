@@ -38,8 +38,9 @@ name: 50-device-link
 - runFlow: subflows/dismiss-system-alerts.yaml
 
 # Public-origin redeem shows the four SAS digits and waits. Loopback redeem
-# lands in the workspace. Either outcome proves the link was consumed.
+# lands in the workspace. A redeem failure (`device-link-failure`) is NOT
+# success — this wait times out on that id so the flow is red.
 - extendedWaitUntil:
     visible:
-      id: "device-link-sas|sidebar-list|device-link-failure"
+      id: "device-link-sas|sidebar-list"
     timeout: 60000

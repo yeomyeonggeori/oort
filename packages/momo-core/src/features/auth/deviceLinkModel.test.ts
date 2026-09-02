@@ -11,6 +11,7 @@ import {
   DEVICE_LINK_MALFORMED_COPY,
   DEVICE_LINK_TOKEN_LEN,
   DEVICE_LINK_USED_COPY,
+  DeviceLinkFormatError,
   deviceLinkFailureCopy,
   deviceLinkSasDigits,
   isDeviceLinkToken,
@@ -72,7 +73,7 @@ describe("device-link redeem copy", () => {
     const used = deviceLinkFailureCopy(
       new ApiError(409, "device link token has already been used")
     );
-    const malformed = deviceLinkFailureCopy(new Error("bad qr"));
+    const malformed = deviceLinkFailureCopy(new DeviceLinkFormatError());
     expect(expired.message).toBe(DEVICE_LINK_EXPIRED_COPY);
     expect(used.message).toBe(DEVICE_LINK_USED_COPY);
     expect(malformed.message).toBe(DEVICE_LINK_MALFORMED_COPY);
