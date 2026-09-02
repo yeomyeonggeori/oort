@@ -1,6 +1,6 @@
 # ADR-0182: 일시 확인(ephemeral confirmation) 정책 — 토스트 금지의 대안 문법
 
-- 상태: **Proposed** (2026-09-02 기안 Fable — 성재 결재 대기. 인터뷰 Q2 권고 승인 = 금지 유지 + 대안 성문)
+- 상태: **Accepted** (2026-09-02 성재 결재 — "2~5까지는 승인". 기안 Fable 같은 날 인터뷰 Q2 권고 승인 = 금지 유지 + 대안 성문)
 - 발제: 브리프 §2 근원 R6·웹 클라 실사 "No transient notification channel at all" / 편성 UX-R5e
 - 관련: ADR-0159(디자인 시스템 §4 네 상태) · `momo-design-taste-web` §8 · `clients/web/src/features/common/States.tsx:35`("Toast stacks are banned; the message lives where the problem is") · `scripts/design_preflight_web.sh` 카테고리 6 `toast`(hard-zero) · `SettingsFields.tsx:584`(copy-with-inline-confirm 선례)
 
