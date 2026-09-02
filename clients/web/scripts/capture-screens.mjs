@@ -8514,7 +8514,7 @@ async function waitForScrollerAlignSettled(page, label) {
         if (prev === top) {
           const next = frames + 1;
           scroller.setAttribute("data-capture-stable-frames", String(next));
-          return next >= 2;
+          return next >= 12;
         }
         scroller.setAttribute("data-capture-scroll-top", top);
         scroller.setAttribute("data-capture-stable-frames", "0");
@@ -8670,6 +8670,9 @@ async function captureMarkUnreadScenes(browser, scheme) {
     polling: "raf",
     timeout: 15_000,
   });
+  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
   const state = await proof.jsonValue();
   if (!state || !state.dividerText.includes("새 메시지")) {
     throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
@@ -8686,9 +8689,6 @@ async function captureMarkUnreadScenes(browser, scheme) {
       `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
     );
   }
-  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
-  await page.screenshot({ path });
-  shots.push(path);
   await assertComposerVisible(page, `mark-unread ${scheme}`);
   await assertNoHorizontalOverflow(page, `mark-unread ${scheme}`);
   console.log(
