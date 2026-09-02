@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./motion.css";
 
 /* =============================================================================
  * momo 여명(Dawn) design tokens — MOMO-597 / ADR-0133 P1.
@@ -268,11 +269,12 @@
    * 전체가 아니라 서랍이라는 사실이 보여야, 바깥을 눌러 닫을 자리도 함께 보인다. */
   --w-sidebar-drawer: 280px;
 
-  /* 데스크톱 사이드바 접힘/펼침 (#1864). 서랍 슬라이드(160ms)와 같은 축의 피드백
-   * 이되, 폭 전환은 한 박자 더 길어야 열이 사라지는 방향이 읽힌다. 장식 루프가
-   * 아니라 상태 변화 한 번이므로 200ms ease-out. prefers-reduced-motion 에서는
-   * `app-shell` 유틸이 이 값을 쓰지 않는다. */
-  --duration-sidebar: 200ms;
+  /* 데스크톱 사이드바 접힘/펼침 (#1864, ADR-0179 흡수). 서랍 슬라이드(fast)와
+   * 같은 축의 피드백이되, 폭 전환은 한 박자 더 길어야 열이 사라지는 방향이
+   * 읽힌다 — 그래서 standard. 손기입 200ms 는 사다리 standard(240)로 이관.
+   * prefers-reduced-motion 에서는 사다리가 0 이고, `app-shell` 도 transition:
+   * none 이다. */
+  --duration-sidebar: var(--motion-standard);
 
   /* Overlay 타이틀바의 트래픽라이트 자리 (#1864). macOS 세 원(약 52px) +
    * trafficLightPosition.x 16 + 토글과의 간격. 웹(브라우저)은 이 값을 쓰지 않고
@@ -634,6 +636,11 @@
 }
 
 @theme inline {
+  /* ADR-0179 M-2: stock `transition` / `transition-opacity` 가 읽는 기본값.
+   * Tailwind theme.css 의 .15s / cubic-bezier(.4,0,.2,1) 을 사다리에 묶는다. */
+  --default-transition-duration: var(--motion-instant);
+  --default-transition-timing-function: var(--motion-ease-standard);
+
   /* Clear Tailwind's stock palette: bg-indigo-500 and friends must not exist,
    * so the only reachable colors are the Dawn tokens below. */
   --color-*: initial;
@@ -688,10 +695,13 @@
  * 아웃라인, 지금은 아래 `@utility focus-ring`; 둘 다 outline-color 를 focus 에서만
  * 세운다). 그래서 탭으로 포커스가 들어오면
  * `outline-width` 는 즉시 2px 로 서지만 색은 정지 상태의 `currentcolor`(= --ink,
- * 본문 잉크)에서 --accent 로 기본 150ms 동안 번진다 — 키보드가 1급 문법인
+ * 본문 잉크)에서 --accent 로 기본 전이 동안 번진다 — 키보드가 1급 문법인
  * 제품(ux-bible P11)에서 포커스 표시가 첫 프레임에 **잉크색으로** 나타났다가
- * 호박이 된다. 보강 증거는 이미 레포에 있었다: gates/gate-shell-layout.mjs:760-764
- * 가 정확히 이 보간 때문에 getComputedStyle 앞에서 400ms 를 기다린다.
+ * 호박이 된다. 보강 증거는 이미 레포에 있었다:
+ * gates/gate-shell-layout.mjs:1038 이 이 보간 때문에 getComputedStyle 앞에서
+ * 400ms 를 기다린다(그 주석은 옛 기본 150ms 를 인용한다). ADR-0179 가 기본
+ * 전이를 instant(120)로 흡수해도 400ms 는 두 배를 넘으므로 게이트가 재는 것
+ * (전이 종료 후 합성색)은 그대로다.
  *
  * 이 수리는 지금도 load-bearing 이다: 검수 피드백 #1 로 포커스 링이 `focus-ring`
  * (인셋 accent outline)으로 바뀌었지만 그 링도 `outline-color` 로 색을 준다. 이
@@ -736,6 +746,26 @@
     transition-property:
       color, background-color, border-color, text-decoration-color, fill,
       stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    /* ADR-0179: Tailwind 기본 150ms 를 instant 로 흡수. 속성 목록은 #1210 D3
+     * 그대로(outline-color 만 빠짐). */
+    transition-duration: var(--motion-instant);
+    transition-timing-function: var(--motion-ease-standard);
+  }
+
+  /* ADR-0179 D5. `@utility press` 는 @import "tailwindcss" 확장 자리에 나가
+   * 이 블록보다 앞에 선다. 같은 레이어·같은 특정도면 나중이 이므로, 눌림의
+   * 전이 목록은 여기 둔다. Button 은 `press` 만 든다(transition-colors 없음).
+   * outline-color 는 넣지 않는다(#1210 D3). transform 을 전역 transition-colors
+   * 에 더하지 않는다(36곳). */
+  .press {
+    transition-property:
+      transform, color, background-color, border-color, text-decoration-color,
+      fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    transition-duration: var(--motion-instant);
+    transition-timing-function: var(--motion-ease-standard);
+    &:active {
+      transform: scale(0.98);
+    }
   }
 }
 
@@ -756,8 +786,8 @@
  * 두 가지가 깨진다. 그래서 같은 목표(엣지에 붙는 표시)를 아웃라인으로 달성한다:
  *   1. **다시 페이드한다.** border-color 는 hover 를 위해 `transition-colors` 목록에
  *      남아 있다(#1210 D3 은 outline-color 하나만 뺐다 — 바로 위 블록). 포커스가
- *      border-color 를 건드리면 링이 정지색에서 --accent 로 ~150ms 번진다 — #1210 D3
- *      이 잡은 결함을 다른 속성으로 되살리는 것이다. outline-color 는 #1210 D3 이
+ *      border-color 를 건드리면 링이 정지색에서 --accent 로 instant 동안 번진다 —
+ *      #1210 D3 이 잡은 결함을 다른 속성으로 되살리는 것이다. outline-color 는 #1210 D3 이
  *      목록에서 빼 두었으므로 focus-ring 은 즉시 선다 — 이 유틸은 그 수리 위에 산다.
  *   2. **테두리 없는 컨트롤에서 안 보인다.** button 의 default·ghost·destructive,
  *      링크·행·<summary>·메뉴 항목은 border-width 가 0 이라 border-color 가 그릴
@@ -811,6 +841,33 @@
 }
 @utility focus-ring-on-fill {
   --focus-ring-ink: var(--on-accent);
+}
+
+/* ADR-0179 D1 소비 유틸. 표면은 duration-[0-9]+ 를 적지 않고 이 이름을 든다.
+ * `.press` 는 위 @layer utilities 블록(transition-colors 뒤)이 소유한다. */
+@utility motion-instant {
+  transition-duration: var(--motion-instant);
+  animation-duration: var(--motion-instant);
+  transition-timing-function: var(--motion-ease-standard);
+  animation-timing-function: var(--motion-ease-standard);
+}
+@utility motion-fast {
+  transition-duration: var(--motion-fast);
+  animation-duration: var(--motion-fast);
+  transition-timing-function: var(--motion-ease-standard);
+  animation-timing-function: var(--motion-ease-standard);
+}
+@utility motion-standard {
+  transition-duration: var(--motion-standard);
+  animation-duration: var(--motion-standard);
+  transition-timing-function: var(--motion-ease-standard);
+  animation-timing-function: var(--motion-ease-standard);
+}
+@utility motion-arrival {
+  transition-duration: var(--motion-arrival);
+  animation-duration: var(--motion-arrival);
+  transition-timing-function: var(--motion-ease-arrival);
+  animation-timing-function: var(--motion-ease-arrival);
 }
 
 @utility onboarding-focus {
@@ -883,7 +940,8 @@
    * 토글은 첫째 행(타이틀바)에 남는다. 폭 전환은 `--duration-sidebar`이고,
    * reduced-motion에서는 즉시 자리가 바뀐다. */
   @media (width >= 600px) {
-    transition: grid-template-columns var(--duration-sidebar) ease-out;
+    transition: grid-template-columns var(--duration-sidebar)
+      var(--motion-ease-standard);
 
     &[data-sidebar-collapsed] {
       grid-template-columns: 0px 1fr;
@@ -942,8 +1000,9 @@
  * (clip이 자른다). `position: fixed`였다면 초기 컨테이닝 블록에 붙어 셸의
  * 클리핑을 벗어났을 것이고, MOMO-628이 sr-only에서 이미 치른 값이다.
  *
- * 움직임은 피드백이다(SKILL §4): 서랍이 **어디에서** 왔는지가 160ms 동안 보이고,
- * 그보다 길어지면 대기가 된다. reduced-motion에서는 전환 없이 자리에 나타난다 —
+ * 움직임은 피드백이다(SKILL §4): 서랍이 **어디에서** 왔는지가 standard 동안
+ * 보인다(ADR-0179 D1 — 드로어는 상태 변화). 손기입 160ms 는 사다리
+ * standard(240)로 이관. reduced-motion에서는 전환 없이 자리에 나타난다 —
  * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
 @utility sidebar-drawer {
   /* 데스크톱 접힘 (#1864): 그리드 열이 0으로 줄어드는 동안 레일·채널 트리가
@@ -963,7 +1022,7 @@
     /* 논리 속성이 아닌 이유: transform은 물리 축만 안다. 이 앱은 ko/LTR이고,
      * RTL이 생기면 여기가 뒤집을 자리다. */
     transform: translateX(-100%);
-    transition: transform 160ms ease-out;
+    transition: transform var(--motion-standard) var(--motion-ease-standard);
 
     &[data-open] {
       transform: translateX(0);
@@ -2598,9 +2657,9 @@ progress[data-upload-progress]::-webkit-progress-bar {
 progress[data-upload-progress]::-webkit-progress-value {
   background-color: var(--accent);
   /* 값이 바뀔 때만 움직인다. 계속 도는 애니메이션이 아니라 상태 변화의 피드백이다
-   * (SKILL §4). 120ms 는 한 번의 progress 이벤트 간격보다 짧아서 막대가 뒤처지지
+   * (SKILL §4). instant 는 한 번의 progress 이벤트 간격보다 짧아서 막대가 뒤처지지
    * 않는다. */
-  transition: inline-size 120ms linear;
+  transition: inline-size var(--motion-instant) linear;
 }
 
 progress[data-upload-progress]::-moz-progress-bar {
