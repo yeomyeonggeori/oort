@@ -85,7 +85,7 @@ const EQ = new Set<ts.SyntaxKind>([
 ]);
 
 type Scope = {
-  parent: Scope | null;
+  parent: Scope | undefined;
   decls: Map<string, ts.Node>;
 };
 
@@ -219,7 +219,7 @@ export function scanComposition(
   );
   const lines = source.split("\n");
   const scopeOf = new Map<ts.Node, Scope>();
-  const rootScope: Scope = { parent: null, decls: new Map() };
+  const rootScope: Scope = { parent: undefined, decls: new Map() };
   const fns = new Map<string, ts.SignatureDeclaration>();
 
   function collectFns(node: ts.Node) {
