@@ -5,7 +5,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
+  consumeUserClearedUnread,
   nextAdvertisedChannelId,
+  noteUserClearedUnread,
   readIntentWire,
 } from "./advertiseReadState";
 
@@ -75,6 +77,15 @@ describe("channelReadAdvertisementReason", () => {
     expect(channelReadAdvertisementReason("ch-a", "ch-a")).toBe("arrival_flush");
     expect(channelReadAdvertisementReason("ch-a", "ch-b")).toBe("channel_open");
     expect(channelReadAdvertisementReason("CH-A", "ch-a")).toBe("arrival_flush");
+  });
+});
+
+describe("user-cleared unread (N-12)", () => {
+  it("노트한 채널만 한 번 소비한다", () => {
+    expect(consumeUserClearedUnread("ch-a")).toBe(false);
+    noteUserClearedUnread("CH-A");
+    expect(consumeUserClearedUnread("ch-a")).toBe(true);
+    expect(consumeUserClearedUnread("ch-a")).toBe(false);
   });
 });
 

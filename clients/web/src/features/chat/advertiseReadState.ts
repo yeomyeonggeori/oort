@@ -75,6 +75,20 @@ export function nextAdvertisedChannelId(
   return putSucceeded ? channelId : previous;
 }
 
+const userClearedUnread = new Set<string>();
+
+/** Sidebar 「읽음 처리」 — the open visit must drop its frozen mark. */
+export function noteUserClearedUnread(channelId: string): void {
+  userClearedUnread.add(channelId.toLowerCase());
+}
+
+export function consumeUserClearedUnread(channelId: string): boolean {
+  const key = channelId.toLowerCase();
+  if (!userClearedUnread.has(key)) return false;
+  userClearedUnread.delete(key);
+  return true;
+}
+
 export function advertiseReadState(
   workspaceId: string,
   channelId: string,

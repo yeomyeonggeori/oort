@@ -12,6 +12,7 @@ import {
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
+  consumeUserClearedUnread,
   nextAdvertisedChannelId,
 } from "@/features/chat/advertiseReadState";
 import {
@@ -243,7 +244,11 @@ export function ChatShell() {
       ) {
         return freezeOpenedRead(channelId, read);
       }
-      return foldInVisitMark(current, read);
+      return foldInVisitMark(
+        current,
+        read,
+        consumeUserClearedUnread(channelId) ? "user_clear" : "open_advertisement"
+      );
     });
   }, [channelId, readStates.byChannel]);
 

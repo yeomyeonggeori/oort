@@ -15,12 +15,16 @@ import {
 // cursor-based.
 // =============================================================================
 
+export type VisitNullSource = "open_advertisement" | "user_clear";
+
 export interface OpenedReadSnapshot {
   channelId: string;
   lastReadSeq: number | null;
   latestSeq: number;
   /** Open-time mark, or a mark set during this visit. Server `null` does not clear it. */
   markSeq: number | null;
+  /** When true, a live `null` is treated as the open's own explicit_open. */
+  absorbOpenNull: boolean;
 }
 
 export function freezeOpenedRead(
@@ -33,6 +37,7 @@ export function freezeOpenedRead(
       lastReadSeq: null,
       latestSeq: 0,
       markSeq: null,
+      absorbOpenNull: true,
     };
   }
   return {
@@ -40,21 +45,28 @@ export function freezeOpenedRead(
     lastReadSeq: read.lastReadSeq,
     latestSeq: read.latestSeq,
     markSeq: read.markedUnreadBeforeSeq,
+    absorbOpenNull: true,
   };
 }
 
 /**
- * Ignore only the open's own `null`. Any non-null live mark replaces the
- * snapshot (a later re-mark in this visit wins).
+ * Ignore only the open's own `null` (`absorbOpenNull`). A user clear
+ * (sidebar 「읽음 처리」) must drop the visit boundary.
  */
 export function foldInVisitMark(
   opened: OpenedReadSnapshot,
-  live: ReadState | null | undefined
+  live: ReadState | null | undefined,
+  source: VisitNullSource = "open_advertisement"
 ): OpenedReadSnapshot {
   if (!live || opened.lastReadSeq === null) return opened;
   const incoming = freezeOpenedRead(opened.channelId, live);
-  if (typeof incoming.markSeq !== "number") return opened;
-  return { ...opened, markSeq: incoming.markSeq };
+  if (typeof incoming.markSeq === "number") {
+    return { ...opened, markSeq: incoming.markSeq, absorbOpenNull: true };
+  }
+  if (source === "user_clear" || !opened.absorbOpenNull) {
+    return { ...opened, markSeq: null, absorbOpenNull: false };
+  }
+  return opened;
 }
 
 export function timelineUnreadFromOpened(opened: OpenedReadSnapshot): {

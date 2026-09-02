@@ -50,6 +50,25 @@ describe("재열람 방문은 연 순간의 마크 경계를 지킨다 (B-1)", (
     expect(visit.unreadCount).toBe(MARK_AT_3_CURSOR_10.count);
   });
 
+  it("사이드바 읽음 처리는 방문 경계를 지운다 (N-12)", () => {
+    const atOpen = markAt3Cursor10();
+    const frozen = freezeOpenedRead(atOpen.channelId, atOpen);
+    const afterOpen = foldInVisitMark(frozen, {
+      ...atOpen,
+      markedUnreadBeforeSeq: null,
+    });
+    expect(timelineUnreadFromOpened(afterOpen).unreadCount).toBe(
+      MARK_AT_3_CURSOR_10.count
+    );
+    const afterUserClear = foldInVisitMark(
+      afterOpen,
+      { ...atOpen, markedUnreadBeforeSeq: null },
+      "user_clear"
+    );
+    expect(timelineUnreadFromOpened(afterUserClear).unreadCount).toBe(0);
+    expect(afterUserClear.markSeq).toBeNull();
+  });
+
   it("방문 중 나중 마크 B 는 구분선을 B 로 옮기고, 열람의 null 은 지우지 않는다 (H-3)", () => {
     const atOpen = markAt3Cursor10();
     const frozen = freezeOpenedRead(atOpen.channelId, atOpen);
