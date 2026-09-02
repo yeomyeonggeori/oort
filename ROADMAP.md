@@ -42,7 +42,7 @@
 ### 운영 파이프라인
 
 - **트랙**: track/uxui · track/engine에서 랜딩(트랙 내 머지 자율), **main 승격은 성재 명시 승인**(`docs/TRACKS.md`).
-- **워커 레인**: Opus 5 Agent 레인(2026-09-01~, 병렬 상한 2), 리뷰는 design-review 에이전트 폐곡선(Blocker 0·High 0) 후 머지. 레인·모델 정본은 (예정) `docs/planning/PIPELINE.md`.
+- **워커 레인**: grok 4.6(grok build CLI, 2026-09-02 성재 지시 — 병렬 상한 2·조기 종료 시 1), 리뷰는 design-review 에이전트 폐곡선(Blocker 0·High 0) 후 머지. 레인·모델 정본은 (예정) `docs/planning/PIPELINE.md`.
 - **푸시**: APNs 종단 증명 완료 · PushRelay 배포 · id-only payload(ADR-0120). 셀프호스트는 Dawn PushRelay 경유(D1-A). Apple 서명 자산 확보 완료, CI 레인만 미구축.
 
 ---
