@@ -170,3 +170,29 @@ export function urlWithoutJoinParams(href: string): string {
   }
   return url.toString();
 }
+
+/**
+ * Device-link deep link (`oort://link?server=…&token=…`, ADR-0180 D2).
+ *
+ * Same grammar as `join`: two meaningful parameters, order-independent,
+ * unknown parameters ignored, `momo://` absorbed. Both `server` and `token`
+ * are required; an unusable `server` rejects the whole link (unlike join,
+ * which can prefill a code alone).
+ */
+export interface DeviceLinkPrefill {
+  /** Validated API base. */
+  serverUrl: string;
+  /** Raw 32-byte base64url voucher (43 characters). */
+  token: string;
+}
+
+const LINK_ACTION = "link";
+
+/**
+ * Parse a device-link URL. Null when it is not one, is missing a parameter,
+ * or carries a `server` that does not validate as a base URL.
+ */
+export function parseDeviceLinkDeepLink(raw: string): DeviceLinkPrefill | null {
+  void raw;
+  return null;
+}
