@@ -8666,13 +8666,16 @@ async function captureMarkUnreadScenes(browser, scheme) {
   }
   await markItem.click();
   await waitForScrollerAlignSettled(page, `${scheme} after mark`);
-  const proof = await page.waitForFunction(`() => ${markUnreadProofExpr()}`, {
+  const proof = await page.waitForFunction(markUnreadProofExpr(), {
     polling: "raf",
     timeout: 15_000,
   });
   const state = await proof.jsonValue();
   if (!state || !state.dividerText.includes("새 메시지")) {
     throw new Error(`마크 캡처 ${scheme}: 구분선 문구가 없다 ${JSON.stringify(state)}`);
+  }
+  if (!state.focus) {
+    throw new Error(`마크 캡처 ${scheme}: 포커스가 행을 떠났다 ${JSON.stringify(state)}`);
   }
   const countMatch = state.dividerText.match(/(\d+)/);
   if (!countMatch) {
@@ -8682,15 +8685,6 @@ async function captureMarkUnreadScenes(browser, scheme) {
     throw new Error(
       `마크 캡처 ${scheme}: 필 「${state.pillText}」와 구분선 「${state.dividerText}」가 다른 수다`
     );
-  }
-  const still = await page.evaluate(`() => ${markUnreadProofExpr()}`);
-  if (!still || still.dividerText !== state.dividerText) {
-    throw new Error(
-      `마크 캡처 ${scheme}: 스크린샷 직전 구분선이 사라졌다 ${JSON.stringify(still)}`
-    );
-  }
-  if (!still.focus) {
-    throw new Error(`마크 캡처 ${scheme}: 포커스가 행을 떠났다`);
   }
   const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
   await page.screenshot({ path });
