@@ -217,6 +217,44 @@ describe("ADR-0179 D5 눌림 단일점", () => {
       expect(rule[1]).not.toMatch(/outline-color/);
     }
   });
+
+  it("mousedown 에서 transform 전이가 돈다 (H-1 runtime)", async () => {
+    const className = buttonVariants({ variant: "secondary" });
+    const css = await buildCss(classTokens(className));
+    const { chromium } = await import("playwright");
+    const browser = await chromium.launch();
+    try {
+      const page = await browser.newPage();
+      await page.setContent(
+        `<!doctype html><html><head><style>${css}</style></head><body><button id="b" class="${className}">변경 저장</button></body></html>`
+      );
+      const el = page.locator("#b");
+      await el.evaluate((node) => {
+        const target = node as HTMLElement & { __ev: string[] };
+        target.__ev = [];
+        for (const type of ["transitionrun", "transitionend"] as const) {
+          node.addEventListener(type, (event) => {
+            target.__ev.push(`${type}:${(event as TransitionEvent).propertyName}`);
+          });
+        }
+      });
+      const box = await el.boundingBox();
+      if (!box) throw new Error("button box missing");
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.down();
+      await page.waitForTimeout(180);
+      const events = await el.evaluate(
+        (node) => (node as HTMLElement & { __ev: string[] }).__ev
+      );
+      expect(
+        events.some((entry) => entry.startsWith("transitionrun:transform")),
+        `events=${events.join(" ")}`
+      ).toBe(true);
+      await page.mouse.up();
+    } finally {
+      await browser.close();
+    }
+  }, 20_000);
 });
 
 describe("ADR-0179 D6 엘리베이션 이름", () => {
@@ -261,13 +299,17 @@ describe("ADR-0179 D10 사다리 밖 ms 리터럴", () => {
   });
 
   it("Tailwind 기본 transition 이 사다리 instant/standard ease 를 따른다", async () => {
-    const css = await buildCss(["transition"]);
-    expect(css).toMatch(
+    expect(TOKENS_CSS).toMatch(
       /--default-transition-duration:\s*var\(--motion-instant\)/
     );
-    expect(css).toMatch(
+    expect(TOKENS_CSS).toMatch(
       /--default-transition-timing-function:\s*var\(--motion-ease-standard\)/
     );
+    const css = await buildCss(["transition"]);
+    const rule = css.match(/\.transition\s*\{([^}]+)\}/);
+    expect(rule, ".transition 규칙").toBeTruthy();
+    expect(rule![1]).toMatch(/var\(--motion-instant\)/);
+    expect(rule![1]).toMatch(/var\(--motion-ease-standard\)/);
   });
 
   it("tokens.css 의 ms 리터럴은 온보딩 예외 블록 밖 0건이다", () => {
