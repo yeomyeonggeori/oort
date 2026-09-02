@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)
+
+- momo-core `effectiveUnreadStartSeq` 단일점 (ADR-0178 D3). 배지·UnreadDivider·UnreadPill·⌥↑↓ 가 이 함수만 소비. 서버 `unread_count` 는 접지 않음.
+- 메시지 ⋯ 「여기부터 안 읽음」: PUT `mark_unread_before_seq`, `read_intent` 생략. 낙관 반영, 400/403 롤백+행 배너.
+- 채널 명시 열람·사이드바 「읽음 처리」는 `read_intent: "explicit_open"`. 도착 중 플러시·인박스 멘션 광고는 생략(background). 서버 `marked_unread_before_seq: null` 이 로컬 마크를 지움.
+- 서버 절반은 track/engine PR #1961. runtime-unverified: 라이브 PUT/GET 왕복(이 레인은 모킹).
+- red proof: 마크 3/커서 10 공유 픽스처 · explicit_open vs 도착 플러시 · null 수렴 · 400 롤백. 합성 grep 게이트.
+
 ## BZ-5a 외양 1차: 토큰 바인딩 + 컬러 모드 + 액센트 시안 (#1868, 2026-08-30)
 
 - `clients/web/src/design/themes/` 바인딩 층. 컴포넌트는 `--accent`만 소비하고, 루트 `data-accent`가 라이트·다크 쌍을 재정의. 기본=새벽(호박, 목록 첫 값). 후보 시안: 성운, 홍염, 혜성, 감람. 성재 확정 전 머지 금지.

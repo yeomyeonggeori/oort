@@ -52,6 +52,7 @@ import {
 import {
   canDeleteMessage,
   canEditMessage,
+  canMarkUnreadMessage,
   canPinMessage,
   canReactToMessage,
   canRemindMessage,
@@ -101,8 +102,10 @@ import type { MessageUnfurl } from "@momo/core/features/timeline/unfurl";
 import { UnfurlCards } from "./UnfurlCards";
 import { useSession } from "@/app/session";
 import { reminderFailureMessage } from "@momo/core/features/reminders/model";
+import { markUnreadFailureMessage } from "@momo/core/features/readState/copy";
 import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
+import { useMarkUnread } from "./useMarkUnread";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -373,6 +376,7 @@ export function MessageRow({
   const [remindError, setRemindError] = useState<string | null>(null);
   const { workspaceId } = useSession();
   const reminderMutations = useReminderMutations(workspaceId);
+  const markUnread = useMarkUnread(workspaceId);
   const [actionMenuOpen, setActionMenuOpen] = useState(false);
   const [contextMenuOpen, setContextMenuOpen] = useState(false);
   const [rowHovered, setRowHovered] = useState(false);
@@ -466,6 +470,7 @@ export function MessageRow({
     // 할 수 있다(서버가 같은 규칙을 강제한다).
     pin: Boolean(actions) && canPinMessage(message),
     remind: Boolean(actions) && canRemindMessage(message),
+    markUnread: Boolean(actions) && canMarkUnreadMessage(message),
     edit: Boolean(actions) && canEditMessage(message, actions?.myMemberId),
     delete: Boolean(actions) && canDeleteMessage(message, actions?.myMemberId),
   };
@@ -521,6 +526,22 @@ export function MessageRow({
     onRemind: () => {
       setRemindError(null);
       setRemindOpen(true);
+    },
+    onMarkUnread: () => {
+      setRowError(null);
+      void markUnread
+        .run({
+          channelId: message.channelId,
+          lastReadSeq: message.seq,
+          seq: message.seq,
+        })
+        .catch((error: unknown) =>
+          setRowError(
+            error instanceof Error
+              ? error.message
+              : markUnreadFailureMessage(error)
+          )
+        );
     },
     onEdit: () => {
       setEditError(null);

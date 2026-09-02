@@ -8480,6 +8480,93 @@ async function captureTerminalDockScenes(browser, scheme) {
   return shots;
 }
 
+/**
+ * BT-6 (#1934): timeline with a mark-unread (divider + top pill). Own context
+ * so existing READ_STATES fixtures are not rewritten. Overlay only the
+ * read-state GET/PUT for this scene.
+ */
+async function captureMarkUnreadScenes(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], {
+    origin: ORIGIN,
+  });
+  await installMocks(context);
+  let markSeq = null;
+  await context.route("**/v1/workspaces/*/read-state", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, {
+      read_states: READ_STATES.map((row) => ({
+        ...row,
+        marked_unread_before_seq:
+          row.channel_id === GENERAL_ID ? markSeq : null,
+      })),
+    });
+  });
+  await context.route("**/v1/workspaces/*/channels/*/read-state", (route) => {
+    const req = route.request();
+    if (req.method() !== "PUT") return route.fallback();
+    const body = req.postDataJSON() || {};
+    if (body.read_intent === "explicit_open") {
+      markSeq = null;
+    } else if (typeof body.mark_unread_before_seq === "number") {
+      markSeq = body.mark_unread_before_seq;
+    }
+    return json(route, {
+      ...READ_STATES[0],
+      last_read_seq: body.last_read_seq ?? READ_STATES[0].last_read_seq,
+      marked_unread_before_seq: markSeq,
+    });
+  });
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  const topSeq = await pinActionableRowToScrollerTop(page);
+  if (!topSeq) {
+    throw new Error(`마크 캡처 ${scheme}: 스크롤러 상단에 붙일 행이 없다`);
+  }
+  const early = page.locator(
+    `[data-testid="timeline-message"][data-seq="${topSeq}"]`
+  );
+  await early.waitFor({ state: "visible" });
+  await early.hover();
+  await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
+  await page.getByTestId("message-actions-trigger").click();
+  await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
+  const markItem = page.getByTestId("menu-mark-unread");
+  if ((await markItem.count()) !== 1) {
+    throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${topSeq})`);
+  }
+  await markItem.click();
+  await page.getByTestId("unread-divider").waitFor({ state: "visible" });
+  await page.evaluate(`(() => {
+    const rows = document.querySelectorAll('[data-testid="timeline-message"]');
+    const last = rows[rows.length - 1];
+    if (last) last.scrollIntoView({ block: "end" });
+  })()`);
+  await page.waitForTimeout(400);
+  try {
+    await page.getByTestId("jump-unread").waitFor({
+      state: "visible",
+      timeout: 4_000,
+    });
+  } catch {
+    // Divider still proves the mark even if the pill did not arm.
+  }
+  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  await page.close();
+  await context.close();
+  return shots;
+}
+
 // 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
@@ -10057,6 +10144,7 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
+          all.push(...(await captureMarkUnreadScenes(browser, scheme)));
           all.push(...(await captureEmptyConversationScenes(browser, scheme)));
           all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
           all.push(...(await captureAddMemberScenes(browser, scheme)));

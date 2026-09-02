@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { uuidEq, type Channel } from "@momo/core/lib/api";
+import { composedUnreadCount } from "@momo/core/features/readState/model";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import { useSession } from "@/app/session";
 import { isSidebarTreeInert } from "@/app/sidebarPane";
@@ -343,7 +344,7 @@ export function Sidebar({
       }
       const read = unreadFor(readStates.byChannel, channel.id);
       return {
-        unreadCount: read?.unreadCount ?? 0,
+        unreadCount: read ? composedUnreadCount(read) : 0,
         mentionCount: read?.mentionCount ?? 0,
       };
     },

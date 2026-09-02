@@ -5,12 +5,13 @@ import { Check, Loader2 } from "lucide-react";
 import {
   removeChannelMember,
   setChannelNotificationPref,
-  updateReadState,
   uuidEq,
   type Channel,
   type MembershipRole,
   type ReadState,
 } from "@momo/core/lib/api";
+import { composedUnreadCount } from "@momo/core/features/readState/model";
+import { advertiseReadState } from "@/features/chat/advertiseReadState";
 import {
   channelLeaveConfirmBody,
   channelLeaveFailureMessage,
@@ -49,7 +50,10 @@ import { channelShareUrl } from "@/features/inbox/anchor";
 import { openChannelId } from "@/features/sidebar/openChannel";
 import { SECTION_MOVE_TO_BASE_LABEL } from "@momo/core/features/sidebar/sidebarSections";
 import { absoluteApiBase } from "@/lib/serverBase";
-import { useInvalidateReadStates } from "@/features/workspace/useWorkspace";
+import {
+  applyReadStateToCache,
+  useInvalidateReadStates,
+} from "@/features/workspace/useWorkspace";
 import {
   channelActionAvailability,
   channelActionItemsForSurface,
@@ -187,16 +191,22 @@ export function useChannelActions({
   // 부르는가뿐이다 — 여기서는 채널을 열지 않고. 서버가 `max(current, min(요청,
   // latestSeq))` 로 죄므로 커서는 뒤로 가지 않는다(ADR-0178 D1 단조성).
   //
-  // 되돌리기(mark-unread)는 여기 없다. 그 신호는 ADR-0178 이 Proposed 이고 서버
-  // 컬럼이 아직 없다 — 없는 것을 그리지 않는다.
+  // ADR-0178 D6: this path is `explicit_open`, same discriminator as opening
+  // the channel. The ⋯ 「여기부터 안 읽음」 path is the opposite (background).
   const markReadMutation = useMutation({
     mutationFn: () => {
       if (!readState) throw new Error("no read state");
-      return updateReadState(workspaceId, channel.id, readState.latestSeq);
+      return advertiseReadState(
+        workspaceId,
+        channel.id,
+        readState.latestSeq,
+        "mark_read_menu"
+      );
     },
-    onSuccess: () => {
+    onSuccess: (state) => {
       setError(null);
       onActionSucceeded();
+      applyReadStateToCache(client, workspaceId, state);
       invalidateReadStates();
     },
     onError: () => setError(CHANNEL_MARK_READ_FAILURE),
@@ -261,7 +271,7 @@ export function useChannelActions({
       channelActionAvailability({
         channel,
         selfRole,
-        unreadCount: readState?.unreadCount ?? 0,
+        unreadCount: readState ? composedUnreadCount(readState) : 0,
         // 옮길 곳을 **부를 수 있는 표면**이 없으면 항목도 없다. 목적지 목록만
         // 있고 손잡이가 없으면 눌러도 아무 일이 없는 라디오가 된다.
         sectionCount: onMoveToSection ? sections?.length ?? 0 : 0,
@@ -270,7 +280,7 @@ export function useChannelActions({
     [
       channel,
       selfRole,
-      readState?.unreadCount,
+      readState,
       sections?.length,
       onMoveToSection,
       onToggleStar,

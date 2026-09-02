@@ -84,16 +84,11 @@ describe("실행부는 한 벌이다", () => {
     expect(dialogs).toEqual([CANON]);
   });
 
-  it("읽음 광고는 기존 세 경로 그대로다 — 「읽음 처리」가 네 번째를 만들지 않았다", () => {
-    // ChatShell = 채널을 열어 읽는 그 광고. useInbox = 인박스에서 한 멘션까지
-    // 읽은 것으로 미는 광고. 정본 = 이 메뉴. 셋 다 같은 `PUT read-state` 이고,
-    // 새 서버 표면은 하나도 늘지 않았다.
+  it("읽음 광고는 헬퍼 한 곳이다 — 「읽음 처리」가 네 번째 HTTP 호출을 만들지 않았다", () => {
+    // ChatShell · 이 메뉴 · useInbox · 「여기부터 안 읽음」은 같은 PUT 이고,
+    // 호출은 advertiseReadState 한 곳으로 모인다 (ADR-0178 D6).
     expect(callers("updateReadState").sort()).toEqual(
-      [
-        CANON,
-        "features/chat/ChatShell.tsx",
-        "features/inbox/useInbox.ts",
-      ].sort()
+      ["features/chat/advertiseReadState.ts"].sort()
     );
     // 표면은 어느 것도 직접 부르지 않는다.
     expect(fileCode(HEADER)).not.toMatch(/updateReadState/);

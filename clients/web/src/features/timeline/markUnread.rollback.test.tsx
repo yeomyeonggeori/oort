@@ -52,6 +52,44 @@ afterEach(() => {
   advertiseReadState.mockReset();
 });
 
+function Inner({
+  onBanner,
+}: {
+  onBanner: (message: string | null) => void;
+}) {
+  const mark = useMarkUnread(WS);
+  const [banner, setBanner] = useState<string | null>(null);
+  return createElement(
+    "button",
+    {
+      type: "button",
+      "data-testid": "run-mark",
+      onClick: () => {
+        void mark
+          .run({
+            channelId: CH,
+            lastReadSeq: 10,
+            seq: 3,
+          })
+          .then(() => {
+            setBanner(null);
+            onBanner(null);
+          })
+          .catch((error: unknown) => {
+            const message =
+              error instanceof Error ? error.message : String(error);
+            setBanner(message);
+            onBanner(message);
+          });
+      },
+    },
+    MARK_UNREAD_ACTION_LABEL,
+    banner
+      ? createElement("div", { "data-testid": "message-action-error" }, banner)
+      : null
+  );
+}
+
 function Harness({
   client,
   onBanner,
@@ -59,39 +97,10 @@ function Harness({
   client: QueryClient;
   onBanner: (message: string | null) => void;
 }) {
-  const mark = useMarkUnread(WS);
-  const [banner, setBanner] = useState<string | null>(null);
   return createElement(
     QueryClientProvider,
     { client },
-    createElement(
-      "button",
-      {
-        type: "button",
-        "data-testid": "run-mark",
-        onClick: () => {
-          void mark
-            .run({
-              channelId: CH,
-              lastReadSeq: 10,
-              seq: 3,
-            })
-            .then(() => {
-              setBanner(null);
-              onBanner(null);
-            })
-            .catch((error: unknown) => {
-              const message = error instanceof Error ? error.message : String(error);
-              setBanner(message);
-              onBanner(message);
-            });
-        },
-      },
-      MARK_UNREAD_ACTION_LABEL,
-      banner
-        ? createElement("div", { "data-testid": "message-action-error" }, banner)
-        : null
-    )
+    createElement(Inner, { onBanner })
   );
 }
 

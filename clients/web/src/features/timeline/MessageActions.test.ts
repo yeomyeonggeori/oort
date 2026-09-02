@@ -23,6 +23,7 @@ const available: MessageActionAvailability = {
   react: true,
   pin: true,
   remind: true,
+  markUnread: true,
   edit: true,
   delete: true,
 };
@@ -44,6 +45,7 @@ const AUTHOR_KEYS: MessageActionItemKey[] = [
   "copy-link",
   "pin",
   "remind",
+  "mark-unread",
   "edit",
   "delete",
 ];
@@ -63,7 +65,7 @@ describe("메시지 액션 세 표면", () => {
 
   it("저자 인벤토리는 고정 뒤에 나중에 알림을 두고 링크 복사는 복사 뒤에 둔다", () => {
     const keys = messageActionItems(available, copyReady).map((item) => item.key);
-    expect(keys).toHaveLength(15);
+    expect(keys).toHaveLength(16);
     expect(keys.indexOf("copy-link")).toBe(keys.indexOf("copy") + 1);
     expect(keys.slice(0, keys.indexOf("copy") + 1)).toEqual([
       ...QUICK_REACTIONS.map((emoji) => `react:${emoji}` as const),
@@ -75,6 +77,7 @@ describe("메시지 액션 세 표면", () => {
     expect(keys.slice(keys.indexOf("copy-link") + 1)).toEqual([
       "pin",
       "remind",
+      "mark-unread",
       "edit",
       "delete",
     ]);
@@ -89,7 +92,7 @@ describe("메시지 액션 세 표면", () => {
       { ...available, edit: false, delete: false },
       copyReady
     ).map((item) => item.key);
-    expect(other).toHaveLength(13);
+    expect(other).toHaveLength(14);
     expect(other).not.toContain("edit");
     expect(other).not.toContain("delete");
     expect(other).toContain("copy");

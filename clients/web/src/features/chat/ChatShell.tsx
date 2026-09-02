@@ -3,13 +3,20 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Hash, Lock, MessageSquare, SquareTerminal } from "lucide-react";
 import {
   fetchMessages,
-  updateReadState,
   uuidEq,
   type Channel,
   type MembershipRole,
   type Message,
   type WorkSession,
 } from "@momo/core/lib/api";
+import {
+  composedUnreadCount,
+  unreadDividerCursorSeq,
+} from "@momo/core/features/readState/model";
+import {
+  advertiseReadState,
+  channelReadAdvertisementReason,
+} from "@/features/chat/advertiseReadState";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
@@ -208,6 +215,7 @@ export function ChatShell() {
     unreadCount: number;
   } | null>(null);
   const markedRef = useRef<string | null>(null);
+  const advertisedChannelRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (channelId === null) return;
@@ -223,8 +231,37 @@ export function ChatShell() {
     });
   }, [channelId, readStates.byChannel]);
 
+  const liveMark =
+    channelId === null
+      ? null
+      : (unreadFor(readStates.byChannel, channelId)?.markedUnreadBeforeSeq ??
+        null);
+
+  const timelineUnread = useMemo(() => {
+    if (
+      !openedWith ||
+      openedWith.lastReadSeq === null ||
+      (channelId !== null && !uuidEq(openedWith.channelId, channelId))
+    ) {
+      return { lastReadSeq: null as number | null, unreadCount: 0 };
+    }
+    const frozen = {
+      lastReadSeq: openedWith.lastReadSeq,
+      latestSeq: openedWith.lastReadSeq + openedWith.unreadCount,
+      markedUnreadBeforeSeq: liveMark,
+    };
+    return {
+      lastReadSeq: unreadDividerCursorSeq(frozen),
+      unreadCount: composedUnreadCount(frozen),
+    };
+  }, [openedWith, channelId, liveMark]);
+
   // Advance the server read cursor once history is on screen (P7: the server
   // owns unread, so the client reports a position instead of counting).
+  //
+  // ADR-0178 D6: the first PUT after the open channel id changes is
+  // `explicit_open` (clears a mark). Later PUTs while that channel stays
+  // open are background (arrival / coalesced flush) and omit `read_intent`.
   //
   // goal B8 H10: the failure branch used to keep `markedRef` pointing at the
   // seq whose PUT had just failed, so this effect refused to try that seq
@@ -239,7 +276,12 @@ export function ChatShell() {
     const key = `${channelId}:${newestSeq}`;
     if (markedRef.current === key) return;
     markedRef.current = key;
-    updateReadState(workspaceId, channelId, newestSeq)
+    const reason = channelReadAdvertisementReason(
+      advertisedChannelRef.current,
+      channelId
+    );
+    advertisedChannelRef.current = channelId;
+    advertiseReadState(workspaceId, channelId, newestSeq, reason)
       .then(() => invalidateReadStates())
       .catch(() => {
         if (markedRef.current === key) markedRef.current = null;
@@ -1074,8 +1116,8 @@ export function ChatShell() {
               messages={messages}
               directory={directory}
               status={stressCount > 0 ? "ready" : timeline.status}
-              lastReadSeq={openedWith?.lastReadSeq ?? null}
-              unreadCount={openedWith?.unreadCount ?? 0}
+              lastReadSeq={timelineUnread.lastReadSeq}
+              unreadCount={timelineUnread.unreadCount}
               recoveryMarkers={timeline.recoveryMarkers}
               pending={stressCount > 0 ? undefined : timeline.pending}
               // B11 — the stress fixture renders synthetic rows with no server
