@@ -5,8 +5,12 @@ import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useInlineConfirm } from "@/design/ui/inlineConfirm";
+import { PRESS_CLASS } from "@/design/motion";
 import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { StatusChip } from "./StatusChip";
 import {
+  EMPTY_CATALOG_COPY,
+  UNKNOWN_TOOL_CHIP,
   enabledToolsFromRows,
   isToolToggleLocked,
   mergeToolRows,
@@ -36,6 +40,7 @@ export interface EnabledToolsSectionProps {
 const OFFLINE_REASON = "연결이 끊긴 동안에는 바꿀 수 없습니다.";
 const SAVE_ERROR =
   "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+const SAVE_IDLE_REASON = "바꿀 내용이 없습니다.";
 
 /**
  * Reading this as: Agent Hub profile tools section for internal team users on
@@ -61,6 +66,7 @@ export function EnabledToolsSection({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [forbidden, setForbidden] = useState<string | null>(null);
+  const [roveName, setRoveName] = useState<string | null>(null);
   const { confirmed, confirm } = useInlineConfirm();
   const rows = draft ?? savedRows;
   const readOnly =
@@ -69,6 +75,7 @@ export function EnabledToolsSection({
     forbidden !== null ||
     catalogStatus === "forbidden";
   const dirty = !sameToolSet(enabledToolsFromRows(rows), [...enabledTools]);
+  const canSave = dirty && !readOnly && !saving;
   const sharedReason = offline
     ? OFFLINE_REASON
     : forbidden
@@ -77,6 +84,11 @@ export function EnabledToolsSection({
         ? editDisabledReason
         : null;
   const sharedReasonId = "agent-hub-enabled-tools-reason";
+  const saveReasonId = "agent-hub-enabled-tools-save-reason";
+  const unlocked = rows.filter((row) => !isToolToggleLocked(row, readOnly));
+  const tabStopName = roveName ?? unlocked[0]?.name ?? null;
+  const catalogReady = catalogStatus === "ready" && catalog !== null;
+  const catalogEmpty = catalogReady && rows.length === 0;
 
   async function submit() {
     if (saving || readOnly || !dirty) return;
@@ -114,17 +126,15 @@ export function EnabledToolsSection({
 
       {catalogStatus === "loading" ? (
         <SkeletonRows rows={4} className="p-0" />
-      ) : catalogStatus === "ready" && catalog !== null ? (
+      ) : catalogEmpty ? (
+        <p className="text-body text-ink">{EMPTY_CATALOG_COPY}</p>
+      ) : catalogReady ? (
         <>
           {forbidden && (
             <InlineBanner
               tone="neutral"
               separator={false}
-              message={
-                forbidden ??
-                catalogMessage ??
-                "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다."
-              }
+              message={forbidden}
               messageId={sharedReasonId}
               testId="agent-hub-enabled-tools-forbidden"
             />
@@ -146,10 +156,21 @@ export function EnabledToolsSection({
               {editDisabledReason}
             </p>
           )}
+          {!canSave && (
+            <p id={saveReasonId} className="sr-only">
+              {readOnly ? (sharedReason ?? SAVE_IDLE_REASON) : SAVE_IDLE_REASON}
+            </p>
+          )}
           <ul
             className="flex min-w-0 flex-col overflow-hidden rounded-md border border-line"
             onKeyDown={(event) => {
-              roveToolToggles(event.currentTarget, event);
+              if (roveToolToggles(event.currentTarget, event)) {
+                const active = event.currentTarget.ownerDocument.activeElement;
+                if (active instanceof HTMLElement) {
+                  const name = active.getAttribute("data-tool-name");
+                  if (name) setRoveName(name);
+                }
+              }
             }}
           >
             {rows.map((row, index) => (
@@ -158,15 +179,19 @@ export function EnabledToolsSection({
                 row={row}
                 index={index}
                 locked={isToolToggleLocked(row, readOnly)}
+                tabStop={row.name === tabStopName}
                 describedBy={
                   [
                     `agent-hub-tool-${index}-desc`,
-                    !row.executable ? `agent-hub-tool-${index}-reason` : null,
+                    !row.executable || row.unknown
+                      ? `agent-hub-tool-${index}-reason`
+                      : null,
                     readOnly && sharedReason ? sharedReasonId : null,
                   ]
                     .filter((id): id is string => id !== null)
                     .join(" ")
                 }
+                onFocus={() => setRoveName(row.name)}
                 onToggle={(next) => {
                   if (isToolToggleLocked(row, readOnly) || saving) return;
                   setError(null);
@@ -178,17 +203,23 @@ export function EnabledToolsSection({
           <Button
             type="button"
             size="sm"
-            className="tap-target self-start motion-instant"
-            aria-disabled={!dirty || readOnly || undefined}
+            className={cn("tap-target self-start", !canSave && "opacity-50")}
+            aria-disabled={!canSave || undefined}
             aria-busy={saving || undefined}
             aria-live="polite"
+            aria-describedby={!canSave ? saveReasonId : undefined}
             data-testid="agent-hub-enabled-tools-save"
             onClick={() => {
+              if (!canSave) return;
               void submit();
             }}
           >
             {saving && <Loader2 aria-hidden="true" className="spinner-busy" />}
-            {saving ? "저장 중" : confirmed ? "저장됨" : "저장"}
+            {saving
+              ? "저장 중"
+              : confirmed
+                ? "도구 변경 저장됨"
+                : "도구 변경 저장"}
           </Button>
         </>
       ) : (
@@ -235,12 +266,7 @@ function ToolsChips({
   return (
     <div className="flex flex-wrap gap-1">
       {tools.map((tool) => (
-        <span
-          key={tool}
-          className="rounded-sm border border-line px-1 text-timestamp text-ink-muted"
-        >
-          {tool}
-        </span>
+        <StatusChip key={tool}>{tool}</StatusChip>
       ))}
     </div>
   );
@@ -250,75 +276,95 @@ function ToolToggleRow({
   row,
   index,
   locked,
+  tabStop,
   describedBy,
+  onFocus,
   onToggle,
 }: {
   row: ToolRow;
   index: number;
   locked: boolean;
+  tabStop: boolean;
   describedBy: string;
+  onFocus: () => void;
   onToggle: (next: boolean) => void;
 }) {
   const nameId = `agent-hub-tool-${index}-name`;
   const descId = `agent-hub-tool-${index}-desc`;
   const reasonId = `agent-hub-tool-${index}-reason`;
+  const capability = row.unknown
+    ? UNKNOWN_TOOL_CHIP
+    : row.executable
+      ? "실행 가능"
+      : "실행 불가";
   return (
-    <li
-      className={cn(
-        "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0 tap-target",
-        row.enabled ? "bg-accent-soft" : "hover:bg-surface-hover"
-      )}
-      data-testid={`agent-hub-tool-row-${row.name}`}
-    >
-      <input
-        type="checkbox"
-        data-tool-toggle=""
-        data-testid={`agent-hub-tool-toggle-${row.name}`}
-        checked={row.enabled}
-        aria-disabled={locked || undefined}
-        aria-labelledby={nameId}
-        aria-describedby={describedBy}
+    <li className="border-b border-line last:border-b-0">
+      <label
         className={cn(
-          "mt-1 size-4 shrink-0 rounded-sm accent-accent focus-visible:focus-ring",
-          locked && "opacity-50"
+          "flex min-w-0 items-start gap-3 p-3 tap-target",
+          locked ? "cursor-default" : cn("cursor-pointer", PRESS_CLASS),
+          row.enabled && "bg-accent-soft",
+          !locked && !row.enabled && "hover:bg-surface-hover",
+          row.enabled
+            ? "has-[:focus-visible]:focus-ring-on-fill"
+            : "has-[:focus-visible]:focus-ring"
         )}
-        onChange={(event) => {
-          if (locked) return;
-          onToggle(event.target.checked);
-        }}
-        onKeyDown={(event) => {
-          if (event.key !== " " && event.key !== "Spacebar") return;
-          event.preventDefault();
-          if (locked) return;
-          onToggle(!row.enabled);
-        }}
-      />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
-        <span id={nameId} className="break-all text-body text-ink">
-          {row.name}
-        </span>
-        {row.description !== "" && (
-          <span id={descId} className="break-keep text-meta text-ink-muted">
-            {row.description}
+        data-testid={`agent-hub-tool-row-${row.name}`}
+      >
+        <input
+          type="checkbox"
+          data-tool-toggle=""
+          data-tool-name={row.name}
+          data-testid={`agent-hub-tool-toggle-${row.name}`}
+          tabIndex={tabStop ? 0 : -1}
+          checked={row.enabled}
+          aria-disabled={locked || undefined}
+          aria-labelledby={nameId}
+          aria-describedby={describedBy}
+          className={cn(
+            "mt-1 size-4 shrink-0 rounded-sm accent-accent",
+            row.enabled
+              ? "focus-visible:focus-ring-on-fill"
+              : "focus-visible:focus-ring",
+            locked && "opacity-50"
+          )}
+          onFocus={onFocus}
+          onChange={(event) => {
+            if (locked) return;
+            onToggle(event.target.checked);
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== " " && event.key !== "Spacebar") return;
+            event.preventDefault();
+            if (locked) return;
+            onToggle(!row.enabled);
+          }}
+        />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <span id={nameId} className="break-all text-body text-ink">
+            {row.name}
           </span>
-        )}
-        {row.description === "" && <span id={descId} className="sr-only" />}
-        <div className="flex flex-wrap gap-1">
-          <span className="rounded-sm border border-line px-1 text-timestamp text-ink-muted">
-            {row.executable ? "실행 가능" : "선언만"}
-          </span>
-          {row.requiresApproval && (
-            <span className="rounded-sm border border-warn px-1 text-timestamp text-warn">
-              승인 필요
+          {row.description !== "" && (
+            <span id={descId} className="break-keep text-meta text-ink-muted">
+              {row.description}
+            </span>
+          )}
+          {row.description === "" && <span id={descId} className="sr-only" />}
+          <div className="flex flex-wrap gap-1">
+            <StatusChip tone={row.unknown ? "warn" : "neutral"}>
+              {capability}
+            </StatusChip>
+            {row.requiresApproval && (
+              <StatusChip tone="warn">승인 필요</StatusChip>
+            )}
+          </div>
+          {row.unavailableReason && (
+            <span id={reasonId} className="break-keep text-meta text-ink-muted">
+              {row.unavailableReason}
             </span>
           )}
         </div>
-        {!row.executable && row.unavailableReason && (
-          <span id={reasonId} className="break-keep text-meta text-ink-muted">
-            {row.unavailableReason}
-          </span>
-        )}
-      </div>
+      </label>
     </li>
   );
 }

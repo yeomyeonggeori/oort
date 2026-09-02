@@ -34,6 +34,49 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+/** UX-R4a M-6: whole tools section including 저장 must sit in the viewport. */
+async function frameEnabledToolsSection(page, where) {
+  const section = page.getByTestId("agent-hub-enabled-tools");
+  await section.waitFor({ state: "visible" });
+  const previous = page.viewportSize();
+  const metrics = await page.evaluate(() => {
+    const el = document.querySelector('[data-testid="agent-hub-enabled-tools"]');
+    if (!el) return null;
+    const r = el.getBoundingClientRect();
+    return { height: r.height };
+  });
+  if (!metrics) throw new Error(`[${where}] tools section missing`);
+  const height = Math.max(previous.height, Math.ceil(metrics.height + 160));
+  await page.setViewportSize({ width: previous.width, height });
+  await section.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await page.waitForTimeout(200);
+  const frame = await page.evaluate(() => {
+    const sec = document.querySelector('[data-testid="agent-hub-enabled-tools"]');
+    const btn = document.querySelector('[data-testid="agent-hub-enabled-tools-save"]');
+    if (!sec || !btn) return { ok: false, reason: "missing-save" };
+    const sr = sec.getBoundingClientRect();
+    const br = btn.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    return {
+      ok:
+        br.top >= 0 &&
+        br.bottom <= vh &&
+        br.left >= 0 &&
+        br.right <= vw &&
+        sr.top >= -8,
+      vh,
+      saveTop: br.top,
+      saveBottom: br.bottom,
+      sectionTop: sr.top,
+    };
+  });
+  if (!frame.ok) {
+    throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+  }
+  return previous;
+}
 const TOKENS_CSS = readFileSync(
   resolve(WEB_ROOT, "src/design/tokens.css"),
   "utf8"
@@ -6589,10 +6632,12 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
   await shoot(page, "agent-hub");
-  await page.getByTestId("agent-hub-enabled-tools").scrollIntoViewIfNeeded();
-  await page.getByTestId("agent-hub-enabled-tools").waitFor({ state: "visible" });
-  await page.waitForTimeout(300);
+  const toolsViewport = await frameEnabledToolsSection(
+    page,
+    `mobile agent-hub-tools ${scheme}`
+  );
   await shoot(page, "agent-hub-tools");
+  await page.setViewportSize(toolsViewport);
 
   // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
   //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
@@ -7645,14 +7690,14 @@ async function captureScheme(browser, scheme) {
   const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
-  await agentHub.getByTestId("agent-hub-enabled-tools").scrollIntoViewIfNeeded();
-  await agentHub.getByTestId("agent-hub-enabled-tools").waitFor({ state: "visible" });
-  await agentHub.waitForTimeout(300);
+  const toolsViewport = await frameEnabledToolsSection(
+    agentHub,
+    `agent-hub-tools ${scheme}`
+  );
   const agentHubToolsShot = `${OUT_DIR}/agent-hub-tools-${scheme}.png`;
-  await agentHub
-    .getByTestId("agent-hub-enabled-tools")
-    .screenshot({ path: agentHubToolsShot });
+  await agentHub.screenshot({ path: agentHubToolsShot });
   shots.push(agentHubToolsShot);
+  await agentHub.setViewportSize(toolsViewport);
 
   // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
   //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).

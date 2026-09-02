@@ -11,6 +11,7 @@ export const INLINE_CONFIRM_MS = 1_600;
 export function useInlineConfirm(): {
   confirmed: boolean;
   confirm: () => void;
+  reset: () => void;
 } {
   const [confirmed, setConfirmed] = useState(false);
   const timer = useRef<number | undefined>(undefined);
@@ -22,6 +23,11 @@ export function useInlineConfirm(): {
     []
   );
 
+  const reset = useCallback(() => {
+    setConfirmed(false);
+    window.clearTimeout(timer.current);
+  }, []);
+
   const confirm = useCallback(() => {
     setConfirmed(true);
     window.clearTimeout(timer.current);
@@ -30,5 +36,5 @@ export function useInlineConfirm(): {
     }, INLINE_CONFIRM_MS);
   }, []);
 
-  return { confirmed, confirm };
+  return { confirmed, confirm, reset };
 }

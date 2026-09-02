@@ -29,10 +29,8 @@ export function catalogEntryFromWire(
   value: unknown
 ): AgentToolCatalogEntry | null {
   const name = str(value, "name")?.trim();
-  const description = str(value, "description");
-  if (!name || description === undefined || description.trim() === "") {
-    return null;
-  }
+  if (!name) return null;
+  const description = (str(value, "description") ?? "").trim();
   const executable = bool(value, "executable") ?? false;
   const requiresApproval = bool(value, "requiresApproval") ?? true;
   const rawReason = str(value, "unavailableReason")?.trim() ?? "";

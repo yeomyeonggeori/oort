@@ -242,13 +242,13 @@ describe("EnabledToolsSection", () => {
     );
     expect(button).not.toBeNull();
     expect(button?.getAttribute("aria-disabled")).toBe("true");
-    expect(button?.className).toMatch(/\bopacity-50\b/);
+    expect(button?.className).toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
     expect(Number(getComputedStyle(button!).opacity)).toBeLessThan(1);
     act(() => {
       toggle(host, LONG_NAME).click();
     });
     expect(button?.getAttribute("aria-disabled")).toBeNull();
-    expect(button?.className).not.toMatch(/\bopacity-50\b/);
+    expect(button?.className).not.toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
     style.remove();
   });
 
@@ -315,7 +315,9 @@ describe("EnabledToolsSection", () => {
     const { host, save } = mount();
     const first = toggle(host, LONG_NAME);
     const second = toggle(host, "work.session.spawn");
-    first.focus();
+    act(() => {
+      first.focus();
+    });
     expect(document.activeElement).toBe(first);
     act(() => {
       first.dispatchEvent(

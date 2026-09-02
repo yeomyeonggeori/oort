@@ -880,3 +880,16 @@ describe("onboarding S0 palette (single look)", () => {
     expect(hue > 265 && hue < 330, `accent hue ${hue.toFixed(0)}`).toBe(false);
   });
 });
+
+describe("UX-R4a tool chip border on selected row", () => {
+  it("ink-muted (neutral chip border) on accent-soft is ≥ 3:1 in both schemes", () => {
+    for (const scheme of SCHEMES) {
+      expect(
+        contrast(
+          pick("ink-muted", scheme.index),
+          pick("accent-soft", scheme.index)
+        )
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+});

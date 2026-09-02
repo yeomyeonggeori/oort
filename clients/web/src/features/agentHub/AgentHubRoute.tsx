@@ -91,7 +91,9 @@ import {
 } from "@momo/core/features/agents/hubModel";
 import { AgentChannelsSection } from "./AgentChannelsSection";
 import { EnabledToolsSection } from "./EnabledToolsSection";
+import { StatusChip } from "./StatusChip";
 import { useAgentToolCatalog } from "./useAgentToolCatalog";
+import { toolsProfilePut } from "./enabledToolsModel";
 import {
   EMPTY_AGENT_DRAFT,
   canCreateAgentNow,
@@ -165,30 +167,6 @@ function profileKey(workspaceId: string, agentMemberId: string) {
     normalizedId(workspaceId),
     normalizedId(agentMemberId),
   ] as const;
-}
-
-function StatusChip({
-  children,
-  tone = "neutral",
-  testId,
-}: {
-  children: React.ReactNode;
-  tone?: "neutral" | "agent" | "warn";
-  testId?: string;
-}) {
-  return (
-    <span
-      className={cn(
-        "rounded-sm px-1 text-timestamp",
-        tone === "neutral" && "border border-line text-ink-muted",
-        tone === "agent" && "bg-agent-soft text-agent",
-        tone === "warn" && "border border-warn text-warn"
-      )}
-      data-testid={testId}
-    >
-      {children}
-    </span>
-  );
 }
 
 function AgentHubLoading({
@@ -1016,18 +994,15 @@ function AgentProfileSection({
           void catalogQuery.refetch();
         }}
         save={async (tools) => {
-          const input = {
-            instructions: currentInstructions,
-            enabledTools: tools,
-            triggers: handle.profile?.triggers ?? { mention: true as const },
-            ...(currentDraft.model === null
-              ? {}
-              : { modelPref: currentDraft.model }),
-            ...(currentDraft.effort === null
-              ? {}
-              : { effortPref: currentDraft.effort }),
-          };
-          const result = await handle.replace(input);
+          const built = toolsProfilePut(handle.profile, tools);
+          if (!built.ok) {
+            return {
+              ok: false as const,
+              forbidden: false,
+              message: built.message,
+            };
+          }
+          const result = await handle.replace(built.input);
           if (result.ok) return { ok: true as const };
           return {
             ok: false as const,
