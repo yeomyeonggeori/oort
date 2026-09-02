@@ -35,6 +35,7 @@ import {
 } from "@/design/ui/card";
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
+import { DeviceLinkCard } from "@/features/settings/DeviceLinkCard";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
@@ -156,6 +157,9 @@ export function ConnectPage({
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
+  const [phoneLinkSession, setPhoneLinkSession] = useState<LoginResponse | null>(
+    null
+  );
 
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
   const discovered = useDiscoveredServers();
@@ -294,7 +298,8 @@ export function ConnectPage({
         mode === "join"
           ? await joinWithInvite(inviteCode, email, password)
           : await login(email, password, workspace);
-      onLoggedIn(session);
+      if (mode === "join") setPhoneLinkSession(session);
+      else onLoggedIn(session);
     } catch (err) {
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
       setFailure(next);
@@ -652,6 +657,50 @@ export function ConnectPage({
 
   if (step === "landing") {
     return slide;
+  }
+
+  if (phoneLinkSession) {
+    return (
+      <div className="flex min-h-full flex-col bg-surface">
+        <header
+          className="onboarding-step-chrome"
+          data-testid="onboarding-step-chrome"
+          {...titlebarDragProps(IS_TAURI)}
+        >
+          {progress && (
+            <p
+              className="text-meta text-ink-muted"
+              data-testid="onboarding-progress"
+              data-numeric
+            >
+              {progress}
+            </p>
+          )}
+        </header>
+        <div className="flex flex-1 items-center justify-center p-6">
+          <div
+            className="flex w-full max-w-2xl flex-col gap-4"
+            data-testid="onboarding-phone-link"
+          >
+            <div className="flex flex-col gap-1">
+              <h2 className="text-title font-semibold text-ink">폰에서도 쓰기</h2>
+              <p className="break-keep text-body text-ink-muted">
+                같은 계정으로 폰을 붙이려면 지금 QR을 만들 수 있습니다. 나중에 설정
+                기기에서도 열 수 있습니다.
+              </p>
+            </div>
+            <DeviceLinkCard offline={!online} />
+            <Button
+              type="button"
+              onClick={() => onLoggedIn(phoneLinkSession)}
+              data-testid="onboarding-enter-app"
+            >
+              앱으로 들어가기
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -254,6 +254,13 @@ describe("BZ-6a onboarding shell", () => {
         "new-pass"
       );
     });
+    await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="onboarding-phone-link"]')
+      ).not.toBeNull();
+    });
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    click("onboarding-enter-app");
     expect(onLoggedIn).toHaveBeenCalledWith(session);
     expect(login).not.toHaveBeenCalled();
   });

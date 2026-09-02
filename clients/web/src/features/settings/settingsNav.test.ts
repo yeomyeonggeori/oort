@@ -21,6 +21,7 @@ describe("settingsNav", () => {
     ).toEqual([
       "profile",
       "account",
+      "devices",
       "appearance",
       "link-previews",
       "notifications",
@@ -52,6 +53,7 @@ describe("settingsNav", () => {
     expect(idsIn("개인")).toEqual([
       "profile",
       "account",
+      "devices",
       "appearance",
       "link-previews",
       "notifications",

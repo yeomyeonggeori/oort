@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
+
+- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas · GET 폴링(≤2s) `consumed`→「연결됨: <기기명>」. 오류는 InlineBanner. 복사 in-place 「복사됨」(ADR-0182). 토스트 없음.
+- 온보딩: join 완료 화면 「폰에서도 쓰기」가 같은 카드. S0~S2 스텝은 그대로. 로그인 경로는 바로 앱.
+- 기기 목록/해제는 세션 `device_label`이 클라 API에 없어 NOTES 갭(서버 후속). runtime-unverified: 실기기 카메라 스캔(M0m).
+- red proof: 토큰 DOM 비노출 · 만료 전이 · SAS 분기 · consumed 폴링 정지 · confirm 409/400 배너 · 30초 aria-live · 시크릿 grep-gate.
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).

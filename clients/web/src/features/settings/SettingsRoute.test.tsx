@@ -202,6 +202,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     expect(buttons).toEqual(
       expect.arrayContaining([
         "settings-nav-account",
+        "settings-nav-devices",
         "settings-nav-appearance",
         "settings-nav-link-previews",
         "settings-nav-notifications",
@@ -258,6 +259,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
     const host = mountRoute("/settings?section=profile");
     const clicks: Array<[string, string]> = [
       ["settings-nav-account", "logout"],
+      ["settings-nav-devices", "device-link-card"],
       ["settings-nav-appearance", "section-appearance"],
       ["settings-nav-link-previews", "section-link-previews"],
       ["settings-nav-notifications", "section-notifications"],

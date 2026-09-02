@@ -2,7 +2,7 @@
 // or capture frame names. Join only at runtime.
 
 const TOKEN_HEAD = "ABCDEFGHIJKLMNOPQRSTUV";
-const TOKEN_TAIL = "WXYZabcdefghijklm";
+const TOKEN_TAIL = "WXYZabcdefghijklmnopq";
 
 export const DEVICE_LINK_FIXTURE_ID = "019f9b10-0000-7000-8000-000000000d01";
 export const DEVICE_LINK_FIXTURE_SAS = "4821";

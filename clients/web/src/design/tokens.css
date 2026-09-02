@@ -1383,6 +1383,16 @@
   }
 }
 
+/* 폰 카메라가 다크 스킴 화면을 뒤집힌 QR로 읽지 못하게, 이 그릇만 light-dark()
+ * 를 낮의 항으로 고정한다. 값은 토큰이고 hex 는 여기 없다. */
+@utility qr-well {
+  color-scheme: light;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+}
+
 /* 작업 세션 패널 기하 (MOMO-618 R1). The pane is 320px, and beside a 240px
  * sidebar that is 560px of the window spent before the channel gets any. On a
  * 1280px window the channel still has 720px; on a 760px one it has 200px, the

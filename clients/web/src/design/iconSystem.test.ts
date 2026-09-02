@@ -56,6 +56,7 @@ describe("ADR-0172 lucide 아이콘 경계", () => {
     expect(LOCAL_SVG_COMPONENTS).toEqual([
       "src/design/brand/OortMark.tsx",
       "src/features/auth/OortCloudMarks.tsx",
+      "src/features/settings/DeviceLinkCard.tsx",
     ]);
   });
 

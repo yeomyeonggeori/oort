@@ -9,6 +9,7 @@
 export type SettingsSectionId =
   | "profile"
   | "account"
+  | "devices"
   | "appearance"
   | "link-previews"
   | "notifications"
@@ -35,6 +36,7 @@ export interface SettingsSectionMeta {
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "profile", label: "프로필", group: "개인" },
   { id: "account", label: "계정", group: "개인" },
+  { id: "devices", label: "기기", group: "개인" },
   // 테마는 이 기기에만 저장되는 선택이라 워크스페이스가 아니라 개인에 속한다
   // (src/design/theme.ts). 계정 바로 아래인 것은 순서가 곧 빈도이기 때문이다.
   { id: "appearance", label: "테마", group: "개인" },

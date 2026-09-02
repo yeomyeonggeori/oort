@@ -1356,9 +1356,9 @@ const APPROVALS = [
   },
 ];
 
-function json(route, body) {
+function json(route, body, status = 200) {
   return route.fulfill({
-    status: 200,
+    status,
     contentType: "application/json",
     body: JSON.stringify(body),
   });
@@ -1420,6 +1420,36 @@ async function installMocks(context) {
   };
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  const deviceLinkToken = ["ABCDEFGHIJKLMNOPQRSTUV", "WXYZabcdefghijklmnopq"].join(
+    ""
+  );
+  const deviceLinkId = "019f9b10-0000-7000-8000-000000000d01";
+  const deviceLinkOrigin = "https://team.example.com";
+  await context.route("**/v1/auth/device-link**", (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const tail = url.pathname.split("/device-link")[1] ?? "";
+    if (method === "POST" && (tail === "" || tail === "/")) {
+      return json(
+        route,
+        {
+          id: deviceLinkId,
+          token: deviceLinkToken,
+          expiresAt: Date.now() + 120_000,
+          sas: "4821",
+          deepLink: `oort://link?server=${encodeURIComponent(deviceLinkOrigin)}&token=${deviceLinkToken}`,
+        },
+        201
+      );
+    }
+    if (method === "POST" && tail.endsWith("/confirm-sas")) {
+      return json(route, { status: "confirmed" });
+    }
+    if (method === "GET") {
+      return json(route, { status: "pending" });
+    }
+    return route.fallback();
+  });
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
   //
   // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
@@ -8105,6 +8135,7 @@ async function captureScheme(browser, scheme) {
   for (const [section, heading, name] of [
     ["profile", "프로필", "profile"],
     ["account", "계정", "account"],
+    ["devices", "기기", "devices"],
     // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
@@ -8209,6 +8240,68 @@ async function captureScheme(browser, scheme) {
   const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
   await webhooks.screenshot({ path: revealShot });
   shots.push(revealShot);
+
+  // ── 설정 > 기기 폰 연결 (#1989, ADR-0180 D7) ──────────────────────────────
+  // 스윕이 찍는 것은 대기(QR 만들기). 아래 두 장은 카드 안의 나머지 두 상태:
+  // QR(카운트다운·SAS)과 연결됨(긴 기기명). 프레임 이름에 토큰·딥링크를 넣지 않는다.
+  const devices = await context.newPage();
+  await devices.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(devices);
+  await devices.evaluate('location.hash = "/inbox"');
+  await devices.waitForTimeout(200);
+  await devices.evaluate('location.hash = "/settings?section=devices"');
+  await devices.getByTestId("settings-route").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-card").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-create").waitFor({ state: "visible" });
+  await devices.waitForTimeout(250);
+  const devicesIdleShot = `${OUT_DIR}/settings-devices-idle-${scheme}.png`;
+  await devices.screenshot({ path: devicesIdleShot });
+  shots.push(devicesIdleShot);
+
+  await devices.getByTestId("device-link-create").click();
+  await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-sas").waitFor({ state: "visible" });
+  await devices.waitForTimeout(250);
+  const devicesQrShot = `${OUT_DIR}/settings-devices-qr-${scheme}.png`;
+  await devices.screenshot({ path: devicesQrShot });
+  shots.push(devicesQrShot);
+
+  const connectedName =
+    "성재 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대";
+  await context.route("**/v1/auth/device-link/**", (route) => {
+    const url = new URL(route.request().url());
+    if (url.pathname.endsWith("/confirm-sas")) {
+      return json(route, { status: "confirmed" });
+    }
+    if (route.request().method() === "GET") {
+      return json(route, {
+        status: "consumed",
+        device: { name: connectedName, platform: "ios" },
+      });
+    }
+    return route.fallback();
+  });
+  const devicesConnected = await context.newPage();
+  await devicesConnected.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(devicesConnected);
+  await devicesConnected.evaluate('location.hash = "/inbox"');
+  await devicesConnected.waitForTimeout(200);
+  await devicesConnected.evaluate(
+    'location.hash = "/settings?section=devices"'
+  );
+  await devicesConnected.getByTestId("device-link-card").waitFor({
+    state: "visible",
+  });
+  await devicesConnected.getByTestId("device-link-create").click();
+  await devicesConnected.getByTestId("device-link-connected").waitFor({
+    state: "visible",
+  });
+  await devicesConnected.waitForTimeout(250);
+  const devicesConnectedShot = `${OUT_DIR}/settings-devices-connected-${scheme}.png`;
+  await devicesConnected.screenshot({ path: devicesConnectedShot });
+  shots.push(devicesConnectedShot);
+  await devices.close();
+  await devicesConnected.close();
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();
