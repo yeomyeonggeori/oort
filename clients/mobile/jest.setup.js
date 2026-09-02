@@ -307,17 +307,25 @@ jest.mock('expo-camera', () => {
   const {View} = require('react-native');
   const state = {
     permission: {granted: true, canAskAgain: true, status: 'granted'},
+    onBarcodeScanned: null,
   };
   return {
     __state: state,
     __reset: () => {
       state.permission = {granted: true, canAskAgain: true, status: 'granted'};
+      state.onBarcodeScanned = null;
+    },
+    __scan: data => {
+      state.onBarcodeScanned?.({data});
     },
     useCameraPermissions: () => [
       state.permission,
       async () => state.permission,
     ],
-    CameraView: props => React.createElement(View, {testID: props.testID ?? 'qr-camera-view'}),
+    CameraView: props => {
+      state.onBarcodeScanned = props.onBarcodeScanned ?? null;
+      return React.createElement(View, {testID: props.testID ?? 'qr-camera-view'});
+    },
   };
 });
 

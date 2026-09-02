@@ -1,4 +1,4 @@
-import {fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
 
@@ -27,22 +27,40 @@ import {__resetServerBaseCache} from '../src/storage/serverBase';
 // =============================================================================
 
 const DEVICE_LINK_TOKEN = 'dEv1c3L1nkT0kenF1xtureDoN0tL0gOrSt0reXXXXXX';
-const SERVER = 'https://api.example.com';
-const ENCODED_SERVER = 'https%3A%2F%2Fapi.example.com';
+const SERVER = 'https://oort-production-4f2a.up.railway.app';
+const ENCODED_SERVER = 'https%3A%2F%2Foort-production-4f2a.up.railway.app';
 const DEVICE_LINK_URL = `oort://link?server=${ENCODED_SERVER}&token=${DEVICE_LINK_TOKEN}`;
+const STORED_SERVER_A = 'https://a.example.com';
+const SERVER_B = 'https://oort-production-4f2a.up.railway.app';
+const ENCODED_SERVER_B = 'https%3A%2F%2Foort-production-4f2a.up.railway.app';
+const DEVICE_LINK_URL_B = `oort://link?server=${ENCODED_SERVER_B}&token=${DEVICE_LINK_TOKEN}`;
 
 const LOGIN_BODY = {
   accessToken: 'access-token-device-link',
   refreshToken: 'refresh-token-device-link',
-  realtimeWebSocketUrl: 'wss://api.example.com/connection/websocket',
+  realtimeWebSocketUrl: 'wss://oort-production-4f2a.up.railway.app/connection/websocket',
   member: {
     id: '11111111-1111-4111-8111-111111111111',
     workspaceId: '22222222-2222-4222-8222-222222222222',
     kind: 'human',
-    displayName: 'Seongjae Kwak',
+    displayName: '곽성재 Seongjae Kwak 프로덕션 워크스페이스 멤버',
     handle: 'seongjae',
   },
 };
+
+const cameraMock = jest.requireMock('expo-camera') as {
+  __state: {permission: {granted: boolean; canAskAgain: boolean; status: string}};
+  __reset: () => void;
+  __scan: (data: string) => void;
+};
+
+const netInfoMock = (
+  jest.requireMock('@react-native-community/netinfo') as {
+    default: {
+      __emit: (state: {isConnected: boolean; isInternetReachable: boolean | null}) => void;
+    };
+  }
+).default;
 
 const mmkvStore = (
   jest.requireMock('react-native-mmkv') as {__store: Map<string, string>}
@@ -106,6 +124,7 @@ beforeEach(() => {
   keychainItems.clear();
   __resetSessionStore();
   __resetServerBaseCache();
+  cameraMock.__reset();
   fetchMock = jest.fn();
   globalThis.fetch = fetchMock as unknown as typeof fetch;
   jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(null);
@@ -246,3 +265,141 @@ describe('ConnectScreen device-link redeem', () => {
     expect(leakedLogs).toBe(false);
   });
 });
+
+async function renderPendingSas(sas = '4821'): Promise<void> {
+  jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
+  fetchMock.mockImplementation(async (url: string) => {
+    if (String(url).endsWith('/v1/auth/device-link/redeem')) {
+      return jsonResponse(200, {
+        ...LOGIN_BODY,
+        pendingSas: true,
+        sas,
+      });
+    }
+    if (String(url).includes('/v1/workspaces/')) {
+      return jsonResponse(401, {error: {message: 'token has not been activated'}});
+    }
+    return jsonResponse(500, {error: {message: 'unexpected'}});
+  });
+  render(<ConnectScreen />);
+  await waitFor(() => expect(screen.getByTestId('device-link-sas')).toBeTruthy());
+}
+
+describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
+  it('shows 「QR 다시 찍기」 and pressing it returns to the form', async () => {
+    await renderPendingSas();
+    expect(screen.getByText('QR 다시 찍기')).toBeTruthy();
+    fireEvent.press(screen.getByText('QR 다시 찍기'));
+    expect(screen.queryByTestId('device-link-sas')).toBeNull();
+    expect(screen.getByTestId('server-url-input')).toBeTruthy();
+  });
+
+  it('stops polling at the token TTL and speaks the expiry sentence', async () => {
+    await renderPendingSas();
+    jest.useFakeTimers();
+    try {
+      const before = jest.getTimerCount();
+      await act(async () => {
+        jest.advanceTimersByTime(120_000);
+      });
+      expect(screen.getByText(DEVICE_LINK_EXPIRED_COPY)).toBeTruthy();
+      const afterExpiry = jest.getTimerCount();
+      await act(async () => {
+        jest.advanceTimersByTime(10_000);
+      });
+      expect(jest.getTimerCount()).toBe(afterExpiry);
+      expect(afterExpiry).toBeLessThanOrEqual(before);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('R2 H-2 SAS offline and unreachable states', () => {
+  it('renders the offline notice on the SAS screen', async () => {
+    await renderPendingSas();
+    act(() => {
+      netInfoMock.__emit({isConnected: false, isInternetReachable: false});
+    });
+    expect(screen.getByTestId('connect-offline')).toBeTruthy();
+  });
+
+  it('speaks a failure sentence when a probe is unreachable and pauses polling', async () => {
+    jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).endsWith('/v1/auth/device-link/redeem')) {
+        return jsonResponse(200, {
+          ...LOGIN_BODY,
+          pendingSas: true,
+          sas: '4821',
+        });
+      }
+      throw new TypeError('Network request failed');
+    });
+    render(<ConnectScreen />);
+    await waitFor(() => expect(screen.getByTestId('device-link-sas')).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
+    jest.useFakeTimers();
+    try {
+      const paused = jest.getTimerCount();
+      await act(async () => {
+        jest.advanceTimersByTime(6_000);
+      });
+      expect(jest.getTimerCount()).toBe(paused);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
+describe('R2 M-2 permission is decided before the Modal', () => {
+  it('does not mount the scanner, focuses the server field, and offers the fallback', async () => {
+    cameraMock.__state.permission = {
+      granted: false,
+      canAskAgain: false,
+      status: 'denied',
+    };
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-permission-denied')).toBeTruthy());
+    expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
+    expect(screen.getByTestId('server-url-input').props.autoFocus).toBe(true);
+    expect(screen.getByTestId('qr-permission-fallback')).toBeTruthy();
+  });
+});
+
+describe('R2 M-5 camera mock consumers', () => {
+  it('opens the sheet from 「QR로 연결」 when permission is granted', async () => {
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+  });
+
+  it('speaks the malformed sentence for a non-link QR and 「QR 다시 찍기」 reopens the sheet', async () => {
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-camera-view')).toBeTruthy());
+    act(() => {
+      cameraMock.__scan('https://example.com/not-a-link');
+    });
+    await waitFor(() => expect(screen.getByText(DEVICE_LINK_MALFORMED_COPY)).toBeTruthy());
+    fireEvent.press(screen.getByText('QR 다시 찍기'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+  });
+});
+
+describe('R2 M-7 server base is not kept on a failed redeem', () => {
+  it('keeps stored server A when a stale QR for server B returns 401', async () => {
+    mmkvStore.set('momo.mobile.server.v1', STORED_SERVER_A);
+    __resetServerBaseCache();
+    jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL_B);
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(401, {error: {message: 'device link token is invalid'}}),
+    );
+    render(<ConnectScreen />);
+    await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
+    expect(screen.getByTestId('server-url-input').props.value).toBe(STORED_SERVER_A);
+    expect(mmkvStore.get('momo.mobile.server.v1')).toBe(STORED_SERVER_A);
+  });
+});
+
