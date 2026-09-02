@@ -1,6 +1,6 @@
 # ADR-0181: 웰컴 킥오프 — 에이전트가 먼저 말을 거는 첫 5분 (오프너 주체 = agent-worker)
 
-- 상태: **Proposed** (2026-09-02 기안 Fable — 성재 결재 대기. 인터뷰 Q11 권고 승인 = agent-worker 트리거)
+- 상태: **Accepted** (2026-09-02 성재 결재 — "2~5까지는 승인". 기안 Fable 같은 날 인터뷰 Q11 권고 승인 = agent-worker 트리거)
 - 발제: `docs/planning/research/2026-08-29-bz6-onboarding-design.md` v2.1 S4 / `2026-08-29-buzz-onboarding-research.md` §1-D("이 설계의 정수") / 패리티 감사 §3-S13(리서치 간 인계 누락) / 편성 UX-R2b·R2s
 - 관련: ADR-0101(에이전트=멤버, 봇 래핑 금지) · ADR-0131(네이티브 에이전트 프로필) · ADR-0158(턴 스트리밍) · UX 바이블 P5("첫 실행 = 에이전트와의 첫 대화") · `usage_ledger`(비용 원장) · buzz `welcomeKickoff.ts`(869줄, 멱등 마커 opener/closer/provider-required v1)
 
