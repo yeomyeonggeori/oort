@@ -2205,7 +2205,7 @@ export interface paths {
         get?: never;
         /**
          * Advance the caller's read cursor for a channel.
-         * @description Monotonic: the effective cursor is `max(current, min(requested, latestSeq))` — it never moves backward and never beyond the channel head. The cursor owner is always the authenticated principal; no member id is accepted in the body.
+         * @description Monotonic: the effective cursor is `max(current, min(requested, latestSeq))` — it never moves backward and never beyond the channel head (ADR-0109, ADR-0178 D1). The cursor owner is always the authenticated principal; no member id is accepted in the body. Optional `mark_unread_before_seq` sets the mark-unread signal (D5); optional `read_intent` (`explicit_open` or `background`, default `background`) is the D6 discriminator that decides whether this advertisement clears the mark.
          */
         put: operations["updateReadState"];
         post?: never;
@@ -5129,6 +5129,17 @@ export interface components {
         UpdateReadStateRequest: {
             /** Format: int64 */
             last_read_seq: number;
+            /**
+             * Format: int64
+             * @description ADR-0178 D5. Set the mark-unread signal to this seq ("treat this channel as unread from this seq onward, inclusive"). The seq must already exist as a message in this channel; a future or unknown seq is 400. Independent of last_read_seq — GREATEST on the cursor is unchanged (D1). Absent on ordinary cursor advertisements.
+             */
+            mark_unread_before_seq?: number;
+            /**
+             * @description ADR-0178 D6. Why this advertisement was sent. `explicit_open` (channel mount/switch, explicit "mark read") clears the mark in the same transaction. `background` (the default, including when the field is absent) never touches the mark — that is the safety direction, so a stale replay from another device, or a client that predates this field, cannot silently erase a mark.
+             * @default background
+             * @enum {string}
+             */
+            read_intent: "explicit_open" | "background";
         };
         ReadState: {
             /** Format: uuid */
@@ -5137,9 +5148,17 @@ export interface components {
             last_read_seq: number;
             /** Format: int64 */
             latest_seq: number;
-            /** Format: int64 */
+            /**
+             * Format: int64
+             * @description `latest_seq - last_read_seq`, floored at zero. The server does not fold `marked_unread_before_seq` into this number (ADR-0178 D3 — composition lives in momo-core only).
+             */
             unread_count: number;
             mention_count: number;
+            /**
+             * Format: int64
+             * @description ADR-0178 D2. Inclusive seq from which this channel should be treated as unread. Always present; JSON null when unmarked, so a client can tell "no mark" from "this server is too old to have the concept".
+             */
+            marked_unread_before_seq: number | null;
         };
         ReadStateListResponse: {
             read_states: components["schemas"]["ReadState"][];
@@ -12602,7 +12621,7 @@ export interface operations {
                     "application/json": components["schemas"]["ReadState"];
                 };
             };
-            /** @description last_read_seq must be non-negative, or invalid ids. */
+            /** @description last_read_seq must be non-negative; mark_unread_before_seq must name a message that already exists in this channel; read_intent must be explicit_open or background; or the ids are invalid. */
             400: {
                 headers: {
                     [name: string]: unknown;
