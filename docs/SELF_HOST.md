@@ -480,6 +480,7 @@ oort down -v
 
 | 증상 | 원인과 조치 |
 |---|---|
+| 설치가 막혔는지 먼저 판정 | `scripts/oort doctor` (필요하면 `--json`). 도구·env·스택을 한 판정으로 본다. 스택이 아직 없으면 그 검사는 skip 하고 env 쪽만 판정한다. |
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
 | 화면은 뜨는데 메시지가 실시간으로 안 온다 | outbox가 빠졌는지 먼저 본다(아래 질의). `broadcast \| done` 이면 서버 쪽은 끝난 것이고 브라우저 쪽을 본다(`oort logs api`). `pending`/`failed` 면 relay다(`oort logs relay`). |

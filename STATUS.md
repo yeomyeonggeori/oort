@@ -6,6 +6,19 @@
 - 워커: provider 미구성이면 모델/원장 0, 에이전트 명의 정적 카피 1건(`ProviderRequired`) — opener 키는 소비하지 않음. opener는 정상 run + `usage_ledger`. G2 streak는 `welcome:%` run 제외.
 - settings `welcome_agent_member_id`(활성 에이전트)·`welcome_prompt`(≤2000자). WorkspaceDto 프로젝션. `schema_v0.sql` 무접촉. Closer는 enum 예약(v1 미구현).
 - runtime-unverified: 라이브 join→Centrifugo 첫 발화 왕복(클라 UX-R2b).
+## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
+
+- ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
+- R2: Button 전이 목록 소유자는 `press` 하나(`transition-colors` 제거, `@layer utilities` 에서 override 뒤). 모달/팝오버 상수는 `motion-enter/exit` 키프레임 유틸(tw-animate-css 없음). `@theme --default-transition-*` 를 사다리에 묶음.
+- 강제: `motion.test.ts` + preflight `raw_motion`(온보딩 블록·motion.ts allowlist). 폰 무접촉(M1a). `motion/react` 미도입(D8는 첫 소비자 티켓). 표면 이관은 UX-R1a~e.
+- 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
+- H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
+- runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
+## SH-3a `scripts/oort doctor` (#1955, 2026-09-02)
+
+- 셀프호스트 설치 판정 1개: `scripts/oort doctor [--env] [--json] [--strict]`. 필수 키는 `self_host_env.sh` 생성 heredoc에서 파생. 소문자 `true` 게이트(doorbell/hosted-delivery)·언퍼얼 `1`·`PLATFORM_ADMIN_EMAILS`·provider master key·drive backend·WS URL·role 비번↔DATABASE_URL. 시크릿은 이름·길이 class·형식만.
+- 스택 미기동이면 compose/`/healthz`/agent-port/outbox/migrate 는 skip+안내(설치 전 preflight). exit 0/1/2, `--strict` 는 major→2.
+- runtime-unverified 아님(픽스처 하네스). 로컬 `oortv013` 스택 실측은 PR 본문.
 
 ## M0s 기기 연결 서버 절반 — 1회용 QR 링크 토큰 (#1959, 2026-09-02)
 

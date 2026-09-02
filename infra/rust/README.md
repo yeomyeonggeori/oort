@@ -360,6 +360,7 @@ compose는 두 서비스 모두에 이미 이 이름을 넘기고 있었으므�
 
 ## 8. 트러블슈팅
 
+* 먼저 `scripts/oort doctor` — 셀프호스트 설치 판정(env 조용한 실패·스택 헬스). `--json` 가능.
 * `psql: warning: server 18, client 15` — bookworm의 postgresql-client는 15다. 마이그레이션은
   서버측 SQL이고 psql은 메타커맨드만 해석하므로 동작에 영향이 없다(prod Swift 이미지는
   ubuntu 24.04의 16). 경고가 거슬리면 `--build-arg RUNTIME_IMAGE=...`로 베이스를 올린다.

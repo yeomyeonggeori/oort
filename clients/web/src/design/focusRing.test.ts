@@ -28,8 +28,12 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const require_ = createRequire(import.meta.url);
 
-async function loadStylesheet() {
-  const path = require_.resolve("tailwindcss/index.css");
+async function loadStylesheet(id: string, base: string) {
+  if (id === "tailwindcss") {
+    const path = require_.resolve("tailwindcss/index.css");
+    return { path, base: dirname(path), content: readFileSync(path, "utf8") };
+  }
+  const path = id.startsWith(".") ? `${base}/${id.replace(/^\.\//, "")}` : id;
   return { path, base: dirname(path), content: readFileSync(path, "utf8") };
 }
 
