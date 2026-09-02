@@ -1,9 +1,23 @@
 # oort 진행 현황
 
+## M0s 기기 연결 서버 절반 — 1회용 QR 링크 토큰 (#1959, 2026-09-02)
+
+- `POST /v1/auth/device-link` 발급 · `POST …/redeem` 소비 · `GET …/{id}` 폴링 · `POST …/{id}/confirm-sas`. 마이그레이션 086 `device_link_token` + `token.device_label`/`pending_sas`. `schema_v0.sql` 무접촉.
+- D4 SAS: `RealtimeAdvert::SameOrigin`(`MOMO_CENTRIFUGO_WS_URL=same-origin`, `--public-origin` 이 쓰는 값) + 비-루프백/비-LAN Host 일 때만 4자리. 새 env 없음.
+- red proof ①만료 401 ②재소비 409 ③에이전트 403 ④발급자 로그아웃 401 ⑤공개 오리진 SAS 홀드 ⑥루프백 즉시 ⑦원문 로그 0 ⑧RLS. runtime-unverified: 실기기 QR/카메라(M0w/M0m).
+
+## SH-1 릴리스 매니페스트 `releases/latest.json` (#1954, 2026-09-02)
+
+- 커밋된 `releases/latest.json`(v0.1.4 list digest, GHCR 아키별 이미지 매니페스트 digest 실측) + `scripts/release_manifest.sh` / `scripts/check_release_manifest.sh`. SELF_HOST·AGENT·README는 매니페스트를 읽고 산문 digest 0.
+- red proof: digest 한 글자·`@sha256:` 잔여·CHANGELOG version 불일치. 생성기 재실행 바이트 동일. `scripts/local_gate.sh` 편입은 이 티켓에서 하지 않음(오케스트레이터).
+- runtime-unverified 아님(GHCR inspect·attestation verify PASS, 생성기 멱등).
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
-- ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120).
+- ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
+- R2: Button 전이 목록 소유자는 `press` 하나(`transition-colors` 제거, `@layer utilities` 에서 override 뒤). 모달/팝오버 상수는 `motion-enter/exit` 키프레임 유틸(tw-animate-css 없음). `@theme --default-transition-*` 를 사다리에 묶음.
 - 강제: `motion.test.ts` + preflight `raw_motion`(온보딩 블록·motion.ts allowlist). 폰 무접촉(M1a). `motion/react` 미도입(D8는 첫 소비자 티켓). 표면 이관은 UX-R1a~e.
+- 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
 
 ## BT-6 클라 절반 mark-unread (#1934, 2026-09-02)

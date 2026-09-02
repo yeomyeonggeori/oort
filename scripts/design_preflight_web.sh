@@ -251,6 +251,63 @@ drop_comment_lines_motion() {
   done
 }
 
+# `/*` 로 열린 블록의 속줄이 `*` 로 시작하지 않으면 줄 규칙이 코드로 센다
+# (N-2). grep 히트만으로는 opener 를 못 보므로, 실제 파일을 읽어 그 줄이
+# 블록 주석 안인지 판정한다. 파일이 없는 합성 selftest 줄은 그대로 통과.
+drop_motion_comment_spans() {
+  python3 -c '
+import os, re, sys
+hits = sys.stdin.read().splitlines()
+cache = {}
+
+def in_block_comment(path, lineno):
+    if path not in cache:
+        if not os.path.isfile(path):
+            cache[path] = None
+        else:
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                cache[path] = fh.read().splitlines()
+    lines = cache[path]
+    if lines is None:
+        return False
+    in_block = False
+    for i, line in enumerate(lines, 1):
+        if i == lineno:
+            return in_block
+        j = 0
+        n = len(line)
+        while j < n:
+            if in_block:
+                k = line.find("*/", j)
+                if k < 0:
+                    break
+                in_block = False
+                j = k + 2
+                continue
+            sl = line.find("//", j)
+            bl = line.find("/*", j)
+            if sl >= 0 and (bl < 0 or sl < bl):
+                break
+            if bl >= 0:
+                in_block = True
+                j = bl + 2
+                continue
+            break
+    return False
+
+pat = re.compile(r"^(.*):(\d+):(.*)$")
+for hit in hits:
+    m = pat.match(hit)
+    if not m:
+        print(hit)
+        continue
+    path, lineno = m.group(1), int(m.group(2))
+    if in_block_comment(path, lineno):
+        continue
+    print(hit)
+'
+}
+
 # 온보딩 예외 블록: 마커 주석부터 그 다음 `@layer base` 직전. 마커가 없으면
 # 면제하지 않는다(fail-closed).
 onboarding_bounds() {
@@ -374,6 +431,7 @@ scan_category() {
       grep -rnE "$MOTION_HIT_RE" \
         "$SRC" --include='*.tsx' --include='*.css' 2>/dev/null \
         | drop_comment_lines_motion \
+        | drop_motion_comment_spans \
         | drop_motion_allowlist \
         | grep -vF "$ALLOW_RE"
       ;;
@@ -512,7 +570,31 @@ EOF
 CASES
 
   echo ""
-  if [ "$fails" -ne 0 ]; then
+  echo "== raw_motion block-comment continuation (N-2) =="
+  local span_tmp span_hits span_ok=0
+  span_tmp="$(mktemp "${TMPDIR:-/tmp}/momo-raw-motion-span.XXXXXX")" || return 1
+  cat >"$span_tmp" <<'SPAN'
+/* Sequential reveal after the orbit draw.
+   Same 175ms fade as the step fade-in. */
+.real { transition-duration: 175ms; }
+SPAN
+  span_hits="$(
+    grep -nE "$MOTION_HIT_RE" "$span_tmp" \
+      | sed "s|^|$span_tmp:|" \
+      | drop_comment_lines_motion \
+      | drop_motion_comment_spans \
+      | grep -c . || true
+  )"
+  rm -f "$span_tmp"
+  # opener line has no \d+ms; continuation 175ms is a comment span (drop);
+  # `.real { 175ms }` is the one hit.
+  if [ "$span_hits" = "1" ]; then
+    echo "OK    block-comment continuation dropped, code 175ms kept (hits=$span_hits)"
+  else
+    echo "FAIL  want=1 code hit after dropping continuation, got=$span_hits"
+    span_ok=1
+  fi
+  if [ "$fails" -ne 0 ] || [ "$span_ok" -ne 0 ]; then
     echo "RESULT: FAIL, the raw_motion discriminator does not hold."
     return 1
   fi

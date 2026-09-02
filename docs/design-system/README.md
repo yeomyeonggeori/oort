@@ -212,28 +212,46 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 3단은 들이지 않는다(ADR-0159 D5). 웹 클래스는 그대로 `shadow-sm`/`shadow-lg`이고, 이름은 `clients/web/src/design/motion.css`가 진다. `designSystem.test.ts`가 그 두 이름과 클래스 어휘를 잠근다. 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
 
-**모션은 전면 토큰 축이다.** 숫자는 `motion.css`(사다리)와 `motion.ts`(모달 상수) 두 파일에만 산다. 그 밖 tsx/css의 `\d+ms`·`duration-[0-9]+`는 프리플라이트 `raw_motion` 위반이다.
+**모션은 전면 토큰 축이다.** 손기입 `\d+ms`·`duration-[0-9]+`는 `motion.css`(사다리 + 모달 200/150)와 `motion.ts`(클래스 조립)에만 산다. Tailwind 기본 `transition` 은 `@theme`의 `--default-transition-duration: var(--motion-instant)` / `--default-transition-timing-function: var(--motion-ease-standard)` 가 사다리에 묶는다. 그 밖 tsx/css의 리터럴은 프리플라이트 `raw_motion` 위반이다.
 
 | 토큰 | 값 | 자리 |
 |---|---|---|
 | `--motion-instant` | 120ms | 피드백 — 눌림·색·툴팁 |
-| `--motion-fast` | 180ms | 작은 표면 — 팝오버·드롭다운·칩·서랍 슬라이드 |
-| `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입·사이드바 접기(`--duration-sidebar`가 이 값을 가리킨다) |
+| `--motion-fast` | 180ms | 작은 표면 — 팝오버·드롭다운·칩 |
+| `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입·사이드바 접기·**드로어**(`--duration-sidebar`도 이 값) |
 | `--motion-arrival` | 500ms | 합성 도착 — 새 메시지·첫 진입 (키프레임 이관은 UX-R1) |
+| `--motion-modal-open` / `--motion-modal-close` | 200ms / 150ms | D4 예외 2호. `motion.ts`의 `MODAL_*_MOTION` 이 소비 |
 | `--motion-ease-standard` | `cubic-bezier(0.25, 1, 0.5, 1)` | 기존 `ease-out` 손기입의 흡수처 |
 | `--motion-ease-arrival` | `cubic-bezier(0.16, 1, 0.3, 1)` | 도착 전용 |
 | `--motion-distance-arrival` | 0.75rem | 도착 translateY (값만. 재생은 UX-R1) |
 | `--motion-blur-arrival` | 2px | 도착 blur (값만) |
 
-비대칭: 사라짐은 나타남보다 짧다. 모달만 예외 2호 — 열림 200 / 닫힘 150, `motion.ts`의 `MODAL_*_MOTION` 한 곳. 온보딩 650/760ms는 ADR-0159 단일-룩 예외로 `tokens.css` 온보딩 블록에 남는다. **이 둘 말고 사다리 밖 값을 늘리지 마라.**
+비대칭: 사라짐은 나타남보다 짧다. 모달만 열림 200 / 닫힘 150. 온보딩 예외 블록(`tokens.css` `Onboarding S0 motion` … 다음 `@layer base`)의 사다리 밖 값:
 
-눌림(D5): 모든 버튼 variant는 `@utility press`(`transform: scale(0.98)` + instant)를 든다. `active:scale-[0.98]`은 arbitrary 금지와 충돌하므로 유틸이 단일점이다. 행·칩 상속은 DS-1.
+| 값 | 자리 |
+|---|---|
+| 650ms | line-slide |
+| 760ms | mask-reveal |
+| 300ms ×3 | `onboarding-fade-in` (wordmark · tagline · fade effect) |
 
-reduced-motion(D9): 사다리 네 duration은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
+**이 목록 말고 사다리 밖 값을 늘리지 마라.**
+
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1.
+
+reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
 
 루프 애니메이션(캐럿 1.1s, 스피너 0.9s/1.6s, 업로드 드리프트 1.1s/3.2s)은 사다리가 아니라 **정보가 곧 움직임인 자리**라 초 단위로 남는다(SKILL §4).
 
 폰 사다리는 웹과 이름·값이 같다. 2026-07-28 권고 `instant 0 / fast 120 / standard 180 / slow 240`은 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다. 폰 `tokens.ts` 파생은 M1a.
+
+아직 이 축이 안 재는 것(owed, 이 PR이 닫지 않음):
+
+| 항목 | ADR | 티켓 |
+|---|---|---|
+| `hover:`만 있고 `active:`가 없는 신규 표면 preflight | D5 | DS-4 |
+| 캡처 `waitForAnimations(page)` | D10 ③ | DS-3 |
+| rest/hover/active 3짝 캡처 레인 | D10 ④ | DS-3 |
+| 폰 모션·밀도 값 파생 + 바이트 대조 | D10 ⑤ | M1a |
 
 ### 2.7 터치 타깃
 
@@ -495,7 +513,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | # | 결정 | 지금 상태 |
 |---|---|---|
 | 1 | 반경 `md` 10 vs 8을 맞출 것인가, "플랫폼별로 다름 + 사유"를 정식 개념으로 둘 것인가 | 분기가 세어지고 상한이 걸려 있다(§2.4) |
-| 2 | 모션 토큰을 신설할 것인가 | 부분 결정: 사이드바 전환 1호 토큰 신설(#1864), 전면 토큰화는 계속 미결 |
+| 2 | 모션 토큰을 신설할 것인가 | **결정됨** ADR-0179. UX-R0(#1958)이 사다리·눌림·강제 기제를 랜딩. 표면 이관은 UX-R1a~e |
 | 3 | 렌더 스윕(컨트롤 경계·터치 크기 전수)을 넣을 것인가 | 기법은 이미 레포에 있다(`gate-shell-layout.mjs`가 계산 스타일 파싱 + 휘도 계산) |
 | 4 | `@axe-core/playwright`로 렌더 텍스트 대비(1.4.3)를 잴 것인가 | MPL-2.0 — permissive-only 정책에 명시 필요. **1.4.11은 커버 안 되므로 우리 시험 유지 필수** |
 | 5 | 한국어 텍스트 검사를 만들 것인가 | 선례 없음. **우리가 선례가 될 자리** |
