@@ -11,7 +11,7 @@
 // use is `null` (absent), never an invented catalog.
 // =============================================================================
 
-import { arrayField, bool, record, str } from "../../lib/wire";
+import { arrayField, bool, str } from "../../lib/wire";
 
 export interface AgentToolCatalogEntry {
   name: string;
@@ -25,6 +25,26 @@ export interface AgentToolCatalogEntry {
 export const DECLARED_ONLY_REASON =
   "이 서버는 아직 이 도구를 실행하지 않습니다.";
 
+export function catalogEntryFromWire(
+  value: unknown
+): AgentToolCatalogEntry | null {
+  const name = str(value, "name")?.trim();
+  const description = str(value, "description");
+  if (!name || description === undefined || description.trim() === "") {
+    return null;
+  }
+  const executable = bool(value, "executable") ?? false;
+  const requiresApproval = bool(value, "requiresApproval") ?? true;
+  const rawReason = str(value, "unavailableReason")?.trim() ?? "";
+  return {
+    name,
+    description,
+    executable,
+    requiresApproval,
+    unavailableReason: executable ? null : rawReason || DECLARED_ONLY_REASON,
+  };
+}
+
 /**
  * `tools` 키가 없거나 배열이 아니면 `null` (라우트가 없거나 본문을 못 읽음).
  * 빈 배열은 빈 카탈로그이지 부재가 아니다.
@@ -32,17 +52,15 @@ export const DECLARED_ONLY_REASON =
 export function parseAgentToolCatalog(
   value: unknown
 ): AgentToolCatalogEntry[] | null {
-  void value;
-  return null;
-}
-
-export function catalogEntryFromWire(
-  value: unknown
-): AgentToolCatalogEntry | null {
-  void value;
-  void arrayField;
-  void bool;
-  void record;
-  void str;
-  return null;
+  const tools = arrayField(value, "tools");
+  if (tools === null) return null;
+  const parsed: AgentToolCatalogEntry[] = [];
+  const seen = new Set<string>();
+  for (const item of tools) {
+    const entry = catalogEntryFromWire(item);
+    if (entry === null || seen.has(entry.name)) continue;
+    seen.add(entry.name);
+    parsed.push(entry);
+  }
+  return parsed;
 }

@@ -152,7 +152,7 @@ describe("EnabledToolsSection", () => {
     const described = input.getAttribute("aria-describedby") ?? "";
     const reason = described
       .split(" ")
-      .map((id) => host.querySelector(`#${CSS.escape(id)}`)?.textContent ?? "")
+      .map((id) => host.querySelector(`[id="${id}"]`)?.textContent ?? "")
       .join(" ");
     expect(reason).toContain(DECLARED_ONLY_REASON);
     const before = input.checked;

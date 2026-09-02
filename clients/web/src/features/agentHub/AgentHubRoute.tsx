@@ -90,6 +90,8 @@ import {
   type AgentHubSection,
 } from "@momo/core/features/agents/hubModel";
 import { AgentChannelsSection } from "./AgentChannelsSection";
+import { EnabledToolsSection } from "./EnabledToolsSection";
+import { useAgentToolCatalog } from "./useAgentToolCatalog";
 import {
   EMPTY_AGENT_DRAFT,
   canCreateAgentNow,
@@ -627,6 +629,7 @@ function AgentProfileSection({
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const handle = useAgentProfile(agent.id);
+  const catalogQuery = useAgentToolCatalog();
   const routingCapability = useRoutingCapability();
   const allowedModels = useAllowedAgentModels(agent.id);
   const savedDraft = handle.profile
@@ -985,7 +988,59 @@ function AgentProfileSection({
         </Button>
       </form>
 
-      <PermissionsSection agent={agent} profile={handle.profile} />
+      <EnabledToolsSection
+        catalog={
+          catalogQuery.data?.kind === "ready" ? catalogQuery.data.tools : null
+        }
+        catalogStatus={
+          catalogQuery.isPending
+            ? "loading"
+            : (catalogQuery.data?.kind ?? "absent")
+        }
+        catalogMessage={
+          catalogQuery.data?.kind === "forbidden" ||
+          catalogQuery.data?.kind === "unknown"
+            ? catalogQuery.data.message
+            : null
+        }
+        enabledTools={handle.profile?.enabledTools ?? []}
+        emptyLabel={
+          handle.profile
+            ? "허용된 도구 없음"
+            : "프로필이 없어 별도 제한이 저장되지 않음"
+        }
+        offline={offline}
+        editable={editable}
+        editDisabledReason={editDisabledReason}
+        onRetryCatalog={() => {
+          void catalogQuery.refetch();
+        }}
+        save={async (tools) => {
+          const input = {
+            instructions: currentInstructions,
+            enabledTools: tools,
+            triggers: handle.profile?.triggers ?? { mention: true as const },
+            ...(currentDraft.model === null
+              ? {}
+              : { modelPref: currentDraft.model }),
+            ...(currentDraft.effort === null
+              ? {}
+              : { effortPref: currentDraft.effort }),
+          };
+          const result = await handle.replace(input);
+          if (result.ok) return { ok: true as const };
+          return {
+            ok: false as const,
+            forbidden: result.forbidden,
+            message: result.forbidden
+              ? "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다."
+              : (handle.failure?.message ??
+                "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요."),
+          };
+        }}
+      />
+
+      <PermissionsSection agent={agent} />
 
       <section className="flex flex-col gap-2 border-t border-line pt-4">
         <h3 className="text-body font-semibold text-ink">예약 작업</h3>
@@ -1062,17 +1117,15 @@ function CurrentWorkValue({
 
 function PermissionsSection({
   agent,
-  profile,
 }: {
   agent: RosterMember;
-  profile: AgentProfile | null;
 }) {
   return (
     <section className="flex flex-col gap-3 border-t border-line pt-4">
       <div>
         <h3 className="text-body font-semibold text-ink">권한</h3>
         <p className="text-meta text-ink-muted">
-          서버가 공개한 capability와 프로필의 도구 제한을 읽기 전용으로 보여 줍니다.
+          서버가 공개한 capability입니다. 앱 권한은 설정에서 봅니다.
         </p>
       </div>
       <dl className="flex flex-col gap-3 text-body">
@@ -1084,22 +1137,6 @@ function PermissionsSection({
             ) : (
               agent.capabilities.map((capability) => (
                 <StatusChip key={capability}>{capability}</StatusChip>
-              ))
-            )}
-          </dd>
-        </div>
-        <div className="flex flex-col gap-1">
-          <dt className="text-ink-muted">프로필 도구 제한</dt>
-          <dd className="flex flex-wrap gap-1">
-            {!profile || profile.enabledTools.length === 0 ? (
-              <span className="text-ink">
-                {profile
-                  ? "허용된 도구 없음"
-                  : "프로필이 없어 별도 제한이 저장되지 않음"}
-              </span>
-            ) : (
-              profile.enabledTools.map((tool) => (
-                <StatusChip key={tool}>{tool}</StatusChip>
               ))
             )}
           </dd>

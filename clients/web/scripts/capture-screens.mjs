@@ -1253,7 +1253,7 @@ const AGENT_PROFILE = {
   instructions:
     "배포 전에는 롤백 절차부터 확인하고, 근거가 없는 추정은 추정이라고 먼저 말합니다.",
   modelPref: "hermes-agent",
-  enabledTools: ["shell", "git"],
+  enabledTools: ["work.session.spawn", "shell", "git"],
   triggers: { mention: true },
   paused: false,
   version: 3,
@@ -1262,6 +1262,54 @@ const AGENT_PROFILE = {
 };
 
 const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
+
+/** UX-R4a: catalog GET is not on the live server; capture supplies the body. */
+const AGENT_TOOL_CATALOG = {
+  tools: [
+    {
+      name: "deploy.rollback.session-end-with-a-very-long-qualified-name",
+      description:
+        "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료입니다. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못합니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.spawn",
+      description:
+        "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작합니다. 승인하는 사람이 호스트를 고릅니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.login_handoff",
+      description:
+        "세션 화면에서 사람이 직접 로그인하게 잠시 멈춥니다. 비밀번호나 코드를 채팅으로 묻지 않습니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.resume",
+      description: "멈춘 작업 세션을 이어서 시작합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+    {
+      name: "agent.pause",
+      description: "에이전트를 일시정지합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+    {
+      name: "message.post",
+      description: "채널에 메시지를 올립니다. 에이전트는 이미 자기 답변 경로로 말합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+  ],
+};
 
 /** The id POST /agents answers with: the hub selects it right after. */
 const CREATED_AGENT_ID = "019f9b10-0000-7000-8000-0000000004a1";
@@ -1532,6 +1580,9 @@ async function installMocks(context) {
   );
   // 에이전트 허브 (goal B5.3b). 더 긴 경로를 먼저 건다: `**/…/agents`가
   // `/agents/{id}/profile`을 삼키지 않도록 하는 것과 같은 규칙이다.
+  await context.route("**/v1/workspaces/*/agent-tool-catalog", (route) =>
+    json(route, AGENT_TOOL_CATALOG)
+  );
   await context.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
     json(route, { allowedAgentModels: ALLOWED_AGENT_MODELS })
   );
@@ -6538,6 +6589,10 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
   await shoot(page, "agent-hub");
+  await page.getByTestId("agent-hub-enabled-tools").scrollIntoViewIfNeeded();
+  await page.getByTestId("agent-hub-enabled-tools").waitFor({ state: "visible" });
+  await page.waitForTimeout(300);
+  await shoot(page, "agent-hub-tools");
 
   // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
   //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
@@ -7590,6 +7645,14 @@ async function captureScheme(browser, scheme) {
   const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
+  await agentHub.getByTestId("agent-hub-enabled-tools").scrollIntoViewIfNeeded();
+  await agentHub.getByTestId("agent-hub-enabled-tools").waitFor({ state: "visible" });
+  await agentHub.waitForTimeout(300);
+  const agentHubToolsShot = `${OUT_DIR}/agent-hub-tools-${scheme}.png`;
+  await agentHub
+    .getByTestId("agent-hub-enabled-tools")
+    .screenshot({ path: agentHubToolsShot });
+  shots.push(agentHubToolsShot);
 
   // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
   //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).

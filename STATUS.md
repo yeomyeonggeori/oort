@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## UX-R4a Agent Hub enabledTools 편집 UI (#1957, 2026-09-02)
+
+- Agent Hub 프로필 도구 칩을 카탈로그 행(이름·설명·실행 가능/선언만·승인 필요) + 비낙관 저장으로 대체. PUT `enabledTools` 기존 수용. 성공은 ADR-0182 in-place `저장`→`저장됨` 1.6s (`useInlineConfirm`), 실패는 InlineBanner, 403은 읽기 전용.
+- 카탈로그는 GET `/v1/workspaces/{ws}/agent-tool-catalog` 에서 읽는다. OpenAPI·momo-server 에 이 라우트가 없어 404/본문 불명은 표시 전용으로 접는다. `tools.rs` CATALOG 는 클라에 복사하지 않음. 엔진 티켓이 라우트·사람용 설명을 채우면 편집 표면이 켜진다.
+- runtime-unverified: 라이브 카탈로그 GET(라우트 부재). 클라 시험은 목 카탈로그.
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).

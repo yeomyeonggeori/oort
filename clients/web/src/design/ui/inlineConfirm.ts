@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * ADR-0182 D2 type-1 in-place confirm. The hold is not a motion-ladder step.
- * RED stub: duration and state are wrong on purpose (#1957).
+ * ADR-0182 D2 type-1 in-place confirm hold.
+ *
+ * Not a motion-ladder step. Appear uses `--motion-instant`, disappear
+ * `--motion-fast`; the 1.6s is how long the control keeps saying the result.
  */
-export const INLINE_CONFIRM_MS = 0;
+export const INLINE_CONFIRM_MS = 1_600;
 
 export function useInlineConfirm(): {
   confirmed: boolean;
@@ -21,8 +23,11 @@ export function useInlineConfirm(): {
   );
 
   const confirm = useCallback(() => {
-    void setConfirmed;
-    void timer;
+    setConfirmed(true);
+    window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => {
+      setConfirmed(false);
+    }, INLINE_CONFIRM_MS);
   }, []);
 
   return { confirmed, confirm };
