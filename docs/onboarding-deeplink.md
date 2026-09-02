@@ -1,4 +1,4 @@
-# 초대 딥링크 계약 (`oort://join`) — 정본
+# 온보딩 딥링크 계약 (`oort://join` · `oort://link`) — 정본
 
 > 온보딩 와우 배치(W-O1, `docs/planning/2026-07-24-onboarding-wow-audit.md`). 이 파일이 딥링크 형식의 **정본**이며, 서버/운영(MOMO-584)과 macOS/iOS 클라이언트(MOMO-585)가 글자 그대로 일치해야 한다.
 
@@ -50,3 +50,31 @@ sops exec-env /secure/momo/prod.sops.env \
 - 세션 연결 전: chooser의 초대 참여 경로로 `server`·`code`를 **프리필**한다(사용자는 이름/비밀번호만 입력).
 - 세션 연결 후: 무시하고 안내 배너 정도로 처리한다.
 - 잘못된 링크/인코딩/부분 파라미터는 조용히 무시하거나 검증 오류로 처리한다(순수 파싱 로직 단위테스트 대상).
+
+## `oort://link` — 기기 연결 (ADR-0180)
+
+이미 로그인한 사람의 **두 번째 기기**를 붙인다. `join` 이 새 계정을 만드는 것과 달리, 링크 토큰은 자격이 아니라 **교환권**이다 — 그 자체로는 어떤 API 도 호출할 수 없고, `POST /v1/auth/device-link/redeem` 한 번만 소비된다.
+
+### 형식
+
+```
+oort://link?server=<percent-encoded base URL>&token=<base64url>
+```
+
+- 쿼리 파라미터는 **`server`와 `token` 둘뿐**이다.
+- **순서 무관.** `token` 이 먼저 와도 동일하게 해석한다.
+- **알 수 없는 파라미터는 무시**한다(하위 호환 여지).
+- 스킴 소비는 `join` 과 같다: **발급은 `oort://`만**, 소비는 `oort://`와 `momo://` 둘 다 흡수.
+
+### `server`
+
+`join` 의 `server` 와 같다. API base URL 을 RFC 3986 percent-encoding 한 값. 클라가 percent-decoding 후 `validatedBaseURL()` 로 재검증한다.
+
+### `token`
+
+32바이트 CSPRNG 의 base64url(패딩 없음, 43자, `[A-Za-z0-9-_]`). unreserved 집합이라 percent-encoding 후에도 값이 그대로다. **원문은 발급 응답에만** 실리고 서버는 sha256 만 저장한다(ADR-0180 D1/D6).
+
+### 발급 / 소비
+
+- 발급: 인증된 사람 멤버가 `POST /v1/auth/device-link` (TTL 120s, 1회).
+- 소비: 폰이 `POST /v1/auth/device-link/redeem` (공개, per-IP 레이트리밋). 공개 오리진 모드에서는 4자리 SAS 를 발급자 확인 후에야 세션이 활성화된다(D4).

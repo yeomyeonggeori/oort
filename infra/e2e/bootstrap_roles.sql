@@ -66,6 +66,11 @@ BEGIN
       FROM PUBLIC, momo_relay, momo_worker, momo_notifier;
     GRANT EXECUTE ON FUNCTION momo_join_private.owner_claim_workspace_id(text) TO momo_app;
   END IF;
+  IF to_regprocedure('momo_join_private.device_link_workspace_id(text)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION momo_join_private.device_link_workspace_id(text)
+      FROM PUBLIC, momo_relay, momo_worker, momo_notifier;
+    GRANT EXECUTE ON FUNCTION momo_join_private.device_link_workspace_id(text) TO momo_app;
+  END IF;
 END $$;
 
 DO $$

@@ -71,33 +71,40 @@ scripts/self_host_env.sh --local-build
 
 ### B. 공개 digest pull
 
-최신 불변 digest는 **GitHub Releases**가 정본이다
-([Releases](https://github.com/yeomyeonggeori/oort/releases)). `latest`나
-`sha-<commit>` 태그는 받지 않는다. **반드시 `@sha256:`로 pin된
-`ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
-실패한다. 릴리스에 digest 표가 없으면 A를 쓴다.
+최신 불변 digest는 커밋된
+[`releases/latest.json`](../releases/latest.json)이 정본이고, GitHub
+[Releases](https://github.com/yeomyeonggeori/oort/releases)가 그 출처다.
+`latest`나 `sha-<commit>` 태그는 받지 않는다. **반드시 불변 digest로 pin된
+`ghcr.io/yeomyeonggeori/oort`만** 받으며(`sha256:` 접두 + 64 hex), 형식이
+틀리면 env를 만들기 전에 실패한다. 매니페스트가 없으면 A를 쓴다.
 
-아래는 v0.1.4 공개 발행의 **앱** list digest(빌드 커밋 `main=e39e9427`,
-Release [v0.1.4](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.4)).
-이 값이 항상 최신은 아니다 — Releases를 본다.
+앱 list digest는 매니페스트에서 읽는다 — 산문에 hex를 다시 적지 않는다.
 
 ```sh
-IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f'
+IMAGE_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
-같은 발행의 두 list digest (v0.1.4, 빌드 커밋 `main=e39e9427`).
+checkout이 없으면 raw URL:
+
+```sh
+IMAGE_REF="$(curl -fsSL https://raw.githubusercontent.com/yeomyeonggeori/oort/main/releases/latest.json | jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"')"
+```
+
+같은 발행의 postgres list digest는 매니페스트 `images.postgres`다.
 `--published-image`에는 앱 행만 넣는다. postgres 행은 Release 표와
 운영/PITR 경로용이며, 이 문서 compose의 postgres 서비스가 소비하는 값이
 아니다.
 
-| 대상 | 불변 이미지 |
-|---|---|
-| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:563ee793c3e8fb9417dfc8bd6b72fdfa70680d48de81c3633d75b820f507e3b5` |
+```sh
+jq -r '
+  "앱\t\(.images.app.ref)@\(.images.app.digest_list)",
+  "PostgreSQL 18 + pgBackRest\t\(.images.postgres.ref)@\(.images.postgres.digest_list)"
+' releases/latest.json
+```
 
-공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.4
-digest는 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
+공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 매니페스트
+`digest_list`가 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
 Silicon과 ARM 서버는 이 pin을 native pull한다. 첫 공개 발행
 v0.1.0(`main=45a154d2`)은 amd64 단일였고, 그 digest의 Apple Silicon
 native pull은 불가했다(실측 2026-08-21). 운영자 pin은 list digest다.

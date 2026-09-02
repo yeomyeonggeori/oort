@@ -982,7 +982,11 @@ require("validate_compose_command_args" in self_host, "caller Compose argv must 
 require("PUBLISHED_IMAGE_CONSUMERS=8" in self_host, "render verification must cover all eight image consumers")
 require("head -1" not in self_host, "security-critical env keys must not use first-value parsing")
 require("--local-build" in self_host_doc and "--published-image" in self_host_doc, "SELF_HOST must document both modes")
-require("@sha256:" in self_host_doc, "SELF_HOST must show immutable digest pinning")
+require(
+    "releases/latest.json" in self_host_doc and "digest_list" in self_host_doc,
+    "SELF_HOST must pin published images via releases/latest.json, not a prose digest",
+)
+require("@sha256:" not in self_host_doc, "SELF_HOST must not hard-code @sha256: digest literals")
 
 deploy_lib = read("infra/prod/deploy-lib.sh")
 validate_deploy_contract(deploy_lib)
