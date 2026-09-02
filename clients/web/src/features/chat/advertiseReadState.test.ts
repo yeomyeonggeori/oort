@@ -1,12 +1,31 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   advertiseReadState,
   channelReadAdvertisementReason,
   readIntentWire,
 } from "./advertiseReadState";
+
+const updateReadState = vi.hoisted(() => vi.fn());
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
+  return {
+    ...actual,
+    updateReadState: (
+      workspaceId: string,
+      channelId: string,
+      lastReadSeq: number,
+      options?: unknown
+    ) => updateReadState(workspaceId, channelId, lastReadSeq, options),
+  };
+});
+
+afterEach(() => {
+  updateReadState.mockReset();
+});
 
 const HERE = fileURLToPath(new URL(".", import.meta.url));
 const SRC = join(HERE, "..", "..");
@@ -79,7 +98,37 @@ describe("광고 호출 자리는 헬퍼 한 곳이다", () => {
 });
 
 describe("advertiseReadState 는 reason 을 옵션으로 옮긴다", () => {
-  it("함수가 존재한다 (시그니처 고정)", () => {
-    expect(typeof advertiseReadState).toBe("function");
+  it("channel_open 은 explicit_open 을 싣고 mark 는 싣지 않는다", async () => {
+    updateReadState.mockResolvedValue({
+      channelId: "ch-a",
+      lastReadSeq: 15,
+      latestSeq: 15,
+      unreadCount: 0,
+      mentionCount: 0,
+      markedUnreadBeforeSeq: null,
+    });
+    await advertiseReadState("ws", "ch-a", 15, "channel_open");
+    expect(updateReadState).toHaveBeenCalledWith("ws", "ch-a", 15, {
+      readIntent: "explicit_open",
+      markUnreadBeforeSeq: undefined,
+    });
+  });
+
+  it("mark_unread 는 mark 만 싣고 read_intent 는 생략한다", async () => {
+    updateReadState.mockResolvedValue({
+      channelId: "ch-a",
+      lastReadSeq: 10,
+      latestSeq: 10,
+      unreadCount: 0,
+      mentionCount: 0,
+      markedUnreadBeforeSeq: 3,
+    });
+    await advertiseReadState("ws", "ch-a", 10, "mark_unread", {
+      markUnreadBeforeSeq: 3,
+    });
+    expect(updateReadState).toHaveBeenCalledWith("ws", "ch-a", 10, {
+      readIntent: undefined,
+      markUnreadBeforeSeq: 3,
+    });
   });
 });

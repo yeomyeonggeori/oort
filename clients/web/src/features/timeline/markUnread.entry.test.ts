@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { MessageActionAvailability } from "@momo/core/features/timeline/model";
 import {
@@ -51,5 +52,14 @@ describe("⋯ 메뉴 「여기부터 안 읽음」", () => {
     expect(keys).toContain("mark-unread");
     expect(keys.indexOf("mark-unread")).toBeGreaterThan(keys.indexOf("copy-link"));
     expect(keys.indexOf("mark-unread")).toBeLessThan(keys.indexOf("edit"));
+  });
+
+  it("읽음 상태 문법은 Mail 을 쓴다 (숨김 EyeOff 가 아니다)", () => {
+    const source = readFileSync(
+      new URL("./MessageActions.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(source).toMatch(/case "mark-unread":\s*return <Mail /);
+    expect(source).not.toMatch(/EyeOff/);
   });
 });

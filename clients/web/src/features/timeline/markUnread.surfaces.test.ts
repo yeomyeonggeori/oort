@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type { Message } from "@momo/core/lib/api";
 import { buildTimelineItems } from "@momo/core/features/timeline/model";
@@ -13,6 +14,10 @@ import {
   markAt3Cursor10,
 } from "@momo/core/features/readState/proof";
 import { countUnreadJump } from "./navigation";
+import {
+  sidebarUnreadCounts,
+  unreadChannelsInOrder,
+} from "../sidebar/sidebarUnread";
 
 function msg(seq: number): Message {
   return {
@@ -63,10 +68,23 @@ describe("마크 한 점이 배지·디바이더·필·⌥↑↓ 에 같다", ()
   });
 
   it("사이드바 배지와 ⌥↑↓ 후보가 같은 수로 그 채널을 안 읽음으로 본다", () => {
-    const closedChannelUnread = composedUnreadCount(read);
-    expect(closedChannelUnread).toBe(MARK_AT_3_CURSOR_10.count);
-    const unreadChannels = closedChannelUnread > 0 ? [read.channelId] : [];
-    expect(unreadChannels).toEqual([read.channelId]);
+    const counts = sidebarUnreadCounts(read.channelId, null, read);
+    expect(counts.unreadCount).toBe(MARK_AT_3_CURSOR_10.count);
+    const unreadChannels = unreadChannelsInOrder(
+      [{ id: read.channelId }],
+      null,
+      () => read
+    );
+    expect(unreadChannels).toEqual([{ id: read.channelId }]);
+    expect(
+      sidebarUnreadCounts(read.channelId, read.channelId, read).unreadCount
+    ).toBe(0);
+    const sidebar = readFileSync(
+      new URL("../sidebar/Sidebar.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(sidebar).toContain("sidebarUnreadCounts");
+    expect(sidebar).toContain("unreadChannelsInOrder");
   });
 });
 
