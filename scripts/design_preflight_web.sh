@@ -27,6 +27,7 @@
 #   10 pure_bw       pure #000000 / #ffffff / bg-black / bg-white
 #   11 progress_word 진행 낱말꼴 「명사 + 중」 위반 (「저장하는 중」)   [AST, #1511]
 #   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
+#   13 raw_motion    사다리 밖 \d+ms · duration-[0-9]+ 손기입 (ADR-0179 D10)
 #
 # 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
 # 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
@@ -181,7 +182,7 @@ drop_issue_refs() {
   done
 }
 
-KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle"
+KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle raw_motion"
 
 label_for() {
   case "$1" in
@@ -197,6 +198,7 @@ label_for() {
     pure_bw)       echo "pure black/white (use the surface tokens, they adapt to scheme)" ;;
     progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
     latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
+    raw_motion)    echo "사다리 밖 duration 손기입 (ADR-0179 D10): \\d+ms 와 duration-[0-9]+ 는 motion.css·motion.ts 에만. 온보딩 키프레임 블록은 ADR-0159 예외" ;;
     *)             echo "$1" ;;
   esac
 }
@@ -209,6 +211,95 @@ filter_common() {
 # Drop whole-line comments (`// ...` / ` * ...`): a comment is not user-visible.
 drop_comment_lines() {
   grep -vE '^[^:]*:[0-9]+:[[:space:]]*(//|\*|/\*)'
+}
+
+# ---- raw_motion (ADR-0179 D10) ----------------------------------------------
+#
+# 숫자는 motion.css(사다리 정의)와 motion.ts(모달 200/150)에만 산다. tokens.css
+# 는 raw_color 와 달리 **면제하지 않는다** — 175ms 한 줄이 여기로 들어오면
+# 빨개져야 한다(red proof). 온보딩 키프레임 블록만 ADR-0159 예외.
+#
+# 경로에 콜론이 있어(`clients/web/...`) 기존 drop_comment_lines 의 `^[^:]*:`
+# 패턴이 이 분류에서는 주석을 못 벗긴다. 내용만 떼서 판정한다.
+
+MOTION_MS_RE='[0-9]+ms'
+DURATION_CLASS_RE='duration-[0-9]+'
+MOTION_HIT_RE="${MOTION_MS_RE}|${DURATION_CLASS_RE}"
+MOTION_DEF_RE='src/design/motion\.(css|ts):'
+ONBOARDING_MARK='Onboarding S0 motion'
+
+# grep -n 산출 `path:lineno:content` 에서 내용. 경로는 콜론을 품을 수 있다.
+motion_line_content() {
+  printf '%s\n' "$1" | sed -E 's/^(.*):[0-9]+:(.*)$/\2/'
+}
+
+motion_line_no() {
+  printf '%s\n' "$1" | sed -E 's/^(.*):([0-9]+):.*$/\2/'
+}
+
+drop_comment_lines_motion() {
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    content="$(motion_line_content "$line")"
+    trimmed="$(printf '%s' "$content" | sed 's/^[[:space:]]*//')"
+    case "$trimmed" in
+      //*) continue ;;
+      \**) continue ;;
+      /\**) continue ;;
+    esac
+    printf '%s\n' "$line"
+  done
+}
+
+# 온보딩 예외 블록: 마커 주석부터 그 다음 `@layer base` 직전. 마커가 없으면
+# 면제하지 않는다(fail-closed).
+onboarding_bounds() {
+  local file="$SRC/design/tokens.css"
+  local start end
+  start="$(grep -n "$ONBOARDING_MARK" "$file" 2>/dev/null | head -1 | cut -d: -f1)"
+  if [ -z "${start:-}" ]; then
+    echo "0 0"
+    return
+  fi
+  end="$(awk -v s="$start" 'NR > s && $0 ~ /^@layer base/ { print NR - 1; exit }' "$file")"
+  if [ -z "${end:-}" ]; then
+    echo "0 0"
+    return
+  fi
+  echo "$start $end"
+}
+
+drop_motion_allowlist() {
+  local start end lineno
+  read -r start end <<EOF
+$(onboarding_bounds)
+EOF
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    case "$line" in
+      *src/design/motion.css:*|*src/design/motion.ts:*) continue ;;
+    esac
+    case "$line" in
+      *src/design/tokens.css:*)
+        lineno="$(motion_line_no "$line")"
+        if [ "$start" -gt 0 ] && [ "$end" -gt 0 ] && \
+           [ "$lineno" -ge "$start" ] && [ "$lineno" -le "$end" ]; then
+          continue
+        fi
+        ;;
+    esac
+    printf '%s\n' "$line"
+  done
+}
+
+# stdin: 한 줄. 주석·allowlist 를 거친 뒤 위반이면 그대로 출력.
+motion_hit_line() {
+  local line="$1"
+  printf '%s\n' "$line" \
+    | drop_comment_lines_motion \
+    | drop_motion_allowlist \
+    | grep -vF "$ALLOW_RE" \
+    | grep -E "$MOTION_HIT_RE" || true
 }
 
 scan_category() {
@@ -276,6 +367,15 @@ scan_category() {
       grep -rniE 'bg-black|bg-white|#000000|#ffffff|#000\b|#fff\b' \
         "$SRC" "$HTML" --include='*.tsx' --include='*.ts' --include='*.css' --include='*.html' 2>/dev/null \
         | filter_common
+      ;;
+    raw_motion)
+      # tokens.css 는 면제하지 않는다(사다리 정의는 motion.css). 온보딩 블록만
+      # drop_motion_allowlist 가 벗긴다. design-preflight-allow 는 그대로.
+      grep -rnE "$MOTION_HIT_RE" \
+        "$SRC" --include='*.tsx' --include='*.css' 2>/dev/null \
+        | drop_comment_lines_motion \
+        | drop_motion_allowlist \
+        | grep -vF "$ALLOW_RE"
       ;;
   esac
 }
@@ -364,6 +464,62 @@ EXEMPT_CASES
   return 0
 }
 
+# ---- raw_motion self-test (ADR-0179 D10) ------------------------------------
+#
+# 판별자가 지키는 결정, 실행 가능한 형태로. 175ms 한 줄이 tokens.css 에 오면
+# 빨개지고, motion.css·motion.ts·온보딩 블록·주석은 통과해야 한다.
+run_raw_motion_selftest() {
+  echo "== raw_motion discriminator self-test =="
+  local fails=0 want line got start end onboarding_line
+  read -r start end <<EOF
+$(onboarding_bounds)
+EOF
+  if [ "$start" -gt 0 ] && [ "$end" -gt 0 ]; then
+    onboarding_line="$start"
+  else
+    echo "FAIL  onboarding exception block markers missing (fail-closed)"
+    return 1
+  fi
+
+  while IFS='|' read -r want line; do
+    [ -z "${want:-}" ] && continue
+    case "$want" in \#*) continue ;; esac
+    got=0
+    if [ -n "$(motion_hit_line "$line")" ]; then
+      got=1
+    fi
+    if [ "$got" = "$want" ]; then
+      echo "OK    want=$want  $line"
+    else
+      echo "FAIL  want=$want got=$got  $line"
+      fails=1
+    fi
+  done <<CASES
+# a handwritten duration is a violation (the 175ms red proof)
+1|clients/web/src/design/tokens.css:9:  --x: 175ms;
+1|clients/web/src/features/work/A.tsx:9:  className="duration-200"
+1|clients/web/src/features/work/A.tsx:9:  transition: transform 175ms ease-out;
+# definition file and D4 constant file are the two number homes
+0|clients/web/src/design/motion.css:9:  --motion-instant: 120ms;
+0|clients/web/src/design/motion.ts:9:  "duration-200 duration-150"
+# comments quote old timings; they are not new literals
+0|clients/web/src/features/work/A.tsx:9:// waited 175ms for the focus ring
+0|clients/web/src/design/tokens.css:9: * 기본 150ms 동안 번진다
+# onboarding exception block (ADR-0159) — real line range, synthetic content
+0|clients/web/src/design/tokens.css:${onboarding_line}:  animation-duration: 650ms;
+# a duration outside that block is still a hit, even in tokens.css
+1|clients/web/src/design/tokens.css:1:  --duration-sidebar: 175ms;
+CASES
+
+  echo ""
+  if [ "$fails" -ne 0 ]; then
+    echo "RESULT: FAIL, the raw_motion discriminator does not hold."
+    return 1
+  fi
+  echo "RESULT: PASS, raw_motion tells ladder numbers from handwritten ms."
+  return 0
+}
+
 # ---- 코어 단계 (이슈 #1141) --------------------------------------------------
 #
 # node 가 없으면 **건너뛰지 않고 실패한다**. "안 돌린 것"과 "초록"이 구별되지 않는
@@ -395,6 +551,9 @@ case "${1:-}" in
     run_selftest
     web_rc=$?
     echo ""
+    run_raw_motion_selftest
+    motion_rc=$?
+    echo ""
     if command -v node >/dev/null 2>&1 && [ -f "$WEB_STRING_SCAN" ]; then
       node "$WEB_STRING_SCAN" --selftest
       strings_rc=$?
@@ -406,18 +565,20 @@ case "${1:-}" in
     run_core_stage --selftest
     core_rc=$?
     echo ""
-    if [ "$web_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
-      echo "SELFTEST: FAIL (web raw_color=$web_rc, web strings=$strings_rc, core separation=$core_rc)"
+    if [ "$web_rc" -ne 0 ] || [ "$motion_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
+      echo "SELFTEST: FAIL (web raw_color=$web_rc, raw_motion=$motion_rc, web strings=$strings_rc, core separation=$core_rc)"
       exit 1
     fi
-    echo "SELFTEST: PASS (web raw_color + web strings + core separation rule)"
+    echo "SELFTEST: PASS (web raw_color + raw_motion + web strings + core separation rule)"
     exit 0
     ;;
   --help|-h)
     echo "usage: scripts/design_preflight_web.sh [--list|--selftest]"
-    echo "  (no args)  hard-zero check: web 10 categories + core string literals"
+    echo "  (no args)  hard-zero check: web 13 categories + core string literals"
     echo "  --list     print every current hit per category, no gating"
     echo "  --selftest raw_color: prove issue refs pass and real hex fails;"
+    echo "             raw_motion: prove 175ms / duration-200 fail, motion.css·"
+    echo "             motion.ts·onboarding block·comments pass (ADR-0179 D10);"
     echo "             web strings + core: prove render strings and JSX text fail"
     echo "             while comments, JSX comments and test names pass"
     echo ""
@@ -473,7 +634,7 @@ echo ""
 if [ "$overall" -ne 0 ]; then
   echo "FAIL  web: 위 분류에 위반이 있다."
 else
-  echo "OK    web: 12/12 categories clean."
+  echo "OK    web: 13/13 categories clean."
 fi
 
 # 코어 단계는 웹이 붉어도 **돈다**. 한 번의 실행이 두 층을 다 말해야 고치는 사람이
@@ -494,7 +655,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, web 12/12 + core 5/5 categories clean."
+echo "RESULT: PASS, web 13/13 + core 5/5 categories clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0

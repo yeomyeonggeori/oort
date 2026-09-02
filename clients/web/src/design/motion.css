@@ -1,0 +1,7 @@
+/*
+ * ADR-0179 motion ladder. Token declarations land in the GREEN commit;
+ * this file exists so motion.test.ts can read it (red proof: missing tokens).
+ *
+ * Onboarding 650/760 ms stays in tokens.css — the only documented
+ * ladder exception besides the modal 200/150 constants in motion.ts.
+ */
