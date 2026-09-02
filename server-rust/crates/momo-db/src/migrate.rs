@@ -410,19 +410,23 @@ mod tests {
     /// 085 is ADR-0178's mark-unread signal (#1934 BT-6 server half): nullable
     /// `read_state.marked_unread_before_seq`. schema_v0.sql is not modified;
     /// last_read_seq GREATEST is unchanged.
+    ///
+    /// 086 is ADR-0180's `device_link_token` (#1959 M0s): hash-only QR link
+    /// tokens, SAS hold, and nullable `token.device_label`/`pending_sas`.
+    /// schema_v0.sql is not modified.
     #[test]
-    fn discovers_contiguous_migrations_001_to_085() {
+    fn discovers_contiguous_migrations_001_to_086() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            85,
-            "expected 85 migrations under {}",
+            86,
+            "expected 86 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 85);
+        assert_eq!(migrations.last().unwrap().version, 86);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

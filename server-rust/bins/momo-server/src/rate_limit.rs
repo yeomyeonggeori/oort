@@ -314,6 +314,24 @@ pub async fn per_ip_claim(State(state): State<AppState>, request: Request, next:
     .await
 }
 
+/// Per-IP gate for public device-link redeem. Reuses the claim budget (no new
+/// env) on an independent key so claim traffic cannot starve QR redeem.
+pub async fn per_ip_device_link(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
+    gate_per_ip(
+        state,
+        request,
+        next,
+        "ip:device-link",
+        |config| config.claim_per_ip_limit,
+        "/v1/auth/device-link/redeem",
+    )
+    .await
+}
+
 async fn gate_per_ip(
     state: AppState,
     request: Request,

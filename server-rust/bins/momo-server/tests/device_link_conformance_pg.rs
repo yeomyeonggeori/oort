@@ -463,7 +463,9 @@ async fn expired_device_link_token_redeem_is_401() {
     let issued = issued.expect("issued");
 
     sqlx::query(
-        "UPDATE device_link_token SET expires_at = now() - interval '1 second' \
+        "UPDATE device_link_token \
+            SET created_at = now() - interval '2 seconds', \
+                expires_at = now() - interval '1 second' \
           WHERE id = $1::uuid",
     )
     .bind(&issued.id)
