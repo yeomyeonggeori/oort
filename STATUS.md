@@ -3,6 +3,12 @@
 > **랜딩 증거 원장(newest-first).** 항목=랜딩 단위, 원문 불변.
 > **로테이션(2026-09-01 재편):** 이 파일은 당월+직전월 항목만 담는다. 월초 플러시 때 `momo-main`이 그 이전 달 항목을 `docs/archive/STATUS-YYYY-MM.md`로 원문 그대로 이동한다. 과거 추적은 `docs/archive/README.md` 색인.
 
+## mark-unread 신호 서버 절반 (#1934 / BT-6, ADR-0178, 2026-09-02)
+
+- `read_state.marked_unread_before_seq` nullable bigint (085). `schema_v0.sql` 무접촉. `last_read_seq` GREATEST 불변(D1). 서버는 마크를 `unread_count`에 접지 않음(D3 합성은 momo-core 단일점).
+- `PUT …/read-state` 본문 가산: `mark_unread_before_seq`(채널 실존 seq, 미래·비존재 400) + `read_intent` enum `[explicit_open, background]` (optional, default=background, D6). explicit_open만 같은 tx에서 마크 삭제. 구식/백그라운드 광고는 마크 불변.
+- GET/list·realtime payload에 `marked_unread_before_seq` 항상 존재(미표시는 `null`). red proof: `mark_unread_conformance_pg` + `d2_b12_2b`. 클라 절반은 별 PR.
+
 ## 커스텀 멤버 상태 REST (#1889 / BF-B2 서버 절반, 2026-08-30)
 
 - `member`에 nullable 3필드(083): `status_emoji`(≤32 스칼라)·`status_text`(trim ≤80)·`status_expires_at`. `schema_v0.sql` 무접촉. RLS는 기존 `member` ws_isolation 승계.

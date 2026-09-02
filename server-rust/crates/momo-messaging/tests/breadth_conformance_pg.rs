@@ -36,8 +36,9 @@ use momo_db::{with_tenant_tx, DbError, PgPool};
 use momo_messaging::{
     active_workspace_role, canonical_participants, create_channel, dm_participant_key,
     list_direct_messages, list_read_state, open_direct_message_in_tx, search_messages,
-    send_message, send_message_with_mentions_in_tx, update_read_cursor_in_tx, ChannelKind,
-    NewChannel, NewMessage, OpenedDirectMessage, SearchCursor, SearchScope, SendExtras,
+    send_message, send_message_with_mentions_in_tx, update_read_cursor_in_tx,
+    update_read_cursor_with_intent_in_tx, ChannelKind, MarkUnreadWrite, NewChannel, NewMessage,
+    OpenedDirectMessage, ReadCursorOutcome, ReadIntent, SearchCursor, SearchScope, SendExtras,
 };
 use serde_json::Value;
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
@@ -550,6 +551,252 @@ async fn d2_b12_2_read_cursor_is_seq_based_and_unread_is_exact() {
     assert!(
         refused.is_none(),
         "a member of the workspace but not the channel cannot move a cursor in it"
+    );
+}
+
+/// ADR-0178 / #1934 — the mark-unread signal is independent of GREATEST.
+///
+/// Goes red if a stale/background advertisement clears the mark, if
+/// explicit_open leaves it, if a future seq is stored (or clamps like a
+/// cursor), or if a refused mark still advances `last_read_seq`.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 DB + momo_app role"]
+async fn d2_b12_2b_mark_unread_survives_stale_background_and_clears_on_explicit_open() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+
+    let ws = Uuid::new_v4();
+    let reader = Uuid::new_v4();
+    let author = Uuid::new_v4();
+    seed_workspace(&su, ws).await;
+    seed_member(&su, ws, reader, "human", "reader").await;
+    seed_member(&su, ws, author, "human", "author").await;
+
+    let channel = create_channel(
+        &app,
+        ws,
+        NewChannel {
+            kind: ChannelKind::Public,
+            name: "mark-unread".into(),
+            topic: None,
+            created_by: author,
+        },
+    )
+    .await
+    .expect("create channel");
+    seed_membership(&su, ws, channel.id, reader).await;
+
+    for index in 1..=5 {
+        send_message(
+            &app,
+            ws,
+            NewMessage::text(channel.id, author, format!("m{index}")),
+        )
+        .await
+        .expect("send");
+    }
+
+    // Cursor sits at 3, two messages still unread, so a refused mark that
+    // travels with last_read_seq=5 would be visible as a cursor advance if
+    // validation ran after the write.
+    let parked = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move { update_read_cursor_in_tx(conn, ws, channel.id, reader, 3).await })
+    })
+    .await
+    .expect("park cursor")
+    .expect("member");
+    assert_eq!(parked.state.last_read_seq, 3);
+    assert_eq!(parked.state.unread_count, 2);
+    assert_eq!(parked.state.marked_unread_before_seq, None);
+
+    let marked = with_tenant_tx(&app, ws, {
+        let channel_id = channel.id;
+        move |conn| {
+            Box::pin(async move {
+                update_read_cursor_with_intent_in_tx(
+                    conn,
+                    ws,
+                    channel_id,
+                    reader,
+                    3,
+                    MarkUnreadWrite::Set(2),
+                    ReadIntent::Background,
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("set mark");
+    let ReadCursorOutcome::Updated(marked) = marked else {
+        panic!("setting a real seq must succeed, got {marked:?}");
+    };
+    assert_eq!(marked.state.last_read_seq, 3, "GREATEST is untouched");
+    assert_eq!(marked.state.marked_unread_before_seq, Some(2));
+    assert_eq!(
+        marked.state.unread_count, 2,
+        "D3: unread_count stays latest-cursor; the server does not compose the mark"
+    );
+    assert!(
+        marked.outbox_id.is_some(),
+        "a mark change publishes even when the cursor stood still"
+    );
+
+    let listed = with_tenant_tx(&app, ws, move |conn| {
+        Box::pin(async move { list_read_state(conn, ws, reader).await })
+    })
+    .await
+    .expect("list");
+    let listed = listed
+        .iter()
+        .find(|state| state.channel_id == channel.id)
+        .expect("channel listed");
+    assert_eq!(listed.marked_unread_before_seq, Some(2));
+    assert_eq!(listed.unread_count, 2);
+
+    // Proof ①: a stale device replays seq 1. GREATEST is a no-op, background
+    // leaves the mark.
+    let stale = with_tenant_tx(&app, ws, {
+        let channel_id = channel.id;
+        move |conn| {
+            Box::pin(async move {
+                update_read_cursor_with_intent_in_tx(
+                    conn,
+                    ws,
+                    channel_id,
+                    reader,
+                    1,
+                    MarkUnreadWrite::Leave,
+                    ReadIntent::Background,
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("stale replay");
+    let ReadCursorOutcome::Updated(stale) = stale else {
+        panic!("a member's stale replay must apply, got {stale:?}");
+    };
+    assert!(!stale.advanced);
+    assert_eq!(stale.state.last_read_seq, 3);
+    assert_eq!(
+        stale.state.marked_unread_before_seq,
+        Some(2),
+        "a stale background advertisement must not clear the mark"
+    );
+    assert!(
+        stale.outbox_id.is_none(),
+        "GREATEST no-op + unchanged mark must not publish"
+    );
+
+    // Proof ③ before we catch up: seq 99 does not exist. The accompanying
+    // last_read_seq=5 *would* advance 3 → 5 if validation ran after the write.
+    let refused = with_tenant_tx(&app, ws, {
+        let channel_id = channel.id;
+        move |conn| {
+            Box::pin(async move {
+                update_read_cursor_with_intent_in_tx(
+                    conn,
+                    ws,
+                    channel_id,
+                    reader,
+                    5,
+                    MarkUnreadWrite::Set(99),
+                    ReadIntent::Background,
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("future seq");
+    assert_eq!(refused, ReadCursorOutcome::MarkSeqNotInChannel(99));
+
+    let stored_mark: Option<i64> = sqlx::query_scalar(
+        "SELECT marked_unread_before_seq FROM read_state \
+          WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(channel.id)
+    .bind(reader)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    let stored_cursor: i64 = sqlx::query_scalar(
+        "SELECT last_read_seq FROM read_state WHERE channel_id = $1 AND member_id = $2",
+    )
+    .bind(channel.id)
+    .bind(reader)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        stored_mark,
+        Some(2),
+        "a refused mark must leave the previous mark in place"
+    );
+    assert_eq!(
+        stored_cursor, 3,
+        "a refused mark must not sneak a cursor advance through"
+    );
+
+    // Proof ②: explicit_open with the same seq (no advance) clears the mark
+    // in this transaction.
+    let opened = with_tenant_tx(&app, ws, {
+        let channel_id = channel.id;
+        move |conn| {
+            Box::pin(async move {
+                update_read_cursor_with_intent_in_tx(
+                    conn,
+                    ws,
+                    channel_id,
+                    reader,
+                    3,
+                    MarkUnreadWrite::Leave,
+                    ReadIntent::ExplicitOpen,
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("explicit open");
+    let ReadCursorOutcome::Updated(opened) = opened else {
+        panic!("explicit open must apply, got {opened:?}");
+    };
+    assert_eq!(opened.state.last_read_seq, 3);
+    assert_eq!(opened.state.marked_unread_before_seq, None);
+    assert!(opened.outbox_id.is_some(), "clearing the mark publishes");
+
+    // Set + explicit_open: the deliberate mark outranks the inference.
+    let both = with_tenant_tx(&app, ws, {
+        let channel_id = channel.id;
+        move |conn| {
+            Box::pin(async move {
+                update_read_cursor_with_intent_in_tx(
+                    conn,
+                    ws,
+                    channel_id,
+                    reader,
+                    5,
+                    MarkUnreadWrite::Set(4),
+                    ReadIntent::ExplicitOpen,
+                )
+                .await
+            })
+        }
+    })
+    .await
+    .expect("set wins");
+    let ReadCursorOutcome::Updated(both) = both else {
+        panic!("set+open must apply, got {both:?}");
+    };
+    assert_eq!(both.state.last_read_seq, 5);
+    assert_eq!(
+        both.state.marked_unread_before_seq,
+        Some(4),
+        "setting a mark is a thing a person just did; it outranks the open inference"
     );
 }
 

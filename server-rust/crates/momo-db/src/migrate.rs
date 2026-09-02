@@ -406,19 +406,23 @@ mod tests {
     /// JSONB blob per (workspace, member) holding that member's custom sidebar
     /// sections, channel placement and stars. `ws_isolation` RLS as D2 names;
     /// schema_v0.sql is not modified; no outbox fan-out.
+    ///
+    /// 085 is ADR-0178's mark-unread signal (#1934 BT-6 server half): nullable
+    /// `read_state.marked_unread_before_seq`. schema_v0.sql is not modified;
+    /// last_read_seq GREATEST is unchanged.
     #[test]
-    fn discovers_contiguous_migrations_001_to_084() {
+    fn discovers_contiguous_migrations_001_to_085() {
         let dir = default_migrations_dir();
         let migrations = discover_migrations(&dir).expect("migrations directory readable");
 
         assert_eq!(
             migrations.len(),
-            84,
-            "expected 84 migrations under {}",
+            85,
+            "expected 85 migrations under {}",
             dir.display()
         );
         assert_eq!(migrations.first().unwrap().version, 1);
-        assert_eq!(migrations.last().unwrap().version, 84);
+        assert_eq!(migrations.last().unwrap().version, 85);
         assert!(migrations.first().unwrap().name.starts_with("001_init"));
 
         for (i, migration) in migrations.iter().enumerate() {

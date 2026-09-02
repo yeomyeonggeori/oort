@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use momo_messaging::{SearchScope, SidebarPrefs};
+use momo_messaging::{ReadIntent, SearchScope, SidebarPrefs};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
@@ -2533,6 +2533,39 @@ pub struct OpenDirectMessageResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateReadStateRequestDto {
     pub last_read_seq: i64,
+    /// ADR-0178 D5 — set the mark-unread signal to this seq. Absent on the
+    /// overwhelming majority of requests (every ordinary cursor advance).
+    #[serde(default)]
+    pub mark_unread_before_seq: Option<i64>,
+    /// ADR-0178 D4 — why this advertisement was sent.
+    ///
+    /// Absent means [`ReadIntentDto::Background`], and that default is the
+    /// safety property, not a convenience: every client that predates this
+    /// field, plus the retiring Swift server, sends nothing, and none of them
+    /// may silently erase a mark someone left on purpose.
+    #[serde(default)]
+    pub read_intent: Option<ReadIntentDto>,
+}
+
+/// Wire spelling of [`momo_messaging::ReadIntent`].
+///
+/// `deny_unknown_variants` is what `serde` does by default for enums, and here
+/// that strictness is wanted: a typo'd intent must be a loud 400, not a silent
+/// downgrade to whichever behaviour the typo happened to resemble.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadIntentDto {
+    ExplicitOpen,
+    Background,
+}
+
+impl From<ReadIntentDto> for ReadIntent {
+    fn from(dto: ReadIntentDto) -> Self {
+        match dto {
+            ReadIntentDto::ExplicitOpen => ReadIntent::ExplicitOpen,
+            ReadIntentDto::Background => ReadIntent::Background,
+        }
+    }
 }
 
 /// Swift `ReadStateDTO` (:301-315) — snake_case for the same reason.
@@ -2543,6 +2576,10 @@ pub struct ReadStateDto {
     pub latest_seq: i64,
     pub unread_count: i64,
     pub mention_count: i32,
+    /// ADR-0178 D2. Always present (`null` when unmarked) rather than skipped:
+    /// a client distinguishing "no mark" from "this server is too old to have
+    /// the concept" needs the key to be there.
+    pub marked_unread_before_seq: Option<i64>,
 }
 
 /// Swift `ReadStateListResponseDTO` (:317-322).
@@ -4537,6 +4574,7 @@ mod tests {
                 latest_seq: 2,
                 unread_count: 1,
                 mention_count: 0,
+                marked_unread_before_seq: None,
             }],
         })
         .expect("serialize");
@@ -4544,6 +4582,41 @@ mod tests {
         assert!(json.get("readStates").is_none(), "{json}");
         assert_eq!(json["read_states"][0]["channel_id"], "c");
         assert_eq!(json["read_states"][0]["last_read_seq"], 1);
+        assert!(
+            json["read_states"][0]
+                .get("marked_unread_before_seq")
+                .is_some(),
+            "the mark key is always present: {json}"
+        );
+        assert!(json["read_states"][0]["marked_unread_before_seq"].is_null());
+    }
+
+    #[test]
+    fn unknown_read_intent_is_rejected_and_absent_is_background() {
+        let unknown: Result<UpdateReadStateRequestDto, _> = serde_json::from_value(
+            serde_json::json!({"last_read_seq": 1, "read_intent": "stale_flush"}),
+        );
+        assert!(
+            unknown.is_err(),
+            "a typo'd intent must not silently become background"
+        );
+
+        let absent: UpdateReadStateRequestDto =
+            serde_json::from_value(serde_json::json!({"last_read_seq": 1})).expect("decode");
+        assert_eq!(absent.read_intent, None);
+        assert_eq!(
+            absent.read_intent.map(ReadIntent::from).unwrap_or_default(),
+            ReadIntent::Background
+        );
+
+        let open: UpdateReadStateRequestDto = serde_json::from_value(serde_json::json!({
+            "last_read_seq": 1,
+            "read_intent": "explicit_open",
+            "mark_unread_before_seq": 3,
+        }))
+        .expect("decode");
+        assert_eq!(open.read_intent, Some(ReadIntentDto::ExplicitOpen));
+        assert_eq!(open.mark_unread_before_seq, Some(3));
     }
 
     #[test]

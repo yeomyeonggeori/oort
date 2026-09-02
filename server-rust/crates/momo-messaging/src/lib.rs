@@ -150,7 +150,8 @@ pub use presence::{
 pub use read_state::{
     build_read_state_payload, contains_mention, effective_cursor, list_read_state,
     mention_id_token, read_state_channel, record_mentions_in_tx, unread_count,
-    update_read_cursor_in_tx, ReadCursorUpdate, ReadState, MENTION_PROPS_KEY,
+    update_read_cursor_in_tx, update_read_cursor_with_intent_in_tx, MarkUnreadWrite,
+    ReadCursorOutcome, ReadCursorUpdate, ReadIntent, ReadState, MENTION_PROPS_KEY,
 };
 pub use refine::{
     harness_refine_client_msg_id, harness_refine_input_props, validate_harness_refine,
