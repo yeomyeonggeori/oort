@@ -44,7 +44,7 @@ const IDENT_ALT = IDENT_NAMES.join("|");
 /** Math / ?? / ternary `?` (not `??` `?.` `?:`) / spaced relational / + −.
  *  `<Type>` generics are not comparisons — `>` before `{` is a return type. */
 const COMPOSITION =
-  /\bMath\.(?:min|max)\b|\?\?|(?<!\?)\?(?![?.:])|(?<=\s)[<>]=?(?!=)(?=\s[A-Za-z0-9_(])|(?<![\w$])[+\-](?![=>])/;
+  /\bMath\.(?:min|max)\b|\?\?|(?<!\?)\?(?![?.:])|(?<=\s)[<>]=?(?!=)(?=\s[A-Za-z0-9_(])|(?<![\w$])[+-](?![=>])/;
 
 const ALLOW_RELATIVE = new Set([
   "features/readState/model.ts",
