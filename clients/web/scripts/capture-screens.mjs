@@ -40,39 +40,58 @@ async function frameEnabledToolsSection(page, where) {
   const section = page.getByTestId("agent-hub-enabled-tools");
   await section.waitFor({ state: "visible" });
   const previous = page.viewportSize();
-  const metrics = await page.evaluate(() => {
-    const el = document.querySelector('[data-testid="agent-hub-enabled-tools"]');
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    return { height: r.height };
-  });
-  if (!metrics) throw new Error(`[${where}] tools section missing`);
-  const height = Math.max(previous.height, Math.ceil(metrics.height + 160));
-  await page.setViewportSize({ width: previous.width, height });
-  await section.evaluate((el) => el.scrollIntoView({ block: "start" }));
-  await page.waitForTimeout(200);
-  const frame = await page.evaluate(() => {
-    const sec = document.querySelector('[data-testid="agent-hub-enabled-tools"]');
-    const btn = document.querySelector('[data-testid="agent-hub-enabled-tools-save"]');
-    if (!sec || !btn) return { ok: false, reason: "missing-save" };
-    const sr = sec.getBoundingClientRect();
-    const br = btn.getBoundingClientRect();
-    const vh = window.innerHeight;
-    const vw = window.innerWidth;
-    return {
-      ok:
-        br.top >= 0 &&
-        br.bottom <= vh &&
-        br.left >= 0 &&
-        br.right <= vw &&
-        sr.top >= -8,
-      vh,
-      saveTop: br.top,
-      saveBottom: br.bottom,
-      sectionTop: sr.top,
-    };
-  });
-  if (!frame.ok) {
+  const measure = () =>
+    page.evaluate(() => {
+      const sec = document.querySelector(
+        '[data-testid="agent-hub-enabled-tools"]'
+      );
+      const btn = document.querySelector(
+        '[data-testid="agent-hub-enabled-tools-save"]'
+      );
+      if (!sec) return null;
+      const sr = sec.getBoundingClientRect();
+      const br = btn?.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      return {
+        ok:
+          Boolean(br) &&
+          br.top >= 0 &&
+          br.bottom <= vh &&
+          br.left >= 0 &&
+          br.right <= vw &&
+          sr.top >= -8,
+        vh,
+        saveTop: br?.top ?? null,
+        saveBottom: br?.bottom ?? null,
+        sectionTop: sr.top,
+        sectionBottom: sr.bottom,
+        reason: btn ? undefined : "missing-save",
+      };
+    });
+
+  // Phone stacks roster above the profile, so scrollIntoView leaves an
+  // unscrollable offset (~449px). Grow by saveBottom after that scroll, not
+  // by section height alone.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await section.evaluate((el) => el.scrollIntoView({ block: "start" }));
+    await page.waitForTimeout(120);
+    const frame = await measure();
+    if (!frame) throw new Error(`[${where}] tools section missing`);
+    if (frame.ok) return previous;
+    if (frame.reason === "missing-save" || frame.saveBottom == null) {
+      throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+    }
+    const needed = Math.ceil(
+      Math.max(frame.saveBottom, frame.sectionBottom) + 64
+    );
+    if (needed <= page.viewportSize().height) {
+      throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+    }
+    await page.setViewportSize({ width: previous.width, height: needed });
+  }
+  const frame = await measure();
+  if (!frame?.ok) {
     throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
   }
   return previous;
