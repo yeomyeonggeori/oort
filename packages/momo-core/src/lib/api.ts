@@ -244,6 +244,27 @@ export interface ReadState {
   latestSeq: number;
   unreadCount: number;
   mentionCount: number;
+  /**
+   * ADR-0178 D2. Inclusive seq from which this channel is unread. Wire name
+   * `marked_unread_before_seq` (always present on a current server, JSON
+   * `null` when unmarked). Missing on an older server is treated as unmarked.
+   * Do not compose this field here — `effectiveUnreadStartSeq` in
+   * `features/readState/model.ts` is the only composition point.
+   */
+  markedUnreadBeforeSeq: number | null;
+}
+
+/** ADR-0178 D6. Only `"explicit_open"` is sent; absence means background. */
+export type ReadIntent = "explicit_open" | "background";
+
+export interface UpdateReadStateOptions {
+  /** D5. Set the mark-unread signal to this existing channel seq. */
+  markUnreadBeforeSeq?: number;
+  /**
+   * D6. Send only `"explicit_open"`. Do not send `"background"` — omitting
+   * the field is the wire form of background.
+   */
+  readIntent?: "explicit_open";
 }
 
 /** Thread rollup embedded in a message page (snake_case on the wire). */
@@ -1585,6 +1606,18 @@ interface WireReadState {
   latest_seq: number;
   unread_count: number;
   mention_count: number;
+  marked_unread_before_seq?: number | null;
+}
+
+function markedUnreadBeforeSeqFromWire(
+  wire: WireReadState
+): number | null {
+  const value = wire.marked_unread_before_seq;
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  return null;
 }
 
 function toReadState(wire: WireReadState): ReadState {
@@ -1594,6 +1627,7 @@ function toReadState(wire: WireReadState): ReadState {
     latestSeq: wire.latest_seq,
     unreadCount: wire.unread_count,
     mentionCount: wire.mention_count,
+    markedUnreadBeforeSeq: markedUnreadBeforeSeqFromWire(wire),
   };
 }
 
@@ -1618,11 +1652,15 @@ export async function fetchReadStates(
 /**
  * Advance the caller's read cursor. The server clamps to
  * `max(current, min(requested, latestSeq))`, so it can never regress.
+ *
+ * Optional `markUnreadBeforeSeq` / `readIntent` are ADR-0178 D5/D6. RED
+ * (#1934): the extra keys are not yet on the wire. GREEN serializes them.
  */
 export async function updateReadState(
   workspaceId: string,
   channelId: string,
-  lastReadSeq: number
+  lastReadSeq: number,
+  _options?: UpdateReadStateOptions
 ): Promise<ReadState> {
   const res = await request<WireReadState>(
     `/v1/workspaces/${encodeURIComponent(

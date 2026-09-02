@@ -331,6 +331,11 @@ export interface MessageActionAvailability {
    * still type-checks; missing is off.
    */
   remind?: boolean;
+  /**
+   * ADR-0178. Optional so a phone surface that has not consumed BT-6 yet
+   * still type-checks; missing is off.
+   */
+  markUnread?: boolean;
   edit: boolean;
   delete: boolean;
 }

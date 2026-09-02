@@ -128,6 +128,7 @@ function readStateFixture(over: Partial<ReadState> = {}): ReadState {
     latestSeq: 47,
     unreadCount: 7,
     mentionCount: 0,
+    markedUnreadBeforeSeq: null,
     ...over,
   };
 }

@@ -17,6 +17,7 @@ export type MessageActionItemKey =
   | "copy-link"
   | "pin"
   | "remind"
+  | "mark-unread"
   | "edit"
   | "delete";
 
@@ -48,7 +49,7 @@ export interface MessageActionCopyState {
  *                   `copyMessageActionLabel` so it sits next to the link
  *                   action; both are verb phrases, same as the phone sheet.
  *   * copy-link   — `#/c/{ch}?msg=&seq=` already lands (ChatShell + searchHitPath).
- *   * mark unread — PUT read-state is monotone (`GREATEST`). Accrued.
+ *   * mark unread — ADR-0178. 「여기부터 안 읽음」. RED: inventory not yet.
  *   * remind later — ADR-0175 / #1888. 「나중에 알림」 in this inventory.
  *   * report — no surface. Accrued.
  */

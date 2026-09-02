@@ -1,6 +1,7 @@
 import {
   Bell,
   Copy,
+  EyeOff,
   Link,
   MessageSquareReply,
   MoreHorizontal,
@@ -119,6 +120,8 @@ export interface MessageActionCallbacks {
   onPin: () => void;
   /** ADR-0175 — open the later-reminder dialog for this row. */
   onRemind: () => void;
+  /** ADR-0178 — mark this channel unread from this message's seq. */
+  onMarkUnread?: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }
@@ -144,6 +147,8 @@ function actionIcon(item: MessageActionItem, pinned: boolean) {
       );
     case "remind":
       return <Bell className="size-4" aria-hidden="true" />;
+    case "mark-unread":
+      return <EyeOff className="size-4" aria-hidden="true" />;
     case "edit":
       return <Pencil className="size-4" aria-hidden="true" />;
     case "delete":
@@ -181,6 +186,9 @@ function invokeAction(
       return;
     case "remind":
       callbacks.onRemind();
+      return;
+    case "mark-unread":
+      callbacks.onMarkUnread?.();
       return;
     case "edit":
       callbacks.onEdit();
