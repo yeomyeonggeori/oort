@@ -77,26 +77,26 @@ scripts/self_host_env.sh --local-build
 `ghcr.io/yeomyeonggeori/oort`만** 받으며, 형식이 틀리면 env를 만들기 전에
 실패한다. 릴리스에 digest 표가 없으면 A를 쓴다.
 
-아래는 v0.1.3 공개 발행의 **앱** list digest(빌드 커밋 `main=4d3085ad`,
-Release [v0.1.3](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.3)).
+아래는 v0.1.4 공개 발행의 **앱** list digest(빌드 커밋 `main=e39e9427`,
+Release [v0.1.4](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.4)).
 이 값이 항상 최신은 아니다 — Releases를 본다.
 
 ```sh
-IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:e0faed220e6463627dc3c1b1fe7e629cca0e1d2a64335efb14fbe00174c48688'
+IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f'
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
-같은 발행의 두 list digest (v0.1.3, 빌드 커밋 `main=4d3085ad`).
+같은 발행의 두 list digest (v0.1.4, 빌드 커밋 `main=e39e9427`).
 `--published-image`에는 앱 행만 넣는다. postgres 행은 Release 표와
 운영/PITR 경로용이며, 이 문서 compose의 postgres 서비스가 소비하는 값이
 아니다.
 
 | 대상 | 불변 이미지 |
 |---|---|
-| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:e0faed220e6463627dc3c1b1fe7e629cca0e1d2a64335efb14fbe00174c48688` |
-| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:49a589bd6b98ba6451155cbb5a70f9cef2574566593ff39e3bc9881a2486d071` |
+| 앱 | `ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f` |
+| PostgreSQL 18 + pgBackRest | `ghcr.io/yeomyeonggeori/oort-postgres@sha256:563ee793c3e8fb9417dfc8bd6b72fdfa70680d48de81c3633d75b820f507e3b5` |
 
-공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.3
+공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 표의 v0.1.4
 digest는 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
 Silicon과 ARM 서버는 이 pin을 native pull한다. 첫 공개 발행
 v0.1.0(`main=45a154d2`)은 amd64 단일였고, 그 digest의 Apple Silicon
