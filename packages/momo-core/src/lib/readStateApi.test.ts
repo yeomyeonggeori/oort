@@ -25,6 +25,18 @@ afterEach(() => {
   resetCoreHost();
 });
 
+function putBody(fetchMock: ReturnType<typeof vi.fn>): unknown {
+  const call = fetchMock.mock.calls[0];
+  if (call === undefined) throw new Error("fetch was not called");
+  const init = call[1];
+  if (typeof init !== "object" || init === null) {
+    throw new Error("fetch init is missing");
+  }
+  const body = "body" in init ? init.body : undefined;
+  if (typeof body !== "string") throw new Error("fetch body is not a string");
+  return JSON.parse(body) as unknown;
+}
+
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
@@ -94,8 +106,7 @@ describe("read-state wire (ADR-0178 / PR #1961 snake_case)", () => {
     );
     vi.stubGlobal("fetch", fetchMock);
     await updateReadState("ws", "c-1", 15, { readIntent: "explicit_open" });
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
+    expect(putBody(fetchMock)).toEqual({
       last_read_seq: 15,
       read_intent: "explicit_open",
     });
@@ -106,9 +117,8 @@ describe("read-state wire (ADR-0178 / PR #1961 snake_case)", () => {
     const fetchMock = vi.fn(async () => jsonResponse(WIRE));
     vi.stubGlobal("fetch", fetchMock);
     await updateReadState("ws", "c-1", 15);
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({ last_read_seq: 15 });
-    expect(JSON.parse(String(init.body))).not.toHaveProperty("read_intent");
+    expect(putBody(fetchMock)).toEqual({ last_read_seq: 15 });
+    expect(putBody(fetchMock)).not.toHaveProperty("read_intent");
   });
 
   it("여기부터 안 읽음은 mark_unread_before_seq 만 싣고 read_intent 는 생략한다", async () => {
@@ -116,11 +126,10 @@ describe("read-state wire (ADR-0178 / PR #1961 snake_case)", () => {
     const fetchMock = vi.fn(async () => jsonResponse(WIRE));
     vi.stubGlobal("fetch", fetchMock);
     await updateReadState("ws", "c-1", 10, { markUnreadBeforeSeq: 3 });
-    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
-    expect(JSON.parse(String(init.body))).toEqual({
+    expect(putBody(fetchMock)).toEqual({
       last_read_seq: 10,
       mark_unread_before_seq: 3,
     });
-    expect(JSON.parse(String(init.body))).not.toHaveProperty("read_intent");
+    expect(putBody(fetchMock)).not.toHaveProperty("read_intent");
   });
 });

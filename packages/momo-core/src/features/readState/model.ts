@@ -7,7 +7,7 @@
 // Every consumer (sidebar badge, UnreadDivider, UnreadPill, ⌥↑/⌥↓, anything
 // else that derives "unread") goes through these functions. Arithmetic or
 // comparison on `markedUnreadBeforeSeq` anywhere else is a ticket failure
-// (`compositionGate.test.ts`).
+// (`clients/web/src/features/timeline/markUnread.compositionGate.test.ts`).
 // =============================================================================
 
 export interface UnreadCompositionInput {
