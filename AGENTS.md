@@ -1,12 +1,11 @@
-# AGENTS.md — oort (Codex 자율작업 운영 계약)
+# AGENTS.md — oort (구현 워커 운영 계약)
 
-> 이 파일은 코딩 에이전트(특히 **OpenAI Codex**)가 이 리포에서 자율 실행할 때 따르는 **단일 운영 계약**이다.
+> 이 파일은 구현 워커(어떤 하네스든 — **현재 레인·모델 값은 `docs/planning/PIPELINE.md`**)가 이 리포에서 goal을 수행할 때 따르는 **단일 운영 계약**이다.
 > 제품 이름은 **oort**, 레포 이름은 아직 **momo**다(작업명 유래 — README 각주). 두 이름이 섞여 있으면 오타가 아니라 이 사정이다.
-> Codex는 세션 시작 시 git root → 현재 디렉터리까지 `AGENTS.md`를 root→leaf 순으로 머지한다(leaf override). 이 파일이 root 계약이다.
-> **핵심 내용은 `CODEX.md`와 동일**(CODEX.md = 사람·도구가 직접 읽는 풀 가이드). 둘이 어긋나면 이 `AGENTS.md`가 우선.
+> Codex 계열 하네스는 `AGENTS.md`를 root→leaf로 자동 적재한다; 다른 하네스(grok CLI 등)는 브리프가 이 파일을 읽으라고 지시한다. 이 파일이 root 계약이다. (`CODEX.md`는 2026-09-02 이 파일로 병합됐고 링크 호환 스텁만 남아 있다.)
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
-> **실행 주체:** 기획은 성재(최종 승인)+Fable/GPT 5.6(병렬 planner), 공용 정본 통합은 `momo-main`(계약: `docs/planning/README.md`), **실제 구현은 Codex가 goal(=GitHub Issue)로 자율 실행**. **지금 세션이 기획/오케스트레이션이면 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽어라.** 동시 구현은 최대 **5 goal**(`docs/MULTI_SESSION_OPS.md`).
+> **실행 주체(레인):** product-owner(ADR·로드맵 승인) · planner/momo-main(기획·통합·머지) · worker(goal 구현) · reviewer(design/code). **각 레인의 현재 값(모델·도구)·병렬 상한·워크트리 경로는 `docs/planning/PIPELINE.md`가 유일한 정본**이다 — 이 파일은 그 값을 다시 적지 않는다. 기획/오케스트레이션 세션은 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽는다.
 > **현재 위치(2026-08):** 서버는 **Rust/Axum**(`server-rust/`, ADR-0145)이고, **호스티드 배포는 없다** — NCP 프로덕션은 2026-08-26 완전 철수(#1802·#1803). 실행 표면은 **셀프호스트 이미지(v0.1.2, `SELF_HOST.md`)와 로컬 리그**, 제품 표면은 **웹 + Tauri 데스크톱 + React Native 모바일**이다. **Swift 트리는 은퇴 중**(§0 아래 상자) — 그쪽에 새 기능을 얹지 마라. 최신 상태는 항상 `STATUS.md` 최상단이 정본이고, 이 문단은 방향만 가리킨다.
 > **표기:** `(검증됨)`=교차확인 · `(추정)`=설계/일정 판단 · `runtime-unverified`=해당 goal에서 아직 e2e를 못 닫은 것. **법무 텍스트는 법률 자문 아님.**
 
@@ -87,7 +86,7 @@ infra/prod/              Swift prod compose 계열
 > **Rust 툴체인 — 레포에 `rust-toolchain.toml`은 없다**(#1442 판정: 신설하지 않음). 고정이 없으니 네 환경의 기본 툴체인이 그대로 쓰이고, 그것이 아래 MSRV보다 낮으면 컴파일 이전 resolve 단계에서 거절된다(`rustc X is not supported by the following packages`). 카고 워크스페이스는 **둘**이고 MSRV가 서로 다르다(둘 다 #1442 실측): `server-rust` = **1.88.0**(time 0.3.54 계열), `clients/desktop/src-tauri` = **1.89.0**(notify-rust 4.18.0). 둘 다 만지면 **stable ≥ 1.89.0**을 써라. edition은 양쪽 다 `2021`이고 마이그레이션 계획 없음 — 그래프 안의 edition2024 크레이트는 서드파티이지 우리 코드가 아니다.
 > npm 트리는 lockfile이 셋이다 — 루트(`packages/*`), `clients/web`, `clients/mobile`. 셋 다 설치돼야 `make ts-check`가 돈다.
 
-> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`CODEX.md`·`docs/RUN.md`·`docs/runbooks/*.md`의
+> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`docs/RUN.md`·`docs/runbooks/*.md`(및 스텁 `CODEX.md`)의
 > 명령은 `scripts/check_docs_commands.py`가 매 프로파일에서 트리에 대고 해소한다 — 실행체 존재/구문,
 > `make` 타깃, `--profile` 이름, npm 스크립트, 우리 스크립트에 넘기는 long flag, compose·`--package-path`
 > 경로, 그리고 위의 `cargo fmt --all` 규칙. **명령을 고칠 때 문서도 같은 커밋에서 고쳐라** — 안 고치면
@@ -137,7 +136,7 @@ make swift-build ; make swift-test
 - `[infra]`/`[sql]` = 파일 존재 + `schema_v0.sql`(정본) 정합. Docker/psql로 적용 가능한 범위는 runtime 검증한다.
 - `[python]` = `python3 -m py_compile` 통과. `[ci]` = actionlint 통과 + (게이트 전) dry-run.
 - `[runtime]` = Docker/psql로 가능한 검증은 수행한다. hermes 등 외부 의존이 필요하면 실제 의존성 또는 mock을 먼저 준비하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + 절차 문서화.
-- `[manual]` = 사람 1회(발급/계약/심사). Codex는 런북/파일만 준비하고 위임 표시.
+- `[manual]` = 사람 1회(발급/계약/심사). 워커는 런북/파일만 준비하고 위임 표시.
 - `[swift]`(은퇴 중) = 삭제 대기 트리를 불가피하게 건드릴 때만. 새 goal의 수용기준으로 쓰지 마라.
 
 ## 4. Definition of Done (모든 이슈 공통 — 못 채우면 닫지 마라)

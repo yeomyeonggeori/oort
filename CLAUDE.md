@@ -1,15 +1,15 @@
 # CLAUDE.md — oort (기획/오케스트레이션 세션 진입점)
 
-> Claude(Fable) 세션의 기본 역할은 **기획 레이어**다. GPT 5.6 planner와 병렬로 일할 수 있지만 한 planning ID에는 owner가 하나뿐이며, 공용 정본 통합은 `momo-main`이 순차 수행한다. 직접 구현하지 않는다 — 구현은 Codex worker가 goal(=GitHub Issue)로 수행한다(계약: `AGENTS.md`).
+> Claude(Fable) 세션의 기본 역할은 **기획 레이어(planner)이자 통합자(momo-main)**다. 한 planning ID에는 owner가 하나뿐이며 공용 정본 통합은 순차 수행한다. 직접 구현하지 않는다 — 구현은 worker 레인이 goal(=GitHub Issue+패킷)로 수행한다(계약: `AGENTS.md`). **레인별 현재 값(모델·도구·병렬 상한·워크트리 경로)은 `docs/planning/PIPELINE.md`가 유일한 정본** — 여기에 모델명을 적지 않는다.
 
 ## 역할과 정본
-- **기획 절차 정본: `docs/planning/README.md`** — 진입 순서, ADR→티켓→핸드오프 패킷 체인, 병렬(최대 5)·머지·이탈 환류 규칙 전부 여기에.
+- **기획 절차 정본: `docs/planning/README.md`** — 진입 순서, ADR→티켓→핸드오프 패킷 체인, 병렬·머지·이탈 환류 규칙 전부 여기에. 레인 설정은 `docs/planning/PIPELINE.md`.
 - 결정 거버넌스: **ADR-0100** — 결정은 `docs/adr/`, 증거는 `STATUS.md`, 계획은 `ROADMAP.md`. 경계 변경(API/보안/스키마/방향/스택)은 Accepted ADR 없이 머지 금지.
 - 아키텍처 정본 `docs/architecture/overview.md` · UX 원칙 `docs/ux-bible/README.md`(P1~P15) · 티켓 수용기준 `BUILD_TICKETS.md`.
 - ADR·로드맵 정본 반영의 최종 승인은 항상 **성재**.
 
 ## 세션 시작 시
-1. `scripts/planning_context.sh` 또는 **`docs/planning/CURRENT_STATE.md`** — 현재 owner/결정/다음 행동 복원.
+1. `scripts/planning_context.sh` 또는 **`docs/planning/CURRENT_STATE.md`** — 현재 owner/결정/다음 행동 복원. 워커를 띄울 세션이면 `docs/planning/PIPELINE.md` §1·§3(현재 값·spawn 계약)도.
 2. `docs/planning/JOURNAL.md` 최근 항목과 `DEVIATION_LOG.md`의 `pending` 판정 확인.
 3. 새 기획은 `CURRENT_STATE.md`에서 비어 있는 planning ID를 claim한 뒤 시작.
 4. 오케스트레이션이면 `scripts/goal_status.sh`, 기획이면 결정 큐 + Proposed ADR 확인.
