@@ -2,6 +2,11 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-23 (Fable) · ★M-2 폐곡선 — #1702 머지(track/uxui=5679f6c8)·#1700 close. UXUI 파도 전량 종결
+- sol 워커 완주(1288 tests·PR #1702·정지 계약 준수) → 오케스트레이터 검수: 공유 코어 가산 무해(웹 tsc+첨부 23 그린)·project-shape 보정 스코프드·PHPicker selection-only라 권한 키 불요 판단 타당.
+- design-review 1차 PASS(High 2: picker 제시 레이스·iOS 낭독 무음) → **오케스트레이터 수리 065cb6a6**(onDismiss+폴백 이원화·draftAnnouncement+announce 배선, 레드 프루프 3/3) → **재판정 PASS(0·0)** → 머지. Medium 4·Nit 5·실기 미검증은 **#1703** 적립.
+- 이로써 UXUI 완성도 파도 8 goal(U-1~5·7·C-1·M-1+M-2) **전량 랜딩**. 남은 실기 확증=iOS 시뮬레이터 세션(Slow Animations 오독 주의 — 재판정 주석).
+
 ## 2026-08-23 (Fable) · ★T-9 폐곡선 — #1701 머지(track/engine=462efd67)·#1678 close
 - grok 워커 커밋(13파일·+806) 인수 검수: 유닛 283·red-proof 통합 3분기·생성기 멱등·docs 493 facts 전부 그린 → PR #1701 CI 그린 → 머지. ENGINE_HANDOFF **A-29 info**(UXUI 소비 작업 없음 — 클라 verbatim 불변). ADR-0167 집행 완결, D8 P1 원천 수리 폐곡선.
 - 운영 사고 복구: 호스트 ENOSPC 여파로 Colima VM containerd 블롭 I/O 에러(컨테이너 좀비化) → VM 재시작으로 완전 복구(pgdata 무손실·api 브리지 재기동). **교훈: 호스트 디스크 고갈은 VM 스파스 디스크를 통해 컨테이너층까지 전파된다 — 대형 빌드 전 df 확인.**
