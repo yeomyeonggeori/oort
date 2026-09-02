@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## UX-R2s 웰컴 킥오프 서버 절반 — RunTrigger::Welcome (#1960, 2026-09-02)
+
+- `RunTrigger::Welcome { kind: Opener|ProviderRequired|Closer }` + 멱등 키 `welcome:{ws}:{member}:{kind}:v1`. 가입 `createdMember:true`·owner claim 완주가 같은 tx에서 `agent_job`을 넣는다. 재가입·invite redeem(기존 멤버)은 무트리거.
+- 워커: provider 미구성이면 모델/원장 0, 에이전트 명의 정적 카피 1건(`ProviderRequired`) — opener 키는 소비하지 않음. opener는 정상 run + `usage_ledger`. G2 streak는 `welcome:%` run 제외.
+- settings `welcome_agent_member_id`(활성 에이전트)·`welcome_prompt`(≤2000자). WorkspaceDto 프로젝션. `schema_v0.sql` 무접촉. Closer는 enum 예약(v1 미구현).
+- runtime-unverified: 라이브 join→Centrifugo 첫 발화 왕복(클라 UX-R2b).
+
 ## M0s 기기 연결 서버 절반 — 1회용 QR 링크 토큰 (#1959, 2026-09-02)
 
 - `POST /v1/auth/device-link` 발급 · `POST …/redeem` 소비 · `GET …/{id}` 폴링 · `POST …/{id}/confirm-sas`. 마이그레이션 086 `device_link_token` + `token.device_label`/`pending_sas`. `schema_v0.sql` 무접촉.
