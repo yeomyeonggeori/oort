@@ -720,6 +720,11 @@ pub struct WorkspaceIdentity {
     /// Member-readable `settings.role_labels` projection (`{}` when absent).
     /// The rest of the settings bag is never carried on this type.
     pub role_labels: Value,
+    /// Member-readable `settings.welcome_agent_member_id`, when a valid uuid.
+    pub welcome_agent_member_id: Option<Uuid>,
+    /// Stored `settings.welcome_prompt`, when a non-empty string. The DTO
+    /// fills the canonical default when this is `None`.
+    pub welcome_prompt: Option<String>,
 }
 
 /// Why a workspace read produced no workspace — the distinction Swift's
@@ -766,6 +771,16 @@ pub async fn read_workspace_for_active_member(
                   THEN w.settings->'role_labels' \
                   ELSE '{}'::jsonb \
                 END AS role_labels, \
+                CASE \
+                  WHEN jsonb_typeof(w.settings->'welcome_agent_member_id') = 'string' \
+                  THEN w.settings->>'welcome_agent_member_id' \
+                  ELSE NULL \
+                END AS welcome_agent_member_id, \
+                CASE \
+                  WHEN jsonb_typeof(w.settings->'welcome_prompt') = 'string' \
+                  THEN w.settings->>'welcome_prompt' \
+                  ELSE NULL \
+                END AS welcome_prompt, \
                 floor(extract(epoch from w.updated_at) * 1000)::bigint AS updated_at_ms \
            FROM (SELECT 1) AS anchor \
            LEFT JOIN workspace w \
@@ -798,6 +813,13 @@ pub async fn read_workspace_for_active_member(
                 value @ Value::Object(_) => value,
                 _ => json!({}),
             },
+            welcome_agent_member_id: row
+                .try_get::<Option<String>, _>("welcome_agent_member_id")?
+                .and_then(|value| Uuid::parse_str(&value).ok()),
+            welcome_prompt: row
+                .try_get::<Option<String>, _>("welcome_prompt")?
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty()),
         })),
         None => {
             let exists: bool = row.try_get("workspace_exists")?;

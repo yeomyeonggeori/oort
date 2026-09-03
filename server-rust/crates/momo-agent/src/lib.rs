@@ -151,6 +151,7 @@ pub mod run;
 pub mod status;
 pub mod tools;
 pub mod usage;
+pub mod welcome;
 
 pub use approval::{
     approval_payload, approval_request_body, approval_request_props, attach_request_message_in_tx,
@@ -220,7 +221,8 @@ pub use run::{
     requeue_run_from_approval_in_tx, resume_runs_from_control_window_in_tx, terminal_run_ids_in_tx,
     trigger_summary, validated_run_limit, AgentRunRow, AgentRunSummaryPage, AgentRunSummaryRow,
     CancellableRun, CompletionStatusError, CreatedRun, EligibleAgent, GatewayRunSnapshot,
-    NewAgentRun, ParkedRun, RunBindingRejected, RunStatus, RunTrigger, TRIGGER_SUMMARY_LIMIT,
+    NewAgentRun, ParkedRun, RunBindingRejected, RunStatus, RunTrigger, WelcomeKind,
+    TRIGGER_SUMMARY_LIMIT,
 };
 pub use status::{
     agent_partial_payload, agent_partial_tool_call_payload, agent_status_channel,
@@ -233,4 +235,9 @@ pub use usage::{
     ChainUsage, ResolvedUsage, RunUsageReport, UsageAgentRow, UsageBucket, UsageBucketRow,
     UsageBudget, UsageModelRow, UsageSummary, UsageTotals, UsageWindow, UsageWindowError,
     DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
+};
+pub use welcome::{
+    resolve_welcome_target_in_tx, welcome_job_payload, welcome_run_input, WelcomeTarget,
+    DEFAULT_WELCOME_PROMPT, PROVIDER_REQUIRED_BODY, WELCOME_AUDIT_PROVIDER_REQUIRED,
+    WELCOME_AUDIT_QUEUED, WELCOME_AUDIT_SCHEMA, WELCOME_JOB_CREATED_FROM, WELCOME_RUN_INPUT_SCHEMA,
 };

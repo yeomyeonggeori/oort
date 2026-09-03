@@ -144,7 +144,9 @@ tags:
       Operator-only workspace.settings bag (#1800/#1770). Owner/admin. The bag
       is not exposed on GET /v1/workspaces/{workspaceId}; members read
       individual keys through derived projections. role_labels is accepted on
-      PATCH and projected as WorkspaceDto.roleLabels.
+      PATCH and projected as WorkspaceDto.roleLabels. welcome_agent_member_id
+      and welcome_prompt are accepted on PATCH and projected on WorkspaceDto
+      (ADR-0181).
 
 paths:
   /v1/auth/login:
@@ -1011,7 +1013,8 @@ paths:
         which must not grow a `settings` field — the bag is an extensible
         store that may later hold keys not every member may read.
         Members read `role_labels` through `WorkspaceDto.roleLabels` on that
-        identity GET.
+        identity GET, and `welcome_agent_member_id` / `welcome_prompt` through
+        the matching WorkspaceDto fields (ADR-0181).
       security:
         - bearerAuth: []
       parameters:
@@ -1042,9 +1045,11 @@ paths:
         Owner/admin only. RFC 7396-shaped top-level merge: specified keys
         replace, omitted keys stay, `null` deletes the key. Unknown top-level
         keys are 400. Allowlist is `allowed_agent_models` (string array, max
-        32 entries, each ≤ 64 bytes) and `role_labels` (object whose keys
+        32 entries, each ≤ 64 bytes), `role_labels` (object whose keys
         are `owner`/`admin`/`member`/`guest`, values non-empty strings ≤ 48
-        UTF-8 bytes). `role_labels` is replaced whole — omit a role key to
+        UTF-8 bytes), `welcome_agent_member_id` (uuid of an active workspace
+        agent, or null to delete), and `welcome_prompt` (string, ≤ 2000
+        characters). `role_labels` is replaced whole — omit a role key to
         drop that override; `null` deletes the key (client default labels).
         Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
       security:
@@ -1063,7 +1068,7 @@ paths:
             application/json:
               schema: {$ref: "#/components/schemas/WorkspaceSettings"}
         "400":
-          description: Unknown key, malformed allowed_agent_models or role_labels, or non-object body.
+          description: Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id or welcome_prompt, inactive welcome agent, or non-object body.
           content:
             application/json:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
@@ -11500,7 +11505,8 @@ components:
       description: >
         Stored workspace.settings bag. Additional keys may appear after a later
         ticket widens the allowlist. Writable keys today are
-        allowed_agent_models and role_labels (#1770).
+        allowed_agent_models, role_labels (#1770), welcome_agent_member_id
+        and welcome_prompt (ADR-0181 / #1960).
       additionalProperties: true
       properties:
         allowed_agent_models:
@@ -11511,6 +11517,19 @@ components:
           maxItems: 32
         role_labels:
           $ref: "#/components/schemas/RoleLabels"
+        welcome_agent_member_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Active agent member who posts the welcome opener. Null deletes
+            the override (kickoff then uses the first native agent).
+        welcome_prompt:
+          type: string
+          maxLength: 2000
+          description: >
+            Instruction for the opener run. Absent key uses the canonical
+            default copy.
 
     PatchWorkspaceSettingsRequest:
       type: object
@@ -11536,6 +11555,20 @@ components:
             guest}. Values are non-empty strings, ≤ 48 UTF-8 bytes.
             Whitespace-only is 400. Agent keys are refused. null deletes
             the key (client default labels).
+        welcome_agent_member_id:
+          nullable: true
+          type: string
+          format: uuid
+          description: >
+            Active agent member id. Inactive / non-agent ids are 400.
+            null deletes the key.
+        welcome_prompt:
+          nullable: true
+          type: string
+          maxLength: 2000
+          description: >
+            Opener instruction, ≤ 2000 characters. null deletes the key
+            (canonical default).
 
     RoleLabels:
       type: object
@@ -11554,9 +11587,9 @@ components:
       type: object
       description: >
         GET /v1/workspaces/{workspaceId} workspace object. Identity plus the
-        member-readable roleLabels projection. The settings bag is never
-        included.
-      required: [id, slug, name, updatedAtMs, roleLabels]
+        member-readable roleLabels and welcome projections. The settings bag
+        is never included.
+      required: [id, slug, name, updatedAtMs, roleLabels, welcomePrompt]
       properties:
         id: {type: string, format: uuid}
         slug: {type: string}
@@ -11571,6 +11604,18 @@ components:
           description: >
             Projection of workspace.settings.role_labels. Empty object when
             the key is absent. Display-only.
+        welcomeAgentMemberId:
+          type: string
+          format: uuid
+          nullable: true
+          description: >
+            Projection of workspace.settings.welcome_agent_member_id. Null
+            when unset.
+        welcomePrompt:
+          type: string
+          description: >
+            Effective welcome prompt. Canonical default when the settings
+            key is absent (ADR-0181 D8).
 
     WorkspaceResponse:
       type: object
