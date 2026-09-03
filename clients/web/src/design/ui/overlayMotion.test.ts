@@ -38,7 +38,7 @@ const FILES = {
   context: readFileSync(new URL("./context-menu.tsx", import.meta.url), "utf8"),
   select: readFileSync(new URL("./select.tsx", import.meta.url), "utf8"),
   harness: readFileSync(
-    new URL("./overlayMotion.harness.tsx", import.meta.url),
+    new URL("../overlayMotion.harness.tsx", import.meta.url),
     "utf8"
   ),
 } as const;
@@ -192,7 +192,7 @@ describe.skipIf(!chromiumAvailable)(
       const esbuild = await import("esbuild");
       const bundled = await esbuild.build({
         absWorkingDir: WEB_ROOT,
-        entryPoints: [resolve(HERE, "overlayMotion.harness.tsx")],
+        entryPoints: [resolve(HERE, "../overlayMotion.harness.tsx")],
         bundle: true,
         write: false,
         format: "iife",
@@ -254,41 +254,44 @@ describe.skipIf(!chromiumAvailable)(
 
     async function armCloseProbe(page: import("playwright").Page, selector: string) {
       await page.evaluate((sel) => {
-        const el = document.querySelector(sel);
         const target = window as Window & {
           __closeProbe?: Promise<Record<string, string | number | boolean | null>>;
         };
         target.__closeProbe = new Promise((resolve) => {
-          const report = (via: string) => {
+          const started = performance.now();
+          const tick = () => {
             const node = document.querySelector(sel);
             if (!node) {
-              resolve({ via, missing: true, connected: false });
+              resolve({ via: "detached", missing: true, connected: false });
               return;
             }
             const s = getComputedStyle(node);
-            resolve({
-              via,
-              state: node.getAttribute("data-state"),
-              name: s.animationName,
-              duration: s.animationDuration,
-              connected: node.isConnected,
-            });
-          };
-          if (!el) {
-            report("missing-before-close");
-            return;
-          }
-          const obs = new MutationObserver(() => {
-            if (el.getAttribute("data-state") === "closed") {
-              obs.disconnect();
-              report("mutation");
+            const name = s.animationName;
+            const state = node.getAttribute("data-state");
+            const isExit = /fade-out|zoom-out/.test(name);
+            if (state === "closed" && isExit) {
+              resolve({
+                via: "poll",
+                state,
+                name,
+                duration: s.animationDuration,
+                connected: node.isConnected,
+              });
+              return;
             }
-          });
-          obs.observe(el, { attributes: true, attributeFilter: ["data-state"] });
-          el.addEventListener("animationstart", () => report("animationstart"), {
-            once: true,
-          });
-          window.setTimeout(() => report("timeout"), 800);
+            if (performance.now() - started > 800) {
+              resolve({
+                via: "timeout",
+                state,
+                name,
+                duration: s.animationDuration,
+                connected: node.isConnected,
+              });
+              return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
         });
       }, selector);
     }
@@ -328,7 +331,9 @@ describe.skipIf(!chromiumAvailable)(
       const { browser, page } = await launchProbe();
       try {
         await page.getByTestId("open-dialog").click();
-        await page.locator(".bg-scrim").waitFor({ state: "visible" });
+        await page.locator('.bg-scrim[data-state="open"]').waitFor({
+          state: "visible",
+        });
         const overlay = await sample(page, ".bg-scrim");
         const content = await sample(page, '[data-testid="dialog-content"]');
 
@@ -378,7 +383,9 @@ describe.skipIf(!chromiumAvailable)(
 
         for (const surface of surfaces) {
           await surface.open();
-          await page.locator(surface.selector).waitFor({ state: "visible" });
+          await page.locator(`${surface.selector}[data-state="open"]`).waitFor({
+            state: "visible",
+          });
           const opened = await sample(page, surface.selector);
           expect(opened.name, surface.selector).toBe(OPEN.popover.name);
           expect(Math.round(opened.duration), surface.selector).toBe(OPEN.popover.ms);
@@ -408,7 +415,9 @@ describe.skipIf(!chromiumAvailable)(
       const { browser, page } = await launchProbe("reduce");
       try {
         await page.getByTestId("open-dialog").click();
-        await page.locator(".bg-scrim").waitFor({ state: "visible" });
+        await page.locator('.bg-scrim[data-state="open"]').waitFor({
+          state: "visible",
+        });
         const overlay = await sample(page, ".bg-scrim");
         expect(Math.round(overlay.duration)).toBe(0);
 

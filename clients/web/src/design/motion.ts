@@ -13,7 +13,7 @@ export const MODAL_CONTENT_MOTION =
   "origin-center data-[state=open]:motion-modal-enter-zoom data-[state=closed]:motion-modal-exit-zoom motion-reduce:animate-none";
 
 export const POPOVER_MOTION =
-  "data-[state=open]:motion-enter data-[state=closed]:motion-exit motion-reduce:animate-none";
+  "data-[state=open]:pointer-events-auto data-[state=open]:motion-enter data-[state=closed]:motion-exit motion-reduce:animate-none";
 
 /** D5. `active:scale-[0.98]` 은 arbitrary 금지와 충돌하므로 `.press`. */
 export const PRESS_CLASS = "press";
