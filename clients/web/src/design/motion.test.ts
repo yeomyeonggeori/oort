@@ -149,7 +149,7 @@ describe("ADR-0179 D2 easing", () => {
 });
 
 describe("ADR-0179 D3 도착 값", () => {
-  it("distance·blur 토큰이 있다 (키프레임 이관은 UX-R1)", () => {
+  it("distance·blur 토큰이 있다", () => {
     expect(MOTION_CSS).toMatch(/--motion-distance-arrival:\s*0\.75rem/);
     expect(MOTION_CSS).toMatch(/--motion-blur-arrival:\s*2px/);
   });
@@ -164,11 +164,33 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(block).toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
     expect(block).toMatch(/opacity:\s*0/);
     expect(block).toMatch(/translateY\(\s*var\(--motion-distance-arrival\)\s*\)/);
+    const toIdx = block.search(/\bto\s*\{/);
+    expect(toIdx).toBeGreaterThan(0);
+    const toBlock = block.slice(toIdx, toIdx + 220);
+    expect(toBlock).toMatch(/filter:\s*blur\(0\)/);
+    expect(toBlock).toMatch(/opacity:\s*1;/);
+    expect(toBlock).not.toMatch(/opacity:\s*0\.2/);
+    expect(toBlock).toMatch(/transform:\s*translateY\(0\)/);
+    expect(toBlock).not.toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
+    expect(toBlock).not.toMatch(
+      /translateY\(\s*var\(--motion-distance-arrival\)\s*\)/
+    );
   });
 
   it("enter-conversation 유틸이 키프레임을 arrival·arrival-ease 로 조립하고 규칙을 낸다", async () => {
     expect(MOTION_CSS).toMatch(
-      /animation:\s*motion-enter-conversation\s+var\(--motion-arrival\)\s+var\(--motion-ease-arrival\)/
+      /animation:\s*motion-enter-conversation\s+var\(--motion-arrival\)\s+var\(--motion-ease-arrival\)\s+1\s+both/
+    );
+    const utility = MOTION_CSS.match(
+      /@utility enter-conversation \{[\s\S]*?\}/
+    );
+    expect(utility, "enter-conversation @utility 가 없다").not.toBeNull();
+    expect(utility?.[0]).toMatch(/var\(--motion-ease-arrival\)\s+1\s+both/);
+    expect(utility?.[0]).not.toMatch(
+      /var\(--motion-ease-arrival\)\s+[2-9]\s+both/
+    );
+    expect(utility?.[0]).not.toMatch(
+      /var\(--motion-ease-arrival\)\s+both/
     );
     const css = await buildCss([ENTER_CONVERSATION_CLASS]);
     const selector = escapedClassSelector(ENTER_CONVERSATION_CLASS);
@@ -180,6 +202,8 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(snippet).toMatch(/motion-enter-conversation/);
     expect(snippet).toMatch(/var\(--motion-arrival\)/);
     expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
+    expect(snippet).toMatch(/animation-iteration-count:\s*1|1\s+both|iteration-count:\s*1/);
+    expect(snippet).toMatch(/\bboth\b/);
   });
 
   it.skipIf(!chromiumAvailable)(
@@ -204,6 +228,7 @@ describe("ADR-0179 D3 도착 값", () => {
         const measured = await page.evaluate(async () => {
           const el = document.getElementById("row");
           if (!el) throw new Error("row missing");
+          const style = getComputedStyle(el);
           const animations = el.getAnimations();
           const playCount = animations.filter(
             (animation) => animation.playState === "running" || animation.playState === "finished"
@@ -220,18 +245,44 @@ describe("ADR-0179 D3 도착 값", () => {
             const onEnd = (event: AnimationEvent) => {
               if (event.animationName !== "motion-enter-conversation") return;
               count += 1;
-              el.removeEventListener("animationend", onEnd);
-              resolve(count);
             };
             el.addEventListener("animationend", onEnd);
-            window.setTimeout(() => resolve(count), 2_000);
+            window.setTimeout(() => {
+              el.removeEventListener("animationend", onEnd);
+              resolve(count);
+            }, 1_200);
           });
-          return { playCount, durationMs, animationName, ends };
+          if (anim) {
+            anim.finish();
+          }
+          const landed = getComputedStyle(el);
+          return {
+            playCount,
+            durationMs,
+            animationName,
+            ends,
+            iterationCount: style.animationIterationCount,
+            fillMode: style.animationFillMode,
+            landedOpacity: landed.opacity,
+            landedFilter: landed.filter,
+            landedTransform: landed.transform,
+          };
         });
         expect(measured.playCount, `playCount=${measured.playCount}`).toBe(1);
         expect(measured.animationName).toBe(ENTER_CONVERSATION_ANIMATION_NAME);
         expect(measured.durationMs).toBe(500);
         expect(measured.ends).toBe(1);
+        expect(measured.iterationCount).toBe("1");
+        expect(measured.fillMode).toBe("both");
+        expect(measured.landedOpacity).toBe("1");
+        expect(
+          measured.landedFilter === "none" ||
+            measured.landedFilter === "blur(0px)"
+        ).toBe(true);
+        expect(
+          measured.landedTransform === "none" ||
+            measured.landedTransform === "matrix(1, 0, 0, 1, 0, 0)"
+        ).toBe(true);
       } finally {
         await browser.close();
       }

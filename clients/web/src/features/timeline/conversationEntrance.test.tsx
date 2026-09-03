@@ -115,6 +115,30 @@ describe("useConversationEntrance play count", () => {
     mount(false, () => consumed.push(1));
     expect(consumed.length).toBe(0);
   });
+
+  it("consumedRef 가 있으면 onConsumed 신원 변경에도 소비 1", () => {
+    const consumed: number[] = [];
+    host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+    act(() => {
+      mountedRoot?.render(
+        createElement(Probe, {
+          playEntrance: true,
+          onConsumed: () => consumed.push(1),
+        })
+      );
+    });
+    act(() => {
+      mountedRoot?.render(
+        createElement(Probe, {
+          playEntrance: true,
+          onConsumed: () => consumed.push(2),
+        })
+      );
+    });
+    expect(consumed).toEqual([1]);
+  });
 });
 
 // duration / computed animationName: jsdom 은 빈 문자열을 돌려준다. 그 값을
