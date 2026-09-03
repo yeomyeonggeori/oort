@@ -2,8 +2,8 @@
 
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
 
-- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, CSS `data-preview` 0, `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지). 미리보기 속성은 `data-gallery-preview`(첨부 `data-preview` 와 이름 충돌 없음).
-- ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 **칸(`data-gallery-stage`) 안에** 붙는다. 무대 높이는 표본 자신(pane 가로 토큰을 세로로 빌리지 않음). Dialog 스크림은 갤러리 대역. 캡처는 로드 포커스·스크롤 가시 면적(≥0.9)·네 변 잘림을 잰다.
+- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, 강제 미리보기 `:is(:hover,[preview])` 규칙 0 (`gallery-preview.css` 에서 속성·시그니처 파생), `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지). 미리보기 속성은 `data-gallery-preview`(첨부 `data-preview` 와 이름 충돌 없음).
+- ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 **칸(`data-gallery-stage`) 안에** 붙는다. 무대 높이는 표본 자신(pane 가로 토큰을 세로로 빌리지 않음). 네 판 `onOpenAutoFocus={preventAutoFocus}`(로드 후 첫 Tab 이 위 컨트롤, 스크롤 ~0). Dialog 스크림은 판 둘레에 보이는 대역(가림 없는 가시 면적). 캡처는 첫 Tab·휠 스크롤 가시 면적(≥0.9)·네 변 잘림·스크림 비가림을 잰다.
 - NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용. 스크림은 갤러리 대역.
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 

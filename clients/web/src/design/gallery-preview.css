@@ -37,3 +37,8 @@
   inset: auto !important;
   transform: none !important;
 }
+
+/* Specimen scrim is the replica. Radix still mounts Overlay in the stage. */
+[data-gallery-root] [data-gallery-stage] > .fixed.inset-0:not([data-gallery-replica]) {
+  display: none;
+}
