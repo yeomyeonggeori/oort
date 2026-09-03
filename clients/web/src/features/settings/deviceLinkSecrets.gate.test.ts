@@ -59,11 +59,12 @@ describe("device-link secrets grep-gate", () => {
       "utf8"
     );
     const frameNames = [
-      ...capture.matchAll(/settings-devices[A-Za-z0-9_-]*/g),
-    ].map((match) => match[0]);
+      ...capture.matchAll(/\$\{OUT_DIR\}\/([^`"'\s]+)/g),
+    ].map((match) => match[1]);
+    expect(frameNames.length).toBeGreaterThan(10);
     for (const name of frameNames) {
       for (const secret of secrets) {
-        expect(name).not.toContain(secret);
+        expect(name, name).not.toContain(secret);
       }
     }
 
