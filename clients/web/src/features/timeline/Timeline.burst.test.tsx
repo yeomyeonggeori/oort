@@ -476,6 +476,7 @@ describe("virtualized Timeline same-tick live burst", () => {
         );
       });
       await flushVirtuosoMount();
+      await flushVirtuosoMount();
       const css = await buildArrivalCss();
       const markup = host.innerHTML;
       let chromium: typeof import("playwright").chromium;

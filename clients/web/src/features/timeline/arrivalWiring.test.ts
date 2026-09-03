@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 
 const timeline = readFileSync(new URL("./Timeline.tsx", import.meta.url), "utf8");
@@ -8,6 +9,44 @@ const shell = readFileSync(
   new URL("../chat/ChatShell.tsx", import.meta.url),
   "utf8"
 );
+
+function jsxTagName(
+  node: ts.JsxOpeningElement | ts.JsxSelfClosingElement
+): string {
+  return node.tagName.getText();
+}
+
+/** Live JSX attribute bindings. Comments and string occurrences do not count. */
+function jsxBindingCount(
+  source: string,
+  component: string,
+  attr: string,
+  valueIncludes: string
+): number {
+  const file = ts.createSourceFile(
+    "ChatShell.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (jsxTagName(node) === component) {
+        for (const property of node.attributes.properties) {
+          if (!ts.isJsxAttribute(property)) continue;
+          if (property.name.getText() !== attr) continue;
+          const init = property.initializer;
+          if (init && init.getText().includes(valueIncludes)) count += 1;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return count;
+}
 
 describe("arrival wiring — mutations of the seam go red", () => {
   it("Timeline 은 isPlayEntrance(id) 만 넘기고 true 로 고정하지 않는다", () => {
@@ -23,12 +62,44 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("ChatShell 은 Timeline 과 ThreadPanel 에 같은 두 props 를 각각 잇는다", () => {
-    const grants = shell.split("isPlayEntrance={timeline.isPlayEntrance}");
-    expect(grants.length - 1).toBe(2);
-    const consumed = shell.split(
-      "onEntranceConsumed={timeline.consumeEntrance}"
-    );
-    expect(consumed.length - 1).toBe(2);
+    expect(
+      jsxBindingCount(shell, "Timeline", "isPlayEntrance", "timeline.isPlayEntrance")
+    ).toBe(1);
+    expect(
+      jsxBindingCount(shell, "ThreadPanel", "isPlayEntrance", "timeline.isPlayEntrance")
+    ).toBe(1);
+    expect(
+      jsxBindingCount(
+        shell,
+        "Timeline",
+        "onEntranceConsumed",
+        "timeline.consumeEntrance"
+      )
+    ).toBe(1);
+    expect(
+      jsxBindingCount(
+        shell,
+        "ThreadPanel",
+        "onEntranceConsumed",
+        "timeline.consumeEntrance"
+      )
+    ).toBe(1);
+    expect(
+      jsxBindingCount(
+        shell,
+        "Timeline",
+        "capUnmountedArrivals",
+        "timeline.capUnmountedArrivals"
+      )
+    ).toBe(1);
+    expect(
+      jsxBindingCount(
+        shell,
+        "ThreadPanel",
+        "capUnmountedArrivals",
+        "timeline.capUnmountedArrivals"
+      )
+    ).toBe(0);
   });
 
   it("ThreadPanel 은 루트와 답글에 playEntrance 를 잇는다", () => {
