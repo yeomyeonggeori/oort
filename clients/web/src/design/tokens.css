@@ -454,9 +454,10 @@
    * 모듈이 줄어든다(v7 3.32px, v8 3.09px). 축을 빌려 쓰지 않는다.
    *
    * 값은 스캔 가능한 모듈 피치의 바닥이다. 리듬 1단계(4px)가 화면의 한 모듈을
-   * 카메라가 분해하는 최소이고, 우물 한 변은 (버전 모듈 + 콰이어트 4×2) × 이
-   * 값으로 자란다. 버전 8 은 49+8=57 모듈 → 228px. `qr-well` 이
-   * `data-qr-modules` 로 이 값을 든다. */
+   * 카메라가 분해하는 최소이고, **내용 상자** 한 변이 (버전 모듈 + 콰이어트 4×2)
+   * × 이 값이다. padding 은 그 밖이다(content-box). border-box 로 곱하면
+   * spacing-2×2 가 내용에서 빠져 피치가 바닥 아래로 간다. 버전 8 은 57×4 = 228px
+   * 내용. `qr-well` 이 `data-qr-modules` 로 이 값을 든다. */
   --spacing-qr-module: 4px;
 
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
@@ -1397,9 +1398,10 @@
 
 /* 폰 카메라가 다크 스킴 화면을 뒤집힌 QR로 읽지 못하게, 이 그릇만 light-dark()
  * 를 낮의 항으로 고정한다. 값은 토큰이고 hex 는 여기 없다.
- * 한 변은 모듈 수 × `--spacing-qr-module`(피치 바닥). 버전이 커지면 상자가
- * 자라고 모듈은 줄지 않는다. */
+ * 내용 상자가 모듈 수 × `--spacing-qr-module`. padding 은 content-box 라
+ * 피치를 깎지 않는다. 버전이 커지면 상자가 자라고 모듈은 줄지 않는다. */
 @utility qr-well {
+  box-sizing: content-box;
   color-scheme: light;
   background-color: var(--surface);
   color: var(--ink);

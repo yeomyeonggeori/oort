@@ -26,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
+import { assertQrModulePitch } from "./qrModulePitch.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -1424,12 +1425,14 @@ const deviceLinkHarness = {
   sas: "4821",
   issueStatus: 201,
   getBody: () => ({ status: "pending" }),
+  deepLink: "",
 };
 
 function resetDeviceLinkHarness() {
   deviceLinkHarness.sas = "4821";
   deviceLinkHarness.issueStatus = 201;
   deviceLinkHarness.getBody = () => ({ status: "pending" });
+  deviceLinkHarness.deepLink = "";
 }
 
 function deviceLinkIssueBody() {
@@ -1437,10 +1440,48 @@ function deviceLinkIssueBody() {
     id: DEVICE_LINK_CAPTURE_ID,
     token: DEVICE_LINK_CAPTURE_TOKEN,
     expiresAt: Date.now() + 120_000,
-    deepLink: `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
+    deepLink:
+      deviceLinkHarness.deepLink ||
+      `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
   };
   if (deviceLinkHarness.sas) body.sas = deviceLinkHarness.sas;
   return body;
+}
+
+const QR_MODULE_FLOOR = Number(
+  (TOKENS_CSS.match(/--spacing-qr-module:\s*([\d.]+)px;/) || [])[1]
+);
+if (!Number.isFinite(QR_MODULE_FLOOR) || QR_MODULE_FLOOR <= 0) {
+  throw new Error(
+    "tokens.css missing a numeric --spacing-qr-module (capture cannot measure QR pitch)"
+  );
+}
+
+async function measureDeviceLinkQrPitch(page, label) {
+  const measured = await page.locator('[data-testid="device-link-qr"]').evaluate((el) => {
+    const modules = Number(el.getAttribute("data-qr-modules"));
+    const cs = getComputedStyle(el);
+    const pad =
+      (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const borderBox = el.getBoundingClientRect().width;
+    const content = borderBox - pad;
+    return {
+      modules,
+      content,
+      boxSizing: cs.boxSizing,
+      pitch: content / modules,
+    };
+  });
+  const pitch = assertQrModulePitch(
+    measured.content,
+    measured.modules,
+    QR_MODULE_FLOOR,
+    label
+  );
+  console.log(
+    `  device-link QR pitch ${label}: ${pitch.toFixed(3)} px/module (${measured.modules} modules, content ${measured.content}px, box-sizing ${measured.boxSizing})`
+  );
+  return measured;
 }
 
 async function installMocks(context) {
@@ -8296,9 +8337,36 @@ async function captureScheme(browser, scheme) {
 
   await devices.getByTestId("device-link-create").click();
   await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
-  await devices.getByTestId("device-link-sas").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-pending").waitFor({ state: "visible" });
   await shootDevices(devices, "qr");
   await devices.close();
+
+  const railwayDeepLink = `oort://link?server=https%3A%2F%2Foort-production-1a2b.up.railway.app&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+  const selfHostOrigin =
+    "https://self-hosted-oort.internal.yeomyeonggeori.example.com:8443";
+  const selfHostDeepLink = `oort://link?server=${encodeURIComponent(selfHostOrigin)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = railwayDeepLink;
+  const devicesV7 = await openDevicesPage();
+  await devicesV7.getByTestId("device-link-create").click();
+  await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
+  if (v7.modules !== 53) {
+    throw new Error(`v7 QR expected 53 modules, got ${v7.modules}`);
+  }
+  await devicesV7.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = selfHostDeepLink;
+  const devicesV8 = await openDevicesPage();
+  await devicesV8.getByTestId("device-link-create").click();
+  await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
+  if (v8.modules !== 57) {
+    throw new Error(`v8 QR expected 57 modules, got ${v8.modules}`);
+  }
+  await devicesV8.close();
 
   resetDeviceLinkHarness();
   deviceLinkHarness.getBody = () => ({
