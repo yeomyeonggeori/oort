@@ -26,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
+import { assertQrModulePitch } from "./qrModulePitch.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -1466,9 +1467,9 @@ const APPROVALS = [
   },
 ];
 
-function json(route, body) {
+function json(route, body, status = 200) {
   return route.fulfill({
-    status: 200,
+    status,
     contentType: "application/json",
     body: JSON.stringify(body),
   });
@@ -1521,6 +1522,78 @@ async function installUnmockedFallback(context) {
   });
 }
 
+const DEVICE_LINK_CAPTURE_TOKEN = [
+  "ABCDEFGHIJKLMNOPQRSTUV",
+  "WXYZabcdefghijklmnopq",
+].join("");
+const DEVICE_LINK_CAPTURE_ID = "019f9b10-0000-7000-8000-000000000d01";
+const DEVICE_LINK_CAPTURE_ORIGIN = "https://team.example.com";
+const DEVICE_LINK_CAPTURE_DEVICE =
+  "성재 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대";
+
+const deviceLinkHarness = {
+  sas: "4821",
+  issueStatus: 201,
+  getBody: () => ({ status: "pending" }),
+  deepLink: "",
+};
+
+function resetDeviceLinkHarness() {
+  deviceLinkHarness.sas = "4821";
+  deviceLinkHarness.issueStatus = 201;
+  deviceLinkHarness.getBody = () => ({ status: "pending" });
+  deviceLinkHarness.deepLink = "";
+}
+
+function deviceLinkIssueBody() {
+  const body = {
+    id: DEVICE_LINK_CAPTURE_ID,
+    token: DEVICE_LINK_CAPTURE_TOKEN,
+    expiresAt: Date.now() + 120_000,
+    deepLink:
+      deviceLinkHarness.deepLink ||
+      `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
+  };
+  if (deviceLinkHarness.sas) body.sas = deviceLinkHarness.sas;
+  return body;
+}
+
+const QR_MODULE_FLOOR = Number(
+  (TOKENS_CSS.match(/--spacing-qr-module:\s*([\d.]+)px;/) || [])[1]
+);
+if (!Number.isFinite(QR_MODULE_FLOOR) || QR_MODULE_FLOOR <= 0) {
+  throw new Error(
+    "tokens.css missing a numeric --spacing-qr-module (capture cannot measure QR pitch)"
+  );
+}
+
+async function measureDeviceLinkQrPitch(page, label) {
+  const measured = await page.locator('[data-testid="device-link-qr"]').evaluate((el) => {
+    const modules = Number(el.getAttribute("data-qr-modules"));
+    const cs = getComputedStyle(el);
+    const pad =
+      (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const borderBox = el.getBoundingClientRect().width;
+    const content = borderBox - pad;
+    return {
+      modules,
+      content,
+      boxSizing: cs.boxSizing,
+      pitch: content / modules,
+    };
+  });
+  const pitch = assertQrModulePitch(
+    measured.content,
+    measured.modules,
+    QR_MODULE_FLOOR,
+    label
+  );
+  console.log(
+    `  device-link QR pitch ${label}: ${pitch.toFixed(3)} px/module (${measured.modules} modules, content ${measured.content}px, box-sizing ${measured.boxSizing})`
+  );
+  return measured;
+}
+
 async function installMocks(context) {
   let declaredPresence = "auto";
   let customStatus = {
@@ -1528,8 +1601,31 @@ async function installMocks(context) {
     statusText: SELF_STATUS_TEXT,
     statusExpiresAtMs: undefined,
   };
+  resetDeviceLinkHarness();
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  await context.route("**/v1/auth/device-link**", (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const tail = url.pathname.split("/device-link")[1] ?? "";
+    if (method === "POST" && (tail === "" || tail === "/")) {
+      if (deviceLinkHarness.issueStatus !== 201) {
+        return json(
+          route,
+          { error: "unavailable" },
+          deviceLinkHarness.issueStatus
+        );
+      }
+      return json(route, deviceLinkIssueBody(), 201);
+    }
+    if (method === "POST" && tail.endsWith("/confirm-sas")) {
+      return json(route, { status: "confirmed" });
+    }
+    if (method === "GET") {
+      return json(route, deviceLinkHarness.getBody());
+    }
+    return route.fallback();
+  });
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
   //
   // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
@@ -2219,7 +2315,9 @@ async function signIn(page) {
   // 셸로 자동 복귀해 로그인 카드가 아예 없다. 지금까지는 회전이 실패해 매번
   // 로그아웃되는 덕에 우연히 로그인 화면이 나왔던 것이다 — 그 우연에 기대던 자리를
   // 명시적인 초기화로 바꾼다.
-  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.evaluate(
+    "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}"
+  );
   await page.reload({ waitUntil: "networkidle" });
   await signInThroughOnboarding(page, {
     email: "seongjae@dawn.example",
@@ -8232,6 +8330,7 @@ async function captureScheme(browser, scheme) {
   for (const [section, heading, name] of [
     ["profile", "프로필", "profile"],
     ["account", "계정", "account"],
+    ["devices", "기기", "devices"],
     // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
@@ -8336,6 +8435,150 @@ async function captureScheme(browser, scheme) {
   const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
   await webhooks.screenshot({ path: revealShot });
   shots.push(revealShot);
+
+  // ── 설정 > 기기 폰 연결 (#1989, ADR-0180 D7) ──────────────────────────────
+  // 프레임 이름에 토큰·딥링크를 넣지 않는다. sas 는 하네스가 장면마다 바꾼다.
+  async function openDevicesPage() {
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/inbox"');
+    await page.waitForTimeout(200);
+    await page.evaluate('location.hash = "/settings?section=devices"');
+    await page.getByTestId("settings-route").waitFor({ state: "visible" });
+    await page.getByTestId("device-link-card").waitFor({ state: "visible" });
+    return page;
+  }
+
+  async function shootDevices(page, name) {
+    await page.waitForTimeout(250);
+    const path = `${OUT_DIR}/settings-devices-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+  }
+
+  resetDeviceLinkHarness();
+  const devices = await openDevicesPage();
+  await devices.getByTestId("device-link-create").waitFor({ state: "visible" });
+  await shootDevices(devices, "idle");
+
+  await devices.getByTestId("device-link-create").click();
+  await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-pending").waitFor({ state: "visible" });
+  await shootDevices(devices, "qr");
+  await devices.close();
+
+  const railwayDeepLink = `oort://link?server=https%3A%2F%2Foort-production-1a2b.up.railway.app&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+  const selfHostOrigin =
+    "https://self-hosted-oort.internal.yeomyeonggeori.example.com:8443";
+  const selfHostDeepLink = `oort://link?server=${encodeURIComponent(selfHostOrigin)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = railwayDeepLink;
+  const devicesV7 = await openDevicesPage();
+  await devicesV7.getByTestId("device-link-create").click();
+  await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
+  if (v7.modules !== 53) {
+    throw new Error(`v7 QR expected 53 modules, got ${v7.modules}`);
+  }
+  await devicesV7.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = selfHostDeepLink;
+  const devicesV8 = await openDevicesPage();
+  await devicesV8.getByTestId("device-link-create").click();
+  await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
+  if (v8.modules !== 57) {
+    throw new Error(`v8 QR expected 57 modules, got ${v8.modules}`);
+  }
+  await devicesV8.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.getBody = () => ({
+    status: "consumed",
+    device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
+  });
+  const devicesConfirm = await openDevicesPage();
+  await devicesConfirm.getByTestId("device-link-create").click();
+  await devicesConfirm.getByTestId("device-link-awaiting-confirm").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesConfirm, "awaiting-confirm");
+  await devicesConfirm.getByTestId("device-link-confirm-sas").click();
+  await devicesConfirm.getByTestId("device-link-connected").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesConfirm, "connected");
+  await devicesConfirm.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.getBody = () => ({ status: "expired" });
+  const devicesExpired = await openDevicesPage();
+  await devicesExpired.getByTestId("device-link-create").click();
+  await devicesExpired.getByTestId("device-link-expired").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesExpired, "expired");
+  await devicesExpired.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.issueStatus = 500;
+  const devicesError = await openDevicesPage();
+  await devicesError.getByTestId("device-link-create").click();
+  await devicesError.getByTestId("device-link-banner").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesError, "error");
+  await devicesError.close();
+
+  resetDeviceLinkHarness();
+  const devicesOffline = await openDevicesPage();
+  await devicesOffline.evaluate(() => {
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+    window.dispatchEvent(new Event("offline"));
+  });
+  await devicesOffline.getByTestId("device-link-offline").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesOffline, "offline");
+  await devicesOffline.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.sas = "";
+  deviceLinkHarness.getBody = () => ({
+    status: "consumed",
+    device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
+  });
+  const devicesLoopback = await openDevicesPage();
+  await devicesLoopback.getByTestId("device-link-create").click();
+  await devicesLoopback.getByTestId("device-link-connected").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesLoopback, "loopback");
+  await devicesLoopback.close();
+
+  resetDeviceLinkHarness();
+  const firstRun = await context.newPage();
+  await firstRun.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(firstRun);
+  await firstRun.evaluate(() => {
+    sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending");
+  });
+  await firstRun.reload({ waitUntil: "networkidle" });
+  await firstRun.getByTestId("onboarding-phone-link").waitFor({
+    state: "visible",
+  });
+  await firstRun.waitForTimeout(250);
+  const firstRunShot = `${OUT_DIR}/onboarding-phone-link-${scheme}.png`;
+  await firstRun.screenshot({ path: firstRunShot });
+  shots.push(firstRunShot);
+  await firstRun.getByTestId("onboarding-enter-app").click();
+  await firstRun.close();
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

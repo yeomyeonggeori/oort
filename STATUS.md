@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
+
+- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).
+- ADR-0180 D7 「온보딩 S5」는 번호 스텝이 아니라 **로그인 후 first-run 카드**(App이 소유, 세션 게이트가 선점하지 못함). UX-R2a가 번호 시퀀스에 접을 수 있다. 진행 표시 없음.
+- NOTES: 기기 목록/해제는 `GET /v1/auth/devices` + `DELETE /v1/auth/devices/{id}`가 없다(#2029). 현재 카드의 연결됨은 세션 안 폴 `status`/`device`(+live 기록)로만 살아남고, 지속 목록은 #2029.
+- runtime-unverified: 실기기 카메라 스캔(M0m).
+- red proof: 독립 디코더 왕복(v1/v7/v8) · RS/포맷 골든 · App 트리 first-run · SAS 미확인≠연결됨 · 채움 액센트 ≤1 · 모듈 피치 바닥 · aria-describedby · 만료 문장 · 리마운트 · 재발급 폴 1개 · 캡처 전수 시크릿 스윕.
+- R3: QR well `content-box`(피치 v7/v8 = 4.000 CSS px) · pending은 살아 있는 코드+스캔, SAS confirm은 awaitingConfirm만 · 바우처는 만료·consumed·로그아웃에 지움 · 시크릿 게이트는 심은 프레임에서 실패 · 기기명에 조사 없음 · first-run은 S1/S2와 같은 `onboarding-step-chrome`+`max-w-sm`.
 ## UX-R4a Agent Hub enabledTools 편집 UI (#1957, 2026-09-02)
 
 - Agent Hub 프로필 도구 칩을 카탈로그 행(이름·설명·실행 가능/실행 불가·승인 필요) + 비낙관 저장으로 대체. PUT 은 저장된 프로필 필드만 싣는다. 성공은 ADR-0182 in-place `도구 변경 저장`→`도구 변경 저장됨` 1.6s (`useInlineConfirm`, CopyButton 동일 시계). 실패는 InlineBanner, 403은 읽기 전용.

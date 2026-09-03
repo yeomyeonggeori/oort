@@ -447,6 +447,19 @@
    * 600px 미만에서만 이 값을 max-block-size 로 든다. */
   --spacing-settings-nav: 308px;
 
+  /* QR 모듈 피치 바닥 (#1989 H3).
+   *
+   * `--spacing-pane-sm`(192) 은 **가로** 바닥이다(mention 목록 · dropdown ·
+   * 부차 패널이 양보할 때의 폭). 정사각 우물에 빌려 쓰면 버전이 올라갈수록
+   * 모듈이 줄어든다(v7 3.32px, v8 3.09px). 축을 빌려 쓰지 않는다.
+   *
+   * 값은 스캔 가능한 모듈 피치의 바닥이다. 리듬 1단계(4px)가 화면의 한 모듈을
+   * 카메라가 분해하는 최소이고, **내용 상자** 한 변이 (버전 모듈 + 콰이어트 4×2)
+   * × 이 값이다. padding 은 그 밖이다(content-box). border-box 로 곱하면
+   * spacing-2×2 가 내용에서 빠져 피치가 바닥 아래로 간다. 버전 8 은 57×4 = 228px
+   * 내용. `qr-well` 이 `data-qr-modules` 로 이 값을 든다. */
+  --spacing-qr-module: 4px;
+
   /* 주 표면의 바닥 (#1413). 같은 폭 축이지만 pane 계열과 뜻이 반대라 이름이 따로
    * 있다: pane 은 부차 표면이 **가져가는** 폭이고, 이것은 부차 표면이 옆에 설 때
    * **남겨야 하는** 폭이다. 빌려 쓰면 축이 섞인다.
@@ -1382,6 +1395,39 @@
     border-block-end: 1px solid var(--line);
   }
 }
+
+/* 폰 카메라가 다크 스킴 화면을 뒤집힌 QR로 읽지 못하게, 이 그릇만 light-dark()
+ * 를 낮의 항으로 고정한다. 값은 토큰이고 hex 는 여기 없다.
+ * 내용 상자가 모듈 수 × `--spacing-qr-module`. padding 은 content-box 라
+ * 피치를 깎지 않는다. 버전이 커지면 상자가 자라고 모듈은 줄지 않는다. */
+@utility qr-well {
+  box-sizing: content-box;
+  color-scheme: light;
+  background-color: var(--surface);
+  color: var(--ink);
+  padding: var(--spacing-2);
+  border-radius: var(--radius-sm);
+  --qr-modules: 29;
+  inline-size: calc(var(--qr-modules) * var(--spacing-qr-module));
+  block-size: calc(var(--qr-modules) * var(--spacing-qr-module));
+}
+
+.qr-well[data-qr-modules="29"] { --qr-modules: 29; }
+.qr-well[data-qr-modules="33"] { --qr-modules: 33; }
+.qr-well[data-qr-modules="37"] { --qr-modules: 37; }
+.qr-well[data-qr-modules="41"] { --qr-modules: 41; }
+.qr-well[data-qr-modules="45"] { --qr-modules: 45; }
+.qr-well[data-qr-modules="49"] { --qr-modules: 49; }
+.qr-well[data-qr-modules="53"] { --qr-modules: 53; }
+.qr-well[data-qr-modules="57"] { --qr-modules: 57; }
+.qr-well[data-qr-modules="61"] { --qr-modules: 61; }
+.qr-well[data-qr-modules="65"] { --qr-modules: 65; }
+.qr-well[data-qr-modules="69"] { --qr-modules: 69; }
+.qr-well[data-qr-modules="73"] { --qr-modules: 73; }
+.qr-well[data-qr-modules="77"] { --qr-modules: 77; }
+.qr-well[data-qr-modules="81"] { --qr-modules: 81; }
+.qr-well[data-qr-modules="85"] { --qr-modules: 85; }
+.qr-well[data-qr-modules="89"] { --qr-modules: 89; }
 
 /* 작업 세션 패널 기하 (MOMO-618 R1). The pane is 320px, and beside a 240px
  * sidebar that is 560px of the window spent before the channel gets any. On a
