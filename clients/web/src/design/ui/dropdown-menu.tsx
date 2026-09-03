@@ -18,7 +18,8 @@ import { POPOVER_MOTION } from "@/design/motion";
 //
 // Same house deviations as the Dialog: no decorative chrome. Enter/exit is
 // ADR-0179 D4 (open 240 / close 180) via POPOVER_MOTION. Radix Presence waits
-// for the CSS animation; forceMount is not added.
+// for the CSS animation when Content stays mounted through close; forceMount
+// is not added. `{open && <DropdownMenuContent/>}` skips the exit.
 //
 // `ContextMenu` proper (right-click) is deliberately NOT used as the only path:
 // a right-click menu has no visible affordance, and the row has to be operable

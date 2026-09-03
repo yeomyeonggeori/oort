@@ -16,7 +16,9 @@ import {
 //
 // Same house deviations as Dialog/DropdownMenu: no decorative chrome (no
 // arrow). Enter/exit is ADR-0179 D4 (open 240 / close 180) via POPOVER_MOTION.
-// Radix Presence waits for the CSS animation; forceMount is not added.
+// Radix Presence waits for the CSS animation when Content stays mounted
+// through close; forceMount is not added. `{open && <PopoverContent/>}` skips
+// the exit.
 
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;

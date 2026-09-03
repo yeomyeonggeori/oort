@@ -13,8 +13,10 @@ import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 //     trailing 취소 button, and a third affordance in the corner is the web-card
 //     tell, not an accessibility gain.
 //   - enter/exit is ADR-0179 D4 (open 200 / close 150) via motion.ts constants.
-//     Radix Presence already waits for the CSS animation on data-state=closed;
-//     forceMount is not added (measured unmount dwell ≈ 150ms).
+//     Radix Presence waits for the CSS animation on data-state=closed only when
+//     Content stays mounted through close. `{open && <DialogContent/>}` unmounts
+//     the Presence subtree first and the exit never plays. forceMount is not
+//     added.
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
