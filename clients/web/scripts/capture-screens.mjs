@@ -10257,22 +10257,72 @@ async function captureDesignGallery(browser, scheme) {
   await page.goto(`${ORIGIN}/#/design`, { waitUntil: "networkidle" });
   const gallery = page.getByTestId("design-gallery");
   await gallery.waitFor({ state: "visible" });
-  await page.evaluate((next) => {
-    document.documentElement.setAttribute("data-theme", next);
-    const node = document.querySelector("[data-testid=design-gallery]");
-    if (node) document.body.replaceChildren(node);
-    document.documentElement.style.height = "auto";
-    document.body.style.height = "auto";
-    document.body.style.overflow = "visible";
-  }, scheme);
   await page.evaluate(() => document.fonts.ready);
+
+  const docScroll = await page.evaluate(() => {
+    const doc = document.documentElement;
+    return { scroll: doc.scrollHeight, client: doc.clientHeight };
+  });
+  if (docScroll.scroll > docScroll.client + 1) {
+    throw new Error(
+      `design-gallery ${scheme}: 문서 스크롤러 ${docScroll.scroll}px > ${docScroll.client}px`
+    );
+  }
+
+  await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 1280`);
+
+  const overlays = await page.evaluate(() => {
+    const names = [
+      "DialogContent",
+      "DialogOverlay",
+      "DropdownMenuContent",
+      "PopoverContent",
+      "ContextMenuContent",
+    ];
+    return names.map((name) => {
+      const el = document.querySelector(`[data-gallery-export="${name}"]`);
+      if (!el) return { name, missing: true, area: 0, srOnly: false };
+      const r = el.getBoundingClientRect();
+      return {
+        name,
+        missing: false,
+        area: r.width * r.height,
+        srOnly: Boolean(el.closest(".sr-only")),
+      };
+    });
+  });
+  for (const row of overlays) {
+    if (row.missing) {
+      throw new Error(`design-gallery ${scheme}: ${row.name} 없음`);
+    }
+    if (row.srOnly) {
+      throw new Error(`design-gallery ${scheme}: ${row.name} 이 sr-only`);
+    }
+    if (row.area <= 0) {
+      throw new Error(`design-gallery ${scheme}: ${row.name} 면적 0`);
+    }
+  }
+
+  await page.setViewportSize({ width: 900, height: VIEWPORT.height });
+  await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 900`);
+  await page.setViewportSize(VIEWPORT);
+
+  const contentHeight = await page.evaluate(() => {
+    const node = document.querySelector("[data-testid=design-gallery]");
+    return node ? Math.ceil(node.scrollHeight) : 0;
+  });
+  await page.setViewportSize({
+    width: VIEWPORT.width,
+    height: Math.max(VIEWPORT.height, contentHeight),
+  });
   const path = `${OUT_DIR}/design-gallery-${scheme}.png`;
   await page.screenshot({
     path,
-    fullPage: true,
+    fullPage: false,
     animations: "disabled",
     caret: "hide",
   });
+  await page.setViewportSize(VIEWPORT);
   await page.close();
   await context.close();
   return [path];
