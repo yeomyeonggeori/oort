@@ -763,8 +763,7 @@
       fill, stroke, --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
     transition-duration: var(--motion-instant);
     transition-timing-function: var(--motion-ease-standard);
-    &:is(:active, [data-preview="active"]),
-    [data-preview="active"] & {
+    &:active {
       transform: scale(0.98);
     }
   }
@@ -831,32 +830,6 @@
  * `focusModality.ts`)와 자식 `:focus-visible` 을 함께 요구한다. 컨트롤
  * 프리미티브의 `focus-visible:focus-ring` 은 그대로다.
  * ========================================================================== */
-/* DS-2: forced gallery preview shares the real interaction selectors.
- * Not a new named utility — hover/active/focus-visible compile once via :is(). */
-@custom-variant hover {
-  &:is(:hover, [data-preview="hover"]),
-  [data-preview="hover"] & {
-    @slot;
-  }
-}
-@custom-variant active {
-  &:is(:active, [data-preview="active"]),
-  [data-preview="active"] & {
-    @slot;
-  }
-}
-@custom-variant focus {
-  &:is(:focus, [data-preview="focus"]),
-  [data-preview="focus"] & {
-    @slot;
-  }
-}
-@custom-variant focus-visible {
-  &:is(:focus-visible, [data-preview="focus"]),
-  [data-preview="focus"] & {
-    @slot;
-  }
-}
 @custom-variant focus-visible-within {
   :root[data-focus-modality="keyboard"] &:has(:focus-visible) {
     @slot;

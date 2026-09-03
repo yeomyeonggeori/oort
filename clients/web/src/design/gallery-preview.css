@@ -1,0 +1,27 @@
+/* Forced preview for `#/design` only. Gallery.tsx imports this file so
+ * production DCE drops it with the route. Not a new named utility: @apply
+ * reuses the real utilities, and :is() shares one declaration list between
+ * live :hover/:active/:focus-visible and data-preview. Scoped to
+ * [data-gallery-root] so product surfaces never match. */
+@reference "./tokens.css";
+
+@media (hover: hover) {
+  [data-gallery-root] .hover\:bg-surface-hover:is(:hover, [data-preview="hover"]) {
+    @apply bg-surface-hover;
+  }
+  [data-gallery-root] .hover\:opacity-90:is(:hover, [data-preview="hover"]) {
+    @apply opacity-90;
+  }
+}
+
+[data-gallery-root] .active\:opacity-90:is(:active, [data-preview="active"]) {
+  @apply opacity-90;
+}
+
+[data-gallery-root] .focus-visible\:focus-ring:is(:focus-visible, [data-preview="focus"]) {
+  @apply focus-ring;
+}
+
+[data-gallery-root] .press:is(:active, [data-preview="active"]) {
+  transform: scale(0.98);
+}
