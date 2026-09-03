@@ -120,7 +120,14 @@ export const DialogContent = React.forwardRef<
 
   return (
     <DialogPortal container={container ?? undefined}>
-      <DialogOverlay className={overlayClassName} />
+      <DialogOverlay
+        className={overlayClassName}
+        // overlayClassName is the gallery in-cell road; mark the scrim so the
+        // display case can assert the real overlay box (modal=false renders none).
+        {...(overlayClassName
+          ? { "data-gallery-export": "DialogOverlay" }
+          : {})}
+      />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

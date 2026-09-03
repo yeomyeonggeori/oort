@@ -242,6 +242,7 @@ function renderGallery(): HTMLElement {
     root.render(createElement(MemoryRouter, null, createElement(Gallery)));
   });
   act(() => undefined);
+  act(() => undefined);
   return host;
 }
 
