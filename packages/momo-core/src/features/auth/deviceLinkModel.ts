@@ -35,6 +35,11 @@ export const DEVICE_LINK_RETRY_LABEL = "QR 다시 찍기";
 export const DEVICE_LINK_QR_LABEL = "QR로 연결";
 export const DEVICE_LINK_ADDRESS_FALLBACK_LABEL = "주소로 연결";
 export const DEVICE_LINK_SETTINGS_LABEL = "설정에서 허용";
+export const DEVICE_LINK_QR_INSTRUCTION =
+  "데스크톱 화면의 QR을 카메라에 맞추세요.";
+export const DEVICE_LINK_CAMERA_OPENING_COPY = "카메라 여는 중";
+export const DEVICE_LINK_CAMERA_ERROR_COPY =
+  "카메라를 열 수 없습니다. 주소로 연결하세요.";
 
 export class DeviceLinkFormatError extends Error {
   constructor() {

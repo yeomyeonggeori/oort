@@ -47,6 +47,7 @@ import {
 import {
   FailureBanner,
   NoticeBlock,
+  OutlineButton,
   PrimaryButton,
   Screen,
   Sentence,
@@ -422,8 +423,12 @@ export default function ConnectScreen({
         : null;
     return (
       <Screen>
-        <View style={styles.sas} testID="device-link-sas">
-          <Text style={styles.title}>기기 연결</Text>
+        <ScrollView
+          style={styles.flex}
+          contentContainerStyle={styles.sas}
+          keyboardShouldPersistTaps="handled"
+          testID="device-link-sas">
+          <Sentence style={styles.title}>기기 연결</Sentence>
           <Text
             style={styles.sasDigits}
             accessibilityLabel={`확인 번호 ${sasWait.sas.split('').join(', ')}`}
@@ -448,14 +453,11 @@ export default function ConnectScreen({
             <Sentence style={styles.subtitle}>{DEVICE_LINK_SAS_WAIT_COPY}</Sentence>
           )}
           {sasFailure ? null : (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={DEVICE_LINK_RETRY_LABEL}
+            <OutlineButton
+              label={DEVICE_LINK_RETRY_LABEL}
               onPress={retryQr}
-              style={({pressed}) => [styles.outlineButton, pressed && styles.togglePressed]}
-              testID="device-link-sas-rescan">
-              <Text style={styles.toggleLabel}>{DEVICE_LINK_RETRY_LABEL}</Text>
-            </Pressable>
+              testID="device-link-sas-rescan"
+            />
           )}
           <Pressable
             accessibilityRole="button"
@@ -465,7 +467,7 @@ export default function ConnectScreen({
             testID="device-link-address-fallback">
             <Text style={styles.toggleLabel}>{DEVICE_LINK_ADDRESS_FALLBACK_LABEL}</Text>
           </Pressable>
-        </View>
+        </ScrollView>
       </Screen>
     );
   }
@@ -483,23 +485,20 @@ export default function ConnectScreen({
           contentContainerStyle={styles.content}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag">
-          <Text style={styles.title}>
+          <Sentence style={styles.title}>
             {joining ? '워크스페이스에 참여' : 'oort에 연결'}
-          </Text>
+          </Sentence>
           <Sentence style={styles.subtitle}>
             {joining
               ? '초대 코드로 워크스페이스에 참여합니다.'
               : 'QR을 찍거나 서버 주소를 입력하세요.'}
           </Sentence>
 
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={DEVICE_LINK_QR_LABEL}
+          <OutlineButton
+            label={DEVICE_LINK_QR_LABEL}
             onPress={() => void openScanner()}
-            style={({pressed}) => [styles.outlineButton, pressed && styles.togglePressed]}
-            testID="qr-connect-button">
-            <Text style={styles.toggleLabel}>{DEVICE_LINK_QR_LABEL}</Text>
-          </Pressable>
+            testID="qr-connect-button"
+          />
 
           {permissionDenied ? (
             <NoticeBlock
@@ -508,16 +507,13 @@ export default function ConnectScreen({
             />
           ) : null}
           {permissionDenied ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
+            <OutlineButton
+              label={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
               onPress={() => {
                 focusTextInput(fields.current.server);
               }}
-              style={({pressed}) => [styles.outlineButton, pressed && styles.togglePressed]}
-              testID="qr-permission-fallback">
-              <Text style={styles.toggleLabel}>{DEVICE_LINK_ADDRESS_FALLBACK_LABEL}</Text>
-            </Pressable>
+              testID="qr-permission-fallback"
+            />
           ) : null}
           {permissionDenied ? (
             <Pressable
@@ -706,7 +702,7 @@ function Field({
     <View style={styles.field}>
       <Text style={styles.label}>{label}</Text>
       {children}
-      {hint ? <Text style={styles.fieldHint}>{hint}</Text> : null}
+      {hint ? <Sentence style={styles.fieldHint}>{hint}</Sentence> : null}
     </View>
   );
 }
@@ -746,15 +742,6 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   },
   togglePressed: {backgroundColor: color.surfacePressed},
   toggleLabel: {color: color.accentText, fontSize: font.label, fontWeight: '600'},
-  outlineButton: {
-    minHeight: TOUCH_TARGET,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: color.border,
-  },
   sas: {
     flex: 1,
     paddingHorizontal: SAFE_GUTTER,

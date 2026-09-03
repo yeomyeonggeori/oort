@@ -6,8 +6,11 @@ import '../src/boot/polyfills';
 import '../src/boot/coreHost';
 
 import {
+  DEVICE_LINK_CAMERA_ERROR_COPY,
+  DEVICE_LINK_CAMERA_OPENING_COPY,
   DEVICE_LINK_EXPIRED_COPY,
   DEVICE_LINK_MALFORMED_COPY,
+  DEVICE_LINK_QR_INSTRUCTION,
   DEVICE_LINK_SAS_WAIT_COPY,
   DEVICE_LINK_TOKEN_LEN,
   DEVICE_LINK_UNREACHABLE_COPY,
@@ -59,6 +62,8 @@ const cameraMock = jest.requireMock('expo-camera') as {
   __state: {permission: {granted: boolean; canAskAgain: boolean; status: string}};
   __reset: () => void;
   __scan: (data: string) => void;
+  __ready: () => void;
+  __error: (message?: string) => void;
 };
 
 const netInfoMock = (
@@ -459,13 +464,16 @@ describe('R2 M-2 permission is decided before the Modal', () => {
 
 describe('R3 M-6 device name is the OS model', () => {
   it('sends expo-device modelName, falling back to the idiom string', () => {
-    const Device = jest.requireMock('expo-device') as {modelName: string | null};
-    Device.modelName = 'iPhone 17 Pro';
+    const Device = jest.requireMock('expo-device') as {
+      __state: {modelName: string | null};
+    };
+    Device.__state.modelName = 'iPhone 17 Pro';
     expect(deviceLinkDevice()).toEqual({name: 'iPhone 17 Pro', platform: 'ios'});
-    Device.modelName = null;
+    Device.__state.modelName = null;
     expect(deviceLinkDevice().name).toMatch(/\(iOS\)$/);
-    Device.modelName = `VeryLongModelNameThatExceedsTheServerDeviceLabelLimit ${'x'.repeat(80)}`;
+    Device.__state.modelName = `VeryLongModelNameThatExceedsTheServerDeviceLabelLimit ${'x'.repeat(80)}`;
     expect(deviceLinkDevice().name.length).toBeLessThanOrEqual(64);
+    Device.__state.modelName = 'iPhone 17 Pro';
   });
 });
 
@@ -474,6 +482,32 @@ describe('R2 M-5 camera mock consumers', () => {
     render(<ConnectScreen />);
     fireEvent.press(screen.getByTestId('qr-connect-button'));
     await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+  });
+
+  it('shows an instruction and opening copy until the camera is ready', async () => {
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+    expect(screen.getByText(DEVICE_LINK_QR_INSTRUCTION)).toBeTruthy();
+    expect(screen.getByTestId('qr-camera-opening')).toHaveTextContent(
+      DEVICE_LINK_CAMERA_OPENING_COPY,
+    );
+    act(() => {
+      cameraMock.__ready();
+    });
+    expect(screen.queryByTestId('qr-camera-opening')).toBeNull();
+  });
+
+  it('speaks a camera error and offers the address exit', async () => {
+    render(<ConnectScreen />);
+    fireEvent.press(screen.getByTestId('qr-connect-button'));
+    await waitFor(() => expect(screen.getByTestId('qr-camera-view')).toBeTruthy());
+    act(() => {
+      cameraMock.__error('denied');
+    });
+    expect(screen.getByText(DEVICE_LINK_CAMERA_ERROR_COPY)).toBeTruthy();
+    fireEvent.press(screen.getByTestId('qr-camera-address-fallback'));
+    expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
   });
 
   it('speaks the malformed sentence for a non-link QR and 「QR 다시 찍기」 reopens the sheet', async () => {

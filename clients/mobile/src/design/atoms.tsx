@@ -424,6 +424,30 @@ export function Sentence(
 }
 
 /** An inline failure attached to a form, rather than a whole-surface state. */
+export function OutlineButton({
+  label,
+  onPress,
+  testID,
+  accessibilityLabel,
+}: {
+  label: string;
+  onPress: () => void;
+  testID?: string;
+  accessibilityLabel?: string;
+}): React.JSX.Element {
+  const styles = useStyles(buildStyles);
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      onPress={onPress}
+      style={({pressed}) => [styles.outline, pressed && styles.pressed]}
+      testID={testID}>
+      <Text style={styles.retryLabel}>{label}</Text>
+    </Pressable>
+  );
+}
+
 export function FailureBanner({
   message,
   onRetry,
@@ -526,6 +550,14 @@ const buildStyles = (color: Palette) => StyleSheet.create({
   stateHeadline: {fontSize: font.body, color: color.text, fontWeight: '600'},
   stateHeadlineDanger: {color: color.danger},
   stateDetail: {fontSize: font.label, color: color.textMuted, lineHeight: 20},
+  outline: {
+    ...hitStyle,
+    paddingHorizontal: space.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: color.border,
+    alignItems: 'center',
+  },
   retry: {
     ...hitStyle,
     paddingHorizontal: space.md,

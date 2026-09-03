@@ -4,7 +4,8 @@
 
 - `oort://link` 파서(join 동형: 순서 무관·`momo://` 흡수·미지 파라미터 무시·잘못된 server 거부) + `POST /v1/auth/device-link/redeem` + `pendingSas` SAS 대기(서버 `sas` 또는 토큰 SHA-256 파생 4자리). 세션은 활성화 후 키체인만.
 - 카메라 권한 거부 → 문장 안내 + 「주소로 연결」 폴백. 만료 401 / 재사용 409 / 형식 오류 세 문장, 재시도 「QR 다시 찍기」.
-- R2: SAS에 「QR 다시 찍기」·「주소로 연결」 탈출, TTL 120s 만료 문장, 오프라인/unreachable 상태, 권한은 모달 전에 결정. runtime-unverified: 실기기 카메라·OS 카메라 앱 딥링크 왕복, Maestro `50-device-link.yaml`.
+- R2: SAS에 「QR 다시 찍기」·「주소로 연결」 탈출, TTL 120s 만료 문장, 오프라인/unreachable 상태, 권한은 모달 전에 결정.
+- R3: SAS 「QR 다시 찍기」는 스캐너를 연다. 거부 「주소로 연결」은 인앱 포커스(Settings는 「설정에서 허용」만). unreachable은 TTL까지 백오프 폴. AppDelegate가 warm `oort://`를 RCTLinkingManager로 전달. `expo-device` `modelName`. runtime-unverified: 실기기 카메라·권한 프롬프트.
 
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
