@@ -17,6 +17,11 @@ name: dismiss-system-alerts
 # Both are dismissed defensively rather than once at setup — `runFlow: when:`
 # is a no-op on the runs where the alert never showed, so calling this between
 # steps costs nothing and removes a whole class of flake.
+#
+#   "열기"                    iOS confirmation when another app (or Maestro
+#                          `openLink`) hands oort a URL while it is already
+#                          running. Without this tap the flow stares at the
+#                          dialog and every selector under it fails.
 - runFlow:
     when:
       visible: "지금 안 함"
@@ -27,3 +32,8 @@ name: dismiss-system-alerts
       visible: "허용 안 함"
     commands:
       - tapOn: "허용 안 함"
+- runFlow:
+    when:
+      visible: "열기"
+    commands:
+      - tapOn: "열기"
