@@ -8,7 +8,9 @@ import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { encodeQr, selectQrVersion } from "@momo/core/lib/qr";
 import { DeviceLinkCard } from "./DeviceLinkCard";
-import { writeDeviceLinkLive } from "./deviceLinkLive";
+import { DEVICE_LINK_LIVE_KEY, writeDeviceLinkLive } from "./deviceLinkLive";
+import { clearSession } from "@/lib/session";
+import { assertQrModulePitch } from "@/lib/qrModulePitch";
 import {
   DEVICE_LINK_FIXTURE_DEVICE_NAME,
   DEVICE_LINK_FIXTURE_ID,
@@ -163,6 +165,13 @@ function consumedDevice() {
   };
 }
 
+function liveDeepLink(): string | undefined {
+  const raw = sessionStorage.getItem(DEVICE_LINK_LIVE_KEY);
+  if (!raw) return undefined;
+  const parsed = JSON.parse(raw) as { deepLink?: string };
+  return parsed.deepLink;
+}
+
 function assertSecretAbsent(host: HTMLElement, secret: string): void {
   const hostText = host.innerText || host.textContent || "";
   const bodyText = document.body.innerText || document.body.textContent || "";
@@ -221,6 +230,16 @@ describe("DeviceLinkCard red proofs", () => {
       testId("device-link-create").click();
     });
     await flush();
+    expect(document.querySelector('[data-testid="device-link-sas"]')).toBeNull();
+    expect(
+      document.querySelector('[data-testid="device-link-confirm-sas"]')
+    ).toBeNull();
+
+    getDeviceLink.mockResolvedValue(consumedDevice());
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    await flush();
     const sas = testId("device-link-sas");
     expect(sas.textContent).toContain(DEVICE_LINK_FIXTURE_SAS);
     expect(accessibleName(sas)).toContain(DEVICE_LINK_FIXTURE_SAS);
@@ -265,8 +284,13 @@ describe("DeviceLinkCard red proofs", () => {
   });
 
   it("renders an InlineBanner when confirm-sas is rejected", async () => {
+    getDeviceLink.mockResolvedValue(consumedDevice());
     mount();
     await createLink();
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    await flush();
     confirmDeviceLinkSas.mockRejectedValueOnce(
       new ApiError(409, "SAS is not required, or the token has not been redeemed")
     );
@@ -319,6 +343,7 @@ describe("DeviceLinkCard R2 proofs", () => {
     await flush();
     expect(host.textContent).not.toContain("연결됨");
     expect(testId("device-link-confirm-sas")).not.toBeNull();
+    expect(testId("device-link-confirm-sas").className).toMatch(/\btap-target\b/);
     expect(filledAccentButtons(host)).toHaveLength(1);
     expect(filledAccentButtons(host)[0].getAttribute("data-testid")).toBe(
       "device-link-confirm-sas"
@@ -339,10 +364,11 @@ describe("DeviceLinkCard R2 proofs", () => {
     expect(testId("device-link-create").className).not.toMatch(/\bw-full\b/);
 
     await createLink();
-    expect(filledAccentButtons(host)).toHaveLength(1);
+    expect(filledAccentButtons(host)).toHaveLength(0);
     expect(testId("device-link-create").className).toMatch(/\bborder-line-strong\b/);
-    expect(testId("device-link-confirm-sas").className).toMatch(/\btap-target\b/);
-    expect(testId("device-link-confirm-sas").className).not.toMatch(/\bw-full\b/);
+    expect(
+      document.querySelector('[data-testid="device-link-confirm-sas"]')
+    ).toBeNull();
 
     await act(async () => {
       vi.advanceTimersByTime(120_000);
@@ -379,12 +405,12 @@ describe("DeviceLinkCard R2 proofs", () => {
     expect(TOKENS_CSS).toMatch(
       /\.qr-well\[data-qr-modules="57"\]\s*\{\s*--qr-modules:\s*57;/
     );
+    expect(TOKENS_CSS).toMatch(/@utility qr-well \{[\s\S]*box-sizing:\s*content-box/);
     expect(192 / modules).toBeLessThan(floor);
-    const cs = getComputedStyle(qr);
-    const declared = Number(cs.getPropertyValue("--qr-modules").trim() || modules);
-    const width = parseFloat(cs.width) || parseFloat(cs.inlineSize) || declared * floor;
-    const pitch = width / modules;
-    expect(pitch).toBeGreaterThanOrEqual(floor);
+    expect(() => assertQrModulePitch(192, modules, floor, "fixed-square")).toThrow(
+      /< floor/
+    );
+    expect(assertQrModulePitch(modules * floor, modules, floor)).toBe(floor);
   });
 
   it("describes the offline-locked create control with the reason sentence", () => {
@@ -516,5 +542,75 @@ describe("DeviceLinkCard R2 proofs", () => {
   it("does not keep an unreachable 만료됨 live-band branch", () => {
     expect(CARD_SOURCE).not.toMatch(/liveBand === 0/);
     expect(CARD_SOURCE).not.toMatch(/남은 시간 \$\{liveBand\}초` : "만료됨"/);
+  });
+
+  it("pending names the live code and does not offer SAS confirm", async () => {
+    const host = mount();
+    await createLink();
+    expect(testId("device-link-pending").textContent).toMatch(/살아 있|카메라/);
+    expect(testId("device-link-pending").textContent).not.toMatch(/만드세요/);
+    expect(
+      document.querySelector('[data-testid="device-link-confirm-sas"]')
+    ).toBeNull();
+    expect(
+      document.querySelector('[data-testid="device-link-sas"]')
+    ).toBeNull();
+    expect(filledAccentButtons(host)).toHaveLength(0);
+  });
+
+  it("awaitingConfirm is the only state with the SAS confirm filled action", async () => {
+    getDeviceLink.mockResolvedValue(consumedDevice());
+    const host = mount();
+    await createLink();
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    await flush();
+    expect(testId("device-link-awaiting-confirm").textContent).toMatch(/코드를 쓴/);
+    expect(testId("device-link-awaiting-confirm").textContent).not.toMatch(/가 코드/);
+    expect(filledAccentButtons(host)).toHaveLength(1);
+    expect(filledAccentButtons(host)[0].getAttribute("data-testid")).toBe(
+      "device-link-confirm-sas"
+    );
+  });
+
+  it("drops the voucher from sessionStorage when the code expires", async () => {
+    const token = deviceLinkFixtureToken();
+    mount();
+    await createLink();
+    expect(liveDeepLink()).toContain(token);
+    await act(async () => {
+      vi.advanceTimersByTime(120_000);
+    });
+    await flush();
+    expect(liveDeepLink()).toBeUndefined();
+  });
+
+  it("drops the voucher from sessionStorage when the code is consumed", async () => {
+    const token = deviceLinkFixtureToken();
+    getDeviceLink.mockResolvedValue({ status: "pending" });
+    mount();
+    await createLink();
+    expect(liveDeepLink()).toContain(token);
+    getDeviceLink.mockResolvedValue(consumedDevice());
+    await act(async () => {
+      vi.advanceTimersByTime(2_000);
+    });
+    await flush();
+    expect(liveDeepLink()).toBeUndefined();
+    expect(sessionStorage.getItem(DEVICE_LINK_LIVE_KEY)).toBeTruthy();
+  });
+
+  it("drops the voucher from sessionStorage on logout", () => {
+    const token = deviceLinkFixtureToken();
+    writeDeviceLinkLive({
+      id: DEVICE_LINK_FIXTURE_ID,
+      expiresAt: NOW + 120_000,
+      deepLink: deviceLinkFixtureDeepLink(),
+    });
+    expect(liveDeepLink()).toContain(token);
+    clearSession();
+    expect(liveDeepLink()).toBeUndefined();
+    expect(sessionStorage.getItem(DEVICE_LINK_LIVE_KEY)).toBeNull();
   });
 });

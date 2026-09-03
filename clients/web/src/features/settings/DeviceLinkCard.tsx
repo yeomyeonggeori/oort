@@ -53,16 +53,30 @@ function announceBand(remaining: number): number {
 function toIssued(live: {
   id: string;
   expiresAt: number;
-  deepLink: string;
+  deepLink?: string;
   sas?: string;
 }): DeviceLinkIssue {
   return {
     id: live.id,
     token: "",
     expiresAt: live.expiresAt,
-    deepLink: live.deepLink,
+    deepLink: live.deepLink ?? "",
     ...(live.sas ? { sas: live.sas } : {}),
   };
+}
+
+function persistLiveWithoutVoucher(extra?: {
+  sas?: string;
+  confirmed?: boolean;
+}): void {
+  const live = readDeviceLinkLive();
+  if (!live) return;
+  writeDeviceLinkLive({
+    id: live.id,
+    expiresAt: live.expiresAt,
+    ...(extra?.sas ?? live.sas ? { sas: extra?.sas ?? live.sas } : {}),
+    ...(extra?.confirmed || live.confirmed ? { confirmed: true } : {}),
+  });
 }
 
 // icon-system-exception(ADR-0172): this SVG is a data matrix of the deep link,
@@ -111,6 +125,10 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         setIssued(toIssued(live));
         if (status.status === "consumed") {
           setDevice(status.device);
+          persistLiveWithoutVoucher({
+            ...(live.sas ? { sas: live.sas } : {}),
+            ...(live.sas && !live.confirmed ? {} : { confirmed: true }),
+          });
           if (live.sas && !live.confirmed) {
             setConfirmed(false);
             setPhase("awaitingConfirm");
@@ -119,6 +137,7 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
             setPhase("connected");
           }
         } else if (status.status === "expired" || Date.now() >= live.expiresAt) {
+          writeDeviceLinkLive(null);
           setPhase("expired");
         } else {
           setConfirmed(false);
@@ -130,7 +149,10 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
       })
       .catch(() => {
         if (cancelled) return;
-        if (Date.now() >= live.expiresAt) setPhase("expired");
+        if (Date.now() >= live.expiresAt) {
+          writeDeviceLinkLive(null);
+          setPhase("expired");
+        }
       });
     return () => {
       cancelled = true;
@@ -154,11 +176,16 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         delay = DEVICE_LINK_POLL_INTERVAL_MS;
         if (status.status === "consumed") {
           setDevice(status.device);
+          persistLiveWithoutVoucher({
+            ...(issued.sas ? { sas: issued.sas } : {}),
+            ...(issued.sas && !confirmed ? {} : { confirmed: true }),
+          });
           if (issued.sas && !confirmed) setPhase("awaitingConfirm");
           else setPhase("connected");
           return;
         }
         if (status.status === "expired") {
+          writeDeviceLinkLive(null);
           setPhase("expired");
           return;
         }
@@ -168,6 +195,7 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         const copy = failureCopy(error);
         setBanner((prev) => (prev === copy ? prev : copy));
         if (Date.now() >= issued.expiresAt) {
+          writeDeviceLinkLive(null);
           setPhase("expired");
           return;
         }
@@ -192,7 +220,10 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
     const tick = () => {
       const left = Math.max(0, Math.ceil((issued.expiresAt - Date.now()) / 1_000));
       setRemaining(left);
-      if (left <= 0) setPhase("expired");
+      if (left <= 0) {
+        writeDeviceLinkLive(null);
+        setPhase("expired");
+      }
     };
     tick();
     const timer = window.setInterval(tick, COUNTDOWN_TICK_MS);
@@ -236,10 +267,10 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
       await confirmDeviceLinkSas(issued.id);
       setConfirmed(true);
       setPhase("connected");
-      const live = readDeviceLinkLive();
-      if (live && live.id === issued.id) {
-        writeDeviceLinkLive({ ...live, confirmed: true });
-      }
+      persistLiveWithoutVoucher({
+        ...(issued.sas ? { sas: issued.sas } : {}),
+        confirmed: true,
+      });
     } catch (error) {
       setBanner(failureCopy(error));
     } finally {
@@ -249,9 +280,7 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
 
   const showQr = phase === "pending" && issued;
   const showSas =
-    Boolean(issued?.sas) &&
-    !confirmed &&
-    (phase === "pending" || phase === "awaitingConfirm");
+    Boolean(issued?.sas) && !confirmed && phase === "awaitingConfirm";
   const createLabel = busy
     ? "생성 중"
     : phase === "expired"
@@ -263,10 +292,14 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         ? `연결됨: ${device.name}`
         : "연결됨"
       : phase === "awaitingConfirm"
-        ? `${device ? `${device.name}가` : "폰이"} 코드를 썼습니다. 폰에 같은 숫자가 보이면 확인하세요.`
+        ? device
+          ? `코드를 쓴 기기: ${device.name}. 폰에 같은 숫자가 보이면 확인하세요.`
+          : "폰이 코드를 썼습니다. 폰에 같은 숫자가 보이면 확인하세요."
         : phase === "expired"
           ? "이 코드는 만료됐습니다. 다시 만들면 새 QR이 나옵니다."
-          : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
+          : phase === "pending"
+            ? "이 QR은 지금 살아 있습니다. 폰 카메라로 찍으세요."
+            : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
 
   return (
     <div
@@ -286,7 +319,9 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
               ? "device-link-expired"
               : phase === "awaitingConfirm"
                 ? "device-link-awaiting-confirm"
-                : undefined
+                : phase === "pending"
+                  ? "device-link-pending"
+                  : undefined
         }
       >
         {body}
