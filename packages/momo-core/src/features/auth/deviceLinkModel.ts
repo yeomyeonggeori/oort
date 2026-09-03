@@ -30,7 +30,7 @@ export const DEVICE_LINK_SAS_WAIT_COPY =
 export const DEVICE_LINK_PERMISSION_COPY =
   "카메라 권한이 없어 QR을 찍을 수 없습니다. 주소로 연결하세요.";
 export const DEVICE_LINK_UNREACHABLE_COPY =
-  "서버에 닿지 못했습니다. 네트워크가 연결되면 다시 기다립니다.";
+  "서버에 닿지 못했습니다. 다시 연결을 시도합니다.";
 export const DEVICE_LINK_RETRY_LABEL = "QR 다시 찍기";
 export const DEVICE_LINK_QR_LABEL = "QR로 연결";
 export const DEVICE_LINK_ADDRESS_FALLBACK_LABEL = "주소로 연결";

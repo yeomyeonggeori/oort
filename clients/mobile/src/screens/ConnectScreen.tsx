@@ -59,6 +59,7 @@ import {
 } from '../deeplink/deviceLink';
 import {useJoinPrefill} from '../deeplink/joinLink';
 import {deviceLinkDevice} from '../features/deviceLink/deviceIdentity';
+import {focusTextInput} from '../features/deviceLink/focusTextInput';
 import {QrScannerSheet} from '../features/deviceLink/QrScannerSheet';
 import {isOnlineFromNetInfo} from '../query/queryClient';
 import {SESSION_EXPIRED_NOTICE} from '../session/authGate';
@@ -191,7 +192,7 @@ export default function ConnectScreen({
       password,
       requiresServer: requiresServerUrl(),
     });
-    fields.current[target]?.focus();
+    focusTextInput(fields.current[target]);
   }, [prefill, prefillApplied, serverTyped, serverUrl, email, password]);
 
   // Derived during render from the core, never stored. There is no second copy
@@ -212,7 +213,7 @@ export default function ConnectScreen({
     if (!checked.ok) {
       // The core wrote this sentence; it is shown rather than paraphrased.
       setPhase({busy: false, failure: {message: checked.message, suggestSignIn: false, retryable: false}});
-      fields.current.server?.focus();
+      focusTextInput(fields.current.server);
       return;
     }
     setPhase({busy: true, failure: null});
@@ -342,38 +343,64 @@ export default function ConnectScreen({
     }
   }, [online]);
 
+  // Poll identity is the hold's start, not the unreachable flag — flipping that
+  // flag must not cancel the timer (R2-H3). NetInfo coming back is a dep so a
+  // radio edge restarts a tick immediately.
+  const sasPollKey = sasWait
+    ? `${sasWait.startedAt}:${sasWait.session.accessToken}:${sasWait.expired}`
+    : '';
+
   useEffect(() => {
-    if (!sasWait || sasWait.expired || sasWait.unreachable || !online) return;
+    if (!sasWait || sasWait.expired || !online) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let delay = DEVICE_LINK_POLL_MS;
+    const startedAt = sasWait.startedAt;
+    const session = sasWait.session;
     const tick = async () => {
-      if (Date.now() >= sasWait.startedAt + DEVICE_LINK_TTL_MS) {
+      if (Date.now() >= startedAt + DEVICE_LINK_TTL_MS) {
         setSasWait(current =>
           current ? {...current, expired: true, unreachable: false} : current,
         );
         return;
       }
       const outcome = await probeDeviceLinkAccess(
-        sasWait.session.accessToken,
-        sasWait.session.member.workspaceId,
+        session.accessToken,
+        session.member.workspaceId,
       );
       if (cancelled) return;
-      if (Date.now() >= sasWait.startedAt + DEVICE_LINK_TTL_MS) {
+      if (Date.now() >= startedAt + DEVICE_LINK_TTL_MS) {
         setSasWait(current =>
           current ? {...current, expired: true, unreachable: false} : current,
         );
         return;
       }
       if (outcome === 'active') {
-        activateDeviceLinkSession(sasWait.session);
+        setSasWait(current =>
+          current && current.unreachable
+            ? {...current, unreachable: false}
+            : current,
+        );
+        activateDeviceLinkSession(session);
         return;
       }
       if (outcome === 'unreachable') {
         setSasWait(current =>
-          current ? {...current, unreachable: true} : current,
+          current && !current.unreachable
+            ? {...current, unreachable: true}
+            : current,
         );
+        const wait = delay;
+        delay = Math.min(delay * 2, DEVICE_LINK_POLL_MS * 4);
+        timer = setTimeout(() => {
+          void tick();
+        }, wait);
         return;
       }
+      setSasWait(current =>
+        current && current.unreachable ? {...current, unreachable: false} : current,
+      );
+      delay = DEVICE_LINK_POLL_MS;
       timer = setTimeout(() => {
         void tick();
       }, DEVICE_LINK_POLL_MS);
@@ -383,7 +410,9 @@ export default function ConnectScreen({
       cancelled = true;
       if (timer) clearTimeout(timer);
     };
-  }, [sasWait, online]);
+    // sasPollKey, not sasWait: unreachable updates must not tear the loop down.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see sasPollKey
+  }, [sasPollKey, online]);
 
   if (sasWait) {
     const sasFailure = sasWait.expired
@@ -412,7 +441,7 @@ export default function ConnectScreen({
             <FailureBanner
               message={sasFailure}
               retryLabel={DEVICE_LINK_RETRY_LABEL}
-              onRetry={leaveSasToForm}
+              onRetry={retryQr}
               testID="device-link-failure"
             />
           ) : (
@@ -422,7 +451,7 @@ export default function ConnectScreen({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={DEVICE_LINK_RETRY_LABEL}
-              onPress={leaveSasToForm}
+              onPress={retryQr}
               style={({pressed}) => [styles.outlineButton, pressed && styles.togglePressed]}
               testID="device-link-sas-rescan">
               <Text style={styles.toggleLabel}>{DEVICE_LINK_RETRY_LABEL}</Text>
@@ -483,8 +512,7 @@ export default function ConnectScreen({
               accessibilityRole="button"
               accessibilityLabel={DEVICE_LINK_ADDRESS_FALLBACK_LABEL}
               onPress={() => {
-                fields.current.server?.focus();
-                void Linking.openSettings();
+                focusTextInput(fields.current.server);
               }}
               style={({pressed}) => [styles.outlineButton, pressed && styles.togglePressed]}
               testID="qr-permission-fallback">
@@ -540,7 +568,6 @@ export default function ConnectScreen({
               autoCorrect={false}
               keyboardType="url"
               accessibilityLabel="서버 주소"
-              autoFocus={permissionDenied}
               returnKeyType="next"
               // The keyboard's 다음 key moves to the next field, as it does in
               // every other iOS form. Without this it dismisses the keyboard and

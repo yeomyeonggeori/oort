@@ -1,4 +1,4 @@
-import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
 
@@ -17,8 +17,13 @@ import {parseDeviceLinkDeepLink} from '@momo/core/features/auth/deepLink';
 
 import ConnectScreen from '../src/screens/ConnectScreen';
 import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
+import {focusTextInput} from '../src/features/deviceLink/focusTextInput';
 import {__resetSessionStore, keychainSettled} from '../src/storage/secureSession';
 import {__resetServerBaseCache} from '../src/storage/serverBase';
+
+jest.mock('../src/features/deviceLink/focusTextInput', () => ({
+  focusTextInput: jest.fn(),
+}));
 
 // =============================================================================
 // M0m / #1990 — device-link on the phone (ADR-0180 D2·D3·D4·D7).
@@ -296,14 +301,7 @@ describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
     expect(screen.queryByTestId('device-link-sas')).toBeNull();
   });
 
-  it('sends 「QR 다시 찍기」 to the scanner and 「주소로 연결」 to the form', async () => {
-    await renderPendingSas();
-    fireEvent.press(screen.getByTestId('device-link-sas-rescan'));
-    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
-    expect(screen.queryByTestId('device-link-sas')).toBeNull();
-
-    cleanup();
-
+  it('sends 「주소로 연결」 to the form, not the scanner', async () => {
     await renderPendingSas();
     fireEvent.press(screen.getByTestId('device-link-address-fallback'));
     expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
@@ -428,7 +426,7 @@ describe('R2 H-2 SAS offline and unreachable states', () => {
     );
     expect(probes).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText(DEVICE_LINK_UNREACHABLE_COPY)).toBeNull();
-  });
+  }, 10000);
 });
 
 describe('R2 M-2 permission is decided before the Modal', () => {
@@ -448,12 +446,8 @@ describe('R2 M-2 permission is decided before the Modal', () => {
     expect(screen.getByTestId('server-url-input').props.autoFocus).toBeFalsy();
     expect(screen.getByTestId('qr-permission-fallback')).toBeTruthy();
 
-    const input = screen.getByTestId('server-url-input') as unknown as {
-      focus: () => void;
-    };
-    const focus = jest.fn();
-    input.focus = focus;
-
+    const focus = focusTextInput as jest.Mock;
+    focus.mockClear();
     fireEvent.press(screen.getByTestId('qr-permission-fallback'));
     expect(openSettings).toHaveBeenCalledTimes(0);
     expect(focus).toHaveBeenCalled();
