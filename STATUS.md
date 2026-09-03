@@ -2,10 +2,11 @@
 
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
-- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas · GET 폴링(≤2s) `consumed`→「연결됨: <기기명>」. 오류는 InlineBanner. 복사 in-place 「복사됨」(ADR-0182). 토스트 없음.
-- 온보딩: join 완료 화면 「폰에서도 쓰기」가 같은 카드. S0~S2 스텝은 그대로. 로그인 경로는 바로 앱.
-- 기기 목록/해제는 세션 `device_label`이 클라 API에 없어 NOTES 갭(서버 후속). runtime-unverified: 실기기 카메라 스캔(M0m).
-- red proof: 토큰 DOM 비노출 · 만료 전이 · SAS 분기 · consumed 폴링 정지 · confirm 409/400 배너 · 30초 aria-live · 시크릿 grep-gate.
+- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).
+- ADR-0180 D7 「온보딩 S5」는 번호 스텝이 아니라 **로그인 후 first-run 카드**(App이 소유, 세션 게이트가 선점하지 못함). UX-R2a가 번호 시퀀스에 접을 수 있다. 진행 표시 없음.
+- NOTES: 기기 목록/해제는 `GET /v1/auth/devices` + `DELETE /v1/auth/devices/{id}`가 없다(#2029). 현재 카드의 연결됨은 세션 안 폴 `status`/`device`(+live 기록)로만 살아남고, 지속 목록은 #2029.
+- runtime-unverified: 실기기 카메라 스캔(M0m).
+- red proof: 독립 디코더 왕복(v1/v7/v8) · RS/포맷 골든 · App 트리 first-run · SAS 미확인≠연결됨 · 채움 액센트 ≤1 · 모듈 피치 바닥 · aria-describedby · 만료 문장 · 리마운트 · 재발급 폴 1개 · 캡처 전수 시크릿 스윕.
 
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 

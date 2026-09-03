@@ -7,7 +7,8 @@ import { describe, expect, it } from "vitest";
 // ADR-0172의 아이콘 경계를 전수로 잰다.
 //
 // 기능 아이콘은 lucide-react가 정본이다. 로컬 SVG는 "지금 아는 파일"을 대충
-// 세는 잔량이 아니라, Lucide에 없는 도메인 고유 글리프만 허용하는 닫힌 예외다.
+// 세는 잔량이 아니라, Lucide에 없는 도메인 고유 글리프와 데이터 행렬(QR)만
+// 허용하는 닫힌 예외다. QR은 글리프가 아니라 페이로드를 모듈로 그린 것이다.
 // 새 <svg>나 public/*.svg가 생기면 이 테스트가 먼저 실패하고, 그 파일을 예외로
 // 추가하려면 코드 주석과 디자인 시스템 정본에 존치 사유를 함께 적어야 한다.
 // =============================================================================
@@ -52,7 +53,7 @@ const SHIPPED_SOURCES = filesUnder(SRC_DIR, /\.tsx?$/)
   }));
 
 describe("ADR-0172 lucide 아이콘 경계", () => {
-  it("기능 표면의 raw SVG는 oort 브랜드 글리프만 남는다", () => {
+  it("기능 표면의 raw SVG는 브랜드 글리프와 데이터 행렬(QR)만 남는다", () => {
     expect(LOCAL_SVG_COMPONENTS).toEqual([
       "src/design/brand/OortMark.tsx",
       "src/features/auth/OortCloudMarks.tsx",
