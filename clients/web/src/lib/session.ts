@@ -292,5 +292,10 @@ export function clearSession(): void {
   persisted = null;
   authExpired = false;
   writeStorage(null);
+  try {
+    sessionStorage.removeItem("momo.web.deviceLinkLive.v1");
+  } catch {
+    // Private mode / non-browser. Same key as deviceLinkLive.ts.
+  }
   notify();
 }
