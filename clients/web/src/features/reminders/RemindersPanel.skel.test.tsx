@@ -2,86 +2,96 @@
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FeedItem } from "@momo/core/features/inbox/model";
+import type { MessageReminder } from "@momo/core/features/reminders/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import type { Feed } from "./useInbox";
-import { InboxRoute } from "./InboxRoute";
+import { makeDirectory } from "@/features/workspace/useWorkspace";
+import { RemindersPanel } from "./RemindersPanel";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 const CH = "00000000-0000-7000-8000-000000000201";
+const MSG = "00000000-0000-7000-8000-000000000301";
 const NOW = 1_800_000_000_000;
-
-vi.mock("@/app/SidebarDrawerToggle", () => ({
-  SidebarDrawerToggle: () => null,
-}));
 
 vi.mock("@/features/common/useOffline", () => ({
   useOffline: () => false,
 }));
 
-vi.mock("@/features/reminders/useReminders", () => ({
-  useReminders: () => ({
-    isLoading: false,
-    isError: false,
-    data: { reminders: [] },
-    dataUpdatedAt: NOW,
-    refetch: () => undefined,
+vi.mock("@/features/emoji/useHoverNone", () => ({
+  useHoverNone: () => true,
+}));
+
+const remindersState: {
+  isLoading: boolean;
+  isError: boolean;
+  data: { reminders: MessageReminder[] } | undefined;
+  dataUpdatedAt: number;
+  refetch: () => void;
+} = {
+  isLoading: false,
+  isError: false,
+  data: { reminders: [] },
+  dataUpdatedAt: NOW,
+  refetch: () => undefined,
+};
+
+vi.mock("./useReminders", () => ({
+  useReminders: () => remindersState,
+  useReminderMutations: () => ({
+    create: { isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() },
+    complete: { isPending: false, mutateAsync: vi.fn() },
+    snooze: { isPending: false, mutateAsync: vi.fn() },
+    remove: { isPending: false, mutateAsync: vi.fn() },
   }),
 }));
 
-const ITEM: FeedItem = {
-  key: "row-1",
-  kind: "approval",
-  tone: "warn",
-  actor: "김인턴",
-  actorIsAgent: true,
-  predicate: "세션을 마치려고 합니다.",
-  outcome: null,
-  outcomeTone: "muted",
-  channelId: CH,
-  channelLabel: "엔진",
-  timeLabel: "방금",
-  sortAtMs: NOW,
-  pending: true,
-  reason: "실행 허가",
-};
-
-const listFeed: Feed = {
-  items: [ITEM],
-  isLoading: false,
-  error: false,
-  absent: false,
-  updatedAtMs: NOW,
-  refetch: () => undefined,
-};
-
-const emptyFeed: Feed = {
-  items: [],
-  isLoading: false,
-  error: false,
-  absent: false,
-  updatedAtMs: NOW,
-  refetch: () => undefined,
-};
-
-vi.mock("./useInbox", () => ({
-  useNeedsAction: () => listFeed,
-  useMentions: () => emptyFeed,
-  useAgentFeed: () => emptyFeed,
-  useMentionCount: () => 0,
-  useUnreadMentionChannels: () => [],
-  useMarkRead: () => () => undefined,
-  useInvalidateApprovals: () => () => undefined,
-}));
+vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
+  return {
+    ...actual,
+    useChannels: () => ({
+      groups: {
+        channels: [
+          {
+            id: CH,
+            workspaceId: WS,
+            kind: "public",
+            name: "일반",
+            muted: false,
+          },
+        ],
+        dms: [],
+      },
+    }),
+    useDirectory: () => ({
+      directory: makeDirectory([]),
+      isPending: false,
+    }),
+  };
+});
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+
+function reminder(): MessageReminder {
+  return {
+    id: "r-1",
+    workspaceId: WS,
+    memberId: MEMBER_ID,
+    channelId: CH,
+    messageId: MSG,
+    dueAtMs: NOW + 60_000,
+    createdAtMs: NOW,
+    messagePreview: "배포 점검 부탁드립니다",
+    messageSeq: 12,
+  };
+}
 
 function sessionValue(): SessionContextValue {
   return {
@@ -115,8 +125,15 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: ["/inbox"] },
-      createElement(InboxRoute)
+      { initialEntries: ["/inbox?filter=reminders"] },
+      createElement(
+        Routes,
+        null,
+        createElement(Route, {
+          path: "/inbox",
+          element: createElement(RemindersPanel),
+        })
+      )
     )
   );
   await act(async () => {
@@ -131,8 +148,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  listFeed.items = [ITEM];
-  listFeed.isLoading = false;
+  remindersState.isLoading = false;
+  remindersState.isError = false;
+  remindersState.data = { reminders: [reminder()] };
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -154,13 +172,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("InboxRoute skeleton host", () => {
-  it("wraps the inbox list inside Skeleton (moving the list out turns this red)", async () => {
+describe("RemindersPanel skeleton host", () => {
+  it("wraps the reminder list inside Skeleton (moving the list out turns this red)", async () => {
     const host = await mount();
-    const list = host.querySelector('[data-testid="inbox-list"]');
-    const skel = host.querySelector(
-      '[data-testid="inbox-route"] [data-testid="skeleton"]'
-    );
+    const list = host.querySelector('[data-testid="reminders-list"]');
+    const skel = host.querySelector('[data-testid="skeleton"]');
     expect(list).not.toBeNull();
     expect(skel).not.toBeNull();
     expect(skel?.contains(list)).toBe(true);
@@ -168,13 +184,11 @@ describe("InboxRoute skeleton host", () => {
     expect(skel?.querySelector(".skel-content")).toBeTruthy();
   });
 
-  it("stays data-ready=false while the inbox is loading (ready={true} turns this red)", async () => {
-    listFeed.items = [];
-    listFeed.isLoading = true;
+  it("stays data-ready=false while reminders are loading (ready={true} turns this red)", async () => {
+    remindersState.isLoading = true;
+    remindersState.data = undefined;
     const host = await mount();
-    const skel = host.querySelector(
-      '[data-testid="inbox-route"] [data-testid="skeleton"]'
-    );
+    const skel = host.querySelector('[data-testid="skeleton"]');
     expect(skel).not.toBeNull();
     expect(skel?.getAttribute("data-ready")).toBe("false");
   });

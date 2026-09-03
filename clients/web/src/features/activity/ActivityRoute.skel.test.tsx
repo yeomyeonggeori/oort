@@ -6,8 +6,8 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { FeedItem } from "@momo/core/features/inbox/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
-import type { Feed } from "./useInbox";
-import { InboxRoute } from "./InboxRoute";
+import type { Feed } from "@/features/inbox/useInbox";
+import { ActivityRoute } from "./ActivityRoute";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -16,20 +16,6 @@ const NOW = 1_800_000_000_000;
 
 vi.mock("@/app/SidebarDrawerToggle", () => ({
   SidebarDrawerToggle: () => null,
-}));
-
-vi.mock("@/features/common/useOffline", () => ({
-  useOffline: () => false,
-}));
-
-vi.mock("@/features/reminders/useReminders", () => ({
-  useReminders: () => ({
-    isLoading: false,
-    isError: false,
-    data: { reminders: [] },
-    dataUpdatedAt: NOW,
-    refetch: () => undefined,
-  }),
 }));
 
 const ITEM: FeedItem = {
@@ -49,7 +35,7 @@ const ITEM: FeedItem = {
   reason: "실행 허가",
 };
 
-const listFeed: Feed = {
+const feed: Feed = {
   items: [ITEM],
   isLoading: false,
   error: false,
@@ -58,23 +44,8 @@ const listFeed: Feed = {
   refetch: () => undefined,
 };
 
-const emptyFeed: Feed = {
-  items: [],
-  isLoading: false,
-  error: false,
-  absent: false,
-  updatedAtMs: NOW,
-  refetch: () => undefined,
-};
-
-vi.mock("./useInbox", () => ({
-  useNeedsAction: () => listFeed,
-  useMentions: () => emptyFeed,
-  useAgentFeed: () => emptyFeed,
-  useMentionCount: () => 0,
-  useUnreadMentionChannels: () => [],
-  useMarkRead: () => () => undefined,
-  useInvalidateApprovals: () => () => undefined,
+vi.mock("@/features/inbox/useInbox", () => ({
+  useAgentFeed: () => feed,
 }));
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -115,8 +86,8 @@ async function mount(): Promise<HTMLElement> {
     { value: sessionValue() },
     createElement(
       MemoryRouter,
-      { initialEntries: ["/inbox"] },
-      createElement(InboxRoute)
+      { initialEntries: ["/activity"] },
+      createElement(ActivityRoute)
     )
   );
   await act(async () => {
@@ -131,8 +102,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  listFeed.items = [ITEM];
-  listFeed.isLoading = false;
+  feed.items = [ITEM];
+  feed.isLoading = false;
+  feed.absent = false;
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -154,12 +126,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("InboxRoute skeleton host", () => {
-  it("wraps the inbox list inside Skeleton (moving the list out turns this red)", async () => {
+describe("ActivityRoute skeleton host", () => {
+  it("wraps the activity list inside Skeleton (moving the list out turns this red)", async () => {
     const host = await mount();
-    const list = host.querySelector('[data-testid="inbox-list"]');
+    const list = host.querySelector('[data-testid="activity-list"]');
     const skel = host.querySelector(
-      '[data-testid="inbox-route"] [data-testid="skeleton"]'
+      '[data-testid="activity-route"] [data-testid="skeleton"]'
     );
     expect(list).not.toBeNull();
     expect(skel).not.toBeNull();
@@ -168,12 +140,12 @@ describe("InboxRoute skeleton host", () => {
     expect(skel?.querySelector(".skel-content")).toBeTruthy();
   });
 
-  it("stays data-ready=false while the inbox is loading (ready={true} turns this red)", async () => {
-    listFeed.items = [];
-    listFeed.isLoading = true;
+  it("stays data-ready=false while the feed is loading (ready={true} turns this red)", async () => {
+    feed.items = [];
+    feed.isLoading = true;
     const host = await mount();
     const skel = host.querySelector(
-      '[data-testid="inbox-route"] [data-testid="skeleton"]'
+      '[data-testid="activity-route"] [data-testid="skeleton"]'
     );
     expect(skel).not.toBeNull();
     expect(skel?.getAttribute("data-ready")).toBe("false");

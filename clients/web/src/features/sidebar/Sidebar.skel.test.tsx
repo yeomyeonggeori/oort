@@ -76,19 +76,21 @@ const self: RosterMember = {
   updatedAtMs: 1_800_000_000_000,
 };
 
+const channelsQuery = {
+  isLoading: false,
+  isPending: false,
+  error: null as Error | null,
+  refetch: () => undefined,
+  groups: { channels: [engine, general], dms: [] as Channel[] },
+  data: [engine, general] as Channel[],
+};
+
 vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
   return {
     ...actual,
-    useChannels: () => ({
-      isLoading: false,
-      isPending: false,
-      error: null,
-      refetch: () => undefined,
-      groups: { channels: [engine, general], dms: [] },
-      data: [engine, general],
-    }),
+    useChannels: () => channelsQuery,
     useDirectory: () => ({
       directory: makeDirectory([self]),
       isPending: false,
@@ -203,6 +205,9 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  channelsQuery.isLoading = false;
+  channelsQuery.groups = { channels: [engine, general], dms: [] };
+  channelsQuery.data = [engine, general];
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -245,5 +250,22 @@ describe("Sidebar skeleton host", () => {
     expect(skel?.getAttribute("data-ready")).toBe("true");
     expect(skel?.querySelector(".skel-content")).toBeTruthy();
     expect(host.textContent).toContain("엔진");
+  });
+
+  it("stays data-ready=false while channels are loading (ready={true} turns this red)", async () => {
+    channelsQuery.isLoading = true;
+    channelsQuery.groups = { channels: [], dms: [] };
+    channelsQuery.data = [];
+    const host = await mount();
+    const section = await vi.waitFor(() => {
+      const node = host.querySelector(
+        '[data-testid="sidebar-section-channels"]'
+      );
+      expect(node).not.toBeNull();
+      return node as HTMLElement;
+    });
+    const skel = section.querySelector('[data-testid="skeleton"]');
+    expect(skel).not.toBeNull();
+    expect(skel?.getAttribute("data-ready")).toBe("false");
   });
 });
