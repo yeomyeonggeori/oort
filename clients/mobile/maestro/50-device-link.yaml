@@ -13,8 +13,9 @@ name: 50-device-link
 # Debug Metro limitation (same as 00-login): a COLD openLink relaunches without
 # RCT_jsLocation and lands on a red "No script URL provided" box. The flow
 # therefore launches first, waits for the connect screen, then openLink as a
-# WARM hand-off. If that Linking event does not reach JS on this build, the
-# redeem/SAS path is unmeasured — do not call the flow green.
+# WARM hand-off. AppDelegate forwards `application(_:open:)` to
+# RCTLinkingManager so the warm URL reaches JS; `dismiss-system-alerts` taps
+# the OS 「열기」 confirmation. If redeem still does not happen, the flow is red.
 ---
 # 50-device-link — oort://link 투입 → redeem → (SAS 대기 또는 채널 목록).
 - launchApp:
