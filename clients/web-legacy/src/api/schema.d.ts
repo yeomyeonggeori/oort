@@ -396,7 +396,7 @@ export interface paths {
         };
         /**
          * Read the workspace.settings bag.
-         * @description Owner/admin only (`require_workspace_operator`). Returns the stored jsonb object, or `{}` when the workspace has never written a key. This is deliberately a sibling of `GET /v1/workspaces/{workspaceId}`, which must not grow a `settings` field — the bag is an extensible store that may later hold keys not every member may read. Members read `role_labels` through `WorkspaceDto.roleLabels` on that identity GET.
+         * @description Owner/admin only (`require_workspace_operator`). Returns the stored jsonb object, or `{}` when the workspace has never written a key. This is deliberately a sibling of `GET /v1/workspaces/{workspaceId}`, which must not grow a `settings` field — the bag is an extensible store that may later hold keys not every member may read. Members read `role_labels` through `WorkspaceDto.roleLabels` on that identity GET, and `welcome_agent_member_id` / `welcome_prompt` through the matching WorkspaceDto fields (ADR-0181).
          */
         get: operations["getWorkspaceSettings"];
         put?: never;
@@ -406,7 +406,7 @@ export interface paths {
         head?: never;
         /**
          * Merge top-level keys into workspace.settings.
-         * @description Owner/admin only. RFC 7396-shaped top-level merge: specified keys replace, omitted keys stay, `null` deletes the key. Unknown top-level keys are 400. Allowlist is `allowed_agent_models` (string array, max 32 entries, each ≤ 64 bytes) and `role_labels` (object whose keys are `owner`/`admin`/`member`/`guest`, values non-empty strings ≤ 48 UTF-8 bytes). `role_labels` is replaced whole — omit a role key to drop that override; `null` deletes the key (client default labels). Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
+         * @description Owner/admin only. RFC 7396-shaped top-level merge: specified keys replace, omitted keys stay, `null` deletes the key. Unknown top-level keys are 400. Allowlist is `allowed_agent_models` (string array, max 32 entries, each ≤ 64 bytes), `role_labels` (object whose keys are `owner`/`admin`/`member`/`guest`, values non-empty strings ≤ 48 UTF-8 bytes), `welcome_agent_member_id` (uuid of an active workspace agent, or null to delete), and `welcome_prompt` (string, ≤ 2000 characters). `role_labels` is replaced whole — omit a role key to drop that override; `null` deletes the key (client default labels). Serialized body over 8192 bytes is 413. There is no PUT whole-replace.
          */
         patch: operations["patchWorkspaceSettings"];
         trace?: never;
@@ -4986,10 +4986,17 @@ export interface components {
         PinList: {
             pins: components["schemas"]["PinnedMessage"][];
         };
-        /** @description Stored workspace.settings bag. Additional keys may appear after a later ticket widens the allowlist. Writable keys today are allowed_agent_models and role_labels (#1770). */
+        /** @description Stored workspace.settings bag. Additional keys may appear after a later ticket widens the allowlist. Writable keys today are allowed_agent_models, role_labels (#1770), welcome_agent_member_id and welcome_prompt (ADR-0181 / #1960). */
         WorkspaceSettings: {
             allowed_agent_models?: string[];
             role_labels?: components["schemas"]["RoleLabels"];
+            /**
+             * Format: uuid
+             * @description Active agent member who posts the welcome opener. Null deletes the override (kickoff then uses the first native agent).
+             */
+            welcome_agent_member_id?: string | null;
+            /** @description Instruction for the opener run. Absent key uses the canonical default copy. */
+            welcome_prompt?: string;
         } & {
             [key: string]: unknown;
         };
@@ -4998,6 +5005,13 @@ export interface components {
             allowed_agent_models?: string[] | null;
             /** @description Display-only role name overrides. Keys ⊂ {owner, admin, member, guest}. Values are non-empty strings, ≤ 48 UTF-8 bytes. Whitespace-only is 400. Agent keys are refused. null deletes the key (client default labels). */
             role_labels?: components["schemas"]["RoleLabels"] | null;
+            /**
+             * Format: uuid
+             * @description Active agent member id. Inactive / non-agent ids are 400. null deletes the key.
+             */
+            welcome_agent_member_id?: string | null;
+            /** @description Opener instruction, ≤ 2000 characters. null deletes the key (canonical default). */
+            welcome_prompt?: string | null;
         };
         /** @description Display-only membership role name overrides. Does not change permissions, RLS, or the role wire value. Empty object means client defaults. Agent labels are a client null rule and are not stored. */
         RoleLabels: {
@@ -5006,7 +5020,7 @@ export interface components {
             member?: string;
             guest?: string;
         };
-        /** @description GET /v1/workspaces/{workspaceId} workspace object. Identity plus the member-readable roleLabels projection. The settings bag is never included. */
+        /** @description GET /v1/workspaces/{workspaceId} workspace object. Identity plus the member-readable roleLabels and welcome projections. The settings bag is never included. */
         WorkspaceDto: {
             /** Format: uuid */
             id: string;
@@ -5018,6 +5032,13 @@ export interface components {
             avatarUrl?: string;
             /** @description Projection of workspace.settings.role_labels. Empty object when the key is absent. Display-only. */
             roleLabels: components["schemas"]["RoleLabels"];
+            /**
+             * Format: uuid
+             * @description Projection of workspace.settings.welcome_agent_member_id. Null when unset.
+             */
+            welcomeAgentMemberId?: string | null;
+            /** @description Effective welcome prompt. Canonical default when the settings key is absent (ADR-0181 D8). */
+            welcomePrompt: string;
         };
         WorkspaceResponse: {
             workspace: components["schemas"]["WorkspaceDto"];
@@ -7028,7 +7049,7 @@ export interface operations {
                     "application/json": components["schemas"]["WorkspaceSettings"];
                 };
             };
-            /** @description Unknown key, malformed allowed_agent_models or role_labels, or non-object body. */
+            /** @description Unknown key, malformed allowed_agent_models, role_labels, welcome_agent_member_id or welcome_prompt, inactive welcome agent, or non-object body. */
             400: {
                 headers: {
                     [name: string]: unknown;

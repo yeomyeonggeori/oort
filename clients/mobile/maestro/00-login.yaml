@@ -48,7 +48,7 @@ name: 00-login
     timeout: 180000
 
 - assertVisible: "oort에 연결"
-- assertVisible: "oort는 셀프호스팅입니다. 연결할 서버 주소를 입력하세요."
+- assertVisible: "QR을 찍거나 서버 주소를 입력하세요."
 
 # The server address is TYPED rather than deep-linked. `oort://join?server=…`
 # is the supported prefill and it parses correctly, but it cannot be used here —

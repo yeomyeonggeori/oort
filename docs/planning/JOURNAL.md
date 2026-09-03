@@ -3,6 +3,15 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-02 (심야2) · Fable · ★W1 1차 랜딩 — v0.1.4 발행·엔진 3건+UX-R0+SH-3a main 정본화·M0m R1 FAIL→R2·UX-R4a 가동
+
+- 발행: v0.1.4(run 33616349789, 태그 e39e9427, attestation PASS) → SELF_HOST §2-B·CHANGELOG #1980.
+- 랜딩: SH-1 #1983 · M0s #1986(A-44) · UX-R2s #1993(A-45 — 1차 체인 머지 누락 발견, 9/3 재랜딩) · UX-R0 #1985(R1 FAIL→R2 PASS→R3 CI Chromium skipIf) · SH-3a #2007(재검증 9/9·시크릿 0/14). 승격 #2005 + 배치 i #2012/#2014, sync h·i. main=1a88d9ca.
+- 검수: M0m PR #2009 design-review FAIL B1·H2·M7·N5 → R2 미션(기획 결정 3: QR 헤드라인=outline 티어·`font.display`·-습니다 어투). 서버 후속 #2010, 폰 후속 #2011.
+- 발행: UX-R1a~e·R2a·R2b #1996~#2002, #1984 범위 확장, #2000 원장. ADR-0179 D1 정오표(온보딩 300ms×3 예외 열거).
+- 교훈: gh --delete-branch 워크트리 함정(메모리) · CI 유닛 레인 Playwright 부재.
+- 다음: M0m R2 재검수·랜딩 → UX-R4a 랜딩(#2015 design-review → 트랙) → DS-2/M0w 발사 → 승격 j → ITO 준비.
+
 ## 2026-09-02 (심야) · Fable · ★G0 완주 — BT-6 5회전 랜딩·lint 위생·승격 배치 7PR(감사 6회)·main 정본화. 발행 창만 남음
 
 - BT-6 클라 #1963: R1 B2·H2(재열람 경계 소실·폰 tsc·게이트 1/5·캡처 비결정) → R2 H-3(재마크 회귀) → R3 H-4/H-5(캡처 증거 무효·정렬 중 IO 래치) → R4 H-6(롤백 null 흡수) → R5 PASS. H-5는 4회 불성립 후 선재 판정·철회(#1966). 재검증 매 회전: ts-check·lint·vitest·병합 트리 8레인.
@@ -132,7 +141,3 @@
 - 2차 승격 창: #1721(docs)→선sync 짝→#1724(uxui)→#1725→#1726(engine)→최종 짝. 학습 절차(선sync)로 토폴로지 재실행 1회로 끝.
 - #1716 랜딩(#1729): 실측 크기 정본화(0-선언 개방·상한 실측 red proof·PG 12/12) — grok 4차 조기종료(ENOSPC)를 인수 완주. #1720 1·3·4항 랜딩(#1733): sol이 main 전진에 TRACKS 하드 가드로 정직 정지→sync 후 전달. 잔여=2항(fan-out 배치)만.
 - 운영: ENOSPC 4차 — **근본 원인=워크트리 50개 적체**(스테일 node_modules·딥 .build). 정리 판정=성재 큐. 각 회수로 14Gi+ 확보.
-## 2026-08-24 (Fable) · ★ADR-0170 완결 — 언퍼얼 양 절반 랜딩(#1717 서버·#1719 클라). 성재 요청 기능 종단 완성
-- 서버 절반(#1717, grok 3,828줄): message_unfurl 원장(079)·SSRF 가드 워커·on/off·제거·프록시. 랜딩 중 fail-closed 게이트 2건(GHCR 고지·web-legacy 타입) 정당 적발→해소.
-- 클라 절반(#1719, sol 24파일): 카드·제거·2층 설정. **design-review FAIL(B1·H1)→수리 라운드(1413762d)→재판정 PASS(0·0)**. 수리가 로빙 기계 잠복 결함 2건을 근본 해소: ①비동기 마운트 구성원 정규화 누락(MutationObserver) ②정거장 이력 고착(focusout primary 복원) — 리뷰어 적대 반증 6경로 전부 방어. 레인 230프레임(다크 115) 완주 실증. 적립=#1720(rowFocus jsdom 고정·배치 API·바이트 예산).
-- #1718·#1698 close. 활성화는 배포 창에서 MOMO_UNFURL_ENABLED=1 결정. 운영: ENOSPC 3차(원인=npm 캐시 11G+brew 4G+Swift .build 잔재)→36Gi 회수. **교훈: 대형 파도 세션은 시작·중간에 df 게이트.**

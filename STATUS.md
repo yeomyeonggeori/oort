@@ -7,6 +7,20 @@
 - runtime-unverified: 라이브 카탈로그 GET(라우트 부재). 클라 시험은 목 카탈로그.
 - 잔량: 폰 `COPY_RECEIPT_MS = 1_500` (`clients/mobile/src/features/conversation/copy.ts`) vs 웹 1 600. 이 티켓은 폰 무접촉. 소유: 폰 패리티 후속.
 
+## M0m 기기 연결 폰 절반 — ConnectScreen 「QR로 연결」 (#1990, 2026-09-02)
+
+- `oort://link` 파서(join 동형: 순서 무관·`momo://` 흡수·미지 파라미터 무시·잘못된 server 거부) + `POST /v1/auth/device-link/redeem` + `pendingSas` SAS 대기(서버 `sas` 또는 토큰 SHA-256 파생 4자리). 세션은 활성화 후 키체인만.
+- 카메라 권한 거부 → 문장 안내 + 「주소로 연결」 폴백. 만료 401 / 재사용 409 / 형식 오류 세 문장, 재시도 「QR 다시 찍기」.
+- R2: SAS에 「QR 다시 찍기」·「주소로 연결」 탈출, TTL 120s 만료 문장, 오프라인/unreachable 상태, 권한은 모달 전에 결정.
+- R3: SAS 「QR 다시 찍기」는 스캐너를 연다. 거부 「주소로 연결」은 인앱 포커스(Settings는 「설정에서 허용」만). unreachable은 TTL까지 백오프 폴. AppDelegate가 warm `oort://`를 RCTLinkingManager로 전달. `expo-device` `modelName`. runtime-unverified: 실기기 카메라·권한 프롬프트.
+
+## UX-R2s 웰컴 킥오프 서버 절반 — RunTrigger::Welcome (#1960, 2026-09-02)
+
+- `RunTrigger::Welcome { kind: Opener|ProviderRequired|Closer }` + 멱등 키 `welcome:{ws}:{member}:{kind}:v1`. 가입 `createdMember:true`·owner claim 완주가 같은 tx에서 `agent_job`을 넣는다. 재가입·invite redeem(기존 멤버)은 무트리거.
+- 워커: provider 미구성이면 모델/원장 0, 에이전트 명의 정적 카피 1건(`ProviderRequired`) — opener 키는 소비하지 않음. opener는 정상 run + `usage_ledger`. G2 streak는 `welcome:%` run 제외.
+- settings `welcome_agent_member_id`(활성 에이전트)·`welcome_prompt`(≤2000자). WorkspaceDto 프로젝션. `schema_v0.sql` 무접촉. Closer는 enum 예약(v1 미구현).
+- runtime-unverified: 라이브 join→Centrifugo 첫 발화 왕복(클라 UX-R2b).
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
@@ -15,6 +29,7 @@
 - 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
 - H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
+
 ## SH-3a `scripts/oort doctor` (#1955, 2026-09-02)
 
 - 셀프호스트 설치 판정 1개: `scripts/oort doctor [--env] [--json] [--strict]`. 필수 키는 `self_host_env.sh` 생성 heredoc에서 파생. 소문자 `true` 게이트(doorbell/hosted-delivery)·언퍼얼 `1`·`PLATFORM_ADMIN_EMAILS`·provider master key·drive backend·WS URL·role 비번↔DATABASE_URL. 시크릿은 이름·길이 class·형식만.

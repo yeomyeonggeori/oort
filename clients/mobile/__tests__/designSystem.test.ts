@@ -265,7 +265,7 @@ describe('타이포 축', () => {
     const pairedPhone = new Set<string>(TYPE_PAIRS.map(([key]) => key));
     const pairedWeb = new Set<string>(TYPE_PAIRS.map(([, role]) => role));
     expect(Object.keys(font).filter(key => !pairedPhone.has(key)).sort()).toEqual(
-      ['body', 'heading', 'label', 'title'],
+      ['body', 'display', 'heading', 'label', 'title'],
     );
     expect(
       Object.keys(WEB_TEXT)
@@ -282,8 +282,15 @@ describe('타이포 축', () => {
     expect(font.body).toBeGreaterThanOrEqual(16);
   });
 
-  it('크기 다섯 단이 겹치지 않고 내려간다', () => {
-    const ranks = [font.title, font.heading, font.body, font.label, font.meta];
+  it('크기 여섯 단이 겹치지 않고 내려간다', () => {
+    const ranks = [
+      font.display,
+      font.title,
+      font.heading,
+      font.body,
+      font.label,
+      font.meta,
+    ];
     for (let index = 1; index < ranks.length; index += 1) {
       expect(ranks[index]).toBeLessThan(ranks[index - 1]);
     }
