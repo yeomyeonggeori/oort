@@ -341,13 +341,15 @@ jest.mock('expo-camera', () => {
   };
 });
 
-jest.mock(
-  'expo-device',
-  () => ({
-    modelName: 'iPhone 17 Pro',
-  }),
-  {virtual: true},
-);
+jest.mock('expo-device', () => {
+  const state = {modelName: 'iPhone 17 Pro'};
+  return {
+    __state: state,
+    get modelName() {
+      return state.modelName;
+    },
+  };
+});
 
 jest.mock('expo-clipboard', () => {
   const box = {value: null};
