@@ -9,6 +9,12 @@
 - 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx` + `MessageRow.entrance.test.tsx`.
 - red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 끝점/1회/`both` 불일치 시 motion.test 붉음 · 부분 복구를 live 로 읽으면 하네스가 붉음 · `playEntrance` 무시·클래스 자식 이전·두 번째 consume 탈락은 행 렌더가 붉음.
 
+## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
+
+- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, 강제 미리보기 `:is(:hover,[preview])` 규칙 0 (`gallery-preview.css` 에서 속성·시그니처 파생), `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지). 미리보기 속성은 `data-gallery-preview`(첨부 `data-preview` 와 이름 충돌 없음).
+- ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 **칸(`data-gallery-stage`) 안에** 붙는다. 무대 높이는 표본 자신(pane 가로 토큰을 세로로 빌리지 않음). 네 판 `onOpenAutoFocus={preventAutoFocus}`(로드 후 첫 Tab 이 위 컨트롤, 스크롤 ~0). Dialog 스크림은 판 둘레에 보이는 대역(가림 없는 가시 면적). 캡처는 첫 Tab·휠 스크롤 가시 면적(≥0.9)·네 변 잘림·스크림 비가림을 잰다.
+- NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용. 스크림은 갤러리 대역.
+
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
 - 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).

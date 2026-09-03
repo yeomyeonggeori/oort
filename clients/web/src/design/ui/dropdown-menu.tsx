@@ -55,9 +55,13 @@ export const DropdownMenuGroup = MenuPrimitive.Group;
  */
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof MenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <MenuPrimitive.Portal>
+  React.ComponentPropsWithoutRef<typeof MenuPrimitive.Content> & {
+    container?: HTMLElement | null;
+    /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
+    onOpenAutoFocus?: (event: Event) => void;
+  }
+>(({ className, sideOffset = 4, container, onOpenAutoFocus, ...props }, ref) => (
+  <MenuPrimitive.Portal container={container ?? undefined}>
     <MenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
@@ -67,6 +71,9 @@ export const DropdownMenuContent = React.forwardRef<
         className
       )}
       {...props}
+      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+        typeof MenuPrimitive.Content
+      >)}
     />
   </MenuPrimitive.Portal>
 ));
