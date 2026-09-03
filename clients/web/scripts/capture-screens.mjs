@@ -6913,6 +6913,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-input").hover();
   await login.waitForTimeout(100);
   await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
+  await waitForAnimations(login);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);

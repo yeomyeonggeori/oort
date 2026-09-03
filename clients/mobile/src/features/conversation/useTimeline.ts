@@ -659,8 +659,9 @@ export function useTimeline(
 
     // 2) The realtime rail, with resume healing.
     const unsub = rail.subscribeChannel(workspaceId, channelId, {
-      onSubscribed: recovered => {
+      onSubscribed: ctx => {
         if (cancelled) return;
+        const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
         setResume(r => ({

@@ -197,7 +197,7 @@ export function createRealtime(
     workspaceId: string,
     channelId: string,
     handlers: {
-      onSubscribed: (recovered: boolean) => void;
+      onSubscribed: (ctx: SubscribedRecoveryContext) => void;
       onMessage: (event: MessageNewEvent) => void;
       onMessageDeleted?: (event: MessageDeletedEvent) => void;
       onReaction?: (event: ReactionEvent) => void;
@@ -209,8 +209,8 @@ export function createRealtime(
       centrifugoChannelName(workspaceId, channelId),
       { recoverable: true, positioned: true },
       (sub) => {
-        const onSubscribed = (ctx: { recovered?: boolean }) =>
-          handlers.onSubscribed(ctx.recovered === true);
+        const onSubscribed = (ctx: SubscribedRecoveryContext) =>
+          handlers.onSubscribed(ctx);
         const onPublication = (ctx: { data?: unknown }) => {
           const event = ctx.data as MessageNewEvent | undefined;
           if (
