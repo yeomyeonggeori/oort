@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { Button } from "@/design/ui/button";
-import { Dialog, DialogContent, DialogTitle } from "@/design/ui/dialog";
+import { SectionDeleteConfirmDialog } from "@/features/sidebar/SidebarSectionDialogs";
 import {
   Popover,
   PopoverContent,
@@ -22,9 +22,10 @@ import {
 import { Select } from "@/design/ui/select";
 
 /**
- * UX-R1a browser probe mount. Not a product route. The overlayMotion test
- * bundles this file and measures computed animationName / duration on the
- * live primitives (jsdom cannot resolve CSS animation durations).
+ * UX-R1a browser probe. Not a product route. Lives under measure/ so a
+ * module-scope createRoot cannot become a second React root over the app.
+ * The dialog under test is a shipped product dialog (SectionDeleteConfirmDialog),
+ * not a synthetic always-mounted DialogContent.
  */
 export function Harness() {
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -35,12 +36,13 @@ export function Harness() {
       <Button data-testid="open-dialog" onClick={() => setDialogOpen(true)}>
         대화 상자 열기
       </Button>
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent data-testid="dialog-content">
-          <DialogTitle>채널 만들기</DialogTitle>
-          <Button data-testid="dialog-action">변경 저장</Button>
-        </DialogContent>
-      </Dialog>
+      <SectionDeleteConfirmDialog
+        open={dialogOpen}
+        name="기획"
+        opener={null}
+        onOpenChange={setDialogOpen}
+        onConfirm={() => setDialogOpen(false)}
+      />
 
       <Popover>
         <PopoverTrigger asChild>

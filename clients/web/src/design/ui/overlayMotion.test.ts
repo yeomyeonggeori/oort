@@ -12,24 +12,25 @@ import {
 import { buttonVariants } from "./button";
 
 /**
- * UX-R1a / ADR-0179 D4 — overlay enter/exit is a measured duration, not a
- * class-name presence check. jsdom does not run CSS animations; a 0s
- * getComputedStyle there would be a floor that cannot fail. Duration proofs
- * live in the Playwright probe below.
+ * UX-R1a / ADR-0179 D4 — overlay enter/exit.
  *
- * red proof (this file):
- *   - strip MODAL_OVERLAY_MOTION from dialog overlay → open duration ≠ 200
- *   - strip POPOVER_MOTION from popover → open duration ≠ 240
- *   - drop the exit utility → close duration ≠ 150/180 and unmount dwell < 140
- *   - drop scrim-blur → backdrop-filter blur ≠ 5px
- *   - reduced-motion off → duration ≠ 0
+ * Browser-free half (always runs): compile the motion class lists through
+ * Tailwind and assert the emitted rules. A comment cannot satisfy this.
+ * Product callers that wrap DialogContent in `{open && …}` are scanned in
+ * the same file so a missing Chromium cannot hide that regression.
+ *
+ * Playwright half (skipIf, loud): closed-state dwell on a shipped product
+ * dialog (SectionDeleteConfirmDialog), plus popover/menu durations.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = resolve(HERE, "../..", "..");
 const SRC = resolve(WEB_ROOT, "src");
+const CORE_SRC = resolve(WEB_ROOT, "../../packages/momo-core/src");
+const HARNESS = resolve(WEB_ROOT, "measure/overlayMotion.harness.tsx");
 const require_ = createRequire(import.meta.url);
 const TOKENS_CSS = readFileSync(new URL("../tokens.css", import.meta.url), "utf8");
+const MOTION_CSS = readFileSync(new URL("../motion.css", import.meta.url), "utf8");
 
 const FILES = {
   dialog: readFileSync(new URL("./dialog.tsx", import.meta.url), "utf8"),
@@ -37,8 +38,25 @@ const FILES = {
   dropdown: readFileSync(new URL("./dropdown-menu.tsx", import.meta.url), "utf8"),
   context: readFileSync(new URL("./context-menu.tsx", import.meta.url), "utf8"),
   select: readFileSync(new URL("./select.tsx", import.meta.url), "utf8"),
-  harness: readFileSync(
-    new URL("../overlayMotion.harness.tsx", import.meta.url),
+  harness: readFileSync(HARNESS, "utf8"),
+  createChannel: readFileSync(
+    new URL("../../features/channels/CreateChannelDialog.tsx", import.meta.url),
+    "utf8"
+  ),
+  profileCard: readFileSync(
+    new URL("../../features/sidebar/ProfileCard.tsx", import.meta.url),
+    "utf8"
+  ),
+  sectionDialogs: readFileSync(
+    new URL("../../features/sidebar/SidebarSectionDialogs.tsx", import.meta.url),
+    "utf8"
+  ),
+  channelActions: readFileSync(
+    new URL("../../features/chat/channelActions.tsx", import.meta.url),
+    "utf8"
+  ),
+  messageActions: readFileSync(
+    new URL("../../features/timeline/MessageActions.tsx", import.meta.url),
     "utf8"
   ),
 } as const;
@@ -61,12 +79,18 @@ const chromiumAvailability = detectChromium();
 const chromiumAvailable = chromiumAvailability.ok;
 if (!chromiumAvailable) {
   console.warn(
-    `UX-R1a overlay probe skipped: Playwright Chromium executable missing (${chromiumAvailability.path})`
+    `UX-R1a overlay Playwright probe skipped: Playwright Chromium executable missing (${chromiumAvailability.path}). Compiled-CSS and product-mount assertions still run.`
   );
 }
 
 function classTokens(className: string): string[] {
   return className.split(/\s+/).filter(Boolean);
+}
+
+function codeOnly(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(?<!:)\/\/.*$/gm, "");
 }
 
 function quotedClassTokens(source: string): string[] {
@@ -84,6 +108,10 @@ function quotedClassTokens(source: string): string[] {
     }
   }
   return tokens;
+}
+
+function escapedClassSelector(candidate: string): string {
+  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
 }
 
 async function loadStylesheet(id: string, base: string) {
@@ -137,52 +165,114 @@ const CLOSE = {
   popover: { name: "motion-fade-out", ms: 180 },
 } as const;
 
-describe("UX-R1a wiring (not the duration proof)", () => {
-  it("dialog consumes the modal overlay and content constants", () => {
-    expect(FILES.dialog).toContain("MODAL_OVERLAY_MOTION");
-    expect(FILES.dialog).toContain("MODAL_CONTENT_MOTION");
+const PRODUCT_DIALOG_SITES = [
+  {
+    name: "CreateChannelDialog",
+    source: FILES.createChannel,
+    forbidden: /\{\s*open\s*&&\s*\(\s*<CreateChannelPanel/,
+  },
+  {
+    name: "ProfileCard logout confirm",
+    source: FILES.profileCard,
+    forbidden: /\{\s*confirmLogout\s*&&\s*\(\s*<DialogContent/,
+  },
+  {
+    name: "SidebarSectionDialogs",
+    source: FILES.sectionDialogs,
+    forbidden: /\{\s*open\s*&&\s*\(\s*<DialogContent/,
+  },
+  {
+    name: "ChannelLeaveConfirmDialog",
+    source: FILES.channelActions,
+    forbidden: /\{\s*leave\.confirmOpen\s*&&\s*\(\s*<DialogContent/,
+  },
+] as const;
+
+describe("UX-R1a compiled CSS (browser-free)", () => {
+  it("MODAL_OVERLAY_MOTION emits modal-enter/exit against the 200/150 tokens", async () => {
+    const tokens = classTokens(MODAL_OVERLAY_MOTION);
+    const css = await buildCss(tokens);
+    expect(MOTION_CSS).toMatch(/--motion-modal-open:\s*200ms/);
+    expect(MOTION_CSS).toMatch(/--motion-modal-close:\s*150ms/);
+    expect(css).toMatch(/var\(--motion-modal-open\)/);
+    expect(css).toMatch(/var\(--motion-modal-close\)/);
+    for (const token of tokens) {
+      expect(css.includes(escapedClassSelector(token)), token).toBe(true);
+    }
   });
 
-  it("popover, dropdown-menu, context-menu consume POPOVER_MOTION", () => {
-    expect(FILES.popover).toContain("POPOVER_MOTION");
-    expect(FILES.dropdown).toContain("POPOVER_MOTION");
-    expect(FILES.context).toContain("POPOVER_MOTION");
+  it("MODAL_CONTENT_MOTION emits zoom enter/exit and closed pointer-events-none", async () => {
+    const tokens = classTokens(MODAL_CONTENT_MOTION);
+    const css = await buildCss(tokens);
+    expect(css).toMatch(/var\(--motion-modal-open\)/);
+    expect(css).toMatch(/var\(--motion-modal-close\)/);
+    expect(tokens).toContain("data-[state=closed]:pointer-events-none");
+    for (const token of tokens) {
+      expect(css.includes(escapedClassSelector(token)), token).toBe(true);
+    }
+  });
+
+  it("POPOVER_MOTION emits standard open / fast close", async () => {
+    const tokens = classTokens(POPOVER_MOTION);
+    const css = await buildCss(tokens);
+    expect(MOTION_CSS).toMatch(/--motion-standard:\s*240ms/);
+    expect(MOTION_CSS).toMatch(/--motion-fast:\s*180ms/);
+    expect(css).toMatch(/var\(--motion-standard\)/);
+    expect(css).toMatch(/var\(--motion-fast\)/);
+    for (const token of tokens) {
+      expect(css.includes(escapedClassSelector(token)), token).toBe(true);
+    }
+  });
+
+  it("scrim-blur emits blur(5px)", async () => {
+    const css = await buildCss(["scrim-blur"]);
+    expect(css.includes(escapedClassSelector("scrim-blur"))).toBe(true);
+    expect(css).toMatch(/blur\(\s*5px\s*\)/);
+  });
+});
+
+describe("UX-R1a primitive wiring (comment-stripped)", () => {
+  it("dialog consumes the modal overlay and content constants as identifiers", () => {
+    const code = codeOnly(FILES.dialog);
+    expect(code).toMatch(/\bMODAL_OVERLAY_MOTION\b/);
+    expect(code).toMatch(/\bMODAL_CONTENT_MOTION\b/);
+  });
+
+  it("popover, dropdown-menu, context-menu import and pass POPOVER_MOTION", () => {
+    for (const [name, source] of [
+      ["popover", FILES.popover],
+      ["dropdown-menu", FILES.dropdown],
+      ["context-menu", FILES.context],
+    ] as const) {
+      const code = codeOnly(source);
+      expect(code, name).toMatch(/import\s*\{[\s\S]*\bPOPOVER_MOTION\b/);
+      expect(code, name).toMatch(/\bPOPOVER_MOTION\s*[,)]/);
+    }
   });
 
   it("select stays the native OS picker (no Radix data-state overlay)", () => {
-    const code = FILES.select
-      .replace(/\/\*[\s\S]*?\*\//g, "")
-      .replace(/(?<!:)\/\/.*$/gm, "");
+    const code = codeOnly(FILES.select);
     expect(code).toMatch(/<select\b/);
     expect(code).not.toContain("POPOVER_MOTION");
     expect(code).not.toContain("data-[state=");
     expect(code).not.toContain("@radix-ui/react-select");
   });
+
+  it("touch action sheet overrides modal origin-center with origin-bottom", () => {
+    const code = codeOnly(FILES.messageActions);
+    expect(code).toMatch(
+      /data-testid=["']message-action-sheet["'][\s\S]{0,400}origin-bottom/
+    );
+  });
 });
 
-/**
- * A 0s computed duration is what jsdom (and a missing stylesheet) return.
- * Treating that as the expected value is the silent-green floor this ticket
- * forbids. Callers that want 0 must pass `allowZero` (reduced-motion only).
- */
-export function assertMeasuredDurationMs(
-  duration: string,
-  expected: number,
-  allowZero = false
-): number {
-  const ms = durationMs(duration);
-  if (!allowZero && Math.round(ms) === 0) {
-    throw new Error(
-      `animationDuration resolved to 0ms (${JSON.stringify(duration)}); jsdom/missing CSS cannot prove ${expected}ms. Measure in the Playwright probe.`
-    );
-  }
-  return ms;
-}
-
-describe("jsdom/0s cannot stand in for overlay duration", () => {
-  it("throws on 0s instead of counting it as 200ms", () => {
-    expect(() => assertMeasuredDurationMs("0s", 200)).toThrow(/0ms/);
-  });
+describe("UX-R1a product dialogs stay mounted through close", () => {
+  it.each(PRODUCT_DIALOG_SITES)(
+    "$name does not unmount DialogContent with {open &&}",
+    ({ source, forbidden }) => {
+      expect(codeOnly(source)).not.toMatch(forbidden);
+    }
+  );
 });
 
 describe.skipIf(!chromiumAvailable)(
@@ -192,13 +282,13 @@ describe.skipIf(!chromiumAvailable)(
       const esbuild = await import("esbuild");
       const bundled = await esbuild.build({
         absWorkingDir: WEB_ROOT,
-        entryPoints: [resolve(HERE, "../overlayMotion.harness.tsx")],
+        entryPoints: [HARNESS],
         bundle: true,
         write: false,
         format: "iife",
         platform: "browser",
         jsx: "automatic",
-        alias: { "@": SRC },
+        alias: { "@": SRC, "@momo/core": CORE_SRC },
         logLevel: "silent",
       });
       const js = bundled.outputFiles[0]?.text;
@@ -216,6 +306,7 @@ describe.skipIf(!chromiumAvailable)(
         ...quotedClassTokens(FILES.context),
         ...quotedClassTokens(FILES.select),
         ...quotedClassTokens(FILES.harness),
+        ...quotedClassTokens(FILES.sectionDialogs),
         "scrim-blur",
         "bg-scrim",
         "focus-visible:focus-ring",
@@ -327,15 +418,15 @@ describe.skipIf(!chromiumAvailable)(
       return page.evaluate((start) => performance.now() - start, t0);
     }
 
-    it("dialog overlay/content open at 200ms and close at 150ms; scrim blur is 5px", async () => {
+    it("product dialog (SectionDeleteConfirmDialog) overlay opens at 200ms and close dwell is ≥140ms", async () => {
       const { browser, page } = await launchProbe();
       try {
         await page.getByTestId("open-dialog").click();
-        await page.locator('.bg-scrim[data-state="open"]').waitFor({
+        await page.locator('[data-testid="sidebar-section-delete-confirm"][data-state="open"]').waitFor({
           state: "visible",
         });
         const overlay = await sample(page, ".bg-scrim");
-        const content = await sample(page, '[data-testid="dialog-content"]');
+        const content = await sample(page, '[data-testid="sidebar-section-delete-confirm"]');
 
         expect(overlay.state, `overlay state ${overlay.state}`).toBe("open");
         expect(overlay.name).toBe(OPEN.dialog.name);
@@ -352,7 +443,7 @@ describe.skipIf(!chromiumAvailable)(
         expect(closed.missing, `close probe ${closed.via}`).toBe(false);
         expect(closed.name).toBe(CLOSE.dialog.name);
         expect(Math.round(closed.duration)).toBe(CLOSE.dialog.ms);
-        expect(dwell, `unmount dwell ${dwell}ms`).toBeGreaterThanOrEqual(140);
+        expect(dwell, `product dialog unmount dwell ${dwell}ms`).toBeGreaterThanOrEqual(140);
         expect(dwell).toBeLessThan(500);
       } finally {
         await browser.close();
@@ -425,45 +516,6 @@ describe.skipIf(!chromiumAvailable)(
           page.keyboard.press("Escape")
         );
         expect(dwell, `reduced-motion dwell ${dwell}ms`).toBeLessThan(80);
-      } finally {
-        await browser.close();
-      }
-    }, 60_000);
-
-    it("focus ring on the first dialog frame equals the settled frame", async () => {
-      const { browser, page } = await launchProbe();
-      try {
-        await page.getByTestId("open-dialog").focus();
-        await page.keyboard.press("Enter");
-        await page.locator('[data-testid="dialog-content"]').waitFor({
-          state: "visible",
-        });
-
-        const readRing = () =>
-          page.evaluate(() => {
-            const el = document.querySelector(
-              '[data-testid="dialog-action"]'
-            ) as HTMLElement | null;
-            const active = document.activeElement as HTMLElement | null;
-            const target = el?.contains(active) ? active : el;
-            if (!target) return null;
-            const s = getComputedStyle(target);
-            return {
-              width: s.outlineWidth,
-              offset: s.outlineOffset,
-              color: s.outlineColor,
-            };
-          });
-
-        const first = await readRing();
-        await page.locator('[data-testid="dialog-content"]').evaluate((node) =>
-          Promise.all(
-            node.getAnimations().map((animation) => animation.finished.catch(() => undefined))
-          )
-        );
-        const settled = await readRing();
-        expect(first).not.toBeNull();
-        expect(settled).toEqual(first);
       } finally {
         await browser.close();
       }

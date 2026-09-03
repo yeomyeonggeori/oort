@@ -10490,9 +10490,6 @@ async function waitForAnimations(page) {
   );
 }
 
-/** @deprecated name; ADR-0179 D10 ③ is waitForAnimations. */
-const waitUntilAnimationsIdle = waitForAnimations;
-
 /** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
 async function screenshotSettled(page, path) {
   await waitForAnimations(page);
@@ -10565,7 +10562,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
   transform: translateZ(0);
 }`,
     });
-    await waitUntilAnimationsIdle(page);
+    await waitForAnimations(page);
     const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
     mkdirSync(previewDir, { recursive: true });
     const shots = [];
@@ -10580,7 +10577,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
         '[data-testid="channel-item"][aria-current="page"]',
         "--accent-soft"
       );
-      await waitUntilAnimationsIdle(page);
+      await waitForAnimations(page);
       await page.evaluate(
         () =>
           new Promise((resolve) => {
