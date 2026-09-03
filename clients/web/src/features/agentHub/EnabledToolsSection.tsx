@@ -14,6 +14,7 @@ import {
   enabledToolsFromRows,
   isToolToggleLocked,
   mergeToolRows,
+  resolveToolTabStop,
   roveToolToggles,
   sameToolSet,
   toggleToolRow,
@@ -41,6 +42,9 @@ const OFFLINE_REASON = "연결이 끊긴 동안에는 바꿀 수 없습니다.";
 const SAVE_ERROR =
   "도구 허용을 저장하지 못했습니다. 연결을 확인하고 다시 시도하세요.";
 const SAVE_IDLE_REASON = "바꿀 내용이 없습니다.";
+const TOOLS_EDITOR_LEAD =
+  "이 에이전트가 부를 수 있는 도구입니다. 바꾼 뒤에는 저장해야 반영됩니다.";
+const TOOLS_DISPLAY_LEAD = "이 에이전트에 허용된 도구입니다.";
 
 /**
  * Reading this as: Agent Hub profile tools section for internal team users on
@@ -85,8 +89,7 @@ export function EnabledToolsSection({
         : null;
   const sharedReasonId = "agent-hub-enabled-tools-reason";
   const saveReasonId = "agent-hub-enabled-tools-save-reason";
-  const unlocked = rows.filter((row) => !isToolToggleLocked(row, readOnly));
-  const tabStopName = roveName ?? unlocked[0]?.name ?? null;
+  const tabStopName = resolveToolTabStop(rows, readOnly, roveName);
   const catalogReady = catalogStatus === "ready" && catalog !== null;
   const catalogEmpty = catalogReady && rows.length === 0;
 
@@ -119,9 +122,11 @@ export function EnabledToolsSection({
     >
       <div>
         <h3 className="text-body font-semibold text-ink">도구</h3>
-        <p className="text-meta text-ink-muted">
-          이 에이전트가 부를 수 있는 도구입니다. 바꾼 뒤에는 저장해야 반영됩니다.
-        </p>
+        {(catalogReady ? !catalogEmpty : catalogStatus !== "loading") && (
+          <p className="text-meta text-ink-muted">
+            {catalogReady ? TOOLS_EDITOR_LEAD : TOOLS_DISPLAY_LEAD}
+          </p>
+        )}
       </div>
 
       {catalogStatus === "loading" ? (
@@ -191,7 +196,9 @@ export function EnabledToolsSection({
                     .filter((id): id is string => id !== null)
                     .join(" ")
                 }
-                onFocus={() => setRoveName(row.name)}
+                onFocus={() => {
+                  if (!isToolToggleLocked(row, readOnly)) setRoveName(row.name);
+                }}
                 onToggle={(next) => {
                   if (isToolToggleLocked(row, readOnly) || saving) return;
                   setError(null);
@@ -203,7 +210,13 @@ export function EnabledToolsSection({
           <Button
             type="button"
             size="sm"
-            className={cn("tap-target self-start", !canSave && "opacity-50")}
+            className={cn(
+              "tap-target self-start",
+              !canSave &&
+                !confirmed &&
+                !saving &&
+                "pointer-events-none opacity-50 hover:opacity-50"
+            )}
             aria-disabled={!canSave || undefined}
             aria-busy={saving || undefined}
             aria-live="polite"
@@ -306,7 +319,7 @@ function ToolToggleRow({
           row.enabled && "bg-accent-soft",
           !locked && !row.enabled && "hover:bg-surface-hover",
           row.enabled
-            ? "has-[:focus-visible]:focus-ring-on-fill"
+            ? "has-[:focus-visible]:focus-ring focus-ring-on-fill"
             : "has-[:focus-visible]:focus-ring"
         )}
         data-testid={`agent-hub-tool-row-${row.name}`}
@@ -324,7 +337,7 @@ function ToolToggleRow({
           className={cn(
             "mt-1 size-4 shrink-0 rounded-sm accent-accent",
             row.enabled
-              ? "focus-visible:focus-ring-on-fill"
+              ? "focus-visible:focus-ring focus-ring-on-fill"
               : "focus-visible:focus-ring",
             locked && "opacity-50"
           )}
@@ -351,9 +364,7 @@ function ToolToggleRow({
           )}
           {row.description === "" && <span id={descId} className="sr-only" />}
           <div className="flex flex-wrap gap-1">
-            <StatusChip tone={row.unknown ? "warn" : "neutral"}>
-              {capability}
-            </StatusChip>
+            <StatusChip tone="neutral">{capability}</StatusChip>
             {row.requiresApproval && (
               <StatusChip tone="warn">승인 필요</StatusChip>
             )}

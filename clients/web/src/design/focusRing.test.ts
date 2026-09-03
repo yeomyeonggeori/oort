@@ -177,7 +177,9 @@ describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review 
     expect(onFillStrings.length).toBeGreaterThan(0);
     for (const classList of onFillStrings) {
       const stripped = classList.replaceAll("focus-ring-on-fill", "");
-      expect(stripped, classList).toMatch(/focus-visible:focus-ring/);
+      expect(stripped, classList).toMatch(
+        /focus-visible:focus-ring|has-\[:focus-visible\]:focus-ring/
+      );
     }
   });
 });

@@ -881,15 +881,25 @@ describe("onboarding S0 palette (single look)", () => {
   });
 });
 
-describe("UX-R4a tool chip border on selected row", () => {
-  it("ink-muted (neutral chip border) on accent-soft is ≥ 3:1 in both schemes", () => {
+describe("UX-R4a tool chip vessel on selected row", () => {
+  it("muted-soft on accent-soft meets the §2.2 vessel floor in both schemes", () => {
     for (const scheme of SCHEMES) {
+      const ratio = contrast(
+        pick("muted-soft", scheme.index),
+        pick("accent-soft", scheme.index)
+      );
+      const distance = deltaE(
+        pick("muted-soft", scheme.index),
+        pick("accent-soft", scheme.index)
+      );
       expect(
-        contrast(
-          pick("ink-muted", scheme.index),
-          pick("accent-soft", scheme.index)
-        )
-      ).toBeGreaterThanOrEqual(3);
+        Number(ratio.toFixed(3)),
+        `muted-soft on accent-soft (${scheme.name}) contrast`
+      ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_CONTRAST);
+      expect(
+        Number(distance.toFixed(4)),
+        `muted-soft on accent-soft (${scheme.name}) OKLab distance`
+      ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_DISTANCE);
     }
   });
 });

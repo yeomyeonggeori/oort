@@ -120,6 +120,7 @@ function mount(
 function injectSaveOpacityCss(): HTMLStyleElement {
   const style = document.createElement("style");
   style.textContent = `
+    button { opacity: 1; }
     .opacity-50 { opacity: 0.5; }
     .hover\\:opacity-90:hover, .is-hovered.hover\\:opacity-90 { opacity: 0.9; }
     .hover\\:opacity-50:hover, .is-hovered.hover\\:opacity-50 { opacity: 0.5; }
@@ -318,7 +319,7 @@ describe("EnabledToolsSection", () => {
     );
     expect(row?.className).toContain("focus-ring-on-fill");
     const stripped = (row?.className ?? "").replaceAll("focus-ring-on-fill", "");
-    expect(stripped).toMatch(/focus-visible:focus-ring/);
+    expect(stripped).toMatch(/has-\[:focus-visible\]:focus-ring/);
   });
 
   it("H-4: 이름 클릭이 토글하고, 잠긴 행은 hover 틴트가 없다", () => {

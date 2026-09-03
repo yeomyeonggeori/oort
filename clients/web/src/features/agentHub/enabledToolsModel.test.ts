@@ -9,6 +9,7 @@ import {
   enabledToolsFromRows,
   isToolToggleLocked,
   mergeToolRows,
+  resolveToolTabStop,
   toggleToolRow,
   toolsProfilePut,
 } from "./enabledToolsModel";
@@ -147,6 +148,20 @@ describe("toolsProfilePut", () => {
   });
 });
 
+describe("resolveToolTabStop", () => {
+  it("H-5: 잠긴 이름과 사라진 이름은 정거장을 못 갖고 살아있는 첫 행으로 접힌다", () => {
+    const rows = mergeToolRows(CATALOG, ["work.session.spawn"]);
+    expect(resolveToolTabStop(rows, false, "work.session.resume")).toBe(
+      LONG_NAME
+    );
+    expect(resolveToolTabStop(rows, false, "vanished")).toBe(LONG_NAME);
+    expect(resolveToolTabStop(rows, false, "work.session.spawn")).toBe(
+      "work.session.spawn"
+    );
+    expect(resolveToolTabStop(rows, false, null)).toBe(LONG_NAME);
+  });
+});
+
 describe("AgentHubRoute tools save wiring", () => {
   it("H-1: 도구 저장 콜백은 지시문/모델 초안을 싣지 않는다", () => {
     const source = readFileSync(
@@ -171,6 +186,8 @@ describe("M-3 StatusChip vessel", () => {
     );
     expect(source).toContain("bg-muted-soft");
     expect(source).not.toContain("border-ink-muted");
-    expect(source).not.toMatch(/tone === "neutral" &&[\s\S]*border /);
+    expect(source).toMatch(
+      /tone === "neutral" && "bg-muted-soft text-ink-muted"/
+    );
   });
 });

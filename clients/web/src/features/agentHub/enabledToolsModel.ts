@@ -110,6 +110,19 @@ export function isToolRoveKey(key: string): boolean {
   );
 }
 
+export function resolveToolTabStop(
+  rows: readonly ToolRow[],
+  readOnly: boolean,
+  preferred: string | null
+): string | null {
+  const unlocked = rows
+    .filter((row) => !isToolToggleLocked(row, readOnly))
+    .map((row) => row.name);
+  if (unlocked.length === 0) return null;
+  if (preferred !== null && unlocked.includes(preferred)) return preferred;
+  return unlocked[0] ?? null;
+}
+
 export function roveToolToggles(
   root: HTMLElement | null,
   event: {
@@ -127,7 +140,11 @@ export function roveToolToggles(
   ).filter((el) => el.getAttribute("aria-disabled") !== "true");
   if (toggles.length === 0) return false;
   const active = root.ownerDocument.activeElement as HTMLElement;
-  const index = toggles.indexOf(active);
+  let index = toggles.indexOf(active);
+  if (index < 0) {
+    const stop = toggles.find((el) => el.tabIndex === 0);
+    index = stop ? toggles.indexOf(stop) : 0;
+  }
   let nextIndex = 0;
   if (event.key === "Home") {
     nextIndex = 0;
@@ -135,7 +152,7 @@ export function roveToolToggles(
     nextIndex = toggles.length - 1;
   } else {
     const step = event.key === "ArrowDown" ? 1 : -1;
-    nextIndex = (Math.max(index, 0) + step + toggles.length) % toggles.length;
+    nextIndex = (index + step + toggles.length) % toggles.length;
   }
   const next = toggles[nextIndex];
   if (!next) return false;
