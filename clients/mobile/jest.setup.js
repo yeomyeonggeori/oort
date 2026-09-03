@@ -302,6 +302,55 @@ jest.mock('react-native-safe-area-context', () => {
 // asserting about 복사 is WHAT LANDED — the markdown source a person can paste
 // back, not the rendered text — and a `jest.fn()` that records a call without
 // keeping the value cannot answer that.
+jest.mock('expo-camera', () => {
+  const React = require('react');
+  const {View} = require('react-native');
+  const state = {
+    permission: {granted: true, canAskAgain: true, status: 'granted'},
+    onBarcodeScanned: null,
+    onMountError: null,
+    onCameraReady: null,
+  };
+  return {
+    __state: state,
+    __reset: () => {
+      state.permission = {granted: true, canAskAgain: true, status: 'granted'};
+      state.onBarcodeScanned = null;
+      state.onMountError = null;
+      state.onCameraReady = null;
+    },
+    __scan: data => {
+      state.onBarcodeScanned?.({data});
+    },
+    useCameraPermissions: () => [
+      state.permission,
+      async () => state.permission,
+    ],
+    CameraView: props => {
+      state.onBarcodeScanned = props.onBarcodeScanned ?? null;
+      state.onMountError = props.onMountError ?? null;
+      state.onCameraReady = props.onCameraReady ?? null;
+      return React.createElement(View, {testID: props.testID ?? 'qr-camera-view'});
+    },
+    __ready: () => {
+      state.onCameraReady?.();
+    },
+    __error: (message = 'failed') => {
+      state.onMountError?.({message});
+    },
+  };
+});
+
+jest.mock('expo-device', () => {
+  const state = {modelName: 'iPhone 17 Pro'};
+  return {
+    __state: state,
+    get modelName() {
+      return state.modelName;
+    },
+  };
+});
+
 jest.mock('expo-clipboard', () => {
   const box = {value: null};
   return {

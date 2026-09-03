@@ -448,6 +448,12 @@ export const radius = {
  * at, and a login form that zooms on focus is the first thing a person meets.
  */
 export const font = {
+  /**
+   * SAS 4자리처럼 두 화면 사이에서 비교하는 숫자 — 표면을 지배해야 한다.
+   * One clear step above `title` (26). Not paired with web `--text-display`
+   * (20px): that role is a page heading, this one is a number to match aloud.
+   */
+  display: 32,
   title: 26,
   heading: 18,
   body: 16,

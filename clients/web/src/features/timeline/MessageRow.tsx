@@ -406,7 +406,8 @@ export function MessageRow({
   const hasBody = hasRenderableBody(message.body);
   // Same meaning as the phone action sheet: only the author's raw markdown,
   // and never an empty string or a tombstone. The shared hook is also what the
-  // settings CopyButton uses, so the two-second 「복사됨」 receipt cannot drift.
+  // settings CopyButton uses; the hook owns the 「복사됨」 clock
+  // (`COPY_FEEDBACK_MS` = `INLINE_CONFIRM_MS`).
   const canCopy = Boolean(actions) && !deleted && hasBody;
   const { copied, copy: copyMessage } = useClipboardCopy(message.body ?? "");
   // UX-D3: a persisted row already has a HashRouter landing (`?msg=`+`seq=`).

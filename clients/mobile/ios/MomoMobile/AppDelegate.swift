@@ -67,6 +67,21 @@ class AppDelegate: ExpoAppDelegate {
     // uninitialised and the token callback unhooked.
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
+
+  // Warm `oort://` / `momo://` (OS camera, Safari, another app) must reach JS
+  // `Linking` 'url'. ExpoAppDelegate only forwards this to Expo subscribers;
+  // RCTLinkingManager is not one. Cold launch still uses launchOptions via
+  // getInitialURL and is unchanged.
+  override func application(
+    _ app: UIApplication,
+    open url: URL,
+    options: [UIApplication.OpenURLOptionsKey: Any] = [:]
+  ) -> Bool {
+    if RCTLinkingManager.application(app, open: url, options: options) {
+      return true
+    }
+    return super.application(app, open: url, options: options)
+  }
 }
 
 class ReactNativeDelegate: ExpoReactNativeFactoryDelegate {

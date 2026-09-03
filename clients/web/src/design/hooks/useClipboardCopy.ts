@@ -1,7 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect } from "react";
+import {
+  INLINE_CONFIRM_MS,
+  useInlineConfirm,
+} from "@/design/ui/inlineConfirm";
 
-/** The same two-second receipt used by every copy control in the web client. */
-export const COPY_FEEDBACK_MS = 2_000;
+/** ADR-0182 D5 type-1 hold. Same clock as `useInlineConfirm`. */
+export const COPY_FEEDBACK_MS = INLINE_CONFIRM_MS;
 
 /**
  * Copies plain text and keeps the short-lived inline receipt state.
@@ -14,20 +18,11 @@ export function useClipboardCopy(value: string): {
   copied: boolean;
   copy: () => Promise<boolean>;
 } {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<number | undefined>(undefined);
-
-  useEffect(
-    () => () => {
-      window.clearTimeout(timer.current);
-    },
-    []
-  );
+  const { confirmed: copied, confirm, reset } = useInlineConfirm();
 
   useEffect(() => {
-    setCopied(false);
-    window.clearTimeout(timer.current);
-  }, [value]);
+    reset();
+  }, [value, reset]);
 
   const copy = useCallback(async (): Promise<boolean> => {
     try {
@@ -35,14 +30,9 @@ export function useClipboardCopy(value: string): {
     } catch {
       return false;
     }
-    setCopied(true);
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(
-      () => setCopied(false),
-      COPY_FEEDBACK_MS
-    );
+    confirm();
     return true;
-  }, [value]);
+  }, [value, confirm]);
 
   return { copied, copy };
 }

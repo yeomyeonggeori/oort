@@ -21,6 +21,7 @@ import { IS_TAURI } from "@/lib/env";
 import { isDesktop } from "@/lib/tauri";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
+import { DevicesSection } from "./DevicesSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { LinkPreviewSection } from "./LinkPreviewSection";
@@ -249,6 +250,7 @@ export function SettingsRoute() {
           >
           {section === "profile" && <ProfileSection offline={offline} />}
           {section === "account" && <AccountSection />}
+          {section === "devices" && <DevicesSection offline={offline} />}
           {section === "appearance" && <AppearanceSection />}
           {section === "link-previews" && <LinkPreviewSection />}
           {section === "notifications" && (
