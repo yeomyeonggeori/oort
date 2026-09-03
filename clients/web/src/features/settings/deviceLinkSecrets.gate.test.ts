@@ -1,4 +1,12 @@
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -7,7 +15,6 @@ import { deviceLinkFixtureDeepLink, deviceLinkFixtureToken } from "./deviceLinkF
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_SRC = join(HERE, "../..");
 const WEB_ROOT = join(HERE, "../../..");
-const REPO_ROOT = join(WEB_ROOT, "../..");
 
 function walk(dir: string, acc: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
@@ -28,11 +35,28 @@ function itTitles(source: string): string[] {
   return titles;
 }
 
+function voucherSecrets(): string[] {
+  const token = deviceLinkFixtureToken();
+  const deepLink = deviceLinkFixtureDeepLink();
+  return [
+    token,
+    deepLink,
+    encodeURIComponent(token),
+    encodeURIComponent(deepLink),
+  ];
+}
+
+function assertNamesClean(names: string[], secrets: string[], where: string): void {
+  for (const name of names) {
+    for (const secret of secrets) {
+      expect(name, `${where}: ${name}`).not.toContain(secret);
+    }
+  }
+}
+
 describe("device-link secrets grep-gate", () => {
-  it("voucher plaintext stays out of titles, snapshots, and capture frame names", () => {
-    const token = deviceLinkFixtureToken();
-    const deepLink = deviceLinkFixtureDeepLink();
-    const secrets = [token, deepLink];
+  it("voucher plaintext stays out of titles, snapshots, and capture templates", () => {
+    const secrets = voucherSecrets();
 
     const testFiles = walk(WEB_SRC).filter(
       (path) => path.endsWith(".test.ts") || path.endsWith(".test.tsx")
@@ -62,32 +86,37 @@ describe("device-link secrets grep-gate", () => {
       ...capture.matchAll(/\$\{OUT_DIR\}\/([^`"'\s]+)/g),
     ].map((match) => match[1]);
     expect(frameNames.length).toBeGreaterThan(10);
-    for (const name of frameNames) {
-      for (const secret of secrets) {
-        expect(name, name).not.toContain(secret);
-      }
-    }
+    assertNamesClean(frameNames, secrets, "capture template");
+    expect(capture).not.toMatch(/OUT_DIR\}[^;`]*CAPTURE_TOKEN/);
+    expect(capture).not.toMatch(/CAPTURE_TOKEN[^;`]*\.png/);
+  });
 
+  it("fails when a produced frame is named with the fixture voucher", () => {
+    const token = deviceLinkFixtureToken();
+    const secrets = voucherSecrets();
     const designDir = join(WEB_ROOT, "artifacts/design");
+    mkdirSync(designDir, { recursive: true });
+    const planted = join(designDir, `probe-${token}.png`);
+    writeFileSync(planted, "");
+    let bitten = false;
     try {
-      for (const name of readdirSync(designDir)) {
-        for (const secret of secrets) {
-          expect(name).not.toContain(secret);
-        }
-      }
+      assertNamesClean(readdirSync(designDir), secrets, "planted frame");
     } catch {
-      // Capture artifacts are produced by capture:design, not by unit tests.
+      bitten = true;
+    } finally {
+      unlinkSync(planted);
     }
+    expect(bitten).toBe(true);
+  });
 
-    const manifest = join(REPO_ROOT, "artifacts/design");
-    try {
-      for (const name of readdirSync(manifest)) {
-        for (const secret of secrets) {
-          expect(name).not.toContain(secret);
-        }
-      }
-    } catch {
-      // optional
+  it("produced capture frames do not contain the harness voucher", () => {
+    const secrets = voucherSecrets();
+    const designDir = join(WEB_ROOT, "artifacts/design");
+    if (!existsSync(designDir)) {
+      throw new Error(
+        "device-link secrets gate: artifacts/design is missing (run capture:design)"
+      );
     }
+    assertNamesClean(readdirSync(designDir), secrets, "artifacts/design");
   });
 });
