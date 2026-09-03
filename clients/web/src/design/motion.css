@@ -126,6 +126,11 @@
     var(--motion-ease-arrival) 1 both;
 }
 
+/* D6: floating-surface scrim. Named so surfaces never write blur-[5px]. */
+@utility scrim-blur {
+  backdrop-filter: blur(5px);
+}
+
 /* D9: duration 0 — the state still lands. Onboarding rAF fields are untouched. */
 @media (prefers-reduced-motion: reduce) {
   :root {

@@ -137,6 +137,7 @@ export function ChannelHeaderMenu({
         actions={actions}
         title={title}
         testId="channel-leave-confirm"
+        opener={triggerRef.current}
       />
 
       {topic !== "" && (

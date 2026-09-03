@@ -15,7 +15,8 @@ import { cn } from "@/design/lib/cn";
 // lose the caret.
 //
 // Styling stays on the box only. The popup is OS-drawn and takes no classes;
-// that is the trade, and it is the right one here.
+// that is the trade, and it is the right one here. UX-R1a cannot consume
+// POPOVER_MOTION / data-state enter-exit on an OS picker (계획 이탈).
 //
 // The box itself is `input.tsx` to the pixel: same height, same 1px
 // `--line-strong` border, same `px-3`, same transparent fill. They are siblings

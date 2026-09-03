@@ -7,9 +7,15 @@
 - R2: 부분 복구(`recovered=false` + `hasRecoveredPublications=true`) 는 리플레이로 읽는다 (`subscribeHuddle` 과 같이 구독 컨텍스트 전부). 스레드 패널도 같은 live 행을 재생. `settlesPending` 팔 삭제(런타임 불가 픽스처). 키프레임 `to` 끝점·iteration-count 1·`both` 단정.
 - R3: grant→class 이음은 실제 `MessageRow` 렌더(`data-entrance-play`·행 자신의 클래스). ChatShell consume 바인딩 2곳. 키프레임은 캐스케이드 승자(마지막 블록).
 - R4: 같은 틱 라이브 버스트 3건은 **가상화 `Timeline` + 실물 react-virtuoso** 경로에서 3/3 재생(jsdom 마운트 행 + Chromium `motion-enter-conversation` 시작 횟수). grant 는 행 마운트(consume)까지 유지하고, leftover 상한은 스크롤-업일 때만 쓸어 낸다(페인트 틱 상한은 virtuoso 의 늦은 커밋을 앞질렀다). ChatShell 이음은 JSX AST(주석에 남은 문자열은 세지 않음). `subscribeChannel` 포워딩은 credential-free 유닛(`realtime.channelRecovery.test.ts`); Centrifugo 전송 실측은 계속 `gate:resume`.
-- NOTES: DS-2 `MOTION_VOCABULARY` 는 `motion.css` 유틸 9개 중 8개만 손기입하고 `enter-conversation` 이 빠진다. 이 브랜치 스코프 밖 — 오케스트레이터가 따로 티켓. R5(`useLayoutEffect`→`useEffect` 소비) 는 동작 보존 리팩터이지 결함 아님: 같은 커밋에서 자식 effect 가 부모보다 먼저 돌고, 부하 속성은 「grant 를 읽는 렌더보다 먼저 상한을 돌리지 말 것」이며 그건 P1 이 이미 핀한다.
+- NOTES: DS-2 `MOTION_VOCABULARY` 는 `motion.css` `@utility` 를 손기입하고 `enter-conversation`(및 UX-R1a `scrim-blur`)이 빠진다. 이 브랜치 스코프 밖 — 오케스트레이터가 따로 티켓. R5(`useLayoutEffect`→`useEffect` 소비) 는 동작 보존 리팩터이지 결함 아님: 같은 커밋에서 자식 effect 가 부모보다 먼저 돌고, 부하 속성은 「grant 를 읽는 렌더보다 먼저 상한을 돌리지 말 것」이며 그건 P1 이 이미 핀한다.
 - 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx` + `MessageRow.entrance.test.tsx` + `Timeline.burst.test.tsx` + `realtime.channelRecovery.test.ts`.
 - red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 끝점/1회/`both` 불일치 시 motion.test 붉음 · 부분 복구를 live 로 읽으면 하네스가 붉음 · `playEntrance` 무시·클래스 자식 이전·두 번째 consume 탈락은 행 렌더가 붉음 · 페인트 틱 상한은 가상화 `Timeline` 버스트가 1/3 로 붉음 · ChatShell 바인딩을 주석으로 남기면 JSX AST 가 붉음 · `subscribeChannel` 이 `hasRecoveredPublications` 를 버리면 channelRecovery 가 붉음.
+
+## UX-R1a 모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit (#1996, 2026-09-03)
+
+- ADR-0179 D4 비대칭: dialog overlay+content는 `MODAL_*_MOTION`(열림 200 / 닫힘 150), popover·dropdown-menu·context-menu는 `POPOVER_MOTION`(240/180). 스크림 `scrim-blur` 5px. Radix Presence는 Content가 닫힘 동안 마운트돼 있을 때만 exit을 기다린다(forceMount 없음). `{open && <DialogContent/>}`는 Presence보다 먼저 언마운트해 닫힘 애니메이션이 안 돈다 — 제품 다섯 곳(채널 만들기·로그아웃 확인·섹션 이름/삭제·채널 나가기)은 ShortcutHelpDialog처럼 유지. Escape는 닫힘을 시작한 그 키만 삼킨다.
+- native `<select>`는 OS picker라 data-state 모션 불가(계획 이탈). reduced-motion duration 0. 캡처 overlay 장면은 `waitForAnimations`.
+- red proof: `{open && <DialogContent/>}` at any of the five product sites → closed-state dwell < 140ms. POPOVER_MOTION 사용만 지우고 주석만 남김 → 컴파일 CSS 단정 빨강. `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` 에서도 컴파일 단정은 돈다.
 
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
 

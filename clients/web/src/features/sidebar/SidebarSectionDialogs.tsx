@@ -104,11 +104,10 @@ export function SectionNameDialog({
         if (!next) restoreDialogOpenerFocus(opener);
       }}
     >
-      {open && (
-        <DialogContent
-          className="gap-4 p-4"
-          data-testid="sidebar-section-name-dialog"
-        >
+      <DialogContent
+        className="gap-4 p-4"
+        data-testid="sidebar-section-name-dialog"
+      >
           <div className="flex flex-col gap-1">
             <DialogTitle>
               {mode === "create" ? SECTION_CREATE_TITLE : SECTION_RENAME_TITLE}
@@ -181,8 +180,7 @@ export function SectionNameDialog({
               </Button>
             </div>
           </form>
-        </DialogContent>
-      )}
+      </DialogContent>
     </Dialog>
   );
 }
@@ -215,11 +213,10 @@ export function SectionDeleteConfirmDialog({
         if (!next) restoreDialogOpenerFocus(opener);
       }}
     >
-      {open && (
-        <DialogContent
-          className="gap-4 p-4"
-          data-testid="sidebar-section-delete-confirm"
-        >
+      <DialogContent
+        className="gap-4 p-4"
+        data-testid="sidebar-section-delete-confirm"
+      >
           {/* 제목은 고정, 이름은 본문 (design-review #1932 M-1). 80자 이름이
               제목에 들어가면 물음이 셋째 줄 끝에 도착한다 - 이 다이얼로그가
               문법을 빌려 온 `ChannelLeaveConfirmDialog` 가 정확히 그 이유로
@@ -255,8 +252,7 @@ export function SectionDeleteConfirmDialog({
               {SECTION_DELETE_CONFIRM_LABEL}
             </Button>
           </div>
-        </DialogContent>
-      )}
+      </DialogContent>
     </Dialog>
   );
 }
