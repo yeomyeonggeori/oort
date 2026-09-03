@@ -136,11 +136,15 @@ function previewOf(
 
 function controlProps(state: InteractionState) {
   return {
-    "data-preview": previewOf(state),
+    "data-gallery-preview": previewOf(state),
     disabled: state === "disabled" ? true : undefined,
     "aria-busy": state === "busy" ? true : undefined,
   };
 }
+
+const preventAutoFocus = (event: { preventDefault: () => void }) => {
+  event.preventDefault();
+};
 
 const Export = forwardRef<
   HTMLDivElement,
@@ -193,7 +197,7 @@ function StampPreview({
   useLayoutEffect(() => {
     const node = ref.current?.querySelector(selector);
     if (preview && node instanceof HTMLElement) {
-      node.setAttribute("data-preview", preview);
+      node.setAttribute("data-gallery-preview", preview);
     }
   });
   return <div ref={ref}>{children}</div>;
@@ -201,29 +205,20 @@ function StampPreview({
 
 function OverlayCell({
   portalExport,
-  stampOverlay,
   className,
   children,
 }: {
   portalExport?: string;
-  stampOverlay?: string;
   className?: string;
   children: (host: HTMLElement) => ReactNode;
 }) {
   const [host, setHost] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!host || !stampOverlay) return;
-    const overlay = host.querySelector(".bg-scrim");
-    overlay?.setAttribute("data-gallery-export", stampOverlay);
-  }, [host, stampOverlay]);
   return (
     <div
       ref={setHost}
+      data-gallery-stage=""
       {...(portalExport ? { "data-gallery-export": portalExport } : {})}
-      className={cn(
-        "relative overflow-hidden border border-line bg-surface translate-y-0",
-        className
-      )}
+      className={cn("relative border border-line bg-surface", className)}
     >
       {host ? children(host) : null}
     </div>
@@ -318,11 +313,15 @@ function OverlayExamples() {
       <h2 className="text-title font-medium text-ink">떠 있는 표면</h2>
       <p className="text-body text-ink-muted">
         패널은 elevation-float (shadow-lg). 아래 네 칸은 실제로 열린 Dialog,
-        DropdownMenu, Popover, ContextMenu 다.
+        DropdownMenu, Popover, ContextMenu 다. 판은 칸 안에 붙는다.
       </p>
       <div className="flex flex-col gap-6">
         <div className="flex w-full max-w-pane-md flex-col gap-2">
           <p className="text-meta text-ink-muted">Dialog</p>
+          <p className="text-meta text-ink-muted">
+            스크림은 갤러리 대역이다. 모달을 끄면 프리미티브는 스크림을 그리지
+            않는다.
+          </p>
           <Export name="Dialog">
             <Dialog open modal={false}>
               <DialogTrigger asChild>
@@ -335,20 +334,19 @@ function OverlayExamples() {
                   대화상자 열기
                 </Button>
               </DialogTrigger>
-              <OverlayCell
-                portalExport="DialogPortal"
-                className="mt-2 min-h-pane-md w-full"
-              >
+              <OverlayCell portalExport="DialogPortal" className="mt-2 w-full">
                 {(host) => (
                   <>
                     <div
                       data-gallery-export="DialogOverlay"
+                      data-gallery-replica="DialogOverlay"
                       className="absolute inset-0 bg-scrim"
                     />
                     <DialogContent
                       container={host}
-                      className="gap-4 p-4"
+                      className="relative left-auto top-auto translate-x-0 gap-4 p-4"
                       data-gallery-export="DialogContent"
+                      onOpenAutoFocus={preventAutoFocus}
                     >
                     <DialogTitle data-gallery-export="DialogTitle">
                       채널을 지울까요
@@ -376,7 +374,7 @@ function OverlayExamples() {
           </Export>
         </div>
 
-        <div className="flex w-full max-w-pane-md flex-col gap-2">
+        <div className="flex w-max max-w-full flex-col gap-2">
           <p className="text-meta text-ink-muted">DropdownMenu</p>
           <Export name="DropdownMenu">
             <DropdownMenu open modal={false}>
@@ -390,7 +388,7 @@ function OverlayExamples() {
                   메뉴 열기
                 </Button>
               </DropdownMenuTrigger>
-              <OverlayCell className="mt-2 min-h-pane-sm w-full">
+              <OverlayCell className="mt-2 w-max max-w-full">
                 {(host) => (
                   <DropdownMenuContent
                     container={host}
@@ -424,7 +422,7 @@ function OverlayExamples() {
           </Export>
         </div>
 
-        <div className="flex w-full min-w-pane-picker max-w-pane-md flex-col gap-2">
+        <div className="flex w-max max-w-full flex-col gap-2">
           <p className="text-meta text-ink-muted">Popover</p>
           <Export name="Popover">
             <Popover open modal={false}>
@@ -444,13 +442,14 @@ function OverlayExamples() {
               </PopoverAnchor>
               <OverlayCell
                 portalExport="PopoverPortal"
-                className="mt-2 min-h-pane-sm w-full"
+                className="mt-2 w-max max-w-full"
               >
                 {(host) => (
                   <PopoverContent
                     container={host}
                     align="start"
                     data-gallery-export="PopoverContent"
+                    onOpenAutoFocus={preventAutoFocus}
                   >
                     <p className="text-body">{GALLERY_TEXT_FIXTURE}</p>
                     <PopoverClose asChild>
@@ -470,7 +469,7 @@ function OverlayExamples() {
           </Export>
         </div>
 
-        <div className="flex w-full max-w-pane-md flex-col gap-2">
+        <div className="flex w-max max-w-full flex-col gap-2">
           <p className="text-meta text-ink-muted">ContextMenu</p>
           <Export name="ContextMenu">
             <ContextMenuSpecimen />
@@ -482,24 +481,10 @@ function OverlayExamples() {
 }
 
 function ContextMenuSpecimen() {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const [host, setHost] = useState<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!host || !triggerRef.current) return;
-    const box = host.getBoundingClientRect();
-    triggerRef.current.dispatchEvent(
-      new MouseEvent("contextmenu", {
-        bubbles: true,
-        clientX: box.left + 24,
-        clientY: box.top + 24,
-      })
-    );
-  }, [host]);
   return (
     <ContextMenu open modal={false}>
       <ContextMenuTrigger asChild>
         <Button
-          ref={triggerRef}
           data-gallery-export="ContextMenuTrigger"
           type="button"
           variant="outline"
@@ -508,11 +493,8 @@ function ContextMenuSpecimen() {
           우클릭 메뉴
         </Button>
       </ContextMenuTrigger>
-      <div
-        ref={setHost}
-        className="relative mt-2 min-h-pane-sm w-full overflow-hidden border border-line bg-surface translate-y-0"
-      >
-        {host ? (
+      <OverlayCell className="mt-2 w-max max-w-full">
+        {(host) => (
           <ContextMenuContent
             container={host}
             data-gallery-export="ContextMenuContent"
@@ -536,8 +518,8 @@ function ContextMenuSpecimen() {
               </ContextMenuRadioItem>
             </ContextMenuRadioGroup>
           </ContextMenuContent>
-        ) : null}
-      </div>
+        )}
+      </OverlayCell>
     </ContextMenu>
   );
 }
@@ -556,6 +538,21 @@ function GalleryBody() {
     ],
     []
   );
+
+  useEffect(() => {
+    const release = () => {
+      const active = document.activeElement;
+      if (
+        active instanceof HTMLElement &&
+        active.closest("[data-gallery-stage], [data-gallery-export]")
+      ) {
+        active.blur();
+      }
+    };
+    release();
+    const id = window.setTimeout(release, 0);
+    return () => window.clearTimeout(id);
+  }, []);
 
   return (
     <div
@@ -654,7 +651,7 @@ function GalleryBody() {
               icon={<Hash className="size-4" />}
               label="릴리스 노트"
               dataAttrs={{
-                ...(previewOf(state) ? { "data-preview": previewOf(state)! } : {}),
+                ...(previewOf(state) ? { "data-gallery-preview": previewOf(state)! } : {}),
               }}
             />
           </ul>
@@ -733,7 +730,7 @@ function GalleryBody() {
             name === "press" ? (
               <figure key={name} className="flex min-w-action-sm flex-col gap-2">
                 <figcaption className="text-meta text-ink-muted">{name}</figcaption>
-                <Button type="button" variant="secondary" data-preview="active">
+                <Button type="button" variant="secondary" data-gallery-preview="active">
                   눌림
                 </Button>
               </figure>
@@ -762,6 +759,10 @@ function GalleryBody() {
           <li>Button busy는 aria-busy만 있고 시각 유틸이 없다.</li>
           <li>
             DialogPortal·PopoverPortal은 목적지 칸이다. 포털 자체는 상자가 없다.
+          </li>
+          <li>
+            스크림은 갤러리 대역이다. 모달을 끄면 프리미티브는 스크림을 그리지
+            않는다.
           </li>
         </ul>
       </section>

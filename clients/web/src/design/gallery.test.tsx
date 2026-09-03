@@ -7,7 +7,7 @@
  *   - 그 export 를 `.sr-only` 에 숨겨도 붉다 (속성 존재만으로는 통과하지 않는다)
  *   - tokens.css 에서 `@media (hover: hover)` 가드를 빼면 붉다
  *   - production CSS 에 `data-preview` 가 있으면 붉다
- *   - `data-preview=hover` 선언이 `:hover` 선언과 다르면 붉다
+ *   - `data-gallery-preview=hover` 선언이 `:hover` 선언과 다르면 붉다
  *   - production `vite build` 산출물에 "design-gallery" 가 있으면 붉다
  */
 import { execFileSync } from "node:child_process";
@@ -216,6 +216,14 @@ function captureDesignGallerySource(): string {
   return CAPTURE_SRC.slice(start, end);
 }
 
+function captureFnSource(name: string): string {
+  const start = CAPTURE_SRC.indexOf(`async function ${name}(`);
+  expect(start, name).toBeGreaterThan(-1);
+  const from = CAPTURE_SRC.slice(start);
+  const next = from.slice("async function ".length).search(/\nasync function /);
+  return next === -1 ? from : from.slice(0, next + "async function ".length);
+}
+
 function visibleExportBox(root: ParentNode, name: string): DOMRect | null {
   const nodes = [...root.querySelectorAll(`[data-gallery-export="${name}"]`)];
   for (const node of nodes) {
@@ -358,6 +366,24 @@ describe("src/design/ui export 전수", () => {
     expect(GALLERY_SRC).toMatch(/<Dialog[^>]*modal=\{false\}/);
   });
 
+  it("무대 높이는 pane 가로 토큰을 세로로 빌리지 않는다", () => {
+    expect(GALLERY_SRC).not.toMatch(/min-h-pane-|h-pane-/);
+  });
+
+  it("ContextMenu 는 마운트 좌표로 contextmenu 를 쏘지 않는다", () => {
+    expect(GALLERY_SRC).not.toMatch(/dispatchEvent\([\s\S]*contextmenu/);
+    expect(GALLERY_SRC).toMatch(/onOpenAutoFocus/);
+  });
+
+  it("Dialog 스크림은 대역이라고 이름 붙인다", () => {
+    expect(GALLERY_SRC).toMatch(/data-gallery-replica=["']DialogOverlay["']/);
+    expect(GALLERY_SRC).toMatch(/갤러리 대역/);
+  });
+
+  it("오버레이 무대는 data-gallery-stage 다", () => {
+    expect(GALLERY_SRC).toMatch(/data-gallery-stage/);
+  });
+
   it("출하 Dialog 프리미티브에 갤러리 마커가 없다", () => {
     expect(DIALOG_SRC).not.toMatch(/data-gallery-export/);
   });
@@ -399,17 +425,17 @@ describe("data-preview 선언 공유", () => {
     const pairs: { live: RegExp; preview: RegExp; label: string }[] = [
       {
         live: /hover\\:bg-surface-hover:hover\b/,
-        preview: /\[data-preview=["']hover["']\]/,
+        preview: /\[data-gallery-preview=["']hover["']\]/,
         label: "hover",
       },
       {
         live: /active\\:opacity-90:active\b/,
-        preview: /\[data-preview=["']active["']\]/,
+        preview: /\[data-gallery-preview=["']active["']\]/,
         label: "active",
       },
       {
         live: /focus-visible\\:focus-ring:focus-visible\b/,
-        preview: /\[data-preview=["']focus["']\]/,
+        preview: /\[data-gallery-preview=["']focus["']\]/,
         label: "focus-visible",
       },
     ];
@@ -436,7 +462,7 @@ describe("data-preview 선언 공유", () => {
     }
 
     const hoverPreview = previewRules.filter((rule) =>
-      /\[data-preview=["']hover["']\]/.test(rule.selector)
+      /\[data-gallery-preview=["']hover["']\]/.test(rule.selector)
     );
     expect(
       hoverPreview.every((rule) => /@media\s*\(\s*hover\s*:\s*hover\s*\)/.test(rule.selector)),
@@ -449,12 +475,30 @@ describe("캡처 장면", () => {
   it("DOM 을 고치지 않고 단정을 붙이며 data-theme 을 덧찍지 않는다", () => {
     const scene = captureDesignGallerySource();
     expect(scene).not.toMatch(/replaceChildren/);
+    // 소스가 루트에 data-theme 을 찍지 않는다는 뜻이다. 갤러리 토글은
+    // 런타임에 찍을 수 있고, 사용성 단정이 에뮬레이션 스킴으로 되돌린다.
     expect(scene).not.toMatch(/data-theme/);
     expect(scene).toMatch(/assertNoHorizontalOverflow/);
     expect(scene).toMatch(/setViewportSize/);
     expect(scene).toMatch(/assertGalleryUsable/);
     expect(scene).toMatch(/assertOverlayProductGeometry/);
     expect(scene).toMatch(/assertGalleryScrollOwnership/);
+    expect(scene).toMatch(/assertGalleryLoadFocus/);
+    expect(scene).toMatch(/assertOverlayVisibleInStageAtScroll/);
+  });
+
+  it("오버레이 기하는 무대 칸을 재고 잘림을 네 변에서 본다", () => {
+    const geo = captureFnSource("assertOverlayProductGeometry");
+    expect(geo).toMatch(/data-gallery-stage/);
+    expect(geo).toMatch(/visibleFraction/);
+    expect(geo).toMatch(/pastTop/);
+    expect(geo).toMatch(/pastLeft/);
+    expect(geo).not.toMatch(/const cell = el\.parentElement/);
+    const stay = captureFnSource("assertOverlayVisibleInStageAtScroll");
+    expect(stay).toMatch(/scrollTop/);
+    expect(stay).toMatch(/0\.9/);
+    const focus = captureFnSource("assertGalleryLoadFocus");
+    expect(focus).toMatch(/data-gallery-stage/);
   });
 });
 

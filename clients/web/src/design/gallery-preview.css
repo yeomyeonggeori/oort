@@ -1,27 +1,39 @@
 /* Forced preview for `#/design` only. Gallery.tsx imports this file so
  * production DCE drops it with the route. Not a new named utility: @apply
  * reuses the real utilities, and :is() shares one declaration list between
- * live :hover/:active/:focus-visible and data-preview. Scoped to
- * [data-gallery-root] so product surfaces never match. */
+ * live :hover/:active/:focus-visible and data-gallery-preview. Scoped to
+ * [data-gallery-root] so product surfaces never match.
+ * data-gallery-preview (not data-preview): AttachmentList already stamps
+ * data-preview as attachment status. */
 @reference "./tokens.css";
 
 @media (hover: hover) {
-  [data-gallery-root] .hover\:bg-surface-hover:is(:hover, [data-preview="hover"]) {
+  [data-gallery-root] .hover\:bg-surface-hover:is(:hover, [data-gallery-preview="hover"]) {
     @apply bg-surface-hover;
   }
-  [data-gallery-root] .hover\:opacity-90:is(:hover, [data-preview="hover"]) {
+  [data-gallery-root] .hover\:opacity-90:is(:hover, [data-gallery-preview="hover"]) {
     @apply opacity-90;
   }
 }
 
-[data-gallery-root] .active\:opacity-90:is(:active, [data-preview="active"]) {
+[data-gallery-root] .active\:opacity-90:is(:active, [data-gallery-preview="active"]) {
   @apply opacity-90;
 }
 
-[data-gallery-root] .focus-visible\:focus-ring:is(:focus-visible, [data-preview="focus"]) {
+[data-gallery-root] .focus-visible\:focus-ring:is(:focus-visible, [data-gallery-preview="focus"]) {
   @apply focus-ring;
 }
 
-[data-gallery-root] .press:is(:active, [data-preview="active"]) {
+[data-gallery-root] .press:is(:active, [data-gallery-preview="active"]) {
   transform: scale(0.98);
+}
+
+/* Pin popper wrappers to the stage. Do not write the `translate` property
+ * here: Tailwind v4 rewrites it to `transform: translate(0)` and leaves
+ * `-translate-x-1/2` (the `translate` property) alive. Dialog is pinned
+ * with classes at the call site. */
+[data-gallery-root] [data-gallery-stage] [data-radix-popper-content-wrapper] {
+  position: relative !important;
+  inset: auto !important;
+  transform: none !important;
 }

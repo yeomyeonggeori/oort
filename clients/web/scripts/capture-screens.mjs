@@ -10616,6 +10616,39 @@ async function captureConsent(browser, scheme) {
   return shots;
 }
 
+async function assertGalleryLoadFocus(page, where) {
+  const info = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (!(el instanceof HTMLElement) || el === document.body || el === document.documentElement) {
+      return { ok: true };
+    }
+    const specimen = el.closest(
+      "[data-gallery-stage], [data-gallery-export], [role='menu'], [role='dialog']"
+    );
+    if (!specimen) return { ok: true };
+    return {
+      ok: false,
+      tag: el.tagName,
+      role: el.getAttribute("role") || "",
+      text: (el.innerText || "").replace(/\s+/g, " ").trim().slice(0, 40),
+    };
+  });
+  if (!info.ok) {
+    throw new Error(
+      `${where}: 로드 포커스가 표본 안 (${info.tag} ${info.role} ${info.text})`
+    );
+  }
+  console.log(`  load-focus ${where}: outside specimens`);
+}
+
+async function releaseGallerySelection(page) {
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) active.blur();
+    window.getSelection()?.removeAllRanges();
+  });
+}
+
 async function assertGalleryUsable(page, where) {
   const lock = await page.evaluate(() => {
     const body = document.body;
@@ -10646,7 +10679,11 @@ async function assertGalleryUsable(page, where) {
   await gallery.evaluate((el) => {
     el.scrollTop = 0;
   });
-  await page.mouse.move(640, 400);
+  const viewport = page.viewportSize();
+  await page.mouse.move(
+    Math.floor(viewport.width / 2),
+    Math.floor(viewport.height / 2)
+  );
   const before = await gallery.evaluate((el) => el.scrollTop);
   await page.mouse.wheel(0, 2400);
   await page.waitForTimeout(300);
@@ -10690,6 +10727,7 @@ async function assertGalleryUsable(page, where) {
     `  usable lock ${where}: pointer-events=${lock.pointerEvents} scroll-locked=${lock.scrollLocked || "0"}`
   );
 
+  await releaseGallerySelection(page);
   await gallery.evaluate((el) => {
     el.scrollTop = 0;
   });
@@ -10714,34 +10752,57 @@ async function assertOverlayProductGeometry(page, where) {
       const el = document.querySelector(`[data-gallery-export="${name}"]`);
       if (!el) return { name, missing: true };
       const r = el.getBoundingClientRect();
-      const cell = el.parentElement;
-      const c = cell ? cell.getBoundingClientRect() : null;
-      const pastRight = c ? Math.round(r.right - c.right) : 0;
-      const pastBottom = c ? Math.round(r.bottom - c.bottom) : 0;
+      const stage = el.closest("[data-gallery-stage]");
+      if (!stage) {
+        return { name, missing: false, noStage: true, srOnly: false };
+      }
+      const s = stage.getBoundingClientRect();
+      const overlapW = Math.max(
+        0,
+        Math.min(r.right, s.right) - Math.max(r.left, s.left)
+      );
+      const overlapH = Math.max(
+        0,
+        Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top)
+      );
+      const area = r.width * r.height;
+      const visibleFraction = area > 0 ? (overlapW * overlapH) / area : 0;
       return {
         name,
         missing: false,
+        noStage: false,
         srOnly: Boolean(el.closest(".sr-only")),
+        replica: el.hasAttribute("data-gallery-replica"),
         width: Math.round(r.width),
         height: Math.round(r.height),
-        scrollWidth: el.scrollWidth,
-        clientWidth: el.clientWidth,
-        cellWidth: c ? Math.round(c.width) : 0,
-        pastRight,
-        pastBottom,
+        stageWidth: Math.round(s.width),
+        stageHeight: Math.round(s.height),
+        pastRight: Math.round(r.right - s.right),
+        pastBottom: Math.round(r.bottom - s.bottom),
+        pastLeft: Math.round(s.left - r.left),
+        pastTop: Math.round(s.top - r.top),
+        visibleFraction,
         want: want[name] ?? 0,
       };
     });
   }, expected);
   for (const row of rows) {
     if (row.missing) throw new Error(`${where}: ${row.name} 없음`);
+    if (row.noStage) {
+      throw new Error(`${where}: ${row.name} 이 [data-gallery-stage] 밖에 있다`);
+    }
     if (row.srOnly) throw new Error(`${where}: ${row.name} 이 sr-only`);
     if (row.width * row.height <= 0) {
       throw new Error(`${where}: ${row.name} 면적 0`);
     }
-    if (row.pastRight > 1 || row.pastBottom > 1) {
+    if (row.visibleFraction < 0.9) {
       throw new Error(
-        `${where}: ${row.name} 이 셀을 넘어 잘린다 (pastRight ${row.pastRight} pastBottom ${row.pastBottom}, 폭 ${row.width}/${row.cellWidth})`
+        `${where}: ${row.name} 무대 가시 면적 ${row.visibleFraction.toFixed(3)} < 0.9 (past t${row.pastTop} r${row.pastRight} b${row.pastBottom} l${row.pastLeft})`
+      );
+    }
+    if (row.pastRight > 1 || row.pastBottom > 1 || row.pastLeft > 1 || row.pastTop > 1) {
+      throw new Error(
+        `${where}: ${row.name} 이 무대를 넘어 잘린다 (pastTop ${row.pastTop} pastRight ${row.pastRight} pastBottom ${row.pastBottom} pastLeft ${row.pastLeft}, 폭 ${row.width}/${row.stageWidth})`
       );
     }
     if (row.want && Math.abs(row.width - row.want) > 4 && row.width < row.want - 4) {
@@ -10750,9 +10811,70 @@ async function assertOverlayProductGeometry(page, where) {
       );
     }
     console.log(
-      `  overlay ${where} ${row.name}: ${row.width}×${row.height} cell ${row.cellWidth} want ${row.want || "-"}`
+      `  overlay ${where} ${row.name}: ${row.width}×${row.height} stage ${row.stageWidth}×${row.stageHeight} vis ${row.visibleFraction.toFixed(3)} want ${row.want || "-"}`
     );
   }
+}
+
+async function assertOverlayVisibleInStageAtScroll(page, where) {
+  const gallery = page.getByTestId("design-gallery");
+  const max = await gallery.evaluate((el) => el.scrollHeight - el.clientHeight);
+  const offsets = [...new Set([0, 400, 1200, 2000, 2400, 2800, max].filter((v) => v >= 0 && v <= max))].sort(
+    (a, b) => a - b
+  );
+  const names = [
+    "DialogContent",
+    "DropdownMenuContent",
+    "PopoverContent",
+    "ContextMenuContent",
+  ];
+  for (const top of offsets) {
+    await gallery.evaluate((el, next) => {
+      el.scrollTop = next;
+    }, top);
+    const rows = await page.evaluate((exportNames) => {
+      return exportNames.map((name) => {
+        const el = document.querySelector(`[data-gallery-export="${name}"]`);
+        if (!el) return { name, missing: true };
+        const r = el.getBoundingClientRect();
+        const stage = el.closest("[data-gallery-stage]");
+        if (!stage) return { name, missing: false, noStage: true };
+        const s = stage.getBoundingClientRect();
+        const overlapW = Math.max(
+          0,
+          Math.min(r.right, s.right) - Math.max(r.left, s.left)
+        );
+        const overlapH = Math.max(
+          0,
+          Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top)
+        );
+        const area = r.width * r.height;
+        const visibleFraction = area > 0 ? (overlapW * overlapH) / area : 0;
+        return { name, missing: false, noStage: false, visibleFraction };
+      });
+    }, names);
+    for (const row of rows) {
+      if (row.missing) throw new Error(`${where} scrollTop ${top}: ${row.name} 없음`);
+      if (row.noStage) {
+        throw new Error(
+          `${where} scrollTop ${top}: ${row.name} 이 [data-gallery-stage] 밖에 있다`
+        );
+      }
+      if (row.visibleFraction < 0.9) {
+        throw new Error(
+          `${where} scrollTop ${top}: ${row.name} 무대 가시 면적 ${row.visibleFraction.toFixed(3)} < 0.9`
+        );
+      }
+    }
+    console.log(
+      `  overlay-scroll ${where} ${top}: ${rows
+        .map((row) => `${row.name} vis ${row.visibleFraction.toFixed(3)}`)
+        .join(" | ")}`
+    );
+  }
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
 }
 
 async function assertGalleryScrollOwnership(page, where) {
@@ -10805,16 +10927,20 @@ async function captureDesignGallery(browser, scheme) {
   const gallery = page.getByTestId("design-gallery");
   await gallery.waitFor({ state: "visible" });
   await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(50);
 
+  await assertGalleryLoadFocus(page, `design-gallery ${scheme}`);
   await assertGalleryScrollOwnership(page, `design-gallery ${scheme}`);
   await assertGalleryUsable(page, `design-gallery ${scheme}`);
   await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 1280`);
   await assertOverlayProductGeometry(page, `design-gallery ${scheme} 1280`);
+  await assertOverlayVisibleInStageAtScroll(page, `design-gallery ${scheme} 1280`);
 
   await page.setViewportSize({ width: 900, height: VIEWPORT.height });
   await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 900`);
   await assertOverlayProductGeometry(page, `design-gallery ${scheme} 900`);
   await page.setViewportSize(VIEWPORT);
+  await releaseGallerySelection(page);
 
   const contentHeight = await page.evaluate(() => {
     const node = document.querySelector("[data-testid=design-gallery]");
