@@ -98,12 +98,32 @@ export function resetEscapeLayers(): void {
   uninstall();
 }
 
-function dialogIsOpen(): boolean {
-  if (typeof document === "undefined") return false;
+/**
+ * Radix overlay still mounted — including Presence exit (`data-state=closed`).
+ *
+ * ADR-0179 D4 keeps dialog/popover/menu in the tree for the close duration.
+ * Requiring `data-state=open` lets the same Escape that started the exit also
+ * close the layer underneath: Radix sets closed first, then React portal
+ * bubbling (ThreadPanel aside) and this stack both see "no open dialog".
+ */
+export function overlayOwnsEscape(
+  root?: Pick<ParentNode, "querySelector"> | null
+): boolean {
+  const scope =
+    root === undefined
+      ? typeof document === "undefined"
+        ? null
+        : document
+      : root;
+  if (scope == null) return false;
   return (
-    document.querySelector('[role="dialog"][data-state="open"]') !== null ||
-    document.querySelector('[role="menu"][data-state="open"]') !== null
+    scope.querySelector('[role="dialog"]') !== null ||
+    scope.querySelector('[role="menu"]') !== null
   );
+}
+
+function dialogIsOpen(): boolean {
+  return overlayOwnsEscape();
 }
 
 /**

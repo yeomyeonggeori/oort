@@ -11,6 +11,7 @@ import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { ThreadComposer } from "./ThreadComposer";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
+import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -105,7 +106,14 @@ export function ThreadPanel({
         // stopPropagation 없이 곧장 닫는 WorkPanel의 마지막 분기(`closePanel()`)와
         // 같다. 답글 컴포저의 멘션 목록은 공용 useEscapeLayer가 먼저 한 단계만
         // 물러나며 전파를 막는다. 목록이 닫힌 뒤의 Escape만 여기로 올라온다.
+        //
+        // 이모지 피커는 Radix 포탈이라 DOM 경로에는 이 aside가 없지만, React는
+        // 포탈을 트리 부모로 버블시킨다. D4 Presence는 data-state=closed로
+        // 그 노드를 닫힘 동안 남겨 두므로, 열린 오버레이뿐 아니라 마운트된
+        // role=dialog|menu 가 있는 동안은 서랍을 닫지 않는다 (#1996).
         if (event.key !== "Escape") return;
+        if (event.defaultPrevented) return;
+        if (overlayOwnsEscape()) return;
         closePanel();
       }}
       className="thread-pane flex h-full flex-col border-l border-line bg-surface"

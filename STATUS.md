@@ -2,9 +2,9 @@
 
 ## UX-R1a 모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit (#1996, 2026-09-03)
 
-- ADR-0179 D4 비대칭: dialog overlay+content는 `MODAL_*_MOTION`(열림 200 / 닫힘 150), popover·dropdown-menu·context-menu는 `POPOVER_MOTION`(240/180). 스크림 `scrim-blur` 5px. Radix Presence가 exit을 기다림(forceMount 없음, 실측 unmount dwell ≥140ms).
+- ADR-0179 D4 비대칭: dialog overlay+content는 `MODAL_*_MOTION`(열림 200 / 닫힘 150), popover·dropdown-menu·context-menu는 `POPOVER_MOTION`(240/180). 스크림 `scrim-blur` 5px. Radix Presence가 exit을 기다림(forceMount 없음, 실측 unmount dwell ≥140ms). Presence 닫힘(`data-state=closed`) 동안도 `overlayOwnsEscape`가 Esc를 가져가 스레드 서랍이 같은 키에 닫히지 않는다.
 - native `<select>`는 OS picker라 data-state 모션 불가(계획 이탈). reduced-motion duration 0. 캡처 overlay 장면은 `waitForAnimations`.
-- red proof: overlay 상수 제거 → animationName none; 모달 200→120 → 실측 120≠200; blur 5→2px → `blur(2px)`. jsdom 0s는 throw.
+- red proof: overlay 상수 제거 → animationName none; 모달 200→120 → 실측 120≠200; blur 5→2px → `blur(2px)`. jsdom 0s는 throw. closed dialog node count=1 → overlayOwnsEscape true; `data-state=open`만 보면 0으로 통과해 버린다.
 
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 

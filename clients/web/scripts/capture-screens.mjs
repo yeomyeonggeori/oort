@@ -7186,14 +7186,16 @@ async function captureScheme(browser, scheme) {
   const chipPlus = actionRow.getByTestId("reaction-add");
   if ((await chipPlus.count()) > 0) {
     await login.keyboard.press("Escape");
-    await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+    await login.getByTestId("reaction-picker").waitFor({ state: "detached" });
+    await waitForAnimations(login);
     await actionRow.hover();
     await chipPlus.click();
     await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
     await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   }
   await login.keyboard.press("Escape");
-  await login.getByTestId("reaction-picker").waitFor({ state: "hidden" });
+  await login.getByTestId("reaction-picker").waitFor({ state: "detached" });
+  await waitForAnimations(login);
   await actionRow.hover();
   await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
   await login.setViewportSize({ width: 900, height: 800 });
@@ -7511,7 +7513,8 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
   await login.keyboard.press("Escape");
-
+  await login.getByTestId("reaction-picker").waitFor({ state: "detached" });
+  await waitForAnimations(login);
   // 2i. 같은 피커를 메시지 반응과 컴포저 삽입이 공유한다 (#1742).
   //     패널은 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
   //     컴포저의 명시적인 진입점으로 돌린다.
@@ -7530,7 +7533,8 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
   await login.keyboard.press("Escape");
-
+  await login.getByTestId("composer-emoji-picker").waitFor({ state: "detached" });
+  await waitForAnimations(login);
   // 2j. 스레드도 채널과 같은 메시지 입력 능력(멘션·첨부·이모지)을 갖는다
   //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
   await login.getByTestId("thread-anchor").first().click();
@@ -7588,6 +7592,16 @@ async function captureScheme(browser, scheme) {
     "thread-composer-emoji-picker"
   );
   await login.keyboard.press("Escape");
+  await login
+    .getByTestId("thread-composer-emoji-picker")
+    .waitFor({ state: "detached" });
+  await waitForAnimations(login);
+  const threadStillOpen = await login.getByTestId("thread-panel").count();
+  if (threadStillOpen !== 1) {
+    throw new Error(
+      `[thread ${scheme}] picker Escape left thread-panel count=${threadStillOpen} (want 1)`
+    );
+  }
   await login.getByTestId("thread-close").click();
 
   // 2j-2. 답글 0개 분기(#1753 M-2): 점선 빈 상태 상자의 자연 경로는 「아직 답글

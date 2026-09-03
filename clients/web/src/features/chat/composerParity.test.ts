@@ -48,6 +48,7 @@ describe("컴포저 공용 표면 (#1688)", () => {
     expect(picker).toContain("onOpenAutoFocus");
     expect(picker).toContain("autoFocusSearch={!isTouch}");
     expect(picker).toContain("onEscapeKeyDown={onEscapeKeyDown}");
+    expect(picker).toContain("event.stopPropagation()");
     expect(panel).not.toContain("event.stopPropagation()");
     expect(row).toContain("triggerRef={actionTriggerRef}");
     expect(row).toContain("openReactionPicker(actionTriggerRef.current)");
