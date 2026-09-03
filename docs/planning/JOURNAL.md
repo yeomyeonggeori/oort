@@ -3,6 +3,15 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-03 · Fable→Opus5 · ★W1 2차 랜딩 — M0m·UX-R4a·M0w 폐곡선, DS-2 잔류, 워커 레인 정지
+
+- 랜딩: M0m #2009(3회전, iOS warm 딥링크 선재 공백 복구) · UX-R4a #2015(4회전, 「보이지 않는 포커스 링」 교정) · M0w #2019(3회전, **스캔 불가 QR 인코더** 수리 + 독립 왕복 디코드 시험). 승격 배치 k #2033 + sync #2034/#2035 → main=10893152.
+- 잔류: DS-2 #2020 R3 FAIL(B1·H3 — ContextMenu 표본이 라이브에서 빈 상자, 기하 단정이 클리핑 무시). 미션 R4 작성 완료.
+- 정지: grok Build 잔액 소진(402)으로 워커 레인 중단. 결정 대기(충전/Opus 전환/마감).
+- 발행: #2016·#2029·#2030·#2031·#2032, #2018 범위 확장.
+- 교훈: 「실패할 수 없는 단정」이 이 회차 최빈 결함 — 검수 사보타주 요구가 전부 잡았다. 병합 트리 게이트 동시 실행 금지.
+- 정본 정정: 디자인시스템 README 칩 테두리 잔량 문구에서 `AgentHubRoute.tsx:181`(UX-R4a가 닫음) 제거, 살아있는 자리(`AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`)로 갱신.
+
 ## 2026-09-02 (심야2) · Fable · ★W1 1차 랜딩 — v0.1.4 발행·엔진 3건+UX-R0+SH-3a main 정본화·M0m R1 FAIL→R2·UX-R4a 가동
 
 - 발행: v0.1.4(run 33616349789, 태그 e39e9427, attestation PASS) → SELF_HOST §2-B·CHANGELOG #1980.
@@ -135,9 +144,3 @@
 - 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
 - ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
 - 권고: 그록봇 제품 편입 고집 대신 역방향 소비(Remote MCP Tools, ADR-0163 경로)가 폴링·CDP·약관 3문제 동시 탈출. Cloud Agents는 코드 이그레스 결정(ADR-0150 계열) 선행. 결정 큐 Q-DIR/Q-MCP/Q-EGRESS 상신.
-
-## 2026-08-24 (Fable) · ★4차 집행 완결 — 2차 승격 창·v0.1.2 첫 멀티아치 재발행·#1716/#1720 랜딩
-- **v0.1.2 발행 폐곡선**(RELEASING 전 절차): main=d66ca97a → dispatch+owner 승인 2회(위임·자동 승인 감시) → 멀티아치 성공 → list digest 수거(앱 43babdbc…de6d·pg b09eb970…1626) → attestation 2본 PASS → 태그·Release → SELF_HOST §2-B 현행화(#1730). **첫 멀티아치 운영자 pin — Apple Silicon 네이티브 pull 성립. D8 함정 3종(실시간·보관소·claim)이 셀프호스터 이미지에 실림.** 언퍼얼은 포함·기본 꺼짐.
-- 2차 승격 창: #1721(docs)→선sync 짝→#1724(uxui)→#1725→#1726(engine)→최종 짝. 학습 절차(선sync)로 토폴로지 재실행 1회로 끝.
-- #1716 랜딩(#1729): 실측 크기 정본화(0-선언 개방·상한 실측 red proof·PG 12/12) — grok 4차 조기종료(ENOSPC)를 인수 완주. #1720 1·3·4항 랜딩(#1733): sol이 main 전진에 TRACKS 하드 가드로 정직 정지→sync 후 전달. 잔여=2항(fan-out 배치)만.
-- 운영: ENOSPC 4차 — **근본 원인=워크트리 50개 적체**(스테일 node_modules·딥 .build). 정리 판정=성재 큐. 각 회수로 14Gi+ 확보.
