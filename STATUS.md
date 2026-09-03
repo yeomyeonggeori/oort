@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## UX-R1a 모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit (#1996, 2026-09-03)
+
+- ADR-0179 D4 비대칭: dialog overlay+content는 `MODAL_*_MOTION`(열림 200 / 닫힘 150), popover·dropdown-menu·context-menu는 `POPOVER_MOTION`(240/180). 스크림 `scrim-blur` 5px. Radix Presence가 exit을 기다림(forceMount 없음, 실측 unmount dwell ≥140ms).
+- native `<select>`는 OS picker라 data-state 모션 불가(계획 이탈). reduced-motion duration 0. 캡처 overlay 장면은 `waitForAnimations`.
+- red proof: overlay 상수 제거 → animationName none; 모달 200→120 → 실측 120≠200; blur 5→2px → `blur(2px)`. jsdom 0s는 throw.
+
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
 - 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).

@@ -3,7 +3,7 @@
  *
  * 숫자는 `motion.css`(사다리 + 모달 200/150)에만 산다. 이 파일은 그 유틸을
  * 조립한다. 표면은 `\d+ms` 나 `duration-[0-9]+` 를 직접 적지 않는다.
- * 이 티켓은 상수를 조립만 하고 소비하지 않는다(UX-R1a~e).
+ * UX-R1a 소비: dialog · popover · dropdown-menu · context-menu.
  */
 
 export const MODAL_OVERLAY_MOTION =

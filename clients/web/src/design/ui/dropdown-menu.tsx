@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/design/lib/cn";
+import { POPOVER_MOTION } from "@/design/motion";
 
 // shadcn/ui new-york DropdownMenu (vendored, Radix primitive).
 //
@@ -15,8 +16,9 @@ import { cn } from "@/design/lib/cn";
 // a recycled row is how you ship a menu that survives every case but the one
 // nobody tried.
 //
-// Same two house deviations as the Dialog: no animation (motion is feedback,
-// §4), and no decorative chrome.
+// Same house deviations as the Dialog: no decorative chrome. Enter/exit is
+// ADR-0179 D4 (open 240 / close 180) via POPOVER_MOTION. Radix Presence waits
+// for the CSS animation; forceMount is not added.
 //
 // `ContextMenu` proper (right-click) is deliberately NOT used as the only path:
 // a right-click menu has no visible affordance, and the row has to be operable
@@ -64,6 +66,7 @@ export const DropdownMenuContent = React.forwardRef<
       collisionPadding={8}
       className={cn(
         "z-50 min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        POPOVER_MOTION,
         className
       )}
       {...props}

@@ -2618,6 +2618,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     );
   }
   const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
 
@@ -3166,6 +3167,7 @@ async function captureCustomSection(page, scheme, shots) {
   await dialog.waitFor({ state: "visible" });
   await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
   const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  await waitForAnimations(page);
   await page.screenshot({ path: createShot });
   shots.push(createShot);
   await page.getByTestId("sidebar-section-name-submit").click();
@@ -3222,6 +3224,7 @@ async function captureCustomSection(page, scheme, shots) {
     );
   }
   const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
 
@@ -3295,6 +3298,7 @@ async function captureCustomSection(page, scheme, shots) {
     throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
   }
   const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  await waitForAnimations(page);
   await page.screenshot({ path: deleteShot });
   shots.push(deleteShot);
   await page.getByTestId("sidebar-section-delete-action").click();
@@ -7112,6 +7116,7 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoveOpener.click();
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "visible" });
   const unfurlRemoveShot = `${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: unfurlRemoveShot });
   shots.push(unfurlRemoveShot);
   await login.keyboard.press("Escape");
@@ -7385,6 +7390,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: menuShot });
   shots.push(menuShot);
   //     포커스는 **표본이 아니라 조건**으로 읽는다 (goal QA-flake). 사연은
@@ -7439,6 +7445,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: contextShot });
   shots.push(contextShot);
   await login.getByTestId("context-copy").click();
@@ -7486,6 +7493,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: deleteShot });
   shots.push(deleteShot);
   await login.getByTestId("delete-message-cancel").click();
@@ -7499,6 +7507,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
   await login.keyboard.press("Escape");
@@ -7517,6 +7526,7 @@ async function captureScheme(browser, scheme) {
     "composer-emoji-picker"
   );
   const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
   await login.keyboard.press("Escape");
@@ -7632,6 +7642,7 @@ async function captureScheme(browser, scheme) {
   // the product never rests on. Let it settle first.
   await login.waitForTimeout(300);
   const createShot = `${OUT_DIR}/channel-create-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: createShot });
   shots.push(createShot);
 
@@ -7644,6 +7655,7 @@ async function captureScheme(browser, scheme) {
     .waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const createErrorShot = `${OUT_DIR}/channel-create-error-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: createErrorShot });
   shots.push(createErrorShot);
 
@@ -7663,6 +7675,7 @@ async function captureScheme(browser, scheme) {
     .waitFor({ state: "visible" });
   await login.waitForTimeout(200);
   const createPendingShot = `${OUT_DIR}/channel-create-pending-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: createPendingShot });
   shots.push(createPendingShot);
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
@@ -7677,6 +7690,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
   await login.waitForTimeout(200);
   const createOfflineShot = `${OUT_DIR}/channel-create-offline-${scheme}.png`;
+  await waitForAnimations(login);
   await login.screenshot({ path: createOfflineShot });
   shots.push(createOfflineShot);
   await context.setOffline(false);
@@ -10446,7 +10460,7 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
  * first tick while the selected row is still mid-transition. Finite
  * running animations (not the infinite caret/spin) must be gone.
  */
-async function waitUntilAnimationsIdle(page) {
+async function waitForAnimations(page) {
   await page.waitForFunction(
     () =>
       document.getAnimations().filter((animation) => {
@@ -10462,8 +10476,12 @@ async function waitUntilAnimationsIdle(page) {
   );
 }
 
+/** @deprecated name; ADR-0179 D10 ③ is waitForAnimations. */
+const waitUntilAnimationsIdle = waitForAnimations;
+
 /** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
 async function screenshotSettled(page, path) {
+  await waitForAnimations(page);
   let previous = null;
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const buffer = await page.screenshot({
