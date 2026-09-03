@@ -29,6 +29,8 @@ export function ThreadPanel({
   pins,
   onOpenWorkSession,
   onClose,
+  isPlayEntrance,
+  onEntranceConsumed,
 }: {
   workspaceId: string;
   channelId: string;
@@ -47,6 +49,8 @@ export function ThreadPanel({
   pins?: PinMap;
   onOpenWorkSession?: OpenWorkSession;
   onClose: () => void;
+  isPlayEntrance?: (messageId: string) => boolean;
+  onEntranceConsumed?: (messageId: string) => void;
 }) {
   const query = useQuery({
     queryKey: ["thread", workspaceId, channelId, root.id],
@@ -149,6 +153,12 @@ export function ThreadPanel({
           actions={rowActions(root)}
           onOpenWorkSession={onOpenWorkSession}
           showRollup={false}
+          playEntrance={isPlayEntrance?.(root.id) ?? false}
+          onEntranceConsumed={
+            onEntranceConsumed
+              ? () => onEntranceConsumed(root.id)
+              : undefined
+          }
         />
         {/* 루트와 답글 사이에는 선을 긋지 않는다 (#1753). 둘은 32px 여백으로
             갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
@@ -183,6 +193,12 @@ export function ThreadPanel({
               // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
               // 말하지 않게 하기 위해서다.
               showRollup={false}
+              playEntrance={isPlayEntrance?.(reply.id) ?? false}
+              onEntranceConsumed={
+                onEntranceConsumed
+                  ? () => onEntranceConsumed(reply.id)
+                  : undefined
+              }
             />
           ))}
         </div>

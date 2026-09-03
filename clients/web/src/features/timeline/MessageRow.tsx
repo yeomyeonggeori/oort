@@ -369,7 +369,7 @@ export function MessageRow({
   showRollup?: boolean;
   /**
    * ADR-0179 D3. True only when this row entered as a live other-user
-   * arrival. Default false: REST, thread panel, work log, fixtures.
+   * arrival. Default false: REST, work log, fixtures.
    */
   playEntrance?: boolean;
   /** Parent consumes the grant on first mount (virtualisation remount = 0). */
@@ -686,7 +686,7 @@ export function MessageRow({
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       data-row-banner={rowError ? "open" : undefined}
-      data-entrance-play={entrance.playing ? "1" : "0"}
+      data-entrance-play={entrance.playing ? "1" : undefined}
       onAnimationEnd={entrance.onAnimationEnd}
       onKeyDown={onRowKeyDown}
       onMouseEnter={() => setRowHovered(true)}
