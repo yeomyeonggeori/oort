@@ -117,6 +117,31 @@ function escapedClassSelector(candidate: string): string {
   return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
 }
 
+/** Cascade winner: a later duplicate `@keyframes` of the same name wins. */
+function lastAtKeyframeBlock(css: string, name: string): string {
+  const re = new RegExp(`@keyframes\\s+${name}\\s*\\{`, "g");
+  let lastIndex = -1;
+  let match = re.exec(css);
+  while (match) {
+    lastIndex = match.index;
+    match = re.exec(css);
+  }
+  if (lastIndex < 0) {
+    throw new Error(`@keyframes ${name} 이 없다`);
+  }
+  const open = css.indexOf("{", lastIndex);
+  let depth = 0;
+  for (let i = open; i < css.length; i += 1) {
+    const ch = css[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(lastIndex, i + 1);
+    }
+  }
+  throw new Error(`@keyframes ${name} 블록이 닫히지 않는다`);
+}
+
 function lastPressOrColorsTransition(css: string): {
   selector: string;
   body: string;
@@ -158,9 +183,10 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(ENTER_CONVERSATION_ANIMATION_NAME).toBe("motion-enter-conversation");
     expect(ENTER_CONVERSATION_CLASS).toBe("enter-conversation");
     expect(MOTION_CSS).toMatch(/@keyframes\s+motion-enter-conversation\s*\{/);
-    const start = MOTION_CSS.search(/@keyframes\s+motion-enter-conversation\s*\{/);
-    expect(start).toBeGreaterThanOrEqual(0);
-    const block = MOTION_CSS.slice(start, start + 900);
+    const block = lastAtKeyframeBlock(
+      MOTION_CSS,
+      ENTER_CONVERSATION_ANIMATION_NAME
+    );
     expect(block).toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
     expect(block).toMatch(/opacity:\s*0/);
     expect(block).toMatch(/translateY\(\s*var\(--motion-distance-arrival\)\s*\)/);
