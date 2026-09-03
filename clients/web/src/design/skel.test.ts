@@ -190,7 +190,10 @@ async function withSkelPage(
 }
 
 async function withReactSkelPage(
-  options: { reducedMotion?: "reduce" | "no-preference" },
+  options: {
+    reducedMotion?: "reduce" | "no-preference";
+    viewport?: { width: number; height: number };
+  },
   run: (page: import("playwright").Page) => Promise<void>
 ): Promise<void> {
   const esbuild = await import("esbuild");
@@ -213,6 +216,7 @@ async function withReactSkelPage(
   try {
     const page = await browser.newPage({
       reducedMotion: options.reducedMotion ?? "no-preference",
+      viewport: options.viewport,
     });
     await page.setContent(
       `<!doctype html><html><head><style>${css}</style></head><body><div id="root"></div><script>${js}</script></body></html>`
@@ -222,6 +226,154 @@ async function withReactSkelPage(
   } finally {
     await browser.close();
   }
+}
+
+type HeightSample = {
+  t: number;
+  h: number;
+  content: number;
+  settled: boolean;
+};
+
+type HeightTrace = {
+  samples: HeightSample[];
+  lastTransitionEnd: number;
+};
+
+/**
+ * Per-frame host height across the crossfade. R3-H1: a repair that is right
+ * at the endpoints and wrong in its timing is still a pop. The R3 behaviour
+ * (collapse only on is-settled) produces one 48–76 px unanimated frame after
+ * the fade; the ladder must keep every step ≤ 12 px.
+ */
+async function traceHostHeight(
+  page: import("playwright").Page,
+  shape: "sidebar" | "drafts"
+): Promise<HeightTrace> {
+  const arrive =
+    shape === "drafts" ? "skel-arrive-drafts" : "skel-arrive";
+  return page.evaluate(async (args) => {
+    const section = document.querySelector(
+      `[data-skel-shape="${args.shape}"]`
+    );
+    const host = section?.querySelector(
+      '[data-testid="skeleton"]'
+    ) as HTMLElement | null;
+    const button = document.querySelector(
+      `[data-testid="${args.arrive}"]`
+    ) as HTMLButtonElement | null;
+    if (!host || !button) throw new Error("height trace: shape not mounted");
+    const bars = host.querySelector('[data-skel="bars"]') as HTMLElement | null;
+    const samples: HeightSample[] = [];
+    let lastTransitionEnd = 0;
+    const t0 = performance.now();
+    const markEnd = (event: TransitionEvent) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.propertyName !== "opacity" && event.propertyName !== "height")
+        return;
+      lastTransitionEnd = performance.now() - t0;
+    };
+    bars?.addEventListener("transitionend", markEnd);
+    host.addEventListener("transitionend", markEnd);
+    button.click();
+    await new Promise<void>((done) => {
+      const tick = () => {
+        const now = performance.now() - t0;
+        const content = host.querySelector(
+          '[data-skel="content"]'
+        ) as HTMLElement | null;
+        samples.push({
+          t: Math.round(now),
+          h: Math.round(host.getBoundingClientRect().height),
+          content: Math.round(content?.getBoundingClientRect().height ?? 0),
+          settled: host.classList.contains("is-settled"),
+        });
+        if (now > 700) return done();
+        requestAnimationFrame(tick);
+      };
+      requestAnimationFrame(tick);
+    });
+    return { samples, lastTransitionEnd: Math.round(lastTransitionEnd) };
+  }, { shape, arrive });
+}
+
+function formatTrace(samples: HeightSample[]): string {
+  return samples
+    .filter(
+      (s, i) =>
+        i === 0 ||
+        s.h !== samples[i - 1]!.h ||
+        s.settled !== samples[i - 1]!.settled
+    )
+    .map((s) => `t=${s.t} h=${s.h} content=${s.content} settled=${s.settled}`)
+    .join("\n");
+}
+
+function assertHeightLadder(trace: HeightTrace, label: string): void {
+  const { samples, lastTransitionEnd } = trace;
+  expect(samples.length, `${label}: no frames`).toBeGreaterThan(4);
+  const compact = formatTrace(samples);
+  const deltas: number[] = [];
+  for (let i = 1; i < samples.length; i += 1) {
+    deltas.push(samples[i]!.h - samples[i - 1]!.h);
+  }
+  const maxStep = Math.max(0, ...deltas.map((d) => Math.abs(d)));
+  expect(
+    maxStep,
+    `${label}: max single-frame |Δh|=${maxStep} (cap 12)\n${compact}`
+  ).toBeLessThanOrEqual(12);
+
+  const first = samples[0]!.h;
+  const last = samples[samples.length - 1]!.h;
+  const shrink = last <= first;
+  for (let i = 1; i < samples.length; i += 1) {
+    const prev = samples[i - 1]!.h;
+    const next = samples[i]!.h;
+    if (shrink) {
+      expect(
+        next,
+        `${label}: height rose ${prev}→${next} at t=${samples[i]!.t} (must be monotonic shrink)\n${compact}`
+      ).toBeLessThanOrEqual(prev);
+    } else {
+      expect(
+        next,
+        `${label}: height fell ${prev}→${next} at t=${samples[i]!.t} (must be monotonic grow)\n${compact}`
+      ).toBeGreaterThanOrEqual(prev);
+    }
+  }
+
+  const settledAt = samples.findIndex((s) => s.settled);
+  expect(settledAt, `${label}: never settled\n${compact}`).toBeGreaterThan(0);
+  const settledHeight = samples[settledAt]!.h;
+  for (let i = settledAt; i < samples.length; i += 1) {
+    expect(
+      samples[i]!.h,
+      `${label}: height moved after is-settled (t=${samples[i]!.t} ${settledHeight}→${samples[i]!.h})\n${compact}`
+    ).toBe(settledHeight);
+  }
+
+  expect(
+    lastTransitionEnd,
+    `${label}: no transitionend\n${compact}`
+  ).toBeGreaterThan(0);
+  const afterEnd = samples.filter((s) => s.t > lastTransitionEnd);
+  expect(
+    afterEnd.length,
+    `${label}: no samples after transitionend t=${lastTransitionEnd}\n${compact}`
+  ).toBeGreaterThan(0);
+  const heightAfterEnd = afterEnd[0]!.h;
+  for (const sample of afterEnd) {
+    expect(
+      sample.h,
+      `${label}: height moved after last transitionend (t=${sample.t} ${heightAfterEnd}→${sample.h}, end=${lastTransitionEnd})\n${compact}`
+    ).toBe(heightAfterEnd);
+  }
+
+  const end = samples[samples.length - 1]!;
+  expect(
+    end.h,
+    `${label}: final host ${end.h} !== content ${end.content}\n${compact}`
+  ).toBe(end.content);
 }
 
 type TransitionProbe = { propertyName: string; type: string };
@@ -604,6 +756,34 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
           return host?.classList.contains("is-settled") === true;
         });
       });
+    },
+    30_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "Drafts empty: host height steps ≤12px, monotonic, frozen after is-settled",
+    async () => {
+      await withReactSkelPage(
+        { viewport: { width: 390, height: 800 } },
+        async (page) => {
+          const samples = await traceHostHeight(page, "drafts");
+          assertHeightLadder(samples, "drafts-empty");
+        }
+      );
+    },
+    30_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "sidebar 2-channel: host height steps ≤12px, monotonic, frozen after is-settled",
+    async () => {
+      await withReactSkelPage(
+        { viewport: { width: 390, height: 800 } },
+        async (page) => {
+          const samples = await traceHostHeight(page, "sidebar");
+          assertHeightLadder(samples, "sidebar-2ch");
+        }
+      );
     },
     30_000
   );
