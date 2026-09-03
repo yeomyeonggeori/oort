@@ -10616,6 +10616,474 @@ async function captureConsent(browser, scheme) {
   return shots;
 }
 
+async function assertGalleryLoadFocus(page, where) {
+  const gallery = page.getByTestId("design-gallery");
+  const before = await gallery.evaluate((el) => el.scrollTop);
+  let info = null;
+  for (let i = 0; i < 4; i += 1) {
+    await page.keyboard.press("Tab");
+    info = await page.evaluate(() => {
+      const el = document.activeElement;
+      const g = document.querySelector("[data-testid=design-gallery]");
+      if (!(el instanceof HTMLElement) || !g) {
+        return { ok: false, reason: "no-focus" };
+      }
+      const er = el.getBoundingClientRect();
+      const gr = g.getBoundingClientRect();
+      const label = (
+        el.getAttribute("aria-label") ||
+        el.innerText ||
+        el.getAttribute("data-gallery-export") ||
+        ""
+      )
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 40);
+      return {
+        ok: true,
+        tag: el.tagName,
+        label,
+        role: el.getAttribute("role") || "",
+        scrollTop: g.scrollTop,
+        viewportTop: Math.round(er.top),
+        galleryY: Math.round(er.top - gr.top + g.scrollTop),
+        area: Math.round(er.width * er.height),
+        inSpecimen: Boolean(
+          el.closest("[data-gallery-stage], [role='menu'], [role='dialog']")
+        ),
+        isBody: el === document.body,
+      };
+    });
+    if (!info.ok) {
+      throw new Error(`${where}: 로드 후 Tab 이 포커스를 옮기지 않았다`);
+    }
+    if (info.scrollTop > 80) {
+      throw new Error(
+        `${where}: 로드 후 첫 Tab 이 갤러리를 ${before} → ${info.scrollTop} 로 굴렸다 (${info.tag} ${info.label})`
+      );
+    }
+    if (info.area > 0) break;
+  }
+  if (!info || !info.ok) {
+    throw new Error(`${where}: 로드 후 첫 Tab 이 포커스를 옮기지 않았다`);
+  }
+  if (info.isBody) {
+    throw new Error(`${where}: 로드 후 첫 가시 Tab 이 body 에 남았다`);
+  }
+  if (info.inSpecimen) {
+    throw new Error(
+      `${where}: 로드 후 첫 가시 Tab 이 표본 안 (${info.tag} ${info.role} ${info.label})`
+    );
+  }
+  if (info.area <= 0) {
+    throw new Error(
+      `${where}: 로드 후 Tab 4번에 면적 있는 컨트롤이 없다 (${info.tag} ${info.label})`
+    );
+  }
+  if (info.viewportTop < 0 || info.viewportTop > 700) {
+    throw new Error(
+      `${where}: 로드 후 첫 가시 Tab 착지가 화면 위가 아니다 (y=${info.viewportTop} galleryY=${info.galleryY} ${info.label})`
+    );
+  }
+  console.log(
+    `  load-focus ${where}: Tab → ${info.tag} "${info.label}" y=${info.viewportTop} galleryY=${info.galleryY} scroll=${info.scrollTop} area=${info.area}`
+  );
+  await releaseGallerySelection(page);
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+}
+
+async function releaseGallerySelection(page) {
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body) active.blur();
+    window.getSelection()?.removeAllRanges();
+  });
+}
+
+async function assertGalleryUsable(page, where) {
+  const lock = await page.evaluate(() => {
+    const body = document.body;
+    return {
+      pointerEvents: getComputedStyle(body).pointerEvents,
+      scrollLocked: body.getAttribute("data-scroll-locked"),
+    };
+  });
+  if (lock.pointerEvents === "none") {
+    throw new Error(`${where}: body pointer-events: none`);
+  }
+  if (lock.scrollLocked && lock.scrollLocked !== "0") {
+    throw new Error(`${where}: body data-scroll-locked=${lock.scrollLocked}`);
+  }
+
+  const darkToggle = page.getByRole("button", { name: "다크로 보기" });
+  const lightToggle = page.getByRole("button", { name: "라이트로 보기" });
+  const other = where.includes("dark") ? lightToggle : darkToggle;
+  const home = where.includes("dark") ? darkToggle : lightToggle;
+  await other.click({ timeout: 3000 });
+  const pressed = await other.getAttribute("aria-pressed");
+  if (pressed !== "true") {
+    throw new Error(`${where}: 스킴 토글 클릭이 먹지 않는다 (aria-pressed=${pressed})`);
+  }
+  await home.click({ timeout: 3000 });
+
+  const gallery = page.getByTestId("design-gallery");
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  const viewport = page.viewportSize();
+  await page.mouse.move(
+    Math.floor(viewport.width / 2),
+    Math.floor(viewport.height / 2)
+  );
+  const before = await gallery.evaluate((el) => el.scrollTop);
+  await page.mouse.wheel(0, 2400);
+  await page.waitForTimeout(300);
+  const after = await gallery.evaluate((el) => ({
+    top: el.scrollTop,
+    max: el.scrollHeight - el.clientHeight,
+  }));
+  if (after.max > 200 && after.top - before < 200) {
+    throw new Error(
+      `${where}: 휠 2400px 요청에 갤러리 스크롤 ${before} → ${after.top} (max ${after.max})`
+    );
+  }
+  console.log(
+    `  usable wheel ${where}: ${before} → ${after.top} (요청 2400, max ${after.max})`
+  );
+
+  await lightToggle.focus();
+  const reached = [];
+  for (let i = 0; i < 8; i += 1) {
+    await page.keyboard.press("Tab");
+    const key = await page.evaluate(() => {
+      const el = document.activeElement;
+      if (!(el instanceof HTMLElement) || el === document.body) return "";
+      const label =
+        el.getAttribute("aria-label") ||
+        el.innerText ||
+        el.getAttribute("data-gallery-export") ||
+        "";
+      return `${el.tagName}:${label.replace(/\s+/g, " ").trim().slice(0, 24)}`;
+    });
+    if (key) reached.push(key);
+  }
+  const distinct = [...new Set(reached)];
+  if (distinct.length < 2) {
+    throw new Error(
+      `${where}: Tab 8번에 서로 다른 컨트롤 ${distinct.length}개 (${distinct.join(" | ")})`
+    );
+  }
+  console.log(`  usable tab ${where}: ${distinct.join(" → ")}`);
+  console.log(
+    `  usable lock ${where}: pointer-events=${lock.pointerEvents} scroll-locked=${lock.scrollLocked || "0"}`
+  );
+
+  await releaseGallerySelection(page);
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+}
+
+async function assertOverlayProductGeometry(page, where) {
+  const expected = {
+    DialogContent: pixelToken("spacing-pane-md"),
+    PopoverContent: pixelToken("spacing-pane-picker"),
+    DropdownMenuContent: pixelToken("spacing-pane-sm"),
+    ContextMenuContent: pixelToken("spacing-pane-sm"),
+  };
+  const rows = await page.evaluate((want) => {
+    const names = [
+      "DialogContent",
+      "DialogOverlay",
+      "DropdownMenuContent",
+      "PopoverContent",
+      "ContextMenuContent",
+    ];
+    return names.map((name) => {
+      const el = document.querySelector(`[data-gallery-export="${name}"]`);
+      if (!el) return { name, missing: true };
+      const r = el.getBoundingClientRect();
+      const stage = el.closest("[data-gallery-stage]");
+      if (!stage) {
+        return { name, missing: false, noStage: true, srOnly: false };
+      }
+      const s = stage.getBoundingClientRect();
+      const overlapW = Math.max(
+        0,
+        Math.min(r.right, s.right) - Math.max(r.left, s.left)
+      );
+      const overlapH = Math.max(
+        0,
+        Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top)
+      );
+      const area = r.width * r.height;
+      const visibleFraction = area > 0 ? (overlapW * overlapH) / area : 0;
+      const replica = el.hasAttribute("data-gallery-replica");
+      let unoccludedFraction = 1;
+      let bgAlpha = 1;
+      if (replica) {
+        const panel = document.querySelector('[data-gallery-export="DialogContent"]');
+        const p = panel ? panel.getBoundingClientRect() : null;
+        if (p) {
+          const hideW = Math.max(
+            0,
+            Math.min(r.right, p.right) - Math.max(r.left, p.left)
+          );
+          const hideH = Math.max(
+            0,
+            Math.min(r.bottom, p.bottom) - Math.max(r.top, p.top)
+          );
+          unoccludedFraction = area > 0 ? (area - hideW * hideH) / area : 0;
+        } else {
+          unoccludedFraction = 0;
+        }
+        const bg = getComputedStyle(el).backgroundColor;
+        const alphaMatch = bg.match(/rgba?\(([^)]+)\)/);
+        if (alphaMatch) {
+          const parts = alphaMatch[1].split(",").map((n) => Number(n.trim()));
+          bgAlpha = parts.length === 4 ? parts[3] : 1;
+        }
+      }
+      return {
+        name,
+        missing: false,
+        noStage: false,
+        srOnly: Boolean(el.closest(".sr-only")),
+        replica,
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+        stageWidth: Math.round(s.width),
+        stageHeight: Math.round(s.height),
+        pastRight: Math.round(r.right - s.right),
+        pastBottom: Math.round(r.bottom - s.bottom),
+        pastLeft: Math.round(s.left - r.left),
+        pastTop: Math.round(s.top - r.top),
+        visibleFraction,
+        unoccludedFraction,
+        bgAlpha,
+        want: want[name] ?? 0,
+      };
+    });
+  }, expected);
+  for (const row of rows) {
+    if (row.missing) throw new Error(`${where}: ${row.name} 없음`);
+    if (row.noStage) {
+      throw new Error(`${where}: ${row.name} 이 [data-gallery-stage] 밖에 있다`);
+    }
+    if (row.srOnly) throw new Error(`${where}: ${row.name} 이 sr-only`);
+    if (row.width * row.height <= 0) {
+      throw new Error(`${where}: ${row.name} 면적 0`);
+    }
+    if (row.visibleFraction < 0.9) {
+      throw new Error(
+        `${where}: ${row.name} 무대 가시 면적 ${row.visibleFraction.toFixed(3)} < 0.9 (past t${row.pastTop} r${row.pastRight} b${row.pastBottom} l${row.pastLeft})`
+      );
+    }
+    if (row.pastRight > 1 || row.pastBottom > 1 || row.pastLeft > 1 || row.pastTop > 1) {
+      throw new Error(
+        `${where}: ${row.name} 이 무대를 넘어 잘린다 (pastTop ${row.pastTop} pastRight ${row.pastRight} pastBottom ${row.pastBottom} pastLeft ${row.pastLeft}, 폭 ${row.width}/${row.stageWidth})`
+      );
+    }
+    if (row.replica) {
+      if (row.unoccludedFraction < 0.15) {
+        throw new Error(
+          `${where}: ${row.name} 가림 없는 가시 면적 ${row.unoccludedFraction.toFixed(3)} < 0.15 (판이 스크림을 가림)`
+        );
+      }
+      if (row.bgAlpha <= 0) {
+        throw new Error(`${where}: ${row.name} 배경이 투명해서 스크림이 안 보인다`);
+      }
+    }
+    if (row.want && Math.abs(row.width - row.want) > 4 && row.width < row.want - 4) {
+      throw new Error(
+        `${where}: ${row.name} 폭 ${row.width}px ≠ 제품 ${row.want}px`
+      );
+    }
+    const extra = row.replica
+      ? ` unoccluded ${row.unoccludedFraction.toFixed(3)}`
+      : "";
+    console.log(
+      `  overlay ${where} ${row.name}: ${row.width}×${row.height} stage ${row.stageWidth}×${row.stageHeight} vis ${row.visibleFraction.toFixed(3)} want ${row.want || "-"}${extra}`
+    );
+  }
+}
+
+async function wheelGalleryTo(page, gallery, targetTop) {
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+  if (targetTop <= 0) return 0;
+  const box = await gallery.boundingBox();
+  if (!box) throw new Error("design-gallery bounding box missing");
+  await page.mouse.move(
+    Math.floor(box.x + box.width / 2),
+    Math.floor(box.y + Math.min(360, box.height / 2))
+  );
+  let current = 0;
+  for (let i = 0; i < 48; i += 1) {
+    const remaining = targetTop - current;
+    if (remaining <= 16) break;
+    await page.mouse.wheel(0, Math.min(400, remaining));
+    await page.waitForTimeout(40);
+    const next = await gallery.evaluate((el) => el.scrollTop);
+    if (next <= current) break;
+    current = next;
+  }
+  if (targetTop > 80 && current < targetTop * 0.5) {
+    throw new Error(
+      `휠로 ${targetTop} 근처까지 못 감 (landed ${current})`
+    );
+  }
+  return current;
+}
+
+async function assertOverlayVisibleInStageAtScroll(page, where) {
+  const gallery = page.getByTestId("design-gallery");
+  const max = await gallery.evaluate((el) => el.scrollHeight - el.clientHeight);
+  const offsets = [...new Set([0, 400, 1200, 2000, 2400, 2800, max].filter((v) => v >= 0 && v <= max))].sort(
+    (a, b) => a - b
+  );
+  const names = [
+    "DialogContent",
+    "DropdownMenuContent",
+    "PopoverContent",
+    "ContextMenuContent",
+  ];
+  for (const top of offsets) {
+    const landed = await wheelGalleryTo(page, gallery, top);
+    const rows = await page.evaluate((exportNames) => {
+      return exportNames.map((name) => {
+        const el = document.querySelector(`[data-gallery-export="${name}"]`);
+        if (!el) return { name, missing: true };
+        const r = el.getBoundingClientRect();
+        const stage = el.closest("[data-gallery-stage]");
+        if (!stage) return { name, missing: false, noStage: true };
+        const s = stage.getBoundingClientRect();
+        const overlapW = Math.max(
+          0,
+          Math.min(r.right, s.right) - Math.max(r.left, s.left)
+        );
+        const overlapH = Math.max(
+          0,
+          Math.min(r.bottom, s.bottom) - Math.max(r.top, s.top)
+        );
+        const area = r.width * r.height;
+        const visibleFraction = area > 0 ? (overlapW * overlapH) / area : 0;
+        return { name, missing: false, noStage: false, visibleFraction };
+      });
+    }, names);
+    for (const row of rows) {
+      if (row.missing) throw new Error(`${where} wheel ${landed}: ${row.name} 없음`);
+      if (row.noStage) {
+        throw new Error(
+          `${where} wheel ${landed}: ${row.name} 이 [data-gallery-stage] 밖에 있다`
+        );
+      }
+      if (row.visibleFraction < 0.9) {
+        throw new Error(
+          `${where} wheel ${landed}: ${row.name} 무대 가시 면적 ${row.visibleFraction.toFixed(3)} < 0.9`
+        );
+      }
+    }
+    console.log(
+      `  overlay-scroll ${where} wheel ${landed} (want ${top}): ${rows
+        .map((row) => `${row.name} vis ${row.visibleFraction.toFixed(3)}`)
+        .join(" | ")}`
+    );
+  }
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
+}
+
+async function assertGalleryScrollOwnership(page, where) {
+  const m = await page.evaluate(() => {
+    const g = document.querySelector("[data-testid=design-gallery]");
+    const doc = document.documentElement;
+    if (!g) return { missing: true };
+    return {
+      missing: false,
+      overflowY: getComputedStyle(g).overflowY,
+      gScroll: g.scrollHeight,
+      gClient: g.clientHeight,
+      vh: window.innerHeight,
+      docScroll: doc.scrollHeight,
+      docClient: doc.clientHeight,
+    };
+  });
+  if (m.missing) throw new Error(`${where}: 갤러리 루트 없음`);
+  if (m.gScroll > m.vh + 1) {
+    if (m.overflowY !== "auto" && m.overflowY !== "scroll") {
+      throw new Error(
+        `${where}: 갤러리 내용 ${m.gScroll}px > 뷰포트 ${m.vh}px 인데 overflow-y=${m.overflowY}`
+      );
+    }
+    if (m.gClient > m.vh + 1) {
+      throw new Error(
+        `${where}: 갤러리 루트 clientHeight ${m.gClient} > 뷰포트 ${m.vh} — 스크롤 소유가 아니다`
+      );
+    }
+  }
+  if (m.docScroll > m.docClient + 1) {
+    throw new Error(
+      `${where}: 문서 스크롤러 ${m.docScroll}px > ${m.docClient}px`
+    );
+  }
+  console.log(
+    `  scroll-own ${where}: gallery ${m.gClient}/${m.gScroll} overflow-y=${m.overflowY} doc ${m.docClient}/${m.docScroll}`
+  );
+}
+
+async function captureDesignGallery(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  const page = await context.newPage();
+  await page.goto(`${ORIGIN}/#/design`, { waitUntil: "networkidle" });
+  const gallery = page.getByTestId("design-gallery");
+  await gallery.waitFor({ state: "visible" });
+  await page.evaluate(() => document.fonts.ready);
+  await page.waitForTimeout(50);
+
+  await assertGalleryLoadFocus(page, `design-gallery ${scheme}`);
+  await assertGalleryScrollOwnership(page, `design-gallery ${scheme}`);
+  await assertGalleryUsable(page, `design-gallery ${scheme}`);
+  await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 1280`);
+  await assertOverlayProductGeometry(page, `design-gallery ${scheme} 1280`);
+  await assertOverlayVisibleInStageAtScroll(page, `design-gallery ${scheme} 1280`);
+
+  await page.setViewportSize({ width: 900, height: VIEWPORT.height });
+  await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 900`);
+  await assertOverlayProductGeometry(page, `design-gallery ${scheme} 900`);
+  await page.setViewportSize(VIEWPORT);
+  await releaseGallerySelection(page);
+
+  const contentHeight = await page.evaluate(() => {
+    const node = document.querySelector("[data-testid=design-gallery]");
+    return node ? Math.ceil(node.scrollHeight) : 0;
+  });
+  await page.setViewportSize({
+    width: VIEWPORT.width,
+    height: Math.max(VIEWPORT.height, contentHeight),
+  });
+  const path = `${OUT_DIR}/design-gallery-${scheme}.png`;
+  await page.screenshot({
+    path,
+    fullPage: false,
+    animations: "disabled",
+    caret: "hide",
+  });
+  await page.setViewportSize(VIEWPORT);
+  await page.close();
+  await context.close();
+  return [path];
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
@@ -10644,8 +11112,13 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
+      } else if (profile === "gallery") {
+        for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureDesignGallery(browser, scheme)));
+        }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
+          all.push(...(await captureDesignGallery(browser, scheme)));
           all.push(...(await captureScheme(browser, scheme)));
           all.push(...(await captureTerminalDockScenes(browser, scheme)));
           all.push(...(await captureMarkUnreadScenes(browser, scheme)));
@@ -10663,7 +11136,7 @@ async function main() {
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop" && profile !== "accent") {
+      if (profile !== "desktop" && profile !== "accent" && profile !== "gallery") {
         for (const scheme of ["light", "dark"]) {
           all.push(...(await captureMobile(browser, scheme)));
         }

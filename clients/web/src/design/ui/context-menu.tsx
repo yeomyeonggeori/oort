@@ -16,9 +16,13 @@ export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 
 export const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content> & {
+    container?: HTMLElement | null;
+    /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
+    onOpenAutoFocus?: (event: Event) => void;
+  }
+>(({ className, container, onOpenAutoFocus, ...props }, ref) => (
+  <ContextMenuPrimitive.Portal container={container ?? undefined}>
     <ContextMenuPrimitive.Content
       ref={ref}
       collisionPadding={8}
@@ -27,6 +31,9 @@ export const ContextMenuContent = React.forwardRef<
         className
       )}
       {...props}
+      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+        typeof ContextMenuPrimitive.Content
+      >)}
     />
   </ContextMenuPrimitive.Portal>
 ));
