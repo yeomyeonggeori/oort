@@ -29,6 +29,7 @@ const WEB_ROOT = resolve(HERE, "..", "..");
 const UI_DIR = join(HERE, "ui");
 const APP_SRC = readFileSync(join(HERE, "..", "app", "App.tsx"), "utf8");
 const GALLERY_SRC = readFileSync(join(HERE, "Gallery.tsx"), "utf8");
+const DIALOG_SRC = readFileSync(join(HERE, "ui", "dialog.tsx"), "utf8");
 const TOKENS_CSS = readFileSync(join(HERE, "tokens.css"), "utf8");
 const PREVIEW_PATH = join(HERE, "gallery-preview.css");
 const CAPTURE_SRC = readFileSync(
@@ -348,10 +349,17 @@ describe("src/design/ui export 전수", () => {
   it("떠 있는 표면은 실제 프리미티브이고 FloatPanel 흉내가 없다", () => {
     expect(GALLERY_SRC).not.toMatch(/\bFloatPanel\b/);
     expect(GALLERY_SRC).toMatch(/container=\{/);
-    expect(GALLERY_SRC).toMatch(/overlayClassName=/);
     expect(GALLERY_SRC).not.toMatch(/캡처가 실제 열림을 만들고/);
     expect(GALLERY_SRC).not.toMatch(/정적 판/);
     expect(GALLERY_SRC).not.toMatch(/`shadow-lg`/);
+  });
+
+  it("Dialog 는 문서를 잠그지 않는다", () => {
+    expect(GALLERY_SRC).toMatch(/<Dialog[^>]*modal=\{false\}/);
+  });
+
+  it("출하 Dialog 프리미티브에 갤러리 마커가 없다", () => {
+    expect(DIALOG_SRC).not.toMatch(/data-gallery-export/);
   });
 });
 
@@ -444,6 +452,9 @@ describe("캡처 장면", () => {
     expect(scene).not.toMatch(/data-theme/);
     expect(scene).toMatch(/assertNoHorizontalOverflow/);
     expect(scene).toMatch(/setViewportSize/);
+    expect(scene).toMatch(/assertGalleryUsable/);
+    expect(scene).toMatch(/assertOverlayProductGeometry/);
+    expect(scene).toMatch(/assertGalleryScrollOwnership/);
   });
 });
 
@@ -456,7 +467,7 @@ describe("프로덕션 번들", () => {
   });
 
   it(
-    "production vite build dist 에 design-gallery 와 CSS data-preview 가 0건이다",
+    "production vite build dist 에 design-gallery 와 data-gallery-export 가 0건이다",
     () => {
       const viteBin = resolve(WEB_ROOT, "node_modules/.bin/vite");
       expect(existsSync(viteBin), "clients/web/node_modules/.bin/vite").toBe(true);
@@ -470,11 +481,13 @@ describe("프로덕션 번들", () => {
         });
         const galleryHits: string[] = [];
         const previewHits: string[] = [];
+        const markerHits: string[] = [];
         for (const file of walkFiles(outDir)) {
           const bytes = readFileSync(file);
           const rel = file.slice(outDir.length + 1);
           if (bytes.includes("design-gallery")) galleryHits.push(rel);
           if (file.endsWith(".css") && bytes.includes("data-preview")) previewHits.push(rel);
+          if (bytes.includes("data-gallery-export")) markerHits.push(rel);
         }
         expect(
           galleryHits,
@@ -483,6 +496,10 @@ describe("프로덕션 번들", () => {
         expect(
           previewHits,
           `production CSS 에 data-preview: ${previewHits.join(", ")}`
+        ).toEqual([]);
+        expect(
+          markerHits,
+          `production dist 에 data-gallery-export: ${markerHits.join(", ")}`
         ).toEqual([]);
       } finally {
         rmSync(outDir, { recursive: true, force: true });
