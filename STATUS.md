@@ -4,7 +4,7 @@
 
 - `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 막대는 정지(펄스 없음). 페이드가 끝나면 `is-settled`가 막대를 레이아웃에서 빼 호스트 높이 = 콘텐츠 높이. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다.
 - 호출부 57곳 식별자 이관. 같은 슬롯에서 `ready`가 뒤집히는 면은 9곳(Sidebar×2, ChatShell, Inbox, Drafts, Activity, Search, ThreadPanel, Reminders). 나머지 48곳은 `<Skeleton ready={false} />` self-closing — 예전 팝(DS-2 갤러리 표본·라우트 fallback 포함). 타임라인은 Virtuoso `height:100%` 스크롤러와 고정 높이 막대 블록이 충돌하므로 제외(주석 `Timeline.tsx`).
-- runtime-unverified 아님. 캡처: Inbox+Sidebar, 모션 켜고 `skeleton-{light,dark}` + `skeleton-settled-{light,dark}`.
+- runtime-unverified 아님. 캡처: Inbox+Sidebar, 모션 켜고 `skeleton-{light,dark}` + `skeleton-settled-{light,dark}`. Inbox 스켈레톤 프레임은 `**/approvals*` 홀드 + `[data-testid="inbox-route"] [data-ready="false"]`가 보증한다.
 - 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## UX-R1a 모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit (#1996, 2026-09-03)

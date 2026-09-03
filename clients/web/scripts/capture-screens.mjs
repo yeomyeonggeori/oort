@@ -10478,9 +10478,15 @@ async function waitForAnimations(page) {
 
 /**
  * UX-R1c: two frames per scheme, skeleton then settled. Holds the channel
- * list and inbox mention fetch so the surfaces that actually crossfade
- * (sidebar + inbox) are on screen. Motion stays on; waitUntilAnimationsIdle
- * covers the 240ms fade. This is not ADR-0179 D10 ③ / DS-3.
+ * list, channel messages, and inbox approvals fetch so the surfaces that
+ * actually crossfade (sidebar + inbox) are loading together. Motion stays
+ * on; waitUntilAnimationsIdle covers the 240ms fade. This is not ADR-0179
+ * D10 ③ / DS-3.
+ *
+ * The inbox default panel is 결정 대기 (`GET …/approvals`). Holding only
+ * channels leaves that panel ready=true with cards already painted. Gate
+ * the skeleton frame on `[data-testid="inbox-route"] [data-ready="false"]`
+ * (1 at skeleton, 0 at settled) and the settled frame on the inverse.
  */
 async function captureSkeletonReveal(browser, scheme) {
   const context = await browser.newContext({
@@ -10508,6 +10514,11 @@ async function captureSkeletonReveal(browser, scheme) {
       return route.fallback();
     }
   );
+  await context.route("**/v1/workspaces/*/approvals*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await held;
+    return route.fallback();
+  });
   const page = await context.newPage();
   const shots = [];
   try {
@@ -10525,8 +10536,8 @@ async function captureSkeletonReveal(browser, scheme) {
     await page.evaluate('location.hash = "/inbox"');
     await page.getByTestId("inbox-route").waitFor({ state: "visible" });
     await page
-      .locator('[data-testid="inbox-route"] [data-testid="skeleton"]')
-      .waitFor({ state: "visible" });
+      .locator('[data-testid="inbox-route"] [data-ready="false"]')
+      .waitFor({ state: "visible", timeout: 8_000 });
     await waitUntilAnimationsIdle(page);
     const skeletonPath = `${OUT_DIR}/skeleton-${scheme}.png`;
     await screenshotSettled(page, skeletonPath);
@@ -10537,11 +10548,11 @@ async function captureSkeletonReveal(browser, scheme) {
       .getByRole("link", { name: "엔진" })
       .waitFor({ state: "visible" });
     await page
-      .locator(
-        '[data-testid="inbox-list"], [data-testid="inbox-empty"], [data-testid="inbox-error"]'
-      )
-      .first()
+      .locator('[data-testid="inbox-route"] [data-ready="true"]')
       .waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-ready="false"]')
+      .waitFor({ state: "hidden" });
     await page
       .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
       .waitFor({ state: "visible" });
