@@ -68,6 +68,11 @@ fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
             )
         }),
         role_labels: workspace.role_labels.clone(),
+        welcome_agent_member_id: workspace.welcome_agent_member_id.map(|id| id.to_string()),
+        welcome_prompt: workspace
+            .welcome_prompt
+            .clone()
+            .unwrap_or_else(|| momo_agent::DEFAULT_WELCOME_PROMPT.to_string()),
     }
 }
 
@@ -291,6 +296,8 @@ mod tests {
                 updated_at_ms: 1_700_000_000_123,
                 avatar_media_id: None,
                 role_labels: serde_json::json!({}),
+                welcome_agent_member_id: None,
+                welcome_prompt: None,
             }),
         })
         .expect("serialize");
@@ -301,6 +308,14 @@ mod tests {
         // No avatar → the key is absent, not null (skip_serializing_if).
         assert!(json["workspace"].get("avatarUrl").is_none(), "{json}");
         assert_eq!(json["workspace"]["roleLabels"], serde_json::json!({}));
+        assert_eq!(
+            json["workspace"]["welcomeAgentMemberId"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            json["workspace"]["welcomePrompt"],
+            momo_agent::DEFAULT_WELCOME_PROMPT
+        );
         assert!(
             json["workspace"].get("settings").is_none(),
             "identity must not grow a settings bag: {json}"
@@ -318,6 +333,8 @@ mod tests {
             updated_at_ms: 1_700_000_000_123,
             avatar_media_id: Some(Uuid::from_u128(42)),
             role_labels: serde_json::json!({"owner": "마스터"}),
+            welcome_agent_member_id: None,
+            welcome_prompt: None,
         });
         let url = dto.avatar_url.expect("avatar url present");
         assert!(url.starts_with("/v1/workspaces/"), "{url}");
