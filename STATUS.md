@@ -4,8 +4,8 @@
 
 - ADR-0179 D3: 실시간 도착(타 사용자 `message.new`) 행만 `enter-conversation` 1회. REST 백필·리플레이 게이트·초기 로드·가상화 재마운트·낙관 PendingRow 교체·자기 메시지·edited 는 0. `takeArrivalPlay` 단일점(momo-core). `animationName` 일치로 클래스 제거.
 - reduced-motion: 재생 0 (ingest 가드 + 사다리 duration 0). UnreadDivider/Pill 무접촉.
-- runtime-unverified 아님. 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다).
-- red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 삭제 시 motion.test 붉음.
+- 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**(이 변경과 무관한 기존 조건).
+- red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 이름 불일치 시 motion.test 붉음.
 
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
