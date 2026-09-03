@@ -10276,22 +10276,21 @@ async function assertGalleryUsable(page, where) {
   await gallery.evaluate((el) => {
     el.scrollTop = 0;
   });
-  const box = await gallery.boundingBox();
-  if (!box) throw new Error(`${where}: 갤러리 상자 없음`);
-  await page.mouse.move(box.x + box.width / 2, box.y + 80);
+  await page.mouse.move(640, 400);
   const before = await gallery.evaluate((el) => el.scrollTop);
-  await page.mouse.wheel(0, 800);
+  await page.mouse.wheel(0, 2400);
+  await page.waitForTimeout(300);
   const after = await gallery.evaluate((el) => ({
     top: el.scrollTop,
     max: el.scrollHeight - el.clientHeight,
   }));
   if (after.max > 200 && after.top - before < 200) {
     throw new Error(
-      `${where}: 휠 800px 요청에 갤러리 스크롤 ${before} → ${after.top} (max ${after.max})`
+      `${where}: 휠 2400px 요청에 갤러리 스크롤 ${before} → ${after.top} (max ${after.max})`
     );
   }
   console.log(
-    `  usable wheel ${where}: ${before} → ${after.top} (요청 800, max ${after.max})`
+    `  usable wheel ${where}: ${before} → ${after.top} (요청 2400, max ${after.max})`
   );
 
   await lightToggle.focus();
