@@ -6923,6 +6923,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-input").hover();
   await login.waitForTimeout(100);
   await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
+  await waitForAnimations(login);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
@@ -10446,7 +10447,7 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
  * first tick while the selected row is still mid-transition. Finite
  * running animations (not the infinite caret/spin) must be gone.
  */
-async function waitUntilAnimationsIdle(page) {
+async function waitForAnimations(page) {
   await page.waitForFunction(
     () =>
       document.getAnimations().filter((animation) => {
@@ -10533,7 +10534,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
   transform: translateZ(0);
 }`,
     });
-    await waitUntilAnimationsIdle(page);
+    await waitForAnimations(page);
     const previewDir = resolve(WEB_ROOT, "src/design/themes/previews");
     mkdirSync(previewDir, { recursive: true });
     const shots = [];
@@ -10548,7 +10549,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
         '[data-testid="channel-item"][aria-current="page"]',
         "--accent-soft"
       );
-      await waitUntilAnimationsIdle(page);
+      await waitForAnimations(page);
       await page.evaluate(
         () =>
           new Promise((resolve) => {

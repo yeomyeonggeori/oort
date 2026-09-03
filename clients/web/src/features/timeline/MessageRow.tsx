@@ -115,6 +115,7 @@ import { RemindDialog } from "@/features/reminders/RemindDialog";
 import { useReminderMutations } from "@/features/reminders/useReminders";
 import { useMarkUnread } from "./useMarkUnread";
 import { useTimelineLive } from "./timelineLiveContext";
+import { useConversationEntrance } from "./conversationEntrance";
 
 // =============================================================================
 // One message row (R-1 §3). Humans and agents share the SAME grid and the same
@@ -285,6 +286,8 @@ export function MessageRow({
   onOpenWorkSession,
   onResend,
   showRollup = true,
+  playEntrance = false,
+  onEntranceConsumed,
 }: {
   message: Message;
   startsGroup: boolean;
@@ -364,7 +367,15 @@ export function MessageRow({
    * **그 줄이 여기서 할 말이 없다**는 것이었고, 여기서 끊는 것이 그 조건이다.
    */
   showRollup?: boolean;
+  /**
+   * ADR-0179 D3. True only when this row entered as a live other-user
+   * arrival. Default false: REST, thread panel, work log, fixtures.
+   */
+  playEntrance?: boolean;
+  /** Parent consumes the grant on first mount (virtualisation remount = 0). */
+  onEntranceConsumed?: () => void;
 }) {
+  const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);
   const [resending, setResending] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editPending, setEditPending] = useState(false);
@@ -675,6 +686,8 @@ export function MessageRow({
       data-author-kind={author?.kind ?? "unknown"}
       data-actionable={actionable ? "true" : undefined}
       data-row-banner={rowError ? "open" : undefined}
+      data-entrance-play={entrance.playing ? "1" : "0"}
+      onAnimationEnd={entrance.onAnimationEnd}
       onKeyDown={onRowKeyDown}
       onMouseEnter={() => setRowHovered(true)}
       onMouseLeave={() => setRowHovered(false)}
@@ -707,7 +720,8 @@ export function MessageRow({
         // 행 사이 간격은 코어가 정한다 (H-7 · `ROW_SPACE`). 진단이 실측한 값은 연속
         // 행 8px이고, 거기서 한 사람이 연달아 쓴 다섯 발화가 한 문단으로 뭉쳤다.
         // 클래스가 그 숫자와 어긋나면 `spacing.test.ts`가 붉다.
-        startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS
+        startsGroup ? ROW_GROUP_START_PAD_CLASS : ROW_CONTINUATION_PAD_CLASS,
+        entrance.className
       )}
     >
       {!timelineLive.hasRegion && (

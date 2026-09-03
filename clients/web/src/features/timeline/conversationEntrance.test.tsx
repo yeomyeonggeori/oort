@@ -70,9 +70,9 @@ function dispatchEnd(root: HTMLElement, animationName: string): void {
   const el = root.querySelector("[data-testid='entrance-probe']");
   if (!(el instanceof HTMLElement)) throw new Error("missing probe");
   act(() => {
-    el.dispatchEvent(
-      new AnimationEvent("animationend", { animationName, bubbles: true })
-    );
+    const event = new Event("animationend", { bubbles: true });
+    Object.defineProperty(event, "animationName", { value: animationName });
+    el.dispatchEvent(event);
   });
 }
 

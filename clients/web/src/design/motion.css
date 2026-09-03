@@ -74,6 +74,19 @@
   }
 }
 
+@keyframes motion-enter-conversation {
+  from {
+    filter: blur(var(--motion-blur-arrival));
+    opacity: 0;
+    transform: translateY(var(--motion-distance-arrival));
+  }
+  to {
+    filter: blur(0);
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 /* Enter/exit vocabulary. No tw-animate-css: these are the classes motion.ts
  * assembles. Duration 0 under reduced-motion (D9) via the token override. */
 @utility motion-enter {
@@ -105,6 +118,12 @@
 @utility motion-modal-exit-zoom {
   animation: motion-zoom-out var(--motion-modal-close)
     var(--motion-ease-standard) both;
+}
+
+/* D3: one-shot live arrival. Duration 0 under reduced-motion via the token. */
+@utility enter-conversation {
+  animation: motion-enter-conversation var(--motion-arrival)
+    var(--motion-ease-arrival) both;
 }
 
 /* D9: duration 0 — the state still lands. Onboarding rAF fields are untouched. */

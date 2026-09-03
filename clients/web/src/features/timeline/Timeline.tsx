@@ -218,6 +218,8 @@ export function Timeline({
   onResendPending,
   onAddMember,
   onStartWriting,
+  isPlayEntrance,
+  onEntranceConsumed,
   reachedStart = false,
   canAddMember = false,
   channelName,
@@ -290,6 +292,12 @@ export function Timeline({
    * 두 표면이 다른 이유로 비어 있어도 다음에 하는 일은 같다 (#1536).
    */
   onStartWriting?: () => void;
+  /**
+   * ADR-0179 D3. Live-arrival ids that have not yet mounted. The hook owns
+   * the set; this surface only reads it at render.
+   */
+  isPlayEntrance?: (messageId: string) => boolean;
+  onEntranceConsumed?: (messageId: string) => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -685,6 +693,12 @@ export function Timeline({
               startsGroup={item.startsGroup}
               directory={directory}
               unfurls={unfurlsFor(unfurls ?? {}, item.message.id)}
+              playEntrance={isPlayEntrance?.(item.message.id) ?? false}
+              onEntranceConsumed={
+                onEntranceConsumed
+                  ? () => onEntranceConsumed(item.message.id)
+                  : undefined
+              }
               actions={
                 actions && {
                   ...actions,

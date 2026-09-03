@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## UX-R1d 메시지 도착 모션 `motion-enter-conversation` (#1999, 2026-09-03)
+
+- ADR-0179 D3: 실시간 도착(타 사용자 `message.new`) 행만 `enter-conversation` 1회. REST 백필·리플레이 게이트·초기 로드·가상화 재마운트·낙관 PendingRow 교체·자기 메시지·edited 는 0. `takeArrivalPlay` 단일점(momo-core). `animationName` 일치로 클래스 제거.
+- reduced-motion: 재생 0 (ingest 가드 + 사다리 duration 0). UnreadDivider/Pill 무접촉.
+- runtime-unverified 아님. 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다).
+- red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 삭제 시 motion.test 붉음.
+
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
 - 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).

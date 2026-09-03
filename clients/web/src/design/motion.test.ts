@@ -157,8 +157,8 @@ describe("ADR-0179 D3 도착 값", () => {
   it("키프레임 motion-enter-conversation 이 arrival 사다리로 blur·opacity·translateY 를 한 번에 쓴다", () => {
     expect(ENTER_CONVERSATION_ANIMATION_NAME).toBe("motion-enter-conversation");
     expect(ENTER_CONVERSATION_CLASS).toBe("enter-conversation");
-    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-enter-conversation/);
-    const start = MOTION_CSS.indexOf("@keyframes motion-enter-conversation");
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-enter-conversation\s*\{/);
+    const start = MOTION_CSS.search(/@keyframes\s+motion-enter-conversation\s*\{/);
     expect(start).toBeGreaterThanOrEqual(0);
     const block = MOTION_CSS.slice(start, start + 900);
     expect(block).toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
@@ -181,6 +181,93 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(snippet).toMatch(/var\(--motion-arrival\)/);
     expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
   });
+
+  it.skipIf(!chromiumAvailable)(
+    "enter-conversation 재생 횟수 1, animationName 일치, duration 500ms",
+    async () => {
+      const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+      let chromium: typeof import("playwright").chromium;
+      try {
+        ({ chromium } = await import("playwright"));
+      } catch (err) {
+        throw new Error(
+          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body><article id="row" class="${ENTER_CONVERSATION_CLASS}">새 메시지</article></body></html>`
+        );
+        const measured = await page.evaluate(async () => {
+          const el = document.getElementById("row");
+          if (!el) throw new Error("row missing");
+          const animations = el.getAnimations();
+          const playCount = animations.filter(
+            (animation) => animation.playState === "running" || animation.playState === "finished"
+          ).length;
+          const anim = animations[0];
+          const durationMs =
+            anim && anim.effect && typeof anim.effect.getComputedTiming === "function"
+              ? anim.effect.getComputedTiming().duration
+              : null;
+          const animationName = anim ? anim.animationName : null;
+          const ends = await new Promise<number>((resolve) => {
+            let count = 0;
+            const onEnd = (event: AnimationEvent) => {
+              if (event.animationName !== "motion-enter-conversation") return;
+              count += 1;
+              el.removeEventListener("animationend", onEnd);
+              resolve(count);
+            };
+            el.addEventListener("animationend", onEnd);
+            window.setTimeout(() => resolve(count), 2_000);
+          });
+          return { playCount, durationMs, animationName, ends };
+        });
+        expect(measured.playCount, `playCount=${measured.playCount}`).toBe(1);
+        expect(measured.animationName).toBe(ENTER_CONVERSATION_ANIMATION_NAME);
+        expect(measured.durationMs).toBe(500);
+        expect(measured.ends).toBe(1);
+      } finally {
+        await browser.close();
+      }
+    },
+    20_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "클래스가 없으면 재생 0",
+    async () => {
+      const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+      let chromium: typeof import("playwright").chromium;
+      try {
+        ({ chromium } = await import("playwright"));
+      } catch (err) {
+        throw new Error(
+          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body><article id="row">이미 있던 행</article></body></html>`
+        );
+        const playCount = await page.evaluate(() => {
+          const el = document.getElementById("row");
+          if (!el) throw new Error("row missing");
+          return el.getAnimations().length;
+        });
+        expect(playCount).toBe(0);
+      } finally {
+        await browser.close();
+      }
+    },
+    20_000
+  );
 });
 
 describe("ADR-0179 D4 모달 상수", () => {

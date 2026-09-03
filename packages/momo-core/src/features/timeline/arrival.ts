@@ -24,9 +24,13 @@ export interface ArrivalDecisionInput {
 }
 
 export function shouldPlayMessageArrival(input: ArrivalDecisionInput): boolean {
-  void input;
-  void uuidEq;
-  return false;
+  if (input.reducedMotion) return false;
+  if (input.alreadyHeld) return false;
+  if (input.settlesPending) return false;
+  if (input.provenance !== "live") return false;
+  if (input.eventType !== "message.new") return false;
+  if (uuidEq(input.authorMemberId, input.selfMemberId)) return false;
+  return true;
 }
 
 /**
@@ -38,7 +42,9 @@ export function takeArrivalPlay(
   consumedIds: Set<string>,
   input: ArrivalDecisionInput
 ): 0 | 1 {
-  void consumedIds;
-  void input;
-  return 0;
+  const key = input.messageId.toLowerCase();
+  if (consumedIds.has(key)) return 0;
+  if (!shouldPlayMessageArrival(input)) return 0;
+  consumedIds.add(key);
+  return 1;
 }

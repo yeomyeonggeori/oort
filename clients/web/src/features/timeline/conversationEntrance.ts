@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type AnimationEvent } from "react";
+import { useLayoutEffect, useRef, useState, type AnimationEvent } from "react";
 import {
   ENTER_CONVERSATION_ANIMATION_NAME,
   ENTER_CONVERSATION_CLASS,
@@ -17,19 +17,23 @@ export function useConversationEntrance(
   className: string | undefined;
   onAnimationEnd: (event: AnimationEvent<HTMLElement>) => void;
 } {
-  const [playing, setPlaying] = useState(false);
-  void playEntrance;
-  void onConsumed;
-  void ENTER_CONVERSATION_CLASS;
-  void ENTER_CONVERSATION_ANIMATION_NAME;
-  void useLayoutEffect;
-  void setPlaying;
+  const [playing, setPlaying] = useState(playEntrance);
+  const consumedRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!playEntrance || consumedRef.current) return;
+    consumedRef.current = true;
+    onConsumed?.();
+  }, [playEntrance, onConsumed]);
+
+  const onAnimationEnd = (event: AnimationEvent<HTMLElement>) => {
+    if (event.animationName !== ENTER_CONVERSATION_ANIMATION_NAME) return;
+    setPlaying(false);
+  };
 
   return {
     playing,
-    className: undefined,
-    onAnimationEnd: (_event: AnimationEvent<HTMLElement>) => {
-      /* stub: RED */
-    },
+    className: playing ? ENTER_CONVERSATION_CLASS : undefined,
+    onAnimationEnd,
   };
 }

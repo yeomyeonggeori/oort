@@ -1191,6 +1191,8 @@ export function ChatShell() {
                   openAddMember({ id: channelId, name: channel.name ?? label });
               }}
               onStartWriting={focusComposer}
+              isPlayEntrance={timeline.isPlayEntrance}
+              onEntranceConsumed={timeline.consumeEntrance}
             />
           ) : channelsQuery.isLoading ? (
             <SkeletonRows rows={6} className="p-4" />
