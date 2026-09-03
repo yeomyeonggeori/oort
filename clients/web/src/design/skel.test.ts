@@ -492,7 +492,7 @@ describe("UX-R1c product binding — real Skeleton markup", () => {
     expect(STATES_SRC).toMatch(/style\.height/);
   });
 
-  it("Drafts and Activity wrap empty states (not a literal prop spelling)", () => {
+  it("Drafts and Activity empty states sit inside <Skeleton> (source guard)", () => {
     expect(DRAFTS_SRC).toMatch(/<Skeleton[\s>]/);
     expect(DRAFTS_SRC).toMatch(
       /<Skeleton[\s\S]*?data-testid="drafts-empty"[\s\S]*?<\/Skeleton>/
