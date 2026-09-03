@@ -891,6 +891,7 @@
  * reduced-motion: D9 zeroes --motion-standard, so the swap is instant. */
 @utility skel {
   display: grid;
+  position: relative;
 }
 
 @utility skel-layer {
