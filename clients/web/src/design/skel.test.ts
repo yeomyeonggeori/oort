@@ -31,6 +31,7 @@ import { EmptyInvite, Skeleton } from "../features/common/States";
  *     mounted InboxRoute.skel host.contains(list) is false
  *   - leave bars in flow after ready → host height > content height
  *   - restore skel-pulse → animation-name is not none
+ *   - collapse host height only on is-settled (R3) → per-frame |Δh| is 48/76
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -470,6 +471,16 @@ describe("UX-R1c @utility skel CSS", () => {
     expect(css).toMatch(/\.skel\.is-settled[\s\S]{0,200}position:\s*absolute/);
     expect(css).not.toMatch(/skel-pulse/);
   });
+
+  it("is-sizing interpolates host height on the standard ladder", async () => {
+    const css = await buildCss(SKEL_CANDIDATES);
+    expect(css).toMatch(
+      /\.skel\.is-sizing[\s\S]{0,220}height[\s\S]{0,80}var\(--motion-standard\)/
+    );
+    expect(css).toMatch(
+      /\.skel\.is-sizing[\s\S]{0,220}var\(--motion-ease-standard\)/
+    );
+  });
 });
 
 describe("UX-R1c product binding — real Skeleton markup", () => {
@@ -477,6 +488,8 @@ describe("UX-R1c product binding — real Skeleton markup", () => {
     expect(STATES_SRC).toMatch(/className=\{cn\(\s*"skel-layer skel-bars/);
     expect(STATES_SRC).toMatch(/className="skel-layer skel-content"/);
     expect(STATES_SRC).toMatch(/className="h-6 rounded-sm bg-surface-hover"/);
+    expect(STATES_SRC).toMatch(/classList\.add\("is-sizing"\)/);
+    expect(STATES_SRC).toMatch(/style\.height/);
   });
 
   it("Drafts and Activity wrap empty states (not a literal prop spelling)", () => {
@@ -695,9 +708,13 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
     "React ready false→true: content opacity and filter transitionrun are 1; is-settled after transitionend",
     async () => {
       await withReactSkelPage({}, async (page) => {
-        expect(await page.locator(".skel-content").count()).toBe(1);
-        await armTransitionProbe(page, '[data-skel="content"]');
-        await page.locator('[data-skel="bars"]').evaluate((node) => {
+        const sidebar = page.locator('[data-skel-shape="sidebar"]');
+        expect(await sidebar.locator(".skel-content").count()).toBe(1);
+        await armTransitionProbe(
+          page,
+          '[data-skel-shape="sidebar"] [data-skel="content"]'
+        );
+        await sidebar.locator('[data-skel="bars"]').evaluate((node) => {
           const target = node as HTMLElement & { __end: number };
           target.__end = 0;
           node.addEventListener("transitionend", (event) => {
@@ -708,10 +725,12 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         });
         await page.getByTestId("skel-arrive").click();
         await page.waitForFunction(() => {
-          const host = document.querySelector('[data-testid="skeleton"]');
+          const host = document.querySelector(
+            '[data-skel-shape="sidebar"] [data-testid="skeleton"]'
+          );
           return host?.classList.contains("is-settled") === true;
         });
-        const barsEnd = await page.locator('[data-skel="bars"]').evaluate(
+        const barsEnd = await sidebar.locator('[data-skel="bars"]').evaluate(
           (node) => (node as HTMLElement & { __end: number }).__end
         );
         expect(barsEnd, "is-settled must follow bars opacity transitionend").toBe(
@@ -720,7 +739,10 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         // Past a 300ms post-arrival re-flip (M3d). Static setAttribute cases
         // never run React, so they cannot see that mutation.
         await page.waitForTimeout(400);
-        const events = await readProbe(page, '[data-skel="content"]');
+        const events = await readProbe(
+          page,
+          '[data-skel-shape="sidebar"] [data-skel="content"]'
+        );
         const opacityRuns = events.filter(
           (event) => event.type === "transitionrun" && event.propertyName === "opacity"
         ).length;
@@ -738,7 +760,10 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
     "is-settled arrives via the 400ms fallback when transitionend never fires",
     async () => {
       await withReactSkelPage({}, async (page) => {
-        await page.locator('[data-skel="bars"]').evaluate((node) => {
+        const host = page.locator(
+          '[data-skel-shape="sidebar"] [data-testid="skeleton"]'
+        );
+        await host.evaluate((node) => {
           node.addEventListener(
             "transitionend",
             (event) => event.stopImmediatePropagation(),
@@ -747,13 +772,15 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         });
         await page.getByTestId("skel-arrive").click();
         await page.waitForTimeout(200);
-        const early = await page
-          .locator('[data-testid="skeleton"]')
-          .evaluate((node) => node.classList.contains("is-settled"));
+        const early = await host.evaluate((node) =>
+          node.classList.contains("is-settled")
+        );
         expect(early, "must not settle before the 400ms fallback").toBe(false);
         await page.waitForFunction(() => {
-          const host = document.querySelector('[data-testid="skeleton"]');
-          return host?.classList.contains("is-settled") === true;
+          const node = document.querySelector(
+            '[data-skel-shape="sidebar"] [data-testid="skeleton"]'
+          );
+          return node?.classList.contains("is-settled") === true;
         });
       });
     },

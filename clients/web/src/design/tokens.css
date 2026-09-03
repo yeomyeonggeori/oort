@@ -885,9 +885,10 @@
 
 /* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell while
  * loading. Content arrives with blur(var(--motion-blur-arrival))→0 and
- * opacity, standard ladder. Bars are static (no pulse). After the fade,
- * is-settled takes them out of flow so the host is the content height.
- * is-resetting = in-place ready true→false (전이 0), not a remount.
+ * opacity, standard ladder. Bars are static (no pulse). Host height
+ * interpolates bars → content across the same window (is-sizing). After
+ * that, is-settled takes the bars out of a layer already at content
+ * height. is-resetting = in-place ready true→false (전이 0), not a remount.
  * reduced-motion: D9 zeroes --motion-standard, so the swap is instant. */
 @utility skel {
   display: grid;
@@ -900,6 +901,7 @@
 }
 
 .skel-content {
+  align-self: start;
   opacity: 0;
   filter: blur(var(--motion-blur-arrival));
   pointer-events: none;
@@ -923,7 +925,13 @@
   pointer-events: none;
 }
 
-/* Out of the grid's size contribution once the fade has finished. */
+/* Host height from bars to content, same ladder as the fade. */
+.skel.is-sizing {
+  overflow: hidden;
+  transition: height var(--motion-standard) var(--motion-ease-standard);
+}
+
+/* Out of the grid's size contribution once the host is already content-sized. */
 .skel.is-settled .skel-bars {
   position: absolute;
   inset-inline: 0;

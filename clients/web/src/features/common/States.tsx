@@ -14,11 +14,25 @@ import { Button } from "@/design/ui/button";
 /**
  * Height-preserving skeleton → content crossfade (ADR-0179 D3 / UX-R1c).
  * Bars and children share one grid cell while loading. No shimmer, no pulse:
- * the bars are static; the crossfade is the whole motion. After the fade
- * ends, `is-settled` takes the bars out of flow so the host height is the
- * content's. `is-resetting` is an in-place `ready` true→false on a live
+ * the bars are static; the crossfade is the whole motion. Host height rides
+ * the same ladder as the fade (bars → content). After that window,
+ * `is-settled` takes the bars out of a layer that is already at the content
+ * height. `is-resetting` is an in-place `ready` true→false on a live
  * instance (전이 0). A remount is a new instance and does crossfade.
  */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+function clearHostSize(host: HTMLElement) {
+  host.style.height = "";
+  host.classList.remove("is-sizing");
+}
+
 export function Skeleton({
   ready,
   rows = 4,
@@ -33,38 +47,76 @@ export function Skeleton({
   const seenReady = useRef(ready);
   if (ready) seenReady.current = true;
   const resetting = seenReady.current && !ready;
+  const hostRef = useRef<HTMLDivElement>(null);
   const barsRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [settled, setSettled] = useState(ready);
 
   useEffect(() => {
+    const host = hostRef.current;
+    const bars = barsRef.current;
+    const content = contentRef.current;
     if (!ready) {
       setSettled(false);
+      if (host) clearHostSize(host);
       return;
     }
-    const bars = barsRef.current;
-    const reduced =
-      typeof window !== "undefined" &&
-      typeof window.matchMedia === "function" &&
-      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    if (!bars || reduced) {
+    if (settled) return;
+    const reduced = prefersReducedMotion();
+    if (!host || !bars || !content || reduced) {
       setSettled(true);
+      if (host) clearHostSize(host);
       return;
     }
-    const onEnd = (event: TransitionEvent) => {
-      if (event.target !== bars) return;
-      if (event.propertyName !== "opacity") return;
+
+    const from = host.getBoundingClientRect().height;
+    const to = content.getBoundingClientRect().height;
+    const needsSize = Math.abs(from - to) >= 1;
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      host.classList.add("is-settled");
+      clearHostSize(host);
       setSettled(true);
     };
-    bars.addEventListener("transitionend", onEnd);
-    const fallback = window.setTimeout(() => setSettled(true), 400);
+
+    if (!needsSize) {
+      const onEnd = (event: TransitionEvent) => {
+        if (event.target !== bars) return;
+        if (event.propertyName !== "opacity") return;
+        finish();
+      };
+      bars.addEventListener("transitionend", onEnd);
+      const fallback = window.setTimeout(finish, 400);
+      return () => {
+        bars.removeEventListener("transitionend", onEnd);
+        window.clearTimeout(fallback);
+      };
+    }
+
+    host.style.height = `${from}px`;
+    host.classList.add("is-sizing");
+    void host.offsetHeight;
+    host.style.height = `${to}px`;
+
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target !== host) return;
+      if (event.propertyName !== "height") return;
+      finish();
+    };
+    host.addEventListener("transitionend", onEnd);
+    const fallback = window.setTimeout(finish, 400);
     return () => {
-      bars.removeEventListener("transitionend", onEnd);
+      host.removeEventListener("transitionend", onEnd);
       window.clearTimeout(fallback);
     };
-  }, [ready]);
+  }, [ready, settled]);
 
   return (
     <div
+      ref={hostRef}
       className={cn(
         "skel",
         resetting && "is-resetting",
@@ -91,7 +143,11 @@ export function Skeleton({
           />
         ))}
       </div>
-      <div className="skel-layer skel-content" data-skel="content">
+      <div
+        ref={contentRef}
+        className="skel-layer skel-content"
+        data-skel="content"
+      >
         {children}
       </div>
     </div>
