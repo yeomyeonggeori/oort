@@ -231,7 +231,7 @@ describe("useTimeline arrival counts", () => {
     expect(out.isPlayEntrance?.(ID_REST)).toBe(false);
   });
 
-  it("백로그: 마운트되지 않은 라이브 도착은 상한만 남긴다", async () => {
+  it("백로그: 마운트되지 않은 라이브 도착은 커밋 뒤 상한만 남긴다", async () => {
     await mount();
     await act(async () => {
       rail.handlers?.onSubscribed({ recovered: false });
@@ -255,6 +255,8 @@ describe("useTimeline arrival counts", () => {
         granted += 1;
     }
     expect(MAX_PENDING_ARRIVAL_GRANTS).toBe(1);
+    // Unmounted leftover after a commit. A mounted same-tick burst of 3
+    // plays 3 — MessageRow.burst.test.tsx.
     expect(granted).toBe(MAX_PENDING_ARRIVAL_GRANTS);
     expect(
       out.isPlayEntrance?.("0199dddd-0000-7000-8000-000000000449")

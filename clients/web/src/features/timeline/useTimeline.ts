@@ -292,7 +292,10 @@ export function useTimeline(
         if (play === 1) playOnMountRef.current.add(key);
         heldIdsRef.current.add(key);
       }
-      capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+      // Same-tick Centrifugo bursts call applyBatch once per publication
+      // before React commits. Capping here evicts grants that are about to
+      // mount. Leftovers that survive a commit without a row consuming them
+      // are capped in the effect below (scrolled-up backlog → one lift).
       capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
       // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
       // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
@@ -486,6 +489,13 @@ export function useTimeline(
     const open = unsettledPending(state.messages, pendingRef.current);
     if (open.length !== pendingRef.current.length) updatePending(() => open);
   }, [state.messages, updatePending]);
+
+  // After paint: child rows have already consumed in useLayoutEffect.
+  // What remains never mounted (backlog while scrolled up) and may not
+  // cascade when the reader jumps to the bottom.
+  useEffect(() => {
+    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+  }, [state.messages]);
 
   useEffect(() => {
     if (!channelId || !realtime) return;
