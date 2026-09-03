@@ -30,9 +30,10 @@ export const PopoverContent = React.forwardRef<
   React.ElementRef<typeof PopoverPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof PopoverPrimitive.Content> & {
     opener?: DialogFocusTarget | null;
+    container?: HTMLElement | null;
   }
->(({ className, sideOffset = 4, opener, onCloseAutoFocus, ...props }, ref) => (
-  <PopoverPrimitive.Portal>
+>(({ className, sideOffset = 4, opener, container, onCloseAutoFocus, ...props }, ref) => (
+  <PopoverPrimitive.Portal container={container ?? undefined}>
     <PopoverPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
