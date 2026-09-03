@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
@@ -14,14 +14,17 @@ import {
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
 import { CopyButton } from "./SettingsFields";
+import { readDeviceLinkLive, writeDeviceLinkLive } from "./deviceLinkLive";
 
-// Reading this as: settings / onboarding for internal team users on web+Tauri,
+// Reading this as: settings / first-run for internal team users on web+Tauri,
 // density 6/10, motion 2/10.
 
-type Phase = "idle" | "pending" | "expired" | "consumed";
+type Phase = "idle" | "pending" | "awaitingConfirm" | "connected" | "expired";
 
 const COUNTDOWN_TICK_MS = 1_000;
 const ANNOUNCE_SECONDS = 30;
+const POLL_BACKOFF_CAP_MS = 16_000;
+const OFFLINE_REASON_ID = "device-link-offline-reason";
 
 function failureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
@@ -30,16 +33,16 @@ function failureCopy(error: unknown): string {
       return "아직 폰이 이 코드를 쓰지 않았거나, 이 연결은 확인이 필요 없습니다. 폰에서 먼저 찍은 뒤 다시 시도하세요.";
     }
     if (error.status === 400) {
-      return "확인 요청을 읽지 못했습니다. 다시 시도하세요.";
+      return "서버가 확인 요청을 거절했습니다. 다시 시도하세요.";
     }
     if (error.status === 403) {
       return "사람 계정만 폰을 연결할 수 있습니다.";
     }
     if (error.status === 429) {
-      return "잠시 뒤에 다시 시도하세요.";
+      return "요청이 너무 잦습니다. 잠시 뒤에 다시 시도하세요.";
     }
   }
-  return "연결을 만들지 못했습니다. 다시 시도하세요.";
+  return "서버가 연결을 만들지 못했습니다. 다시 시도하세요.";
 }
 
 function announceBand(remaining: number): number {
@@ -47,8 +50,23 @@ function announceBand(remaining: number): number {
   return Math.ceil(remaining / ANNOUNCE_SECONDS) * ANNOUNCE_SECONDS;
 }
 
-// icon-system-exception(ADR-0172): this SVG is a scannable QR matrix, not a
-// function glyph. Lucide `QrCode` is a 16px icon and cannot encode a deep link.
+function toIssued(live: {
+  id: string;
+  expiresAt: number;
+  deepLink: string;
+  sas?: string;
+}): DeviceLinkIssue {
+  return {
+    id: live.id,
+    token: "",
+    expiresAt: live.expiresAt,
+    deepLink: live.deepLink,
+    ...(live.sas ? { sas: live.sas } : {}),
+  };
+}
+
+// icon-system-exception(ADR-0172): this SVG is a data matrix of the deep link,
+// not a function glyph. Lucide `QrCode` is a 16px icon and cannot encode a payload.
 function DeviceLinkQr({ payload }: { payload: string }) {
   const encoded = useMemo(() => encodeQr(payload), [payload]);
   const path = useMemo(() => qrModulePath(encoded.modules), [encoded]);
@@ -57,13 +75,18 @@ function DeviceLinkQr({ payload }: { payload: string }) {
       role="img"
       aria-label="폰 연결 QR"
       viewBox={`0 0 ${path.viewBox} ${path.viewBox}`}
-      className="qr-well size-pane-sm shrink-0"
+      className="qr-well shrink-0"
+      data-qr-modules={String(path.viewBox)}
       data-testid="device-link-qr"
       shapeRendering="crispEdges"
     >
       <path d={path.d} fill="currentColor" />
     </svg>
   );
+}
+
+function filledCreate(phase: Phase): boolean {
+  return phase === "idle" || phase === "expired";
 }
 
 export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
@@ -75,33 +98,94 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
   const [confirmBusy, setConfirmBusy] = useState(false);
   const [confirmed, setConfirmed] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
+  const liveIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const live = readDeviceLinkLive();
+    if (!live) return;
+    let cancelled = false;
+    liveIdRef.current = live.id;
+    void getDeviceLink(live.id)
+      .then((status) => {
+        if (cancelled || liveIdRef.current !== live.id) return;
+        setIssued(toIssued(live));
+        if (status.status === "consumed") {
+          setDevice(status.device);
+          if (live.sas && !live.confirmed) {
+            setConfirmed(false);
+            setPhase("awaitingConfirm");
+          } else {
+            setConfirmed(true);
+            setPhase("connected");
+          }
+        } else if (status.status === "expired" || Date.now() >= live.expiresAt) {
+          setPhase("expired");
+        } else {
+          setConfirmed(false);
+          setPhase("pending");
+          setRemaining(
+            Math.max(0, Math.ceil((live.expiresAt - Date.now()) / 1_000))
+          );
+        }
+      })
+      .catch(() => {
+        if (cancelled) return;
+        if (Date.now() >= live.expiresAt) setPhase("expired");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (phase !== "pending" || !issued) return;
+    const id = issued.id;
+    liveIdRef.current = id;
     let cancelled = false;
+    let delay = DEVICE_LINK_POLL_INTERVAL_MS;
+    let failures = 0;
+    let timer = 0;
     const poll = async () => {
+      if (cancelled || liveIdRef.current !== id) return;
       try {
-        const status = await getDeviceLink(issued.id);
-        if (cancelled) return;
+        const status = await getDeviceLink(id);
+        if (cancelled || liveIdRef.current !== id) return;
+        failures = 0;
+        delay = DEVICE_LINK_POLL_INTERVAL_MS;
         if (status.status === "consumed") {
           setDevice(status.device);
-          setPhase("consumed");
-        } else if (status.status === "expired") {
+          if (issued.sas && !confirmed) setPhase("awaitingConfirm");
+          else setPhase("connected");
+          return;
+        }
+        if (status.status === "expired") {
           setPhase("expired");
+          return;
         }
       } catch (error) {
-        if (!cancelled) setBanner(failureCopy(error));
+        if (cancelled || liveIdRef.current !== id) return;
+        failures += 1;
+        const copy = failureCopy(error);
+        setBanner((prev) => (prev === copy ? prev : copy));
+        if (Date.now() >= issued.expiresAt) {
+          setPhase("expired");
+          return;
+        }
+        delay = Math.min(
+          DEVICE_LINK_POLL_INTERVAL_MS * 2 ** failures,
+          POLL_BACKOFF_CAP_MS
+        );
       }
+      timer = window.setTimeout(() => {
+        void poll();
+      }, delay);
     };
     void poll();
-    const timer = window.setInterval(() => {
-      void poll();
-    }, DEVICE_LINK_POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
-      window.clearInterval(timer);
+      window.clearTimeout(timer);
     };
-  }, [phase, issued]);
+  }, [phase, issued, confirmed]);
 
   useEffect(() => {
     if (phase !== "pending" || !issued) return;
@@ -123,6 +207,13 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
     setBusy(true);
     try {
       const next = await issueDeviceLink();
+      liveIdRef.current = next.id;
+      writeDeviceLinkLive({
+        id: next.id,
+        expiresAt: next.expiresAt,
+        deepLink: next.deepLink,
+        ...(next.sas ? { sas: next.sas } : {}),
+      });
       setIssued(next);
       setDevice(undefined);
       setConfirmed(false);
@@ -144,6 +235,11 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
     try {
       await confirmDeviceLinkSas(issued.id);
       setConfirmed(true);
+      setPhase("connected");
+      const live = readDeviceLinkLive();
+      if (live && live.id === issued.id) {
+        writeDeviceLinkLive({ ...live, confirmed: true });
+      }
     } catch (error) {
       setBanner(failureCopy(error));
     } finally {
@@ -155,16 +251,26 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
   const showSas =
     Boolean(issued?.sas) &&
     !confirmed &&
-    (phase === "pending" || phase === "consumed");
+    (phase === "pending" || phase === "awaitingConfirm");
   const createLabel = busy
     ? "생성 중"
     : phase === "expired"
       ? "다시 만들기"
       : "QR 만들기";
+  const body =
+    phase === "connected"
+      ? device
+        ? `연결됨: ${device.name}`
+        : "연결됨"
+      : phase === "awaitingConfirm"
+        ? `${device ? `${device.name}가` : "폰이"} 코드를 썼습니다. 폰에 같은 숫자가 보이면 확인하세요.`
+        : phase === "expired"
+          ? "이 코드는 만료됐습니다. 다시 만들면 새 QR이 나옵니다."
+          : "이 계정을 폰에서도 쓰려면 QR을 만드세요.";
 
   return (
     <div
-      className="flex min-w-0 flex-col gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
+      className="flex min-w-0 flex-col items-start gap-3 rounded-md border border-line bg-surface-raised p-4 shadow-sm"
       data-testid="device-link-card"
     >
       <div className="flex items-center gap-2">
@@ -174,18 +280,23 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
       <p
         className="break-keep text-body text-ink-muted"
         data-testid={
-          phase === "consumed" && device ? "device-link-connected" : undefined
+          phase === "connected"
+            ? "device-link-connected"
+            : phase === "expired"
+              ? "device-link-expired"
+              : phase === "awaitingConfirm"
+                ? "device-link-awaiting-confirm"
+                : undefined
         }
       >
-        {phase === "consumed" && device
-          ? `연결됨: ${device.name}`
-          : "이 계정을 폰에서도 쓰려면 QR을 만드세요."}
+        {body}
       </p>
 
       {offline && (
         <InlineBanner
           tone="neutral"
           message="연결이 끊겼습니다. 다시 연결된 뒤에 QR을 만들 수 있습니다."
+          messageId={OFFLINE_REASON_ID}
           testId="device-link-offline"
           separator={false}
         />
@@ -200,46 +311,41 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
       )}
 
       {showQr && issued && (
-        <div className="flex min-w-0 flex-col gap-3">
+        <div className="flex min-w-0 flex-col items-start gap-3">
           <DeviceLinkQr payload={issued.deepLink} />
-          {phase === "pending" && (
-            <>
-              <p
-                className="font-mono text-body text-ink"
-                data-numeric
-                data-testid="device-link-countdown"
-              >
-                {remaining}초
-              </p>
-              <p
-                className="sr-only"
-                aria-live="polite"
-                data-testid="device-link-countdown-live"
-              >
-                {liveBand === null
-                  ? ""
-                  : liveBand === 0
-                    ? "만료됨"
-                    : `${liveBand}초`}
-              </p>
-            </>
-          )}
-          <CopyButton
-            value={issued.deepLink}
-            label="복사"
-            subject="연결 주소"
-            testId="device-link-copy"
-          />
+          <p
+            className="font-mono text-body text-ink"
+            data-numeric
+            data-testid="device-link-countdown"
+            aria-hidden="true"
+          >
+            남은 시간 {remaining}초
+          </p>
+          <p
+            className="sr-only"
+            aria-live="polite"
+            data-testid="device-link-countdown-live"
+          >
+            {liveBand ? `남은 시간 ${liveBand}초` : ""}
+          </p>
+          <div className="self-start">
+            <CopyButton
+              value={issued.deepLink}
+              label="복사"
+              subject="연결 주소"
+              testId="device-link-copy"
+            />
+          </div>
         </div>
       )}
 
       {showSas && issued?.sas && (
-        <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 flex-col items-start gap-2">
           <div
+            role="group"
             className="flex items-center gap-2"
             data-testid="device-link-sas"
             aria-label={`확인 숫자 ${issued.sas}`}
-            aria-live="polite"
           >
             {issued.sas.split("").map((digit, index) => (
               <span
@@ -253,7 +359,8 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
           </div>
           <Button
             type="button"
-            size="sm"
+            size="default"
+            className="self-start"
             onClick={() => void confirm()}
             aria-busy={confirmBusy || undefined}
             data-testid="device-link-confirm-sas"
@@ -266,10 +373,12 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
       <Button
         type="button"
         size="default"
+        variant={filledCreate(phase) ? "default" : "outline"}
+        className={offline ? "self-start opacity-50" : "self-start"}
         onClick={() => void create()}
         aria-busy={busy || undefined}
         aria-disabled={offline || undefined}
-        className={offline ? "opacity-50" : undefined}
+        aria-describedby={offline ? OFFLINE_REASON_ID : undefined}
         data-testid="device-link-create"
       >
         {createLabel}

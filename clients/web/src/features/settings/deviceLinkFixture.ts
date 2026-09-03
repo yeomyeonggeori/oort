@@ -38,8 +38,10 @@ export function deviceLinkFixtureDeepLink(
 }
 
 export function deviceLinkFixtureIssue(input?: {
+  id?: string;
   sas?: string | null;
   expiresAt?: number;
+  deepLink?: string;
 }): {
   id: string;
   token: string;
@@ -48,10 +50,10 @@ export function deviceLinkFixtureIssue(input?: {
   deepLink: string;
 } {
   const issued = {
-    id: DEVICE_LINK_FIXTURE_ID,
+    id: input?.id ?? DEVICE_LINK_FIXTURE_ID,
     token: deviceLinkFixtureToken(),
     expiresAt: input?.expiresAt ?? Date.now() + 120_000,
-    deepLink: deviceLinkFixtureDeepLink(),
+    deepLink: input?.deepLink ?? deviceLinkFixtureDeepLink(),
   };
   if (input && "sas" in input) {
     return input.sas ? { ...issued, sas: input.sas } : issued;
