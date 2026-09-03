@@ -33,7 +33,7 @@ const BAR_CLASS = "block rounded-sm bg-surface-hover";
 /**
  * The roster, before it arrives, in the shape it will arrive in.
  *
- * The generic Skeleton was full-bleed 24px bars, so a 1600px window
+ * The generic SkeletonRows was full-bleed 24px bars, so a 1600px window
  * predicted a 1328px-wide 24px row and then delivered a 640px-capped 41px one:
  * the list moved on BOTH axes at the moment of arrival, which is the jump a
  * skeleton exists to prevent (design-taste-web §5, loading is height-preserving

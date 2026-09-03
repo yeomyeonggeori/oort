@@ -2,9 +2,9 @@
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
-- `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. `is-resetting`·reduced-motion은 전이 0. 펄스는 brightness, 도착 시 `animation-play-state: paused`.
-- `SkeletonRows` 호출부 전량 `Skeleton`으로 이관. 높이 보존(레이아웃 시프트 0)은 Playwright가 래퍼 높이를 한 층과 같다고 잰다.
-- runtime-unverified 아님. 캡처: `skeleton-{light,dark}` + `skeleton-settled-{light,dark}`, `waitForAnimations`.
+- `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 막대는 정지(펄스 없음). 페이드가 끝나면 `is-settled`가 막대를 레이아웃에서 빼 호스트 높이 = 콘텐츠 높이. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다.
+- 호출부 55곳 식별자 이관. 같은 슬롯에서 `ready`가 뒤집히는 면은 9곳(Sidebar×2, ChatShell, Inbox, Drafts, Activity, Search, ThreadPanel, Reminders). 나머지 46곳은 `<Skeleton ready={false} />` self-closing — 예전 팝. 타임라인은 Virtuoso `height:100%` 스크롤러와 고정 높이 막대 블록이 충돌하므로 제외(주석 `Timeline.tsx`).
+- runtime-unverified 아님. 캡처: Inbox+Sidebar, 모션 켜고 `skeleton-{light,dark}` + `skeleton-settled-{light,dark}`.
 - 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
