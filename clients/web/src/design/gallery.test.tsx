@@ -6,8 +6,8 @@
  *   - `src/design/ui/` 에 PascalCase export 를 하나 더하면 렌더 기하 단정이 붉다
  *   - 그 export 를 `.sr-only` 에 숨겨도 붉다 (속성 존재만으로는 통과하지 않는다)
  *   - tokens.css 에서 `@media (hover: hover)` 가드를 빼면 붉다
- *   - production CSS 에 `data-preview` 가 있으면 붉다
- *   - `data-gallery-preview=hover` 선언이 `:hover` 선언과 다르면 붉다
+ *   - production CSS 에 gallery-preview.css 가 컴파일한 :is(:hover, [preview]) 규칙이 있으면 붉다
+ *   - preview 속성=값 선언이 `:hover` 선언과 다르면 붉다
  *   - production `vite build` 산출물에 "design-gallery" 가 있으면 붉다
  */
 import { execFileSync } from "node:child_process";
@@ -32,6 +32,8 @@ const GALLERY_SRC = readFileSync(join(HERE, "Gallery.tsx"), "utf8");
 const DIALOG_SRC = readFileSync(join(HERE, "ui", "dialog.tsx"), "utf8");
 const TOKENS_CSS = readFileSync(join(HERE, "tokens.css"), "utf8");
 const PREVIEW_PATH = join(HERE, "gallery-preview.css");
+const PREVIEW_SRC = readFileSync(PREVIEW_PATH, "utf8");
+const AUTH_DIR = join(HERE, "..", "features", "auth");
 const CAPTURE_SRC = readFileSync(
   join(HERE, "..", "..", "scripts", "capture-screens.mjs"),
   "utf8"
@@ -208,6 +210,35 @@ function walkFiles(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** Attribute gallery-preview.css actually stamps. Derived, not copied. */
+function previewAttributeName(src: string): string {
+  const match = src.match(/\[(data-[a-z0-9-]*preview[a-z0-9-]*)[=[\s\]]/i);
+  if (!match) {
+    throw new Error("gallery-preview.css 에서 preview 속성 이름을 못 찾았다");
+  }
+  return match[1];
+}
+
+/**
+ * Forced-preview rules share one declaration list via :is(:hover, [attr]).
+ * Production tokens.css uses `.hover\\:...:hover`, never this form.
+ */
+function forcedPreviewRulePattern(previewSrc: string): RegExp {
+  const attr = previewAttributeName(previewSrc);
+  const isBlock = previewSrc.match(/:is\(([^)]+)\)/);
+  if (!isBlock || !isBlock[1].includes(attr)) {
+    throw new Error(
+      "gallery-preview.css 의 :is() 규칙이 preview 속성을 담지 않는다"
+    );
+  }
+  const escaped = attr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`:is\\(\\s*:hover\\s*,\\s*\\[${escaped}=["']?hover["']?\\]`);
+}
+
+function cssHasForcedPreviewRule(css: string, previewSrc: string): boolean {
+  return forcedPreviewRulePattern(previewSrc).test(css);
+}
+
 function captureDesignGallerySource(): string {
   const start = CAPTURE_SRC.indexOf("async function captureDesignGallery");
   const end = CAPTURE_SRC.indexOf("\nasync function main(");
@@ -372,12 +403,22 @@ describe("src/design/ui export 전수", () => {
 
   it("ContextMenu 는 마운트 좌표로 contextmenu 를 쏘지 않는다", () => {
     expect(GALLERY_SRC).not.toMatch(/dispatchEvent\([\s\S]*contextmenu/);
-    expect(GALLERY_SRC).toMatch(/onOpenAutoFocus/);
+    expect(GALLERY_SRC).toMatch(
+      /<DropdownMenuContent[^>]*onOpenAutoFocus=\{preventAutoFocus\}/
+    );
+    expect(GALLERY_SRC).toMatch(
+      /<ContextMenuContent[^>]*onOpenAutoFocus=\{preventAutoFocus\}/
+    );
+    expect(GALLERY_SRC).not.toMatch(/active\.blur\(\)/);
   });
 
   it("Dialog 스크림은 대역이라고 이름 붙인다", () => {
     expect(GALLERY_SRC).toMatch(/data-gallery-replica=["']DialogOverlay["']/);
     expect(GALLERY_SRC).toMatch(/갤러리 대역/);
+    expect(GALLERY_SRC).toMatch(
+      /className=\{cn\("relative border border-line bg-surface p-4"/
+    );
+    expect(GALLERY_SRC).toMatch(/className="mt-2 w-max max-w-full p-8"/);
   });
 
   it("오버레이 무대는 data-gallery-stage 다", () => {
@@ -390,9 +431,16 @@ describe("src/design/ui export 전수", () => {
 });
 
 describe("production hover 변이", () => {
-  it("@media (hover: hover) 가 hover 변이를 지키고 data-preview 는 없다", async () => {
+  it("@media (hover: hover) 가 hover 변이를 지키고 강제 미리보기 규칙은 없다", async () => {
     const css = await buildCss(["hover:bg-surface-hover", "touch-only"]);
-    expect(css, "production tokens 에 data-preview 금지").not.toMatch(/data-preview/);
+    const attr = previewAttributeName(PREVIEW_SRC);
+    expect(
+      cssHasForcedPreviewRule(css, PREVIEW_SRC),
+      "production tokens 에 강제 미리보기 :is(:hover) 규칙 금지"
+    ).toBe(false);
+    expect(css, "production tokens 에 preview 속성 금지").not.toMatch(
+      new RegExp(attr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    );
     expect(TOKENS_CSS).not.toMatch(/@custom-variant\s+hover\b/);
     const media = /@media\s*\(\s*hover\s*:\s*hover\s*\)/;
     expect(css, "hover 미디어 가드").toMatch(media);
@@ -404,12 +452,14 @@ describe("production hover 변이", () => {
   });
 });
 
-describe("data-preview 선언 공유", () => {
+describe("강제 미리보기 선언 공유", () => {
   it("gallery-preview.css 의 :is() 가 실제 :hover/:active/:focus-visible 선언과 같다", async () => {
     expect(existsSync(PREVIEW_PATH), "gallery-preview.css").toBe(true);
-    const previewSrc = readFileSync(PREVIEW_PATH, "utf8");
+    const previewSrc = PREVIEW_SRC;
+    const attr = previewAttributeName(previewSrc);
     expect(previewSrc).toMatch(/\[data-gallery-root\]/);
     expect(GALLERY_SRC).toMatch(/gallery-preview\.css/);
+    expect(GALLERY_SRC).toMatch(new RegExp(attr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
     expect(TOKENS_CSS).not.toMatch(/gallery-preview\.css/);
 
     const liveCss = await buildCss([
@@ -418,24 +468,29 @@ describe("data-preview 선언 공유", () => {
       "focus-visible:focus-ring",
       "press",
     ]);
+    const escaped = attr.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const previewCss = await buildCss([], previewSrc);
+    expect(
+      cssHasForcedPreviewRule(previewCss, previewSrc),
+      "정본 산출물에 강제 미리보기 :is(:hover) 규칙"
+    ).toBe(true);
     const liveRules = parseRules(liveCss);
     const previewRules = parseRules(previewCss);
 
     const pairs: { live: RegExp; preview: RegExp; label: string }[] = [
       {
         live: /hover\\:bg-surface-hover:hover\b/,
-        preview: /\[data-gallery-preview=["']hover["']\]/,
+        preview: new RegExp(`\\[${escaped}=["']hover["']\\]`),
         label: "hover",
       },
       {
         live: /active\\:opacity-90:active\b/,
-        preview: /\[data-gallery-preview=["']active["']\]/,
+        preview: new RegExp(`\\[${escaped}=["']active["']\\]`),
         label: "active",
       },
       {
         live: /focus-visible\\:focus-ring:focus-visible\b/,
-        preview: /\[data-gallery-preview=["']focus["']\]/,
+        preview: new RegExp(`\\[${escaped}=["']focus["']\\]`),
         label: "focus-visible",
       },
     ];
@@ -462,7 +517,7 @@ describe("data-preview 선언 공유", () => {
     }
 
     const hoverPreview = previewRules.filter((rule) =>
-      /\[data-gallery-preview=["']hover["']\]/.test(rule.selector)
+      new RegExp(`\\[${escaped}=["']hover["']\\]`).test(rule.selector)
     );
     expect(
       hoverPreview.every((rule) => /@media\s*\(\s*hover\s*:\s*hover\s*\)/.test(rule.selector)),
@@ -491,14 +546,21 @@ describe("캡처 장면", () => {
     const geo = captureFnSource("assertOverlayProductGeometry");
     expect(geo).toMatch(/data-gallery-stage/);
     expect(geo).toMatch(/visibleFraction/);
+    expect(geo).toMatch(/unoccludedFraction/);
+    expect(geo).toMatch(/bgAlpha/);
     expect(geo).toMatch(/pastTop/);
     expect(geo).toMatch(/pastLeft/);
     expect(geo).not.toMatch(/const cell = el\.parentElement/);
     const stay = captureFnSource("assertOverlayVisibleInStageAtScroll");
-    expect(stay).toMatch(/scrollTop/);
+    expect(stay).toMatch(/wheelGalleryTo/);
     expect(stay).toMatch(/0\.9/);
+    const wheel = captureFnSource("wheelGalleryTo");
+    expect(wheel).toMatch(/mouse\.wheel/);
+    expect(wheel).not.toMatch(/el\.scrollTop = next/);
     const focus = captureFnSource("assertGalleryLoadFocus");
-    expect(focus).toMatch(/data-gallery-stage/);
+    expect(focus).toMatch(/keyboard\.press\(["']Tab["']\)/);
+    expect(focus).toMatch(/scrollTop/);
+    expect(focus).not.toMatch(/outside specimens/);
   });
 });
 
@@ -510,11 +572,26 @@ describe("프로덕션 번들", () => {
     expect(APP_SRC).not.toMatch(/design-gallery/);
   });
 
+  it("features/auth 는 react-router 를 import 하지 않는다", () => {
+    const hits: string[] = [];
+    for (const file of walkFiles(AUTH_DIR)) {
+      if (!/\.(ts|tsx)$/.test(file)) continue;
+      if (/\.test\./.test(file)) continue;
+      const src = readFileSync(file, "utf8");
+      if (/from\s+["']react-router(?:-dom)?["']/.test(src)) {
+        hits.push(file.slice(AUTH_DIR.length + 1));
+      }
+    }
+    expect(hits, `auth 가 react-router 를 import: ${hits.join(", ")}`).toEqual([]);
+  });
+
   it(
-    "production vite build dist 에 design-gallery 와 data-gallery-export 가 0건이다",
+    "production vite build dist 에 design-gallery 와 강제 미리보기 규칙이 0건이다",
     () => {
       const viteBin = resolve(WEB_ROOT, "node_modules/.bin/vite");
       expect(existsSync(viteBin), "clients/web/node_modules/.bin/vite").toBe(true);
+      const rule = forcedPreviewRulePattern(PREVIEW_SRC);
+      const attr = previewAttributeName(PREVIEW_SRC);
       const outDir = mkdtempSync(join(tmpdir(), "momo-gallery-prod-"));
       try {
         execFileSync(viteBin, ["build", "--outDir", outDir, "--emptyOutDir"], {
@@ -530,7 +607,10 @@ describe("프로덕션 번들", () => {
           const bytes = readFileSync(file);
           const rel = file.slice(outDir.length + 1);
           if (bytes.includes("design-gallery")) galleryHits.push(rel);
-          if (file.endsWith(".css") && bytes.includes("data-preview")) previewHits.push(rel);
+          if (file.endsWith(".css")) {
+            const css = bytes.toString("utf8");
+            if (rule.test(css)) previewHits.push(rel);
+          }
           if (bytes.includes("data-gallery-export")) markerHits.push(rel);
         }
         expect(
@@ -539,7 +619,7 @@ describe("프로덕션 번들", () => {
         ).toEqual([]);
         expect(
           previewHits,
-          `production CSS 에 data-preview: ${previewHits.join(", ")}`
+          `production CSS 에 강제 미리보기 규칙 (${attr} :is(:hover)): ${previewHits.join(", ")}`
         ).toEqual([]);
         expect(
           markerHits,
