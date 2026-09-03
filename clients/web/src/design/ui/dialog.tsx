@@ -1,18 +1,22 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/design/lib/cn";
+import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 
 // shadcn/ui new-york Dialog (vendored, Radix primitive). The palette already
 // ships one dialog through cmdk's Command.Dialog, which wraps this same Radix
 // root; a form dialog needs the root directly, so it is vendored here rather
 // than hand-rolled (design-taste-web §1: reach for the primitive).
 //
-// Two house deviations from stock shadcn, both deliberate:
+// House deviations from stock shadcn:
 //   - no built-in ✕ button. A dialog here closes with Esc and with its own
 //     trailing 취소 button, and a third affordance in the corner is the web-card
 //     tell, not an accessibility gain.
-//   - no enter/exit animation. Motion is feedback (§4), and a dialog appearing
-//     where the click was is already the feedback.
+//   - enter/exit is ADR-0179 D4 (open 200 / close 150) via motion.ts constants.
+//     Radix Presence waits for the CSS animation on data-state=closed only when
+//     Content stays mounted through close. `{open && <DialogContent/>}` unmounts
+//     the Presence subtree first and the exit never plays. forceMount is not
+//     added.
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -72,7 +76,7 @@ export const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 bg-scrim", className)}
+    className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
     {...props}
   />
 ));
@@ -103,8 +107,10 @@ export const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & {
     /** 닫힐 때 포커스를 돌려줄 엘리먼트. 생략하면 activeElement 추정으로 폴백한다. */
     opener?: DialogFocusTarget | null;
+    /** 포털 목적지. 생략하면 document.body. */
+    container?: HTMLElement | null;
   }
->(({ className, children, onCloseAutoFocus, opener, ...props }, ref) => {
+>(({ className, children, onCloseAutoFocus, opener, container, ...props }, ref) => {
   // `document.activeElement` 추정은 Chromium에서만 맞다. WebKit은 마우스 클릭으로
   // <button>에 포커스를 주지 않아 캡처값이 <body>가 되고, 닫힐 때 돌려줄 자리가
   // 사라진다 — 데스크톱 셸이 WKWebView이므로 배포 대상의 절반이 그쪽이다.
@@ -116,12 +122,13 @@ export const DialogContent = React.forwardRef<
   }
 
   return (
-    <DialogPortal>
+    <DialogPortal container={container ?? undefined}>
       <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
           "dialog-panel fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+          MODAL_CONTENT_MOTION,
           className
         )}
         onCloseAutoFocus={(event) => {

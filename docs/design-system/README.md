@@ -219,7 +219,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | `--motion-instant` | 120ms | 피드백 — 눌림·색·툴팁 |
 | `--motion-fast` | 180ms | 작은 표면 — 팝오버·드롭다운·칩 |
 | `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입·사이드바 접기·**드로어**(`--duration-sidebar`도 이 값) |
-| `--motion-arrival` | 500ms | 합성 도착 — 새 메시지·첫 진입 (키프레임 이관은 UX-R1) |
+| `--motion-arrival` | 500ms | 합성 도착 — 새 메시지·첫 진입. UX-R1d: `motion-enter-conversation` + `@utility enter-conversation` |
 | `--motion-modal-open` / `--motion-modal-close` | 200ms / 150ms | D4 예외 2호. `motion.ts`의 `MODAL_*_MOTION` 이 소비 |
 | `--motion-ease-standard` | `cubic-bezier(0.25, 1, 0.5, 1)` | 기존 `ease-out` 손기입의 흡수처 |
 | `--motion-ease-arrival` | `cubic-bezier(0.16, 1, 0.3, 1)` | 도착 전용 |

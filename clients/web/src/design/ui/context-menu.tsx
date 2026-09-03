@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as ContextMenuPrimitive from "@radix-ui/react-context-menu";
 import { cn } from "@/design/lib/cn";
+import { POPOVER_MOTION } from "@/design/motion";
 import { menuRowClass } from "@/design/ui/dropdown-menu";
 
 // shadcn/ui new-york ContextMenu (vendored, Radix primitive).
@@ -8,25 +9,34 @@ import { menuRowClass } from "@/design/ui/dropdown-menu";
 // A message row already has a visible DropdownMenu trigger and a touch action
 // sheet. This primitive adds the pointer-native summons without creating a
 // third visual language: its panel, rows, focus treatment and separators reuse
-// the exact DropdownMenu classes. Positioning, collision handling, arrow-key
-// roving and focus restoration remain Radix's responsibility.
+// the exact DropdownMenu classes, including POPOVER_MOTION (ADR-0179 D4).
+// Positioning, collision handling, arrow-key roving and focus restoration
+// remain Radix's responsibility.
 
 export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
 
 export const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content>
->(({ className, ...props }, ref) => (
-  <ContextMenuPrimitive.Portal>
+  React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content> & {
+    container?: HTMLElement | null;
+    /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
+    onOpenAutoFocus?: (event: Event) => void;
+  }
+>(({ className, container, onOpenAutoFocus, ...props }, ref) => (
+  <ContextMenuPrimitive.Portal container={container ?? undefined}>
     <ContextMenuPrimitive.Content
       ref={ref}
       collisionPadding={8}
       className={cn(
         "z-50 min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        POPOVER_MOTION,
         className
       )}
       {...props}
+      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+        typeof ContextMenuPrimitive.Content
+      >)}
     />
   </ContextMenuPrimitive.Portal>
 ));

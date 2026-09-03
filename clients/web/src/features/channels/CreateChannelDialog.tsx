@@ -130,11 +130,13 @@ function DialogField({
 }
 
 function CreateChannelPanel({
+  open,
   draft,
   setDraft,
   onOpenChange,
   opener,
 }: {
+  open: boolean;
   draft: ChannelDraft;
   setDraft: (next: ChannelDraft) => void;
   onOpenChange: (open: boolean) => void;
@@ -148,6 +150,15 @@ function CreateChannelPanel({
   const nameRef = useRef<HTMLInputElement>(null);
   const topicRef = useRef<HTMLInputElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+
+  // Keep the panel mounted through close so Radix Presence can play the exit
+  // (UX-R1a H-1). Reset attempt/rejection on open; the draft stays on the
+  // provider, which is why this is not `{open && <Panel/>}`.
+  useEffect(() => {
+    if (!open) return;
+    setAttempted(false);
+    clearFailure();
+  }, [open, clearFailure]);
 
   const nameIssue = channelNameIssue(name);
   const topicIssue = channelTopicIssue(topic);
@@ -415,23 +426,18 @@ export function CreateChannelDialog({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      {/* 열려 있는 동안에만 마운트한다. 이전 시도의 거절과 attempted 플래그가
-          다음 열기까지 따라오지 않고, 다이얼로그가 열리는 그 순간의
-          document.activeElement가 곧 "무엇이 이걸 열었나"이기 때문이다
-          (dialog.tsx가 그 값을 잡아 닫을 때 돌려준다). 조건부 마운트 액션은
-          그 순간 이미 언마운트될 수 있어 `opener`로 트리거를 명시한다 (B-1).
-          다만 초안은 위(provider)에 있어서, 280자를 쓰다가 바깥을 한 번
-          클릭해도 글은 그대로 있고 다시 열면 이어서 쓴다. 지운 적 없는 글은
-          지워지지 않는다는 쪽이, 닫을 때마다 확인 다이얼로그를 띄우는 쪽보다
-          조용하다(SKILL §6 파괴적 액션 확인). */}
-      {open && (
-        <CreateChannelPanel
-          draft={draft}
-          setDraft={setDraft}
-          onOpenChange={onOpenChange}
-          opener={opener}
-        />
-      )}
+      {/* Content stays mounted while `open` is false so Presence can run the
+          close (ShortcutHelpDialog). Attempt/rejection reset on open, above;
+          opener is the trigger captured at openCreate, not a remount. Draft
+          lives on the provider, so 280자를 쓰다가 바깥을 한 번 클릭해도 글은
+          그대로 있고 다시 열면 이어서 쓴다. */}
+      <CreateChannelPanel
+        open={open}
+        draft={draft}
+        setDraft={setDraft}
+        onOpenChange={onOpenChange}
+        opener={opener}
+      />
     </Dialog>
   );
 }

@@ -11,6 +11,7 @@ import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
 import { ThreadComposer } from "./ThreadComposer";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
+import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -29,6 +30,8 @@ export function ThreadPanel({
   pins,
   onOpenWorkSession,
   onClose,
+  isPlayEntrance,
+  onEntranceConsumed,
 }: {
   workspaceId: string;
   channelId: string;
@@ -47,6 +50,8 @@ export function ThreadPanel({
   pins?: PinMap;
   onOpenWorkSession?: OpenWorkSession;
   onClose: () => void;
+  isPlayEntrance?: (messageId: string) => boolean;
+  onEntranceConsumed?: (messageId: string) => void;
 }) {
   const query = useQuery({
     queryKey: ["thread", workspaceId, channelId, root.id],
@@ -105,7 +110,14 @@ export function ThreadPanel({
         // stopPropagation 없이 곧장 닫는 WorkPanel의 마지막 분기(`closePanel()`)와
         // 같다. 답글 컴포저의 멘션 목록은 공용 useEscapeLayer가 먼저 한 단계만
         // 물러나며 전파를 막는다. 목록이 닫힌 뒤의 Escape만 여기로 올라온다.
+        //
+        // 이모지 피커는 Radix 포탈이라 DOM 경로에는 이 aside가 없지만, React는
+        // 포탈을 트리 부모로 버블시킨다. 같은 Escape가 피커를 닫은 뒤 이
+        // 리스너에 닿으면 overlayOwnsEscape(event)가 그 키를 삼킨다. Presence
+        // 닫힘 동안의 *다음* Escape는 새 이벤트라 서랍이 받는다 (#1996 M-1).
         if (event.key !== "Escape") return;
+        if (event.defaultPrevented) return;
+        if (overlayOwnsEscape(undefined, event.nativeEvent)) return;
         closePanel();
       }}
       className="thread-pane flex h-full flex-col border-l border-line bg-surface"
@@ -149,6 +161,12 @@ export function ThreadPanel({
           actions={rowActions(root)}
           onOpenWorkSession={onOpenWorkSession}
           showRollup={false}
+          playEntrance={isPlayEntrance?.(root.id) ?? false}
+          onEntranceConsumed={
+            onEntranceConsumed
+              ? () => onEntranceConsumed(root.id)
+              : undefined
+          }
         />
         {/* 루트와 답글 사이에는 선을 긋지 않는다 (#1753). 둘은 32px 여백으로
             갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
@@ -183,6 +201,12 @@ export function ThreadPanel({
               // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
               // 말하지 않게 하기 위해서다.
               showRollup={false}
+              playEntrance={isPlayEntrance?.(reply.id) ?? false}
+              onEntranceConsumed={
+                onEntranceConsumed
+                  ? () => onEntranceConsumed(reply.id)
+                  : undefined
+              }
             />
           ))}
         </div>

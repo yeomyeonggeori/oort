@@ -216,11 +216,11 @@ export function ProfileCard({
       />
 
       <Dialog open={confirmLogout} onOpenChange={setConfirmLogout}>
-        {confirmLogout && (
-          <DialogContent
-            className="gap-4 p-4"
-            data-testid="profile-logout-confirm"
-          >
+        <DialogContent
+          opener={triggerRef.current}
+          className="gap-4 p-4"
+          data-testid="profile-logout-confirm"
+        >
             <div className="flex flex-col gap-1">
               <DialogTitle>로그아웃할까요?</DialogTitle>
               <DialogDescription>
@@ -248,8 +248,7 @@ export function ProfileCard({
                 로그아웃
               </Button>
             </div>
-          </DialogContent>
-        )}
+        </DialogContent>
       </Dialog>
     </>
   );

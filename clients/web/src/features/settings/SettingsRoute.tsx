@@ -118,7 +118,7 @@ export function SettingsRoute() {
       // 팔레트 레인이 이것을 잡는다). 집이 지금까지 쓰던 방법은 다이얼로그마다
       // `onEscapeKeyDown` 에서 `stopPropagation` 을 부르는 것이었는데
       // (PluginSection), 그것은 새 다이얼로그가 생길 때마다 기억해야 하는 규율이다.
-      if (escapeIsClaimed()) return;
+      if (escapeIsClaimed(event)) return;
       // 3R M5: provider 키 등 명시 저장형 폼을 입력하던 중의 반사적 Esc가
       // 라우트 이탈로 폼 상태를 날리지 않도록, 편집 중에는 무시한다. 층 규칙이
       // 이것을 대체하지는 않는다 — 편집 중인 폼은 층이 아니고, 층으로 만드는
