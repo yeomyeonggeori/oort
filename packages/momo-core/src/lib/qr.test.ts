@@ -3,6 +3,8 @@ import {
   encodeQr,
   qrByteCapacity,
   qrModulePath,
+  qrRsDivisor,
+  qrRsRemainder,
   selectQrVersion,
 } from "./qr";
 
@@ -83,5 +85,93 @@ describe("qr byte-mode ECC M", () => {
     const payload = Array.from(raw, (byte) => String.fromCharCode(byte)).join("");
     const matrix = encodeQr(payload);
     expect(matrix.size).toBeGreaterThanOrEqual(21);
+  });
+});
+
+function hex(bytes: readonly number[]): string {
+  return [...bytes].map((b) => b.toString(16).padStart(2, "0")).join(" ");
+}
+
+function byteModeDataCodewords(text: string, version: number): number[] {
+  const data = new TextEncoder().encode(text);
+  const countBits = version <= 9 ? 8 : 16;
+  const bits: number[] = [];
+  const push = (value: number, length: number) => {
+    for (let i = length - 1; i >= 0; i -= 1) bits.push((value >>> i) & 1);
+  };
+  push(0b0100, 4);
+  push(data.length, countBits);
+  for (const byte of data) push(byte, 8);
+  const total =
+    ([0, 26, 44, 70, 100, 134, 172, 196, 242, 292, 346, 404, 466, 532, 581, 655, 733][
+      version
+    ] ?? 0) -
+    ([0, 10, 16, 26, 18, 24, 16, 18, 22, 22, 26, 30, 22, 22, 24, 24, 28][version] ??
+      0) *
+      ([0, 1, 1, 1, 2, 2, 4, 4, 4, 5, 5, 5, 8, 9, 9, 10, 10][version] ?? 0);
+  const capacity = total * 8;
+  const terminator = Math.min(4, capacity - bits.length);
+  for (let i = 0; i < terminator; i += 1) bits.push(0);
+  while (bits.length % 8 !== 0) bits.push(0);
+  const pads = [0xec, 0x11];
+  let pad = 0;
+  while (bits.length < capacity) {
+    push(pads[pad], 8);
+    pad ^= 1;
+  }
+  const words: number[] = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let value = 0;
+    for (let j = 0; j < 8; j += 1) value = (value << 1) | bits[i + j];
+    words.push(value);
+  }
+  return words.slice(0, total);
+}
+
+function readFormatMsbIndependent(modules: boolean[][]): string {
+  // ISO: bit 14 at (8,0), bit 0 at (0,8). Independent of encoder write order.
+  const first: Array<[number, number]> = [
+    [8, 0],
+    [8, 1],
+    [8, 2],
+    [8, 3],
+    [8, 4],
+    [8, 5],
+    [8, 7],
+    [8, 8],
+    [7, 8],
+    [5, 8],
+    [4, 8],
+    [3, 8],
+    [2, 8],
+    [1, 8],
+    [0, 8],
+  ];
+  return first.map(([r, c]) => (modules[r][c] ? "1" : "0")).join("");
+}
+
+describe("QR golden vectors (B1; full independent round-trip is qr.decode.test.ts)", () => {
+  it("matches Apple CIQRCodeGenerator divisor(10) and oort remainder", () => {
+    expect(hex(qrRsDivisor(10))).toBe("d8 c2 9f 6f c7 5e 5f 71 9d c1");
+    const data = byteModeDataCodewords("oort", 1);
+    expect(hex(qrRsRemainder(data, qrRsDivisor(10)))).toBe(
+      "17 d8 df de bd df a8 9d 2c 28"
+    );
+  });
+
+  it("places format bits at spec locations against the published ECC M table", () => {
+    const publishedM = [
+      "101010000010010",
+      "101000100100101",
+      "101111001111100",
+      "101101101001011",
+      "100010111111001",
+      "100000011001110",
+      "100111110010111",
+      "100101010100000",
+    ];
+    expect(publishedM[2]).toBe("101111001111100");
+    const format = readFormatMsbIndependent(encodeQr("oort").modules);
+    expect(publishedM).toContain(format);
   });
 });

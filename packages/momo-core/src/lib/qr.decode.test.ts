@@ -338,6 +338,7 @@ describe("QR golden vectors and independent decode (B1 / M8)", () => {
   });
 
   it("the reversed format order misses the published M/mask table", () => {
+    expect(FORMAT_M_MSB[2]).toBe("101111001111100");
     const { modules } = encodeQr("oort");
     const msb = readFormatMsb(modules);
     const lsb = readFormatLsbFirst(modules);
