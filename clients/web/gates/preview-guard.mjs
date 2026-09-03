@@ -158,12 +158,6 @@ export async function startGuardedPreview({
     onData(); // 리스너를 달기 전에 이미 도착한 출력도 읽는다.
   });
 
-  // Ready 뒤에도 stdout/stderr 를 비운다. `.off("data")` 만 하면 파이프가
-  // paused 가 되고, vite 가 빠진 백엔드로 프록시 오류를 stderr 에 쌓다가
-  // 버퍼가 차면 리스너가 죽는다 — 게이트는 한가운데 `ERR_CONNECTION_REFUSED`.
-  child.stdout.on("data", () => {});
-  child.stderr.on("data", () => {});
-
   // 준비 신호 뒤의 첫 응답. 지금 이 포트를 들고 있는 것은 우리 자식뿐이다.
   const deadline = Date.now() + timeoutMs;
   let probe = null;

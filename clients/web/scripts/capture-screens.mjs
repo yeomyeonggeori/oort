@@ -20,13 +20,13 @@
 // fixtures below (realistic Korean+English team content, never "테스트 1").
 // =============================================================================
 
-import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
+import { startGuardedPreview } from "../gates/preview-guard.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -2293,52 +2293,6 @@ async function assertCloudMissesCta(page, where) {
 
 async function assertCloudMissesLockup(page, where) {
   await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
-}
-
-async function waitForServer(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error(`preview server never came up: ${url}`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
-}
-
-function spawnPreview() {
-  mkdirSync(OUT_DIR, { recursive: true });
-  const logPath = resolve(OUT_DIR, "vite-preview.log");
-  const child = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: ["ignore", "pipe", "pipe"] }
-  );
-  const append = (chunk) => {
-    try {
-      appendFileSync(logPath, chunk);
-    } catch {
-      /* log is diagnostic; capture still proceeds */
-    }
-  };
-  child.stdout.on("data", append);
-  child.stderr.on("data", append);
-  child.on("exit", (code, signal) => {
-    append(`\n[preview exit code=${code} signal=${signal}]\n`);
-  });
-  return child;
-}
-
-async function previewAlive() {
-  try {
-    const res = await fetch(ORIGIN, { signal: AbortSignal.timeout(1500) });
-    return res.ok;
-  } catch {
-    return false;
-  }
 }
 
 async function signIn(page) {
@@ -10494,30 +10448,28 @@ async function waitUntilAnimationsIdle(page) {
   );
 }
 
-/** ADR-0179 D10 ③ / UX-R1c: never shoot a mid-transition frame. */
-async function waitForAnimations(page) {
-  await waitUntilAnimationsIdle(page);
-}
-
 /**
- * UX-R1c: two frames per scheme, skeleton then settled. Messages are held
- * so the timeline Skeleton is on screen; then released. reduced-motion so
- * the crossfade is duration 0 (never mid-animation). Pulse is infinite and
- * already ignored by waitForAnimations; screenshotSettled also disables
- * animations for byte-stable bars.
+ * UX-R1c: two frames per scheme, skeleton then settled. Holds the channel
+ * list and inbox mention fetch so the surfaces that actually crossfade
+ * (sidebar + inbox) are on screen. Motion stays on; waitUntilAnimationsIdle
+ * covers the 240ms fade. This is not ADR-0179 D10 ③ / DS-3.
  */
 async function captureSkeletonReveal(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
     colorScheme: scheme,
-    reducedMotion: "reduce",
   });
-  let releaseMessages = () => {};
+  let release = () => {};
   const held = new Promise((resolve) => {
-    releaseMessages = resolve;
+    release = resolve;
   });
   await installMocks(context);
+  await context.route("**/v1/workspaces/*/channels", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await held;
+    return route.fallback();
+  });
   await context.route(
     "**/v1/workspaces/*/channels/*/messages*",
     async (route) => {
@@ -10525,13 +10477,7 @@ async function captureSkeletonReveal(browser, scheme) {
       if (url.pathname.includes("/replies")) return route.fallback();
       if (route.request().method() !== "GET") return route.fallback();
       await held;
-      if (url.searchParams.has("before") || url.searchParams.has("after")) {
-        return json(route, { messages: [] });
-      }
-      if (url.pathname.includes(DM_ID)) {
-        return json(route, { messages: makeDmMessages() });
-      }
-      return json(route, { messages: makeMessages(16) });
+      return route.fallback();
     }
   );
   const page = await context.newPage();
@@ -10548,15 +10494,30 @@ async function captureSkeletonReveal(browser, scheme) {
     });
     await page.getByTestId("channel-list").waitFor({ state: "visible" });
     await page.getByTestId("skeleton-row").first().waitFor({ state: "visible" });
-    await waitForAnimations(page);
+    await page.evaluate('location.hash = "/inbox"');
+    await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-testid="skeleton"]')
+      .waitFor({ state: "visible" });
+    await waitUntilAnimationsIdle(page);
     const skeletonPath = `${OUT_DIR}/skeleton-${scheme}.png`;
     await screenshotSettled(page, skeletonPath);
     shots.push(skeletonPath);
-    releaseMessages();
-    await page.getByTestId("timeline-message").first().waitFor({
-      state: "visible",
-    });
-    await waitForAnimations(page);
+    release();
+    await page
+      .getByTestId("sidebar-section-channels")
+      .getByRole("link", { name: "엔진" })
+      .waitFor({ state: "visible" });
+    await page
+      .locator(
+        '[data-testid="inbox-list"], [data-testid="inbox-empty"], [data-testid="inbox-error"]'
+      )
+      .first()
+      .waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
+      .waitFor({ state: "visible" });
+    await waitUntilAnimationsIdle(page);
     const settledPath = `${OUT_DIR}/skeleton-settled-${scheme}.png`;
     await screenshotSettled(page, settledPath);
     shots.push(settledPath);
@@ -10727,22 +10688,24 @@ async function main() {
   }
   mkdirSync(OUT_DIR, { recursive: true });
 
-  let server = spawnPreview();
-  const shutdown = () => {
-    if (server && !server.killed) server.kill("SIGTERM");
-  };
-  process.on("exit", shutdown);
-
-  const ensurePreview = async () => {
-    if (await previewAlive()) return;
-    shutdown();
-    await new Promise((r) => setTimeout(r, 400));
-    server = spawnPreview();
-    await waitForServer(ORIGIN);
+  const preview = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "CAPTURE_PORT",
+  });
+  let previewDeath = null;
+  preview.child.on("exit", (code, signal) => {
+    previewDeath = new Error(
+      `CAPTURE FAIL: this lane's vite preview died mid-run ` +
+        `(exit ${code}, signal ${signal}). Not retrying and not photographing ` +
+        `whoever is now on ${PORT}.`
+    );
+  });
+  const assertThisPreview = () => {
+    if (previewDeath) throw previewDeath;
   };
 
   try {
-    await waitForServer(ORIGIN);
     const browser = await chromium.launch();
     await prepareUnfurlPreviewPng(browser);
     try {
@@ -10753,23 +10716,14 @@ async function main() {
       const profile = process.env.CAPTURE_PROFILE || "all";
       if (profile === "accent") {
         for (const scheme of ["light", "dark"]) {
-          await ensurePreview();
+          assertThisPreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           const shot = async (fn) => {
-            await ensurePreview();
-            try {
-              return await fn();
-            } catch (err) {
-              const msg = String(err && err.message ? err.message : err);
-              if (!/ERR_CONNECTION_REFUSED|ECONNREFUSED|net::ERR_CONNECTION/.test(msg)) {
-                throw err;
-              }
-              await ensurePreview();
-              return await fn();
-            }
+            assertThisPreview();
+            return await fn();
           };
           all.push(...(await shot(() => captureScheme(browser, scheme))));
           all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
@@ -10791,7 +10745,7 @@ async function main() {
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
       if (profile !== "desktop" && profile !== "accent") {
         for (const scheme of ["light", "dark"]) {
-          await ensurePreview();
+          assertThisPreview();
           all.push(...(await captureMobile(browser, scheme)));
         }
       }
@@ -10801,7 +10755,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    shutdown();
+    await preview.stop();
   }
 }
 
