@@ -148,166 +148,166 @@ export function RemindersPanel() {
   return (
     <Skeleton ready={!query.isLoading} rows={3} className="p-4">
       {query.isLoading ? null : (
-    <div data-testid="reminders-panel">
-      {actionError && !dialogOpen && (
-        <InlineBanner
-          message={actionError}
-          actionLabel="닫기"
-          onAction={() => setActionError(null)}
-          testId="reminders-action-error"
-        />
-      )}
-      <ul data-testid="reminders-list">
-        {reminders.map((reminder) => (
-          <ReminderRow
-            key={reminder.id}
-            reminder={reminder}
-            channelLabel={labelFor(reminder.channelId)}
-            nowMs={nowMs}
-            offline={offline}
-            pending={
-              mutations.complete.isPending ||
-              mutations.snooze.isPending ||
-              mutations.remove.isPending
-            }
-            onComplete={() => {
-              setActionError(null);
-              setCompleteTarget(reminder);
-            }}
-            onSnoozePreset={(id) => snoozePreset(reminder, id)}
-            onSnoozeCustom={() => {
-              setActionError(null);
-              setSnoozeTarget(reminder);
-            }}
-            onDelete={() => {
-              setActionError(null);
-              setDeleteTarget(reminder);
-            }}
-          />
-        ))}
-      </ul>
-      <RemindDialog
-        open={snoozeTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSnoozeTarget(null);
-            setActionError(null);
-          }
-        }}
-        mode="snooze"
-        preview={snoozeTarget ? reminderPreviewText(snoozeTarget) : undefined}
-        pending={mutations.snooze.isPending}
-        error={actionError}
-        onCommit={(dueAtMs) => {
-          if (snoozeTarget === null) return;
-          const id = snoozeTarget.id;
-          void run(
-            () => mutations.snooze.mutateAsync({ id, dueAtMs }),
-            "snooze"
-          ).then((ok) => {
-            if (ok) setSnoozeTarget(null);
-          });
-        }}
-      />
-      <Dialog
-        open={deleteTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setDeleteTarget(null);
-            setActionError(null);
-          }
-        }}
-      >
-        <DialogContent data-testid="reminder-delete-dialog" className="gap-3 p-4">
-          <DialogTitle>이 알림을 지울까요?</DialogTitle>
-          <DialogDescription>
-            지운 알림은 되돌릴 수 없습니다. 원문 메시지는 그대로 있습니다.
-          </DialogDescription>
-          {actionError && (
-            <InlineBanner message={actionError} testId="reminder-delete-error" />
-          )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="secondary"
-              data-testid="reminder-delete-cancel"
-              onClick={() => {
-                setDeleteTarget(null);
-                setActionError(null);
-              }}
-            >
-              취소
-            </Button>
-            <Button
-              variant="destructive"
-              data-testid="reminder-delete-commit"
-              disabled={mutations.remove.isPending || offline}
-              onClick={() => {
-                if (deleteTarget === null) return;
-                const id = deleteTarget.id;
-                void run(() => mutations.remove.mutateAsync(id), "delete").then(
-                  (ok) => {
-                    if (ok) setDeleteTarget(null);
-                  }
-                );
-              }}
-            >
-              {mutations.remove.isPending ? "지우는 중…" : REMINDER_DELETE_LABEL}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog
-        open={completeTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) {
-            setCompleteTarget(null);
-            setActionError(null);
-          }
-        }}
-      >
-        <DialogContent
-          data-testid="reminder-complete-dialog"
-          className="gap-3 p-4"
-        >
-          <DialogTitle>{REMINDER_COMPLETE_CONFIRM_TITLE}</DialogTitle>
-          <DialogDescription>{REMINDER_COMPLETE_CONFIRM_DETAIL}</DialogDescription>
-          {actionError && (
+        <div data-testid="reminders-panel">
+          {actionError && !dialogOpen && (
             <InlineBanner
               message={actionError}
-              testId="reminder-complete-error"
+              actionLabel="닫기"
+              onAction={() => setActionError(null)}
+              testId="reminders-action-error"
             />
           )}
-          <div className="flex justify-end gap-2 pt-1">
-            <Button
-              variant="secondary"
-              data-testid="reminder-complete-cancel"
-              onClick={() => {
+          <ul data-testid="reminders-list">
+            {reminders.map((reminder) => (
+              <ReminderRow
+                key={reminder.id}
+                reminder={reminder}
+                channelLabel={labelFor(reminder.channelId)}
+                nowMs={nowMs}
+                offline={offline}
+                pending={
+                  mutations.complete.isPending ||
+                  mutations.snooze.isPending ||
+                  mutations.remove.isPending
+                }
+                onComplete={() => {
+                  setActionError(null);
+                  setCompleteTarget(reminder);
+                }}
+                onSnoozePreset={(id) => snoozePreset(reminder, id)}
+                onSnoozeCustom={() => {
+                  setActionError(null);
+                  setSnoozeTarget(reminder);
+                }}
+                onDelete={() => {
+                  setActionError(null);
+                  setDeleteTarget(reminder);
+                }}
+              />
+            ))}
+          </ul>
+          <RemindDialog
+            open={snoozeTarget !== null}
+            onOpenChange={(open) => {
+              if (!open) {
+                setSnoozeTarget(null);
+                setActionError(null);
+              }
+            }}
+            mode="snooze"
+            preview={snoozeTarget ? reminderPreviewText(snoozeTarget) : undefined}
+            pending={mutations.snooze.isPending}
+            error={actionError}
+            onCommit={(dueAtMs) => {
+              if (snoozeTarget === null) return;
+              const id = snoozeTarget.id;
+              void run(
+                () => mutations.snooze.mutateAsync({ id, dueAtMs }),
+                "snooze"
+              ).then((ok) => {
+                if (ok) setSnoozeTarget(null);
+              });
+            }}
+          />
+          <Dialog
+            open={deleteTarget !== null}
+            onOpenChange={(open) => {
+              if (!open) {
+                setDeleteTarget(null);
+                setActionError(null);
+              }
+            }}
+          >
+            <DialogContent data-testid="reminder-delete-dialog" className="gap-3 p-4">
+              <DialogTitle>이 알림을 지울까요?</DialogTitle>
+              <DialogDescription>
+                지운 알림은 되돌릴 수 없습니다. 원문 메시지는 그대로 있습니다.
+              </DialogDescription>
+              {actionError && (
+                <InlineBanner message={actionError} testId="reminder-delete-error" />
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="secondary"
+                  data-testid="reminder-delete-cancel"
+                  onClick={() => {
+                    setDeleteTarget(null);
+                    setActionError(null);
+                  }}
+                >
+                  취소
+                </Button>
+                <Button
+                  variant="destructive"
+                  data-testid="reminder-delete-commit"
+                  disabled={mutations.remove.isPending || offline}
+                  onClick={() => {
+                    if (deleteTarget === null) return;
+                    const id = deleteTarget.id;
+                    void run(() => mutations.remove.mutateAsync(id), "delete").then(
+                      (ok) => {
+                        if (ok) setDeleteTarget(null);
+                      }
+                    );
+                  }}
+                >
+                  {mutations.remove.isPending ? "지우는 중…" : REMINDER_DELETE_LABEL}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog
+            open={completeTarget !== null}
+            onOpenChange={(open) => {
+              if (!open) {
                 setCompleteTarget(null);
                 setActionError(null);
-              }}
+              }
+            }}
+          >
+            <DialogContent
+              data-testid="reminder-complete-dialog"
+              className="gap-3 p-4"
             >
-              취소
-            </Button>
-            <Button
-              data-testid="reminder-complete-commit"
-              disabled={mutations.complete.isPending || offline}
-              onClick={() => {
-                if (completeTarget === null) return;
-                const id = completeTarget.id;
-                void run(
-                  () => mutations.complete.mutateAsync(id),
-                  "complete"
-                ).then((ok) => {
-                  if (ok) setCompleteTarget(null);
-                });
-              }}
-            >
-              {mutations.complete.isPending ? "완료 중…" : REMINDER_COMPLETE_LABEL}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-    </div>
+              <DialogTitle>{REMINDER_COMPLETE_CONFIRM_TITLE}</DialogTitle>
+              <DialogDescription>{REMINDER_COMPLETE_CONFIRM_DETAIL}</DialogDescription>
+              {actionError && (
+                <InlineBanner
+                  message={actionError}
+                  testId="reminder-complete-error"
+                />
+              )}
+              <div className="flex justify-end gap-2 pt-1">
+                <Button
+                  variant="secondary"
+                  data-testid="reminder-complete-cancel"
+                  onClick={() => {
+                    setCompleteTarget(null);
+                    setActionError(null);
+                  }}
+                >
+                  취소
+                </Button>
+                <Button
+                  data-testid="reminder-complete-commit"
+                  disabled={mutations.complete.isPending || offline}
+                  onClick={() => {
+                    if (completeTarget === null) return;
+                    const id = completeTarget.id;
+                    void run(
+                      () => mutations.complete.mutateAsync(id),
+                      "complete"
+                    ).then((ok) => {
+                      if (ok) setCompleteTarget(null);
+                    });
+                  }}
+                >
+                  {mutations.complete.isPending ? "완료 중…" : REMINDER_COMPLETE_LABEL}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+        </div>
       )}
     </Skeleton>
   );
