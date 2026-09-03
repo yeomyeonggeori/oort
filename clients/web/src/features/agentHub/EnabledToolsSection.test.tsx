@@ -130,16 +130,6 @@ function injectSaveOpacityCss(): HTMLStyleElement {
   return style;
 }
 
-function hoverOpacity(el: HTMLElement): number {
-  if (getComputedStyle(el).pointerEvents === "none") {
-    return Number(getComputedStyle(el).opacity);
-  }
-  el.classList.add("is-hovered");
-  const value = Number(getComputedStyle(el).opacity);
-  el.classList.remove("is-hovered");
-  return value;
-}
-
 function liveTabStops(host: HTMLElement): HTMLElement[] {
   return [...host.querySelectorAll<HTMLElement>("[data-tool-toggle]")].filter(
     (el) => el.tabIndex === 0
@@ -287,11 +277,9 @@ describe("EnabledToolsSection", () => {
     expect(button?.getAttribute("aria-disabled")).toBe("true");
     expect(button?.hasAttribute("disabled")).toBe(false);
     expect(Number(getComputedStyle(button!).opacity)).toBe(0.5);
-    expect(hoverOpacity(button!)).toBe(0.5);
+    expect(getComputedStyle(button!).pointerEvents).toBe("none");
     act(() => {
-      button?.classList.add("is-hovered");
       button?.click();
-      button?.classList.remove("is-hovered");
     });
     expect(save).not.toHaveBeenCalled();
     act(() => {
@@ -299,6 +287,7 @@ describe("EnabledToolsSection", () => {
     });
     expect(button?.getAttribute("aria-disabled")).toBeNull();
     expect(Number(getComputedStyle(button!).opacity)).toBe(1);
+    expect(getComputedStyle(button!).pointerEvents).not.toBe("none");
     expect(button?.className).not.toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
     style.remove();
   });
@@ -312,14 +301,14 @@ describe("EnabledToolsSection", () => {
     expect(row?.textContent).not.toContain("실행 가능");
   });
 
-  it("H-3: 켜진 행은 그리는 링과 on-fill 을 같은 목록에 든다", () => {
+  it("H-3R: 켜진 행은 표준 링을 그리고 on-fill 은 없다", () => {
     const { host } = mount();
     const row = host.querySelector(
       '[data-testid="agent-hub-tool-row-work.session.spawn"]'
     );
-    expect(row?.className).toContain("focus-ring-on-fill");
-    const stripped = (row?.className ?? "").replaceAll("focus-ring-on-fill", "");
-    expect(stripped).toMatch(/has-\[:focus-visible\]:focus-ring/);
+    expect(row?.className).toMatch(/has-\[:focus-visible\]:focus-ring/);
+    expect(row?.className).not.toContain("focus-ring-on-fill");
+    expect(row?.className).toContain("bg-accent-soft");
   });
 
   it("H-4: 이름 클릭이 토글하고, 잠긴 행은 hover 틴트가 없다", () => {
@@ -480,7 +469,7 @@ describe("EnabledToolsSection", () => {
   it("M-7: 저장됨 수령증은 흐리지 않는다", async () => {
     vi.useFakeTimers();
     const style = injectSaveOpacityCss();
-    const { host } = mount();
+    const { host, remount } = mount();
     act(() => {
       toggle(host, LONG_NAME).click();
     });
@@ -490,12 +479,17 @@ describe("EnabledToolsSection", () => {
     await act(async () => {
       button?.click();
     });
+    remount({
+      enabledTools: [LONG_NAME, "work.session.spawn"],
+    });
     const receipt = host.querySelector<HTMLButtonElement>(
       '[data-testid="agent-hub-enabled-tools-save"]'
     );
     expect(receipt?.textContent).toContain("도구 변경 저장됨");
+    expect(receipt?.getAttribute("aria-disabled")).toBe("true");
     expect(Number(getComputedStyle(receipt!).opacity)).toBe(1);
     expect(receipt?.className).not.toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
+    expect(getComputedStyle(receipt!).pointerEvents).toBe("none");
     style.remove();
   });
 
@@ -529,6 +523,51 @@ describe("EnabledToolsSection", () => {
     const approval = spans.find((el) => el.textContent === "승인 필요");
     expect(unknown?.className).toMatch(/bg-muted-soft/);
     expect(unknown?.className).not.toMatch(/border-warn/);
+    expect(approval?.className).toMatch(/bg-warn-soft/);
     expect(approval?.className).toMatch(/text-warn/);
+    expect(approval?.className).not.toMatch(/border-warn/);
+  });
+
+  it("M-10: 편집 잠금 사유는 형제처럼 눈에 보인다", () => {
+    const reason = "이 서버가 프로필 편집을 받는지 확인 중입니다.";
+    const { host } = mount({
+      editable: false,
+      editDisabledReason: reason,
+    });
+    const line = [...host.querySelectorAll("p")].find((el) =>
+      el.textContent?.includes(reason)
+    );
+    expect(line).toBeDefined();
+    expect(line?.className).not.toMatch(/\bsr-only\b/);
+    expect(line?.className).toMatch(/text-meta/);
+  });
+
+  it("N-13: 잠긴 행에서 ArrowDown 은 DOM 아래의 다음 live 로 간다", () => {
+    const { host } = mount();
+    const locked = toggle(host, "work.session.resume");
+    const first = toggle(host, LONG_NAME);
+    const second = toggle(host, "work.session.spawn");
+    act(() => {
+      locked.focus();
+    });
+    act(() => {
+      locked.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(document.activeElement).toBe(first);
+    expect(document.activeElement).not.toBe(second);
+  });
+
+  it("N-15: 읽기 전용에서도 Tab 정거장이 하나 있다", () => {
+    const { host } = mount({
+      editable: false,
+      editDisabledReason: "이 서버가 프로필 편집을 받는지 확인 중입니다.",
+    });
+    expect(liveTabStops(host)).toHaveLength(1);
   });
 });

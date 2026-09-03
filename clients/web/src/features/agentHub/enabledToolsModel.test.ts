@@ -160,6 +160,14 @@ describe("resolveToolTabStop", () => {
     );
     expect(resolveToolTabStop(rows, false, null)).toBe(LONG_NAME);
   });
+
+  it("N-15: 읽기 전용이면 첫 행이 정거장이다", () => {
+    const rows = mergeToolRows(CATALOG, ["work.session.spawn"]);
+    expect(resolveToolTabStop(rows, true, null)).toBe(LONG_NAME);
+    expect(resolveToolTabStop(rows, true, "work.session.resume")).toBe(
+      "work.session.resume"
+    );
+  });
 });
 
 describe("AgentHubRoute tools save wiring", () => {
@@ -189,5 +197,14 @@ describe("M-3 StatusChip vessel", () => {
     expect(source).toMatch(
       /tone === "neutral" && "bg-muted-soft text-ink-muted"/
     );
+  });
+
+  it("M-11: warn 칩은 테두리가 아니라 warn-soft 그릇이다", () => {
+    const source = readFileSync(
+      new URL("./StatusChip.tsx", import.meta.url),
+      "utf8"
+    );
+    expect(source).toContain("bg-warn-soft");
+    expect(source).not.toMatch(/tone === "warn" && "border border-warn/);
   });
 });

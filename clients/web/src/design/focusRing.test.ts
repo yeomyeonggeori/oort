@@ -28,6 +28,17 @@ import { describe, expect, it } from "vitest";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const require_ = createRequire(import.meta.url);
 
+/**
+ * on-fill 스윕이 한 문자열에서 짝+채움을 못 읽는 자리. cva 는 base 에
+ * `focus-visible:focus-ring`, 변형에 `bg-accent`/`bg-danger-fill` + on-fill.
+ */
+const ON_FILL_RESIDUE: readonly (readonly [string, string])[] = [
+  [
+    "design/ui/button.tsx",
+    "cva base carries focus-visible:focus-ring; default/destructive variants carry bg-accent/bg-danger-fill + on-fill",
+  ],
+];
+
 async function loadStylesheet(id: string, base: string) {
   if (id === "tailwindcss") {
     const path = require_.resolve("tailwindcss/index.css");
@@ -165,21 +176,42 @@ describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review 
         expect(line, "ThreadComposer 보내기 버튼").toContain("focus-ring-on-fill");
       }
     }
-    // Agent Hub tools row is the control (#1957 R3 H-3). on-fill without a
-    // drawing `focus-visible:focus-ring` paints nothing.
-    const tools = readFileSync(
-      `${HERE}/../features/agentHub/EnabledToolsSection.tsx`,
-      "utf8"
+  });
+
+  it("N-10: every focus-ring-on-fill is paired with a ring and an accent fill, or named in residue", () => {
+    const { globSync } = require_("node:fs") as typeof import("node:fs");
+    const files = (globSync("**/*.{ts,tsx}", { cwd: HERE + "/.." }) as string[])
+      .filter((file) => !/\.test\.(ts|tsx)$/.test(file));
+    const drawing =
+      /focus-visible:focus-ring|has-\[:focus-visible\]:focus-ring/;
+    const fill = /(?:^|\s)(?:bg-accent|bg-danger-fill)(?:\s|$)/;
+    const residue = new Set(
+      ON_FILL_RESIDUE.map(([rel]) => rel)
     );
-    const onFillStrings = [
-      ...tools.matchAll(/"([^"]*focus-ring-on-fill[^"]*)"/g),
-    ].map((match) => match[1]);
-    expect(onFillStrings.length).toBeGreaterThan(0);
-    for (const classList of onFillStrings) {
-      const stripped = classList.replaceAll("focus-ring-on-fill", "");
-      expect(stripped, classList).toMatch(
-        /focus-visible:focus-ring|has-\[:focus-visible\]:focus-ring/
-      );
+    const hits: { rel: string; classList: string }[] = [];
+    for (const file of files) {
+      const src = readFileSync(`${HERE}/../${file}`, "utf8");
+      for (const match of src.matchAll(/"([^"\n]*focus-ring-on-fill[^"\n]*)"/g)) {
+        hits.push({ rel: file, classList: match[1] });
+      }
+    }
+    expect(hits.length).toBeGreaterThan(0);
+    const unswept: string[] = [];
+    for (const hit of hits) {
+      const stripped = hit.classList.replaceAll("focus-ring-on-fill", "");
+      const ok = drawing.test(stripped) && fill.test(hit.classList);
+      if (ok) continue;
+      if (residue.has(hit.rel)) continue;
+      unswept.push(`${hit.rel}: ${hit.classList}`);
+    }
+    expect(unswept, "on-fill without ring+accent fill, and not in residue").toEqual(
+      []
+    );
+    for (const [rel] of ON_FILL_RESIDUE) {
+      expect(
+        hits.some((hit) => hit.rel === rel),
+        `residue ${rel} no longer has on-fill`
+      ).toBe(true);
     }
   });
 });

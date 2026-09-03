@@ -881,25 +881,33 @@ describe("onboarding S0 palette (single look)", () => {
   });
 });
 
-describe("UX-R4a tool chip vessel on selected row", () => {
-  it("muted-soft on accent-soft meets the §2.2 vessel floor in both schemes", () => {
+describe("H-3R checked tool row ring vs fill", () => {
+  it("ring ink on accent-soft is ≥ 3:1 both schemes; on-fill pairing fails this", () => {
+    const tools = readFileSync(
+      new URL("../features/agentHub/EnabledToolsSection.tsx", import.meta.url),
+      "utf8"
+    );
+    const usesOnFill = /bg-accent-soft[\s\S]{0,500}focus-ring-on-fill/.test(
+      tools
+    );
     for (const scheme of SCHEMES) {
-      const ratio = contrast(
-        pick("muted-soft", scheme.index),
-        pick("accent-soft", scheme.index)
-      );
-      const distance = deltaE(
-        pick("muted-soft", scheme.index),
-        pick("accent-soft", scheme.index)
-      );
+      const ring = pick(usesOnFill ? "on-accent" : "accent", scheme.index);
+      const fill = pick("accent-soft", scheme.index);
       expect(
-        Number(ratio.toFixed(3)),
-        `muted-soft on accent-soft (${scheme.name}) contrast`
-      ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_CONTRAST);
-      expect(
-        Number(distance.toFixed(4)),
-        `muted-soft on accent-soft (${scheme.name}) OKLab distance`
-      ).toBeGreaterThanOrEqual(CHIP_VESSEL_MIN_DISTANCE);
+        contrast(ring, fill),
+        `${usesOnFill ? "on-accent" : "accent"} on accent-soft (${scheme.name})`
+      ).toBeGreaterThanOrEqual(3);
     }
+  });
+});
+
+describe("N-11 vessel table ownership", () => {
+  it("muted-soft on accent-soft is not re-measured in a second UX-R4a describe", () => {
+    const src = readFileSync(new URL("./tokens.contrast.test.ts", import.meta.url), "utf8");
+    const banned =
+      "describe(" + '"UX-R4a ' + 'tool chip vessel on selected row"';
+    expect(src.includes(banned)).toBe(false);
+    const muted = CHIP_VESSEL_SURFACES.find(([name]) => name === "muted-soft");
+    expect(muted?.[1]).toContain("accent-soft");
   });
 });
