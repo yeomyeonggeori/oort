@@ -26,6 +26,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
+import { assertQrModulePitch } from "./qrModulePitch.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -34,6 +35,68 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+/** UX-R4a M-6: whole tools section including 저장 must sit in the viewport. */
+async function frameEnabledToolsSection(page, where) {
+  const section = page.getByTestId("agent-hub-enabled-tools");
+  await section.waitFor({ state: "visible" });
+  const previous = page.viewportSize();
+  const measure = () =>
+    page.evaluate(() => {
+      const sec = document.querySelector(
+        '[data-testid="agent-hub-enabled-tools"]'
+      );
+      const btn = document.querySelector(
+        '[data-testid="agent-hub-enabled-tools-save"]'
+      );
+      if (!sec) return null;
+      const sr = sec.getBoundingClientRect();
+      const br = btn?.getBoundingClientRect();
+      const vh = window.innerHeight;
+      const vw = window.innerWidth;
+      return {
+        ok:
+          Boolean(br) &&
+          br.top >= 0 &&
+          br.bottom <= vh &&
+          br.left >= 0 &&
+          br.right <= vw &&
+          sr.top >= -8,
+        vh,
+        saveTop: br?.top ?? null,
+        saveBottom: br?.bottom ?? null,
+        sectionTop: sr.top,
+        sectionBottom: sr.bottom,
+        reason: btn ? undefined : "missing-save",
+      };
+    });
+
+  // Phone stacks roster above the profile, so scrollIntoView leaves an
+  // unscrollable offset (~449px). Grow by saveBottom after that scroll, not
+  // by section height alone.
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    await section.evaluate((el) => el.scrollIntoView({ block: "start" }));
+    await page.waitForTimeout(120);
+    const frame = await measure();
+    if (!frame) throw new Error(`[${where}] tools section missing`);
+    if (frame.ok) return previous;
+    if (frame.reason === "missing-save" || frame.saveBottom == null) {
+      throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+    }
+    const needed = Math.ceil(
+      Math.max(frame.saveBottom, frame.sectionBottom) + 64
+    );
+    if (needed <= page.viewportSize().height) {
+      throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+    }
+    await page.setViewportSize({ width: previous.width, height: needed });
+  }
+  const frame = await measure();
+  if (!frame?.ok) {
+    throw new Error(`[${where}] tools 저장 not in frame ${JSON.stringify(frame)}`);
+  }
+  return previous;
+}
 const TOKENS_CSS = readFileSync(
   resolve(WEB_ROOT, "src/design/tokens.css"),
   "utf8"
@@ -1253,7 +1316,7 @@ const AGENT_PROFILE = {
   instructions:
     "배포 전에는 롤백 절차부터 확인하고, 근거가 없는 추정은 추정이라고 먼저 말합니다.",
   modelPref: "hermes-agent",
-  enabledTools: ["shell", "git"],
+  enabledTools: ["work.session.spawn", "shell", "git"],
   triggers: { mention: true },
   paused: false,
   version: 3,
@@ -1262,6 +1325,54 @@ const AGENT_PROFILE = {
 };
 
 const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
+
+/** UX-R4a: catalog GET is not on the live server; capture supplies the body. */
+const AGENT_TOOL_CATALOG = {
+  tools: [
+    {
+      name: "deploy.rollback.session-end-with-a-very-long-qualified-name",
+      description:
+        "배포 전 롤백 절차를 확인한 뒤에만 쓰는 작업 세션 종료입니다. 호스트 상태와 정산 원장을 닫으며, 한 번 실행하면 같은 세션으로 되돌리지 못합니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.spawn",
+      description:
+        "등록된 호스트에서 코딩 도구를 새 작업 세션으로 시작합니다. 승인하는 사람이 호스트를 고릅니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.login_handoff",
+      description:
+        "세션 화면에서 사람이 직접 로그인하게 잠시 멈춥니다. 비밀번호나 코드를 채팅으로 묻지 않습니다.",
+      executable: true,
+      requiresApproval: true,
+    },
+    {
+      name: "work.session.resume",
+      description: "멈춘 작업 세션을 이어서 시작합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+    {
+      name: "agent.pause",
+      description: "에이전트를 일시정지합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+    {
+      name: "message.post",
+      description: "채널에 메시지를 올립니다. 에이전트는 이미 자기 답변 경로로 말합니다.",
+      executable: false,
+      requiresApproval: true,
+      unavailableReason: "이 서버는 아직 이 도구를 실행하지 않습니다.",
+    },
+  ],
+};
 
 /** The id POST /agents answers with: the hub selects it right after. */
 const CREATED_AGENT_ID = "019f9b10-0000-7000-8000-0000000004a1";
@@ -1356,9 +1467,9 @@ const APPROVALS = [
   },
 ];
 
-function json(route, body) {
+function json(route, body, status = 200) {
   return route.fulfill({
-    status: 200,
+    status,
     contentType: "application/json",
     body: JSON.stringify(body),
   });
@@ -1411,6 +1522,78 @@ async function installUnmockedFallback(context) {
   });
 }
 
+const DEVICE_LINK_CAPTURE_TOKEN = [
+  "ABCDEFGHIJKLMNOPQRSTUV",
+  "WXYZabcdefghijklmnopq",
+].join("");
+const DEVICE_LINK_CAPTURE_ID = "019f9b10-0000-7000-8000-000000000d01";
+const DEVICE_LINK_CAPTURE_ORIGIN = "https://team.example.com";
+const DEVICE_LINK_CAPTURE_DEVICE =
+  "성재 iPhone 16 Pro Max, 집 작업실 책상 옆 MagSafe 충전 거치대";
+
+const deviceLinkHarness = {
+  sas: "4821",
+  issueStatus: 201,
+  getBody: () => ({ status: "pending" }),
+  deepLink: "",
+};
+
+function resetDeviceLinkHarness() {
+  deviceLinkHarness.sas = "4821";
+  deviceLinkHarness.issueStatus = 201;
+  deviceLinkHarness.getBody = () => ({ status: "pending" });
+  deviceLinkHarness.deepLink = "";
+}
+
+function deviceLinkIssueBody() {
+  const body = {
+    id: DEVICE_LINK_CAPTURE_ID,
+    token: DEVICE_LINK_CAPTURE_TOKEN,
+    expiresAt: Date.now() + 120_000,
+    deepLink:
+      deviceLinkHarness.deepLink ||
+      `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
+  };
+  if (deviceLinkHarness.sas) body.sas = deviceLinkHarness.sas;
+  return body;
+}
+
+const QR_MODULE_FLOOR = Number(
+  (TOKENS_CSS.match(/--spacing-qr-module:\s*([\d.]+)px;/) || [])[1]
+);
+if (!Number.isFinite(QR_MODULE_FLOOR) || QR_MODULE_FLOOR <= 0) {
+  throw new Error(
+    "tokens.css missing a numeric --spacing-qr-module (capture cannot measure QR pitch)"
+  );
+}
+
+async function measureDeviceLinkQrPitch(page, label) {
+  const measured = await page.locator('[data-testid="device-link-qr"]').evaluate((el) => {
+    const modules = Number(el.getAttribute("data-qr-modules"));
+    const cs = getComputedStyle(el);
+    const pad =
+      (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const borderBox = el.getBoundingClientRect().width;
+    const content = borderBox - pad;
+    return {
+      modules,
+      content,
+      boxSizing: cs.boxSizing,
+      pitch: content / modules,
+    };
+  });
+  const pitch = assertQrModulePitch(
+    measured.content,
+    measured.modules,
+    QR_MODULE_FLOOR,
+    label
+  );
+  console.log(
+    `  device-link QR pitch ${label}: ${pitch.toFixed(3)} px/module (${measured.modules} modules, content ${measured.content}px, box-sizing ${measured.boxSizing})`
+  );
+  return measured;
+}
+
 async function installMocks(context) {
   let declaredPresence = "auto";
   let customStatus = {
@@ -1418,8 +1601,31 @@ async function installMocks(context) {
     statusText: SELF_STATUS_TEXT,
     statusExpiresAtMs: undefined,
   };
+  resetDeviceLinkHarness();
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  await context.route("**/v1/auth/device-link**", (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const tail = url.pathname.split("/device-link")[1] ?? "";
+    if (method === "POST" && (tail === "" || tail === "/")) {
+      if (deviceLinkHarness.issueStatus !== 201) {
+        return json(
+          route,
+          { error: "unavailable" },
+          deviceLinkHarness.issueStatus
+        );
+      }
+      return json(route, deviceLinkIssueBody(), 201);
+    }
+    if (method === "POST" && tail.endsWith("/confirm-sas")) {
+      return json(route, { status: "confirmed" });
+    }
+    if (method === "GET") {
+      return json(route, deviceLinkHarness.getBody());
+    }
+    return route.fallback();
+  });
   // ## 로그인 직후의 토큰 회전까지 막아야 로그인이 유지된다 (goal RN-U2, 선행 결함)
   //
   // 이 스텁이 없어서 **하네스 전체가 로그인 화면에서 멈춰 있었다.** 증상은 `signIn`
@@ -1532,6 +1738,9 @@ async function installMocks(context) {
   );
   // 에이전트 허브 (goal B5.3b). 더 긴 경로를 먼저 건다: `**/…/agents`가
   // `/agents/{id}/profile`을 삼키지 않도록 하는 것과 같은 규칙이다.
+  await context.route("**/v1/workspaces/*/agent-tool-catalog", (route) =>
+    json(route, AGENT_TOOL_CATALOG)
+  );
   await context.route("**/v1/workspaces/*/agents/*/allowed-models", (route) =>
     json(route, { allowedAgentModels: ALLOWED_AGENT_MODELS })
   );
@@ -2106,7 +2315,9 @@ async function signIn(page) {
   // 셸로 자동 복귀해 로그인 카드가 아예 없다. 지금까지는 회전이 실패해 매번
   // 로그아웃되는 덕에 우연히 로그인 화면이 나왔던 것이다 — 그 우연에 기대던 자리를
   // 명시적인 초기화로 바꾼다.
-  await page.evaluate("try { localStorage.clear(); } catch (e) {}");
+  await page.evaluate(
+    "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}"
+  );
   await page.reload({ waitUntil: "networkidle" });
   await signInThroughOnboarding(page, {
     email: "seongjae@dawn.example",
@@ -6538,6 +6749,12 @@ async function captureMobile(browser, scheme) {
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `agent hub ${scheme}`);
   await shoot(page, "agent-hub");
+  const toolsViewport = await frameEnabledToolsSection(
+    page,
+    `mobile agent-hub-tools ${scheme}`
+  );
+  await shoot(page, "agent-hub-tools");
+  await page.setViewportSize(toolsViewport);
 
   // 5. 인박스. 전역 표면의 헤더에도 서랍을 여는 길이 있어야 한다는 것이 이
   //    프레임의 요점이다: 없으면 채널 밖으로 나간 사람은 갇힌다. 그 요점은 이
@@ -7590,6 +7807,14 @@ async function captureScheme(browser, scheme) {
   const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
+  const toolsViewport = await frameEnabledToolsSection(
+    agentHub,
+    `agent-hub-tools ${scheme}`
+  );
+  const agentHubToolsShot = `${OUT_DIR}/agent-hub-tools-${scheme}.png`;
+  await agentHub.screenshot({ path: agentHubToolsShot });
+  shots.push(agentHubToolsShot);
+  await agentHub.setViewportSize(toolsViewport);
 
   // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
   //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).
@@ -8105,6 +8330,7 @@ async function captureScheme(browser, scheme) {
   for (const [section, heading, name] of [
     ["profile", "프로필", "profile"],
     ["account", "계정", "account"],
+    ["devices", "기기", "devices"],
     // 설정 > 테마 (U2). 이 스윕은 두 스킴에서 도므로, 선택 화면 **자신이** 라이트와
     // 다크 각각에서 성립하는지가 리뷰 증거로 남는다. 고르는 값은 localStorage이고
     // signIn()이 매번 그것을 비우므로, 찍히는 것은 언제나 기본값(시스템)의 화면이다.
@@ -8209,6 +8435,150 @@ async function captureScheme(browser, scheme) {
   const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
   await webhooks.screenshot({ path: revealShot });
   shots.push(revealShot);
+
+  // ── 설정 > 기기 폰 연결 (#1989, ADR-0180 D7) ──────────────────────────────
+  // 프레임 이름에 토큰·딥링크를 넣지 않는다. sas 는 하네스가 장면마다 바꾼다.
+  async function openDevicesPage() {
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/inbox"');
+    await page.waitForTimeout(200);
+    await page.evaluate('location.hash = "/settings?section=devices"');
+    await page.getByTestId("settings-route").waitFor({ state: "visible" });
+    await page.getByTestId("device-link-card").waitFor({ state: "visible" });
+    return page;
+  }
+
+  async function shootDevices(page, name) {
+    await page.waitForTimeout(250);
+    const path = `${OUT_DIR}/settings-devices-${name}-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+  }
+
+  resetDeviceLinkHarness();
+  const devices = await openDevicesPage();
+  await devices.getByTestId("device-link-create").waitFor({ state: "visible" });
+  await shootDevices(devices, "idle");
+
+  await devices.getByTestId("device-link-create").click();
+  await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  await devices.getByTestId("device-link-pending").waitFor({ state: "visible" });
+  await shootDevices(devices, "qr");
+  await devices.close();
+
+  const railwayDeepLink = `oort://link?server=https%3A%2F%2Foort-production-1a2b.up.railway.app&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+  const selfHostOrigin =
+    "https://self-hosted-oort.internal.yeomyeonggeori.example.com:8443";
+  const selfHostDeepLink = `oort://link?server=${encodeURIComponent(selfHostOrigin)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`;
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = railwayDeepLink;
+  const devicesV7 = await openDevicesPage();
+  await devicesV7.getByTestId("device-link-create").click();
+  await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
+  if (v7.modules !== 53) {
+    throw new Error(`v7 QR expected 53 modules, got ${v7.modules}`);
+  }
+  await devicesV7.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.deepLink = selfHostDeepLink;
+  const devicesV8 = await openDevicesPage();
+  await devicesV8.getByTestId("device-link-create").click();
+  await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
+  const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
+  if (v8.modules !== 57) {
+    throw new Error(`v8 QR expected 57 modules, got ${v8.modules}`);
+  }
+  await devicesV8.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.getBody = () => ({
+    status: "consumed",
+    device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
+  });
+  const devicesConfirm = await openDevicesPage();
+  await devicesConfirm.getByTestId("device-link-create").click();
+  await devicesConfirm.getByTestId("device-link-awaiting-confirm").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesConfirm, "awaiting-confirm");
+  await devicesConfirm.getByTestId("device-link-confirm-sas").click();
+  await devicesConfirm.getByTestId("device-link-connected").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesConfirm, "connected");
+  await devicesConfirm.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.getBody = () => ({ status: "expired" });
+  const devicesExpired = await openDevicesPage();
+  await devicesExpired.getByTestId("device-link-create").click();
+  await devicesExpired.getByTestId("device-link-expired").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesExpired, "expired");
+  await devicesExpired.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.issueStatus = 500;
+  const devicesError = await openDevicesPage();
+  await devicesError.getByTestId("device-link-create").click();
+  await devicesError.getByTestId("device-link-banner").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesError, "error");
+  await devicesError.close();
+
+  resetDeviceLinkHarness();
+  const devicesOffline = await openDevicesPage();
+  await devicesOffline.evaluate(() => {
+    Object.defineProperty(navigator, "onLine", {
+      configurable: true,
+      get: () => false,
+    });
+    window.dispatchEvent(new Event("offline"));
+  });
+  await devicesOffline.getByTestId("device-link-offline").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesOffline, "offline");
+  await devicesOffline.close();
+
+  resetDeviceLinkHarness();
+  deviceLinkHarness.sas = "";
+  deviceLinkHarness.getBody = () => ({
+    status: "consumed",
+    device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
+  });
+  const devicesLoopback = await openDevicesPage();
+  await devicesLoopback.getByTestId("device-link-create").click();
+  await devicesLoopback.getByTestId("device-link-connected").waitFor({
+    state: "visible",
+  });
+  await shootDevices(devicesLoopback, "loopback");
+  await devicesLoopback.close();
+
+  resetDeviceLinkHarness();
+  const firstRun = await context.newPage();
+  await firstRun.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(firstRun);
+  await firstRun.evaluate(() => {
+    sessionStorage.setItem("momo.web.phoneLinkFirstRun.v1", "pending");
+  });
+  await firstRun.reload({ waitUntil: "networkidle" });
+  await firstRun.getByTestId("onboarding-phone-link").waitFor({
+    state: "visible",
+  });
+  await firstRun.waitForTimeout(250);
+  const firstRunShot = `${OUT_DIR}/onboarding-phone-link-${scheme}.png`;
+  await firstRun.screenshot({ path: firstRunShot });
+  shots.push(firstRunShot);
+  await firstRun.getByTestId("onboarding-enter-app").click();
+  await firstRun.close();
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
   const stress = await context.newPage();

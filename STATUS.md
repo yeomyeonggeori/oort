@@ -5,6 +5,20 @@
 - `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, CSS `data-preview` 0, `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지).
 - ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 셀 안에서 스크림·제품 폭(pane-md / pane-picker / pane-sm)을 보여 준다. 갤러리 루트가 유일한 스크롤러. 캡처는 사용성(클릭·휠·Tab·body 잠금)과 오버레이 기하를 잰다.
 - NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용.
+## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
+
+- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).
+- ADR-0180 D7 「온보딩 S5」는 번호 스텝이 아니라 **로그인 후 first-run 카드**(App이 소유, 세션 게이트가 선점하지 못함). UX-R2a가 번호 시퀀스에 접을 수 있다. 진행 표시 없음.
+- NOTES: 기기 목록/해제는 `GET /v1/auth/devices` + `DELETE /v1/auth/devices/{id}`가 없다(#2029). 현재 카드의 연결됨은 세션 안 폴 `status`/`device`(+live 기록)로만 살아남고, 지속 목록은 #2029.
+- runtime-unverified: 실기기 카메라 스캔(M0m).
+- red proof: 독립 디코더 왕복(v1/v7/v8) · RS/포맷 골든 · App 트리 first-run · SAS 미확인≠연결됨 · 채움 액센트 ≤1 · 모듈 피치 바닥 · aria-describedby · 만료 문장 · 리마운트 · 재발급 폴 1개 · 캡처 전수 시크릿 스윕.
+- R3: QR well `content-box`(피치 v7/v8 = 4.000 CSS px) · pending은 살아 있는 코드+스캔, SAS confirm은 awaitingConfirm만 · 바우처는 만료·consumed·로그아웃에 지움 · 시크릿 게이트는 심은 프레임에서 실패 · 기기명에 조사 없음 · first-run은 S1/S2와 같은 `onboarding-step-chrome`+`max-w-sm`.
+## UX-R4a Agent Hub enabledTools 편집 UI (#1957, 2026-09-02)
+
+- Agent Hub 프로필 도구 칩을 카탈로그 행(이름·설명·실행 가능/실행 불가·승인 필요) + 비낙관 저장으로 대체. PUT 은 저장된 프로필 필드만 싣는다. 성공은 ADR-0182 in-place `도구 변경 저장`→`도구 변경 저장됨` 1.6s (`useInlineConfirm`, CopyButton 동일 시계). 실패는 InlineBanner, 403은 읽기 전용.
+- 카탈로그는 GET `/v1/workspaces/{ws}/agent-tool-catalog` 에서 읽는다. OpenAPI·momo-server 에 이 라우트가 없어 404/405/501·본문 불명은 표시 전용으로 접는다. `tools.rs` CATALOG 는 클라에 복사하지 않음.
+- runtime-unverified: 라이브 카탈로그 GET(라우트 부재). 클라 시험은 목 카탈로그.
+- 잔량: 폰 `COPY_RECEIPT_MS = 1_500` (`clients/mobile/src/features/conversation/copy.ts`) vs 웹 1 600. 이 티켓은 폰 무접촉. 소유: 폰 패리티 후속.
 
 ## M0m 기기 연결 폰 절반 — ConnectScreen 「QR로 연결」 (#1990, 2026-09-02)
 

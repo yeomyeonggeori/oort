@@ -208,7 +208,7 @@ export const SURFACES = [
 export const CHIP_VESSEL_SURFACES = [
   ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
   ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
-  ["warn-soft", ["surface", "surface-hover", "surface-raised"]],
+  ["warn-soft", ["surface", "surface-hover", "surface-raised", "accent-soft"]],
   ["danger-soft", ["surface", "surface-hover", "surface-raised"]],
 ] as const;
 
@@ -878,5 +878,36 @@ describe("onboarding S0 palette (single look)", () => {
   it("keeps the S0 accent out of the indigo/violet AI-tell band", () => {
     const hue = hueAngle(ONBOARDING["onboarding-accent"]);
     expect(hue > 265 && hue < 330, `accent hue ${hue.toFixed(0)}`).toBe(false);
+  });
+});
+
+describe("H-3R checked tool row ring vs fill", () => {
+  it("ring ink on accent-soft is ≥ 3:1 both schemes; on-fill pairing fails this", () => {
+    const tools = readFileSync(
+      new URL("../features/agentHub/EnabledToolsSection.tsx", import.meta.url),
+      "utf8"
+    );
+    const usesOnFill = /bg-accent-soft[\s\S]{0,500}focus-ring-on-fill/.test(
+      tools
+    );
+    for (const scheme of SCHEMES) {
+      const ring = pick(usesOnFill ? "on-accent" : "accent", scheme.index);
+      const fill = pick("accent-soft", scheme.index);
+      expect(
+        contrast(ring, fill),
+        `${usesOnFill ? "on-accent" : "accent"} on accent-soft (${scheme.name})`
+      ).toBeGreaterThanOrEqual(3);
+    }
+  });
+});
+
+describe("N-11 vessel table ownership", () => {
+  it("muted-soft on accent-soft is not re-measured in a second UX-R4a describe", () => {
+    const src = readFileSync(new URL("./tokens.contrast.test.ts", import.meta.url), "utf8");
+    const banned =
+      "describe(" + '"UX-R4a ' + 'tool chip vessel on selected row"';
+    expect(src.includes(banned)).toBe(false);
+    const muted = CHIP_VESSEL_SURFACES.find(([name]) => name === "muted-soft");
+    expect(muted?.[1]).toContain("accent-soft");
   });
 });

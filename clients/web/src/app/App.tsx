@@ -1,9 +1,14 @@
-import { lazy, Suspense, useEffect } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
 import { useRestoredSession } from "@/app/session";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
+import { PhoneLinkFirstRun } from "@/features/auth/PhoneLinkFirstRun";
+import {
+  dismissPhoneLinkFirstRun,
+  phoneLinkFirstRunIsPending,
+} from "@/features/auth/phoneLinkFirstRunStore";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { AppShell } from "@/app/AppShell";
@@ -56,6 +61,7 @@ function DesignGalleryRoute() {
 export function App() {
   const { status, session, signIn, signOut, replaceSessionMember } =
     useRestoredSession();
+  const [, setPhoneLinkFirstRunTick] = useState(0);
 
   // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
   // the connect screen is the reader most likely to need the build that fixes
@@ -105,6 +111,19 @@ export function App() {
       );
     }
     return <ConnectPage onLoggedIn={signIn} />;
+  }
+
+  // ADR-0180 D7 ships as a post-login first-run card, not onboarding S5.
+  // Owned here so the session gate cannot unmount it (B2).
+  if (phoneLinkFirstRunIsPending()) {
+    return (
+      <PhoneLinkFirstRun
+        onEnterApp={() => {
+          dismissPhoneLinkFirstRun();
+          setPhoneLinkFirstRunTick((n) => n + 1);
+        }}
+      />
+    );
   }
 
   return (
