@@ -47,7 +47,7 @@ function DesignGalleryRoute() {
     <Route
       path="design"
       element={
-        <Suspense fallback={<SkeletonRows rows={4} className="p-6" />}>
+        <Suspense fallback={<Skeleton ready={false} rows={4} className="p-6" />}>
           <DesignGalleryPage />
         </Suspense>
       }
