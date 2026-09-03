@@ -54,28 +54,33 @@ function gfMul(a: number, b: number): number {
   return EXP[LOG[a] + LOG[b]];
 }
 
-function rsDivisor(degree: number): number[] {
-  const poly = [1];
-  for (let i = 0, root = 1; i < degree; i += 1, root = gfMul(root, 2)) {
-    poly.push(0);
-    for (let j = poly.length - 1; j > 0; j -= 1) {
-      poly[j] = gfMul(poly[j - 1], root) ^ poly[j];
+/** Degree-`n` generator polynomial coefficients, lowest power first. Length n. */
+export function qrRsDivisor(degree: number): number[] {
+  const result: number[] = [];
+  for (let i = 0; i < degree - 1; i += 1) result.push(0);
+  result.push(1);
+  let root = 1;
+  for (let i = 0; i < degree; i += 1) {
+    for (let j = 0; j < result.length; j += 1) {
+      result[j] = gfMul(result[j], root);
+      if (j + 1 < result.length) result[j] ^= result[j + 1];
     }
-    poly[0] = gfMul(poly[0], root);
+    root = gfMul(root, 2);
   }
-  return poly;
+  return result;
 }
 
-function rsRemainder(data: readonly number[], divisor: readonly number[]): number[] {
-  const result = new Array<number>(divisor.length - 1).fill(0);
+export function qrRsRemainder(
+  data: readonly number[],
+  divisor: readonly number[]
+): number[] {
+  const result = divisor.map(() => 0);
   for (const byte of data) {
-    const factor = byte ^ result[0];
-    result.shift();
+    const factor = byte ^ (result.shift() as number);
     result.push(0);
-    if (factor === 0) continue;
-    for (let i = 0; i < result.length; i += 1) {
-      result[i] ^= gfMul(divisor[i + 1], factor);
-    }
+    divisor.forEach((coef, i) => {
+      result[i] ^= gfMul(coef, factor);
+    });
   }
   return result;
 }
@@ -153,14 +158,14 @@ function splitBlocks(data: readonly number[], version: number): {
   const shortLength = Math.floor(totalData / blockCount);
   const longCount = totalData % blockCount;
   const shortCount = blockCount - longCount;
-  const divisor = rsDivisor(ecCount);
+  const divisor = qrRsDivisor(ecCount);
   const blocks: { data: number[]; ecc: number[] }[] = [];
   let offset = 0;
   for (let i = 0; i < blockCount; i += 1) {
     const length = i < shortCount ? shortLength : shortLength + 1;
     const slice = data.slice(offset, offset + length);
     offset += length;
-    blocks.push({ data: slice, ecc: rsRemainder(slice, divisor) });
+    blocks.push({ data: slice, ecc: qrRsRemainder(slice, divisor) });
   }
   return blocks;
 }
@@ -323,21 +328,23 @@ function drawFunctionPatterns(
 function placeFormat(modules: boolean[][], mask: number): void {
   const size = modules.length;
   const bits = formatBits(mask);
-  const coords: Array<[number, number]> = [];
-  for (let i = 0; i <= 5; i += 1) coords.push([8, i]);
-  coords.push([8, 7], [8, 8], [7, 8]);
-  for (let i = 5; i >= 0; i -= 1) coords.push([i, 8]);
+  // Spec: bit 14 (MSB) sits at (8, 0); bit 0 (LSB) sits at (0, 8). Writing
+  // bit i into the 14−i slot was the B1 reverse-order bug.
+  const first: Array<[number, number]> = [];
+  for (let i = 0; i <= 5; i += 1) first.push([i, 8]);
+  first.push([7, 8], [8, 8], [8, 7]);
+  for (let i = 9; i < 15; i += 1) first.push([8, 14 - i]);
   for (let i = 0; i < 15; i += 1) {
     const dark = ((bits >>> i) & 1) === 1;
-    const [r, c] = coords[i];
-    modules[r][c] = dark;
+    modules[first[i][0]][first[i][1]] = dark;
   }
-  for (let i = 0; i < 7; i += 1) {
-    modules[size - 1 - i][8] = ((bits >>> i) & 1) === 1;
+  for (let i = 0; i < 8; i += 1) {
+    modules[8][size - 1 - i] = ((bits >>> i) & 1) === 1;
   }
-  for (let i = 7; i < 15; i += 1) {
-    modules[8][size - 15 + i] = ((bits >>> i) & 1) === 1;
+  for (let i = 8; i < 15; i += 1) {
+    modules[size - 15 + i][8] = ((bits >>> i) & 1) === 1;
   }
+  modules[size - 8][8] = true;
 }
 
 function placeData(
