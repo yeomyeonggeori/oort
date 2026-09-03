@@ -155,36 +155,36 @@ export function ThreadPanel({
             이 여백은 루트 툴바가 아래로 뒤집힐 때 쓰는 26px 띠도 함께 비워 둔다. */}
         <div className="pt-8" data-testid="thread-replies">
           <Skeleton ready={!query.isLoading} rows={3} className="p-4">
-          {query.error && (
-            <InlineBanner
-              message="답글을 불러오지 못했습니다."
-              actionLabel="다시 시도"
-              onAction={() => void query.refetch()}
-              testId="thread-error"
-            />
-          )}
-          {!query.isLoading && !query.error && replies.length === 0 && (
-            <EmptyInvite
-              headline="첫 답글을 남겨 이 대화를 이어가세요."
-              className="mx-4 rounded-md border border-dashed border-line"
-              testId="thread-empty"
-            />
-          )}
-          {replies.map((reply, index) => (
-            <MessageRow
-              key={reply.seq}
-              message={reply}
-              startsGroup={startsAuthorGroup(replies[index - 1], reply)}
-              directory={directory}
-              actions={rowActions(reply)}
-              onOpenWorkSession={onOpenWorkSession}
-              // 답글은 애초에 롤업을 갖지 않는다(서버 투영이 `root_id IS NULL` 로
-              // 거른다 — 스레드는 한 단계다). 명시해 두는 것은 그 불변식이 깨져
-              // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
-              // 말하지 않게 하기 위해서다.
-              showRollup={false}
-            />
-          ))}
+            {query.error && (
+              <InlineBanner
+                message="답글을 불러오지 못했습니다."
+                actionLabel="다시 시도"
+                onAction={() => void query.refetch()}
+                testId="thread-error"
+              />
+            )}
+            {!query.isLoading && !query.error && replies.length === 0 && (
+              <EmptyInvite
+                headline="첫 답글을 남겨 이 대화를 이어가세요."
+                className="mx-4 rounded-md border border-dashed border-line"
+                testId="thread-empty"
+              />
+            )}
+            {replies.map((reply, index) => (
+              <MessageRow
+                key={reply.seq}
+                message={reply}
+                startsGroup={startsAuthorGroup(replies[index - 1], reply)}
+                directory={directory}
+                actions={rowActions(reply)}
+                onOpenWorkSession={onOpenWorkSession}
+                // 답글은 애초에 롤업을 갖지 않는다(서버 투영이 `root_id IS NULL` 로
+                // 거른다 — 스레드는 한 단계다). 명시해 두는 것은 그 불변식이 깨져
+                // 답글에 `thread` 가 실려 오는 날에도 이 화면이 답글 밑에 답글이 있다고
+                // 말하지 않게 하기 위해서다.
+                showRollup={false}
+              />
+            ))}
           </Skeleton>
         </div>
         </TimelineLiveRegionProvider>

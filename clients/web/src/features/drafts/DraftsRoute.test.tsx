@@ -333,7 +333,13 @@ describe("초안 패널 (#1901)", () => {
 
   it("진입 시 초안 0이면 사용법 카피를 그린다", async () => {
     const host = await mountAt("/drafts");
-    expect(host.querySelector('[data-testid="drafts-empty"]')).not.toBeNull();
+    const empty = host.querySelector('[data-testid="drafts-empty"]');
+    const skel = host.querySelector('[data-testid="skeleton"]');
+    expect(empty).not.toBeNull();
+    expect(skel).not.toBeNull();
+    expect(skel?.contains(empty)).toBe(true);
+    expect(skel?.getAttribute("data-ready")).toBe("true");
+    expect(skel?.querySelector(".skel-content")).toBeTruthy();
     expect(host.textContent).toContain("아직 초안이 없습니다.");
     expect(host.textContent).toContain("쓰다 만 글은 자동으로 저장됩니다.");
     expect(host.querySelector('[data-testid="drafts-list"]')).toBeNull();
