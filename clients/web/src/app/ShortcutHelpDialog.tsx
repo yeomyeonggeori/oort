@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CircleHelp } from "lucide-react";
 import { Button } from "@/design/ui/button";
+import { OPEN_DIALOG_SELECTOR } from "@/design/ui/escapeLayer";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +15,9 @@ import {
 
 function anotherDialogIsOpen(): boolean {
   if (typeof document === "undefined") return false;
-  return document.querySelector('[role="dialog"][data-state="open"]') !== null;
+  // "Is another dialog *open*", not "who owns this Escape". Presence-exit
+  // nodes are not open; overlayOwnsEscape(event) is the ownership predicate.
+  return document.querySelector(OPEN_DIALOG_SELECTOR) !== null;
 }
 
 /**

@@ -108,12 +108,12 @@ export function ThreadPanel({
         // 물러나며 전파를 막는다. 목록이 닫힌 뒤의 Escape만 여기로 올라온다.
         //
         // 이모지 피커는 Radix 포탈이라 DOM 경로에는 이 aside가 없지만, React는
-        // 포탈을 트리 부모로 버블시킨다. D4 Presence는 data-state=closed로
-        // 그 노드를 닫힘 동안 남겨 두므로, 열린 오버레이뿐 아니라 마운트된
-        // role=dialog|menu 가 있는 동안은 서랍을 닫지 않는다 (#1996).
+        // 포탈을 트리 부모로 버블시킨다. 같은 Escape가 피커를 닫은 뒤 이
+        // 리스너에 닿으면 overlayOwnsEscape(event)가 그 키를 삼킨다. Presence
+        // 닫힘 동안의 *다음* Escape는 새 이벤트라 서랍이 받는다 (#1996 M-1).
         if (event.key !== "Escape") return;
         if (event.defaultPrevented) return;
-        if (overlayOwnsEscape()) return;
+        if (overlayOwnsEscape(undefined, event.nativeEvent)) return;
         closePanel();
       }}
       className="thread-pane flex h-full flex-col border-l border-line bg-surface"

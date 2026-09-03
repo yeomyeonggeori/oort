@@ -175,9 +175,9 @@ export function SidebarRowContextMenu({
   // 층을 세우지만, **이 층의 handle 은 결코 불리지 않는다** (design-review
   // #1937 N-2). 아래 층(폰 서랍·작업 패널)을 실제로 지키는 것은 이 줄이 아니라
   // `escapeLayer.ts` 의 `overlayOwnsEscape()` 술어다: 그것이
-  // 마운트된 `[role="menu"]`(Presence 닫힘 `data-state=closed` 포함)를
-  // 「가장 위」로 판정해 `runTopEscapeLayer(blocked=true)` 가 즉시 물러나고,
-  // Esc 는 Radix 가 가져간다.
+  // `[role="menu"][data-state="open"]` 를 「가장 위」로 판정하고, 그
+  // 키다운을 표시해 같은 이벤트가 Presence 닫힘 뒤에 아래 층으로 새지
+  // 않게 한다. 닫힘 동안의 *다음* Escape는 새 이벤트다.
   //
   // 그런데도 세우는 이유는 하나다. `escapeIsClaimed()` — 층을 열지 **않는**
   // 표면(설정 라우트의 뒤로 가기)이 「지금 화면에 층이 있나」를 묻는 그 술어 —

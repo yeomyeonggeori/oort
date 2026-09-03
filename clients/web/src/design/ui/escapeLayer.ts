@@ -99,16 +99,42 @@ export function resetEscapeLayers(): void {
 }
 
 /**
- * Radix overlay still mounted — including Presence exit (`data-state=closed`).
+ * Radix overlay that is currently open. Bound to `data-state=open` so a
+ * persistently mounted `[role="menu"]` without that state cannot claim Escape
+ * app-wide (UX-R1a M-2). Presence-exit (`data-state=closed`) is not open.
  *
- * ADR-0179 D4 keeps dialog/popover/menu in the tree for the close duration.
- * Requiring `data-state=open` lets the same Escape that started the exit also
- * close the layer underneath: Radix sets closed first, then React portal
- * bubbling (ThreadPanel aside) and this stack both see "no open dialog".
+ * "Is another dialog open" (ShortcutHelpDialog) is the dialog half of this
+ * selector, not "who owns this Escape event" — that question is
+ * `overlayOwnsEscape(root, event)`.
+ */
+export const OPEN_OVERLAY_SELECTOR =
+  '[role="dialog"][data-state="open"], [role="menu"][data-state="open"]';
+
+export const OPEN_DIALOG_SELECTOR = '[role="dialog"][data-state="open"]';
+
+/**
+ * The exact KeyboardEvent that started an overlay close. Presence keeps the
+ * node mounted for the close duration; a *new* Escape during that window
+ * belongs to the layer beneath. The event that closed the overlay does not.
+ */
+const consumedEscapeEvents = new WeakSet<object>();
+
+/**
+ * Whether an overlay owns Escape.
+ *
+ * Pass the current keydown when deciding for a live event: an open overlay
+ * marks that event, so later listeners in the same dispatch still see it as
+ * owned after Radix has flipped `data-state` to closed. A later keydown is a
+ * different Event and is not owned by a Presence-exit node.
+ *
+ * Accepts a native Event or a React synthetic event (`nativeEvent` for the
+ * latter — same identity as window capture).
  */
 export function overlayOwnsEscape(
-  root?: Pick<ParentNode, "querySelector"> | null
+  root?: Pick<ParentNode, "querySelector"> | null,
+  event?: object | null
 ): boolean {
+  if (event && consumedEscapeEvents.has(event)) return true;
   const scope =
     root === undefined
       ? typeof document === "undefined"
@@ -116,14 +142,13 @@ export function overlayOwnsEscape(
         : document
       : root;
   if (scope == null) return false;
-  return (
-    scope.querySelector('[role="dialog"]') !== null ||
-    scope.querySelector('[role="menu"]') !== null
-  );
+  const open = scope.querySelector(OPEN_OVERLAY_SELECTOR) !== null;
+  if (open && event) consumedEscapeEvents.add(event);
+  return open;
 }
 
-function dialogIsOpen(): boolean {
-  return overlayOwnsEscape();
+function dialogIsOpen(event?: object): boolean {
+  return overlayOwnsEscape(undefined, event);
 }
 
 /**
@@ -146,13 +171,14 @@ function dialogIsOpen(): boolean {
  *     라우트를 함께 닫는다. 이 술어는 그 우연을 이유로 바꾼다. 프로필 카드
  *     메뉴(`role="menu"`)도 같은 면제에 들어간다: 없으면 서랍 층이 한 번에 닫힌다.
  */
-export function escapeIsClaimed(): boolean {
-  return stack.length > 0 || dialogIsOpen();
+export function escapeIsClaimed(event?: object): boolean {
+  return stack.length > 0 || dialogIsOpen(event);
 }
 
 function onKeyDown(event: KeyboardEvent): void {
   if (event.key !== "Escape") return;
-  if (!runTopEscapeLayer(dialogIsOpen())) return;
+  if (dialogIsOpen(event)) return;
+  if (!runTopEscapeLayer(false)) return;
   event.stopImmediatePropagation();
   event.stopPropagation();
   event.preventDefault();
