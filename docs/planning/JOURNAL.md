@@ -3,6 +3,15 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-04 · Fable(+Opus 5 검수) · ★W1 3차 랜딩 — UX-R1a·R1d 폐곡선, DS-2 포함 승격 l, UX-R1c R4 진행, 레인 재정의
+
+- 레인: 성재 「Fable + opus5으로 가자」 — planner Fable · design-review Opus 5 · 워커 Cursor grok 4.6. 재개는 Opus5의 스크래치 RESUME.md로 복원 후 repo 보존(`claudedocs/resume-2026-09-03/`).
+- 랜딩: UX-R1a #2043(2회전 — 제품 다이얼로그 exit 0 → 12~20 frames 실측) · UX-R1d #2042(4회전 — 가상화 버스트 1/3 → 3/3·5/5·10/10). UX-R1c #2045 R2 FAIL(CI 상시 빨강 throw·런타임 3회 초록·Inbox 비로딩) → R3 FAIL(정착 팝 48~76px, 한 프레임) → R4 워커 발사.
+- 승격 l: #2051(uxui→main) + sync #2052/#2053 → main=d584e95c·uxui=c9ec58c7·engine=ab6a2ba7, alignment PASS.
+- 발행: #2048(`MOTION_VOCABULARY` 2/10 누락) · #2049(R1a 잔여) · #2050(R1d 잔여 + 성재 결정: 바닥 동시 도착 상한). 개방: #1997·#2001·#2002 ready.
+- 교훈: 스크래치 `.git` 함정 · `pgrep -f` 미션 텍스트 매치 · 루트 폰 node_modules 신선도 · skipIf 형제 형태를 미션에 명시 · 구간 단정(프레임당 최대 변화량) · 워커 stdout 절단 · bash 3.2 연관 배열.
+- 다음: R1c R4 검수·랜딩·승격 m → R1e/R1b/R2a/R2b 발사(go) → ITO 준비.
+
 ## 2026-09-03 · Fable→Opus5 · ★W1 2차 랜딩 — M0m·UX-R4a·M0w 폐곡선, DS-2 잔류, 워커 레인 정지
 
 - 랜딩: M0m #2009(3회전, iOS warm 딥링크 선재 공백 복구) · UX-R4a #2015(4회전, 「보이지 않는 포커스 링」 교정) · M0w #2019(3회전, **스캔 불가 QR 인코더** 수리 + 독립 왕복 디코드 시험). 승격 배치 k #2033 + sync #2034/#2035 → main=10893152.
@@ -139,8 +148,3 @@
 - **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
 - 파도 1: **#1777 랜딩**(9a308276) — host-signed 세 팔 이식으로 remote_attach_available false→true, 터미널 축 개방. 레시피 `scripts/verify_workd_rust.sh` 동반. **#1778 PR #1787** — 소유자 관전 토글 400 수리, **ADR-0004 증보3 D3 원문 회귀 이식**(owner_only 강제는 077 파도가 스스로 넓힌 규칙이었다). 독립 재현 1199/1199 + PG 컨포먼스 1/1(일회용 PG 신규 기동).
 - 적립: **#1788**(M6 — 첨부 capability URL이 고정 localhost로 조립돼 터널 접속에서 깨짐. `--public-origin` 갱신 대상에서 누락. 그록봇 VM E2E가 정확히 이 조건). #1785(ACP 릴레이).
-
-## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
-- 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
-- ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
-- 권고: 그록봇 제품 편입 고집 대신 역방향 소비(Remote MCP Tools, ADR-0163 경로)가 폴링·CDP·약관 3문제 동시 탈출. Cloud Agents는 코드 이그레스 결정(ADR-0150 계열) 선행. 결정 큐 Q-DIR/Q-MCP/Q-EGRESS 상신.
