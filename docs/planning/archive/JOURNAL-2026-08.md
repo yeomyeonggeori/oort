@@ -2,6 +2,11 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
+- 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
+- ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
+- 권고: 그록봇 제품 편입 고집 대신 역방향 소비(Remote MCP Tools, ADR-0163 경로)가 폴링·CDP·약관 3문제 동시 탈출. Cloud Agents는 코드 이그레스 결정(ADR-0150 계열) 선행. 결정 큐 Q-DIR/Q-MCP/Q-EGRESS 상신.
+
 ## 2026-08-24 (Fable) · ★4차 집행 완결 — 2차 승격 창·v0.1.2 첫 멀티아치 재발행·#1716/#1720 랜딩
 - **v0.1.2 발행 폐곡선**(RELEASING 전 절차): main=d66ca97a → dispatch+owner 승인 2회(위임·자동 승인 감시) → 멀티아치 성공 → list digest 수거(앱 43babdbc…de6d·pg b09eb970…1626) → attestation 2본 PASS → 태그·Release → SELF_HOST §2-B 현행화(#1730). **첫 멀티아치 운영자 pin — Apple Silicon 네이티브 pull 성립. D8 함정 3종(실시간·보관소·claim)이 셀프호스터 이미지에 실림.** 언퍼얼은 포함·기본 꺼짐.
 - 2차 승격 창: #1721(docs)→선sync 짝→#1724(uxui)→#1725→#1726(engine)→최종 짝. 학습 절차(선sync)로 토폴로지 재실행 1회로 끝.

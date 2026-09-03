@@ -1,5 +1,15 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-04 스냅샷 85 (Fable · momo-main — ★W1 3차 랜딩: UX-R1a·UX-R1d 폐곡선 랜딩 + DS-2 승격, 배치 l. UX-R1c는 R4 수리 중. 레인 = Fable planner + Opus 5 검수 + Cursor grok 4.6 워커).** 컴팩트 복원 진입점.
+>
+> **★ 레인(성재 2026-09-04 「Fable + opus5으로 가자」)**: planner/momo-main = **Fable**, design-review 서브에이전트 = **Opus 5**(`model: opus`), 워커 = **Cursor CLI grok 4.6 non-fast**(정본 PIPELINE §1·§3). 병렬 2는 **워커+검수 합산**(dwell ms·프레임 수·버스트 재생 같은 타이밍 측정이 CPU 경합에 흔들린다). 재개 체크포인트는 `/tmp` 스크래치가 아니라 **repo**에 — 이전 세션(Opus5)의 RESUME.md는 `claudedocs/resume-2026-09-03/`로 보존.
+> **★ 랜딩(전부 design-review 폐곡선)**: **UX-R1a #2043**(모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit 비대칭, **2회전** — R1: 「다섯 제품 다이얼로그의 닫힘 애니메이션이 한 번도 돌지 않음」(`{open && <DialogContent/>}`가 Radix Presence보다 먼저 언마운트, 하네스만 150ms — 문서 3곳이 하네스 숫자를 제품 실측처럼 기재) + 「측정 파일이 브라우저 없으면 통과」 → R2 PASS: 제품 실측 12~20 closed frames / 173~193ms, 브라우저 없이도 wiring 단정 빨강) → uxui `8f607b26` · **UX-R1d #2042**(메시지 도착 모션, **4회전** — R3: 「같은 틱 버스트가 가상화 경로에서 1/3」(react-virtuoso가 다음 커밋에 마운트, paint-tick 캡 `useEffect`가 그 사이 grant를 먹음; 하네스는 가상화 없이 3/3) → R4 PASS: grant는 행 마운트까지 생존, 검수자 프로브 3/3·5/5·10/10, 백로그 스크롤업 0 → 바닥 점프 1, R5 생존 뮤테이션은 측정으로 무결함 판정) → uxui `cf70d743`. **UX-R1c #2045**: R2 FAIL(B1·H2 — `skel.test.ts`가 Chromium 없으면 throw → CI 상시 빨강, 옳은 답 `skipIf`가 형제 파일 40줄 옆에; 런타임 이중 크로스페이드 3회가 2483 초록; Inbox 프레임이 로딩 아님) → R3 워커 → R3 FAIL(B0·**H1**: 막대를 흐름에서 빼는 R2 수리가 **정착 한 프레임 뒤 152→104 / 136→60px 컨테이너 팝**을 만듦 — 팝을 콘텐츠에서 컨테이너로 옮겨 원인보다 250ms 늦춘 꼴, 빈 상태 8표면) → **R4 수리 중**(기획 결정: 높이 변화가 페이드와 같은 사다리를 탄다 — 프레임당 ≤12px·정착 후 0px 단정, 9호출부 실마운트 결속, `measure/**` lint·typecheck 편입).
+> **★ 승격 배치 l**: #2051(uxui→main: DS-2 #2020·UX-R1a·UX-R1d) + sync #2052(engine)·#2053(uxui) → **main=d584e95c·uxui=c9ec58c7·engine=ab6a2ba7**, alignment PASS. 보호 경로 변경 0(감사 불요).
+> **★ 발행 티켓**: **#2048** DS-2 `MOTION_VOCABULARY` 손수 목록이 10개 유틸리티 중 `enter-conversation`·`scrim-blur` 누락, 전수 미측정 · **#2049** UX-R1a R2 잔여(여섯째 확인 다이얼로그 `AgentHubRoute` 메모리 무효화 `open` 상수 true → exit 불가 · 마운트 가드가 정규식 한 모양(삼항·early return 초록) · 항상-마운트 시 opener 폴백 `<body>` 고정(명시 복원 하나만 지우면 포커스 BODY, 두 엔진) · 메뉴→다이얼로그 첫 Escape 1프레임(6/8 vs 0/8) · `measure/`가 lint·typecheck·프리플라이트 밖) · **#2050** UX-R1d R4 잔여(스크롤업 백로그 캡 가드가 렌더를 안 탐 — sweep deps `[]` → 스위트 2512 초록인 채 제품 43/50 캐스케이드 · **성재 결정 항목: 바닥 동시 도착 상한**(10건이 뷰포트 절반을 동시에 blur, 규칙 위반 아님) · AST dead-binding · capture wait 무보호 · 플레이크 1/90). 개방: #1997 UX-R1b · #2001 UX-R2a · #2002 UX-R2b(전부 ready).
+> **★ 교훈**: ①검수 스크래치 사본의 `.git` 파일이 실제 워크트리 gitdir을 가리킨다 — 사본 생성 직후 삭제(검수 프롬프트 상설) ②`pgrep -f`는 워커 프로세스 명령줄에 실린 **미션 전문**에 매치한다(랜딩 프리플라이트 false positive) — argv로 판별 ③루트 체크아웃의 폰 `node_modules`가 낡아 사후 게이트만 붉었다 — 병합 트리 게이트는 **빌려 쓰는 node_modules의 신선도**에 의존; 8레인은 이 머신에서 ~30초(웹 2474/7.5초, 폰 1320) ④워커가 형제 파일의 `skipIf` 형태를 두고 throw를 골라 CI가 구조적으로 붉었다(「옳은 답이 옆에 있었다」 코퍼스 최다 패턴) — 미션에 형제 형태를 **이름 대어** 적을 것 ⑤R2 수리가 R3에서 「끝 상태는 옳고 타이밍이 틀린」 회귀를 만들었다 — 단정은 **구간**을 재야 한다(프레임당 최대 변화량) ⑥워커 stdout 절단 반복(149B·159B) — 보고 정본은 PR 본문 ⑦bash 3.2엔 연관 배열이 없다(승격 스크립트 1회 즉사, 부작용 0).
+> **★ 다음**: UX-R1c R4 → 검수 R4 → 랜딩 → 승격 m · UX-R1e #2000 · UX-R1b #1997 · UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2, 발사는 go) · ITO(G1) 준비 · 성재 결정 #2050 N-2.
+
+> 이하 스냅샷 84:
 > **2026-09-03 스냅샷 84 (Fable/Opus5 · momo-main — ★W1 2차 랜딩: M0m·UX-R4a·M0w 폐곡선 랜딩+승격, DS-2만 잔류. 워커 레인 정지(grok 잔액 소진)).** 컴팩트 복원 진입점.
 >
 > **★ 오케스트레이터 = Opus 5**(Fable 한도 소진, 성재가 `/model` 전환). **서브에이전트도 `model: opus`로 발사할 것.**
@@ -47,15 +57,6 @@
 > **★ ADR 큐(go 후 즉시 기안)**: 0179 표현 축(모션·눌림·엘리베이션·밀도) · 0180 기기 연결 1회용 QR 링크 토큰 · 0181 웰컴 킥오프 오프너=agent-worker · 0182 일시 확인 정책(토스트 금지 대안).
 > **★ 다음 행동(go 신호 후)**: ①ADR 4본 Proposed ②G0 집행(BT-6 이어받기 워커 → #1922 머지·A6 상향 → 승격 → v0.1.4) ③티켓·패킷 발급(UX-R0~R1e·DS-1·2·SH-1~3a·M0s/w/m·P1~P4) ④W1 발사(병렬 2).
 > **★ 재개 지점 불변**: BT-6 서버 절반 `wbt6-server` 미커밋(085·read_state ReadIntent·dto). 워커 레인=Opus 5 Agent.
-
-> 이하 스냅샷 79:
-> **2026-09-02 스냅샷 79 (Fable · momo-main — ★재개 복원 + 출시 재진단·두 기둥 브리프 작성, 인터뷰 대기).** 컴팩트 복원 진입점.
->
-> **★ 재개 지점**: BT-1~5 트랙 랜딩 완료(#1937~#1945). **BT-6(#1934) 서버 절반이 `momo-worktrees/wbt6-server`에 미커밋**(085 마이그레이션·read_state.rs ReadIntent·dto — 라우트·테스트 미착수). 클라 절반 미착수. 권고=이어받기. 루트는 8/28 브랜치 잔재를 stash@{0}에 보존 후 origin/main 정렬, 트랙 워크트리 ff.
-> **★ 브리프 정본**: `research/2026-09-02-launch-rediagnosis-two-pillars-brief.md` — 탐색 4기(웹 클라·셀프호스팅·buzz·문서/파이프라인) + 9/1 3중 감사 합본. 근원 5(모션 축 0·눌림 피드백 부재·온보딩 절정 부재·⌘K 내비 전용·에이전트 표면 분산·금지 위주 시스템). 편성안: **UX-R0~R6**(ADR-0179 모션·밀도 축 → 모션 토대 → 온보딩 절정 → 팔레트 → 에이전트 표면 → 상호작용 → 외양) · **SH-1~9**(릴리스 매니페스트 → 공개 엣지 #1926 → CLI/doctor → 영문 에이전트 런북+README 프롬프트 → 클라우드 경로 → 합류 GUI → blocker 순서 → 그록봇 → OSS 위생) · **P1~P8**(PIPELINE.md 단일 설정·CODEX.md 병합·commands·스킬 통합·archive·planning_context 갱신). 게이트 G1(내부 테스트 진입)=UX-R1·R2+SH-1~4, G2(출시)=셀프호스터 3명 다변화.
-> **★ 성재 인터뷰 대기(브리프 §8 Q1~Q11)**: 모션 라이브러리·토스트 정책·UX-R 순서·하네스/플랫폼 우선·BT-6 재개 방식·결재 3건·워커 레인 확정값·영문화 범위·그록봇 템플릿 실물·폰 시점·킥오프 오프너 주체. 답 수신 → ADR 3본 기안 + 티켓/패킷 발급 + BT-6 재발사(발사는 go 신호).
-> **★ 결재 대기(변동 없음)**: ①BZ-5a 액센트→#1922 ②track→main 승격(uxui 110·engine 35 적체) ③A6 rich 기본. 워커 레인=Opus 5 Agent(9/1~).
-
 
 > **과거 스냅샷은 `docs/planning/archive/CURRENT_STATE-snapshots.md`로 이동(로테이션 — 규칙은 아래 절).**
 

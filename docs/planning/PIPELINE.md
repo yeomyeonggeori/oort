@@ -8,7 +8,7 @@
 | 레인 | 역할 | 현재 값 | 계약·스킬 |
 |---|---|---|---|
 | **product-owner** | ADR Accept/Reject · 로드맵 정본 반영 승인 · 우선순위 · track→main 승격 승인 | 메인테이너(성재) | ADR-0100 · `docs/TRACKS.md` §3 |
-| **planner / momo-main** | 리서치 · ADR 기안 · 티켓/패킷 발급 · 워커 검수 재판정 · 순차 머지 · 승격+sync 짝 집행(상시 위임 범위) · CURRENT_STATE/JOURNAL 플러시 | Claude **Opus 5**(2026-09-03~, Fable 한도 소진으로 전환. 단일 세션이 planner와 momo-main 겸임) | `CLAUDE.md` · `docs/planning/README.md` · `.claude/skills/momo-planning` |
+| **planner / momo-main** | 리서치 · ADR 기안 · 티켓/패킷 발급 · 워커 검수 재판정 · 순차 머지 · 승격+sync 짝 집행(상시 위임 범위) · CURRENT_STATE/JOURNAL 플러시 | Claude **Fable**(2026-09-04~, 성재 「Fable + opus5으로 가자」 — 한도 소진 시 Opus 5로 강하, `FABLE_DOWNGRADE_ROUTINE.md`). **서브에이전트(design-review 등)는 Opus 5**(`model: opus`). 단일 세션이 planner와 momo-main 겸임 | `CLAUDE.md` · `docs/planning/README.md` · `.claude/skills/momo-planning` |
 | **worker** | goal(=GitHub Issue+패킷) 구현 · 게이트 · PR · 정지 | **grok 4.6 (Cursor CLI, non-fast)** — `cursor-agent --model cursor-grok-4.6-high`. 구 grok build CLI(`~/.grok/bin/grok`)는 **잔액 소진(402)으로 정지**(2026-09-03). | `AGENTS.md` · `~/.claude/skills/grok-fleet`(spawn 계약 — 호출부만 아래 §3으로 대체) |
 | **reviewer-design** | UI 변경의 fresh-context 리뷰(캡처+프리플라이트+루브릭, Blocker 0·High 0 폐곡선) | `.claude/agents/design-review.md` 에이전트 | `.claude/skills/momo-design-taste` 라우터 |
 | **reviewer-code** | 보안·정합·스코프·테스트 정직성 리뷰 · 정책 무결성 감사 | planner 본인(+필요 시 grok 독립 렌즈 "리뷰어 C") | `docs/MULTI_SESSION_OPS.md` §7 · `scripts/verify_policy_integrity_from_base.sh` |
@@ -38,6 +38,8 @@
   백그라운드(nohup) + 진행·정지·종료 감시(커밋 수·dirty·rc 파일). 재개는 같은 cwd에서 `-c`.
 - **워커 상습 6축(리뷰 지시문에 상설)**: 증명 없는 초록 시험 · 픽스처 맞춤 규칙 인하 · 짧은 픽스처 뒤에 숨는 규칙 · 수리가 만드는 회귀 · 자 부분상속 · **실패할 수 없는 단정**(2026-09-03 신설 — 수리는 옳은데 그것을 지키는 자가 헛돈다: 한 번도 디코드하지 않는 QR 스위트, jsdom 폴백으로 항상 참인 하한, `try{}catch{}`에 싸인 스캔, 파일 이름 허용목록, 속성만 보는 렌더 가드, 발화하지 않는 스크롤 단정).
 - **리뷰 지시문 필수 문구**: 「각 단정을 스크래치 사본에서 되돌려 붉어지는지 증명하라(사보타주)」 — 2026-09-03 회차의 모든 발견이 여기서 나왔다. 수리 미션에는 **무엇을 숫자로 재는지**를 적는다(예: 링-채움 대비 ≥3:1, 렌더된 모듈 피치 ≥floor, 표본의 셀 내 가시 비율 ≥0.9).
+- **병렬 상한 2는 워커+검수 합산**(2026-09-04): design-review 서브에이전트도 캡처·스위트·프로브를 돌리는 무거운 잡이고, dwell ms·프레임 수·버스트 재생 같은 타이밍 측정은 CPU 경합에 흔들린다. 검수 프롬프트에는 「스크래치 사본 생성 직후 `.git` 파일 삭제」(사본의 `.git`이 실제 워크트리 gitdir을 가리킨다)와 사용 포트 배정을 명시한다.
+- **미션에 형제 형태를 이름 대어 적는다**(2026-09-04): 워커가 옆 파일의 `warn + skipIf`를 두고 throw를 골라 CI가 구조적으로 붉었다(UX-R1c R2-B1). 수리 미션은 「무엇을 재라」에 더해 「어느 파일의 어느 형태를 따르라」를 적는다.
 - **게이트 동시 실행 금지**: 병합 트리 게이트를 둘 이상 동시에 돌리면 폰 스위트가 비결정적으로 붉어진다(#2018 — `workConsole`·`composerAttachments`·`deviceLink` 3파일 실측, 순차 재실행 시 전부 PASS).
 
 ## 4. 이 문서를 참조해야 하는 자리 (모델명 하드코딩 금지 목록)
