@@ -165,6 +165,20 @@ describe("검수 #1 재검토 — 채워진 컨트롤 위 대비 (design-review 
         expect(line, "ThreadComposer 보내기 버튼").toContain("focus-ring-on-fill");
       }
     }
+    // Agent Hub tools row is the control (#1957 R3 H-3). on-fill without a
+    // drawing `focus-visible:focus-ring` paints nothing.
+    const tools = readFileSync(
+      `${HERE}/../features/agentHub/EnabledToolsSection.tsx`,
+      "utf8"
+    );
+    const onFillStrings = [
+      ...tools.matchAll(/"([^"]*focus-ring-on-fill[^"]*)"/g),
+    ].map((match) => match[1]);
+    expect(onFillStrings.length).toBeGreaterThan(0);
+    for (const classList of onFillStrings) {
+      const stripped = classList.replaceAll("focus-ring-on-fill", "");
+      expect(stripped, classList).toMatch(/focus-visible:focus-ring/);
+    }
   });
 });
 

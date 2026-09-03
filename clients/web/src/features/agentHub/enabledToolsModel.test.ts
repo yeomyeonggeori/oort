@@ -164,12 +164,13 @@ describe("AgentHubRoute tools save wiring", () => {
 });
 
 describe("M-3 StatusChip vessel", () => {
-  it("중립 칩은 muted-soft 그릇과 ink-muted 테두리를 쓴다", () => {
+  it("H-6: 중립 칩은 muted-soft 그릇만 쓰고 컨트롤 테두리는 없다", () => {
     const source = readFileSync(
       new URL("./StatusChip.tsx", import.meta.url),
       "utf8"
     );
     expect(source).toContain("bg-muted-soft");
-    expect(source).toContain("border-ink-muted");
+    expect(source).not.toContain("border-ink-muted");
+    expect(source).not.toMatch(/tone === "neutral" &&[\s\S]*border /);
   });
 });

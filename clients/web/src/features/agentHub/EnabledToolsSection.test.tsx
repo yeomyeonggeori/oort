@@ -81,6 +81,7 @@ function mount(
 ): {
   host: HTMLElement;
   save: ReturnType<typeof vi.fn<(tools: string[]) => Promise<ToolsSaveResult>>>;
+  remount: (next?: Partial<EnabledToolsSectionProps>) => void;
 } {
   const save = vi.fn<(tools: string[]) => Promise<ToolsSaveResult>>();
   save.mockResolvedValue({ ok: true });
@@ -88,7 +89,7 @@ function mount(
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
-  const props: EnabledToolsSectionProps = {
+  let props: EnabledToolsSectionProps = {
     catalog: CATALOG,
     catalogStatus: "ready",
     catalogMessage: null,
@@ -99,11 +100,49 @@ function mount(
     save,
     ...over,
   };
-  const tree: ReactElement = createElement(EnabledToolsSection, props);
-  act(() => {
-    mountedRoot?.render(tree);
-  });
-  return { host, save };
+  const render = (next: EnabledToolsSectionProps) => {
+    const tree: ReactElement = createElement(EnabledToolsSection, next);
+    act(() => {
+      mountedRoot?.render(tree);
+    });
+  };
+  render(props);
+  return {
+    host,
+    save,
+    remount(next: Partial<EnabledToolsSectionProps> = {}) {
+      props = { ...props, ...next };
+      render(props);
+    },
+  };
+}
+
+function injectSaveOpacityCss(): HTMLStyleElement {
+  const style = document.createElement("style");
+  style.textContent = `
+    .opacity-50 { opacity: 0.5; }
+    .hover\\:opacity-90:hover, .is-hovered.hover\\:opacity-90 { opacity: 0.9; }
+    .hover\\:opacity-50:hover, .is-hovered.hover\\:opacity-50 { opacity: 0.5; }
+    .pointer-events-none { pointer-events: none; }
+  `;
+  document.head.append(style);
+  return style;
+}
+
+function hoverOpacity(el: HTMLElement): number {
+  if (getComputedStyle(el).pointerEvents === "none") {
+    return Number(getComputedStyle(el).opacity);
+  }
+  el.classList.add("is-hovered");
+  const value = Number(getComputedStyle(el).opacity);
+  el.classList.remove("is-hovered");
+  return value;
+}
+
+function liveTabStops(host: HTMLElement): HTMLElement[] {
+  return [...host.querySelectorAll<HTMLElement>("[data-tool-toggle]")].filter(
+    (el) => el.tabIndex === 0
+  );
 }
 
 function toggle(host: HTMLElement, name: string): HTMLInputElement {
@@ -156,6 +195,11 @@ describe("EnabledToolsSection", () => {
       .map((id) => host.querySelector(`[id="${id}"]`)?.textContent ?? "")
       .join(" ");
     expect(reason).toContain(DECLARED_ONLY_REASON);
+    const row = host.querySelector(
+      '[data-testid="agent-hub-tool-row-work.session.resume"]'
+    );
+    expect(row?.textContent).toContain("실행 불가");
+    expect(row?.textContent).not.toContain("선언만");
     const before = input.checked;
     act(() => {
       input.click();
@@ -233,21 +277,27 @@ describe("EnabledToolsSection", () => {
   });
 
   it("B-1: rest 저장은 aria-disabled 이고 흐리며, dirty 면 풀린다", () => {
-    const style = document.createElement("style");
-    style.textContent = ".opacity-50 { opacity: 0.5; }";
-    document.head.append(style);
-    const { host } = mount();
+    const style = injectSaveOpacityCss();
+    const { host, save } = mount();
     const button = host.querySelector<HTMLButtonElement>(
       '[data-testid="agent-hub-enabled-tools-save"]'
     );
     expect(button).not.toBeNull();
     expect(button?.getAttribute("aria-disabled")).toBe("true");
-    expect(button?.className).toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
-    expect(Number(getComputedStyle(button!).opacity)).toBeLessThan(1);
+    expect(button?.hasAttribute("disabled")).toBe(false);
+    expect(Number(getComputedStyle(button!).opacity)).toBe(0.5);
+    expect(hoverOpacity(button!)).toBe(0.5);
+    act(() => {
+      button?.classList.add("is-hovered");
+      button?.click();
+      button?.classList.remove("is-hovered");
+    });
+    expect(save).not.toHaveBeenCalled();
     act(() => {
       toggle(host, LONG_NAME).click();
     });
     expect(button?.getAttribute("aria-disabled")).toBeNull();
+    expect(Number(getComputedStyle(button!).opacity)).toBe(1);
     expect(button?.className).not.toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
     style.remove();
   });
@@ -261,14 +311,14 @@ describe("EnabledToolsSection", () => {
     expect(row?.textContent).not.toContain("실행 가능");
   });
 
-  it("H-3: 켜진 토글의 클래스 목록에 on-fill 포커스 링이 있다", () => {
+  it("H-3: 켜진 행은 그리는 링과 on-fill 을 같은 목록에 든다", () => {
     const { host } = mount();
-    const checked = toggle(host, "work.session.spawn");
     const row = host.querySelector(
       '[data-testid="agent-hub-tool-row-work.session.spawn"]'
     );
-    const classes = `${checked.className} ${row?.className ?? ""}`;
-    expect(classes).toContain("focus-ring-on-fill");
+    expect(row?.className).toContain("focus-ring-on-fill");
+    const stripped = (row?.className ?? "").replaceAll("focus-ring-on-fill", "");
+    expect(stripped).toMatch(/focus-visible:focus-ring/);
   });
 
   it("H-4: 이름 클릭이 토글하고, 잠긴 행은 hover 틴트가 없다", () => {
@@ -379,5 +429,105 @@ describe("EnabledToolsSection", () => {
     });
     expect(button?.textContent).toContain("도구 변경 저장");
     expect(button?.textContent).not.toContain("저장됨");
+  });
+
+  it("H-5: 잠긴 행에 포커스해도 Tab 정거장은 살아있는 행에 남는다", () => {
+    const { host } = mount();
+    act(() => {
+      toggle(host, "work.session.resume").focus();
+    });
+    const stops = liveTabStops(host);
+    expect(stops).toHaveLength(1);
+    expect(stops[0]?.getAttribute("data-tool-name")).not.toBe(
+      "work.session.resume"
+    );
+    expect(stops[0]?.getAttribute("aria-disabled")).not.toBe("true");
+  });
+
+  it("H-5: 첫 살아있는 토글에서 ArrowDown 은 두 번째로 가고 세 번째(잠긴 행)를 건너뛴다", () => {
+    const { host } = mount();
+    const first = toggle(host, LONG_NAME);
+    const second = toggle(host, "work.session.spawn");
+    const locked = toggle(host, "work.session.resume");
+    act(() => {
+      first.focus();
+    });
+    act(() => {
+      first.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "ArrowDown",
+          bubbles: true,
+          cancelable: true,
+        })
+      );
+    });
+    expect(document.activeElement).toBe(second);
+    expect(document.activeElement).not.toBe(locked);
+  });
+
+  it("H-5: roveName 행이 사라지면 그룹에 Tab 정거장이 하나 남는다", () => {
+    const { host, remount } = mount({
+      enabledTools: ["work.session.spawn", "shell"],
+    });
+    act(() => {
+      toggle(host, "shell").focus();
+    });
+    remount({ enabledTools: ["work.session.spawn"] });
+    expect(liveTabStops(host)).toHaveLength(1);
+  });
+
+  it("M-7: 저장됨 수령증은 흐리지 않는다", async () => {
+    vi.useFakeTimers();
+    const style = injectSaveOpacityCss();
+    const { host } = mount();
+    act(() => {
+      toggle(host, LONG_NAME).click();
+    });
+    const button = host.querySelector<HTMLButtonElement>(
+      '[data-testid="agent-hub-enabled-tools-save"]'
+    );
+    await act(async () => {
+      button?.click();
+    });
+    const receipt = host.querySelector<HTMLButtonElement>(
+      '[data-testid="agent-hub-enabled-tools-save"]'
+    );
+    expect(receipt?.textContent).toContain("도구 변경 저장됨");
+    expect(Number(getComputedStyle(receipt!).opacity)).toBe(1);
+    expect(receipt?.className).not.toMatch(/(?:^|\s)opacity-50(?:\s|$)/);
+    style.remove();
+  });
+
+  it("M-8: 표시 전용은 저장을 약속하지 않는다", () => {
+    const { host } = mount({
+      catalog: null,
+      catalogStatus: "absent",
+      enabledTools: ["work.session.spawn"],
+    });
+    expect(host.textContent).not.toContain("저장해야");
+    expect(host.textContent).toContain("이 에이전트에 허용된 도구입니다.");
+    expect(
+      host.querySelector('[data-testid="agent-hub-enabled-tools-save"]')
+    ).toBeNull();
+  });
+
+  it("M-8: 카탈로그가 온 편집기만 저장 문장을 말한다", () => {
+    const { host } = mount();
+    expect(host.textContent).toContain(
+      "바꾼 뒤에는 저장해야 반영됩니다"
+    );
+  });
+
+  it("M-9: 모르는 표식은 중립 그릇이고 승인 필요는 warn 그릇이다", () => {
+    const { host } = mount({
+      enabledTools: ["work.session.spawn", "shell"],
+    });
+    const row = host.querySelector('[data-testid="agent-hub-tool-row-shell"]');
+    const spans = [...(row?.querySelectorAll("span") ?? [])];
+    const unknown = spans.find((el) => el.textContent === UNKNOWN_TOOL_CHIP);
+    const approval = spans.find((el) => el.textContent === "승인 필요");
+    expect(unknown?.className).toMatch(/bg-muted-soft/);
+    expect(unknown?.className).not.toMatch(/border-warn/);
+    expect(approval?.className).toMatch(/text-warn/);
   });
 });
