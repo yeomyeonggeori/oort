@@ -1,4 +1,4 @@
-import {act, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
+import {act, cleanup, fireEvent, render, screen, waitFor} from '@testing-library/react-native';
 import React from 'react';
 import {Linking} from 'react-native';
 
@@ -10,11 +10,13 @@ import {
   DEVICE_LINK_MALFORMED_COPY,
   DEVICE_LINK_SAS_WAIT_COPY,
   DEVICE_LINK_TOKEN_LEN,
+  DEVICE_LINK_UNREACHABLE_COPY,
   DEVICE_LINK_USED_COPY,
 } from '@momo/core/features/auth/deviceLinkModel';
 import {parseDeviceLinkDeepLink} from '@momo/core/features/auth/deepLink';
 
 import ConnectScreen from '../src/screens/ConnectScreen';
+import {deviceLinkDevice} from '../src/features/deviceLink/deviceIdentity';
 import {__resetSessionStore, keychainSettled} from '../src/storage/secureSession';
 import {__resetServerBaseCache} from '../src/storage/serverBase';
 
@@ -286,12 +288,67 @@ async function renderPendingSas(sas = '4821'): Promise<void> {
 }
 
 describe('R2 B-1 SAS wait has an exit and a bounded poll', () => {
-  it('shows 「QR 다시 찍기」 and pressing it returns to the form', async () => {
+  it('shows 「QR 다시 찍기」 and pressing it opens the scanner', async () => {
     await renderPendingSas();
     expect(screen.getByText('QR 다시 찍기')).toBeTruthy();
-    fireEvent.press(screen.getByText('QR 다시 찍기'));
+    fireEvent.press(screen.getByTestId('device-link-sas-rescan'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
     expect(screen.queryByTestId('device-link-sas')).toBeNull();
+  });
+
+  it('sends 「QR 다시 찍기」 to the scanner and 「주소로 연결」 to the form', async () => {
+    await renderPendingSas();
+    fireEvent.press(screen.getByTestId('device-link-sas-rescan'));
+    await waitFor(() => expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy());
+    expect(screen.queryByTestId('device-link-sas')).toBeNull();
+
+    cleanup();
+
+    await renderPendingSas();
+    fireEvent.press(screen.getByTestId('device-link-address-fallback'));
+    expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
     expect(screen.getByTestId('server-url-input')).toBeTruthy();
+    expect(screen.queryByTestId('device-link-sas')).toBeNull();
+  });
+
+  it('opens the scanner from the SAS expiry banner retry', async () => {
+    jest.useFakeTimers();
+    try {
+      jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
+      fetchMock.mockImplementation(async (url: string) => {
+        if (String(url).endsWith('/v1/auth/device-link/redeem')) {
+          return jsonResponse(200, {
+            ...LOGIN_BODY,
+            pendingSas: true,
+            sas: '4821',
+          });
+        }
+        if (String(url).includes('/v1/workspaces/')) {
+          return jsonResponse(401, {error: {message: 'token has not been activated'}});
+        }
+        return jsonResponse(500, {error: {message: 'unexpected'}});
+      });
+      render(<ConnectScreen />);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('device-link-sas')).toBeTruthy();
+      await act(async () => {
+        jest.advanceTimersByTime(120_000);
+      });
+      expect(screen.getByText(DEVICE_LINK_EXPIRED_COPY)).toBeTruthy();
+      fireEvent.press(screen.getByTestId('device-link-failure-retry'));
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(screen.getByTestId('qr-scanner-sheet')).toBeTruthy();
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('stops polling at the token TTL and speaks the expiry sentence', async () => {
@@ -344,8 +401,9 @@ describe('R2 H-2 SAS offline and unreachable states', () => {
     expect(screen.getByTestId('connect-offline')).toBeTruthy();
   });
 
-  it('speaks a failure sentence when a probe is unreachable and pauses polling', async () => {
+  it('keeps polling after one unreachable probe while online and activates on the next', async () => {
     jest.spyOn(Linking, 'getInitialURL').mockResolvedValue(DEVICE_LINK_URL);
+    let probes = 0;
     fetchMock.mockImplementation(async (url: string) => {
       if (String(url).endsWith('/v1/auth/device-link/redeem')) {
         return jsonResponse(200, {
@@ -354,42 +412,66 @@ describe('R2 H-2 SAS offline and unreachable states', () => {
           sas: '4821',
         });
       }
-      throw new TypeError('Network request failed');
+      if (String(url).includes('/v1/workspaces/')) {
+        probes += 1;
+        if (probes === 1) throw new TypeError('Network request failed');
+        return jsonResponse(200, {channels: []});
+      }
+      return jsonResponse(500, {error: {message: 'unexpected'}});
     });
     render(<ConnectScreen />);
-    await waitFor(() => expect(screen.getByTestId('device-link-sas')).toBeTruthy());
     await waitFor(() => expect(screen.getByTestId('device-link-failure')).toBeTruthy());
-    const probesWhenPaused = fetchMock.mock.calls.filter(call =>
-      String(call[0]).includes('/workspaces'),
-    ).length;
-    jest.useFakeTimers();
-    try {
-      await act(async () => {
-        jest.advanceTimersByTime(6_000);
-      });
-      const probesAfter = fetchMock.mock.calls.filter(call =>
-        String(call[0]).includes('/workspaces'),
-      ).length;
-      expect(probesAfter).toBe(probesWhenPaused);
-    } finally {
-      jest.useRealTimers();
-    }
+    expect(screen.getByText(DEVICE_LINK_UNREACHABLE_COPY)).toBeTruthy();
+    await waitFor(
+      () => expect(keychainItems.size).toBeGreaterThan(0),
+      {timeout: 8000},
+    );
+    expect(probes).toBeGreaterThanOrEqual(2);
+    expect(screen.queryByText(DEVICE_LINK_UNREACHABLE_COPY)).toBeNull();
   });
 });
 
 describe('R2 M-2 permission is decided before the Modal', () => {
-  it('does not mount the scanner, focuses the server field, and offers the fallback', async () => {
+  it('does not mount the scanner; 「주소로 연결」 focuses in-app; only Settings opens Settings', async () => {
     cameraMock.__state.permission = {
       granted: false,
       canAskAgain: false,
       status: 'denied',
     };
+    const openSettings = jest
+      .spyOn(Linking, 'openSettings')
+      .mockResolvedValue(undefined as never);
     render(<ConnectScreen />);
     fireEvent.press(screen.getByTestId('qr-connect-button'));
     await waitFor(() => expect(screen.getByTestId('qr-permission-denied')).toBeTruthy());
     expect(screen.queryByTestId('qr-scanner-sheet')).toBeNull();
-    expect(screen.getByTestId('server-url-input').props.autoFocus).toBe(true);
+    expect(screen.getByTestId('server-url-input').props.autoFocus).toBeFalsy();
     expect(screen.getByTestId('qr-permission-fallback')).toBeTruthy();
+
+    const input = screen.getByTestId('server-url-input') as unknown as {
+      focus: () => void;
+    };
+    const focus = jest.fn();
+    input.focus = focus;
+
+    fireEvent.press(screen.getByTestId('qr-permission-fallback'));
+    expect(openSettings).toHaveBeenCalledTimes(0);
+    expect(focus).toHaveBeenCalled();
+
+    fireEvent.press(screen.getByTestId('qr-permission-settings'));
+    expect(openSettings).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('R3 M-6 device name is the OS model', () => {
+  it('sends expo-device modelName, falling back to the idiom string', () => {
+    const Device = jest.requireMock('expo-device') as {modelName: string | null};
+    Device.modelName = 'iPhone 17 Pro';
+    expect(deviceLinkDevice()).toEqual({name: 'iPhone 17 Pro', platform: 'ios'});
+    Device.modelName = null;
+    expect(deviceLinkDevice().name).toMatch(/\(iOS\)$/);
+    Device.modelName = `VeryLongModelNameThatExceedsTheServerDeviceLabelLimit ${'x'.repeat(80)}`;
+    expect(deviceLinkDevice().name.length).toBeLessThanOrEqual(64);
   });
 });
 

@@ -308,12 +308,16 @@ jest.mock('expo-camera', () => {
   const state = {
     permission: {granted: true, canAskAgain: true, status: 'granted'},
     onBarcodeScanned: null,
+    onMountError: null,
+    onCameraReady: null,
   };
   return {
     __state: state,
     __reset: () => {
       state.permission = {granted: true, canAskAgain: true, status: 'granted'};
       state.onBarcodeScanned = null;
+      state.onMountError = null;
+      state.onCameraReady = null;
     },
     __scan: data => {
       state.onBarcodeScanned?.({data});
@@ -324,10 +328,26 @@ jest.mock('expo-camera', () => {
     ],
     CameraView: props => {
       state.onBarcodeScanned = props.onBarcodeScanned ?? null;
+      state.onMountError = props.onMountError ?? null;
+      state.onCameraReady = props.onCameraReady ?? null;
       return React.createElement(View, {testID: props.testID ?? 'qr-camera-view'});
+    },
+    __ready: () => {
+      state.onCameraReady?.();
+    },
+    __error: (message = 'failed') => {
+      state.onMountError?.({message});
     },
   };
 });
+
+jest.mock(
+  'expo-device',
+  () => ({
+    modelName: 'iPhone 17 Pro',
+  }),
+  {virtual: true},
+);
 
 jest.mock('expo-clipboard', () => {
   const box = {value: null};
