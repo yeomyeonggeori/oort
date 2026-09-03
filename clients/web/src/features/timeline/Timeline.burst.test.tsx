@@ -418,8 +418,6 @@ describe("virtualized Timeline same-tick live burst", () => {
   it("같은 틱 라이브 3건은 virtuoso 가 마운트한 행 3개가 모두 재생한다", async () => {
     restPage.messages = [1, 2, 3, 4, 5, 6, 7, 8].map(restMessage);
     host = document.createElement("div");
-    host.style.width = "640px";
-    host.style.height = "800px";
     document.body.append(host);
     mountedRoot = createRoot(host);
     const client = new QueryClient({
@@ -449,8 +447,6 @@ describe("virtualized Timeline same-tick live burst", () => {
     async () => {
       restPage.messages = [1, 2, 3, 4, 5, 6, 7, 8].map(restMessage);
       host = document.createElement("div");
-      host.style.width = "640px";
-      host.style.height = "800px";
       document.body.append(host);
       mountedRoot = createRoot(host);
       const client = new QueryClient({
