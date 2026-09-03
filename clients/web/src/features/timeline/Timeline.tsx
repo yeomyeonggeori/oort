@@ -218,6 +218,9 @@ export function Timeline({
   onResendPending,
   onAddMember,
   onStartWriting,
+  isPlayEntrance,
+  onEntranceConsumed,
+  capUnmountedArrivals,
   reachedStart = false,
   canAddMember = false,
   channelName,
@@ -290,6 +293,17 @@ export function Timeline({
    * 두 표면이 다른 이유로 비어 있어도 다음에 하는 일은 같다 (#1536).
    */
   onStartWriting?: () => void;
+  /**
+   * ADR-0179 D3. Live-arrival ids that have not yet mounted. The hook owns
+   * the set; this surface only reads it at render.
+   */
+  isPlayEntrance?: (messageId: string) => boolean;
+  onEntranceConsumed?: (messageId: string) => void;
+  /**
+   * Sweep grants whose rows were never offered a mount (reader scrolled
+   * up). Must not run while at the bottom: virtuoso appends one commit late.
+   */
+  capUnmountedArrivals?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -473,6 +487,11 @@ export function Timeline({
       baseline === null ? 0 : countNewerThan(messages, baseline, myMemberId)
     );
   }, [messages, myMemberId]);
+
+  useEffect(() => {
+    if (atBottom) return;
+    capUnmountedArrivals?.();
+  }, [messages, atBottom, capUnmountedArrivals]);
 
   // 상단 N은 연 순간의 동결 스냅샷 — 구분선과 같은 수 (M-1(a)). 라이브 꼬리는
   // 하단 필이 센다. 사유는 `navigation.ts` (a)/(b).
@@ -685,6 +704,12 @@ export function Timeline({
               startsGroup={item.startsGroup}
               directory={directory}
               unfurls={unfurlsFor(unfurls ?? {}, item.message.id)}
+              playEntrance={isPlayEntrance?.(item.message.id) ?? false}
+              onEntranceConsumed={
+                onEntranceConsumed
+                  ? () => onEntranceConsumed(item.message.id)
+                  : undefined
+              }
               actions={
                 actions && {
                   ...actions,

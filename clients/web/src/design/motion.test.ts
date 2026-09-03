@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import {
+  ENTER_CONVERSATION_ANIMATION_NAME,
+  ENTER_CONVERSATION_CLASS,
   MODAL_CONTENT_MOTION,
   MODAL_OVERLAY_MOTION,
   POPOVER_MOTION,
@@ -115,6 +117,31 @@ function escapedClassSelector(candidate: string): string {
   return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
 }
 
+/** Cascade winner: a later duplicate `@keyframes` of the same name wins. */
+function lastAtKeyframeBlock(css: string, name: string): string {
+  const re = new RegExp(`@keyframes\\s+${name}\\s*\\{`, "g");
+  let lastIndex = -1;
+  let match = re.exec(css);
+  while (match) {
+    lastIndex = match.index;
+    match = re.exec(css);
+  }
+  if (lastIndex < 0) {
+    throw new Error(`@keyframes ${name} 이 없다`);
+  }
+  const open = css.indexOf("{", lastIndex);
+  let depth = 0;
+  for (let i = open; i < css.length; i += 1) {
+    const ch = css[i];
+    if (ch === "{") depth += 1;
+    else if (ch === "}") {
+      depth -= 1;
+      if (depth === 0) return css.slice(lastIndex, i + 1);
+    }
+  }
+  throw new Error(`@keyframes ${name} 블록이 닫히지 않는다`);
+}
+
 function lastPressOrColorsTransition(css: string): {
   selector: string;
   body: string;
@@ -147,10 +174,178 @@ describe("ADR-0179 D2 easing", () => {
 });
 
 describe("ADR-0179 D3 도착 값", () => {
-  it("distance·blur 토큰이 있다 (키프레임 이관은 UX-R1)", () => {
+  it("distance·blur 토큰이 있다", () => {
     expect(MOTION_CSS).toMatch(/--motion-distance-arrival:\s*0\.75rem/);
     expect(MOTION_CSS).toMatch(/--motion-blur-arrival:\s*2px/);
   });
+
+  it("키프레임 motion-enter-conversation 이 arrival 사다리로 blur·opacity·translateY 를 한 번에 쓴다", () => {
+    expect(ENTER_CONVERSATION_ANIMATION_NAME).toBe("motion-enter-conversation");
+    expect(ENTER_CONVERSATION_CLASS).toBe("enter-conversation");
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-enter-conversation\s*\{/);
+    const block = lastAtKeyframeBlock(
+      MOTION_CSS,
+      ENTER_CONVERSATION_ANIMATION_NAME
+    );
+    expect(block).toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
+    expect(block).toMatch(/opacity:\s*0/);
+    expect(block).toMatch(/translateY\(\s*var\(--motion-distance-arrival\)\s*\)/);
+    const toIdx = block.search(/\bto\s*\{/);
+    expect(toIdx).toBeGreaterThan(0);
+    const toBlock = block.slice(toIdx, toIdx + 220);
+    expect(toBlock).toMatch(/filter:\s*blur\(0\)/);
+    expect(toBlock).toMatch(/opacity:\s*1;/);
+    expect(toBlock).not.toMatch(/opacity:\s*0\.2/);
+    expect(toBlock).toMatch(/transform:\s*translateY\(0\)/);
+    expect(toBlock).not.toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
+    expect(toBlock).not.toMatch(
+      /translateY\(\s*var\(--motion-distance-arrival\)\s*\)/
+    );
+  });
+
+  it("enter-conversation 유틸이 키프레임을 arrival·arrival-ease 로 조립하고 규칙을 낸다", async () => {
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-enter-conversation\s+var\(--motion-arrival\)\s+var\(--motion-ease-arrival\)\s+1\s+both/
+    );
+    const utility = MOTION_CSS.match(
+      /@utility enter-conversation \{[\s\S]*?\}/
+    );
+    expect(utility, "enter-conversation @utility 가 없다").not.toBeNull();
+    expect(utility?.[0]).toMatch(/var\(--motion-ease-arrival\)\s+1\s+both/);
+    expect(utility?.[0]).not.toMatch(
+      /var\(--motion-ease-arrival\)\s+[2-9]\s+both/
+    );
+    expect(utility?.[0]).not.toMatch(
+      /var\(--motion-ease-arrival\)\s+both/
+    );
+    const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+    const selector = escapedClassSelector(ENTER_CONVERSATION_CLASS);
+    expect(css.includes(selector), "enter-conversation 이 규칙을 내지 않는다").toBe(
+      true
+    );
+    const from = css.indexOf(selector);
+    const snippet = css.slice(from, from + 400);
+    expect(snippet).toMatch(/motion-enter-conversation/);
+    expect(snippet).toMatch(/var\(--motion-arrival\)/);
+    expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
+    expect(snippet).toMatch(/animation-iteration-count:\s*1|1\s+both|iteration-count:\s*1/);
+    expect(snippet).toMatch(/\bboth\b/);
+  });
+
+  it.skipIf(!chromiumAvailable)(
+    "enter-conversation 재생 횟수 1, animationName 일치, duration 500ms",
+    async () => {
+      const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+      let chromium: typeof import("playwright").chromium;
+      try {
+        ({ chromium } = await import("playwright"));
+      } catch (err) {
+        throw new Error(
+          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.emulateMedia({ reducedMotion: "no-preference" });
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body><article id="row" class="${ENTER_CONVERSATION_CLASS}">새 메시지</article></body></html>`
+        );
+        const measured = await page.evaluate(async () => {
+          const el = document.getElementById("row");
+          if (!el) throw new Error("row missing");
+          const style = getComputedStyle(el);
+          const animations = el.getAnimations();
+          const playCount = animations.filter(
+            (animation) => animation.playState === "running" || animation.playState === "finished"
+          ).length;
+          const anim = animations[0];
+          const durationMs =
+            anim && anim.effect && typeof anim.effect.getComputedTiming === "function"
+              ? anim.effect.getComputedTiming().duration
+              : null;
+          const named = anim as unknown as { animationName?: string };
+          const animationName = named.animationName ?? null;
+          const ends = await new Promise<number>((resolve) => {
+            let count = 0;
+            const onEnd = (event: AnimationEvent) => {
+              if (event.animationName !== "motion-enter-conversation") return;
+              count += 1;
+            };
+            el.addEventListener("animationend", onEnd);
+            window.setTimeout(() => {
+              el.removeEventListener("animationend", onEnd);
+              resolve(count);
+            }, 1_200);
+          });
+          if (anim) {
+            anim.finish();
+          }
+          const landed = getComputedStyle(el);
+          return {
+            playCount,
+            durationMs,
+            animationName,
+            ends,
+            iterationCount: style.animationIterationCount,
+            fillMode: style.animationFillMode,
+            landedOpacity: landed.opacity,
+            landedFilter: landed.filter,
+            landedTransform: landed.transform,
+          };
+        });
+        expect(measured.playCount, `playCount=${measured.playCount}`).toBe(1);
+        expect(measured.animationName).toBe(ENTER_CONVERSATION_ANIMATION_NAME);
+        expect(measured.durationMs).toBe(500);
+        expect(measured.ends).toBe(1);
+        expect(measured.iterationCount).toBe("1");
+        expect(measured.fillMode).toBe("both");
+        expect(measured.landedOpacity).toBe("1");
+        expect(
+          measured.landedFilter === "none" ||
+            measured.landedFilter === "blur(0px)"
+        ).toBe(true);
+        expect(
+          measured.landedTransform === "none" ||
+            measured.landedTransform === "matrix(1, 0, 0, 1, 0, 0)"
+        ).toBe(true);
+      } finally {
+        await browser.close();
+      }
+    },
+    20_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "클래스가 없으면 재생 0",
+    async () => {
+      const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+      let chromium: typeof import("playwright").chromium;
+      try {
+        ({ chromium } = await import("playwright"));
+      } catch (err) {
+        throw new Error(
+          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
+        );
+      }
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body><article id="row">이미 있던 행</article></body></html>`
+        );
+        const playCount = await page.evaluate(() => {
+          const el = document.getElementById("row");
+          if (!el) throw new Error("row missing");
+          return el.getAnimations().length;
+        });
+        expect(playCount).toBe(0);
+      } finally {
+        await browser.close();
+      }
+    },
+    20_000
+  );
 });
 
 describe("ADR-0179 D4 모달 상수", () => {
