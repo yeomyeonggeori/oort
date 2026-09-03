@@ -122,6 +122,9 @@ describe("App post-login phone-link first-run (B2)", () => {
     const card = host.querySelector('[data-testid="onboarding-phone-link"]');
     expect(card).not.toBeNull();
     expect(card?.textContent).toContain("폰에서도 쓰기");
+    expect(host.querySelector('[data-testid="onboarding-step-chrome"]')).not.toBeNull();
+    expect(card?.className).toMatch(/\bmax-w-sm\b/);
+    expect(card?.className).not.toMatch(/max-w-2xl/);
     expect(host.querySelector('[data-testid="onboarding-progress"]')).toBeNull();
     expect(filledAccentButtons(card as ParentNode).length).toBeLessThanOrEqual(1);
   });

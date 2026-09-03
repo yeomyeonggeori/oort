@@ -1,16 +1,24 @@
 import { Button } from "@/design/ui/button";
 import { DeviceLinkCard } from "@/features/settings/DeviceLinkCard";
+import { IS_TAURI } from "@/lib/env";
+import { titlebarDragProps } from "@/app/sidebarPane";
 
 /**
  * Post-login first-run card (ADR-0180 D7 ships here, not as onboarding S5).
  * App owns this so the session gate cannot unmount it.
+ * Shell/width matches S1/S2 (`onboarding-step-chrome` + `max-w-sm`).
  */
 export function PhoneLinkFirstRun({ onEnterApp }: { onEnterApp: () => void }) {
   return (
     <div className="flex min-h-full flex-col bg-surface">
+      <header
+        className="onboarding-step-chrome"
+        data-testid="onboarding-step-chrome"
+        {...titlebarDragProps(IS_TAURI)}
+      />
       <div className="flex flex-1 items-center justify-center p-6">
         <div
-          className="flex w-full max-w-2xl flex-col items-start gap-4"
+          className="flex w-full max-w-sm flex-col items-start gap-4"
           data-testid="onboarding-phone-link"
         >
           <div className="flex flex-col gap-1">
