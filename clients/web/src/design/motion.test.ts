@@ -213,7 +213,8 @@ describe("ADR-0179 D3 도착 값", () => {
             anim && anim.effect && typeof anim.effect.getComputedTiming === "function"
               ? anim.effect.getComputedTiming().duration
               : null;
-          const animationName = anim ? anim.animationName : null;
+          const named = anim as unknown as { animationName?: string };
+          const animationName = named.animationName ?? null;
           const ends = await new Promise<number>((resolve) => {
             let count = 0;
             const onEnd = (event: AnimationEvent) => {
