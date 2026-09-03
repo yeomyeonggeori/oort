@@ -26,7 +26,7 @@ import { Select } from "@/design/ui/select";
  * bundles this file and measures computed animationName / duration on the
  * live primitives (jsdom cannot resolve CSS animation durations).
  */
-function Harness() {
+export function Harness() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [clicks, setClicks] = useState(0);
 
