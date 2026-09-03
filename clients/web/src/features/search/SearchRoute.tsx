@@ -8,7 +8,7 @@ import { Input } from "@/design/ui/input";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { searchHitPath } from "@/features/inbox/anchor";
 import { relativeLabel } from "@momo/core/features/inbox/model";
@@ -306,11 +306,12 @@ export function SearchRoute() {
           <EmptyInvite headline={SHORT_QUERY_HINT} testId="search-too-short" />
         )}
 
-        {search.phase === "searching" && (
-          <SkeletonRows rows={5} className="p-4" />
-        )}
-
-        {search.phase === "error" &&
+        {(search.phase === "searching" ||
+          search.phase === "error" ||
+          search.phase === "empty" ||
+          search.phase === "results") && (
+        <Skeleton ready={search.phase !== "searching"} rows={5} className="p-4">
+        {search.phase === "searching" ? null : search.phase === "error" &&
           // 세 갈래다. 순서가 규칙이다.
           //
           // (a) **좁힌 범위의 404 = 그 채널을 볼 수 없다** (R1 B-3). 미제공
@@ -423,6 +424,8 @@ export function SearchRoute() {
               </div>
             )}
           </>
+        )}
+        </Skeleton>
         )}
       </div>
     </div>

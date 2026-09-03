@@ -16,7 +16,7 @@ import {
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
   type PendingMessage,
@@ -581,7 +581,7 @@ export function Timeline({
   }
 
   if (status === "loading" && empty) {
-    return <SkeletonRows rows={6} className="p-4" />;
+    return <Skeleton ready={false} rows={6} className="p-4" />;
   }
 
   return (

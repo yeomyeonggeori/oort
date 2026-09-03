@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
 import { useWorkspaceAvatar } from "@/features/sidebar/useWorkspaceAvatar";
 import { useSession } from "@/app/session";
@@ -109,7 +109,7 @@ function WorkspaceUnfurlSetting({
         "개인의 「링크 미리보기 접기」는 렌더만 바꾸며 이 서버 설정과 별개입니다.",
       ]}
     >
-      {query.isPending && <SkeletonRows rows={1} />}
+      {query.isPending && <Skeleton ready={false} rows={1} />}
       {denied && (
         <OperatorNotice
           who="링크 미리보기는 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
@@ -667,7 +667,7 @@ export function WorkspaceSection({
 
   return (
     <SectionShell title="워크스페이스" lines={lines}>
-      {query.isPending && <SkeletonRows rows={3} />}
+      {query.isPending && <Skeleton ready={false} rows={3} />}
       {query.isError && (
         <InlineBanner
           message={errorMessage(query.error)}

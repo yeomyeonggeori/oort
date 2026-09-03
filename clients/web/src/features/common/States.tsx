@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
@@ -10,23 +11,52 @@ import { Button } from "@/design/ui/button";
 //   offline = one inline banner, cached content keeps rendering (P15)
 // =============================================================================
 
-/** Height-preserving neutral bars. No shimmer: loading is not a light show. */
-export function SkeletonRows({
+/**
+ * Height-preserving skeleton → content crossfade (ADR-0179 D3 / UX-R1c).
+ * Bars and children share one grid cell. No shimmer: pulse is brightness,
+ * paused when `ready`. Remount after a ready paint is `is-resetting` (전이 0).
+ */
+export function Skeleton({
+  ready,
   rows = 4,
   className,
+  children,
 }: {
+  ready: boolean;
   rows?: number;
   className?: string;
+  children?: React.ReactNode;
 }) {
+  const seenReady = useRef(ready);
+  if (ready) seenReady.current = true;
+  const resetting = seenReady.current && !ready;
+
   return (
-    <div className={cn("flex flex-col gap-2 p-2", className)} aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <div
-          key={i}
-          className="h-6 rounded-sm bg-surface-hover"
-          data-testid="skeleton-row"
-        />
-      ))}
+    <div
+      className={cn("skel", resetting && "is-resetting")}
+      data-testid="skeleton"
+      data-ready={ready ? "true" : "false"}
+      aria-busy={ready ? undefined : true}
+    >
+      <div
+        className={cn(
+          "skel-layer skel-bars flex flex-col gap-2 p-2",
+          className
+        )}
+        data-skel="bars"
+        aria-hidden="true"
+      >
+        {Array.from({ length: rows }, (_, i) => (
+          <div
+            key={i}
+            className="h-6 rounded-sm bg-surface-hover"
+            data-testid="skeleton-row"
+          />
+        ))}
+      </div>
+      <div className="skel-layer skel-content" data-skel="content">
+        {children}
+      </div>
     </div>
   );
 }

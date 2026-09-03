@@ -4,7 +4,7 @@ import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { useEscapeGuard, useEscapeLayer } from "@/design/ui/escapeLayer";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { channelLabel, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { resolveServerBaseUrl } from "@momo/core/features/settings/api";
 import {
@@ -356,7 +356,7 @@ export function WebhookSection({
   if (webhooks.isPending) {
     return (
       <SectionShell title="웹훅" lines={lines}>
-        <SkeletonRows rows={4} />
+        <Skeleton ready={false} rows={4} />
       </SectionShell>
     );
   }

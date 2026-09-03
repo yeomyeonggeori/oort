@@ -54,7 +54,7 @@ import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
@@ -855,7 +855,7 @@ export function Sidebar({
                 </>
               }
             >
-              {channelsQuery.isLoading && <SkeletonRows rows={4} />}
+              <Skeleton ready={!channelsQuery.isLoading} rows={4}>
               {channelsQuery.error && (
                 <InlineBanner
                   message="채널을 불러오지 못했습니다."
@@ -892,6 +892,7 @@ export function Sidebar({
                 />
               )}
               {baseChannelSection.channels.map((channel) => rowFor(channel))}
+              </Skeleton>
             </SidebarSection>
 
             {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
@@ -966,7 +967,7 @@ export function Sidebar({
                     실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
                     사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
                     쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
-                {channelsQuery.isLoading && <SkeletonRows rows={2} />}
+                <Skeleton ready={!channelsQuery.isLoading} rows={2}>
                 {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
                     섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
                     터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
@@ -981,6 +982,7 @@ export function Sidebar({
                     </li>
                   )}
                 {section.channels.map((channel) => rowFor(channel))}
+                </Skeleton>
               </SidebarSection>
             ))}
 

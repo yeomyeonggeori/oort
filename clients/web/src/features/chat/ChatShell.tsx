@@ -85,7 +85,7 @@ import type { HuddleController } from "@/features/huddles/useHuddle";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
@@ -1192,9 +1192,9 @@ export function ChatShell() {
               }}
               onStartWriting={focusComposer}
             />
-          ) : channelsQuery.isLoading ? (
-            <SkeletonRows rows={6} className="p-4" />
-          ) : channelsQuery.error ? (
+          ) : (
+            <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
+            {channelsQuery.isLoading ? null : channelsQuery.error ? (
             <InlineBanner
               message="채널을 불러오지 못했습니다."
               actionLabel="다시 시도"
@@ -1221,6 +1221,8 @@ export function ChatShell() {
               detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다. 관리자에게 요청하세요."
               testId="chat-no-channel"
             />
+          )}
+            </Skeleton>
           )}
         </div>
 

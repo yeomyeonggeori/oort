@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
+
+- `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. `is-resetting`·reduced-motion은 전이 0. 펄스는 brightness, 도착 시 `animation-play-state: paused`.
+- `SkeletonRows` 호출부 전량 `Skeleton`으로 이관. 높이 보존(레이아웃 시프트 0)은 Playwright가 래퍼 높이를 한 층과 같다고 잰다.
+- runtime-unverified 아님. 캡처: `skeleton-{light,dark}` + `skeleton-settled-{light,dark}`, `waitForAnimations`.
+- 폰 무접촉. design-review는 이 워커가 하지 않음.
+
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
 - 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).

@@ -3,7 +3,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { isDesktop } from "@/lib/tauri";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
   readDesktopNotificationPermission,
   requestDesktopNotificationPermission,
@@ -88,7 +88,7 @@ export function DesktopNotificationPermissionPanel({
   if (permission === "loading") {
     return (
       <div data-testid="desktop-notifications-permission" data-state="loading">
-        <SkeletonRows rows={1} className="p-0" />
+        <Skeleton ready={false} rows={1} className="p-0" />
       </div>
     );
   }

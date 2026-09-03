@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { spawn } from "node:child_process";
-import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
@@ -2306,6 +2306,38 @@ async function waitForServer(url, timeoutMs = 30_000) {
     }
     if (Date.now() > deadline) throw new Error(`preview server never came up: ${url}`);
     await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
+function spawnPreview() {
+  mkdirSync(OUT_DIR, { recursive: true });
+  const logPath = resolve(OUT_DIR, "vite-preview.log");
+  const child = spawn(
+    resolve(WEB_ROOT, "node_modules/.bin/vite"),
+    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
+    { cwd: WEB_ROOT, stdio: ["ignore", "pipe", "pipe"] }
+  );
+  const append = (chunk) => {
+    try {
+      appendFileSync(logPath, chunk);
+    } catch {
+      /* log is diagnostic; capture still proceeds */
+    }
+  };
+  child.stdout.on("data", append);
+  child.stderr.on("data", append);
+  child.on("exit", (code, signal) => {
+    append(`\n[preview exit code=${code} signal=${signal}]\n`);
+  });
+  return child;
+}
+
+async function previewAlive() {
+  try {
+    const res = await fetch(ORIGIN, { signal: AbortSignal.timeout(1500) });
+    return res.ok;
+  } catch {
+    return false;
   }
 }
 
@@ -10462,6 +10494,79 @@ async function waitUntilAnimationsIdle(page) {
   );
 }
 
+/** ADR-0179 D10 ③ / UX-R1c: never shoot a mid-transition frame. */
+async function waitForAnimations(page) {
+  await waitUntilAnimationsIdle(page);
+}
+
+/**
+ * UX-R1c: two frames per scheme, skeleton then settled. Messages are held
+ * so the timeline Skeleton is on screen; then released. reduced-motion so
+ * the crossfade is duration 0 (never mid-animation). Pulse is infinite and
+ * already ignored by waitForAnimations; screenshotSettled also disables
+ * animations for byte-stable bars.
+ */
+async function captureSkeletonReveal(browser, scheme) {
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  let releaseMessages = () => {};
+  const held = new Promise((resolve) => {
+    releaseMessages = resolve;
+  });
+  await installMocks(context);
+  await context.route(
+    "**/v1/workspaces/*/channels/*/messages*",
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.includes("/replies")) return route.fallback();
+      if (route.request().method() !== "GET") return route.fallback();
+      await held;
+      if (url.searchParams.has("before") || url.searchParams.has("after")) {
+        return json(route, { messages: [] });
+      }
+      if (url.pathname.includes(DM_ID)) {
+        return json(route, { messages: makeDmMessages() });
+      }
+      return json(route, { messages: makeMessages(16) });
+    }
+  );
+  const page = await context.newPage();
+  const shots = [];
+  try {
+    await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+    await page.evaluate(
+      "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}"
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await signInThroughOnboarding(page, {
+      email: "seongjae@dawn.example",
+      password: "capture-only-not-a-credential",
+    });
+    await page.getByTestId("channel-list").waitFor({ state: "visible" });
+    await page.getByTestId("skeleton-row").first().waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    const skeletonPath = `${OUT_DIR}/skeleton-${scheme}.png`;
+    await screenshotSettled(page, skeletonPath);
+    shots.push(skeletonPath);
+    releaseMessages();
+    await page.getByTestId("timeline-message").first().waitFor({
+      state: "visible",
+    });
+    await waitForAnimations(page);
+    const settledPath = `${OUT_DIR}/skeleton-settled-${scheme}.png`;
+    await screenshotSettled(page, settledPath);
+    shots.push(settledPath);
+    return shots;
+  } finally {
+    await page.close();
+    await context.close();
+  }
+}
+
 /** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
 async function screenshotSettled(page, path) {
   let previous = null;
@@ -10622,13 +10727,19 @@ async function main() {
   }
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const server = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: "ignore" }
-  );
-  const shutdown = () => server.kill("SIGTERM");
+  let server = spawnPreview();
+  const shutdown = () => {
+    if (server && !server.killed) server.kill("SIGTERM");
+  };
   process.on("exit", shutdown);
+
+  const ensurePreview = async () => {
+    if (await previewAlive()) return;
+    shutdown();
+    await new Promise((r) => setTimeout(r, 400));
+    server = spawnPreview();
+    await waitForServer(ORIGIN);
+  };
 
   try {
     await waitForServer(ORIGIN);
@@ -10642,29 +10753,45 @@ async function main() {
       const profile = process.env.CAPTURE_PROFILE || "all";
       if (profile === "accent") {
         for (const scheme of ["light", "dark"]) {
+          await ensurePreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
-          all.push(...(await captureScheme(browser, scheme)));
-          all.push(...(await captureTerminalDockScenes(browser, scheme)));
-          all.push(...(await captureMarkUnreadScenes(browser, scheme)));
-          all.push(...(await captureEmptyConversationScenes(browser, scheme)));
-          all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
-          all.push(...(await captureAddMemberScenes(browser, scheme)));
-          all.push(...(await captureSetStatusScenes(browser, scheme)));
-          all.push(...(await captureSearchScopeScenes(browser, scheme)));
-          all.push(...(await captureHostedPairingScenes(browser, scheme)));
-          all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
-          all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
-          all.push(...(await captureConsent(browser, scheme)));
-          all.push(...(await captureAccentCandidates(browser, scheme)));
+          const shot = async (fn) => {
+            await ensurePreview();
+            try {
+              return await fn();
+            } catch (err) {
+              const msg = String(err && err.message ? err.message : err);
+              if (!/ERR_CONNECTION_REFUSED|ECONNREFUSED|net::ERR_CONNECTION/.test(msg)) {
+                throw err;
+              }
+              await ensurePreview();
+              return await fn();
+            }
+          };
+          all.push(...(await shot(() => captureScheme(browser, scheme))));
+          all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
+          all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
+          all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
+          all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
+          all.push(...(await shot(() => captureNonemptyChannelIntroScenes(browser, scheme))));
+          all.push(...(await shot(() => captureAddMemberScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSetStatusScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSearchScopeScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedPairingScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedDisconnectScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedDoorbellScenes(browser, scheme))));
+          all.push(...(await shot(() => captureConsent(browser, scheme))));
+          all.push(...(await shot(() => captureAccentCandidates(browser, scheme))));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
       if (profile !== "desktop" && profile !== "accent") {
         for (const scheme of ["light", "dark"]) {
+          await ensurePreview();
           all.push(...(await captureMobile(browser, scheme)));
         }
       }

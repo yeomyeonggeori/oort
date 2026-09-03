@@ -4,7 +4,7 @@ import { Hash, Loader2, Lock } from "lucide-react";
 import { Button } from "@/design/ui/button";
 import { Select } from "@/design/ui/select";
 import { useSession } from "@/app/session";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useChannels } from "@/features/workspace/useWorkspace";
 import {
   addChannelMember,
@@ -141,7 +141,7 @@ export function AgentChannelsSection({
       {channelsQuery.isPending ? (
         <div role="status">
           <span className="sr-only">채널 목록을 불러오는 중입니다.</span>
-          <SkeletonRows rows={3} className="p-0" />
+          <Skeleton ready={false} rows={3} className="p-0" />
         </div>
       ) : channelsQuery.isError ? (
         <InlineBanner

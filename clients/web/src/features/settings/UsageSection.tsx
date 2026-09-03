@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 // The one cost formatter in this client. A second rounding rule would mean two
 // different answers to "how much did this cost" on two surfaces.
 import { formatCount, formatMicroUsd } from "@momo/core/features/timeline/agentCardModel";
@@ -534,13 +534,13 @@ function UsageSkeleton() {
       data-testid="usage-skeleton"
     >
       <div className="rounded-md border border-line bg-surface-raised p-4">
-        <SkeletonRows rows={7} />
+        <Skeleton ready={false} rows={7} />
       </div>
       <div className="rounded-md border border-line bg-surface-raised p-4">
-        <SkeletonRows rows={6} />
+        <Skeleton ready={false} rows={6} />
       </div>
-      <SkeletonRows rows={5} />
-      <SkeletonRows rows={4} />
+      <Skeleton ready={false} rows={5} />
+      <Skeleton ready={false} rows={4} />
     </div>
   );
 }

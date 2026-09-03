@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   EVENT_SUBSCRIPTION_KINDS,
   createEventSubscription,
@@ -228,7 +228,7 @@ export function EventSubscriptionSection({
   return (
     <SectionShell title="이벤트 구독" lines={LINES}>
       {subscriptions.isPending ? (
-        <SkeletonRows rows={3} />
+        <Skeleton ready={false} rows={3} />
       ) : subscriptions.isError ? (
         <InlineBanner
           message={eventSubscriptionErrorMessage("load", subscriptions.error)}

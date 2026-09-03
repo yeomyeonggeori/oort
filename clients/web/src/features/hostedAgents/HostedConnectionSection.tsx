@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   ConfirmButton,
   KeyValueRows,
@@ -302,7 +302,7 @@ export function HostedConnectionSection({
       {list.isPending && (
         <div role="status">
           <span className="sr-only">호스티드 연결을 불러오는 중입니다.</span>
-          <SkeletonRows rows={3} className="p-0" />
+          <Skeleton ready={false} rows={3} className="p-0" />
         </div>
       )}
 
@@ -331,7 +331,7 @@ export function HostedConnectionSection({
           {detail.isPending && (
             <div role="status">
               <span className="sr-only">정리 목록을 불러오는 중입니다.</span>
-              <SkeletonRows rows={4} className="p-0" />
+              <Skeleton ready={false} rows={4} className="p-0" />
             </div>
           )}
           {detail.isError && (

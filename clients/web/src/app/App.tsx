@@ -12,7 +12,7 @@ import {
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { AppShell } from "@/app/AppShell";
-import { SkeletonRows } from "@/features/common/States";
+import { Skeleton } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { ChatShell } from "@/features/chat/ChatShell";
 import { InboxRoute } from "@/features/inbox/InboxRoute";
@@ -68,7 +68,7 @@ export function App() {
     // about to appear occupies this space, so nothing jumps when it does.
     return (
       <div data-testid="session-restoring">
-        <SkeletonRows rows={4} className="p-6" />
+        <Skeleton ready={false} rows={4} className="p-6" />
       </div>
     );
   }

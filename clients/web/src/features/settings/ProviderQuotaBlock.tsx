@@ -226,7 +226,7 @@ export function ProviderQuotaBlock({ workspaceId }: { workspaceId: string }) {
 /**
  * The wait, shaped like what arrives (SKILL §5: height-preserving, no shimmer).
  *
- * Six generic `SkeletonRows` stood in for a shape they did not have, so every
+ * Six generic `Skeleton` stood in for a shape they did not have, so every
  * arrival threw the whole ledger below it up or down the page by about 150px
  * (R1 M3). This mirrors the real structure instead: one provider heading and its
  * two gauges, each gauge a label line, a 4px bar and an 11px age line at the

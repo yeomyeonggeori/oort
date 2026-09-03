@@ -19,7 +19,7 @@ import {
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import { messageAnchorPath, searchHitPath, watchForMessage } from "@/features/inbox/anchor";
@@ -123,9 +123,6 @@ export function RemindersPanel() {
     );
   };
 
-  if (query.isLoading) {
-    return <SkeletonRows rows={3} className="p-4" />;
-  }
   if (query.isError) {
     return (
       <InlineBanner
@@ -138,7 +135,7 @@ export function RemindersPanel() {
   }
 
   const reminders = query.data?.reminders ?? [];
-  if (reminders.length === 0) {
+  if (!query.isLoading && reminders.length === 0) {
     return (
       <EmptyInvite
         headline={REMINDER_EMPTY_HEADLINE}
@@ -149,6 +146,8 @@ export function RemindersPanel() {
   }
 
   return (
+    <Skeleton ready={!query.isLoading} rows={3} className="p-4">
+      {query.isLoading ? null : (
     <div data-testid="reminders-panel">
       {actionError && !dialogOpen && (
         <InlineBanner
@@ -309,6 +308,8 @@ export function RemindersPanel() {
         </DialogContent>
       </Dialog>
     </div>
+      )}
+    </Skeleton>
   );
 }
 

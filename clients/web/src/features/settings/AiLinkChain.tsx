@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
   deleteProviderChain,
   fetchProviderChain,
@@ -488,7 +488,7 @@ export function AiLinkChain({
   if (query.isPending) {
     return (
       <Subsection title="연결 순서" lines={lines}>
-        <SkeletonRows rows={3} />
+        <Skeleton ready={false} rows={3} />
       </Subsection>
     );
   }

@@ -883,6 +883,68 @@
   animation-timing-function: var(--motion-ease-arrival);
 }
 
+/* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell. Content
+ * arrives with blur(var(--motion-blur-arrival))→0 and opacity, standard
+ * ladder. Remount (is-resetting) and reduced-motion: transition none.
+ * Pulse is brightness, not a shimmer, and pauses when ready. */
+@utility skel {
+  display: grid;
+}
+
+@utility skel-layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.skel-content {
+  opacity: 0;
+  filter: blur(var(--motion-blur-arrival));
+  pointer-events: none;
+  transition:
+    opacity var(--motion-standard) var(--motion-ease-standard),
+    filter var(--motion-standard) var(--motion-ease-standard);
+}
+
+.skel[data-ready="true"] .skel-content {
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+}
+
+.skel-bars {
+  animation: skel-pulse 1.2s ease-in-out infinite;
+  transition: opacity var(--motion-standard) var(--motion-ease-standard);
+}
+
+.skel[data-ready="true"] .skel-bars {
+  opacity: 0;
+  pointer-events: none;
+  animation-play-state: paused;
+}
+
+.skel.is-resetting .skel-content,
+.skel.is-resetting .skel-bars {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel-content,
+  .skel-bars {
+    transition: none;
+    animation: none;
+  }
+}
+
+@keyframes skel-pulse {
+  0%,
+  100% {
+    filter: brightness(1);
+  }
+  50% {
+    filter: brightness(0.92);
+  }
+}
+
 @utility onboarding-focus {
   --focus-ring-ink: var(--onboarding-accent);
 }

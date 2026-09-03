@@ -13,7 +13,7 @@ import {
   type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import {
   Field,
@@ -500,7 +500,7 @@ function HostedWizardBody({
           <div
             data-testid={advancingToPairing ? "hosted-wizard-auto-advance" : undefined}
           >
-            <SkeletonRows rows={4} className="p-0" />
+            <Skeleton ready={false} rows={4} className="p-0" />
           </div>
         )}
         {detailError !== null && (
@@ -804,7 +804,7 @@ function PickerScreen({
     return (
       <div role="status">
         <span className="sr-only">진행 중인 연결을 불러오는 중입니다.</span>
-        <SkeletonRows rows={3} className="p-0" />
+        <Skeleton ready={false} rows={3} className="p-0" />
       </div>
     );
   }

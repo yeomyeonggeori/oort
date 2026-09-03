@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { fetchThreadReplies, type Channel, type Message } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { startsAuthorGroup } from "@momo/core/features/timeline/model";
 import { MessageRow, type MessageRowActions } from "./MessageRow";
 import { TimelineLiveRegionProvider } from "./timelineLiveRegion";
@@ -154,7 +154,7 @@ export function ThreadPanel({
             갈리고, 빈 상태일 때만 그 상태 자체의 조용한 점선 상자가 영역을 말한다.
             이 여백은 루트 툴바가 아래로 뒤집힐 때 쓰는 26px 띠도 함께 비워 둔다. */}
         <div className="pt-8" data-testid="thread-replies">
-          {query.isLoading && <SkeletonRows rows={3} className="p-4" />}
+          <Skeleton ready={!query.isLoading} rows={3} className="p-4">
           {query.error && (
             <InlineBanner
               message="답글을 불러오지 못했습니다."
@@ -185,6 +185,7 @@ export function ThreadPanel({
               showRollup={false}
             />
           ))}
+          </Skeleton>
         </div>
         </TimelineLiveRegionProvider>
       </div>

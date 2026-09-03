@@ -327,6 +327,20 @@ describe("UX-R1c runtime — one number per case", () => {
   );
 
   it(
+    "reduced-motion: pulse animation-name is none",
+    async () => {
+      await withSkelPage({ reducedMotion: "reduce" }, async (page) => {
+        const pulse = await page.locator('[data-skel="bars"]').evaluate((node) => {
+          const style = getComputedStyle(node as HTMLElement);
+          return style.animationName;
+        });
+        expect(pulse).toBe("none");
+      });
+    },
+    20_000
+  );
+
+  it(
     "pulse is running while !ready",
     async () => {
       await withSkelPage({}, async (page) => {

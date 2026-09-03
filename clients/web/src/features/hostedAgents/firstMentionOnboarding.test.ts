@@ -25,7 +25,7 @@ describe("T-6 첫 왕복 표면은 위저드에 이어 붙기만 한다", () => 
     expect(surface).toContain("data-offline");
     expect(surface).toContain("first-mention-error");
     expect(surface).toContain('data-phase={surface.phase}');
-    expect(surface).toContain("SkeletonRows");
+    expect(surface).toContain("Skeleton");
     expect(surface).toContain("InlineBanner");
     expect(surface).toContain("first-mention-wait");
     expect(surface).toContain("elapsedLabel");

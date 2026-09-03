@@ -23,7 +23,7 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import {
   useAgentWorkingSignals,
@@ -181,7 +181,7 @@ function AgentHubLoading({
   return (
     <div role="status">
       <span className="sr-only">{message}</span>
-      <SkeletonRows rows={rows} className={className} />
+      <Skeleton ready={false} rows={rows} className={className} />
     </div>
   );
 }
