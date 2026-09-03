@@ -64,6 +64,8 @@ export interface AgentProfileSaveResult {
   ok: boolean;
   /** 저장 실패의 원인이 추론 강도 필드였다. 호출자는 그 값을 되돌린다. */
   effortUnsupported: boolean;
+  /** PUT 이 403 을 답했다. 소유 인간·admin 이 아니라는 서버 판정. */
+  forbidden: boolean;
 }
 
 export interface AgentProfileHandle {
@@ -112,7 +114,9 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
       input: AgentProfileInput,
       draft?: RoutingDraft
     ): Promise<AgentProfileSaveResult> => {
-      if (agentMemberId === null) return { ok: false, effortUnsupported: false };
+      if (agentMemberId === null) {
+        return { ok: false, effortUnsupported: false, forbidden: false };
+      }
       setSaving(true);
       setFailure(null);
       try {
@@ -121,7 +125,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
           ["agent-profile", workspaceId.toLowerCase(), key],
           saved
         );
-        return { ok: true, effortUnsupported: false };
+        return { ok: true, effortUnsupported: false, forbidden: false };
       } catch (error) {
         // 모양 거절은 강도를 실었을 때만 강도에 대한 답이다. 강도를 싣지도 않았는데
         // 온 "모르는 필드"는 다른 이야기이므로 그것으로 축을 내리지 않는다.
@@ -132,7 +136,15 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
               "이 서버는 아직 추론 강도 저장을 지원하지 않습니다. 고른 강도는 되돌렸고, 모델만 바꿔서 다시 저장할 수 있습니다.",
             field: null,
           });
-          return { ok: false, effortUnsupported: true };
+          return { ok: false, effortUnsupported: true, forbidden: false };
+        }
+        if (error instanceof ApiError && error.status === 403) {
+          setFailure({
+            message:
+              "이 계정으로는 이 에이전트의 설정을 바꿀 수 없습니다.",
+            field: null,
+          });
+          return { ok: false, effortUnsupported: false, forbidden: true };
         }
         setFailure({
           message:
@@ -148,7 +160,7 @@ export function useAgentProfile(agentMemberId: string | null): AgentProfileHandl
               ? routingRejectionField(error.status, error.message, draft)
               : null,
         });
-        return { ok: false, effortUnsupported: false };
+        return { ok: false, effortUnsupported: false, forbidden: false };
       } finally {
         setSaving(false);
       }

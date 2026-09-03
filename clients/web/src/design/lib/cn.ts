@@ -62,6 +62,7 @@ export const NAMED_MEASURES = [
   "pane-lg",
   "pane-picker",
   "settings-nav",
+  "qr-module",
   "diff-body",
   "terminal-body",
   "terminal-dock",
