@@ -121,7 +121,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **남은 잔량 33건**(칩 그릇) **+ 7건**(손 기하). 좌표와 수가 `chipVessel.test.ts`의 두 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
 
-**이 층이 재지 않는 축: 칩의 테두리.** `bg-*`만 읽는다. `SettingsFields`의 `StatusChip`은 `border-ok`/`border-warn`/`border-danger`/`border-line` 다섯 톤 셀로 일곱 설정 표면에 살아 있고, `AgentTurnBadge.tsx:33`·`AgentHubRoute.tsx:181`도 `border border-warn`을 두른다 — #1516이 검증 칩 **하나**에서 「컨트롤 문법」이라 판정해 걷어낸 것이 바로 그 모양이다. 즉 웹의 제거는 아직 한 칩에 그쳤고, 그 축에는 기계 강제가 **아예 없다**(§5.3).
+**이 층이 재지 않는 축: 칩의 테두리.** `bg-*`만 읽는다. `SettingsFields`의 `StatusChip`은 `border-ok`/`border-warn`/`border-danger`/`border-line` 다섯 톤 셀로 일곱 설정 표면에 살아 있고, `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`도 `border border-warn`을 두른다(`AgentHubRoute`의 그 자리는 UX-R4a #1957이 그릇으로 걷었다) — #1516이 검증 칩 **하나**에서 「컨트롤 문법」이라 판정해 걷어낸 것이 바로 그 모양이다. 즉 웹의 제거는 아직 한 칩에 그쳤고, 그 축에는 기계 강제가 **아예 없다**(§5.3).
 
 **사정거리는 웹이다.** 폰(`clients/mobile`)에도 같은 격의 칩이 있다 — `WorkSessionParts.tsx`의 `WorkStatusBadge`는 같은 `WorkSessionStatus` 키를 쓰고 자기 주석이 「역할 정본은 웹/코어 표이고, 폰은 그 표를 따른다」라고 적는다 — 그리고 그쪽은 아직 톤 채움 + 1px 테두리다. 폰 정렬은 §6 절차를 지나야 하는 별도 결정이라 여기서 하지 않았고, **후속 goal은 #1600으로 발급돼 있다**: 폰의 `okSurface`/`warnSurface`/`dangerSurface`는 새 웹 토큰과 다크에서 OKLab 거리 0.0337/0.0450/0.0421이라, 위 0.02 자로는 **서로 다른 재료**다. 번역이 아니라 신설이 필요한 자리라는 뜻이다.
 
@@ -431,7 +431,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | 16위 (4건) | **화면이 거짓을 말함** | 손으로 짠 런타임 프로브가 필요했다 |
 | — | **포커스 링의 *성질*** — 페이드·트랜지션·애니메이션 | 프리플라이트 `naked_focus`는 링이 **있는지**만 본다. 링이 잉크색에서 호박색으로 번지는 것(Tailwind v4 `transition-colors`가 `outline-color`를 포함한다 — v3엔 없던 것)은 `transition-colors`와 `focus-visible:outline-*`를 함께 든 **클래스 리스트 25곳**에 있고, 리뷰 16건이 한 번도 못 잡았다 — 수리·재발 방지는 **#1210** |
 | — | **웹의 렌더된 컨트롤 경계·터치 크기 전수** | 지금은 토큰 층과 프리미티브 층까지만 잰다. 렌더 스윕은 미구현(감사 §C-3-b·c) |
-| — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:33`·`AgentHubRoute.tsx:181`에 남아 있고, **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
+| — | **칩의 *테두리*** — 「이 알약이 컨트롤로 읽히는가」 | `chipVessel.test.ts`는 `bg-*`만 읽는다. #1516이 검증 칩 하나에서 테두리를 걷었지만 같은 모양이 `SettingsFields`의 `StatusChip`(다섯 톤 셀 × 일곱 설정 표면)과 `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`에 남아 있고(`AgentHubRoute` 자리는 #1957이 닫음), **그 축에는 기계가 아무것도 없다.** 그릇과 달리 「테두리가 어포던스인가」는 §3.3의 그 의미 질문이라 grep으로 못 가른다 — 프리미티브에 했던 것처럼 **분류에 이름을 붙이는 것**이 다음 걸음이다 |
 | — | **hover·선택 상태의 사진** | 이 시스템의 게이트는 마우스를 일부러 치워 둔다(`gate-workstream.mjs:875` — hover 잔상이 150ms 전이와 겹쳐 측정을 흔든다). 그래서 **이 문서가 다루는 결함(그릇이 hover에서 사라진다)을 찍은 레인이 하나도 없었다**: 회전 2의 1.000 두 건은 리뷰어가 손으로 hover 프레임을 계측해 찾았다. `gate-my-sessions`에 rest/hover 짝 캡처를 신설해 그 공백의 첫 칸을 메웠다(아래 §5.4 레인) — 나머지 표면은 미구현 |
 | — | **비텍스트 대비(WCAG 1.4.11)를 살 수 있는 곳** | **없다.** Deque 자사 데이터로 axe DevTools 커버리지 **0.00%**(자동·인간보조 모두 0, 100% 수동). 우리 손수 만든 시험을 지우면 대체물이 없다 |
 | — | **아이콘 규칙의 나머지 전부**(§2.8) | `iconSystem.test.ts`는 예외 목록과 import 형태 **둘만** 잰다. 16px 단일 기본·`strokeWidth` 재지정 금지·`currentColor` 상속·`aria-hidden`(잔량 57곳/인접 레이블 없는 36곳)·CSS 도형/아이콘 폰트/기능 이모지 회피·`src/**` 아래 SVG 자산 유입·**`.ts` 파일 안 손제작 SVG·`createElement("svg")`**(둘 다 초록 통과 실증) — 전부 무검사다. §2.8이 잔량을 세어 둔 이유다 |
