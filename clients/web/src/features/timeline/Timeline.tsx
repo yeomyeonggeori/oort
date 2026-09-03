@@ -220,6 +220,7 @@ export function Timeline({
   onStartWriting,
   isPlayEntrance,
   onEntranceConsumed,
+  capUnmountedArrivals,
   reachedStart = false,
   canAddMember = false,
   channelName,
@@ -298,6 +299,11 @@ export function Timeline({
    */
   isPlayEntrance?: (messageId: string) => boolean;
   onEntranceConsumed?: (messageId: string) => void;
+  /**
+   * Sweep grants whose rows were never offered a mount (reader scrolled
+   * up). Must not run while at the bottom: virtuoso appends one commit late.
+   */
+  capUnmountedArrivals?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -481,6 +487,11 @@ export function Timeline({
       baseline === null ? 0 : countNewerThan(messages, baseline, myMemberId)
     );
   }, [messages, myMemberId]);
+
+  useEffect(() => {
+    if (atBottom) return;
+    capUnmountedArrivals?.();
+  }, [messages, atBottom, capUnmountedArrivals]);
 
   // 상단 N은 연 순간의 동결 스냅샷 — 구분선과 같은 수 (M-1(a)). 라이브 꼬리는
   // 하단 필이 센다. 사유는 `navigation.ts` (a)/(b).

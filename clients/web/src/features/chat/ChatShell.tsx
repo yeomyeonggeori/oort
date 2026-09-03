@@ -1193,6 +1193,7 @@ export function ChatShell() {
               onStartWriting={focusComposer}
               isPlayEntrance={timeline.isPlayEntrance}
               onEntranceConsumed={timeline.consumeEntrance}
+              capUnmountedArrivals={timeline.capUnmountedArrivals}
             />
           ) : channelsQuery.isLoading ? (
             <SkeletonRows rows={6} className="p-4" />

@@ -362,6 +362,7 @@ function BurstTimeline(): ReactElement {
     reachedStart: true,
     isPlayEntrance: timeline.isPlayEntrance,
     onEntranceConsumed: timeline.consumeEntrance,
+    capUnmountedArrivals: timeline.capUnmountedArrivals,
   });
 }
 

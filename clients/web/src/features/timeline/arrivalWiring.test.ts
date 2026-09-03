@@ -51,5 +51,16 @@ describe("arrival wiring — mutations of the seam go red", () => {
       "if (play === 1) playOnMountRef.current.add(key);"
     );
     expect(hook).toContain("playOnMountRef.current = new Set();");
+    expect(hook).toContain(
+      "capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);"
+    );
+    expect(hook).not.toMatch(
+      /capArrivalSet\(playOnMountRef\.current, MAX_PENDING_ARRIVAL_GRANTS\);\s*\}, \[state\.messages\]/
+    );
+  });
+
+  it("Timeline 은 바닥이 아닐 때만 leftover grant 를 쓸어 낸다", () => {
+    expect(timeline).toContain("if (atBottom) return;");
+    expect(timeline).toContain("capUnmountedArrivals?.()");
   });
 });

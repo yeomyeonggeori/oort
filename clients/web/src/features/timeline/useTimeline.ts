@@ -149,6 +149,12 @@ export interface UseTimelineResult {
   /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
   isPlayEntrance: (messageId: string) => boolean;
   consumeEntrance: (messageId: string) => void;
+  /**
+   * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
+   * this when the reader is not at the bottom. Mounted rows consume
+   * themselves; a paint-tick cap would race virtuoso's later commit.
+   */
+  capUnmountedArrivals: () => void;
 }
 
 /**
@@ -261,6 +267,9 @@ export function useTimeline(
   const consumeEntrance = useCallback((messageId: string) => {
     playOnMountRef.current.delete(messageId.toLowerCase());
   }, []);
+  const capUnmountedArrivals = useCallback(() => {
+    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+  }, []);
 
   const applyBatch = useCallback(
     (
@@ -293,9 +302,11 @@ export function useTimeline(
         heldIdsRef.current.add(key);
       }
       // Same-tick Centrifugo bursts call applyBatch once per publication
-      // before React commits. Capping here evicts grants that are about to
-      // mount. Leftovers that survive a commit without a row consuming them
-      // are capped in the effect below (scrolled-up backlog → one lift).
+      // before React commits. Do not cap playOnMount here or on the next
+      // paint: react-virtuoso mounts appended rows in a later commit, and
+      // a paint-tick cap evicts grants whose rows have not mounted yet.
+      // Consume evicts a grant on mount; Timeline sweeps leftovers when
+      // the reader is scrolled up.
       capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
       // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
       // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
@@ -489,13 +500,6 @@ export function useTimeline(
     const open = unsettledPending(state.messages, pendingRef.current);
     if (open.length !== pendingRef.current.length) updatePending(() => open);
   }, [state.messages, updatePending]);
-
-  // After paint: child rows have already consumed in useLayoutEffect.
-  // What remains never mounted (backlog while scrolled up) and may not
-  // cascade when the reader jumps to the bottom.
-  useEffect(() => {
-    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
-  }, [state.messages]);
 
   useEffect(() => {
     if (!channelId || !realtime) return;
@@ -853,5 +857,6 @@ export function useTimeline(
     removeUnfurls,
     isPlayEntrance,
     consumeEntrance,
+    capUnmountedArrivals,
   };
 }

@@ -55,14 +55,16 @@ const realtime = {
 const out: {
   isPlayEntrance: ((id: string) => boolean) | null;
   consume: ((id: string) => void) | null;
+  capUnmountedArrivals: (() => void) | null;
   messages: Message[];
-} = { isPlayEntrance: null, consume: null, messages: [] };
+} = { isPlayEntrance: null, consume: null, capUnmountedArrivals: null, messages: [] };
 
 function Probe({ channelId }: { channelId: string }): ReactElement {
   const t = useTimeline(realtime, WS, channelId, ME);
   useEffect(() => {
     out.isPlayEntrance = t.isPlayEntrance;
     out.consume = t.consumeEntrance;
+    out.capUnmountedArrivals = t.capUnmountedArrivals;
     out.messages = t.state.messages;
   });
   return createElement("div");
@@ -231,7 +233,7 @@ describe("useTimeline arrival counts", () => {
     expect(out.isPlayEntrance?.(ID_REST)).toBe(false);
   });
 
-  it("백로그: 마운트되지 않은 라이브 도착은 커밋 뒤 상한만 남긴다", async () => {
+  it("백로그: 마운트되지 않은 라이브 도착은 leftover sweep 상한만 남긴다", async () => {
     await mount();
     await act(async () => {
       rail.handlers?.onSubscribed({ recovered: false });
@@ -254,9 +256,20 @@ describe("useTimeline arrival counts", () => {
       )
         granted += 1;
     }
+    // Paint must not evict: virtuoso mounts appended rows one commit later.
+    // Timeline calls capUnmountedArrivals when the reader is scrolled up.
+    expect(granted).toBe(50);
+    act(() => out.capUnmountedArrivals?.());
+    granted = 0;
+    for (let i = 0; i < 50; i += 1) {
+      if (
+        out.isPlayEntrance?.(
+          `0199dddd-0000-7000-8000-0000000004${String(i).padStart(2, "0")}`
+        )
+      )
+        granted += 1;
+    }
     expect(MAX_PENDING_ARRIVAL_GRANTS).toBe(1);
-    // Unmounted leftover after a commit. A mounted same-tick burst of 3
-    // plays 3 — MessageRow.burst.test.tsx.
     expect(granted).toBe(MAX_PENDING_ARRIVAL_GRANTS);
     expect(
       out.isPlayEntrance?.("0199dddd-0000-7000-8000-000000000449")
