@@ -628,7 +628,9 @@ export function MessageActionSheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         data-testid="message-action-sheet"
-        className="safe-area-bottom bottom-0 left-0 top-auto max-w-none translate-x-0 gap-2 rounded-lg p-3"
+        // Bottom-anchored sheet: modal zoom would inherit origin-center and
+        // lift the panel off the screen edge on the opening frame (UX-R1a M-4).
+        className="safe-area-bottom bottom-0 left-0 top-auto max-w-none origin-bottom translate-x-0 gap-2 rounded-lg p-3"
       >
         <DialogTitle className="px-3 pt-1 text-body">메시지 액션</DialogTitle>
         <DialogDescription className="line-clamp-2 px-3 text-meta">

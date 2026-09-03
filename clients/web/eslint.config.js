@@ -15,7 +15,7 @@ import reactRefresh from "eslint-plugin-react-refresh";
  *      tokens in src/design/tokens.css, never from a hex typed in a component.
  */
 export default tseslint.config(
-  { ignores: ["dist", "node_modules", "src-tauri"] },
+  { ignores: ["dist", "node_modules", "src-tauri", "measure"] },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
