@@ -42,6 +42,7 @@ import {
   DialogContent,
   DialogDescription,
   DialogTitle,
+  type DialogFocusTarget,
 } from "@/design/ui/dialog";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
@@ -619,11 +620,13 @@ export function ChannelLeaveConfirmDialog({
   actions,
   title,
   testId,
+  opener,
 }: {
   actions: ChannelActions;
   title: string;
   /** 표면별 접두사를 붙인 id. 게이트가 표면을 구별해 누른다. */
   testId: string;
+  opener?: DialogFocusTarget | null;
 }) {
   const { leave } = actions;
   return (
@@ -633,10 +636,10 @@ export function ChannelLeaveConfirmDialog({
         if (!next) leave.close();
       }}
     >
-      {leave.confirmOpen && (
-        <DialogContent
-          className="gap-4 p-4"
-          data-testid={testId}
+      <DialogContent
+        opener={opener}
+        className="gap-4 p-4"
+        data-testid={testId}
           onEscapeKeyDown={(event) => {
             if (leave.pending) event.preventDefault();
           }}
@@ -681,8 +684,7 @@ export function ChannelLeaveConfirmDialog({
               {leave.pending ? "나가는 중" : CHANNEL_LEAVE_LABEL}
             </Button>
           </div>
-        </DialogContent>
-      )}
+      </DialogContent>
     </Dialog>
   );
 }

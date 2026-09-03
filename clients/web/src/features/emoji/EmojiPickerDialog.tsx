@@ -131,6 +131,9 @@ export function EmojiPickerDialog({
   };
 
   const onEscapeKeyDown = (event: KeyboardEvent) => {
+    // React portal bubbling reaches ThreadPanel's aside onKeyDown. Stop it
+    // here so one Escape dismisses only this overlay (or the skin list).
+    event.stopPropagation();
     if (!skinOpen) return;
     event.preventDefault();
     setSkinOpen(false);

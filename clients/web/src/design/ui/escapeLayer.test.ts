@@ -1,7 +1,11 @@
+// @vitest-environment jsdom
+
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   escapeIsClaimed,
   escapeLayerDepth,
+  OPEN_OVERLAY_SELECTOR,
+  overlayOwnsEscape,
   pushEscapeLayer,
   removeEscapeLayer,
   resetEscapeLayers,
@@ -90,18 +94,67 @@ describe("escape layer stack", () => {
       expect(escapeIsClaimed()).toBe(false);
     });
 
-    it("열린 role=menu 셀렉터를 실제로 조회한다 (N-5)", () => {
+    it("마운트된 open overlay 셀렉터를 실제로 조회한다", () => {
       const seen: string[] = [];
       vi.stubGlobal("document", {
         querySelector: (sel: string) => {
           seen.push(sel);
-          return sel === '[role="menu"][data-state="open"]' ? {} : null;
+          return sel === OPEN_OVERLAY_SELECTOR ? {} : null;
         },
       });
       expect(escapeLayerDepth()).toBe(0);
       expect(escapeIsClaimed()).toBe(true);
-      expect(seen).toContain('[role="menu"][data-state="open"]');
+      expect(seen).toContain(OPEN_OVERLAY_SELECTOR);
       vi.unstubAllGlobals();
+    });
+
+    it("Presence exit (data-state=closed) does not own a fresh Escape", () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("data-state", "closed");
+      host.append(dialog);
+
+      expect(host.querySelectorAll('[role="dialog"]').length).toBe(1);
+      expect(host.querySelectorAll(OPEN_OVERLAY_SELECTOR).length).toBe(0);
+      expect(overlayOwnsEscape(host)).toBe(false);
+
+      dialog.remove();
+      host.remove();
+    });
+
+    it("a persistently mounted role=menu without data-state does not own Escape", () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const menu = document.createElement("div");
+      menu.setAttribute("role", "menu");
+      host.append(menu);
+
+      expect(overlayOwnsEscape(host)).toBe(false);
+      menu.remove();
+      host.remove();
+    });
+
+    it("the Escape that closed an overlay still owns that event after Presence flips closed", () => {
+      const host = document.createElement("div");
+      document.body.append(host);
+      const dialog = document.createElement("div");
+      dialog.setAttribute("role", "dialog");
+      dialog.setAttribute("data-state", "open");
+      host.append(dialog);
+
+      const closing = new KeyboardEvent("keydown", { key: "Escape" });
+      expect(overlayOwnsEscape(host, closing)).toBe(true);
+
+      dialog.setAttribute("data-state", "closed");
+      expect(overlayOwnsEscape(host, closing)).toBe(true);
+
+      const next = new KeyboardEvent("keydown", { key: "Escape" });
+      expect(overlayOwnsEscape(host, next)).toBe(false);
+
+      dialog.remove();
+      host.remove();
     });
   });
 });

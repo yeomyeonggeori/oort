@@ -33,6 +33,16 @@ import {
   type TimelineState,
 } from "@momo/core/features/timeline/model";
 import {
+  MAX_CONSUMED_ARRIVAL_IDS,
+  MAX_PENDING_ARRIVAL_GRANTS,
+  capArrivalSet,
+  takeArrivalPlay,
+  type ArrivalEventType,
+  type MessageArrivalProvenance,
+} from "@momo/core/features/timeline/arrival";
+import { createReplayGate } from "@momo/core/lib/realtimeEvents";
+import { prefersReducedMotion } from "@/app/sidebarPane";
+import {
   applyReactionDelta,
   clearMessageReactions,
   emptyReactions,
@@ -136,6 +146,15 @@ export interface UseTimelineResult {
   removeUnfurls: (message: Message) => Promise<void>;
   /** Server projection keyed by case-folded message id. */
   unfurls: UnfurlMap;
+  /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
+  isPlayEntrance: (messageId: string) => boolean;
+  consumeEntrance: (messageId: string) => void;
+  /**
+   * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
+   * this when the reader is not at the bottom. Mounted rows consume
+   * themselves; a paint-tick cap would race virtuoso's later commit.
+   */
+  capUnmountedArrivals: () => void;
 }
 
 /**
@@ -236,22 +255,71 @@ export function useTimeline(
   const newestSeqRef = useRef<number | null>(null);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
+  const heldIdsRef = useRef(new Set<string>());
+  const consumedArrivalIdsRef = useRef(new Set<string>());
+  const playOnMountRef = useRef(new Set<string>());
+  const pendingRef = useRef<PendingMessage[]>([]);
 
-  const applyBatch = useCallback((batch: Message[]) => {
-    if (batch.length === 0) return;
-    for (const message of batch) {
-      if (newestSeqRef.current === null || message.seq > newestSeqRef.current) {
-        newestSeqRef.current = message.seq;
-      }
-    }
-    // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
-    // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
-    // 호출부마다 심게 두면 언젠가 한 곳이 빠지고, 그 한 곳으로 들어온 반쪽 답만
-    // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
-    // 않으므로 여기서 아무것도 내놓지 않는다.
-    seedEndedRuns(endedStreamRunIds(batch));
-    setState((s) => reconcileMessages(s, batch));
+  const isPlayEntrance = useCallback(
+    (messageId: string) => playOnMountRef.current.has(messageId.toLowerCase()),
+    []
+  );
+  const consumeEntrance = useCallback((messageId: string) => {
+    playOnMountRef.current.delete(messageId.toLowerCase());
   }, []);
+  const capUnmountedArrivals = useCallback(() => {
+    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+  }, []);
+
+  const applyBatch = useCallback(
+    (
+      batch: Message[],
+      meta: {
+        provenance: MessageArrivalProvenance;
+        eventType: ArrivalEventType;
+      } = { provenance: "rest", eventType: "rest" }
+    ) => {
+      if (batch.length === 0) return;
+      const reducedMotion = prefersReducedMotion();
+      for (const message of batch) {
+        if (
+          newestSeqRef.current === null ||
+          message.seq > newestSeqRef.current
+        ) {
+          newestSeqRef.current = message.seq;
+        }
+        const key = message.id.toLowerCase();
+        const play = takeArrivalPlay(consumedArrivalIdsRef.current, {
+          messageId: message.id,
+          authorMemberId: message.authorMemberId,
+          selfMemberId: authorMemberId,
+          provenance: meta.provenance,
+          eventType: meta.eventType,
+          alreadyHeld: heldIdsRef.current.has(key),
+          reducedMotion,
+        });
+        if (play === 1) playOnMountRef.current.add(key);
+        heldIdsRef.current.add(key);
+      }
+      // Same-tick Centrifugo bursts call applyBatch once per publication
+      // before React commits. Do not cap playOnMount here or on the next
+      // paint: react-virtuoso mounts appended rows in a later commit, and
+      // a paint-tick cap evicts grants whose rows have not mounted yet.
+      // Consume evicts a grant on mount; Timeline sweeps leftovers when
+      // the reader is scrolled up.
+      capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
+      // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
+      // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
+      // 호출부마다 심게 두면 언젠가 한 곳이 빠지고, 그 한 곳으로 들어온 반쪽 답만
+      // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
+      // 않으므로 여기서 아무것도 내놓지 않는다.
+      seedEndedRuns(endedStreamRunIds(batch));
+      // 장부 ref 는 updater 밖에서 맞춘다 (`updatePending` 과 같은 이유:
+      // React 는 updater 를 돌리고 결과를 버릴 수 있다).
+      setState((s) => reconcileMessages(s, batch));
+    },
+    [authorMemberId]
+  );
 
   const addMarker = useCallback((source: RecoveryMarker["source"]) => {
     const seq = newestSeqRef.current;
@@ -267,7 +335,6 @@ export function useTimeline(
   // The pending list is mirrored in a ref so a retry can read the row it is
   // retrying without making the callbacks depend on the list (which would
   // rebuild the composer's handler on every keystroke of every other sender).
-  const pendingRef = useRef<PendingMessage[]>([]);
   const updatePending = useCallback(
     (fn: (list: PendingMessage[]) => PendingMessage[]) => {
       pendingRef.current = fn(pendingRef.current);
@@ -440,6 +507,9 @@ export function useTimeline(
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
+    heldIdsRef.current = new Set();
+    consumedArrivalIdsRef.current = new Set();
+    playOnMountRef.current = new Set();
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus("loading");
@@ -490,9 +560,12 @@ export function useTimeline(
     loadPins(channelId);
 
     // 2) Realtime rail with resume healing.
+    const replayGate = createReplayGate();
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
-      onSubscribed: (recovered) => {
+      onSubscribed: (ctx) => {
         if (cancelled) return;
+        replayGate.onSubscribed(ctx);
+        const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
         setResume((r) => ({
@@ -518,7 +591,11 @@ export function useTimeline(
       },
       onMessage: (event) => {
         if (cancelled) return;
-        applyBatch([payloadToMessage(event.payload)]);
+        applyBatch([payloadToMessage(event.payload)], {
+          provenance: replayGate.isReplaying() ? "replay" : "live",
+          eventType:
+            event.type === "message.edited" ? "message.edited" : "message.new",
+        });
       },
       // B11 — a tombstone marks the row it names in place. It cannot go through
       // `applyBatch`: the frame carries only an id (by design, so a delete
@@ -778,5 +855,8 @@ export function useTimeline(
     deleteMessage,
     unfurls,
     removeUnfurls,
+    isPlayEntrance,
+    consumeEntrance,
+    capUnmountedArrivals,
   };
 }
