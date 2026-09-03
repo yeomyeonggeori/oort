@@ -2,6 +2,12 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-24 (Fable) · ★4차 집행 완결 — 2차 승격 창·v0.1.2 첫 멀티아치 재발행·#1716/#1720 랜딩
+- **v0.1.2 발행 폐곡선**(RELEASING 전 절차): main=d66ca97a → dispatch+owner 승인 2회(위임·자동 승인 감시) → 멀티아치 성공 → list digest 수거(앱 43babdbc…de6d·pg b09eb970…1626) → attestation 2본 PASS → 태그·Release → SELF_HOST §2-B 현행화(#1730). **첫 멀티아치 운영자 pin — Apple Silicon 네이티브 pull 성립. D8 함정 3종(실시간·보관소·claim)이 셀프호스터 이미지에 실림.** 언퍼얼은 포함·기본 꺼짐.
+- 2차 승격 창: #1721(docs)→선sync 짝→#1724(uxui)→#1725→#1726(engine)→최종 짝. 학습 절차(선sync)로 토폴로지 재실행 1회로 끝.
+- #1716 랜딩(#1729): 실측 크기 정본화(0-선언 개방·상한 실측 red proof·PG 12/12) — grok 4차 조기종료(ENOSPC)를 인수 완주. #1720 1·3·4항 랜딩(#1733): sol이 main 전진에 TRACKS 하드 가드로 정직 정지→sync 후 전달. 잔여=2항(fan-out 배치)만.
+- 운영: ENOSPC 4차 — **근본 원인=워크트리 50개 적체**(스테일 node_modules·딥 .build). 정리 판정=성재 큐. 각 회수로 14Gi+ 확보.
+
 ## 2026-08-24 (Fable) · ★ADR-0170 완결 — 언퍼얼 양 절반 랜딩(#1717 서버·#1719 클라). 성재 요청 기능 종단 완성
 - 서버 절반(#1717, grok 3,828줄): message_unfurl 원장(079)·SSRF 가드 워커·on/off·제거·프록시. 랜딩 중 fail-closed 게이트 2건(GHCR 고지·web-legacy 타입) 정당 적발→해소.
 - 클라 절반(#1719, sol 24파일): 카드·제거·2층 설정. **design-review FAIL(B1·H1)→수리 라운드(1413762d)→재판정 PASS(0·0)**. 수리가 로빙 기계 잠복 결함 2건을 근본 해소: ①비동기 마운트 구성원 정규화 누락(MutationObserver) ②정거장 이력 고착(focusout primary 복원) — 리뷰어 적대 반증 6경로 전부 방어. 레인 230프레임(다크 115) 완주 실증. 적립=#1720(rowFocus jsdom 고정·배치 API·바이트 예산).
