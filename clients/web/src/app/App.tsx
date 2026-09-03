@@ -100,6 +100,8 @@ export function App() {
   }
 
   if (!session) {
+    // `#/design` 은 세션 없이 열려야 한다. ConnectPage 는 react-router 를
+    // import 하지 않아, 이 HashRouter 는 오늘 로그인 화면과 같다.
     if (DESIGN_GALLERY_ENABLED) {
       return (
         <HashRouter>
