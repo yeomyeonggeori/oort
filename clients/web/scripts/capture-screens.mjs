@@ -10477,11 +10477,11 @@ async function waitForAnimations(page) {
 }
 
 /**
- * UX-R1c: two frames per scheme, skeleton then settled. Holds the channel
- * list, channel messages, and inbox approvals fetch so the surfaces that
- * actually crossfade (sidebar + inbox) are loading together. Motion stays
- * on; waitForAnimations covers the 240ms fade. This is not ADR-0179
- * D10 ③ / DS-3.
+ * UX-R1c: two frames per scheme at 1280, plus light 390 (skeleton then
+ * settled). Holds the channel list, channel messages, and inbox approvals
+ * fetch so the surfaces that actually crossfade (sidebar + inbox) are
+ * loading together. Motion stays on; waitForAnimations covers the 240ms
+ * fade. This is not ADR-0179 D10 ③ / DS-3.
  *
  * The inbox default panel is 결정 대기 (`GET …/approvals`). Holding only
  * channels leaves that panel ready=true with cards already painted. Gate
@@ -10489,8 +10489,19 @@ async function waitForAnimations(page) {
  * (1 at skeleton, 0 at settled) and the settled frame on the inverse.
  */
 async function captureSkeletonReveal(browser, scheme) {
+  return captureSkeletonRevealAt(browser, scheme, VIEWPORT, "");
+}
+
+/**
+ * 1280 keeps the sidebar column in frame. 390 folds it into a drawer, so
+ * the wait is `open-sidebar-drawer` (and the inbox skeleton in the pane),
+ * never `channel-list`. Light 390 is enough to put the phone-width bars
+ * on record; dark 390 is the same layout.
+ */
+async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
+  const phone = viewport.width === MOBILE_VIEWPORT.width;
   const context = await browser.newContext({
-    viewport: VIEWPORT,
+    viewport,
     deviceScaleFactor: 2,
     colorScheme: scheme,
   });
@@ -10531,22 +10542,30 @@ async function captureSkeletonReveal(browser, scheme) {
       email: "seongjae@dawn.example",
       password: "capture-only-not-a-credential",
     });
-    await page.getByTestId("channel-list").waitFor({ state: "visible" });
-    await page.getByTestId("skeleton-row").first().waitFor({ state: "visible" });
+    if (phone) {
+      await page
+        .getByTestId("open-sidebar-drawer")
+        .waitFor({ state: "visible" });
+    } else {
+      await page.getByTestId("channel-list").waitFor({ state: "visible" });
+      await page.getByTestId("skeleton-row").first().waitFor({ state: "visible" });
+    }
     await page.evaluate('location.hash = "/inbox"');
     await page.getByTestId("inbox-route").waitFor({ state: "visible" });
     await page
       .locator('[data-testid="inbox-route"] [data-ready="false"]')
       .waitFor({ state: "visible", timeout: 8_000 });
     await waitForAnimations(page);
-    const skeletonPath = `${OUT_DIR}/skeleton-${scheme}.png`;
+    const skeletonPath = `${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`;
     await screenshotSettled(page, skeletonPath);
     shots.push(skeletonPath);
     release();
-    await page
-      .getByTestId("sidebar-section-channels")
-      .getByRole("link", { name: "엔진" })
-      .waitFor({ state: "visible" });
+    if (!phone) {
+      await page
+        .getByTestId("sidebar-section-channels")
+        .getByRole("link", { name: "엔진" })
+        .waitFor({ state: "visible" });
+    }
     await page
       .locator('[data-testid="inbox-route"] [data-ready="true"]')
       .waitFor({ state: "visible" });
@@ -10557,7 +10576,7 @@ async function captureSkeletonReveal(browser, scheme) {
       .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
       .waitFor({ state: "visible" });
     await waitForAnimations(page);
-    const settledPath = `${OUT_DIR}/skeleton-settled-${scheme}.png`;
+    const settledPath = `${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`;
     await screenshotSettled(page, settledPath);
     shots.push(settledPath);
     return shots;
@@ -11241,6 +11260,13 @@ async function main() {
           all.push(...(await shot(() => captureDesignGallery(browser, scheme))));
           all.push(...(await shot(() => captureScheme(browser, scheme))));
           all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
+          if (scheme === "light") {
+            all.push(
+              ...(await shot(() =>
+                captureSkeletonRevealAt(browser, scheme, MOBILE_VIEWPORT, "-390")
+              ))
+            );
+          }
           all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
           all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
           all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
