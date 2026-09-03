@@ -22,7 +22,7 @@
 // screen can point this device at another server, and the Tauri shell must.
 // =============================================================================
 
-import { fetchWithDeadline, type HttpResponse } from "./http";
+import { fetchWithDeadline, NetworkError, type HttpResponse } from "./http";
 import { apiBase, coreSession } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
@@ -48,6 +48,12 @@ import {
   stringArrayField,
   WireShapeError,
 } from "./wire";
+import {
+  parseAgentToolCatalog,
+  type AgentToolCatalogEntry,
+} from "../features/agents/toolCatalog";
+
+export type { AgentToolCatalogEntry };
 
 export type { PresenceSnapshot, PresenceWrite } from "../features/presence/customStatus";
 
@@ -3896,6 +3902,53 @@ export async function putAgentProfile(
     { method: "PUT", body: JSON.stringify(input) }
   );
   return res.profile;
+}
+
+export type AgentToolCatalogRead =
+  | { kind: "ready"; tools: AgentToolCatalogEntry[] }
+  | { kind: "absent" }
+  | { kind: "forbidden"; message: string }
+  | { kind: "unknown"; message: string };
+
+export const AGENT_TOOL_CATALOG_FORBIDDEN =
+  "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다.";
+
+export const AGENT_TOOL_CATALOG_UNKNOWN =
+  "도구 목록을 불러오지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+
+/**
+ * Workspace tool catalog for Agent Hub enabledTools editing (UX-R4a).
+ *
+ * GET `/v1/workspaces/{ws}/agent-tool-catalog` is not in OpenAPI yet. 404/405/501
+ * and an unreadable 200 are `absent` (display-only chips). The client never
+ * copies `tools.rs` CATALOG.
+ */
+export async function fetchAgentToolCatalog(
+  workspaceId: string,
+  signal?: AbortSignal
+): Promise<AgentToolCatalogRead> {
+  try {
+    const body = await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/agent-tool-catalog`,
+      { signal }
+    );
+    const tools = parseAgentToolCatalog(body);
+    if (tools === null) return { kind: "absent" };
+    return { kind: "ready", tools };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 404 || error.status === 405 || error.status === 501) {
+        return { kind: "absent" };
+      }
+      if (error.status === 403) {
+        return { kind: "forbidden", message: AGENT_TOOL_CATALOG_FORBIDDEN };
+      }
+    }
+    if (error instanceof NetworkError) {
+      return { kind: "unknown", message: error.message };
+    }
+    return { kind: "unknown", message: AGENT_TOOL_CATALOG_UNKNOWN };
+  }
 }
 
 export async function putAgentPause(
