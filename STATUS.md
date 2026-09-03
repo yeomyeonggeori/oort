@@ -2,9 +2,9 @@
 
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
 
-- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy 등록. production dist 에 `design-gallery` 0건. `src/design/ui/` PascalCase export 전수 렌더 가드. hover/active/focus-visible 과 `data-preview` 는 `:is()` 한 몸.
-- 캡처 장면 `design-gallery-{light,dark}.png`. 세션·서버 불요. 새 명명 유틸리티 없음. runtime-unverified 아님(jsdom 렌더 + production grep + capture:design).
-- NOTES(DS-1 입력): busy 는 `aria-busy` 만(시각 유틸 없음). Card/Input/Select 패널은 hover 채움이 없음. press 는 Button 전용(행·칩은 DS-1).
+- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, CSS `data-preview` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지).
+- ui PascalCase export 전수 실면적 렌더. Dialog/Dropdown/Popover/ContextMenu 실개봉(`container`·`overlayClassName`). 갤러리 루트가 유일한 스크롤러. 캡처는 DOM 무수정·뷰포트 확장.
+- NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용.
 
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
