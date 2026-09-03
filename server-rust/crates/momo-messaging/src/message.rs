@@ -1981,7 +1981,13 @@ pub async fn agent_auto_reply_streak_in_tx(
             AND m.deleted_at IS NULL \
             AND m.author_member_id = $2 \
             AND m.type = 'text' \
-            AND m.seq > h.seq",
+            AND m.seq > h.seq \
+            AND NOT EXISTS ( \
+                  SELECT 1 FROM agent_run r \
+                   WHERE r.id = m.run_id \
+                     AND r.workspace_id = m.workspace_id \
+                     AND r.idempotency_key LIKE 'welcome:%' \
+                )",
     )
     .bind(channel_id)
     .bind(agent_member_id)

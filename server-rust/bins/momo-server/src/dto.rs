@@ -2187,6 +2187,12 @@ pub struct WorkspaceDto {
     /// object when the key is absent. Display-only; the settings bag itself
     /// is never included on this DTO (#1770).
     pub role_labels: serde_json::Value,
+    /// Member-readable `workspace.settings.welcome_agent_member_id`. `null`
+    /// when unset; the first native agent is resolved at kickoff time, not here.
+    pub welcome_agent_member_id: Option<String>,
+    /// Effective welcome prompt. The canonical default when the settings key
+    /// is absent (ADR-0181 D8).
+    pub welcome_prompt: String,
 }
 
 /// Swift `WorkspaceResponse` (`DTOs.swift:777-779`). The client unwraps

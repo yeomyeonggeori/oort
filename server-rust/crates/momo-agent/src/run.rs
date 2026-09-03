@@ -135,6 +135,26 @@ impl RunStatus {
 /// That is the whole idempotency story: **one trigger message produces at most
 /// one run** (the schema comment at `001_init.sql:288`), enforced by the unique
 /// index rather than by a read-then-write anybody could race.
+/// ADR-0181 D4 marker kind for a welcome kickoff run.
+///
+/// `Closer` is reserved (v1 does not enqueue it).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WelcomeKind {
+    Opener,
+    ProviderRequired,
+    Closer,
+}
+
+impl WelcomeKind {
+    pub fn as_key(self) -> &'static str {
+        match self {
+            WelcomeKind::Opener => "opener",
+            WelcomeKind::ProviderRequired => "provider-required",
+            WelcomeKind::Closer => "closer",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunTrigger {
     /// A message that mentioned the agent. The message id is also written to
@@ -150,6 +170,15 @@ pub enum RunTrigger {
         actor_member_id: Uuid,
         agent_member_id: Uuid,
         client_run_id: Uuid,
+    },
+    /// A human member's first join (ADR-0181). Keyed per workspace + member +
+    /// kind so UNIQUE(`workspace_id`, `idempotency_key`) is the marker table.
+    Welcome {
+        workspace_id: Uuid,
+        member_id: Uuid,
+        agent_member_id: Uuid,
+        channel_id: Uuid,
+        kind: WelcomeKind,
     },
 }
 
@@ -177,6 +206,17 @@ impl RunTrigger {
                 agent_member_id.to_string().to_uppercase(),
                 client_run_id.to_string().to_uppercase()
             ),
+            RunTrigger::Welcome {
+                workspace_id,
+                member_id,
+                kind,
+                ..
+            } => format!(
+                "welcome:{}:{}:{}:v1",
+                workspace_id.to_string().to_uppercase(),
+                member_id.to_string().to_uppercase(),
+                kind.as_key()
+            ),
         }
     }
 
@@ -186,7 +226,7 @@ impl RunTrigger {
     pub fn trigger_message_id(&self) -> Option<Uuid> {
         match self {
             RunTrigger::Mention { message_id, .. } => Some(*message_id),
-            RunTrigger::Work { .. } => None,
+            RunTrigger::Work { .. } | RunTrigger::Welcome { .. } => None,
         }
     }
 
@@ -196,6 +236,9 @@ impl RunTrigger {
                 agent_member_id, ..
             }
             | RunTrigger::Work {
+                agent_member_id, ..
+            }
+            | RunTrigger::Welcome {
                 agent_member_id, ..
             } => *agent_member_id,
         }
@@ -2008,6 +2051,50 @@ mod tests {
         assert_ne!(
             work.idempotency_key(),
             different_client_run.idempotency_key()
+        );
+    }
+
+    #[test]
+    fn a_welcome_trigger_keys_per_member_and_kind() {
+        let workspace = Uuid::from_u128(1);
+        let member = Uuid::from_u128(2);
+        let agent = Uuid::from_u128(3);
+        let channel = Uuid::from_u128(4);
+        let opener = RunTrigger::Welcome {
+            workspace_id: workspace,
+            member_id: member,
+            agent_member_id: agent,
+            channel_id: channel,
+            kind: WelcomeKind::Opener,
+        };
+        let retry = RunTrigger::Welcome {
+            workspace_id: workspace,
+            member_id: member,
+            agent_member_id: agent,
+            channel_id: channel,
+            kind: WelcomeKind::Opener,
+        };
+        assert_eq!(opener.idempotency_key(), retry.idempotency_key());
+        assert_eq!(
+            opener.idempotency_key(),
+            format!(
+                "welcome:{}:{}:opener:v1",
+                workspace.to_string().to_uppercase(),
+                member.to_string().to_uppercase()
+            )
+        );
+        assert_eq!(opener.trigger_message_id(), None);
+        let provider_required = RunTrigger::Welcome {
+            workspace_id: workspace,
+            member_id: member,
+            agent_member_id: agent,
+            channel_id: channel,
+            kind: WelcomeKind::ProviderRequired,
+        };
+        assert_ne!(
+            opener.idempotency_key(),
+            provider_required.idempotency_key(),
+            "provider-required must not consume the opener marker"
         );
     }
 

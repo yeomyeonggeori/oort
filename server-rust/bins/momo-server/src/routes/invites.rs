@@ -326,6 +326,9 @@ pub async fn regenerate(
         .into_response())
 }
 
+/// ADR-0181: redeem does not create a member, so it does not enqueue a welcome
+/// kickoff. First-entry triggers are `POST /v1/join` (`createdMember: true`)
+/// and owner-claim completion.
 pub async fn redeem(
     State(state): State<AppState>,
     Extension(principal): Extension<Principal>,

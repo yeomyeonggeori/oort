@@ -40,15 +40,12 @@
 //! row is `momo_db::audit::write_audit`'s. What lives here is translation:
 //! validation → 400, [`JoinRejection`] → its status, and the 201/200 split.
 //!
-//! ## Deliberate omission, recorded rather than implied
+//! ## Welcome kickoff (ADR-0181)
 //!
-//! Swift follows a successful join with `OnboardingGreeting.post` (MOMO-588 /
-//! W-O3): the workspace agent posts a deterministic welcome through the
-//! canonical write path. It is **not** ported here. It is best-effort and
-//! error-swallowing on the Swift side too (a greeting failure must never fail a
-//! join), so its absence changes no response field and no status — it is a
-//! missing timeline message, nothing else. It also belongs to the agent surface
-//! this batch was told to leave alone. Recorded in the PR body as open.
+//! A newly created human (`createdMember: true`) enqueues a welcome job in this
+//! same transaction. Rejoin does not. The worker — not this route — authors the
+//! opener, so a missing provider can post the static `ProviderRequired` copy
+//! without consuming the opener marker.
 
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode, Uri};
@@ -126,6 +123,7 @@ pub async fn join(
         .get(axum::http::header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    let gateway_enabled = state.agent_gateway.enabled();
 
     // -- 2. which tenant? --------------------------------------------------
     // The locked definer lookup, on a connection with NO tenant GUC — there is
@@ -182,6 +180,15 @@ pub async fn join(
                         ),
                 )
                 .await?;
+                if outcome.created_member {
+                    crate::routes::welcome::enqueue_welcome_kickoff_in_tx(
+                        conn,
+                        workspace_id,
+                        outcome.member.id,
+                        gateway_enabled,
+                    )
+                    .await?;
+                }
                 Ok(outcome)
             })
         }
