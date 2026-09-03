@@ -4,9 +4,10 @@
 
 - ADR-0179 D3: 실시간 도착(타 사용자 `message.new`) 행만 `enter-conversation` 1회. REST 백필·리플레이 게이트·초기 로드·가상화 재마운트·자기 메시지·edited 는 0. `takeArrivalPlay` 단일점(momo-core). `animationName` 일치로 클래스 제거.
 - reduced-motion: 재생 0 (ingest 가드 + 사다리 duration 0). UnreadDivider/Pill 무접촉.
-- R2: 부분 복구(`recovered=false` + `hasRecoveredPublications=true`) 는 리플레이로 읽는다 (`subscribeHuddle` 과 같이 구독 컨텍스트 전부). grant 상한 1. 스레드 패널도 같은 live 행을 재생. `settlesPending` 팔 삭제(런타임 불가 픽스처). 키프레임 `to` 끝점·iteration-count 1·`both` 단정.
-- 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 H-1 의 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx`.
-- red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 끝점/1회/`both` 불일치 시 motion.test 붉음 · 부분 복구를 live 로 읽으면 하네스가 붉음.
+- R2: 부분 복구(`recovered=false` + `hasRecoveredPublications=true`) 는 리플레이로 읽는다 (`subscribeHuddle` 과 같이 구독 컨텍스트 전부). 스레드 패널도 같은 live 행을 재생. `settlesPending` 팔 삭제(런타임 불가 픽스처). 키프레임 `to` 끝점·iteration-count 1·`both` 단정.
+- R3: grant→class 이음은 실제 `MessageRow` 렌더(`data-entrance-play`·행 자신의 클래스). ChatShell consume 바인딩 2곳. 키프레임은 캐스케이드 승자(마지막 블록). 같은 틱 라이브 버스트는 마운트된 행 수만큼 재생(상한은 커밋 뒤 미마운트 leftover).
+- 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx` + `MessageRow.entrance.test.tsx`.
+- red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 끝점/1회/`both` 불일치 시 motion.test 붉음 · 부분 복구를 live 로 읽으면 하네스가 붉음 · `playEntrance` 무시·클래스 자식 이전·두 번째 consume 탈락은 행 렌더가 붉음.
 
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
