@@ -18,8 +18,10 @@ export const ContextMenuContent = React.forwardRef<
   React.ElementRef<typeof ContextMenuPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof ContextMenuPrimitive.Content> & {
     container?: HTMLElement | null;
+    /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
+    onOpenAutoFocus?: (event: Event) => void;
   }
->(({ className, container, ...props }, ref) => (
+>(({ className, container, onOpenAutoFocus, ...props }, ref) => (
   <ContextMenuPrimitive.Portal container={container ?? undefined}>
     <ContextMenuPrimitive.Content
       ref={ref}
@@ -29,6 +31,9 @@ export const ContextMenuContent = React.forwardRef<
         className
       )}
       {...props}
+      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+        typeof ContextMenuPrimitive.Content
+      >)}
     />
   </ContextMenuPrimitive.Portal>
 ));

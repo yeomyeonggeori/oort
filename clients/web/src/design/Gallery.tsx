@@ -1,6 +1,5 @@
 import {
   forwardRef,
-  useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -218,7 +217,7 @@ function OverlayCell({
       ref={setHost}
       data-gallery-stage=""
       {...(portalExport ? { "data-gallery-export": portalExport } : {})}
-      className={cn("relative border border-line bg-surface", className)}
+      className={cn("relative border border-line bg-surface p-4", className)}
     >
       {host ? children(host) : null}
     </div>
@@ -316,7 +315,7 @@ function OverlayExamples() {
         DropdownMenu, Popover, ContextMenu 다. 판은 칸 안에 붙는다.
       </p>
       <div className="flex flex-col gap-6">
-        <div className="flex w-full max-w-pane-md flex-col gap-2">
+        <div className="flex w-max max-w-full flex-col gap-2">
           <p className="text-meta text-ink-muted">Dialog</p>
           <p className="text-meta text-ink-muted">
             스크림은 갤러리 대역이다. 모달을 끄면 프리미티브는 스크림을 그리지
@@ -334,7 +333,10 @@ function OverlayExamples() {
                   대화상자 열기
                 </Button>
               </DialogTrigger>
-              <OverlayCell portalExport="DialogPortal" className="mt-2 w-full">
+              <OverlayCell
+                portalExport="DialogPortal"
+                className="mt-2 w-max max-w-full p-8"
+              >
                 {(host) => (
                   <>
                     <div
@@ -344,7 +346,7 @@ function OverlayExamples() {
                     />
                     <DialogContent
                       container={host}
-                      className="relative left-auto top-auto translate-x-0 gap-4 p-4"
+                      className="relative left-auto top-auto w-pane-md translate-x-0 gap-4 p-4"
                       data-gallery-export="DialogContent"
                       onOpenAutoFocus={preventAutoFocus}
                     >
@@ -394,6 +396,7 @@ function OverlayExamples() {
                     container={host}
                     align="start"
                     data-gallery-export="DropdownMenuContent"
+                    onOpenAutoFocus={preventAutoFocus}
                   >
                     <DropdownMenuLabel data-gallery-export="DropdownMenuLabel">
                       채널 동작
@@ -498,6 +501,7 @@ function ContextMenuSpecimen() {
           <ContextMenuContent
             container={host}
             data-gallery-export="ContextMenuContent"
+            onOpenAutoFocus={preventAutoFocus}
           >
             <ContextMenuLabel data-gallery-export="ContextMenuLabel">
               메시지
@@ -538,21 +542,6 @@ function GalleryBody() {
     ],
     []
   );
-
-  useEffect(() => {
-    const release = () => {
-      const active = document.activeElement;
-      if (
-        active instanceof HTMLElement &&
-        active.closest("[data-gallery-stage], [data-gallery-export]")
-      ) {
-        active.blur();
-      }
-    };
-    release();
-    const id = window.setTimeout(release, 0);
-    return () => window.clearTimeout(id);
-  }, []);
 
   return (
     <div
