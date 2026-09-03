@@ -105,9 +105,8 @@ export const DialogContent = React.forwardRef<
     opener?: DialogFocusTarget | null;
     /** 포털 목적지. 생략하면 document.body. */
     container?: HTMLElement | null;
-    overlayClassName?: string;
   }
->(({ className, children, onCloseAutoFocus, opener, container, overlayClassName, ...props }, ref) => {
+>(({ className, children, onCloseAutoFocus, opener, container, ...props }, ref) => {
   // `document.activeElement` 추정은 Chromium에서만 맞다. WebKit은 마우스 클릭으로
   // <button>에 포커스를 주지 않아 캡처값이 <body>가 되고, 닫힐 때 돌려줄 자리가
   // 사라진다 — 데스크톱 셸이 WKWebView이므로 배포 대상의 절반이 그쪽이다.
@@ -120,14 +119,7 @@ export const DialogContent = React.forwardRef<
 
   return (
     <DialogPortal container={container ?? undefined}>
-      <DialogOverlay
-        className={overlayClassName}
-        // overlayClassName is the gallery in-cell road; mark the scrim so the
-        // display case can assert the real overlay box (modal=false renders none).
-        {...(overlayClassName
-          ? { "data-gallery-export": "DialogOverlay" }
-          : {})}
-      />
+      <DialogOverlay />
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
