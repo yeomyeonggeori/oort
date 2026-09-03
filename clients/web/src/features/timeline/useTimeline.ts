@@ -28,12 +28,14 @@ import {
   removePending,
   retryPending,
   unsettledPending,
-  confirmsPending,
   type PendingMessage,
   type RecoveryMarker,
   type TimelineState,
 } from "@momo/core/features/timeline/model";
 import {
+  MAX_CONSUMED_ARRIVAL_IDS,
+  MAX_PENDING_ARRIVAL_GRANTS,
+  capArrivalSet,
   takeArrivalPlay,
   type ArrivalEventType,
   type MessageArrivalProvenance,
@@ -247,7 +249,7 @@ export function useTimeline(
   const newestSeqRef = useRef<number | null>(null);
   const firstSubscribeRef = useRef(true);
   const markerCounterRef = useRef(0);
-  const messagesRef = useRef<Message[]>([]);
+  const heldIdsRef = useRef(new Set<string>());
   const consumedArrivalIdsRef = useRef(new Set<string>());
   const playOnMountRef = useRef(new Set<string>());
   const pendingRef = useRef<PendingMessage[]>([]);
@@ -269,9 +271,6 @@ export function useTimeline(
       } = { provenance: "rest", eventType: "rest" }
     ) => {
       if (batch.length === 0) return;
-      const held = new Set(
-        messagesRef.current.map((message) => message.id.toLowerCase())
-      );
       const reducedMotion = prefersReducedMotion();
       for (const message of batch) {
         if (
@@ -280,31 +279,30 @@ export function useTimeline(
         ) {
           newestSeqRef.current = message.seq;
         }
+        const key = message.id.toLowerCase();
         const play = takeArrivalPlay(consumedArrivalIdsRef.current, {
           messageId: message.id,
           authorMemberId: message.authorMemberId,
           selfMemberId: authorMemberId,
           provenance: meta.provenance,
           eventType: meta.eventType,
-          settlesPending: pendingRef.current.some((row) =>
-            confirmsPending(message, row)
-          ),
-          alreadyHeld: held.has(message.id.toLowerCase()),
+          alreadyHeld: heldIdsRef.current.has(key),
           reducedMotion,
         });
-        if (play === 1) playOnMountRef.current.add(message.id.toLowerCase());
+        if (play === 1) playOnMountRef.current.add(key);
+        heldIdsRef.current.add(key);
       }
+      capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+      capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
       // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
       // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
       // 호출부마다 심게 두면 언젠가 한 곳이 빠지고, 그 한 곳으로 들어온 반쪽 답만
       // 조용히 완결 행세를 한다. 실시간으로 온 행은 `runEnded` 를 달고 오지
       // 않으므로 여기서 아무것도 내놓지 않는다.
       seedEndedRuns(endedStreamRunIds(batch));
-      setState((s) => {
-        const next = reconcileMessages(s, batch);
-        messagesRef.current = next.messages;
-        return next;
-      });
+      // 장부 ref 는 updater 밖에서 맞춘다 (`updatePending` 과 같은 이유:
+      // React 는 updater 를 돌리고 결과를 버릴 수 있다).
+      setState((s) => reconcileMessages(s, batch));
     },
     [authorMemberId]
   );
@@ -495,7 +493,7 @@ export function useTimeline(
     firstSubscribeRef.current = true;
     newestSeqRef.current = null;
     markerCounterRef.current = 0;
-    messagesRef.current = [];
+    heldIdsRef.current = new Set();
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
     updatePending(() => []);
@@ -550,9 +548,10 @@ export function useTimeline(
     // 2) Realtime rail with resume healing.
     const replayGate = createReplayGate();
     const unsub = realtime.subscribeChannel(workspaceId, channelId, {
-      onSubscribed: (recovered) => {
+      onSubscribed: (ctx) => {
         if (cancelled) return;
-        replayGate.onSubscribed({ recovered });
+        replayGate.onSubscribed(ctx);
+        const recovered = ctx.recovered === true;
         const isFirst = firstSubscribeRef.current;
         firstSubscribeRef.current = false;
         setResume((r) => ({

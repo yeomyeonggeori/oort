@@ -156,8 +156,8 @@ export function createChannelRail(getClient: () => Centrifuge): ChannelRail {
         centrifugoChannelName(workspaceId, channelId),
         {recoverable: true, positioned: true},
         sub => {
-          const onSubscribed = (ctx: {recovered?: boolean}) => {
-            handlers.onSubscribed(ctx.recovered === true);
+          const onSubscribed = (ctx: SubscribedRecoveryContext) => {
+            handlers.onSubscribed(ctx);
           };
           const onPublication = (ctx: {data?: unknown}) => {
             const event = ctx.data as MessageNewEvent | undefined;
