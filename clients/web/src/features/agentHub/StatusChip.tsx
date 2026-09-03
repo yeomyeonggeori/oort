@@ -21,7 +21,7 @@ export function StatusChip({
         "rounded-sm px-1 text-timestamp",
         tone === "neutral" && "bg-muted-soft text-ink-muted",
         tone === "agent" && "bg-agent-soft text-agent",
-        tone === "warn" && "border border-warn text-warn"
+        tone === "warn" && "bg-warn-soft text-warn"
       )}
       data-testid={testId}
     >

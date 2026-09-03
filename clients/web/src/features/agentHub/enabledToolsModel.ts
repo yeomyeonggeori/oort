@@ -115,12 +115,14 @@ export function resolveToolTabStop(
   readOnly: boolean,
   preferred: string | null
 ): string | null {
+  const names = rows.map((row) => row.name);
   const unlocked = rows
     .filter((row) => !isToolToggleLocked(row, readOnly))
     .map((row) => row.name);
-  if (unlocked.length === 0) return null;
-  if (preferred !== null && unlocked.includes(preferred)) return preferred;
-  return unlocked[0] ?? null;
+  const candidates = unlocked.length > 0 ? unlocked : names;
+  if (candidates.length === 0) return null;
+  if (preferred !== null && candidates.includes(preferred)) return preferred;
+  return candidates[0] ?? null;
 }
 
 export function roveToolToggles(
@@ -135,26 +137,35 @@ export function roveToolToggles(
   if (!root) return false;
   const target = event.target;
   if (!(target instanceof Node) || !root.contains(target)) return false;
-  const toggles = Array.from(
+  const all = Array.from(
     root.querySelectorAll<HTMLElement>("[data-tool-toggle]")
-  ).filter((el) => el.getAttribute("aria-disabled") !== "true");
-  if (toggles.length === 0) return false;
+  );
+  const live = all.filter((el) => el.getAttribute("aria-disabled") !== "true");
+  const pool = live.length > 0 ? live : all;
+  if (pool.length === 0) return false;
   const active = root.ownerDocument.activeElement as HTMLElement;
-  let index = toggles.indexOf(active);
-  if (index < 0) {
-    const stop = toggles.find((el) => el.tabIndex === 0);
-    index = stop ? toggles.indexOf(stop) : 0;
-  }
-  let nextIndex = 0;
+  let next: HTMLElement | undefined;
   if (event.key === "Home") {
-    nextIndex = 0;
+    next = pool[0];
   } else if (event.key === "End") {
-    nextIndex = toggles.length - 1;
+    next = pool[pool.length - 1];
   } else {
     const step = event.key === "ArrowDown" ? 1 : -1;
-    nextIndex = (index + step + toggles.length) % toggles.length;
+    const from = all.indexOf(active);
+    if (from < 0) {
+      const stop = pool.find((el) => el.tabIndex === 0) ?? pool[0];
+      const stopIndex = pool.indexOf(stop);
+      next = pool[(stopIndex + step + pool.length) % pool.length];
+    } else {
+      for (let offset = 1; offset <= all.length; offset += 1) {
+        const candidate = all[(from + offset * step + all.length) % all.length];
+        if (pool.includes(candidate)) {
+          next = candidate;
+          break;
+        }
+      }
+    }
   }
-  const next = toggles[nextIndex];
   if (!next) return false;
   event.preventDefault();
   next.focus();

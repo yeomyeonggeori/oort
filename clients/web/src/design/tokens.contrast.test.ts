@@ -208,7 +208,7 @@ export const SURFACES = [
 export const CHIP_VESSEL_SURFACES = [
   ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
   ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
-  ["warn-soft", ["surface", "surface-hover", "surface-raised"]],
+  ["warn-soft", ["surface", "surface-hover", "surface-raised", "accent-soft"]],
   ["danger-soft", ["surface", "surface-hover", "surface-raised"]],
 ] as const;
 

@@ -157,7 +157,11 @@ export function EnabledToolsSection({
             </p>
           )}
           {!offline && !editable && editDisabledReason && !forbidden && (
-            <p id={sharedReasonId} className="sr-only">
+            <p
+              id={sharedReasonId}
+              className="text-meta text-ink-muted"
+              data-testid="agent-hub-enabled-tools-edit-reason"
+            >
               {editDisabledReason}
             </p>
           )}
@@ -212,10 +216,11 @@ export function EnabledToolsSection({
             size="sm"
             className={cn(
               "tap-target self-start",
+              !canSave && !saving && "pointer-events-none",
               !canSave &&
                 !confirmed &&
                 !saving &&
-                "pointer-events-none opacity-50 hover:opacity-50"
+                "opacity-50 hover:opacity-50"
             )}
             aria-disabled={!canSave || undefined}
             aria-busy={saving || undefined}
@@ -318,9 +323,7 @@ function ToolToggleRow({
           locked ? "cursor-default" : cn("cursor-pointer", PRESS_CLASS),
           row.enabled && "bg-accent-soft",
           !locked && !row.enabled && "hover:bg-surface-hover",
-          row.enabled
-            ? "has-[:focus-visible]:focus-ring focus-ring-on-fill"
-            : "has-[:focus-visible]:focus-ring"
+          "has-[:focus-visible]:focus-ring"
         )}
         data-testid={`agent-hub-tool-row-${row.name}`}
       >
@@ -335,10 +338,7 @@ function ToolToggleRow({
           aria-labelledby={nameId}
           aria-describedby={describedBy}
           className={cn(
-            "mt-1 size-4 shrink-0 rounded-sm accent-accent",
-            row.enabled
-              ? "focus-visible:focus-ring focus-ring-on-fill"
-              : "focus-visible:focus-ring",
+            "mt-1 size-4 shrink-0 rounded-sm accent-accent focus-visible:focus-ring",
             locked && "opacity-50"
           )}
           onFocus={onFocus}
