@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
@@ -13,8 +13,11 @@ import { Button } from "@/design/ui/button";
 
 /**
  * Height-preserving skeleton → content crossfade (ADR-0179 D3 / UX-R1c).
- * Bars and children share one grid cell. No shimmer: pulse is brightness,
- * paused when `ready`. Remount after a ready paint is `is-resetting` (전이 0).
+ * Bars and children share one grid cell while loading. No shimmer, no pulse:
+ * the bars are static; the crossfade is the whole motion. After the fade
+ * ends, `is-settled` takes the bars out of flow so the host height is the
+ * content's. `is-resetting` is an in-place `ready` true→false on a live
+ * instance (전이 0). A remount is a new instance and does crossfade.
  */
 export function Skeleton({
   ready,
@@ -30,15 +33,49 @@ export function Skeleton({
   const seenReady = useRef(ready);
   if (ready) seenReady.current = true;
   const resetting = seenReady.current && !ready;
+  const barsRef = useRef<HTMLDivElement>(null);
+  const [settled, setSettled] = useState(ready);
+
+  useEffect(() => {
+    if (!ready) {
+      setSettled(false);
+      return;
+    }
+    const bars = barsRef.current;
+    const reduced =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (!bars || reduced) {
+      setSettled(true);
+      return;
+    }
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target !== bars) return;
+      if (event.propertyName !== "opacity") return;
+      setSettled(true);
+    };
+    bars.addEventListener("transitionend", onEnd);
+    const fallback = window.setTimeout(() => setSettled(true), 400);
+    return () => {
+      bars.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [ready]);
 
   return (
     <div
-      className={cn("skel", resetting && "is-resetting")}
+      className={cn(
+        "skel",
+        resetting && "is-resetting",
+        settled && "is-settled"
+      )}
       data-testid="skeleton"
       data-ready={ready ? "true" : "false"}
       aria-busy={ready ? undefined : true}
     >
       <div
+        ref={barsRef}
         className={cn(
           "skel-layer skel-bars flex flex-col gap-2 p-2",
           className

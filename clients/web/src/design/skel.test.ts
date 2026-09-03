@@ -2,26 +2,54 @@ import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
+import { EmptyInvite, Skeleton } from "../features/common/States";
 
 /**
  * UX-R1c / ADR-0179 D3 — skeleton → content blur crossfade.
  *
- * Each case isolates one number. Chromium missing → throw (never skip).
+ * Markup comes from the real `Skeleton` (renderToStaticMarkup), not a
+ * hand-written fixture. Chromium missing → throw (never skip).
  *
- * red proof:
- *   - drop @utility skel → compile selector test is red
- *   - stack layers (no grid-area) → wrapper height equals the sum, not one layer
- *   - skip the ready transition → opacity transitionrun count is 0, not 1
- *   - drop is-resetting { transition: none } → remount count is not 0
- *   - drop reduced-motion { transition: none } → reduce count is not 0
- *   - leave pulse running after ready → animation-play-state stays running
+ * red proof (scratch, product):
+ *   - rename skel-content / skel-bars in States.tsx → computed overlay gone
+ *   - h-6 → h-12 on the bar → row height is not 24
+ *   - duplicate the arrival crossfade → opacity transitionrun count is not 1
+ *   - delete the Inbox wrapping Skeleton → InboxRoute source scan is red
+ *   - leave bars in flow after ready → host height > content height
+ *   - restore skel-pulse → animation-name is not none
+ *
+ * reduced-motion transitionrun 0 is D9 (`--motion-standard: 0ms`) plus the
+ * local `transition: none`. Deleting only the skel @media block does not
+ * make that count non-zero; do not claim it would.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const require_ = createRequire(import.meta.url);
 const TOKENS_CSS = readFileSync(new URL("./tokens.css", import.meta.url), "utf8");
+const STATES_SRC = readFileSync(
+  new URL("../features/common/States.tsx", import.meta.url),
+  "utf8"
+);
+const INBOX_SRC = readFileSync(
+  new URL("../features/inbox/InboxRoute.tsx", import.meta.url),
+  "utf8"
+);
+const DRAFTS_SRC = readFileSync(
+  new URL("../features/drafts/DraftsRoute.tsx", import.meta.url),
+  "utf8"
+);
+const ACTIVITY_SRC = readFileSync(
+  new URL("../features/activity/ActivityRoute.tsx", import.meta.url),
+  "utf8"
+);
+const SIDEBAR_SRC = readFileSync(
+  new URL("../features/sidebar/Sidebar.tsx", import.meta.url),
+  "utf8"
+);
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
   try {
@@ -69,35 +97,68 @@ const SKEL_CANDIDATES = [
   "flex",
   "flex-col",
   "gap-2",
+  "gap-3",
   "p-2",
+  "p-4",
+  "px-2",
+  "px-4",
+  "py-1",
+  "py-6",
   "h-6",
   "rounded-sm",
   "bg-surface-hover",
+  "text-body",
+  "text-meta",
+  "font-medium",
+  "text-ink",
+  "text-ink-muted",
+  "break-keep",
+  "items-start",
 ];
 
-function skelFixtureHtml(contentRows = 4): string {
-  const bars = Array.from(
-    { length: 4 },
-    () =>
-      `<div class="h-6 rounded-sm bg-surface-hover" data-testid="skeleton-row"></div>`
-  ).join("");
-  const lines = Array.from(
-    { length: contentRows },
-    (_, i) =>
-      `<div class="h-6">alpha standup notes line ${i + 1}</div>`
-  ).join("");
-  return `<div id="host" class="skel" data-testid="skeleton" data-ready="false">
-  <div class="skel-layer skel-bars flex flex-col gap-2 p-2" data-skel="bars" aria-hidden="true">${bars}</div>
-  <div class="skel-layer skel-content" data-skel="content">
-    <div class="flex flex-col gap-2 p-2">${lines}</div>
-  </div>
-</div>`;
+type CallSite = "sidebar" | "drafts" | "activity";
+
+function callSiteChildren(site: CallSite) {
+  if (site === "sidebar") {
+    return createElement(
+      "ul",
+      { className: "flex flex-col" },
+      createElement("li", { className: "px-2 py-1 text-body" }, "엔진"),
+      createElement("li", { className: "px-2 py-1 text-body" }, "일반")
+    );
+  }
+  if (site === "drafts") {
+    return createElement(EmptyInvite, {
+      headline: "아직 초안이 없습니다.",
+      detail: "쓰다 만 글은 자동으로 저장됩니다.",
+      testId: "drafts-empty",
+    });
+  }
+  return createElement(EmptyInvite, {
+    headline: "에이전트 활동이 아직 없습니다.",
+    detail:
+      "에이전트가 실행 허가를 요청하거나 작업을 마치면 한 줄씩 쌓입니다. 담당자도 함께 표시됩니다.",
+    testId: "activity-empty",
+  });
+}
+
+function productMarkup(ready: boolean, site: CallSite = "sidebar"): string {
+  const rows = site === "sidebar" ? 4 : 4;
+  const className = site === "sidebar" ? undefined : "p-4";
+  return renderToStaticMarkup(
+    createElement(
+      Skeleton,
+      { ready, rows, className },
+      callSiteChildren(site)
+    )
+  );
 }
 
 async function withSkelPage(
   options: {
     reducedMotion?: "reduce" | "no-preference";
-    contentRows?: number;
+    ready?: boolean;
+    site?: CallSite;
   },
   run: (page: import("playwright").Page) => Promise<void>
 ): Promise<void> {
@@ -108,8 +169,9 @@ async function withSkelPage(
     const page = await browser.newPage({
       reducedMotion: options.reducedMotion ?? "no-preference",
     });
+    const markup = productMarkup(options.ready ?? false, options.site ?? "sidebar");
     await page.setContent(
-      `<!doctype html><html><head><style>${css}</style></head><body>${skelFixtureHtml(options.contentRows ?? 4)}</body></html>`
+      `<!doctype html><html><head><style>${css}</style></head><body>${markup}</body></html>`
     );
     await run(page);
   } finally {
@@ -151,9 +213,27 @@ async function setReady(
   page: import("playwright").Page,
   ready: boolean
 ): Promise<void> {
-  await page.locator("#host").evaluate((node, next) => {
+  await page.locator('[data-testid="skeleton"]').evaluate((node, next) => {
     node.setAttribute("data-ready", next ? "true" : "false");
   }, ready);
+}
+
+async function measureHost(page: import("playwright").Page) {
+  return page.locator('[data-testid="skeleton"]').evaluate((node) => {
+    const host = node as HTMLElement;
+    const bars = host.querySelector('[data-skel="bars"]') as HTMLElement | null;
+    const content = host.querySelector(
+      '[data-skel="content"]'
+    ) as HTMLElement | null;
+    return {
+      host: host.getBoundingClientRect().height,
+      bars: bars?.getBoundingClientRect().height ?? 0,
+      content: content?.getBoundingClientRect().height ?? 0,
+      contentClass: content?.className ?? "",
+      barsClass: bars?.className ?? "",
+      settled: host.classList.contains("is-settled"),
+    };
+  });
 }
 
 describe("UX-R1c @utility skel CSS", () => {
@@ -186,13 +266,64 @@ describe("UX-R1c @utility skel CSS", () => {
     const css = await buildCss(SKEL_CANDIDATES);
     expect(css).toMatch(/\.skel\.is-resetting[\s\S]{0,280}transition:\s*none/);
   });
+
+  it("is-settled takes bars out of flow (no pulse keyframes)", async () => {
+    const css = await buildCss(SKEL_CANDIDATES);
+    expect(css).toMatch(/\.skel\.is-settled[\s\S]{0,200}position:\s*absolute/);
+    expect(css).not.toMatch(/skel-pulse/);
+  });
 });
 
-describe("UX-R1c runtime — one number per case", () => {
+describe("UX-R1c product binding — real Skeleton markup", () => {
+  it("States.tsx paints skel-content and skel-bars (rename turns this red)", () => {
+    expect(STATES_SRC).toMatch(/className=\{cn\(\s*"skel-layer skel-bars/);
+    expect(STATES_SRC).toMatch(/className="skel-layer skel-content"/);
+    expect(STATES_SRC).toMatch(/className="h-6 rounded-sm bg-surface-hover"/);
+  });
+
+  it("InboxRoute wraps the feed in Skeleton (delete turns this red)", () => {
+    expect(INBOX_SRC).toMatch(
+      /<Skeleton ready=\{state !== "loading"\} rows=\{3\} className="p-4">/
+    );
+    expect(INBOX_SRC).toContain("<FeedList");
+    expect(INBOX_SRC).toContain('testId="inbox-list"');
+    expect(INBOX_SRC).toContain("</Skeleton>");
+    expect(INBOX_SRC).not.toMatch(
+      /<Skeleton ready=\{state !== "loading"\}[^>]*\/>/
+    );
+  });
+
+  it("Drafts and Activity wrap empty states (not self-closing)", () => {
+    expect(DRAFTS_SRC).toMatch(
+      /<Skeleton ready=\{!panel\.isPending\} rows=\{4\} className="p-4">/
+    );
+    expect(DRAFTS_SRC).toContain('data-testid="drafts-empty"');
+    expect(DRAFTS_SRC).toContain("</Skeleton>");
+    expect(ACTIVITY_SRC).toContain("<Skeleton");
+    expect(ACTIVITY_SRC).toContain('testId="activity-empty"');
+    expect(ACTIVITY_SRC).toContain("</Skeleton>");
+  });
+
+  it("sidebar list is outside ul>div: wrapList false and ul lives inside Skeleton", () => {
+    expect(SIDEBAR_SRC).toContain("wrapList={false}");
+    expect(SIDEBAR_SRC).toContain("sidebarSectionListId(baseChannelSection.id)");
+    const skeletonAt = SIDEBAR_SRC.indexOf(
+      "<Skeleton ready={!channelsQuery.isLoading} rows={4}>"
+    );
+    expect(skeletonAt).toBeGreaterThan(0);
+    const inner = SIDEBAR_SRC.slice(skeletonAt, skeletonAt + 2800);
+    expect(inner).toContain("<ul");
+    expect(inner).toContain("baseChannelSection.channels.map");
+    expect(inner).toContain("</Skeleton>");
+  });
+});
+
+describe("UX-R1c runtime — one number per case, product host", () => {
   it(
     "ready false→true: content opacity transitionrun count is 1",
     async () => {
       await withSkelPage({}, async (page) => {
+        expect(await page.locator(".skel-content").count()).toBe(1);
         await armTransitionProbe(page, '[data-skel="content"]');
         await setReady(page, true);
         await page.waitForTimeout(400);
@@ -241,23 +372,41 @@ describe("UX-R1c runtime — one number per case", () => {
   );
 
   it(
-    "overlay: wrapper height equals one layer, not the sum",
+    "product classes drive the overlay (rename in States.tsx turns this red)",
     async () => {
       await withSkelPage({}, async (page) => {
-        const box = await page.locator("#host").evaluate((node) => {
-          const host = node as HTMLElement;
-          const bars = host.querySelector('[data-skel="bars"]') as HTMLElement;
-          const content = host.querySelector(
-            '[data-skel="content"]'
-          ) as HTMLElement;
-          return {
-            host: host.getBoundingClientRect().height,
-            bars: bars.getBoundingClientRect().height,
-            content: content.getBoundingClientRect().height,
-          };
-        });
+        const box = await measureHost(page);
+        expect(box.contentClass).toContain("skel-content");
+        expect(box.barsClass).toContain("skel-bars");
+        const opacity = await page
+          .locator(".skel-content")
+          .evaluate((node) => getComputedStyle(node as HTMLElement).opacity);
+        expect(opacity, "unmatched .skel-content would paint at 1").toBe("0");
+      });
+    },
+    20_000
+  );
+
+  it(
+    "each bar is h-6 (24px) — doubling the bar class turns this red",
+    async () => {
+      await withSkelPage({}, async (page) => {
+        const height = await page
+          .locator('[data-testid="skeleton-row"]')
+          .first()
+          .evaluate((node) => (node as HTMLElement).getBoundingClientRect().height);
+        expect(height).toBe(24);
+      });
+    },
+    20_000
+  );
+
+  it(
+    "loading: wrapper height equals the bars layer, not the sum",
+    async () => {
+      await withSkelPage({ site: "sidebar" }, async (page) => {
+        const box = await measureHost(page);
         expect(box.bars).toBeGreaterThan(0);
-        expect(box.content).toBe(box.bars);
         expect(box.host).toBe(box.bars);
         expect(box.host).not.toBe(box.bars + box.content);
       });
@@ -266,26 +415,46 @@ describe("UX-R1c runtime — one number per case", () => {
   );
 
   it(
-    "layout shift: wrapper height stays the taller layer (not the sum) after ready",
+    "sidebar settled: host height equals content height (not a bars floor)",
     async () => {
-      await withSkelPage({ contentRows: 8 }, async (page) => {
-        const measure = () =>
-          page.locator("#host").evaluate((node) => {
-            const host = node as HTMLElement;
-            const content = host.querySelector(
-              '[data-skel="content"]'
-            ) as HTMLElement;
-            return {
-              host: host.getBoundingClientRect().height,
-              content: content.getBoundingClientRect().height,
-            };
-          });
-        const before = await measure();
-        expect(before.host).toBe(before.content);
-        await setReady(page, true);
-        await page.waitForTimeout(400);
-        const after = await measure();
-        expect(after.host).toBe(before.host);
+      await withSkelPage({ ready: true, site: "sidebar" }, async (page) => {
+        const box = await measureHost(page);
+        expect(box.settled, "SSR ready=true must ship is-settled").toBe(true);
+        expect(box.content).toBeGreaterThan(0);
+        expect(box.host).toBe(box.content);
+        expect(box.bars).toBe(0);
+      });
+    },
+    20_000
+  );
+
+  it(
+    "Drafts empty settled: host height equals content height",
+    async () => {
+      await withSkelPage({ ready: true, site: "drafts" }, async (page) => {
+        const box = await measureHost(page);
+        expect(box.settled).toBe(true);
+        expect(await page.locator('[data-testid="drafts-empty"]').count()).toBe(
+          1
+        );
+        expect(box.host).toBe(box.content);
+        expect(box.bars).toBe(0);
+      });
+    },
+    20_000
+  );
+
+  it(
+    "Activity empty settled: host height equals content height",
+    async () => {
+      await withSkelPage({ ready: true, site: "activity" }, async (page) => {
+        const box = await measureHost(page);
+        expect(box.settled).toBe(true);
+        expect(
+          await page.locator('[data-testid="activity-empty"]').count()
+        ).toBe(1);
+        expect(box.host).toBe(box.content);
+        expect(box.bars).toBe(0);
       });
     },
     20_000
@@ -295,7 +464,7 @@ describe("UX-R1c runtime — one number per case", () => {
     "is-resetting: content transitionrun count is 0",
     async () => {
       await withSkelPage({}, async (page) => {
-        await page.locator("#host").evaluate((node) => {
+        await page.locator('[data-testid="skeleton"]').evaluate((node) => {
           node.classList.add("is-resetting");
         });
         await armTransitionProbe(page, '[data-skel="content"]');
@@ -311,7 +480,7 @@ describe("UX-R1c runtime — one number per case", () => {
   );
 
   it(
-    "reduced-motion: content transitionrun count is 0",
+    "reduced-motion: content transitionrun count is 0 (D9 duration 0)",
     async () => {
       await withSkelPage({ reducedMotion: "reduce" }, async (page) => {
         await armTransitionProbe(page, '[data-skel="content"]');
@@ -327,21 +496,7 @@ describe("UX-R1c runtime — one number per case", () => {
   );
 
   it(
-    "reduced-motion: pulse animation-name is none",
-    async () => {
-      await withSkelPage({ reducedMotion: "reduce" }, async (page) => {
-        const pulse = await page.locator('[data-skel="bars"]').evaluate((node) => {
-          const style = getComputedStyle(node as HTMLElement);
-          return style.animationName;
-        });
-        expect(pulse).toBe("none");
-      });
-    },
-    20_000
-  );
-
-  it(
-    "pulse is running while !ready",
+    "bars have no pulse animation",
     async () => {
       await withSkelPage({}, async (page) => {
         const pulse = await page.locator('[data-skel="bars"]').evaluate((node) => {
@@ -351,27 +506,7 @@ describe("UX-R1c runtime — one number per case", () => {
             playState: style.animationPlayState,
           };
         });
-        expect(pulse.name).not.toBe("none");
-        expect(pulse.playState).toBe("running");
-      });
-    },
-    20_000
-  );
-
-  it(
-    "pulse animation-play-state is paused when ready",
-    async () => {
-      await withSkelPage({}, async (page) => {
-        await setReady(page, true);
-        const pulse = await page.locator('[data-skel="bars"]').evaluate((node) => {
-          const style = getComputedStyle(node as HTMLElement);
-          return {
-            name: style.animationName,
-            playState: style.animationPlayState,
-          };
-        });
-        expect(pulse.name, "paused pulse must still be named").not.toBe("none");
-        expect(pulse.playState).toBe("paused");
+        expect(pulse.name).toBe("none");
       });
     },
     20_000

@@ -5,16 +5,16 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * UX-R1c — Skeleton wrapper. Geometry and transition counts live in
  * design/skel.test.ts (Playwright). This file is the React contract:
- * ready attribute, is-resetting on remount, children, and the call-site
- * migration (no remaining <SkeletonRows).
+ * ready attribute, is-resetting on in-place ready true→false (not remount),
+ * is-settled after the fade, children, and the call-site migration.
  *
  * jsdom cannot measure transitions. It does not skip those proofs — it
- * refuses: see "jsdom does not measure motion" below.
+ * refuses those numbers to Playwright.
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -27,6 +27,18 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
 
+beforeEach(() => {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: false,
+    media: query,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+});
+
 afterEach(() => {
   act(() => {
     mountedRoot?.unmount();
@@ -34,6 +46,7 @@ afterEach(() => {
   mountedHost?.remove();
   mountedRoot = null;
   mountedHost = null;
+  vi.unstubAllGlobals();
 });
 
 async function loadSkeleton(): Promise<
@@ -101,15 +114,18 @@ describe("Skeleton wrapper", () => {
     expect(host.querySelectorAll('[data-testid="skeleton-row"]').length).toBe(4);
   });
 
-  it("ready=true sets data-ready and keeps the bars mounted (overlay)", async () => {
+  it("ready=true sets data-ready, keeps the bars mounted, and is-settled on first paint", async () => {
     const host = await mount(true);
     const root = host.querySelector('[data-testid="skeleton"]');
     expect(root?.getAttribute("data-ready")).toBe("true");
     expect(host.querySelectorAll('[data-testid="skeleton-row"]').length).toBe(4);
     expect(host.textContent).toContain("채널 목록이 도착했습니다");
+    expect(root?.classList.contains("is-settled")).toBe(true);
+    expect(root?.querySelector(".skel-content")).toBeTruthy();
+    expect(root?.querySelector(".skel-bars")).toBeTruthy();
   });
 
-  it("ready true→false adds is-resetting on the same tree", async () => {
+  it("ready true→false adds is-resetting on the same tree (not a remount)", async () => {
     const Skeleton = await loadSkeleton();
     reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
     const host = document.createElement("div");
@@ -128,7 +144,55 @@ describe("Skeleton wrapper", () => {
     });
     const root = host.querySelector('[data-testid="skeleton"]');
     expect(root?.classList.contains("is-resetting")).toBe(true);
+    expect(root?.classList.contains("is-settled")).toBe(false);
     expect(root?.getAttribute("data-ready")).toBe("false");
+  });
+
+  it("a remount after a ready paint does not get is-resetting", async () => {
+    const first = await mount(true);
+    expect(
+      first.querySelector('[data-testid="skeleton"]')?.classList.contains(
+        "is-resetting"
+      )
+    ).toBe(false);
+    act(() => {
+      mountedRoot?.unmount();
+    });
+    mountedHost?.remove();
+    mountedRoot = null;
+    mountedHost = null;
+    const second = await mount(false);
+    const root = second.querySelector('[data-testid="skeleton"]');
+    expect(root?.classList.contains("is-resetting")).toBe(false);
+    expect(root?.getAttribute("data-ready")).toBe("false");
+  });
+
+  it("opacity transitionend on the bars adds is-settled", async () => {
+    const host = await mount(false);
+    const root = host.querySelector('[data-testid="skeleton"]');
+    expect(root?.classList.contains("is-settled")).toBe(false);
+    const Skeleton = await loadSkeleton();
+    await act(async () => {
+      mountedRoot!.render(
+        createElement(
+          Skeleton,
+          { ready: true, rows: 4 },
+          createElement("p", null, "채널 목록이 도착했습니다")
+        )
+      );
+    });
+    const bars = host.querySelector('[data-skel="bars"]');
+    expect(bars).toBeTruthy();
+    await act(async () => {
+      const event = new Event("transitionend", { bubbles: true });
+      Object.defineProperty(event, "propertyName", { value: "opacity" });
+      bars!.dispatchEvent(event);
+    });
+    expect(
+      host.querySelector('[data-testid="skeleton"]')?.classList.contains(
+        "is-settled"
+      )
+    ).toBe(true);
   });
 });
 

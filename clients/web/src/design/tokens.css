@@ -883,10 +883,12 @@
   animation-timing-function: var(--motion-ease-arrival);
 }
 
-/* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell. Content
- * arrives with blur(var(--motion-blur-arrival))→0 and opacity, standard
- * ladder. Remount (is-resetting) and reduced-motion: transition none.
- * Pulse is brightness, not a shimmer, and pauses when ready. */
+/* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell while
+ * loading. Content arrives with blur(var(--motion-blur-arrival))→0 and
+ * opacity, standard ladder. Bars are static (no pulse). After the fade,
+ * is-settled takes them out of flow so the host is the content height.
+ * is-resetting = in-place ready true→false (전이 0), not a remount.
+ * reduced-motion: instant swap. */
 @utility skel {
   display: grid;
 }
@@ -912,14 +914,23 @@
 }
 
 .skel-bars {
-  animation: skel-pulse 1.2s ease-in-out infinite;
   transition: opacity var(--motion-standard) var(--motion-ease-standard);
 }
 
 .skel[data-ready="true"] .skel-bars {
   opacity: 0;
   pointer-events: none;
-  animation-play-state: paused;
+}
+
+/* Out of the grid's size contribution once the fade has finished. */
+.skel.is-settled .skel-bars {
+  position: absolute;
+  inset-inline: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
 }
 
 .skel.is-resetting .skel-content,
@@ -931,17 +942,6 @@
   .skel-content,
   .skel-bars {
     transition: none;
-    animation: none;
-  }
-}
-
-@keyframes skel-pulse {
-  0%,
-  100% {
-    filter: brightness(1);
-  }
-  50% {
-    filter: brightness(0.92);
   }
 }
 
