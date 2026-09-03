@@ -11,6 +11,7 @@
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
+use momo_agent::is_active_agent_in_tx;
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_settings::{
@@ -18,6 +19,7 @@ use momo_settings::{
     write_workspace_settings, WorkspaceSettingsInvalid,
 };
 use serde_json::{json, Value};
+use uuid::Uuid;
 
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -88,6 +90,21 @@ pub async fn patch(
                 Ok(merged) => merged,
                 Err(error) => return Ok(Err(rejection(error))),
             };
+            if let Some(Value::String(raw_id)) = request.get("welcome_agent_member_id") {
+                let parsed = match Uuid::parse_str(raw_id) {
+                    Ok(id) => id,
+                    Err(_) => {
+                        return Ok(Err(ApiError::bad_request(
+                            "welcome_agent_member_id must be a uuid",
+                        )))
+                    }
+                };
+                if !is_active_agent_in_tx(conn, workspace_id, parsed).await? {
+                    return Ok(Err(ApiError::bad_request(
+                        "welcome_agent_member_id is not an active agent",
+                    )));
+                }
+            }
             let Some(stored) = write_workspace_settings(conn, workspace_id, &merged).await? else {
                 return Ok(Err(ApiError::not_found("workspace not found")));
             };

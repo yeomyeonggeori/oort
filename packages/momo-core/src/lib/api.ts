@@ -930,6 +930,90 @@ export async function claimOwnerPassword(
   return claimResponse;
 }
 
+// ---- device-link redeem (POST /v1/auth/device-link/redeem, ADR-0180 D3) -----
+// Public, like /v1/join: the phone holds a one-time voucher and no bearer.
+// LoginResponse plus `pendingSas`. The session is applied here only when the
+// SAS hold is off; public-origin mode keeps tokens in the caller until the
+// issuer confirms and a probe returns 200.
+
+export interface DeviceLinkRedeemResult {
+  session: LoginResponse;
+  pendingSas: boolean;
+  /** Four-digit SAS when the server sent one. Null when omitted (OpenAPI). */
+  sas: string | null;
+}
+
+export type DeviceLinkProbe = "active" | "pending" | "unreachable";
+
+function fourDigitSas(value: string | undefined): string | null {
+  return value !== undefined && /^\d{4}$/.test(value) ? value : null;
+}
+
+function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
+  const source = responseRecord(value);
+  const pendingSas = bool(source, "pendingSas");
+  if (pendingSas === undefined) throw new WireShapeError();
+  return {
+    session: loginResponseFromWire(source),
+    pendingSas,
+    sas: fourDigitSas(str(source, "sas")),
+  };
+}
+
+export async function redeemDeviceLink(
+  token: string,
+  device: { name: string; platform: string }
+): Promise<DeviceLinkRedeemResult> {
+  const res = await rawRequest(
+    "/v1/auth/device-link/redeem",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        token: token.trim(),
+        device: {
+          name: device.name.trim(),
+          platform: device.platform.trim(),
+        },
+      }),
+    },
+    null
+  );
+  if (!res.ok) throw parseError(res);
+  const result = deviceLinkRedeemFromWire(res.json<unknown>());
+  if (!result.pendingSas) {
+    coreSession().applyLogin(result.session);
+  }
+  return result;
+}
+
+/** Land the redeemed session after SAS confirm (or immediately if no hold). */
+export function activateDeviceLinkSession(session: LoginResponse): void {
+  coreSession().applyLogin(session);
+}
+
+/**
+ * Ask whether a redeemed access token is usable yet. Does not touch the
+ * session store and does not treat 401 as "signed out" — pending SAS is 401
+ * until the issuer confirms.
+ */
+export async function probeDeviceLinkAccess(
+  accessToken: string,
+  workspaceId: string
+): Promise<DeviceLinkProbe> {
+  try {
+    const res = await rawRequest(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`,
+      { method: "GET" },
+      accessToken
+    );
+    if (res.ok) return "active";
+    if (res.status === 401) return "pending";
+    return "pending";
+  } catch {
+    return "unreachable";
+  }
+}
+
 /**
  * Resume a stored session after a reload or a webview restart (M9). The access
  * token was never persisted, so resuming IS one refresh rotation; identity and

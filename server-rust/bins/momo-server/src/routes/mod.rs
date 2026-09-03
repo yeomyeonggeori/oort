@@ -65,6 +65,7 @@ pub mod usage;
 /// #1222 — 인바운드 웹훅 설치 관리 (ADR-0115). The public ingress half is not
 /// ported yet; see the module header.
 pub mod webhooks;
+pub mod welcome;
 /// #1114 — the host-control ledger (ADR-0114 D4/D5) and its spawn approval.
 pub mod work_controls;
 pub mod work_hosts;

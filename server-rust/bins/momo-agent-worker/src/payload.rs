@@ -110,6 +110,12 @@ pub struct AgentJobPayload {
     pub step_count: Option<i32>,
     #[serde(default)]
     pub max_steps: Option<i32>,
+    /// Producer stamp. Welcome jobs set `server.welcome.kickoff.v1`.
+    #[serde(default)]
+    pub created_from: Option<String>,
+    /// Requested welcome marker (`opener` / `provider-required` / `closer`).
+    #[serde(default)]
+    pub welcome_kind: Option<String>,
 }
 
 /// The tool call a human approved (`approval.payload.tool_call`, projected by
@@ -186,6 +192,13 @@ impl AgentJobPayload {
     /// Is this job the resume of an approved tool call?
     pub fn is_resume(&self) -> bool {
         self.resume_from_approval_id.is_some()
+    }
+
+    /// ADR-0181 welcome kickoff job. The worker creates the run so a missing
+    /// provider can post `ProviderRequired` without consuming the opener key.
+    pub fn is_welcome(&self) -> bool {
+        self.created_from.as_deref() == Some(momo_agent::WELCOME_JOB_CREATED_FROM)
+            || self.welcome_kind.is_some()
     }
 }
 
