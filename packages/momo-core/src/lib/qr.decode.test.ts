@@ -187,7 +187,6 @@ function isFunctionModule(row: number, col: number, size: number, version: numbe
 }
 
 function readFormatMsb(modules: boolean[][]): string {
-  const size = modules.length;
   const first: Array<[number, number]> = [
     [8, 0],
     [8, 1],
