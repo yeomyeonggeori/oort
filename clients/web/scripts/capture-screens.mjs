@@ -10480,7 +10480,7 @@ async function waitForAnimations(page) {
  * UX-R1c: two frames per scheme, skeleton then settled. Holds the channel
  * list, channel messages, and inbox approvals fetch so the surfaces that
  * actually crossfade (sidebar + inbox) are loading together. Motion stays
- * on; waitUntilAnimationsIdle covers the 240ms fade. This is not ADR-0179
+ * on; waitForAnimations covers the 240ms fade. This is not ADR-0179
  * D10 ③ / DS-3.
  *
  * The inbox default panel is 결정 대기 (`GET …/approvals`). Holding only
@@ -10538,7 +10538,7 @@ async function captureSkeletonReveal(browser, scheme) {
     await page
       .locator('[data-testid="inbox-route"] [data-ready="false"]')
       .waitFor({ state: "visible", timeout: 8_000 });
-    await waitUntilAnimationsIdle(page);
+    await waitForAnimations(page);
     const skeletonPath = `${OUT_DIR}/skeleton-${scheme}.png`;
     await screenshotSettled(page, skeletonPath);
     shots.push(skeletonPath);
@@ -10556,7 +10556,7 @@ async function captureSkeletonReveal(browser, scheme) {
     await page
       .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
       .waitFor({ state: "visible" });
-    await waitUntilAnimationsIdle(page);
+    await waitForAnimations(page);
     const settledPath = `${OUT_DIR}/skeleton-settled-${scheme}.png`;
     await screenshotSettled(page, settledPath);
     shots.push(settledPath);
