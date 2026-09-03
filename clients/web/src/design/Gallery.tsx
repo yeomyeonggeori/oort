@@ -320,11 +320,11 @@ function OverlayExamples() {
         패널은 elevation-float (shadow-lg). 아래 네 칸은 실제로 열린 Dialog,
         DropdownMenu, Popover, ContextMenu 다.
       </p>
-      <div className="flex flex-wrap gap-4">
-        <div className="flex min-w-pane-sm flex-col gap-2">
+      <div className="flex flex-col gap-6">
+        <div className="flex w-full max-w-pane-md flex-col gap-2">
           <p className="text-meta text-ink-muted">Dialog</p>
           <Export name="Dialog">
-            <Dialog open>
+            <Dialog open modal={false}>
               <DialogTrigger asChild>
                 <Button
                   data-gallery-export="DialogTrigger"
@@ -337,16 +337,19 @@ function OverlayExamples() {
               </DialogTrigger>
               <OverlayCell
                 portalExport="DialogPortal"
-                stampOverlay="DialogOverlay"
-                className="mt-2 min-h-pane-md w-full max-w-pane-md"
+                className="mt-2 min-h-pane-md w-full"
               >
                 {(host) => (
-                  <DialogContent
-                    container={host}
-                    overlayClassName="absolute inset-0"
-                    className="gap-4 p-4"
-                    data-gallery-export="DialogContent"
-                  >
+                  <>
+                    <div
+                      data-gallery-export="DialogOverlay"
+                      className="absolute inset-0 bg-scrim"
+                    />
+                    <DialogContent
+                      container={host}
+                      className="gap-4 p-4"
+                      data-gallery-export="DialogContent"
+                    >
                     <DialogTitle data-gallery-export="DialogTitle">
                       채널을 지울까요
                     </DialogTitle>
@@ -365,14 +368,15 @@ function OverlayExamples() {
                         </Button>
                       </DialogClose>
                     </div>
-                  </DialogContent>
+                    </DialogContent>
+                  </>
                 )}
               </OverlayCell>
             </Dialog>
           </Export>
         </div>
 
-        <div className="flex min-w-pane-sm flex-col gap-2">
+        <div className="flex w-full max-w-pane-md flex-col gap-2">
           <p className="text-meta text-ink-muted">DropdownMenu</p>
           <Export name="DropdownMenu">
             <DropdownMenu open modal={false}>
@@ -386,7 +390,7 @@ function OverlayExamples() {
                   메뉴 열기
                 </Button>
               </DropdownMenuTrigger>
-              <OverlayCell className="mt-2 min-h-pane-sm w-full max-w-pane-md">
+              <OverlayCell className="mt-2 min-h-pane-sm w-full">
                 {(host) => (
                   <DropdownMenuContent
                     container={host}
@@ -420,7 +424,7 @@ function OverlayExamples() {
           </Export>
         </div>
 
-        <div className="flex min-w-pane-sm flex-col gap-2">
+        <div className="flex w-full min-w-pane-picker max-w-pane-md flex-col gap-2">
           <p className="text-meta text-ink-muted">Popover</p>
           <Export name="Popover">
             <Popover open modal={false}>
@@ -440,7 +444,7 @@ function OverlayExamples() {
               </PopoverAnchor>
               <OverlayCell
                 portalExport="PopoverPortal"
-                className="mt-2 min-h-pane-sm w-full max-w-pane-md"
+                className="mt-2 min-h-pane-sm w-full"
               >
                 {(host) => (
                   <PopoverContent
@@ -466,7 +470,7 @@ function OverlayExamples() {
           </Export>
         </div>
 
-        <div className="flex min-w-pane-sm flex-col gap-2">
+        <div className="flex w-full max-w-pane-md flex-col gap-2">
           <p className="text-meta text-ink-muted">ContextMenu</p>
           <Export name="ContextMenu">
             <ContextMenuSpecimen />
@@ -506,7 +510,7 @@ function ContextMenuSpecimen() {
       </ContextMenuTrigger>
       <div
         ref={setHost}
-        className="relative mt-2 min-h-pane-sm w-full max-w-pane-md overflow-hidden border border-line bg-surface translate-y-0"
+        className="relative mt-2 min-h-pane-sm w-full overflow-hidden border border-line bg-surface translate-y-0"
       >
         {host ? (
           <ContextMenuContent
