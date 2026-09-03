@@ -2,8 +2,8 @@
 
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
 
-- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, CSS `data-preview` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지).
-- ui PascalCase export 전수 실면적 렌더. Dialog/Dropdown/Popover/ContextMenu 실개봉(`container`·`overlayClassName`). 갤러리 루트가 유일한 스크롤러. 캡처는 DOM 무수정·뷰포트 확장.
+- `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, CSS `data-preview` 0, `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지).
+- ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 셀 안에서 스크림·제품 폭(pane-md / pane-picker / pane-sm)을 보여 준다. 갤러리 루트가 유일한 스크롤러. 캡처는 사용성(클릭·휠·Tab·body 잠금)과 오버레이 기하를 잰다.
 - NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용.
 
 ## M0m 기기 연결 폰 절반 — ConnectScreen 「QR로 연결」 (#1990, 2026-09-02)
