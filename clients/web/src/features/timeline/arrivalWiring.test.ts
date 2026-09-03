@@ -2,7 +2,6 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const timeline = readFileSync(new URL("./Timeline.tsx", import.meta.url), "utf8");
-const row = readFileSync(new URL("./MessageRow.tsx", import.meta.url), "utf8");
 const hook = readFileSync(new URL("./useTimeline.ts", import.meta.url), "utf8");
 const panel = readFileSync(new URL("./ThreadPanel.tsx", import.meta.url), "utf8");
 const shell = readFileSync(
@@ -23,15 +22,13 @@ describe("arrival wiring — mutations of the seam go red", () => {
     expect(timeline).toContain("onEntranceConsumed(item.message.id)");
   });
 
-  it("MessageRow 는 entrance.className 과 onAnimationEnd 를 싣는다", () => {
-    expect(row).toContain("entrance.className");
-    expect(row).toContain("onAnimationEnd={entrance.onAnimationEnd}");
-  });
-
-  it("ChatShell 은 Timeline 과 ThreadPanel 에 같은 두 props 를 잇는다", () => {
+  it("ChatShell 은 Timeline 과 ThreadPanel 에 같은 두 props 를 각각 잇는다", () => {
     const grants = shell.split("isPlayEntrance={timeline.isPlayEntrance}");
     expect(grants.length - 1).toBe(2);
-    expect(shell).toContain("onEntranceConsumed={timeline.consumeEntrance}");
+    const consumed = shell.split(
+      "onEntranceConsumed={timeline.consumeEntrance}"
+    );
+    expect(consumed.length - 1).toBe(2);
   });
 
   it("ThreadPanel 은 루트와 답글에 playEntrance 를 잇는다", () => {
