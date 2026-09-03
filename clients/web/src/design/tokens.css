@@ -888,7 +888,7 @@
  * opacity, standard ladder. Bars are static (no pulse). After the fade,
  * is-settled takes them out of flow so the host is the content height.
  * is-resetting = in-place ready true→false (전이 0), not a remount.
- * reduced-motion: instant swap. */
+ * reduced-motion: D9 zeroes --motion-standard, so the swap is instant. */
 @utility skel {
   display: grid;
 }
@@ -936,13 +936,6 @@
 .skel.is-resetting .skel-content,
 .skel.is-resetting .skel-bars {
   transition: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .skel-content,
-  .skel-bars {
-    transition: none;
-  }
 }
 
 @utility onboarding-focus {
