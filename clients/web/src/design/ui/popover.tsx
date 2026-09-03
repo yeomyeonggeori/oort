@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as PopoverPrimitive from "@radix-ui/react-popover";
 import { cn } from "@/design/lib/cn";
+import { POPOVER_MOTION } from "@/design/motion";
 import {
   restoreDialogOpenerFocus,
   type DialogFocusTarget,
@@ -13,8 +14,11 @@ import {
 // this panel is a search field plus a grid, so borrowing the menu primitive
 // would fight the combobox/listbox contract. Dialog is the touch sheet.
 //
-// Same two house deviations as Dialog/DropdownMenu: no animation (motion is
-// feedback, §4), and no decorative chrome (no arrow).
+// Same house deviations as Dialog/DropdownMenu: no decorative chrome (no
+// arrow). Enter/exit is ADR-0179 D4 (open 240 / close 180) via POPOVER_MOTION.
+// Radix Presence waits for the CSS animation when Content stays mounted
+// through close; forceMount is not added. `{open && <PopoverContent/>}` skips
+// the exit.
 
 export const Popover = PopoverPrimitive.Root;
 export const PopoverTrigger = PopoverPrimitive.Trigger;
@@ -36,6 +40,7 @@ export const PopoverContent = React.forwardRef<
       collisionPadding={8}
       className={cn(
         "z-50 w-pane-picker rounded-lg border border-line bg-surface-raised p-3 text-ink shadow-lg",
+        POPOVER_MOTION,
         className
       )}
       onCloseAutoFocus={(event) => {

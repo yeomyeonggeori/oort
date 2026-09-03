@@ -1,10 +1,17 @@
 # oort 진행 현황
 
+## UX-R1a 모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit (#1996, 2026-09-03)
+
+- ADR-0179 D4 비대칭: dialog overlay+content는 `MODAL_*_MOTION`(열림 200 / 닫힘 150), popover·dropdown-menu·context-menu는 `POPOVER_MOTION`(240/180). 스크림 `scrim-blur` 5px. Radix Presence는 Content가 닫힘 동안 마운트돼 있을 때만 exit을 기다린다(forceMount 없음). `{open && <DialogContent/>}`는 Presence보다 먼저 언마운트해 닫힘 애니메이션이 안 돈다 — 제품 다섯 곳(채널 만들기·로그아웃 확인·섹션 이름/삭제·채널 나가기)은 ShortcutHelpDialog처럼 유지. Escape는 닫힘을 시작한 그 키만 삼킨다.
+- native `<select>`는 OS picker라 data-state 모션 불가(계획 이탈). reduced-motion duration 0. 캡처 overlay 장면은 `waitForAnimations`.
+- red proof: `{open && <DialogContent/>}` at any of the five product sites → closed-state dwell < 140ms. POPOVER_MOTION 사용만 지우고 주석만 남김 → 컴파일 CSS 단정 빨강. `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` 에서도 컴파일 단정은 돈다.
+
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
 
 - `#/design` 은 `MODE=design` 또는 `VITE_DESIGN_GALLERY=1` 에서만 lazy. production dist `design-gallery` 0, 강제 미리보기 `:is(:hover,[preview])` 규칙 0 (`gallery-preview.css` 에서 속성·시그니처 파생), `data-gallery-export` 0. 강제 미리보기는 `gallery-preview.css` 의 `[data-gallery-root] :is()` 뿐(전역 hover 변이 무접촉, `@media (hover: hover)` 유지). 미리보기 속성은 `data-gallery-preview`(첨부 `data-preview` 와 이름 충돌 없음).
 - ui PascalCase export 전수 실면적 렌더. 오버레이는 `modal={false}` 로 문서를 잠그지 않고 **칸(`data-gallery-stage`) 안에** 붙는다. 무대 높이는 표본 자신(pane 가로 토큰을 세로로 빌리지 않음). 네 판 `onOpenAutoFocus={preventAutoFocus}`(로드 후 첫 Tab 이 위 컨트롤, 스크롤 ~0). Dialog 스크림은 판 둘레에 보이는 대역(가림 없는 가시 면적). 캡처는 첫 Tab·휠 스크롤 가시 면적(≥0.9)·네 변 잘림·스크림 비가림을 잰다.
 - NOTES(DS-1 입력): Card/Input/Select hover·active·busy 없음. SidebarRow disabled·busy 없음(unread≠busy). Button busy는 aria-busy만. DialogPortal·PopoverPortal은 목적지 칸. press는 Button 전용. 스크림은 갤러리 대역.
+
 ## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
 
 - 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).
