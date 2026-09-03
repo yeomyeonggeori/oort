@@ -976,7 +976,7 @@ export interface RealtimeHandle {
     workspaceId: string,
     channelId: string,
     handlers: {
-      onSubscribed: (recovered: boolean) => void;
+      onSubscribed: (ctx: SubscribedRecoveryContext) => void;
       onMessage: (event: MessageNewEvent) => void;
       /**
        * B11 — optional so the notification rail, which has nothing to say about

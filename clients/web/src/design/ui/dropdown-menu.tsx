@@ -1,6 +1,7 @@
 import * as React from "react";
 import * as MenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { cn } from "@/design/lib/cn";
+import { POPOVER_MOTION } from "@/design/motion";
 
 // shadcn/ui new-york DropdownMenu (vendored, Radix primitive).
 //
@@ -15,8 +16,10 @@ import { cn } from "@/design/lib/cn";
 // a recycled row is how you ship a menu that survives every case but the one
 // nobody tried.
 //
-// Same two house deviations as the Dialog: no animation (motion is feedback,
-// §4), and no decorative chrome.
+// Same house deviations as the Dialog: no decorative chrome. Enter/exit is
+// ADR-0179 D4 (open 240 / close 180) via POPOVER_MOTION. Radix Presence waits
+// for the CSS animation when Content stays mounted through close; forceMount
+// is not added. `{open && <DropdownMenuContent/>}` skips the exit.
 //
 // `ContextMenu` proper (right-click) is deliberately NOT used as the only path:
 // a right-click menu has no visible affordance, and the row has to be operable
@@ -55,18 +58,26 @@ export const DropdownMenuGroup = MenuPrimitive.Group;
  */
 export const DropdownMenuContent = React.forwardRef<
   React.ElementRef<typeof MenuPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof MenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
-  <MenuPrimitive.Portal>
+  React.ComponentPropsWithoutRef<typeof MenuPrimitive.Content> & {
+    container?: HTMLElement | null;
+    /** MenuContentImpl reads this; public MenuContentProps omits it as private. */
+    onOpenAutoFocus?: (event: Event) => void;
+  }
+>(({ className, sideOffset = 4, container, onOpenAutoFocus, ...props }, ref) => (
+  <MenuPrimitive.Portal container={container ?? undefined}>
     <MenuPrimitive.Content
       ref={ref}
       sideOffset={sideOffset}
       collisionPadding={8}
       className={cn(
         "z-50 min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        POPOVER_MOTION,
         className
       )}
       {...props}
+      {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
+        typeof MenuPrimitive.Content
+      >)}
     />
   </MenuPrimitive.Portal>
 ));
