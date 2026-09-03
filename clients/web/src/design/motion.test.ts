@@ -5,6 +5,8 @@ import { fileURLToPath } from "node:url";
 import { compile } from "tailwindcss";
 import { describe, expect, it } from "vitest";
 import {
+  ENTER_CONVERSATION_ANIMATION_NAME,
+  ENTER_CONVERSATION_CLASS,
   MODAL_CONTENT_MOTION,
   MODAL_OVERLAY_MOTION,
   POPOVER_MOTION,
@@ -150,6 +152,34 @@ describe("ADR-0179 D3 도착 값", () => {
   it("distance·blur 토큰이 있다 (키프레임 이관은 UX-R1)", () => {
     expect(MOTION_CSS).toMatch(/--motion-distance-arrival:\s*0\.75rem/);
     expect(MOTION_CSS).toMatch(/--motion-blur-arrival:\s*2px/);
+  });
+
+  it("키프레임 motion-enter-conversation 이 arrival 사다리로 blur·opacity·translateY 를 한 번에 쓴다", () => {
+    expect(ENTER_CONVERSATION_ANIMATION_NAME).toBe("motion-enter-conversation");
+    expect(ENTER_CONVERSATION_CLASS).toBe("enter-conversation");
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-enter-conversation/);
+    const start = MOTION_CSS.indexOf("@keyframes motion-enter-conversation");
+    expect(start).toBeGreaterThanOrEqual(0);
+    const block = MOTION_CSS.slice(start, start + 900);
+    expect(block).toMatch(/blur\(\s*var\(--motion-blur-arrival\)\s*\)/);
+    expect(block).toMatch(/opacity:\s*0/);
+    expect(block).toMatch(/translateY\(\s*var\(--motion-distance-arrival\)\s*\)/);
+  });
+
+  it("enter-conversation 유틸이 키프레임을 arrival·arrival-ease 로 조립하고 규칙을 낸다", async () => {
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-enter-conversation\s+var\(--motion-arrival\)\s+var\(--motion-ease-arrival\)/
+    );
+    const css = await buildCss([ENTER_CONVERSATION_CLASS]);
+    const selector = escapedClassSelector(ENTER_CONVERSATION_CLASS);
+    expect(css.includes(selector), "enter-conversation 이 규칙을 내지 않는다").toBe(
+      true
+    );
+    const from = css.indexOf(selector);
+    const snippet = css.slice(from, from + 400);
+    expect(snippet).toMatch(/motion-enter-conversation/);
+    expect(snippet).toMatch(/var\(--motion-arrival\)/);
+    expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
   });
 });
 

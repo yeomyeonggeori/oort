@@ -3,7 +3,6 @@
  *
  * 숫자는 `motion.css`(사다리 + 모달 200/150)에만 산다. 이 파일은 그 유틸을
  * 조립한다. 표면은 `\d+ms` 나 `duration-[0-9]+` 를 직접 적지 않는다.
- * 이 티켓은 상수를 조립만 하고 소비하지 않는다(UX-R1a~e).
  */
 
 export const MODAL_OVERLAY_MOTION =
@@ -17,3 +16,7 @@ export const POPOVER_MOTION =
 
 /** D5. `active:scale-[0.98]` 은 arbitrary 금지와 충돌하므로 `.press`. */
 export const PRESS_CLASS = "press";
+
+/** ADR-0179 D3. Class is the @utility; animationName is the keyframe. */
+export const ENTER_CONVERSATION_CLASS = "enter-conversation";
+export const ENTER_CONVERSATION_ANIMATION_NAME = "motion-enter-conversation";
