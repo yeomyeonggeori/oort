@@ -5,8 +5,10 @@
 - ADR-0179 D3: 실시간 도착(타 사용자 `message.new`) 행만 `enter-conversation` 1회. REST 백필·리플레이 게이트·초기 로드·가상화 재마운트·자기 메시지·edited 는 0. `takeArrivalPlay` 단일점(momo-core). `animationName` 일치로 클래스 제거.
 - reduced-motion: 재생 0 (ingest 가드 + 사다리 duration 0). UnreadDivider/Pill 무접촉.
 - R2: 부분 복구(`recovered=false` + `hasRecoveredPublications=true`) 는 리플레이로 읽는다 (`subscribeHuddle` 과 같이 구독 컨텍스트 전부). 스레드 패널도 같은 live 행을 재생. `settlesPending` 팔 삭제(런타임 불가 픽스처). 키프레임 `to` 끝점·iteration-count 1·`both` 단정.
-- R3: grant→class 이음은 실제 `MessageRow` 렌더(`data-entrance-play`·행 자신의 클래스). ChatShell consume 바인딩 2곳. 키프레임은 캐스케이드 승자(마지막 블록). 같은 틱 라이브 버스트는 마운트된 행 수만큼 재생(상한은 커밋 뒤 미마운트 leftover).
-- 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx` + `MessageRow.entrance.test.tsx`.
+- R3: grant→class 이음은 실제 `MessageRow` 렌더(`data-entrance-play`·행 자신의 클래스). ChatShell consume 바인딩 2곳. 키프레임은 캐스케이드 승자(마지막 블록).
+- R4: 같은 틱 라이브 버스트 3건은 **가상화 `Timeline` + 실물 react-virtuoso** 경로에서 3/3 재생(jsdom 마운트 행 + Chromium `motion-enter-conversation` 시작 횟수). grant 는 행 마운트(consume)까지 유지하고, leftover 상한은 스크롤-업일 때만 쓸어 낸다(페인트 틱 상한은 virtuoso 의 늦은 커밋을 앞질렀다). ChatShell 이음은 JSX AST(주석에 남은 문자열은 세지 않음). `subscribeChannel` 포워딩은 credential-free 유닛(`realtime.channelRecovery.test.ts`); Centrifugo 전송 실측은 계속 `gate:resume`.
+- NOTES: DS-2 `MOTION_VOCABULARY` 는 `motion.css` 유틸 9개 중 8개만 손기입하고 `enter-conversation` 이 빠진다. 이 브랜치 스코프 밖 — 오케스트레이터가 따로 티켓. R5(`useLayoutEffect`→`useEffect` 소비) 는 동작 보존 리팩터이지 결함 아님: 같은 커밋에서 자식 effect 가 부모보다 먼저 돌고, 부하 속성은 「grant 를 읽는 렌더보다 먼저 상한을 돌리지 말 것」이며 그건 P1 이 이미 핀한다.
+- 캡처는 `waitForAnimations` 정착 프레임(REST 픽스처라 도착 모션 0이 맞다). `gate:seq`·`gate:resume` 은 `MOMO_EMAIL`/`MOMO_PASSWORD` 미설정 + `127.0.0.1:28000` 미기동으로 exit 2 — **runtime-unverified**, 소유 #1999. `gate:resume` 은 실제 Centrifugo 복구를 도는 유일한 레인이라 전송 실측은 여기 남는다. 클라 증명은 `useTimeline.arrival.test.tsx` + `MessageRow.entrance.test.tsx` + `Timeline.burst.test.tsx` + `realtime.channelRecovery.test.ts`.
 - red proof: live=1 스텁 0에서 붉음 · 소비 생략 시 재마운트 0이 1로 붉음 · animationName 불일치 시 클래스 잔류 · 키프레임 끝점/1회/`both` 불일치 시 motion.test 붉음 · 부분 복구를 live 로 읽으면 하네스가 붉음 · `playEntrance` 무시·클래스 자식 이전·두 번째 consume 탈락은 행 렌더가 붉음.
 
 ## DS-2 `/design` 갤러리 라우트 (#1956, 2026-09-03)
