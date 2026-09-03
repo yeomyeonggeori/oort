@@ -36,6 +36,7 @@ import {
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
+import { markPhoneLinkFirstRunPending } from "./phoneLinkFirstRunStore";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
 import { DiscoveredServerList } from "./DiscoveredServerList";
@@ -156,7 +157,6 @@ export function ConnectPage({
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
-
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
   const discovered = useDiscoveredServers();
   const prefill = useJoinPrefill();
@@ -294,6 +294,7 @@ export function ConnectPage({
         mode === "join"
           ? await joinWithInvite(inviteCode, email, password)
           : await login(email, password, workspace);
+      if (mode === "join") markPhoneLinkFirstRunPending();
       onLoggedIn(session);
     } catch (err) {
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);

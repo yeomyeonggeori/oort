@@ -22,7 +22,7 @@
 // screen can point this device at another server, and the Tauri shell must.
 // =============================================================================
 
-import { fetchWithDeadline, type HttpResponse } from "./http";
+import { fetchWithDeadline, NetworkError, type HttpResponse } from "./http";
 import { apiBase, coreSession } from "../runtime/host";
 import { parseExecutionPlan, type SpawnExecutionPlan } from "./executionPlan";
 import { restoredLoginResponse } from "./sessionModel";
@@ -48,6 +48,12 @@ import {
   stringArrayField,
   WireShapeError,
 } from "./wire";
+import {
+  parseAgentToolCatalog,
+  type AgentToolCatalogEntry,
+} from "../features/agents/toolCatalog";
+
+export type { AgentToolCatalogEntry };
 
 export type { PresenceSnapshot, PresenceWrite } from "../features/presence/customStatus";
 
@@ -928,6 +934,90 @@ export async function claimOwnerPassword(
   const claimResponse = loginResponseFromWire(res.json<unknown>());
   coreSession().applyLogin(claimResponse);
   return claimResponse;
+}
+
+// ---- device-link redeem (POST /v1/auth/device-link/redeem, ADR-0180 D3) -----
+// Public, like /v1/join: the phone holds a one-time voucher and no bearer.
+// LoginResponse plus `pendingSas`. The session is applied here only when the
+// SAS hold is off; public-origin mode keeps tokens in the caller until the
+// issuer confirms and a probe returns 200.
+
+export interface DeviceLinkRedeemResult {
+  session: LoginResponse;
+  pendingSas: boolean;
+  /** Four-digit SAS when the server sent one. Null when omitted (OpenAPI). */
+  sas: string | null;
+}
+
+export type DeviceLinkProbe = "active" | "pending" | "unreachable";
+
+function fourDigitSas(value: string | undefined): string | null {
+  return value !== undefined && /^\d{4}$/.test(value) ? value : null;
+}
+
+function deviceLinkRedeemFromWire(value: unknown): DeviceLinkRedeemResult {
+  const source = responseRecord(value);
+  const pendingSas = bool(source, "pendingSas");
+  if (pendingSas === undefined) throw new WireShapeError();
+  return {
+    session: loginResponseFromWire(source),
+    pendingSas,
+    sas: fourDigitSas(str(source, "sas")),
+  };
+}
+
+export async function redeemDeviceLink(
+  token: string,
+  device: { name: string; platform: string }
+): Promise<DeviceLinkRedeemResult> {
+  const res = await rawRequest(
+    "/v1/auth/device-link/redeem",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        token: token.trim(),
+        device: {
+          name: device.name.trim(),
+          platform: device.platform.trim(),
+        },
+      }),
+    },
+    null
+  );
+  if (!res.ok) throw parseError(res);
+  const result = deviceLinkRedeemFromWire(res.json<unknown>());
+  if (!result.pendingSas) {
+    coreSession().applyLogin(result.session);
+  }
+  return result;
+}
+
+/** Land the redeemed session after SAS confirm (or immediately if no hold). */
+export function activateDeviceLinkSession(session: LoginResponse): void {
+  coreSession().applyLogin(session);
+}
+
+/**
+ * Ask whether a redeemed access token is usable yet. Does not touch the
+ * session store and does not treat 401 as "signed out" — pending SAS is 401
+ * until the issuer confirms.
+ */
+export async function probeDeviceLinkAccess(
+  accessToken: string,
+  workspaceId: string
+): Promise<DeviceLinkProbe> {
+  try {
+    const res = await rawRequest(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/channels`,
+      { method: "GET" },
+      accessToken
+    );
+    if (res.ok) return "active";
+    if (res.status === 401) return "pending";
+    return "pending";
+  } catch {
+    return "unreachable";
+  }
 }
 
 /**
@@ -3812,6 +3902,53 @@ export async function putAgentProfile(
     { method: "PUT", body: JSON.stringify(input) }
   );
   return res.profile;
+}
+
+export type AgentToolCatalogRead =
+  | { kind: "ready"; tools: AgentToolCatalogEntry[] }
+  | { kind: "absent" }
+  | { kind: "forbidden"; message: string }
+  | { kind: "unknown"; message: string };
+
+export const AGENT_TOOL_CATALOG_FORBIDDEN =
+  "이 계정으로는 이 에이전트의 도구 허용을 바꿀 수 없습니다.";
+
+export const AGENT_TOOL_CATALOG_UNKNOWN =
+  "도구 목록을 불러오지 못했습니다. 연결을 확인하고 다시 시도하세요.";
+
+/**
+ * Workspace tool catalog for Agent Hub enabledTools editing (UX-R4a).
+ *
+ * GET `/v1/workspaces/{ws}/agent-tool-catalog` is not in OpenAPI yet. 404/405/501
+ * and an unreadable 200 are `absent` (display-only chips). The client never
+ * copies `tools.rs` CATALOG.
+ */
+export async function fetchAgentToolCatalog(
+  workspaceId: string,
+  signal?: AbortSignal
+): Promise<AgentToolCatalogRead> {
+  try {
+    const body = await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/agent-tool-catalog`,
+      { signal }
+    );
+    const tools = parseAgentToolCatalog(body);
+    if (tools === null) return { kind: "absent" };
+    return { kind: "ready", tools };
+  } catch (error) {
+    if (error instanceof ApiError) {
+      if (error.status === 404 || error.status === 405 || error.status === 501) {
+        return { kind: "absent" };
+      }
+      if (error.status === 403) {
+        return { kind: "forbidden", message: AGENT_TOOL_CATALOG_FORBIDDEN };
+      }
+    }
+    if (error instanceof NetworkError) {
+      return { kind: "unknown", message: error.message };
+    }
+    return { kind: "unknown", message: AGENT_TOOL_CATALOG_UNKNOWN };
+  }
 }
 
 export async function putAgentPause(

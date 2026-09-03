@@ -8,6 +8,7 @@ import { NetworkError } from "@momo/core/lib/http";
 import { setServerBase } from "@/lib/serverBase";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
+import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
 
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
@@ -57,6 +58,7 @@ beforeEach(() => {
   joinWithInvite.mockResolvedValue(session);
   setServerBase(null);
   clearRecentServers();
+  sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: reducedMotion && query.includes("prefers-reduced-motion"),
@@ -255,6 +257,10 @@ describe("BZ-6a onboarding shell", () => {
       );
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
+    expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
+    expect(
+      document.querySelector('[data-testid="onboarding-phone-link"]')
+    ).toBeNull();
     expect(login).not.toHaveBeenCalled();
   });
 

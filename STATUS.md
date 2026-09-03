@@ -1,11 +1,34 @@
 # oort 진행 현황
 
+## M0w 기기 연결 웹/데스크톱 — 설정 「폰 연결」 QR 카드 (#1989, 2026-09-03)
+
+- 설정 › 기기: 「QR 만들기」 → POST `/v1/auth/device-link` → 순수 SVG QR(코어 byte mode ECC M, 의존 추가 없음) · 120초 카운트다운 · 만료 「다시 만들기」 · `sas`가 있을 때만 4자리+confirm-sas. `consumed`+미확인 SAS는 확인 대기(연결됨이 아님). 확인 후 제자리 「연결됨」(ADR-0182, 토스트 없음).
+- ADR-0180 D7 「온보딩 S5」는 번호 스텝이 아니라 **로그인 후 first-run 카드**(App이 소유, 세션 게이트가 선점하지 못함). UX-R2a가 번호 시퀀스에 접을 수 있다. 진행 표시 없음.
+- NOTES: 기기 목록/해제는 `GET /v1/auth/devices` + `DELETE /v1/auth/devices/{id}`가 없다(#2029). 현재 카드의 연결됨은 세션 안 폴 `status`/`device`(+live 기록)로만 살아남고, 지속 목록은 #2029.
+- runtime-unverified: 실기기 카메라 스캔(M0m).
+- red proof: 독립 디코더 왕복(v1/v7/v8) · RS/포맷 골든 · App 트리 first-run · SAS 미확인≠연결됨 · 채움 액센트 ≤1 · 모듈 피치 바닥 · aria-describedby · 만료 문장 · 리마운트 · 재발급 폴 1개 · 캡처 전수 시크릿 스윕.
+- R3: QR well `content-box`(피치 v7/v8 = 4.000 CSS px) · pending은 살아 있는 코드+스캔, SAS confirm은 awaitingConfirm만 · 바우처는 만료·consumed·로그아웃에 지움 · 시크릿 게이트는 심은 프레임에서 실패 · 기기명에 조사 없음 · first-run은 S1/S2와 같은 `onboarding-step-chrome`+`max-w-sm`.
+## UX-R4a Agent Hub enabledTools 편집 UI (#1957, 2026-09-02)
+
+- Agent Hub 프로필 도구 칩을 카탈로그 행(이름·설명·실행 가능/실행 불가·승인 필요) + 비낙관 저장으로 대체. PUT 은 저장된 프로필 필드만 싣는다. 성공은 ADR-0182 in-place `도구 변경 저장`→`도구 변경 저장됨` 1.6s (`useInlineConfirm`, CopyButton 동일 시계). 실패는 InlineBanner, 403은 읽기 전용.
+- 카탈로그는 GET `/v1/workspaces/{ws}/agent-tool-catalog` 에서 읽는다. OpenAPI·momo-server 에 이 라우트가 없어 404/405/501·본문 불명은 표시 전용으로 접는다. `tools.rs` CATALOG 는 클라에 복사하지 않음.
+- runtime-unverified: 라이브 카탈로그 GET(라우트 부재). 클라 시험은 목 카탈로그.
+- 잔량: 폰 `COPY_RECEIPT_MS = 1_500` (`clients/mobile/src/features/conversation/copy.ts`) vs 웹 1 600. 이 티켓은 폰 무접촉. 소유: 폰 패리티 후속.
+
+## M0m 기기 연결 폰 절반 — ConnectScreen 「QR로 연결」 (#1990, 2026-09-02)
+
+- `oort://link` 파서(join 동형: 순서 무관·`momo://` 흡수·미지 파라미터 무시·잘못된 server 거부) + `POST /v1/auth/device-link/redeem` + `pendingSas` SAS 대기(서버 `sas` 또는 토큰 SHA-256 파생 4자리). 세션은 활성화 후 키체인만.
+- 카메라 권한 거부 → 문장 안내 + 「주소로 연결」 폴백. 만료 401 / 재사용 409 / 형식 오류 세 문장, 재시도 「QR 다시 찍기」.
+- R2: SAS에 「QR 다시 찍기」·「주소로 연결」 탈출, TTL 120s 만료 문장, 오프라인/unreachable 상태, 권한은 모달 전에 결정.
+- R3: SAS 「QR 다시 찍기」는 스캐너를 연다. 거부 「주소로 연결」은 인앱 포커스(Settings는 「설정에서 허용」만). unreachable은 TTL까지 백오프 폴. AppDelegate가 warm `oort://`를 RCTLinkingManager로 전달. `expo-device` `modelName`. runtime-unverified: 실기기 카메라·권한 프롬프트.
+
 ## UX-R2s 웰컴 킥오프 서버 절반 — RunTrigger::Welcome (#1960, 2026-09-02)
 
 - `RunTrigger::Welcome { kind: Opener|ProviderRequired|Closer }` + 멱등 키 `welcome:{ws}:{member}:{kind}:v1`. 가입 `createdMember:true`·owner claim 완주가 같은 tx에서 `agent_job`을 넣는다. 재가입·invite redeem(기존 멤버)은 무트리거.
 - 워커: provider 미구성이면 모델/원장 0, 에이전트 명의 정적 카피 1건(`ProviderRequired`) — opener 키는 소비하지 않음. opener는 정상 run + `usage_ledger`. G2 streak는 `welcome:%` run 제외.
 - settings `welcome_agent_member_id`(활성 에이전트)·`welcome_prompt`(≤2000자). WorkspaceDto 프로젝션. `schema_v0.sql` 무접촉. Closer는 enum 예약(v1 미구현).
 - runtime-unverified: 라이브 join→Centrifugo 첫 발화 왕복(클라 UX-R2b).
+
 ## UX-R0 모션 토큰 사다리·눌림 단일점·강제 기제 (#1958, 2026-09-02)
 
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
@@ -14,6 +37,7 @@
 - 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
 - H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
+
 ## SH-3a `scripts/oort doctor` (#1955, 2026-09-02)
 
 - 셀프호스트 설치 판정 1개: `scripts/oort doctor [--env] [--json] [--strict]`. 필수 키는 `self_host_env.sh` 생성 heredoc에서 파생. 소문자 `true` 게이트(doorbell/hosted-delivery)·언퍼얼 `1`·`PLATFORM_ADMIN_EMAILS`·provider master key·drive backend·WS URL·role 비번↔DATABASE_URL. 시크릿은 이름·길이 class·형식만.
