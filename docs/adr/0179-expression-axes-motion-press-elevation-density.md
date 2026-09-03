@@ -12,7 +12,7 @@
 
 ## 결정
 
-- **D1 duration 사다리(웹·폰 공통, 이름·값 동일).** `--motion-instant: 120ms`(피드백 — 눌림·색·툴팁) · `--motion-fast: 180ms`(작은 표면 — 팝오버·드롭다운·칩) · `--motion-standard: 240ms`(상태 변화 — 패널·드로어·리스트 삽입·사이드바 접기) · `--motion-arrival: 500ms`(합성 도착 — 새 메시지·첫 진입). 온보딩(650/760ms)은 ADR-0159 단일-룩 예외로 남는 **유일한 사다리 밖 값**이다. 2026-07-28 폰 권고(0/120/180/240)는 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다.
+- **D1 duration 사다리(웹·폰 공통, 이름·값 동일).** `--motion-instant: 120ms`(피드백 — 눌림·색·툴팁) · `--motion-fast: 180ms`(작은 표면 — 팝오버·드롭다운·칩) · `--motion-standard: 240ms`(상태 변화 — 패널·드로어·리스트 삽입·사이드바 접기) · `--motion-arrival: 500ms`(합성 도착 — 새 메시지·첫 진입). 온보딩(650/760ms)은 ADR-0159 단일-룩 예외로 남는 **유일한 사다리 밖 값**이다. *정오표(2026-09-02, UX-R0 랜딩 실측 — design-review R2 M-3)*: 온보딩 예외 블록에는 `onboarding-fade-in` 300ms×3(wordmark·tagline·fade)도 있으며, 모달 200/150은 D4가 예외 2호로 둔다 — 사다리 밖 값의 정본 목록은 디자인시스템 README §2.6 예외표이고 D1의 '유일한'은 '온보딩 블록과 모달 상수 두 곳 밖에는 없다'로 읽는다. 결정 본문 무변경. 2026-07-28 폰 권고(0/120/180/240)는 이 결정이 대체한다 — `instant 0`은 값이 아니라 reduced-motion 상태다.
 - **D2 easing 2종.** `--motion-ease-standard: cubic-bezier(0.25,1,0.5,1)` · `--motion-ease-arrival: cubic-bezier(0.16,1,0.3,1)`. 기존 `ease-out` 손기입은 전부 전자로 흡수.
 - **D3 도착 모션 규격.** `--motion-distance-arrival: 0.75rem` · `--motion-blur-arrival: 2px`. 새 메시지 행은 `blur→0 · opacity 0→1 · translateY(distance)→0`을 arrival 사다리로 **1회만** 재생한다(one-shot — `animationName` 일치로 종료 감지, 재마운트·백필·리플레이 무재생). 스켈레톤→콘텐츠 전이는 같은 blur 값으로 크로스페이드한다(팝 금지).
 - **D4 비대칭 원칙.** 사라짐은 나타남보다 짧다 — 모달·팝오버·드롭다운·컨텍스트 메뉴는 열림 `standard`(240)·닫힘 `fast`(180)… 단 모달만 열림 200·닫힘 150(buzz 실측값, 사다리 밖 예외 2호 — 정본 상수 `modalMotion` 한 곳). 공용 클래스 한 곳(`src/design/motion.ts`)에서만 조립하고 각 표면이 숫자를 적지 않는다.
