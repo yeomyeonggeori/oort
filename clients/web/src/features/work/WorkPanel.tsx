@@ -115,7 +115,7 @@ function ScopeButton({
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "h-control-sm rounded-sm px-2 text-meta transition-colors focus-visible:focus-ring",
+        "h-control-sm rounded-sm px-2 text-meta focus-visible:focus-ring",
         flexible ? "min-w-0 flex-1 truncate" : "shrink-0",
         active
           ? "bg-accent-soft text-accent"
@@ -202,7 +202,7 @@ function SessionRow({
       data-session-id={session.id}
       data-status={status.key}
       className={cn(
-        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left transition-colors focus-visible:focus-ring",
+        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left focus-visible:focus-ring",
         peeked ? "bg-surface-hover" : "press hover:bg-surface-hover"
       )}
     >
