@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -59,11 +59,10 @@ import {
   Dialog,
   DialogOverlay,
   DialogPortal,
+  restoreDialogOpenerFocus,
+  type DialogFocusTarget,
 } from "@/design/ui/dialog";
-import {
-  MODAL_CONTENT_MOTION,
-  PALETTE_ITEM_MOTION,
-} from "@/design/motion";
+import { MODAL_CONTENT_MOTION } from "@/design/motion";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -87,8 +86,7 @@ import { cn } from "@/design/lib/cn";
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
   "text-ink data-[selected=true]:bg-accent-soft " +
-  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50 " +
-  PALETTE_ITEM_MOTION;
+  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
 // it is styled from the list rather than by a className we could pass. Same
@@ -111,14 +109,19 @@ const SEARCH_SURFACE_NAME = serverSurface("messageSearch").label;
 
 function PaletteLayer({
   onOpenChange,
+  opener,
   children,
 }: {
   onOpenChange: (open: boolean) => void;
+  opener: RefObject<DialogFocusTarget | null>;
   children: ReactNode;
 }) {
   const [isPresent, safeToRemove] = usePresence();
   const reduceMotion = useReducedMotion();
   const overlayRef = useRef<HTMLDivElement>(null);
+  // Snapshot at open (this layer mounts). Parent may clear its ref on
+  // `open=false` before Radix `onCloseAutoFocus`.
+  const capturedOpener = useRef<DialogFocusTarget | null>(opener.current);
 
   useEffect(() => {
     if (isPresent) return;
@@ -169,7 +172,17 @@ function PaletteLayer({
             MODAL_CONTENT_MOTION
           )}
           onCloseAutoFocus={(event) => {
-            event.preventDefault();
+            // DialogContent's restore lives here rather than a bare
+            // preventDefault: that path sent the caret to <body> when the
+            // opener ref was missing (#1997 M-3). Presence still owns this
+            // layer (overlay ref for animationend), so the house panel is not
+            // a drop-in; the opener contract is the same. Only swallow Radix's
+            // default when the opener actually took the caret.
+            if (
+              restoreDialogOpenerFocus(capturedOpener.current ?? opener.current)
+            ) {
+              event.preventDefault();
+            }
           }}
         >
           {children}
@@ -354,7 +367,7 @@ export function QuickSwitcher({
   return (
     <AnimatePresence>
       {open ? (
-    <PaletteLayer onOpenChange={onOpenChange}>
+    <PaletteLayer onOpenChange={onOpenChange} opener={restoreRef}>
       <Command label="검색과 이동">
       {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
           팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은

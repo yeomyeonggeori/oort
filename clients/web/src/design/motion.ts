@@ -4,7 +4,7 @@
  * 숫자는 `motion.css`(사다리 + 모달 200/150)에만 산다. 이 파일은 그 유틸을
  * 조립한다. 표면은 `\d+ms` 나 `duration-[0-9]+` 를 직접 적지 않는다.
  * UX-R1a 소비: dialog · popover · dropdown-menu · context-menu.
- * UX-R1b 소비: 390 드로어 스크림 · 스레드 패널 · ⌘K 팔레트 항목 페이드.
+ * UX-R1b 소비: 390 드로어 스크림 · 스레드 패널 · ⌘K 팔레트.
  */
 
 export const MODAL_OVERLAY_MOTION =
@@ -23,10 +23,6 @@ export const DRAWER_SCRIM_MOTION =
 /** 스레드 패널. 열림 standard 우측 슬라이드, 닫힘 fast. */
 export const PANEL_MOTION =
   "data-[state=open]:motion-slide-in-end data-[state=closed]:motion-slide-out-end data-[state=closed]:pointer-events-none motion-reduce:animate-none";
-
-/** ⌘K 리스트 항목. 페이드만. `layout` 금지. */
-export const PALETTE_ITEM_MOTION =
-  "motion-item-fade motion-reduce:animate-none";
 
 /** D5. `active:scale-[0.98]` 은 arbitrary 금지와 충돌하므로 `.press`. */
 export const PRESS_CLASS = "press";
