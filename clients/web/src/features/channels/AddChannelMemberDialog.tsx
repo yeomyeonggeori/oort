@@ -22,7 +22,7 @@ import {
   DialogTitle,
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { cn } from "@/design/lib/cn";
 import { Avatar } from "@/features/timeline/MessageRow";
@@ -280,7 +280,7 @@ function AddChannelMemberPanel({
 
   let body: ReactNode;
   if (roster.pending && groups.total === 0) {
-    body = <SkeletonRows rows={6} className="p-4" />;
+    body = <Skeleton ready={false} rows={6} className="p-4" />;
   } else if (roster.failed && groups.total === 0) {
     body = (
       <InlineBanner

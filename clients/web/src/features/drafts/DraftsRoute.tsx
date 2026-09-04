@@ -18,7 +18,7 @@ import {
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
@@ -265,40 +265,40 @@ export function DraftsRoute() {
       )}
 
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {panel.isPending ? (
-          <SkeletonRows rows={4} className="p-4" />
-        ) : panel.isError ? (
-          <InlineBanner
-            message="채널 목록을 불러오지 못해 초안 대상을 확인할 수 없습니다."
-            actionLabel="다시 시도"
-            onAction={panel.refetch}
-            testId="drafts-error"
-          />
-        ) : panel.items.length === 0 ? (
-          <div
-            ref={emptyRef}
-            tabIndex={-1}
-            data-testid="drafts-empty"
-            className="focus-visible:focus-ring"
-          >
-            <EmptyInvite
-              headline="아직 초안이 없습니다."
-              detail="쓰다 만 글은 자동으로 저장됩니다."
+        <Skeleton ready={!panel.isPending} rows={4} className="p-4">
+          {panel.isPending ? null : panel.isError ? (
+            <InlineBanner
+              message="채널 목록을 불러오지 못해 초안 대상을 확인할 수 없습니다."
+              actionLabel="다시 시도"
+              onAction={panel.refetch}
+              testId="drafts-error"
             />
-          </div>
-        ) : (
-          <ul ref={listRef} data-testid="drafts-list">
-            {panel.items.map((item) => (
-              <DraftRow
-                key={`${item.workspaceId}:${item.channelId}`}
-                item={item}
-                nowMs={nowMs}
-                onDelete={onDelete}
-                onCloseAutoFocus={onCloseAutoFocus}
+          ) : panel.items.length === 0 ? (
+            <div
+              ref={emptyRef}
+              tabIndex={-1}
+              data-testid="drafts-empty"
+              className="focus-visible:focus-ring"
+            >
+              <EmptyInvite
+                headline="아직 초안이 없습니다."
+                detail="쓰다 만 글은 자동으로 저장됩니다."
               />
-            ))}
-          </ul>
-        )}
+            </div>
+          ) : (
+            <ul ref={listRef} data-testid="drafts-list">
+              {panel.items.map((item) => (
+                <DraftRow
+                  key={`${item.workspaceId}:${item.channelId}`}
+                  item={item}
+                  nowMs={nowMs}
+                  onDelete={onDelete}
+                  onCloseAutoFocus={onCloseAutoFocus}
+                />
+              ))}
+            </ul>
+          )}
+        </Skeleton>
       </div>
     </div>
   );

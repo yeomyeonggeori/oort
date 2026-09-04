@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import type { RosterMember } from "@momo/core/lib/api";
 import {
   hostedFailureMessage,
@@ -64,7 +64,7 @@ export function GrokBotInvite({
     return (
       <div role="status" className="border-b border-line px-4 py-2" data-testid="grokbot-invite-loading">
         <span className="sr-only">그록봇 연결 상태를 확인하는 중입니다.</span>
-        <SkeletonRows rows={1} className="p-0" />
+        <Skeleton ready={false} rows={1} className="p-0" />
       </div>
     );
   }

@@ -883,6 +883,73 @@
   animation-timing-function: var(--motion-ease-arrival);
 }
 
+/* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell while
+ * loading. Content arrives with blur(var(--motion-blur-arrival))→0 and
+ * opacity, standard ladder. Bars are static (no pulse). Host height
+ * interpolates bars → content across the same window (is-sizing), both
+ * shrink and grow. `from` is the bars height stored while ready is false,
+ * locked onto the host before the first ready paint so no frame is
+ * max(bars, content). After that, is-settled takes the bars out of a
+ * layer already at content height. is-resetting = in-place ready
+ * true→false (전이 0), not a remount. reduced-motion: D9 zeroes
+ * --motion-standard, so the swap is instant. */
+@utility skel {
+  display: grid;
+  position: relative;
+}
+
+@utility skel-layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.skel-content {
+  align-self: start;
+  opacity: 0;
+  filter: blur(var(--motion-blur-arrival));
+  pointer-events: none;
+  transition:
+    opacity var(--motion-standard) var(--motion-ease-standard),
+    filter var(--motion-standard) var(--motion-ease-standard);
+}
+
+.skel[data-ready="true"] .skel-content {
+  opacity: 1;
+  filter: none;
+  pointer-events: auto;
+}
+
+.skel-bars {
+  transition: opacity var(--motion-standard) var(--motion-ease-standard);
+}
+
+.skel[data-ready="true"] .skel-bars {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* Host height from bars to content, same ladder as the fade. */
+.skel.is-sizing {
+  overflow: hidden;
+  transition: height var(--motion-standard) var(--motion-ease-standard);
+}
+
+/* Out of the grid's size contribution once the host is already content-sized. */
+.skel.is-settled .skel-bars {
+  position: absolute;
+  inset-inline: 0;
+  height: 0;
+  padding: 0;
+  overflow: hidden;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.skel.is-resetting .skel-content,
+.skel.is-resetting .skel-bars {
+  transition: none;
+}
+
 @utility onboarding-focus {
   --focus-ring-ink: var(--onboarding-accent);
 }

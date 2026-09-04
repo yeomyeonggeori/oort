@@ -15,7 +15,7 @@ import {
 import { useSession } from "@/app/session";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useSessionWorkstream } from "@/features/workstreams/useWorkstreams";
 import { DisplayObserver } from "./DisplayObserver";
 import { ControlInvite, DisplayController } from "./DisplayController";
@@ -1231,7 +1231,7 @@ export function WorkSessionDetail({
 
         <PlanBlock plan={folded.plan} headingLevel={childHeadingLevel} />
 
-        {query.isPending && <SkeletonRows rows={5} className="p-4" />}
+        {query.isPending && <Skeleton ready={false} rows={5} className="p-4" />}
         {query.error !== null && (
           <InlineBanner
             message="진행 내역을 불러오지 못했습니다."

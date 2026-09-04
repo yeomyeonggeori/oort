@@ -31,7 +31,7 @@ import {
 import { useSession } from "@/app/session";
 import { useInertRefWhile } from "@/app/inert";
 import { memberNameParts, useDirectory } from "@/features/workspace/useWorkspace";
-import { EmptyInvite, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, Skeleton } from "@/features/common/States";
 import { useAdeDrawerOpen } from "@/features/ade/adeDrawerStore";
 import {
   restoreDialogOpenerFocus,
@@ -284,7 +284,7 @@ function PanelBody({
     // 때 화면에 아무 말도 없는 패널이 남는다.
     return (
       <div className="min-h-0 flex-1" data-testid="agent-work-panel-opening">
-        <SkeletonRows rows={3} className="p-4" />
+        <Skeleton ready={false} rows={3} className="p-4" />
       </div>
     );
   }

@@ -238,7 +238,7 @@ describe("RED PROOF ③ 컴포넌트는 얇고 조용하다", () => {
   });
 
   it("네 상태가 전부 있다", () => {
-    expect(section).toContain("SkeletonRows");
+    expect(section).toMatch(/<Skeleton[\s>]/);
     expect(section).toContain("EmptyInvite");
     expect(row).toContain("InlineBanner");
     // 오프라인은 배너를 하나 더 세우지 않는다. 라우트가 이미 자기 배너를 들고

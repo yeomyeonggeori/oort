@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
+
+- `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 호스트 높이는 `ready=false`일 때 막대 높이를 저장하고, 뒤집히는 `useLayoutEffect`에서 그 값으로 잠근 뒤 콘텐츠 높이로 같은 사다리·같은 창을 탄다(줄어듦·늘어남 같은 기구). 가드는 뒤집기 전 프레임부터 샘플한다. 막대는 정지(펄스 없음). 그 창이 끝나면 `is-settled`가 이미 콘텐츠 높이인 레이어에서 막대를 뺀다. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다. 프레임당 |Δh| 상한 12px는 줄어듦과 +14 늘어남에서 실측되고, +224(12채널)는 같은 240ms ease-out에서 첫 프레임 ~30px — 사다리이지 점프가 아니다(점프로 되돌리면 224).
+- 호출부 57곳 식별자 이관. 같은 슬롯에서 `ready`가 뒤집히는 면은 9곳(Sidebar×2, ChatShell, Inbox, Drafts, Activity, Search, ThreadPanel, Reminders). 나머지 48곳은 `<Skeleton ready={false} />` self-closing — 예전 팝(DS-2 갤러리 표본·라우트 fallback 포함). 타임라인은 Virtuoso `height:100%` 스크롤러와 고정 높이 막대 블록이 충돌하므로 제외(주석 `Timeline.tsx`).
+- runtime-unverified 아님. 캡처: Inbox+Sidebar, 모션 켜고 `skeleton-{light,dark}` + `skeleton-settled-{light,dark}` + 라이트 390(`skeleton-390-light` / `skeleton-settled-390-light`). Inbox 스켈레톤 프레임은 `**/approvals*` 홀드 + `[data-testid="inbox-route"] [data-ready="false"]`가 보증한다.
+- `clients/web/measure/**`는 `npm run lint`·`typecheck` 대상(`tsconfig.measure.json`). Vite 진입은 `src/main.tsx`라 dist에 하네스가 없다. design pre-flight의 `measure/` 커버리지는 #2049 N-2.
+- 폰 무접촉. design-review는 이 워커가 하지 않음.
+
 ## UX-R1d 메시지 도착 모션 `motion-enter-conversation` (#1999, 2026-09-03)
 
 - ADR-0179 D3: 실시간 도착(타 사용자 `message.new`) 행만 `enter-conversation` 1회. REST 백필·리플레이 게이트·초기 로드·가상화 재마운트·자기 메시지·edited 는 0. `takeArrivalPlay` 단일점(momo-core). `animationName` 일치로 클래스 제거.

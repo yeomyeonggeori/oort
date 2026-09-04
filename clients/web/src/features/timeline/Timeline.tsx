@@ -16,7 +16,7 @@ import {
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { Directory } from "@/features/workspace/useWorkspace";
 import type { OpenWorkSession } from "@/features/work/openWorkSession";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import {
   buildTimelineItems,
   type PendingMessage,
@@ -600,7 +600,10 @@ export function Timeline({
   }
 
   if (status === "loading" && empty) {
-    return <SkeletonRows rows={6} className="p-4" />;
+    // Virtuoso owns a height:100% scroller. Overlaying a fixed-height bar
+    // block in the same grid cell fights that ownership (and would floor
+    // the pane the way B-1 did on shorter surfaces). Keep the old pop.
+    return <Skeleton ready={false} rows={6} className="p-4" />;
   }
 
   return (

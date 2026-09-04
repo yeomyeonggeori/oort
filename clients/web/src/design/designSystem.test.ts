@@ -366,12 +366,17 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
   /**
    * `element.style.x = …` 로 스타일을 쓰는 파일. **0 이 아니라 잔량이다.**
    *
-   * 둘 다 「스타일시트가 미리 알 수 없는 값」을 쓴다:
+   * 셋 다 「스타일시트가 미리 알 수 없는 값」을 쓴다:
    *
    *   `useAutoGrow`      내용에서 잰 높이. 값이 사람이 친 글에서 나온다.
    *   `placeholderFit`   계산된 글자꼴의 사본. 값이 `getComputedStyle` 에서 나온다.
+   *   `States` (Skeleton) `ready=false`일 때 막대 높이를 저장하고, 뒤집히는
+   *                      레이아웃 이펙트에서 그 값→콘텐츠 높이로 호스트를
+   *                      옮긴다. 기간·이징은 `.skel.is-sizing`의
+   *                      `--motion-standard` 사다리다. JSX `style=` 은 프리플라이트가
+   *                      막으므로 `host.style.height` 만 쓴다.
    *
-   * 지어낸 값(자리·가시성·줄바꿈)은 둘 다 스타일시트에 있다 — `placeholderFit`
+   * 지어낸 값(자리·가시성·줄바꿈)은 스타일시트에 있다 — `placeholderFit`
    * 의 것은 `tokens.css` 의 `text-probe` 다. 그래서 이 목록은 「인라인 스타일이
    * 허용된 곳」이 아니라 **「아직 안 닫힌 곳의 수」**이고, 줄어드는 것은 통과하고
    * 늘어나면 빨갛다.
@@ -385,6 +390,7 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
   const REMAINING_RUNTIME_STYLE_WRITERS = [
     "features/timeline/useAutoGrow.ts",
     "features/chat/placeholderFit.ts",
+    "features/common/States.tsx",
   ];
 
   it("런타임 스타일 작성자가 잔량 목록보다 늘지 않는다", () => {

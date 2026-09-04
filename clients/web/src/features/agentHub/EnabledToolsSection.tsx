@@ -6,7 +6,7 @@ import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useInlineConfirm } from "@/design/ui/inlineConfirm";
 import { PRESS_CLASS } from "@/design/motion";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import { StatusChip } from "./StatusChip";
 import {
   EMPTY_CATALOG_COPY,
@@ -130,7 +130,7 @@ export function EnabledToolsSection({
       </div>
 
       {catalogStatus === "loading" ? (
-        <SkeletonRows rows={4} className="p-0" />
+        <Skeleton ready={false} rows={4} className="p-0" />
       ) : catalogEmpty ? (
         <p className="text-body text-ink">{EMPTY_CATALOG_COPY}</p>
       ) : catalogReady ? (
