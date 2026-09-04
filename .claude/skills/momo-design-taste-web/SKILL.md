@@ -128,7 +128,7 @@ scripts/design_preflight_web.sh          # exit 0 pass, 1 violation
 scripts/design_preflight_web.sh --list   # every hit per category, no gating
 ```
 
-Thirteen categories (ten grep + three AST, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
+Fourteen categories (ten grep + four AST/grep, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
 
 | # | key | catches |
 |---|---|---|
@@ -145,12 +145,13 @@ Thirteen categories (ten grep + three AST, see 10.1), **hard zero** (unlike the 
 | 11 | `progress_word` | 「명사 + 중」 진행 낱말 (**AST**, #1511) |
 | 12 | `latin_particle` | 라틴 낱말과 조사 사이 공백 (**AST**, #1511) |
 | 13 | `raw_motion` | 사다리 밖 `\d+ms` · `duration-[0-9]+` (ADR-0179 D10; 온보딩 블록·`motion.css`·`motion.ts` allowlist) |
+| 14 | `motion_lib_scope` | `import … from "motion/react"` 허용 3파일 외 hard-zero (ADR-0179 D8 / UX-R1b: QuickSwitcher · ThreadPanel · Sidebar) |
 
 `src/design/tokens.css`, `tokens.contrast.test.ts`, and `src/design/themes/` are excluded (defining, measuring, and rebinding raw values is their job). The themes directory is **pre-validated bindings only**, not a general raw-color exemption: a hex in a component is still a fail. A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
 
 ### 10.1 The AST stage: core, and the web `emdash` category (issue #1141)
 
-The thirteen categories above scan `clients/web/src` only — but a large share of what this client puts on screen is not there. It lives in `packages/momo-core`, and both TS clients render it verbatim. That gap is what carried em-dashes to the edge of a release in #1138 B2.
+The fourteen categories above scan `clients/web/src` only — but a large share of what this client puts on screen is not there. It lives in `packages/momo-core`, and both TS clients render it verbatim. That gap is what carried em-dashes to the edge of a release in #1138 B2.
 
 So the same command runs a second stage over the core. The core is pure TS with no markup, which means there is no syntactic marker separating "text that gets rendered" from "prose written for a reader" (comments, docstrings, test names) — line-based grep does not survive there. The separation rule is therefore an AST one, held with its evidence in `scripts/design_preflight_core.mjs`:
 

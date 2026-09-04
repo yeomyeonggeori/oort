@@ -1,5 +1,24 @@
 # oort 진행 현황
 
+## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
+
+- ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.
+- 실측(제품 컴포넌트 Playwright, 두 스킴 동일). 숫자는 computed `animationDuration`/`transitionDuration` + 닫힘 closed-frames.
+
+| 표면 | 방향 | light | dark | reduced-motion |
+|---|---|---|---|---|
+| 390 드로어 패널 | enter/exit 대칭 `--motion-fast` | 180ms | 180ms | 0 |
+| 390 스크림 | enter `--motion-fast` / exit 재생(closed frames>0, dwell≥140, 이후 detach) | 180ms | 180ms | 0 |
+| 스레드 패널 | open `motion-slide-in-end` `--motion-standard` | 240ms | 240ms | 0 |
+| 스레드 패널 | close `motion-slide-out-end` `--motion-fast` (AnimatePresence 유지) | ≥140ms dwell | ≥140ms dwell | 즉시 detach |
+| ⌘K 오버레이/콘텐츠 | open `MODAL_*` 200ms · Escape exit dwell≥120 · AnimatePresence | 200 / 150 | 200 / 150 | 0 / dwell<80 |
+| 데스크톱 사이드바 접기 | `--duration-sidebar` = `--motion-standard` | 240ms | (light와 같은 CSS) | 0 (`transition: none`) |
+
+- 390 드로어 **패널**은 DOM에 남는다(스크롤 보존, UX-R0). AnimatePresence는 스크림에만 — AppShell `{drawerOpen && <scrim>}` 가 닫힘 프레임 0이던 R1a급 버그. 데스크톱 접힘은 타이틀바 토글 계약 유지(`sidebarPane.test.ts`).
+- R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
+- red proof: allowlist 밖 `import … from "motion/react"` → preflight `--selftest` 붉음. AnimatePresence 제거 → 팔레트 closed frames 0 / detach <20ms. `useReducedMotion` 제거 → duration 0 단정 실패. `{drawerOpen && scrim}` 복원 → 스크림 closed frames 0.
+- 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
+
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
 - `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 호스트 높이는 `ready=false`일 때 막대 높이를 저장하고, 뒤집히는 `useLayoutEffect`에서 그 값으로 잠근 뒤 콘텐츠 높이로 같은 사다리·같은 창을 탄다(줄어듦·늘어남 같은 기구). 가드는 뒤집기 전 프레임부터 샘플한다. 막대는 정지(펄스 없음). 그 창이 끝나면 `is-settled`가 이미 콘텐츠 높이인 레이어에서 막대를 뺀다. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다. 프레임당 |Δh| 상한 12px는 줄어듦과 +14 늘어남에서 실측되고, +224(12채널)는 같은 240ms ease-out에서 첫 프레임 ~30px — 사다리이지 점프가 아니다(점프로 되돌리면 224).
