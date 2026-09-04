@@ -34,6 +34,21 @@
   --surface-raised: light-dark(#fffefb, #201f24);
   --surface-sidebar: light-dark(#efece6, #1b1a1f);
   --surface-hover: light-dark(#e7e3db, #26252c);
+  /* --- 본문 행의 눌림 채움 (#2000 R2 / #1515) ---------------------------
+   * `--surface-hover` 와 `--accent-soft` 를 두 스킴에서 hover 와 대비·OKLab
+   * 거리로 쟀다. raised 는 라이트에서 hover 보다 밝고(1.269) 다크에서는
+   * 더 어두워(1.078) 눌림이 아니라 떼는 쪽으로 읽힌다. accent-soft 는 양쪽
+   * 다 구분은 되지만(라이트 dE 0.0229 · 다크 0.0401) 선택된 행의 채움이라
+   * 본문 행이 고른 것처럼 보인다. 그래서 토큰을 하나 더 둔다.
+   *
+   * 라이트 hover 휘도 0.7704 는 ink-muted AA 바닥(0.769)에 붙어 있어 한 단계
+   * 더 어두울 수 없다. 같은 휘도에서 종이 색상(hue 89, surface 의 91)의
+   * 채도만 한 단계 올린다: #ece3cc, hover 대비 1.001 · dE 0.0205, accent-soft
+   * 와는 dE 0.0192 · hue 74 가 아니라 91 이라 선택으로 안 읽힌다.
+   * 다크는 hover(#26252c)가 이미 한 단 뜬 자리라 같은 방향으로 한 단 더:
+   * #2d2c34, 대비 1.100 · dE 0.0290. muted-soft(#302e36) 그릇과는 다른 값.
+   * `--line-strong` 다크 2.73(<3) 이라 컨트롤이 설 수 있는 표면이 아니다. */
+  --surface-pressed: light-dark(#ece3cc, #2d2c34);
 
   /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
    * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
@@ -665,6 +680,7 @@
   --color-surface-raised: var(--surface-raised);
   --color-surface-sidebar: var(--surface-sidebar);
   --color-surface-hover: var(--surface-hover);
+  --color-surface-pressed: var(--surface-pressed);
   --color-line: var(--line);
   --color-line-strong: var(--line-strong);
   --color-ink: var(--ink);
@@ -769,7 +785,9 @@
    * 이 블록보다 앞에 선다. 같은 레이어·같은 특정도면 나중이 이므로, 눌림의
    * 전이 목록은 여기 둔다. Button 은 `press` 만 든다(transition-colors 없음).
    * outline-color 는 넣지 않는다(#1210 D3). transform 을 전역 transition-colors
-   * 에 더하지 않는다(36곳). */
+   * 에 더하지 않는다(36곳).
+   * 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다
+   * — #1743 B-4, capture seq 1416. 그 자리의 눌림은 `--surface-pressed` 채움. */
   .press {
     transition-property:
       transform, color, background-color, border-color, text-decoration-color,
@@ -779,6 +797,16 @@
     &:active {
       transform: scale(0.98);
     }
+  }
+
+  /* 메뉴 행 하이라이트는 포인터 포커스가 옮길 때 즉시 선다. `.press` 의
+   * background-color 전이를 이 자리에서만 뺀다 (N-3). 스케일 전이는 남는다. */
+  .press-instant-fill {
+    transition-property:
+      transform, color, border-color, text-decoration-color, fill, stroke,
+      --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+    transition-duration: var(--motion-instant);
+    transition-timing-function: var(--motion-ease-standard);
   }
 }
 
@@ -2021,6 +2049,9 @@
   &:not([aria-current="true"]):hover {
     background-color: var(--surface-raised);
   }
+  &:not([aria-current="true"]):active {
+    background-color: var(--surface-hover);
+  }
 }
 
 /* Determinate download progress (설정 > 업데이트, MOMO-606). A native
@@ -2154,6 +2185,9 @@
 
   &::-webkit-scrollbar-thumb:hover {
     background: var(--ink-muted);
+  }
+  &::-webkit-scrollbar-thumb:active {
+    background: var(--ink);
   }
 
   &::-webkit-scrollbar-corner {

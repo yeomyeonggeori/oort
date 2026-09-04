@@ -27,6 +27,9 @@
 [data-gallery-root] .press:is(:active, [data-gallery-preview="active"]) {
   transform: scale(0.98);
 }
+[data-gallery-root] .active\:bg-surface-pressed:is(:active, [data-gallery-preview="active"]) {
+  @apply bg-surface-pressed;
+}
 
 /* Pin popper wrappers to the stage. Do not write the `translate` property
  * here: Tailwind v4 rewrites it to `transform: translate(0)` and leaves

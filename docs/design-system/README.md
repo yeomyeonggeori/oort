@@ -100,7 +100,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | 축 | 토큰 | 하는 일 |
 |---|---|---|
-| 상호작용 상태 | `--surface-hover` · `--accent-soft` | 가리킨 행 · 선택된 행. **켜졌다 꺼진다** |
+| 상호작용 상태 | `--surface-hover` · `--surface-pressed` · `--accent-soft` | 가리킨 행 · 눌린 본문 행 · 선택된 행. **켜졌다 꺼진다** |
 | 칩의 그릇 | `--muted-soft` · `--ok-soft` · `--warn-soft` · `--danger-soft` | 칩 한 개가 서는 옅은 채움. **늘 있다** |
 
 **「그냥 다른 회색」이 답이 아닌 것은 취향이 아니라 산술이다.** 라이트에서 `--ink-muted`가 AA를 지키려면 바탕 휘도가 0.769 이상이어야 하는데 `--surface-hover`가 0.7704다 — 바닥에 이미 붙어 있다. 칩 그릇이 설 수 있는 띠는 [0.769, 0.9911(종이)] 하나뿐이고 표면 다섯이 그것을 이미 나눠 갖고 있어, **여섯 번째 중립이 얻을 수 있는 최선의 최소 분리는 1.06:1**이다. 명도만으로 그릇을 세우는 설계는 거기서 끝나고, 남는 자가 §3.1의 위험 위계를 재던 것과 같은 축의 **OKLab 거리**다(`--danger-fill`이 `--accent`와 섞이지 않았음을 증명한 그 자). 그래서 그릇의 생존은 두 자로 정의된다: 대비 ≥ 1.05 **그리고** OKLab 거리 ≥ 0.02. 하나만 걸면 「대비는 넘는데 눈에는 같은 회색」이 통과한다.
@@ -236,7 +236,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **이 목록 말고 사다리 밖 값을 늘리지 마라.**
 
-눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1.
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`의 유일한 어포던스가 밑줄 또는 `hover:text-` 이고 채움과 상자가 없는 것이다.
 
 reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
 

@@ -165,6 +165,7 @@ export const SURFACES = [
   "surface-raised",
   "surface-sidebar",
   "surface-hover",
+  "surface-pressed",
   "accent-soft",
   "agent-soft",
   "muted-soft",
@@ -484,6 +485,18 @@ describe("Dawn palette", () => {
   // to this file because --accent-soft was simply not in the control table. So
   // the table is now closed: every surface is classified, and its class must
   // agree with the numbers in BOTH schemes.
+  it("pressed fill is distinct from hover on both schemes (#2000 M-1)", () => {
+    for (const scheme of SCHEMES) {
+      const pressed = pick("surface-pressed", scheme.index);
+      const hover = pick("surface-hover", scheme.index);
+      expect(pressed, scheme.name).not.toBe(hover);
+      expect(
+        deltaE(pressed, hover),
+        `--surface-pressed vs --surface-hover (${scheme.name})`
+      ).toBeGreaterThanOrEqual(0.02);
+    }
+  });
+
   it("classifies every surface by whether a bordered control may sit on it", () => {
     for (const bg of SURFACES) {
       const passes = SCHEMES.every(
