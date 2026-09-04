@@ -18,7 +18,7 @@ const channels: Channel[] = [
 const reducedMotion = vi.hoisted(() => ({ current: true }));
 
 vi.mock("motion/react", async (importOriginal) => {
-  const actual = await importOriginal();
+  const actual = await importOriginal<typeof import("motion/react")>();
   return {
     ...actual,
     useReducedMotion: () => reducedMotion.current,
