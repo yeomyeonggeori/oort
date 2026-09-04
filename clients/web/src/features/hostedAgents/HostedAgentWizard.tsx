@@ -856,7 +856,7 @@ function PickerScreen({
             <button
               type="button"
               onClick={() => onPick(row.id)}
-              className="flex w-full min-w-0 flex-col items-start gap-1 p-2 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+              className="flex w-full min-w-0 flex-col items-start gap-1 p-2 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
               data-testid="hosted-wizard-resume"
               data-connection-id={normalizedId(row.id)}
             >

@@ -747,7 +747,7 @@ function Segmented({
         {options.map((option) => (
           <label
             key={option.id}
-            className="border-l border-line first:border-l-0"
+            className="border-l border-line first:border-l-0 active:bg-surface-pressed"
             data-testid={`${name}-${option.id}`}
           >
             <input

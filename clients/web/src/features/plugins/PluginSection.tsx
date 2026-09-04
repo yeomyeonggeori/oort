@@ -379,7 +379,7 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
-                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left focus-visible:focus-ring"
+                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left active:bg-surface-pressed focus-visible:focus-ring"
                       : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left focus-visible:focus-ring disabled:cursor-wait"}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
@@ -1059,7 +1059,7 @@ function PluginScopeConsentDialog({
                         파일의 카탈로그 행이 같은 조건(이 뮤테이션 진행 중)에
                         disabled:cursor-wait를 쓰고 있어, 한 조건에 커서가 둘이라는
                         모순이기도 했다. 한 조건, 한 커서. */}
-                    <label className={`flex items-start gap-2 ${pending ? "cursor-wait" : "cursor-pointer"}`}>
+                    <label className={`flex items-start gap-2 ${pending ? "cursor-wait" : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"}`}>
                       <input
                         type="checkbox"
                         checked={checked}

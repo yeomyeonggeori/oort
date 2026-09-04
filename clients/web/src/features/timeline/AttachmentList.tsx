@@ -148,7 +148,7 @@ function ImageCard({
         title="전체 화면 미리보기 열기"
         className={
           preview.status === "ready"
-            ? "max-w-full self-start rounded-md focus-visible:focus-ring"
+            ? "max-w-full self-start rounded-md press hover:bg-surface-hover focus-visible:focus-ring"
             : PREVIEW_FRAME_CLASS
         }
       >

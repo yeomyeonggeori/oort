@@ -118,7 +118,7 @@ export function DraftRow({
       <Link
         to={channelPathForDraft(item.channelId)}
         aria-describedby={DRAFT_ROW_HINT_ID}
-        className="flex w-full gap-3 py-2 pl-4 pr-8 press hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:focus-ring"
+        className="flex w-full gap-3 py-2 pl-4 pr-8 hover:bg-surface-hover active:bg-surface-pressed focus-visible:bg-surface-hover focus-visible:focus-ring"
         onClick={onClick}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">

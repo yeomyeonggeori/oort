@@ -218,7 +218,7 @@ export function QuoteBlock({
         RAIL,
         // hover도 중성이다 (B-1). `hover:bg-surface-hover`는 이 앱의 하우스 hover
         // 패턴이고, 레일은 앰버로 가는 대신 잉크 쪽으로 한 단 올라간다.
-        "mb-1 w-full rounded-sm press hover:border-ink hover:text-ink focus-visible:focus-ring"
+        "mb-1 w-full rounded-sm hover:border-ink hover:text-ink active:bg-surface-pressed focus-visible:focus-ring"
       )}
     >
       <QuoteContent block={block} directory={directory} />

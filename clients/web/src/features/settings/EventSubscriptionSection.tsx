@@ -689,8 +689,10 @@ function CreateForm({
                 key={kind}
                 htmlFor={id}
                 className={cn(
-                  "flex min-w-0 cursor-pointer items-start gap-2 border-b border-line p-2 last:border-b-0 hover:bg-surface-hover active:bg-surface-pressed",
-                  checked && "bg-accent-soft"
+                  "flex min-w-0 cursor-pointer items-start gap-2 border-b border-line p-2 last:border-b-0",
+                  checked
+                    ? "bg-accent-soft active:bg-surface-pressed"
+                    : "hover:bg-surface-hover active:bg-surface-pressed"
                 )}
               >
                 {/* The NAME is the kind; the two clauses are the DESCRIPTION.

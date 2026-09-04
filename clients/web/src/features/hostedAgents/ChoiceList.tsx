@@ -101,8 +101,9 @@ export function ChoiceList({
                 "flex min-w-0 items-start gap-2 border-b border-line p-2 last:border-b-0",
                 item.disabled
                   ? "cursor-not-allowed bg-surface-hover"
-                  : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed",
-                !item.disabled && checked && "bg-accent-soft"
+                  : checked
+                    ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
+                    : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
               )}
               data-testid={`${name}-row`}
               data-choice-id={item.id}

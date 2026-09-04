@@ -319,10 +319,10 @@ function ToolToggleRow({
       <label
         className={cn(
           "flex min-w-0 items-start gap-3 p-3 tap-target",
-          locked
-            ? "cursor-default"
-            : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed",
-          row.enabled && "bg-accent-soft",
+          locked ? "cursor-not-allowed" : "cursor-pointer",
+          row.enabled
+            ? "bg-accent-soft active:bg-surface-pressed"
+            : !locked && "hover:bg-surface-hover active:bg-surface-pressed",
           "has-[:focus-visible]:focus-ring"
         )}
         data-testid={`agent-hub-tool-row-${row.name}`}

@@ -215,7 +215,9 @@ function AgentListRow({
         aria-current={selected ? "page" : undefined}
         className={cn(
           "flex w-full items-start gap-3 px-4 py-3 text-left focus-visible:focus-ring",
-          selected ? "bg-accent-soft" : "press hover:bg-surface-hover"
+          selected
+            ? "bg-accent-soft active:bg-surface-pressed"
+            : "hover:bg-surface-hover active:bg-surface-pressed"
         )}
         data-testid="agent-hub-agent-row"
         data-agent-id={normalizedId(agent.id)}
@@ -509,10 +511,10 @@ export function AgentHubRoute() {
                               activeSection === item.id ? "page" : undefined
                             }
                             className={cn(
-                              "rounded-sm px-3 py-1 text-body focus-visible:focus-ring",
+                              "rounded-sm px-3 py-1 text-body press focus-visible:focus-ring",
                               activeSection === item.id
-                                ? "bg-accent-soft text-ink"
-                                : "text-ink-muted press hover:bg-surface-hover"
+                                ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                                : "text-ink-muted hover:bg-surface-hover"
                             )}
                             data-testid={`agent-hub-tab-${item.id}`}
                           >
@@ -1683,7 +1685,7 @@ function HistoryRow({
       <button
         type="button"
         onClick={(event) => onOpen(event.currentTarget)}
-        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex w-full items-start justify-between gap-3 px-4 py-3 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         data-testid="agent-history-row"
         data-run-id={run.id}
       >

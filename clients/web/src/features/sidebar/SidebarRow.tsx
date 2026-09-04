@@ -27,12 +27,12 @@ import type {
 // 유틸리티가 아무 규칙도 갖지 않으므로 목록 밀도는 그대로다.
 const rowClass =
   "tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body " +
-  "press focus-visible:focus-ring";
+  "focus-visible:focus-ring";
 
 const inactiveClass =
-  "text-ink hover:bg-surface-hover";
+  "text-ink hover:bg-surface-hover active:bg-surface-pressed";
 const activeClass =
-  "bg-accent-soft text-ink";
+  "bg-accent-soft text-ink active:bg-surface-pressed";
 
 export interface SidebarRowProps {
   to: string;
@@ -293,7 +293,7 @@ export function SidebarSection({
             aria-controls={collapsed ? undefined : listId}
             title={`${title} 섹션 ${collapsed ? "펼치기" : "접기"}`}
             data-testid={`section-collapse-${sectionId}`}
-            className="flex h-control-sm w-full min-w-0 items-center gap-1 rounded-sm text-left text-meta font-medium text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
+            className="flex h-control-sm w-full min-w-0 items-center gap-1 rounded-sm text-left text-meta font-medium text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
           >
             <Chevron className="size-4 shrink-0" aria-hidden="true" />
             <span className="min-w-0 truncate">{title}</span>

@@ -125,13 +125,13 @@ export function SpawnHostChoice({
                 htmlFor={inputId}
                 className={cn(
                   "flex min-w-0 items-center gap-2 border-b border-line p-2 last:border-b-0",
-                  // 커서와 hover는 `selectable`이 아니라 **지금 누를 수 있는가**를
-                  // 읽는다. 잠긴 줄이 마우스 밑에서 밝아지면 그것은 클릭을 권한
-                  // 뒤 삼키는 것이다(B1).
-                  live && "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed",
                   !candidate.selectable && "cursor-not-allowed",
-                  candidate.selectable && locked && "cursor-default",
-                  checked && candidate.selectable && "bg-accent-soft"
+                  candidate.selectable && locked && "cursor-not-allowed",
+                  live && checked
+                    ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
+                    : live &&
+                      "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
+                )}
                 )}
                 data-testid={`${testIdPrefix}-host-option-${candidate.hostId}`}
                 data-selectable={candidate.selectable ? "" : undefined}

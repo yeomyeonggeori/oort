@@ -280,7 +280,7 @@ export function TerminalDock({
                   className={cn(
                     "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta press focus-visible:focus-ring",
                     selectedTab
-                      ? "bg-accent-soft font-medium text-ink"
+                      ? "bg-accent-soft font-medium text-ink active:bg-surface-pressed"
                       : "text-ink-muted hover:bg-surface-hover"
                   )}
                 >

@@ -157,7 +157,7 @@ function AdeCard({
         data-anchor={item.anchorMessageId === undefined ? undefined : ""}
         className={cn(
           "flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left",
-          "press hover:bg-surface-hover",
+          "hover:bg-surface-hover active:bg-surface-pressed",
           "focus-visible:focus-ring"
         )}
       >

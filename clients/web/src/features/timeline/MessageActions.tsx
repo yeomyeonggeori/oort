@@ -431,9 +431,11 @@ export function MessageHoverToolbar({
                 callbacks.onReact(emoji);
               }}
               className={cn(
-                toolbarItemClass,
+                "flex size-control-sm items-center justify-center rounded-sm press focus-visible:focus-ring",
                 "text-title",
-                mine && "bg-accent-soft text-ink"
+                mine
+                  ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                  : "text-ink-muted hover:bg-surface-hover hover:text-ink"
               )}
             >
               <span aria-hidden="true">{emoji}</span>
@@ -581,7 +583,7 @@ function SheetAction({
       data-testid={testId}
       onClick={onSelect}
       className={cn(
-        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body press hover:bg-surface-hover focus-visible:focus-ring",
+        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
         tone === "danger" ? "text-danger" : "text-ink"
       )}
     >

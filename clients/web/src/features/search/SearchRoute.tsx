@@ -96,7 +96,7 @@ function HitRow({
         to={searchHitPath(hit.channelId, hit.messageId, hit.seq)}
         // `tap-target`은 폰에서만 이 행을 44px로 세운다. 사이드바 행이 같은
         // 유틸리티를 같은 이유로 쓴다.
-        className="tap-target flex flex-col gap-1 break-keep border-b border-line px-4 py-3 text-left press hover:bg-surface-hover focus-visible:focus-ring"
+        className="tap-target flex flex-col gap-1 break-keep border-b border-line px-4 py-3 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         data-testid="search-hit"
         data-channel-id={hit.channelId}
         data-message-id={hit.messageId}

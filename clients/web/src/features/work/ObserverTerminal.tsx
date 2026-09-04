@@ -1298,10 +1298,10 @@ function ScopeButton({
       data-testid={testId}
       data-active={active ? "" : undefined}
       className={cn(
-        "flex items-center gap-1 rounded-sm px-2 py-px text-timestamp focus-visible:focus-ring",
+        "flex items-center gap-1 rounded-sm px-2 py-px text-timestamp press focus-visible:focus-ring",
         active
-          ? "bg-accent-soft text-ink"
-          : "text-ink-muted press hover:bg-surface-hover"
+          ? "bg-accent-soft text-ink active:bg-surface-pressed"
+          : "text-ink-muted hover:bg-surface-hover"
       )}
     >
       {pending && <Loader2 aria-hidden="true" className="spinner-busy size-3" />}

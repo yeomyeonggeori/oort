@@ -95,7 +95,7 @@ export function FilterTabs<T extends string>({
             className={cn(
               BASE,
               selected
-                ? "bg-accent-soft font-medium text-ink"
+                ? "bg-accent-soft font-medium text-ink active:bg-surface-pressed"
                 : "text-ink-muted hover:bg-surface-hover"
             )}
           >

@@ -26,7 +26,24 @@ import { nextComposerTabStop } from "./useComposerFormat";
 // collapse the textarea selection this tray is formatting.
 
 export const COMPOSER_FORMAT_ITEM_CLASS =
-  "flex size-control-sm items-center justify-center rounded-sm focus-visible:focus-ring";
+  "flex size-control-sm items-center justify-center rounded-sm press focus-visible:focus-ring";
+
+function formatItemClass(pressed: boolean, disabled: boolean): string {
+  if (pressed) {
+    return cn(
+      COMPOSER_FORMAT_ITEM_CLASS,
+      "bg-accent-soft text-ink active:bg-surface-pressed",
+      disabled && "opacity-50"
+    );
+  }
+  if (disabled) {
+    return cn(COMPOSER_FORMAT_ITEM_CLASS, "text-ink-muted opacity-50");
+  }
+  return cn(
+    COMPOSER_FORMAT_ITEM_CLASS,
+    "text-ink-muted hover:bg-surface-hover hover:text-ink"
+  );
+}
 
 const ACTIONS: ReadonlyArray<{
   kind: ComposerFormatKind;
@@ -246,12 +263,7 @@ export function ComposerFormatTray({
             title={title}
             tabIndex={index === activeIndex ? 0 : -1}
             data-testid={`${testIdPrefix}-${suffix}`}
-            className={cn(
-              COMPOSER_FORMAT_ITEM_CLASS,
-              item.pressed ? "bg-accent-soft text-ink" : "text-ink-muted",
-              !item.disabled && !item.pressed && "press hover:bg-surface-hover hover:text-ink",
-              item.disabled && "opacity-50"
-            )}
+            className={formatItemClass(item.pressed, item.disabled)}
             onClick={() => {
               if (item.disabled) return;
               onApply(kind);

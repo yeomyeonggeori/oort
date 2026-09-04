@@ -982,7 +982,7 @@ export function WorkSessionDetail({
               if (!openingThread) onOpenThread();
             }}
             aria-busy={openingThread}
-            className="block w-full truncate px-4 py-1 text-left press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+            className="block w-full truncate px-4 py-1 text-left hover:bg-surface-hover active:bg-surface-pressed hover:text-ink focus-visible:focus-ring"
             data-testid="work-detail-thread"
           >
             {openingThread ? threadActionCopy.busy : threadActionCopy.idle} ·{" "}

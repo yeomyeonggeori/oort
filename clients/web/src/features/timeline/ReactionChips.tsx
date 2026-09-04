@@ -121,7 +121,7 @@ function ReactionChipButton({
       className={cn(
         "tap-target flex items-center gap-1 rounded-sm border px-2 py-px text-meta press focus-visible:focus-ring disabled:opacity-50",
         chip.mine
-          ? "border-accent bg-accent-soft text-ink"
+          ? "border-accent bg-accent-soft text-ink active:bg-surface-pressed"
           : "border-line bg-surface-raised text-ink-muted hover:bg-surface-hover"
       )}
     >

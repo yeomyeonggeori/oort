@@ -133,8 +133,10 @@ export function ComposerAutocompleteList({
               onChoose(candidate);
             }}
             className={cn(
-              "flex w-full flex-wrap items-center gap-x-2 rounded-sm px-2 py-1 text-left text-body press",
-              index === highlight ? "bg-accent-soft text-ink" : "text-ink"
+              "flex w-full flex-wrap items-center gap-x-2 rounded-sm px-2 py-1 text-left text-body",
+              index === highlight
+                ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                : "text-ink hover:bg-surface-hover active:bg-surface-pressed"
             )}
           >
             {candidate.mark === "private-channel" && (
