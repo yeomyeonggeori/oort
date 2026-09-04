@@ -363,7 +363,7 @@ function ReminderRow({
 
   return (
     <li
-      className="relative border-b border-line press hover:bg-surface-hover focus-within:bg-surface-hover"
+      className="relative border-b border-line hover:bg-surface-hover focus-within:bg-surface-hover"
       data-testid="reminder-row"
       data-due={overdue ? "overdue" : "upcoming"}
       data-reminder-id={reminder.id}
@@ -380,7 +380,7 @@ function ReminderRow({
               watchForMessage(reminder.messageSeq);
             }
           }}
-          className="flex min-w-0 flex-1 gap-3 focus-visible:focus-ring"
+          className="flex min-w-0 flex-1 gap-3 press focus-visible:focus-ring"
           data-testid="reminder-row-link"
         >
           <span className="shrink-0 pt-1" aria-hidden="true">

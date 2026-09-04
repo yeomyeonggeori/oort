@@ -79,7 +79,7 @@ function DraftChip({
     <li
       data-testid="attachment-chip"
       data-attachment-status={draft.status}
-      className="flex items-center gap-2 rounded-sm px-2 py-1 press hover:bg-surface-hover"
+      className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
     >
       <Icon
         aria-hidden="true"

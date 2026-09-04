@@ -99,7 +99,7 @@ function DraftRow({
 
   return (
     <li
-      className="relative border-b border-line press hover:bg-surface-hover focus-within:bg-surface-hover"
+      className="relative border-b border-line hover:bg-surface-hover focus-within:bg-surface-hover"
       data-testid="draft-row"
       data-channel-id={item.channelId}
       onMouseEnter={() => setHovered(true)}
@@ -110,7 +110,7 @@ function DraftRow({
       <Link
         to={channelPathForDraft(item.channelId)}
         aria-describedby={DRAFT_ROW_HINT_ID}
-        className="flex gap-3 py-2 pl-4 pr-8 focus-visible:focus-ring"
+        className="flex gap-3 py-2 pl-4 pr-8 press focus-visible:focus-ring"
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
           <KindIcon kind={item.destination.kind} />
