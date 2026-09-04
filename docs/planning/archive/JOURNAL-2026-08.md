@@ -2,6 +2,12 @@
 
 > `docs/planning/JOURNAL.md`에서 이동한 2026-08 항목 원문(불변, newest-first). 현행은 `docs/planning/JOURNAL.md`.
 
+## 2026-08-26 (Opus) · ★NCP 비용 판정 + 셀프호스트 외부 의존 전수 감사 · 파도 1 완주(#1777·#1778)
+- **전수 감사**(`research/2026-08-26-selfhost-external-dependency-audit.md`): "우리 서버를 타는 자리"=4곳, 런타임 강제는 **실질 1곳(데스크톱 자동 업데이트 — 빌드타임 baked)**뿐. 이미지 pull=local-build 대안 1급, 푸시=기본 스택에 부재, display TURN=**문면만 oort 전용이고 코드는 호스트 미검증**(M7 판정 필요). 텔레메트리·분석·과금 콜백 **0건**. **사실 정정: 허들은 oort TURN을 타지 않는다 — livekit.yaml TURN 블록이 통째 주석이라 TURN이 아예 없다.**
+- **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
+- 파도 1: **#1777 랜딩**(9a308276) — host-signed 세 팔 이식으로 remote_attach_available false→true, 터미널 축 개방. 레시피 `scripts/verify_workd_rust.sh` 동반. **#1778 PR #1787** — 소유자 관전 토글 400 수리, **ADR-0004 증보3 D3 원문 회귀 이식**(owner_only 강제는 077 파도가 스스로 넓힌 규칙이었다). 독립 재현 1199/1199 + PG 컨포먼스 1/1(일회용 PG 신규 기동).
+- 적립: **#1788**(M6 — 첨부 capability URL이 고정 localhost로 조립돼 터널 접속에서 깨짐. `--public-origin` 갱신 대상에서 누락. 그록봇 VM E2E가 정확히 이 조건). #1785(ACP 릴레이).
+
 ## 2026-08-24 (Fable) · 그록봇 제어 재검토 — CDP 필연성·오픈소스 오해·Push 가능성 리서치
 - 성재 3문 답(정본 `research/2026-08-24-grokbot-push-vs-cdp.md`): ①**CDP는 필연 아님** — 데스크탑/폰 앱=클라우드 VM 얇은 클라이언트라 로컬 봇 API 부재, CDP(렌더러 :9333)가 유일했던 손잡이고 이미 자연어 릴레이로 은퇴. ②**오픈소스 전제 오해 2건** — 그록봇은 폐쇄 SaaS(오픈소스는 oort), 본인 계정도 Cursor ToS 자동화금지(B3) 그대로 구속(본인계정=필요조건≠충분).
 - ③**Push 판정**: 그록봇 제품에 인바운드 API/웹훅/외부 트리거 **전무**(releasebot 8/17~24 재확인 — 8/21 플랜 확대뿐). polling 회피 native 경로=폐쇄 이벤트 트리거(Slack/GitHub/Teams 우회)뿐. "Grok이 응답" 넓게 보면 **xAI API Remote MCP Tools**(모델이 Agent Port 서버사이드 소비) 또는 **Cursor Cloud Agents API**(spawn/run/stop 우리 통제)가 진짜 push — 단 응답 주체가 봇 페르소나 아님.
