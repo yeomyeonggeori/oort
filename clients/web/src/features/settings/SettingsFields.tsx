@@ -17,6 +17,12 @@ import { choiceRadiosHintId } from "./fieldIds";
 // typed key-value lists, no card per row: elevation is reserved for grouping.
 // =============================================================================
 
+/** Rounded `<details>` that host a hover-fill `<summary>` (#2000 H-1). */
+export const SETTINGS_COLLAPSIBLE_CARD_CLASS =
+  "min-w-0 overflow-hidden rounded-md border border-line";
+export const SETTINGS_COLLAPSIBLE_SUMMARY_CLASS =
+  "cursor-pointer px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring";
+
 /**
  * One on/off row in a bordered settings group. The NAME is the checkbox's
  * accessible name; the sentence is its description. Kept apart so a screen
@@ -46,7 +52,9 @@ export function SettingsToggleRow({
     <div
       className={cn(
         "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0",
-        checked ? "bg-accent-soft" : "hover:bg-surface-hover"
+        checked
+          ? "bg-accent-soft"
+          : "hover:bg-surface-hover active:bg-surface-pressed"
       )}
       data-state={checked ? "on" : "off"}
     >
