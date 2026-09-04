@@ -20,9 +20,10 @@
 // fixtures below (realistic Korean+English team content, never "테스트 1").
 // =============================================================================
 
-import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
@@ -11184,17 +11185,48 @@ async function pngRgba(page, pngBuffer) {
   }, b64);
 }
 
+function linearizeChannel(c) {
+  const v = c / 255;
+  return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function oklabOfRgb(r, g, b) {
+  const lr = linearizeChannel(r);
+  const lg = linearizeChannel(g);
+  const lb = linearizeChannel(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function rgbDeltaE(r1, g1, b1, r2, g2, b2) {
+  const a = oklabOfRgb(r1, g1, b1);
+  const b = oklabOfRgb(r2, g2, b2);
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+/** Pixels below this OKLab dE count as the same colour (N-2). */
+const PIXEL_DE_MIN = 0.01;
+
 function pixelDiffRatio(a, b) {
   if (a.data.length !== b.data.length) return 1;
   let changed = 0;
   const pixels = a.data.length / 4;
   for (let i = 0; i < a.data.length; i += 4) {
-    if (
-      a.data[i] !== b.data[i] ||
-      a.data[i + 1] !== b.data[i + 1] ||
-      a.data[i + 2] !== b.data[i + 2] ||
-      a.data[i + 3] !== b.data[i + 3]
-    ) {
+    const dE = rgbDeltaE(
+      a.data[i],
+      a.data[i + 1],
+      a.data[i + 2],
+      b.data[i],
+      b.data[i + 1],
+      b.data[i + 2]
+    );
+    if (dE >= PIXEL_DE_MIN || a.data[i + 3] !== b.data[i + 3]) {
       changed += 1;
     }
   }
@@ -11230,6 +11262,28 @@ function rgbEq(a, b) {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
 
+function cornerInteriorPoints(box) {
+  const insets = [
+    [2, 2],
+    [1, 1],
+    [2, 1],
+    [1, 2],
+  ];
+  const origins = [
+    [box.x, box.y, 1, 1],
+    [box.x + box.width - 1, box.y, -1, 1],
+    [box.x, box.y + box.height - 1, 1, -1],
+    [box.x + box.width - 1, box.y + box.height - 1, -1, -1],
+  ];
+  const points = [];
+  for (const [ox, oy, sx, sy] of origins) {
+    for (const [dx, dy] of insets) {
+      points.push([ox + sx * dx, oy + sy * dy]);
+    }
+  }
+  return points;
+}
+
 async function assertSummaryHoverCorners(page, scheme) {
   const figure = page.getByTestId("press-triplet-summary-card");
   await figure.waitFor({ state: "attached" });
@@ -11254,26 +11308,61 @@ async function assertSummaryHoverCorners(page, scheme) {
       `summary-card ${scheme}: hover fill ${fill} equals page bg — hover did not paint`
     );
   }
-  const corners = [
-    [box.x, box.y],
-    [box.x + box.width - 1, box.y],
-    [box.x, box.y + box.height - 1],
-    [box.x + box.width - 1, box.y + box.height - 1],
-  ];
-  for (const [x, y] of corners) {
+  const points = cornerInteriorPoints(box);
+  for (const [x, y] of points) {
     const rgb = await sampleRgb(page, x, y);
     if (rgbEq(rgb, fill)) {
       throw new Error(
-        `summary-card ${scheme}: corner (${x.toFixed(1)},${y.toFixed(1)}) is hover fill ${fill}, not page bg ${pad}`
+        `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) is hover fill ${fill}, not page bg ${pad}`
       );
     }
     if (!rgbEq(rgb, pad)) {
       throw new Error(
-        `summary-card ${scheme}: corner (${x.toFixed(1)},${y.toFixed(1)}) ${rgb} ≠ page bg ${pad}`
+        `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) ${rgb} ≠ page bg ${pad}`
       );
     }
   }
-  console.log(`  summary-card ${scheme}: 4 corners = page bg, not hover fill`);
+  console.log(
+    `  summary-card ${scheme}: ${points.length} interior-corner samples = page bg, not hover fill`
+  );
+}
+
+async function assertToggleRowTarget(page, scheme) {
+  const frame = page.getByTestId("press-triplet-settings-row");
+  await frame.scrollIntoViewIfNeeded();
+  const checkbox = frame.getByTestId("press-triplet-settings-toggle");
+  const host = checkbox.locator("xpath=..");
+  const tag = await host.evaluate((el) => el.tagName);
+  if (tag !== "LABEL") {
+    throw new Error(
+      `settings-row ${scheme}: click target is <${tag}>, not LABEL`
+    );
+  }
+  const hostBox = await host.boundingBox();
+  const labelBox = await frame.locator("label").boundingBox();
+  if (!hostBox || !labelBox) {
+    throw new Error(`settings-row ${scheme}: bounding box missing`);
+  }
+  const deadRight = hostBox.x + hostBox.width - (labelBox.x + labelBox.width);
+  if (deadRight > 2) {
+    throw new Error(
+      `settings-row ${scheme}: fill covers ${deadRight.toFixed(1)}px that are not a click target`
+    );
+  }
+  const hit = await page.evaluate(
+    ({ x, y }) => {
+      const node = document.elementFromPoint(x, y);
+      const label = node?.closest("label");
+      return label ? "LABEL" : (node?.tagName ?? "NONE");
+    },
+    { x: hostBox.x + hostBox.width - 8, y: hostBox.y + hostBox.height / 2 }
+  );
+  if (hit !== "LABEL") {
+    throw new Error(
+      `settings-row ${scheme}: right-8 hit <${hit}>, not LABEL`
+    );
+  }
+  console.log(`  settings-row ${scheme}: label fills the row, right-8 is the target`);
 }
 
 const PRESS_TRIPLET_GALLERY = [
@@ -11342,6 +11431,7 @@ async function capturePressTriplet(
 
   if (suffix === "") {
     await assertSummaryHoverCorners(page, scheme);
+    await assertToggleRowTarget(page, scheme);
   }
 
   const paths = [];
@@ -11467,11 +11557,52 @@ async function captureDesignGallery(browser, scheme) {
   return [path];
 }
 
+function wipePressTripletEvidence() {
+  if (!existsSync(OUT_DIR)) return;
+  for (const name of readdirSync(OUT_DIR)) {
+    if (/^press-triplet/.test(name)) {
+      unlinkSync(resolve(OUT_DIR, name));
+    }
+  }
+}
+
+/** Aborted run must not leave a full triplet set on disk (#2000 N-4). */
+function recordPressTripletAbort(err) {
+  const cause = err instanceof Error ? err.message : String(err);
+  console.error(
+    `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: ${cause}`
+  );
+  if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
+    console.error(
+      "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
+    );
+  }
+  wipePressTripletEvidence();
+}
+
+function writePressTripletCatalog() {
+  if (!existsSync(OUT_DIR)) return;
+  const names = readdirSync(OUT_DIR)
+    .filter((name) => /^press-triplet-.*\.png$/.test(name))
+    .sort();
+  const lines = names.map((name) => {
+    const sha = createHash("sha256")
+      .update(readFileSync(resolve(OUT_DIR, name)))
+      .digest("hex");
+    return `${sha}  ${name}`;
+  });
+  writeFileSync(
+    resolve(OUT_DIR, "press-triplet-catalog.txt"),
+    `${lines.join("\n")}\n`
+  );
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
   }
   mkdirSync(OUT_DIR, { recursive: true });
+  wipePressTripletEvidence();
 
   const preview = await startGuardedPreview({
     webRoot: WEB_ROOT,
@@ -11566,6 +11697,7 @@ async function main() {
         }
       }
       for (const path of all) console.log(path);
+      writePressTripletCatalog();
       reportUnmocked();
     } finally {
       await browser.close();
@@ -11576,6 +11708,11 @@ async function main() {
 }
 
 main().catch((err) => {
+  try {
+    recordPressTripletAbort(err);
+  } catch (wipeErr) {
+    console.error(wipeErr);
+  }
   console.error(err);
   process.exit(1);
 });
