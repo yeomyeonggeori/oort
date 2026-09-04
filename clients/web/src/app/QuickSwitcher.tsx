@@ -74,8 +74,8 @@ import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 // controls for, which is exactly what this row is.
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
-  "text-ink hover:bg-surface-hover active:bg-surface-pressed " +
-  "data-[selected=true]:bg-accent-soft " +
+  "text-ink data-[selected=true]:bg-accent-soft " +
+  "data-[selected=true]:active:bg-surface-pressed " +
   "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
@@ -345,7 +345,7 @@ export function QuickSwitcher({
             찾을 수 있습니다」라고 가리키는 그 이름이 이 머리글이다. */}
         {searchProvided && (
           <Command.Group heading={SEARCH_SURFACE_NAME} forceMount>
-            <Command.Item
+            <Command.Item role="option"
               className={itemClass}
               value={`${SEARCH_SURFACE_NAME} 전체에서 검색 찾기 search messages everywhere`}
               data-testid="switcher-message-search"
@@ -371,7 +371,7 @@ export function QuickSwitcher({
                 줄이었다. 「질의를 들고 채널 범위로 인계」가 이 줄의 용도인데
                 질의가 있으면 없어졌으니, 의도와 렌더가 서로 반대였다. */}
             {currentChannel !== null && (
-              <Command.Item
+              <Command.Item role="option"
                 className={itemClass}
                 value={`${SEARCH_SURFACE_NAME} 이 채널에서 검색 찾기 search in this channel`}
                 data-testid="switcher-message-search-channel"
@@ -395,12 +395,12 @@ export function QuickSwitcher({
         )}
 
         <Command.Group heading="이동">
-          <Command.Item className={itemClass} onSelect={() => go("/inbox")}>
+          <Command.Item role="option" className={itemClass} onSelect={() => go("/inbox")}>
             <Inbox className="size-4 opacity-70" />
             인박스
           </Command.Item>
           {showDrafts && (
-            <Command.Item
+            <Command.Item role="option"
               className={itemClass}
               value="초안 drafts"
               data-testid="switcher-drafts"
@@ -410,7 +410,7 @@ export function QuickSwitcher({
               초안
             </Command.Item>
           )}
-          <Command.Item className={itemClass} onSelect={() => go("/activity")}>
+          <Command.Item role="option" className={itemClass} onSelect={() => go("/activity")}>
             <Activity className="size-4 opacity-70" />
             활동
           </Command.Item>
@@ -419,7 +419,7 @@ export function QuickSwitcher({
               arrive at says 멤버, so that is the name (R-1 어휘 계승). The
               older wording stays in `value` as a search alias, so typing
               디렉터리 or 명부 still finds it. */}
-          <Command.Item
+          <Command.Item role="option"
             className={itemClass}
             value="멤버 디렉터리 명부"
             onSelect={() => go("/directory")}
@@ -427,7 +427,7 @@ export function QuickSwitcher({
             <Users className="size-4 opacity-70" />
             멤버
           </Command.Item>
-          <Command.Item className={itemClass} onSelect={() => go("/settings")}>
+          <Command.Item role="option" className={itemClass} onSelect={() => go("/settings")}>
             <Settings className="size-4 opacity-70" />
             설정
           </Command.Item>
@@ -435,7 +435,7 @@ export function QuickSwitcher({
 
         {canCreate && (
           <Command.Group heading="만들기">
-            <Command.Item
+            <Command.Item role="option"
               className={itemClass}
               value="채널 만들기 새 채널 create channel"
               data-testid="switcher-create-channel"
@@ -457,7 +457,7 @@ export function QuickSwitcher({
         {agents.length > 0 && (
           <Command.Group heading="에이전트 설정">
             {agents.map((agent) => (
-              <Command.Item
+              <Command.Item role="option"
                 key={agent.id}
                 value={`${agent.displayName} ${agent.handle} 라우팅 모델 추론 강도 routing model effort`}
                 className={itemClass}
@@ -480,7 +480,7 @@ export function QuickSwitcher({
 
         <Command.Group heading="채널">
           {groups.channels.map((channel) => (
-            <Command.Item
+            <Command.Item role="option"
               key={channel.id}
               value={`${channel.name ?? ""} ${channel.id}`}
               className={itemClass}
@@ -509,7 +509,7 @@ export function QuickSwitcher({
                 session.member.id
               );
               return (
-                <Command.Item
+                <Command.Item role="option"
                   key={channel.id}
                   value={`${label.text} ${label.handle ?? ""} ${channel.id}`}
                   className={itemClass}
@@ -535,7 +535,7 @@ export function QuickSwitcher({
         {people.length > 0 && (
           <Command.Group heading="사람">
             {people.map(({ member, selectable, reason }) => (
-              <Command.Item
+              <Command.Item role="option"
                 key={member.id}
                 value={`${member.displayName} ${member.handle} ${member.id}`}
                 className={itemClass}
