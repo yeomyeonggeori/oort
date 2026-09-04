@@ -20,7 +20,7 @@
 // fixtures below (realistic Korean+English team content, never "테스트 1").
 // =============================================================================
 
-import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, readdirSync, unlinkSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
@@ -8066,6 +8066,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
   const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  await notificationsPage.mouse.move(0, 0);
   await notificationsPage.screenshot({ path: notificationsShot });
   shots.push(notificationsShot);
   await notificationsPage.close();
@@ -11383,6 +11384,7 @@ const PRESS_TRIPLET_INSITU = [
   "message-row",
   "pending-row",
   "settings-row",
+  "settings-row-checked",
   "drafts-li",
 ];
 
@@ -11397,8 +11399,12 @@ function pressTripletTarget(page, surface) {
   if (surface === "chip") return frame.getByTestId("reaction-chip");
   if (surface === "message-row") return frame.getByTestId("timeline-message");
   if (surface === "pending-row") return frame.getByTestId("timeline-pending");
-  if (surface === "settings-row") {
-    return frame.getByTestId("press-triplet-settings-toggle").locator("..");
+  if (surface === "settings-row" || surface === "settings-row-checked") {
+    const toggleId =
+      surface === "settings-row-checked"
+        ? "press-triplet-settings-toggle-checked"
+        : "press-triplet-settings-toggle";
+    return frame.getByTestId(toggleId).locator("..");
   }
   if (surface === "drafts-li") {
     return frame.getByTestId("draft-row").locator("a").first();
@@ -11504,13 +11510,9 @@ async function capturePressTriplet(
       activePath,
       `press-triplet ${surface} ${scheme}${suffix}`
     );
-    await page.mouse.up();
-    await page.mouse.move(0, 0);
-    await waitForAnimations(page);
-  }
-
   await page.close();
   await context.close();
+  commitPressTripletCatalog();
   return paths;
 }
 
@@ -11571,9 +11573,35 @@ function wipePressTripletEvidence() {
   }
 }
 
-/** Aborted run must not leave a full triplet set on disk (#2000 N-4). */
+let pressTripletCatalogCommitted = false;
+
+function commitPressTripletCatalog() {
+  writePressTripletCatalog();
+  pressTripletCatalogCommitted = true;
+}
+
+function appendPressTripletAbort(cause) {
+  const catalog = resolve(OUT_DIR, "press-triplet-catalog.txt");
+  const line = `# abort-after-triplet ${cause.replace(/\s+/g, " ").trim()}\n`;
+  if (existsSync(catalog)) appendFileSync(catalog, line);
+  else writeFileSync(catalog, line);
+}
+
+/** Aborted run must not leave a *partial* triplet set; a finished set stays (#2000 N4-5). */
 function recordPressTripletAbort(err) {
   const cause = err instanceof Error ? err.message : String(err);
+  if (pressTripletCatalogCommitted) {
+    console.error(
+      `CAPTURE ABORT: keeping completed press-triplet outputs and catalog. cause: ${cause}`
+    );
+    if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
+      console.error(
+        "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
+      );
+    }
+    appendPressTripletAbort(cause);
+    return;
+  }
   console.error(
     `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: ${cause}`
   );
