@@ -7,16 +7,17 @@
  * UX-R1b 소비: 390 드로어 스크림 · 스레드 패널 · ⌘K 팔레트.
  *
  * `data-[state=closed]:pointer-events-none` is the owner on nodes we write
- * (thread panel, 390 scrim). Radix `DialogOverlay` also writes
- * `pointer-events: auto` inline, so dialog.tsx sets `style.pointerEvents`
- * from `open` — a class cannot win that layer (#1997 H-1).
+ * (thread panel, 390 scrim). Radix `DialogOverlay` writes
+ * `pointer-events: auto` inline; the overlay/content closed class uses
+ * Tailwind's `!` so the compiled rule is `pointer-events: none !important`
+ * and beats that layer without an inline style (#1997 H-1).
  */
 
 export const MODAL_OVERLAY_MOTION =
-  "data-[state=open]:motion-modal-enter data-[state=closed]:motion-modal-exit data-[state=closed]:pointer-events-none motion-reduce:animate-none";
+  "data-[state=open]:motion-modal-enter data-[state=closed]:motion-modal-exit data-[state=closed]:pointer-events-none! motion-reduce:animate-none";
 
 export const MODAL_CONTENT_MOTION =
-  "origin-center data-[state=open]:motion-modal-enter-zoom data-[state=closed]:motion-modal-exit-zoom data-[state=closed]:pointer-events-none motion-reduce:animate-none";
+  "origin-center data-[state=open]:motion-modal-enter-zoom data-[state=closed]:motion-modal-exit-zoom data-[state=closed]:pointer-events-none! motion-reduce:animate-none";
 
 export const POPOVER_MOTION =
   "data-[state=open]:pointer-events-auto data-[state=closed]:pointer-events-none data-[state=open]:motion-enter data-[state=closed]:motion-exit motion-reduce:animate-none";

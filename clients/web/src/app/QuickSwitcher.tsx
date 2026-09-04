@@ -148,17 +148,16 @@ function PaletteLayer({
       open={isPresent}
       onOpenChange={onOpenChange}
     >
-      {/* AnimatePresence owns this slot. Portal+Content stay forceMounted so
-          the CSS exit can play while `open={isPresent}` is already false.
-          Overlay forceMount is not used: Presence already keeps the overlay
-          through its CSS exit (#1997 M-1). */}
-      <DialogPortal forceMount>
+      {/* AnimatePresence holds PaletteLayer until safeToRemove(). Radix
+          Presence plays the CSS exit on overlay/content from data-state=closed.
+          Neither Portal nor Content forceMount is needed: closed frames stay
+          > 0 and dwell stays ≥140ms without them (#1997 M-1). */}
+      <DialogPortal>
         <DialogOverlay
           ref={overlayRef}
           data-testid="quick-switcher-overlay"
         />
         <DialogPrimitive.Content
-          forceMount
           aria-label="검색과 이동"
           data-testid="quick-switcher"
           className={cn(

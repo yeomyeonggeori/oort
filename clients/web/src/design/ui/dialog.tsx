@@ -3,10 +3,10 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/design/lib/cn";
 import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 
-// shadcn/ui new-york Dialog (vendored, Radix primitive). The palette already
-// ships one dialog through cmdk's Command.Dialog, which wraps this same Radix
-// root; a form dialog needs the root directly, so it is vendored here rather
-// than hand-rolled (design-taste-web §1: reach for the primitive).
+// shadcn/ui new-york Dialog (vendored, Radix primitive). The ⌘K palette
+// consumes this same Root (`QuickSwitcher` PaletteLayer), not cmdk's
+// `Command.Dialog`. A form dialog needs the root directly, so it is vendored
+// here rather than hand-rolled (design-taste-web §1: reach for the primitive).
 //
 // House deviations from stock shadcn:
 //   - no built-in ✕ button. A dialog here closes with Esc and with its own
@@ -18,25 +18,7 @@ import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 //     the Presence subtree first and the exit never plays. forceMount is not
 //     added.
 
-const DialogOpenContext = React.createContext<boolean | undefined>(undefined);
-
-/**
- * Controlled `open` is mirrored here so DialogOverlay can set
- * `style.pointerEvents` on the same commit as `data-state`. OverlayImpl is
- * inside Presence and does not receive `open` as a prop.
- */
-export const Dialog = ({
-  open,
-  onOpenChange,
-  children,
-  ...props
-}: React.ComponentProps<typeof DialogPrimitive.Root>) => (
-  <DialogOpenContext.Provider value={open}>
-    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} {...props}>
-      {children}
-    </DialogPrimitive.Root>
-  </DialogOpenContext.Provider>
-);
+export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
@@ -91,28 +73,13 @@ export function useRestoreFocusOnClose(open: boolean, opener: DialogOpener): voi
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, style, ...props }, ref) => {
-  const open = React.useContext(DialogOpenContext);
-  const closed = open === false;
-  return (
-    <DialogPrimitive.Overlay
-      ref={ref}
-      className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
-      {...props}
-      // Radix OverlayImpl writes `pointer-events: auto` inline:
-      // `style: { pointerEvents: "auto", ...overlayProps.style }`.
-      // A class cannot win that layer — R3's
-      // `data-[state=closed]:pointer-events-none` was dead on the product.
-      // Passing `pointerEvents` here occupies the same slot, later in that
-      // merge, so a closed overlay is not hit-testable (#1997 H-1).
-      // Why not !important: the library already writes inline; beating it
-      // means writing the same property from the same `open`/`data-state`
-      // the thread panel and 390 scrim already measure as pe=none.
-      // eslint-disable-next-line no-restricted-syntax
-      style={{ ...style, pointerEvents: closed ? "none" : "auto" }} // design-preflight-allow
-    />
-  );
-});
+>(({ className, ...props }, ref) => (
+  <DialogPrimitive.Overlay
+    ref={ref}
+    className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
+    {...props}
+  />
+));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 /**

@@ -5,6 +5,7 @@ import { MemoryRouter } from "react-router-dom";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { QuickSwitcher } from "@/app/QuickSwitcher";
 import { CreateChannelProvider } from "@/features/channels/CreateChannelDialog";
+import { useOpenCreateChannel } from "@/features/channels/useCreateChannel";
 import { AddChannelMemberProvider } from "@/features/channels/AddChannelMemberDialog";
 import { AddWorkspaceProvider } from "@/features/workspace/AddWorkspaceDialog";
 import { AgentProfileProvider } from "@/features/routing/AgentProfileDialog";
@@ -104,7 +105,13 @@ function sessionValue(): SessionContextValue {
   };
 }
 
-function DrawerProbe() {
+function DrawerProbe({
+  behindClicks,
+  onBehindClick,
+}: {
+  behindClicks: number;
+  onBehindClick: () => void;
+}) {
   const isMobile = useIsMobileShell();
   const [open, setOpen] = useState(false);
   const [folded, setFolded] = useState(false);
@@ -144,7 +151,13 @@ function DrawerProbe() {
             channelPaneCollapsed={folded}
             treeHidden={false}
           />
-          <main>본문</main>
+          <main
+            data-testid="click-behind"
+            data-clicks={behindClicks}
+            onClick={onBehindClick}
+          >
+            본문
+          </main>
         </div>
       </div>
     </ShellNavProvider>
@@ -207,7 +220,22 @@ function PaletteProbe() {
   );
 }
 
+function CreateChannelClickProbe() {
+  const openCreate = useOpenCreateChannel();
+  return (
+    <button
+      type="button"
+      data-testid="open-create-channel"
+      className="focus-visible:focus-ring"
+      onClick={() => openCreate(null)}
+    >
+      채널 만들기
+    </button>
+  );
+}
+
 export function Harness() {
+  const [behindClicks, setBehindClicks] = useState(0);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -220,9 +248,13 @@ export function Harness() {
           <AddChannelMemberProvider>
           <AgentProfileProvider>
           <MemberProfileProvider>
-            <DrawerProbe />
+            <DrawerProbe
+              behindClicks={behindClicks}
+              onBehindClick={() => setBehindClicks((n) => n + 1)}
+            />
             <ThreadProbe />
             <PaletteProbe />
+            <CreateChannelClickProbe />
           </MemberProfileProvider>
           </AgentProfileProvider>
           </AddChannelMemberProvider>

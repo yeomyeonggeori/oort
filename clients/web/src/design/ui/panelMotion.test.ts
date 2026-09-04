@@ -107,7 +107,7 @@ function quotedClassTokens(source: string): string[] {
 }
 
 function escapedClassSelector(candidate: string): string {
-  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
+  return "." + candidate.replace(/[:[\]=.!]/g, (ch) => "\\" + ch);
 }
 
 async function loadStylesheet(id: string, base: string) {
@@ -287,6 +287,8 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).not.toMatch(/Command\.Dialog/);
     expect(code).toMatch(/\brestoreRef\b/);
     expect(code).not.toMatch(/\brestoreDialogOpenerFocus\b/);
+    expect(code).not.toMatch(/<DialogPortal\s+forceMount/);
+    expect(code).not.toMatch(/<DialogPrimitive\.Content\s+forceMount/);
   });
 
   it("ThreadPanel presence is parent-driven; onClose is immediate", () => {
@@ -584,7 +586,7 @@ describe.skipIf(!chromiumAvailable)(
             () => page.keyboard.press("Escape")
           );
           expect(trace.frames, `${scheme} palette closed frames`).toBeGreaterThan(0);
-          expect(trace.dwell).toBeGreaterThanOrEqual(120);
+          expect(trace.dwell).toBeGreaterThanOrEqual(140);
           await page.locator("[data-testid='quick-switcher']").waitFor({
             state: "detached",
             timeout: 2_000,
@@ -613,6 +615,118 @@ describe.skipIf(!chromiumAvailable)(
         await browser.close();
       }
     }, 60_000);
+
+    async function behindPoint(page: import("playwright").Page) {
+      const box = await page.getByTestId("click-behind").boundingBox();
+      if (!box) throw new Error("click-behind missing");
+      return {
+        x: box.x + Math.max(16, box.width - 24),
+        y: box.y + Math.max(16, box.height - 24),
+      };
+    }
+
+    async function behindClicks(page: import("playwright").Page): Promise<number> {
+      return page.getByTestId("click-behind").evaluate((el) =>
+        Number(el.getAttribute("data-clicks") ?? "0")
+      );
+    }
+
+    async function assertClickThrough(
+      page: import("playwright").Page,
+      open: () => Promise<void>,
+      overlaySelector: string
+    ) {
+      await open();
+      const { x, y } = await behindPoint(page);
+      const blockedBefore = await behindClicks(page);
+      await page.mouse.click(x, y);
+      expect(
+        await behindClicks(page),
+        `${overlaySelector} open overlay must block the control behind`
+      ).toBe(blockedBefore);
+
+      for (const delay of [30, 60, 120]) {
+        await page.locator(overlaySelector).waitFor({ state: "detached", timeout: 2_000 });
+        await open();
+        await page.keyboard.press("Escape");
+        await page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
+        const overlay = page.locator(overlaySelector).first();
+        expect(
+          await overlay.count(),
+          `t+${delay}ms overlay still attached`
+        ).toBeGreaterThan(0);
+        expect(await overlay.getAttribute("data-state")).toBe("closed");
+        expect(
+          await overlay.evaluate((el) => getComputedStyle(el).pointerEvents),
+          `t+${delay}ms overlay pointer-events`
+        ).toBe("none");
+        const before = await behindClicks(page);
+        await page.mouse.click(x, y);
+        expect(
+          await behindClicks(page),
+          `t+${delay}ms click behind ${overlaySelector}`
+        ).toBe(before + 1);
+      }
+    }
+
+    it("Escape then click-behind at 30/60/120ms lands on palette + two R1a dialogs; open still blocks", async () => {
+      const { browser, page } = await launchProbe("no-preference", "light");
+      try {
+        await page.setViewportSize({ width: 1280, height: 800 });
+
+        await assertClickThrough(
+          page,
+          async () => {
+            await page.getByTestId("open-palette").click();
+            await page.locator("[data-testid='quick-switcher-overlay'][data-state='open']").waitFor({
+              state: "attached",
+            });
+            await page.locator("[data-testid='quick-switcher'][data-state='open']").waitFor({
+              state: "visible",
+            });
+          },
+          "[data-testid='quick-switcher-overlay']"
+        );
+
+        await page.locator("[data-testid='quick-switcher-overlay']").waitFor({
+          state: "detached",
+          timeout: 2_000,
+        });
+
+        await assertClickThrough(
+          page,
+          async () => {
+            await page.getByTestId("open-create-channel").click();
+            await page.locator("[data-testid='create-channel-name']").waitFor({
+              state: "visible",
+            });
+            await page.locator(".bg-scrim[data-state='open']").waitFor({ state: "attached" });
+          },
+          ".bg-scrim"
+        );
+
+        await page.locator(".bg-scrim").waitFor({ state: "detached", timeout: 2_000 });
+
+        await assertClickThrough(
+          page,
+          async () => {
+            await page.getByTestId("profile-card").click();
+            await page.getByTestId("profile-logout").click();
+            await page.locator("[data-testid='profile-logout-confirm'][data-state='open']").waitFor({
+              state: "visible",
+            });
+            await page.locator("[data-testid='profile-card-menu']").waitFor({
+              state: "detached",
+              timeout: 2_000,
+            });
+            await page.locator(".bg-scrim[data-state='open']").waitFor({ state: "attached" });
+          },
+          ".bg-scrim"
+        );
+      } finally {
+        await browser.close();
+      }
+    }, 120_000);
 
     it("reduced-motion: durations are 0 and scrim/palette detach within one frame", async () => {
       const { browser, page } = await launchProbe("reduce", "light");

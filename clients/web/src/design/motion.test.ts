@@ -114,7 +114,7 @@ function classTokens(className: string): string[] {
 
 /** Tailwind v4 가 셀렉터에 쓰는 이스케이프. compile-probe 와 같은 자. */
 function escapedClassSelector(candidate: string): string {
-  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
+  return "." + candidate.replace(/[:[\]=.!]/g, (ch) => "\\" + ch);
 }
 
 /** Cascade winner: a later duplicate `@keyframes` of the same name wins. */
