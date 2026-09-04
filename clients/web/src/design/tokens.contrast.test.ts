@@ -184,7 +184,8 @@ export const SURFACES = [
  *
  *   `muted-soft`  원장의 칩(수명주기·단계 행)이 드는 톤 없는 그릇. 네 표면 전부에
  *                 선다 — 목록·상세의 기본 바탕(`--surface`), 가리킨·펼친 행
- *                 (`--surface-hover`), 선택된 관제 줄(`--accent-soft`), 그리고
+ *                 (`--surface-hover`), 눌린 본문 행(`--surface-pressed`),
+ *                 선택된 관제 줄(`--accent-soft`), 그리고
  *                 미리보기 패널(`--surface-raised`, 단계 행 칩이 그 위에 선다).
  *   톤 그릇 셋    측정을 나르는 검증 칩이 드는 그릇. 이 칩이 서는 자리는 목록 행
  *                 (`WorkPanel` 의 두 목록)과 상세의 카드뿐이다. **관제 줄에는 이
@@ -207,10 +208,10 @@ export const SURFACES = [
  * 것이다 — 실제로 관제 줄에 칩이 서는 날이 오면 그때 이 문단을 다시 읽고 정하면 된다.
  */
 export const CHIP_VESSEL_SURFACES = [
-  ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised"]],
-  ["ok-soft", ["surface", "surface-hover", "surface-raised"]],
-  ["warn-soft", ["surface", "surface-hover", "surface-raised", "accent-soft"]],
-  ["danger-soft", ["surface", "surface-hover", "surface-raised"]],
+  ["muted-soft", ["surface", "surface-hover", "accent-soft", "surface-raised", "surface-pressed"]],
+  ["ok-soft", ["surface", "surface-hover", "surface-raised", "surface-pressed"]],
+  ["warn-soft", ["surface", "surface-hover", "surface-raised", "accent-soft", "surface-pressed"]],
+  ["danger-soft", ["surface", "surface-hover", "surface-raised", "surface-pressed"]],
 ] as const;
 
 /**
@@ -283,6 +284,7 @@ export const CONTROL_SURFACES = [
   "surface-raised",
   "surface-sidebar",
   "surface-hover",
+  "surface-pressed",
 ] as const;
 
 function pick(token: string, index: 0 | 1): string {
@@ -495,6 +497,57 @@ describe("Dawn palette", () => {
         `--surface-pressed vs --surface-hover (${scheme.name})`
       ).toBeGreaterThanOrEqual(0.02);
     }
+  });
+
+  it("pressed is one darker step from hover, outside the dark chip-vessel band (#2000 M-2)", () => {
+    for (const scheme of SCHEMES) {
+      const pressed = pick("surface-pressed", scheme.index);
+      const hover = pick("surface-hover", scheme.index);
+      expect(
+        luminance(pressed),
+        `${scheme.name} pressed ${pressed} L ${luminance(pressed).toFixed(4)} vs hover ${luminance(hover).toFixed(4)}`
+      ).toBeLessThan(luminance(hover));
+    }
+    const darkL = luminance(pick("surface-pressed", 1));
+    expect(
+      darkL < 0.0192 || darkL > 0.0320,
+      `dark pressed L ${darkL.toFixed(4)} sits in the chip-vessel band .0192–.0320`
+    ).toBe(true);
+  });
+
+  it("light pressed is a different material from accent-soft, or the hover hue family (#2000 M-2)", () => {
+    const pressed = pick("surface-pressed", 0);
+    const hover = pick("surface-hover", 0);
+    const soft = pick("accent-soft", 0);
+    const sameLadder = hueGap(pressed, hover) <= 5;
+    const distinctSoft =
+      deltaE(pressed, soft) >= 0.02 && hueGap(pressed, soft) >= 15;
+    expect(
+      sameLadder || distinctSoft,
+      `light pressed vs accent-soft dE ${deltaE(pressed, soft).toFixed(4)} Δhue ${hueGap(pressed, soft).toFixed(1)} (hover Δhue ${hueGap(pressed, hover).toFixed(1)})`
+    ).toBe(true);
+  });
+
+  it("CHIP_VESSEL_SURFACES names surface-pressed on every vessel (#2000 M-2)", () => {
+    for (const [vessel, surfaces] of CHIP_VESSEL_SURFACES) {
+      expect(
+        [...surfaces],
+        `${vessel} row backgrounds`
+      ).toContain("surface-pressed");
+    }
+  });
+
+  it("R2 pressed hexes fail the darker / vessel rulers (#2000 M-2 RED)", () => {
+    const r2Light = "#ece3cc";
+    const r2Dark = "#2d2c34";
+    expect(luminance(r2Light)).toBeGreaterThan(luminance(pick("surface-hover", 0)));
+    const darkL = luminance(r2Dark);
+    expect(darkL >= 0.0192 && darkL <= 0.0320).toBe(true);
+    expect(
+      contrast(pick("muted-soft", 1), r2Dark)
+    ).toBeLessThan(CHIP_VESSEL_MIN_CONTRAST);
+    expect(pick("surface-pressed", 0)).not.toBe(r2Light);
+    expect(pick("surface-pressed", 1)).not.toBe(r2Dark);
   });
 
   it("classifies every surface by whether a bordered control may sit on it", () => {
@@ -779,7 +832,7 @@ describe("Dawn palette", () => {
       // 하므로, 한 값을 나눠 가지면 상태가 켜진 동안 그릇이 반드시 사라진다.
       it("never lets a chip vessel share a value with an interaction state", () => {
         for (const [vessel] of CHIP_VESSEL_SURFACES) {
-          for (const state of ["surface-hover", "accent-soft"] as const) {
+          for (const state of ["surface-hover", "accent-soft", "surface-pressed"] as const) {
             expect(
               pick(vessel, scheme.index),
               `${vessel} (${scheme.name}) is the value ${state} paints interaction with`

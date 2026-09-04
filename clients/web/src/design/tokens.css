@@ -34,21 +34,21 @@
   --surface-raised: light-dark(#fffefb, #201f24);
   --surface-sidebar: light-dark(#efece6, #1b1a1f);
   --surface-hover: light-dark(#e7e3db, #26252c);
-  /* --- 본문 행의 눌림 채움 (#2000 R2 / #1515) ---------------------------
-   * `--surface-hover` 와 `--accent-soft` 를 두 스킴에서 hover 와 대비·OKLab
-   * 거리로 쟀다. raised 는 라이트에서 hover 보다 밝고(1.269) 다크에서는
-   * 더 어두워(1.078) 눌림이 아니라 떼는 쪽으로 읽힌다. accent-soft 는 양쪽
-   * 다 구분은 되지만(라이트 dE 0.0229 · 다크 0.0401) 선택된 행의 채움이라
-   * 본문 행이 고른 것처럼 보인다. 그래서 토큰을 하나 더 둔다.
+  /* --- 본문 행의 눌림 채움 (#2000 R3 / #1515) ---------------------------
+   * `--surface-hover` 에서 한 단 **더 어두운** 방향. R2 값(#ece3cc / #2d2c34)은
+   * 라이트가 hover 보다 밝고(0.7713>0.7704) 다크 휘도 0.0261 이 칩 그릇 띠
+   * (.0192~.0320) 안에 앉아 네 그릇이 대비 1.05 를 깨며, 라이트 accent-soft 와
+   * dE 0.0192 · Δhue 14.4° 로 §2.2 의 두 자를 못 넘었다.
    *
-   * 라이트 hover 휘도 0.7704 는 ink-muted AA 바닥(0.769)에 붙어 있어 한 단계
-   * 더 어두울 수 없다. 같은 휘도에서 종이 색상(hue 89, surface 의 91)의
-   * 채도만 한 단계 올린다: #ece3cc, hover 대비 1.001 · dE 0.0205, accent-soft
-   * 와는 dE 0.0192 · hue 74 가 아니라 91 이라 선택으로 안 읽힌다.
-   * 다크는 hover(#26252c)가 이미 한 단 뜬 자리라 같은 방향으로 한 단 더:
-   * #2d2c34, 대비 1.100 · dE 0.0290. muted-soft(#302e36) 그릇과는 다른 값.
-   * `--line-strong` 다크 2.73(<3) 이라 컨트롤이 설 수 있는 표면이 아니다. */
-  --surface-pressed: light-dark(#ece3cc, #2d2c34);
+   * 라이트 #eee2cc: hover 보다 어둡고(0.7693) 같은 색상 가족(Δhue 1.8°, hover
+   * 84.6). 대비 1.001 · dE 0.0205. ink-muted 4.502. accent-soft 와는 같은
+   * 사다리라 Δhue 8.0° 이지만 hover 와 한 가족이라 §2.2 가 허용. 그릇 최악
+   * danger-soft 1.101 / dE 0.0429.
+   * 다크 #262335: hover(#26252c, L 0.0192 = 띠의 아래 끝)에서 한 단 내려
+   * 띠 밖(0.0187). 대비 1.007 · dE 0.0204 · hue 291.6(hover 292.1). ink-muted
+   * 5.395. 그릇 최악 muted-soft 1.142 / dE 0.0430. `--line-strong` 양쪽 ≥3
+   * 이라 컨트롤 표면으로 분류된다. */
+  --surface-pressed: light-dark(#eee2cc, #262335);
 
   /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
    * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
