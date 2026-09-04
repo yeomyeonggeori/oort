@@ -1078,7 +1078,7 @@ export function MessageRow({
                     setResending(false)
                   );
                 }}
-                className="rounded-sm underline underline-offset-2 press hover:text-ink focus-visible:focus-ring disabled:opacity-50"
+                className="rounded-sm underline underline-offset-2 hover:text-ink focus-visible:focus-ring disabled:opacity-50"
               >
                 {resending ? "보내는 중…" : "다시 보내기"}
               </button>

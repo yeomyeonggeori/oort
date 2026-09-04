@@ -516,7 +516,7 @@ export function InboxRoute() {
             first panel instead of the rules it names (ADR-0124 증보 1). */}
         <Link
           to="/settings?section=notifications"
-          className="rounded-sm text-meta text-ink-muted underline underline-offset-2 press hover:text-ink focus-visible:focus-ring"
+          className="rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
           data-testid="inbox-notification-rules"
         >
           알림 규칙 설정
