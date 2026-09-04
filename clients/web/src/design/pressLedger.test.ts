@@ -84,20 +84,8 @@ const PLUGIN_SRC = readFileSync(
   new URL("../features/plugins/PluginSection.tsx", import.meta.url),
   "utf8"
 );
-const CHANNEL_HEADER_SRC = readFileSync(
-  new URL("../features/chat/channelHeaderControl.ts", import.meta.url),
-  "utf8"
-);
-const TERMINAL_DOCK_SRC = readFileSync(
-  new URL("../features/work/TerminalDock.tsx", import.meta.url),
-  "utf8"
-);
 const WORK_PANEL_SRC = readFileSync(
   new URL("../features/work/WorkPanel.tsx", import.meta.url),
-  "utf8"
-);
-const WORK_CONSOLE_SRC = readFileSync(
-  new URL("../features/workConsole/WorkConsoleRoute.tsx", import.meta.url),
   "utf8"
 );
 const GALLERY_SRC = readFileSync(
@@ -1171,23 +1159,6 @@ function uniqueClasses(values: string[]): string[] {
   return [...new Set(values.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean))];
 }
 
-function cnBranchesInFunction(source: string, fileName: string, fnName: string): string[] {
-  const sf = sourceFile(source, fileName);
-  const ctx = buildExpandCtx(sf);
-  const fn = collectDecls(sf).find((d) => d.name === fnName);
-  if (!fn) throw new Error(`${fnName} 이 없다`);
-  const out: string[] = [];
-  const visit = (node: ts.Node) => {
-    if (ts.isCallExpression(node) && calleeName(node.expression) === "cn") {
-      out.push(...expandClass(node, ctx));
-      return;
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(fn.node);
-  return uniqueClasses(out);
-}
-
 function classBranchesInFunctionOnTag(
   source: string,
   fileName: string,
@@ -1208,22 +1179,6 @@ function classBranchesInFunctionOnTag(
     ts.forEachChild(node, visit);
   };
   visit(fn.node);
-  return uniqueClasses(out);
-}
-
-function classBranchesByTestId(source: string, fileName: string, testId: string): string[] {
-  const sf = sourceFile(source, fileName);
-  const ctx = buildExpandCtx(sf);
-  const out: string[] = [];
-  const visit = (node: ts.Node) => {
-    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      if (attrText(jsxAttr(node, ["data-testid"]), ctx) === testId) {
-        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), ctx));
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(sf);
   return uniqueClasses(out);
 }
 
@@ -1945,14 +1900,3 @@ export function Probe() {
     expect(strippedCss).not.toMatch(/\[data-selected=.true.\]:active/);
   });
 });
-
-function pressDuration(css: string): string {
-  const rules = [
-    ...css.matchAll(/\.press\s*\{([^}]*)\}/g),
-  ].filter((match) => /transition-duration:/.test(match[1]));
-  if (rules.length === 0) return "0s";
-  const match = rules[rules.length - 1][1].match(
-    /transition-duration:\s*([^;]+)/
-  );
-  return match ? match[1].trim() : "0s";
-}
