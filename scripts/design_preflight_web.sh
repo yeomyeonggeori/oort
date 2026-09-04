@@ -28,7 +28,7 @@
 #   11 progress_word 진행 낱말꼴 「명사 + 중」 위반 (「저장하는 중」)   [AST, #1511]
 #   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
 #   13 raw_motion    사다리 밖 \d+ms · duration-[0-9]+ 손기입 (ADR-0179 D10)
-#   14 motion_lib_scope  motion / motion/… / framer-motion 허용 3파일 외 hard-zero (grep, ADR-0179 D8 / UX-R1b)
+#   14 motion_lib_scope  motion family (motion, motion/…, motion-dom, motion-utils, framer-motion, framer-motion/…) 허용 3파일 외 hard-zero (grep, ADR-0179 D8 / UX-R1b)
 #
 # 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
 # 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
@@ -200,7 +200,7 @@ label_for() {
     progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
     latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
     raw_motion)    echo "사다리 밖 duration 손기입 (ADR-0179 D10): \\d+ms 와 duration-[0-9]+ 는 motion.css·motion.ts 에만. 온보딩 키프레임 블록은 ADR-0159 예외" ;;
-    motion_lib_scope) echo "motion/framer-motion import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. from/side-effect import/import()/require() · motion · motion/… · framer-motion. 네 번째 파일은 hard-zero" ;;
+    motion_lib_scope) echo "motion family import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. from/side-effect import/import()/require() · motion · motion/… · motion-dom · motion-utils · framer-motion · framer-motion/…. 네 번째 파일은 hard-zero" ;;
     *)             echo "$1" ;;
   esac
 }
@@ -363,17 +363,20 @@ motion_hit_line() {
 
 # ---- motion_lib_scope (ADR-0179 D8 / UX-R1b) --------------------------------
 #
-# motion / motion/… / framer-motion 는 세 파일만. CSS 로는 exit 언마운트를 못
-# 붙잡는 표면(⌘K·스레드 패널·390 스크림)의 AnimatePresence. 네 번째 파일은
-# 빨개져야 한다 — raw_motion 과 같은 합성 selftest 줄로 지킨다.
+# motion family 는 세 파일만. CSS 로는 exit 언마운트를 못 붙잡는 표면
+# (⌘K·스레드 패널·390 스크림)의 AnimatePresence. 네 번째 파일은 빨개져야
+# 한다 — raw_motion 과 같은 합성 selftest 줄로 지킨다.
 #
 # Doors (any string literal in these positions):
 #   import { x } from "spec" | import * as m from "spec"
 #   import "spec" (side-effect)
 #   import("spec") | require("spec")
-# Specifiers: "motion" | "motion/…" | "framer-motion"
+# Specifiers: "motion" | "motion/…" | "motion-dom" | "motion-utils"
+#             | "framer-motion" | "framer-motion/…"
+# The family, not one package name: motion-dom / motion-utils are hoisted
+# transitives of motion, and framer-motion ships subpaths (framer-motion/dom).
 
-MOTION_LIB_SPEC='["'"'"'](motion(/[^"'"'"']*)?|framer-motion)["'"'"']'
+MOTION_LIB_SPEC='["'"'"'](motion(-dom|-utils)?(/[^"'"'"']*)?|framer-motion(/[^"'"'"']*)?)["'"'"']'
 MOTION_LIB_IMPORT_RE="(from[[:space:]]+|import[[:space:]]+|import\\(|require\\()${MOTION_LIB_SPEC}"
 # Anchored to the path field of grep -n output (path:line:content). Matching
 # anywhere would let a comment quote an allowlisted path and exempt itself.
@@ -667,6 +670,9 @@ run_motion_lib_scope_selftest() {
 1|clients/web/src/design/ui/button.tsx:9:import { AnimatePresence } from "framer-motion";
 1|clients/web/src/design/ui/button.tsx:9:import { animate } from "motion";
 1|clients/web/src/design/ui/button.tsx:9:import { motion } from "motion/react-client";
+1|clients/web/src/design/ui/button.tsx:9:import { prefersReducedMotion } from "motion-dom";
+1|clients/web/src/design/ui/button.tsx:9:import { noop } from "motion-utils";
+1|clients/web/src/design/ui/button.tsx:9:import { animate } from "framer-motion/dom";
 # quoting an allowlisted path in the content must not exempt a fourth file
 1|clients/web/src/design/ui/button.tsx:9:import { motion } from "motion/react"; // src/app/QuickSwitcher.tsx:
 # the three allowlisted product files may import it
@@ -746,8 +752,10 @@ case "${1:-}" in
     echo "  --selftest raw_color: prove issue refs pass and real hex fails;"
     echo "             raw_motion: prove 175ms / duration-200 fail, motion.css·"
     echo "             motion.ts·onboarding block·comments pass (ADR-0179 D10);"
-    echo "             motion_lib_scope: prove a fourth motion/react import fails"
-    echo "             and the three allowlisted files pass (ADR-0179 D8);"
+    echo "             motion_lib_scope: prove a fourth motion-family import fails"
+    echo "             (motion / motion/… / motion-dom / motion-utils /"
+    echo "             framer-motion / framer-motion/…) and the three"
+    echo "             allowlisted files pass (ADR-0179 D8);"
     echo "             web strings + core: prove render strings and JSX text fail"
     echo "             while comments, JSX comments and test names pass"
     echo ""
