@@ -74,7 +74,8 @@ import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 // controls for, which is exactly what this row is.
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
-  "text-ink data-[selected=true]:bg-accent-soft " +
+  "text-ink hover:bg-surface-hover active:bg-surface-pressed " +
+  "data-[selected=true]:bg-accent-soft " +
   "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
