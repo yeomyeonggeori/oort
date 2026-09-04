@@ -11250,7 +11250,7 @@ async function assertTripletFramesDiffer(page, hoverPath, activePath, label) {
 
 async function sampleRgb(page, x, y) {
   const buf = await page.screenshot({
-    clip: { x: Math.max(0, x), y: Math.max(0, y), width: 1, height: 1 },
+    clip: { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)), width: 1, height: 1 },
     animations: "allow",
     caret: "hide",
   });
@@ -11263,11 +11263,12 @@ function rgbEq(a, b) {
 }
 
 function cornerInteriorPoints(box) {
+  // 2px in along both axes is the leak pixel (R3: sabotaged tl+2 = fill,
+  // shipped tl+2 = page bg). [1,1] is the short diagonal. Off-diagonal
+  // [2,1]/[1,2] sit on the 1px border and read as AA, not page bg.
   const insets = [
     [2, 2],
     [1, 1],
-    [2, 1],
-    [1, 2],
   ];
   const origins = [
     [box.x, box.y, 1, 1],
@@ -11278,7 +11279,7 @@ function cornerInteriorPoints(box) {
   const points = [];
   for (const [ox, oy, sx, sy] of origins) {
     for (const [dx, dy] of insets) {
-      points.push([ox + sx * dx, oy + sy * dy]);
+      points.push([Math.round(ox + sx * dx), Math.round(oy + sy * dy)]);
     }
   }
   return points;
