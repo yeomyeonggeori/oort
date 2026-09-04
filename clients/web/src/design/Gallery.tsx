@@ -1,4 +1,5 @@
 import {
+  cloneElement,
   forwardRef,
   useLayoutEffect,
   useMemo,
@@ -556,6 +557,89 @@ function GalleryBody() {
         </p>
         <SchemeToggle />
       </header>
+
+      <section
+        data-testid="press-triplet-root"
+        className="flex flex-col gap-4 border-b border-line py-6"
+      >
+        <h2 className="text-title font-medium text-ink">눌림 3짝</h2>
+        <p className="text-meta text-ink-muted">
+          캡처 레인이 여섯 표면의 정지, 가리킴, 눌림을 찍는다. 미리보기 속성이
+          아니라 포인터 상태다.
+        </p>
+        <div className="flex flex-wrap items-start gap-4">
+          <figure
+            data-testid="press-triplet-button-default"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="default">
+              변경 저장
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-secondary"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="secondary">
+              취소
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-ghost"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="ghost">
+              닫기
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-destructive"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="destructive">
+              지우기
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-row"
+            className="min-w-action bg-surface p-6"
+          >
+            <ul>
+              <SidebarRow
+                to="/c/gallery-press-triplet"
+                icon={<Hash className="size-4" />}
+                label="릴리스 노트"
+                testId="press-triplet-row-link"
+                wrapLink={(link) =>
+                  cloneElement(link, {
+                    onClick: (event: { preventDefault: () => void }) => {
+                      event.preventDefault();
+                    },
+                  })
+                }
+              />
+            </ul>
+          </figure>
+          <figure
+            data-testid="press-triplet-chip"
+            className="inline-flex bg-surface p-6"
+          >
+            <ReactionChips
+              chips={[
+                {
+                  emoji: "👍",
+                  count: 2,
+                  mine: false,
+                  memberIds: [MEMBER_ID],
+                },
+              ]}
+              directory={directory}
+              myMemberId={MEMBER_ID}
+              onToggle={() => undefined}
+            />
+          </figure>
+        </div>
+      </section>
 
       <StateRow
         title="Button"
