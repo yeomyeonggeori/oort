@@ -151,7 +151,7 @@ function RunRow({
           hover·focus 계약으로 간다. */}
       <Link
         to={workSessionPath(channelId, run.id)}
-        className="flex flex-col px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex flex-col px-4 py-2 press hover:bg-surface-hover focus-visible:focus-ring"
         data-testid="workstream-run-link"
       >
         <span className="flex min-w-0 items-baseline gap-2">

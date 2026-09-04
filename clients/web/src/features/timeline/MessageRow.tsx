@@ -710,7 +710,9 @@ export function MessageRow({
         // `group` lets the gutter clock react to a hover anywhere on the row.
         // The hover toolbar is JS-mounted (not group-hover opacity) so a
         // non-hovered row contributes zero toolbar tab stops.
-        "group relative flex gap-2 px-4 hover:bg-surface-hover",
+        // `press` scales on :active and empties a body drag-select (#1743 B-4).
+        // Active here is the same fill as hover, not a transform.
+        "group relative flex gap-2 px-4 hover:bg-surface-hover active:bg-surface-hover",
         // actionable 행의 rest 정거장은 행 자신이다 (rowFocus.ts, 리뷰 W-4,
         // #1743 B-2). 정거장에는 보이는 링이 있어야 하고, 링은 **안쪽**에
         // 그린다 — 행은 스크롤 컨테이너 안에 있어서 바깥으로 2px 나간 링은

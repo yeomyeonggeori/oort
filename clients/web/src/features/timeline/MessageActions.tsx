@@ -329,7 +329,7 @@ function MessageActionMenuItems({
 }
 
 const toolbarItemClass =
-  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
+  "flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring";
 
 /**
  * Floating hover/focus toolbar. The parent decides whether this is mounted;
@@ -581,7 +581,7 @@ function SheetAction({
       data-testid={testId}
       onClick={onSelect}
       className={cn(
-        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body transition-colors hover:bg-surface-hover focus-visible:focus-ring",
+        "tap-target flex w-full items-center gap-3 rounded-sm px-3 text-body press hover:bg-surface-hover focus-visible:focus-ring",
         tone === "danger" ? "text-danger" : "text-ink"
       )}
     >
@@ -648,7 +648,7 @@ export function MessageActionSheet({
                   invokeAction(item.key, callbacks, onOpenPicker);
                   close();
                 }}
-                className="tap-target flex items-center justify-center rounded-sm text-title transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                className="tap-target flex items-center justify-center rounded-sm text-title press hover:bg-surface-hover focus-visible:focus-ring"
               >
                 <span aria-hidden="true">{item.label}</span>
               </button>
@@ -662,7 +662,7 @@ export function MessageActionSheet({
                   close();
                   invokeAction(more.key, callbacks, onOpenPicker);
                 }}
-                className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                className="tap-target flex items-center justify-center rounded-sm px-3 text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
               >
                 {actionIcon(more, copyState.pinned)}
               </button>

@@ -835,7 +835,7 @@ export function WorkSessionDetail({
               onClick={onBack}
               aria-label="세션 목록으로"
               data-testid="work-detail-back"
-              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+              className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <ArrowLeft className="size-4" />
             </button>
@@ -955,7 +955,7 @@ export function WorkSessionDetail({
           <p className="border-b border-line text-meta text-ink-muted">
             <Link
               to={`/workstreams/${goal.id}`}
-              className="block truncate px-4 py-1 hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+              className="block truncate px-4 py-1 press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
               data-testid="work-detail-workstream"
               data-workstream-id={goal.id}
             >
@@ -982,7 +982,7 @@ export function WorkSessionDetail({
               if (!openingThread) onOpenThread();
             }}
             aria-busy={openingThread}
-            className="block w-full truncate px-4 py-1 text-left hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+            className="block w-full truncate px-4 py-1 text-left press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
             data-testid="work-detail-thread"
           >
             {openingThread ? threadActionCopy.busy : threadActionCopy.idle} ·{" "}
@@ -1006,7 +1006,7 @@ export function WorkSessionDetail({
             are reference material you check once, and as always-open chrome
             they cost more height than the ledger they describe. */}
         <details className="border-b border-line" data-testid="work-detail-meta">
-          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
+          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring">
             세션 정보 · {channelName}
           </summary>
           <dl className="pb-1">

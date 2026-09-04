@@ -25,7 +25,7 @@ import type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
 export type { FilterTabsSpec } from "@momo/core/features/common/filterTabs";
 
 const BASE =
-  "inline-flex h-control-sm items-center gap-2 rounded-sm px-3 text-body transition-colors focus-visible:focus-ring";
+  "inline-flex h-control-sm items-center gap-2 rounded-sm px-3 text-body press focus-visible:focus-ring";
 
 export function FilterTabs<T extends string>({
   spec,

@@ -79,7 +79,7 @@ function DraftChip({
     <li
       data-testid="attachment-chip"
       data-attachment-status={draft.status}
-      className="flex items-center gap-2 rounded-sm px-2 py-1 hover:bg-surface-hover"
+      className="flex items-center gap-2 rounded-sm px-2 py-1 press hover:bg-surface-hover"
     >
       <Icon
         aria-hidden="true"
@@ -157,7 +157,7 @@ function DraftChip({
         title={ATTACH_COPY.remove}
         data-testid="attachment-chip-remove"
         className={cn(
-          "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink",
+          "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink",
           "focus-visible:focus-ring"
         )}
       >

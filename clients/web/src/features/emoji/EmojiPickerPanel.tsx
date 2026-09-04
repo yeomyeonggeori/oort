@@ -309,7 +309,7 @@ export function EmojiPickerPanel({
               const next = ((((tone + delta) % 6) + 6) % 6) as SkinTone;
               setTone(next);
             }}
-            className="tap-target flex size-control items-center justify-center rounded-sm border border-line-strong text-title hover:bg-surface-hover focus-visible:focus-ring"
+            className="tap-target flex size-control items-center justify-center rounded-sm border border-line-strong text-title press hover:bg-surface-hover focus-visible:focus-ring"
           >
             <span aria-hidden="true">
               {SKIN_OPTIONS[tone]?.glyph ?? "✋"}
@@ -335,7 +335,7 @@ export function EmojiPickerPanel({
                       onSkinOpenChange(false);
                     }}
                     className={cn(
-                      "tap-target flex size-control items-center justify-center rounded-sm text-title hover:bg-surface-hover focus-visible:focus-ring",
+                      "tap-target flex size-control items-center justify-center rounded-sm text-title press hover:bg-surface-hover focus-visible:focus-ring",
                       tone === option.tone && "bg-accent-soft"
                     )}
                   >
@@ -379,7 +379,7 @@ export function EmojiPickerPanel({
                   setTabFocus(index);
                 }}
                 className={cn(
-                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
+                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
                   selected && "bg-accent-soft text-ink"
                 )}
               >

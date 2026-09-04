@@ -157,7 +157,7 @@ function AdeCard({
         data-anchor={item.anchorMessageId === undefined ? undefined : ""}
         className={cn(
           "flex min-w-0 flex-1 flex-col gap-1 px-4 py-3 text-left",
-          "transition-colors hover:bg-surface-hover",
+          "press hover:bg-surface-hover",
           "focus-visible:focus-ring"
         )}
       >
@@ -312,7 +312,7 @@ function AdeCard({
           className={cn(
             ANCHOR_CELL_CLASS,
             "border-line-strong text-ink-muted",
-            "transition-colors hover:bg-surface-hover hover:text-ink",
+            "press hover:bg-surface-hover hover:text-ink",
             "focus-visible:focus-ring"
           )}
         >
@@ -452,7 +452,7 @@ export function AdeDrawer() {
           onClick={close}
           aria-label="작업 목록 닫기"
           data-testid="ade-drawer-close"
-          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X className="size-4" />
         </button>

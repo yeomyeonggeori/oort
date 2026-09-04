@@ -103,7 +103,7 @@ export function ChoiceList({
                   ? "cursor-not-allowed bg-surface-hover"
                   : "cursor-pointer",
                 !item.disabled && checked && "bg-accent-soft",
-                !item.disabled && !checked && "hover:bg-surface-hover"
+                !item.disabled && !checked && "press hover:bg-surface-hover"
               )}
               data-testid={`${name}-row`}
               data-choice-id={item.id}

@@ -365,7 +365,7 @@ export function ThreadComposer({
                 title={attachBlockCopy ?? "답글 보내기"}
                 data-testid="thread-composer-send"
                 className={cn(
-                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent transition-opacity hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill",
+                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm bg-accent text-on-accent press hover:opacity-90 focus-visible:focus-ring focus-ring-on-fill",
                   // 전송 중에는 그릇의 opacity가 상태를 진다. 빈 초안처럼 그릇은
                   // 정상인 판에서는 버튼 자신이 채널 컴포저와 같은 50%로 흐려진다.
                   sending ? "disabled:opacity-100" : "disabled:opacity-50"

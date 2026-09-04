@@ -322,7 +322,7 @@ function AgentActivityBar({
                 // 시계가 들어가고, 보조기술이 그 줄을 초당 한 번 다시 읽는다.
                 aria-label={`${activityText(line)}. 진행 과정 열기`}
                 data-testid="composer-working-open"
-                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left hover:bg-surface-hover focus-visible:focus-ring"
+                className="flex min-w-0 items-baseline gap-2 rounded-sm text-left press hover:bg-surface-hover focus-visible:focus-ring"
               >
                 {body}
               </button>

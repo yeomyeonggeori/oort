@@ -115,7 +115,7 @@ export function MemberRow({
         className={cn(
           ROW_CLASS,
           CONTENT_CLASS,
-          "transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+          "press hover:bg-surface-hover focus-visible:focus-ring"
         )}
       >
         <Avatar member={member} />

@@ -760,7 +760,7 @@ function Segmented({
                 the same specificity, so without it the hover rule (emitted
                 later by Tailwind) wins and the selection marker disappears
                 under the cursor. */}
-            <span className="flex h-control-sm cursor-pointer items-center px-3 text-meta text-ink-muted hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-checked:hover:bg-accent-soft peer-focus-visible:focus-ring">
+            <span className="flex h-control-sm cursor-pointer items-center px-3 text-meta text-ink-muted press hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-checked:hover:bg-accent-soft peer-focus-visible:focus-ring">
               {option.label}
             </span>
           </label>

@@ -1246,7 +1246,7 @@ function PluginScopeConsentDialog({
             // 진행 신호다.
             className={cn(
               "min-w-action",
-              !hasSelection && "bg-accent-soft text-ink hover:opacity-100"
+              !hasSelection && "bg-accent-soft text-ink press hover:opacity-100"
             )}
             data-testid="plugin-scope-confirm"
             onClick={() => {

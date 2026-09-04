@@ -44,7 +44,7 @@ const DRAFT_ROW_HINT_ID = "drafts-row-hint";
 const overflowBowlClass =
   "absolute right-2 top-2 z-20 rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
 const overflowTriggerClass =
-  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
+  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
 
 function KindIcon({ kind }: { kind: DraftKind }) {
   const className = "size-4 text-ink-muted";
@@ -99,7 +99,7 @@ function DraftRow({
 
   return (
     <li
-      className="relative border-b border-line transition-colors hover:bg-surface-hover focus-within:bg-surface-hover"
+      className="relative border-b border-line press hover:bg-surface-hover focus-within:bg-surface-hover"
       data-testid="draft-row"
       data-channel-id={item.channelId}
       onMouseEnter={() => setHovered(true)}

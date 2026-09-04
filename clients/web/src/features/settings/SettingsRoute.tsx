@@ -196,7 +196,7 @@ export function SettingsRoute() {
               type="button"
               onClick={close}
               data-testid="settings-back-to-app"
-              className="tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body hover:bg-surface-hover focus-visible:focus-ring"
+              className="tap-target flex w-full items-center gap-2 rounded-sm px-2 py-1 text-left text-body press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <ArrowLeft className="size-4 shrink-0" aria-hidden="true" />
               앱으로 돌아가기
@@ -220,7 +220,7 @@ export function SettingsRoute() {
                         "tap-target w-full rounded-sm px-2 py-1 text-left text-body focus-visible:focus-ring",
                         section === item.id
                           ? "bg-accent-soft text-ink"
-                          : "hover:bg-surface-hover"
+                          : "press hover:bg-surface-hover"
                       )}
                     >
                       {item.label}

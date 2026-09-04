@@ -249,7 +249,7 @@ export function ComposerFormatTray({
             className={cn(
               COMPOSER_FORMAT_ITEM_CLASS,
               item.pressed ? "bg-accent-soft text-ink" : "text-ink-muted",
-              !item.disabled && !item.pressed && "hover:bg-surface-hover hover:text-ink",
+              !item.disabled && !item.pressed && "press hover:bg-surface-hover hover:text-ink",
               item.disabled && "opacity-50"
             )}
             onClick={() => {

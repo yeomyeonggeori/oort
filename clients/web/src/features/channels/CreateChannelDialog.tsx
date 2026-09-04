@@ -333,7 +333,7 @@ function CreateChannelPanel({
                 htmlFor={`create-channel-kind-${choice.id}`}
                 className={cn(
                   "flex min-w-0 cursor-pointer items-start gap-2 border-b border-line p-2 last:border-b-0",
-                  kind === choice.id ? "bg-accent-soft" : "hover:bg-surface-hover"
+                  kind === choice.id ? "bg-accent-soft" : "press hover:bg-surface-hover"
                 )}
               >
                 <input

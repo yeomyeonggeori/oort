@@ -224,7 +224,7 @@ export function UnfurlCards({
         data-row-action=""
         aria-label="링크 미리보기 제거"
         title="링크 미리보기 제거"
-        className="tap-target absolute right-1 top-1 z-10 flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        className="tap-target absolute right-1 top-1 z-10 flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
         onClick={(event) => {
           setOpener(event.currentTarget);
           setError(false);

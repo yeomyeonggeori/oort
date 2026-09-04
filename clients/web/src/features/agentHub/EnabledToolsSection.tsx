@@ -220,7 +220,7 @@ export function EnabledToolsSection({
               !canSave &&
                 !confirmed &&
                 !saving &&
-                "opacity-50 hover:opacity-50"
+                "opacity-50 press hover:opacity-50"
             )}
             aria-disabled={!canSave || undefined}
             aria-busy={saving || undefined}
@@ -322,7 +322,7 @@ function ToolToggleRow({
           "flex min-w-0 items-start gap-3 p-3 tap-target",
           locked ? "cursor-default" : cn("cursor-pointer", PRESS_CLASS),
           row.enabled && "bg-accent-soft",
-          !locked && !row.enabled && "hover:bg-surface-hover",
+          !locked && !row.enabled && "press hover:bg-surface-hover",
           "has-[:focus-visible]:focus-ring"
         )}
         data-testid={`agent-hub-tool-row-${row.name}`}

@@ -99,7 +99,7 @@ function WorkstreamRow({
     >
       <Link
         to={`/workstreams/${workstream.id}`}
-        className="flex px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex px-4 py-2 press hover:bg-surface-hover focus-visible:focus-ring"
       >
         <span
           className={cn(MEASURE_CLASS, "flex min-w-0 flex-col gap-1 break-keep")}

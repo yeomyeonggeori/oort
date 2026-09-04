@@ -48,7 +48,7 @@ import {
  * 버튼 최소**폭** 토큰을 높이로 빌려 썼다).
  */
 const PREVIEW_FRAME_CLASS =
-  "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover hover:bg-surface-raised focus-visible:focus-ring";
+  "flex h-preview-frame w-pane max-w-full items-center justify-center overflow-hidden rounded-md border border-line bg-surface-hover press hover:bg-surface-raised focus-visible:focus-ring";
 
 /**
  * 한 줄에 「무엇이」와 「무엇을 할 수 있는가」를 놓는 행.

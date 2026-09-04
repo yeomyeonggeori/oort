@@ -46,7 +46,7 @@ export function SettingsToggleRow({
     <div
       className={cn(
         "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0",
-        checked ? "bg-accent-soft" : "hover:bg-surface-hover"
+        checked ? "bg-accent-soft" : "press hover:bg-surface-hover"
       )}
       data-state={checked ? "on" : "off"}
     >
@@ -374,7 +374,7 @@ export function ChoiceRadios({
             htmlFor={`${name}-${choice.id}`}
             className={cn(
               "flex min-w-0 cursor-pointer items-start gap-2 border-b border-line p-2 last:border-b-0",
-              value === choice.id ? "bg-accent-soft" : "hover:bg-surface-hover"
+              value === choice.id ? "bg-accent-soft" : "press hover:bg-surface-hover"
             )}
           >
             <input

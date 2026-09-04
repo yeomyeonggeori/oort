@@ -390,7 +390,7 @@ export function ConnectPage({
               <button
                 key={base}
                 type="button"
-                className="tap-target inline-flex items-center rounded-sm bg-muted-soft px-2 py-1 text-meta text-ink hover:bg-surface-hover focus-visible:focus-ring"
+                className="tap-target inline-flex items-center rounded-sm bg-muted-soft px-2 py-1 text-meta text-ink press hover:bg-surface-hover focus-visible:focus-ring"
                 data-testid="connect-recent-server"
                 onClick={() => {
                   setServerUrl(base);

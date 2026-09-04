@@ -62,7 +62,8 @@ export function PendingRow({
       data-client-msg-id={pending.clientMsgId}
       data-status={pending.status}
       className={cn(
-        "flex gap-2 px-4 hover:bg-surface-hover",
+        "flex gap-2 px-4 hover:bg-surface-hover active:bg-surface-hover",
+        // `press` 는 MessageRow 와 같이 본문 드래그 선택을 접는다. active 는 채움만.
         // 확정된 행과 **같은 다리**를 쓴다 (U4-6 리뷰 M-1). 이 자리는 `pt-3 pb-1`
         // /`py-1` 이라는 손으로 적은 값이었고, 그래서 묶음 안 간격이 8px(4+4)
         // 이었다 — 코어가 말하는 12(`ROW_SPACE.withinGroup`)가 아니다. echo 행은

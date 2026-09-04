@@ -134,7 +134,7 @@ function WorkConsoleRow({
         aria-current={selected ? "page" : undefined}
         className={cn(
           "flex min-w-0 flex-col gap-1 px-4 py-2 transition-colors focus-visible:focus-ring",
-          selected ? "bg-accent-soft" : "hover:bg-surface-hover"
+          selected ? "bg-accent-soft" : "press hover:bg-surface-hover"
         )}
         data-session-id={session.id}
       >
@@ -512,7 +512,7 @@ export function WorkConsoleRoute() {
                   aria-controls="work-console-session-list"
                   title={detailWide ? "세션 목록 보이기" : "상세 넓게 보기"}
                   data-testid="work-console-detail-wide"
-                  className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+                  className="pane-wide-toggle flex size-6 shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
                 >
                   {detailWide ? (
                     <PanelLeftOpen className="size-4" />

@@ -44,7 +44,7 @@ export function AppTitlebar({
         aria-controls="sidebar-drawer"
         title={copy.label}
         data-testid="sidebar-toggle"
-        className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
       >
         <PanelLeft className="size-4" aria-hidden="true" />
       </button>
