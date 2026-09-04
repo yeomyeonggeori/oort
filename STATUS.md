@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## UX-R1e 눌림 상태 전수 + shrinking ledger + 3짝 캡처 (#2000, 2026-09-04)
+
+- ADR-0179 D5: 상호작용 표면(행·칩·아이콘 버튼·메뉴 항목·사이드바 행·리액션 칩·S0 CTA)에 `press` 전수. 텍스트 링크·비활성 제외. 메시지/대기 본문 행은 `press` 의 `:active` scale 이 드래그 선택을 접어 (#1743 B-4, capture:design 실측) `active:bg-surface-hover` 만 둔다 — 변형 없음.
+- Ledger `pressLedger.test.ts`: 주석 제거 JSX/클래스 구조 스캔. N0=107 (interactive 95 · text-link 12) → N1=12 (text-link only, interactive 0). 천장 12 고정. 올린 천장 또는 신규 hover-only 컨트롤은 붉음.
+- 이관 표면 compiled CSS: `transition-property` 에 transform 포함, outline-color 제외. 스케일은 `.press` 의 `scale(0.98)` (토큰). `duration-150`/`scale-95` 리터럴 0.
+- 캡처: `press-triplet` 장면 6×3×2=36 PNG. hover=Playwright `hover()`, active=`mouse.down()` 유지, `waitForAnimations`. 모션 켜 둠 (`animations: allow`).
+- runtime-unverified 아님. 폰 무접촉. design-review는 이 워커가 하지 않음.
+
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
 - `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 호스트 높이는 `ready=false`일 때 막대 높이를 저장하고, 뒤집히는 `useLayoutEffect`에서 그 값으로 잠근 뒤 콘텐츠 높이로 같은 사다리·같은 창을 탄다(줄어듦·늘어남 같은 기구). 가드는 뒤집기 전 프레임부터 샘플한다. 막대는 정지(펄스 없음). 그 창이 끝나면 `is-settled`가 이미 콘텐츠 높이인 레이어에서 막대를 뺀다. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다. 프레임당 |Δh| 상한 12px는 줄어듦과 +14 늘어남에서 실측되고, +224(12채널)는 같은 240ms ease-out에서 첫 프레임 ~30px — 사다리이지 점프가 아니다(점프로 되돌리면 224).

@@ -250,7 +250,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 |---|---|---|
 | `hover:`만 있고 `active:`가 없는 신규 표면 preflight | D5 | DS-4 |
 | 캡처 `waitForAnimations(page)` | D10 ③ | DS-3 |
-| rest/hover/active 3짝 캡처 레인 | D10 ④ | DS-3 |
+| rest/hover/active 3짝 캡처 레인 | D10 ④ | UX-R1e (#2000) 닫힘 |
 | 폰 모션·밀도 값 파생 + 바이트 대조 | D10 ⑤ | M1a |
 
 ### 2.7 터치 타깃
