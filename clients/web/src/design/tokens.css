@@ -1160,6 +1160,9 @@
     outline: 2px solid var(--accent);
     outline-offset: -4px;
   }
+  &:active {
+    opacity: 0.92;
+  }
 }
 
 /* 앱 상단 줄 (#1864). 데스크톱에서만 선다: 토글이 사이드바 안에 있으면 접는
@@ -1961,6 +1964,9 @@
     outline: 2px solid var(--accent);
     outline-offset: -4px;
   }
+  &:active {
+    opacity: 0.92;
+  }
 }
 
 /* Agent Hub keeps its roster and detail side by side while both have useful
@@ -2054,6 +2060,9 @@
   }
   &:not([aria-current="true"]):active {
     background-color: var(--surface-hover);
+  }
+  &[aria-current="true"]:active {
+    background-color: var(--surface-pressed);
   }
 }
 
