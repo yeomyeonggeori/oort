@@ -59,7 +59,7 @@ import { Select } from "@/design/ui/select";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { OpenMemberProfileContext } from "@/features/directory/memberProfileContext";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { SidebarRow } from "@/features/sidebar/SidebarRow";
 import { MessageRow } from "@/features/timeline/MessageRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
@@ -694,7 +694,7 @@ function GalleryBody() {
           tone="neutral"
           message="연결이 끊겼습니다. 캐시된 내용은 그대로 둡니다."
         />
-        <SkeletonRows rows={3} />
+        <Skeleton ready={false} rows={3} />
         <EmptyInvite
           headline="아직 메시지가 없습니다"
           detail={GALLERY_TEXT_FIXTURE}

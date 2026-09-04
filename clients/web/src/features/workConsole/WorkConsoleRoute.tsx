@@ -16,7 +16,7 @@ import { CHIP_CLASS } from "@/features/common/chip";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { messageAnchorPath } from "@/features/inbox/anchor";
@@ -433,7 +433,7 @@ export function WorkConsoleRoute() {
           className="min-h-0 min-w-0 overflow-y-auto border-e border-line focus-visible:focus-ring"
         >
           {projectionsPending ? (
-            <SkeletonRows rows={6} className="p-4" />
+            <Skeleton ready={false} rows={6} className="p-4" />
           ) : blockingProjectionError ? (
             <InlineBanner
               message={
@@ -482,7 +482,7 @@ export function WorkConsoleRoute() {
           className="flex min-h-0 min-w-0 flex-col bg-surface"
         >
           {projectionsPending && showingDetail ? (
-            <SkeletonRows rows={7} className="p-4" />
+            <Skeleton ready={false} rows={7} className="p-4" />
           ) : blockingProjectionError && showingDetail ? (
             <InlineBanner
               message="선택한 작업 세션을 불러오지 못했습니다."

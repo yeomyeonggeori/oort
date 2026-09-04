@@ -202,7 +202,7 @@ describe("H-2 — 커스텀 섹션에서도 로딩은 빈 상태가 아니다", 
       sidebarSource.indexOf("{customSections.map((section) => (")
     );
     const body = custom.slice(0, custom.indexOf("</SidebarSection>"));
-    expect(body).toContain("channelsQuery.isLoading && <SkeletonRows");
+    expect(body).toContain("ready={!channelsQuery.isLoading}");
     // 그리고 빈 상태 문장은 로딩·오류가 아닐 때만 선다.
     expect(body).toContain("!channelsQuery.isLoading &&");
     expect(body).toContain("!channelsQuery.error &&");

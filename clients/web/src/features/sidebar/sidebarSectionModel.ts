@@ -29,6 +29,10 @@
  */
 export type SidebarSectionId = string;
 
+export function sidebarSectionListId(sectionId: SidebarSectionId): string {
+  return `sidebar-section-${sectionId}-list`;
+}
+
 export function shouldShowSectionActions(input: {
   pointerCanHover: boolean;
   headerHovered: boolean;

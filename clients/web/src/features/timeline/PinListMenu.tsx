@@ -8,7 +8,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/design/ui/dropdown-menu";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, type Directory } from "@/features/workspace/useWorkspace";
 import { appNote } from "@momo/core/features/timeline/appVoice";
 import {
@@ -182,7 +182,7 @@ export function PinListMenu({
           // 그리지 않는 것이다 — 그것이 1차가 로딩과 빈 상태를 구별하지 못해 하던
           // 거짓말의 절반이다. 앱의 로딩 어휘 그대로: 높이를 지키는 중립 막대이고
           // 반짝이지 않는다.
-          <SkeletonRows rows={2} />
+          <Skeleton ready={false} rows={2} />
         ) : entries.length === 0 ? (
           status === "failed" ? null : (
             <p

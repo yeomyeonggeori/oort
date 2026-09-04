@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   createInvite,
   fetchWorkspace,
@@ -143,7 +143,7 @@ export function InviteSection({
   if (invites.isPending) {
     return (
       <SectionShell title="멤버와 초대" lines={lines}>
-        <SkeletonRows rows={4} />
+        <Skeleton ready={false} rows={4} />
       </SectionShell>
     );
   }

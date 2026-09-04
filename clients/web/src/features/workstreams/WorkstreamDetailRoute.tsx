@@ -7,7 +7,7 @@ import { Button } from "@/design/ui/button";
 import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import {
   messageAnchorPath,
@@ -516,7 +516,7 @@ export function WorkstreamDetailRoute() {
 
       <div className="min-h-0 flex-1 overflow-y-auto">
         {query.isPending ? (
-          <SkeletonRows rows={5} className="p-4" />
+          <Skeleton ready={false} rows={5} className="p-4" />
         ) : isWorkstreamMissing(query.error) ? (
           /* 404, said as 404. The server answers this for a workstream anchored
              outside the reader's channels precisely so the read cannot confirm
@@ -656,7 +656,7 @@ export function WorkstreamDetailRoute() {
             <section>
               <h2 className="px-4 py-2 text-meta text-ink-muted">실행 이력</h2>
               {runsQuery.isPending ? (
-                <SkeletonRows rows={3} className="px-4 pb-4" />
+                <Skeleton ready={false} rows={3} className="px-4 pb-4" />
               ) : runsQuery.error ? (
                 <InlineBanner
                   message="실행 이력을 불러오지 못했습니다."

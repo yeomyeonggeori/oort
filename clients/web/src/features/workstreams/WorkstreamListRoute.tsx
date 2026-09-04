@@ -6,7 +6,7 @@ import { useSession } from "@/app/session";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import { CHIP_CLASS } from "@/features/common/chip";
 import { FilterTabs } from "@/features/common/FilterTabs";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { relativeLabel } from "@momo/core/features/inbox/model";
 import {
@@ -264,7 +264,7 @@ export function WorkstreamListRoute() {
         className="min-h-0 flex-1 overflow-y-auto"
       >
         {query.isPending ? (
-          <SkeletonRows rows={5} className="p-4" />
+          <Skeleton ready={false} rows={5} className="p-4" />
         ) : query.error ? (
           <InlineBanner
             message="작업 흐름을 불러오지 못했습니다."

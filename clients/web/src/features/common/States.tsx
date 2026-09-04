@@ -1,3 +1,4 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
@@ -10,23 +11,167 @@ import { Button } from "@/design/ui/button";
 //   offline = one inline banner, cached content keeps rendering (P15)
 // =============================================================================
 
-/** Height-preserving neutral bars. No shimmer: loading is not a light show. */
-export function SkeletonRows({
+/**
+ * Height-preserving skeleton → content crossfade (ADR-0179 D3 / UX-R1c).
+ * Bars and children share one grid cell while loading. No shimmer, no pulse:
+ * the bars are static; the crossfade is the whole motion. Host height is
+ * captured from the bars layer while `ready` is false, locked to that
+ * `from` in a layout effect before the first ready paint, then rides the
+ * same ladder as the fade to the content height — shrink and grow, same
+ * mechanism. After that window, `is-settled` takes the bars out of a layer
+ * that is already at the content height. `is-resetting` is an in-place
+ * `ready` true→false on a live instance (전이 0). A remount is a new
+ * instance and does crossfade.
+ */
+function prefersReducedMotion(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    typeof window.matchMedia === "function" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches
+  );
+}
+
+const useBrowserLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+function clearHostSize(host: HTMLElement) {
+  host.style.height = "";
+  host.classList.remove("is-sizing");
+}
+
+export function Skeleton({
+  ready,
   rows = 4,
   className,
+  children,
 }: {
+  ready: boolean;
   rows?: number;
   className?: string;
+  children?: React.ReactNode;
 }) {
+  const seenReady = useRef(ready);
+  if (ready) seenReady.current = true;
+  const resetting = seenReady.current && !ready;
+  const hostRef = useRef<HTMLDivElement>(null);
+  const barsRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const lastBarsHeight = useRef(0);
+  const [settled, setSettled] = useState(ready);
+
+  useBrowserLayoutEffect(() => {
+    if (ready) return;
+    const bars = barsRef.current;
+    if (!bars) return;
+    const record = () => {
+      lastBarsHeight.current = bars.getBoundingClientRect().height;
+    };
+    record();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(record);
+    observer.observe(bars);
+    return () => observer.disconnect();
+  }, [ready]);
+
+  useBrowserLayoutEffect(() => {
+    const host = hostRef.current;
+    const bars = barsRef.current;
+    const content = contentRef.current;
+    if (!ready) {
+      setSettled(false);
+      if (host) clearHostSize(host);
+      return;
+    }
+    if (settled) return;
+    const reduced = prefersReducedMotion();
+    if (!host || !bars || !content || reduced) {
+      setSettled(true);
+      if (host) clearHostSize(host);
+      return;
+    }
+
+    const from = lastBarsHeight.current;
+    host.style.height = `${from}px`;
+    host.classList.add("is-sizing");
+    void host.offsetHeight;
+    const to = content.getBoundingClientRect().height;
+    const needsSize = Math.abs(from - to) >= 1;
+
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      host.classList.add("is-settled");
+      clearHostSize(host);
+      setSettled(true);
+    };
+
+    if (!needsSize) {
+      clearHostSize(host);
+      const onEnd = (event: TransitionEvent) => {
+        if (event.target !== bars) return;
+        if (event.propertyName !== "opacity") return;
+        finish();
+      };
+      bars.addEventListener("transitionend", onEnd);
+      const fallback = window.setTimeout(finish, 400);
+      return () => {
+        bars.removeEventListener("transitionend", onEnd);
+        window.clearTimeout(fallback);
+      };
+    }
+
+    host.style.height = `${to}px`;
+
+    const onEnd = (event: TransitionEvent) => {
+      if (event.target !== host) return;
+      if (event.propertyName !== "height") return;
+      finish();
+    };
+    host.addEventListener("transitionend", onEnd);
+    const fallback = window.setTimeout(finish, 400);
+    return () => {
+      host.removeEventListener("transitionend", onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [ready, settled]);
+
   return (
-    <div className={cn("flex flex-col gap-2 p-2", className)} aria-hidden="true">
-      {Array.from({ length: rows }, (_, i) => (
-        <div
-          key={i}
-          className="h-6 rounded-sm bg-surface-hover"
-          data-testid="skeleton-row"
-        />
-      ))}
+    <div
+      ref={hostRef}
+      className={cn(
+        "skel",
+        resetting && "is-resetting",
+        settled && "is-settled"
+      )}
+      data-testid="skeleton"
+      data-ready={ready ? "true" : "false"}
+      aria-busy={ready ? undefined : true}
+    >
+      <div
+        ref={barsRef}
+        className={cn(
+          "skel-layer skel-bars flex flex-col gap-2 p-2",
+          className
+        )}
+        data-skel="bars"
+        aria-hidden="true"
+      >
+        {Array.from({ length: rows }, (_, i) => (
+          <div
+            key={i}
+            className="h-6 rounded-sm bg-surface-hover"
+            data-testid="skeleton-row"
+          />
+        ))}
+      </div>
+      <div
+        ref={contentRef}
+        className="skel-layer skel-content"
+        data-skel="content"
+      >
+        {children}
+      </div>
     </div>
   );
 }
