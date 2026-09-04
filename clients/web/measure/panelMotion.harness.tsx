@@ -27,9 +27,29 @@ const ROOT_A = "00000000-0000-7000-8000-000000000301";
 const ROOT_B = "00000000-0000-7000-8000-000000000302";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 
+const PALETTE_CHANNELS = [
+  { id: "00000000-0000-7000-8000-000000000211", workspaceId: WS, kind: "public" as const, name: "abc-엔진", muted: false },
+  { id: "00000000-0000-7000-8000-000000000212", workspaceId: WS, kind: "public" as const, name: "abc-클라", muted: false },
+  { id: "00000000-0000-7000-8000-000000000213", workspaceId: WS, kind: "public" as const, name: "abc-디자인", muted: false },
+  { id: "00000000-0000-7000-8000-000000000214", workspaceId: WS, kind: "public" as const, name: "abc-인프라", muted: false },
+  { id: "00000000-0000-7000-8000-000000000215", workspaceId: WS, kind: "public" as const, name: "abc-릴리스", muted: false },
+];
+
 window.fetch = async (input: RequestInfo | URL) => {
   const url = String(input);
-  if (url.includes("/workspaces/") && !url.includes("/channels")) {
+  if (url.includes("/channels")) {
+    return new Response(JSON.stringify({ channels: PALETTE_CHANNELS }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (url.includes("/roster")) {
+    return new Response(JSON.stringify({ members: [] }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  }
+  if (url.includes("/workspaces/")) {
     return new Response(
       JSON.stringify({
         id: WS,

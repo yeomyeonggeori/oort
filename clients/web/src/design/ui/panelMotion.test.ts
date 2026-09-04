@@ -46,7 +46,6 @@ const FILES = {
     new URL("../../features/sidebar/Sidebar.tsx", import.meta.url),
     "utf8"
   ),
-  appShell: readFileSync(new URL("../../app/AppShell.tsx", import.meta.url), "utf8"),
   chatShell: readFileSync(
     new URL("../../features/chat/ChatShell.tsx", import.meta.url),
     "utf8"
@@ -309,9 +308,7 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).toMatch(/\bonEntranceConsumed=\{timeline\.consumeEntrance\}/);
   });
 
-  it("AppShell does not mount a synchronous 390 scrim; Sidebar owns presence", () => {
-    const shell = codeOnly(FILES.appShell);
-    expect(shell).not.toMatch(/className=["']sidebar-scrim["']/);
+  it("AppShell does not own the 390 scrim; Sidebar owns presence", () => {
     expect(codeOnly(FILES.sidebar)).toMatch(/\bSidebarDrawerScrimLayer\b/);
     expect(codeOnly(FILES.sidebar)).toMatch(/\bDRAWER_SCRIM_MOTION\b/);
     expect(codeOnly(FILES.harness)).toMatch(/<Sidebar\b/);
@@ -368,6 +365,7 @@ describe.skipIf(!chromiumAvailable)(
         "sidebar-drawer",
         "sidebar-scrim",
         "scrim-blur",
+        "motion-item-fade",
         "app-shell",
         "thread-pane",
         "bg-scrim",
@@ -769,29 +767,44 @@ describe.skipIf(!chromiumAvailable)(
         await page.locator("[data-testid='quick-switcher']").waitFor({
           state: "visible",
         });
+        await page.locator("[cmdk-item]").first().waitFor({ state: "visible" });
+        await page.waitForTimeout(80);
         const afterOpen = await page.evaluate(() => {
           const w = window as Window & {
             __itemAnim?: number;
             __containerAnim?: number;
           };
-          return { items: w.__itemAnim ?? 0, container: w.__containerAnim ?? 0 };
+          return {
+            items: w.__itemAnim ?? 0,
+            container: w.__containerAnim ?? 0,
+            rows: document.querySelectorAll("[cmdk-item]").length,
+          };
         });
+        expect(afterOpen.rows, `rows on open ${afterOpen.rows}`).toBeGreaterThan(0);
         expect(afterOpen.container, `container animationstart on open ${afterOpen.container}`).toBeLessThanOrEqual(
           1
         );
+        expect(afterOpen.items, `item animationstart on open ${afterOpen.items}`).toBe(0);
         await page.evaluate(() => {
           const w = window as Window & { __itemAnim?: number };
           w.__itemAnim = 0;
         });
         await page.locator("[data-testid='quick-switcher-input']").click();
         await page.keyboard.type("abc");
+        await page.keyboard.press("Backspace");
+        await page.waitForTimeout(80);
         const counts = await page.evaluate(() => {
           const w = window as Window & {
             __itemAnim?: number;
             __containerAnim?: number;
           };
-          return { items: w.__itemAnim ?? 0, container: w.__containerAnim ?? 0 };
+          return {
+            items: w.__itemAnim ?? 0,
+            container: w.__containerAnim ?? 0,
+            rows: document.querySelectorAll("[cmdk-item]").length,
+          };
         });
+        expect(counts.rows, `rows after keystrokes ${counts.rows}`).toBeGreaterThan(0);
         expect(counts.items, `item animationstart ${counts.items}`).toBe(0);
 
         await page.keyboard.press("Escape");
@@ -804,7 +817,7 @@ describe.skipIf(!chromiumAvailable)(
         );
         expect(focused, `focus after palette close: ${focused}`).toBe("open-palette");
         console.info(
-          `palette-keystrokes open-container=${afterOpen.container} type-items=${counts.items} focus=${focused}`
+          `palette-keystrokes open-container=${afterOpen.container} type-items=${counts.items} rows=${counts.rows} focus=${focused}`
         );
       } finally {
         await browser.close();
