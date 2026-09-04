@@ -22,7 +22,7 @@
   - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 150ms 를 기다린다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다.
   - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom 렌더). `{drawerOpen && <scrim>}` 정규식은 80자 창이라 증거가 아니다.
   - 연 팔레트에 키 3타 → `[cmdk-item]` `animationstart` 0. `PALETTE_ITEM_MOTION` 을 행에 되돌리면 타수마다 재생.
-  - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). `restoreDialogOpenerFocus` 를 빼면 `BODY`.
+  - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
 - 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
 
