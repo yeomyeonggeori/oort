@@ -11510,6 +11510,11 @@ async function capturePressTriplet(
       activePath,
       `press-triplet ${surface} ${scheme}${suffix}`
     );
+    await page.mouse.up();
+    await page.mouse.move(0, 0);
+    await waitForAnimations(page);
+  }
+
   await page.close();
   await context.close();
   commitPressTripletCatalog();
