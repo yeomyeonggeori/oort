@@ -132,7 +132,6 @@ export function SpawnHostChoice({
                     : live &&
                       "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
                 )}
-                )}
                 data-testid={`${testIdPrefix}-host-option-${candidate.hostId}`}
                 data-selectable={candidate.selectable ? "" : undefined}
                 data-checked={checked ? "" : undefined}
