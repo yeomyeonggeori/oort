@@ -8,10 +8,10 @@
 | 표면 | 방향 | light | dark | reduced-motion |
 |---|---|---|---|---|
 | 390 드로어 패널 | enter/exit 대칭 `--motion-fast` | 180ms | 180ms | 0 |
-| 390 스크림 | enter `--motion-fast` / exit 재생(closed frames>0, dwell≥140, 이후 detach). `backdrop-filter: blur(5px)` (D6, 이 PR에서 스크림에 붙음) | 180ms | 180ms | 0 · lane detach 4.8ms |
+| 390 스크림 | enter `--motion-fast` / exit 재생(closed frames>0, dwell≥140, 이후 detach). `backdrop-filter: blur(5px)` (D6, 이 PR에서 스크림에 붙음) | 180ms | 180ms | 0 · lane detach 4.9–6.0ms |
 | 스레드 패널 | open `motion-slide-in-end` `--motion-standard` | 240ms | 240ms | 0 |
 | 스레드 패널 | close `motion-slide-out-end` `--motion-fast` (AnimatePresence 유지) | ≥140ms dwell | ≥140ms dwell | 즉시 detach |
-| ⌘K 오버레이/콘텐츠 | open `MODAL_*` 200ms · Escape exit dwell≥140 (실측 153 light / 144 dark) · AnimatePresence. 행 필터 재렌더 모션 0 | 200 / 150 | 200 / 150 | 0 · lane detach 3.4ms (full suite; isolation 25.1ms) · product 27ms light / 55ms dark (R5) |
+| ⌘K 오버레이/콘텐츠 | open `MODAL_*` 200ms · Escape exit dwell≥140 (lane 3×+full-suite light 155.7–156.5 / dark 156.4–159.5; R6 product 157.2 / 172.0) · AnimatePresence. 행 필터 재렌더 모션 0 | 200 / 150 | 200 / 150 | 0 · lane detach palette isolation 23.8–27.3ms (~7× vs R5 pre-forceMount 3.4ms) · full-suite 이번 4.3ms · scrim 4.9–6.2ms |
 | 데스크톱 사이드바 접기 | `--duration-sidebar` = `--motion-standard` | 240ms | (light와 같은 CSS) | 0 (`transition: none`) |
 
 - 390 드로어 **패널**은 DOM에 남는다(스크롤 보존, UX-R0). AnimatePresence는 스크림에만 (`SidebarDrawerScrimLayer`). 데스크톱 접힘은 타이틀바 토글 계약 유지(`sidebarPane.test.ts`).
@@ -19,24 +19,25 @@
 - R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
 - red proof (수리 떼면 실제로 붉음):
   - 닫힘 중 20/60/100ms 에 같은/다른 `thread-anchor` 클릭 → 패널이 요청한 root 로 열린다. `leaving`+지연 `onClose` 를 되돌리면 같은 스윕이 안 연다.
-  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (lane 이번 full-suite scrim=4.8ms palette=3.4ms; isolation scrim=5.5ms palette=25.1ms). jsdom: 스크림·스레드·팔레트 모두 computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 노드가 남는다. 팔레트는 Portal/Content `forceMount` 가 overlayRef 를 닫힘 동안 붙든다: 없으면 Radix Presence 가 오버레이를 먼저 걷어 `!node` 가 답하고 분기를 지워도 jsdom·Chromium 둘 다 초록이다 (R5 H-1). duration 0 은 UX-R0 D9 토큰이라 `setTimeout(0)` 으로 떼면 Chromium 도 안 붉다 — duration≤0 에서는 훅만 뗀다. 분기를 지우면 jsdom 은 20ms 에 노드가 남고 Chromium 은 `quick-switcher` 가 2s 안 detach 하지 않는다. CSS exit (closed frames>0, dwell≥140) 은 forceMount 없이 이미 돈다. forceMount 의 이유는 그 exit 이 아니라 훅 분기의 도달 가능성.
+  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms. lane R7 isolation 3× scrim=4.9–6.0ms palette=23.8–27.3ms; full-suite 이번 scrim=6.2ms palette=4.3ms. isolation 팔레트는 R5 forceMount 이전 3.4ms 의 ~7× (그때는 `!node` 지름길). full-suite 짧은 숫자는 같은 레인·같은 빌드에서 다시 나오므로 isolation 과 짝으로 적는다. jsdom: computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 분기를 지우면 팔레트는 남는다(Portal `forceMount` 유지; Content `forceMount` 유무는 무관). Portal 을 같이 빼면 분기를 지워도 jsdom 초록 (`!node` 선답). duration 0 (훅 false) 은 `setTimeout(0)` — R6 `duration<=0 return` 은 hang. CSS exit 은 forceMount 없이 이미 돈다.
   - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom, 제품 `Sidebar` 마운트). `{asDrawer && drawerOpen ? <SidebarDrawerScrimLayer open={true}/> : null}` 로 바꾸면 닫힘 즉시 null — Chromium 없이 붉다. AppShell `className=["']sidebar-scrim["']` 정규식은 증거가 아니라서 지웠다.
   - 연 팔레트에 행 ≥5 (하네스 `abc-*` 5채널) · 키 3타+Backspace 뒤 행 > 0 · `[cmdk-item]` `animationstart` 0 (open-container=1, type-items=0, rows=6). `PALETTE_ITEM_MOTION`/`motion-item-fade` 를 행에 되돌리면 open 에서 item animationstart **11**. jsdom 은 행 class 에 `motion-item-fade` 가 있으면 붉다.
   - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom 2/2, Playwright `focus=BODY`). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
 - `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
-- 캡처 `CAPTURE_PORT=8625` R6 3×3. head 2/3 · base(`51f32202`) 1/3 — head 가 base 보다 더 자주 죽지 않음. 실패는 둘 다 `scrollTimelineRowIntoView` nonempty intro (헬퍼 레이스, 선행). 완전 증거(light+dark+390)는 head 런 1·2. **3/3 PASS 라고 쓰지 않음.**
+- 캡처 `CAPTURE_PORT=8625` R7 3×. head **1/3** (run 1 FAIL nonempty intro dark · run 2 FAIL nonempty intro light · run 3 PASS light+dark+390). 실패는 선행 `scrollTimelineRowIntoView` 레이스 (R6 과 같은 장면·같은 숫자). **3/3 PASS 라고 쓰지 않음.**
 
-  | run | head | base `51f32202` |
-  |---|---|---|
-  | 1 | PASS (light+dark+390) | PASS |
-  | 2 | PASS (light+dark+390) | FAIL nonempty intro dark |
-  | 3 | FAIL nonempty intro dark | FAIL nonempty intro light |
+  | run | R7 head |
+  |---|---|
+  | 1 | FAIL nonempty intro dark |
+  | 2 | FAIL nonempty intro light |
+  | 3 | PASS (light+dark+390) |
 
 - `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` GATE PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
-- R6: 팔레트 `useReducedMotion` 분기는 Portal/Content `forceMount` + duration≤0 에서 훅만 detach. 분기를 지우면 jsdom·Chromium 둘 다 빨강. CSS exit 은 그대로 (light/dark dwell≥140, reduced 0s).
+- R7: `duration<=0 return` 삭제. duration 0 은 다시 `setTimeout(0)` (스레드/스크림과 같은 폴백). Content `forceMount` 삭제 — Portal 만 로드베어링. 훅 분기 삭제 시 jsdom 빨강(Portal 유지), Portal 도 빼면 초록. 제품: 연 팔레트에서 reduce 토글·userCSS `animation:none` 3회 닫힘 `[0,0,0]` (hunk 있으면 `[1,1,1]` + `data-scroll-locked=1` + 휠 delta 0).
+- R6: 팔레트 `useReducedMotion` 분기는 Portal `forceMount` 가 닫힘 동안 노드를 붙든다. R6 의 `duration<=0 return` 은 제품 hang 이라 R7 이 되돌림. CSS exit 은 그대로 (dwell≥140, reduced 0s).
 - R5: 닫힌 모달 오버레이/콘텐츠는 `data-[state=closed]:pointer-events-none!` (컴파일 규칙 `pointer-events: none !important`). Radix 인라인 `auto`를 클래스가 이긴다. `DialogOpenContext`·인라인 `style.pointerEvents`·eslint-disable·preflight-allow 없음. 가드: 컴파일 CSS `!important` + Playwright Escape 뒤 30/60/120ms 클릭(팔레트·채널 만들기·로그아웃 확인·섹션 삭제). `!` 를 빼면 컴파일 단정 빨강이고 제품 클릭이 다시 삼켜진다. dist CSS 해시로는 `!` 를 증언하지 못함 — 같은 리터럴이 `overlayMotion.test.ts` 에 있어 Tailwind 가 시험 텍스트를 스캔한다 (README §2.3 `pt-[13px]` 함정). 가드는 상수를 컴파일한다.
-- NOTES (R6, momo-main 이 티켓): N-4 `data-[state=closed]:pointer-events-none!` 는 `clients/web/src` 첫 bang-important 유틸리티. pre-flight 는 `!` 를 세지 않는다 — 후속 분류. 스크립트는 이 PR 범위 밖. N-5 선행 재관측만: `Timeline.burst` flake · 팔레트 `채널` 헤딩 clip · 프로필 메뉴→로그아웃 확인 첫 Escape (#2049 M-4).
+- NOTES (R7): N-1 캡처 head 는 PASS 라고 쓰지 않음 (재실행 줄을 게이트에). N-2 `Timeline.burst` flake 선행 #2050. N-3 `!important` 미집계 #2074, 스크립트 이 PR 밖. N-4 dwell 은 한 숫자가 아니라 레인 3× 범위(위 표). N-5 선행 재관측만: 팔레트 `채널` 헤딩 clip · 프로필 메뉴→로그아웃 확인 첫 Escape (#2049 M-4).
 - R4 기록(정정): 인라인 `pointerEvents` + overlay-only `forceMount` 제거는 기구가 무거웠고 Portal 상속으로 overlay `forceMount` 제거는 no-op 였다. 동작은 R5 가 그대로 두고 기구만 바꿨다.
 - N-2 `Timeline.burst` flake 2/5 at load 7.88 는 선행 (#2050 N-7). 이 PR 이 파일을 안 만진다.
 - N-3 팔레트 리스트가 `채널` 그룹 헤딩에서 잘리고 행이 안 비치는 기하은 base 와 byte-identical. 선행.

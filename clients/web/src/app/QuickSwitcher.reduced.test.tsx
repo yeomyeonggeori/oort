@@ -162,39 +162,66 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("PaletteLayer reduced-motion (#1997 N-2)", () => {
-  // Red iff Portal/Content forceMount keeps overlayRef through the exit.
-  // Without it, Radix Presence nulls the ref and `!node` detaches first,
-  // so deleting `if (reduceMotion)` stays green (R5 H-1 / R6 H-1).
-  it("detaches within one frame even when computed duration is the CSS exit", async () => {
-    const host = document.createElement("div");
-    document.body.append(host);
-    mountedHost = host;
-    mountedRoot = createRoot(host);
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false, gcTime: 0 } },
-    });
-    const tree: ReactElement = createElement(
-      QueryClientProvider,
-      { client },
-      createElement(
-        SessionProvider,
-        { value: sessionValue() },
-        createElement(MemoryRouter, null, createElement(Host, { initialOpen: true }))
-      )
-    );
-    await act(async () => {
-      mountedRoot?.render(tree);
-      await Promise.resolve();
-    });
-    expect(document.querySelector("[data-testid='quick-switcher']")).not.toBeNull();
+async function mountOpenPalette(): Promise<HTMLElement> {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountedHost = host;
+  mountedRoot = createRoot(host);
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  const tree: ReactElement = createElement(
+    QueryClientProvider,
+    { client },
+    createElement(
+      SessionProvider,
+      { value: sessionValue() },
+      createElement(MemoryRouter, null, createElement(Host, { initialOpen: true }))
+    )
+  );
+  await act(async () => {
+    mountedRoot?.render(tree);
+    await Promise.resolve();
+  });
+  expect(document.querySelector("[data-testid='quick-switcher']")).not.toBeNull();
+  return host;
+}
 
-    await act(async () => {
-      (host.querySelector("[data-testid='close-palette']") as HTMLButtonElement).click();
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(20);
-    });
+async function closePalette(host: HTMLElement): Promise<void> {
+  await act(async () => {
+    (host.querySelector("[data-testid='close-palette']") as HTMLButtonElement).click();
+  });
+  await act(async () => {
+    vi.advanceTimersByTime(20);
+  });
+}
+
+describe("PaletteLayer reduced-motion (#1997 N-2)", () => {
+  // Red iff Portal forceMount keeps overlayRef through the exit.
+  // Content inherits portalContext.forceMount (R6 M-1). Without Portal
+  // forceMount, Radix Presence nulls the ref and `!node` detaches first,
+  // so deleting `if (reduceMotion)` stays green (R5 H-1).
+  it("detaches within one frame even when computed duration is the CSS exit", async () => {
+    const host = await mountOpenPalette();
+    await closePalette(host);
+    expect(document.querySelector("[data-testid='quick-switcher']")).toBeNull();
+  });
+
+  // Product path (b): a user stylesheet / "animations off" zeroes computed
+  // duration without flipping the reduce hook. Duration 0 must still
+  // schedule safeToRemove (setTimeout(0)). The R6 `if (duration <= 0)
+  // return` hunk never calls it — this case is red with that hunk (#1997 B-1).
+  it("detaches when computed duration is 0 without the reduce hook", async () => {
+    reducedMotion.current = false;
+    vi.spyOn(window, "getComputedStyle").mockImplementation(
+      () =>
+        ({
+          animationDuration: "0s",
+          getPropertyValue: () => "",
+        }) as unknown as CSSStyleDeclaration
+    );
+    const host = await mountOpenPalette();
+    await closePalette(host);
     expect(document.querySelector("[data-testid='quick-switcher']")).toBeNull();
   });
 });

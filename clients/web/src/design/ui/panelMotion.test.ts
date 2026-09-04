@@ -287,11 +287,11 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).not.toMatch(/Command\.Dialog/);
     expect(code).toMatch(/\brestoreRef\b/);
     expect(code).not.toMatch(/\brestoreDialogOpenerFocus\b/);
-    // Portal+Content forceMount is the reduced-motion owner's seat: without
-    // it the `!node` fallback fires first and deleting `if (reduceMotion)`
-    // stays green (#1997 H-1). Overlay forceMount is not asserted (inherited).
+    // Portal forceMount keeps the overlay node alive through the exit so
+    // the reduced-motion branch is reachable. Content inherits
+    // portalContext.forceMount; do not pin that inherited prop (R6 M-1).
+    // Overlay forceMount is not asserted (inherited).
     expect(code).toMatch(/<DialogPortal\s+forceMount/);
-    expect(code).toMatch(/<DialogPrimitive\.Content\s+forceMount/);
   });
 
   it("ThreadPanel presence is parent-driven; onClose is immediate", () => {
@@ -590,6 +590,9 @@ describe.skipIf(!chromiumAvailable)(
           );
           expect(trace.frames, `${scheme} palette closed frames`).toBeGreaterThan(0);
           expect(trace.dwell).toBeGreaterThanOrEqual(140);
+          console.info(
+            `palette-exit ${scheme} closedFrames=${trace.frames} dwell=${trace.dwell.toFixed(1)}ms`
+          );
           await page.locator("[data-testid='quick-switcher']").waitFor({
             state: "detached",
             timeout: 2_000,
