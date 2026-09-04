@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { Avatar } from "@/features/timeline/MessageRow";
 import {
@@ -323,7 +323,7 @@ export function FirstMentionOnboarding({
       ) : surface.phase === "loading" ? (
         <div role="status">
           <span className="sr-only">{surface.headline}</span>
-          <SkeletonRows rows={2} className="p-0" />
+          <Skeleton ready={false} rows={2} className="p-0" />
         </div>
       ) : surface.phase === "error" ? (
         <div className="flex min-w-0 flex-col items-start gap-3">

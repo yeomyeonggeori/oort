@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useTickingNow } from "@/features/agents/agentWorkingSignal";
 import {
   ConfirmButton,
@@ -261,7 +261,7 @@ export function DoorbellSection({
       {loading && (
         <div role="status" data-testid="hosted-doorbell-loading">
           <span className="sr-only">{DOORBELL_LOADING_LABEL}</span>
-          <SkeletonRows rows={2} className="p-0" />
+          <Skeleton ready={false} rows={2} className="p-0" />
         </div>
       )}
 

@@ -11,6 +11,7 @@ import { cn } from "@/design/lib/cn";
 import { useHoverNone } from "@/features/emoji/useHoverNone";
 import {
   shouldShowSectionActions,
+  sidebarSectionListId,
   type SidebarSectionId,
 } from "./sidebarSectionModel";
 import type {
@@ -164,6 +165,7 @@ export function SidebarSection({
   mentionCount = 0,
   dropProps,
   headerDragProps,
+  wrapList = true,
 }: {
   title: string;
   sectionId: SidebarSectionId;
@@ -189,6 +191,11 @@ export function SidebarSection({
   /** Collapsed-header aggregate. Hidden while expanded: the rows speak then. */
   unreadCount?: number;
   mentionCount?: number;
+  /**
+   * When false, children already include the `<ul>` (a Skeleton wrapping the
+   * list). Default true: this section is the list. SKILL §6 `ul > li`.
+   */
+  wrapList?: boolean;
 }) {
   const touchSurface = useHoverNone();
   const [headerHovered, setHeaderHovered] = useState(false);
@@ -221,7 +228,7 @@ export function SidebarSection({
     overlayOpen: overlayOpen || overlayHeld,
   });
   const Chevron = collapsed ? ChevronRight : ChevronDown;
-  const listId = `sidebar-section-${sectionId}-list`;
+  const listId = sidebarSectionListId(sectionId);
   const hasUnread = unreadCount > 0;
   const hasMention = mentionCount > 0;
 
@@ -311,10 +318,12 @@ export function SidebarSection({
         ) : null}
         {showActions ? action : null}
       </div>
-      {collapsed ? null : (
+      {collapsed ? null : wrapList ? (
         <ul id={listId} className="flex flex-col">
           {children}
         </ul>
+      ) : (
+        children
       )}
     </section>
   );

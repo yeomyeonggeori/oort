@@ -12,7 +12,7 @@ import {
 } from "@/design/ui/dialog";
 import { Input } from "@/design/ui/input";
 import { Select } from "@/design/ui/select";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import {
   getPlugin,
@@ -532,7 +532,7 @@ function PluginDetailPanel({
   grantScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
   revokeScopeButtonRef: MutableRefObject<HTMLButtonElement | null>;
 }) {
-  if (isPending) return <SkeletonRows rows={3} />;
+  if (isPending) return <Skeleton ready={false} rows={3} />;
   if (isError || !detail) {
     return (
       <InlineBanner

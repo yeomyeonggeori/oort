@@ -8,7 +8,7 @@ import { Input } from "@/design/ui/input";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { searchHitPath } from "@/features/inbox/anchor";
 import { relativeLabel } from "@momo/core/features/inbox/model";
@@ -306,123 +306,126 @@ export function SearchRoute() {
           <EmptyInvite headline={SHORT_QUERY_HINT} testId="search-too-short" />
         )}
 
-        {search.phase === "searching" && (
-          <SkeletonRows rows={5} className="p-4" />
-        )}
+        {(search.phase === "searching" ||
+          search.phase === "error" ||
+          search.phase === "empty" ||
+          search.phase === "results") && (
+          <Skeleton ready={search.phase !== "searching"} rows={5} className="p-4">
+            {search.phase === "searching" ? null : search.phase === "error" &&
+              // 세 갈래다. 순서가 규칙이다.
+              //
+              // (a) **좁힌 범위의 404 = 그 채널을 볼 수 없다** (R1 B-3). 미제공
+              //     판정보다 먼저 본다. `serverSaysAbsent`는 404를 「이 서버에 그
+              //     기능이 없다」로 읽는데, 채널 하나를 물었을 때 그 독법은 정반대의
+              //     거짓말이 된다 — 서버는 검색을 제공하고 있고, 없는 것은 그 채널을
+              //     볼 자격이다. 회복은 빈손 화면과 **같은 문법**이다(같은 라벨의
+              //     같은 버튼): 화면이 두 곳에서 같은 탈출구를 다르게 부르지 않는다.
+              // (b) 미제공과 장애는 다른 문장이다. 이 서버가 검색 라우트를 싣고
+              //     있다는 것은 판정표의 사실이지만, 표가 서버보다 앞서 갔을 수
+              //     있다. 그때는 오류가 아니라 미제공으로 접는다 (이중 방어의 (b)).
+              // (c) 나머지는 장애다.
+              (isChannelScopeRefusal(search.error, scope, scopedChannel) ? (
+                <EmptyInvite
+                  headline={channelScopeRefusalCopy(scopedChannel).headline}
+                  detail={channelScopeRefusalCopy(scopedChannel).detail}
+                  actions={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setScope("workspace")}
+                      data-testid="search-scope-refused-escalate"
+                    >
+                      {ESCALATE_TO_WORKSPACE_LABEL}
+                    </Button>
+                  }
+                  testId="search-scope-refused"
+                />
+              ) : serverSaysAbsent(search.error) ? (
+                <SurfaceUnavailableSection
+                  surface="messageSearch"
+                  testId="search-unavailable"
+                />
+              ) : (
+                <InlineBanner
+                  message={
+                    search.error instanceof NetworkError
+                      ? search.error.message
+                      : "검색하지 못했습니다. 잠시 뒤 다시 시도하세요."
+                  }
+                  actionLabel="다시 시도"
+                  onAction={search.retry}
+                  testId="search-error"
+                />
+              ))}
 
-        {search.phase === "error" &&
-          // 세 갈래다. 순서가 규칙이다.
-          //
-          // (a) **좁힌 범위의 404 = 그 채널을 볼 수 없다** (R1 B-3). 미제공
-          //     판정보다 먼저 본다. `serverSaysAbsent`는 404를 「이 서버에 그
-          //     기능이 없다」로 읽는데, 채널 하나를 물었을 때 그 독법은 정반대의
-          //     거짓말이 된다 — 서버는 검색을 제공하고 있고, 없는 것은 그 채널을
-          //     볼 자격이다. 회복은 빈손 화면과 **같은 문법**이다(같은 라벨의
-          //     같은 버튼): 화면이 두 곳에서 같은 탈출구를 다르게 부르지 않는다.
-          // (b) 미제공과 장애는 다른 문장이다. 이 서버가 검색 라우트를 싣고
-          //     있다는 것은 판정표의 사실이지만, 표가 서버보다 앞서 갔을 수
-          //     있다. 그때는 오류가 아니라 미제공으로 접는다 (이중 방어의 (b)).
-          // (c) 나머지는 장애다.
-          (isChannelScopeRefusal(search.error, scope, scopedChannel) ? (
-            <EmptyInvite
-              headline={channelScopeRefusalCopy(scopedChannel).headline}
-              detail={channelScopeRefusalCopy(scopedChannel).detail}
-              actions={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setScope("workspace")}
-                  data-testid="search-scope-refused-escalate"
-                >
-                  {ESCALATE_TO_WORKSPACE_LABEL}
-                </Button>
-              }
-              testId="search-scope-refused"
-            />
-          ) : serverSaysAbsent(search.error) ? (
-            <SurfaceUnavailableSection
-              surface="messageSearch"
-              testId="search-unavailable"
-            />
-          ) : (
-            <InlineBanner
-              message={
-                search.error instanceof NetworkError
-                  ? search.error.message
-                  : "검색하지 못했습니다. 잠시 뒤 다시 시도하세요."
-              }
-              actionLabel="다시 시도"
-              onAction={search.retry}
-              testId="search-error"
-            />
-          ))}
+            {search.phase === "empty" &&
+              // 좁힌 범위에서 빈손인 것과 전체에서 빈손인 것은 다른 소식이다.
+              // 앞은 「옆 채널을 보라」이고 뒤는 「내가 속한 곳에는 없다」인데, 한
+              // 문장으로 뭉뚱그리면 앞의 경우에 사람이 검색을 그만둔다.
+              (scope === "channel" && scopedChannel !== null ? (
+                <EmptyInvite
+                  headline={noResultsCopy(search.query, scope, scopedChannel)}
+                  detail={ESCALATE_TO_WORKSPACE_DETAIL}
+                  // 승격은 **한 번의 누름**이다. 문구만 두고 컨트롤을 두지 않으면
+                  // 「전체에서 찾아보세요」는 칩을 다시 찾아 누르라는 숙제이고,
+                  // 이 표면은 방금 그 사람의 질의를 이미 들고 있다. 질의는 그대로
+                  // 남으므로 다시 칠 일도 없다.
+                  actions={
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setScope("workspace")}
+                      data-testid="search-empty-escalate"
+                    >
+                      {ESCALATE_TO_WORKSPACE_LABEL}
+                    </Button>
+                  }
+                  testId="search-empty"
+                  dataAttrs={{ "data-scope": "channel" }}
+                />
+              ) : (
+                <EmptyInvite
+                  headline={noResultsCopy(search.query)}
+                  detail={NO_RESULTS_SCOPE_NOTE}
+                  testId="search-empty"
+                  dataAttrs={{ "data-scope": "workspace" }}
+                />
+              ))}
 
-        {search.phase === "empty" &&
-          // 좁힌 범위에서 빈손인 것과 전체에서 빈손인 것은 다른 소식이다.
-          // 앞은 「옆 채널을 보라」이고 뒤는 「내가 속한 곳에는 없다」인데, 한
-          // 문장으로 뭉뚱그리면 앞의 경우에 사람이 검색을 그만둔다.
-          (scope === "channel" && scopedChannel !== null ? (
-            <EmptyInvite
-              headline={noResultsCopy(search.query, scope, scopedChannel)}
-              detail={ESCALATE_TO_WORKSPACE_DETAIL}
-              // 승격은 **한 번의 누름**이다. 문구만 두고 컨트롤을 두지 않으면
-              // 「전체에서 찾아보세요」는 칩을 다시 찾아 누르라는 숙제이고,
-              // 이 표면은 방금 그 사람의 질의를 이미 들고 있다. 질의는 그대로
-              // 남으므로 다시 칠 일도 없다.
-              actions={
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setScope("workspace")}
-                  data-testid="search-empty-escalate"
-                >
-                  {ESCALATE_TO_WORKSPACE_LABEL}
-                </Button>
-              }
-              testId="search-empty"
-              dataAttrs={{ "data-scope": "channel" }}
-            />
-          ) : (
-            <EmptyInvite
-              headline={noResultsCopy(search.query)}
-              detail={NO_RESULTS_SCOPE_NOTE}
-              testId="search-empty"
-              dataAttrs={{ "data-scope": "workspace" }}
-            />
-          ))}
-
-        {search.phase === "results" && (
-          <>
-            <ul data-testid="search-results">
-              {search.hits.map((hit) => {
-                const author = authorFor(hit.authorMemberId);
-                return (
-                  <HitRow
-                    key={hit.messageId}
-                    hit={hit}
-                    query={search.query}
-                    channelName={channelNameFor(hit.channelId)}
-                    authorName={author.name}
-                    isAgent={author.isAgent}
-                    nowMs={nowMs}
-                  />
-                );
-              })}
-            </ul>
-            {search.hasMore && (
-              <div className="px-4 py-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={search.loadMore}
-                  aria-busy={search.isLoadingMore || undefined}
-                  data-testid="search-load-more"
-                >
-                  {search.isLoadingMore ? "불러오는 중" : "더 보기"}
-                </Button>
-              </div>
+            {search.phase === "results" && (
+              <>
+                <ul data-testid="search-results">
+                  {search.hits.map((hit) => {
+                    const author = authorFor(hit.authorMemberId);
+                    return (
+                      <HitRow
+                        key={hit.messageId}
+                        hit={hit}
+                        query={search.query}
+                        channelName={channelNameFor(hit.channelId)}
+                        authorName={author.name}
+                        isAgent={author.isAgent}
+                        nowMs={nowMs}
+                      />
+                    );
+                  })}
+                </ul>
+                {search.hasMore && (
+                  <div className="px-4 py-3">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={search.loadMore}
+                      aria-busy={search.isLoadingMore || undefined}
+                      data-testid="search-load-more"
+                    >
+                      {search.isLoadingMore ? "불러오는 중" : "더 보기"}
+                    </Button>
+                  </div>
+                )}
+              </>
             )}
-          </>
+          </Skeleton>
         )}
       </div>
     </div>

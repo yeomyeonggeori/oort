@@ -9,7 +9,7 @@ import {
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import {
   displayGlyph,
@@ -400,7 +400,7 @@ export function EmojiPickerPanel({
         className="min-h-0 max-h-pane overflow-y-auto"
       >
         {loading ? (
-          <SkeletonRows rows={6} className="p-0" />
+          <Skeleton ready={false} rows={6} className="p-0" />
         ) : error ? (
           <InlineBanner
             message={
