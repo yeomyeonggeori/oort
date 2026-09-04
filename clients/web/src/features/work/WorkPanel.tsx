@@ -115,11 +115,11 @@ function ScopeButton({
       onClick={onClick}
       data-testid={testId}
       className={cn(
-        "h-control-sm rounded-sm px-2 text-meta focus-visible:focus-ring",
+        "h-control-sm rounded-sm px-2 text-meta press focus-visible:focus-ring",
         flexible ? "min-w-0 flex-1 truncate" : "shrink-0",
         active
           ? "bg-accent-soft text-accent"
-          : "text-ink-muted press hover:bg-surface-hover"
+          : "text-ink-muted hover:bg-surface-hover"
       )}
     >
       {label}
@@ -202,8 +202,8 @@ function SessionRow({
       data-session-id={session.id}
       data-status={status.key}
       className={cn(
-        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left focus-visible:focus-ring",
-        peeked ? "bg-surface-hover" : "press hover:bg-surface-hover"
+        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left press focus-visible:focus-ring",
+        peeked ? "bg-surface-hover" : "hover:bg-surface-hover"
       )}
     >
       <span className="flex min-w-0 items-center gap-2">

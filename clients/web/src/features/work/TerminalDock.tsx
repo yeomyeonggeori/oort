@@ -278,10 +278,10 @@ export function TerminalDock({
                   onClick={() => selectSession(session.id)}
                   title={session.label}
                   className={cn(
-                    "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta focus-visible:focus-ring",
+                    "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta press focus-visible:focus-ring",
                     selectedTab
                       ? "bg-accent-soft font-medium text-ink"
-                      : "text-ink-muted press hover:bg-surface-hover"
+                      : "text-ink-muted hover:bg-surface-hover"
                   )}
                 >
                   {session.label}

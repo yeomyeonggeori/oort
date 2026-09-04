@@ -133,8 +133,8 @@ function WorkConsoleRow({
         onClick={onSelect}
         aria-current={selected ? "page" : undefined}
         className={cn(
-          "flex min-w-0 flex-col gap-1 px-4 py-2 focus-visible:focus-ring",
-          selected ? "bg-accent-soft" : "press hover:bg-surface-hover"
+          "flex min-w-0 flex-col gap-1 px-4 py-2 press focus-visible:focus-ring",
+          selected ? "bg-accent-soft" : "hover:bg-surface-hover"
         )}
         data-session-id={session.id}
       >
