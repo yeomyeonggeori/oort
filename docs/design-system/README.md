@@ -236,7 +236,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **이 목록 말고 사다리 밖 값을 늘리지 마라.**
 
-눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`의 유일한 어포던스가 밑줄 또는 `hover:text-` 이고 채움과 상자가 없는 것이다.
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`의 유일한 어포던스가 밑줄 또는 `hover:text-` 이고 채움과 상자가 없는 것이다. 메뉴 행은 `.press-instant-fill`: 채움은 즉시 서고 변형만 사다리를 탄다.
 
 reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
 

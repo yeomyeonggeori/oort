@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type FocusEvent } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type MouseEventHandler,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   Hash,
@@ -66,16 +72,18 @@ function draftRowLink(
   return null;
 }
 
-function DraftRow({
+export function DraftRow({
   item,
   nowMs,
   onDelete,
   onCloseAutoFocus,
+  onClick,
 }: {
   item: DraftViewItem;
   nowMs: number;
   onDelete: (item: DraftViewItem) => void;
   onCloseAutoFocus: (event: Event) => void;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
@@ -111,6 +119,7 @@ function DraftRow({
         to={channelPathForDraft(item.channelId)}
         aria-describedby={DRAFT_ROW_HINT_ID}
         className="flex gap-3 py-2 pl-4 pr-8 press focus-visible:focus-ring"
+        onClick={onClick}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
           <KindIcon kind={item.destination.kind} />

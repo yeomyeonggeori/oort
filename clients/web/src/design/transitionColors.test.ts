@@ -125,7 +125,7 @@ describe("#1210 D3 — transition-colors", () => {
         if (file.startsWith("design/ui/")) inPrimitives += 1;
       }
     }
-    expect(withRing).toBeGreaterThanOrEqual(inPrimitives);
+    expect(withRing).toBe(inPrimitives);
     // button 은 press 가 전이 목록을 진다(ADR-0179 D5). UX-R1e H-2 가
     // press 와 동거하던 feature 자리의 transition-colors 를 지워, 남은
     // 프리미티브는 input·select 둘. withRing === inPrimitives 가 된 것이
