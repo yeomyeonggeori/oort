@@ -62,7 +62,9 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { SidebarRow } from "@/features/sidebar/SidebarRow";
+import { SettingsToggleRow } from "@/features/settings/SettingsFields";
 import { MessageRow } from "@/features/timeline/MessageRow";
+import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { Message, RosterMember } from "@momo/core/lib/api";
@@ -276,6 +278,18 @@ function galleryMessage(): Message {
     body: GALLERY_TEXT_FIXTURE,
     state: "sent",
     createdAtMs: 1_800_000_000_000,
+  };
+}
+
+function galleryPending() {
+  return {
+    clientMsgId: "gallery-pending-1",
+    channelId: CHANNEL_ID,
+    authorMemberId: MEMBER_ID,
+    body: GALLERY_TEXT_FIXTURE,
+    createdAtMs: 1_800_000_000_000,
+    sinceSeq: 4081,
+    status: "sending" as const,
   };
 }
 
@@ -564,8 +578,8 @@ function GalleryBody() {
       >
         <h2 className="text-title font-medium text-ink">눌림 3짝</h2>
         <p className="text-meta text-ink-muted">
-          캡처 레인이 여섯 표면의 정지, 가리킴, 눌림을 찍는다. 미리보기 속성이
-          아니라 포인터 상태다.
+          캡처 레인이 갤러리 프리미티브와 제품 행의 정지, 가리킴, 눌림을 찍는다.
+          미리보기 속성이 아니라 포인터 상태다.
         </p>
         <div className="flex flex-wrap items-start gap-4">
           <figure
@@ -637,6 +651,60 @@ function GalleryBody() {
               myMemberId={MEMBER_ID}
               onToggle={() => undefined}
             />
+          </figure>
+          <figure
+            data-testid="press-triplet-message-row"
+            className="min-w-action bg-surface"
+          >
+            <MessageRow
+              message={message}
+              startsGroup
+              directory={directory}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-pending-row"
+            className="min-w-action bg-surface"
+          >
+            <PendingRow
+              pending={galleryPending()}
+              startsGroup
+              directory={directory}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-settings-row"
+            className="min-w-action bg-surface"
+          >
+            <SettingsToggleRow
+              testId="press-triplet-settings-toggle"
+              name="알림"
+              description="멘션이 오면 알려 준다."
+              checked={false}
+              onToggle={() => undefined}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-drafts-li"
+            className="min-w-action bg-surface"
+          >
+            <ul>
+              <li
+                className="relative border-b border-line hover:bg-surface-hover"
+                data-testid="draft-row"
+              >
+                <a
+                  href="#gallery-draft"
+                  data-testid="press-triplet-drafts-control"
+                  className="flex gap-3 py-2 pl-4 pr-8 press focus-visible:focus-ring"
+                  onClick={(event) => event.preventDefault()}
+                >
+                  <span className="text-body font-semibold text-ink">
+                    릴리스 노트
+                  </span>
+                </a>
+              </li>
+            </ul>
           </figure>
         </div>
       </section>

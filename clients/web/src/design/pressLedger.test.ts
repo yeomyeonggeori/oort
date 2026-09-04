@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,22 +9,20 @@ import { PRESS_CLASS } from "./motion";
 import { buttonVariants } from "./ui/button";
 
 /**
- * ADR-0179 D5 shrinking ledger (#2000 / UX-R1e).
+ * ADR-0179 D5 shrinking ledger (#2000 / UX-R1e R2).
  *
- * Counts `.tsx` **elements** whose class string has a Tailwind `hover:` variant
- * and no `press` / `active:` on that same element. Discovery is structural
- * (JSX/class expression of the element), not a file-level substring: a comment
- * that still names `hover:bg-surface-hover` after the binding is gone cannot
- * keep this green.
+ * The sweep's unit is the **control**, classified by tag/role, not the row
+ * that contains it. Discovery is a full sweep: JSX + `createElement` in `.ts`
+ * and `.tsx`, same-file and imported class constants, `tokens.css` @utility
+ * blocks. A comment cannot keep this green.
  *
  * red proof:
- *   - add a hover-only `<button className="hover:bg-surface-hover">` in a
- *     scratch copy → count rises, this file is red
- *   - raise CEILING while the count stays → exact pin is red
- *   - put `duration-150` or `scale-95` on a migrated element → raw_motion /
- *     the literal ban below is red
- *   - compile a migrated class list, drop `press` → transition-property no
- *     longer contains transform
+ *   - put `press` on a non-interactive `div`/`li` → forbidden-press is red
+ *   - add `press` and `transition-colors` on one element → dual-class is red
+ *   - swap `.press` / `.transition-colors` rule order in a scratch CSS → cascade red
+ *   - add a hover-only `@utility` in a scratch copy of tokens.css → CSS pin red
+ *   - a hover-only local `<Button>` (not `@/design/ui/button`) → residue red
+ *   - repair one text-link residue without lowering CEILING → stale-ceiling red
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -62,8 +60,51 @@ const PENDING_ROW_SRC = readFileSync(
 
 const HOVER_RE = /(?<![\w-])hover:/;
 const PRESS_RE = /(?:(?<![\w-])press\b|(?<![\w-])active:)/;
+const TRANSITION_COLORS_RE = /(?<![\w-])transition-colors\b/;
 const DURATION_LITERAL = /(?<![\w-])duration-\d+\b/;
 const SCALE_LITERAL = /(?<![\w-])scale-\d+\b/;
+
+const NATIVE_CONTROLS = new Set([
+  "button",
+  "a",
+  "summary",
+  "input",
+  "select",
+  "textarea",
+  "option",
+]);
+const INTERACTIVE_ROLES = new Set([
+  "button",
+  "menuitem",
+  "menuitemradio",
+  "menuitemcheckbox",
+  "tab",
+  "option",
+  "checkbox",
+  "switch",
+  "link",
+  "radio",
+]);
+const PRESS_FORBIDDEN_TAGS = new Set([
+  "div",
+  "li",
+  "span",
+  "section",
+  "p",
+  "ul",
+  "ol",
+  "article",
+  "header",
+  "footer",
+  "nav",
+  "main",
+  "aside",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "figure",
+]);
 
 /** Channel-view files the UX-R0 runtime probe sat on. Source grep, not DOM. */
 const CHANNEL_VIEW = [
@@ -96,11 +137,13 @@ const CHANNEL_VIEW = [
   "app/SidebarDrawerToggle.tsx",
 ] as const;
 
-function walkTsx(dir: string, out: string[] = []): string[] {
+function walkSource(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
     const p = join(dir, name);
-    if (statSync(p).isDirectory()) walkTsx(p, out);
-    else if (p.endsWith(".tsx") && !/\.test\.tsx$/.test(p)) out.push(p);
+    if (statSync(p).isDirectory()) walkSource(p, out);
+    else if (/\.(ts|tsx)$/.test(p) && !/\.test\.(ts|tsx)$/.test(p) && !/\.d\.ts$/.test(p)) {
+      out.push(p);
+    }
   }
   return out;
 }
@@ -109,7 +152,9 @@ export interface PressSite {
   rel: string;
   line: number;
   tag: string;
+  role: string;
   text: string;
+  kind: "jsx" | "createElement";
 }
 
 function hasHover(text: string): boolean {
@@ -120,14 +165,54 @@ function hasPress(text: string): boolean {
   return PRESS_RE.test(text);
 }
 
-function isTextLink(text: string): boolean {
-  const controlHover =
-    /(?<![\w-])hover:(?:bg-|opacity-|border-)/.test(text);
-  if (controlHover) return false;
-  return (
-    /\bunderline\b/.test(text) ||
-    /(?<![\w-])hover:text-/.test(text)
-  );
+function isPascalCase(tag: string): boolean {
+  return tag.length > 0 && tag[0] === tag[0].toUpperCase() && tag[0] !== tag[0].toLowerCase();
+}
+
+function isAnchorLike(tag: string): boolean {
+  const t = tag.toLowerCase();
+  return t === "a" || t === "button" || tag === "Link" || tag === "NavLink";
+}
+
+/**
+ * Canonical §2.6 D5: a text link is an `<a>`/`<button>` whose only affordance
+ * is underline or `hover:text-`, with no fill and no box.
+ */
+function isTextLink(tag: string, text: string): boolean {
+  if (!isAnchorLike(tag)) return false;
+  if (/(?<![\w-])hover:(?:bg-|opacity-|border-)/.test(text)) return false;
+  const underline = /\bunderline\b/.test(text);
+  const hoverText = /(?<![\w-])hover:text-/.test(text);
+  if (!underline && !hoverText) return false;
+  if (underline) return true;
+  if (/\brounded-/.test(text)) return false;
+  if (/\bflex\b/.test(text) && /\bitems-center\b/.test(text)) return false;
+  if (/(?<![\w-])(?:tap-target|size-control|h-control|w-control)\b/.test(text)) {
+    return false;
+  }
+  if (/(?<![\w-])(?:p|px|py|pt|pb|pl|pr)-\d/.test(text)) return false;
+  return true;
+}
+
+function isPressForbidden(tag: string, role: string, text: string): boolean {
+  const t = tag.toLowerCase();
+  if (!PRESS_FORBIDDEN_TAGS.has(t)) return false;
+  if (role && INTERACTIVE_ROLES.has(role)) return false;
+  // Painted face of a hidden native control (UsageSection radio segment).
+  if (t === "span" && /peer-(?:checked|focus-visible|focus):/.test(text)) {
+    return false;
+  }
+  return true;
+}
+
+function isControl(tag: string, role: string, text = ""): boolean {
+  if (isPressForbidden(tag, role, text)) return false;
+  const t = tag.toLowerCase();
+  if (NATIVE_CONTROLS.has(t)) return true;
+  if (tag === "Link" || tag === "NavLink") return true;
+  if (role && INTERACTIVE_ROLES.has(role)) return true;
+  if (isPascalCase(tag)) return true;
+  return false;
 }
 
 function calleeName(expr: ts.Expression): string | undefined {
@@ -247,48 +332,198 @@ function jsxTagName(tag: ts.JsxTagNameExpression): string {
   return "";
 }
 
-function classAttr(el: ts.JsxOpeningLikeElement): ts.JsxAttribute | undefined {
+function jsxAttr(
+  el: ts.JsxOpeningLikeElement,
+  names: string[]
+): ts.JsxAttribute | undefined {
   for (const attr of el.attributes.properties) {
     if (!ts.isJsxAttribute(attr)) continue;
-    const name = ts.isIdentifier(attr.name)
-      ? attr.name.text
-      : attr.name.getText();
-    if (name === "className" || name === "class") return attr;
+    const name = ts.isIdentifier(attr.name) ? attr.name.text : attr.name.getText();
+    if (names.includes(name)) return attr;
   }
   return undefined;
 }
 
-function alwaysPressTag(tag: string): boolean {
-  return tag === "Button";
+function attrText(
+  attr: ts.JsxAttribute | undefined,
+  index: Map<string, string>
+): string {
+  if (!attr?.initializer) return "";
+  if (ts.isStringLiteral(attr.initializer)) return attr.initializer.text;
+  if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+    const expr = attr.initializer.expression;
+    if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
+      return expr.text;
+    }
+    return collect(expr, index);
+  }
+  return "";
+}
+
+function resolveModule(fromFile: string, spec: string): string | undefined {
+  let base: string;
+  if (spec.startsWith("@/")) base = join(WEB_SRC, spec.slice(2));
+  else if (spec.startsWith(".")) base = join(dirname(fromFile), spec);
+  else return undefined;
+  const candidates = [base, `${base}.ts`, `${base}.tsx`, join(base, "index.ts"), join(base, "index.tsx")];
+  for (const p of candidates) {
+    if (existsSync(p) && statSync(p).isFile()) return p;
+  }
+  return undefined;
+}
+
+interface FileIndex {
+  strings: Map<string, string>;
+  pressTags: Set<string>;
+}
+
+function isCreateElement(expr: ts.Expression): boolean {
+  if (ts.isIdentifier(expr) && expr.text === "createElement") return true;
+  if (
+    ts.isPropertyAccessExpression(expr) &&
+    ts.isIdentifier(expr.name) &&
+    expr.name.text === "createElement"
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function objectProp(
+  obj: ts.ObjectLiteralExpression,
+  name: string,
+  index: Map<string, string>
+): string {
+  for (const prop of obj.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    const key = ts.isIdentifier(prop.name)
+      ? prop.name.text
+      : ts.isStringLiteral(prop.name)
+        ? prop.name.text
+        : "";
+    if (key === name) return collect(prop.initializer, index);
+  }
+  return "";
+}
+
+function braceBody(source: string, openIdx: number): string {
+  let depth = 0;
+  for (let i = openIdx; i < source.length; i += 1) {
+    if (source[i] === "{") depth += 1;
+    else if (source[i] === "}") {
+      depth -= 1;
+      if (depth === 0) return source.slice(openIdx + 1, i);
+    }
+  }
+  return "";
+}
+
+/** Hover-without-:active `@utility` blocks in tokens.css. Pin 0. */
+export function cssHoverWithoutActive(source: string): string[] {
+  const names: string[] = [];
+  const re = /@utility\s+([a-z0-9-]+)\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source))) {
+    const body = braceBody(source, match.index + match[0].length - 1);
+    const stripped = body.replace(/\/\*[\s\S]*?\*\//g, "");
+    if (/:hover\b/.test(stripped) && !/:active\b/.test(stripped)) {
+      names.push(match[1]);
+    }
+  }
+  return names;
+}
+
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(?<!:)\/\/.*$/gm, "");
+}
+
+const SOURCE_FILES = walkSource(WEB_SRC);
+
+function buildFileIndex(file: string, sf: ts.SourceFile): FileIndex {
+  const strings = resolveIndex(collectDecls(sf));
+  const pressTags = new Set<string>();
+  for (const stmt of sf.statements) {
+    if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) {
+      continue;
+    }
+    const spec = stmt.moduleSpecifier.text;
+    if (/ui\/button$/.test(spec)) {
+      const bindings = stmt.importClause?.namedBindings;
+      if (bindings && ts.isNamedImports(bindings)) {
+        for (const el of bindings.elements) {
+          const imported = (el.propertyName ?? el.name).text;
+          if (imported === "Button") pressTags.add(el.name.text);
+        }
+      }
+    }
+    const resolved = resolveModule(file, spec);
+    if (!resolved) continue;
+    const importedSf = ts.createSourceFile(
+      resolved,
+      readFileSync(resolved, "utf8"),
+      ts.ScriptTarget.Latest,
+      true,
+      resolved.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+    );
+    const importedIndex = resolveIndex(collectDecls(importedSf));
+    const bindings = stmt.importClause?.namedBindings;
+    if (bindings && ts.isNamedImports(bindings)) {
+      for (const el of bindings.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        const local = el.name.text;
+        if (importedIndex.has(imported)) strings.set(local, importedIndex.get(imported)!);
+      }
+    }
+  }
+  return { strings, pressTags };
 }
 
 function discover(): PressSite[] {
   const sites: PressSite[] = [];
-  for (const file of walkTsx(WEB_SRC)) {
+  for (const file of SOURCE_FILES) {
     const src = readFileSync(file, "utf8");
     const rel = `clients/web/src/${relative(WEB_SRC, file)}`;
-    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-    const index = resolveIndex(collectDecls(sf));
+    const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+    const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
+    const { strings, pressTags } = buildFileIndex(file, sf);
     const visit = (node: ts.Node) => {
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-        const attr = classAttr(node);
         const tag = jsxTagName(node.tagName);
+        const role = attrText(jsxAttr(node, ["role"]), strings);
+        let text = attrText(jsxAttr(node, ["className", "class"]), strings);
+        if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+        sites.push({
+          rel,
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          tag,
+          role,
+          text: text.replace(/\s+/g, " ").trim(),
+          kind: "jsx",
+        });
+      }
+      if (ts.isCallExpression(node) && isCreateElement(node.expression) && node.arguments.length >= 2) {
+        const tagArg = node.arguments[0];
+        const propsArg = node.arguments[1];
+        const tag = ts.isStringLiteral(tagArg)
+          ? tagArg.text
+          : ts.isIdentifier(tagArg)
+            ? tagArg.text
+            : "";
         let text = "";
-        if (attr?.initializer) {
-          if (ts.isStringLiteral(attr.initializer)) text = attr.initializer.text;
-          else if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
-            text = collect(attr.initializer.expression, index);
-          }
+        let role = "";
+        if (ts.isObjectLiteralExpression(propsArg)) {
+          text = objectProp(propsArg, "className", strings) || objectProp(propsArg, "class", strings);
+          role = objectProp(propsArg, "role", strings);
         }
-        if (alwaysPressTag(tag)) text = `${text} ${PRESS_CLASS}`;
-        if (hasHover(text) && !hasPress(text)) {
-          sites.push({
-            rel,
-            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
-            tag,
-            text: text.replace(/\s+/g, " ").trim(),
-          });
-        }
+        if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+        sites.push({
+          rel,
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          tag,
+          role,
+          text: text.replace(/\s+/g, " ").trim(),
+          kind: "createElement",
+        });
       }
       ts.forEachChild(node, visit);
     };
@@ -298,32 +533,37 @@ function discover(): PressSite[] {
 }
 
 const SITES = discover();
-const HOVER_ONLY = SITES;
-const TEXT_LINKS = HOVER_ONLY.filter((s) => isTextLink(s.text));
-const INTERACTIVE = HOVER_ONLY.filter((s) => !isTextLink(s.text));
+const HOVER_ONLY = SITES.filter(
+  (s) => isControl(s.tag, s.role, s.text) && hasHover(s.text) && !hasPress(s.text)
+);
+const TEXT_LINKS = HOVER_ONLY.filter((s) => isTextLink(s.tag, s.text));
+const INTERACTIVE = HOVER_ONLY.filter((s) => !isTextLink(s.tag, s.text));
+const FORBIDDEN_PRESS = SITES.filter(
+  (s) => isPressForbidden(s.tag, s.role, s.text) && /(?<![\w-])press\b/.test(s.text)
+);
+const DUAL_TRANSITION = SITES.filter(
+  (s) => /(?<![\w-])press\b/.test(s.text) && TRANSITION_COLORS_RE.test(s.text)
+);
 
 /**
- * Remaining hover-without-press sites after the UX-R1e sweep.
- * All 12 are text links (underline or color-only `hover:text-`). Interactive
- * hover-without-press is hard-zero. Pin is exact: raise this without adding
- * sites → red; add a hover-only control without raising → red.
+ * Remaining hover-without-press **text links** after the UX-R1e R2 sweep.
+ * Interactive hover-without-press is hard-zero. Pin shrinks only.
  *
- * N0 (pre-sweep, this scanner) = 107 (interactive 95 · text-link 12).
+ * R1 scanner N0=107 (interactive 95 · text-link 12) → N1=12. That scanner was
+ * JSX-class-string only. This ledger's full sweep is the new denominator.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/attachments/AttachmentTray.tsx", 2],
-  ["clients/web/src/features/chat/ChatShell.tsx", 1],
   ["clients/web/src/features/inbox/InboxRoute.tsx", 1],
   ["clients/web/src/features/routing/MentionRoutingBar.tsx", 1],
   ["clients/web/src/features/timeline/FoldToggle.tsx", 1],
   ["clients/web/src/features/timeline/LongPressHint.tsx", 1],
   ["clients/web/src/features/timeline/MessageBody.tsx", 1],
-  ["clients/web/src/features/timeline/MessageRow.tsx", 2],
+  ["clients/web/src/features/timeline/MessageRow.tsx", 1],
   ["clients/web/src/features/timeline/PendingRow.tsx", 1],
-  ["clients/web/src/features/workstreams/WorkstreamDetailRoute.tsx", 1],
 ];
 
-const CEILING = 12;
+const CEILING = 9;
 
 function countedByFile(sites: PressSite[]): [string, number][] {
   const counted = new Map<string, number>();
@@ -392,15 +632,21 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
 
   it("컨트롤 hover-only 는 0 이다", () => {
     expect(
-      INTERACTIVE.map((s) => `${s.rel}:${s.line} <${s.tag}>`),
+      INTERACTIVE.map((s) => `${s.rel}:${s.line} <${s.tag}> ${s.text}`),
       "interactive hover-without-press"
     ).toEqual([]);
   });
 
   it("hover 만 있고 press/active 가 없는 자리는 줄어들기만 한다", () => {
-    expect(HOVER_ONLY.length).toBe(CEILING);
     expect(HOVER_ONLY.length).toBeLessThanOrEqual(CEILING);
-    expect(TEXT_LINKS.length).toBe(CEILING);
+  });
+
+  it("천장이 낡지 않았다", () => {
+    expect(
+      HOVER_ONLY.length === CEILING,
+      `lower the ceiling to ${HOVER_ONLY.length}`
+    ).toBe(true);
+    expect(TEXT_LINKS.length).toBe(HOVER_ONLY.length);
   });
 
   it("잔량은 좌표와 수까지 표와 정확히 맞는다", () => {
@@ -414,8 +660,158 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     const channel = HOVER_ONLY.filter((s) =>
       CHANNEL_VIEW.some((part) => s.rel.endsWith(part))
     );
-    expect(channel.every((s) => isTextLink(s.text))).toBe(true);
+    expect(channel.every((s) => isTextLink(s.tag, s.text))).toBe(true);
     expect(channel.length).toBeGreaterThan(0);
+  });
+
+  it("비상호작용 태그에는 press 가 없다 (H-1)", () => {
+    expect(
+      FORBIDDEN_PRESS.map((s) => `${s.rel}:${s.line} <${s.tag}>`),
+      "press on a non-interactive container"
+    ).toEqual([]);
+  });
+
+  it("press 와 transition-colors 를 같은 요소에 두지 않는다 (H-2)", () => {
+    expect(
+      DUAL_TRANSITION.map((s) => `${s.rel}:${s.line} <${s.tag}>`),
+      "press + transition-colors on one element"
+    ).toEqual([]);
+  });
+
+  it("tokens.css hover-without-active 유틸은 0 이다 (H-3)", () => {
+    expect(cssHoverWithoutActive(TOKENS_CSS)).toEqual([]);
+  });
+
+  it("hover-only @utility 를 넣으면 붉다", () => {
+    const scratch = `${TOKENS_CSS}\n@utility sabotage-hover-only {\n  &:hover { color: var(--ink); }\n}\n`;
+    expect(cssHoverWithoutActive(scratch)).toEqual(["sabotage-hover-only"]);
+  });
+
+  it("이름만 Button 인 hover-only 는 잔량이다 (H-3 이름 허용목록 없음)", () => {
+    const scratch = ts.createSourceFile(
+      "SabotageButton.tsx",
+      `function Button(props: { className?: string }) { return null; }
+export function Probe() {
+  return <Button className="hover:bg-surface-hover" />;
+}
+`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const index = resolveIndex(collectDecls(scratch));
+    const sites: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+        const tag = jsxTagName(node.tagName);
+        const text = attrText(jsxAttr(node, ["className", "class"]), index);
+        if (isControl(tag, "", text) && hasHover(text) && !hasPress(text)) {
+          sites.push(tag);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(scratch);
+    expect(sites).toEqual(["Button"]);
+  });
+
+  it("비상호작용 div 에 press 를 두면 붉다 (H-1)", () => {
+    const scratch = ts.createSourceFile(
+      "SabotageDiv.tsx",
+      `export function Probe() {
+  return <div className="press hover:bg-surface-hover" />;
+}
+`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const forbidden: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+        const tag = jsxTagName(node.tagName);
+        const text = attrText(jsxAttr(node, ["className", "class"]), new Map());
+        if (isPressForbidden(tag, "", text) && /(?<![\w-])press\b/.test(text)) {
+          forbidden.push(tag);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(scratch);
+    expect(forbidden).toEqual(["div"]);
+  });
+
+  it("장식 div 의 hover 는 컨트롤이 아니다 (M-4)", () => {
+    const scratch = ts.createSourceFile(
+      "SabotageDecor.tsx",
+      `export function Probe() {
+  return <div aria-hidden="true" className="rounded-sm bg-surface hover:bg-surface-hover" />;
+}
+`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const counted: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
+        const tag = jsxTagName(node.tagName);
+        const role = attrText(jsxAttr(node, ["role"]), new Map());
+        const text = attrText(jsxAttr(node, ["className", "class"]), new Map());
+        if (isControl(tag, role, text) && hasHover(text) && !hasPress(text)) {
+          counted.push(tag);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(scratch);
+    expect(counted).toEqual([]);
+  });
+
+  it(".ts createElement hover-only 는 잔량이다 (H-3)", () => {
+    const scratch = ts.createSourceFile(
+      "sabotageCreate.ts",
+      `import { createElement } from "react";
+export function Probe() {
+  return createElement("button", { className: "hover:bg-surface-hover" });
+}
+`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TS
+    );
+    const counted: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (
+        ts.isCallExpression(node) &&
+        isCreateElement(node.expression) &&
+        node.arguments.length >= 2
+      ) {
+        const tagArg = node.arguments[0];
+        const tag = ts.isStringLiteral(tagArg) ? tagArg.text : "";
+        let text = "";
+        const propsArg = node.arguments[1];
+        if (ts.isObjectLiteralExpression(propsArg)) {
+          text = objectProp(propsArg, "className", new Map());
+        }
+        if (isControl(tag, "", text) && hasHover(text) && !hasPress(text)) {
+          counted.push(tag);
+        }
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(scratch);
+    expect(counted).toEqual(["button"]);
+  });
+
+  it("다른 모듈에서 온 클래스 함수의 hover 도 본다 (H-3)", () => {
+    const header = SITES.filter(
+      (s) =>
+        s.rel.endsWith("ChannelHeaderMenu.tsx") &&
+        /hover:bg-surface-hover/.test(s.text)
+    );
+    expect(header.length).toBeGreaterThan(0);
+    expect(header.every((s) => hasPress(s.text))).toBe(true);
   });
 
   it("이관 표면은 duration-* / scale-* 리터럴을 들지 않는다", () => {
@@ -434,19 +830,28 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
   });
 
   it("S0 CTA 와 메뉴 행은 press 를 든다 (N-4, D5 메뉴)", () => {
-    const landing = LANDING_SRC.replace(/\/\*[\s\S]*?\*\//g, "").replace(
-      /(?<!:)\/\/.*$/gm,
-      ""
-    );
+    const landing = stripComments(LANDING_SRC);
     expect(classBeforeTestId(landing, "onboarding-choose-server")).toMatch(
       /\bpress\b/
     );
     expect(classBeforeTestId(landing, "onboarding-choose-invite")).toMatch(
       /\bpress\b/
     );
-    expect(MENU_SRC.replace(/\/\*[\s\S]*?\*\//g, "")).toMatch(
+    expect(stripComments(MENU_SRC)).toMatch(
       /function menuRowClass[\s\S]*?\bpress\b/
     );
+  });
+
+  it("메뉴 행 하이라이트는 background 를 전이하지 않는다 (N-3)", async () => {
+    expect(MENU_SRC).toMatch(/\bpress-instant-fill\b/);
+    const css = await buildCss(["press", "press-instant-fill"]);
+    const fillRules = [...css.matchAll(/\.press-instant-fill\s*\{([^}]*)\}/g)].filter(
+      (match) => /transition-property:/.test(match[1])
+    );
+    expect(fillRules.length).toBeGreaterThan(0);
+    const last = fillRules[fillRules.length - 1][1];
+    expect(last).toMatch(/transform/);
+    expect(last).not.toMatch(/background-color/);
   });
 
   it("SidebarRow 이관 목록은 press 가 이기고 transform 이 있으며 outline-color 는 없다", async () => {
@@ -464,6 +869,20 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     expect(last.body).not.toMatch(/outline-color/);
   });
 
+  it("compiled CSS 에서 .press 는 .transition-colors 뒤에 선다 (H-2)", async () => {
+    const css = await buildCss(["press", "transition-colors"]);
+    const last = lastPressOrColorsTransition(css);
+    expect(last.selector, "캐스케이드 마지막 소유자는 press").toBe(".press");
+    const swapped = css
+      .replace(/\.press(?=[{\s])/g, ".transition-colors-HOLD")
+      .replace(/\.transition-colors(?=[{\s])/g, ".press")
+      .replace(/\.transition-colors-HOLD/g, ".transition-colors");
+    expect(
+      lastPressOrColorsTransition(swapped).selector,
+      "규칙 순서를 바꾸면 .transition-colors 가 이긴다"
+    ).toBe(".transition-colors");
+  });
+
   it("눌림 스케일은 토큰이지 scale-95 가 아니다", async () => {
     const css = await buildCss(["press"]);
     expect(css).toMatch(/scale\(\s*0\.98\s*\)/);
@@ -471,19 +890,30 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     expect(PRESS_CLASS).toBe("press");
   });
 
-  it("메시지 본문 행은 press 가 아니라 active 채움이다 (#1743 드래그 선택)", () => {
+  it("메시지 본문 행은 press 가 아니라 구분된 active 채움이다 (#1743)", async () => {
     const article = [
       ...MESSAGE_ROW_SRC.matchAll(/"(group relative flex gap-2 px-4[^"]*)"/g),
     ].map((m) => m[1]);
     expect(article, "MessageRow article class").toHaveLength(1);
     expect(article[0]).toMatch(/hover:bg-surface-hover/);
-    expect(article[0]).toMatch(/active:bg-surface-hover/);
+    expect(article[0]).toMatch(/active:bg-surface-pressed/);
     expect(article[0]).not.toMatch(/(?<![\w-])press\b/);
     const pending = [
       ...PENDING_ROW_SRC.matchAll(/"(flex gap-2 px-4[^"]*)"/g),
     ].map((m) => m[1]);
     expect(pending, "PendingRow article class").toHaveLength(1);
-    expect(pending[0]).toMatch(/active:bg-surface-hover/);
+    expect(pending[0]).toMatch(/active:bg-surface-pressed/);
     expect(pending[0]).not.toMatch(/(?<![\w-])press\b/);
+
+    const css = await buildCss([
+      "hover:bg-surface-hover",
+      "active:bg-surface-pressed",
+    ]);
+    expect(css).toMatch(/var\(--surface-hover\)/);
+    expect(css).toMatch(/var\(--surface-pressed\)/);
+    const hoverToken = css.match(/--surface-hover/g);
+    const pressedToken = css.match(/--surface-pressed/g);
+    expect(hoverToken).toBeTruthy();
+    expect(pressedToken).toBeTruthy();
   });
 });

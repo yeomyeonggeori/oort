@@ -11162,7 +11162,7 @@ async function assertGalleryScrollOwnership(page, where) {
   );
 }
 
-const PRESS_TRIPLET_SURFACES = [
+const PRESS_TRIPLET_GALLERY = [
   "button-default",
   "button-secondary",
   "button-ghost",
@@ -11171,22 +11171,51 @@ const PRESS_TRIPLET_SURFACES = [
   "row",
 ];
 
+const PRESS_TRIPLET_INSITU = [
+  "message-row",
+  "pending-row",
+  "settings-row",
+  "drafts-li",
+];
+
+const PRESS_TRIPLET_SURFACES = [
+  ...PRESS_TRIPLET_GALLERY,
+  ...PRESS_TRIPLET_INSITU,
+];
+
 function pressTripletTarget(page, surface) {
   const frame = page.getByTestId(`press-triplet-${surface}`);
   if (surface === "row") return frame.locator("[data-sidebar-row]");
   if (surface === "chip") return frame.getByTestId("reaction-chip");
+  if (surface === "message-row") return frame.getByTestId("timeline-message");
+  if (surface === "pending-row") return frame.getByTestId("timeline-pending");
+  if (surface === "settings-row") {
+    return frame.getByTestId("press-triplet-settings-toggle");
+  }
+  if (surface === "drafts-li") {
+    return frame.getByTestId("press-triplet-drafts-control");
+  }
   return frame.locator("button").first();
 }
 
 /**
- * ADR-0179 D10 ④ / UX-R1e: 6 surfaces × rest/hover/active × two schemes.
+ * ADR-0179 D10 ④ / UX-R1e: gallery primitives + in-situ surfaces ×
+ * rest/hover/active × two schemes. 390 light covers in-situ + sidebar row.
  * hover = Playwright hover(); active = mouse.down() held. Motion stays on
  * (reducedMotion no-preference) so waitForAnimations is load-bearing —
  * screenshot animations are allowed, not fast-forwarded.
  */
-async function capturePressTriplet(browser, scheme) {
+async function capturePressTriplet(
+  browser,
+  scheme,
+  {
+    viewport = VIEWPORT,
+    suffix = "",
+    surfaces = PRESS_TRIPLET_SURFACES,
+  } = {}
+) {
   const context = await browser.newContext({
-    viewport: VIEWPORT,
+    viewport,
     deviceScaleFactor: 2,
     colorScheme: scheme,
     reducedMotion: "no-preference",
@@ -11198,7 +11227,7 @@ async function capturePressTriplet(browser, scheme) {
   await waitForAnimations(page);
 
   const paths = [];
-  for (const surface of PRESS_TRIPLET_SURFACES) {
+  for (const surface of surfaces) {
     const frame = page.getByTestId(`press-triplet-${surface}`);
     await frame.scrollIntoViewIfNeeded();
     const target = pressTripletTarget(page, surface);
@@ -11206,7 +11235,7 @@ async function capturePressTriplet(browser, scheme) {
 
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
-    const restPath = `${OUT_DIR}/press-triplet-${surface}-rest-${scheme}.png`;
+    const restPath = `${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`;
     await frame.screenshot({
       path: restPath,
       animations: "allow",
@@ -11216,7 +11245,7 @@ async function capturePressTriplet(browser, scheme) {
 
     await target.hover();
     await waitForAnimations(page);
-    const hoverPath = `${OUT_DIR}/press-triplet-${surface}-hover-${scheme}.png`;
+    const hoverPath = `${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`;
     await frame.screenshot({
       path: hoverPath,
       animations: "allow",
@@ -11230,10 +11259,26 @@ async function capturePressTriplet(browser, scheme) {
         `press-triplet ${surface} ${scheme}: bounding box missing`
       );
     }
+    let hoverBg = null;
+    if (surface === "message-row" || surface === "pending-row") {
+      hoverBg = await target.evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+    }
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
     await page.mouse.down();
     await waitForAnimations(page);
-    const activePath = `${OUT_DIR}/press-triplet-${surface}-active-${scheme}.png`;
+    if (hoverBg !== null) {
+      const activeBg = await target.evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+      if (hoverBg === activeBg) {
+        throw new Error(
+          `press-triplet ${surface} ${scheme}: hover bg ${hoverBg} equals active (pressed fill vanished)`
+        );
+      }
+    }
+    const activePath = `${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`;
     await frame.screenshot({
       path: activePath,
       animations: "allow",
@@ -11340,6 +11385,15 @@ async function main() {
           assertThisPreview();
           all.push(...(await captureDesignGallery(browser, scheme)));
           all.push(...(await capturePressTriplet(browser, scheme)));
+          if (scheme === "light") {
+            all.push(
+              ...(await capturePressTriplet(browser, scheme, {
+                viewport: MOBILE_VIEWPORT,
+                suffix: "-390",
+                surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+              }))
+            );
+          }
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
@@ -11349,6 +11403,17 @@ async function main() {
           };
           all.push(...(await shot(() => captureDesignGallery(browser, scheme))));
           all.push(...(await shot(() => capturePressTriplet(browser, scheme))));
+          if (scheme === "light") {
+            all.push(
+              ...(await shot(() =>
+                capturePressTriplet(browser, scheme, {
+                  viewport: MOBILE_VIEWPORT,
+                  suffix: "-390",
+                  surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+                })
+              ))
+            );
+          }
           all.push(...(await shot(() => captureScheme(browser, scheme))));
           all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
           if (scheme === "light") {
