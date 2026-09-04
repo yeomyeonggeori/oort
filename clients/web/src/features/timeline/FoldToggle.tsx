@@ -33,7 +33,7 @@ const FOLD_CONTROL_CLASS = cn(
   // 보다 커진다(tokens.css의 두 값이 갈리는 근거, `LongPressHint`의 같은 산수).
   // 글자 크기도 밑줄 위치도 그대로다: 커지는 것은 면적뿐이다.
   "touch-target self-start rounded-sm text-meta text-ink-muted underline underline-offset-2",
-  "hover:text-ink focus-visible:focus-ring"
+  "press hover:text-ink focus-visible:focus-ring"
 );
 
 export function FoldToggle({

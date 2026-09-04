@@ -298,7 +298,7 @@ export function AttachmentTray({
             onClick={onClear}
             data-testid="attachment-clear"
             className={cn(
-              "touch-target rounded-sm text-meta text-ink-muted underline underline-offset-2 hover:text-ink",
+              "touch-target rounded-sm text-meta text-ink-muted underline underline-offset-2 press hover:text-ink",
               "focus-visible:focus-ring"
             )}
           >
@@ -344,7 +344,7 @@ export function AttachmentTray({
             type="button"
             onClick={onAcknowledgeNotices}
             className={cn(
-              "touch-target rounded-sm underline underline-offset-2 hover:text-ink",
+              "touch-target rounded-sm underline underline-offset-2 press hover:text-ink",
               "focus-visible:focus-ring"
             )}
           >
