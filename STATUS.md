@@ -1,14 +1,17 @@
 # oort 진행 현황
 
-## UX-R1e 눌림 상태 전수 + shrinking ledger + 3짝 캡처 (#2000, 2026-09-04)
+## UX-R1e 눌림 상태 전수 + shrinking ledger + 3짝 캡처 (#2000, 2026-09-05)
 
 - ADR-0179 D5 스윕 단위는 **컨트롤**(태그/role)이지, 그걸 감싼 행이 아니고, 「이미 `hover:` 가 있던 요소」도 아니다. `press` 는 활성화 대상 자신만 진다. 비상호작용 `div`/`li`/`span`/`section`(interactive role 없음)에 `press` 를 두면 원장이 붉다.
-- 본문 메시지/대기 행은 fill-only. 사유: `.press` 의 `:active { scale(0.98) }` 가 본문 드래그 선택을 접는다 (#1743 B-4, capture seq 1416). 포인터 아래 눌림 채움은 `--surface-pressed`(라이트 `#ece3cc` · 다크 `#2d2c34`) — `--surface-hover` 와 다른 값(라이트 대비 1.001 · dE 0.0205, 다크 대비 1.100 · dE 0.0290). `--accent-soft` 는 선택으로 읽혀 쓰지 않음. 변형 없음.
-- 텍스트 링크(정본 §2.6: `<a>`/`<button>` 의 유일한 어포던스가 밑줄 또는 `hover:text-` 이고 채움·상자가 없는 것)와 비활성·스크림은 제외.
-- Ledger `pressLedger.test.ts` 전수: JSX + `createElement` · `.ts`/`.tsx` · 같은 파일·import 클래스 상수 · `tokens.css` `@utility` hover-without-active. R1 JSX 스캐너 N0=107 (interactive 95 · text-link 12) → N1=12 는 그 스캐너 기준으로 유지(리뷰 재현). R2 전수 스캐너 N1=9 (텍스트 링크 9 · interactive 0 · CSS 0) · 천장 9. 올린 천장·신규 hover-only 컨트롤·컨테이너 `press`·`press`+`transition-colors` 동거·hover-only `@utility` 는 붉음. 잔량 수리는 `≤` 이고 천장 숫자는 따로 「lower the ceiling to N」.
+- 본문 메시지/대기 행·설정 토글 행은 fill-only (`hover:bg-surface-hover active:bg-surface-pressed`, 변형 없음). 사유: `.press` 의 `:active { scale(0.98) }` 가 본문 드래그 선택을 접는다 (#1743 B-4, capture seq 1416). `--surface-pressed` 는 hover 에서 한 단 더 어두운 값(라이트 `#eee2cc` L 0.7693 · 대비 1.001 · dE 0.0205 · ink-muted 4.502 · hover 색상 가족 Δhue 1.8° · accent-soft dE 0.0185 Δhue 8.0° 이지만 hover 와 한 가족; 다크 `#262335` L 0.0187, 칩 그릇 띠 .0192~.0320 **밖** · 대비 1.007 · dE 0.0204 · ink-muted 5.395). 그릇 여덟 쌍: 라이트 대비 1.101–1.118 / dE 0.0382–0.0464, 다크 대비 1.142–1.148 / dE 0.0430–0.0754 (바닥 1.05 / 0.02). R2 값 `#ece3cc`/`#2d2c34` 는 라이트가 hover 보다 밝고 다크가 띠 안(그릇 1.031–1.037)이라 자가 붉다. `--accent-soft` 는 선택으로 읽혀 쓰지 않음.
+- 반경 있는 설정 `<details>` 둘은 `overflow-hidden` 으로 summary hover 채움이 `rounded-md` 밖으로 나가지 않는다. 캡처가 네 모서리 픽셀 = 페이지 배경을 잰다.
+- 선택 분기는 공유 base 에 `press`(패턴 C). 선택된 탭·스코프·세션 행·헤더 컨트롤의 compiled `transition-duration` 이 비선택과 같고 `0s` 가 아니다.
+- 텍스트 링크(정본 §2.6: 밑줄 또는 `hover:text-` **그리고** 채움·상자 없음 — `bg-*`/`rounded-*`/`px-*`/`py-*`/border 없음)와 비활성·스크림은 제외. `underline` 만으로는 면제되지 않는다. 상자 있는 밑줄 컨트롤 8곳은 `press` 를 받았다.
+- Ledger `pressLedger.test.ts` 전수: JSX + `createElement` · `.ts`/`.tsx` · 같은 파일·import 클래스 상수 · 조건식 **분기별** 클래스 · `tokens.css` `@utility` hover-without-active. 소비자의 `press` 와 유틸리티 `:active` 는 한 임자 — `plugin-marketplace-row` 는 CSS `:active` 가 지고 JSX `press` 는 없다. 합성 클래스 목록이 `:active` 규칙으로 컴파일되는지를 잰다. N1=1 (메시지 본문 인라인 링크) · interactive 0 · CSS 0 · 천장 1. 천장보다 많으면 `hover-only control added at <file:line>`, 적으면 `lower the ceiling to N`.
 - 이관 표면 compiled CSS: `transition-property` 에 transform 포함, outline-color 제외. 스케일은 `.press` 의 `scale(0.98)`. `duration-*`/`scale-*` 리터럴 0. 메뉴 행은 `press-instant-fill` 로 background 를 전이 목록에서 뺀다(하이라이트 ≤1 프레임).
-- 캡처: 갤러리 6 + in-situ 4(메시지 행·대기 행·설정 행 체크박스·초안 `a`) × rest/hover/active × 두 스킴, 라이트 390 은 in-situ+사이드바 행. hover=Playwright `hover()`, active=`mouse.down()` 유지, `waitForAnimations`. 메시지/대기 행은 hover `background-color` ≠ active 를 런타임으로 잰다. 모션 켜 둠 (`animations: allow`).
-- R2 가 고친 R1 거짓 문장: 「press 전수」는 hover 가 있던 95곳이 아니라 컨트롤 분모 · 「interactive 0」은 JSX 스캐너 기준이었고 CSS `plugin-marketplace-row` 반례가 있었음 · `active:bg-surface-hover` 는 hover 와 같은 토큰이라 포인터에서 눌림이 보이지 않았음 · 천장 12 등호 핀은 수리를 벌함.
+- 캡처: 갤러리 6 + in-situ 4(메시지 행·대기 행·설정 토글 **행**·초안 `DraftRow`) × rest/hover/active × 두 스킴, 390 은 라이트·다크 둘 다 in-situ+사이드바 행. in-situ 는 `w-full`(1280 갤러리 ≈ 제품 폭). 초안은 제품 `DraftRow` 이지 갤러리 손 복제가 아니다. 모든 표면 hover/active 프레임 픽셀 차 ≥ 1%. hover=Playwright `hover()`, active=`mouse.down()` 유지, `waitForAnimations`. 모션 켜 둠 (`animations: allow`).
+- NOTES(DS-1): 전폭 행에 `press` 의 `scale(0.98)` 는 1224px 에서 ±12.5px. 본문 행은 fill-only 라 그 이동이 없다. 초안·리마인더·세션 목록의 안쪽 링크/버튼은 여전히 `press` 를 지고, 그 절대 이동량은 DS-1 이 행 눌림 언어를 정할 때 함께 본다.
+- R3 가 고친 R2 거짓 문장: `--surface-pressed` 가 §2.2 그릇 자를 통과한다(다크는 띠 안이었다) · 주석 hue 91 은 `--surface` 이지 pressed 가 아님 · 설정 토글 3짝이 눌림을 보여 준다(R2 는 0.6%·체크박스 0.26px) · 텍스트 링크 자가 채움·상자를 잰다 · 천장 실패 메시지가 증가/감소를 가른다 · 선택 분기도 전이한다 · summary hover 가 카드 반경을 넘지 않는다.
 - runtime-unverified 아님. 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)

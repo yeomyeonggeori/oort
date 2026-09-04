@@ -11162,6 +11162,120 @@ async function assertGalleryScrollOwnership(page, where) {
   );
 }
 
+async function pngRgba(page, pngBuffer) {
+  const b64 = Buffer.isBuffer(pngBuffer)
+    ? pngBuffer.toString("base64")
+    : readFileSync(pngBuffer).toString("base64");
+  return page.evaluate(async (b64) => {
+    const blob = await fetch(`data:image/png;base64,${b64}`).then((r) => r.blob());
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bmp, 0, 0);
+    const { data, width, height } = ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+    return { data: Array.from(data), width, height };
+  }, b64);
+}
+
+function pixelDiffRatio(a, b) {
+  if (a.data.length !== b.data.length) return 1;
+  let changed = 0;
+  const pixels = a.data.length / 4;
+  for (let i = 0; i < a.data.length; i += 4) {
+    if (
+      a.data[i] !== b.data[i] ||
+      a.data[i + 1] !== b.data[i + 1] ||
+      a.data[i + 2] !== b.data[i + 2] ||
+      a.data[i + 3] !== b.data[i + 3]
+    ) {
+      changed += 1;
+    }
+  }
+  return changed / pixels;
+}
+
+async function assertTripletFramesDiffer(page, hoverPath, activePath, label) {
+  const hover = await pngRgba(page, hoverPath);
+  const active = await pngRgba(page, activePath);
+  const ratio = pixelDiffRatio(hover, active);
+  const min = 0.01;
+  if (ratio < min) {
+    throw new Error(
+      `${label}: hover vs active differ by ${(ratio * 100).toFixed(2)}% of ${hover.data.length / 4}px (need ≥ 1%)`
+    );
+  }
+  console.log(
+    `  ${label}: hover≠active ${(ratio * 100).toFixed(1)}% of ${hover.data.length / 4}px`
+  );
+}
+
+async function sampleRgb(page, x, y) {
+  const buf = await page.screenshot({
+    clip: { x: Math.max(0, x), y: Math.max(0, y), width: 1, height: 1 },
+    animations: "allow",
+    caret: "hide",
+  });
+  const rgba = await pngRgba(page, buf);
+  return [rgba.data[0], rgba.data[1], rgba.data[2]];
+}
+
+function rgbEq(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+async function assertSummaryHoverCorners(page, scheme) {
+  const figure = page.getByTestId("press-triplet-summary-card");
+  await figure.waitFor({ state: "attached" });
+  await figure.scrollIntoViewIfNeeded();
+  const summary = figure.locator("summary");
+  await summary.hover();
+  await waitForAnimations(page);
+  const details = figure.locator("details");
+  const box = await details.boundingBox();
+  const fig = await figure.boundingBox();
+  if (!box || !fig) {
+    throw new Error(`summary-card ${scheme}: bounding box missing`);
+  }
+  const pad = await sampleRgb(page, fig.x + 2, fig.y + 2);
+  const fill = await sampleRgb(
+    page,
+    box.x + box.width / 2,
+    box.y + Math.min(12, box.height / 2)
+  );
+  if (rgbEq(pad, fill)) {
+    throw new Error(
+      `summary-card ${scheme}: hover fill ${fill} equals page bg — hover did not paint`
+    );
+  }
+  const corners = [
+    [box.x, box.y],
+    [box.x + box.width - 1, box.y],
+    [box.x, box.y + box.height - 1],
+    [box.x + box.width - 1, box.y + box.height - 1],
+  ];
+  for (const [x, y] of corners) {
+    const rgb = await sampleRgb(page, x, y);
+    if (rgbEq(rgb, fill)) {
+      throw new Error(
+        `summary-card ${scheme}: corner (${x.toFixed(1)},${y.toFixed(1)}) is hover fill ${fill}, not page bg ${pad}`
+      );
+    }
+    if (!rgbEq(rgb, pad)) {
+      throw new Error(
+        `summary-card ${scheme}: corner (${x.toFixed(1)},${y.toFixed(1)}) ${rgb} ≠ page bg ${pad}`
+      );
+    }
+  }
+  console.log(`  summary-card ${scheme}: 4 corners = page bg, not hover fill`);
+}
+
 const PRESS_TRIPLET_GALLERY = [
   "button-default",
   "button-secondary",
@@ -11190,18 +11304,18 @@ function pressTripletTarget(page, surface) {
   if (surface === "message-row") return frame.getByTestId("timeline-message");
   if (surface === "pending-row") return frame.getByTestId("timeline-pending");
   if (surface === "settings-row") {
-    return frame.getByTestId("press-triplet-settings-toggle");
+    return frame.getByTestId("press-triplet-settings-toggle").locator("..");
   }
   if (surface === "drafts-li") {
-    return frame.getByTestId("press-triplet-drafts-control");
+    return frame.getByTestId("draft-row").locator("a").first();
   }
   return frame.locator("button").first();
 }
 
 /**
  * ADR-0179 D10 ④ / UX-R1e: gallery primitives + in-situ surfaces ×
- * rest/hover/active × two schemes. 390 light covers in-situ + sidebar row.
- * hover = Playwright hover(); active = mouse.down() held. Motion stays on
+ * rest/hover/active × two schemes. 390 covers in-situ + sidebar row in
+ * both schemes. hover = Playwright hover(); active = mouse.down() held. Motion stays on
  * (reducedMotion no-preference) so waitForAnimations is load-bearing —
  * screenshot animations are allowed, not fast-forwarded.
  */
@@ -11225,6 +11339,10 @@ async function capturePressTriplet(
   await page.getByTestId("design-gallery").waitFor({ state: "visible" });
   await page.evaluate(() => document.fonts.ready);
   await waitForAnimations(page);
+
+  if (suffix === "") {
+    await assertSummaryHoverCorners(page, scheme);
+  }
 
   const paths = [];
   for (const surface of surfaces) {
@@ -11285,6 +11403,12 @@ async function capturePressTriplet(
       caret: "hide",
     });
     paths.push(activePath);
+    await assertTripletFramesDiffer(
+      page,
+      hoverPath,
+      activePath,
+      `press-triplet ${surface} ${scheme}${suffix}`
+    );
     await page.mouse.up();
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
@@ -11385,15 +11509,13 @@ async function main() {
           assertThisPreview();
           all.push(...(await captureDesignGallery(browser, scheme)));
           all.push(...(await capturePressTriplet(browser, scheme)));
-          if (scheme === "light") {
-            all.push(
-              ...(await capturePressTriplet(browser, scheme, {
-                viewport: MOBILE_VIEWPORT,
-                suffix: "-390",
-                surfaces: [...PRESS_TRIPLET_INSITU, "row"],
-              }))
-            );
-          }
+          all.push(
+            ...(await capturePressTriplet(browser, scheme, {
+              viewport: MOBILE_VIEWPORT,
+              suffix: "-390",
+              surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+            }))
+          );
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
@@ -11403,17 +11525,15 @@ async function main() {
           };
           all.push(...(await shot(() => captureDesignGallery(browser, scheme))));
           all.push(...(await shot(() => capturePressTriplet(browser, scheme))));
-          if (scheme === "light") {
-            all.push(
-              ...(await shot(() =>
-                capturePressTriplet(browser, scheme, {
-                  viewport: MOBILE_VIEWPORT,
-                  suffix: "-390",
-                  surfaces: [...PRESS_TRIPLET_INSITU, "row"],
-                })
-              ))
-            );
-          }
+          all.push(
+            ...(await shot(() =>
+              capturePressTriplet(browser, scheme, {
+                viewport: MOBILE_VIEWPORT,
+                suffix: "-390",
+                surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+              })
+            ))
+          );
           all.push(...(await shot(() => captureScheme(browser, scheme))));
           all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
           if (scheme === "light") {

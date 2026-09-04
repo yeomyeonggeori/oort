@@ -57,6 +57,46 @@ const PENDING_ROW_SRC = readFileSync(
   new URL("../features/timeline/PendingRow.tsx", import.meta.url),
   "utf8"
 );
+const SETTINGS_FIELDS_SRC = readFileSync(
+  new URL("../features/settings/SettingsFields.tsx", import.meta.url),
+  "utf8"
+);
+const USAGE_SRC = readFileSync(
+  new URL("../features/settings/UsageSection.tsx", import.meta.url),
+  "utf8"
+);
+const WEBHOOK_SRC = readFileSync(
+  new URL("../features/settings/WebhookSection.tsx", import.meta.url),
+  "utf8"
+);
+const PLUGIN_SRC = readFileSync(
+  new URL("../features/plugins/PluginSection.tsx", import.meta.url),
+  "utf8"
+);
+const CHANNEL_HEADER_SRC = readFileSync(
+  new URL("../features/chat/channelHeaderControl.ts", import.meta.url),
+  "utf8"
+);
+const TERMINAL_DOCK_SRC = readFileSync(
+  new URL("../features/work/TerminalDock.tsx", import.meta.url),
+  "utf8"
+);
+const WORK_PANEL_SRC = readFileSync(
+  new URL("../features/work/WorkPanel.tsx", import.meta.url),
+  "utf8"
+);
+const WORK_CONSOLE_SRC = readFileSync(
+  new URL("../features/workConsole/WorkConsoleRoute.tsx", import.meta.url),
+  "utf8"
+);
+const GALLERY_SRC = readFileSync(
+  new URL("./Gallery.tsx", import.meta.url),
+  "utf8"
+);
+const CAPTURE_SRC = readFileSync(
+  new URL("../../scripts/capture-screens.mjs", import.meta.url),
+  "utf8"
+);
 
 const HOVER_RE = /(?<![\w-])hover:/;
 const PRESS_RE = /(?:(?<![\w-])press\b|(?<![\w-])active:)/;
@@ -178,19 +218,24 @@ function isAnchorLike(tag: string): boolean {
  * Canonical §2.6 D5: a text link is an `<a>`/`<button>` whose only affordance
  * is underline or `hover:text-`, with no fill and no box.
  */
-function isTextLink(tag: string, text: string): boolean {
+export function isTextLink(tag: string, text: string): boolean {
   if (!isAnchorLike(tag)) return false;
   if (/(?<![\w-])hover:(?:bg-|opacity-|border-)/.test(text)) return false;
   const underline = /\bunderline\b/.test(text);
   const hoverText = /(?<![\w-])hover:text-/.test(text);
   if (!underline && !hoverText) return false;
-  if (underline) return true;
+  if (/(?<![\w-])bg-/.test(text)) return false;
   if (/\brounded-/.test(text)) return false;
   if (/\bflex\b/.test(text) && /\bitems-center\b/.test(text)) return false;
-  if (/(?<![\w-])(?:tap-target|size-control|h-control|w-control)\b/.test(text)) {
+  if (
+    /(?<![\w-])(?:tap-target|touch-target|size-control|h-control|w-control)\b/.test(
+      text
+    )
+  ) {
     return false;
   }
   if (/(?<![\w-])(?:p|px|py|pt|pb|pl|pr)-\d/.test(text)) return false;
+  if (/(?<![\w-])border(?!-\d)/.test(text)) return false;
   return true;
 }
 
@@ -295,6 +340,91 @@ function collect(node: ts.Node, index: Map<string, string>): string {
   return bits.filter(Boolean).join(" ");
 }
 
+function cartesianJoin(parts: string[][]): string[] {
+  return parts.reduce<string[]>(
+    (acc, next) => acc.flatMap((a) => next.map((n) => `${a} ${n}`.trim())),
+    [""]
+  );
+}
+
+/** One class string per conditional branch. `collect()` still merges for import indexes. */
+function expandClass(node: ts.Node, index: Map<string, string>): string[] {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return [node.text];
+  }
+  if (ts.isTemplateExpression(node)) {
+    let acc = [node.head.text];
+    for (const span of node.templateSpans) {
+      const mids = expandClass(span.expression, index);
+      acc = acc.flatMap((a) => mids.map((m) => a + m + span.literal.text));
+    }
+    return acc;
+  }
+  if (ts.isIdentifier(node)) {
+    if (node.text === "PRESS_CLASS") return [PRESS_CLASS];
+    return [index.get(node.text) ?? ""];
+  }
+  if (ts.isPropertyAccessExpression(node)) {
+    return expandClass(node.name, index);
+  }
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isTypeAssertionExpression(node)
+  ) {
+    return expandClass(node.expression, index);
+  }
+  if (ts.isConditionalExpression(node)) {
+    return [
+      ...expandClass(node.whenTrue, index),
+      ...expandClass(node.whenFalse, index),
+    ];
+  }
+  if (ts.isBinaryExpression(node)) {
+    const op = node.operatorToken.kind;
+    if (
+      op === ts.SyntaxKind.AmpersandAmpersandToken ||
+      op === ts.SyntaxKind.BarBarToken
+    ) {
+      return ["", ...expandClass(node.right, index)];
+    }
+    return cartesianJoin([
+      expandClass(node.left, index),
+      expandClass(node.right, index),
+    ]);
+  }
+  if (ts.isCallExpression(node)) {
+    const parts = node.arguments.map((arg) => expandClass(arg, index));
+    const callee = calleeName(node.expression);
+    if (callee && index.has(callee)) parts.unshift([index.get(callee)!]);
+    return cartesianJoin(parts);
+  }
+  if (ts.isObjectLiteralExpression(node)) {
+    return cartesianJoin(
+      node.properties.map((prop) => {
+        if (ts.isPropertyAssignment(prop)) {
+          return expandClass(prop.initializer, index);
+        }
+        if (ts.isShorthandPropertyAssignment(prop)) {
+          return [index.get(prop.name.text) ?? ""];
+        }
+        if (ts.isSpreadAssignment(prop)) {
+          return expandClass(prop.expression, index);
+        }
+        return [""];
+      })
+    );
+  }
+  if (ts.isArrayLiteralExpression(node)) {
+    return cartesianJoin(node.elements.map((el) => expandClass(el, index)));
+  }
+  if (ts.isJsxExpression(node) && node.expression) {
+    return expandClass(node.expression, index);
+  }
+  return [collect(node, index)];
+}
+
 interface Decl {
   name: string;
   node: ts.Node;
@@ -344,20 +474,23 @@ function jsxAttr(
   return undefined;
 }
 
+function attrClasses(
+  attr: ts.JsxAttribute | undefined,
+  index: Map<string, string>
+): string[] {
+  if (!attr?.initializer) return [""];
+  if (ts.isStringLiteral(attr.initializer)) return [attr.initializer.text];
+  if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+    return expandClass(attr.initializer.expression, index);
+  }
+  return [""];
+}
+
 function attrText(
   attr: ts.JsxAttribute | undefined,
   index: Map<string, string>
 ): string {
-  if (!attr?.initializer) return "";
-  if (ts.isStringLiteral(attr.initializer)) return attr.initializer.text;
-  if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
-    const expr = attr.initializer.expression;
-    if (ts.isStringLiteral(expr) || ts.isNoSubstitutionTemplateLiteral(expr)) {
-      return expr.text;
-    }
-    return collect(expr, index);
-  }
-  return "";
+  return attrClasses(attr, index).join(" ").replace(/\s+/g, " ").trim();
 }
 
 function resolveModule(fromFile: string, spec: string): string | undefined {
@@ -387,6 +520,22 @@ function isCreateElement(expr: ts.Expression): boolean {
     return true;
   }
   return false;
+}
+
+function objectPropNode(
+  obj: ts.ObjectLiteralExpression,
+  name: string
+): ts.Expression | undefined {
+  for (const prop of obj.properties) {
+    if (!ts.isPropertyAssignment(prop)) continue;
+    const key = ts.isIdentifier(prop.name)
+      ? prop.name.text
+      : ts.isStringLiteral(prop.name)
+        ? prop.name.text
+        : "";
+    if (key === name) return prop.initializer;
+  }
+  return undefined;
 }
 
 function objectProp(
@@ -490,16 +639,20 @@ function discover(): PressSite[] {
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
         const tag = jsxTagName(node.tagName);
         const role = attrText(jsxAttr(node, ["role"]), strings);
-        let text = attrText(jsxAttr(node, ["className", "class"]), strings);
-        if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
-        sites.push({
-          rel,
-          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
-          tag,
-          role,
-          text: text.replace(/\s+/g, " ").trim(),
-          kind: "jsx",
-        });
+        const classes = attrClasses(jsxAttr(node, ["className", "class"]), strings);
+        const unique = [...new Set(classes.map((c) => c.replace(/\s+/g, " ").trim()))];
+        for (const raw of unique.length > 0 ? unique : [""]) {
+          let text = raw;
+          if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+          sites.push({
+            rel,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            tag,
+            role,
+            text: text.replace(/\s+/g, " ").trim(),
+            kind: "jsx",
+          });
+        }
       }
       if (ts.isCallExpression(node) && isCreateElement(node.expression) && node.arguments.length >= 2) {
         const tagArg = node.arguments[0];
@@ -509,21 +662,29 @@ function discover(): PressSite[] {
           : ts.isIdentifier(tagArg)
             ? tagArg.text
             : "";
-        let text = "";
+        let texts: string[] = [""];
         let role = "";
         if (ts.isObjectLiteralExpression(propsArg)) {
-          text = objectProp(propsArg, "className", strings) || objectProp(propsArg, "class", strings);
+          const classAttr =
+            objectPropNode(propsArg, "className") || objectPropNode(propsArg, "class");
+          texts = classAttr
+            ? expandClass(classAttr, strings)
+            : [""];
           role = objectProp(propsArg, "role", strings);
         }
-        if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
-        sites.push({
-          rel,
-          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
-          tag,
-          role,
-          text: text.replace(/\s+/g, " ").trim(),
-          kind: "createElement",
-        });
+        const unique = [...new Set(texts.map((c) => c.replace(/\s+/g, " ").trim()))];
+        for (const raw of unique.length > 0 ? unique : [""]) {
+          let text = raw;
+          if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+          sites.push({
+            rel,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            tag,
+            role,
+            text: text.replace(/\s+/g, " ").trim(),
+            kind: "createElement",
+          });
+        }
       }
       ts.forEachChild(node, visit);
     };
@@ -546,24 +707,18 @@ const DUAL_TRANSITION = SITES.filter(
 );
 
 /**
- * Remaining hover-without-press **text links** after the UX-R1e R2 sweep.
+ * Remaining hover-without-press **text links** after the UX-R1e R3 classifier.
  * Interactive hover-without-press is hard-zero. Pin shrinks only.
  *
- * R1 scanner N0=107 (interactive 95 · text-link 12) → N1=12. That scanner was
- * JSX-class-string only. This ledger's full sweep is the new denominator.
+ * Boxed underline controls (rounded/padding/touch-target) took `press` when
+ * the §2.6 "no fill and no box" clause started applying to the underline
+ * branch. Residue is the one inline body link.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
-  ["clients/web/src/features/attachments/AttachmentTray.tsx", 2],
-  ["clients/web/src/features/inbox/InboxRoute.tsx", 1],
-  ["clients/web/src/features/routing/MentionRoutingBar.tsx", 1],
-  ["clients/web/src/features/timeline/FoldToggle.tsx", 1],
-  ["clients/web/src/features/timeline/LongPressHint.tsx", 1],
   ["clients/web/src/features/timeline/MessageBody.tsx", 1],
-  ["clients/web/src/features/timeline/MessageRow.tsx", 1],
-  ["clients/web/src/features/timeline/PendingRow.tsx", 1],
 ];
 
-const CEILING = 9;
+const CEILING = 1;
 
 function countedByFile(sites: PressSite[]): [string, number][] {
   const counted = new Map<string, number>();
@@ -642,10 +797,15 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
   });
 
   it("천장이 낡지 않았다", () => {
-    expect(
-      HOVER_ONLY.length === CEILING,
-      `lower the ceiling to ${HOVER_ONLY.length}`
-    ).toBe(true);
+    const added =
+      INTERACTIVE[0] ??
+      HOVER_ONLY.find((s) => !RESIDUE.some(([rel]) => rel === s.rel)) ??
+      HOVER_ONLY[0];
+    const message =
+      HOVER_ONLY.length > CEILING
+        ? `hover-only control added at ${added.rel}:${added.line}`
+        : `lower the ceiling to ${HOVER_ONLY.length}`;
+    expect(HOVER_ONLY.length, message).toBe(CEILING);
     expect(TEXT_LINKS.length).toBe(HOVER_ONLY.length);
   });
 
@@ -916,4 +1076,183 @@ export function Probe() {
     expect(hoverToken).toBeTruthy();
     expect(pressedToken).toBeTruthy();
   });
+
+  it("반경 있는 details 는 overflow-hidden 으로 summary 채움을 자른다 (H-1)", () => {
+    expect(SETTINGS_FIELDS_SRC).toMatch(
+      /SETTINGS_COLLAPSIBLE_CARD_CLASS =\s*"min-w-0 overflow-hidden rounded-md border border-line"/
+    );
+    expect(USAGE_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
+    expect(WEBHOOK_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
+    expect(GALLERY_SRC).toMatch(/SETTINGS_COLLAPSIBLE_CARD_CLASS/);
+    expect(GALLERY_SRC).toMatch(/press-triplet-summary-card/);
+  });
+
+  it("선택 분기도 press 전이를 진다 (M-1)", async () => {
+    const pairs = [
+      [
+        "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta press focus-visible:focus-ring",
+        "bg-accent-soft font-medium text-ink",
+        "text-ink-muted hover:bg-surface-hover",
+      ],
+      [
+        "h-control-sm rounded-sm px-2 text-meta press focus-visible:focus-ring",
+        "bg-accent-soft text-accent",
+        "text-ink-muted hover:bg-surface-hover",
+      ],
+      [
+        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left press focus-visible:focus-ring",
+        "bg-surface-hover",
+        "hover:bg-surface-hover",
+      ],
+      [
+        "flex min-w-0 flex-col gap-1 px-4 py-2 press focus-visible:focus-ring",
+        "bg-accent-soft",
+        "hover:bg-surface-hover",
+      ],
+      [
+        "flex shrink-0 items-center justify-center rounded-sm border border-line-strong press focus-visible:focus-ring",
+        "bg-accent-soft text-accent",
+        "text-ink-muted hover:bg-surface-hover data-[state=open]:bg-surface-hover data-[state=open]:text-ink",
+      ],
+    ] as const;
+    expect(TERMINAL_DOCK_SRC).toMatch(/press focus-visible:focus-ring/);
+    expect(WORK_PANEL_SRC).toMatch(/press focus-visible:focus-ring/);
+    expect(WORK_CONSOLE_SRC).toMatch(/press focus-visible:focus-ring/);
+    expect(CHANNEL_HEADER_SRC).toMatch(/press focus-visible:focus-ring/);
+    for (const [shared, selected, unselected] of pairs) {
+      const selectedCss = await buildCss(classTokens(`${shared} ${selected}`));
+      const unselectedCss = await buildCss(
+        classTokens(`${shared} ${unselected}`)
+      );
+      const selectedDur = pressDuration(selectedCss);
+      const unselectedDur = pressDuration(unselectedCss);
+      expect(selectedDur, shared).not.toBe("0s");
+      expect(selectedDur).toBe(unselectedDur);
+    }
+  });
+
+  it("설정 토글 행은 행 채움 눌림이고 행 자체는 scale 하지 않는다 (M-3)", () => {
+    expect(SETTINGS_FIELDS_SRC).toMatch(
+      /hover:bg-surface-hover active:bg-surface-pressed/
+    );
+    const toggle = SETTINGS_FIELDS_SRC.match(
+      /export function SettingsToggleRow[\s\S]*?\nexport function /
+    )?.[0];
+    expect(toggle).toBeTruthy();
+    const rowClass = toggle!.match(/<div\s+className=\{cn\(([\s\S]*?)\)\}/)?.[1];
+    expect(rowClass).toMatch(/active:bg-surface-pressed/);
+    expect(rowClass).not.toMatch(/(?<![\w-])press\b/);
+    expect(toggle).toMatch(/<input[\s\S]*?\bpress\b/);
+  });
+
+  it("underline 만으로 텍스트 링크가 되지 않는다 (M-4)", () => {
+    expect(
+      isTextLink(
+        "button",
+        "rounded-md bg-accent-soft px-3 py-2 text-ink underline hover:text-ink"
+      )
+    ).toBe(false);
+    expect(
+      isTextLink("button", "underline underline-offset-2 hover:text-ink")
+    ).toBe(true);
+  });
+
+  it("plugin-marketplace-row 합성 클래스는 :active 규칙을 컴파일한다 (N-1)", async () => {
+    const rows = SITES.filter((s) =>
+      /\bplugin-marketplace-row\b/.test(s.text)
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    expect(PLUGIN_SRC).not.toMatch(
+      /plugin-marketplace-row[\s\S]{0,80}\bpress\b/
+    );
+    for (const row of rows) {
+      expect(row.text, `${row.rel}:${row.line}`).not.toMatch(
+        /(?<![\w-])press\b/
+      );
+      const css = await buildCss(classTokens(row.text));
+      expect(css, `${row.rel}:${row.line}`).toMatch(/:active/);
+    }
+  });
+
+  it("조건식 분기를 한 문자열로 합치지 않는다 (N-2)", () => {
+    const scratch = ts.createSourceFile(
+      "Branch.tsx",
+      `export function Probe({ on }: { on: boolean }) {
+  return <button className={on ? "bg-accent-soft" : "press hover:bg-surface-hover"} />;
+}
+`,
+      ts.ScriptTarget.Latest,
+      true,
+      ts.ScriptKind.TSX
+    );
+    const index = resolveIndex(collectDecls(scratch));
+    const classes: string[] = [];
+    const visit = (node: ts.Node) => {
+      if (ts.isJsxSelfClosingElement(node)) {
+        classes.push(
+          ...attrClasses(jsxAttr(node, ["className"]), index).map((c) =>
+            c.replace(/\s+/g, " ").trim()
+          )
+        );
+      }
+      ts.forEachChild(node, visit);
+    };
+    visit(scratch);
+    expect(classes).toContain("bg-accent-soft");
+    expect(classes.some((c) => /\bpress\b/.test(c))).toBe(true);
+    expect(classes.some((c) => /\bpress\b/.test(c) && /bg-accent-soft/.test(c))).toBe(
+      false
+    );
+  });
+
+  it("3짝 표면 목록이 갤러리 제품 컴포넌트와 캡처 레인에 핀된다 (N-3)", () => {
+    const surfaces = [
+      "button-default",
+      "button-secondary",
+      "button-ghost",
+      "button-destructive",
+      "chip",
+      "row",
+      "message-row",
+      "pending-row",
+      "settings-row",
+      "drafts-li",
+    ];
+    for (const surface of surfaces) {
+      expect(GALLERY_SRC).toContain(`press-triplet-${surface}`);
+      expect(CAPTURE_SRC).toContain(`"${surface}"`);
+    }
+    expect(GALLERY_SRC).toMatch(/<DraftRow\b/);
+    expect(GALLERY_SRC).toMatch(
+      /onClick=\{\(event\) => event\.preventDefault\(\)\}/
+    );
+    expect(CAPTURE_SRC).toMatch(/MOBILE_VIEWPORT/);
+    expect(CAPTURE_SRC).toMatch(/suffix: "-390"/);
+    expect(CAPTURE_SRC).toMatch(
+      /for \(const scheme of \["light", "dark"\]\)/
+    );
+    expect(CAPTURE_SRC).not.toMatch(
+      /if \(scheme === "light"\) \{\s*\n\s*all\.push\(\s*\.\.\.\((?:await shot\(\(\) =>\s*)?capturePressTriplet/
+    );
+  });
+
+  it("본문 행은 fill-only 이고 전폭 행의 press 스케일은 DS-1 이다 (N-4)", () => {
+    expect(MESSAGE_ROW_SRC).toMatch(/active:bg-surface-pressed/);
+    expect(PENDING_ROW_SRC).toMatch(/active:bg-surface-pressed/);
+    const article = MESSAGE_ROW_SRC.match(
+      /"(group relative flex gap-2 px-4[^"]*)"/
+    )?.[1];
+    expect(article).not.toMatch(/(?<![\w-])press\b/);
+  });
 });
+
+function pressDuration(css: string): string {
+  const rules = [
+    ...css.matchAll(/\.press\s*\{([^}]*)\}/g),
+  ].filter((match) => /transition-duration:/.test(match[1]));
+  if (rules.length === 0) return "0s";
+  const match = rules[rules.length - 1][1].match(
+    /transition-duration:\s*([^;]+)/
+  );
+  return match ? match[1].trim() : "0s";
+}

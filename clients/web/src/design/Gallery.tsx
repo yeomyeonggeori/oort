@@ -62,7 +62,13 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { SidebarRow } from "@/features/sidebar/SidebarRow";
-import { SettingsToggleRow } from "@/features/settings/SettingsFields";
+import {
+  SettingsToggleRow,
+  SETTINGS_COLLAPSIBLE_CARD_CLASS,
+  SETTINGS_COLLAPSIBLE_SUMMARY_CLASS,
+} from "@/features/settings/SettingsFields";
+import { DraftRow } from "@/features/drafts/DraftsRoute";
+import type { DraftViewItem } from "@/features/drafts/model";
 import { MessageRow } from "@/features/timeline/MessageRow";
 import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
@@ -290,6 +296,22 @@ function galleryPending() {
     createdAtMs: 1_800_000_000_000,
     sinceSeq: 4081,
     status: "sending" as const,
+  };
+}
+
+function galleryDraft(): DraftViewItem {
+  return {
+    workspaceId: WS,
+    channelId: CHANNEL_ID,
+    text: GALLERY_TEXT_FIXTURE,
+    atMs: 1_800_000_000_000,
+    preview: GALLERY_TEXT_FIXTURE,
+    destination: {
+      text: "릴리스 노트",
+      handle: null,
+      kind: "public",
+      isAgent: false,
+    },
   };
 }
 
@@ -654,7 +676,7 @@ function GalleryBody() {
           </figure>
           <figure
             data-testid="press-triplet-message-row"
-            className="min-w-action bg-surface"
+            className="w-full bg-surface"
           >
             <MessageRow
               message={message}
@@ -664,7 +686,7 @@ function GalleryBody() {
           </figure>
           <figure
             data-testid="press-triplet-pending-row"
-            className="min-w-action bg-surface"
+            className="w-full bg-surface"
           >
             <PendingRow
               pending={galleryPending()}
@@ -674,7 +696,7 @@ function GalleryBody() {
           </figure>
           <figure
             data-testid="press-triplet-settings-row"
-            className="min-w-action bg-surface"
+            className="w-full bg-surface"
           >
             <SettingsToggleRow
               testId="press-triplet-settings-toggle"
@@ -686,25 +708,27 @@ function GalleryBody() {
           </figure>
           <figure
             data-testid="press-triplet-drafts-li"
-            className="min-w-action bg-surface"
+            className="w-full bg-surface"
           >
             <ul>
-              <li
-                className="relative border-b border-line hover:bg-surface-hover"
-                data-testid="draft-row"
-              >
-                <a
-                  href="#gallery-draft"
-                  data-testid="press-triplet-drafts-control"
-                  className="flex gap-3 py-2 pl-4 pr-8 press focus-visible:focus-ring"
-                  onClick={(event) => event.preventDefault()}
-                >
-                  <span className="text-body font-semibold text-ink">
-                    릴리스 노트
-                  </span>
-                </a>
-              </li>
+              <DraftRow
+                item={galleryDraft()}
+                nowMs={1_800_000_000_000}
+                onDelete={() => undefined}
+                onCloseAutoFocus={() => undefined}
+                onClick={(event) => event.preventDefault()}
+              />
             </ul>
+          </figure>
+          <figure
+            data-testid="press-triplet-summary-card"
+            className="w-full bg-surface p-6"
+          >
+            <details className={SETTINGS_COLLAPSIBLE_CARD_CLASS}>
+              <summary className={SETTINGS_COLLAPSIBLE_SUMMARY_CLASS}>
+                기간별로 자세히 보기
+              </summary>
+            </details>
           </figure>
         </div>
       </section>
