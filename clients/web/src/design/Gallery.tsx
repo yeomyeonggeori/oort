@@ -707,6 +707,18 @@ function GalleryBody() {
             />
           </figure>
           <figure
+            data-testid="press-triplet-settings-row-checked"
+            className="w-full bg-surface"
+          >
+            <SettingsToggleRow
+              testId="press-triplet-settings-toggle-checked"
+              name="방해 금지"
+              description="정해 둔 시간에는 알림을 끊는다."
+              checked={true}
+              onToggle={() => undefined}
+            />
+          </figure>
+          <figure
             data-testid="press-triplet-drafts-li"
             className="w-full bg-surface"
           >
