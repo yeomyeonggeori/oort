@@ -511,22 +511,28 @@ describe.skipIf(!chromiumAvailable)(
         ).toBe(blockedBefore);
 
         for (const delay of [30, 60, 120]) {
-          await page.locator(overlaySelector).waitFor({ state: "detached", timeout: 2_000 });
+          const lingering = page.locator(overlaySelector).first();
+          if ((await lingering.count()) > 0) {
+            if ((await lingering.getAttribute("data-state")) === "open") {
+              await page.keyboard.press("Escape");
+            }
+            await lingering.waitFor({ state: "detached", timeout: 2_000 });
+          }
           await open();
-        await page.keyboard.press("Escape");
-        await page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
-        const overlay = page.locator(overlaySelector).first();
-        expect(
-          await overlay.count(),
-          `t+${delay}ms overlay still attached`
-        ).toBeGreaterThan(0);
-        expect(await overlay.getAttribute("data-state")).toBe("closed");
-        expect(
-          await overlay.evaluate((el) => getComputedStyle(el).pointerEvents),
-          `t+${delay}ms overlay pointer-events`
-        ).toBe("none");
-        const before = await behindClicks(page);
-        await page.mouse.click(x, y);
+          await page.keyboard.press("Escape");
+          await page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
+          const overlay = page.locator(overlaySelector).first();
+          expect(
+            await overlay.count(),
+            `t+${delay}ms overlay still attached`
+          ).toBeGreaterThan(0);
+          expect(await overlay.getAttribute("data-state")).toBe("closed");
+          expect(
+            await overlay.evaluate((el) => getComputedStyle(el).pointerEvents),
+            `t+${delay}ms overlay pointer-events`
+          ).toBe("none");
+          const before = await behindClicks(page);
+          await page.mouse.click(x, y);
           expect(
             await behindClicks(page),
             `t+${delay}ms click behind ${overlaySelector}`

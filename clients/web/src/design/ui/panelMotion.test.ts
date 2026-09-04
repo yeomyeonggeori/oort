@@ -631,6 +631,18 @@ describe.skipIf(!chromiumAvailable)(
       );
     }
 
+    async function waitOverlayGone(
+      page: import("playwright").Page,
+      overlaySelector: string
+    ) {
+      const overlay = page.locator(overlaySelector).first();
+      if ((await overlay.count()) === 0) return;
+      if ((await overlay.getAttribute("data-state")) === "open") {
+        await page.keyboard.press("Escape");
+      }
+      await overlay.waitFor({ state: "detached", timeout: 2_000 });
+    }
+
     async function assertClickThrough(
       page: import("playwright").Page,
       open: () => Promise<void>,
@@ -646,7 +658,7 @@ describe.skipIf(!chromiumAvailable)(
       ).toBe(blockedBefore);
 
       for (const delay of [30, 60, 120]) {
-        await page.locator(overlaySelector).waitFor({ state: "detached", timeout: 2_000 });
+        await waitOverlayGone(page, overlaySelector);
         await open();
         await page.keyboard.press("Escape");
         await page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
@@ -667,6 +679,7 @@ describe.skipIf(!chromiumAvailable)(
           `t+${delay}ms click behind ${overlaySelector}`
         ).toBe(before + 1);
       }
+      await waitOverlayGone(page, overlaySelector);
     }
 
     it("Escape then click-behind at 30/60/120ms lands on palette + two R1a dialogs; open still blocks", async () => {
