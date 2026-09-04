@@ -19,14 +19,18 @@
 - R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
 - red proof (수리 떼면 실제로 붉음):
   - 닫힘 중 20/60/100ms 에 같은/다른 `thread-anchor` 클릭 → 패널이 요청한 root 로 열린다. `leaving`+지연 `onClose` 를 되돌리면 같은 스윕이 안 연다.
-  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: 스크림·스레드·팔레트 모두 computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 노드가 남는다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다; 이 케이스가 훅을 소유자로 고정한다. 팔레트는 Radix Presence 가 overlay 를 먼저 떼면 `overlayRef` 가 null 이라 분기가 안 붉었고, `forceMount` 로 AnimatePresence 가 슬롯을 든다.
+  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: 스크림·스레드·팔레트 모두 computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 노드가 남는다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다; 이 케이스가 훅을 소유자로 고정한다. 팔레트 exit 슬롯은 AnimatePresence 가 든다 (Portal/Content `forceMount` 없음, #1997 M-1).
   - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom, 제품 `Sidebar` 마운트). `{asDrawer && drawerOpen ? <SidebarDrawerScrimLayer open={true}/> : null}` 로 바꾸면 닫힘 즉시 null — Chromium 없이 붉다. AppShell `className=["']sidebar-scrim["']` 정규식은 증거가 아니라서 지웠다.
   - 연 팔레트에 행 ≥5 (하네스 `abc-*` 5채널) · 키 3타+Backspace 뒤 행 > 0 · `[cmdk-item]` `animationstart` 0 (open-container=1, type-items=0, rows=6). `PALETTE_ITEM_MOTION`/`motion-item-fade` 를 행에 되돌리면 open 에서 item animationstart **11**. jsdom 은 행 class 에 `motion-item-fade` 가 있으면 붉다.
   - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom 2/2, Playwright `focus=BODY`). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
 - `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
 - 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
-- R4: 닫힌 모달 오버레이는 Radix 인라인 `pointer-events: auto` 를 `open === false` 에서 같은 슬롯으로 `none` 으로 덮는다 (`DialogOverlay`, 팔레트와 R1a 다이얼로그 공통). 클래스만으로는 히트테스트가 안 꺼진다. 팔레트 overlay `forceMount` 는 제거. 정본 §2.6/`§5.2` 모션 행은 390 드로어 180 대칭 정오표.
+- R5: 닫힌 모달 오버레이/콘텐츠는 `data-[state=closed]:pointer-events-none!` (컴파일 규칙 `pointer-events: none !important`). Radix 인라인 `auto`를 클래스가 이긴다. `DialogOpenContext`·인라인 `style.pointerEvents`·eslint-disable·preflight-allow 없음. 가드: 컴파일 CSS `!important` + Playwright Escape 뒤 30/60/120ms 클릭(팔레트·채널 만들기·로그아웃 확인·섹션 삭제). `!` 를 빼면 컴파일 단정 빨강이고 제품 클릭이 다시 삼켜진다. 팔레트 Portal/Content `forceMount` 도 없음 — closed frames>0 · dwell≥140ms 는 AnimatePresence+Radix Presence 만으로 유지.
+- R4 기록(정정): 인라인 `pointerEvents` + overlay-only `forceMount` 제거는 기구가 무거웠고 Portal 상속으로 overlay `forceMount` 제거는 no-op 였다. 동작은 R5 가 그대로 두고 기구만 바꿨다.
+- N-2 `Timeline.burst` flake 2/5 at load 7.88 는 선행 (#2050 N-7). 이 PR 이 파일을 안 만진다.
+- N-3 팔레트 리스트가 `채널` 그룹 헤딩에서 잘리고 행이 안 비치는 기하은 base 와 byte-identical. 선행.
+- N-4 프로필 메뉴 → 로그아웃 확인 직후 첫 Escape 가 나가는 DropdownMenu 에 먹히는 경우 있음 (head 1/4 · base 2/4). R1a-era 선행 (#2049 M-4 영토).
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
