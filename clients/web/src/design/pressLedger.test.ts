@@ -16,15 +16,23 @@ import { buttonVariants } from "./ui/button";
  * and `.tsx`, same-file and imported class constants, `tokens.css` @utility
  * blocks. A comment cannot keep this green.
  *
+ * Population is every JSX/`createElement` site whose **tag** is
+ * button/a/Link/NavLink/summary/label[associated checkbox|radio]/input[checkbox|
+ * radio|submit|button]/select or whose **role** is button|link|menuitem*|tab|
+ * option|checkbox|switch|radio|treeitem, minus disabled/aria-disabled and
+ * minus text links. No hover/press marker gating. No file-name escapes.
+ *
  * red proof:
  *   - put `press` on a non-interactive `div`/`li` → forbidden-press is red
  *   - add `press` and `transition-colors` on one element → dual-class is red
  *   - swap `.press` / `.transition-colors` rule order in a scratch CSS → cascade red
  *   - add a hover-only `@utility` in a scratch copy of tokens.css → CSS pin red
- *   - a hover-only local `<Button>` (not `@/design/ui/button`) → residue red
+ *   - a hover-only local `<button>` → residue red
  *   - repair one text-link residue without lowering CEILING → stale-ceiling red
- *   - R2 ScopeButton (press only on unselected) → selected duration 0s
+ *   - selected arm of a ternary without press → INTERACTIVE residue
  *   - checked toggle branch without hover/press → INTERACTIVE residue
+ *   - drop the cmdk selected+active compound → compiled CSS red
+ *   - put `press` (scale) on a full-width row → B4-3 red
  *   - drop or add a PRESS_TRIPLET_INSITU id without updating the pin → set red
  */
 
@@ -100,6 +108,10 @@ const CAPTURE_SRC = readFileSync(
   new URL("../../scripts/capture-screens.mjs", import.meta.url),
   "utf8"
 );
+const QUICKSWITCHER_SRC = readFileSync(
+  new URL("../app/QuickSwitcher.tsx", import.meta.url),
+  "utf8"
+);
 const DRAFTS_SRC = readFileSync(
   new URL("../features/drafts/DraftsRoute.tsx", import.meta.url),
   "utf8"
@@ -111,26 +123,28 @@ const TRANSITION_COLORS_RE = /(?<![\w-])transition-colors\b/;
 const DURATION_LITERAL = /(?<![\w-])duration-\d+\b/;
 const SCALE_LITERAL = /(?<![\w-])scale-\d+\b/;
 
-const NATIVE_CONTROLS = new Set([
-  "button",
-  "a",
-  "summary",
-  "input",
-  "select",
-  "textarea",
-  "option",
-]);
+const INTERACTIVE_TAGS = new Set(["button", "a", "summary", "select"]);
+const BUTTON_INPUT_TYPES = new Set(["checkbox", "radio", "submit", "button"]);
+const CLASS_COMBINERS = new Set(["cn", "clsx", "classNames", "twMerge"]);
 const INTERACTIVE_ROLES = new Set([
   "button",
+  "link",
   "menuitem",
-  "menuitemradio",
   "menuitemcheckbox",
+  "menuitemradio",
   "tab",
   "option",
   "checkbox",
   "switch",
-  "link",
   "radio",
+  "treeitem",
+]);
+const LIST_ITEM_ROLES = new Set([
+  "option",
+  "menuitem",
+  "menuitemcheckbox",
+  "menuitemradio",
+  "treeitem",
 ]);
 const PRESS_FORBIDDEN_TAGS = new Set([
   "div",
@@ -202,6 +216,21 @@ export interface PressSite {
   role: string;
   text: string;
   kind: "jsx" | "createElement";
+  htmlFor?: string;
+  inputType?: string;
+  disabled?: boolean;
+  parentTag?: string;
+  labelIsControl?: boolean;
+  routerLink?: boolean;
+}
+
+interface ExpandCtx {
+  strings: Map<string, string>;
+  fns: Map<string, { node: ts.Node; ctx: ExpandCtx }>;
+}
+
+function ctxFromStrings(strings: Map<string, string>): ExpandCtx {
+  return { strings, fns: new Map() };
 }
 
 function hasHover(text: string): boolean {
@@ -212,28 +241,30 @@ function hasPress(text: string): boolean {
   return PRESS_RE.test(text);
 }
 
-function isPascalCase(tag: string): boolean {
-  return tag.length > 0 && tag[0] === tag[0].toUpperCase() && tag[0] !== tag[0].toLowerCase();
+function isNativeHtmlTag(tag: string): boolean {
+  return tag === tag.toLowerCase();
 }
 
-function isAnchorLike(tag: string): boolean {
+function isAnchorLike(tag: string, routerLink = false): boolean {
+  if (routerLink) return true;
   const t = tag.toLowerCase();
   return t === "a" || t === "button" || tag === "Link" || tag === "NavLink";
 }
 
 /**
- * Canonical §2.6 D5: a text link is an `<a>`/`<button>` whose rendering is
- * text only — underline or `hover:text-`, with no background fill and no
- * border/rounded box. Padding alone (a touch target) does not make a box.
+ * Canonical §2.6 D5: a text link is an `<a>`/`<button>`/`Link`/`NavLink`
+ * whose rendering is text only — underline or `hover:text-`, with no
+ * background fill and no border/rounded box. Any `border*` class is a box.
+ * Padding alone (a touch target) does not make a box.
  */
-export function isTextLink(tag: string, text: string): boolean {
-  if (!isAnchorLike(tag)) return false;
+export function isTextLink(tag: string, text: string, routerLink = false): boolean {
+  if (!isAnchorLike(tag, routerLink)) return false;
   const underline = /\bunderline\b/.test(text);
   const hoverText = /(?<![\w-])hover:text-/.test(text);
   if (!underline && !hoverText) return false;
   if (/(?<![\w-])(?:hover:)?bg-/.test(text)) return false;
   if (/(?<![\w-])hover:(?:opacity-|border-)/.test(text)) return false;
-  if (/(?<![\w-])border(?!-\d)/.test(text)) return false;
+  if (/(?<![\w-])border(?:-|$)/.test(text)) return false;
   return true;
 }
 
@@ -248,22 +279,136 @@ function isPressForbidden(tag: string, role: string, text: string): boolean {
   return true;
 }
 
-function isControl(tag: string, role: string, text = ""): boolean {
-  if (isPressForbidden(tag, role, text)) return false;
-  const t = tag.toLowerCase();
-  if (NATIVE_CONTROLS.has(t)) return true;
+function isInteractiveElement(
+  s: Pick<
+    PressSite,
+    "tag" | "role" | "inputType" | "labelIsControl" | "routerLink"
+  >
+): boolean {
+  const role = (s.role ?? "").toLowerCase();
+  if (role && INTERACTIVE_ROLES.has(role)) return true;
+  if (s.routerLink) return true;
+  if (!isNativeHtmlTag(s.tag)) return false;
+  if (INTERACTIVE_TAGS.has(s.tag)) return true;
+  if (s.tag === "input") {
+    return BUTTON_INPUT_TYPES.has((s.inputType ?? "").toLowerCase());
+  }
+  if (s.tag === "label") return Boolean(s.labelIsControl);
+  return false;
+}
+
+function isVisuallyHidden(text: string): boolean {
+  return /(?<![\w-])sr-only\b/.test(text);
+}
+
+function isNativeUaWidget(s: PressSite): boolean {
+  if (!isNativeHtmlTag(s.tag)) return false;
+  if (hasHover(s.text) || /(?<![\w-])(?:hover:)?bg-/.test(s.text)) return false;
+  if (s.tag === "select") return true;
+  if (s.tag === "input") {
+    return BUTTON_INPUT_TYPES.has((s.inputType ?? "").toLowerCase());
+  }
+  return false;
+}
+
+function isControl(tag: string, role: string, _text = ""): boolean {
+  return isInteractiveElement({ tag, role, inputType: "", labelIsControl: false });
+}
+
+function hasPressScaleClass(text: string): boolean {
+  return text.split(/\s+/).includes("press");
+}
+
+function hasFillPress(text: string): boolean {
+  return (
+    /(?<![\w-])active:bg-surface-pressed/.test(text) ||
+    /(?<![\w-])press-instant-fill\b/.test(text)
+  );
+}
+
+function isCenteredCta(text: string): boolean {
+  return /(?<![\w-])max-w-sm\b/.test(text) && /(?<![\w-])h-control/.test(text);
+}
+
+function isGridCell(text: string): boolean {
+  return /(?<![\w-])aspect-square\b/.test(text);
+}
+
+function isCompactChip(text: string): boolean {
+  if (/(?<![\w-])w-full\b/.test(text)) return false;
   if (
-    t === "label" &&
-    (hasHover(text) ||
-      hasPress(text) ||
-      /(?<![\w-])bg-accent-soft/.test(text) ||
-      /data-\[selected/.test(text))
+    /(?<![\w-])(?:size-control(?:-sm)?|size-6|h-control(?:-sm|-lg)?)\b/.test(
+      text
+    )
   ) {
     return true;
   }
-  if (tag === "Link" || tag === "NavLink") return true;
-  if (role && INTERACTIVE_ROLES.has(role)) return true;
-  if (isPascalCase(tag)) return true;
+  return (
+    /(?<![\w-])(?:py-px|py-1)\b/.test(text) &&
+    /(?<![\w-])px-[23]\b/.test(text) &&
+    !/(?<![\w-])py-[23]\b/.test(text)
+  );
+}
+
+export function isFullWidthRow(s: PressSite): boolean {
+  if (isTextLink(s.tag, s.text, s.routerLink)) return false;
+  if (!isInteractiveElement(s)) return false;
+  if (isCenteredCta(s.text) || isGridCell(s.text)) return false;
+  if (isCompactChip(s.text)) return false;
+  if (LIST_ITEM_ROLES.has((s.role ?? "").toLowerCase())) return true;
+  if (/(?<![\w-])w-full\b/.test(s.text)) return true;
+  const t = s.tag;
+  const rowTag =
+    t === "a" ||
+    t === "button" ||
+    t === "summary" ||
+    t === "label" ||
+    Boolean(s.routerLink);
+  return (
+    s.parentTag === "li" &&
+    rowTag &&
+    /(?<![\w-])flex-1\b/.test(s.text)
+  );
+}
+
+function isFnNode(node: ts.Node): boolean {
+  return (
+    ts.isArrowFunction(node) ||
+    ts.isFunctionExpression(node) ||
+    ts.isBlock(node)
+  );
+}
+
+function isClassInitializer(node: ts.Node): boolean {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+    return true;
+  }
+  if (ts.isTemplateExpression(node)) return true;
+  if (ts.isIdentifier(node)) return true;
+  if (ts.isPropertyAccessExpression(node)) return isClassInitializer(node.name);
+  if (
+    ts.isParenthesizedExpression(node) ||
+    ts.isAsExpression(node) ||
+    ts.isNonNullExpression(node) ||
+    ts.isTypeAssertionExpression(node)
+  ) {
+    return isClassInitializer(node.expression);
+  }
+  if (
+    ts.isBinaryExpression(node) &&
+    node.operatorToken.kind === ts.SyntaxKind.PlusToken
+  ) {
+    return isClassInitializer(node.left) && isClassInitializer(node.right);
+  }
+  if (ts.isConditionalExpression(node)) {
+    return (
+      isClassInitializer(node.whenTrue) && isClassInitializer(node.whenFalse)
+    );
+  }
+  if (ts.isCallExpression(node)) {
+    const callee = calleeName(node.expression);
+    return Boolean(callee && CLASS_COMBINERS.has(callee));
+  }
   return false;
 }
 
@@ -308,8 +453,11 @@ function collect(node: ts.Node, index: Map<string, string>): string {
     return `${collect(node.left, index)} ${collect(node.right, index)}`;
   }
   if (ts.isCallExpression(node)) {
-    const parts = node.arguments.map((arg) => collect(arg, index));
     const callee = calleeName(node.expression);
+    if (callee && CLASS_COMBINERS.has(callee)) {
+      return node.arguments.map((arg) => collect(arg, index)).join(" ");
+    }
+    const parts = node.arguments.map((arg) => collect(arg, index));
     if (callee && index.has(callee)) parts.unshift(index.get(callee)!);
     return parts.join(" ");
   }
@@ -355,24 +503,26 @@ function cartesianJoin(parts: string[][]): string[] {
 }
 
 /** One class string per conditional branch. `collect()` still merges for import indexes. */
-function expandClass(node: ts.Node, index: Map<string, string>): string[] {
+function expandClass(node: ts.Node, ctx: ExpandCtx): string[] {
   if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
     return [node.text];
   }
   if (ts.isTemplateExpression(node)) {
     let acc = [node.head.text];
     for (const span of node.templateSpans) {
-      const mids = expandClass(span.expression, index);
+      const mids = expandClass(span.expression, ctx);
       acc = acc.flatMap((a) => mids.map((m) => a + m + span.literal.text));
     }
     return acc;
   }
   if (ts.isIdentifier(node)) {
     if (node.text === "PRESS_CLASS") return [PRESS_CLASS];
-    return [index.get(node.text) ?? ""];
+    const fn = ctx.fns.get(node.text);
+    if (fn) return expandClass(fn.node, fn.ctx);
+    return [ctx.strings.get(node.text) ?? ""];
   }
   if (ts.isPropertyAccessExpression(node)) {
-    return expandClass(node.name, index);
+    return expandClass(node.name, ctx);
   }
   if (
     ts.isParenthesizedExpression(node) ||
@@ -380,56 +530,77 @@ function expandClass(node: ts.Node, index: Map<string, string>): string[] {
     ts.isNonNullExpression(node) ||
     ts.isTypeAssertionExpression(node)
   ) {
-    return expandClass(node.expression, index);
+    return expandClass(node.expression, ctx);
   }
   if (ts.isConditionalExpression(node)) {
     return [
-      ...expandClass(node.whenTrue, index),
-      ...expandClass(node.whenFalse, index),
+      ...expandClass(node.whenTrue, ctx),
+      ...expandClass(node.whenFalse, ctx),
     ];
   }
   if (ts.isBinaryExpression(node)) {
     const op = node.operatorToken.kind;
-    if (
-      op === ts.SyntaxKind.AmpersandAmpersandToken ||
-      op === ts.SyntaxKind.BarBarToken
-    ) {
-      return ["", ...expandClass(node.right, index)];
+    if (op === ts.SyntaxKind.AmpersandAmpersandToken) {
+      return expandClass(node.right, ctx);
+    }
+    if (op === ts.SyntaxKind.BarBarToken) {
+      return [
+        ...expandClass(node.left, ctx),
+        ...expandClass(node.right, ctx),
+      ];
     }
     return cartesianJoin([
-      expandClass(node.left, index),
-      expandClass(node.right, index),
+      expandClass(node.left, ctx),
+      expandClass(node.right, ctx),
     ]);
   }
   if (ts.isCallExpression(node)) {
-    const parts = node.arguments.map((arg) => expandClass(arg, index));
     const callee = calleeName(node.expression);
-    if (callee && index.has(callee)) parts.unshift([index.get(callee)!]);
-    return cartesianJoin(parts);
+    if (callee && CLASS_COMBINERS.has(callee)) {
+      return cartesianJoin(
+        node.arguments.map((arg) => expandClass(arg, ctx))
+      );
+    }
+    if (callee && ctx.fns.has(callee)) {
+      const fn = ctx.fns.get(callee)!;
+      return expandClass(fn.node, fn.ctx);
+    }
+    return [ctx.strings.get(callee ?? "") ?? ""];
   }
   if (ts.isObjectLiteralExpression(node)) {
     return cartesianJoin(
       node.properties.map((prop) => {
         if (ts.isPropertyAssignment(prop)) {
-          return expandClass(prop.initializer, index);
+          return expandClass(prop.initializer, ctx);
         }
         if (ts.isShorthandPropertyAssignment(prop)) {
-          return [index.get(prop.name.text) ?? ""];
+          return [ctx.strings.get(prop.name.text) ?? ""];
         }
         if (ts.isSpreadAssignment(prop)) {
-          return expandClass(prop.expression, index);
+          return expandClass(prop.expression, ctx);
         }
         return [""];
       })
     );
   }
   if (ts.isArrayLiteralExpression(node)) {
-    return cartesianJoin(node.elements.map((el) => expandClass(el, index)));
+    return cartesianJoin(node.elements.map((el) => expandClass(el, ctx)));
   }
   if (ts.isJsxExpression(node) && node.expression) {
-    return expandClass(node.expression, index);
+    return expandClass(node.expression, ctx);
   }
-  return [collect(node, index)];
+  if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+    return expandClass(node.body, ctx);
+  }
+  if (ts.isBlock(node)) {
+    const returns = node.statements.filter((stmt) => ts.isReturnStatement(stmt));
+    if (returns.length === 0) return [collect(node, ctx.strings)];
+    return returns.flatMap((stmt) => expandClass(stmt, ctx));
+  }
+  if (ts.isReturnStatement(node) && node.expression) {
+    return expandClass(node.expression, ctx);
+  }
+  return [collect(node, ctx.strings)];
 }
 
 interface Decl {
@@ -452,14 +623,30 @@ function collectDecls(sf: ts.SourceFile): Decl[] {
   return decls;
 }
 
-function resolveIndex(decls: Decl[]): Map<string, string> {
+function resolveStrings(decls: Decl[]): Map<string, string> {
   const index = new Map<string, string>([["PRESS_CLASS", PRESS_CLASS]]);
   for (let pass = 0; pass < 6; pass += 1) {
     for (const decl of decls) {
+      if (isFnNode(decl.node)) continue;
+      if (!isClassInitializer(decl.node)) continue;
       index.set(decl.name, collect(decl.node, index));
     }
   }
   return index;
+}
+
+function buildExpandCtx(sf: ts.SourceFile): ExpandCtx {
+  const decls = collectDecls(sf);
+  const ctx: ExpandCtx = {
+    strings: resolveStrings(decls),
+    fns: new Map(),
+  };
+  for (const decl of decls) {
+    if (!isFnNode(decl.node)) continue;
+    if (CLASS_COMBINERS.has(decl.name)) continue;
+    ctx.fns.set(decl.name, { node: decl.node, ctx });
+  }
+  return ctx;
 }
 
 function jsxTagName(tag: ts.JsxTagNameExpression): string {
@@ -483,21 +670,59 @@ function jsxAttr(
 
 function attrClasses(
   attr: ts.JsxAttribute | undefined,
-  index: Map<string, string>
+  ctx: ExpandCtx
 ): string[] {
   if (!attr?.initializer) return [""];
   if (ts.isStringLiteral(attr.initializer)) return [attr.initializer.text];
   if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
-    return expandClass(attr.initializer.expression, index);
+    return expandClass(attr.initializer.expression, ctx);
   }
   return [""];
 }
 
 function attrText(
   attr: ts.JsxAttribute | undefined,
-  index: Map<string, string>
+  ctx: ExpandCtx
 ): string {
-  return attrClasses(attr, index).join(" ").replace(/\s+/g, " ").trim();
+  return attrClasses(attr, ctx).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function attrExprText(attr: ts.JsxAttribute | undefined): string {
+  if (!attr?.initializer) return "";
+  if (ts.isStringLiteral(attr.initializer)) return attr.initializer.text;
+  if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+    const ex = attr.initializer.expression;
+    if (ts.isStringLiteral(ex) || ts.isNoSubstitutionTemplateLiteral(ex)) {
+      return ex.text;
+    }
+    return ex.getText();
+  }
+  return "";
+}
+
+function attrIsLiteralTrue(attr: ts.JsxAttribute | undefined): boolean {
+  if (!attr) return false;
+  if (!attr.initializer) return true;
+  if (ts.isStringLiteral(attr.initializer)) return attr.initializer.text === "true";
+  if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+    return attr.initializer.expression.kind === ts.SyntaxKind.TrueKeyword;
+  }
+  return false;
+}
+
+function jsxContainsBinaryInput(opening: ts.JsxOpeningLikeElement): boolean {
+  const parent = opening.parent;
+  if (!parent || !ts.isJsxElement(parent)) return false;
+  const walk = (n: ts.Node): boolean => {
+    if (ts.isJsxOpeningElement(n) || ts.isJsxSelfClosingElement(n)) {
+      if (jsxTagName(n.tagName).toLowerCase() === "input") {
+        const type = attrExprText(jsxAttr(n, ["type"])).toLowerCase();
+        if (type === "checkbox" || type === "radio") return true;
+      }
+    }
+    return Boolean(ts.forEachChild(n, walk));
+  };
+  return parent.children.some((child) => walk(child));
 }
 
 function resolveModule(fromFile: string, spec: string): string | undefined {
@@ -513,8 +738,9 @@ function resolveModule(fromFile: string, spec: string): string | undefined {
 }
 
 interface FileIndex {
-  strings: Map<string, string>;
+  ctx: ExpandCtx;
   pressTags: Set<string>;
+  routerTags: Set<string>;
 }
 
 function isCreateElement(expr: ts.Expression): boolean {
@@ -548,7 +774,7 @@ function objectPropNode(
 function objectProp(
   obj: ts.ObjectLiteralExpression,
   name: string,
-  index: Map<string, string>
+  ctx: ExpandCtx
 ): string {
   for (const prop of obj.properties) {
     if (!ts.isPropertyAssignment(prop)) continue;
@@ -557,7 +783,7 @@ function objectProp(
       : ts.isStringLiteral(prop.name)
         ? prop.name.text
         : "";
-    if (key === name) return collect(prop.initializer, index);
+    if (key === name) return collect(prop.initializer, ctx.strings);
   }
   return "";
 }
@@ -595,43 +821,92 @@ function stripComments(source: string): string {
 
 const SOURCE_FILES = walkSource(WEB_SRC);
 
+function cssUtilitiesWithActive(source: string): Set<string> {
+  const names = new Set<string>();
+  const re = /@utility\s+([a-z0-9-]+)\s*\{/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(source))) {
+    const body = braceBody(source, match.index + match[0].length - 1);
+    const stripped = body.replace(/\/\*[\s\S]*?\*\//g, "");
+    if (/:active\b/.test(stripped)) names.add(match[1]);
+  }
+  return names;
+}
+
+const UTILITIES_WITH_ACTIVE = cssUtilitiesWithActive(TOKENS_CSS);
+
+function hasUtilityActive(text: string): boolean {
+  return text.split(/\s+/).some((tok) => UTILITIES_WITH_ACTIVE.has(tok));
+}
+
+function siteHasPress(s: PressSite): boolean {
+  if (hasPress(s.text)) return true;
+  if (hasUtilityActive(s.text)) return true;
+  if (isNativeUaWidget(s)) return true;
+  return false;
+}
+
+function parseImportedSf(resolved: string): ts.SourceFile {
+  return ts.createSourceFile(
+    resolved,
+    readFileSync(resolved, "utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    resolved.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
+  );
+}
+
 function buildFileIndex(file: string, sf: ts.SourceFile): FileIndex {
-  const strings = resolveIndex(collectDecls(sf));
+  const ctx = buildExpandCtx(sf);
   const pressTags = new Set<string>();
+  const routerTags = new Set<string>();
   for (const stmt of sf.statements) {
     if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) {
       continue;
     }
     const spec = stmt.moduleSpecifier.text;
-    if (/ui\/button$/.test(spec)) {
-      const bindings = stmt.importClause?.namedBindings;
-      if (bindings && ts.isNamedImports(bindings)) {
-        for (const el of bindings.elements) {
-          const imported = (el.propertyName ?? el.name).text;
-          if (imported === "Button") pressTags.add(el.name.text);
+    const bindings = stmt.importClause?.namedBindings;
+    if (/ui\/button$/.test(spec) && bindings && ts.isNamedImports(bindings)) {
+      for (const el of bindings.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (imported === "Button") pressTags.add(el.name.text);
+      }
+    }
+    if (
+      /react-router-dom$/.test(spec) &&
+      bindings &&
+      ts.isNamedImports(bindings)
+    ) {
+      for (const el of bindings.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (imported === "Link" || imported === "NavLink") {
+          routerTags.add(el.name.text);
         }
       }
     }
     const resolved = resolveModule(file, spec);
     if (!resolved) continue;
-    const importedSf = ts.createSourceFile(
-      resolved,
-      readFileSync(resolved, "utf8"),
-      ts.ScriptTarget.Latest,
-      true,
-      resolved.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS
-    );
-    const importedIndex = resolveIndex(collectDecls(importedSf));
-    const bindings = stmt.importClause?.namedBindings;
+    const importedSf = parseImportedSf(resolved);
+    const importedCtx = buildExpandCtx(importedSf);
     if (bindings && ts.isNamedImports(bindings)) {
       for (const el of bindings.elements) {
         const imported = (el.propertyName ?? el.name).text;
         const local = el.name.text;
-        if (importedIndex.has(imported)) strings.set(local, importedIndex.get(imported)!);
+        if (importedCtx.strings.has(imported)) {
+          ctx.strings.set(local, importedCtx.strings.get(imported)!);
+        }
+        const fn = importedCtx.fns.get(imported);
+        if (
+          fn &&
+          !CLASS_COMBINERS.has(imported) &&
+          !CLASS_COMBINERS.has(local)
+        ) {
+          ctx.fns.set(local, fn);
+        }
       }
     }
   }
-  return { strings, pressTags };
+  return { ctx, pressTags, routerTags };
 }
 
 function discover(): PressSite[] {
@@ -641,27 +916,83 @@ function discover(): PressSite[] {
     const rel = `clients/web/src/${relative(WEB_SRC, file)}`;
     const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
-    const { strings, pressTags } = buildFileIndex(file, sf);
-    const visit = (node: ts.Node) => {
+    const { ctx, pressTags, routerTags } = buildFileIndex(file, sf);
+    const binaryIds = new Set<string>();
+    const collectIds = (node: ts.Node) => {
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-        const tag = jsxTagName(node.tagName);
-        const role = attrText(jsxAttr(node, ["role"]), strings);
-        const classes = attrClasses(jsxAttr(node, ["className", "class"]), strings);
-        const unique = [...new Set(classes.map((c) => c.replace(/\s+/g, " ").trim()))];
-        for (const raw of unique.length > 0 ? unique : [""]) {
-          let text = raw;
-          if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
-          sites.push({
-            rel,
-            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
-            tag,
-            role,
-            text: text.replace(/\s+/g, " ").trim(),
-            kind: "jsx",
-          });
+        if (jsxTagName(node.tagName) === "input") {
+          const type = attrExprText(jsxAttr(node, ["type"])).toLowerCase();
+          if (type === "checkbox" || type === "radio") {
+            const id = attrExprText(jsxAttr(node, ["id"]));
+            if (id) binaryIds.add(id);
+          }
         }
       }
-      if (ts.isCallExpression(node) && isCreateElement(node.expression) && node.arguments.length >= 2) {
+      ts.forEachChild(node, collectIds);
+    };
+    collectIds(sf);
+
+    const emitJsx = (
+      node: ts.JsxOpeningLikeElement,
+      parentTag: string,
+      parentAsChild: boolean
+    ) => {
+      const tag = jsxTagName(node.tagName);
+      const role = attrText(jsxAttr(node, ["role"]), ctx);
+      const htmlFor = attrExprText(jsxAttr(node, ["htmlFor"]));
+      const inputType = attrExprText(jsxAttr(node, ["type"]));
+      const disabled =
+        attrIsLiteralTrue(jsxAttr(node, ["disabled"])) ||
+        attrIsLiteralTrue(jsxAttr(node, ["aria-disabled"]));
+      const containsBinary =
+        tag === "label" && jsxContainsBinaryInput(node);
+      const labelIsControl =
+        tag === "label" &&
+        (containsBinary || (htmlFor !== "" && binaryIds.has(htmlFor)));
+      const classes = attrClasses(jsxAttr(node, ["className", "class"]), ctx);
+      const unique = [...new Set(classes.map((c) => c.replace(/\s+/g, " ").trim()))];
+      for (const raw of unique.length > 0 ? unique : [""]) {
+        let text = raw;
+        if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+        if (parentAsChild && pressTags.has(parentTag)) {
+          text = `${text} ${PRESS_CLASS}`;
+        }
+        sites.push({
+          rel,
+          line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+          tag,
+          role,
+          text: text.replace(/\s+/g, " ").trim(),
+          kind: "jsx",
+          htmlFor,
+          inputType,
+          disabled,
+          parentTag,
+          labelIsControl,
+          routerLink: routerTags.has(tag),
+        });
+      }
+    };
+
+    const visit = (node: ts.Node, parentTag: string, parentAsChild: boolean) => {
+      if (ts.isJsxElement(node)) {
+        const tag = jsxTagName(node.openingElement.tagName);
+        const asChild = attrIsLiteralTrue(
+          jsxAttr(node.openingElement, ["asChild"])
+        );
+        emitJsx(node.openingElement, parentTag, parentAsChild);
+        for (const child of node.children) visit(child, tag, asChild);
+        return;
+      }
+      if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+        emitJsx(node, parentTag, parentAsChild);
+        return;
+      }
+      if (
+        ts.isCallExpression(node) &&
+        isCreateElement(node.expression) &&
+        node.arguments.length >= 2
+      ) {
         const tagArg = node.arguments[0];
         const propsArg = node.arguments[1];
         const tag = ts.isStringLiteral(tagArg)
@@ -671,13 +1002,21 @@ function discover(): PressSite[] {
             : "";
         let texts: string[] = [""];
         let role = "";
+        let inputType = "";
+        let disabled = false;
+        let htmlFor = "";
         if (ts.isObjectLiteralExpression(propsArg)) {
           const classAttr =
             objectPropNode(propsArg, "className") || objectPropNode(propsArg, "class");
-          texts = classAttr
-            ? expandClass(classAttr, strings)
-            : [""];
-          role = objectProp(propsArg, "role", strings);
+          texts = classAttr ? expandClass(classAttr, ctx) : [""];
+          role = objectProp(propsArg, "role", ctx);
+          inputType = objectProp(propsArg, "type", ctx);
+          htmlFor = objectProp(propsArg, "htmlFor", ctx);
+          const disabledNode = objectPropNode(propsArg, "disabled");
+          disabled =
+            Boolean(
+              disabledNode && disabledNode.kind === ts.SyntaxKind.TrueKeyword
+            );
         }
         const unique = [...new Set(texts.map((c) => c.replace(/\s+/g, " ").trim()))];
         for (const raw of unique.length > 0 ? unique : [""]) {
@@ -690,12 +1029,19 @@ function discover(): PressSite[] {
             role,
             text: text.replace(/\s+/g, " ").trim(),
             kind: "createElement",
+            htmlFor,
+            inputType,
+            disabled,
+            parentTag: "",
+            labelIsControl:
+              tag === "label" && htmlFor !== "" && binaryIds.has(htmlFor),
+            routerLink: routerTags.has(tag),
           });
         }
       }
-      ts.forEachChild(node, visit);
+      ts.forEachChild(node, (child) => visit(child, parentTag, parentAsChild));
     };
-    visit(sf);
+    visit(sf, "", false);
   }
   return sites;
 }
@@ -705,26 +1051,29 @@ function isInertPointer(text: string): boolean {
 }
 
 function isPointerInteractive(s: PressSite): boolean {
-  if (isPressForbidden(s.tag, s.role, s.text)) return false;
-  if (!isControl(s.tag, s.role, s.text)) return false;
-  if (hasHover(s.text) || hasPress(s.text) || isTextLink(s.tag, s.text)) {
-    return true;
-  }
+  if (s.disabled) return false;
+  if (isVisuallyHidden(s.text)) return false;
   if (isInertPointer(s.text)) return false;
-  if (/data-\[selected/.test(s.text)) return true;
-  return (
-    s.rel.endsWith("SettingsFields.tsx") &&
-    s.tag.toLowerCase() === "label" &&
-    /(?<![\w-])bg-accent-soft/.test(s.text)
-  );
+  if (isPressForbidden(s.tag, s.role, s.text)) return false;
+  return isInteractiveElement(s);
 }
 
 const SITES = discover();
 const POPULATION = SITES.filter(isPointerInteractive);
-const MISSING_PRESS = POPULATION.filter((s) => !hasPress(s.text));
+const MISSING_PRESS = POPULATION.filter((s) => !siteHasPress(s));
 const HOVER_ONLY = MISSING_PRESS;
-const TEXT_LINKS = MISSING_PRESS.filter((s) => isTextLink(s.tag, s.text));
-const INTERACTIVE = MISSING_PRESS.filter((s) => !isTextLink(s.tag, s.text));
+const TEXT_LINKS = MISSING_PRESS.filter((s) =>
+  isTextLink(s.tag, s.text, s.routerLink)
+);
+const INTERACTIVE = MISSING_PRESS.filter(
+  (s) => !isTextLink(s.tag, s.text, s.routerLink)
+);
+if (process.env.PRESS_LEDGER_CENSUS === "1") {
+  console.log(
+    `PRESS_LEDGER N0=${POPULATION.length} N1=${MISSING_PRESS.length} interactive=${INTERACTIVE.length}`
+  );
+  console.log(JSON.stringify(countedByFile(TEXT_LINKS)));
+}
 const FORBIDDEN_PRESS = SITES.filter(
   (s) => isPressForbidden(s.tag, s.role, s.text) && /(?<![\w-])press\b/.test(s.text)
 );
@@ -733,12 +1082,13 @@ const DUAL_TRANSITION = SITES.filter(
 );
 
 /**
- * Remaining press-missing **text links** after the UX-R1e R4 classifier.
- * Interactive elements (tag/role + neither-hover-nor-press cmdk/checked
- * toggle) without press are hard-zero. Pin shrinks only.
+ * Remaining press-missing **text links** after the UX-R1e R5 tag/role
+ * population. Interactive elements without press/fill (or native UA press)
+ * are hard-zero. Pin shrinks only.
  *
  * Bare underlined links (padding/rounded/touch-target without a painted fill
- * or border) are text, not boxes.
+ * or any `border*` class) are text, not boxes. `Link`/`NavLink` from
+ * react-router-dom count with `<a>`/`<button>`.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/attachments/AttachmentTray.tsx", 2],
@@ -823,13 +1173,13 @@ function uniqueClasses(values: string[]): string[] {
 
 function cnBranchesInFunction(source: string, fileName: string, fnName: string): string[] {
   const sf = sourceFile(source, fileName);
-  const index = resolveIndex(collectDecls(sf));
+  const ctx = buildExpandCtx(sf);
   const fn = collectDecls(sf).find((d) => d.name === fnName);
   if (!fn) throw new Error(`${fnName} 이 없다`);
   const out: string[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isCallExpression(node) && calleeName(node.expression) === "cn") {
-      out.push(...expandClass(node, index));
+      out.push(...expandClass(node, ctx));
       return;
     }
     ts.forEachChild(node, visit);
@@ -845,14 +1195,14 @@ function classBranchesInFunctionOnTag(
   tag: string
 ): string[] {
   const sf = sourceFile(source, fileName);
-  const index = resolveIndex(collectDecls(sf));
+  const ctx = buildExpandCtx(sf);
   const fn = collectDecls(sf).find((d) => d.name === fnName);
   if (!fn) throw new Error(`${fnName} 이 없다`);
   const out: string[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
       if (jsxTagName(node.tagName) === tag) {
-        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), index));
+        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), ctx));
       }
     }
     ts.forEachChild(node, visit);
@@ -863,12 +1213,12 @@ function classBranchesInFunctionOnTag(
 
 function classBranchesByTestId(source: string, fileName: string, testId: string): string[] {
   const sf = sourceFile(source, fileName);
-  const index = resolveIndex(collectDecls(sf));
+  const ctx = buildExpandCtx(sf);
   const out: string[] = [];
   const visit = (node: ts.Node) => {
     if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
-      if (attrText(jsxAttr(node, ["data-testid"]), index) === testId) {
-        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), index));
+      if (attrText(jsxAttr(node, ["data-testid"]), ctx) === testId) {
+        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), ctx));
       }
     }
     ts.forEachChild(node, visit);
@@ -939,7 +1289,9 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     const channel = HOVER_ONLY.filter((s) =>
       CHANNEL_VIEW.some((part) => s.rel.endsWith(part))
     );
-    expect(channel.every((s) => isTextLink(s.tag, s.text))).toBe(true);
+    expect(channel.every((s) => isTextLink(s.tag, s.text, s.routerLink))).toBe(
+      true
+    );
     expect(channel.length).toBeGreaterThan(0);
   });
 
@@ -966,24 +1318,39 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     expect(cssHoverWithoutActive(scratch)).toEqual(["sabotage-hover-only"]);
   });
 
-  it("이름만 Button 인 hover-only 는 잔량이다 (H-3 이름 허용목록 없음)", () => {
+  it("PascalCase 이름은 인구가 아니고 button 태그가 인구다 (B4-1)", () => {
+    expect(
+      isInteractiveElement({
+        tag: "Button",
+        role: "",
+        inputType: "",
+        labelIsControl: false,
+      })
+    ).toBe(false);
+    expect(
+      isInteractiveElement({
+        tag: "button",
+        role: "",
+        inputType: "",
+        labelIsControl: false,
+      })
+    ).toBe(true);
     const scratch = ts.createSourceFile(
       "SabotageButton.tsx",
-      `function Button(props: { className?: string }) { return null; }
-export function Probe() {
-  return <Button className="hover:bg-surface-hover" />;
+      `export function Probe() {
+  return <button type="button" className="hover:bg-surface-hover" />;
 }
 `,
       ts.ScriptTarget.Latest,
       true,
       ts.ScriptKind.TSX
     );
-    const index = resolveIndex(collectDecls(scratch));
+    const ctx = buildExpandCtx(scratch);
     const sites: string[] = [];
     const visit = (node: ts.Node) => {
       if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
         const tag = jsxTagName(node.tagName);
-        const text = attrText(jsxAttr(node, ["className", "class"]), index);
+        const text = attrText(jsxAttr(node, ["className", "class"]), ctx);
         if (isControl(tag, "", text) && hasHover(text) && !hasPress(text)) {
           sites.push(tag);
         }
@@ -991,7 +1358,7 @@ export function Probe() {
       ts.forEachChild(node, visit);
     };
     visit(scratch);
-    expect(sites).toEqual(["Button"]);
+    expect(sites).toEqual(["button"]);
   });
 
   it("비상호작용 div 에 press 를 두면 붉다 (H-1)", () => {
@@ -1009,7 +1376,10 @@ export function Probe() {
     const visit = (node: ts.Node) => {
       if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
         const tag = jsxTagName(node.tagName);
-        const text = attrText(jsxAttr(node, ["className", "class"]), new Map());
+        const text = attrText(
+          jsxAttr(node, ["className", "class"]),
+          ctxFromStrings(new Map())
+        );
         if (isPressForbidden(tag, "", text) && /(?<![\w-])press\b/.test(text)) {
           forbidden.push(tag);
         }
@@ -1035,8 +1405,11 @@ export function Probe() {
     const visit = (node: ts.Node) => {
       if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
         const tag = jsxTagName(node.tagName);
-        const role = attrText(jsxAttr(node, ["role"]), new Map());
-        const text = attrText(jsxAttr(node, ["className", "class"]), new Map());
+        const role = attrText(jsxAttr(node, ["role"]), ctxFromStrings(new Map()));
+        const text = attrText(
+          jsxAttr(node, ["className", "class"]),
+          ctxFromStrings(new Map())
+        );
         if (isControl(tag, role, text) && hasHover(text) && !hasPress(text)) {
           counted.push(tag);
         }
@@ -1071,7 +1444,7 @@ export function Probe() {
         let text = "";
         const propsArg = node.arguments[1];
         if (ts.isObjectLiteralExpression(propsArg)) {
-          text = objectProp(propsArg, "className", new Map());
+          text = objectProp(propsArg, "className", ctxFromStrings(new Map()));
         }
         if (isControl(tag, "", text) && hasHover(text) && !hasPress(text)) {
           counted.push(tag);
@@ -1098,9 +1471,8 @@ export function Probe() {
       constString(SIDEBAR_ROW_SRC, "rowClass") +
       " " +
       constString(SIDEBAR_ROW_SRC, "inactiveClass");
-    expect(row).toContain("press");
-    expect(row).not.toMatch(DURATION_LITERAL);
-    expect(row).not.toMatch(SCALE_LITERAL);
+    expect(row).not.toMatch(/(?<![\w-])press\b/);
+    expect(row).toMatch(/active:bg-surface-pressed/);
     expect(REACTION_SRC).toMatch(/\bpress\b/);
     for (const site of HOVER_ONLY) {
       expect(site.text, `${site.rel}:${site.line}`).not.toMatch(DURATION_LITERAL);
@@ -1137,19 +1509,22 @@ export function Probe() {
     expect(css).toMatch(/\.press-instant-fill:active[\s\S]*?transform:\s*none/);
   });
 
-  it("SidebarRow 이관 목록은 press 가 이기고 transform 이 있으며 outline-color 는 없다", async () => {
+  it("SidebarRow 전폭 행은 채움만 하고 변형이 없다 (B4-3)", async () => {
     const rowClass = constString(SIDEBAR_ROW_SRC, "rowClass");
     const inactiveClass = constString(SIDEBAR_ROW_SRC, "inactiveClass");
-    const className = `${rowClass} ${inactiveClass}`;
-    expect(className).toContain("press");
-    expect(className).not.toMatch(DURATION_LITERAL);
-    expect(className).not.toMatch(SCALE_LITERAL);
-
-    const css = await buildCss(classTokens(className));
-    const last = lastPressOrColorsTransition(css);
-    expect(last.selector, "캐스케이드 마지막 소유자는 press").toBe(".press");
-    expect(last.body).toMatch(/transform/);
-    expect(last.body).not.toMatch(/outline-color/);
+    const activeClass = constString(SIDEBAR_ROW_SRC, "activeClass");
+    expect(rowClass).not.toMatch(/(?:^|\s)press(?:\s|$)/);
+    expect(inactiveClass).toMatch(/active:bg-surface-pressed/);
+    expect(activeClass).toMatch(/bg-accent-soft/);
+    expect(activeClass).toMatch(/active:bg-surface-pressed/);
+    expect(activeClass).not.toMatch(/hover:bg-surface-hover/);
+    const css = await buildCss(
+      classTokens(`${inactiveClass} ${activeClass} active:bg-surface-pressed`)
+    );
+    expect(css).toMatch(/var\(--surface-pressed\)/);
+    expect(`${rowClass} ${inactiveClass} ${activeClass}`).not.toMatch(
+      /(?:^|\s)press(?:\s|$)/
+    );
   });
 
   it("compiled CSS 에서 .press 는 .transition-colors 뒤에 선다 (H-2)", async () => {
@@ -1210,26 +1585,29 @@ export function Probe() {
     expect(GALLERY_SRC).toMatch(/press-triplet-summary-card/);
   });
 
-  it("선택 분기도 press 전이를 진다 (H-2g)", async () => {
-    const groups = [
-      classBranchesInFunctionOnTag(WORK_PANEL_SRC, "WorkPanel.tsx", "ScopeButton", "button"),
-      classBranchesByTestId(WORK_PANEL_SRC, "WorkPanel.tsx", "work-session-row"),
-      classBranchesByTestId(TERMINAL_DOCK_SRC, "TerminalDock.tsx", "terminal-dock-tab"),
-      classBranchesInFunctionOnTag(WORK_CONSOLE_SRC, "WorkConsoleRoute.tsx", "WorkConsoleRow", "Link"),
-      cnBranchesInFunction(
-        CHANNEL_HEADER_SRC,
-        "channelHeaderControl.ts",
-        "channelHeaderControlClass"
-      ),
-    ];
-    expect(groups.every((g) => g.length > 0)).toBe(true);
-    for (const branches of groups) {
-      for (const className of branches) {
-        expect(className, className).toMatch(/(?<![\w-])press\b/);
-        const css = await buildCss(classTokens(className));
-        expect(pressDuration(css), className).not.toBe("0s");
-      }
+  it("모든 분기는 press 또는 채움 눌림을 진다 (B4-1)", () => {
+    expect(
+      INTERACTIVE.map((s) => `${s.rel}:${s.line} <${s.tag}> ${s.text}`),
+      "interactive without press"
+    ).toEqual([]);
+    for (const s of POPULATION) {
+      if (isTextLink(s.tag, s.text, s.routerLink)) continue;
+      expect(siteHasPress(s), `${s.rel}:${s.line} <${s.tag}>`).toBe(true);
     }
+  });
+
+  it("선택 분기에서 press 를 빼면 전수가 그 분기를 센다 (B4-1 RED)", () => {
+    const site: PressSite = {
+      rel: "clients/web/src/features/agentHub/AgentHubRoute.tsx",
+      line: 216,
+      tag: "button",
+      role: "",
+      text: "flex w-full items-start gap-3 px-4 py-3 text-left focus-visible:focus-ring bg-accent-soft",
+      kind: "jsx",
+    };
+    expect(isPointerInteractive(site)).toBe(true);
+    expect(hasPress(site.text)).toBe(false);
+    expect(isTextLink(site.tag, site.text)).toBe(false);
   });
 
   it("ScopeButton 을 R2 모양으로 되돌리면 선택 분기가 붉다 (H-2g RED)", async () => {
@@ -1261,8 +1639,9 @@ export function Probe() {
     expect(toggle).toBeTruthy();
     expect(toggle).toMatch(/<label\s+htmlFor=\{testId\}/);
     const rowClass = toggle!.match(/<label[\s\S]*?className=\{cn\(([\s\S]*?)\)\}/)?.[1];
-    expect(rowClass).toMatch(/hover:bg-surface-hover active:bg-surface-pressed/);
-    expect(rowClass).toMatch(/checked && "bg-accent-soft"/);
+    expect(rowClass).toMatch(
+      /checked\s*\?\s*"bg-accent-soft active:bg-surface-pressed"/
+    );
     expect(rowClass).not.toMatch(/(?<![\w-])press\b/);
     expect(toggle).toMatch(/<input[\s\S]*?\bpress\b/);
     expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).toMatch(
@@ -1279,8 +1658,9 @@ export function Probe() {
       line: 53,
       tag: "label",
       role: "",
-      text: 'flex min-w-0 cursor-pointer items-start gap-3 border-b border-line p-3 last:border-b-0 bg-accent-soft',
+      text: "flex min-w-0 cursor-pointer items-start gap-3 border-b border-line p-3 last:border-b-0 bg-accent-soft",
       kind: "jsx",
+      labelIsControl: true,
     };
     expect(isPointerInteractive(site)).toBe(true);
     expect(hasHover(site.text)).toBe(false);
@@ -1304,6 +1684,10 @@ export function Probe() {
         "touch-target rounded-sm px-2 underline underline-offset-2 hover:text-ink"
       )
     ).toBe(true);
+    expect(
+      isTextLink("a", "underline border-2 hover:text-ink")
+    ).toBe(false);
+    expect(isTextLink("Link", "underline hover:text-ink")).toBe(true);
   });
 
   it("plugin-marketplace-row 합성 클래스는 :active 규칙을 컴파일한다 (N-1)", async () => {
@@ -1334,12 +1718,12 @@ export function Probe() {
       true,
       ts.ScriptKind.TSX
     );
-    const index = resolveIndex(collectDecls(scratch));
+    const ctx = buildExpandCtx(scratch);
     const classes: string[] = [];
     const visit = (node: ts.Node) => {
       if (ts.isJsxSelfClosingElement(node)) {
         classes.push(
-          ...attrClasses(jsxAttr(node, ["className"]), index).map((c) =>
+          ...attrClasses(jsxAttr(node, ["className"]), ctx).map((c) =>
             c.replace(/\s+/g, " ").trim()
           )
         );
@@ -1367,12 +1751,14 @@ export function Probe() {
       "message-row",
       "pending-row",
       "settings-row",
+      "settings-row-checked",
       "drafts-li",
     ] as const;
     const skip = new Set([
       "root",
       "row-link",
       "settings-toggle",
+      "settings-toggle-checked",
       "summary-card",
     ]);
     const galleryFrames = [
@@ -1419,7 +1805,7 @@ export function Probe() {
     expect(new Set(extra)).not.toEqual(new Set(pin));
     const scratchDrop = CAPTURE_SRC.replace(
       /const PRESS_TRIPLET_INSITU = \[[^\]]*\]/,
-      `const PRESS_TRIPLET_INSITU = [\n  "message-row",\n  "pending-row",\n  "drafts-li",\n]`
+      `const PRESS_TRIPLET_INSITU = [\n  "message-row",\n  "pending-row",\n  "settings-row",\n  "drafts-li",\n]`
     );
     expect(stringArrayConst(scratchDrop, "PRESS_TRIPLET_INSITU").sort()).not.toEqual(
       [...pin].sort()
@@ -1433,16 +1819,37 @@ export function Probe() {
     );
   });
 
-  it("초안 행은 링크가 채움과 press 를 같이 진다 (N-1)", () => {
+  it("초안 행은 채움만 지고 변형이 없다 (B4-3)", () => {
     expect(DRAFTS_SRC).toMatch(
-      /<Link[\s\S]*?className="flex w-full[^"]*\bpress hover:bg-surface-hover/
+      /<Link[\s\S]*?className="flex w-full[^"]*hover:bg-surface-hover active:bg-surface-pressed/
+    );
+    expect(DRAFTS_SRC).not.toMatch(
+      /<Link[\s\S]*?className="flex w-full[^"]*(?:^|\s)press(?:\s|$)/
     );
     expect(DRAFTS_SRC).not.toMatch(
       /<li\b[^>]*hover:bg-surface-hover[\s\S]*?<Link/
     );
-    expect(DRAFTS_SRC).not.toMatch(
-      /<li\b[^>]*\bpress\b[\s\S]*?<Link/
-    );
+    const drafts = POPULATION.filter((s) => s.rel.endsWith("DraftsRoute.tsx"));
+    const row = drafts.find((s) => /flex w-full gap-3/.test(s.text));
+    expect(row).toBeTruthy();
+    expect(isFullWidthRow(row!)).toBe(true);
+    expect(hasPressScaleClass(row!.text)).toBe(false);
+    expect(hasFillPress(row!.text)).toBe(true);
+  });
+
+  it("초안 행에 press 를 되돌리면 전폭 가드가 붉다 (B4-3 RED)", () => {
+    const site: PressSite = {
+      rel: "clients/web/src/features/drafts/DraftsRoute.tsx",
+      line: 121,
+      tag: "Link",
+      role: "",
+      text: "flex w-full gap-3 py-2 pl-4 pr-8 press hover:bg-surface-hover focus-visible:bg-surface-hover focus-visible:focus-ring",
+      kind: "jsx",
+      parentTag: "li",
+      routerLink: true,
+    };
+    expect(isFullWidthRow(site)).toBe(true);
+    expect(hasPressScaleClass(site.text)).toBe(true);
   });
 
   it("모서리 프로브는 AABB 꼭짓점이 아니라 호 밖 내부를 잰다 (H-1g)", () => {
@@ -1457,9 +1864,12 @@ export function Probe() {
     );
   });
 
-  it("캡처는 시작과 중단에 3짝 증거를 지운다 (N-4)", () => {
+  it("캡처는 시작에 3짝을 지우고 완료된 세트는 이후 중단에 남긴다 (N4-5)", () => {
     expect(CAPTURE_SRC).toMatch(/function wipePressTripletEvidence/);
     expect(CAPTURE_SRC).toMatch(/wipePressTripletEvidence\(\);/);
+    expect(CAPTURE_SRC).toMatch(/function commitPressTripletCatalog/);
+    expect(CAPTURE_SRC).toMatch(/pressTripletCatalogCommitted/);
+    expect(CAPTURE_SRC).toMatch(/abort-after-triplet/);
     expect(CAPTURE_SRC).toMatch(/function recordPressTripletAbort/);
     expect(CAPTURE_SRC).toMatch(/press-triplet-catalog/);
     expect(CAPTURE_SRC).toMatch(/#2057 N-4/);
@@ -1486,6 +1896,53 @@ export function Probe() {
     expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).not.toMatch(
       /(?<![\w-])press\b/
     );
+  });
+
+  it("전폭 행은 채움만 있고 press 스케일이 없다 (B4-3)", () => {
+    const rows = POPULATION.filter(isFullWidthRow);
+    expect(rows.length).toBeGreaterThan(0);
+    for (const s of rows) {
+      expect(
+        hasPressScaleClass(s.text),
+        `${s.rel}:${s.line} <${s.tag}> ${s.text}`
+      ).toBe(false);
+      if (!isTextLink(s.tag, s.text, s.routerLink)) {
+        expect(hasFillPress(s.text), `${s.rel}:${s.line} ${s.text}`).toBe(true);
+      }
+    }
+  });
+
+  it("선택 채움은 hover 에 유지되고 눌림 채움이 이긴다 (B4-4)", () => {
+    for (const s of POPULATION) {
+      if (!/(?<![\w-])bg-accent-soft/.test(s.text)) continue;
+      if (isTextLink(s.tag, s.text, s.routerLink)) continue;
+      expect(
+        s.text,
+        `${s.rel}:${s.line} <${s.tag}> ${s.text}`
+      ).not.toMatch(/(?<![\w-])hover:bg-surface-hover/);
+      expect(s.text, `${s.rel}:${s.line}`).toMatch(
+        /(?<![\w-])active:bg-surface-pressed/
+      );
+    }
+  });
+
+  it("cmdk 선택+active 합성은 selected 채움보다 이긴다 (B4-2)", async () => {
+    const itemClass = constString(QUICKSWITCHER_SRC, "itemClass");
+    expect(itemClass).toMatch(/data-\[selected=true\]:bg-accent-soft/);
+    expect(itemClass).toMatch(
+      /data-\[selected=true\]:active:bg-surface-pressed/
+    );
+    expect(itemClass).not.toMatch(/(?:^|\s)press(?:\s|$)/);
+    const css = await buildCss(classTokens(itemClass));
+    expect(css).toMatch(/\[data-selected=.true.\]:active/);
+    expect(css).toMatch(/var\(--surface-pressed\)/);
+    expect(css).toMatch(/var\(--accent-soft\)/);
+    const stripped = itemClass.replace(
+      /data-\[selected=true\]:active:bg-surface-pressed\s*/,
+      ""
+    );
+    const strippedCss = await buildCss(classTokens(stripped));
+    expect(strippedCss).not.toMatch(/\[data-selected=.true.\]:active/);
   });
 });
 
