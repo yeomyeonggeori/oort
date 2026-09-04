@@ -148,14 +148,13 @@ function PaletteLayer({
       open={isPresent}
       onOpenChange={onOpenChange}
     >
-      {/* AnimatePresence owns this slot. Radix Presence would unmount the
-          overlay as soon as `open={isPresent}` flips, leaving overlayRef
-          null so the duration path (and the reduced-motion branch that
-          skips it) could not be the owner (#1997 N-2). */}
+      {/* AnimatePresence owns this slot. Portal+Content stay forceMounted so
+          the CSS exit can play while `open={isPresent}` is already false.
+          Overlay forceMount is not used: Presence already keeps the overlay
+          through its CSS exit (#1997 M-1). */}
       <DialogPortal forceMount>
         <DialogOverlay
           ref={overlayRef}
-          forceMount
           data-testid="quick-switcher-overlay"
         />
         <DialogPrimitive.Content
