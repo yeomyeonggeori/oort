@@ -515,17 +515,40 @@ describe("Dawn palette", () => {
     ).toBe(true);
   });
 
-  it("light pressed is a different material from accent-soft, or the hover hue family (#2000 M-2)", () => {
-    const pressed = pick("surface-pressed", 0);
-    const hover = pick("surface-hover", 0);
+  it("pressed fill is a different material from every other soft/state fill (#2000 B-1)", () => {
+    const others = [
+      "surface-hover",
+      "accent-soft",
+      "muted-soft",
+      "ok-soft",
+      "warn-soft",
+      "danger-soft",
+      "agent-soft",
+      "surface",
+      "surface-raised",
+      "surface-sidebar",
+    ] as const;
+    for (const scheme of SCHEMES) {
+      const pressed = pick("surface-pressed", scheme.index);
+      for (const other of others) {
+        expect(
+          deltaE(pressed, pick(other, scheme.index)),
+          `--surface-pressed vs --${other} (${scheme.name}) dE`
+        ).toBeGreaterThanOrEqual(0.02);
+      }
+    }
+  });
+
+  it("R3 light pressed fails dE vs accent-soft with no family exemption (#2000 B-1 RED)", () => {
+    const r3Light = "#eee2cc";
     const soft = pick("accent-soft", 0);
-    const sameLadder = hueGap(pressed, hover) <= 5;
-    const distinctSoft =
-      deltaE(pressed, soft) >= 0.02 && hueGap(pressed, soft) >= 15;
+    const dE = deltaE(r3Light, soft);
     expect(
-      sameLadder || distinctSoft,
-      `light pressed vs accent-soft dE ${deltaE(pressed, soft).toFixed(4)} Δhue ${hueGap(pressed, soft).toFixed(1)} (hover Δhue ${hueGap(pressed, hover).toFixed(1)})`
-    ).toBe(true);
+      dE,
+      `R3 #eee2cc vs accent-soft dE ${dE.toFixed(4)} contrast ${contrast(r3Light, soft).toFixed(4)}`
+    ).toBeLessThan(0.02);
+    expect(contrast(r3Light, soft)).toBeGreaterThanOrEqual(1.05);
+    expect(pick("surface-pressed", 0)).not.toBe(r3Light);
   });
 
   it("CHIP_VESSEL_SURFACES names surface-pressed on every vessel (#2000 M-2)", () => {

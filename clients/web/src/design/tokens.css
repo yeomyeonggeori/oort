@@ -34,21 +34,21 @@
   --surface-raised: light-dark(#fffefb, #201f24);
   --surface-sidebar: light-dark(#efece6, #1b1a1f);
   --surface-hover: light-dark(#e7e3db, #26252c);
-  /* --- 본문 행의 눌림 채움 (#2000 R3 / #1515) ---------------------------
-   * `--surface-hover` 에서 한 단 **더 어두운** 방향. R2 값(#ece3cc / #2d2c34)은
-   * 라이트가 hover 보다 밝고(0.7713>0.7704) 다크 휘도 0.0261 이 칩 그릇 띠
-   * (.0192~.0320) 안에 앉아 네 그릇이 대비 1.05 를 깨며, 라이트 accent-soft 와
-   * dE 0.0192 · Δhue 14.4° 로 §2.2 의 두 자를 못 넘었다.
+  /* --- 본문 행의 눌림 채움 (#2000 R4 / #1515) ---------------------------
+   * `--surface-hover` 에서 한 단 **더 어두운** 방향. 같은 재료 여부는 §2.2 의
+   * 한 쌍(대비 ≥ 1.05 **그리고** OKLab dE ≥ 0.02)이지, 색상 가족 면제가 아니다.
+   * R3 라이트 #eee2cc 는 accent-soft 와 대비 1.0526 · dE 0.0185 — 「대비는
+   * 넘는데 눈에는 같은 회색」. R2 (#ece3cc / #2d2c34) 는 라이트가 hover 보다
+   * 밝고 다크가 칩 그릇 띠(.0192~.0320) 안이다.
    *
-   * 라이트 #eee2cc: hover 보다 어둡고(0.7693) 같은 색상 가족(Δhue 1.8°, hover
-   * 84.6). 대비 1.001 · dE 0.0205. ink-muted 4.502. accent-soft 와는 같은
-   * 사다리라 Δhue 8.0° 이지만 hover 와 한 가족이라 §2.2 가 허용. 그릇 최악
-   * danger-soft 1.101 / dE 0.0429.
-   * 다크 #262335: hover(#26252c, L 0.0192 = 띠의 아래 끝)에서 한 단 내려
-   * 띠 밖(0.0187). 대비 1.007 · dE 0.0204 · hue 291.6(hover 292.1). ink-muted
-   * 5.395. 그릇 최악 muted-soft 1.142 / dE 0.0430. `--line-strong` 양쪽 ≥3
-   * 이라 컨트롤 표면으로 분류된다. */
-  --surface-pressed: light-dark(#eee2cc, #262335);
+   * 라이트 #efe2c8: hover 보다 어둡고(L 0.769136 < 0.770416). vs hover 대비
+   * 1.0016 · dE 0.0257 · Δhue 0.00°. vs accent-soft 대비 1.0528 · dE 0.0210.
+   * ink 12.512 · ink-muted 4.5013 (AA 4.5, 여유 0.0013) · line-strong 3.024
+   * (≥3, 여유 0.024). 4.55 / 3.05 여유를 같이 넘는 해는 라이트 띠에 없다
+   * (hover 자신이 muted 4.508 · line 3.029). 그릇 1.101–1.118 / 0.038–0.048.
+   * 다크 #262335: 띠 밖(L 0.0187). vs hover 1.007 · dE 0.0204. ink-muted 5.395.
+   * `--line-strong` 양쪽 ≥3 이라 컨트롤 표면으로 분류된다. */
+  --surface-pressed: light-dark(#efe2c8, #262335);
 
   /* --- lines: --line separates, --line-strong outlines controls (3:1) ----
    * #1866: 라이트 --line 만 한 단계 옅게 (#dcd8d0 → #e4e0d8). --line-strong 은
