@@ -23,6 +23,9 @@ import { buttonVariants } from "./ui/button";
  *   - add a hover-only `@utility` in a scratch copy of tokens.css → CSS pin red
  *   - a hover-only local `<Button>` (not `@/design/ui/button`) → residue red
  *   - repair one text-link residue without lowering CEILING → stale-ceiling red
+ *   - R2 ScopeButton (press only on unselected) → selected duration 0s
+ *   - checked toggle branch without hover/press → INTERACTIVE residue
+ *   - drop or add a PRESS_TRIPLET_INSITU id without updating the pin → set red
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -95,6 +98,10 @@ const GALLERY_SRC = readFileSync(
 );
 const CAPTURE_SRC = readFileSync(
   new URL("../../scripts/capture-screens.mjs", import.meta.url),
+  "utf8"
+);
+const DRAFTS_SRC = readFileSync(
+  new URL("../features/drafts/DraftsRoute.tsx", import.meta.url),
   "utf8"
 );
 
@@ -215,26 +222,17 @@ function isAnchorLike(tag: string): boolean {
 }
 
 /**
- * Canonical §2.6 D5: a text link is an `<a>`/`<button>` whose only affordance
- * is underline or `hover:text-`, with no fill and no box.
+ * Canonical §2.6 D5: a text link is an `<a>`/`<button>` whose rendering is
+ * text only — underline or `hover:text-`, with no background fill and no
+ * border/rounded box. Padding alone (a touch target) does not make a box.
  */
 export function isTextLink(tag: string, text: string): boolean {
   if (!isAnchorLike(tag)) return false;
-  if (/(?<![\w-])hover:(?:bg-|opacity-|border-)/.test(text)) return false;
   const underline = /\bunderline\b/.test(text);
   const hoverText = /(?<![\w-])hover:text-/.test(text);
   if (!underline && !hoverText) return false;
-  if (/(?<![\w-])bg-/.test(text)) return false;
-  if (/\brounded-/.test(text)) return false;
-  if (/\bflex\b/.test(text) && /\bitems-center\b/.test(text)) return false;
-  if (
-    /(?<![\w-])(?:tap-target|touch-target|size-control|h-control|w-control)\b/.test(
-      text
-    )
-  ) {
-    return false;
-  }
-  if (/(?<![\w-])(?:p|px|py|pt|pb|pl|pr)-\d/.test(text)) return false;
+  if (/(?<![\w-])(?:hover:)?bg-/.test(text)) return false;
+  if (/(?<![\w-])hover:(?:opacity-|border-)/.test(text)) return false;
   if (/(?<![\w-])border(?!-\d)/.test(text)) return false;
   return true;
 }
@@ -254,6 +252,15 @@ function isControl(tag: string, role: string, text = ""): boolean {
   if (isPressForbidden(tag, role, text)) return false;
   const t = tag.toLowerCase();
   if (NATIVE_CONTROLS.has(t)) return true;
+  if (
+    t === "label" &&
+    (hasHover(text) ||
+      hasPress(text) ||
+      /(?<![\w-])bg-accent-soft/.test(text) ||
+      /data-\[selected/.test(text))
+  ) {
+    return true;
+  }
   if (tag === "Link" || tag === "NavLink") return true;
   if (role && INTERACTIVE_ROLES.has(role)) return true;
   if (isPascalCase(tag)) return true;
@@ -693,12 +700,31 @@ function discover(): PressSite[] {
   return sites;
 }
 
+function isInertPointer(text: string): boolean {
+  return /cursor-not-allowed|cursor-wait/.test(text);
+}
+
+function isPointerInteractive(s: PressSite): boolean {
+  if (isPressForbidden(s.tag, s.role, s.text)) return false;
+  if (!isControl(s.tag, s.role, s.text)) return false;
+  if (hasHover(s.text) || hasPress(s.text) || isTextLink(s.tag, s.text)) {
+    return true;
+  }
+  if (isInertPointer(s.text)) return false;
+  if (/data-\[selected/.test(s.text)) return true;
+  return (
+    s.rel.endsWith("SettingsFields.tsx") &&
+    s.tag.toLowerCase() === "label" &&
+    /(?<![\w-])bg-accent-soft/.test(s.text)
+  );
+}
+
 const SITES = discover();
-const HOVER_ONLY = SITES.filter(
-  (s) => isControl(s.tag, s.role, s.text) && hasHover(s.text) && !hasPress(s.text)
-);
-const TEXT_LINKS = HOVER_ONLY.filter((s) => isTextLink(s.tag, s.text));
-const INTERACTIVE = HOVER_ONLY.filter((s) => !isTextLink(s.tag, s.text));
+const POPULATION = SITES.filter(isPointerInteractive);
+const MISSING_PRESS = POPULATION.filter((s) => !hasPress(s.text));
+const HOVER_ONLY = MISSING_PRESS;
+const TEXT_LINKS = MISSING_PRESS.filter((s) => isTextLink(s.tag, s.text));
+const INTERACTIVE = MISSING_PRESS.filter((s) => !isTextLink(s.tag, s.text));
 const FORBIDDEN_PRESS = SITES.filter(
   (s) => isPressForbidden(s.tag, s.role, s.text) && /(?<![\w-])press\b/.test(s.text)
 );
@@ -707,18 +733,27 @@ const DUAL_TRANSITION = SITES.filter(
 );
 
 /**
- * Remaining hover-without-press **text links** after the UX-R1e R3 classifier.
- * Interactive hover-without-press is hard-zero. Pin shrinks only.
+ * Remaining press-missing **text links** after the UX-R1e R4 classifier.
+ * Interactive elements (tag/role + neither-hover-nor-press cmdk/checked
+ * toggle) without press are hard-zero. Pin shrinks only.
  *
- * Boxed underline controls (rounded/padding/touch-target) took `press` when
- * the §2.6 "no fill and no box" clause started applying to the underline
- * branch. Residue is the one inline body link.
+ * Bare underlined links (padding/rounded/touch-target without a painted fill
+ * or border) are text, not boxes.
  */
 const RESIDUE: readonly (readonly [string, number])[] = [
+  ["clients/web/src/features/attachments/AttachmentTray.tsx", 2],
+  ["clients/web/src/features/auth/ConnectPage.tsx", 1],
+  ["clients/web/src/features/inbox/InboxRoute.tsx", 1],
+  ["clients/web/src/features/plugins/PluginSection.tsx", 1],
+  ["clients/web/src/features/routing/MentionRoutingBar.tsx", 1],
+  ["clients/web/src/features/timeline/FoldToggle.tsx", 1],
+  ["clients/web/src/features/timeline/LongPressHint.tsx", 1],
   ["clients/web/src/features/timeline/MessageBody.tsx", 1],
+  ["clients/web/src/features/timeline/MessageRow.tsx", 1],
+  ["clients/web/src/features/timeline/PendingRow.tsx", 1],
 ];
 
-const CEILING = 1;
+const CEILING = 11;
 
 function countedByFile(sites: PressSite[]): [string, number][] {
   const counted = new Map<string, number>();
@@ -777,6 +812,77 @@ function classBeforeTestId(source: string, testId: string): string {
   return source.slice(Math.max(0, idx - 500), idx);
 }
 
+function sourceFile(source: string, fileName: string): ts.SourceFile {
+  const kind = fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, kind);
+}
+
+function uniqueClasses(values: string[]): string[] {
+  return [...new Set(values.map((c) => c.replace(/\s+/g, " ").trim()).filter(Boolean))];
+}
+
+function cnBranchesInFunction(source: string, fileName: string, fnName: string): string[] {
+  const sf = sourceFile(source, fileName);
+  const index = resolveIndex(collectDecls(sf));
+  const fn = collectDecls(sf).find((d) => d.name === fnName);
+  if (!fn) throw new Error(`${fnName} 이 없다`);
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isCallExpression(node) && calleeName(node.expression) === "cn") {
+      out.push(...expandClass(node, index));
+      return;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(fn.node);
+  return uniqueClasses(out);
+}
+
+function classBranchesInFunctionOnTag(
+  source: string,
+  fileName: string,
+  fnName: string,
+  tag: string
+): string[] {
+  const sf = sourceFile(source, fileName);
+  const index = resolveIndex(collectDecls(sf));
+  const fn = collectDecls(sf).find((d) => d.name === fnName);
+  if (!fn) throw new Error(`${fnName} 이 없다`);
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (jsxTagName(node.tagName) === tag) {
+        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), index));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(fn.node);
+  return uniqueClasses(out);
+}
+
+function classBranchesByTestId(source: string, fileName: string, testId: string): string[] {
+  const sf = sourceFile(source, fileName);
+  const index = resolveIndex(collectDecls(sf));
+  const out: string[] = [];
+  const visit = (node: ts.Node) => {
+    if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
+      if (attrText(jsxAttr(node, ["data-testid"]), index) === testId) {
+        out.push(...attrClasses(jsxAttr(node, ["className", "class"]), index));
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return uniqueClasses(out);
+}
+
+function stringArrayConst(source: string, name: string): string[] {
+  const match = source.match(new RegExp(String.raw`const ${name} = \[([^\]]*)\]`));
+  if (!match) throw new Error(`${name} 배열이 없다`);
+  return [...match[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+}
+
 describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
   it("발견이 JSX 클래스이지 주석이 아니다", () => {
     expect(IDLE_CARD_SRC).toMatch(/hover:bg-surface-hover/);
@@ -785,15 +891,15 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     ).toEqual([]);
   });
 
-  it("컨트롤 hover-only 는 0 이다", () => {
+  it("컨트롤 중 press 없는 자리는 텍스트 링크뿐이다", () => {
     expect(
       INTERACTIVE.map((s) => `${s.rel}:${s.line} <${s.tag}> ${s.text}`),
-      "interactive hover-without-press"
+      "interactive without press"
     ).toEqual([]);
   });
 
-  it("hover 만 있고 press/active 가 없는 자리는 줄어들기만 한다", () => {
-    expect(HOVER_ONLY.length).toBeLessThanOrEqual(CEILING);
+  it("press 없는 자리는 줄어들기만 한다", () => {
+    expect(MISSING_PRESS.length).toBeLessThanOrEqual(CEILING);
   });
 
   it("천장이 낡지 않았다", () => {
@@ -803,7 +909,7 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
       HOVER_ONLY[0];
     const message =
       HOVER_ONLY.length > CEILING
-        ? `hover-only control added at ${added.rel}:${added.line}`
+        ? `press-missing control added at ${added.rel}:${added.line}`
         : `lower the ceiling to ${HOVER_ONLY.length}`;
     expect(HOVER_ONLY.length, message).toBe(CEILING);
     expect(TEXT_LINKS.length).toBe(HOVER_ONLY.length);
@@ -814,6 +920,19 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
       countedByFile(HOVER_ONLY),
       "잔량 표가 낡았다 — 고쳤으면 줄이고, 늘었으면 적어라"
     ).toEqual(RESIDUE.map(([rel, n]) => [rel, n]));
+  });
+
+  it("전수 인구는 상호작용 요소이다 (M-3)", () => {
+    expect(POPULATION.length, `N0=${POPULATION.length}`).toBeGreaterThan(
+      MISSING_PRESS.length
+    );
+    expect(TEXT_LINKS.length, `N1=${MISSING_PRESS.length}`).toBe(
+      MISSING_PRESS.length
+    );
+    expect(INTERACTIVE, `interactive without press; N0=${POPULATION.length}`).toEqual(
+      []
+    );
+    expect(CEILING, `ceiling=${CEILING}`).toBe(MISSING_PRESS.length);
   });
 
   it("채널 뷰 소스 잔량은 텍스트 링크뿐이다 (UX-R0 52/6/26 은 런타임 DOM)", () => {
@@ -989,7 +1108,7 @@ export function Probe() {
     }
   });
 
-  it("S0 CTA 와 메뉴 행은 press 를 든다 (N-4, D5 메뉴)", () => {
+  it("S0 CTA 는 press 를 들고 메뉴 행은 채움만 든다 (N-5)", () => {
     const landing = stripComments(LANDING_SRC);
     expect(classBeforeTestId(landing, "onboarding-choose-server")).toMatch(
       /\bpress\b/
@@ -997,12 +1116,15 @@ export function Probe() {
     expect(classBeforeTestId(landing, "onboarding-choose-invite")).toMatch(
       /\bpress\b/
     );
-    expect(stripComments(MENU_SRC)).toMatch(
-      /function menuRowClass[\s\S]*?\bpress\b/
+    const menu = stripComments(MENU_SRC);
+    expect(menu).toMatch(/function menuRowClass[\s\S]*?\bpress-instant-fill\b/);
+    expect(menu).toMatch(/function menuRowClass[\s\S]*?active:bg-surface-pressed/);
+    expect(menu).not.toMatch(
+      /function menuRowClass[\s\S]*?\bpress press-instant-fill\b/
     );
   });
 
-  it("메뉴 행 하이라이트는 background 를 전이하지 않는다 (N-3)", async () => {
+  it("메뉴 행은 채움만 있고 변형은 없다 (N-5)", async () => {
     expect(MENU_SRC).toMatch(/\bpress-instant-fill\b/);
     const css = await buildCss(["press", "press-instant-fill"]);
     const fillRules = [...css.matchAll(/\.press-instant-fill\s*\{([^}]*)\}/g)].filter(
@@ -1010,8 +1132,9 @@ export function Probe() {
     );
     expect(fillRules.length).toBeGreaterThan(0);
     const last = fillRules[fillRules.length - 1][1];
-    expect(last).toMatch(/transform/);
+    expect(last).not.toMatch(/transform/);
     expect(last).not.toMatch(/background-color/);
+    expect(css).toMatch(/\.press-instant-fill:active[\s\S]*?transform:\s*none/);
   });
 
   it("SidebarRow 이관 목록은 press 가 이기고 transform 이 있으며 outline-color 는 없다", async () => {
@@ -1087,62 +1210,82 @@ export function Probe() {
     expect(GALLERY_SRC).toMatch(/press-triplet-summary-card/);
   });
 
-  it("선택 분기도 press 전이를 진다 (M-1)", async () => {
-    const pairs = [
-      [
-        "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta press focus-visible:focus-ring",
-        "bg-accent-soft font-medium text-ink",
-        "text-ink-muted hover:bg-surface-hover",
-      ],
-      [
-        "h-control-sm rounded-sm px-2 text-meta press focus-visible:focus-ring",
-        "bg-accent-soft text-accent",
-        "text-ink-muted hover:bg-surface-hover",
-      ],
-      [
-        "flex w-full min-w-0 flex-col gap-px px-4 py-2 text-left press focus-visible:focus-ring",
-        "bg-surface-hover",
-        "hover:bg-surface-hover",
-      ],
-      [
-        "flex min-w-0 flex-col gap-1 px-4 py-2 press focus-visible:focus-ring",
-        "bg-accent-soft",
-        "hover:bg-surface-hover",
-      ],
-      [
-        "flex shrink-0 items-center justify-center rounded-sm border border-line-strong press focus-visible:focus-ring",
-        "bg-accent-soft text-accent",
-        "text-ink-muted hover:bg-surface-hover data-[state=open]:bg-surface-hover data-[state=open]:text-ink",
-      ],
-    ] as const;
-    expect(TERMINAL_DOCK_SRC).toMatch(/press focus-visible:focus-ring/);
-    expect(WORK_PANEL_SRC).toMatch(/press focus-visible:focus-ring/);
-    expect(WORK_CONSOLE_SRC).toMatch(/press focus-visible:focus-ring/);
-    expect(CHANNEL_HEADER_SRC).toMatch(/press focus-visible:focus-ring/);
-    for (const [shared, selected, unselected] of pairs) {
-      const selectedCss = await buildCss(classTokens(`${shared} ${selected}`));
-      const unselectedCss = await buildCss(
-        classTokens(`${shared} ${unselected}`)
-      );
-      const selectedDur = pressDuration(selectedCss);
-      const unselectedDur = pressDuration(unselectedCss);
-      expect(selectedDur, shared).not.toBe("0s");
-      expect(selectedDur).toBe(unselectedDur);
+  it("선택 분기도 press 전이를 진다 (H-2g)", async () => {
+    const groups = [
+      classBranchesInFunctionOnTag(WORK_PANEL_SRC, "WorkPanel.tsx", "ScopeButton", "button"),
+      classBranchesByTestId(WORK_PANEL_SRC, "WorkPanel.tsx", "work-session-row"),
+      classBranchesByTestId(TERMINAL_DOCK_SRC, "TerminalDock.tsx", "terminal-dock-tab"),
+      classBranchesInFunctionOnTag(WORK_CONSOLE_SRC, "WorkConsoleRoute.tsx", "WorkConsoleRow", "Link"),
+      cnBranchesInFunction(
+        CHANNEL_HEADER_SRC,
+        "channelHeaderControl.ts",
+        "channelHeaderControlClass"
+      ),
+    ];
+    expect(groups.every((g) => g.length > 0)).toBe(true);
+    for (const branches of groups) {
+      for (const className of branches) {
+        expect(className, className).toMatch(/(?<![\w-])press\b/);
+        const css = await buildCss(classTokens(className));
+        expect(pressDuration(css), className).not.toBe("0s");
+      }
     }
   });
 
-  it("설정 토글 행은 행 채움 눌림이고 행 자체는 scale 하지 않는다 (M-3)", () => {
-    expect(SETTINGS_FIELDS_SRC).toMatch(
-      /hover:bg-surface-hover active:bg-surface-pressed/
+  it("ScopeButton 을 R2 모양으로 되돌리면 선택 분기가 붉다 (H-2g RED)", async () => {
+    const sabotaged = WORK_PANEL_SRC.replace(
+      `"h-control-sm rounded-sm px-2 text-meta press focus-visible:focus-ring"`,
+      `"h-control-sm rounded-sm px-2 text-meta focus-visible:focus-ring"`
+    ).replace(
+      `: "text-ink-muted hover:bg-surface-hover"`,
+      `: "text-ink-muted press hover:bg-surface-hover"`
     );
+    const branches = classBranchesInFunctionOnTag(
+      sabotaged,
+      "WorkPanel.tsx",
+      "ScopeButton",
+      "button"
+    );
+    const selected = branches.filter((c) => /bg-accent-soft/.test(c));
+    expect(selected.length).toBeGreaterThan(0);
+    expect(
+      selected.filter((c) => /(?<![\w-])press\b/.test(c)),
+      selected.join(" | ")
+    ).toEqual([]);
+  });
+
+  it("설정 토글 행은 행 전체가 라벨이고 채움만 한다 (H-3)", () => {
     const toggle = SETTINGS_FIELDS_SRC.match(
       /export function SettingsToggleRow[\s\S]*?\nexport function /
     )?.[0];
     expect(toggle).toBeTruthy();
-    const rowClass = toggle!.match(/<div\s+className=\{cn\(([\s\S]*?)\)\}/)?.[1];
-    expect(rowClass).toMatch(/active:bg-surface-pressed/);
+    expect(toggle).toMatch(/<label\s+htmlFor=\{testId\}/);
+    const rowClass = toggle!.match(/<label[\s\S]*?className=\{cn\(([\s\S]*?)\)\}/)?.[1];
+    expect(rowClass).toMatch(/hover:bg-surface-hover active:bg-surface-pressed/);
+    expect(rowClass).toMatch(/checked && "bg-accent-soft"/);
     expect(rowClass).not.toMatch(/(?<![\w-])press\b/);
     expect(toggle).toMatch(/<input[\s\S]*?\bpress\b/);
+    expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).toMatch(
+      /hover:bg-surface-hover active:bg-surface-pressed/
+    );
+    expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).not.toMatch(
+      /(?<![\w-])press\b/
+    );
+  });
+
+  it("checked 분기의 hover/press 를 빼면 전수가 그 분기를 센다 (H-3 RED)", () => {
+    const site: PressSite = {
+      rel: "clients/web/src/features/settings/SettingsFields.tsx",
+      line: 53,
+      tag: "label",
+      role: "",
+      text: 'flex min-w-0 cursor-pointer items-start gap-3 border-b border-line p-3 last:border-b-0 bg-accent-soft',
+      kind: "jsx",
+    };
+    expect(isPointerInteractive(site)).toBe(true);
+    expect(hasHover(site.text)).toBe(false);
+    expect(hasPress(site.text)).toBe(false);
+    expect(isTextLink(site.tag, site.text)).toBe(false);
   });
 
   it("underline 만으로 텍스트 링크가 되지 않는다 (M-4)", () => {
@@ -1154,6 +1297,12 @@ export function Probe() {
     ).toBe(false);
     expect(
       isTextLink("button", "underline underline-offset-2 hover:text-ink")
+    ).toBe(true);
+    expect(
+      isTextLink(
+        "button",
+        "touch-target rounded-sm px-2 underline underline-offset-2 hover:text-ink"
+      )
     ).toBe(true);
   });
 
@@ -1205,22 +1354,47 @@ export function Probe() {
     );
   });
 
-  it("3짝 표면 목록이 갤러리 제품 컴포넌트와 캡처 레인에 핀된다 (N-3)", () => {
-    const surfaces = [
+  it("3짝 표면 목록이 정본과 집합이 같다 (M-2g)", () => {
+    const gallery = [
       "button-default",
       "button-secondary",
       "button-ghost",
       "button-destructive",
       "chip",
       "row",
+    ] as const;
+    const insitu = [
       "message-row",
       "pending-row",
       "settings-row",
       "drafts-li",
-    ];
-    for (const surface of surfaces) {
+    ] as const;
+    const skip = new Set([
+      "root",
+      "row-link",
+      "settings-toggle",
+      "summary-card",
+    ]);
+    const galleryFrames = [
+      ...new Set(
+        [...GALLERY_SRC.matchAll(/data-testid="press-triplet-([^"]+)"/g)].map(
+          (m) => m[1]
+        )
+      ),
+    ]
+      .filter((id) => !skip.has(id))
+      .sort();
+    const capturedGallery = stringArrayConst(CAPTURE_SRC, "PRESS_TRIPLET_GALLERY");
+    const capturedInsitu = stringArrayConst(CAPTURE_SRC, "PRESS_TRIPLET_INSITU");
+    const canonical = [...gallery, ...insitu].sort();
+    expect(galleryFrames).toEqual(canonical);
+    expect([...capturedGallery].sort()).toEqual([...gallery].sort());
+    expect([...capturedInsitu].sort()).toEqual([...insitu].sort());
+    expect([...capturedGallery, ...capturedInsitu].sort()).toEqual(canonical);
+    expect(capturedGallery).toHaveLength(gallery.length);
+    expect(capturedInsitu).toHaveLength(insitu.length);
+    for (const surface of canonical) {
       expect(GALLERY_SRC).toContain(`press-triplet-${surface}`);
-      expect(CAPTURE_SRC).toContain(`"${surface}"`);
     }
     expect(GALLERY_SRC).toMatch(/<DraftRow\b/);
     expect(GALLERY_SRC).toMatch(
@@ -1236,13 +1410,82 @@ export function Probe() {
     );
   });
 
-  it("본문 행은 fill-only 이고 전폭 행의 press 스케일은 DS-1 이다 (N-4)", () => {
+  it("in-situ 목록에서 하나를 빼거나 더하면 집합이 붉다 (M-2g RED)", () => {
+    const pin = stringArrayConst(CAPTURE_SRC, "PRESS_TRIPLET_INSITU");
+    const dropped = pin.filter((id) => id !== "settings-row");
+    const extra = [...pin, "ghost-row"];
+    expect(new Set(dropped)).not.toEqual(new Set(pin));
+    expect(dropped).not.toHaveLength(pin.length);
+    expect(new Set(extra)).not.toEqual(new Set(pin));
+    const scratchDrop = CAPTURE_SRC.replace(
+      /const PRESS_TRIPLET_INSITU = \[[^\]]*\]/,
+      `const PRESS_TRIPLET_INSITU = [\n  "message-row",\n  "pending-row",\n  "drafts-li",\n]`
+    );
+    expect(stringArrayConst(scratchDrop, "PRESS_TRIPLET_INSITU").sort()).not.toEqual(
+      [...pin].sort()
+    );
+    const scratchAdd = CAPTURE_SRC.replace(
+      /const PRESS_TRIPLET_INSITU = \[[^\]]*\]/,
+      `const PRESS_TRIPLET_INSITU = [\n  "message-row",\n  "pending-row",\n  "settings-row",\n  "drafts-li",\n  "ghost-row",\n]`
+    );
+    expect(stringArrayConst(scratchAdd, "PRESS_TRIPLET_INSITU").sort()).not.toEqual(
+      [...pin].sort()
+    );
+  });
+
+  it("초안 행은 링크가 채움과 press 를 같이 진다 (N-1)", () => {
+    expect(DRAFTS_SRC).toMatch(
+      /<Link[\s\S]*?className="flex w-full[^"]*\bpress hover:bg-surface-hover/
+    );
+    expect(DRAFTS_SRC).not.toMatch(
+      /<li\b[^>]*hover:bg-surface-hover[\s\S]*?<Link/
+    );
+    expect(DRAFTS_SRC).not.toMatch(
+      /<li\b[^>]*\bpress\b[\s\S]*?<Link/
+    );
+  });
+
+  it("모서리 프로브는 AABB 꼭짓점이 아니라 호 밖 내부를 잰다 (H-1g)", () => {
+    expect(CAPTURE_SRC).toMatch(/function cornerInteriorPoints/);
+    expect(CAPTURE_SRC).toMatch(/\[2, 2\]/);
+    expect(CAPTURE_SRC).toMatch(/\[1, 1\]/);
+    expect(CAPTURE_SRC).not.toMatch(
+      /sampleRgb\(\s*page,\s*box\.x,\s*box\.y\s*\)/
+    );
+    expect(SETTINGS_FIELDS_SRC).toMatch(
+      /SETTINGS_COLLAPSIBLE_CARD_CLASS =\s*"min-w-0 overflow-hidden rounded-md border border-line"/
+    );
+  });
+
+  it("캡처는 시작과 중단에 3짝 증거를 지운다 (N-4)", () => {
+    expect(CAPTURE_SRC).toMatch(/function wipePressTripletEvidence/);
+    expect(CAPTURE_SRC).toMatch(/wipePressTripletEvidence\(\);/);
+    expect(CAPTURE_SRC).toMatch(/function recordPressTripletAbort/);
+    expect(CAPTURE_SRC).toMatch(/press-triplet-catalog/);
+    expect(CAPTURE_SRC).toMatch(/#2057 N-4/);
+  });
+
+  it("3짝 픽셀 차는 크기 문턱을 든다 (N-2)", () => {
+    expect(CAPTURE_SRC).toMatch(/PIXEL_DE_MIN = 0\.01/);
+    expect(CAPTURE_SRC).toMatch(/dE >= PIXEL_DE_MIN/);
+  });
+
+  it("토글 행 타깃 프로브는 라벨이 행을 채운다 (H-3)", () => {
+    expect(CAPTURE_SRC).toMatch(/function assertToggleRowTarget/);
+    expect(CAPTURE_SRC).toMatch(/deadRight > 2/);
+    expect(CAPTURE_SRC).toMatch(/tag !== "LABEL"/);
+  });
+
+  it("본문 행과 전폭 summary 는 채움만 한다 (N-5)", () => {
     expect(MESSAGE_ROW_SRC).toMatch(/active:bg-surface-pressed/);
     expect(PENDING_ROW_SRC).toMatch(/active:bg-surface-pressed/);
     const article = MESSAGE_ROW_SRC.match(
       /"(group relative flex gap-2 px-4[^"]*)"/
     )?.[1];
     expect(article).not.toMatch(/(?<![\w-])press\b/);
+    expect(constString(SETTINGS_FIELDS_SRC, "SETTINGS_COLLAPSIBLE_SUMMARY_CLASS")).not.toMatch(
+      /(?<![\w-])press\b/
+    );
   });
 });
 
