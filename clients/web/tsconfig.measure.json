@@ -22,5 +22,5 @@
       "@momo/core/*": ["../../packages/momo-core/src/*"]
     }
   },
-  "include": ["measure"]
+  "include": ["measure", "src/vite-env.d.ts"]
 }

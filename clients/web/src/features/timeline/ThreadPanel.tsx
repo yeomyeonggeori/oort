@@ -1,5 +1,6 @@
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { X } from "lucide-react";
 import { fetchThreadReplies, type Channel, type Message } from "@momo/core/lib/api";
 import type { Directory } from "@/features/workspace/useWorkspace";
@@ -12,6 +13,8 @@ import { ThreadComposer } from "./ThreadComposer";
 import { chipsFor, type ReactionMap } from "@momo/core/features/timeline/reactions";
 import { isPinned, type PinMap } from "@momo/core/features/timeline/pins";
 import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
+import { PANEL_MOTION } from "@/design/motion";
+import { cn } from "@/design/lib/cn";
 
 // =============================================================================
 // Thread panel (R-1 §3 "스레드 진입 자리", P12: replies live outside the channel
@@ -19,20 +22,7 @@ import { overlayOwnsEscape } from "@/design/ui/escapeLayer";
 // expansion, sharing the exact MessageRow anatomy of the channel timeline.
 // =============================================================================
 
-export function ThreadPanel({
-  workspaceId,
-  channelId,
-  root,
-  directory,
-  channels,
-  actions,
-  reactions,
-  pins,
-  onOpenWorkSession,
-  onClose,
-  isPlayEntrance,
-  onEntranceConsumed,
-}: {
+type ThreadPanelProps = {
   workspaceId: string;
   channelId: string;
   root: Message;
@@ -52,36 +42,95 @@ export function ThreadPanel({
   onClose: () => void;
   isPlayEntrance?: (messageId: string) => boolean;
   onEntranceConsumed?: (messageId: string) => void;
-}) {
-  const query = useQuery({
-    queryKey: ["thread", workspaceId, channelId, root.id],
-    queryFn: () => fetchThreadReplies(workspaceId, channelId, root.id),
-  });
+};
 
-  const replies = query.data?.messages ?? [];
-
-  // 작업 세션 서랍과 동형인 키보드 탈출 (#1431 · WorkPanel.tsx openerRef/closePanel).
-  // 두 서랍은 같은 오버레이 문법인데 이 서랍만 Escape 닫기와 포커스 반환이 없어,
-  // 답글 컴포저에서 Escape가 무반응이었고 닫기 버튼을 누르면 포커스가 document.body로
-  // 떨어졌다.
-  //
-  // opener를 **첫 렌더에서** 잡는 이유: 900px 미만에서 이 패널이 채널 표면을 덮는
-  // 순간 그 표면(chat-region)이 inert가 되고, 그 안에 있던 opener(답글 앵커)가
-  // 포커스를 잃는다 — 잃기 전에 잡아야 닫을 때 되돌려 줄 수 있다.
+export function ThreadPanel(props: ThreadPanelProps) {
+  const { onClose } = props;
+  const [leaving, setLeaving] = useState(false);
+  const reduceMotion = useReducedMotion();
   const openerRef = useRef<HTMLElement | null>(null);
   if (openerRef.current === null && typeof document !== "undefined") {
     const active = document.activeElement;
     openerRef.current = active instanceof HTMLElement ? active : null;
   }
 
-  // 닫기의 유일한 경로. `onClose`가 패널을 언마운트하고(그 안에서 ChatShell이 덮개의
-  // inert를 opener.focus()보다 **먼저** 뗀다 — inert가 남아 있으면 포커스가 먹지
-  // 않는다), 그 다음 opener로 캐럿을 돌려준다. WorkPanel.closePanel과 같은 shape다.
-  const closePanel = useCallback(() => {
+  const finishClose = useCallback(() => {
     const opener = openerRef.current;
     onClose();
     if (opener?.isConnected) opener.focus();
   }, [onClose]);
+
+  const closePanel = useCallback(() => {
+    if (leaving) return;
+    if (reduceMotion) {
+      finishClose();
+      return;
+    }
+    setLeaving(true);
+  }, [leaving, reduceMotion, finishClose]);
+
+  return (
+    <AnimatePresence onExitComplete={finishClose}>
+      {!leaving ? (
+        <ThreadPanelFrame {...props} onClose={closePanel} />
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+function ThreadPanelFrame({
+  workspaceId,
+  channelId,
+  root,
+  directory,
+  channels,
+  actions,
+  reactions,
+  pins,
+  onOpenWorkSession,
+  onClose: closePanel,
+  isPlayEntrance,
+  onEntranceConsumed,
+}: ThreadPanelProps) {
+  const [isPresent, safeToRemove] = usePresence();
+  const reduceMotion = useReducedMotion();
+  const asideRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (isPresent) return;
+    if (reduceMotion) {
+      safeToRemove();
+      return;
+    }
+    const node = asideRef.current;
+    if (!node) {
+      safeToRemove();
+      return;
+    }
+    const durationMs = Number.parseFloat(getComputedStyle(node).animationDuration);
+    const duration =
+      Number.isFinite(durationMs) && durationMs > 0
+        ? getComputedStyle(node).animationDuration.includes("ms")
+          ? durationMs
+          : durationMs * 1000
+        : 0;
+    const onEnd = (event: AnimationEvent) => {
+      if (event.target !== node) return;
+      safeToRemove();
+    };
+    node.addEventListener("animationend", onEnd);
+    const fallback = window.setTimeout(() => safeToRemove(), duration);
+    return () => {
+      node.removeEventListener("animationend", onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [isPresent, reduceMotion, safeToRemove]);
+  const query = useQuery({
+    queryKey: ["thread", workspaceId, channelId, root.id],
+    queryFn: () => fetchThreadReplies(workspaceId, channelId, root.id),
+  });
+
+  const replies = query.data?.messages ?? [];
 
   /** Per-row actions, with this row's chips and pin state folded in. */
   const rowActions = (message: Message): MessageRowActions | undefined =>
@@ -102,8 +151,10 @@ export function ThreadPanel({
     // 이 pane과 작업 세션 pane은 채널 열과 같은 행을 나눠 갖고, 그 행의 바닥은
     // 채널 열이 든다(`chat-region`). 한쪽만 양보하지 못하면 바닥이 넘침이 된다.
     <aside
+      ref={asideRef}
       aria-label="스레드"
       data-testid="thread-panel"
+      data-state={isPresent ? "open" : "closed"}
       onKeyDown={(event) => {
         // 작업 서랍과 동형: Escape로 서랍을 닫는다 (#1431 · WorkPanel.tsx:839-852).
         // 이 서랍은 작업 서랍의 상세/엿보기 같은 중간 단계가 없어 한 단계뿐이므로,
@@ -120,7 +171,10 @@ export function ThreadPanel({
         if (overlayOwnsEscape(undefined, event.nativeEvent)) return;
         closePanel();
       }}
-      className="thread-pane flex h-full flex-col border-l border-line bg-surface"
+      className={cn(
+        "thread-pane flex h-full flex-col border-l border-line bg-surface",
+        PANEL_MOTION
+      )}
     >
       <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2">
         <h2 className="text-body font-semibold">스레드</h2>

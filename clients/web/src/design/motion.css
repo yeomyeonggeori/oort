@@ -87,6 +87,24 @@
   }
 }
 
+@keyframes motion-slide-in-end {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes motion-slide-out-end {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
 /* Enter/exit vocabulary. No tw-animate-css: these are the classes motion.ts
  * assembles. Duration 0 under reduced-motion (D9) via the token override. */
 @utility motion-enter {
@@ -118,6 +136,23 @@
 @utility motion-modal-exit-zoom {
   animation: motion-zoom-out var(--motion-modal-close)
     var(--motion-ease-standard) both;
+}
+@utility motion-fast-enter {
+  animation: motion-fade-in var(--motion-fast) var(--motion-ease-standard) both;
+}
+@utility motion-fast-exit {
+  animation: motion-fade-out var(--motion-fast) var(--motion-ease-standard) both;
+}
+@utility motion-slide-in-end {
+  animation: motion-slide-in-end var(--motion-standard)
+    var(--motion-ease-standard) both;
+}
+@utility motion-slide-out-end {
+  animation: motion-slide-out-end var(--motion-fast) var(--motion-ease-standard)
+    both;
+}
+@utility motion-item-fade {
+  animation: motion-fade-in var(--motion-fast) var(--motion-ease-standard) both;
 }
 
 /* D3: one-shot live arrival. Duration 0 under reduced-motion via the token. */

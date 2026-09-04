@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
+import * as DialogPrimitive from "@radix-ui/react-dialog";
+import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import {
   Activity,
   Bot,
@@ -53,6 +55,16 @@ import {
   OPEN_SETTINGS_SHORTCUT,
 } from "@/app/keyboardShortcuts";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
+import {
+  Dialog,
+  DialogOverlay,
+  DialogPortal,
+} from "@/design/ui/dialog";
+import {
+  MODAL_CONTENT_MOTION,
+  PALETTE_ITEM_MOTION,
+} from "@/design/motion";
+import { cn } from "@/design/lib/cn";
 
 // =============================================================================
 // ⌘K quick switcher (R-1 §공통계약, ADR-0133 stack: cmdk). Channels, DMs, people
@@ -75,7 +87,8 @@ import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 const itemClass =
   "flex cursor-default items-center gap-2 rounded-sm px-2 py-1 text-body " +
   "text-ink data-[selected=true]:bg-accent-soft " +
-  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50";
+  "data-[selected=true]:text-ink data-[disabled=true]:opacity-50 " +
+  PALETTE_ITEM_MOTION;
 
 // cmdk renders the group label into a [cmdk-group-heading] element it owns, so
 // it is styled from the list rather than by a className we could pass. Same
@@ -95,6 +108,76 @@ const groupHeadingClass =
  * 라우트의 제목이 각자 적으면 셋이 갈라지고, 실제로 사이드바가 갈라져 있었다.
  */
 const SEARCH_SURFACE_NAME = serverSurface("messageSearch").label;
+
+function PaletteLayer({
+  onOpenChange,
+  children,
+}: {
+  onOpenChange: (open: boolean) => void;
+  children: ReactNode;
+}) {
+  const [isPresent, safeToRemove] = usePresence();
+  const reduceMotion = useReducedMotion();
+  const overlayRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (isPresent) return;
+    if (reduceMotion) {
+      safeToRemove();
+      return;
+    }
+    const node = overlayRef.current;
+    if (!node) {
+      safeToRemove();
+      return;
+    }
+    const raw = getComputedStyle(node).animationDuration;
+    const parsed = Number.parseFloat(raw);
+    const duration =
+      Number.isFinite(parsed) && parsed > 0
+        ? raw.includes("ms")
+          ? parsed
+          : parsed * 1000
+        : 0;
+    const onEnd = (event: AnimationEvent) => {
+      if (event.target !== node) return;
+      safeToRemove();
+    };
+    node.addEventListener("animationend", onEnd);
+    const fallback = window.setTimeout(() => safeToRemove(), duration);
+    return () => {
+      node.removeEventListener("animationend", onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [isPresent, reduceMotion, safeToRemove]);
+
+  return (
+    <Dialog
+      open={isPresent}
+      onOpenChange={onOpenChange}
+    >
+      <DialogPortal>
+        <DialogOverlay
+          ref={overlayRef}
+          data-testid="quick-switcher-overlay"
+        />
+        <DialogPrimitive.Content
+          aria-label="검색과 이동"
+          data-testid="quick-switcher"
+          className={cn(
+            "fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+            MODAL_CONTENT_MOTION
+          )}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+          }}
+        >
+          {children}
+        </DialogPrimitive.Content>
+      </DialogPortal>
+    </Dialog>
+  );
+}
 
 export function QuickSwitcher({
   open,
@@ -269,14 +352,10 @@ export function QuickSwitcher({
   // 오히려 밝히던 bg-ink/20을 대신하며, 512px은 스톡 스케일의 이름 없는 숫자가
   // 아니라 이름을 가진 오버레이 측정선이다(R2 M7).
   return (
-    <Command.Dialog
-      open={open}
-      onOpenChange={onOpenChange}
-      label="검색과 이동"
-      overlayClassName="fixed inset-0 bg-scrim"
-      contentClassName="fixed left-1/2 top-8 w-full max-w-pane-md -translate-x-1/2 rounded-lg border border-line bg-surface-raised text-ink shadow-lg"
-      data-testid="quick-switcher"
-    >
+    <AnimatePresence>
+      {open ? (
+    <PaletteLayer onOpenChange={onOpenChange}>
+      <Command label="검색과 이동">
       {/* 입력은 팔레트 안에 또 하나의 진한 상자를 그리지 않는다 (#1753 H-1).
           팔레트는 모달이고 입력이 유일한 포커스 대상이라, 열려 있는 동안 링은
           상시 점등이 되어 정보가 0이다 — 링 없이 hairline 구분선만 남긴다.
@@ -573,6 +652,9 @@ export function QuickSwitcher({
           </Command.Group>
         )}
       </Command.List>
-    </Command.Dialog>
+    </Command>
+    </PaletteLayer>
+      ) : null}
+    </AnimatePresence>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, usePresence, useReducedMotion } from "motion/react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -97,6 +98,7 @@ import {
 import { Button } from "@/design/ui/button";
 import type { DialogFocusTarget } from "@/design/ui/dialog";
 import { cn } from "@/design/lib/cn";
+import { DRAWER_SCRIM_MOTION } from "@/design/motion";
 import { MOVE_UNREAD_CHANNEL_SHORTCUT } from "@/app/keyboardShortcuts";
 import { ShortcutHelpDialog } from "@/app/ShortcutHelpDialog";
 import { DraftsNavItem } from "@/features/drafts/DraftsNavItem";
@@ -526,11 +528,13 @@ export function Sidebar({
   }
 
   return (
+    <>
     <div
       ref={drawerRef}
       id="sidebar-drawer"
-      className="sidebar-drawer flex h-full"
+      className={cn("sidebar-drawer flex h-full", asDrawer && "shadow-lg")}
       data-open={asDrawer && drawerOpen ? "" : undefined}
+      data-state={asDrawer ? (drawerOpen ? "open" : "closed") : undefined}
       data-testid="sidebar"
     >
       <WorkspaceRail
@@ -1127,5 +1131,72 @@ export function Sidebar({
         }}
       />
     </div>
+    <SidebarDrawerScrimLayer open={asDrawer && drawerOpen} onClose={closeDrawer} />
+    </>
+  );
+}
+
+export function SidebarDrawerScrimLayer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <AnimatePresence>
+      {open ? (
+        <SidebarDrawerScrim key="sidebar-scrim" onClose={onClose} />
+      ) : null}
+    </AnimatePresence>
+  );
+}
+
+export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
+  const [isPresent, safeToRemove] = usePresence();
+  const reduceMotion = useReducedMotion();
+  const ref = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (isPresent) return;
+    if (reduceMotion) {
+      safeToRemove();
+      return;
+    }
+    const node = ref.current;
+    if (!node) {
+      safeToRemove();
+      return;
+    }
+    const raw = getComputedStyle(node).animationDuration;
+    const parsed = Number.parseFloat(raw);
+    const duration =
+      Number.isFinite(parsed) && parsed > 0
+        ? raw.includes("ms")
+          ? parsed
+          : parsed * 1000
+        : 0;
+    const onEnd = (event: AnimationEvent) => {
+      if (event.target !== node) return;
+      safeToRemove();
+    };
+    node.addEventListener("animationend", onEnd);
+    const fallback = window.setTimeout(() => safeToRemove(), duration);
+    return () => {
+      node.removeEventListener("animationend", onEnd);
+      window.clearTimeout(fallback);
+    };
+  }, [isPresent, reduceMotion, safeToRemove]);
+
+  return (
+    <button
+      ref={ref}
+      type="button"
+      className={cn("sidebar-scrim scrim-blur", DRAWER_SCRIM_MOTION)}
+      data-state={isPresent ? "open" : "closed"}
+      onClick={onClose}
+      aria-label="채널 목록 닫기"
+      data-testid="sidebar-scrim"
+    />
   );
 }

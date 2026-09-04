@@ -232,6 +232,17 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(snippet).toMatch(/\bboth\b/);
   });
 
+  it("slide-in-end / slide-out-end assemble standard open and fast close", () => {
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-slide-in-end/);
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-slide-out-end/);
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-slide-in-end\s+var\(--motion-standard\)/
+    );
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-slide-out-end\s+var\(--motion-fast\)/
+    );
+  });
+
   it.skipIf(!chromiumAvailable)(
     "enter-conversation 재생 횟수 1, animationName 일치, duration 500ms",
     async () => {

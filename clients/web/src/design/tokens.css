@@ -1080,10 +1080,11 @@
  * (clip이 자른다). `position: fixed`였다면 초기 컨테이닝 블록에 붙어 셸의
  * 클리핑을 벗어났을 것이고, MOMO-628이 sr-only에서 이미 치른 값이다.
  *
- * 움직임은 피드백이다(SKILL §4): 서랍이 **어디에서** 왔는지가 standard 동안
- * 보인다(ADR-0179 D1 — 드로어는 상태 변화). 손기입 160ms 는 사다리
- * standard(240)로 이관. reduced-motion에서는 전환 없이 자리에 나타난다 —
- * 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이 없다. */
+ * 움직임은 피드백이다(SKILL §4): 390 오버레이 서랍은 enter/exit 대칭
+ * `--motion-fast`(UX-R1b). 데스크톱 접힘 폭은 `--duration-sidebar` =
+ * `--motion-standard`가 따로 진다. reduced-motion에서는 전환 없이 자리에
+ * 나타난다 — 위치 정보는 그림자와 스크림이 이미 말하고 있으므로 잃는 것이
+ * 없다. */
 @utility sidebar-drawer {
   /* 데스크톱 접힘 (#1864): 그리드 열이 0으로 줄어드는 동안 레일·채널 트리가
    * 밖으로 새지 않게 자른다. 탭/AX 는 `inert`(Sidebar)가 빼고, 전환이 끝나면
@@ -1102,7 +1103,7 @@
     /* 논리 속성이 아닌 이유: transform은 물리 축만 안다. 이 앱은 ko/LTR이고,
      * RTL이 생기면 여기가 뒤집을 자리다. */
     transform: translateX(-100%);
-    transition: transform var(--motion-standard) var(--motion-ease-standard);
+    transition: transform var(--motion-fast) var(--motion-ease-standard);
 
     &[data-open] {
       transform: translateX(0);
