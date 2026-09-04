@@ -3,20 +3,27 @@
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
 - ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.
-- 실측(제품 컴포넌트 Playwright, 두 스킴 동일). 숫자는 computed `animationDuration`/`transitionDuration` + 닫힘 closed-frames.
+- 실측. Playwright 레인(`skipIf` Chromium)은 제품 컴포넌트(`Sidebar` 390 드로어·스크림, `ThreadPanel`, `QuickSwitcher`). 브라우저 없는 반쪽은 컴파일 CSS(`.sidebar-drawer` `--motion-fast`)와 배선 단정 — 그건 제품 마운트가 아니다. 숫자는 computed `animationDuration`/`transitionDuration` + 닫힘 closed-frames. 두 스킴 동일.
 
 | 표면 | 방향 | light | dark | reduced-motion |
 |---|---|---|---|---|
 | 390 드로어 패널 | enter/exit 대칭 `--motion-fast` | 180ms | 180ms | 0 |
-| 390 스크림 | enter `--motion-fast` / exit 재생(closed frames>0, dwell≥140, 이후 detach) | 180ms | 180ms | 0 |
+| 390 스크림 | enter `--motion-fast` / exit 재생(closed frames>0, dwell≥140, 이후 detach). `backdrop-filter: blur(5px)` (D6, 이 PR에서 스크림에 붙음) | 180ms | 180ms | 0 · detach ≤20ms |
 | 스레드 패널 | open `motion-slide-in-end` `--motion-standard` | 240ms | 240ms | 0 |
 | 스레드 패널 | close `motion-slide-out-end` `--motion-fast` (AnimatePresence 유지) | ≥140ms dwell | ≥140ms dwell | 즉시 detach |
-| ⌘K 오버레이/콘텐츠 | open `MODAL_*` 200ms · Escape exit dwell≥120 · AnimatePresence | 200 / 150 | 200 / 150 | 0 / dwell<80 |
+| ⌘K 오버레이/콘텐츠 | open `MODAL_*` 200ms · Escape exit dwell≥120 · AnimatePresence. 행 필터 재렌더 모션 0 | 200 / 150 | 200 / 150 | 0 · detach ≤20ms |
 | 데스크톱 사이드바 접기 | `--duration-sidebar` = `--motion-standard` | 240ms | (light와 같은 CSS) | 0 (`transition: none`) |
 
-- 390 드로어 **패널**은 DOM에 남는다(스크롤 보존, UX-R0). AnimatePresence는 스크림에만 — AppShell `{drawerOpen && <scrim>}` 가 닫힘 프레임 0이던 R1a급 버그. 데스크톱 접힘은 타이틀바 토글 계약 유지(`sidebarPane.test.ts`).
+- 390 드로어 **패널**은 DOM에 남는다(스크롤 보존, UX-R0). AnimatePresence는 스크림에만 (`SidebarDrawerScrimLayer`). 데스크톱 접힘은 타이틀바 토글 계약 유지(`sidebarPane.test.ts`).
+- 스레드 패널 presence는 부모 `root`가 민다. `onClose()`는 사용자 의도에서 즉시. 로컬 `leaving` 없음. 닫힘 중 같은/다른 앵커 클릭은 새 `key`로 exit을 끊는다.
 - R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
-- red proof: allowlist 밖 `import … from "motion/react"` → preflight `--selftest` 붉음. AnimatePresence 제거 → 팔레트 closed frames 0 / detach <20ms. `useReducedMotion` 제거 → duration 0 단정 실패. `{drawerOpen && scrim}` 복원 → 스크림 closed frames 0.
+- red proof (수리 떼면 실제로 붉음):
+  - 닫힘 중 20/60/100ms 에 같은/다른 `thread-anchor` 클릭 → 패널이 요청한 root 로 열린다. `leaving`+지연 `onClose` 를 되돌리면 같은 스윕이 안 연다.
+  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 150ms 를 기다린다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다.
+  - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom 렌더). `{drawerOpen && <scrim>}` 정규식은 80자 창이라 증거가 아니다.
+  - 연 팔레트에 키 3타 → `[cmdk-item]` `animationstart` 0. `PALETTE_ITEM_MOTION` 을 행에 되돌리면 타수마다 재생.
+  - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). `restoreDialogOpenerFocus` 를 빼면 `BODY`.
+  - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
 - 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
