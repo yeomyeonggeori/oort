@@ -18,7 +18,25 @@ import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 //     the Presence subtree first and the exit never plays. forceMount is not
 //     added.
 
-export const Dialog = DialogPrimitive.Root;
+const DialogOpenContext = React.createContext<boolean | undefined>(undefined);
+
+/**
+ * Controlled `open` is mirrored here so DialogOverlay can set
+ * `style.pointerEvents` on the same commit as `data-state`. OverlayImpl is
+ * inside Presence and does not receive `open` as a prop.
+ */
+export const Dialog = ({
+  open,
+  onOpenChange,
+  children,
+  ...props
+}: React.ComponentProps<typeof DialogPrimitive.Root>) => (
+  <DialogOpenContext.Provider value={open}>
+    <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} {...props}>
+      {children}
+    </DialogPrimitive.Root>
+  </DialogOpenContext.Provider>
+);
 export const DialogTrigger = DialogPrimitive.Trigger;
 export const DialogPortal = DialogPrimitive.Portal;
 export const DialogClose = DialogPrimitive.Close;
@@ -73,13 +91,28 @@ export function useRestoreFocusOnClose(open: boolean, opener: DialogOpener): voi
 export const DialogOverlay = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Overlay>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
-  <DialogPrimitive.Overlay
-    ref={ref}
-    className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
-    {...props}
-  />
-));
+>(({ className, style, ...props }, ref) => {
+  const open = React.useContext(DialogOpenContext);
+  const closed = open === false;
+  return (
+    <DialogPrimitive.Overlay
+      ref={ref}
+      className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
+      {...props}
+      // Radix OverlayImpl writes `pointer-events: auto` inline:
+      // `style: { pointerEvents: "auto", ...overlayProps.style }`.
+      // A class cannot win that layer — R3's
+      // `data-[state=closed]:pointer-events-none` was dead on the product.
+      // Passing `pointerEvents` here occupies the same slot, later in that
+      // merge, so a closed overlay is not hit-testable (#1997 H-1).
+      // Why not !important: the library already writes inline; beating it
+      // means writing the same property from the same `open`/`data-state`
+      // the thread panel and 390 scrim already measure as pe=none.
+      // eslint-disable-next-line no-restricted-syntax
+      style={{ ...style, pointerEvents: closed ? "none" : "auto" }} // design-preflight-allow
+    />
+  );
+});
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
 
 /**

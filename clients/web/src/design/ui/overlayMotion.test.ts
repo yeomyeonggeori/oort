@@ -236,6 +236,8 @@ describe("UX-R1a primitive wiring (comment-stripped)", () => {
     const code = codeOnly(FILES.dialog);
     expect(code).toMatch(/\bMODAL_OVERLAY_MOTION\b/);
     expect(code).toMatch(/\bMODAL_CONTENT_MOTION\b/);
+    // #1997 H-1: class-only closed pointer-events is dead under Radix inline.
+    expect(code).toMatch(/pointerEvents:\s*closed \? ["']none["']/);
   });
 
   it("popover, dropdown-menu, context-menu import and pass POPOVER_MOTION", () => {

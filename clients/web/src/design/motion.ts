@@ -5,6 +5,11 @@
  * 조립한다. 표면은 `\d+ms` 나 `duration-[0-9]+` 를 직접 적지 않는다.
  * UX-R1a 소비: dialog · popover · dropdown-menu · context-menu.
  * UX-R1b 소비: 390 드로어 스크림 · 스레드 패널 · ⌘K 팔레트.
+ *
+ * `data-[state=closed]:pointer-events-none` is the owner on nodes we write
+ * (thread panel, 390 scrim). Radix `DialogOverlay` also writes
+ * `pointer-events: auto` inline, so dialog.tsx sets `style.pointerEvents`
+ * from `open` — a class cannot win that layer (#1997 H-1).
  */
 
 export const MODAL_OVERLAY_MOTION =
