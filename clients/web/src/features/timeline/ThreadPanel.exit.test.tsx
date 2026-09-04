@@ -180,6 +180,11 @@ describe("ThreadPanel exit does not own parent state (#1997 B-1)", () => {
     const panel = host.querySelector(
       `[data-testid='thread-panel'][data-root-id='${ROOT_B}']`
     );
+    const panels = host.querySelectorAll("[data-testid='thread-panel']");
+    expect(panels).toHaveLength(1);
+    expect(
+      host.querySelector(`[data-testid='thread-panel'][data-root-id='${ROOT_A}']`)
+    ).toBeNull();
     expect(panel).not.toBeNull();
     expect(panel?.getAttribute("data-root-id")).toBe(ROOT_B);
     expect(
