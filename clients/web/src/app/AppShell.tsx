@@ -318,6 +318,12 @@ export function AppShell({
                 treeHidden={sidebarPaint.treeHidden}
               />
             )}
+            {/* 스크림은 사이드바 **다음**에 있어야 한다: 서랍이 열린 동안 탭이 갈
+             * 수 있는 곳은 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그
+             * 순환이다. 아이콘도 글자도 없는 표면이지만 진짜 버튼인 이유는
+             * 바깥을 눌러 닫는 것이 이 앱에서 유일하게 마우스로만 가능한 행동이
+             * 되면 안 되기 때문이다. Presence 호스트는 Sidebar 가 같은 순서로
+             * 그린다. */}
             <main ref={mainRef} className="flex min-h-0 min-w-0 flex-col">
               {/* 실시간이 죽었다는 사실은 채널만의 사실이 아니다 (goal B8 B2):
                * 인박스도 활동도 갱신이 멈추고, 조용한 하루와 구별되지 않는다.

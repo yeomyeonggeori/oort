@@ -529,609 +529,608 @@ export function Sidebar({
 
   return (
     <>
-    <div
-      ref={drawerRef}
-      id="sidebar-drawer"
-      className={cn("sidebar-drawer flex h-full", asDrawer && "shadow-lg")}
-      data-open={asDrawer && drawerOpen ? "" : undefined}
-      data-state={asDrawer ? (drawerOpen ? "open" : "closed") : undefined}
-      data-testid="sidebar"
-    >
-      <WorkspaceRail
-        workspace={{
-          name: workspaceQuery.data?.name,
-          isPending: workspaceQuery.isPending,
-          isError: workspaceQuery.isError,
-        }}
-        workspaceId={workspaceId}
-        avatarUrl={workspaceQuery.data?.avatarUrl}
-        hidden={treeHidden}
-      />
-
       <div
-        id="sidebar-channel-pane"
-        hidden={treeHidden}
-        data-sidebar-channel-pane
-        data-testid="sidebar-channel-pane"
-        className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
+        ref={drawerRef}
+        id="sidebar-drawer"
+        className={cn("sidebar-drawer flex h-full", asDrawer && "shadow-lg")}
+        data-open={asDrawer && drawerOpen ? "" : undefined}
+        data-testid="sidebar"
       >
-        <div className="flex items-center gap-2 border-b border-line p-2">
-          {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
-              접는 순간 입구가 사라진다. */}
-          <Button
-            variant="outline"
-            size="sm"
-            className="tap-target min-w-0 flex-1 justify-between"
-            onClick={onOpenQuickSwitcher}
-            data-testid="open-quick-switcher"
-          >
-            <span className="flex items-center gap-2">
-              <Search className="size-4" />
-              검색과 이동
-            </span>
-            {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
-                적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다.
-
-                #1384: 이 앱의 키 힌트 표기는 한 벌이고(코어 `composerCopy.ts`
-                의 「키보드 힌트의 표기법」) 이 자리가 이미 그 표기다 —
-                `wide-only` · `text-meta` · `text-ink-muted` · 테두리 없는 산문.
-                동사가 없는 이유는 이 조각을 담은 버튼의 이름이 곧 동사라서다
-                ("검색과 이동"). 힌트 줄에서는 `<키>로 <동사>`로 적는다. */}
-            <span className="wide-only text-meta text-ink-muted">⌘K</span>
-          </Button>
-          {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
-              아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={closeDrawer}
-            aria-label="채널 목록 닫기"
-            title="채널 목록 닫기"
-            data-testid="close-sidebar-drawer"
-            className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </button>
-        </div>
-
-        {fixtureMode !== null && (
-          <p
-            className="border-b border-line px-2 py-1 text-meta text-warn"
-            data-testid="agent-fixture-notice"
-          >
-            {fixtureMode === "live"
-              ? "에이전트 활동 픽스처: 아래 턴과 연결 상태는 실제가 아닙니다."
-              : "에이전트 활동 픽스처: 아래 턴은 실제가 아니고 레일은 끊긴 상태입니다."}
-          </p>
-        )}
+        <WorkspaceRail
+          workspace={{
+            name: workspaceQuery.data?.name,
+            isPending: workspaceQuery.isPending,
+            isError: workspaceQuery.isError,
+          }}
+          workspaceId={workspaceId}
+          avatarUrl={workspaceQuery.data?.avatarUrl}
+          hidden={treeHidden}
+        />
 
         <div
-          ref={navRef}
-          onKeyDown={onNavKeyDown}
-          // 목록에서 무언가를 골랐으면 서랍은 할 일을 마쳤다. 라우트가 바뀌는
-          // 경우는 셸이 이미 닫지만(AppShell의 routePath 효과), **이미 열려 있는
-          // 채널**을 다시 고르면 주소가 그대로라 그 효과는 돌지 않는다. 그때도
-          // 사람이 한 일은 "이 채널을 보겠다"이므로 서랍은 비켜야 한다.
-          onClick={(event) => {
-            if (!asDrawer || !drawerOpen) return;
-            if ((event.target as Element).closest("a")) closeDrawer();
-          }}
-          // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
-          // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
-          // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
-          className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
-          data-testid="channel-list"
+          id="sidebar-channel-pane"
+          hidden={treeHidden}
+          data-sidebar-channel-pane
+          data-testid="sidebar-channel-pane"
+          className="flex h-full w-full min-w-0 flex-col border-r border-line bg-surface-sidebar"
         >
-          <nav aria-label="워크스페이스 탐색">
-            <ul className="flex flex-col px-2 py-2">
-              <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
-              <DraftsNavItem />
-              <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
-              <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
-              <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
-              {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
-                  도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
-                  연다. 표면 삭제 금지. */}
-              <SidebarRow
-                to="/work"
-                icon={<SquareTerminal className="size-4" />}
-                label="작업 콘솔"
-                testId="nav-work-console"
-              />
-              {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
-                  가는 곳이지 구독하는 것이 아니다.
-
-                  **이름을 짓지 않고 받아 온다** (이슈 #1146 N4). 1차의 이 줄은
-                  「검색」이라고 적었는데, 도착하는 라우트의 제목도 팔레트의 항목도
-                  폰의 화면도 전부 「메시지 검색」이었다 — 한 목적지에 이름이 둘이면
-                  사람은 그것을 두 기능으로 센다. 바로 위 줄의 「검색과 이동」과
-                  나란히 서면 더 나빠서, 「검색」은 그 팔레트의 짧은 이름처럼 읽혔다.
-                  게다가 팔레트의 빈 상태는 이 줄을 **이름으로 가리킨다**(「메시지
-                  본문은 아래 메시지 검색에서 찾을 수 있습니다」) — 가리키는 이름이
-                  화면에 없으면 그 안내는 없는 곳을 가리킨 것이다.
-
-                  판정은 팔레트가 「멤버 ↔ 디렉터리」에서 이미 내렸다: 사람이
-                  **도착하는 표면이 쓰는 말**이 그 목적지의 이름이다. 그 말은 코어의
-                  표면 판정표에 이미 한 줄로 있으므로(`serverSurface`), 여기서 다시
-                  적지 않고 그것을 든다. */}
-              {isSurfaceProvided("messageSearch") && (
-                <SidebarRow
-                  to="/search"
-                  icon={<Search className="size-4" />}
-                  label={serverSurface("messageSearch").label}
-                  testId="nav-search"
-                />
-              )}
-              {/* 작업 흐름 sits with the global destinations for the reason
-                  에이전트 does (MOMO-652): it is a place you GO, not a thing you
-                  are subscribed to. It is also the one work surface that cannot
-                  live in the channel drawer beside it — 작업 세션 is scoped to
-                  the channel you are already in and, in its most used range, to
-                  your own sessions, while someone looking for work to pick up is
-                  by definition looking for work that is not theirs (ADR-0143).
-
-                  이 서버가 작업 흐름을 싣지 않으면 줄 자체를 세우지 않는다
-                  (goal B12). 비활성으로 남겨 두는 선택지도 있었지만, 흐릿한 줄은
-                  "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
-                  아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
-              {isSurfaceProvided("workstreams") && (
-                <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
-              )}
-            </ul>
-
-            {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
- 
-                · 읽기 실패(design-review #1932 B-1): 배치를 한 번도 못 읽었다.
-                  이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
-                  그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
-                  이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
-                  주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
-                  액션 문법이다.
-                · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
-                  없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
- 
-                둘을 겹쳐 세우지 않는 이유: 읽지 못한 상태에서 훅이 쓰기를 거절할
-                때 그 사유가 곧 읽기 실패라, 배너 둘이 같은 문장을 두 번 말하게
-                된다. 읽기 실패가 더 근본이므로 그것이 이긴다. */}
-            {sidebarPrefs.loadError ? (
-              <InlineBanner
-                message={sidebarPrefs.loadError}
-                actionLabel={SIDEBAR_PREFS_LOAD_RETRY_LABEL}
-                onAction={sidebarPrefs.retryLoad}
-                testId="sidebar-prefs-load-error"
-              />
-            ) : sidebarPrefs.error ? (
-              <InlineBanner
-                message={sidebarPrefs.error}
-                actionLabel="닫기"
-                onAction={sidebarPrefs.dismissError}
-                testId="sidebar-prefs-error"
-              />
-            ) : null}
-
-            {/* 「별표」는 **파생**이다 (ADR-0177 D5 / BT-5 #1933): payload 에 이
-                섹션은 없고 `starredChannelIds` 뿐이며, 코어가 그것을 목록으로
-                조립한다. 맨 위에 서고, 비면 코어가 아예 내놓지 않는다 - 빈 그릇을
-                그리지 않는 판정이 표면이 아니라 파생에 있어야 웹과 폰이 같은 수의
-                섹션을 센다(`DerivedSidebarSections.sections` 머리말).
-
-                이름 바꾸기도 삭제도 차례 바꾸기도 없다(기본 섹션 문법), 그래서
-                ⋮ 가 없다. 대신 드롭은 받는다 - 여기 떨어뜨리는 것은 배치가 아니라
-                별표를 붙이는 일이고, 그 뜻은 `resolveSidebarDrop` 이 갖는다. */}
-            {starredSection.channels.length > 0 && (
-              <SidebarSection
-                title={starredSection.title}
-                sectionId={starredSection.id}
-                collapsed={collapsedSections[starredSection.id] === true}
-                onCollapsedChange={(next) =>
-                  setSidebarSectionCollapsed(starredSection.id, next)
-                }
-                unreadCount={sectionUnread(starredSection.id).unreadCount}
-                mentionCount={sectionUnread(starredSection.id).mentionCount}
-                dropProps={drag.dropProps({ kind: "starred", sectionId: null })}
-              >
-                {starredSection.channels.map((channel) =>
-                  rowFor(channel, { inStarredSection: true })
-                )}
-                {/* 터치에는 **떼는 문이 없다**, 그리고 그 사실을 말한다
-                    (design-review R1 M-1). 별표는 로밍하므로 넓은 화면에서 붙인
-                    것이 폰 서랍에 그려지는데, 그 표면에는 행 메뉴도 드래그도 없다.
-                    빈 커스텀 섹션이 터치에서 하는 말과 같은 문법·같은 자리다 -
-                    표면이 자기 문에 대해 참말을 한다(BT-4 H-1 규율). */}
-                {touchSurface && (
-                  <li className="px-2 py-1 text-meta text-ink-muted">
-                    {SIDEBAR_STARRED_TOUCH_HINT}
-                  </li>
-                )}
-              </SidebarSection>
-            )}
-
-            <SidebarSection
-              title={baseChannelSection.title}
-              sectionId={baseChannelSection.id}
-              collapsed={collapsedSections[baseChannelSection.id] === true}
-              onCollapsedChange={(next) =>
-                setSidebarSectionCollapsed(baseChannelSection.id, next)
-              }
-              dropProps={drag.dropProps({ kind: "channels", sectionId: null })}
-              overlayOpen={
-                createChannelOpen ||
-                nameDialog?.mode === "create" ||
-                openSectionMenu === baseChannelSection.id
-              }
-              unreadCount={sectionUnread(baseChannelSection.id).unreadCount}
-              mentionCount={sectionUnread(baseChannelSection.id).mentionCount}
-              wrapList={false}
-              action={
-                <>
-                  {canCreate ? (
-                  /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
-                     크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
-                     셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
-                     이사했다. */
-                  <button
-                    ref={newChannelRef}
-                    type="button"
-                    onClick={() => openCreateChannel(newChannelRef.current)}
-                    aria-label="새 채널 만들기"
-                    title="새 채널 만들기"
-                    data-testid="new-channel"
-                    data-section-action=""
-                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-                  >
-                    <Plus className="size-4" aria-hidden="true" />
-                  </button>
-                  ) : rosterSettled ? null : (
-                    /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
-                       때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
-                    <span aria-hidden="true" className="block size-control-sm" />
-                  )}
-                  {/* 섹션을 만드는 문은 여기 하나다 (ADR-0177 D4). 채널을 만드는
-                      +와 나란히 서지만 다른 일이다: +는 워크스페이스에 방을
-                      만들고, 이것은 **내 사이드바**를 정리한다. 그래서 권한을
-                      묻지 않는다 - 섹션은 멤버 소유라 누구나 만들 수 있다(D1).
-
-                      **문이 서는 조건은 `canEditSections` 하나다**(B-1/H-1):
-                      배치를 읽지 못한 동안에도, 배치를 줄 수 없는 표면에서도 이
-                      문은 없다. 상한(50)은 다르다 - 그때는 문을 지우지 않고
-                      비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
-                      아직 못 찾은 문을 사람은 구분하지 못한다. */}
-                  {canEditSections && (
-                    <button
-                      ref={newSectionRef}
-                      type="button"
-                      disabled={!sidebarPrefs.canCreate}
-                      onClick={() =>
-                        setNameDialog({
-                          mode: "create",
-                          sectionId: null,
-                          name: "",
-                          opener: newSectionRef.current,
-                        })
-                      }
-                      aria-label={
-                        sidebarPrefs.canCreate
-                          ? SECTION_CREATE_TITLE
-                          : sidebarSectionCapMessage()
-                      }
-                      title={
-                        sidebarPrefs.canCreate
-                          ? SECTION_CREATE_TITLE
-                          : sidebarSectionCapMessage()
-                      }
-                      data-testid="new-section"
-                      data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <FolderPlus className="size-4" aria-hidden="true" />
-                    </button>
-                  )}
-                  {/* 정렬의 문은 **여기 하나**다 (BT-5 #1933). 값이 사이드바 전체에
-                      하나뿐이라(payload 의 `sectionSort` 한 칸) 섹션마다 같은
-                      라디오를 세우면 「이 섹션의 정렬」로 읽히고, 하나를 바꿀 때
-                      전부 바뀌는 것이 결함이 된다. 이 헤더인 이유는 그것이 이미
-                      **사이드바의 선반**이기 때문이다 - 「새 섹션」도 채널 섹션의
-                      일이 아니라 사이드바의 일이고 같은 자리에 산다.
-
-                      커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
-                      열리는 설정이 아니다.
-
-                      **자기 글리프와 자기 이름을 갖는다**(design-review R1 M-2):
-                      섹션 ⋮ 안에 들어 있던 동안에는 스크린리더가 「채널 섹션 메뉴」로
-                      읽었고, 같은 ⋯ 이 섹션마다 다른 메뉴를 열었다. 근거는
-                      `SidebarSortMenu` 머리말에 있다.
-
-                      **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
-                      자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
-                      아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
-                      상시 마운트라(`shouldShowSectionActions`) 240px 서랍의 머리글에
-                      아이콘이 하나 더 영구히 서고, 그 값을 두 번째 순위의 설정이
-                      치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
-                      아니라 폰의 설정 표면이다. */}
-                  {canEditSections && (
-                    <SidebarSortMenu
-                      mode={sidebarPrefs.sortMode}
-                      onChange={sidebarPrefs.setSortMode}
-                      onOpenChange={(open) =>
-                        setOpenSectionMenu(open ? baseChannelSection.id : null)
-                      }
-                    />
-                  )}
-                </>
-              }
+          <div className="flex items-center gap-2 border-b border-line p-2">
+            {/* 데스크톱 접기 토글은 타이틀바에 한 자리만 산다 (#1864). 여기 두면
+                접는 순간 입구가 사라진다. */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="tap-target min-w-0 flex-1 justify-between"
+              onClick={onOpenQuickSwitcher}
+              data-testid="open-quick-switcher"
             >
-              <Skeleton ready={!channelsQuery.isLoading} rows={4}>
-                {channelsQuery.error && (
-                  <InlineBanner
-                    message="채널을 불러오지 못했습니다."
-                    actionLabel="다시 시도"
-                    onAction={() => void channelsQuery.refetch()}
-                    testId="channels-error"
+              <span className="flex items-center gap-2">
+                <Search className="size-4" />
+                검색과 이동
+              </span>
+              {/* 폰에는 ⌘ 키가 없다 (goal B6). 누를 수 없는 단축키를 컨트롤에
+                  적어 두면 그만큼의 폭을 쓰면서 아무것도 알려주지 않는다.
+
+                  #1384: 이 앱의 키 힌트 표기는 한 벌이고(코어 `composerCopy.ts`
+                  의 「키보드 힌트의 표기법」) 이 자리가 이미 그 표기다 —
+                  `wide-only` · `text-meta` · `text-ink-muted` · 테두리 없는 산문.
+                  동사가 없는 이유는 이 조각을 담은 버튼의 이름이 곧 동사라서다
+                  ("검색과 이동"). 힌트 줄에서는 `<키>로 <동사>`로 적는다. */}
+              <span className="wide-only text-meta text-ink-muted">⌘K</span>
+            </Button>
+            {/* 폰에서만 서는 닫기 (goal B6). 넓은 창에서 사이드바는 닫히는 것이
+                아니라 그냥 거기 있으므로, 이 버튼은 그때 아무 일도 하지 않는다. */}
+            <button
+              ref={closeRef}
+              type="button"
+              onClick={closeDrawer}
+              aria-label="채널 목록 닫기"
+              title="채널 목록 닫기"
+              data-testid="close-sidebar-drawer"
+              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+            >
+              <X className="size-4" aria-hidden="true" />
+            </button>
+          </div>
+
+          {fixtureMode !== null && (
+            <p
+              className="border-b border-line px-2 py-1 text-meta text-warn"
+              data-testid="agent-fixture-notice"
+            >
+              {fixtureMode === "live"
+                ? "에이전트 활동 픽스처: 아래 턴과 연결 상태는 실제가 아닙니다."
+                : "에이전트 활동 픽스처: 아래 턴은 실제가 아니고 레일은 끊긴 상태입니다."}
+            </p>
+          )}
+
+          <div
+            ref={navRef}
+            onKeyDown={onNavKeyDown}
+            // 목록에서 무언가를 골랐으면 서랍은 할 일을 마쳤다. 라우트가 바뀌는
+            // 경우는 셸이 이미 닫지만(AppShell의 routePath 효과), **이미 열려 있는
+            // 채널**을 다시 고르면 주소가 그대로라 그 효과는 돌지 않는다. 그때도
+            // 사람이 한 일은 "이 채널을 보겠다"이므로 서랍은 비켜야 한다.
+            onClick={(event) => {
+              if (!asDrawer || !drawerOpen) return;
+              if ((event.target as Element).closest("a")) closeDrawer();
+            }}
+            // `overscroll-contain` (goal B9): 채널 목록 끝에서 계속 미는 손가락이
+            // 서랍 바깥으로 넘어가지 않는다 — 덮인 표면이 함께 움직이면 서랍이 종이
+            // 한 장이 아니라 창처럼 느껴진다. 타임라인이 같은 이유로 같은 것을 쓴다.
+            className="overscroll-contain min-h-0 flex-1 overflow-y-auto"
+            data-testid="channel-list"
+          >
+            <nav aria-label="워크스페이스 탐색">
+              <ul className="flex flex-col px-2 py-2">
+                <SidebarRow to="/inbox" icon={<Inbox className="size-4" />} label="인박스" testId="nav-inbox" />
+                <DraftsNavItem />
+                <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
+                <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
+                <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+                {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
+                    도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
+                    연다. 표면 삭제 금지. */}
+                <SidebarRow
+                  to="/work"
+                  icon={<SquareTerminal className="size-4" />}
+                  label="작업 콘솔"
+                  testId="nav-work-console"
+                />
+                {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
+                    가는 곳이지 구독하는 것이 아니다.
+
+                    **이름을 짓지 않고 받아 온다** (이슈 #1146 N4). 1차의 이 줄은
+                    「검색」이라고 적었는데, 도착하는 라우트의 제목도 팔레트의 항목도
+                    폰의 화면도 전부 「메시지 검색」이었다 — 한 목적지에 이름이 둘이면
+                    사람은 그것을 두 기능으로 센다. 바로 위 줄의 「검색과 이동」과
+                    나란히 서면 더 나빠서, 「검색」은 그 팔레트의 짧은 이름처럼 읽혔다.
+                    게다가 팔레트의 빈 상태는 이 줄을 **이름으로 가리킨다**(「메시지
+                    본문은 아래 메시지 검색에서 찾을 수 있습니다」) — 가리키는 이름이
+                    화면에 없으면 그 안내는 없는 곳을 가리킨 것이다.
+
+                    판정은 팔레트가 「멤버 ↔ 디렉터리」에서 이미 내렸다: 사람이
+                    **도착하는 표면이 쓰는 말**이 그 목적지의 이름이다. 그 말은 코어의
+                    표면 판정표에 이미 한 줄로 있으므로(`serverSurface`), 여기서 다시
+                    적지 않고 그것을 든다. */}
+                {isSurfaceProvided("messageSearch") && (
+                  <SidebarRow
+                    to="/search"
+                    icon={<Search className="size-4" />}
+                    label={serverSurface("messageSearch").label}
+                    testId="nav-search"
                   />
                 )}
-                {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
-                    본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
-                    좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
-                    있고, 서술형 문장은 지시가 아니며, 문장 첫머리의 +는 글머리표로
-                    읽혔다(R2 M6). 그래서 액션을 여기에도 두되 outline이다: 액센트
-                    하나는 본문에만 있어 200px 간격으로 primary 둘이 다투지 않고,
-                    여기 있는 것은 같은 일로 가는 조용한 두 번째 문이다.
-                    만들 수 없는 멤버에게는 여전히 이 목록이 비었다는 사실뿐이고,
-                    누가 만들 수 있는지는 본문이 한 번만 말한다. */}
-                {!channelsQuery.isLoading &&
-                  !channelsQuery.error &&
-                  channels.length === 0 && (
-                    <EmptyInvite
-                      headline="채널 목록이 비어 있습니다."
-                      actions={
-                        canCreate ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openCreateChannel()}
-                            data-testid="sidebar-create-channel"
-                          >
-                            채널 만들기
-                          </Button>
-                        ) : undefined
-                      }
-                      testId="channels-empty"
-                    />
-                  )}
-                <ul
-                  id={sidebarSectionListId(baseChannelSection.id)}
-                  className="flex flex-col"
-                >
-                  {baseChannelSection.channels.map((channel) => rowFor(channel))}
-                </ul>
-              </Skeleton>
-            </SidebarSection>
+                {/* 작업 흐름 sits with the global destinations for the reason
+                    에이전트 does (MOMO-652): it is a place you GO, not a thing you
+                    are subscribed to. It is also the one work surface that cannot
+                    live in the channel drawer beside it — 작업 세션 is scoped to
+                    the channel you are already in and, in its most used range, to
+                    your own sessions, while someone looking for work to pick up is
+                    by definition looking for work that is not theirs (ADR-0143).
 
-            {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
-                코어의 `deriveSidebarSections` 머리말에 있다 - 섹션 하나를 만들
-                때 목록의 대부분이 아래로 밀리지 않게. 접기·unread 집계·호버
-                액션·⌥↑↓ 는 기본 섹션과 **같은 기계**를 탄다: 이 루프가 넘기는
-                프롭이 위 SidebarSection 이 받는 것과 한 벌이다. */}
-            {customSections.map((section) => (
+                    이 서버가 작업 흐름을 싣지 않으면 줄 자체를 세우지 않는다
+                    (goal B12). 비활성으로 남겨 두는 선택지도 있었지만, 흐릿한 줄은
+                    "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
+                    아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
+                {isSurfaceProvided("workstreams") && (
+                  <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+                )}
+              </ul>
+
+              {/* 배치에 대해 사이드바가 하는 말은 **한 번에 하나**다.
+ 
+                  · 읽기 실패(design-review #1932 B-1): 배치를 한 번도 못 읽었다.
+                    이 문장이 없던 동안 화면은 「섹션이 아직 없다」와 똑같이 생겼고,
+                    그 위의 편집 하나가 서버의 배치를 통째로 지웠다. 편집 문은 위에서
+                    이미 닫혔으므로 여기 남는 일은 **무슨 일인지 말하고 되돌아갈 길을
+                    주는 것**이고, 「채널을 불러오지 못했습니다」와 같은 배너·같은
+                    액션 문법이다.
+                  · 저장 실패: 되돌린 뒤라 화면은 이미 서버가 준 배치이고, 이 문장이
+                    없으면 방금 만든 섹션이 조용히 사라진 것으로만 보인다.
+ 
+                  둘을 겹쳐 세우지 않는 이유: 읽지 못한 상태에서 훅이 쓰기를 거절할
+                  때 그 사유가 곧 읽기 실패라, 배너 둘이 같은 문장을 두 번 말하게
+                  된다. 읽기 실패가 더 근본이므로 그것이 이긴다. */}
+              {sidebarPrefs.loadError ? (
+                <InlineBanner
+                  message={sidebarPrefs.loadError}
+                  actionLabel={SIDEBAR_PREFS_LOAD_RETRY_LABEL}
+                  onAction={sidebarPrefs.retryLoad}
+                  testId="sidebar-prefs-load-error"
+                />
+              ) : sidebarPrefs.error ? (
+                <InlineBanner
+                  message={sidebarPrefs.error}
+                  actionLabel="닫기"
+                  onAction={sidebarPrefs.dismissError}
+                  testId="sidebar-prefs-error"
+                />
+              ) : null}
+
+              {/* 「별표」는 **파생**이다 (ADR-0177 D5 / BT-5 #1933): payload 에 이
+                  섹션은 없고 `starredChannelIds` 뿐이며, 코어가 그것을 목록으로
+                  조립한다. 맨 위에 서고, 비면 코어가 아예 내놓지 않는다 - 빈 그릇을
+                  그리지 않는 판정이 표면이 아니라 파생에 있어야 웹과 폰이 같은 수의
+                  섹션을 센다(`DerivedSidebarSections.sections` 머리말).
+
+                  이름 바꾸기도 삭제도 차례 바꾸기도 없다(기본 섹션 문법), 그래서
+                  ⋮ 가 없다. 대신 드롭은 받는다 - 여기 떨어뜨리는 것은 배치가 아니라
+                  별표를 붙이는 일이고, 그 뜻은 `resolveSidebarDrop` 이 갖는다. */}
+              {starredSection.channels.length > 0 && (
+                <SidebarSection
+                  title={starredSection.title}
+                  sectionId={starredSection.id}
+                  collapsed={collapsedSections[starredSection.id] === true}
+                  onCollapsedChange={(next) =>
+                    setSidebarSectionCollapsed(starredSection.id, next)
+                  }
+                  unreadCount={sectionUnread(starredSection.id).unreadCount}
+                  mentionCount={sectionUnread(starredSection.id).mentionCount}
+                  dropProps={drag.dropProps({ kind: "starred", sectionId: null })}
+                >
+                  {starredSection.channels.map((channel) =>
+                    rowFor(channel, { inStarredSection: true })
+                  )}
+                  {/* 터치에는 **떼는 문이 없다**, 그리고 그 사실을 말한다
+                      (design-review R1 M-1). 별표는 로밍하므로 넓은 화면에서 붙인
+                      것이 폰 서랍에 그려지는데, 그 표면에는 행 메뉴도 드래그도 없다.
+                      빈 커스텀 섹션이 터치에서 하는 말과 같은 문법·같은 자리다 -
+                      표면이 자기 문에 대해 참말을 한다(BT-4 H-1 규율). */}
+                  {touchSurface && (
+                    <li className="px-2 py-1 text-meta text-ink-muted">
+                      {SIDEBAR_STARRED_TOUCH_HINT}
+                    </li>
+                  )}
+                </SidebarSection>
+              )}
+
               <SidebarSection
-                key={section.id}
-                title={section.title}
-                sectionId={section.id}
-                collapsed={collapsedSections[section.id] === true}
+                title={baseChannelSection.title}
+                sectionId={baseChannelSection.id}
+                collapsed={collapsedSections[baseChannelSection.id] === true}
                 onCollapsedChange={(next) =>
-                  setSidebarSectionCollapsed(section.id, next)
+                  setSidebarSectionCollapsed(baseChannelSection.id, next)
                 }
+                dropProps={drag.dropProps({ kind: "channels", sectionId: null })}
                 overlayOpen={
-                  openSectionMenu === section.id ||
-                  nameDialog?.sectionId === section.id ||
-                  deleteDialog?.sectionId === section.id
+                  createChannelOpen ||
+                  nameDialog?.mode === "create" ||
+                  openSectionMenu === baseChannelSection.id
                 }
-                unreadCount={sectionUnread(section.id).unreadCount}
-                mentionCount={sectionUnread(section.id).mentionCount}
+                unreadCount={sectionUnread(baseChannelSection.id).unreadCount}
+                mentionCount={sectionUnread(baseChannelSection.id).mentionCount}
                 wrapList={false}
-                // 커스텀 섹션은 **둘 다** 한다: 채널을 받고(배치), 자기가 끌려
-                // 가면 차례가 바뀐다. 두 뜻이 한 구역에 겹치는 것이 아니라
-                // 「무엇이 떨어졌는가」가 가른다(`resolveSidebarDrop`).
-                dropProps={drag.dropProps({
-                  kind: "custom",
-                  sectionId: section.id,
-                })}
-                headerDragProps={
-                  canEditSections
-                    ? drag.dragProps({ kind: "section", sectionId: section.id })
-                    : undefined
-                }
                 action={
-                  canEditSections ? (
-                  <SidebarSectionMenu
-                    sectionId={section.id}
-                    title={section.title}
-                    order={{
-                      canUp: sidebarPrefs.canMoveSection(section.id, -1),
-                      canDown: sidebarPrefs.canMoveSection(section.id, 1),
-                      onMove: (delta) =>
-                        sidebarPrefs.moveSection(section.id, delta),
-                    }}
-                    onOpenChange={(open) =>
-                      setOpenSectionMenu(open ? section.id : null)
-                    }
-                    onRename={(opener) =>
-                      setNameDialog({
-                        mode: "rename",
-                        sectionId: section.id,
-                        name: section.title,
-                        opener,
-                      })
-                    }
-                    onDelete={(opener) =>
-                      setDeleteDialog({
-                        sectionId: section.id,
-                        name: section.title,
-                        opener,
-                      })
-                    }
-                  />
-                  ) : undefined
+                  <>
+                    {canCreate ? (
+                    /* size-control-sm(28px): WCAG 2.2 최소 타깃 24px에 딱 걸치던
+                       크기를 하우스 컨트롤 높이로 올린다. 사이드바의 아이콘 버튼
+                       셋(+ · 새 DM)이 같은 규격이다. 설정은 프로필 카드 행으로
+                       이사했다. */
+                    <button
+                      ref={newChannelRef}
+                      type="button"
+                      onClick={() => openCreateChannel(newChannelRef.current)}
+                      aria-label="새 채널 만들기"
+                      title="새 채널 만들기"
+                      data-testid="new-channel"
+                      data-section-action=""
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                    >
+                      <Plus className="size-4" aria-hidden="true" />
+                    </button>
+                    ) : rosterSettled ? null : (
+                      /* 명부를 기다리는 동안 자리만 지킨다. 호버 클러스터가 열렸을
+                         때만 마운트되므로 rest 헤더 높이는 흔들리지 않는다. */
+                      <span aria-hidden="true" className="block size-control-sm" />
+                    )}
+                    {/* 섹션을 만드는 문은 여기 하나다 (ADR-0177 D4). 채널을 만드는
+                        +와 나란히 서지만 다른 일이다: +는 워크스페이스에 방을
+                        만들고, 이것은 **내 사이드바**를 정리한다. 그래서 권한을
+                        묻지 않는다 - 섹션은 멤버 소유라 누구나 만들 수 있다(D1).
+
+                        **문이 서는 조건은 `canEditSections` 하나다**(B-1/H-1):
+                        배치를 읽지 못한 동안에도, 배치를 줄 수 없는 표면에서도 이
+                        문은 없다. 상한(50)은 다르다 - 그때는 문을 지우지 않고
+                        비활성으로 남기고 **사유를 이름으로 든다**(M-3). 사라진 문과
+                        아직 못 찾은 문을 사람은 구분하지 못한다. */}
+                    {canEditSections && (
+                      <button
+                        ref={newSectionRef}
+                        type="button"
+                        disabled={!sidebarPrefs.canCreate}
+                        onClick={() =>
+                          setNameDialog({
+                            mode: "create",
+                            sectionId: null,
+                            name: "",
+                            opener: newSectionRef.current,
+                          })
+                        }
+                        aria-label={
+                          sidebarPrefs.canCreate
+                            ? SECTION_CREATE_TITLE
+                            : sidebarSectionCapMessage()
+                        }
+                        title={
+                          sidebarPrefs.canCreate
+                            ? SECTION_CREATE_TITLE
+                            : sidebarSectionCapMessage()
+                        }
+                        data-testid="new-section"
+                        data-section-action=""
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                      >
+                        <FolderPlus className="size-4" aria-hidden="true" />
+                      </button>
+                    )}
+                    {/* 정렬의 문은 **여기 하나**다 (BT-5 #1933). 값이 사이드바 전체에
+                        하나뿐이라(payload 의 `sectionSort` 한 칸) 섹션마다 같은
+                        라디오를 세우면 「이 섹션의 정렬」로 읽히고, 하나를 바꿀 때
+                        전부 바뀌는 것이 결함이 된다. 이 헤더인 이유는 그것이 이미
+                        **사이드바의 선반**이기 때문이다 - 「새 섹션」도 채널 섹션의
+                        일이 아니라 사이드바의 일이고 같은 자리에 산다.
+
+                        커스텀 섹션이 하나도 없어도 서야 한다: 정렬은 섹션을 만들어야
+                        열리는 설정이 아니다.
+
+                        **자기 글리프와 자기 이름을 갖는다**(design-review R1 M-2):
+                        섹션 ⋮ 안에 들어 있던 동안에는 스크린리더가 「채널 섹션 메뉴」로
+                        읽었고, 같은 ⋯ 이 섹션마다 다른 메뉴를 열었다. 근거는
+                        `SidebarSortMenu` 머리말에 있다.
+
+                        **터치에는 없다** — BT-4 H-1 의 규율을 그대로 승계한다. 정렬
+                        자체는 손가락으로도 멀쩡히 동작하므로 이것은 「없는 문」이
+                        아니라 **밀도 판정**이다: `hover: none` 에서는 헤더의 액션이
+                        상시 마운트라(`shouldShowSectionActions`) 240px 서랍의 머리글에
+                        아이콘이 하나 더 영구히 서고, 그 값을 두 번째 순위의 설정이
+                        치를 이유가 없다. 폰이 정렬을 갖게 되는 날의 자리는 이 헤더가
+                        아니라 폰의 설정 표면이다. */}
+                    {canEditSections && (
+                      <SidebarSortMenu
+                        mode={sidebarPrefs.sortMode}
+                        onChange={sidebarPrefs.setSortMode}
+                        onOpenChange={(open) =>
+                          setOpenSectionMenu(open ? baseChannelSection.id : null)
+                        }
+                      />
+                    )}
+                  </>
                 }
               >
-                {/* **로딩은 빈 상태가 아니다** (design-review #1932 H-2). 채널
-                    목록이 오는 동안 이 자리는 「비었다」고 말했고, 바로 스무 줄
-                    위에서 기본 섹션은 같은 프레임에 스켈레톤을 그리고 있었다.
-                    실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
-                    사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
-                    쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
-                <Skeleton ready={!channelsQuery.isLoading} rows={2}>
+                <Skeleton ready={!channelsQuery.isLoading} rows={4}>
+                  {channelsQuery.error && (
+                    <InlineBanner
+                      message="채널을 불러오지 못했습니다."
+                      actionLabel="다시 시도"
+                      onAction={() => void channelsQuery.refetch()}
+                      testId="channels-error"
+                    />
+                  )}
+                  {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
+                      본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
+                      좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
+                      있고, 서술형 문장은 지시가 아니며, 문장 첫머리의 +는 글머리표로
+                      읽혔다(R2 M6). 그래서 액션을 여기에도 두되 outline이다: 액센트
+                      하나는 본문에만 있어 200px 간격으로 primary 둘이 다투지 않고,
+                      여기 있는 것은 같은 일로 가는 조용한 두 번째 문이다.
+                      만들 수 없는 멤버에게는 여전히 이 목록이 비었다는 사실뿐이고,
+                      누가 만들 수 있는지는 본문이 한 번만 말한다. */}
+                  {!channelsQuery.isLoading &&
+                    !channelsQuery.error &&
+                    channels.length === 0 && (
+                      <EmptyInvite
+                        headline="채널 목록이 비어 있습니다."
+                        actions={
+                          canCreate ? (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openCreateChannel()}
+                              data-testid="sidebar-create-channel"
+                            >
+                              채널 만들기
+                            </Button>
+                          ) : undefined
+                        }
+                        testId="channels-empty"
+                      />
+                    )}
                   <ul
-                    id={sidebarSectionListId(section.id)}
+                    id={sidebarSectionListId(baseChannelSection.id)}
                     className="flex flex-col"
                   >
-                    {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
-                        섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
-                        터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
-                        채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
-                        기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
-                        번의 실패가 N개의 문장이 된다. */}
-                    {!channelsQuery.isLoading &&
-                      !channelsQuery.error &&
-                      section.channels.length === 0 && (
-                        <li className="px-2 py-1 text-meta text-ink-muted">
-                          {sidebarEmptySectionHint(!touchSurface)}
-                        </li>
-                      )}
-                    {section.channels.map((channel) => rowFor(channel))}
+                    {baseChannelSection.channels.map((channel) => rowFor(channel))}
                   </ul>
                 </Skeleton>
               </SidebarSection>
-            ))}
 
-            {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). 그때의 시작 경로는
-                위의 멤버 행과 ⌘⇧K다. */}
-            {dmSection.channels.length > 0 && (
-              <SidebarSection
-                title={dmSection.title}
-                sectionId={dmSection.id}
-                collapsed={collapsedSections[dmSection.id] === true}
-                onCollapsedChange={(next) =>
-                  setSidebarSectionCollapsed(dmSection.id, next)
-                }
-                unreadCount={sectionUnread(dmSection.id).unreadCount}
-                mentionCount={sectionUnread(dmSection.id).mentionCount}
-                action={
-                  <Link
-                    to="/directory"
-                    aria-label="새 다이렉트 메시지 시작"
-                    title="새 다이렉트 메시지 (⌘⇧K)"
-                    data-testid="new-dm"
-                    data-section-action=""
-                    className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
-                  >
-                    <SquarePen className="size-4" aria-hidden="true" />
-                  </Link>
-                }
-              >
-                {dmSection.channels.map((channel) => rowFor(channel))}
-              </SidebarSection>
-            )}
+              {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
+                  코어의 `deriveSidebarSections` 머리말에 있다 - 섹션 하나를 만들
+                  때 목록의 대부분이 아래로 밀리지 않게. 접기·unread 집계·호버
+                  액션·⌥↑↓ 는 기본 섹션과 **같은 기계**를 탄다: 이 루프가 넘기는
+                  프롭이 위 SidebarSection 이 받는 것과 한 벌이다. */}
+              {customSections.map((section) => (
+                <SidebarSection
+                  key={section.id}
+                  title={section.title}
+                  sectionId={section.id}
+                  collapsed={collapsedSections[section.id] === true}
+                  onCollapsedChange={(next) =>
+                    setSidebarSectionCollapsed(section.id, next)
+                  }
+                  overlayOpen={
+                    openSectionMenu === section.id ||
+                    nameDialog?.sectionId === section.id ||
+                    deleteDialog?.sectionId === section.id
+                  }
+                  unreadCount={sectionUnread(section.id).unreadCount}
+                  mentionCount={sectionUnread(section.id).mentionCount}
+                  wrapList={false}
+                  // 커스텀 섹션은 **둘 다** 한다: 채널을 받고(배치), 자기가 끌려
+                  // 가면 차례가 바뀐다. 두 뜻이 한 구역에 겹치는 것이 아니라
+                  // 「무엇이 떨어졌는가」가 가른다(`resolveSidebarDrop`).
+                  dropProps={drag.dropProps({
+                    kind: "custom",
+                    sectionId: section.id,
+                  })}
+                  headerDragProps={
+                    canEditSections
+                      ? drag.dragProps({ kind: "section", sectionId: section.id })
+                      : undefined
+                  }
+                  action={
+                    canEditSections ? (
+                    <SidebarSectionMenu
+                      sectionId={section.id}
+                      title={section.title}
+                      order={{
+                        canUp: sidebarPrefs.canMoveSection(section.id, -1),
+                        canDown: sidebarPrefs.canMoveSection(section.id, 1),
+                        onMove: (delta) =>
+                          sidebarPrefs.moveSection(section.id, delta),
+                      }}
+                      onOpenChange={(open) =>
+                        setOpenSectionMenu(open ? section.id : null)
+                      }
+                      onRename={(opener) =>
+                        setNameDialog({
+                          mode: "rename",
+                          sectionId: section.id,
+                          name: section.title,
+                          opener,
+                        })
+                      }
+                      onDelete={(opener) =>
+                        setDeleteDialog({
+                          sectionId: section.id,
+                          name: section.title,
+                          opener,
+                        })
+                      }
+                    />
+                    ) : undefined
+                  }
+                >
+                  {/* **로딩은 빈 상태가 아니다** (design-review #1932 H-2). 채널
+                      목록이 오는 동안 이 자리는 「비었다」고 말했고, 바로 스무 줄
+                      위에서 기본 섹션은 같은 프레임에 스켈레톤을 그리고 있었다.
+                      실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
+                      사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
+                      쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
+                  <Skeleton ready={!channelsQuery.isLoading} rows={2}>
+                    <ul
+                      id={sidebarSectionListId(section.id)}
+                      className="flex flex-col"
+                    >
+                      {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
+                          섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
+                          터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
+                          채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
+                          기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
+                          번의 실패가 N개의 문장이 된다. */}
+                      {!channelsQuery.isLoading &&
+                        !channelsQuery.error &&
+                        section.channels.length === 0 && (
+                          <li className="px-2 py-1 text-meta text-ink-muted">
+                            {sidebarEmptySectionHint(!touchSurface)}
+                          </li>
+                        )}
+                      {section.channels.map((channel) => rowFor(channel))}
+                    </ul>
+                  </Skeleton>
+                </SidebarSection>
+              ))}
 
-            {/* The turn pill covers a bounded number of (channel, agent) pairs.
-                Past that bound a row's empty trailing cell means "not watched",
-                which looks exactly like "quiet" and is not the same fact, so the
-                list names the gap instead of leaving the reader to assume the
-                friendlier reading (SKILL §9). Renders nothing until the cap
-                actually cuts, which no workspace this size reaches. */}
-            {uncovered.length > 0 && (
-              <p
-                className="px-4 py-2 text-meta text-ink-muted"
-                data-testid="agent-coverage-notice"
-                title={`에이전트 활동 미표시: ${uncovered
-                  .map((c) => c.name ?? c.id)
-                  .join(", ")}`}
-              >
-                에이전트 활동 표시가 한도에 닿았습니다. 위 목록 아래쪽 채널 일부는
-                작업 중이어도 표시되지 않습니다.
-              </p>
-            )}
-          </nav>
-        </div>
-
-        {/* Above the identity row, not below it: a new build is news, and news
-            belongs where the eye already lands when it leaves the channel list.
-            Renders nothing at all unless there is something to act on. */}
-        <UpdateBadge />
-
-        {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
-            ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
-            the separation real rather than asserted:
-            • the presence badge (③) is on the avatar: the declared status
-              (auto/away/dnd) as a ROUND badge, the universally read presence
-              spot. It is the only thing on this row that is ever green.
-            • the connection indicator (①, moved here in 6a) is a BAR next to
-              the card, and only when the rail is unhealthy.
-            UX-D4 (#1756) made the whole row the profile-card trigger: status
-            radios, the rail's 워크스페이스 추가, and settings live in that
-            card. The collapse control lives on the titlebar (#1864). */}
-        <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
-          <ProfileCard
-            workspaceId={workspaceId}
-            selfMemberId={session.member.id}
-            selfMember={selfMember}
-            selfName={selfName}
-            connected={connStatus === "connected"}
-          />
-          {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
-              the accessible name both derive from the status, and while connected
-              the element is not rendered at all. 12x4 bar = the workspace rail's
-              marker grammar, deliberately not the avatar badge's circle.
-              shrink-0 keeps it in place while a long name truncates. */}
-          {showsConnectionBar(connStatus) && (
-            <span
-              data-testid="conn-status"
-              data-status={connStatus}
-              role="img"
-              aria-label={connectionCopy(connStatus)}
-              title={connectionCopy(connStatus)}
-              className={cn(
-                "h-1 w-3 shrink-0 rounded-full",
-                connectionBarClass(connStatus)
+              {/* DM 0개면 섹션 자체를 접는다 (R-1 §1 빈 상태). 그때의 시작 경로는
+                  위의 멤버 행과 ⌘⇧K다. */}
+              {dmSection.channels.length > 0 && (
+                <SidebarSection
+                  title={dmSection.title}
+                  sectionId={dmSection.id}
+                  collapsed={collapsedSections[dmSection.id] === true}
+                  onCollapsedChange={(next) =>
+                    setSidebarSectionCollapsed(dmSection.id, next)
+                  }
+                  unreadCount={sectionUnread(dmSection.id).unreadCount}
+                  mentionCount={sectionUnread(dmSection.id).mentionCount}
+                  action={
+                    <Link
+                      to="/directory"
+                      aria-label="새 다이렉트 메시지 시작"
+                      title="새 다이렉트 메시지 (⌘⇧K)"
+                      data-testid="new-dm"
+                      data-section-action=""
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                    >
+                      <SquarePen className="size-4" aria-hidden="true" />
+                    </Link>
+                  }
+                >
+                  {dmSection.channels.map((channel) => rowFor(channel))}
+                </SidebarSection>
               )}
-            />
-          )}
-          <ShortcutHelpDialog />
-        </div>
-      </div>
 
-      {/* 섹션 다이얼로그는 목록 **밖에** 산다. 안에 두면 삭제 확인이 자기가 지우는
-          섹션의 서브트리 안에 있게 되고, 확인을 누르는 순간 함께 언마운트된다 -
-          #1937 H-1 이 채널 나가기에서 정확히 그 값을 치렀다. */}
-      <SectionNameDialog
-        mode={nameDialog?.mode ?? "create"}
-        open={nameDialog !== null}
-        initialName={nameDialog?.name ?? ""}
-        opener={nameDialog?.opener ?? null}
-        onOpenChange={(next) => {
-          if (!next) setNameDialog(null);
-        }}
-        onSubmit={(name) => {
-          if (nameDialog?.mode === "rename" && nameDialog.sectionId) {
-            sidebarPrefs.renameSection(nameDialog.sectionId, name);
-          } else {
-            sidebarPrefs.createSection(name);
-          }
-        }}
-      />
-      <SectionDeleteConfirmDialog
-        open={deleteDialog !== null}
-        name={deleteDialog?.name ?? ""}
-        opener={deleteDialog?.opener ?? null}
-        onOpenChange={(next) => {
-          if (!next) setDeleteDialog(null);
-        }}
-        onConfirm={() => {
-          if (deleteDialog) sidebarPrefs.deleteSection(deleteDialog.sectionId);
-        }}
-      />
-    </div>
-    <SidebarDrawerScrimLayer open={asDrawer && drawerOpen} onClose={closeDrawer} />
+              {/* The turn pill covers a bounded number of (channel, agent) pairs.
+                  Past that bound a row's empty trailing cell means "not watched",
+                  which looks exactly like "quiet" and is not the same fact, so the
+                  list names the gap instead of leaving the reader to assume the
+                  friendlier reading (SKILL §9). Renders nothing until the cap
+                  actually cuts, which no workspace this size reaches. */}
+              {uncovered.length > 0 && (
+                <p
+                  className="px-4 py-2 text-meta text-ink-muted"
+                  data-testid="agent-coverage-notice"
+                  title={`에이전트 활동 미표시: ${uncovered
+                    .map((c) => c.name ?? c.id)
+                    .join(", ")}`}
+                >
+                  에이전트 활동 표시가 한도에 닿았습니다. 위 목록 아래쪽 채널 일부는
+                  작업 중이어도 표시되지 않습니다.
+                </p>
+              )}
+            </nav>
+          </div>
+
+          {/* Above the identity row, not below it: a new build is news, and news
+              belongs where the eye already lands when it leaves the channel list.
+              Renders nothing at all unless there is something to act on. */}
+          <UpdateBadge />
+
+          {/* The identity row is "who I am". Two DIFFERENT facts can appear here and
+              ADR-0160 keeps them apart (guard 6) — 6b design-review H1 is what made
+              the separation real rather than asserted:
+              • the presence badge (③) is on the avatar: the declared status
+                (auto/away/dnd) as a ROUND badge, the universally read presence
+                spot. It is the only thing on this row that is ever green.
+              • the connection indicator (①, moved here in 6a) is a BAR next to
+                the card, and only when the rail is unhealthy.
+              UX-D4 (#1756) made the whole row the profile-card trigger: status
+              radios, the rail's 워크스페이스 추가, and settings live in that
+              card. The collapse control lives on the titlebar (#1864). */}
+          <div className="safe-area-bottom flex items-center gap-2 border-t border-line p-2">
+            <ProfileCard
+              workspaceId={workspaceId}
+              selfMemberId={session.member.id}
+              selfMember={selfMember}
+              selfName={selfName}
+              connected={connStatus === "connected"}
+            />
+            {/* Bound to real connStatus, never decorative (SKILL §8): the colour and
+                the accessible name both derive from the status, and while connected
+                the element is not rendered at all. 12x4 bar = the workspace rail's
+                marker grammar, deliberately not the avatar badge's circle.
+                shrink-0 keeps it in place while a long name truncates. */}
+            {showsConnectionBar(connStatus) && (
+              <span
+                data-testid="conn-status"
+                data-status={connStatus}
+                role="img"
+                aria-label={connectionCopy(connStatus)}
+                title={connectionCopy(connStatus)}
+                className={cn(
+                  "h-1 w-3 shrink-0 rounded-full",
+                  connectionBarClass(connStatus)
+                )}
+              />
+            )}
+            <ShortcutHelpDialog />
+          </div>
+        </div>
+
+        {/* 섹션 다이얼로그는 목록 **밖에** 산다. 안에 두면 삭제 확인이 자기가 지우는
+            섹션의 서브트리 안에 있게 되고, 확인을 누르는 순간 함께 언마운트된다 -
+            #1937 H-1 이 채널 나가기에서 정확히 그 값을 치렀다. */}
+        <SectionNameDialog
+          mode={nameDialog?.mode ?? "create"}
+          open={nameDialog !== null}
+          initialName={nameDialog?.name ?? ""}
+          opener={nameDialog?.opener ?? null}
+          onOpenChange={(next) => {
+            if (!next) setNameDialog(null);
+          }}
+          onSubmit={(name) => {
+            if (nameDialog?.mode === "rename" && nameDialog.sectionId) {
+              sidebarPrefs.renameSection(nameDialog.sectionId, name);
+            } else {
+              sidebarPrefs.createSection(name);
+            }
+          }}
+        />
+        <SectionDeleteConfirmDialog
+          open={deleteDialog !== null}
+          name={deleteDialog?.name ?? ""}
+          opener={deleteDialog?.opener ?? null}
+          onOpenChange={(next) => {
+            if (!next) setDeleteDialog(null);
+          }}
+          onConfirm={() => {
+            if (deleteDialog) sidebarPrefs.deleteSection(deleteDialog.sectionId);
+          }}
+        />
+      </div>
+      <SidebarDrawerScrimLayer open={asDrawer && drawerOpen} onClose={closeDrawer} />
     </>
   );
 }
@@ -1146,6 +1145,8 @@ export function SidebarDrawerScrimLayer({
   return (
     <AnimatePresence>
       {open ? (
+        // 스크림은 서랍 **다음**에 있다: 서랍이 열린 동안 탭이 갈 수 있는 곳은
+        // 서랍과 이 버튼뿐이고(본문은 inert), DOM 순서가 곧 그 순환이다.
         <SidebarDrawerScrim key="sidebar-scrim" onClose={onClose} />
       ) : null}
     </AnimatePresence>
