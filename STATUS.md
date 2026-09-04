@@ -2,10 +2,13 @@
 
 ## UX-R1e 눌림 상태 전수 + shrinking ledger + 3짝 캡처 (#2000, 2026-09-04)
 
-- ADR-0179 D5: 상호작용 표면(행·칩·아이콘 버튼·메뉴 항목·사이드바 행·리액션 칩·S0 CTA)에 `press` 전수. 텍스트 링크·비활성 제외. 메시지/대기 본문 행은 `press` 의 `:active` scale 이 드래그 선택을 접어 (#1743 B-4, capture:design 실측) `active:bg-surface-hover` 만 둔다 — 변형 없음.
-- Ledger `pressLedger.test.ts`: 주석 제거 JSX/클래스 구조 스캔. N0=107 (interactive 95 · text-link 12) → N1=12 (text-link only, interactive 0). 천장 12 고정. 올린 천장 또는 신규 hover-only 컨트롤은 붉음.
-- 이관 표면 compiled CSS: `transition-property` 에 transform 포함, outline-color 제외. 스케일은 `.press` 의 `scale(0.98)` (토큰). `duration-150`/`scale-95` 리터럴 0.
-- 캡처: `press-triplet` 장면 6×3×2=36 PNG. hover=Playwright `hover()`, active=`mouse.down()` 유지, `waitForAnimations`. 모션 켜 둠 (`animations: allow`).
+- ADR-0179 D5 스윕 단위는 **컨트롤**(태그/role)이지, 그걸 감싼 행이 아니고, 「이미 `hover:` 가 있던 요소」도 아니다. `press` 는 활성화 대상 자신만 진다. 비상호작용 `div`/`li`/`span`/`section`(interactive role 없음)에 `press` 를 두면 원장이 붉다.
+- 본문 메시지/대기 행은 fill-only. 사유: `.press` 의 `:active { scale(0.98) }` 가 본문 드래그 선택을 접는다 (#1743 B-4, capture seq 1416). 포인터 아래 눌림 채움은 `--surface-pressed`(라이트 `#ece3cc` · 다크 `#2d2c34`) — `--surface-hover` 와 다른 값(라이트 대비 1.001 · dE 0.0205, 다크 대비 1.100 · dE 0.0290). `--accent-soft` 는 선택으로 읽혀 쓰지 않음. 변형 없음.
+- 텍스트 링크(정본 §2.6: `<a>`/`<button>` 의 유일한 어포던스가 밑줄 또는 `hover:text-` 이고 채움·상자가 없는 것)와 비활성·스크림은 제외.
+- Ledger `pressLedger.test.ts` 전수: JSX + `createElement` · `.ts`/`.tsx` · 같은 파일·import 클래스 상수 · `tokens.css` `@utility` hover-without-active. R1 JSX 스캐너 N0=107 (interactive 95 · text-link 12) → N1=12 는 그 스캐너 기준으로 유지(리뷰 재현). R2 전수 스캐너 N1=9 (텍스트 링크 9 · interactive 0 · CSS 0) · 천장 9. 올린 천장·신규 hover-only 컨트롤·컨테이너 `press`·`press`+`transition-colors` 동거·hover-only `@utility` 는 붉음. 잔량 수리는 `≤` 이고 천장 숫자는 따로 「lower the ceiling to N」.
+- 이관 표면 compiled CSS: `transition-property` 에 transform 포함, outline-color 제외. 스케일은 `.press` 의 `scale(0.98)`. `duration-*`/`scale-*` 리터럴 0. 메뉴 행은 `press-instant-fill` 로 background 를 전이 목록에서 뺀다(하이라이트 ≤1 프레임).
+- 캡처: 갤러리 6 + in-situ 4(메시지 행·대기 행·설정 행 체크박스·초안 `a`) × rest/hover/active × 두 스킴, 라이트 390 은 in-situ+사이드바 행. hover=Playwright `hover()`, active=`mouse.down()` 유지, `waitForAnimations`. 메시지/대기 행은 hover `background-color` ≠ active 를 런타임으로 잰다. 모션 켜 둠 (`animations: allow`).
+- R2 가 고친 R1 거짓 문장: 「press 전수」는 hover 가 있던 95곳이 아니라 컨트롤 분모 · 「interactive 0」은 JSX 스캐너 기준이었고 CSS `plugin-marketplace-row` 반례가 있었음 · `active:bg-surface-hover` 는 hover 와 같은 토큰이라 포인터에서 눌림이 보이지 않았음 · 천장 12 등호 핀은 수리를 벌함.
 - runtime-unverified 아님. 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
@@ -73,7 +76,7 @@
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
 - R2: Button 전이 목록 소유자는 `press` 하나(`transition-colors` 제거, `@layer utilities` 에서 override 뒤). 모달/팝오버 상수는 `motion-enter/exit` 키프레임 유틸(tw-animate-css 없음). `@theme --default-transition-*` 를 사다리에 묶음.
 - 강제: `motion.test.ts` + preflight `raw_motion`(온보딩 블록·motion.ts allowlist). 폰 무접촉(M1a). `motion/react` 미도입(D8는 첫 소비자 티켓). 표면 이관은 UX-R1a~e.
-- 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
+- 잔량(고치지 않음): hover-without-active preflight는 DS-4. 캡처 `waitForAnimations` 전수는 DS-3. S0 CTA `press` 는 UX-R1e.
 - H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
 
