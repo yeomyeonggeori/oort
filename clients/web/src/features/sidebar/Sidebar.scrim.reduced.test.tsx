@@ -14,7 +14,7 @@ let mountedHost: HTMLElement | null = null;
 const reducedMotion = vi.hoisted(() => ({ current: true }));
 
 vi.mock("motion/react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("motion/react")>();
+  const actual = (await importOriginal()) as { [key: string]: unknown };
   return {
     ...actual,
     useReducedMotion: () => reducedMotion.current,

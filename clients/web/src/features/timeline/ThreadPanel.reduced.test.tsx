@@ -16,7 +16,7 @@ const AUTHOR = "00000000-0000-7000-8000-000000000101";
 const reducedMotion = vi.hoisted(() => ({ current: true }));
 
 vi.mock("motion/react", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("motion/react")>();
+  const actual = (await importOriginal()) as { [key: string]: unknown };
   return {
     ...actual,
     useReducedMotion: () => reducedMotion.current,

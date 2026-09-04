@@ -3,7 +3,7 @@
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
 - ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.
-- 실측. Playwright 레인(`skipIf` Chromium)은 제품 컴포넌트(`Sidebar` 390 드로어·스크림, `ThreadPanel`, `QuickSwitcher`). 브라우저 없는 반쪽은 컴파일 CSS(`.sidebar-drawer` `--motion-fast`)와 배선 단정 — 그건 제품 마운트가 아니다. 숫자는 computed `animationDuration`/`transitionDuration` + 닫힘 closed-frames. 두 스킴 동일.
+- 실측. Playwright 레인(`skipIf` Chromium)은 제품 컴포넌트(`Sidebar` 390 드로어·스크림, `ThreadPanel`, `QuickSwitcher`)의 밀리초. 브라우저 없는 반쪽은 컴파일 CSS(`.sidebar-drawer` `--motion-fast`) **그리고** jsdom 제품 마운트(스레드 interrupt, 스크림 persist, 팔레트 focus/keystroke class, 세 표면 reduced-motion detach). 숫자는 computed `animationDuration`/`transitionDuration` + 닫힘 closed-frames. 두 스킴 동일.
 
 | 표면 | 방향 | light | dark | reduced-motion |
 |---|---|---|---|---|
@@ -19,11 +19,12 @@
 - R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
 - red proof (수리 떼면 실제로 붉음):
   - 닫힘 중 20/60/100ms 에 같은/다른 `thread-anchor` 클릭 → 패널이 요청한 root 로 열린다. `leaving`+지연 `onClose` 를 되돌리면 같은 스윕이 안 연다.
-  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 150ms 를 기다린다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다.
-  - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom 렌더). `{drawerOpen && <scrim>}` 정규식은 80자 창이라 증거가 아니다.
-  - 연 팔레트에 키 3타 → `[cmdk-item]` `animationstart` 0. `PALETTE_ITEM_MOTION` 을 행에 되돌리면 타수마다 재생.
-  - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
+  - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 Playwright 벽시계 detach <50ms (실측 스크림 한 프레임대, 팔레트 Escape ~26ms). jsdom: 스크림·스레드·팔레트 모두 computed duration 150ms 여도 `useReducedMotion` 분기가 20ms 안에 뗀다 — 그 분기를 지우면 노드가 남는다. duration 0 은 UX-R0 D9 토큰이라 훅을 떼도 안 붉다; 이 케이스가 훅을 소유자로 고정한다. 팔레트는 Radix Presence 가 overlay 를 먼저 떼면 `overlayRef` 가 null 이라 분기가 안 붉었고, `forceMount` 로 AnimatePresence 가 슬롯을 든다.
+  - 스크림을 닫아도 노드가 `data-state=closed` 로 남았다가 exit 뒤 detach (jsdom, 제품 `Sidebar` 마운트). `{asDrawer && drawerOpen ? <SidebarDrawerScrimLayer open={true}/> : null}` 로 바꾸면 닫힘 즉시 null — Chromium 없이 붉다. AppShell `className=["']sidebar-scrim["']` 정규식은 증거가 아니라서 지웠다.
+  - 연 팔레트에 행 ≥5 (하네스 `abc-*` 5채널) · 키 3타+Backspace 뒤 행 > 0 · `[cmdk-item]` `animationstart` 0 (open-container=1, type-items=0, rows=6). `PALETTE_ITEM_MOTION`/`motion-item-fade` 를 행에 되돌리면 open 에서 item animationstart **11**. jsdom 은 행 class 에 `motion-item-fade` 가 있으면 붉다.
+  - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom 2/2, Playwright `focus=BODY`). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
+- `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
 - 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
