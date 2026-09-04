@@ -32,6 +32,10 @@ import { EmptyInvite, Skeleton } from "../features/common/States";
  *   - leave bars in flow after ready → host height > content height
  *   - restore skel-pulse → animation-name is not none
  *   - collapse host height only on is-settled (R3) → per-frame |Δh| is 48/76
+ *   - measure `from` on the shared cell after content commit (R4) → grow
+ *     cases land +14/+224 in the flip frame and heightTransitionEnd is -1
+ *   - sample only after the click (old trace) → that same grow jump is
+ *     before sample 0, so maxStep=0 and the ladder looks closed
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -238,21 +242,35 @@ type HeightSample = {
 
 type HeightTrace = {
   samples: HeightSample[];
-  lastTransitionEnd: number;
+  heightTransitionEnd: number;
+  opacityTransitionEnd: number;
+};
+
+type TraceShape = "sidebar" | "drafts" | "sidebar5" | "sidebar12";
+
+const TRACE_ARRIVE: Record<TraceShape, string> = {
+  sidebar: "skel-arrive",
+  drafts: "skel-arrive-drafts",
+  sidebar5: "skel-arrive-sidebar5",
+  sidebar12: "skel-arrive-sidebar12",
 };
 
 /**
- * Per-frame host height across the crossfade. R3-H1: a repair that is right
- * at the endpoints and wrong in its timing is still a pop. The R3 behaviour
- * (collapse only on is-settled) produces one 48–76 px unanimated frame after
- * the fade; the ladder must keep every step ≤ 12 px.
+ * Per-frame host height across the crossfade. R3-H1 / R4-H1: a repair that
+ * is right at the endpoints and wrong in its timing is still a pop, and a
+ * trace that starts after the flip cannot see a one-frame grow.
+ *
+ * Sample 0 is the pre-flip height. The rAF loop starts first; the click
+ * runs on the next frame so the flip is inside the window. `flip-then-sample`
+ * is the R4 guard (click, then sample from the next rAF) — kept only so a
+ * scratch copy can show it missing the grow jump.
  */
 async function traceHostHeight(
   page: import("playwright").Page,
-  shape: "sidebar" | "drafts"
+  shape: TraceShape,
+  mode: "sample-then-flip" | "flip-then-sample" = "sample-then-flip"
 ): Promise<HeightTrace> {
-  const arrive =
-    shape === "drafts" ? "skel-arrive-drafts" : "skel-arrive";
+  const arrive = TRACE_ARRIVE[shape];
   return page.evaluate(async (args) => {
     const section = document.querySelector(
       `[data-skel-shape="${args.shape}"]`
@@ -266,36 +284,63 @@ async function traceHostHeight(
     if (!host || !button) throw new Error("height trace: shape not mounted");
     const bars = host.querySelector('[data-skel="bars"]') as HTMLElement | null;
     const samples: HeightSample[] = [];
-    let lastTransitionEnd = 0;
+    let heightTransitionEnd = -1;
+    let opacityTransitionEnd = -1;
     const t0 = performance.now();
     const markEnd = (event: TransitionEvent) => {
       if (event.target !== event.currentTarget) return;
-      if (event.propertyName !== "opacity" && event.propertyName !== "height")
-        return;
-      lastTransitionEnd = performance.now() - t0;
+      const elapsed = performance.now() - t0;
+      if (event.propertyName === "height") heightTransitionEnd = elapsed;
+      if (event.propertyName === "opacity") opacityTransitionEnd = elapsed;
     };
     bars?.addEventListener("transitionend", markEnd);
     host.addEventListener("transitionend", markEnd);
-    button.click();
-    await new Promise<void>((done) => {
-      const tick = () => {
-        const now = performance.now() - t0;
-        const content = host.querySelector(
-          '[data-skel="content"]'
-        ) as HTMLElement | null;
-        samples.push({
-          t: Math.round(now),
-          h: Math.round(host.getBoundingClientRect().height),
-          content: Math.round(content?.getBoundingClientRect().height ?? 0),
-          settled: host.classList.contains("is-settled"),
-        });
-        if (now > 700) return done();
+
+    const pushSample = () => {
+      const now = performance.now() - t0;
+      const content = host.querySelector(
+        '[data-skel="content"]'
+      ) as HTMLElement | null;
+      samples.push({
+        t: Math.round(now),
+        h: Math.round(host.getBoundingClientRect().height),
+        content: Math.round(content?.getBoundingClientRect().height ?? 0),
+        settled: host.classList.contains("is-settled"),
+      });
+      return now;
+    };
+
+    if (args.mode === "flip-then-sample") {
+      button.click();
+      await new Promise<void>((done) => {
+        const tick = () => {
+          const now = pushSample();
+          if (now > 700) return done();
+          requestAnimationFrame(tick);
+        };
         requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
-    });
-    return { samples, lastTransitionEnd: Math.round(lastTransitionEnd) };
-  }, { shape, arrive });
+      });
+    } else {
+      await new Promise<void>((done) => {
+        let flipped = false;
+        const tick = () => {
+          const now = pushSample();
+          if (!flipped) {
+            flipped = true;
+            button.click();
+          }
+          if (now > 700) return done();
+          requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      });
+    }
+    return {
+      samples,
+      heightTransitionEnd: Math.round(heightTransitionEnd),
+      opacityTransitionEnd: Math.round(opacityTransitionEnd),
+    };
+  }, { shape, arrive, mode });
 }
 
 function formatTrace(samples: HeightSample[]): string {
@@ -310,8 +355,22 @@ function formatTrace(samples: HeightSample[]): string {
     .join("\n");
 }
 
-function assertHeightLadder(trace: HeightTrace, label: string): void {
-  const { samples, lastTransitionEnd } = trace;
+function nearestSampleIndex(samples: HeightSample[], t: number): number {
+  let best = 0;
+  for (let i = 1; i < samples.length; i += 1) {
+    if (Math.abs(samples[i]!.t - t) < Math.abs(samples[best]!.t - t)) {
+      best = i;
+    }
+  }
+  return best;
+}
+
+function assertHeightLadder(
+  trace: HeightTrace,
+  label: string,
+  maxStepCap = 12
+): void {
+  const { samples, heightTransitionEnd, opacityTransitionEnd } = trace;
   expect(samples.length, `${label}: no frames`).toBeGreaterThan(4);
   const compact = formatTrace(samples);
   const deltas: number[] = [];
@@ -321,8 +380,8 @@ function assertHeightLadder(trace: HeightTrace, label: string): void {
   const maxStep = Math.max(0, ...deltas.map((d) => Math.abs(d)));
   expect(
     maxStep,
-    `${label}: max single-frame |Δh|=${maxStep} (cap 12)\n${compact}`
-  ).toBeLessThanOrEqual(12);
+    `${label}: max single-frame |Δh|=${maxStep} (cap ${maxStepCap})\n${compact}`
+  ).toBeLessThanOrEqual(maxStepCap);
 
   const first = samples[0]!.h;
   const last = samples[samples.length - 1]!.h;
@@ -354,19 +413,31 @@ function assertHeightLadder(trace: HeightTrace, label: string): void {
   }
 
   expect(
-    lastTransitionEnd,
-    `${label}: no transitionend\n${compact}`
-  ).toBeGreaterThan(0);
-  const afterEnd = samples.filter((s) => s.t > lastTransitionEnd);
+    heightTransitionEnd,
+    `${label}: heightTransitionEnd never fired\n${compact}`
+  ).toBeGreaterThanOrEqual(0);
+  expect(
+    opacityTransitionEnd,
+    `${label}: opacityTransitionEnd never fired\n${compact}`
+  ).toBeGreaterThanOrEqual(0);
+  const heightEndAt = nearestSampleIndex(samples, heightTransitionEnd);
+  const opacityEndAt = nearestSampleIndex(samples, opacityTransitionEnd);
+  expect(
+    Math.abs(heightEndAt - opacityEndAt),
+    `${label}: height end frame ${heightEndAt} (t=${heightTransitionEnd}) vs opacity end frame ${opacityEndAt} (t=${opacityTransitionEnd}) (±1)\n${compact}`
+  ).toBeLessThanOrEqual(1);
+
+  const lastEnd = Math.max(heightTransitionEnd, opacityTransitionEnd);
+  const afterEnd = samples.filter((s) => s.t > lastEnd);
   expect(
     afterEnd.length,
-    `${label}: no samples after transitionend t=${lastTransitionEnd}\n${compact}`
+    `${label}: no samples after transitionend t=${lastEnd}\n${compact}`
   ).toBeGreaterThan(0);
   const heightAfterEnd = afterEnd[0]!.h;
   for (const sample of afterEnd) {
     expect(
       sample.h,
-      `${label}: height moved after last transitionend (t=${sample.t} ${heightAfterEnd}→${sample.h}, end=${lastTransitionEnd})\n${compact}`
+      `${label}: height moved after last transitionend (t=${sample.t} ${heightAfterEnd}→${sample.h}, end=${lastEnd})\n${compact}`
     ).toBe(heightAfterEnd);
   }
 
@@ -481,6 +552,16 @@ describe("UX-R1c @utility skel CSS", () => {
       /\.skel\.is-sizing[\s\S]{0,220}var\(--motion-ease-standard\)/
     );
   });
+
+  it("is-sizing clips the bars overhang (overflow: hidden)", async () => {
+    const css = await buildCss(SKEL_CANDIDATES);
+    expect(css).toMatch(/\.skel\.is-sizing[\s\S]{0,160}overflow:\s*hidden/);
+  });
+
+  it("skel-layer has min-width: 0 (grid min-content floor)", async () => {
+    const css = await buildCss(["skel-layer"]);
+    expect(css).toMatch(/\.skel-layer[\s\S]{0,120}min-width:\s*0/);
+  });
 });
 
 describe("UX-R1c product binding — real Skeleton markup", () => {
@@ -490,6 +571,9 @@ describe("UX-R1c product binding — real Skeleton markup", () => {
     expect(STATES_SRC).toMatch(/className="h-6 rounded-sm bg-surface-hover"/);
     expect(STATES_SRC).toMatch(/classList\.add\("is-sizing"\)/);
     expect(STATES_SRC).toMatch(/style\.height/);
+    expect(STATES_SRC).toMatch(/lastBarsHeight/);
+    expect(STATES_SRC).toMatch(/useLayoutEffect/);
+    expect(STATES_SRC).toMatch(/setTimeout\(\s*finish,\s*400\s*\)/);
   });
 
   it("Drafts and Activity empty states sit inside <Skeleton> (source guard)", () => {
@@ -809,6 +893,94 @@ describe("UX-R1c runtime — React-mounted Skeleton (ready via state)", () => {
         async (page) => {
           const samples = await traceHostHeight(page, "sidebar");
           assertHeightLadder(samples, "sidebar-2ch");
+        }
+      );
+    },
+    30_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "sidebar 5-channel grow: host height steps ≤12px, monotonic, height transitionend fires",
+    async () => {
+      await withReactSkelPage(
+        { viewport: { width: 390, height: 800 } },
+        async (page) => {
+          const samples = await traceHostHeight(page, "sidebar5");
+          assertHeightLadder(samples, "sidebar-5ch");
+        }
+      );
+    },
+    30_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "sidebar 12-channel grow: host height steps ≤12px, monotonic, height transitionend fires",
+    async () => {
+      await withReactSkelPage(
+        { viewport: { width: 390, height: 800 } },
+        async (page) => {
+          const samples = await traceHostHeight(page, "sidebar12");
+          // 224px on --motion-standard ease-out peaks ~30px/frame at 120Hz.
+          // Cap 64 still fails the unanimated 224 jump; 12 would fail the ladder.
+          assertHeightLadder(samples, "sidebar-12ch", 64);
+        }
+      );
+    },
+    30_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "mid-flight shrink: bars visible rect is inside the host (overflow: hidden)",
+    async () => {
+      await withReactSkelPage(
+        { viewport: { width: 390, height: 800 } },
+        async (page) => {
+          const drafts = page.locator('[data-skel-shape="drafts"]');
+          await drafts.getByTestId("skel-arrive-drafts").click();
+          await page.waitForFunction(() => {
+            const host = document.querySelector(
+              '[data-skel-shape="drafts"] [data-testid="skeleton"]'
+            );
+            return host?.classList.contains("is-sizing") === true;
+          });
+          await page.waitForTimeout(120);
+          const clip = await drafts
+            .locator('[data-testid="skeleton"]')
+            .evaluate((node) => {
+              const host = node as HTMLElement;
+              const bars = host.querySelector(
+                '[data-skel="bars"]'
+              ) as HTMLElement | null;
+              if (!bars) throw new Error("bars missing");
+              const hostBox = host.getBoundingClientRect();
+              const barsBox = bars.getBoundingClientRect();
+              const overflow = getComputedStyle(host).overflow;
+              const visible =
+                overflow === "visible"
+                  ? barsBox
+                  : {
+                      top: Math.max(barsBox.top, hostBox.top),
+                      bottom: Math.min(barsBox.bottom, hostBox.bottom),
+                      left: Math.max(barsBox.left, hostBox.left),
+                      right: Math.min(barsBox.right, hostBox.right),
+                    };
+              return {
+                overflow,
+                sizing: host.classList.contains("is-sizing"),
+                hostBottom: hostBox.bottom,
+                barsBottom: barsBox.bottom,
+                visibleBottom: visible.bottom,
+                visibleTop: visible.top,
+                hostTop: hostBox.top,
+              };
+            });
+          expect(clip.sizing, "must still be mid-flight").toBe(true);
+          expect(clip.overflow, "delete overflow:hidden → this is visible").toBe(
+            "hidden"
+          );
+          expect(clip.visibleTop).toBeGreaterThanOrEqual(clip.hostTop - 0.5);
+          expect(clip.visibleBottom).toBeLessThanOrEqual(clip.hostBottom + 0.5);
+          expect(clip.barsBottom).toBeGreaterThan(clip.hostBottom + 1);
         }
       );
     },

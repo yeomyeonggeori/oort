@@ -7,11 +7,52 @@ import { EmptyInvite, Skeleton } from "@/features/common/States";
  * module-scope createRoot cannot become a second React root over the app.
  * Call-site shape: bars → content, `ready` flipped through React state.
  *
- * Two product shapes share the page so the height-trace cases can sample
- * Drafts-empty and the sidebar 2-channel list on the real `Skeleton`.
- * `skel-arrive` stays on the sidebar shape (existing React cases).
+ * Product shapes share the page so the height-trace cases can sample
+ * Drafts-empty (shrink), sidebar 2-channel (shrink), and sidebar 5/12
+ * (grow: bars=4 rows, content taller) on the real `Skeleton`.
+ * `skel-arrive` stays on the 2-channel shape (existing React cases).
  */
-function SidebarShape() {
+
+const CHANNELS_2 = ["엔진", "일반"] as const;
+const CHANNELS_5 = [
+  "엔진",
+  "일반",
+  "디자인 시스템",
+  "release-train",
+  "고객-피드백",
+] as const;
+const CHANNELS_12 = [
+  ...CHANNELS_5,
+  "배포",
+  "온보딩",
+  "인프라",
+  "법무",
+  "제품",
+  "리서치",
+  "qa-nightly",
+] as const;
+
+function ChannelList({ names }: { names: readonly string[] }) {
+  return (
+    <ul className="flex flex-col">
+      {names.map((name) => (
+        <li key={name} className="px-2 py-1 text-body">
+          {name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function SidebarShape({
+  shape,
+  arrive,
+  names,
+}: {
+  shape: string;
+  arrive: string;
+  names: readonly string[];
+}) {
   const [ready, setReady] = useState(false);
 
   const handleArrive = () => {
@@ -19,15 +60,12 @@ function SidebarShape() {
   };
 
   return (
-    <section data-skel-shape="sidebar">
-      <button type="button" data-testid="skel-arrive" onClick={handleArrive}>
+    <section data-skel-shape={shape}>
+      <button type="button" data-testid={arrive} onClick={handleArrive}>
         도착
       </button>
       <Skeleton ready={ready} rows={4}>
-        <ul className="flex flex-col">
-          <li className="px-2 py-1 text-body">엔진</li>
-          <li className="px-2 py-1 text-body">일반</li>
-        </ul>
+        {ready ? <ChannelList names={names} /> : null}
       </Skeleton>
     </section>
   );
@@ -50,11 +88,13 @@ function DraftsShape() {
         도착
       </button>
       <Skeleton ready={ready} rows={4} className="p-4">
-        <EmptyInvite
-          headline="아직 초안이 없습니다."
-          detail="쓰다 만 글은 자동으로 저장됩니다."
-          testId="drafts-empty"
-        />
+        {ready ? (
+          <EmptyInvite
+            headline="아직 초안이 없습니다."
+            detail="쓰다 만 글은 자동으로 저장됩니다."
+            testId="drafts-empty"
+          />
+        ) : null}
       </Skeleton>
     </section>
   );
@@ -63,7 +103,21 @@ function DraftsShape() {
 export function Harness() {
   return (
     <div>
-      <SidebarShape />
+      <SidebarShape
+        shape="sidebar"
+        arrive="skel-arrive"
+        names={CHANNELS_2}
+      />
+      <SidebarShape
+        shape="sidebar5"
+        arrive="skel-arrive-sidebar5"
+        names={CHANNELS_5}
+      />
+      <SidebarShape
+        shape="sidebar12"
+        arrive="skel-arrive-sidebar12"
+        names={CHANNELS_12}
+      />
       <DraftsShape />
     </div>
   );

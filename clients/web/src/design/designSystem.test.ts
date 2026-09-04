@@ -370,8 +370,9 @@ describe("컴포넌트는 스타일을 짓지 않는다 — 런타임 몫", () =
    *
    *   `useAutoGrow`      내용에서 잰 높이. 값이 사람이 친 글에서 나온다.
    *   `placeholderFit`   계산된 글자꼴의 사본. 값이 `getComputedStyle` 에서 나온다.
-   *   `States` (Skeleton) 도착 순간 막대 높이와 콘텐츠 높이를 재서 호스트를
-   *                      A→B로 옮긴다. 기간·이징은 `.skel.is-sizing`의
+   *   `States` (Skeleton) `ready=false`일 때 막대 높이를 저장하고, 뒤집히는
+   *                      레이아웃 이펙트에서 그 값→콘텐츠 높이로 호스트를
+   *                      옮긴다. 기간·이징은 `.skel.is-sizing`의
    *                      `--motion-standard` 사다리다. JSX `style=` 은 프리플라이트가
    *                      막으므로 `host.style.height` 만 쓴다.
    *

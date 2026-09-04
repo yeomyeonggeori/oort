@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
@@ -14,11 +14,14 @@ import { Button } from "@/design/ui/button";
 /**
  * Height-preserving skeleton → content crossfade (ADR-0179 D3 / UX-R1c).
  * Bars and children share one grid cell while loading. No shimmer, no pulse:
- * the bars are static; the crossfade is the whole motion. Host height rides
- * the same ladder as the fade (bars → content). After that window,
- * `is-settled` takes the bars out of a layer that is already at the content
- * height. `is-resetting` is an in-place `ready` true→false on a live
- * instance (전이 0). A remount is a new instance and does crossfade.
+ * the bars are static; the crossfade is the whole motion. Host height is
+ * captured from the bars layer while `ready` is false, locked to that
+ * `from` in a layout effect before the first ready paint, then rides the
+ * same ladder as the fade to the content height — shrink and grow, same
+ * mechanism. After that window, `is-settled` takes the bars out of a layer
+ * that is already at the content height. `is-resetting` is an in-place
+ * `ready` true→false on a live instance (전이 0). A remount is a new
+ * instance and does crossfade.
  */
 function prefersReducedMotion(): boolean {
   return (
@@ -27,6 +30,9 @@ function prefersReducedMotion(): boolean {
     window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
 }
+
+const useBrowserLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 function clearHostSize(host: HTMLElement) {
   host.style.height = "";
@@ -50,9 +56,24 @@ export function Skeleton({
   const hostRef = useRef<HTMLDivElement>(null);
   const barsRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const lastBarsHeight = useRef(0);
   const [settled, setSettled] = useState(ready);
 
-  useEffect(() => {
+  useBrowserLayoutEffect(() => {
+    if (ready) return;
+    const bars = barsRef.current;
+    if (!bars) return;
+    const record = () => {
+      lastBarsHeight.current = bars.getBoundingClientRect().height;
+    };
+    record();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(record);
+    observer.observe(bars);
+    return () => observer.disconnect();
+  }, [ready]);
+
+  useBrowserLayoutEffect(() => {
     const host = hostRef.current;
     const bars = barsRef.current;
     const content = contentRef.current;
@@ -69,7 +90,10 @@ export function Skeleton({
       return;
     }
 
-    const from = host.getBoundingClientRect().height;
+    const from = lastBarsHeight.current;
+    host.style.height = `${from}px`;
+    host.classList.add("is-sizing");
+    void host.offsetHeight;
     const to = content.getBoundingClientRect().height;
     const needsSize = Math.abs(from - to) >= 1;
 
@@ -83,6 +107,7 @@ export function Skeleton({
     };
 
     if (!needsSize) {
+      clearHostSize(host);
       const onEnd = (event: TransitionEvent) => {
         if (event.target !== bars) return;
         if (event.propertyName !== "opacity") return;
@@ -96,9 +121,6 @@ export function Skeleton({
       };
     }
 
-    host.style.height = `${from}px`;
-    host.classList.add("is-sizing");
-    void host.offsetHeight;
     host.style.height = `${to}px`;
 
     const onEnd = (event: TransitionEvent) => {

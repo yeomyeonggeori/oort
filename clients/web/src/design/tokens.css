@@ -886,10 +886,13 @@
 /* UX-R1c / ADR-0179 D3. Skeleton and content share one grid cell while
  * loading. Content arrives with blur(var(--motion-blur-arrival))→0 and
  * opacity, standard ladder. Bars are static (no pulse). Host height
- * interpolates bars → content across the same window (is-sizing). After
- * that, is-settled takes the bars out of a layer already at content
- * height. is-resetting = in-place ready true→false (전이 0), not a remount.
- * reduced-motion: D9 zeroes --motion-standard, so the swap is instant. */
+ * interpolates bars → content across the same window (is-sizing), both
+ * shrink and grow. `from` is the bars height stored while ready is false,
+ * locked onto the host before the first ready paint so no frame is
+ * max(bars, content). After that, is-settled takes the bars out of a
+ * layer already at content height. is-resetting = in-place ready
+ * true→false (전이 0), not a remount. reduced-motion: D9 zeroes
+ * --motion-standard, so the swap is instant. */
 @utility skel {
   display: grid;
   position: relative;
