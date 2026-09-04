@@ -28,6 +28,7 @@
 #   11 progress_word 진행 낱말꼴 「명사 + 중」 위반 (「저장하는 중」)   [AST, #1511]
 #   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
 #   13 raw_motion    사다리 밖 \d+ms · duration-[0-9]+ 손기입 (ADR-0179 D10)
+#   14 motion_lib_scope  motion/react import 허용 3파일 외 hard-zero (ADR-0179 D8 / UX-R1b)
 #
 # 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
 # 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
@@ -182,7 +183,7 @@ drop_issue_refs() {
   done
 }
 
-KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle raw_motion"
+KEYS="emdash raw_color inline_style arbitrary_tw ai_gradient toast naked_focus external_font hype pure_bw progress_word latin_particle raw_motion motion_lib_scope"
 
 label_for() {
   case "$1" in
@@ -199,6 +200,7 @@ label_for() {
     progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
     latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
     raw_motion)    echo "사다리 밖 duration 손기입 (ADR-0179 D10): \\d+ms 와 duration-[0-9]+ 는 motion.css·motion.ts 에만. 온보딩 키프레임 블록은 ADR-0159 예외" ;;
+    motion_lib_scope) echo "motion/react import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. 네 번째 파일은 hard-zero" ;;
     *)             echo "$1" ;;
   esac
 }
@@ -359,6 +361,28 @@ motion_hit_line() {
     | grep -E "$MOTION_HIT_RE" || true
 }
 
+# ---- motion_lib_scope (ADR-0179 D8 / UX-R1b) --------------------------------
+#
+# `import … from "motion/react"` 는 세 파일만. CSS 로는 exit 언마운트를 못
+# 붙잡는 표면(⌘K·스레드 패널·390 스크림)의 AnimatePresence. 네 번째 파일은
+# 빨개져야 한다 — raw_motion 과 같은 합성 selftest 줄로 지킨다.
+
+MOTION_LIB_IMPORT_RE='from[[:space:]]+["'"'"']motion/react["'"'"']'
+MOTION_LIB_ALLOW_RE='src/app/QuickSwitcher\.tsx:|src/features/timeline/ThreadPanel\.tsx:|src/features/sidebar/Sidebar\.tsx:'
+
+motion_lib_hit_line() {
+  local line="$1"
+  case "$line" in
+    *src/app/QuickSwitcher.tsx:*|*src/features/timeline/ThreadPanel.tsx:*|*src/features/sidebar/Sidebar.tsx:*)
+      return 0
+      ;;
+  esac
+  printf '%s\n' "$line" \
+    | drop_comment_lines_motion \
+    | grep -vF "$ALLOW_RE" \
+    | grep -E "$MOTION_LIB_IMPORT_RE" || true
+}
+
 scan_category() {
   case "$1" in
     emdash)
@@ -433,6 +457,13 @@ scan_category() {
         | drop_comment_lines_motion \
         | drop_motion_comment_spans \
         | drop_motion_allowlist \
+        | grep -vF "$ALLOW_RE"
+      ;;
+    motion_lib_scope)
+      grep -rnE "$MOTION_LIB_IMPORT_RE" \
+        "$SRC" --include='*.tsx' --include='*.ts' 2>/dev/null \
+        | drop_comment_lines_motion \
+        | grep -vE "$MOTION_LIB_ALLOW_RE" \
         | grep -vF "$ALLOW_RE"
       ;;
   esac
@@ -602,6 +633,41 @@ SPAN
   return 0
 }
 
+run_motion_lib_scope_selftest() {
+  echo "== motion_lib_scope discriminator self-test =="
+  local fails=0 want line got
+  while IFS='|' read -r want line; do
+    [ -z "${want:-}" ] && continue
+    case "$want" in \#*) continue ;; esac
+    got=0
+    if [ -n "$(motion_lib_hit_line "$line")" ]; then
+      got=1
+    fi
+    if [ "$got" = "$want" ]; then
+      echo "OK    want=$want  $line"
+    else
+      echo "FAIL  want=$want got=$got  $line"
+      fails=1
+    fi
+  done <<'CASES'
+# a fourth file importing motion/react is a violation (UX-R1b red proof)
+1|clients/web/src/design/ui/button.tsx:9:  import { AnimatePresence } from "motion/react";
+1|clients/web/src/app/AppShell.tsx:9:import { motion } from "motion/react";
+# the three allowlisted product files may import it
+0|clients/web/src/app/QuickSwitcher.tsx:9:import { AnimatePresence } from "motion/react";
+0|clients/web/src/features/timeline/ThreadPanel.tsx:9:import { usePresence } from "motion/react";
+0|clients/web/src/features/sidebar/Sidebar.tsx:9:import { useReducedMotion } from "motion/react";
+# comments are not imports
+0|clients/web/src/design/ui/button.tsx:9:// import { motion } from "motion/react";
+CASES
+  if [ "$fails" -ne 0 ]; then
+    echo "RESULT: FAIL, the motion_lib_scope discriminator does not hold."
+    return 1
+  fi
+  echo "RESULT: PASS, motion_lib_scope allows three files and rejects a fourth."
+  return 0
+}
+
 # ---- 코어 단계 (이슈 #1141) --------------------------------------------------
 #
 # node 가 없으면 **건너뛰지 않고 실패한다**. "안 돌린 것"과 "초록"이 구별되지 않는
@@ -636,6 +702,9 @@ case "${1:-}" in
     run_raw_motion_selftest
     motion_rc=$?
     echo ""
+    run_motion_lib_scope_selftest
+    motion_lib_rc=$?
+    echo ""
     if command -v node >/dev/null 2>&1 && [ -f "$WEB_STRING_SCAN" ]; then
       node "$WEB_STRING_SCAN" --selftest
       strings_rc=$?
@@ -647,20 +716,22 @@ case "${1:-}" in
     run_core_stage --selftest
     core_rc=$?
     echo ""
-    if [ "$web_rc" -ne 0 ] || [ "$motion_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
-      echo "SELFTEST: FAIL (web raw_color=$web_rc, raw_motion=$motion_rc, web strings=$strings_rc, core separation=$core_rc)"
+    if [ "$web_rc" -ne 0 ] || [ "$motion_rc" -ne 0 ] || [ "$motion_lib_rc" -ne 0 ] || [ "$strings_rc" -ne 0 ] || [ "$core_rc" -ne 0 ]; then
+      echo "SELFTEST: FAIL (web raw_color=$web_rc, raw_motion=$motion_rc, motion_lib_scope=$motion_lib_rc, web strings=$strings_rc, core separation=$core_rc)"
       exit 1
     fi
-    echo "SELFTEST: PASS (web raw_color + raw_motion + web strings + core separation rule)"
+    echo "SELFTEST: PASS (web raw_color + raw_motion + motion_lib_scope + web strings + core separation rule)"
     exit 0
     ;;
   --help|-h)
     echo "usage: scripts/design_preflight_web.sh [--list|--selftest]"
-    echo "  (no args)  hard-zero check: web 13 categories + core string literals"
+    echo "  (no args)  hard-zero check: web 14 categories + core string literals"
     echo "  --list     print every current hit per category, no gating"
     echo "  --selftest raw_color: prove issue refs pass and real hex fails;"
     echo "             raw_motion: prove 175ms / duration-200 fail, motion.css·"
     echo "             motion.ts·onboarding block·comments pass (ADR-0179 D10);"
+    echo "             motion_lib_scope: prove a fourth motion/react import fails"
+    echo "             and the three allowlisted files pass (ADR-0179 D8);"
     echo "             web strings + core: prove render strings and JSX text fail"
     echo "             while comments, JSX comments and test names pass"
     echo ""
@@ -716,7 +787,7 @@ echo ""
 if [ "$overall" -ne 0 ]; then
   echo "FAIL  web: 위 분류에 위반이 있다."
 else
-  echo "OK    web: 13/13 categories clean."
+  echo "OK    web: 14/14 categories clean."
 fi
 
 # 코어 단계는 웹이 붉어도 **돈다**. 한 번의 실행이 두 층을 다 말해야 고치는 사람이
@@ -737,7 +808,7 @@ if [ "$overall" -ne 0 ]; then
   exit 1
 fi
 
-echo "RESULT: PASS, web 13/13 + core 5/5 categories clean."
+echo "RESULT: PASS, web 14/14 + core 5/5 categories clean."
 echo "  Still manual (SKILL §10 checklist): light AND dark reviewed, four states"
 echo "  present, keyboard path exists, long Korean strings do not overflow."
 exit 0
