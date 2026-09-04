@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-04 (오후) · Fable(+Opus 5 검수) · ★UX-R1c 5회전 랜딩 + 승격 m — W1 uxui 1차 파도 완결(R1a·R1c·R1d·DS-2 main 정본화)
+
+- 랜딩: UX-R1c #2045 R3 FAIL(정착 팝 48~76px) → R4 워커(API 소진 사망 → `--continue` 재개) → R4 FAIL(늘어남 반쪽 +224px, 가드 맹점) → R5 워커 → **R5 PASS**(32트레이스 양방향, cap 64 이탈 정직 판정). 승격 m #2058(토폴로지 검사 → sync #2059 선행) + sync #2060 → main=f8cc7754.
+- 발행: #2057(R5 잔여 — 이징 기반 단일 상한·부하 선언 7개·intro 플레이크).
+- 정정: PIPELINE §3 재개 `--continue` · 승격 뒤 sync는 소스 트랙에도. 교훈: 수리 사슬은 구간/방향 누락 모양 · 숫자 상한은 프레임레이트 종속 · 워커 절단·소진 상시.
+- 다음: R1e/R1b/R2a/R2b 발사(go) · #2050 N-2 결정 · ITO 준비.
+
 ## 2026-09-04 · Fable(+Opus 5 검수) · ★W1 3차 랜딩 — UX-R1a·R1d 폐곡선, DS-2 포함 승격 l, UX-R1c R4 진행, 레인 재정의
 
 - 레인: 성재 「Fable + opus5으로 가자」 — planner Fable · design-review Opus 5 · 워커 Cursor grok 4.6. 재개는 Opus5의 스크래치 RESUME.md로 복원 후 repo 보존(`claudedocs/resume-2026-09-03/`).
@@ -142,9 +149,3 @@
 - **#1788 기전 정정**: 최초 진단("--public-origin이 이 키를 갱신 안 함")은 **틀렸다** — `ensure_local_drive_public_base`가 #1696부터 실재(`self_host_env.sh:436-446`). 진짜 결함은 **claim 수술이 정본 env의 비밀번호 키를 mv로 제거**(`SELF_HOST_AGENT.md:141-148`)해 갱신 경로가 `validate_owner_password`(`:872`)에서 abort ⇒ `ensure_local_drive_public_base`(`:879`)에 영원히 도달 못 함. **플레이북 §1.4↔§2.3 내부 모순**(§1.4가 스스로 "생성기를 다시 돌리지 않는다"고 적어 두고 §2.3이 돌리라 한다). 티켓 본문·제목 정정 완료.
 - **급소 2**: "클라우드=VM 유휴자원"은 데이터 축은 **이미 성립**(pgdata·drive `/workspace` bind), 컴퓨트 축은 T3 어댑터 추가로 **안 된다**(wire adapter=cubesandbox 하나) — 맞는 그림은 **T2 workd**(`021_work_host.sql:23`). **TC-2와는 직교**(TC-2=관리형 표면, 이번 모델=셀프호스트).
 - 파도 1 **4/4 완주**: #1781·#1777(9a308276)·#1778(b1966a23)·#850. 결재석 G1~G5 + ADR 2건(0165 증보3 문안 완성·0169 증보1) + 로드맵 델타 D-a~D-f.
-
-## 2026-08-26 (Opus) · ★NCP 비용 판정 + 셀프호스트 외부 의존 전수 감사 · 파도 1 완주(#1777·#1778)
-- **전수 감사**(`research/2026-08-26-selfhost-external-dependency-audit.md`): "우리 서버를 타는 자리"=4곳, 런타임 강제는 **실질 1곳(데스크톱 자동 업데이트 — 빌드타임 baked)**뿐. 이미지 pull=local-build 대안 1급, 푸시=기본 스택에 부재, display TURN=**문면만 oort 전용이고 코드는 호스트 미검증**(M7 판정 필요). 텔레메트리·분석·과금 콜백 **0건**. **사실 정정: 허들은 oort TURN을 타지 않는다 — livekit.yaml TURN 블록이 통째 주석이라 TURN이 아예 없다.**
-- **NCP 정리 판정**(`research/2026-08-26-ncp-teardown-judgment.md`, 성재 발제 "비용이 의미 없이 발생"): 3대=app.oor7.com(healthz 200)·momo-cube-host(8vCPU·32GB·300GB)·momo-turn. **momo-turn은 cube의 자식**(symmetric NAT 때문에 생긴 호스트)이라 한 묶음. **성재 4대 테스트(터미널·UXUI·허들·그록봇)는 NCP 0대로 전부 도달 가능** — 허들은 같은 머신 안이면 LiveKit 127.0.0.1 바인드가 그대로 통한다(그록봇 VM은 불가: quick tunnel이 UDP 미디어를 못 나름). **Vercel은 옮길 대상이 없다** — oor7.com 루트 무응답(공개 랜딩 부재), 앱 SPA는 same-origin 전제라 뗄 수 없다. 결재 대기 2건: PG 덤프 필요 여부·외부 셀프호스터의 push relay 의존 여부.
-- 파도 1: **#1777 랜딩**(9a308276) — host-signed 세 팔 이식으로 remote_attach_available false→true, 터미널 축 개방. 레시피 `scripts/verify_workd_rust.sh` 동반. **#1778 PR #1787** — 소유자 관전 토글 400 수리, **ADR-0004 증보3 D3 원문 회귀 이식**(owner_only 강제는 077 파도가 스스로 넓힌 규칙이었다). 독립 재현 1199/1199 + PG 컨포먼스 1/1(일회용 PG 신규 기동).
-- 적립: **#1788**(M6 — 첨부 capability URL이 고정 localhost로 조립돼 터널 접속에서 깨짐. `--public-origin` 갱신 대상에서 누락. 그록봇 VM E2E가 정확히 이 조건). #1785(ACP 릴레이).
