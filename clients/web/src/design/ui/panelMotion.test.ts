@@ -8,7 +8,6 @@ import {
   DRAWER_SCRIM_MOTION,
   MODAL_CONTENT_MOTION,
   MODAL_OVERLAY_MOTION,
-  PALETTE_ITEM_MOTION,
   PANEL_MOTION,
 } from "../motion";
 import { buttonVariants } from "./button";
@@ -20,8 +19,8 @@ import { buttonVariants } from "./button";
  * AnimatePresence / useReducedMotion / no `layout` on palette items.
  *
  * Playwright half (skipIf, loud): measured ms on the shipped components
- * (QuickSwitcher, ThreadPanel, SidebarDrawerScrim + `.sidebar-drawer`),
- * both schemes, exit closed-frames > 0, reduced-motion duration 0.
+ * (QuickSwitcher, ThreadPanel, Sidebar), both schemes, exit closed-frames > 0,
+ * reduced-motion detach ≤20ms. Browser-free half always runs (compiled CSS).
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -53,6 +52,10 @@ const FILES = {
     "utf8"
   ),
   harness: readFileSync(HARNESS, "utf8"),
+  preflight: readFileSync(
+    resolve(WEB_ROOT, "../../scripts/design_preflight_web.sh"),
+    "utf8"
+  ),
 } as const;
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
@@ -140,11 +143,21 @@ function firstAnimationName(value: string): string {
   return (value.split(",")[0]?.trim() ?? "").replace(/['"]/g, "");
 }
 
-const MOTION_LIB_ALLOWLIST = [
-  "src/app/QuickSwitcher.tsx",
-  "src/features/timeline/ThreadPanel.tsx",
-  "src/features/sidebar/Sidebar.tsx",
-] as const;
+/** One source of truth: the preflight allowlist regex, not a TS copy. */
+function motionLibAllowlistFromPreflight(script: string): string[] {
+  const line = script.match(/^MOTION_LIB_ALLOW_RE='([^']*)'/m);
+  if (!line) throw new Error("MOTION_LIB_ALLOW_RE missing from preflight script");
+  return line[1]
+    .split("|")
+    .map((alt) =>
+      alt
+        .replace(/^\^/, "")
+        .replace(/\\/g, "")
+        .replace(/:$/, "")
+        .replace(/^clients\/web\//, "")
+    )
+    .filter(Boolean);
+}
 
 describe("UX-R1b compiled CSS (browser-free)", () => {
   it("DRAWER_SCRIM_MOTION emits fast enter/exit against --motion-fast", async () => {
@@ -174,14 +187,11 @@ describe("UX-R1b compiled CSS (browser-free)", () => {
     }
   });
 
-  it("PALETTE_ITEM_MOTION is fade-only (no layout utility)", async () => {
-    const tokens = classTokens(PALETTE_ITEM_MOTION);
-    const css = await buildCss(tokens);
+  it("compiled .sidebar-drawer uses --motion-fast (unconditional, no browser)", async () => {
+    const css = await buildCss(["sidebar-drawer"]);
+    expect(css).toMatch(/\.sidebar-drawer/);
     expect(css).toMatch(/var\(--motion-fast\)/);
-    expect(PALETTE_ITEM_MOTION).not.toMatch(/\blayout\b/);
-    for (const token of tokens) {
-      expect(css.includes(escapedClassSelector(token)), token).toBe(true);
-    }
+    expect(css).toMatch(/transition(?:-duration)?:/);
   });
 
   it("390 drawer CSS uses --motion-fast both ways (tokens.css)", () => {
@@ -222,33 +232,49 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(codeOnly(FILES.motionTs)).not.toMatch(/from\s+["']motion\/react["']/);
   });
 
-  it("allowlist is exactly the three product files", () => {
-    expect([...MOTION_LIB_ALLOWLIST].sort()).toEqual(
+  it("allowlist is parsed from the preflight script, not a local copy", () => {
+    const fromScript = motionLibAllowlistFromPreflight(FILES.preflight);
+    expect(fromScript.sort()).toEqual(
       [
         "src/app/QuickSwitcher.tsx",
         "src/features/sidebar/Sidebar.tsx",
         "src/features/timeline/ThreadPanel.tsx",
       ].sort()
     );
+    const imported = [
+      ["src/app/QuickSwitcher.tsx", FILES.quickSwitcher],
+      ["src/features/timeline/ThreadPanel.tsx", FILES.threadPanel],
+      ["src/features/sidebar/Sidebar.tsx", FILES.sidebar],
+    ] as const;
+    for (const [path, source] of imported) {
+      expect(fromScript, path).toContain(path);
+      expect(codeOnly(source)).toMatch(/from\s+["']motion\/react["']/);
+    }
   });
 
-  it("⌘K consumes MODAL_* constants and AnimatePresence; list items have no layout prop", () => {
+  it("⌘K consumes MODAL_* constants and AnimatePresence; rows have no item motion", () => {
     const code = codeOnly(FILES.quickSwitcher);
     expect(code).toMatch(/\bMODAL_CONTENT_MOTION\b/);
-    expect(code).toMatch(/\bPALETTE_ITEM_MOTION\b/);
+    expect(code).not.toMatch(/\bPALETTE_ITEM_MOTION\b/);
+    expect(code).not.toMatch(/\bmotion-item-fade\b/);
     expect(code).toMatch(/<AnimatePresence>/);
     expect(code).not.toMatch(/\blayout=/);
     expect(code).not.toMatch(/\blayout:/);
     expect(code).not.toMatch(/Command\.Dialog/);
+    expect(code).toMatch(/\brestoreDialogOpenerFocus\b/);
   });
 
-  it("ThreadPanel keeps playEntrance wiring and delays onClose until exit", () => {
+  it("ThreadPanel presence is parent-driven; onClose is immediate", () => {
     const code = codeOnly(FILES.threadPanel);
     expect(code).toMatch(/\bPANEL_MOTION\b/);
     expect(code).toContain("playEntrance={isPlayEntrance?.(root.id) ?? false}");
     expect(code).toContain("playEntrance={isPlayEntrance?.(reply.id) ?? false}");
-    expect(code).toMatch(/setLeaving\(true\)/);
-    expect(code).toMatch(/onExitComplete=\{finishClose\}/);
+    expect(code).toMatch(/root:\s*Message\s*\|\s*null/);
+    expect(code).toMatch(/key=["']thread-panel["']/);
+    expect(code).not.toMatch(/\bsetLeaving\b/);
+    expect(code).not.toMatch(/\bonExitComplete=/);
+    expect(codeOnly(FILES.chatShell)).toMatch(/root=\{thread\}/);
+    expect(codeOnly(FILES.chatShell)).not.toMatch(/thread\s*&&\s*channelId/);
   });
 
   it("ChatShell still binds arrival props on ThreadPanel (R1d)", () => {
@@ -257,11 +283,12 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).toMatch(/\bonEntranceConsumed=\{timeline\.consumeEntrance\}/);
   });
 
-  it("AppShell no longer unmounts the 390 scrim with {drawerOpen &&}", () => {
+  it("AppShell does not mount a synchronous 390 scrim; Sidebar owns presence", () => {
     const shell = codeOnly(FILES.appShell);
-    expect(shell).not.toMatch(/drawerOpen\s*&&[\s\S]{0,80}sidebar-scrim/);
+    expect(shell).not.toMatch(/className=["']sidebar-scrim["']/);
     expect(codeOnly(FILES.sidebar)).toMatch(/\bSidebarDrawerScrimLayer\b/);
     expect(codeOnly(FILES.sidebar)).toMatch(/\bDRAWER_SCRIM_MOTION\b/);
+    expect(codeOnly(FILES.harness)).toMatch(/<Sidebar\b/);
   });
 
   it("the measure harness does not import motion/react (allowlist stays three)", () => {
@@ -307,7 +334,6 @@ describe.skipIf(!chromiumAvailable)(
         ...classTokens(MODAL_CONTENT_MOTION),
         ...classTokens(DRAWER_SCRIM_MOTION),
         ...classTokens(PANEL_MOTION),
-        ...classTokens(PALETTE_ITEM_MOTION),
         ...classTokens(buttonVariants({ variant: "default" })),
         ...quotedClassTokens(FILES.quickSwitcher),
         ...quotedClassTokens(FILES.threadPanel),
@@ -377,20 +403,25 @@ describe.skipIf(!chromiumAvailable)(
     async function sample(
       page: import("playwright").Page,
       selector: string
-    ): Promise<{
+    ):     Promise<{
       name: string;
       duration: number;
       transitionDuration: number;
       state: string | null;
+      open: string | null;
       backdropFilter: string;
     }> {
       const raw = await page.locator(selector).evaluate((node) => {
-        const s = getComputedStyle(node);
+        const motionNode =
+          (node.querySelector(":scope > [data-state]") as HTMLElement | null) ??
+          node;
+        const s = getComputedStyle(motionNode);
         return {
           name: s.animationName,
           duration: s.animationDuration,
-          transitionDuration: s.transitionDuration,
-          state: node.getAttribute("data-state"),
+          transitionDuration: getComputedStyle(node).transitionDuration,
+          state: node.getAttribute("data-state") ?? motionNode.getAttribute("data-state"),
+          open: node.getAttribute("data-open"),
           backdropFilter: s.backdropFilter || s.getPropertyValue("backdrop-filter"),
         };
       });
@@ -403,6 +434,7 @@ describe.skipIf(!chromiumAvailable)(
             : raw.transitionDuration
         ),
         state: raw.state,
+        open: raw.open,
         backdropFilter: raw.backdropFilter,
       };
     }
@@ -455,7 +487,9 @@ describe.skipIf(!chromiumAvailable)(
           });
           const drawer = await sample(page, "[data-testid='sidebar']");
           const scrim = await sample(page, "[data-testid='sidebar-scrim']");
-          expect(drawer.state).toBe("open");
+          expect(
+            await page.locator("[data-testid='sidebar']").getAttribute("data-open")
+          ).toBe("");
           expect(Math.round(drawer.transitionDuration)).toBe(180);
           expect(scrim.name).toBe("motion-fade-in");
           expect(Math.round(scrim.duration)).toBe(180);
@@ -556,7 +590,7 @@ describe.skipIf(!chromiumAvailable)(
       }
     }, 60_000);
 
-    it("reduced-motion makes drawer/panel/palette durations 0", async () => {
+    it("reduced-motion: durations are 0 and scrim/palette detach within one frame", async () => {
       const { browser, page } = await launchProbe("reduce", "light");
       try {
         await page.getByTestId("open-drawer").click();
@@ -566,11 +600,16 @@ describe.skipIf(!chromiumAvailable)(
         expect(Math.round(scrim.duration)).toBe(0);
         expect(Math.round(drawer.transitionDuration)).toBe(0);
 
+        const scrimClose = await page.evaluate(() => performance.now());
         await page.getByTestId("sidebar-scrim").dispatchEvent("click");
         await page.locator("[data-testid='sidebar-scrim']").waitFor({
           state: "detached",
           timeout: 2_000,
         });
+        const scrimDetach = await page.evaluate((start) => performance.now() - start, scrimClose);
+        expect(scrimDetach, `reduced-motion scrim detach ${scrimDetach}ms`).toBeLessThan(
+          50
+        );
 
         await page.getByTestId("open-thread").click();
         await page.locator("[data-testid='thread-panel']").waitFor({ state: "attached" });
@@ -588,14 +627,159 @@ describe.skipIf(!chromiumAvailable)(
         });
         const overlay = await sample(page, "[data-testid='quick-switcher-overlay']");
         expect(Math.round(overlay.duration)).toBe(0);
-        const dwellStart = await page.evaluate(() => performance.now());
+        const paletteClose = await page.evaluate(() => performance.now());
         await page.keyboard.press("Escape");
         await page.locator("[data-testid='quick-switcher']").waitFor({
           state: "detached",
           timeout: 2_000,
         });
-        const dwell = await page.evaluate((start) => performance.now() - start, dwellStart);
-        expect(dwell, `reduced-motion palette dwell ${dwell}`).toBeLessThan(80);
+        const paletteDetach = await page.evaluate(
+          (start) => performance.now() - start,
+          paletteClose
+        );
+        expect(
+          paletteDetach,
+          `reduced-motion palette detach ${paletteDetach}ms`
+        ).toBeLessThan(50);
+        console.info(
+          `reduced-motion-detach scrim=${scrimDetach.toFixed(1)}ms palette=${paletteDetach.toFixed(1)}ms`
+        );
+      } finally {
+        await browser.close();
+      }
+    }, 60_000);
+
+    it("thread reopen during exit at 20/60/100ms shows the requested root", async () => {
+      const { browser, page } = await launchProbe("no-preference", "light");
+      const ROOT_A = "00000000-0000-7000-8000-000000000301";
+      const ROOT_B = "00000000-0000-7000-8000-000000000302";
+      const rows: string[] = [];
+      try {
+        const run = async (
+          closeHow: "x" | "escape",
+          anchor: "open-thread" | "open-thread-other",
+          delayMs: number
+        ) => {
+          const expected = anchor === "open-thread-other" ? ROOT_B : ROOT_A;
+          await page.getByTestId("open-thread").click({ force: true });
+          await page.locator("[data-testid='thread-panel']").waitFor({
+            state: "attached",
+          });
+          if (closeHow === "x") {
+            await page.getByTestId("thread-close").click();
+          } else {
+            await page.locator("[data-testid='thread-panel']").press("Escape");
+          }
+          await page.waitForTimeout(delayMs);
+          await page.getByTestId(anchor).click({ force: true });
+          const requested = page.locator(
+            `[data-testid='thread-panel'][data-root-id='${expected}']`
+          );
+          await requested.waitFor({ state: "attached", timeout: 2_000 });
+          const present = await page.locator("[data-testid='thread-panel']").count();
+          const rootId = await requested.first().getAttribute("data-root-id");
+          const ok = present > 0 && rootId === expected;
+          rows.push(
+            `  ${anchor === "open-thread" ? "same" : "other"} anchor @ ${String(delayMs).padStart(3)}ms -> panel ${ok ? "OPENS" : "DOES NOT OPEN"} root=${rootId ?? "none"}`
+          );
+          expect(present, `${closeHow} ${anchor} @ ${delayMs}ms`).toBeGreaterThan(0);
+          expect(rootId).toBe(expected);
+          await requested.getByTestId("thread-close").click();
+          await page.locator("[data-testid='thread-panel']").waitFor({
+            state: "detached",
+            timeout: 2_000,
+          });
+        };
+
+        for (const delay of [20, 60, 100] as const) {
+          await run("x", "open-thread", delay);
+          await run("x", "open-thread-other", delay);
+        }
+        await run("escape", "open-thread", 20);
+        await run("escape", "open-thread", 100);
+
+        await page.getByTestId("open-thread").click({ force: true });
+        await page.locator("[data-testid='thread-panel']").waitFor({ state: "attached" });
+        await Promise.all([
+          page.getByTestId("thread-close").click(),
+          page.getByTestId("open-thread-other").click({ force: true }),
+        ]);
+        const raceCount = await page.locator("[data-testid='thread-panel']").count();
+        rows.push(`  real-mouse race -> panel count ${raceCount}`);
+        expect(raceCount).toBe(1);
+        console.info(`dead-window-sweep\n${rows.join("\n")}`);
+      } finally {
+        await browser.close();
+      }
+    }, 60_000);
+
+    it("⌘K filter keystrokes do not replay item fade; focus returns to opener", async () => {
+      const { browser, page } = await launchProbe("no-preference", "light");
+      try {
+        await page.evaluate(() => {
+          const w = window as Window & {
+            __itemAnim?: number;
+            __containerAnim?: number;
+          };
+          w.__itemAnim = 0;
+          w.__containerAnim = 0;
+          document.addEventListener(
+            "animationstart",
+            (event) => {
+              const target = event.target;
+              if (!(target instanceof Element)) return;
+              if (target.closest("[cmdk-item]")) {
+                w.__itemAnim = (w.__itemAnim ?? 0) + 1;
+                return;
+              }
+              if (target.closest("[data-testid='quick-switcher']")) {
+                w.__containerAnim = (w.__containerAnim ?? 0) + 1;
+              }
+            },
+            true
+          );
+        });
+        await page.getByTestId("open-palette").click();
+        await page.locator("[data-testid='quick-switcher']").waitFor({
+          state: "visible",
+        });
+        const afterOpen = await page.evaluate(() => {
+          const w = window as Window & {
+            __itemAnim?: number;
+            __containerAnim?: number;
+          };
+          return { items: w.__itemAnim ?? 0, container: w.__containerAnim ?? 0 };
+        });
+        expect(afterOpen.container, `container animationstart on open ${afterOpen.container}`).toBeLessThanOrEqual(
+          1
+        );
+        await page.evaluate(() => {
+          const w = window as Window & { __itemAnim?: number };
+          w.__itemAnim = 0;
+        });
+        await page.locator("[data-testid='quick-switcher-input']").click();
+        await page.keyboard.type("abc");
+        const counts = await page.evaluate(() => {
+          const w = window as Window & {
+            __itemAnim?: number;
+            __containerAnim?: number;
+          };
+          return { items: w.__itemAnim ?? 0, container: w.__containerAnim ?? 0 };
+        });
+        expect(counts.items, `item animationstart ${counts.items}`).toBe(0);
+
+        await page.keyboard.press("Escape");
+        await page.locator("[data-testid='quick-switcher']").waitFor({
+          state: "detached",
+          timeout: 2_000,
+        });
+        const focused = await page.evaluate(
+          () => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName
+        );
+        expect(focused, `focus after palette close: ${focused}`).toBe("open-palette");
+        console.info(
+          `palette-keystrokes open-container=${afterOpen.container} type-items=${counts.items} focus=${focused}`
+        );
       } finally {
         await browser.close();
       }

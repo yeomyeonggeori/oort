@@ -390,7 +390,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | 층 | 어디 | 무엇 |
 |---|---|---|
-| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 13분류 + 코어 5분류, **하드 제로** |
+| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 14분류 + 코어 5분류, **하드 제로** |
 | **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |
 | **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |
 | **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |

@@ -128,7 +128,7 @@ scripts/design_preflight_web.sh          # exit 0 pass, 1 violation
 scripts/design_preflight_web.sh --list   # every hit per category, no gating
 ```
 
-Fourteen categories (ten grep + four AST/grep, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
+Fourteen categories (eleven grep + three AST, see 10.1), **hard zero** (unlike the mac ratchet: `clients/web` was converted to the Dawn tokens in one pass, MOMO-597, so there is no legacy debt to grandfather):
 
 | # | key | catches |
 |---|---|---|
@@ -145,7 +145,7 @@ Fourteen categories (ten grep + four AST/grep, see 10.1), **hard zero** (unlike 
 | 11 | `progress_word` | 「명사 + 중」 진행 낱말 (**AST**, #1511) |
 | 12 | `latin_particle` | 라틴 낱말과 조사 사이 공백 (**AST**, #1511) |
 | 13 | `raw_motion` | 사다리 밖 `\d+ms` · `duration-[0-9]+` (ADR-0179 D10; 온보딩 블록·`motion.css`·`motion.ts` allowlist) |
-| 14 | `motion_lib_scope` | `import … from "motion/react"` 허용 3파일 외 hard-zero (ADR-0179 D8 / UX-R1b: QuickSwitcher · ThreadPanel · Sidebar) |
+| 14 | `motion_lib_scope` | `motion` / `motion/…` / `framer-motion` 허용 3파일 외 hard-zero (comment-stripped grep; ADR-0179 D8 / UX-R1b: QuickSwitcher · ThreadPanel · Sidebar). Doors: `from`, side-effect `import`, `import()`, `require()` |
 
 `src/design/tokens.css`, `tokens.contrast.test.ts`, and `src/design/themes/` are excluded (defining, measuring, and rebinding raw values is their job). The themes directory is **pre-validated bindings only**, not a general raw-color exemption: a hex in a component is still a fail. A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
 
@@ -164,7 +164,7 @@ Core is **hard zero** as well, with no ratchet file: applying the separation rul
 
 **The web `emdash` category uses the same scanner** (`scripts/design_preflight_web_strings.mjs`; the rule itself lives once, in `scripts/design_preflight_ast.mjs`). It was line-based until #1141, and its 12-hit backlog turned out to be 10 `describe`/`it` names, 1 JSX comment, and 1 developer-facing `throw` — 11 of 12 were false positives that the AST simply does not see. Moving closed a miss at the same time: web text is often written **without quotes**, between tags (`<p>… — …</p>`), which the quoted-literal grep had never once looked at. JSX text is a node, a JSX comment is not.
 
-The other ten grep categories stay line-based on purpose. They ask about class names, CSS and markup — questions a string-literal node cannot answer — and `raw_color` has to read `.css`, where there is no TS AST at all.
+The other eleven grep categories stay line-based on purpose. They ask about class names, CSS and markup — questions a string-literal node cannot answer — and `raw_color` has to read `.css`, where there is no TS AST at all.
 
 ```sh
 scripts/design_preflight_web.sh --selftest   # all three discriminators, as cases
