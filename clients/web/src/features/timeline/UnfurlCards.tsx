@@ -108,7 +108,7 @@ export function UnfurlCardView({
         // 링크 메시지마다 키보드 여정이 카드 수만큼 늘어난다(리뷰 Blocker-1).
         data-row-action=""
         className={cn(
-          "flex min-w-0 flex-1 rounded-md focus-visible:focus-ring",
+          "flex min-w-0 flex-1 rounded-md press focus-visible:focus-ring",
           rich ? "flex-col" : "items-stretch"
         )}
         data-testid="unfurl-card"

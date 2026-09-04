@@ -481,7 +481,7 @@ export function WorkstreamDetailRoute() {
   const back = (
     <Link
       to="/workstreams"
-      className="flex items-center gap-1 text-meta text-ink-muted hover:text-ink focus-visible:focus-ring"
+      className="flex items-center gap-1 text-meta text-ink-muted press hover:text-ink focus-visible:focus-ring"
       data-testid="workstream-detail-back"
     >
       <ArrowLeft aria-hidden="true" className="size-4" />

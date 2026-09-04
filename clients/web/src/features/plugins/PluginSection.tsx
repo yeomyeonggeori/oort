@@ -379,8 +379,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
-                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left focus-visible:focus-ring"
-                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left focus-visible:focus-ring disabled:cursor-wait"}
+                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left press focus-visible:focus-ring"
+                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left press focus-visible:focus-ring disabled:cursor-wait"}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-raised text-body font-semibold text-ink" aria-hidden="true">
@@ -1246,7 +1246,7 @@ function PluginScopeConsentDialog({
             // 진행 신호다.
             className={cn(
               "min-w-action",
-              !hasSelection && "bg-accent-soft text-ink press hover:opacity-100"
+              !hasSelection && "bg-accent-soft text-ink hover:opacity-100"
             )}
             data-testid="plugin-scope-confirm"
             onClick={() => {

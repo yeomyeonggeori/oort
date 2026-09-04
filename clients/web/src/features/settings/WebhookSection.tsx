@@ -1045,7 +1045,7 @@ function IngressNotes() {
       className="min-w-0 rounded-md border border-line"
       data-testid="webhook-ingress-notes"
     >
-      <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:focus-ring">
+      <summary className="cursor-pointer px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring">
         {WEBHOOK_INGRESS_NOTES_LABEL}
       </summary>
       <div className="flex flex-col gap-3 border-t border-line p-3">

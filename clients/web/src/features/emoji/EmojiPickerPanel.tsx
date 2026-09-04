@@ -482,7 +482,7 @@ export function EmojiPickerPanel({
                     // (~42px there). Finger floor is touch-target (24).
                     // MOBILE_TAP_TARGETS is an allowlist and does not see
                     // these cells (오르트 구름 §5.5②) — 42 < 44 is known.
-                    "emoji-grid-slot touch-target flex aspect-square w-full items-center justify-center rounded-sm text-title focus-visible:focus-ring",
+                    "emoji-grid-slot touch-target flex aspect-square w-full items-center justify-center rounded-sm text-title press focus-visible:focus-ring",
                     active && "bg-accent-soft text-ink"
                   )}
                 >

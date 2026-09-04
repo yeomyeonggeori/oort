@@ -445,7 +445,7 @@ function UsageBody({
 
       {summary.buckets.length > 0 && (
         <details className="min-w-0 rounded-md border border-line" data-testid="usage-buckets">
-          <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:focus-ring">
+          <summary className="cursor-pointer px-3 py-2 text-body text-ink press hover:bg-surface-hover focus-visible:focus-ring">
             기간별로 자세히 보기 (
             <span className="font-mono" data-numeric="">
               {summary.buckets.length}

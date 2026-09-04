@@ -220,7 +220,7 @@ export function EnabledToolsSection({
               !canSave &&
                 !confirmed &&
                 !saving &&
-                "opacity-50 press hover:opacity-50"
+                "opacity-50 hover:opacity-50"
             )}
             aria-disabled={!canSave || undefined}
             aria-busy={saving || undefined}
