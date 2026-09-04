@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-04 스냅샷 87 (Fable · momo-main — ★결정 4건 집행 + W1 uxui 2차 발사 준비 완료(go 대기). 세션 안전 중단 체크포인트 = `claudedocs/resume-2026-09-04/RESUME.md`).** 컴팩트 복원 진입점.
+>
+> **★ 성재 결정(2026-09-04)**: ①**#2050 N-2 = 바닥 동시 도착 상한 3**(초과분 즉시 정착, stagger 기각) → ADR-0179 D3 정오표 + #2050 수용 기준 갱신 ②W1 uxui 2차 발사 순서 권고 확인(**R1e + R1b 먼저**, 그 뒤 R2a·R2b) — **발사는 go 신호** ③**#2057 확정**: 페이드 창은 Δh로 늘리지 않음, 상한은 이징 기반 단일 규칙 ④7월 DEVIATION pending 3건 위임 판정: MOMO-412 → **아직 유효**(JWT_HMAC 폴백이 셀프호스트 기본값) → **#2066** 발행·`accepted` / MOMO-471·474 → macOS 표면 은퇴로 소멸 → `noted`·#495 close. 정정: 출시 프로그램 계획 머리글(ADR Accepted).
+> **★ 발사 준비(go 대기)**: 워크트리 `momo-worktrees/wuxr1e`(`feat/uxr1e-press-sweep`)·`wuxr1b`(`feat/uxr1b-panel-motion`) @ uxui `51f32202`, node_modules 설치, 미션 `claudedocs/resume-2026-09-04/mission-uxr1e.md`·`mission-uxr1b.md`(브리프 계약 + 「숫자로 잴 것」 + skipIf 형제 형태 + 판정 금지). 포트: R1e 8637/8639 · R1b 8625/8627. R1b는 `scripts/design_preflight_web.sh` 카테고리 1개 추가(`motion_lib_scope`)를 **별도 커밋**으로 — 승격 시 정책 감사 대상.
+> **★ 정본 헤드**: 스냅샷 86 체인 뒤 main=d46e90e9·uxui=51f32202·engine=846870c1(이 문서 PR 이후 갱신). 도는 것 없음.
+> **★ 다음**: go → R1e·R1b 워커 발사(병렬 2) → design-review 폐곡선 → 랜딩 → 승격 n(R1b의 보호 경로 감사 포함) → R2a·R2b → ITO(G1).
+
+> 이하 스냅샷 86:
 > **2026-09-04 스냅샷 86 (Fable · momo-main — ★W1 uxui 1차 파도 완결: UX-R1c 5회전 폐곡선 랜딩 + 승격 배치 m → R1a·R1c·R1d·DS-2 전부 main 정본화. 잔여 = R1e·R1b·R2a·R2b(전부 ready, 발사 go 대기)).** 컴팩트 복원 진입점.
 >
 > **★ 랜딩**: **UX-R1c #2045**(스켈레톤 blur 크로스페이드 `Skeleton` 래퍼, **5회전** — R1 B2·H3(죽은 공간 76px·제품 결속 0·펄스) → R2 B1·H2(CI throw 상시 빨강·런타임 3회 초록·Inbox 비로딩) → R3 H1(**R2 수리가 만든 회귀**: 정착 250ms 뒤 152→104 / 136→60px 컨테이너 팝, 빈 상태 8표면) → R4 H1(**R3 수리가 반쪽**: 늘어남 +14/+224px 한 프레임 — `from`을 커밋 후 셀에서 재 `needsSize` false, 가드는 플립 다음 rAF부터 샘플해 maxStep=0) → **R5 PASS**: `from`을 `ready=false` 동안 저장 + `useLayoutEffect` 잠금, 샘플 먼저→플립 가드, 검수자 32트레이스 양방향 검증(플립 직후=플립 전, 정착 후 Δ0, host==content), cap 64 이탈은 「정직 — 상한 모양만 교정」 판정) → uxui `e0b03442`. 워커 1회 Cursor `[resource_exhausted]` 사망 → `--continue` 재개(수리 커밋 보존, 게이트·PR 본문·푸시만 이음).
@@ -49,15 +57,6 @@
 > **★ 결재 대기**: ADR-0179(표현 축)·0180(QR 기기 연결)·0181(웰컴 킥오프)·0182(일시 확인) Proposed. Accept 시 #1958 UX-R0·#1959 M0s·#1960 UX-R2s 개방. 즉시 발사 가능: #1954 SH-1·#1955 SH-3a·#1956 DS-2·#1957 UX-R4a.
 > **★ 적립**: #1964 폰 마크 소비+explicit_open · #1966 UnreadPill 재방문 arming 선재 결함 · #1967 BT-6 닛(N-15 죽은 분기·N-9 게이트 잔여·N-14) · #1774 감사 재요구 마찰(이번 승격 6회 실측 — P4 후보).
 > **★ 교훈(메모리 기록)**: 트랙 머지 전 verify_merge_tree 8레인 필수(STATUS 충돌은 union 임시 커밋 --base) · zsh 미인용 $VAR 미분리 · 워커 상습 축에 "수리 회귀"와 "런타임 4/4 미실측 주장" 추가 — R3/R4에서 M-8 '수리됨' 주장이 두 번 불성립.
-
-> 이하 스냅샷 81:
-> **2026-09-02 스냅샷 81 (Fable · momo-main — ★G0 집행 중: BZ-5a·BT-6 서버 랜딩, ADR 4본 Proposed, W1 패킷·이슈 발급, 클라 워커 가동).** 컴팩트 복원 진입점.
->
-> **★ 랜딩**: BZ-5a #1922 → track/uxui **939ed80e**(결재: 액센트 기본=새벽·5종 유지, 정책 검증 PASS, #1868 코멘트·5b 잔여) · BT-6 서버 절반 #1961 → track/engine **6faccaea**(재검증: PG 증명 5/5·breadth 2/2·마이그레이션 3/3 GREEN, RED 커밋 5/5 실패 확인) · ENGINE_HANDOFF **A-43** ready(#1962 → engine 6b8b723f) · 트랙 동기화 #1951·#1952(alignment PASS).
-> **★ 가동**: **BT-6 클라 절반 grok 4.6 워커**(`momo-worktrees/wbt6-client`, 미션 `scratchpad/mission-bt6-client.md` — momo-core 합성 단일점·⋯ 메뉴·explicit_open 배선·grep 게이트·캡처 8587/셸 8589). 완료 시 design-review(fresh) 폐곡선 → 머지 → #1934 close.
-> **★ 결재 대기**: **ADR-0179·0180·0181·0182 Proposed**(main 랜딩 #1949) → Accept 시 #1958 UX-R0·#1959 M0s·#1960 UX-R2s 개방. 즉시 발사 가능(go 대기): #1954 SH-1·#1955 SH-3a·#1956 DS-2·#1957 UX-R4a(패킷 main 랜딩 #1950).
-> **★ 보류 PR**: **#1953** P1 PIPELINE.md+P2 CODEX.md 병합(+이 스냅샷) — 승격 창에서 main 머지 후 sync 짝. 워커 레인=grok 4.6(D-7 개정).
-> **★ 다음**: 클라 절반 랜딩 → 승격 배치(engine→main→uxui sync→uxui→main→engine sync→#1953→sync 짝) → **v0.1.4 발행 창(성재 attended dispatch 승인)** → W1 발사(병렬 2). 교훈 기록: zsh 미인용 $VAR 미분리로 빈 diff를 '동일'로 오판한 감사 코멘트 정정(#1922) — 메모리 `zsh-word-split-gotcha`.
 
 > **과거 스냅샷은 `docs/planning/archive/CURRENT_STATE-snapshots.md`로 이동(로테이션 — 규칙은 아래 절).**
 
