@@ -562,7 +562,7 @@ export function ConnectPage({
                   onClick={() => setWorkspaceOpen((open) => !open)}
                   aria-expanded={workspaceOpen}
                   aria-controls="connect-workspace-field"
-                  className="self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 focus-visible:focus-ring"
+                  className="self-start rounded-sm text-meta text-ink-muted underline underline-offset-4 hover:text-ink focus-visible:focus-ring"
                   data-testid="login-workspace-toggle"
                 >
                   다른 워크스페이스로 로그인
