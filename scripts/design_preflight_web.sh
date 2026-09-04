@@ -28,7 +28,7 @@
 #   11 progress_word 진행 낱말꼴 「명사 + 중」 위반 (「저장하는 중」)   [AST, #1511]
 #   12 latin_particle 라틴 낱말과 조사 사이 공백 (「Esc 는」)          [AST, #1511]
 #   13 raw_motion    사다리 밖 \d+ms · duration-[0-9]+ 손기입 (ADR-0179 D10)
-#   14 motion_lib_scope  motion/react import 허용 3파일 외 hard-zero (ADR-0179 D8 / UX-R1b)
+#   14 motion_lib_scope  motion / motion/… / framer-motion 허용 3파일 외 hard-zero (grep, ADR-0179 D8 / UX-R1b)
 #
 # 11·12 는 emdash 와 같은 AST 단계가 판정한다(렌더 문자열·JSX 텍스트만, 주석·
 # 테스트 이름 제외 — 규칙 정의는 scripts/design_preflight_ast.mjs). 코어 단계도
@@ -200,7 +200,7 @@ label_for() {
     progress_word) echo "진행 낱말은 「명사 + 중」 (#1501 정본·#1511 게이트) — 「-하는 중」은 고유어 어간(ast.mjs NATIVE_HANEUN_STEMS)만, 문장 꼴 「-하는 중입니다」는 검사 밖" ;;
     latin_particle) echo "라틴 낱말 뒤 조사는 붙여 쓴다 (「Esc 는」→「Esc는」, #1511·#1560 M①) — break-keep 아래서 띈 조사가 줄머리 고아로 선다" ;;
     raw_motion)    echo "사다리 밖 duration 손기입 (ADR-0179 D10): \\d+ms 와 duration-[0-9]+ 는 motion.css·motion.ts 에만. 온보딩 키프레임 블록은 ADR-0159 예외" ;;
-    motion_lib_scope) echo "motion/react import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. 네 번째 파일은 hard-zero" ;;
+    motion_lib_scope) echo "motion/framer-motion import 허용 범위 (ADR-0179 D8): QuickSwitcher.tsx · ThreadPanel.tsx · Sidebar.tsx 세 파일만. from/side-effect import/import()/require() · motion · motion/… · framer-motion. 네 번째 파일은 hard-zero" ;;
     *)             echo "$1" ;;
   esac
 }
@@ -363,22 +363,29 @@ motion_hit_line() {
 
 # ---- motion_lib_scope (ADR-0179 D8 / UX-R1b) --------------------------------
 #
-# `import … from "motion/react"` 는 세 파일만. CSS 로는 exit 언마운트를 못
+# motion / motion/… / framer-motion 는 세 파일만. CSS 로는 exit 언마운트를 못
 # 붙잡는 표면(⌘K·스레드 패널·390 스크림)의 AnimatePresence. 네 번째 파일은
 # 빨개져야 한다 — raw_motion 과 같은 합성 selftest 줄로 지킨다.
+#
+# Doors (any string literal in these positions):
+#   import { x } from "spec" | import * as m from "spec"
+#   import "spec" (side-effect)
+#   import("spec") | require("spec")
+# Specifiers: "motion" | "motion/…" | "framer-motion"
 
-MOTION_LIB_IMPORT_RE='from[[:space:]]+["'"'"']motion/react["'"'"']'
-MOTION_LIB_ALLOW_RE='src/app/QuickSwitcher\.tsx:|src/features/timeline/ThreadPanel\.tsx:|src/features/sidebar/Sidebar\.tsx:'
+MOTION_LIB_SPEC='["'"'"'](motion(/[^"'"'"']*)?|framer-motion)["'"'"']'
+MOTION_LIB_IMPORT_RE="(from[[:space:]]+|import[[:space:]]+|import\\(|require\\()${MOTION_LIB_SPEC}"
+# Anchored to the path field of grep -n output (path:line:content). Matching
+# anywhere would let a comment quote an allowlisted path and exempt itself.
+MOTION_LIB_ALLOW_RE='^clients/web/src/app/QuickSwitcher\.tsx:|^clients/web/src/features/timeline/ThreadPanel\.tsx:|^clients/web/src/features/sidebar/Sidebar\.tsx:'
 
+# Same filter the scan uses. The case-statement copy of the allowlist is gone:
+# widening MOTION_LIB_ALLOW_RE must turn this red, as it turns the scan red.
 motion_lib_hit_line() {
   local line="$1"
-  case "$line" in
-    *src/app/QuickSwitcher.tsx:*|*src/features/timeline/ThreadPanel.tsx:*|*src/features/sidebar/Sidebar.tsx:*)
-      return 0
-      ;;
-  esac
   printf '%s\n' "$line" \
     | drop_comment_lines_motion \
+    | grep -vE "$MOTION_LIB_ALLOW_RE" \
     | grep -vF "$ALLOW_RE" \
     | grep -E "$MOTION_LIB_IMPORT_RE" || true
 }
@@ -653,6 +660,15 @@ run_motion_lib_scope_selftest() {
 # a fourth file importing motion/react is a violation (UX-R1b red proof)
 1|clients/web/src/design/ui/button.tsx:9:  import { AnimatePresence } from "motion/react";
 1|clients/web/src/app/AppShell.tsx:9:import { motion } from "motion/react";
+1|clients/web/src/design/ui/button.tsx:9:import * as m from "motion/react";
+1|clients/web/src/design/ui/button.tsx:9:const load = () => import("motion/react");
+1|clients/web/src/design/ui/button.tsx:9:require("motion/react");
+1|clients/web/src/design/ui/button.tsx:9:import "motion/react";
+1|clients/web/src/design/ui/button.tsx:9:import { AnimatePresence } from "framer-motion";
+1|clients/web/src/design/ui/button.tsx:9:import { animate } from "motion";
+1|clients/web/src/design/ui/button.tsx:9:import { motion } from "motion/react-client";
+# quoting an allowlisted path in the content must not exempt a fourth file
+1|clients/web/src/design/ui/button.tsx:9:import { motion } from "motion/react"; // src/app/QuickSwitcher.tsx:
 # the three allowlisted product files may import it
 0|clients/web/src/app/QuickSwitcher.tsx:9:import { AnimatePresence } from "motion/react";
 0|clients/web/src/features/timeline/ThreadPanel.tsx:9:import { usePresence } from "motion/react";
