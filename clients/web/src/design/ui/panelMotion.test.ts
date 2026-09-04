@@ -286,7 +286,8 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).not.toMatch(/\blayout=/);
     expect(code).not.toMatch(/\blayout:/);
     expect(code).not.toMatch(/Command\.Dialog/);
-    expect(code).toMatch(/\brestoreDialogOpenerFocus\b/);
+    expect(code).toMatch(/\brestoreRef\b/);
+    expect(code).not.toMatch(/\brestoreDialogOpenerFocus\b/);
   });
 
   it("ThreadPanel presence is parent-driven; onClose is immediate", () => {
