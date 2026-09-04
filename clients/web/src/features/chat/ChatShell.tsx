@@ -85,7 +85,7 @@ import type { HuddleController } from "@/features/huddles/useHuddle";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
@@ -1195,35 +1195,37 @@ export function ChatShell() {
               onEntranceConsumed={timeline.consumeEntrance}
               capUnmountedArrivals={timeline.capUnmountedArrivals}
             />
-          ) : channelsQuery.isLoading ? (
-            <SkeletonRows rows={6} className="p-4" />
-          ) : channelsQuery.error ? (
-            <InlineBanner
-              message="채널을 불러오지 못했습니다."
-              actionLabel="다시 시도"
-              onAction={() => void channelsQuery.refetch()}
-              testId="chat-channels-error"
-            />
-          ) : canCreate ? (
-            <EmptyInvite
-              headline="아직 채널이 없습니다. 첫 채널을 만들어 팀을 시작하세요."
-              actions={
-                <Button
-                  size="sm"
-                  onClick={() => openCreateChannel()}
-                  data-testid="chat-create-channel"
-                >
-                  채널 만들기
-                </Button>
-              }
-              testId="chat-no-channel"
-            />
           ) : (
-            <EmptyInvite
-              headline="아직 채널이 없습니다."
-              detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다. 관리자에게 요청하세요."
-              testId="chat-no-channel"
-            />
+            <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
+              {channelsQuery.isLoading ? null : channelsQuery.error ? (
+                <InlineBanner
+                  message="채널을 불러오지 못했습니다."
+                  actionLabel="다시 시도"
+                  onAction={() => void channelsQuery.refetch()}
+                  testId="chat-channels-error"
+                />
+              ) : canCreate ? (
+                <EmptyInvite
+                  headline="아직 채널이 없습니다. 첫 채널을 만들어 팀을 시작하세요."
+                  actions={
+                    <Button
+                      size="sm"
+                      onClick={() => openCreateChannel()}
+                      data-testid="chat-create-channel"
+                    >
+                      채널 만들기
+                    </Button>
+                  }
+                  testId="chat-no-channel"
+                />
+              ) : (
+                <EmptyInvite
+                  headline="아직 채널이 없습니다."
+                  detail="채널은 워크스페이스 오너나 관리자가 만들 수 있습니다. 관리자에게 요청하세요."
+                  testId="chat-no-channel"
+                />
+              )}
+            </Skeleton>
           )}
         </div>
 

@@ -1,6 +1,6 @@
 import { Lock } from "lucide-react";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   composerTriggerSpec,
   type ComposerCandidate,
@@ -88,7 +88,7 @@ export function ComposerAutocompleteList({
         onMouseDown={(event) => event.preventDefault()}
       >
         {status === "loading" ? (
-          <SkeletonRows rows={3} className="p-0" />
+          <Skeleton ready={false} rows={3} className="p-0" />
         ) : status === "error" ? (
           <InlineBanner
             message={offline ? copy.offline : copy.error}

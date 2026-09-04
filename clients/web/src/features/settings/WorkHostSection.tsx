@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   fetchWorkHostEngine,
   fetchWorkTierPolicy,
@@ -166,7 +166,7 @@ function EngineBlock({ offline }: { offline: boolean }) {
   if (query.isPending) {
     return (
       <Subsection title="실행 엔진" lines={lines}>
-        <SkeletonRows rows={3} />
+        <Skeleton ready={false} rows={3} />
       </Subsection>
     );
   }
@@ -376,7 +376,7 @@ function RegistryBlock({
   if (hosts.isPending) {
     return (
       <Subsection title="등록된 호스트" lines={REGISTRY_LINES}>
-        <SkeletonRows rows={2} />
+        <Skeleton ready={false} rows={2} />
       </Subsection>
     );
   }
@@ -559,7 +559,7 @@ function TierPolicyBlock({
   if (mine.isPending) {
     return (
       <Subsection title="호스트 상실 시 재개" lines={POLICY_LINES}>
-        <SkeletonRows rows={2} />
+        <Skeleton ready={false} rows={2} />
       </Subsection>
     );
   }
@@ -620,7 +620,7 @@ function TierPolicyBlock({
         {workspace.isPending && (
           <div className="flex min-w-0 flex-col gap-1">
             <p className="text-meta text-ink-muted">워크스페이스 기본</p>
-            <SkeletonRows rows={2} />
+            <Skeleton ready={false} rows={2} />
           </div>
         )}
 

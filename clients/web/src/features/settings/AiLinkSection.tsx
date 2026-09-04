@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   deleteProviderLink,
   fetchProviderLink,
@@ -416,7 +416,7 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
   if (query.isPending) {
     return (
       <SectionShell title="AI 연결" lines={lines}>
-        <SkeletonRows rows={4} />
+        <Skeleton ready={false} rows={4} />
       </SectionShell>
     );
   }

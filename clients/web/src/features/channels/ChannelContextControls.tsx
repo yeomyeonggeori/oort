@@ -12,7 +12,7 @@ import {
   useRestoreFocusOnClose,
 } from "@/design/ui/dialog";
 import { Avatar } from "@/features/timeline/MessageRow";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { channelHeaderControlClass } from "@/features/chat/channelHeaderControl";
 import { cn } from "@/design/lib/cn";
 
@@ -245,7 +245,7 @@ export function ChannelMemberPanel({
 
         <div className="min-h-0 flex-1 overflow-y-auto" data-testid="channel-member-list">
           {showLoading ? (
-            <SkeletonRows rows={4} className="p-4" />
+            <Skeleton ready={false} rows={4} className="p-4" />
           ) : showEmpty ? (
             <EmptyInvite
               headline="이 채널에 멤버가 없습니다."

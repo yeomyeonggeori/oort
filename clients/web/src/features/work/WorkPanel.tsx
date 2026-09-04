@@ -31,7 +31,7 @@ import {
 } from "@/features/workspace/useWorkspace";
 import { useTickingNow } from "@/features/agents/agentWorkingSignal";
 import { CHIP_CLASS } from "@/features/common/chip";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
   useSessionEvents,
   useSessionVerification,
@@ -598,7 +598,7 @@ function SessionPeek({
       data-session-id={session.id}
     >
       {query.isPending ? (
-        <SkeletonRows rows={2} className="p-0" />
+        <Skeleton ready={false} rows={2} className="p-0" />
       ) : query.error !== null ? (
         <p className="text-meta text-danger" role="alert">
           진행 내역을 불러오지 못했습니다.
@@ -1113,7 +1113,7 @@ export function WorkPanel({
       ) : (
         <div className="min-h-0 flex-1 overflow-y-auto">
           {projectionsPending && (
-            <SkeletonRows rows={4} className="p-4" />
+            <Skeleton ready={false} rows={4} className="p-4" />
           )}
           {projectionError !== null && (
             <InlineBanner

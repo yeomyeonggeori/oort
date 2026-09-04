@@ -20,13 +20,13 @@
 // fixtures below (realistic Korean+English team content, never "테스트 1").
 // =============================================================================
 
-import { spawn } from "node:child_process";
 import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
+import { startGuardedPreview } from "../gates/preview-guard.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -2293,20 +2293,6 @@ async function assertCloudMissesCta(page, where) {
 
 async function assertCloudMissesLockup(page, where) {
   await assertCloudMissesTarget(page, where, "onboarding-lockup", "lockup");
-}
-
-async function waitForServer(url, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    if (Date.now() > deadline) throw new Error(`preview server never came up: ${url}`);
-    await new Promise((r) => setTimeout(r, 200));
-  }
 }
 
 async function signIn(page) {
@@ -10491,6 +10477,116 @@ async function waitForAnimations(page) {
   );
 }
 
+/**
+ * UX-R1c: two frames per scheme at 1280, plus light 390 (skeleton then
+ * settled). Holds the channel list, channel messages, and inbox approvals
+ * fetch so the surfaces that actually crossfade (sidebar + inbox) are
+ * loading together. Motion stays on; waitForAnimations covers the 240ms
+ * fade. This is not ADR-0179 D10 ③ / DS-3.
+ *
+ * The inbox default panel is 결정 대기 (`GET …/approvals`). Holding only
+ * channels leaves that panel ready=true with cards already painted. Gate
+ * the skeleton frame on `[data-testid="inbox-route"] [data-ready="false"]`
+ * (1 at skeleton, 0 at settled) and the settled frame on the inverse.
+ */
+async function captureSkeletonReveal(browser, scheme) {
+  return captureSkeletonRevealAt(browser, scheme, VIEWPORT, "");
+}
+
+/**
+ * 1280 keeps the sidebar column in frame. 390 folds it into a drawer, so
+ * the wait is `open-sidebar-drawer` (and the inbox skeleton in the pane),
+ * never `channel-list`. Light 390 is enough to put the phone-width bars
+ * on record; dark 390 is the same layout.
+ */
+async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
+  const phone = viewport.width === MOBILE_VIEWPORT.width;
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+  });
+  let release = () => {};
+  const held = new Promise((resolve) => {
+    release = resolve;
+  });
+  await installMocks(context);
+  await context.route("**/v1/workspaces/*/channels", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await held;
+    return route.fallback();
+  });
+  await context.route(
+    "**/v1/workspaces/*/channels/*/messages*",
+    async (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.includes("/replies")) return route.fallback();
+      if (route.request().method() !== "GET") return route.fallback();
+      await held;
+      return route.fallback();
+    }
+  );
+  await context.route("**/v1/workspaces/*/approvals*", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    await held;
+    return route.fallback();
+  });
+  const page = await context.newPage();
+  const shots = [];
+  try {
+    await page.goto(ORIGIN, { waitUntil: "domcontentloaded" });
+    await page.evaluate(
+      "try { localStorage.clear(); sessionStorage.clear(); } catch (e) {}"
+    );
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await signInThroughOnboarding(page, {
+      email: "seongjae@dawn.example",
+      password: "capture-only-not-a-credential",
+    });
+    if (phone) {
+      await page
+        .getByTestId("open-sidebar-drawer")
+        .waitFor({ state: "visible" });
+    } else {
+      await page.getByTestId("channel-list").waitFor({ state: "visible" });
+      await page.getByTestId("skeleton-row").first().waitFor({ state: "visible" });
+    }
+    await page.evaluate('location.hash = "/inbox"');
+    await page.getByTestId("inbox-route").waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-ready="false"]')
+      .waitFor({ state: "visible", timeout: 8_000 });
+    await waitForAnimations(page);
+    const skeletonPath = `${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`;
+    await screenshotSettled(page, skeletonPath);
+    shots.push(skeletonPath);
+    release();
+    if (!phone) {
+      await page
+        .getByTestId("sidebar-section-channels")
+        .getByRole("link", { name: "엔진" })
+        .waitFor({ state: "visible" });
+    }
+    await page
+      .locator('[data-testid="inbox-route"] [data-ready="true"]')
+      .waitFor({ state: "visible" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-ready="false"]')
+      .waitFor({ state: "hidden" });
+    await page
+      .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
+      .waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    const settledPath = `${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`;
+    await screenshotSettled(page, settledPath);
+    shots.push(settledPath);
+    return shots;
+  } finally {
+    await page.close();
+    await context.close();
+  }
+}
+
 /** Two consecutive buffers must match so a mid-transition shutter cannot ship. */
 async function screenshotSettled(page, path) {
   await waitForAnimations(page);
@@ -11120,16 +11216,24 @@ async function main() {
   }
   mkdirSync(OUT_DIR, { recursive: true });
 
-  const server = spawn(
-    resolve(WEB_ROOT, "node_modules/.bin/vite"),
-    ["preview", "--port", String(PORT), "--strictPort", "--host", "127.0.0.1"],
-    { cwd: WEB_ROOT, stdio: "ignore" }
-  );
-  const shutdown = () => server.kill("SIGTERM");
-  process.on("exit", shutdown);
+  const preview = await startGuardedPreview({
+    webRoot: WEB_ROOT,
+    port: PORT,
+    portEnvVar: "CAPTURE_PORT",
+  });
+  let previewDeath = null;
+  preview.child.on("exit", (code, signal) => {
+    previewDeath = new Error(
+      `CAPTURE FAIL: this lane's vite preview died mid-run ` +
+        `(exit ${code}, signal ${signal}). Not retrying and not photographing ` +
+        `whoever is now on ${PORT}.`
+    );
+  });
+  const assertThisPreview = () => {
+    if (previewDeath) throw previewDeath;
+  };
 
   try {
-    await waitForServer(ORIGIN);
     const browser = await chromium.launch();
     await prepareUnfurlPreviewPng(browser);
     try {
@@ -11140,34 +11244,49 @@ async function main() {
       const profile = process.env.CAPTURE_PROFILE || "all";
       if (profile === "accent") {
         for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
       } else if (profile === "gallery") {
         for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
           all.push(...(await captureDesignGallery(browser, scheme)));
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
-          all.push(...(await captureDesignGallery(browser, scheme)));
-          all.push(...(await captureScheme(browser, scheme)));
-          all.push(...(await captureTerminalDockScenes(browser, scheme)));
-          all.push(...(await captureMarkUnreadScenes(browser, scheme)));
-          all.push(...(await captureEmptyConversationScenes(browser, scheme)));
-          all.push(...(await captureNonemptyChannelIntroScenes(browser, scheme)));
-          all.push(...(await captureAddMemberScenes(browser, scheme)));
-          all.push(...(await captureSetStatusScenes(browser, scheme)));
-          all.push(...(await captureSearchScopeScenes(browser, scheme)));
-          all.push(...(await captureHostedPairingScenes(browser, scheme)));
-          all.push(...(await captureHostedDisconnectScenes(browser, scheme)));
-          all.push(...(await captureHostedDoorbellScenes(browser, scheme)));
-          all.push(...(await captureConsent(browser, scheme)));
-          all.push(...(await captureAccentCandidates(browser, scheme)));
+          const shot = async (fn) => {
+            assertThisPreview();
+            return await fn();
+          };
+          all.push(...(await shot(() => captureDesignGallery(browser, scheme))));
+          all.push(...(await shot(() => captureScheme(browser, scheme))));
+          all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
+          if (scheme === "light") {
+            all.push(
+              ...(await shot(() =>
+                captureSkeletonRevealAt(browser, scheme, MOBILE_VIEWPORT, "-390")
+              ))
+            );
+          }
+          all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
+          all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
+          all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
+          all.push(...(await shot(() => captureNonemptyChannelIntroScenes(browser, scheme))));
+          all.push(...(await shot(() => captureAddMemberScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSetStatusScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSearchScopeScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedPairingScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedDisconnectScenes(browser, scheme))));
+          all.push(...(await shot(() => captureHostedDoorbellScenes(browser, scheme))));
+          all.push(...(await shot(() => captureConsent(browser, scheme))));
+          all.push(...(await shot(() => captureAccentCandidates(browser, scheme))));
         }
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
       if (profile !== "desktop" && profile !== "accent" && profile !== "gallery") {
         for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
           all.push(...(await captureMobile(browser, scheme)));
         }
       }
@@ -11177,7 +11296,7 @@ async function main() {
       await browser.close();
     }
   } finally {
-    shutdown();
+    await preview.stop();
   }
 }
 

@@ -7,7 +7,7 @@ import {
   putNotificationRules,
   type NotificationRules,
 } from "@momo/core/features/settings/notificationRules";
-import { InlineBanner, SkeletonRows } from "@/features/common/States";
+import { InlineBanner, Skeleton } from "@/features/common/States";
 import { DesktopNotificationGroup } from "./DesktopNotificationGroup";
 import { SectionShell, SettingsToggleRow, Subsection } from "./SettingsFields";
 
@@ -83,7 +83,7 @@ export function NotificationRulesSection({ offline }: { offline: boolean }) {
 
       {rules.isPending ? (
         <Subsection title="워크스페이스 규칙">
-          <SkeletonRows rows={2} />
+          <Skeleton ready={false} rows={2} />
         </Subsection>
       ) : rules.isError ? (
         <Subsection title="워크스페이스 규칙">

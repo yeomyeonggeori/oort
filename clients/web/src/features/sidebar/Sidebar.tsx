@@ -54,7 +54,7 @@ import {
   isSurfaceProvided,
   serverSurface,
 } from "@momo/core/features/capabilities/serverSurfaces";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
@@ -62,7 +62,7 @@ import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
 import { WorkspaceRail } from "./WorkspaceRail";
 import { ProfileCard } from "./ProfileCard";
-import { sectionUnreadTotals } from "./sidebarSectionModel";
+import { sectionUnreadTotals, sidebarSectionListId } from "./sidebarSectionModel";
 import {
   sidebarUnreadCounts,
   unreadChannelsInOrder,
@@ -757,6 +757,7 @@ export function Sidebar({
               }
               unreadCount={sectionUnread(baseChannelSection.id).unreadCount}
               mentionCount={sectionUnread(baseChannelSection.id).mentionCount}
+              wrapList={false}
               action={
                 <>
                   {canCreate ? (
@@ -855,43 +856,51 @@ export function Sidebar({
                 </>
               }
             >
-              {channelsQuery.isLoading && <SkeletonRows rows={4} />}
-              {channelsQuery.error && (
-                <InlineBanner
-                  message="채널을 불러오지 못했습니다."
-                  actionLabel="다시 시도"
-                  onAction={() => void channelsQuery.refetch()}
-                  testId="channels-error"
-                />
-              )}
-              {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
-                  본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
-                  좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
-                  있고, 서술형 문장은 지시가 아니며, 문장 첫머리의 +는 글머리표로
-                  읽혔다(R2 M6). 그래서 액션을 여기에도 두되 outline이다: 액센트
-                  하나는 본문에만 있어 200px 간격으로 primary 둘이 다투지 않고,
-                  여기 있는 것은 같은 일로 가는 조용한 두 번째 문이다.
-                  만들 수 없는 멤버에게는 여전히 이 목록이 비었다는 사실뿐이고,
-                  누가 만들 수 있는지는 본문이 한 번만 말한다. */}
-              {!channelsQuery.isLoading && !channelsQuery.error && channels.length === 0 && (
-                <EmptyInvite
-                  headline="채널 목록이 비어 있습니다."
-                  actions={
-                    canCreate ? (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openCreateChannel()}
-                        data-testid="sidebar-create-channel"
-                      >
-                        채널 만들기
-                      </Button>
-                    ) : undefined
-                  }
-                  testId="channels-empty"
-                />
-              )}
-              {baseChannelSection.channels.map((channel) => rowFor(channel))}
+              <Skeleton ready={!channelsQuery.isLoading} rows={4}>
+                {channelsQuery.error && (
+                  <InlineBanner
+                    message="채널을 불러오지 못했습니다."
+                    actionLabel="다시 시도"
+                    onAction={() => void channelsQuery.refetch()}
+                    testId="channels-error"
+                  />
+                )}
+                {/* 빈 상태는 한 줄 + 액션 하나다 (SKILL §5). R-1에서는 그 액션을
+                    본문 하나로 몰고 여기에는 "+ 또는 ⌘K로 만듭니다."라고만 썼는데,
+                    좁은 창이나 스크롤된 상태에서는 그 본문 버튼이 화면 밖일 수
+                    있고, 서술형 문장은 지시가 아니며, 문장 첫머리의 +는 글머리표로
+                    읽혔다(R2 M6). 그래서 액션을 여기에도 두되 outline이다: 액센트
+                    하나는 본문에만 있어 200px 간격으로 primary 둘이 다투지 않고,
+                    여기 있는 것은 같은 일로 가는 조용한 두 번째 문이다.
+                    만들 수 없는 멤버에게는 여전히 이 목록이 비었다는 사실뿐이고,
+                    누가 만들 수 있는지는 본문이 한 번만 말한다. */}
+                {!channelsQuery.isLoading &&
+                  !channelsQuery.error &&
+                  channels.length === 0 && (
+                    <EmptyInvite
+                      headline="채널 목록이 비어 있습니다."
+                      actions={
+                        canCreate ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openCreateChannel()}
+                            data-testid="sidebar-create-channel"
+                          >
+                            채널 만들기
+                          </Button>
+                        ) : undefined
+                      }
+                      testId="channels-empty"
+                    />
+                  )}
+                <ul
+                  id={sidebarSectionListId(baseChannelSection.id)}
+                  className="flex flex-col"
+                >
+                  {baseChannelSection.channels.map((channel) => rowFor(channel))}
+                </ul>
+              </Skeleton>
             </SidebarSection>
 
             {/* 커스텀 섹션 (ADR-0177 D1/D4). 기본 「채널」과 DM 사이에 서는 이유는
@@ -915,6 +924,7 @@ export function Sidebar({
                 }
                 unreadCount={sectionUnread(section.id).unreadCount}
                 mentionCount={sectionUnread(section.id).mentionCount}
+                wrapList={false}
                 // 커스텀 섹션은 **둘 다** 한다: 채널을 받고(배치), 자기가 끌려
                 // 가면 차례가 바뀐다. 두 뜻이 한 구역에 겹치는 것이 아니라
                 // 「무엇이 떨어졌는가」가 가른다(`resolveSidebarDrop`).
@@ -966,21 +976,27 @@ export function Sidebar({
                     실제로 채널을 가진 섹션이 「여기로 옮기세요」라고 말하면
                     사람은 이미 있는 배치를 다시 만든다. 답이 위에 있으므로 그것을
                     쓴다 - 커스텀 섹션은 보통 짧으니 두 줄. */}
-                {channelsQuery.isLoading && <SkeletonRows rows={2} />}
-                {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
-                    섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
-                    터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
-                    채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
-                    기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
-                    번의 실패가 N개의 문장이 된다. */}
-                {!channelsQuery.isLoading &&
-                  !channelsQuery.error &&
-                  section.channels.length === 0 && (
-                    <li className="px-2 py-1 text-meta text-ink-muted">
-                      {sidebarEmptySectionHint(!touchSurface)}
-                    </li>
-                  )}
-                {section.channels.map((channel) => rowFor(channel))}
+                <Skeleton ready={!channelsQuery.isLoading} rows={2}>
+                  <ul
+                    id={sidebarSectionListId(section.id)}
+                    className="flex flex-col"
+                  >
+                    {/* 빈 섹션은 만든 직후의 정상 상태다. 한 줄이 없으면 방금 만든
+                        섹션이 고장난 것처럼 보인다. 낱말은 **표면마다 다르다**(H-1):
+                        터치에는 우클릭이 없으므로 그 문장은 없는 동작을 지시한다.
+                        채널 목록 자체가 실패했으면 아무 말도 하지 않는다 - 그 사실은
+                        기본 섹션의 배너가 이미 한 번 말했고, 섹션마다 되풀이하면 한
+                        번의 실패가 N개의 문장이 된다. */}
+                    {!channelsQuery.isLoading &&
+                      !channelsQuery.error &&
+                      section.channels.length === 0 && (
+                        <li className="px-2 py-1 text-meta text-ink-muted">
+                          {sidebarEmptySectionHint(!touchSurface)}
+                        </li>
+                      )}
+                    {section.channels.map((channel) => rowFor(channel))}
+                  </ul>
+                </Skeleton>
               </SidebarSection>
             ))}
 

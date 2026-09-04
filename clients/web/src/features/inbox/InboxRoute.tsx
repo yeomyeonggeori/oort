@@ -12,7 +12,7 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { Button } from "@/design/ui/button";
@@ -191,9 +191,6 @@ function FeedPanel({
       />
     );
   }
-  if (state === "loading") {
-    return <SkeletonRows rows={3} className="p-4" />;
-  }
   if (state === "error") {
     return (
       <InlineBanner
@@ -204,24 +201,25 @@ function FeedPanel({
       />
     );
   }
-  if (state === "empty") {
-    const copy = EMPTY_COPY[filter];
-    return (
-      <EmptyInvite
-        headline={copy.headline}
-        detail={copy.detail}
-        testId="inbox-empty"
-      />
-    );
-  }
+  const copy = EMPTY_COPY[filter];
   return (
-    <FeedList
-      items={feed.items}
-      onMarkRead={onMarkRead}
-      renderActions={renderActions}
-      testId="inbox-list"
-      listRef={listRef}
-    />
+    <Skeleton ready={state !== "loading"} rows={3} className="p-4">
+      {state === "loading" ? null : state === "empty" ? (
+        <EmptyInvite
+          headline={copy.headline}
+          detail={copy.detail}
+          testId="inbox-empty"
+        />
+      ) : (
+        <FeedList
+          items={feed.items}
+          onMarkRead={onMarkRead}
+          renderActions={renderActions}
+          testId="inbox-list"
+          listRef={listRef}
+        />
+      )}
+    </Skeleton>
   );
 }
 

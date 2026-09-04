@@ -6,7 +6,7 @@ import { uuidEq } from "@momo/core/lib/api";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { ConnectPage } from "@/features/auth/ConnectPage";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 // useBrowserOffline, NOT useOffline: this route renders ABOVE AppShell, so there
 // is no SessionProvider (useOffline reads the realtime rail via useSession and
 // would crash) and no realtime rail to read. The browser's navigator.onLine is
@@ -190,7 +190,7 @@ function ConsentLoading() {
   return (
     <div role="status" data-testid="oauth-consent-loading">
       <span className="sr-only">{OAUTH_CONSENT_LOADING_SR}</span>
-      <SkeletonRows rows={5} className="p-0" />
+      <Skeleton ready={false} rows={5} className="p-0" />
     </div>
   );
 }

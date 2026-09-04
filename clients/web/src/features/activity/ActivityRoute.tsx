@@ -3,7 +3,7 @@ import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   EmptyInvite,
   InlineBanner,
-  SkeletonRows,
+  Skeleton,
 } from "@/features/common/States";
 import { FeedList } from "@/features/inbox/FeedRow";
 import { relativeLabel } from "@momo/core/features/inbox/model";
@@ -80,23 +80,30 @@ export function ActivityRoute() {
             surface="agentRunHistory"
             testId="activity-unavailable"
           />
-        ) : feed.isLoading && feed.items.length === 0 ? (
-          <SkeletonRows rows={4} className="p-4" />
-        ) : feed.error && feed.items.length === 0 ? (
-          <InlineBanner
-            message="활동을 불러오지 못했습니다."
-            actionLabel="다시 시도"
-            onAction={feed.refetch}
-            testId="activity-error"
-          />
-        ) : feed.items.length === 0 ? (
-          <EmptyInvite
-            headline="에이전트 활동이 아직 없습니다."
-            detail="에이전트가 실행 허가를 요청하거나 작업을 마치면 한 줄씩 쌓입니다. 담당자도 함께 표시됩니다."
-            testId="activity-empty"
-          />
         ) : (
-          <FeedList items={feed.items} testId="activity-list" />
+          <Skeleton
+            ready={!(feed.isLoading && feed.items.length === 0)}
+            rows={4}
+            className="p-4"
+          >
+            {feed.isLoading && feed.items.length === 0 ? null : feed.error &&
+              feed.items.length === 0 ? (
+              <InlineBanner
+                message="활동을 불러오지 못했습니다."
+                actionLabel="다시 시도"
+                onAction={feed.refetch}
+                testId="activity-error"
+              />
+            ) : feed.items.length === 0 ? (
+              <EmptyInvite
+                headline="에이전트 활동이 아직 없습니다."
+                detail="에이전트가 실행 허가를 요청하거나 작업을 마치면 한 줄씩 쌓입니다. 담당자도 함께 표시됩니다."
+                testId="activity-empty"
+              />
+            ) : (
+              <FeedList items={feed.items} testId="activity-list" />
+            )}
+          </Skeleton>
         )}
       </div>
     </div>

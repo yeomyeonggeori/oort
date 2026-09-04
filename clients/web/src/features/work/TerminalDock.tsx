@@ -9,7 +9,7 @@ import {
   sortSessions,
   workHostName,
 } from "@momo/core/features/work/workSessionModel";
-import { EmptyInvite, InlineBanner, SkeletonRows } from "@/features/common/States";
+import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { useWorkHosts, useWorkSessions } from "./useWorkSessions";
 import { ObserverTerminal, TerminalShortNotice } from "./ObserverTerminal";
@@ -338,7 +338,7 @@ export function TerminalDock({
         )}
         {pending ? (
           <div data-testid="terminal-dock-loading">
-            <SkeletonRows rows={4} className="p-4" />
+            <Skeleton ready={false} rows={4} className="p-4" />
           </div>
         ) : failed ? (
           <InlineBanner
