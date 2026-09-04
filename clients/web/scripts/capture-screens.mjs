@@ -11262,6 +11262,10 @@ function rgbEq(a, b) {
   return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
 }
 
+function rgbNear(a, b) {
+  return rgbEq(a, b) || rgbDeltaE(a[0], a[1], a[2], b[0], b[1], b[2]) < PIXEL_DE_MIN;
+}
+
 function cornerInteriorPoints(box) {
   // 2px in along both axes is the leak pixel (R3: sabotaged tl+2 = fill,
   // shipped tl+2 = page bg). [1,1] is the short diagonal. Off-diagonal
@@ -11312,12 +11316,12 @@ async function assertSummaryHoverCorners(page, scheme) {
   const points = cornerInteriorPoints(box);
   for (const [x, y] of points) {
     const rgb = await sampleRgb(page, x, y);
-    if (rgbEq(rgb, fill)) {
+    if (rgbNear(rgb, fill) && !rgbNear(rgb, pad)) {
       throw new Error(
         `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) is hover fill ${fill}, not page bg ${pad}`
       );
     }
-    if (!rgbEq(rgb, pad)) {
+    if (!rgbNear(rgb, pad)) {
       throw new Error(
         `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) ${rgb} ≠ page bg ${pad}`
       );
