@@ -156,6 +156,11 @@ afterEach(() => {
 });
 
 describe("ThreadPanel exit does not own parent state (#1997 B-1)", () => {
+  // This file goes red with `key={root.id}` on ThreadPanelFrame (two panels).
+  // Restoring the R2 B-1 shape (deferring onClose past the exit so the exit
+  // owns parent `thread` state) leaves it green. B-1 is caught by
+  // `panelMotion.test.ts` (reopen during exit at 20/60/100ms) and, browser-free,
+  // by `ThreadPanel.reduced.test.tsx`.
   it("opening a second root during the exit renders that root", async () => {
     const host = await mount(message(ROOT_A));
     expect(host.querySelector("[data-testid='thread-panel']")).not.toBeNull();
