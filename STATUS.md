@@ -26,6 +26,7 @@
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
 - `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
 - 캡처 `CAPTURE_PORT=8625` PASS · `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
+- R4: 닫힌 모달 오버레이는 Radix 인라인 `pointer-events: auto` 를 `open === false` 에서 같은 슬롯으로 `none` 으로 덮는다 (`DialogOverlay`, 팔레트와 R1a 다이얼로그 공통). 클래스만으로는 히트테스트가 안 꺼진다. 팔레트 overlay `forceMount` 는 제거. 정본 §2.6/`§5.2` 모션 행은 390 드로어 180 대칭 정오표.
 
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
