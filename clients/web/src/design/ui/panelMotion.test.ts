@@ -287,8 +287,11 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).not.toMatch(/Command\.Dialog/);
     expect(code).toMatch(/\brestoreRef\b/);
     expect(code).not.toMatch(/\brestoreDialogOpenerFocus\b/);
-    expect(code).not.toMatch(/<DialogPortal\s+forceMount/);
-    expect(code).not.toMatch(/<DialogPrimitive\.Content\s+forceMount/);
+    // Portal+Content forceMount is the reduced-motion owner's seat: without
+    // it the `!node` fallback fires first and deleting `if (reduceMotion)`
+    // stays green (#1997 H-1). Overlay forceMount is not asserted (inherited).
+    expect(code).toMatch(/<DialogPortal\s+forceMount/);
+    expect(code).toMatch(/<DialogPrimitive\.Content\s+forceMount/);
   });
 
   it("ThreadPanel presence is parent-driven; onClose is immediate", () => {

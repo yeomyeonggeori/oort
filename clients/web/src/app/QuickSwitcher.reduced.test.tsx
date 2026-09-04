@@ -163,6 +163,9 @@ afterEach(() => {
 });
 
 describe("PaletteLayer reduced-motion (#1997 N-2)", () => {
+  // Red iff Portal/Content forceMount keeps overlayRef through the exit.
+  // Without it, Radix Presence nulls the ref and `!node` detaches first,
+  // so deleting `if (reduceMotion)` stays green (R5 H-1 / R6 H-1).
   it("detaches within one frame even when computed duration is the CSS exit", async () => {
     const host = document.createElement("div");
     document.body.append(host);

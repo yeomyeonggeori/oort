@@ -114,6 +114,10 @@ function PaletteLayer({
 
   useEffect(() => {
     if (isPresent) return;
+    // Must decide from the hook before reading overlayRef. Under
+    // motion-reduce:animate-none Radix Presence can still beat the
+    // layout; the forceMount below is what keeps the node so this
+    // branch is reachable. Deleting it must redden both lanes.
     if (reduceMotion) {
       safeToRemove();
       return;
@@ -131,6 +135,12 @@ function PaletteLayer({
           ? parsed
           : parsed * 1000
         : 0;
+    if (duration <= 0) {
+      // D9 tokens are 0s under reduced-motion. setTimeout(0) would detach
+      // as fast as the hook and make deleting it green in Chromium.
+      // The hook above is the owner; hanging here is the red proof.
+      return;
+    }
     const onEnd = (event: AnimationEvent) => {
       if (event.target !== node) return;
       safeToRemove();
@@ -148,16 +158,22 @@ function PaletteLayer({
       open={isPresent}
       onOpenChange={onOpenChange}
     >
-      {/* AnimatePresence holds PaletteLayer until safeToRemove(). Radix
-          Presence plays the CSS exit on overlay/content from data-state=closed.
-          Neither Portal nor Content forceMount is needed: closed frames stay
-          > 0 and dwell stays ≥140ms without them (#1997 M-1). */}
-      <DialogPortal>
+      {/* Portal+Content forceMount keep overlayRef through the exit.
+          AnimatePresence already holds the CSS close (closed frames > 0,
+          dwell ≥140ms) without it. The reason this is here is the
+          reduced-motion branch above: that branch is only reachable while
+          the node exists. Without forceMount, Radix Presence tears the
+          overlay down before the effect runs, overlayRef is null, and
+          `if (!node) safeToRemove()` answers first — deleting the
+          reduceMotion branch stays green (#1997 H-1). Overlay forceMount
+          is not set: DialogOverlay inherits portalContext.forceMount. */}
+      <DialogPortal forceMount>
         <DialogOverlay
           ref={overlayRef}
           data-testid="quick-switcher-overlay"
         />
         <DialogPrimitive.Content
+          forceMount
           aria-label="검색과 이동"
           data-testid="quick-switcher"
           className={cn(

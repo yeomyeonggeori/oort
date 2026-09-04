@@ -223,6 +223,9 @@ describe("UX-R1a compiled CSS (browser-free)", () => {
   });
 
   it("closed overlay/content pointer-events is none !important (beats Radix inline auto)", async () => {
+    // This literal is also why a dist CSS diff cannot witness the `!`:
+    // Tailwind scans test text (README §2.3 `pt-[13px]` trap). The guard
+    // compiles the constant, not the stylesheet hash. Do not remove it.
     const closed = "data-[state=closed]:pointer-events-none!";
     for (const [name, className] of [
       ["MODAL_OVERLAY_MOTION", MODAL_OVERLAY_MOTION],
