@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 292,
-    "npm": 451,
-    "unique_blobs": 370
+    "npm": 455,
+    "unique_blobs": 372
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "394dc0508d9a43f3af8f906694407d0e33c2b431b3c4cd219bb55a3c71981e22",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "894d2f94d49502e7882d58a9f8c242ea5acde380b6507f9ef570e0d17a8d1261",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "bb85609df736f68f239429c5d7fd929183d80d109fdc1ba54a21a52489c53882",
-    "THIRD_PARTY_NOTICES.md": "9805840be5ca4af699dd1492b7ceda0a9d71fc0dd29faaa36e665efbfe2626df"
+    "THIRD_PARTY_NOTICES.md": "38b3ef09142e28aa47260819f21ed5cdbc22eee85568efdc9b832e727c14869b"
   },
   "inputs": {
     "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
-    "clients_web_package_lock_sha256": "c12017de24aec23b76026d5f3de596a3ff229b782447c013ff269e5748a86003",
+    "clients_web_package_lock_sha256": "77361e075c19d5f5a053afaef3cc34b980712137153c4e712b55000458924584",
     "server_rust_cargo_lock_sha256": "e1c98a011f39274b32038c6c48555e4127308e8c96e10115adedcfe9de472db4",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "394dc0508d9a43f3af8f906694407d0e33c2b431b3c4cd219bb55a3c71981e22",
-    "sha256_manifest_sha256": "a31b9953b8d3e68dd117852e330d4bd2866b80f4d66f56192eb90955929adfe2"
+    "bundle_sha256": "894d2f94d49502e7882d58a9f8c242ea5acde380b6507f9ef570e0d17a8d1261",
+    "sha256_manifest_sha256": "044836593cce19b6ff4471098e15e05c8f869e4ed68472b01606a2b02fc25751"
   },
   "packages": [
     {
@@ -10771,6 +10771,22 @@
       "version": "3.4.3"
     },
     {
+      "copyright": "Copyright (c) 2018 Framer B.V.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "5ff46083b88563822b0560dd6221ab89d2f74bc97a52d4c97a75020fd62c6f32",
+          "source": "package-tree"
+        }
+      ],
+      "name": "framer-motion",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "12.43.0"
+    },
+    {
       "copyright": "Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis, Elan Shankar, Paul Miller",
       "ecosystem": "npm",
       "files": [
@@ -11697,6 +11713,54 @@
       "source": "package-tree",
       "spdx": "ISC",
       "version": "3.1.5"
+    },
+    {
+      "copyright": "Copyright (c) 2024 [Motion](https://motion.dev) B.V.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "motion",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "12.23.24"
+    },
+    {
+      "copyright": "Copyright (c) 2024 [Motion](https://motion.dev) B.V.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "motion-dom",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "12.43.0"
+    },
+    {
+      "copyright": "Copyright (c) 2024 [Motion](https://motion.dev) B.V.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1",
+          "source": "package-tree"
+        }
+      ],
+      "name": "motion-utils",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "12.39.0"
     },
     {
       "copyright": "Copyright (c) 2020 Vercel, Inc.",
