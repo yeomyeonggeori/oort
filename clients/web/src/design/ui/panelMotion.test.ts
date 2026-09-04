@@ -159,6 +159,14 @@ function motionLibAllowlistFromPreflight(script: string): string[] {
     .filter(Boolean);
 }
 
+/** Reconstruct MOTION_LIB_SPEC from bash quoting (`'"'"'` → `'`) and test specifiers. */
+function motionLibSpecFromPreflight(script: string): RegExp {
+  const line = script.match(/^MOTION_LIB_SPEC='(.*)'$/m);
+  if (!line) throw new Error("MOTION_LIB_SPEC missing from preflight script");
+  const source = line[1].replace(/'"'"'/g, "'");
+  return new RegExp(source);
+}
+
 describe("UX-R1b compiled CSS (browser-free)", () => {
   it("DRAWER_SCRIM_MOTION emits fast enter/exit against --motion-fast", async () => {
     const tokens = classTokens(DRAWER_SCRIM_MOTION);
@@ -250,6 +258,23 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
       expect(fromScript, path).toContain(path);
       expect(codeOnly(source)).toMatch(/from\s+["']motion\/react["']/);
     }
+  });
+
+  it("MOTION_LIB_SPEC covers the shipped family including motion-dom and motion-utils", () => {
+    const spec = motionLibSpecFromPreflight(FILES.preflight);
+    for (const quoted of [
+      '"motion"',
+      '"motion/react"',
+      '"motion-dom"',
+      '"motion-utils"',
+      '"framer-motion"',
+      '"framer-motion/dom"',
+      "'motion-dom'",
+    ]) {
+      expect(spec.test(quoted), quoted).toBe(true);
+    }
+    expect(spec.test('"react"')).toBe(false);
+    expect(spec.test('"lodash"')).toBe(false);
   });
 
   it("⌘K consumes MODAL_* constants and AnimatePresence; rows have no item motion", () => {

@@ -3,10 +3,6 @@
 import { act, createElement, useState, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  hasReducedMotionListener,
-  prefersReducedMotion,
-} from "motion-dom";
 import { SidebarDrawerScrimLayer } from "./Sidebar";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -14,6 +10,16 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+
+const reducedMotion = vi.hoisted(() => ({ current: true }));
+
+vi.mock("motion/react", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useReducedMotion: () => reducedMotion.current,
+  };
+});
 
 function Host({ initialOpen }: { initialOpen: boolean }) {
   const [open, setOpen] = useState(initialOpen);
@@ -54,8 +60,7 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
-  hasReducedMotionListener.current = false;
-  prefersReducedMotion.current = null;
+  reducedMotion.current = true;
   vi.useFakeTimers();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: query.includes("prefers-reduced-motion"),

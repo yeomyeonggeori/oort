@@ -145,7 +145,7 @@ Fourteen categories (eleven grep + three AST, see 10.1), **hard zero** (unlike t
 | 11 | `progress_word` | 「명사 + 중」 진행 낱말 (**AST**, #1511) |
 | 12 | `latin_particle` | 라틴 낱말과 조사 사이 공백 (**AST**, #1511) |
 | 13 | `raw_motion` | 사다리 밖 `\d+ms` · `duration-[0-9]+` (ADR-0179 D10; 온보딩 블록·`motion.css`·`motion.ts` allowlist) |
-| 14 | `motion_lib_scope` | `motion` / `motion/…` / `framer-motion` 허용 3파일 외 hard-zero (comment-stripped grep; ADR-0179 D8 / UX-R1b: QuickSwitcher · ThreadPanel · Sidebar). Doors: `from`, side-effect `import`, `import()`, `require()` |
+| 14 | `motion_lib_scope` | `motion` / `motion/…` / `motion-dom` / `motion-utils` / `framer-motion` / `framer-motion/…` 허용 3파일 외 hard-zero (comment-stripped grep; ADR-0179 D8 / UX-R1b: QuickSwitcher · ThreadPanel · Sidebar). Doors: `from`, side-effect `import`, `import()`, `require()`. Tests are not exempt. |
 
 `src/design/tokens.css`, `tokens.contrast.test.ts`, and `src/design/themes/` are excluded (defining, measuring, and rebinding raw values is their job). The themes directory is **pre-validated bindings only**, not a general raw-color exemption: a hex in a component is still a fail. A deliberate, reviewed exception is marked with the comment marker `design-preflight-allow` and justified in the PR body — on the offending line, or (for the two AST categories) in the leading comment of the field, attribute or `throw` that owns the string.
 
