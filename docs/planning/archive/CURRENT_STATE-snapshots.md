@@ -2,6 +2,16 @@
 
 > `docs/planning/CURRENT_STATE.md`에서 이동한 과거 스냅샷 원문(불변, newest-first 유지). 로테이션 시 새 이동분을 이 헤더 바로 아래에 prepend한다. 하단의 구 구조 절(§0~§5)은 2026-07 기준 정체 구획으로, 현행 운영과 다르다 — 역사 기록으로만 읽어라(현행: `docs/TRACKS.md`·`CLAUDE.md`).
 
+> 이하 스냅샷 83:
+> **2026-09-02 스냅샷 83 (Fable · momo-main — ★W1 1차 랜딩 완료: v0.1.4 발행 + SH-1·M0s·UX-R2s·UX-R0·SH-3a main 정본화, UX-R4a·M0m(R2) 가동).** 컴팩트 복원 진입점.
+>
+> **★ 발행**: **v0.1.4**(run 33616349789 · 태그 e39e9427 · app `sha256:7426d282…` · pg `sha256:563ee793…` · attestation verify PASS) — SELF_HOST §2-B·CHANGELOG #1980. 로컬 스택 `oortv013`은 v0.1.3 digest(doctor가 적발) — 갱신은 별도.
+> **★ 랜딩·승격**: SH-1 #1983(engine, `releases/latest.json`) · M0s #1986(engine, A-44 #1988) · UX-R2s #1993(engine — **1차 랜딩 체인이 `| tail -1`로 머지 실패를 삼켜 #1960 close·A-45 ready가 먼저 기록됨 → 2026-09-03 재검증 후 재랜딩·승격 배치 j**, A-45 #1994) · **승격 #2005**(engine→main, 감사: SH-1 `scripts/**` 4파일) + sync h #2006/#2008 · **UX-R0 #1985**(uxui — design-review R1 FAIL B0·H2·M3·N4 → R2 PASS B0·H0 → R3: CI 유닛 레인엔 Playwright 없음 → H-1 런타임 프로브 skipIf+경고, 양방향 증명) · **SH-3a #2007**(engine — 재검증 9/9·신선 클론 PASS·시크릿 유출 0/14·플래그 코드 대조 doorbell/hosted=`true`·unfurl=`1`) · **승격 배치 i** #2012(engine→main)·#2014(uxui→main, 토폴로지 검사가 engine sync 선행을 요구 → i2 정합) + **배치 j**(UX-R2s) + sync i/i2/j → **main=1a88d9ca·uxui=d048f5e6·engine=f02022db**, alignment PASS.
+> **★ 가동(병렬 2)**: **UX-R4a #1957**(`wuxr4a` — 워커가 도구 카탈로그 GET 라우트 부재 확인 → 브리프 정지 조건대로 안전 부분만 랜딩(제안 경로 `GET …/agent-tool-catalog` 부재 시 표시 전용으로 접힘)·PR #2015 검수 중; 엔진 티켓 **#2016** 발행) · **M0m #1990**(`wm0m`, PR #2009 — design-review R1 **FAIL B1·H2·M7·N5**(SAS 화면 출구 부재·`Podfile.lock` 미갱신·오프라인/오류 상태 부재·QR 버튼 4번째 룩·권한 거부 빈 모달·기기명 상수·서버 base 선덮어쓰기) → R2 수리 워커 `-c` 재개, 미션 `scratchpad/mission-m0m-r2.md`; 기획 결정: QR=헤드라인 문(outline 티어)·폰 `font.display` 역할 신설·어투 -습니다 통일). 준비된 미션: `mission-ds2.md`·`mission-m0w.md`(uxui 슬롯 비면 발사).
+> **★ 발행 이슈**: UX-R1a~e·R2a·R2b **#1996~#2002**(R1a/c/d/e ready, 나머지 blocked) · **#2010** redeem 응답 sas 동봉(engine, 폰 파생 복제 은퇴) · **#2011** 로그인 상태 oort://link 한 문장(mobile) · **#2016** 도구 카탈로그 GET(engine, UX-R4a 편집 표면 개방) · #1984 범위 확장(`test_oort_doctor.sh` local_gate 편입) · #2000 원장(UX-R0 nit N-5~N-8) · ADR-0179 D1 정오표(이 PR).
+> **★ 다음**: M0m R2 → 재검수(fresh) → 랜딩 · UX-R4a 랜딩(#2015 design-review → 트랙) · 다음 uxui 발사 DS-2 또는 M0w · 승격 배치 j · ITO(G1) 준비.
+> **★ 교훈(메모리)**: `gh pr merge --delete-branch`를 PR 헤드 워크트리에서 실행하면 머지는 되고 체인만 ABORT(#1985·#2007 재발) → 루트에서 `--merge`만, 원격은 `push --delete` · 체인의 `| tail -1`은 rc를 삼킨다 — 머지 결과는 항상 `gh pr view --json state`로 확인 · CI 유닛 레인은 브라우저 없음 — 런타임 프로브는 로컬 게이트 소관.
+
 > 이하 스냅샷 82:
 > **2026-09-02 스냅샷 82 (Fable · momo-main — ★G0 완주(발행 창만 남음): BT 파도 6장 전량·BZ-5a·P1/P2 main 정본화, ADR 4본 결재 대기, W1 발사 대기).** 컴팩트 복원 진입점.
 >
