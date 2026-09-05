@@ -532,6 +532,20 @@ export function displayNameSaveMessage(error: unknown): string {
   return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
 
+/** Server join/PATCH ceiling for `displayName` (characters, not bytes). */
+export const DISPLAY_NAME_MAX_CHARS = 80;
+
+/**
+ * Live field gate shared by 설정 › 프로필 and onboarding S3.
+ * A sentence, never a fragment like "80자 초과".
+ */
+export function displayNameFieldError(raw: string): string | null {
+  if (raw.length > DISPLAY_NAME_MAX_CHARS) {
+    return "표시 이름은 80자까지 쓸 수 있습니다.";
+  }
+  return null;
+}
+
 /**
  * 코드 실행 호스트 surfaces answer in Korean, not in the wire message.
  *
