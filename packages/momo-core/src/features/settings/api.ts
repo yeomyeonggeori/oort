@@ -445,11 +445,6 @@ export interface WorkspaceIdentity {
    * Missing, null, or a non-object is `{}` (Korean defaults). The settings
    * bag is never on this response.
    */
-  /**
-   * Display-only role name overrides from GET /v1/workspaces/{ws}.
-   * Missing, null, or a non-object is `{}` (Korean defaults). The settings
-   * bag is never on this response.
-   */
   roleLabels: RoleLabels;
   /**
    * Member-readable projection of `settings.welcome_agent_member_id`.
