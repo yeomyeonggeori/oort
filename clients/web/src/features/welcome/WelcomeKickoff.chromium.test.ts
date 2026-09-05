@@ -9,6 +9,7 @@ import {
   WELCOME_KICKOFF_EXIT_CLASS,
   WELCOME_KICKOFF_MARK_CLASS,
 } from "@/design/motion";
+import { WELCOME_KICKOFF_SHAPES } from "./welcomeKickoff";
 
 /**
  * Chromium half of UX-R2b. Node environment (not jsdom) so esbuild's
@@ -76,6 +77,7 @@ declare global {
 async function launchWelcomeHarness(opts: {
   directoryDelayMs?: number;
   backlogAgent?: boolean;
+  reducedMotion?: boolean;
 } = {}): Promise<{
   browser: import("playwright").Browser;
   page: import("playwright").Page;
@@ -143,11 +145,14 @@ async function launchWelcomeHarness(opts: {
   page.on("pageerror", (err) => {
     pageErrors.push(err instanceof Error ? err.message : String(err));
   });
-  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await page.emulateMedia({
+    reducedMotion: opts.reducedMotion ? "reduce" : "no-preference",
+  });
   await page.setViewportSize({ width: 1280, height: 800 });
   const boot = JSON.stringify({
     directoryDelayMs: opts.directoryDelayMs ?? 0,
     backlogAgent: Boolean(opts.backlogAgent),
+    reducedMotion: Boolean(opts.reducedMotion),
   });
   await page.setContent(
     `<!doctype html><html><head><style>
@@ -173,7 +178,8 @@ ${css}
   Object.defineProperty(window, "localStorage", { value: local });
   Object.defineProperty(window, "sessionStorage", { value: session });
   window.matchMedia = (query) => ({
-    matches: false,
+    matches: Boolean(window.__welcomeKickoffOpts?.reducedMotion) &&
+      String(query).includes("prefers-reduced-motion: reduce"),
     media: query,
     addEventListener() {},
     removeEventListener() {},
@@ -236,7 +242,25 @@ describe("welcome kickoff Chromium harness", () => {
       const handle = await launchWelcomeHarness({ directoryDelayMs: 2000 });
       try {
         await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
-        await handle.page.waitForTimeout(400);
+        const pendingLog = await handle.page.evaluate(async () => {
+          const rows: { t: number; write: boolean; stage: boolean }[] = [];
+          const start = performance.now();
+          while (performance.now() - start < 1800) {
+            rows.push({
+              t: Math.round(performance.now() - start),
+              write: Boolean(
+                document.querySelector("[data-testid='timeline-empty-primary']")
+              ),
+              stage: Boolean(
+                document.querySelector("[data-testid='welcome-kickoff-stage']")
+              ),
+            });
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+          }
+          return rows;
+        });
+        expect(pendingLog.every((row) => row.write === false)).toBe(true);
+        expect(pendingLog.every((row) => row.stage === false)).toBe(true);
         expect(
           await handle.page.locator("[data-testid='welcome-kickoff-stage']").count()
         ).toBe(0);
@@ -320,5 +344,142 @@ describe("welcome kickoff Chromium harness", () => {
       }
     },
     40_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "product path N=5: exit→arrival deltaMs min/median/max",
+    async () => {
+      const deltas: number[] = [];
+      for (let sample = 0; sample < 5; sample += 1) {
+        const handle = await launchWelcomeHarness();
+        try {
+          await handle.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
+          await handle.page
+            .locator("[data-testid='welcome-kickoff-stage']")
+            .waitFor({ state: "attached", timeout: 4000 });
+          const measured = await handle.page.evaluate(async () => {
+            return await new Promise<{
+              exitEndedMs: number;
+              arrivalStartMs: number;
+              deltaMs: number;
+              arrivalDuringExit: boolean;
+            }>((resolve, reject) => {
+              const timeout = window.setTimeout(
+                () => reject(new Error("product exit→arrival did not complete")),
+                4000
+              );
+              let exitEndedMs = 0;
+              let exitRunning = false;
+              document.addEventListener(
+                "animationstart",
+                (event) => {
+                  if (event.animationName === "motion-fade-out") exitRunning = true;
+                },
+                true
+              );
+              document.addEventListener(
+                "animationend",
+                (event) => {
+                  if (event.animationName !== "motion-fade-out") return;
+                  exitEndedMs = performance.now();
+                  exitRunning = false;
+                },
+                true
+              );
+              document.addEventListener(
+                "animationstart",
+                (event) => {
+                  if (event.animationName !== "motion-enter-conversation") return;
+                  const arrivalStartMs = performance.now();
+                  window.clearTimeout(timeout);
+                  resolve({
+                    exitEndedMs,
+                    arrivalStartMs,
+                    deltaMs: arrivalStartMs - exitEndedMs,
+                    arrivalDuringExit: exitRunning,
+                  });
+                },
+                true
+              );
+              window.__welcomeKickoff.deliverOpener();
+            });
+          });
+          expect(measured.exitEndedMs).toBeGreaterThan(0);
+          expect(measured.arrivalDuringExit).toBe(false);
+          deltas.push(measured.deltaMs);
+        } finally {
+          await handle.browser.close();
+        }
+      }
+      const sorted = [...deltas].sort((a, b) => a - b);
+      const min = sorted[0] ?? 0;
+      const max = sorted[sorted.length - 1] ?? 0;
+      const median = sorted[2] ?? 0;
+      console.info(
+        `welcome kickoff product exit→arrival N=5 deltaMs min=${min.toFixed(1)} median=${median.toFixed(1)} max=${max.toFixed(1)} samples=${deltas.map((n) => n.toFixed(1)).join(",")}`
+      );
+      expect(deltas).toHaveLength(5);
+    },
+    120_000
+  );
+
+  it.skipIf(!chromiumAvailable)(
+    "welcome marks render CLOUD_BODIES size and reduced pose equals end rotate",
+    async () => {
+      const animated = await launchWelcomeHarness();
+      try {
+        await animated.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
+        await animated.page
+          .locator("[data-testid='welcome-kickoff-stage']")
+          .waitFor({ state: "attached", timeout: 4000 });
+        const boxes = await animated.page.evaluate(() =>
+          [...document.querySelectorAll(".welcome-kickoff-body")].map((el) => {
+            const style = getComputedStyle(el);
+            return {
+              body: el.getAttribute("data-onboarding-body"),
+              width: Number.parseFloat(style.width),
+              height: Number.parseFloat(style.height),
+            };
+          })
+        );
+        expect(boxes.length).toBe(WELCOME_KICKOFF_SHAPES.length);
+        for (const [index, shape] of WELCOME_KICKOFF_SHAPES.entries()) {
+          expect(boxes[index]?.body).toBe(String(shape.index));
+          expect(boxes[index]?.width).toBe(shape.size);
+          expect(boxes[index]?.height).toBe(shape.size);
+        }
+      } finally {
+        await animated.browser.close();
+      }
+
+      const reduced = await launchWelcomeHarness({ reducedMotion: true });
+      try {
+        await reduced.page.evaluate(() => window.__welcomeKickoff.onSubscribed());
+        await reduced.page
+          .locator("[data-testid='welcome-kickoff-stage']")
+          .waitFor({ state: "attached", timeout: 4000 });
+        const poses = await reduced.page.evaluate(() =>
+          [...document.querySelectorAll(".welcome-kickoff-body")].map((el) => ({
+            body: el.getAttribute("data-onboarding-body"),
+            transform: getComputedStyle(el).transform,
+            stagger: el.getAttribute("data-stagger-index"),
+          }))
+        );
+        expect(poses.every((row) => row.stagger === null)).toBe(true);
+        for (const [index, shape] of WELCOME_KICKOFF_SHAPES.entries()) {
+          const transform = poses[index]?.transform ?? "none";
+          expect(transform, `body ${shape.index} reduced transform`).not.toBe("none");
+          const nums = transform.match(/-?\d+\.?\d*(?:e[+-]?\d+)?/gi);
+          expect(nums && nums.length >= 4).toBe(true);
+          const a = Number(nums?.[0]);
+          const b = Number(nums?.[1]);
+          const deg = (Math.atan2(b, a) * 180) / Math.PI;
+          expect(Math.abs(deg - shape.rotate)).toBeLessThan(0.6);
+        }
+      } finally {
+        await reduced.browser.close();
+      }
+    },
+    60_000
   );
 });
