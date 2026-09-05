@@ -594,6 +594,53 @@ describe("BZ-6b onboarding profile step", () => {
     });
   });
 
+  it("keeps keyboard focus on the name field after a failed Enter save, not body", async () => {
+    let rejectPatch: ((error: unknown) => void) | undefined;
+    changeMyDisplayName.mockImplementation(
+      () =>
+        new Promise<Member>((_, reject) => {
+          rejectPatch = reject;
+        })
+    );
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    const name = document.querySelector(
+      '[data-testid="onboarding-profile-name"]'
+    ) as HTMLInputElement;
+    act(() => {
+      submit.focus();
+    });
+    expect(document.activeElement).toBe(submit);
+    await act(async () => {
+      submit.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })
+      );
+      submit.form?.requestSubmit();
+    });
+    await vi.waitFor(() => {
+      expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
+    });
+    expect(submit.getAttribute("aria-busy")).toBe("true");
+    expect(submit.disabled).toBe(false);
+    await act(async () => {
+      rejectPatch?.(new ApiError(500, "engine boom"));
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+    });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(name);
+    expect(document.activeElement?.getAttribute("data-testid")).not.toBe(
+      "onboarding-profile-skip"
+    );
+  });
+
   it("다시 시도 after a PATCH failure re-sends the current draft", async () => {
     changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
     const renamed = { ...session.member, displayName: "성재" };
