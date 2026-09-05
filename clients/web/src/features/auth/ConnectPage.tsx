@@ -194,6 +194,7 @@ export function ConnectPage({
   const chooseServerRef = useRef<HTMLButtonElement>(null);
   const chooseInviteRef = useRef<HTMLButtonElement>(null);
   const profileNameRef = useRef<HTMLInputElement>(null);
+  const profileBusyRef = useRef(false);
 
   const typed = useRef({ serverUrl, email, password });
   typed.current = { serverUrl, email, password };
@@ -383,8 +384,9 @@ export function ConnectPage({
   }
 
   async function patchProfileName() {
-    if (!pendingJoin || profileBusy) return;
+    if (!pendingJoin || profileBusyRef.current) return;
     if (displayNameFieldError(profileName) !== null) return;
+    profileBusyRef.current = true;
     setProfileBusy(true);
     setProfileError(null);
     try {
@@ -398,7 +400,12 @@ export function ConnectPage({
       setProfileError(
         `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요.`
       );
+      // InlineBanner is role="alert" (States.tsx:276), not a focus target.
+      // The name field is; landing there keeps Enter-driven keyboard users
+      // on the card instead of <body> (whose first Tab stop was 건너뛰기).
+      focusLater("profile-name");
     } finally {
+      profileBusyRef.current = false;
       setProfileBusy(false);
     }
   }
@@ -751,7 +758,6 @@ export function ConnectPage({
               name="displayName"
               value={profileName}
               autoComplete="nickname"
-              disabled={profileBusy}
               aria-invalid={profileFieldError ? true : undefined}
               aria-describedby={
                 [
@@ -788,10 +794,10 @@ export function ConnectPage({
           <div className="flex flex-col gap-3">
             <Button
               type="submit"
+              // Pending = aria-busy + "저장 중…", still focusable. States.tsx:245-249:
+              // never disabled and never dimmed while the action is running.
               disabled={
-                profileFailed
-                  ? false
-                  : profileBusy || !online || profileFieldError !== null
+                profileFailed ? false : !online || profileFieldError !== null
               }
               title={
                 online || profileFailed
