@@ -22,7 +22,9 @@ export const MODAL_CONTENT_MOTION =
 export const POPOVER_MOTION =
   "data-[state=open]:pointer-events-auto data-[state=closed]:pointer-events-none data-[state=open]:motion-enter data-[state=closed]:motion-exit motion-reduce:animate-none";
 
-/** 390 드로어 스크림. enter/exit 대칭 `--motion-fast`. */
+/** 390 드로어 스크림. enter/exit 대칭 `--motion-fast`.
+ * Enter fill is `backwards` (`motion-fast-enter`) so a finished fade does
+ * not pin opacity over `.scrim-press:active` (#1997 R12). */
 export const DRAWER_SCRIM_MOTION =
   "data-[state=open]:motion-fast-enter data-[state=closed]:motion-fast-exit data-[state=closed]:pointer-events-none motion-reduce:animate-none";
 

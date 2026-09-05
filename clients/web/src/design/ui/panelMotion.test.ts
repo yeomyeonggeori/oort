@@ -171,8 +171,14 @@ describe("UX-R1b compiled CSS (browser-free)", () => {
     const tokens = classTokens(DRAWER_SCRIM_MOTION);
     const css = await buildCss(tokens);
     expect(MOTION_CSS).toMatch(
-      /@utility motion-fast-enter\s*\{[\s\S]*?motion-fade-in\s+var\(--motion-fast\)/
+      /@utility motion-fast-enter\s*\{[\s\S]*?motion-fade-in\s+var\(--motion-fast\)[\s\S]*?backwards/
     );
+    const enterBlock = MOTION_CSS.match(
+      /@utility motion-fast-enter\s*\{[\s\S]*?\}/
+    )?.[0];
+    expect(enterBlock, "motion-fast-enter @utility missing").toBeTruthy();
+    expect(enterBlock).toMatch(/\bbackwards\b/);
+    expect(enterBlock).not.toMatch(/\bboth\b/);
     expect(MOTION_CSS).toMatch(
       /@utility motion-fast-exit\s*\{[\s\S]*?motion-fade-out\s+var\(--motion-fast\)/
     );
@@ -421,6 +427,7 @@ describe.skipIf(!chromiumAvailable)(
         "sidebar-drawer",
         "sidebar-scrim",
         "scrim-blur",
+        "scrim-press",
         "motion-item-fade",
         "app-shell",
         "thread-pane",
@@ -478,6 +485,97 @@ describe.skipIf(!chromiumAvailable)(
         );
       }
       return { browser, page };
+    }
+
+    async function waitEnterFinished(
+      page: import("playwright").Page,
+      selector: string
+    ) {
+      await page.locator(selector).evaluate(async (node) => {
+        const waitEnd = () =>
+          new Promise<void>((resolve) => {
+            const done = () => {
+              node.removeEventListener("animationend", done);
+              window.clearTimeout(fallback);
+              resolve();
+            };
+            const fallback = window.setTimeout(done, 400);
+            node.addEventListener("animationend", done);
+          });
+        const animations = node.getAnimations();
+        if (animations.length === 0) {
+          await waitEnd();
+          return;
+        }
+        await Promise.all(
+          animations.map((animation) =>
+            animation.playState === "finished"
+              ? Promise.resolve()
+              : animation.finished.catch(() => undefined)
+          )
+        );
+      });
+    }
+
+    async function forceActiveStyles(
+      page: import("playwright").Page,
+      selector: string
+    ): Promise<{
+      opacity: number;
+      fillMode: string;
+      name: string;
+      transform: string;
+      hasScrimPressRule: boolean;
+    }> {
+      const session = await page.context().newCDPSession(page);
+      await session.send("DOM.enable");
+      await session.send("CSS.enable");
+      const { root } = await session.send("DOM.getDocument", { depth: 0 });
+      const found = await session.send("DOM.querySelector", {
+        nodeId: root.nodeId,
+        selector,
+      });
+      if (!found.nodeId) {
+        throw new Error(`CDP miss ${selector}`);
+      }
+      await session.send("CSS.forcePseudoState", {
+        nodeId: found.nodeId,
+        forcedPseudoClasses: ["active"],
+      });
+      // scrim-press transitions opacity on --motion-instant (120ms).
+      await page.waitForTimeout(160);
+      const measured = await page.locator(selector).evaluate((el) => {
+        const s = getComputedStyle(el);
+        let hasScrimPressRule = false;
+        for (const sheet of document.styleSheets) {
+          let rules: CSSRuleList;
+          try {
+            rules = sheet.cssRules;
+          } catch {
+            continue;
+          }
+          for (const rule of rules) {
+            if (
+              /scrim-press/.test(rule.cssText) &&
+              /:active/.test(rule.cssText)
+            ) {
+              hasScrimPressRule = true;
+            }
+          }
+        }
+        return {
+          opacity: Number.parseFloat(s.opacity),
+          fillMode: s.animationFillMode,
+          name: s.animationName,
+          transform: s.transform,
+          hasScrimPressRule,
+        };
+      });
+      await session.send("CSS.forcePseudoState", {
+        nodeId: found.nodeId,
+        forcedPseudoClasses: [],
+      });
+      return measured;
     }
 
     async function sample(
@@ -642,6 +740,43 @@ describe.skipIf(!chromiumAvailable)(
       };
     }
 
+    async function measureFixtureScrimPress(css: string): Promise<{
+      opacity: number;
+      fillMode: string;
+    }> {
+      const { chromium } = await import("playwright");
+      const browser = await chromium.launch();
+      try {
+        const page = await browser.newPage();
+        await page.setContent(
+          `<!doctype html><html><head><style>${css}</style></head><body>
+<button type="button" data-testid="fixture-scrim" data-state="open" class="sidebar-scrim scrim-press ${DRAWER_SCRIM_MOTION}"></button>
+</body></html>`
+        );
+        await waitEnterFinished(page, "[data-testid='fixture-scrim']");
+        return await forceActiveStyles(page, "[data-testid='fixture-scrim']");
+      } finally {
+        await browser.close();
+      }
+    }
+
+    it("finished enter fill both pins scrim-press :active at opacity 1 (R12 RED)", async () => {
+      const css = await buildCss([
+        "sidebar-scrim",
+        "scrim-press",
+        ...classTokens(DRAWER_SCRIM_MOTION),
+      ]);
+      const green = await measureFixtureScrimPress(css);
+      expect(green.opacity, `product fill=${green.fillMode}`).toBeCloseTo(0.92, 2);
+
+      const bothCss = `${css}\n[data-testid="fixture-scrim"] { animation-fill-mode: both; }\n`;
+      const red = await measureFixtureScrimPress(bothCss);
+      console.info(
+        `panelMotion: R12 RED both-fill :active opacity=${red.opacity} fill=${red.fillMode} (product ${green.opacity}/${green.fillMode})`
+      );
+      expect(red.opacity, "restore both → :active opacity 1").toBe(1);
+    }, 60_000);
+
     for (const scheme of ["light", "dark"] as const) {
       it(`${scheme}: 390 drawer enter/exit are --motion-fast and scrim exit plays`, async () => {
         const { browser, page } = await launchProbe("no-preference", scheme);
@@ -659,6 +794,23 @@ describe.skipIf(!chromiumAvailable)(
           expect(scrim.name).toBe("motion-fade-in");
           expect(Math.round(scrim.duration)).toBe(180);
           expect(scrim.backdropFilter).toMatch(/blur\(\s*5px\s*\)/);
+
+          await waitEnterFinished(page, "[data-testid='sidebar-scrim']");
+          const pressed = await forceActiveStyles(
+            page,
+            "[data-testid='sidebar-scrim']"
+          );
+          console.info(
+            `panelMotion: scrim :active after enter ${scheme} opacity=${pressed.opacity} fill=${pressed.fillMode} name=${pressed.name} scrimPressRule=${pressed.hasScrimPressRule}`
+          );
+          expect(
+            pressed.hasScrimPressRule,
+            `${scheme} harness CSS must include .scrim-press:active`
+          ).toBe(true);
+          expect(
+            pressed.opacity,
+            `${scheme} scrim :active opacity after enter fill=${pressed.fillMode}`
+          ).toBeCloseTo(0.92, 2);
 
           const trace = await closeTrace(page, "[data-testid='sidebar-scrim']", () =>
             page.getByTestId("sidebar-scrim").dispatchEvent("click")
@@ -689,6 +841,23 @@ describe.skipIf(!chromiumAvailable)(
           expect(opened.name).toBe("motion-slide-in-end");
           expect(Math.round(opened.duration)).toBe(240);
 
+          await waitEnterFinished(page, "[data-testid='thread-panel'] [data-state='open']");
+          const panelPressed = await forceActiveStyles(
+            page,
+            "[data-testid='thread-panel'] [data-state='open']"
+          );
+          const closePressed = await forceActiveStyles(
+            page,
+            "[data-testid='thread-close']"
+          );
+          console.info(
+            `panelMotion: thread enter-fill vs :active ${scheme} panel opacity=${panelPressed.opacity} transform=${panelPressed.transform} fill=${panelPressed.fillMode} close transform=${closePressed.transform}`
+          );
+          expect(
+            panelPressed.opacity,
+            `${scheme} thread panel has no :active opacity; finished slide fill must not invent one`
+          ).toBe(1);
+
           const [trace] = await Promise.all([
             closeTrace(page, "[data-testid='thread-panel']", () =>
               page.getByTestId("thread-close").click()
@@ -718,6 +887,28 @@ describe.skipIf(!chromiumAvailable)(
           expect(Math.round(overlay.duration)).toBe(200);
           expect(content.name).toBe("motion-zoom-in");
           expect(Math.round(content.duration)).toBe(200);
+
+          await waitEnterFinished(page, "[data-testid='quick-switcher-overlay']");
+          await waitEnterFinished(page, "[data-testid='quick-switcher']");
+          const overlayPressed = await forceActiveStyles(
+            page,
+            "[data-testid='quick-switcher-overlay']"
+          );
+          const contentPressed = await forceActiveStyles(
+            page,
+            "[data-testid='quick-switcher']"
+          );
+          console.info(
+            `panelMotion: palette enter-fill vs :active ${scheme} overlay opacity=${overlayPressed.opacity} fill=${overlayPressed.fillMode} content opacity=${contentPressed.opacity} transform=${contentPressed.transform} fill=${contentPressed.fillMode}`
+          );
+          expect(
+            overlayPressed.opacity,
+            `${scheme} palette overlay has no :active opacity; finished fade fill must not invent one`
+          ).toBe(1);
+          expect(
+            contentPressed.opacity,
+            `${scheme} palette content has no :active opacity; finished zoom fill must not invent one`
+          ).toBe(1);
 
           const trace = await closeTrace(
             page,

@@ -17,6 +17,8 @@
 - 390 드로어 **패널**은 DOM에 남는다(스크롤 보존, UX-R0). AnimatePresence는 스크림에만 (`SidebarDrawerScrimLayer`). 데스크톱 접힘은 타이틀바 토글 계약 유지(`sidebarPane.test.ts`).
 - 스레드 패널 presence는 부모 `root`가 민다. `onClose()`는 사용자 의도에서 즉시. 로컬 `leaving` 없음. 닫힘 중 같은/다른 앵커 클릭은 안정 `key="thread-panel"` 슬롯을 재사용해 exit을 끊는다.
 - R1d `playEntrance`/`onEntranceConsumed` ThreadPanel 이음 유지(`arrivalWiring.test.ts` · `Timeline.burst.test.tsx`).
+- R11: merge `4d9ade23` (`origin/track/uxui` into this branch). 105/105 single-sided files byte-identical; dual-sided hunks accounted. R1e `scrim-press` landed on the Presence scrim.
+- R12: `motion-fast-enter` fill is `backwards` (not `both`). A finished fill-`both` fade kept `opacity: 1` at the animation origin and outranked `.scrim-press:active { opacity: .92 }`. Measured after enter (CDP `:active`): product ≈ 0.92; restore `both` on the fixture → 1 (RED). Capture `assertEnterMotionPressAfterFill` waits for enter to finish then forces `:active` on `motion-*-enter` interactives (390 drawer requires the scrim). Thread panel / ⌘K overlay+content have no `:active` opacity on the enter node — finished fill does not hide a press step there.
 - red proof (수리 떼면 실제로 붉음):
   - 닫힘 중 20/60/100ms 에 같은/다른 `thread-anchor` 클릭 → 패널이 요청한 root 로 열린다. `leaving`+지연 `onClose` 를 되돌리면 같은 스윕이 안 연다.
   - `prefers-reduced-motion: reduce` 에서 팔레트/스크림 in-page detach <50ms. MutationObserver 를 Escape 전에 팔레트 루트에 달고 `performance.now()` 로 제거 시각을 찍는다. Playwright `waitFor(detached)` 지연은 `observeLag` 로 따로 찍고, 경로는 `data-exit-path`(duration 으로 추론하지 않음) — 팔레트와 스크림 둘 다. R10 full-suite ×3 verbatim (discard 없음):
@@ -30,6 +32,7 @@
   - 연 팔레트에 행 ≥5 (하네스 `abc-*` 5채널) · 키 3타+Backspace 뒤 행 > 0 · `[cmdk-item]` `animationstart` 0 (open-container=1, type-items=0, rows=6). `PALETTE_ITEM_MOTION`/`motion-item-fade` 를 행에 되돌리면 open 에서 item animationstart **11**. jsdom 은 행 class 에 `motion-item-fade` 가 있으면 붉다.
   - 팔레트 닫힘 후 `activeElement` 는 opener (`open-palette`). owner 는 `restoreRef` effect (`open === false` 에서 `target.focus()`). 그 effect 를 빼면 Escape·항목 선택 모두 `BODY` (jsdom 2/2, Playwright `focus=BODY`). `restoreDialogOpenerFocus` 는 이 경로의 owner 가 아니다.
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
+  - 스크림 enter 가 끝난 뒤 CDP `:active` opacity ≈ 0.92. `motion-fast-enter` fill 을 `both` 로 되돌리면 같은 측정이 1 (R12 RED). 캡처에서 `assertEnterMotionPressAfterFill` 을 빼면 원장 핀이 붉다.
 - `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
 - 캡처 `CAPTURE_PORT=8625` R10 **FAIL** (nonempty intro light, `scrollTimelineRowIntoView`). 선행 장면. **PASS 라고 쓰지 않음.**
 

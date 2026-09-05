@@ -54,6 +54,8 @@ import { buttonVariants } from "./ui/button";
  *   - add `disabled:cursor-not-allowed` to a live button → still in the population (M5-1)
  *   - `@utility` with `&:active { color: … }` → not counted as press (M5-2)
  *   - `<TabsPrimitive.Trigger className="hover:bg-surface-hover">` → in population (N5-1)
+ *   - drop `assertEnterMotionPressAfterFill` or its `0.92` scrim check → R12 pin red
+ *   - restore `motion-fast-enter` fill `both` → Playwright :active opacity 1 (R12 RED)
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -2204,6 +2206,14 @@ export function Probe() {
     expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `search /);
     expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `agent hub /);
     expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\(settingsSweep/);
+    expect(CAPTURE_SRC).toMatch(/function assertEnterMotionPressAfterFill/);
+    expect(CAPTURE_SRC).toMatch(/getAnimations\(\)/);
+    expect(CAPTURE_SRC).toMatch(/0\.92/);
+    expect(CAPTURE_SRC).toMatch(/requireScrim/);
+    expect(CAPTURE_SRC).toMatch(/assertEnterMotionPressAfterFill\(page, label\)/);
+    expect(CAPTURE_SRC).toMatch(
+      /assertEnterMotionPressAfterFill\(page, `drawer \$\{scheme\}`/
+    );
   });
 
   it("FeedRow 는 전폭 행이고 press 스케일이 없다 (M6-1)", () => {

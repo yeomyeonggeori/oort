@@ -137,8 +137,12 @@
   animation: motion-zoom-out var(--motion-modal-close)
     var(--motion-ease-standard) both;
 }
+/* backwards, not both: a finished fill-both fade keeps opacity:1 at the
+ * animation origin and outranks `.scrim-press:active { opacity:.92 }`.
+ * Rest opacity is already 1, so forwards fill adds nothing (#1997 R12). */
 @utility motion-fast-enter {
-  animation: motion-fade-in var(--motion-fast) var(--motion-ease-standard) both;
+  animation: motion-fade-in var(--motion-fast) var(--motion-ease-standard)
+    backwards;
 }
 @utility motion-fast-exit {
   animation: motion-fade-out var(--motion-fast) var(--motion-ease-standard) both;
