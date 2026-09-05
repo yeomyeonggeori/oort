@@ -407,7 +407,7 @@ function RawPatch({ patch }: { patch: string }) {
     >
       <summary
         className={cn(
-          "cursor-pointer px-3 py-2 text-meta text-ink-muted press hover:bg-surface-hover",
+          "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed",
           "focus-visible:focus-ring"
         )}
       >

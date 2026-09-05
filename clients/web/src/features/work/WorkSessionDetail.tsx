@@ -1006,7 +1006,7 @@ export function WorkSessionDetail({
             are reference material you check once, and as always-open chrome
             they cost more height than the ledger they describe. */}
         <details className="border-b border-line" data-testid="work-detail-meta">
-          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring">
+          <summary className="cursor-pointer px-4 py-1 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring">
             세션 정보 · {channelName}
           </summary>
           <dl className="pb-1">

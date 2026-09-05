@@ -380,7 +380,7 @@ function ReminderRow({
               watchForMessage(reminder.messageSeq);
             }
           }}
-          className="flex min-w-0 flex-1 gap-3 press focus-visible:focus-ring"
+          className="flex w-full min-w-0 flex-1 gap-3 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
           data-testid="reminder-row-link"
         >
           <span className="shrink-0 pt-1" aria-hidden="true">
