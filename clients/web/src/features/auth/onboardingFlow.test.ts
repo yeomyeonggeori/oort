@@ -4,6 +4,7 @@ import {
   initialOnboarding,
   progressLabel,
   transitionFor,
+  type OnboardingStep,
 } from "./onboardingFlow";
 
 describe("onboarding first step", () => {
@@ -64,10 +65,11 @@ describe("gateway prefill focus", () => {
 });
 
 describe("onboarding progress", () => {
-  it("hides the bar on the landing and counts 2/3 then 3/3", () => {
+  it("hides the bar on the landing and counts 2/4 then 3/4 then 4/4", () => {
     expect(progressLabel("landing")).toBeNull();
-    expect(progressLabel("gateway")).toBe("2/3");
-    expect(progressLabel("account")).toBe("3/3");
+    expect(progressLabel("gateway")).toBe("2/4");
+    expect(progressLabel("account")).toBe("3/4");
+    expect(progressLabel("profile" as OnboardingStep)).toBe("4/4");
   });
 });
 
@@ -91,6 +93,21 @@ describe("onboarding transitions", () => {
     expect(transitionFor("account", "gateway", false)).toEqual({
       effect: "line-slide",
       direction: "backward",
+    });
+  });
+
+  it("uses line-slide from account into profile, and none when motion is reduced", () => {
+    expect(
+      transitionFor("account", "profile" as OnboardingStep, false)
+    ).toEqual({
+      effect: "line-slide",
+      direction: "forward",
+    });
+    expect(
+      transitionFor("account", "profile" as OnboardingStep, true)
+    ).toEqual({
+      effect: "none",
+      direction: "forward",
     });
   });
 

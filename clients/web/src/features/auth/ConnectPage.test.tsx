@@ -163,14 +163,14 @@ describe("BZ-6a onboarding shell", () => {
     expect(back?.textContent).toContain("뒤로");
     expect(back?.querySelector("svg")).not.toBeNull();
     expect(back?.className).not.toMatch(/underline/);
-    expect(progress?.textContent).toBe("2/3");
+    expect(progress?.textContent).toBe("2/4");
     expect(document.querySelector('[data-testid="login-server"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="login-invite-code"]')).toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("login-server");
     click("onboarding-next");
     expect(document.querySelector('[data-testid="onboarding-account"]')).not.toBeNull();
     expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
-      "3/3"
+      "3/4"
     );
     expect(document.querySelector('[data-testid="login-email"]')).not.toBeNull();
     expect(document.activeElement?.getAttribute("data-testid")).toBe("login-email");
