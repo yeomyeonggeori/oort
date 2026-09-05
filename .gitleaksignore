@@ -246,3 +246,7 @@ c0f0b2a27a9af23a6c5248709f77953f0dfe9f5f:clients/web/src/design/theme.ts:generic
 a2a775f604c1105c2d1b34506f0041239b09adae:clients/web/src/features/auth/ConnectPage.test.tsx:generic-api-key:13
 a2a775f604c1105c2d1b34506f0041239b09adae:clients/web/src/features/welcome/freshSignup.ts:generic-api-key:13
 e0e39dd74c384e3e1f788e97fac25f65c36704b3:clients/web/src/features/auth/ConnectPage.test.tsx:generic-api-key:325
+
+# 2026-09-05 #2002 UX-R2b — 오탐: 세션 저장 슬롯 이름 "oort.freshSignup.v1" (generic-api-key), 시크릿 아님
+b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshSignup.ts:generic-api-key:13
+2874c2e8f449df8d08b3d143bebac783b3bb1d35:clients/web/src/features/welcome/freshSignup.test.ts:generic-api-key:10
