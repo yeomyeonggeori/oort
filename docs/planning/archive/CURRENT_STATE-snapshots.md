@@ -2,6 +2,15 @@
 
 > `docs/planning/CURRENT_STATE.md`에서 이동한 과거 스냅샷 원문(불변, newest-first 유지). 로테이션 시 새 이동분을 이 헤더 바로 아래에 prepend한다. 하단의 구 구조 절(§0~§5)은 2026-07 기준 정체 구획으로, 현행 운영과 다르다 — 역사 기록으로만 읽어라(현행: `docs/TRACKS.md`·`CLAUDE.md`).
 
+> 이하 스냅샷 81:
+> **2026-09-02 스냅샷 81 (Fable · momo-main — ★G0 집행 중: BZ-5a·BT-6 서버 랜딩, ADR 4본 Proposed, W1 패킷·이슈 발급, 클라 워커 가동).** 컴팩트 복원 진입점.
+>
+> **★ 랜딩**: BZ-5a #1922 → track/uxui **939ed80e**(결재: 액센트 기본=새벽·5종 유지, 정책 검증 PASS, #1868 코멘트·5b 잔여) · BT-6 서버 절반 #1961 → track/engine **6faccaea**(재검증: PG 증명 5/5·breadth 2/2·마이그레이션 3/3 GREEN, RED 커밋 5/5 실패 확인) · ENGINE_HANDOFF **A-43** ready(#1962 → engine 6b8b723f) · 트랙 동기화 #1951·#1952(alignment PASS).
+> **★ 가동**: **BT-6 클라 절반 grok 4.6 워커**(`momo-worktrees/wbt6-client`, 미션 `scratchpad/mission-bt6-client.md` — momo-core 합성 단일점·⋯ 메뉴·explicit_open 배선·grep 게이트·캡처 8587/셸 8589). 완료 시 design-review(fresh) 폐곡선 → 머지 → #1934 close.
+> **★ 결재 대기**: **ADR-0179·0180·0181·0182 Proposed**(main 랜딩 #1949) → Accept 시 #1958 UX-R0·#1959 M0s·#1960 UX-R2s 개방. 즉시 발사 가능(go 대기): #1954 SH-1·#1955 SH-3a·#1956 DS-2·#1957 UX-R4a(패킷 main 랜딩 #1950).
+> **★ 보류 PR**: **#1953** P1 PIPELINE.md+P2 CODEX.md 병합(+이 스냅샷) — 승격 창에서 main 머지 후 sync 짝. 워커 레인=grok 4.6(D-7 개정).
+> **★ 다음**: 클라 절반 랜딩 → 승격 배치(engine→main→uxui sync→uxui→main→engine sync→#1953→sync 짝) → **v0.1.4 발행 창(성재 attended dispatch 승인)** → W1 발사(병렬 2). 교훈 기록: zsh 미인용 $VAR 미분리로 빈 diff를 '동일'로 오판한 감사 코멘트 정정(#1922) — 메모리 `zsh-word-split-gotcha`.
+
 > 이하 스냅샷 80:
 > **2026-09-02 스냅샷 80 (Fable · momo-main — ★인터뷰 전량 승인 → 출시 프로그램 편성 정본 확정·ROADMAP 정렬. 착수 전, go 대기).** 컴팩트 복원 진입점.
 >
