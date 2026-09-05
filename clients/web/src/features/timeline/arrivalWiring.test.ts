@@ -61,7 +61,7 @@ describe("arrival wiring — mutations of the seam go red", () => {
     expect(timeline).toContain("onEntranceConsumed(item.message.id)");
   });
 
-  it("ChatShell 은 Timeline 과 ThreadPanel 에 같은 두 props 를 각각 잇는다", () => {
+  it("ChatShell holds Timeline isPlayEntrance through the welcome stage; ThreadPanel keeps the unwrapped store fn", () => {
     expect(shell).toContain("welcomeHoldsEntrance(welcome.holdEntranceId, id)");
     expect(shell).toContain("return timeline.isPlayEntrance?.(id) ?? false");
     expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
