@@ -1619,9 +1619,11 @@ async function measureSidebarDrawerIndependence(browser) {
   await page.screenshot({ path: `${OUT_DIR}/390x844-drawer-independent.png` });
 
   await page.keyboard.press("Escape");
+  // UX-R1b: the 390 scrim stays mounted through `--motion-fast` exit. Focus
+  // returns on close; the node detaches after animationend.
   await waitForPageCondition(
     page,
-    'document.activeElement === document.querySelector(\'[data-testid="open-sidebar-drawer"]\')'
+    'document.activeElement === document.querySelector(\'[data-testid="open-sidebar-drawer"]\') && !document.querySelector(\'[data-testid="sidebar-scrim"]\')'
   );
   const drawerClosed = await page.evaluate(`(() => ({
     open: document.querySelector('[data-testid="sidebar"]')?.hasAttribute("data-open"),
