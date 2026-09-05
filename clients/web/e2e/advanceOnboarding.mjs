@@ -1,9 +1,10 @@
-// Walk the BZ-6a connect shell from whatever step is showing to S2 (account).
+// Walk the BZ-6a/BZ-6b connect shell from whatever step is showing to S2 (account).
 //
 // First paint is S0 (landing) when no server is stored and no invite is
 // prefilled. A stored `momo.web.server.v1` or a `?code=` / `?join=` prefill
 // skips S0 and opens S1 (gateway). Email / password / login-submit live on S2.
 // Lanes that still wait for login-submit as the first paint hang on S0.
+// Sign-in lanes never see S3. Join lanes wait for onboarding-profile then skip.
 //
 // Capture of S0 itself must happen BEFORE calling this. Reduced-motion capture
 // contexts skip the mask-reveal, so the gateway card is visible immediately.

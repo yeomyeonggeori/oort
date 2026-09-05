@@ -6,15 +6,19 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ApiError, type JoinResponse, type LoginResponse, type Member } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { setServerBase } from "@/lib/serverBase";
+import { applyLogin, clearSession } from "@/lib/session";
+import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
 import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
+import { releaseSessionRestore, holdSessionRestore } from "./onboardingSessionHold";
 
 const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
 
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
+const restoreSession = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -25,6 +29,7 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       joinWithInvite(...args) as Promise<JoinResponse>,
     changeMyDisplayName: (...args: unknown[]) =>
       changeMyDisplayName(...args) as Promise<Member>,
+    restoreSession: () => restoreSession() as Promise<LoginResponse | null>,
   };
 });
 
@@ -60,8 +65,12 @@ beforeEach(() => {
   login.mockReset();
   joinWithInvite.mockReset();
   changeMyDisplayName.mockReset();
+  restoreSession.mockReset();
   login.mockResolvedValue(session);
   joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
+  restoreSession.mockResolvedValue(session);
+  releaseSessionRestore();
+  clearSession();
   setServerBase(null);
   clearRecentServers();
   sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
@@ -92,6 +101,8 @@ afterEach(() => {
   mountedHost = null;
   setServerBase(null);
   clearRecentServers();
+  releaseSessionRestore();
+  clearSession();
   vi.unstubAllGlobals();
 });
 
@@ -102,6 +113,26 @@ function mount(onLoggedIn: (next: LoginResponse) => void = () => undefined): HTM
   mountedRoot = createRoot(host);
   act(() => {
     mountedRoot?.render(createElement(ConnectPage, { onLoggedIn }));
+  });
+  return host;
+}
+
+function SessionGate() {
+  const { session: current, signIn, status } = useRestoredSession();
+  if (status === "restoring") {
+    return createElement("div", { "data-testid": "session-restoring" });
+  }
+  if (!current) return createElement(ConnectPage, { onLoggedIn: signIn });
+  return createElement("div", { "data-testid": "signed-in-shell" });
+}
+
+function mountGate(): HTMLElement {
+  const host = document.createElement("div");
+  document.body.append(host);
+  mountedHost = host;
+  mountedRoot = createRoot(host);
+  act(() => {
+    mountedRoot?.render(createElement(SessionGate));
   });
   return host;
 }
@@ -484,6 +515,52 @@ describe("BZ-6b onboarding profile step", () => {
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
+  });
+
+  it("keeps S3 on screen after join applyLogin instead of restoring the shell", async () => {
+    joinWithInvite.mockImplementation(async () => {
+      applyLogin(session);
+      return { ...session, createdMember: true };
+    });
+    mountGate();
+    click("onboarding-choose-invite");
+    fill("login-invite-code", "Ab3-_x");
+    click("onboarding-next");
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "new-pass");
+    await act(async () => {
+      click("login-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-testid="session-restoring"]')).toBeNull();
+    expect(document.querySelector('[data-testid="signed-in-shell"]')).toBeNull();
+    expect(restoreSession).not.toHaveBeenCalled();
+  });
+
+  it("starts a restore after applyLogin when nothing holds it", async () => {
+    mountGate();
+    await act(async () => {
+      applyLogin(session);
+    });
+    await vi.waitFor(() => {
+      expect(restoreSession).toHaveBeenCalled();
+    });
+  });
+
+  it("does not start restore while the join hold is on", async () => {
+    mountGate();
+    await act(async () => {
+      holdSessionRestore();
+      applyLogin(session);
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(restoreSession).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="session-restoring"]')).toBeNull();
   });
 });
 

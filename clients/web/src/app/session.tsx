@@ -20,6 +20,10 @@ import {
   hasPersistedSession,
   subscribeSession,
 } from "@/lib/session";
+import {
+  sessionRestoreHeld,
+  subscribeSessionRestoreHold,
+} from "@/features/auth/onboardingSessionHold";
 import { clearAllDrafts } from "@/features/chat/draftStore";
 import { clearAllFirstMentionRecords } from "@/features/hostedAgents/firstMentionStore";
 import type { RealtimeHandle, RealtimeStatus } from "@/lib/realtime";
@@ -85,6 +89,10 @@ export function useRestoredSession(): SessionLifecycle {
   // (main.tsx), so the answer can arrive after this hook has already mounted and
   // said "anonymous" — `hydrate()` notifies the session store when it does.
   const resumable = useSyncExternalStore(subscribeSession, hasPersistedSession);
+  const restoreHeld = useSyncExternalStore(
+    subscribeSessionRestoreHold,
+    sessionRestoreHeld
+  );
 
   // One resume attempt per app lifetime. Without this the effect would re-fire
   // on the store notification that a fresh sign-in emits, and rotate a token
@@ -92,7 +100,10 @@ export function useRestoredSession(): SessionLifecycle {
   const attempted = useRef(false);
 
   useEffect(() => {
-    if (attempted.current || !resumable) return;
+    // Join applyLogin persists before S3 calls onLoggedIn. Without this hold
+    // App enters restoring and unmounts ConnectPage (capture 30000ms timeout
+    // on onboarding-profile, CAPTURE_PORT=8641).
+    if (attempted.current || !resumable || restoreHeld) return;
     attempted.current = true;
     let cancelled = false;
     let settled = false;
@@ -129,7 +140,7 @@ export function useRestoredSession(): SessionLifecycle {
       cancelled = true;
       clearTimeout(release);
     };
-  }, [resumable]);
+  }, [resumable, restoreHeld]);
 
   // A 401 that survived a rotation means the refresh token is gone for good.
   // Returning to the login form is the honest response; leaving the shell up to

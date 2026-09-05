@@ -74,6 +74,10 @@ import {
   displayNameSaveMessage,
 } from "@momo/core/features/settings/model";
 import { markFreshSignup } from "@/features/welcome/freshSignup";
+import {
+  holdSessionRestore,
+  releaseSessionRestore,
+} from "./onboardingSessionHold";
 
 type ShellFocus =
   | ConnectField
@@ -314,6 +318,7 @@ export function ConnectPage({
     setBusy(true);
     try {
       if (mode === "join") {
+        holdSessionRestore();
         const session = await joinWithInvite(inviteCode, email, password);
         markPhoneLinkFirstRunPending();
         if (session.createdMember) {
@@ -326,11 +331,13 @@ export function ConnectPage({
           return;
         }
         onLoggedIn(session);
+        releaseSessionRestore();
         return;
       }
       const session = await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
+      if (mode === "join") releaseSessionRestore();
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
       setFailure(next);
       if (next.onGateway) {
@@ -368,6 +375,7 @@ export function ConnectPage({
       memberId: pendingJoin.member.id,
     });
     onLoggedIn({ ...pendingJoin, member });
+    releaseSessionRestore();
   }
 
   function handleProfileSkip() {
@@ -696,6 +704,8 @@ export function ConnectPage({
     </Card>
   );
 
+  // Design Read: onboarding for internal team users on web+Tauri,
+  // density 5/10, motion 4/10 (S0 only; S1–S3 stay the connect form).
   // Capture and e2e walk this card the same way they walk S0/S1/S2
   // (`onboarding-landing` / `onboarding-gateway` / `onboarding-account`).
   const profileCard = (
