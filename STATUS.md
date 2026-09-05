@@ -1,5 +1,27 @@
 # oort 진행 현황
 
+## UX-R2a 온보딩 S3 프로필 스텝 (#2001, 2026-09-05)
+
+- Track UXUI. S3 = 표시 이름 only. Personal avatar upload route does not exist (workspace avatar is operator-only). No disabled avatar control on S3.
+- `onboardingFlow` steps `landing|gateway|account|profile`. `progressLabel`: gateway `2/4` · account `3/4` · profile `4/4`. `transitionFor("account","profile",false)` = line-slide forward; reduced-motion = none.
+- Join with `createdMember: true` holds the session, paints S3, calls `onLoggedIn` on skip / save / fail-forward. Sign-in and `createdMember: false` skip S3. `joinWithInvite` returns `JoinResponse` (`createdMember` boolean; non-boolean = `WireShapeError`). Shared ceiling `DISPLAY_NAME_MAX_CHARS = 80`, sentence `"표시 이름은 80자까지 쓸 수 있습니다."`
+- Join `applyLogin` persists before S3 `onLoggedIn`. Hold: `holdSessionRestore` so App does not enter `restoring` and unmount ConnectPage. Measured: first capture waitFor(`onboarding-profile`) 30000ms timeout; after hold, S3 paints (card center profile light/dark).
+- Seam `clients/web/src/features/welcome/freshSignup.ts` (bytes from `claudedocs/resume-2026-09-04/seam-freshSignup.ts`). `markFreshSignup` before `onLoggedIn` on the three S3 exits and on `ClaimPage`.
+- Test counts: `onboardingFlow.test.ts` 8 → 9. `ConnectPage.test.tsx` 11 → 21. `model.test.ts` 47 → 48. `joinApi.test.ts` 3 (new). Web suite 2688 passed (226 files). Core 1979 passed (99 files).
+- Counter strings that asserted `2/3`/`3/3` (product+tests): 6 across `onboardingFlow.ts` (2), `onboardingFlow.test.ts` (2 expects), `ConnectPage.test.tsx` (2). After: `2/4`/`3/4`/`4/4` in those files plus capture `4/4` and S3 chrome comment. Gates/e2e did not assert `2/3`.
+- Capture `CAPTURE_PORT=8641`: run 1 wrote S3 four desktop PNGs then aborted on nonempty intro-scroll (`#2057` N-4). Run 2 aborted waiting for `design-gallery` 30000ms (before S3). Run 3 full exit 0. Desktop S3 sha256 run1 = run3:
+
+| file | sha256 |
+|---|---|
+| onboarding-profile-light.png | `b68eb776877a20cf699bed26115de5863a7b05fe1e307716f297a83c3a8ff59c` |
+| onboarding-profile-error-light.png | `7c846bdc96334259ec3294a9c5aceaa6854e1b0d30e29e07b96bafd1f6d25188` |
+| onboarding-profile-dark.png | `1ed21b70c31f09e28b8db7a4825a41342fae08b3fafbb7287bfcd467cce4fc77` |
+| onboarding-profile-error-dark.png | `a15e1847bfa1f88800edc82d7b47284c834dcd93df48a318deee85d5d31c0750` |
+
+- Preflight web 14/14 + core 5/5. Lint 0 errors (14 pre-existing warnings). `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. smoke/connect e2e not run (`MOMO_EMAIL` unset).
+- Join lanes that learned S3: `capture-screens.mjs` `shootOnboardingProfile`; `advanceOnboarding.mjs` `skipProfileIfPresent` + `ONBOARDING_SURFACE`. Sign-in gates unchanged.
+- runtime-unverified: live smoke/connect. design-review is not this worker.
+
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
 - ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.
