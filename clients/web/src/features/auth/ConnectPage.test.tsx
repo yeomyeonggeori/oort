@@ -631,9 +631,9 @@ describe("BZ-6b onboarding profile step", () => {
       click("onboarding-profile-submit");
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
     });
-    const banner = document.querySelector('[data-testid="onboarding-profile-error"]')
+    const banner = document.querySelector('[data-testid="onboarding-profile-banner"]')
       ?.textContent;
     expect(banner).toContain("요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.");
     expect(banner).toContain("설정 › 프로필에서 언제든 바꿀 수 있어요.");
@@ -641,7 +641,7 @@ describe("BZ-6b onboarding profile step", () => {
     expect(banner).not.toContain("engine boom");
     expect(onLoggedIn).not.toHaveBeenCalled();
     const retry = document.querySelector(
-      '[data-testid="onboarding-profile-error"] button'
+      '[data-testid="onboarding-profile-banner"] button'
     );
     expect(retry?.textContent).toContain("다시 시도");
     const submit = document.querySelector(
@@ -672,7 +672,7 @@ describe("BZ-6b onboarding profile step", () => {
       click("onboarding-profile-submit");
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
     });
     fill("onboarding-profile-name", "두번째이름");
     const submit = document.querySelector(
@@ -735,7 +735,7 @@ describe("BZ-6b onboarding profile step", () => {
       rejectPatch?.(new ApiError(500, "engine boom"));
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
     });
     expect(document.activeElement).not.toBe(document.body);
     expect(document.activeElement).toBe(name);
@@ -757,12 +757,12 @@ describe("BZ-6b onboarding profile step", () => {
       click("onboarding-profile-submit");
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-error"] button')).not.toBeNull();
+      expect(document.querySelector('[data-testid="onboarding-profile-banner"] button')).not.toBeNull();
     });
     await act(async () => {
       (
         document.querySelector(
-          '[data-testid="onboarding-profile-error"] button'
+          '[data-testid="onboarding-profile-banner"] button'
         ) as HTMLButtonElement
       ).click();
     });
@@ -851,7 +851,7 @@ describe("BZ-6b onboarding profile step", () => {
       click("onboarding-profile-submit");
     });
     await vi.waitFor(() => {
-      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+      expect(document.querySelector('[data-testid="onboarding-profile-banner"]')).not.toBeNull();
     });
     expect(sessionRestoreHeld()).toBe(true);
     releaseSessionRestoreMock.mockClear();

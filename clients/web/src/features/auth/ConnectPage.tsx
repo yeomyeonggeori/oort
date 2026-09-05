@@ -761,8 +761,8 @@ export function ConnectPage({
             <InlineBanner
               tone="error"
               message={profileError}
-              messageId="onboarding-profile-error-text"
-              testId="onboarding-profile-error"
+              messageId="onboarding-profile-banner-text"
+              testId="onboarding-profile-banner"
               actionLabel="다시 시도"
               onAction={() => void handleProfileRetry(join)}
               actionBusy={profileBusy}
@@ -784,7 +784,7 @@ export function ConnectPage({
                     : profileError
                       ? null
                       : "onboarding-profile-name-hint",
-                  profileError ? "onboarding-profile-error-text" : null,
+                  profileError ? "onboarding-profile-banner-text" : null,
                 ]
                   .filter(Boolean)
                   .join(" ") || undefined

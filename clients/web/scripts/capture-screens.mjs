@@ -2558,7 +2558,19 @@ async function shootOnboardingProfile(page, where, { tapTargets = false, shoot }
   await page.getByTestId("onboarding-profile-name-error").waitFor({
     state: "visible",
   });
-  if (shoot) await shoot("onboarding-profile-error");
+  if (shoot) await shoot("onboarding-profile-field-error");
+  await page.route("**/v1/workspaces/*/members/me", (route) => {
+    if (route.request().method() === "PATCH") {
+      return json(route, { error: { message: "engine boom" } }, 500);
+    }
+    return route.fallback();
+  });
+  await page.getByTestId("onboarding-profile-name").fill("성재");
+  await page.getByTestId("onboarding-profile-submit").click();
+  await page.getByTestId("onboarding-profile-banner").waitFor({
+    state: "visible",
+  });
+  if (shoot) await shoot("onboarding-profile-banner");
 }
 
 function isPresencePut(request) {
