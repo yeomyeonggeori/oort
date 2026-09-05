@@ -1,4 +1,10 @@
-import { useLayoutEffect, useRef, useState, type FocusEvent } from "react";
+import {
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FocusEvent,
+  type MouseEventHandler,
+} from "react";
 import { Link } from "react-router-dom";
 import {
   Hash,
@@ -44,7 +50,7 @@ const DRAFT_ROW_HINT_ID = "drafts-row-hint";
 const overflowBowlClass =
   "absolute right-2 top-2 z-20 rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
 const overflowTriggerClass =
-  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
+  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
 
 function KindIcon({ kind }: { kind: DraftKind }) {
   const className = "size-4 text-ink-muted";
@@ -66,16 +72,18 @@ function draftRowLink(
   return null;
 }
 
-function DraftRow({
+export function DraftRow({
   item,
   nowMs,
   onDelete,
   onCloseAutoFocus,
+  onClick,
 }: {
   item: DraftViewItem;
   nowMs: number;
   onDelete: (item: DraftViewItem) => void;
   onCloseAutoFocus: (event: Event) => void;
+  onClick?: MouseEventHandler<HTMLAnchorElement>;
 }) {
   const hoverNone = useHoverNone();
   const [hovered, setHovered] = useState(false);
@@ -99,7 +107,7 @@ function DraftRow({
 
   return (
     <li
-      className="relative border-b border-line transition-colors hover:bg-surface-hover focus-within:bg-surface-hover"
+      className="relative border-b border-line"
       data-testid="draft-row"
       data-channel-id={item.channelId}
       onMouseEnter={() => setHovered(true)}
@@ -110,7 +118,8 @@ function DraftRow({
       <Link
         to={channelPathForDraft(item.channelId)}
         aria-describedby={DRAFT_ROW_HINT_ID}
-        className="flex gap-3 py-2 pl-4 pr-8 focus-visible:focus-ring"
+        className="flex w-full gap-3 py-2 pl-4 pr-8 hover:bg-surface-hover active:bg-surface-pressed focus-visible:bg-surface-hover focus-visible:focus-ring"
+        onClick={onClick}
       >
         <span className="shrink-0 pt-1" aria-hidden="true">
           <KindIcon kind={item.destination.kind} />

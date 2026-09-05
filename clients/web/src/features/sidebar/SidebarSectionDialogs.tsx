@@ -300,7 +300,7 @@ export function SidebarSortMenu({
           title={SIDEBAR_SORT_GROUP_LABEL}
           data-section-action=""
           data-testid="sidebar-sort-menu"
-          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
         >
           <ArrowUpDown className="size-4" aria-hidden="true" />
         </button>
@@ -385,7 +385,7 @@ export function SidebarSectionMenu({
           title={`${title} 섹션 메뉴`}
           data-section-action=""
           data-testid={`section-menu-${sectionId}`}
-          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
         >
           <MoreHorizontal className="size-4" aria-hidden="true" />
         </button>

@@ -51,7 +51,7 @@ export function LandingStep({
         <button
           ref={serverChoiceRef}
           type="button"
-          className="tap-target onboarding-focus-on-fill inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm bg-onboarding-accent px-4 text-body font-medium text-onboarding-on-accent focus-visible:focus-ring"
+          className="tap-target onboarding-focus-on-fill press inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm bg-onboarding-accent px-4 text-body font-medium text-onboarding-on-accent focus-visible:focus-ring"
           data-testid="onboarding-choose-server"
           onClick={onChooseServer}
         >
@@ -60,7 +60,7 @@ export function LandingStep({
         <button
           ref={inviteChoiceRef}
           type="button"
-          className="tap-target onboarding-focus inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm border border-onboarding-line bg-transparent px-4 text-body font-medium text-onboarding-ink focus-visible:focus-ring"
+          className="tap-target onboarding-focus press inline-flex h-control-lg w-full max-w-sm items-center justify-center rounded-sm border border-onboarding-line bg-transparent px-4 text-body font-medium text-onboarding-ink focus-visible:focus-ring"
           data-testid="onboarding-choose-invite"
           onClick={onChooseInvite}
         >

@@ -17,10 +17,17 @@ import { choiceRadiosHintId } from "./fieldIds";
 // typed key-value lists, no card per row: elevation is reserved for grouping.
 // =============================================================================
 
+/** Rounded `<details>` that host a hover-fill `<summary>` (#2000 H-1). */
+export const SETTINGS_COLLAPSIBLE_CARD_CLASS =
+  "min-w-0 overflow-hidden rounded-md border border-line";
+export const SETTINGS_COLLAPSIBLE_SUMMARY_CLASS =
+  "cursor-pointer px-3 py-2 text-body text-ink hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring";
+
 /**
  * One on/off row in a bordered settings group. The NAME is the checkbox's
  * accessible name; the sentence is its description. Kept apart so a screen
- * reader does not run the whole paragraph together as one label.
+ * reader does not run the whole paragraph together as one label. The `<label>`
+ * is the whole row so press fill and click target are the same box (#2000 H-3).
  */
 export function SettingsToggleRow({
   testId,
@@ -43,10 +50,13 @@ export function SettingsToggleRow({
   const nameId = `${testId}-name`;
   const descId = `${testId}-desc`;
   return (
-    <div
+    <label
+      htmlFor={testId}
       className={cn(
-        "flex min-w-0 items-start gap-3 border-b border-line p-3 last:border-b-0",
-        checked ? "bg-accent-soft" : "hover:bg-surface-hover"
+        "flex min-w-0 cursor-pointer items-start gap-3 border-b border-line p-3 last:border-b-0",
+        checked
+          ? "bg-accent-soft active:bg-surface-pressed"
+          : "hover:bg-surface-hover active:bg-surface-pressed"
       )}
       data-state={checked ? "on" : "off"}
     >
@@ -58,18 +68,18 @@ export function SettingsToggleRow({
         aria-labelledby={nameId}
         aria-describedby={describedBy ? `${descId} ${describedBy}` : descId}
         onChange={(event) => onToggle(event.target.checked)}
-        className="mt-1 accent-accent focus-visible:focus-ring"
+        className="mt-1 accent-accent press focus-visible:focus-ring"
         data-testid={testId}
       />
-      <label htmlFor={testId} className="flex min-w-0 cursor-pointer flex-col gap-px">
+      <span className="flex min-w-0 flex-col gap-px">
         <span id={nameId} className="text-body text-ink">
           {name}
         </span>
         <span id={descId} className="break-keep text-meta text-ink-muted">
           {description}
         </span>
-      </label>
-    </div>
+      </span>
+    </label>
   );
 }
 
@@ -374,7 +384,9 @@ export function ChoiceRadios({
             htmlFor={`${name}-${choice.id}`}
             className={cn(
               "flex min-w-0 cursor-pointer items-start gap-2 border-b border-line p-2 last:border-b-0",
-              value === choice.id ? "bg-accent-soft" : "hover:bg-surface-hover"
+              value === choice.id
+                ? "bg-accent-soft active:bg-surface-pressed"
+                : "hover:bg-surface-hover active:bg-surface-pressed"
             )}
           >
             <input

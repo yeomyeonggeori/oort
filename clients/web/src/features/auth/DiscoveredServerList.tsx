@@ -34,7 +34,7 @@ export function DiscoveredServerList({
               type="button"
               onClick={() => onSelect(server)}
               data-testid="connect-discovery-item"
-              className="flex w-full flex-col items-start gap-0 rounded-sm px-1 py-1 text-left hover:bg-surface-hover focus-visible:focus-ring"
+              className="flex w-full flex-col items-start gap-0 rounded-sm px-1 py-1 text-left hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
             >
               <span className="w-full truncate text-body text-ink">
                 {server.displayHost}

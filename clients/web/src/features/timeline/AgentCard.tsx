@@ -160,7 +160,7 @@ function PayloadDisclosure({ detail }: { detail: PayloadDetail }) {
   if (detail.rows.length === 0 && detail.withheld === 0) return null;
   return (
     <details className="border-t border-line" data-testid="agent-payload">
-      <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
+      <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring">
         원본 데이터 보기
       </summary>
       <dl className="pb-2">
@@ -901,7 +901,7 @@ function TurnBody({ card }: { card: AgentTurnCard }) {
           // sibling folds where only one carries a separator read as one
           // control and one stray line.
           <details className="border-t border-line" data-testid="turn-failure-detail">
-            <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover focus-visible:focus-ring">
+            <summary className="cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring">
               자세히
             </summary>
             {/* 실패 상세도 같은 예산을 쓴다 (진단 H-8: 「실패 상세도 별도

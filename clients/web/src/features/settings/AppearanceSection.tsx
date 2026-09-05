@@ -77,7 +77,7 @@ export function AppearanceSection() {
               data-accent-swatch={theme.id}
               data-testid={`accent-swatch-${theme.id}`}
               className={cn(
-                "accent-swatch flex cursor-pointer flex-col items-center justify-center gap-1 rounded-sm border border-line p-1 text-meta hover:bg-surface-hover"
+                "accent-swatch flex cursor-pointer flex-col items-center justify-center gap-1 rounded-sm border border-line p-1 text-meta press hover:bg-surface-hover"
               )}
             >
               <input
