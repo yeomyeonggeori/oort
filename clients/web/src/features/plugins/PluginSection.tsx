@@ -921,7 +921,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {
-  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
+  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
 }
 
 function PluginScopeConsentDialog({

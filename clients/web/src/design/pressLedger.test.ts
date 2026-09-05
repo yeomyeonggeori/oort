@@ -291,11 +291,28 @@ function isAnchorLike(tag: string, routerLink = false): boolean {
   return t === "a" || t === "button" || tag === "Link" || tag === "NavLink";
 }
 
+function restTextColor(text: string): string | null {
+  const matches = [
+    ...text.matchAll(
+      /(?:^|\s)text-(ink(?:-muted)?|accent|agent|warn|ok|danger)(?=\s|$)/g
+    ),
+  ];
+  return matches.length > 0 ? matches[matches.length - 1][1] : null;
+}
+
+function hoverTextColor(text: string): string | null {
+  const match = text.match(
+    /(?<![\w-])hover:text-(ink(?:-muted)?|accent|agent|warn|ok|danger)(?=\s|$)/
+  );
+  return match ? match[1] : null;
+}
+
 /**
  * Canonical §2.6 D5: a text link is an `<a>`/`<button>`/`Link`/`NavLink`
  * whose rendering is text only — underline or `hover:text-`, with no
  * background fill and no border/rounded box. Any `border*` class is a box.
  * Padding alone (a touch target) does not make a box.
+ * `hover:text-X` whose X equals the rest `text-*` colour is not feedback (H6-2).
  */
 export function isTextLink(tag: string, text: string, routerLink = false): boolean {
   if (!isAnchorLike(tag, routerLink)) return false;
@@ -305,6 +322,9 @@ export function isTextLink(tag: string, text: string, routerLink = false): boole
   if (/(?<![\w-])(?:hover:)?bg-/.test(text)) return false;
   if (/(?<![\w-])hover:(?:opacity-|border-)/.test(text)) return false;
   if (/(?<![\w-])border(?:-|\s|$)/.test(text)) return false;
+  const hover = hoverTextColor(text);
+  const rest = restTextColor(text);
+  if (hover && rest && hover === rest) return false;
   return true;
 }
 
@@ -1841,6 +1861,18 @@ export function Probe() {
     ).toBe(false);
     expect(isTextLink("a", "underline border hover:text-ink")).toBe(false);
     expect(isTextLink("Link", "underline hover:text-ink")).toBe(true);
+    expect(
+      isTextLink(
+        "a",
+        "break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+      )
+    ).toBe(false);
+    expect(
+      isTextLink(
+        "a",
+        "break-all text-body text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring"
+      )
+    ).toBe(true);
   });
 
   it("plugin-marketplace-row 합성 클래스는 :active 규칙을 컴파일한다 (N-1)", async () => {
@@ -2283,9 +2315,23 @@ export function Probe() {
     );
   });
 
-  it("플러그인 상세 링크는 텍스트 링크 hover 를 든다 (M5-5)", () => {
+  it("플러그인 상세 링크는 muted→ink 이고 rest=hover 는 텍스트 링크가 아니다 (H6-2)", () => {
     expect(PLUGIN_SRC).toMatch(
+      /break-all text-body text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring/
+    );
+    expect(PLUGIN_SRC).not.toMatch(
       /break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring/
     );
+    const restInk: PressSite = {
+      rel: "clients/web/src/features/plugins/PluginSection.tsx",
+      line: 924,
+      tag: "a",
+      role: "",
+      text: "break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring",
+      kind: "jsx",
+    };
+    expect(isTextLink(restInk.tag, restInk.text)).toBe(false);
+    expect(siteHasPress(restInk)).toBe(false);
+    expect(isPointerInteractive(restInk)).toBe(true);
   });
 });
