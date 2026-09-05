@@ -11,7 +11,7 @@ import { useRestoredSession } from "@/app/session";
 import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
 import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
-import { releaseSessionRestore, holdSessionRestore } from "./onboardingSessionHold";
+import { releaseSessionRestore, holdSessionRestore, sessionRestoreHeld } from "./onboardingSessionHold";
 
 const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
 
@@ -19,6 +19,7 @@ const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
 const restoreSession = vi.hoisted(() => vi.fn());
+const releaseSessionRestoreMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -30,6 +31,17 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     changeMyDisplayName: (...args: unknown[]) =>
       changeMyDisplayName(...args) as Promise<Member>,
     restoreSession: () => restoreSession() as Promise<LoginResponse | null>,
+  };
+});
+
+vi.mock("./onboardingSessionHold", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./onboardingSessionHold")>();
+  return {
+    ...actual,
+    releaseSessionRestore: () => {
+      releaseSessionRestoreMock();
+      actual.releaseSessionRestore();
+    },
   };
 });
 
@@ -70,6 +82,7 @@ beforeEach(() => {
   joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
   restoreSession.mockResolvedValue(session);
   releaseSessionRestore();
+  releaseSessionRestoreMock.mockClear();
   clearSession();
   setServerBase(null);
   clearRecentServers();
@@ -713,6 +726,75 @@ describe("BZ-6b onboarding profile step", () => {
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
+  });
+
+  it("releases the restore hold once on skip", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-skip"]')).not.toBeNull();
+    });
+    expect(sessionRestoreHeld()).toBe(true);
+    releaseSessionRestoreMock.mockClear();
+    await act(async () => {
+      click("onboarding-profile-skip");
+    });
+    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("releases the restore hold once on save", async () => {
+    changeMyDisplayName.mockResolvedValue({ ...session.member, displayName: "성재" });
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    expect(sessionRestoreHeld()).toBe(true);
+    releaseSessionRestoreMock.mockClear();
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    });
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("releases the restore hold once on fail-forward 계속", async () => {
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+    });
+    expect(sessionRestoreHeld()).toBe(true);
+    releaseSessionRestoreMock.mockClear();
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    expect(sessionRestoreHeld()).toBe(false);
+  });
+
+  it("releases the restore hold once on unmount during S3", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+    });
+    expect(sessionRestoreHeld()).toBe(true);
+    releaseSessionRestoreMock.mockClear();
+    act(() => {
+      mountedRoot?.unmount();
+      mountedRoot = null;
+    });
+    expect(releaseSessionRestoreMock).toHaveBeenCalledTimes(1);
+    expect(sessionRestoreHeld()).toBe(false);
   });
 
   it("keeps S3 on screen after join applyLogin instead of restoring the shell", async () => {
