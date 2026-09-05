@@ -32,7 +32,7 @@ import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { markFreshSignup, peekFreshSignup, clearFreshSignup } from "./freshSignup";
-import { useWelcomeKickoff, welcomeHoldsEntrance } from "./useWelcomeKickoff";
+import { useWelcomeKickoff, welcomePlayEntrance } from "./useWelcomeKickoff";
 import {
   WELCOME_BACKSTOP_COPY,
   WELCOME_BACKSTOP_MS,
@@ -326,6 +326,7 @@ function WelcomeFed(props: {
     isPlayEntrance: () => false,
     welcomePhase: welcome.phase,
     welcomeReducedMotion: welcome.reducedMotion,
+    welcomeHoldWriteAction: welcome.holdWriteAction,
     onWelcomeExitComplete: welcome.onExitComplete,
   });
 }
@@ -363,12 +364,11 @@ function WelcomeTimeline(props: {
     channelKind: "public",
     channelName: props.channelName ?? "general",
     isPlayEntrance: (id: string) =>
-      welcomeHoldsEntrance(welcome.holdEntranceId, id)
-        ? false
-        : timeline.isPlayEntrance(id),
+      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
     onEntranceConsumed: timeline.consumeEntrance,
     welcomePhase: welcome.phase,
     welcomeReducedMotion: welcome.reducedMotion,
+    welcomeHoldWriteAction: welcome.holdWriteAction,
     onWelcomeExitComplete: welcome.onExitComplete,
   });
 }
@@ -494,6 +494,7 @@ describe("welcome kickoff product path", () => {
     const card = root.querySelector("[data-testid='welcome-kickoff-backstop']");
     expect(card?.textContent).toContain(WELCOME_BACKSTOP_COPY);
     expect(card?.textContent).not.toMatch(/실패|오류|error|fail/i);
+    expect((card?.textContent ?? "").split(AGENTS_NAV.label).length - 1).toBe(1);
     expect(peekFreshSignup()).toBeNull();
     expect(readShownMarker(WS, ME)).toBe(true);
     const link = card?.querySelector("a");
@@ -727,7 +728,8 @@ describe("welcome kickoff product path", () => {
     });
     await settle();
     expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
-    expect(host.textContent).toContain(EMPTY_WRITE_ACTION_LABEL);
+    expect(host.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+    expect(host.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
     await act(async () => {
       settleRoster?.();
     });

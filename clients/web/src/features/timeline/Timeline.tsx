@@ -232,6 +232,7 @@ export function Timeline({
   capUnmountedArrivals,
   welcomePhase = "hidden",
   welcomeReducedMotion = false,
+  welcomeHoldWriteAction = false,
   onWelcomeExitComplete,
   reachedStart = false,
   canAddMember = false,
@@ -322,6 +323,8 @@ export function Timeline({
    */
   welcomePhase?: WelcomeKickoffPhase;
   welcomeReducedMotion?: boolean;
+  /** Hide the empty-channel write CTA while the stage is up or the mount is pending. */
+  welcomeHoldWriteAction?: boolean;
   onWelcomeExitComplete?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
@@ -696,7 +699,7 @@ export function Timeline({
                 intro={intro}
                 empty={empty}
                 peer={peer}
-                hideWriteAction={showWelcome}
+                hideWriteAction={showWelcome || welcomeHoldWriteAction}
                 onWrite={onStartWriting}
                 onAddMember={onAddMember}
               />

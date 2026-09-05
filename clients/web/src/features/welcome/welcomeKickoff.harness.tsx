@@ -10,12 +10,21 @@ import { Timeline } from "@/features/timeline/Timeline";
 import { useTimeline } from "@/features/timeline/useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { markFreshSignup } from "./freshSignup";
-import { useWelcomeKickoff, welcomeHoldsEntrance } from "./useWelcomeKickoff";
+import {
+  useWelcomeKickoff,
+  welcomePlayEntrance,
+} from "./useWelcomeKickoff";
 
 /**
  * UX-R2b Chromium probe. Not a product route. Mounts the shipped Timeline +
  * useTimeline + useWelcomeKickoff chain so exit→arrival timestamps come off
  * the product wiring, not a test that adds `enter-conversation` itself.
+ *
+ * ChatShell wires arrival through `welcomePlayEntrance` (ChatShell.tsx next
+ * to the Timeline `isPlayEntrance` binding). This harness mounts Timeline
+ * directly — it cannot import ChatShell (Session + channel queries + shell
+ * chrome). The shared helper is the same function ChatShell calls. A
+ * ChatShell-only drop of that call is guarded by arrivalWiring.test.ts (S6b).
  */
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -203,12 +212,11 @@ function WelcomeTimeline(): ReactElement {
     channelKind: "public",
     channelName: "general",
     isPlayEntrance: (id: string) =>
-      welcomeHoldsEntrance(welcome.holdEntranceId, id)
-        ? false
-        : timeline.isPlayEntrance(id),
+      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
     onEntranceConsumed: timeline.consumeEntrance,
     welcomePhase: welcome.phase,
     welcomeReducedMotion: welcome.reducedMotion,
+    welcomeHoldWriteAction: welcome.holdWriteAction,
     onWelcomeExitComplete: welcome.onExitComplete,
   });
 }
@@ -278,6 +286,7 @@ declare global {
     __welcomeKickoffOpts?: {
       directoryDelayMs?: number;
       backlogAgent?: boolean;
+      reducedMotion?: boolean;
     };
     __welcomeKickoff: {
       onSubscribed: () => void;

@@ -62,8 +62,9 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("ChatShell holds Timeline isPlayEntrance through the welcome stage; ThreadPanel keeps the unwrapped store fn", () => {
-    expect(shell).toContain("welcomeHoldsEntrance(welcome.holdEntranceId, id)");
-    expect(shell).toContain("return timeline.isPlayEntrance?.(id) ?? false");
+    expect(shell).toContain(
+      "welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance)"
+    );
     expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
       1
     );

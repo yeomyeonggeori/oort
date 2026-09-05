@@ -92,7 +92,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
-import { useWelcomeKickoff, welcomeHoldsEntrance } from "@/features/welcome/useWelcomeKickoff";
+import { useWelcomeKickoff, welcomePlayEntrance } from "@/features/welcome/useWelcomeKickoff";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -228,10 +228,8 @@ export function ChatShell() {
     realtime: stressCount > 0 ? null : realtime,
   });
   const isPlayEntrance = useCallback(
-    (id: string) => {
-      if (welcomeHoldsEntrance(welcome.holdEntranceId, id)) return false;
-      return timeline.isPlayEntrance?.(id) ?? false;
-    },
+    (id: string) =>
+      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
     [welcome.holdEntranceId, timeline]
   );
 
@@ -1228,6 +1226,7 @@ export function ChatShell() {
               capUnmountedArrivals={timeline.capUnmountedArrivals}
               welcomePhase={welcome.phase}
               welcomeReducedMotion={welcome.reducedMotion}
+              welcomeHoldWriteAction={welcome.holdWriteAction}
               onWelcomeExitComplete={welcome.onExitComplete}
             />
           ) : (

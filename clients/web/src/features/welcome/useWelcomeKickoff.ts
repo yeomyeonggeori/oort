@@ -8,6 +8,7 @@ import {
   WELCOME_BACKSTOP_MS,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
+  isWelcomeDecisionPending,
   messagesBelongToChannel,
   readShownMarker,
   writeShownMarker,
@@ -32,6 +33,7 @@ export function useWelcomeKickoff(input: {
 }): {
   phase: WelcomeKickoffPhase;
   holdEntranceId: string | null;
+  holdWriteAction: boolean;
   reducedMotion: boolean;
   onExitComplete: () => void;
 } {
@@ -172,9 +174,26 @@ export function useWelcomeKickoff(input: {
       ? openerId
       : null;
 
+  const holdWriteAction =
+    phase === "stage" ||
+    phase === "exiting" ||
+    phase === "backstop" ||
+    isWelcomeDecisionPending({
+      freshSignup: peekFreshSignup(),
+      workspaceId,
+      memberId,
+      channelKind,
+      channelName,
+      timelineStatus,
+      directoryStatus,
+      channelId,
+      messages,
+    });
+
   return {
     phase,
     holdEntranceId,
+    holdWriteAction,
     reducedMotion: prefersReducedMotion(),
     onExitComplete: finish,
   };
@@ -185,4 +204,14 @@ export function welcomeHoldsEntrance(
   messageId: string
 ): boolean {
   return holdEntranceId !== null && uuidEq(holdEntranceId, messageId);
+}
+
+/** ChatShell and the Chromium harness share this composition (N12). */
+export function welcomePlayEntrance(
+  holdEntranceId: string | null,
+  messageId: string,
+  storePlay: ((id: string) => boolean) | undefined
+): boolean {
+  if (welcomeHoldsEntrance(holdEntranceId, messageId)) return false;
+  return storePlay?.(messageId) ?? false;
 }

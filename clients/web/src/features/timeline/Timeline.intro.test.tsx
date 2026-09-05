@@ -131,6 +131,7 @@ function mount(
     onStartWriting?: () => void;
     onAddMember?: () => void;
     welcomePhase?: "hidden" | "stage" | "exiting" | "backstop";
+    welcomeHoldWriteAction?: boolean;
   } = {}
 ): HTMLElement {
   if (host === null) {
@@ -153,6 +154,7 @@ function mount(
         onStartWriting: over.onStartWriting,
         onAddMember: over.onAddMember,
         welcomePhase: over.welcomePhase,
+        welcomeHoldWriteAction: over.welcomeHoldWriteAction,
       })
     );
   });
@@ -280,6 +282,13 @@ describe("Timeline channel intro leading row", () => {
     expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
     expect(root.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
     expect(root.querySelector("[data-testid='timeline-empty-secondary']")).not.toBeNull();
+  });
+
+  it("hides 첫 메시지 쓰기 while the welcome mount is still pending", () => {
+    const root = mount({ welcomeHoldWriteAction: true });
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+    expect(root.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
   });
 
   it("keeps 첫 메시지 쓰기 when welcome is hidden", () => {
