@@ -112,6 +112,10 @@ const GALLERY_SRC = readFileSync(
   new URL("./Gallery.tsx", import.meta.url),
   "utf8"
 );
+const GALLERY_PREVIEW_SRC = readFileSync(
+  new URL("./gallery-preview.css", import.meta.url),
+  "utf8"
+);
 const CAPTURE_SRC = readFileSync(
   new URL("../../scripts/capture-screens.mjs", import.meta.url),
   "utf8"
@@ -2382,12 +2386,19 @@ export function Probe() {
     expect(isPointerInteractive(restInk)).toBe(true);
   });
 
-  it("press-instant-fill 은 채움을 칠하고 이름만으로는 부족하다 (M6-2)", () => {
+  it("press-instant-fill 은 채움을 칠하고 이름만으로는 부족하다 (M6-2)", async () => {
     expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("press-instant-fill")).toBe(
       true
     );
     expect(TOKENS_CSS).toMatch(
       /@utility press-instant-fill[\s\S]*?&:active[\s\S]*?--surface-pressed/
+    );
+    expect(TOKENS_CSS).toMatch(
+      /@utility press-instant-fill[\s\S]*?&:active:hover[\s\S]*?--surface-pressed/
+    );
+    const css = await buildCss(["hover:bg-surface-hover", "press-instant-fill"]);
+    expect(css).toMatch(
+      /\.press-instant-fill \{[\s\S]*?&:active:hover[\s\S]*?var\(--surface-pressed\)/
     );
     const stripped = TOKENS_CSS.replace(
       /@utility press-instant-fill \{[\s\S]*?\n\}/,
@@ -2410,6 +2421,9 @@ export function Probe() {
     expect(GALLERY_SRC).toMatch(/data-testid="press-instant-fill-swatch"/);
     expect(GALLERY_SRC).toMatch(
       /hover:bg-surface-hover press-instant-fill/
+    );
+    expect(GALLERY_PREVIEW_SRC).toMatch(
+      /\[data-gallery-root\] \.press-instant-fill:is\(:active/
     );
     expect(CAPTURE_SRC).toMatch(/function assertInstantFillSwatch/);
   });

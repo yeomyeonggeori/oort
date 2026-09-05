@@ -1963,14 +1963,17 @@
 
 /* Named fill-only press (#2000 M6-2). The word paints: `:active` is
  * `--surface-pressed`, not a transition that leaves the fill to a sibling
- * class. Scale stays none. */
+ * class. Scale stays none. `:active:hover` is one class + two
+ * pseudo-classes so it beats `hover:bg-surface-hover:hover` (same two
+ * simple selectors) when the pointer is down on a hovered chip. */
 @utility press-instant-fill {
   transition-property:
     color, background-color, border-color, text-decoration-color, fill, stroke,
     --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
   transition-duration: var(--motion-instant);
   transition-timing-function: var(--motion-ease-standard);
-  &:active {
+  &:active,
+  &:active:hover {
     transform: none;
     background-color: var(--surface-pressed);
   }
