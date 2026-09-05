@@ -13,7 +13,7 @@ import { ConnectPage } from "./ConnectPage";
 import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
 import { releaseSessionRestore, holdSessionRestore, sessionRestoreHeld } from "./onboardingSessionHold";
 
-const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
+const FRESH_SIGNUP_SLOT = "oort.freshSignup.v1";
 
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
@@ -99,7 +99,7 @@ beforeEach(() => {
   setServerBase(null);
   clearRecentServers();
   sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
-  sessionStorage.removeItem(FRESH_SIGNUP_KEY);
+  sessionStorage.removeItem(FRESH_SIGNUP_SLOT);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: reducedMotion && query.includes("prefers-reduced-motion"),
@@ -412,7 +412,7 @@ describe("BZ-6b onboarding profile step", () => {
     expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
     expect(joinWithInvite).not.toHaveBeenCalled();
     expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(sessionStorage.getItem(FRESH_SIGNUP_KEY)).toBeNull();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
   it("does not open S3 when join reports createdMember false", async () => {
@@ -424,7 +424,7 @@ describe("BZ-6b onboarding profile step", () => {
     expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: false });
     expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
     expect(changeMyDisplayName).not.toHaveBeenCalled();
-    expect(sessionStorage.getItem(FRESH_SIGNUP_KEY)).toBeNull();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
   it("writes the fresh-signup marker at join success, before any S3 interaction, and only once", async () => {
@@ -435,7 +435,7 @@ describe("BZ-6b onboarding profile step", () => {
       key: string,
       value: string
     ) {
-      if (key === FRESH_SIGNUP_KEY) writes.push(value);
+      if (key === FRESH_SIGNUP_SLOT) writes.push(value);
       return orig.call(this, key, value);
     });
     try {
@@ -534,7 +534,7 @@ describe("BZ-6b onboarding profile step", () => {
     });
     expect(changeMyDisplayName).not.toHaveBeenCalled();
     expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
-    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_KEY) ?? "null")).toEqual({
+    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_SLOT) ?? "null")).toEqual({
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
@@ -802,7 +802,7 @@ describe("BZ-6b onboarding profile step", () => {
       createdMember: true,
       member: renamed,
     });
-    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_KEY) ?? "null")).toEqual({
+    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_SLOT) ?? "null")).toEqual({
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
