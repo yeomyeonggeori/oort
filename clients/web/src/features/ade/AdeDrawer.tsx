@@ -498,7 +498,7 @@ export function AdeDrawer() {
       onClick={close}
       aria-label="작업 목록 닫기"
       data-testid="ade-scrim"
-      className="ade-scrim"
+      className="ade-scrim scrim-press"
     />
     </>
   );

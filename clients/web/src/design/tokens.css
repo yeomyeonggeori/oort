@@ -1160,9 +1160,6 @@
     outline: 2px solid var(--accent);
     outline-offset: -4px;
   }
-  &:active {
-    opacity: 0.92;
-  }
 }
 
 /* 앱 상단 줄 (#1864). 데스크톱에서만 선다: 토글이 사이드바 안에 있으면 접는
@@ -1964,6 +1961,14 @@
     outline: 2px solid var(--accent);
     outline-offset: -4px;
   }
+}
+
+/* Named press vocabulary for dismissal scrims (#2000 M5-2). Opacity
+ * step on `--motion-instant`, not an unnamed `:active { opacity }`. */
+@utility scrim-press {
+  transition-property: opacity;
+  transition-duration: var(--motion-instant);
+  transition-timing-function: var(--motion-ease-standard);
   &:active {
     opacity: 0.92;
   }
@@ -2059,7 +2064,7 @@
     background-color: var(--surface-raised);
   }
   &:not([aria-current="true"]):active {
-    background-color: var(--surface-hover);
+    background-color: var(--surface-pressed);
   }
   &[aria-current="true"]:active {
     background-color: var(--surface-pressed);
