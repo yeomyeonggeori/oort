@@ -27,6 +27,14 @@
 [data-gallery-root] .press:is(:active, [data-gallery-preview="active"]) {
   transform: scale(0.98);
 }
+[data-gallery-root] .active\:bg-surface-pressed:is(:active, [data-gallery-preview="active"]) {
+  @apply bg-surface-pressed;
+}
+/* Beats the hover:bg preview (same [data-gallery-root] + class + :is()
+ * specificity) so a hovered press-instant-fill still shows pressed fill. */
+[data-gallery-root] .press-instant-fill:is(:active, [data-gallery-preview="active"]) {
+  background-color: var(--surface-pressed);
+}
 
 /* Pin popper wrappers to the stage. Do not write the `translate` property
  * here: Tailwind v4 rewrites it to `transform: translate(0)` and leaves

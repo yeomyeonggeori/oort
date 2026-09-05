@@ -51,6 +51,8 @@ import {
   OperatorNotice,
   SectionShell,
   SelectField,
+  SETTINGS_COLLAPSIBLE_CARD_CLASS,
+  SETTINGS_COLLAPSIBLE_SUMMARY_CLASS,
   StatusChip,
   Subsection,
 } from "./SettingsFields";
@@ -1042,10 +1044,10 @@ function RevealCard({
 function IngressNotes() {
   return (
     <details
-      className="min-w-0 rounded-md border border-line"
+      className={SETTINGS_COLLAPSIBLE_CARD_CLASS}
       data-testid="webhook-ingress-notes"
     >
-      <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:focus-ring">
+      <summary className={SETTINGS_COLLAPSIBLE_SUMMARY_CLASS}>
         {WEBHOOK_INGRESS_NOTES_LABEL}
       </summary>
       <div className="flex flex-col gap-3 border-t border-line p-3">

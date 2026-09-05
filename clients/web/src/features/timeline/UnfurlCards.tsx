@@ -108,7 +108,7 @@ export function UnfurlCardView({
         // 링크 메시지마다 키보드 여정이 카드 수만큼 늘어난다(리뷰 Blocker-1).
         data-row-action=""
         className={cn(
-          "flex min-w-0 flex-1 rounded-md focus-visible:focus-ring",
+          "flex w-full min-w-0 flex-1 rounded-md hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
           rich ? "flex-col" : "items-stretch"
         )}
         data-testid="unfurl-card"
@@ -224,7 +224,7 @@ export function UnfurlCards({
         data-row-action=""
         aria-label="링크 미리보기 제거"
         title="링크 미리보기 제거"
-        className="tap-target absolute right-1 top-1 z-10 flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        className="tap-target absolute right-1 top-1 z-10 flex size-control-sm items-center justify-center rounded-sm border border-line-strong bg-surface-raised text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
         onClick={(event) => {
           setOpener(event.currentTarget);
           setError(false);

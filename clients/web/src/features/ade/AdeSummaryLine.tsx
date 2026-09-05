@@ -84,12 +84,13 @@ export function AdeSummaryLine() {
       data-testid="ade-summary"
       data-working={counts.working}
       data-blocked={counts.blocked}
-      className={cn(
+        className={cn(
         "tap-target flex w-full shrink-0 items-center justify-between gap-2",
         "border-b border-line px-4 py-2 text-left text-meta",
-        "transition-colors hover:bg-surface-hover",
         "focus-visible:focus-ring",
-        open && "bg-surface-hover"
+        open
+          ? "bg-surface-hover active:bg-surface-pressed"
+          : "hover:bg-surface-hover active:bg-surface-pressed"
       )}
     >
       {/* 보조기술이 읽는 것은 이것 하나다. 아래 보이는 조각들은 폭에 따라 잘릴 수

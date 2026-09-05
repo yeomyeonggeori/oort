@@ -326,7 +326,7 @@ export function AppShell({
             {isMobile && drawerOpen && !isSettingsSurface && (
               <button
                 type="button"
-                className="sidebar-scrim"
+                className="sidebar-scrim scrim-press"
                 onClick={closeDrawer}
                 aria-label="채널 목록 닫기"
                 data-testid="sidebar-scrim"

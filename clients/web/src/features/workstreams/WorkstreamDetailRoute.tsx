@@ -151,7 +151,7 @@ function RunRow({
           hover·focus 계약으로 간다. */}
       <Link
         to={workSessionPath(channelId, run.id)}
-        className="flex flex-col px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex flex-col px-4 py-2 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
         data-testid="workstream-run-link"
       >
         <span className="flex min-w-0 items-baseline gap-2">
@@ -481,7 +481,7 @@ export function WorkstreamDetailRoute() {
   const back = (
     <Link
       to="/workstreams"
-      className="flex items-center gap-1 text-meta text-ink-muted hover:text-ink focus-visible:focus-ring"
+      className="flex items-center gap-1 text-meta text-ink-muted press hover:text-ink focus-visible:focus-ring"
       data-testid="workstream-detail-back"
     >
       <ArrowLeft aria-hidden="true" className="size-4" />

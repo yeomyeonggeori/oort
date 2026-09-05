@@ -132,7 +132,7 @@ export function HuddleHeaderControl({
             title={microphoneLabel}
             aria-busy={huddle.busy === "microphone" || undefined}
             data-testid="huddle-microphone"
-            className="flex size-control shrink-0 items-center justify-center text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+            className="flex size-control shrink-0 items-center justify-center text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
           >
             {huddle.busy === "microphone" ? (
               <Loader2 aria-hidden="true" className="size-4 spinner-busy" />

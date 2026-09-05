@@ -74,7 +74,7 @@ export function FeedRow({
         data-channel-id={item.channelId}
         {...seqAttrs}
         className={cn(
-          "flex gap-3 px-4 py-2 transition-colors hover:bg-surface-hover focus-visible:focus-ring",
+          "flex gap-3 px-4 py-2 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
           !actions && "border-b border-line"
         )}
       >

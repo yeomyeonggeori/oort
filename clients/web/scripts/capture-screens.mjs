@@ -20,9 +20,10 @@
 // fixtures below (realistic Korean+English team content, never "테스트 1").
 // =============================================================================
 
-import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, copyFileSync, writeFileSync, appendFileSync, readdirSync, unlinkSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
@@ -35,6 +36,45 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+/** H6-1: one writer per artefact. A second screenshot to the same path is red. */
+const claimedShotPaths = new Set();
+
+function claimShotPath(path) {
+  const key = resolve(path);
+  if (claimedShotPaths.has(key)) {
+    throw new Error(`duplicate shot writer: ${path} already written in this run`);
+  }
+  claimedShotPaths.add(key);
+  return path;
+}
+
+function wrapPageShotGuard(page) {
+  const orig = page.screenshot.bind(page);
+  page.screenshot = async (opts = {}) => {
+    if (opts && opts.path) claimShotPath(opts.path);
+    return orig(opts);
+  };
+}
+
+function wrapContextShotGuard(context) {
+  const origNewPage = context.newPage.bind(context);
+  context.newPage = async (...args) => {
+    const page = await origNewPage(...args);
+    wrapPageShotGuard(page);
+    return page;
+  };
+}
+
+function wrapBrowserShotGuard(browser) {
+  const origNewContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const context = await origNewContext(...args);
+    wrapContextShotGuard(context);
+    return context;
+  };
+  return browser;
+}
 
 /** UX-R4a M-6: whole tools section including 저장 must sit in the viewport. */
 async function frameEnabledToolsSection(page, where) {
@@ -6852,6 +6892,7 @@ async function captureScheme(browser, scheme) {
     },
   });
   const loginShot = `${OUT_DIR}/login-${scheme}.png`;
+  await assertWideRowsFillOnly(login, `connect ${scheme}`);
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
 
@@ -6895,6 +6936,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("unfurl-card").waitFor({ state: "visible" });
   const unfurlImage = login.getByTestId("unfurl-image");
   await unfurlImage.waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(login, `desktop chat ${scheme}`);
   const unfurlNaturalSize = await unfurlImage.evaluate((element) => ({
     width: element.naturalWidth,
     height: element.naturalHeight,
@@ -7526,6 +7568,7 @@ async function captureScheme(browser, scheme) {
   //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
   await login.getByTestId("thread-anchor").first().click();
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(login, `thread ${scheme}`);
   const threadComposer = login.getByTestId("thread-composer-input");
   await threadComposer.waitFor({ state: "visible" });
   const threadFileInputs = await login
@@ -7819,6 +7862,7 @@ async function captureScheme(browser, scheme) {
   await agentHub.evaluate('location.hash = "/agents"');
   await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
   await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(agentHub, `agent hub ${scheme}`);
   const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
@@ -7911,6 +7955,18 @@ async function captureScheme(browser, scheme) {
     .getByTestId("inbox-approval-approve")
     .first()
     .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(approvals, `inbox ${scheme}`);
+  await approvals.evaluate('location.hash = "/activity"');
+  await approvals.getByTestId("activity-route").waitFor({ state: "visible" });
+  await approvals
+    .locator(
+      '[data-testid="feed-row"], [data-testid="activity-list"], [data-testid="activity-empty"], [data-testid="activity-unavailable"], [data-testid="activity-error"]'
+    )
+    .first()
+    .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(approvals, `activity ${scheme}`);
+  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
   const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
@@ -8007,6 +8063,7 @@ async function captureScheme(browser, scheme) {
   // The rich frame is reserved before bytes arrive (#1903 H-1). Wait for
   // the image so the shot shows the OG card, not the muted skeleton.
   await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(turns, `agent-turns ${scheme}`);
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
@@ -8064,7 +8121,10 @@ async function captureScheme(browser, scheme) {
   await notificationsPage
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(notificationsPage, `settings notifications ${scheme}`);
   const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  await parkPointerOffViewport(notificationsPage);
+  await assertNotificationsDndRest(notificationsPage, scheme);
   await notificationsPage.screenshot({ path: notificationsShot });
   shots.push(notificationsShot);
   await notificationsPage.close();
@@ -8119,6 +8179,7 @@ async function captureScheme(browser, scheme) {
     }))()`);
     throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
   }
+  await assertWideRowsFillOnly(draftsPage, `drafts ${scheme}`);
   const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
   await draftsPage.screenshot({ path: draftsShot });
   shots.push(draftsShot);
@@ -8352,7 +8413,8 @@ async function captureScheme(browser, scheme) {
     // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
     ["appearance", "테마", "appearance"],
     ["link-previews", "링크 미리보기", "link-previews"],
-    ["notifications", "알림 규칙", "notifications"],
+    // notifications is owned by the parked-pointer scene above (H6-1).
+    // Listing it here overwrote that file with an unguarded hover fill.
     ["workspace", "워크스페이스", "workspace"],
     ["plugins", "앱", "plugins"],
     ["usage", "사용량", "usage"],
@@ -8392,6 +8454,7 @@ async function captureScheme(browser, scheme) {
     if (boundary > 0) {
       throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
     }
+    await assertWideRowsFillOnly(settingsSweep, `settings ${name} ${scheme}`);
     const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
     await settingsSweep.screenshot({ path: sectionShot });
     shots.push(sectionShot);
@@ -8626,6 +8689,7 @@ async function captureScheme(browser, scheme) {
   await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
   await b8.getByTestId("turn-failure-detail").first().click();
   await b8.waitForTimeout(200);
+  await assertWideRowsFillOnly(b8, `b8-failure ${scheme}`);
   const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
   await b8.screenshot({ path: failureShot });
   shots.push(failureShot);
@@ -9267,6 +9331,7 @@ async function captureSearchScopeScenes(browser, scheme) {
   if (narrowed !== 2) {
     throw new Error(`좁힌 검색 행 수 ${scheme}: ${narrowed} (2여야 함)`);
   }
+  await assertWideRowsFillOnly(page, `search ${scheme}`);
   await page.waitForTimeout(200);
   const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
   await page.screenshot({ path: narrowShot });
@@ -10598,11 +10663,13 @@ async function screenshotSettled(page, path) {
       caret: "hide",
     });
     if (previous !== null && Buffer.compare(previous, buffer) === 0) {
+      claimShotPath(path);
       writeFileSync(path, buffer);
       return;
     }
     previous = buffer;
   }
+  claimShotPath(path);
   writeFileSync(path, previous);
 }
 
@@ -10619,7 +10686,9 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
   // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
   // launches (R3-M1). Software raster + no LCD keeps chrome visible and
   // two capture:design runs byte-identical.
-  const browser = await chromium.launch({ args: ACCENT_CAPTURE_ARGS });
+  const browser = wrapBrowserShotGuard(
+    await chromium.launch({ args: ACCENT_CAPTURE_ARGS })
+  );
   try {
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -11162,6 +11231,576 @@ async function assertGalleryScrollOwnership(page, where) {
   );
 }
 
+async function pngRgba(page, pngBuffer) {
+  const b64 = Buffer.isBuffer(pngBuffer)
+    ? pngBuffer.toString("base64")
+    : readFileSync(pngBuffer).toString("base64");
+  return page.evaluate(async (b64) => {
+    const blob = await fetch(`data:image/png;base64,${b64}`).then((r) => r.blob());
+    const bmp = await createImageBitmap(blob);
+    const canvas = document.createElement("canvas");
+    canvas.width = bmp.width;
+    canvas.height = bmp.height;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(bmp, 0, 0);
+    const { data, width, height } = ctx.getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height
+    );
+    return { data: Array.from(data), width, height };
+  }, b64);
+}
+
+function linearizeChannel(c) {
+  const v = c / 255;
+  return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+
+function oklabOfRgb(r, g, b) {
+  const lr = linearizeChannel(r);
+  const lg = linearizeChannel(g);
+  const lb = linearizeChannel(b);
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function rgbDeltaE(r1, g1, b1, r2, g2, b2) {
+  const a = oklabOfRgb(r1, g1, b1);
+  const b = oklabOfRgb(r2, g2, b2);
+  return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+}
+
+/** Pixels below this OKLab dE count as the same colour (N-2). */
+const PIXEL_DE_MIN = 0.01;
+
+function pixelDiffRatio(a, b) {
+  if (a.data.length !== b.data.length) return 1;
+  let changed = 0;
+  const pixels = a.data.length / 4;
+  for (let i = 0; i < a.data.length; i += 4) {
+    const dE = rgbDeltaE(
+      a.data[i],
+      a.data[i + 1],
+      a.data[i + 2],
+      b.data[i],
+      b.data[i + 1],
+      b.data[i + 2]
+    );
+    if (dE >= PIXEL_DE_MIN || a.data[i + 3] !== b.data[i + 3]) {
+      changed += 1;
+    }
+  }
+  return changed / pixels;
+}
+
+async function assertTripletFramesDiffer(page, hoverPath, activePath, label) {
+  const hover = await pngRgba(page, hoverPath);
+  const active = await pngRgba(page, activePath);
+  const ratio = pixelDiffRatio(hover, active);
+  const min = 0.01;
+  if (ratio < min) {
+    throw new Error(
+      `${label}: hover vs active differ by ${(ratio * 100).toFixed(2)}% of ${hover.data.length / 4}px (need ≥ 1%)`
+    );
+  }
+  console.log(
+    `  ${label}: hover≠active ${(ratio * 100).toFixed(1)}% of ${hover.data.length / 4}px`
+  );
+}
+
+async function sampleRgb(page, x, y) {
+  const buf = await page.screenshot({
+    clip: { x: Math.max(0, Math.round(x)), y: Math.max(0, Math.round(y)), width: 1, height: 1 },
+    animations: "allow",
+    caret: "hide",
+  });
+  const rgba = await pngRgba(page, buf);
+  return [rgba.data[0], rgba.data[1], rgba.data[2]];
+}
+
+function rgbEq(a, b) {
+  return a[0] === b[0] && a[1] === b[1] && a[2] === b[2];
+}
+
+function rgbNear(a, b) {
+  return rgbEq(a, b) || rgbDeltaE(a[0], a[1], a[2], b[0], b[1], b[2]) < PIXEL_DE_MIN;
+}
+
+function cornerInteriorPoints(box) {
+  // 2px in along both axes is the leak pixel (R3: sabotaged tl+2 = fill,
+  // shipped tl+2 = page bg). [1,1] is the short diagonal. Off-diagonal
+  // [2,1]/[1,2] sit on the 1px border and read as AA, not page bg.
+  const insets = [
+    [2, 2],
+    [1, 1],
+  ];
+  const origins = [
+    [box.x, box.y, 1, 1],
+    [box.x + box.width - 1, box.y, -1, 1],
+    [box.x, box.y + box.height - 1, 1, -1],
+    [box.x + box.width - 1, box.y + box.height - 1, -1, -1],
+  ];
+  const points = [];
+  for (const [ox, oy, sx, sy] of origins) {
+    for (const [dx, dy] of insets) {
+      points.push([Math.round(ox + sx * dx), Math.round(oy + sy * dy)]);
+    }
+  }
+  return points;
+}
+
+async function assertSummaryHoverCorners(page, scheme) {
+  const figure = page.getByTestId("press-triplet-summary-card");
+  await figure.waitFor({ state: "attached" });
+  await figure.scrollIntoViewIfNeeded();
+  const summary = figure.locator("summary");
+  await summary.hover();
+  await waitForAnimations(page);
+  const details = figure.locator("details");
+  const box = await details.boundingBox();
+  const fig = await figure.boundingBox();
+  if (!box || !fig) {
+    throw new Error(`summary-card ${scheme}: bounding box missing`);
+  }
+  const pad = await sampleRgb(page, fig.x + 2, fig.y + 2);
+  const fill = await sampleRgb(
+    page,
+    box.x + box.width / 2,
+    box.y + Math.min(12, box.height / 2)
+  );
+  if (rgbEq(pad, fill)) {
+    throw new Error(
+      `summary-card ${scheme}: hover fill ${fill} equals page bg — hover did not paint`
+    );
+  }
+  const points = cornerInteriorPoints(box);
+  for (const [x, y] of points) {
+    const rgb = await sampleRgb(page, x, y);
+    if (rgbNear(rgb, fill) && !rgbNear(rgb, pad)) {
+      throw new Error(
+        `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) is hover fill ${fill}, not page bg ${pad}`
+      );
+    }
+    if (!rgbNear(rgb, pad)) {
+      throw new Error(
+        `summary-card ${scheme}: interior corner (${x.toFixed(1)},${y.toFixed(1)}) ${rgb} ≠ page bg ${pad}`
+      );
+    }
+  }
+  console.log(
+    `  summary-card ${scheme}: ${points.length} interior-corner samples = page bg, not hover fill`
+  );
+}
+
+const WIDE_MIN_PX = 480;
+const WIDE_MIN_FRAC = 0.5;
+
+/**
+ * H5-1 / M6-1: full-width is a measured width. Walk the whole interactive
+ * population on the shipped page; for those ≥ 480px or ≥ 50% of `main`,
+ * `:active` transform must be none. Prints visited count and the widest
+ * offenders (even when green). FeedRow at 1040px goes red with `.press`.
+ */
+async function assertWideRowsFillOnly(page, label) {
+  const { visited, candidates } = await page.evaluate(
+    ({ WIDE_MIN_PX: minPx, WIDE_MIN_FRAC: minFrac }) => {
+      const main = document.querySelector("main") || document.body;
+      const column = main.getBoundingClientRect().width;
+      const sel = [
+        "a",
+        "button",
+        "summary",
+        '[role="button"]',
+        '[role="link"]',
+        '[role="option"]',
+        '[role="menuitem"]',
+        '[role="menuitemcheckbox"]',
+        '[role="menuitemradio"]',
+        '[role="tab"]',
+        '[role="checkbox"]',
+        '[role="switch"]',
+        '[role="radio"]',
+        '[role="treeitem"]',
+      ].join(",");
+      const out = [];
+      let visited = 0;
+      let i = 0;
+      for (const el of document.querySelectorAll(sel)) {
+        if (!(el instanceof HTMLElement)) continue;
+        if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+          continue;
+        }
+        if (el instanceof HTMLSelectElement) continue;
+        if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+        const st = getComputedStyle(el);
+        if (st.display === "none" || st.visibility === "hidden" || st.pointerEvents === "none") {
+          continue;
+        }
+        if (st.cursor === "not-allowed" || st.cursor === "wait") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        visited += 1;
+        const wide = r.width >= minPx || r.width >= minFrac * column;
+        if (!wide) continue;
+        const mark = `press-wide-${i}`;
+        i += 1;
+        el.setAttribute("data-press-wide", mark);
+        out.push({
+          mark,
+          tag: el.tagName,
+          testId: el.getAttribute("data-testid") || "",
+          width: Math.round(r.width * 100) / 100,
+          column: Math.round(column * 100) / 100,
+          text: (el.innerText || "").replace(/\s+/g, " ").slice(0, 48),
+        });
+      }
+      return { visited, candidates: out };
+    },
+    { WIDE_MIN_PX, WIDE_MIN_FRAC }
+  );
+
+  const session = await page.context().newCDPSession(page);
+  await session.send("DOM.enable");
+  await session.send("CSS.enable");
+  const { root } = await session.send("DOM.getDocument", { depth: 0 });
+  const failures = [];
+  for (const c of candidates) {
+    const found = await session.send("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector: `[data-press-wide="${c.mark}"]`,
+    });
+    if (!found.nodeId) continue;
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: ["active"],
+    });
+    const transform = await page
+      .locator(`[data-press-wide="${c.mark}"]`)
+      .evaluate((el) => getComputedStyle(el).transform);
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: [],
+    });
+    const none =
+      transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+    if (!none) {
+      failures.push(
+        `<${c.tag}> ${c.testId || c.text} width=${c.width} column=${c.column} transform=${transform}`
+      );
+    }
+  }
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-press-wide]").forEach((el) => {
+      el.removeAttribute("data-press-wide");
+    });
+  });
+  const widest = [...candidates]
+    .sort((a, b) => b.width - a.width)
+    .slice(0, 5)
+    .map((c) => `<${c.tag}> ${c.testId || c.text} width=${c.width}`)
+    .join("; ");
+  console.log(
+    `  wide fill-only ${label}: visited=${visited} wide=${candidates.length} ≥ ${WIDE_MIN_PX}px or ≥ ${WIDE_MIN_FRAC}·column; widest: ${widest || "(none)"}`
+  );
+  if (failures.length > 0) {
+    throw new Error(
+      `wide press ${label}: expected transform none on :active, got ${failures.join("; ")}`
+    );
+  }
+}
+
+async function parkPointerOffViewport(page) {
+  const vp = page.viewportSize() ?? { width: 1280, height: 800 };
+  await page.mouse.move(vp.width + 80, vp.height + 80);
+  await page.evaluate(() => {
+    document.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+  });
+  await waitForAnimations(page);
+}
+
+function parseCssRgb(css) {
+  const m = String(css).match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
+async function assertNotificationsDndRest(page, scheme) {
+  const row = page
+    .getByTestId("notification-rules-dnd")
+    .locator("xpath=ancestor::label[1]");
+  await row.waitFor({ state: "visible" });
+  const { bg, hover, surface } = await row.evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.className = "bg-surface-hover";
+    document.body.appendChild(probe);
+    const hoverColor = getComputedStyle(probe).backgroundColor;
+    probe.className = "bg-surface";
+    const surfaceColor = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return {
+      bg: getComputedStyle(el).backgroundColor,
+      hover: hoverColor,
+      surface: surfaceColor,
+    };
+  });
+  if (bg === hover) {
+    throw new Error(
+      `settings-notifications ${scheme}: DND row still hover fill ${bg}`
+    );
+  }
+  const box = await row.boundingBox();
+  if (!box) {
+    throw new Error(`settings-notifications ${scheme}: DND row box missing`);
+  }
+  const px = await sampleRgb(page, box.x + 16, box.y + box.height / 2);
+  const surfaceRgb = parseCssRgb(surface);
+  if (!surfaceRgb || !rgbNear(px, surfaceRgb)) {
+    throw new Error(
+      `settings-notifications ${scheme}: DND row rest pixels ${px} ≠ page surface ${surface} (computed ${bg})`
+    );
+  }
+  console.log(
+    `  settings-notifications ${scheme}: DND row rest ${bg} ≠ hover ${hover}; pixels ${px} = surface ${surface}`
+  );
+}
+
+async function assertInstantFillSwatch(page, scheme) {
+  const btn = page.getByTestId("press-instant-fill-swatch");
+  await btn.waitFor({ state: "visible" });
+  await btn.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  await waitForAnimations(page);
+  const restCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await btn.hover();
+  await waitForAnimations(page);
+  const hoverCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const box = await btn.boundingBox();
+  if (!box) {
+    throw new Error(`press-instant-fill swatch ${scheme}: bounding box missing`);
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await waitForAnimations(page);
+  const activeCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await page.mouse.up();
+  const rest = parseCssRgb(restCss);
+  const hover = parseCssRgb(hoverCss);
+  const active = parseCssRgb(activeCss);
+  if (!rest || !hover || !active) {
+    throw new Error(
+      `press-instant-fill swatch ${scheme}: unparsed rest=${restCss} hover=${hoverCss} active=${activeCss}`
+    );
+  }
+  const dE = (a, b) => rgbDeltaE(a[0], a[1], a[2], b[0], b[1], b[2]);
+  const restHover = dE(rest, hover);
+  const restActive = dE(rest, active);
+  const hoverActive = dE(hover, active);
+  if (restHover < PIXEL_DE_MIN || restActive < PIXEL_DE_MIN || hoverActive < PIXEL_DE_MIN) {
+    throw new Error(
+      `press-instant-fill swatch ${scheme}: rest=${restCss} hover=${hoverCss} active=${activeCss} dE rest-hover=${restHover.toFixed(4)} rest-active=${restActive.toFixed(4)} hover-active=${hoverActive.toFixed(4)} (need ≥ ${PIXEL_DE_MIN})`
+    );
+  }
+  console.log(
+    `  press-instant-fill swatch ${scheme}: rest ${restCss} hover ${hoverCss} active ${activeCss} dE ${restHover.toFixed(3)}/${restActive.toFixed(3)}/${hoverActive.toFixed(3)}`
+  );
+}
+
+async function assertToggleRowTarget(page, scheme) {
+  const frame = page.getByTestId("press-triplet-settings-row");
+  await frame.scrollIntoViewIfNeeded();
+  const checkbox = frame.getByTestId("press-triplet-settings-toggle");
+  const host = checkbox.locator("xpath=..");
+  const tag = await host.evaluate((el) => el.tagName);
+  if (tag !== "LABEL") {
+    throw new Error(
+      `settings-row ${scheme}: click target is <${tag}>, not LABEL`
+    );
+  }
+  const hostBox = await host.boundingBox();
+  const labelBox = await frame.locator("label").boundingBox();
+  if (!hostBox || !labelBox) {
+    throw new Error(`settings-row ${scheme}: bounding box missing`);
+  }
+  const deadRight = hostBox.x + hostBox.width - (labelBox.x + labelBox.width);
+  if (deadRight > 2) {
+    throw new Error(
+      `settings-row ${scheme}: fill covers ${deadRight.toFixed(1)}px that are not a click target`
+    );
+  }
+  const hit = await page.evaluate(
+    ({ x, y }) => {
+      const node = document.elementFromPoint(x, y);
+      const label = node?.closest("label");
+      return label ? "LABEL" : (node?.tagName ?? "NONE");
+    },
+    { x: hostBox.x + hostBox.width - 8, y: hostBox.y + hostBox.height / 2 }
+  );
+  if (hit !== "LABEL") {
+    throw new Error(
+      `settings-row ${scheme}: right-8 hit <${hit}>, not LABEL`
+    );
+  }
+  console.log(`  settings-row ${scheme}: label fills the row, right-8 is the target`);
+}
+
+const PRESS_TRIPLET_GALLERY = [
+  "button-default",
+  "button-secondary",
+  "button-ghost",
+  "button-destructive",
+  "chip",
+  "row",
+];
+
+const PRESS_TRIPLET_INSITU = [
+  "message-row",
+  "pending-row",
+  "settings-row",
+  "settings-row-checked",
+  "drafts-li",
+];
+
+const PRESS_TRIPLET_SURFACES = [
+  ...PRESS_TRIPLET_GALLERY,
+  ...PRESS_TRIPLET_INSITU,
+];
+
+function pressTripletTarget(page, surface) {
+  const frame = page.getByTestId(`press-triplet-${surface}`);
+  if (surface === "row") return frame.locator("[data-sidebar-row]");
+  if (surface === "chip") return frame.getByTestId("reaction-chip");
+  if (surface === "message-row") return frame.getByTestId("timeline-message");
+  if (surface === "pending-row") return frame.getByTestId("timeline-pending");
+  if (surface === "settings-row" || surface === "settings-row-checked") {
+    const toggleId =
+      surface === "settings-row-checked"
+        ? "press-triplet-settings-toggle-checked"
+        : "press-triplet-settings-toggle";
+    return frame.getByTestId(toggleId).locator("..");
+  }
+  if (surface === "drafts-li") {
+    return frame.getByTestId("draft-row").locator("a").first();
+  }
+  return frame.locator("button").first();
+}
+
+/**
+ * ADR-0179 D10 ④ / UX-R1e: gallery primitives + in-situ surfaces ×
+ * rest/hover/active × two schemes. 390 covers in-situ + sidebar row in
+ * both schemes. hover = Playwright hover(); active = mouse.down() held. Motion stays on
+ * (reducedMotion no-preference) so waitForAnimations is load-bearing —
+ * screenshot animations are allowed, not fast-forwarded.
+ */
+async function capturePressTriplet(
+  browser,
+  scheme,
+  {
+    viewport = VIEWPORT,
+    suffix = "",
+    surfaces = PRESS_TRIPLET_SURFACES,
+  } = {}
+) {
+  const context = await browser.newContext({
+    viewport,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "no-preference",
+  });
+  const page = await context.newPage();
+  await page.goto(`${ORIGIN}/#/design`, { waitUntil: "networkidle" });
+  await page.getByTestId("design-gallery").waitFor({ state: "visible" });
+  await page.evaluate(() => document.fonts.ready);
+  await waitForAnimations(page);
+
+  if (suffix === "") {
+    await assertSummaryHoverCorners(page, scheme);
+    await assertToggleRowTarget(page, scheme);
+  }
+
+  const paths = [];
+  for (const surface of surfaces) {
+    const frame = page.getByTestId(`press-triplet-${surface}`);
+    await frame.scrollIntoViewIfNeeded();
+    const target = pressTripletTarget(page, surface);
+    await target.waitFor({ state: "visible" });
+
+    await page.mouse.move(0, 0);
+    await waitForAnimations(page);
+    const restPath = `${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`;
+    await frame.screenshot({
+      path: restPath,
+      animations: "allow",
+      caret: "hide",
+    });
+    paths.push(restPath);
+
+    await target.hover();
+    await waitForAnimations(page);
+    const hoverPath = `${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`;
+    await frame.screenshot({
+      path: hoverPath,
+      animations: "allow",
+      caret: "hide",
+    });
+    paths.push(hoverPath);
+
+    const box = await target.boundingBox();
+    if (!box) {
+      throw new Error(
+        `press-triplet ${surface} ${scheme}: bounding box missing`
+      );
+    }
+    let hoverBg = null;
+    if (surface === "message-row" || surface === "pending-row") {
+      hoverBg = await target.evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+    }
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await waitForAnimations(page);
+    if (hoverBg !== null) {
+      const activeBg = await target.evaluate(
+        (el) => getComputedStyle(el).backgroundColor
+      );
+      if (hoverBg === activeBg) {
+        throw new Error(
+          `press-triplet ${surface} ${scheme}: hover bg ${hoverBg} equals active (pressed fill vanished)`
+        );
+      }
+    }
+    const activePath = `${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`;
+    await frame.screenshot({
+      path: activePath,
+      animations: "allow",
+      caret: "hide",
+    });
+    paths.push(activePath);
+    await assertTripletFramesDiffer(
+      page,
+      hoverPath,
+      activePath,
+      `press-triplet ${surface} ${scheme}${suffix}`
+    );
+    await page.mouse.up();
+    await page.mouse.move(0, 0);
+    await waitForAnimations(page);
+  }
+
+  await page.close();
+  await context.close();
+  commitPressTripletCatalog();
+  return paths;
+}
+
 async function captureDesignGallery(browser, scheme) {
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -11177,6 +11816,11 @@ async function captureDesignGallery(browser, scheme) {
   await page.waitForTimeout(50);
 
   await assertGalleryLoadFocus(page, `design-gallery ${scheme}`);
+  await assertInstantFillSwatch(page, scheme);
+  await page.mouse.move(0, 0);
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
   await assertGalleryScrollOwnership(page, `design-gallery ${scheme}`);
   await assertGalleryUsable(page, `design-gallery ${scheme}`);
   await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 1280`);
@@ -11210,11 +11854,78 @@ async function captureDesignGallery(browser, scheme) {
   return [path];
 }
 
+function wipePressTripletEvidence() {
+  if (!existsSync(OUT_DIR)) return;
+  for (const name of readdirSync(OUT_DIR)) {
+    if (/^press-triplet/.test(name)) {
+      unlinkSync(resolve(OUT_DIR, name));
+    }
+  }
+}
+
+let pressTripletCatalogCommitted = false;
+
+function commitPressTripletCatalog() {
+  writePressTripletCatalog();
+  pressTripletCatalogCommitted = true;
+}
+
+function appendPressTripletAbort(cause) {
+  const catalog = resolve(OUT_DIR, "press-triplet-catalog.txt");
+  const line = `# abort-after-triplet ${cause.replace(/\s+/g, " ").trim()}\n`;
+  if (existsSync(catalog)) appendFileSync(catalog, line);
+  else writeFileSync(catalog, line);
+}
+
+/** Aborted run must not leave a *partial* triplet set; a finished set stays (#2000 N4-5). */
+function recordPressTripletAbort(err) {
+  const cause = err instanceof Error ? err.message : String(err);
+  if (pressTripletCatalogCommitted) {
+    console.error(
+      `CAPTURE ABORT: keeping completed press-triplet outputs and catalog. cause: ${cause}`
+    );
+    if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
+      console.error(
+        "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
+      );
+    }
+    appendPressTripletAbort(cause);
+    return;
+  }
+  console.error(
+    `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: ${cause}`
+  );
+  if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
+    console.error(
+      "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
+    );
+  }
+  wipePressTripletEvidence();
+}
+
+function writePressTripletCatalog() {
+  if (!existsSync(OUT_DIR)) return;
+  const names = readdirSync(OUT_DIR)
+    .filter((name) => /^press-triplet-.*\.png$/.test(name))
+    .sort();
+  const lines = names.map((name) => {
+    const sha = createHash("sha256")
+      .update(readFileSync(resolve(OUT_DIR, name)))
+      .digest("hex");
+    return `${sha}  ${name}`;
+  });
+  writeFileSync(
+    resolve(OUT_DIR, "press-triplet-catalog.txt"),
+    `${lines.join("\n")}\n`
+  );
+}
+
 async function main() {
   if (!existsSync(resolve(WEB_ROOT, "dist/index.html"))) {
     throw new Error("dist/ is missing. Run `npm run capture:design`.");
   }
   mkdirSync(OUT_DIR, { recursive: true });
+  wipePressTripletEvidence();
 
   const preview = await startGuardedPreview({
     webRoot: WEB_ROOT,
@@ -11234,7 +11945,7 @@ async function main() {
   };
 
   try {
-    const browser = await chromium.launch();
+    const browser = wrapBrowserShotGuard(await chromium.launch());
     await prepareUnfurlPreviewPng(browser);
     try {
       const all = [];
@@ -11251,6 +11962,14 @@ async function main() {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureDesignGallery(browser, scheme)));
+          all.push(...(await capturePressTriplet(browser, scheme)));
+          all.push(
+            ...(await capturePressTriplet(browser, scheme, {
+              viewport: MOBILE_VIEWPORT,
+              suffix: "-390",
+              surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+            }))
+          );
         }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
@@ -11259,6 +11978,16 @@ async function main() {
             return await fn();
           };
           all.push(...(await shot(() => captureDesignGallery(browser, scheme))));
+          all.push(...(await shot(() => capturePressTriplet(browser, scheme))));
+          all.push(
+            ...(await shot(() =>
+              capturePressTriplet(browser, scheme, {
+                viewport: MOBILE_VIEWPORT,
+                suffix: "-390",
+                surfaces: [...PRESS_TRIPLET_INSITU, "row"],
+              })
+            ))
+          );
           all.push(...(await shot(() => captureScheme(browser, scheme))));
           all.push(...(await shot(() => captureSkeletonReveal(browser, scheme))));
           if (scheme === "light") {
@@ -11291,6 +12020,7 @@ async function main() {
         }
       }
       for (const path of all) console.log(path);
+      writePressTripletCatalog();
       reportUnmocked();
     } finally {
       await browser.close();
@@ -11301,6 +12031,11 @@ async function main() {
 }
 
 main().catch((err) => {
+  try {
+    recordPressTripletAbort(err);
+  } catch (wipeErr) {
+    console.error(wipeErr);
+  }
   console.error(err);
   process.exit(1);
 });
