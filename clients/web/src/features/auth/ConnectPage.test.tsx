@@ -418,6 +418,16 @@ describe("BZ-6b onboarding profile step", () => {
     expect(name?.value).toBe("곽성재");
   });
 
+  it("labels the display-name field as 선택, never 필수", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+    });
+    const card = document.querySelector('[data-testid="onboarding-profile"]');
+    expect(card?.textContent).toContain("선택");
+    expect(card?.textContent).not.toContain("필수");
+  });
+
   it("skip lands without PATCHing and writes the fresh-signup marker", async () => {
     const onLoggedIn = await submitJoinFromPrefill();
     await vi.waitFor(() => {
