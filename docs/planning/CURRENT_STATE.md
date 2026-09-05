@@ -1,5 +1,13 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-05 스냅샷 88 (Fable · momo-main — ★W1 uxui 2차 파도 완결: UX-R1e(7회전)·UX-R1b(10회전+병합) 폐곡선 랜딩 + 승격 n·o. 잔여 uxui = R2a·R2b(ready, go 대기)).** 컴팩트 복원 진입점.
+>
+> **★ 랜딩(전부 design-review 폐곡선, Opus 5 검수)**: **UX-R1e #2071**(눌림 전수 + 원장 + 3짝 캡처, **7회전** — R1 컨테이너 press 미끄러짐 → R2 summary 카드 밖·다크 토큰 그릇 띠 → R3 라이트 토큰이 accent-soft와 같은 재료(「가족」 면제는 정본 밖) → R4 원장 인구 마커 기반·cmdk 미도색·전폭 문구 거짓 → R5 전폭이 클래스 토큰·early return → R6 샷 이중 writer·무효 hover → **R7 PASS**: 인구 태그/role N0=477·잔량 11·미눌림 0, `--surface-pressed` `light-dark(#efe2c8, #262335)`, 와이드 행 채움만(런타임 프로브), 3짝 102장) → uxui `42ab25cb` → **승격 n #2077**. **UX-R1b #2072**(드로어·스레드·⌘K enter/exit + `motion/react` 첫 소비자 + `motion_lib_scope`, **10회전** — R1 스레드 앵커 죽은 창·레드 증명 초록 → R2 `motion-dom` 우회 → R3 하우스 Dialog 닫힘 오버레이가 Radix 인라인 pe:auto로 첫 클릭 삼킴(#2073) → R4 인라인+컨텍스트 → `!` 클래스 → R5 forceMount 제거가 가드 무력화 → R6 hunk가 팔레트 영구 마운트 → R7 가드가 떨어진 노드 샘플 → R8 측정 없는 「우회」 진단 → R9 forceMount 주석 모순 → **R10 PASS** → R11 트랙 팁 병합(코드 충돌 3파일 해소, 병합 검수 PASS)) → uxui 810706cf → **승격 o #2081**(보호 경로 `scripts/design_preflight_web.sh` 3커밋 정책 감사) + sync #2082/#2083 → **main=0bef6bf4·uxui=810706cf·engine=183bfb5b**, alignment PASS.
+> **★ 발행·정리**: #2076(R1e R7 잔여: 폭 규칙 정의 통일·390 CTA·shrink-0·인구 477·instant-fill 전이) · #2080(R1b R10 잔여) · #2073 close(#2072 랜딩) · #2074(`!` 계수) · #2075(UnreadPill이 스크림 위, 선재) · #2050 플레이크 원장 갱신. DEVIATION 2행 `accepted`(390 드로어 fast·⌘K 하우스 Dialog / 본문 행 채움만) + ADR-0179 D1 정오표.
+> **★ 교훈(87에 추가)**: ⑪워커 상습 축 두 개가 이번 두 티켓을 지배했다 — **「하네스에서 참, 제품에서 거짓」**(R1a·R1b·R1e 전부 첫 회전)과 **「실패할 수 없는 단정」**(사본 컴파일·부분문자열 핀·마커 인구·떨어진 노드 샘플·측정 없는 진단) — 미션에 「인구는 태그/role·가드는 정의·모든 return·연결된 노드·관측한 경로만」을 상설 ⑫수리가 수리를 부르는 사슬은 매 회전 「전 회전 수리가 만든 회귀 먼저」로 잡혔다(R1b R6 hunk·R1e R2 팝) ⑬브랜치 보호 「base 최신」: 랜딩 전 트랙 팁 병합 필수(코드 충돌이면 워커 병합 미션 + 병합 한정 검수) ⑭병합 트리 게이트 플레이크는 #2050 원장에 기록 후 재실행.
+> **★ 다음(go 대기)**: UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2) · ITO(G1) 준비 · 후속 #2076·#2080·#2074·#2075·#2057.
+
+> 이하 스냅샷 87:
 > **2026-09-04 스냅샷 87 (Fable · momo-main — ★결정 4건 집행 + W1 uxui 2차 발사 준비 완료(go 대기). 세션 안전 중단 체크포인트 = `claudedocs/resume-2026-09-04/RESUME.md`).** 컴팩트 복원 진입점.
 >
 > **★ 성재 결정(2026-09-04)**: ①**#2050 N-2 = 바닥 동시 도착 상한 3**(초과분 즉시 정착, stagger 기각) → ADR-0179 D3 정오표 + #2050 수용 기준 갱신 ②W1 uxui 2차 발사 순서 권고 확인(**R1e + R1b 먼저**, 그 뒤 R2a·R2b) — **발사는 go 신호** ③**#2057 확정**: 페이드 창은 Δh로 늘리지 않음, 상한은 이징 기반 단일 규칙 ④7월 DEVIATION pending 3건 위임 판정: MOMO-412 → **아직 유효**(JWT_HMAC 폴백이 셀프호스트 기본값) → **#2066** 발행·`accepted` / MOMO-471·474 → macOS 표면 은퇴로 소멸 → `noted`·#495 close. 정정: 출시 프로그램 계획 머리글(ADR Accepted).
@@ -48,15 +56,6 @@
 > **★ 발행 이슈**: UX-R1a~e·R2a·R2b **#1996~#2002**(R1a/c/d/e ready, 나머지 blocked) · **#2010** redeem 응답 sas 동봉(engine, 폰 파생 복제 은퇴) · **#2011** 로그인 상태 oort://link 한 문장(mobile) · **#2016** 도구 카탈로그 GET(engine, UX-R4a 편집 표면 개방) · #1984 범위 확장(`test_oort_doctor.sh` local_gate 편입) · #2000 원장(UX-R0 nit N-5~N-8) · ADR-0179 D1 정오표(이 PR).
 > **★ 다음**: M0m R2 → 재검수(fresh) → 랜딩 · UX-R4a 랜딩(#2015 design-review → 트랙) · 다음 uxui 발사 DS-2 또는 M0w · 승격 배치 j · ITO(G1) 준비.
 > **★ 교훈(메모리)**: `gh pr merge --delete-branch`를 PR 헤드 워크트리에서 실행하면 머지는 되고 체인만 ABORT(#1985·#2007 재발) → 루트에서 `--merge`만, 원격은 `push --delete` · 체인의 `| tail -1`은 rc를 삼킨다 — 머지 결과는 항상 `gh pr view --json state`로 확인 · CI 유닛 레인은 브라우저 없음 — 런타임 프로브는 로컬 게이트 소관.
-
-> 이하 스냅샷 82:
-> **2026-09-02 스냅샷 82 (Fable · momo-main — ★G0 완주(발행 창만 남음): BT 파도 6장 전량·BZ-5a·P1/P2 main 정본화, ADR 4본 결재 대기, W1 발사 대기).** 컴팩트 복원 진입점.
->
-> **★ 랜딩·승격**: BT-6 서버 #1961(engine 6faccaea, A-43) + 클라 #1963(uxui 23fbbb0c — design-review **5회전** R1 FAIL B2·H2 → R2 B0·H1 → R3 B0·H2 → R4 B0·H2 → R5 **PASS B0·H0**; H-5 필 arming은 선재 결함으로 철회→#1966) · lint 위생 #1965(BZ-5a가 붉힌 web lint 레인 수리) · **승격 배치 #1968(engine→main)·#1970(uxui→main)·sync #1969/#1971/#1972/#1973·docs #1953(P1 PIPELINE.md·P2 CODEX 병합·스냅샷 81)** — 정책 감사 6회(코멘트→라벨→정본 검증 PASS). 최종 main=4369909b·uxui=e0e992c4·engine=5696ecd9, alignment PASS.
-> **★ G0 잔여 = v0.1.4 발행 창**(성재 attended: `publish-images.yml` dispatch + release Environment 승인 → digest 수거 → 태그·Release → SELF_HOST 문면). 이후 W1 발사(go 신호).
-> **★ 결재 대기**: ADR-0179(표현 축)·0180(QR 기기 연결)·0181(웰컴 킥오프)·0182(일시 확인) Proposed. Accept 시 #1958 UX-R0·#1959 M0s·#1960 UX-R2s 개방. 즉시 발사 가능: #1954 SH-1·#1955 SH-3a·#1956 DS-2·#1957 UX-R4a.
-> **★ 적립**: #1964 폰 마크 소비+explicit_open · #1966 UnreadPill 재방문 arming 선재 결함 · #1967 BT-6 닛(N-15 죽은 분기·N-9 게이트 잔여·N-14) · #1774 감사 재요구 마찰(이번 승격 6회 실측 — P4 후보).
-> **★ 교훈(메모리 기록)**: 트랙 머지 전 verify_merge_tree 8레인 필수(STATUS 충돌은 union 임시 커밋 --base) · zsh 미인용 $VAR 미분리 · 워커 상습 축에 "수리 회귀"와 "런타임 4/4 미실측 주장" 추가 — R3/R4에서 M-8 '수리됨' 주장이 두 번 불성립.
 
 > **과거 스냅샷은 `docs/planning/archive/CURRENT_STATE-snapshots.md`로 이동(로테이션 — 규칙은 아래 절).**
 
