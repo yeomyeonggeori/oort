@@ -20,6 +20,9 @@ const joinWithInvite = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
 const restoreSession = vi.hoisted(() => vi.fn());
 const releaseSessionRestoreMock = vi.hoisted(() => vi.fn());
+const discoveredServersMock = vi.hoisted(() =>
+  vi.fn((): { base: string; displayHost: string }[] => [])
+);
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -42,6 +45,14 @@ vi.mock("./onboardingSessionHold", async (importOriginal) => {
       releaseSessionRestoreMock();
       actual.releaseSessionRestore();
     },
+  };
+});
+
+vi.mock("./discovery", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./discovery")>();
+  return {
+    ...actual,
+    useDiscoveredServers: () => discoveredServersMock(),
   };
 });
 
@@ -81,6 +92,7 @@ beforeEach(() => {
   login.mockResolvedValue(session);
   joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
   restoreSession.mockResolvedValue(session);
+  discoveredServersMock.mockReturnValue([]);
   releaseSessionRestore();
   releaseSessionRestoreMock.mockClear();
   clearSession();
@@ -473,6 +485,40 @@ describe("BZ-6b onboarding profile step", () => {
     const card = document.querySelector('[data-testid="onboarding-profile"]');
     expect(card?.textContent).toContain("선택");
     expect(card?.textContent).not.toContain("필수");
+  });
+
+  it("does not render the discovered-servers picker on S3", async () => {
+    discoveredServersMock.mockReturnValue([
+      { base: "https://lan.example", displayHost: "Mac.local:28000" },
+    ]);
+    window.history.replaceState(null, "", "/?code=Ab3-_x");
+    mount();
+    expect(document.querySelector('[data-testid="connect-discovery"]')).not.toBeNull();
+    click("onboarding-next");
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "new-pass");
+    await act(async () => {
+      click("login-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+    });
+    expect(document.querySelector('[data-testid="connect-discovery"]')).toBeNull();
+    expect(document.querySelector('[data-testid="connect-discovery-item"]')).toBeNull();
+  });
+
+  it("wires the helper sentence as a description of the name field", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
+    });
+    const input = document.querySelector('[data-testid="onboarding-profile-name"]');
+    const hint = document.getElementById("onboarding-profile-name-hint");
+    const label = document.querySelector('label[for="onboarding-profile-name"]');
+    expect(hint).not.toBeNull();
+    expect(hint?.textContent).toContain("나중에 설정에서 언제든 바꿀 수 있습니다");
+    expect(input?.getAttribute("aria-describedby")).toContain("onboarding-profile-name-hint");
+    expect(label).not.toBeNull();
   });
 
   it("skip lands without PATCHing; the marker was already written at join", async () => {
