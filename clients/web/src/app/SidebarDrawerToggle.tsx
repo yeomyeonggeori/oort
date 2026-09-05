@@ -15,7 +15,7 @@ export function SidebarDrawerToggle() {
   return (
     <button
       type="button"
-      className="mobile-only tap-target -ml-2 flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+      className="mobile-only tap-target -ml-2 flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
       onClick={(event) => openDrawer(event.currentTarget)}
       aria-label="채널 목록 열기"
       title="채널 목록 열기"

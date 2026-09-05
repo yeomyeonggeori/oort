@@ -379,8 +379,8 @@ export function PluginSection({ offline }: { offline: boolean }) {
                     }}
                     aria-current={active ? "true" : undefined}
                     className={active
-                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left focus-visible:focus-ring"
-                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left focus-visible:focus-ring disabled:cursor-wait"}
+                      ? "plugin-marketplace-row flex w-full flex-col gap-2 bg-accent-soft p-3 text-left active:bg-surface-pressed focus-visible:focus-ring"
+                      : "plugin-marketplace-row flex w-full flex-col gap-2 p-3 text-left active:bg-surface-pressed focus-visible:focus-ring disabled:cursor-wait"}
                   >
                     <span className="flex min-w-0 flex-wrap items-center gap-2">
                       <span className="flex size-control shrink-0 items-center justify-center rounded-sm border border-line bg-surface-raised text-body font-semibold text-ink" aria-hidden="true">
@@ -921,7 +921,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
 }
 
 function DetailLink({ label, href }: { label: string; href: string }) {
-  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink underline decoration-line-strong underline-offset-2 focus-visible:focus-ring" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
+  return <div className="flex min-w-0 flex-col gap-px"><dt className="text-meta text-ink-muted">{label}</dt><dd><a className="break-all text-body text-ink-muted underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring" href={href} rel="noreferrer" target="_blank">{href}</a></dd></div>;
 }
 
 function PluginScopeConsentDialog({
@@ -1059,7 +1059,7 @@ function PluginScopeConsentDialog({
                         파일의 카탈로그 행이 같은 조건(이 뮤테이션 진행 중)에
                         disabled:cursor-wait를 쓰고 있어, 한 조건에 커서가 둘이라는
                         모순이기도 했다. 한 조건, 한 커서. */}
-                    <label className={`flex items-start gap-2 ${pending ? "cursor-wait" : "cursor-pointer"}`}>
+                    <label className={`flex items-start gap-2 ${pending ? "cursor-wait" : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"}`}>
                       <input
                         type="checkbox"
                         checked={checked}

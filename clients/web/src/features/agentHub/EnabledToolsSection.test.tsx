@@ -323,7 +323,7 @@ describe("EnabledToolsSection", () => {
       '[data-testid="agent-hub-tool-row-work.session.resume"]'
     );
     expect(locked?.className).not.toMatch(/hover:bg-surface-hover/);
-    expect(locked?.className).toMatch(/cursor-default/);
+    expect(locked?.className).toMatch(/cursor-not-allowed/);
   });
 
   it("M-1: 빈 카탈로그는 한 문장이고 저장 버튼이 없다", () => {

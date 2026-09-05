@@ -19,7 +19,12 @@ import { ApiError } from "@momo/core/lib/api";
 import { fetchUsageSummary } from "@momo/core/features/settings/api";
 import { errorMessage } from "@momo/core/features/settings/model";
 import { ProviderQuotaBlock } from "./ProviderQuotaBlock";
-import { SectionShell, StatusChip } from "./SettingsFields";
+import {
+  SectionShell,
+  SETTINGS_COLLAPSIBLE_CARD_CLASS,
+  SETTINGS_COLLAPSIBLE_SUMMARY_CLASS,
+  StatusChip,
+} from "./SettingsFields";
 import {
   USAGE_BUCKETS,
   USAGE_PERIODS,
@@ -444,8 +449,8 @@ function UsageBody({
       />
 
       {summary.buckets.length > 0 && (
-        <details className="min-w-0 rounded-md border border-line" data-testid="usage-buckets">
-          <summary className="cursor-pointer px-3 py-2 text-body text-ink focus-visible:focus-ring">
+        <details className={SETTINGS_COLLAPSIBLE_CARD_CLASS} data-testid="usage-buckets">
+          <summary className={SETTINGS_COLLAPSIBLE_SUMMARY_CLASS}>
             기간별로 자세히 보기 (
             <span className="font-mono" data-numeric="">
               {summary.buckets.length}
@@ -742,7 +747,7 @@ function Segmented({
         {options.map((option) => (
           <label
             key={option.id}
-            className="border-l border-line first:border-l-0"
+            className="border-l border-line first:border-l-0 active:bg-surface-pressed"
             data-testid={`${name}-${option.id}`}
           >
             <input
@@ -760,7 +765,7 @@ function Segmented({
                 the same specificity, so without it the hover rule (emitted
                 later by Tailwind) wins and the selection marker disappears
                 under the cursor. */}
-            <span className="flex h-control-sm cursor-pointer items-center px-3 text-meta text-ink-muted hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-checked:hover:bg-accent-soft peer-focus-visible:focus-ring">
+            <span className="flex h-control-sm cursor-pointer items-center px-3 text-meta text-ink-muted press hover:bg-surface-hover peer-checked:bg-accent-soft peer-checked:text-ink peer-checked:hover:bg-accent-soft peer-focus-visible:focus-ring">
               {option.label}
             </span>
           </label>

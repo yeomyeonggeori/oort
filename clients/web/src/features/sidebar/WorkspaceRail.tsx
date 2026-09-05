@@ -113,7 +113,7 @@ export function WorkspaceRail({
         aria-label="워크스페이스 추가"
         title="워크스페이스 추가"
         data-testid="add-workspace"
-        className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="flex size-rail-tile items-center justify-center rounded-md border border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
       >
         <Plus className="size-6" aria-hidden="true" />
       </button>

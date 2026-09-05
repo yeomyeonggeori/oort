@@ -587,7 +587,7 @@ export function Sidebar({
               aria-label="채널 목록 닫기"
               title="채널 목록 닫기"
               data-testid="close-sidebar-drawer"
-              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+              className="mobile-only tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
             >
               <X className="size-4" aria-hidden="true" />
             </button>
@@ -776,7 +776,7 @@ export function Sidebar({
                       title="새 채널 만들기"
                       data-testid="new-channel"
                       data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
                     >
                       <Plus className="size-4" aria-hidden="true" />
                     </button>
@@ -820,7 +820,7 @@ export function Sidebar({
                         }
                         data-testid="new-section"
                         data-section-action=""
-                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+                        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
                       >
                         <FolderPlus className="size-4" aria-hidden="true" />
                       </button>
@@ -1022,7 +1022,7 @@ export function Sidebar({
                       title="새 다이렉트 메시지 (⌘⇧K)"
                       data-testid="new-dm"
                       data-section-action=""
-                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+                      className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
                     >
                       <SquarePen className="size-4" aria-hidden="true" />
                     </Link>
@@ -1195,7 +1195,7 @@ export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
     <button
       ref={ref}
       type="button"
-      className={cn("sidebar-scrim scrim-blur", DRAWER_SCRIM_MOTION)}
+      className={cn("sidebar-scrim scrim-blur scrim-press", DRAWER_SCRIM_MOTION)}
       data-state={isPresent ? "open" : "closed"}
       onClick={onClose}
       aria-label="채널 목록 닫기"

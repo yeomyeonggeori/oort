@@ -918,7 +918,7 @@ export function ChatShell() {
                   openMemberProfile(peer.id, event.currentTarget)
                 }
                 className={cn(
-                  "min-w-0 truncate rounded-sm hover:text-ink focus-visible:focus-ring",
+                  "min-w-0 truncate rounded-sm press hover:text-ink focus-visible:focus-ring",
                   labelParts?.isAgent ? "text-agent" : "text-ink"
                 )}
               >

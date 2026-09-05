@@ -74,7 +74,7 @@ export function HuddleMicMenu({
       aria-busy={busy || undefined}
       disabled={locked}
       data-testid="huddle-mic-devices"
-      className="flex h-control w-6 shrink-0 items-center justify-center border-l border-line-strong text-ink-muted hover:bg-surface-hover focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-50"
+      className="flex h-control w-6 shrink-0 items-center justify-center border-l border-line-strong text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink disabled:pointer-events-none disabled:opacity-50"
     >
       {busy ? (
         <Loader2 aria-hidden="true" className="size-4 spinner-busy" />

@@ -64,7 +64,7 @@ export function AttachmentDownloadButton({
       className={cn(
         tapTarget ? "tap-target" : "touch-target",
         "flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted",
-        "hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
+        "press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring"
       )}
     >
       {busy ? (

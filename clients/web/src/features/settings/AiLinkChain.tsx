@@ -230,7 +230,7 @@ function HopRow({
             visible word is kept inside the name so speech input still matches. */}
         <label
           htmlFor={enabledId}
-          className="flex shrink-0 cursor-pointer items-center gap-2 text-meta text-ink"
+          className="flex shrink-0 cursor-pointer items-center gap-2 rounded-sm px-1 text-meta text-ink press hover:bg-surface-hover"
         >
           <input
             type="checkbox"

@@ -96,7 +96,7 @@ export function ProfileCard({
             data-testid="profile-card"
             aria-label={triggerName}
             title={triggerName}
-            className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left hover:bg-surface-hover focus-visible:focus-ring"
+            className="tap-target flex min-w-0 flex-1 items-center gap-2 rounded-sm px-1 text-left press hover:bg-surface-hover focus-visible:focus-ring"
           >
             <PresenceBadge selfName={selfName} effective={effective} />
             <span className="flex min-w-0 flex-1 flex-col">

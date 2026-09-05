@@ -100,7 +100,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 | 축 | 토큰 | 하는 일 |
 |---|---|---|
-| 상호작용 상태 | `--surface-hover` · `--accent-soft` | 가리킨 행 · 선택된 행. **켜졌다 꺼진다** |
+| 상호작용 상태 | `--surface-hover` · `--surface-pressed` · `--accent-soft` | 가리킨 행 · 눌린 본문 행 · 선택된 행. **켜졌다 꺼진다** |
 | 칩의 그릇 | `--muted-soft` · `--ok-soft` · `--warn-soft` · `--danger-soft` | 칩 한 개가 서는 옅은 채움. **늘 있다** |
 
 **「그냥 다른 회색」이 답이 아닌 것은 취향이 아니라 산술이다.** 라이트에서 `--ink-muted`가 AA를 지키려면 바탕 휘도가 0.769 이상이어야 하는데 `--surface-hover`가 0.7704다 — 바닥에 이미 붙어 있다. 칩 그릇이 설 수 있는 띠는 [0.769, 0.9911(종이)] 하나뿐이고 표면 다섯이 그것을 이미 나눠 갖고 있어, **여섯 번째 중립이 얻을 수 있는 최선의 최소 분리는 1.06:1**이다. 명도만으로 그릇을 세우는 설계는 거기서 끝나고, 남는 자가 §3.1의 위험 위계를 재던 것과 같은 축의 **OKLab 거리**다(`--danger-fill`이 `--accent`와 섞이지 않았음을 증명한 그 자). 그래서 그릇의 생존은 두 자로 정의된다: 대비 ≥ 1.05 **그리고** OKLab 거리 ≥ 0.02. 하나만 걸면 「대비는 넘는데 눈에는 같은 회색」이 통과한다.
@@ -119,7 +119,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 컨트롤 변형표(`button.tsx`)는 기하가 다르므로 자동으로 빠진다 — 컨트롤이 `--accent-soft`를 선택 상태로 입는 것은 이 규칙의 대상이 아니라 그 토큰이 하는 일 그 자체다. 반대로 **컨트롤이 칩 기하를 빌려 쓰면** 걸린다(관전 터미널 토글·설치 마법사 단계 표시기). 그 둘은 그릇이 아니라 기하가 결함이고, 잔량 표가 그 갈림을 적어 둔다.
 
-**남은 잔량 33건**(칩 그릇) **+ 7건**(손 기하). 좌표와 수가 `chipVessel.test.ts`의 두 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
+**남은 잔량 34건**(칩 그릇) **+ 7건**(손 기하). 천장은 `chipVessel.test.ts` 잔량 표와 **같은 수**다. 새 칩이 늘리면 붉다. 이미 잔량이던 컨트롤에 눌림 채움이 생기면 표와 천장을 같이 올린다 — UX-R1e 가 관전 터미널 토글에 `active:bg-surface-pressed` 를 얹어 33에서 34가 된 것이 그 경우다(새 칩이 아니라 세 번째 상호작용 상태). 수리는 표를 줄이지 않으면 붉다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
 
 **이 층이 재지 않는 축: 칩의 테두리.** `bg-*`만 읽는다. `SettingsFields`의 `StatusChip`은 `border-ok`/`border-warn`/`border-danger`/`border-line` 다섯 톤 셀로 일곱 설정 표면에 살아 있고, `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`도 `border border-warn`을 두른다(`AgentHubRoute`의 그 자리는 UX-R4a #1957이 그릇으로 걷었다) — #1516이 검증 칩 **하나**에서 「컨트롤 문법」이라 판정해 걷어낸 것이 바로 그 모양이다. 즉 웹의 제거는 아직 한 칩에 그쳤고, 그 축에는 기계 강제가 **아예 없다**(§5.3).
 
@@ -236,7 +236,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **이 목록 말고 사다리 밖 값을 늘리지 마라.**
 
-눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1.
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`/`Link`/`NavLink`의 렌더가 글자뿐인 것 — 밑줄 또는 `hover:text-` 이고 **채움과 상자(어떤 `border*` 클래스·배경 상자)가 없는** 것이다. 패딩만 있는 터치 타깃은 상자가 아니다. 이름 있는 눌림 어휘는 `tokens.css` 에서 파생한다: `@utility` 의 `:active` 가 `--surface-pressed` 또는 눌림 전이(`--motion-instant`)를 쓰는 이름(지금 `press-instant-fill` · `scrim-press` · `plugin-marketplace-row`)에 `.press` 와 `active:bg-surface-pressed` 를 더한 집합이다. 갤러리 `MOTION_VOCABULARY` 는 그 파생 집합을 포함한다. `:active` 만 있는 익명 유틸은 눌림이 아니다. `hover:text-X` 의 X 가 rest `text-*` 와 같으면 호버가 아니다. 전폭은 폭이다: 상호작용 행/카드의 렌더 폭이 480px 이상이거나 그 콘텐츠 열의 50% 이상이면 채움만 (`hover:bg-surface-hover` / `active:bg-surface-pressed` / `press-instant-fill`, `.press` 스케일 없음). 선택 행은 hover 에서 선택 채움을 유지하고 press 에서 눌림 채움을 낸다. 변형은 그 폭 문턱 아래 컨트롤에만. 메뉴 행은 `.press-instant-fill`.
 
 reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
 
@@ -250,7 +250,7 @@ reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다.
 |---|---|---|
 | `hover:`만 있고 `active:`가 없는 신규 표면 preflight | D5 | DS-4 |
 | 캡처 `waitForAnimations(page)` | D10 ③ | DS-3 |
-| rest/hover/active 3짝 캡처 레인 | D10 ④ | DS-3 |
+| rest/hover/active 3짝 캡처 레인 | D10 ④ | UX-R1e (#2000) 닫힘 |
 | 폰 모션·밀도 값 파생 + 바이트 대조 | D10 ⑤ | M1a |
 
 ### 2.7 터치 타깃

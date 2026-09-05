@@ -125,7 +125,7 @@ export function menuRowClass({
   className?: string;
 }) {
   return cn(
-    "tap-target flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+    "tap-target flex cursor-default select-none gap-2 rounded-sm px-2 text-body outline-none press-instant-fill active:bg-surface-pressed focus:bg-surface-hover focus-visible:focus-ring data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
     layout === "stack"
       ? // `gap-2` between two lines of ONE item would read as a paragraph
         // break, so a stacked item sets its own vertical rhythm.
