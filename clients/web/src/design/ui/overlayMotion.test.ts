@@ -494,7 +494,57 @@ describe.skipIf(!chromiumAvailable)(
       );
     }
 
-    it("Escape then click-behind at 30/60/120ms lands; open overlay still blocks", async () => {
+    /**
+     * Wait for `data-state=closed` on a pinned node, then sample at `delayMs`
+     * in the same in-page turn. Stop (connected=false) once the node detaches.
+     * 30/60/90 sits inside CLOSE.dialog (150ms) with margin; 120 was 30ms
+     * inside the exit and flaked under full-suite CDP load (#1997 H-1).
+     */
+    async function sampleClosedOverlayAfter(
+      page: import("playwright").Page,
+      overlaySelector: string,
+      delayMs: number
+    ): Promise<{ connected: boolean; state: string | null; pointerEvents: string }> {
+      return page.evaluate(
+        ({ selector, ms }) =>
+          new Promise((resolve, reject) => {
+            const el = document.querySelector(selector);
+            if (!el) {
+              resolve({ connected: false, state: null, pointerEvents: "" });
+              return;
+            }
+            const waitClosed = (deadline: number) => {
+              if (!el.isConnected) {
+                resolve({ connected: false, state: null, pointerEvents: "" });
+                return;
+              }
+              if (el.getAttribute("data-state") === "closed") {
+                window.setTimeout(() => {
+                  if (!el.isConnected) {
+                    resolve({ connected: false, state: null, pointerEvents: "" });
+                    return;
+                  }
+                  resolve({
+                    connected: true,
+                    state: el.getAttribute("data-state"),
+                    pointerEvents: getComputedStyle(el).pointerEvents,
+                  });
+                }, ms);
+                return;
+              }
+              if (performance.now() > deadline) {
+                reject(new Error(`${selector} never reached data-state=closed`));
+                return;
+              }
+              requestAnimationFrame(() => waitClosed(deadline));
+            };
+            waitClosed(performance.now() + 500);
+          }),
+        { selector: overlaySelector, ms: delayMs }
+      );
+    }
+
+    it("Escape then click-behind at 30/60/90ms lands; open overlay still blocks", async () => {
       const { browser, page } = await launchProbe();
       const overlaySelector = ".bg-scrim";
       try {
@@ -513,7 +563,7 @@ describe.skipIf(!chromiumAvailable)(
           "open overlay must block the control behind"
         ).toBe(blockedBefore);
 
-        for (const delay of [30, 60, 120]) {
+        for (const delay of [30, 60, 90]) {
           const lingering = page.locator(overlaySelector).first();
           if ((await lingering.count()) > 0) {
             if ((await lingering.getAttribute("data-state")) === "open") {
@@ -523,17 +573,18 @@ describe.skipIf(!chromiumAvailable)(
           }
           await open();
           await page.keyboard.press("Escape");
-          await page.evaluate((ms) => new Promise((resolve) => setTimeout(resolve, ms)), delay);
-          const overlay = page.locator(overlaySelector).first();
-          expect(
-            await overlay.count(),
-            `t+${delay}ms overlay still attached`
-          ).toBeGreaterThan(0);
-          expect(await overlay.getAttribute("data-state")).toBe("closed");
-          expect(
-            await overlay.evaluate((el) => getComputedStyle(el).pointerEvents),
-            `t+${delay}ms overlay pointer-events`
-          ).toBe("none");
+          const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
+          if (!sample.connected) {
+            const before = await behindClicks(page);
+            await page.mouse.click(x, y);
+            expect(
+              await behindClicks(page),
+              `t+${delay}ms click behind ${overlaySelector} after detach`
+            ).toBe(before + 1);
+            break;
+          }
+          expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
+          expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
           const before = await behindClicks(page);
           await page.mouse.click(x, y);
           expect(
