@@ -445,7 +445,21 @@ export interface WorkspaceIdentity {
    * Missing, null, or a non-object is `{}` (Korean defaults). The settings
    * bag is never on this response.
    */
+  /**
+   * Display-only role name overrides from GET /v1/workspaces/{ws}.
+   * Missing, null, or a non-object is `{}` (Korean defaults). The settings
+   * bag is never on this response.
+   */
   roleLabels: RoleLabels;
+  /**
+   * Member-readable projection of `settings.welcome_agent_member_id`.
+   * Null when unset (first active agent is resolved at kickoff).
+   */
+  welcomeAgentMemberId: string | null;
+  /**
+   * Effective welcome prompt. Empty string when the server omitted it.
+   */
+  welcomePrompt: string;
 }
 
 export function createWorkspace(
@@ -468,11 +482,17 @@ export async function fetchWorkspace(
     throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
   }
   const workspace = res.workspace;
+  const raw = workspace as WorkspaceIdentity & {
+    roleLabels?: unknown;
+    welcomeAgentMemberId?: unknown;
+    welcomePrompt?: unknown;
+  };
   return {
     ...workspace,
-    roleLabels: parseRoleLabels(
-      (workspace as WorkspaceIdentity & { roleLabels?: unknown }).roleLabels
-    ),
+    roleLabels: parseRoleLabels(raw.roleLabels),
+    welcomeAgentMemberId:
+      typeof raw.welcomeAgentMemberId === "string" ? raw.welcomeAgentMemberId : null,
+    welcomePrompt: typeof raw.welcomePrompt === "string" ? raw.welcomePrompt : "",
   };
 }
 
@@ -480,10 +500,15 @@ export async function fetchWorkspace(
  * PATCH /v1/workspaces/{ws}/settings — top-level merge. `role_labels` is
  * replaced whole: omit a role key to drop that override, `null` deletes the
  * key (every default restored). Other settings keys are left untouched.
+ * `welcome_agent_member_id` / `welcome_prompt` are additive (ADR-0181).
  */
 export function patchWorkspaceSettings(
   workspaceId: string,
-  body: { role_labels: RoleLabels | null }
+  body: {
+    role_labels?: RoleLabels | null;
+    welcome_agent_member_id?: string | null;
+    welcome_prompt?: string;
+  }
 ): Promise<unknown> {
   return settingsRequest<unknown>(
     `/v1/workspaces/${encodeURIComponent(workspaceId)}/settings`,

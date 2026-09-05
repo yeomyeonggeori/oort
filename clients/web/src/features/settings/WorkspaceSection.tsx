@@ -3,6 +3,7 @@ import { Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { Select } from "@/design/ui/select";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { putAttachmentBytes } from "@/features/attachments/uploadTransport";
@@ -43,6 +44,10 @@ import {
   workspaceNameError,
 } from "@momo/core/features/settings/model";
 import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import {
+  WELCOME_PROMPT_MAX_CHARS,
+  welcomePromptTooLong,
+} from "@/features/welcome/welcomeKickoff";
 import {
   ConfirmButton,
   Field,
@@ -543,6 +548,222 @@ function RoleLabelsEditor({
   );
 }
 
+const WELCOME_AGENT_DEFAULT_LABEL = "기본값 (첫 활성 에이전트)";
+
+/**
+ * Operator-only welcome kickoff fields (#1800 pattern: non-optimistic save,
+ * in-place confirm, SaveButton/Field). Non-operators see KeyValueRows.
+ */
+function WelcomeKickoffEditor({
+  workspaceId,
+  agentMemberId,
+  prompt,
+  offline,
+}: {
+  workspaceId: string;
+  agentMemberId: string | null;
+  prompt: string;
+  offline: boolean;
+}) {
+  const { session } = useSession();
+  const directoryQuery = useDirectory(workspaceId);
+  const client = useQueryClient();
+  const self = memberFor(directoryQuery.directory, session.member.id);
+  const canEdit = isWorkspaceOperator(self?.role);
+  const agents = directoryQuery.directory.members.filter(
+    (member) => member.kind === "agent" && member.status === "active"
+  );
+  const [draftAgent, setDraftAgent] = useState(agentMemberId ?? "");
+  const [draftPrompt, setDraftPrompt] = useState(prompt);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const saveStarted = useRef(false);
+
+  useEffect(() => {
+    setDraftAgent(agentMemberId ?? "");
+    setDraftPrompt(prompt);
+    setPromptError(null);
+  }, [agentMemberId, prompt]);
+
+  const savedAgent = agentMemberId ?? "";
+  const dirty = draftAgent !== savedAgent || draftPrompt !== prompt;
+  const canSave = canEdit && dirty && !promptError && !offline;
+
+  const save = useMutation({
+    mutationFn: () =>
+      patchWorkspaceSettings(workspaceId, {
+        welcome_agent_member_id: draftAgent === "" ? null : draftAgent,
+        welcome_prompt: draftPrompt,
+      }),
+    onSuccess: () => {
+      saveStarted.current = false;
+      client.setQueryData(
+        workspaceIdentityKey(workspaceId),
+        (
+          current:
+            | { welcomeAgentMemberId?: string | null; welcomePrompt?: string }
+            | undefined
+        ) =>
+          current
+            ? {
+                ...current,
+                welcomeAgentMemberId: draftAgent === "" ? null : draftAgent,
+                welcomePrompt: draftPrompt,
+              }
+            : current
+      );
+    },
+    onError: () => {
+      saveStarted.current = false;
+    },
+  });
+  const denied = save.isError && isOperatorDenied(save.error);
+
+  const handlePromptChange = (value: string) => {
+    setDraftPrompt(value);
+    setPromptError(welcomePromptTooLong(value));
+  };
+
+  const handleSave = () => {
+    if (!canSave || save.isPending || saveStarted.current) return;
+    const tooLong = welcomePromptTooLong(draftPrompt);
+    setPromptError(tooLong);
+    if (tooLong) return;
+    saveStarted.current = true;
+    save.mutate();
+  };
+
+  const readOnly = !canEdit;
+  const confirmedNonOperator = readOnly && directoryQuery.isSuccess;
+  const locked = readOnly || offline;
+  const agentLabel =
+    agents.find((member) => member.id === (agentMemberId ?? ""))?.displayName ??
+    WELCOME_AGENT_DEFAULT_LABEL;
+
+  return (
+    <Subsection
+      title="웰컴 킥오프"
+      lines={[
+        "새로 들어온 사람에게 첫 메시지를 보내는 에이전트와 프롬프트입니다.",
+        "비워 두면 첫 활성 에이전트와 서버 기본 프롬프트가 쓰입니다.",
+      ]}
+    >
+      {(confirmedNonOperator || denied) && (
+        <OperatorNotice
+          who={
+            denied
+              ? errorMessage(save.error)
+              : "웰컴 킥오프는 워크스페이스 오너와 관리자만 바꿀 수 있습니다."
+          }
+          contact="바꿔야 한다면 이 워크스페이스의 오너에게 문의하세요."
+        />
+      )}
+      {confirmedNonOperator ? (
+        <div data-testid="workspace-welcome-kickoff">
+          <KeyValueRows
+            rows={[
+              { key: "웰컴 에이전트", value: agentLabel, prose: true },
+              {
+                key: "웰컴 프롬프트",
+                value: prompt || WELCOME_AGENT_DEFAULT_LABEL,
+                prose: true,
+              },
+            ]}
+          />
+        </div>
+      ) : (
+        <form
+          className="flex flex-col gap-3"
+          onSubmit={(event) => {
+            event.preventDefault();
+            handleSave();
+          }}
+          data-testid="workspace-welcome-kickoff"
+        >
+          <Field
+            label="웰컴 에이전트"
+            htmlFor="welcome-agent"
+            hint={
+              locked
+                ? undefined
+                : "비우면 첫 활성 에이전트가 웰컴을 보냅니다."
+            }
+          >
+            <Select
+              id="welcome-agent"
+              name="welcome-agent"
+              value={draftAgent}
+              disabled={locked}
+              onChange={(event) => {
+                if (locked) return;
+                setDraftAgent(event.target.value);
+              }}
+              data-testid="welcome-agent"
+            >
+              <option value="">{WELCOME_AGENT_DEFAULT_LABEL}</option>
+              {agents.map((member) => (
+                <option key={member.id} value={member.id}>
+                  {member.displayName}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field
+            label="웰컴 프롬프트"
+            htmlFor="welcome-prompt"
+            hint={
+              locked
+                ? undefined
+                : `${WELCOME_PROMPT_MAX_CHARS}자까지 쓸 수 있습니다.`
+            }
+            error={promptError}
+          >
+            <textarea
+              id="welcome-prompt"
+              name="welcome-prompt"
+              value={draftPrompt}
+              rows={4}
+              readOnly={locked}
+              aria-readonly={locked || undefined}
+              maxLength={WELCOME_PROMPT_MAX_CHARS + 1}
+              className={cn(
+                "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
+                locked && "opacity-50"
+              )}
+              onChange={(event) => {
+                if (locked) return;
+                handlePromptChange(event.target.value);
+              }}
+              data-testid="welcome-prompt"
+            />
+          </Field>
+          {offline && canEdit && (
+            <p className="text-meta text-ink-muted" id="workspace-welcome-offline">
+              연결이 끊겨 지금은 웰컴 설정을 저장할 수 없습니다.
+            </p>
+          )}
+          {save.isError && !denied && (
+            <InlineBanner
+              message={errorMessage(save.error)}
+              testId="workspace-welcome-save-error"
+            />
+          )}
+          {canEdit && (
+            <div className="flex flex-wrap items-center gap-2">
+              <SaveButton
+                label="웰컴 저장"
+                canSave={canSave}
+                busy={save.isPending}
+                onSave={handleSave}
+                testId="workspace-welcome-save"
+              />
+            </div>
+          )}
+        </form>
+      )}
+    </Subsection>
+  );
+}
+
 function LeaveWorkspace({
   workspaceId,
   offline,
@@ -700,6 +921,15 @@ export function WorkspaceSection({
         <RoleLabelsEditor
           workspaceId={workspaceId}
           labels={query.data.roleLabels}
+          offline={offline}
+        />
+      )}
+
+      {query.data && (
+        <WelcomeKickoffEditor
+          workspaceId={workspaceId}
+          agentMemberId={query.data.welcomeAgentMemberId}
+          prompt={query.data.welcomePrompt}
           offline={offline}
         />
       )}
