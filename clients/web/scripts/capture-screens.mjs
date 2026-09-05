@@ -37,6 +37,45 @@ const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
 
+/** H6-1: one writer per artefact. A second screenshot to the same path is red. */
+const claimedShotPaths = new Set();
+
+function claimShotPath(path) {
+  const key = resolve(path);
+  if (claimedShotPaths.has(key)) {
+    throw new Error(`duplicate shot writer: ${path} already written in this run`);
+  }
+  claimedShotPaths.add(key);
+  return path;
+}
+
+function wrapPageShotGuard(page) {
+  const orig = page.screenshot.bind(page);
+  page.screenshot = async (opts = {}) => {
+    if (opts && opts.path) claimShotPath(opts.path);
+    return orig(opts);
+  };
+}
+
+function wrapContextShotGuard(context) {
+  const origNewPage = context.newPage.bind(context);
+  context.newPage = async (...args) => {
+    const page = await origNewPage(...args);
+    wrapPageShotGuard(page);
+    return page;
+  };
+}
+
+function wrapBrowserShotGuard(browser) {
+  const origNewContext = browser.newContext.bind(browser);
+  browser.newContext = async (...args) => {
+    const context = await origNewContext(...args);
+    wrapContextShotGuard(context);
+    return context;
+  };
+  return browser;
+}
+
 /** UX-R4a M-6: whole tools section including 저장 must sit in the viewport. */
 async function frameEnabledToolsSection(page, where) {
   const section = page.getByTestId("agent-hub-enabled-tools");
@@ -8357,7 +8396,8 @@ async function captureScheme(browser, scheme) {
     // 고른 뒤의 화면은 gates/gate-theme.mjs가 실행마다 다시 찍는다.
     ["appearance", "테마", "appearance"],
     ["link-previews", "링크 미리보기", "link-previews"],
-    ["notifications", "알림 규칙", "notifications"],
+    // notifications is owned by the parked-pointer scene above (H6-1).
+    // Listing it here overwrote that file with an unguarded hover fill.
     ["workspace", "워크스페이스", "workspace"],
     ["plugins", "앱", "plugins"],
     ["usage", "사용량", "usage"],
@@ -10604,11 +10644,13 @@ async function screenshotSettled(page, path) {
       caret: "hide",
     });
     if (previous !== null && Buffer.compare(previous, buffer) === 0) {
+      claimShotPath(path);
       writeFileSync(path, buffer);
       return;
     }
     previous = buffer;
   }
+  claimShotPath(path);
   writeFileSync(path, previous);
 }
 
@@ -10625,7 +10667,9 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
   // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
   // launches (R3-M1). Software raster + no LCD keeps chrome visible and
   // two capture:design runs byte-identical.
-  const browser = await chromium.launch({ args: ACCENT_CAPTURE_ARGS });
+  const browser = wrapBrowserShotGuard(
+    await chromium.launch({ args: ACCENT_CAPTURE_ARGS })
+  );
   try {
     const context = await browser.newContext({
       viewport: VIEWPORT,
@@ -11455,26 +11499,49 @@ async function parkPointerOffViewport(page) {
   await waitForAnimations(page);
 }
 
+function parseCssRgb(css) {
+  const m = String(css).match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+  if (!m) return null;
+  return [Number(m[1]), Number(m[2]), Number(m[3])];
+}
+
 async function assertNotificationsDndRest(page, scheme) {
   const row = page
     .getByTestId("notification-rules-dnd")
     .locator("xpath=ancestor::label[1]");
   await row.waitFor({ state: "visible" });
-  const { bg, hover } = await row.evaluate((el) => {
+  const { bg, hover, surface } = await row.evaluate((el) => {
     const probe = document.createElement("div");
     probe.className = "bg-surface-hover";
     document.body.appendChild(probe);
     const hoverColor = getComputedStyle(probe).backgroundColor;
+    probe.className = "bg-surface";
+    const surfaceColor = getComputedStyle(probe).backgroundColor;
     probe.remove();
-    return { bg: getComputedStyle(el).backgroundColor, hover: hoverColor };
+    return {
+      bg: getComputedStyle(el).backgroundColor,
+      hover: hoverColor,
+      surface: surfaceColor,
+    };
   });
   if (bg === hover) {
     throw new Error(
       `settings-notifications ${scheme}: DND row still hover fill ${bg}`
     );
   }
+  const box = await row.boundingBox();
+  if (!box) {
+    throw new Error(`settings-notifications ${scheme}: DND row box missing`);
+  }
+  const px = await sampleRgb(page, box.x + 16, box.y + box.height / 2);
+  const surfaceRgb = parseCssRgb(surface);
+  if (!surfaceRgb || !rgbNear(px, surfaceRgb)) {
+    throw new Error(
+      `settings-notifications ${scheme}: DND row rest pixels ${px} ≠ page surface ${surface} (computed ${bg})`
+    );
+  }
   console.log(
-    `  settings-notifications ${scheme}: DND row rest ${bg} ≠ hover ${hover}`
+    `  settings-notifications ${scheme}: DND row rest ${bg} ≠ hover ${hover}; pixels ${px} = surface ${surface}`
   );
 }
 
@@ -11805,7 +11872,7 @@ async function main() {
   };
 
   try {
-    const browser = await chromium.launch();
+    const browser = wrapBrowserShotGuard(await chromium.launch());
     await prepareUnfurlPreviewPng(browser);
     try {
       const all = [];

@@ -2242,6 +2242,47 @@ export function Probe() {
     expect(CAPTURE_SRC).toMatch(/assertNotificationsDndRest|notification-rules-dnd/);
   });
 
+  it("캡처는 같은 파일을 두 번 쓰지 않고 알림 샷은 가드된 장면만 쓴다 (H6-1)", () => {
+    expect(CAPTURE_SRC).toMatch(/function claimShotPath/);
+    expect(CAPTURE_SRC).toMatch(/duplicate shot writer/);
+    expect(CAPTURE_SRC).toMatch(/function wrapBrowserShotGuard/);
+    expect(CAPTURE_SRC).toMatch(/wrapBrowserShotGuard\(await chromium\.launch/);
+    const sweep = CAPTURE_SRC.match(
+      /for \(const \[section, heading, name\] of \[([\s\S]*?)\]\)/
+    )?.[1];
+    expect(sweep, "settings sweep list").toBeTruthy();
+    expect(sweep).not.toMatch(/\["notifications"/);
+    const notificationsWrites = [
+      ...CAPTURE_SRC.matchAll(
+        /\$\{OUT_DIR\}\/settings-notifications-\$\{scheme\}\.png/g
+      ),
+    ];
+    expect(notificationsWrites.length).toBe(1);
+    expect(CAPTURE_SRC).toMatch(/DND row rest pixels/);
+    const sabotaged = CAPTURE_SRC.replace(
+      /\/\/ notifications is owned by the parked-pointer scene above \(H6-1\)\.\n    \/\/ Listing it here overwrote that file with an unguarded hover fill\.\n/,
+      `["notifications", "알림 규칙", "notifications"],\n    `
+    );
+    const sabotagedSweep = sabotaged.match(
+      /for \(const \[section, heading, name\] of \[([\s\S]*?)\]\)/
+    )?.[1];
+    expect(sabotagedSweep).toMatch(/\["notifications"/);
+  });
+
+  it("같은 경로를 두 번 claim 하면 붉다 (H6-1 RED)", () => {
+    const claimed = new Set();
+    const claim = (path) => {
+      if (claimed.has(path)) {
+        throw new Error(`duplicate shot writer: ${path} already written in this run`);
+      }
+      claimed.add(path);
+    };
+    claim("/tmp/settings-notifications-light.png");
+    expect(() => claim("/tmp/settings-notifications-light.png")).toThrow(
+      /duplicate shot writer/
+    );
+  });
+
   it("플러그인 상세 링크는 텍스트 링크 hover 를 든다 (M5-5)", () => {
     expect(PLUGIN_SRC).toMatch(
       /break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring/
