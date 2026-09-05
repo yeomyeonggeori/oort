@@ -183,6 +183,13 @@
 @utility welcome-kickoff-body {
   width: var(--onboarding-body-size);
   height: var(--onboarding-body-size);
+  overflow: hidden;
+  flex: none;
+  /* Pose lives on the element. Reduced-motion drops `.welcome-kickoff-mark`,
+     and `transform:none` here would also drop `--onboarding-body-rotate`
+     (same trap as `.onboarding-cloud-body` in tokens.css). Animation below
+     only carries the travel; both ends keep this rotate. */
+  transform: translateY(0) rotate(var(--onboarding-body-rotate, 0deg));
 }
 
 @utility welcome-kickoff-mark {

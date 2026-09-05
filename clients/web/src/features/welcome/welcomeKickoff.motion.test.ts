@@ -86,4 +86,60 @@ describe("welcome kickoff compiled motion", () => {
     expect(code).not.toMatch(/duration-\d+/);
     expect(code).not.toMatch(/\d+ms/);
   });
+
+  it("reduced-motion pose transform equals the rise end-state transform", async () => {
+    const css = await compileClasses(["welcome-kickoff-body", WELCOME_KICKOFF_MARK_CLASS]);
+    const body = classSnippet(css, "welcome-kickoff-body");
+    const toBlock = css.match(
+      /@keyframes\s+motion-welcome-kickoff-rise\s*\{[\s\S]*?to\s*\{([^}]*)\}/
+    )?.[1];
+    expect(toBlock, "rise to-keyframe missing").toBeTruthy();
+    const pose =
+      body.match(/transform:\s*([^;]+);/)?.[1]?.replace(/\s+/g, " ").trim();
+    const end =
+      toBlock?.match(/transform:\s*([^;]+);/)?.[1]?.replace(/\s+/g, " ").trim();
+    expect(pose).toBe("translateY(0) rotate(var(--onboarding-body-rotate, 0deg))");
+    expect(end).toBe(pose);
+    expect(body).not.toMatch(/transform:\s*none/);
+  });
+
+  it("every data-onboarding-body and data-stagger-index selector begins with a class", async () => {
+    const css = await compileClasses([
+      "welcome-kickoff-body",
+      WELCOME_KICKOFF_MARK_CLASS,
+    ]);
+    const mentioned: string[] = [];
+    for (const chunk of css.split("}")) {
+      const open = chunk.lastIndexOf("{");
+      if (open < 0) continue;
+      const raw = chunk.slice(0, open);
+      if (
+        !raw.includes("data-onboarding-body") &&
+        !raw.includes("data-stagger-index")
+      ) {
+        continue;
+      }
+      for (const piece of raw.split(",")) {
+        const lines = piece
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter(Boolean);
+        const sel = lines[lines.length - 1] ?? "";
+        if (
+          !sel.includes("data-onboarding-body") &&
+          !sel.includes("data-stagger-index")
+        ) {
+          continue;
+        }
+        mentioned.push(sel);
+      }
+    }
+    expect(mentioned.length).toBeGreaterThan(0);
+    for (const sel of mentioned) {
+      expect(sel, `unscoped ${sel}`).toMatch(
+        /^\.(onboarding-cloud-body|welcome-kickoff-body|welcome-kickoff-mark)\[/
+      );
+    }
+  });
 });

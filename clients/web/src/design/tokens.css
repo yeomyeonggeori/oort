@@ -2366,36 +2366,39 @@
   animation-delay: 0.45s;
 }
 
-[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
-[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
-[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
-[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
-[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
-[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
-[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
-[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
-[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
-[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
-[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
-[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
-[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
-[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
-[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
-[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
-[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
-[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
-[data-onboarding-body="18"] { --onboarding-body-top: 16%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -12deg; }
-[data-onboarding-body="19"] { --onboarding-body-top: 8%; --onboarding-body-left: 37%; --onboarding-body-size: 28px; --onboarding-body-rotate: 5deg; }
-[data-onboarding-body="20"] { --onboarding-body-top: 11%; --onboarding-body-left: 27%; --onboarding-body-size: 30px; --onboarding-body-rotate: 22deg; }
-[data-onboarding-body="21"] { --onboarding-body-top: 4%; --onboarding-body-left: 41%; --onboarding-body-size: 32px; --onboarding-body-rotate: -10deg; }
-[data-onboarding-body="22"] { --onboarding-body-top: 2%; --onboarding-body-left: 56%; --onboarding-body-size: 34px; --onboarding-body-rotate: 7deg; }
-[data-onboarding-body="23"] { --onboarding-body-top: 5%; --onboarding-body-left: 71%; --onboarding-body-size: 36px; --onboarding-body-rotate: 24deg; }
-[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
-[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
-[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
-[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
-[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
-[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
+/* Named consumers only (UX-R2b M7): the S0 cloud and the welcome marks.
+   A bare [data-onboarding-body] selector is a global leak; the compiled-CSS
+   guard in welcomeKickoff.motion.test.ts goes red if one returns. */
+.onboarding-cloud-body[data-onboarding-body="0"], .welcome-kickoff-body[data-onboarding-body="0"] { --onboarding-body-top: 50%; --onboarding-body-left: 96%; --onboarding-body-size: 22px; --onboarding-body-rotate: -24deg; }
+.onboarding-cloud-body[data-onboarding-body="1"], .welcome-kickoff-body[data-onboarding-body="1"] { --onboarding-body-top: 64%; --onboarding-body-left: 91%; --onboarding-body-size: 24px; --onboarding-body-rotate: -7deg; }
+.onboarding-cloud-body[data-onboarding-body="2"], .welcome-kickoff-body[data-onboarding-body="2"] { --onboarding-body-top: 77%; --onboarding-body-left: 86%; --onboarding-body-size: 26px; --onboarding-body-rotate: 10deg; }
+.onboarding-cloud-body[data-onboarding-body="3"], .welcome-kickoff-body[data-onboarding-body="3"] { --onboarding-body-top: 81%; --onboarding-body-left: 88%; --onboarding-body-size: 28px; --onboarding-body-rotate: -22deg; }
+.onboarding-cloud-body[data-onboarding-body="4"], .welcome-kickoff-body[data-onboarding-body="4"] { --onboarding-body-top: 78%; --onboarding-body-left: 10%; --onboarding-body-size: 30px; --onboarding-body-rotate: -5deg; }
+.onboarding-cloud-body[data-onboarding-body="5"], .welcome-kickoff-body[data-onboarding-body="5"] { --onboarding-body-top: 79%; --onboarding-body-left: 90%; --onboarding-body-size: 32px; --onboarding-body-rotate: 12deg; }
+.onboarding-cloud-body[data-onboarding-body="6"], .welcome-kickoff-body[data-onboarding-body="6"] { --onboarding-body-top: 62%; --onboarding-body-left: 5%; --onboarding-body-size: 34px; --onboarding-body-rotate: -20deg; }
+.onboarding-cloud-body[data-onboarding-body="7"], .welcome-kickoff-body[data-onboarding-body="7"] { --onboarding-body-top: 76%; --onboarding-body-left: 93%; --onboarding-body-size: 36px; --onboarding-body-rotate: -3deg; }
+.onboarding-cloud-body[data-onboarding-body="8"], .welcome-kickoff-body[data-onboarding-body="8"] { --onboarding-body-top: 58%; --onboarding-body-left: 6%; --onboarding-body-size: 22px; --onboarding-body-rotate: 14deg; }
+.onboarding-cloud-body[data-onboarding-body="9"], .welcome-kickoff-body[data-onboarding-body="9"] { --onboarding-body-top: 70%; --onboarding-body-left: 16%; --onboarding-body-size: 24px; --onboarding-body-rotate: -18deg; }
+.onboarding-cloud-body[data-onboarding-body="10"], .welcome-kickoff-body[data-onboarding-body="10"] { --onboarding-body-top: 73%; --onboarding-body-left: 8%; --onboarding-body-size: 26px; --onboarding-body-rotate: -1deg; }
+.onboarding-cloud-body[data-onboarding-body="11"], .welcome-kickoff-body[data-onboarding-body="11"] { --onboarding-body-top: 66%; --onboarding-body-left: 12%; --onboarding-body-size: 28px; --onboarding-body-rotate: 16deg; }
+.onboarding-cloud-body[data-onboarding-body="12"], .welcome-kickoff-body[data-onboarding-body="12"] { --onboarding-body-top: 67%; --onboarding-body-left: 11%; --onboarding-body-size: 30px; --onboarding-body-rotate: -16deg; }
+.onboarding-cloud-body[data-onboarding-body="13"], .welcome-kickoff-body[data-onboarding-body="13"] { --onboarding-body-top: 54%; --onboarding-body-left: 4%; --onboarding-body-size: 32px; --onboarding-body-rotate: 1deg; }
+.onboarding-cloud-body[data-onboarding-body="14"], .welcome-kickoff-body[data-onboarding-body="14"] { --onboarding-body-top: 40%; --onboarding-body-left: 4%; --onboarding-body-size: 34px; --onboarding-body-rotate: 18deg; }
+.onboarding-cloud-body[data-onboarding-body="15"], .welcome-kickoff-body[data-onboarding-body="15"] { --onboarding-body-top: 50%; --onboarding-body-left: 4%; --onboarding-body-size: 36px; --onboarding-body-rotate: -14deg; }
+.onboarding-cloud-body[data-onboarding-body="16"], .welcome-kickoff-body[data-onboarding-body="16"] { --onboarding-body-top: 35%; --onboarding-body-left: 4%; --onboarding-body-size: 22px; --onboarding-body-rotate: 3deg; }
+.onboarding-cloud-body[data-onboarding-body="17"], .welcome-kickoff-body[data-onboarding-body="17"] { --onboarding-body-top: 20%; --onboarding-body-left: 10%; --onboarding-body-size: 24px; --onboarding-body-rotate: 20deg; }
+.onboarding-cloud-body[data-onboarding-body="18"], .welcome-kickoff-body[data-onboarding-body="18"] { --onboarding-body-top: 16%; --onboarding-body-left: 26%; --onboarding-body-size: 26px; --onboarding-body-rotate: -12deg; }
+.onboarding-cloud-body[data-onboarding-body="19"], .welcome-kickoff-body[data-onboarding-body="19"] { --onboarding-body-top: 8%; --onboarding-body-left: 37%; --onboarding-body-size: 28px; --onboarding-body-rotate: 5deg; }
+.onboarding-cloud-body[data-onboarding-body="20"], .welcome-kickoff-body[data-onboarding-body="20"] { --onboarding-body-top: 11%; --onboarding-body-left: 27%; --onboarding-body-size: 30px; --onboarding-body-rotate: 22deg; }
+.onboarding-cloud-body[data-onboarding-body="21"], .welcome-kickoff-body[data-onboarding-body="21"] { --onboarding-body-top: 4%; --onboarding-body-left: 41%; --onboarding-body-size: 32px; --onboarding-body-rotate: -10deg; }
+.onboarding-cloud-body[data-onboarding-body="22"], .welcome-kickoff-body[data-onboarding-body="22"] { --onboarding-body-top: 2%; --onboarding-body-left: 56%; --onboarding-body-size: 34px; --onboarding-body-rotate: 7deg; }
+.onboarding-cloud-body[data-onboarding-body="23"], .welcome-kickoff-body[data-onboarding-body="23"] { --onboarding-body-top: 5%; --onboarding-body-left: 71%; --onboarding-body-size: 36px; --onboarding-body-rotate: 24deg; }
+.onboarding-cloud-body[data-onboarding-body="24"], .welcome-kickoff-body[data-onboarding-body="24"] { --onboarding-body-top: 19%; --onboarding-body-left: 79%; --onboarding-body-size: 22px; --onboarding-body-rotate: -8deg; }
+.onboarding-cloud-body[data-onboarding-body="25"], .welcome-kickoff-body[data-onboarding-body="25"] { --onboarding-body-top: 12%; --onboarding-body-left: 72%; --onboarding-body-size: 24px; --onboarding-body-rotate: 9deg; }
+.onboarding-cloud-body[data-onboarding-body="26"], .welcome-kickoff-body[data-onboarding-body="26"] { --onboarding-body-top: 20%; --onboarding-body-left: 84%; --onboarding-body-size: 26px; --onboarding-body-rotate: -23deg; }
+.onboarding-cloud-body[data-onboarding-body="27"], .welcome-kickoff-body[data-onboarding-body="27"] { --onboarding-body-top: 32%; --onboarding-body-left: 96%; --onboarding-body-size: 28px; --onboarding-body-rotate: -6deg; }
+.onboarding-cloud-body[data-onboarding-body="28"], .welcome-kickoff-body[data-onboarding-body="28"] { --onboarding-body-top: 46%; --onboarding-body-left: 96%; --onboarding-body-size: 30px; --onboarding-body-rotate: 11deg; }
+.onboarding-cloud-body[data-onboarding-body="29"], .welcome-kickoff-body[data-onboarding-body="29"] { --onboarding-body-top: 61%; --onboarding-body-left: 96%; --onboarding-body-size: 32px; --onboarding-body-rotate: -21deg; }
 
 .onboarding-transition-line[data-onboarding-effect="fade"]
   > .onboarding-transition-content {
