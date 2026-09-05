@@ -3,7 +3,7 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type LoginResponse } from "@momo/core/lib/api";
+import { ApiError, type JoinResponse, type LoginResponse, type Member } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import { setServerBase } from "@/lib/serverBase";
 import { clearRecentServers } from "./recentServers";
@@ -12,6 +12,7 @@ import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
 
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
+const changeMyDisplayName = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -19,7 +20,9 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     login: (...args: unknown[]) => login(...args) as Promise<LoginResponse>,
     joinWithInvite: (...args: unknown[]) =>
-      joinWithInvite(...args) as Promise<LoginResponse>,
+      joinWithInvite(...args) as Promise<JoinResponse>,
+    changeMyDisplayName: (...args: unknown[]) =>
+      changeMyDisplayName(...args) as Promise<Member>,
   };
 });
 
@@ -54,11 +57,13 @@ beforeEach(() => {
   reducedMotion = false;
   login.mockReset();
   joinWithInvite.mockReset();
+  changeMyDisplayName.mockReset();
   login.mockResolvedValue(session);
-  joinWithInvite.mockResolvedValue(session);
+  joinWithInvite.mockResolvedValue({ ...session, createdMember: true });
   setServerBase(null);
   clearRecentServers();
   sessionStorage.removeItem(PHONE_LINK_FIRST_RUN_KEY);
+  sessionStorage.removeItem(FRESH_SIGNUP_KEY);
   window.history.replaceState(null, "", "/");
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: reducedMotion && query.includes("prefers-reduced-motion"),
@@ -316,3 +321,143 @@ describe("BZ-6a onboarding shell", () => {
     );
   });
 });
+
+const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
+
+async function submitJoinFromPrefill() {
+  window.history.replaceState(null, "", "/?code=Ab3-_x");
+  const onLoggedIn = vi.fn();
+  mount(onLoggedIn);
+  click("onboarding-next");
+  fill("login-email", "seongjae@dawn.example");
+  fill("login-password", "new-pass");
+  await act(async () => {
+    click("login-submit");
+  });
+  return onLoggedIn;
+}
+
+describe("BZ-6b onboarding profile step", () => {
+  it("does not open S3 after sign-in and calls onLoggedIn immediately", async () => {
+    setServerBase("https://team.example.com");
+    const onLoggedIn = vi.fn();
+    mount(onLoggedIn);
+    click("onboarding-next");
+    fill("login-email", "seongjae@dawn.example");
+    fill("login-password", "correct-horse");
+    await act(async () => {
+      click("login-submit");
+    });
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith(session);
+    expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
+    expect(joinWithInvite).not.toHaveBeenCalled();
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_KEY)).toBeNull();
+  });
+
+  it("does not open S3 when join reports createdMember false", async () => {
+    joinWithInvite.mockResolvedValue({ ...session, createdMember: false });
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: false });
+    expect(document.querySelector('[data-testid="onboarding-profile"]')).toBeNull();
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_KEY)).toBeNull();
+  });
+
+  it("opens S3 after a join that created the member, with no 뒤로 and counter 4/4", async () => {
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+    });
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
+      "4/4"
+    );
+    expect(document.querySelector('[data-testid="onboarding-back"]')).toBeNull();
+    const name = document.querySelector(
+      '[data-testid="onboarding-profile-name"]'
+    ) as HTMLInputElement | null;
+    expect(name?.value).toBe("곽성재");
+  });
+
+  it("skip lands without PATCHing and writes the fresh-signup marker", async () => {
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-skip"]')).not.toBeNull();
+    });
+    await act(async () => {
+      click("onboarding-profile-skip");
+    });
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
+    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_KEY) ?? "null")).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
+    });
+  });
+
+  it("rejects 81 characters in a sentence, disables save, and does not PATCH", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "가".repeat(81));
+    const message = document.querySelector(
+      '[data-testid="onboarding-profile-name-error"]'
+    )?.textContent;
+    expect(message).toBe("표시 이름은 80자까지 쓸 수 있습니다.");
+    expect(message).not.toMatch(/80자 초과/);
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+  });
+
+  it("shows a fail-forward banner on PATCH failure and 계속 lands with the original member", async () => {
+    changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+    });
+    const banner = document.querySelector('[data-testid="onboarding-profile-error"]')
+      ?.textContent;
+    expect(banner).toContain("요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.");
+    expect(banner).toContain("설정 › 프로필에서 언제든 바꿀 수 있어요");
+    expect(banner).not.toContain("engine boom");
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    expect(submit.textContent).toContain("계속");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
+    expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
+    expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
+  });
+});
+
