@@ -533,9 +533,14 @@ describe("BZ-6b onboarding profile step", () => {
     const banner = document.querySelector('[data-testid="onboarding-profile-error"]')
       ?.textContent;
     expect(banner).toContain("요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.");
-    expect(banner).toContain("설정 › 프로필에서 언제든 바꿀 수 있어요");
+    expect(banner).toContain("설정 › 프로필에서 언제든 바꿀 수 있어요.");
+    expect(banner).not.toContain("나중에 설정에서 언제든 바꿀 수 있습니다");
     expect(banner).not.toContain("engine boom");
     expect(onLoggedIn).not.toHaveBeenCalled();
+    const retry = document.querySelector(
+      '[data-testid="onboarding-profile-error"] button'
+    );
+    expect(retry?.textContent).toContain("다시 시도");
     const submit = document.querySelector(
       '[data-testid="onboarding-profile-submit"]'
     ) as HTMLButtonElement;
@@ -579,6 +584,45 @@ describe("BZ-6b onboarding profile step", () => {
       expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
     });
     expect(changeMyDisplayName.mock.calls[1]?.[1]).toBe("두번째이름");
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith({
+      ...session,
+      createdMember: true,
+      member: renamed,
+    });
+  });
+
+  it("다시 시도 after a PATCH failure re-sends the current draft", async () => {
+    changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
+    const renamed = { ...session.member, displayName: "성재" };
+    changeMyDisplayName.mockResolvedValueOnce(renamed);
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-error"] button')).not.toBeNull();
+    });
+    await act(async () => {
+      (
+        document.querySelector(
+          '[data-testid="onboarding-profile-error"] button'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
+    });
+    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).toEqual([
+      "성재",
+      "성재",
+    ]);
     await vi.waitFor(() => {
       expect(onLoggedIn).toHaveBeenCalledTimes(1);
     });

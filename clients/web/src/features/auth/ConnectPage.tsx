@@ -382,12 +382,8 @@ export function ConnectPage({
     finishProfile();
   }
 
-  async function handleProfileSave() {
-    if (!pendingJoin) return;
-    if (profileFailed) {
-      finishProfile();
-      return;
-    }
+  async function patchProfileName() {
+    if (!pendingJoin || profileBusy) return;
     if (displayNameFieldError(profileName) !== null) return;
     setProfileBusy(true);
     setProfileError(null);
@@ -400,11 +396,25 @@ export function ConnectPage({
     } catch (err) {
       setProfileFailed(true);
       setProfileError(
-        `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요`
+        `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요.`
       );
     } finally {
       setProfileBusy(false);
     }
+  }
+
+  function handleProfileSave() {
+    if (!pendingJoin) return;
+    if (profileFailed) {
+      finishProfile();
+      return;
+    }
+    void patchProfileName();
+  }
+
+  function handleProfileRetry() {
+    setProfileFailed(false);
+    void patchProfileName();
   }
 
   function onProfileSubmit(e: FormEvent) {
@@ -728,6 +738,9 @@ export function ConnectPage({
               message={profileError}
               messageId="onboarding-profile-error-text"
               testId="onboarding-profile-error"
+              actionLabel="다시 시도"
+              onAction={() => void handleProfileRetry()}
+              actionBusy={profileBusy}
             />
           ) : null}
           <label className="flex flex-col gap-1 text-body">
@@ -749,7 +762,13 @@ export function ConnectPage({
                   .join(" ") || undefined
               }
               data-testid="onboarding-profile-name"
-              onChange={(e) => setProfileName(e.target.value)}
+              onChange={(e) => {
+                setProfileName(e.target.value);
+                if (profileFailed) {
+                  setProfileFailed(false);
+                  setProfileError(null);
+                }
+              }}
             />
             {profileFieldError ? (
               <p
@@ -760,7 +779,7 @@ export function ConnectPage({
               >
                 {profileFieldError}
               </p>
-            ) : (
+            ) : profileError ? null : (
               <span className="text-meta text-ink-muted">
                 나중에 설정에서 언제든 바꿀 수 있습니다
               </span>
