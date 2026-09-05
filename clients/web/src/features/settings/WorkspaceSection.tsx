@@ -46,7 +46,7 @@ import {
 } from "@momo/core/features/settings/model";
 import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
-  WELCOME_PROMPT_MAX_CHARS,
+  WELCOME_PROMPT_LIMIT_SENTENCE,
   welcomePromptTooLong,
 } from "@/features/welcome/welcomeKickoff";
 import {
@@ -712,9 +712,9 @@ function WelcomeKickoffEditor({
             label="웰컴 프롬프트"
             htmlFor="welcome-prompt"
             hint={
-              locked
+              locked || promptError
                 ? undefined
-                : `${WELCOME_PROMPT_MAX_CHARS}자까지 쓸 수 있습니다.`
+                : WELCOME_PROMPT_LIMIT_SENTENCE
             }
             error={promptError}
           >

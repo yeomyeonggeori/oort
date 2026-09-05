@@ -327,7 +327,8 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
       setTextareaValue(prompt!, "가".repeat(2002));
     });
     expect(prompt?.value.length).toBe(2002);
-    expect(host.textContent).toContain("웰컴 프롬프트는 2000자까지 쓸 수 있습니다.");
+    expect(host.textContent).toContain("2000자까지 쓸 수 있습니다.");
+    expect(host.textContent?.split("2000자까지 쓸 수 있습니다.").length - 1).toBe(1);
     const save = host.querySelector(
       '[data-testid="workspace-welcome-save"]'
     ) as HTMLButtonElement | null;

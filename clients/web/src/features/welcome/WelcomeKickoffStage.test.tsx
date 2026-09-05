@@ -79,7 +79,9 @@ describe("WelcomeKickoffStage", () => {
     );
     for (const [index, body] of WELCOME_KICKOFF_SHAPES.entries()) {
       expect(marks[index]?.getAttribute("data-onboarding-body")).toBe(String(body.index));
-      expect(marks[index]?.getAttribute("data-onboarding-tone")).toBe(body.tone);
+      expect(marks[index]?.className).toContain(
+        body.tone === "accent" ? "text-accent" : "text-ink"
+      );
     }
     const kinds = WELCOME_KICKOFF_SHAPES.map((body) => body.kind);
     expect(new Set(kinds).size).toBe(WELCOME_KICKOFF_SHAPES.length);
@@ -145,6 +147,7 @@ describe("WelcomeKickoffStage", () => {
     const card = root.querySelector("[data-testid='welcome-kickoff-backstop']");
     expect(card?.textContent).toContain(WELCOME_BACKSTOP_COPY);
     expect(card?.textContent).not.toMatch(/실패|오류|error|fail/i);
+    expect((card?.textContent ?? "").split(AGENTS_NAV.label).length - 1).toBe(1);
     const link = card?.querySelector("a");
     expect(link?.getAttribute("href")).toBe(AGENTS_NAV.to);
     expect(link?.getAttribute("href")).toBe(WELCOME_BACKSTOP_HREF);

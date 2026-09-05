@@ -22,7 +22,11 @@ export const WELCOME_DEFAULT_CHANNEL_NAME = "general";
 
 export const WELCOME_STAGE_COPY = "팀이 준비하고 있어요";
 
-export const WELCOME_BACKSTOP_COPY = `에이전트가 아직 준비 중이에요. ${AGENTS_NAV.label}에서 상태를 볼 수 있어요.`;
+/** Card sentence around the agents-hub link. `{label}` in the planner copy is the link. */
+export const WELCOME_BACKSTOP_BEFORE = "아직 준비하고 있어요. 진행 상황은 ";
+export const WELCOME_BACKSTOP_AFTER = "에서 볼 수 있어요.";
+
+export const WELCOME_BACKSTOP_COPY = `${WELCOME_BACKSTOP_BEFORE}${AGENTS_NAV.label}${WELCOME_BACKSTOP_AFTER}`;
 
 export const WELCOME_BACKSTOP_LINK_LABEL = AGENTS_NAV.label;
 
@@ -30,8 +34,7 @@ export const WELCOME_BACKSTOP_HREF = AGENTS_NAV.to;
 
 export const WELCOME_PROMPT_MAX_CHARS = 2000;
 
-export const WELCOME_PROMPT_TOO_LONG =
-  "웰컴 프롬프트는 2000자까지 쓸 수 있습니다.";
+export const WELCOME_PROMPT_LIMIT_SENTENCE = `${WELCOME_PROMPT_MAX_CHARS}자까지 쓸 수 있습니다.`;
 
 export const WELCOME_KICKOFF_ITEM_KEY = "welcome-kickoff";
 
@@ -183,7 +186,37 @@ export function writeShownMarker(workspaceId: string, memberId: string): void {
 
 export function welcomePromptTooLong(value: string): string | null {
   if (value.length <= WELCOME_PROMPT_MAX_CHARS) return null;
-  return WELCOME_PROMPT_TOO_LONG;
+  return WELCOME_PROMPT_LIMIT_SENTENCE;
+}
+
+/** Fresh marker is present and roster/backlog have not settled — hold the write CTA. */
+export function isWelcomeDecisionPending(input: {
+  freshSignup: { workspaceId: string; memberId: string } | null;
+  workspaceId: string;
+  memberId: string;
+  channelKind?: string;
+  channelName?: string;
+  timelineStatus: "loading" | "ready" | "error";
+  directoryStatus: "pending" | "success" | "error";
+  channelId: string | null;
+  messages: readonly { channelId?: string }[];
+}): boolean {
+  if (input.freshSignup === null) return false;
+  if (!uuidEq(input.freshSignup.workspaceId, input.workspaceId)) return false;
+  if (!uuidEq(input.freshSignup.memberId, input.memberId)) return false;
+  if (
+    !isDefaultWelcomeChannel({
+      kind: input.channelKind,
+      name: input.channelName,
+    })
+  ) {
+    return false;
+  }
+  if (readShownMarker(input.workspaceId, input.memberId)) return false;
+  if (input.timelineStatus === "loading") return true;
+  if (input.directoryStatus === "pending") return true;
+  if (!messagesBelongToChannel(input.messages, input.channelId)) return true;
+  return false;
 }
 
 export interface WelcomeKickoffItem {

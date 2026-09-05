@@ -8,7 +8,8 @@ import {
   WELCOME_KICKOFF_MARK_CLASS,
 } from "@/design/motion";
 import {
-  WELCOME_BACKSTOP_COPY,
+  WELCOME_BACKSTOP_AFTER,
+  WELCOME_BACKSTOP_BEFORE,
   WELCOME_BACKSTOP_HREF,
   WELCOME_BACKSTOP_LINK_LABEL,
   WELCOME_KICKOFF_SHAPES,
@@ -63,17 +64,16 @@ export function WelcomeKickoffStage({
       onAnimationEnd={handleAnimationEnd}
     >
       {showCard ? (
-        <>
-          <p className="max-w-pane-md break-keep text-body text-ink">
-            {WELCOME_BACKSTOP_COPY}
-          </p>
+        <p className="max-w-pane-md break-keep text-body text-ink">
+          {WELCOME_BACKSTOP_BEFORE}
           <Link
             to={WELCOME_BACKSTOP_HREF}
-            className="touch-target self-start rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+            className="touch-target rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
           >
             {WELCOME_BACKSTOP_LINK_LABEL}
           </Link>
-        </>
+          {WELCOME_BACKSTOP_AFTER}
+        </p>
       ) : (
         <>
           <div className="flex items-end gap-3" aria-hidden="true">
@@ -86,7 +86,6 @@ export function WelcomeKickoffStage({
                   !reducedMotion && WELCOME_KICKOFF_MARK_CLASS
                 )}
                 data-onboarding-body={String(body.index)}
-                data-onboarding-tone={body.tone}
                 {...(reducedMotion
                   ? {}
                   : { "data-stagger-index": String(index) })}

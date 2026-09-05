@@ -6,12 +6,14 @@ import {
   WELCOME_BACKSTOP_HREF,
   WELCOME_BACKSTOP_LINK_LABEL,
   WELCOME_BACKSTOP_MS,
+  WELCOME_PROMPT_LIMIT_SENTENCE,
   WELCOME_SHOWN_STORAGE_PREFIX,
   WELCOME_STAGE_COPY,
   WELCOME_KICKOFF_SHAPES,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isDefaultWelcomeChannel,
+  isWelcomeDecisionPending,
   messagesBelongToChannel,
   readShownMarker,
   welcomePromptTooLong,
@@ -105,6 +107,33 @@ describe("decideWelcomeMount early returns", () => {
       show: false,
       reason: "directory-not-ready",
     });
+  });
+
+  it("write CTA is held only while the mount is still pending", () => {
+    const pendingInput = {
+      freshSignup: fresh,
+      workspaceId: WS,
+      memberId: MEMBER,
+      channelKind: "public" as const,
+      channelName: "general",
+      timelineStatus: "ready" as const,
+      directoryStatus: "pending" as const,
+      channelId: AGENT,
+      messages: [] as { channelId?: string }[],
+    };
+    expect(isWelcomeDecisionPending(pendingInput)).toBe(true);
+    expect(
+      isWelcomeDecisionPending({ ...pendingInput, directoryStatus: "success" })
+    ).toBe(false);
+    expect(
+      isWelcomeDecisionPending({ ...pendingInput, directoryStatus: "error" })
+    ).toBe(false);
+    expect(
+      isWelcomeDecisionPending({ ...pendingInput, timelineStatus: "loading" })
+    ).toBe(true);
+    expect(isWelcomeDecisionPending({ ...pendingInput, freshSignup: null })).toBe(
+      false
+    );
   });
 
   it("unresolved-author after roster settled", () => {
@@ -232,12 +261,13 @@ describe("copy and constants", () => {
 
   it("backstop sentence has no failure wording and names the agents nav", () => {
     expect(WELCOME_BACKSTOP_COPY).toBe(
-      `에이전트가 아직 준비 중이에요. ${AGENTS_NAV.label}에서 상태를 볼 수 있어요.`
+      `아직 준비하고 있어요. 진행 상황은 ${AGENTS_NAV.label}에서 볼 수 있어요.`
     );
     expect(WELCOME_BACKSTOP_COPY).not.toMatch(/실패|오류|error|fail/i);
     expect(WELCOME_BACKSTOP_COPY.endsWith(".")).toBe(true);
     expect(WELCOME_BACKSTOP_LINK_LABEL).toBe(AGENTS_NAV.label);
     expect(WELCOME_BACKSTOP_HREF).toBe(AGENTS_NAV.to);
+    expect(WELCOME_BACKSTOP_COPY.split(AGENTS_NAV.label).length - 1).toBe(1);
   });
 
   it("constellation is a unique-kind slice of CLOUD_BODIES", () => {
@@ -253,7 +283,8 @@ describe("copy and constants", () => {
   it("2001 characters is a sentence rejection", () => {
     expect(welcomePromptTooLong("가".repeat(2000))).toBeNull();
     expect(welcomePromptTooLong("가".repeat(2001))).toBe(
-      "웰컴 프롬프트는 2000자까지 쓸 수 있습니다."
+      WELCOME_PROMPT_LIMIT_SENTENCE
     );
+    expect(WELCOME_PROMPT_LIMIT_SENTENCE).toBe("2000자까지 쓸 수 있습니다.");
   });
 });
