@@ -1,5 +1,23 @@
 # oort 진행 현황
 
+## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05)
+
+- ADR-0181 D7. Leading row of `#general` (identified as `channel.kind === "public" && channel.name === "general"` in `welcomeKickoff.ts:51-57`; post-signup landing is `channelsQuery.groups.channels[0]` in `ChatShell.tsx:166-169` — for a new workspace that is the same channel). 4 `OortCloudMark` shapes + "팀이 준비하고 있어요". First agent-authored message or `agent.partial` exits the stage (`--motion-standard`, fill `backwards`); that row plays `enter-conversation` once. Backstop `WELCOME_BACKSTOP_MS = 120_000`. Settings › 워크스페이스: operator-only `welcome_agent_member_id` / `welcome_prompt` (#1800 pattern).
+- 실측. Chromium `skipIf` one run: `exitEndedMs=346.9` `arrivalStartMs=348.6` `deltaMs=1.7`. Compiled `.welcome-kickoff-mark` contains `var(--motion-instant)` / `var(--motion-arrival)` / `var(--motion-ease-arrival)` and no `\d+ms`. PATCH body `{ welcome_agent_member_id: "00000000-0000-7000-8000-000000000201", welcome_prompt: "직접 편집한 프롬프트" }` (no `role_labels` key).
+- Capture `CAPTURE_PORT=8645`. PNG counts: 4 light + 4 dark = 8 (`welcome-stage` · `welcome-stage-reduce` · `welcome-arrived` · `welcome-backstop` × two schemes). Two full `capture:design` runs (before arrived double-wait): stage/backstop/reduce sha256 MATCH; arrived DIFF (single `waitForAnimations` returned between stage-exit end and opener arrival start). After a second `waitForAnimations` following two rAF: light arrived MATCH `a228307c252868d9f10c7af74095935e5dede341951e7dde62121853014811c2` across two welcome completions. Dark arrived post-fix sampled once `dae57c2aa45ba3263fcd684847a4cecd2dab4374237e481c6bf98e5cab0ad1f9` — two subsequent `capture:design` runs died on nonempty intro scroll (#2057 N-4) after welcome scenes had already been written. Stage/backstop/reduce hashes that MATCH across the two full runs:
+
+| file | sha256 (both full runs) |
+|---|---|
+| welcome-stage-light.png | `9d40d3ca2fc08976996499a5db7cdca309028e7397e0a27ddaa05ab94315f871` |
+| welcome-stage-dark.png | `3801a13a8adb4359da4b1e823313a690d05b4b1d5b2485407c6015784bccbbde` |
+| welcome-stage-reduce-light.png | `c0300a9ad01ebb4132100b9d9ecc97ed4f4fa9b69fa78c62d1a658cb3ae678cb` |
+| welcome-stage-reduce-dark.png | `94282793dac09652af3ba47ca4039eee6e16e12192c1208eed90a38df9c4267d` |
+| welcome-backstop-light.png | `f27299cbcaf8b4368a60dfde92d7da2066c785f066a7b6d24cfc63eb34dc6f68` |
+| welcome-backstop-dark.png | `a09b8083a9cb18ece78181ce4bc687534bca0a5370d435014922b14c673b8c9a` |
+
+- `SHELL_GATE_PORT=8647 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` welcome vitest 50 passed, 1 skipped, 0 failed. preflight web 14/14 + core 5/5. lint 0 errors. design-review는 이 워커가 하지 않음.
+- 폰 무접촉. runtime-unverified 아님.
+
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
 - ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.
