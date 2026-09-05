@@ -9,7 +9,7 @@
 // contexts skip the mask-reveal, so the gateway card is visible immediately.
 
 export const ONBOARDING_SURFACE =
-  '[data-testid="onboarding-landing"], [data-testid="onboarding-gateway"], [data-testid="onboarding-account"]';
+  '[data-testid="onboarding-landing"], [data-testid="onboarding-gateway"], [data-testid="onboarding-account"], [data-testid="onboarding-profile"]';
 
 /**
  * @param {import("playwright").Page} page
@@ -53,4 +53,18 @@ export async function signInThroughOnboarding(page, creds) {
   await page.getByTestId("login-email").fill(creds.email);
   await page.getByTestId("login-password").fill(creds.password);
   await page.getByTestId("login-submit").click();
+}
+
+/**
+ * Join that created a member lands on S3. Sign-in and rejoin do not.
+ * Lanes that submit a join wait for `onboarding-profile` then call this;
+ * a sign-in lane that is already past S2 sees nothing and returns.
+ *
+ * @param {import("playwright").Page} page
+ */
+export async function skipProfileIfPresent(page) {
+  const profile = page.getByTestId("onboarding-profile");
+  if (!(await profile.isVisible())) return;
+  await page.getByTestId("onboarding-profile-skip").click();
+  await profile.waitFor({ state: "hidden" });
 }
