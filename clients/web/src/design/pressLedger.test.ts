@@ -2426,6 +2426,13 @@ export function Probe() {
       /\[data-gallery-root\] \.press-instant-fill:is\(:active/
     );
     expect(CAPTURE_SRC).toMatch(/function assertInstantFillSwatch/);
+    const galleryScene = CAPTURE_SRC.match(
+      /async function captureDesignGallery[\s\S]*?return \[path\];/
+    )?.[0];
+    expect(galleryScene, "captureDesignGallery").toBeTruthy();
+    expect(galleryScene.indexOf("assertGalleryLoadFocus")).toBeLessThan(
+      galleryScene.indexOf("assertInstantFillSwatch")
+    );
   });
 
   it("갤러리 눌림 어휘는 tokens.css 파생 집합을 포함한다 (N6-1)", () => {

@@ -11814,9 +11814,13 @@ async function captureDesignGallery(browser, scheme) {
   await gallery.waitFor({ state: "visible" });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(50);
-  await assertInstantFillSwatch(page, scheme);
 
   await assertGalleryLoadFocus(page, `design-gallery ${scheme}`);
+  await assertInstantFillSwatch(page, scheme);
+  await page.mouse.move(0, 0);
+  await gallery.evaluate((el) => {
+    el.scrollTop = 0;
+  });
   await assertGalleryScrollOwnership(page, `design-gallery ${scheme}`);
   await assertGalleryUsable(page, `design-gallery ${scheme}`);
   await assertNoHorizontalOverflow(page, `design-gallery ${scheme} 1280`);
