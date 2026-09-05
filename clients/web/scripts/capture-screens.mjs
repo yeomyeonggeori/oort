@@ -6896,6 +6896,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("unfurl-card").waitFor({ state: "visible" });
   const unfurlImage = login.getByTestId("unfurl-image");
   await unfurlImage.waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(login, `desktop chat ${scheme}`);
   const unfurlNaturalSize = await unfurlImage.evaluate((element) => ({
     width: element.naturalWidth,
     height: element.naturalHeight,
@@ -8008,6 +8009,7 @@ async function captureScheme(browser, scheme) {
   // The rich frame is reserved before bytes arrive (#1903 H-1). Wait for
   // the image so the shot shows the OG card, not the muted skeleton.
   await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(turns, `agent-turns ${scheme}`);
   const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
@@ -8066,7 +8068,8 @@ async function captureScheme(browser, scheme) {
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
   const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
-  await notificationsPage.mouse.move(0, 0);
+  await parkPointerOffViewport(notificationsPage);
+  await assertNotificationsDndRest(notificationsPage, scheme);
   await notificationsPage.screenshot({ path: notificationsShot });
   shots.push(notificationsShot);
   await notificationsPage.close();
@@ -8628,6 +8631,7 @@ async function captureScheme(browser, scheme) {
   await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
   await b8.getByTestId("turn-failure-detail").first().click();
   await b8.waitForTimeout(200);
+  await assertWideRowsFillOnly(b8, `b8-failure ${scheme}`);
   const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
   await b8.screenshot({ path: failureShot });
   shots.push(failureShot);
@@ -11330,6 +11334,147 @@ async function assertSummaryHoverCorners(page, scheme) {
   }
   console.log(
     `  summary-card ${scheme}: ${points.length} interior-corner samples = page bg, not hover fill`
+  );
+}
+
+const WIDE_MIN_PX = 480;
+const WIDE_MIN_FRAC = 0.5;
+
+/**
+ * H5-1: full-width is a measured width. Walk interactive elements on the
+ * shipped page, and for those ≥ 480px or ≥ 50% of `main`, `:active` transform
+ * must be none. The four 638px cards go red with `.press`.
+ */
+async function assertWideRowsFillOnly(page, label) {
+  const candidates = await page.evaluate(
+    ({ WIDE_MIN_PX: minPx, WIDE_MIN_FRAC: minFrac }) => {
+      const main = document.querySelector("main") || document.body;
+      const column = main.getBoundingClientRect().width;
+      const sel = [
+        "a",
+        "button",
+        "summary",
+        '[role="button"]',
+        '[role="link"]',
+        '[role="option"]',
+        '[role="menuitem"]',
+        '[role="menuitemcheckbox"]',
+        '[role="menuitemradio"]',
+        '[role="tab"]',
+        '[role="checkbox"]',
+        '[role="switch"]',
+        '[role="radio"]',
+        '[role="treeitem"]',
+      ].join(",");
+      const out = [];
+      let i = 0;
+      for (const el of document.querySelectorAll(sel)) {
+        if (!(el instanceof HTMLElement)) continue;
+        if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+          continue;
+        }
+        if (el instanceof HTMLSelectElement) continue;
+        if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+        const st = getComputedStyle(el);
+        if (st.display === "none" || st.visibility === "hidden" || st.pointerEvents === "none") {
+          continue;
+        }
+        if (st.cursor === "not-allowed" || st.cursor === "wait") continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 2 || r.height < 2) continue;
+        const wide = r.width >= minPx || r.width >= minFrac * column;
+        if (!wide) continue;
+        const mark = `press-wide-${i}`;
+        i += 1;
+        el.setAttribute("data-press-wide", mark);
+        out.push({
+          mark,
+          tag: el.tagName,
+          testId: el.getAttribute("data-testid") || "",
+          width: Math.round(r.width * 100) / 100,
+          column: Math.round(column * 100) / 100,
+          text: (el.innerText || "").replace(/\s+/g, " ").slice(0, 48),
+        });
+      }
+      return out;
+    },
+    { WIDE_MIN_PX, WIDE_MIN_FRAC }
+  );
+
+  const session = await page.context().newCDPSession(page);
+  await session.send("DOM.enable");
+  await session.send("CSS.enable");
+  const { root } = await session.send("DOM.getDocument", { depth: 0 });
+  const failures = [];
+  for (const c of candidates) {
+    const found = await session.send("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector: `[data-press-wide="${c.mark}"]`,
+    });
+    if (!found.nodeId) continue;
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: ["active"],
+    });
+    const transform = await page
+      .locator(`[data-press-wide="${c.mark}"]`)
+      .evaluate((el) => getComputedStyle(el).transform);
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: [],
+    });
+    const none =
+      transform === "none" || transform === "matrix(1, 0, 0, 1, 0, 0)";
+    if (!none) {
+      failures.push(
+        `<${c.tag}> ${c.testId || c.text} width=${c.width} column=${c.column} transform=${transform}`
+      );
+    }
+  }
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-press-wide]").forEach((el) => {
+      el.removeAttribute("data-press-wide");
+    });
+  });
+  if (failures.length > 0) {
+    throw new Error(
+      `wide press ${label}: expected transform none on :active, got ${failures.join("; ")}`
+    );
+  }
+  console.log(
+    `  wide fill-only ${label}: ${candidates.length} rows ≥ ${WIDE_MIN_PX}px or ≥ ${WIDE_MIN_FRAC}·column, transform !== scale`
+  );
+}
+
+async function parkPointerOffViewport(page) {
+  const vp = page.viewportSize() ?? { width: 1280, height: 800 };
+  await page.mouse.move(vp.width + 80, vp.height + 80);
+  await page.evaluate(() => {
+    document.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+  });
+  await waitForAnimations(page);
+}
+
+async function assertNotificationsDndRest(page, scheme) {
+  const row = page
+    .getByTestId("notification-rules-dnd")
+    .locator("xpath=ancestor::label[1]");
+  await row.waitFor({ state: "visible" });
+  const { bg, hover } = await row.evaluate((el) => {
+    const probe = document.createElement("div");
+    probe.className = "bg-surface-hover";
+    document.body.appendChild(probe);
+    const hoverColor = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return { bg: getComputedStyle(el).backgroundColor, hover: hoverColor };
+  });
+  if (bg === hover) {
+    throw new Error(
+      `settings-notifications ${scheme}: DND row still hover fill ${bg}`
+    );
+  }
+  console.log(
+    `  settings-notifications ${scheme}: DND row rest ${bg} ≠ hover ${hover}`
   );
 }
 
