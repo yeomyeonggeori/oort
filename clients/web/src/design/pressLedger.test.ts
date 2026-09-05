@@ -2429,7 +2429,9 @@ export function Probe() {
     const galleryScene = CAPTURE_SRC.match(
       /async function captureDesignGallery[\s\S]*?return \[path\];/
     )?.[0];
-    expect(galleryScene, "captureDesignGallery").toBeTruthy();
+    if (!galleryScene) {
+      throw new Error("captureDesignGallery missing");
+    }
     expect(galleryScene.indexOf("assertGalleryLoadFocus")).toBeLessThan(
       galleryScene.indexOf("assertInstantFillSwatch")
     );
