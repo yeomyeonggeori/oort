@@ -279,7 +279,7 @@ function DiffFileSection({
           would paint straight over it. */}
       <summary
         className={cn(
-          "sticky top-0 z-10 flex cursor-pointer items-center gap-2 border-b border-line bg-surface-raised px-3 py-1 hover:bg-surface-hover",
+          "sticky top-0 z-10 flex cursor-pointer items-center gap-2 border-b border-line bg-surface-raised px-3 py-1 press hover:bg-surface-hover",
           "focus-visible:focus-ring"
         )}
       >
@@ -407,7 +407,7 @@ function RawPatch({ patch }: { patch: string }) {
     >
       <summary
         className={cn(
-          "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover",
+          "cursor-pointer px-3 py-2 text-meta text-ink-muted hover:bg-surface-hover active:bg-surface-pressed",
           "focus-visible:focus-ring"
         )}
       >
@@ -656,7 +656,7 @@ function OpenLinkRow({ url, storageKey }: { url: string; storageKey: string }) {
           });
         }}
         className={cn(
-          "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-accent hover:bg-surface-hover",
+          "flex items-center gap-2 border-t border-line px-3 py-2 text-meta text-accent press hover:bg-surface-hover",
           "focus-visible:focus-ring"
         )}
       >

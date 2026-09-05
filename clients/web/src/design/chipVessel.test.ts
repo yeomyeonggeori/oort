@@ -256,8 +256,11 @@ const VESSELS = new Set([
  *
  *   StatusChip.tsx        20  턴·승인·로그인 핸드오프 세 역할표 + 완료 리포트 칩.
  *                             불투명 카드 안에 산다(위 문단).
- *   ObserverTerminal.tsx   4  관전 터미널 머리 칩 둘(손 기하) + **토글 버튼** 하나가
- *                             칩 기하를 빌려 쓴 것(:1246, `aria-pressed`).
+ *   ObserverTerminal.tsx   5  관전 터미널 머리 칩 둘(손 기하) + **토글 버튼** 하나가
+ *                             칩 기하를 빌려 쓴 것(`aria-pressed`). 선택 채움
+ *                             (`bg-accent-soft`)에 눌림 채움(`active:bg-surface-pressed`)
+ *                             이 겹친다 — UX-R1e B4-4, 새 칩이 아니라 같은 컨트롤의
+ *                             상호작용 상태.
  *   HostedAgentWizard.tsx  2  단계 표시기(:672). 이것도 칩이 아니라 **상태 표시**다.
  *   WorkSessionDetail.tsx  2  제어 창 칩. `--surface-raised` 카드 안.
  *   DisplayController.tsx  2  제어 등급 칩. 같은 카드 문맥.
@@ -267,11 +270,13 @@ const VESSELS = new Set([
  *
  * #1516 이 `SessionVerificationChip` 한 줄을 지웠다(검증 칩의 `--surface-raised` +
  * 테두리가 톤 그릇으로 바뀌었다) — 천장이 34 에서 33 으로 내려온 것이 그 기록이다.
+ * UX-R1e R5 가 그 토글에 `active:bg-surface-pressed` 를 얹어 천장이 다시 34 가
+ * 됐다. 새 칩이 아니라 이미 잔량이던 컨트롤의 눌림 상태다.
  *
  * **두 종류가 섞여 있고 고치는 법이 다르다.** 대부분은 「칩인데 그릇이 틀렸다」이고,
  * `ObserverTerminal:1246`·`HostedAgentWizard:672` 는 반대다 — **컨트롤·상태 표시가 칩
  * 기하를 빌려 쓴 것**이라 거기서는 `--accent-soft`(눌림·현재 단계)와
- * `--surface-hover`(hover)가 **옳게** 쓰이고 있다. 그 둘의 결함은 그릇이 아니라
+ * `--surface-hover`(hover)·`--surface-pressed`(active)가 **옳게** 쓰이고 있다. 그 둘의 결함은 그릇이 아니라
  * 기하이고, 그래서 아래 `HAND_ROLLED` 에도 함께 서 있다. 스윕이 기하로 걸리는 이상
  * 둘 다 여기 보이는 것이 맞고, 「보이지만 사유가 다르다」를 적어 두지 않으면 다음
  * 사람이 눌림 상태를 그릇으로 오해해 지운다.
@@ -286,12 +291,12 @@ const RESIDUE: readonly (readonly [string, number])[] = [
   ["clients/web/src/features/timeline/StatusChip.tsx", 20],
   ["clients/web/src/features/work/DisplayController.tsx", 2],
   ["clients/web/src/features/work/DisplayObserver.tsx", 1],
-  ["clients/web/src/features/work/ObserverTerminal.tsx", 4],
+  ["clients/web/src/features/work/ObserverTerminal.tsx", 5],
   ["clients/web/src/features/work/WorkSessionDetail.tsx", 2],
 ];
 
 /** 잔량 천장. **내려가기만 한다** — 올리는 변경은 위 문단을 지나야 한다. */
-const RESIDUE_CEILING = 33;
+const RESIDUE_CEILING = 34;
 
 /**
  * 기하를 손으로 다시 적은 자리 — 좌표와 수.
@@ -381,6 +386,10 @@ describe("칩의 그릇 규칙은 팔레트 전체에 걸린다 (#1515)", () => 
     );
     // `bg-surface-raised` 는 #1516 이 검증 칩을 톤 그릇으로 옮기며 사라졌다 —
     // 이제 잔량은 **전부 상호작용 상태 토큰**이다.
-    expect([...kinds].sort()).toEqual(["bg-accent-soft", "bg-surface-hover"]);
+    expect([...kinds].sort()).toEqual([
+      "bg-accent-soft",
+      "bg-surface-hover",
+      "bg-surface-pressed",
+    ]);
   });
 });

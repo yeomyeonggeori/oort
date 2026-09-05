@@ -157,7 +157,7 @@ function DraftChip({
         title={ATTACH_COPY.remove}
         data-testid="attachment-chip-remove"
         className={cn(
-          "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink",
+          "touch-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink",
           "focus-visible:focus-ring"
         )}
       >

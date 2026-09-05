@@ -11,10 +11,10 @@ export function channelHeaderControlClass(options?: {
   wide?: boolean;
 }) {
   return cn(
-    "flex shrink-0 items-center justify-center rounded-sm border border-line-strong transition-colors focus-visible:focus-ring",
+    "flex shrink-0 items-center justify-center rounded-sm border border-line-strong press focus-visible:focus-ring",
     options?.wide ? "h-control gap-1 px-2 text-meta" : "size-control",
     options?.pressed
-      ? "bg-accent-soft text-accent"
+      ? "bg-accent-soft text-accent active:bg-surface-pressed"
       : "text-ink-muted hover:bg-surface-hover data-[state=open]:bg-surface-hover data-[state=open]:text-ink"
   );
 }

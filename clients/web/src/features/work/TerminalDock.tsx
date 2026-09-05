@@ -278,9 +278,9 @@ export function TerminalDock({
                   onClick={() => selectSession(session.id)}
                   title={session.label}
                   className={cn(
-                    "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta transition-colors focus-visible:focus-ring",
+                    "h-control-sm max-w-pane-sm shrink-0 truncate rounded-sm px-2 text-meta press focus-visible:focus-ring",
                     selectedTab
-                      ? "bg-accent-soft font-medium text-ink"
+                      ? "bg-accent-soft font-medium text-ink active:bg-surface-pressed"
                       : "text-ink-muted hover:bg-surface-hover"
                   )}
                 >
@@ -305,7 +305,7 @@ export function TerminalDock({
           aria-label="터미널 크게 보기"
           title={expandTitle}
           data-testid="terminal-dock-expand"
-          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
+          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring disabled:pointer-events-none disabled:opacity-50"
         >
           <ChevronsUpDown aria-hidden="true" className="size-4" />
         </button>
@@ -314,7 +314,7 @@ export function TerminalDock({
           onClick={onClose}
           aria-label="터미널 닫기"
           data-testid="terminal-dock-close"
-          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-control-sm shrink-0 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X aria-hidden="true" className="size-4" />
         </button>

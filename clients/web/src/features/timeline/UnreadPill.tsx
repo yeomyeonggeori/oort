@@ -12,7 +12,7 @@ import { cn } from "@/design/lib/cn";
 
 /** 하단 jump-latest가 쓰던 클래스. 상단 필도 이 한 줄을 입는다. */
 export const UNREAD_PILL_CLASS =
-  "pointer-events-auto flex h-control-sm tap-target items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink shadow-lg hover:bg-surface-hover focus-visible:focus-ring";
+  "pointer-events-auto flex h-control-sm tap-target items-center gap-2 rounded-sm border border-line-strong bg-surface-raised px-3 text-meta text-ink shadow-lg press hover:bg-surface-hover focus-visible:focus-ring";
 
 export function UnreadPill({
   direction,

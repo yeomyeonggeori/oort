@@ -1,5 +1,25 @@
 # oort 진행 현황
 
+## UX-R1e 눌림 상태 전수 + shrinking ledger + 3짝 캡처 (#2000, 2026-09-05)
+
+- ADR-0179 D5 스윕 단위는 **컨트롤**(태그/role)이지, 그걸 감싼 행이 아니고, 「이미 `hover:` 가 있던 요소」도 아니다. `press` 는 활성화 대상 자신만 진다. 비상호작용 `div`/`li`/`span`/`section`(interactive role 없음)에 `press` 를 두면 원장이 붉다.
+- 전폭은 폭이다: 렌더 폭 ≥ 480px 이거나 콘텐츠 열의 50% 이상인 상호작용 행/카드는 fill-only (`hover:bg-surface-hover active:bg-surface-pressed` / `press-instant-fill`, `.press` 스케일 없음). 소스 휴리스틱(목록 행·`w-full`·`<summary>`·부모 `li` 의 Link/앵커 행 — FeedRow 는 클래스가 아니라 레이아웃으로 열을 채운다)과 캡처 레인의 `getBoundingClientRect` 프로브가 **찍는 장면마다** 같이 센다(inbox · activity · channel · thread · drafts · search · settings · agent hub · connect). 본문 메시지/대기 행·설정 토글 행·카드 `<summary>`·메뉴 행·리마인더 행·인박스 FeedRow 가 그 자리.
+- 라이트 `#efe2c8` (L 0.769136 < hover 0.770416). vs hover 대비 1.0016 · dE 0.0257 · Δhue 0.00°. vs `--accent-soft` 대비 **1.0528 · dE 0.0210** · Δhue 9.83°. ink 12.512 · ink-muted **4.5013** (AA+0.0013) · line-strong **3.024** (3:1+0.024). ink-muted ≥ 4.55 **그리고** line-strong ≥ 3.05 를 같이 넘는 해는 라이트 띠에 없다(hover 자신 muted 4.508 · line 3.029). 그릇 여덟 쌍 1.101–1.118 / dE 0.038–0.048. 다크 `#262335` (L 0.0187, 칩 그릇 띠 .0192~.0320 **밖**) · vs hover 1.007 · dE 0.0204 · ink-muted 5.395. 그릇 1.142–1.148 / 0.043–0.075. R3 라이트 `#eee2cc` 는 accent-soft 와 대비 1.0526 · **dE 0.0185** 로 §2.2 「대비는 넘는데 눈에는 같은 회색」이며 자가가 그 값을 넣으면 붉다. R2 `#ece3cc`/`#2d2c34` 는 라이트가 hover 보다 밝고 다크가 띠 안.
+- 반경 있는 설정 `<details>` 는 `overflow-hidden` 으로 summary hover 채움을 자른다. 캡처 프로브는 AABB 꼭짓점이 아니라 **둥근 경로 안·호 밖**(각 모서리에서 축으로 2px + 짧은 대각)을 재고, 그 픽셀이 페이지 배경이어야 한다. `overflow-hidden` 을 빼면 light tl+2 = fill `231,227,219`(페이지 `247,246,243`), dark tl+2 = fill `38,37,44`(페이지 `23,22,26`).
+- 선택 행은 hover 에서 선택 채움(`bg-accent-soft`)을 유지하고 press 에서 `active:bg-surface-pressed` 를 낸다. 전폭 행은 채움만(`.press` 스케일 없음). 콤팩트 칩·탭은 공유 base 에 `press` 를 두고 선택 팔에 눌림 채움을 더한다. 가드는 파일/컴포넌트 이름이 아니라 태그/role·전폭 정의·분기 전수다. 선택 팔에서 press/채움을 빼면 붉다.
+- 설정 토글 행은 `<label>` 이 행 전체이고 릴리스 어디서나 토글된다. `checked` 는 선택 채움을 hover 에 유지하고 `active:bg-surface-pressed` 만 낸다(unchecked 만 `hover:bg-surface-hover`). 캡처: 체크박스 부모가 LABEL, 행 오른쪽 8px 히트가 LABEL, deadRight ≤ 2px. `settings-row-checked` 3짝이 그 분기를 찍는다.
+- 텍스트 링크(정본 §2.6: `<a>`/`<button>`/`Link`/`NavLink` 의 렌더가 **글자뿐** — 밑줄 또는 `hover:text-`, **채움과 상자(어떤 `border*` ·배경 상자) 없음**. 패딩·`rounded-*`·터치 타깃만으로는 상자가 아니다. `hover:text-X` 의 X 가 rest `text-*` 와 같으면 호버가 아니다)는 `press` 를 안 든다. 밑줄만 있는 자리는 잔량. 상자 있는 밑줄 컨트롤은 `press` 를 유지.
+- Ledger 전수 인구는 **태그/role** 이다. `hover:`/`press` 마커 게이팅 없음. 파일 이름 탈출 없음. N0=**476** · N1=**11**(텍스트 링크 잔량) · interactive-without-press **0** · 천장 **11**. 「has press」는 이름 있는 어휘만(`.press` · `active:bg-surface-pressed`, 또는 `:active` 가 `--surface-pressed`/`--motion-instant` 를 쓰는 `@utility` — 지금 `press-instant-fill` · `scrim-press` · `plugin-marketplace-row`). 이름 있는 눌림은 칠한다. `press-instant-fill` 만으로 전이만 선언하고 채움이 없으면 붉다. 천장보다 많으면 `hover-only control added at <file:line>`, 적으면 `lower the ceiling to N`.
+- 3짝 표면 핀은 `PRESS_TRIPLET_GALLERY`/`INSITU` 와 갤러리 `data-testid` 의 **양쪽 집합 동등**. in-situ 는 message/pending/settings/settings-row-checked/drafts 다섯. 하나를 빼거나 더하면 붉다(부분문자열 핀이 아님).
+- 이관 표면 compiled CSS: `transition-property` 에 transform 포함, outline-color 제외. 스케일은 `.press` 의 `scale(0.98)`. `duration-*`/`scale-*` 리터럴 0. 메뉴 행은 `press-instant-fill`(스케일 없음, `:active` 가 `--surface-pressed` 를 칠한다). 초안 행은 채움만(`hover:bg-surface-hover active:bg-surface-pressed`, `.press` 없음). cmdk 행은 선택 채움이 hover 이고 `data-[selected=true]:active:bg-surface-pressed` 가 선택 위를 이긴다(채움만, 변형 없음).
+- 캡처: 갤러리 6 + in-situ 5 × rest/hover/active × 두 스킴, 390 은 라이트·다크 둘 다 in-situ+사이드바 행. hover≠active 는 픽셀 수가 아니라 픽셀당 OKLab dE ≥ 0.01. 레인은 **시작에만** `press-triplet*` 를 지운다. 3짝 카탈로그가 쓰인 뒤 다른 장면이 중단되면 세트를 남기고 카탈로그에 `# abort-after-triplet` 을 적는다. 중단 사유가 intro/scroll/timeout 이면 NOTES 에 선재 intro-scroll 플레이크(#2057 N-4)를 적는다. `capture:design` 이 그 플레이크로 exit 1 이어도 abort-keep 은 동작한다(N5-3 기록). `settings-notifications-{light,dark}.png` 는 가드된 장면만 쓴다(스윕은 그 이름을 건너뛴다). 같은 경로를 두 번 쓰면 레인이 붉다. 찍기 전 포인터를 뷰포트 밖으로 보내고 unchecked 「방해 금지」 행의 rest 픽셀이 `--surface` 와 같다.
+- NOTES: 전폭 행의 `:active { transform }` 은 `none` 이다. R5 가 잰 AgentCard/ArtifactCard/UnfurlCards 638px 행의 12.76px 폭 손실은 `.press` scale(0.98) 이었다. 라이트 `--surface-pressed` 여백은 띠 바닥(16.7M 스윕, 구조) — 값을 바꾸지 않는다. N4-4 기록만. 칩 그릇 잔량 34(관전 터미널 토글 눌림 채움이 33→34). 천장 숫자는 잔량 표와 같고, 이미 잔량이던 컨트롤에 눌림 채움이 생기면 같이 오른다.
+- R6 가 **닫혔다고 적었으나 닫히지 않은** R5 문장: M5-4 설정 「방해 금지」 rest 샷이 hover 채움이다(가드는 통과하고 스윕이 같은 파일을 덮어썼다) · M5-5 플러그인 상세 링크에 hover 가 없다(`hover:text-ink` 를 `text-ink` rest 위에 얹어 픽셀이 안 바뀌었다). R7 이 둘을 닫는다.
+- R6 가 실제로 고친 R5 거짓 문장: 전폭이 `w-full`/클래스 토큰이다(제품 네 카드는 닫혔으나 FeedRow 1040px 는 R7) · `expandClass` 가 최상위 `return` 만 센다 · `disabled:cursor-not-allowed` 가 산 컨트롤을 인구에서 뺀다 · 이름 없는 `@utility :active` 가 눌림이다 · README 칩 잔량 33.
+- R7 이 고친 R6 거짓 문장: 알림 PNG 한 파일에 작성자가 둘이다 · `hover:text-ink` 가 rest 와 같아도 호버다 · 전폭 프로브가 타임라인 세 장면뿐이다 · `press-instant-fill` 이 이름만으로 눌림이다 · 갤러리 17이름과 `@utility` 눌림 집합이 달라도 된다 · 칩 천장은 내려가기만 한다.
+- R5 가 고친 R4 거짓 문장: 전수 인구가 hover-keyed 448 이다 · 선택 팔에 press 가 없어도 원장이 0 이다 · cmdk `hover:`/`active:` 가 선택된 행에 칠해진다 · 초안 행은 채움만이라 스케일 이동이 없다 · 캡처 중단이 완료된 3짝을 지운다 · 텍스트 링크 정본이 `<a>`/`<button>` 뿐이다 · `border-2` 가 글자 링크다.
+- runtime-unverified 아님. 폰 무접촉. design-review는 이 워커가 하지 않음.
+
 ## UX-R1c 스켈레톤 blur 크로스페이드 (#1998, 2026-09-03)
 
 - `Skeleton` 래퍼: 막대와 콘텐츠를 같은 grid cell에 겹치고, `ready` 시 `--motion-blur-arrival` + opacity를 `--motion-standard`로 크로스페이드. 호스트 높이는 `ready=false`일 때 막대 높이를 저장하고, 뒤집히는 `useLayoutEffect`에서 그 값으로 잠근 뒤 콘텐츠 높이로 같은 사다리·같은 창을 탄다(줄어듦·늘어남 같은 기구). 가드는 뒤집기 전 프레임부터 샘플한다. 막대는 정지(펄스 없음). 그 창이 끝나면 `is-settled`가 이미 콘텐츠 높이인 레이어에서 막대를 뺀다. `is-resetting`은 제자리 `ready` true→false(전이 0)이지 재마운트가 아니다. 프레임당 |Δh| 상한 12px는 줄어듦과 +14 늘어남에서 실측되고, +224(12채널)는 같은 240ms ease-out에서 첫 프레임 ~30px — 사다리이지 점프가 아니다(점프로 되돌리면 224).
@@ -65,7 +85,7 @@
 - ADR-0179 D1·D2·D3(값)·D4·D5·D6·D9·D10. `motion.css` 사다리(120/180/240/500) + easing + arrival 값 + `--elevation-rest/float`. `motion.ts` 모달 200/150 상수(소비는 UX-R1). `button` 전 variant `press`. tokens.css 손기입 200/160/150/120ms 를 사다리로 흡수(값 200→240, 160→180, 150→120). 드로어는 D1대로 `standard`(240).
 - R2: Button 전이 목록 소유자는 `press` 하나(`transition-colors` 제거, `@layer utilities` 에서 override 뒤). 모달/팝오버 상수는 `motion-enter/exit` 키프레임 유틸(tw-animate-css 없음). `@theme --default-transition-*` 를 사다리에 묶음.
 - 강제: `motion.test.ts` + preflight `raw_motion`(온보딩 블록·motion.ts allowlist). 폰 무접촉(M1a). `motion/react` 미도입(D8는 첫 소비자 티켓). 표면 이관은 UX-R1a~e.
-- 잔량(고치지 않음): S0 CTA는 원시 `<button>` — press 없음. UX-R1e 장부. hover-without-active preflight는 DS-4. 3짝 캡처·waitForAnimations는 DS-3.
+- 잔량(고치지 않음): hover-without-active preflight는 DS-4. 캡처 `waitForAnimations` 전수는 DS-3. S0 CTA `press` 는 UX-R1e.
 - H-1 runtime probe: CI에서는 skip — DS-3 3짝 캡처 레인이 런타임 모션 측정을 인수.
 - runtime-unverified 아님. 캡처는 rest 프레임만(눌림 3짝은 DS-3).
 

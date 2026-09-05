@@ -309,7 +309,7 @@ export function EmojiPickerPanel({
               const next = ((((tone + delta) % 6) + 6) % 6) as SkinTone;
               setTone(next);
             }}
-            className="tap-target flex size-control items-center justify-center rounded-sm border border-line-strong text-title hover:bg-surface-hover focus-visible:focus-ring"
+            className="tap-target flex size-control items-center justify-center rounded-sm border border-line-strong text-title press hover:bg-surface-hover focus-visible:focus-ring"
           >
             <span aria-hidden="true">
               {SKIN_OPTIONS[tone]?.glyph ?? "✋"}
@@ -335,8 +335,10 @@ export function EmojiPickerPanel({
                       onSkinOpenChange(false);
                     }}
                     className={cn(
-                      "tap-target flex size-control items-center justify-center rounded-sm text-title hover:bg-surface-hover focus-visible:focus-ring",
-                      tone === option.tone && "bg-accent-soft"
+                      "tap-target flex size-control items-center justify-center rounded-sm text-title press focus-visible:focus-ring",
+                      tone === option.tone
+                        ? "bg-accent-soft active:bg-surface-pressed"
+                        : "hover:bg-surface-hover"
                     )}
                   >
                     <span aria-hidden="true">{option.glyph}</span>
@@ -379,8 +381,10 @@ export function EmojiPickerPanel({
                   setTabFocus(index);
                 }}
                 className={cn(
-                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring",
-                  selected && "bg-accent-soft text-ink"
+                  "tap-target flex size-control shrink-0 items-center justify-center rounded-sm press focus-visible:focus-ring",
+                  selected
+                    ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                    : "text-ink-muted hover:bg-surface-hover hover:text-ink"
                 )}
               >
                 <tab.Icon className="size-4" aria-hidden="true" />
@@ -482,8 +486,10 @@ export function EmojiPickerPanel({
                     // (~42px there). Finger floor is touch-target (24).
                     // MOBILE_TAP_TARGETS is an allowlist and does not see
                     // these cells (오르트 구름 §5.5②) — 42 < 44 is known.
-                    "emoji-grid-slot touch-target flex aspect-square w-full items-center justify-center rounded-sm text-title focus-visible:focus-ring",
-                    active && "bg-accent-soft text-ink"
+                    "emoji-grid-slot touch-target flex aspect-square w-full items-center justify-center rounded-sm text-title press focus-visible:focus-ring",
+                    active
+                      ? "bg-accent-soft text-ink active:bg-surface-pressed"
+                      : "hover:bg-surface-hover"
                   )}
                 >
                   <span aria-hidden="true">{shown}</span>

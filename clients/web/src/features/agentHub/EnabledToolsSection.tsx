@@ -5,7 +5,6 @@ import { PRIMARY_ACTION_SHORTCUT } from "@/app/keyboardShortcuts";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { useInlineConfirm } from "@/design/ui/inlineConfirm";
-import { PRESS_CLASS } from "@/design/motion";
 import { InlineBanner, Skeleton } from "@/features/common/States";
 import { StatusChip } from "./StatusChip";
 import {
@@ -320,9 +319,10 @@ function ToolToggleRow({
       <label
         className={cn(
           "flex min-w-0 items-start gap-3 p-3 tap-target",
-          locked ? "cursor-default" : cn("cursor-pointer", PRESS_CLASS),
-          row.enabled && "bg-accent-soft",
-          !locked && !row.enabled && "hover:bg-surface-hover",
+          locked ? "cursor-not-allowed" : "cursor-pointer",
+          row.enabled
+            ? "bg-accent-soft active:bg-surface-pressed"
+            : !locked && "hover:bg-surface-hover active:bg-surface-pressed",
           "has-[:focus-visible]:focus-ring"
         )}
         data-testid={`agent-hub-tool-row-${row.name}`}
