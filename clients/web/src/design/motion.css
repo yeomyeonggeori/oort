@@ -171,12 +171,18 @@
 @keyframes motion-welcome-kickoff-rise {
   from {
     opacity: 0;
-    transform: translateY(var(--motion-distance-arrival));
+    transform: translateY(var(--motion-distance-arrival))
+      rotate(var(--onboarding-body-rotate, 0deg));
   }
   to {
     opacity: 1;
-    transform: translateY(0);
+    transform: translateY(0) rotate(var(--onboarding-body-rotate, 0deg));
   }
+}
+
+@utility welcome-kickoff-body {
+  width: var(--onboarding-body-size);
+  height: var(--onboarding-body-size);
 }
 
 @utility welcome-kickoff-mark {
@@ -185,25 +191,26 @@
   animation-delay: calc(var(--stagger-index, 0) * var(--motion-instant));
 }
 
-/* backwards, not both: same R12 discipline as motion-fast-enter. */
+/* Exit fill is `both`: a fade-out must hold its end opacity until React
+ * removes the node. `backwards` is the enter discipline (#1997 R12). */
 @utility welcome-kickoff-exit {
   animation: motion-fade-out var(--motion-standard) var(--motion-ease-standard)
-    backwards;
+    both;
 }
 
-[data-stagger-index="0"] {
+.welcome-kickoff-mark[data-stagger-index="0"] {
   --stagger-index: 0;
 }
-[data-stagger-index="1"] {
+.welcome-kickoff-mark[data-stagger-index="1"] {
   --stagger-index: 1;
 }
-[data-stagger-index="2"] {
+.welcome-kickoff-mark[data-stagger-index="2"] {
   --stagger-index: 2;
 }
-[data-stagger-index="3"] {
+.welcome-kickoff-mark[data-stagger-index="3"] {
   --stagger-index: 3;
 }
-[data-stagger-index="4"] {
+.welcome-kickoff-mark[data-stagger-index="4"] {
   --stagger-index: 4;
 }
 

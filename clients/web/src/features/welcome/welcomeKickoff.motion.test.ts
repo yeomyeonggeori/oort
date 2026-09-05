@@ -72,11 +72,12 @@ describe("welcome kickoff compiled motion", () => {
     expect(snippet).not.toMatch(/\d+ms/);
   });
 
-  it("exit uses --motion-standard and backwards fill", async () => {
+  it("exit uses --motion-standard and both fill", async () => {
     const css = await compileClasses([WELCOME_KICKOFF_EXIT_CLASS]);
     const snippet = classSnippet(css, WELCOME_KICKOFF_EXIT_CLASS);
     expect(snippet).toMatch(/var\(--motion-standard\)/);
-    expect(snippet).toMatch(/backwards/);
+    expect(snippet).toMatch(/\bboth\b/);
+    expect(snippet).not.toMatch(/backwards/);
     expect(snippet).not.toMatch(/\d+ms/);
   });
 

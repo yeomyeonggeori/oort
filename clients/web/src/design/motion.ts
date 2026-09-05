@@ -41,6 +41,6 @@ export const ENTER_CONVERSATION_ANIMATION_NAME = "motion-enter-conversation";
 
 /** UX-R2b / ADR-0181 D7. Stage rise; stagger delay is `--stagger-index × --motion-instant`. */
 export const WELCOME_KICKOFF_MARK_CLASS = "welcome-kickoff-mark";
-/** Stage/card exit. Fill `backwards` so a finished fade does not pin opacity over press. */
+/** Stage/card exit. Fill `both` so the faded frame holds until unmount. */
 export const WELCOME_KICKOFF_EXIT_CLASS = "welcome-kickoff-exit";
 export const WELCOME_KICKOFF_EXIT_ANIMATION_NAME = "motion-fade-out";
