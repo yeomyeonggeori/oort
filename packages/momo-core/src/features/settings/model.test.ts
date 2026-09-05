@@ -39,7 +39,9 @@ import {
   workHostStatus,
   workHostTypeLabel,
   workspaceNameError,
+  displayNameFieldError,
   displayNameSaveMessage,
+  DISPLAY_NAME_MAX_CHARS,
   workTierPolicySaveMessage,
 } from "./model";
 
@@ -392,6 +394,30 @@ describe("프로필 표시 이름 error copy", () => {
     expect(displayNameSaveMessage(new Error("network"))).toBe(
       "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
     );
+  });
+
+  it("rejects 101 characters in a sentence, and accepts 100", () => {
+    expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
+    expect(displayNameFieldError("가".repeat(100))).toBeNull();
+    expect(displayNameFieldError("가".repeat(101))).toBe(
+      "표시 이름은 100자까지 쓸 수 있습니다."
+    );
+    expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
+  });
+
+  it("rejects empty and whitespace client-side, and accepts 100 characters", () => {
+    expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
+    expect(displayNameFieldError("")).toBe(
+      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+    );
+    expect(displayNameFieldError("   ")).toBe(
+      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+    );
+    expect(displayNameFieldError("가".repeat(100))).toBeNull();
+    expect(displayNameFieldError("가".repeat(101))).toBe(
+      "표시 이름은 100자까지 쓸 수 있습니다."
+    );
+    expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
   });
 });
 

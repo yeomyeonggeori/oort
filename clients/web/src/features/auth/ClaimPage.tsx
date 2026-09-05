@@ -12,6 +12,7 @@ import {
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
+import { markFreshSignup } from "@/features/welcome/freshSignup";
 import { readClaimToken } from "./claimPath";
 
 // Reading this as: onboarding claim-password form for self-host operators on
@@ -75,6 +76,10 @@ export function ClaimPage({
     try {
       const session = await claimOwnerPassword(token, password);
       window.history.replaceState(null, "", "/");
+      markFreshSignup({
+        workspaceId: session.member.workspaceId,
+        memberId: session.member.id,
+      });
       onLoggedIn(session);
     } catch (err) {
       setFailure(claimFailureCopy(err));
