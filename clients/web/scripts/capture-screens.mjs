@@ -9234,6 +9234,240 @@ async function captureMarkUnreadScenes(browser, scheme) {
   return shots;
 }
 
+// UX-R2b welcome kickoff (#2002). Scenes only — startGuardedPreview is untouched.
+// Arrival is driven through the product store path (`oort.capture.message.new`
+// → useTimeline applyBatch), not a stage prop.
+async function captureWelcomeKickoffScenes(browser, scheme) {
+  const shots = [];
+
+  async function openWelcome(reducedMotion, options = {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion,
+    });
+    await installMocks(context);
+    await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.includes("/replies")) return route.fallback();
+      if (route.request().method() !== "GET") return route.fallback();
+      return url.pathname.toLowerCase().includes(GENERAL_ID.toLowerCase())
+        ? json(route, { messages: [] })
+        : route.fallback();
+    });
+    await context.addInitScript(
+      ({ workspaceId, memberId }) => {
+        sessionStorage.setItem(
+          "oort.freshSignup.v1",
+          JSON.stringify({ workspaceId, memberId })
+        );
+      },
+      { workspaceId: WORKSPACE_ID, memberId: ME }
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate(
+      ({ workspaceId, memberId }) => {
+        sessionStorage.setItem(
+          "oort.freshSignup.v1",
+          JSON.stringify({ workspaceId, memberId })
+        );
+      },
+      { workspaceId: WORKSPACE_ID, memberId: ME }
+    );
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, CHANNELS[1].id);
+    await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+    if (options.installClock) await page.clock.install();
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, GENERAL_ID);
+    return { context, page };
+  }
+
+  async function waitForWelcomeStage(page) {
+    const empty = page.getByTestId("timeline-empty");
+    try {
+      await empty.waitFor({ state: "visible", timeout: 15_000 });
+    } catch (err) {
+      // Empty intro is optional: a nonempty #general still mounts the stage.
+      // Timeout is the only miss we accept; anything else is a real fail.
+      const name = err instanceof Error ? err.name : "";
+      const message = err instanceof Error ? err.message : String(err);
+      if (name !== "TimeoutError" && !message.includes("Timeout")) throw err;
+    }
+    const stage = page.getByTestId("welcome-kickoff-stage");
+    try {
+      await stage.waitFor({ state: "attached", timeout: 10_000 });
+    } catch (err) {
+      const dump = await page.evaluate(() => ({
+        hash: location.hash,
+        fresh: sessionStorage.getItem("oort.freshSignup.v1"),
+        shown: Object.keys(localStorage).filter((k) =>
+          k.includes("welcomeKickoff")
+        ),
+        introEmpty: Boolean(document.querySelector('[data-testid="timeline-empty"]')),
+        introStarted: Boolean(
+          document.querySelector('[data-testid="message-channel-intro"]')
+        ),
+        messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
+        copy: document.body.innerText.includes("팀이 준비하고 있어요"),
+      }));
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)} (${cause})`);
+    }
+    try {
+      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    } catch (err) {
+      if (!String(err).includes("자리가 멎지 않았다")) throw err;
+      await page.waitForTimeout(200);
+      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    }
+    await stage.waitFor({ state: "visible" });
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-stage-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("reduce");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-stage-reduce-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    await page.evaluate(
+      ({ channelId, agentId }) => {
+        window.dispatchEvent(
+          new CustomEvent("oort.capture.message.new", {
+            detail: {
+              id: "0199eeee-0000-7000-8000-000000000501",
+              channelId,
+              seq: 1,
+              hlcTs: 1_704_067_200_000,
+              hlcCount: 0,
+              authorMemberId: agentId,
+              type: "text",
+              body: "시작할까요? 이 워크스페이스에서 같이 일해요.",
+              state: "sent",
+              createdAtMs: 1_704_067_200_000,
+            },
+          })
+        );
+      },
+      { channelId: GENERAL_ID, agentId: HERMES }
+    );
+    await page.getByTestId("timeline-message").waitFor({ state: "visible" });
+    await page.waitForFunction(
+      () =>
+        [...document.querySelectorAll('[data-testid="timeline-message"]')].some(
+          (node) => node.classList.contains("enter-conversation")
+        )
+    );
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-arrived-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference", {
+      installClock: true,
+    });
+    await waitForWelcomeStage(page);
+    await page.clock.fastForward(120_000);
+    await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
+    await page.clock.resume();
+    await waitForAnimations(page);
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  return shots;
+}
+
+async function captureSettingsWelcomeScenes(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.evaluate('location.hash = "/settings?section=workspace"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  const block = page.getByTestId("workspace-welcome-kickoff");
+  await block.waitFor({ state: "visible" });
+  // Playwright visible ≠ in-viewport. R2 measured the block at top:884 in an
+  // 800 px frame after this wait, so the shutter hit the section above it.
+  await block.evaluate((el) => el.scrollIntoView({ block: "start" }));
+  await waitForAnimations(page);
+  const frame = await block.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    return {
+      top: box.top,
+      bottom: box.bottom,
+      left: box.left,
+      right: box.right,
+      height: box.height,
+      vh,
+      vw,
+      inViewport:
+        box.top >= 0 &&
+        box.bottom <= vh &&
+        box.left >= 0 &&
+        box.right <= vw,
+    };
+  });
+  const path = `${OUT_DIR}/settings-welcome-${scheme}.png`;
+  if (frame.height > frame.vh) {
+    console.info(
+      `settings-welcome ${scheme}: block cannot fit (height ${frame.height} > vh ${frame.vh}); shooting the block element`
+    );
+    await block.screenshot({ path });
+  } else {
+    if (!frame.inViewport) {
+      throw new Error(
+        `settings-welcome ${scheme} inViewport:false top:${frame.top} bottom:${frame.bottom} vh:${frame.vh} vw:${frame.vw}`
+      );
+    }
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    await page.screenshot({ path });
+  }
+  shots.push(path);
+  await context.close();
+  return shots;
+}
+
 // 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
@@ -9301,6 +9535,11 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
     window.location.hash = `#/c/${id}`;
   }, CHANNEL_ID);
   await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector("[data-virtuoso-scroller]");
+    return Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 200);
+  });
   await scrollTimelineRowIntoView(
     page,
     "message-channel-intro",
@@ -12230,6 +12469,8 @@ async function main() {
           }
           all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
           all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
+          all.push(...(await shot(() => captureWelcomeKickoffScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSettingsWelcomeScenes(browser, scheme))));
           all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
           all.push(...(await shot(() => captureNonemptyChannelIntroScenes(browser, scheme))));
           all.push(...(await shot(() => captureAddMemberScenes(browser, scheme))));
