@@ -9,11 +9,17 @@ import {
   WELCOME_KICKOFF_EXIT_CLASS,
   WELCOME_KICKOFF_MARK_CLASS,
 } from "@/design/motion";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, join } from "node:path";
 import {
   WELCOME_BACKSTOP_COPY,
+  WELCOME_BACKSTOP_HREF,
+  WELCOME_BACKSTOP_LINK_LABEL,
   WELCOME_KICKOFF_SHAPES,
   WELCOME_STAGE_COPY,
 } from "./welcomeKickoff";
+import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
 import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 
 const reactActEnvironment = globalThis as typeof globalThis & {
@@ -60,20 +66,23 @@ function mount(props: {
 }
 
 describe("WelcomeKickoffStage", () => {
-  it("stage shows the sentence and 4 marks with stagger indexes", () => {
+  it("stage shows the sentence and constellation from CLOUD_BODIES", () => {
     const root = mount({ phase: "stage", reducedMotion: false });
     expect(root.textContent).toContain(WELCOME_STAGE_COPY);
-    const marks = [...root.querySelectorAll("[data-stagger-index]")];
+    const marks = [...root.querySelectorAll(".welcome-kickoff [data-stagger-index]")];
     expect(marks.length).toBe(WELCOME_KICKOFF_SHAPES.length);
-    expect(marks.map((el) => el.getAttribute("data-stagger-index"))).toEqual([
-      "0",
-      "1",
-      "2",
-      "3",
-    ]);
+    expect(marks.map((el) => el.getAttribute("data-stagger-index"))).toEqual(
+      WELCOME_KICKOFF_SHAPES.map((_, index) => String(index))
+    );
     expect(marks.every((el) => el.classList.contains(WELCOME_KICKOFF_MARK_CLASS))).toBe(
       true
     );
+    for (const [index, body] of WELCOME_KICKOFF_SHAPES.entries()) {
+      expect(marks[index]?.getAttribute("data-onboarding-body")).toBe(String(body.index));
+      expect(marks[index]?.getAttribute("data-onboarding-tone")).toBe(body.tone);
+    }
+    const kinds = WELCOME_KICKOFF_SHAPES.map((body) => body.kind);
+    expect(new Set(kinds).size).toBe(WELCOME_KICKOFF_SHAPES.length);
   });
 
   it("reduced-motion has no stagger custom property and no rise class", () => {
@@ -131,11 +140,21 @@ describe("WelcomeKickoffStage", () => {
     expect(calls.length).toBe(1);
   });
 
-  it("backstop shows the guidance sentence and no failure wording", () => {
+  it("backstop link href is the agents route and its label is the nav constant", () => {
     const root = mount({ phase: "backstop", reducedMotion: false });
     const card = root.querySelector("[data-testid='welcome-kickoff-backstop']");
     expect(card?.textContent).toContain(WELCOME_BACKSTOP_COPY);
     expect(card?.textContent).not.toMatch(/실패|오류|error|fail/i);
-    expect(card?.querySelector("a")?.getAttribute("href")).toBe("/agents");
+    const link = card?.querySelector("a");
+    expect(link?.getAttribute("href")).toBe(AGENTS_NAV.to);
+    expect(link?.getAttribute("href")).toBe(WELCOME_BACKSTOP_HREF);
+    expect(link?.textContent).toBe(AGENTS_NAV.label);
+    expect(link?.textContent).toBe(WELCOME_BACKSTOP_LINK_LABEL);
+    const app = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), "../../app/App.tsx"),
+      "utf8"
+    );
+    expect(app).toContain(`path="agents"`);
+    expect(WELCOME_BACKSTOP_HREF.replace(/^\//, "")).toBe("agents");
   });
 });

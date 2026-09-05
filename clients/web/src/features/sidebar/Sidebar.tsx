@@ -58,6 +58,7 @@ import {
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { UpdateBadge } from "@/features/updates/UpdateBadge";
 import { SidebarRow, SidebarSection } from "./SidebarRow";
+import { AGENTS_NAV } from "./workspaceNav";
 import { SidebarRowContextMenu } from "./SidebarRowContextMenu";
 import { openChannelId } from "./openChannel";
 import { roveSidebarRows } from "./sidebarRoving";
@@ -627,7 +628,7 @@ export function Sidebar({
                 <DraftsNavItem />
                 <SidebarRow to="/activity" icon={<Activity className="size-4" />} label="활동" testId="nav-activity" />
                 <SidebarRow to="/directory" icon={<Users className="size-4" />} label="멤버" testId="nav-directory" />
-                <SidebarRow to="/agents" icon={<Bot className="size-4" />} label="에이전트" testId="nav-agents" />
+                <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" />
                 {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
                     도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
                     연다. 표면 삭제 금지. */}
