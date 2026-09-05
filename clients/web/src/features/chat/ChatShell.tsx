@@ -215,6 +215,14 @@ export function ChatShell() {
         : timeline.status === "loading"
           ? "loading"
           : "ready",
+    directoryStatus:
+      stressCount > 0
+        ? "success"
+        : directoryQuery.status === "error"
+          ? "error"
+          : directoryQuery.status === "success"
+            ? "success"
+            : "pending",
     messages,
     directory,
     realtime: stressCount > 0 ? null : realtime,

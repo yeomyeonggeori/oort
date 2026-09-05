@@ -3,9 +3,12 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   WELCOME_BACKSTOP_COPY,
+  WELCOME_BACKSTOP_HREF,
+  WELCOME_BACKSTOP_LINK_LABEL,
   WELCOME_BACKSTOP_MS,
   WELCOME_SHOWN_STORAGE_PREFIX,
   WELCOME_STAGE_COPY,
+  WELCOME_KICKOFF_SHAPES,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isDefaultWelcomeChannel,
@@ -15,6 +18,8 @@ import {
   welcomeShownKey,
   writeShownMarker,
 } from "./welcomeKickoff";
+import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
+import { CLOUD_BODIES } from "@/features/auth/cloudBodies";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const OTHER_WS = "00000000-0000-7000-8000-000000000002";
@@ -33,6 +38,8 @@ function mount(over: Partial<Parameters<typeof decideWelcomeMount>[0]> = {}) {
     channelKind: "public",
     channelName: "general",
     timelineStatus: "ready",
+    directoryStatus: "success",
+    hasUnresolvedAuthor: false,
     hasAgentAuthoredMessage: false,
     shown: false,
     ...over,
@@ -90,6 +97,20 @@ describe("decideWelcomeMount early returns", () => {
     expect(mount({ timelineStatus: "loading" })).toEqual({
       show: false,
       reason: "timeline-not-ready",
+    });
+  });
+
+  it("directory-not-ready while roster is pending", () => {
+    expect(mount({ directoryStatus: "pending" })).toEqual({
+      show: false,
+      reason: "directory-not-ready",
+    });
+  });
+
+  it("unresolved-author after roster settled", () => {
+    expect(mount({ hasUnresolvedAuthor: true })).toEqual({
+      show: false,
+      reason: "unresolved-author",
     });
   });
 
@@ -209,11 +230,24 @@ describe("copy and constants", () => {
     expect(WELCOME_STAGE_COPY).toBe("팀이 준비하고 있어요");
   });
 
-  it("backstop sentence has no failure wording", () => {
+  it("backstop sentence has no failure wording and names the agents nav", () => {
     expect(WELCOME_BACKSTOP_COPY).toBe(
-      "에이전트가 아직 준비 중이에요. 설정 › 에이전트에서 상태를 볼 수 있어요"
+      `에이전트가 아직 준비 중이에요. ${AGENTS_NAV.label}에서 상태를 볼 수 있어요.`
     );
     expect(WELCOME_BACKSTOP_COPY).not.toMatch(/실패|오류|error|fail/i);
+    expect(WELCOME_BACKSTOP_COPY.endsWith(".")).toBe(true);
+    expect(WELCOME_BACKSTOP_LINK_LABEL).toBe(AGENTS_NAV.label);
+    expect(WELCOME_BACKSTOP_HREF).toBe(AGENTS_NAV.to);
+  });
+
+  it("constellation is a unique-kind slice of CLOUD_BODIES", () => {
+    expect(WELCOME_KICKOFF_SHAPES.length).toBeGreaterThanOrEqual(3);
+    expect(WELCOME_KICKOFF_SHAPES.length).toBeLessThanOrEqual(5);
+    const kinds = WELCOME_KICKOFF_SHAPES.map((body) => body.kind);
+    expect(new Set(kinds).size).toBe(WELCOME_KICKOFF_SHAPES.length);
+    for (const shape of WELCOME_KICKOFF_SHAPES) {
+      expect(CLOUD_BODIES).toContainEqual(shape);
+    }
   });
 
   it("2001 characters is a sentence rejection", () => {

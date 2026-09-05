@@ -1,4 +1,9 @@
 import { uuidEq } from "@momo/core/lib/api";
+import {
+  CLOUD_BODIES,
+  type CloudBody,
+} from "@/features/auth/cloudBodies";
+import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
 
 // =============================================================================
 // Welcome kickoff model (UX-R2b / ADR-0181 D7).
@@ -17,13 +22,11 @@ export const WELCOME_DEFAULT_CHANNEL_NAME = "general";
 
 export const WELCOME_STAGE_COPY = "팀이 준비하고 있어요";
 
-export const WELCOME_BACKSTOP_COPY =
-  "에이전트가 아직 준비 중이에요. 설정 › 에이전트에서 상태를 볼 수 있어요";
+export const WELCOME_BACKSTOP_COPY = `에이전트가 아직 준비 중이에요. ${AGENTS_NAV.label}에서 상태를 볼 수 있어요.`;
 
-export const WELCOME_BACKSTOP_LINK_LABEL = "설정 › 에이전트";
+export const WELCOME_BACKSTOP_LINK_LABEL = AGENTS_NAV.label;
 
-/** Agent hub is the product surface that shows agent status. */
-export const WELCOME_BACKSTOP_HREF = "/agents";
+export const WELCOME_BACKSTOP_HREF = AGENTS_NAV.to;
 
 export const WELCOME_PROMPT_MAX_CHARS = 2000;
 
@@ -34,15 +37,27 @@ export const WELCOME_KICKOFF_ITEM_KEY = "welcome-kickoff";
 
 export type WelcomeKickoffPhase = "hidden" | "stage" | "exiting" | "backstop";
 
-export type WelcomeCloudKind = "comet" | "asteroid" | "star";
+export type WelcomeCloudKind = CloudBody["kind"];
 
-/** 4 line-art bodies. OortCloudMark kinds; mascot body untouched. */
-export const WELCOME_KICKOFF_SHAPES: readonly WelcomeCloudKind[] = [
-  "comet",
-  "asteroid",
-  "star",
-  "comet",
-];
+/**
+ * Constellation is a unique-kind slice of `CLOUD_BODIES` (size / rotate /
+ * tone per body). No repeated comet.
+ */
+export const WELCOME_KICKOFF_SHAPES: readonly CloudBody[] = pickWelcomeBodies(
+  CLOUD_BODIES
+);
+
+function pickWelcomeBodies(bodies: readonly CloudBody[]): CloudBody[] {
+  const seen = new Set<CloudBody["kind"]>();
+  const picked: CloudBody[] = [];
+  for (const body of bodies) {
+    if (seen.has(body.kind)) continue;
+    seen.add(body.kind);
+    picked.push(body);
+    if (picked.length === 3) break;
+  }
+  return picked;
+}
 
 export function welcomeShownKey(workspaceId: string, memberId: string): string {
   return `${WELCOME_SHOWN_STORAGE_PREFIX}:${workspaceId}:${memberId}`;
@@ -63,6 +78,8 @@ export type WelcomeMountReason =
   | "wrong-member"
   | "not-default-channel"
   | "timeline-not-ready"
+  | "directory-not-ready"
+  | "unresolved-author"
   | "has-agent-message"
   | "already-shown";
 
@@ -77,6 +94,8 @@ export function decideWelcomeMount(input: {
   channelKind?: string;
   channelName?: string;
   timelineStatus: "loading" | "ready" | "error";
+  directoryStatus: "pending" | "success" | "error";
+  hasUnresolvedAuthor: boolean;
   hasAgentAuthoredMessage: boolean;
   shown: boolean;
 }): WelcomeMountDecision {
@@ -99,6 +118,12 @@ export function decideWelcomeMount(input: {
   }
   if (input.timelineStatus !== "ready") {
     return { show: false, reason: "timeline-not-ready" };
+  }
+  if (input.directoryStatus !== "success") {
+    return { show: false, reason: "directory-not-ready" };
+  }
+  if (input.hasUnresolvedAuthor) {
+    return { show: false, reason: "unresolved-author" };
   }
   if (input.hasAgentAuthoredMessage) {
     return { show: false, reason: "has-agent-message" };

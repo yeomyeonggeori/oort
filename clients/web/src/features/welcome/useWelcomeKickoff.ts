@@ -25,6 +25,7 @@ export function useWelcomeKickoff(input: {
   channelName?: string;
   channelId: string | null;
   timelineStatus: "loading" | "ready" | "error";
+  directoryStatus: "pending" | "success" | "error";
   messages: readonly { id: string; authorMemberId: string; channelId?: string }[];
   directory: Directory;
   realtime: RealtimeHandle | null;
@@ -41,6 +42,7 @@ export function useWelcomeKickoff(input: {
     channelName,
     channelId,
     timelineStatus,
+    directoryStatus,
     messages,
     directory,
     realtime,
@@ -63,10 +65,14 @@ export function useWelcomeKickoff(input: {
   }
 
   const authorKind = (id: string) => memberFor(directory, id)?.kind;
+  const hasUnresolvedAuthor =
+    directoryStatus === "success" &&
+    messages.some((message) => memberFor(directory, message.authorMemberId) == null);
 
   if (
     !lockedRef.current &&
     timelineStatus === "ready" &&
+    directoryStatus === "success" &&
     messagesBelongToChannel(messages, channelId)
   ) {
     const decision = decideWelcomeMount({
@@ -76,6 +82,8 @@ export function useWelcomeKickoff(input: {
       channelKind,
       channelName,
       timelineStatus,
+      directoryStatus,
+      hasUnresolvedAuthor,
       hasAgentAuthoredMessage: hasAgentAuthoredMessage(messages, authorKind),
       shown: readShownMarker(workspaceId, memberId),
     });
@@ -103,11 +111,15 @@ export function useWelcomeKickoff(input: {
     return null;
   })();
 
-  const finish = useCallback(() => {
+  const persistExit = useCallback(() => {
     clearFreshSignup();
     writeShownMarker(workspaceId, memberId);
-    setPhase("hidden");
   }, [workspaceId, memberId]);
+
+  const finish = useCallback(() => {
+    persistExit();
+    setPhase("hidden");
+  }, [persistExit]);
 
   const beginExit = useCallback(() => {
     const current = phaseRef.current;
@@ -128,10 +140,12 @@ export function useWelcomeKickoff(input: {
   useEffect(() => {
     if (phase !== "stage") return;
     const timer = window.setTimeout(() => {
-      setPhase((current) => (current === "stage" ? "backstop" : current));
+      if (phaseRef.current !== "stage") return;
+      persistExit();
+      setPhase("backstop");
     }, WELCOME_BACKSTOP_MS);
     return () => window.clearTimeout(timer);
-  }, [phase]);
+  }, [phase, persistExit]);
 
   useEffect(() => {
     if (!realtime || channelId === null) return;
