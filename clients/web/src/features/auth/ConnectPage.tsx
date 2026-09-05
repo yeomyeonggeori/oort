@@ -751,7 +751,7 @@ export function ConnectPage({
             />
           ) : null}
           <label className="flex flex-col gap-1 text-body">
-            <FieldLabel>표시 이름</FieldLabel>
+            <FieldLabel optional>표시 이름</FieldLabel>
             <Input
               ref={profileNameRef}
               id="onboarding-profile-name"
