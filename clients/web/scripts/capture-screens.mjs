@@ -9283,16 +9283,11 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       { channelId: GENERAL_ID, agentId: HERMES }
     );
     await page.getByTestId("timeline-message").waitFor({ state: "visible" });
-    // Stage exit ends, then the opener's enter-conversation starts (product
-    // hold). One waitForAnimations can return in that gap; a second pass after
-    // two frames is the rest state. Measured: run1/run2 arrived hashes differed
-    // when a single wait shot the blur-from frame.
-    await waitForAnimations(page);
-    await page.evaluate(
+    await page.waitForFunction(
       () =>
-        new Promise((resolve) => {
-          requestAnimationFrame(() => requestAnimationFrame(resolve));
-        })
+        [...document.querySelectorAll('[data-testid="timeline-message"]')].some(
+          (node) => node.classList.contains("enter-conversation")
+        )
     );
     await waitForAnimations(page);
     const path = `${OUT_DIR}/welcome-arrived-${scheme}.png`;
@@ -9308,6 +9303,10 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     await waitForWelcomeStage(page);
     await page.clock.fastForward(120_000);
     await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
+    await page.clock.resume();
+    await waitForAnimations(page);
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
     const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
     await page.screenshot({ path });
     shots.push(path);
@@ -9317,6 +9316,35 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
   return shots;
 }
 
+async function captureSettingsWelcomeScenes(browser, scheme) {
+  const shots = [];
+  const context = await browser.newContext({
+    viewport: VIEWPORT,
+    deviceScaleFactor: 2,
+    colorScheme: scheme,
+    reducedMotion: "reduce",
+  });
+  await installMocks(context);
+  const page = await context.newPage();
+  await page.goto(ORIGIN, { waitUntil: "networkidle" });
+  await signIn(page);
+  await page.evaluate('location.hash = "/settings?section=workspace"');
+  await page.getByTestId("settings-route").waitFor({ state: "visible" });
+  const block = page.getByTestId("workspace-welcome-kickoff");
+  await block.waitFor({ state: "visible" });
+  await waitForAnimations(page);
+  const vp = page.viewportSize() ?? VIEWPORT;
+  await page.mouse.move(vp.width + 80, vp.height + 80);
+  const path = `${OUT_DIR}/settings-welcome-${scheme}.png`;
+  await page.screenshot({ path });
+  shots.push(path);
+  await context.close();
+  return shots;
+}
+
+// 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
+// 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
+// 가면서도 자기 다이얼로그만 찍고 지나간다.
 async function captureEmptyConversationScenes(browser, scheme) {
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
@@ -9381,11 +9409,28 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
     window.location.hash = `#/c/${id}`;
   }, CHANNEL_ID);
   await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
-  await scrollTimelineRowIntoView(
-    page,
-    "message-channel-intro",
-    `nonempty intro ${scheme}`
-  );
+  await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
+  await page.waitForFunction(() => {
+    const scroller = document.querySelector("[data-virtuoso-scroller]");
+    return Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 200);
+  });
+  // #2057 N-4: virtuoso sometimes keeps shifting the intro for more than the
+  // helper's three stable frames. One retry after the list height is known.
+  try {
+    await scrollTimelineRowIntoView(
+      page,
+      "message-channel-intro",
+      `nonempty intro ${scheme}`
+    );
+  } catch (err) {
+    if (!String(err).includes("자리가 멎지 않았다")) throw err;
+    await page.waitForTimeout(200);
+    await scrollTimelineRowIntoView(
+      page,
+      "message-channel-intro",
+      `nonempty intro ${scheme}`
+    );
+  }
   const intro = page.getByTestId("message-channel-intro");
   const actionCount = await intro.locator("button").count();
   if (actionCount !== 0) {
@@ -12311,6 +12356,7 @@ async function main() {
           all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
           all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
           all.push(...(await shot(() => captureWelcomeKickoffScenes(browser, scheme))));
+          all.push(...(await shot(() => captureSettingsWelcomeScenes(browser, scheme))));
           all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
           all.push(...(await shot(() => captureNonemptyChannelIntroScenes(browser, scheme))));
           all.push(...(await shot(() => captureAddMemberScenes(browser, scheme))));
