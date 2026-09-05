@@ -27,10 +27,11 @@ import { buttonVariants } from "./ui/button";
  * (not `disabled:`/`aria-disabled:` variants), minus text links. No hover/press
  * marker gating. No file-name escapes.
  *
- * "Has press" is the named vocabulary only: `.press`, `.press-instant-fill`,
- * `scrim-press`, `active:bg-surface-pressed`, or a `@utility` whose `:active`
+ * "Has press" is the named vocabulary only: `.press`, `scrim-press`,
+ * `press-instant-fill` (a `@utility` whose `:active` paints `--surface-pressed`),
+ * `active:bg-surface-pressed`, or a `@utility` whose `:active`
  * block uses `--surface-pressed` or `--motion-instant`. An arbitrary
- * `:active { color }` does not count.
+ * `:active { color }` does not count. A named press member must paint.
  *
  * Full-width is a **width**, not a class token: source heuristic (list rows,
  * `w-full`, `summary`, parent-`li` row) plus a capture runtime probe
@@ -2411,5 +2412,20 @@ export function Probe() {
       /hover:bg-surface-hover press-instant-fill/
     );
     expect(CAPTURE_SRC).toMatch(/function assertInstantFillSwatch/);
+  });
+
+  it("갤러리 눌림 어휘는 tokens.css 파생 집합을 포함한다 (N6-1)", () => {
+    const gallery = new Set(stringArrayConst(GALLERY_SRC, "MOTION_VOCABULARY"));
+    const derived = cssUtilitiesWithNamedPress(TOKENS_CSS);
+    const missing = [...derived].filter((name) => !gallery.has(name)).sort();
+    expect(missing, `gallery missing press utilities: ${missing.join(",")}`).toEqual(
+      []
+    );
+    expect(gallery.has("plugin-marketplace-row")).toBe(true);
+    const dropped = GALLERY_SRC.replace(/"plugin-marketplace-row",\n/, "");
+    const droppedSet = new Set(stringArrayConst(dropped, "MOTION_VOCABULARY"));
+    expect(
+      [...derived].filter((name) => !droppedSet.has(name))
+    ).toContain("plugin-marketplace-row");
   });
 });

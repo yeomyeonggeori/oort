@@ -103,6 +103,7 @@ const MOTION_VOCABULARY = [
   "press",
   "press-instant-fill",
   "scrim-press",
+  "plugin-marketplace-row",
   "motion-instant",
   "motion-fast",
   "motion-standard",
@@ -930,6 +931,16 @@ function GalleryBody() {
                 <button
                   type="button"
                   className="rounded-sm border border-line-strong px-3 py-2 text-meta text-ink scrim-press"
+                >
+                  {name}
+                </button>
+              </figure>
+            ) : name === "plugin-marketplace-row" ? (
+              <figure key={name} className="flex min-w-action-sm flex-col gap-2">
+                <figcaption className="text-meta text-ink-muted">{name}</figcaption>
+                <button
+                  type="button"
+                  className="plugin-marketplace-row rounded-sm px-3 py-2 text-left text-meta text-ink"
                 >
                   {name}
                 </button>
