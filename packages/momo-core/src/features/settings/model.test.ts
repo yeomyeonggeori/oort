@@ -39,7 +39,9 @@ import {
   workHostStatus,
   workHostTypeLabel,
   workspaceNameError,
+  displayNameFieldError,
   displayNameSaveMessage,
+  DISPLAY_NAME_MAX_CHARS,
   workTierPolicySaveMessage,
 } from "./model";
 
@@ -392,6 +394,15 @@ describe("프로필 표시 이름 error copy", () => {
     expect(displayNameSaveMessage(new Error("network"))).toBe(
       "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
     );
+  });
+
+  it("rejects 81 characters in a sentence, and accepts 80", () => {
+    expect(DISPLAY_NAME_MAX_CHARS).toBe(80);
+    expect(displayNameFieldError("가".repeat(80))).toBeNull();
+    expect(displayNameFieldError("가".repeat(81))).toBe(
+      "표시 이름은 80자까지 쓸 수 있습니다."
+    );
+    expect(displayNameFieldError("가".repeat(81))).not.toMatch(/80자 초과/);
   });
 });
 
