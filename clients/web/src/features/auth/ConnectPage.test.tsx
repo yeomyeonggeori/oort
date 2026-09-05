@@ -415,6 +415,40 @@ describe("BZ-6b onboarding profile step", () => {
     expect(sessionStorage.getItem(FRESH_SIGNUP_KEY)).toBeNull();
   });
 
+  it("writes the fresh-signup marker at join success, before any S3 interaction, and only once", async () => {
+    const writes: string[] = [];
+    const orig = Storage.prototype.setItem;
+    const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string
+    ) {
+      if (key === FRESH_SIGNUP_KEY) writes.push(value);
+      return orig.call(this, key, value);
+    });
+    try {
+      const onLoggedIn = await submitJoinFromPrefill();
+      await vi.waitFor(() => {
+        expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
+      });
+      expect(onLoggedIn).not.toHaveBeenCalled();
+      expect(writes).toHaveLength(1);
+      expect(JSON.parse(writes[0] ?? "null")).toEqual({
+        workspaceId: session.member.workspaceId,
+        memberId: session.member.id,
+      });
+      await act(async () => {
+        click("onboarding-profile-skip");
+      });
+      await vi.waitFor(() => {
+        expect(onLoggedIn).toHaveBeenCalledTimes(1);
+      });
+      expect(writes).toHaveLength(1);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("opens S3 after a join that created the member, with no 뒤로 and counter 4/4", async () => {
     const onLoggedIn = await submitJoinFromPrefill();
     await vi.waitFor(() => {
