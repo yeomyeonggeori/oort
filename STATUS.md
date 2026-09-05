@@ -1,26 +1,33 @@
 # oort 진행 현황
 
-## UX-R2a 온보딩 S3 프로필 스텝 (#2001, 2026-09-05)
+## UX-R2a 온보딩 S3 프로필 스텝 (#2001, 2026-09-05, R2)
 
 - Track UXUI. S3 = 표시 이름 only. Personal avatar upload route does not exist (workspace avatar is operator-only). No disabled avatar control on S3.
 - `onboardingFlow` steps `landing|gateway|account|profile`. `progressLabel`: gateway `2/4` · account `3/4` · profile `4/4`. `transitionFor("account","profile",false)` = line-slide forward; reduced-motion = none.
-- Join with `createdMember: true` holds the session, paints S3, calls `onLoggedIn` on skip / save / fail-forward. Sign-in and `createdMember: false` skip S3. `joinWithInvite` returns `JoinResponse` (`createdMember` boolean; non-boolean = `WireShapeError`). Shared ceiling `DISPLAY_NAME_MAX_CHARS = 80`, sentence `"표시 이름은 80자까지 쓸 수 있습니다."`
-- Join `applyLogin` persists before S3 `onLoggedIn`. Hold: `holdSessionRestore` so App does not enter `restoring` and unmount ConnectPage. Measured: first capture waitFor(`onboarding-profile`) 30000ms timeout; after hold, S3 paints (card center profile light/dark).
-- Seam `clients/web/src/features/welcome/freshSignup.ts` (bytes from `claudedocs/resume-2026-09-04/seam-freshSignup.ts`). `markFreshSignup` before `onLoggedIn` on the three S3 exits and on `ClaimPage`.
-- Test counts: `onboardingFlow.test.ts` 8 → 9. `ConnectPage.test.tsx` 11 → 21. `model.test.ts` 47 → 48. `joinApi.test.ts` 3 (new). Web suite 2688 passed (226 files). Core 1979 passed (99 files).
-- Counter strings that asserted `2/3`/`3/3` (product+tests): 6 across `onboardingFlow.ts` (2), `onboardingFlow.test.ts` (2 expects), `ConnectPage.test.tsx` (2). After: `2/4`/`3/4`/`4/4` in those files plus capture `4/4` and S3 chrome comment. Gates/e2e did not assert `2/3`.
-- Capture `CAPTURE_PORT=8641`: run 1 wrote S3 four desktop PNGs then aborted on nonempty intro-scroll (`#2057` N-4). Run 2 aborted waiting for `design-gallery` 30000ms (before S3). Run 3 full exit 0. Desktop S3 sha256 run1 = run3:
+- Join with `createdMember: true` holds the session, paints S3, calls `onLoggedIn` on skip / save / fail-forward. Sign-in and `createdMember: false` skip S3. `joinWithInvite` returns `JoinResponse` (`createdMember` boolean; non-boolean = `WireShapeError`). That hardness is contract-correct: openapi marks `createdMember` required. Shared rule `DISPLAY_NAME_MAX_CHARS = 100` mirrors `normalized_join_display_name` (`server-rust/crates/momo-settings/src/join.rs:167`): trim · non-empty · ≤ 100. Empty/whitespace sentence `"표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."` · over 100 `"표시 이름은 100자까지 쓸 수 있습니다."` ProfileSection and S3 consume the same function. Empty never PATCHes (primary disabled; wire mock `changeMyDisplayName` not called).
+- Join `applyLogin` persists before S3 `onLoggedIn`. Hold: `holdSessionRestore` so App does not enter `restoring` and unmount ConnectPage. Measured: first capture waitFor(`onboarding-profile`) 30000ms timeout; after hold, S3 paints. S3 render is `step === "profile" && pendingJoin` so `finishProfile` has no `!pendingJoin` early return. Unmount cleanup calls `releaseSessionRestore()`. A leaked hold is inert for the rest of this page lifetime: `signIn` claims `attempted.current` first (design-review #2088 R1 sabotage S5: deleting the S3 release left 38/38 green). Release still runs on skip · save · 계속 · unmount (each `toHaveBeenCalledTimes(1)`, `sessionRestoreHeld()` false).
+- Seam `clients/web/src/features/welcome/freshSignup.ts` (bytes from `claudedocs/resume-2026-09-04/seam-freshSignup.ts`, file untouched in R2). `markFreshSignup` runs at join success (`createdMember: true`), before S3 shows. `ClaimPage` unchanged. sessionStorage survives a same-tab reload.
+- S3 coverage is `ConnectPage.test.tsx` (mocked `@momo/core/lib/api`, PATCH bodies asserted) plus capture scenes. No e2e lane submits a join today (`advanceToAccount` defaults `path: "server"`; a join needs a live invite). `skipProfileIfPresent` deleted (zero callers). A join e2e lane is a gap (NOTES). Sign-in gates unchanged.
+- Test counts: `onboardingFlow.test.ts` 8 → 9. `ConnectPage.test.tsx` 11 → 34. `model.test.ts` 47 → 49. `joinApi.test.ts` 3 (new). Web suite **2701** passed (226 files). Core **1980** passed (99 files).
+- Capture `CAPTURE_PORT=8641`: run 1 full **exit 0**. Runs 2 and 3 wrote the S3 scenes then aborted on nonempty intro-scroll (`#2057` N-4, two honest attempts). S3 sha256 run 1 = run 2 = run 3. Scenes: `onboarding-profile` (rest), `onboarding-profile-field-error` (101-char sentence), `onboarding-profile-banner` (fail-forward: banner + 다시 시도 + 계속), both schemes, desktop + 390.
 
 | file | sha256 |
 |---|---|
-| onboarding-profile-light.png | `b68eb776877a20cf699bed26115de5863a7b05fe1e307716f297a83c3a8ff59c` |
-| onboarding-profile-error-light.png | `7c846bdc96334259ec3294a9c5aceaa6854e1b0d30e29e07b96bafd1f6d25188` |
-| onboarding-profile-dark.png | `1ed21b70c31f09e28b8db7a4825a41342fae08b3fafbb7287bfcd467cce4fc77` |
-| onboarding-profile-error-dark.png | `a15e1847bfa1f88800edc82d7b47284c834dcd93df48a318deee85d5d31c0750` |
+| onboarding-profile-light.png | `68d6d54e5d1656d11e382155e81e506482fa9f65d3dde714c187085d4c3e997e` |
+| onboarding-profile-field-error-light.png | `325a1e6b72f77e4bfd58d5cd423bd4d8a847b6395d036179d217ac86d1735f11` |
+| onboarding-profile-banner-light.png | `3c14ab0aa72b29dc8f47c9857ddd85d1baf94ad9f8814055525f3e6800d8191f` |
+| onboarding-profile-dark.png | `3bec98744e0a3d36da78752ab1742e953b53cf38c31987a5383ab926be00aa91` |
+| onboarding-profile-field-error-dark.png | `5e70234066563847eca6928ec1eb384906668800ecf56ae3588e449f8c9cb681` |
+| onboarding-profile-banner-dark.png | `c4dbc2377bbd8170f036ae13db21a30bc9d145e0db1080b9714602919e396060` |
+| mobile-onboarding-profile-light.png | `c1010df78d9991244954f2ab03c03cbb51c91d561faae3b04b2828477c073680` |
+| mobile-onboarding-profile-field-error-light.png | `cb4841bcfb8b1ee17f175db67ec976ceabe99931db192d2c013b5f50279c5f04` |
+| mobile-onboarding-profile-banner-light.png | `e17f9124898558a15fcecffb5ac13b0e226dc661a4ffc1e7af9d3db0e30fe777` |
+| mobile-onboarding-profile-dark.png | `35589db5bddcd4f21ef9481ae06475d7df875147dde53ab5a42c5a41a28eb5ad` |
+| mobile-onboarding-profile-field-error-dark.png | `12e3e775851459f36a1be2273ee647548e5643fdee0456dce9771768d4657668` |
+| mobile-onboarding-profile-banner-dark.png | `877305970029a9ddd07165725d77e040aa3e3fc7b3b45e04ef191c2389ec582e` |
 
-- Preflight web 14/14 + core 5/5. Lint 0 errors (14 pre-existing warnings). `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. smoke/connect e2e not run (`MOMO_EMAIL` unset).
-- Join lanes that learned S3: `capture-screens.mjs` `shootOnboardingProfile`; `advanceOnboarding.mjs` `skipProfileIfPresent` + `ONBOARDING_SURFACE`. Sign-in gates unchanged.
-- runtime-unverified: live smoke/connect. design-review is not this worker.
+- Preflight web 14/14 + core 5/5. Lint 0 errors (14 pre-existing warnings). `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `npm --prefix clients/mobile run typecheck` green. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS. smoke/connect e2e not run (`MOMO_EMAIL` unset).
+- runtime-unverified: live smoke/connect; join e2e lane. design-review is not this worker.
 
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
