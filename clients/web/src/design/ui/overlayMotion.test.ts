@@ -16,8 +16,10 @@ import { buttonVariants } from "./button";
  *
  * Browser-free half (always runs): compile the motion class lists through
  * Tailwind and assert the emitted rules. A comment cannot satisfy this.
- * Product callers that wrap DialogContent in `{open && …}` are scanned in
- * the same file so a missing Chromium cannot hide that regression.
+ * Closed overlay/content pointer-events must compile to `none !important`
+ * so they beat Radix OverlayImpl's inline `auto` (#1997 H-1). Product
+ * callers that wrap DialogContent in `{open && …}` are scanned in the same
+ * file so a missing Chromium cannot hide that regression.
  *
  * Playwright half (skipIf, loud): closed-state dwell on a shipped product
  * dialog (SectionDeleteConfirmDialog), plus popover/menu durations.
@@ -111,7 +113,15 @@ function quotedClassTokens(source: string): string[] {
 }
 
 function escapedClassSelector(candidate: string): string {
-  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
+  return "." + candidate.replace(/[:[\]=.!]/g, (ch) => "\\" + ch);
+}
+
+function ruleFor(css: string, token: string): string {
+  const selector = escapedClassSelector(token);
+  const from = css.indexOf(selector);
+  if (from < 0) return "";
+  const to = css.indexOf("}", from);
+  return to < 0 ? css.slice(from) : css.slice(from, to + 1);
 }
 
 async function loadStylesheet(id: string, base: string) {
@@ -206,9 +216,27 @@ describe("UX-R1a compiled CSS (browser-free)", () => {
     const css = await buildCss(tokens);
     expect(css).toMatch(/var\(--motion-modal-open\)/);
     expect(css).toMatch(/var\(--motion-modal-close\)/);
-    expect(tokens).toContain("data-[state=closed]:pointer-events-none");
+    expect(tokens).toContain("data-[state=closed]:pointer-events-none!");
     for (const token of tokens) {
       expect(css.includes(escapedClassSelector(token)), token).toBe(true);
+    }
+  });
+
+  it("closed overlay/content pointer-events is none !important (beats Radix inline auto)", async () => {
+    // This literal is also why a dist CSS diff cannot witness the `!`:
+    // Tailwind scans test text (README §2.3 `pt-[13px]` trap). The guard
+    // compiles the constant, not the stylesheet hash. Do not remove it.
+    const closed = "data-[state=closed]:pointer-events-none!";
+    for (const [name, className] of [
+      ["MODAL_OVERLAY_MOTION", MODAL_OVERLAY_MOTION],
+      ["MODAL_CONTENT_MOTION", MODAL_CONTENT_MOTION],
+    ] as const) {
+      const tokens = classTokens(className);
+      expect(tokens, name).toContain(closed);
+      const css = await buildCss(tokens);
+      const rule = ruleFor(css, closed);
+      expect(rule, `${name} emitted closed rule`).not.toBe("");
+      expect(rule, name).toMatch(/pointer-events\s*:\s*none\s*!important/);
     }
   });
 
@@ -236,6 +264,10 @@ describe("UX-R1a primitive wiring (comment-stripped)", () => {
     const code = codeOnly(FILES.dialog);
     expect(code).toMatch(/\bMODAL_OVERLAY_MOTION\b/);
     expect(code).toMatch(/\bMODAL_CONTENT_MOTION\b/);
+    // #1997 H-1: closed pe=none is the `!` class, not an inline assignment.
+    expect(code).not.toMatch(/\bpointerEvents\b/);
+    expect(code).not.toMatch(/DialogOpenContext/);
+    expect(code).not.toMatch(/design-preflight-allow/);
   });
 
   it("popover, dropdown-menu, context-menu import and pass POPOVER_MOTION", () => {
@@ -445,6 +477,112 @@ describe.skipIf(!chromiumAvailable)(
         expect(Math.round(closed.duration)).toBe(CLOSE.dialog.ms);
         expect(dwell, `product dialog unmount dwell ${dwell}ms`).toBeGreaterThanOrEqual(140);
         expect(dwell).toBeLessThan(500);
+      } finally {
+        await browser.close();
+      }
+    }, 60_000);
+
+    async function behindPoint(page: import("playwright").Page) {
+      const box = await page.getByTestId("click-behind").boundingBox();
+      if (!box) throw new Error("click-behind missing");
+      return { x: box.x + Math.min(8, box.width / 2), y: box.y + Math.min(8, box.height / 2) };
+    }
+
+    async function behindClicks(page: import("playwright").Page): Promise<number> {
+      return page.getByTestId("click-behind").evaluate((el) =>
+        Number(el.getAttribute("data-clicks") ?? "0")
+      );
+    }
+
+    /**
+     * Wait for `data-state=closed` on a pinned node, then sample at `delayMs`
+     * in the same in-page turn. Stop (connected=false) once the node detaches.
+     * 30/60/90 sits inside CLOSE.dialog (150ms) with margin; 120 was 30ms
+     * inside the exit and flaked under full-suite CDP load (#1997 H-1).
+     */
+    async function sampleClosedOverlayAfter(
+      page: import("playwright").Page,
+      overlaySelector: string,
+      delayMs: number
+    ): Promise<{ connected: boolean; state: string | null; pointerEvents: string }> {
+      return page.evaluate(
+        ({ selector, ms }) =>
+          new Promise((resolve, reject) => {
+            const el = document.querySelector(selector);
+            if (!el) {
+              resolve({ connected: false, state: null, pointerEvents: "" });
+              return;
+            }
+            const waitClosed = (deadline: number) => {
+              if (!el.isConnected) {
+                resolve({ connected: false, state: null, pointerEvents: "" });
+                return;
+              }
+              if (el.getAttribute("data-state") === "closed") {
+                window.setTimeout(() => {
+                  if (!el.isConnected) {
+                    resolve({ connected: false, state: null, pointerEvents: "" });
+                    return;
+                  }
+                  resolve({
+                    connected: true,
+                    state: el.getAttribute("data-state"),
+                    pointerEvents: getComputedStyle(el).pointerEvents,
+                  });
+                }, ms);
+                return;
+              }
+              if (performance.now() > deadline) {
+                reject(new Error(`${selector} never reached data-state=closed`));
+                return;
+              }
+              requestAnimationFrame(() => waitClosed(deadline));
+            };
+            waitClosed(performance.now() + 500);
+          }),
+        { selector: overlaySelector, ms: delayMs }
+      );
+    }
+
+    it("Escape then click-behind at 30/60/90ms lands; open overlay still blocks", async () => {
+      const { browser, page } = await launchProbe();
+      const overlaySelector = ".bg-scrim";
+      try {
+        const open = async () => {
+          await page.getByTestId("open-dialog").click();
+          await page
+            .locator('[data-testid="sidebar-section-delete-confirm"][data-state="open"]')
+            .waitFor({ state: "visible" });
+        };
+        await open();
+        const { x, y } = await behindPoint(page);
+        const blockedBefore = await behindClicks(page);
+        await page.mouse.click(x, y);
+        expect(
+          await behindClicks(page),
+          "open overlay must block the control behind"
+        ).toBe(blockedBefore);
+
+        for (const delay of [30, 60, 90]) {
+          const lingering = page.locator(overlaySelector).first();
+          if ((await lingering.count()) > 0) {
+            if ((await lingering.getAttribute("data-state")) === "open") {
+              await page.keyboard.press("Escape");
+            }
+            await lingering.waitFor({ state: "detached", timeout: 2_000 });
+          }
+          await open();
+          await page.keyboard.press("Escape");
+          const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
+          expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
+          expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
+          const before = await behindClicks(page);
+          await page.mouse.click(x, y);
+          expect(
+            await behindClicks(page),
+            `t+${delay}ms click behind ${overlaySelector}`
+          ).toBe(before + 1);
+        }
       } finally {
         await browser.close();
       }

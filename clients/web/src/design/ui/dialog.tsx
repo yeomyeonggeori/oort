@@ -3,10 +3,10 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/design/lib/cn";
 import { MODAL_CONTENT_MOTION, MODAL_OVERLAY_MOTION } from "@/design/motion";
 
-// shadcn/ui new-york Dialog (vendored, Radix primitive). The palette already
-// ships one dialog through cmdk's Command.Dialog, which wraps this same Radix
-// root; a form dialog needs the root directly, so it is vendored here rather
-// than hand-rolled (design-taste-web §1: reach for the primitive).
+// shadcn/ui new-york Dialog (vendored, Radix primitive). The ⌘K palette
+// consumes this same Root (`QuickSwitcher` PaletteLayer), not cmdk's
+// `Command.Dialog`. A form dialog needs the root directly, so it is vendored
+// here rather than hand-rolled (design-taste-web §1: reach for the primitive).
 //
 // House deviations from stock shadcn:
 //   - no built-in ✕ button. A dialog here closes with Esc and with its own

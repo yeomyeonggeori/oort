@@ -1256,7 +1256,7 @@ export function ChatShell() {
         )}
       </div>
 
-      {thread && channelId !== null && !workPanelOpen && (
+      {channelId !== null && !workPanelOpen && (
         <ThreadPanel
           workspaceId={workspaceId}
           channelId={channelId}
@@ -1281,6 +1281,8 @@ export function ChatShell() {
             // ThreadPanel.closePanel은 onClose() 뒤에 opener.focus()를 부르는데,
             // React는 언마운트 커밋 전까지 속성을 떼지 않으므로 그 focus()보다 먼저
             // 여기서 뗀다. `covered` 효과가 다시 맞춘다(뗄 게 없으면 no-op).
+            // Presence stays mounted on this host so a new root can interrupt
+            // the visual exit; parent state flips immediately (#1997 B-1).
             coveredRef.current?.removeAttribute("inert");
             setThread(null);
           }}

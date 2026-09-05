@@ -218,7 +218,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 |---|---|---|
 | `--motion-instant` | 120ms | 피드백 — 눌림·색·툴팁 |
 | `--motion-fast` | 180ms | 작은 표면 — 팝오버·드롭다운·칩 |
-| `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입·사이드바 접기·**드로어**(`--duration-sidebar`도 이 값) |
+| `--motion-standard` | 240ms | 상태 변화 — 패널·리스트 삽입. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 |
 | `--motion-arrival` | 500ms | 합성 도착 — 새 메시지·첫 진입. UX-R1d: `motion-enter-conversation` + `@utility enter-conversation` |
 | `--motion-modal-open` / `--motion-modal-close` | 200ms / 150ms | D4 예외 2호. `motion.ts`의 `MODAL_*_MOTION` 이 소비 |
 | `--motion-ease-standard` | `cubic-bezier(0.25, 1, 0.5, 1)` | 기존 `ease-out` 손기입의 흡수처 |
@@ -390,7 +390,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 | 층 | 어디 | 무엇 |
 |---|---|---|
-| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 13분류 + 코어 5분류, **하드 제로** |
+| **셸 그렙 프리플라이트** | `scripts/design_preflight_web.sh` | 웹 14분류 + 코어 5분류, **하드 제로** |
 | **단위 스위트 단정** | `clients/web/src/**/*.test.ts` · `clients/mobile/__tests__/*` | 토큰 산술 · 소스 전수 스윕 · 렌더 트리 실측 |
 | **Playwright 게이트** | `clients/web/gates/gate-*.mjs` (24개) | 티켓별 기하·상태·회귀. 셋만 렌더 대비를 계산한다 |
 | **캡처 레인** | `clients/web/scripts/capture-screens.mjs` · `clients/mobile/measure/*` | 사진 + 단정(가로 오버플로 0 · 탭 타깃 · 상단 여백 · 컴포저 가시성) |
@@ -406,7 +406,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **반경** | `--radius-*: initial`(이름 단계만) + `arbitrary_tw`(`rounded-[9px]`) + `designSystem.test.ts`(3단계·순서) | `designSystem.test.ts` 전수 스윕 | `designSystem.test.ts` — 짝 1 · 분기 1(상한 포함) ✅ (#1211) |
 | **타이포** | `--text-*: initial`(이름 단계만) + `arbitrary_tw`(`text-[13px]`) + `designSystem.test.ts`(롤마다 줄 높이·크기 중복 금지) | `designSystem.test.ts` 전수 스윕(`fontSize`·`lineHeight`) | `designSystem.test.ts` — 짝 1 · 나머지 관계 ✅ (#1211) |
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
-| **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion` | ❌ (M1a) | 값 파생은 M1a |
+| **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |
 | **위계** | §3.3 표 | 동 | — |
