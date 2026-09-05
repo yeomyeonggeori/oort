@@ -58,6 +58,8 @@ window.fetch = async (input: RequestInfo | URL) => {
         name: "새벽",
         updatedAtMs: 1_800_000_000_000,
         roleLabels: {},
+        welcomeAgentMemberId: null,
+        welcomePrompt: "",
       }),
       { status: 200, headers: { "content-type": "application/json" } }
     );

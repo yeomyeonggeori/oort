@@ -43,6 +43,7 @@ export function ChannelIntroBlock({
   intro,
   empty,
   peer,
+  hideWriteAction = false,
   onWrite,
   onAddMember,
 }: {
@@ -50,12 +51,16 @@ export function ChannelIntroBlock({
   /** Message count is 0: keep the empty-channel test ids the gates already use. */
   empty: boolean;
   peer?: RosterMember | null;
+  /** While the welcome stage is the leading invitation, hide the write CTA. */
+  hideWriteAction?: boolean;
   onWrite?: () => void;
   onAddMember?: () => void;
 }) {
   const run = (kind: "write" | "add-member") =>
     kind === "write" ? onWrite?.() : onAddMember?.();
-  const actions = empty ? intro.actions : [];
+  const actions = empty
+    ? intro.actions.filter((action) => !(hideWriteAction && action.kind === "write"))
+    : [];
 
   return (
     <div
