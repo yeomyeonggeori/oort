@@ -6892,6 +6892,7 @@ async function captureScheme(browser, scheme) {
     },
   });
   const loginShot = `${OUT_DIR}/login-${scheme}.png`;
+  await assertWideRowsFillOnly(login, `connect ${scheme}`);
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
 
@@ -7567,6 +7568,7 @@ async function captureScheme(browser, scheme) {
   //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
   await login.getByTestId("thread-anchor").first().click();
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(login, `thread ${scheme}`);
   const threadComposer = login.getByTestId("thread-composer-input");
   await threadComposer.waitFor({ state: "visible" });
   const threadFileInputs = await login
@@ -7860,6 +7862,7 @@ async function captureScheme(browser, scheme) {
   await agentHub.evaluate('location.hash = "/agents"');
   await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
   await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(agentHub, `agent hub ${scheme}`);
   const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
@@ -7952,6 +7955,18 @@ async function captureScheme(browser, scheme) {
     .getByTestId("inbox-approval-approve")
     .first()
     .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(approvals, `inbox ${scheme}`);
+  await approvals.evaluate('location.hash = "/activity"');
+  await approvals.getByTestId("activity-route").waitFor({ state: "visible" });
+  await approvals
+    .locator(
+      '[data-testid="feed-row"], [data-testid="activity-list"], [data-testid="activity-empty"], [data-testid="activity-unavailable"], [data-testid="activity-error"]'
+    )
+    .first()
+    .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(approvals, `activity ${scheme}`);
+  await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
+  await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
   const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
@@ -8106,6 +8121,7 @@ async function captureScheme(browser, scheme) {
   await notificationsPage
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
+  await assertWideRowsFillOnly(notificationsPage, `settings notifications ${scheme}`);
   const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
   await parkPointerOffViewport(notificationsPage);
   await assertNotificationsDndRest(notificationsPage, scheme);
@@ -8163,6 +8179,7 @@ async function captureScheme(browser, scheme) {
     }))()`);
     throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
   }
+  await assertWideRowsFillOnly(draftsPage, `drafts ${scheme}`);
   const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
   await draftsPage.screenshot({ path: draftsShot });
   shots.push(draftsShot);
@@ -8437,6 +8454,7 @@ async function captureScheme(browser, scheme) {
     if (boundary > 0) {
       throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
     }
+    await assertWideRowsFillOnly(settingsSweep, `settings ${name} ${scheme}`);
     const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
     await settingsSweep.screenshot({ path: sectionShot });
     shots.push(sectionShot);
@@ -9313,6 +9331,7 @@ async function captureSearchScopeScenes(browser, scheme) {
   if (narrowed !== 2) {
     throw new Error(`좁힌 검색 행 수 ${scheme}: ${narrowed} (2여야 함)`);
   }
+  await assertWideRowsFillOnly(page, `search ${scheme}`);
   await page.waitForTimeout(200);
   const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
   await page.screenshot({ path: narrowShot });
@@ -11385,12 +11404,13 @@ const WIDE_MIN_PX = 480;
 const WIDE_MIN_FRAC = 0.5;
 
 /**
- * H5-1: full-width is a measured width. Walk interactive elements on the
- * shipped page, and for those ≥ 480px or ≥ 50% of `main`, `:active` transform
- * must be none. The four 638px cards go red with `.press`.
+ * H5-1 / M6-1: full-width is a measured width. Walk the whole interactive
+ * population on the shipped page; for those ≥ 480px or ≥ 50% of `main`,
+ * `:active` transform must be none. Prints visited count and the widest
+ * offenders (even when green). FeedRow at 1040px goes red with `.press`.
  */
 async function assertWideRowsFillOnly(page, label) {
-  const candidates = await page.evaluate(
+  const { visited, candidates } = await page.evaluate(
     ({ WIDE_MIN_PX: minPx, WIDE_MIN_FRAC: minFrac }) => {
       const main = document.querySelector("main") || document.body;
       const column = main.getBoundingClientRect().width;
@@ -11411,6 +11431,7 @@ async function assertWideRowsFillOnly(page, label) {
         '[role="treeitem"]',
       ].join(",");
       const out = [];
+      let visited = 0;
       let i = 0;
       for (const el of document.querySelectorAll(sel)) {
         if (!(el instanceof HTMLElement)) continue;
@@ -11426,6 +11447,7 @@ async function assertWideRowsFillOnly(page, label) {
         if (st.cursor === "not-allowed" || st.cursor === "wait") continue;
         const r = el.getBoundingClientRect();
         if (r.width < 2 || r.height < 2) continue;
+        visited += 1;
         const wide = r.width >= minPx || r.width >= minFrac * column;
         if (!wide) continue;
         const mark = `press-wide-${i}`;
@@ -11440,7 +11462,7 @@ async function assertWideRowsFillOnly(page, label) {
           text: (el.innerText || "").replace(/\s+/g, " ").slice(0, 48),
         });
       }
-      return out;
+      return { visited, candidates: out };
     },
     { WIDE_MIN_PX, WIDE_MIN_FRAC }
   );
@@ -11480,14 +11502,19 @@ async function assertWideRowsFillOnly(page, label) {
       el.removeAttribute("data-press-wide");
     });
   });
+  const widest = [...candidates]
+    .sort((a, b) => b.width - a.width)
+    .slice(0, 5)
+    .map((c) => `<${c.tag}> ${c.testId || c.text} width=${c.width}`)
+    .join("; ");
+  console.log(
+    `  wide fill-only ${label}: visited=${visited} wide=${candidates.length} ≥ ${WIDE_MIN_PX}px or ≥ ${WIDE_MIN_FRAC}·column; widest: ${widest || "(none)"}`
+  );
   if (failures.length > 0) {
     throw new Error(
       `wide press ${label}: expected transform none on :active, got ${failures.join("; ")}`
     );
   }
-  console.log(
-    `  wide fill-only ${label}: ${candidates.length} rows ≥ ${WIDE_MIN_PX}px or ≥ ${WIDE_MIN_FRAC}·column, transform !== scale`
-  );
 }
 
 async function parkPointerOffViewport(page) {

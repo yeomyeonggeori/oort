@@ -423,6 +423,7 @@ export function isFullWidthRow(s: PressSite): boolean {
   if (!isInteractiveElement(s)) return false;
   if (isCenteredCta(s.text) || isGridCell(s.text)) return false;
   if (isCompactChip(s.text)) return false;
+  if (/(?<![\w-])shrink-0\b/.test(s.text)) return false;
   if (LIST_ITEM_ROLES.has((s.role ?? "").toLowerCase())) return true;
   if (/(?<![\w-])w-full\b/.test(s.text)) return true;
   if (s.tag === "summary") return true;
@@ -433,6 +434,11 @@ export function isFullWidthRow(s: PressSite): boolean {
     t === "summary" ||
     t === "label" ||
     Boolean(s.routerLink);
+  // FeedRow-shaped: an anchor that is the list row. It fills the column by
+  // layout (the `li` is a flex column) without `w-full` / `flex-1`.
+  if (s.parentTag === "li" && (t === "a" || Boolean(s.routerLink))) {
+    return true;
+  }
   return (
     s.parentTag === "li" &&
     rowTag &&
@@ -2183,6 +2189,42 @@ export function Probe() {
     expect(CAPTURE_SRC).toMatch(/WIDE_MIN_FRAC = 0\.5/);
     expect(CAPTURE_SRC).toMatch(/CSS\.forcePseudoState|forcedPseudoClasses/);
     expect(CAPTURE_SRC).toMatch(/transform === "none"/);
+    expect(CAPTURE_SRC).toMatch(/visited=\$\{visited\}/);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `inbox /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `activity /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `connect /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `thread /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `drafts /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `search /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\([^,]+, `agent hub /);
+    expect(CAPTURE_SRC).toMatch(/assertWideRowsFillOnly\(settingsSweep/);
+  });
+
+  it("FeedRow 는 전폭 행이고 press 스케일이 없다 (M6-1)", () => {
+    const rows = POPULATION.filter(
+      (s) => s.rel.endsWith("FeedRow.tsx") && Boolean(s.routerLink)
+    );
+    expect(rows.length).toBeGreaterThan(0);
+    for (const s of rows) {
+      expect(isFullWidthRow(s), `${s.rel}:${s.line} ${s.text}`).toBe(true);
+      expect(hasPressScaleClass(s.text), `${s.rel}:${s.line}`).toBe(false);
+      expect(hasFillPress(s.text), `${s.rel}:${s.line}`).toBe(true);
+    }
+  });
+
+  it("FeedRow 에 press 를 되돌리면 전폭 가드가 붉다 (M6-1 RED)", () => {
+    const site: PressSite = {
+      rel: "clients/web/src/features/inbox/FeedRow.tsx",
+      line: 76,
+      tag: "Link",
+      role: "",
+      text: "flex gap-3 px-4 py-2 press hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring",
+      kind: "jsx",
+      parentTag: "li",
+      routerLink: true,
+    };
+    expect(isFullWidthRow(site)).toBe(true);
+    expect(hasPressScaleClass(site.text)).toBe(true);
   });
 
   it("early return 분기도 전수가 센다 (H5-2)", () => {
