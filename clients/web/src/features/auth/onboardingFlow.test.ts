@@ -4,7 +4,6 @@ import {
   initialOnboarding,
   progressLabel,
   transitionFor,
-  type OnboardingStep,
 } from "./onboardingFlow";
 
 describe("onboarding first step", () => {
@@ -69,7 +68,7 @@ describe("onboarding progress", () => {
     expect(progressLabel("landing")).toBeNull();
     expect(progressLabel("gateway")).toBe("2/4");
     expect(progressLabel("account")).toBe("3/4");
-    expect(progressLabel("profile" as OnboardingStep)).toBe("4/4");
+    expect(progressLabel("profile")).toBe("4/4");
   });
 });
 
@@ -97,15 +96,11 @@ describe("onboarding transitions", () => {
   });
 
   it("uses line-slide from account into profile, and none when motion is reduced", () => {
-    expect(
-      transitionFor("account", "profile" as OnboardingStep, false)
-    ).toEqual({
+    expect(transitionFor("account", "profile", false)).toEqual({
       effect: "line-slide",
       direction: "forward",
     });
-    expect(
-      transitionFor("account", "profile" as OnboardingStep, true)
-    ).toEqual({
+    expect(transitionFor("account", "profile", true)).toEqual({
       effect: "none",
       direction: "forward",
     });
