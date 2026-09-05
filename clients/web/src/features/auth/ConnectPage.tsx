@@ -330,6 +330,12 @@ export function ConnectPage({
         const session = await joinWithInvite(inviteCode, email, password);
         markPhoneLinkFirstRunPending();
         if (session.createdMember) {
+          // Written at join success, before S3. sessionStorage survives a
+          // same-tab reload, so a reload at S3 keeps the UX-R2b kickoff marker.
+          markFreshSignup({
+            workspaceId: session.member.workspaceId,
+            memberId: session.member.id,
+          });
           setPendingJoin(session);
           setProfileName(session.member.displayName);
           setProfileFailed(false);
@@ -377,10 +383,6 @@ export function ConnectPage({
   }
 
   function finishProfile(join: JoinResponse, member: Member) {
-    markFreshSignup({
-      workspaceId: join.member.workspaceId,
-      memberId: join.member.id,
-    });
     onLoggedIn({ ...join, member });
     releaseSessionRestore();
   }

@@ -475,7 +475,7 @@ describe("BZ-6b onboarding profile step", () => {
     expect(card?.textContent).not.toContain("필수");
   });
 
-  it("skip lands without PATCHing and writes the fresh-signup marker", async () => {
+  it("skip lands without PATCHing; the marker was already written at join", async () => {
     const onLoggedIn = await submitJoinFromPrefill();
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="onboarding-profile-skip"]')).not.toBeNull();
