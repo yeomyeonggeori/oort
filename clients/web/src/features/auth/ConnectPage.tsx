@@ -517,7 +517,7 @@ export function ConnectPage({
     );
   }
 
-  const cardShared = (
+  const cardChrome = (
     <>
       <UpdateNotice />
       {TEST_PREFILL_ACTIVE && (
@@ -539,6 +539,12 @@ export function ConnectPage({
           testId="connect-offline"
         />
       )}
+    </>
+  );
+
+  const cardShared = (
+    <>
+      {cardChrome}
       {discovered.length > 0 && (
         <DiscoveredServerList
           servers={discovered}
@@ -746,7 +752,7 @@ export function ConnectPage({
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
-        {cardShared}
+        {cardChrome}
         <form
           onSubmit={(e) => onProfileSubmit(e, join)}
           className="flex flex-col gap-6"
@@ -762,7 +768,7 @@ export function ConnectPage({
               actionBusy={profileBusy}
             />
           ) : null}
-          <label className="flex flex-col gap-1 text-body">
+          <label htmlFor="onboarding-profile-name" className="flex flex-col gap-1 text-body">
             <FieldLabel optional>표시 이름</FieldLabel>
             <Input
               ref={profileNameRef}
@@ -773,7 +779,11 @@ export function ConnectPage({
               aria-invalid={profileFieldError ? true : undefined}
               aria-describedby={
                 [
-                  profileFieldError ? "onboarding-profile-name-error" : null,
+                  profileFieldError
+                    ? "onboarding-profile-name-error"
+                    : profileError
+                      ? null
+                      : "onboarding-profile-name-hint",
                   profileError ? "onboarding-profile-error-text" : null,
                 ]
                   .filter(Boolean)
@@ -798,7 +808,10 @@ export function ConnectPage({
                 {profileFieldError}
               </p>
             ) : profileError ? null : (
-              <span className="text-meta text-ink-muted">
+              <span
+                id="onboarding-profile-name-hint"
+                className="text-meta text-ink-muted"
+              >
                 나중에 설정에서 언제든 바꿀 수 있습니다
               </span>
             )}
