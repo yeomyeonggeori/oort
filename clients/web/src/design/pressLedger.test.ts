@@ -2349,8 +2349,8 @@ export function Probe() {
   });
 
   it("같은 경로를 두 번 claim 하면 붉다 (H6-1 RED)", () => {
-    const claimed = new Set();
-    const claim = (path) => {
+    const claimed = new Set<string>();
+    const claim = (path: string) => {
       if (claimed.has(path)) {
         throw new Error(`duplicate shot writer: ${path} already written in this run`);
       }
