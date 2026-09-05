@@ -18,9 +18,24 @@ import { buttonVariants } from "./ui/button";
  *
  * Population is every JSX/`createElement` site whose **tag** is
  * button/a/Link/NavLink/summary/label[associated checkbox|radio]/input[checkbox|
- * radio|submit|button]/select or whose **role** is button|link|menuitem*|tab|
- * option|checkbox|switch|radio|treeitem, minus disabled/aria-disabled and
- * minus text links. No hover/press marker gating. No file-name escapes.
+ * radio|submit|button]/select, whose **role** is button|link|menuitem*|tab|
+ * option|checkbox|switch|radio|treeitem, or whose tag is a canonical primitive
+ * (`Button`, react-router `Link`/`NavLink` via import, `Command.Item`,
+ * `DropdownMenuItem`, `ContextMenuItem`, `TabsTrigger`, plus dotted
+ * `*.Item`/`*.Trigger`). Lucide `Link` icons are not the router primitive. Minus
+ * disabled/aria-disabled, minus a **base** `cursor-not-allowed`/`cursor-wait`
+ * (not `disabled:`/`aria-disabled:` variants), minus text links. No hover/press
+ * marker gating. No file-name escapes.
+ *
+ * "Has press" is the named vocabulary only: `.press`, `.press-instant-fill`,
+ * `scrim-press`, `active:bg-surface-pressed`, or a `@utility` whose `:active`
+ * block uses `--surface-pressed` or `--motion-instant`. An arbitrary
+ * `:active { color }` does not count.
+ *
+ * Full-width is a **width**, not a class token: source heuristic (list rows,
+ * `w-full`, `summary`, parent-`li` row) plus a capture runtime probe
+ * (`getBoundingClientRect().width` ≥ 480px or ≥ 50% of the content column →
+ * `transform: none` on `:active`).
  *
  * red proof:
  *   - put `press` on a non-interactive `div`/`li` → forbidden-press is red
@@ -34,6 +49,10 @@ import { buttonVariants } from "./ui/button";
  *   - drop the cmdk selected+active compound → compiled CSS red
  *   - put `press` (scale) on a full-width row → B4-3 red
  *   - drop or add a PRESS_TRIPLET_INSITU id without updating the pin → set red
+ *   - delete `active:bg-surface-pressed` from ComposerFormatTray's pressed arm → H5-2 red
+ *   - add `disabled:cursor-not-allowed` to a live button → still in the population (M5-1)
+ *   - `@utility` with `&:active { color: … }` → not counted as press (M5-2)
+ *   - `<TabsPrimitive.Trigger className="hover:bg-surface-hover">` → in population (N5-1)
  */
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -104,6 +123,22 @@ const DRAFTS_SRC = readFileSync(
   new URL("../features/drafts/DraftsRoute.tsx", import.meta.url),
   "utf8"
 );
+const AGENT_CARD_SRC = readFileSync(
+  new URL("../features/timeline/AgentCard.tsx", import.meta.url),
+  "utf8"
+);
+const ARTIFACT_SRC = readFileSync(
+  new URL("../features/timeline/ArtifactCard.tsx", import.meta.url),
+  "utf8"
+);
+const UNFURL_SRC = readFileSync(
+  new URL("../features/timeline/UnfurlCards.tsx", import.meta.url),
+  "utf8"
+);
+const FORMAT_TRAY_SRC = readFileSync(
+  new URL("../features/chat/ComposerFormatTray.tsx", import.meta.url),
+  "utf8"
+);
 
 const HOVER_RE = /(?<![\w-])hover:/;
 const PRESS_RE = /(?:(?<![\w-])press\b|(?<![\w-])active:)/;
@@ -134,6 +169,23 @@ const LIST_ITEM_ROLES = new Set([
   "menuitemradio",
   "treeitem",
 ]);
+/**
+ * PascalCase / dotted tags that are controls even without a written `role`.
+ * Documented next to the population (N5-1). `Link`/`NavLink` enter via the
+ * react-router import (`routerLink`), not the tag name — lucide `Link` is an
+ * icon. Dotted `*.Item` / `*.Trigger` (cmdk, Radix) join this list by suffix
+ * so dropping `role="option"` cannot empty that slice.
+ */
+const CANONICAL_PRIMITIVES = new Set([
+  "Button",
+  "Command.Item",
+  "DropdownMenuItem",
+  "ContextMenuItem",
+  "TabsTrigger",
+  "DropdownMenuRadioItem",
+  "ContextMenuRadioItem",
+]);
+const CANONICAL_PRIMITIVE_SUFFIXES = new Set(["Item", "Trigger"]);
 const PRESS_FORBIDDEN_TAGS = new Set([
   "div",
   "li",
@@ -252,7 +304,7 @@ export function isTextLink(tag: string, text: string, routerLink = false): boole
   if (!underline && !hoverText) return false;
   if (/(?<![\w-])(?:hover:)?bg-/.test(text)) return false;
   if (/(?<![\w-])hover:(?:opacity-|border-)/.test(text)) return false;
-  if (/(?<![\w-])border(?:-|$)/.test(text)) return false;
+  if (/(?<![\w-])border(?:-|\s|$)/.test(text)) return false;
   return true;
 }
 
@@ -267,6 +319,13 @@ function isPressForbidden(tag: string, role: string, text: string): boolean {
   return true;
 }
 
+function isCanonicalPrimitive(tag: string): boolean {
+  if (CANONICAL_PRIMITIVES.has(tag)) return true;
+  const dotted = tag.includes(".");
+  const last = dotted ? tag.slice(tag.lastIndexOf(".") + 1) : tag;
+  return dotted && CANONICAL_PRIMITIVE_SUFFIXES.has(last);
+}
+
 function isInteractiveElement(
   s: Pick<
     PressSite,
@@ -276,6 +335,7 @@ function isInteractiveElement(
   const role = (s.role ?? "").toLowerCase();
   if (role && INTERACTIVE_ROLES.has(role)) return true;
   if (s.routerLink) return true;
+  if (isCanonicalPrimitive(s.tag)) return true;
   if (!isNativeHtmlTag(s.tag)) return false;
   if (INTERACTIVE_TAGS.has(s.tag)) return true;
   if (s.tag === "input") {
@@ -291,7 +351,7 @@ function isVisuallyHidden(text: string): boolean {
 
 function isNativeUaWidget(s: PressSite): boolean {
   if (!isNativeHtmlTag(s.tag)) return false;
-  if (hasHover(s.text) || /(?<![\w-])(?:hover:)?bg-/.test(s.text)) return false;
+  if (hasHover(s.text)) return false;
   if (s.tag === "select") return true;
   if (s.tag === "input") {
     return BUTTON_INPUT_TYPES.has((s.inputType ?? "").toLowerCase());
@@ -345,6 +405,7 @@ export function isFullWidthRow(s: PressSite): boolean {
   if (isCompactChip(s.text)) return false;
   if (LIST_ITEM_ROLES.has((s.role ?? "").toLowerCase())) return true;
   if (/(?<![\w-])w-full\b/.test(s.text)) return true;
+  if (s.tag === "summary") return true;
   const t = s.tag;
   const rowTag =
     t === "a" ||
@@ -581,7 +642,23 @@ function expandClass(node: ts.Node, ctx: ExpandCtx): string[] {
     return expandClass(node.body, ctx);
   }
   if (ts.isBlock(node)) {
-    const returns = node.statements.filter((stmt) => ts.isReturnStatement(stmt));
+    const returns: ts.ReturnStatement[] = [];
+    const visit = (n: ts.Node) => {
+      if (
+        ts.isArrowFunction(n) ||
+        ts.isFunctionExpression(n) ||
+        ts.isFunctionDeclaration(n) ||
+        ts.isMethodDeclaration(n)
+      ) {
+        return;
+      }
+      if (ts.isReturnStatement(n)) {
+        returns.push(n);
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(node);
     if (returns.length === 0) return [collect(node, ctx.strings)];
     return returns.flatMap((stmt) => expandClass(stmt, ctx));
   }
@@ -639,7 +716,15 @@ function buildExpandCtx(sf: ts.SourceFile): ExpandCtx {
 
 function jsxTagName(tag: ts.JsxTagNameExpression): string {
   if (ts.isIdentifier(tag)) return tag.text;
-  if (ts.isPropertyAccessExpression(tag)) return tag.name.text;
+  if (ts.isPropertyAccessExpression(tag)) {
+    const left = ts.isIdentifier(tag.expression)
+      ? tag.expression.text
+      : ts.isPropertyAccessExpression(tag.expression) ||
+          ts.isJsxNamespacedName(tag.expression as ts.Node)
+        ? jsxTagName(tag.expression as ts.JsxTagNameExpression)
+        : "";
+    return left ? `${left}.${tag.name.text}` : tag.name.text;
+  }
   if (ts.isJsxNamespacedName(tag)) return `${tag.namespace.text}:${tag.name.text}`;
   return "";
 }
@@ -728,6 +813,7 @@ function resolveModule(fromFile: string, spec: string): string | undefined {
 interface FileIndex {
   ctx: ExpandCtx;
   pressTags: Set<string>;
+  fillTags: Set<string>;
   routerTags: Set<string>;
 }
 
@@ -809,27 +895,51 @@ function stripComments(source: string): string {
 
 const SOURCE_FILES = walkSource(WEB_SRC);
 
-function cssUtilitiesWithActive(source: string): Set<string> {
+function cssUtilitiesWithNamedPress(source: string): Set<string> {
   const names = new Set<string>();
   const re = /@utility\s+([a-z0-9-]+)\s*\{/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(source))) {
     const body = braceBody(source, match.index + match[0].length - 1);
     const stripped = body.replace(/\/\*[\s\S]*?\*\//g, "");
-    if (/:active\b/.test(stripped)) names.add(match[1]);
+    const activeRe = /:active[^{]*\{/g;
+    let am: RegExpExecArray | null;
+    let named = false;
+    while ((am = activeRe.exec(stripped))) {
+      const block = braceBody(stripped, am.index + am[0].length - 1);
+      if (
+        /--surface-pressed/.test(block) ||
+        /var\(--motion-instant\)/.test(block) ||
+        /var\(--motion-instant\)/.test(stripped)
+      ) {
+        // Opacity/transform on the press ladder counts when the utility's
+        // :active block is the named step (scrim-press) or the fill token.
+        if (
+          /--surface-pressed/.test(block) ||
+          (/opacity\s*:/.test(block) && /var\(--motion-instant\)/.test(stripped))
+        ) {
+          named = true;
+        }
+      }
+    }
+    if (named) names.add(match[1]);
   }
   return names;
 }
 
-const UTILITIES_WITH_ACTIVE = cssUtilitiesWithActive(TOKENS_CSS);
+const UTILITIES_WITH_NAMED_PRESS = cssUtilitiesWithNamedPress(TOKENS_CSS);
 
-function hasUtilityActive(text: string): boolean {
-  return text.split(/\s+/).some((tok) => UTILITIES_WITH_ACTIVE.has(tok));
+function hasNamedUtilityPress(text: string): boolean {
+  return text.split(/\s+/).some((tok) => UTILITIES_WITH_NAMED_PRESS.has(tok));
 }
 
+const NAMED_PRESS_TOKEN = /(?:^|\s)(?:press|press-instant-fill|scrim-press)(?:\s|$)/;
+const NAMED_PRESS_FILL = /active:bg-surface-pressed/;
+
 function siteHasPress(s: PressSite): boolean {
-  if (hasPress(s.text)) return true;
-  if (hasUtilityActive(s.text)) return true;
+  if (NAMED_PRESS_TOKEN.test(` ${s.text} `)) return true;
+  if (NAMED_PRESS_FILL.test(` ${s.text} `)) return true;
+  if (hasNamedUtilityPress(s.text)) return true;
   if (isNativeUaWidget(s)) return true;
   return false;
 }
@@ -847,6 +957,7 @@ function parseImportedSf(resolved: string): ts.SourceFile {
 function buildFileIndex(file: string, sf: ts.SourceFile): FileIndex {
   const ctx = buildExpandCtx(sf);
   const pressTags = new Set<string>();
+  const fillTags = new Set<string>();
   const routerTags = new Set<string>();
   for (const stmt of sf.statements) {
     if (!ts.isImportDeclaration(stmt) || !ts.isStringLiteral(stmt.moduleSpecifier)) {
@@ -858,6 +969,23 @@ function buildFileIndex(file: string, sf: ts.SourceFile): FileIndex {
       for (const el of bindings.elements) {
         const imported = (el.propertyName ?? el.name).text;
         if (imported === "Button") pressTags.add(el.name.text);
+      }
+    }
+    if (
+      (/ui\/dropdown-menu$/.test(spec) || /ui\/context-menu$/.test(spec)) &&
+      bindings &&
+      ts.isNamedImports(bindings)
+    ) {
+      for (const el of bindings.elements) {
+        const imported = (el.propertyName ?? el.name).text;
+        if (
+          imported === "DropdownMenuItem" ||
+          imported === "DropdownMenuRadioItem" ||
+          imported === "ContextMenuItem" ||
+          imported === "ContextMenuRadioItem"
+        ) {
+          fillTags.add(el.name.text);
+        }
       }
     }
     if (
@@ -894,7 +1022,24 @@ function buildFileIndex(file: string, sf: ts.SourceFile): FileIndex {
       }
     }
   }
-  return { ctx, pressTags, routerTags };
+  return { ctx, pressTags, fillTags, routerTags };
+}
+
+function visitJsxAttrs(
+  el: ts.JsxOpeningLikeElement,
+  hostTag: string,
+  visit: (node: ts.Node, parentTag: string, parentAsChild: boolean) => void
+): void {
+  for (const attr of el.attributes.properties) {
+    if (ts.isJsxSpreadAttribute(attr)) {
+      visit(attr.expression, hostTag, false);
+      continue;
+    }
+    if (!ts.isJsxAttribute(attr) || !attr.initializer) continue;
+    if (ts.isJsxExpression(attr.initializer) && attr.initializer.expression) {
+      visit(attr.initializer.expression, hostTag, false);
+    }
+  }
 }
 
 function discover(): PressSite[] {
@@ -904,7 +1049,7 @@ function discover(): PressSite[] {
     const rel = `clients/web/src/${relative(WEB_SRC, file)}`;
     const kind = file.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
     const sf = ts.createSourceFile(file, src, ts.ScriptTarget.Latest, true, kind);
-    const { ctx, pressTags, routerTags } = buildFileIndex(file, sf);
+    const { ctx, pressTags, fillTags, routerTags } = buildFileIndex(file, sf);
     const binaryIds = new Set<string>();
     const collectIds = (node: ts.Node) => {
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
@@ -942,8 +1087,12 @@ function discover(): PressSite[] {
       for (const raw of unique.length > 0 ? unique : [""]) {
         let text = raw;
         if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+        if (fillTags.has(tag)) text = `${text} press-instant-fill`;
         if (parentAsChild && pressTags.has(parentTag)) {
           text = `${text} ${PRESS_CLASS}`;
+        }
+        if (parentAsChild && fillTags.has(parentTag)) {
+          text = `${text} press-instant-fill`;
         }
         sites.push({
           rel,
@@ -969,11 +1118,13 @@ function discover(): PressSite[] {
           jsxAttr(node.openingElement, ["asChild"])
         );
         emitJsx(node.openingElement, parentTag, parentAsChild);
+        visitJsxAttrs(node.openingElement, tag, visit);
         for (const child of node.children) visit(child, tag, asChild);
         return;
       }
       if (ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) {
         emitJsx(node, parentTag, parentAsChild);
+        visitJsxAttrs(node, jsxTagName(node.tagName), visit);
         return;
       }
       if (
@@ -1010,6 +1161,7 @@ function discover(): PressSite[] {
         for (const raw of unique.length > 0 ? unique : [""]) {
           let text = raw;
           if (pressTags.has(tag)) text = `${text} ${PRESS_CLASS}`;
+          if (fillTags.has(tag)) text = `${text} press-instant-fill`;
           sites.push({
             rel,
             line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
@@ -1035,7 +1187,7 @@ function discover(): PressSite[] {
 }
 
 function isInertPointer(text: string): boolean {
-  return /cursor-not-allowed|cursor-wait/.test(text);
+  return text.split(/\s+/).some((tok) => tok === "cursor-not-allowed" || tok === "cursor-wait");
 }
 
 function isPointerInteractive(s: PressSite): boolean {
@@ -1070,8 +1222,9 @@ const DUAL_TRANSITION = SITES.filter(
 );
 
 /**
- * Remaining press-missing **text links** after the UX-R1e R5 tag/role
- * population. Interactive elements without press/fill (or native UA press)
+ * Remaining press-missing **text links** after the UX-R1e R6 tag/role
+ * population (canonical primitives + nested returns + base-only inert).
+ * Interactive elements without named press/fill (or native UA press)
  * are hard-zero. Pin shrinks only.
  *
  * Bare underlined links (padding/rounded/touch-target without a painted fill
@@ -1182,6 +1335,18 @@ function classBranchesInFunctionOnTag(
   return uniqueClasses(out);
 }
 
+function classBranchesOfFunction(
+  source: string,
+  fileName: string,
+  fnName: string
+): string[] {
+  const sf = sourceFile(source, fileName);
+  const ctx = buildExpandCtx(sf);
+  const fn = ctx.fns.get(fnName);
+  if (!fn) throw new Error(`${fnName} 이 없다`);
+  return uniqueClasses(expandClass(fn.node, fn.ctx));
+}
+
 function stringArrayConst(source: string, name: string): string[] {
   const match = source.match(new RegExp(String.raw`const ${name} = \[([^\]]*)\]`));
   if (!match) throw new Error(`${name} 배열이 없다`);
@@ -1273,10 +1438,34 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
     expect(cssHoverWithoutActive(scratch)).toEqual(["sabotage-hover-only"]);
   });
 
-  it("PascalCase 이름은 인구가 아니고 button 태그가 인구다 (B4-1)", () => {
+  it("정본 프리미티브와 dotted 태그는 인구에 들고 그 외 PascalCase 는 안 든다 (N5-1)", () => {
     expect(
       isInteractiveElement({
         tag: "Button",
+        role: "",
+        inputType: "",
+        labelIsControl: false,
+      })
+    ).toBe(true);
+    expect(
+      isInteractiveElement({
+        tag: "Command.Item",
+        role: "",
+        inputType: "",
+        labelIsControl: false,
+      })
+    ).toBe(true);
+    expect(
+      isInteractiveElement({
+        tag: "TabsPrimitive.Trigger",
+        role: "",
+        inputType: "",
+        labelIsControl: false,
+      })
+    ).toBe(true);
+    expect(
+      isInteractiveElement({
+        tag: "Widget",
         role: "",
         inputType: "",
         labelIsControl: false,
@@ -1291,9 +1480,10 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
       })
     ).toBe(true);
     const scratch = ts.createSourceFile(
-      "SabotageButton.tsx",
-      `export function Probe() {
-  return <button type="button" className="hover:bg-surface-hover" />;
+      "SabotageTabs.tsx",
+      `import * as TabsPrimitive from "@radix-ui/react-tabs";
+export function Probe() {
+  return <TabsPrimitive.Trigger className="hover:bg-surface-hover" />;
 }
 `,
       ts.ScriptTarget.Latest,
@@ -1301,19 +1491,26 @@ describe("ADR-0179 D5 shrinking ledger (#2000)", () => {
       ts.ScriptKind.TSX
     );
     const ctx = buildExpandCtx(scratch);
-    const sites: string[] = [];
+    const sites: PressSite[] = [];
     const visit = (node: ts.Node) => {
       if (ts.isJsxSelfClosingElement(node) || ts.isJsxOpeningElement(node)) {
         const tag = jsxTagName(node.tagName);
         const text = attrText(jsxAttr(node, ["className", "class"]), ctx);
-        if (isControl(tag, "", text) && hasHover(text) && !hasPress(text)) {
-          sites.push(tag);
-        }
+        sites.push({
+          rel: "SabotageTabs.tsx",
+          line: 1,
+          tag,
+          role: "",
+          text,
+          kind: "jsx",
+        });
       }
       ts.forEachChild(node, visit);
     };
     visit(scratch);
-    expect(sites).toEqual(["button"]);
+    expect(sites.map((s) => s.tag)).toEqual(["TabsPrimitive.Trigger"]);
+    expect(isPointerInteractive(sites[0])).toBe(true);
+    expect(siteHasPress(sites[0])).toBe(false);
   });
 
   it("비상호작용 div 에 press 를 두면 붉다 (H-1)", () => {
@@ -1642,6 +1839,7 @@ export function Probe() {
     expect(
       isTextLink("a", "underline border-2 hover:text-ink")
     ).toBe(false);
+    expect(isTextLink("a", "underline border hover:text-ink")).toBe(false);
     expect(isTextLink("Link", "underline hover:text-ink")).toBe(true);
   });
 
@@ -1861,6 +2059,7 @@ export function Probe() {
         hasPressScaleClass(s.text),
         `${s.rel}:${s.line} <${s.tag}> ${s.text}`
       ).toBe(false);
+      if (isNativeUaWidget(s)) continue;
       if (!isTextLink(s.tag, s.text, s.routerLink)) {
         expect(hasFillPress(s.text), `${s.rel}:${s.line} ${s.text}`).toBe(true);
       }
@@ -1871,6 +2070,7 @@ export function Probe() {
     for (const s of POPULATION) {
       if (!/(?<![\w-])bg-accent-soft/.test(s.text)) continue;
       if (isTextLink(s.tag, s.text, s.routerLink)) continue;
+      if (!isFullWidthRow(s) && hasPressScaleClass(s.text)) continue;
       expect(
         s.text,
         `${s.rel}:${s.line} <${s.tag}> ${s.text}`
@@ -1898,5 +2098,153 @@ export function Probe() {
     );
     const strippedCss = await buildCss(classTokens(stripped));
     expect(strippedCss).not.toMatch(/\[data-selected=.true.\]:active/);
+  });
+
+  it("카드 열을 가로지르는 summary 와 unfurl 은 채움만 한다 (H5-1)", () => {
+    const summaries = POPULATION.filter(
+      (s) =>
+        (s.rel.endsWith("AgentCard.tsx") || s.rel.endsWith("ArtifactCard.tsx")) &&
+        s.tag === "summary" &&
+        !isCompactChip(s.text)
+    );
+    expect(summaries.length).toBeGreaterThanOrEqual(3);
+    for (const s of summaries) {
+      expect(isFullWidthRow(s), `${s.rel}:${s.line}`).toBe(true);
+      expect(hasPressScaleClass(s.text), `${s.rel}:${s.line} ${s.text}`).toBe(false);
+      expect(hasFillPress(s.text), `${s.rel}:${s.line}`).toBe(true);
+    }
+    const unfurl = POPULATION.find(
+      (s) =>
+        s.rel.endsWith("UnfurlCards.tsx") &&
+        /flex w-full min-w-0 flex-1/.test(s.text)
+    );
+    expect(unfurl).toBeTruthy();
+    expect(isFullWidthRow(unfurl!)).toBe(true);
+    expect(hasPressScaleClass(unfurl!.text)).toBe(false);
+    expect(hasFillPress(unfurl!.text)).toBe(true);
+    expect(AGENT_CARD_SRC).not.toMatch(
+      /<summary className="[^"]*\bpress\b/
+    );
+    expect(ARTIFACT_SRC).not.toMatch(
+      /cursor-pointer px-3 py-2[^"]*\bpress\b/
+    );
+  });
+
+  it("638px 카드에 press 를 되돌리면 전폭 가드가 붉다 (H5-1 RED)", () => {
+    const site: PressSite = {
+      rel: "clients/web/src/features/timeline/AgentCard.tsx",
+      line: 163,
+      tag: "summary",
+      role: "",
+      text: "cursor-pointer px-3 py-2 text-meta text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring",
+      kind: "jsx",
+    };
+    expect(isFullWidthRow(site)).toBe(true);
+    expect(hasPressScaleClass(site.text)).toBe(true);
+    expect(UNFURL_SRC).toMatch(/hover:bg-surface-hover active:bg-surface-pressed/);
+  });
+
+  it("캡처 레인은 넓은 컨트롤의 :active transform 을 잰다 (H5-1)", () => {
+    expect(CAPTURE_SRC).toMatch(/function assertWideRowsFillOnly/);
+    expect(CAPTURE_SRC).toMatch(/getBoundingClientRect\(\)\.width/);
+    expect(CAPTURE_SRC).toMatch(/WIDE_MIN_PX = 480/);
+    expect(CAPTURE_SRC).toMatch(/WIDE_MIN_FRAC = 0\.5/);
+    expect(CAPTURE_SRC).toMatch(/CSS\.forcePseudoState|forcedPseudoClasses/);
+    expect(CAPTURE_SRC).toMatch(/transform === "none"/);
+  });
+
+  it("early return 분기도 전수가 센다 (H5-2)", () => {
+    const branches = classBranchesOfFunction(
+      FORMAT_TRAY_SRC,
+      "ComposerFormatTray.tsx",
+      "formatItemClass"
+    );
+    expect(branches.length).toBeGreaterThanOrEqual(3);
+    const pressed = branches.filter((c) => /bg-accent-soft/.test(c));
+    expect(pressed.length).toBeGreaterThan(0);
+    expect(
+      pressed.every((c) => /active:bg-surface-pressed/.test(c)),
+      pressed.join(" | ")
+    ).toBe(true);
+    const formatButtons = POPULATION.filter((s) =>
+      s.rel.endsWith("ComposerFormatTray.tsx")
+    );
+    expect(formatButtons.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("early return 의 눌림 팔을 빼면 붉다 (H5-2 RED)", () => {
+    const sabotaged = FORMAT_TRAY_SRC.replace(
+      `"bg-accent-soft text-ink active:bg-surface-pressed"`,
+      `"bg-accent-soft text-ink"`
+    );
+    const branches = classBranchesOfFunction(
+      sabotaged,
+      "ComposerFormatTray.tsx",
+      "formatItemClass"
+    );
+    const pressed = branches.filter(
+      (c) => /bg-accent-soft/.test(c) && !/active:bg-surface-pressed/.test(c)
+    );
+    expect(pressed.length).toBeGreaterThan(0);
+    expect(
+      pressed.every((c) => hasFillPress(c)),
+      pressed.join(" | ")
+    ).toBe(false);
+  });
+
+  it("disabled: 변이의 cursor 는 산 컨트롤을 인구에서 빼지 않는다 (M5-1)", () => {
+    const live: PressSite = {
+      rel: "sabotage.tsx",
+      line: 1,
+      tag: "button",
+      role: "",
+      text: "hover:bg-surface-hover disabled:cursor-not-allowed",
+      kind: "jsx",
+    };
+    expect(isInertPointer(live.text)).toBe(false);
+    expect(isPointerInteractive(live)).toBe(true);
+    const base: PressSite = {
+      ...live,
+      text: "cursor-not-allowed hover:bg-surface-hover",
+    };
+    expect(isInertPointer(base.text)).toBe(true);
+    expect(isPointerInteractive(base)).toBe(false);
+    const marketplace = POPULATION.filter((s) =>
+      s.rel.endsWith("PluginSection.tsx") && /\bplugin-marketplace-row\b/.test(s.text)
+    );
+    expect(marketplace.length).toBeGreaterThan(0);
+  });
+
+  it("이름 없는 :active 유틸은 눌림이 아니다 (M5-2)", () => {
+    const scratch = `${TOKENS_CSS}\n@utility sabotage-color-active {\n  &:hover { background-color: var(--surface-hover); }\n  &:active { color: var(--ink); }\n}\n`;
+    expect(cssUtilitiesWithNamedPress(scratch).has("sabotage-color-active")).toBe(
+      false
+    );
+    expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("scrim-press")).toBe(true);
+    expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("plugin-marketplace-row")).toBe(
+      true
+    );
+    expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("sidebar-scrim")).toBe(false);
+    const unnamed: PressSite = {
+      rel: "sabotage.tsx",
+      line: 1,
+      tag: "button",
+      role: "",
+      text: "sabotage-color-active hover:bg-surface-hover",
+      kind: "jsx",
+    };
+    expect(siteHasPress(unnamed)).toBe(false);
+  });
+
+  it("스크림은 이름 있는 scrim-press 를 든다 (M5-2)", () => {
+    expect(GALLERY_SRC).toMatch(/"scrim-press"/);
+    expect(TOKENS_CSS).toMatch(/@utility scrim-press/);
+    expect(CAPTURE_SRC).toMatch(/assertNotificationsDndRest|notification-rules-dnd/);
+  });
+
+  it("플러그인 상세 링크는 텍스트 링크 hover 를 든다 (M5-5)", () => {
+    expect(PLUGIN_SRC).toMatch(
+      /break-all text-body text-ink underline decoration-line-strong underline-offset-2 hover:text-ink focus-visible:focus-ring/
+    );
   });
 });
