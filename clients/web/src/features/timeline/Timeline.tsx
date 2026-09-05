@@ -31,6 +31,12 @@ import {
 } from "./channelIntro";
 import { ChannelIntroBlock } from "./ChannelIntroBlock";
 import {
+  WELCOME_KICKOFF_ITEM,
+  type WelcomeKickoffItem,
+  type WelcomeKickoffPhase,
+} from "@/features/welcome/welcomeKickoff";
+import { WelcomeKickoffStage } from "@/features/welcome/WelcomeKickoffStage";
+import {
   foldDeletedRuns,
   type DeletedFoldFields,
 } from "@momo/core/features/timeline/deletedFold";
@@ -102,7 +108,10 @@ const START_INDEX = 1_000_000;
  * (`deletedFold.ts`) — 접기는 그리는 순간에만 일어나고 메시지 배열도 seq도
  * 커서도 그것을 모른다.
  */
-type FoldedItem = (TimelineItem & DeletedFoldFields) | ChannelIntroItem;
+type FoldedItem =
+  | (TimelineItem & DeletedFoldFields)
+  | ChannelIntroItem
+  | WelcomeKickoffItem;
 
 /** Oldest message currently in the stream, with its position. */
 function anchorOf(
@@ -221,6 +230,9 @@ export function Timeline({
   isPlayEntrance,
   onEntranceConsumed,
   capUnmountedArrivals,
+  welcomePhase = "hidden",
+  welcomeReducedMotion = false,
+  onWelcomeExitComplete,
   reachedStart = false,
   canAddMember = false,
   channelName,
@@ -304,6 +316,13 @@ export function Timeline({
    * up). Must not run while at the bottom: virtuoso appends one commit late.
    */
   capUnmountedArrivals?: () => void;
+  /**
+   * UX-R2b leading row. Same family as the channel intro: not a modal, not a
+   * scrim. Omitted when the kickoff is not for this channel.
+   */
+  welcomePhase?: WelcomeKickoffPhase;
+  welcomeReducedMotion?: boolean;
+  onWelcomeExitComplete?: () => void;
 }) {
   const ref = useRef<VirtuosoHandle>(null);
 
@@ -378,7 +397,16 @@ export function Timeline({
             .length > 0,
       })
     );
-    return showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+    const withIntro = showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
+    const showWelcome =
+      welcomePhase === "stage" ||
+      welcomePhase === "exiting" ||
+      welcomePhase === "backstop";
+    if (!showWelcome) return withIntro;
+    if (showIntro) {
+      return [CHANNEL_INTRO_ITEM, WELCOME_KICKOFF_ITEM, ...folded];
+    }
+    return [WELCOME_KICKOFF_ITEM, ...folded];
   }, [
     messages,
     lastReadSeq,
@@ -388,6 +416,7 @@ export function Timeline({
     reactions,
     myMemberIdForFold,
     showIntro,
+    welcomePhase,
   ]);
 
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
@@ -669,6 +698,22 @@ export function Timeline({
                 peer={peer}
                 onWrite={onStartWriting}
                 onAddMember={onAddMember}
+              />
+            );
+          }
+          if (item.kind === "welcome-kickoff") {
+            if (
+              welcomePhase !== "stage" &&
+              welcomePhase !== "exiting" &&
+              welcomePhase !== "backstop"
+            ) {
+              return null;
+            }
+            return (
+              <WelcomeKickoffStage
+                phase={welcomePhase}
+                reducedMotion={welcomeReducedMotion}
+                onExitComplete={onWelcomeExitComplete ?? (() => undefined)}
               />
             );
           }

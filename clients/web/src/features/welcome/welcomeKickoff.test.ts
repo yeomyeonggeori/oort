@@ -9,6 +9,7 @@ import {
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isDefaultWelcomeChannel,
+  messagesBelongToChannel,
   readShownMarker,
   welcomePromptTooLong,
   welcomeShownKey,
@@ -145,6 +146,38 @@ describe("hasAgentAuthoredMessage", () => {
     expect(
       hasAgentAuthoredMessage([{ authorMemberId: AGENT }], () => undefined)
     ).toBe(false);
+  });
+});
+
+describe("messagesBelongToChannel", () => {
+  const HERE = "00000000-0000-7000-8000-000000000201";
+  const THERE = "00000000-0000-7000-8000-000000000202";
+
+  it("empty list matches", () => {
+    expect(messagesBelongToChannel([], HERE)).toBe(true);
+  });
+
+  it("rows without channelId match (test fixtures that only pass author)", () => {
+    expect(messagesBelongToChannel([{}], HERE)).toBe(true);
+  });
+
+  it("rows for this channel match, including case", () => {
+    expect(
+      messagesBelongToChannel([{ channelId: HERE.toUpperCase() }], HERE)
+    ).toBe(true);
+  });
+
+  it("a row from another channel does not match", () => {
+    expect(
+      messagesBelongToChannel(
+        [{ channelId: HERE }, { channelId: THERE }],
+        HERE
+      )
+    ).toBe(false);
+  });
+
+  it("null channelId matches everything", () => {
+    expect(messagesBelongToChannel([{ channelId: THERE }], null)).toBe(true);
   });
 });
 

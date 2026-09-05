@@ -62,9 +62,11 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("ChatShell 은 Timeline 과 ThreadPanel 에 같은 두 props 를 각각 잇는다", () => {
-    expect(
-      jsxBindingCount(shell, "Timeline", "isPlayEntrance", "timeline.isPlayEntrance")
-    ).toBe(1);
+    expect(shell).toContain("welcomeHoldsEntrance(welcome.holdEntranceId, id)");
+    expect(shell).toContain("return timeline.isPlayEntrance?.(id) ?? false");
+    expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
+      1
+    );
     expect(
       jsxBindingCount(shell, "ThreadPanel", "isPlayEntrance", "timeline.isPlayEntrance")
     ).toBe(1);

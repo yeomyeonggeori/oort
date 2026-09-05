@@ -23,6 +23,10 @@ export function useConversationEntrance(
   useLayoutEffect(() => {
     if (!playEntrance || consumedRef.current) return;
     consumedRef.current = true;
+    // Delayed grant (false → true): a held opener row starts after the
+    // welcome stage's exit animationend. useState(playEntrance) only
+    // captures the first mount.
+    setPlaying(true);
     onConsumed?.();
   }, [playEntrance, onConsumed]);
 

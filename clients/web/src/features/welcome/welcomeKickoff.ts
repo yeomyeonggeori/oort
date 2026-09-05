@@ -32,6 +32,8 @@ export const WELCOME_PROMPT_TOO_LONG =
 
 export const WELCOME_KICKOFF_ITEM_KEY = "welcome-kickoff";
 
+export type WelcomeKickoffPhase = "hidden" | "stage" | "exiting" | "backstop";
+
 export type WelcomeCloudKind = "comet" | "asteroid" | "star";
 
 /** 4 line-art bodies. OortCloudMark kinds; mascot body untouched. */
@@ -112,6 +114,22 @@ export function hasAgentAuthoredMessage(
   authorKind: (memberId: string) => string | undefined
 ): boolean {
   return messages.some((message) => authorKind(message.authorMemberId) === "agent");
+}
+
+/**
+ * useTimeline keeps the previous channel's rows until its effect clears them.
+ * Deciding on that render would lock `has-agent-message` for the wrong room.
+ * Rows without `channelId` (tests that only pass author) are treated as matching.
+ */
+export function messagesBelongToChannel(
+  messages: readonly { channelId?: string }[],
+  channelId: string | null
+): boolean {
+  if (channelId === null) return true;
+  return messages.every(
+    (message) =>
+      message.channelId === undefined || uuidEq(message.channelId, channelId)
+  );
 }
 
 function localStore(): Storage | null {

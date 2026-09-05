@@ -165,6 +165,48 @@
     var(--motion-ease-arrival) 1 both;
 }
 
+/* UX-R2b kickoff rise. Stagger is `--stagger-index × --motion-instant`.
+ * `data-stagger-index` is the product hook that sets `--stagger-index`
+ * (no inline style). One-shot; reduced-motion skips the class. */
+@keyframes motion-welcome-kickoff-rise {
+  from {
+    opacity: 0;
+    transform: translateY(var(--motion-distance-arrival));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@utility welcome-kickoff-mark {
+  animation: motion-welcome-kickoff-rise var(--motion-arrival)
+    var(--motion-ease-arrival) 1 both;
+  animation-delay: calc(var(--stagger-index, 0) * var(--motion-instant));
+}
+
+/* backwards, not both: same R12 discipline as motion-fast-enter. */
+@utility welcome-kickoff-exit {
+  animation: motion-fade-out var(--motion-standard) var(--motion-ease-standard)
+    backwards;
+}
+
+[data-stagger-index="0"] {
+  --stagger-index: 0;
+}
+[data-stagger-index="1"] {
+  --stagger-index: 1;
+}
+[data-stagger-index="2"] {
+  --stagger-index: 2;
+}
+[data-stagger-index="3"] {
+  --stagger-index: 3;
+}
+[data-stagger-index="4"] {
+  --stagger-index: 4;
+}
+
 /* D6: floating-surface scrim. Named so surfaces never write blur-[5px]. */
 @utility scrim-blur {
   backdrop-filter: blur(5px);
