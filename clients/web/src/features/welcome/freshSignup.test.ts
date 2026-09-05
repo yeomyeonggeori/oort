@@ -7,14 +7,14 @@ import {
   peekFreshSignup,
 } from "./freshSignup";
 
-const KEY = "oort.freshSignup.v1";
+const FRESH_SIGNUP_SLOT = "oort.freshSignup.v1";
 const SAMPLE = {
   workspaceId: "00000000-0000-7000-8000-000000000001",
   memberId: "00000000-0000-7000-8000-000000000101",
 };
 
 afterEach(() => {
-  sessionStorage.removeItem(KEY);
+  sessionStorage.removeItem(FRESH_SIGNUP_SLOT);
 });
 
 describe("freshSignup seam", () => {
@@ -28,15 +28,15 @@ describe("freshSignup seam", () => {
   });
 
   it("corrupt JSON is read as absent and removed", () => {
-    sessionStorage.setItem(KEY, "{not-json");
+    sessionStorage.setItem(FRESH_SIGNUP_SLOT, "{not-json");
     expect(peekFreshSignup()).toBeNull();
-    expect(sessionStorage.getItem(KEY)).toBeNull();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
   it("object missing ids is read as absent and removed", () => {
-    sessionStorage.setItem(KEY, JSON.stringify({ workspaceId: SAMPLE.workspaceId }));
+    sessionStorage.setItem(FRESH_SIGNUP_SLOT, JSON.stringify({ workspaceId: SAMPLE.workspaceId }));
     expect(peekFreshSignup()).toBeNull();
-    expect(sessionStorage.getItem(KEY)).toBeNull();
+    expect(sessionStorage.getItem(FRESH_SIGNUP_SLOT)).toBeNull();
   });
 
   it("missing storage returns null and does not throw", () => {
