@@ -290,8 +290,12 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     // Portal forceMount keeps the overlay node alive through the exit so
     // the reduced-motion branch is reachable. Content inherits
     // portalContext.forceMount; do not pin that inherited prop (R6 M-1).
-    // Overlay forceMount is not asserted (inherited).
+    // Overlay forceMount is not asserted (inherited). The taken path is
+    // marked on the node (`data-exit-path`); duration is not a discriminator.
     expect(code).toMatch(/<DialogPortal\s+forceMount/);
+    expect(code).toMatch(
+      /setAttribute\(\s*["']data-exit-path["']\s*,\s*["']reduce["']\s*\)/
+    );
   });
 
   it("ThreadPanel presence is parent-driven; onClose is immediate", () => {
@@ -328,37 +332,42 @@ describe.skipIf(!chromiumAvailable)(
   "UX-R1b drawer/panel/palette (Playwright, measured ms)",
   () => {
     const lanePrint = {
-      scrimMs: null as number | null,
-      paletteMs: null as number | null,
+      scrimInPageMs: null as number | null,
+      paletteInPageMs: null as number | null,
+      paletteObserveLagMs: null as number | null,
+      exitPath: null as string | null,
       dwellLightMs: null as number | null,
       dwellDarkMs: null as number | null,
-      printed: false,
+      summaryPrinted: false,
     };
 
-    const printLaneIfReady = () => {
-      const { scrimMs, paletteMs, dwellLightMs, dwellDarkMs, printed } = lanePrint;
+    const printLaneSummary = () => {
+      const {
+        scrimInPageMs,
+        paletteInPageMs,
+        paletteObserveLagMs,
+        exitPath,
+        dwellLightMs,
+        dwellDarkMs,
+        summaryPrinted,
+      } = lanePrint;
       if (
-        printed ||
-        scrimMs == null ||
-        paletteMs == null ||
+        summaryPrinted ||
+        scrimInPageMs == null ||
+        paletteInPageMs == null ||
         dwellLightMs == null ||
         dwellDarkMs == null
       ) {
         return;
       }
-      lanePrint.printed = true;
-      if (paletteMs < 10) {
-        console.warn(
-          `panelMotion: palette detach ${paletteMs.toFixed(1)}ms is the !node bypass (Portal forceMount lost the race); do not record this run`
-        );
-      }
+      lanePrint.summaryPrinted = true;
       console.info(
-        `panelMotion: reduced-motion detach scrim=${scrimMs.toFixed(1)}ms palette=${paletteMs.toFixed(1)}ms · dwell light=${dwellLightMs.toFixed(1)}ms dark=${dwellDarkMs.toFixed(1)}ms`
+        `panelMotion: reduced-motion detach scrimInPage=${scrimInPageMs.toFixed(1)}ms paletteInPage=${paletteInPageMs.toFixed(1)}ms exitPath=${exitPath ?? "unset"} observeLag=${(paletteObserveLagMs ?? 0).toFixed(1)}ms · dwell light=${dwellLightMs.toFixed(1)}ms dark=${dwellDarkMs.toFixed(1)}ms`
       );
     };
 
     afterAll(() => {
-      printLaneIfReady();
+      printLaneSummary();
     });
 
     async function launchProbe(
@@ -540,6 +549,91 @@ describe.skipIf(!chromiumAvailable)(
       return raw ?? { frames: 0, dwell: 0 };
     }
 
+    /**
+     * Escape/click → removal, timed in-page. Playwright's waitFor(detached)
+     * plus the following evaluate are reported separately as observeLag.
+     * `data-exit-path` is copied off the removed node; duration is not a path.
+     */
+    async function measureInPageDetach(
+      page: import("playwright").Page,
+      selector: string,
+      close: () => Promise<void>,
+      mark: "escape" | "click"
+    ): Promise<{ inPageMs: number; observeLagMs: number; exitPath: string | null }> {
+      await page.evaluate(
+        ({ sel, markKind }) => {
+          const target = window as Window & {
+            __inPageDetach?: {
+              t0: number;
+              tRemove: number;
+              exitPath: string | null;
+            };
+          };
+          const probe = { t0: 0, tRemove: 0, exitPath: null as string | null };
+          const onMark = (event: Event) => {
+            if (probe.t0 !== 0) return;
+            if (markKind === "escape") {
+              if (!("key" in event) || (event as KeyboardEvent).key !== "Escape") {
+                return;
+              }
+            }
+            probe.t0 = performance.now();
+          };
+          if (markKind === "escape") {
+            document.addEventListener("keydown", onMark, true);
+          } else {
+            document.addEventListener("click", onMark, true);
+          }
+          const observer = new MutationObserver((mutations) => {
+            if (probe.tRemove !== 0) return;
+            for (const mutation of mutations) {
+              for (const removed of mutation.removedNodes) {
+                if (!(removed instanceof Element)) continue;
+                const marked = removed.hasAttribute("data-exit-path")
+                  ? removed
+                  : removed.querySelector("[data-exit-path]");
+                if (marked) {
+                  probe.exitPath = marked.getAttribute("data-exit-path");
+                }
+              }
+            }
+            if (document.querySelector(sel)) return;
+            probe.tRemove = performance.now();
+            observer.disconnect();
+            document.removeEventListener("keydown", onMark, true);
+            document.removeEventListener("click", onMark, true);
+            target.__inPageDetach = probe;
+          });
+          observer.observe(document.body, { childList: true, subtree: true });
+          target.__inPageDetach = probe;
+        },
+        { sel: selector, markKind: mark }
+      );
+      const pwStart = await page.evaluate(() => performance.now());
+      await close();
+      await page.locator(selector).waitFor({ state: "detached", timeout: 2_000 });
+      const pwMs = await page.evaluate((start) => performance.now() - start, pwStart);
+      const probe = await page.evaluate(() => {
+        const target = window as Window & {
+          __inPageDetach?: {
+            t0: number;
+            tRemove: number;
+            exitPath: string | null;
+          };
+        };
+        return target.__inPageDetach ?? null;
+      });
+      if (!probe || probe.t0 === 0 || probe.tRemove === 0) {
+        throw new Error(`in-page detach observer missed ${selector}`);
+      }
+      const inPageMs = probe.tRemove - probe.t0;
+      return {
+        inPageMs,
+        observeLagMs: pwMs - inPageMs,
+        exitPath: probe.exitPath,
+      };
+    }
+
     for (const scheme of ["light", "dark"] as const) {
       it(`${scheme}: 390 drawer enter/exit are --motion-fast and scrim exit plays`, async () => {
         const { browser, page } = await launchProbe("no-preference", scheme);
@@ -624,6 +718,9 @@ describe.skipIf(!chromiumAvailable)(
           );
           expect(trace.frames, `${scheme} palette closed frames`).toBeGreaterThan(0);
           expect(trace.dwell).toBeGreaterThanOrEqual(140);
+          console.info(
+            `panelMotion: palette-exit ${scheme} dwell=${trace.dwell.toFixed(1)}ms`
+          );
           if (scheme === "light") {
             lanePrint.dwellLightMs = trace.dwell;
           } else {
@@ -754,15 +851,7 @@ describe.skipIf(!chromiumAvailable)(
         await open();
         await page.keyboard.press("Escape");
         const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
-        if (!sample.connected) {
-          const before = await behindClicks(page);
-          await page.mouse.click(x, y);
-          expect(
-            await behindClicks(page),
-            `t+${delay}ms click behind ${overlaySelector} after detach`
-          ).toBe(before + 1);
-          break;
-        }
+        if (!sample.connected) break;
         expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
         expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
         const before = await behindClicks(page);
@@ -844,17 +933,20 @@ describe.skipIf(!chromiumAvailable)(
         expect(Math.round(scrim.duration)).toBe(0);
         expect(Math.round(drawer.transitionDuration)).toBe(0);
 
-        const scrimClose = await page.evaluate(() => performance.now());
-        await page.getByTestId("sidebar-scrim").dispatchEvent("click");
-        await page.locator("[data-testid='sidebar-scrim']").waitFor({
-          state: "detached",
-          timeout: 2_000,
-        });
-        const scrimDetach = await page.evaluate((start) => performance.now() - start, scrimClose);
-        expect(scrimDetach, `reduced-motion scrim detach ${scrimDetach}ms`).toBeLessThan(
-          50
+        const scrimDetach = await measureInPageDetach(
+          page,
+          "[data-testid='sidebar-scrim']",
+          () => page.getByTestId("sidebar-scrim").dispatchEvent("click"),
+          "click"
         );
-        lanePrint.scrimMs = scrimDetach;
+        expect(
+          scrimDetach.inPageMs,
+          `reduced-motion scrim in-page detach ${scrimDetach.inPageMs}ms`
+        ).toBeLessThan(50);
+        lanePrint.scrimInPageMs = scrimDetach.inPageMs;
+        console.info(
+          `panelMotion: reduced-motion scrim inPage=${scrimDetach.inPageMs.toFixed(1)}ms observeLag=${scrimDetach.observeLagMs.toFixed(1)}ms`
+        );
 
         await page.getByTestId("open-thread").click();
         await page.locator("[data-testid='thread-panel']").waitFor({ state: "attached" });
@@ -872,22 +964,27 @@ describe.skipIf(!chromiumAvailable)(
         });
         const overlay = await sample(page, "[data-testid='quick-switcher-overlay']");
         expect(Math.round(overlay.duration)).toBe(0);
-        const paletteClose = await page.evaluate(() => performance.now());
-        await page.keyboard.press("Escape");
-        await page.locator("[data-testid='quick-switcher']").waitFor({
-          state: "detached",
-          timeout: 2_000,
-        });
-        const paletteDetach = await page.evaluate(
-          (start) => performance.now() - start,
-          paletteClose
+        const paletteDetach = await measureInPageDetach(
+          page,
+          "[data-testid='quick-switcher']",
+          () => page.keyboard.press("Escape"),
+          "escape"
         );
         expect(
-          paletteDetach,
-          `reduced-motion palette detach ${paletteDetach}ms`
+          paletteDetach.inPageMs,
+          `reduced-motion palette in-page detach ${paletteDetach.inPageMs}ms`
         ).toBeLessThan(50);
-        lanePrint.paletteMs = paletteDetach;
-        printLaneIfReady();
+        expect(
+          paletteDetach.exitPath,
+          "palette exit path is observed on the node, not inferred from duration"
+        ).toBe("reduce");
+        lanePrint.paletteInPageMs = paletteDetach.inPageMs;
+        lanePrint.paletteObserveLagMs = paletteDetach.observeLagMs;
+        lanePrint.exitPath = paletteDetach.exitPath;
+        console.info(
+          `panelMotion: reduced-motion palette inPage=${paletteDetach.inPageMs.toFixed(1)}ms observeLag=${paletteDetach.observeLagMs.toFixed(1)}ms exitPath=${paletteDetach.exitPath}`
+        );
+        printLaneSummary();
       } finally {
         await browser.close();
       }

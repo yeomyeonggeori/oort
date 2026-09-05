@@ -197,10 +197,9 @@ async function closePalette(host: HTMLElement): Promise<void> {
 }
 
 describe("PaletteLayer reduced-motion (#1997 N-2)", () => {
-  // Red iff Portal forceMount keeps overlayRef through the exit.
-  // Content inherits portalContext.forceMount (R6 M-1). Without Portal
-  // forceMount, Radix Presence nulls the ref and `!node` detaches first,
-  // so deleting `if (reduceMotion)` stays green (R5 H-1).
+  // Red iff the reduceMotion branch runs. Portal forceMount keeps the
+  // overlay mounted so the effect can see the node (R6 M-1). Deleting
+  // `if (reduceMotion)` leaves the palette mounted after 20ms.
   it("detaches within one frame even when computed duration is the CSS exit", async () => {
     const host = await mountOpenPalette();
     await closePalette(host);

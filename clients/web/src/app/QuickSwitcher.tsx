@@ -114,12 +114,12 @@ function PaletteLayer({
 
   useEffect(() => {
     if (isPresent) return;
-    // Must decide from the hook before reading overlayRef. Under
-    // motion-reduce:animate-none Radix Presence can still beat the
-    // layout; Portal forceMount below keeps the node so this branch
-    // is reachable. Deleting it reddens jsdom; Chromium still detaches
-    // via the duration-0 setTimeout fallback (R6 B-1 / R7).
+    // Decide from the hook before reading overlayRef. Deleting this
+    // branch reddens jsdom; Chromium still detaches via the duration-0
+    // setTimeout fallback (R6 B-1 / R7). Mark the taken path on the
+    // overlay; duration is not a discriminator.
     if (reduceMotion) {
+      overlayRef.current?.setAttribute("data-exit-path", "reduce");
       safeToRemove();
       return;
     }
@@ -128,6 +128,7 @@ function PaletteLayer({
       safeToRemove();
       return;
     }
+    node.setAttribute("data-exit-path", "timeout");
     const raw = getComputedStyle(node).animationDuration;
     const parsed = Number.parseFloat(raw);
     const duration =
@@ -157,12 +158,9 @@ function PaletteLayer({
           so the reduced-motion branch above is reachable. Content inherits
           portalContext.forceMount (same DialogContent contract as
           DialogOverlay). AnimatePresence already holds the CSS close
-          (closed frames > 0, dwell ≥140ms) without it. Without Portal
-          forceMount, Radix Presence tears the overlay down before the
-          effect runs, overlayRef is null, and `if (!node) safeToRemove()`
-          answers first — deleting the reduceMotion branch stays green
-          (#1997 H-1). Overlay forceMount is not set: DialogOverlay
-          inherits portalContext.forceMount. */}
+          (closed frames > 0, dwell ≥140ms) without it. Overlay
+          forceMount is not set: DialogOverlay inherits
+          portalContext.forceMount. */}
       <DialogPortal forceMount>
         <DialogOverlay
           ref={overlayRef}
