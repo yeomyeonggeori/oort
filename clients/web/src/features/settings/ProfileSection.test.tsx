@@ -271,4 +271,24 @@ describe("ProfileSection", () => {
     });
     expect(host.textContent).not.toContain("engine boom");
   });
+
+  it("81자는 문장형으로 막고 PATCH를 보내지 않는다", () => {
+    const { host } = mountSection();
+    const input = host.querySelector(
+      '[data-testid="profile-display-name"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "가".repeat(81)));
+    expect(
+      host.querySelector('[data-testid="profile-display-name-field-error"]')
+        ?.textContent
+    ).toBe("표시 이름은 80자까지 쓸 수 있습니다.");
+    const save = host.querySelector(
+      '[data-testid="profile-display-name-save"]'
+    ) as HTMLButtonElement;
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    act(() => {
+      save.click();
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+  });
 });

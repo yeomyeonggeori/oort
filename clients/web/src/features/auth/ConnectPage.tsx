@@ -8,7 +8,13 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowLeft, FlaskConical } from "lucide-react";
-import { joinWithInvite, login, type LoginResponse } from "@momo/core/lib/api";
+import {
+  changeMyDisplayName,
+  joinWithInvite,
+  login,
+  type JoinResponse,
+  type LoginResponse,
+} from "@momo/core/lib/api";
 import { parseJoinFromPageUrl } from "@momo/core/features/auth/deepLink";
 import {
   API_BASE_DEFAULT,
@@ -63,8 +69,18 @@ import {
   type ConnectField,
   type ConnectMode,
 } from "@momo/core/features/auth/connectModel";
+import {
+  displayNameFieldError,
+  displayNameSaveMessage,
+} from "@momo/core/features/settings/model";
+import { markFreshSignup } from "@/features/welcome/freshSignup";
 
-type ShellFocus = ConnectField | "next" | "choose-server" | "choose-invite";
+type ShellFocus =
+  | ConnectField
+  | "next"
+  | "choose-server"
+  | "choose-invite"
+  | "profile-name";
 
 // Reading this as: onboarding for internal team users on web+Tauri,
 // density 5/10, motion 4/10 (S0 landing only; S1/S2 stay the connect form).
@@ -157,6 +173,11 @@ export function ConnectPage({
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<JoinResponse | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileFailed, setProfileFailed] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
   const discovered = useDiscoveredServers();
   const prefill = useJoinPrefill();
@@ -168,6 +189,7 @@ export function ConnectPage({
   const nextRef = useRef<HTMLButtonElement>(null);
   const chooseServerRef = useRef<HTMLButtonElement>(null);
   const chooseInviteRef = useRef<HTMLButtonElement>(null);
+  const profileNameRef = useRef<HTMLInputElement>(null);
 
   const typed = useRef({ serverUrl, email, password });
   typed.current = { serverUrl, email, password };
@@ -199,6 +221,7 @@ export function ConnectPage({
       next: nextRef.current,
       "choose-server": chooseServerRef.current,
       "choose-invite": chooseInviteRef.current,
+      "profile-name": profileNameRef.current,
     }[pendingFocus];
     // Stay pending until the step that owns the node has mounted. Clearing
     // on a miss is what made the old single-form prefillFocus a silent no-op
@@ -290,11 +313,22 @@ export function ConnectPage({
     if (!commitServer()) return;
     setBusy(true);
     try {
-      const session =
-        mode === "join"
-          ? await joinWithInvite(inviteCode, email, password)
-          : await login(email, password, workspace);
-      if (mode === "join") markPhoneLinkFirstRunPending();
+      if (mode === "join") {
+        const session = await joinWithInvite(inviteCode, email, password);
+        markPhoneLinkFirstRunPending();
+        if (session.createdMember) {
+          setPendingJoin(session);
+          setProfileName(session.member.displayName);
+          setProfileFailed(false);
+          setProfileError(null);
+          goTo("profile");
+          focusLater("profile-name");
+          return;
+        }
+        onLoggedIn(session);
+        return;
+      }
+      const session = await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
@@ -327,6 +361,49 @@ export function ConnectPage({
     void attempt();
   }
 
+  function finishProfile(member = pendingJoin?.member) {
+    if (!pendingJoin || !member) return;
+    markFreshSignup({
+      workspaceId: pendingJoin.member.workspaceId,
+      memberId: pendingJoin.member.id,
+    });
+    onLoggedIn({ ...pendingJoin, member });
+  }
+
+  function handleProfileSkip() {
+    finishProfile();
+  }
+
+  async function handleProfileSave() {
+    if (!pendingJoin) return;
+    if (profileFailed) {
+      finishProfile();
+      return;
+    }
+    if (displayNameFieldError(profileName) !== null) return;
+    setProfileBusy(true);
+    setProfileError(null);
+    try {
+      const member = await changeMyDisplayName(
+        pendingJoin.member.workspaceId,
+        profileName
+      );
+      finishProfile(member);
+    } catch (err) {
+      setProfileFailed(true);
+      setProfileError(
+        `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요`
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  }
+
+  function onProfileSubmit(e: FormEvent) {
+    e.preventDefault();
+    void handleProfileSave();
+  }
+
   const serverHint = requiresServer
     ? "데스크톱 앱은 접속할 서버 주소가 필요합니다."
     : "비워 두면 이 페이지를 제공한 주소로 연결합니다.";
@@ -340,6 +417,7 @@ export function ConnectPage({
         : "로그인";
   const progress = progressLabel(step);
   const joinPath = path === "invite" || mode === "join";
+  const profileFieldError = displayNameFieldError(profileName);
 
   function serverField() {
     return (
@@ -618,6 +696,106 @@ export function ConnectPage({
     </Card>
   );
 
+  // Capture and e2e walk this card the same way they walk S0/S1/S2
+  // (`onboarding-landing` / `onboarding-gateway` / `onboarding-account`).
+  const profileCard = (
+    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
+      <CardHeader>
+        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
+          <OortMark className="size-6 shrink-0 text-accent" />
+          <span className="text-title">oort</span>
+        </h1>
+        <CardDescription>
+          워크스페이스에서 다른 멤버에게 보이는 이름입니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {cardShared}
+        <form onSubmit={onProfileSubmit} className="flex flex-col gap-6">
+          {profileError ? (
+            <InlineBanner
+              tone="error"
+              message={profileError}
+              messageId="onboarding-profile-error-text"
+              testId="onboarding-profile-error"
+            />
+          ) : null}
+          <label className="flex flex-col gap-1 text-body">
+            <FieldLabel>표시 이름</FieldLabel>
+            <Input
+              ref={profileNameRef}
+              id="onboarding-profile-name"
+              name="displayName"
+              value={profileName}
+              autoComplete="nickname"
+              disabled={profileBusy}
+              aria-invalid={profileFieldError ? true : undefined}
+              aria-describedby={
+                [
+                  profileFieldError ? "onboarding-profile-name-error" : null,
+                  profileError ? "onboarding-profile-error-text" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
+              data-testid="onboarding-profile-name"
+              onChange={(e) => setProfileName(e.target.value)}
+            />
+            {profileFieldError ? (
+              <p
+                id="onboarding-profile-name-error"
+                role="alert"
+                className="text-meta text-danger"
+                data-testid="onboarding-profile-name-error"
+              >
+                {profileFieldError}
+              </p>
+            ) : (
+              <span className="text-meta text-ink-muted">
+                나중에 설정에서 언제든 바꿀 수 있습니다
+              </span>
+            )}
+          </label>
+          <div className="flex flex-col gap-3">
+            <Button
+              type="submit"
+              disabled={
+                profileFailed
+                  ? false
+                  : profileBusy || !online || profileFieldError !== null
+              }
+              title={
+                online || profileFailed
+                  ? undefined
+                  : "오프라인 상태에서는 연결할 수 없습니다."
+              }
+              aria-busy={profileBusy || undefined}
+              data-testid="onboarding-profile-submit"
+            >
+              {profileFailed
+                ? "계속"
+                : profileBusy
+                  ? "저장 중…"
+                  : "표시 이름 저장"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={profileBusy}
+              onClick={handleProfileSkip}
+              data-testid="onboarding-profile-skip"
+            >
+              지금은 건너뛰기
+            </Button>
+          </div>
+        </form>
+        <div className="flex justify-end border-t border-line pt-4">
+          <RuntimeBadge />
+        </div>
+      </CardContent>
+    </Card>
+  );
+
   const slide = (
     <OnboardingSlideTransition
       transitionKey={`${step}-${path ?? "none"}`}
@@ -645,6 +823,8 @@ export function ConnectPage({
         />
       ) : step === "gateway" ? (
         gatewayCard
+      ) : step === "profile" ? (
+        profileCard
       ) : (
         accountCard
       )}
@@ -662,26 +842,34 @@ export function ConnectPage({
         data-testid="onboarding-step-chrome"
         {...titlebarDragProps(IS_TAURI)}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          data-testid="onboarding-back"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => {
-            if (step === "account") {
-              goTo("gateway");
-              focusLater(path === "invite" ? "code" : "server");
-            } else {
-              goTo("landing");
-              focusLater(
-                path === "invite" ? "choose-invite" : "choose-server"
-              );
-            }
-          }}
-        >
-          <ArrowLeft aria-hidden="true" />
-          뒤로
-        </Button>
+        {/*
+          S3 has no 뒤로: the account exists now, and going back to S2 would
+          re-submit a join. The 4/4 counter stays.
+        */}
+        {step !== "profile" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            data-testid="onboarding-back"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              if (step === "account") {
+                goTo("gateway");
+                focusLater(path === "invite" ? "code" : "server");
+              } else {
+                goTo("landing");
+                focusLater(
+                  path === "invite" ? "choose-invite" : "choose-server"
+                );
+              }
+            }}
+          >
+            <ArrowLeft aria-hidden="true" />
+            뒤로
+          </Button>
+        ) : (
+          <span />
+        )}
         {progress && (
           <p
             className="text-meta text-ink-muted"

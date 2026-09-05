@@ -10,6 +10,8 @@ import { clearRecentServers } from "./recentServers";
 import { ConnectPage } from "./ConnectPage";
 import { PHONE_LINK_FIRST_RUN_KEY } from "./phoneLinkFirstRunStore";
 
+const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
+
 const login = vi.hoisted(() => vi.fn());
 const joinWithInvite = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
@@ -261,7 +263,8 @@ describe("BZ-6a onboarding shell", () => {
         "new-pass"
       );
     });
-    expect(onLoggedIn).toHaveBeenCalledWith(session);
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(document.querySelector('[data-testid="onboarding-profile"]')).not.toBeNull();
     expect(sessionStorage.getItem(PHONE_LINK_FIRST_RUN_KEY)).toBe("pending");
     expect(
       document.querySelector('[data-testid="onboarding-phone-link"]')
@@ -321,8 +324,6 @@ describe("BZ-6a onboarding shell", () => {
     );
   });
 });
-
-const FRESH_SIGNUP_KEY = "oort.freshSignup.v1";
 
 async function submitJoinFromPrefill() {
   window.history.replaceState(null, "", "/?code=Ab3-_x");
@@ -458,6 +459,31 @@ describe("BZ-6b onboarding profile step", () => {
     expect(onLoggedIn).toHaveBeenCalledWith({ ...session, createdMember: true });
     expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
     expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
+  });
+
+  it("save success lands with the renamed member", async () => {
+    const renamed = { ...session.member, displayName: "성재" };
+    changeMyDisplayName.mockResolvedValue(renamed);
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith({
+      ...session,
+      createdMember: true,
+      member: renamed,
+    });
+    expect(JSON.parse(sessionStorage.getItem(FRESH_SIGNUP_KEY) ?? "null")).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
+    });
   });
 });
 
