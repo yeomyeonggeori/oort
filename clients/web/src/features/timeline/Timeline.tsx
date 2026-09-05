@@ -369,6 +369,10 @@ export function Timeline({
   // list (that remount was the empty-state layout shift).
   const empty =
     messages.length === 0 && (pending === undefined || pending.length === 0);
+  const showWelcome =
+    welcomePhase === "stage" ||
+    welcomePhase === "exiting" ||
+    welcomePhase === "backstop";
   const intro = useMemo(
     () =>
       buildChannelIntro({
@@ -398,10 +402,6 @@ export function Timeline({
       })
     );
     const withIntro = showIntro ? [CHANNEL_INTRO_ITEM, ...folded] : folded;
-    const showWelcome =
-      welcomePhase === "stage" ||
-      welcomePhase === "exiting" ||
-      welcomePhase === "backstop";
     if (!showWelcome) return withIntro;
     if (showIntro) {
       return [CHANNEL_INTRO_ITEM, WELCOME_KICKOFF_ITEM, ...folded];
@@ -416,7 +416,7 @@ export function Timeline({
     reactions,
     myMemberIdForFold,
     showIntro,
-    welcomePhase,
+    showWelcome,
   ]);
 
   // ADR-0155 — 끝난 것을 **본** run 들. 여기서 한 번 구독하고 행에는 boolean 하나만
@@ -696,6 +696,7 @@ export function Timeline({
                 intro={intro}
                 empty={empty}
                 peer={peer}
+                hideWriteAction={showWelcome}
                 onWrite={onStartWriting}
                 onAddMember={onAddMember}
               />

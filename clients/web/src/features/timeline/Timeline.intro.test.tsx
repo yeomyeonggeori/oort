@@ -130,6 +130,7 @@ function mount(
     peer?: RosterMember | null;
     onStartWriting?: () => void;
     onAddMember?: () => void;
+    welcomePhase?: "hidden" | "stage" | "exiting" | "backstop";
   } = {}
 ): HTMLElement {
   if (host === null) {
@@ -151,6 +152,7 @@ function mount(
         peer: over.peer,
         onStartWriting: over.onStartWriting,
         onAddMember: over.onAddMember,
+        welcomePhase: over.welcomePhase,
       })
     );
   });
@@ -270,5 +272,21 @@ describe("Timeline channel intro leading row", () => {
     });
     expect(document.activeElement).toBe(composer);
     composer.remove();
+  });
+
+  it("hides 첫 메시지 쓰기 while the welcome stage is mounted", () => {
+    const root = mount({ welcomePhase: "stage" });
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+    expect(root.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
+    expect(root.querySelector("[data-testid='timeline-empty-secondary']")).not.toBeNull();
+  });
+
+  it("keeps 첫 메시지 쓰기 when welcome is hidden", () => {
+    const root = mount({ welcomePhase: "hidden" });
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")?.textContent).toContain(
+      EMPTY_WRITE_ACTION_LABEL
+    );
   });
 });
