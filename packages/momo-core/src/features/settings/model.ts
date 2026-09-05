@@ -532,16 +532,25 @@ export function displayNameSaveMessage(error: unknown): string {
   return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
 
-/** Server join/PATCH ceiling for `displayName` (characters, not bytes). */
-export const DISPLAY_NAME_MAX_CHARS = 80;
+/**
+ * Server join/PATCH ceiling for `displayName` (Unicode scalar values, not bytes).
+ * Mirrors `normalized_join_display_name`: trimmed · non-empty · ≤ 100
+ * (`server-rust/crates/momo-settings/src/join.rs:167`).
+ */
+export const DISPLAY_NAME_MAX_CHARS = 100;
 
 /**
  * Live field gate shared by 설정 › 프로필 and onboarding S3.
- * A sentence, never a fragment like "80자 초과".
+ * One sentence per failure (empty/whitespace, or over 100). Never a fragment
+ * like "100자 초과".
  */
 export function displayNameFieldError(raw: string): string | null {
-  if (raw.length > DISPLAY_NAME_MAX_CHARS) {
-    return "표시 이름은 80자까지 쓸 수 있습니다.";
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) {
+    return "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.";
+  }
+  if ([...trimmed].length > DISPLAY_NAME_MAX_CHARS) {
+    return "표시 이름은 100자까지 쓸 수 있습니다.";
   }
   return null;
 }

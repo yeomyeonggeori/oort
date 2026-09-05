@@ -437,17 +437,17 @@ describe("BZ-6b onboarding profile step", () => {
     });
   });
 
-  it("rejects 81 characters in a sentence, disables save, and does not PATCH", async () => {
+  it("rejects 101 characters in a sentence, disables save, and does not PATCH", async () => {
     await submitJoinFromPrefill();
     await vi.waitFor(() => {
       expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
     });
-    fill("onboarding-profile-name", "가".repeat(81));
+    fill("onboarding-profile-name", "가".repeat(101));
     const message = document.querySelector(
       '[data-testid="onboarding-profile-name-error"]'
     )?.textContent;
-    expect(message).toBe("표시 이름은 80자까지 쓸 수 있습니다.");
-    expect(message).not.toMatch(/80자 초과/);
+    expect(message).toBe("표시 이름은 100자까지 쓸 수 있습니다.");
+    expect(message).not.toMatch(/100자 초과/);
     const submit = document.querySelector(
       '[data-testid="onboarding-profile-submit"]'
     ) as HTMLButtonElement;

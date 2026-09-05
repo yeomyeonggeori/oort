@@ -217,35 +217,24 @@ describe("ProfileSection", () => {
     });
   });
 
-  it("빈 이름 400은 한국어 다음 행동으로 보여 주고 와이어 영어는 숨긴다", async () => {
-    changeMyDisplayName.mockRejectedValue(
-      new ApiError(400, "displayName is required")
-    );
+  it("빈 이름과 공백만 있는 이름은 클라에서 막고 PATCH를 보내지 않는다", () => {
     const { host, replaceSessionMember } = mountSection();
     const input = host.querySelector(
       '[data-testid="profile-display-name"]'
     ) as HTMLInputElement;
     act(() => setInputValue(input, "   "));
-    await act(async () => {
-      (
-        host.querySelector(
-          '[data-testid="profile-display-name-save"]'
-        ) as HTMLButtonElement
-      ).click();
-    });
-    await vi.waitFor(() => {
-      expect(
-        host.querySelector('[data-testid="profile-display-name-error"]')
-          ?.textContent
-      ).toBe(
-        "표시 이름을 비울 수 없습니다. 한 글자 이상 적고 다시 저장하세요."
-      );
-    });
     expect(
-      host.querySelector('[data-testid="profile-display-name-error"]')
+      host.querySelector('[data-testid="profile-display-name-field-error"]')
         ?.textContent
-    ).not.toContain("displayName");
-    expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
+    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.");
+    const save = host.querySelector(
+      '[data-testid="profile-display-name-save"]'
+    ) as HTMLButtonElement;
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    act(() => {
+      save.click();
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
     expect(replaceSessionMember).not.toHaveBeenCalled();
   });
 
@@ -272,16 +261,16 @@ describe("ProfileSection", () => {
     expect(host.textContent).not.toContain("engine boom");
   });
 
-  it("81자는 문장형으로 막고 PATCH를 보내지 않는다", () => {
+  it("101자는 문장형으로 막고 PATCH를 보내지 않는다", () => {
     const { host } = mountSection();
     const input = host.querySelector(
       '[data-testid="profile-display-name"]'
     ) as HTMLInputElement;
-    act(() => setInputValue(input, "가".repeat(81)));
+    act(() => setInputValue(input, "가".repeat(101)));
     expect(
       host.querySelector('[data-testid="profile-display-name-field-error"]')
         ?.textContent
-    ).toBe("표시 이름은 80자까지 쓸 수 있습니다.");
+    ).toBe("표시 이름은 100자까지 쓸 수 있습니다.");
     const save = host.querySelector(
       '[data-testid="profile-display-name-save"]'
     ) as HTMLButtonElement;

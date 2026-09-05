@@ -2554,7 +2554,7 @@ async function shootOnboardingProfile(page, where, { tapTargets = false, shoot }
     await assertTapTargets(page, `profile ${where}`, PROFILE_TAP_TARGETS);
   }
   if (shoot) await shoot("onboarding-profile");
-  await page.getByTestId("onboarding-profile-name").fill("가".repeat(81));
+  await page.getByTestId("onboarding-profile-name").fill("가".repeat(101));
   await page.getByTestId("onboarding-profile-name-error").waitFor({
     state: "visible",
   });

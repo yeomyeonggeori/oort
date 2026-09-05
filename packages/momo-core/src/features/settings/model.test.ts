@@ -396,13 +396,13 @@ describe("프로필 표시 이름 error copy", () => {
     );
   });
 
-  it("rejects 81 characters in a sentence, and accepts 80", () => {
-    expect(DISPLAY_NAME_MAX_CHARS).toBe(80);
-    expect(displayNameFieldError("가".repeat(80))).toBeNull();
-    expect(displayNameFieldError("가".repeat(81))).toBe(
-      "표시 이름은 80자까지 쓸 수 있습니다."
+  it("rejects 101 characters in a sentence, and accepts 100", () => {
+    expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
+    expect(displayNameFieldError("가".repeat(100))).toBeNull();
+    expect(displayNameFieldError("가".repeat(101))).toBe(
+      "표시 이름은 100자까지 쓸 수 있습니다."
     );
-    expect(displayNameFieldError("가".repeat(81))).not.toMatch(/80자 초과/);
+    expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
   });
 
   it("rejects empty and whitespace client-side, and accepts 100 characters", () => {
