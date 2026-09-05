@@ -10,6 +10,7 @@ import {
   sendMessage,
   setPin,
   setReaction,
+  uuidEq,
   type Message,
   type MessageAttachment,
   type SendMessageOptions,
@@ -676,6 +677,26 @@ export function useTimeline(
     updatePending,
     reloadNonce,
   ]);
+
+  /**
+   * Design-capture seam. The lane injects a live message through applyBatch,
+   * the same path as message.new. Release builds skip this listener.
+   */
+  useEffect(() => {
+    if (!(import.meta.env.DEV || import.meta.env.MODE === "design")) return;
+    if (!channelId) return;
+    const onCapture = (event: Event) => {
+      const detail = (event as CustomEvent<Message>).detail;
+      if (!detail || typeof detail !== "object") return;
+      if (typeof detail.id !== "string") return;
+      if (detail.channelId && !uuidEq(detail.channelId, channelId)) return;
+      applyBatch([detail], { provenance: "live", eventType: "message.new" });
+    };
+    window.addEventListener("oort.capture.message.new", onCapture);
+    return () => {
+      window.removeEventListener("oort.capture.message.new", onCapture);
+    };
+  }, [channelId, applyBatch]);
 
   /**
    * Read the list again (이슈 #1146 M2).

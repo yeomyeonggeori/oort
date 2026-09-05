@@ -150,6 +150,8 @@ function workspace(labels: RoleLabels): WorkspaceIdentity {
     name: "새벽팀",
     updatedAtMs: 0,
     roleLabels: labels,
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
   };
 }
 
