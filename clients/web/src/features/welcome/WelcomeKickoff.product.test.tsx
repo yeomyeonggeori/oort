@@ -9,7 +9,9 @@ import {
   act,
   createElement,
   forwardRef,
+  useEffect,
   useImperativeHandle,
+  useState,
   type ReactElement,
   type Ref,
 } from "react";
@@ -38,6 +40,8 @@ import {
   welcomeShownKey,
   writeShownMarker,
 } from "./welcomeKickoff";
+import { AGENTS_NAV } from "@/features/sidebar/workspaceNav";
+import { EMPTY_WRITE_ACTION_LABEL } from "@momo/core/features/timeline/model";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const OTHER_WS = "00000000-0000-7000-8000-000000000002";
@@ -295,7 +299,11 @@ function wrap(node: ReactElement, client: QueryClient): ReactElement {
   );
 }
 
-function WelcomeFed(props: { messages: Message[] }): ReactElement {
+function WelcomeFed(props: {
+  messages: Message[];
+  directory?: ReturnType<typeof makeDirectory>;
+  directoryStatus?: "pending" | "success" | "error";
+}): ReactElement {
   const welcome = useWelcomeKickoff({
     workspaceId: WS,
     memberId: ME,
@@ -303,8 +311,9 @@ function WelcomeFed(props: { messages: Message[] }): ReactElement {
     channelName: "general",
     channelId: CH,
     timelineStatus: "ready",
+    directoryStatus: props.directoryStatus ?? "success",
     messages: props.messages,
-    directory,
+    directory: props.directory ?? directory,
     realtime,
   });
   return createElement(Timeline, {
@@ -324,8 +333,11 @@ function WelcomeFed(props: { messages: Message[] }): ReactElement {
 function WelcomeTimeline(props: {
   channelKind?: string;
   channelName?: string;
+  directory?: ReturnType<typeof makeDirectory>;
+  directoryStatus?: "pending" | "success" | "error";
 }): ReactElement {
   const timeline = useTimeline(realtime, WS, CH, ME);
+  const resolvedDirectory = props.directory ?? directory;
   const welcome = useWelcomeKickoff({
     workspaceId: WS,
     memberId: ME,
@@ -338,13 +350,14 @@ function WelcomeTimeline(props: {
         : timeline.status === "loading"
           ? "loading"
           : "ready",
+    directoryStatus: props.directoryStatus ?? "success",
     messages: timeline.state.messages,
-    directory,
+    directory: resolvedDirectory,
     realtime,
   });
   return createElement(Timeline, {
     messages: timeline.state.messages,
-    directory,
+    directory: resolvedDirectory,
     status: timeline.status === "error" ? "error" : "ready",
     reachedStart: true,
     channelKind: "public",
@@ -370,6 +383,8 @@ async function settle(): Promise<void> {
 async function mountWelcome(over: {
   channelKind?: string;
   channelName?: string;
+  directory?: ReturnType<typeof makeDirectory>;
+  directoryStatus?: "pending" | "success" | "error";
 } = {}): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
@@ -383,6 +398,8 @@ async function mountWelcome(over: {
         createElement(WelcomeTimeline, {
           channelKind: over.channelKind,
           channelName: over.channelName,
+          directory: over.directory,
+          directoryStatus: over.directoryStatus,
         }),
         client
       )
@@ -467,7 +484,7 @@ describe("welcome kickoff product path", () => {
     expect(readShownMarker(WS, ME)).toBe(true);
   });
 
-  it("120s without an opener → guidance card; later opener still exits the card", async () => {
+  it("120s without an opener → guidance card; seam cleared and shown-marker written; later opener still exits the card", async () => {
     vi.useFakeTimers();
     const root = await mountWelcome();
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
@@ -477,6 +494,11 @@ describe("welcome kickoff product path", () => {
     const card = root.querySelector("[data-testid='welcome-kickoff-backstop']");
     expect(card?.textContent).toContain(WELCOME_BACKSTOP_COPY);
     expect(card?.textContent).not.toMatch(/실패|오류|error|fail/i);
+    expect(peekFreshSignup()).toBeNull();
+    expect(readShownMarker(WS, ME)).toBe(true);
+    const link = card?.querySelector("a");
+    expect(link?.getAttribute("href")).toBe(AGENTS_NAV.to);
+    expect(link?.textContent).toBe(AGENTS_NAV.label);
     await act(async () => {
       rail.handlers?.onMessage(
         frame(OPENER_ID, AGENT, 1, "설정 › AI 연결에서 연결하고 돌아오면 시작해요")
@@ -497,6 +519,28 @@ describe("welcome kickoff product path", () => {
     expect(entranceCount(root)).toBe(1);
   });
 
+  it("120s without an opener → reload of #general shows no stage and no card replay", async () => {
+    vi.useFakeTimers();
+    await mountWelcome();
+    await act(async () => {
+      vi.advanceTimersByTime(WELCOME_BACKSTOP_MS);
+    });
+    expect(peekFreshSignup()).toBeNull();
+    expect(readShownMarker(WS, ME)).toBe(true);
+    vi.useRealTimers();
+    if (mountedRoot) {
+      act(() => mountedRoot?.unmount());
+      mountedRoot = null;
+    }
+    host?.remove();
+    host = null;
+    rail.handlers = null;
+    restPage.messages = [];
+    const again = await mountWelcome();
+    expect(again.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(again.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
+  });
+
   it("re-entry with shown-marker → no stage", async () => {
     writeShownMarker(WS, ME);
     const root = await mountWelcome();
@@ -506,6 +550,15 @@ describe("welcome kickoff product path", () => {
   it("channel with an existing agent message → no stage", async () => {
     restPage.messages = [restAgentMessage()];
     const root = await mountWelcome();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+  });
+
+  it("loaded message whose author the directory cannot resolve → no stage", async () => {
+    restPage.messages = [restAgentMessage()];
+    const root = await mountWelcome({
+      directory: makeDirectory([humanMember()]),
+      directoryStatus: "success",
+    });
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
   });
 
@@ -619,8 +672,106 @@ describe("welcome kickoff product path", () => {
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
   });
 
+  it("agent backlog + pending directory → no stage; success with the agent still no stage", async () => {
+    restPage.messages = [restAgentMessage()];
+    const empty = makeDirectory([]);
+    const root = await mountWelcome({
+      directory: empty,
+      directoryStatus: "pending",
+    });
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    await act(async () => {
+      mountedRoot?.render(
+        wrap(
+          createElement(WelcomeTimeline, {
+            directory,
+            directoryStatus: "success",
+          }),
+          new QueryClient({ defaultOptions: { queries: { retry: false } } })
+        )
+      );
+    });
+    await settle();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+  });
+
+  it("empty channel + pending directory → no stage; roster success → stage then opener exits once", async () => {
+    const empty = makeDirectory([]);
+    host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let settleRoster: (() => void) | null = null;
+    function DelayedRoster(): ReactElement {
+      const [status, setStatus] = useState<"pending" | "success">("pending");
+      const [dir, setDir] = useState(empty);
+      useEffect(() => {
+        settleRoster = () => {
+          setDir(directory);
+          setStatus("success");
+        };
+      }, []);
+      return createElement(WelcomeTimeline, {
+        directory: dir,
+        directoryStatus: status,
+      });
+    }
+    await act(async () => {
+      mountedRoot?.render(wrap(createElement(DelayedRoster), client));
+    });
+    await settle();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    await settle();
+    expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(host.textContent).toContain(EMPTY_WRITE_ACTION_LABEL);
+    await act(async () => {
+      settleRoster?.();
+    });
+    await settle();
+    expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    expect(host.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
+    await act(async () => {
+      rail.handlers?.onMessage(
+        frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
+      );
+    });
+    await settle();
+    const stage = host.querySelector("[data-testid='welcome-kickoff-stage']");
+    expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
+    act(() => {
+      const event = new Event("animationend", { bubbles: true });
+      Object.defineProperty(event, "animationName", {
+        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
+      });
+      stage?.dispatchEvent(event);
+    });
+    await settle();
+    expect(host.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(entranceCount(host)).toBe(1);
+  });
+
+  it("stage mounted → no 첫 메시지 쓰기", async () => {
+    const withStage = await mountWelcome();
+    expect(withStage.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    expect(withStage.querySelector("[data-testid='timeline-empty-primary']")).toBeNull();
+    expect(withStage.textContent).not.toContain(EMPTY_WRITE_ACTION_LABEL);
+  });
+
+  it("no marker → 첫 메시지 쓰기 CTA as before", async () => {
+    clearFreshSignup();
+    const root = await mountWelcome();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    expect(root.querySelector("[data-testid='timeline-empty-primary']")?.textContent).toContain(
+      EMPTY_WRITE_ACTION_LABEL
+    );
+  });
+
   it.skipIf(!chromiumAvailable)(
-    "exit animation ended before opener arrival start (Chromium timestamps)",
+    "exit fill both: no frame above end opacity after animationend (Chromium)",
     async () => {
       let chromium: typeof import("playwright").chromium;
       try {
@@ -647,10 +798,7 @@ describe("welcome kickoff product path", () => {
           return { path, base: dirname(path), content: readFileSync(path, "utf8") };
         },
       });
-      const css = compiler.build([
-        WELCOME_KICKOFF_EXIT_CLASS,
-        ENTER_CONVERSATION_CLASS,
-      ]);
+      const css = compiler.build([WELCOME_KICKOFF_EXIT_CLASS]);
       const browser = await chromium.launch();
       try {
         const page = await browser.newPage();
@@ -658,49 +806,41 @@ describe("welcome kickoff product path", () => {
         await page.setContent(
           `<!doctype html><html><head><style>${css}</style></head><body>
             <div id="stage" class="${WELCOME_KICKOFF_EXIT_CLASS}">팀이 준비하고 있어요</div>
-            <article id="row" data-testid="timeline-message">오프너</article>
           </body></html>`
         );
         const measured = await page.evaluate(async () => {
           const stage = document.getElementById("stage");
-          const row = document.getElementById("row");
-          if (!stage || !row) throw new Error("missing nodes");
-          return await new Promise<{
-            exitEndedMs: number;
-            arrivalStartMs: number;
-            deltaMs: number;
-          }>((resolve, reject) => {
-            const timeout = window.setTimeout(
-              () => reject(new Error("stage exit animationend did not fire")),
-              2000
-            );
-            stage.addEventListener("animationend", (event) => {
-              if (event.animationName !== "motion-fade-out") return;
-              const exitEndedMs = performance.now();
-              row.classList.add("enter-conversation");
-              const arrival = document
-                .getAnimations()
-                .find(
-                  (animation) =>
-                    (animation as unknown as { animationName?: string })
-                      .animationName === "motion-enter-conversation"
-                );
-              const arrivalStartMs = performance.now();
-              window.clearTimeout(timeout);
-              resolve({
-                exitEndedMs,
-                arrivalStartMs,
-                deltaMs: arrivalStartMs - exitEndedMs,
+          if (!stage) throw new Error("missing stage");
+          return await new Promise<{ samples: number[]; maxAfterEnd: number }>(
+            (resolve, reject) => {
+              const timeout = window.setTimeout(
+                () => reject(new Error("stage exit animationend did not fire")),
+                2000
+              );
+              stage.addEventListener("animationend", (event) => {
+                if (event.animationName !== "motion-fade-out") return;
+                const samples: number[] = [];
+                const sample = () => {
+                  samples.push(Number(getComputedStyle(stage).opacity));
+                  if (samples.length >= 8) {
+                    window.clearTimeout(timeout);
+                    resolve({
+                      samples,
+                      maxAfterEnd: Math.max(...samples),
+                    });
+                    return;
+                  }
+                  requestAnimationFrame(sample);
+                };
+                requestAnimationFrame(sample);
               });
-              void arrival;
-            });
-          });
+            }
+          );
         });
         console.info(
-          `welcome kickoff exit→arrival exitEndedMs=${measured.exitEndedMs.toFixed(1)} arrivalStartMs=${measured.arrivalStartMs.toFixed(1)} deltaMs=${measured.deltaMs.toFixed(1)}`
+          `welcome kickoff H1 fill-both maxAfterEnd=${measured.maxAfterEnd.toFixed(4)} samples=${measured.samples.map((n) => n.toFixed(4)).join(",")}`
         );
-        expect(measured.deltaMs).toBeGreaterThanOrEqual(0);
-        expect(measured.exitEndedMs).toBeGreaterThan(0);
+        expect(measured.maxAfterEnd).toBeLessThan(0.02);
       } finally {
         await browser.close();
       }
