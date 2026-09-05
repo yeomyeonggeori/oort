@@ -1161,6 +1161,7 @@ export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (isPresent) return;
     if (reduceMotion) {
+      ref.current?.setAttribute("data-exit-path", "reduce");
       safeToRemove();
       return;
     }
@@ -1169,6 +1170,7 @@ export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
       safeToRemove();
       return;
     }
+    node.setAttribute("data-exit-path", "timeout");
     const raw = getComputedStyle(node).animationDuration;
     const parsed = Number.parseFloat(raw);
     const duration =

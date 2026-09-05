@@ -574,7 +574,6 @@ describe.skipIf(!chromiumAvailable)(
           await open();
           await page.keyboard.press("Escape");
           const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
-          if (!sample.connected) break;
           expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
           expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
           const before = await behindClicks(page);

@@ -119,6 +119,8 @@ function PaletteLayer({
     // setTimeout fallback (R6 B-1 / R7). Mark the taken path on the
     // overlay; duration is not a discriminator.
     if (reduceMotion) {
+      // data-exit-path: written only inside the exit window, removed
+      // with the node, read by panelMotion.test.ts.
       overlayRef.current?.setAttribute("data-exit-path", "reduce");
       safeToRemove();
       return;
@@ -154,13 +156,11 @@ function PaletteLayer({
       open={isPresent}
       onOpenChange={onOpenChange}
     >
-      {/* Portal forceMount keeps the overlay node alive through the exit
-          so the reduced-motion branch above is reachable. Content inherits
-          portalContext.forceMount (same DialogContent contract as
-          DialogOverlay). AnimatePresence already holds the CSS close
-          (closed frames > 0, dwell ≥140ms) without it. Overlay
-          forceMount is not set: DialogOverlay inherits
-          portalContext.forceMount. */}
+      {/* DialogContent inherits portal forceMount. Without it Radix Presence
+          removes the content itself and the jsdom "still mounted at 20 ms"
+          assertion passes regardless of the effect. forceMount keeps the
+          guard meaningful (the palette's exit is owned by our effect, not
+          by Radix), not the branch reachable. */}
       <DialogPortal forceMount>
         <DialogOverlay
           ref={overlayRef}

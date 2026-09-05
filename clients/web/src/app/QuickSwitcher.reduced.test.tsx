@@ -197,9 +197,11 @@ async function closePalette(host: HTMLElement): Promise<void> {
 }
 
 describe("PaletteLayer reduced-motion (#1997 N-2)", () => {
-  // Red iff the reduceMotion branch runs. Portal forceMount keeps the
-  // overlay mounted so the effect can see the node (R6 M-1). Deleting
-  // `if (reduceMotion)` leaves the palette mounted after 20ms.
+  // Green when the reduceMotion branch runs; red when it is deleted
+  // (palette still mounted at 20 ms). Portal forceMount keeps
+  // DialogContent mounted after open flips false, so this assertion
+  // can only become true through our safeToRemove(); without it Radix
+  // Presence removes the content and the red-proof goes vacuous.
   it("detaches within one frame even when computed duration is the CSS exit", async () => {
     const host = await mountOpenPalette();
     await closePalette(host);

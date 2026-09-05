@@ -287,8 +287,11 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(code).not.toMatch(/Command\.Dialog/);
     expect(code).toMatch(/\brestoreRef\b/);
     expect(code).not.toMatch(/\brestoreDialogOpenerFocus\b/);
-    // Portal forceMount keeps the overlay node alive through the exit so
-    // the reduced-motion branch is reachable. Content inherits
+    // Removing DialogPortal forceMount lets Radix Presence own the content
+    // removal, so the jsdom "still mounted at 20 ms" assertion passes
+    // regardless of the effect and the red-proof goes vacuous. forceMount
+    // keeps the guard meaningful (exit owned by our effect, not by Radix),
+    // not the reduce branch reachable. Content inherits
     // portalContext.forceMount; do not pin that inherited prop (R6 M-1).
     // Overlay forceMount is not asserted (inherited). The taken path is
     // marked on the node (`data-exit-path`); duration is not a discriminator.
@@ -321,6 +324,9 @@ describe("UX-R1b product wiring (comment-stripped)", () => {
     expect(codeOnly(FILES.sidebar)).toMatch(/\bSidebarDrawerScrimLayer\b/);
     expect(codeOnly(FILES.sidebar)).toMatch(/\bDRAWER_SCRIM_MOTION\b/);
     expect(codeOnly(FILES.harness)).toMatch(/<Sidebar\b/);
+    expect(codeOnly(FILES.sidebar)).toMatch(
+      /setAttribute\(\s*["']data-exit-path["']\s*,\s*["']reduce["']\s*\)/
+    );
   });
 
   it("the measure harness does not import motion/react (allowlist stays three)", () => {
@@ -333,6 +339,7 @@ describe.skipIf(!chromiumAvailable)(
   () => {
     const lanePrint = {
       scrimInPageMs: null as number | null,
+      scrimExitPath: null as string | null,
       paletteInPageMs: null as number | null,
       paletteObserveLagMs: null as number | null,
       exitPath: null as string | null,
@@ -344,6 +351,7 @@ describe.skipIf(!chromiumAvailable)(
     const printLaneSummary = () => {
       const {
         scrimInPageMs,
+        scrimExitPath,
         paletteInPageMs,
         paletteObserveLagMs,
         exitPath,
@@ -362,7 +370,7 @@ describe.skipIf(!chromiumAvailable)(
       }
       lanePrint.summaryPrinted = true;
       console.info(
-        `panelMotion: reduced-motion detach scrimInPage=${scrimInPageMs.toFixed(1)}ms paletteInPage=${paletteInPageMs.toFixed(1)}ms exitPath=${exitPath ?? "unset"} observeLag=${(paletteObserveLagMs ?? 0).toFixed(1)}ms · dwell light=${dwellLightMs.toFixed(1)}ms dark=${dwellDarkMs.toFixed(1)}ms`
+        `panelMotion: reduced-motion detach scrimInPage=${scrimInPageMs.toFixed(1)}ms scrimExitPath=${scrimExitPath ?? "unset"} paletteInPage=${paletteInPageMs.toFixed(1)}ms exitPath=${exitPath ?? "unset"} observeLag=${(paletteObserveLagMs ?? 0).toFixed(1)}ms · dwell light=${dwellLightMs.toFixed(1)}ms dark=${dwellDarkMs.toFixed(1)}ms`
       );
     };
 
@@ -716,8 +724,6 @@ describe.skipIf(!chromiumAvailable)(
             "[data-testid='quick-switcher-overlay']",
             () => page.keyboard.press("Escape")
           );
-          expect(trace.frames, `${scheme} palette closed frames`).toBeGreaterThan(0);
-          expect(trace.dwell).toBeGreaterThanOrEqual(140);
           console.info(
             `panelMotion: palette-exit ${scheme} dwell=${trace.dwell.toFixed(1)}ms`
           );
@@ -726,6 +732,8 @@ describe.skipIf(!chromiumAvailable)(
           } else {
             lanePrint.dwellDarkMs = trace.dwell;
           }
+          expect(trace.frames, `${scheme} palette closed frames`).toBeGreaterThan(0);
+          expect(trace.dwell).toBeGreaterThanOrEqual(140);
           await page.locator("[data-testid='quick-switcher']").waitFor({
             state: "detached",
             timeout: 2_000,
@@ -851,7 +859,6 @@ describe.skipIf(!chromiumAvailable)(
         await open();
         await page.keyboard.press("Escape");
         const sample = await sampleClosedOverlayAfter(page, overlaySelector, delay);
-        if (!sample.connected) break;
         expect(sample.state, `t+${delay}ms overlay data-state`).toBe("closed");
         expect(sample.pointerEvents, `t+${delay}ms overlay pointer-events`).toBe("none");
         const before = await behindClicks(page);
@@ -939,14 +946,19 @@ describe.skipIf(!chromiumAvailable)(
           () => page.getByTestId("sidebar-scrim").dispatchEvent("click"),
           "click"
         );
+        lanePrint.scrimInPageMs = scrimDetach.inPageMs;
+        lanePrint.scrimExitPath = scrimDetach.exitPath;
+        console.info(
+          `panelMotion: reduced-motion scrim inPage=${scrimDetach.inPageMs.toFixed(1)}ms observeLag=${scrimDetach.observeLagMs.toFixed(1)}ms exitPath=${scrimDetach.exitPath}`
+        );
         expect(
           scrimDetach.inPageMs,
           `reduced-motion scrim in-page detach ${scrimDetach.inPageMs}ms`
         ).toBeLessThan(50);
-        lanePrint.scrimInPageMs = scrimDetach.inPageMs;
-        console.info(
-          `panelMotion: reduced-motion scrim inPage=${scrimDetach.inPageMs.toFixed(1)}ms observeLag=${scrimDetach.observeLagMs.toFixed(1)}ms`
-        );
+        expect(
+          scrimDetach.exitPath,
+          "scrim exit path is observed on the node, not inferred from duration"
+        ).toBe("reduce");
 
         await page.getByTestId("open-thread").click();
         await page.locator("[data-testid='thread-panel']").waitFor({ state: "attached" });
@@ -970,6 +982,12 @@ describe.skipIf(!chromiumAvailable)(
           () => page.keyboard.press("Escape"),
           "escape"
         );
+        lanePrint.paletteInPageMs = paletteDetach.inPageMs;
+        lanePrint.paletteObserveLagMs = paletteDetach.observeLagMs;
+        lanePrint.exitPath = paletteDetach.exitPath;
+        console.info(
+          `panelMotion: reduced-motion palette inPage=${paletteDetach.inPageMs.toFixed(1)}ms observeLag=${paletteDetach.observeLagMs.toFixed(1)}ms exitPath=${paletteDetach.exitPath}`
+        );
         expect(
           paletteDetach.inPageMs,
           `reduced-motion palette in-page detach ${paletteDetach.inPageMs}ms`
@@ -978,12 +996,6 @@ describe.skipIf(!chromiumAvailable)(
           paletteDetach.exitPath,
           "palette exit path is observed on the node, not inferred from duration"
         ).toBe("reduce");
-        lanePrint.paletteInPageMs = paletteDetach.inPageMs;
-        lanePrint.paletteObserveLagMs = paletteDetach.observeLagMs;
-        lanePrint.exitPath = paletteDetach.exitPath;
-        console.info(
-          `panelMotion: reduced-motion palette inPage=${paletteDetach.inPageMs.toFixed(1)}ms observeLag=${paletteDetach.observeLagMs.toFixed(1)}ms exitPath=${paletteDetach.exitPath}`
-        );
         printLaneSummary();
       } finally {
         await browser.close();
@@ -1047,8 +1059,8 @@ describe.skipIf(!chromiumAvailable)(
         ]);
         const raceCount = await page.locator("[data-testid='thread-panel']").count();
         rows.push(`  real-mouse race -> panel count ${raceCount}`);
-        expect(raceCount).toBe(1);
         console.info(`dead-window-sweep\n${rows.join("\n")}`);
+        expect(raceCount).toBe(1);
       } finally {
         await browser.close();
       }
@@ -1132,10 +1144,10 @@ describe.skipIf(!chromiumAvailable)(
         const focused = await page.evaluate(
           () => document.activeElement?.getAttribute("data-testid") ?? document.activeElement?.tagName
         );
-        expect(focused, `focus after palette close: ${focused}`).toBe("open-palette");
         console.info(
           `palette-keystrokes open-container=${afterOpen.container} type-items=${counts.items} rows=${counts.rows} focus=${focused}`
         );
+        expect(focused, `focus after palette close: ${focused}`).toBe("open-palette");
       } finally {
         await browser.close();
       }
