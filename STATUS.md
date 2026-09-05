@@ -1,5 +1,34 @@
 # oort 진행 현황
 
+## UX-R2a 온보딩 S3 프로필 스텝 (#2001, 2026-09-05, R2)
+
+- Track UXUI. S3 = 표시 이름 only. Personal avatar upload route does not exist (workspace avatar is operator-only). No disabled avatar control on S3.
+- `onboardingFlow` steps `landing|gateway|account|profile`. `progressLabel`: gateway `2/4` · account `3/4` · profile `4/4`. `transitionFor("account","profile",false)` = line-slide forward; reduced-motion = none.
+- Join with `createdMember: true` holds the session, paints S3, calls `onLoggedIn` on skip / save / fail-forward. Sign-in and `createdMember: false` skip S3. `joinWithInvite` returns `JoinResponse` (`createdMember` boolean; non-boolean = `WireShapeError`). That hardness is contract-correct: openapi marks `createdMember` required. Shared rule `DISPLAY_NAME_MAX_CHARS = 100` mirrors `normalized_join_display_name` (`server-rust/crates/momo-settings/src/join.rs:167`): trim · non-empty · ≤ 100. Empty/whitespace sentence `"표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."` · over 100 `"표시 이름은 100자까지 쓸 수 있습니다."` ProfileSection and S3 consume the same function. Empty never PATCHes (primary disabled; wire mock `changeMyDisplayName` not called).
+- Join `applyLogin` persists before S3 `onLoggedIn`. Hold: `holdSessionRestore` so App does not enter `restoring` and unmount ConnectPage. Measured: first capture waitFor(`onboarding-profile`) 30000ms timeout; after hold, S3 paints. S3 render is `step === "profile" && pendingJoin` so `finishProfile` has no `!pendingJoin` early return. Unmount cleanup calls `releaseSessionRestore()`. A leaked hold is inert for the rest of this page lifetime: `signIn` claims `attempted.current` first (design-review #2088 R1 sabotage S5: deleting the S3 release left 38/38 green). Release still runs on skip · save · 계속 · unmount (each `toHaveBeenCalledTimes(1)`, `sessionRestoreHeld()` false).
+- Seam `clients/web/src/features/welcome/freshSignup.ts` (bytes from `claudedocs/resume-2026-09-04/seam-freshSignup.ts`, file untouched in R2). `markFreshSignup` runs at join success (`createdMember: true`), before S3 shows. `ClaimPage` unchanged. sessionStorage survives a same-tab reload.
+- S3 coverage is `ConnectPage.test.tsx` (mocked `@momo/core/lib/api`, PATCH bodies asserted) plus capture scenes. No e2e lane submits a join today (`advanceToAccount` defaults `path: "server"`; a join needs a live invite). `skipProfileIfPresent` deleted (zero callers). A join e2e lane is a gap (NOTES). Sign-in gates unchanged.
+- Test counts: `onboardingFlow.test.ts` 8 → 9. `ConnectPage.test.tsx` 11 → 34. `model.test.ts` 47 → 49. `joinApi.test.ts` 3 (new). Web suite **2701** passed (226 files). Core **1980** passed (99 files).
+- Capture `CAPTURE_PORT=8641`: run 1 full **exit 0**. Runs 2 and 3 wrote the S3 scenes then aborted on nonempty intro-scroll (`#2057` N-4, two honest attempts). S3 sha256 run 1 = run 2 = run 3. Scenes: `onboarding-profile` (rest), `onboarding-profile-field-error` (101-char sentence), `onboarding-profile-banner` (fail-forward: banner + 다시 시도 + 계속), both schemes, desktop + 390.
+
+| file | sha256 |
+|---|---|
+| onboarding-profile-light.png | `68d6d54e5d1656d11e382155e81e506482fa9f65d3dde714c187085d4c3e997e` |
+| onboarding-profile-field-error-light.png | `325a1e6b72f77e4bfd58d5cd423bd4d8a847b6395d036179d217ac86d1735f11` |
+| onboarding-profile-banner-light.png | `3c14ab0aa72b29dc8f47c9857ddd85d1baf94ad9f8814055525f3e6800d8191f` |
+| onboarding-profile-dark.png | `3bec98744e0a3d36da78752ab1742e953b53cf38c31987a5383ab926be00aa91` |
+| onboarding-profile-field-error-dark.png | `5e70234066563847eca6928ec1eb384906668800ecf56ae3588e449f8c9cb681` |
+| onboarding-profile-banner-dark.png | `c4dbc2377bbd8170f036ae13db21a30bc9d145e0db1080b9714602919e396060` |
+| mobile-onboarding-profile-light.png | `c1010df78d9991244954f2ab03c03cbb51c91d561faae3b04b2828477c073680` |
+| mobile-onboarding-profile-field-error-light.png | `cb4841bcfb8b1ee17f175db67ec976ceabe99931db192d2c013b5f50279c5f04` |
+| mobile-onboarding-profile-banner-light.png | `e17f9124898558a15fcecffb5ac13b0e226dc661a4ffc1e7af9d3db0e30fe777` |
+| mobile-onboarding-profile-dark.png | `35589db5bddcd4f21ef9481ae06475d7df875147dde53ab5a42c5a41a28eb5ad` |
+| mobile-onboarding-profile-field-error-dark.png | `12e3e775851459f36a1be2273ee647548e5643fdee0456dce9771768d4657668` |
+| mobile-onboarding-profile-banner-dark.png | `877305970029a9ddd07165725d77e040aa3e3fc7b3b45e04ef191c2389ec582e` |
+
+- Preflight web 14/14 + core 5/5. Lint 0 errors (14 pre-existing warnings). `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `npm --prefix clients/mobile run typecheck` green. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS. smoke/connect e2e not run (`MOMO_EMAIL` unset).
+- runtime-unverified: live smoke/connect; join e2e lane. design-review is not this worker.
+
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
 
 - ADR-0179 D1·D4·D8·D9. `motion@12.23.24` MIT 직접 의존 1개(전이 `framer-motion` MIT). CSS 키프레임 + `AnimatePresence`/`usePresence`/`useReducedMotion` — `motion.div` animate/exit 스타일 없음(inline_style hard-zero). allowlist 3파일: `QuickSwitcher.tsx` · `ThreadPanel.tsx` · `Sidebar.tsx`. preflight `motion_lib_scope` 14번째 분류.

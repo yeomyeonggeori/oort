@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { changeMyDisplayName } from "@momo/core/lib/api";
-import { displayNameSaveMessage } from "@momo/core/features/settings/model";
+import {
+  displayNameFieldError,
+  displayNameSaveMessage,
+} from "@momo/core/features/settings/model";
 import { useSession } from "@/app/session";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
@@ -35,7 +38,8 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     setDraft(savedName);
   }, [savedName]);
 
-  const canSave = !offline && !busy && draft !== savedName;
+  const fieldError = displayNameFieldError(draft);
+  const canSave = !offline && !busy && draft !== savedName && fieldError === null;
 
   async function save() {
     if (!canSave || saveStarted.current) return;
@@ -96,11 +100,12 @@ export function ProfileSection({ offline }: { offline: boolean }) {
             value={draft}
             autoComplete="nickname"
             disabled={offline}
-            aria-invalid={error ? true : undefined}
+            aria-invalid={error || fieldError ? true : undefined}
             aria-describedby={
               [
                 offline ? "profile-offline-reason" : null,
                 error ? "profile-display-name-error-text" : null,
+                fieldError ? "profile-display-name-field-error" : null,
               ]
                 .filter(Boolean)
                 .join(" ") || undefined
@@ -108,6 +113,16 @@ export function ProfileSection({ offline }: { offline: boolean }) {
             data-testid="profile-display-name"
             onChange={(event) => setDraft(event.currentTarget.value)}
           />
+          {fieldError ? (
+            <p
+              id="profile-display-name-field-error"
+              role="alert"
+              className="text-meta text-danger"
+              data-testid="profile-display-name-field-error"
+            >
+              {fieldError}
+            </p>
+          ) : null}
         </Field>
         <div className="flex flex-wrap items-center gap-2">
           <SaveButton
