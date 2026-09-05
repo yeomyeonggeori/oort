@@ -114,7 +114,7 @@ function classTokens(className: string): string[] {
 
 /** Tailwind v4 가 셀렉터에 쓰는 이스케이프. compile-probe 와 같은 자. */
 function escapedClassSelector(candidate: string): string {
-  return "." + candidate.replace(/[:[\]=.]/g, (ch) => "\\" + ch);
+  return "." + candidate.replace(/[:[\]=.!]/g, (ch) => "\\" + ch);
 }
 
 /** Cascade winner: a later duplicate `@keyframes` of the same name wins. */
@@ -230,6 +230,17 @@ describe("ADR-0179 D3 도착 값", () => {
     expect(snippet).toMatch(/var\(--motion-ease-arrival\)/);
     expect(snippet).toMatch(/animation-iteration-count:\s*1|1\s+both|iteration-count:\s*1/);
     expect(snippet).toMatch(/\bboth\b/);
+  });
+
+  it("slide-in-end / slide-out-end assemble standard open and fast close", () => {
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-slide-in-end/);
+    expect(MOTION_CSS).toMatch(/@keyframes\s+motion-slide-out-end/);
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-slide-in-end\s+var\(--motion-standard\)/
+    );
+    expect(MOTION_CSS).toMatch(
+      /animation:\s*motion-slide-out-end\s+var\(--motion-fast\)/
+    );
   });
 
   it.skipIf(!chromiumAvailable)(

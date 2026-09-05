@@ -30,9 +30,19 @@ import { Select } from "@/design/ui/select";
 export function Harness() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [clicks, setClicks] = useState(0);
+  const [behindClicks, setBehindClicks] = useState(0);
 
   return (
     <div>
+      <button
+        type="button"
+        data-testid="click-behind"
+        data-clicks={behindClicks}
+        className="fixed right-4 bottom-4"
+        onClick={() => setBehindClicks((n) => n + 1)}
+      >
+        behind
+      </button>
       <Button data-testid="open-dialog" onClick={() => setDialogOpen(true)}>
         대화 상자 열기
       </Button>

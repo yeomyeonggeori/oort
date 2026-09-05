@@ -9,11 +9,11 @@
 # inside each image; GPL/LGPL there are copyleft, not permissive.
 #
 # cargo.lock.sha256: e1c98a011f39274b32038c6c48555e4127308e8c96e10115adedcfe9de472db4
-# web.package-lock.sha256: c12017de24aec23b76026d5f3de596a3ff229b782447c013ff269e5748a86003
+# web.package-lock.sha256: 77361e075c19d5f5a053afaef3cc34b980712137153c4e712b55000458924584
 # clarify.sha256: 82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4
 # cargo.packages: 292
-# npm.packages: 451
-# unique.license.blobs: 370
+# npm.packages: 455
+# unique.license.blobs: 372
 #
 ## Package index
 # ecosystem <TAB> name <TAB> version <TAB> spdx <TAB> copyright <TAB> source <TAB> file_sha256[,file_sha256]
@@ -609,6 +609,7 @@ npm	file-entry-cache	8.0.0	MIT	Copyright (c) Roy Riojas & Jared Wray	package-tre
 npm	find-up	5.0.0	MIT	Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (https://sindresorhus.com)	package-tree	5c932d88256b4ab958f64a856fa48e8bd1f55bc1d96b8149c65689e0c61789d3
 npm	flat-cache	4.0.1	MIT	Copyright (c) Roy Riojas and Jared Wray	package-tree	a6a23fb76d91d98669f5ed6eb58213df594ab2d56c9e981ae021b194e3d662a7
 npm	flatted	3.4.3	ISC	Copyright (c) 2018-2020, Andrea Giammarchi, @WebReflection; copyright notice and this permission notice appear in all copies.	package-tree	148718606d34f467fd08a2176bb4c1ab275f999576f779368503d8d3e3642861
+npm	framer-motion	12.43.0	MIT	Copyright (c) 2018 Framer B.V.	package-tree	5ff46083b88563822b0560dd6221ab89d2f74bc97a52d4c97a75020fd62c6f32
 npm	fsevents	2.3.2	MIT	Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis, Elan Shankar, Paul Miller	package-tree	2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1
 npm	fsevents	2.3.3	MIT	Copyright (C) 2010-2020 by Philipp Dunkel, Ben Noordhuis, Elan Shankar, Paul Miller	package-tree	2a8a5d6197bb97a018b8a190dd3ed853d750ca87c8e80c17aad41d6c6ff448e1
 npm	gensync	1.0.0-beta.2	MIT	Copyright 2018 Logan Smyth <loganfsmyth@gmail.com>	package-tree	e3a956681ee067f971ac413994171b3d90ca801ec6324e76c9c55366cfe31cb0
@@ -667,6 +668,9 @@ npm	lucide-react	0.454.0	ISC	Copyright (c) for portions of Lucide are held by Co
 npm	magic-string	0.30.21	MIT	Copyright 2018 Rich Harris	package-tree	1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484
 npm	minimatch	10.2.5	BlueOak-1.0.0	copyright in it.	package-tree	2c7c5d22ed5a8ee968c64757710979afcd77438c48b4a265b94e615babd8a901
 npm	minimatch	3.1.5	ISC	Copyright (c) Isaac Z. Schlueter and Contributors; copyright notice and this permission notice appear in all copies.	package-tree	4ec3d4c66cd87f5c8d8ad911b10f99bf27cb00cdfcff82621956e379186b016b
+npm	motion	12.23.24	MIT	Copyright (c) 2024 [Motion](https://motion.dev) B.V.	package-tree	1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1
+npm	motion-dom	12.43.0	MIT	Copyright (c) 2024 [Motion](https://motion.dev) B.V.	package-tree	1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1
+npm	motion-utils	12.39.0	MIT	Copyright (c) 2024 [Motion](https://motion.dev) B.V.	package-tree	1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1
 npm	ms	2.1.3	MIT	Copyright (c) 2020 Vercel, Inc.	package-tree	1662fae9b5314d11cf51284e2dcd1f006a354f7343f08712a730fcff9a359801
 npm	nanoid	3.3.16	MIT	Copyright 2017 Andrey Sitnik <andrey@sitnik.ru>; COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER	package-tree	da4db1480d9beea3483a2eda5c53b22238d0827d57da162b48f122e04d2d9987
 npm	natural-compare	1.4.0	MIT	copyright not stated in license file	clarify	f9c4c77baa3828004ee54b8a4f2db2e88ed44a6237a493965bf551fac0fcb62d
@@ -8591,6 +8595,32 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 -----
 
+### sha256:1bf0dc3f7727723e5a032ed12164a47cf92c05204cb1a3485f123c24e2833ed1
+# as-filed: LICENSE.md
+-----
+The MIT License (MIT)
+
+Copyright (c) 2024 [Motion](https://motion.dev) B.V.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
 ### sha256:1cbe51b907662f6cb1492b16c359384a595180bf0e4d101603ed525e75c4e484
 # as-filed: LICENSE
 -----
@@ -15512,6 +15542,32 @@ defined by the Mozilla Public License, v. 2.0.
 MIT License
 
 Copyright (c) 2019 Akhil Velagapudi
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+-----
+
+### sha256:5ff46083b88563822b0560dd6221ab89d2f74bc97a52d4c97a75020fd62c6f32
+# as-filed: LICENSE.md
+-----
+The MIT License (MIT)
+
+Copyright (c) 2018 Framer B.V.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -6639,6 +6639,9 @@ async function captureMobile(browser, scheme) {
   await page.getByTestId("open-sidebar-drawer").click();
   await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
+  await assertEnterMotionPressAfterFill(page, `drawer ${scheme}`, {
+    requireScrim: true,
+  });
   const drawer = await page.evaluate(`(() => {
     const el = document.querySelector('[data-testid="sidebar"]');
     const r = el.getBoundingClientRect();
@@ -11402,6 +11405,152 @@ async function assertSummaryHoverCorners(page, scheme) {
 
 const WIDE_MIN_PX = 480;
 const WIDE_MIN_FRAC = 0.5;
+const MOTION_ENTER_RE =
+  /(?:^|\s)(?:[\w:[\]%=.-]*:)?motion-(?:fast-|modal-)?enter(?:-zoom)?(?:\s|$)|(?:^|\s)(?:[\w:[\]%=.-]*:)?motion-slide-in-end(?:\s|$)/;
+const NAMED_PRESS_RE = /(?:^|\s)(?:press|scrim-press|press-instant-fill)(?:\s|$)/;
+
+/**
+ * R12: after a `motion-*-enter` animation finishes, named press must still
+ * paint. Fill-`both` on the same node pins the `to` keyframe and hides
+ * `:active` (B-1: scrim-press opacity stayed 1). Restore `both` → 1 → red.
+ */
+async function assertEnterMotionPressAfterFill(page, label, opts = {}) {
+  const requireScrim = opts.requireScrim === true;
+  await waitForAnimations(page);
+  const { candidates } = await page.evaluate((enterSource) => {
+    const enterRe = new RegExp(enterSource);
+    const sel = [
+      "a",
+      "button",
+      "summary",
+      '[role="button"]',
+      '[role="link"]',
+      '[role="option"]',
+      '[role="menuitem"]',
+      '[role="menuitemcheckbox"]',
+      '[role="menuitemradio"]',
+      '[role="tab"]',
+      '[role="checkbox"]',
+      '[role="switch"]',
+      '[role="radio"]',
+      '[role="treeitem"]',
+    ].join(",");
+    const out = [];
+    let i = 0;
+    for (const el of document.querySelectorAll(sel)) {
+      if (!(el instanceof HTMLElement)) continue;
+      if (el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio")) {
+        continue;
+      }
+      if (el instanceof HTMLSelectElement) continue;
+      if (el.disabled || el.getAttribute("aria-disabled") === "true") continue;
+      const st = getComputedStyle(el);
+      if (st.display === "none" || st.visibility === "hidden") continue;
+      const r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const cls = el.className && typeof el.className === "string" ? el.className : "";
+      if (!enterRe.test(cls)) continue;
+      const mark = `press-enter-${i}`;
+      i += 1;
+      el.setAttribute("data-press-enter", mark);
+      out.push({
+        mark,
+        tag: el.tagName,
+        testId: el.getAttribute("data-testid") || "",
+        className: cls,
+      });
+    }
+    return { candidates: out };
+  }, MOTION_ENTER_RE.source);
+
+  const session = await page.context().newCDPSession(page);
+  await session.send("DOM.enable");
+  await session.send("CSS.enable");
+  const { root } = await session.send("DOM.getDocument", { depth: 0 });
+  const failures = [];
+  const reports = [];
+  for (const c of candidates) {
+    const loc = page.locator(`[data-press-enter="${c.mark}"]`);
+    await loc.evaluate(async (el) => {
+      await Promise.all(
+        el.getAnimations().map((animation) =>
+          animation.playState === "finished"
+            ? Promise.resolve()
+            : animation.finished.catch(() => undefined)
+        )
+      );
+    });
+    const rest = await loc.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return { opacity: s.opacity, transform: s.transform, background: s.backgroundColor };
+    });
+    const found = await session.send("DOM.querySelector", {
+      nodeId: root.nodeId,
+      selector: `[data-press-enter="${c.mark}"]`,
+    });
+    if (!found.nodeId) continue;
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: ["active"],
+    });
+    await page.waitForTimeout(160);
+    const active = await loc.evaluate((el) => {
+      const s = getComputedStyle(el);
+      return {
+        opacity: Number.parseFloat(s.opacity),
+        opacityRaw: s.opacity,
+        transform: s.transform,
+        background: s.backgroundColor,
+        fillMode: s.animationFillMode,
+      };
+    });
+    await session.send("CSS.forcePseudoState", {
+      nodeId: found.nodeId,
+      forcedPseudoClasses: [],
+    });
+    reports.push(
+      `<${c.tag}> ${c.testId || c.mark} :active opacity=${active.opacityRaw} fill=${active.fillMode}`
+    );
+    const namedPress = NAMED_PRESS_RE.test(c.className);
+    if (/\bscrim-press\b/.test(c.className)) {
+      if (Math.abs(active.opacity - 0.92) > 0.02) {
+        failures.push(
+          `${c.testId || c.mark} scrim-press :active opacity=${active.opacity} fill=${active.fillMode} (want ≈0.92 after enter finished)`
+        );
+      }
+    } else if (namedPress) {
+      const opacityMoved = rest.opacity !== active.opacityRaw;
+      const transformMoved = rest.transform !== active.transform;
+      const fillMoved = rest.background !== active.background;
+      if (!opacityMoved && !transformMoved && !fillMoved) {
+        failures.push(
+          `${c.testId || c.mark} carries motion-*-enter + named press but :active after enter equals rest (opacity=${active.opacityRaw} transform=${active.transform})`
+        );
+      }
+    }
+  }
+  await page.evaluate(() => {
+    document.querySelectorAll("[data-press-enter]").forEach((el) => {
+      el.removeAttribute("data-press-enter");
+    });
+  });
+  const scrimVisible = await page
+    .locator('[data-testid="sidebar-scrim"]')
+    .isVisible()
+    .catch(() => false);
+  if (requireScrim || scrimVisible) {
+    const measured = candidates.some((c) => c.testId === "sidebar-scrim");
+    if (!measured) {
+      throw new Error(`enter-press ${label}: sidebar-scrim visible but not measured`);
+    }
+  }
+  console.log(
+    `  enter-press ${label}: n=${candidates.length}${reports.length ? ` ${reports.join("; ")}` : ""}`
+  );
+  if (failures.length > 0) {
+    throw new Error(`enter-press ${label}: ${failures.join("; ")}`);
+  }
+}
 
 /**
  * H5-1 / M6-1: full-width is a measured width. Walk the whole interactive
@@ -11515,6 +11664,7 @@ async function assertWideRowsFillOnly(page, label) {
       `wide press ${label}: expected transform none on :active, got ${failures.join("; ")}`
     );
   }
+  await assertEnterMotionPressAfterFill(page, label);
 }
 
 async function parkPointerOffViewport(page) {
