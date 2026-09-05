@@ -9316,7 +9316,8 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
         copy: document.body.innerText.includes("팀이 준비하고 있어요"),
       }));
-      throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)}`);
+      const cause = err instanceof Error ? err.message : String(err);
+      throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)} (${cause})`);
     }
     try {
       await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
