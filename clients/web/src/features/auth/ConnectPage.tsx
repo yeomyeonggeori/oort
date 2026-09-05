@@ -723,8 +723,9 @@ export function ConnectPage({
 
   // Design Read: onboarding for internal team users on web+Tauri,
   // density 5/10, motion 4/10 (S0 only; S1–S3 stay the connect form).
-  // Capture and e2e walk this card the same way they walk S0/S1/S2
-  // (`onboarding-landing` / `onboarding-gateway` / `onboarding-account`).
+  // Capture walks this card (`onboarding-profile`). No e2e lane submits a
+  // join today (`advanceToAccount` defaults to path: "server"), so none
+  // walk S3; a join e2e lane is a gap (NOTES).
   const profileCard = (
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
       <CardHeader>

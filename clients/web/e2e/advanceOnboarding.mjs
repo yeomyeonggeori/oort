@@ -4,7 +4,10 @@
 // prefilled. A stored `momo.web.server.v1` or a `?code=` / `?join=` prefill
 // skips S0 and opens S1 (gateway). Email / password / login-submit live on S2.
 // Lanes that still wait for login-submit as the first paint hang on S0.
-// Sign-in lanes never see S3. Join lanes wait for onboarding-profile then skip.
+// Sign-in lanes never see S3. No e2e lane submits a join today
+// (`advanceToAccount` defaults to path: "server"; a join needs a live invite).
+// `onboarding-profile` stays in ONBOARDING_SURFACE so a lane that does land
+// on S3 still sees the onboarding surface rather than timing out.
 //
 // Capture of S0 itself must happen BEFORE calling this. Reduced-motion capture
 // contexts skip the mask-reveal, so the gateway card is visible immediately.
@@ -54,18 +57,4 @@ export async function signInThroughOnboarding(page, creds) {
   await page.getByTestId("login-email").fill(creds.email);
   await page.getByTestId("login-password").fill(creds.password);
   await page.getByTestId("login-submit").click();
-}
-
-/**
- * Join that created a member lands on S3. Sign-in and rejoin do not.
- * Lanes that submit a join wait for `onboarding-profile` then call this;
- * a sign-in lane that is already past S2 sees nothing and returns.
- *
- * @param {import("playwright").Page} page
- */
-export async function skipProfileIfPresent(page) {
-  const profile = page.getByTestId("onboarding-profile");
-  if (!(await profile.isVisible())) return;
-  await page.getByTestId("onboarding-profile-skip").click();
-  await profile.waitFor({ state: "hidden" });
 }
