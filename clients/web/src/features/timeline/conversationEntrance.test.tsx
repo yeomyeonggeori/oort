@@ -116,6 +116,22 @@ describe("useConversationEntrance play count", () => {
     expect(consumed.length).toBe(0);
   });
 
+  it("playEntrance false 마운트 뒤 true 는 재생 1 (클래스 1)", () => {
+    host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+    act(() => {
+      mountedRoot?.render(createElement(Probe, { playEntrance: false }));
+    });
+    expect(playCount(host)).toBe(0);
+    expect(classCount(host)).toBe(0);
+    act(() => {
+      mountedRoot?.render(createElement(Probe, { playEntrance: true }));
+    });
+    expect(playCount(host)).toBe(1);
+    expect(classCount(host)).toBe(1);
+  });
+
   it("consumedRef 가 있으면 onConsumed 신원 변경에도 소비 1", () => {
     const consumed: number[] = [];
     host = document.createElement("div");

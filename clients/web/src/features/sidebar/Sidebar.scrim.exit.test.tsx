@@ -115,6 +115,8 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
       name: "새벽",
       updatedAtMs: 1_800_000_000_000,
       roleLabels: {},
+      welcomeAgentMemberId: null,
+      welcomePrompt: "",
     }),
   };
 });

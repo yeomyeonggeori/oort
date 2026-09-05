@@ -92,6 +92,7 @@ import { Button } from "@/design/ui/button";
 import { cn } from "@/design/lib/cn";
 import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { useOpenMemberProfile } from "@/features/directory/memberProfileContext";
+import { useWelcomeKickoff, welcomePlayEntrance } from "@/features/welcome/useWelcomeKickoff";
 
 // =============================================================================
 // Channel surface (R-1 §3): header, offline banner, timeline, composer, thread
@@ -202,6 +203,35 @@ export function ChatShell() {
     session.member.id
   );
   const messages = stressCount > 0 ? stressMessages : timeline.state.messages;
+  const welcome = useWelcomeKickoff({
+    workspaceId,
+    memberId: session.member.id,
+    channelKind: channel?.kind,
+    channelName: channel?.name,
+    channelId: stressCount > 0 ? null : channelId,
+    timelineStatus:
+      timeline.status === "error"
+        ? "error"
+        : timeline.status === "loading"
+          ? "loading"
+          : "ready",
+    directoryStatus:
+      stressCount > 0
+        ? "success"
+        : directoryQuery.status === "error"
+          ? "error"
+          : directoryQuery.status === "success"
+            ? "success"
+            : "pending",
+    messages,
+    directory,
+    realtime: stressCount > 0 ? null : realtime,
+  });
+  const isPlayEntrance = useCallback(
+    (id: string) =>
+      welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
+    [welcome.holdEntranceId, timeline]
+  );
 
   // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
   // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.
@@ -1191,9 +1221,13 @@ export function ChatShell() {
                   openAddMember({ id: channelId, name: channel.name ?? label });
               }}
               onStartWriting={focusComposer}
-              isPlayEntrance={timeline.isPlayEntrance}
+              isPlayEntrance={isPlayEntrance}
               onEntranceConsumed={timeline.consumeEntrance}
               capUnmountedArrivals={timeline.capUnmountedArrivals}
+              welcomePhase={welcome.phase}
+              welcomeReducedMotion={welcome.reducedMotion}
+              welcomeHoldWriteAction={welcome.holdWriteAction}
+              onWelcomeExitComplete={welcome.onExitComplete}
             />
           ) : (
             <Skeleton ready={!channelsQuery.isLoading} rows={6} className="p-4">
