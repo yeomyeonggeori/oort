@@ -404,6 +404,21 @@ describe("프로필 표시 이름 error copy", () => {
     );
     expect(displayNameFieldError("가".repeat(81))).not.toMatch(/80자 초과/);
   });
+
+  it("rejects empty and whitespace client-side, and accepts 100 characters", () => {
+    expect(DISPLAY_NAME_MAX_CHARS).toBe(100);
+    expect(displayNameFieldError("")).toBe(
+      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+    );
+    expect(displayNameFieldError("   ")).toBe(
+      "표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요."
+    );
+    expect(displayNameFieldError("가".repeat(100))).toBeNull();
+    expect(displayNameFieldError("가".repeat(101))).toBe(
+      "표시 이름은 100자까지 쓸 수 있습니다."
+    );
+    expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
+  });
 });
 
 describe("코드 실행 호스트 error copy", () => {

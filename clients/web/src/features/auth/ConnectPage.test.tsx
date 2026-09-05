@@ -458,6 +458,65 @@ describe("BZ-6b onboarding profile step", () => {
     expect(changeMyDisplayName).not.toHaveBeenCalled();
   });
 
+  it("rejects empty and whitespace names client-side and never PATCHes an empty displayName", async () => {
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "");
+    expect(
+      document.querySelector('[data-testid="onboarding-profile-name-error"]')
+        ?.textContent
+    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.");
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(true);
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).not.toContain("");
+
+    fill("onboarding-profile-name", "   ");
+    expect(
+      document.querySelector('[data-testid="onboarding-profile-name-error"]')
+        ?.textContent
+    ).toBe("표시 이름을 비울 수 없습니다. 한 글자 이상 적으세요.");
+    expect(submit.disabled).toBe(true);
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(changeMyDisplayName.mock.calls.map((args) => args[1])).not.toEqual(
+      expect.arrayContaining(["", "   "])
+    );
+  });
+
+  it("accepts a 100-character name and PATCHes that body", async () => {
+    const name = "가".repeat(100);
+    const renamed = { ...session.member, displayName: name };
+    changeMyDisplayName.mockResolvedValue(renamed);
+    await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-name"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", name);
+    expect(document.querySelector('[data-testid="onboarding-profile-name-error"]')).toBeNull();
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
+    });
+    expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, name);
+    expect(changeMyDisplayName.mock.calls[0]?.[1]).toHaveLength(100);
+  });
+
   it("shows a fail-forward banner on PATCH failure and 계속 lands with the original member", async () => {
     changeMyDisplayName.mockRejectedValue(new ApiError(500, "engine boom"));
     const onLoggedIn = await submitJoinFromPrefill();
