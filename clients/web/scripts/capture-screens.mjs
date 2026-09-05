@@ -9153,9 +9153,170 @@ async function captureMarkUnreadScenes(browser, scheme) {
   return shots;
 }
 
-// 빈 대화의 첫 행동 (#1536, 온보딩 실측 F5). 이 표면은 첫 실행에서 사람이 **반드시**
-// 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
-// 가면서도 자기 다이얼로그만 찍고 지나간다.
+// UX-R2b welcome kickoff (#2002). Scenes only — startGuardedPreview is untouched.
+// Arrival is driven through the product store path (`oort.capture.message.new`
+// → useTimeline applyBatch), not a stage prop.
+async function captureWelcomeKickoffScenes(browser, scheme) {
+  const shots = [];
+
+  async function openWelcome(reducedMotion, options = {}) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion,
+    });
+    await installMocks(context);
+    await context.route("**/v1/workspaces/*/channels/*/messages*", (route) => {
+      const url = new URL(route.request().url());
+      if (url.pathname.includes("/replies")) return route.fallback();
+      if (route.request().method() !== "GET") return route.fallback();
+      return url.pathname.toLowerCase().includes(GENERAL_ID.toLowerCase())
+        ? json(route, { messages: [] })
+        : route.fallback();
+    });
+    await context.addInitScript(
+      ({ workspaceId, memberId }) => {
+        sessionStorage.setItem(
+          "oort.freshSignup.v1",
+          JSON.stringify({ workspaceId, memberId })
+        );
+      },
+      { workspaceId: WORKSPACE_ID, memberId: ME }
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate(
+      ({ workspaceId, memberId }) => {
+        sessionStorage.setItem(
+          "oort.freshSignup.v1",
+          JSON.stringify({ workspaceId, memberId })
+        );
+      },
+      { workspaceId: WORKSPACE_ID, memberId: ME }
+    );
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, CHANNELS[1].id);
+    await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
+    if (options.installClock) await page.clock.install();
+    await page.evaluate((id) => {
+      window.location.hash = `#/c/${id}`;
+    }, GENERAL_ID);
+    return { context, page };
+  }
+
+  async function waitForWelcomeStage(page) {
+    const empty = page.getByTestId("timeline-empty");
+    try {
+      await empty.waitFor({ state: "visible", timeout: 15_000 });
+    } catch {
+      /* waitFor attached reports the DOM if the empty intro never painted */
+    }
+    const stage = page.getByTestId("welcome-kickoff-stage");
+    try {
+      await stage.waitFor({ state: "attached", timeout: 10_000 });
+    } catch {
+      const dump = await page.evaluate(() => ({
+        hash: location.hash,
+        fresh: sessionStorage.getItem("oort.freshSignup.v1"),
+        shown: Object.keys(localStorage).filter((k) =>
+          k.includes("welcomeKickoff")
+        ),
+        introEmpty: Boolean(document.querySelector('[data-testid="timeline-empty"]')),
+        introStarted: Boolean(
+          document.querySelector('[data-testid="message-channel-intro"]')
+        ),
+        messages: document.querySelectorAll('[data-testid="timeline-message"]').length,
+        copy: document.body.innerText.includes("팀이 준비하고 있어요"),
+      }));
+      throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)}`);
+    }
+    await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    await stage.waitFor({ state: "visible" });
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-stage-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("reduce");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-stage-reduce-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference");
+    await waitForWelcomeStage(page);
+    await waitForAnimations(page);
+    await page.evaluate(
+      ({ channelId, agentId }) => {
+        window.dispatchEvent(
+          new CustomEvent("oort.capture.message.new", {
+            detail: {
+              id: "0199eeee-0000-7000-8000-000000000501",
+              channelId,
+              seq: 1,
+              hlcTs: 1_704_067_200_000,
+              hlcCount: 0,
+              authorMemberId: agentId,
+              type: "text",
+              body: "시작할까요? 이 워크스페이스에서 같이 일해요.",
+              state: "sent",
+              createdAtMs: 1_704_067_200_000,
+            },
+          })
+        );
+      },
+      { channelId: GENERAL_ID, agentId: HERMES }
+    );
+    await page.getByTestId("timeline-message").waitFor({ state: "visible" });
+    // Stage exit ends, then the opener's enter-conversation starts (product
+    // hold). One waitForAnimations can return in that gap; a second pass after
+    // two frames is the rest state. Measured: run1/run2 arrived hashes differed
+    // when a single wait shot the blur-from frame.
+    await waitForAnimations(page);
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        })
+    );
+    await waitForAnimations(page);
+    const path = `${OUT_DIR}/welcome-arrived-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  {
+    const { context, page } = await openWelcome("no-preference", {
+      installClock: true,
+    });
+    await waitForWelcomeStage(page);
+    await page.clock.fastForward(120_000);
+    await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
+    const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  return shots;
+}
+
 async function captureEmptyConversationScenes(browser, scheme) {
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
@@ -12149,6 +12310,7 @@ async function main() {
           }
           all.push(...(await shot(() => captureTerminalDockScenes(browser, scheme))));
           all.push(...(await shot(() => captureMarkUnreadScenes(browser, scheme))));
+          all.push(...(await shot(() => captureWelcomeKickoffScenes(browser, scheme))));
           all.push(...(await shot(() => captureEmptyConversationScenes(browser, scheme))));
           all.push(...(await shot(() => captureNonemptyChannelIntroScenes(browser, scheme))));
           all.push(...(await shot(() => captureAddMemberScenes(browser, scheme))));
