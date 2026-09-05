@@ -2339,7 +2339,7 @@ export function Probe() {
     expect(notificationsWrites.length).toBe(1);
     expect(CAPTURE_SRC).toMatch(/DND row rest pixels/);
     const sabotaged = CAPTURE_SRC.replace(
-      /\/\/ notifications is owned by the parked-pointer scene above \(H6-1\)\.\n    \/\/ Listing it here overwrote that file with an unguarded hover fill\.\n/,
+      /\/\/ notifications is owned by the parked-pointer scene above \(H6-1\)\.\n {4}\/\/ Listing it here overwrote that file with an unguarded hover fill\.\n/,
       `["notifications", "알림 규칙", "notifications"],\n    `
     );
     const sabotagedSweep = sabotaged.match(
