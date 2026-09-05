@@ -131,6 +131,7 @@ generated bundle above.
 |---|---|---|---|
 | react / react-dom / scheduler | https://github.com/facebook/react | MIT | 웹 UI |
 | centrifuge (centrifuge-js) | https://github.com/centrifugal/centrifuge-js | MIT | 웹 Centrifugo live subscription |
+| motion | https://github.com/motiondivision/motion | MIT | 웹 UX-R1b AnimatePresence (⌘K·스레드 패널·390 드로어 exit). 직접 의존 1개 |
 | @xterm/xterm (xterm.js) | https://github.com/xtermjs/xterm.js | MIT | 웹 Work observer 터미널 read-only 렌더러 |
 | livekit-client | https://github.com/livekit/client-sdk-js | Apache-2.0 | 웹 허들 오디오 연결 |
 | protobufjs + @protobufjs/* | https://github.com/protobufjs/protobuf.js | BSD-3-Clause | centrifuge-js 전이(protobuf 코덱; JSON 사용이라 번들에서 tree-shake 대상) |
