@@ -918,7 +918,8 @@ function GalleryBody() {
                 <figcaption className="text-meta text-ink-muted">{name}</figcaption>
                 <button
                   type="button"
-                  className="rounded-sm border border-line-strong px-3 py-2 text-meta text-ink press-instant-fill"
+                  data-testid="press-instant-fill-swatch"
+                  className="rounded-sm border border-line-strong px-3 py-2 text-meta text-ink hover:bg-surface-hover press-instant-fill"
                 >
                   {name}
                 </button>

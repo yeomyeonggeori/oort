@@ -959,7 +959,7 @@ function hasNamedUtilityPress(text: string): boolean {
   return text.split(/\s+/).some((tok) => UTILITIES_WITH_NAMED_PRESS.has(tok));
 }
 
-const NAMED_PRESS_TOKEN = /(?:^|\s)(?:press|press-instant-fill|scrim-press)(?:\s|$)/;
+const NAMED_PRESS_TOKEN = /(?:^|\s)(?:press|scrim-press)(?:\s|$)/;
 const NAMED_PRESS_FILL = /active:bg-surface-pressed/;
 
 function siteHasPress(s: PressSite): boolean {
@@ -1682,9 +1682,10 @@ export function Probe() {
     );
     expect(fillRules.length).toBeGreaterThan(0);
     const last = fillRules[fillRules.length - 1][1];
-    expect(last).not.toMatch(/transform/);
-    expect(last).not.toMatch(/background-color/);
-    expect(css).toMatch(/\.press-instant-fill:active[\s\S]*?transform:\s*none/);
+    expect(last).toMatch(/background-color/);
+    expect(last).not.toMatch(/scale\(/);
+    expect(css).toMatch(/\.press-instant-fill[\s\S]*?transform:\s*none/);
+    expect(css).toMatch(/\.press-instant-fill[\s\S]*?var\(--surface-pressed\)/);
   });
 
   it("SidebarRow 전폭 행은 채움만 하고 변형이 없다 (B4-3)", async () => {
@@ -2298,6 +2299,9 @@ export function Probe() {
     expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("plugin-marketplace-row")).toBe(
       true
     );
+    expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("press-instant-fill")).toBe(
+      true
+    );
     expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("sidebar-scrim")).toBe(false);
     const unnamed: PressSite = {
       rel: "sabotage.tsx",
@@ -2375,5 +2379,37 @@ export function Probe() {
     expect(isTextLink(restInk.tag, restInk.text)).toBe(false);
     expect(siteHasPress(restInk)).toBe(false);
     expect(isPointerInteractive(restInk)).toBe(true);
+  });
+
+  it("press-instant-fill 은 채움을 칠하고 이름만으로는 부족하다 (M6-2)", () => {
+    expect(cssUtilitiesWithNamedPress(TOKENS_CSS).has("press-instant-fill")).toBe(
+      true
+    );
+    expect(TOKENS_CSS).toMatch(
+      /@utility press-instant-fill[\s\S]*?&:active[\s\S]*?--surface-pressed/
+    );
+    const stripped = TOKENS_CSS.replace(
+      /@utility press-instant-fill \{[\s\S]*?\n\}/,
+      `@utility press-instant-fill {\n  &:active { transform: none; }\n}\n`
+    );
+    expect(cssUtilitiesWithNamedPress(stripped).has("press-instant-fill")).toBe(
+      false
+    );
+    const bare: PressSite = {
+      rel: "sabotage.tsx",
+      line: 1,
+      tag: "button",
+      role: "",
+      text: "press-instant-fill hover:bg-surface-hover",
+      kind: "jsx",
+    };
+    expect(siteHasPress(bare)).toBe(true);
+    const unnamed = { ...bare, text: "hover:bg-surface-hover" };
+    expect(siteHasPress(unnamed)).toBe(false);
+    expect(GALLERY_SRC).toMatch(/data-testid="press-instant-fill-swatch"/);
+    expect(GALLERY_SRC).toMatch(
+      /hover:bg-surface-hover press-instant-fill/
+    );
+    expect(CAPTURE_SRC).toMatch(/function assertInstantFillSwatch/);
   });
 });

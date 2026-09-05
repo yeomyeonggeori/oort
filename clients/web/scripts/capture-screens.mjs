@@ -11572,6 +11572,47 @@ async function assertNotificationsDndRest(page, scheme) {
   );
 }
 
+async function assertInstantFillSwatch(page, scheme) {
+  const btn = page.getByTestId("press-instant-fill-swatch");
+  await btn.waitFor({ state: "visible" });
+  await btn.scrollIntoViewIfNeeded();
+  await page.mouse.move(0, 0);
+  await waitForAnimations(page);
+  const restCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await btn.hover();
+  await waitForAnimations(page);
+  const hoverCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  const box = await btn.boundingBox();
+  if (!box) {
+    throw new Error(`press-instant-fill swatch ${scheme}: bounding box missing`);
+  }
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.down();
+  await waitForAnimations(page);
+  const activeCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
+  await page.mouse.up();
+  const rest = parseCssRgb(restCss);
+  const hover = parseCssRgb(hoverCss);
+  const active = parseCssRgb(activeCss);
+  if (!rest || !hover || !active) {
+    throw new Error(
+      `press-instant-fill swatch ${scheme}: unparsed rest=${restCss} hover=${hoverCss} active=${activeCss}`
+    );
+  }
+  const dE = (a, b) => rgbDeltaE(a[0], a[1], a[2], b[0], b[1], b[2]);
+  const restHover = dE(rest, hover);
+  const restActive = dE(rest, active);
+  const hoverActive = dE(hover, active);
+  if (restHover < PIXEL_DE_MIN || restActive < PIXEL_DE_MIN || hoverActive < PIXEL_DE_MIN) {
+    throw new Error(
+      `press-instant-fill swatch ${scheme}: rest=${restCss} hover=${hoverCss} active=${activeCss} dE rest-hover=${restHover.toFixed(4)} rest-active=${restActive.toFixed(4)} hover-active=${hoverActive.toFixed(4)} (need ≥ ${PIXEL_DE_MIN})`
+    );
+  }
+  console.log(
+    `  press-instant-fill swatch ${scheme}: rest ${restCss} hover ${hoverCss} active ${activeCss} dE ${restHover.toFixed(3)}/${restActive.toFixed(3)}/${hoverActive.toFixed(3)}`
+  );
+}
+
 async function assertToggleRowTarget(page, scheme) {
   const frame = page.getByTestId("press-triplet-settings-row");
   await frame.scrollIntoViewIfNeeded();
@@ -11773,6 +11814,7 @@ async function captureDesignGallery(browser, scheme) {
   await gallery.waitFor({ state: "visible" });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(50);
+  await assertInstantFillSwatch(page, scheme);
 
   await assertGalleryLoadFocus(page, `design-gallery ${scheme}`);
   await assertGalleryScrollOwnership(page, `design-gallery ${scheme}`);

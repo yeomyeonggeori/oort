@@ -798,19 +798,6 @@
       transform: scale(0.98);
     }
   }
-
-  /* 전폭 행·메뉴는 채움만, 변형 없음 (#2000 N-5). `.press` 의 스케일과
-   * background 전이를 이 자리에서 끈다. 채움은 `active:bg-surface-pressed`. */
-  .press-instant-fill {
-    transition-property:
-      color, border-color, text-decoration-color, fill, stroke,
-      --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
-    transition-duration: var(--motion-instant);
-    transition-timing-function: var(--motion-ease-standard);
-  }
-  .press-instant-fill:active {
-    transform: none;
-  }
 }
 
 /* =============================================================================
@@ -1971,6 +1958,21 @@
   transition-timing-function: var(--motion-ease-standard);
   &:active {
     opacity: 0.92;
+  }
+}
+
+/* Named fill-only press (#2000 M6-2). The word paints: `:active` is
+ * `--surface-pressed`, not a transition that leaves the fill to a sibling
+ * class. Scale stays none. */
+@utility press-instant-fill {
+  transition-property:
+    color, background-color, border-color, text-decoration-color, fill, stroke,
+    --tw-gradient-from, --tw-gradient-via, --tw-gradient-to;
+  transition-duration: var(--motion-instant);
+  transition-timing-function: var(--motion-ease-standard);
+  &:active {
+    transform: none;
+    background-color: var(--surface-pressed);
   }
 }
 
