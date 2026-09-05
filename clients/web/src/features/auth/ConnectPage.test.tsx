@@ -551,6 +551,44 @@ describe("BZ-6b onboarding profile step", () => {
     expect(changeMyDisplayName).toHaveBeenCalledWith(session.member.workspaceId, "성재");
   });
 
+  it("editing after a PATCH failure re-arms save so the primary PATCHes the new name", async () => {
+    changeMyDisplayName.mockRejectedValueOnce(new ApiError(500, "engine boom"));
+    const renamed = { ...session.member, displayName: "두번째이름" };
+    changeMyDisplayName.mockResolvedValueOnce(renamed);
+    const onLoggedIn = await submitJoinFromPrefill();
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-submit"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "성재");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(document.querySelector('[data-testid="onboarding-profile-error"]')).not.toBeNull();
+    });
+    fill("onboarding-profile-name", "두번째이름");
+    const submit = document.querySelector(
+      '[data-testid="onboarding-profile-submit"]'
+    ) as HTMLButtonElement;
+    expect(submit.textContent).toContain("저장");
+    expect(submit.textContent).not.toContain("계속");
+    await act(async () => {
+      click("onboarding-profile-submit");
+    });
+    await vi.waitFor(() => {
+      expect(changeMyDisplayName).toHaveBeenCalledTimes(2);
+    });
+    expect(changeMyDisplayName.mock.calls[1]?.[1]).toBe("두번째이름");
+    await vi.waitFor(() => {
+      expect(onLoggedIn).toHaveBeenCalledTimes(1);
+    });
+    expect(onLoggedIn).toHaveBeenCalledWith({
+      ...session,
+      createdMember: true,
+      member: renamed,
+    });
+  });
+
   it("save success lands with the renamed member", async () => {
     const renamed = { ...session.member, displayName: "성재" };
     changeMyDisplayName.mockResolvedValue(renamed);
