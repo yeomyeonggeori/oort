@@ -72,6 +72,9 @@ export interface LoginResponse {
   realtimeWebSocketUrl: string;
 }
 
+/** POST /v1/join: a session plus whether this call created the member row. */
+export type JoinResponse = LoginResponse & { createdMember: boolean };
+
 /** Workspace membership role (openapi MembershipRole). Absent on older rows. */
 export type MembershipRole = "owner" | "admin" | "member" | "guest";
 
@@ -797,6 +800,13 @@ function loginResponseFromWire(value: unknown): LoginResponse {
   };
 }
 
+function joinResponseFromWire(value: unknown): JoinResponse {
+  const login = loginResponseFromWire(value);
+  const createdMember = bool(responseRecord(value), "createdMember");
+  if (createdMember === undefined) throw new WireShapeError();
+  return { ...login, createdMember };
+}
+
 function refreshResponseFromWire(value: unknown): RefreshResponse {
   const source = responseRecord(value);
   if (typeof source.accessToken !== "string" || typeof source.refreshToken !== "string") {
@@ -886,7 +896,7 @@ export async function joinWithInvite(
   code: string,
   email: string,
   password: string
-): Promise<LoginResponse> {
+): Promise<JoinResponse> {
   // Normalised rather than merely trimmed, and the derivations read the same
   // value: the row this creates will hold `lower(btrim(...))`, so deriving the
   // display name from any other spelling would name the account after a string
@@ -908,7 +918,7 @@ export async function joinWithInvite(
     null
   );
   if (!res.ok) throw parseError(res);
-  const joinResponse = loginResponseFromWire(res.json<unknown>());
+  const joinResponse = joinResponseFromWire(res.json<unknown>());
   coreSession().applyLogin(joinResponse);
   return joinResponse;
 }
