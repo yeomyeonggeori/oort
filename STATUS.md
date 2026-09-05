@@ -34,8 +34,7 @@
   - `MOTION_LIB_ALLOW_RE` 를 `src/` 로 넓힌 사본 → `--selftest` 실패. 네 번째 파일 import → 스캔 빨강. 스크립트 목록과 코드 import 가 갈리면 vitest 빨강.
   - 스크림 enter 가 끝난 뒤 CDP `:active` opacity ≈ 0.92. `motion-fast-enter` fill 을 `both` 로 되돌리면 같은 측정이 1 (R12 RED). 캡처에서 `assertEnterMotionPressAfterFill` 을 빼면 원장 핀이 붉다.
 - `Timeline.burst.test.tsx` (`expected 1 to be 3`) 는 선행 flake (#2050 N-7). isolation 20× head 0/20 · base 0/20. full suite 20× head **1/20** · base **2/20**. 이 PR 이 비율을 올리지 않아 버스트 테스트는 안 만졌다.
-- 캡처 `CAPTURE_PORT=8625` R10 **FAIL** (nonempty intro light, `scrollTimelineRowIntoView`). 선행 장면. **PASS 라고 쓰지 않음.**
-
+- 캡처 `CAPTURE_PORT=8625` R12 **exit 0** (intro nonempty light/dark 포함). `enter-press drawer` light/dark `:active opacity=0.92 fill=backwards`. R10/R11 은 intro abort 를 기록했고, 이 런은 완료됐다. 선행 flake 는 남을 수 있다.
 - `SHELL_GATE_PORT=8627 SHELL_GATE_FOCUS_ONLY=1` GATE PASS(타이틀바 토글·390 Escape는 스크림 exit 후 detach). 폰 무접촉. design-review는 이 워커가 하지 않음.
 - R7: `duration<=0 return` 삭제. duration 0 은 다시 `setTimeout(0)` (스레드/스크림과 같은 폴백). Content `forceMount` 삭제 — Portal 만 로드베어링. 훅 분기 삭제 시 jsdom 빨강(Portal 유지), Portal 도 빼면 초록. 제품: 연 팔레트에서 reduce 토글·userCSS `animation:none` 3회 닫힘 `[0,0,0]` (hunk 있으면 `[1,1,1]` + `data-scroll-locked=1` + 휠 delta 0).
 - R6: 팔레트 `useReducedMotion` 분기는 Portal `forceMount` 가 닫힘 동안 노드를 붙든다. R6 의 `duration<=0 return` 은 제품 hang 이라 R7 이 되돌림. CSS exit 은 그대로 (dwell≥140, reduced 0s).
