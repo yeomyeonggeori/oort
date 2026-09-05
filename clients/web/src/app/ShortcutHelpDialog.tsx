@@ -68,7 +68,7 @@ export function ShortcutHelpDialog() {
         aria-label="단축키 도움말 열기"
         title="단축키 도움말 (?)"
         data-testid="shortcut-help-trigger"
-        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted transition-colors hover:bg-surface-hover focus-visible:focus-ring"
+        className="tap-target flex size-control-sm items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
       >
         <CircleHelp className="size-4" aria-hidden="true" />
       </button>

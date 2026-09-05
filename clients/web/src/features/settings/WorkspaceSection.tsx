@@ -147,7 +147,7 @@ function WorkspaceUnfurlSetting({
           <label
             htmlFor="workspace-unfurls"
             className={cn(
-              "flex min-w-0 cursor-pointer flex-col gap-px",
+              "flex min-w-0 cursor-pointer flex-col gap-px hover:bg-surface-hover active:bg-surface-pressed",
               offline && "opacity-50"
             )}
           >

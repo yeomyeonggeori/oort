@@ -316,7 +316,7 @@ export function RemindersPanel() {
 const overflowBowlClass =
   "rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
 const overflowTriggerClass =
-  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
+  "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
 
 function ReminderRow({
   reminder,
@@ -363,7 +363,7 @@ function ReminderRow({
 
   return (
     <li
-      className="relative border-b border-line transition-colors hover:bg-surface-hover focus-within:bg-surface-hover"
+      className="relative border-b border-line hover:bg-surface-hover focus-within:bg-surface-hover"
       data-testid="reminder-row"
       data-due={overdue ? "overdue" : "upcoming"}
       data-reminder-id={reminder.id}
@@ -380,7 +380,7 @@ function ReminderRow({
               watchForMessage(reminder.messageSeq);
             }
           }}
-          className="flex min-w-0 flex-1 gap-3 focus-visible:focus-ring"
+          className="flex w-full min-w-0 flex-1 gap-3 hover:bg-surface-hover active:bg-surface-pressed focus-visible:focus-ring"
           data-testid="reminder-row-link"
         >
           <span className="shrink-0 pt-1" aria-hidden="true">

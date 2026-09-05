@@ -129,7 +129,7 @@ export function ThreadPanel({
           onClick={closePanel}
           aria-label="스레드 닫기"
           data-testid="thread-close"
-          className="tap-target flex size-6 items-center justify-center rounded-sm text-ink-muted hover:bg-surface-hover focus-visible:focus-ring"
+          className="tap-target flex size-6 items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover focus-visible:focus-ring"
         >
           <X className="size-4" />
         </button>

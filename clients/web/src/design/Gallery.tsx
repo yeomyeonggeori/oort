@@ -1,4 +1,5 @@
 import {
+  cloneElement,
   forwardRef,
   useLayoutEffect,
   useMemo,
@@ -61,7 +62,15 @@ import { OpenMemberProfileContext } from "@/features/directory/memberProfileCont
 import { CHIP_CLASS } from "@/features/common/chip";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { SidebarRow } from "@/features/sidebar/SidebarRow";
+import {
+  SettingsToggleRow,
+  SETTINGS_COLLAPSIBLE_CARD_CLASS,
+  SETTINGS_COLLAPSIBLE_SUMMARY_CLASS,
+} from "@/features/settings/SettingsFields";
+import { DraftRow } from "@/features/drafts/DraftsRoute";
+import type { DraftViewItem } from "@/features/drafts/model";
 import { MessageRow } from "@/features/timeline/MessageRow";
+import { PendingRow } from "@/features/timeline/PendingRow";
 import { ReactionChips } from "@/features/timeline/ReactionChips";
 import { makeDirectory } from "@momo/core/features/workspace/directory";
 import type { Message, RosterMember } from "@momo/core/lib/api";
@@ -92,6 +101,9 @@ const CHIP_STATES = ["rest", "hover", "focus", "disabled"] as const;
 
 const MOTION_VOCABULARY = [
   "press",
+  "press-instant-fill",
+  "scrim-press",
+  "plugin-marketplace-row",
   "motion-instant",
   "motion-fast",
   "motion-standard",
@@ -275,6 +287,34 @@ function galleryMessage(): Message {
     body: GALLERY_TEXT_FIXTURE,
     state: "sent",
     createdAtMs: 1_800_000_000_000,
+  };
+}
+
+function galleryPending() {
+  return {
+    clientMsgId: "gallery-pending-1",
+    channelId: CHANNEL_ID,
+    authorMemberId: MEMBER_ID,
+    body: GALLERY_TEXT_FIXTURE,
+    createdAtMs: 1_800_000_000_000,
+    sinceSeq: 4081,
+    status: "sending" as const,
+  };
+}
+
+function galleryDraft(): DraftViewItem {
+  return {
+    workspaceId: WS,
+    channelId: CHANNEL_ID,
+    text: GALLERY_TEXT_FIXTURE,
+    atMs: 1_800_000_000_000,
+    preview: GALLERY_TEXT_FIXTURE,
+    destination: {
+      text: "릴리스 노트",
+      handle: null,
+      kind: "public",
+      isAgent: false,
+    },
   };
 }
 
@@ -557,6 +597,157 @@ function GalleryBody() {
         <SchemeToggle />
       </header>
 
+      <section
+        data-testid="press-triplet-root"
+        className="flex flex-col gap-4 border-b border-line py-6"
+      >
+        <h2 className="text-title font-medium text-ink">눌림 3짝</h2>
+        <p className="text-meta text-ink-muted">
+          캡처 레인이 갤러리 프리미티브와 제품 행의 정지, 가리킴, 눌림을 찍는다.
+          미리보기 속성이 아니라 포인터 상태다.
+        </p>
+        <div className="flex flex-wrap items-start gap-4">
+          <figure
+            data-testid="press-triplet-button-default"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="default">
+              변경 저장
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-secondary"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="secondary">
+              취소
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-ghost"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="ghost">
+              닫기
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-button-destructive"
+            className="inline-flex bg-surface p-6"
+          >
+            <Button type="button" variant="destructive">
+              지우기
+            </Button>
+          </figure>
+          <figure
+            data-testid="press-triplet-row"
+            className="min-w-action bg-surface p-6"
+          >
+            <ul>
+              <SidebarRow
+                to="/c/gallery-press-triplet"
+                icon={<Hash className="size-4" />}
+                label="릴리스 노트"
+                testId="press-triplet-row-link"
+                wrapLink={(link) =>
+                  cloneElement(link, {
+                    onClick: (event: { preventDefault: () => void }) => {
+                      event.preventDefault();
+                    },
+                  })
+                }
+              />
+            </ul>
+          </figure>
+          <figure
+            data-testid="press-triplet-chip"
+            className="inline-flex bg-surface p-6"
+          >
+            <ReactionChips
+              chips={[
+                {
+                  emoji: "👍",
+                  count: 2,
+                  mine: false,
+                  memberIds: [MEMBER_ID],
+                },
+              ]}
+              directory={directory}
+              myMemberId={MEMBER_ID}
+              onToggle={() => undefined}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-message-row"
+            className="w-full bg-surface"
+          >
+            <MessageRow
+              message={message}
+              startsGroup
+              directory={directory}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-pending-row"
+            className="w-full bg-surface"
+          >
+            <PendingRow
+              pending={galleryPending()}
+              startsGroup
+              directory={directory}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-settings-row"
+            className="w-full bg-surface"
+          >
+            <SettingsToggleRow
+              testId="press-triplet-settings-toggle"
+              name="알림"
+              description="멘션이 오면 알려 준다."
+              checked={false}
+              onToggle={() => undefined}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-settings-row-checked"
+            className="w-full bg-surface"
+          >
+            <SettingsToggleRow
+              testId="press-triplet-settings-toggle-checked"
+              name="방해 금지"
+              description="정해 둔 시간에는 알림을 끊는다."
+              checked={true}
+              onToggle={() => undefined}
+            />
+          </figure>
+          <figure
+            data-testid="press-triplet-drafts-li"
+            className="w-full bg-surface"
+          >
+            <ul>
+              <DraftRow
+                item={galleryDraft()}
+                nowMs={1_800_000_000_000}
+                onDelete={() => undefined}
+                onCloseAutoFocus={() => undefined}
+                onClick={(event) => event.preventDefault()}
+              />
+            </ul>
+          </figure>
+          <figure
+            data-testid="press-triplet-summary-card"
+            className="w-full bg-surface p-6"
+          >
+            <details className={SETTINGS_COLLAPSIBLE_CARD_CLASS}>
+              <summary className={SETTINGS_COLLAPSIBLE_SUMMARY_CLASS}>
+                기간별로 자세히 보기
+              </summary>
+            </details>
+          </figure>
+        </div>
+      </section>
+
       <StateRow
         title="Button"
         states={BUTTON_STATES}
@@ -722,6 +913,37 @@ function GalleryBody() {
                 <Button type="button" variant="secondary" data-gallery-preview="active">
                   눌림
                 </Button>
+              </figure>
+            ) : name === "press-instant-fill" ? (
+              <figure key={name} className="flex min-w-action-sm flex-col gap-2">
+                <figcaption className="text-meta text-ink-muted">{name}</figcaption>
+                <button
+                  type="button"
+                  data-testid="press-instant-fill-swatch"
+                  className="rounded-sm border border-line-strong px-3 py-2 text-meta text-ink hover:bg-surface-hover press-instant-fill"
+                >
+                  {name}
+                </button>
+              </figure>
+            ) : name === "scrim-press" ? (
+              <figure key={name} className="flex min-w-action-sm flex-col gap-2">
+                <figcaption className="text-meta text-ink-muted">{name}</figcaption>
+                <button
+                  type="button"
+                  className="rounded-sm border border-line-strong px-3 py-2 text-meta text-ink scrim-press"
+                >
+                  {name}
+                </button>
+              </figure>
+            ) : name === "plugin-marketplace-row" ? (
+              <figure key={name} className="flex min-w-action-sm flex-col gap-2">
+                <figcaption className="text-meta text-ink-muted">{name}</figcaption>
+                <button
+                  type="button"
+                  className="plugin-marketplace-row rounded-sm px-3 py-2 text-left text-meta text-ink"
+                >
+                  {name}
+                </button>
               </figure>
             ) : (
               <figure key={name} className="flex min-w-action-sm flex-col gap-2">
