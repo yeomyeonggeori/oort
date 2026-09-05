@@ -3,7 +3,6 @@ import { Link } from "react-router-dom";
 import { OortCloudMark } from "@/features/auth/OortCloudMarks";
 import { cn } from "@/design/lib/cn";
 import {
-  PRESS_CLASS,
   WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
   WELCOME_KICKOFF_EXIT_CLASS,
   WELCOME_KICKOFF_MARK_CLASS,
@@ -57,7 +56,7 @@ export function WelcomeKickoffStage({
   return (
     <div
       className={cn(
-        "flex w-full flex-col items-start gap-3 px-4 py-6",
+        "welcome-kickoff flex w-full flex-col items-start gap-3 px-4 py-6",
         exiting && !reducedMotion && WELCOME_KICKOFF_EXIT_CLASS
       )}
       data-testid={showCard ? "welcome-kickoff-backstop" : "welcome-kickoff-stage"}
@@ -70,29 +69,29 @@ export function WelcomeKickoffStage({
           </p>
           <Link
             to={WELCOME_BACKSTOP_HREF}
-            className={cn(
-              PRESS_CLASS,
-              "text-body text-ink underline underline-offset-2 focus-visible:focus-ring"
-            )}
+            className="touch-target self-start rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
           >
             {WELCOME_BACKSTOP_LINK_LABEL}
           </Link>
         </>
       ) : (
         <>
-          <div className="flex items-center gap-3" aria-hidden="true">
-            {WELCOME_KICKOFF_SHAPES.map((kind, index) => (
+          <div className="flex items-end gap-3" aria-hidden="true">
+            {WELCOME_KICKOFF_SHAPES.map((body, index) => (
               <span
-                key={`${kind}-${index}`}
+                key={`${body.kind}-${body.index}`}
                 className={cn(
-                  "flex size-8 items-center justify-center text-ink-muted",
+                  "welcome-kickoff-body flex items-center justify-center",
+                  body.tone === "accent" ? "text-accent" : "text-ink",
                   !reducedMotion && WELCOME_KICKOFF_MARK_CLASS
                 )}
+                data-onboarding-body={String(body.index)}
+                data-onboarding-tone={body.tone}
                 {...(reducedMotion
                   ? {}
                   : { "data-stagger-index": String(index) })}
               >
-                <OortCloudMark kind={kind} />
+                <OortCloudMark kind={body.kind} />
               </span>
             ))}
           </div>

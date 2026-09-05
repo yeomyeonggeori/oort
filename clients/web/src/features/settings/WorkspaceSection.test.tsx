@@ -322,13 +322,16 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
       '[data-testid="welcome-prompt"]'
     ) as HTMLTextAreaElement | null;
     expect(prompt).not.toBeNull();
+    expect(prompt?.getAttribute("maxLength")).toBeNull();
     act(() => {
-      setTextareaValue(prompt!, "가".repeat(2001));
+      setTextareaValue(prompt!, "가".repeat(2002));
     });
+    expect(prompt?.value.length).toBe(2002);
     expect(host.textContent).toContain("웰컴 프롬프트는 2000자까지 쓸 수 있습니다.");
     const save = host.querySelector(
       '[data-testid="workspace-welcome-save"]'
     ) as HTMLButtonElement | null;
+    expect(save?.getAttribute("aria-disabled")).toBe("true");
     await act(async () => {
       save?.click();
     });
@@ -352,9 +355,11 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
       save?.click();
     });
     await vi.waitFor(() => {
-      expect(
-        host.querySelector('[data-testid="workspace-welcome-save-error"]')?.textContent
-      ).toContain("welcome_prompt must be at most 2000 characters");
+      const error = host.querySelector('[data-testid="workspace-welcome-save-error"]');
+      expect(error?.textContent).toContain("welcome_prompt must be at most 2000 characters");
+      expect(error?.getAttribute("role")).toBe("alert");
+      expect(error?.className).toContain("text-meta");
+      expect(error?.className).toContain("text-danger");
     });
   });
 

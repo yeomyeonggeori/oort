@@ -15,6 +15,7 @@ import {
   fetchWorkspaceUnfurlSettings,
   leaveWorkspace,
   updateWorkspaceUnfurlSettings,
+  uuidEq,
 } from "@momo/core/lib/api";
 import { ApiError } from "@momo/core/lib/api";
 import {
@@ -636,7 +637,7 @@ function WelcomeKickoffEditor({
   const confirmedNonOperator = readOnly && directoryQuery.isSuccess;
   const locked = readOnly || offline;
   const agentLabel =
-    agents.find((member) => member.id === (agentMemberId ?? ""))?.displayName ??
+    agents.find((member) => uuidEq(member.id, agentMemberId ?? ""))?.displayName ??
     WELCOME_AGENT_DEFAULT_LABEL;
 
   return (
@@ -724,7 +725,6 @@ function WelcomeKickoffEditor({
               rows={4}
               readOnly={locked}
               aria-readonly={locked || undefined}
-              maxLength={WELCOME_PROMPT_MAX_CHARS + 1}
               className={cn(
                 "w-full resize-y rounded-sm border border-line-strong bg-transparent px-3 py-2 text-body text-ink placeholder:text-ink-muted focus-visible:focus-ring disabled:cursor-not-allowed disabled:opacity-50",
                 locked && "opacity-50"
@@ -742,10 +742,13 @@ function WelcomeKickoffEditor({
             </p>
           )}
           {save.isError && !denied && (
-            <InlineBanner
-              message={errorMessage(save.error)}
-              testId="workspace-welcome-save-error"
-            />
+            <p
+              className="text-meta text-danger"
+              role="alert"
+              data-testid="workspace-welcome-save-error"
+            >
+              {errorMessage(save.error)}
+            </p>
           )}
           {canEdit && (
             <div className="flex flex-wrap items-center gap-2">
