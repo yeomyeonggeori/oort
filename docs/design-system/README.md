@@ -119,7 +119,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 컨트롤 변형표(`button.tsx`)는 기하가 다르므로 자동으로 빠진다 — 컨트롤이 `--accent-soft`를 선택 상태로 입는 것은 이 규칙의 대상이 아니라 그 토큰이 하는 일 그 자체다. 반대로 **컨트롤이 칩 기하를 빌려 쓰면** 걸린다(관전 터미널 토글·설치 마법사 단계 표시기). 그 둘은 그릇이 아니라 기하가 결함이고, 잔량 표가 그 갈림을 적어 둔다.
 
-**남은 잔량 33건**(칩 그릇) **+ 7건**(손 기하). 좌표와 수가 `chipVessel.test.ts`의 두 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
+**남은 잔량 34건**(칩 그릇) **+ 7건**(손 기하). UX-R1e 가 관전 터미널 토글에 눌림 채움(`active:bg-surface-pressed`)을 얹어 천장이 33에서 34로 올랐다 — 새 칩이 아니라 이미 잔량이던 컨트롤의 세 번째 상호작용 상태다. 좌표와 수가 `chipVessel.test.ts`의 두 표에 있고 그 표가 **정확히** 맞아야 초록이다 — 새 위반은 적지 않으면 빨갛고, 수리는 표를 줄이지 않으면 빨갛다. 천장은 내려가기만 한다. 잔량은 **더 이상 「전부 rule-only」가 아니라 「지금은 전부 rule-only」**이고, 그것이 살아 있지 않은 이유도 표에 적혀 있다: 타임라인 칩 스무 개를 지켜 주는 것은 「행이 hover하지 않아서」가 **아니라**(`MessageRow.tsx:473`은 hover한다) 사이에 낀 불투명한 `bg-surface-raised` 카드다. 그 카드를 평평하게 만드는 사람이 칩 스무 개를 한꺼번에 지운다.
 
 **이 층이 재지 않는 축: 칩의 테두리.** `bg-*`만 읽는다. `SettingsFields`의 `StatusChip`은 `border-ok`/`border-warn`/`border-danger`/`border-line` 다섯 톤 셀로 일곱 설정 표면에 살아 있고, `AgentTurnBadge.tsx:34`·`AgentWorkPanel.tsx:233-234`도 `border border-warn`을 두른다(`AgentHubRoute`의 그 자리는 UX-R4a #1957이 그릇으로 걷었다) — #1516이 검증 칩 **하나**에서 「컨트롤 문법」이라 판정해 걷어낸 것이 바로 그 모양이다. 즉 웹의 제거는 아직 한 칩에 그쳤고, 그 축에는 기계 강제가 **아예 없다**(§5.3).
 
@@ -236,7 +236,7 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 
 **이 목록 말고 사다리 밖 값을 늘리지 마라.**
 
-눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`/`Link`/`NavLink`의 렌더가 글자뿐인 것 — 밑줄 또는 `hover:text-` 이고 **채움과 상자(어떤 `border*` 클래스·배경 상자)가 없는** 것이다. 패딩만 있는 터치 타깃은 상자가 아니다. 전폭 행은 컨테이너를 채우는 목록 행/아이템이다(`w-full`, 열 목록의 `flex-1`, `li` 를 가로지르는 `a`/`button`/`Link`/`NavLink`, `role=option|menuitem*|treeitem`). 채움만 (`hover:bg-surface-hover` / `active:bg-surface-pressed`, cmdk 는 `data-[selected=true]:active:bg-surface-pressed`), `.press` 스케일 없음. 선택 행은 hover 에서 선택 채움을 유지하고 press 에서 눌림 채움을 낸다. 변형은 전폭이 아닌 컨트롤에만. 메뉴 행은 `.press-instant-fill`.
+눌림(D5): Button 전 variant는 `.press`(`transform: scale(0.98)` + instant, 색 전이 목록 포함, `outline-color` 없음)만 든다. `transition-colors`와 함께 두지 않는다. 행·칩 상속은 DS-1. 본문 텍스트를 드래그로 고를 수 있어야 하는 표면에는 `.press`를 얹지 않는다(#1743 B-4). 텍스트 링크는 `<a>`/`<button>`/`Link`/`NavLink`의 렌더가 글자뿐인 것 — 밑줄 또는 `hover:text-` 이고 **채움과 상자(어떤 `border*` 클래스·배경 상자)가 없는** 것이다. 패딩만 있는 터치 타깃은 상자가 아니다. 이름 있는 눌림 어휘는 `.press` · `.press-instant-fill` · `active:bg-surface-pressed` · `scrim-press`(스크림 opacity 를 `--motion-instant` 에) 뿐이고, `:active` 만 있는 익명 유틸은 눌림이 아니다. 전폭은 폭이다: 상호작용 행/카드의 렌더 폭이 480px 이상이거나 그 콘텐츠 열의 50% 이상이면 채움만 (`hover:bg-surface-hover` / `active:bg-surface-pressed` / `press-instant-fill`, `.press` 스케일 없음). 선택 행은 hover 에서 선택 채움을 유지하고 press 에서 눌림 채움을 낸다. 변형은 그 폭 문턱 아래 컨트롤에만. 메뉴 행은 `.press-instant-fill`.
 
 reduced-motion(D9): 사다리 네 duration과 모달 200/150은 `0ms`가 된다. 모션을 끄는 것이 아니라 0으로 만든다 — 상태는 착지한다. 온보딩 rAF 필드는 현행대로 시작하지 않는다.
 
