@@ -103,6 +103,12 @@ export function useRestoredSession(): SessionLifecycle {
     // Join applyLogin persists before S3 calls onLoggedIn. Without this hold
     // App enters restoring and unmounts ConnectPage (capture 30000ms timeout
     // on onboarding-profile, CAPTURE_PORT=8641).
+    //
+    // A leaked hold is inert for the rest of this page lifetime: signIn claims
+    // `attempted.current` first (below), so this effect cannot start a restore
+    // after onLoggedIn. Measured in design-review #2088 R1 (sabotage S5:
+    // deleting the S3 release left 38/38 green). S3 still releases on every
+    // exit and on unmount so the next edit cannot inherit a stuck hold.
     if (attempted.current || !resumable || restoreHeld) return;
     attempted.current = true;
     let cancelled = false;

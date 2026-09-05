@@ -14,6 +14,7 @@ import {
   login,
   type JoinResponse,
   type LoginResponse,
+  type Member,
 } from "@momo/core/lib/api";
 import { parseJoinFromPageUrl } from "@momo/core/features/auth/deepLink";
 import {
@@ -201,6 +202,12 @@ export function ConnectPage({
   const stepRef = useRef(step);
   stepRef.current = step;
 
+  useEffect(() => {
+    return () => {
+      releaseSessionRestore();
+    };
+  }, []);
+
   const focusLater = useCallback((field: ShellFocus) => {
     setPendingFocus(field);
   }, []);
@@ -369,32 +376,31 @@ export function ConnectPage({
     void attempt();
   }
 
-  function finishProfile(member = pendingJoin?.member) {
-    if (!pendingJoin || !member) return;
+  function finishProfile(join: JoinResponse, member: Member) {
     markFreshSignup({
-      workspaceId: pendingJoin.member.workspaceId,
-      memberId: pendingJoin.member.id,
+      workspaceId: join.member.workspaceId,
+      memberId: join.member.id,
     });
-    onLoggedIn({ ...pendingJoin, member });
+    onLoggedIn({ ...join, member });
     releaseSessionRestore();
   }
 
-  function handleProfileSkip() {
-    finishProfile();
+  function handleProfileSkip(join: JoinResponse) {
+    finishProfile(join, join.member);
   }
 
-  async function patchProfileName() {
-    if (!pendingJoin || profileBusyRef.current) return;
+  async function patchProfileName(join: JoinResponse) {
+    if (profileBusyRef.current) return;
     if (displayNameFieldError(profileName) !== null) return;
     profileBusyRef.current = true;
     setProfileBusy(true);
     setProfileError(null);
     try {
       const member = await changeMyDisplayName(
-        pendingJoin.member.workspaceId,
+        join.member.workspaceId,
         profileName
       );
-      finishProfile(member);
+      finishProfile(join, member);
     } catch (err) {
       setProfileFailed(true);
       setProfileError(
@@ -410,23 +416,22 @@ export function ConnectPage({
     }
   }
 
-  function handleProfileSave() {
-    if (!pendingJoin) return;
+  function handleProfileSave(join: JoinResponse) {
     if (profileFailed) {
-      finishProfile();
+      finishProfile(join, join.member);
       return;
     }
-    void patchProfileName();
+    void patchProfileName(join);
   }
 
-  function handleProfileRetry() {
+  function handleProfileRetry(join: JoinResponse) {
     setProfileFailed(false);
-    void patchProfileName();
+    void patchProfileName(join);
   }
 
-  function onProfileSubmit(e: FormEvent) {
+  function onProfileSubmit(e: FormEvent, join: JoinResponse) {
     e.preventDefault();
-    void handleProfileSave();
+    handleProfileSave(join);
   }
 
   const serverHint = requiresServer
@@ -726,7 +731,8 @@ export function ConnectPage({
   // Capture walks this card (`onboarding-profile`). No e2e lane submits a
   // join today (`advanceToAccount` defaults to path: "server"), so none
   // walk S3; a join e2e lane is a gap (NOTES).
-  const profileCard = (
+  function renderProfile(join: JoinResponse) {
+    return (
     <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
       <CardHeader>
         <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
@@ -739,7 +745,10 @@ export function ConnectPage({
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         {cardShared}
-        <form onSubmit={onProfileSubmit} className="flex flex-col gap-6">
+        <form
+          onSubmit={(e) => onProfileSubmit(e, join)}
+          className="flex flex-col gap-6"
+        >
           {profileError ? (
             <InlineBanner
               tone="error"
@@ -747,7 +756,7 @@ export function ConnectPage({
               messageId="onboarding-profile-error-text"
               testId="onboarding-profile-error"
               actionLabel="다시 시도"
-              onAction={() => void handleProfileRetry()}
+              onAction={() => void handleProfileRetry(join)}
               actionBusy={profileBusy}
             />
           ) : null}
@@ -818,7 +827,7 @@ export function ConnectPage({
               type="button"
               variant="secondary"
               disabled={profileBusy}
-              onClick={handleProfileSkip}
+              onClick={() => handleProfileSkip(join)}
               data-testid="onboarding-profile-skip"
             >
               지금은 건너뛰기
@@ -830,7 +839,8 @@ export function ConnectPage({
         </div>
       </CardContent>
     </Card>
-  );
+    );
+  }
 
   const slide = (
     <OnboardingSlideTransition
@@ -859,8 +869,8 @@ export function ConnectPage({
         />
       ) : step === "gateway" ? (
         gatewayCard
-      ) : step === "profile" ? (
-        profileCard
+      ) : step === "profile" && pendingJoin ? (
+        renderProfile(pendingJoin)
       ) : (
         accountCard
       )}
