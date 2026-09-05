@@ -2,6 +2,15 @@
 
 > `docs/planning/CURRENT_STATE.md`에서 이동한 과거 스냅샷 원문(불변, newest-first 유지). 로테이션 시 새 이동분을 이 헤더 바로 아래에 prepend한다. 하단의 구 구조 절(§0~§5)은 2026-07 기준 정체 구획으로, 현행 운영과 다르다 — 역사 기록으로만 읽어라(현행: `docs/TRACKS.md`·`CLAUDE.md`).
 
+> 이하 스냅샷 82:
+> **2026-09-02 스냅샷 82 (Fable · momo-main — ★G0 완주(발행 창만 남음): BT 파도 6장 전량·BZ-5a·P1/P2 main 정본화, ADR 4본 결재 대기, W1 발사 대기).** 컴팩트 복원 진입점.
+>
+> **★ 랜딩·승격**: BT-6 서버 #1961(engine 6faccaea, A-43) + 클라 #1963(uxui 23fbbb0c — design-review **5회전** R1 FAIL B2·H2 → R2 B0·H1 → R3 B0·H2 → R4 B0·H2 → R5 **PASS B0·H0**; H-5 필 arming은 선재 결함으로 철회→#1966) · lint 위생 #1965(BZ-5a가 붉힌 web lint 레인 수리) · **승격 배치 #1968(engine→main)·#1970(uxui→main)·sync #1969/#1971/#1972/#1973·docs #1953(P1 PIPELINE.md·P2 CODEX 병합·스냅샷 81)** — 정책 감사 6회(코멘트→라벨→정본 검증 PASS). 최종 main=4369909b·uxui=e0e992c4·engine=5696ecd9, alignment PASS.
+> **★ G0 잔여 = v0.1.4 발행 창**(성재 attended: `publish-images.yml` dispatch + release Environment 승인 → digest 수거 → 태그·Release → SELF_HOST 문면). 이후 W1 발사(go 신호).
+> **★ 결재 대기**: ADR-0179(표현 축)·0180(QR 기기 연결)·0181(웰컴 킥오프)·0182(일시 확인) Proposed. Accept 시 #1958 UX-R0·#1959 M0s·#1960 UX-R2s 개방. 즉시 발사 가능: #1954 SH-1·#1955 SH-3a·#1956 DS-2·#1957 UX-R4a.
+> **★ 적립**: #1964 폰 마크 소비+explicit_open · #1966 UnreadPill 재방문 arming 선재 결함 · #1967 BT-6 닛(N-15 죽은 분기·N-9 게이트 잔여·N-14) · #1774 감사 재요구 마찰(이번 승격 6회 실측 — P4 후보).
+> **★ 교훈(메모리 기록)**: 트랙 머지 전 verify_merge_tree 8레인 필수(STATUS 충돌은 union 임시 커밋 --base) · zsh 미인용 $VAR 미분리 · 워커 상습 축에 "수리 회귀"와 "런타임 4/4 미실측 주장" 추가 — R3/R4에서 M-8 '수리됨' 주장이 두 번 불성립.
+
 > 이하 스냅샷 81:
 > **2026-09-02 스냅샷 81 (Fable · momo-main — ★G0 집행 중: BZ-5a·BT-6 서버 랜딩, ADR 4본 Proposed, W1 패킷·이슈 발급, 클라 워커 가동).** 컴팩트 복원 진입점.
 >
