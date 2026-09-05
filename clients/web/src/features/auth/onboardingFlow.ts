@@ -1,4 +1,4 @@
-export type OnboardingStep = "landing" | "gateway" | "account";
+export type OnboardingStep = "landing" | "gateway" | "account" | "profile";
 export type OnboardingPath = "server" | "invite";
 export type OnboardingTransitionDirection = "forward" | "backward";
 export type OnboardingTransitionEffect =
@@ -12,6 +12,7 @@ const STEP_ORDER: Record<OnboardingStep, number> = {
   landing: 0,
   gateway: 1,
   account: 2,
+  profile: 3,
 };
 
 /**
@@ -29,8 +30,9 @@ export function initialOnboarding(input: {
 }
 
 export function progressLabel(step: OnboardingStep): string | null {
-  if (step === "gateway") return "2/3";
-  if (step === "account") return "3/3";
+  if (step === "gateway") return "2/4";
+  if (step === "account") return "3/4";
+  if (step === "profile") return "4/4";
   return null;
 }
 

@@ -393,6 +393,12 @@ const GATEWAY_TAP_TARGETS = [
   ["connect-recent-server", "최근 접속", "optional"],
 ];
 
+const PROFILE_TAP_TARGETS = [
+  ["onboarding-profile-name", "표시 이름 입력"],
+  ["onboarding-profile-submit", "표시 이름 저장"],
+  ["onboarding-profile-skip", "지금은 건너뛰기"],
+];
+
 // ADR-0134 계약 픽스처. 단위 테스트(routingModel.test.ts)와 라우팅 캡처가 이미
 // 쓰는 그 파일이고, 여기서도 같은 것을 읽어 세 표면이 한 표를 본다.
 const ROUTING_FIXTURES = JSON.parse(
@@ -1644,6 +1650,9 @@ async function installMocks(context) {
   resetDeviceLinkHarness();
   await installUnmockedFallback(context);
   await context.route("**/v1/auth/login", (route) => json(route, SESSION));
+  await context.route("**/v1/join", (route) =>
+    json(route, { ...SESSION, createdMember: true })
+  );
   await context.route("**/v1/auth/device-link**", (route) => {
     const url = new URL(route.request().url());
     const method = route.request().method();
@@ -2510,6 +2519,58 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
   await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
+}
+
+async function shootOnboardingProfile(page, where, { tapTargets = false, shoot } = {}) {
+  await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
+  await page.getByTestId("onboarding-choose-invite").click();
+  await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
+  await page.getByTestId("login-invite-code").fill("momo-alpha-2026");
+  await page.getByTestId("onboarding-next").click();
+  await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
+  await page.getByTestId("login-email").fill("seongjae@dawn.example");
+  await page.getByTestId("login-password").fill("capture-only-not-a-credential");
+  await page.getByTestId("login-submit").click();
+  await page.getByTestId("onboarding-profile").waitFor({ state: "visible" });
+  const chrome = await page.evaluate(`(() => {
+    const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
+    const back = document.querySelector('[data-testid="onboarding-back"]');
+    const progress = document.querySelector('[data-testid="onboarding-progress"]');
+    return {
+      hasBack: Boolean(back),
+      progress: progress?.textContent ?? null,
+      rowHasProgress: Boolean(row && progress && row.contains(progress)),
+    };
+  })()`);
+  if (chrome.hasBack) {
+    throw new Error(`S3 크롬 ${where}: 뒤로가 있다`);
+  }
+  if (chrome.progress !== "4/4" || !chrome.rowHasProgress) {
+    throw new Error(`S3 크롬 ${where}: ${JSON.stringify(chrome)}`);
+  }
+  await assertOnboardingCardCentered(page, `profile ${where}`, "onboarding-profile");
+  await assertNoHorizontalOverflow(page, `profile ${where}`);
+  if (tapTargets) {
+    await assertTapTargets(page, `profile ${where}`, PROFILE_TAP_TARGETS);
+  }
+  if (shoot) await shoot("onboarding-profile");
+  await page.getByTestId("onboarding-profile-name").fill("가".repeat(101));
+  await page.getByTestId("onboarding-profile-name-error").waitFor({
+    state: "visible",
+  });
+  if (shoot) await shoot("onboarding-profile-field-error");
+  await page.route("**/v1/workspaces/*/members/me", (route) => {
+    if (route.request().method() === "PATCH") {
+      return json(route, { error: { message: "engine boom" } }, 500);
+    }
+    return route.fallback();
+  });
+  await page.getByTestId("onboarding-profile-name").fill("성재");
+  await page.getByTestId("onboarding-profile-submit").click();
+  await page.getByTestId("onboarding-profile-banner").waitFor({
+    state: "visible",
+  });
+  if (shoot) await shoot("onboarding-profile-banner");
 }
 
 function isPresencePut(request) {
@@ -6424,6 +6485,14 @@ async function captureMobile(browser, scheme) {
   await assertTapTargets(page, `login ${scheme}`, LOGIN_TAP_TARGETS);
   await shoot(page, "login");
 
+  const profilePage = await context.newPage();
+  await profilePage.goto(ORIGIN, { waitUntil: "networkidle" });
+  await shootOnboardingProfile(profilePage, `profile ${scheme}`, {
+    tapTargets: true,
+    shoot: (name) => shoot(profilePage, name),
+  });
+  await profilePage.close();
+
   // 2. 채널. 사이드바는 열이 아니라 닫힌 서랍이므로 타임라인이 390px 전부를
   //    받고, 컴포저는 안전 영역 위에 도크된다.
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
@@ -6932,6 +7001,18 @@ async function captureScheme(browser, scheme) {
   const inviteShot = `${OUT_DIR}/connect-invite-${scheme}.png`;
   await invite.screenshot({ path: inviteShot });
   shots.push(inviteShot);
+
+  // S3 (UX-R2a). A join that created the member; sign-in on `login` is unchanged.
+  const profile = await context.newPage();
+  await profile.goto(ORIGIN, { waitUntil: "networkidle" });
+  await shootOnboardingProfile(profile, scheme, {
+    shoot: async (name) => {
+      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      await profile.screenshot({ path });
+      shots.push(path);
+    },
+  });
+  await profile.close();
 
   // 2. chat shell, live path: sidebar + timeline + composer + rail status
   await signIn(login);

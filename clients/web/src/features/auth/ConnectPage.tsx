@@ -8,7 +8,14 @@ import {
   type ReactNode,
 } from "react";
 import { ArrowLeft, FlaskConical } from "lucide-react";
-import { joinWithInvite, login, type LoginResponse } from "@momo/core/lib/api";
+import {
+  changeMyDisplayName,
+  joinWithInvite,
+  login,
+  type JoinResponse,
+  type LoginResponse,
+  type Member,
+} from "@momo/core/lib/api";
 import { parseJoinFromPageUrl } from "@momo/core/features/auth/deepLink";
 import {
   API_BASE_DEFAULT,
@@ -63,8 +70,22 @@ import {
   type ConnectField,
   type ConnectMode,
 } from "@momo/core/features/auth/connectModel";
+import {
+  displayNameFieldError,
+  displayNameSaveMessage,
+} from "@momo/core/features/settings/model";
+import { markFreshSignup } from "@/features/welcome/freshSignup";
+import {
+  holdSessionRestore,
+  releaseSessionRestore,
+} from "./onboardingSessionHold";
 
-type ShellFocus = ConnectField | "next" | "choose-server" | "choose-invite";
+type ShellFocus =
+  | ConnectField
+  | "next"
+  | "choose-server"
+  | "choose-invite"
+  | "profile-name";
 
 // Reading this as: onboarding for internal team users on web+Tauri,
 // density 5/10, motion 4/10 (S0 landing only; S1/S2 stay the connect form).
@@ -157,6 +178,11 @@ export function ConnectPage({
   const [failure, setFailure] = useState<ConnectFailure | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [pendingFocus, setPendingFocus] = useState<ShellFocus | null>(null);
+  const [pendingJoin, setPendingJoin] = useState<JoinResponse | null>(null);
+  const [profileName, setProfileName] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
+  const [profileFailed, setProfileFailed] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
   const online = useSyncExternalStore(subscribeOnline, readOnline, () => true);
   const discovered = useDiscoveredServers();
   const prefill = useJoinPrefill();
@@ -168,11 +194,19 @@ export function ConnectPage({
   const nextRef = useRef<HTMLButtonElement>(null);
   const chooseServerRef = useRef<HTMLButtonElement>(null);
   const chooseInviteRef = useRef<HTMLButtonElement>(null);
+  const profileNameRef = useRef<HTMLInputElement>(null);
+  const profileBusyRef = useRef(false);
 
   const typed = useRef({ serverUrl, email, password });
   typed.current = { serverUrl, email, password };
   const stepRef = useRef(step);
   stepRef.current = step;
+
+  useEffect(() => {
+    return () => {
+      releaseSessionRestore();
+    };
+  }, []);
 
   const focusLater = useCallback((field: ShellFocus) => {
     setPendingFocus(field);
@@ -199,6 +233,7 @@ export function ConnectPage({
       next: nextRef.current,
       "choose-server": chooseServerRef.current,
       "choose-invite": chooseInviteRef.current,
+      "profile-name": profileNameRef.current,
     }[pendingFocus];
     // Stay pending until the step that owns the node has mounted. Clearing
     // on a miss is what made the old single-form prefillFocus a silent no-op
@@ -290,13 +325,33 @@ export function ConnectPage({
     if (!commitServer()) return;
     setBusy(true);
     try {
-      const session =
-        mode === "join"
-          ? await joinWithInvite(inviteCode, email, password)
-          : await login(email, password, workspace);
-      if (mode === "join") markPhoneLinkFirstRunPending();
+      if (mode === "join") {
+        holdSessionRestore();
+        const session = await joinWithInvite(inviteCode, email, password);
+        markPhoneLinkFirstRunPending();
+        if (session.createdMember) {
+          // Written at join success, before S3. sessionStorage survives a
+          // same-tab reload, so a reload at S3 keeps the UX-R2b kickoff marker.
+          markFreshSignup({
+            workspaceId: session.member.workspaceId,
+            memberId: session.member.id,
+          });
+          setPendingJoin(session);
+          setProfileName(session.member.displayName);
+          setProfileFailed(false);
+          setProfileError(null);
+          goTo("profile");
+          focusLater("profile-name");
+          return;
+        }
+        onLoggedIn(session);
+        releaseSessionRestore();
+        return;
+      }
+      const session = await login(email, password, workspace);
       onLoggedIn(session);
     } catch (err) {
+      if (mode === "join") releaseSessionRestore();
       const next = mode === "join" ? joinFailureCopy(err) : signInFailureCopy(err);
       setFailure(next);
       if (next.onGateway) {
@@ -327,6 +382,60 @@ export function ConnectPage({
     void attempt();
   }
 
+  function finishProfile(join: JoinResponse, member: Member) {
+    onLoggedIn({ ...join, member });
+    releaseSessionRestore();
+  }
+
+  function handleProfileSkip(join: JoinResponse) {
+    finishProfile(join, join.member);
+  }
+
+  async function patchProfileName(join: JoinResponse) {
+    if (profileBusyRef.current) return;
+    if (displayNameFieldError(profileName) !== null) return;
+    profileBusyRef.current = true;
+    setProfileBusy(true);
+    setProfileError(null);
+    try {
+      const member = await changeMyDisplayName(
+        join.member.workspaceId,
+        profileName
+      );
+      finishProfile(join, member);
+    } catch (err) {
+      setProfileFailed(true);
+      setProfileError(
+        `${displayNameSaveMessage(err)} 설정 › 프로필에서 언제든 바꿀 수 있어요.`
+      );
+      // InlineBanner is role="alert" (States.tsx:276), not a focus target.
+      // The name field is; landing there keeps Enter-driven keyboard users
+      // on the card instead of <body> (whose first Tab stop was 건너뛰기).
+      focusLater("profile-name");
+    } finally {
+      profileBusyRef.current = false;
+      setProfileBusy(false);
+    }
+  }
+
+  function handleProfileSave(join: JoinResponse) {
+    if (profileFailed) {
+      finishProfile(join, join.member);
+      return;
+    }
+    void patchProfileName(join);
+  }
+
+  function handleProfileRetry(join: JoinResponse) {
+    setProfileFailed(false);
+    void patchProfileName(join);
+  }
+
+  function onProfileSubmit(e: FormEvent, join: JoinResponse) {
+    e.preventDefault();
+    handleProfileSave(join);
+  }
+
   const serverHint = requiresServer
     ? "데스크톱 앱은 접속할 서버 주소가 필요합니다."
     : "비워 두면 이 페이지를 제공한 주소로 연결합니다.";
@@ -340,6 +449,7 @@ export function ConnectPage({
         : "로그인";
   const progress = progressLabel(step);
   const joinPath = path === "invite" || mode === "join";
+  const profileFieldError = displayNameFieldError(profileName);
 
   function serverField() {
     return (
@@ -407,7 +517,7 @@ export function ConnectPage({
     );
   }
 
-  const cardShared = (
+  const cardChrome = (
     <>
       <UpdateNotice />
       {TEST_PREFILL_ACTIVE && (
@@ -429,6 +539,12 @@ export function ConnectPage({
           testId="connect-offline"
         />
       )}
+    </>
+  );
+
+  const cardShared = (
+    <>
+      {cardChrome}
       {discovered.length > 0 && (
         <DiscoveredServerList
           servers={discovered}
@@ -618,6 +734,129 @@ export function ConnectPage({
     </Card>
   );
 
+  // Design Read: onboarding for internal team users on web+Tauri,
+  // density 5/10, motion 4/10 (S0 only; S1–S3 stay the connect form).
+  // Capture walks this card (`onboarding-profile`). No e2e lane submits a
+  // join today (`advanceToAccount` defaults to path: "server"), so none
+  // walk S3; a join e2e lane is a gap (NOTES).
+  function renderProfile(join: JoinResponse) {
+    return (
+    <Card className="mx-auto w-full max-w-sm" data-testid="onboarding-profile">
+      <CardHeader>
+        <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
+          <OortMark className="size-6 shrink-0 text-accent" />
+          <span className="text-title">oort</span>
+        </h1>
+        <CardDescription>
+          워크스페이스에서 다른 멤버에게 보이는 이름입니다.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-4">
+        {cardChrome}
+        <form
+          onSubmit={(e) => onProfileSubmit(e, join)}
+          className="flex flex-col gap-6"
+        >
+          {profileError ? (
+            <InlineBanner
+              tone="error"
+              message={profileError}
+              messageId="onboarding-profile-banner-text"
+              testId="onboarding-profile-banner"
+              actionLabel="다시 시도"
+              onAction={() => void handleProfileRetry(join)}
+              actionBusy={profileBusy}
+            />
+          ) : null}
+          <label htmlFor="onboarding-profile-name" className="flex flex-col gap-1 text-body">
+            <FieldLabel optional>표시 이름</FieldLabel>
+            <Input
+              ref={profileNameRef}
+              id="onboarding-profile-name"
+              name="displayName"
+              value={profileName}
+              autoComplete="nickname"
+              aria-invalid={profileFieldError ? true : undefined}
+              aria-describedby={
+                [
+                  profileFieldError
+                    ? "onboarding-profile-name-error"
+                    : profileError
+                      ? null
+                      : "onboarding-profile-name-hint",
+                  profileError ? "onboarding-profile-banner-text" : null,
+                ]
+                  .filter(Boolean)
+                  .join(" ") || undefined
+              }
+              data-testid="onboarding-profile-name"
+              onChange={(e) => {
+                setProfileName(e.target.value);
+                if (profileFailed) {
+                  setProfileFailed(false);
+                  setProfileError(null);
+                }
+              }}
+            />
+            {profileFieldError ? (
+              <p
+                id="onboarding-profile-name-error"
+                role="alert"
+                className="text-meta text-danger"
+                data-testid="onboarding-profile-name-error"
+              >
+                {profileFieldError}
+              </p>
+            ) : profileError ? null : (
+              <span
+                id="onboarding-profile-name-hint"
+                className="text-meta text-ink-muted"
+              >
+                나중에 설정에서 언제든 바꿀 수 있습니다
+              </span>
+            )}
+          </label>
+          <div className="flex flex-col gap-3">
+            <Button
+              type="submit"
+              // Pending = aria-busy + "저장 중…", still focusable. States.tsx:245-249:
+              // never disabled and never dimmed while the action is running.
+              disabled={
+                profileFailed ? false : !online || profileFieldError !== null
+              }
+              title={
+                online || profileFailed
+                  ? undefined
+                  : "오프라인 상태에서는 연결할 수 없습니다."
+              }
+              aria-busy={profileBusy || undefined}
+              data-testid="onboarding-profile-submit"
+            >
+              {profileFailed
+                ? "계속"
+                : profileBusy
+                  ? "저장 중…"
+                  : "표시 이름 저장"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={profileBusy}
+              onClick={() => handleProfileSkip(join)}
+              data-testid="onboarding-profile-skip"
+            >
+              지금은 건너뛰기
+            </Button>
+          </div>
+        </form>
+        <div className="flex justify-end border-t border-line pt-4">
+          <RuntimeBadge />
+        </div>
+      </CardContent>
+    </Card>
+    );
+  }
+
   const slide = (
     <OnboardingSlideTransition
       transitionKey={`${step}-${path ?? "none"}`}
@@ -645,6 +884,8 @@ export function ConnectPage({
         />
       ) : step === "gateway" ? (
         gatewayCard
+      ) : step === "profile" && pendingJoin ? (
+        renderProfile(pendingJoin)
       ) : (
         accountCard
       )}
@@ -662,26 +903,34 @@ export function ConnectPage({
         data-testid="onboarding-step-chrome"
         {...titlebarDragProps(IS_TAURI)}
       >
-        <Button
-          type="button"
-          variant="ghost"
-          data-testid="onboarding-back"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => {
-            if (step === "account") {
-              goTo("gateway");
-              focusLater(path === "invite" ? "code" : "server");
-            } else {
-              goTo("landing");
-              focusLater(
-                path === "invite" ? "choose-invite" : "choose-server"
-              );
-            }
-          }}
-        >
-          <ArrowLeft aria-hidden="true" />
-          뒤로
-        </Button>
+        {/*
+          S3 has no 뒤로: the account exists now, and going back to S2 would
+          re-submit a join. The 4/4 counter stays.
+        */}
+        {step !== "profile" ? (
+          <Button
+            type="button"
+            variant="ghost"
+            data-testid="onboarding-back"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => {
+              if (step === "account") {
+                goTo("gateway");
+                focusLater(path === "invite" ? "code" : "server");
+              } else {
+                goTo("landing");
+                focusLater(
+                  path === "invite" ? "choose-invite" : "choose-server"
+                );
+              }
+            }}
+          >
+            <ArrowLeft aria-hidden="true" />
+            뒤로
+          </Button>
+        ) : (
+          <span />
+        )}
         {progress && (
           <p
             className="text-meta text-ink-muted"

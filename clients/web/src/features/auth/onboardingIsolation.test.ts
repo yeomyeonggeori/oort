@@ -55,7 +55,9 @@ describe("onboarding S0 and brand lockup stay outside custom accent", () => {
         });
       }
     }
-    expect(hits, "OortMark text-accent sites").toHaveLength(3);
+    // Gateway, account, profile (S3), and claim. A fifth site without
+    // `.brand-lockup` nearby is leftover below.
+    expect(hits, "OortMark text-accent sites").toHaveLength(4);
     const leftover = hits.filter((hit) => !hit.near.includes("brand-lockup"));
     expect(leftover, leftover.map((hit) => hit.file).join(", ")).toEqual([]);
   });
