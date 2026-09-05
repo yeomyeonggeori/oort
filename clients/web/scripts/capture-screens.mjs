@@ -9292,13 +9292,17 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const empty = page.getByTestId("timeline-empty");
     try {
       await empty.waitFor({ state: "visible", timeout: 15_000 });
-    } catch {
-      /* waitFor attached reports the DOM if the empty intro never painted */
+    } catch (err) {
+      // Empty intro is optional: a nonempty #general still mounts the stage.
+      // Timeout is the only miss we accept; anything else is a real fail.
+      const name = err instanceof Error ? err.name : "";
+      const message = err instanceof Error ? err.message : String(err);
+      if (name !== "TimeoutError" && !message.includes("Timeout")) throw err;
     }
     const stage = page.getByTestId("welcome-kickoff-stage");
     try {
       await stage.waitFor({ state: "attached", timeout: 10_000 });
-    } catch {
+    } catch (err) {
       const dump = await page.evaluate(() => ({
         hash: location.hash,
         fresh: sessionStorage.getItem("oort.freshSignup.v1"),
@@ -9314,7 +9318,13 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       }));
       throw new Error(`welcome-kickoff-stage missing ${JSON.stringify(dump)}`);
     }
-    await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    try {
+      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    } catch (err) {
+      if (!String(err).includes("자리가 멎지 않았다")) throw err;
+      await page.waitForTimeout(200);
+      await scrollTimelineRowIntoView(page, "welcome-kickoff-stage", "welcome-kickoff");
+    }
     await stage.waitFor({ state: "visible" });
   }
 
@@ -9413,11 +9423,45 @@ async function captureSettingsWelcomeScenes(browser, scheme) {
   await page.getByTestId("settings-route").waitFor({ state: "visible" });
   const block = page.getByTestId("workspace-welcome-kickoff");
   await block.waitFor({ state: "visible" });
+  // Playwright visible ≠ in-viewport. R2 measured the block at top:884 in an
+  // 800 px frame after this wait, so the shutter hit the section above it.
+  await block.evaluate((el) => el.scrollIntoView({ block: "start" }));
   await waitForAnimations(page);
-  const vp = page.viewportSize() ?? VIEWPORT;
-  await page.mouse.move(vp.width + 80, vp.height + 80);
+  const frame = await block.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+    return {
+      top: box.top,
+      bottom: box.bottom,
+      left: box.left,
+      right: box.right,
+      height: box.height,
+      vh,
+      vw,
+      inViewport:
+        box.top >= 0 &&
+        box.bottom <= vh &&
+        box.left >= 0 &&
+        box.right <= vw,
+    };
+  });
   const path = `${OUT_DIR}/settings-welcome-${scheme}.png`;
-  await page.screenshot({ path });
+  if (frame.height > frame.vh) {
+    console.info(
+      `settings-welcome ${scheme}: block cannot fit (height ${frame.height} > vh ${frame.vh}); shooting the block element`
+    );
+    await block.screenshot({ path });
+  } else {
+    if (!frame.inViewport) {
+      throw new Error(
+        `settings-welcome ${scheme} inViewport:false top:${frame.top} bottom:${frame.bottom} vh:${frame.vh} vw:${frame.vw}`
+      );
+    }
+    const vp = page.viewportSize() ?? VIEWPORT;
+    await page.mouse.move(vp.width + 80, vp.height + 80);
+    await page.screenshot({ path });
+  }
   shots.push(path);
   await context.close();
   return shots;
@@ -9495,23 +9539,11 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
     const scroller = document.querySelector("[data-virtuoso-scroller]");
     return Boolean(scroller && scroller.scrollHeight > scroller.clientHeight + 200);
   });
-  // #2057 N-4: virtuoso sometimes keeps shifting the intro for more than the
-  // helper's three stable frames. One retry after the list height is known.
-  try {
-    await scrollTimelineRowIntoView(
-      page,
-      "message-channel-intro",
-      `nonempty intro ${scheme}`
-    );
-  } catch (err) {
-    if (!String(err).includes("자리가 멎지 않았다")) throw err;
-    await page.waitForTimeout(200);
-    await scrollTimelineRowIntoView(
-      page,
-      "message-channel-intro",
-      `nonempty intro ${scheme}`
-    );
-  }
+  await scrollTimelineRowIntoView(
+    page,
+    "message-channel-intro",
+    `nonempty intro ${scheme}`
+  );
   const intro = page.getByTestId("message-channel-intro");
   const actionCount = await intro.locator("button").count();
   if (actionCount !== 0) {
