@@ -1,21 +1,25 @@
 # oort 진행 현황
 
-## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05)
+## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R2)
 
-- ADR-0181 D7. Leading row of `#general` (identified as `channel.kind === "public" && channel.name === "general"` in `welcomeKickoff.ts:51-57`; post-signup landing is `channelsQuery.groups.channels[0]` in `ChatShell.tsx:166-169` — for a new workspace that is the same channel). 4 `OortCloudMark` shapes + "팀이 준비하고 있어요". First agent-authored message or `agent.partial` exits the stage (`--motion-standard`, fill `backwards`); that row plays `enter-conversation` once. Backstop `WELCOME_BACKSTOP_MS = 120_000`. Settings › 워크스페이스: operator-only `welcome_agent_member_id` / `welcome_prompt` (#1800 pattern).
-- 실측. Chromium `skipIf` one run: `exitEndedMs=346.9` `arrivalStartMs=348.6` `deltaMs=1.7`. Compiled `.welcome-kickoff-mark` contains `var(--motion-instant)` / `var(--motion-arrival)` / `var(--motion-ease-arrival)` and no `\d+ms`. PATCH body `{ welcome_agent_member_id: "00000000-0000-7000-8000-000000000201", welcome_prompt: "직접 편집한 프롬프트" }` (no `role_labels` key).
-- Capture `CAPTURE_PORT=8645`. PNG counts: 4 light + 4 dark = 8 (`welcome-stage` · `welcome-stage-reduce` · `welcome-arrived` · `welcome-backstop` × two schemes). Two full `capture:design` runs (before arrived double-wait): stage/backstop/reduce sha256 MATCH; arrived DIFF (single `waitForAnimations` returned between stage-exit end and opener arrival start). After a second `waitForAnimations` following two rAF: light arrived MATCH `a228307c252868d9f10c7af74095935e5dede341951e7dde62121853014811c2` across two welcome completions. Dark arrived post-fix sampled once `dae57c2aa45ba3263fcd684847a4cecd2dab4374237e481c6bf98e5cab0ad1f9` — two subsequent `capture:design` runs died on nonempty intro scroll (#2057 N-4) after welcome scenes had already been written. Stage/backstop/reduce hashes that MATCH across the two full runs:
+- ADR-0181 D7. Leading row of `#general` (`channel.kind === "public" && channel.name === "general"`). Unique-kind slice of `CLOUD_BODIES` (3 marks, size/rotate/tone per body) + "팀이 준비하고 있어요". Decision is undefined until timeline backlog **and** directory/roster have `status === "success"`; unresolved author → do not show. First agent-authored message or `agent.partial` exits the stage (`--motion-standard`, fill `both`); that row plays `enter-conversation` once. Backstop `WELCOME_BACKSTOP_MS = 120_000` runs the same persist as opener exit (`clearFreshSignup` + shown-marker). Backstop link is `AGENTS_NAV` (`#/agents`, label 「에이전트」). While the stage is mounted the empty-state 「첫 메시지 쓰기」 CTA is not rendered. Settings › 워크스페이스: operator-only `welcome_agent_member_id` / `welcome_prompt` (#1800 pattern); prompt has no `maxLength` (2000+ shows the sentence and disables save); save error is the `role_labels` `<p class="text-meta text-danger" role="alert">` shape.
+- 실측. Product-path Chromium harness (real `Timeline` + `useTimeline` + `useWelcomeKickoff`; source `npm --prefix clients/web run test`): `exitEndedMs=474.9` `arrivalStartMs=491.5` `deltaMs=16.6` `arrivalDuringExit=false`. Isolated Chromium file one run: `deltaMs=15.8`. H1 fill-both sampler (same full suite): `maxAfterEnd=0.0000`. Compiled `.welcome-kickoff-mark` contains `var(--motion-instant)` / `var(--motion-arrival)` / `var(--motion-ease-arrival)` and no `\d+ms`. PATCH body `{ welcome_agent_member_id: "00000000-0000-7000-8000-000000000201", welcome_prompt: "직접 편집한 프롬프트" }` (no `role_labels` key). Press-ledger CEILING 12 (M1 text-link residue at `WelcomeKickoffStage.tsx`).
+- Capture `CAPTURE_PORT=8645`. PNG counts: 5 light + 5 dark = 10 (`welcome-stage` · `welcome-stage-reduce` · `welcome-arrived` · `welcome-backstop` · `settings-welcome` × two schemes). Two consecutive `capture:design` runs both exit 0 (`/tmp/uxr2b-cap3`, `/tmp/uxr2b-cap4`). All 10 sha256 MATCH. Arrived wait is product `enter-conversation` then one `waitForAnimations` (the R1 self-gap double-wait is gone). Backstop: `page.clock.resume()` + `waitForAnimations` + mouse off viewport (this Playwright has no `clock.uninstall`). Nonempty intro (#2057 N-4): wait for scroller height then one retry of `scrollTimelineRowIntoView`. An intervening run (`/tmp/uxr2b-cap2`) still aborted at that scene after welcome hashes already matched.
 
-| file | sha256 (both full runs) |
+| file | sha256 (cap3 = cap4) |
 |---|---|
-| welcome-stage-light.png | `9d40d3ca2fc08976996499a5db7cdca309028e7397e0a27ddaa05ab94315f871` |
-| welcome-stage-dark.png | `3801a13a8adb4359da4b1e823313a690d05b4b1d5b2485407c6015784bccbbde` |
-| welcome-stage-reduce-light.png | `c0300a9ad01ebb4132100b9d9ecc97ed4f4fa9b69fa78c62d1a658cb3ae678cb` |
-| welcome-stage-reduce-dark.png | `94282793dac09652af3ba47ca4039eee6e16e12192c1208eed90a38df9c4267d` |
-| welcome-backstop-light.png | `f27299cbcaf8b4368a60dfde92d7da2066c785f066a7b6d24cfc63eb34dc6f68` |
-| welcome-backstop-dark.png | `a09b8083a9cb18ece78181ce4bc687534bca0a5370d435014922b14c673b8c9a` |
+| welcome-stage-light.png | `e1e34065b3b857187e24a8ee5c4c02a5e93f2c715bd81d40e7fe931f6c95ec03` |
+| welcome-stage-dark.png | `3106f17d98e0442141325be74ab5073b53df549a82c3ba2e212a92b4807d3450` |
+| welcome-stage-reduce-light.png | `3ed840abd9cc5607b70d03525a371bf52487951a0533d323e824bd1c562c2b68` |
+| welcome-stage-reduce-dark.png | `a89a26a6ba9135814922607b86636b52007cde785e60f08fb61d8bf3d4e3a9b4` |
+| welcome-arrived-light.png | `a228307c252868d9f10c7af74095935e5dede341951e7dde62121853014811c2` |
+| welcome-arrived-dark.png | `dae57c2aa45ba3263fcd684847a4cecd2dab4374237e481c6bf98e5cab0ad1f9` |
+| welcome-backstop-light.png | `12569ae553a280aba95fc72cf7004bc511a554ff1c05bfb9f1c219b636592e18` |
+| welcome-backstop-dark.png | `71f380d929aae14bf8ab051c60b59da6a3f0c22cd407a2962efba5e865c2021c` |
+| settings-welcome-light.png | `ffadc20fede313e46e4f46af069ae7010b4dbffe0f46e1d51609319216073a50` |
+| settings-welcome-dark.png | `91f8b5e5425c987c0f2bc5bad5111e99d1ab56de949390144582208b99c3bb87` |
 
-- `SHELL_GATE_PORT=8647 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` welcome vitest 50 passed, 1 skipped, 0 failed. preflight web 14/14 + core 5/5. lint 0 errors. design-review는 이 워커가 하지 않음.
+- `SHELL_GATE_PORT=8647 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` welcome vitest 59 passed, 4 skipped, 0 failed. preflight web 14/14 + core 5/5. lint 0 errors (15 warnings: 14 pre-existing + harness `only-export-components`). `scripts/verify_merge_tree.sh --base origin/track/uxui` currently FAIL: `origin/track/uxui` moved to `0a87e8c5` (UX-R2a #2088) — add/add on `freshSignup.ts` (`KEY` → `SLOT`) and `STATUS.md`. Seam on this branch left untouched per R2 contract. Worker does not merge. design-review는 이 워커가 하지 않음.
 - 폰 무접촉. runtime-unverified 아님.
 
 ## UX-R1b 드로어·스레드 패널·⌘K enter/exit (#1997, 2026-09-04)
