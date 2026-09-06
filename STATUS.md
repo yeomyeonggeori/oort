@@ -1,18 +1,21 @@
 # oort 진행 현황
 
-## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06)
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R2)
 
-- Dispatcher verbs: `status` · `logs` · `upgrade` · `backup`/`restore` · `member invite` / `member credential`. Reuses `oort_doctor_*` (no copied functions), `scripts/self_host_pg_dump.sh` / `self_host_pg_restore.sh` (no new pg_dump call site), `releases/latest.json` `digest_list` (`^sha256:[0-9a-f]{64}$`, list≠arch). Never `docker volume rm` / `down -v`; failure prints a rollback command and does not run it. Secrets masked by generator secret-shaped keys + Bearer + `postgres://` passwords.
-- Red proofs `scripts/tests/test_oort_day2.sh` **9/9**: upgrade aborts on missing env, bad digest format, arch digest (list≠arch), missing volume (volume not created); restore refuses non-empty before `pg_restore`; logs fixture secrets grep 0; `status --json` schema + `image.state`.
-- Round-trip (published-image, worktree under `$HOME`, `COMPOSE_PROJECT_NAME=oort-sh3b`, not `/tmp`, did not touch `oort-pgdata`). `digest_list`=`sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f`.
-  - Empty up: `scripts/oort doctor --json` `summary={"pass":28,"fail":0,"skip":3,"verdict":"PASS"}` exit 0. Cached image; web `8089`. ~15s.
-  - REST seed **N=5** into `#general`. `count_before_backup=5`. Dump `610877` bytes, sha256 `36c4c5c6d014b1cb6f0ab0407c5c8cda192022ebea6008aabbe600caef42c0f6`, named `oort-pg-v0.1.4-20260906T033948Z-sha256_7426d282…`.
-  - `scripts/oort upgrade --to <same list digest> --yes --no-backup`: pull + `up -d` + `IDEMPOTENCY_OK` + `/healthz` 200. `status --json` `image.state=current` (same digest). `count_after_upgrade=5`.
-  - Doctor after upgrade: `summary={"pass":28,"fail":1,"skip":2,"verdict":"FAIL"}` — only `stack.outbox` (`push_candidate|pending`=5, `broadcast|done`=5). Self-host has no push relay; those pending rows are from the seed, not the image replace. Upgrade therefore exited 1 at the doctor gate.
-  - Restore into fresh empty postgres-only `oort-sh3br` (no migrate, `$HOME` worktree): `count_after_restore=5`. `pg_restore` exit 1 = 103 GRANT errors for `momo_app`/`momo_relay`/`momo_worker` (runtime-roles not run yet — runbook postgres-first path). Table data present. `compose down` without `-v`; volumes `oort-sh3b-pgdata` / `oort-sh3br-pgdata` / `oort-pgdata` still inspectable.
-- Docs: `docs/SELF_HOST.md` When stuck +5 command rows. `docs/SELF_HOST_AGENT.md` / `.ko.md` §4: canon command is `scripts/oort upgrade`; prose kept as explanation. `python3 scripts/check_docs_commands.py` PASS 521 facts / 18 docs.
-- member 실사: `POST /v1/workspaces/{workspaceId}/invites` (`CreateInviteRequest` role/expiresAtMs), `POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials`, handle → id via `GET …/roster?kind=agent` (field `members`). Workspace from JWT claim `ws` or owner login. No invented routes.
-- 계획 이탈: `scripts/tests/test_oort_doctor.sh` stub (`status` exit 2) not edited (allowlist). Doctor PASS after upgrade not reached because of `push_candidate|pending`. postgres-first restore surfaces pg_restore ACL exit 1. runtime-unverified: member invite/credential live e2e.
+- Dispatcher verbs: `status` · `logs` · `upgrade` · `backup`/`restore` · `member invite` / `member credential`. Reuses `oort_doctor_*` (no copied functions), `scripts/self_host_pg_dump.sh` / `self_host_pg_restore.sh` (no new pg_dump/pg_restore call site), `releases/latest.json` `digest_list` (`^sha256:[0-9a-f]{64}$`, list≠arch). Never `docker volume rm` / `down -v`; failure prints a rollback command and does not run it. Secrets masked by generator secret-shaped keys + Bearer + `postgres://` passwords.
+- R2 landing (three planner blockers):
+  - `stack.outbox`: `push_candidate` pending is **non-failing** when no push relay is configured (compose has no `push-relay`/`notifier`; overlay keys `PUSH_RELAY_URL` / `MOMO_PUSH_RELAY_IMAGE` / `MOMO_APNS_KEY_HOST_PATH` unset — `infra/rust/docker-compose.push.yml` / `push-relay.env.example`). Same rows **fail** when a relay is configured. Other kinds unchanged.
+  - `oort restore` runs the stack's `runtime-roles` one-shot (`MOMO_RUNTIME_ROLE_PROVISION=1`) before `scripts/self_host_pg_restore.sh` if `momo_app`/`momo_relay`/`momo_worker` are absent. No hand-written GRANT SQL. No second pg_restore call site.
+  - `scripts/tests/test_oort_doctor.sh` expects live `status` (doctor reuse + `image.state`), not the SH-3a stub. `[oort-doctor-test] PASS: 15 case(s)`.
+- Red proofs `scripts/tests/test_oort_day2.sh` **10/10** (was 9/9): previous 9 plus restore into a roles-less dest runs `runtime-roles` before `pg_restore`.
+- R2 round-trip (published-image, this worktree under `$HOME`, `COMPOSE_PROJECT_NAME=oort-sh3b`, did not touch `oort-pgdata`). `digest_list`=`sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f`. Volume still held **N=5**.
+  - `scripts/oort upgrade --to <same list digest> --yes --no-backup`: `oort upgrade: doctor summary {"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` **exit 0**. `stack.outbox` pass `push_candidate pending=5 non-failing (no push relay configured…)`. `count_after_upgrade=5`.
+  - Backup 610878 bytes, sha256 `fba68f6ab2328d73c97411075357b474f2d256133f78199e968751d0b6fbf947`.
+  - Restore into fresh postgres-only `oort-sh3br2` (roles_before=0): `oort restore: runtime roles absent (0/3); running compose service runtime-roles` then `[migrate] runtime roles provisioned` then `[self-host-restore] restore finished`. **RESTORE_EXIT=0**. `count_after_restore=5`, `roles_after=3`.
+  - Dest app services up: `scripts/oort doctor --json` `summary={"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` exit 0. Both projects `compose down` **without `-v`**.
+- Volumes left for planner reclaim (not `volume rm`'d): `oort-sh3b-pgdata` · `oort-sh3b-drive` · `oort-sh3b_web-static` · `oort-sh3br-pgdata` (R1) · `oort-sh3br2-pgdata` · `oort-sh3br2-drive` · `oort-sh3br2_web-static` · `oort-pgdata` (untouched).
+- Docs: `docs/SELF_HOST.md` When stuck restore row; `docs/SELF_HOST_AGENT.md` / `.ko.md` §4 restore + §막히면 `stack.outbox`. `python3 scripts/check_docs_commands.py` PASS 522 facts / 18 docs.
+- 계획 이탈: 없음 (R1 blockers closed). runtime-unverified: member invite/credential live e2e. `scripts/local_gate.sh` does not yet list `scripts/oort` / `test_oort_day2.sh` (policy file — planner files that).
 
 ## SH-4b README paste block + SELF_HOST·FIRST_DAY 영문 정본 (#2105, 2026-09-06)
 

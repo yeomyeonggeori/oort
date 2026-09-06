@@ -320,9 +320,8 @@ EOF
 pass "other kinds keep failing when not done"
 
 # Env/compose facts: overlay keys from infra/rust/push-relay.env.example
-OORT_DOCTOR_ENV="$VALID"
-OORT_DOCTOR_ENV_RAW="$VALID"
 OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/env-norm.XXXXXX")"
+export OORT_DOCTOR_ENV_NORM
 oort_doctor_load_env "$VALID"
 if oort_doctor_push_relay_configured ""; then
   fail "valid fixture must not look like a configured push relay"
@@ -334,7 +333,6 @@ cp "$VALID" "$RELAY_ENV"
 printf '\nPUSH_RELAY_URL=http://push-relay:28195/v1/push\n' >>"$RELAY_ENV"
 chmod 600 "$RELAY_ENV"
 oort_doctor_load_env "$RELAY_ENV"
-OORT_DOCTOR_ENV_RAW="$RELAY_ENV"
 if ! oort_doctor_push_relay_configured ""; then
   fail "PUSH_RELAY_URL must count as push relay configured"
 fi
