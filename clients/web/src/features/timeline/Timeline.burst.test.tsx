@@ -4,7 +4,7 @@
 // product plays 1 of 3 because virtuoso mounts appended rows in a later
 // commit than the state update; a test that skips that commit is not evidence.
 
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -146,28 +146,6 @@ function scrollerScrollHeight(target: HTMLElement): number {
     return VIEWPORT_HEIGHT;
   }
   return scrollerHeight(target);
-}
-
-function detectChromium(): { ok: true } | { ok: false; path: string } {
-  try {
-    const { chromium } = require_("playwright") as typeof import("playwright");
-    const exe = chromium.executablePath();
-    if (!existsSync(exe)) return { ok: false, path: exe };
-    return { ok: true };
-  } catch (err) {
-    return {
-      ok: false,
-      path: err instanceof Error ? err.message : String(err),
-    };
-  }
-}
-
-const chromiumAvailability = detectChromium();
-const chromiumAvailable = chromiumAvailability.ok;
-if (!chromiumAvailable) {
-  console.warn(
-    `Timeline burst animation probe skipped: Playwright Chromium executable missing (${chromiumAvailability.path})`
-  );
 }
 
 beforeAll(() => {
@@ -350,6 +328,7 @@ afterEach(() => {
   restPage.messages = [];
   rafQueue.length = 0;
   probe.isPlayEntrance = null;
+  document.querySelectorAll("style[data-arrival-css]").forEach((node) => node.remove());
 });
 
 function member(): RosterMember {
@@ -503,6 +482,15 @@ function settledAmong(ids: readonly string[]): HTMLElement[] {
   return rowsFor(ids).filter((node) => !isPlayingRow(node));
 }
 
+function isClassAndStyleSettled(node: HTMLElement): boolean {
+  if (node.classList.contains(ENTER_CONVERSATION_CLASS)) return false;
+  const name = window.getComputedStyle(node).animationName;
+  return (
+    !name.includes(ENTER_CONVERSATION_ANIMATION_NAME) &&
+    (name === "none" || name === "" || name === "none, none")
+  );
+}
+
 async function waitUntilRowsMounted(ids: readonly string[]): Promise<HTMLElement[]> {
   for (let step = 0; step < 64; step += 1) {
     await flushVirtuosoMount();
@@ -530,65 +518,6 @@ async function waitUntilPlayingCount(
   );
 }
 
-function scrollerOf(): HTMLElement {
-  const node =
-    host?.querySelector("[data-virtuoso-scroller]") ??
-    host?.querySelector('[data-testid="timeline-virtuoso"]');
-  if (!(node instanceof HTMLElement)) throw new Error("missing timeline scroller");
-  return node;
-}
-
-async function pinToBottom(): Promise<void> {
-  const scroller = scrollerOf();
-  await act(async () => {
-    scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-  await flushVirtuosoMount();
-  await settle();
-}
-
-async function leaveBottom(): Promise<void> {
-  const scroller = scrollerOf();
-  for (let step = 0; step < 64; step += 1) {
-    await act(async () => {
-      scroller.scrollTop = 0;
-      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await settle();
-    await flushVirtuosoMount();
-    await settle();
-    if (scroller.scrollTop !== 0) {
-      await act(async () => {
-        scroller.scrollTop = 0;
-        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-      });
-      await settle();
-    }
-    // Product signal (same as mountBurst): jump-latest is present iff the
-    // reader has left the bottom. Do not require a stubbed head index.
-    if (host?.querySelector("[data-testid='jump-latest']")) return;
-  }
-  throw new Error("reader never left the bottom (jump-latest missing)");
-}
-
-async function jumpToLatest(): Promise<void> {
-  const button = host?.querySelector("[data-testid='jump-latest']");
-  if (!(button instanceof HTMLElement)) throw new Error("missing jump-latest");
-  await act(async () => {
-    button.click();
-  });
-  for (let step = 0; step < 64; step += 1) {
-    await pinToBottom();
-    if (!host?.querySelector("[data-testid='jump-latest']")) return;
-  }
-  // Measured (two attempts): after product `scrollToIndex({ index: "LAST" })`
-  // this jsdom harness never fires atBottom=true, so the pill stays mounted
-  // through 64 pinToBottom loops and through rAF timestamps 0..63×16.
-  // pinToBottom still mounts the tail. The case asserts leftover plays, not
-  // pill absence. remaining <= AT_BOTTOM_SLACK_PX (64) is not used.
-}
-
 async function loadStylesheet(id: string, base: string) {
   if (id === "tailwindcss" || id.endsWith("tailwindcss/index.css")) {
     const path = require_.resolve("tailwindcss/index.css");
@@ -608,6 +537,14 @@ async function buildArrivalCss(): Promise<string> {
   return compiler.build([ENTER_CONVERSATION_CLASS]);
 }
 
+async function injectArrivalCss(): Promise<void> {
+  const css = await buildArrivalCss();
+  const style = document.createElement("style");
+  style.setAttribute("data-arrival-css", "1");
+  style.textContent = css;
+  document.head.append(style);
+}
+
 describe("virtualized Timeline same-tick live burst", () => {
   it("같은 틱 라이브 3건은 virtuoso 가 마운트한 행 3개가 모두 재생한다", async () => {
     await mountBurst();
@@ -619,77 +556,15 @@ describe("virtualized Timeline same-tick live burst", () => {
     expect(host?.querySelector("[data-testid='timeline-virtuoso']")).not.toBeNull();
   });
 
-  it.skipIf(!chromiumAvailable)(
-    "브라우저가 motion-enter-conversation 을 3회 시작한다 (virtuoso 경로의 스냅샷)",
-    async () => {
-      restPage.messages = [1, 2, 3, 4, 5, 6, 7, 8].map(restMessage);
-      host = document.createElement("div");
-      document.body.append(host);
-      mountedRoot = createRoot(host);
-      const client = new QueryClient({
-        defaultOptions: { queries: { retry: false } },
-      });
-      await act(async () => {
-        mountedRoot?.render(wrap(createElement(BurstTimeline), client));
-      });
-      await settle();
-      await flushVirtuosoMount();
-      await pinToBottom();
-      await act(async () => {
-        rail.handlers?.onSubscribed({ recovered: false });
-      });
-      await act(async () => {
-        rail.handlers?.onMessage(
-          frame(BURST_IDS[0], 21, "같은 틱 첫 번째 arrival 도착")
-        );
-        rail.handlers?.onMessage(
-          frame(BURST_IDS[1], 22, "같은 틱 두 번째 arrival 도착")
-        );
-        rail.handlers?.onMessage(
-          frame(BURST_IDS[2], 23, "같은 틱 세 번째 arrival 도착")
-        );
-      });
-      await waitUntilRowsMounted(BURST_IDS);
-      const css = await buildArrivalCss();
-      const markup = host.innerHTML;
-      let chromium: typeof import("playwright").chromium;
-      try {
-        ({ chromium } = await import("playwright"));
-      } catch (err) {
-        throw new Error(
-          `playwright import failed after skipIf: ${err instanceof Error ? err.message : err}`
-        );
-      }
-      const browser = await chromium.launch();
-      try {
-        const page = await browser.newPage();
-        await page.emulateMedia({ reducedMotion: "no-preference" });
-        await page.setContent(
-          `<!doctype html><html><head><style>${css}</style></head><body>${markup}</body></html>`
-        );
-        const measured = await page.evaluate((animationName: string) => {
-          const rows = [...document.querySelectorAll('[data-testid="timeline-message"]')].filter(
-            (el) => (el.textContent ?? "").includes("arrival")
-          );
-          const animations = document.getAnimations().filter((animation) => {
-            const named = animation as unknown as { animationName?: string };
-            return named.animationName === animationName;
-          });
-          return {
-            arrivalRows: rows.length,
-            animated: animations.length,
-          };
-        }, ENTER_CONVERSATION_ANIMATION_NAME);
-        expect(measured.arrivalRows).toBe(3);
-        expect(measured.animated).toBe(3);
-      } finally {
-        await browser.close();
-      }
-    },
-    20_000
-  );
-
   async function mountBurst(history = 8): Promise<QueryClient> {
+    // Harness controls: REST history length, live frames on the fake rail,
+    // rAF flush so virtuoso can commit in jsdom.
+    // Harness observes: mounted rows, enter-conversation class / computed
+    // animation-name, playing count.
+    // Harness does not write scrollTop after the first paint. Initial
+    // atBottom is the product default (useState(true) + alignToBottom).
+    // jsdom never raises atBottom after scrollToIndex("LAST"), so
+    // scroll-up / jump lives in Timeline.burst.chromium.test.ts.
     restPage.messages = Array.from({ length: history }, (_, i) => restMessage(i + 1));
     host = document.createElement("div");
     document.body.append(host);
@@ -707,11 +582,7 @@ describe("virtualized Timeline same-tick live burst", () => {
     });
     await settle();
     await flushVirtuosoMount();
-    for (let step = 0; step < 64; step += 1) {
-      await pinToBottom();
-      if (!host?.querySelector("[data-testid='jump-latest']")) return client;
-    }
-    throw new Error("reader never sat at the bottom after mount");
+    return client;
   }
 
   async function deliverLive(ids: readonly string[], seqStart: number, body: string): Promise<void> {
@@ -723,6 +594,7 @@ describe("virtualized Timeline same-tick live burst", () => {
   }
 
   it("바닥 같은 틱 10건은 재생 3 · 정착 7", async () => {
+    await injectArrivalCss();
     await mountBurst();
     const ids = arrivalIds(10);
     await deliverLive(ids, 30, "바닥 동시 arrival");
@@ -733,15 +605,21 @@ describe("virtualized Timeline same-tick live burst", () => {
     const unmounted = ids.length - mounted.length;
     expect(mounted.length).toBe(10);
     expect(plays.length).toBe(3);
-    expect(mountedSettled.length).toBe(7);
     expect(unmounted).toBe(0);
     const newest = ids.slice(-3);
     const older = ids.slice(0, ids.length - 3);
     expect(playingAmong(newest).length).toBe(3);
     expect(playingAmong(older).length).toBe(0);
+    for (const row of mountedSettled) {
+      expect(isClassAndStyleSettled(row)).toBe(true);
+    }
+    console.info(
+      `10-case plays=${plays.length} mountedSettled=${mountedSettled.length} unmounted=${unmounted} mounted=${mounted.length}`
+    );
   });
 
   it("바닥 같은 틱 50건은 재생 3 · 마운트된 나머지만 정착으로 센다", async () => {
+    await injectArrivalCss();
     await mountBurst();
     const ids = arrivalIds(50);
     await deliverLive(ids, 40, "바닥 대량 arrival");
@@ -751,30 +629,15 @@ describe("virtualized Timeline same-tick live burst", () => {
     const plays = playingAmong(ids);
     const mountedSettled = settledAmong(ids);
     const unmounted = ids.length - mounted.length;
-    // H-2: the harness mounts a window, not all 50. Report the three
-    // numbers; do not claim 47 settled.
     console.info(
       `50-case plays=${plays.length} mountedSettled=${mountedSettled.length} unmounted=${unmounted} mounted=${mounted.length}`
     );
     expect(plays.length).toBe(3);
-    expect(mountedSettled.length).toBe(mounted.length - 3);
-    expect(unmounted).toBe(50 - mounted.length);
     expect(playingAmong(newest).length).toBe(3);
     expect(mounted.length).toBeGreaterThanOrEqual(3);
-  });
-
-  it("스크롤업 백로그 50건은 재생 0, 바닥 점프는 정확히 1", async () => {
-    await mountBurst(40);
-    await leaveBottom();
-    const ids = arrivalIds(50, "0199dddd-0000-7000-8000-0000000007");
-    await deliverLive(ids, 200, "스크롤업 백로그 arrival");
-    await settle();
-    expect(playingAmong(ids).length).toBe(0);
-    expect(host?.querySelector("[data-testid='jump-latest']")).not.toBeNull();
-    await jumpToLatest();
-    await waitUntilPlayingCount(ids, 1);
-    expect(playingAmong(ids).length).toBe(1);
-    expect(playingAmong([ids[ids.length - 1]!]).length).toBe(1);
+    for (const row of mountedSettled) {
+      expect(isClassAndStyleSettled(row)).toBe(true);
+    }
   });
 
   it("isPlayEntrance 읽기는 대소문자를 접는다", async () => {
