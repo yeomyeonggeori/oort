@@ -31,7 +31,8 @@ type ClockMod = {
     locator: { click: (...args: unknown[]) => Promise<unknown> },
     options?: unknown
   ) => Promise<unknown>;
-  wrapPageTimeGateClicks: (page: Record<string, unknown>) => unknown;
+  wrapPageTimeGateClicks: (page: Record<string, unknown>) => Promise<unknown>;
+  sceneNameFromShotPath: (path: unknown) => string;
 };
 
 function loadClock(): ClockMod {
@@ -55,6 +56,7 @@ return {
   testIdFromSelector,
   sceneClick,
   wrapPageTimeGateClicks,
+  sceneNameFromShotPath,
 };`
   )() as ClockMod;
 }
@@ -69,6 +71,7 @@ const {
   testIdFromSelector,
   sceneClick,
   wrapPageTimeGateClicks,
+  sceneNameFromShotPath,
 } = clock;
 
 function stripComments(source: string): string {
@@ -91,6 +94,64 @@ function walkTsFiles(dir: string, into: string[] = []): string[] {
     into.push(path);
   }
   return into;
+}
+
+function confirmTestIdsInGuardFile(source: string): string[] {
+  const file = ts.createSourceFile(
+    "file.tsx",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  const ids: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isJsxAttribute(node) && node.name.getText() === "data-testid") {
+      const init = node.initializer;
+      if (init && ts.isStringLiteral(init) && init.text.endsWith("-confirm")) {
+        ids.push(init.text);
+      }
+      if (
+        init &&
+        ts.isJsxExpression(init) &&
+        init.expression &&
+        ts.isStringLiteral(init.expression) &&
+        init.expression.text.endsWith("-confirm")
+      ) {
+        ids.push(init.expression.text);
+      }
+    }
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "getByTestId" &&
+      node.arguments[0] &&
+      ts.isStringLiteral(node.arguments[0]) &&
+      node.arguments[0].text.endsWith("-confirm")
+    ) {
+      ids.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return ids;
+}
+
+function fileUsesGuardMs(source: string, path: string): boolean {
+  const file = ts.createSourceFile(
+    path,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TSX
+  );
+  let uses = false;
+  const visit = (node: ts.Node): void => {
+    if (ts.isIdentifier(node) && /_GUARD_MS$/.test(node.text)) uses = true;
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return uses;
 }
 
 function jsxAttrStringLiterals(
@@ -189,45 +250,28 @@ describe("capture clock scene registry", () => {
 
   it("every *_GUARD_MS usage site in clients/web/src registers its control", () => {
     const files = walkTsFiles(WEB_SRC);
-    const guardFiles: string[] = [];
-    for (const path of files) {
-      const src = readFileSync(path, "utf8");
-      const file = ts.createSourceFile(
-        path,
-        src,
-        ts.ScriptTarget.Latest,
-        true,
-        ts.ScriptKind.TSX
-      );
-      let usesGuard = false;
-      const visit = (node: ts.Node): void => {
-        if (ts.isIdentifier(node) && /_GUARD_MS$/.test(node.text)) {
-          usesGuard = true;
-        }
-        ts.forEachChild(node, visit);
-      };
-      visit(file);
-      if (usesGuard) guardFiles.push(path);
-    }
-    expect(guardFiles.some((path) => path.endsWith("ApprovalActions.tsx"))).toBe(
-      true
-    );
+    const usageIds = new Set<string>();
     const prefixes = new Set<string>(["approval"]);
     for (const path of files) {
       const src = readFileSync(path, "utf8");
-      if (!src.includes("ApprovalActions")) continue;
-      for (const prefix of jsxAttrStringLiterals(
-        src,
-        "ApprovalActions",
-        "testIdPrefix"
-      )) {
-        prefixes.add(prefix);
+      if (src.includes("ApprovalActions")) {
+        for (const prefix of jsxAttrStringLiterals(
+          src,
+          "ApprovalActions",
+          "testIdPrefix"
+        )) {
+          prefixes.add(prefix);
+        }
+      }
+      if (!fileUsesGuardMs(src, path)) continue;
+      for (const id of confirmTestIdsInGuardFile(src)) {
+        usageIds.add(id);
       }
     }
-    const expected = [...prefixes].map((prefix) => `${prefix}-confirm`);
-    for (const control of expected) {
-      expect(PRODUCT_CONTROLS).toContain(control);
+    for (const prefix of prefixes) {
+      usageIds.add(`${prefix}-confirm`);
     }
+    expect([...usageIds].sort()).toEqual([...PRODUCT_CONTROLS].sort());
   });
 
   it("fixed-clock scene clicking inbox-approval-confirm aborts naming CONFIRM_GUARD_MS", () => {
@@ -248,7 +292,7 @@ describe("capture clock scene registry", () => {
   });
 
   it("page.locator data-testid click aborts in a fixed-clock scene", async () => {
-    setActiveCaptureScene("default");
+    setActiveCaptureScene("approvals-confirm");
     expect(testIdFromSelector("[data-testid=inbox-approval-confirm]")).toBe(
       "inbox-approval-confirm"
     );
@@ -260,17 +304,17 @@ describe("capture clock scene registry", () => {
       getByText: () => makeLocator("text"),
       getByLabel: () => makeLocator("label"),
     };
-    wrapPageTimeGateClicks(page);
+    await wrapPageTimeGateClicks(page);
     await expect(
       (page.locator("[data-testid=inbox-approval-confirm]") as { click: () => Promise<unknown> }).click()
     ).rejects.toThrow(
-      /CAPTURE ABORT: scene "default" is clock:fixed; time-gated control \[inbox-approval-confirm\] cannot open CONFIRM_GUARD_MS/
+      /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[inbox-approval-confirm\] cannot open CONFIRM_GUARD_MS/
     );
     expect(clicks).toEqual([]);
     await expect(
       sceneClick(page, page.locator("[data-testid=inbox-approval-confirm]"))
     ).rejects.toThrow(
-      /CAPTURE ABORT: scene "default" is clock:fixed; time-gated control \[inbox-approval-confirm\] cannot open CONFIRM_GUARD_MS/
+      /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[inbox-approval-confirm\] cannot open CONFIRM_GUARD_MS/
     );
     setActiveCaptureScene("welcome-backstop");
     await (page.locator("[data-testid=inbox-approval-confirm]") as { click: () => Promise<unknown> }).click();
@@ -283,11 +327,48 @@ describe("capture clock scene registry", () => {
     expect(body).toMatch(/sceneClick/);
     expect(body).toMatch(/wrapPageTimeGateClicks/);
     expect(body).toMatch(/setActiveCaptureScene\("welcome-backstop"\)/);
+    expect(body).toMatch(/setActiveCaptureScene\(sceneNameFromShotPath/);
     expect(body).toMatch(/pinPageWallClock/);
+    expect(sceneNameFromShotPath("/tmp/approvals-confirm-light.png")).toBe(
+      "approvals-confirm"
+    );
+    expect(sceneNameFromShotPath("/tmp/welcome-backstop-dark.png")).toBe(
+      "welcome-backstop"
+    );
   });
 
-  it("capture-screens scene code has no raw .click(", () => {
+  it("capture-screens scene code has no raw click-equivalents", () => {
     const body = stripComments(CAPTURE_SRC);
     expect(body.match(/\.click\s*\(/g)).toBeNull();
+    expect(body.match(/\.mouse\.down\s*\(/g)).toBeNull();
+    expect(body.match(/\.mouse\.up\s*\(/g)).toBeNull();
+    expect(body.match(/keyboard\.press\s*\(\s*["'](Enter| |Space)["']/g)).toBeNull();
+    expect(body.match(/new MouseEvent/g)).toBeNull();
+  });
+
+  it("raw keyboard Enter on a focused time-gated control aborts in a fixed scene", async () => {
+    setActiveCaptureScene("approvals-confirm");
+    const presses: string[] = [];
+    const page = {
+      evaluate: async () => "inbox-approval-confirm",
+      keyboard: {
+        press: async (key: string) => {
+          presses.push(key);
+        },
+      },
+      getByTestId: (testId: string) => makeLocator(`[data-testid=${testId}]`),
+      locator: (selector: string) => makeLocator(selector),
+      getByRole: () => makeLocator("role"),
+      getByText: () => makeLocator("text"),
+      getByLabel: () => makeLocator("label"),
+    };
+    await wrapPageTimeGateClicks(page);
+    await expect(
+      (page.keyboard.press as (key: string) => Promise<unknown>)("Enter")
+    ).rejects.toThrow(
+      /CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control \[inbox-approval-confirm\] cannot open CONFIRM_GUARD_MS/
+    );
+    expect(presses).toEqual([]);
+    setActiveCaptureScene("default");
   });
 });
