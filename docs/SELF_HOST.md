@@ -1,123 +1,138 @@
-# oort 셀프호스트 — clone에서 로그인까지 (SELF_HOST.md)
+# oort self-host — clone to sign-in (SELF_HOST.md)
 
-> **이 문서 하나로 끝난다.** 끝까지 따르면 당신의 머신에서 돌아가는 oort에
-> **브라우저로 로그인해 메시지를 주고받는다.**
-> 처음에 이미지 공급 방식만 하나 고른다: 현재 checkout을 짓는
-> **로컬 빌드**, 또는 공개된 이미지를 불변 digest로 받는 **digest pull**. 둘은
-> 같은 Rust 스택을 띄우며 스크립트가 두 경로를 섞지 못하게 막는다.
-> 이 quickstart의 PostgreSQL named volume은 **production backup이 아니다**.
-> 공개 운영·업그레이드는 별도 pgBackRest/WAL/PITR 절차와 fresh signed evidence를
-> 요구한다([운영 런북](runbooks/pgbackrest-pitr.md)).
-> 그록봇 VM이나 개인 인스턴스에서 **데이터를 파일로 가져가려면**
+> **English is the canon.** Korean: [`SELF_HOST.ko.md`](SELF_HOST.ko.md).
+>
+> **This document is enough.** Follow it to the end and you sign in, in a
+> browser, to oort running on your machine, and you send a message.
+> At the start you pick one image source: a **local build** of the current
+> checkout, or a **digest pull** of the published image pinned to an
+> immutable digest. Both bring up the same Rust stack; the script refuses to
+> mix the two paths.
+> This quickstart's PostgreSQL named volume is **not a production backup**.
+> Public operation and upgrades require a separate pgBackRest/WAL/PITR
+> procedure and fresh signed evidence
+> ([ops runbook](runbooks/pgbackrest-pitr.md)).
+> To take data as a file from a Grok Bot VM or a personal instance, use
 > [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
-> (`scripts/self_host_pg_dump.sh`) — PITR의 대체재가 아니다.
-> 첨부 바이트는 Postgres 밖에 있다. 덤프와 **보관소 볼륨**(`DRIVE_VOLUME_NAME`,
-> 기본 `oort-drive`)을 같이 가져가라(아래 [첨부 보관소](#첨부-보관소)).
+> (`scripts/self_host_pg_dump.sh`) — it is not a substitute for PITR.
+> Attachment bytes live outside Postgres. Take the dump **and** the archive
+> volume (`DRIVE_VOLUME_NAME`, default `oort-drive`) together (see
+> [Attachment archive](#attachment-archive) below).
 >
-> 시간은 약속하지 않는다. 로컬 모드는 이미지를 처음부터 굽고,
-> digest 모드는 레지스트리에서 받는다. 약속하는 것은 **결과**다: 1~4를
-> 마치면 화면이 있고, [5](#5-에이전트가-대답하게-하기-ai-연결)를 마치면
-> 에이전트가 대답한다. Claude Code·CI 같은 외부 도구는 사람 로그인 토큰이
-> 아니라 [6](#6-외부-도구-연동-claude-code--ci)의 에이전트 자격을 쓴다.
+> Time is not a promise. Local mode bakes the image from scratch; digest mode
+> fetches it from the registry. What this document promises is the
+> **result**: after 1–4 the screen is there, and after
+> [5](#5-make-an-agent-answer-ai-link) an agent answers. External tools such
+> as Claude Code or CI use agent credentials from
+> [6](#6-external-tools-claude-code--ci), not a human login token.
 >
-> 근거: 2026-08-10 재실측(#1229). 깨끗한 클론에서 이 문서를 그대로 밟아
-> 브라우저 왕복까지 갔고, **문서에 없는 임기응변은 0회**였다. 그 전 측정(같은 날,
-> `docs/planning/research/2026-08-10-buzz-audit-C.md`)은 6회였다.
+> Evidence: re-measured 2026-08-10 (#1229). A clean clone, this document
+> followed as written, reached a browser round-trip, and **ad-lib steps not
+> in the document: 0**. The prior measurement that same day
+> (`docs/planning/research/2026-08-10-buzz-audit-C.md`) was 6.
 >
-> 로그인 다음 — 워크스페이스 만들기, 웹 GUI 초대, 둘째 사용자 합류(웹 +
-> `oort://join`), AI 연결 GUI, 첫 멘션 — 은
-> [`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) (#1608). 이 문서는
-> clone→로그인(+키 둘) 정본이다. 그록봇이 사용자 본인 VM에 설치하는
-> 경로(본인 계정 전용)는 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)다.
+> After sign-in — create a workspace, issue a web GUI invite, join a second
+> user (web + `oort://join`), AI link GUI, first mention — is
+> [`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) (#1608). This document
+> is the clone→sign-in (+ the two keys) canon. The path where an agent
+> installs on the user's own VM (that user's account only) is
+> [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md).
 
 ---
 
-## 전제
+## Prerequisites
 
-| 필요한 것 | 확인 |
+| You need | Check |
 |---|---|
 | Docker Engine + Compose v2 | `docker compose version` |
 | git | `git --version` |
 
-**그 외에는 없다.** Rust도, Node도, `psql`도 설치하지 않는다 — 서버·릴레이·워커·
-마이그레이션 러너·웹 화면이 전부 한 이미지 안에 있고, PostgreSQL과 Centrifugo는
-compose가 가져온다. 도메인·TLS 인증서·외부 API 키도 이 경로에는 필요 없다
-(도메인을 붙이는 것은 [§운영](#운영-도메인과-tls를-붙일-때)이고, 별도 절차다).
+**Nothing else.** Do not install Rust, Node, or `psql` — the server, relay,
+worker, migration runner, and web UI all live in one image, and compose
+brings PostgreSQL and Centrifugo. No domain, TLS certificate, or external
+API key is required on this path (attaching a domain is
+[§Open on a public origin](#open-on-a-public-origin), a separate
+procedure).
 
 ---
 
-## 1. 클론
+## 1. Clone
 
 ```sh
 git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
 ```
 
-> 저장소는 현재 public이라 GitHub 로그인이나 개인 access token 없이 clone된다.
-> 공개 컨테이너의 첫 발행은 별도 owner 승인 게이트 뒤에 진행한다.
+> The repository is public today, so clone needs neither a GitHub login nor
+> a personal access token. First publication of the public container still
+> sits behind a separate owner-approval gate.
 
-## 2. 이미지 모드 고르고 env 만들기
+## 2. Choose an image mode and write env
 
-다음 둘 중 **하나만** 실행한다.
+Run **exactly one** of the following.
 
-### A. 로컬 빌드
+### A. Local build
 
 ```sh
 scripts/self_host_env.sh --local-build
 ```
 
-현재 checkout의 `server-rust/Dockerfile`로 `oort:local`을 만든다. Rust·Node는
-호스트에 설치할 필요가 없고 Docker 빌드 스테이지 안에서만 쓴다.
+This builds `oort:local` from this checkout's `server-rust/Dockerfile`.
+Rust and Node do not need to be installed on the host; they run only inside
+the Docker build stages.
 
-### B. 공개 digest pull
+### B. Published digest pull
 
-최신 불변 digest는 커밋된
-[`releases/latest.json`](../releases/latest.json)이 정본이고, GitHub
-[Releases](https://github.com/yeomyeonggeori/oort/releases)가 그 출처다.
-`latest`나 `sha-<commit>` 태그는 받지 않는다. **반드시 불변 digest로 pin된
-`ghcr.io/yeomyeonggeori/oort`만** 받으며(`sha256:` 접두 + 64 hex), 형식이
-틀리면 env를 만들기 전에 실패한다. 매니페스트가 없으면 A를 쓴다.
+The latest immutable digest is the committed
+[`releases/latest.json`](../releases/latest.json); GitHub
+[Releases](https://github.com/yeomyeonggeori/oort/releases) is the source.
+Do not take a `latest` or `sha-<commit>` tag. **Receive only**
+`ghcr.io/yeomyeonggeori/oort` pinned to an immutable digest (`sha256:`
+prefix + 64 hex); a bad shape fails before env is written. If the manifest
+is missing, use A.
 
-앱 list digest는 매니페스트에서 읽는다 — 산문에 hex를 다시 적지 않는다.
+Read the app list digest from the manifest — do not write hex into prose
+again.
 
 ```sh
 IMAGE_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 scripts/self_host_env.sh --published-image "$IMAGE_REF"
 ```
 
-checkout이 없으면 raw URL:
+Without a checkout, the raw URL:
 
 ```sh
 IMAGE_REF="$(curl -fsSL https://raw.githubusercontent.com/yeomyeonggeori/oort/main/releases/latest.json | jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"')"
 ```
 
-같은 발행의 postgres list digest는 매니페스트 `images.postgres`다.
-`--published-image`에는 앱 행만 넣는다. postgres 행은 Release 표와
-운영/PITR 경로용이며, 이 문서 compose의 postgres 서비스가 소비하는 값이
-아니다.
+The postgres list digest for the same publication is the manifest
+`images.postgres` row. Pass only the app row to `--published-image`. The
+postgres row is for the Release table and the ops/PITR path; it is not a
+value this document's compose postgres service consumes.
 
 ```sh
 jq -r '
-  "앱\t\(.images.app.ref)@\(.images.app.digest_list)",
+  "app\t\(.images.app.ref)@\(.images.app.digest_list)",
   "PostgreSQL 18 + pgBackRest\t\(.images.postgres.ref)@\(.images.postgres.digest_list)"
 ' releases/latest.json
 ```
 
-공개 발행은 `linux/amd64`+`linux/arm64` **manifest list**다. 매니페스트
-`digest_list`가 그 list digest이며, 한 pin으로 두 아키텍처를 받는다. Apple
-Silicon과 ARM 서버는 이 pin을 native pull한다. 첫 공개 발행
-v0.1.0(`main=45a154d2`)은 amd64 단일였고, 그 digest의 Apple Silicon
-native pull은 불가했다(실측 2026-08-21). 운영자 pin은 list digest다.
+A public publication is a `linux/amd64`+`linux/arm64` **manifest list**.
+The manifest `digest_list` is that list digest; one pin covers both
+architectures. Apple Silicon and ARM servers native-pull this pin. The
+first public publication v0.1.0 (`main=45a154d2`) was amd64-only, and a
+native Apple Silicon pull of that digest was impossible (measured
+2026-08-21). The operator pin is the list digest.
 
-발행 workflow는 `main` ref의 수동 실행만 허용하고, GitHub `release` Environment의
-owner 승인 뒤 **아키별 digest와 manifest list digest**에 SLSA v1 provenance를 OCI
-referrer로 붙인다. 2026-08-12
-attended 설정/readback에서 required reviewer는 `kwakseongjae`(user id `87296259`),
-`prevent_self_review=false`, deployment branch policy는 custom `main` branch 하나임을
-확인했다. `sha-*`
-태그는 커밋을 찾기 위한 이동 가능한 표식일 뿐 불변 신원이 아니다. 운영자
-pin은 list digest다. digest 자체는
-다음처럼 검증한다(`gh`가 설치된 운영자용 선택 단계):
+The publish workflow allows only a manual run of the `main` ref, and after
+owner approval of the GitHub `release` Environment it attaches SLSA v1
+provenance as OCI referrers on **per-arch digests and the manifest list
+digest**. An attended setup/readback on 2026-08-12 confirmed the required
+reviewer is `kwakseongjae` (user id `87296259`), `prevent_self_review=false`,
+and the deployment branch policy is a single custom `main` branch. `sha-*`
+tags are movable markers for finding a commit, not an immutable identity.
+The operator pin is the list digest. Verify the digest itself like this
+(optional step for operators who have `gh`):
 
 ```sh
 gh attestation verify "oci://$IMAGE_REF" \
@@ -125,28 +140,34 @@ gh attestation verify "oci://$IMAGE_REF" \
   --predicate-type https://slsa.dev/provenance/v1
 ```
 
-첫 multi-arch 발행과 공개 GHCR 왕복(발행 · 익명 inspect · attestation
-2본)은 **v0.1.1 list digest**에 대해 실측 완료다. 좌표: Release
+The first multi-arch publication and the public GHCR round-trip (publish ·
+anonymous inspect · two attestations) is measured complete against the
+**v0.1.1 list digest**. Coordinates: Release
 [v0.1.1](https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.1),
-빌드 커밋 `main=1b79bc65`, 익명 inspect PASS, amd64+arm64 포함,
-attestation 2본 PASS(오케스트레이터 2026-08-23). (구 `SELF_HOST.md:88`
-`runtime-unverified` 문면.) 절차 정본은 [`RELEASING.md`](RELEASING.md).
-이 문서가 릴리스 권한을 주지는 않는다.
+build commit `main=1b79bc65`, anonymous inspect PASS, amd64+arm64 included,
+two attestations PASS (orchestrator 2026-08-23). (Former `SELF_HOST.md:88`
+`runtime-unverified` wording.) Procedure canon:
+[`RELEASING.md`](RELEASING.md). This document does not grant release
+authority.
 
-`infra/rust/local.secrets.env` 를 만든다 — **채워 넣을 자리가 하나도 없는** 파일이다.
-시크릿 아홉 개를 `openssl` 로 만들고, 서로 같아야 하는 값들(런타임 롤 비밀번호와
-접속 URL 안의 비밀번호)을 같게 쓰고, 포트가 이미 쓰이고 있으면 비어 있는 다음
-포트를 골라 알려 준다. 그리고 **첫 로그인 계정**과 선택한
-`MOMO_SELF_HOST_MODE`를 함께 기록한다.
+It writes `infra/rust/local.secrets.env` — a file with **no blanks to fill
+in**. It creates nine secrets with `openssl`, writes values that must match
+(runtime-role passwords and the passwords inside connection URLs) the same,
+and if a port is already taken it picks the next free one and tells you.
+It also records the **first login account** and the chosen
+`MOMO_SELF_HOST_MODE`.
 
-환경변수에서 파일로 들어가는 모든 값은 한 줄 scalar인지 먼저 검사한다. LF/CR을
-포함한 값, 중복 env 키, 1..65535 밖이거나 ASCII 10진수가 아닌 포트는 파일을 쓰거나
-셸 산술을 하기 전에 실패한다. 이메일과 비밀번호는 Compose dotenv가 보간·인용·주석으로
-재해석하지 않는 literal 형식만 받으며 비밀번호는 12..128자다. 기존 env도 같은 검사를
-다시 통과해야 한다. POSIX argv/env 자체가 NUL을 표현할 수 없다는 경계도 스크립트 주석과
-계약 테스트에 고정돼 있다. 오류와 stdout에는 비밀번호를 출력하지 않는다.
+Every value that goes from environment to file is first checked as a
+one-line scalar. A value containing LF/CR, a duplicate env key, or a port
+outside 1..65535 or not ASCII decimal fails before the file is written or
+any shell arithmetic runs. Email and password accept only a literal form
+that Compose dotenv will not re-interpret as interpolation, quoting, or
+comment, and the password is 12..128 characters. An existing env must pass
+the same checks again. The boundary that POSIX argv/env cannot express NUL
+is pinned in the script comments and the contract tests. Errors and stdout
+never print the password.
 
-끝에 이런 것이 찍힌다 — 다음 두 단계가 전부 여기 있다:
+At the end it prints something like this — the next two steps are all here:
 
 ```
 [self-host] infra/rust/local.secrets.env 를 만들었다 (권한 600).
@@ -165,94 +186,107 @@ attestation 2본 PASS(오케스트레이터 2026-08-23). (구 `SELF_HOST.md:88`
   password infra/rust/local.secrets.env 의 MOMO_INITIAL_OWNER_PASSWORD 값
 ```
 
-비밀번호는 stdout에 나오지 않고 파일에만 있다(`infra/rust/local.secrets.env`, 권한 600,
-커밋 대상 아님). 이 스크립트는 **파일이 이미 있으면 절대 덮어쓰지 않는다** — 이미 마이그레이션한
-DB가 있는데 시크릿을 다시 만들면 그 DB와 어긋나기 때문이다. 다시 실행하면 현재
-이메일과 비밀번호가 든 파일 위치만 다시 보여 준다. 기존 파일에 중복 키가 있거나,
-기존 env와 다른 모드·digest를 주면 조용히 바꾸지 않고 실패한다.
+The password is not on stdout; it lives only in the file
+(`infra/rust/local.secrets.env`, mode 600, not a commit target). This
+script **never overwrites the file if it already exists** — regenerating
+secrets against an already-migrated DB would desync from that DB. Run it
+again and it only re-shows the path of the file that already holds the
+email and password. Duplicate keys in an existing file, or a different
+mode/digest than the existing env, fail instead of changing quietly.
 
-## 3. 기동
+## 3. Bring-up
 
-2단계가 찍어 준 명령을 그대로 붙여 넣는다. `--compose` 경유는 필수다. generated
-env의 모든 실제 키, canonical Compose 파일의 모든 interpolation 키와 `COMPOSE_FILE`·
-`COMPOSE_PROFILES` 같은 제어 키를 process env에서 제거한 뒤 정본 env/file set을
-호출한다. caller의 config-source 대체 인자와 Compose global control 인자도
-fail-closed로 거절한다. `DOCKER_HOST`·`DOCKER_CONTEXT`는 운영자가 고른 daemon 권위라
-보존한다. 이 launcher의 정본 파일은 `infra/rust/docker-compose.rust.yml`,
-`infra/rust/docker-compose.rust.build.yml`, `infra/rust/local.override.yml`이다.
-로컬 모드는 다음과 같다.
+Paste the command step 2 printed, as-is. Going through `--compose` is
+required. It strips every real key of the generated env, every
+interpolation key of the canonical Compose files, and control keys such as
+`COMPOSE_FILE`·`COMPOSE_PROFILES` from the process env, then invokes the
+canon env/file set. Caller config-source override arguments and Compose
+global control arguments are also rejected fail-closed. `DOCKER_HOST`·
+`DOCKER_CONTEXT` are the operator-chosen daemon authority and are
+preserved. This launcher's canon files are
+`infra/rust/docker-compose.rust.yml`,
+`infra/rust/docker-compose.rust.build.yml`,
+`infra/rust/local.override.yml`. Local mode looks like this.
 
 ```sh
 scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-digest 모드는 빌드 오버레이와 `--build`가 없다. 스크립트가 이 명령을
-출력한다:
+Digest mode has neither the build overlay nor `--build`. The script prints
+this command:
 
 ```sh
 scripts/self_host_env.sh --compose up -d --pull missing --wait
 ```
 
-`--wait` 가 붙어 있으므로 **이 명령이 끝났다는 것이 준비가 끝났다는 뜻이다.**
-그 사이에 순서대로 일어나는 일: 이미지 빌드 또는 pull → PostgreSQL 기동 → 최소권한 런타임
-롤 생성 → 마이그레이션 전량 적용(+2패스 멱등 검사) → 첫 로그인 계정 생성 →
-api·relay·agent-worker·웹 엣지 기동.
+`--wait` is attached, so **the command having finished means ready**. In
+order, what happens in between: image build or pull → PostgreSQL up →
+least-privilege runtime roles created → all migrations applied (+ a 2-pass
+idempotence check) → first login account created → api·relay·agent-worker·
+web edge up.
 
-이 경로는 생성 env에 `MOMO_MIGRATE_ENV=development`와 evidence gate 비활성 상태를
-**명시적으로** 기록하고, migrate가 같은 사실을 warning으로 남긴다. API의
-`MOMO_ENV=staging` 보안 자세는 그대로다. 운영에서 이 로컬 예외를 복사하지 말 것:
-staging/production migrate는 서명된 15분 이내 PITR evidence 또는 실제 빈 DB의
-단발 bootstrap probe 중 정확히 하나가 없으면 실패한다.
+This path **explicitly** records `MOMO_MIGRATE_ENV=development` and
+evidence-gate-off in the generated env, and migrate logs the same fact as a
+warning. The API's `MOMO_ENV=staging` security posture is unchanged. Do not
+copy this local exception into operations: staging/production migrate fails
+unless exactly one of signed PITR evidence not older than 15 minutes, or a
+one-shot bootstrap probe of a truly empty DB, is present.
 
-## 4. 로그인
+## 4. Sign in
 
-브라우저에서 2단계가 인쇄한 주소 — 기본 **`http://localhost:8088`** — 를 연다.
-로그인 화면에 보이는 칸은 셋이고, 그중 둘만 채운다.
+Open the address step 2 printed — default **`http://localhost:8088`** — in
+a browser. The sign-in screen shows three fields; fill two of them.
 
-| 화면의 칸 | 넣을 것 |
+| Field on screen | Put this |
 |---|---|
-| **서버 주소**(선택) | **비운다.** 이 페이지를 내준 주소가 곧 이 서버다 — 칸 아래에 그렇게 적혀 있다: 「비워 두면 이 페이지를 제공한 주소로 연결합니다」 |
-| **이메일**(필수) | 2단계가 알려 준 주소 (기본 `owner@oort.local`) |
-| **비밀번호**(필수) | `infra/rust/local.secrets.env` 의 `MOMO_INITIAL_OWNER_PASSWORD` — 스크립트는 이 값만은 화면에 찍지 않으므로 파일에서 직접 읽는다 |
+| **서버 주소** (optional) | **Leave it empty.** The address that served this page *is* this server — the hint under the field says so: 「비워 두면 이 페이지를 제공한 주소로 연결합니다」 |
+| **이메일** (required) | The address step 2 told you (default `owner@oort.local`) |
+| **비밀번호** (required) | `MOMO_INITIAL_OWNER_PASSWORD` in `infra/rust/local.secrets.env` — the script never prints this value, so read it from the file |
 
-**워크스페이스 칸은 찾지 않아도 된다.** 화면에 열려 있지 않다 — `다른
-워크스페이스로 로그인` 이라는 접힌 줄 뒤에 있고, 셀프호스트 첫 실행에서 그것을
-펼칠 이유는 없다(펼쳐서 비워 두는 것과 결과가 같다). 펼쳤을 때의 라벨은
-`워크스페이스 ID`이고, 받는 값은 **UUID 하나뿐**이다. 한 서버에 워크스페이스를
-여럿 두게 된 다음에나 쓰는 칸이며, 그때 넣을 UUID는 로그인한 뒤 **설정 › 계정**에
-적혀 있다.
+**You do not need to find a workspace field.** It is not open on the
+screen — it sits behind the folded line `다른 워크스페이스로 로그인`, and
+there is no reason to expand it on a self-host first run (expanding it and
+leaving it empty is the same result). The label when expanded is
+`워크스페이스 ID`, and the only value it accepts is **one UUID**. That
+field is for after a server has several workspaces; the UUID to put in then
+is on **설정 › 계정** after you sign in.
 
-`로그인`을 누르면 채널 목록(`agent-lab` · `general` — 목록에는 `#` 없이 이름만
-선다)이 있는 화면이 뜬다. 아무 채널이나 골라 메시지를 보내면 그 자리에
-나타난다. **You're in.**
+Press `로그인` and a screen with the channel list (`agent-lab` · `general`
+— the list shows the name without `#`) appears. Pick any channel, send a
+message, and it shows up in place. **You're in.**
 
-## 5. 에이전트가 대답하게 하기 (AI 연결)
+## 5. Make an agent answer (AI link)
 
-4단계까지는 **사람들끼리의 메신저**다. 에이전트를 만들어 멘션해도 대답이 없다면
-그건 고장이 아니라 **아직 키를 주지 않아서**다. 이 절이 그 한 걸음이다.
+Through step 4 this is a **messenger among people**. If you create an agent
+and mention it and get no answer, that is not a break — **you have not given
+it a key yet**. This section is that one step.
 
-### 당신이 이 인스턴스의 운영자다
+### You are this instance's operator
 
-2단계가 만든 env에는 이 줄이 들어 있다:
+The env step 2 wrote contains this line:
 
 ```
 PLATFORM_ADMIN_EMAILS=owner@oort.local     # = MOMO_INITIAL_OWNER_EMAIL
 ```
 
-「이 인스턴스의 첫 owner는 이 인스턴스의 운영자다」라는 선언이고, **설정 › AI 연결**과
-워크스페이스 생성이 열리는 근거다. 인가 규칙 자체는 그대로다(MOMO-583: 인스턴스-전역
-표면은 `platform:read` 토큰 **또는** 여기 등재된 검증 이메일의 owner/admin에게만).
-셀프호스트 스택은 `platform:read` 토큰을 발급할 방법이 없으므로, 이 줄이 없으면 그
-표면은 **아무에게도** 열리지 않는다 — 설치한 본인에게도. 그때 화면에 보이는 것은
-403 하나뿐이고, 에이전트는 조용히 대답하지 않는다.
+That is the declaration 「the first owner of this instance is this
+instance's operator」, and it is why **설정 › AI 연결** and workspace
+creation open. The authorization rule itself is unchanged (MOMO-583:
+instance-global surfaces open only to a `platform:read` token **or** an
+owner/admin whose verified email is listed here). The self-host stack has
+no way to issue a `platform:read` token, so without this line that surface
+opens to **nobody** — including the person who installed it. What the
+screen shows then is a single 403, and the agent stays quietly silent.
 
-운영자를 더 두려면 쉼표로 잇는다(`a@example.com,b@example.com`). 그 주소는 이 인스턴스에
-실재하는 owner/admin이어야 하고 이메일이 **검증**돼 있어야 한다.
+To add operators, join addresses with commas (`a@example.com,b@example.com`).
+Each address must be a real owner/admin on this instance, and the email
+must be **verified**.
 
-### 키 넣기
+### Put the key in
 
-브라우저에서 **설정 › AI 연결**을 열고 OpenAI 호환 엔드포인트 주소와 키를 넣는다.
-같은 일을 REST로도 할 수 있다(`<port>`는 2단계가 알려 준 값):
+In the browser open **설정 › AI 연결** and put in the OpenAI-compatible
+endpoint URL and the key. The same work can be done over REST (`<port>` is
+the value step 2 told you):
 
 ```sh
 TOKEN=$(curl -sS -X POST http://localhost:8088/v1/auth/login \
@@ -265,41 +299,48 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
   -d '{"baseUrl":"https://api.example.com/v1","bearer":"<키>"}'
 ```
 
-키는 이 서버의 DB에 **암호화되어** 저장되고(`PROVIDER_LINK_MASTER_KEY`), 응답과 화면에는
-끝 네 자리만 돌아온다. 엔드포인트는 오늘 **외부 `https://`** 주소여야 한다 — 노트북에
-띄운 로컬 모델(`http://127.0.0.1:...`)을 붙이는 경로는 아직 열려 있지 않다.
+The key is stored **encrypted** in this server's DB
+(`PROVIDER_LINK_MASTER_KEY`); the response and the screen return only the
+last four digits. The endpoint today must be an **external `https://`**
+address — the path that attaches a local model on the laptop
+(`http://127.0.0.1:...`) is not open yet.
 
-그다음 에이전트를 만들고(에이전트 명부 → 새 에이전트) 채널에 초대한 뒤 `@핸들`로
-부른다. 대답이 오면 거기까지가 이 문서가 약속한 전부다.
+Then create an agent (agent directory → new agent), invite it to a channel,
+and call it with `@handle`. When an answer arrives, that is everything this
+document promised.
 
-### 무엇이 즉시 반영되고 무엇이 재시작을 요구하나
+### What takes effect immediately and what needs a restart
 
-한 줄로 갈린다. **키는 행이고 허용목록은 프로세스 env다.**
+It splits on one line. **The key is a row; the allowlist is process env.**
 
-| 바꾼 것 | 반영 | 왜 |
+| What you changed | Takes effect | Why |
 |---|---|---|
-| provider 키(위 PUT / GUI) | **즉시** — 다음 작업부터, 늦어도 2초 | DB 행이고 worker가 2초 캐시로 다시 읽는다. **재시작하면 안 되는 게 아니라 필요가 없다** |
-| `PLATFORM_ADMIN_EMAILS` | **api 재시작**(`oort up -d`) | 부팅 때 프로세스 env에서 읽는다 |
+| provider key (the PUT / GUI above) | **Immediately** — from the next job, within 2 seconds at latest | It is a DB row and the worker re-reads it on a 2 s cache. **Restart is not forbidden; it is unnecessary** |
+| `PLATFORM_ADMIN_EMAILS` | **api restart** (`oort up -d`) | Read from process env at boot |
 
-2단계 이전에 만든 env에는 그 줄이 없다. 그런 파일에는 `scripts/self_host_env.sh`가
-다음 실행 때 **그 줄만 덧붙인다** — 시크릿은 하나도 다시 만들지 않는다(다시 만들면
-이미 마이그레이션된 DB와 어긋난다). 덧붙인 뒤 `oort up -d`로 api를 재시작한다.
+An env made before step 2 has no that line. For such a file,
+`scripts/self_host_env.sh` **appends only that line** on the next run — it
+does not regenerate any secret (doing so would desync from an already
+migrated DB). After the append, restart api with `oort up -d`.
 
-## 6. 외부 도구 연동 (Claude Code · CI)
+## 6. External tools (Claude Code · CI)
 
-사람 로그인 토큰을 Claude Code나 CI에 넣지 마라. 그 토큰은 **15분** 만에
-죽고, 리프레시는 한 번 쓰면 버려진다 — 브라우저 세션용이다. 외부 도구는
-**에이전트 멤버**로 넣고, 장수명 자격을 한 번 발급해 도구가 보관하게 한다
-(ADR-0101). 추천은 이 절의 generic 자격이고, hosted pairing(Grok Bot)이
-아니다.
+Do not put a human login token into Claude Code or CI. That token dies in
+**15 minutes**, and a refresh is discarded after one use — it is for a
+browser session. Put the external tool in as an **agent member**, issue a
+long-lived credential once, and let the tool keep it (ADR-0101). The
+recommendation is this section's generic credential, not hosted pairing
+(Grok Bot).
 
-전제: [4](#4-로그인)까지 끝나 워크스페이스 owner로 들어가 있다. 에이전트를
-아직 안 만들었으면 명부에서 하나 만든다(표시 이름·핸들·모델·게이트웨이
-주소). 폼에 API 키 칸은 없다 — 그건 맞다(ADR-0004). 채널에 그 에이전트를
-초대해 두라. 멘션 없이 **도구가 글을 쓰게만** 하려면 초대한 것으로 충분하다.
+Prerequisite: [4](#4-sign-in) is done and you are in as workspace owner.
+If you have not created an agent yet, create one from the directory
+(display name · handle · model · gateway URL). There is no API-key field
+on the form — that is correct (ADR-0004). Invite that agent to a channel.
+If you only need the **tool to write**, the invite is enough; no mention
+required.
 
-아래 `<port>` 는 2단계가 알려 준 값(기본 웹 `8088`). 비밀번호·토큰은 화면에
-붙이지 말고 셸 변수에만 둔다.
+`<port>` below is the value step 2 told you (default web `8088`). Keep
+passwords and tokens in shell variables, not on the screen.
 
 ```sh
 OORT=http://localhost:<port>
@@ -312,14 +353,14 @@ HUMAN=$(curl -sS -X POST "$OORT/v1/auth/login" \
   -d "{\"email\":\"owner@oort.local\",\"password\":\"<MOMO_INITIAL_OWNER_PASSWORD>\",\"workspace\":\"$WS\"}" \
   | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
 
-# 원문은 이 응답에만 있다. 목록 API는 메타만 돌려준다.
+# The plaintext exists only in this response. The list API returns metadata only.
 curl -sS -X POST "$OORT/v1/workspaces/$WS/agents/$AGENT/credentials" \
   -H "Authorization: Bearer $HUMAN" -H 'Content-Type: application/json' \
   -d '{"label":"claude-code","scopes":["messages:write","messages:read"]}'
 ```
 
-응답의 `token` 한 줄을 도구 env에 넣고, 사람 `HUMAN` 변수는 버린다. 그 자격으로
-메시지를 쓰는 예:
+Put the response `token` line in the tool env, and drop the human `HUMAN`
+variable. Example of writing a message with that credential:
 
 ```sh
 curl -sS -X POST "$OORT/v1/workspaces/$WS/channels/$CHANNEL/messages" \
@@ -327,182 +368,201 @@ curl -sS -X POST "$OORT/v1/workspaces/$WS/channels/$CHANNEL/messages" \
   -d "{\"clientMsgId\":\"$(uuidgen | tr '[:upper:]' '[:lower:]')\",\"type\":\"text\",\"body\":\"hello from an external tool\"}"
 ```
 
-201이 오면 그 채널에 에이전트 이름으로 글이 남는다. `messages:read`를 같이
-넣었으면 그 에이전트가 멤버인 채널의 히스토리 `GET`과 스레드 replies `GET`이
-200이다. 이 스코프는 비-default라 발급 때 빼면 읽기는 403이다(ADR-0173).
-자격은 만료를 적지 않으면 장수명이고, 다시 발급하면 이전 값은 하루(기본)
-유예 뒤 죽는다. 회수는 `POST …/credentials/{id}/revoke`.
+A 201 leaves a post in that channel under the agent's name. If you also
+included `messages:read`, history `GET` and thread replies `GET` for
+channels that agent is a member of are 200. This scope is non-default, so
+omitting it at issue time makes reads 403 (ADR-0173). Credentials are
+long-lived if you do not set an expiry; re-issuing kills the previous
+value after a one-day grace (default). Revoke with
+`POST …/credentials/{id}/revoke`.
 
-**오늘 안 되는 것.** 단일 메시지 `GET`·replies `POST`·검색은 닫혀 있다.
-hosted 자격은 REST 전체가 403이다 — Agent Port MCP 격리(ADR-0162)는 그대로다.
-hosted 연결 전용 멤버에 generic 발급을 치면
-`409 hosted_connection_managed` — 그 멤버는 pairing 화면에서만 자격을 만든다.
+**What does not work today.** Single-message `GET` · replies `POST` ·
+search are closed. A hosted credential is 403 for the entire REST surface
+— Agent Port MCP isolation (ADR-0162) is unchanged. Hitting generic issue
+on a hosted-connection-only member returns `409 hosted_connection_managed`
+— that member mints credentials only from the pairing screen.
 
-근거와 판정: [EXT-1 자격 조사](planning/research/2026-08-27-ext1-agent-credential-external-tools.md) (#1797) · [ADR-0173](adr/0173-external-tool-message-read.md).
+Evidence and ruling: [EXT-1 credential research](planning/research/2026-08-27-ext1-agent-credential-external-tools.md)
+(#1797) · [ADR-0173](adr/0173-external-tool-message-read.md).
 
 ---
 
-## 방금 무엇이 떴나
+## What just came up
 
 ```text
-브라우저 ── http://localhost:8088 ──> web (Caddy, 같은 오리진 엣지)
-                                        ├── /            SPA (이미지 안의 번들)
+browser ── http://localhost:8088 ──> web (Caddy, same-origin edge)
+                                        ├── /            SPA (bundle inside the image)
                                         ├── /v1/*        ──> api
                                         └── /connection  ──> centrifugo
-api ── 트랜잭션 ──> PostgreSQL 18 (진실의 원천: message + seq + outbox)
+api ── transaction ──> PostgreSQL 18 (source of truth: message + seq + outbox)
                                           │
-centrifugo (전송 전용) <── publish ── relay ┘
+centrifugo (transport only) <── publish ── relay ┘
 ```
 
-쓰기 경로는 하나다: `REST → PostgreSQL 커밋 → 트랜잭션 아웃박스 → relay publish`.
-채널 순서를 정하는 것은 전송 오프셋이 아니라 `message.seq` 다. 전체 계약은
-[아키텍처 개요](architecture/overview.md).
+There is one write path: `REST → PostgreSQL commit → transactional outbox →
+relay publish`. What defines channel order is `message.seq`, not a
+transport offset. The full contract is the
+[architecture overview](architecture/overview.md).
 
-브라우저가 아는 주소가 **포트 하나뿐**이라는 점이 이 경로의 설계다 — SPA도 REST도
-실시간도 같은 오리진에서 나오므로 CORS가 성립할 여지가 없고, 실시간 주소는
-로그인 응답이 돌려주는 값을 클라이언트가 그대로 쓴다(ADR-0110).
+That the browser knows **one port only** is this path's design — SPA, REST,
+and realtime all come from the same origin, so CORS has no room to arise,
+and the realtime URL is the value the login response returns, which the
+client uses as-is (ADR-0110).
 
-## 두 체크아웃을 같이 쓸 때
+## Using two checkouts at once
 
-기본 compose 프로젝트 이름은 `oort` 이고, PostgreSQL named volume 은
-`oort-pgdata` 다. 그 이름은 **체크아웃 경로가 아니라 프로젝트 이름에 묶인다.**
-클론 A로 스택을 띄운 뒤 클론 B에서 같은 기본값으로 `--compose up` 하면, 예전에는
-B가 A의 컨테이너를 무경고로 다시 만들었고, 프로젝트 이름만 `oort-b` 로 바꿔도
-볼륨 문자열이 같으면 PostgreSQL이 **같은 데이터 디렉토리로 두 번** 기동됐다
-(#1613).
+The default compose project name is `oort`, and the PostgreSQL named volume
+is `oort-pgdata`. Those names are **bound to the project name, not the
+checkout path.** After bringing a stack up from clone A, `--compose up`
+from clone B with the same defaults used to recreate A's containers with
+no warning, and even renaming the project to `oort-b` still started
+PostgreSQL **twice against the same data directory** if the volume string
+matched (#1613).
 
-지금은 기동 전에 산 컨테이너의 `com.docker.compose.project.working_dir` 라벨을
-이 체크아웃 경로와 대조한다. 다른 디렉터리의 스택이 같은 프로젝트 또는 같은
-`DB_VOLUME_NAME` 을 쓰고 있으면 `--compose up` / `down` 은 거절되고, 원인과
-해법을 출력한다. **같은 체크아웃에서 다시 `up` 하는 것**(내 스택 재개)은
-경고 없이 동작한다.
+Now, before bring-up, the live container's
+`com.docker.compose.project.working_dir` label is compared with this
+checkout path. If another directory's stack is using the same project or
+the same `DB_VOLUME_NAME`, `--compose up` / `down` is refused and the
+cause and the fix are printed. **`up` again from the same checkout**
+(resuming your stack) still works with no warning.
 
-분리하려면 env 의 **두 줄을 함께** 바꾼다. 프로젝트명만 바꾸면 볼륨을 계속
-공유한다:
+To separate, change **both lines** in env together. Changing only the
+project name keeps sharing the volume:
 
 ```sh
-# infra/rust/local.secrets.env — 예시. 이미 파일이 있으면 시크릿을 다시 만들지 말고
-# 이 두 줄만 고친 뒤, 다른 체크아웃의 스택이 내려간 것을 확인하고 up 한다.
+# infra/rust/local.secrets.env — example. If the file already exists, do not
+# regenerate secrets; edit only these two lines, confirm the other checkout's
+# stack is down, then up.
 COMPOSE_PROJECT_NAME=oort-lab
 DB_VOLUME_NAME=oort-lab-pgdata
 ```
 
-기존 `oort-pgdata` 데이터를 이 클론이 이어받으려면 기본 이름(`oort` /
-`oort-pgdata`)을 유지한 채 **먼저 다른 체크아웃에서 `down`**(볼륨은 남김)한다.
-업그레이드가 볼륨을 지우거나 새 빈 볼륨으로 바꿔 끼우지 않는다. `down -v` 의
-의미는 그대로다: **이 env 가 가리키는 볼륨**을 지운다. 첨부 보관소 볼륨
-(`DRIVE_VOLUME_NAME`, 기본 `oort-drive`)도 같은 규율이다 — 프로젝트명을
-바꿀 때 같이 바꾼다.
+For this clone to inherit existing `oort-pgdata` data, keep the default
+names (`oort` / `oort-pgdata`) and **`down` the other checkout first**
+(leave the volume). An upgrade does not delete the volume or swap in a
+new empty one. The meaning of `down -v` is unchanged: it deletes **the
+volume this env points at**. The attachment archive volume
+(`DRIVE_VOLUME_NAME`, default `oort-drive`) follows the same rule —
+change it when you change the project name.
 
-## 첨부 보관소
+## Attachment archive
 
-셀프호스트 생성 env 는 `MOMO_DRIVE_ARCHIVE_BACKEND=local` 과
-`MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive` 를 기본으로 쓴다(ADR-0169).
-첨부 바이트는 Postgres 가 아니라 그 디렉터리(compose 명명 볼륨
-`DRIVE_VOLUME_NAME`, 기본 `oort-drive`)에 산다. 파일명은 메타만 되고,
-디스크 경로는 서버가 만든 불투명 id 뿐이다. Google Workspace SA 는
-이 경로에 필요 없다. `stub` 은 `MOMO_ENV=staging` 에서 부팅이 거부된다.
+A generated self-host env defaults to `MOMO_DRIVE_ARCHIVE_BACKEND=local`
+and `MOMO_DRIVE_LOCAL_DIR=/var/lib/oort/drive` (ADR-0169). Attachment
+bytes live not in Postgres but in that directory (compose named volume
+`DRIVE_VOLUME_NAME`, default `oort-drive`). The filename is metadata only;
+the disk path is an opaque id the server made. A Google Workspace SA is
+not needed on this path. `stub` is refused at boot when
+`MOMO_ENV=staging`.
 
-기존 env 에 이 키가 없으면 `scripts/self_host_env.sh` 가 **그 줄만
-덧붙인다** — 시크릿은 다시 만들지 않는다. 반영에는 api 재시작이 필요하다
-(`scripts/self_host_env.sh --compose up -d`). 값을 비워 두면 첨부는 예전처럼
-503 `Drive archive is not configured` 이다. 신선한 명명 볼륨은 root
-소유로 생긴다. `local.override.yml` 의 `drive-init` 이 첫 기동에서
-마운트 포인트를 uid 10001 로 chown 한다 — 쓰기 실패를 무시하지 않고,
-권한을 고친 뒤에야 api 가 뜬다.
+If an existing env is missing these keys, `scripts/self_host_env.sh`
+**appends only those lines** — it does not regenerate secrets. Taking
+effect needs an api restart
+(`scripts/self_host_env.sh --compose up -d`). Leave the values empty and
+attachments are 503 `Drive archive is not configured`, as before. A fresh
+named volume is created root-owned. `drive-init` in `local.override.yml`
+chowns the mount point to uid 10001 on first start — it does not ignore a
+write failure; api comes up only after permissions are fixed.
 
-**백업 대상.** `pg_dump` 는 메시지·멤버만 가져온다. 첨부 파일을 살리려면
-같은 시점에 보관소 볼륨을 복사한다. 절차 한 줄은
+**Backup target.** `pg_dump` takes messages and members only. To keep
+attachment files, copy the archive volume at the same moment. One-line
+procedure:
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).
 
-## 링크 미리보기 (언퍼얼)
+## Link previews (unfurl)
 
-메시지에 붙은 http(s) 링크의 제목·설명·이미지를 서버가 가져와 카드로
-광고한다(ADR-0170). **기본은 꺼져 있다.** 셀프호스트 egress 를 보수적으로
-두려면 그대로 둔다.
+The server fetches title · description · image of http(s) links on a
+message and advertises them as a card (ADR-0170). **Default is off.** Leave
+it that way if you want conservative self-host egress.
 
-켜려면 env 에 한 줄을 넣고 `webhook-sender` 를 재시작한다:
+To turn it on, put one line in env and restart `webhook-sender`:
 
 ```sh
 MOMO_UNFURL_ENABLED=1
 ```
 
-워크스페이스 관리자는 `PUT /v1/workspaces/{id}/unfurl-settings` 로
-테넌트 단위에서 fetch 자체를 끌 수 있다(렌더만 끄는 게 아니다).
-발신자는 자기 메시지의 카드를 `DELETE …/messages/{id}/unfurls` 로 지운다 —
-지운 카드는 다시 만들어지지 않는다.
+A workspace admin can turn fetch itself off per tenant with
+`PUT /v1/workspaces/{id}/unfurl-settings` (this is not render-only). The
+author deletes the card on their own message with
+`DELETE …/messages/{id}/unfurls` — a deleted card is not made again.
 
-**P9 경계.** 서버는 링크 *대상*만 읽는다. 메시지 본문을 알림 판정이나
-에이전트 컨텍스트로 읽는 경로가 아니다. URL 문자열을 집어 OG/Twitter 태그를
-가져오는 것이고, 사람 발신과 에이전트 발신은 같은 경로다. 사설망·링크로컬·
-루프백은 기존 OutboundHTTPPolicy 가 매 홉 거절한다. 미리보기 이미지는
-서버 프록시만 통과한다 — 브라우저가 임의 호스트에 직접 붙지 않는다.
+**P9 boundary.** The server reads only the link *target*. This is not a
+path that reads the message body for notification decisions or agent
+context. It takes the URL string and fetches OG/Twitter tags; human
+authors and agent authors share the same path. Private networks,
+link-local, and loopback are refused every hop by the existing
+OutboundHTTPPolicy. Preview images pass only through the server proxy —
+the browser does not attach directly to an arbitrary host.
 
-## 허들 (음성)
+## Huddle (voice)
 
-허들 프로파일(`huddle`)을 켤 때 LiveKit이 ICE에 광고하는 IP는
-`MOMO_LIVEKIT_NODE_IP`다. 로컬 브라우저는 `127.0.0.1`(생성 env 기본),
-LAN·원격 클라는 그 호스트의 클라 도달 가능 IP, 미설정은 컨테이너가
-브리지 IP를 자동 감지해 대개 외부에서 도달할 수 없다.
+When the huddle profile (`huddle`) is on, the IP LiveKit advertises for ICE
+is `MOMO_LIVEKIT_NODE_IP`. A local browser uses `127.0.0.1` (generated-env
+default); a LAN or remote client uses that host's client-reachable IP;
+unset, the container auto-detects a bridge IP that is usually unreachable
+from outside.
 
-## 멈추기 · 지우기
+## Stop · wipe
 
-3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
-**자신이 고른 모드의 한 줄만** 붙여 넣는다(변수가 아니라 함수인 것은
-의도다 — zsh는 변수를 단어로 쪼개 주지 않는다):
+The argument bundle from step 3 is long, so from here it is written as one
+function. From the repo root, paste **only the one line for the mode you
+chose** (it is a function, not a variable, on purpose — zsh does not split
+variables into words):
 
 ```sh
-# 두 모드 공통 — env의 MOMO_SELF_HOST_MODE가 canonical file set을 고른다.
+# Shared by both modes — env MOMO_SELF_HOST_MODE picks the canonical file set.
 oort() { scripts/self_host_env.sh --compose "$@"; }
 ```
 
 ```sh
-# 멈춘다 (데이터는 남는다)
+# Stop (data stays)
 oort down
 
-# 다시 켠다
+# Bring it back
 oort up -d --wait
 
-# 무슨 일이 있었는지 본다
+# See what happened
 oort logs api
 oort logs migrate
 
-# 데이터까지 지운다 — 메시지·계정·볼륨이 사라진다. 되돌릴 수 없다.
+# Wipe the data too — messages, accounts, and the volume go. This cannot be undone.
 oort down -v
 ```
 
-`down -v` 로 지운 뒤 처음부터 다시 하려면 `infra/rust/local.secrets.env` 도 지우고
-2단계부터 다시 밟는다(새 DB에는 새 시크릿이 맞다). 다른 체크아웃의 스택을 이
-트리의 `--compose down -v` 로 지우려고 하지 마라 — 같은 프로젝트/볼륨을 쓰는
-산 타 체크아웃이면 거절된다([두 체크아웃](#두-체크아웃을-같이-쓸-때)).
+After a `down -v` wipe, to start over, also delete
+`infra/rust/local.secrets.env` and walk from step 2 again (a new DB matches
+new secrets). Do not try to wipe another checkout's stack with this tree's
+`--compose down -v` — a live other checkout using the same project/volume
+is refused ([two checkouts](#using-two-checkouts-at-once)).
 
-## 막히면
+## When stuck
 
-| 증상 | 원인과 조치 |
+| Symptom | Cause and action |
 |---|---|
-| 설치가 막혔는지 먼저 판정 | `scripts/oort doctor` (필요하면 `--json`). 도구·env·스택을 한 판정으로 본다. 스택이 아직 없으면 그 검사는 skip 하고 env 쪽만 판정한다. |
-| 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
-| 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
-| 화면은 뜨는데 메시지가 실시간으로 안 온다 | outbox가 빠졌는지 먼저 본다(아래 질의). `broadcast \| done` 이면 서버 쪽은 끝난 것이고 브라우저 쪽을 본다(`oort logs api`). `pending`/`failed` 면 relay다(`oort logs relay`). |
-| 설정 › AI 연결이 **403** | 이 인스턴스에 등재된 운영자가 없다. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — 줄이 없으면 `scripts/self_host_env.sh --local-build`(또는 자신이 고른 모드)를 다시 실행하면 그 줄만 덧붙는다. 그 뒤 `oort up -d`로 api 재시작. [§5](#5-에이전트가-대답하게-하기-ai-연결). |
-| 설정 › AI 연결이 **503** | api가 `PROVIDER_LINK_MASTER_KEY` 없이 떴다. 2단계가 만든 env에는 있다 — 손으로 만든 env를 쓰고 있다면 그 줄을 채우고 `oort up -d`. |
-| 에이전트를 만들었는데 대답이 없다 | 키를 아직 안 넣었거나(§5), 넣은 엔드포인트가 응답하지 않는 것이다. 채널에 「응답하지 못했습니다」류 메시지가 뜨면 후자다(`oort logs agent-worker`). |
-| `--compose up` 이 다른 체크아웃이 같은 프로젝트/볼륨을 쓴다고 거절 | 그 체크아웃에서 `down`(볼륨은 남김) 하거나, 이 클론의 `COMPOSE_PROJECT_NAME` 과 `DB_VOLUME_NAME` 을 **함께** 바꾼다. [두 체크아웃](#두-체크아웃을-같이-쓸-때). |
-| 업그레이드 후 로그인이 안 되고 DB가 비어 보인다 | 새 env 가 `oort-pgdata` 가 아닌 볼륨을 가리키고 있을 수 있다. 데이터가 삭제된 것이 아니다 — `docker volume ls` 로 `oort-pgdata` 를 확인하고, `DB_VOLUME_NAME=oort-pgdata` 로 채택하거나 기본 프로젝트명 `oort` 로 env 를 다시 만든다. |
-| ACME 주문이 보인다 (Let's Encrypt) | `OORT_SITE_ADDRESS` 가 이 호스트가 아닌 남의 호스트다. 공개 템플릿은 그 키가 없으면 기동 자체가 거부된다. 로컬에서는 `caddy.override.yml` 을 이름 부르지 마라. |
-| 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
+| Judge first whether the install is stuck | `scripts/oort doctor` (`--json` if you need it). Tools, env, and stack as one verdict. If the stack is not up yet those checks skip and only the env side is judged. |
+| Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
+| Sign-in says `invalid credentials` | Use the values step 2 told you (`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). To change the password, the rotate command below. |
+| The screen comes up but messages do not arrive in realtime | Check outbox first (query below). `broadcast \| done` means the server side is finished; look at the browser (`oort logs api`). `pending`/`failed` is relay (`oort logs relay`). |
+| 설정 › AI 연결 is **403** | This instance has no listed operator. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — if the line is missing, re-run `scripts/self_host_env.sh --local-build` (or the mode you chose) and it appends only that line. Then restart api with `oort up -d`. [§5](#5-make-an-agent-answer-ai-link). |
+| 설정 › AI 연결 is **503** | api came up without `PROVIDER_LINK_MASTER_KEY`. The env step 2 wrote has it — if you are using a hand-made env, fill that line and `oort up -d`. |
+| You created an agent and it does not answer | You have not put the key in yet (§5), or the endpoint you put in does not respond. If the channel shows a 「응답하지 못했습니다」-style message, it is the latter (`oort logs agent-worker`). |
+| `--compose up` refuses because another checkout uses the same project/volume | `down` on that checkout (leave the volume), or change this clone's `COMPOSE_PROJECT_NAME` and `DB_VOLUME_NAME` **together**. [Two checkouts](#using-two-checkouts-at-once). |
+| After an upgrade, sign-in fails and the DB looks empty | The new env may be pointing at a volume that is not `oort-pgdata`. The data was not deleted — confirm `oort-pgdata` with `docker volume ls`, then adopt `DB_VOLUME_NAME=oort-pgdata` or recreate env with the default project name `oort`. |
+| An ACME order appears (Let's Encrypt) | `OORT_SITE_ADDRESS` is someone else's host, not this one. The public template refuses to start if that key is unset. On local, do not name `caddy.override.yml`. |
+| You want to start from scratch | `down -v` + `rm infra/rust/local.secrets.env` + from step 2. |
 
-메시지가 실제로 레일까지 갔는지 보는 질의(`broadcast | done` 이 정상):
+Query to see whether a message actually reached the rail (`broadcast | done`
+is healthy):
 
 ```sh
 oort exec postgres psql -U momo -d momo \
   -c "SELECT kind, status, count(*) FROM outbox GROUP BY 1,2;"
 ```
 
-relay는 성공 publish를 **로그하지 않는다**(정상 경로가 조용하다). 그래서 「relay가
-일했나」의 답은 로그가 아니라 위 질의다.
+Relay does **not log** a successful publish (the happy path is quiet). So
+the answer to 「did relay work」 is the query above, not the logs.
 
-비밀번호 회전(의도적 변경 — 모든 세션이 로그아웃된다):
+Password rotate (intentional change — every session is signed out):
 
 ```sh
 MOMO_INITIAL_OWNER_EMAIL=owner@oort.local \
@@ -510,51 +570,55 @@ MOMO_INITIAL_OWNER_PASSWORD='<새 비밀번호>' \
   oort run --rm -e MOMO_INITIAL_OWNER_EMAIL -e MOMO_INITIAL_OWNER_PASSWORD migrate set-owner
 ```
 
-더 깊은 것(마이그레이션 로그 읽는 법, Centrifugo history로 왕복 증명, env 파리티
-표, 트러블슈팅)은 [`infra/rust/README.md`](../infra/rust/README.md) 에 있다. 이
-문서가 「처음 한 번」이고, 그 문서가 「그다음 전부」다.
+Deeper (how to read migration logs, proving a round-trip with Centrifugo
+history, the env-parity table, troubleshooting) lives in
+[`infra/rust/README.md`](../infra/rust/README.md). This document is 「the
+first time」; that document is 「everything after」.
 
-## 터널·외부 노출
+## Tunnels and external exposure
 
-이 문서의 엣지는 루프백이다. Tailscale·cloudflared 같은 터널로 원격
-클라가 붙을 때 로그인 REST는 되는데 실시간만 죽는 증상은, 생성기가
-예전 기본값 `ws://localhost:<port>/connection/websocket` 을 광고했기
-때문이다(ADR-0167). 새 env 는 `MOMO_CENTRIFUGO_WS_URL=same-origin` 이라
-로그인 응답이 요청 `Host` 에서 `wss://<공개호스트>/connection/websocket`
-을 파생한다.
+This document's edge is loopback. When a remote client attaches through a
+tunnel such as Tailscale or cloudflared, the symptom that login REST works
+but only realtime dies is that the generator used to advertise the old
+default `ws://localhost:<port>/connection/websocket` (ADR-0167). A new env
+has `MOMO_CENTRIFUGO_WS_URL=same-origin`, so the login response derives
+`wss://<public-host>/connection/websocket` from the request `Host`.
 
-공개 오리진을 Centrifugo 허용목록에 멱등 추가한 뒤 스택을 재시작한다.
-기본 localhost / 127.0.0.1 / tauri Origin 은 그대로 둔다.
+Idempotently add the public origin to the Centrifugo allowlist, then
+restart the stack. The default localhost / 127.0.0.1 / tauri Origin stay.
 
 ```sh
 scripts/self_host_env.sh --public-origin https://<공개호스트>
 scripts/self_host_env.sh --compose up -d
 ```
 
-검증: 로그인 응답 `realtimeWebSocketUrl` == `wss://<공개호스트>/connection/websocket`.
-이미 만든 env 가 루프백 URL을 들고 있으면 그 한 줄만 `same-origin` 으로
-고친다. 시크릿 파일 재생성은 금지.
+Verify: login response `realtimeWebSocketUrl` ==
+`wss://<공개호스트>/connection/websocket`. If an already-made env still
+holds a loopback URL, change that one line to `same-origin`. Regenerating
+the secrets file is forbidden.
 
-## 공개 오리진으로 열기
+## Open on a public origin
 
-위 경로의 엣지는 루프백이다 (`Caddyfile.local`, `:80`, ACME 없음). 공개 호스트에
-TLS 를 붙이려면 **같은 생성기**가 사이트 주소와 CSP connect-src 를 파생한다.
-키 이름 정본은 `scripts/self_host_env.sh` 의 `oort_public_edge_env_keys`
-(`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`) 다. 손으로 적지 마라.
+The edge on the path above is loopback (`Caddyfile.local`, `:80`, no ACME).
+To attach TLS on a public host, **the same generator** derives the site
+address and the CSP connect-src. The canon key names are
+`oort_public_edge_env_keys` in `scripts/self_host_env.sh`
+(`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`). Do not type them by hand.
 
 ```sh
 scripts/self_host_env.sh --public-origin https://<host>
 ```
 
-같은 호출이 Centrifugo 허용목록과 드라이브 base URL 도 갱신한다(기존 규칙).
-와일드카드 오리진(`https://*.example.test` 등)은 거절한다 (#1792).
-`--public-origin` 없이 돌리면 두 키를 쓰지 않는다 — 로컬 루프백 경로는 그대로다.
+The same call also updates the Centrifugo allowlist and the drive base URL
+(existing rules). A wildcard origin (`https://*.example.test` and the like)
+is refused (#1792). Run without `--public-origin` and the two keys are not
+written — the local loopback path stays as-is.
 
-공개 오버레이는 그 env 를 컨테이너로 넘긴다. env 가 비어 있으면 compose/`caddy
-validate` 가 실패한다. 그것이 ACME 오발사 차단의 실체다. 이 오버레이는 **그
-호스트의 DNS 를 가진 머신에서만** 기동한다. 로컬에서 이름 부르지 마라.
-`--compose` 는 canonical file 집합을 바꾸지 못하므로, 공개 오버레이는 배포
-호스트에서 compose 를 직접 호출한다:
+The public overlay passes that env into the container. Empty env makes
+compose/`caddy validate` fail. That is the actual ACME misfire block. Start
+this overlay **only on a machine that holds DNS for that host**. Do not
+name it on local. `--compose` cannot change the canonical file set, so on
+the deploy host call compose directly for the public overlay:
 
 ```sh
 docker compose --env-file infra/rust/local.secrets.env \
@@ -562,17 +626,18 @@ docker compose --env-file infra/rust/local.secrets.env \
   -f infra/rust/caddy.override.yml up -d
 ```
 
-공개 템플릿은 `caddy adapt` / `caddy validate` 로만 검증한다. 픽스처 호스트가
-아닌 실호스트로 컨테이너를 띄워 ACME 를 주문하지 마라.
+The public template is verified only with `caddy adapt` / `caddy validate`.
+Do not bring containers up against a real host that is not a fixture host
+and order ACME.
 
-| | 로컬(이 문서의 기본) | 공개 오리진 |
+| | Local (this document's default) | Public origin |
 |---|---|---|
-| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
-| 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
-| CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
+| Edge | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
+| CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
-보안 강화·백업·업그레이드·다중 워크스페이스 운영은
-[`docs/DEPLOY.md`](DEPLOY.md), pgBackRest 폐곡선과 migrate gate는
+Hardening, backup, upgrade, and multi-workspace operations:
+[`docs/DEPLOY.md`](DEPLOY.md); the pgBackRest closed loop and migrate gate:
 [`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md).
-은퇴한 NCP 런북은 [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)
-에 역사 기록으로만 남아 있다.
+The retired NCP runbook remains as historical record only in
+[`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
