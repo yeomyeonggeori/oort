@@ -1292,18 +1292,34 @@ SH-5b는 "VM + compose + 도메인"(나중에 최소 Terraform). 그 전까지:
 
 ## 4. Day-2
 
-`scripts/oort status` / `logs` / `upgrade` / `backup` / `member` 는
-**SH-3b**. 그 동사가 있기 전까지 디스패처는 SH-3b에 랜딩한다고 인쇄하고
-종료코드 2로 끝난다. 아래 산문을 쓴다. SH-3b 뒤에는 그 명령이 정본이
-되고 이 절은 포인터로 줄어든다.
+정본:
+
+```sh
+scripts/oort status
+scripts/oort logs
+scripts/oort upgrade
+scripts/oort backup
+scripts/oort restore <dump>
+scripts/oort member invite
+scripts/oort member credential --agent <handle>
+```
 
 **업그레이드 (이미지는 사라지고, env는 유지해야 한다):**
+`scripts/oort upgrade`. 그것이 명령이다. 아래 산문은 설명이지 두 번째
+절차가 아니다.
+
+실행 중/env digest 를 `releases/latest.json` 과 비교하고 (`digest_list`,
+정규식 `sha256:` + 소문자 hex 64; list ≠ arch), 먼저
+`scripts/oort backup` (`--no-backup` 으로만 생략), env 와 이름 붙은
+볼륨/`Caddyfile.local` bind 가 있는지 다시 보고 (볼륨을 만들거나 지우지
+않음), `compose pull` + `up -d`, migrate `IDEMPOTENCY_OK` 대기,
+`/healthz` 대기, `scripts/oort doctor` PASS. 실패하면 롤백 명령을
+**인쇄**만 하고 (`scripts/oort upgrade --to <이전> --no-backup --yes`)
+실행하지 않는다.
 
 ```sh
 APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
-docker pull "$APP_REF"
-scripts/self_host_env.sh --compose up -d --pull missing --wait
-scripts/oort doctor --json
+scripts/oort upgrade --to "$APP_REF" --yes
 ```
 
 claim 모드: `--compose` 대신 `oort_compose` (§3.3.3). Grok Bot VM은
@@ -1311,16 +1327,23 @@ claim 모드: `--compose` 대신 `oort_compose` (§3.3.3). Grok Bot VM은
 
 **백업 / 복원** (PITR 아님; 정본
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)):
+`scripts/oort backup` 과 `scripts/oort restore <dump>`. 복원은 메시지가
+이미 있는 스택을 거부한다. dest 에 런타임 롤(`momo_app`/`momo_relay`/
+`momo_worker`)이 없으면 `pg_restore` 앞에 compose 서비스 `runtime-roles`
+(`MOMO_RUNTIME_ROLE_PROVISION=1`)를 돌린다 — GRANT SQL 을 손으로 쓰지
+않는다. 래퍼는 아래 두 스크립트를 호출만 한다 (`pg_dump`/`pg_restore`
+호출부 신설 없음):
 
 ```sh
-scripts/self_host_pg_dump.sh --output-dir ./oort-backups
-scripts/self_host_pg_restore.sh --dump ./oort-backups/oort-pg.dump
+scripts/oort backup --out ./oort-backups
+scripts/oort restore ./oort-backups/oort-pg.dump --yes
 ```
 
 첨부는 `DRIVE_VOLUME_NAME`(기본 `oort-drive`)에 산다. 덤프와 그 볼륨을
 같이 가져간다. `down -v` 는 이 env가 이름 붙인 볼륨을 지운다.
 
-**로그** (SH-3b 전까지):
+**로그:** `scripts/oort logs api` (시크릿 값은 `***`). claim 모드의
+직접 compose 는 그대로 유효하다:
 
 ```sh
 scripts/self_host_env.sh --compose logs api
@@ -1357,7 +1380,7 @@ scripts/self_host_env.sh --compose logs relay
 | `stack.compose_ps` | 서비스 없음/unhealthy | 그 서비스에 `--compose ps` / `logs`. claim 모드: `oort_compose`. `runtime-roles` 종료코드 1에 `password authentication failed for user "momo"` 는 남은 pgdata vs 새로 만든 env — `down -v`, env 삭제, §2.3 다시 (또는 **원래** env로 `up` 재시도). |
 | `stack.healthz` | 200 `database:ok` 아님 | `logs api`. |
 | `stack.agent_port` | 401 + Bearer scope 아님 | 잘못된 이미지. `releases/latest.json` 확인. |
-| `stack.outbox` | `done`이 아닌 행 | pending/failed면 `logs relay`. |
+| `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 실패가 아니다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). 다른 kind: pending/failed면 `logs relay`. |
 | `stack.migrate_idempotency` | `IDEMPOTENCY_OK` 없음 | `logs migrate`. |
 | `public.healthz` / `public.websocket` | 공개 오리진은 등록됐는데 200/101 없음 | 터널/Caddy와 `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 1회 재시작. |
 
