@@ -215,12 +215,12 @@ OLD_SECRET="fixture-old-cent-proxy-secret-1329"
 SENTINEL_SECRET="h1-review-secret-sentinel-must-never-be-read-or-printed"
 printf 'MOMO_ENV=test\nCENT_PROXY_SECRET=%s\n' "$CURRENT_SECRET" > "$HOST_ENV"
 printf 'CENT_PROXY_SECRET=%s\n' "$OLD_SECRET" > "$OLD_ENV"
-printf 'MOMO_ENV=production\nCENT_PROXY_SECRET=%s\n' "$CURRENT_SECRET" > "$PROD_ENV"
-printf 'MOMO_ENV=production\nCENT_PROXY_SECRET=%s\n' "$SENTINEL_SECRET" > "$SENTINEL_ENV"
+printf 'MOMO_ENV=production\nCENT_PROXY_SECRET=%s\nOORT_SITE_ADDRESS=edge.example.test\n' "$CURRENT_SECRET" > "$PROD_ENV"
+printf 'MOMO_ENV=production\nCENT_PROXY_SECRET=%s\nOORT_SITE_ADDRESS=edge.example.test\n' "$SENTINEL_SECRET" > "$SENTINEL_ENV"
 chmod 600 "$HOST_ENV" "$OLD_ENV" "$PROD_ENV" "$SENTINEL_ENV"
 
 REAL_GREP="$(command -v grep)"
-TRUSTED_PROD_ORIGIN="https://app.oor7.com"
+TRUSTED_PROD_ORIGIN="https://edge.example.test"
 TRUSTED_TEST_ORIGIN="http://127.0.0.1:28443"
 EXPECTED_SUBSCRIBE_URL="${TRUSTED_TEST_ORIGIN}/v1/centrifugo/subscribe"
 TOOL_LOG="$TMP_ROOT/tool.log"
@@ -247,21 +247,21 @@ reject_untrusted_origin_without_io() {
 }
 
 reject_untrusted_origin_without_io attacker 'https://attacker.example'
-reject_untrusted_origin_without_io typo 'https://app.oor7.co'
-reject_untrusted_origin_without_io wrong-port 'https://app.oor7.com:443'
-reject_untrusted_origin_without_io userinfo 'https://operator:credential@app.oor7.com'
-reject_untrusted_origin_without_io path 'https://app.oor7.com/v1'
-reject_untrusted_origin_without_io query 'https://app.oor7.com?next=attacker'
-reject_untrusted_origin_without_io fragment 'https://app.oor7.com#attacker'
-reject_untrusted_origin_without_io punycode 'https://xn--oor7-9za.example'
-reject_untrusted_origin_without_io trailing-slash 'https://app.oor7.com/'
+reject_untrusted_origin_without_io typo 'https://edge.example.tes'
+reject_untrusted_origin_without_io wrong-port 'https://edge.example.test:443'
+reject_untrusted_origin_without_io userinfo 'https://operator:credential@edge.example.test'
+reject_untrusted_origin_without_io path 'https://edge.example.test/v1'
+reject_untrusted_origin_without_io query 'https://edge.example.test?next=attacker'
+reject_untrusted_origin_without_io fragment 'https://edge.example.test#attacker'
+reject_untrusted_origin_without_io punycode 'https://xn--edge-9za.example'
+reject_untrusted_origin_without_io trailing-slash 'https://edge.example.test/'
 pass "attacker/typo/port/userinfo/path/query/fragment/punycode origins are network-zero before secret read"
 
 BAD_ROOT="$TMP_ROOT/bad-runtime-root"
 mkdir -p "$BAD_ROOT/scripts" "$BAD_ROOT/infra/rust"
 cp "$RUNTIME" "$BAD_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
 cp infra/rust/docker-compose.rust.yml "$BAD_ROOT/infra/rust/docker-compose.rust.yml"
-printf 'app.oor7.com {\nsecond.example.com {\n' > "$BAD_ROOT/infra/rust/Caddyfile"
+printf 'edge.example.test {\nsecond.example.test {\n' > "$BAD_ROOT/infra/rust/Caddyfile"
 chmod +x "$BAD_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
 : > "$TOOL_LOG"
 BAD_CADDY_LOG="$TMP_ROOT/runtime-bad-caddy.log"
@@ -275,6 +275,32 @@ grep -Fq 'canonical_caddy_site_count' "$BAD_CADDY_LOG" \
   || fail "ambiguous canonical Caddy sites did not fail by name"
 [ ! -s "$TOOL_LOG" ] || fail "canonical Caddy parse failure performed secret/docker/curl I/O"
 pass "canonical Caddy ambiguity is network-zero before secret read"
+
+HARDCODED_TREE="$TMP_ROOT/hardcoded-site"
+mkdir -p "$HARDCODED_TREE/scripts" "$HARDCODED_TREE/infra/rust"
+cp "$RUNTIME" "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+cp infra/rust/docker-compose.rust.yml "$HARDCODED_TREE/infra/rust/docker-compose.rust.yml"
+{
+  printf 'evil.example.test {\n'
+  cat infra/rust/Caddyfile
+} > "$HARDCODED_TREE/infra/rust/Caddyfile"
+chmod +x "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+: > "$TOOL_LOG"
+HARDCODED_LOG="$TMP_ROOT/runtime-hardcoded-site.log"
+if PATH="$FAKE_BIN:$PATH" FAKE_REAL_GREP="$REAL_GREP" FAKE_TOOL_LOG="$TOOL_LOG" \
+  "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh" \
+    --env-file "$SENTINEL_ENV" --edge-url "$TRUSTED_PROD_ORIGIN" \
+    --evidence-dir "$TMP_ROOT/evidence-hardcoded-site" > "$HARDCODED_LOG" 2>&1; then
+  fail "runtime accepted a hardcoded extra site next to the placeholder"
+fi
+grep -Fq 'canonical_caddy_site_count expected=1 actual=' "$HARDCODED_LOG" \
+  || fail "hardcoded extra site did not fail by site count"
+hardcoded_actual="$(awk '/canonical_caddy_site_count expected=1 actual=/ {
+  for (i = 1; i <= NF; i++) if ($i ~ /^actual=/) { sub(/^actual=/, "", $i); print $i }
+}' "$HARDCODED_LOG")"
+[ "$hardcoded_actual" != "1" ] || fail "hardcoded extra site still reported site count 1"
+[ ! -s "$TOOL_LOG" ] || fail "hardcoded extra site performed secret/docker/curl I/O"
+pass "hardcoded extra site on the template is site count != 1 before secret read"
 
 reject_loopback_for_env() {
   local mode="$1"
@@ -417,7 +443,7 @@ prod_green_json="$(find "$TMP_ROOT/evidence-production-green" -name '*.json' -ty
 [ -n "$prod_green_json" ] || fail "production runtime did not write JSON evidence"
 jq -e '
   .result == "PASS"
-  and .edgeUrl == "https://app.oor7.com"
+  and .edgeUrl == "https://edge.example.test"
   and .trustedOriginSource == "canonical-caddy"
   and .redirectPolicy == "no-follow"
   and .edge == {noHeader:403, wrongSecret:403, currentSecret:403}
