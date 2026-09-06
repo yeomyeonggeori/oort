@@ -1328,8 +1328,11 @@ claim 모드: `--compose` 대신 `oort_compose` (§3.3.3). Grok Bot VM은
 **백업 / 복원** (PITR 아님; 정본
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)):
 `scripts/oort backup` 과 `scripts/oort restore <dump>`. 복원은 메시지가
-이미 있는 스택을 거부한다. 래퍼는 아래 두 스크립트를 호출만 한다
-(`pg_dump`/`pg_restore` 호출부 신설 없음):
+이미 있는 스택을 거부한다. dest 에 런타임 롤(`momo_app`/`momo_relay`/
+`momo_worker`)이 없으면 `pg_restore` 앞에 compose 서비스 `runtime-roles`
+(`MOMO_RUNTIME_ROLE_PROVISION=1`)를 돌린다 — GRANT SQL 을 손으로 쓰지
+않는다. 래퍼는 아래 두 스크립트를 호출만 한다 (`pg_dump`/`pg_restore`
+호출부 신설 없음):
 
 ```sh
 scripts/oort backup --out ./oort-backups

@@ -487,9 +487,44 @@ oort_restore_usage() {
   cat <<'EOF'
 Usage: scripts/oort restore <dump> [--yes] [--env FILE]
 
-Restores into an empty stack only (message count == 0). Calls
+Restores into an empty stack only (message count == 0). Ensures the
+destination has runtime roles (compose service runtime-roles) then calls
 scripts/self_host_pg_restore.sh. Never prints secrets.
 EOF
+}
+
+oort_runtime_roles_count() {
+  local user db out
+  user="$(oort_doctor_get POSTGRES_USER)"
+  db="$(oort_doctor_get POSTGRES_DB)"
+  [ -n "$user" ] || user=momo
+  [ -n "$db" ] || db=momo
+  out="$(oort_compose exec -T postgres \
+    psql -U "$user" -d "$db" -At -c \
+    "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" \
+    2>/dev/null || true)"
+  out="$(printf '%s' "$out" | tr -d '\r' | awk 'NF { print; exit }')"
+  if [ -z "$out" ]; then
+    return 1
+  fi
+  printf '%s' "$out"
+}
+
+oort_ensure_runtime_roles() {
+  local n
+  n="$(oort_runtime_roles_count || true)"
+  if [ "$n" = "3" ]; then
+    return 0
+  fi
+  printf 'oort restore: runtime roles absent (%s/3); running compose service runtime-roles\n' \
+    "${n:-0}"
+  if ! oort_compose run --rm runtime-roles; then
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+  fi
+  n="$(oort_runtime_roles_count || true)"
+  if [ "$n" != "3" ]; then
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are still absent after runtime-roles. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+  fi
 }
 
 oort_restore() {
@@ -556,6 +591,8 @@ oort_restore() {
   if [ "$count" -gt 0 ]; then
     oort_die "스택이 비어 있지 않다 (message count=${count}). 빈 스택에만 복원한다. 기존 데이터를 덮어쓰지 않는다."
   fi
+
+  oort_ensure_runtime_roles
 
   if oort_schema_present; then
     # shellcheck disable=SC2086

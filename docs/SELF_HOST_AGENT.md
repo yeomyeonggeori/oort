@@ -1363,8 +1363,12 @@ also re-checks `/workspace` binds and Funnel state (§3.3.8).
 **Backup / restore** (not PITR; see
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)):
 `scripts/oort backup` and `scripts/oort restore <dump>`. Restore refuses
-a stack that already has messages. The wrappers call the two scripts
-below (no second `pg_dump`/`pg_restore` call site):
+a stack that already has messages. If the dest lacks runtime roles
+(`momo_app`/`momo_relay`/`momo_worker`) it runs the compose service
+`runtime-roles` (`MOMO_RUNTIME_ROLE_PROVISION=1`) before
+`scripts/self_host_pg_restore.sh` — it does not hand-write GRANT SQL.
+The wrappers call the two scripts below (no second `pg_dump`/`pg_restore`
+call site):
 
 ```sh
 scripts/oort backup --out ./oort-backups

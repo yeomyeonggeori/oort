@@ -33,6 +33,8 @@ Commands:
 
   restore <dump> [--yes] [--env FILE]
       Restore via scripts/self_host_pg_restore.sh into an empty stack only.
+      Runs compose service runtime-roles first if momo_app/momo_relay/momo_worker
+      are absent.
 
   member invite [--role member] [--expires 24h]
   member credential --agent <handle> [--scopes s1,s2]
