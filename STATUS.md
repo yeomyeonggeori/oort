@@ -1,5 +1,17 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. ADR-0179 D3 정오표: 바닥 같은 틱 재생 상한 **3** (`MAX_SIMULTANEOUS_ARRIVALS`, `MAX_PENDING_ARRIVAL_GRANTS` 의 바닥 짝). Stagger 없음. 스크롤업 leftover 는 1.
+- 결정성. 같은 틱 3건은 virtuoso 마운트 + 바닥 신호(`jump-latest` 없음)를 기다린 뒤 재생 3을 잰다. 부하 30× (`--pool=threads --maxWorkers=1 --minWorkers=1` 측정, 동시에 full `vitest run`): 마운트만 기다리던 중간본 **2/30** (`expected 3, got 1`) · 바닥 대기 후 **0/30**. CI 원장: #2097 · #2099 · #2109 (`expected 1 to be 3`).
+- 상한. 가상화 `Timeline` 하네스: 10 같은 틱 → 재생 **3** · 정착 **7**. 50 → **3 / 47**. RED: `capArrivalSet(..., MAX_SIMULTANEOUS_ARRIVALS)` 삭제 → `expected 10 to be 3`.
+- M-1. 스크롤업 백로그 50 → 재생 **0**. 바닥 점프 → **1**. RED: `Timeline.tsx` sweep deps `[]` → `expected 1 playing rows, got 3 mounted=30`.
+- Nits. N-1 AST 상수-false ternary 0. N-4 `waitForAnimations(login)` 데스크톱 chat 샷 앞 삭제(reduce 캡처라 부하 없음). N-5 재재생이 나타나는 `MAX_CONSUMED_ARRIVAL_IDS` 값 **없음** (4에서도 0; `alreadyHeld` 가드). N-6 `isPlayEntrance` 대소문자 접힘(가상화 행 재생 1). N-7 이 원장.
+- Capture intro. 60프레임 로그: intro `{top:85,height:154}` · list `{top:85,height:2593}` · `scrollTop:0` · `vis:visible` 60/60 동일(1 pose). 표적 대기: item-list `visibility` + intro rect + `scrollTop`. `#2057 N-4` pre-existing 면제 삭제(`pressLedger` `.not.toMatch`). `CAPTURE_PORT=8641` 5연속 **exit 0**. 전 장면 5-동일은 **아님**: 371/528 byte-identical, 157는 accent 시안·hover 크롬 등 선행 비결정. intro nonempty sha 5회 모두 다름(호버 툴바가 피사체에 남음 → 포인터를 뷰포트 밖으로 + toolbar 0). 표적 대기 제거 RED는 이 호스트에서 중단 재현 안 됨(상자가 프레임 0부터 멎어 있음).
+- 게이트. web test 232/232 · 2784 passed. typecheck. lint 0 errors (15 warnings 선행). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. design-review는 이 워커가 하지 않음.
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+
+
 ## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
 
 - ADR-0181 D7. Leading row of `#general` (`channel.kind === "public" && channel.name === "general"`). Unique-kind slice of `CLOUD_BODIES` (3 marks, size/rotate/tone per body) + "팀이 준비하고 있어요". Decision is undefined until timeline backlog **and** directory/roster have `status === "success"`; unresolved author → do not show. First agent-authored message or `agent.partial` exits the stage (`--motion-standard`, fill `both`); that row plays `enter-conversation` once. Backstop `WELCOME_BACKSTOP_MS = 120_000` runs the same persist as opener exit (`clearFreshSignup` + shown-marker). Backstop card is one sentence: 「아직 준비하고 있어요. 진행 상황은 {label}에서 볼 수 있어요.」 with one in-sentence link whose text is exactly `AGENTS_NAV.label` (「에이전트」) and `href` is `AGENTS_NAV.to`. While the stage is mounted **or** the mount decision is still pending (fresh marker + roster/backlog not settled) the empty-state 「첫 메시지 쓰기」 CTA is not rendered; after a do-not-show decision it returns. Settings › 워크스페이스: operator-only `welcome_agent_member_id` / `welcome_prompt` (#1800 pattern); prompt has no `maxLength` (2000+ shows `WELCOME_PROMPT_LIMIT_SENTENCE` once and disables save); save error is the `role_labels` `<p class="text-meta text-danger" role="alert">` shape.
