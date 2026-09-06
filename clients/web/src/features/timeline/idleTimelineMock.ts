@@ -1,27 +1,26 @@
+import type { UseTimelineResult } from "./useTimeline";
+import { emptyTimeline } from "@momo/core/features/timeline/model";
+
 /**
- * Shared idle `useTimeline` mock (#2050 R3 N-3). ChatShell.intro / .skel
- * and markUnread.rollback.visit each held a hand-extended copy; ChatShell
- * reading `pinArrivalGrant` made all three drift. One helper, overrides
- * for state.
+ * Shared idle `useTimeline` mock (#2050 R3 N-3 / R4 N-3). ChatShell.intro /
+ * .skel and markUnread.rollback.visit each held a hand-extended copy;
+ * ChatShell reading `pinArrivalGrant` made all three drift. One helper,
+ * `satisfies UseTimelineResult` so a dropped member is a type error.
  */
 export function idleTimelineMock(
   over: {
-    state?: {
-      messages: unknown[];
-      oldestSeq: number | null;
-      newestSeq: number | null;
-    };
+    state?: UseTimelineResult["state"];
   } = {}
-) {
+): UseTimelineResult {
   return {
-    state: over.state ?? { messages: [], oldestSeq: null, newestSeq: null },
+    state: over.state ?? emptyTimeline(),
     status: "ready" as const,
     resume: { lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 },
     recoveryMarkers: [],
     pending: [],
     send: async () => undefined,
     resend: async () => undefined,
-    loadOlder: () => undefined,
+    loadOlder: async () => undefined,
     reload: () => undefined,
     loadingOlder: false,
     reachedStart: true,
@@ -39,5 +38,5 @@ export function idleTimelineMock(
     consumeEntrance: () => undefined,
     pinArrivalGrant: () => undefined,
     capUnmountedArrivals: () => undefined,
-  };
+  } satisfies UseTimelineResult;
 }
