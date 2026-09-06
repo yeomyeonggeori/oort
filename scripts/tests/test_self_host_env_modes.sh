@@ -189,6 +189,15 @@ grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49100 http://127.0.0.1:49100 tauri://localhost http://tauri.localhost' \
   "$local_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_CENTRIFUGO_WS_URL=same-origin' "$local_fixture/infra/rust/local.secrets.env"
+# #1926 — without --public-origin the public-edge keys stay absent.
+if grep -q '^OORT_SITE_ADDRESS=' "$local_fixture/infra/rust/local.secrets.env"; then
+  echo "local-build wrote OORT_SITE_ADDRESS without --public-origin" >&2
+  exit 1
+fi
+if grep -q '^OORT_CSP_CONNECT_SRC=' "$local_fixture/infra/rust/local.secrets.env"; then
+  echo "local-build wrote OORT_CSP_CONNECT_SRC without --public-origin" >&2
+  exit 1
+fi
 # #1696 / ADR-0169 — self-host default archive is a named local volume, not
 # stub (boot-refused in staging) and not Google SA.
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_BACKEND=local' "$local_fixture/infra/rust/local.secrets.env"
@@ -909,8 +918,51 @@ run_generator "$public_fixture" "$public_fixture/origin-again" 49700 \
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49700 http://127.0.0.1:49700 tauri://localhost http://tauri.localhost https://cursor.tailb1aad3.ts.net wss://cursor.tailb1aad3.ts.net' \
   "$public_fixture/infra/rust/local.secrets.env"
 grep -Fq '이미 있다 (멱등)' "$public_fixture/origin-again"
-test "$(grep -c 'https://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
-test "$(grep -c 'wss://cursor.tailb1aad3.ts.net' "$public_fixture/infra/rust/local.secrets.env")" -eq 1
+# #1926 — --public-origin maintenance writes three lines: one
+# CENTRIFUGO_ALLOWED_ORIGINS containing the origin once, one
+# OORT_CSP_CONNECT_SRC containing https://host and wss://host, one
+# OORT_SITE_ADDRESS; no wildcard. File-wide grep -c of the origin strings
+# is 2 because CSP repeats them — count per key instead.
+public_env="$public_fixture/infra/rust/local.secrets.env"
+test "$(grep -c '^CENTRIFUGO_ALLOWED_ORIGINS=' "$public_env")" -eq 1
+test "$(grep -c '^OORT_CSP_CONNECT_SRC=' "$public_env")" -eq 1
+test "$(grep -c '^OORT_SITE_ADDRESS=' "$public_env")" -eq 1
+grep -Fxq 'OORT_SITE_ADDRESS=cursor.tailb1aad3.ts.net' "$public_env"
+cent_line="$(grep '^CENTRIFUGO_ALLOWED_ORIGINS=' "$public_env")"
+case "$cent_line" in
+  *"https://cursor.tailb1aad3.ts.net"*) ;;
+  *)
+    echo "CENTRIFUGO_ALLOWED_ORIGINS missing https origin" >&2
+    exit 1
+    ;;
+esac
+https_in_cent="$(printf '%s\n' "$cent_line" | grep -o 'https://cursor.tailb1aad3.ts.net' | awk 'END { print NR + 0 }')"
+wss_in_cent="$(printf '%s\n' "$cent_line" | grep -o 'wss://cursor.tailb1aad3.ts.net' | awk 'END { print NR + 0 }')"
+test "$https_in_cent" -eq 1
+test "$wss_in_cent" -eq 1
+csp_raw="$(awk -F= '$1 == "OORT_CSP_CONNECT_SRC" { print substr($0, index($0, "=") + 1) }' "$public_env")"
+csp_val="$csp_raw"
+case "$csp_val" in
+  \"*\") csp_val="${csp_val#\"}"; csp_val="${csp_val%\"}" ;;
+esac
+case "$csp_val" in
+  *"https://cursor.tailb1aad3.ts.net"*) ;;
+  *)
+    echo "OORT_CSP_CONNECT_SRC missing https://host" >&2
+    exit 1
+    ;;
+esac
+case "$csp_val" in
+  *"wss://cursor.tailb1aad3.ts.net"*) ;;
+  *)
+    echo "OORT_CSP_CONNECT_SRC missing wss://host" >&2
+    exit 1
+    ;;
+esac
+if grep -E '^(CENTRIFUGO_ALLOWED_ORIGINS|OORT_CSP_CONNECT_SRC|OORT_SITE_ADDRESS)=' "$public_env" | grep -Fq '*'; then
+  echo "public-edge keys contain a wildcard" >&2
+  exit 1
+fi
 # #1788: same-origin is not demoted to an absolute public URL.
 grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
   "$public_fixture/infra/rust/local.secrets.env"
