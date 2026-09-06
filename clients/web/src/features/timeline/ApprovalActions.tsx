@@ -64,16 +64,31 @@ export type Armed = "approve" | "reject" | null;
 export const CONFIRM_GUARD_MS = 400;
 
 /**
+ * Suffix of the control whose handler reads `CONFIRM_GUARD_MS`.
+ * The armed row's `${testIdPrefix}-confirm` is a non-focusable container;
+ * the guard lives on the commit button. Capture keys the time-gate on
+ * that button, so a rename of this suffix moves the markup and the
+ * registry together.
+ */
+const TIME_GATED_CONTROL_SUFFIX = "commit";
+
+/** Test id of the interactive element `CONFIRM_GUARD_MS` actually gates. */
+// eslint-disable-next-line react-refresh/only-export-components -- same registry helper as TIME_GATED_CONTROLS; a rename must move with the markup.
+export function timeGatedTestId(testIdPrefix: string): string {
+  return `${testIdPrefix}-${TIME_GATED_CONTROL_SUFFIX}`;
+}
+
+/**
  * Click targets gated by `CONFIRM_GUARD_MS`. Capture consults this list
- * under `clock: "fixed"`. Not markup — a named export next to the constant
- * that gates them. Every ApprovalActions `${testIdPrefix}-confirm` must
- * appear here (the usage-site test in captureClock.test.ts walks callers).
+ * under `clock: "fixed"`. Derived from the same helper the commit button
+ * uses for `data-testid`, so a rename cannot drift. Every ApprovalActions
+ * caller prefix must appear here (the usage-site test walks callers).
  */
 // eslint-disable-next-line react-refresh/only-export-components -- allowConstantExport covers CONFIRM_GUARD_MS 리터럴만; as const 배열은 같은 자리의 레지스트리다.
 export const TIME_GATED_CONTROLS = [
-  "approval-confirm",
-  "inbox-approval-confirm",
-  "handoff-confirm",
+  timeGatedTestId("approval"),
+  timeGatedTestId("inbox-approval"),
+  timeGatedTestId("handoff"),
 ] as const;
 
 /**
@@ -443,7 +458,7 @@ export function ApprovalActions({
               size="sm"
               disabled={busy}
               ref={commitRef}
-              data-testid={`${testIdPrefix}-commit`}
+              data-testid={timeGatedTestId(testIdPrefix)}
               // (b) 눌린 채로 반복 발생한 keydown은 두 번째 의도가 아니라 하나의
               // 누름이다. 브라우저는 <button> 위의 Enter keydown마다 click을
               // 합성하므로, 여기서 막지 않으면 길게 누른 Enter가 무장과 확정을

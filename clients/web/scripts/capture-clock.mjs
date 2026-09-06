@@ -1,5 +1,5 @@
 /**
- * Capture-lane wall-clock policy (#2050 R4 M-4).
+ * Capture-lane wall-clock policy (#2050 R4 M-4 / R6 H-1).
  *
  * `pinPageWallClock` freezes `Date` on every capture page, so elapsed-time
  * gates (`ApprovalActions` `CONFIRM_GUARD_MS`) can never open. Scenes that
@@ -7,12 +7,16 @@
  * `fixed`. A fixed-clock scene that clicks a time-gated control aborts
  * with a sentence naming the scene and the control.
  *
- * The control registry is the product export `TIME_GATED_CONTROLS` next
- * to `CONFIRM_GUARD_MS`. Scene clicks go through `sceneClick`; wrap also
- * intercepts `page.locator(...).click()`, `keyboard.press("Enter"|" ")`,
- * `mouse.down()`/`up()`, and `locator.press` so click-equivalents cannot
- * open a time gate under a frozen Date. `setActiveCaptureScene` is set
- * from every screenshot path so the abort names the real scene.
+ * The control registry is the product export `TIME_GATED_CONTROLS`,
+ * derived from `timeGatedTestId` next to `CONFIRM_GUARD_MS` — the
+ * interactive element the guard actually gates (the `-commit` button),
+ * not the `-confirm` container. Scene clicks go through `sceneClick`;
+ * wrap also intercepts `page.locator(...).click()`,
+ * `keyboard.press("Enter"|" ")`, `mouse.down()`/`up()`, and
+ * `locator.press` so click-equivalents cannot open a time gate under a
+ * frozen Date. `beginCaptureScene` is set at scene start so pre-shot
+ * interactions are judged by the right scene; `clockForScene` reads
+ * that same name.
  */
 
 import { readFileSync } from "node:fs";
@@ -25,7 +29,21 @@ const APPROVAL_PATH = join(
 );
 
 /** @param {string} src */
+export function parseTimeGatedControlSuffix(src) {
+  const match = src.match(
+    /(?:const|export const) TIME_GATED_CONTROL_SUFFIX\s*=\s*"([^"]+)"/
+  );
+  if (!match) {
+    throw new Error(
+      "TIME_GATED_CONTROL_SUFFIX missing from ApprovalActions.tsx"
+    );
+  }
+  return match[1];
+}
+
+/** @param {string} src */
 export function parseTimeGatedControls(src) {
+  const suffix = parseTimeGatedControlSuffix(src);
   const match = src.match(
     /export const TIME_GATED_CONTROLS\s*=\s*\[([\s\S]*?)\]\s*as const/
   );
@@ -34,7 +52,15 @@ export function parseTimeGatedControls(src) {
       "TIME_GATED_CONTROLS export missing from ApprovalActions.tsx"
     );
   }
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((hit) => hit[1]);
+  const prefixes = [
+    ...match[1].matchAll(/timeGatedTestId\("([^"]+)"\)/g),
+  ].map((hit) => hit[1]);
+  if (prefixes.length === 0) {
+    throw new Error(
+      "TIME_GATED_CONTROLS must list timeGatedTestId(...) entries"
+    );
+  }
+  return prefixes.map((prefix) => `${prefix}-${suffix}`);
 }
 
 export const TIME_GATED_CONTROLS = parseTimeGatedControls(
@@ -58,12 +84,24 @@ export function setActiveCaptureScene(name) {
   activeScene = name;
 }
 
+/**
+ * Scene identity for the time-gate. Call at scene start, before any
+ * click/key/mouse, so pre-shot interactions are named by this scene.
+ * `clockForScene()` with no argument reads the same name.
+ *
+ * @param {string} name
+ */
+export function beginCaptureScene(name) {
+  setActiveCaptureScene(name);
+  return clockForScene();
+}
+
 export function activeCaptureScene() {
   return activeScene;
 }
 
-/** @param {string} sceneName */
-export function clockForScene(sceneName) {
+/** @param {string} [sceneName] */
+export function clockForScene(sceneName = activeScene) {
   return CAPTURE_SCENE_CLOCK[sceneName] ?? "fixed";
 }
 
@@ -126,7 +164,7 @@ export function installCaptureMouseEventDispatch() {
   };
 }
 
-async function readFocusedTestId(page) {
+export async function readFocusedTestId(page) {
   if (typeof page?.evaluate !== "function") return "";
   return page.evaluate(() => {
     const el = document.activeElement;
@@ -144,7 +182,11 @@ async function readTestIdAt(page, point) {
   return page.evaluate(({ x, y }) => {
     const el = document.elementFromPoint(x, y);
     if (!(el instanceof Element)) return "";
-    return el.closest("[data-testid]")?.getAttribute("data-testid") || "";
+    return (
+      el.getAttribute("data-testid") ||
+      el.closest("[data-testid]")?.getAttribute("data-testid") ||
+      ""
+    );
   }, point);
 }
 
@@ -218,14 +260,54 @@ export async function sceneMouseUp(page, options) {
 }
 
 /**
- * Node-side gate for an in-page `MouseEvent` dispatch. The page helper
- * `window.__oortDispatchMouseEvent` is installed by `wrapPageTimeGateClicks`.
+ * Node-side gate + dispatch for an in-page `MouseEvent`. The gated test
+ * id is read from the element the event will land on — callers pass the
+ * Playwright locator (or `"document"`), not a hand-written test id.
  *
  * @param {import("playwright").Page} page
- * @param {string} testId
+ * @param {import("playwright").Locator | "document"} locator
+ * @param {string} type
+ * @param {MouseEventInit} [init]
  */
-export async function sceneDispatchMouseEvent(page, testId) {
+export async function sceneDispatchMouseEvent(page, locator, type, init = {}) {
+  if (!page) {
+    throw new Error("sceneDispatchMouseEvent requires the Playwright page");
+  }
+  let testId = "";
+  if (locator === "document") {
+    testId = await page.evaluate(() => {
+      const el = document.documentElement;
+      return (
+        el.getAttribute("data-testid") ||
+        el.closest("[data-testid]")?.getAttribute("data-testid") ||
+        ""
+      );
+    });
+  } else if (locator && typeof locator.evaluate === "function") {
+    testId = await locator.evaluate((el) => {
+      if (!(el instanceof Element)) return "";
+      return (
+        el.getAttribute("data-testid") ||
+        el.closest("[data-testid]")?.getAttribute("data-testid") ||
+        ""
+      );
+    });
+  }
   abortIfFixedClockClicksTimeGate(activeCaptureScene(), testId);
+  if (locator === "document") {
+    await page.evaluate(({ type, init }) => {
+      window.__oortDispatchMouseEvent?.(document, type, init);
+    }, { type, init });
+    return;
+  }
+  if (locator && typeof locator.evaluate === "function") {
+    await locator.evaluate(
+      (el, packed) => {
+        window.__oortDispatchMouseEvent?.(el, packed.type, packed.init);
+      },
+      { type, init }
+    );
+  }
 }
 
 /**

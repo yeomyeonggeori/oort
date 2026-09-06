@@ -35,6 +35,7 @@ import {
   tickIntroSettle,
 } from "./capture-intro-settle.mjs";
 import {
+  beginCaptureScene,
   setActiveCaptureScene,
   wrapPageTimeGateClicks,
   sceneClick,
@@ -65,8 +66,9 @@ const VIEWPORT = { width: 1280, height: 800 };
  * (`ApprovalActions` `CONFIRM_GUARD_MS`) never open under the pin; a
  * fixed-clock scene that clicks a time-gated control aborts. Every
  * scene click goes through `sceneClick`; wrap also intercepts
- * `page.locator(...).click()`, Enter/Space, and mouse down/up. Every
- * screenshot sets the active scene from its path.
+ * `page.locator(...).click()`, Enter/Space, and mouse down/up. The
+ * active scene is set at scene start (`beginCaptureScene`), before
+ * any interaction; `clockForScene` reads that same name.
  * 2024-06-15T03:00:00.000Z = 12:00 KST.
  */
 const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
@@ -101,12 +103,20 @@ function claimShotPath(path) {
   return path;
 }
 
+function beginScene(name) {
+  beginCaptureScene(name);
+}
+
+function beginSceneFromShotPath(path) {
+  beginCaptureScene(sceneNameFromShotPath(path));
+  return path;
+}
+
 function wrapPageShotGuard(page) {
   const orig = page.screenshot.bind(page);
   page.screenshot = async (opts = {}) => {
     if (opts && opts.path) {
       claimShotPath(opts.path);
-      setActiveCaptureScene(sceneNameFromShotPath(opts.path));
     }
     return orig(opts);
   };
@@ -2705,6 +2715,7 @@ function isReadStatePut(request) {
  *   ④ 「읽음 처리」가 그 채널의 `latest_seq` 를 광고한다.
  */
 async function captureSidebarRowMenu(page, scheme, shots) {
+  beginScene("sidebar-row-menu");
   // 안 읽음이 있는 행을 고른다: 다섯 항목이 전부 서는 유일한 상태이고,
   // 「읽음 처리」를 누를 수 있는 유일한 행이다.
   const unreadChannelId = CHANNELS[1].id;
@@ -2761,7 +2772,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `행 메뉴 항목 ${scheme}: ${JSON.stringify(items)} (${JSON.stringify(expected)} 여야 함)`
     );
   }
-  const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
@@ -2826,7 +2837,12 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await menu.waitFor({ state: "hidden" });
 
   // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
-  await sceneDispatchMouseEvent(page, "");
+  await sceneDispatchMouseEvent(
+    page,
+    page.locator(`[data-channel-id="${unreadChannelId}"]`),
+    "contextmenu",
+    { bubbles: true, clientX: 40, clientY: 200 }
+  );
   await page.waitForFunction(
     (id) => {
       const target = document.querySelector(`[data-channel-id="${id}"]`);
@@ -2953,7 +2969,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `활성 행 위 열림 표식 대비 ${scheme}: ${JSON.stringify(marker)} (비텍스트 3:1 이상이어야 함)`
     );
   }
-  const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
+  const activeShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`);
   await page.screenshot({ path: activeShot });
   shots.push(activeShot);
   await page.keyboard.press("Escape");
@@ -3038,7 +3054,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `실패 뒤 항목 상태 ${scheme}: ${JSON.stringify(banner)} (잠금·진행 표시가 남으면 안 된다)`
     );
   }
-  const errorShot = `${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`;
+  const errorShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`);
   await page.screenshot({ path: errorShot });
   shots.push(errorShot);
   await page.keyboard.press("Escape");
@@ -3053,6 +3069,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
+  beginScene("sidebar-profile-card");
   await assertSectionActionsAtRest(page, scheme, "첫 줄");
 
   await captureSidebarRowMenu(page, scheme, shots);
@@ -3144,7 +3161,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `프로필 카드가 뷰포트 위로 새었다 ${scheme}: ${JSON.stringify(anchor)}`
     );
   }
-  const profileShot = `${OUT_DIR}/sidebar-profile-card-${scheme}.png`;
+  const profileShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-profile-card-${scheme}.png`);
   await page.screenshot({ path: profileShot });
   shots.push(profileShot);
 
@@ -3209,7 +3226,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `섹션 헤더 높이가 rest ${restHeader} → hover ${hoverHeader} 로 자랐다 ${scheme}`
     );
   }
-  const hoverShot = `${OUT_DIR}/sidebar-section-hover-${scheme}.png`;
+  const hoverShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-hover-${scheme}.png`);
   await page.screenshot({ path: hoverShot });
   shots.push(hoverShot);
 
@@ -3233,7 +3250,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `접힌 채널 섹션에 언리드 배지가 없다 ${scheme}: ${unreadText}`
     );
   }
-  const sectionShot = `${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`;
+  const sectionShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`);
   await page.screenshot({ path: sectionShot });
   shots.push(sectionShot);
   await page.getByTestId("section-collapse-channels").press("Enter");
@@ -3248,7 +3265,7 @@ async function captureSidebarD4(page, scheme, shots) {
       document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
-  const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
+  const collapsedShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-collapsed-${scheme}.png`);
   await page.screenshot({ path: collapsedShot });
   shots.push(collapsedShot);
   await sceneClick(page, page.getByTestId("sidebar-toggle"));
@@ -3302,6 +3319,7 @@ async function assertSectionControlSize(page, scheme, testId) {
  * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
  */
 async function captureCustomSection(page, scheme, shots) {
+  beginScene("sidebar-section-create");
   // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
   // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
   const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
@@ -3313,7 +3331,7 @@ async function captureCustomSection(page, scheme, shots) {
   const dialog = page.getByTestId("sidebar-section-name-dialog");
   await dialog.waitFor({ state: "visible" });
   await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
-  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  const createShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-create-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: createShot });
   shots.push(createShot);
@@ -3370,7 +3388,7 @@ async function captureCustomSection(page, scheme, shots) {
       `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
     );
   }
-  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
@@ -3409,7 +3427,7 @@ async function captureCustomSection(page, scheme, shots) {
 
   await assertSectionControlSize(page, scheme, "section-menu-sec-1");
   await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
-  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  const filledShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-custom-section-${scheme}.png`);
   await page.screenshot({ path: filledShot });
   shots.push(filledShot);
 
@@ -3444,7 +3462,7 @@ async function captureCustomSection(page, scheme, shots) {
   if (!confirmCopy.body.includes(LONG_NAME)) {
     throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
   }
-  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  const deleteShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-delete-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: deleteShot });
   shots.push(deleteShot);
@@ -3469,6 +3487,7 @@ async function captureCustomSection(page, scheme, shots) {
  * 없다.
  */
 async function captureSortDoor(page, scheme, shots) {
+  beginScene("sidebar-sort-menu");
   await page.getByTestId("sidebar-section-channels-header").hover();
   const door = page.getByTestId("sidebar-sort-menu");
   await door.waitFor({ state: "visible" });
@@ -3497,7 +3516,7 @@ async function captureSortDoor(page, scheme, shots) {
     throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
   }
   await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-sort-menu-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-sort-menu-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
   await page.keyboard.press("Escape");
@@ -3518,6 +3537,7 @@ async function captureSortDoor(page, scheme, shots) {
  * 「드롭 표지」가 수로 잰다.
  */
 async function captureSectionDropMarker(page, scheme, shots) {
+  beginScene("sidebar-drop-target");
   await page.evaluate(`(() => {
     const row = document.querySelector(
       '[data-testid="sidebar-section-channels"] [data-testid="channel-item"]'
@@ -3541,7 +3561,7 @@ async function captureSectionDropMarker(page, scheme, shots) {
     throw new Error(`드롭 표지 개수 ${scheme}: ${marked} (하나여야 함)`);
   }
   await assertNoHorizontalOverflow(page, `drop marker ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-drop-target-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-drop-target-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
@@ -3558,6 +3578,7 @@ async function captureSectionDropMarker(page, scheme, shots) {
  * 그대로 남는다(같은 함수의 섹션 만들기·지우기와 같은 규율).
  */
 async function captureStarredSection(page, scheme, shots) {
+  beginScene("sidebar-starred-section");
   const base = page
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
@@ -3595,7 +3616,7 @@ async function captureStarredSection(page, scheme, shots) {
     throw new Error(`별표 뒤 중복 행 ${scheme}: ${duplicated}`);
   }
   await assertNoHorizontalOverflow(page, `starred section ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-starred-section-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-starred-section-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
@@ -3624,6 +3645,7 @@ async function captureStarredSection(page, scheme, shots) {
  * 나가지 않았다」이고, 소실은 나간 PUT 이 만든다.
  */
 async function captureSidebarPrefsUnavailable(context, scheme, shots) {
+  beginScene("sidebar-prefs-unavailable");
   const page = await context.newPage();
   let puts = 0;
   await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
@@ -3654,7 +3676,7 @@ async function captureSidebarPrefsUnavailable(context, scheme, shots) {
     );
   }
 
-  const shot = `${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
@@ -4525,7 +4547,7 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     );
   }
   if (shots && scheme) {
-    const pointerShot = `${OUT_DIR}/terminal-pointer-${scheme}.png`;
+    const pointerShot = beginSceneFromShotPath(`${OUT_DIR}/terminal-pointer-${scheme}.png`);
     await page.screenshot({ path: pointerShot });
     shots.push(pointerShot);
   }
@@ -4552,7 +4574,7 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     );
   }
   if (shots && scheme) {
-    const focusShot = `${OUT_DIR}/terminal-focus-${scheme}.png`;
+    const focusShot = beginSceneFromShotPath(`${OUT_DIR}/terminal-focus-${scheme}.png`);
     await page.screenshot({ path: focusShot });
     shots.push(focusShot);
   }
@@ -4641,6 +4663,7 @@ async function assertMentionTrigger(page, where, ids) {
  * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
  */
 async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  beginScene(trigger.shot);
   const input = page.getByTestId(ids.input);
   await input.fill("");
   await sceneClick(page, input);
@@ -4680,7 +4703,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
     );
   }
   if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
-  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/${trigger.shot}-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
   console.log(
@@ -4710,6 +4733,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
  * 이 판을 만들 수 없다.
  */
 async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  beginScene("composer-emoji-catalog-error");
   const posted = [];
   const watch = (request) => {
     if (request.method() === "POST" && request.url().includes("/messages")) {
@@ -4755,7 +4779,7 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   ) {
     throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
   }
-  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
@@ -6552,6 +6576,7 @@ async function assertControlsAboveFold(page, where, ids) {
  * (두 열이 한 열이 되는 표면), 인박스(전역 표면의 헤더에 햄버거가 서는 자리).
  */
 async function captureMobile(browser, scheme) {
+  beginScene("mobile-login");
   const context = await browser.newContext({
     viewport: MOBILE_VIEWPORT,
     deviceScaleFactor: 3,
@@ -6567,7 +6592,7 @@ async function captureMobile(browser, scheme) {
   await installMocks(context);
   const shots = [];
   const shoot = async (page, name) => {
-    const path = `${OUT_DIR}/mobile-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/mobile-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
   };
@@ -7041,6 +7066,7 @@ async function captureMobile(browser, scheme) {
 }
 
 async function captureScheme(browser, scheme) {
+  beginScene("login");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -7059,12 +7085,12 @@ async function captureScheme(browser, scheme) {
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(login, scheme, {
     shoot: async (name) => {
-      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
       await login.screenshot({ path });
       shots.push(path);
     },
   });
-  const loginShot = `${OUT_DIR}/login-${scheme}.png`;
+  const loginShot = beginSceneFromShotPath(`${OUT_DIR}/login-${scheme}.png`);
   await assertWideRowsFillOnly(login, `connect ${scheme}`);
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
@@ -7072,6 +7098,7 @@ async function captureScheme(browser, scheme) {
   // 1a-2. 워크스페이스 칸을 펼친 상태 (goal B13 R2 High 1). 접어 둔 것이 "채우는
   //       법을 지운 것"이 아님을 보이는 프레임이다: 열면 라벨이 "워크스페이스 ID"
   //       이고 placeholder가 UUID 모양이라, 무엇을 넣는 칸인지 화면에서 읽힌다.
+  beginScene("login-workspace");
   await sceneClick(login, login.getByTestId("login-workspace-toggle"));
   await login.getByTestId("login-workspace").waitFor({ state: "visible" });
   const workspacePlaceholder = await login
@@ -7082,7 +7109,7 @@ async function captureScheme(browser, scheme) {
       `워크스페이스 칸이 형식을 보여주지 않는다 ${scheme}: ${workspacePlaceholder}`
     );
   }
-  const workspaceShot = `${OUT_DIR}/login-workspace-${scheme}.png`;
+  const workspaceShot = beginSceneFromShotPath(`${OUT_DIR}/login-workspace-${scheme}.png`);
   await login.screenshot({ path: workspaceShot });
   shots.push(workspaceShot);
   await sceneClick(login, login.getByTestId("login-workspace-toggle"));
@@ -7099,7 +7126,7 @@ async function captureScheme(browser, scheme) {
     waitUntil: "networkidle",
   });
   await invite.getByTestId("login-invite-code").waitFor({ state: "visible" });
-  const inviteShot = `${OUT_DIR}/connect-invite-${scheme}.png`;
+  const inviteShot = beginSceneFromShotPath(`${OUT_DIR}/connect-invite-${scheme}.png`);
   await invite.screenshot({ path: inviteShot });
   shots.push(inviteShot);
 
@@ -7108,7 +7135,7 @@ async function captureScheme(browser, scheme) {
   await profile.goto(ORIGIN, { waitUntil: "networkidle" });
   await shootOnboardingProfile(profile, scheme, {
     shoot: async (name) => {
-      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
       await profile.screenshot({ path });
       shots.push(path);
     },
@@ -7140,7 +7167,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-input").hover();
   await login.waitForTimeout(100);
   await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
-  const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
+  const chatShot = beginSceneFromShotPath(`${OUT_DIR}/chat-${scheme}.png`);
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
 
@@ -7154,7 +7181,7 @@ async function captureScheme(browser, scheme) {
   for (let index = 0; index < 4; index++) {
     await login.keyboard.press("Shift+Tab");
   }
-  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
+  const focusShot = beginSceneFromShotPath(`${OUT_DIR}/composer-focus-${scheme}.png`);
   await login.screenshot({ path: focusShot });
   shots.push(focusShot);
   await assertComposerVesselClick(login, scheme, {
@@ -7162,7 +7189,7 @@ async function captureScheme(browser, scheme) {
     actions: "composer-actions",
     frame: "composer-frame",
   });
-  const pointerShot = `${OUT_DIR}/composer-pointer-${scheme}.png`;
+  const pointerShot = beginSceneFromShotPath(`${OUT_DIR}/composer-pointer-${scheme}.png`);
   await login.screenshot({ path: pointerShot });
   shots.push(pointerShot);
 
@@ -7173,7 +7200,7 @@ async function captureScheme(browser, scheme) {
     trigger: "composer-mention-trigger",
     list: "composer-mention-list",
   });
-  const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
+  const mentionShot = beginSceneFromShotPath(`${OUT_DIR}/composer-mention-${scheme}.png`);
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
@@ -7263,7 +7290,7 @@ async function captureScheme(browser, scheme) {
       `컴포저 오프라인 disabled 의미 ${scheme}: ${JSON.stringify(offlineControls)}`
     );
   }
-  const composerOfflineShot = `${OUT_DIR}/composer-offline-${scheme}.png`;
+  const composerOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/composer-offline-${scheme}.png`);
   await login.screenshot({ path: composerOfflineShot });
   shots.push(composerOfflineShot);
   await context.setOffline(false);
@@ -7307,7 +7334,7 @@ async function captureScheme(browser, scheme) {
       buffer: Buffer.from("capture attachment"),
     });
   await login.getByTestId("attachment-chip-progress").waitFor({ state: "visible" });
-  const composerPendingShot = `${OUT_DIR}/composer-attachment-pending-${scheme}.png`;
+  const composerPendingShot = beginSceneFromShotPath(`${OUT_DIR}/composer-attachment-pending-${scheme}.png`);
   await login.screenshot({ path: composerPendingShot });
   shots.push(composerPendingShot);
   releaseComposerUpload();
@@ -7328,7 +7355,7 @@ async function captureScheme(browser, scheme) {
   const unfurlRemoveOpener = login.getByTestId("unfurl-remove");
   await sceneClick(login, unfurlRemoveOpener);
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "visible" });
-  const unfurlRemoveShot = `${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`;
+  const unfurlRemoveShot = beginSceneFromShotPath(`${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: unfurlRemoveShot });
   shots.push(unfurlRemoveShot);
@@ -7368,7 +7395,7 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoval
     .getByText("502가 계속 납니다.", { exact: false })
     .waitFor({ state: "visible" });
-  const unfurlRemovedShot = `${OUT_DIR}/unfurl-removed-${scheme}.png`;
+  const unfurlRemovedShot = beginSceneFromShotPath(`${OUT_DIR}/unfurl-removed-${scheme}.png`);
   await unfurlRemoval.screenshot({ path: unfurlRemovedShot });
   shots.push(unfurlRemovedShot);
 
@@ -7419,7 +7446,7 @@ async function captureScheme(browser, scheme) {
   await login.setViewportSize(VIEWPORT);
   await actionRow.hover();
   await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
-  const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
+  const actionsShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-actions-${scheme}.png`);
   await login.screenshot({ path: actionsShot });
   shots.push(actionsShot);
 
@@ -7586,7 +7613,7 @@ async function captureScheme(browser, scheme) {
     `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow} → ${backArrow}`
   );
   await login.waitForTimeout(300);
-  const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
+  const actionsFocusShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-actions-focus-${scheme}.png`);
   await login.screenshot({ path: actionsFocusShot });
   shots.push(actionsFocusShot);
 
@@ -7604,7 +7631,7 @@ async function captureScheme(browser, scheme) {
   await sceneKeyboardPress(login, "Enter");
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-action-menu-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: menuShot });
   shots.push(menuShot);
@@ -7659,7 +7686,7 @@ async function captureScheme(browser, scheme) {
   await sceneClick(login, actionRow, { button: "right", position: { x: 180, y: 24 } });
   await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
+  const contextShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-context-menu-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: contextShot });
   shots.push(contextShot);
@@ -7695,7 +7722,7 @@ async function captureScheme(browser, scheme) {
       `[편집 ${scheme}] 편집 중인 행에 액션 진입점이 ${triggerWhileEditing}개 남아 있다`
     );
   }
-  const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
+  const editShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-edit-${scheme}.png`);
   await login.screenshot({ path: editShot });
   shots.push(editShot);
   await sceneClick(login, login.getByTestId("message-editor-cancel"));
@@ -7707,7 +7734,7 @@ async function captureScheme(browser, scheme) {
   await sceneClick(login, login.getByTestId("menu-delete"));
   await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  const deleteShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-delete-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: deleteShot });
   shots.push(deleteShot);
@@ -7721,7 +7748,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  const pickerShot = beginSceneFromShotPath(`${OUT_DIR}/b11-reaction-picker-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
@@ -7741,7 +7768,7 @@ async function captureScheme(browser, scheme) {
     "composer-emoji-trigger",
     "composer-emoji-picker"
   );
-  const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
+  const composerEmojiShot = beginSceneFromShotPath(`${OUT_DIR}/u4-composer-emoji-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
@@ -7782,7 +7809,7 @@ async function captureScheme(browser, scheme) {
   await assertThreadRootHoverToolbar(login, scheme);
   // 호버 프레임은 자기 이름으로 찍고(#1753 N-1), 패리티 사진은 마우스를 치운
   // rest 상태로 되돌린다 — hover 잔상이 다른 목적의 사진에 앉지 않게.
-  const threadHoverShot = `${OUT_DIR}/thread-root-hover-${scheme}.png`;
+  const threadHoverShot = beginSceneFromShotPath(`${OUT_DIR}/thread-root-hover-${scheme}.png`);
   await login.screenshot({ path: threadHoverShot });
   shots.push(threadHoverShot);
   await login.mouse.move(8, 8);
@@ -7790,7 +7817,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("thread-panel")
     .getByTestId("message-hover-toolbar")
     .waitFor({ state: "detached" });
-  const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
+  const threadShot = beginSceneFromShotPath(`${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`);
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
   await login.keyboard.press("Escape");
@@ -7844,7 +7871,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("thread-empty").waitFor({ state: "visible" });
   await login.mouse.move(8, 8);
   await assertNoHorizontalOverflow(login, `thread empty ${scheme}`);
-  const threadEmptyShot = `${OUT_DIR}/thread-empty-${scheme}.png`;
+  const threadEmptyShot = beginSceneFromShotPath(`${OUT_DIR}/thread-empty-${scheme}.png`);
   await login.screenshot({ path: threadEmptyShot });
   shots.push(threadEmptyShot);
   await login.unroute("**/v1/workspaces/*/channels/*/messages/*/replies*");
@@ -7869,7 +7896,7 @@ async function captureScheme(browser, scheme) {
   // instant after focus catches the ring mid-interpolation and reviews a color
   // the product never rests on. Let it settle first.
   await login.waitForTimeout(300);
-  const createShot = `${OUT_DIR}/channel-create-${scheme}.png`;
+  const createShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createShot });
   shots.push(createShot);
@@ -7882,7 +7909,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("create-channel-name-error")
     .waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const createErrorShot = `${OUT_DIR}/channel-create-error-${scheme}.png`;
+  const createErrorShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-error-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createErrorShot });
   shots.push(createErrorShot);
@@ -7902,7 +7929,7 @@ async function captureScheme(browser, scheme) {
     .locator('[data-testid="create-channel-submit"][aria-busy="true"]')
     .waitFor({ state: "visible" });
   await login.waitForTimeout(200);
-  const createPendingShot = `${OUT_DIR}/channel-create-pending-${scheme}.png`;
+  const createPendingShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-pending-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createPendingShot });
   shots.push(createPendingShot);
@@ -7917,7 +7944,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
   await login.waitForTimeout(200);
-  const createOfflineShot = `${OUT_DIR}/channel-create-offline-${scheme}.png`;
+  const createOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-offline-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createOfflineShot });
   shots.push(createOfflineShot);
@@ -7937,7 +7964,7 @@ async function captureScheme(browser, scheme) {
   await emptyWorkspace.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(emptyWorkspace);
   await emptyWorkspace.getByTestId("chat-no-channel").waitFor({ state: "visible" });
-  const emptyShot = `${OUT_DIR}/workspace-empty-${scheme}.png`;
+  const emptyShot = beginSceneFromShotPath(`${OUT_DIR}/workspace-empty-${scheme}.png`);
   await emptyWorkspace.screenshot({ path: emptyShot });
   shots.push(emptyShot);
 
@@ -7960,7 +7987,7 @@ async function captureScheme(browser, scheme) {
   await nonAdmin.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(nonAdmin);
   await nonAdmin.getByTestId("chat-no-channel").waitFor({ state: "visible" });
-  const nonAdminShot = `${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`;
+  const nonAdminShot = beginSceneFromShotPath(`${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`);
   await nonAdmin.screenshot({ path: nonAdminShot });
   shots.push(nonAdminShot);
 
@@ -7996,7 +8023,7 @@ async function captureScheme(browser, scheme) {
     );
   }
   await memberSettings.waitForTimeout(250);
-  const memberSettingsShot = `${OUT_DIR}/settings-workspace-member-${scheme}.png`;
+  const memberSettingsShot = beginSceneFromShotPath(`${OUT_DIR}/settings-workspace-member-${scheme}.png`);
   await memberSettings.screenshot({ path: memberSettingsShot });
   shots.push(memberSettingsShot);
 
@@ -8007,7 +8034,7 @@ async function captureScheme(browser, scheme) {
   await signIn(directory);
   await directory.evaluate('location.hash = "/directory"');
   await directory.getByTestId("directory-row").first().waitFor({ state: "visible" });
-  const directoryShot = `${OUT_DIR}/directory-${scheme}.png`;
+  const directoryShot = beginSceneFromShotPath(`${OUT_DIR}/directory-${scheme}.png`);
   await directory.screenshot({ path: directoryShot });
   shots.push(directoryShot);
 
@@ -8018,7 +8045,7 @@ async function captureScheme(browser, scheme) {
   await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
   await directory.getByTestId("quick-switcher-input").fill("김");
   await directory.getByTestId("switcher-person").first().waitFor({ state: "visible" });
-  const switcherShot = `${OUT_DIR}/quick-switcher-people-${scheme}.png`;
+  const switcherShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-people-${scheme}.png`);
   await directory.screenshot({ path: switcherShot });
   shots.push(switcherShot);
   await directory.keyboard.press("Escape");
@@ -8032,7 +8059,7 @@ async function captureScheme(browser, scheme) {
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await assertPausedNoticeFolded(directory, `dm ${scheme}`);
-  const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
+  const dmShot = beginSceneFromShotPath(`${OUT_DIR}/dm-${scheme}.png`);
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
 
@@ -8046,14 +8073,14 @@ async function captureScheme(browser, scheme) {
   await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
   await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(agentHub, `agent hub ${scheme}`);
-  const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
+  const agentHubShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-${scheme}.png`);
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
   const toolsViewport = await frameEnabledToolsSection(
     agentHub,
     `agent-hub-tools ${scheme}`
   );
-  const agentHubToolsShot = `${OUT_DIR}/agent-hub-tools-${scheme}.png`;
+  const agentHubToolsShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-tools-${scheme}.png`);
   await agentHub.screenshot({ path: agentHubToolsShot });
   shots.push(agentHubToolsShot);
   await agentHub.setViewportSize(toolsViewport);
@@ -8074,7 +8101,7 @@ async function captureScheme(browser, scheme) {
   // 포커스 링은 transition-colors(150ms)를 타므로, 방금 포커스한 프레임을 찍으면
   // 제품이 한 번도 머무르지 않는 중간 색을 리뷰하게 된다.
   await agentHub.waitForTimeout(300);
-  const agentCreateShot = `${OUT_DIR}/agent-create-${scheme}.png`;
+  const agentCreateShot = beginSceneFromShotPath(`${OUT_DIR}/agent-create-${scheme}.png`);
   await agentHub.screenshot({ path: agentCreateShot });
   shots.push(agentCreateShot);
 
@@ -8086,7 +8113,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("create-agent-handle-error")
     .waitFor({ state: "visible" });
   await agentHub.waitForTimeout(300);
-  const agentCreateErrorShot = `${OUT_DIR}/agent-create-error-${scheme}.png`;
+  const agentCreateErrorShot = beginSceneFromShotPath(`${OUT_DIR}/agent-create-error-${scheme}.png`);
   await agentHub.screenshot({ path: agentCreateErrorShot });
   shots.push(agentCreateErrorShot);
   await sceneClick(agentHub, agentHub.getByTestId("create-agent-cancel"));
@@ -8110,7 +8137,7 @@ async function captureScheme(browser, scheme) {
   await readOnlyHub
     .getByTestId("agent-hub-edit-unsupported")
     .waitFor({ state: "visible" });
-  const agentHubReadOnlyShot = `${OUT_DIR}/agent-hub-readonly-${scheme}.png`;
+  const agentHubReadOnlyShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-readonly-${scheme}.png`);
   await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
   shots.push(agentHubReadOnlyShot);
 
@@ -8150,16 +8177,17 @@ async function captureScheme(browser, scheme) {
   await assertWideRowsFillOnly(approvals, `activity ${scheme}`);
   await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
   await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
-  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
+  const approvalsShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-${scheme}.png`);
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
 
+  beginScene("approvals-confirm");
   await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
   await approvals
     .getByTestId("inbox-approval-confirm")
     .first()
     .waitFor({ state: "visible" });
-  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
+  const approvalsConfirmShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-confirm-${scheme}.png`);
   await approvals.screenshot({ path: approvalsConfirmShot });
   shots.push(approvalsConfirmShot);
 
@@ -8179,7 +8207,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("inbox-approval-confirm")
     .first()
     .waitFor({ state: "visible" });
-  const spawnPickerShot = `${OUT_DIR}/approvals-host-picker-${scheme}.png`;
+  const spawnPickerShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-host-picker-${scheme}.png`);
   await approvals.screenshot({ path: spawnPickerShot });
   shots.push(spawnPickerShot);
 
@@ -8228,7 +8256,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("inbox-approval-host-blocked")
     .first()
     .waitFor({ state: "visible" });
-  const spawnBlockedShot = `${OUT_DIR}/approvals-host-blocked-${scheme}.png`;
+  const spawnBlockedShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-host-blocked-${scheme}.png`);
   await blockedPage.screenshot({ path: spawnBlockedShot });
   shots.push(spawnBlockedShot);
   await blockedPage.close();
@@ -8247,7 +8275,7 @@ async function captureScheme(browser, scheme) {
   // the image so the shot shows the OG card, not the muted skeleton.
   await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(turns, `agent-turns ${scheme}`);
-  const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
+  const turnsShot = beginSceneFromShotPath(`${OUT_DIR}/agent-turns-${scheme}.png`);
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
 
@@ -8264,7 +8292,7 @@ async function captureScheme(browser, scheme) {
     "cascade-notice",
     `agent-turns ${scheme}`
   );
-  const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
+  const cascadeShot = beginSceneFromShotPath(`${OUT_DIR}/cascade-notice-${scheme}.png`);
   await turns.screenshot({ path: cascadeShot });
   shots.push(cascadeShot);
 
@@ -8283,7 +8311,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("agent-turn-badge")
     .first()
     .waitFor({ state: "visible" });
-  const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
+  const turnsOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/agent-turns-offline-${scheme}.png`);
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
 
@@ -8305,7 +8333,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
   await assertWideRowsFillOnly(notificationsPage, `settings notifications ${scheme}`);
-  const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  const notificationsShot = beginSceneFromShotPath(`${OUT_DIR}/settings-notifications-${scheme}.png`);
   await parkPointerOffViewport(notificationsPage);
   await assertNotificationsDndRest(notificationsPage, scheme);
   await notificationsPage.screenshot({ path: notificationsShot });
@@ -8363,7 +8391,7 @@ async function captureScheme(browser, scheme) {
     throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
   }
   await assertWideRowsFillOnly(draftsPage, `drafts ${scheme}`);
-  const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
+  const draftsShot = beginSceneFromShotPath(`${OUT_DIR}/drafts-panel-${scheme}.png`);
   await draftsPage.screenshot({ path: draftsShot });
   shots.push(draftsShot);
   await draftsPage.close();
@@ -8385,7 +8413,7 @@ async function captureScheme(browser, scheme) {
     .first()
     .waitFor({ state: "visible" });
   await assertReminderOverflowClearsBodyText(remindersPage, `desktop ${scheme}`);
-  const remindersShot = `${OUT_DIR}/reminders-${scheme}.png`;
+  const remindersShot = beginSceneFromShotPath(`${OUT_DIR}/reminders-${scheme}.png`);
   await remindersPage.screenshot({ path: remindersShot });
   shots.push(remindersShot);
   await remindersPage.getByRole("heading", { name: "인박스" }).hover();
@@ -8401,7 +8429,7 @@ async function captureScheme(browser, scheme) {
   await settings.evaluate('location.hash = "/settings?section=code"');
   await settings.getByTestId("work-host-list").waitFor({ state: "visible" });
   await settings.getByTestId("work-tier-policy").waitFor({ state: "visible" });
-  const workHostShot = `${OUT_DIR}/settings-work-host-${scheme}.png`;
+  const workHostShot = beginSceneFromShotPath(`${OUT_DIR}/settings-work-host-${scheme}.png`);
   await settings.screenshot({ path: workHostShot });
   shots.push(workHostShot);
 
@@ -8412,7 +8440,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("work-tier-policy")
     .scrollIntoViewIfNeeded();
   await settings.waitForTimeout(200);
-  const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
+  const policyShot = beginSceneFromShotPath(`${OUT_DIR}/settings-work-host-policy-${scheme}.png`);
   await settings.screenshot({ path: policyShot });
   shots.push(policyShot);
 
@@ -8424,7 +8452,7 @@ async function captureScheme(browser, scheme) {
   await signIn(aiLink);
   await aiLink.evaluate('location.hash = "/settings?section=ai"');
   await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
-  const aiLinkShot = `${OUT_DIR}/settings-ai-chain-${scheme}.png`;
+  const aiLinkShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-${scheme}.png`);
   await aiLink.screenshot({ path: aiLinkShot });
   shots.push(aiLinkShot);
 
@@ -8432,7 +8460,7 @@ async function captureScheme(browser, scheme) {
   // is reviewed twice or the half nobody sees is the half that regresses.
   await aiLink.getByTestId("chain-add").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiEditShot = `${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`;
+  const aiEditShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`);
   await aiLink.screenshot({ path: aiEditShot });
   shots.push(aiEditShot);
 
@@ -8440,7 +8468,7 @@ async function captureScheme(browser, scheme) {
   //     dispositions and therefore all four status tones in one frame.
   await sceneClick(aiLink, aiLink.getByRole("button", { name: "연결 확인" }));
   await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
-  const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
+  const aiProbeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-${scheme}.png`);
   await aiLink.screenshot({ path: aiProbeShot });
   shots.push(aiProbeShot);
 
@@ -8453,7 +8481,7 @@ async function captureScheme(browser, scheme) {
   await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
   await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiNewRowShot = `${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`;
+  const aiNewRowShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`);
   await aiLink.screenshot({ path: aiNewRowShot });
   shots.push(aiNewRowShot);
 
@@ -8463,7 +8491,7 @@ async function captureScheme(browser, scheme) {
   //     of "3차".
   await aiLink.getByTestId("chain-probe-scope").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiPendingShot = `${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`;
+  const aiPendingShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`);
   await aiLink.screenshot({ path: aiPendingShot });
   shots.push(aiPendingShot);
 
@@ -8480,7 +8508,7 @@ async function captureScheme(browser, scheme) {
   await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
   await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
   await aiPartial.waitForTimeout(200);
-  const aiPartialShot = `${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`;
+  const aiPartialShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`);
   await aiPartial.screenshot({ path: aiPartialShot });
   shots.push(aiPartialShot);
 
@@ -8499,7 +8527,7 @@ async function captureScheme(browser, scheme) {
   await signIn(aiLegacy);
   await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
   await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
-  const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
+  const aiLegacyShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-no-chain-${scheme}.png`);
   await aiLegacy.screenshot({ path: aiLegacyShot });
   shots.push(aiLegacyShot);
 
@@ -8565,7 +8593,7 @@ async function captureScheme(browser, scheme) {
   await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
   await sceneClick(aiMock, aiMock.getByRole("button", { name: "연결 확인" }));
   await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
-  const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
+  const aiMockShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`);
   await aiMock.screenshot({ path: aiMockShot });
   shots.push(aiMockShot);
 
@@ -8638,7 +8666,7 @@ async function captureScheme(browser, scheme) {
       throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
     }
     await assertWideRowsFillOnly(settingsSweep, `settings ${name} ${scheme}`);
-    const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
+    const sectionShot = beginSceneFromShotPath(`${OUT_DIR}/settings-${name}-${scheme}.png`);
     await settingsSweep.screenshot({ path: sectionShot });
     shots.push(sectionShot);
   }
@@ -8662,7 +8690,7 @@ async function captureScheme(browser, scheme) {
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);
-  const revokeShot = `${OUT_DIR}/settings-webhooks-revoke-confirm-${scheme}.png`;
+  const revokeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-revoke-confirm-${scheme}.png`);
   await webhooks.screenshot({ path: revokeShot });
   shots.push(revokeShot);
 
@@ -8679,7 +8707,7 @@ async function captureScheme(browser, scheme) {
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);
-  const rotateShot = `${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`;
+  const rotateShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`);
   await webhooks.screenshot({ path: rotateShot });
   shots.push(rotateShot);
 
@@ -8693,7 +8721,7 @@ async function captureScheme(browser, scheme) {
   await sceneClick(webhooks, webhooks.getByTestId("webhook-create"));
   await webhooks.getByTestId("webhook-revealed").waitFor({ state: "visible" });
   await webhooks.waitForTimeout(200);
-  const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
+  const revealShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-created-${scheme}.png`);
   await webhooks.screenshot({ path: revealShot });
   shots.push(revealShot);
 
@@ -8713,7 +8741,7 @@ async function captureScheme(browser, scheme) {
 
   async function shootDevices(page, name) {
     await page.waitForTimeout(250);
-    const path = `${OUT_DIR}/settings-devices-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/settings-devices-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
   }
@@ -8835,7 +8863,7 @@ async function captureScheme(browser, scheme) {
     state: "visible",
   });
   await firstRun.waitForTimeout(250);
-  const firstRunShot = `${OUT_DIR}/onboarding-phone-link-${scheme}.png`;
+  const firstRunShot = beginSceneFromShotPath(`${OUT_DIR}/onboarding-phone-link-${scheme}.png`);
   await firstRun.screenshot({ path: firstRunShot });
   shots.push(firstRunShot);
   await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
@@ -8846,7 +8874,7 @@ async function captureScheme(browser, scheme) {
   await stress.goto(`${ORIGIN}/?stress=40`, { waitUntil: "networkidle" });
   await signIn(stress);
   await stress.getByTestId("timeline-message").first().waitFor({ state: "visible" });
-  const stressShot = `${OUT_DIR}/timeline-dense-${scheme}.png`;
+  const stressShot = beginSceneFromShotPath(`${OUT_DIR}/timeline-dense-${scheme}.png`);
   await stress.screenshot({ path: stressShot });
   shots.push(stressShot);
 
@@ -8863,7 +8891,7 @@ async function captureScheme(browser, scheme) {
   await scrollTimelineRowIntoView(b8, "message-markdown", `B8 ${scheme}`);
   await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
   await b8.waitForTimeout(200);
-  const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
+  const markdownShot = beginSceneFromShotPath(`${OUT_DIR}/b8-message-markdown-${scheme}.png`);
   await b8.screenshot({ path: markdownShot });
   shots.push(markdownShot);
 
@@ -8873,7 +8901,7 @@ async function captureScheme(browser, scheme) {
   await sceneClick(b8, b8.getByTestId("turn-failure-detail").first());
   await b8.waitForTimeout(200);
   await assertWideRowsFillOnly(b8, `b8-failure ${scheme}`);
-  const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
+  const failureShot = beginSceneFromShotPath(`${OUT_DIR}/b8-provider-failure-${scheme}.png`);
   await b8.screenshot({ path: failureShot });
   shots.push(failureShot);
 
@@ -8883,7 +8911,7 @@ async function captureScheme(browser, scheme) {
   await b8.getByTestId("composer-input").focus();
   await b8.getByTestId("composer-hint").waitFor({ state: "visible" });
   await b8.waitForTimeout(300);
-  const hintShot = `${OUT_DIR}/b8-composer-hint-${scheme}.png`;
+  const hintShot = beginSceneFromShotPath(`${OUT_DIR}/b8-composer-hint-${scheme}.png`);
   await b8.screenshot({ path: hintShot });
   shots.push(hintShot);
 
@@ -8894,7 +8922,7 @@ async function captureScheme(browser, scheme) {
   // and 15.1s in the product is a banner nobody can review.
   await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
   await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
-  const bannerShot = `${OUT_DIR}/b8-connection-banner-${scheme}.png`;
+  const bannerShot = beginSceneFromShotPath(`${OUT_DIR}/b8-connection-banner-${scheme}.png`);
   await b8.screenshot({ path: bannerShot });
   shots.push(bannerShot);
 
@@ -8905,7 +8933,7 @@ async function captureScheme(browser, scheme) {
   // wrap badly, and both are on screen in this one shot.
   await b8.setViewportSize({ width: 900, height: 800 });
   await b8.waitForTimeout(300);
-  const narrowShot = `${OUT_DIR}/b8-narrow-900-${scheme}.png`;
+  const narrowShot = beginSceneFromShotPath(`${OUT_DIR}/b8-narrow-900-${scheme}.png`);
   await b8.screenshot({ path: narrowShot });
   shots.push(narrowShot);
   const overflow900 = await b8.evaluate(
@@ -8936,6 +8964,7 @@ function reportUnmocked() {
 // 비교차를 잰다. ADE가 같은 work-sessions 키를 셸에서 읽으므로 로딩 장면은
 // networkidle을 기다리지 않는다.
 async function captureTerminalDockScenes(browser, scheme) {
+  beginScene("terminal-dock");
   const shots = [];
   const liveHostId = "019f994c-4ed0-76a9-9d43-a9bde45b8fcd";
   const dockSessions = [
@@ -9018,7 +9047,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     await assertComposerVisible(page, `terminal dock ${name} ${scheme}`);
     await assertDockAboveComposer(page, `terminal dock ${name} ${scheme}`);
     await assertDockExpandHonesty(page, `terminal dock ${name} ${scheme}`);
-    const path = `${OUT_DIR}/terminal-dock-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/terminal-dock-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9219,6 +9248,7 @@ function markUnreadReadStates(cleared) {
 }
 
 async function captureMarkUnreadScenes(browser, scheme) {
+  beginScene("mark-unread");
   const shots = [];
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -9304,7 +9334,7 @@ async function captureMarkUnreadScenes(browser, scheme) {
     undefined,
     { polling: "raf", timeout: 15_000 }
   );
-  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/mark-unread-timeline-${scheme}.png`);
   await page.screenshot({ path });
   shots.push(path);
   const state = await proof.jsonValue();
@@ -9337,6 +9367,7 @@ async function captureMarkUnreadScenes(browser, scheme) {
 // Arrival is driven through the product store path (`oort.capture.message.new`
 // → useTimeline applyBatch), not a stage prop.
 async function captureWelcomeKickoffScenes(browser, scheme) {
+  beginScene("welcome-arrived");
   const shots = [];
 
   async function openWelcome(reducedMotion, options = {}) {
@@ -9434,7 +9465,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("no-preference");
     await waitForWelcomeStage(page);
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-stage-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9444,7 +9475,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("reduce");
     await waitForWelcomeStage(page);
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-stage-reduce-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-reduce-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9483,7 +9514,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         )
     );
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-arrived-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-arrived-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9493,7 +9524,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("no-preference", {
       installClock: true,
     });
-    setActiveCaptureScene("welcome-backstop");
+    beginScene("welcome-backstop");
     try {
       await waitForWelcomeStage(page);
       await page.clock.fastForward(120_000);
@@ -9502,7 +9533,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       await waitForAnimations(page);
       const vp = page.viewportSize() ?? VIEWPORT;
       await page.mouse.move(vp.width + 80, vp.height + 80);
-      const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-backstop-${scheme}.png`);
       await page.screenshot({ path });
       shots.push(path);
       await context.close();
@@ -9515,6 +9546,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
 }
 
 async function captureSettingsWelcomeScenes(browser, scheme) {
+  beginScene("settings-welcome");
   const shots = [];
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -9553,7 +9585,7 @@ async function captureSettingsWelcomeScenes(browser, scheme) {
         box.right <= vw,
     };
   });
-  const path = `${OUT_DIR}/settings-welcome-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/settings-welcome-${scheme}.png`);
   if (frame.height > frame.vh) {
     console.info(
       `settings-welcome ${scheme}: block cannot fit (height ${frame.height} > vh ${frame.vh}); shooting the block element`
@@ -9578,6 +9610,7 @@ async function captureSettingsWelcomeScenes(browser, scheme) {
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
 async function captureEmptyConversationScenes(browser, scheme) {
+  beginScene("channel-intro-empty");
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
 
@@ -9608,7 +9641,7 @@ async function captureEmptyConversationScenes(browser, scheme) {
     // 이 goal 이 고친 것을 정확히 못 보이게 한다.
     await empty.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
     await page.waitForTimeout(200);
-    const path = `${OUT_DIR}/empty-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/empty-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9624,6 +9657,7 @@ async function captureEmptyConversationScenes(browser, scheme) {
 // general은 픽스처 16행이라 열자마자 reachedStart이고, 인트로는 바닥 정렬 때문에
 // 창 위에 있으므로 목록을 머리까지 올린 뒤에 찍는다.
 async function captureNonemptyChannelIntroScenes(browser, scheme) {
+  beginScene("channel-intro-nonempty");
   const shots = [];
   const CHANNEL_ID = CHANNELS[0].id;
 
@@ -9665,7 +9699,7 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   const vp = page.viewportSize() ?? VIEWPORT;
   await page.mouse.move(vp.width + 80, vp.height + 80);
   await assertHoverToolbarCount(page, `nonempty intro ${scheme}`, 0);
-  const path = `${OUT_DIR}/channel-intro-nonempty-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/channel-intro-nonempty-${scheme}.png`);
   await page.screenshot({ path });
   shots.push(path);
   await context.close();
@@ -9680,6 +9714,7 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
 // 칩은 죽은 컨트롤이다. 그래서 프레임을 찍기 전에 행 수를 센다 — 스크린샷은
 // 「목록이 안 바뀌었다」를 보여주지 못한다(MOBILE_TAP_TARGETS와 같은 이유).
 async function captureSearchScopeScenes(browser, scheme) {
+  beginScene("search-scope");
   const shots = [];
   const HERE = GENERAL_ID; // general
   const THERE = CHANNELS[1].id; // 엔진
@@ -9764,7 +9799,7 @@ async function captureSearchScopeScenes(browser, scheme) {
   }
   await assertWideRowsFillOnly(page, `search ${scheme}`);
   await page.waitForTimeout(200);
-  const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
+  const narrowShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-channel-${scheme}.png`);
   await page.screenshot({ path: narrowShot });
   shots.push(narrowShot);
 
@@ -9774,7 +9809,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
   );
   await page.waitForTimeout(200);
-  const wideShot = `${OUT_DIR}/search-scope-workspace-${scheme}.png`;
+  const wideShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-workspace-${scheme}.png`);
   await page.screenshot({ path: wideShot });
   shots.push(wideShot);
 
@@ -9804,7 +9839,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     );
   }
   await page.waitForTimeout(200);
-  const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
+  const emptyShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-empty-${scheme}.png`);
   await page.screenshot({ path: emptyShot });
   shots.push(emptyShot);
 
@@ -9845,7 +9880,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     throw new Error(`DM 칩이 「채널」이라 부른다 ${scheme}: ${dmChip}`);
   }
   await page.waitForTimeout(200);
-  const dmShot = `${OUT_DIR}/search-scope-dm-${scheme}.png`;
+  const dmShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-dm-${scheme}.png`);
   await page.screenshot({ path: dmShot });
   shots.push(dmShot);
 
@@ -9875,7 +9910,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     throw new Error(`긴 이름이 칩으로 새어 들어갔다 ${scheme}: ${longChip}`);
   }
   await page.waitForTimeout(200);
-  const longShot = `${OUT_DIR}/search-scope-long-name-${scheme}.png`;
+  const longShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-long-name-${scheme}.png`);
   await page.screenshot({ path: longShot });
   shots.push(longShot);
 
@@ -9886,6 +9921,7 @@ async function captureSearchScopeScenes(browser, scheme) {
 // #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
 // 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
 async function captureSetStatusScenes(browser, scheme) {
+  beginScene("set-status-dialog");
   const shots = [];
 
   async function shoot(name, { failPut = false, offline = false, customExpiry = false } = {}) {
@@ -9928,7 +9964,7 @@ async function captureSetStatusScenes(browser, scheme) {
     } else {
       await page.waitForTimeout(200);
     }
-    const path = `${OUT_DIR}/set-status-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/set-status-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9959,6 +9995,7 @@ async function captureSetStatusScenes(browser, scheme) {
 // 이 레인이 이름으로 집는 것은 그대로이고, 덕분에 이 레인은 강등된 문이 여전히
 // 열린다는 것까지 매 캡처마다 실제로 눌러 확인하는 자리가 됐다.
 async function captureAddMemberScenes(browser, scheme) {
+  beginScene("add-member");
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
 
@@ -10023,7 +10060,7 @@ async function captureAddMemberScenes(browser, scheme) {
       // 애니메이션은 reducedMotion으로 이미 꺼져 있다.
       await page.waitForTimeout(200);
     }
-    const path = `${OUT_DIR}/add-member-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/add-member-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -10085,6 +10122,7 @@ function hostedConnection(overrides = {}) {
 }
 
 async function captureHostedPairingScenes(browser, scheme) {
+  beginScene("hosted-pairing");
   const shots = [];
 
   /**
@@ -10113,7 +10151,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     await settle(page, context);
 
     const frame = async (suffix) => {
-      const path = `${OUT_DIR}/hosted-pairing-${suffix}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-pairing-${suffix}-${scheme}.png`);
       await page.screenshot({ path });
       shots.push(path);
     };
@@ -10443,6 +10481,7 @@ function disconnectConnection(overrides = {}) {
 }
 
 async function captureHostedDisconnectScenes(browser, scheme) {
+  beginScene("hosted-disconnect");
   const shots = [];
 
   // band 는 리뷰 루브릭 §11 phase 2 의 두 폭이다: 기본 1280, 그리고 사이드바가
@@ -10482,7 +10521,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     await settle(page, context);
 
     const frame = async (suffix) => {
-      const path = `${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`);
       await page.screenshot({ path });
       shots.push(path);
       if (band.tag) {
@@ -10768,6 +10807,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
 // 다른 게이트 닫힘이다. 벨 테스트는 이 파도에 없다.
 // =============================================================================
 async function captureHostedDoorbellScenes(browser, scheme) {
+  beginScene("hosted-doorbell");
   const shots = [];
   const connection = disconnectConnection({ status: "active" });
 
@@ -10791,7 +10831,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
     await sceneClick(page, page.getByTestId("agent-hub-tab-connection"));
     await page.getByTestId("hosted-doorbell-section").waitFor({ state: "visible" });
     await settle(page, context);
-    const path = `${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -10983,6 +11023,7 @@ async function waitForAnimations(page) {
  * (1 at skeleton, 0 at settled) and the settled frame on the inverse.
  */
 async function captureSkeletonReveal(browser, scheme) {
+  beginScene("skeleton-reveal");
   return captureSkeletonRevealAt(browser, scheme, VIEWPORT, "");
 }
 
@@ -10993,6 +11034,7 @@ async function captureSkeletonReveal(browser, scheme) {
  * on record; dark 390 is the same layout.
  */
 async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
+  beginScene(`skeleton-reveal${nameSuffix}`);
   const phone = viewport.width === MOBILE_VIEWPORT.width;
   const context = await browser.newContext({
     viewport,
@@ -11050,7 +11092,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
       .locator('[data-testid="inbox-route"] [data-ready="false"]')
       .waitFor({ state: "visible", timeout: 8_000 });
     await waitForAnimations(page);
-    const skeletonPath = `${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`;
+    const skeletonPath = beginSceneFromShotPath(`${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`);
     await screenshotSettled(page, skeletonPath);
     shots.push(skeletonPath);
     release();
@@ -11070,7 +11112,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
       .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
       .waitFor({ state: "visible" });
     await waitForAnimations(page);
-    const settledPath = `${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`;
+    const settledPath = beginSceneFromShotPath(`${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`);
     await screenshotSettled(page, settledPath);
     shots.push(settledPath);
     return shots;
@@ -11110,6 +11152,7 @@ const ACCENT_CAPTURE_ARGS = [
 ];
 
 async function captureAccentCandidates(_sharedBrowser, scheme) {
+  beginScene("accent-preview");
   const ids = accentCatalogIds();
   // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
   // launches (R3-M1). Software raster + no LCD keeps chrome visible and
@@ -11178,7 +11221,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
             requestAnimationFrame(() => requestAnimationFrame(resolve));
           })
       );
-      const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/accent-${id}-${scheme}.png`);
       await screenshotSettled(page, path);
       copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
       shots.push(path);
@@ -11192,6 +11235,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
 }
 
 async function captureConsent(browser, scheme) {
+  beginScene("consent");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -11207,7 +11251,7 @@ async function captureConsent(browser, scheme) {
     waitUntil: "networkidle",
   });
   await signin.getByTestId("oauth-consent-signin").waitFor({ state: "visible" });
-  const signinShot = `${OUT_DIR}/oauth-consent-signin-${scheme}.png`;
+  const signinShot = beginSceneFromShotPath(`${OUT_DIR}/oauth-consent-signin-${scheme}.png`);
   await signin.screenshot({ path: signinShot });
   shots.push(signinShot);
   await signin.close();
@@ -11229,7 +11273,7 @@ async function captureConsent(browser, scheme) {
     });
     await page.getByTestId(testId).waitFor({ state: "visible" });
     await assertNoHorizontalOverflow(page, `oauth-consent ${name} ${scheme}`);
-    const shot = `${OUT_DIR}/oauth-consent-${name}-${scheme}.png`;
+    const shot = beginSceneFromShotPath(`${OUT_DIR}/oauth-consent-${name}-${scheme}.png`);
     await page.screenshot({ path: shot });
     shots.push(shot);
   }
@@ -12095,9 +12139,8 @@ async function assertWideRowsFillOnly(page, label) {
 async function parkPointerOffViewport(page) {
   const vp = page.viewportSize() ?? { width: 1280, height: 800 };
   await page.mouse.move(vp.width + 80, vp.height + 80);
-  await sceneDispatchMouseEvent(page, "");
-  await page.evaluate(() => {
-    window.__oortDispatchMouseEvent?.(document, "mouseleave", { bubbles: true });
+  await sceneDispatchMouseEvent(page, "document", "mouseleave", {
+    bubbles: true,
   });
   await waitForAnimations(page);
 }
@@ -12303,6 +12346,7 @@ async function capturePressTriplet(
 
   const paths = [];
   for (const surface of surfaces) {
+    beginScene(`press-triplet-${surface}-rest`);
     const frame = page.getByTestId(`press-triplet-${surface}`);
     await frame.scrollIntoViewIfNeeded();
     const target = pressTripletTarget(page, surface);
@@ -12310,7 +12354,7 @@ async function capturePressTriplet(
 
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
-    const restPath = `${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`;
+    const restPath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: restPath,
       animations: "allow",
@@ -12318,9 +12362,10 @@ async function capturePressTriplet(
     });
     paths.push(restPath);
 
+    beginScene(`press-triplet-${surface}-hover`);
     await target.hover();
     await waitForAnimations(page);
-    const hoverPath = `${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`;
+    const hoverPath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: hoverPath,
       animations: "allow",
@@ -12341,6 +12386,7 @@ async function capturePressTriplet(
       );
     }
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    beginScene(`press-triplet-${surface}-active`);
     await sceneMouseDown(page);
     await waitForAnimations(page);
     if (hoverBg !== null) {
@@ -12353,7 +12399,7 @@ async function capturePressTriplet(
         );
       }
     }
-    const activePath = `${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`;
+    const activePath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: activePath,
       animations: "allow",
@@ -12378,6 +12424,7 @@ async function capturePressTriplet(
 }
 
 async function captureDesignGallery(browser, scheme) {
+  beginScene("design-gallery");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -12417,7 +12464,7 @@ async function captureDesignGallery(browser, scheme) {
     width: VIEWPORT.width,
     height: Math.max(VIEWPORT.height, contentHeight),
   });
-  const path = `${OUT_DIR}/design-gallery-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/design-gallery-${scheme}.png`);
   await page.screenshot({
     path,
     fullPage: false,
