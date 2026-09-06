@@ -1,5 +1,30 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R3)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. Worker does not claim design-review PASS.
+- B-1. jsdom 스크롤업→점프를 Chromium 레인으로 옮김 (`Timeline.burst.chromium.test.ts` + `timelineBurst.harness.tsx`, `detectChromium` + `it.skipIf`). 「3회 시작」 대기는 `animationstart` ×3 프로미스(천장=`animationend` before 3). 점프는 leftover grant=1 뒤 제품 `jump-latest` click, 같은 이벤트 천장. jsdom 은 같은 틱 3/3 · 10→3/7 · 50→3+mounted-settled+unmounted 만. 하네스는 첫 페인트 이후 `scrollTop` 을 쓰지 않음.
+- 부하 3×30 (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run`; `/tmp/r3-burst-2114/burst-{a,b,c}-{1..30}.log`). **fail/90, 반올림 없음:**
+
+| case | fail/90 | source |
+|---|---|---|
+| jsdom 같은 틱 3/3 | **1/90** | `burst-c-1.log`: `expected 3 playing rows, got 1 mounted=3` |
+| jsdom 10→재생 3 · 정착 7 | **0/90** | 90 exit 0 |
+| jsdom 50→재생 3 · mounted-settled (printed 27) · unmounted (printed 20) | **0/90** | 90 exit 0 |
+| jsdom 대소문자 접힘 | **0/90** | 90 exit 0 |
+| jsdom consumed 재전달 0 | **0/90** | 90 exit 0 |
+| Chromium `motion-enter-conversation` 3회 시작 | **0/90** | 90 exit 0 (R2 는 1/90) |
+| Chromium 스크롤업 50→점프 1 | **0/90** | 90 exit 0 (R2 는 5/90, `jump-latest missing`) |
+
+- H-1. 핀 후 라이브 배치 4건: opener grant 생존·1회 재생, 핀 해제 후 CH2 누수 0 (`useTimeline.arrival.test.tsx` · `WelcomeKickoff.product.test.tsx`). RED (`capArrivalSetKeeping` ignore `keep`): `expected false to be true` at opener `isPlayEntrance` / `enter-conversation` class.
+- M-2. `arrivalWiring.test.ts` 의 indent-exact `capArrivalSetKeeping` grep 삭제. `if (liveNew)` 코드는 유지. 스코핑은 REST 경로에서 행동적으로 무해(REST 배치는 grant 0, eviction 0) — R2 RED 는 공백만 깨는 가드였다.
+- M-3. 10/50 정착 행은 `enter-conversation` 클래스 없음 + `animation-name` 이 `motion-enter-conversation` 이 아님(`none`). `mounted−3` / `50−mounted` 항등식 단정 삭제, `console.info` 숫자만.
+- M-4. 장면 레지스트리 `clock: "fixed" | "flowing"` (기본 fixed). `welcome-backstop` 만 flowing. `wrapPageTimeGateClicks` 가 `inbox-approval-confirm` 클릭을 막음. RED: 고정 시계 장면 `chat` 에서 confirm click → `CAPTURE ABORT: scene "chat" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
+- Nits. N-1 `INTRO_SETTLE_FRAME_CEILING` 삭제. N-2 `tickIntroSettle` 공유. N-3 `idleTimelineMock`.
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: 488/528 identical, 40 differing. R2 HEAD-39에 없던 이름 14개는 전부 2/3 동일(1런 아웃라이어) — #2128 잔량 클래스, 면제 확대 없음. 37 pre-existing 장면은 #2128, 이 PR 무접촉.
+- 게이트. web test **235 files / 2797 passed**. typecheck. lint 0 errors (16 warnings: 15 선행 + burst harness `only-export-components`, welcome harness 와 동일). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` 는 커밋 후 실행.
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06, R2)
 
 - Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. ADR-0179 D3 정오표: 바닥 같은 틱 재생 상한 **3**. Stagger 없음. 스크롤업 leftover 는 1. 캡은 live `message.new` 배치에만 적용(REST head/load-more/backfill/own-send/edit 무접촉). 웰컴 opener grant 는 eviction 면제 (`pinArrivalGrant` + `holdEntranceId`).
