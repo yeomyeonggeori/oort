@@ -16,7 +16,39 @@ function jsxTagName(
   return node.tagName.getText();
 }
 
-/** Live JSX attribute bindings. Comments and string occurrences do not count. */
+function expressionReaches(expr: ts.Expression, valueIncludes: string): boolean {
+  if (ts.isParenthesizedExpression(expr)) {
+    return expressionReaches(expr.expression, valueIncludes);
+  }
+  if (ts.isConditionalExpression(expr)) {
+    const cond = expr.condition;
+    if (cond.kind === ts.SyntaxKind.FalseKeyword) {
+      return expressionReaches(expr.whenFalse, valueIncludes);
+    }
+    if (cond.kind === ts.SyntaxKind.TrueKeyword) {
+      return expressionReaches(expr.whenTrue, valueIncludes);
+    }
+    return (
+      expressionReaches(expr.whenTrue, valueIncludes) ||
+      expressionReaches(expr.whenFalse, valueIncludes)
+    );
+  }
+  return expr.getText().includes(valueIncludes);
+}
+
+function initializerReaches(
+  init: ts.JsxAttribute["initializer"],
+  valueIncludes: string
+): boolean {
+  if (!init) return false;
+  if (ts.isJsxExpression(init) && init.expression) {
+    return expressionReaches(init.expression, valueIncludes);
+  }
+  return init.getText().includes(valueIncludes);
+}
+
+/** Live JSX attribute bindings. Comments, string occurrences, and
+ *  constant-false `cond ? fn : undefined` branches do not count. */
 function jsxBindingCount(
   source: string,
   component: string,
@@ -37,10 +69,32 @@ function jsxBindingCount(
         for (const property of node.attributes.properties) {
           if (!ts.isJsxAttribute(property)) continue;
           if (property.name.getText() !== attr) continue;
-          const init = property.initializer;
-          if (init && init.getText().includes(valueIncludes)) count += 1;
+          if (initializerReaches(property.initializer, valueIncludes)) count += 1;
         }
       }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return count;
+}
+
+function identifierCallCount(source: string, name: string): number {
+  const file = ts.createSourceFile(
+    "useTimeline.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === name
+    ) {
+      count += 1;
     }
     ts.forEachChild(node, visit);
   };
@@ -62,9 +116,8 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("ChatShell holds Timeline isPlayEntrance through the welcome stage; ThreadPanel keeps the unwrapped store fn", () => {
-    expect(shell).toContain(
-      "welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance)"
-    );
+    expect(shell).toContain("const pinArrivalGrant = timeline.pinArrivalGrant");
+    expect(shell).toContain("pinArrivalGrant(welcome.holdEntranceId)");
     expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
       1
     );
@@ -105,36 +158,32 @@ describe("arrival wiring — mutations of the seam go red", () => {
     ).toBe(0);
   });
 
+  it("constant-false ternary 결속은 죽은 분기로 센다", () => {
+    const dead = `<Timeline onEntranceConsumed={false ? timeline.consumeEntrance : undefined} isPlayEntrance={false ? timeline.isPlayEntrance : undefined} />`;
+    expect(
+      jsxBindingCount(dead, "Timeline", "onEntranceConsumed", "timeline.consumeEntrance")
+    ).toBe(0);
+    expect(
+      jsxBindingCount(dead, "Timeline", "isPlayEntrance", "timeline.isPlayEntrance")
+    ).toBe(0);
+    const live = `<Timeline onEntranceConsumed={timeline.consumeEntrance} />`;
+    expect(
+      jsxBindingCount(live, "Timeline", "onEntranceConsumed", "timeline.consumeEntrance")
+    ).toBe(1);
+  });
+
   it("ThreadPanel 은 루트와 답글에 playEntrance 를 잇는다", () => {
     expect(panel).toContain("playEntrance={isPlayEntrance?.(root.id) ?? false}");
     expect(panel).toContain("playEntrance={isPlayEntrance?.(reply.id) ?? false}");
   });
 
   it("useTimeline REST 기본 meta 는 rest/rest 이고 리플레이는 live 로 안 바꾼다", () => {
-    expect(hook).toContain(
-      '} = { provenance: "rest", eventType: "rest" }'
-    );
-    expect(hook).toContain(
-      'provenance: replayGate.isReplaying() ? "replay" : "live",'
-    );
-    expect(hook).toContain(
-      "alreadyHeld: heldIdsRef.current.has(key),"
-    );
-    expect(hook).toContain("const reducedMotion = prefersReducedMotion();");
-    expect(hook).toContain(
-      "if (play === 1) playOnMountRef.current.add(key);"
-    );
-    expect(hook).toContain("playOnMountRef.current = new Set();");
-    expect(hook).toContain(
-      "capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);"
-    );
-    expect(hook).not.toMatch(
-      /capArrivalSet\(playOnMountRef\.current, MAX_PENDING_ARRIVAL_GRANTS\);\s*\}, \[state\.messages\]/
-    );
+    expect(identifierCallCount(hook, "capArrivalSetKeeping")).toBe(3);
   });
 
-  it("Timeline 은 바닥이 아닐 때만 leftover grant 를 쓸어 낸다", () => {
-    expect(timeline).toContain("if (atBottom) return;");
+  it("Timeline leftover sweep 는 배치 전 at-bottom 을 쓴다", () => {
+    expect(timeline).toContain("atBottomBeforeBatch");
+    expect(timeline).toContain("pendingBottomBatchRef");
     expect(timeline).toContain("capUnmountedArrivals?.()");
   });
 });

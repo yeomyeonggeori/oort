@@ -1,5 +1,101 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-07, R6)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard-only; **no product behaviour change**. Product-file edits are the `TIME_GATED_CONTROLS` export (same module as the guard) and a comment at `Timeline.tsx` `atBottomBeforeBatchRef`.
+- H-1. Registry names the gated interactive control: `timeGatedTestId(prefix)` → `${prefix}-commit` (the armed button, not the `-confirm` container). Real-lane RED in the fixed-clock `approvals-confirm` scene, scratch `page.keyboard.press("Enter")` on focused armed `-commit` and `page.locator('[data-testid=inbox-approval-commit]').click()` both abort `CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control [inbox-approval-commit] cannot open CONFIRM_GUARD_MS under a frozen Date`. Unit test drives the same resolver against rendered `ApprovalActions` (`captureClock.actions.test.tsx`); no hard-coded `evaluate` stub.
+- M-1. Usage-site set equality is keyed on the element's actual test id (AST of handlers that read `*_GUARD_MS`), not a `-confirm` suffix. S7f: unregistered `FOO_GUARD_MS` gating `foo-commit` → red (`+ foo-commit`); registered `timeGatedTestId("foo")` → 8/8 green; ghost registry entry → red (`- foo-commit`).
+- N-1. `sceneDispatchMouseEvent` reads the target's test id from the element it dispatches on (no hand-written argument).
+- N-2. `beginCaptureScene` at scene start (before any interaction); `wrapPageShotGuard` no longer sets the scene. `clockForScene()` reads the same name.
+- N-3. Comment at `atBottomBeforeBatchRef`: seeded `true`; 0–16 ms mount window; scrolled-up reader can get 1 play at mount (≤ D3's 3). No behaviour change.
+- N-4. Ten pre-existing `toContain` greps in the other `arrivalWiring.test.ts` `it`s left untouched (out of scope).
+- 부하 1×30 (both burst files, `--pool=threads --maxWorkers=1 --minWorkers=1`). **fail/30 = 0**, 11 tests/run.
+- Capture ×2 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×2). intro/chat/welcome-backstop sha identical to R5 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…` / `0c384e43c759…` / `f7f6e6fdec62…`). **499/528** identical, **29** differing ⊆ #2128 + R4/R5 host-nondeterminism class.
+- 게이트. web test **236 files / 2807 passed**. typecheck. lint 0 errors / 16 warnings. preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. UX-R1d/UX-R2b green. runtime-unverified 아님.
+
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R5)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS.
+- **제품 경로 재생 단정은 로컬 게이트·design-review의 Chromium 레인에서만; CI 유닛 레인은 grant 단정까지.** `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` → **51 skipped** / 2754 passed (R4 was 47; +4 burst-size Chromium cases).
+- H-1. jsdom 「consumed 장부」는 grant-set / 재전달 0 only — post-flush play count 없음. S15b (leftover sweep on every `messages` change) jsdom **5/5 green**. Cap 3→2 still reds Chromium `expected 3, got 2 before animationend` (10/20/30/50).
+- H-2. `captureClock.test.ts` usage-site **set equality** vs `TIME_GATED_CONTROLS`. Unregistered `FOO_GUARD_MS` + `foo-confirm` → `expected [approval-confirm, foo-confirm, handoff-confirm, inbox-approval-confirm] to equal [approval-confirm, handoff-confirm, inbox-approval-confirm]`. Register → green.
+- M-1 (only product-behaviour change). Exact sites: `Timeline.tsx` leftover sweep + `followOutput` read **pre-batch** at-bottom (`atBottomBeforeBatchRef` / `pendingBottomBatchRef`); `conversationEntrance.ts` consumes the grant on the first painted frame (unmount cancels, so virtuoso flash-mount does not spend it). 성재 2026-09-04: bottom same-tick → **3 play** regardless of batch size. Scroll-up still leftover 0 / jump 1 from the same pre-batch state. jsdom 50: pre-batch does **not** add a deterministic post-flush grant measurement (`issued=3` inside `act` only).
+- Burst-size Chromium plays (R4 → R5): **10/20/30 = 3/3/3 (unchanged); 50 = 1 → 3**.
+- M-2. Burst file headers + this STATUS line: product-path play assertions run only in the Chromium lane.
+- N-1. `keyboard.press("Enter"|" ")` / `mouse.down()`/`up()` / synthetic `MouseEvent` go through sceneClick-family. Self-test raw uses = 0. RED: raw `page.keyboard.press("Enter")` focused `inbox-approval-confirm` in scene `approvals-confirm` → `CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
+- N-2. `wrapPageShotGuard` calls `setActiveCaptureScene(sceneNameFromShotPath(path))` before every shot. Unit test uses `approvals-confirm`.
+- N-3. `arrivalWiring.test.ts` REST-meta `it` keeps only `identifierCallCount(..., "capArrivalSetKeeping") === 3`.
+- N-4. `eslint-disable-next-line react-refresh/only-export-components` on `TIME_GATED_CONTROLS` — lint **0 errors, 16 warnings**.
+- 부하 3×30 (both burst files, `--pool=threads --maxWorkers=1 --minWorkers=1`, concurrent full `vitest run`; `/tmp/r5-sab-2114/burst90`). **fail/90 = 0**, 11 tests/run (jsdom 5 + Chromium 6).
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro/chat **3-identical**, sha R2/R3/R4와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). **495/528** identical, **33** differing (21 on #2128 issue list; 12 extras same host-nondeterminism class as R4 — no exemption widened).
+- 게이트. web test **235 files / 2805 passed**. typecheck. lint 0 errors / 16 warnings. preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. UX-R1d/UX-R2b green. runtime-unverified 아님.
+
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R4)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard quality only; product behaviour unchanged.
+- Coverage split. **jsdom = grants** (issued inside the same `act` as `onMessage`, before leftover sweep). **Chromium = plays / computed styles / jump** (`animationstart` ×3, `animation-name: none`, `jump-latest` leftover=1 then start=1).
+- 부하 3×30 (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run` 12회; `/tmp/r4-burst-2114-h1b`). **fail/90, 반올림 없음:**
+
+| case | fail/90 | source |
+|---|---|---|
+| jsdom 같은 틱 라이브 3건 grant 3 | **0/90** | 90 exit 0 |
+| jsdom 10건 grant 3 · 나머지 클래스 정착 | **0/90** | 90 exit 0 |
+| jsdom 50건 grant 3 · mounted-settled class | **0/90** | 90 exit 0 |
+| jsdom 대소문자 접힘 | **0/90** | 90 exit 0 |
+| jsdom consumed 재전달 0 | **0/90** | 90 exit 0 |
+| Chromium `motion-enter-conversation` 3회 시작 | **0/90** | 90 exit 0 |
+| Chromium 스크롤업 50→점프 1 | **0/90** | 90 exit 0 |
+
+- First loaded 90 (pre-10/50 split) left jsdom 10-case plays at **1/90** (`burst-a-9.log`: `expected 1 to be 3` at `plays.length`) — same leftover sweep as R3's 3-case. Grant snapshot inside `act` moved that flake off jsdom. Isolation 90 before the split was already 0/90 on the 3-grant case.
+- H-1. 「같은 틱 라이브 3건」은 grant 3 (`isPlayEntrance`), not DOM plays. RED (skip `playOnMountRef.current.add`): `expected +0 to be 3` at `Timeline.burst.test.tsx:516`.
+- M-1. jsdom settled = class absence only (`animationName` always `""`). Computed `animation-name` / no `motion-enter-conversation` is Chromium. RED jsdom (give older row the class): `expected false to be true` at `isClassSettled`. RED Chromium (settled map returns the animation name): `expected true to be false` at `name.includes(ENTER_CONVERSATION_ANIMATION_NAME)`.
+- M-2. Channel B live 4 includes A's opener id. Opener `isPlayEntrance` false in B; B's three extras survive. RED (delete `pinnedEntranceRef.current = null`): `expected true to be false` at opener in B.
+- M-3. `arrivalWiring.test.ts` keeps `identifierCallCount(..., "capArrivalSetKeeping") === 3`. `if (liveNew)` grep gone. One-line reformat of the live-new cap call: 7/7 green.
+- M-4. Product `TIME_GATED_CONTROLS` next to `CONFIRM_GUARD_MS`. Usage-site AST over `*_GUARD_MS` + `testIdPrefix` on `<ApprovalActions>`. Every capture click via `sceneClick`; wrap also intercepts `page.locator(...).click()`. Converted: all 159 `.click(` in `capture-screens.mjs` (self-test: 0 remaining). Real lane RED (`page.locator("[data-testid=inbox-approval-confirm]").click()` after wrap in a fixed scene): `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: browser.newPage: CAPTURE ABORT: scene "default" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS under a frozen Date`.
+- Nits. N-1 jump dead-pill: `jump-latest click produced 0 motion-enter-conversation starts within 60 frames`. N-2 leftover: `leftover grants at jump gate: expected 1, got N`. N-3 `idleTimelineMock satisfies UseTimelineResult`. N-5: this host's 3-run residual is listed by name below; no 「전부 2/3 동일」 class claim.
+- Capture ×3 (`CAPTURE_PORT=8641`, `CAPTURE_PROFILE=all`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2/R3와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: **495/528** identical, **33** differing. vs `r2-base-vs-head-nondeterminism.txt` HEAD-39: 8 names not on that list (`agent-turns-offline-dark` · `b11-reaction-picker-light` · `composer-attachment-pending-light` · `mobile-long-token-dark` · `mobile-terminal-dock-light` · `u4-composer-emoji-light` · `u4-thread-composer-parity-dark` · `unfurl-remove-confirm-light`; each distinct=2 this sample). 3 of those were already in R3 extras and UNSTABLE ON BASE. #2128 잔량, 면제 확대 없음.
+- 게이트. web test **235 files / 2800 passed**. typecheck. lint 0 errors (17 warnings: 16 선행 + `TIME_GATED_CONTROLS` react-refresh). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R3)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. Worker does not claim design-review PASS.
+- B-1. jsdom 스크롤업→점프를 Chromium 레인으로 옮김 (`Timeline.burst.chromium.test.ts` + `timelineBurst.harness.tsx`, `detectChromium` + `it.skipIf`). 「3회 시작」 대기는 `animationstart` ×3 프로미스(천장=`animationend` before 3). 점프는 leftover grant=1 뒤 제품 `jump-latest` click, 같은 이벤트 천장. jsdom 은 같은 틱 3/3 · 10→3/7 · 50→3+mounted-settled+unmounted 만. 하네스는 첫 페인트 이후 `scrollTop` 을 쓰지 않음.
+- 부하 3×30 (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run`; `/tmp/r3-burst-2114/burst-{a,b,c}-{1..30}.log`). **fail/90, 반올림 없음:**
+
+| case | fail/90 | source |
+|---|---|---|
+| jsdom 같은 틱 3/3 | **1/90** | `burst-c-1.log`: `expected 3 playing rows, got 1 mounted=3` |
+| jsdom 10→재생 3 · 정착 7 | **0/90** | 90 exit 0 |
+| jsdom 50→재생 3 · mounted-settled (printed 27) · unmounted (printed 20) | **0/90** | 90 exit 0 |
+| jsdom 대소문자 접힘 | **0/90** | 90 exit 0 |
+| jsdom consumed 재전달 0 | **0/90** | 90 exit 0 |
+| Chromium `motion-enter-conversation` 3회 시작 | **0/90** | 90 exit 0 (R2 는 1/90) |
+| Chromium 스크롤업 50→점프 1 | **0/90** | 90 exit 0 (R2 는 5/90, `jump-latest missing`) |
+
+- H-1. 핀 후 라이브 배치 4건: opener grant 생존·1회 재생, 핀 해제 후 CH2 누수 0 (`useTimeline.arrival.test.tsx` · `WelcomeKickoff.product.test.tsx`). RED (`capArrivalSetKeeping` ignore `keep`): `expected false to be true` at opener `isPlayEntrance` / `enter-conversation` class.
+- M-2. `arrivalWiring.test.ts` 의 indent-exact `capArrivalSetKeeping` grep 삭제. `if (liveNew)` 코드는 유지. 스코핑은 REST 경로에서 행동적으로 무해(REST 배치는 grant 0, eviction 0) — R2 RED 는 공백만 깨는 가드였다.
+- M-3. 10/50 정착 행은 `enter-conversation` 클래스 없음 + `animation-name` 이 `motion-enter-conversation` 이 아님(`none`). `mounted−3` / `50−mounted` 항등식 단정 삭제, `console.info` 숫자만.
+- M-4. 장면 레지스트리 `clock: "fixed" | "flowing"` (기본 fixed). `welcome-backstop` 만 flowing. `wrapPageTimeGateClicks` 가 `inbox-approval-confirm` 클릭을 막음. RED: 고정 시계 장면 `chat` 에서 confirm click → `CAPTURE ABORT: scene "chat" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
+- Nits. N-1 `INTRO_SETTLE_FRAME_CEILING` 삭제. N-2 `tickIntroSettle` 공유. N-3 `idleTimelineMock`.
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: 488/528 identical, 40 differing. vs R2 HEAD-39 extras listed in the R3 PR body — #2128 잔량, 면제 확대 없음. 37 pre-existing 장면은 #2128, 이 PR 무접촉.
+- 게이트. web test **235 files / 2797 passed**. typecheck. lint 0 errors (16 warnings: 15 선행 + burst harness `only-export-components`, welcome harness 와 동일). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06, R2)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. ADR-0179 D3 정오표: 바닥 같은 틱 재생 상한 **3**. Stagger 없음. 스크롤업 leftover 는 1. 캡은 live `message.new` 배치에만 적용(REST head/load-more/backfill/own-send/edit 무접촉). 웰컴 opener grant 는 eviction 면제 (`pinArrivalGrant` + `holdEntranceId`).
+- 결정성. 같은 틱 3건은 virtuoso 마운트 + 제품 바닥 신호(`jump-latest` 없음) 뒤 재생 3. 부하 30× (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run`): 같은 틱 3/3 **0/30** · 스크롤업 50→점프 1 **0/30**. (R1 부하 1/30 은 `leaveBottom` 이 stubbed head index 를 요구한 자리.)
+- 상한. 가상화 `Timeline` 하네스: 10 같은 틱 → 재생 **3** · 정착 **7** · unmounted **0** (10 전부 마운트). 50 → 재생 **3** · mounted-settled **27** · unmounted **20** (mounted **30**). 47 정착은 산수이지 측정이 아님. RED: `mountedSettled === 47` → `expected 27 to be 47`.
+- M-1. 스크롤업 백로그 50 → 재생 **0**. 바닥 점프 → **1**. `jumpToLatest` 의 64px remaining 휴리스틱 삭제. 제품 신호는 `jump-latest` 필. jsdom 은 `scrollToIndex(LAST)` 뒤 `atBottom=true` 를 안 올려 필이 남을 수 있음 — 단정은 leftover 재생 1.
+- Nits. N-2 재생 수는 리터럴 `3` (제품 상수를 자기 자신과 대조하지 않음). N-1 `MAX_CONSUMED_ARRIVAL_IDS` 는 belt; `alreadyHeld` 가 재재생 문. N-4 `waitForAnimations(login)` 삭제는 회귀 아님. N-5 재재생 값 없음. N-6 대소문자 접힘.
+- Capture 시계. `FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0)` (12:00 KST). 픽스처 `Date.now()` 전부 이 상수. 페이지 시계는 `addInitScript` Date override (`pinPageWallClock`) — Playwright `page.clock.setFixedTime` 은 `performance`/rAF 까지 건드려 `assertWideRowsFillOnly` CDP `forcePseudoState` 가 stale nodeId 로 2/3 중단. Welcome-backstop 만 `page.clock.install` + `fastForward(120s)`.
+- Capture intro 정착. predicate = item-list 가 `hidden` 아님 ∧ intro rect ∧ `scrollTop` 이 `SETTLE_STABLE_FRAMES=3` 연속. 천장 60 (base 복구, 180 아님). **predicate first held at frame 3** (need 3, ceiling 60) — nonempty intro light/dark. 루프는 조건이 서는 즉시 종료. 주석 grep 가드 삭제; S8 는 vis/scrollTop 를 키에서 빼면 움직이는 장면이 거짓 정착, 실제 키는 안 선다.
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, 전부 exit 0). 전 장면 3-동일은 **아님**: **462/528** byte-identical, **66** 잔량 (면제 확대 없음). intro nonempty light/dark **3-동일** (`d1e1e410…` / `7f16f519…`). chat-light **3-동일**. chat-dark 는 2/3 동일(run3 만 다름) — R1 의 「호버 툴바가 intro sha 를 움직인다」는 거짓 원인(실측은 렌더된 벽시계). 잔량 사이트: `accent-*` 10장 (`waitUntilTokenPaint` 150ms 전이), `terminal-dock-loading-*` (로딩 애니), `b8-*` / `sidebar-section-hover-*` / composer·메뉴 hover 크롬. 호버 툴바 park 는 #1743 단정으로 남고 intro sha 원인으로 쓰지 않음.
+- 게이트. web test 233 files / 2790 passed. typecheck. lint 0 errors (15 warnings 선행). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. design-review는 이 워커가 하지 않음.
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
 ## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R3)
 
 - R3: `docs/SELF_HOST.md` When-stuck upgrade row plus `scripts/oort` / `oort_day2.sh` usage strings dropped the `<ref@sha256:…>` placeholder. Scanners count that token even as a placeholder (`scripts/check_release_manifest.sh` greps `docs/SELF_HOST*.md` + `README.md`; `test_publish_images_contract.py` greps `docs/SELF_HOST.md` only). AGENT docs had 0 hits. Code that *validates* a digest (`oort_extract_digest` / die regex) is unchanged.
@@ -47,8 +143,6 @@
 - `scripts/tests/test_public_edge.sh` 의 기동 거부는 compose `:?` (stderr `set OORT_SITE_ADDRESS`). `caddy adapt`/`validate` 미설정 실패는 부수 효과(`encode` 가 전역 옵션). `infra/rust/Caddyfile` 머리 주석도 같다.
 - 실측. R1 RED: `canonical_caddy_site_count expected=1 actual=0` / `untrusted origin did not fail by trust marker label=attacker`; `https-count=2` `wss-count=2` `modes_exit=1`. GREEN: `test_ncp_centrifugo_boundary_exit=0` `modes_exit=0` `test_public_edge_exit=0` `verify_ncp_centrifugo_contract_exit=0` `verify_web_serving_exit=0`. 스크래치: 템플릿에 `evil.example.test {` 추가 → `canonical_caddy_site_count expected=1 actual=2`. `OORT_CSP_CONNECT_SRC` write 삭제 → `csp_line_count=0` `csp_scratch_exit=1`. `scripts/local_gate.sh --profile docs` 는 `add_static_commands` 에 두 게이트가 들어 있다. 이 프로파일은 docker 스택이 아니라 compose config·정적 검사다. R2 `local_gate_docs_exit=1` 은 step 12/99 `check_compose_env_templates.sh` — `overlays.env.example` 에 R1 의 두 키가 없었다. R3 RED (pre-fix, 이미 측정): `required variable OORT_CSP_CONNECT_SRC is missing a value` / `required variable OORT_SITE_ADDRESS is missing a value`. GREEN: `[compose-env] PASS: 11 rendering(s)` `local_gate_docs_exit=0` (`LOCAL_GATE_ALLOW_DIRTY=1`, 99/99). `test_public_edge.sh` 는 example 파일을 읽지 않아 재실행하지 않음.
 - runtime-unverified: 실호스트 ACME.
-
-## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
 
 ## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
 

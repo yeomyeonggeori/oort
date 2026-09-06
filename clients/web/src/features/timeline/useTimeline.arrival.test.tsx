@@ -17,16 +17,24 @@ const CH2 = "00000000-0000-7000-8000-000000000003";
 const ME = "00000000-0000-7000-8000-0000000001ff";
 const OTHER = "00000000-0000-7000-8000-000000000101";
 
-const restPage = vi.hoisted(() => ({ messages: [] as unknown[] }));
+const restPage = vi.hoisted(() => ({
+  messages: [] as unknown[],
+  older: [] as unknown[],
+}));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
-    fetchMessages: vi.fn(async () => ({
-      messages: restPage.messages,
-      nextBefore: undefined,
-    })),
+    fetchMessages: vi.fn(async (_workspaceId, _channelId, opts?: { before?: number }) => {
+      if (opts?.before != null) {
+        return { messages: restPage.older, nextBefore: undefined };
+      }
+      return {
+        messages: restPage.messages,
+        nextBefore: restPage.older.length > 0 ? 1 : undefined,
+      };
+    }),
     fetchReactionSnapshot: vi.fn(async () => ({ reactions: [] })),
     fetchChannelPins: vi.fn(async () => ({ pins: [] })),
     fetchMessageUnfurls: vi.fn(async () => ({ unfurls: [] })),
@@ -56,8 +64,17 @@ const out: {
   isPlayEntrance: ((id: string) => boolean) | null;
   consume: ((id: string) => void) | null;
   capUnmountedArrivals: (() => void) | null;
+  pinArrivalGrant: ((id: string | null) => void) | null;
+  loadOlder: (() => Promise<void>) | null;
   messages: Message[];
-} = { isPlayEntrance: null, consume: null, capUnmountedArrivals: null, messages: [] };
+} = {
+  isPlayEntrance: null,
+  consume: null,
+  capUnmountedArrivals: null,
+  pinArrivalGrant: null,
+  loadOlder: null,
+  messages: [],
+};
 
 function Probe({ channelId }: { channelId: string }): ReactElement {
   const t = useTimeline(realtime, WS, channelId, ME);
@@ -65,6 +82,8 @@ function Probe({ channelId }: { channelId: string }): ReactElement {
     out.isPlayEntrance = t.isPlayEntrance;
     out.consume = t.consumeEntrance;
     out.capUnmountedArrivals = t.capUnmountedArrivals;
+    out.pinArrivalGrant = t.pinArrivalGrant;
+    out.loadOlder = t.loadOlder;
     out.messages = t.state.messages;
   });
   return createElement("div");
@@ -100,6 +119,7 @@ afterEach(() => {
   host = null;
   rail.handlers = null;
   restPage.messages = [];
+  restPage.older = [];
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: defaultMatchMedia,
@@ -186,6 +206,18 @@ describe("useTimeline arrival counts", () => {
     expect(out.isPlayEntrance?.(ID_LIVE)).toBe(false);
   });
 
+  it("isPlayEntrance 읽기는 대소문자를 접는다", async () => {
+    await mount();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    await act(async () => {
+      rail.handlers?.onMessage(frame(ID_LIVE.toUpperCase(), OTHER, 10));
+    });
+    expect(out.isPlayEntrance?.(ID_LIVE)).toBe(true);
+    expect(out.isPlayEntrance?.(ID_LIVE.toUpperCase())).toBe(true);
+  });
+
   it("자기 메시지 실시간 도착 = 0", async () => {
     await mount();
     await act(async () => {
@@ -256,9 +288,10 @@ describe("useTimeline arrival counts", () => {
       )
         granted += 1;
     }
-    // Paint must not evict: virtuoso mounts appended rows one commit later.
-    // Timeline calls capUnmountedArrivals when the reader is scrolled up.
-    expect(granted).toBe(50);
+    // Apply-batch keeps the newest 3 grants (bottom pair,
+    // MAX_SIMULTANEOUS_ARRIVALS). Timeline calls capUnmountedArrivals when
+    // the reader is scrolled up, which then leaves MAX_PENDING_ARRIVAL_GRANTS.
+    expect(granted).toBe(3);
     act(() => out.capUnmountedArrivals?.());
     granted = 0;
     for (let i = 0; i < 50; i += 1) {
@@ -274,6 +307,89 @@ describe("useTimeline arrival counts", () => {
     expect(
       out.isPlayEntrance?.("0199dddd-0000-7000-8000-000000000449")
     ).toBe(true);
+  });
+
+  it("바닥 load-more 40건은 grant 0 이고 든 live grant 를 축출하지 않는다", async () => {
+    restPage.messages = [restMessage(ID_REST, 50)];
+    restPage.older = Array.from({ length: 40 }, (_, i) =>
+      restMessage(
+        `0199cccc-0000-7000-8000-0000000005${String(i).padStart(2, "0")}`,
+        i + 1
+      )
+    );
+    await mount();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    const live = [
+      "0199cccc-0000-7000-8000-000000000311",
+      "0199cccc-0000-7000-8000-000000000312",
+      "0199cccc-0000-7000-8000-000000000313",
+    ];
+    await act(async () => {
+      live.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 60 + i)));
+    });
+    expect(live.filter((id) => out.isPlayEntrance?.(id)).length).toBe(3);
+    await act(async () => {
+      await out.loadOlder?.();
+    });
+    expect(live.filter((id) => out.isPlayEntrance?.(id)).length).toBe(3);
+    expect(
+      restPage.older.filter((row) =>
+        out.isPlayEntrance?.((row as Message).id)
+      ).length
+    ).toBe(0);
+  });
+
+  it("핀 후 라이브 배치 4건이 와도 opener grant 는 남는다", async () => {
+    const opener = "0199cccc-0000-7000-8000-000000000401";
+    const extras = [
+      "0199cccc-0000-7000-8000-000000000402",
+      "0199cccc-0000-7000-8000-000000000403",
+      "0199cccc-0000-7000-8000-000000000404",
+      "0199cccc-0000-7000-8000-000000000405",
+    ];
+    await mount(CH);
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+      rail.handlers?.onMessage(frame(opener, OTHER, 30));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(true);
+    act(() => out.pinArrivalGrant?.(opener));
+    await act(async () => {
+      extras.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 31 + i)));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(true);
+    expect(extras.filter((id) => out.isPlayEntrance?.(id)).length).toBe(2);
+  });
+
+  it("채널 전환은 A 의 핀을 버려서 B 에서 외국 id 가 살아남지 않는다", async () => {
+    // The reset `pinnedEntranceRef.current = null` exists so a pin from A
+    // cannot protect a foreign id in B. Channel switch already empties
+    // playOnMount; a keep that is not in the set is a no-op. So B's live
+    // batch includes A's opener id — the leaked keep is then in the set
+    // and eviction differs: opener survives, B's oldest extra is dropped.
+    // Deleting the reset line makes opener isPlayEntrance true here.
+    const opener = "0199cccc-0000-7000-8000-000000000401";
+    const inB = [
+      opener,
+      "0199cccc-0000-7000-8000-000000000412",
+      "0199cccc-0000-7000-8000-000000000413",
+      "0199cccc-0000-7000-8000-000000000414",
+    ];
+    await mount(CH);
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+      rail.handlers?.onMessage(frame(opener, OTHER, 30));
+    });
+    act(() => out.pinArrivalGrant?.(opener));
+    await mount(CH2);
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+      inB.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 10 + i)));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(false);
+    expect(inB.slice(1).every((id) => out.isPlayEntrance?.(id))).toBe(true);
   });
 
   it("채널 전환은 남은 grant 를 버린다", async () => {
