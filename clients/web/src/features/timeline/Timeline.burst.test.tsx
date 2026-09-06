@@ -558,45 +558,58 @@ describe("virtualized Timeline same-tick live burst", () => {
     });
   }
 
-  it("바닥 같은 틱 10건은 재생 3 · 정착 7", async () => {
+  async function deliverLiveIssued(
+    ids: readonly string[],
+    seqStart: number,
+    body: string
+  ): Promise<number> {
+    let issued = 0;
+    await act(async () => {
+      for (let i = 0; i < ids.length; i += 1) {
+        rail.handlers?.onMessage(frame(ids[i]!, seqStart + i, `${body} ${i + 1}`));
+      }
+      issued = ids.filter((id) => probe.isPlayEntrance?.(id)).length;
+    });
+    return issued;
+  }
+
+  it("바닥 같은 틱 10건은 grant 3 · 나머지 클래스로 정착", async () => {
+    // Same coverage split as the 3-live case: jsdom leftover sweep can
+    // drop post-flush plays to 1 (loaded 1/90 at plays.length). Grants
+    // issued inside this act are deterministic. Plays live in
+    // Timeline.burst.chromium.test.ts.
     await mountBurst();
     const ids = arrivalIds(10);
-    await deliverLive(ids, 30, "바닥 동시 arrival");
+    const issued = await deliverLiveIssued(ids, 30, "바닥 동시 arrival");
+    expect(issued).toBe(3);
     await waitUntilRowsMounted(ids);
     const mounted = rowsFor(ids);
-    const plays = playingAmong(ids);
-    const mountedSettled = settledAmong(ids);
     const unmounted = ids.length - mounted.length;
     expect(mounted.length).toBe(10);
-    expect(plays.length).toBe(3);
     expect(unmounted).toBe(0);
-    const newest = ids.slice(-3);
     const older = ids.slice(0, ids.length - 3);
-    expect(playingAmong(newest).length).toBe(3);
     expect(playingAmong(older).length).toBe(0);
-    for (const row of mountedSettled) {
+    for (const row of rowsFor(older)) {
       expect(isClassSettled(row)).toBe(true);
     }
     console.info(
-      `10-case plays=${plays.length} mountedSettled=${mountedSettled.length} unmounted=${unmounted} mounted=${mounted.length}`
+      `10-case issued=${issued} mountedSettledOlder=${rowsFor(older).length} unmounted=${unmounted} mounted=${mounted.length}`
     );
   });
 
-  it("바닥 같은 틱 50건은 재생 3 · 마운트된 나머지만 정착으로 센다", async () => {
+  it("바닥 같은 틱 50건은 grant 3 · 마운트된 나머지만 정착으로 센다", async () => {
     await mountBurst();
     const ids = arrivalIds(50);
-    await deliverLive(ids, 40, "바닥 대량 arrival");
+    const issued = await deliverLiveIssued(ids, 40, "바닥 대량 arrival");
+    expect(issued).toBe(3);
     const newest = ids.slice(-3);
     await waitUntilRowsMounted(newest);
     const mounted = rowsFor(ids);
-    const plays = playingAmong(ids);
     const mountedSettled = settledAmong(ids);
     const unmounted = ids.length - mounted.length;
     console.info(
-      `50-case plays=${plays.length} mountedSettled=${mountedSettled.length} unmounted=${unmounted} mounted=${mounted.length}`
+      `50-case issued=${issued} mountedSettled=${mountedSettled.length} unmounted=${unmounted} mounted=${mounted.length}`
     );
-    expect(plays.length).toBe(3);
-    expect(playingAmong(newest).length).toBe(3);
     expect(mounted.length).toBeGreaterThanOrEqual(3);
     for (const row of mountedSettled) {
       expect(isClassSettled(row)).toBe(true);
