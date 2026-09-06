@@ -540,6 +540,11 @@ is refused ([two checkouts](#using-two-checkouts-at-once)).
 | Symptom | Cause and action |
 |---|---|
 | Judge first whether the install is stuck | `scripts/oort doctor` (`--json` if you need it). Tools, env, and stack as one verdict. If the stack is not up yet those checks skip and only the env side is judged. |
+| Day-2: is this stack healthy, current, behind? | `scripts/oort status` (`--json` if you need it). Same exit codes as doctor, plus image digest vs `releases/latest.json`. |
+| Day-2: read service logs without leaking secrets | `scripts/oort logs` `[service] [--since 10m] [--follow]`. Env secret keys, Bearer tokens, and postgres URL passwords are `***`. |
+| Day-2: replace the image (Update / new digest) | `scripts/oort upgrade` (`--to <image ref pinned by its list digest, read from releases/latest.json>` or `--manifest URL` or `--local-build`). Backs up first, refuses missing env/volumes, waits for `IDEMPOTENCY_OK`, then doctor PASS. Prints a rollback command on failure; never auto-rolls back; never `down -v`. |
+| Day-2: take or restore a dump | `scripts/oort backup` (`--out DIR`) and `scripts/oort restore <dump>`. Restore refuses a non-empty stack. If `momo_app`/`momo_relay`/`momo_worker` are absent it runs the stack's `runtime-roles` one-shot first, then `scripts/self_host_pg_restore.sh`. |
+| Day-2: invite a human or issue an agent bearer | `scripts/oort member invite` and `scripts/oort member credential --agent <handle>`. The invite code and agent token print once. |
 | Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
 | Sign-in says `invalid credentials` | Use the values step 2 told you (`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). To change the password, the rotate command below. |
 | The screen comes up but messages do not arrive in realtime | Check outbox first (query below). `broadcast \| done` means the server side is finished; look at the browser (`oort logs api`). `pending`/`failed` is relay (`oort logs relay`). |

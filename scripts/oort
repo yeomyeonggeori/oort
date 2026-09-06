@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # oort operator CLI dispatcher. bash 3.2, set -euo pipefail.
-# SH-3a implements `doctor` only. status/logs/upgrade/backup/member are SH-3b.
+# SH-3a: doctor. SH-3b: status/logs/upgrade/backup/restore/member.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -16,11 +16,29 @@ Commands:
       Self-host install verdict (tools, env, stack). Compose/env are read-only.
       Exit: 0 pass, 1 major-only, 2 any blocker. --strict promotes major to 2.
 
-  status    (SH-3b에서)
-  logs      (SH-3b에서)
-  upgrade   (SH-3b에서)
-  backup    (SH-3b에서)
-  member    (SH-3b에서)
+  status [--env FILE] [--json]
+      Compose health, /healthz, outbox, image digest vs releases/latest.json.
+      Exit codes match doctor.
+
+  logs [service] [--since 10m] [--follow] [--env FILE]
+      Compose logs with secret masking (env secret keys, Bearer, postgres URLs).
+
+  upgrade [--to <image ref pinned by its list digest, read from releases/latest.json>|--manifest URL|--local-build]
+          [--yes] [--no-backup] [--env FILE]
+      Backup, re-check volumes/env, pull/up, wait IDEMPOTENCY_OK, doctor PASS.
+      Prints a rollback command on failure. Never auto-rolls back.
+
+  backup [--out DIR] [--env FILE]
+      pg_dump via scripts/self_host_pg_dump.sh. Name includes version/time/digest.
+
+  restore <dump> [--yes] [--env FILE]
+      Restore via scripts/self_host_pg_restore.sh into an empty stack only.
+      Runs compose service runtime-roles first if momo_app/momo_relay/momo_worker
+      are absent.
+
+  member invite [--role member] [--expires 24h]
+  member credential --agent <handle> [--scopes s1,s2]
+      Operator REST. Invite code and agent bearer print once.
 
   help      Show this help.
 EOF
@@ -38,10 +56,21 @@ case "$cmd" in
     . "$SCRIPT_DIR/lib/oort_doctor.sh"
     oort_doctor "$@"
     ;;
-  status | logs | upgrade | backup | member)
-    printf 'scripts/oort %s 는 SH-3b에서 구현한다.\n' "$cmd" >&2
-    usage >&2
-    exit 2
+  status | logs | upgrade | backup | restore | member)
+    # shellcheck disable=SC1091
+    . "$SCRIPT_DIR/lib/oort_doctor.sh"
+    # shellcheck disable=SC1091
+    . "$SCRIPT_DIR/lib/oort_common.sh"
+    # shellcheck disable=SC1091
+    . "$SCRIPT_DIR/lib/oort_day2.sh"
+    case "$cmd" in
+      status) oort_status "$@" ;;
+      logs) oort_logs "$@" ;;
+      upgrade) oort_upgrade "$@" ;;
+      backup) oort_backup "$@" ;;
+      restore) oort_restore "$@" ;;
+      member) oort_member "$@" ;;
+    esac
     ;;
   help | -h | --help | '')
     usage
