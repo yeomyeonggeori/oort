@@ -643,9 +643,9 @@ livekit_csp_origins_from_env() {
 public_edge_csp_connect_src() {
   local origin="$1" ws extra token i=1
   ws="$(public_origin_websocket "$origin")"
-  extra="'self' ${origin} ${ws} https://www.googleapis.com"
+    extra="'self' ${origin} ${ws} https://www.googleapis.com"
   while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
-    origin="${PUBLIC_ORIGINS[$i]}"
+    origin="${PUBLIC_ORIGINS[i]}"
     extra="$(append_space_token "$extra" "$origin")"
     extra="$(append_space_token "$extra" "$(public_origin_websocket "$origin")")"
     i=$((i + 1))
@@ -679,7 +679,7 @@ normalize_requested_public_origins() {
   local i=0
   [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
   while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
-    PUBLIC_ORIGINS[$i]="$(normalize_public_origin "${PUBLIC_ORIGINS[$i]}")"
+    PUBLIC_ORIGINS[i]="$(normalize_public_origin "${PUBLIC_ORIGINS[i]}")"
     i=$((i + 1))
   done
 }
@@ -691,7 +691,7 @@ centrifugo_origins_with_public() {
     return 0
   }
   while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
-    origin="${PUBLIC_ORIGINS[$i]}"
+    origin="${PUBLIC_ORIGINS[i]}"
     ws_origin="$(public_origin_websocket "$origin")"
     current="$(append_space_token "$current" "$origin")"
     current="$(append_space_token "$current" "$ws_origin")"
