@@ -21,7 +21,7 @@ import {
   ENTER_CONVERSATION_ANIMATION_NAME,
   ENTER_CONVERSATION_CLASS,
 } from "@/design/motion";
-import { useTimeline } from "./useTimeline";
+import { useTimeline, MAX_SIMULTANEOUS_ARRIVALS } from "./useTimeline";
 import { Timeline } from "./Timeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 
@@ -86,18 +86,66 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 };
 
 type RafCallback = FrameRequestCallback;
-const rafQueue: RafCallback[] = [];
+const rafQueue: { id: number; cb: RafCallback }[] = [];
 let rafId = 0;
 
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 
+const VIEWPORT_HEIGHT = 800;
+const VIEWPORT_WIDTH = 640;
+const ITEM_HEIGHT = 48;
+
+function isScrollerEl(target: Element): boolean {
+  return (
+    target === host ||
+    (target instanceof HTMLElement &&
+      (target.dataset.testid === "timeline-virtuoso" ||
+        target.hasAttribute("data-virtuoso-scroller")))
+  );
+}
+
+function isItemEl(target: Element): boolean {
+  return target instanceof HTMLElement && target.hasAttribute("data-item-index");
+}
+
+function paddedListHeight(list: HTMLElement): number {
+  const padTop = Number.parseFloat(list.style.paddingTop) || 0;
+  const padBottom = Number.parseFloat(list.style.paddingBottom) || 0;
+  const items = list.querySelectorAll("[data-item-index]").length;
+  return padTop + padBottom + items * ITEM_HEIGHT;
+}
+
 function scrollerHeight(target: Element): number {
-  if (target === host) return 800;
-  if (target instanceof HTMLElement && target.dataset.testid === "timeline-virtuoso") {
-    return 800;
+  if (!(target instanceof HTMLElement)) return 0;
+  if (isScrollerEl(target)) return VIEWPORT_HEIGHT;
+  if (target.hasAttribute("data-viewport-type")) return VIEWPORT_HEIGHT;
+  if (isItemEl(target) || target.dataset.testid === "timeline-message") {
+    return ITEM_HEIGHT;
   }
-  return 48;
+  const styleHeight = Number.parseFloat(target.style.height);
+  if (Number.isFinite(styleHeight) && styleHeight > 0) return styleHeight;
+  if (target.dataset.testid === "virtuoso-item-list") {
+    return paddedListHeight(target);
+  }
+  const padTop = Number.parseFloat(target.style.paddingTop) || 0;
+  const padBottom = Number.parseFloat(target.style.paddingBottom) || 0;
+  if (padTop + padBottom > 0) return padTop + padBottom;
+  return 0;
+}
+
+function scrollerWidth(target: Element): number {
+  if (!(target instanceof HTMLElement)) return 0;
+  return VIEWPORT_WIDTH;
+}
+
+function scrollerScrollHeight(target: HTMLElement): number {
+  if (isScrollerEl(target)) {
+    const list = target.querySelector('[data-testid="virtuoso-item-list"]');
+    if (list instanceof HTMLElement) return paddedListHeight(list);
+    return VIEWPORT_HEIGHT;
+  }
+  return scrollerHeight(target);
 }
 
 function detectChromium(): { ok: true } | { ok: false; path: string } {
@@ -124,6 +172,17 @@ if (!chromiumAvailable) {
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  const computed = window.getComputedStyle.bind(window);
+  window.getComputedStyle = (elt: Element, pseudoElt?: string | null) => {
+    const style = computed(elt, pseudoElt);
+    return new Proxy(style, {
+      get(target, prop, receiver) {
+        if (prop === "rowGap" || prop === "columnGap") return "0px";
+        const value = Reflect.get(target, prop, receiver);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+  };
   Object.defineProperty(HTMLElement.prototype, "offsetParent", {
     configurable: true,
     get() {
@@ -134,15 +193,17 @@ beforeAll(() => {
     configurable: true,
     value() {
       const height = scrollerHeight(this);
-      const width = 640;
+      const width = scrollerWidth(this);
+      const index = Number(this.getAttribute("data-item-index"));
+      const top = Number.isFinite(index) ? (index - 1_000_000) * ITEM_HEIGHT : 0;
       return {
         x: 0,
-        y: 0,
+        y: top,
         width,
         height,
-        top: 0,
+        top,
         left: 0,
-        bottom: height,
+        bottom: top + height,
         right: width,
         toJSON: () => ({}),
       };
@@ -158,6 +219,30 @@ beforeAll(() => {
     configurable: true,
     get() {
       return scrollerHeight(this);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get() {
+      return scrollerWidth(this);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "offsetWidth", {
+    configurable: true,
+    get() {
+      return scrollerWidth(this);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+    configurable: true,
+    get() {
+      return scrollerWidth(this);
+    },
+  });
+  Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
+    configurable: true,
+    get() {
+      return scrollerScrollHeight(this);
     },
   });
   HTMLElement.prototype.scrollIntoView = () => undefined;
@@ -184,7 +269,7 @@ beforeAll(() => {
     }
     observe(target: Element) {
       const height = scrollerHeight(target);
-      const width = 640;
+      const width = scrollerWidth(target);
       this.callback(
         [
           {
@@ -235,12 +320,13 @@ beforeAll(() => {
     };
   }
   vi.stubGlobal("requestAnimationFrame", (cb: RafCallback) => {
-    rafQueue.push(cb);
     rafId += 1;
+    rafQueue.push({ id: rafId, cb });
     return rafId;
   });
   vi.stubGlobal("cancelAnimationFrame", (id: number) => {
-    void id;
+    const index = rafQueue.findIndex((item) => item.id === id);
+    if (index >= 0) rafQueue.splice(index, 1);
   });
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
@@ -263,6 +349,7 @@ afterEach(() => {
   rail.handlers = null;
   restPage.messages = [];
   rafQueue.length = 0;
+  probe.isPlayEntrance = null;
 });
 
 function member(): RosterMember {
@@ -354,6 +441,7 @@ function frame(id: string, seq: number, body: string) {
 
 function BurstTimeline(): ReactElement {
   const timeline = useTimeline(realtime, WS, CH, ME);
+  probe.isPlayEntrance = timeline.isPlayEntrance;
   const directory = makeDirectory([member()]);
   return createElement(Timeline, {
     messages: timeline.state.messages,
@@ -376,23 +464,138 @@ async function settle(): Promise<void> {
 async function flushVirtuosoMount(): Promise<void> {
   await act(async () => {
     const queued = rafQueue.splice(0);
-    for (const cb of queued) cb(0);
+    for (const item of queued) item.cb(0);
   });
 }
 
-function burstRows(): HTMLElement[] {
-  if (!host) return [];
-  return BURST_IDS.map((id) =>
-    host!.querySelector(`[data-testid="timeline-message"][data-message-id="${id}"]`)
-  ).filter((node): node is HTMLElement => node instanceof HTMLElement);
+const probe: {
+  isPlayEntrance: ((id: string) => boolean) | null;
+} = { isPlayEntrance: null };
+
+function arrivalIds(count: number, prefix = "0199eeee-0000-7000-8000-0000000006"): string[] {
+  return Array.from({ length: count }, (_, i) => `${prefix}${String(i).padStart(2, "0")}`);
 }
 
-function playingBurstRows(): HTMLElement[] {
-  return burstRows().filter(
-    (node) =>
-      node.getAttribute("data-entrance-play") === "1" &&
-      node.classList.contains(ENTER_CONVERSATION_CLASS)
+function rowFor(id: string): HTMLElement | null {
+  if (!host) return null;
+  const node = host.querySelector(
+    `[data-testid="timeline-message"][data-message-id="${id.toLowerCase()}"]`
   );
+  return node instanceof HTMLElement ? node : null;
+}
+
+function rowsFor(ids: readonly string[]): HTMLElement[] {
+  return ids.map(rowFor).filter((node): node is HTMLElement => node !== null);
+}
+
+function isPlayingRow(node: HTMLElement): boolean {
+  return (
+    node.getAttribute("data-entrance-play") === "1" &&
+    node.classList.contains(ENTER_CONVERSATION_CLASS)
+  );
+}
+
+function playingAmong(ids: readonly string[]): HTMLElement[] {
+  return rowsFor(ids).filter(isPlayingRow);
+}
+
+function settledAmong(ids: readonly string[]): HTMLElement[] {
+  return rowsFor(ids).filter((node) => !isPlayingRow(node));
+}
+
+async function waitUntilRowsMounted(ids: readonly string[]): Promise<HTMLElement[]> {
+  for (let step = 0; step < 64; step += 1) {
+    await flushVirtuosoMount();
+    await settle();
+    const rows = rowsFor(ids);
+    if (rows.length === ids.length) return rows;
+  }
+  throw new Error(
+    `virtuoso never mounted ${ids.length} rows (got ${rowsFor(ids).length})`
+  );
+}
+
+async function waitUntilPlayingCount(
+  ids: readonly string[],
+  count: number
+): Promise<HTMLElement[]> {
+  for (let step = 0; step < 64; step += 1) {
+    await flushVirtuosoMount();
+    await settle();
+    const playing = playingAmong(ids);
+    if (playing.length === count) return playing;
+  }
+  throw new Error(
+    `expected ${count} playing rows, got ${playingAmong(ids).length} mounted=${rowsFor(ids).length}`
+  );
+}
+
+function scrollerOf(): HTMLElement {
+  const node =
+    host?.querySelector("[data-virtuoso-scroller]") ??
+    host?.querySelector('[data-testid="timeline-virtuoso"]');
+  if (!(node instanceof HTMLElement)) throw new Error("missing timeline scroller");
+  return node;
+}
+
+async function pinToBottom(): Promise<void> {
+  const scroller = scrollerOf();
+  await act(async () => {
+    scroller.scrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await flushVirtuosoMount();
+  await settle();
+}
+
+async function leaveBottom(): Promise<void> {
+  const scroller = scrollerOf();
+  for (let step = 0; step < 64; step += 1) {
+    await act(async () => {
+      scroller.scrollTop = 0;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await settle();
+    await flushVirtuosoMount();
+    await settle();
+    if (scroller.scrollTop !== 0) {
+      await act(async () => {
+        scroller.scrollTop = 0;
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+      await settle();
+    }
+    const indexes = [...(host?.querySelectorAll("[data-item-index]") ?? [])]
+      .map((node) => Number(node.getAttribute("data-item-index")))
+      .filter((value) => Number.isFinite(value));
+    const atHead = indexes.length > 0 && Math.min(...indexes) <= 1_000_002;
+    if (host?.querySelector("[data-testid='jump-latest']") && atHead) return;
+  }
+  throw new Error("reader never left the bottom (jump-latest missing)");
+}
+
+async function jumpToLatest(): Promise<void> {
+  const button = host?.querySelector("[data-testid='jump-latest']");
+  if (!(button instanceof HTMLElement)) throw new Error("missing jump-latest");
+  await act(async () => {
+    button.click();
+  });
+  const scroller = scrollerOf();
+  for (let step = 0; step < 64; step += 1) {
+    await act(async () => {
+      scroller.scrollTop = Math.max(
+        0,
+        scroller.scrollHeight - scroller.clientHeight
+      );
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await flushVirtuosoMount();
+    await settle();
+    const remaining =
+      scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+    if (remaining <= 64) return;
+  }
+  throw new Error("scroller never reached the bottom after jump-latest");
 }
 
 async function loadStylesheet(id: string, base: string) {
@@ -416,30 +619,13 @@ async function buildArrivalCss(): Promise<string> {
 
 describe("virtualized Timeline same-tick live burst", () => {
   it("같은 틱 라이브 3건은 virtuoso 가 마운트한 행 3개가 모두 재생한다", async () => {
-    restPage.messages = [1, 2, 3, 4, 5, 6, 7, 8].map(restMessage);
-    host = document.createElement("div");
-    document.body.append(host);
-    mountedRoot = createRoot(host);
-    const client = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
-    await act(async () => {
-      mountedRoot?.render(wrap(createElement(BurstTimeline), client));
-    });
-    await settle();
-    await flushVirtuosoMount();
-    await act(async () => {
-      rail.handlers?.onSubscribed({ recovered: false });
-    });
-    await act(async () => {
-      rail.handlers?.onMessage(frame(BURST_IDS[0], 21, "같은 틱 첫 번째 arrival 도착"));
-      rail.handlers?.onMessage(frame(BURST_IDS[1], 22, "같은 틱 두 번째 arrival 도착"));
-      rail.handlers?.onMessage(frame(BURST_IDS[2], 23, "같은 틱 세 번째 arrival 도착"));
-    });
-    await flushVirtuosoMount();
-    const playing = playingBurstRows();
-    expect(playing.length).toBe(3);
-    expect(host.querySelector("[data-testid='timeline-virtuoso']")).not.toBeNull();
+    await mountBurst();
+    await deliverLive(BURST_IDS, 21, "같은 틱 arrival");
+    await waitUntilRowsMounted(BURST_IDS);
+    await waitUntilPlayingCount(BURST_IDS, 3);
+    expect(playingAmong(BURST_IDS).length).toBe(3);
+    expect(MAX_SIMULTANEOUS_ARRIVALS).toBe(3);
+    expect(host?.querySelector("[data-testid='timeline-virtuoso']")).not.toBeNull();
   });
 
   it.skipIf(!chromiumAvailable)(
@@ -457,6 +643,7 @@ describe("virtualized Timeline same-tick live burst", () => {
       });
       await settle();
       await flushVirtuosoMount();
+      await pinToBottom();
       await act(async () => {
         rail.handlers?.onSubscribed({ recovered: false });
       });
@@ -471,8 +658,7 @@ describe("virtualized Timeline same-tick live burst", () => {
           frame(BURST_IDS[2], 23, "같은 틱 세 번째 arrival 도착")
         );
       });
-      await flushVirtuosoMount();
-      await flushVirtuosoMount();
+      await waitUntilRowsMounted(BURST_IDS);
       const css = await buildArrivalCss();
       const markup = host.innerHTML;
       let chromium: typeof import("playwright").chromium;
@@ -511,4 +697,101 @@ describe("virtualized Timeline same-tick live burst", () => {
     },
     20_000
   );
+
+  async function mountBurst(history = 8): Promise<QueryClient> {
+    restPage.messages = Array.from({ length: history }, (_, i) => restMessage(i + 1));
+    host = document.createElement("div");
+    document.body.append(host);
+    mountedRoot = createRoot(host);
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    await act(async () => {
+      mountedRoot?.render(wrap(createElement(BurstTimeline), client));
+    });
+    await settle();
+    await flushVirtuosoMount();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    await settle();
+    await flushVirtuosoMount();
+    for (let step = 0; step < 64; step += 1) {
+      await pinToBottom();
+      if (!host?.querySelector("[data-testid='jump-latest']")) return client;
+    }
+    throw new Error("reader never sat at the bottom after mount");
+  }
+
+  async function deliverLive(ids: readonly string[], seqStart: number, body: string): Promise<void> {
+    await act(async () => {
+      for (let i = 0; i < ids.length; i += 1) {
+        rail.handlers?.onMessage(frame(ids[i]!, seqStart + i, `${body} ${i + 1}`));
+      }
+    });
+  }
+
+  it("바닥 같은 틱 10건은 재생 3 · 정착 7", async () => {
+    await mountBurst();
+    const ids = arrivalIds(10);
+    await deliverLive(ids, 30, "바닥 동시 arrival");
+    await waitUntilRowsMounted(ids);
+    expect(MAX_SIMULTANEOUS_ARRIVALS).toBe(3);
+    expect(playingAmong(ids).length).toBe(MAX_SIMULTANEOUS_ARRIVALS);
+    expect(settledAmong(ids).length).toBe(7);
+    const newest = ids.slice(-MAX_SIMULTANEOUS_ARRIVALS);
+    const older = ids.slice(0, ids.length - MAX_SIMULTANEOUS_ARRIVALS);
+    expect(playingAmong(newest).length).toBe(3);
+    expect(playingAmong(older).length).toBe(0);
+  });
+
+  it("바닥 같은 틱 50건은 재생 3 · 나머지 47은 애니 없음", async () => {
+    await mountBurst();
+    const ids = arrivalIds(50);
+    await deliverLive(ids, 40, "바닥 대량 arrival");
+    const newest = ids.slice(-MAX_SIMULTANEOUS_ARRIVALS);
+    await waitUntilRowsMounted(newest);
+    expect(playingAmong(ids).length).toBe(MAX_SIMULTANEOUS_ARRIVALS);
+    expect(playingAmong(ids.slice(0, 47)).length).toBe(0);
+    expect(ids.length - playingAmong(ids).length).toBe(47);
+  });
+
+  it("스크롤업 백로그 50건은 재생 0, 바닥 점프는 정확히 1", async () => {
+    await mountBurst(40);
+    await leaveBottom();
+    const ids = arrivalIds(50, "0199dddd-0000-7000-8000-0000000007");
+    await deliverLive(ids, 200, "스크롤업 백로그 arrival");
+    await settle();
+    expect(playingAmong(ids).length).toBe(0);
+    expect(host?.querySelector("[data-testid='jump-latest']")).not.toBeNull();
+    await jumpToLatest();
+    await waitUntilPlayingCount(ids, 1);
+    expect(playingAmong(ids).length).toBe(1);
+    expect(playingAmong([ids[ids.length - 1]!]).length).toBe(1);
+  });
+
+  it("isPlayEntrance 읽기는 대소문자를 접는다", async () => {
+    await mountBurst();
+    const mixed = BURST_IDS[0].toUpperCase();
+    await deliverLive([mixed], 80, "대소문자 arrival");
+    await waitUntilRowsMounted([mixed]);
+    expect(playingAmong([mixed]).length).toBe(1);
+  });
+
+  it("consumed 장부가 비워져도 같은 id 재전달은 재재생 0", async () => {
+    // N-5: MAX_CONSUMED_ARRIVAL_IDS 64→4 로 줄여도 재재생은 안 생긴다.
+    // takeArrivalPlay 는 alreadyHeld 가 먼저 0 을 돌려서, consumed 장부
+    // 축출만으로는 같은 id 가 다시 grant 되지 않는다. 재재생이 나타나는
+    // 값은 없다 (측정: 4 에서도 0, 제품 경로 alreadyHeld).
+    await mountBurst();
+    const ids = arrivalIds(5, "0199eeee-0000-7000-8000-0000000008");
+    await deliverLive(ids, 90, "consumed 측정 arrival");
+    await waitUntilRowsMounted(ids);
+    expect(playingAmong(ids).length).toBe(MAX_SIMULTANEOUS_ARRIVALS);
+    await deliverLive([ids[0]!], 90, "consumed 재전달 arrival");
+    await flushVirtuosoMount();
+    await settle();
+    expect(playingAmong([ids[0]!]).length).toBe(0);
+    expect(probe.isPlayEntrance?.(ids[0]!)).toBe(false);
+  });
 });

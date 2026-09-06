@@ -16,7 +16,39 @@ function jsxTagName(
   return node.tagName.getText();
 }
 
-/** Live JSX attribute bindings. Comments and string occurrences do not count. */
+function expressionReaches(expr: ts.Expression, valueIncludes: string): boolean {
+  if (ts.isParenthesizedExpression(expr)) {
+    return expressionReaches(expr.expression, valueIncludes);
+  }
+  if (ts.isConditionalExpression(expr)) {
+    const cond = expr.condition;
+    if (cond.kind === ts.SyntaxKind.FalseKeyword) {
+      return expressionReaches(expr.whenFalse, valueIncludes);
+    }
+    if (cond.kind === ts.SyntaxKind.TrueKeyword) {
+      return expressionReaches(expr.whenTrue, valueIncludes);
+    }
+    return (
+      expressionReaches(expr.whenTrue, valueIncludes) ||
+      expressionReaches(expr.whenFalse, valueIncludes)
+    );
+  }
+  return expr.getText().includes(valueIncludes);
+}
+
+function initializerReaches(
+  init: ts.JsxAttribute["initializer"],
+  valueIncludes: string
+): boolean {
+  if (!init) return false;
+  if (ts.isJsxExpression(init) && init.expression) {
+    return expressionReaches(init.expression, valueIncludes);
+  }
+  return init.getText().includes(valueIncludes);
+}
+
+/** Live JSX attribute bindings. Comments, string occurrences, and
+ *  constant-false `cond ? fn : undefined` branches do not count. */
 function jsxBindingCount(
   source: string,
   component: string,
@@ -37,8 +69,7 @@ function jsxBindingCount(
         for (const property of node.attributes.properties) {
           if (!ts.isJsxAttribute(property)) continue;
           if (property.name.getText() !== attr) continue;
-          const init = property.initializer;
-          if (init && init.getText().includes(valueIncludes)) count += 1;
+          if (initializerReaches(property.initializer, valueIncludes)) count += 1;
         }
       }
     }
@@ -105,6 +136,20 @@ describe("arrival wiring — mutations of the seam go red", () => {
     ).toBe(0);
   });
 
+  it("constant-false ternary 결속은 죽은 분기로 센다", () => {
+    const dead = `<Timeline onEntranceConsumed={false ? timeline.consumeEntrance : undefined} isPlayEntrance={false ? timeline.isPlayEntrance : undefined} />`;
+    expect(
+      jsxBindingCount(dead, "Timeline", "onEntranceConsumed", "timeline.consumeEntrance")
+    ).toBe(0);
+    expect(
+      jsxBindingCount(dead, "Timeline", "isPlayEntrance", "timeline.isPlayEntrance")
+    ).toBe(0);
+    const live = `<Timeline onEntranceConsumed={timeline.consumeEntrance} />`;
+    expect(
+      jsxBindingCount(live, "Timeline", "onEntranceConsumed", "timeline.consumeEntrance")
+    ).toBe(1);
+  });
+
   it("ThreadPanel 은 루트와 답글에 playEntrance 를 잇는다", () => {
     expect(panel).toContain("playEntrance={isPlayEntrance?.(root.id) ?? false}");
     expect(panel).toContain("playEntrance={isPlayEntrance?.(reply.id) ?? false}");
@@ -125,6 +170,10 @@ describe("arrival wiring — mutations of the seam go red", () => {
       "if (play === 1) playOnMountRef.current.add(key);"
     );
     expect(hook).toContain("playOnMountRef.current = new Set();");
+    expect(hook).toContain("export const MAX_SIMULTANEOUS_ARRIVALS = 3");
+    expect(hook).toContain(
+      "capArrivalSet(playOnMountRef.current, MAX_SIMULTANEOUS_ARRIVALS);"
+    );
     expect(hook).toContain(
       "capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);"
     );

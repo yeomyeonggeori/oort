@@ -8,7 +8,7 @@ import { act } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Message } from "@momo/core/lib/api";
 import { MAX_PENDING_ARRIVAL_GRANTS } from "@momo/core/features/timeline/arrival";
-import { useTimeline } from "./useTimeline";
+import { useTimeline, MAX_SIMULTANEOUS_ARRIVALS } from "./useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -186,6 +186,18 @@ describe("useTimeline arrival counts", () => {
     expect(out.isPlayEntrance?.(ID_LIVE)).toBe(false);
   });
 
+  it("isPlayEntrance 읽기는 대소문자를 접는다", async () => {
+    await mount();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    await act(async () => {
+      rail.handlers?.onMessage(frame(ID_LIVE.toUpperCase(), OTHER, 10));
+    });
+    expect(out.isPlayEntrance?.(ID_LIVE)).toBe(true);
+    expect(out.isPlayEntrance?.(ID_LIVE.toUpperCase())).toBe(true);
+  });
+
   it("자기 메시지 실시간 도착 = 0", async () => {
     await mount();
     await act(async () => {
@@ -256,9 +268,10 @@ describe("useTimeline arrival counts", () => {
       )
         granted += 1;
     }
-    // Paint must not evict: virtuoso mounts appended rows one commit later.
-    // Timeline calls capUnmountedArrivals when the reader is scrolled up.
-    expect(granted).toBe(50);
+    // Apply-batch keeps the newest MAX_SIMULTANEOUS_ARRIVALS grants (bottom
+    // pair). Timeline calls capUnmountedArrivals when the reader is scrolled
+    // up, which then leaves MAX_PENDING_ARRIVAL_GRANTS.
+    expect(granted).toBe(MAX_SIMULTANEOUS_ARRIVALS);
     act(() => out.capUnmountedArrivals?.());
     granted = 0;
     for (let i = 0; i < 50; i += 1) {
