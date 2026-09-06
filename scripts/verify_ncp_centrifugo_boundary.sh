@@ -12,6 +12,7 @@ umask 077
 ENV_FILE=""
 OLD_ENV_FILE=""
 EDGE_URL=""
+SITE_ADDRESS=""
 EVIDENCE_DIR="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-ncp-cent-boundary}"
 ALLOW_HTTP_LOCAL=0
 TEST_MODE=0
@@ -22,14 +23,18 @@ usage() {
   cat <<'EOF'
 Usage: scripts/verify_ncp_centrifugo_boundary.sh \
   --env-file PATH --edge-url https://app.example.com \
-  [--old-env-file PATH] [--evidence-dir DIR]
+  [--old-env-file PATH] [--evidence-dir DIR] [--site-address HOST]
 
 Options:
   --env-file PATH       Host env file used by docker-compose.rust.yml.
   --old-env-file PATH   Optional pre-rotation env backup. Its old secret must
                         get 401 on the compose-private API.
   --edge-url URL        Must exactly equal the HTTPS origin derived from the
-                        canonical infra/rust/Caddyfile site label.
+                        canonical infra/rust/Caddyfile site: {$OORT_SITE_ADDRESS}
+                        resolved from --site-address or OORT_SITE_ADDRESS in
+                        --env-file. A second hardcoded site label is not 1 site.
+  --site-address HOST    Optional. Resolve {$OORT_SITE_ADDRESS} to HOST instead
+                        of reading OORT_SITE_ADDRESS from --env-file.
   --evidence-dir DIR    Redacted markdown/json output directory.
   --allow-http-local    Test-only: permit the exact loopback origin in
                         MOMO_NCP_TEST_TRUSTED_ORIGIN, and only with MOMO_ENV=test
@@ -71,6 +76,10 @@ while [ "$#" -gt 0 ]; do
       ALLOW_HTTP_LOCAL=1
       shift
       ;;
+    --site-address)
+      SITE_ADDRESS="${2:-}"
+      shift 2
+      ;;
     -h|--help)
       usage
       exit 0
@@ -94,14 +103,45 @@ CADDYFILE="$REPO_ROOT/infra/rust/Caddyfile"
 [ -f "$CADDYFILE" ] || fail "canonical_caddyfile_missing"
 [ -z "${MOMO_NCP_RUNTIME_ROOT:-}" ] || fail "runtime_root_override_forbidden"
 
+read_env_site_address() {
+  local count line value
+  count="$(grep -Ec '^[[:space:]]*(export[[:space:]]+)?OORT_SITE_ADDRESS=' "$ENV_FILE" || true)"
+  [ "$count" = "1" ] || fail "site_address_line_count expected=1 actual=$count"
+  line="$(grep -E '^[[:space:]]*(export[[:space:]]+)?OORT_SITE_ADDRESS=' "$ENV_FILE")"
+  value="${line#*=}"
+  case "$value" in
+    \"*\") value="${value#\"}"; value="${value%\"}" ;;
+    \'*\') value="${value#\'}"; value="${value%\'}" ;;
+  esac
+  [ -n "$value" ] || fail "site_address_empty"
+  printf '%s' "$value"
+}
+
 derive_caddy_origin() {
-  local sites site_count site
-  sites="$(awk '
-    /^[[:alnum:]][[:alnum:].-]*[[:space:]]+\{[[:space:]]*$/ { print $1 }
+  local placeholder_count hardcoded_count site_count site
+  # {$OORT_SITE_ADDRESS} is not an alphanumeric site label. Count it as one
+  # site after resolving from --site-address or the env file under test.
+  placeholder_count="$(awk '
+    /^\{\$OORT_SITE_ADDRESS\}[[:space:]]+\{[[:space:]]*$/ { count += 1 }
+    END { print count + 0 }
   ' "$CADDYFILE")"
-  site_count="$(printf '%s\n' "$sites" | awk 'NF { count += 1 } END { print count + 0 }')"
+  hardcoded_count="$(awk '
+    /^[[:alnum:]][[:alnum:].-]*[[:space:]]+\{[[:space:]]*$/ { count += 1 }
+    END { print count + 0 }
+  ' "$CADDYFILE")"
+  site_count=$((placeholder_count + hardcoded_count))
   [ "$site_count" = "1" ] || fail "canonical_caddy_site_count expected=1 actual=$site_count"
-  site="$sites"
+  if [ "$placeholder_count" = "1" ]; then
+    if [ -n "$SITE_ADDRESS" ]; then
+      site="$SITE_ADDRESS"
+    else
+      site="$(read_env_site_address)"
+    fi
+  else
+    site="$(awk '
+      /^[[:alnum:]][[:alnum:].-]*[[:space:]]+\{[[:space:]]*$/ { print $1; exit }
+    ' "$CADDYFILE")"
+  fi
   if ! awk -v host="$site" 'BEGIN {
     if (host !~ /^[a-z0-9.-]+$/ || host ~ /^\./ || host ~ /\.$/ || host ~ /\.\./) exit 1
     count = split(host, labels, ".")
