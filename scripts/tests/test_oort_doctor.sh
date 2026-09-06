@@ -285,7 +285,72 @@ fi
 pass "role password ≠ DATABASE_URL → fail(blocker), exit 2"
 
 # -----------------------------------------------------------------------------
-# 5. JSON schema on every --json run already covered; dispatcher stubs
+# 5. outbox oracle: push_candidate|pending is non-failing without a push relay
+#    (fixture TSV / mocked query — no live postgres). Other kinds unchanged.
+# -----------------------------------------------------------------------------
+# shellcheck source=../lib/oort_doctor.sh
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/oort_doctor.sh"
+
+OUTBOX_PUSH_PENDING="$(printf 'push_candidate\tpending\t5\nbroadcast\tdone\t5\n')"
+
+oort_doctor_classify_outbox 0 <<EOF
+$OUTBOX_PUSH_PENDING
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "pass" ] || \
+  fail "push_candidate|pending + no relay want pass, got $OORT_DOCTOR_OUTBOX_STATUS"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Eq '5|pending' || \
+  fail "no-relay pass detail must name the pending count: $OORT_DOCTOR_OUTBOX_DETAIL"
+printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Eqi 'push relay|push-relay|PUSH_RELAY|docker-compose.push' || \
+  fail "no-relay pass detail must state the rule: $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "push_candidate|pending + no relay → pass (detail names count)"
+
+oort_doctor_classify_outbox 1 <<EOF
+$OUTBOX_PUSH_PENDING
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "push_candidate|pending + relay configured want fail, got $OORT_DOCTOR_OUTBOX_STATUS"
+pass "push_candidate|pending + relay configured → fail"
+
+oort_doctor_classify_outbox 0 <<EOF
+$(printf 'broadcast\tpending\t2\n')
+EOF
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "fail" ] || \
+  fail "broadcast|pending without relay must still fail, got $OORT_DOCTOR_OUTBOX_STATUS"
+pass "other kinds keep failing when not done"
+
+# Env/compose facts: overlay keys from infra/rust/push-relay.env.example
+OORT_DOCTOR_ENV="$VALID"
+OORT_DOCTOR_ENV_RAW="$VALID"
+OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/env-norm.XXXXXX")"
+oort_doctor_load_env "$VALID"
+if oort_doctor_push_relay_configured ""; then
+  fail "valid fixture must not look like a configured push relay"
+fi
+pass "self-host env without overlay keys → push relay not configured"
+
+RELAY_ENV="$SANDBOX/with-push-relay.env"
+cp "$VALID" "$RELAY_ENV"
+printf '\nPUSH_RELAY_URL=http://push-relay:28195/v1/push\n' >>"$RELAY_ENV"
+chmod 600 "$RELAY_ENV"
+oort_doctor_load_env "$RELAY_ENV"
+OORT_DOCTOR_ENV_RAW="$RELAY_ENV"
+if ! oort_doctor_push_relay_configured ""; then
+  fail "PUSH_RELAY_URL must count as push relay configured"
+fi
+pass "PUSH_RELAY_URL set → push relay configured"
+
+if ! oort_doctor_push_relay_configured "$(printf 'api running healthy\npush-relay running healthy\n')"; then
+  fail "compose service push-relay must count as configured"
+fi
+oort_doctor_load_env "$VALID"
+if ! oort_doctor_push_relay_configured "$(printf 'notifier running healthy\n')"; then
+  fail "compose service notifier must count as configured"
+fi
+pass "compose push-relay/notifier services → push relay configured"
+
+# -----------------------------------------------------------------------------
+# 6. JSON schema on every --json run already covered; dispatcher stubs
 # -----------------------------------------------------------------------------
 set +e
 "$OORT" status >"$SANDBOX/status.out" 2>"$SANDBOX/status.err"
