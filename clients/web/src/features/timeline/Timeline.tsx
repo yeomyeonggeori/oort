@@ -512,6 +512,14 @@ export function Timeline({
   const baselineRef = useRef<number | null>(null);
   const newestSeqRef = useRef<number | null>(null);
   const messagesRef = useRef(messages);
+  // Seeded `true`. Refreshed only on renders where `messages` did not
+  // change, so there is a one-render lag between "the reader is away"
+  // and "the sweep knows it". Measured (R5 SW): in the 0–16 ms window
+  // after `jump-latest` becomes visible, a scrolled-up reader can get 1
+  // play at mount (virtuoso itself followed to the bottom in both
+  // builds; 1 ≤ ADR-0179 D3's 최대 3). From 50 ms the scroll-up rule
+  // holds (0 plays, grant 1, position held). No behaviour change —
+  // recorded number.
   const atBottomBeforeBatchRef = useRef(true);
   const pendingBottomBatchRef = useRef(false);
   const atBottomRef = useRef(atBottom);
