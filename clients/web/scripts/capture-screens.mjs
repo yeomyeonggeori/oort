@@ -28,6 +28,12 @@ import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
+import {
+  INTRO_SETTLE_FRAME_CEILING,
+  SETTLE_FRAME_CEILING,
+  SETTLE_STABLE_FRAMES,
+  introPoseKey,
+} from "./capture-intro-settle.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -36,6 +42,36 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+/**
+ * Frozen wall clock for every capture fixture timestamp AND the page clock.
+ * The page pin is an `addInitScript` Date override (`Date.now` / `new Date()`),
+ * not Playwright `page.clock.setFixedTime`. Clock fakes also patch
+ * `performance` / rAF and left CDP `CSS.forcePseudoState` with a stale
+ * nodeId (2/3 runs aborted at `assertWideRowsFillOnly` during desktop chat).
+ * Welcome-backstop still uses `page.clock.install({ time: FIXTURE_NOW })`
+ * plus `fastForward` because that scene has to fire the 120s timer.
+ * 2024-06-15T03:00:00.000Z = 12:00 KST.
+ */
+const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
+
+async function pinPageWallClock(page) {
+  await page.addInitScript((now) => {
+    const NativeDate = Date;
+    function FrozenDate(...args) {
+      if (new.target) {
+        return Reflect.construct(NativeDate, args.length === 0 ? [now] : args);
+      }
+      return new NativeDate(now).toString();
+    }
+    FrozenDate.now = () => now;
+    FrozenDate.parse = NativeDate.parse.bind(NativeDate);
+    FrozenDate.UTC = NativeDate.UTC.bind(NativeDate);
+    FrozenDate.prototype = NativeDate.prototype;
+    FrozenDate.prototype.constructor = FrozenDate;
+    globalThis.Date = FrozenDate;
+  }, FIXTURE_NOW);
+}
 
 /** H6-1: one writer per artefact. A second screenshot to the same path is red. */
 const claimedShotPaths = new Set();
@@ -62,6 +98,7 @@ function wrapContextShotGuard(context) {
   context.newPage = async (...args) => {
     const page = await origNewPage(...args);
     wrapPageShotGuard(page);
+    await pinPageWallClock(page);
     return page;
   };
 }
@@ -453,10 +490,10 @@ const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
   role: i % 2 ? "admin" : "member",
   maxUses: 5,
   usedCount: i % 5,
-  expiresAtMs: Date.now() + (i + 1) * 86_400_000,
+  expiresAtMs: FIXTURE_NOW + (i + 1) * 86_400_000,
   createdBy: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
-  createdAtMs: Date.now(),
-  updatedAtMs: Date.now(),
+  createdAtMs: FIXTURE_NOW,
+  updatedAtMs: FIXTURE_NOW,
 }));
 
 // 설정 > 웹훅 (#1202). 세 줄이 서로 다른 것을 말한다: oort 서명 활성, Slack 호환
@@ -470,8 +507,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "native",
     label: "배포 알림 (GitHub Actions)",
     status: "active",
-    createdAtMs: Date.now() - 3 * 86_400_000,
-    updatedAtMs: Date.now() - 3 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 3 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 3 * 86_400_000,
   },
   {
     id: "019f9b10-0000-7000-8000-0000000009a2",
@@ -480,8 +517,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "slack_compatible",
     label: "Sentry 이슈 알림",
     status: "active",
-    createdAtMs: Date.now() - 9 * 86_400_000,
-    updatedAtMs: Date.now() - 9 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 9 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 9 * 86_400_000,
   },
   {
     id: "019f9b10-0000-7000-8000-0000000009a3",
@@ -490,8 +527,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "native",
     label: "구 CI 서버 (2026-07 폐기)",
     status: "revoked",
-    createdAtMs: Date.now() - 40 * 86_400_000,
-    updatedAtMs: Date.now() - 20 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 40 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 20 * 86_400_000,
   },
 ];
 
@@ -887,7 +924,7 @@ const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_
 const ACTION_ROW_BODY = `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`;
 
 function makeMessages(count) {
-  const base = Date.now() - count * 60_000;
+  const base = FIXTURE_NOW - count * 60_000;
   const rows = Array.from({ length: count }, (_, i) => {
     const [author, body, type, props] = BODIES[i % BODIES.length];
     return {
@@ -972,7 +1009,7 @@ function makeMessages(count) {
  * momo 스레드는 한 단계이고, 답글에 답글을 걸면 서버가 거절한다.
  */
 function makeThreadReplies() {
-  const base = Date.now() - 6 * 60_000;
+  const base = FIXTURE_NOW - 6 * 60_000;
   const rows = [
     [HERMES, "런북 3단계부터 다시 도는 게 맞습니다. 헬스 체크는 제가 확인할게요."],
     [ME, "네, 그 사이 배포는 잠급니다."],
@@ -1014,8 +1051,8 @@ const WORK_HOSTS = [
     displayName: "성재 iMac, 집 작업실",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    revokedAtMs: Date.now() - 3 * 86_400_000,
-    createdAtMs: Date.now() - 30 * 86_400_000,
+    revokedAtMs: FIXTURE_NOW - 3 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 30 * 86_400_000,
     online: false,
   },
   {
@@ -1027,8 +1064,8 @@ const WORK_HOSTS = [
     displayName: "성재 iMac, 집 작업실",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    revokedAtMs: Date.now() - 2 * 86_400_000,
-    createdAtMs: Date.now() - 20 * 86_400_000,
+    revokedAtMs: FIXTURE_NOW - 2 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 20 * 86_400_000,
     online: false,
   },
   {
@@ -1040,8 +1077,8 @@ const WORK_HOSTS = [
     displayName: "성재 MacBook Pro",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true, git: true },
-    lastSeenAtMs: Date.now() - 20_000,
-    createdAtMs: Date.now() - 86_400_000,
+    lastSeenAtMs: FIXTURE_NOW - 20_000,
+    createdAtMs: FIXTURE_NOW - 86_400_000,
     online: true,
   },
   {
@@ -1053,8 +1090,8 @@ const WORK_HOSTS = [
     displayName: "dawn-build-01",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    lastSeenAtMs: Date.now() - 3 * 3_600_000,
-    createdAtMs: Date.now() - 7 * 86_400_000,
+    lastSeenAtMs: FIXTURE_NOW - 3 * 3_600_000,
+    createdAtMs: FIXTURE_NOW - 7 * 86_400_000,
     online: false,
   },
 ];
@@ -1077,7 +1114,7 @@ const PROVIDER_LINK = {
   bearerLast4: "8f21",
   availability: "live",
   keyConfigured: true,
-  updatedAtMs: Date.now() - 6 * 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 6 * 3_600_000,
   diagnostics: [],
 };
 
@@ -1104,7 +1141,7 @@ const PROVIDER_CHAIN = {
       enabled: true,
       bearerConfigured: true,
       bearerLast4: "c40a",
-      updatedAtMs: Date.now() - 2 * 3_600_000,
+      updatedAtMs: FIXTURE_NOW - 2 * 3_600_000,
     },
     {
       position: 2,
@@ -1188,7 +1225,7 @@ const PROVIDER_PROBE = {
   source: "database",
   mode: "external-hermes",
   endpointLabel: PROVIDER_LINK.endpointLabel,
-  checkedAtMs: Date.now(),
+  checkedAtMs: FIXTURE_NOW,
   cascadeOk: true,
   entries: [
     {
@@ -1258,7 +1295,7 @@ const WORKSPACE_TIER_POLICY = {
   mode: "auto",
   autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
   inherited: false,
-  updatedAtMs: Date.now() - 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 3_600_000,
 };
 
 // The member has their OWN row here, pointing at a host that was revoked after
@@ -1272,7 +1309,7 @@ const MEMBER_TIER_POLICY = {
   mode: "auto",
   autoTarget: REVOKED_TARGET,
   inherited: false,
-  updatedAtMs: Date.now() - 40 * 60_000,
+  updatedAtMs: FIXTURE_NOW - 40 * 60_000,
 };
 
 /**
@@ -1290,7 +1327,7 @@ const MEMBER_TIER_POLICY = {
  * 비교하지 않으면 이 프레임에서 바로 드러난다.
  */
 function makeDmMessages() {
-  const base = Date.now() - 12 * 60_000;
+  const base = FIXTURE_NOW - 12 * 60_000;
   const spoken = [
     [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
     [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
@@ -1367,7 +1404,7 @@ const AGENT_PROFILE = {
   paused: false,
   version: 3,
   updatedBy: ME,
-  updatedAtMs: Date.now() - 6 * 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 6 * 3_600_000,
 };
 
 const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
@@ -1493,7 +1530,7 @@ const APPROVALS = [
     action_type: "work.spawn",
     status: "pending",
     is_reversible: false,
-    expires_at_ms: Date.now() + 26 * 60_000,
+    expires_at_ms: FIXTURE_NOW + 26 * 60_000,
     payload: {
       source: "work_control",
       tool_call: { call_id: "call-spawn", name: "work.spawn" },
@@ -1509,7 +1546,7 @@ const APPROVALS = [
     action_type: "shell.exec",
     status: "pending",
     is_reversible: true,
-    expires_at_ms: Date.now() + 3 * 3_600_000,
+    expires_at_ms: FIXTURE_NOW + 3 * 3_600_000,
   },
 ];
 
@@ -1595,7 +1632,7 @@ function deviceLinkIssueBody() {
   const body = {
     id: DEVICE_LINK_CAPTURE_ID,
     token: DEVICE_LINK_CAPTURE_TOKEN,
-    expiresAt: Date.now() + 120_000,
+    expiresAt: FIXTURE_NOW + 120_000,
     deepLink:
       deviceLinkHarness.deepLink ||
       `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
@@ -1705,7 +1742,7 @@ async function installMocks(context) {
     json(route, {
       token: "capture-only-not-a-credential",
       tokenType: "jwt",
-      expiresAtMs: Date.now() + 60_000,
+      expiresAtMs: FIXTURE_NOW + 60_000,
       ttlSeconds: 60,
       workspaceId: WORKSPACE_ID,
       memberId: ME,
@@ -1767,7 +1804,7 @@ async function installMocks(context) {
           channelId: CREATED_CHANNEL_ID,
           memberId: ME,
           role: "owner",
-          joinedAtMs: Date.now(),
+          joinedAtMs: FIXTURE_NOW,
         },
       }),
     });
@@ -1835,7 +1872,7 @@ async function installMocks(context) {
         channelId: GENERAL_ID,
         memberId: HERMES,
         role: "member",
-        joinedAtMs: Date.now(),
+        joinedAtMs: FIXTURE_NOW,
       },
     })
   );
@@ -1930,7 +1967,7 @@ async function installMocks(context) {
   // BF-B1 (#1888). Same 30s poll as read-state; without this pair the catch-all
   // 404s and the 나중에 tab is an error instead of a list.
   await context.route("**/v1/workspaces/*/reminders*", (route) => {
-    const now = Date.now();
+    const now = FIXTURE_NOW;
     return json(route, {
       reminders: [
         {
@@ -1974,7 +2011,7 @@ async function installMocks(context) {
       engine: "opencode",
       source: "database",
       updatedBy: "곽성재",
-      updatedAtMs: Date.now() - 2 * 86_400_000,
+      updatedAtMs: FIXTURE_NOW - 2 * 86_400_000,
       schema: "momo.work_host_engine.v0",
     })
   );
@@ -2086,7 +2123,7 @@ async function installMocks(context) {
           body: JSON.stringify({ error: { message: "not found" } }),
         });
       }
-      const now = Date.now();
+      const now = FIXTURE_NOW;
       if (request === "preview-empty") {
         return json(route, {
           ...OAUTH_CONSENT_PREVIEW,
@@ -2116,8 +2153,8 @@ async function installMocks(context) {
       mode: body.mode,
       label: body.label,
       status: "active",
-      createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
+      createdAtMs: FIXTURE_NOW,
+      updatedAtMs: FIXTURE_NOW,
     };
     return json(route, {
       installation: created,
@@ -2149,7 +2186,7 @@ async function installMocks(context) {
     const id = new URL(route.request().url()).pathname.split("/").at(-1);
     const row = SETTINGS_WEBHOOKS.find((item) => item.id === id);
     return json(route, {
-      installation: { ...row, status: "revoked", updatedAtMs: Date.now() },
+      installation: { ...row, status: "revoked", updatedAtMs: FIXTURE_NOW },
       revoked: true,
     });
   });
@@ -2187,7 +2224,7 @@ async function installMocks(context) {
         id: WORKSPACE_ID,
         slug: "momowebqa",
         name: "momo webqa",
-        updatedAtMs: Date.now(),
+        updatedAtMs: FIXTURE_NOW,
         roleLabels: {},
       },
     })
@@ -2234,7 +2271,7 @@ async function installMocks(context) {
     const body = JSON.parse(route.request().postData() || "{}");
     return json(route, {
       enabled: route.request().method() === "PUT" ? body.enabled : true,
-      updatedAtMs: Date.now() - 3_600_000,
+      updatedAtMs: FIXTURE_NOW - 3_600_000,
     });
   });
   // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
@@ -2250,7 +2287,7 @@ async function installMocks(context) {
         const body = JSON.parse(route.request().postData() || "{}");
         return json(route, {
           prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
-          updatedAtMs: Date.now(),
+          updatedAtMs: FIXTURE_NOW,
         });
       }
       return json(route, {
@@ -5807,7 +5844,7 @@ async function countTabStopsToComposer(page, where, ceiling) {
 async function scrollTimelineRowIntoView(page, testId, where = "") {
   const label = where ? `${testId} · ${where}` : testId;
   const seen = await page.evaluate(
-    async ({ testId, maxSteps }) => {
+    async ({ testId, maxSteps, stableNeed, frameCeiling, poseKeySrc }) => {
       // 한 프레임 양보. rAF는 보이지 않는 탭에서 멈출 수 있으므로 상한을 함께
       // 건다 — 대기로 때우는 값이 아니라 rAF가 오지 않을 때의 안전망이다.
       const frame = () =>
@@ -5880,78 +5917,80 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       const el = find();
       if (!el) return report({ ok: false, steps, ceiling, scanned });
 
-      // 가운데로 올리고, virtuoso 첫 페인트(visibility:hidden)가 풀린 뒤
-      // 인트로 자리와 스크롤러 scrollTop 이 같은 값으로 앉을 때까지 기다린다.
-      // alignToBottom + followOutput 이 scrollIntoView 와 싸우는 동안
-      // 상자만 보면 60프레임 안에 안 멎는다. 제품 신호는
-      // (1) item-list 가 hidden 이 아님 (initialItemFinalLocationReached)
-      // (2) jump-latest (바닥에 있지 않음)
-      // (3) intro rect + scrollTop 이 연속 프레임에서 같음.
+      // 가운데로 올리고, item-list visibility + intro rect + scrollTop 이
+      // stableNeed 연속 프레임 같은 값이 될 때까지 기다린다. jump-latest 는
+      // 로그에만 남고 안정 키에 넣지 않는다. 루프는 조건이 서는 즉시 나간다
+      // (프레임 수 잠이 아니다).
       el.scrollIntoView({ block: "center" });
+      const poseKey = eval(`(${poseKeySrc})`);
       const motionLog = [];
-      let key = null;
-      let stable = 0;
-      const instrument = testId === "message-channel-intro";
-      const minFrames = instrument ? 60 : 0;
-      for (let i = 0; i < 180; i++) {
+      const state = { key: null, stable: 0 };
+      for (let i = 0; i < frameCeiling; i++) {
         await frame();
         const now = find();
         const list = document.querySelector('[data-testid="virtuoso-item-list"]');
         const scroller = scrollers()[0];
         const introBox = now ? now.getBoundingClientRect() : null;
-        const listBox = list ? list.getBoundingClientRect() : null;
         const vis = list ? getComputedStyle(list).visibility : null;
         const sample = {
+          vis,
+          intro: introBox
+            ? { top: introBox.top, height: introBox.height }
+            : null,
+          scrollTop: scroller ? scroller.scrollTop : null,
+          now,
+        };
+        motionLog.push({
           i,
           intro: introBox
             ? {
                 top: Math.round(introBox.top),
                 height: Math.round(introBox.height),
-                bottom: Math.round(introBox.bottom),
-              }
-            : null,
-          list: listBox
-            ? {
-                top: Math.round(listBox.top),
-                height: Math.round(listBox.height),
               }
             : null,
           scrollTop: scroller ? Math.round(scroller.scrollTop) : null,
           vis,
           jump: Boolean(document.querySelector('[data-testid="jump-latest"]')),
-        };
-        if (instrument && motionLog.length < 60) motionLog.push(sample);
-        if (vis === "hidden") {
-          key = null;
-          stable = 0;
-        } else if (!now || !introBox || introBox.height <= 0) {
-          key = null;
-          stable = 0;
-        } else {
-          const next =
-            `${Math.round(introBox.top)}:${Math.round(introBox.height)}:` +
-            `${scroller ? Math.round(scroller.scrollTop) : 0}:${vis}`;
-          if (next === key) stable++;
-          else {
-            key = next;
-            stable = 0;
-          }
-        }
-        if (i + 1 >= minFrames && stable >= 3) break;
-      }
-      if (stable < 3) {
-        return report({
-          ok: false,
-          steps,
-          ceiling,
-          scanned,
-          unsettled: true,
-          motionLog,
         });
+        const key = poseKey(sample);
+        if (key === null) {
+          state.key = null;
+          state.stable = 0;
+        } else if (key === state.key) {
+          state.stable += 1;
+        } else {
+          state.key = key;
+          state.stable = 0;
+        }
+        if (state.stable >= stableNeed) {
+          return report({
+            ok: true,
+            steps,
+            ceiling,
+            scanned,
+            settledAt: i,
+          });
+        }
       }
-      return report({ ok: true, steps, ceiling, scanned, motionLog });
+      return report({
+        ok: false,
+        steps,
+        ceiling,
+        scanned,
+        unsettled: true,
+        motionLog,
+      });
     },
-    { testId, maxSteps: 400 }
+    {
+      testId,
+      maxSteps: 400,
+      stableNeed: SETTLE_STABLE_FRAMES,
+      frameCeiling:
+        testId === "message-channel-intro"
+          ? INTRO_SETTLE_FRAME_CEILING
+          : SETTLE_FRAME_CEILING,
+      poseKeySrc: introPoseKey.toString(),
+    }
   );
 
   const scene =
@@ -5966,9 +6005,14 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       ? `창 밖에 있어 스크롤러를 ${seen.steps}걸음 훑어 올림`
       : "이미 창 안";
     console.log(`  스크롤 ${label}: ${how} · ${scene}`);
-    if (Array.isArray(seen.motionLog) && seen.motionLog.length > 0) {
+    if (typeof seen.settledAt === "number") {
       console.log(
-        `  intro-motion ${label}: ${JSON.stringify(seen.motionLog)}`
+        `  settle ${label}: predicate first held at frame ${seen.settledAt}` +
+          ` (need ${SETTLE_STABLE_FRAMES}, ceiling ${
+            testId === "message-channel-intro"
+              ? INTRO_SETTLE_FRAME_CEILING
+              : SETTLE_FRAME_CEILING
+          })`
       );
     }
     return;
@@ -7246,7 +7290,7 @@ async function captureScheme(browser, scheme) {
       mime: "text/plain",
       size: 18,
       status: "complete",
-      createdAtMs: Date.now(),
+      createdAtMs: FIXTURE_NOW,
     })
   );
   await login
@@ -8270,7 +8314,7 @@ async function captureScheme(browser, scheme) {
   await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(draftsPage);
   await draftsPage.evaluate(`(() => {
-    const now = Date.now();
+    const now = ${FIXTURE_NOW};
     const prefix = "momo.draft.v1:${WORKSPACE_ID}:";
     localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
       text: "배포 롤백 근거를 정리하면",
@@ -8477,7 +8521,7 @@ async function captureScheme(browser, scheme) {
       source: "environment",
       mode: "local-mock",
       endpointLabel: MOCK_ONLY_HOP.endpointLabel,
-      checkedAtMs: Date.now(),
+      checkedAtMs: FIXTURE_NOW,
       cascadeOk: false,
       entries: [
         {
@@ -8905,7 +8949,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       observerGrantCount: 1,
       remoteAttachAvailable: true,
       remoteDisplayAvailable: false,
-      startedAtMs: Date.now() - 12 * 60_000,
+      startedAtMs: FIXTURE_NOW - 12 * 60_000,
     },
     {
       id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c5",
@@ -8921,7 +8965,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       observerGrantCount: 0,
       remoteAttachAvailable: true,
       remoteDisplayAvailable: false,
-      startedAtMs: Date.now() - 45 * 60_000,
+      startedAtMs: FIXTURE_NOW - 45 * 60_000,
     },
   ];
 
@@ -9332,7 +9376,9 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       window.location.hash = `#/c/${id}`;
     }, CHANNELS[1].id);
     await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
-    if (options.installClock) await page.clock.install();
+    if (options.installClock) {
+      await page.clock.install({ time: FIXTURE_NOW });
+    }
     await page.evaluate((id) => {
       window.location.hash = `#/c/${id}`;
     }, GENERAL_ID);
@@ -10077,7 +10123,7 @@ async function captureHostedPairingScenes(browser, scheme) {
         ? json(route, {
             connection: hostedConnection(),
             pairingCredential: HOSTED_PAIRING_VALUE,
-            pairingExpiresAtMs: Date.now() + 15 * 60 * 1000,
+            pairingExpiresAtMs: FIXTURE_NOW + 15 * 60 * 1000,
           })
         : json(route, { connections: [] })
     );
@@ -10798,7 +10844,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
       ...connection,
       doorbellUrl: "https://hooks.example.com/doorbell",
       doorbellSecretMasked: "••••wxyz",
-      doorbellLastFiredAtMs: Date.now() - 12 * 60_000,
+      doorbellLastFiredAtMs: FIXTURE_NOW - 12 * 60_000,
       doorbellLastStatus: "ok_200",
     }),
     async (page) => {
