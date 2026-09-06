@@ -64,6 +64,18 @@ export type Armed = "approve" | "reject" | null;
 export const CONFIRM_GUARD_MS = 400;
 
 /**
+ * Click targets gated by `CONFIRM_GUARD_MS`. Capture consults this list
+ * under `clock: "fixed"`. Not markup — a named export next to the constant
+ * that gates them. Every ApprovalActions `${testIdPrefix}-confirm` must
+ * appear here (the usage-site test in captureClock.test.ts walks callers).
+ */
+export const TIME_GATED_CONTROLS = [
+  "approval-confirm",
+  "inbox-approval-confirm",
+  "handoff-confirm",
+] as const;
+
+/**
  * 확정 문장 정본 (2R 오케스트레이터 결정).
  *
  * **"바로 실행합니다"를 쓰지 않는다.** 계약이 지킬 수 없는 약속이었기 때문이다:

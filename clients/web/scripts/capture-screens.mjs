@@ -37,6 +37,7 @@ import {
 import {
   setActiveCaptureScene,
   wrapPageTimeGateClicks,
+  sceneClick,
 } from "./capture-clock.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -57,7 +58,9 @@ const VIEWPORT = { width: 1280, height: 800 };
  * plus `fastForward` because that scene has to fire the 120s timer
  * (`clock: "flowing"` in capture-clock.mjs). Elapsed-time gates
  * (`ApprovalActions` `CONFIRM_GUARD_MS`) never open under the pin; a
- * fixed-clock scene that clicks a time-gated testid aborts.
+ * fixed-clock scene that clicks a time-gated control aborts. Every
+ * scene click goes through `sceneClick`; wrap also intercepts
+ * `page.locator(...).click()`.
  * 2024-06-15T03:00:00.000Z = 12:00 KST.
  */
 const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
@@ -2532,7 +2535,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   }
   if (shoot) await shoot("onboarding-landing");
 
-  await page.getByTestId("onboarding-choose-server").click();
+  await sceneClick(page, page.getByTestId("onboarding-choose-server"));
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
   const chrome = await page.evaluate(`(() => {
     const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
@@ -2560,7 +2563,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   }
   if (shoot) await shoot("onboarding-gateway");
 
-  await page.getByTestId("onboarding-next").click();
+  await sceneClick(page, page.getByTestId("onboarding-next"));
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
   await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
@@ -2568,14 +2571,14 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
 
 async function shootOnboardingProfile(page, where, { tapTargets = false, shoot } = {}) {
   await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
-  await page.getByTestId("onboarding-choose-invite").click();
+  await sceneClick(page, page.getByTestId("onboarding-choose-invite"));
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
   await page.getByTestId("login-invite-code").fill("momo-alpha-2026");
-  await page.getByTestId("onboarding-next").click();
+  await sceneClick(page, page.getByTestId("onboarding-next"));
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("onboarding-profile").waitFor({ state: "visible" });
   const chrome = await page.evaluate(`(() => {
     const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
@@ -2611,7 +2614,7 @@ async function shootOnboardingProfile(page, where, { tapTargets = false, shoot }
     return route.fallback();
   });
   await page.getByTestId("onboarding-profile-name").fill("성재");
-  await page.getByTestId("onboarding-profile-submit").click();
+  await sceneClick(page, page.getByTestId("onboarding-profile-submit"));
   await page.getByTestId("onboarding-profile-banner").waitFor({
     state: "visible",
   });
@@ -2634,7 +2637,7 @@ async function revealNewChannel(page) {
     await page.getByTestId("sidebar-section-channels-header").hover();
     await button.waitFor({ state: "visible" });
   }
-  await button.click();
+  await sceneClick(page, button);
 }
 
 async function sectionActionRestCounts(page) {
@@ -2651,7 +2654,7 @@ async function sectionActionRestCounts(page) {
 /** overlayHeld 해제(rAF) 와 포인터 주차를 기다린 뒤 rest 0 을 단정한다. */
 async function assertSectionActionsAtRest(page, scheme, where) {
   await page.getByTestId("composer-input").hover();
-  await page.getByTestId("composer-input").click();
+  await sceneClick(page, page.getByTestId("composer-input"));
   await page.evaluate(
     `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
   );
@@ -2717,7 +2720,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     );
   }
 
-  await row.click({ button: "right" });
+  await sceneClick(page, row, { button: "right" });
   const menu = page.getByTestId("channel-row-menu");
   await menu.waitFor({ state: "visible" });
   const owner = await row.evaluate((el) =>
@@ -2756,7 +2759,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
 
   // ④ 읽음 처리 — 채널을 열지 않고 그 채널의 latest_seq 를 광고한다.
   const readPut = page.waitForRequest(isReadStatePut);
-  await page.getByTestId("channel-row-mark-read").click();
+  await sceneClick(page, page.getByTestId("channel-row-mark-read"));
   const readBody = (await readPut).postDataJSON();
   if (readBody?.last_read_seq !== 42) {
     throw new Error(
@@ -2837,7 +2840,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   });
   // 되돌린다: 뒤따르는 장면이 음소거된 채널을 물려받지 않게.
   const unmutePut = page.waitForRequest(isMutePut);
-  await page.getByTestId("channel-row-mute-toggle").click();
+  await sceneClick(page, page.getByTestId("channel-row-mute-toggle"));
   await unmutePut;
   await menu.waitFor({ state: "hidden" });
 
@@ -2971,9 +2974,9 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   );
   const quietRow = page.locator(`[data-channel-id="${CHANNELS[2].id}"]`);
   await quietRow.waitFor({ state: "visible" });
-  await quietRow.click({ button: "right" });
+  await sceneClick(page, quietRow, { button: "right" });
   await menu.waitFor({ state: "visible" });
-  await page.getByTestId("channel-row-mute-toggle").click();
+  await sceneClick(page, page.getByTestId("channel-row-mute-toggle"));
   await page
     .getByTestId("channel-row-action-error")
     .waitFor({ state: "visible", timeout: 6_000 });
@@ -3089,9 +3092,9 @@ async function captureSidebarD4(page, scheme, shots) {
 
   // R2-1: ⌘K 팔레트는 헤더를 거치지 않는다. 닫힌 뒤 hold 가 헤더 blur 를
   // 기다리면 +·DM 이 세션 내내 rest 에 남는다.
-  await page.getByTestId("open-quick-switcher").click();
+  await sceneClick(page, page.getByTestId("open-quick-switcher"));
   await page.getByTestId("quick-switcher").waitFor({ state: "visible" });
-  await page.getByTestId("switcher-create-channel").click();
+  await sceneClick(page, page.getByTestId("switcher-create-channel"));
   await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   const dmWhileCmdkDialog = await page.getByTestId("new-dm").count();
   if (dmWhileCmdkDialog !== 0) {
@@ -3103,7 +3106,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   await assertSectionActionsAtRest(page, scheme, "⌘K 왕복 후");
 
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   const menu = page.getByTestId("profile-card-menu");
   await menu.waitFor({ state: "visible" });
   await assertProfileMenuFitsViewport(page, `sidebar profile ${scheme}`);
@@ -3134,7 +3137,7 @@ async function captureSidebarD4(page, scheme, shots) {
   shots.push(profileShot);
 
   const putAway = page.waitForRequest(isPresencePut);
-  await page.getByTestId("presence-option-away").click();
+  await sceneClick(page, page.getByTestId("presence-option-away"));
   const awayReq = await putAway;
   const awayBody = awayReq.postDataJSON();
   if (awayBody?.status !== "away") {
@@ -3153,14 +3156,14 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("profile-card").press("Enter");
   await menu.waitFor({ state: "visible" });
   const putAuto = page.waitForRequest(isPresencePut);
-  await page.getByTestId("presence-option-auto").click();
+  await sceneClick(page, page.getByTestId("presence-option-auto"));
   await putAuto;
   await menu.waitFor({ state: "hidden" });
 
   // H-2: 카드가 연 워크스페이스 추가를 취소하면 트리거(프로필 카드)로 복귀.
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   await menu.waitFor({ state: "visible" });
-  await page.getByTestId("profile-add-workspace").click();
+  await sceneClick(page, page.getByTestId("profile-add-workspace"));
   await page.getByTestId("add-workspace-dialog").waitFor({ state: "visible" });
   await page.getByTestId("add-workspace-name").waitFor({ state: "visible" });
   // Esc first (review probe). If a leftover layer ate the key, the visible
@@ -3168,7 +3171,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("add-workspace-name").focus();
   await page.keyboard.press("Escape");
   if (await page.getByTestId("add-workspace-dialog").count()) {
-    await page.getByTestId("add-workspace-cancel").click();
+    await sceneClick(page, page.getByTestId("add-workspace-cancel"));
   }
   await page.getByTestId("add-workspace-dialog").waitFor({ state: "detached" });
   await page.waitForFunction(
@@ -3226,7 +3229,7 @@ async function captureSidebarD4(page, scheme, shots) {
 
   await captureCustomSection(page, scheme, shots);
 
-  await page.getByTestId("sidebar-toggle").click();
+  await sceneClick(page, page.getByTestId("sidebar-toggle"));
   await page.waitForFunction(
     () =>
       document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
@@ -3236,7 +3239,7 @@ async function captureSidebarD4(page, scheme, shots) {
   const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
   await page.screenshot({ path: collapsedShot });
   shots.push(collapsedShot);
-  await page.getByTestId("sidebar-toggle").click();
+  await sceneClick(page, page.getByTestId("sidebar-toggle"));
   await page.waitForFunction(
     () =>
       !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
@@ -3294,7 +3297,7 @@ async function captureCustomSection(page, scheme, shots) {
   await page.getByTestId("sidebar-section-channels-header").hover();
   await page.getByTestId("new-section").waitFor({ state: "visible" });
   await assertSectionControlSize(page, scheme, "new-section");
-  await page.getByTestId("new-section").click();
+  await sceneClick(page, page.getByTestId("new-section"));
   const dialog = page.getByTestId("sidebar-section-name-dialog");
   await dialog.waitFor({ state: "visible" });
   await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
@@ -3302,7 +3305,7 @@ async function captureCustomSection(page, scheme, shots) {
   await waitForAnimations(page);
   await page.screenshot({ path: createShot });
   shots.push(createShot);
-  await page.getByTestId("sidebar-section-name-submit").click();
+  await sceneClick(page, page.getByTestId("sidebar-section-name-submit"));
   await dialog.waitFor({ state: "detached" });
 
   const section = page.getByTestId("sidebar-section-sec-1");
@@ -3322,7 +3325,7 @@ async function captureCustomSection(page, scheme, shots) {
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
     .first();
-  await row.click({ button: "right" });
+  await sceneClick(page, row, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   await page
     .getByTestId("channel-row-move-to-section")
@@ -3360,14 +3363,14 @@ async function captureCustomSection(page, scheme, shots) {
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
 
-  await page.getByTestId("channel-row-section-sec-1").click();
+  await sceneClick(page, page.getByTestId("channel-row-section-sec-1"));
   await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
   // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
   // 사실을 말하는지 여기서 함께 본다.
   //
   // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
   // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
-  await section.locator('[data-testid="channel-item"]').first().click({
+  await sceneClick(page, section.locator('[data-testid="channel-item"]').first(), {
     button: "right",
   });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
@@ -3407,8 +3410,8 @@ async function captureCustomSection(page, scheme, shots) {
   // ⋮ 는 rest 에서 DOM 에 없다(UX-HT 계약).
   await page.getByTestId("sidebar-section-sec-1-header").hover();
   await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
-  await page.getByTestId("section-menu-sec-1").click();
-  await page.getByTestId("section-menu-sec-1-delete").click();
+  await sceneClick(page, page.getByTestId("section-menu-sec-1"));
+  await sceneClick(page, page.getByTestId("section-menu-sec-1-delete"));
   const confirm = page.getByTestId("sidebar-section-delete-confirm");
   await confirm.waitFor({ state: "visible" });
   // design-review #1932 M-1 — 제목은 고정 문장이고 이름은 본문이 진다. 80자
@@ -3433,7 +3436,7 @@ async function captureCustomSection(page, scheme, shots) {
   await waitForAnimations(page);
   await page.screenshot({ path: deleteShot });
   shots.push(deleteShot);
-  await page.getByTestId("sidebar-section-delete-action").click();
+  await sceneClick(page, page.getByTestId("sidebar-section-delete-action"));
   await confirm.waitFor({ state: "detached" });
   await section.waitFor({ state: "detached" });
   // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
@@ -3468,7 +3471,7 @@ async function captureSortDoor(page, scheme, shots) {
     throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
   }
 
-  await door.click();
+  await sceneClick(page, door);
   const content = page.getByTestId("sidebar-sort-menu-content");
   await content.waitFor({ state: "visible" });
   const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
@@ -3547,13 +3550,13 @@ async function captureStarredSection(page, scheme, shots) {
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
     .first();
-  await base.click({ button: "right" });
+  await sceneClick(page, base, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   const starLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
   if (starLabel !== "별표 붙이기") {
     throw new Error(`별표 항목의 낱말 ${scheme}: ${starLabel}`);
   }
-  await page.getByTestId("channel-row-star").click();
+  await sceneClick(page, page.getByTestId("channel-row-star"));
   await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
 
   const starred = page.getByTestId("sidebar-section-starred");
@@ -3586,13 +3589,13 @@ async function captureStarredSection(page, scheme, shots) {
 
   // 떼고 나간다. 낱말이 상태라는 것도 여기서 함께 본다.
   const starredRow = starred.locator('[data-testid="channel-item"]').first();
-  await starredRow.click({ button: "right" });
+  await sceneClick(page, starredRow, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   const unstarLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
   if (unstarLabel !== "별표 떼기") {
     throw new Error(`별표 뒤 항목의 낱말 ${scheme}: ${unstarLabel}`);
   }
-  await page.getByTestId("channel-row-star").click();
+  await sceneClick(page, page.getByTestId("channel-row-star"));
   await starred.waitFor({ state: "detached" });
 }
 
@@ -3646,7 +3649,7 @@ async function captureSidebarPrefsUnavailable(context, scheme, shots) {
   // 재시도 문은 있다: 닫힌 이유를 말했으면 되돌아갈 길도 줘야 한다.
   const retry = banner.getByRole("button", { name: "다시 시도" });
   await retry.waitFor({ state: "visible" });
-  await retry.click();
+  await sceneClick(page, retry);
   await banner.waitFor({ state: "visible" });
 
   if (puts !== 0) {
@@ -4117,7 +4120,7 @@ async function assertDockExpandHonesty(page, where) {
           `여유 ${Math.round(slack)}px 있는데 확대가 비활성이다 ${where} @${next.height}`
         );
       }
-      await expand.click();
+      await sceneClick(page, expand);
       await page.waitForFunction(
         () =>
           document
@@ -4135,7 +4138,7 @@ async function assertDockExpandHonesty(page, where) {
       console.log(
         `  dock expand ${where} @${next.width}×${next.height}: ${Math.round(before)} → ${Math.round(after)} (Δ${Math.round(after - before)})`
       );
-      await expand.click();
+      await sceneClick(page, expand);
       await page.waitForFunction(
         () =>
           document
@@ -4402,7 +4405,7 @@ async function assertComposerVesselClick(page, where, ids) {
   });
   await input.fill("그릇 클릭 확인");
   await input.evaluate((element) => element.setSelectionRange(2, 2));
-  await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
+  await sceneClick(page, page.getByTestId(ids.actions), { position: { x: 160, y: 4 } });
   const proof = await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid="${ids.input}"]');
     const frame = document.querySelector('[data-testid="${ids.frame ?? "composer-frame"}"]');
@@ -4476,7 +4479,7 @@ function readObserverTerminalVessel() {
 async function assertObserverTerminalModality(page, where, shots, scheme) {
   const start = page.getByTestId("work-observer-start");
   await start.waitFor({ state: "visible" });
-  await start.click();
+  await sceneClick(page, start);
   await page.locator(".xterm-helper-textarea").waitFor({
     state: "attached",
     timeout: 10_000,
@@ -4544,7 +4547,7 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
 
   const stop = page.getByTestId("work-observer-stop");
   if ((await stop.count()) > 0 && (await stop.isVisible())) {
-    await stop.click();
+    await sceneClick(page, stop);
     await page.getByTestId("work-observer-start").waitFor({ state: "visible" });
   }
 
@@ -4560,7 +4563,7 @@ async function assertMentionTrigger(page, where, ids) {
   await input.fill("배포 확인");
   // `배포` 바로 뒤는 비공백 경계다. 공백 뒤를 고르면 B-1의 죽은 버튼도 초록이다.
   await input.evaluate((element) => element.setSelectionRange(2, 2));
-  await page.getByTestId(ids.trigger).click();
+  await sceneClick(page, page.getByTestId(ids.trigger));
   await page.getByTestId(ids.list).waitFor({ state: "visible" });
   await page.waitForFunction(
     (testId) =>
@@ -4628,7 +4631,7 @@ async function assertMentionTrigger(page, where, ids) {
 async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
   const input = page.getByTestId(ids.input);
   await input.fill("");
-  await input.click();
+  await sceneClick(page, input);
   await page.keyboard.type(trigger.typed, { delay: 15 });
   const list = page.getByTestId(trigger.list);
   await list.waitFor({ state: "visible" });
@@ -4706,7 +4709,7 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   await context.route("**/emojiCatalog-*", block);
   const input = page.getByTestId("composer-input");
   await input.fill("");
-  await input.click();
+  await sceneClick(page, input);
   await page.keyboard.type(":thu", { delay: 15 });
   const box = page.getByTestId("composer-emoji-list-status");
   await box.waitFor({ state: "visible" });
@@ -4745,7 +4748,7 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   shots.push(shot);
 
   await context.unroute("**/emojiCatalog-*", block);
-  await box.locator("button").click();
+  await sceneClick(page, box.locator("button"));
   await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
   const after = await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid="composer-input"]');
@@ -6584,7 +6587,7 @@ async function captureMobile(browser, scheme) {
   //    받고, 컴포저는 안전 영역 위에 도크된다.
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
   await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6595,7 +6598,7 @@ async function captureMobile(browser, scheme) {
   await shoot(page, "chat");
 
   // TC-1 (#1758): 헤더 터미널을 실제로 눌러 도크가 컴포저 위에 앉는지 폰에서도 잰다.
-  await page.getByTestId("open-terminal-dock").click();
+  await sceneClick(page, page.getByTestId("open-terminal-dock"));
   await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
   await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
   await assertComposerVisible(page, `terminal dock ${scheme}`);
@@ -6605,12 +6608,12 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `terminal dock ${scheme}`);
   await assertTapTargets(page, `terminal dock ${scheme}`);
   await shoot(page, "terminal-dock");
-  await page.getByTestId("terminal-dock-close").click();
+  await sceneClick(page, page.getByTestId("terminal-dock-close"));
   await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
 
   // 2a-0. 이모지 피커 바텀시트 (#1742). 390에서 분류 탭이 화면 밖으로
   //       나가면 안 된다. hover: none 이므로 포인터 popover가 아니라 시트다.
-  await page.getByTestId("composer-emoji-trigger").click();
+  await sceneClick(page, page.getByTestId("composer-emoji-trigger"));
   await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
   await page.getByTestId("emoji-search").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6689,10 +6692,10 @@ async function captureMobile(browser, scheme) {
   }
   await shoot(page, "b11-action-sheet");
   // UX-D3 (#1755): 시트 클립보드 항목을 실제로 누르고 내용을 읽는다.
-  await page.getByTestId("sheet-copy").click();
+  await sceneClick(page, page.getByTestId("sheet-copy"));
   await page.getByTestId("sheet-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(page, `시트 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await page.getByTestId("sheet-copy-link").click();
+  await sceneClick(page, page.getByTestId("sheet-copy-link"));
   await page.getByTestId("sheet-copy-link").getByText("링크 복사됨").waitFor();
   const sheetMessageId = await sheetTarget.getAttribute("data-message-id");
   const sheetSeq = await sheetTarget.getAttribute("data-seq");
@@ -6721,26 +6724,26 @@ async function captureMobile(browser, scheme) {
 
   // (1) 제자리 편집기.
   await openSheet();
-  await page.getByTestId("sheet-edit").click();
+  await sceneClick(page, page.getByTestId("sheet-edit"));
   await page.getByTestId("message-editor-input").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `inline editor ${scheme}`);
   await assertTapTargets(page, `inline editor ${scheme}`);
   await shoot(page, "b11-edit");
-  await page.getByTestId("message-editor-cancel").click();
+  await sceneClick(page, page.getByTestId("message-editor-cancel"));
   await page
     .getByTestId("message-editor-input")
     .waitFor({ state: "detached" });
 
   // (2) 삭제 확인.
   await openSheet();
-  await page.getByTestId("sheet-delete").click();
+  await sceneClick(page, page.getByTestId("sheet-delete"));
   await page.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `delete dialog ${scheme}`);
   await assertTapTargets(page, `delete dialog ${scheme}`);
   await shoot(page, "b11-delete");
-  await page.getByTestId("delete-message-cancel").click();
+  await sceneClick(page, page.getByTestId("delete-message-cancel"));
   await page
     .getByTestId("delete-message-dialog")
     .waitFor({ state: "hidden" });
@@ -6748,7 +6751,7 @@ async function captureMobile(browser, scheme) {
   // (2b) 나중에 알림 (#1889 R2-M1). RemindDialog 44 주장은 장면이 없으면
   //      허용목록만 초록이다. 시트의 「나중에 알림」이 폰의 실진입점.
   await openSheet();
-  await page.getByTestId("sheet-remind").click();
+  await sceneClick(page, page.getByTestId("sheet-remind"));
   await page.getByTestId("remind-dialog").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `remind dialog ${scheme}`);
@@ -6759,7 +6762,7 @@ async function captureMobile(browser, scheme) {
 
   // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
   //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
-  await page.getByTestId("thread-anchor").first().click();
+  await sceneClick(page, page.getByTestId("thread-anchor").first());
   await page.getByTestId("thread-panel").waitFor({ state: "visible" });
   await page.getByTestId("thread-composer-input").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6778,7 +6781,7 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "b11-thread-bottom-chrome");
   await releaseBottomChrome(page);
-  await page.getByTestId("thread-close").click();
+  await sceneClick(page, page.getByTestId("thread-close"));
   await page.getByTestId("thread-panel").waitFor({ state: "detached" });
 
   // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
@@ -6792,7 +6795,7 @@ async function captureMobile(browser, scheme) {
 
   // 3. 서랍이 열린 상태. 뒤 표면이 110px 남는 것이 이 프레임의 요점이다: 덮은
   //    것이 화면 전체가 아니라 서랍이어야 바깥을 눌러 닫을 자리가 보인다.
-  await page.getByTestId("open-sidebar-drawer").click();
+  await sceneClick(page, page.getByTestId("open-sidebar-drawer"));
   await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertEnterMotionPressAfterFill(page, `drawer ${scheme}`, {
@@ -6851,12 +6854,12 @@ async function captureMobile(browser, scheme) {
 
   await shoot(page, "sidebar-drawer");
 
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
   await assertProfileMenuFitsViewport(page, `drawer profile ${scheme}`);
   await assertTapTargets(page, `drawer profile ${scheme}`);
   await shoot(page, "sidebar-profile-card");
-  await page.getByTestId("profile-set-status").click();
+  await sceneClick(page, page.getByTestId("profile-set-status"));
   await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
   await assertTapTargets(page, `set-status ${scheme}`);
   await shoot(page, "set-status-dialog");
@@ -6883,12 +6886,11 @@ async function captureMobile(browser, scheme) {
   //     증명하므로 존재하는 쪽을 따로 찍는다 — 특히 이름이 긴 에이전트에서
   //     이 줄이 가로로 새지 않는지가 요점이다.
   await page.evaluate('location.hash = "/directory"');
-  await page
+  await sceneClick(page, page
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
-    .first()
-    .click();
+    .first());
   await page.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
-  await page.getByTestId("member-profile-dm").click();
+  await sceneClick(page, page.getByTestId("member-profile-dm"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
   await page.getByTestId("composer-dm-hint").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -7058,7 +7060,7 @@ async function captureScheme(browser, scheme) {
   // 1a-2. 워크스페이스 칸을 펼친 상태 (goal B13 R2 High 1). 접어 둔 것이 "채우는
   //       법을 지운 것"이 아님을 보이는 프레임이다: 열면 라벨이 "워크스페이스 ID"
   //       이고 placeholder가 UUID 모양이라, 무엇을 넣는 칸인지 화면에서 읽힌다.
-  await login.getByTestId("login-workspace-toggle").click();
+  await sceneClick(login, login.getByTestId("login-workspace-toggle"));
   await login.getByTestId("login-workspace").waitFor({ state: "visible" });
   const workspacePlaceholder = await login
     .getByTestId("login-workspace")
@@ -7071,7 +7073,7 @@ async function captureScheme(browser, scheme) {
   const workspaceShot = `${OUT_DIR}/login-workspace-${scheme}.png`;
   await login.screenshot({ path: workspaceShot });
   shots.push(workspaceShot);
-  await login.getByTestId("login-workspace-toggle").click();
+  await sceneClick(login, login.getByTestId("login-workspace-toggle"));
 
   // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
   //     oort://join link fills server and code, so only email/password remain.
@@ -7298,7 +7300,7 @@ async function captureScheme(browser, scheme) {
   shots.push(composerPendingShot);
   releaseComposerUpload();
   await login.getByTestId("attachment-chip-progress").waitFor({ state: "hidden" });
-  await login.getByTestId("attachment-chip-remove").click();
+  await sceneClick(login, login.getByTestId("attachment-chip-remove"));
   await login.getByTestId("attachment-chip").waitFor({ state: "hidden" });
   await login.unroute("**/attachments/uploads");
   await login.unroute("**/capture-composer-upload");
@@ -7312,7 +7314,7 @@ async function captureScheme(browser, scheme) {
   // review frame. Esc must restore focus to the exact opener and keeps the card
   // available for the remaining lanes.
   const unfurlRemoveOpener = login.getByTestId("unfurl-remove");
-  await unfurlRemoveOpener.click();
+  await sceneClick(login, unfurlRemoveOpener);
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "visible" });
   const unfurlRemoveShot = `${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`;
   await waitForAnimations(login);
@@ -7348,8 +7350,8 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoval.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(unfurlRemoval);
   await unfurlRemoval.getByTestId("unfurl-card").waitFor({ state: "visible" });
-  await unfurlRemoval.getByTestId("unfurl-remove").click();
-  await unfurlRemoval.getByTestId("unfurl-remove-commit").click();
+  await sceneClick(unfurlRemoval, unfurlRemoval.getByTestId("unfurl-remove"));
+  await sceneClick(unfurlRemoval, unfurlRemoval.getByTestId("unfurl-remove-commit"));
   await unfurlRemoval.getByTestId("unfurl-group").waitFor({ state: "hidden" });
   await unfurlRemoval
     .getByText("502가 계속 납니다.", { exact: false })
@@ -7379,7 +7381,7 @@ async function captureScheme(browser, scheme) {
   // N-2 / B-1: the React button on the mounted toolbar must open the picker.
   // The ⋯ 메뉴 path is a different consumer and used to stay green while this
   // one crashed.
-  await login.getByTestId("toolbar-react-more").last().click();
+  await sceneClick(login, login.getByTestId("toolbar-react-more").last());
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   const chipPlus = actionRow.getByTestId("reaction-add");
@@ -7388,7 +7390,7 @@ async function captureScheme(browser, scheme) {
     await login.getByTestId("reaction-picker").waitFor({ state: "detached" });
     await waitForAnimations(login);
     await actionRow.hover();
-    await chipPlus.click();
+    await sceneClick(login, chipPlus);
     await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
     await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   }
@@ -7620,15 +7622,15 @@ async function captureScheme(browser, scheme) {
   // 2e-d3. UX-D3 (#1755): 새 메뉴 항목을 실제로 누르고 클립보드를 읽는다.
   //     세 표면(⋯ · 우클릭 · 시트) 중 포인터 둘. 시트는 captureMobile.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   if ((await login.getByTestId("menu-copy-link").count()) !== 1) {
     throw new Error(`[메뉴 ${scheme}] 링크 복사가 없다`);
   }
-  await login.getByTestId("menu-copy").click();
+  await sceneClick(login, login.getByTestId("menu-copy"));
   await login.getByTestId("menu-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(login, `⋯ 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await login.getByTestId("menu-copy-link").click();
+  await sceneClick(login, login.getByTestId("menu-copy-link"));
   await login.getByTestId("menu-copy-link").getByText("링크 복사됨").waitFor();
   const menuMessageId = await actionRow.getAttribute("data-message-id");
   const menuSeq = await actionRow.getAttribute("data-seq");
@@ -7642,17 +7644,17 @@ async function captureScheme(browser, scheme) {
   await login.keyboard.press("Escape");
   await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
 
-  await actionRow.click({ button: "right", position: { x: 180, y: 24 } });
+  await sceneClick(login, actionRow, { button: "right", position: { x: 180, y: 24 } });
   await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
   await waitForAnimations(login);
   await login.screenshot({ path: contextShot });
   shots.push(contextShot);
-  await login.getByTestId("context-copy").click();
+  await sceneClick(login, login.getByTestId("context-copy"));
   await login.getByTestId("context-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(login, `우클릭 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await login.getByTestId("context-copy-link").click();
+  await sceneClick(login, login.getByTestId("context-copy-link"));
   await login.getByTestId("context-copy-link").getByText("링크 복사됨").waitFor();
   await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, copiedLink);
   await login.keyboard.press("Escape");
@@ -7663,8 +7665,8 @@ async function captureScheme(browser, scheme) {
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-edit").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-edit"));
   await login.getByTestId("message-editor-input").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   // R2 M3 회귀: 편집 중인 행에는 hover 진입점이 없어야 한다. 1라운드에서는 바가
@@ -7684,26 +7686,26 @@ async function captureScheme(browser, scheme) {
   const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
   await login.screenshot({ path: editShot });
   shots.push(editShot);
-  await login.getByTestId("message-editor-cancel").click();
+  await sceneClick(login, login.getByTestId("message-editor-cancel"));
 
   // 2g. 지우기 확인 (goal B11). 되돌리기가 아니라 확인이다 — 서버의 삭제는 본문을
   //     지우는 tombstone이라 되돌릴 것이 남지 않는다.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-delete").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-delete"));
   await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
   await waitForAnimations(login);
   await login.screenshot({ path: deleteShot });
   shots.push(deleteShot);
-  await login.getByTestId("delete-message-cancel").click();
+  await sceneClick(login, login.getByTestId("delete-message-cancel"));
 
   // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
   //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-react-more").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-react-more"));
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
@@ -7717,7 +7719,7 @@ async function captureScheme(browser, scheme) {
   // 2i. 같은 피커를 메시지 반응과 컴포저 삽입이 공유한다 (#1742).
   //     패널은 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
   //     컴포저의 명시적인 진입점으로 돌린다.
-  await login.getByTestId("composer-emoji-trigger").click();
+  await sceneClick(login, login.getByTestId("composer-emoji-trigger"));
   await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
@@ -7736,7 +7738,7 @@ async function captureScheme(browser, scheme) {
   await waitForAnimations(login);
   // 2j. 스레드도 채널과 같은 메시지 입력 능력(멘션·첨부·이모지)을 갖는다
   //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
-  await login.getByTestId("thread-anchor").first().click();
+  await sceneClick(login, login.getByTestId("thread-anchor").first());
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(login, `thread ${scheme}`);
   const threadComposer = login.getByTestId("thread-composer-input");
@@ -7781,7 +7783,7 @@ async function captureScheme(browser, scheme) {
   shots.push(threadShot);
   await login.keyboard.press("Escape");
   await threadComposer.fill("");
-  await login.getByTestId("thread-composer-emoji-trigger").click();
+  await sceneClick(login, login.getByTestId("thread-composer-emoji-trigger"));
   await login
     .getByTestId("thread-composer-emoji-picker")
     .waitFor({ state: "visible" });
@@ -7802,7 +7804,7 @@ async function captureScheme(browser, scheme) {
       `[thread ${scheme}] picker Escape left thread-panel count=${threadStillOpen} (want 1)`
     );
   }
-  await login.getByTestId("thread-close").click();
+  await sceneClick(login, login.getByTestId("thread-close"));
 
   // 2j-2. 답글 0개 분기(#1753 M-2): 점선 빈 상태 상자의 자연 경로는 「아직 답글
   //       없는 행에서 툴바 [답글]로 스레드를 여는 것」이다 — 이미 연 스레드는
@@ -7818,14 +7820,14 @@ async function captureScheme(browser, scheme) {
   // 불변식(탭 스톱 자)이 있으므로 전역 locator로 잡는다.
   // 앞 레인이 행에 남긴 키보드 포커스를 컴포저로 옮긴다 — 포커스 행+호버 행이
   // 갈리면 툴바가 2개 떠서(hover∨focus 계약) 전역 locator가 흔들린다.
-  await login.getByTestId("composer-input").click();
+  await sceneClick(login, login.getByTestId("composer-input"));
   const freshThreadRow = login
     .locator('[data-testid="timeline-message"][data-actionable="true"]')
     .last();
   await freshThreadRow.hover();
   const freshToolbar = freshThreadRow.getByTestId("message-hover-toolbar");
   await freshToolbar.waitFor({ state: "visible" });
-  await freshToolbar.getByTestId("toolbar-reply").click();
+  await sceneClick(login, freshToolbar.getByTestId("toolbar-reply"));
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
   await login.getByTestId("thread-empty").waitFor({ state: "visible" });
   await login.mouse.move(8, 8);
@@ -7834,7 +7836,7 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: threadEmptyShot });
   shots.push(threadEmptyShot);
   await login.unroute("**/v1/workspaces/*/channels/*/messages/*/replies*");
-  await login.getByTestId("thread-close").click();
+  await sceneClick(login, login.getByTestId("thread-close"));
 
   // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
   //     리뷰가 센 것과 같은 자다. 실측 16번(그려진 11행 + 본문 링크 + 카드 안
@@ -7863,7 +7865,7 @@ async function captureScheme(browser, scheme) {
   // 3a-2. 서버 거절은 필드 옆에 (MOMO-614): 이미 있는 이름을 보내면 409가 이름
   //       상자 밑에 붙고, 입력한 값은 그대로 남는다. 토스트 아님.
   await login.getByTestId("create-channel-name").fill("general");
-  await login.getByTestId("create-channel-submit").click();
+  await sceneClick(login, login.getByTestId("create-channel-submit"));
   await login
     .getByTestId("create-channel-name-error")
     .waitFor({ state: "visible" });
@@ -7883,7 +7885,7 @@ async function captureScheme(browser, scheme) {
     return route.fallback();
   });
   await login.getByTestId("create-channel-name").fill("release-rollback");
-  await login.getByTestId("create-channel-submit").click();
+  await sceneClick(login, login.getByTestId("create-channel-submit"));
   await login
     .locator('[data-testid="create-channel-submit"][aria-busy="true"]')
     .waitFor({ state: "visible" });
@@ -7908,7 +7910,7 @@ async function captureScheme(browser, scheme) {
   await login.screenshot({ path: createOfflineShot });
   shots.push(createOfflineShot);
   await context.setOffline(false);
-  await login.getByTestId("create-channel-cancel").click();
+  await sceneClick(login, login.getByTestId("create-channel-cancel"));
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
 
   // 3a-3. 빈 워크스페이스 (MOMO-614): 채널이 0개일 때 남는 유일한 행동. 이 화면의
@@ -8001,7 +8003,7 @@ async function captureScheme(browser, scheme) {
   //     query is typed, which is how the palette is actually used, and "김"
   //     lands on the pair a directory has to keep apart (a human and an agent
   //     whose display names are both 김인턴).
-  await directory.getByTestId("open-quick-switcher").click();
+  await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
   await directory.getByTestId("quick-switcher-input").fill("김");
   await directory.getByTestId("switcher-person").first().waitFor({ state: "visible" });
   const switcherShot = `${OUT_DIR}/quick-switcher-people-${scheme}.png`;
@@ -8010,12 +8012,11 @@ async function captureScheme(browser, scheme) {
   await directory.keyboard.press("Escape");
 
   // 3d. the DM that a directory profile opens: same timeline anatomy as a channel.
-  await directory
+  await sceneClick(directory, directory
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
-    .first()
-    .click();
+    .first());
   await directory.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
-  await directory.getByTestId("member-profile-dm").click();
+  await sceneClick(directory, directory.getByTestId("member-profile-dm"));
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await assertPausedNoticeFolded(directory, `dm ${scheme}`);
@@ -8047,7 +8048,7 @@ async function captureScheme(browser, scheme) {
 
   // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
   //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).
-  await agentHub.getByTestId("agent-hub-create").click();
+  await sceneClick(agentHub, agentHub.getByTestId("agent-hub-create"));
   await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "visible" });
   await agentHub.getByTestId("create-agent-display-name").fill("배포당번");
   await agentHub.getByTestId("create-agent-handle").fill("release-duty");
@@ -8068,7 +8069,7 @@ async function captureScheme(browser, scheme) {
   // 3f-3. 서버 거절은 필드 옆에: 이미 있는 핸들을 보내면 409가 핸들 상자 밑에
   //       붙고, 입력한 값은 그대로 남는다. 토스트 아님.
   await agentHub.getByTestId("create-agent-handle").fill("hermes");
-  await agentHub.getByTestId("create-agent-submit").click();
+  await sceneClick(agentHub, agentHub.getByTestId("create-agent-submit"));
   await agentHub
     .getByTestId("create-agent-handle-error")
     .waitFor({ state: "visible" });
@@ -8076,7 +8077,7 @@ async function captureScheme(browser, scheme) {
   const agentCreateErrorShot = `${OUT_DIR}/agent-create-error-${scheme}.png`;
   await agentHub.screenshot({ path: agentCreateErrorShot });
   shots.push(agentCreateErrorShot);
-  await agentHub.getByTestId("create-agent-cancel").click();
+  await sceneClick(agentHub, agentHub.getByTestId("create-agent-cancel"));
   await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "detached" });
 
   // 3f-4. 편집 표면이 없는 서버 (diff matrix D-4의 현재 형상): allowed-models가
@@ -8141,7 +8142,7 @@ async function captureScheme(browser, scheme) {
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
 
-  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
   await approvals
     .getByTestId("inbox-approval-confirm")
     .first()
@@ -8161,7 +8162,7 @@ async function captureScheme(browser, scheme) {
       "inbox-approval-host-radio-019f9b10-0000-7000-8000-00000000c002"
     )
     .check();
-  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
   await approvals
     .getByTestId("inbox-approval-confirm")
     .first()
@@ -8425,7 +8426,7 @@ async function captureScheme(browser, scheme) {
 
   // …and the probe table, which is the one surface carrying all four
   //     dispositions and therefore all four status tones in one frame.
-  await aiLink.getByRole("button", { name: "연결 확인" }).click();
+  await sceneClick(aiLink, aiLink.getByRole("button", { name: "연결 확인" }));
   await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
   const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
   await aiLink.screenshot({ path: aiProbeShot });
@@ -8436,7 +8437,7 @@ async function captureScheme(browser, scheme) {
   //     keep its format hint. Nothing has happened yet, so there is no error to
   //     report; what the block owes the reader is the next step, once, at the
   //     foot ("6차 provider 주소를 입력하면 저장할 수 있습니다.").
-  await aiLink.getByTestId("chain-add").click();
+  await sceneClick(aiLink, aiLink.getByTestId("chain-add"));
   await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
   await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
@@ -8550,7 +8551,7 @@ async function captureScheme(browser, scheme) {
   await signIn(aiMock);
   await aiMock.evaluate('location.hash = "/settings?section=ai"');
   await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
-  await aiMock.getByRole("button", { name: "연결 확인" }).click();
+  await sceneClick(aiMock, aiMock.getByRole("button", { name: "연결 확인" }));
   await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
   const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
   await aiMock.screenshot({ path: aiMockShot });
@@ -8643,7 +8644,7 @@ async function captureScheme(browser, scheme) {
 
   // 확정하지 않는다. 찍는 것은 **묻는 판**이고, 그 판이 존재한다는 사실이 이
   // 표면의 계약이다(한 번의 무방비 클릭으로 살아 있는 수신 주소가 죽지 않는다).
-  await webhooks.locator('[data-testid^="webhook-revoke-"]').first().click();
+  await sceneClick(webhooks, webhooks.locator('[data-testid^="webhook-revoke-"]').first());
   await webhooks
     .locator('[data-testid^="webhook-revoke-"][data-testid$="-commit"]')
     .first()
@@ -8660,7 +8661,7 @@ async function captureScheme(browser, scheme) {
   await webhooks.waitForTimeout(200);
   await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
   await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
-  await webhooks.locator('[data-testid^="webhook-rotate-"]').first().click();
+  await sceneClick(webhooks, webhooks.locator('[data-testid^="webhook-rotate-"]').first());
   await webhooks
     .locator('[data-testid^="webhook-rotate-"][data-testid$="-commit"]')
     .first()
@@ -8677,7 +8678,7 @@ async function captureScheme(browser, scheme) {
   await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
   await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
   await webhooks.getByTestId("webhook-label").fill("배포 알림 (GitHub Actions)");
-  await webhooks.getByTestId("webhook-create").click();
+  await sceneClick(webhooks, webhooks.getByTestId("webhook-create"));
   await webhooks.getByTestId("webhook-revealed").waitFor({ state: "visible" });
   await webhooks.waitForTimeout(200);
   const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
@@ -8710,7 +8711,7 @@ async function captureScheme(browser, scheme) {
   await devices.getByTestId("device-link-create").waitFor({ state: "visible" });
   await shootDevices(devices, "idle");
 
-  await devices.getByTestId("device-link-create").click();
+  await sceneClick(devices, devices.getByTestId("device-link-create"));
   await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
   await devices.getByTestId("device-link-pending").waitFor({ state: "visible" });
   await shootDevices(devices, "qr");
@@ -8724,7 +8725,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.deepLink = railwayDeepLink;
   const devicesV7 = await openDevicesPage();
-  await devicesV7.getByTestId("device-link-create").click();
+  await sceneClick(devicesV7, devicesV7.getByTestId("device-link-create"));
   await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
   if (v7.modules !== 53) {
@@ -8735,7 +8736,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.deepLink = selfHostDeepLink;
   const devicesV8 = await openDevicesPage();
-  await devicesV8.getByTestId("device-link-create").click();
+  await sceneClick(devicesV8, devicesV8.getByTestId("device-link-create"));
   await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
   if (v8.modules !== 57) {
@@ -8749,12 +8750,12 @@ async function captureScheme(browser, scheme) {
     device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
   });
   const devicesConfirm = await openDevicesPage();
-  await devicesConfirm.getByTestId("device-link-create").click();
+  await sceneClick(devicesConfirm, devicesConfirm.getByTestId("device-link-create"));
   await devicesConfirm.getByTestId("device-link-awaiting-confirm").waitFor({
     state: "visible",
   });
   await shootDevices(devicesConfirm, "awaiting-confirm");
-  await devicesConfirm.getByTestId("device-link-confirm-sas").click();
+  await sceneClick(devicesConfirm, devicesConfirm.getByTestId("device-link-confirm-sas"));
   await devicesConfirm.getByTestId("device-link-connected").waitFor({
     state: "visible",
   });
@@ -8764,7 +8765,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.getBody = () => ({ status: "expired" });
   const devicesExpired = await openDevicesPage();
-  await devicesExpired.getByTestId("device-link-create").click();
+  await sceneClick(devicesExpired, devicesExpired.getByTestId("device-link-create"));
   await devicesExpired.getByTestId("device-link-expired").waitFor({
     state: "visible",
   });
@@ -8774,7 +8775,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.issueStatus = 500;
   const devicesError = await openDevicesPage();
-  await devicesError.getByTestId("device-link-create").click();
+  await sceneClick(devicesError, devicesError.getByTestId("device-link-create"));
   await devicesError.getByTestId("device-link-banner").waitFor({
     state: "visible",
   });
@@ -8803,7 +8804,7 @@ async function captureScheme(browser, scheme) {
     device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
   });
   const devicesLoopback = await openDevicesPage();
-  await devicesLoopback.getByTestId("device-link-create").click();
+  await sceneClick(devicesLoopback, devicesLoopback.getByTestId("device-link-create"));
   await devicesLoopback.getByTestId("device-link-connected").waitFor({
     state: "visible",
   });
@@ -8825,7 +8826,7 @@ async function captureScheme(browser, scheme) {
   const firstRunShot = `${OUT_DIR}/onboarding-phone-link-${scheme}.png`;
   await firstRun.screenshot({ path: firstRunShot });
   shots.push(firstRunShot);
-  await firstRun.getByTestId("onboarding-enter-app").click();
+  await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
   await firstRun.close();
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
@@ -8857,7 +8858,7 @@ async function captureScheme(browser, scheme) {
   // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
   // and both are negatives: no English, and no provider text.
   await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
-  await b8.getByTestId("turn-failure-detail").first().click();
+  await sceneClick(b8, b8.getByTestId("turn-failure-detail").first());
   await b8.waitForTimeout(200);
   await assertWideRowsFillOnly(b8, `b8-failure ${scheme}`);
   const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
@@ -8962,7 +8963,7 @@ async function captureTerminalDockScenes(browser, scheme) {
 
   async function openDock(page) {
     const toggle = page.getByTestId("open-terminal-dock");
-    await toggle.click();
+    await sceneClick(page, toggle);
     await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
     if ((await toggle.getAttribute("aria-pressed")) !== "true") {
       throw new Error(`터미널 토글이 열린 동안 pressed가 아니다 ${scheme}`);
@@ -9074,7 +9075,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       if ((await tabs.count()) < 2) {
         throw new Error(`세션 탭이 2개 미만이다 ${scheme}`);
       }
-      await tabs.nth(1).click();
+      await sceneClick(page, tabs.nth(1));
       if ((await tabs.nth(1).getAttribute("aria-selected")) !== "true") {
         throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
       }
@@ -9086,7 +9087,7 @@ async function captureTerminalDockScenes(browser, scheme) {
         scheme
       );
       const dock = page.getByTestId("terminal-dock");
-      await page.getByTestId("terminal-dock-close").click();
+      await sceneClick(page, page.getByTestId("terminal-dock-close"));
       await dock.waitFor({ state: "detached" });
       await page.waitForFunction(
         `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
@@ -9278,13 +9279,13 @@ async function captureMarkUnreadScenes(browser, scheme) {
   );
   await marked.hover();
   await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
-  await page.getByTestId("message-actions-trigger").click();
+  await sceneClick(page, page.getByTestId("message-actions-trigger"));
   await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
   const markItem = page.getByTestId("menu-mark-unread");
   if ((await markItem.count()) !== 1) {
     throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
   }
-  await markItem.click();
+  await sceneClick(page, markItem);
   await waitForScrollerAlignSettled(page, `${scheme} after mark`);
   const proof = await page.waitForFunction(
     markUnreadProofExpr(),
@@ -9756,7 +9757,7 @@ async function captureSearchScopeScenes(browser, scheme) {
   shots.push(narrowShot);
 
   // 칩을 실제로 누른다. 프레임만 찍고 누르지 않으면 죽은 칩도 초록이다.
-  await page.getByTestId("search-scope-workspace").click();
+  await sceneClick(page, page.getByTestId("search-scope-workspace"));
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
   );
@@ -9795,7 +9796,7 @@ async function captureSearchScopeScenes(browser, scheme) {
   await page.screenshot({ path: emptyShot });
   shots.push(emptyShot);
 
-  await page.getByTestId("search-empty-escalate").click();
+  await sceneClick(page, page.getByTestId("search-empty-escalate"));
   await page.waitForFunction(
     () =>
       (
@@ -9898,12 +9899,12 @@ async function captureSetStatusScenes(browser, scheme) {
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
-    await page.getByTestId("profile-card").click();
+    await sceneClick(page, page.getByTestId("profile-card"));
     await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
-    await page.getByTestId("profile-set-status").click();
+    await sceneClick(page, page.getByTestId("profile-set-status"));
     await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
     if (failPut) {
-      await page.getByTestId("set-status-save").click();
+      await sceneClick(page, page.getByTestId("set-status-save"));
       await page.getByTestId("set-status-error").waitFor({ state: "visible" });
     } else if (offline) {
       await context.setOffline(true);
@@ -9976,27 +9977,26 @@ async function captureAddMemberScenes(browser, scheme) {
     // 사이드바 행을 눌러 SPA 안에서 이동한다(딥링크 goto가 아니라). 라우터가
     // 해시 기반이라 href는 `#/c/{id}` 꼴이다 — 이 앱이 실제로 쓰는 경로를 그대로
     // 고른다.
-    await page
-      .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`)
-      .click();
+    await sceneClick(page, page
+      .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`));
     if (entry === "header") {
       // 로딩 장면은 로스터를 붙잡는다. 인트로의 「멤버 추가하기」는 로스터가
       // 오기 전에 아무 말도 하지 않으므로(R2 M5) 여기서 열 수 없다. 헤더 멤버
       // 목록이 같은 다이얼로그의 다른 문이다. 픽스처에 맞춰 제품 규칙을 낮추지
       // 않는다 (#1904 H-1).
       await page.getByTestId("channel-member-count").waitFor({ state: "visible" });
-      await page.getByTestId("channel-member-count").click();
+      await sceneClick(page, page.getByTestId("channel-member-count"));
       await page
         .getByTestId("channel-member-panel")
         .waitFor({ state: "visible" });
-      await page.getByTestId("channel-member-add").click();
+      await sceneClick(page, page.getByTestId("channel-member-add"));
     } else {
       const empty = page.getByTestId("timeline-empty");
       await empty.waitFor({ state: "visible" });
       // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
       // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
       // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
-      await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+      await sceneClick(page, empty.getByRole("button", { name: "멤버 추가하기" }));
     }
     await page
       .getByTestId("add-channel-member-dialog")
@@ -10096,7 +10096,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
     await page.evaluate('location.hash = "/agents"');
-    await page.getByTestId("agent-hub-hosted-pairing").click();
+    await sceneClick(page, page.getByTestId("agent-hub-hosted-pairing"));
     await page.getByTestId("hosted-agent-wizard").waitFor({ state: "visible" });
     await settle(page, context);
 
@@ -10147,13 +10147,13 @@ async function captureHostedPairingScenes(browser, scheme) {
   await shoot("pairing", emptyList, async (page) => {
     await page.getByTestId("hosted-display-name").fill("Grok 리서치");
     await page.getByTestId("hosted-handle").fill("grok-research");
-    await page.getByTestId("hosted-create").click();
+    await sceneClick(page, page.getByTestId("hosted-create"));
     await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
   });
 
   // 3단계. 다이얼인 대기 = 이 표면의 빈 상태.
   await shoot("detecting", listWith(hostedConnection()), async (page) => {
-    await page.getByTestId("hosted-wizard-resume").click();
+    await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
     await page.getByTestId("hosted-detecting-empty").waitFor({ state: "visible" });
   });
 
@@ -10169,7 +10169,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "approval",
     listWith(hostedConnection({ status: "detected" })),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
       await page
         .getByTestId("hosted-channels")
@@ -10225,7 +10225,7 @@ async function captureHostedPairingScenes(browser, scheme) {
       })
     ),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-awaiting-proof").waitFor({ state: "visible" });
     }
   );
@@ -10246,7 +10246,7 @@ async function captureHostedPairingScenes(browser, scheme) {
       })
     ),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-test-mention").waitFor({ state: "visible" });
     }
   );
@@ -10256,7 +10256,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "expired",
     listWith(hostedConnection({ status: "expired" })),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-expired").waitFor({ state: "visible" });
     }
   );
@@ -10294,7 +10294,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "offline",
     listWith(hostedConnection({ status: "detected" })),
     async (page, context) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
       await context.setOffline(true);
       await page.getByTestId("hosted-wizard-offline").waitFor({ state: "visible" });
@@ -10463,10 +10463,9 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     await page.evaluate('location.hash = "/agents"');
     // 해제는 연결을 만들 때가 아니라 **그 에이전트를 보다가** 하는 일이다. 그래서
     // 진입도 로스터에서 그 에이전트를 고르는 것으로 시작한다.
-    await page
-      .locator(`[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`)
-      .click();
-    await page.getByTestId("agent-hub-tab-connection").click();
+    await sceneClick(page, page
+      .locator(`[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`));
+    await sceneClick(page, page.getByTestId("agent-hub-tab-connection"));
     await page.getByTestId("hosted-connection-section").waitFor({ state: "visible" });
     await settle(page, context);
 
@@ -10576,7 +10575,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       [
         "start-confirm",
         async (page) => {
-          await page.getByTestId("hosted-disconnect-start").click();
+          await sceneClick(page, page.getByTestId("hosted-disconnect-start"));
           await page.waitForTimeout(200);
         },
       ],
@@ -10609,13 +10608,13 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     ledger(disconnectConnection(), CLEANUP_MIDWAY),
     async (page) => {
       const bot = page.locator('[data-testid="cleanup-artifact"][data-artifact-kind="bot"]');
-      await bot.getByTestId("cleanup-open-form").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-open-form"));
       await bot.getByTestId("cleanup-form").waitFor({ state: "visible" });
       await assertFocusInForm(page);
-      await bot.getByTestId("cleanup-cancel").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-cancel"));
       await assertFocusOnRowHeading(page, "bot");
       // 다시 열어 첫 종착(봇을 지웠습니다, 파괴)을 고른 폼을 남긴다.
-      await bot.getByTestId("cleanup-open-form").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-open-form"));
       await bot.getByTestId("cleanup-disposition").waitFor({ state: "visible" });
       await bot.getByTestId("cleanup-disposition").getByRole("radio").first().check();
       await bot.getByTestId("cleanup-evidence").scrollIntoViewIfNeeded();
@@ -10634,7 +10633,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
           await bot
             .getByTestId("cleanup-evidence")
             .fill("팀에 대화 기록 위치를 알린 뒤 봇은 남겨 두기로 했습니다");
-          await bot.getByTestId("cleanup-save").click();
+          await sceneClick(bot, bot.getByTestId("cleanup-save"));
           await bot.getByTestId("cleanup-save-confirm").waitFor({ state: "visible" });
           await page.waitForTimeout(200);
         },
@@ -10654,7 +10653,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       [
         "terminal-confirm",
         async (page) => {
-          await page.getByTestId("hosted-disconnect-complete").click();
+          await sceneClick(page, page.getByTestId("hosted-disconnect-complete"));
           await page.waitForTimeout(200);
         },
       ],
@@ -10690,13 +10689,13 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       const plugin = page.locator(
         '[data-testid="cleanup-artifact"][data-artifact-kind="plugin"]'
       );
-      await plugin.getByTestId("cleanup-open-form").click();
+      await sceneClick(plugin, plugin.getByTestId("cleanup-open-form"));
       await plugin.getByTestId("cleanup-disposition").getByRole("radio").first().check();
       await plugin
         .getByTestId("cleanup-evidence")
         .fill("플러그인 관리 화면에서 등록을 삭제했습니다");
-      await plugin.getByTestId("cleanup-save").click();
-      await plugin.getByTestId("cleanup-save-confirm").click();
+      await sceneClick(plugin, plugin.getByTestId("cleanup-save"));
+      await sceneClick(plugin, plugin.getByTestId("cleanup-save-confirm"));
       await page.getByTestId("hosted-disconnect-failure").waitFor({ state: "visible" });
       await page.waitForTimeout(200);
     }
@@ -10773,12 +10772,11 @@ async function captureHostedDoorbellScenes(browser, scheme) {
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
     await page.evaluate('location.hash = "/agents"');
-    await page
+    await sceneClick(page, page
       .locator(
         `[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`
-      )
-      .click();
-    await page.getByTestId("agent-hub-tab-connection").click();
+      ));
+    await sceneClick(page, page.getByTestId("agent-hub-tab-connection"));
     await page.getByTestId("hosted-doorbell-section").waitFor({ state: "visible" });
     await settle(page, context);
     const path = `${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`;
@@ -10868,7 +10866,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
         "https://hooks.example.com/doorbell"
       );
       await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
-      await page.getByTestId("hosted-doorbell-register").click();
+      await sceneClick(page, page.getByTestId("hosted-doorbell-register"));
       await page.getByTestId("hosted-doorbell-failure").waitFor({ state: "visible" });
     }
   );
@@ -10883,7 +10881,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
         "https://hooks.example.com/doorbell"
       );
       await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
-      await page.getByTestId("hosted-doorbell-register").click();
+      await sceneClick(page, page.getByTestId("hosted-doorbell-register"));
       await page.getByTestId("hosted-doorbell-gate-off").waitFor({ state: "visible" });
     }
   );
@@ -11334,12 +11332,12 @@ async function assertGalleryUsable(page, where) {
   const lightToggle = page.getByRole("button", { name: "라이트로 보기" });
   const other = where.includes("dark") ? lightToggle : darkToggle;
   const home = where.includes("dark") ? darkToggle : lightToggle;
-  await other.click({ timeout: 3000 });
+  await sceneClick(page, other, { timeout: 3000 });
   const pressed = await other.getAttribute("aria-pressed");
   if (pressed !== "true") {
     throw new Error(`${where}: 스킴 토글 클릭이 먹지 않는다 (aria-pressed=${pressed})`);
   }
-  await home.click({ timeout: 3000 });
+  await sceneClick(page, home, { timeout: 3000 });
 
   const gallery = page.getByTestId("design-gallery");
   await gallery.evaluate((el) => {
