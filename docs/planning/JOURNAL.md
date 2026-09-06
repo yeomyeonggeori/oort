@@ -3,6 +3,15 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-06 · Fable(+Opus 5 검수) · ★W3 파도 1 완결 — 엔진 4/4(SH-2·SH-4a·SH-4b·SH-3b) + ST-1, 셀프호스팅 문서 영문 정본·공개 엣지·day-2 CLI main 정본화
+
+- 결재: 「런칭 준비 마무리?」 아니오(G1은 W3 뒤) → 엔진 우선 + UXUI 안정화 권장 채택 → go.
+- 엔진(planner 검토): SH-2 #2110(R3, 승격 u 감사 5파일) · SH-4a #2115(설치 실측 개입 0) · SH-4b #2119 · SH-3b #2123(R3, 왕복 실측, 승격 x 감사 6파일) → main=6d42c1b4.
+- UXUI: ST-1 #2114(R1 FAIL B2·H3 → R2 FAIL B1·H1 → R3 FAIL B0·H1 → R4 FAIL B0·H2 → R5 FAIL B0·H1 → R6 PASS(B0·H0·M2·N4)) — 상한 3·백로그 가드·버스트 결정성 0/30·캡처 시계 고정(벽시계가 진짜 원인)·오프너 grant 핀. 랜딩 #2114 → 승격 y #2131 + sync #2132/#2133.
+- 발행: #2124 정책 파일 · #2130. DEVIATION 3행 accepted. PIPELINE §3 게이트 목록·체인 산출물 검사.
+- 교훈 ⑳~㉕: 미션 게이트 목록 명시 · 템플릿화 시 게이트 동반 상향 · 오라클의 배포 형상 인지 · 브리프 수용 숫자의 실사 · 체인 산출물 검사 · 엔진 레인 planner 검토 회전.
+- 다음: G1 잔여 편성(UXUI W3 + SH-5a·SH-6a) 성재 결재.
+
 ## 2026-09-05 (저녁) · Fable(+Opus 5 검수) · ★W1 uxui 3차 파도 완결 — UX-R2a·UX-R2b 폐곡선 랜딩, 승격 q·r, 사고 2건(워커 사망·gitleaks 오탐)
 
 - 랜딩: UX-R2a #2088(R1 FAIL B0·H4 → R2 PASS → R3 CI 스캔 미니) → 승격 q #2092 + sync #2093/#2094(main 15e6e3e2). UX-R2b #2089(R1 FAIL B2·H4 → R2 FAIL B0·H1 → R3 PASS(B0·H0·M2·N4)) → 승격 r #2096 + sync #2097/#2099 → main=831315ae(sync 뒤 uxui 2ce432c2·engine 282a53f7). W1 uxui 8건 전부 main 정본화.
@@ -137,10 +146,3 @@
 - **#1798 랜딩**: PR #1798 → track/engine **094cdc87**, #1767 close. 패스워드 리셋 위계(ADR-0128 D2) 구멍 종료. cursor grok 4.6 워커 수리(d8d68b89): `can_issue_password_reset_for` 사다리+self 진입즉시 Forbidden, 행위자·대상 role 둘 다 같은 테넌트 트랜잭션 조회(라우트 require_admin 비단독). **워커 RED proof 정석**: 매트릭스 20칸 중 4칸(admin→owner 계열) 201→403, conformance 25 passed. Fable 재검수+CI 그린(fail=0) 확인 후 머지. 브리프의 매트릭스 표·정지 조건 절 상설 템플릿 첫 실전 완주.
 - **회수**: w1747·w1769·w1770·wfix·w1767 5기 reap(디스크 111Gi). `momo-worktree-reclaim.sh` infra 비-git 디렉터리 pipefail 결함 수리. 성재 위생 대상: `momo-worktrees/infra/rust/local.secrets.env`(리그 산물 추정 시크릿, 보존).
 - **정리·중단**: 재개 진입점 `handoffs/2026-08-27-fable-resume-checkpoint.md`. 다음 순서 ③#1800→④#1770→⑤(#1792 P2폴백∥#1785∥#1797)→⑥#1768(위계 헬퍼 패턴 승계). 실행 결재 전부 소진, 방향 기승인 — 다음 세션 ③부터 자율.
-
-## 2026-08-27 · Fable · ★성재 결재 5건 전부 판정 — #1799 랜딩·#1798 수리 워커 가동·#1803 완료
-- **결재 반영**(정본 `handoffs/2026-08-27-post-audit-execution-plan.md` §1.1): ①DNS=성재 직접(가비아, **유일 잔여** — dig 실측 101.79.11.189 여전히 응답) ②#1798 계약 승인+검수·머지 위임 ③허들 폴백=**P2 운영자 TURN**(P3 유료 배제, #1792 코멘트) ④#1768=순서 ⑥ 유지 ⑤#1803=Fable 검증 위임.
-- **#1799 랜딩**: track/engine **89298a2f**, #1769 close. 머지 전 같은 계열 위계 재점검 통과 — owner 초대 불가가 API 400+DB 제약(`invite_code_role_ck`) 이중 방어, admin의 revoke/regenerate는 신규 발급 경로라 탈취 계열 아님.
-- **#1798 수리 워커 발사**(cursor grok 4.6, w1767 워크트리): 결함 재확정(require_admin이 행위자만, in_tx 오류 집합에 대상 role 축 부재, self 차단 부재) → 브리프 `2026-08-27-1798-hierarchy-repair-brief.md` — **권한 매트릭스 표+정지 조건 절 상설 템플릿 첫 실전**. #1799 선랜딩으로 base sync 1회화(①② 순서 의도적 교환).
-- **#1803 완료**(e2b53eee): AGENTS/CODEX 헤더·런북 은퇴 배너·Caddyfile 고지. 정정: **CLAUDE.md 잔재 0건**(이슈 기재와 다름). STATUS.md 역사 기록은 원칙대로 보존.
-- 다음: 워커 완료 시 재검수(매트릭스 red proof 확인)→머지→#1800 발사. DNS 삭제는 성재 가비아 처리 후 dig 재확인.
