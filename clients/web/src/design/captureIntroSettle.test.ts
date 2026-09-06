@@ -20,7 +20,6 @@ type PoseSample = {
 type SettleMod = {
   SETTLE_STABLE_FRAMES: number;
   SETTLE_FRAME_CEILING: number;
-  INTRO_SETTLE_FRAME_CEILING: number;
   introPoseKey: (sample: PoseSample) => string | null;
   tickIntroSettle: (
     state: { key: string | null; stable: number },
@@ -34,14 +33,12 @@ const settle = new Function(
 return {
   SETTLE_STABLE_FRAMES,
   SETTLE_FRAME_CEILING,
-  INTRO_SETTLE_FRAME_CEILING,
   introPoseKey,
   tickIntroSettle,
 };`
 )() as SettleMod;
 
 const {
-  INTRO_SETTLE_FRAME_CEILING,
   SETTLE_FRAME_CEILING,
   SETTLE_STABLE_FRAMES,
   introPoseKey,
@@ -76,7 +73,7 @@ describe("capture intro settle predicate", () => {
   it("a still-moving intro (hidden list or drifting scrollTop) does not settle", () => {
     const state = { key: null as string | null, stable: 0 };
     let settledAt = -1;
-    driftingFrames(INTRO_SETTLE_FRAME_CEILING).forEach((sample, i) => {
+    driftingFrames(SETTLE_FRAME_CEILING).forEach((sample, i) => {
       if (tickIntroSettle(state, sample, SETTLE_STABLE_FRAMES) && settledAt < 0) {
         settledAt = i;
       }
@@ -94,7 +91,6 @@ describe("capture intro settle predicate", () => {
     });
     expect(settledAt).toBe(SETTLE_STABLE_FRAMES);
     expect(SETTLE_FRAME_CEILING).toBe(60);
-    expect(INTRO_SETTLE_FRAME_CEILING).toBe(60);
   });
 
   it("S8: gut vis and scrollTop from the key (keep the comment) and a moving scene falsely settles; the real key does not", () => {
@@ -138,12 +134,13 @@ describe("capture intro settle predicate", () => {
     expect(introPoseKey(visLocked[3]!)).toMatch(/:\d+:visible$/);
   });
 
-  it("capture-screens executes the shared pose key, not a comment", () => {
+  it("capture-screens executes the shared tick, not a copy of the state machine", () => {
     const body = stripComments(CAPTURE_SRC);
+    expect(body).toMatch(/tickIntroSettle\.toString\(\)/);
     expect(body).toMatch(/introPoseKey\.toString\(\)/);
     expect(body).toMatch(/SETTLE_STABLE_FRAMES/);
     expect(body).toMatch(/SETTLE_FRAME_CEILING/);
-    expect(body).toMatch(/INTRO_SETTLE_FRAME_CEILING/);
+    expect(body).not.toMatch(/INTRO_SETTLE_FRAME_CEILING/);
     expect(body).not.toMatch(/minFrames/);
     expect(body).not.toMatch(/for \(let i = 0; i < 180/);
     expect(body).toMatch(/pinPageWallClock/);

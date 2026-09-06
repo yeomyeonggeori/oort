@@ -10,16 +10,9 @@
 /** Consecutive frames the pose must hold before the lane proceeds. */
 export const SETTLE_STABLE_FRAMES = 3;
 
-/** Abort ceiling for every timeline scene except nonempty intro. Base value. */
+/** Abort ceiling for every timeline scene. The loop exits as soon as
+ *  SETTLE_STABLE_FRAMES consecutive matches land (not a sleep). */
 export const SETTLE_FRAME_CEILING = 60;
-
-/**
- * Nonempty-intro ceiling. The predicate first holds at frame 3 on a settled
- * scene (R1 instrumentation: 1 unique pose from frame 0). Same 60 as the
- * prior lane; not a sleep — the loop exits as soon as SETTLE_STABLE_FRAMES
- * consecutive matches land.
- */
-export const INTRO_SETTLE_FRAME_CEILING = 60;
 
 /**
  * @param {{

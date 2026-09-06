@@ -29,11 +29,15 @@ import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
 import {
-  INTRO_SETTLE_FRAME_CEILING,
   SETTLE_FRAME_CEILING,
   SETTLE_STABLE_FRAMES,
   introPoseKey,
+  tickIntroSettle,
 } from "./capture-intro-settle.mjs";
+import {
+  setActiveCaptureScene,
+  wrapPageTimeGateClicks,
+} from "./capture-clock.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -50,7 +54,10 @@ const VIEWPORT = { width: 1280, height: 800 };
  * `performance` / rAF and left CDP `CSS.forcePseudoState` with a stale
  * nodeId (2/3 runs aborted at `assertWideRowsFillOnly` during desktop chat).
  * Welcome-backstop still uses `page.clock.install({ time: FIXTURE_NOW })`
- * plus `fastForward` because that scene has to fire the 120s timer.
+ * plus `fastForward` because that scene has to fire the 120s timer
+ * (`clock: "flowing"` in capture-clock.mjs). Elapsed-time gates
+ * (`ApprovalActions` `CONFIRM_GUARD_MS`) never open under the pin; a
+ * fixed-clock scene that clicks a time-gated testid aborts.
  * 2024-06-15T03:00:00.000Z = 12:00 KST.
  */
 const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
@@ -98,6 +105,7 @@ function wrapContextShotGuard(context) {
   context.newPage = async (...args) => {
     const page = await origNewPage(...args);
     wrapPageShotGuard(page);
+    wrapPageTimeGateClicks(page);
     await pinPageWallClock(page);
     return page;
   };
@@ -5844,7 +5852,7 @@ async function countTabStopsToComposer(page, where, ceiling) {
 async function scrollTimelineRowIntoView(page, testId, where = "") {
   const label = where ? `${testId} · ${where}` : testId;
   const seen = await page.evaluate(
-    async ({ testId, maxSteps, stableNeed, frameCeiling, poseKeySrc }) => {
+    async ({ testId, maxSteps, stableNeed, frameCeiling, tickSrc }) => {
       // 한 프레임 양보. rAF는 보이지 않는 탭에서 멈출 수 있으므로 상한을 함께
       // 건다 — 대기로 때우는 값이 아니라 rAF가 오지 않을 때의 안전망이다.
       const frame = () =>
@@ -5922,7 +5930,7 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       // 로그에만 남고 안정 키에 넣지 않는다. 루프는 조건이 서는 즉시 나간다
       // (프레임 수 잠이 아니다).
       el.scrollIntoView({ block: "center" });
-      const poseKey = eval(`(${poseKeySrc})`);
+      const tick = eval(tickSrc);
       const motionLog = [];
       const state = { key: null, stable: 0 };
       for (let i = 0; i < frameCeiling; i++) {
@@ -5952,17 +5960,7 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
           vis,
           jump: Boolean(document.querySelector('[data-testid="jump-latest"]')),
         });
-        const key = poseKey(sample);
-        if (key === null) {
-          state.key = null;
-          state.stable = 0;
-        } else if (key === state.key) {
-          state.stable += 1;
-        } else {
-          state.key = key;
-          state.stable = 0;
-        }
-        if (state.stable >= stableNeed) {
+        if (tick(state, sample, stableNeed)) {
           return report({
             ok: true,
             steps,
@@ -5985,11 +5983,8 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       testId,
       maxSteps: 400,
       stableNeed: SETTLE_STABLE_FRAMES,
-      frameCeiling:
-        testId === "message-channel-intro"
-          ? INTRO_SETTLE_FRAME_CEILING
-          : SETTLE_FRAME_CEILING,
-      poseKeySrc: introPoseKey.toString(),
+      frameCeiling: SETTLE_FRAME_CEILING,
+      tickSrc: `(() => { const introPoseKey = ${introPoseKey.toString()}; ${tickIntroSettle.toString()}; return tickIntroSettle; })()`,
     }
   );
 
@@ -6008,11 +6003,7 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
     if (typeof seen.settledAt === "number") {
       console.log(
         `  settle ${label}: predicate first held at frame ${seen.settledAt}` +
-          ` (need ${SETTLE_STABLE_FRAMES}, ceiling ${
-            testId === "message-channel-intro"
-              ? INTRO_SETTLE_FRAME_CEILING
-              : SETTLE_FRAME_CEILING
-          })`
+          ` (need ${SETTLE_STABLE_FRAMES}, ceiling ${SETTLE_FRAME_CEILING})`
       );
     }
     return;
@@ -9489,17 +9480,22 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("no-preference", {
       installClock: true,
     });
-    await waitForWelcomeStage(page);
-    await page.clock.fastForward(120_000);
-    await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
-    await page.clock.resume();
-    await waitForAnimations(page);
-    const vp = page.viewportSize() ?? VIEWPORT;
-    await page.mouse.move(vp.width + 80, vp.height + 80);
-    const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
+    setActiveCaptureScene("welcome-backstop");
+    try {
+      await waitForWelcomeStage(page);
+      await page.clock.fastForward(120_000);
+      await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
+      await page.clock.resume();
+      await waitForAnimations(page);
+      const vp = page.viewportSize() ?? VIEWPORT;
+      await page.mouse.move(vp.width + 80, vp.height + 80);
+      const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
+      await page.screenshot({ path });
+      shots.push(path);
+      await context.close();
+    } finally {
+      setActiveCaptureScene("default");
+    }
   }
 
   return shots;
