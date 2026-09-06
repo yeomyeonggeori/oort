@@ -1,12 +1,12 @@
 # oort 진행 현황
 
-## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06, R2)
+## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06, R3)
 
-- R1 템플릿·compose `:?`·생성기 파생(LiveKit 포함)·와일드카드 거절·로컬 엣지 deny·문서는 유지. R2 는 게이트 두 본이 이 브랜치에서 빨개지던 자리만 고친다.
+- R1 템플릿·compose `:?`·생성기 파생(LiveKit 포함)·와일드카드 거절·로컬 엣지 deny·문서는 유지. R2 는 게이트 두 본이 이 브랜치에서 빨개지던 자리만 고친다. R3 는 `infra/rust/overlays.env.example` 에 `oort_public_edge_env_keys` (`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`) 자리표시를 채워 docs 게이트 step 12 를 닫는다.
 - `scripts/verify_ncp_centrifugo_boundary.sh` 의 `derive_caddy_origin` 이 `{$OORT_SITE_ADDRESS}` 를 `--site-address` 또는 env 의 `OORT_SITE_ADDRESS` 로 풀어 사이트 1개로 센다. 픽스처 호스트 `edge.example.test` (은퇴 호스트 0). deny 앞·hash·redaction·untrusted trust marker 는 그대로.
 - `scripts/tests/test_self_host_env_modes.sh` 는 `--public-origin` 유지보수 계약을 키 단위로 잰다: `CENTRIFUGO_ALLOWED_ORIGINS` 1줄에 오리진 1회, `OORT_CSP_CONNECT_SRC` 1줄에 `https://host`+`wss://host`, `OORT_SITE_ADDRESS` 1줄, `*` 0. `--public-origin` 없으면 두 키 0행.
 - `scripts/tests/test_public_edge.sh` 의 기동 거부는 compose `:?` (stderr `set OORT_SITE_ADDRESS`). `caddy adapt`/`validate` 미설정 실패는 부수 효과(`encode` 가 전역 옵션). `infra/rust/Caddyfile` 머리 주석도 같다.
-- 실측. R1 RED: `canonical_caddy_site_count expected=1 actual=0` / `untrusted origin did not fail by trust marker label=attacker`; `https-count=2` `wss-count=2` `modes_exit=1`. GREEN: `test_ncp_centrifugo_boundary_exit=0` `modes_exit=0` `test_public_edge_exit=0` `verify_ncp_centrifugo_contract_exit=0` `verify_web_serving_exit=0`. 스크래치: 템플릿에 `evil.example.test {` 추가 → `canonical_caddy_site_count expected=1 actual=2`. `OORT_CSP_CONNECT_SRC` write 삭제 → `csp_line_count=0` `csp_scratch_exit=1`. `scripts/local_gate.sh --profile docs` 는 `add_static_commands` 에 두 게이트가 들어 있다. 이 프로파일은 docker 스택이 아니라 compose config·정적 검사다. `local_gate_docs_exit=1` 은 두 게이트 이전 단계 `check_compose_env_templates.sh` — `overlays.env.example` 에 R1 의 `OORT_SITE_ADDRESS`/`OORT_CSP_CONNECT_SRC` 줄이 없다 (R2 파일 목록 밖). 두 게이트 자체는 단독 실행 초록.
+- 실측. R1 RED: `canonical_caddy_site_count expected=1 actual=0` / `untrusted origin did not fail by trust marker label=attacker`; `https-count=2` `wss-count=2` `modes_exit=1`. GREEN: `test_ncp_centrifugo_boundary_exit=0` `modes_exit=0` `test_public_edge_exit=0` `verify_ncp_centrifugo_contract_exit=0` `verify_web_serving_exit=0`. 스크래치: 템플릿에 `evil.example.test {` 추가 → `canonical_caddy_site_count expected=1 actual=2`. `OORT_CSP_CONNECT_SRC` write 삭제 → `csp_line_count=0` `csp_scratch_exit=1`. `scripts/local_gate.sh --profile docs` 는 `add_static_commands` 에 두 게이트가 들어 있다. 이 프로파일은 docker 스택이 아니라 compose config·정적 검사다. R2 `local_gate_docs_exit=1` 은 step 12/99 `check_compose_env_templates.sh` — `overlays.env.example` 에 R1 의 두 키가 없었다. R3 RED (pre-fix, 이미 측정): `required variable OORT_CSP_CONNECT_SRC is missing a value` / `required variable OORT_SITE_ADDRESS is missing a value`. GREEN: `[compose-env] PASS: 11 rendering(s)` `local_gate_docs_exit=0` (`LOCAL_GATE_ALLOW_DIRTY=1`, 99/99). `test_public_edge.sh` 는 example 파일을 읽지 않아 재실행하지 않음.
 - runtime-unverified: 실호스트 ACME.
 
 ## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
