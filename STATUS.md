@@ -1,5 +1,32 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R4)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard quality only; product behaviour unchanged.
+- Coverage split. **jsdom = grants** (issued inside the same `act` as `onMessage`, before leftover sweep). **Chromium = plays / computed styles / jump** (`animationstart` ×3, `animation-name: none`, `jump-latest` leftover=1 then start=1).
+- 부하 3×30 (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run` 12회; `/tmp/r4-burst-2114-h1b`). **fail/90, 반올림 없음:**
+
+| case | fail/90 | source |
+|---|---|---|
+| jsdom 같은 틱 라이브 3건 grant 3 | **0/90** | 90 exit 0 |
+| jsdom 10건 grant 3 · 나머지 클래스 정착 | **0/90** | 90 exit 0 |
+| jsdom 50건 grant 3 · mounted-settled class | **0/90** | 90 exit 0 |
+| jsdom 대소문자 접힘 | **0/90** | 90 exit 0 |
+| jsdom consumed 재전달 0 | **0/90** | 90 exit 0 |
+| Chromium `motion-enter-conversation` 3회 시작 | **0/90** | 90 exit 0 |
+| Chromium 스크롤업 50→점프 1 | **0/90** | 90 exit 0 |
+
+- First loaded 90 (pre-10/50 split) left jsdom 10-case plays at **1/90** (`burst-a-9.log`: `expected 1 to be 3` at `plays.length`) — same leftover sweep as R3's 3-case. Grant snapshot inside `act` moved that flake off jsdom. Isolation 90 before the split was already 0/90 on the 3-grant case.
+- H-1. 「같은 틱 라이브 3건」은 grant 3 (`isPlayEntrance`), not DOM plays. RED (skip `playOnMountRef.current.add`): `expected +0 to be 3` at `Timeline.burst.test.tsx:516`.
+- M-1. jsdom settled = class absence only (`animationName` always `""`). Computed `animation-name` / no `motion-enter-conversation` is Chromium. RED jsdom (give older row the class): `expected false to be true` at `isClassSettled`. RED Chromium (settled map returns the animation name): `expected true to be false` at `name.includes(ENTER_CONVERSATION_ANIMATION_NAME)`.
+- M-2. Channel B live 4 includes A's opener id. Opener `isPlayEntrance` false in B; B's three extras survive. RED (delete `pinnedEntranceRef.current = null`): `expected true to be false` at opener in B.
+- M-3. `arrivalWiring.test.ts` keeps `identifierCallCount(..., "capArrivalSetKeeping") === 3`. `if (liveNew)` grep gone. One-line reformat of the live-new cap call: 7/7 green.
+- M-4. Product `TIME_GATED_CONTROLS` next to `CONFIRM_GUARD_MS`. Usage-site AST over `*_GUARD_MS` + `testIdPrefix` on `<ApprovalActions>`. Every capture click via `sceneClick`; wrap also intercepts `page.locator(...).click()`. Converted: all 159 `.click(` in `capture-screens.mjs` (self-test: 0 remaining). Real lane RED (`page.locator("[data-testid=inbox-approval-confirm]").click()` after wrap in a fixed scene): `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: browser.newPage: CAPTURE ABORT: scene "default" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS under a frozen Date`.
+- Nits. N-1 jump dead-pill: `jump-latest click produced 0 motion-enter-conversation starts within 60 frames`. N-2 leftover: `leftover grants at jump gate: expected 1, got N`. N-3 `idleTimelineMock satisfies UseTimelineResult`. N-5: this host's 3-run residual is listed by name below; no 「전부 2/3 동일」 class claim.
+- Capture ×3 (`CAPTURE_PORT=8641`, `CAPTURE_PROFILE=all`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2/R3와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: **495/528** identical, **33** differing. vs `r2-base-vs-head-nondeterminism.txt` HEAD-39: 8 names not on that list (`agent-turns-offline-dark` · `b11-reaction-picker-light` · `composer-attachment-pending-light` · `mobile-long-token-dark` · `mobile-terminal-dock-light` · `u4-composer-emoji-light` · `u4-thread-composer-parity-dark` · `unfurl-remove-confirm-light`; each distinct=2 this sample). 3 of those were already in R3 extras and UNSTABLE ON BASE. #2128 잔량, 면제 확대 없음.
+- 게이트. web test **235 files / 2800 passed**. typecheck. lint 0 errors (17 warnings: 16 선행 + `TIME_GATED_CONTROLS` react-refresh). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R3)
 
 - Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. Worker does not claim design-review PASS.
@@ -21,7 +48,7 @@
 - M-3. 10/50 정착 행은 `enter-conversation` 클래스 없음 + `animation-name` 이 `motion-enter-conversation` 이 아님(`none`). `mounted−3` / `50−mounted` 항등식 단정 삭제, `console.info` 숫자만.
 - M-4. 장면 레지스트리 `clock: "fixed" | "flowing"` (기본 fixed). `welcome-backstop` 만 flowing. `wrapPageTimeGateClicks` 가 `inbox-approval-confirm` 클릭을 막음. RED: 고정 시계 장면 `chat` 에서 confirm click → `CAPTURE ABORT: scene "chat" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
 - Nits. N-1 `INTRO_SETTLE_FRAME_CEILING` 삭제. N-2 `tickIntroSettle` 공유. N-3 `idleTimelineMock`.
-- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: 488/528 identical, 40 differing. R2 HEAD-39에 없던 이름 14개는 전부 2/3 동일(1런 아웃라이어) — #2128 잔량 클래스, 면제 확대 없음. 37 pre-existing 장면은 #2128, 이 PR 무접촉.
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: 488/528 identical, 40 differing. vs R2 HEAD-39 extras listed in the R3 PR body — #2128 잔량, 면제 확대 없음. 37 pre-existing 장면은 #2128, 이 PR 무접촉.
 - 게이트. web test **235 files / 2797 passed**. typecheck. lint 0 errors (16 warnings: 15 선행 + burst harness `only-export-components`, welcome harness 와 동일). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
 - 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
 
