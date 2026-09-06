@@ -1,5 +1,13 @@
 # oort 진행 현황
 
+## SH-4b README paste block + SELF_HOST·FIRST_DAY 영문 정본 (#2105, 2026-09-06)
+
+- README §Self-host 맨 위 「Paste this into your agent」 펜스 1개, **4줄**(상한 10). 정본 raw URL `docs/SELF_HOST_AGENT.md` + §0 계약 + `scripts/oort doctor` PASS일 때만 완료. 하네스 이름 grep 0. 바로 아래 1줄: 사람이 직접 하려면 → `docs/SELF_HOST.md`. 플레이북 명령은 복제하지 않음. SH-2 링크는 `[Open on a public origin](docs/SELF_HOST.md#open-on-a-public-origin)`.
+- `docs/SELF_HOST.md` · `docs/SELF_HOST_FIRST_DAY.md` 영문 정본. 한국어 거울 `SELF_HOST.ko.md` · `SELF_HOST_FIRST_DAY.ko.md`. 절 번호 집합 동일: SELF_HOST 21/21, FIRST_DAY 22/22 (검증 상태 날짜·버전은 옮김, 재측정 없음 — SH-5a).
+- 상호 링크 대조(README ↔ SELF_HOST ↔ SELF_HOST_AGENT ↔ FIRST_DAY ↔ llms.txt, 상대경로 해소 + 앵커 존재): **134 checked, broken 0**. `llms.txt` raw URL 불변이라 무수정.
+- `grep -rn '@sha256:' README.md docs/SELF_HOST*.md llms.txt` = 0. `scripts/check_release_manifest.sh` glob `docs/SELF_HOST*.md` 가 새 `.ko.md` 4본 포함: `[release-manifest] ok: v0.1.4 matches CHANGELOG 0.1.4; prose @sha256: literals = 0`. `python3 scripts/check_docs_commands.py`: `[docs-cmd] PASS: 515 fact(s) decided across 3810 candidate command(s) in 18 document(s)`. GATED_DOCS 테이블은 여전히 `SELF_HOST_AGENT.md`만 (SELF_HOST/FIRST_DAY·`.ko.md` 미등재 — `scripts/**` 무수정, NOTES).
+- 코드·SELF_HOST_AGENT* 무접촉. runtime-unverified: 영문 SELF_HOST/FIRST_DAY 사람 클릭 경로 재측정(SH-5a).
+
 ## SH-4a 에이전트 셀프호스트 영문 정본 (#2104, 2026-09-06)
 
 - `docs/SELF_HOST_AGENT.md` 영문 하네스 불가지론 정본. 구 972줄 한국어·그록봇 VM 전용 플레이북은 공통 코어(§0–§2) + §3.3 Grok Bot VM 분기로 이동. 사라진 절 0 (대조표: `docs/planning/research/2026-09-06-sh4a-agent-install-run.md`).
