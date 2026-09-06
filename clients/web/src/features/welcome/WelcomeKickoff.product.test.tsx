@@ -541,6 +541,53 @@ describe("welcome kickoff product path", () => {
     ).toHaveLength(1);
   });
 
+  it("stage mounted + opener pinned, then a later live batch of 4 → opener still plays exactly once", async () => {
+    const root = await mountWelcome();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    await act(async () => {
+      rail.handlers?.onMessage(
+        frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
+      );
+    });
+    await settle();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    const later = [
+      "0199eeee-0000-7000-8000-000000000521",
+      "0199eeee-0000-7000-8000-000000000522",
+      "0199eeee-0000-7000-8000-000000000523",
+      "0199eeee-0000-7000-8000-000000000524",
+    ] as const;
+    await act(async () => {
+      later.forEach((id, i) => {
+        rail.handlers?.onMessage(frame(id, AGENT, i + 2, `핀 이후 라이브 ${i + 2}`));
+      });
+    });
+    await settle();
+    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
+    expect(stage).not.toBeNull();
+    act(() => {
+      const event = new Event("animationend", { bubbles: true });
+      Object.defineProperty(event, "animationName", {
+        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
+      });
+      stage?.dispatchEvent(event);
+    });
+    await settle();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    const opener = [...root.querySelectorAll("[data-testid='timeline-message']")].find(
+      (node) => node.getAttribute("data-message-id") === OPENER_ID
+    );
+    expect(opener).toBeTruthy();
+    expect(opener?.classList.contains(ENTER_CONVERSATION_CLASS)).toBe(true);
+    expect(
+      [...root.querySelectorAll("[data-testid='timeline-message']")].filter(
+        (node) =>
+          node.getAttribute("data-message-id") === OPENER_ID &&
+          node.classList.contains(ENTER_CONVERSATION_CLASS)
+      )
+    ).toHaveLength(1);
+  });
+
   it("120s without an opener → guidance card; seam cleared and shown-marker written; later opener still exits the card", async () => {
     vi.useFakeTimers();
     const root = await mountWelcome();

@@ -64,12 +64,14 @@ const out: {
   isPlayEntrance: ((id: string) => boolean) | null;
   consume: ((id: string) => void) | null;
   capUnmountedArrivals: (() => void) | null;
+  pinArrivalGrant: ((id: string | null) => void) | null;
   loadOlder: (() => Promise<void>) | null;
   messages: Message[];
 } = {
   isPlayEntrance: null,
   consume: null,
   capUnmountedArrivals: null,
+  pinArrivalGrant: null,
   loadOlder: null,
   messages: [],
 };
@@ -80,6 +82,7 @@ function Probe({ channelId }: { channelId: string }): ReactElement {
     out.isPlayEntrance = t.isPlayEntrance;
     out.consume = t.consumeEntrance;
     out.capUnmountedArrivals = t.capUnmountedArrivals;
+    out.pinArrivalGrant = t.pinArrivalGrant;
     out.loadOlder = t.loadOlder;
     out.messages = t.state.messages;
   });
@@ -336,6 +339,37 @@ describe("useTimeline arrival counts", () => {
         out.isPlayEntrance?.((row as Message).id)
       ).length
     ).toBe(0);
+  });
+
+  it("핀 후 라이브 배치 4건이 와도 opener grant 는 남고, 핀을 풀면 채널 전환에 새지 않는다", async () => {
+    const opener = "0199cccc-0000-7000-8000-000000000401";
+    const extras = [
+      "0199cccc-0000-7000-8000-000000000402",
+      "0199cccc-0000-7000-8000-000000000403",
+      "0199cccc-0000-7000-8000-000000000404",
+      "0199cccc-0000-7000-8000-000000000405",
+    ];
+    await mount(CH);
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+      rail.handlers?.onMessage(frame(opener, OTHER, 30));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(true);
+    act(() => out.pinArrivalGrant?.(opener));
+    await act(async () => {
+      extras.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 31 + i)));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(true);
+    expect(extras.filter((id) => out.isPlayEntrance?.(id)).length).toBe(2);
+    act(() => out.pinArrivalGrant?.(null));
+    await mount(CH2);
+    expect(out.isPlayEntrance?.(opener)).toBe(false);
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+      extras.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 10 + i)));
+    });
+    expect(out.isPlayEntrance?.(opener)).toBe(false);
+    expect(extras.filter((id) => out.isPlayEntrance?.(id)).length).toBe(3);
   });
 
   it("채널 전환은 남은 grant 를 버린다", async () => {
