@@ -134,6 +134,13 @@ SELF_HOST_DRIVE_LOCAL_DIR="/var/lib/oort/drive"
 
 fail() { printf '[self-host] %s\n' "$*" >&2; exit 1; }
 
+# Canonical public-edge env key names (#1926). The Caddyfile placeholders,
+# caddy.override.yml interpolation, and docs/SELF_HOST.md all derive from
+# this list — do not type the names in a second place.
+oort_public_edge_env_keys() {
+  printf '%s\n' 'OORT_SITE_ADDRESS' 'OORT_CSP_CONNECT_SRC'
+}
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -146,6 +153,10 @@ No argument is a backwards-compatible alias for --local-build.
 --public-origin may be repeated. It idempotently adds the origin (and its
 ws/wss twin, for React Native) to CENTRIFUGO_ALLOWED_ORIGINS and rewrites
 MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL; existing Centrifugo tokens are preserved.
+The same call derives OORT_SITE_ADDRESS and OORT_CSP_CONNECT_SRC (canonical
+names: oort_public_edge_env_keys) for the public Caddy template. A wildcard
+in the origin is rejected (#1792). Without --public-origin those two keys
+are not written (local loopback path unchanged).
 On an existing env it does not regenerate secrets. Claim-mode env
 (MOMO_BOOTSTRAP_CLAIM=1, no owner password) may use this maintenance path;
 --compose still requires the password key (ADR-0166).
@@ -491,6 +502,11 @@ normalize_public_origin() {
   local raw="$1"
   validate_env_scalar MOMO_PUBLIC_ORIGIN "$raw"
   case "$raw" in
+    *'*'*)
+      fail "--public-origin 은 와일드카드를 허용하지 않는다 (#1792). 운영자가 선언한 오리진만 Caddy env 보간으로 주입한다."
+      ;;
+  esac
+  case "$raw" in
     */) raw="${raw%/}" ;;
   esac
   case "$raw" in
@@ -557,11 +573,113 @@ rewrite_env_assignment() {
   mv "$tmp" "$ENV_FILE"
 }
 
+# Same as rewrite_env_assignment, but the value may contain quotes (CSP 'self').
+rewrite_env_assignment_quoted() {
+  local key="$1" value="$2" tmp
+  validate_env_scalar "$key" "$value"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-self-host-env.XXXXXX")"
+  OORT_REWRITE_VALUE="$value" awk -v key="$key" '
+    BEGIN { done = 0; value = ENVIRON["OORT_REWRITE_VALUE"] }
+    index($0, key "=") == 1 && done == 0 {
+      print key "=" value
+      done = 1
+      next
+    }
+    { print }
+    END {
+      if (done == 0) print key "=" value
+    }
+  ' "$ENV_FILE" >"$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+public_edge_site_address() {
+  local origin="$1"
+  case "$origin" in
+    https://*) printf '%s' "${origin#https://}" ;;
+    http://*) printf '%s' "${origin#http://}" ;;
+    *) fail "--public-origin 내부 오류: 스킴 화이트리스트를 통과한 값이 아니다." ;;
+  esac
+}
+
+# Docker env-file: a value that starts with a single quote is parsed as a quoted
+# scalar, which would drop the CSP 'self' token. Wrap those values in double
+# quotes so the file bytes and the container env are the same string.
+quote_env_file_value() {
+  local value="$1"
+  case "$value" in
+    "'"*) printf '"%s"' "$value" ;;
+    *) printf '%s' "$value" ;;
+  esac
+}
+
+csp_origin_from_endpoint() {
+  local url="$1" scheme rest hostport
+  case "$url" in
+    wss://*|ws://*|https://*|http://*) ;;
+    *) return 1 ;;
+  esac
+  scheme="${url%%://*}"
+  rest="${url#*://}"
+  hostport="${rest%%/*}"
+  hostport="${hostport%%\?*}"
+  hostport="${hostport%%#*}"
+  [ -n "$hostport" ] || return 1
+  printf '%s://%s' "$scheme" "$hostport"
+}
+
+livekit_csp_origins_from_env() {
+  [ -f "$ENV_FILE" ] || return 0
+  awk -F= '
+    /^MOMO_LIVEKIT_[A-Za-z0-9_]+=/ {
+      key = $1
+      value = substr($0, length(key) + 2)
+      if (value ~ /^https?:\/\// || value ~ /^wss?:\/\//) print value
+    }
+  ' "$ENV_FILE"
+}
+
+public_edge_csp_connect_src() {
+  local origin="$1" ws extra token i=1
+  ws="$(public_origin_websocket "$origin")"
+    extra="'self' ${origin} ${ws} https://www.googleapis.com"
+  while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
+    origin="${PUBLIC_ORIGINS[i]}"
+    extra="$(append_space_token "$extra" "$origin")"
+    extra="$(append_space_token "$extra" "$(public_origin_websocket "$origin")")"
+    i=$((i + 1))
+  done
+  while IFS= read -r token; do
+    [ -n "$token" ] || continue
+    origin="$(csp_origin_from_endpoint "$token")" || continue
+    extra="$(append_space_token "$extra" "$origin")"
+  done <<EOF
+$(livekit_csp_origins_from_env)
+EOF
+  printf '%s' "$extra"
+}
+
+ensure_public_edge_env() {
+  [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
+  local origin host csp quoted
+  origin="${PUBLIC_ORIGINS[0]}"
+  host="$(public_edge_site_address "$origin")"
+  csp="$(public_edge_csp_connect_src "$origin")"
+  validate_env_scalar OORT_SITE_ADDRESS "$host"
+  validate_env_scalar OORT_CSP_CONNECT_SRC "$csp"
+  rewrite_env_assignment OORT_SITE_ADDRESS "$host"
+  quoted="$(quote_env_file_value "$csp")"
+  rewrite_env_assignment_quoted OORT_CSP_CONNECT_SRC "$quoted"
+  printf '[self-host] %s 의 공개 엣지 키를 --public-origin 에서 파생했다.\n' \
+    "$ENV_FILE" >&2
+}
+
 normalize_requested_public_origins() {
   local i=0
   [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
   while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
-    PUBLIC_ORIGINS[$i]="$(normalize_public_origin "${PUBLIC_ORIGINS[$i]}")"
+    PUBLIC_ORIGINS[i]="$(normalize_public_origin "${PUBLIC_ORIGINS[i]}")"
     i=$((i + 1))
   done
 }
@@ -573,7 +691,7 @@ centrifugo_origins_with_public() {
     return 0
   }
   while [ "$i" -lt "$PUBLIC_ORIGIN_COUNT" ]; do
-    origin="${PUBLIC_ORIGINS[$i]}"
+    origin="${PUBLIC_ORIGINS[i]}"
     ws_origin="$(public_origin_websocket "$origin")"
     current="$(append_space_token "$current" "$origin")"
     current="$(append_space_token "$current" "$ws_origin")"
@@ -984,6 +1102,7 @@ if [ -e "$ENV_FILE" ]; then
   warn_if_centrifugo_missing_desktop_origins
   ensure_public_origins
   ensure_local_drive_public_base
+  ensure_public_edge_env
   warn_if_legacy_localhost_realtime_ws
   warn_if_legacy_localhost_drive_base
 
@@ -1205,6 +1324,7 @@ MOMO_LIVEKIT_NODE_IP=127.0.0.1
 EOF
 chmod 600 "$ENV_FILE"
 
+ensure_public_edge_env
 reject_duplicate_env_keys
 if [ "$MODE" = "published-digest" ]; then
   verify_published_compose_image "$IMAGE"
