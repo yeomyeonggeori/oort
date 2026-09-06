@@ -89,32 +89,10 @@ vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
   };
 });
 
-vi.mock("@/features/timeline/useTimeline", () => ({
-  useTimeline: () => ({
-    state: { messages: [], oldestSeq: null, newestSeq: null },
-    status: "ready",
-    resume: { lastRecovered: null, lastBackfillCount: 0, resubscribeCount: 0 },
-    recoveryMarkers: [],
-    pending: [],
-    send: async () => undefined,
-    resend: async () => undefined,
-    loadOlder: () => undefined,
-    reload: () => undefined,
-    loadingOlder: false,
-    reachedStart: true,
-    reactions: {},
-    toggleReaction: async () => undefined,
-    pins: {},
-    pinsStatus: "ready",
-    reloadPins: () => undefined,
-    togglePin: async () => undefined,
-    editMessage: async () => undefined,
-    deleteMessage: async () => undefined,
-    unfurls: {},
-    removeUnfurls: async () => undefined,
-    pinArrivalGrant: () => undefined,
-  }),
-}));
+vi.mock("@/features/timeline/useTimeline", async () => {
+  const { idleTimelineMock } = await import("@/features/timeline/idleTimelineMock");
+  return { useTimeline: () => idleTimelineMock() };
+});
 
 vi.mock("@/features/chat/useTyping", () => ({
   useTypingReceive: () => undefined,
