@@ -2072,7 +2072,8 @@ export function Probe() {
     expect(CAPTURE_SRC).toMatch(/abort-after-triplet/);
     expect(CAPTURE_SRC).toMatch(/function recordPressTripletAbort/);
     expect(CAPTURE_SRC).toMatch(/press-triplet-catalog/);
-    expect(CAPTURE_SRC).toMatch(/#2057 N-4/);
+    expect(CAPTURE_SRC).not.toMatch(/pre-existing intro-scroll flake \(#2057 N-4\)/);
+    expect(CAPTURE_SRC).toMatch(/initialItemFinalLocationReached/);
   });
 
   it("3짝 픽셀 차는 크기 문턱을 든다 (N-2)", () => {

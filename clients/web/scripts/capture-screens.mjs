@@ -5880,34 +5880,76 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       const el = find();
       if (!el) return report({ ok: false, steps, ceiling, scanned });
 
-      // 가운데로 올리고, 같은 자리에 세 프레임 연속으로 앉을 때까지 기다린다.
+      // 가운데로 올리고, virtuoso 첫 페인트(visibility:hidden)가 풀린 뒤
+      // 인트로 자리와 스크롤러 scrollTop 이 같은 값으로 앉을 때까지 기다린다.
+      // alignToBottom + followOutput 이 scrollIntoView 와 싸우는 동안
+      // 상자만 보면 60프레임 안에 안 멎는다. 제품 신호는
+      // (1) item-list 가 hidden 이 아님 (initialItemFinalLocationReached)
+      // (2) jump-latest (바닥에 있지 않음)
+      // (3) intro rect + scrollTop 이 연속 프레임에서 같음.
       el.scrollIntoView({ block: "center" });
+      const motionLog = [];
       let key = null;
       let stable = 0;
-      for (let i = 0; i < 60 && stable < 3; i++) {
+      const instrument = testId === "message-channel-intro";
+      const minFrames = instrument ? 60 : 0;
+      for (let i = 0; i < 180; i++) {
         await frame();
         const now = find();
-        if (!now) {
+        const list = document.querySelector('[data-testid="virtuoso-item-list"]');
+        const scroller = scrollers()[0];
+        const introBox = now ? now.getBoundingClientRect() : null;
+        const listBox = list ? list.getBoundingClientRect() : null;
+        const vis = list ? getComputedStyle(list).visibility : null;
+        const sample = {
+          i,
+          intro: introBox
+            ? {
+                top: Math.round(introBox.top),
+                height: Math.round(introBox.height),
+                bottom: Math.round(introBox.bottom),
+              }
+            : null,
+          list: listBox
+            ? {
+                top: Math.round(listBox.top),
+                height: Math.round(listBox.height),
+              }
+            : null,
+          scrollTop: scroller ? Math.round(scroller.scrollTop) : null,
+          vis,
+          jump: Boolean(document.querySelector('[data-testid="jump-latest"]')),
+        };
+        if (instrument && motionLog.length < 60) motionLog.push(sample);
+        if (vis === "hidden") {
           key = null;
           stable = 0;
-          continue;
-        }
-        const rect = now.getBoundingClientRect();
-        if (rect.height <= 0) {
+        } else if (!now || !introBox || introBox.height <= 0) {
+          key = null;
           stable = 0;
-          continue;
+        } else {
+          const next =
+            `${Math.round(introBox.top)}:${Math.round(introBox.height)}:` +
+            `${scroller ? Math.round(scroller.scrollTop) : 0}:${vis}`;
+          if (next === key) stable++;
+          else {
+            key = next;
+            stable = 0;
+          }
         }
-        const next = `${Math.round(rect.top)}:${Math.round(rect.height)}`;
-        if (next === key) stable++;
-        else {
-          key = next;
-          stable = 0;
-        }
+        if (i + 1 >= minFrames && stable >= 3) break;
       }
       if (stable < 3) {
-        return report({ ok: false, steps, ceiling, scanned, unsettled: true });
+        return report({
+          ok: false,
+          steps,
+          ceiling,
+          scanned,
+          unsettled: true,
+          motionLog,
+        });
       }
-      return report({ ok: true, steps, ceiling, scanned });
+      return report({ ok: true, steps, ceiling, scanned, motionLog });
     },
     { testId, maxSteps: 400 }
   );
@@ -5924,9 +5966,19 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       ? `창 밖에 있어 스크롤러를 ${seen.steps}걸음 훑어 올림`
       : "이미 창 안";
     console.log(`  스크롤 ${label}: ${how} · ${scene}`);
+    if (Array.isArray(seen.motionLog) && seen.motionLog.length > 0) {
+      console.log(
+        `  intro-motion ${label}: ${JSON.stringify(seen.motionLog)}`
+      );
+    }
     return;
   }
   if (seen.unsettled) {
+    if (Array.isArray(seen.motionLog) && seen.motionLog.length > 0) {
+      console.log(
+        `  intro-motion ${label} (unsettled): ${JSON.stringify(seen.motionLog)}`
+      );
+    }
     throw new Error(
       `[스크롤] ${label}: 행을 찾아 가운데로 올렸는데 자리가 멎지 않았다 — ${scene}`
     );
@@ -7039,7 +7091,6 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-input").hover();
   await login.waitForTimeout(100);
   await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
-  await waitForAnimations(login);
   const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
@@ -9556,7 +9607,9 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   if (text.includes("첫 메시지")) {
     throw new Error(`비어 있지 않은 인트로가 「첫 메시지」를 말한다 ${scheme}`);
   }
-  await page.waitForTimeout(200);
+  const vp = page.viewportSize() ?? VIEWPORT;
+  await page.mouse.move(vp.width + 80, vp.height + 80);
+  await assertHoverToolbarCount(page, `nonempty intro ${scheme}`, 0);
   const path = `${OUT_DIR}/channel-intro-nonempty-${scheme}.png`;
   await page.screenshot({ path });
   shots.push(path);
@@ -12354,22 +12407,12 @@ function recordPressTripletAbort(err) {
     console.error(
       `CAPTURE ABORT: keeping completed press-triplet outputs and catalog. cause: ${cause}`
     );
-    if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
-      console.error(
-        "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
-      );
-    }
     appendPressTripletAbort(cause);
     return;
   }
   console.error(
     `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: ${cause}`
   );
-  if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
-    console.error(
-      "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
-    );
-  }
   wipePressTripletEvidence();
 }
 
