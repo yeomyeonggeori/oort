@@ -1,6 +1,16 @@
 # oort 진행 현황
 
+## SH-4a 에이전트 셀프호스트 영문 정본 (#2104, 2026-09-06)
+
+- `docs/SELF_HOST_AGENT.md` 영문 하네스 불가지론 정본. 구 972줄 한국어·그록봇 VM 전용 플레이북은 공통 코어(§0–§2) + §3.3 Grok Bot VM 분기로 이동. 사라진 절 0 (대조표: `docs/planning/research/2026-09-06-sh4a-agent-install-run.md`).
+- 한국어판 `docs/SELF_HOST_AGENT.ko.md` — 같은 절 번호 44개 일치. `llms.txt` 는 본인 기계/계정·시크릿 금지·자동화 금지 (하네스 전용 문장 제거). 정본 raw URL 유지.
+- SH-2 공개 엣지 키(`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`, `--public-origin` 파생)는 이 브랜치에 랜딩돼 있어 VPS 분기에 수록. Railway/Fly/AWS/GCP 는 SH-5 템플릿 전까지 §3.2 포인터.
+- 실측 (영문 §3.1만). 스크래치 `$HOME/oort-sh4a-install`, `COMPOSE_PROJECT_NAME=oort-sh4a`, published digest from `releases/latest.json`. `scripts/oort doctor --json` `summary={"pass":28,"fail":0,"skip":3,"verdict":"PASS"}` exit 0. GET `/` 200, `POST /v1/auth/login` 200 (`accessToken` 존재, 원문 폐기). 사람 개입 0. GUI 브라우저는 MCP 금지라 REST 로그인으로 대체. 위상 6. 성공 up+doctor 약 17s (이미지 캐시). `/tmp` Docker Desktop 마운트 실패와 leftover pgdata는 문서에 반영 후 재측정.
+- `scripts/check_release_manifest.sh` 초록. `@sha256:` / `app.oor7.com` 0. CDP는 §3.3만. glob `docs/SELF_HOST*.md` 는 `.ko.md` 를 포함 (게이트 미수정).
+- SH-3b `oort status/logs/upgrade/backup` 미랜딩 — §4는 산문 유지. runtime-unverified: Grok Bot Funnel 1h soak, Railway/Fly E2E (SH-5).
+
 ## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06, R3)
+
 
 - R1 템플릿·compose `:?`·생성기 파생(LiveKit 포함)·와일드카드 거절·로컬 엣지 deny·문서는 유지. R2 는 게이트 두 본이 이 브랜치에서 빨개지던 자리만 고친다. R3 는 `infra/rust/overlays.env.example` 에 `oort_public_edge_env_keys` (`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`) 자리표시를 채워 docs 게이트 step 12 를 닫는다.
 - `scripts/verify_ncp_centrifugo_boundary.sh` 의 `derive_caddy_origin` 이 `{$OORT_SITE_ADDRESS}` 를 `--site-address` 또는 env 의 `OORT_SITE_ADDRESS` 로 풀어 사이트 1개로 센다. 픽스처 호스트 `edge.example.test` (은퇴 호스트 0). deny 앞·hash·redaction·untrusted trust marker 는 그대로.
