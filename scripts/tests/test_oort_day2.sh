@@ -297,6 +297,87 @@ assert_no_secret_leak "restore nonempty" "$OUT" "$ERR"
 pass "restore refuses a non-empty stack before pg_restore"
 
 # -----------------------------------------------------------------------------
+# 5b. restore into a roles-less empty dest: run runtime-roles or refuse,
+#     before pg_restore (no second pg_restore call site).
+# -----------------------------------------------------------------------------
+cat >"$FAKE_BIN/docker" <<'EOF'
+#!/bin/sh
+set -eu
+log="${FAKE_DOCKER_LOG:-/tmp/fake-docker-day2.log}"
+printf '%s\n' "$*" >>"$log"
+saw_schema=0
+saw_roles=0
+for arg in "$@"; do
+  case "$arg" in
+    *information_schema*) saw_schema=1 ;;
+    *pg_roles*) saw_roles=1 ;;
+  esac
+done
+if [ "$saw_schema" -eq 1 ]; then
+  printf '0\n'
+  exit 0
+fi
+if [ "$saw_roles" -eq 1 ]; then
+  if grep -E '(^|[[:space:]])run[[:space:]]' "$log" | grep -Fq 'runtime-roles'; then
+    printf '3\n'
+    exit 0
+  fi
+  printf '0\n'
+  exit 0
+fi
+if [ "${1:-}" = "compose" ]; then
+  case " $* " in
+    *" run "*" runtime-roles "*|*" runtime-roles "*" run "*) exit 0 ;;
+  esac
+  printf '0\n'
+  exit 0
+fi
+if [ "${1:-}" = "ps" ]; then
+  printf 'fake-pg-container\n'
+  exit 0
+fi
+if [ "${1:-}" = "inspect" ]; then
+  printf 'true\n'
+  exit 0
+fi
+if [ "${1:-}" = "exec" ]; then
+  exit 0
+fi
+if [ "${1:-}" = "info" ] || [ "${1:-}" = "--version" ]; then
+  exit 0
+fi
+echo "unexpected docker invocation: $*" >&2
+exit 3
+EOF
+chmod +x "$FAKE_BIN/docker"
+OUT="$SANDBOX/restore-noroles.out"
+ERR="$SANDBOX/restore-noroles.err"
+FAKE_DOCKER_LOG="$SANDBOX/restore-noroles-docker.log"
+: >"$FAKE_DOCKER_LOG"
+set +e
+PATH="$FAKE_BIN:$PATH" FAKE_DOCKER_LOG="$FAKE_DOCKER_LOG" \
+  "$OORT" restore "$DUMP_FILE" --env "$VALID" --yes \
+  >"$OUT" 2>"$ERR"
+rc=$?
+set -e
+# Must either refuse naming runtime-roles, or invoke that compose service
+# before any pg_restore.
+if grep -Fq 'pg_restore' "$FAKE_DOCKER_LOG"; then
+  roles_line="$(grep -n 'runtime-roles' "$FAKE_DOCKER_LOG" | head -1 | cut -d: -f1 || true)"
+  restore_line="$(grep -n 'pg_restore' "$FAKE_DOCKER_LOG" | head -1 | cut -d: -f1 || true)"
+  [ -n "$roles_line" ] || \
+    fail "roles-less restore reached pg_restore without runtime-roles: $(cat "$FAKE_DOCKER_LOG")"
+  [ "$roles_line" -lt "$restore_line" ] || \
+    fail "runtime-roles must run before pg_restore (roles=$roles_line restore=$restore_line)"
+else
+  [ "$rc" != "0" ] || fail "roles-less restore exited 0 without pg_restore"
+  grep -Eqi 'runtime-roles|MOMO_RUNTIME_ROLE_PROVISION|momo_app' "$ERR" "$OUT" || \
+    fail "roles-less restore did not name runtime-roles: stdout=$(cat "$OUT") stderr=$(cat "$ERR")"
+fi
+assert_no_secret_leak "restore roles-less" "$OUT" "$ERR"
+pass "restore into roles-less dest runs runtime-roles or refuses before pg_restore"
+
+# -----------------------------------------------------------------------------
 # 6. logs output: planted secrets → 0 hits
 # -----------------------------------------------------------------------------
 cat >"$FAKE_BIN/docker" <<EOF
