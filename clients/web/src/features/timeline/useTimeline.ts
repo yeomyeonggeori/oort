@@ -72,6 +72,11 @@ import {
   type UnfurlMap,
 } from "@momo/core/features/timeline/unfurl";
 
+/** Bottom-side pair of `MAX_PENDING_ARRIVAL_GRANTS` (scroll-up leftover cap 1).
+ *  ADR-0179 D3 erratum: same-tick live arrivals at the bottom play at most 3;
+ *  the rest settle immediately. Stagger is out of ladder. */
+export const MAX_SIMULTANEOUS_ARRIVALS = 3;
+
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
 
@@ -303,11 +308,13 @@ export function useTimeline(
         heldIdsRef.current.add(key);
       }
       // Same-tick Centrifugo bursts call applyBatch once per publication
-      // before React commits. Do not cap playOnMount here or on the next
-      // paint: react-virtuoso mounts appended rows in a later commit, and
-      // a paint-tick cap evicts grants whose rows have not mounted yet.
-      // Consume evicts a grant on mount; Timeline sweeps leftovers when
-      // the reader is scrolled up.
+      // before React commits. Cap to the bottom-side pair here so the
+      // newest 3 keep their grants until virtuoso's later mount; extras
+      // settle with no class. Do not use MAX_PENDING_ARRIVAL_GRANTS (1)
+      // here: that is the scrolled-up leftover sweep. Consume evicts a
+      // grant on mount; Timeline sweeps leftovers when the reader is
+      // scrolled up.
+      capArrivalSet(playOnMountRef.current, MAX_SIMULTANEOUS_ARRIVALS);
       capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
       // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
       // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
