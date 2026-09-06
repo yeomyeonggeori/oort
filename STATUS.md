@@ -1,14 +1,16 @@
 # oort 진행 현황
 
-## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06)
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06, R2)
 
-- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. ADR-0179 D3 정오표: 바닥 같은 틱 재생 상한 **3** (`MAX_SIMULTANEOUS_ARRIVALS`, `MAX_PENDING_ARRIVAL_GRANTS` 의 바닥 짝). Stagger 없음. 스크롤업 leftover 는 1.
-- 결정성. 같은 틱 3건은 virtuoso 마운트 + 바닥 신호(`jump-latest` 없음)를 기다린 뒤 재생 3을 잰다. 부하 30× (`--pool=threads --maxWorkers=1 --minWorkers=1` 측정, 동시에 full `vitest run`): 마운트만 기다리던 중간본 **2/30** (`expected 3, got 1`) · 바닥 대기 후 **0/30**. CI 원장: #2097 · #2099 · #2109 (`expected 1 to be 3`).
-- 상한. 가상화 `Timeline` 하네스: 10 같은 틱 → 재생 **3** · 정착 **7**. 50 → **3 / 47**. RED: `capArrivalSet(..., MAX_SIMULTANEOUS_ARRIVALS)` 삭제 → `expected 10 to be 3`.
-- M-1. 스크롤업 백로그 50 → 재생 **0**. 바닥 점프 → **1**. RED: `Timeline.tsx` sweep deps `[]` → `expected 1 playing rows, got 3 mounted=30`.
-- Nits. N-1 AST 상수-false ternary 0. N-4 `waitForAnimations(login)` 데스크톱 chat 샷 앞 삭제(reduce 캡처라 부하 없음). N-5 재재생이 나타나는 `MAX_CONSUMED_ARRIVAL_IDS` 값 **없음** (4에서도 0; `alreadyHeld` 가드). N-6 `isPlayEntrance` 대소문자 접힘(가상화 행 재생 1). N-7 이 원장.
-- Capture intro. 60프레임 로그: intro `{top:85,height:154}` · list `{top:85,height:2593}` · `scrollTop:0` · `vis:visible` 60/60 동일(1 pose). 표적 대기: item-list `visibility` + intro rect + `scrollTop`. `#2057 N-4` pre-existing 면제 삭제(`pressLedger` `.not.toMatch`). `CAPTURE_PORT=8641` 5연속 **exit 0**. 전 장면 5-동일은 **아님**: 371/528 byte-identical, 157는 accent 시안·hover 크롬 등 선행 비결정. intro nonempty sha 5회 모두 다름(호버 툴바가 피사체에 남음 → 포인터를 뷰포트 밖으로 + toolbar 0). 표적 대기 제거 RED는 이 호스트에서 중단 재현 안 됨(상자가 프레임 0부터 멎어 있음).
-- 게이트. web test 232/232 · 2784 passed. typecheck. lint 0 errors (15 warnings 선행). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. design-review는 이 워커가 하지 않음.
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui`. ADR-0179 D3 정오표: 바닥 같은 틱 재생 상한 **3**. Stagger 없음. 스크롤업 leftover 는 1. 캡은 live `message.new` 배치에만 적용(REST head/load-more/backfill/own-send/edit 무접촉). 웰컴 opener grant 는 eviction 면제 (`pinArrivalGrant` + `holdEntranceId`).
+- 결정성. 같은 틱 3건은 virtuoso 마운트 + 제품 바닥 신호(`jump-latest` 없음) 뒤 재생 3. 부하 30× (`--pool=threads --maxWorkers=1 --minWorkers=1`, 동시에 full `vitest run`): 같은 틱 3/3 **0/30** · 스크롤업 50→점프 1 **0/30**. (R1 부하 1/30 은 `leaveBottom` 이 stubbed head index 를 요구한 자리.)
+- 상한. 가상화 `Timeline` 하네스: 10 같은 틱 → 재생 **3** · 정착 **7** · unmounted **0** (10 전부 마운트). 50 → 재생 **3** · mounted-settled **27** · unmounted **20** (mounted **30**). 47 정착은 산수이지 측정이 아님. RED: `mountedSettled === 47` → `expected 27 to be 47`.
+- M-1. 스크롤업 백로그 50 → 재생 **0**. 바닥 점프 → **1**. `jumpToLatest` 의 64px remaining 휴리스틱 삭제. 제품 신호는 `jump-latest` 필. jsdom 은 `scrollToIndex(LAST)` 뒤 `atBottom=true` 를 안 올려 필이 남을 수 있음 — 단정은 leftover 재생 1.
+- Nits. N-2 재생 수는 리터럴 `3` (제품 상수를 자기 자신과 대조하지 않음). N-1 `MAX_CONSUMED_ARRIVAL_IDS` 는 belt; `alreadyHeld` 가 재재생 문. N-4 `waitForAnimations(login)` 삭제는 회귀 아님. N-5 재재생 값 없음. N-6 대소문자 접힘.
+- Capture 시계. `FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0)` (12:00 KST). 픽스처 `Date.now()` 전부 이 상수. 페이지 시계는 `addInitScript` Date override (`pinPageWallClock`) — Playwright `page.clock.setFixedTime` 은 `performance`/rAF 까지 건드려 `assertWideRowsFillOnly` CDP `forcePseudoState` 가 stale nodeId 로 2/3 중단. Welcome-backstop 만 `page.clock.install` + `fastForward(120s)`.
+- Capture intro 정착. predicate = item-list 가 `hidden` 아님 ∧ intro rect ∧ `scrollTop` 이 `SETTLE_STABLE_FRAMES=3` 연속. 천장 60 (base 복구, 180 아님). **predicate first held at frame 3** (need 3, ceiling 60) — nonempty intro light/dark. 루프는 조건이 서는 즉시 종료. 주석 grep 가드 삭제; S8 는 vis/scrollTop 를 키에서 빼면 움직이는 장면이 거짓 정착, 실제 키는 안 선다.
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, 전부 exit 0). 전 장면 3-동일은 **아님**: **462/528** byte-identical, **66** 잔량 (면제 확대 없음). intro nonempty light/dark **3-동일** (`d1e1e410…` / `7f16f519…`). chat-light **3-동일**. chat-dark 는 2/3 동일(run3 만 다름) — R1 의 「호버 툴바가 intro sha 를 움직인다」는 거짓 원인(실측은 렌더된 벽시계). 잔량 사이트: `accent-*` 10장 (`waitUntilTokenPaint` 150ms 전이), `terminal-dock-loading-*` (로딩 애니), `b8-*` / `sidebar-section-hover-*` / composer·메뉴 hover 크롬. 호버 툴바 park 는 #1743 단정으로 남고 intro sha 원인으로 쓰지 않음.
+- 게이트. web test 233 files / 2790 passed. typecheck. lint 0 errors (15 warnings 선행). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. design-review는 이 워커가 하지 않음.
 - 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
 ## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R3)
 
