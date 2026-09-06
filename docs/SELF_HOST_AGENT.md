@@ -1327,18 +1327,34 @@ public checks.
 
 ## 4. Day-2
 
-`scripts/oort status` / `logs` / `upgrade` / `backup` / `member` are
-**SH-3b**. Until those verbs exist, the dispatcher prints that they land in
-SH-3b and exits 2. Use the prose below. After SH-3b, those commands become
-the canon and this section shrinks to a pointer.
+Canon:
 
-**Upgrade (images gone, env must stay):**
+```sh
+scripts/oort status
+scripts/oort logs
+scripts/oort upgrade
+scripts/oort backup
+scripts/oort restore <dump>
+scripts/oort member invite
+scripts/oort member credential --agent <handle>
+```
+
+**Upgrade (images gone, env must stay):** `scripts/oort upgrade`.
+That is the command. The prose below is explanation, not a second
+procedure.
+
+It compares the running/env digest with `releases/latest.json`
+(`digest_list`, regex `sha256:` + 64 lowercase hex; list ≠ arch), takes
+`scripts/oort backup` first (`--no-backup` to skip), re-checks that env
+and the named volumes/`Caddyfile.local` bind exist (it will not create
+or delete a volume), `compose pull` + `up -d`, waits for migrate
+`IDEMPOTENCY_OK`, waits for `/healthz`, then `scripts/oort doctor` PASS.
+On failure it **prints** the rollback command (`scripts/oort upgrade
+--to <previous> --no-backup --yes`) and does not run it.
 
 ```sh
 APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
-docker pull "$APP_REF"
-scripts/self_host_env.sh --compose up -d --pull missing --wait
-scripts/oort doctor --json
+scripts/oort upgrade --to "$APP_REF" --yes
 ```
 
 Claim-mode: `oort_compose` instead of `--compose` (§3.3.3). Grok Bot VM
@@ -1346,16 +1362,24 @@ also re-checks `/workspace` binds and Funnel state (§3.3.8).
 
 **Backup / restore** (not PITR; see
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)):
+`scripts/oort backup` and `scripts/oort restore <dump>`. Restore refuses
+a stack that already has messages. If the dest lacks runtime roles
+(`momo_app`/`momo_relay`/`momo_worker`) it runs the compose service
+`runtime-roles` (`MOMO_RUNTIME_ROLE_PROVISION=1`) before
+`scripts/self_host_pg_restore.sh` — it does not hand-write GRANT SQL.
+The wrappers call the two scripts below (no second `pg_dump`/`pg_restore`
+call site):
 
 ```sh
-scripts/self_host_pg_dump.sh --output-dir ./oort-backups
-scripts/self_host_pg_restore.sh --dump ./oort-backups/oort-pg.dump
+scripts/oort backup --out ./oort-backups
+scripts/oort restore ./oort-backups/oort-pg.dump --yes
 ```
 
 Attachments live on `DRIVE_VOLUME_NAME` (default `oort-drive`). Take that
 volume with the dump. `down -v` deletes the volume this env names.
 
-**Logs** until SH-3b:
+**Logs:** `scripts/oort logs api` (secret values are `***`). Direct
+compose remains valid for claim-mode:
 
 ```sh
 scripts/self_host_env.sh --compose logs api
@@ -1392,7 +1416,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. Claim-mode: `oort_compose`. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
-| `stack.outbox` | non-`done` rows | `logs relay` if pending/failed. |
+| `stack.outbox` | non-`done` rows | `push_candidate` pending is non-failing when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). Other kinds: `logs relay` if pending/failed. |
 | `stack.migrate_idempotency` | no `IDEMPOTENCY_OK` | `logs migrate`. |
 | `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. |
 

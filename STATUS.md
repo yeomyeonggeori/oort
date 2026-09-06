@@ -1,5 +1,26 @@
 # oort 진행 현황
 
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R3)
+
+- R3: `docs/SELF_HOST.md` When-stuck upgrade row plus `scripts/oort` / `oort_day2.sh` usage strings dropped the `<ref@sha256:…>` placeholder. Scanners count that token even as a placeholder (`scripts/check_release_manifest.sh` greps `docs/SELF_HOST*.md` + `README.md`; `test_publish_images_contract.py` greps `docs/SELF_HOST.md` only). AGENT docs had 0 hits. Code that *validates* a digest (`oort_extract_digest` / die regex) is unchanged.
+
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R2)
+
+- Dispatcher verbs: `status` · `logs` · `upgrade` · `backup`/`restore` · `member invite` / `member credential`. Reuses `oort_doctor_*` (no copied functions), `scripts/self_host_pg_dump.sh` / `self_host_pg_restore.sh` (no new pg_dump/pg_restore call site), `releases/latest.json` `digest_list` (`^sha256:[0-9a-f]{64}$`, list≠arch). Never `docker volume rm` / `down -v`; failure prints a rollback command and does not run it. Secrets masked by generator secret-shaped keys + Bearer + `postgres://` passwords.
+- R2 landing (three planner blockers):
+  - `stack.outbox`: `push_candidate` pending is **non-failing** when no push relay is configured (compose has no `push-relay`/`notifier`; overlay keys `PUSH_RELAY_URL` / `MOMO_PUSH_RELAY_IMAGE` / `MOMO_APNS_KEY_HOST_PATH` unset — `infra/rust/docker-compose.push.yml` / `push-relay.env.example`). Same rows **fail** when a relay is configured. Other kinds unchanged.
+  - `oort restore` runs the stack's `runtime-roles` one-shot (`MOMO_RUNTIME_ROLE_PROVISION=1`) before `scripts/self_host_pg_restore.sh` if `momo_app`/`momo_relay`/`momo_worker` are absent. No hand-written GRANT SQL. No second pg_restore call site.
+  - `scripts/tests/test_oort_doctor.sh` expects live `status` (doctor reuse + `image.state`), not the SH-3a stub. `[oort-doctor-test] PASS: 15 case(s)`.
+- Red proofs `scripts/tests/test_oort_day2.sh` **10/10** (was 9/9): previous 9 plus restore into a roles-less dest runs `runtime-roles` before `pg_restore`.
+- R2 round-trip (published-image, this worktree under `$HOME`, `COMPOSE_PROJECT_NAME=oort-sh3b`, did not touch `oort-pgdata`). `digest_list`=`sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f`. Volume still held **N=5**.
+  - `scripts/oort upgrade --to <same list digest> --yes --no-backup`: `oort upgrade: doctor summary {"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` **exit 0**. `stack.outbox` pass `push_candidate pending=5 non-failing (no push relay configured…)`. `count_after_upgrade=5`.
+  - Backup 610878 bytes, sha256 `fba68f6ab2328d73c97411075357b474f2d256133f78199e968751d0b6fbf947`.
+  - Restore into fresh postgres-only `oort-sh3br2` (roles_before=0): `oort restore: runtime roles absent (0/3); running compose service runtime-roles` then `[migrate] runtime roles provisioned` then `[self-host-restore] restore finished`. **RESTORE_EXIT=0**. `count_after_restore=5`, `roles_after=3`.
+  - Dest app services up: `scripts/oort doctor --json` `summary={"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` exit 0. Both projects `compose down` **without `-v`**.
+- Volumes left for planner reclaim (not `volume rm`'d): `oort-sh3b-pgdata` · `oort-sh3b-drive` · `oort-sh3b_web-static` · `oort-sh3br-pgdata` (R1) · `oort-sh3br2-pgdata` · `oort-sh3br2-drive` · `oort-sh3br2_web-static` · `oort-pgdata` (untouched).
+- Docs: `docs/SELF_HOST.md` When stuck restore row; `docs/SELF_HOST_AGENT.md` / `.ko.md` §4 restore + §막히면 `stack.outbox`. `python3 scripts/check_docs_commands.py` PASS 522 facts / 18 docs.
+- 계획 이탈: 없음 (R1 blockers closed). runtime-unverified: member invite/credential live e2e. `scripts/local_gate.sh` does not yet list `scripts/oort` / `test_oort_day2.sh` (policy file — planner files that).
+
 ## SH-4b README paste block + SELF_HOST·FIRST_DAY 영문 정본 (#2105, 2026-09-06)
 
 - README §Self-host 맨 위 「Paste this into your agent」 펜스 1개, **4줄**(상한 10). 정본 raw URL `docs/SELF_HOST_AGENT.md` + §0 계약 + `scripts/oort doctor` PASS일 때만 완료. 하네스 이름 grep 0. 바로 아래 1줄: 사람이 직접 하려면 → `docs/SELF_HOST.md`. 플레이북 명령은 복제하지 않음. SH-2 링크는 `[Open on a public origin](docs/SELF_HOST.md#open-on-a-public-origin)`.
