@@ -1,5 +1,19 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-07, R6)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard-only; **no product behaviour change**. Product-file edits are the `TIME_GATED_CONTROLS` export (same module as the guard) and a comment at `Timeline.tsx` `atBottomBeforeBatchRef`.
+- H-1. Registry names the gated interactive control: `timeGatedTestId(prefix)` → `${prefix}-commit` (the armed button, not the `-confirm` container). Real-lane RED in the fixed-clock `approvals-confirm` scene, scratch `page.keyboard.press("Enter")` on focused armed `-commit` and `page.locator('[data-testid=inbox-approval-commit]').click()` both abort `CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control [inbox-approval-commit] cannot open CONFIRM_GUARD_MS under a frozen Date`. Unit test drives the same resolver against rendered `ApprovalActions` (`captureClock.actions.test.tsx`); no hard-coded `evaluate` stub.
+- M-1. Usage-site set equality is keyed on the element's actual test id (AST of handlers that read `*_GUARD_MS`), not a `-confirm` suffix. S7f: unregistered `FOO_GUARD_MS` gating `foo-commit` → red (`+ foo-commit`); registered `timeGatedTestId("foo")` → 8/8 green; ghost registry entry → red (`- foo-commit`).
+- N-1. `sceneDispatchMouseEvent` reads the target's test id from the element it dispatches on (no hand-written argument).
+- N-2. `beginCaptureScene` at scene start (before any interaction); `wrapPageShotGuard` no longer sets the scene. `clockForScene()` reads the same name.
+- N-3. Comment at `atBottomBeforeBatchRef`: seeded `true`; 0–16 ms mount window; scrolled-up reader can get 1 play at mount (≤ D3's 3). No behaviour change.
+- N-4. Ten pre-existing `toContain` greps in the other `arrivalWiring.test.ts` `it`s left untouched (out of scope).
+- 부하 1×30 (both burst files, `--pool=threads --maxWorkers=1 --minWorkers=1`). **fail/30 = 0**, 11 tests/run.
+- Capture ×2 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×2). intro/chat/welcome-backstop sha identical to R5 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…` / `0c384e43c759…` / `f7f6e6fdec62…`). **499/528** identical, **29** differing ⊆ #2128 + R4/R5 host-nondeterminism class.
+- 게이트. web test **236 files / 2807 passed**. typecheck. lint 0 errors / 16 warnings. preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. UX-R1d/UX-R2b green. runtime-unverified 아님.
+
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R5)
 
 - Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS.
