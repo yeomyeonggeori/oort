@@ -1,8 +1,8 @@
-# ⚠️ 은퇴한 배포의 파일 — NCP 프로덕션은 2026-08-26 완전 철수(#1803). 이
-# 파일을 그대로 재기동하면 존재하지 않는 배포를 향해 ACME 인증서 발급을
-# 시도한다. 사이트 호스트 파라미터화(하드코딩 제거)는 #1239 몫이고, 그
-# 전까지 이 파일은 참조용이다.
-app.oor7.com {
+# 공개 엣지 템플릿 (#1926). 사이트 주소와 CSP connect-src 는 env 보간이다.
+# 키 이름 정본: scripts/self_host_env.sh 의 oort_public_edge_env_keys.
+# OORT_SITE_ADDRESS 가 없으면 caddy adapt/validate 가 실패한다 — 기본값 없음.
+# 그래서 이 파일을 로컬에서 이름 불러도 남의 호스트로 ACME 주문이 나가지 않는다.
+{$OORT_SITE_ADDRESS} {
 	encode zstd gzip
 
 	# ── 보안 헤더 (#1213) ────────────────────────────────────────────────
@@ -18,15 +18,13 @@ app.oor7.com {
 		# HSTS: 브라우저가 **기억하는** 헤더다. 한 번 받은 브라우저는 max-age
 		# 동안 이 호스트를 평문으로 열지 않고, 그 기억은 서버에서 취소할 수
 		# 없다(헤더를 지워도 이미 받은 브라우저는 만료까지 기억한다). 그래서
-		# 1일에서 시작한다. 확장 일정은 docs/runbooks/ncp-rust-deploy.md.
+		# 1일에서 시작한다. 확장 일정은 운영자가 자기 호스트에서 판단한다.
 		#
 		# `preload` 없음 — 프리로드 목록 등재는 브라우저 소스에 박히는 것이고
 		# 제거에 수개월이 걸린다. 도그푸딩 단계에서 살 물건이 아니다.
 		#
-		# `includeSubDomains` 없음 — 2026-08-09 dig 실측: app.oor7.com 만
-		# A 레코드를 갖고(101.79.11.189), *.app.oor7.com 은 와일드카드도 개별
-		# 레코드도 없다. 지킬 하위도메인이 0개인 지시어는 얻는 것 없이
-		# 「앞으로 생길 하위도메인도 전부 HTTPS여야 한다」는 기억만 남긴다.
+		# `includeSubDomains` 없음 — 지킬 하위도메인이 0개인 지시어는 얻는 것
+		# 없이 「앞으로 생길 하위도메인도 전부 HTTPS여야 한다」는 기억만 남긴다.
 		# max-age를 늘리는 창에서 같이 판단한다.
 		Strict-Transport-Security "max-age=86400"
 		# MIME 스니핑 금지. /v1 응답은 전부 application/json 이고 SPA 자산은
@@ -70,20 +68,18 @@ app.oor7.com {
 		#    (dist 실측). 서비스워커는 /sw.js 이고 worker-src는 default-src로
 		#    떨어진다. 웹폰트 없음(빌드된 CSS에 url() 0건)이라 font-src도 같다.
 		#
-		#  connect-src 'self' wss://app.oor7.com https://www.googleapis.com
+		#  connect-src {$OORT_CSP_CONNECT_SRC}
+		#    생성기가 --public-origin 에서 파생한다. 기본 토큰:
 		#    'self' = REST(/v1/*) 와 첨부 다운로드/미리보기 프록시
-		#    (/v1/.../attachments/{id}/content). 둘 다 이 오리진이다.
-		#    wss://app.oor7.com = 레일. 주소는 로그인 응답의
-		#    realtimeWebSocketUrl(ADR-0110)이고 라이브 값은
-		#    wss://app.oor7.com/connection/websocket 이다. 같은 호스트라
-		#    CSP3의 'self'가 덮어야 하지만 ws(s)에 대한 'self' 해석은 엔진마다
-		#    갈렸던 자리다 — 명시가 싸고 확실하다.
+		#    https://<host> / wss://<host> = 같은 호스트 REST·레일
 		#    https://www.googleapis.com = **첨부 바이트가 이 서버를 지나지 않는
 		#    유일한 요청**(ADR-0151 D1). 브라우저가 Drive 재개 가능 세션 주소로
 		#    직접 PUT 한다. 이 한 토큰이 빠지면 첨부 업로드가 즉사한다 — #1206이
 		#    실제로 밟았고 #1207이 닫은 그 사고다. 호스트는 추측이 아니라 서버가
 		#    강제한다: momo-drive/src/google.rs:380 이 Location 헤더가
 		#    "https://www.googleapis.com/" 로 시작하지 않으면 세션을 거절한다.
+		#    MOMO_LIVEKIT_* URL 이 env 에 있으면 그 오리진도 붙는다.
+		#    와일드카드는 생성기가 거절한다 (#1792).
 		#
 		#  img-src 'self' data:
 		#    'self' = /favicon.svg · /apple-touch-icon.png · PWA 아이콘.
@@ -110,7 +106,7 @@ app.oor7.com {
 		#    그런 브라우저를 위한 두 번째 줄은 지켜 줄 대상이 없는 중복이다.
 		#    (infra/prod/Caddyfile은 셀프호스트 배포용이라 둘 다 갖고 있고,
 		#     그 파일은 이 티켓에서 건드리지 않는다.)
-		header Content-Security-Policy "default-src 'self'; connect-src 'self' wss://app.oor7.com https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		header Content-Security-Policy "default-src 'self'; connect-src {$OORT_CSP_CONNECT_SRC}; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
 		try_files {path} /index.html
 		file_server
 	}

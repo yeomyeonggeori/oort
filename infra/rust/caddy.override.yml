@@ -8,9 +8,9 @@
 # ## What this file recovers
 #
 # `docker-compose.rust.yml` says caddy is "deliberately absent (B1.7 scope)".
-# That sentence was true for the smoke and false for production: app.oor7.com
-# has been fronted by a `caddy.override.yml` that existed on exactly one disk
-# and in no commit (audit B §2-2). The runbook could not even name its own
+# That sentence was true for the smoke and false for production: the retired
+# public host was fronted by a `caddy.override.yml` that existed on exactly one
+# disk and in no commit (audit B §2-2). The runbook could not even name its own
 # service — `docs/runbooks/ncp-rust-deploy.md` used to read "서비스 이름은
 # caddy.override.yml 에서 확인" because the file was not here to look at.
 #
@@ -34,12 +34,13 @@
 #
 # ## ⚠ Naming this file OFF the deploy host talks to Let's Encrypt (#1228 실측)
 #
-# `infra/rust/Caddyfile` names a real public site (`app.oor7.com`) with no
-# scheme, so Caddy turns on automatic HTTPS and starts an ACME order **the
-# moment the container boots** — before any request, and regardless of which
-# host ports you mapped. Measured on 2026-08-10 during this ticket's local
-# verification: 4 failed challenges (http-01 + tls-alpn-01, two orders) against
-# the production Let's Encrypt directory for the live domain.
+# `infra/rust/Caddyfile` is now an env template (`{$OORT_SITE_ADDRESS}`,
+# #1926). Missing env → Caddy refuses to start (no default, no ACME). A set
+# hostname still turns on automatic HTTPS the moment the container boots —
+# before any request, and regardless of which host ports you mapped. Measured
+# on 2026-08-10 when this file still hardcoded a live site: 4 failed
+# challenges (http-01 + tls-alpn-01, two orders) against the production Let's
+# Encrypt directory. Do not bind a real public hostname from a laptop.
 #
 # What it did NOT do, and why the live edge was unharmed: the container had an
 # empty `caddy-data`, so Caddy registered a NEW ACME account. Failed-validation
@@ -57,9 +58,10 @@
 # nothing else — no `/v1`, no `/connection` — so it could never produce a login,
 # which is exactly the gap the local overlay closes.)
 #
-# A structural fix (parameterising the site address, or an `acme_ca` global so
-# a local run can point at the staging CA or `internal`) would change the live
-# TLS file and is left as a decision rather than taken here — goal #1239.
+# Site address and CSP connect-src are env-interpolated (#1926 / #1239).
+# Keys: `OORT_SITE_ADDRESS` + `OORT_CSP_CONNECT_SRC` (canonical list:
+# `oort_public_edge_env_keys` in scripts/self_host_env.sh). Compose `:?`
+# refuses to render this overlay if either is unset.
 #
 # ## Volumes are project-scoped on purpose (no `name:` key)
 #
@@ -111,6 +113,11 @@ services:
       # defaults are the live values and ACME HTTP-01 needs exactly them.
       - "${CADDY_HTTP_PORT:-80}:80"
       - "${CADDY_HTTPS_PORT:-443}:443"
+    environment:
+      # Canonical names: oort_public_edge_env_keys in scripts/self_host_env.sh.
+      # No default — missing keys fail compose interpolation before Caddy boots.
+      OORT_SITE_ADDRESS: ${OORT_SITE_ADDRESS:?set OORT_SITE_ADDRESS}
+      OORT_CSP_CONNECT_SRC: ${OORT_CSP_CONNECT_SRC:?set OORT_CSP_CONNECT_SRC}
     volumes:
       # Single-FILE bind. Replacing it by rename (editor "atomic save", `mv`)
       # splits the inode and the container keeps serving the old bytes —

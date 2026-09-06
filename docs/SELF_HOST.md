@@ -489,6 +489,7 @@ oort down -v
 | 에이전트를 만들었는데 대답이 없다 | 키를 아직 안 넣었거나(§5), 넣은 엔드포인트가 응답하지 않는 것이다. 채널에 「응답하지 못했습니다」류 메시지가 뜨면 후자다(`oort logs agent-worker`). |
 | `--compose up` 이 다른 체크아웃이 같은 프로젝트/볼륨을 쓴다고 거절 | 그 체크아웃에서 `down`(볼륨은 남김) 하거나, 이 클론의 `COMPOSE_PROJECT_NAME` 과 `DB_VOLUME_NAME` 을 **함께** 바꾼다. [두 체크아웃](#두-체크아웃을-같이-쓸-때). |
 | 업그레이드 후 로그인이 안 되고 DB가 비어 보인다 | 새 env 가 `oort-pgdata` 가 아닌 볼륨을 가리키고 있을 수 있다. 데이터가 삭제된 것이 아니다 — `docker volume ls` 로 `oort-pgdata` 를 확인하고, `DB_VOLUME_NAME=oort-pgdata` 로 채택하거나 기본 프로젝트명 `oort` 로 env 를 다시 만든다. |
+| ACME 주문이 보인다 (Let's Encrypt) | `OORT_SITE_ADDRESS` 가 이 호스트가 아닌 남의 호스트다. 공개 템플릿은 그 키가 없으면 기동 자체가 거부된다. 로컬에서는 `caddy.override.yml` 을 이름 부르지 마라. |
 | 처음부터 다시 하고 싶다 | `down -v` + `rm infra/rust/local.secrets.env` + 2단계부터. |
 
 메시지가 실제로 레일까지 갔는지 보는 질의(`broadcast | done` 이 정상):
@@ -534,25 +535,44 @@ scripts/self_host_env.sh --compose up -d
 이미 만든 env 가 루프백 URL을 들고 있으면 그 한 줄만 `same-origin` 으로
 고친다. 시크릿 파일 재생성은 금지.
 
-## 운영: 도메인과 TLS를 붙일 때
+## 공개 오리진으로 열기
 
-위 경로는 **루프백 전용**이다. 엣지는 `127.0.0.1` 에만 바인딩되고 TLS가 없다.
-공개 호스트에 올리는 것은 다른 절차이고, 다른 파일을 쓴다:
+위 경로의 엣지는 루프백이다 (`Caddyfile.local`, `:80`, ACME 없음). 공개 호스트에
+TLS 를 붙이려면 **같은 생성기**가 사이트 주소와 CSP connect-src 를 파생한다.
+키 이름 정본은 `scripts/self_host_env.sh` 의 `oort_public_edge_env_keys`
+(`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`) 다. 손으로 적지 마라.
 
-| | 로컬(이 문서) | 공개 배포 |
+```sh
+scripts/self_host_env.sh --public-origin https://<host>
+```
+
+같은 호출이 Centrifugo 허용목록과 드라이브 base URL 도 갱신한다(기존 규칙).
+와일드카드 오리진(`https://*.example.test` 등)은 거절한다 (#1792).
+`--public-origin` 없이 돌리면 두 키를 쓰지 않는다 — 로컬 루프백 경로는 그대로다.
+
+공개 오버레이는 그 env 를 컨테이너로 넘긴다. env 가 비어 있으면 compose/`caddy
+validate` 가 실패한다. 그것이 ACME 오발사 차단의 실체다. 이 오버레이는 **그
+호스트의 DNS 를 가진 머신에서만** 기동한다. 로컬에서 이름 부르지 마라.
+`--compose` 는 canonical file 집합을 바꾸지 못하므로, 공개 오버레이는 배포
+호스트에서 compose 를 직접 호출한다:
+
+```sh
+docker compose --env-file infra/rust/local.secrets.env \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/caddy.override.yml up -d
+```
+
+공개 템플릿은 `caddy adapt` / `caddy validate` 로만 검증한다. 픽스처 호스트가
+아닌 실호스트로 컨테이너를 띄워 ACME 를 주문하지 마라.
+
+| | 로컬(이 문서의 기본) | 공개 오리진 |
 |---|---|---|
-| 엣지 | `infra/rust/local.override.yml` + `Caddyfile.local`(`:80`, ACME 없음) | `infra/rust/caddy.override.yml` + `infra/rust/Caddyfile`(자동 HTTPS) |
-| 주소 | `http://localhost:<port>` | 실도메인 + `CENTRIFUGO_ALLOWED_ORIGINS` |
-| 절차 정본 | 이 문서 | [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md) |
-
-> ⚠ **`caddy.override.yml` 을 배포 호스트가 아닌 곳에서 이름 부르지 마라.**
-> `infra/rust/Caddyfile` 이 실도메인을 스킴 없이 적고 있어서, 컨테이너가 뜨는
-> **순간** Let's Encrypt에 ACME 주문이 나간다 — 요청 하나 없이도, 포트를 바꿔도.
-> 2026-08-10에 실제로 운영 도메인 앞으로 실패한 챌린지 4건이 발생했다. 그래서
-> 로컬 경로는 저 파일을 아예 쓰지 않고 `local.override.yml` 을 쓴다.
-> 구조적 수리(사이트 주소 파라미터화 / `acme_ca`)는 **#1239** 의 결정 사항이다.
+| 엣지 | `local.override.yml` + `Caddyfile.local` (`:80`) | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`) |
+| 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
+| CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
 
 보안 강화·백업·업그레이드·다중 워크스페이스 운영은
 [`docs/DEPLOY.md`](DEPLOY.md), pgBackRest 폐곡선과 migrate gate는
-[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md), 배포 호스트 절차는
-[`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
+[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md).
+은퇴한 NCP 런북은 [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)
+에 역사 기록으로만 남아 있다.

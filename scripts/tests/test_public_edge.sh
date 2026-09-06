@@ -305,9 +305,7 @@ fi
 if grep -E '^[^#]*app\.oor7\.com' "$CADDYFILE_LOCAL"; then
   fail "infra/rust/Caddyfile.local still names app.oor7.com outside comments"
 fi
-grep_count="$(grep -rn 'app.oor7.com' -- . \
-  --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=target \
-  --exclude-dir=dist --exclude-dir=.build 2>/dev/null | wc -l | tr -d ' ')"
+grep_count="$( { git grep -n 'app.oor7.com' || true; } | wc -l | tr -d ' ')"
 printf '[test-public-edge] repo grep app.oor7.com count=%s\n' "$grep_count"
 pass "public Caddyfile template has 0 app.oor7.com hits (repo count printed)"
 
