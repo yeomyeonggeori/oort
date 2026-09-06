@@ -350,15 +350,21 @@ fi
 pass "compose push-relay/notifier services → push relay configured"
 
 # -----------------------------------------------------------------------------
-# 6. JSON schema on every --json run already covered; dispatcher stubs
+# 6. status is live (SH-3b): doctor reuse + image object, not a stub
 # -----------------------------------------------------------------------------
 set +e
-"$OORT" status >"$SANDBOX/status.out" 2>"$SANDBOX/status.err"
+"$OORT" status --env "$VALID" --json >"$SANDBOX/status.out" 2>"$SANDBOX/status.err"
 sc=$?
 set -e
-[ "$sc" = "2" ] || fail "status stub exit $sc (want 2)"
-grep -q 'SH-3b' "$SANDBOX/status.err" "$SANDBOX/status.out" || \
-  fail "status stub should mention SH-3b"
-pass "status stub points at SH-3b"
+[ "$sc" = "0" ] || fail "status live exit $sc (want 0); stderr=$(cat "$SANDBOX/status.err")"
+validate_schema "$SANDBOX/status.out" || fail "status --json schema"
+jq -e '.image.state == "local"' "$SANDBOX/status.out" >/dev/null || \
+  fail "status --json missing local image.state: $(head -c 200 "$SANDBOX/status.out")"
+if grep -q 'SH-3b에서' "$SANDBOX/status.err" "$SANDBOX/status.out"; then
+  fail "status still a stub"
+fi
+assert_no_secret_leak "status json" "$SANDBOX/status.out"
+assert_no_secret_leak "status stderr" "$SANDBOX/status.err"
+pass "status is live (doctor reuse + image); not a stub"
 
 echo "[oort-doctor-test] PASS: $CASES case(s)"
