@@ -609,11 +609,75 @@ EOF
   return 1
 }
 
+# Push drain exists only with the ADR-0120 overlay (infra/rust/docker-compose.push.yml
+# + keys in push-relay.env.example). Self-host compose does not attach that file.
+# "Configured" = overlay env key present, drain enabled, or compose ps lists
+# push-relay / notifier. The messaging service named `relay` is not a push relay.
+oort_doctor_push_relay_configured() {
+  local ps_out="${1:-}" key value trimmed
+  if printf '%s\n' "$ps_out" | awk '
+    $1 == "push-relay" || $1 == "notifier" { found = 1 }
+    END { exit found ? 0 : 1 }
+  '; then
+    return 0
+  fi
+  for key in \
+    PUSH_RELAY_URL MOMO_PUSH_RELAY_IMAGE MOMO_APNS_KEY_HOST_PATH \
+    MOMO_RELAY_SIGNING_KEY_HOST_PATH NOTIFIER_DATABASE_URL MOMO_RELAY_SERVERS
+  do
+    oort_doctor_has "$key" || continue
+    value="$(oort_doctor_trim "$(oort_doctor_get "$key")")"
+    [ -n "$value" ] || continue
+    return 0
+  done
+  if oort_doctor_has MOMO_PUSH_NOTIFIER_ENABLED; then
+    trimmed="$(oort_doctor_trim "$(oort_doctor_get MOMO_PUSH_NOTIFIER_ENABLED)")"
+    if [ "$trimmed" = "1" ] || [ "$trimmed" = "true" ]; then
+      return 0
+    fi
+  fi
+  return 1
+}
+
+# stdin: kind<TAB>status<TAB>count from `GROUP BY kind, status`.
+# $1 = 1 if push relay is configured, else 0.
+# Sets OORT_DOCTOR_OUTBOX_STATUS / DETAIL / FIX.
+oort_doctor_classify_outbox() {
+  local relay="${1:-0}" tsv failing push_pending
+  tsv="$(cat)"
+  failing="$(printf '%s\n' "$tsv" | awk -F '\t' -v relay="$relay" '
+    NF < 2 { next }
+    $2 != "done" && !(relay == 0 && $1 == "push_candidate") { n += 1 }
+    END { print n + 0 }
+  ')"
+  push_pending="$(printf '%s\n' "$tsv" | awk -F '\t' '
+    $1 == "push_candidate" && $2 != "done" { n += $3 + 0 }
+    END { print n + 0 }
+  ')"
+  OORT_DOCTOR_OUTBOX_FIX=""
+  if [ "$failing" -gt 0 ]; then
+    OORT_DOCTOR_OUTBOX_STATUS=fail
+    if [ "$relay" = "1" ] && [ "$push_pending" -gt 0 ]; then
+      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (push_candidate pending=${push_pending}; push relay configured: docker-compose.push.yml / PUSH_RELAY_URL or compose push-relay/notifier)"
+    else
+      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (kind/status 집계, 값 미나열)"
+    fi
+    OORT_DOCTOR_OUTBOX_FIX="pending/failed 면 relay 로그: scripts/self_host_env.sh --compose logs relay"
+    return
+  fi
+  OORT_DOCTOR_OUTBOX_STATUS=pass
+  if [ "$push_pending" -gt 0 ]; then
+    OORT_DOCTOR_OUTBOX_DETAIL="push_candidate pending=${push_pending} non-failing (no push relay configured: compose has no push-relay/notifier; overlay keys PUSH_RELAY_URL/MOMO_PUSH_RELAY_IMAGE/MOMO_APNS_KEY_HOST_PATH unset; infra/rust/docker-compose.push.yml)"
+  else
+    OORT_DOCTOR_OUTBOX_DETAIL="outbox 잔량 없음 (broadcast|done 외 0)"
+  fi
+}
+
 oort_doctor_check_stack() {
   local project="$1"
   local ps_out svc state health line missing="" unhealthy="" report=""
   local web_port api_port base body hdr code db auth_line
-  local pg_user pg_db outbox leftover
+  local pg_user pg_db outbox push_relay
   local logs
 
   ps_out="$(docker compose -p "$project" ps --format '{{.Service}} {{.State}} {{.Health}}' 2>/dev/null || true)"
@@ -711,15 +775,17 @@ oort_doctor_check_stack() {
       "outbox 오라클을 실행하지 못했다 (postgres exec)" \
       "스택이 기동 중이면 scripts/self_host_env.sh --compose exec postgres psql 로 확인하라."
   else
-    leftover="$(printf '%s\n' "$outbox" | awk -F '\t' '$2 != "done" { n += 1 } END { print n + 0 }')"
-    if [ "$leftover" -eq 0 ]; then
-      oort_doctor_record stack.outbox major pass \
-        "outbox 잔량 없음 (broadcast|done 외 0)" ""
-    else
-      oort_doctor_record stack.outbox major fail \
-        "outbox 에 done 아닌 행이 있다 (kind/status 집계, 값 미나열)" \
-        "pending/failed 면 relay 로그: scripts/self_host_env.sh --compose logs relay"
+    push_relay=0
+    if oort_doctor_push_relay_configured "$ps_out"; then
+      push_relay=1
     fi
+    oort_doctor_classify_outbox "$push_relay" <<EOF
+$outbox
+EOF
+    oort_doctor_record stack.outbox major \
+      "$OORT_DOCTOR_OUTBOX_STATUS" \
+      "$OORT_DOCTOR_OUTBOX_DETAIL" \
+      "$OORT_DOCTOR_OUTBOX_FIX"
   fi
 
   logs="$(docker compose -p "$project" logs migrate 2>/dev/null || true)"
