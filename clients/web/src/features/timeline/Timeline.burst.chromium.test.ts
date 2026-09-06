@@ -199,7 +199,7 @@ ${css}
 
 describe("virtualized Timeline burst (Chromium)", () => {
   it.skipIf(!chromiumAvailable)(
-    "브라우저가 motion-enter-conversation 을 3회 시작한다 (virtuoso 경로의 스냅샷)",
+    "브라우저가 motion-enter-conversation 을 3회 시작한다 (virtuoso 경로의 스냅샷; jsdom 은 grant 만 센다)",
     async () => {
       const handle = await launchBurstHarness({ history: 8 });
       try {
@@ -253,6 +253,22 @@ describe("virtualized Timeline burst (Chromium)", () => {
           });
         }, ENTER_CONVERSATION_ANIMATION_NAME);
         expect(measured).toBe(3);
+        // Settled-row computed style is real here (jsdom's injected sheet
+        // never parses; animationName is always ""). History rows must not
+        // carry motion-enter-conversation.
+        const settledStyles = await handle.page.evaluate(() => {
+          const rows = [
+            ...document.querySelectorAll('[data-testid="timeline-message"]'),
+          ];
+          return rows
+            .filter((node) => !node.classList.contains("enter-conversation"))
+            .map((node) => getComputedStyle(node).animationName);
+        });
+        expect(settledStyles.length).toBeGreaterThan(0);
+        for (const name of settledStyles) {
+          expect(name.includes(ENTER_CONVERSATION_ANIMATION_NAME)).toBe(false);
+          expect(name === "none" || name === "none, none").toBe(true);
+        }
       } finally {
         await handle.browser.close();
       }
@@ -301,6 +317,11 @@ describe("virtualized Timeline burst (Chromium)", () => {
             return await new Promise<number>((resolve, reject) => {
               let clicked = false;
               let grantedAtClick: string[] = [];
+              let framesWaiting = 0;
+              let framesAfterClick = 0;
+              let frameHandle = 0;
+              const FRAME_CEILING = 60;
+              const leftoversNow = () => window.__timelineBurst.playCount(nextIds);
               const onStart = (event: AnimationEvent) => {
                 if (event.animationName !== animationName) return;
                 const got = current() - baseline;
@@ -330,16 +351,56 @@ describe("virtualized Timeline burst (Chromium)", () => {
               };
               const tryClick = () => {
                 if (clicked) return;
-                if (window.__timelineBurst.playCount(nextIds) !== 1) return;
+                if (leftoversNow() !== 1) return;
                 const button = document.querySelector("[data-testid='jump-latest']");
                 if (!(button instanceof HTMLElement)) return;
                 clicked = true;
+                framesAfterClick = 0;
                 grantedAtClick = window.__timelineBurst.playIds(nextIds);
                 button.click();
               };
+              const onFrame = () => {
+                if (!clicked) {
+                  const leftovers = leftoversNow();
+                  tryClick();
+                  if (clicked) {
+                    frameHandle = requestAnimationFrame(onFrame);
+                    return;
+                  }
+                  framesWaiting += 1;
+                  if (framesWaiting >= FRAME_CEILING) {
+                    cleanup();
+                    reject(
+                      leftovers === 0
+                        ? new Error(
+                            `leftover grant vanished before jump (starts=${current() - baseline})`
+                          )
+                        : new Error(
+                            `leftover grants at jump gate: expected 1, got ${leftovers}`
+                          )
+                    );
+                    return;
+                  }
+                  frameHandle = requestAnimationFrame(onFrame);
+                  return;
+                }
+                framesAfterClick += 1;
+                const got = current() - baseline;
+                if (got >= want) return;
+                if (framesAfterClick >= FRAME_CEILING) {
+                  cleanup();
+                  reject(
+                    new Error(
+                      `jump-latest click produced ${got} motion-enter-conversation starts within ${FRAME_CEILING} frames (expected ${want}; dead control?)`
+                    )
+                  );
+                  return;
+                }
+                frameHandle = requestAnimationFrame(onFrame);
+              };
               const obs = new MutationObserver(() => {
                 tryClick();
-                if (!clicked && window.__timelineBurst.playCount(nextIds) === 0) {
+                if (!clicked && leftoversNow() === 0) {
                   cleanup();
                   reject(
                     new Error(
@@ -380,6 +441,7 @@ describe("virtualized Timeline burst (Chromium)", () => {
                 document.removeEventListener("animationstart", onStart, true);
                 document.removeEventListener("animationend", onEnd, true);
                 obs.disconnect();
+                cancelAnimationFrame(frameHandle);
               }
               document.addEventListener("animationstart", onStart, true);
               document.addEventListener("animationend", onEnd, true);
@@ -388,6 +450,7 @@ describe("virtualized Timeline burst (Chromium)", () => {
                 childList: true,
                 attributes: true,
               });
+              frameHandle = requestAnimationFrame(onFrame);
               tryClick();
             });
           },
