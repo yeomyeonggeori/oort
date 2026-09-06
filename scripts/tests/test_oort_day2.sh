@@ -248,15 +248,25 @@ cat >"$FAKE_BIN/docker" <<'EOF'
 set -eu
 log="${FAKE_DOCKER_LOG:-/tmp/fake-docker-day2.log}"
 printf '%s\n' "$*" >>"$log"
-# occupancy query: compose exec … psql … message
+# Occupancy is two queries: information_schema (exists) then count(*).
+saw_schema=0
+saw_count=0
 for arg in "$@"; do
   case "$arg" in
-    *message*|*MESSAGE*)
-      printf '4\n'
-      exit 0
-      ;;
+    *information_schema*) saw_schema=1 ;;
+  esac
+  case "$arg" in
+    *'FROM message'* | *'from message'*) saw_count=1 ;;
   esac
 done
+if [ "$saw_schema" -eq 1 ]; then
+  printf '1\n'
+  exit 0
+fi
+if [ "$saw_count" -eq 1 ]; then
+  printf '4\n'
+  exit 0
+fi
 if [ "${1:-}" = "compose" ]; then
   printf '4\n'
   exit 0

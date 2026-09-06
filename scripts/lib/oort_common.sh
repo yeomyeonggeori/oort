@@ -202,14 +202,25 @@ PY
 }
 
 oort_message_count() {
-  local user db out
+  local user db exists out
   user="$(oort_doctor_get POSTGRES_USER)"
   db="$(oort_doctor_get POSTGRES_DB)"
   [ -n "$user" ] || user=momo
   [ -n "$db" ] || db=momo
-  out="$(oort_compose exec -T postgres \
+  exists="$(oort_compose exec -T postgres \
     psql -U "$user" -d "$db" -At -c \
-    "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='message') THEN (SELECT count(*)::text FROM message) ELSE '0' END;" \
+    "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='message') THEN 1 ELSE 0 END;" \
+    2>/dev/null || true)"
+  exists="$(printf '%s' "$exists" | tr -d '\r' | awk 'NF { print; exit }')"
+  if [ -z "$exists" ]; then
+    return 1
+  fi
+  if [ "$exists" != "1" ]; then
+    printf '0'
+    return 0
+  fi
+  out="$(oort_compose exec -T postgres \
+    psql -U "$user" -d "$db" -At -c "SELECT count(*)::text FROM message;" \
     2>/dev/null || true)"
   out="$(printf '%s' "$out" | tr -d '\r' | awk 'NF { print; exit }')"
   if [ -z "$out" ]; then
