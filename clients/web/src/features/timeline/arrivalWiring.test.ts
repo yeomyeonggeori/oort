@@ -93,9 +93,8 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("ChatShell holds Timeline isPlayEntrance through the welcome stage; ThreadPanel keeps the unwrapped store fn", () => {
-    expect(shell).toContain(
-      "welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance)"
-    );
+    expect(shell).toContain("const pinArrivalGrant = timeline.pinArrivalGrant");
+    expect(shell).toContain("pinArrivalGrant(welcome.holdEntranceId)");
     expect(jsxBindingCount(shell, "Timeline", "isPlayEntrance", "isPlayEntrance")).toBe(
       1
     );
@@ -172,10 +171,15 @@ describe("arrival wiring — mutations of the seam go red", () => {
     expect(hook).toContain("playOnMountRef.current = new Set();");
     expect(hook).toContain("export const MAX_SIMULTANEOUS_ARRIVALS = 3");
     expect(hook).toContain(
-      "capArrivalSet(playOnMountRef.current, MAX_SIMULTANEOUS_ARRIVALS);"
+      "capArrivalSetKeeping(\n          playOnMountRef.current,\n          MAX_SIMULTANEOUS_ARRIVALS,"
     );
+    expect(hook).toContain("if (liveNew)");
     expect(hook).toContain(
-      "capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);"
+      'meta.provenance === "live" && meta.eventType === "message.new"'
+    );
+    expect(hook).toContain("pinArrivalGrant");
+    expect(hook).toContain(
+      "capArrivalSetKeeping(\n      playOnMountRef.current,\n      MAX_PENDING_ARRIVAL_GRANTS,"
     );
     expect(hook).not.toMatch(
       /capArrivalSet\(playOnMountRef\.current, MAX_PENDING_ARRIVAL_GRANTS\);\s*\}, \[state\.messages\]/

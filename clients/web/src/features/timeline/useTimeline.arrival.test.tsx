@@ -8,7 +8,7 @@ import { act } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import type { Message } from "@momo/core/lib/api";
 import { MAX_PENDING_ARRIVAL_GRANTS } from "@momo/core/features/timeline/arrival";
-import { useTimeline, MAX_SIMULTANEOUS_ARRIVALS } from "./useTimeline";
+import { useTimeline } from "./useTimeline";
 import type { RealtimeHandle } from "@/lib/realtime";
 
 const WS = "00000000-0000-7000-8000-000000000001";
@@ -17,16 +17,24 @@ const CH2 = "00000000-0000-7000-8000-000000000003";
 const ME = "00000000-0000-7000-8000-0000000001ff";
 const OTHER = "00000000-0000-7000-8000-000000000101";
 
-const restPage = vi.hoisted(() => ({ messages: [] as unknown[] }));
+const restPage = vi.hoisted(() => ({
+  messages: [] as unknown[],
+  older: [] as unknown[],
+}));
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
-    fetchMessages: vi.fn(async () => ({
-      messages: restPage.messages,
-      nextBefore: undefined,
-    })),
+    fetchMessages: vi.fn(async (_workspaceId, _channelId, opts?: { before?: number }) => {
+      if (opts?.before != null) {
+        return { messages: restPage.older, nextBefore: undefined };
+      }
+      return {
+        messages: restPage.messages,
+        nextBefore: restPage.older.length > 0 ? 1 : undefined,
+      };
+    }),
     fetchReactionSnapshot: vi.fn(async () => ({ reactions: [] })),
     fetchChannelPins: vi.fn(async () => ({ pins: [] })),
     fetchMessageUnfurls: vi.fn(async () => ({ unfurls: [] })),
@@ -56,8 +64,15 @@ const out: {
   isPlayEntrance: ((id: string) => boolean) | null;
   consume: ((id: string) => void) | null;
   capUnmountedArrivals: (() => void) | null;
+  loadOlder: (() => Promise<void>) | null;
   messages: Message[];
-} = { isPlayEntrance: null, consume: null, capUnmountedArrivals: null, messages: [] };
+} = {
+  isPlayEntrance: null,
+  consume: null,
+  capUnmountedArrivals: null,
+  loadOlder: null,
+  messages: [],
+};
 
 function Probe({ channelId }: { channelId: string }): ReactElement {
   const t = useTimeline(realtime, WS, channelId, ME);
@@ -65,6 +80,7 @@ function Probe({ channelId }: { channelId: string }): ReactElement {
     out.isPlayEntrance = t.isPlayEntrance;
     out.consume = t.consumeEntrance;
     out.capUnmountedArrivals = t.capUnmountedArrivals;
+    out.loadOlder = t.loadOlder;
     out.messages = t.state.messages;
   });
   return createElement("div");
@@ -100,6 +116,7 @@ afterEach(() => {
   host = null;
   rail.handlers = null;
   restPage.messages = [];
+  restPage.older = [];
   Object.defineProperty(window, "matchMedia", {
     writable: true,
     value: defaultMatchMedia,
@@ -268,10 +285,10 @@ describe("useTimeline arrival counts", () => {
       )
         granted += 1;
     }
-    // Apply-batch keeps the newest MAX_SIMULTANEOUS_ARRIVALS grants (bottom
-    // pair). Timeline calls capUnmountedArrivals when the reader is scrolled
-    // up, which then leaves MAX_PENDING_ARRIVAL_GRANTS.
-    expect(granted).toBe(MAX_SIMULTANEOUS_ARRIVALS);
+    // Apply-batch keeps the newest 3 grants (bottom pair,
+    // MAX_SIMULTANEOUS_ARRIVALS). Timeline calls capUnmountedArrivals when
+    // the reader is scrolled up, which then leaves MAX_PENDING_ARRIVAL_GRANTS.
+    expect(granted).toBe(3);
     act(() => out.capUnmountedArrivals?.());
     granted = 0;
     for (let i = 0; i < 50; i += 1) {
@@ -287,6 +304,38 @@ describe("useTimeline arrival counts", () => {
     expect(
       out.isPlayEntrance?.("0199dddd-0000-7000-8000-000000000449")
     ).toBe(true);
+  });
+
+  it("바닥 load-more 40건은 grant 0 이고 든 live grant 를 축출하지 않는다", async () => {
+    restPage.messages = [restMessage(ID_REST, 50)];
+    restPage.older = Array.from({ length: 40 }, (_, i) =>
+      restMessage(
+        `0199cccc-0000-7000-8000-0000000005${String(i).padStart(2, "0")}`,
+        i + 1
+      )
+    );
+    await mount();
+    await act(async () => {
+      rail.handlers?.onSubscribed({ recovered: false });
+    });
+    const live = [
+      "0199cccc-0000-7000-8000-000000000311",
+      "0199cccc-0000-7000-8000-000000000312",
+      "0199cccc-0000-7000-8000-000000000313",
+    ];
+    await act(async () => {
+      live.forEach((id, i) => rail.handlers?.onMessage(frame(id, OTHER, 60 + i)));
+    });
+    expect(live.filter((id) => out.isPlayEntrance?.(id)).length).toBe(3);
+    await act(async () => {
+      await out.loadOlder?.();
+    });
+    expect(live.filter((id) => out.isPlayEntrance?.(id)).length).toBe(3);
+    expect(
+      restPage.older.filter((row) =>
+        out.isPlayEntrance?.((row as Message).id)
+      ).length
+    ).toBe(0);
   });
 
   it("채널 전환은 남은 grant 를 버린다", async () => {

@@ -356,6 +356,10 @@ function WelcomeTimeline(props: {
     directory: resolvedDirectory,
     realtime,
   });
+  const pinArrivalGrant = timeline.pinArrivalGrant;
+  useEffect(() => {
+    pinArrivalGrant(welcome.holdEntranceId);
+  }, [pinArrivalGrant, welcome.holdEntranceId]);
   return createElement(Timeline, {
     messages: timeline.state.messages,
     directory: resolvedDirectory,
@@ -482,6 +486,59 @@ describe("welcome kickoff product path", () => {
     expect(entranceCount(root)).toBe(1);
     expect(peekFreshSignup()).toBeNull();
     expect(readShownMarker(WS, ME)).toBe(true);
+  });
+
+  it("stage mounted + live batch of 5 including the opener → opener still plays exactly once and the stage exits", async () => {
+    const root = await mountWelcome();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).not.toBeNull();
+    const extra = [
+      "0199eeee-0000-7000-8000-000000000511",
+      "0199eeee-0000-7000-8000-000000000512",
+      "0199eeee-0000-7000-8000-000000000513",
+      "0199eeee-0000-7000-8000-000000000514",
+    ] as const;
+    await act(async () => {
+      rail.handlers?.onMessage(
+        frame(OPENER_ID, AGENT, 1, "시작할까요? 이 워크스페이스에서 같이 일해요.")
+      );
+      extra.forEach((id, i) => {
+        rail.handlers?.onMessage(
+          frame(id, AGENT, i + 2, `같은 틱 라이브 ${i + 2}`)
+        );
+      });
+    });
+    await settle();
+    const stage = root.querySelector("[data-testid='welcome-kickoff-stage']");
+    expect(stage).not.toBeNull();
+    expect(stage?.classList.contains(WELCOME_KICKOFF_EXIT_CLASS)).toBe(true);
+    expect(
+      [...root.querySelectorAll("[data-testid='timeline-message']")].some(
+        (node) =>
+          node.getAttribute("data-message-id") === OPENER_ID &&
+          node.classList.contains(ENTER_CONVERSATION_CLASS)
+      )
+    ).toBe(false);
+    act(() => {
+      const event = new Event("animationend", { bubbles: true });
+      Object.defineProperty(event, "animationName", {
+        value: WELCOME_KICKOFF_EXIT_ANIMATION_NAME,
+      });
+      stage?.dispatchEvent(event);
+    });
+    await settle();
+    expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
+    const opener = [...root.querySelectorAll("[data-testid='timeline-message']")].find(
+      (node) => node.getAttribute("data-message-id") === OPENER_ID
+    );
+    expect(opener).toBeTruthy();
+    expect(opener?.classList.contains(ENTER_CONVERSATION_CLASS)).toBe(true);
+    expect(
+      [...root.querySelectorAll("[data-testid='timeline-message']")].filter(
+        (node) =>
+          node.getAttribute("data-message-id") === OPENER_ID &&
+          node.classList.contains(ENTER_CONVERSATION_CLASS)
+      )
+    ).toHaveLength(1);
   });
 
   it("120s without an opener → guidance card; seam cleared and shown-marker written; later opener still exits the card", async () => {

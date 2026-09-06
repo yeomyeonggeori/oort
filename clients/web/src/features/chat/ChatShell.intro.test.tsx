@@ -112,6 +112,7 @@ vi.mock("@/features/timeline/useTimeline", () => ({
     deleteMessage: async () => undefined,
     unfurls: {},
     removeUnfurls: async () => undefined,
+    pinArrivalGrant: () => undefined,
   }),
 }));
 

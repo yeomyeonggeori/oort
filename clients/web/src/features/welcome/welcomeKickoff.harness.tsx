@@ -204,6 +204,10 @@ function WelcomeTimeline(): ReactElement {
     directory,
     realtime,
   });
+  const pinArrivalGrant = timeline.pinArrivalGrant;
+  useEffect(() => {
+    pinArrivalGrant(welcome.holdEntranceId);
+  }, [pinArrivalGrant, welcome.holdEntranceId]);
   return createElement(Timeline, {
     messages: timeline.state.messages,
     directory,
