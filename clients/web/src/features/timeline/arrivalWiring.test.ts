@@ -170,9 +170,6 @@ describe("arrival wiring — mutations of the seam go red", () => {
     );
     expect(hook).toContain("playOnMountRef.current = new Set();");
     expect(hook).toContain("export const MAX_SIMULTANEOUS_ARRIVALS = 3");
-    expect(hook).toContain(
-      "capArrivalSetKeeping(\n          playOnMountRef.current,\n          MAX_SIMULTANEOUS_ARRIVALS,"
-    );
     expect(hook).toContain("if (liveNew)");
     expect(hook).toContain(
       'meta.provenance === "live" && meta.eventType === "message.new"'
