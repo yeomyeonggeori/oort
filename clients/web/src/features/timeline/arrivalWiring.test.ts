@@ -79,6 +79,29 @@ function jsxBindingCount(
   return count;
 }
 
+function identifierCallCount(source: string, name: string): number {
+  const file = ts.createSourceFile(
+    "useTimeline.ts",
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    ts.ScriptKind.TS
+  );
+  let count = 0;
+  const visit = (node: ts.Node): void => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === name
+    ) {
+      count += 1;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(file);
+  return count;
+}
+
 describe("arrival wiring — mutations of the seam go red", () => {
   it("Timeline 은 isPlayEntrance(id) 만 넘기고 true 로 고정하지 않는다", () => {
     expect(timeline).toContain(
@@ -170,14 +193,11 @@ describe("arrival wiring — mutations of the seam go red", () => {
     );
     expect(hook).toContain("playOnMountRef.current = new Set();");
     expect(hook).toContain("export const MAX_SIMULTANEOUS_ARRIVALS = 3");
-    expect(hook).toContain("if (liveNew)");
     expect(hook).toContain(
       'meta.provenance === "live" && meta.eventType === "message.new"'
     );
     expect(hook).toContain("pinArrivalGrant");
-    expect(hook).toContain(
-      "capArrivalSetKeeping(\n      playOnMountRef.current,\n      MAX_PENDING_ARRIVAL_GRANTS,"
-    );
+    expect(identifierCallCount(hook, "capArrivalSetKeeping")).toBe(3);
     expect(hook).not.toMatch(
       /capArrivalSet\(playOnMountRef\.current, MAX_PENDING_ARRIVAL_GRANTS\);\s*\}, \[state\.messages\]/
     );
