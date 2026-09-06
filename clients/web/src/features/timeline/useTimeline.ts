@@ -72,8 +72,34 @@ import {
   type UnfurlMap,
 } from "@momo/core/features/timeline/unfurl";
 
+/** Bottom-side pair of `MAX_PENDING_ARRIVAL_GRANTS` (scroll-up leftover cap 1).
+ *  ADR-0179 D3 erratum: same-tick live arrivals at the bottom play at most 3;
+ *  the rest settle immediately. Stagger is out of ladder. */
+export const MAX_SIMULTANEOUS_ARRIVALS = 3;
+
 const HEAD_LIMIT = 50;
 const PAGE_LIMIT = 50;
+
+/** Like `capArrivalSet`, but never deletes `keep`. Size may stay above `max`
+ *  only when every remaining id is the pinned one. */
+function capArrivalSetKeeping(
+  ids: Set<string>,
+  max: number,
+  keep: string | null
+): void {
+  const pinned = keep?.toLowerCase() ?? null;
+  while (ids.size > max) {
+    let oldest: string | undefined;
+    for (const id of ids) {
+      if (id !== pinned) {
+        oldest = id;
+        break;
+      }
+    }
+    if (oldest === undefined) break;
+    ids.delete(oldest);
+  }
+}
 
 export interface ResumeInfo {
   /** How the last (re)subscribe resolved. */
@@ -150,6 +176,13 @@ export interface UseTimelineResult {
   /** ADR-0179 D3 — live-arrival grant still waiting for first mount. */
   isPlayEntrance: (messageId: string) => boolean;
   consumeEntrance: (messageId: string) => void;
+  /**
+   * Pin a grant so `MAX_SIMULTANEOUS_ARRIVALS` eviction cannot drop it.
+   * ChatShell passes the welcome opener (`holdEntranceId`) here: a same-tick
+   * live batch ≥4 would otherwise evict the oldest grant, which is the
+   * opener UX-R2b holds until stage exit.
+   */
+  pinArrivalGrant: (messageId: string | null) => void;
   /**
    * Evict unmounted leftover grants (scrolled-up backlog). Timeline calls
    * this when the reader is not at the bottom. Mounted rows consume
@@ -259,6 +292,7 @@ export function useTimeline(
   const heldIdsRef = useRef(new Set<string>());
   const consumedArrivalIdsRef = useRef(new Set<string>());
   const playOnMountRef = useRef(new Set<string>());
+  const pinnedEntranceRef = useRef<string | null>(null);
   const pendingRef = useRef<PendingMessage[]>([]);
 
   const isPlayEntrance = useCallback(
@@ -268,8 +302,24 @@ export function useTimeline(
   const consumeEntrance = useCallback((messageId: string) => {
     playOnMountRef.current.delete(messageId.toLowerCase());
   }, []);
+  const pinArrivalGrant = useCallback((messageId: string | null) => {
+    const pinned = messageId?.toLowerCase() ?? null;
+    pinnedEntranceRef.current = pinned;
+    if (pinned && consumedArrivalIdsRef.current.has(pinned)) {
+      playOnMountRef.current.add(pinned);
+      capArrivalSetKeeping(
+        playOnMountRef.current,
+        MAX_SIMULTANEOUS_ARRIVALS,
+        pinned
+      );
+    }
+  }, []);
   const capUnmountedArrivals = useCallback(() => {
-    capArrivalSet(playOnMountRef.current, MAX_PENDING_ARRIVAL_GRANTS);
+    capArrivalSetKeeping(
+      playOnMountRef.current,
+      MAX_PENDING_ARRIVAL_GRANTS,
+      pinnedEntranceRef.current
+    );
   }, []);
 
   const applyBatch = useCallback(
@@ -303,11 +353,25 @@ export function useTimeline(
         heldIdsRef.current.add(key);
       }
       // Same-tick Centrifugo bursts call applyBatch once per publication
-      // before React commits. Do not cap playOnMount here or on the next
-      // paint: react-virtuoso mounts appended rows in a later commit, and
-      // a paint-tick cap evicts grants whose rows have not mounted yet.
-      // Consume evicts a grant on mount; Timeline sweeps leftovers when
-      // the reader is scrolled up.
+      // before React commits. Cap only live `message.new` batches — REST
+      // head / load-more / backfill / own-send / edit never issue grants
+      // and must not touch the grant set. Do not use
+      // MAX_PENDING_ARRIVAL_GRANTS (1) here: that is the scrolled-up
+      // leftover sweep. Consume evicts a grant on mount; Timeline sweeps
+      // leftovers when the reader is scrolled up.
+      const liveNew =
+        meta.provenance === "live" && meta.eventType === "message.new";
+      if (liveNew) {
+        capArrivalSetKeeping(
+          playOnMountRef.current,
+          MAX_SIMULTANEOUS_ARRIVALS,
+          pinnedEntranceRef.current
+        );
+      }
+      // N-1 / N-5: heldIdsRef is uncapped per channel visit and alreadyHeld
+      // short-circuits takeArrivalPlay before this ledger is read. Replay
+      // does not appear at MAX_CONSUMED_ARRIVAL_IDS 4, 1, or 0. The call
+      // stays as a belt behind that lock; the constant is not the door.
       capArrivalSet(consumedArrivalIdsRef.current, MAX_CONSUMED_ARRIVAL_IDS);
       // #1166 — 종결 기록의 씨앗을 **머지 자리에서** 심는다. 페이지를 긷는 곳은
       // 셋(첫 화면·위로 더 읽기·재연결 백필)이고, 그 셋이 전부 이 문을 지난다.
@@ -511,6 +575,7 @@ export function useTimeline(
     heldIdsRef.current = new Set();
     consumedArrivalIdsRef.current = new Set();
     playOnMountRef.current = new Set();
+    pinnedEntranceRef.current = null;
     updatePending(() => []);
     setState(emptyTimeline());
     setStatus("loading");
@@ -878,6 +943,7 @@ export function useTimeline(
     removeUnfurls,
     isPlayEntrance,
     consumeEntrance,
+    pinArrivalGrant,
     capUnmountedArrivals,
   };
 }

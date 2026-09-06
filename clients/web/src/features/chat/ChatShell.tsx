@@ -232,6 +232,10 @@ export function ChatShell() {
       welcomePlayEntrance(welcome.holdEntranceId, id, timeline.isPlayEntrance),
     [welcome.holdEntranceId, timeline]
   );
+  const pinArrivalGrant = timeline.pinArrivalGrant;
+  useEffect(() => {
+    pinArrivalGrant(welcome.holdEntranceId);
+  }, [pinArrivalGrant, welcome.holdEntranceId]);
 
   // 「작성 중」 수신 (ADR-0149). **보이는 채널만** 구독한다 - 그것이 이 레일의 유일한
   // 폭 제어다. 스트레스 픽스처에는 서버가 없으므로 걸지 않는다.

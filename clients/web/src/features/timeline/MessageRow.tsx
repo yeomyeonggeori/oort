@@ -372,7 +372,7 @@ export function MessageRow({
    * arrival. Default false: REST, work log, fixtures.
    */
   playEntrance?: boolean;
-  /** Parent consumes the grant on first mount (virtualisation remount = 0). */
+  /** Parent consumes the grant on the first painted frame (flash-unmount keeps it). */
   onEntranceConsumed?: () => void;
 }) {
   const entrance = useConversationEntrance(playEntrance, onEntranceConsumed);

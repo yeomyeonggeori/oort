@@ -196,8 +196,10 @@ interface AnchorState {
 // 떨어진 사람에게 그 줄로 되돌아가는 문이다. 아래 필과 동시에 떠도 역할이
 // 갈라진다 (위=과거, 아래=최신).
 //
-// `followOutput="auto"`와의 계약: 바닥에 있으면 virtuoso가 스스로 따라가므로
-// 아래 컨트롤은 아예 뜨지 않는다. 읽던 중(바닥이 아닌 상태)에는 화면이
+// `followOutput`와의 계약: 바닥에 있으면 virtuoso가 스스로 따라가므로
+// 아래 컨트롤은 아예 뜨지 않는다. 같은 틱 대량 추가는 배치 *전* 바닥 여부를
+// 쓴다 — virtuoso가 append 중에 잠깐 "바닥이 아님"을 보고해도 따라간다.
+// 읽던 중(바닥이 아닌 상태)에는 화면이
 // **움직이지 않아야** 하고 — 읽던 줄이 밀려나는 것은 새 메시지가 저지를 수 있는
 // 가장 나쁜 일이다 — 대신 아래에 몇 개가 쌓였는지를 이 줄이 말한다. 그 산수는
 // 조용히 틀릴 수 있어서 따로 산다: `navigation.ts`.
@@ -314,7 +316,8 @@ export function Timeline({
   onEntranceConsumed?: (messageId: string) => void;
   /**
    * Sweep grants whose rows were never offered a mount (reader scrolled
-   * up). Must not run while at the bottom: virtuoso appends one commit late.
+   * up). Live batches use at-bottom captured before the batch is applied
+   * so a transient during append is not a scroll-up.
    */
   capUnmountedArrivals?: () => void;
   /**
@@ -508,6 +511,19 @@ export function Timeline({
   const [newCount, setNewCount] = useState(0);
   const baselineRef = useRef<number | null>(null);
   const newestSeqRef = useRef<number | null>(null);
+  const messagesRef = useRef(messages);
+  // Seeded `true`. Refreshed only on renders where `messages` did not
+  // change, so there is a one-render lag between "the reader is away"
+  // and "the sweep knows it". Measured (R5 SW): in the 0–16 ms window
+  // after `jump-latest` becomes visible, a scrolled-up reader can get 1
+  // play at mount (virtuoso itself followed to the bottom in both
+  // builds; 1 ≤ ADR-0179 D3's 최대 3). From 50 ms the scroll-up rule
+  // holds (0 plays, grant 1, position held). No behaviour change —
+  // recorded number.
+  const atBottomBeforeBatchRef = useRef(true);
+  const pendingBottomBatchRef = useRef(false);
+  const atBottomRef = useRef(atBottom);
+  atBottomRef.current = atBottom;
   newestSeqRef.current = newestSeqOf(messages);
 
   // 내 확정 전송은 「새 메시지」가 아니다 (design-review M-3) — 그 낱말은 안읽음
@@ -520,10 +536,51 @@ export function Timeline({
     );
   }, [messages, myMemberId]);
 
+  const followOutput = useCallback(() => {
+    // Same pre-batch at-bottom as the leftover sweep (#2050 R5 M-1).
+    // `followOutput="auto"` would otherwise stop following while virtuoso
+    // reports a transient "not at bottom" on a large same-tick append,
+    // unmounting the newest granted rows before they play.
+    return atBottomBeforeBatchRef.current || pendingBottomBatchRef.current
+      ? "auto"
+      : false;
+  }, []);
+
   useEffect(() => {
-    if (atBottom) return;
+    // Live-batch leftover sweep reads at-bottom from *before* this
+    // messages commit (#2050 R5 M-1). Virtuoso can report a transient
+    // "not at bottom" while a large same-tick append lands — often in a
+    // follow-up render of the same batch. That is not a reader scroll-up.
+    // Bottom same-tick still plays 3 at any batch size. A genuine
+    // scroll-up (atBottom-only, no pending at-bottom batch) still sweeps.
+    const messagesChanged = messagesRef.current !== messages;
+    messagesRef.current = messages;
+    const hasGrants = messages.some((message) => isPlayEntrance?.(message.id));
+    if (messagesChanged) {
+      if (atBottomBeforeBatchRef.current || pendingBottomBatchRef.current) {
+        if (hasGrants) pendingBottomBatchRef.current = true;
+        return;
+      }
+      capUnmountedArrivals?.();
+      return;
+    }
+    if (atBottom) {
+      atBottomBeforeBatchRef.current = true;
+      pendingBottomBatchRef.current = false;
+      return;
+    }
+    if (pendingBottomBatchRef.current) {
+      pendingBottomBatchRef.current = false;
+      requestAnimationFrame(() => {
+        if (!atBottomRef.current) {
+          atBottomBeforeBatchRef.current = false;
+        }
+      });
+      return;
+    }
+    atBottomBeforeBatchRef.current = false;
     capUnmountedArrivals?.();
-  }, [messages, atBottom, capUnmountedArrivals]);
+  }, [messages, atBottom, capUnmountedArrivals, isPlayEntrance]);
 
   // 상단 N은 연 순간의 동결 스냅샷 — 구분선과 같은 수 (M-1(a)). 라이브 꼬리는
   // 하단 필이 센다. 사유는 `navigation.ts` (a)/(b).
@@ -656,7 +713,7 @@ export function Timeline({
         data={items}
         data-testid="timeline-virtuoso"
         alignToBottom
-        followOutput="auto"
+        followOutput={followOutput}
         startReached={onStartReached}
         scrollerRef={onScrollerRef}
         rangeChanged={({ startIndex, endIndex }) => {

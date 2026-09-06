@@ -66,6 +66,14 @@ function classCount(root: HTMLElement): number {
   return el.classList.contains(ENTER_CONVERSATION_CLASS) ? 1 : 0;
 }
 
+async function flushPaintFrame(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function dispatchEnd(root: HTMLElement, animationName: string): void {
   const el = root.querySelector("[data-testid='entrance-probe']");
   if (!(el instanceof HTMLElement)) throw new Error("missing probe");
@@ -104,15 +112,18 @@ describe("useConversationEntrance play count", () => {
     expect(classCount(root)).toBe(1);
   });
 
-  it("첫 마운트에서 플래그를 1회 소비한다", () => {
+  it("첫 페인트 프레임에서 플래그를 1회 소비한다", async () => {
     const consumed: number[] = [];
     mount(true, () => consumed.push(1));
+    expect(consumed.length).toBe(0);
+    await flushPaintFrame();
     expect(consumed.length).toBe(1);
   });
 
-  it("playEntrance false 마운트는 소비 0", () => {
+  it("playEntrance false 마운트는 소비 0", async () => {
     const consumed: number[] = [];
     mount(false, () => consumed.push(1));
+    await flushPaintFrame();
     expect(consumed.length).toBe(0);
   });
 
@@ -132,7 +143,7 @@ describe("useConversationEntrance play count", () => {
     expect(classCount(host)).toBe(1);
   });
 
-  it("consumedRef 가 있으면 onConsumed 신원 변경에도 소비 1", () => {
+  it("consumedRef 가 있으면 onConsumed 신원 변경에도 소비 1", async () => {
     const consumed: number[] = [];
     host = document.createElement("div");
     document.body.append(host);
@@ -145,6 +156,7 @@ describe("useConversationEntrance play count", () => {
         })
       );
     });
+    await flushPaintFrame();
     act(() => {
       mountedRoot?.render(
         createElement(Probe, {
@@ -153,6 +165,7 @@ describe("useConversationEntrance play count", () => {
         })
       );
     });
+    await flushPaintFrame();
     expect(consumed).toEqual([1]);
   });
 });

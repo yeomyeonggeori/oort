@@ -181,6 +181,14 @@ function rowEl(root: HTMLElement): HTMLElement {
   return el;
 }
 
+async function flushPaintFrame(): Promise<void> {
+  await act(async () => {
+    await new Promise<void>((resolve) => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
+}
+
 function dispatchAnimationEnd(el: HTMLElement, animationName: string): void {
   act(() => {
     const event = new Event("animationend", { bubbles: true });
@@ -222,15 +230,18 @@ describe("MessageRow arrival render seam", () => {
     expect(row.classList.contains(ENTER_CONVERSATION_CLASS)).toBe(true);
   });
 
-  it("첫 마운트에서 onEntranceConsumed 를 1회 호출한다", () => {
+  it("첫 페인트 프레임에서 onEntranceConsumed 를 1회 호출한다", async () => {
     const consumed: number[] = [];
     mountRow(true, () => consumed.push(1));
+    expect(consumed.length).toBe(0);
+    await flushPaintFrame();
     expect(consumed.length).toBe(1);
   });
 
-  it("playEntrance false 마운트는 소비 0", () => {
+  it("playEntrance false 마운트는 소비 0", async () => {
     const consumed: number[] = [];
     mountRow(false, () => consumed.push(1));
+    await flushPaintFrame();
     expect(consumed.length).toBe(0);
   });
 });
