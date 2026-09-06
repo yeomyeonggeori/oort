@@ -4,16 +4,17 @@
 # /v1 · /healthz · /connection 을 같은 오리진에서 프록시한다. 다른 것은 딱 하나,
 # **사이트 주소**다.
 #
-#   infra/rust/Caddyfile   app.oor7.com   → 자동 HTTPS. 컨테이너가 뜨는 순간
-#                                            Let's Encrypt에 ACME 주문을 낸다.
-#   이 파일                 :80            → 스킴 없는 포트 주소라 자동 HTTPS가
-#                                            꺼진다. 밖으로 나가는 요청이 없다.
+#   infra/rust/Caddyfile   {$OORT_SITE_ADDRESS}  → 자동 HTTPS. env 가 없으면
+#                                                  기동 거부(기본값 없음).
+#   이 파일                 :80                   → 스킴 없는 포트 주소라
+#                                                  자동 HTTPS가 꺼진다.
 #
 # 그 한 줄이 왜 파일을 나눌 값어치가 있냐면: 2026-08-10 실측으로, 로컬에서
-# caddy.override.yml 을 이름만 불러도 **운영 도메인 앞으로 실패한 ACME 챌린지
-# 4건**이 날아갔다(캐디는 요청을 기다리지 않고 부팅 시각에 주문한다).
-# 포트를 바꿔도, -p 를 안 붙여도 막을 수 없다. 사이트 주소를 바꾸는 것만이 막는다.
-# 그래서 로컬 경로는 저 파일을 아예 이름 부르지 않고 이 파일을 쓴다.
+# 하드코딩된 공개 사이트 주소로 caddy.override.yml 을 이름만 불러도 **남의
+# 도메인 앞으로 실패한 ACME 챌린지 4건**이 날아갔다(캐디는 요청을 기다리지
+# 않고 부팅 시각에 주문한다). 포트를 바꿔도, -p 를 안 붙여도 막을 수 없다.
+# 공개 템플릿은 이제 env 미설정이면 기동 자체가 거부되고, 로컬 경로는 저
+# 파일을 아예 이름 부르지 않고 이 파일을 쓴다.
 #
 # 이 엣지는 compose가 127.0.0.1 에만 바인딩한다(infra/rust/local.override.yml).
 # 공개 호스트에 이 파일을 쓰지 마라 — TLS도 HSTS도 없다. 공개 배포의 정본은
@@ -30,6 +31,12 @@
 		Referrer-Policy "no-referrer"
 	}
 
+	# ADR-0002 / #1300: same exclusive deny as the public template, before
+	# the general /v1 proxy. A missing matcher here would let a guessed
+	# CENT_PROXY_SECRET reach the API from this edge.
+	handle /v1/centrifugo/* {
+		respond 403
+	}
 	handle /v1/* {
 		reverse_proxy api:8080
 	}
@@ -48,11 +55,11 @@
 	}
 	handle {
 		root * /srv/web
-		# 운영 CSP(infra/rust/Caddyfile)와 같은 정책이고 connect-src 한 줄만 다르다.
-		# 운영은 wss://app.oor7.com 을 명시하고, 여기는 로그인 응답이 돌려주는
-		# 로컬 레일 주소(ADR-0110)를 명시한다 — 포트는 MOMO_WEB_PORT 로 바뀌므로
-		# 포트 와일드카드를 쓰고, 브라우저가 localhost 로 열렸든 127.0.0.1 로
-		# 열렸든 같은 파일이 통하도록 두 호스트를 모두 적는다.
+		# 공개 CSP(infra/rust/Caddyfile)와 같은 정책이고 connect-src 한 줄만 다르다.
+		# 공개는 {$OORT_CSP_CONNECT_SRC} 를 env 로 받고, 여기는 로그인 응답이
+		# 돌려주는 로컬 레일 주소(ADR-0110)를 명시한다 — 포트는 MOMO_WEB_PORT 로
+		# 바뀌므로 포트 와일드카드를 쓰고, 브라우저가 localhost 로 열렸든
+		# 127.0.0.1 로 열렸든 같은 파일이 통하도록 두 호스트를 모두 적는다.
 		# https://www.googleapis.com 은 첨부 업로드의 직접 PUT 목적지다(ADR-0151 D1).
 		header Content-Security-Policy "default-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
 		try_files {path} /index.html
