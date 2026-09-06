@@ -162,9 +162,9 @@ scripts/self_host_env.sh --published-image "$IMAGE_REF"
 Three commands, no branches, and no promised minute count — measured from a
 clean clone to a message round-trip in the browser: about a minute on a warm
 Docker cache. The full walk-through, what each step does, and how to stop or
-reset live in [`docs/SELF_HOST.md`](docs/SELF_HOST.md). Production (a real
-domain, TLS, the Caddy overlay) starts from the
-[deploy runbook](docs/runbooks/ncp-rust-deploy.md).
+reset live in [`docs/SELF_HOST.md`](docs/SELF_HOST.md). A public origin (TLS
+edge, the two Caddy env keys) starts from
+[공개 오리진으로 열기](docs/SELF_HOST.md#공개-오리진으로-열기).
 
 ## Getting started with the code
 
