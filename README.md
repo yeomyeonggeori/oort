@@ -141,6 +141,17 @@ flowchart LR
 
 ## Self-host
 
+**Paste this into your agent**
+
+```
+On this machine, under this user's account only: read
+https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md
+and follow its §0 contract to install oort.
+Report done only when `scripts/oort doctor` is PASS.
+```
+
+To walk the same stack yourself → [`docs/SELF_HOST.md`](docs/SELF_HOST.md).
+
 You need Docker and git. Nothing else — the API, relay, worker, migrations,
 and the web UI ship in one image built from this repo.
 
@@ -164,7 +175,7 @@ clean clone to a message round-trip in the browser: about a minute on a warm
 Docker cache. The full walk-through, what each step does, and how to stop or
 reset live in [`docs/SELF_HOST.md`](docs/SELF_HOST.md). A public origin (TLS
 edge, the two Caddy env keys) starts from
-[공개 오리진으로 열기](docs/SELF_HOST.md#공개-오리진으로-열기).
+[Open on a public origin](docs/SELF_HOST.md#open-on-a-public-origin).
 
 ## Getting started with the code
 

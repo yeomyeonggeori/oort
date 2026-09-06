@@ -10,8 +10,46 @@
 - Capture intro. 60프레임 로그: intro `{top:85,height:154}` · list `{top:85,height:2593}` · `scrollTop:0` · `vis:visible` 60/60 동일(1 pose). 표적 대기: item-list `visibility` + intro rect + `scrollTop`. `#2057 N-4` pre-existing 면제 삭제(`pressLedger` `.not.toMatch`). `CAPTURE_PORT=8641` 5연속 **exit 0**. 전 장면 5-동일은 **아님**: 371/528 byte-identical, 157는 accent 시안·hover 크롬 등 선행 비결정. intro nonempty sha 5회 모두 다름(호버 툴바가 피사체에 남음 → 포인터를 뷰포트 밖으로 + toolbar 0). 표적 대기 제거 RED는 이 호스트에서 중단 재현 안 됨(상자가 프레임 0부터 멎어 있음).
 - 게이트. web test 232/232 · 2784 passed. typecheck. lint 0 errors (15 warnings 선행). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. design-review는 이 워커가 하지 않음.
 - 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R3)
+
+- R3: `docs/SELF_HOST.md` When-stuck upgrade row plus `scripts/oort` / `oort_day2.sh` usage strings dropped the `<ref@sha256:…>` placeholder. Scanners count that token even as a placeholder (`scripts/check_release_manifest.sh` greps `docs/SELF_HOST*.md` + `README.md`; `test_publish_images_contract.py` greps `docs/SELF_HOST.md` only). AGENT docs had 0 hits. Code that *validates* a digest (`oort_extract_digest` / die regex) is unchanged.
+
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R2)
+
+- Dispatcher verbs: `status` · `logs` · `upgrade` · `backup`/`restore` · `member invite` / `member credential`. Reuses `oort_doctor_*` (no copied functions), `scripts/self_host_pg_dump.sh` / `self_host_pg_restore.sh` (no new pg_dump/pg_restore call site), `releases/latest.json` `digest_list` (`^sha256:[0-9a-f]{64}$`, list≠arch). Never `docker volume rm` / `down -v`; failure prints a rollback command and does not run it. Secrets masked by generator secret-shaped keys + Bearer + `postgres://` passwords.
+- R2 landing (three planner blockers):
+  - `stack.outbox`: `push_candidate` pending is **non-failing** when no push relay is configured (compose has no `push-relay`/`notifier`; overlay keys `PUSH_RELAY_URL` / `MOMO_PUSH_RELAY_IMAGE` / `MOMO_APNS_KEY_HOST_PATH` unset — `infra/rust/docker-compose.push.yml` / `push-relay.env.example`). Same rows **fail** when a relay is configured. Other kinds unchanged.
+  - `oort restore` runs the stack's `runtime-roles` one-shot (`MOMO_RUNTIME_ROLE_PROVISION=1`) before `scripts/self_host_pg_restore.sh` if `momo_app`/`momo_relay`/`momo_worker` are absent. No hand-written GRANT SQL. No second pg_restore call site.
+  - `scripts/tests/test_oort_doctor.sh` expects live `status` (doctor reuse + `image.state`), not the SH-3a stub. `[oort-doctor-test] PASS: 15 case(s)`.
+- Red proofs `scripts/tests/test_oort_day2.sh` **10/10** (was 9/9): previous 9 plus restore into a roles-less dest runs `runtime-roles` before `pg_restore`.
+- R2 round-trip (published-image, this worktree under `$HOME`, `COMPOSE_PROJECT_NAME=oort-sh3b`, did not touch `oort-pgdata`). `digest_list`=`sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f`. Volume still held **N=5**.
+  - `scripts/oort upgrade --to <same list digest> --yes --no-backup`: `oort upgrade: doctor summary {"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` **exit 0**. `stack.outbox` pass `push_candidate pending=5 non-failing (no push relay configured…)`. `count_after_upgrade=5`.
+  - Backup 610878 bytes, sha256 `fba68f6ab2328d73c97411075357b474f2d256133f78199e968751d0b6fbf947`.
+  - Restore into fresh postgres-only `oort-sh3br2` (roles_before=0): `oort restore: runtime roles absent (0/3); running compose service runtime-roles` then `[migrate] runtime roles provisioned` then `[self-host-restore] restore finished`. **RESTORE_EXIT=0**. `count_after_restore=5`, `roles_after=3`.
+  - Dest app services up: `scripts/oort doctor --json` `summary={"pass":29,"fail":0,"skip":2,"verdict":"PASS"}` exit 0. Both projects `compose down` **without `-v`**.
+- Volumes left for planner reclaim (not `volume rm`'d): `oort-sh3b-pgdata` · `oort-sh3b-drive` · `oort-sh3b_web-static` · `oort-sh3br-pgdata` (R1) · `oort-sh3br2-pgdata` · `oort-sh3br2-drive` · `oort-sh3br2_web-static` · `oort-pgdata` (untouched).
+- Docs: `docs/SELF_HOST.md` When stuck restore row; `docs/SELF_HOST_AGENT.md` / `.ko.md` §4 restore + §막히면 `stack.outbox`. `python3 scripts/check_docs_commands.py` PASS 522 facts / 18 docs.
+- 계획 이탈: 없음 (R1 blockers closed). runtime-unverified: member invite/credential live e2e. `scripts/local_gate.sh` does not yet list `scripts/oort` / `test_oort_day2.sh` (policy file — planner files that).
+
+## SH-4b README paste block + SELF_HOST·FIRST_DAY 영문 정본 (#2105, 2026-09-06)
+
+- README §Self-host 맨 위 「Paste this into your agent」 펜스 1개, **4줄**(상한 10). 정본 raw URL `docs/SELF_HOST_AGENT.md` + §0 계약 + `scripts/oort doctor` PASS일 때만 완료. 하네스 이름 grep 0. 바로 아래 1줄: 사람이 직접 하려면 → `docs/SELF_HOST.md`. 플레이북 명령은 복제하지 않음. SH-2 링크는 `[Open on a public origin](docs/SELF_HOST.md#open-on-a-public-origin)`.
+- `docs/SELF_HOST.md` · `docs/SELF_HOST_FIRST_DAY.md` 영문 정본. 한국어 거울 `SELF_HOST.ko.md` · `SELF_HOST_FIRST_DAY.ko.md`. 절 번호 집합 동일: SELF_HOST 21/21, FIRST_DAY 22/22 (검증 상태 날짜·버전은 옮김, 재측정 없음 — SH-5a).
+- 상호 링크 대조(README ↔ SELF_HOST ↔ SELF_HOST_AGENT ↔ FIRST_DAY ↔ llms.txt, 상대경로 해소 + 앵커 존재): **134 checked, broken 0**. `llms.txt` raw URL 불변이라 무수정.
+- `grep -rn '@sha256:' README.md docs/SELF_HOST*.md llms.txt` = 0. `scripts/check_release_manifest.sh` glob `docs/SELF_HOST*.md` 가 새 `.ko.md` 4본 포함: `[release-manifest] ok: v0.1.4 matches CHANGELOG 0.1.4; prose @sha256: literals = 0`. `python3 scripts/check_docs_commands.py`: `[docs-cmd] PASS: 515 fact(s) decided across 3810 candidate command(s) in 18 document(s)`. GATED_DOCS 테이블은 여전히 `SELF_HOST_AGENT.md`만 (SELF_HOST/FIRST_DAY·`.ko.md` 미등재 — `scripts/**` 무수정, NOTES).
+- 코드·SELF_HOST_AGENT* 무접촉. runtime-unverified: 영문 SELF_HOST/FIRST_DAY 사람 클릭 경로 재측정(SH-5a).
+
+## SH-4a 에이전트 셀프호스트 영문 정본 (#2104, 2026-09-06)
+
+- `docs/SELF_HOST_AGENT.md` 영문 하네스 불가지론 정본. 구 972줄 한국어·그록봇 VM 전용 플레이북은 공통 코어(§0–§2) + §3.3 Grok Bot VM 분기로 이동. 사라진 절 0 (대조표: `docs/planning/research/2026-09-06-sh4a-agent-install-run.md`).
+- 한국어판 `docs/SELF_HOST_AGENT.ko.md` — 같은 절 번호 44개 일치. `llms.txt` 는 본인 기계/계정·시크릿 금지·자동화 금지 (하네스 전용 문장 제거). 정본 raw URL 유지.
+- SH-2 공개 엣지 키(`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`, `--public-origin` 파생)는 이 브랜치에 랜딩돼 있어 VPS 분기에 수록. Railway/Fly/AWS/GCP 는 SH-5 템플릿 전까지 §3.2 포인터.
+- 실측 (영문 §3.1만). 스크래치 `$HOME/oort-sh4a-install`, `COMPOSE_PROJECT_NAME=oort-sh4a`, published digest from `releases/latest.json`. `scripts/oort doctor --json` `summary={"pass":28,"fail":0,"skip":3,"verdict":"PASS"}` exit 0. GET `/` 200, `POST /v1/auth/login` 200 (`accessToken` 존재, 원문 폐기). 사람 개입 0. GUI 브라우저는 MCP 금지라 REST 로그인으로 대체. 위상 6. 성공 up+doctor 약 17s (이미지 캐시). `/tmp` Docker Desktop 마운트 실패와 leftover pgdata는 문서에 반영 후 재측정.
+- `scripts/check_release_manifest.sh` 초록. `@sha256:` / `app.oor7.com` 0. CDP는 §3.3만. glob `docs/SELF_HOST*.md` 는 `.ko.md` 를 포함 (게이트 미수정).
+- SH-3b `oort status/logs/upgrade/backup` 미랜딩 — §4는 산문 유지. runtime-unverified: Grok Bot Funnel 1h soak, Railway/Fly E2E (SH-5).
 
 ## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06, R3)
+
 
 - R1 템플릿·compose `:?`·생성기 파생(LiveKit 포함)·와일드카드 거절·로컬 엣지 deny·문서는 유지. R2 는 게이트 두 본이 이 브랜치에서 빨개지던 자리만 고친다. R3 는 `infra/rust/overlays.env.example` 에 `oort_public_edge_env_keys` (`OORT_SITE_ADDRESS` · `OORT_CSP_CONNECT_SRC`) 자리표시를 채워 docs 게이트 step 12 를 닫는다.
 - `scripts/verify_ncp_centrifugo_boundary.sh` 의 `derive_caddy_origin` 이 `{$OORT_SITE_ADDRESS}` 를 `--site-address` 또는 env 의 `OORT_SITE_ADDRESS` 로 풀어 사이트 1개로 센다. 픽스처 호스트 `edge.example.test` (은퇴 호스트 0). deny 앞·hash·redaction·untrusted trust marker 는 그대로.
