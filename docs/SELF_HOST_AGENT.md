@@ -107,6 +107,10 @@ git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
 ```
 
+Put the clone where Docker can bind-mount files. On Docker Desktop (macOS),
+that is almost always a path under the user's home — not `/tmp`. A `/tmp`
+checkout fails later when compose bind-mounts `infra/rust/Caddyfile.local`.
+
 This playbook lands on `track/engine` until it is promoted. If the default
 clone does not yet contain `scripts/oort`, check out `track/engine`.
 
@@ -244,6 +248,13 @@ scripts/self_host_env.sh --compose up -d --build --wait
 This edge binds `127.0.0.1` (no TLS). A public IP on the box does not make
 this stack reachable; VPS and Grok Bot branches add an edge in §3.
 
+If `up` fails **after** postgres has initialized the volume, **keep this
+env** and retry `--compose up -d --wait`. Do not generate a second env
+against the same `COMPOSE_PROJECT_NAME` / `DB_VOLUME_NAME`. Leftover
+pgdata plus new secrets is `password authentication failed for user "momo"`
+and `runtime-roles` exit 1. To start over: `--compose down -v`, delete
+`infra/rust/local.secrets.env`, then §2.3 again.
+
 **Claim-mode exception:** `--compose` refuses an env with
 `MOMO_BOOTSTRAP_CLAIM=1` and no password key. Only §3.3 uses that shape, and
 it calls `docker compose` directly.
@@ -306,7 +317,11 @@ Do §2 first unless a branch says otherwise (Grok Bot snapshot + claim).
 
 This is the D-4 default (paste into an agent on the user's laptop).
 
-1. §2.1 clone (or this tree) → doctor preflight.
+1. §2.1 clone (or this tree) → doctor preflight. On Docker Desktop, the
+   clone must be a path the engine can bind-mount (usually under the
+   user's home). `/tmp` on macOS is often **not** shared with the VM —
+   compose then fails mounting `infra/rust/Caddyfile.local` ("not a
+   directory"). Clone into `~/oort` (or another home path) instead.
 2. §2.2 published digest (or `--local-build` if this checkout is the image).
 3. §2.3 env. If `--compose up` later refuses because another checkout owns
    `oort`, re-generate only when the env file does **not** exist yet, with
@@ -364,7 +379,7 @@ docker compose --env-file "$ENV_FILE" \
 ### 3.3 Grok Bot VM (Tailscale Funnel)
 
 Personal try-out on **this user's** vendor VM. Not a team server. Work and
-standing use: take a dump (§3.3.23) onto a VPS.
+standing use: take a dump (§3.3.18) onto a VPS.
 
 Persistence is **durable-but-resettable** (RA-4): `/workspace` files survive;
 Docker images and packages may vanish on Update. Reset is a snapshot
@@ -449,7 +464,7 @@ fi
 ```
 
 If a volume already exists and is **not** a bind to `/workspace/oort-pgdata`,
-**stop**. Do not delete someone else's volume. Restore is §4 / §3.3.23.
+**stop**. Do not delete someone else's volume. Restore is §4 / §3.3.18.
 
 **Gate:** `docker volume inspect oort-pgdata` Options show
 `device=/workspace/oort-pgdata`.
@@ -1374,7 +1389,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `env.role_passwords` | role password ≠ URL password | Do not mint a new env. Align URL passwords with `*_POSTGRES_PASSWORD`, or regenerate only with `down -v`. |
 | `env.digest` | published image not list-digest-pinned, or ≠ `releases/latest.json` | Pin from the manifest. Do not regenerate secrets to upgrade. |
 | `port.web` / `port.api` / `port.centrifugo` | port taken while stack is down | Stop the occupant or change the env port, then up. |
-| `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. Claim-mode: `oort_compose`. |
+| `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. Claim-mode: `oort_compose`. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
 | `stack.outbox` | non-`done` rows | `logs relay` if pending/failed. |
