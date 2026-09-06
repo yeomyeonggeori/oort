@@ -28,6 +28,23 @@ import { chromium } from "playwright";
 import { signInThroughOnboarding } from "../e2e/advanceOnboarding.mjs";
 import { assertQrModulePitch } from "./qrModulePitch.mjs";
 import { startGuardedPreview } from "../gates/preview-guard.mjs";
+import {
+  SETTLE_FRAME_CEILING,
+  SETTLE_STABLE_FRAMES,
+  introPoseKey,
+  tickIntroSettle,
+} from "./capture-intro-settle.mjs";
+import {
+  beginCaptureScene,
+  setActiveCaptureScene,
+  wrapPageTimeGateClicks,
+  sceneClick,
+  sceneKeyboardPress,
+  sceneMouseDown,
+  sceneMouseUp,
+  sceneDispatchMouseEvent,
+  sceneNameFromShotPath,
+} from "./capture-clock.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT_DIR = process.env.OUT_DIR
@@ -36,6 +53,43 @@ const OUT_DIR = process.env.OUT_DIR
 const PORT = Number(process.env.CAPTURE_PORT || 5178);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const VIEWPORT = { width: 1280, height: 800 };
+
+/**
+ * Frozen wall clock for every capture fixture timestamp AND the page clock.
+ * The page pin is an `addInitScript` Date override (`Date.now` / `new Date()`),
+ * not Playwright `page.clock.setFixedTime`. Clock fakes also patch
+ * `performance` / rAF and left CDP `CSS.forcePseudoState` with a stale
+ * nodeId (2/3 runs aborted at `assertWideRowsFillOnly` during desktop chat).
+ * Welcome-backstop still uses `page.clock.install({ time: FIXTURE_NOW })`
+ * plus `fastForward` because that scene has to fire the 120s timer
+ * (`clock: "flowing"` in capture-clock.mjs). Elapsed-time gates
+ * (`ApprovalActions` `CONFIRM_GUARD_MS`) never open under the pin; a
+ * fixed-clock scene that clicks a time-gated control aborts. Every
+ * scene click goes through `sceneClick`; wrap also intercepts
+ * `page.locator(...).click()`, Enter/Space, and mouse down/up. The
+ * active scene is set at scene start (`beginCaptureScene`), before
+ * any interaction; `clockForScene` reads that same name.
+ * 2024-06-15T03:00:00.000Z = 12:00 KST.
+ */
+const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
+
+async function pinPageWallClock(page) {
+  await page.addInitScript((now) => {
+    const NativeDate = Date;
+    function FrozenDate(...args) {
+      if (new.target) {
+        return Reflect.construct(NativeDate, args.length === 0 ? [now] : args);
+      }
+      return new NativeDate(now).toString();
+    }
+    FrozenDate.now = () => now;
+    FrozenDate.parse = NativeDate.parse.bind(NativeDate);
+    FrozenDate.UTC = NativeDate.UTC.bind(NativeDate);
+    FrozenDate.prototype = NativeDate.prototype;
+    FrozenDate.prototype.constructor = FrozenDate;
+    globalThis.Date = FrozenDate;
+  }, FIXTURE_NOW);
+}
 
 /** H6-1: one writer per artefact. A second screenshot to the same path is red. */
 const claimedShotPaths = new Set();
@@ -49,10 +103,21 @@ function claimShotPath(path) {
   return path;
 }
 
+function beginScene(name) {
+  beginCaptureScene(name);
+}
+
+function beginSceneFromShotPath(path) {
+  beginCaptureScene(sceneNameFromShotPath(path));
+  return path;
+}
+
 function wrapPageShotGuard(page) {
   const orig = page.screenshot.bind(page);
   page.screenshot = async (opts = {}) => {
-    if (opts && opts.path) claimShotPath(opts.path);
+    if (opts && opts.path) {
+      claimShotPath(opts.path);
+    }
     return orig(opts);
   };
 }
@@ -62,6 +127,8 @@ function wrapContextShotGuard(context) {
   context.newPage = async (...args) => {
     const page = await origNewPage(...args);
     wrapPageShotGuard(page);
+    await wrapPageTimeGateClicks(page);
+    await pinPageWallClock(page);
     return page;
   };
 }
@@ -453,10 +520,10 @@ const SETTINGS_INVITES = Array.from({ length: 6 }, (_, i) => ({
   role: i % 2 ? "admin" : "member",
   maxUses: 5,
   usedCount: i % 5,
-  expiresAtMs: Date.now() + (i + 1) * 86_400_000,
+  expiresAtMs: FIXTURE_NOW + (i + 1) * 86_400_000,
   createdBy: "019f94e3-7a10-79cd-9dee-208f47edd9a8",
-  createdAtMs: Date.now(),
-  updatedAtMs: Date.now(),
+  createdAtMs: FIXTURE_NOW,
+  updatedAtMs: FIXTURE_NOW,
 }));
 
 // 설정 > 웹훅 (#1202). 세 줄이 서로 다른 것을 말한다: oort 서명 활성, Slack 호환
@@ -470,8 +537,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "native",
     label: "배포 알림 (GitHub Actions)",
     status: "active",
-    createdAtMs: Date.now() - 3 * 86_400_000,
-    updatedAtMs: Date.now() - 3 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 3 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 3 * 86_400_000,
   },
   {
     id: "019f9b10-0000-7000-8000-0000000009a2",
@@ -480,8 +547,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "slack_compatible",
     label: "Sentry 이슈 알림",
     status: "active",
-    createdAtMs: Date.now() - 9 * 86_400_000,
-    updatedAtMs: Date.now() - 9 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 9 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 9 * 86_400_000,
   },
   {
     id: "019f9b10-0000-7000-8000-0000000009a3",
@@ -490,8 +557,8 @@ const SETTINGS_WEBHOOKS = [
     mode: "native",
     label: "구 CI 서버 (2026-07 폐기)",
     status: "revoked",
-    createdAtMs: Date.now() - 40 * 86_400_000,
-    updatedAtMs: Date.now() - 20 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 40 * 86_400_000,
+    updatedAtMs: FIXTURE_NOW - 20 * 86_400_000,
   },
 ];
 
@@ -887,7 +954,7 @@ const LONG_HANGUL = "재시작루프가또났는데원인은outbox_drain_worker_
 const ACTION_ROW_BODY = `502가 계속 납니다. GET ${LONG_URL} 이고 페이로드는 ${LONG_DIGEST} 입니다. ${LONG_HANGUL}`;
 
 function makeMessages(count) {
-  const base = Date.now() - count * 60_000;
+  const base = FIXTURE_NOW - count * 60_000;
   const rows = Array.from({ length: count }, (_, i) => {
     const [author, body, type, props] = BODIES[i % BODIES.length];
     return {
@@ -972,7 +1039,7 @@ function makeMessages(count) {
  * momo 스레드는 한 단계이고, 답글에 답글을 걸면 서버가 거절한다.
  */
 function makeThreadReplies() {
-  const base = Date.now() - 6 * 60_000;
+  const base = FIXTURE_NOW - 6 * 60_000;
   const rows = [
     [HERMES, "런북 3단계부터 다시 도는 게 맞습니다. 헬스 체크는 제가 확인할게요."],
     [ME, "네, 그 사이 배포는 잠급니다."],
@@ -1014,8 +1081,8 @@ const WORK_HOSTS = [
     displayName: "성재 iMac, 집 작업실",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    revokedAtMs: Date.now() - 3 * 86_400_000,
-    createdAtMs: Date.now() - 30 * 86_400_000,
+    revokedAtMs: FIXTURE_NOW - 3 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 30 * 86_400_000,
     online: false,
   },
   {
@@ -1027,8 +1094,8 @@ const WORK_HOSTS = [
     displayName: "성재 iMac, 집 작업실",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    revokedAtMs: Date.now() - 2 * 86_400_000,
-    createdAtMs: Date.now() - 20 * 86_400_000,
+    revokedAtMs: FIXTURE_NOW - 2 * 86_400_000,
+    createdAtMs: FIXTURE_NOW - 20 * 86_400_000,
     online: false,
   },
   {
@@ -1040,8 +1107,8 @@ const WORK_HOSTS = [
     displayName: "성재 MacBook Pro",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true, git: true },
-    lastSeenAtMs: Date.now() - 20_000,
-    createdAtMs: Date.now() - 86_400_000,
+    lastSeenAtMs: FIXTURE_NOW - 20_000,
+    createdAtMs: FIXTURE_NOW - 86_400_000,
     online: true,
   },
   {
@@ -1053,8 +1120,8 @@ const WORK_HOSTS = [
     displayName: "dawn-build-01",
     publicKey: "capture-only-not-a-credential",
     capabilities: { terminal: true },
-    lastSeenAtMs: Date.now() - 3 * 3_600_000,
-    createdAtMs: Date.now() - 7 * 86_400_000,
+    lastSeenAtMs: FIXTURE_NOW - 3 * 3_600_000,
+    createdAtMs: FIXTURE_NOW - 7 * 86_400_000,
     online: false,
   },
 ];
@@ -1077,7 +1144,7 @@ const PROVIDER_LINK = {
   bearerLast4: "8f21",
   availability: "live",
   keyConfigured: true,
-  updatedAtMs: Date.now() - 6 * 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 6 * 3_600_000,
   diagnostics: [],
 };
 
@@ -1104,7 +1171,7 @@ const PROVIDER_CHAIN = {
       enabled: true,
       bearerConfigured: true,
       bearerLast4: "c40a",
-      updatedAtMs: Date.now() - 2 * 3_600_000,
+      updatedAtMs: FIXTURE_NOW - 2 * 3_600_000,
     },
     {
       position: 2,
@@ -1188,7 +1255,7 @@ const PROVIDER_PROBE = {
   source: "database",
   mode: "external-hermes",
   endpointLabel: PROVIDER_LINK.endpointLabel,
-  checkedAtMs: Date.now(),
+  checkedAtMs: FIXTURE_NOW,
   cascadeOk: true,
   entries: [
     {
@@ -1258,7 +1325,7 @@ const WORKSPACE_TIER_POLICY = {
   mode: "auto",
   autoTarget: "019f994c-4ee2-74f5-80f1-44408e9a2b82",
   inherited: false,
-  updatedAtMs: Date.now() - 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 3_600_000,
 };
 
 // The member has their OWN row here, pointing at a host that was revoked after
@@ -1272,7 +1339,7 @@ const MEMBER_TIER_POLICY = {
   mode: "auto",
   autoTarget: REVOKED_TARGET,
   inherited: false,
-  updatedAtMs: Date.now() - 40 * 60_000,
+  updatedAtMs: FIXTURE_NOW - 40 * 60_000,
 };
 
 /**
@@ -1290,7 +1357,7 @@ const MEMBER_TIER_POLICY = {
  * 비교하지 않으면 이 프레임에서 바로 드러난다.
  */
 function makeDmMessages() {
-  const base = Date.now() - 12 * 60_000;
+  const base = FIXTURE_NOW - 12 * 60_000;
   const spoken = [
     [ME, "어제 올린 relay 패치, DM으로 짧게만 확인할게요. 롤백 절차는 그대로죠?"],
     [HERMES, "그대로입니다. outbox 재처리 스크립트만 먼저 돌리면 됩니다."],
@@ -1367,7 +1434,7 @@ const AGENT_PROFILE = {
   paused: false,
   version: 3,
   updatedBy: ME,
-  updatedAtMs: Date.now() - 6 * 3_600_000,
+  updatedAtMs: FIXTURE_NOW - 6 * 3_600_000,
 };
 
 const ALLOWED_AGENT_MODELS = ["hermes-agent", "hermes-agent-mini"];
@@ -1493,7 +1560,7 @@ const APPROVALS = [
     action_type: "work.spawn",
     status: "pending",
     is_reversible: false,
-    expires_at_ms: Date.now() + 26 * 60_000,
+    expires_at_ms: FIXTURE_NOW + 26 * 60_000,
     payload: {
       source: "work_control",
       tool_call: { call_id: "call-spawn", name: "work.spawn" },
@@ -1509,7 +1576,7 @@ const APPROVALS = [
     action_type: "shell.exec",
     status: "pending",
     is_reversible: true,
-    expires_at_ms: Date.now() + 3 * 3_600_000,
+    expires_at_ms: FIXTURE_NOW + 3 * 3_600_000,
   },
 ];
 
@@ -1595,7 +1662,7 @@ function deviceLinkIssueBody() {
   const body = {
     id: DEVICE_LINK_CAPTURE_ID,
     token: DEVICE_LINK_CAPTURE_TOKEN,
-    expiresAt: Date.now() + 120_000,
+    expiresAt: FIXTURE_NOW + 120_000,
     deepLink:
       deviceLinkHarness.deepLink ||
       `oort://link?server=${encodeURIComponent(DEVICE_LINK_CAPTURE_ORIGIN)}&token=${DEVICE_LINK_CAPTURE_TOKEN}`,
@@ -1705,7 +1772,7 @@ async function installMocks(context) {
     json(route, {
       token: "capture-only-not-a-credential",
       tokenType: "jwt",
-      expiresAtMs: Date.now() + 60_000,
+      expiresAtMs: FIXTURE_NOW + 60_000,
       ttlSeconds: 60,
       workspaceId: WORKSPACE_ID,
       memberId: ME,
@@ -1767,7 +1834,7 @@ async function installMocks(context) {
           channelId: CREATED_CHANNEL_ID,
           memberId: ME,
           role: "owner",
-          joinedAtMs: Date.now(),
+          joinedAtMs: FIXTURE_NOW,
         },
       }),
     });
@@ -1835,7 +1902,7 @@ async function installMocks(context) {
         channelId: GENERAL_ID,
         memberId: HERMES,
         role: "member",
-        joinedAtMs: Date.now(),
+        joinedAtMs: FIXTURE_NOW,
       },
     })
   );
@@ -1930,7 +1997,7 @@ async function installMocks(context) {
   // BF-B1 (#1888). Same 30s poll as read-state; without this pair the catch-all
   // 404s and the 나중에 tab is an error instead of a list.
   await context.route("**/v1/workspaces/*/reminders*", (route) => {
-    const now = Date.now();
+    const now = FIXTURE_NOW;
     return json(route, {
       reminders: [
         {
@@ -1974,7 +2041,7 @@ async function installMocks(context) {
       engine: "opencode",
       source: "database",
       updatedBy: "곽성재",
-      updatedAtMs: Date.now() - 2 * 86_400_000,
+      updatedAtMs: FIXTURE_NOW - 2 * 86_400_000,
       schema: "momo.work_host_engine.v0",
     })
   );
@@ -2086,7 +2153,7 @@ async function installMocks(context) {
           body: JSON.stringify({ error: { message: "not found" } }),
         });
       }
-      const now = Date.now();
+      const now = FIXTURE_NOW;
       if (request === "preview-empty") {
         return json(route, {
           ...OAUTH_CONSENT_PREVIEW,
@@ -2116,8 +2183,8 @@ async function installMocks(context) {
       mode: body.mode,
       label: body.label,
       status: "active",
-      createdAtMs: Date.now(),
-      updatedAtMs: Date.now(),
+      createdAtMs: FIXTURE_NOW,
+      updatedAtMs: FIXTURE_NOW,
     };
     return json(route, {
       installation: created,
@@ -2149,7 +2216,7 @@ async function installMocks(context) {
     const id = new URL(route.request().url()).pathname.split("/").at(-1);
     const row = SETTINGS_WEBHOOKS.find((item) => item.id === id);
     return json(route, {
-      installation: { ...row, status: "revoked", updatedAtMs: Date.now() },
+      installation: { ...row, status: "revoked", updatedAtMs: FIXTURE_NOW },
       revoked: true,
     });
   });
@@ -2187,7 +2254,7 @@ async function installMocks(context) {
         id: WORKSPACE_ID,
         slug: "momowebqa",
         name: "momo webqa",
-        updatedAtMs: Date.now(),
+        updatedAtMs: FIXTURE_NOW,
         roleLabels: {},
       },
     })
@@ -2234,7 +2301,7 @@ async function installMocks(context) {
     const body = JSON.parse(route.request().postData() || "{}");
     return json(route, {
       enabled: route.request().method() === "PUT" ? body.enabled : true,
-      updatedAtMs: Date.now() - 3_600_000,
+      updatedAtMs: FIXTURE_NOW - 3_600_000,
     });
   });
   // ADR-0177 / BT-4 (#1932) — 멤버 소유 사이드바 배치.
@@ -2250,7 +2317,7 @@ async function installMocks(context) {
         const body = JSON.parse(route.request().postData() || "{}");
         return json(route, {
           prefs: body.prefs ?? { version: 1, sections: [], starredChannelIds: [] },
-          updatedAtMs: Date.now(),
+          updatedAtMs: FIXTURE_NOW,
         });
       }
       return json(route, {
@@ -2487,7 +2554,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   }
   if (shoot) await shoot("onboarding-landing");
 
-  await page.getByTestId("onboarding-choose-server").click();
+  await sceneClick(page, page.getByTestId("onboarding-choose-server"));
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
   const chrome = await page.evaluate(`(() => {
     const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
@@ -2515,7 +2582,7 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
   }
   if (shoot) await shoot("onboarding-gateway");
 
-  await page.getByTestId("onboarding-next").click();
+  await sceneClick(page, page.getByTestId("onboarding-next"));
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-submit").waitFor({ state: "visible" });
   await assertOnboardingCardCentered(page, `account ${where}`, "onboarding-account");
@@ -2523,14 +2590,14 @@ async function walkOnboardingToAccount(page, where, { tapTargets = false, shoot 
 
 async function shootOnboardingProfile(page, where, { tapTargets = false, shoot } = {}) {
   await page.getByTestId("onboarding-landing").waitFor({ state: "visible" });
-  await page.getByTestId("onboarding-choose-invite").click();
+  await sceneClick(page, page.getByTestId("onboarding-choose-invite"));
   await page.getByTestId("onboarding-gateway").waitFor({ state: "visible" });
   await page.getByTestId("login-invite-code").fill("momo-alpha-2026");
-  await page.getByTestId("onboarding-next").click();
+  await sceneClick(page, page.getByTestId("onboarding-next"));
   await page.getByTestId("onboarding-account").waitFor({ state: "visible" });
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("onboarding-profile").waitFor({ state: "visible" });
   const chrome = await page.evaluate(`(() => {
     const row = document.querySelector('[data-testid="onboarding-step-chrome"]');
@@ -2566,7 +2633,7 @@ async function shootOnboardingProfile(page, where, { tapTargets = false, shoot }
     return route.fallback();
   });
   await page.getByTestId("onboarding-profile-name").fill("성재");
-  await page.getByTestId("onboarding-profile-submit").click();
+  await sceneClick(page, page.getByTestId("onboarding-profile-submit"));
   await page.getByTestId("onboarding-profile-banner").waitFor({
     state: "visible",
   });
@@ -2589,7 +2656,7 @@ async function revealNewChannel(page) {
     await page.getByTestId("sidebar-section-channels-header").hover();
     await button.waitFor({ state: "visible" });
   }
-  await button.click();
+  await sceneClick(page, button);
 }
 
 async function sectionActionRestCounts(page) {
@@ -2606,7 +2673,7 @@ async function sectionActionRestCounts(page) {
 /** overlayHeld 해제(rAF) 와 포인터 주차를 기다린 뒤 rest 0 을 단정한다. */
 async function assertSectionActionsAtRest(page, scheme, where) {
   await page.getByTestId("composer-input").hover();
-  await page.getByTestId("composer-input").click();
+  await sceneClick(page, page.getByTestId("composer-input"));
   await page.evaluate(
     `new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)))`
   );
@@ -2648,6 +2715,7 @@ function isReadStatePut(request) {
  *   ④ 「읽음 처리」가 그 채널의 `latest_seq` 를 광고한다.
  */
 async function captureSidebarRowMenu(page, scheme, shots) {
+  beginScene("sidebar-row-menu");
   // 안 읽음이 있는 행을 고른다: 다섯 항목이 전부 서는 유일한 상태이고,
   // 「읽음 처리」를 누를 수 있는 유일한 행이다.
   const unreadChannelId = CHANNELS[1].id;
@@ -2672,7 +2740,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     );
   }
 
-  await row.click({ button: "right" });
+  await sceneClick(page, row, { button: "right" });
   const menu = page.getByTestId("channel-row-menu");
   await menu.waitFor({ state: "visible" });
   const owner = await row.evaluate((el) =>
@@ -2704,14 +2772,14 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `행 메뉴 항목 ${scheme}: ${JSON.stringify(items)} (${JSON.stringify(expected)} 여야 함)`
     );
   }
-  const menuShot = `${OUT_DIR}/sidebar-row-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
 
   // ④ 읽음 처리 — 채널을 열지 않고 그 채널의 latest_seq 를 광고한다.
   const readPut = page.waitForRequest(isReadStatePut);
-  await page.getByTestId("channel-row-mark-read").click();
+  await sceneClick(page, page.getByTestId("channel-row-mark-read"));
   const readBody = (await readPut).postDataJSON();
   if (readBody?.last_read_seq !== 42) {
     throw new Error(
@@ -2756,7 +2824,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     );
   });
   const kbdMutePut = page.waitForRequest(isMutePut);
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   const kbdMuteBody = (await kbdMutePut).postDataJSON();
   if (kbdMuteBody?.muted !== true) {
     throw new Error(
@@ -2769,13 +2837,21 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await menu.waitFor({ state: "hidden" });
 
   // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
+  await sceneDispatchMouseEvent(
+    page,
+    page.locator(`[data-channel-id="${unreadChannelId}"]`),
+    "contextmenu",
+    { bubbles: true, clientX: 40, clientY: 200 }
+  );
   await page.waitForFunction(
     (id) => {
       const target = document.querySelector(`[data-channel-id="${id}"]`);
       const box = target?.closest("[data-row-menu-trigger]");
       if (box?.getAttribute("data-state") !== "open") {
-        target?.dispatchEvent(
-          new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
+        window.__oortDispatchMouseEvent?.(
+          target,
+          "contextmenu",
+          { bubbles: true, clientX: 40, clientY: 200 }
         );
       }
       const item = document.querySelector(
@@ -2792,7 +2868,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   });
   // 되돌린다: 뒤따르는 장면이 음소거된 채널을 물려받지 않게.
   const unmutePut = page.waitForRequest(isMutePut);
-  await page.getByTestId("channel-row-mute-toggle").click();
+  await sceneClick(page, page.getByTestId("channel-row-mute-toggle"));
   await unmutePut;
   await menu.waitFor({ state: "hidden" });
 
@@ -2893,7 +2969,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `활성 행 위 열림 표식 대비 ${scheme}: ${JSON.stringify(marker)} (비텍스트 3:1 이상이어야 함)`
     );
   }
-  const activeShot = `${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`;
+  const activeShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-active-${scheme}.png`);
   await page.screenshot({ path: activeShot });
   shots.push(activeShot);
   await page.keyboard.press("Escape");
@@ -2926,9 +3002,9 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   );
   const quietRow = page.locator(`[data-channel-id="${CHANNELS[2].id}"]`);
   await quietRow.waitFor({ state: "visible" });
-  await quietRow.click({ button: "right" });
+  await sceneClick(page, quietRow, { button: "right" });
   await menu.waitFor({ state: "visible" });
-  await page.getByTestId("channel-row-mute-toggle").click();
+  await sceneClick(page, page.getByTestId("channel-row-mute-toggle"));
   await page
     .getByTestId("channel-row-action-error")
     .waitFor({ state: "visible", timeout: 6_000 });
@@ -2978,7 +3054,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
       `실패 뒤 항목 상태 ${scheme}: ${JSON.stringify(banner)} (잠금·진행 표시가 남으면 안 된다)`
     );
   }
-  const errorShot = `${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`;
+  const errorShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-row-menu-error-${scheme}.png`);
   await page.screenshot({ path: errorShot });
   shots.push(errorShot);
   await page.keyboard.press("Escape");
@@ -2993,6 +3069,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
  * 카드·상태 PUT·접기가 죽은 컨트롤이어도 캡처는 초록이다.
  */
 async function captureSidebarD4(page, scheme, shots) {
+  beginScene("sidebar-profile-card");
   await assertSectionActionsAtRest(page, scheme, "첫 줄");
 
   await captureSidebarRowMenu(page, scheme, shots);
@@ -3015,7 +3092,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `채널 + 키보드 정거장 ${scheme}: ${plusStop} (new-channel 이어야 함)`
     );
   }
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   const plusWhileOpen = await page.getByTestId("new-channel").count();
   if (plusWhileOpen !== 1) {
@@ -3044,9 +3121,9 @@ async function captureSidebarD4(page, scheme, shots) {
 
   // R2-1: ⌘K 팔레트는 헤더를 거치지 않는다. 닫힌 뒤 hold 가 헤더 blur 를
   // 기다리면 +·DM 이 세션 내내 rest 에 남는다.
-  await page.getByTestId("open-quick-switcher").click();
+  await sceneClick(page, page.getByTestId("open-quick-switcher"));
   await page.getByTestId("quick-switcher").waitFor({ state: "visible" });
-  await page.getByTestId("switcher-create-channel").click();
+  await sceneClick(page, page.getByTestId("switcher-create-channel"));
   await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   const dmWhileCmdkDialog = await page.getByTestId("new-dm").count();
   if (dmWhileCmdkDialog !== 0) {
@@ -3058,7 +3135,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
   await assertSectionActionsAtRest(page, scheme, "⌘K 왕복 후");
 
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   const menu = page.getByTestId("profile-card-menu");
   await menu.waitFor({ state: "visible" });
   await assertProfileMenuFitsViewport(page, `sidebar profile ${scheme}`);
@@ -3084,12 +3161,12 @@ async function captureSidebarD4(page, scheme, shots) {
       `프로필 카드가 뷰포트 위로 새었다 ${scheme}: ${JSON.stringify(anchor)}`
     );
   }
-  const profileShot = `${OUT_DIR}/sidebar-profile-card-${scheme}.png`;
+  const profileShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-profile-card-${scheme}.png`);
   await page.screenshot({ path: profileShot });
   shots.push(profileShot);
 
   const putAway = page.waitForRequest(isPresencePut);
-  await page.getByTestId("presence-option-away").click();
+  await sceneClick(page, page.getByTestId("presence-option-away"));
   const awayReq = await putAway;
   const awayBody = awayReq.postDataJSON();
   if (awayBody?.status !== "away") {
@@ -3108,14 +3185,14 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("profile-card").press("Enter");
   await menu.waitFor({ state: "visible" });
   const putAuto = page.waitForRequest(isPresencePut);
-  await page.getByTestId("presence-option-auto").click();
+  await sceneClick(page, page.getByTestId("presence-option-auto"));
   await putAuto;
   await menu.waitFor({ state: "hidden" });
 
   // H-2: 카드가 연 워크스페이스 추가를 취소하면 트리거(프로필 카드)로 복귀.
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   await menu.waitFor({ state: "visible" });
-  await page.getByTestId("profile-add-workspace").click();
+  await sceneClick(page, page.getByTestId("profile-add-workspace"));
   await page.getByTestId("add-workspace-dialog").waitFor({ state: "visible" });
   await page.getByTestId("add-workspace-name").waitFor({ state: "visible" });
   // Esc first (review probe). If a leftover layer ate the key, the visible
@@ -3123,7 +3200,7 @@ async function captureSidebarD4(page, scheme, shots) {
   await page.getByTestId("add-workspace-name").focus();
   await page.keyboard.press("Escape");
   if (await page.getByTestId("add-workspace-dialog").count()) {
-    await page.getByTestId("add-workspace-cancel").click();
+    await sceneClick(page, page.getByTestId("add-workspace-cancel"));
   }
   await page.getByTestId("add-workspace-dialog").waitFor({ state: "detached" });
   await page.waitForFunction(
@@ -3149,7 +3226,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `섹션 헤더 높이가 rest ${restHeader} → hover ${hoverHeader} 로 자랐다 ${scheme}`
     );
   }
-  const hoverShot = `${OUT_DIR}/sidebar-section-hover-${scheme}.png`;
+  const hoverShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-hover-${scheme}.png`);
   await page.screenshot({ path: hoverShot });
   shots.push(hoverShot);
 
@@ -3173,7 +3250,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `접힌 채널 섹션에 언리드 배지가 없다 ${scheme}: ${unreadText}`
     );
   }
-  const sectionShot = `${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`;
+  const sectionShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-collapsed-${scheme}.png`);
   await page.screenshot({ path: sectionShot });
   shots.push(sectionShot);
   await page.getByTestId("section-collapse-channels").press("Enter");
@@ -3181,17 +3258,17 @@ async function captureSidebarD4(page, scheme, shots) {
 
   await captureCustomSection(page, scheme, shots);
 
-  await page.getByTestId("sidebar-toggle").click();
+  await sceneClick(page, page.getByTestId("sidebar-toggle"));
   await page.waitForFunction(
     () =>
       document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
       document.querySelector('[data-testid="sidebar-channel-pane"]')?.hasAttribute("hidden")
   );
   await assertNoHorizontalOverflow(page, `sidebar collapsed ${scheme}`);
-  const collapsedShot = `${OUT_DIR}/sidebar-collapsed-${scheme}.png`;
+  const collapsedShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-collapsed-${scheme}.png`);
   await page.screenshot({ path: collapsedShot });
   shots.push(collapsedShot);
-  await page.getByTestId("sidebar-toggle").click();
+  await sceneClick(page, page.getByTestId("sidebar-toggle"));
   await page.waitForFunction(
     () =>
       !document.querySelector(".app-shell")?.hasAttribute("data-sidebar-collapsed") &&
@@ -3242,6 +3319,7 @@ async function assertSectionControlSize(page, scheme, testId) {
  * 작동하지 않으면 여기서 가로 넘침으로 드러난다.
  */
 async function captureCustomSection(page, scheme, shots) {
+  beginScene("sidebar-section-create");
   // 80자 — ADR-0177 D3 의 상한 그 자리다. 짧은 이름은 잘림도 메뉴 폭도 재지
   // 못하므로, 픽스처가 규칙을 가리지 않게 상한에 붙여 둔다.
   const LONG_NAME = "출시 준비와 회고 그리고 후속 작업 묶음 ".repeat(4).slice(0, 80);
@@ -3249,15 +3327,15 @@ async function captureCustomSection(page, scheme, shots) {
   await page.getByTestId("sidebar-section-channels-header").hover();
   await page.getByTestId("new-section").waitFor({ state: "visible" });
   await assertSectionControlSize(page, scheme, "new-section");
-  await page.getByTestId("new-section").click();
+  await sceneClick(page, page.getByTestId("new-section"));
   const dialog = page.getByTestId("sidebar-section-name-dialog");
   await dialog.waitFor({ state: "visible" });
   await page.getByTestId("sidebar-section-name-input").fill(LONG_NAME);
-  const createShot = `${OUT_DIR}/sidebar-section-create-${scheme}.png`;
+  const createShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-create-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: createShot });
   shots.push(createShot);
-  await page.getByTestId("sidebar-section-name-submit").click();
+  await sceneClick(page, page.getByTestId("sidebar-section-name-submit"));
   await dialog.waitFor({ state: "detached" });
 
   const section = page.getByTestId("sidebar-section-sec-1");
@@ -3277,7 +3355,7 @@ async function captureCustomSection(page, scheme, shots) {
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
     .first();
-  await row.click({ button: "right" });
+  await sceneClick(page, row, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   await page
     .getByTestId("channel-row-move-to-section")
@@ -3310,19 +3388,19 @@ async function captureCustomSection(page, scheme, shots) {
       `행 메뉴가 창을 넘었다 ${scheme}: right=${menuBox.right} view=${menuBox.view} width=${menuBox.width}`
     );
   }
-  const menuShot = `${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-move-menu-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: menuShot });
   shots.push(menuShot);
 
-  await page.getByTestId("channel-row-section-sec-1").click();
+  await sceneClick(page, page.getByTestId("channel-row-section-sec-1"));
   await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
   // 다시 열면 지금 자리가 체크로 서 있다 — 귀(aria-checked)와 눈(체크)이 같은
   // 사실을 말하는지 여기서 함께 본다.
   //
   // **옮긴 그 행**을 다시 열어야 한다. `row` 는 「채널 섹션의 첫 행」이라 옮기고
   // 나면 다른 채널을 가리킨다 — 그 행의 답은 당연히 「기본 섹션」이다.
-  await section.locator('[data-testid="channel-item"]').first().click({
+  await sceneClick(page, section.locator('[data-testid="channel-item"]').first(), {
     button: "right",
   });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
@@ -3349,7 +3427,7 @@ async function captureCustomSection(page, scheme, shots) {
 
   await assertSectionControlSize(page, scheme, "section-menu-sec-1");
   await assertNoHorizontalOverflow(page, `custom section filled ${scheme}`);
-  const filledShot = `${OUT_DIR}/sidebar-custom-section-${scheme}.png`;
+  const filledShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-custom-section-${scheme}.png`);
   await page.screenshot({ path: filledShot });
   shots.push(filledShot);
 
@@ -3362,8 +3440,8 @@ async function captureCustomSection(page, scheme, shots) {
   // ⋮ 는 rest 에서 DOM 에 없다(UX-HT 계약).
   await page.getByTestId("sidebar-section-sec-1-header").hover();
   await page.getByTestId("section-menu-sec-1").waitFor({ state: "visible" });
-  await page.getByTestId("section-menu-sec-1").click();
-  await page.getByTestId("section-menu-sec-1-delete").click();
+  await sceneClick(page, page.getByTestId("section-menu-sec-1"));
+  await sceneClick(page, page.getByTestId("section-menu-sec-1-delete"));
   const confirm = page.getByTestId("sidebar-section-delete-confirm");
   await confirm.waitFor({ state: "visible" });
   // design-review #1932 M-1 — 제목은 고정 문장이고 이름은 본문이 진다. 80자
@@ -3384,11 +3462,11 @@ async function captureCustomSection(page, scheme, shots) {
   if (!confirmCopy.body.includes(LONG_NAME)) {
     throw new Error(`삭제 확인 본문에 섹션 이름이 없다 ${scheme}`);
   }
-  const deleteShot = `${OUT_DIR}/sidebar-section-delete-${scheme}.png`;
+  const deleteShot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-section-delete-${scheme}.png`);
   await waitForAnimations(page);
   await page.screenshot({ path: deleteShot });
   shots.push(deleteShot);
-  await page.getByTestId("sidebar-section-delete-action").click();
+  await sceneClick(page, page.getByTestId("sidebar-section-delete-action"));
   await confirm.waitFor({ state: "detached" });
   await section.waitFor({ state: "detached" });
   // 채널은 돌아왔다 — 섹션을 지우는 것은 채널을 지우는 것이 아니다.
@@ -3409,6 +3487,7 @@ async function captureCustomSection(page, scheme, shots) {
  * 없다.
  */
 async function captureSortDoor(page, scheme, shots) {
+  beginScene("sidebar-sort-menu");
   await page.getByTestId("sidebar-section-channels-header").hover();
   const door = page.getByTestId("sidebar-sort-menu");
   await door.waitFor({ state: "visible" });
@@ -3423,7 +3502,7 @@ async function captureSortDoor(page, scheme, shots) {
     throw new Error(`기본 섹션에 ⋮ 가 섰다 ${scheme}: ${sectionMenu}`);
   }
 
-  await door.click();
+  await sceneClick(page, door);
   const content = page.getByTestId("sidebar-sort-menu-content");
   await content.waitFor({ state: "visible" });
   const label = (await page.getByTestId("sidebar-sort-label").innerText()).trim();
@@ -3437,7 +3516,7 @@ async function captureSortDoor(page, scheme, shots) {
     throw new Error(`기본 정렬이 체크가 아니다 ${scheme}: ${checked}`);
   }
   await assertNoHorizontalOverflow(page, `sort door ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-sort-menu-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-sort-menu-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
   await page.keyboard.press("Escape");
@@ -3458,6 +3537,7 @@ async function captureSortDoor(page, scheme, shots) {
  * 「드롭 표지」가 수로 잰다.
  */
 async function captureSectionDropMarker(page, scheme, shots) {
+  beginScene("sidebar-drop-target");
   await page.evaluate(`(() => {
     const row = document.querySelector(
       '[data-testid="sidebar-section-channels"] [data-testid="channel-item"]'
@@ -3481,7 +3561,7 @@ async function captureSectionDropMarker(page, scheme, shots) {
     throw new Error(`드롭 표지 개수 ${scheme}: ${marked} (하나여야 함)`);
   }
   await assertNoHorizontalOverflow(page, `drop marker ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-drop-target-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-drop-target-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
@@ -3498,17 +3578,18 @@ async function captureSectionDropMarker(page, scheme, shots) {
  * 그대로 남는다(같은 함수의 섹션 만들기·지우기와 같은 규율).
  */
 async function captureStarredSection(page, scheme, shots) {
+  beginScene("sidebar-starred-section");
   const base = page
     .getByTestId("sidebar-section-channels")
     .locator('[data-testid="channel-item"]')
     .first();
-  await base.click({ button: "right" });
+  await sceneClick(page, base, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   const starLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
   if (starLabel !== "별표 붙이기") {
     throw new Error(`별표 항목의 낱말 ${scheme}: ${starLabel}`);
   }
-  await page.getByTestId("channel-row-star").click();
+  await sceneClick(page, page.getByTestId("channel-row-star"));
   await page.getByTestId("channel-row-menu").waitFor({ state: "detached" });
 
   const starred = page.getByTestId("sidebar-section-starred");
@@ -3535,19 +3616,19 @@ async function captureStarredSection(page, scheme, shots) {
     throw new Error(`별표 뒤 중복 행 ${scheme}: ${duplicated}`);
   }
   await assertNoHorizontalOverflow(page, `starred section ${scheme}`);
-  const shot = `${OUT_DIR}/sidebar-starred-section-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-starred-section-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
   // 떼고 나간다. 낱말이 상태라는 것도 여기서 함께 본다.
   const starredRow = starred.locator('[data-testid="channel-item"]').first();
-  await starredRow.click({ button: "right" });
+  await sceneClick(page, starredRow, { button: "right" });
   await page.getByTestId("channel-row-menu").waitFor({ state: "visible" });
   const unstarLabel = (await page.getByTestId("channel-row-star").innerText()).trim();
   if (unstarLabel !== "별표 떼기") {
     throw new Error(`별표 뒤 항목의 낱말 ${scheme}: ${unstarLabel}`);
   }
-  await page.getByTestId("channel-row-star").click();
+  await sceneClick(page, page.getByTestId("channel-row-star"));
   await starred.waitFor({ state: "detached" });
 }
 
@@ -3564,6 +3645,7 @@ async function captureStarredSection(page, scheme, shots) {
  * 나가지 않았다」이고, 소실은 나간 PUT 이 만든다.
  */
 async function captureSidebarPrefsUnavailable(context, scheme, shots) {
+  beginScene("sidebar-prefs-unavailable");
   const page = await context.newPage();
   let puts = 0;
   await page.route("**/v1/workspaces/*/members/me/sidebar-prefs", (route) => {
@@ -3594,14 +3676,14 @@ async function captureSidebarPrefsUnavailable(context, scheme, shots) {
     );
   }
 
-  const shot = `${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/sidebar-prefs-unavailable-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
   // 재시도 문은 있다: 닫힌 이유를 말했으면 되돌아갈 길도 줘야 한다.
   const retry = banner.getByRole("button", { name: "다시 시도" });
   await retry.waitFor({ state: "visible" });
-  await retry.click();
+  await sceneClick(page, retry);
   await banner.waitFor({ state: "visible" });
 
   if (puts !== 0) {
@@ -4072,7 +4154,7 @@ async function assertDockExpandHonesty(page, where) {
           `여유 ${Math.round(slack)}px 있는데 확대가 비활성이다 ${where} @${next.height}`
         );
       }
-      await expand.click();
+      await sceneClick(page, expand);
       await page.waitForFunction(
         () =>
           document
@@ -4090,7 +4172,7 @@ async function assertDockExpandHonesty(page, where) {
       console.log(
         `  dock expand ${where} @${next.width}×${next.height}: ${Math.round(before)} → ${Math.round(after)} (Δ${Math.round(after - before)})`
       );
-      await expand.click();
+      await sceneClick(page, expand);
       await page.waitForFunction(
         () =>
           document
@@ -4357,7 +4439,7 @@ async function assertComposerVesselClick(page, where, ids) {
   });
   await input.fill("그릇 클릭 확인");
   await input.evaluate((element) => element.setSelectionRange(2, 2));
-  await page.getByTestId(ids.actions).click({ position: { x: 160, y: 4 } });
+  await sceneClick(page, page.getByTestId(ids.actions), { position: { x: 160, y: 4 } });
   const proof = await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid="${ids.input}"]');
     const frame = document.querySelector('[data-testid="${ids.frame ?? "composer-frame"}"]');
@@ -4431,7 +4513,7 @@ function readObserverTerminalVessel() {
 async function assertObserverTerminalModality(page, where, shots, scheme) {
   const start = page.getByTestId("work-observer-start");
   await start.waitFor({ state: "visible" });
-  await start.click();
+  await sceneClick(page, start);
   await page.locator(".xterm-helper-textarea").waitFor({
     state: "attached",
     timeout: 10_000,
@@ -4448,10 +4530,10 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     throw new Error(`관전 터미널 상자 없음 ${where}`);
   }
   await page.mouse.move(box.x + 24, box.y + 16);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await page.mouse.move(box.x + 120, box.y + 28);
   const dragging = await page.evaluate(readObserverTerminalVessel());
-  await page.mouse.up();
+  await sceneMouseUp(page);
   if (
     !dragging.frame ||
     !dragging.textarea ||
@@ -4465,7 +4547,7 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     );
   }
   if (shots && scheme) {
-    const pointerShot = `${OUT_DIR}/terminal-pointer-${scheme}.png`;
+    const pointerShot = beginSceneFromShotPath(`${OUT_DIR}/terminal-pointer-${scheme}.png`);
     await page.screenshot({ path: pointerShot });
     shots.push(pointerShot);
   }
@@ -4492,14 +4574,14 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     );
   }
   if (shots && scheme) {
-    const focusShot = `${OUT_DIR}/terminal-focus-${scheme}.png`;
+    const focusShot = beginSceneFromShotPath(`${OUT_DIR}/terminal-focus-${scheme}.png`);
     await page.screenshot({ path: focusShot });
     shots.push(focusShot);
   }
 
   const stop = page.getByTestId("work-observer-stop");
   if ((await stop.count()) > 0 && (await stop.isVisible())) {
-    await stop.click();
+    await sceneClick(page, stop);
     await page.getByTestId("work-observer-start").waitFor({ state: "visible" });
   }
 
@@ -4515,7 +4597,7 @@ async function assertMentionTrigger(page, where, ids) {
   await input.fill("배포 확인");
   // `배포` 바로 뒤는 비공백 경계다. 공백 뒤를 고르면 B-1의 죽은 버튼도 초록이다.
   await input.evaluate((element) => element.setSelectionRange(2, 2));
-  await page.getByTestId(ids.trigger).click();
+  await sceneClick(page, page.getByTestId(ids.trigger));
   await page.getByTestId(ids.list).waitFor({ state: "visible" });
   await page.waitForFunction(
     (testId) =>
@@ -4581,9 +4663,10 @@ async function assertMentionTrigger(page, where, ids) {
  * 셋이 한 기계를 쓰는 이상, 틀린 목록이 뜨는 실패가 가장 그럴듯한 실패다.
  */
 async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
+  beginScene(trigger.shot);
   const input = page.getByTestId(ids.input);
   await input.fill("");
-  await input.click();
+  await sceneClick(page, input);
   await page.keyboard.type(trigger.typed, { delay: 15 });
   const list = page.getByTestId(trigger.list);
   await list.waitFor({ state: "visible" });
@@ -4620,7 +4703,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
     );
   }
   if (trigger.rows !== undefined) await assertComposerRows(page, scheme, trigger);
-  const shot = `${OUT_DIR}/${trigger.shot}-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/${trigger.shot}-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
   console.log(
@@ -4650,6 +4733,7 @@ async function captureComposerTrigger(page, scheme, shots, ids, trigger) {
  * 이 판을 만들 수 없다.
  */
 async function captureComposerCatalogFailure(page, context, scheme, shots) {
+  beginScene("composer-emoji-catalog-error");
   const posted = [];
   const watch = (request) => {
     if (request.method() === "POST" && request.url().includes("/messages")) {
@@ -4661,7 +4745,7 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   await context.route("**/emojiCatalog-*", block);
   const input = page.getByTestId("composer-input");
   await input.fill("");
-  await input.click();
+  await sceneClick(page, input);
   await page.keyboard.type(":thu", { delay: 15 });
   const box = page.getByTestId("composer-emoji-list-status");
   await box.waitFor({ state: "visible" });
@@ -4695,12 +4779,12 @@ async function captureComposerCatalogFailure(page, context, scheme, shots) {
   ) {
     throw new Error(`이모지 카탈로그 오류 상자 ${scheme}: ${JSON.stringify(proof)}`);
   }
-  const shot = `${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`;
+  const shot = beginSceneFromShotPath(`${OUT_DIR}/composer-emoji-catalog-error-${scheme}.png`);
   await page.screenshot({ path: shot });
   shots.push(shot);
 
   await context.unroute("**/emojiCatalog-*", block);
-  await box.locator("button").click();
+  await sceneClick(page, box.locator("button"));
   await page.getByTestId("composer-emoji-list").waitFor({ state: "visible" });
   const after = await page.evaluate(`(() => {
     const input = document.querySelector('[data-testid="composer-input"]');
@@ -5343,7 +5427,7 @@ async function assertReminderKeyboardDelete(page, where) {
       `[리마인더 키보드 ${where}] ⋯에 닿지 못했다 (last=${last})`
     );
   }
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   await page.getByTestId("reminder-row-menu-panel").waitFor({ state: "visible" });
   await page.getByTestId("reminder-row-delete").waitFor({ state: "visible" });
   await page.getByTestId("reminder-row-delete").press("Enter");
@@ -5465,9 +5549,9 @@ async function assertActionableRowDragSelect(page, where) {
   }
   await page.evaluate(`document.getSelection() && document.getSelection().removeAllRanges()`);
   await page.mouse.move(box.x, box.y);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await page.mouse.move(box.x2, box.y2, { steps: 12 });
-  await page.mouse.up();
+  await sceneMouseUp(page);
   const proof = await page.evaluate(`(() => {
     const sel = document.getSelection();
     const text = sel ? sel.toString() : "";
@@ -5807,7 +5891,7 @@ async function countTabStopsToComposer(page, where, ceiling) {
 async function scrollTimelineRowIntoView(page, testId, where = "") {
   const label = where ? `${testId} · ${where}` : testId;
   const seen = await page.evaluate(
-    async ({ testId, maxSteps }) => {
+    async ({ testId, maxSteps, stableNeed, frameCeiling, tickSrc }) => {
       // 한 프레임 양보. rAF는 보이지 않는 탭에서 멈출 수 있으므로 상한을 함께
       // 건다 — 대기로 때우는 값이 아니라 rAF가 오지 않을 때의 안전망이다.
       const frame = () =>
@@ -5880,36 +5964,67 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       const el = find();
       if (!el) return report({ ok: false, steps, ceiling, scanned });
 
-      // 가운데로 올리고, 같은 자리에 세 프레임 연속으로 앉을 때까지 기다린다.
+      // 가운데로 올리고, item-list visibility + intro rect + scrollTop 이
+      // stableNeed 연속 프레임 같은 값이 될 때까지 기다린다. jump-latest 는
+      // 로그에만 남고 안정 키에 넣지 않는다. 루프는 조건이 서는 즉시 나간다
+      // (프레임 수 잠이 아니다).
       el.scrollIntoView({ block: "center" });
-      let key = null;
-      let stable = 0;
-      for (let i = 0; i < 60 && stable < 3; i++) {
+      const tick = eval(tickSrc);
+      const motionLog = [];
+      const state = { key: null, stable: 0 };
+      for (let i = 0; i < frameCeiling; i++) {
         await frame();
         const now = find();
-        if (!now) {
-          key = null;
-          stable = 0;
-          continue;
-        }
-        const rect = now.getBoundingClientRect();
-        if (rect.height <= 0) {
-          stable = 0;
-          continue;
-        }
-        const next = `${Math.round(rect.top)}:${Math.round(rect.height)}`;
-        if (next === key) stable++;
-        else {
-          key = next;
-          stable = 0;
+        const list = document.querySelector('[data-testid="virtuoso-item-list"]');
+        const scroller = scrollers()[0];
+        const introBox = now ? now.getBoundingClientRect() : null;
+        const vis = list ? getComputedStyle(list).visibility : null;
+        const sample = {
+          vis,
+          intro: introBox
+            ? { top: introBox.top, height: introBox.height }
+            : null,
+          scrollTop: scroller ? scroller.scrollTop : null,
+          now,
+        };
+        motionLog.push({
+          i,
+          intro: introBox
+            ? {
+                top: Math.round(introBox.top),
+                height: Math.round(introBox.height),
+              }
+            : null,
+          scrollTop: scroller ? Math.round(scroller.scrollTop) : null,
+          vis,
+          jump: Boolean(document.querySelector('[data-testid="jump-latest"]')),
+        });
+        if (tick(state, sample, stableNeed)) {
+          return report({
+            ok: true,
+            steps,
+            ceiling,
+            scanned,
+            settledAt: i,
+          });
         }
       }
-      if (stable < 3) {
-        return report({ ok: false, steps, ceiling, scanned, unsettled: true });
-      }
-      return report({ ok: true, steps, ceiling, scanned });
+      return report({
+        ok: false,
+        steps,
+        ceiling,
+        scanned,
+        unsettled: true,
+        motionLog,
+      });
     },
-    { testId, maxSteps: 400 }
+    {
+      testId,
+      maxSteps: 400,
+      stableNeed: SETTLE_STABLE_FRAMES,
+      frameCeiling: SETTLE_FRAME_CEILING,
+      tickSrc: `(() => { const introPoseKey = ${introPoseKey.toString()}; ${tickIntroSettle.toString()}; return tickIntroSettle; })()`,
+    }
   );
 
   const scene =
@@ -5924,9 +6039,20 @@ async function scrollTimelineRowIntoView(page, testId, where = "") {
       ? `창 밖에 있어 스크롤러를 ${seen.steps}걸음 훑어 올림`
       : "이미 창 안";
     console.log(`  스크롤 ${label}: ${how} · ${scene}`);
+    if (typeof seen.settledAt === "number") {
+      console.log(
+        `  settle ${label}: predicate first held at frame ${seen.settledAt}` +
+          ` (need ${SETTLE_STABLE_FRAMES}, ceiling ${SETTLE_FRAME_CEILING})`
+      );
+    }
     return;
   }
   if (seen.unsettled) {
+    if (Array.isArray(seen.motionLog) && seen.motionLog.length > 0) {
+      console.log(
+        `  intro-motion ${label} (unsettled): ${JSON.stringify(seen.motionLog)}`
+      );
+    }
     throw new Error(
       `[스크롤] ${label}: 행을 찾아 가운데로 올렸는데 자리가 멎지 않았다 — ${scene}`
     );
@@ -6450,6 +6576,7 @@ async function assertControlsAboveFold(page, where, ids) {
  * (두 열이 한 열이 되는 표면), 인박스(전역 표면의 헤더에 햄버거가 서는 자리).
  */
 async function captureMobile(browser, scheme) {
+  beginScene("mobile-login");
   const context = await browser.newContext({
     viewport: MOBILE_VIEWPORT,
     deviceScaleFactor: 3,
@@ -6465,7 +6592,7 @@ async function captureMobile(browser, scheme) {
   await installMocks(context);
   const shots = [];
   const shoot = async (page, name) => {
-    const path = `${OUT_DIR}/mobile-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/mobile-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
   };
@@ -6497,7 +6624,7 @@ async function captureMobile(browser, scheme) {
   //    받고, 컴포저는 안전 영역 위에 도크된다.
   await page.getByTestId("login-email").fill("seongjae@dawn.example");
   await page.getByTestId("login-password").fill("capture-only-not-a-credential");
-  await page.getByTestId("login-submit").click();
+  await sceneClick(page, page.getByTestId("login-submit"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
   await page.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6508,7 +6635,7 @@ async function captureMobile(browser, scheme) {
   await shoot(page, "chat");
 
   // TC-1 (#1758): 헤더 터미널을 실제로 눌러 도크가 컴포저 위에 앉는지 폰에서도 잰다.
-  await page.getByTestId("open-terminal-dock").click();
+  await sceneClick(page, page.getByTestId("open-terminal-dock"));
   await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
   await page.getByTestId("terminal-dock-empty").waitFor({ state: "visible" });
   await assertComposerVisible(page, `terminal dock ${scheme}`);
@@ -6518,12 +6645,12 @@ async function captureMobile(browser, scheme) {
   await assertNoHorizontalOverflow(page, `terminal dock ${scheme}`);
   await assertTapTargets(page, `terminal dock ${scheme}`);
   await shoot(page, "terminal-dock");
-  await page.getByTestId("terminal-dock-close").click();
+  await sceneClick(page, page.getByTestId("terminal-dock-close"));
   await page.getByTestId("terminal-dock").waitFor({ state: "detached" });
 
   // 2a-0. 이모지 피커 바텀시트 (#1742). 390에서 분류 탭이 화면 밖으로
   //       나가면 안 된다. hover: none 이므로 포인터 popover가 아니라 시트다.
-  await page.getByTestId("composer-emoji-trigger").click();
+  await sceneClick(page, page.getByTestId("composer-emoji-trigger"));
   await page.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
   await page.getByTestId("emoji-search").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6602,10 +6729,10 @@ async function captureMobile(browser, scheme) {
   }
   await shoot(page, "b11-action-sheet");
   // UX-D3 (#1755): 시트 클립보드 항목을 실제로 누르고 내용을 읽는다.
-  await page.getByTestId("sheet-copy").click();
+  await sceneClick(page, page.getByTestId("sheet-copy"));
   await page.getByTestId("sheet-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(page, `시트 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await page.getByTestId("sheet-copy-link").click();
+  await sceneClick(page, page.getByTestId("sheet-copy-link"));
   await page.getByTestId("sheet-copy-link").getByText("링크 복사됨").waitFor();
   const sheetMessageId = await sheetTarget.getAttribute("data-message-id");
   const sheetSeq = await sheetTarget.getAttribute("data-seq");
@@ -6634,26 +6761,26 @@ async function captureMobile(browser, scheme) {
 
   // (1) 제자리 편집기.
   await openSheet();
-  await page.getByTestId("sheet-edit").click();
+  await sceneClick(page, page.getByTestId("sheet-edit"));
   await page.getByTestId("message-editor-input").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `inline editor ${scheme}`);
   await assertTapTargets(page, `inline editor ${scheme}`);
   await shoot(page, "b11-edit");
-  await page.getByTestId("message-editor-cancel").click();
+  await sceneClick(page, page.getByTestId("message-editor-cancel"));
   await page
     .getByTestId("message-editor-input")
     .waitFor({ state: "detached" });
 
   // (2) 삭제 확인.
   await openSheet();
-  await page.getByTestId("sheet-delete").click();
+  await sceneClick(page, page.getByTestId("sheet-delete"));
   await page.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `delete dialog ${scheme}`);
   await assertTapTargets(page, `delete dialog ${scheme}`);
   await shoot(page, "b11-delete");
-  await page.getByTestId("delete-message-cancel").click();
+  await sceneClick(page, page.getByTestId("delete-message-cancel"));
   await page
     .getByTestId("delete-message-dialog")
     .waitFor({ state: "hidden" });
@@ -6661,7 +6788,7 @@ async function captureMobile(browser, scheme) {
   // (2b) 나중에 알림 (#1889 R2-M1). RemindDialog 44 주장은 장면이 없으면
   //      허용목록만 초록이다. 시트의 「나중에 알림」이 폰의 실진입점.
   await openSheet();
-  await page.getByTestId("sheet-remind").click();
+  await sceneClick(page, page.getByTestId("sheet-remind"));
   await page.getByTestId("remind-dialog").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertNoHorizontalOverflow(page, `remind dialog ${scheme}`);
@@ -6672,7 +6799,7 @@ async function captureMobile(browser, scheme) {
 
   // (3) 스레드 패널과 그 컴포저. 폰에서 이 패널은 열이 아니라 채널을 덮는
   //     서랍이고, 그 안에 B11이 입력창을 하나 더 놓았다.
-  await page.getByTestId("thread-anchor").first().click();
+  await sceneClick(page, page.getByTestId("thread-anchor").first());
   await page.getByTestId("thread-panel").waitFor({ state: "visible" });
   await page.getByTestId("thread-composer-input").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6691,7 +6818,7 @@ async function captureMobile(browser, scheme) {
   ]);
   await shoot(page, "b11-thread-bottom-chrome");
   await releaseBottomChrome(page);
-  await page.getByTestId("thread-close").click();
+  await sceneClick(page, page.getByTestId("thread-close"));
   await page.getByTestId("thread-panel").waitFor({ state: "detached" });
 
   // 2b. 하단 브라우저 크롬이 100px을 가져간 상태 (goal B9). 성재 실캡처의 조건이고,
@@ -6705,7 +6832,7 @@ async function captureMobile(browser, scheme) {
 
   // 3. 서랍이 열린 상태. 뒤 표면이 110px 남는 것이 이 프레임의 요점이다: 덮은
   //    것이 화면 전체가 아니라 서랍이어야 바깥을 눌러 닫을 자리가 보인다.
-  await page.getByTestId("open-sidebar-drawer").click();
+  await sceneClick(page, page.getByTestId("open-sidebar-drawer"));
   await page.getByTestId("sidebar-scrim").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
   await assertEnterMotionPressAfterFill(page, `drawer ${scheme}`, {
@@ -6764,12 +6891,12 @@ async function captureMobile(browser, scheme) {
 
   await shoot(page, "sidebar-drawer");
 
-  await page.getByTestId("profile-card").click();
+  await sceneClick(page, page.getByTestId("profile-card"));
   await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
   await assertProfileMenuFitsViewport(page, `drawer profile ${scheme}`);
   await assertTapTargets(page, `drawer profile ${scheme}`);
   await shoot(page, "sidebar-profile-card");
-  await page.getByTestId("profile-set-status").click();
+  await sceneClick(page, page.getByTestId("profile-set-status"));
   await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
   await assertTapTargets(page, `set-status ${scheme}`);
   await shoot(page, "set-status-dialog");
@@ -6796,12 +6923,11 @@ async function captureMobile(browser, scheme) {
   //     증명하므로 존재하는 쪽을 따로 찍는다 — 특히 이름이 긴 에이전트에서
   //     이 줄이 가로로 새지 않는지가 요점이다.
   await page.evaluate('location.hash = "/directory"');
-  await page
+  await sceneClick(page, page
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
-    .first()
-    .click();
+    .first());
   await page.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
-  await page.getByTestId("member-profile-dm").click();
+  await sceneClick(page, page.getByTestId("member-profile-dm"));
   await page.getByTestId("composer-input").waitFor({ state: "visible" });
   await page.getByTestId("composer-dm-hint").waitFor({ state: "visible" });
   await page.waitForTimeout(300);
@@ -6940,6 +7066,7 @@ async function captureMobile(browser, scheme) {
 }
 
 async function captureScheme(browser, scheme) {
+  beginScene("login");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -6958,12 +7085,12 @@ async function captureScheme(browser, scheme) {
   await login.goto(ORIGIN, { waitUntil: "networkidle" });
   await walkOnboardingToAccount(login, scheme, {
     shoot: async (name) => {
-      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
       await login.screenshot({ path });
       shots.push(path);
     },
   });
-  const loginShot = `${OUT_DIR}/login-${scheme}.png`;
+  const loginShot = beginSceneFromShotPath(`${OUT_DIR}/login-${scheme}.png`);
   await assertWideRowsFillOnly(login, `connect ${scheme}`);
   await login.screenshot({ path: loginShot });
   shots.push(loginShot);
@@ -6971,7 +7098,8 @@ async function captureScheme(browser, scheme) {
   // 1a-2. 워크스페이스 칸을 펼친 상태 (goal B13 R2 High 1). 접어 둔 것이 "채우는
   //       법을 지운 것"이 아님을 보이는 프레임이다: 열면 라벨이 "워크스페이스 ID"
   //       이고 placeholder가 UUID 모양이라, 무엇을 넣는 칸인지 화면에서 읽힌다.
-  await login.getByTestId("login-workspace-toggle").click();
+  beginScene("login-workspace");
+  await sceneClick(login, login.getByTestId("login-workspace-toggle"));
   await login.getByTestId("login-workspace").waitFor({ state: "visible" });
   const workspacePlaceholder = await login
     .getByTestId("login-workspace")
@@ -6981,10 +7109,10 @@ async function captureScheme(browser, scheme) {
       `워크스페이스 칸이 형식을 보여주지 않는다 ${scheme}: ${workspacePlaceholder}`
     );
   }
-  const workspaceShot = `${OUT_DIR}/login-workspace-${scheme}.png`;
+  const workspaceShot = beginSceneFromShotPath(`${OUT_DIR}/login-workspace-${scheme}.png`);
   await login.screenshot({ path: workspaceShot });
   shots.push(workspaceShot);
-  await login.getByTestId("login-workspace-toggle").click();
+  await sceneClick(login, login.getByTestId("login-workspace-toggle"));
 
   // 1b. connect surface, invite path (MOMO-604): the browser fallback for a
   //     oort://join link fills server and code, so only email/password remain.
@@ -6998,7 +7126,7 @@ async function captureScheme(browser, scheme) {
     waitUntil: "networkidle",
   });
   await invite.getByTestId("login-invite-code").waitFor({ state: "visible" });
-  const inviteShot = `${OUT_DIR}/connect-invite-${scheme}.png`;
+  const inviteShot = beginSceneFromShotPath(`${OUT_DIR}/connect-invite-${scheme}.png`);
   await invite.screenshot({ path: inviteShot });
   shots.push(inviteShot);
 
@@ -7007,7 +7135,7 @@ async function captureScheme(browser, scheme) {
   await profile.goto(ORIGIN, { waitUntil: "networkidle" });
   await shootOnboardingProfile(profile, scheme, {
     shoot: async (name) => {
-      const path = `${OUT_DIR}/${name}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/${name}-${scheme}.png`);
       await profile.screenshot({ path });
       shots.push(path);
     },
@@ -7039,8 +7167,7 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("composer-input").hover();
   await login.waitForTimeout(100);
   await assertHoverToolbarCount(login, `desktop chat rest ${scheme}`, 0);
-  await waitForAnimations(login);
-  const chatShot = `${OUT_DIR}/chat-${scheme}.png`;
+  const chatShot = beginSceneFromShotPath(`${OUT_DIR}/chat-${scheme}.png`);
   await login.screenshot({ path: chatShot });
   shots.push(chatShot);
 
@@ -7054,7 +7181,7 @@ async function captureScheme(browser, scheme) {
   for (let index = 0; index < 4; index++) {
     await login.keyboard.press("Shift+Tab");
   }
-  const focusShot = `${OUT_DIR}/composer-focus-${scheme}.png`;
+  const focusShot = beginSceneFromShotPath(`${OUT_DIR}/composer-focus-${scheme}.png`);
   await login.screenshot({ path: focusShot });
   shots.push(focusShot);
   await assertComposerVesselClick(login, scheme, {
@@ -7062,7 +7189,7 @@ async function captureScheme(browser, scheme) {
     actions: "composer-actions",
     frame: "composer-frame",
   });
-  const pointerShot = `${OUT_DIR}/composer-pointer-${scheme}.png`;
+  const pointerShot = beginSceneFromShotPath(`${OUT_DIR}/composer-pointer-${scheme}.png`);
   await login.screenshot({ path: pointerShot });
   shots.push(pointerShot);
 
@@ -7073,7 +7200,7 @@ async function captureScheme(browser, scheme) {
     trigger: "composer-mention-trigger",
     list: "composer-mention-list",
   });
-  const mentionShot = `${OUT_DIR}/composer-mention-${scheme}.png`;
+  const mentionShot = beginSceneFromShotPath(`${OUT_DIR}/composer-mention-${scheme}.png`);
   await login.screenshot({ path: mentionShot });
   shots.push(mentionShot);
   await login.keyboard.press("Escape");
@@ -7163,7 +7290,7 @@ async function captureScheme(browser, scheme) {
       `컴포저 오프라인 disabled 의미 ${scheme}: ${JSON.stringify(offlineControls)}`
     );
   }
-  const composerOfflineShot = `${OUT_DIR}/composer-offline-${scheme}.png`;
+  const composerOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/composer-offline-${scheme}.png`);
   await login.screenshot({ path: composerOfflineShot });
   shots.push(composerOfflineShot);
   await context.setOffline(false);
@@ -7195,7 +7322,7 @@ async function captureScheme(browser, scheme) {
       mime: "text/plain",
       size: 18,
       status: "complete",
-      createdAtMs: Date.now(),
+      createdAtMs: FIXTURE_NOW,
     })
   );
   await login
@@ -7207,12 +7334,12 @@ async function captureScheme(browser, scheme) {
       buffer: Buffer.from("capture attachment"),
     });
   await login.getByTestId("attachment-chip-progress").waitFor({ state: "visible" });
-  const composerPendingShot = `${OUT_DIR}/composer-attachment-pending-${scheme}.png`;
+  const composerPendingShot = beginSceneFromShotPath(`${OUT_DIR}/composer-attachment-pending-${scheme}.png`);
   await login.screenshot({ path: composerPendingShot });
   shots.push(composerPendingShot);
   releaseComposerUpload();
   await login.getByTestId("attachment-chip-progress").waitFor({ state: "hidden" });
-  await login.getByTestId("attachment-chip-remove").click();
+  await sceneClick(login, login.getByTestId("attachment-chip-remove"));
   await login.getByTestId("attachment-chip").waitFor({ state: "hidden" });
   await login.unroute("**/attachments/uploads");
   await login.unroute("**/capture-composer-upload");
@@ -7226,9 +7353,9 @@ async function captureScheme(browser, scheme) {
   // review frame. Esc must restore focus to the exact opener and keeps the card
   // available for the remaining lanes.
   const unfurlRemoveOpener = login.getByTestId("unfurl-remove");
-  await unfurlRemoveOpener.click();
+  await sceneClick(login, unfurlRemoveOpener);
   await login.getByTestId("unfurl-remove-dialog").waitFor({ state: "visible" });
-  const unfurlRemoveShot = `${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`;
+  const unfurlRemoveShot = beginSceneFromShotPath(`${OUT_DIR}/unfurl-remove-confirm-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: unfurlRemoveShot });
   shots.push(unfurlRemoveShot);
@@ -7262,13 +7389,13 @@ async function captureScheme(browser, scheme) {
   await unfurlRemoval.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(unfurlRemoval);
   await unfurlRemoval.getByTestId("unfurl-card").waitFor({ state: "visible" });
-  await unfurlRemoval.getByTestId("unfurl-remove").click();
-  await unfurlRemoval.getByTestId("unfurl-remove-commit").click();
+  await sceneClick(unfurlRemoval, unfurlRemoval.getByTestId("unfurl-remove"));
+  await sceneClick(unfurlRemoval, unfurlRemoval.getByTestId("unfurl-remove-commit"));
   await unfurlRemoval.getByTestId("unfurl-group").waitFor({ state: "hidden" });
   await unfurlRemoval
     .getByText("502가 계속 납니다.", { exact: false })
     .waitFor({ state: "visible" });
-  const unfurlRemovedShot = `${OUT_DIR}/unfurl-removed-${scheme}.png`;
+  const unfurlRemovedShot = beginSceneFromShotPath(`${OUT_DIR}/unfurl-removed-${scheme}.png`);
   await unfurlRemoval.screenshot({ path: unfurlRemovedShot });
   shots.push(unfurlRemovedShot);
 
@@ -7293,7 +7420,7 @@ async function captureScheme(browser, scheme) {
   // N-2 / B-1: the React button on the mounted toolbar must open the picker.
   // The ⋯ 메뉴 path is a different consumer and used to stay green while this
   // one crashed.
-  await login.getByTestId("toolbar-react-more").last().click();
+  await sceneClick(login, login.getByTestId("toolbar-react-more").last());
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   const chipPlus = actionRow.getByTestId("reaction-add");
@@ -7302,7 +7429,7 @@ async function captureScheme(browser, scheme) {
     await login.getByTestId("reaction-picker").waitFor({ state: "detached" });
     await waitForAnimations(login);
     await actionRow.hover();
-    await chipPlus.click();
+    await sceneClick(login, chipPlus);
     await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
     await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   }
@@ -7319,7 +7446,7 @@ async function captureScheme(browser, scheme) {
   await login.setViewportSize(VIEWPORT);
   await actionRow.hover();
   await login.getByTestId("message-hover-toolbar").last().waitFor({ state: "visible" });
-  const actionsShot = `${OUT_DIR}/b11-message-actions-${scheme}.png`;
+  const actionsShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-actions-${scheme}.png`);
   await login.screenshot({ path: actionsShot });
   shots.push(actionsShot);
 
@@ -7486,7 +7613,7 @@ async function captureScheme(browser, scheme) {
     `  키보드 ${scheme}: Tab → 행 · 툴바 마운트 · → ${beforeArrow} → ${afterArrow} → ${backArrow}`
   );
   await login.waitForTimeout(300);
-  const actionsFocusShot = `${OUT_DIR}/b11-message-actions-focus-${scheme}.png`;
+  const actionsFocusShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-actions-focus-${scheme}.png`);
   await login.screenshot({ path: actionsFocusShot });
   shots.push(actionsFocusShot);
 
@@ -7501,10 +7628,10 @@ async function captureScheme(browser, scheme) {
     if (onOverflow === "message-actions-trigger") break;
     await login.keyboard.press("ArrowRight");
   }
-  await login.keyboard.press("Enter");
+  await sceneKeyboardPress(login, "Enter");
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
+  const menuShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-action-menu-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: menuShot });
   shots.push(menuShot);
@@ -7534,15 +7661,15 @@ async function captureScheme(browser, scheme) {
   // 2e-d3. UX-D3 (#1755): 새 메뉴 항목을 실제로 누르고 클립보드를 읽는다.
   //     세 표면(⋯ · 우클릭 · 시트) 중 포인터 둘. 시트는 captureMobile.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   if ((await login.getByTestId("menu-copy-link").count()) !== 1) {
     throw new Error(`[메뉴 ${scheme}] 링크 복사가 없다`);
   }
-  await login.getByTestId("menu-copy").click();
+  await sceneClick(login, login.getByTestId("menu-copy"));
   await login.getByTestId("menu-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(login, `⋯ 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await login.getByTestId("menu-copy-link").click();
+  await sceneClick(login, login.getByTestId("menu-copy-link"));
   await login.getByTestId("menu-copy-link").getByText("링크 복사됨").waitFor();
   const menuMessageId = await actionRow.getAttribute("data-message-id");
   const menuSeq = await actionRow.getAttribute("data-seq");
@@ -7556,17 +7683,17 @@ async function captureScheme(browser, scheme) {
   await login.keyboard.press("Escape");
   await login.getByTestId("message-action-menu").waitFor({ state: "hidden" });
 
-  await actionRow.click({ button: "right", position: { x: 180, y: 24 } });
+  await sceneClick(login, actionRow, { button: "right", position: { x: 180, y: 24 } });
   await login.getByTestId("message-context-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const contextShot = `${OUT_DIR}/b11-message-context-menu-${scheme}.png`;
+  const contextShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-context-menu-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: contextShot });
   shots.push(contextShot);
-  await login.getByTestId("context-copy").click();
+  await sceneClick(login, login.getByTestId("context-copy"));
   await login.getByTestId("context-copy").getByText("메시지 복사됨").waitFor();
   await assertCopiedClipboard(login, `우클릭 메시지 복사 ${scheme}`, ACTION_ROW_BODY);
-  await login.getByTestId("context-copy-link").click();
+  await sceneClick(login, login.getByTestId("context-copy-link"));
   await login.getByTestId("context-copy-link").getByText("링크 복사됨").waitFor();
   await assertCopiedClipboard(login, `우클릭 링크 복사 ${scheme}`, copiedLink);
   await login.keyboard.press("Escape");
@@ -7577,8 +7704,8 @@ async function captureScheme(browser, scheme) {
   // 2f. 고치기, 제자리에서 (goal B11). 다이얼로그가 아니라 행 안이다: 고치는
   //     대상이 대화의 한 줄이고, 무엇을 쓸지 알려주는 것은 그 주변 메시지다.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-edit").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-edit"));
   await login.getByTestId("message-editor-input").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   // R2 M3 회귀: 편집 중인 행에는 hover 진입점이 없어야 한다. 1라운드에서는 바가
@@ -7595,33 +7722,33 @@ async function captureScheme(browser, scheme) {
       `[편집 ${scheme}] 편집 중인 행에 액션 진입점이 ${triggerWhileEditing}개 남아 있다`
     );
   }
-  const editShot = `${OUT_DIR}/b11-message-edit-${scheme}.png`;
+  const editShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-edit-${scheme}.png`);
   await login.screenshot({ path: editShot });
   shots.push(editShot);
-  await login.getByTestId("message-editor-cancel").click();
+  await sceneClick(login, login.getByTestId("message-editor-cancel"));
 
   // 2g. 지우기 확인 (goal B11). 되돌리기가 아니라 확인이다 — 서버의 삭제는 본문을
   //     지우는 tombstone이라 되돌릴 것이 남지 않는다.
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-delete").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-delete"));
   await login.getByTestId("delete-message-dialog").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const deleteShot = `${OUT_DIR}/b11-message-delete-${scheme}.png`;
+  const deleteShot = beginSceneFromShotPath(`${OUT_DIR}/b11-message-delete-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: deleteShot });
   shots.push(deleteShot);
-  await login.getByTestId("delete-message-cancel").click();
+  await sceneClick(login, login.getByTestId("delete-message-cancel"));
 
   // 2h. 반응 고르기 (#1742). 자작 피커: 검색·카테고리·빈도·스킨톤, 포인터는
   //     트리거 기준 popover. 라이브러리는 여전히 없다 (CSP + 오프라인 셸).
   await actionRow.hover();
-  await login.getByTestId("message-actions-trigger").last().click();
-  await login.getByTestId("menu-react-more").click();
+  await sceneClick(login, login.getByTestId("message-actions-trigger").last());
+  await sceneClick(login, login.getByTestId("menu-react-more"));
   await login.getByTestId("reaction-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const pickerShot = `${OUT_DIR}/b11-reaction-picker-${scheme}.png`;
+  const pickerShot = beginSceneFromShotPath(`${OUT_DIR}/b11-reaction-picker-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: pickerShot });
   shots.push(pickerShot);
@@ -7631,7 +7758,7 @@ async function captureScheme(browser, scheme) {
   // 2i. 같은 피커를 메시지 반응과 컴포저 삽입이 공유한다 (#1742).
   //     패널은 caret에 넣는 동안에도 opener를 기억해 Esc/선택 뒤 포커스를
   //     컴포저의 명시적인 진입점으로 돌린다.
-  await login.getByTestId("composer-emoji-trigger").click();
+  await sceneClick(login, login.getByTestId("composer-emoji-trigger"));
   await login.getByTestId("composer-emoji-picker").waitFor({ state: "visible" });
   await login.getByTestId("emoji-search").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
@@ -7641,7 +7768,7 @@ async function captureScheme(browser, scheme) {
     "composer-emoji-trigger",
     "composer-emoji-picker"
   );
-  const composerEmojiShot = `${OUT_DIR}/u4-composer-emoji-${scheme}.png`;
+  const composerEmojiShot = beginSceneFromShotPath(`${OUT_DIR}/u4-composer-emoji-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: composerEmojiShot });
   shots.push(composerEmojiShot);
@@ -7650,7 +7777,7 @@ async function captureScheme(browser, scheme) {
   await waitForAnimations(login);
   // 2j. 스레드도 채널과 같은 메시지 입력 능력(멘션·첨부·이모지)을 갖는다
   //     (#1688). 기존 답글 컴포저/첨부 트레이를 유지하고 공용 멘션 층을 붙였다.
-  await login.getByTestId("thread-anchor").first().click();
+  await sceneClick(login, login.getByTestId("thread-anchor").first());
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(login, `thread ${scheme}`);
   const threadComposer = login.getByTestId("thread-composer-input");
@@ -7682,7 +7809,7 @@ async function captureScheme(browser, scheme) {
   await assertThreadRootHoverToolbar(login, scheme);
   // 호버 프레임은 자기 이름으로 찍고(#1753 N-1), 패리티 사진은 마우스를 치운
   // rest 상태로 되돌린다 — hover 잔상이 다른 목적의 사진에 앉지 않게.
-  const threadHoverShot = `${OUT_DIR}/thread-root-hover-${scheme}.png`;
+  const threadHoverShot = beginSceneFromShotPath(`${OUT_DIR}/thread-root-hover-${scheme}.png`);
   await login.screenshot({ path: threadHoverShot });
   shots.push(threadHoverShot);
   await login.mouse.move(8, 8);
@@ -7690,12 +7817,12 @@ async function captureScheme(browser, scheme) {
     .getByTestId("thread-panel")
     .getByTestId("message-hover-toolbar")
     .waitFor({ state: "detached" });
-  const threadShot = `${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`;
+  const threadShot = beginSceneFromShotPath(`${OUT_DIR}/u4-thread-composer-parity-${scheme}.png`);
   await login.screenshot({ path: threadShot });
   shots.push(threadShot);
   await login.keyboard.press("Escape");
   await threadComposer.fill("");
-  await login.getByTestId("thread-composer-emoji-trigger").click();
+  await sceneClick(login, login.getByTestId("thread-composer-emoji-trigger"));
   await login
     .getByTestId("thread-composer-emoji-picker")
     .waitFor({ state: "visible" });
@@ -7716,7 +7843,7 @@ async function captureScheme(browser, scheme) {
       `[thread ${scheme}] picker Escape left thread-panel count=${threadStillOpen} (want 1)`
     );
   }
-  await login.getByTestId("thread-close").click();
+  await sceneClick(login, login.getByTestId("thread-close"));
 
   // 2j-2. 답글 0개 분기(#1753 M-2): 점선 빈 상태 상자의 자연 경로는 「아직 답글
   //       없는 행에서 툴바 [답글]로 스레드를 여는 것」이다 — 이미 연 스레드는
@@ -7732,23 +7859,23 @@ async function captureScheme(browser, scheme) {
   // 불변식(탭 스톱 자)이 있으므로 전역 locator로 잡는다.
   // 앞 레인이 행에 남긴 키보드 포커스를 컴포저로 옮긴다 — 포커스 행+호버 행이
   // 갈리면 툴바가 2개 떠서(hover∨focus 계약) 전역 locator가 흔들린다.
-  await login.getByTestId("composer-input").click();
+  await sceneClick(login, login.getByTestId("composer-input"));
   const freshThreadRow = login
     .locator('[data-testid="timeline-message"][data-actionable="true"]')
     .last();
   await freshThreadRow.hover();
   const freshToolbar = freshThreadRow.getByTestId("message-hover-toolbar");
   await freshToolbar.waitFor({ state: "visible" });
-  await freshToolbar.getByTestId("toolbar-reply").click();
+  await sceneClick(login, freshToolbar.getByTestId("toolbar-reply"));
   await login.getByTestId("thread-panel").waitFor({ state: "visible" });
   await login.getByTestId("thread-empty").waitFor({ state: "visible" });
   await login.mouse.move(8, 8);
   await assertNoHorizontalOverflow(login, `thread empty ${scheme}`);
-  const threadEmptyShot = `${OUT_DIR}/thread-empty-${scheme}.png`;
+  const threadEmptyShot = beginSceneFromShotPath(`${OUT_DIR}/thread-empty-${scheme}.png`);
   await login.screenshot({ path: threadEmptyShot });
   shots.push(threadEmptyShot);
   await login.unroute("**/v1/workspaces/*/channels/*/messages/*/replies*");
-  await login.getByTestId("thread-close").click();
+  await sceneClick(login, login.getByTestId("thread-close"));
 
   // 2j. 그래서 이 타임라인을 키보드로 지나가는 데 얼마가 드는가 (goal B11 R2 H1).
   //     리뷰가 센 것과 같은 자다. 실측 16번(그려진 11행 + 본문 링크 + 카드 안
@@ -7769,7 +7896,7 @@ async function captureScheme(browser, scheme) {
   // instant after focus catches the ring mid-interpolation and reviews a color
   // the product never rests on. Let it settle first.
   await login.waitForTimeout(300);
-  const createShot = `${OUT_DIR}/channel-create-${scheme}.png`;
+  const createShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createShot });
   shots.push(createShot);
@@ -7777,12 +7904,12 @@ async function captureScheme(browser, scheme) {
   // 3a-2. 서버 거절은 필드 옆에 (MOMO-614): 이미 있는 이름을 보내면 409가 이름
   //       상자 밑에 붙고, 입력한 값은 그대로 남는다. 토스트 아님.
   await login.getByTestId("create-channel-name").fill("general");
-  await login.getByTestId("create-channel-submit").click();
+  await sceneClick(login, login.getByTestId("create-channel-submit"));
   await login
     .getByTestId("create-channel-name-error")
     .waitFor({ state: "visible" });
   await login.waitForTimeout(300);
-  const createErrorShot = `${OUT_DIR}/channel-create-error-${scheme}.png`;
+  const createErrorShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-error-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createErrorShot });
   shots.push(createErrorShot);
@@ -7797,12 +7924,12 @@ async function captureScheme(browser, scheme) {
     return route.fallback();
   });
   await login.getByTestId("create-channel-name").fill("release-rollback");
-  await login.getByTestId("create-channel-submit").click();
+  await sceneClick(login, login.getByTestId("create-channel-submit"));
   await login
     .locator('[data-testid="create-channel-submit"][aria-busy="true"]')
     .waitFor({ state: "visible" });
   await login.waitForTimeout(200);
-  const createPendingShot = `${OUT_DIR}/channel-create-pending-${scheme}.png`;
+  const createPendingShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-pending-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createPendingShot });
   shots.push(createPendingShot);
@@ -7817,12 +7944,12 @@ async function captureScheme(browser, scheme) {
   await login.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   await login.getByTestId("create-channel-offline").waitFor({ state: "visible" });
   await login.waitForTimeout(200);
-  const createOfflineShot = `${OUT_DIR}/channel-create-offline-${scheme}.png`;
+  const createOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/channel-create-offline-${scheme}.png`);
   await waitForAnimations(login);
   await login.screenshot({ path: createOfflineShot });
   shots.push(createOfflineShot);
   await context.setOffline(false);
-  await login.getByTestId("create-channel-cancel").click();
+  await sceneClick(login, login.getByTestId("create-channel-cancel"));
   await login.getByTestId("create-channel-dialog").waitFor({ state: "detached" });
 
   // 3a-3. 빈 워크스페이스 (MOMO-614): 채널이 0개일 때 남는 유일한 행동. 이 화면의
@@ -7837,7 +7964,7 @@ async function captureScheme(browser, scheme) {
   await emptyWorkspace.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(emptyWorkspace);
   await emptyWorkspace.getByTestId("chat-no-channel").waitFor({ state: "visible" });
-  const emptyShot = `${OUT_DIR}/workspace-empty-${scheme}.png`;
+  const emptyShot = beginSceneFromShotPath(`${OUT_DIR}/workspace-empty-${scheme}.png`);
   await emptyWorkspace.screenshot({ path: emptyShot });
   shots.push(emptyShot);
 
@@ -7860,7 +7987,7 @@ async function captureScheme(browser, scheme) {
   await nonAdmin.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(nonAdmin);
   await nonAdmin.getByTestId("chat-no-channel").waitFor({ state: "visible" });
-  const nonAdminShot = `${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`;
+  const nonAdminShot = beginSceneFromShotPath(`${OUT_DIR}/workspace-empty-nonadmin-${scheme}.png`);
   await nonAdmin.screenshot({ path: nonAdminShot });
   shots.push(nonAdminShot);
 
@@ -7896,7 +8023,7 @@ async function captureScheme(browser, scheme) {
     );
   }
   await memberSettings.waitForTimeout(250);
-  const memberSettingsShot = `${OUT_DIR}/settings-workspace-member-${scheme}.png`;
+  const memberSettingsShot = beginSceneFromShotPath(`${OUT_DIR}/settings-workspace-member-${scheme}.png`);
   await memberSettings.screenshot({ path: memberSettingsShot });
   shots.push(memberSettingsShot);
 
@@ -7907,7 +8034,7 @@ async function captureScheme(browser, scheme) {
   await signIn(directory);
   await directory.evaluate('location.hash = "/directory"');
   await directory.getByTestId("directory-row").first().waitFor({ state: "visible" });
-  const directoryShot = `${OUT_DIR}/directory-${scheme}.png`;
+  const directoryShot = beginSceneFromShotPath(`${OUT_DIR}/directory-${scheme}.png`);
   await directory.screenshot({ path: directoryShot });
   shots.push(directoryShot);
 
@@ -7915,25 +8042,24 @@ async function captureScheme(browser, scheme) {
   //     query is typed, which is how the palette is actually used, and "김"
   //     lands on the pair a directory has to keep apart (a human and an agent
   //     whose display names are both 김인턴).
-  await directory.getByTestId("open-quick-switcher").click();
+  await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
   await directory.getByTestId("quick-switcher-input").fill("김");
   await directory.getByTestId("switcher-person").first().waitFor({ state: "visible" });
-  const switcherShot = `${OUT_DIR}/quick-switcher-people-${scheme}.png`;
+  const switcherShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-people-${scheme}.png`);
   await directory.screenshot({ path: switcherShot });
   shots.push(switcherShot);
   await directory.keyboard.press("Escape");
 
   // 3d. the DM that a directory profile opens: same timeline anatomy as a channel.
-  await directory
+  await sceneClick(directory, directory
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')
-    .first()
-    .click();
+    .first());
   await directory.getByTestId("member-profile-dialog").waitFor({ state: "visible" });
-  await directory.getByTestId("member-profile-dm").click();
+  await sceneClick(directory, directory.getByTestId("member-profile-dm"));
   await directory.getByTestId("composer-input").waitFor({ state: "visible" });
   await directory.getByTestId("timeline-message").first().waitFor({ state: "visible" });
   await assertPausedNoticeFolded(directory, `dm ${scheme}`);
-  const dmShot = `${OUT_DIR}/dm-${scheme}.png`;
+  const dmShot = beginSceneFromShotPath(`${OUT_DIR}/dm-${scheme}.png`);
   await directory.screenshot({ path: dmShot });
   shots.push(dmShot);
 
@@ -7947,21 +8073,21 @@ async function captureScheme(browser, scheme) {
   await agentHub.getByTestId("agent-hub-profile-card").waitFor({ state: "visible" });
   await agentHub.getByTestId("agent-hub-channels").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(agentHub, `agent hub ${scheme}`);
-  const agentHubShot = `${OUT_DIR}/agent-hub-${scheme}.png`;
+  const agentHubShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-${scheme}.png`);
   await agentHub.screenshot({ path: agentHubShot });
   shots.push(agentHubShot);
   const toolsViewport = await frameEnabledToolsSection(
     agentHub,
     `agent-hub-tools ${scheme}`
   );
-  const agentHubToolsShot = `${OUT_DIR}/agent-hub-tools-${scheme}.png`;
+  const agentHubToolsShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-tools-${scheme}.png`);
   await agentHub.screenshot({ path: agentHubToolsShot });
   shots.push(agentHubToolsShot);
   await agentHub.setViewportSize(toolsViewport);
 
   // 3f-2. 에이전트 만들기, 사람이 채우는 대로 채운 상태. 자격증명 줄이 폼 안에
   //       있는지가 이 프레임의 요점이다 (ADR-0004: 여기에는 키를 넣지 않는다).
-  await agentHub.getByTestId("agent-hub-create").click();
+  await sceneClick(agentHub, agentHub.getByTestId("agent-hub-create"));
   await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "visible" });
   await agentHub.getByTestId("create-agent-display-name").fill("배포당번");
   await agentHub.getByTestId("create-agent-handle").fill("release-duty");
@@ -7975,22 +8101,22 @@ async function captureScheme(browser, scheme) {
   // 포커스 링은 transition-colors(150ms)를 타므로, 방금 포커스한 프레임을 찍으면
   // 제품이 한 번도 머무르지 않는 중간 색을 리뷰하게 된다.
   await agentHub.waitForTimeout(300);
-  const agentCreateShot = `${OUT_DIR}/agent-create-${scheme}.png`;
+  const agentCreateShot = beginSceneFromShotPath(`${OUT_DIR}/agent-create-${scheme}.png`);
   await agentHub.screenshot({ path: agentCreateShot });
   shots.push(agentCreateShot);
 
   // 3f-3. 서버 거절은 필드 옆에: 이미 있는 핸들을 보내면 409가 핸들 상자 밑에
   //       붙고, 입력한 값은 그대로 남는다. 토스트 아님.
   await agentHub.getByTestId("create-agent-handle").fill("hermes");
-  await agentHub.getByTestId("create-agent-submit").click();
+  await sceneClick(agentHub, agentHub.getByTestId("create-agent-submit"));
   await agentHub
     .getByTestId("create-agent-handle-error")
     .waitFor({ state: "visible" });
   await agentHub.waitForTimeout(300);
-  const agentCreateErrorShot = `${OUT_DIR}/agent-create-error-${scheme}.png`;
+  const agentCreateErrorShot = beginSceneFromShotPath(`${OUT_DIR}/agent-create-error-${scheme}.png`);
   await agentHub.screenshot({ path: agentCreateErrorShot });
   shots.push(agentCreateErrorShot);
-  await agentHub.getByTestId("create-agent-cancel").click();
+  await sceneClick(agentHub, agentHub.getByTestId("create-agent-cancel"));
   await agentHub.getByTestId("create-agent-dialog").waitFor({ state: "detached" });
 
   // 3f-4. 편집 표면이 없는 서버 (diff matrix D-4의 현재 형상): allowed-models가
@@ -8011,7 +8137,7 @@ async function captureScheme(browser, scheme) {
   await readOnlyHub
     .getByTestId("agent-hub-edit-unsupported")
     .waitFor({ state: "visible" });
-  const agentHubReadOnlyShot = `${OUT_DIR}/agent-hub-readonly-${scheme}.png`;
+  const agentHubReadOnlyShot = beginSceneFromShotPath(`${OUT_DIR}/agent-hub-readonly-${scheme}.png`);
   await readOnlyHub.screenshot({ path: agentHubReadOnlyShot });
   shots.push(agentHubReadOnlyShot);
 
@@ -8051,16 +8177,17 @@ async function captureScheme(browser, scheme) {
   await assertWideRowsFillOnly(approvals, `activity ${scheme}`);
   await approvals.evaluate('location.hash = "/inbox?filter=needs-action"');
   await approvals.getByTestId("inbox-list").waitFor({ state: "visible" });
-  const approvalsShot = `${OUT_DIR}/approvals-${scheme}.png`;
+  const approvalsShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-${scheme}.png`);
   await approvals.screenshot({ path: approvalsShot });
   shots.push(approvalsShot);
 
-  await approvals.getByTestId("inbox-approval-approve").first().click();
+  beginScene("approvals-confirm");
+  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
   await approvals
     .getByTestId("inbox-approval-confirm")
     .first()
     .waitFor({ state: "visible" });
-  const approvalsConfirmShot = `${OUT_DIR}/approvals-confirm-${scheme}.png`;
+  const approvalsConfirmShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-confirm-${scheme}.png`);
   await approvals.screenshot({ path: approvalsConfirmShot });
   shots.push(approvalsConfirmShot);
 
@@ -8075,12 +8202,12 @@ async function captureScheme(browser, scheme) {
       "inbox-approval-host-radio-019f9b10-0000-7000-8000-00000000c002"
     )
     .check();
-  await approvals.getByTestId("inbox-approval-approve").first().click();
+  await sceneClick(approvals, approvals.getByTestId("inbox-approval-approve").first());
   await approvals
     .getByTestId("inbox-approval-confirm")
     .first()
     .waitFor({ state: "visible" });
-  const spawnPickerShot = `${OUT_DIR}/approvals-host-picker-${scheme}.png`;
+  const spawnPickerShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-host-picker-${scheme}.png`);
   await approvals.screenshot({ path: spawnPickerShot });
   shots.push(spawnPickerShot);
 
@@ -8129,7 +8256,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("inbox-approval-host-blocked")
     .first()
     .waitFor({ state: "visible" });
-  const spawnBlockedShot = `${OUT_DIR}/approvals-host-blocked-${scheme}.png`;
+  const spawnBlockedShot = beginSceneFromShotPath(`${OUT_DIR}/approvals-host-blocked-${scheme}.png`);
   await blockedPage.screenshot({ path: spawnBlockedShot });
   shots.push(spawnBlockedShot);
   await blockedPage.close();
@@ -8148,7 +8275,7 @@ async function captureScheme(browser, scheme) {
   // the image so the shot shows the OG card, not the muted skeleton.
   await turns.getByTestId("unfurl-image").waitFor({ state: "visible" });
   await assertWideRowsFillOnly(turns, `agent-turns ${scheme}`);
-  const turnsShot = `${OUT_DIR}/agent-turns-${scheme}.png`;
+  const turnsShot = beginSceneFromShotPath(`${OUT_DIR}/agent-turns-${scheme}.png`);
   await turns.screenshot({ path: turnsShot });
   shots.push(turnsShot);
 
@@ -8165,7 +8292,7 @@ async function captureScheme(browser, scheme) {
     "cascade-notice",
     `agent-turns ${scheme}`
   );
-  const cascadeShot = `${OUT_DIR}/cascade-notice-${scheme}.png`;
+  const cascadeShot = beginSceneFromShotPath(`${OUT_DIR}/cascade-notice-${scheme}.png`);
   await turns.screenshot({ path: cascadeShot });
   shots.push(cascadeShot);
 
@@ -8184,7 +8311,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("agent-turn-badge")
     .first()
     .waitFor({ state: "visible" });
-  const turnsOfflineShot = `${OUT_DIR}/agent-turns-offline-${scheme}.png`;
+  const turnsOfflineShot = beginSceneFromShotPath(`${OUT_DIR}/agent-turns-offline-${scheme}.png`);
   await turnsOffline.screenshot({ path: turnsOfflineShot });
   shots.push(turnsOfflineShot);
 
@@ -8206,7 +8333,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("notification-rules")
     .waitFor({ state: "visible" });
   await assertWideRowsFillOnly(notificationsPage, `settings notifications ${scheme}`);
-  const notificationsShot = `${OUT_DIR}/settings-notifications-${scheme}.png`;
+  const notificationsShot = beginSceneFromShotPath(`${OUT_DIR}/settings-notifications-${scheme}.png`);
   await parkPointerOffViewport(notificationsPage);
   await assertNotificationsDndRest(notificationsPage, scheme);
   await notificationsPage.screenshot({ path: notificationsShot });
@@ -8219,7 +8346,7 @@ async function captureScheme(browser, scheme) {
   await draftsPage.goto(ORIGIN, { waitUntil: "networkidle" });
   await signIn(draftsPage);
   await draftsPage.evaluate(`(() => {
-    const now = Date.now();
+    const now = ${FIXTURE_NOW};
     const prefix = "momo.draft.v1:${WORKSPACE_ID}:";
     localStorage.setItem(prefix + "${GENERAL_ID}", JSON.stringify({
       text: "배포 롤백 근거를 정리하면",
@@ -8264,7 +8391,7 @@ async function captureScheme(browser, scheme) {
     throw new Error(`drafts panel capture failed: ${JSON.stringify(dump)}`);
   }
   await assertWideRowsFillOnly(draftsPage, `drafts ${scheme}`);
-  const draftsShot = `${OUT_DIR}/drafts-panel-${scheme}.png`;
+  const draftsShot = beginSceneFromShotPath(`${OUT_DIR}/drafts-panel-${scheme}.png`);
   await draftsPage.screenshot({ path: draftsShot });
   shots.push(draftsShot);
   await draftsPage.close();
@@ -8286,7 +8413,7 @@ async function captureScheme(browser, scheme) {
     .first()
     .waitFor({ state: "visible" });
   await assertReminderOverflowClearsBodyText(remindersPage, `desktop ${scheme}`);
-  const remindersShot = `${OUT_DIR}/reminders-${scheme}.png`;
+  const remindersShot = beginSceneFromShotPath(`${OUT_DIR}/reminders-${scheme}.png`);
   await remindersPage.screenshot({ path: remindersShot });
   shots.push(remindersShot);
   await remindersPage.getByRole("heading", { name: "인박스" }).hover();
@@ -8302,7 +8429,7 @@ async function captureScheme(browser, scheme) {
   await settings.evaluate('location.hash = "/settings?section=code"');
   await settings.getByTestId("work-host-list").waitFor({ state: "visible" });
   await settings.getByTestId("work-tier-policy").waitFor({ state: "visible" });
-  const workHostShot = `${OUT_DIR}/settings-work-host-${scheme}.png`;
+  const workHostShot = beginSceneFromShotPath(`${OUT_DIR}/settings-work-host-${scheme}.png`);
   await settings.screenshot({ path: workHostShot });
   shots.push(workHostShot);
 
@@ -8313,7 +8440,7 @@ async function captureScheme(browser, scheme) {
     .getByTestId("work-tier-policy")
     .scrollIntoViewIfNeeded();
   await settings.waitForTimeout(200);
-  const policyShot = `${OUT_DIR}/settings-work-host-policy-${scheme}.png`;
+  const policyShot = beginSceneFromShotPath(`${OUT_DIR}/settings-work-host-policy-${scheme}.png`);
   await settings.screenshot({ path: policyShot });
   shots.push(policyShot);
 
@@ -8325,7 +8452,7 @@ async function captureScheme(browser, scheme) {
   await signIn(aiLink);
   await aiLink.evaluate('location.hash = "/settings?section=ai"');
   await aiLink.getByTestId("chain-list").waitFor({ state: "visible" });
-  const aiLinkShot = `${OUT_DIR}/settings-ai-chain-${scheme}.png`;
+  const aiLinkShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-${scheme}.png`);
   await aiLink.screenshot({ path: aiLinkShot });
   shots.push(aiLinkShot);
 
@@ -8333,15 +8460,15 @@ async function captureScheme(browser, scheme) {
   // is reviewed twice or the half nobody sees is the half that regresses.
   await aiLink.getByTestId("chain-add").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiEditShot = `${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`;
+  const aiEditShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-edit-${scheme}.png`);
   await aiLink.screenshot({ path: aiEditShot });
   shots.push(aiEditShot);
 
   // …and the probe table, which is the one surface carrying all four
   //     dispositions and therefore all four status tones in one frame.
-  await aiLink.getByRole("button", { name: "연결 확인" }).click();
+  await sceneClick(aiLink, aiLink.getByRole("button", { name: "연결 확인" }));
   await aiLink.getByTestId("chain-probe").waitFor({ state: "visible" });
-  const aiProbeShot = `${OUT_DIR}/settings-ai-probe-${scheme}.png`;
+  const aiProbeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-${scheme}.png`);
   await aiLink.screenshot({ path: aiProbeShot });
   shots.push(aiProbeShot);
 
@@ -8350,11 +8477,11 @@ async function captureScheme(browser, scheme) {
   //     keep its format hint. Nothing has happened yet, so there is no error to
   //     report; what the block owes the reader is the next step, once, at the
   //     foot ("6차 provider 주소를 입력하면 저장할 수 있습니다.").
-  await aiLink.getByTestId("chain-add").click();
+  await sceneClick(aiLink, aiLink.getByTestId("chain-add"));
   await aiLink.getByTestId("chain-blocked").waitFor({ state: "visible" });
   await aiLink.getByTestId("chain-blocked").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiNewRowShot = `${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`;
+  const aiNewRowShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-new-row-${scheme}.png`);
   await aiLink.screenshot({ path: aiNewRowShot });
   shots.push(aiNewRowShot);
 
@@ -8364,7 +8491,7 @@ async function captureScheme(browser, scheme) {
   //     of "3차".
   await aiLink.getByTestId("chain-probe-scope").scrollIntoViewIfNeeded();
   await aiLink.waitForTimeout(200);
-  const aiPendingShot = `${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`;
+  const aiPendingShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-probe-pending-${scheme}.png`);
   await aiLink.screenshot({ path: aiPendingShot });
   shots.push(aiPendingShot);
 
@@ -8381,7 +8508,7 @@ async function captureScheme(browser, scheme) {
   await aiPartial.getByTestId("chain-partial").waitFor({ state: "visible" });
   await aiPartial.getByTestId("chain-partial").scrollIntoViewIfNeeded();
   await aiPartial.waitForTimeout(200);
-  const aiPartialShot = `${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`;
+  const aiPartialShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-chain-partial-${scheme}.png`);
   await aiPartial.screenshot({ path: aiPartialShot });
   shots.push(aiPartialShot);
 
@@ -8400,7 +8527,7 @@ async function captureScheme(browser, scheme) {
   await signIn(aiLegacy);
   await aiLegacy.evaluate('location.hash = "/settings?section=ai"');
   await aiLegacy.getByTestId("chain-unavailable").waitFor({ state: "visible" });
-  const aiLegacyShot = `${OUT_DIR}/settings-ai-no-chain-${scheme}.png`;
+  const aiLegacyShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-no-chain-${scheme}.png`);
   await aiLegacy.screenshot({ path: aiLegacyShot });
   shots.push(aiLegacyShot);
 
@@ -8426,7 +8553,7 @@ async function captureScheme(browser, scheme) {
       source: "environment",
       mode: "local-mock",
       endpointLabel: MOCK_ONLY_HOP.endpointLabel,
-      checkedAtMs: Date.now(),
+      checkedAtMs: FIXTURE_NOW,
       cascadeOk: false,
       entries: [
         {
@@ -8464,9 +8591,9 @@ async function captureScheme(browser, scheme) {
   await signIn(aiMock);
   await aiMock.evaluate('location.hash = "/settings?section=ai"');
   await aiMock.getByTestId("chain-list").waitFor({ state: "visible" });
-  await aiMock.getByRole("button", { name: "연결 확인" }).click();
+  await sceneClick(aiMock, aiMock.getByRole("button", { name: "연결 확인" }));
   await aiMock.getByTestId("chain-probe").waitFor({ state: "visible" });
-  const aiMockShot = `${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`;
+  const aiMockShot = beginSceneFromShotPath(`${OUT_DIR}/settings-ai-mock-mode-${scheme}.png`);
   await aiMock.screenshot({ path: aiMockShot });
   shots.push(aiMockShot);
 
@@ -8539,7 +8666,7 @@ async function captureScheme(browser, scheme) {
       throw new Error(`[설정 ${heading} ${scheme}] 에러 경계가 그려졌다 — 픽스처 누락`);
     }
     await assertWideRowsFillOnly(settingsSweep, `settings ${name} ${scheme}`);
-    const sectionShot = `${OUT_DIR}/settings-${name}-${scheme}.png`;
+    const sectionShot = beginSceneFromShotPath(`${OUT_DIR}/settings-${name}-${scheme}.png`);
     await settingsSweep.screenshot({ path: sectionShot });
     shots.push(sectionShot);
   }
@@ -8557,13 +8684,13 @@ async function captureScheme(browser, scheme) {
 
   // 확정하지 않는다. 찍는 것은 **묻는 판**이고, 그 판이 존재한다는 사실이 이
   // 표면의 계약이다(한 번의 무방비 클릭으로 살아 있는 수신 주소가 죽지 않는다).
-  await webhooks.locator('[data-testid^="webhook-revoke-"]').first().click();
+  await sceneClick(webhooks, webhooks.locator('[data-testid^="webhook-revoke-"]').first());
   await webhooks
     .locator('[data-testid^="webhook-revoke-"][data-testid$="-commit"]')
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);
-  const revokeShot = `${OUT_DIR}/settings-webhooks-revoke-confirm-${scheme}.png`;
+  const revokeShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-revoke-confirm-${scheme}.png`);
   await webhooks.screenshot({ path: revokeShot });
   shots.push(revokeShot);
 
@@ -8574,13 +8701,13 @@ async function captureScheme(browser, scheme) {
   await webhooks.waitForTimeout(200);
   await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
   await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
-  await webhooks.locator('[data-testid^="webhook-rotate-"]').first().click();
+  await sceneClick(webhooks, webhooks.locator('[data-testid^="webhook-rotate-"]').first());
   await webhooks
     .locator('[data-testid^="webhook-rotate-"][data-testid$="-commit"]')
     .first()
     .waitFor({ state: "visible" });
   await webhooks.waitForTimeout(150);
-  const rotateShot = `${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`;
+  const rotateShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-rotate-confirm-${scheme}.png`);
   await webhooks.screenshot({ path: rotateShot });
   shots.push(rotateShot);
 
@@ -8591,10 +8718,10 @@ async function captureScheme(browser, scheme) {
   await webhooks.evaluate('location.hash = "/settings?section=webhooks"');
   await webhooks.getByTestId("webhook-list").waitFor({ state: "visible" });
   await webhooks.getByTestId("webhook-label").fill("배포 알림 (GitHub Actions)");
-  await webhooks.getByTestId("webhook-create").click();
+  await sceneClick(webhooks, webhooks.getByTestId("webhook-create"));
   await webhooks.getByTestId("webhook-revealed").waitFor({ state: "visible" });
   await webhooks.waitForTimeout(200);
-  const revealShot = `${OUT_DIR}/settings-webhooks-created-${scheme}.png`;
+  const revealShot = beginSceneFromShotPath(`${OUT_DIR}/settings-webhooks-created-${scheme}.png`);
   await webhooks.screenshot({ path: revealShot });
   shots.push(revealShot);
 
@@ -8614,7 +8741,7 @@ async function captureScheme(browser, scheme) {
 
   async function shootDevices(page, name) {
     await page.waitForTimeout(250);
-    const path = `${OUT_DIR}/settings-devices-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/settings-devices-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
   }
@@ -8624,7 +8751,7 @@ async function captureScheme(browser, scheme) {
   await devices.getByTestId("device-link-create").waitFor({ state: "visible" });
   await shootDevices(devices, "idle");
 
-  await devices.getByTestId("device-link-create").click();
+  await sceneClick(devices, devices.getByTestId("device-link-create"));
   await devices.getByTestId("device-link-qr").waitFor({ state: "visible" });
   await devices.getByTestId("device-link-pending").waitFor({ state: "visible" });
   await shootDevices(devices, "qr");
@@ -8638,7 +8765,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.deepLink = railwayDeepLink;
   const devicesV7 = await openDevicesPage();
-  await devicesV7.getByTestId("device-link-create").click();
+  await sceneClick(devicesV7, devicesV7.getByTestId("device-link-create"));
   await devicesV7.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v7 = await measureDeviceLinkQrPitch(devicesV7, `v7 ${scheme}`);
   if (v7.modules !== 53) {
@@ -8649,7 +8776,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.deepLink = selfHostDeepLink;
   const devicesV8 = await openDevicesPage();
-  await devicesV8.getByTestId("device-link-create").click();
+  await sceneClick(devicesV8, devicesV8.getByTestId("device-link-create"));
   await devicesV8.getByTestId("device-link-qr").waitFor({ state: "visible" });
   const v8 = await measureDeviceLinkQrPitch(devicesV8, `v8 ${scheme}`);
   if (v8.modules !== 57) {
@@ -8663,12 +8790,12 @@ async function captureScheme(browser, scheme) {
     device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
   });
   const devicesConfirm = await openDevicesPage();
-  await devicesConfirm.getByTestId("device-link-create").click();
+  await sceneClick(devicesConfirm, devicesConfirm.getByTestId("device-link-create"));
   await devicesConfirm.getByTestId("device-link-awaiting-confirm").waitFor({
     state: "visible",
   });
   await shootDevices(devicesConfirm, "awaiting-confirm");
-  await devicesConfirm.getByTestId("device-link-confirm-sas").click();
+  await sceneClick(devicesConfirm, devicesConfirm.getByTestId("device-link-confirm-sas"));
   await devicesConfirm.getByTestId("device-link-connected").waitFor({
     state: "visible",
   });
@@ -8678,7 +8805,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.getBody = () => ({ status: "expired" });
   const devicesExpired = await openDevicesPage();
-  await devicesExpired.getByTestId("device-link-create").click();
+  await sceneClick(devicesExpired, devicesExpired.getByTestId("device-link-create"));
   await devicesExpired.getByTestId("device-link-expired").waitFor({
     state: "visible",
   });
@@ -8688,7 +8815,7 @@ async function captureScheme(browser, scheme) {
   resetDeviceLinkHarness();
   deviceLinkHarness.issueStatus = 500;
   const devicesError = await openDevicesPage();
-  await devicesError.getByTestId("device-link-create").click();
+  await sceneClick(devicesError, devicesError.getByTestId("device-link-create"));
   await devicesError.getByTestId("device-link-banner").waitFor({
     state: "visible",
   });
@@ -8717,7 +8844,7 @@ async function captureScheme(browser, scheme) {
     device: { name: DEVICE_LINK_CAPTURE_DEVICE, platform: "ios" },
   });
   const devicesLoopback = await openDevicesPage();
-  await devicesLoopback.getByTestId("device-link-create").click();
+  await sceneClick(devicesLoopback, devicesLoopback.getByTestId("device-link-create"));
   await devicesLoopback.getByTestId("device-link-connected").waitFor({
     state: "visible",
   });
@@ -8736,10 +8863,10 @@ async function captureScheme(browser, scheme) {
     state: "visible",
   });
   await firstRun.waitForTimeout(250);
-  const firstRunShot = `${OUT_DIR}/onboarding-phone-link-${scheme}.png`;
+  const firstRunShot = beginSceneFromShotPath(`${OUT_DIR}/onboarding-phone-link-${scheme}.png`);
   await firstRun.screenshot({ path: firstRunShot });
   shots.push(firstRunShot);
-  await firstRun.getByTestId("onboarding-enter-app").click();
+  await sceneClick(firstRun, firstRun.getByTestId("onboarding-enter-app"));
   await firstRun.close();
 
   // 4. dense timeline via the stress path (no realtime rail, 40 rows)
@@ -8747,7 +8874,7 @@ async function captureScheme(browser, scheme) {
   await stress.goto(`${ORIGIN}/?stress=40`, { waitUntil: "networkidle" });
   await signIn(stress);
   await stress.getByTestId("timeline-message").first().waitFor({ state: "visible" });
-  const stressShot = `${OUT_DIR}/timeline-dense-${scheme}.png`;
+  const stressShot = beginSceneFromShotPath(`${OUT_DIR}/timeline-dense-${scheme}.png`);
   await stress.screenshot({ path: stressShot });
   shots.push(stressShot);
 
@@ -8764,17 +8891,17 @@ async function captureScheme(browser, scheme) {
   await scrollTimelineRowIntoView(b8, "message-markdown", `B8 ${scheme}`);
   await b8.getByTestId("message-code-block").first().waitFor({ state: "visible" });
   await b8.waitForTimeout(200);
-  const markdownShot = `${OUT_DIR}/b8-message-markdown-${scheme}.png`;
+  const markdownShot = beginSceneFromShotPath(`${OUT_DIR}/b8-message-markdown-${scheme}.png`);
   await b8.screenshot({ path: markdownShot });
   shots.push(markdownShot);
 
   // B8 H2: the failure notice, with 자세히 open. Two things are on trial here
   // and both are negatives: no English, and no provider text.
   await scrollTimelineRowIntoView(b8, "turn-failure", `B8 ${scheme}`);
-  await b8.getByTestId("turn-failure-detail").first().click();
+  await sceneClick(b8, b8.getByTestId("turn-failure-detail").first());
   await b8.waitForTimeout(200);
   await assertWideRowsFillOnly(b8, `b8-failure ${scheme}`);
-  const failureShot = `${OUT_DIR}/b8-provider-failure-${scheme}.png`;
+  const failureShot = beginSceneFromShotPath(`${OUT_DIR}/b8-provider-failure-${scheme}.png`);
   await b8.screenshot({ path: failureShot });
   shots.push(failureShot);
 
@@ -8784,7 +8911,7 @@ async function captureScheme(browser, scheme) {
   await b8.getByTestId("composer-input").focus();
   await b8.getByTestId("composer-hint").waitFor({ state: "visible" });
   await b8.waitForTimeout(300);
-  const hintShot = `${OUT_DIR}/b8-composer-hint-${scheme}.png`;
+  const hintShot = beginSceneFromShotPath(`${OUT_DIR}/b8-composer-hint-${scheme}.png`);
   await b8.screenshot({ path: hintShot });
   shots.push(hintShot);
 
@@ -8795,7 +8922,7 @@ async function captureScheme(browser, scheme) {
   // and 15.1s in the product is a banner nobody can review.
   await b8.waitForTimeout(SUSTAINED_DOWN_WAIT_MS);
   await b8.getByTestId("connection-banner").waitFor({ state: "visible" });
-  const bannerShot = `${OUT_DIR}/b8-connection-banner-${scheme}.png`;
+  const bannerShot = beginSceneFromShotPath(`${OUT_DIR}/b8-connection-banner-${scheme}.png`);
   await b8.screenshot({ path: bannerShot });
   shots.push(bannerShot);
 
@@ -8806,7 +8933,7 @@ async function captureScheme(browser, scheme) {
   // wrap badly, and both are on screen in this one shot.
   await b8.setViewportSize({ width: 900, height: 800 });
   await b8.waitForTimeout(300);
-  const narrowShot = `${OUT_DIR}/b8-narrow-900-${scheme}.png`;
+  const narrowShot = beginSceneFromShotPath(`${OUT_DIR}/b8-narrow-900-${scheme}.png`);
   await b8.screenshot({ path: narrowShot });
   shots.push(narrowShot);
   const overflow900 = await b8.evaluate(
@@ -8837,6 +8964,7 @@ function reportUnmocked() {
 // 비교차를 잰다. ADE가 같은 work-sessions 키를 셸에서 읽으므로 로딩 장면은
 // networkidle을 기다리지 않는다.
 async function captureTerminalDockScenes(browser, scheme) {
+  beginScene("terminal-dock");
   const shots = [];
   const liveHostId = "019f994c-4ed0-76a9-9d43-a9bde45b8fcd";
   const dockSessions = [
@@ -8854,7 +8982,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       observerGrantCount: 1,
       remoteAttachAvailable: true,
       remoteDisplayAvailable: false,
-      startedAtMs: Date.now() - 12 * 60_000,
+      startedAtMs: FIXTURE_NOW - 12 * 60_000,
     },
     {
       id: "019f9ab9-6da4-7be7-9bc9-4a3872d921c5",
@@ -8870,13 +8998,13 @@ async function captureTerminalDockScenes(browser, scheme) {
       observerGrantCount: 0,
       remoteAttachAvailable: true,
       remoteDisplayAvailable: false,
-      startedAtMs: Date.now() - 45 * 60_000,
+      startedAtMs: FIXTURE_NOW - 45 * 60_000,
     },
   ];
 
   async function openDock(page) {
     const toggle = page.getByTestId("open-terminal-dock");
-    await toggle.click();
+    await sceneClick(page, toggle);
     await page.getByTestId("terminal-dock").waitFor({ state: "visible" });
     if ((await toggle.getAttribute("aria-pressed")) !== "true") {
       throw new Error(`터미널 토글이 열린 동안 pressed가 아니다 ${scheme}`);
@@ -8919,7 +9047,7 @@ async function captureTerminalDockScenes(browser, scheme) {
     await assertComposerVisible(page, `terminal dock ${name} ${scheme}`);
     await assertDockAboveComposer(page, `terminal dock ${name} ${scheme}`);
     await assertDockExpandHonesty(page, `terminal dock ${name} ${scheme}`);
-    const path = `${OUT_DIR}/terminal-dock-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/terminal-dock-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -8988,7 +9116,7 @@ async function captureTerminalDockScenes(browser, scheme) {
       if ((await tabs.count()) < 2) {
         throw new Error(`세션 탭이 2개 미만이다 ${scheme}`);
       }
-      await tabs.nth(1).click();
+      await sceneClick(page, tabs.nth(1));
       if ((await tabs.nth(1).getAttribute("aria-selected")) !== "true") {
         throw new Error(`두 번째 탭이 선택되지 않는다 ${scheme}`);
       }
@@ -9000,7 +9128,7 @@ async function captureTerminalDockScenes(browser, scheme) {
         scheme
       );
       const dock = page.getByTestId("terminal-dock");
-      await page.getByTestId("terminal-dock-close").click();
+      await sceneClick(page, page.getByTestId("terminal-dock-close"));
       await dock.waitFor({ state: "detached" });
       await page.waitForFunction(
         `document.activeElement?.getAttribute("data-testid") === "open-terminal-dock"`
@@ -9120,6 +9248,7 @@ function markUnreadReadStates(cleared) {
 }
 
 async function captureMarkUnreadScenes(browser, scheme) {
+  beginScene("mark-unread");
   const shots = [];
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -9192,20 +9321,20 @@ async function captureMarkUnreadScenes(browser, scheme) {
   );
   await marked.hover();
   await page.getByTestId("message-actions-trigger").waitFor({ state: "visible" });
-  await page.getByTestId("message-actions-trigger").click();
+  await sceneClick(page, page.getByTestId("message-actions-trigger"));
   await page.getByTestId("message-action-menu").waitFor({ state: "visible" });
   const markItem = page.getByTestId("menu-mark-unread");
   if ((await markItem.count()) !== 1) {
     throw new Error(`마크 안 읽음 항목이 없다 ${scheme} (seq ${MARK_UNREAD_SEQ})`);
   }
-  await markItem.click();
+  await sceneClick(page, markItem);
   await waitForScrollerAlignSettled(page, `${scheme} after mark`);
   const proof = await page.waitForFunction(
     markUnreadProofExpr(),
     undefined,
     { polling: "raf", timeout: 15_000 }
   );
-  const path = `${OUT_DIR}/mark-unread-timeline-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/mark-unread-timeline-${scheme}.png`);
   await page.screenshot({ path });
   shots.push(path);
   const state = await proof.jsonValue();
@@ -9238,6 +9367,7 @@ async function captureMarkUnreadScenes(browser, scheme) {
 // Arrival is driven through the product store path (`oort.capture.message.new`
 // → useTimeline applyBatch), not a stage prop.
 async function captureWelcomeKickoffScenes(browser, scheme) {
+  beginScene("welcome-arrived");
   const shots = [];
 
   async function openWelcome(reducedMotion, options = {}) {
@@ -9281,7 +9411,9 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
       window.location.hash = `#/c/${id}`;
     }, CHANNELS[1].id);
     await page.getByTestId("chat-timeline").waitFor({ state: "visible" });
-    if (options.installClock) await page.clock.install();
+    if (options.installClock) {
+      await page.clock.install({ time: FIXTURE_NOW });
+    }
     await page.evaluate((id) => {
       window.location.hash = `#/c/${id}`;
     }, GENERAL_ID);
@@ -9333,7 +9465,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("no-preference");
     await waitForWelcomeStage(page);
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-stage-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9343,7 +9475,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("reduce");
     await waitForWelcomeStage(page);
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-stage-reduce-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-stage-reduce-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9382,7 +9514,7 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
         )
     );
     await waitForAnimations(page);
-    const path = `${OUT_DIR}/welcome-arrived-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-arrived-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9392,23 +9524,29 @@ async function captureWelcomeKickoffScenes(browser, scheme) {
     const { context, page } = await openWelcome("no-preference", {
       installClock: true,
     });
-    await waitForWelcomeStage(page);
-    await page.clock.fastForward(120_000);
-    await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
-    await page.clock.resume();
-    await waitForAnimations(page);
-    const vp = page.viewportSize() ?? VIEWPORT;
-    await page.mouse.move(vp.width + 80, vp.height + 80);
-    const path = `${OUT_DIR}/welcome-backstop-${scheme}.png`;
-    await page.screenshot({ path });
-    shots.push(path);
-    await context.close();
+    beginScene("welcome-backstop");
+    try {
+      await waitForWelcomeStage(page);
+      await page.clock.fastForward(120_000);
+      await page.getByTestId("welcome-kickoff-backstop").waitFor({ state: "visible" });
+      await page.clock.resume();
+      await waitForAnimations(page);
+      const vp = page.viewportSize() ?? VIEWPORT;
+      await page.mouse.move(vp.width + 80, vp.height + 80);
+      const path = beginSceneFromShotPath(`${OUT_DIR}/welcome-backstop-${scheme}.png`);
+      await page.screenshot({ path });
+      shots.push(path);
+      await context.close();
+    } finally {
+      setActiveCaptureScene("default");
+    }
   }
 
   return shots;
 }
 
 async function captureSettingsWelcomeScenes(browser, scheme) {
+  beginScene("settings-welcome");
   const shots = [];
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -9447,7 +9585,7 @@ async function captureSettingsWelcomeScenes(browser, scheme) {
         box.right <= vw,
     };
   });
-  const path = `${OUT_DIR}/settings-welcome-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/settings-welcome-${scheme}.png`);
   if (frame.height > frame.vh) {
     console.info(
       `settings-welcome ${scheme}: block cannot fit (height ${frame.height} > vh ${frame.vh}); shooting the block element`
@@ -9472,6 +9610,7 @@ async function captureSettingsWelcomeScenes(browser, scheme) {
 // 보는 화면인데 리뷰에 프레임이 없었다 — 아래 add-member 레인은 이 화면을 거쳐
 // 가면서도 자기 다이얼로그만 찍고 지나간다.
 async function captureEmptyConversationScenes(browser, scheme) {
+  beginScene("channel-intro-empty");
   const shots = [];
   const EMPTY_CHANNEL_ID = CHANNELS[1].id; // 엔진
 
@@ -9502,7 +9641,7 @@ async function captureEmptyConversationScenes(browser, scheme) {
     // 이 goal 이 고친 것을 정확히 못 보이게 한다.
     await empty.getByTestId("timeline-empty-primary").waitFor({ state: "visible" });
     await page.waitForTimeout(200);
-    const path = `${OUT_DIR}/empty-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/empty-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9518,6 +9657,7 @@ async function captureEmptyConversationScenes(browser, scheme) {
 // general은 픽스처 16행이라 열자마자 reachedStart이고, 인트로는 바닥 정렬 때문에
 // 창 위에 있으므로 목록을 머리까지 올린 뒤에 찍는다.
 async function captureNonemptyChannelIntroScenes(browser, scheme) {
+  beginScene("channel-intro-nonempty");
   const shots = [];
   const CHANNEL_ID = CHANNELS[0].id;
 
@@ -9556,8 +9696,10 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
   if (text.includes("첫 메시지")) {
     throw new Error(`비어 있지 않은 인트로가 「첫 메시지」를 말한다 ${scheme}`);
   }
-  await page.waitForTimeout(200);
-  const path = `${OUT_DIR}/channel-intro-nonempty-${scheme}.png`;
+  const vp = page.viewportSize() ?? VIEWPORT;
+  await page.mouse.move(vp.width + 80, vp.height + 80);
+  await assertHoverToolbarCount(page, `nonempty intro ${scheme}`, 0);
+  const path = beginSceneFromShotPath(`${OUT_DIR}/channel-intro-nonempty-${scheme}.png`);
   await page.screenshot({ path });
   shots.push(path);
   await context.close();
@@ -9572,6 +9714,7 @@ async function captureNonemptyChannelIntroScenes(browser, scheme) {
 // 칩은 죽은 컨트롤이다. 그래서 프레임을 찍기 전에 행 수를 센다 — 스크린샷은
 // 「목록이 안 바뀌었다」를 보여주지 못한다(MOBILE_TAP_TARGETS와 같은 이유).
 async function captureSearchScopeScenes(browser, scheme) {
+  beginScene("search-scope");
   const shots = [];
   const HERE = GENERAL_ID; // general
   const THERE = CHANNELS[1].id; // 엔진
@@ -9656,17 +9799,17 @@ async function captureSearchScopeScenes(browser, scheme) {
   }
   await assertWideRowsFillOnly(page, `search ${scheme}`);
   await page.waitForTimeout(200);
-  const narrowShot = `${OUT_DIR}/search-scope-channel-${scheme}.png`;
+  const narrowShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-channel-${scheme}.png`);
   await page.screenshot({ path: narrowShot });
   shots.push(narrowShot);
 
   // 칩을 실제로 누른다. 프레임만 찍고 누르지 않으면 죽은 칩도 초록이다.
-  await page.getByTestId("search-scope-workspace").click();
+  await sceneClick(page, page.getByTestId("search-scope-workspace"));
   await page.waitForFunction(
     () => document.querySelectorAll('[data-testid="search-hit"]').length === 3
   );
   await page.waitForTimeout(200);
-  const wideShot = `${OUT_DIR}/search-scope-workspace-${scheme}.png`;
+  const wideShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-workspace-${scheme}.png`);
   await page.screenshot({ path: wideShot });
   shots.push(wideShot);
 
@@ -9696,11 +9839,11 @@ async function captureSearchScopeScenes(browser, scheme) {
     );
   }
   await page.waitForTimeout(200);
-  const emptyShot = `${OUT_DIR}/search-scope-empty-${scheme}.png`;
+  const emptyShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-empty-${scheme}.png`);
   await page.screenshot({ path: emptyShot });
   shots.push(emptyShot);
 
-  await page.getByTestId("search-empty-escalate").click();
+  await sceneClick(page, page.getByTestId("search-empty-escalate"));
   await page.waitForFunction(
     () =>
       (
@@ -9737,7 +9880,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     throw new Error(`DM 칩이 「채널」이라 부른다 ${scheme}: ${dmChip}`);
   }
   await page.waitForTimeout(200);
-  const dmShot = `${OUT_DIR}/search-scope-dm-${scheme}.png`;
+  const dmShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-dm-${scheme}.png`);
   await page.screenshot({ path: dmShot });
   shots.push(dmShot);
 
@@ -9767,7 +9910,7 @@ async function captureSearchScopeScenes(browser, scheme) {
     throw new Error(`긴 이름이 칩으로 새어 들어갔다 ${scheme}: ${longChip}`);
   }
   await page.waitForTimeout(200);
-  const longShot = `${OUT_DIR}/search-scope-long-name-${scheme}.png`;
+  const longShot = beginSceneFromShotPath(`${OUT_DIR}/search-scope-long-name-${scheme}.png`);
   await page.screenshot({ path: longShot });
   shots.push(longShot);
 
@@ -9778,6 +9921,7 @@ async function captureSearchScopeScenes(browser, scheme) {
 // #1889 M-4 / R2-N2 — 상태 설정 다이얼로그. 기본 + PUT 500 오류 + 오프라인 +
 // 「시각 고르기」(날짜·시간이 열리는 분기), 두 스킴.
 async function captureSetStatusScenes(browser, scheme) {
+  beginScene("set-status-dialog");
   const shots = [];
 
   async function shoot(name, { failPut = false, offline = false, customExpiry = false } = {}) {
@@ -9803,12 +9947,12 @@ async function captureSetStatusScenes(browser, scheme) {
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
-    await page.getByTestId("profile-card").click();
+    await sceneClick(page, page.getByTestId("profile-card"));
     await page.getByTestId("profile-card-menu").waitFor({ state: "visible" });
-    await page.getByTestId("profile-set-status").click();
+    await sceneClick(page, page.getByTestId("profile-set-status"));
     await page.getByTestId("set-status-dialog").waitFor({ state: "visible" });
     if (failPut) {
-      await page.getByTestId("set-status-save").click();
+      await sceneClick(page, page.getByTestId("set-status-save"));
       await page.getByTestId("set-status-error").waitFor({ state: "visible" });
     } else if (offline) {
       await context.setOffline(true);
@@ -9820,7 +9964,7 @@ async function captureSetStatusScenes(browser, scheme) {
     } else {
       await page.waitForTimeout(200);
     }
-    const path = `${OUT_DIR}/set-status-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/set-status-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9851,6 +9995,7 @@ async function captureSetStatusScenes(browser, scheme) {
 // 이 레인이 이름으로 집는 것은 그대로이고, 덕분에 이 레인은 강등된 문이 여전히
 // 열린다는 것까지 매 캡처마다 실제로 눌러 확인하는 자리가 됐다.
 async function captureAddMemberScenes(browser, scheme) {
+  beginScene("add-member");
   const shots = [];
   const RELEASE_NOTES_ID = CHANNELS[3].id;
 
@@ -9881,27 +10026,26 @@ async function captureAddMemberScenes(browser, scheme) {
     // 사이드바 행을 눌러 SPA 안에서 이동한다(딥링크 goto가 아니라). 라우터가
     // 해시 기반이라 href는 `#/c/{id}` 꼴이다 — 이 앱이 실제로 쓰는 경로를 그대로
     // 고른다.
-    await page
-      .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`)
-      .click();
+    await sceneClick(page, page
+      .locator(`[data-testid="channel-list"] a[href="#/c/${RELEASE_NOTES_ID}"]`));
     if (entry === "header") {
       // 로딩 장면은 로스터를 붙잡는다. 인트로의 「멤버 추가하기」는 로스터가
       // 오기 전에 아무 말도 하지 않으므로(R2 M5) 여기서 열 수 없다. 헤더 멤버
       // 목록이 같은 다이얼로그의 다른 문이다. 픽스처에 맞춰 제품 규칙을 낮추지
       // 않는다 (#1904 H-1).
       await page.getByTestId("channel-member-count").waitFor({ state: "visible" });
-      await page.getByTestId("channel-member-count").click();
+      await sceneClick(page, page.getByTestId("channel-member-count"));
       await page
         .getByTestId("channel-member-panel")
         .waitFor({ state: "visible" });
-      await page.getByTestId("channel-member-add").click();
+      await sceneClick(page, page.getByTestId("channel-member-add"));
     } else {
       const empty = page.getByTestId("timeline-empty");
       await empty.waitFor({ state: "visible" });
       // #1573: 이 버튼(채널에 멤버 추가)의 이름은 자기 다이얼로그의 동사를 따라
       // 「추가」다. 아래 empty 샷의 "멤버 초대하기"는 다른 행위(워크스페이스 초대)의
       // 이름이고, 그 갈라짐이 이 레인이 매 캡처마다 증명하는 것의 일부다.
-      await empty.getByRole("button", { name: "멤버 추가하기" }).click();
+      await sceneClick(page, empty.getByRole("button", { name: "멤버 추가하기" }));
     }
     await page
       .getByTestId("add-channel-member-dialog")
@@ -9916,7 +10060,7 @@ async function captureAddMemberScenes(browser, scheme) {
       // 애니메이션은 reducedMotion으로 이미 꺼져 있다.
       await page.waitForTimeout(200);
     }
-    const path = `${OUT_DIR}/add-member-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/add-member-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -9978,6 +10122,7 @@ function hostedConnection(overrides = {}) {
 }
 
 async function captureHostedPairingScenes(browser, scheme) {
+  beginScene("hosted-pairing");
   const shots = [];
 
   /**
@@ -10001,12 +10146,12 @@ async function captureHostedPairingScenes(browser, scheme) {
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
     await page.evaluate('location.hash = "/agents"');
-    await page.getByTestId("agent-hub-hosted-pairing").click();
+    await sceneClick(page, page.getByTestId("agent-hub-hosted-pairing"));
     await page.getByTestId("hosted-agent-wizard").waitFor({ state: "visible" });
     await settle(page, context);
 
     const frame = async (suffix) => {
-      const path = `${OUT_DIR}/hosted-pairing-${suffix}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-pairing-${suffix}-${scheme}.png`);
       await page.screenshot({ path });
       shots.push(path);
     };
@@ -10024,7 +10169,7 @@ async function captureHostedPairingScenes(browser, scheme) {
         ? json(route, {
             connection: hostedConnection(),
             pairingCredential: HOSTED_PAIRING_VALUE,
-            pairingExpiresAtMs: Date.now() + 15 * 60 * 1000,
+            pairingExpiresAtMs: FIXTURE_NOW + 15 * 60 * 1000,
           })
         : json(route, { connections: [] })
     );
@@ -10052,13 +10197,13 @@ async function captureHostedPairingScenes(browser, scheme) {
   await shoot("pairing", emptyList, async (page) => {
     await page.getByTestId("hosted-display-name").fill("Grok 리서치");
     await page.getByTestId("hosted-handle").fill("grok-research");
-    await page.getByTestId("hosted-create").click();
+    await sceneClick(page, page.getByTestId("hosted-create"));
     await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
   });
 
   // 3단계. 다이얼인 대기 = 이 표면의 빈 상태.
   await shoot("detecting", listWith(hostedConnection()), async (page) => {
-    await page.getByTestId("hosted-wizard-resume").click();
+    await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
     await page.getByTestId("hosted-detecting-empty").waitFor({ state: "visible" });
   });
 
@@ -10074,7 +10219,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "approval",
     listWith(hostedConnection({ status: "detected" })),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
       await page
         .getByTestId("hosted-channels")
@@ -10130,7 +10275,7 @@ async function captureHostedPairingScenes(browser, scheme) {
       })
     ),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-awaiting-proof").waitFor({ state: "visible" });
     }
   );
@@ -10151,7 +10296,7 @@ async function captureHostedPairingScenes(browser, scheme) {
       })
     ),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-test-mention").waitFor({ state: "visible" });
     }
   );
@@ -10161,7 +10306,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "expired",
     listWith(hostedConnection({ status: "expired" })),
     async (page) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-expired").waitFor({ state: "visible" });
     }
   );
@@ -10199,7 +10344,7 @@ async function captureHostedPairingScenes(browser, scheme) {
     "offline",
     listWith(hostedConnection({ status: "detected" })),
     async (page, context) => {
-      await page.getByTestId("hosted-wizard-resume").click();
+      await sceneClick(page, page.getByTestId("hosted-wizard-resume"));
       await page.getByTestId("hosted-consequence").waitFor({ state: "visible" });
       await context.setOffline(true);
       await page.getByTestId("hosted-wizard-offline").waitFor({ state: "visible" });
@@ -10336,6 +10481,7 @@ function disconnectConnection(overrides = {}) {
 }
 
 async function captureHostedDisconnectScenes(browser, scheme) {
+  beginScene("hosted-disconnect");
   const shots = [];
 
   // band 는 리뷰 루브릭 §11 phase 2 의 두 폭이다: 기본 1280, 그리고 사이드바가
@@ -10368,15 +10514,14 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     await page.evaluate('location.hash = "/agents"');
     // 해제는 연결을 만들 때가 아니라 **그 에이전트를 보다가** 하는 일이다. 그래서
     // 진입도 로스터에서 그 에이전트를 고르는 것으로 시작한다.
-    await page
-      .locator(`[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`)
-      .click();
-    await page.getByTestId("agent-hub-tab-connection").click();
+    await sceneClick(page, page
+      .locator(`[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`));
+    await sceneClick(page, page.getByTestId("agent-hub-tab-connection"));
     await page.getByTestId("hosted-connection-section").waitFor({ state: "visible" });
     await settle(page, context);
 
     const frame = async (suffix) => {
-      const path = `${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-disconnect-${suffix}${band.tag}-${scheme}.png`);
       await page.screenshot({ path });
       shots.push(path);
       if (band.tag) {
@@ -10481,7 +10626,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       [
         "start-confirm",
         async (page) => {
-          await page.getByTestId("hosted-disconnect-start").click();
+          await sceneClick(page, page.getByTestId("hosted-disconnect-start"));
           await page.waitForTimeout(200);
         },
       ],
@@ -10514,13 +10659,13 @@ async function captureHostedDisconnectScenes(browser, scheme) {
     ledger(disconnectConnection(), CLEANUP_MIDWAY),
     async (page) => {
       const bot = page.locator('[data-testid="cleanup-artifact"][data-artifact-kind="bot"]');
-      await bot.getByTestId("cleanup-open-form").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-open-form"));
       await bot.getByTestId("cleanup-form").waitFor({ state: "visible" });
       await assertFocusInForm(page);
-      await bot.getByTestId("cleanup-cancel").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-cancel"));
       await assertFocusOnRowHeading(page, "bot");
       // 다시 열어 첫 종착(봇을 지웠습니다, 파괴)을 고른 폼을 남긴다.
-      await bot.getByTestId("cleanup-open-form").click();
+      await sceneClick(bot, bot.getByTestId("cleanup-open-form"));
       await bot.getByTestId("cleanup-disposition").waitFor({ state: "visible" });
       await bot.getByTestId("cleanup-disposition").getByRole("radio").first().check();
       await bot.getByTestId("cleanup-evidence").scrollIntoViewIfNeeded();
@@ -10539,7 +10684,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
           await bot
             .getByTestId("cleanup-evidence")
             .fill("팀에 대화 기록 위치를 알린 뒤 봇은 남겨 두기로 했습니다");
-          await bot.getByTestId("cleanup-save").click();
+          await sceneClick(bot, bot.getByTestId("cleanup-save"));
           await bot.getByTestId("cleanup-save-confirm").waitFor({ state: "visible" });
           await page.waitForTimeout(200);
         },
@@ -10559,7 +10704,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       [
         "terminal-confirm",
         async (page) => {
-          await page.getByTestId("hosted-disconnect-complete").click();
+          await sceneClick(page, page.getByTestId("hosted-disconnect-complete"));
           await page.waitForTimeout(200);
         },
       ],
@@ -10595,13 +10740,13 @@ async function captureHostedDisconnectScenes(browser, scheme) {
       const plugin = page.locator(
         '[data-testid="cleanup-artifact"][data-artifact-kind="plugin"]'
       );
-      await plugin.getByTestId("cleanup-open-form").click();
+      await sceneClick(plugin, plugin.getByTestId("cleanup-open-form"));
       await plugin.getByTestId("cleanup-disposition").getByRole("radio").first().check();
       await plugin
         .getByTestId("cleanup-evidence")
         .fill("플러그인 관리 화면에서 등록을 삭제했습니다");
-      await plugin.getByTestId("cleanup-save").click();
-      await plugin.getByTestId("cleanup-save-confirm").click();
+      await sceneClick(plugin, plugin.getByTestId("cleanup-save"));
+      await sceneClick(plugin, plugin.getByTestId("cleanup-save-confirm"));
       await page.getByTestId("hosted-disconnect-failure").waitFor({ state: "visible" });
       await page.waitForTimeout(200);
     }
@@ -10662,6 +10807,7 @@ async function captureHostedDisconnectScenes(browser, scheme) {
 // 다른 게이트 닫힘이다. 벨 테스트는 이 파도에 없다.
 // =============================================================================
 async function captureHostedDoorbellScenes(browser, scheme) {
+  beginScene("hosted-doorbell");
   const shots = [];
   const connection = disconnectConnection({ status: "active" });
 
@@ -10678,15 +10824,14 @@ async function captureHostedDoorbellScenes(browser, scheme) {
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
     await page.evaluate('location.hash = "/agents"');
-    await page
+    await sceneClick(page, page
       .locator(
         `[data-testid="agent-hub-agent-row"][data-agent-id="${DISCONNECT_AGENT_ID}"]`
-      )
-      .click();
-    await page.getByTestId("agent-hub-tab-connection").click();
+      ));
+    await sceneClick(page, page.getByTestId("agent-hub-tab-connection"));
     await page.getByTestId("hosted-doorbell-section").waitFor({ state: "visible" });
     await settle(page, context);
-    const path = `${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`;
+    const path = beginSceneFromShotPath(`${OUT_DIR}/hosted-doorbell-${name}-${scheme}.png`);
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
@@ -10745,7 +10890,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
       ...connection,
       doorbellUrl: "https://hooks.example.com/doorbell",
       doorbellSecretMasked: "••••wxyz",
-      doorbellLastFiredAtMs: Date.now() - 12 * 60_000,
+      doorbellLastFiredAtMs: FIXTURE_NOW - 12 * 60_000,
       doorbellLastStatus: "ok_200",
     }),
     async (page) => {
@@ -10773,7 +10918,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
         "https://hooks.example.com/doorbell"
       );
       await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
-      await page.getByTestId("hosted-doorbell-register").click();
+      await sceneClick(page, page.getByTestId("hosted-doorbell-register"));
       await page.getByTestId("hosted-doorbell-failure").waitFor({ state: "visible" });
     }
   );
@@ -10788,7 +10933,7 @@ async function captureHostedDoorbellScenes(browser, scheme) {
         "https://hooks.example.com/doorbell"
       );
       await page.getByTestId("hosted-doorbell-secret").fill("crsr_capture_fixture");
-      await page.getByTestId("hosted-doorbell-register").click();
+      await sceneClick(page, page.getByTestId("hosted-doorbell-register"));
       await page.getByTestId("hosted-doorbell-gate-off").waitFor({ state: "visible" });
     }
   );
@@ -10878,6 +11023,7 @@ async function waitForAnimations(page) {
  * (1 at skeleton, 0 at settled) and the settled frame on the inverse.
  */
 async function captureSkeletonReveal(browser, scheme) {
+  beginScene("skeleton-reveal");
   return captureSkeletonRevealAt(browser, scheme, VIEWPORT, "");
 }
 
@@ -10888,6 +11034,7 @@ async function captureSkeletonReveal(browser, scheme) {
  * on record; dark 390 is the same layout.
  */
 async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
+  beginScene(`skeleton-reveal${nameSuffix}`);
   const phone = viewport.width === MOBILE_VIEWPORT.width;
   const context = await browser.newContext({
     viewport,
@@ -10945,7 +11092,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
       .locator('[data-testid="inbox-route"] [data-ready="false"]')
       .waitFor({ state: "visible", timeout: 8_000 });
     await waitForAnimations(page);
-    const skeletonPath = `${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`;
+    const skeletonPath = beginSceneFromShotPath(`${OUT_DIR}/skeleton${nameSuffix}-${scheme}.png`);
     await screenshotSettled(page, skeletonPath);
     shots.push(skeletonPath);
     release();
@@ -10965,7 +11112,7 @@ async function captureSkeletonRevealAt(browser, scheme, viewport, nameSuffix) {
       .locator('[data-testid="inbox-route"] [data-testid="skeleton"].is-settled')
       .waitFor({ state: "visible" });
     await waitForAnimations(page);
-    const settledPath = `${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`;
+    const settledPath = beginSceneFromShotPath(`${OUT_DIR}/skeleton-settled${nameSuffix}-${scheme}.png`);
     await screenshotSettled(page, settledPath);
     shots.push(settledPath);
     return shots;
@@ -11005,6 +11152,7 @@ const ACCENT_CAPTURE_ARGS = [
 ];
 
 async function captureAccentCandidates(_sharedBrowser, scheme) {
+  beginScene("accent-preview");
   const ids = accentCatalogIds();
   // Own process: lucide/rail-marker AA jittered 1 RGB across shared-browser
   // launches (R3-M1). Software raster + no LCD keeps chrome visible and
@@ -11073,7 +11221,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
             requestAnimationFrame(() => requestAnimationFrame(resolve));
           })
       );
-      const path = `${OUT_DIR}/accent-${id}-${scheme}.png`;
+      const path = beginSceneFromShotPath(`${OUT_DIR}/accent-${id}-${scheme}.png`);
       await screenshotSettled(page, path);
       copyFileSync(path, resolve(previewDir, `accent-${id}-${scheme}.png`));
       shots.push(path);
@@ -11087,6 +11235,7 @@ async function captureAccentCandidates(_sharedBrowser, scheme) {
 }
 
 async function captureConsent(browser, scheme) {
+  beginScene("consent");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -11102,7 +11251,7 @@ async function captureConsent(browser, scheme) {
     waitUntil: "networkidle",
   });
   await signin.getByTestId("oauth-consent-signin").waitFor({ state: "visible" });
-  const signinShot = `${OUT_DIR}/oauth-consent-signin-${scheme}.png`;
+  const signinShot = beginSceneFromShotPath(`${OUT_DIR}/oauth-consent-signin-${scheme}.png`);
   await signin.screenshot({ path: signinShot });
   shots.push(signinShot);
   await signin.close();
@@ -11124,7 +11273,7 @@ async function captureConsent(browser, scheme) {
     });
     await page.getByTestId(testId).waitFor({ state: "visible" });
     await assertNoHorizontalOverflow(page, `oauth-consent ${name} ${scheme}`);
-    const shot = `${OUT_DIR}/oauth-consent-${name}-${scheme}.png`;
+    const shot = beginSceneFromShotPath(`${OUT_DIR}/oauth-consent-${name}-${scheme}.png`);
     await page.screenshot({ path: shot });
     shots.push(shot);
   }
@@ -11239,12 +11388,12 @@ async function assertGalleryUsable(page, where) {
   const lightToggle = page.getByRole("button", { name: "라이트로 보기" });
   const other = where.includes("dark") ? lightToggle : darkToggle;
   const home = where.includes("dark") ? darkToggle : lightToggle;
-  await other.click({ timeout: 3000 });
+  await sceneClick(page, other, { timeout: 3000 });
   const pressed = await other.getAttribute("aria-pressed");
   if (pressed !== "true") {
     throw new Error(`${where}: 스킴 토글 클릭이 먹지 않는다 (aria-pressed=${pressed})`);
   }
-  await home.click({ timeout: 3000 });
+  await sceneClick(page, home, { timeout: 3000 });
 
   const gallery = page.getByTestId("design-gallery");
   await gallery.evaluate((el) => {
@@ -11990,8 +12139,8 @@ async function assertWideRowsFillOnly(page, label) {
 async function parkPointerOffViewport(page) {
   const vp = page.viewportSize() ?? { width: 1280, height: 800 };
   await page.mouse.move(vp.width + 80, vp.height + 80);
-  await page.evaluate(() => {
-    document.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+  await sceneDispatchMouseEvent(page, "document", "mouseleave", {
+    bubbles: true,
   });
   await waitForAnimations(page);
 }
@@ -12057,10 +12206,10 @@ async function assertInstantFillSwatch(page, scheme) {
     throw new Error(`press-instant-fill swatch ${scheme}: bounding box missing`);
   }
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await waitForAnimations(page);
   const activeCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
-  await page.mouse.up();
+  await sceneMouseUp(page);
   const rest = parseCssRgb(restCss);
   const hover = parseCssRgb(hoverCss);
   const active = parseCssRgb(activeCss);
@@ -12197,6 +12346,7 @@ async function capturePressTriplet(
 
   const paths = [];
   for (const surface of surfaces) {
+    beginScene(`press-triplet-${surface}-rest`);
     const frame = page.getByTestId(`press-triplet-${surface}`);
     await frame.scrollIntoViewIfNeeded();
     const target = pressTripletTarget(page, surface);
@@ -12204,7 +12354,7 @@ async function capturePressTriplet(
 
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
-    const restPath = `${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`;
+    const restPath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-rest-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: restPath,
       animations: "allow",
@@ -12212,9 +12362,10 @@ async function capturePressTriplet(
     });
     paths.push(restPath);
 
+    beginScene(`press-triplet-${surface}-hover`);
     await target.hover();
     await waitForAnimations(page);
-    const hoverPath = `${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`;
+    const hoverPath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-hover-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: hoverPath,
       animations: "allow",
@@ -12235,7 +12386,8 @@ async function capturePressTriplet(
       );
     }
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
+    beginScene(`press-triplet-${surface}-active`);
+    await sceneMouseDown(page);
     await waitForAnimations(page);
     if (hoverBg !== null) {
       const activeBg = await target.evaluate(
@@ -12247,7 +12399,7 @@ async function capturePressTriplet(
         );
       }
     }
-    const activePath = `${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`;
+    const activePath = beginSceneFromShotPath(`${OUT_DIR}/press-triplet-${surface}-active-${scheme}${suffix}.png`);
     await frame.screenshot({
       path: activePath,
       animations: "allow",
@@ -12260,7 +12412,7 @@ async function capturePressTriplet(
       activePath,
       `press-triplet ${surface} ${scheme}${suffix}`
     );
-    await page.mouse.up();
+    await sceneMouseUp(page);
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
   }
@@ -12272,6 +12424,7 @@ async function capturePressTriplet(
 }
 
 async function captureDesignGallery(browser, scheme) {
+  beginScene("design-gallery");
   const context = await browser.newContext({
     viewport: VIEWPORT,
     deviceScaleFactor: 2,
@@ -12311,7 +12464,7 @@ async function captureDesignGallery(browser, scheme) {
     width: VIEWPORT.width,
     height: Math.max(VIEWPORT.height, contentHeight),
   });
-  const path = `${OUT_DIR}/design-gallery-${scheme}.png`;
+  const path = beginSceneFromShotPath(`${OUT_DIR}/design-gallery-${scheme}.png`);
   await page.screenshot({
     path,
     fullPage: false,
@@ -12354,22 +12507,12 @@ function recordPressTripletAbort(err) {
     console.error(
       `CAPTURE ABORT: keeping completed press-triplet outputs and catalog. cause: ${cause}`
     );
-    if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
-      console.error(
-        "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
-      );
-    }
     appendPressTripletAbort(cause);
     return;
   }
   console.error(
     `CAPTURE ABORT: wiping press-triplet outputs and catalog. cause: ${cause}`
   );
-  if (/intro|scroll|timeout|waiting for locator/i.test(cause)) {
-    console.error(
-      "CAPTURE ABORT NOTES: pre-existing intro-scroll flake (#2057 N-4)."
-    );
-  }
   wipePressTripletEvidence();
 }
 
