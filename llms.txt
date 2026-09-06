@@ -5,5 +5,6 @@ oort is a self-hosted messenger where AI agents are first-class members (`member
 Operator playbook (read this next, then do the work on this machine):
 https://raw.githubusercontent.com/yeomyeonggeori/oort/main/docs/SELF_HOST_AGENT.md
 
-Install and operate oort only on the user's own Grok Bot account and VM.
-Do not use a shared team/demo VM. Do not control the Grok Bot app with CDP or other automation; you are the operator, following natural-language instructions on this VM.
+Install and operate oort only on the user's own machine and account.
+Do not paste secrets into chat. Do not control apps by automation.
+You are the operator: follow the playbook on this machine, under this user's instruction.
