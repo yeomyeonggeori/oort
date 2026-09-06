@@ -1,6 +1,9 @@
 # 공개 엣지 템플릿 (#1926). 사이트 주소와 CSP connect-src 는 env 보간이다.
 # 키 이름 정본: scripts/self_host_env.sh 의 oort_public_edge_env_keys.
-# OORT_SITE_ADDRESS 가 없으면 caddy adapt/validate 가 실패한다 — 기본값 없음.
+# 기동 거부의 가드는 compose `:?` 다. OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC 가
+# 없으면 interpolation 이 실패하고 컨테이너가 뜨지 않는다 — 기본값 없음.
+# `caddy adapt`/`validate` 가 같은 상태에서 실패하는 것은 부수 효과다:
+# 빈 사이트 주소 때문에 `encode` 가 인식되지 않는 전역 옵션이 된다.
 # 그래서 이 파일을 로컬에서 이름 불러도 남의 호스트로 ACME 주문이 나가지 않는다.
 {$OORT_SITE_ADDRESS} {
 	encode zstd gzip

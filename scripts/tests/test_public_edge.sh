@@ -114,8 +114,30 @@ PY
 pass "caddy adapt fixture host=$FIXTURE_HOST and CSP tokens include https/wss twins"
 
 # ---------------------------------------------------------------------------
-# ② env unset → adapt and validate fail (ACME fail-closed)
+# ② unset public-edge keys → compose `:?` refuses to render (load-bearing)
+#    caddy adapt/validate also fail, but that is incidental: an empty site
+#    address makes `encode` an unrecognized global option.
 # ---------------------------------------------------------------------------
+COMPOSE_UNSET_ERR="$TMP_ROOT/compose-unset.err"
+set +e
+env -u OORT_SITE_ADDRESS -u OORT_CSP_CONNECT_SRC -u COMPOSE_FILE \
+  docker compose --env-file "$ROOT/infra/rust/rust-smoke.env.example" \
+    -f "$ROOT/infra/rust/docker-compose.rust.yml" \
+    -f "$ROOT/infra/rust/caddy.override.yml" \
+    config >"$TMP_ROOT/compose-unset.out" 2>"$COMPOSE_UNSET_ERR"
+compose_unset_ec=$?
+set -e
+printf '[test-public-edge] compose-unset exit=%s\n' "$compose_unset_ec"
+[ "$compose_unset_ec" -ne 0 ] || fail "compose config without OORT_SITE_ADDRESS unexpectedly succeeded"
+grep -Fq 'set OORT_SITE_ADDRESS' "$COMPOSE_UNSET_ERR" || {
+  cat "$COMPOSE_UNSET_ERR" >&2
+  fail "compose unset stderr did not contain set OORT_SITE_ADDRESS"
+}
+pass "unset OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC refuses compose config via :?"
+
+# Incidental: caddy adapt/validate with the two keys unset also exit ≠ 0.
+# They fail because `encode` is parsed as a global option, not because compose
+# `:?` ran. The compose case above is the guard.
 UNSET_ERR="$TMP_ROOT/adapt-unset.err"
 set +e
 docker run --rm \
@@ -131,11 +153,11 @@ docker run --rm \
   >"$TMP_ROOT/validate-unset.out" 2>"$TMP_ROOT/validate-unset.err"
 validate_unset_ec=$?
 set -e
-printf '[test-public-edge] adapt-unset exit=%s\n' "$adapt_unset_ec"
-printf '[test-public-edge] validate-unset exit=%s\n' "$validate_unset_ec"
+printf '[test-public-edge] adapt-unset exit=%s (incidental)\n' "$adapt_unset_ec"
+printf '[test-public-edge] validate-unset exit=%s (incidental)\n' "$validate_unset_ec"
 [ "$adapt_unset_ec" -ne 0 ] || fail "caddy adapt without OORT_SITE_ADDRESS unexpectedly succeeded"
 [ "$validate_unset_ec" -ne 0 ] || fail "caddy validate without OORT_SITE_ADDRESS unexpectedly succeeded"
-pass "unset OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC refuses adapt/validate"
+pass "unset OORT_SITE_ADDRESS / OORT_CSP_CONNECT_SRC refuses adapt/validate (incidental)"
 
 # ---------------------------------------------------------------------------
 # Generator fixture (fake docker/openssl — never writes the worktree env)
