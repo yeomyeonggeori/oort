@@ -178,7 +178,7 @@ oort_logs() {
 
 oort_upgrade_usage() {
   cat <<'EOF'
-Usage: scripts/oort upgrade [--to <ref@sha256:…>|--manifest URL|--local-build]
+Usage: scripts/oort upgrade [--to <image ref pinned by its list digest, read from releases/latest.json>|--manifest URL|--local-build]
                           [--yes] [--no-backup] [--env FILE]
 
 Idempotent image replace. Backs up first unless --no-backup.

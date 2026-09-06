@@ -23,7 +23,7 @@ Commands:
   logs [service] [--since 10m] [--follow] [--env FILE]
       Compose logs with secret masking (env secret keys, Bearer, postgres URLs).
 
-  upgrade [--to <ref@sha256:…>|--manifest URL|--local-build]
+  upgrade [--to <image ref pinned by its list digest, read from releases/latest.json>|--manifest URL|--local-build]
           [--yes] [--no-backup] [--env FILE]
       Backup, re-check volumes/env, pull/up, wait IDEMPOTENCY_OK, doctor PASS.
       Prints a rollback command on failure. Never auto-rolls back.

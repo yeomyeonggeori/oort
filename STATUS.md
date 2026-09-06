@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R3)
+
+- R3: `docs/SELF_HOST.md` When-stuck upgrade row plus `scripts/oort` / `oort_day2.sh` usage strings dropped the `<ref@sha256:…>` placeholder. Scanners count that token even as a placeholder (`scripts/check_release_manifest.sh` greps `docs/SELF_HOST*.md` + `README.md`; `test_publish_images_contract.py` greps `docs/SELF_HOST.md` only). AGENT docs had 0 hits. Code that *validates* a digest (`oort_extract_digest` / die regex) is unchanged.
+
 ## SH-3b `scripts/oort` day-2 (#2103, 2026-09-06, R2)
 
 - Dispatcher verbs: `status` · `logs` · `upgrade` · `backup`/`restore` · `member invite` / `member credential`. Reuses `oort_doctor_*` (no copied functions), `scripts/self_host_pg_dump.sh` / `self_host_pg_restore.sh` (no new pg_dump/pg_restore call site), `releases/latest.json` `digest_list` (`^sha256:[0-9a-f]{64}$`, list≠arch). Never `docker volume rm` / `down -v`; failure prints a rollback command and does not run it. Secrets masked by generator secret-shaped keys + Bearer + `postgres://` passwords.
