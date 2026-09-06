@@ -7,9 +7,12 @@ import { describe, expect, it } from "vitest";
 import { ENTER_CONVERSATION_ANIMATION_NAME, ENTER_CONVERSATION_CLASS } from "@/design/motion";
 
 /**
- * Chromium half of Timeline burst (#2050 R3 B-1). Node environment so
+ * Chromium half of Timeline burst (#2050 R5). Node environment so
  * esbuild's TextEncoder invariant holds. jsdom cannot deliver `atBottom`
  * after `scrollToIndex("LAST")`; these cases need real virtuoso geometry.
+ *
+ * 제품 경로 재생 단정은 로컬 게이트·design-review의 Chromium 레인에서만;
+ * CI 유닛 레인은 grant 단정까지 (`it.skipIf(!chromiumAvailable)`).
  *
  * Waits are event-driven: `animationstart` for `motion-enter-conversation`
  * resolves a promise at N, and `animationend` before N is a loud ceiling.
@@ -197,6 +200,59 @@ ${css}
   return { browser, page };
 }
 
+async function measureArrivalStarts(
+  page: import("playwright").Page,
+  ids: readonly string[],
+  want: number,
+  body: string,
+  seqStart: number
+): Promise<number> {
+  return page.evaluate(
+    async ({ animationName, nextIds, want: need, body: text, seqStart: seq }) => {
+      const baseline = window.__timelineBurst.arrivalStarts();
+      const current = () => window.__timelineBurst.arrivalStarts();
+      return await new Promise<number>((resolve, reject) => {
+        const onStart = (event: AnimationEvent) => {
+          if (event.animationName !== animationName) return;
+          if (current() >= baseline + need) {
+            cleanup();
+            resolve(current() - baseline);
+          }
+        };
+        const onEnd = (event: AnimationEvent) => {
+          if (event.animationName !== animationName) return;
+          if (current() < baseline + need) {
+            cleanup();
+            reject(
+              new Error(
+                `motion-enter-conversation animationstart ceiling: expected ${need}, got ${current() - baseline} before animationend`
+              )
+            );
+          }
+        };
+        function cleanup() {
+          document.removeEventListener("animationstart", onStart, true);
+          document.removeEventListener("animationend", onEnd, true);
+        }
+        document.addEventListener("animationstart", onStart, true);
+        document.addEventListener("animationend", onEnd, true);
+        window.__timelineBurst.deliverLive(nextIds, seq, text);
+        if (current() >= baseline + need) {
+          cleanup();
+          resolve(current() - baseline);
+        }
+      });
+    },
+    {
+      animationName: ENTER_CONVERSATION_ANIMATION_NAME,
+      nextIds: ids,
+      want,
+      body,
+      seqStart,
+    }
+  );
+}
+
 describe("virtualized Timeline burst (Chromium)", () => {
   it.skipIf(!chromiumAvailable)(
     "브라우저가 motion-enter-conversation 을 3회 시작한다 (virtuoso 경로의 스냅샷; jsdom 은 grant 만 센다)",
@@ -269,6 +325,32 @@ describe("virtualized Timeline burst (Chromium)", () => {
           expect(name.includes(ENTER_CONVERSATION_ANIMATION_NAME)).toBe(false);
           expect(name === "none" || name === "none, none").toBe(true);
         }
+      } finally {
+        await handle.browser.close();
+      }
+    },
+    40_000
+  );
+
+  it.skipIf(!chromiumAvailable).each([10, 20, 30, 50])(
+    "바닥 같은 틱 %i건은 motion-enter-conversation 을 3회 시작한다",
+    async (n) => {
+      const handle = await launchBurstHarness({ history: 8 });
+      try {
+        await handle.page.evaluate(() => window.__timelineBurst.onSubscribed());
+        await handle.page.locator("[data-testid='timeline-virtuoso']").waitFor({
+          state: "attached",
+          timeout: 4000,
+        });
+        const ids = arrivalIds(n);
+        const measured = await measureArrivalStarts(
+          handle.page,
+          ids,
+          3,
+          `바닥 같은 틱 ${n} arrival`,
+          40
+        );
+        expect(measured).toBe(3);
       } finally {
         await handle.browser.close();
       }

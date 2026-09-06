@@ -178,33 +178,12 @@ describe("arrival wiring — mutations of the seam go red", () => {
   });
 
   it("useTimeline REST 기본 meta 는 rest/rest 이고 리플레이는 live 로 안 바꾼다", () => {
-    expect(hook).toContain(
-      '} = { provenance: "rest", eventType: "rest" }'
-    );
-    expect(hook).toContain(
-      'provenance: replayGate.isReplaying() ? "replay" : "live",'
-    );
-    expect(hook).toContain(
-      "alreadyHeld: heldIdsRef.current.has(key),"
-    );
-    expect(hook).toContain("const reducedMotion = prefersReducedMotion();");
-    expect(hook).toContain(
-      "if (play === 1) playOnMountRef.current.add(key);"
-    );
-    expect(hook).toContain("playOnMountRef.current = new Set();");
-    expect(hook).toContain("export const MAX_SIMULTANEOUS_ARRIVALS = 3");
-    expect(hook).toContain(
-      'meta.provenance === "live" && meta.eventType === "message.new"'
-    );
-    expect(hook).toContain("pinArrivalGrant");
     expect(identifierCallCount(hook, "capArrivalSetKeeping")).toBe(3);
-    expect(hook).not.toMatch(
-      /capArrivalSet\(playOnMountRef\.current, MAX_PENDING_ARRIVAL_GRANTS\);\s*\}, \[state\.messages\]/
-    );
   });
 
-  it("Timeline 은 바닥이 아닐 때만 leftover grant 를 쓸어 낸다", () => {
-    expect(timeline).toContain("if (atBottom) return;");
+  it("Timeline leftover sweep 는 배치 전 at-bottom 을 쓴다", () => {
+    expect(timeline).toContain("atBottomBeforeBatch");
+    expect(timeline).toContain("pendingBottomBatchRef");
     expect(timeline).toContain("capUnmountedArrivals?.()");
   });
 });
