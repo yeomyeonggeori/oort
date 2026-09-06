@@ -22,7 +22,7 @@
 - M-4. 장면 레지스트리 `clock: "fixed" | "flowing"` (기본 fixed). `welcome-backstop` 만 flowing. `wrapPageTimeGateClicks` 가 `inbox-approval-confirm` 클릭을 막음. RED: 고정 시계 장면 `chat` 에서 confirm click → `CAPTURE ABORT: scene "chat" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
 - Nits. N-1 `INTRO_SETTLE_FRAME_CEILING` 삭제. N-2 `tickIntroSettle` 공유. N-3 `idleTimelineMock`.
 - Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro nonempty light/dark · chat light/dark **3-identical**, sha R2와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). 이 호스트 3런: 488/528 identical, 40 differing. R2 HEAD-39에 없던 이름 14개는 전부 2/3 동일(1런 아웃라이어) — #2128 잔량 클래스, 면제 확대 없음. 37 pre-existing 장면은 #2128, 이 PR 무접촉.
-- 게이트. web test **235 files / 2797 passed**. typecheck. lint 0 errors (16 warnings: 15 선행 + burst harness `only-export-components`, welcome harness 와 동일). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` 는 커밋 후 실행.
+- 게이트. web test **235 files / 2797 passed**. typecheck. lint 0 errors (16 warnings: 15 선행 + burst harness `only-export-components`, welcome harness 와 동일). preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
 - 폰·`packages/momo-core` 무접촉. runtime-unverified 아님.
 
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050 · #2057 N-4, 2026-09-06, R2)
