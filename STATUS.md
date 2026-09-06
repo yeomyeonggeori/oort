@@ -1,10 +1,15 @@
 # oort 진행 현황
 
-## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06)
+## SH-2 공개 엣지 파라미터화 (#1926, 2026-09-06, R2)
 
-- `infra/rust/Caddyfile` 사이트 `{$OORT_SITE_ADDRESS}`, CSP `connect-src {$OORT_CSP_CONNECT_SRC}`. 기본값 없음. 키 정본 `oort_public_edge_env_keys`. `--public-origin` 이 파생하고, 없으면 두 키를 쓰지 않는다. 와일드카드 거절 (#1792). `Caddyfile.local` 에 `/v1/centrifugo/*` 403 을 `/v1/*` 앞에 둠.
-- 실측 (픽스처 `edge.example.test`, `caddy:2-alpine`, ACME 실주문 0). `caddy adapt` 사이트 호스트=`edge.example.test`, connect-src tokens=`'self' https://edge.example.test wss://edge.example.test https://www.googleapis.com` (`*` 0). env 미설정 adapt/validate exit=1. `--public-origin 'https://*.example.test'` exit=1. `--public-origin` 없이 생성한 env 의 `OORT_*` 두 키 행=0. `Caddyfile.local` 루프백 `POST /v1/centrifugo/subscribe` HTTP 403. 은퇴 공개 호스트 `git grep` origin/track/engine=172 → 이 트리=170 (`infra/rust/Caddyfile` 0). `verify_ncp_centrifugo_contract.sh` exit=0. `verify_web_serving.sh` exit=0 (6/9 403; 마운트는 `infra/prod/Caddyfile`). `scripts/oort doctor --json` PASS (env 없음 skip).
-- runtime-unverified: 실호스트 ACME. `scripts/tests/test_ncp_centrifugo_boundary.sh` 는 `derive_caddy_origin` awk 가 `{$OORT_SITE_ADDRESS}` 를 사이트 호스트로 못 읽어 exit=1 (`canonical_caddy_site_count expected=1 actual=0`) — 게이트 본체 무수정(패킷). `test_self_host_env_modes.sh` 는 CSP 줄이 `https://host`/`wss://host` 를 한 번 더 써서 `grep -c … -eq 1` 이 깨짐 (본체 무수정).
+- R1 템플릿·compose `:?`·생성기 파생(LiveKit 포함)·와일드카드 거절·로컬 엣지 deny·문서는 유지. R2 는 게이트 두 본이 이 브랜치에서 빨개지던 자리만 고친다.
+- `scripts/verify_ncp_centrifugo_boundary.sh` 의 `derive_caddy_origin` 이 `{$OORT_SITE_ADDRESS}` 를 `--site-address` 또는 env 의 `OORT_SITE_ADDRESS` 로 풀어 사이트 1개로 센다. 픽스처 호스트 `edge.example.test` (은퇴 호스트 0). deny 앞·hash·redaction·untrusted trust marker 는 그대로.
+- `scripts/tests/test_self_host_env_modes.sh` 는 `--public-origin` 유지보수 계약을 키 단위로 잰다: `CENTRIFUGO_ALLOWED_ORIGINS` 1줄에 오리진 1회, `OORT_CSP_CONNECT_SRC` 1줄에 `https://host`+`wss://host`, `OORT_SITE_ADDRESS` 1줄, `*` 0. `--public-origin` 없으면 두 키 0행.
+- `scripts/tests/test_public_edge.sh` 의 기동 거부는 compose `:?` (stderr `set OORT_SITE_ADDRESS`). `caddy adapt`/`validate` 미설정 실패는 부수 효과(`encode` 가 전역 옵션). `infra/rust/Caddyfile` 머리 주석도 같다.
+- 실측. R1 RED: `canonical_caddy_site_count expected=1 actual=0` / `untrusted origin did not fail by trust marker label=attacker`; `https-count=2` `wss-count=2` `modes_exit=1`. GREEN: `test_ncp_centrifugo_boundary_exit=0` `modes_exit=0` `test_public_edge_exit=0` `verify_ncp_centrifugo_contract_exit=0` `verify_web_serving_exit=0`. 스크래치: 템플릿에 `evil.example.test {` 추가 → `canonical_caddy_site_count expected=1 actual=2`. `OORT_CSP_CONNECT_SRC` write 삭제 → `csp_line_count=0` `csp_scratch_exit=1`.
+- runtime-unverified: 실호스트 ACME.
+
+## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
 
 ## UX-R2b 웰컴 킥오프 클라 스테이지 (#2002, 2026-09-05 R3)
 
