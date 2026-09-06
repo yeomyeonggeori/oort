@@ -38,6 +38,11 @@ import {
   setActiveCaptureScene,
   wrapPageTimeGateClicks,
   sceneClick,
+  sceneKeyboardPress,
+  sceneMouseDown,
+  sceneMouseUp,
+  sceneDispatchMouseEvent,
+  sceneNameFromShotPath,
 } from "./capture-clock.mjs";
 
 const WEB_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,7 +65,8 @@ const VIEWPORT = { width: 1280, height: 800 };
  * (`ApprovalActions` `CONFIRM_GUARD_MS`) never open under the pin; a
  * fixed-clock scene that clicks a time-gated control aborts. Every
  * scene click goes through `sceneClick`; wrap also intercepts
- * `page.locator(...).click()`.
+ * `page.locator(...).click()`, Enter/Space, and mouse down/up. Every
+ * screenshot sets the active scene from its path.
  * 2024-06-15T03:00:00.000Z = 12:00 KST.
  */
 const FIXTURE_NOW = Date.UTC(2024, 5, 15, 3, 0, 0);
@@ -98,7 +104,10 @@ function claimShotPath(path) {
 function wrapPageShotGuard(page) {
   const orig = page.screenshot.bind(page);
   page.screenshot = async (opts = {}) => {
-    if (opts && opts.path) claimShotPath(opts.path);
+    if (opts && opts.path) {
+      claimShotPath(opts.path);
+      setActiveCaptureScene(sceneNameFromShotPath(opts.path));
+    }
     return orig(opts);
   };
 }
@@ -108,7 +117,7 @@ function wrapContextShotGuard(context) {
   context.newPage = async (...args) => {
     const page = await origNewPage(...args);
     wrapPageShotGuard(page);
-    wrapPageTimeGateClicks(page);
+    await wrapPageTimeGateClicks(page);
     await pinPageWallClock(page);
     return page;
   };
@@ -2804,7 +2813,7 @@ async function captureSidebarRowMenu(page, scheme, shots) {
     );
   });
   const kbdMutePut = page.waitForRequest(isMutePut);
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   const kbdMuteBody = (await kbdMutePut).postDataJSON();
   if (kbdMuteBody?.muted !== true) {
     throw new Error(
@@ -2817,13 +2826,16 @@ async function captureSidebarRowMenu(page, scheme, shots) {
   await menu.waitFor({ state: "hidden" });
 
   // ③ 낱말은 서버가 기억한 값을 따른다. 다시 열어 뒤집혔는지 보고 되돌린다.
+  await sceneDispatchMouseEvent(page, "");
   await page.waitForFunction(
     (id) => {
       const target = document.querySelector(`[data-channel-id="${id}"]`);
       const box = target?.closest("[data-row-menu-trigger]");
       if (box?.getAttribute("data-state") !== "open") {
-        target?.dispatchEvent(
-          new MouseEvent("contextmenu", { bubbles: true, clientX: 40, clientY: 200 })
+        window.__oortDispatchMouseEvent?.(
+          target,
+          "contextmenu",
+          { bubbles: true, clientX: 40, clientY: 200 }
         );
       }
       const item = document.querySelector(
@@ -3063,7 +3075,7 @@ async function captureSidebarD4(page, scheme, shots) {
       `채널 + 키보드 정거장 ${scheme}: ${plusStop} (new-channel 이어야 함)`
     );
   }
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   await page.getByTestId("create-channel-dialog").waitFor({ state: "visible" });
   const plusWhileOpen = await page.getByTestId("new-channel").count();
   if (plusWhileOpen !== 1) {
@@ -4496,10 +4508,10 @@ async function assertObserverTerminalModality(page, where, shots, scheme) {
     throw new Error(`관전 터미널 상자 없음 ${where}`);
   }
   await page.mouse.move(box.x + 24, box.y + 16);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await page.mouse.move(box.x + 120, box.y + 28);
   const dragging = await page.evaluate(readObserverTerminalVessel());
-  await page.mouse.up();
+  await sceneMouseUp(page);
   if (
     !dragging.frame ||
     !dragging.textarea ||
@@ -5391,7 +5403,7 @@ async function assertReminderKeyboardDelete(page, where) {
       `[리마인더 키보드 ${where}] ⋯에 닿지 못했다 (last=${last})`
     );
   }
-  await page.keyboard.press("Enter");
+  await sceneKeyboardPress(page, "Enter");
   await page.getByTestId("reminder-row-menu-panel").waitFor({ state: "visible" });
   await page.getByTestId("reminder-row-delete").waitFor({ state: "visible" });
   await page.getByTestId("reminder-row-delete").press("Enter");
@@ -5513,9 +5525,9 @@ async function assertActionableRowDragSelect(page, where) {
   }
   await page.evaluate(`document.getSelection() && document.getSelection().removeAllRanges()`);
   await page.mouse.move(box.x, box.y);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await page.mouse.move(box.x2, box.y2, { steps: 12 });
-  await page.mouse.up();
+  await sceneMouseUp(page);
   const proof = await page.evaluate(`(() => {
     const sel = document.getSelection();
     const text = sel ? sel.toString() : "";
@@ -7589,7 +7601,7 @@ async function captureScheme(browser, scheme) {
     if (onOverflow === "message-actions-trigger") break;
     await login.keyboard.press("ArrowRight");
   }
-  await login.keyboard.press("Enter");
+  await sceneKeyboardPress(login, "Enter");
   await login.getByTestId("message-action-menu").waitFor({ state: "visible" });
   await login.waitForTimeout(300);
   const menuShot = `${OUT_DIR}/b11-message-action-menu-${scheme}.png`;
@@ -12083,8 +12095,9 @@ async function assertWideRowsFillOnly(page, label) {
 async function parkPointerOffViewport(page) {
   const vp = page.viewportSize() ?? { width: 1280, height: 800 };
   await page.mouse.move(vp.width + 80, vp.height + 80);
+  await sceneDispatchMouseEvent(page, "");
   await page.evaluate(() => {
-    document.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+    window.__oortDispatchMouseEvent?.(document, "mouseleave", { bubbles: true });
   });
   await waitForAnimations(page);
 }
@@ -12150,10 +12163,10 @@ async function assertInstantFillSwatch(page, scheme) {
     throw new Error(`press-instant-fill swatch ${scheme}: bounding box missing`);
   }
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.down();
+  await sceneMouseDown(page);
   await waitForAnimations(page);
   const activeCss = await btn.evaluate((el) => getComputedStyle(el).backgroundColor);
-  await page.mouse.up();
+  await sceneMouseUp(page);
   const rest = parseCssRgb(restCss);
   const hover = parseCssRgb(hoverCss);
   const active = parseCssRgb(activeCss);
@@ -12328,7 +12341,7 @@ async function capturePressTriplet(
       );
     }
     await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
+    await sceneMouseDown(page);
     await waitForAnimations(page);
     if (hoverBg !== null) {
       const activeBg = await target.evaluate(
@@ -12353,7 +12366,7 @@ async function capturePressTriplet(
       activePath,
       `press-triplet ${surface} ${scheme}${suffix}`
     );
-    await page.mouse.up();
+    await sceneMouseUp(page);
     await page.mouse.move(0, 0);
     await waitForAnimations(page);
   }

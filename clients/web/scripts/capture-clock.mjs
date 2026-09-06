@@ -9,7 +9,10 @@
  *
  * The control registry is the product export `TIME_GATED_CONTROLS` next
  * to `CONFIRM_GUARD_MS`. Scene clicks go through `sceneClick`; wrap also
- * intercepts `page.locator(...).click()` so the R3 S9 bypass cannot pass.
+ * intercepts `page.locator(...).click()`, `keyboard.press("Enter"|" ")`,
+ * `mouse.down()`/`up()`, and `locator.press` so click-equivalents cannot
+ * open a time gate under a frozen Date. `setActiveCaptureScene` is set
+ * from every screenshot path so the abort names the real scene.
  */
 
 import { readFileSync } from "node:fs";
@@ -96,6 +99,56 @@ export function abortIfFixedClockClicksTimeGate(sceneName, testId) {
 }
 
 /**
+ * Shot filename → capture scene name. `approvals-confirm-light.png` and
+ * `press-triplet-row-rest-dark-390.png` both lose the scheme (and optional
+ * `-390`) so the abort sentence names the artefact stem the lane sets.
+ *
+ * @param {unknown} path
+ */
+export function sceneNameFromShotPath(path) {
+  if (typeof path !== "string" || !path) return "default";
+  const base = path.split(/[/\\]/).pop() ?? "";
+  const stem = base.replace(/\.png$/i, "");
+  return stem.replace(/-390$/, "").replace(/-(light|dark)$/, "") || "default";
+}
+
+function isActivateKey(key) {
+  return key === "Enter" || key === " " || key === "Space";
+}
+
+/**
+ * Serialized into the capture page so scene code never writes `new MouseEvent`.
+ */
+export function installCaptureMouseEventDispatch() {
+  window.__oortDispatchMouseEvent = (target, type, init = {}) => {
+    if (target == null) return;
+    target.dispatchEvent(new MouseEvent(type, init));
+  };
+}
+
+async function readFocusedTestId(page) {
+  if (typeof page?.evaluate !== "function") return "";
+  return page.evaluate(() => {
+    const el = document.activeElement;
+    if (!(el instanceof Element)) return "";
+    return (
+      el.getAttribute("data-testid") ||
+      el.closest("[data-testid]")?.getAttribute("data-testid") ||
+      ""
+    );
+  });
+}
+
+async function readTestIdAt(page, point) {
+  if (typeof page?.evaluate !== "function") return "";
+  return page.evaluate(({ x, y }) => {
+    const el = document.elementFromPoint(x, y);
+    if (!(el instanceof Element)) return "";
+    return el.closest("[data-testid]")?.getAttribute("data-testid") || "";
+  }, point);
+}
+
+/**
  * Every capture-scene click. Consults `TIME_GATED_CONTROLS` under
  * `clock: "fixed"`. `page` is the Playwright page that owns `locator`.
  *
@@ -115,18 +168,132 @@ export async function sceneClick(page, locator, options) {
 }
 
 /**
+ * Enter/Space on a focused control. Same time-gate as `sceneClick`.
+ *
+ * @param {import("playwright").Page} page
+ * @param {string} key
+ * @param {import("playwright").KeyboardPressOptions} [options]
+ */
+export async function sceneKeyboardPress(page, key, options) {
+  if (!page) {
+    throw new Error("sceneKeyboardPress requires the Playwright page");
+  }
+  if (isActivateKey(key)) {
+    abortIfFixedClockClicksTimeGate(
+      activeCaptureScene(),
+      await readFocusedTestId(page)
+    );
+  }
+  return page.keyboard.press(key, options);
+}
+
+/**
+ * @param {import("playwright").Page} page
+ * @param {import("playwright").MouseClickOptions} [options]
+ */
+export async function sceneMouseDown(page, options) {
+  if (!page) {
+    throw new Error("sceneMouseDown requires the Playwright page");
+  }
+  abortIfFixedClockClicksTimeGate(
+    activeCaptureScene(),
+    await readTestIdAt(page, page.__oortMouse ?? { x: 0, y: 0 })
+  );
+  return page.mouse.down(options);
+}
+
+/**
+ * @param {import("playwright").Page} page
+ * @param {import("playwright").MouseClickOptions} [options]
+ */
+export async function sceneMouseUp(page, options) {
+  if (!page) {
+    throw new Error("sceneMouseUp requires the Playwright page");
+  }
+  abortIfFixedClockClicksTimeGate(
+    activeCaptureScene(),
+    await readTestIdAt(page, page.__oortMouse ?? { x: 0, y: 0 })
+  );
+  return page.mouse.up(options);
+}
+
+/**
+ * Node-side gate for an in-page `MouseEvent` dispatch. The page helper
+ * `window.__oortDispatchMouseEvent` is installed by `wrapPageTimeGateClicks`.
+ *
+ * @param {import("playwright").Page} page
+ * @param {string} testId
+ */
+export async function sceneDispatchMouseEvent(page, testId) {
+  abortIfFixedClockClicksTimeGate(activeCaptureScene(), testId);
+}
+
+/**
  * Wrap Playwright locator factories so `.click()` is the machine even
  * when scene code is sabotaged with a raw `page.locator(...).click()`.
  *
  * @param {import("playwright").Page} page
  */
-export function wrapPageTimeGateClicks(page) {
+export async function wrapPageTimeGateClicks(page) {
   wrapFactory(page, "getByTestId", (testId) => String(testId));
   wrapFactory(page, "locator", (selector) => testIdFromSelector(selector));
   wrapFactory(page, "getByRole", () => "");
   wrapFactory(page, "getByText", () => "");
   wrapFactory(page, "getByLabel", () => "");
+  wrapKeyboardActivate(page);
+  wrapMouseButtons(page);
+  if (typeof page.addInitScript === "function") {
+    await page.addInitScript(installCaptureMouseEventDispatch);
+  }
   return page;
+}
+
+/**
+ * @param {import("playwright").Page} page
+ */
+function wrapKeyboardActivate(page) {
+  if (!page.keyboard || typeof page.keyboard.press !== "function") return;
+  const orig = page.keyboard.press.bind(page.keyboard);
+  page.keyboard.press = async (key, ...args) => {
+    if (isActivateKey(key)) {
+      abortIfFixedClockClicksTimeGate(
+        activeCaptureScene(),
+        await readFocusedTestId(page)
+      );
+    }
+    return orig(key, ...args);
+  };
+}
+
+/**
+ * @param {import("playwright").Page} page
+ */
+function wrapMouseButtons(page) {
+  if (!page.mouse || typeof page.mouse.down !== "function") return;
+  page.__oortMouse = { x: 0, y: 0 };
+  if (typeof page.mouse.move === "function") {
+    const origMove = page.mouse.move.bind(page.mouse);
+    page.mouse.move = async (x, y, ...rest) => {
+      page.__oortMouse = { x, y };
+      return origMove(x, y, ...rest);
+    };
+  }
+  const origDown = page.mouse.down.bind(page.mouse);
+  const origUp = page.mouse.up.bind(page.mouse);
+  page.mouse.down = async (...args) => {
+    abortIfFixedClockClicksTimeGate(
+      activeCaptureScene(),
+      await readTestIdAt(page, page.__oortMouse ?? { x: 0, y: 0 })
+    );
+    return origDown(...args);
+  };
+  page.mouse.up = async (...args) => {
+    abortIfFixedClockClicksTimeGate(
+      activeCaptureScene(),
+      await readTestIdAt(page, page.__oortMouse ?? { x: 0, y: 0 })
+    );
+    return origUp(...args);
+  };
 }
 
 /**
@@ -145,14 +312,28 @@ function wrapFactory(page, name, testIdOf) {
  * @param {string} testId
  */
 function wrapLocatorClicks(locator, testId) {
-  const origClick = locator.click.bind(locator);
-  locator.click = async (...args) => {
-    abortIfFixedClockClicksTimeGate(
-      activeCaptureScene(),
-      testIdFromLocator(locator, testId)
-    );
-    return origClick(...args);
-  };
+  if (typeof locator.click === "function") {
+    const origClick = locator.click.bind(locator);
+    locator.click = async (...args) => {
+      abortIfFixedClockClicksTimeGate(
+        activeCaptureScene(),
+        testIdFromLocator(locator, testId)
+      );
+      return origClick(...args);
+    };
+  }
+  if (typeof locator.press === "function") {
+    const origPress = locator.press.bind(locator);
+    locator.press = async (key, ...args) => {
+      if (isActivateKey(key)) {
+        abortIfFixedClockClicksTimeGate(
+          activeCaptureScene(),
+          testIdFromLocator(locator, testId)
+        );
+      }
+      return origPress(key, ...args);
+    };
+  }
   for (const chain of [
     "first",
     "last",
