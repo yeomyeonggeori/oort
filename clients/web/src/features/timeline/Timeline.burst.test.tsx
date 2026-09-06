@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 // Same-tick live burst through the REAL virtualized Timeline (react-virtuoso).
-// Coverage split (#2050 R4): jsdom asserts grants issued; Chromium asserts
-// plays, computed styles, and the jump-latest path. jsdom's synthetic
-// scroll box can report atBottom=false during a same-tick append, so play
-// counts here are not a product measurement.
+// Coverage split (#2050 R5): jsdom asserts grants issued (5/5 cases). Chromium
+// asserts plays, computed styles, and the jump-latest path. 제품 경로 재생
+// 단정은 로컬 게이트·design-review의 Chromium 레인에서만; CI 유닛 레인은 grant
+// 단정까지. jsdom's synthetic scroll box can report atBottom=false during a
+// same-tick append, so play counts here are not a product measurement.
 
 import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
@@ -602,6 +603,9 @@ describe("virtualized Timeline same-tick live burst", () => {
     const ids = arrivalIds(50);
     const issued = await deliverLiveIssued(ids, 40, "바닥 대량 arrival");
     expect(issued).toBe(3);
+    // Pre-batch at-bottom does not add a post-flush jsdom grant measurement:
+    // leftover sweep and mount-consume still run after act. issued=3 inside
+    // this act is the grant case; Chromium 50 → 3 plays is the product path.
     const newest = ids.slice(-3);
     await waitUntilRowsMounted(newest);
     const mounted = rowsFor(ids);
@@ -625,19 +629,27 @@ describe("virtualized Timeline same-tick live burst", () => {
   });
 
   it("consumed 장부가 비워져도 같은 id 재전달은 재재생 0", async () => {
-    // N-5 / N-1: MAX_CONSUMED_ARRIVAL_IDS 64→4·1·0 으로 줄여도 재재생은
-    // 안 생긴다. takeArrivalPlay 는 alreadyHeld 가 먼저 0 을 돌려서,
-    // consumed 장부 축출만으로는 같은 id 가 다시 grant 되지 않는다.
-    // 재재생이 나타나는 값은 없다 (측정: 4, 1, 0 모두 0; 제품 경로 alreadyHeld).
+    // Coverage split (#2050 R5 H-1): grant-set / consumption signal only.
+    // takeArrivalPlay 의 alreadyHeld 가 consumed 장부보다 먼저 0 을 돌려서
+    // 같은 id 재전달은 새 grant 를 만들지 않는다. Plays live in
+    // Timeline.burst.chromium.test.ts — do not count post-flush plays here.
     await mountBurst();
     const ids = arrivalIds(5, "0199eeee-0000-7000-8000-0000000008");
-    await deliverLive(ids, 90, "consumed 측정 arrival");
-    await waitUntilRowsMounted(ids);
-    expect(playingAmong(ids).length).toBe(3);
-    await deliverLive([ids[0]!], 90, "consumed 재전달 arrival");
-    await flushVirtuosoMount();
-    await settle();
-    expect(playingAmong([ids[0]!]).length).toBe(0);
+    const firstIssued = await deliverLiveIssued(ids, 90, "consumed 측정 arrival");
+    expect(firstIssued).toBe(3);
+    let newlyGranted = 0;
+    await act(async () => {
+      const before = new Set(ids.filter((id) => probe.isPlayEntrance?.(id)));
+      for (let i = 0; i < ids.length; i += 1) {
+        rail.handlers?.onMessage(
+          frame(ids[i]!, 90 + i, `consumed 재전달 arrival ${i + 1}`)
+        );
+      }
+      newlyGranted = ids.filter(
+        (id) => probe.isPlayEntrance?.(id) && !before.has(id)
+      ).length;
+    });
+    expect(newlyGranted).toBe(0);
     expect(probe.isPlayEntrance?.(ids[0]!)).toBe(false);
   });
 });
