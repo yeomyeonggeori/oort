@@ -69,6 +69,7 @@ export const CONFIRM_GUARD_MS = 400;
  * that gates them. Every ApprovalActions `${testIdPrefix}-confirm` must
  * appear here (the usage-site test in captureClock.test.ts walks callers).
  */
+// eslint-disable-next-line react-refresh/only-export-components -- allowConstantExport covers CONFIRM_GUARD_MS 리터럴만; as const 배열은 같은 자리의 레지스트리다.
 export const TIME_GATED_CONTROLS = [
   "approval-confirm",
   "inbox-approval-confirm",
