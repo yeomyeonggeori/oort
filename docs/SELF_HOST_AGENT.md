@@ -1412,7 +1412,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. Claim-mode: `oort_compose`. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
-| `stack.outbox` | non-`done` rows | `logs relay` if pending/failed. |
+| `stack.outbox` | non-`done` rows | `push_candidate` pending is non-failing when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). Other kinds: `logs relay` if pending/failed. |
 | `stack.migrate_idempotency` | no `IDEMPOTENCY_OK` | `logs migrate`. |
 | `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. |
 
