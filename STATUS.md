@@ -1,5 +1,23 @@
 # oort 진행 현황
 
+## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R5)
+
+- Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS.
+- **제품 경로 재생 단정은 로컬 게이트·design-review의 Chromium 레인에서만; CI 유닛 레인은 grant 단정까지.** `PLAYWRIGHT_BROWSERS_PATH=/nonexistent` → **51 skipped** / 2754 passed (R4 was 47; +4 burst-size Chromium cases).
+- H-1. jsdom 「consumed 장부」는 grant-set / 재전달 0 only — post-flush play count 없음. S15b (leftover sweep on every `messages` change) jsdom **5/5 green**. Cap 3→2 still reds Chromium `expected 3, got 2 before animationend` (10/20/30/50).
+- H-2. `captureClock.test.ts` usage-site **set equality** vs `TIME_GATED_CONTROLS`. Unregistered `FOO_GUARD_MS` + `foo-confirm` → `expected [approval-confirm, foo-confirm, handoff-confirm, inbox-approval-confirm] to equal [approval-confirm, handoff-confirm, inbox-approval-confirm]`. Register → green.
+- M-1 (only product-behaviour change). Exact sites: `Timeline.tsx` leftover sweep + `followOutput` read **pre-batch** at-bottom (`atBottomBeforeBatchRef` / `pendingBottomBatchRef`); `conversationEntrance.ts` consumes the grant on the first painted frame (unmount cancels, so virtuoso flash-mount does not spend it). 성재 2026-09-04: bottom same-tick → **3 play** regardless of batch size. Scroll-up still leftover 0 / jump 1 from the same pre-batch state. jsdom 50: pre-batch does **not** add a deterministic post-flush grant measurement (`issued=3` inside `act` only).
+- Burst-size Chromium plays (R4 → R5): **10/20/30 = 3/3/3 (unchanged); 50 = 1 → 3**.
+- M-2. Burst file headers + this STATUS line: product-path play assertions run only in the Chromium lane.
+- N-1. `keyboard.press("Enter"|" ")` / `mouse.down()`/`up()` / synthetic `MouseEvent` go through sceneClick-family. Self-test raw uses = 0. RED: raw `page.keyboard.press("Enter")` focused `inbox-approval-confirm` in scene `approvals-confirm` → `CAPTURE ABORT: scene "approvals-confirm" is clock:fixed; time-gated control [inbox-approval-confirm] cannot open CONFIRM_GUARD_MS`.
+- N-2. `wrapPageShotGuard` calls `setActiveCaptureScene(sceneNameFromShotPath(path))` before every shot. Unit test uses `approvals-confirm`.
+- N-3. `arrivalWiring.test.ts` REST-meta `it` keeps only `identifierCallCount(..., "capArrivalSetKeeping") === 3`.
+- N-4. `eslint-disable-next-line react-refresh/only-export-components` on `TIME_GATED_CONTROLS` — lint **0 errors, 16 warnings**.
+- 부하 3×30 (both burst files, `--pool=threads --maxWorkers=1 --minWorkers=1`, concurrent full `vitest run`; `/tmp/r5-sab-2114/burst90`). **fail/90 = 0**, 11 tests/run (jsdom 5 + Chromium 6).
+- Capture ×3 (`CAPTURE_PORT=8641`, 528 PNG, exit 0×3). intro/chat **3-identical**, sha R2/R3/R4와 동일 (`d1e1e410ee97…` / `7f16f519e1f0…` / `2f1ed5c1bc0c…` / `4d9e902466c4…`). **495/528** identical, **33** differing (21 on #2128 issue list; 12 extras same host-nondeterminism class as R4 — no exemption widened).
+- 게이트. web test **235 files / 2805 passed**. typecheck. lint 0 errors / 16 warnings. preflight web 14/14 + core 5/5. `SHELL_GATE_PORT=8643 SHELL_GATE_FOCUS_ONLY=1` GATE PASS. `scripts/verify_merge_tree.sh --base origin/track/uxui --head HEAD` PASS (base `2a4b03f3`).
+- 폰·`packages/momo-core` 무접촉. UX-R1d/UX-R2b green. runtime-unverified 아님.
+
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-06, R4)
 
 - Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard quality only; product behaviour unchanged.
