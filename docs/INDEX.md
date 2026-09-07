@@ -123,8 +123,6 @@
 | [`docs/planning/JOURNAL.md`](planning/JOURNAL.md) | 기획 세션 저널(newest-first, 기존 항목 불변) — Fable↔GPT 5.6 세션 간 이어달리기 | 전반 |
 | [`docs/planning/handoffs/`](planning/handoffs/) | 발급된 핸드오프 패킷 (첫 패킷: 2026-07-10 ADR-0101 agent identity 배치) | 전반 |
 | [`docs/planning/proposals/2026-07-15-workspace-first-superapp-shell.md`](planning/proposals/2026-07-15-workspace-first-superapp-shell.md) | 2026-07-14 실창 QA를 workspace-first messenger와 governed Work Console 경계로 분할한 실행 제안 | M3/슈퍼앱 |
-| [`docs/planning/handoffs/2026-07-15-workspace-first-superapp-shell.md`](planning/handoffs/2026-07-15-workspace-first-superapp-shell.md) | MOMO-383~386 UX buildable queue와 ADR-0113~0116 engine planning lock/handoff | M3/슈퍼앱 |
-| [`docs/planning/handoffs/2026-07-16-plugin-platform-fable.md`](planning/handoffs/2026-07-16-plugin-platform-fable.md) | Plugin Platform 제품화를 위한 Fable 엔진 핸드오프: ADR-0113 custody, SE-04A registry, Drive vertical 후보, 동적 discovery | 슈퍼앱/플러그인 |
 
 ### 2.1 CI/CD · QA 게이트 상세 (`docs/cicd/`)
 

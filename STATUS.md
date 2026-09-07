@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## LS-4 문서 로테이션 (#2143, 2026-09-07)
+
+- Track engine. ADR-0183 D6: closed/unreferenced handoffs 236 삭제(304→68), unreferenced planning-root 19(70→51) · planning/research 35(112→77), uncited `research/` 86(112→26), `claudedocs/` 39 untrack, `docs/archive/` 해체(5→0). STATUS 2026-08 절 761줄을 `docs/planning/archive/STATUS-2026-08.md`로 이동. D6 수명 규칙 4행을 `docs/planning/README.md` §2에 성문.
+
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-07, R6)
 
 - Track UXUI. `feat/st1-timeline-burst-capture` onto `origin/track/uxui` `2a4b03f3`. Worker does not claim design-review PASS. Guard-only; **no product behaviour change**. Product-file edits are the `TIME_GATED_CONTROLS` export (same module as the guard) and a comment at `Timeline.tsx` `atBottomBeforeBatchRef`.
