@@ -125,20 +125,15 @@ node scripts/check_npm_licenses.mjs --report "$SANDBOX/npm-canonical.md" \
 pass "npm gate is green over . + clients/web + clients/mobile"
 
 # Case 6 — RED PROOF (aim): the re-aimed gate reads the canonical trees, not
-# clients/web-legacy. Sentinels are packages that exist in exactly one side:
+# f399e417:clients/web-legacy (#2166 deleted that root). Sentinels:
 #   lightningcss  — clients/web + clients/mobile only (and MPL-2.0, so it also
 #                   proves the reviewed allowance is exercised)
-#   @swc/core     — clients/web-legacy only (@vitejs/plugin-react-swc)
+#   @swc/core     — lived only in the deleted legacy tree (@vitejs/plugin-react-swc)
 grep -q '| lightningcss |' "$SANDBOX/npm-canonical.md" ||
   fail "canonical inventory is missing lightningcss; the gate is not reading clients/web|mobile"
 grep -q '| @swc/core |' "$SANDBOX/npm-canonical.md" &&
-  fail "canonical inventory contains @swc/core; the gate is still reading clients/web-legacy"
-node scripts/check_npm_licenses.mjs --root clients/web-legacy \
-  --report "$SANDBOX/npm-legacy.md" >/dev/null 2>&1 ||
-  fail "npm gate is red on clients/web-legacy"
-grep -q '| @swc/core |' "$SANDBOX/npm-legacy.md" ||
-  fail "clients/web-legacy inventory is missing its own @swc/core"
-pass "npm gate reads the canonical trees (lightningcss present, web-legacy-only @swc/core absent)"
+  fail "canonical inventory contains @swc/core; the gate is still reading a deleted web-legacy inventory"
+pass "npm gate reads the canonical trees (lightningcss present, @swc/core absent)"
 
 # Case 7 — RED PROOF: a forbidden license in a synthetic lockfile fails, and an
 # OR expression with one allowed branch passes. The second half is the shape

@@ -59,6 +59,9 @@ describe("표면 판정표", () => {
     }
     for (const id of [
       "workstreams",
+      "workConsole",
+      "work",
+      "ade",
       "huddles",
       "plugins",
       "agentMemory",

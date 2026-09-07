@@ -19,6 +19,7 @@ import {
   memberFor,
   memberNameParts,
 } from '@momo/core/features/workspace/directory';
+import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 import {
   dmAutoReplyAgent,
   dmPeer,
@@ -1087,7 +1088,9 @@ export default function ConversationScreen({
       {/* 워크스페이스 전역 집계 한 줄. 살아 있는 작업이 없으면 **아무것도 그리지
           않는다** — 빈 띠도 남기지 않는 것이 이 줄의 계약이고, 그래서 이 자리는
           컴포저 액세서리 스택이 아니다(`AdeSummaryLine` 머리말의 세 근거). */}
-      <AdeSummaryLine onPress={openAde} />
+      {isSurfaceProvided('ade') ? (
+        <AdeSummaryLine onPress={openAde} />
+      ) : null}
       <ConversationLayout
         list={
           <>
@@ -1280,7 +1283,7 @@ export default function ConversationScreen({
         />
       ) : null}
 
-      {adeOpen && onOpenConversation ? (
+      {adeOpen && onOpenConversation && isSurfaceProvided('ade') ? (
         <AdeControlPanel
           onClose={closeAde}
           onOpenChannel={onOpenConversation}

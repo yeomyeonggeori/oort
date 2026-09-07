@@ -15,7 +15,7 @@ import {
 // a screenshot.
 //
 // The vocabulary is INHERITED from the ADR-0119 client
-// (clients/web-legacy/src/state/approvalModel.ts): ApprovalStatus,
+// (f399e417:clients/web-legacy/src/state/approvalModel.ts): ApprovalStatus,
 // approvalCardModel, resolveApprovalStatus. The basic-mode contract rides along
 // with it (ADR-0112, design-taste-web §9): only fields the server itself names
 // as public copy are parsed, and tool arguments, execution paths, grants,
@@ -124,7 +124,7 @@ export function turnStatusFor(value: unknown): AgentTurnStatus | null {
 /**
  * A settled snapshot always wins over a stale `pending` projection: the local
  * receipt is server truth from a moment the message row has not caught up to.
- * Ported verbatim in intent from web-legacy resolveApprovalStatus.
+ * Ported verbatim in intent from f399e417:clients/web-legacy resolveApprovalStatus.
  */
 export function resolveApprovalStatus(
   localStatus: string | null,
@@ -540,7 +540,7 @@ function approvalCard(
     typeof rawApprovalId === "string" && rawApprovalId !== ""
       ? rawApprovalId
       : null;
-  // Same guard as web-legacy: a request with neither an id nor a resume offer
+  // Same guard as f399e417:clients/web-legacy: a request with neither an id nor a resume offer
   // is not actionable, so it is not a card.
   if (!isResumeOffer && approvalId === null) return null;
 

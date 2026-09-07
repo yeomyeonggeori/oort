@@ -24,7 +24,7 @@ import {Composer} from '../src/features/conversation/Composer';
 //   produced, in the same tick, with nothing in between.
 //
 // The transitions below are not invented. Every one of them was captured on the
-// device and is pinned in `clients/mobile-spike/__tests__/gate1_composition.test.ts`;
+// device and is pinned in `f399e417:clients/mobile-spike/__tests__/gate1_composition.test.ts`;
 // the notable ones are the 받침 이동 rows (`안녕핫` + ㅔ → `안녕하세`, where one
 // keystroke legitimately produces two syllables) and the 10-key rows where the
 // composing tail widens to two characters and folds back.

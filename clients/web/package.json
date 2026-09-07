@@ -2,7 +2,7 @@
   "name": "momo-web",
   "private": true,
   "version": "0.0.0",
-  "description": "momo canonical UI (ADR-0133 §1): TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri shell (clients/desktop). The ADR-0119 alpha it replaced lives at clients/web-legacy.",
+  "description": "momo canonical UI (ADR-0133 §1): TS + React 18 + Vite. The same bundle runs in the browser and inside the Tauri shell (clients/desktop). The ADR-0119 alpha it replaced lived at f399e417:clients/web-legacy (deleted #2166).",
   "type": "module",
   "scripts": {
     "dev": "vite",

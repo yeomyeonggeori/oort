@@ -7,16 +7,14 @@
 // (exit 1) unless the license is on the permissive allowlist below.
 //
 // #1225 — WHAT MOVED AND WHY
-//   This gate used to live at clients/web-legacy/scripts/check-licenses.mjs and
-//   inspected that one tree. clients/web-legacy is the retired v0 client
-//   (ADR-0133 / MOMO-596); the canonical trees are clients/web,
-//   clients/mobile and the npm workspace root that owns packages/momo-core.
-//   Audit research/2026-08-10-buzz-audit-A.md measured the consequence: the
-//   1,258 packages of the live trees were checked by nothing, while the gate
-//   reported green over a tree that ships to no one. So the script now takes
-//   its roots as arguments and defaults to the canonical three.
-//   clients/web-legacy is still gated — the `web` gate profile builds and
-//   serves it — but explicitly, as one root among others.
+//   This gate used to live at f399e417:clients/web-legacy/scripts/check-licenses.mjs
+//   and inspected that one tree. f399e417:clients/web-legacy is the retired v0
+//   client (ADR-0133 / MOMO-596, deleted #2166); the canonical trees are
+//   clients/web, clients/mobile and the npm workspace root that owns
+//   packages/momo-core. Audit research/2026-08-10-buzz-audit-A.md measured the
+//   consequence: the 1,258 packages of the live trees were checked by nothing,
+//   while the gate reported green over a tree that ships to no one. So the
+//   script now takes its roots as arguments and defaults to the canonical three.
 //
 // Companion gate: deny.toml + scripts/check_cargo_licenses.sh do the same job
 // for the two cargo workspaces. The allowlists are the same policy written
