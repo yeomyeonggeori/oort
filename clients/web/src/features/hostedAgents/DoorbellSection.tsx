@@ -251,7 +251,13 @@ export function DoorbellSection({
       data-testid="hosted-doorbell-section"
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h4 className="text-body font-semibold text-ink">{DOORBELL_HEADLINE}</h4>
+        <h4
+          tabIndex={-1}
+          data-landing="doorbell"
+          className="text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+        >
+          {DOORBELL_HEADLINE}
+        </h4>
         <p className="break-keep text-meta text-ink-muted">{DOORBELL_LEAD}</p>
         <p role="status" aria-live="polite" className="sr-only">
           {live}

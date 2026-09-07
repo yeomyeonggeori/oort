@@ -1,39 +1,34 @@
-import { useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
-import { HostedConnectionSection } from "@/features/hostedAgents/HostedConnectionSection";
+import {
+  HostedConnectionSection,
+  type HostedLedgerLanding,
+} from "@/features/hostedAgents/HostedConnectionSection";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
 import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { hostedPresetIdForMember } from "@momo/core/features/hostedAgents/detect";
-import { doorbellProjection } from "@momo/core/features/hostedAgents/doorbell";
 import {
   hostedFailureMessage,
-  hostedStatusDetail,
   hostedStatusLabel,
   hostedStatusTone,
   isHostedOperatorDenied,
   type HostedAgentConnection,
   type HostedChipTone,
 } from "@momo/core/features/hostedAgents/model";
-import {
-  HOSTED_UPDATED_LABEL,
-  hostedConnectionTimes,
-  hostedListRow,
-} from "@momo/core/features/hostedAgents/status";
+import { hostedListRow } from "@momo/core/features/hostedAgents/status";
 import { regenerateGate } from "@momo/core/features/hostedAgents/wizard";
 import { uuidEq } from "@momo/core/lib/api";
 import {
-  KeyValueRows,
   OperatorNotice,
   SectionShell,
   StatusChip,
   type ChipTone,
-  type KeyValue,
 } from "./SettingsFields";
 import { formatMoment } from "./oauthGrant";
 
@@ -43,33 +38,70 @@ import { formatMoment } from "./oauthGrant";
 // 목록은 이 화면의 것이고, 발급·재발급·해제·도어벨은 이미 있는 표면을 연다.
 // 위저드·1회용 카드·해제 장부를 여기 복제하지 않는다. 1회용 연결 값은 목록에
 // 없고, 위저드 안의 OneTimeSecretCard 에만 선다.
+//
+// 목록 키는 연결 `id` 다. 부분 unique index 때문에 한 에이전트 멤버가 만료 행과
+// 살아 있는 행을 동시에 가질 수 있고, 멤버 id 로 고르면 장부가 다른 연결을 연다.
 // =============================================================================
 
 const CREDENTIALS_OFFLINE_NOTE_ID = "agent-credentials-offline-note";
 const CREDENTIALS_OFFLINE_REASON =
   "연결이 끊겨 지금은 자격을 발급하거나 바꿀 수 없습니다.";
 
+export type CredentialsRowAction = "disconnect" | "doorbell";
+
+/** 행 액션이 장부를 어느 `data-landing` 에 내릴지. 두 버튼은 목적지가 다르다. */
+export function ledgerLandingFor(
+  action: CredentialsRowAction
+): HostedLedgerLanding {
+  return action === "doorbell" ? "doorbell" : "heading";
+}
+
+/** 목록에서 고른 연결. 멤버 id 가 아니라 연결 id 로만 찾는다. */
+export function hostedRowByConnectionId<T extends { id: string }>(
+  rows: readonly T[],
+  connectionId: string | null
+): T | null {
+  if (connectionId === null) return null;
+  return rows.find((row) => uuidEq(row.id, connectionId)) ?? null;
+}
+
+/**
+ * 만료·해제된 행에는 「해제」가 서지 않는다 — 그 상태는 칩이 이미 말하고,
+ * 시작 게이트도 거절한다. 눌러서 다른 연결의 해제를 무장시키던 자리가 여기다.
+ */
+export function offersDisconnect(
+  status: HostedAgentConnection["status"]
+): boolean {
+  return status !== "expired" && status !== "disconnected";
+}
+
 function chipTone(tone: HostedChipTone): ChipTone {
   return tone === "neutral" ? "muted" : tone;
 }
 
-function doorbellLabel(connection: HostedAgentConnection): string {
-  return doorbellProjection(connection) ? "있음" : "없음";
-}
+function TruncatingName({ name }: { name: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [truncated, setTruncated] = useState(false);
 
-function rowFacts(row: HostedAgentConnection): KeyValue[] {
-  const times = hostedConnectionTimes(row).filter(
-    (fact) =>
-      fact.label !== HOSTED_UPDATED_LABEL || fact.atMs !== row.createdAtMs
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    setTruncated(el.scrollWidth > el.clientWidth);
+  }, [name]);
+
+  return (
+    <>
+      <span
+        ref={ref}
+        aria-hidden="true"
+        className="min-w-0 flex-1 truncate text-body text-ink"
+        title={truncated ? name : undefined}
+      >
+        {name}
+      </span>
+      <span className="sr-only">{name}</span>
+    </>
   );
-  return [
-    { key: "상태", value: hostedStatusDetail(row), prose: true },
-    ...times.map((fact) => ({
-      key: fact.label,
-      value: formatMoment(fact.atMs),
-    })),
-    { key: "도어벨", value: doorbellLabel(row) },
-  ];
 }
 
 export function AgentCredentialsSection({ offline }: { offline: boolean }) {
@@ -79,28 +111,46 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
 
   const [wizardOpen, setWizardOpen] = useState(false);
   const [launch, setLaunch] = useState<HostedWizardLaunch | null>(null);
-  const [selectedAgentId, setSelectedAgentId] = useState<string | null>(null);
+  const [selectedConnectionId, setSelectedConnectionId] = useState<
+    string | null
+  >(null);
+  const [landOn, setLandOn] = useState<HostedLedgerLanding | undefined>(
+    undefined
+  );
+  const [landNonce, setLandNonce] = useState(0);
   const [wizardOpener, setWizardOpener] = useState<HTMLButtonElement | null>(
     null
   );
 
   const rows = list.data ?? [];
-  const selected =
-    rows.find((row) => uuidEq(row.agentMemberId, selectedAgentId ?? "")) ?? null;
+  const selected = hostedRowByConnectionId(rows, selectedConnectionId);
   const selectedLabel =
     selected === null
       ? ""
       : (memberFor(directory, selected.agentMemberId)?.displayName ??
         hostedListRow(selected, "에이전트").title);
+  const selectedHeading =
+    selected === null
+      ? ""
+      : `${selectedLabel} · ${hostedStatusLabel(selected.status)}`;
 
   const openIssue = () => {
     setLaunch(null);
     setWizardOpen(true);
   };
 
+  const openLedger = (
+    row: HostedAgentConnection,
+    action: CredentialsRowAction
+  ) => {
+    setSelectedConnectionId(row.id);
+    setLandOn(ledgerLandingFor(action));
+    setLandNonce((nonce) => nonce + 1);
+  };
+
   const openRegenerate = (row: HostedAgentConnection) => {
     const member = memberFor(directory, row.agentMemberId);
-    setSelectedAgentId(row.agentMemberId);
+    setSelectedConnectionId(row.id);
     setLaunch({
       presetId: hostedPresetIdForMember(member),
       displayName: member?.displayName ?? hostedListRow(row, "에이전트").title,
@@ -118,10 +168,13 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
    *
    * `aria-disabled` 로 tab order 에 남게 된 뒤로 그 침묵은 더 크게 들린다 —
    * 초점은 닿는데 왜 못 하는지는 컨트롤이 가리키는 문장에 있어야 한다.
+   * 잠기지 않은 컨트롤에는 id 를 붙이지 않는다.
    */
-  function lockReason(): string | undefined {
-    if (offline) return CREDENTIALS_OFFLINE_NOTE_ID;
-    return undefined;
+  function lockReason(
+    locked: boolean,
+    noteId = CREDENTIALS_OFFLINE_NOTE_ID
+  ): string | undefined {
+    return writesLocked && locked ? noteId : undefined;
   }
 
   const issueButton = (testId: string) => (
@@ -129,7 +182,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
       type="button"
       size="sm"
       aria-disabled={writesLocked || undefined}
-      aria-describedby={lockReason()}
+      aria-describedby={lockReason(writesLocked)}
       className={cn(writesLocked && "opacity-50")}
       onClick={(event) => {
         if (writesLocked) return;
@@ -213,78 +266,98 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                 const member = memberFor(directory, row.agentMemberId);
                 const fullName = member?.displayName ?? "에이전트";
                 const selectedRow = uuidEq(
-                  row.agentMemberId,
-                  selectedAgentId ?? ""
+                  row.id,
+                  selectedConnectionId ?? ""
                 );
                 const gate = regenerateGate(row);
+                const rowOfflineId = `agent-credentials-offline-${row.id}`;
+                const regenerateLocked = writesLocked && gate.allowed;
                 return (
                   <li
                     key={row.id}
-                    className={cn(
-                      "flex min-w-0 flex-col gap-2 border-b border-line p-3 last:border-b-0",
-                      selectedRow ? "bg-accent-soft" : "hover:bg-surface-hover"
-                    )}
+                    aria-current={selectedRow ? "true" : undefined}
+                    className="flex min-w-0 items-stretch border-b border-line last:border-b-0"
                     data-testid="agent-credentials-row"
                     data-connection-id={row.id}
                     data-selected={selectedRow ? "" : undefined}
                   >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <span
-                        className="min-w-0 flex-1 truncate text-body text-ink"
-                        title={fullName}
-                        aria-label={fullName}
-                      >
-                        {fullName}
-                      </span>
+                    <div
+                      className={cn(
+                        "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 py-2",
+                        selectedRow
+                          ? "bg-accent-soft"
+                          : "hover:bg-surface-hover"
+                      )}
+                      data-testid="agent-credentials-row-body"
+                    >
+                      <TruncatingName name={fullName} />
                       <StatusChip
                         tone={chipTone(hostedStatusTone(row.status))}
                       >
                         {hostedStatusLabel(row.status)}
                       </StatusChip>
+                      <span className="min-w-0 shrink truncate text-meta text-ink-muted">
+                        {formatMoment(row.updatedAtMs)}
+                      </span>
                     </div>
-                    <KeyValueRows rows={rowFacts(row)} />
-                    <div className="flex flex-wrap items-center gap-2">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        aria-describedby={lockReason()}
-                        onClick={() => setSelectedAgentId(row.agentMemberId)}
-                        data-testid="agent-credentials-disconnect"
-                      >
-                        해제
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        aria-describedby={lockReason()}
-                        onClick={() => setSelectedAgentId(row.agentMemberId)}
-                        data-testid="agent-credentials-doorbell"
-                      >
-                        도어벨
-                      </Button>
-                      {gate.allowed ? (
+                    <div
+                      className="flex shrink-0 items-center gap-1.5 border-s border-line bg-surface px-2 py-1"
+                      data-testid="agent-credentials-row-actions"
+                    >
+                      {offersDisconnect(row.status) ? (
                         <Button
                           type="button"
                           variant="outline"
                           size="sm"
-                          aria-disabled={writesLocked || undefined}
-                          aria-describedby={lockReason()}
-                          className={cn(writesLocked && "opacity-50")}
-                          onClick={(event) => {
-                            if (writesLocked) return;
-                            setWizardOpener(event.currentTarget);
-                            openRegenerate(row);
-                          }}
-                          data-testid="agent-credentials-regenerate"
+                          onClick={() => openLedger(row, "disconnect")}
+                          data-testid="agent-credentials-disconnect"
                         >
-                          재발급
+                          해제
                         </Button>
                       ) : (
-                        <p className="break-keep text-meta text-ink-muted">
-                          {gate.blockedCopy}
-                        </p>
+                        <span className="text-meta text-ink-muted">
+                          {hostedStatusLabel(row.status)}
+                        </span>
+                      )}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => openLedger(row, "doorbell")}
+                        data-testid="agent-credentials-doorbell"
+                      >
+                        도어벨
+                      </Button>
+                      {gate.allowed && (
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            aria-disabled={regenerateLocked || undefined}
+                            aria-describedby={lockReason(
+                              regenerateLocked,
+                              rowOfflineId
+                            )}
+                            className={cn(regenerateLocked && "opacity-50")}
+                            onClick={(event) => {
+                              if (regenerateLocked) return;
+                              setWizardOpener(event.currentTarget);
+                              openRegenerate(row);
+                            }}
+                            data-testid="agent-credentials-regenerate"
+                          >
+                            재발급
+                          </Button>
+                          {regenerateLocked && (
+                            <p
+                              id={rowOfflineId}
+                              className="break-keep text-meta text-ink-muted"
+                            >
+                              {CREDENTIALS_OFFLINE_REASON}
+                            </p>
+                          )}
+                        </div>
                       )}
                     </div>
                   </li>
@@ -296,10 +369,13 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
 
         {selected !== null && (
           <HostedConnectionSection
-            key={selected.agentMemberId}
+            key={selected.id}
             agentMemberId={selected.agentMemberId}
             agentLabel={selectedLabel}
-            title={selectedLabel}
+            title={selectedHeading}
+            connectionId={selected.id}
+            landOn={landOn}
+            landNonce={landNonce}
             offline={offline}
           />
         )}

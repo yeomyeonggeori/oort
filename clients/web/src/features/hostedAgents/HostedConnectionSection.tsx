@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
@@ -108,11 +108,16 @@ import {
 // 그 복원을 공짜로 만든다.
 // =============================================================================
 
+export type HostedLedgerLanding = "heading" | "doorbell" | "start";
+
 export function HostedConnectionSection({
   agentMemberId,
   agentLabel,
   offline,
   title,
+  connectionId: requestedConnectionId,
+  landOn,
+  landNonce,
 }: {
   agentMemberId: string;
   agentLabel: string;
@@ -125,14 +130,23 @@ export function HostedConnectionSection({
    */
   offline: boolean;
   /**
-   * Visible heading for whose ledger this is. `aria-label` stays the existing
-   * `${agentLabel} 호스티드 연결` so the region name does not fork.
+   * Settings names the exact connection (name · status). The hub leaves this
+   * unset so the heading stays 「호스티드 연결」.
    */
   title?: string;
+  /**
+   * Exact connection to open. Settings passes the row's `id` so an expired
+   * row cannot resolve to a newer live row for the same member. The hub omits
+   * this and still finds by `agentMemberId`.
+   */
+  connectionId?: string;
+  landOn?: HostedLedgerLanding;
+  landNonce?: number;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
   const { directory } = useDirectory(workspaceId);
+  const headingId = useId();
 
   const [openArtifactId, setOpenArtifactId] = useState<string | null>(null);
   // 실패 문구는 **어느 행동의 것인지**를 함께 든다. 이 화면은 한 화면에 다 들어가지
@@ -145,7 +159,11 @@ export function HostedConnectionSection({
 
   const list = useQuery(hostedListQuery(workspaceId));
   const found =
-    list.data?.find((row) => uuidEq(row.agentMemberId, agentMemberId)) ?? null;
+    requestedConnectionId !== undefined
+      ? (list.data?.find((row) => uuidEq(row.id, requestedConnectionId)) ??
+        null)
+      : (list.data?.find((row) => uuidEq(row.agentMemberId, agentMemberId)) ??
+        null);
   const connectionId = found === null ? "" : normalizedId(found.id);
   const detail = useQuery({
     ...hostedConnectionDetailQuery(workspaceId, connectionId),
@@ -184,6 +202,18 @@ export function HostedConnectionSection({
       ?.querySelector<HTMLElement>(`[data-landing="${target}"]`)
       ?.focus({ preventScroll: true });
   }, [detail.data]);
+
+  useEffect(() => {
+    if (landOn === undefined) return;
+    const root = sectionRef.current;
+    if (root === null) return;
+    const node = root.querySelector<HTMLElement>(
+      `[data-landing="${landOn}"]`
+    );
+    if (node === null) return;
+    root.scrollIntoView({ block: "nearest" });
+    node.focus({ preventScroll: true });
+  }, [landOn, landNonce, found]);
 
   function writeDetail(next: HostedConnectionDetail) {
     client.setQueryData(
@@ -291,11 +321,19 @@ export function HostedConnectionSection({
     <section
       ref={sectionRef}
       className="flex min-w-0 flex-col gap-4 p-4"
+      aria-labelledby={headingId}
       aria-label={`${agentLabel} 호스티드 연결`}
       data-testid="hosted-connection-section"
+      data-connection-id={found?.id}
+      data-landing-target={landOn}
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 className="text-title font-semibold text-ink">
+        <h3
+          id={headingId}
+          tabIndex={-1}
+          data-landing="heading"
+          className="text-title font-semibold text-ink outline-none focus-visible:focus-ring"
+        >
           {title ?? "호스티드 연결"}
         </h3>
         <p className="break-keep text-body text-ink-muted">
@@ -524,7 +562,10 @@ function StartPanel({
   // 그래서 없는 갈래를 지어내는 대신 이름으로 그 사실을 적는다.
   const lockReasonId = blocked ? blockedId : undefined;
   return (
-    <div className="flex min-w-0 flex-col gap-3 rounded-md border border-line p-3">
+    <div
+      className="flex min-w-0 flex-col gap-3 rounded-md border border-line p-3"
+      data-landing="start"
+    >
       <div className="grid gap-3 md:grid-cols-2">
         <div className="flex min-w-0 flex-col gap-1">
           <h4 className="text-body font-semibold text-ink">
