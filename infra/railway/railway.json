@@ -1,0 +1,73 @@
+{
+  "name": "oort",
+  "description": "oort self-host on Railway: one GHCR image (api · relay · webhook-sender · agent-worker), Caddy public edge, Centrifugo, Postgres plugin. LiveKit/huddle excluded.",
+  "appImage": {
+    "ref": "ghcr.io/yeomyeonggeori/oort",
+    "digest": "sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+    "source": "releases/latest.json images.app"
+  },
+  "plugins": ["postgresql"],
+  "notes": {
+    "composeTable": "Not a docker-compose rendering. scripts/check_compose_env_templates.sh tables infra/rust/*.yml only. This file is a Railway service catalog; env keys come from scripts/self_host_env.sh --railway.",
+    "livekit": "Excluded (huddle deferred). Do not add a LiveKit service.",
+    "tls": "Railway terminates HTTPS on the caddy service. Caddyfile.railway is the public Caddyfile with an internal-HTTP listener only — not auto_https off plus a bare :8080 site.",
+    "migrate": "Image command migrate does not provision runtime roles and apply 001..NNN in one process. MOMO_RUNTIME_ROLE_PROVISION=1 applies bootstrap_runtime_roles.sql and exits. A second invocation with MOMO_BOOTSTRAP_RUNTIME_ROLES=0 migrates. api.preDeployCommand sequences both against MIGRATE_DATABASE_URL so the running api keeps DATABASE_URL=momo_app (RLS)."
+  },
+  "services": {
+    "caddy": {
+      "public": true,
+      "dockerfile": "infra/railway/Dockerfile.caddy",
+      "buildContext": ".",
+      "startCommand": "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
+      "healthcheckPath": "/healthz",
+      "variablesFromGenerator": ["OORT_SITE_ADDRESS", "OORT_CSP_CONNECT_SRC"]
+    },
+    "api": {
+      "public": false,
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "startCommand": "api",
+      "preDeployCommand": [
+        "DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_RUNTIME_ROLE_PROVISION=1 /usr/local/bin/momo-migrate && DATABASE_URL=\"$MIGRATE_DATABASE_URL\" MOMO_BOOTSTRAP_RUNTIME_ROLES=0 MOMO_ENV=\"${MOMO_MIGRATE_ENV:-development}\" /usr/local/bin/momo-migrate"
+      ],
+      "port": 8080,
+      "healthcheckPath": "/healthz",
+      "privateHostname": "api.railway.internal"
+    },
+    "relay": {
+      "public": false,
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "startCommand": "relay",
+      "variablesHardcoded": {
+        "CENT_API_URL": "http://centrifugo.railway.internal:8000/api"
+      }
+    },
+    "webhook-sender": {
+      "public": false,
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "startCommand": "webhook-sender"
+    },
+    "agent-worker": {
+      "public": false,
+      "image": "ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f",
+      "startCommand": "agent-worker",
+      "variablesDerived": {
+        "WORKER_DATABASE_URL": "postgres://momo_worker:${WORKER_POSTGRES_PASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE} — compose interpolates this; --railway does not emit it (key-set equality with the generator heredoc). Set on this service from the generator passwords + Postgres plugin host."
+      }
+    },
+    "centrifugo": {
+      "public": false,
+      "image": "centrifugo/centrifugo:v6@sha256:8ba0c9443dadedc21b20254b3fc76f35c1998b29acc7cdec877ea0c3636c237e",
+      "startCommand": "centrifugo",
+      "port": 8000,
+      "privateHostname": "centrifugo.railway.internal",
+      "configFile": false,
+      "environment": {
+        "CENTRIFUGO_PORT": "8000",
+        "CENTRIFUGO_CLIENT_SUBSCRIPTION_TOKEN_ENABLED": "true",
+        "CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT": "http://api.railway.internal:8080/v1/centrifugo/subscribe",
+        "CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_INCLUDE_CONNECTION_META": "true",
+        "CENTRIFUGO_CHANNEL_NAMESPACES": "[{\"name\":\"ch\",\"presence\":true,\"join_leave\":true,\"force_push_join_leave\":true,\"history_size\":300,\"history_ttl\":\"720h\",\"history_meta_ttl\":\"744h\",\"force_recovery\":true,\"force_positioning\":true,\"subscribe_proxy_enabled\":true,\"channel_regex\":\"^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$\"},{\"name\":\"dm\",\"presence\":true,\"history_size\":300,\"history_ttl\":\"720h\",\"history_meta_ttl\":\"744h\",\"force_recovery\":true,\"allow_user_limited_channels\":true},{\"name\":\"agent\",\"presence\":true,\"join_leave\":true,\"force_push_join_leave\":true,\"history_size\":100,\"history_ttl\":\"24h\",\"history_meta_ttl\":\"48h\",\"force_recovery\":true,\"subscribe_proxy_enabled\":true,\"channel_regex\":\"^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$\"},{\"name\":\"agentwork\",\"history_size\":100,\"history_ttl\":\"24h\",\"history_meta_ttl\":\"48h\",\"force_recovery\":true,\"subscribe_proxy_enabled\":true,\"channel_regex\":\"^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$\"},{\"name\":\"user\",\"history_size\":50,\"history_ttl\":\"168h\",\"history_meta_ttl\":\"192h\",\"force_recovery\":true,\"allow_user_limited_channels\":true},{\"name\":\"typing\",\"history_size\":0,\"history_ttl\":\"0s\",\"subscribe_proxy_enabled\":true,\"channel_regex\":\"^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$\"},{\"name\":\"presence\",\"history_size\":0,\"history_ttl\":\"0s\",\"subscribe_proxy_enabled\":true,\"channel_regex\":\"^ws[0-9A-Fa-f-]{36}\\\\.[0-9A-Fa-f-]{36}$\"}]"
+      }
+    }
+  }
+}

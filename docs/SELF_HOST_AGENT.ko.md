@@ -1261,13 +1261,37 @@ Postgres가 비어 보이거나 로그인이 안 되면 데이터가 소실된 �
 
 ### 3.4 Railway
 
-SH-5a가 `railway.json` + Postgres 플러그인 + 이미지 하나 + 공개 도메인 →
-SH-2 env를 랜딩한다. 그 템플릿이 있기 전까지 Railway는 §3.2로 다룬다:
-통제하는 기계, 공개 digest, 플랫폼 호스트명에 `--public-origin`,
-`public.*` 포함 doctor PASS.
+카탈로그: [`infra/railway/README.md`](../../infra/railway/README.md) ·
+[`infra/railway/railway.json`](../../infra/railway/railway.json).
+compose와 같은 GHCR 이미지(`releases/latest.json`), 커맨드 넷
+(`api` · `relay` · `webhook-sender` · `agent-worker`), 공개 엣지는 Caddy,
+Centrifugo는 `CENTRIFUGO_*`(파일 마운트 없음), Postgres는 플러그인.
+LiveKit은 이 템플릿에 없다. 이 레포가 싣지 않는 compose 스택을 만들지
+마라. 플랫폼 시크릿을 대화에 붙이지 마라.
 
-이 레포가 싣지 않는 compose 스택을 만들지 마라. 플랫폼 시크릿을 대화에
-붙이지 마라.
+1. Railway 계정 + 프로젝트. Postgres 플러그인을 붙인다. `railway.json`의
+   서비스 여섯(이미지, `startCommand`, api `preDeployCommand`)을 만든다.
+   공개 도메인은 **caddy**에. api는 내부에 둔다.
+2. 플러그인 URL과 caddy 호스트명이 생긴 뒤:
+
+```sh
+scripts/self_host_env.sh --railway
+```
+
+   환경에 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`이 필요하다(둘 중 하나라도
+   없으면 명시 실패 — doctor `public.*` skip이 아니다). stdout KEY=value를
+   Railway 변수로 넣는다. 생성기 파일에 없는 compose 보간 키 셋
+   (`CENT_API_URL`, `WORKER_DATABASE_URL`, Centrifugo proxy 헤더)은 README.
+3. 배포. api preDeploy(런타임 롤 → migrate)가 끝나고 caddy `/healthz`가
+   답할 때까지 기다린다.
+4. 게이트:
+
+```sh
+scripts/oort doctor --json
+```
+
+   `public.healthz`와 `public.websocket`이 PASS여야 한다. 남길 인스턴스가
+   아니면 프로젝트를 지운다.
 
 **플랫폼 URL이 생긴 뒤 게이트:** `scripts/oort doctor --json` 에서
 `public.healthz` pass.

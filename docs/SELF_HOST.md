@@ -666,6 +666,24 @@ and order ACME.
 | Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
 | CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
+## Railway
+
+Cloud install of the same stack: [`infra/railway/README.md`](../infra/railway/README.md).
+Caddy is the public service (Railway TLS); api stays internal so
+`/v1/centrifugo/*` stays an exclusive 403 (`infra/railway/Caddyfile.railway`).
+Postgres is the Railway plugin. LiveKit is not included.
+
+After the plugin `DATABASE_URL` and the caddy public hostname exist, the
+same generator prints Railway variables (no file, no compose stack):
+
+```sh
+scripts/self_host_env.sh --railway
+```
+
+`RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. The output key set
+is the generator heredoc plus `oort_public_edge_env_keys` — do not type
+`OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Gate:
+`scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
 | 레포 경로 | 서버 위 이름 | 역할 |
 |---|---|---|

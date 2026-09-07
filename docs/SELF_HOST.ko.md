@@ -595,6 +595,23 @@ docker compose --env-file infra/rust/local.secrets.env \
 | 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
 | CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
 
+## Railway
+
+같은 스택의 클라우드 설치: [`infra/railway/README.md`](../infra/railway/README.md).
+공개 서비스는 Caddy(Railway TLS), api는 내부 — `/v1/centrifugo/*` 전용 403
+(`infra/railway/Caddyfile.railway`). Postgres는 Railway 플러그인. LiveKit 없음.
+
+플러그인 `DATABASE_URL`과 caddy 공개 호스트명이 생긴 뒤, 같은 생성기가
+Railway 변수를 출력한다(파일 없음, compose 스택 발명 없음):
+
+```sh
+scripts/self_host_env.sh --railway
+```
+
+`RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. 출력 키 집합은 생성기
+heredoc + `oort_public_edge_env_keys` — `OORT_SITE_ADDRESS` /
+`OORT_CSP_CONNECT_SRC`를 손으로 적지 마라. 게이트:
+`scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
 | 레포 경로 | 서버 위 이름 | 역할 |
 |---|---|---|

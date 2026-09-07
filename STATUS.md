@@ -5,6 +5,12 @@
 - Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
 - runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 
+## SH-5a Railway 템플릿 (#2205, 2026-09-08)
+
+- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
+- 검증: `scripts/tests/test_railway_template.sh` (키 집합 diff 0 · JWT_HMAC 사보타주 RED · `caddy adapt` · 403 순서 · 게이트 픽스처 PASS/RED) · `scripts/local_gate.sh --profile docs`.
+- runtime-unverified: `RAILWAY_TOKEN` 없음 — 실배포 `railway up` / 원격 `public.healthz`·`public.websocket`은 planner 수행.
+
 ## LS-3 은퇴 문서 (#2182, 2026-09-07)
 
 - Track engine. `feat/ls3-retired-docs`. 루트 은퇴 문서·G3 런북(`05`/`06`)·Codex 스텁·NCP 런북 `git rm`. `CENT_PROXY_SECRET` 회전 절은 `docs/SELF_HOST.md`(+ko)로 원문 이식, public-edge 계약 `RUNBOOK=` 재지정. INDEX/README는 ADR-0183 D1 목록. `.conductor/`는 local_gate/goal_claim이 소비하므로 유지.

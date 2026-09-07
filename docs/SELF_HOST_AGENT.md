@@ -1294,13 +1294,38 @@ agent may climb the next layer.
 
 ### 3.4 Railway
 
-SH-5a lands `railway.json` + Postgres plugin + one image + public domain →
-SH-2 env. Until that template exists, treat Railway as §3.2: a machine you
-control, published digest, `--public-origin` on the platform hostname,
-doctor PASS including `public.*`.
+Catalog: [`infra/railway/README.md`](../../infra/railway/README.md) ·
+[`infra/railway/railway.json`](../../infra/railway/railway.json).
+Same GHCR image as compose (`releases/latest.json`), four commands
+(`api` · `relay` · `webhook-sender` · `agent-worker`), Caddy as the public
+edge, Centrifugo via `CENTRIFUGO_*` (no file mount), Postgres plugin.
+LiveKit is not in this template. Do not invent a compose stack this repo
+does not ship. Do not paste platform secrets into chat.
 
-Do not invent a compose stack that this repo does not ship. Do not paste
-platform secrets into chat.
+1. Railway account + project. Add the Postgres plugin. Create the six
+   services in `railway.json` (image, `startCommand`, api `preDeployCommand`).
+   Give **caddy** the public domain. Api stays internal.
+2. After the plugin URL and the caddy hostname exist:
+
+```sh
+scripts/self_host_env.sh --railway
+```
+
+   Requires `RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` in the environment
+   (explicit fail if either is missing — not a doctor `public.*` skip).
+   Apply the KEY=value stdout as Railway variables. Also set the three keys
+   compose interpolates that are not in the generator file (`CENT_API_URL`,
+   `WORKER_DATABASE_URL`, Centrifugo proxy header) — listed in the README.
+3. Deploy. Wait until api preDeploy finished (runtime-roles then migrate)
+   and caddy answers `/healthz`.
+4. Gate:
+
+```sh
+scripts/oort doctor --json
+```
+
+   `public.healthz` and `public.websocket` must PASS. Then stop/delete the
+   project unless this instance is meant to stay up.
 
 **Gate after the platform URL exists:** `scripts/oort doctor --json` with
 `public.healthz` pass.
