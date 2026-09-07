@@ -147,7 +147,7 @@ Profiles:
 | `web` | `clients/web` (live SPA; `server-rust/Dockerfile` web-assets), `docs/api/openapi.yaml`, or design-preflight changes | worktree-clean + design pre-flight + `clients/web` `npm ci --no-audit --no-fund` → `npm run lint` → `npm run typecheck` → `npm run test` → `npm run build` + permissive-only license gate on canonical npm roots |
 | `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, GHCR notice bundle (`legal/generated/`, `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`), or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir) + `#1332` `scripts/tests/test_ghcr_notice_bundle.sh` (byte-identical + version/license-delete/Docker-COPY/GPL-as-permissive RED) + `scripts/check_ghcr_notice_bundle.sh` (lockfile-hash stale bundle + Dockerfile COPY of LICENSE/NOTICE/index/generated bundle). Policy (#1225 allow/deny) and attribution (#1332 generated notices) are separate gates. Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit`. Not a legal-sufficiency declaration |
 | `secrets` | fast standalone "did I just commit a credential" lane, or `.gitleaksignore` / secret-gate script changes | `scripts/tests/test_secrets_gate.sh` (red proofs) + `scripts/check_secrets.sh` — gitleaks over every ref with the `.gitleaksignore` triage baseline applied. ~3s, no static checks. The same two steps already run inside **every** other profile through the static block, so this profile is a convenience lane, not extra coverage. Requires `gitleaks`; fails closed with install guidance when absent, with no override env |
-| `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
+| `all` | merge-critical/runtime-wide changes | broad static/runtime DB/relay/agent gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
 
@@ -432,25 +432,16 @@ pass are retired with this profile retarget.
 CSP contract note: the web client uses centrifuge-js in websocket-only
 transport mode. The serving CSP allows `connect-src 'self'` plus
 `wss://REALTIME_DOMAIN` and `https://REALTIME_DOMAIN`. Adding another fallback
-transport requires updating the Caddyfile CSP and the
-`scripts/web_serving_smoke.sh` expectations in the same PR.
+transport requires updating the Caddyfile CSP in the same PR.
 
 `staging-smoke` no longer runs the retired prod-env-preflight / install-upgrade /
 internal-hosting-smoke Swift e2e subjects (#2142). Remaining commands are
-`verify_staging_smoke.sh` and `verify_momo_ops.sh`.
+`verify_staging_smoke.sh` and `verify_momo_ops.sh`. `verify_prod_install_upgrade.sh`
+was deleted with those subjects.
 
-MOMO-406 adds `scripts/verify_prod_install_upgrade.sh` to the same profile. It
-uses a fake Docker command and synthetic non-secret env to cover the
-non-interactive argument matrix, strict per-service `@sha256` pins, preflight
-wiring, compose-config invocation, install/migrate ordering, backup-evidence
-gate, sequential upgrade, and previous-image app rollback. It does not start a
-container. `scripts/verify_staging_smoke.sh` still performs the real
-`docker compose config --quiet` render; the orchestrator records that Docker
-gate separately.
-
-#1329 adds two deliberately separate NCP checks. The static
-`scripts/verify_ncp_centrifugo_contract.sh` and
-`scripts/tests/test_ncp_centrifugo_boundary.sh` run in every full local-gate
+#1329 adds two deliberately separate public-edge checks. The static
+`scripts/verify_public_edge_centrifugo_contract.sh` and
+`scripts/tests/test_public_edge_centrifugo_boundary.sh` run in every full local-gate
 profile. They fail on a missing/reordered `/v1/centrifugo/*` 403, a compose
 secret-source drift, a missing rotation/rollback contract, the old public
 401/401/400 shape, unequal runtime fingerprints, a current secret that still
@@ -460,13 +451,13 @@ The H1 negative matrix covers attacker/typo/wrong-port/userinfo/path/query/
 fragment/punycode inputs and proves secret-read, Docker exec, curl/network, and
 evidence-write counts all stay zero. It also proves 3xx is never followed and
 production/staging cannot activate the synthetic-secret-only loopback escape.
-These fixtures do not contact NCP.
+These fixtures do not contact a public host.
 
 The read-only runtime closure is intentionally operator-attended and is not a
 PR CI or ordinary local-gate step:
 
 ```bash
-/opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+/opt/momo/scripts/verify_public_edge_centrifugo_boundary.sh \
   --env-file /opt/momo/infra/rust/smoke.secrets.env \
   --old-env-file /opt/momo/infra/rust/smoke.secrets.env.before-cent-proxy-<UTC> \
   --edge-url https://app.oor7.com \
