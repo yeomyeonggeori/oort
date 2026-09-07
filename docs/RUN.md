@@ -982,7 +982,8 @@ curl -H "Authorization: Bearer $ACCESS_TOKEN" http://127.0.0.1:8080/v1/mcp/tools
 - Security preflight: app JWT, exact `mcp.*` scope, workspace claim match, `SET LOCAL app.workspace_id`, active member, channel membership.
 - Current status: `POST /v1/mcp/tools/call` returns a stub tool-result envelope (`runtime-unverified`) rather than executing MCP JSON-RPC/tool logic.
 
-Operational details are in [`docs/INBOUND_MCP.md`](INBOUND_MCP.md).
+Operational details are in [`docs/INBOUND_MCP.md`](INBOUND_MCP.md); the normative spec remains
+[`research/11-agent-runtime/09-inbound-mcp-server-v0.md`](../research/11-agent-runtime/09-inbound-mcp-server-v0.md).
 
 ### 5.2 Outbox Relay — `OutboxRelay`
 
