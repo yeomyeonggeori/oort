@@ -1,0 +1,11 @@
+# Railway Caddy image (#2205). Same `caddy:2-alpine` default as
+# infra/rust/caddy.override.yml. SPA bytes come from the published oort image
+# (`web-assets` / compose web-init). Railway volumes are per-service, so the
+# copy is build-time instead of a named volume.
+#
+# Pin ARG OORT_IMAGE to releases/latest.json images.app (ref@digest_list).
+ARG OORT_IMAGE=ghcr.io/yeomyeonggeori/oort@sha256:7426d282b67270ff3d52c4cbf1f5136ea038ae104a2c9dbb971ef71f8694d37f
+FROM ${OORT_IMAGE} AS web
+FROM caddy:2-alpine
+COPY --from=web /opt/momo/web /srv/web
+COPY infra/railway/Caddyfile.railway /etc/caddy/Caddyfile
