@@ -2,7 +2,7 @@
 
 ## LS-4 문서 로테이션 (#2143, 2026-09-07)
 
-- Track engine. ADR-0183 D6: closed/unreferenced handoffs 236 삭제(304→68), unreferenced planning-root 19(70→51) · planning/research 35(112→77), uncited `research/` 83(112→29; hermes-adapter-contract-v0 fixture 3본은 docs-gate 실행 배선으로 복구), `claudedocs/` 39 untrack, `docs/archive/` 해체(5→0). STATUS 2026-08 절 761줄을 `docs/planning/archive/STATUS-2026-08.md`로 이동. D6 수명 규칙 4행을 `docs/planning/README.md` §2에 성문.
+- Track engine. ADR-0183 D6 + R2 live-cite restore: handoffs 304→76, planning-root 70→51, planning/research 112→78, `research/` 112→36 (26 ADR-cited md + 7 live-canon restores + 3 hermes fixtures). `claudedocs/` 39→0, `docs/archive/` 5→0. STATUS 2026-08 절 761줄을 `docs/planning/archive/STATUS-2026-08.md`로 이동. D6 수명 규칙은 살아 있는 정본·코드 인용을 포함한다.
 
 ## ST-1 Timeline burst 결정성 + 바닥 동시 상한 3 + capture intro 정착 (#2050, 2026-09-07, R6)
 
