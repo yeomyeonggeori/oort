@@ -5,6 +5,13 @@
 
 ---
 
+
+> ## 개정 2026-09-08 (성재 확인) — 이 상자가 §1 G1/G2 정의와 §9 파도를 대체한다
+> - **G1'(내부 테스트 진입)** = 두 케이스 E2E 각 1회(`2026-09-07-first-goal-two-cases.md` §2): **A** 그록봇 VM 안 설치·그록봇 자신의 Agent Port 합류·Reset 복구(CDP 하네스, 로컬 한정 허용) · **B** Railway/VPS 설치·본인 hermes(AI 연결)·Claude Code/Codex 합류·upgrade/백업. 폰은 QR 연결 + 푸시 1회(SH-10 relay, stub 또는 Dawn live — **실기기 실수신은 보류**, 2026-09-08 결재 2번).
+> - **G2(출시)** = 외부 셀프호스터 3(하네스 복붙 1·그록봇 1·Railway 1) + **iOS 앱스토어 v0**(셀프호스트 서버에 QR로 붙는 RN 앱 + relay 경유 알림 + 로그인·채널·타임라인·멘션·알림) + 에이전트 멘션·런 실사용 + LAUNCH_READY. 폰 UI 전체 패리티(M1 잔여)는 G3.
+> - **파도(확정)**: 경량화 LS 시리즈 **완료**(ADR-0183, 스냅샷 93) · SH-10 push relay Rust **완료** → **G1'-1** SH-6a-w(uxui, 자격 관리 표면+로컬 provider 안내) ∥ SH-5a(engine, Railway 템플릿 E2E) → **G1'-2** UX-R2c(퍼널) ∥ #1265(웹훅 인바운드)·SH-6a-e(로컬 provider opt-in 플래그) → **G1'-3** SH-8(그록봇 루틴·§3.3 합류 절·CDP 하네스) ∥ SH-9(hermes 런북 현행화) → **G1'-4** E2E-A ∥ E2E-B → **ITO** → iOS v0(#20·#21·#22·#30·#31 + RN TestFlight 런북 신설 + Dawn relay live) → G2.
+> - **연기**: UX-R3a~c 팔레트 · DS-1(·3·4) 잔여 · UX-R2d · #1925 허들 자격 · #1792 TURN · M1 폰 UI 패리티 · #1927 work host(출시 후 ADR) · LS-6 비대 파일(#2187). 아래 본문은 2026-09-02 편성 원문(역사)이며 충돌 시 이 상자가 우선.
+
 ## 0. 고정된 결정
 
 | # | 결정 | 출처 |

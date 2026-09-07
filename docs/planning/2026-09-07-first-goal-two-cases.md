@@ -64,4 +64,6 @@
 
 - **셀프호스팅 레벨 폰 푸시 = 1차 목표 안.** SH-10(#1255) momo-push-relay Rust: 같은 멀티커맨드 이미지, `docker-compose.push.yml` 이미지 = `MOMO_RUST_IMAGE`, 운영 모드 ①Dawn 공용(App Store 앱 기본, 셀프호스트 서버가 서버 ID+Ed25519 공개키로 등록 — v0는 정적 레지스트리 `MOMO_RELAY_SERVERS`, 자기등록 API는 후속) ②자체 relay(자기 Apple 계정·자기 빌드 앱, 같은 바이너리에 자기 .p8) ③stub(로컬). 계약(id-only 봉투 `momo.push.dispatch.v2`·raw-body Ed25519·상태 분류·영수증)은 Rust `momo-notifier`에 이미 있는 클라이언트 절반과 Swift 원본(`f399e417:relay/PushRelay/**`, ~700 LOC)에서 그대로. 크기 M~L(워커 1~2회전) + TestFlight 실수신 S(APNs 자산 확보됨).
 - **케이스 A 전제 해소**: 계정 살아 있음 · 로컬 테스트 한정 CDP 허용 → E2E-A 자동화(#1361을 CDP 하네스로 재편, SH-8에 하네스 복구 포함).
-- **출시 정의 개정 제안(성재 확인 필요)**: G2 = 외부 셀프호스터 3 + **iOS 앱스토어 v0**(셀프호스트 서버에 QR로 붙는 폰 + 푸시 relay 경유 알림 + M1 중 출시 필수분만: 로그인·채널·타임라인·멘션·알림). 폰 UI 전체 패리티(M1 잔여)는 G3 유지. 순서: SH-10 → M0 QR(완료) → TestFlight internal(M2) → 스토어 심사는 G2 뒤.
+- **출시 정의 개정(성재 확인 2026-09-08 — 「1번 진행」)**: G2 = 외부 셀프호스터 3 + **iOS 앱스토어 v0**(셀프호스트 서버에 QR로 붙는 폰 + 푸시 relay 경유 알림 + M1 중 출시 필수분만: 로그인·채널·타임라인·멘션·알림). 폰 UI 전체 패리티(M1 잔여)는 G3 유지. 순서: SH-10 → M0 QR(완료) → TestFlight internal(M2) → 스토어 심사는 G2 뒤.
+
+## 8. 2026-09-08 결재 — 실기기 APNs 실수신은 다음 진행으로 보류(2번), 출시 정의 개정(1번)·G1'-1 브리프(3번) 진행. 남은 작업 지도: `docs/planning/2026-09-08-remaining-work-map.md`.
