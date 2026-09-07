@@ -23,6 +23,7 @@ import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfac
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
+import { AgentCredentialsSection } from "./AgentCredentialsSection";
 import { AiLinkSection } from "./AiLinkSection";
 import { AppearanceSection } from "./AppearanceSection";
 import { LinkPreviewSection } from "./LinkPreviewSection";
@@ -264,6 +265,9 @@ export function SettingsRoute() {
           )}
           {section === "updates" && <UpdateSection />}
           {section === "ai" && <AiLinkSection offline={offline} />}
+          {section === "agents" && (
+            <AgentCredentialsSection offline={offline} />
+          )}
           {section === "code" && (
             <WorkHostSection
               workspaceId={workspaceId}

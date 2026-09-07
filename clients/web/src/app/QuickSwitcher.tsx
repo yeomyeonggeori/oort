@@ -9,6 +9,7 @@ import {
   FileText,
   Hash,
   Inbox,
+  KeyRound,
   Lock,
   MessageSquare,
   Milestone,
@@ -519,6 +520,16 @@ export function QuickSwitcher({
           <Command.Item role="option" className={itemClass} onSelect={() => go("/settings")}>
             <Settings className="size-4 opacity-70" />
             설정
+          </Command.Item>
+          <Command.Item
+            role="option"
+            className={itemClass}
+            value="에이전트 자격 설정 연결 hosted pairing"
+            data-testid="switcher-settings-agents"
+            onSelect={() => go("/settings?section=agents")}
+          >
+            <KeyRound className="size-4 opacity-70" />
+            에이전트 자격
           </Command.Item>
           {isSurfaceProvided("workConsole") && (
             <Command.Item

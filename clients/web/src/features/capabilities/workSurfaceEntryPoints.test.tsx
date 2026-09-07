@@ -93,6 +93,10 @@ vi.mock("@/features/drafts/useDraftsPanel", () => ({
 vi.mock("@/features/settings/AiLinkSection", () => ({
   AiLinkSection: () => createElement("div", { "data-testid": "section-ai" }),
 }));
+vi.mock("@/features/settings/AgentCredentialsSection", () => ({
+  AgentCredentialsSection: () =>
+    createElement("div", { "data-testid": "section-agents" }),
+}));
 vi.mock("@/features/settings/WorkHostSection", () => ({
   WorkHostSection: () => createElement("div", { "data-testid": "section-code" }),
 }));
