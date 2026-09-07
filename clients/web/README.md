@@ -14,6 +14,8 @@ directory** — the Rust image copies `clients/web` dist to `/opt/momo/web/`
 (`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md`
 「웹(정적 SPA) 배포」 / #1228).
 
+work 표면은 서버 capability로 숨김(ADR-0183 D4-②).
+
 ## Structure (matches plan §1)
 
 ```
