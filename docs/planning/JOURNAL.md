@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (저녁) · Fable · ★LS-α 완결 — LS-4(#2143)·LS-0(#2142) main 정본화, LS-β(LS-1 #2165·LS-2 #2166) 패킷 발급
+
+- **LS-4 랜딩**(PR #2152 R1 커밋 10 → planner 검토: 정본·코드 인용 16본 삭제 miss → R2 복원+규칙 확장(살아 있는 정본·코드 참조면 보존, 경로 인식) → miss 0) → 승격 ad #2153 → main `e1975ce9`. 결과: handoffs 302→76 · planning 루트 70→51 · planning/research 112→78 · `research/` 112→36 · claudedocs 39→0(+gitignore) · docs/archive 해체 · STATUS 2026-08 761줄 로테이션 · D6 규칙 README §2.
+- **LS-0 랜딩**(PR #2154 R1 8 + R2 3: 정지 3건 판정 — 문서 명령 게이트=브리프 범위 결함(AGENTS 2행·aws 런북 삭제·worktree_janitor 복원·ncp 런북은 계약 게이트 의존으로 유지) · web 82 빨강=로그인 셸 PATH(node 26) → `run_cmd` 호출자 PATH 재적용 · pgbackrest 선재 #2157) → 정책 감사(track PR·승격 #2158·**sync #2159까지 셋 다** 필요 — 정책 파일 변경 시 sync도 감사, promote-lib 반영) → main `6ed61cfb`. 결과: scripts 265→168 · `add_swift_commands` 0 · CI 레인 5→4 · web 프로파일=clients/web(2807/2807) · SQL 4본 `infra/rust/sql/` · SH 시험 4본 docs 프로파일 편입.
+- 발급: **LS-1 #2165**(`handoffs/2026-09-07-ls1-swift-retire-brief.md`, engine, 감사) · **LS-2 #2166**(`handoffs/2026-09-07-ls2-client-dual-canon-brief.md`, uxui, work 표면 숨김 포함). 워크트리 `wls1`·`wls2`. 발사는 go.
+- 추적 파일 3,416 → 2,927(−489). 다음: go → LS-1 ∥ LS-2 → LS-3 → 스냅샷 92·출시 계획 개정 → G1'.
+
 ## 2026-09-07 (오후2) · Fable · ★go → LS-0·LS-4 발사(병렬 2) + 1차 목표 두 케이스 구체화·결정 3건
 
 - go(성재) → `launch-ls.sh`: LS-0 #2142(`wls0`)·LS-4 #2143(`wls4`) grok 워커 2기 세션 분리 발사(프리플라이트: 패킷·ADR Accepted origin/main 확인).
