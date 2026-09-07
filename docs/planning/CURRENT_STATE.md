@@ -1,6 +1,8 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → LS-α 완결(LS-4·LS-0 main 정본화, 파일 3,416→2,927) → LS-β(LS-1 #2165 ∥ LS-2 #2166) 패킷 발급, 발사 go 대기. 워커 0).** 컴팩트 복원 진입점.
+> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → LS-α 완결(LS-4·LS-0 main 정본화, 파일 3,416→2,927) → LS-β(LS-1 #2165 ∥ LS-2 #2166) **가동 중** · 결재 3건: SH-10 push relay Rust 승격 · CDP 로컬 허용 · iOS 앱스토어 의도).** 컴팩트 복원 진입점.
+>
+> **★ 밤 결재(성재)**: ①셀프호스팅 레벨 폰 푸시 포함 → #1255=SH-10 momo-push-relay Rust(같은 이미지·3 모드), G1'-2 승격, LS-1은 Swift relay 소스만 삭제 ②그록봇 계정 살아 있음 + 로컬 테스트 CDP 허용 → E2E-A 자동화 ③iOS 앱스토어 v0 의도 → G2 개정 제안(`first-goal-two-cases.md` §7, 확인 대기). 가동: LS-1(`wls1`, 정정 재개)·LS-2(`wls2`).
 >
 > **★ 갱신(저녁)**: LS-4 → main `e1975ce9`(문서 −399) · LS-0 → main `6ed61cfb`(scripts 265→168, CI 레인 5→4, web 프로파일=clients/web) — 둘 다 R2 회전(LS-4: 정본·코드 인용 16본 복원+규칙 확장 / LS-0: 문서 명령 게이트·PATH 결정성·ncp 런북 유지). 교훈: 정책 파일 변경은 track·승격·sync PR 셋 다 감사. 선재 #2157. 다음: go → `launch-ls-beta.sh`(LS-1 engine `wls1` ∥ LS-2 uxui `wls2`) → LS-3 → 스냅샷 92.
 >
