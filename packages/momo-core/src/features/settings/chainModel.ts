@@ -775,10 +775,12 @@ export const LOOPBACK_REFUSAL_WIRE =
 
 /**
  * Settings copy when the server refuses a laptop loopback provider URL.
- * SH-6a-e (the env flag) is not a client switch: this sentence only names it.
+ * Product words only: what happened, and what to do. No switch names, ticket
+ * ids, or file names — the enabling control is a server-operator setting, not
+ * a client switch, and this sentence must not claim a flag that is not there.
  */
 export const LOOPBACK_PROVIDER_HINT =
-  "셀프호스트 env에서 로컬 provider 허용(--allow-local-provider, SH-6a-e)을 켜야 합니다. 절차는 SELF_HOST.md의 AI 연결 절에 있습니다.";
+  "이 서버는 같은 컴퓨터의 주소(127.0.0.1·localhost)로 가는 연결을 기본으로 거절합니다. 서버 운영자가 셀프호스트 설정에서 로컬 provider 허용을 켠 뒤 다시 확인해 주세요.";
 
 function refusalText(error: unknown): string {
   if (typeof error === "string") return error;
@@ -814,17 +816,8 @@ export function isLoopbackProviderRefusal(error: unknown): boolean {
   );
 }
 
-/**
- * The Korean hint, unless the server already sent that sentence (or the flag name).
- */
-export function loopbackProviderGuidance(error: unknown): string {
-  const message = refusalText(error);
-  if (
-    message.includes("allow-local-provider") ||
-    message.includes("로컬 provider 허용")
-  ) {
-    return message;
-  }
+/** Product sentence for a loopback refusal. The server wire stays beside it. */
+export function loopbackProviderGuidance(_error?: unknown): string {
   return LOOPBACK_PROVIDER_HINT;
 }
 

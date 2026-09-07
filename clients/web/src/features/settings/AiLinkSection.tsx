@@ -99,6 +99,27 @@ function loopbackHint(error: unknown, url: string): string | null {
   return loopbackProviderGuidance(error);
 }
 
+function LoopbackRefusalBanner({
+  error,
+  url,
+  serverSentence,
+}: {
+  error: unknown;
+  url: string;
+  serverSentence: string;
+}) {
+  const hint = loopbackHint(error, url);
+  if (hint === null) return null;
+  return (
+    <InlineBanner
+      message={hint}
+      items={serverSentence !== "" ? [serverSentence] : undefined}
+      className="px-0"
+      testId="ai-link-loopback-hint"
+    />
+  );
+}
+
 /** Registration methods. Verb-free ids; the server sees neither of these. */
 const LINK_METHODS = [
   {
@@ -767,9 +788,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
 
           {save.isError &&
             (loopbackHint(save.error, baseUrl) ? (
-              <InlineBanner
-                message={loopbackHint(save.error, baseUrl) ?? ""}
-                testId="ai-link-loopback-hint"
+              <LoopbackRefusalBanner
+                error={save.error}
+                url={baseUrl}
+                serverSentence={errorMessage(save.error)}
               />
             ) : (
               <p className="text-meta text-danger" role="alert">
@@ -871,9 +893,10 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
 
       {check.isError &&
         (loopbackHint(check.error, link.baseUrl) ? (
-          <InlineBanner
-            message={loopbackHint(check.error, link.baseUrl) ?? ""}
-            testId="ai-link-loopback-hint"
+          <LoopbackRefusalBanner
+            error={check.error}
+            url={link.baseUrl}
+            serverSentence={errorMessage(check.error)}
           />
         ) : (
           <p className="text-meta text-danger" role="alert">
@@ -904,14 +927,19 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             checkedAtMs={probe.checkedAtMs}
             chainPending={chainPending}
           />
+        ) : loopbackHint(probe.reason ?? "", link.baseUrl) ? (
+          <LoopbackRefusalBanner
+            error={probe.reason ?? ""}
+            url={link.baseUrl}
+            serverSentence={providerTestMessage(probe)}
+          />
         ) : (
           <p
             className={probe.ok ? "text-meta text-ok" : "text-meta text-warn"}
             role="status"
             data-testid="ai-link-probe"
           >
-            {loopbackHint(probe.reason ?? "", link.baseUrl) ??
-              providerTestMessage(probe)}
+            {providerTestMessage(probe)}
           </p>
         ))}
 

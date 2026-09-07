@@ -830,8 +830,9 @@ describe("probe results (entries[] + cascadeOk)", () => {
       probeReasonCopy(
         "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1"
       )
-    ).toContain("로컬 provider 허용");
-    expect(probeReasonCopy("loopback baseUrl")).toContain("--allow-local-provider");
+    ).toBe(LOOPBACK_PROVIDER_HINT);
+    expect(probeReasonCopy("loopback baseUrl")).toBe(LOOPBACK_PROVIDER_HINT);
+    expect(LOOPBACK_PROVIDER_HINT).not.toMatch(/allow-local-provider|SH-6a/);
   });
 });
 
@@ -855,6 +856,6 @@ describe("loopback provider refusal (#2204)", () => {
       loopbackProviderGuidance(
         new ApiError(400, "셀프호스트 env에서 로컬 provider 허용(--allow-local-provider)을 켜야 합니다")
       )
-    ).toContain("allow-local-provider");
+    ).toBe(LOOPBACK_PROVIDER_HINT);
   });
 });
