@@ -73,7 +73,6 @@ jobs:
     outputs:
       rust: ${{ steps.filter.outputs.rust }}
       node: ${{ steps.filter.outputs.node }}
-      contract: ${{ steps.filter.outputs.contract }}
     steps:
       - id: filter
         env:
@@ -84,11 +83,10 @@ jobs:
           set -uo pipefail
 
           run_all() {
-            echo "→ rust=true node=true contract=true ($1)"
+            echo "→ rust=true node=true ($1)"
             {
               echo "rust=true"
               echo "node=true"
-              echo "contract=true"
             } >> "$GITHUB_OUTPUT"
             exit 0
           }
@@ -171,28 +169,17 @@ jobs:
           #     `momo-messaging/src/refine.rs`가 `include_str!`로 굽는다.
           rust=false
           node=false
-          contract=false
           printf '%s\n' "$files" | grep -Eq \
             '^(server-rust/|clients/desktop/src-tauri/|deny\.toml$|scripts/check_cargo_licenses\.sh$|scripts/generate_ghcr_notice_bundle\.py$|scripts/check_ghcr_notice_bundle\.sh$|scripts/check_debian_copyrights\.sh$|scripts/tests/test_ghcr_notice_bundle\.sh$|legal/generated/|legal/THIRD_PARTY_NOTICES\.md$|NOTICE$|docs/api/harness-refine-client-msg-id\.golden\.json$|\.github/workflows/pr-ci\.yml$)' \
             && rust=true
           printf '%s\n' "$files" | grep -Eq \
             '^(clients/web/|clients/mobile/|packages/|server/Fixtures/|package\.json$|package-lock\.json$|scripts/check_npm_licenses\.mjs$|\.github/workflows/pr-ci\.yml$)' \
             && node=true
-          # #1295: the served legacy client's generated contract previously
-          # drifted while both broad build lanes stayed green. Keep this lane
-          # narrow: either side of the generated pair, its lockfile, or verifier
-          # must install the exact generator and compare. Do not trigger on this
-          # workflow alone: #1295 lands on track/uxui while this goal lands on
-          # track/engine, and cross-track product commits stay out of this PR.
-          printf '%s\n' "$files" | grep -Eq \
-            '^(docs/api/openapi\.yaml$|clients/web-legacy/|scripts/check_npm_licenses\.mjs$|scripts/verify_web_generated_types\.sh$)' \
-            && contract=true
 
-          echo "→ rust=$rust node=$node contract=$contract"
+          echo "→ rust=$rust node=$node"
           {
             echo "rust=$rust"
             echo "node=$node"
-            echo "contract=$contract"
           } >> "$GITHUB_OUTPUT"
 
   # Every PR gets a topology check, including documentation-only changes. For
@@ -498,36 +485,6 @@ jobs:
       - name: test — clients/mobile (jest)
         run: npm --prefix clients/mobile run test
 
-  # #1295 regression lane. clients/web-legacy remains the committed generated
-  # consumer even while product UI work happens in clients/web.
-  contract:
-    name: OpenAPI ↔ web-legacy generated contract
-    needs: changes
-    if: needs.changes.outputs.contract == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: clients/web-legacy/package-lock.json
-
-      - name: permissive npm license gate (clients/web-legacy lockfile)
-        run: node scripts/check_npm_licenses.mjs --root clients/web-legacy
-
-      - name: npm ci --ignore-scripts (clients/web-legacy)
-        env:
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
-        run: npm ci --ignore-scripts --prefix clients/web-legacy
-
-      - name: committed generated types match OpenAPI
-        run: scripts/verify_web_generated_types.sh
-
   # Branch protection requires this one stable context. Optional path lanes may
   # be skipped, but a failure/cancellation in any selected lane keeps it red.
   # alignment and gitleaks always run; a skip there is red.
@@ -539,7 +496,6 @@ jobs:
       - gitleaks
       - rust
       - node
-      - contract
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -549,10 +505,8 @@ jobs:
       GITLEAKS_RESULT: ${{ needs.gitleaks.result }}
       RUST_RESULT: ${{ needs.rust.result }}
       NODE_RESULT: ${{ needs.node.result }}
-      CONTRACT_RESULT: ${{ needs.contract.result }}
       RUST_SELECTED: ${{ needs.changes.outputs.rust }}
       NODE_SELECTED: ${{ needs.changes.outputs.node }}
-      CONTRACT_SELECTED: ${{ needs.changes.outputs.contract }}
     steps:
       - name: required and selected lanes are green
         run: |
@@ -571,4 +525,3 @@ jobs:
           }
           require_optional_lane "$RUST_SELECTED" "$RUST_RESULT" rust
           require_optional_lane "$NODE_SELECTED" "$NODE_RESULT" node
-          require_optional_lane "$CONTRACT_SELECTED" "$CONTRACT_RESULT" contract

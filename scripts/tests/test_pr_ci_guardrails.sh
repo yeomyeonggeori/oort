@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Static contract for the PR trigger, #1295 generated lane, and stable required
-# context. actionlint is the semantic YAML validator; these checks name the
-# exact policy strings that must not quietly disappear in a later refactor.
+# Static contract for the PR trigger, retired web-legacy lane absence, and stable
+# required context. ADR-0183 / #2142: the OpenAPI ↔ web-legacy generated-contract
+# job must stay gone — restoring it turns this red. actionlint is the semantic
+# YAML validator; these checks name the exact policy strings that must not
+# quietly disappear in a later refactor.
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -89,7 +91,6 @@ gitleaks_job_compliant() {
 workflow_compliant() {
   local workflow="$1"
   local bootstrap_allowlist changes alignment gitleaks rust node contract gate
-  local license_line install_line verify_line
   changes="$(job_block "$workflow" changes)"
   alignment="$(job_block "$workflow" alignment)"
   gitleaks="$(job_block "$workflow" gitleaks)"
@@ -99,8 +100,28 @@ workflow_compliant() {
   gate="$(job_block "$workflow" gate)"
 
   [ -n "$changes" ] && [ -n "$alignment" ] && [ -n "$gitleaks" ] \
-    && [ -n "$rust" ] && [ -n "$node" ] && [ -n "$contract" ] && [ -n "$gate" ] \
+    && [ -n "$rust" ] && [ -n "$node" ] && [ -n "$gate" ] \
     || return 1
+  # #2142 / ADR-0183 D5: the web-legacy generated-contract lane must stay gone.
+  [ -z "$contract" ] || return 1
+  if grep -Fq 'clients/web-legacy' "$workflow"; then
+    return 1
+  fi
+  if grep -Fq 'OpenAPI ↔ web-legacy generated contract' "$workflow"; then
+    return 1
+  fi
+  if grep -Fq 'verify_web_generated_types.sh' "$workflow"; then
+    return 1
+  fi
+  if grep -Fq 'outputs.contract' "$workflow"; then
+    return 1
+  fi
+  if grep -Fq 'CONTRACT_RESULT' "$workflow"; then
+    return 1
+  fi
+  if grep -Fq 'CONTRACT_SELECTED' "$workflow"; then
+    return 1
+  fi
   gitleaks_job_compliant "$gitleaks" || return 1
   if grep -Fq 'pull_request_target' "$workflow"; then
     return 1
@@ -142,27 +163,20 @@ workflow_compliant() {
   if grep -Fq 'inboxApproval' <<<"$node"; then
     return 1
   fi
-  grep -Fq "if: needs.changes.outputs.contract == 'true'" <<<"$contract" || return 1
-  grep -Fq 'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' <<<"$contract" || return 1
-  grep -Fq 'run: npm ci --ignore-scripts --prefix clients/web-legacy' <<<"$contract" || return 1
-  grep -Fq 'run: scripts/verify_web_generated_types.sh' <<<"$contract" || return 1
-  license_line="$(grep -Fn 'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' <<<"$contract" | cut -d: -f1)"
-  install_line="$(grep -Fn 'run: npm ci --ignore-scripts --prefix clients/web-legacy' <<<"$contract" | cut -d: -f1)"
-  verify_line="$(grep -Fn 'run: scripts/verify_web_generated_types.sh' <<<"$contract" | cut -d: -f1)"
-  [ "$license_line" -lt "$install_line" ] && [ "$install_line" -lt "$verify_line" ] || return 1
-
-  for dependency in changes alignment gitleaks rust node contract; do
+  for dependency in changes alignment gitleaks rust node; do
     grep -Fq "      - $dependency" <<<"$gate" || return 1
   done
-  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT RUST_RESULT NODE_RESULT CONTRACT_RESULT; do
+  if grep -Fq "      - contract" <<<"$gate"; then
+    return 1
+  fi
+  for result in CHANGES_RESULT ALIGNMENT_RESULT GITLEAKS_RESULT RUST_RESULT NODE_RESULT; do
     grep -Fq "      ${result}: \${{ needs." <<<"$gate" || return 1
   done
-  for selected in RUST_SELECTED NODE_SELECTED CONTRACT_SELECTED; do
+  for selected in RUST_SELECTED NODE_SELECTED; do
     grep -Fq "      ${selected}: \${{ needs.changes.outputs." <<<"$gate" || return 1
   done
   grep -Fq "      RUST_SELECTED: \${{ needs.changes.outputs.rust }}" <<<"$gate" || return 1
   grep -Fq "      NODE_SELECTED: \${{ needs.changes.outputs.node }}" <<<"$gate" || return 1
-  grep -Fq "      CONTRACT_SELECTED: \${{ needs.changes.outputs.contract }}" <<<"$gate" || return 1
   grep -Fq '    if: always()' <<<"$gate" || return 1
   # shellcheck disable=SC2016 # These are literal workflow shell contracts.
   grep -Fq 'test "$CHANGES_RESULT" = success' <<<"$gate" || return 1
@@ -194,12 +208,7 @@ for required in \
   '--gitleaks-ignore-path .gitleaksignore' \
   'log_opts="${BASE_SHA}..${HEAD_SHA}"' \
   '      GITLEAKS_RESULT: ${{ needs.gitleaks.result }}' \
-  'docs/api/openapi\.yaml' \
-  'clients/web-legacy/' \
   'scripts/check_npm_licenses\.mjs$' \
-  'scripts/verify_web_generated_types\.sh' \
-  'run: npm ci --ignore-scripts --prefix clients/web-legacy' \
-  'run: node scripts/check_npm_licenses.mjs --root clients/web-legacy' \
   'run: npm --prefix clients/web run test' \
   'run: npm --prefix clients/mobile run test' \
   'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' \
@@ -222,10 +231,19 @@ if workflow_compliant "$TMP_DIR/missing-alignment.yml"; then
   fail "missing alignment dependency was accepted"
 fi
 
-cp "$WORKFLOW" "$TMP_DIR/missing-license.yml"
-sed -i.bak '/check_npm_licenses\.mjs --root clients\/web-legacy/d' "$TMP_DIR/missing-license.yml"
-if workflow_compliant "$TMP_DIR/missing-license.yml"; then
-  fail "missing legacy license gate was accepted"
+# Restoring the retired web-legacy contract lane must turn the guard red.
+cp "$WORKFLOW" "$TMP_DIR/restored-legacy.yml"
+cat >> "$TMP_DIR/restored-legacy.yml" <<'LEGACY_JOB'
+  contract:
+    name: OpenAPI ↔ web-legacy generated contract
+    needs: changes
+    if: needs.changes.outputs.contract == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - run: scripts/verify_web_generated_types.sh
+LEGACY_JOB
+if workflow_compliant "$TMP_DIR/restored-legacy.yml"; then
+  fail "restored web-legacy contract lane was accepted"
 fi
 
 cp "$WORKFLOW" "$TMP_DIR/missing-notice.yml"
@@ -247,7 +265,7 @@ if workflow_compliant "$TMP_DIR/missing-always.yml"; then
 fi
 
 cp "$WORKFLOW" "$TMP_DIR/wrong-selection.yml"
-sed -i.bak 's/CONTRACT_SELECTED: \${{ needs.changes.outputs.contract }}/CONTRACT_SELECTED: ${{ needs.changes.outputs.node }}/' "$TMP_DIR/wrong-selection.yml"
+sed -i.bak 's/NODE_SELECTED: \${{ needs.changes.outputs.node }}/NODE_SELECTED: ${{ needs.changes.outputs.rust }}/' "$TMP_DIR/wrong-selection.yml"
 if workflow_compliant "$TMP_DIR/wrong-selection.yml"; then
   fail "wrong selected-output mapping was accepted"
 fi
@@ -362,7 +380,6 @@ assert_filter_fixture() {
   local pages_json="$3"
   local expected_rust="$4"
   local expected_node="$5"
-  local expected_contract="$6"
   local fixture_dir="$TMP_DIR/fixture-$name"
   local key actual expected
 
@@ -382,41 +399,43 @@ assert_filter_fixture() {
     fail "$name classifier fixture exited non-zero"
   fi
 
-  for key in rust node contract; do
+  for key in rust node; do
     actual="$(awk -F= -v key="$key" '$1 == key { value = $2 } END { print value }' "$fixture_dir/output")"
     case "$key" in
       rust) expected="$expected_rust" ;;
       node) expected="$expected_node" ;;
-      contract) expected="$expected_contract" ;;
     esac
     [ "$actual" = "$expected" ] \
       || fail "$name expected $key=$expected, got ${actual:-<empty>}"
   done
+  if grep -Eq '^(contract)=' "$fixture_dir/output"; then
+    fail "$name classifier still emitted a contract lane"
+  fi
 }
 
 # A rename out of server-rust must still select Rust from previous_filename.
 assert_filter_fixture rename-source \
   '{"changed_files":1}' \
   '[[{"filename":"docs/renamed.md","previous_filename":"server-rust/Cargo.toml","status":"renamed"}]]' \
-  true false false
+  true false
 
 # Metadata says two files but pagination returned one: uncertainty runs all.
 assert_filter_fixture incomplete-pages \
   '{"changed_files":2}' \
   '[[{"filename":"docs/only-one.md","status":"modified"}]]' \
-  true true true
+  true true
 
 # Duplicate rows cannot masquerade as a complete two-file response.
 assert_filter_fixture duplicate-pages \
   '{"changed_files":2}' \
   '[[{"filename":"docs/same.md"},{"filename":"docs/same.md"}]]' \
-  true true true
+  true true
 
 # The API's documented maximum is ambiguous even before listing pages.
 assert_filter_fixture api-cap \
   '{"changed_files":3000}' \
   '[[{"filename":"docs/not-consulted.md"}]]' \
-  true true true
+  true true
 grep -Fq '3,000-file API cap is ambiguous' "$TMP_DIR/fixture-api-cap/log" \
   || fail "3,000-file fixture did not take the explicit cap fallback"
 
@@ -424,12 +443,12 @@ grep -Fq '3,000-file API cap is ambiguous' "$TMP_DIR/fixture-api-cap/log" \
 assert_filter_fixture malformed-metadata \
   '{"changed_files":"2"}' \
   '[[{"filename":"docs/not-consulted.md"}]]' \
-  true true true
+  true true
 
 assert_filter_fixture malformed-pages \
   '{"changed_files":1}' \
   '[[{"filename":17,"status":"modified"}]]' \
-  true true true
+  true true
 
 for required in \
   '  push:' \
@@ -440,4 +459,4 @@ for required in \
   grep -Fq "$required" "$MONITOR" || fail "track monitor missing: $required"
 done
 
-echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures, generated+license contract, gitleaks PR-range fail-closed lane, stable fail-closed gate, mutation proofs, and monitor triggers"
+echo "[pr-ci-guard-test] PASS targets, complete rename-aware classifier fixtures, retired web-legacy lane absence, gitleaks PR-range fail-closed lane, stable fail-closed gate, mutation proofs, and monitor triggers"

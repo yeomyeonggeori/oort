@@ -37,8 +37,6 @@ new_tree() {
   printf '[workspace]\nmembers = []\n' >"$dir/server-rust/Cargo.toml"
 
   : >"$dir/AGENTS.md"
-  : >"$dir/CODEX.md"
-  : >"$dir/docs/RUN.md"
   : >"$dir/docs/RELEASING.md"
   : >"$dir/docs/NEXT_CHANNEL.md"
   : >"$dir/CONTRIBUTING.md"
@@ -132,11 +130,11 @@ run_guard "$tree"
 expect_green "a formatting (non---check) cargo fmt is left alone"
 
 # =============================================================================
-# Case 3 — the executor is gone. This is the shape W-S1 (#1215) left behind in
-# RUN.md: the tree was deleted, nine commands that drive it were not.
+# Case 3 — the executor is gone. This is the shape W-S1 (#1215) left behind:
+# the tree was deleted, nine commands that drive it were not.
 # =============================================================================
 tree="$(new_tree missing-script)"
-add_command "$tree/docs/RUN.md" 'scripts/macos_dev_run.sh --verify'
+add_command "$tree/AGENTS.md" 'scripts/macos_dev_run.sh --verify'
 run_guard "$tree"
 expect_red "a deleted executor is named" "scripts/macos_dev_run.sh"
 
@@ -148,14 +146,14 @@ expect_red "a deleted executor is named" "scripts/macos_dev_run.sh"
 tree="$(new_tree broken-syntax)"
 printf '#!/usr/bin/env bash\nif [ 1 -eq 1 ]; then\n' >"$tree/scripts/demo.sh"
 chmod +x "$tree/scripts/demo.sh"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh'
+add_command "$tree/AGENTS.md" 'scripts/demo.sh'
 run_guard "$tree"
 expect_red "a referenced script that does not parse" "구문 오류"
 
 # ... and the same script without the +x bit.
 tree="$(new_tree not-executable)"
 chmod -x "$tree/scripts/demo.sh"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh'
+add_command "$tree/AGENTS.md" 'scripts/demo.sh'
 run_guard "$tree"
 expect_red "a referenced script with no execute bit" "실행권한"
 
@@ -164,24 +162,24 @@ expect_red "a referenced script with no execute bit" "실행권한"
 # each read out of the file that owns it.
 # =============================================================================
 tree="$(new_tree missing-make-target)"
-add_command "$tree/docs/RUN.md" 'make no-such-target'
+add_command "$tree/AGENTS.md" 'make no-such-target'
 run_guard "$tree"
 expect_red "a make target the Makefile does not define" "no-such-target"
 
 tree="$(new_tree existing-make-target)"
-add_command "$tree/docs/RUN.md" 'make build'
+add_command "$tree/AGENTS.md" 'make build'
 run_guard "$tree"
 expect_green "a make target that exists"
 
 # `--profile macos-ui` is the real one: the lane went away with the macOS tree
-# and RUN.md kept telling people to run it.
+# and operating docs kept telling people to run it.
 tree="$(new_tree missing-gate-profile)"
-add_command "$tree/docs/RUN.md" 'scripts/local_gate.sh --profile macos-ui'
+add_command "$tree/AGENTS.md" 'scripts/local_gate.sh --profile macos-ui'
 run_guard "$tree"
 expect_red "a local_gate profile that no longer exists" "macos-ui"
 
 tree="$(new_tree existing-gate-profile)"
-add_command "$tree/docs/RUN.md" 'scripts/local_gate.sh --profile docs'
+add_command "$tree/AGENTS.md" 'scripts/local_gate.sh --profile docs'
 run_guard "$tree"
 expect_green "a local_gate profile that exists"
 
@@ -207,19 +205,19 @@ expect_green "the same script with the prefix that makes it resolve"
 # it was a flag combination that meant nothing to the tool.
 # =============================================================================
 tree="$(new_tree unknown-flag)"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh --invented'
+add_command "$tree/AGENTS.md" 'scripts/demo.sh --invented'
 run_guard "$tree"
 expect_red "a long flag the script does not accept" "--invented"
 
 tree="$(new_tree known-flag)"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh --known'
+add_command "$tree/AGENTS.md" 'scripts/demo.sh --known'
 run_guard "$tree"
 expect_green "a long flag the script does accept"
 
 # A dispatcher forwards "$@" to somewhere else, so its subcommand's flags are
 # not its own. Judging them would red-flag every `scripts/momo host add …` line.
 tree="$(new_tree dispatcher-subcommand-flag)"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh host add --invented'
+add_command "$tree/AGENTS.md" 'scripts/demo.sh host add --invented'
 run_guard "$tree"
 expect_green "flags behind a subcommand are not attributed to the dispatcher"
 
@@ -237,7 +235,7 @@ run_guard "$tree"
 expect_green "a compose overlay that is in the tree"
 
 tree="$(new_tree deleted-package-path)"
-add_command "$tree/docs/RUN.md" 'swift build --package-path clients/macOS'
+add_command "$tree/AGENTS.md" 'swift build --package-path clients/macOS'
 run_guard "$tree"
 expect_red "a build aimed at a deleted tree" "clients/macOS"
 
@@ -246,14 +244,14 @@ expect_red "a build aimed at a deleted tree" "clients/macOS"
 # documents, and each would have made the guard unusable.
 # =============================================================================
 tree="$(new_tree no-false-alarms)"
-add_command "$tree/docs/RUN.md" 'scripts/demo.sh <issue-number>'
-add_command "$tree/docs/RUN.md" 'make ${TARGET}'
-add_command "$tree/docs/RUN.md" 'npm --prefix <tree> run <script>'
-add_command "$tree/docs/RUN.md" 'docker compose -f infra/*.yml config'
-add_command "$tree/docs/RUN.md" 'scripts/local_gate.sh --profile <docs|web|all>'
-printf '\n`scripts/transcription/README.md`를 따른다.\n' >>"$tree/docs/RUN.md"
+add_command "$tree/AGENTS.md" 'scripts/demo.sh <issue-number>'
+add_command "$tree/AGENTS.md" 'make ${TARGET}'
+add_command "$tree/AGENTS.md" 'npm --prefix <tree> run <script>'
+add_command "$tree/AGENTS.md" 'docker compose -f infra/*.yml config'
+add_command "$tree/AGENTS.md" 'scripts/local_gate.sh --profile <docs|web|all>'
+printf '\n`scripts/transcription/README.md`를 따른다.\n' >>"$tree/AGENTS.md"
 printf '\n```text\nmacOS dev launch: swift build --package-path clients/macOS\n```\n' \
-  >>"$tree/docs/RUN.md"
+  >>"$tree/AGENTS.md"
 run_guard "$tree"
 expect_green "placeholders, globs, prose file references and non-shell blocks"
 
@@ -262,13 +260,13 @@ expect_green "placeholders, globs, prose file references and non-shell blocks"
 # =============================================================================
 tree="$(new_tree ignore-marker)"
 printf '\n- 이 절차는 폐지됐다: `npm run no-such-script`. <!-- docs-cmd-ignore: 폐지된 절차를 이름으로 부르는 문장 -->\n' \
-  >>"$tree/docs/RUN.md"
+  >>"$tree/AGENTS.md"
 run_guard "$tree"
 expect_green "a marked line is exempt"
 
 tree="$(new_tree ignore-marker-scope)"
 printf '\n- 폐지: `npm run gone-a`. <!-- docs-cmd-ignore: 이유 -->\n- 살아있어야 함: `npm run gone-b`.\n' \
-  >>"$tree/docs/RUN.md"
+  >>"$tree/AGENTS.md"
 run_guard "$tree"
 expect_red "the marker covers only its own line" "gone-b"
 case "$GUARD_OUT" in
@@ -277,7 +275,7 @@ esac
 
 # A marker with no reason is not a marker.
 tree="$(new_tree ignore-marker-needs-reason)"
-printf '\n- `npm run gone-c`. <!-- docs-cmd-ignore: -->\n' >>"$tree/docs/RUN.md"
+printf '\n- `npm run gone-c`. <!-- docs-cmd-ignore: -->\n' >>"$tree/AGENTS.md"
 run_guard "$tree"
 expect_red "a reasonless marker does not exempt anything" "gone-c"
 
@@ -292,8 +290,8 @@ run_guard "$tree"
 expect_red "a newly added runbook is gated without being listed" "brand-new.md"
 
 tree="$(new_tree tabled-doc-vanished)"
-rm "$tree/CODEX.md"
+rm "$tree/docs/RELEASING.md"
 run_guard "$tree"
-expect_red "a tabled document that no longer exists" "CODEX.md"
+expect_red "a tabled document that no longer exists" "docs/RELEASING.md"
 
 echo "[docs-cmd-test] PASS: $CASES case(s)"

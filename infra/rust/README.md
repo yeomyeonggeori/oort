@@ -61,8 +61,8 @@ migrate는 `docker-compose.backup.yml`의 continuous WAL + encrypted pgBackRest 
 `clients/mobile/scripts/lane-phone.sh` 머리말에 있다.
 
 이미지 안에 들어가는 것: 바이너리 3종, `server/Migrations/*.sql`(그대로 복사),
-`infra/e2e/bootstrap_roles.sql`, `infra/prod/bootstrap_runtime_roles.sql`,
-`infra/prod/set_initial_owner.sql`, `infra/prod/bootstrap_owner_if_absent.sql`(#1227),
+`infra/e2e/bootstrap_roles.sql`, `infra/rust/sql/bootstrap_runtime_roles.sql`,
+`infra/rust/sql/set_initial_owner.sql`, `infra/rust/sql/bootstrap_owner_if_absent.sql`(#1227),
 LICENSE/NOTICE. 런타임 베이스는
 `debian:bookworm-slim` + **`postgresql-client`** — 마이그레이션 러너가 psql로
 shell-out 하기 때문이다(002/006/012가 psql 메타커맨드 `\if`/`\getenv`를 쓴다. B0 교훈).
@@ -168,7 +168,7 @@ curl -fsS http://127.0.0.1:8080/healthz
 
 두 번째 행이 계약의 핵심이다. `migrate`는 `up -d`마다 다시 돌기 때문에, 재부팅이
 **바꿔 놓은 비밀번호를 되돌리거나 세션을 로그아웃시키면 안 된다.** 그래서 boot 경로는
-쓸 수 있는 비번이 없을 때만 쓰는 전용 파일(`infra/prod/bootstrap_owner_if_absent.sql`)을
+쓸 수 있는 비번이 없을 때만 쓰는 전용 파일(`infra/rust/sql/bootstrap_owner_if_absent.sql`)을
 쓰고, 네 번째 행은 조용한 "off"가 아니라 exit 2다 — 반만 채운 env를 off로 읽으면
 초록색 부팅 로그 뒤에서 잠기게 된다.
 
