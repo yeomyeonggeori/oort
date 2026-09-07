@@ -2,7 +2,7 @@
 //!
 //! ## What this replaces, and why the replacement had to exist
 //!
-//! `docs/runbooks/turn-host-install.md` installed `momo-turn` with **one static
+//! The retired TURN host runbook (#1792 deferred) installed `momo-turn` with **one static
 //! long-term credential** (`lt-cred-mech` + a `user=` line) and said so in
 //! writing: 「이 정적 자격은 임시이며 LIVE-5에서 세션 capability 동반 단명 자격
 //! 발급으로 교체한다」. A single shared password on a relay that every browser

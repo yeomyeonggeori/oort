@@ -136,6 +136,6 @@ without provider tokens or raw secrets.
 - `docs/external-agent-provider/hermes-gateway-native-platform.md`
 - `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/external-agent-provider/local-hermes-gpt.md`
-- `docs/INTERNAL_ALPHA.md`
+- `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`
 - `docs/LOCAL_PR_GATE.md`
 - `scripts/verify_external_agent_provider.sh`

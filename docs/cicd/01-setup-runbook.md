@@ -6,7 +6,7 @@
 ## 사전 요건
 - Apple Developer Program 멤버십(유료, 연 $99 — 법률/계약 변동 가능, 본인 확인). 등록주체 결정, D-U-N-S(조직 선택 시), 사람 handoff 절차는 `docs/legal/01-entity-apple-runbook.md`를 먼저 따른다.
 - App Store Connect에 **App 레코드 생성** + Bundle ID 등록. **어떤 번들 ID에 어떤 capability와
-  프로파일이 필요한지는 `docs/cicd/10-ios-signing-identity-runbook.md`가 정본**이다
+  프로파일이 필요한지는 `docs/cicd/01-setup-runbook.md`가 정본**이다
   (iOS 앱 `app.momo.ios` + 알림 확장 `app.momo.ios.NotificationService`는 **각각** 필요,
   macOS는 `com.dawnkim.momo`). 이 문서를 보고 번들 ID를 짐작하지 말 것.
 - macOS 직접배포면 **Developer ID Application 인증서** 권한(Account Holder/Admin).
@@ -40,7 +40,7 @@ bundle exec fastlane match developer_id --platform macos --app_identifier com.da
 ```
 
 > 위 두 명령 전에 App Group·App ID capability를 먼저 만들어 두면 재작업이 없다 —
-> `docs/cicd/10-ios-signing-identity-runbook.md` §1~2. 실행 전후로
+> `docs/cicd/01-setup-runbook.md` §1~2. 실행 전후로
 > `./scripts/verify_ios_signing.sh`(자격증명 불필요)로 식별자 정합을 확인한다.
 
 ## 3. GitHub Secrets 등록 (docs/cicd/02 목록)

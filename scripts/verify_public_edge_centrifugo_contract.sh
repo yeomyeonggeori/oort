@@ -33,7 +33,7 @@ fi
 CONTRACT_ROOT="${MOMO_NCP_CONTRACT_ROOT:-$REPO_ROOT}"
 CADDYFILE="$CONTRACT_ROOT/infra/rust/Caddyfile"
 COMPOSE="$CONTRACT_ROOT/infra/rust/docker-compose.rust.yml"
-RUNBOOK="$CONTRACT_ROOT/docs/runbooks/ncp-rust-deploy.md"
+RUNBOOK="$CONTRACT_ROOT/docs/SELF_HOST.md"
 RUNTIME_VERIFIER="$CONTRACT_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh"
 
 for path in "$CADDYFILE" "$COMPOSE" "$RUNBOOK" "$RUNTIME_VERIFIER"; do

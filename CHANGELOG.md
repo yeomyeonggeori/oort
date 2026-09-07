@@ -29,7 +29,7 @@ GitHub Release: <https://github.com/yeomyeonggeori/oort/releases/tag/v0.1.4>. Ta
 - Self-host huddle `MOMO_LIVEKIT_NODE_IP` knob (generated env default 127.0.0.1).
 
 ### Changed
-- Governance/docs: ADR-0179~0182 accepted (motion/press/elevation/density axes, QR device link, welcome kickoff, ephemeral confirmation policy); `docs/planning/PIPELINE.md` single lane/model canon; `CODEX.md` merged into `AGENTS.md`; canonical docs rotation.
+- Governance/docs: ADR-0179~0182 accepted (motion/press/elevation/density axes, QR device link, welcome kickoff, ephemeral confirmation policy); `docs/planning/PIPELINE.md` single lane/model canon; `AGENTS.md` merged into `AGENTS.md`; canonical docs rotation.
 
 ### Known
 - UnreadPill return-visit arming is non-deterministic (pre-existing, #1966); phone does not consume mark-unread yet (#1964).

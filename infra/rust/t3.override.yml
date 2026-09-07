@@ -62,7 +62,7 @@ services:
       CENT_TOKEN_HMAC: ${CENT_TOKEN_HMAC:?set CENT_TOKEN_HMAC}
       CENT_PROXY_SECRET: ${CENT_PROXY_SECRET:?set CENT_PROXY_SECRET}
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
-      # LIVE-5a ephemeral TURN (runbook turn-host-install.md §6-3). All three
+      # LIVE-5a ephemeral TURN (#1792 deferred host runbook §6-3). All three
       # default to empty ON PURPOSE, unlike every `${VAR:?}` above: config.rs's
       # `env()` treats blank as unset and `turn_policy_from_env` answers
       # `ice_servers: []` when any half is missing — the static relay path keeps

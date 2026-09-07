@@ -23,10 +23,10 @@ trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 
 BASE_TREE="$TMP_ROOT/base"
 MUT_TREE="$TMP_ROOT/mutation"
-mkdir -p "$BASE_TREE/infra/rust" "$BASE_TREE/docs/runbooks" "$BASE_TREE/scripts"
+mkdir -p "$BASE_TREE/infra/rust" "$BASE_TREE/docs" "$BASE_TREE/scripts"
 cp infra/rust/Caddyfile "$BASE_TREE/infra/rust/Caddyfile"
 cp infra/rust/docker-compose.rust.yml "$BASE_TREE/infra/rust/docker-compose.rust.yml"
-cp docs/runbooks/ncp-rust-deploy.md "$BASE_TREE/docs/runbooks/ncp-rust-deploy.md"
+cp docs/SELF_HOST.md "$BASE_TREE/docs/SELF_HOST.md"
 cp scripts/verify_public_edge_centrifugo_boundary.sh "$BASE_TREE/scripts/verify_public_edge_centrifugo_boundary.sh"
 
 MOMO_NCP_CONTRACT_ROOT="$BASE_TREE" "$CONTRACT" >/dev/null
@@ -101,9 +101,9 @@ expect_contract_red "cent_header_secret_source"
 pass "Centrifugo header source drift is red"
 
 reset_mutation
-grep -Fv '## CENT_PROXY_SECRET 회전' "$MUT_TREE/docs/runbooks/ncp-rust-deploy.md" \
-  > "$MUT_TREE/docs/runbooks/ncp-rust-deploy.md.next"
-mv "$MUT_TREE/docs/runbooks/ncp-rust-deploy.md.next" "$MUT_TREE/docs/runbooks/ncp-rust-deploy.md"
+grep -Fv '## CENT_PROXY_SECRET 회전' "$MUT_TREE/docs/SELF_HOST.md" \
+  > "$MUT_TREE/docs/SELF_HOST.md.next"
+mv "$MUT_TREE/docs/SELF_HOST.md.next" "$MUT_TREE/docs/SELF_HOST.md"
 expect_contract_red "runbook_missing rotation heading"
 pass "missing rotation procedure is red"
 
