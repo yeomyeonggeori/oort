@@ -106,9 +106,7 @@
 | [`docs/cicd/00-apple-cicd-pipeline.md`](cicd/00-apple-cicd-pipeline.md) | Apple CI/CD 파이프라인 설계 |
 | [`docs/cicd/01-setup-runbook.md`](cicd/01-setup-runbook.md) | 1회 셋업 런북 |
 | [`docs/cicd/02-secrets-inventory.md`](cicd/02-secrets-inventory.md) | 비밀값 인벤토리 |
-| [`docs/cicd/03-store-readiness-gate.md`](cicd/03-store-readiness-gate.md) | 게이트 체크리스트 + **PASS 블록 정본 기록처** |
-| [`docs/cicd/05-qa-release-gate.md`](cicd/05-qa-release-gate.md) | 게이트 객관 통과기준(G-0~G-H) |
-| [`docs/cicd/06-beta-testflight-plan.md`](cicd/06-beta-testflight-plan.md) | TestFlight / 비공개 베타 |
+| [`docs/cicd/03-store-readiness-gate.md`](cicd/03-store-readiness-gate.md) | 게이트 체크리스트 + **PASS 블록 정본 기록처**. G3 수치/베타 문서는 LS-3에서 삭제(G3 진입 때 RN 기준으로 재작성) |
 | [`docs/cicd/07-crash-analytics-spec.md`](cicd/07-crash-analytics-spec.md) | 크래시 계측 스펙 |
 | [`docs/cicd/08-e2e-accessibility-performance.md`](cicd/08-e2e-accessibility-performance.md) | e2e·접근성·성능 |
 | [`docs/cicd/11-ios-push-device-check.md`](cicd/11-ios-push-device-check.md) | iOS 푸시 실기기 확인 |

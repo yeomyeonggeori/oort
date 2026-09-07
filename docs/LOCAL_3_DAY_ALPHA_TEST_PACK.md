@@ -93,7 +93,7 @@ mkdir -p "$MOMO_ITO_EVIDENCE_DIR"
 |---|---|---|
 | 웹 (셀프호스트 엣지) | same-origin. 브라우저 `http://localhost:<MOMO_WEB_PORT>` — SPA·`/v1`·Centrifugo가 한 오리진(`docs/SELF_HOST.md:241-257`). CORS가 성립할 여지가 없다. | 데스크탑 릴리스 origin(`tauri://localhost`) |
 | 데스크탑 (Tauri 2) | `clients/web` 번들을 감싼 셸. 딥링크 `oort://join`, mDNS, 키체인, 알림, next 채널 업데이터(`clients/desktop/README.md`). 개발은 `cargo tauri dev`, 증거의 본체는 **릴리스 번들** `cargo tauri build --bundles app`(`:353-370`). | `cargo tauri dev` 성공은 릴리스 로그인 증거가 아니다(dev proxy가 있다). |
-| iOS | I8: `npm --prefix clients/mobile run lane:phone` + 시뮬레이터 수동 로그인 1회 | 실기기·APNs·external TestFlight(`docs/cicd/06-beta-testflight-plan.md` — M7 PASS 전 금지) |
+| iOS | I8: `npm --prefix clients/mobile run lane:phone` + 시뮬레이터 수동 로그인 1회 | 실기기·APNs·external TestFlight(M7 PASS 전 금지; 베타 플랜 문서는 LS-3에서 삭제) |
 
 에이전트는 `member.kind='agent'`. 쓰기는 REST → Postgres 트랜잭션 → outbox → relay. 클라가 Centrifugo에 직접 publish하지 않는다. oort는 provider OAuth 토큰·원문 API 키를 DB·diagnostics·게이트 증거·앱 로그에 담지 않는다.
 
