@@ -186,7 +186,7 @@ while IFS= read -r yml; do
   [ -n "$(required_keys "$yml")" ] || continue
   grep -qxF "$yml" <<<"$tabled_compose" ||
     fail "$yml requires \${VAR:?} but no rendering in this script names it — add a row so its variables are checked against some template"
-done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) ! -path 'infra/prod/*' | LC_ALL=C sort)
+done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
 
 # -----------------------------------------------------------------------------
 # Coverage 2 — no env template may sit outside the table unexplained.

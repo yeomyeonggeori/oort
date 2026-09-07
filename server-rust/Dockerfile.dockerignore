@@ -15,14 +15,14 @@
 .env.*
 **/.env
 **/.env.*
-infra/prod/secrets.env
-infra/prod/*.sops.env
-infra/prod/*.plain.env
-infra/prod/*.decrypted
-infra/prod/age.key
-infra/prod/keys.txt
+# Retired secret paths (tree gone LS-1): f399e417:infra/prod/secrets.env
+# and f399e417:infra/prod/*.sops.env. Catch remaining filled copies by glob.
 **/*.secret.env
 **/*.secrets.env
+**/*.plain.env
+**/*.decrypted
+**/age.key
+**/keys.txt
 local-gate-evidence
 
 # --- build output (server-rust/target alone is multi-GB) --------------------
@@ -58,7 +58,6 @@ clients/web/node_modules
 clients/web/dist
 clients/web/artifacts
 docs
-examples
 fastlane
 # Do not exclude the `legal/` directory itself. A blanket `legal` pattern
 # makes COPY legal/... fail with "not found" because this file REPLACES the
@@ -66,22 +65,16 @@ fastlane
 # THIRD_PARTY_NOTICES.md and legal/generated/*.
 legal/privacy-policy.md
 legal/agent-disclosure.md
-relay
 research
-services
 # Exclude script tree contents, then re-include the one scanner the image
 # COPYs. `scripts` as a directory exclude would also hide the exception
 # (Docker cannot un-ignore a file whose parent directory is excluded).
 scripts/**
 !scripts/check_debian_copyrights.sh
-workers
-server/Sources
-server/Tests
-server/Package.swift
-server/Package.resolved
-infra/eve
-infra/workd
-infra/prod/docker
+# Retired Swift trees (LS-1 #2165): f399e417:examples f399e417:relay
+# f399e417:services f399e417:workers f399e417:server/Sources
+# f399e417:server/Tests f399e417:infra/eve f399e417:infra/workd
+# f399e417:infra/prod/docker — gone, so no exclude entries remain.
 BUILD_TICKETS.md
 ROADMAP.md
 STATUS.md

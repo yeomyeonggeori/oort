@@ -41,8 +41,8 @@
 # dist and staged it with a `web-assets` command, and the Rust path had simply
 # lost that. So: one image, and pinning it pins the browser too.
 #
-# Not in this image (deliberate): the Swift workers / T3 / workd / LinkShort.
-# `infra/prod/docker/momo.Dockerfile` remains the Swift image and is untouched.
+# Not in this image (deliberate): T3 sidecar and LinkShort are out of this
+# binary. The retired Swift image lived at f399e417:infra/prod/docker/momo.Dockerfile.
 #
 # No APNs credential is baked in, here or anywhere: this image cannot talk to
 # Apple. The notifier posts id-only dispatches to the push relay, which is the
