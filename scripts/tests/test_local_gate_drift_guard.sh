@@ -94,18 +94,14 @@ FAKE_BIN="$SANDBOX/bin"
 FAKE_DOCKER_STATE="$SANDBOX/docker.digest"
 ENV_FIXTURE="$SANDBOX/runtime.env"
 mkdir -p "$FAKE_BIN"
-cat >"$ENV_FIXTURE" <<'EOF'
-COMPOSE_PROJECT_NAME=momo_guard_test
+cp "$REPO_ROOT/infra/rust/rust-smoke.env.example" "$ENV_FIXTURE"
+cat >>"$ENV_FIXTURE" <<'EOF'
 PORT=18080
 CENT_PORT=18081
 POSTGRES_PORT=15432
 HERMES_PORT=18083
 DATABASE_URL=postgresql://momo:momo@127.0.0.1:15432/momo
-CENT_TOKEN_HMAC=test-token-hmac
-CENT_API_KEY=test-api-key
-CENT_PROXY_SECRET=test-proxy-secret
 CENT_API_URL=http://127.0.0.1:18081/api
-JWT_HMAC=test-jwt-hmac
 HERMES_BASE_URL=http://127.0.0.1:18083/v1
 HERMES_API_KEY=test-hermes-key
 EOF
