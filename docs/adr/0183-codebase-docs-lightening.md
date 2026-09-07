@@ -1,6 +1,6 @@
 # ADR-0183: 클린 슬레이트 경량화 — 은퇴 표면 삭제·이중 정본 해소·문서 로테이션 (LS 시리즈)
 
-- 상태: **Proposed** (기안 2026-09-07 Fable · momo-main — 성재 지시 2026-09-07 「clean slate라고 생각하고 불필요한 문서·Swift 코드 같은 레거시를 남기지 말고 걷어내자. 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」). **Accept 전 삭제 PR 발사 금지**(경계 변경: 스택·게이트·정본 목록).
+- 상태: **Accepted** (2026-09-07 성재 결재 — 「ADR-0183 Accept, 결정 5건 전부 권고안대로 진행. 애매한 지점은 물어볼 것. 작업이 1차 최종 목표(셀프호스팅 + 그록봇 연동 지원)에 초점을 두는지 점검할 것」. 기안 같은 날 Fable · momo-main. 결재 기록·정오표는 하단 「결재 기록」 절)
 - 발제: 실측 `docs/planning/research/2026-09-07-clean-slate-inventory.md`(인벤토리) · `2026-09-07-clean-slate-candidates.md`(후보·판정) · 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md`.
 - 관련: ADR-0145(Rust 재작성 · 증보 1 삭제 게이트 · 증보 2 상시 빌드 제외) · ADR-0133(Tauri) · ADR-0137(RN) · ADR-0119(web v0) · ADR-0120(PushRelay 경계) · ADR-0153(CI 스택) · ADR-0179~0182(출시 두 기둥) · `docs/TRACKS.md` · `docs/planning/PIPELINE.md` · #1255 · #1256 · #1022 · #1610 · 2026-08-09 Swift 삭제 감사(`research/2026-08-09-swift-removal-audit.md`).
 
@@ -33,7 +33,7 @@
 
 ### D4. Swift 4트리를 삭제한다 — 단, 두 컴포넌트는 성재 결정 뒤에
 - 즉시 삭제: `server/Sources·Tests·Fixtures·Package.swift` · `workers/AgentWorker`·`workers/NotifierWorker` · `relay/OutboxRelay` · `services/CloudProviderKit`·`OutboundHTTPPolicy` · `.swift-version` · Swift e2e 컴포즈 서비스(api/relay/worker/notifier) · `infra/prod/docker/*.Dockerfile`·compose·`install/upgrade/momo-ops/deploy-lib.sh` · `scripts/fixtures/ios-push-sample.apns`.
-- **결정 포인트 ①(PushRelay)** — `relay/PushRelay`+`services/MomoMetrics`: 권고 = **지금 삭제**하고 #1255(Rust 이식)를 M1 폰 파도(G3) 전제로 재편성. 근거: 출시 정의(G2)에 폰이 없고(편성 정본 §6), NCP 철수 후 Dawn 운영 relay 배포 실체가 없으며, ADR-0120의 경계 설계와 Rust `momo-notifier` 클라이언트 절반은 살아 있다. 대안 = 유지 후 #1255 완료 시 삭제(Swift 툴체인·`docker-compose.push.build.yml` 유지 비용 지속).
+- **결정 포인트 ①(PushRelay)** — `relay/PushRelay`+`services/MomoMetrics`: 권고 = **지금 삭제**하고 #1255(Rust 이식)를 M1 폰 파도(G3) 전제로 재편성. 근거: 출시 정의(G2)에 폰이 없고(편성 정본 §6), 저널·런북에 살아 있는 relay 배포 기록이 없으며(NCP 철수 뒤 실체는 결재 기록 참조), ADR-0120의 경계 설계와 Rust `momo-notifier` 클라이언트 절반은 살아 있다. 대안 = 유지 후 #1255 완료 시 삭제(Swift 툴체인·`docker-compose.push.build.yml` 유지 비용 지속).
 - **결정 포인트 ②(work host)** — `workers/WorkHostDaemon`(momo-workd) + `adapters/codex-workbench` + `infra/workd` + `verify_work*/t3_*/workd*` 검증기: 권고 = **삭제**하고 #1256·#1927을 「출시 후 Rust 사이드카」 ADR 1건으로 병합. Rust 측(`momo-t3` crate · `work_sessions.rs` · `infra/cubesandbox` · 웹 `work`·`workConsole`·`workstreams`·`ade` 표면)은 **유지**(데몬 부재 = 「work host 미연결」 상태로 동작, 이미 그 상태). 대안 = Swift workd 유지(T3 실기동 데모 가능, 단 Swift 툴체인·29 .swift·엔진 어댑터 4종 유지).
 - `services/LinkShort`: Caddy `redir` 1줄로 대체 후 삭제(LS-1 안에서).
 
@@ -46,7 +46,7 @@
 
 ### D6. 문서 로테이션 규칙(상설)
 - **핸드오프 패킷은 이슈가 열려 있는 동안만 `docs/planning/handoffs/`에 산다.** 이슈 close 시 다음 플러시에서 삭제(git 히스토리 = 아카이브). 닫힌 이슈·무참조 196본을 LS-4에서 일괄 삭제.
-- 리서치(`docs/planning/research`·`research/`)는 **Accepted ADR·architecture·design-system이 인용하는 것만** 남긴다. 인용되지 않는 리서치는 결정에 흡수된 것이므로 삭제. `research/` 루트는 ADR 인용 파일만 남기고 디렉터리 번호 체계를 접는다(`docs/planning/research/`로 합류).
+- 리서치(`docs/planning/research`·`research/`)는 **Accepted ADR·architecture·design-system이 인용하는 것만** 남긴다. 인용되지 않는 리서치는 결정에 흡수된 것이므로 삭제. `research/` 루트는 ADR·architecture·design-system 인용 파일만 **제자리에** 남기고 나머지를 삭제한다(정오표 2026-09-07: 이동·합류는 80본 ADR의 링크 churn을 만들므로 하지 않는다).
 - `STATUS.md`·`JOURNAL.md`·`CURRENT_STATE.md`는 **월 단위 1파일**로 `docs/planning/archive/`에 로테이션(기존 규칙 확장 — STATUS도 포함). `docs/archive/`(H1 attic)는 삭제, 그 안의 `STATUS-2026-06/07`은 `docs/planning/archive/`로.
 - `claudedocs/`는 세션 스크래치다: **전량 `.gitignore`**, 추적 39본 삭제(검수 REPORT는 PR 본문·코멘트가 정본).
 - 루트 은퇴 문서(`docs/RUN.md`·`RELEASE_PLAYBOOK.md`·`MACOS_ALPHA_UPDATE_CHANNEL.md`·`LOCAL_SOLO_ALPHA_ROADMAP.md`·`HANDOFF_2026-07.md`·`DEPLOY.md`·`BACKLOG.md`·`AWS_INTERNAL_ALPHA.md`·`docs/specs/04-context-packet-v0.md`·`runbooks/ncp-rust-deploy.md`)는 삭제하고 `INDEX.md`를 D1 목록으로 재작성. `SECRETS_BACKUP_RUNBOOK`(Swift 전제 38곳)·`INTERNAL_ALPHA*`·`LOCAL_3_DAY_ALPHA_TEST_PACK`·`WORK_HOST_QUICKSTART`·`AGENT_HOSTING_QUICKSTART`·`BYOC_CLOUD_HOST`·`QA_GATE`·`INBOUND_MCP`·`IOS_TESTFLIGHT_RUNBOOK`·`docs/cicd/04·09-*codex-tickets`·`docs/external-agent-provider/*`·`runbooks/turn-host-install`·`aws-internal-alpha-deploy`는 LS-3 워커가 Swift 전제 문장 수로 실측해 「SELF_HOST로 흡수 / 삭제 / 유지」를 PR에 표로 제시한다(#1610 흡수).
@@ -102,3 +102,10 @@
 | plugins 레지스트리 v0 · memories(+policy·consent) · context-packets v0 · bans · event-subscriptions 잔여 · usage/quota 스냅샷 · workstream continuity · work-tool-profiles · huddles 잔여 · mcp/drive 잔여 · member 잔여 | 보류(판정 없음) | **폐기** — 출시 두 기둥 밖. 필요 시 Rust로 재설계 | D3 |
 | work-controls · work-auto-approvals · webhooks · Agent Port/MCP · attachments · cancel · huddles(ADR-0165) | Rust에 섬 | 이식 완료 | 실측 |
 | workd 5경로(`work_host_auth.rs:22-25` 「still-unported five」) | 미이식 | D4-② 결과에 따름 | — |
+
+## 결재 기록 (2026-09-07)
+
+- **Accept** + 결정 포인트 5건 전부 권고안 채택: ①PushRelay·MomoMetrics 지금 삭제(#1255는 M1 폰 파도 전제로 재편성) ②WorkHostDaemon·codex-workbench·infra/workd 삭제, Rust `momo-t3`·work 라우트·웹 work 표면 유지(#1256·#1927 → 출시 후 「Rust 사이드카」 ADR 1건) ③`research/` 루트 = ADR·architecture·design-system 인용분만 제자리 보존 ④`claudedocs/` 전량 gitignore ⑤LS-0 정책 감사는 planner(Fable) 상시 위임 범위 안에서 집행(감사문 PR 첨부).
+- **초점 지시**: 모든 LS 작업은 1차 최종 목표(셀프호스팅 + 그록봇 연동 지원)에 기여하는지 점검한다 — 점검표는 `docs/planning/2026-09-07-lightening-program.md` §1. Agent Port·hosted agent 검증기·`scripts/oort`·`infra/rust`·`SELF_HOST*` 문서는 LS 전 파도에서 **무접촉**.
+- 이행 티켓: **LS-0 #2142** · **LS-4 #2143**(첫 파도, 병렬 2). LS-1·2·3은 LS-0 랜딩 뒤 패킷과 함께 발급.
+- 전제 확인 요청(미확인): D4-①의 「relay 배포 실체 없음」은 저널·런북 기록 부재로 추정한 것이다. 살아 있는 Dawn relay가 있다면 삭제 전 정지·기록이 선행돼야 한다.
