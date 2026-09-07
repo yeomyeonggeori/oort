@@ -31,10 +31,10 @@
 | LS-4 문서 로테이션 | **#2143** | `handoffs/2026-09-07-ls4-docs-rotation-brief.md` | engine(docs) | M | **완료**(main `e1975ce9`) |
 | LS-1 Swift 은퇴(+workd·LinkShort·infra/prod·Swift e2e; PushRelay 소스만) | **#2165** | `handoffs/2026-09-07-ls1-swift-retire-brief.md` | engine | L | **완료**(main `8bd05806`) |
 | LS-2 web-legacy·mobile-spike + work 표면 숨김 | **#2166** | `handoffs/2026-09-07-ls2-client-dual-canon-brief.md` | uxui | M | **완료**(main `356aaaf3`) |
-| LS-3 은퇴 문서·INDEX·Codex 잔재·G3 문서·ncp 회전 절 이식 | **#2182** | `handoffs/2026-09-07-ls3-retired-docs-brief.md` | engine(docs, 감사) | M | ready(go 대기) |
+| LS-3 은퇴 문서·INDEX·Codex 잔재·G3 문서·ncp 회전 절 이식 | **#2182** | `handoffs/2026-09-07-ls3-retired-docs-brief.md` | engine(docs, 감사) | M | **완료**(main `47f4d6f0`) |
 | LS-5 이슈 위생 | planner | — | — | S | **완료**(17 close·10 유지) |
-| LS-6 비대 파일 티켓 발행 | planner | — | — | S | 파도 뒤 |
-| **SH-10 push relay Rust**(1차 목표 파도 선발) | **#1255** | `handoffs/2026-09-07-sh10-push-relay-rust-brief.md` | engine(감사) | M~L | ready(go 대기, LS-3과 병렬) |
+| LS-6 비대 파일 티켓 발행 | planner | **#2187**(원장) | — | S | **완료**(착수는 G1' 뒤) |
+| **SH-10 push relay Rust**(1차 목표 파도 선발) | **#1255** | `handoffs/2026-09-07-sh10-push-relay-rust-brief.md` | engine(감사) | M~L | **완료**(main `5c670e98`) — 실기기 APNs는 planner 후속 |
 
 각 PR 공통 수용: 삭제 + 실행 배선 참조 grep 0 + 게이트 초록 + **계수 표(전/후)**. 워커 상습 6축(PIPELINE §3) 상설. 완료 조건: `git grep -lE 'server/Sources|workers/|relay/|services/|web-legacy|mobile-spike|infra/prod|\.swift'`가 ADR·JOURNAL·archive 밖에서 0.
 
