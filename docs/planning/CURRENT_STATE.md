@@ -1,6 +1,8 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 진단 완료: 인벤토리·후보·ADR-0183 Proposed. 성재 결재 대기, 워커 0).** 컴팩트 복원 진입점.
+> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 진단 완료 → ADR-0183 Accepted(결정 5건 권고안) → LS-0 #2142 · LS-4 #2143 패킷·워크트리 준비, 발사 go 대기. 워커 0).** 컴팩트 복원 진입점.
+>
+> **★ 갱신(오후)**: 결재 = Accept + 5건 권고안 + **초점 지시(셀프호스팅·그록봇 연동)** → `docs/planning/2026-09-07-lightening-program.md`(§1 초점 점검표: LS-0·1·3 직접 기여, LS-2·4·5 간접 · §4 출시 잔여 재편성 제안 · §5 질문 3: 팔레트·DS-1 연기 승인 / work 표면 숨김 / G3 문서 삭제). 브리프 2본 + 이슈 #2142·#2143 + 워크트리 `wls0`·`wls4`. 다음: go → LS-0 ∥ LS-4 발사(병렬 2) → LS-0 랜딩 시 정책 감사 승격 → LS-1·LS-2 패킷 발급.
 >
 > **★ 지시(성재 2026-09-07)**: 「clean slate — 불필요한 문서·Swift 코드 같은 레거시를 걷어내고 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」. 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md`(§0 불변 · §3 판정 A~E · §4 D-0~D-3).
 > **★ 산출**: `docs/planning/research/2026-09-07-clean-slate-inventory.md` · `2026-09-07-clean-slate-candidates.md` · **ADR-0183**(Proposed — D1 정본 목록 · D3 증보 1 삭제 게이트→출시 범위 판정 · D4 Swift 삭제 · D5 이중 정본 · D6 로테이션 · LS-0 게이트 재배선(정책 감사 1회) → LS-1 Swift ∥ LS-2 클라 → LS-3 문서 ∥ LS-4 로테이션 → LS-5·6).

@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (오후) · Fable · ★ADR-0183 Accepted(결정 5건 권고안 채택 + 초점 지시) — 경량화 프로그램·LS-0/LS-4 패킷·이슈 발급, 발사 go 대기
+
+- 결재(성재): 「ADR-0183 Accept, 결정 5건 전부 권고안대로. 애매하면 물어볼 것. 1차 최종 목표(셀프호스팅 + 그록봇 연동)에 초점을 두는 작업인지 점검」 → ADR 상태·결재 기록·정오표 2건(`research/` 제자리 보존 · D4-① 전제 문구) 반영.
+- 산출: `docs/planning/2026-09-07-lightening-program.md`(§0 1차 목표 자산·무접촉 목록 · §1 LS 초점 점검표 · §2 티켓 · §3 순서 · **§4 출시 잔여 재편성 제안**(SH-5a·SH-6a·UX-R2c·#1361 앞세우고 팔레트·DS-1 연기) · §5 질문 3) · 브리프 `handoffs/2026-09-07-ls0-gate-rewire-brief.md`(#2142, 보호 경로 허용 목록·무접촉 목록·삭제 목록·프로파일 규칙·SQL 이전·개명·red proof) · `2026-09-07-ls4-docs-rotation-brief.md`(#2143, keep-set 3규칙·계수·grep 0·사보타주).
+- 준비: 워크트리 `wls0`(`feat/ls0-gate-rewire`)·`wls4`(`feat/ls4-docs-rotation`) @ engine `6672be38`. 발사는 명시 go. 열린 질문: §4 재편성 승인 · work 표면 숨김 · G3 문서 삭제.
+
 ## 2026-09-07 · Fable · ★클린 슬레이트 D-0 진단 완료 — 인벤토리·후보·ADR-0183(Proposed) 기안, 성재 결재 대기
 
 - 지시(성재 02:5x): 「clean slate라고 생각하고 불필요한 문서·Swift 코드 같은 레거시를 걷어내자. 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」 → 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md` §2 실행(read-only 실측).
