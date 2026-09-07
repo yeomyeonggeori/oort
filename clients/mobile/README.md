@@ -5,7 +5,7 @@ goal RN-C2). Two neighbours are easy to confuse it with:
 
 | | what it is |
 |---|---|
-| `clients/mobile-spike` | the disposable #837 harness. It answered five questions and is not shipped. Do not copy patterns out of it without reading why they were there — several exist only because it deliberately compiled `clients/web/src`. |
+| `f399e417:clients/mobile-spike` | the disposable #837 harness (deleted #2166). It answered five questions and is not shipped. Do not copy patterns out of git history without reading why they were there — several exist only because it deliberately compiled `clients/web/src`. |
 | `clients/iOS` | the SwiftUI kit, **frozen** (ADR-0137 D8). Bug fixes only, retired when this app reaches parity. Its `MomoiOSPushKit` is inherited later, in 이행 순서 5. |
 
 This batch delivered the scaffold and the wiring. The v0 UI (auth, sidebar,

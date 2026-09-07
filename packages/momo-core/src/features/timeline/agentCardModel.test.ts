@@ -53,7 +53,7 @@ function approvalProps(extra: Record<string, unknown> = {}) {
   };
 }
 
-describe("approval card (web-legacy basic-mode vocabulary)", () => {
+describe("approval card (f399e417:clients/web-legacy basic-mode vocabulary)", () => {
   it("parses only the public fields and counts the opaque ones", () => {
     const card = agentCardModel(
       msg({ type: "approval_request", props: approvalProps() })
