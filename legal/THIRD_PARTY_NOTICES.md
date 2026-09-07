@@ -58,6 +58,7 @@ is file-existence evidence, not a legal-sufficiency declaration.
 
 - `clients/desktop/src-tauri` Cargo graph (Tauri shell, not the GHCR app image)
 - `clients/mobile` npm graph
+- `clients/web-legacy` (not the SPA the Rust image copies)
 - in-app “Open Source Licenses” UI (#35)
 
 ## Historical (frozen snapshots)
@@ -120,9 +121,9 @@ shipped. Do not read them as the GHCR attribution record.
 | xctest-dynamic-overlay | 1.11.0 | MIT | https://github.com/pointfreeco/xctest-dynamic-overlay |
 <!-- END GENERATED: SPM LICENSES -->
 
-### Hand-written npm (f399e417:clients/web-legacy / pre-#1332 partial list)
+### Hand-written npm (web-legacy / pre-#1332 partial list)
 
-These rows described `f399e417:clients/web-legacy` runtime deps and a partial npm
+These rows described `clients/web-legacy` runtime deps and a partial npm
 list. They are not the GHCR SPA graph. Current web attribution is the
 generated bundle above.
 
