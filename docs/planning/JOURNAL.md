@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (밤·종결) · Fable · ★LS 시리즈 완결(LS-0~6) + SH-10 push relay Rust main 정본화 — 스냅샷 93
+
+- **LS-γ 랜딩**: **SH-10 #1255**(PR #2192 커밋 6 + planner 위생 1: GHCR 고지 번들 재생성 — 새 crate 의존 fnv·h2) → 승격 al → main `5c670e98`. momo-push-relay Rust(같은 이미지 `push-relay`, 정적 레지스트리, raw-body Ed25519, id-only 봉투, live/stub, 401/400/429가 notifier 분류기와 정합, stub E2E `push_dispatch_log` 200, 런북 3 모드). **LS-3 #2182**(PR #2191 R1 10 + R2 링크 19 정정) → 승격 ak → main `47f4d6f0`: 은퇴 문서 24 삭제(RUN·DEPLOY·BACKLOG·…·G3 문서·Codex 잔재·ncp 런북), 회전 절 SELF_HOST 이식+계약 게이트 재지정, INDEX/README D1 재작성, 살아 있는 md 링크 0 깨짐.
+- **경량화 최종**(main `47f4d6f0` vs 진단 시점 `f399e417`): 추적 파일 **3,416 → 2,491(−27%)** · 코드 LOC ≈768k → 624k(−19%) · md 107k → 67k(−38%) · `.swift` 224→7 · scripts 265→151 · docs 663→364(루트 34→18) · handoffs 302→80 · research 112→36 · CI 레인 5→4. LS-5 17 close · LS-6 원장 #2187.
+- 선재 이슈: #2157(pgbackrest 시험) · #2181(gate:csp-deploy 템플릿) · #2193(momo_notifier 롤). 교훈: 정책 파일 변경은 track·승격·sync 셋 다 감사(자동화) · GHCR 매니페스트가 NOTICE 해시 고정 · Rust 의존 추가 시 고지 번들 재생성 · 체인 update-branch 뒤 로컬은 pull --no-rebase.
+- 다음: §7(G2에 iOS 앱스토어 v0) 성재 확인 → 출시 계획 개정 → G1' 파도(SH-6a ∥ SH-5a 브리프) · 실기기 APNs 실수신(`checklist-apns-real-device.md`, 성재 iPhone).
+
 ## 2026-09-07 (재개·밤3) · Fable · ★LS-β 완결(LS-1·LS-2 main 정본화) + LS-5 이슈 위생 + LS-γ 패킷(LS-3 #2182 · SH-10 #1255) — 스냅샷 92
 
 - **LS-1 랜딩**(PR #2177 R1 8 + R2 2; 정정 1회 PushRelay): Swift 4트리·infra/prod·Swift e2e·eve·workd·codex-workbench·examples 삭제(313), `.swift` 224→8(RN 셸), Swift e2e 전제 verifier 19 삭제·재조준, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제 → 감사 랜딩·승격 ai·sync 감사 → main. R2 발견 선재 **#2181**(gate:csp-deploy가 SH-2 템플릿에서 빨강).
