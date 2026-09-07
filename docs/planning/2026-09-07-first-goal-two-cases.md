@@ -25,7 +25,7 @@
 
 **E2E-B(독립 셀프호스팅)**: README 블록을 Claude Code에 붙여넣기 → Railway(SH-5a) 또는 VPS에서 무개입 설치 → doctor PASS(public) → 팀원 2인 로그인(웹+데스크톱) → **설정 › AI 연결에 본인 hermes(OpenAI 호환) 등록 → 웰컴 채널 킥오프에 김인턴 답장** → **SH-6a 자격으로 Claude Code(또는 Codex)를 Agent Port에 합류 → 멘션 → 답장** → `scripts/oort upgrade` 1회 왕복 + 백업 1회 → (선택) hermes 게이트웨이 플러그인 경로 1회 실측.
 
-두 E2E 모두 폰은 QR 연결(M0)까지만 — 폰 푸시·패리티는 G3.
+두 E2E 모두 폰은 QR 연결(M0)까지 + **폰 푸시 1회**(2026-09-07 저녁 결재: SH-10 Rust push relay를 셀프호스트에 동봉 — 케이스 B는 stub 또는 자체 relay, 케이스 A·Dawn 공용 relay는 TestFlight 기기 실수신). 폰 UI 패리티는 G3 유지, 단 **iOS 앱스토어 v0 출시 의도**(성재)에 따라 출시 정의 개정 제안은 §7.
 
 ## 3. 현행 자산과 갭 (실측)
 
@@ -39,12 +39,12 @@
 | 파도 | 엔진 | UXUI/문서 | 케이스 |
 |---|---|---|---|
 | **G1'-1** | **SH-6a** Agent Port 자격 발급 GUI(설정 › 에이전트 › 자격) + 로컬 OpenAI 호환 opt-in (M) | **SH-5a** Railway 템플릿 1회 E2E (M, 엔진 두 번째 자리) | B-2 · B-1 |
-| **G1'-2** | **#1265** 웹훅 인바운드 2경로 Rust 이식(SH-7 첫 blocker) (M) | **UX-R2c** 첫 에이전트 연결 퍼널 — 카드 4종(Claude Code/Codex/**Grok Bot**/OpenAI 호환=hermes) → 1회용 자격(SH-6a) → 감지 → 첫 멘션 (L) | B-3 · A(카드) |
+| **G1'-2** | **SH-10 #1255** momo-push-relay Rust(같은 이미지·compose push·3 모드) + TestFlight 실수신 (M~L) · **#1265** 웹훅 인바운드 (M, 두 번째 자리) | **UX-R2c** 첫 에이전트 연결 퍼널 — 카드 4종(Claude Code/Codex/**Grok Bot**/OpenAI 호환=hermes) → 1회용 자격(SH-6a) → 감지 → 첫 멘션 (L) | 푸시(A·B) · B-3 · A(카드) |
 | **G1'-3** | **SH-8** 그록봇 루틴 지시문 정본화 + §3.3 「합류」 절(A-1) (M, 문서·성재 확인) | **SH-9** hermes 합류 런북 Rust 현행화(`external-agent-provider/*` 재작성 + 플러그인 1회 실측) (M) | A-1 · B-4 |
-| **G1'-4 E2E** | **E2E-B** Railway + hermes + Claude Code 합류 + upgrade/백업(planner 집행, 성재 로그인) | **E2E-A** #1361 그록봇 pair→reply→disconnect + Reset 복구(A-2·A-3, **성재 손**·계정 복구 전제) | 둘 다 |
+| **G1'-4 E2E** | **E2E-B** Railway + hermes + Claude Code 합류 + upgrade/백업 + 폰 QR+푸시(stub)(planner 집행, 성재 로그인) | **E2E-A** #1361 그록봇 pair→reply→disconnect + Reset 복구(A-2·A-3) — **CDP 하네스로 자동화**(2026-09-07 결재: 로컬 테스트 한정 허용, 계정 살아 있음) | 둘 다 |
 | → **ITO(G1)** | 성재+1인 내부 테스트(웹+데스크톱+폰 QR) | | |
 
-**연기(ITO 뒤)**: UX-R3a~c ⌘K 팔레트 · DS-1(·3·4) 잔여(R2c에 필요한 Card/Field/Banner만 R2c 안에서) · UX-R2d 온보딩 재진입 · #1925 허들 자격 3종 · #1792 TURN · M1 폰 패리티 · #1255 PushRelay Rust · #1927 work host(출시 후 ADR). **G2 정의 불변.**
+**연기(ITO 뒤)**: UX-R3a~c ⌘K 팔레트 · DS-1(·3·4) 잔여(R2c에 필요한 Card/Field/Banner만 R2c 안에서) · UX-R2d 온보딩 재진입 · #1925 허들 자격 3종 · #1792 TURN · M1 폰 UI 패리티 · #1927 work host(출시 후 ADR). (#1255는 SH-10으로 G1'-2 승격.) **G2 정의는 §7 제안 전까지 불변.**
 
 의존: LS-α(LS-0·LS-4) 랜딩 뒤 G1'-1 발사 가능(LS-β·γ와 워커 병렬 2 안에서 교차 — 순서: LS-1 → SH-6a → LS-2 → SH-5a → …는 발사 시점에 편성). 티켓·패킷은 파도 착수 시 발급.
 
@@ -59,3 +59,9 @@
 - `2026-09-02-launch-program-plan.md` §1 G1 정의 → §2 E2E 2본 · §3·§9 파도 → 본 문서 §4 (개정은 LS-γ 랜딩 뒤 스냅샷 92와 함께 1회 — 그 전까지 본 문서가 우선).
 - `2026-09-07-lightening-program.md` §4·§5 → 본 문서 §4·§5로 대체(포인터).
 - LS-2·LS-3 브리프에 §5-2·§5-3 반영.
+
+## 7. 2026-09-07 저녁 결재 반영 — 푸시·CDP·iOS (성재)
+
+- **셀프호스팅 레벨 폰 푸시 = 1차 목표 안.** SH-10(#1255) momo-push-relay Rust: 같은 멀티커맨드 이미지, `docker-compose.push.yml` 이미지 = `MOMO_RUST_IMAGE`, 운영 모드 ①Dawn 공용(App Store 앱 기본, 셀프호스트 서버가 서버 ID+Ed25519 공개키로 등록 — v0는 정적 레지스트리 `MOMO_RELAY_SERVERS`, 자기등록 API는 후속) ②자체 relay(자기 Apple 계정·자기 빌드 앱, 같은 바이너리에 자기 .p8) ③stub(로컬). 계약(id-only 봉투 `momo.push.dispatch.v2`·raw-body Ed25519·상태 분류·영수증)은 Rust `momo-notifier`에 이미 있는 클라이언트 절반과 Swift 원본(`f399e417:relay/PushRelay/**`, ~700 LOC)에서 그대로. 크기 M~L(워커 1~2회전) + TestFlight 실수신 S(APNs 자산 확보됨).
+- **케이스 A 전제 해소**: 계정 살아 있음 · 로컬 테스트 한정 CDP 허용 → E2E-A 자동화(#1361을 CDP 하네스로 재편, SH-8에 하네스 복구 포함).
+- **출시 정의 개정 제안(성재 확인 필요)**: G2 = 외부 셀프호스터 3 + **iOS 앱스토어 v0**(셀프호스트 서버에 QR로 붙는 폰 + 푸시 relay 경유 알림 + M1 중 출시 필수분만: 로그인·채널·타임라인·멘션·알림). 폰 UI 전체 패리티(M1 잔여)는 G3 유지. 순서: SH-10 → M0 QR(완료) → TestFlight internal(M2) → 스토어 심사는 G2 뒤.
