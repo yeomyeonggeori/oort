@@ -35,9 +35,7 @@ jest.mock('@momo/core/features/capabilities/serverSurfaces', () => {
     isSurfaceProvided: (id: string) =>
       (actual.WORK_SURFACE_IDS as readonly string[]).includes(id)
         ? true
-        : actual.isSurfaceProvided(
-            id as import('@momo/core/features/capabilities/serverSurfaces').SurfaceId,
-          ),
+        : actual.isSurfaceProvided(id as never),
   };
 });
 
