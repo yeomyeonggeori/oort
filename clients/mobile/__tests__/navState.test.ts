@@ -3,6 +3,7 @@ import {
   navReducer,
   tabLabel,
   TABS,
+  visibleTabs,
   type NavState,
   type OpenHostedConnection,
 } from '../src/nav/state';
@@ -27,11 +28,12 @@ describe('the four tabs', () => {
     });
   });
 
-  it('names every tab, in the order the tab bar draws them', () => {
+  it('names every tab; the bar hides 작업 unless the work console surface is provided', () => {
     // 「에이전트」 is spelled out rather than shortened: it is what the web
     // client calls the same destination, and two clients that name one place
     // differently have shipped a defect.
     expect(TABS.map(tabLabel)).toEqual(['대화', '인박스', '에이전트', '작업']);
+    expect(visibleTabs().map(tabLabel)).toEqual(['대화', '인박스', '에이전트']);
   });
 
   it('switches tabs', () => {

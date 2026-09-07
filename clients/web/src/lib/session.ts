@@ -34,8 +34,8 @@ export {
 //                  secret, but the refresh response does not repeat them, so a
 //                  restored session has to read them from here.
 //
-// Ported from clients/web-legacy/src/auth/session.ts, which is the working
-// reference implementation of the same rotation (ADR-0119 D3-A).
+// Ported from f399e417:clients/web-legacy/src/auth/session.ts, which is the
+// working reference implementation of the same rotation (ADR-0119 D3-A).
 //
 // XSS: localStorage is readable by any script that reaches this origin, so a
 // successful injection steals the refresh token and can keep rotating it for

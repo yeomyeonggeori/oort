@@ -631,13 +631,16 @@ export function Sidebar({
                 <SidebarRow to={AGENTS_NAV.to} icon={<Bot className="size-4" />} label={AGENTS_NAV.label} testId="nav-agents" />
                 {/* TC-1 (#1758): 전역 작업 세션 목록. 채널 헤더 터미널은
                     도크이고, 우측 WorkPanel 은 이 경로의 `open-work-panel` 이
-                    연다. 표면 삭제 금지. */}
-                <SidebarRow
-                  to="/work"
-                  icon={<SquareTerminal className="size-4" />}
-                  label="작업 콘솔"
-                  testId="nav-work-console"
-                />
+                    연다. 표면 삭제 금지 — 셀프호스트 기본은 진입점만 접는다
+                    (#2166, isSurfaceProvided("workConsole")). */}
+                {isSurfaceProvided("workConsole") && (
+                  <SidebarRow
+                    to="/work"
+                    icon={<SquareTerminal className="size-4" />}
+                    label={serverSurface("workConsole").label}
+                    testId="nav-work-console"
+                  />
+                )}
                 {/* 메시지 검색 (goal B12 H5). 전역 목적지인 이유는 인박스와 같다:
                     가는 곳이지 구독하는 것이 아니다.
 
@@ -675,7 +678,7 @@ export function Sidebar({
                     "권한이 없다"로 읽히고 그것은 사실이 아니다: 없는 것은 권한이
                     아니라 기능이다. 주소를 직접 열면 라우트가 이유를 말한다. */}
                 {isSurfaceProvided("workstreams") && (
-                  <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label="작업 흐름" testId="nav-workstreams" />
+                  <SidebarRow to="/workstreams" icon={<Milestone className="size-4" />} label={serverSurface("workstreams").label} testId="nav-workstreams" />
                 )}
               </ul>
 

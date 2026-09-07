@@ -6,6 +6,8 @@
 // 그룹은 권한이 아니라 범위다. 각 운영 패널의 403은 섹션이 서버에 물어 답한다.
 // =============================================================================
 
+import type { SurfaceId } from "@momo/core/features/capabilities/serverSurfaces";
+
 export type SettingsSectionId =
   | "profile"
   | "account"
@@ -31,6 +33,8 @@ export interface SettingsSectionMeta {
   group: SettingsGroupId;
   /** Only in the desktop shell: a browser tab has no app bundle to update. */
   desktopOnly?: boolean;
+  /** Hide the nav row unless this server surface is provided (#2166). */
+  surface?: SurfaceId;
 }
 
 export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
@@ -47,7 +51,7 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
   { id: "ai", label: "AI 연결", group: "연결" },
-  { id: "code", label: "코드 실행 호스트", group: "연결" },
+  { id: "code", label: "코드 실행 호스트", group: "연결", surface: "work" },
   { id: "usage", label: "사용량", group: "연결" },
   // 연결 그룹 안에서의 상대 순서: 사용량 다음, 이벤트 구독 앞. 전역으로
   // 「앱 바로 뒤」나 「멤버와 초대 앞」이 아니다 — 그 두 섹션은 다른 그룹이다.

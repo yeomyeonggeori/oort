@@ -17,7 +17,6 @@ target
 # thing that makes a build "work on my machine" for the wrong reason.
 clients/web/dist
 clients/web/artifacts
-clients/web-legacy/dist
 .env
 .env.*
 infra/prod/secrets.env

@@ -2,7 +2,7 @@
   "name": "momo-mobile",
   "version": "0.0.1",
   "private": true,
-  "description": "momo (oort) iOS client — bare React Native, New Architecture, Hermes (ADR-0137 D1). Consumes @momo/core by path, exactly as clients/web does. Not clients/mobile-spike: that harness is disposable, this is the app.",
+  "description": "momo (oort) iOS client — bare React Native, New Architecture, Hermes (ADR-0137 D1). Consumes @momo/core by path, exactly as clients/web does. Not the retired f399e417:clients/mobile-spike harness (deleted #2166): that was disposable, this is the app.",
   "scripts": {
     "ios": "react-native run-ios",
     "start": "react-native start",
