@@ -32,7 +32,7 @@
 # Co-locating the relay with the self-hosted stack is a single-VPS convenience
 # for the Dawn-operated smoke, not the architecture. ADR-0120 D1-A makes the
 # relay a boundary that serves *many* self-hosted servers, and
-# infra/prod/prometheus.yml:18 already records it as "a Dawn-operated deployment
+# f399e417:infra/prod/prometheus.yml:18 already records it as "a Dawn-operated deployment
 # boundary, not a service in the stack". See the placement section of
 # docs/cicd/12-push-relay-deploy-runbook.md.
 
@@ -44,7 +44,7 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.match-label: com.docker.compose.project
 
 services:
-  # The APNs boundary. Built from relay/PushRelay/Dockerfile; the deployed stack
+  # The APNs boundary. Image comes from #1255 (Rust momo-push-relay); the deployed stack
   # references a published tag exactly like MOMO_RUST_IMAGE does.
   #
   # Where the required-variable check lives is a deliberate split:

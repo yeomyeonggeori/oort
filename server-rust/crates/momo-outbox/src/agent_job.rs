@@ -71,7 +71,7 @@
 //!
 //! There is **no workspace predicate here and no tenant GUC is set** — a worker
 //! drains every tenant. So the caller must connect as the BYPASSRLS `momo_worker`
-//! role (`infra/e2e/bootstrap_roles.sql:32`). Under a NOBYPASSRLS role the
+//! role (`infra/rust/sql/bootstrap_roles.sql:32`). Under a NOBYPASSRLS role the
 //! `outbox` policy evaluates `current_setting('app.workspace_id', true)::uuid`
 //! against an unset GUC and Postgres answers
 //! `22P02 invalid input syntax for type uuid: ""` — a posture failure that reads

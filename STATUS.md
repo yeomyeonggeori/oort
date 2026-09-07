@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## LS-1 Swift 은퇴 (#2165, 2026-09-07)
+
+- Track engine. `feat/ls1-swift-retire`. Swift `server/Sources`·`workers`·`relay`·`services`·`infra/prod`·Swift e2e compose·examples·codex-workbench 삭제. `server/Migrations`·`server/Fixtures` 유지. PushRelay Swift 본체 삭제, **계약·overlay 유지, Rust 이식 중(#1255)**.
+- runtime-unverified: `scripts/verify_push_relay.sh`는 Swift `relay/PushRelay`를 실행하므로 #1255 착수 전까지 런타임 RED. workd 미이식 경로는 D4-② 폐기(출시 후 Rust 사이드카 ADR).
+
 ## LS-2 클라 이중 정본 해소 (#2166, 2026-09-07)
 
 - Track UXUI. `feat/ls2-client-dual-canon` onto `origin/track/uxui`. `git rm` `clients/web-legacy`(45) + `clients/mobile-spike`(70): `git ls-files clients` 1250→1135. Work 표면 `workstreams`·`workConsole`·`work`·`ade`는 기존 `SURFACES`/`isSurfaceProvided`로 셀프호스트 기본 `provided:false`(라우트·컴포넌트 유지). 진입점 시험: hidden=0, restored=5.

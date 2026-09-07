@@ -12,7 +12,7 @@
 //!    provenance row — "무서명 공존" as a test, not a promise.
 //!
 //! `#[ignore]` — needs a `pgvector/pgvector:pg18` superuser DB plus the runtime
-//! `momo_app` role (`infra/e2e/bootstrap_roles.sql`). Run:
+//! `momo_app` role (`infra/rust/sql/bootstrap_roles.sql`). Run:
 //!
 //! ```text
 //! DATABASE_URL=postgres://momo:momo@localhost:15432/momo \
@@ -96,7 +96,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

@@ -112,7 +112,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())

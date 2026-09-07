@@ -17,7 +17,7 @@
 //!
 //! Harness contract, identical to `mention_routing_conformance_pg.rs`:
 //! `DATABASE_URL` connects as a **superuser** (migrations +
-//! `infra/e2e/bootstrap_roles.sql`, fixtures bypass RLS); the **server** runs on
+//! `infra/rust/sql/bootstrap_roles.sql`, fixtures bypass RLS); the **server** runs on
 //! `momo_app` (NOBYPASSRLS) so every assertion is made through the policies
 //! production uses; the **worker** runs on `momo_worker` (BYPASSRLS), the only
 //! faithful posture for a consumer whose claim has no workspace predicate.
@@ -114,7 +114,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())

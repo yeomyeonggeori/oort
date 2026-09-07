@@ -568,8 +568,8 @@ Stack stop · wipe · port collision: [`SELF_HOST.md`](SELF_HOST.md)
 | [`SELF_HOST.md`](SELF_HOST.md) | Bring-up failure, secret rotate, putting the key in over REST, outbox query |
 | [`onboarding-deeplink.md`](onboarding-deeplink.md) | `oort://join` byte contract |
 | [`infra/rust/README.md`](../infra/rust/README.md) | compose overlays, migration logs |
-| `infra/prod/momo-ops.sh invite-create` | Ops-host CLI issue. Prints the same deeplink as the GUI on stdout. **Not this document's path** |
-| [`AGENT_HOSTING_QUICKSTART.md`](AGENT_HOSTING_QUICKSTART.md) | ACP/workd. Internal-alpha premise. Not the self-host first day |
+| `infra/prod/momo-ops.sh invite-create` | Retired (`f399e417:infra/prod/momo-ops.sh`). Not this document's path |
+| workd / ACP hosting | Retired with LS-1 (#2165). Source: `f399e417:infra/workd` · `f399e417:docs/AGENT_HOSTING_QUICKSTART.md`. Not the self-host first day |
 | `scripts/bench_onboarding.sh` | Wall-clock install→first reply. REST, not GUI |
 
 ---

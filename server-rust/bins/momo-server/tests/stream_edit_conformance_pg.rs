@@ -19,7 +19,7 @@
 //! ```
 //!
 //! Harness contract is `http_smoke_pg.rs`'s: `DATABASE_URL` connects as a
-//! **superuser** (migrations + `infra/e2e/bootstrap_roles.sql`, fixture seeding
+//! **superuser** (migrations + `infra/rust/sql/bootstrap_roles.sql`, fixture seeding
 //! bypasses RLS) while the server runs on the runtime **`momo_app`** role
 //! (`NOBYPASSRLS`), so every assertion is made through the policies production
 //! uses. Fresh random UUIDs per test — the binary shares a container happily.
@@ -102,7 +102,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

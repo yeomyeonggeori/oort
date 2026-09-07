@@ -2,7 +2,7 @@
 # 내부 알파(도커 기반 호스트) 스택 수명주기 — 재배포/수거 단일 진입 (2026-07-23 성재 지시).
 #
 #   scripts/internal_alpha_stack.sh redeploy   # 데이터 보존 재배포: postgres 이미지
-#                                              # 드리프트 수렴 -> migrate -> api/relay
+#                                              # 드리프트 수렴 -> migrate -> api, relay
 #                                              # 재컴파일 재시작 -> health+안전 라우트 스모크
 #   scripts/internal_alpha_stack.sh status     # 컨테이너/포트/마이그레이션 수준 요약
 #   scripts/internal_alpha_stack.sh reclaim    # 컨테이너 수거(볼륨 보존)
@@ -24,7 +24,8 @@ REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
   exit 1
 }
 cd "$REPO_ROOT"
-COMPOSE_FILE="infra/docker-compose.e2e.yml"
+COMPOSE_FILE="infra/rust/docker-compose.rust.yml"
+COMPOSE_ENV_FILE="${INTERNAL_ALPHA_ENV_FILE:-infra/rust/rust-smoke.secrets.env}"
 
 # --- mDNS 서비스 광고 설정 (Bonjour _momo._tcp) — W-O2 서버측(MOMO-586) ----------
 # 587 클라가 브라우징할 서비스를 내부알파 호스트(macOS)가 광고한다. dns-sd는 macOS
@@ -170,7 +171,7 @@ compose() {
     MOMO_E2E_REALTIME_WS_URL="${INTERNAL_ALPHA_WS_URL:-ws://127.0.0.1:${CENT_PORT}/connection/websocket}" \
     PLATFORM_ADMIN_EMAILS="${INTERNAL_ALPHA_PLATFORM_ADMIN_EMAILS:-ops@example.com}" \
     MOMO_CORS_ALLOWED_ORIGINS="${INTERNAL_ALPHA_CORS_ORIGINS:-tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173}" \
-    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
+    docker compose --env-file "$COMPOSE_ENV_FILE" -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
 }
 
 require_stack() {
@@ -226,7 +227,7 @@ cmd_redeploy() {
   # restart도 금지: 컨테이너 생성 시점의 낡은 command를 재사용한다(625 전례 변주).
   note "1/4 전체 스택 down(--remove-orphans, 볼륨 보존) 후 기반 서비스 up"
   compose down --remove-orphans || true
-  compose up -d --wait --wait-timeout 180 postgres centrifugo mock-hermes
+  compose up -d --wait --wait-timeout 180 postgres centrifugo
   local deadline
   deadline=$(( $(date +%s) + 120 ))
   until docker exec "${PROJECT}-postgres-1" pg_isready -U momo >/dev/null 2>&1; do
@@ -237,10 +238,10 @@ cmd_redeploy() {
   note "2/4 마이그레이션(전방향 전용)"
   compose run --rm --no-deps migrate
 
-  note "3/4 api/relay/worker 기동 — 현행 compose command로 소스 재컴파일"
-  # worker(AgentWorker) 미기동이면 에이전트 멘션 응답이 라이브에서 안 나간다
+  note "3/4 api, relay, agent-worker 기동 — 현행 compose command로 소스 재컴파일"
+  # agent-worker 미기동이면 에이전트 멘션 응답이 라이브에서 안 나간다
   # (MOMO-592 런북 걷기에서 발견된 갭, 2026-07-24).
-  compose up -d api relay worker
+  compose up -d api relay agent-worker
 
   note "4/4 health 대기(콜드 컴파일 최대 ${BOOT_TIMEOUT}s) + 안전 라우트 스모크"
   wait_health
@@ -248,10 +249,10 @@ cmd_redeploy() {
 
   # 상시 서비스에 restart=unless-stopped를 걸어 맥 재부팅/Docker Desktop 재시작 시
   # 자동 복구되게 한다(성재 출근 시 서버가 이미 떠 있어야 함 — 이동식 호스트 요건).
-  # e2e compose 기본은 restart:no라 실행 중 컨테이너에 직접 적용한다.
+  # rust compose 기본은 restart:unless-stopped 이다. 실행 중 컨테이너에 직접 적용한다.
   docker update --restart unless-stopped \
-    "${PROJECT}-postgres-1" "${PROJECT}-centrifugo-1" "${PROJECT}-mock-hermes-1" \
-    "${PROJECT}-api-1" "${PROJECT}-relay-1" >/dev/null 2>&1 || true
+    "${PROJECT}-postgres-1" "${PROJECT}-centrifugo-1" \
+    "${PROJECT}-api-1" "${PROJECT}-relay-1" "${PROJECT}-agent-worker-1" >/dev/null 2>&1 || true
 
   # mDNS 서비스 광고 갱신 — 기존 광고 해제 후 현행 포트로 재등록(중복/누수 방지).
   # 587 클라가 LAN에서 이 호스트를 자동 발견하도록(macOS 전용, 그 외 호스트는 skip).

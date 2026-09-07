@@ -13,7 +13,7 @@
 //! ```
 //!
 //! Harness contract, identical to `http_smoke_pg.rs`: `DATABASE_URL` connects as
-//! a **superuser** (migrations + `infra/e2e/bootstrap_roles.sql`, fixtures bypass
+//! a **superuser** (migrations + `infra/rust/sql/bootstrap_roles.sql`, fixtures bypass
 //! RLS); the **server** runs on `momo_app` (NOBYPASSRLS) so every assertion is
 //! made through the policies production uses; and the **worker** runs on
 //! `momo_worker` (BYPASSRLS), which is the only faithful posture for a consumer
@@ -117,7 +117,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())

@@ -95,8 +95,8 @@ const TARGETS = [
     path: resolve(repoRoot, "infra/rust/Caddyfile"),
   },
   {
-    label: "infra/prod/Caddyfile (셀프호스트 compose)",
-    path: resolve(repoRoot, "infra/prod/Caddyfile"),
+    label: "infra/rust/Caddyfile.local (셀프호스트 로컬 엣지)",
+    path: resolve(repoRoot, "infra/rust/Caddyfile.local"),
   },
 ];
 
