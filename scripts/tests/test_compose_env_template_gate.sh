@@ -60,10 +60,10 @@ if [ "$have_docker" -eq 1 ]; then
   [ "$GUARD_STATUS" -eq 0 ] || fail "guard is red on the current tree:
 $GUARD_OUT"
   case "$GUARD_OUT" in
-    *"11 rendering(s)"*) ;;
+    *"8 rendering(s)"*) ;;
     *) fail "guard did not report the expected rendering count: $GUARD_OUT" ;;
   esac
-  pass "green on the current tree, all 11 renderings statically checked and rendered by docker compose"
+  pass "green on the current tree, all 8 renderings statically checked and rendered by docker compose"
 else
   echo "[compose-env-test] skip: docker compose is unavailable on this host"
 fi
@@ -71,21 +71,22 @@ fi
 # =============================================================================
 # Case 2 — the #1246 regression itself, reproduced and named.
 #
-# This is the exact shape that sat red from 2026-07-24: three keys the prod
-# compose requires, absent from the internal-smoke template. The guard must name
-# ALL THREE in one run. `docker compose config` names only the first, which is
-# why that command alone was never going to be the guard.
+# This is the exact shape that sat red from 2026-07-24: three keys a compose
+# file requires, absent from its env template. The guard must name ALL THREE
+# in one run. `docker compose config` names only the first, which is why that
+# command alone was never going to be the guard. After #2142 the remaining
+# table is infra/rust, so the fixture deletes keys from rust-smoke.env.example.
 # =============================================================================
 tree="$(new_tree reintroduce-1246)"
-for key in MOMO_WORKHOST_IMAGE MOMO_WORKHOST_WORKSPACE_ID PROVIDER_LINK_MASTER_KEY; do
-  sed -i.bak "/^${key}=/d" "$tree/infra/prod/internal-smoke.env.example"
+for key in JWT_HMAC CENT_TOKEN_HMAC PROVIDER_LINK_MASTER_KEY; do
+  sed -i.bak "/^${key}=/d" "$tree/infra/rust/rust-smoke.env.example"
 done
-rm -f "$tree/infra/prod/internal-smoke.env.example.bak"
+rm -f "$tree/infra/rust/rust-smoke.env.example.bak"
 run_guard "$tree" --skip-docker
-expect_red "#1246 reintroduced" "internal hosting smoke"
-for key in MOMO_WORKHOST_IMAGE MOMO_WORKHOST_WORKSPACE_ID PROVIDER_LINK_MASTER_KEY; do
+expect_red "#1246 reintroduced" "rust base stack"
+for key in JWT_HMAC CENT_TOKEN_HMAC PROVIDER_LINK_MASTER_KEY; do
   case "$GUARD_OUT" in
-    *"- $key   required at infra/prod/docker-compose.prod.yml:"*) ;;
+    *"- $key   required at infra/rust/docker-compose.rust.yml:"*) ;;
     *) fail "#1246 reintroduced: $key was not reported with its compose location
 $GUARD_OUT" ;;
   esac
@@ -169,9 +170,17 @@ expect_red "untabled env template" "infra/rust/orphan.env.example"
 pass "an env template no rendering uses is red"
 
 tree="$(new_tree missing-allowlisted)"
-rm -f "$tree/infra/prod/aws-internal-alpha.env.example"
-run_guard "$tree" --skip-docker
-expect_red "stale allowlist" "aws-internal-alpha.env.example"
+# Empty NON_COMPOSE_ENV_TEMPLATES (#2142). Forge a stale exemption in a copy of
+# the guard so the "exemption cannot outlive its file" contract still has a RED.
+guard_copy="$tree/check_compose_env_templates.sh"
+sed 's/^NON_COMPOSE_ENV_TEMPLATES=()$/NON_COMPOSE_ENV_TEMPLATES=("infra\/rust\/gone.env.example")/' \
+  "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "stale allowlist" "gone.env.example"
 pass "an allowlisted non-compose template that disappears is red, so the exemption cannot outlive its file"
 
 # =============================================================================
