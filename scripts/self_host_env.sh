@@ -133,12 +133,32 @@ SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS="tauri://localhost http://tauri.localhost"
 SELF_HOST_DRIVE_LOCAL_DIR="/var/lib/oort/drive"
 
 fail() { printf '[self-host] %s\n' "$*" >&2; exit 1; }
+gen() { openssl rand -hex 24; }
 
 # Canonical public-edge env key names (#1926). The Caddyfile placeholders,
 # caddy.override.yml interpolation, and docs/SELF_HOST.md all derive from
 # this list — do not type the names in a second place.
 oort_public_edge_env_keys() {
   printf '%s\n' 'OORT_SITE_ADDRESS' 'OORT_CSP_CONNECT_SRC'
+}
+
+# Keys the generator heredoc actually writes. Same awk as
+# oort_doctor_generator_keys — do not hand-copy the names.
+oort_generator_env_keys() {
+  awk '
+    /^cat >"\$ENV_FILE" <<EOF$/ { grab = 1; next }
+    grab && /^EOF$/ { exit }
+    grab && /^[A-Za-z_][A-Za-z0-9_]*=/ {
+      key = $0
+      sub(/=.*/, "", key)
+      print key
+    }
+  ' "$SCRIPT_DIR/self_host_env.sh"
+}
+
+# Railway output must equal this set (generator heredoc + public-edge keys).
+oort_canonical_env_keys() {
+  { oort_generator_env_keys; oort_public_edge_env_keys; } | LC_ALL=C sort -u
 }
 
 usage() {
@@ -148,6 +168,7 @@ Usage:
   scripts/self_host_env.sh --published-image ghcr.io/yeomyeonggeori/oort@sha256:<64 lowercase hex>
   scripts/self_host_env.sh --public-origin https://<host>
   scripts/self_host_env.sh --compose <docker-compose arguments...>
+  scripts/self_host_env.sh --railway
 
 No argument is a backwards-compatible alias for --local-build.
 --public-origin may be repeated. It idempotently adds the origin (and its
@@ -163,6 +184,11 @@ On an existing env it does not regenerate secrets. Claim-mode env
 After preparation, use --compose for every start/stop/log command so ambient
 Compose variables cannot override infra/rust/local.secrets.env. Use the
 playbook's docker compose helper in claim mode instead of --compose.
+--railway prints the canonical key set (oort_canonical_env_keys) as KEY=value
+on stdout from Railway-provided RAILWAY_PUBLIC_DOMAIN and DATABASE_URL. It
+does not write a file. Those two variables are required (compose :? equivalent);
+missing RAILWAY_PUBLIC_DOMAIN is an explicit failure, not a public.* skip.
+Do not combine --railway with an image mode, --compose, or --public-origin.
 EOF
 }
 
@@ -181,6 +207,7 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --public-origin)
+      [ "$REQUESTED_ACTION" != "railway" ] || fail "--railway는 RAILWAY_PUBLIC_DOMAIN을 쓴다. --public-origin과 함께 지정하지 마라."
       [ "$#" -ge 2 ] || fail "--public-origin 뒤에 http(s)://host 가 필요하다."
       PUBLIC_ORIGINS+=("$2")
       PUBLIC_ORIGIN_COUNT=$((PUBLIC_ORIGIN_COUNT + 1))
@@ -194,6 +221,13 @@ while [ "$#" -gt 0 ]; do
       REQUESTED_ACTION="compose"
       COMPOSE_COMMAND_ARGS=("$@")
       set --
+      ;;
+    --railway)
+      [ "$REQUESTED_ACTION" = "prepare" ] || fail "--railway는 한 번만 지정하라."
+      [ -z "$REQUESTED_MODE" ] || fail "--railway와 이미지 생성 모드를 함께 지정할 수 없다."
+      [ "$PUBLIC_ORIGIN_COUNT" -eq 0 ] || fail "--railway는 RAILWAY_PUBLIC_DOMAIN을 쓴다. --public-origin과 함께 지정하지 마라."
+      REQUESTED_ACTION="railway"
+      shift
       ;;
     -h|--help)
       usage
@@ -675,6 +709,200 @@ ensure_public_edge_env() {
     "$ENV_FILE" >&2
 }
 
+railway_parse_database_url() {
+  local json
+  [ -n "${DATABASE_URL:-}" ] ||
+    fail "DATABASE_URL 이 없다. Postgres 플러그인 변수 없이 env를 만들 수 없다."
+  command -v python3 >/dev/null 2>&1 ||
+    fail "python3 이 필요하다 (--railway 가 DATABASE_URL 을 파싱한다)."
+  json="$(
+    DATABASE_URL="$DATABASE_URL" python3 -c '
+import json, os, sys, urllib.parse
+raw = os.environ.get("DATABASE_URL", "")
+u = urllib.parse.urlparse(raw)
+if u.scheme not in ("postgres", "postgresql"):
+    sys.stderr.write("[self-host] DATABASE_URL 은 postgres:// URL 이어야 한다.\n")
+    sys.exit(1)
+host = u.hostname or ""
+if not host:
+    sys.stderr.write("[self-host] DATABASE_URL 에 호스트가 없다.\n")
+    sys.exit(1)
+path = (u.path or "/").lstrip("/")
+db = urllib.parse.unquote(path.split("/")[0] if path else "")
+if not db:
+    sys.stderr.write("[self-host] DATABASE_URL 에 데이터베이스 이름이 없다.\n")
+    sys.exit(1)
+print(json.dumps({
+    "user": u.username or "",
+    "password": u.password or "",
+    "host": host,
+    "port": str(u.port or 5432),
+    "db": db,
+    "query": u.query or "",
+}))
+'
+  )" || fail "DATABASE_URL 을 파싱하지 못했다."
+  command -v jq >/dev/null 2>&1 || fail "jq 이 필요하다 (--railway 가 DATABASE_URL 을 파싱한다)."
+  RAILWAY_PG_USER="$(printf '%s' "$json" | jq -er '.user')"
+  RAILWAY_PG_PASSWORD="$(printf '%s' "$json" | jq -er '.password')"
+  RAILWAY_PG_HOST="$(printf '%s' "$json" | jq -er '.host')"
+  RAILWAY_PG_PORT="$(printf '%s' "$json" | jq -er '.port')"
+  RAILWAY_PG_DB="$(printf '%s' "$json" | jq -er '.db')"
+  RAILWAY_PG_QUERY="$(printf '%s' "$json" | jq -er '.query')"
+  [ -n "$RAILWAY_PG_USER" ] || fail "DATABASE_URL 에 사용자가 없다."
+  [ -n "$RAILWAY_PG_PASSWORD" ] || fail "DATABASE_URL 에 비밀번호가 없다."
+}
+
+railway_role_url() {
+  local user="$1" password="$2" suffix=""
+  [ -n "$RAILWAY_PG_QUERY" ] && suffix="?${RAILWAY_PG_QUERY}"
+  DATABASE_URL="postgres://unused:unused@${RAILWAY_PG_HOST}:${RAILWAY_PG_PORT}/${RAILWAY_PG_DB}${suffix}" \
+    RAILWAY_ROLE_USER="$user" RAILWAY_ROLE_PASSWORD="$password" python3 -c '
+import os, urllib.parse
+u = urllib.parse.urlparse(os.environ["DATABASE_URL"])
+user = os.environ["RAILWAY_ROLE_USER"]
+password = os.environ["RAILWAY_ROLE_PASSWORD"]
+netloc = "%s:%s@%s" % (
+    urllib.parse.quote(user, safe=""),
+    urllib.parse.quote(password, safe=""),
+    u.netloc.split("@", 1)[-1],
+)
+print(urllib.parse.urlunparse(("postgres", netloc, u.path, "", u.query, "")))
+'
+}
+
+railway_published_image() {
+  local latest="$REPO_ROOT/releases/latest.json" image
+  if [ -n "${MOMO_RUST_IMAGE:-}" ]; then
+    image="$MOMO_RUST_IMAGE"
+  elif [ -f "$latest" ]; then
+    command -v jq >/dev/null 2>&1 || fail "jq 이 필요하다 (releases/latest.json)."
+    image="$(jq -er '"\(.images.app.ref)@\(.images.app.digest_list)"' "$latest")"
+  else
+    fail "MOMO_RUST_IMAGE 또는 releases/latest.json 이 필요하다."
+  fi
+  validate_published_image "$image"
+  printf '%s' "$image"
+}
+
+railway_secret() {
+  local key="$1" current
+  current="$(eval "printf '%s' \"\${$key:-}\"")"
+  if [ -n "$current" ]; then
+    printf '%s' "$current"
+  else
+    gen
+  fi
+}
+
+railway_value_for() {
+  case "$1" in
+    COMPOSE_PROJECT_NAME) printf '%s' "$PROJECT" ;;
+    MOMO_SELF_HOST_MODE) printf '%s' "published-digest" ;;
+    MOMO_RUST_IMAGE) printf '%s' "$IMAGE" ;;
+    MOMO_ENV) printf '%s' "staging" ;;
+    MOMO_MIGRATE_ENV) printf '%s' "development" ;;
+    MOMO_PITR_EVIDENCE_REQUIRED) printf '%s' "0" ;;
+    MOMO_PITR_BOOTSTRAP_EMPTY) printf '%s' "0" ;;
+    LOG_LEVEL) printf '%s' "info" ;;
+    POSTGRES_DB) printf '%s' "$RAILWAY_PG_DB" ;;
+    POSTGRES_USER) printf '%s' "$RAILWAY_PG_USER" ;;
+    POSTGRES_PASSWORD) printf '%s' "$RAILWAY_PG_PASSWORD" ;;
+    MIGRATE_DATABASE_URL) printf '%s' "$DATABASE_URL" ;;
+    DB_VOLUME_NAME) printf '%s' "${PROJECT}-pgdata" ;;
+    MOMO_APP_POSTGRES_PASSWORD) printf '%s' "$APP_PASSWORD" ;;
+    RELAY_POSTGRES_PASSWORD) printf '%s' "$RELAY_PASSWORD" ;;
+    WORKER_POSTGRES_PASSWORD) printf '%s' "$WORKER_PASSWORD" ;;
+    MOMO_APP_DATABASE_URL) printf '%s' "$APP_DATABASE_URL" ;;
+    RELAY_DATABASE_URL) printf '%s' "$RELAY_DB_URL" ;;
+    JWT_HMAC) printf '%s' "$JWT_SECRET" ;;
+    CENT_TOKEN_HMAC) printf '%s' "$CENT_TOKEN_SECRET" ;;
+    CENT_API_KEY) printf '%s' "$CENT_API_SECRET" ;;
+    CENT_PROXY_SECRET) printf '%s' "$CENT_PROXY_SECRET_VALUE" ;;
+    PROVIDER_LINK_MASTER_KEY) printf '%s' "$PROVIDER_LINK_SECRET" ;;
+    MOMO_WEB_PORT) printf '%s' "8080" ;;
+    MOMO_CENTRIFUGO_WS_URL) printf '%s' "same-origin" ;;
+    CENTRIFUGO_ALLOWED_ORIGINS) printf '%s' "$CENTRIFUGO_ORIGINS" ;;
+    MOMO_RUST_API_PORT) printf '%s' "8080" ;;
+    CENT_HOST_PORT) printf '%s' "8000" ;;
+    MOMO_CORS_ALLOWED_ORIGINS) printf '%s' "$SELF_HOST_DESKTOP_CORS_ORIGINS" ;;
+    MOMO_AGENT_SEED_MODE) printf '%s' "none" ;;
+    MIGRATE_IDEMPOTENCY_CHECK) printf '%s' "1" ;;
+    MOMO_INITIAL_OWNER_EMAIL) printf '%s' "$OWNER_EMAIL" ;;
+    MOMO_INITIAL_OWNER_PASSWORD) printf '%s' "$OWNER_PASSWORD" ;;
+    PLATFORM_ADMIN_EMAILS) printf '%s' "$OWNER_EMAIL" ;;
+    MOMO_DRIVE_ARCHIVE_BACKEND) printf '%s' "local" ;;
+    MOMO_DRIVE_LOCAL_DIR) printf '%s' "$SELF_HOST_DRIVE_LOCAL_DIR" ;;
+    MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL) printf '%s' "same-origin" ;;
+    DRIVE_VOLUME_NAME) printf '%s' "${PROJECT}-drive" ;;
+    MOMO_LIVEKIT_NODE_IP) printf '%s' "127.0.0.1" ;;
+    OORT_SITE_ADDRESS) printf '%s' "$SITE_HOST" ;;
+    OORT_CSP_CONNECT_SRC) printf '%s' "$CSP" ;;
+    *) fail "--railway 이 키를 파생하지 못한다: $1" ;;
+  esac
+}
+
+emit_railway_env() {
+  local origin raw key value quoted
+  raw="${RAILWAY_PUBLIC_DOMAIN:-}"
+  [ -n "$raw" ] ||
+    fail "RAILWAY_PUBLIC_DOMAIN 이 없다. Railway 공개 도메인 없이 env를 만들 수 없다."
+  case "$raw" in
+    *'*'*) fail "--railway 의 RAILWAY_PUBLIC_DOMAIN 은 와일드카드를 허용하지 않는다 (#1792)." ;;
+    https://*|http://*) origin="$raw" ;;
+    *) origin="https://${raw}" ;;
+  esac
+  origin="$(normalize_public_origin "$origin")"
+  PUBLIC_ORIGINS=("$origin")
+  PUBLIC_ORIGIN_COUNT=1
+  SITE_HOST="$(public_edge_site_address "$origin")"
+  CSP="$(public_edge_csp_connect_src "$origin")"
+
+  railway_parse_database_url
+  PROJECT="${COMPOSE_PROJECT_NAME:-oort}"
+  validate_project_name "$PROJECT"
+  IMAGE="$(railway_published_image)"
+
+  RAW_OWNER_EMAIL="${MOMO_INITIAL_OWNER_EMAIL:-owner@oort.local}"
+  validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$RAW_OWNER_EMAIL"
+  OWNER_EMAIL="$(printf '%s' "$RAW_OWNER_EMAIL" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
+  validate_owner_email "$OWNER_EMAIL"
+  OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
+  validate_owner_password "$OWNER_PASSWORD"
+
+  APP_PASSWORD="${MOMO_APP_POSTGRES_PASSWORD:-$(gen)}"
+  RELAY_PASSWORD="${RELAY_POSTGRES_PASSWORD:-$(gen)}"
+  WORKER_PASSWORD="${WORKER_POSTGRES_PASSWORD:-$(gen)}"
+  JWT_SECRET="$(railway_secret JWT_HMAC)"
+  CENT_TOKEN_SECRET="$(railway_secret CENT_TOKEN_HMAC)"
+  CENT_API_SECRET="$(railway_secret CENT_API_KEY)"
+  CENT_PROXY_SECRET_VALUE="$(railway_secret CENT_PROXY_SECRET)"
+  PROVIDER_LINK_SECRET="$(railway_secret PROVIDER_LINK_MASTER_KEY)"
+
+  APP_DATABASE_URL="$(railway_role_url momo_app "$APP_PASSWORD")"
+  RELAY_DB_URL="$(railway_role_url momo_relay "$RELAY_PASSWORD")"
+  CENTRIFUGO_ORIGINS="$SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
+  CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
+
+  for key in PROJECT IMAGE APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
+             JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
+             PROVIDER_LINK_SECRET OWNER_EMAIL SITE_HOST CSP CENTRIFUGO_ORIGINS \
+             APP_DATABASE_URL RELAY_DB_URL; do
+    validate_env_scalar "$key" "$(eval "printf '%s' \"\${$key}\"")"
+  done
+
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    value="$(railway_value_for "$key")"
+    quoted="$(quote_env_file_value "$value")"
+    printf '%s=%s\n' "$key" "$quoted"
+  done <<EOF
+$(oort_canonical_env_keys)
+EOF
+  printf '[self-host] --railway 키 %s개를 stdout에 썼다 (파일 없음).\n' \
+    "$(oort_canonical_env_keys | grep -c .)" >&2
+}
+
 normalize_requested_public_origins() {
   local i=0
   [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] || return 0
@@ -971,6 +1199,10 @@ verify_published_compose_image() {
 normalize_requested_public_origins
 
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음 — 시크릿을 만들 수 없다."
+if [ "$REQUESTED_ACTION" = "railway" ]; then
+  emit_railway_env
+  exit 0
+fi
 DOCKER_BIN="$(command -v docker || true)"
 [ -n "$DOCKER_BIN" ] || fail "docker 없음 — https://docs.docker.com/get-docker/"
 
@@ -1153,8 +1385,6 @@ fi
 # ---------------------------------------------------------------------------
 # 값
 # ---------------------------------------------------------------------------
-gen() { openssl rand -hex 24; }
-
 PROJECT="${COMPOSE_PROJECT_NAME:-oort}"
 validate_project_name "$PROJECT"
 MODE="${REQUESTED_MODE:-local-build}"
