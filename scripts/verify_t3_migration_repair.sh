@@ -328,7 +328,7 @@ pass "053 canonicalizes subsequent repair calls through t3_terminate"
 ")" = "1" ] || fail "unsettled usage unique index missing after retry"
 pass "repair retry applies 051 and runner second pass applies zero files"
 
-psql_in "$RECOVERY_DB" -q -f /workspace/infra/e2e/bootstrap_roles.sql
+psql_in "$RECOVERY_DB" -q -f /workspace/infra/rust/sql/bootstrap_roles.sql
 
 free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'

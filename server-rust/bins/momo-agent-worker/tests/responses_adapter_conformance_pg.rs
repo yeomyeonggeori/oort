@@ -133,7 +133,7 @@ fn apply_bootstrap_roles() {
         .arg("-f")
         .arg(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../infra/e2e/bootstrap_roles.sql"
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
         )))
         .status()
         .expect("spawn psql for bootstrap_roles.sql");

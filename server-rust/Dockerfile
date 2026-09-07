@@ -11,7 +11,7 @@
 # The build context is the **repo root**, not `server-rust/`: the image must be
 # source-checkout-free at run time (prod contract), and the migration set plus
 # the two role SQL files it applies live outside `server-rust/`
-# (`server/Migrations`, `infra/e2e`, `infra/rust/sql`). Those files are copied in,
+# (`server/Migrations`, `infra/rust/sql`). Those files are copied in,
 # never modified.
 #
 # B5.1 adds `agent-worker`: the agent turn loop is what makes a mention produce
@@ -57,7 +57,7 @@ ARG RUNTIME_IMAGE=debian:bookworm-slim
 # files from context so a production image stays source-checkout-free.
 FROM ${RUNTIME_IMAGE} AS sql-payload
 COPY server/Migrations /opt/momo/migrations
-COPY infra/e2e/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
+COPY infra/rust/sql/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
 COPY infra/rust/sql/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
 COPY infra/rust/sql/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
 COPY infra/rust/sql/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
@@ -235,7 +235,7 @@ COPY --from=build /out/ /usr/local/bin/
 # Source-checkout-free migration payload. The SQL is copied verbatim; the image
 # owns no migration of its own and edits none of these files.
 COPY server/Migrations /opt/momo/migrations
-COPY infra/e2e/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
+COPY infra/rust/sql/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
 COPY infra/rust/sql/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
 COPY infra/rust/sql/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
 # #1227: the only-if-absent twin the `migrate` command applies at first boot.

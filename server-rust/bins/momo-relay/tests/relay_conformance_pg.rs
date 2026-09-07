@@ -22,7 +22,7 @@
 //!
 //! Harness contract (same as `momo-messaging`'s conformance file):
 //!   * `DATABASE_URL` connects as a **superuser** (applies the migrations via psql
-//!     + `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS);
+//!     + `infra/rust/sql/bootstrap_roles.sql`, and seeds fixtures bypassing RLS);
 //!   * the write path runs as **`momo_app`** (NOBYPASSRLS);
 //!   * the relay runs as **`momo_relay`** (BYPASSRLS) — the credential boundary
 //!     that lets one process drain every tenant.
@@ -61,7 +61,7 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a fresh pgvector/pg18 superuser DB")
 }
 
-/// Committed test-only role passwords from `infra/e2e/bootstrap_roles.sql`
+/// Committed test-only role passwords from `infra/rust/sql/bootstrap_roles.sql`
 /// (not secrets); overridable via env.
 fn role_password(env_key: &str, fallback: &str) -> String {
     std::env::var(env_key).unwrap_or_else(|_| fallback.to_string())
@@ -132,7 +132,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

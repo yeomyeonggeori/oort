@@ -13,7 +13,7 @@
 //!
 //! Harness contract:
 //!   * `DATABASE_URL` connects as a **superuser** — applies every migration plus
-//!     `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS;
+//!     `infra/rust/sql/bootstrap_roles.sql`, and seeds fixtures bypassing RLS;
 //!   * the registration paths run as **`momo_app`** (NOBYPASSRLS), the runtime
 //!     role, so FORCE RLS genuinely applies to everything under test.
 //!
@@ -113,7 +113,7 @@ fn ensure_schema_and_roles() {
         .arg("-f")
         .arg(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../infra/e2e/bootstrap_roles.sql"
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
         )))
         .status()
         .expect("spawn psql for bootstrap_roles.sql");

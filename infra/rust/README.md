@@ -61,7 +61,7 @@ migrate는 `docker-compose.backup.yml`의 continuous WAL + encrypted pgBackRest 
 `clients/mobile/scripts/lane-phone.sh` 머리말에 있다.
 
 이미지 안에 들어가는 것: 바이너리 3종, `server/Migrations/*.sql`(그대로 복사),
-`infra/e2e/bootstrap_roles.sql`, `infra/rust/sql/bootstrap_runtime_roles.sql`,
+`infra/rust/sql/bootstrap_roles.sql`, `infra/rust/sql/bootstrap_runtime_roles.sql`,
 `infra/rust/sql/set_initial_owner.sql`, `infra/rust/sql/bootstrap_owner_if_absent.sql`(#1227),
 LICENSE/NOTICE. 런타임 베이스는
 `debian:bookworm-slim` + **`postgresql-client`** — 마이그레이션 러너가 psql로
@@ -134,7 +134,7 @@ momorust logs migrate
 
 `migrate` 서비스는 `MOMO_BOOTSTRAP_RUNTIME_ROLES=0`으로 돌기 때문에 세 런타임 롤이
 정확한 least-privilege 자세로 존재하지 않으면 **마이그레이션을 거부한다**(prod와 동일).
-즉 `infra/e2e/bootstrap_roles.sql`의 공개 dev 비밀번호는 이 스택에 절대 적용되지 않는다.
+즉 `infra/rust/sql/bootstrap_roles.sql`의 공개 dev 비밀번호는 이 스택에 절대 적용되지 않는다.
 
 ## 4. Smoke 곡선
 

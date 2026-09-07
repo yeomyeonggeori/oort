@@ -1,7 +1,7 @@
 # Build-context excludes for `-f server-rust/Dockerfile` (BuildKit reads
 # `<dockerfile>.dockerignore` in preference to the context root's file). The
 # context is the repo root — this image needs `server-rust/`, `server/Migrations`,
-# SQL files under `infra/e2e` and `infra/rust/sql`, LICENSE/NOTICE, the GHCR notice files under
+# SQL files under `infra/rust/sql`, LICENSE/NOTICE, the GHCR notice files under
 # `legal/`, and `scripts/check_debian_copyrights.sh`; everything else is weight.
 #
 # It is a superset of the repo-root `.dockerignore`, because when this file
