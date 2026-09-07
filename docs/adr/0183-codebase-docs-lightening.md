@@ -97,11 +97,29 @@
 
 ## 부록 A — Swift-only 라우트 패밀리 판정표 (LS-1이 실측으로 채움)
 
-| 패밀리 | 2026-08-09 상태 | 이 ADR 판정 | 근거 |
-|---|---|---|---|
-| plugins 레지스트리 v0 · memories(+policy·consent) · context-packets v0 · bans · event-subscriptions 잔여 · usage/quota 스냅샷 · workstream continuity · work-tool-profiles · huddles 잔여 · mcp/drive 잔여 · member 잔여 | 보류(판정 없음) | **폐기** — 출시 두 기둥 밖. 필요 시 Rust로 재설계 | D3 |
-| work-controls · work-auto-approvals · webhooks · Agent Port/MCP · attachments · cancel · huddles(ADR-0165) | Rust에 섬 | 이식 완료 | 실측 |
-| workd 5경로(`work_host_auth.rs:22-25` 「still-unported five」) | 미이식 | D4-② 결과에 따름 | — |
+실측(삭제 직전, 2026-09-07): Swift `/v1` unique **169**, Rust `/v1` unique **183**. 위치 기준 대조. D4-② 채택: workd 미이식 경로는 **폐기**(출시 후 Rust 사이드카 ADR).
+
+| 패밀리 | Swift-only 경로 수 | Rust 존재 | 이 ADR 판정 | 근거 |
+|---|---|---|---|---|
+| memories | 9 | 없음 | **폐기** | D3 · 출시 두 기둥 밖 |
+| memory-policy | 2 | 없음 | **폐기** | D3 |
+| memory-external-provider-consent | 2 | 없음 | **폐기** | D3 |
+| plugins 레지스트리 v0 | 6 | 없음 | **폐기** | D3 |
+| workstreams | 3 | 없음 | **폐기** | D3 |
+| platform (invites/members/workspaces) | 3 | 없음 | **폐기** | D3 |
+| work-pool | 2 | 없음 | **폐기** | D3 |
+| context-packets v0 | 1 | 없음 | **폐기** | D3 |
+| audit | 1 | 없음 | **폐기** | D3 |
+| huddles 잔여 (recordings, recording-consent) | 2 | huddles 본선은 있음 | **폐기** | D3 · 본선은 ADR-0165 이식 완료 |
+| mcp 잔여 (`/v1/mcp`, tools, drive, tools/call) | 4 | Agent Port MCP는 별도 | **폐기** | D3 · 본선 Agent Port/MCP는 ADR-0162 |
+| work-tool-profiles CRUD | 3 | GET만 | **폐기** | D3 |
+| agents from-card | 2 | agents 본선 있음 | **폐기** | D3 |
+| cost-snapshots | 1 | 없음 | **폐기** | D3 |
+| native webhook receive `POST /v1/webhooks/:ws/:installation` | 1 | webhooks 본선 있음 | **폐기** | D3 · 본선 #1222 |
+| provider quota-snapshots POST | 1 | GET 등 본선 있음 | **폐기** | D3 |
+| workspaces PATCH | 1 | GET/POST 있음 | **폐기** | D3 |
+| work-hosts 미이식 5 (`live-sessions`, `reconcile`, cloud pause/resume/destroy) | 5 | work-hosts 11경로 이식 | **폐기** | D4-② · `work_host_auth.rs` still-unported two(live-sessions+reconcile) + cloud 3 |
+| work-controls · work-auto-approvals · webhooks · Agent Port/MCP · attachments · cancel · huddles(ADR-0165) | — | 섬 | 이식 완료 | 실측 both/rust_only |
 
 ## 결재 기록 (2026-09-07)
 
