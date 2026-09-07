@@ -81,7 +81,7 @@ oort's production hardening includes:
   being misrepresented as verified.
 
 Deployment details and verification procedures are in
-[`docs/DEPLOY.md`](docs/DEPLOY.md).
+[`docs/SELF_HOST.md`](docs/SELF_HOST.md).
 
 ## Secrets and provider credentials
 
@@ -98,5 +98,5 @@ Hermes-facing bearer required to call that runtime, injected through the
 operator's secret environment and redacted from evidence.
 
 For deployment, rotation, backup, and incident procedures, follow
-[`docs/DEPLOY.md`](docs/DEPLOY.md) and
-[`docs/SECRETS_BACKUP_RUNBOOK.md`](docs/SECRETS_BACKUP_RUNBOOK.md).
+[`docs/SELF_HOST.md`](docs/SELF_HOST.md) and
+[`docs/runbooks/pgbackrest-pitr.md`](docs/runbooks/pgbackrest-pitr.md).

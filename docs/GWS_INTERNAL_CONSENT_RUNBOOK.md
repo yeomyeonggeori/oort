@@ -25,7 +25,7 @@
 - [ ] 배포 조직이 Google Workspace를 사용 중이고, 조직 구성원 계정으로 GCP 콘솔(`console.cloud.google.com`)에 접근 가능하다.
 - [ ] GCP 프로젝트 생성 권한(조직 정책에 따라 관리자 요청 필요할 수 있음)이 있다.
 - [ ] 공유 드라이브 생성 권한이 있다(Workspace 에디션/관리자 설정에 따라 다름 — 막혀 있으면 Workspace 관리자에게 생성 위임).
-- [ ] 시크릿 저장 경로가 준비돼 있다(SOPS+age 또는 배포 환경의 secret manager — `docs/SECRETS_BACKUP_RUNBOOK.md`). **SA 키/OAuth secret을 리포·`.env*`에 커밋하는 것은 금지**(AGENTS.md §5).
+- [ ] 시크릿 저장 경로가 준비돼 있다(SOPS+age 또는 배포 환경의 secret manager — `docs/runbooks/pgbackrest-pitr.md`). **SA 키/OAuth secret을 리포·`.env*`에 커밋하는 것은 금지**(AGENTS.md §5).
 
 ## 2. GCP 프로젝트 + API
 

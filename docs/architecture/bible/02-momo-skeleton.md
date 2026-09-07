@@ -58,13 +58,13 @@ Slack의 봇은 "외부에서 API 토큰으로 메시지를 쏘는 존재"다. o
 | worker | AgentWorker (managed 경로) | 내부 |
 | migrate | one-shot 마이그레이션 | 실행 후 종료 |
 
-주변 장치: 시크릿은 SOPS+age로 암호화해 git에 두고 배포 시 메모리에서만 복호화(`docs/DEPLOY.md:118-147`), 위험한 기본값은 preflight가 fail-fast(`scripts/prod_env_preflight.sh`), 백업은 pgBackRest + 복원 리허설 스크립트, 이미지는 GHCR에 수동 발행(`.github/workflows/publish-images.yml`) 후 digest로 pin. 대상은 EC2 t4g.large 1대(`docs/AWS_INTERNAL_ALPHA.md:11`)다.
+주변 장치: 시크릿은 SOPS+age로 암호화해 git에 두고 배포 시 메모리에서만 복호화(`docs/SELF_HOST.md:118-147`), 위험한 기본값은 preflight가 fail-fast(`scripts/prod_env_preflight.sh`), 백업은 pgBackRest + 복원 리허설 스크립트, 이미지는 GHCR에 수동 발행(`.github/workflows/publish-images.yml`) 후 digest로 pin. 대상은 EC2 t4g.large 1대(`docs/SELF_HOST.md:11`)다.
 
 **읽는 법**: 이 compose가 곧 "oort 서버를 판다"의 단위다. 05장의 셀프호스팅 계열과 비교하면 oort는 이미 Mattermost/Zulip급 배포 뼈대(TLS 자동화·시크릿·백업·preflight)를 갖췄고, 없는 것은 install/upgrade 스크립트(ADR-0002가 예약)와 "비개발자용 포장"이다.
 
 ## 7. 확장은 재작성이 아니라 레버다
 
-`docs/DEPLOY.md:504-515`가 정본. 요지: API는 stateless라 Caddy 뒤 N대(M10), relay/worker는 SKIP LOCKED라 그냥 더 띄우면 되고, Centrifugo는 Redis 엔진 공유로 노드 추가, DB는 read replica → 파티셔닝 순. **v0의 단일 인스턴스 SPOF는 결함이 아니라 결정이다** — 10인×수팀 규모에서 HA의 비용(운영 복잡도)이 이득을 압도하기 때문이고, 이는 05장에서 보듯 업계 표준 판단이다(Mattermost도 2,000 동시 사용자까지 단일 서버를 안내한다).
+`docs/SELF_HOST.md:504-515`가 정본. 요지: API는 stateless라 Caddy 뒤 N대(M10), relay/worker는 SKIP LOCKED라 그냥 더 띄우면 되고, Centrifugo는 Redis 엔진 공유로 노드 추가, DB는 read replica → 파티셔닝 순. **v0의 단일 인스턴스 SPOF는 결함이 아니라 결정이다** — 10인×수팀 규모에서 HA의 비용(운영 복잡도)이 이득을 압도하기 때문이고, 이는 05장에서 보듯 업계 표준 판단이다(Mattermost도 2,000 동시 사용자까지 단일 서버를 안내한다).
 
 ## 8. 요약 — oort 뼈대의 한 문장들
 

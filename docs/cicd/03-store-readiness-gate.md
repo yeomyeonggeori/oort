@@ -4,8 +4,8 @@
 > 목적: "빌드 파일이 실제로 사용 가능"함을 빡세게 판명한 뒤에만 스토어/공증 배포로 진행.
 > 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
 >
-> 📐 **객관 통과기준(measurable DoD) = `docs/cicd/05-qa-release-gate.md`.** 이 파일(03)은 체크리스트(무엇), 05는 "사용 가능 완전 판명"의 수치/방법(어떻게 증명)·PASS 기록 양식.
-> 관련: `06-beta-testflight-plan.md`(베타) · `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능) · `09-qa-codex-tickets.md`(Codex 티켓).
+> 📐 **객관 통과기준(measurable DoD)** 문서는 LS-3에서 삭제됐다(G3 진입 때 RN 기준으로 재작성). 이 파일(03)은 체크리스트 + PASS 블록 기록처다.
+> 관련: `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능).
 
 ## G-0. 런타임 e2e (STATUS.md §5 선결)
 - [ ] docker(PG18+Centrifugo v6) 기동 → `make migrate`(001→002) 멱등 적용.
@@ -36,8 +36,8 @@
 - [ ] `ci-build.yml` 통과(swift build/test + Xcode app 빌드).
 - [ ] `fastlane ios beta`(TestFlight) 비대화형 성공 1회(내부 테스터).
 
-## G-5. 객관 통과기준 (수치 — 05 문서가 정본)
-> 아래는 요약. 정의/측정법/임계 근거는 `docs/cicd/05-qa-release-gate.md` §1~§9.
+## G-5. 객관 통과기준 (수치 — G3 진입 때 RN 기준으로 재작성)
+> 아래는 요약. 정의/측정법/임계 정본은 LS-3에서 삭제됐다.
 - [ ] **G-A 크래시-free**: 세션 ≥ 99.5% AND 유저 ≥ 99.0% (분모=세션/유저 수 + 윈도우 일수 명기), 신규 P0/P1 crash 0. (Sentry/MetricKit, 05 §2)
 - [ ] **G-B 핵심플로우 e2e**: 8/8 PASS, 치명 결함 0. (XCUITest + 수동 스모크, 05 §3 / 08 §1)
 - [ ] **G-C 접근성**: `performAccessibilityAudit` 치명 위반 0 + VoiceOver 핵심플로우 조작 가능. (05 §4 / 08 §2)

@@ -559,6 +559,6 @@ Gate 이름은 `E-WORK-1`로 둔다. 이는 엔진 qualification gate이며 M7 `
 ## 10. 계획 이탈
 
 - 구현하지 않았다. 실제 Codex/GWS runtime도 실행하지 않았다.
-- momo-main 통합 단계에서 GitHub Issue MOMO-381(`#383`)을 만들고 `ROADMAP.md`, `docs/BACKLOG.md`, `STATUS.md`, redesign tracker, `CURRENT_STATE.md`, `JOURNAL.md`를 함께 정리했다. `BUILD_TICKETS.md`의 새 구현 계약은 owner가 ADR 권고를 승인한 뒤 반영한다.
+- momo-main 통합 단계에서 GitHub Issue MOMO-381(`#383`)을 만들고 `ROADMAP.md`, `BUILD_TICKETS.md`, `STATUS.md`, redesign tracker, `CURRENT_STATE.md`, `JOURNAL.md`를 함께 정리했다. `BUILD_TICKETS.md`의 새 구현 계약은 owner가 ADR 권고를 승인한 뒤 반영한다.
 - 기존 backlog ID 충돌 때문에 새 implementation issue에는 아직 숫자 ID를 배정하지 않고 planning-local `SE-*`를 유지했다.
 - Google Workspace write는 buildable first slice에서 제외했다. 공통 approval-bound executor와 read source citation을 먼저 닫고 후속 issue로 제안한다.

@@ -167,11 +167,11 @@ buzz 폰 페어링 = 데스크톱 QR → 폰 스캔 → 양쪽 6자리 SAS 대�
 | ID | 티켓 | 규모 |
 |---|---|---|
 | **P1** | `docs/planning/PIPELINE.md` 단일 설정: 레인 표(planner/검수/워커/리뷰어 — **역할과 현재 값 분리**)·병렬 상한·워크트리 루트 변수·승인 역할·spawn 계약 요약. 하드코딩 16곳 링크화(CLAUDE·AGENTS·planning/README·TRACKS·MULTI_SESSION_OPS·skills·issue template·settings.local) | M |
-| **P2** | CODEX.md → AGENTS.md 병합·삭제. AGENTS.md = 하네스 불가지론 워커 계약(Codex 전용 문면 제거, `@codex implement` 템플릿 일반화) | M |
+| **P2** | AGENTS.md → AGENTS.md 병합·삭제. AGENTS.md = 하네스 불가지론 워커 계약(Codex 전용 문면 제거, `@codex implement` 템플릿 일반화) | M |
 | P3 | CLAUDE.md 진입 4줄(PIPELINE→CURRENT_STATE→JOURNAL→DEVIATION pending) 정리 | S |
 | P4 | `.claude/commands/`: `/planning-start`·`/flush`·`/goal-claim`; `settings.local.json` 85줄→패턴 5줄 | S |
 | P5 | `codex-fleet`·`grok-fleet` 스킬 은퇴 표기 → `worker-lane` 단일 스킬(Agent 레인 spawn·감시·수거·회수 계약, 모델은 인자) | M |
-| P6 | handoffs 275 → 닫힌 이슈분 archive · `docs/HANDOFF_2026-07.md` 은퇴 · `DESIGN.md` 스텁화(정본=design-system/README) | S |
+| P6 | handoffs 275 → 닫힌 이슈분 archive · `docs/docs/planning/README.md` 은퇴 · `DESIGN.md` 스텁화(정본=design-system/README) | S |
 | P7 | `scripts/planning_context.sh` 로테이션 형상 반영 + `--github` 보드 | S |
 | P8 | (=SH-9 문서면) 영문 INDEX·architecture 요약 | — |
 

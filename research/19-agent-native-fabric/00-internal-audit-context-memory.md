@@ -69,9 +69,9 @@
 2. **단일 쓰기경로 REST→PG tx→outbox→relay** — `MessageRoutes.swift:1793-1824`.
 3. **RLS FORCE + 테넌트 격리** — 선례 `013_plugin_registry.sql:106-120`, `009_workspace_tenant_rls.sql`; 스펙 `05-memory-plane-v0.md:357-364`.
 4. **BYPASSRLS 금지**(사용자 대면 retrieval/projection) — `05-memory-plane-v0.md:28,364`, `06-capability-cache-v0.md:27,329`.
-5. **자격증명 비유입** — `CURRENT_STATE.md:105-106`, `013_plugin_registry.sql:6-8,:27`, `04-context-packet-v0.md:296-302,321-332`.
-6. **non-user-input fact는 source ref 필수** — `04-context-packet-v0.md:18,163-192`, `05-memory-plane-v0.md:21-27`.
-7. **불변 packet + 재검증**(정책/가시성 변화 시 재발급) — `04-context-packet-v0.md:22,233`, `06-capability-cache-v0.md:26`.
+5. **자격증명 비유입** — `CURRENT_STATE.md:105-106`, `013_plugin_registry.sql:6-8,:27`, `research/11-agent-runtime/04-context-packet-v0.md:296-302,321-332`.
+6. **non-user-input fact는 source ref 필수** — `research/11-agent-runtime/04-context-packet-v0.md:18,163-192`, `05-memory-plane-v0.md:21-27`.
+7. **불변 packet + 재검증**(정책/가시성 변화 시 재발급) — `research/11-agent-runtime/04-context-packet-v0.md:22,233`, `06-capability-cache-v0.md:26`.
 8. **위험 쓰기 = 승인 정지점**(`tool_call→approval_request→tool_result→audit_log`) — `InboundMCPToolRegistry.swift:153-169`.
 9. **에이전트=`member.kind='agent'` 1급 멤버, 채널 멤버십 fail-closed** — `MessageRoutes.swift:1437,1478-1484`, `InboundMCPRoutes.swift:95-118`.
 10. **채널 경계 불혼합**(same-channel only, 구조화 payload는 요약만) — `ContextAssembler.swift:5-9`, `MessageRoutes.swift:1670-1709`.
