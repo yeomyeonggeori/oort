@@ -1,11 +1,11 @@
 ---
-name: "Codex goal (작업 티켓)"
-about: "Codex가 goal로 받아 자율 실행하는 단위 티켓. 본문이 곧 작업 프롬프트가 된다."
+name: "Goal (작업 티켓)"
+about: "워커가 goal로 받아 자율 실행하는 단위 티켓. 본문이 곧 작업 프롬프트가 된다."
 title: "[<area>] <한 줄 목표>"
 labels: ["status:ready"]
 ---
 
-> 이 이슈 본문이 Codex의 작업 프롬프트(goal)가 된다. `@codex implement this issue`로 트리거하면 본문을 컨텍스트로 cloud task를 띄워 PR을 연다.
+> 이 이슈 본문이 워커 레인(`docs/planning/PIPELINE.md` §1)의 작업 프롬프트(goal)가 된다.
 > 작성 규칙: 추론으로 못 얻는 것만 적는다. 검증 등급(`[rust]/[web]/[mobile]/[infra]/[sql]/[python]/[runtime]`)을 Acceptance에 반드시 명시.
 
 ## Goal

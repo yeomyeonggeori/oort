@@ -443,10 +443,9 @@ grep -Fq 'scripts/github_bootstrap.sh' "$SANDBOX/out" \
   || fail "bootstrap-writer rename source was not classified as protected"
 
 # The merge/operator contract and exact-base runner are policy inputs too.
-write_pr kwakseongjae 11 '[{"name":"policy-change-approved"}]'
+write_pr kwakseongjae 10 '[{"name":"policy-change-approved"}]'
 jq -n '[[
   {filename: "AGENTS.md", status: "modified"},
-  {filename: "CODEX.md", status: "modified"},
   {filename: "CONTRIBUTING.md", status: "modified"},
   {filename: "docs/GITHUB_OPS.md", status: "modified"},
   {filename: "docs/LOCAL_PR_GATE.md", status: "modified"},
@@ -459,7 +458,7 @@ jq -n '[[
 ]]' >"$STATE/files.json"
 write_valid_audit
 run_evaluate >"$SANDBOX/out" || fail "protected merge-contract manifest failed: $(cat "$SANDBOX/out")"
-for protected_contract in AGENTS.md CODEX.md CONTRIBUTING.md docs/GITHUB_OPS.md \
+for protected_contract in AGENTS.md CONTRIBUTING.md docs/GITHUB_OPS.md \
   docs/LOCAL_PR_GATE.md docs/TRACKS.md docs/adr/0153-ci-stack-selfhosted-runners.md \
   scripts/verify_policy_integrity_from_base.sh \
   scripts/check_branch_skew.sh scripts/tests/test_license_gate.sh \

@@ -112,8 +112,7 @@ Three onboarding paths:
 An optional **work host** lets agents run governed CLI code sessions on
 infrastructure you control; engine keys and Codex OAuth tokens stay with the
 host and never enter oort's server, database, or ledger. See
-[`docs/WORK_HOST_QUICKSTART.md`](docs/WORK_HOST_QUICKSTART.md) and
-[`docs/BYOC_CLOUD_HOST.md`](docs/BYOC_CLOUD_HOST.md).
+[`docs/runbooks/cubesandbox-host-install.md`](docs/runbooks/cubesandbox-host-install.md).
 
 ## Architecture
 
@@ -131,13 +130,18 @@ flowchart LR
 
 | Path | What lives there |
 |------|-----------------|
-| `server-rust/` | Rust workspace — Axum API, relay, agent worker, notifier |
+| `server-rust/` | Rust/Axum workspace — API, relay, agent worker, notifier, migrate |
+| `server/Migrations/` | PostgreSQL DDL — the load-bearing walls |
+| `schema_v0.sql` | Canon schema (read-only; do not move or edit) |
 | `packages/momo-core/` | TypeScript domain core shared by web and mobile |
 | `clients/web/` | React SPA — also the desktop frontend |
 | `clients/desktop/` | Tauri shell (macOS today) |
 | `clients/mobile/` | React Native app (iOS today) |
-| `server/Migrations/` | PostgreSQL DDL — the load-bearing walls (most of it is triggers, constraints, and RLS) |
-| `docs/adr/` | 150+ architecture decision records — the project's memory |
+| `adapters/` | hermes · prime agent adapters |
+| `infra/rust/` | Self-host compose, Caddy, pgBackRest |
+| `docs/SELF_HOST.md` | First-time self-host playbook |
+| `docs/adr/` | Architecture decision records — the project's memory |
+| `docs/INDEX.md` | Document map |
 
 ## Self-host
 

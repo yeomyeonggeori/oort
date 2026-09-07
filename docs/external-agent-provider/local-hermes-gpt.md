@@ -122,5 +122,5 @@ GPT/OpenAI credential.
 - `docs/adr/0004-codex-oauth-hermes-provider-boundary.md`
 - `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/LOCAL_PR_GATE.md`
-- `docs/RUN.md`
+- `docs/SELF_HOST.md`
 - `scripts/verify_external_agent_provider.sh`

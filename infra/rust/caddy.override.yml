@@ -11,7 +11,7 @@
 # That sentence was true for the smoke and false for production: the retired
 # public host was fronted by a `caddy.override.yml` that existed on exactly one
 # disk and in no commit (audit B §2-2). The runbook could not even name its own
-# service — `docs/runbooks/ncp-rust-deploy.md` used to read "서비스 이름은
+# service — `docs/SELF_HOST.md` used to read "서비스 이름은
 # caddy.override.yml 에서 확인" because the file was not here to look at.
 #
 # `infra/rust/Caddyfile` (the routing + the five security headers, #1213/#1217)

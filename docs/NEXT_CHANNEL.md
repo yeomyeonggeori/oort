@@ -1,8 +1,8 @@
 # oort-next 발행 채널 (Tauri 자동 업데이트)
 
 > 범위: `clients/desktop` (Tauri 2 + `clients/web`) 의 **유일한 현행** 내부 배포 채널. ADR-0133 P2 / MOMO-606.
-> macOS SwiftUI 수동 채널 런북 [`MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md) 는 ITO-0 T-C / #1609 에서 **사문서**다. `clients/macOS` 는 삭제됐다(W-S1 / #1215). 따라 가면 없는 트리를 찾는다. 이 문서가 그것을 대체한다.
-> 은퇴한 Sparkle/DMG PLAYBOOK: [`RELEASE_PLAYBOOK.md`](RELEASE_PLAYBOOK.md) 상단 배너(ITO-0 T-E / #1610) — 실행하지 말 것.
+> macOS SwiftUI 수동 채널 런북 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md) 는 ITO-0 T-C / #1609 에서 **사문서**다. `clients/macOS` 는 삭제됐다(W-S1 / #1215). 따라 가면 없는 트리를 찾는다. 이 문서가 그것을 대체한다.
+> 은퇴한 Sparkle/DMG PLAYBOOK: [`RELEASING.md`](RELEASING.md) 상단 배너(ITO-0 T-E / #1610) — 실행하지 말 것.
 
 ## 0. 채널 하나 (next). alpha 는 은퇴
 

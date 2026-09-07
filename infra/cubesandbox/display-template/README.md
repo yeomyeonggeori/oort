@@ -180,7 +180,7 @@ routable ICE base is a new template obligation. That 증보 is **Proposed —
   `ice_servers: []` and the static path carries the stream unchanged. The
   server's copy wins whenever it is present, which is what lets the relay's
   static `user=` line be removed later without redeploying this template
-  (`docs/runbooks/turn-host-install.md` §6 — **not yet performed**: measured
+  (#1792 deferred — **not yet performed**: measured
   2026-08-18, momo-turn still refuses an ephemeral credential 401 while the
   static one allocates over udp and tcp). `turn://` URIs carry a credential
   either way, so the producer never logs one — only which source it used.

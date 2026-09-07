@@ -1,6 +1,6 @@
-# oort — GitHub 운영 구조 (Codex가 goal로 자율작업)
+# oort — GitHub 운영 구조 (워커 레인이 goal로 자율작업)
 
-> 목적: **계획은 사람/워크플로우가, 실제 작업은 Codex가 GitHub Issue를 goal로 받아 자율 실행**하는 운영 골격.
+> 목적: **계획은 사람/워크플로우가, 실제 작업은 워커 레인(`docs/planning/PIPELINE.md` §1)이 GitHub Issue를 goal로 받아 자율 실행**하는 운영 골격.
 > repo: `yeomyeonggeori/oort` · branch: `main` · 모든 사실은 2026 기준 1차 출처로 확인했고 추정은 "(추정)"으로 표기.
 
 ---
@@ -10,11 +10,11 @@
 | GitHub 프리미티브 | oort에서의 역할 | 산출 파일 |
 |---|---|---|
 | **Milestones** | **릴리스/게이트** (M0~M8 순서가 로드맵) | `scripts/github_bootstrap.sh` |
-| **Issues** | **Codex의 goal 단위.** 이슈 본문이 작업 프롬프트 | `scripts/github_bootstrap.sh`, `.github/ISSUE_TEMPLATE/` |
+| **Issues** | **워커의 goal 단위.** 이슈 본문이 작업 프롬프트 | `scripts/github_bootstrap.sh`, `.github/ISSUE_TEMPLATE/` |
 | **Labels** | 택소노미: `type/status/priority/area/size/gate` | `.github/labels.json` |
 | **Projects (v2)** | roadmap/board 뷰 (iteration으로 일정) | 수동 1회 + §4 |
 | **Issue Types** (org) | 1급 분류(선택, admin:org 필요) | `scripts/github_bootstrap.sh` 주석 §하단 |
-| **AGENTS.md** | Codex 운영 계약(빌드/검증/DoD/picker/PR) | `/AGENTS.md` |
+| **AGENTS.md** | 워커 레인 운영 계약(빌드/검증/DoD/picker/PR) | `/AGENTS.md` |
 
 일괄 생성: `scripts/github_bootstrap.sh` (idempotent). `scripts/github/bootstrap.sh`와 TSV 파일은 legacy 보존용이며 guard가 걸려 있다.
 
@@ -51,7 +51,7 @@
 | **priority** | `priority:p0` `priority:p1` `priority:p2` | 우선순위 (p0=릴리스 블로커) |
 | **area** | `area:server/relay/worker/core/macos/ios/infra/adapter/schema/tenancy/store/ci/alpha` | 어디 코드 |
 | **size** | `size:s` `size:m` `size:l` | 공수 추정 |
-| **gate** | `gate:qa` `agent:codex-ok` | 검수 게이트 / Codex 자율 적합 |
+| **gate** | `gate:qa` `agent:codex-ok` | 검수 게이트 / 워커 자율 적합 |
 
 생성: `gh label create ... --force`(있으면 갱신, 없으면 생성 → idempotent).
 
@@ -59,10 +59,10 @@
 
 ---
 
-## 3. Issues = Codex의 goal (핵심)
+## 3. Issues = 워커의 goal (핵심)
 
 ### 3.1 이슈 본문 = 작업 프롬프트
-Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작업 프롬프트(goal)로** 삼아 sandbox에서 클론→작업→PR을 연다([Codex cloud](https://developers.openai.com/codex/cloud)). 그래서 이슈 템플릿(`.github/ISSUE_TEMPLATE/codex-goal.md`)은 Codex가 바로 실행 가능하도록 `## Goal / ## Context / ## Acceptance / ## Depends on / ## Out of scope`를 강제한다.
+워커 레인은 이슈 본문을 작업 프롬프트(goal)로 삼아 클론→작업→PR을 연다. 이슈 템플릿(`.github/ISSUE_TEMPLATE/goal.md`)은 `## Goal / ## Context / ## Acceptance / ## Depends on / ## Out of scope`를 강제한다.
 
 ### 3.2 이슈 → 실행 흐름
 ```
@@ -77,9 +77,9 @@ Codex(cloud)는 `@codex` 멘션으로 이슈를 받으면 **이슈 본문을 작
                                                                            ▼
                                                 main local gate ─▶ 로드맵/이슈/마일스톤 정리
 ```
-- **수동 트리거:** 이슈에서 `@codex implement this issue`.
-- **자동 위임(추정/조직 설정 의존):** triage에 들어온 이슈가 규칙에 맞으면 Codex에 자동 할당([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). 규칙 기반 자동 위임은 org/플랜 설정에 따라 가용. (추정 — 정확 가용은 org 설정 확인 필요)
-- **품질 레버:** 어려운 이슈는 `codex cloud exec --attempts N`으로 best-of-N 후보 중 선택([upgrades to Codex](https://openai.com/index/introducing-upgrades-to-codex/)). (추정 — 플래그 정확 표기는 CLI reference 확인)
+- **수동 트리거:** 이슈를 `status:ready`로 두고 워커 레인에 넘긴다.
+- **자동 위임(추정/조직 설정 의존):** triage 규칙에 맞으면 워커에 할당. (추정 — org/플랜 설정 확인)
+- **품질 레버:** 어려운 이슈는 레인 상한 안에서 best-of-N을 쓴다. 정본은 `docs/planning/PIPELINE.md`.
 - **로컬/데스크탑 실행:** `scripts/goal_status.sh`로 ready/in-progress/needs-review/blocked와 branch/PR/worktree 충돌을 확인한 뒤 `scripts/goal_claim.sh <issue>`로 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
 - **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → `main` local gate 확인까지가 한 사이클이다. GitHub Actions를 다시 주 gate로 켠 기간에는 Actions green도 함께 확인한다.
 - **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
@@ -223,7 +223,7 @@ recovery PR/merge SHA, 임시 protection 변경 actor/time, fresh run IDs, 최�
 
 ### 3.2c Internal alpha feedback intake
 
-- 정본: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
+- 정본: [`docs/INDEX.md` §6](INDEX.md#6-내부-테스트).
 - raw tester report는 GitHub `Internal alpha feedback` 템플릿으로 접수하고 `type:feedback`, `area:alpha`, `status:needs-triage`를 붙인다.
 - `status:needs-triage`는 worker claim 대상이 아니다. momo-main이 severity(P0 data loss/security, P1 core alpha flow blocked, P2 usability friction, P3 polish), evidence, labels, milestone을 정리한다.
 - 필수 evidence: local gate profile, diagnostics bundle path, repro steps, workspace/channel/member context, expected/actual.
@@ -240,7 +240,7 @@ recovery PR/merge SHA, 임시 protection 변경 actor/time, fresh run IDs, 최�
 - 1차 의존 진실은 `BUILD_TICKETS.md`의 STEPS 표(T01→…→T10 + P1~P6).
 
 ### 3.4 sandbox 안전(2026)
-Codex cloud는 네트워크 격리 sandbox에서 돌고, **GitHub 브랜치 보호 규칙이 그대로 적용**되어 리뷰 없이 main 직접 push가 막힌다([introducing Codex](https://openai.com/index/introducing-codex/)). main 브랜치 보호 + PR 필수 + `swift build` green 체크를 권장.
+워커는 브랜치 보호 규칙이 그대로 적용되어 리뷰 없이 main 직접 push가 막힌다. main 브랜치 보호 + PR 필수 + 해당 등급 게이트 green을 권장.
 
 ---
 
@@ -283,8 +283,8 @@ scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # �
 
 ## 6. AGENTS.md와의 관계
 - 이 문서는 **GitHub 쪽 구조**(마일스톤/라벨/이슈/Project)를 정의한다.
-- `/AGENTS.md`는 **Codex가 한 이슈를 받았을 때의 실행 계약**(빌드/검증 명령, DoD, 다음 티켓 선택법 §6, 브랜치/PR §5, 리포맵 §8)을 정의한다.
-- Codex는 세션 시작 시 git root→leaf로 `AGENTS.md`를 병합한다(leaf override, [Codex AGENTS.md](https://developers.openai.com/codex/guides/agents-md)). 패키지별 세부 규칙이 필요하면 해당 디렉터리에 nested `AGENTS.md`를 추가한다.
+- `/AGENTS.md`는 **워커가 한 이슈를 받았을 때의 실행 계약**(빌드/검증 명령, DoD, 다음 티켓 선택법 §6, 브랜치/PR §5, 리포맵)을 정의한다.
+- 하네스가 `AGENTS.md`를 자동 적재하든 브리프가 읽으라고 지시하든 이 파일이 root 계약이다. 패키지별 세부 규칙이 필요하면 해당 디렉터리에 nested `AGENTS.md`를 추가한다.
 
 ---
 
@@ -306,7 +306,7 @@ scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # �
 
 ## 8. 운영 규칙 요약
 - 한 이슈 = 한 goal = 한 PR. 스코프 늘리지 말 것(필요시 새 이슈).
-- `status:ready` + 의존 충족 + 미할당 = Codex picker 대상.
+- `status:ready` + 의존 충족 + 미할당 = 워커 picker 대상.
 - 가능하면 worktree에서 작업한다. 동시에 여러 작업을 받을 수 있도록 root dirty worktree는 건드리지 않는다.
 - 작업 전 계획 문서를 확인하고, 계획이 미흡하면 추가 리서치부터 한다.
 - PR 이후에는 보안/품질 리뷰, 최종 테스트, merge, `main` local gate 확인까지 완료한다.

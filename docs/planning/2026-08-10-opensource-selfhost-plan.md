@@ -16,7 +16,7 @@
 |---|---|---|---|
 | **#1224** 공개 전 정리 | SECURITY.md 구 org 링크 → 실소유 · 비DNS IP 노출 제거 · 개인 Gmail 기본값 4곳 일반화 · `mobile-spike` debug.keystore 처리 · `.gitleaksignore` 60건 근거 주석 고정 · NOTICE `TODO(Codex)` 해소 | A §즉시 처리 | **W-O1 지금** |
 | **#1225** 라이선스 게이트 이설 | `deny.toml` 신설(cargo 644 커버·화이트리스트+근거 주석) · npm 체크를 `web-legacy`→`clients/web`+`clients/mobile`+`packages/momo-core` 이설 · CONTRIBUTING MPL 문구 정정(위 방침) · `local_gate.sh` 편입 · red proof(금지 라이선스 주입 시 빨강) | A 상위 2·3 | **W-O2 지금** |
-| **#1226** 진입 문서 현행화 | `AGENTS.md`·`CODEX.md`·`docs/RUN.md`·`docs/INDEX.md`·`docs/TRACKS.md`에서 Swift 스택 교육 제거(swift build 39회→0)·Rust/TS 현행화 · `infra/rust/README.md` 루트 링크 · `Makefile` build/test를 현행 스택으로 | E 상위 1 | **W-O3 지금** |
+| **#1226** 진입 문서 현행화 | `AGENTS.md`·`AGENTS.md`·`docs/SELF_HOST.md`·`docs/INDEX.md`·`docs/TRACKS.md`에서 Swift 스택 교육 제거(swift build 39회→0)·Rust/TS 현행화 · `infra/rust/README.md` 루트 링크 · `Makefile` build/test를 현행 스택으로 | E 상위 1 | **W-O3 지금** |
 
 README는 완료(2026-08-10 `b9e2f579`). CI 잡 승격(라이선스·PR CI)은 공개 전환(Actions 과금 해소)과 연동 — 성재 결정 ② 뒤.
 
