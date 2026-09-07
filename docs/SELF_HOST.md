@@ -502,6 +502,28 @@ default); a LAN or remote client uses that host's client-reachable IP;
 unset, the container auto-detects a bridge IP that is usually unreachable
 from outside.
 
+## Phone push
+
+Dawn-operated APNs (the App Store app) needs three keys on the self-host
+server. The server never holds Apple's `.p8`. Generate the identity with
+`scripts/push_relay_keygen.sh`, give Dawn the server id plus the public
+key, and set:
+
+| key | where |
+|---|---|
+| `PUSH_RELAY_URL` | Dawn's `/v1/push` |
+| `PUSH_RELAY_SERVER_ID` | the id Dawn registered |
+| `MOMO_RELAY_SIGNING_KEY_HOST_PATH` | host path of the Ed25519 private key |
+
+Own Apple account / own app build uses the same image with
+`infra/rust/docker-compose.push.yml` (`command: ["push-relay"]`) and a
+mounted `.p8`. Local stub never contacts Apple and refuses to boot without
+`MOMO_APNS_ALLOW_STUB=1`. Contract: [docs/PUSH_RELAY_RUNBOOK.md](PUSH_RELAY_RUNBOOK.md).
+
+`scripts/oort doctor` treats the overlay as configured when compose lists
+`push-relay`/`notifier` or the overlay keys are set; pending `push_candidate`
+rows then fail the outbox check instead of being ignored.
+
 ## Stop · wipe
 
 The argument bundle from step 3 is long, so from here it is written as one

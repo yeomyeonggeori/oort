@@ -1,9 +1,9 @@
 # syntax=docker/dockerfile:1
 #
-# One immutable momo **Rust** application image, seven runtime commands:
+# One immutable momo **Rust** application image, eight runtime commands:
 # api (momo-server), relay (momo-relay), agent-worker (momo-agent-worker),
 # webhook-sender (momo-webhook-sender), notifier (momo-notifier),
-# migrate (momo-migrate), web-assets (SPA staging).
+# push-relay (momo-push-relay), migrate (momo-migrate), web-assets (SPA staging).
 # ADR-0145 B안 / batch B1.7 — the deploy path for the Rust stack.
 #
 #   docker build -f server-rust/Dockerfile -t momo-rust:dev .
@@ -32,6 +32,11 @@
 # Both of its opt-in loops (T3 reconciler, push drain) are default-off, so
 # shipping the binary changes no running deployment; it only makes the drain
 # reachable once compose points at it.
+#
+# #1255 adds `push-relay`. The notifier holds no APNs key (ADR-0120 D1-A); this
+# command is the hop that does. Same image, same entrypoint, overlay-only
+# compose (`docker-compose.push.yml`). Shipping the binary changes no running
+# deployment; a second `-f` is what starts it.
 #
 # #1228 adds the **web SPA**. It was the last thing a deploy had to carry by
 # hand: `npm run build` on a laptop, `tar | ssh`, bind-mount into Caddy. That
@@ -118,6 +123,7 @@ COPY server-rust/crates/momo-wire/Cargo.toml crates/momo-wire/
 COPY server-rust/bins/momo-agent-worker/Cargo.toml bins/momo-agent-worker/
 COPY server-rust/bins/momo-migrate/Cargo.toml bins/momo-migrate/
 COPY server-rust/bins/momo-notifier/Cargo.toml bins/momo-notifier/
+COPY server-rust/bins/momo-push-relay/Cargo.toml bins/momo-push-relay/
 COPY server-rust/bins/momo-relay/Cargo.toml bins/momo-relay/
 COPY server-rust/bins/momo-server/Cargo.toml bins/momo-server/
 COPY server-rust/bins/momo-webhook-sender/Cargo.toml bins/momo-webhook-sender/
@@ -130,7 +136,8 @@ RUN set -eux; \
     done; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker \
-      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier; \
+      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
+      --bin momo-push-relay; \
     find crates bins -name '*.rs' -delete
 
 # Real sources. `--locked` keeps the dependency graph byte-identical to the
@@ -146,13 +153,15 @@ RUN set -eux; \
     find crates bins -name '*.rs' -exec touch {} +; \
     cargo build --release --locked \
       --bin momo-server --bin momo-relay --bin momo-agent-worker \
-      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier; \
+      --bin momo-webhook-sender --bin momo-migrate --bin momo-notifier \
+      --bin momo-push-relay; \
     install -Dm755 target/release/momo-server /out/momo-server; \
     install -Dm755 target/release/momo-relay /out/momo-relay; \
     install -Dm755 target/release/momo-agent-worker /out/momo-agent-worker; \
     install -Dm755 target/release/momo-webhook-sender /out/momo-webhook-sender; \
     install -Dm755 target/release/momo-migrate /out/momo-migrate; \
-    install -Dm755 target/release/momo-notifier /out/momo-notifier
+    install -Dm755 target/release/momo-notifier /out/momo-notifier; \
+    install -Dm755 target/release/momo-push-relay /out/momo-push-relay
 
 # ---------------------------------------------------------------------------
 # web — the SPA Caddy serves (#1228)
@@ -207,7 +216,7 @@ RUN set -eux; \
 FROM ${RUNTIME_IMAGE}
 ARG MOMO_BUILD_SHA
 LABEL org.opencontainers.image.title="momo-rust" \
-      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | webhook-sender | notifier | migrate | web-assets" \
+      org.opencontainers.image.description="momo Rust runtime — api | relay | agent-worker | webhook-sender | notifier | push-relay | migrate | web-assets" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}"
 

@@ -786,6 +786,7 @@ add_runtime_relay_commands() {
   add_runtime_bootstrap_commands
   add_cmd "Rust outbox relay conformance" "cargo test --manifest-path server-rust/Cargo.toml -p momo-relay --test relay_conformance_pg"
   add_cmd "PushRelay signed dispatch runtime verification (MOMO-461, kept for #1255 Rust port)" "scripts/verify_push_relay.sh"
+  add_cmd "PushRelay Rust wire contract (SH-10 #1255)" "scripts/tests/test_push_relay_contract.sh"
   add_note_once coverage "MOMO-461 PushRelay via scripts/verify_push_relay.sh: kept through LS-1 (성재 2026-09-07) while the Swift source is retired and #1255 ports the binary to Rust. Env/signing/id-only contract unchanged."
   add_note_once coverage "Outbox relay is the Rust momo-relay binary; Swift OutboxRelay (#2165) is gone. Conformance is cargo test -p momo-relay."
 }
