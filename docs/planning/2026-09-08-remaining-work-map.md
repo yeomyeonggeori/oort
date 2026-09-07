@@ -9,11 +9,11 @@
 
 | 파도 | 티켓 | 트랙 | 크기 | 상태 | 케이스 |
 |---|---|---|---|---|---|
-| **G1'-1** | **SH-6a-w #2204** 설정 › 에이전트 자격(목록·발급·재발급·해제) + AI 연결 로컬 provider 안내 | uxui | M | 패킷 발급, go 대기 | B |
-| **G1'-1** | **SH-5a #2205** Railway 템플릿 + 1회 E2E | engine | M | 패킷 발급, go 대기(계정 의존) | B |
-| G1'-2 | UX-R2c 온보딩 S5 「첫 에이전트 연결」 퍼널(카드 4종: Claude Code/Codex/Grok Bot/OpenAI 호환) | uxui | L | 미발급 — 기존 HostedAgentWizard·FirstMentionOnboarding·GrokBotInvite 재사용 범위 실측 후 | A·B |
-| G1'-2 | #1265 웹훅 인바운드 2경로 Rust 이식(SH-7 첫 blocker) | engine | M | 이슈 있음, 패킷 없음 | B(별도 에이전트) |
-| G1'-2 | SH-6a-e 로컬 OpenAI 호환 provider opt-in — 생성기 플래그(`self_host_env.sh --allow-local-provider`) → 서버 `allow_local_loopback` env + doctor 행 + env 템플릿 | engine | S | 미발급(정책 감사) | B(hermes 로컬) |
+| **G1'-1** | **SH-6a-w #2204** 설정 › 에이전트 자격(목록·발급·재발급·해제) + AI 연결 로컬 provider 안내 | uxui | M | PR #2214 — design-review R1 FAIL(H4·M5·N5) → R2 수리 → R2 검수 중 | B |
+| **G1'-1** | **SH-5a #2205** Railway 템플릿 + 1회 E2E | engine | M | **템플릿 main 정본화**(#2210·#2211) — 실배포 E2E는 Railway 로그인 대기 | B |
+| G1'-2 | **UX-R2c #2216** 로그인 뒤 「첫 에이전트 연결」 퍼널(카드 4종) | uxui | L | 패킷 발급(`handoffs/2026-09-08-uxr2c-first-agent-funnel-brief.md`), SH-6a-w 랜딩 뒤 go | A·B |
+| G1'-2 | **#1265** 웹훅 인바운드 2경로 Rust 이식(SH-7 첫 blocker) | engine | M | 패킷 발급(`handoffs/2026-09-08-1265-webhook-inbound-brief.md`), go 대기 | B(별도 에이전트) |
+| G1'-2 | **SH-6a-e #2215** 로컬 provider opt-in — 생성기 플래그 → 컴포즈 전달 → `host.docker.internal` 허용 목록 → staging에서도 유효(ADR-0004 증보, 보안 결정) → doctor | engine | S~M | 패킷 발급(`handoffs/2026-09-08-sh6a-e-local-provider-optin-brief.md`), go 대기 | B(hermes 로컬) |
 | G1'-3 | SH-8 그록봇: 루틴 지시문 정본화 + `SELF_HOST_AGENT.md` §3.3 「설치 뒤 그록봇 자신의 합류(dial-in pairing)」 절 + CDP 하네스 복구(로컬 한정, 2026-09-07 결재) | engine/docs | M | 미발급 | A |
 | G1'-3 | SH-9 hermes 합류 런북 현행화 — `docs/external-agent-provider/*` Swift 전제 → Rust 현행(AI 연결 provider link + 플러그인 경로 1회 실측) | engine/docs | M | 미발급 | B |
 | G1'-4 | **E2E-A**: README 붙여넣기 → 그록봇 VM 설치(§3.3) → doctor PASS → 팀 로그인 → 그록봇 pair→멘션→답장(#1361, CDP) → VM Reset 복구 → 잔여 0 | planner+CDP | — | #1361 blocked 해제 필요(SH-8 뒤) | A |
