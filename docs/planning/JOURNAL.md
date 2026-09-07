@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-08 (새벽) · Fable · ★G1'-1 진행(SH-5a 템플릿 정본화 · SH-6a-w R2 검수 중) + G1'-2 패킷 3본
+
+- go → G1'-1 발사. **SH-5a #2205**: 워커 완주(커밋 7: `infra/railway/`(서비스 6·Caddy 엣지·Centrifugo env·PG 플러그인), 생성기 `--railway`(키 41 정본 파생), `Caddyfile.railway`+공개 엣지 계약 픽스처 확장, §3.4 실절차, doctor Railway fail-closed) → planner 검토(gitleaks 지문 2 = 사설 URL 오탐 확인, 시험 7/7) → 감사 랜딩·승격 ao → main `03e90c4c`. 실배포 E2E는 `railway login` 대기(#2205 open). 체인 결함 1: BODY의 `'`(G1'-1) → 문법 오류 → 승격부터 재개(교훈: 체인 BODY에 아포스트로피 금지).
+- **SH-6a-w #2204**: 워커 완주(PR #2214, 커밋 10) → planner 범위 수용 → design-review R1 **FAIL B0·H4·M5·N5**(선택 행=hover 토큰 · 오프라인 잠금 aria 미설명 · 안내 문장이 없는 스위치·티켓 id — **planner 브리프 결함** · 390 절단) → R2 수리(행 선택 `--accent-soft`·이름 붙은 액션·`dl` 사실·`lockReason` 패턴·제품 어휘 카피·서버 원문 보존·캡처 4장면·렌더 시험) → design-review R2 진행 중.
+- G1'-2 패킷: **SH-6a-e #2215**(로컬 provider opt-in — 실측: `validated_base_url`이 staging에서 플래그 무효 → ADR-0004 증보 필수) · **UX-R2c #2216**(첫 에이전트 연결 퍼널) · **#1265**(웹훅 인바운드) 브리프. 교훈: 브리프의 좌표(플래그명·티켓 id)는 화면 글자가 아님을 명시. 발사는 SH-6a-w 랜딩 뒤 go.
+
 ## 2026-09-08 · Fable · ★결재: 실기기 APNs 보류(2) · 출시 정의 개정 확정(1) · G1'-1 브리프(3) + 남은 작업 지도
 
 - 성재: 「2번은 다음 진행으로, 1번·3번 중심으로 진행. 남은 작업도 파악」 → `2026-09-02-launch-program-plan.md` 상단 **개정 상자**(G1' = 두 케이스 E2E, G2 += iOS 앱스토어 v0, 파도 확정, 연기 목록) · `first-goal-two-cases.md` §7 확인·§8 · **`2026-09-08-remaining-work-map.md`**(G1'까지 파도 표 · G2 축 · 선재/위생 · 연기 · 이슈 위생 후속).
