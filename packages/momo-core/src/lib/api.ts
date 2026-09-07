@@ -3,7 +3,7 @@
 // P0 spike against momowebqa).
 //
 // Contract source of truth: server Routes + docs/api/openapi.yaml, mirrored by
-// the ADR-0119 client at clients/web-legacy/src/api. Quirks preserved on purpose:
+// the ADR-0119 client at f399e417:clients/web-legacy/src/api. Quirks preserved on purpose:
 //   - message ordering authority is `seq` (gapless per channel);
 //   - `?before=<seq>` reads OLDER history DESCENDING; `?after=<seq>` backfill is
 //     ASCENDING (used to heal realtime gaps);
@@ -14,7 +14,7 @@
 // Token policy (M9): the access token is kept in memory only and the refresh
 // token rotates single-use through POST /v1/auth/refresh. Storage, the XSS
 // bound and the deferred Tauri keychain path are documented in ./session.ts,
-// ported from clients/web-legacy/src/api/client.ts.
+// ported from f399e417:clients/web-legacy/src/api/client.ts.
 //
 // Base address (P2, MOMO-604): every path below is relative to `apiBase()`,
 // read at call time rather than captured at import. Same-origin stays the

@@ -23,7 +23,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 > ### ⚠️ Swift 트리는 은퇴 중 — 여기에 새로 짓지 마라
 > `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215 — 이식 원본은 git 이력에 있다). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`는 **아직 레포에 있지만 삭제 대기**다. 문서가 `swift build`를 시키더라도 그것은 현행 제품을 짓는 명령이 아니다 — 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다**.
-> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② `relay/PushRelay` — 라이브 푸시 경로가 지금도 빌드·배포하는 Swift 컴포넌트(`infra/rust/docker-compose.push.build.yml`). ③ `clients/web-legacy` — 삭제 아님. **라이브 웹은 `clients/web`**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, `infra/rust/caddy.override.yml:85-87`, #1228). web-legacy는 Swift prod `infra/prod/Dockerfile.web` · e2e `web-init`(`infra/docker-compose.e2e.yml:390-400`) · `--profile web`가 아직 소비(이분, #1610 README).
+> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② `relay/PushRelay` — 라이브 푸시 경로가 지금도 빌드·배포하는 Swift 컴포넌트(`infra/rust/docker-compose.push.build.yml`). **라이브 웹은 `clients/web`**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, `infra/rust/caddy.override.yml:85-87`, #1228). `f399e417:clients/web-legacy`는 #2166에서 삭제됐다.
 
 **핵심 쓰기경로(절대 깨지 말 것):** `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 tx → momo-relay가 Centrifugo /api/publish`. 클라는 절대 Centrifugo로 직접 publish 안 함. Postgres=SoT, Centrifugo=전송계층. 순서 SoT=`message.seq`.
 
@@ -59,7 +59,6 @@ packages/momo-core/      @momo/core — 웹·모바일이 공유하는 TS 도메
 clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` web-assets / #1228)
 clients/desktop/         Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다
 clients/mobile/          React Native 앱(현재 iOS)
-clients/web-legacy/      ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610)
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml (py3)
 adapters/prime/          prime-agent 어댑터(하네스 refine·스트림 릴레이)
 infra/rust/              **라이브 배포 경로** — Rust 이미지 compose + Caddyfile(정본) + 푸시/폰 오버레이

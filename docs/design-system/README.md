@@ -441,7 +441,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 ### 5.4 게이트 실행 경로 — 강제 층의 실행 보장은 **사람**이다
 
 - GitHub Actions는 디자인 게이트를 **하나도** 돌리지 않는다. `.github/workflows/ci-build.yml`은 Swift 빌드뿐이고 그마저 `workflow_dispatch` 전용이다. 기본 머지 게이트는 `docs/LOCAL_PR_GATE.md`의 로컬 증거다.
-- `scripts/local_gate.sh --profile web`의 lint 레인은 **`clients/web-legacy`**(동결된 레거시 클라)를 본다. 정본 UI `clients/web`의 ESLint는 어느 게이트에도 안 걸려 있다 — 배선은 **#1210**. *완화 요인*: 그 두 규칙(hex 금지·인라인 style 금지)은 프리플라이트 그렙이 중복 커버한다. 그래서 지금 손실은 없지만 **중복이 유일한 안전망**이다.
+- `scripts/local_gate.sh --profile web`의 lint 레인은 한때 **`f399e417:clients/web-legacy`**(동결된 레거시 클라)를 봤다. 정본 UI `clients/web`의 ESLint는 **#1210**이 병합 트리 8번째 레인으로 걸었다. *완화 요인*: 그 두 규칙(hex 금지·인라인 style 금지)은 프리플라이트 그렙이 중복 커버한다.
 - 폰에는 "디자인 프리플라이트"라는 이름의 **실행 단위**가 없다. 검사는 `npm test`(jest) 안에 섞여 있고, 그것은 병합 트리 게이트의 `phone suite` 레인으로 **돈다**. 무엇이 커버되는지를 한눈에 못 볼 뿐이다. 한 조각은 이름을 얻었다 — `scripts/design_preflight_phone_strings.mjs`(낱말꼴 두 분류, #1511)는 웹·코어와 같은 규칙 객체를 들지만, 부르는 쪽은 여전히 jest다(`conversationHygiene.test.tsx`가 자식 프로세스로 돌린다). 쉘 `design_preflight_web.sh`는 이름 그대로 웹의 단위이고 폰을 부르지 않는다.
 
 ### 5.5 이 레포가 배운 두 가지 실패 양식

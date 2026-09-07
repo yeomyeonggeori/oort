@@ -7,20 +7,12 @@ quality** — P1 feature work replaces it surface by surface.
 
 ## Path history (MOMO-596)
 
-`clients/web` used to hold the ADR-0119 alpha (v0). That client is **not deleted**:
-it moved to **`clients/web-legacy`**. **Live alpha serving is this directory** —
-the Rust image copies `clients/web` dist to `/opt/momo/web/`
+`clients/web` used to hold the ADR-0119 alpha (v0). That client moved to
+**`f399e417:clients/web-legacy`** and was deleted in #2166. **Live serving is this
+directory** — the Rust image copies `clients/web` dist to `/opt/momo/web/`
 (`server-rust/Dockerfile:147,157,173,231`) and `web-assets` stages it for Caddy
 (`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md`
 「웹(정적 SPA) 배포」 / #1228).
-
-`clients/web-legacy` is still consumed (not discarded — dichotomy, #1610 README):
-Swift prod `infra/prod/Dockerfile.web:8-17` /
-`infra/prod/docker/momo.Dockerfile:44-69`, e2e `web-init`
-(`infra/docker-compose.e2e.yml:390-400`), and
-`scripts/local_gate.sh --profile web`. ADR-0133 desktop parity (default download)
-passed 2026-07-25 (`docs/adr/0133-ui-stack-tauri-react-migration.md` header);
-web SPA serving flipped via #1228, not that gate appendix.
 
 ## Structure (matches plan §1)
 

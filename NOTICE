@@ -15,7 +15,7 @@ Third-party attribution for the GHCR images this repository publishes
   present) from server-rust/Cargo.lock and clients/web/package-lock.json
 - legal/THIRD_PARTY_NOTICES.md
   index that separates the current generated bundle from historical frozen
-  snapshots (retired SwiftPM, web-legacy handwritten npm, work-host sidecars)
+  snapshots (retired SwiftPM, f399e417:clients/web-legacy handwritten npm, work-host sidecars)
 - Image copies of LICENSE, this NOTICE, the index, and the generated bundle:
   /usr/share/licenses/momo-rust/ and /opt/momo/web/legal/ (app)
   /usr/share/licenses/oort-postgres/ (database)
