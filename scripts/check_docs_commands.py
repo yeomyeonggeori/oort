@@ -64,17 +64,6 @@ GATED_DOCS = [
         "#1472에서 워커 3기를 오도한 명령이 살던 자리다.",
     ),
     (
-        "CODEX.md",
-        "AGENTS.md 머리말이 '핵심 내용은 CODEX.md와 동일'이라고 선언한 쌍둥이. "
-        "한쪽만 게이트하면 같은 드리프트가 게이트 없는 쪽으로 되돌아온다 "
-        "(#1472의 깨진 fmt 명령도 두 파일에 같이 있었다).",
-    ),
-    (
-        "docs/RUN.md",
-        "로컬 기동 가이드. 은퇴 중인 Swift 장을 포함하지만 2~4장은 현행 유효라고 "
-        "문서 스스로 못박고 있어, 여기 적힌 명령은 지금도 실행된다.",
-    ),
-    (
         "docs/RELEASING.md",
         "서버/이미지 릴리스 절차 정본. 스스로 '이 문서 하나로 서버 이미지 릴리스를 "
         "완주한다'고 선언한다 — workflow dispatch, attestation verify, "
@@ -102,8 +91,8 @@ GATED_DOCS = [
 # someone follows command by command, and a new one must not arrive ungated.
 GATED_GLOBS = ["docs/runbooks/*.md"]
 
-# Fence info strings that mean "this block is shell". A bare fence counts: RUN.md
-# §1 uses one for its bring-up sequence, and those `make` targets are real.
+# Fence info strings that mean "this block is shell". A bare fence counts:
+# AGENTS.md §3 uses one for its copy-paste sequence, and those `make` targets are real.
 SHELL_INFO = {"", "sh", "bash", "shell", "zsh", "console", "shell-session"}
 
 # A token carrying any of these is a placeholder, an expansion or a glob — the
@@ -117,7 +106,7 @@ SEPARATORS = {"&&", "||", ";", "|", "&", "|&"}
 COMMAND_PREFIXES = {"sudo", "time", "exec", "nohup", "command", "env"}
 
 # Extensionless executors count: `scripts/momo` is one, and it is the entry
-# point RUN.md hands a first-time reader.
+# point operating docs still hand a first-time reader.
 SCRIPT_RE = re.compile(r"^\.?/?(scripts/[A-Za-z0-9_./-]+)$")
 
 # Data and prose living under scripts/. A span naming one of these is a pointer

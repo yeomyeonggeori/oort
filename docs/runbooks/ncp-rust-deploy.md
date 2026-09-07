@@ -34,7 +34,7 @@
 | `infra/rust/pgbackrest.conf` | 같음 | POSIX repository 비시크릿 정본. S3-compatible 전환은 별도 attended overlay |
 | `scripts/verify_pgbackrest_pitr.sh` | `/opt/momo/scripts/` | live source를 중단하지 않는 full/WAL/time-target restore + signed evidence producer |
 | `scripts/run_pitr_gated_migrate.sh` | `/opt/momo/scripts/` | exact base+backup Compose와 검증된 bindings만 소비하는 migration 진입점 |
-| `scripts/verify_ncp_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
+| `scripts/verify_public_edge_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
 | — | APNs `.p8` · relay Ed25519 개인키 | 레포 비유입이 **정상**(ADR-0004/0120) |
 
 > ⚠️ **오버레이 3개는 레포에 있지만 `caddy.override.yml`은 로컬에서 켜지 말 것.** `Caddyfile`이 실도메인(`app.oor7.com`)을 스킴 없이 선언하므로 Caddy는 **컨테이너 기동 즉시** 그 도메인으로 실제 ACME 주문을 시작한다 — 요청 한 번 없어도, 호스트 포트를 어디로 옮겨도. (2026-08-10 #1228 검증 중 실측: 프로덕션 Let's Encrypt에 챌린지 4회 실패. 빈 `caddy-data`라 새 ACME 계정이 만들어졌고 인증서 발급은 0이라 라이브 계정·도메인 한도는 움직이지 않았다.) 로컬 검증은 base + `t3` + `cent-origin`까지만 올리고, 웹 볼륨은 따로 들여다본다:
@@ -312,7 +312,7 @@ chmod 600 smoke.secrets.env "$failed_env"
    # 워크트리에서 서버로. scp/cp 는 같은 inode에 쓴다.
    ssh root@101.79.11.189 'install -d -m 0755 /opt/momo/scripts'
    scp infra/rust/Caddyfile root@101.79.11.189:/opt/momo/infra/rust/Caddyfile
-   scp scripts/verify_ncp_centrifugo_boundary.sh root@101.79.11.189:/opt/momo/scripts/
+   scp scripts/verify_public_edge_centrifugo_boundary.sh root@101.79.11.189:/opt/momo/scripts/
    ```
    > ⚠️ `caddy.override.yml`은 **파일 하나**를 `./Caddyfile:/etc/caddy/Caddyfile:ro`로 bind mount 한다. 디렉터리 마운트와 같은 함정이 파일 단위로 있다: `mv new Caddyfile`(rename)로 바꾸면 inode가 갈리고 컨테이너는 **옛 파일을 계속 본다**. `scp`·`cp`·`sed -i`는 제자리에 쓰므로 안전하고, 에디터의 「원자적 저장」(임시파일→rename)은 안전하지 않다.
 

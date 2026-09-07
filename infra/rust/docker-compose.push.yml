@@ -124,7 +124,7 @@ services:
       # tenant owns it.
       #
       # ⚠ PREREQUISITE GAP, not an oversight: the canonical role for this is
-      # `momo_notifier`, and `infra/prod/bootstrap_runtime_roles.sql` does NOT
+      # `momo_notifier`, and `infra/rust/sql/bootstrap_runtime_roles.sql` does NOT
       # create it — it provisions momo_app / momo_relay / momo_worker only.
       # (`momo_notifier` exists solely in infra/e2e/bootstrap_roles.sql with a
       # committed dev password, which this stack deliberately never applies.)

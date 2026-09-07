@@ -4,10 +4,6 @@ updates:
     directories:
       # ADR-0133 canonical UI (promoted from the P0 spike by MOMO-596).
       - /clients/web
-      # ADR-0119 v0 — still the built/served alpha client until parity.
-      - /clients/web-legacy
-      - /examples/cloudflare-agent-momo
-      - /examples/eve-momo-channel
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
