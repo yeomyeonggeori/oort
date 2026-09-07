@@ -1139,7 +1139,12 @@ run_cmd() {
     # start still needs the same EXIT-trap teardown as a completed bootstrap.
     RUNTIME_COMPOSE_STARTED=1
   fi
-  bash -lc "$command" 2>&1 | tee -a "$LOG_FILE"
+  # Login shells rewrite PATH from the user profile. On this host that
+  # replaces fnm node 24 with Homebrew node 26, and vitest/jsdom then
+  # reports localStorage as undefined (82 red, same files every time).
+  # Re-apply the invoking PATH so gate steps see the same node as a
+  # direct `npm --prefix clients/web run test` (#2142 R2).
+  bash -lc "PATH=$(printf %q "$PATH"); $command" 2>&1 | tee -a "$LOG_FILE"
   code=${PIPESTATUS[0]}
   set +e
 
@@ -1168,7 +1173,7 @@ run_final_cleanup_cmd() {
   } | tee -a "$LOG_FILE"
 
   set +e
-  bash -lc "$command" 2>&1 | tee -a "$LOG_FILE"
+  bash -lc "PATH=$(printf %q "$PATH"); $command" 2>&1 | tee -a "$LOG_FILE"
   code=${PIPESTATUS[0]}
   set +e
 
