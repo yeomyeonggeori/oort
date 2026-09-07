@@ -44,8 +44,9 @@ x-momo-janitor-labels: &momo-janitor-labels
   com.momo.janitor.match-label: com.docker.compose.project
 
 services:
-  # The APNs boundary. Image comes from #1255 (Rust momo-push-relay); the deployed stack
-  # references a published tag exactly like MOMO_RUST_IMAGE does.
+  # The APNs boundary (#1255). Same multi-command image as every other Rust
+  # role: `command: ["push-relay"]`. Overlay-only — the base stack never
+  # interpolates this file.
   #
   # Where the required-variable check lives is a deliberate split:
   #   * `${VAR:?}` for the two BIND MOUNT SOURCES only. A missing mount source
@@ -60,7 +61,8 @@ services:
   # ever interpolated when an operator names it with a second `-f`, so it can
   # never break `docker compose config` for the running base stack.
   push-relay:
-    image: ${MOMO_PUSH_RELAY_IMAGE:-momo-push-relay:dev}
+    image: ${MOMO_RUST_IMAGE:-momo-rust:dev}
+    command: ["push-relay"]
     mem_limit: ${MOMO_PUSH_RELAY_MEM_LIMIT:-512m}
     labels: *momo-janitor-labels
     restart: unless-stopped
@@ -87,6 +89,12 @@ services:
       MOMO_APNS_KEY_PATH: /run/secrets/apns-key.p8
       MOMO_APNS_KEY_ID: ${MOMO_APNS_KEY_ID:-}
       MOMO_APNS_TEAM_ID: ${MOMO_APNS_TEAM_ID:-}
+      # Stub-only. Empty in a real deployment; the binary ignores them unless
+      # MOMO_APNS_SENDER=stub (which still refuses to boot without
+      # MOMO_APNS_ALLOW_STUB=1).
+      MOMO_APNS_STUB_STATUS: ${MOMO_APNS_STUB_STATUS:-}
+      MOMO_APNS_STUB_REASON: ${MOMO_APNS_STUB_REASON:-}
+      MOMO_APNS_STUB_CAPTURE_PATH: ${MOMO_APNS_STUB_CAPTURE_PATH:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     volumes:
       # The one thing an operator supplies that is not an environment variable.
@@ -124,21 +132,18 @@ services:
       # tenant owns it.
       #
       # ⚠ PREREQUISITE GAP, not an oversight: the canonical role for this is
-      # `momo_notifier`, and `infra/rust/sql/bootstrap_runtime_roles.sql` does NOT
-      # create it — it provisions momo_app / momo_relay / momo_worker only.
-      # (`momo_notifier` exists solely in infra/e2e/bootstrap_roles.sql with a
-      # committed dev password, which this stack deliberately never applies.)
-      # So there is no correct default to write here, and inventing one would
-      # hand the notifier a role with the wrong privileges. The operator supplies
-      # the URL; unset is a boot refusal naming this variable. See the
-      # prerequisites section of docs/cicd/12-push-relay-deploy-runbook.md.
+      # `momo_notifier`. `infra/rust/sql/bootstrap_roles.sql` creates it with a
+      # committed dev password (smoke only). `bootstrap_runtime_roles.sql` does
+      # NOT — it provisions momo_app / momo_relay / momo_worker only. There is
+      # no correct production default to write here. For a local stub smoke the
+      # owner URL is acceptable; a real deploy provisions the role separately.
       NOTIFIER_DATABASE_URL: ${NOTIFIER_DATABASE_URL:-}
       # The drain's own switch. Off by default even inside this overlay: adding
       # the file gets you the processes, turning this on gets you dispatches.
       MOMO_PUSH_NOTIFIER_ENABLED: ${MOMO_PUSH_NOTIFIER_ENABLED:-0}
       PUSH_RELAY_URL: ${PUSH_RELAY_URL:-http://push-relay:28195/v1/push}
       # This server's opaque identity at the relay. Must be a key in the
-      # relay's MOMO_RELAY_SERVERS registry or every dispatch is a 403.
+      # relay's MOMO_RELAY_SERVERS registry or every dispatch is a 401.
       PUSH_RELAY_SERVER_ID: ${PUSH_RELAY_SERVER_ID:-momo-local}
       # The Ed25519 PRIVATE key — this server's identity, not an APNs
       # credential. Enabled-without-a-key is a boot refusal (config.rs).

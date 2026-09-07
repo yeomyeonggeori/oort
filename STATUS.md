@@ -7,8 +7,13 @@
 
 ## LS-1 Swift 은퇴 (#2165, 2026-09-07)
 
-- Track engine. `feat/ls1-swift-retire`. Swift `server/Sources`·`workers`·`relay`·`services`·`infra/prod`·Swift e2e compose·examples·codex-workbench 삭제. `server/Migrations`·`server/Fixtures` 유지. PushRelay Swift 본체 삭제, **계약·overlay 유지, Rust 이식 중(#1255)**.
-- runtime-unverified: `scripts/verify_push_relay.sh`는 Swift `relay/PushRelay`를 실행하므로 #1255 착수 전까지 런타임 RED. workd 미이식 경로는 D4-② 폐기(출시 후 Rust 사이드카 ADR).
+- Track engine. `feat/ls1-swift-retire`. Swift `server/Sources`·`workers`·`relay`·`services`·`infra/prod`·Swift e2e compose·examples·codex-workbench 삭제. `server/Migrations`·`server/Fixtures` 유지. PushRelay Swift 본체 삭제, **계약·overlay 유지**. Rust 본체는 #1255(`momo-push-relay`, 같은 멀티커맨드 이미지 `command: ["push-relay"]`).
+- runtime-unverified: 실기기 APNs 수신(TestFlight)은 planner 범위. `scripts/verify_push_relay.sh`는 stub 전용(Apple 미접속). workd 미이식 경로는 D4-② 폐기(출시 후 Rust 사이드카 ADR).
+
+## SH-10 momo-push-relay Rust (#1255, 2026-09-07)
+
+- Track engine. `feat/sh10-push-relay-rust`. ADR-0120 와이어 계약(id-only `momo.push.dispatch.v2`, raw-body Ed25519, receipt `apns_status`/`apns_reason`/`apns_id`, 서명 실패 **401**)을 `server-rust/bins/momo-push-relay`로 이식. stub은 `MOMO_APNS_ALLOW_STUB=1` 없이 exit 78. 자기등록 REST는 범위 밖(v0 = 정적 `MOMO_RELAY_SERVERS`).
+- 검증: `cargo test -p momo-push-relay`, `scripts/verify_push_relay.sh`, stub compose E2E. 실 APNs 미호출.
 
 ## LS-2 클라 이중 정본 해소 (#2166, 2026-09-07)
 

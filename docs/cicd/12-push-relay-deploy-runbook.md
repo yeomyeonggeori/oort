@@ -1,16 +1,12 @@
-# 12 — PushRelay 배포·검증 런북 (goal PUSH-1 / ADR-0120 P-3)
-
-> relay 본체(Swift)는 ADR-0183으로 삭제됨 — Rust 이식 #1255(momo-push-relay, 셀프호스트 동봉) 진행 중. 이 문서의 env·서명·id-only 계약은 그대로 유효.
+# 12 — PushRelay 배포·검증 런북 (goal PUSH-1 / ADR-0120 P-3 / #1255)
 
 > **이 문서가 있는 이유.** 푸시 종단 경로는 세 조각이다 — 서버(Rust notifier)가
 > 서명한 id-only dispatch를 relay가 받고, relay가 APNs로 HTTP/2 발송하고, 기기의
-> NSE가 그것으로 알림을 완성한다. 양 끝은 이미 있었다(#963, #972). 가운데만
-> **배포할 방법이 없었다** — `relay/PushRelay`는 Swift 패키지인데 Dockerfile이
-> 없었고, 유일한 컨테이너 실행 예시는 소스를 복사해 `swift run`하는 검증 트릭
-> 뿐이었다(`infra/e2e/metrics.overlay.yml`). ADR-0120 D1-A상 APNs `.p8`은 이 relay
-> 만 든다(셀프호스트 서버는 Apple과 계약할 수 없다 — 구조적 필연). 그래서 이
-> 조각이 없으면 실 푸시는 한 발도 나가지 못한다. 이 문서는 그 조각을 세우고,
-> **키만 꽂으면 되는 상태**에서 실제 발송까지 가는 절차다.
+> NSE가 그것으로 알림을 완성한다. 양 끝은 이미 있었다(#963, #972). 가운데 hop은
+> `momo-push-relay`로 같은 멀티커맨드 이미지에 실렸다(`command: ["push-relay"]`).
+> ADR-0120 D1-A상 APNs `.p8`은 이 relay만 든다(셀프호스트 서버는 Apple과 계약할
+> 수 없다 — 구조적 필연). 이 문서는 그 조각을 세우고, **키만 꽂으면 되는 상태**
+> 에서 실제 발송까지 가는 절차다.
 
 - 대상: 오케스트레이터(스택 기동·검증) + 성재(Apple 자격증명)
 - 선행: [11 — iOS 푸시 기기 확인 절차](11-ios-push-device-check.md) §3-1·3-2 (기기가 APNs 토큰을 받아 서버 `devices`에 등록됨)
@@ -31,8 +27,8 @@
 | # | 증명 항목 | 확인 방식 |
 |---|---|---|
 | A | 서명된 v2 dispatch를 200으로 수리하고 id-only payload만 만든다 | stub capture JSONL 필드 집합 |
-| B | **위조 서명은 403** (body 1바이트 변조) | HTTP status |
-| C | **미등록 server_id는 403** | HTTP status |
+| B | **위조 서명은 401** (body 1바이트 변조 또는 서명 바이트 1개 반전) | HTTP status |
+| C | **미등록 server_id는 401** | HTTP status |
 | D | 서버별 sliding-window 초과는 429 | HTTP status |
 | E | APNs 410/`Unregistered`가 receipt로 passthrough된다 | `apns_status`/`apns_reason` |
 | F | 대화 본문·표시명·채널명·토큰이 payload에 없다 | 금칙어 grep |
@@ -46,9 +42,9 @@ bash scripts/verify_push_relay.sh   # 실 APNs 없이 A~G 전부
 
 ---
 
-## 1. 이 relay가 부팅에 요구하는 것 (Config.swift 실측)
+## 1. 이 relay가 부팅에 요구하는 것
 
-`relay/PushRelay/Sources/PushRelay/Config.swift` `RelayConfig.load()`에서 그대로
+`server-rust/bins/momo-push-relay/src/config.rs` `RelayConfig::from_env()`에서 그대로
 읽은 표다. **"없으면 어떻게 되는가" 열이 이 표의 요점이다** — 푸시는 fail-open이
 가장 탐지하기 어려운 실패라서, 이 relay에는 "켜졌는데 못 보내는" 상태가 없어야
 한다.
@@ -91,11 +87,11 @@ notifier는 후보를 **배달 완료로 정산**하고, 기기는 영원히 울
 추가로 PUSH-1에서 넣은 것:
 - `.p8` 경로가 **읽히지 않으면** 부팅 거부하며 `MOMO_APNS_KEY_PATH`를 이름으로
   지목한다(가장 흔한 실수: 마운트 경로 오타, uid 10001이 못 읽는 퍼미션).
-- 설정 거부는 Swift `fatalError` 백트레이스가 아니라 **exit 78 (EX_CONFIG) +
-  `PushRelay refused to start — …` 한 줄**이다. 컨테이너가 재시작 루프를 도는
-  동안 `docker logs`에서 읽을 것은 이 한 줄이다.
-- 이미지 빌드가 이 계약을 **빌드 타임에 검증**한다 — 설정 없이 부팅되는 바이너리는
-  빌드가 실패한다(`relay/PushRelay/Dockerfile`).
+- 설정 거부는 **exit 78 (EX_CONFIG) + `PushRelay refused to start — …` 한 줄**이다.
+  컨테이너가 재시작 루프를 도는 동안 `docker logs`에서 읽을 것은 이 한 줄이다.
+- 부팅 거부 4종(stub 무단사용 / 자격증명 부재 / 읽을 수 없는 `.p8` / 빈 레지스트리)은
+  `scripts/verify_push_relay.sh`가 프로세스 단위로 잰다. 이미지 빌드는 바이너리를
+  실을 뿐, 설정 없이 부팅되는지를 빌드 타임에 실행하지는 않는다.
 
 ### 1-2. 부팅 거부로 잡히지 **않는** 것
 
@@ -113,7 +109,7 @@ notifier만 연결 거부를 맞는다 — 초록 컨테이너 + 배달 안 됨.
 인증 방식: notifier가 **raw request body 전체**를 Ed25519로 서명해
 `X-Momo-Push-Signature`에 싣고, `X-Momo-Server-Id`로 자신을 밝힌다. relay는
 `MOMO_RELAY_SERVERS` 레지스트리에서 그 server_id의 공개키를 찾아 검증한다
-(`App.swift`). 실패는 403이고, notifier는 403을 **영구 실패**로 분류해 재시도하지
+(`App.swift` 원본은 `f399e417:`). 실패는 **401**이고, notifier는 401을 **영구 실패**로 분류해 재시도하지
 않는다(`push_relay.rs::classify_relay_status`).
 
 절차:
@@ -127,7 +123,7 @@ notifier만 연결 거부를 맞는다 — 초록 컨테이너 + 배달 안 됨.
 2. 운영자 채널로 **server_id + 공개키 base64만** Dawn에 전달한다.
 3. Dawn이 relay의 `MOMO_RELAY_SERVERS` JSON에 항목을 추가하고 relay를 재시작한다.
 4. 서버는 개인키 경로를 `MOMO_PUSH_RELAY_PRIVATE_KEY_PATH`로,
-   server_id를 `PUSH_RELAY_SERVER_ID`로 준다. **둘이 어긋나면 전부 403이다.**
+   server_id를 `PUSH_RELAY_SERVER_ID`로 준다. **둘이 어긋나면 전부 401이다.**
 
 회전: 새 공개키를 레지스트리에 **먼저** 배포하고(둘 다 등록된 상태), 그 다음
 서버 개인키를 교체한다. 순서를 뒤집으면 그 사이 발송이 전부 영구 실패한다.
@@ -145,8 +141,8 @@ notifier만 연결 거부를 맞는다 — 초록 컨테이너 + 배달 안 됨.
    문서/이 repo는 이것을 만들지도 요구하지도 않는다. `.p8`은 repo·이미지·빌드
    산출물·로그 어디에도 넣지 않고, 호스트 절대경로에 두고 read-only로 마운트한다.
 2. **`momo_notifier` DB 롤 — 미해결 갭.** notifier는 BYPASSRLS 롤로 붙어야 하는데
-   `infra/prod/bootstrap_runtime_roles.sql`은 `momo_app`/`momo_relay`/`momo_worker`
-   **셋만** 만든다. `momo_notifier`는 `infra/e2e/bootstrap_roles.sql`에만 있고 그건
+   `infra/rust/sql/bootstrap_runtime_roles.sql`은 `momo_app`/`momo_relay`/`momo_worker`
+   **셋만** 만든다. `momo_notifier`는 `infra/rust/sql/bootstrap_roles.sql`에만 있고 그건
    커밋된 개발용 비밀번호라 이 스택이 일부러 적용하지 않는 파일이다. 그래서
    `NOTIFIER_DATABASE_URL`에는 **옳은 기본값이 없다**. 스모크만 할 거면 소유자
    URL로 대신하고, 실배포 전에는 롤 프로비저닝을 별도로 결정해야 한다(§5).
@@ -172,13 +168,10 @@ sudo chmod 400 "$MOMO_APNS_KEY_HOST_PATH"
 ### 3-2. 이미지 빌드
 
 ```bash
-docker build -f relay/PushRelay/Dockerfile -t momo-push-relay:dev .
+docker build -f server-rust/Dockerfile --build-arg MOMO_BUILD_SHA="$(git rev-parse HEAD)" -t momo-rust:dev .
 ```
 
-빌드 컨텍스트는 **repo 루트**다(패키지가 `services/MomoMetrics`를 경로 의존).
-`swift:6.2-noble`로 `--static-swift-stdlib` release 빌드 → `ubuntu:24.04` 런타임.
-빌드 마지막 단계가 §1-1의 fail-closed 계약을 검증하므로, **설정 없이 부팅되는
-바이너리는 여기서 빌드가 깨진다.**
+빌드 컨텍스트는 **repo 루트**다. 같은 이미지가 `api|relay|agent-worker|webhook-sender|notifier|push-relay|migrate|web-assets`를 나른다. overlay는 `command: ["push-relay"]`만 바꾼다. 별도 Dockerfile은 없다. stub/live 부팅 거부는 `scripts/verify_push_relay.sh`가 프로세스 exit 78로 잰다.
 
 ### 3-3. 기동 — 기본 비활성, 오버레이로만
 
@@ -252,7 +245,7 @@ Apple이 provider token을 받아들였기 때문에 토큰을 평가할 수 있
 | `403 ExpiredProviderToken` | 호스트 시계 오차 |
 | `400 TopicDisallowed` | dispatch의 `apns_topic`이 이 팀의 번들 ID가 아님 |
 | `400 DeviceTokenNotForTopic` | 토큰과 번들 ID 불일치 |
-| relay 403 (APNs 아님) | 서명/등록 문제 — §2 |
+| relay 401 (APNs 아님) | 서명/등록 문제 — §2 |
 | 전송 오류 반복 | `ca-certificates` 또는 아웃바운드 443 차단 |
 
 ### 4-2. 실기기 종단

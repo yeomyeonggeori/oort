@@ -447,6 +447,26 @@ MOMO_UNFURL_ENABLED=1
 LAN·원격 클라는 그 호스트의 클라 도달 가능 IP, 미설정은 컨테이너가
 브리지 IP를 자동 감지해 대개 외부에서 도달할 수 없다.
 
+## 폰 푸시
+
+App Store 앱의 Dawn 공용 APNs는 셀프호스트 서버에 키 3개만 둔다. 서버는
+Apple `.p8`을 갖지 않는다. `scripts/push_relay_keygen.sh`로 신원을 만들고
+Dawn에 server id + 공개키만 넘긴 뒤:
+
+| 키 | 위치 |
+|---|---|
+| `PUSH_RELAY_URL` | Dawn `/v1/push` |
+| `PUSH_RELAY_SERVER_ID` | Dawn이 등록한 id |
+| `MOMO_RELAY_SIGNING_KEY_HOST_PATH` | Ed25519 개인키의 호스트 경로 |
+
+자기 Apple 계정·자기 빌드 앱은 같은 이미지에
+`infra/rust/docker-compose.push.yml`(`command: ["push-relay"]`)와 `.p8`
+마운트. 로컬 stub은 Apple에 접속하지 않으며 `MOMO_APNS_ALLOW_STUB=1` 없이
+부팅을 거부한다. 계약: [docs/PUSH_RELAY_RUNBOOK.md](PUSH_RELAY_RUNBOOK.md).
+
+`scripts/oort doctor`는 오버레이가 구성되면(`push-relay`/`notifier` 또는
+오버레이 키) pending `push_candidate`를 outbox 실패로 본다.
+
 ## 멈추기 · 지우기
 
 3단계의 인자 묶음이 길어서, 아래부터는 함수 하나로 줄여 쓴다. 레포 루트에서
