@@ -10379,6 +10379,84 @@ async function captureHostedPairingScenes(browser, scheme) {
   return shots;
 }
 
+async function captureAgentCredentialsScenes(browser, scheme) {
+  beginScene("settings-agents");
+  const shots = [];
+
+  async function shoot(name, install, settle) {
+    const context = await browser.newContext({
+      viewport: VIEWPORT,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/settings?section=agents"');
+    await page.getByTestId("agent-credentials-section").waitFor({ state: "visible" });
+    await settle(page);
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/settings-agents-${name}-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  const emptyList = (context) =>
+    context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+      route.request().method() === "POST"
+        ? json(route, {
+            connection: hostedConnection(),
+            pairingCredential: HOSTED_PAIRING_VALUE,
+            pairingExpiresAtMs: FIXTURE_NOW + 15 * 60 * 1000,
+          })
+        : json(route, { connections: [] })
+    );
+
+  function listWith(connection) {
+    return async (context) => {
+      await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+        json(route, { connections: [connection] })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        (route) => json(route, { connection, cleanupArtifacts: [] })
+      );
+    };
+  }
+
+  await shoot("empty", emptyList, (page) =>
+    page.getByTestId("agent-credentials-empty").waitFor({ state: "visible" })
+  );
+
+  await shoot(
+    "list",
+    listWith(
+      hostedConnection({
+        status: "active",
+        doorbellUrl: "https://hooks.example/a",
+        doorbellSecretMasked: "••••abcd",
+      })
+    ),
+    (page) => page.getByTestId("agent-credentials-list").waitFor({ state: "visible" })
+  );
+
+  await shoot("pairing", emptyList, async (page) => {
+    await sceneClick(page, page.getByTestId("agent-credentials-issue"));
+    await page.getByTestId("hosted-display-name").waitFor({ state: "visible" });
+    await page.getByTestId("hosted-display-name").fill("김인턴");
+    await page.getByTestId("hosted-handle").fill("intern");
+    await sceneClick(page, page.getByTestId("hosted-create"));
+    await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
+  });
+
+  return shots;
+}
+
 // =============================================================================
 // 호스티드 연결 해제와 정리 확인 (goal HAP-UX2 / #1362).
 //
@@ -12571,6 +12649,11 @@ async function main() {
           assertThisPreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
+      } else if (profile === "agents") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureAgentCredentialsScenes(browser, scheme)));
+        }
       } else if (profile === "gallery") {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
@@ -12620,6 +12703,7 @@ async function main() {
           all.push(...(await shot(() => captureSetStatusScenes(browser, scheme))));
           all.push(...(await shot(() => captureSearchScopeScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedPairingScenes(browser, scheme))));
+          all.push(...(await shot(() => captureAgentCredentialsScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedDisconnectScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedDoorbellScenes(browser, scheme))));
           all.push(...(await shot(() => captureConsent(browser, scheme))));
