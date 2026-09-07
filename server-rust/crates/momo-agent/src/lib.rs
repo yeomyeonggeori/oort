@@ -135,7 +135,7 @@
 //!
 //! `tests/conformance_pg.rs` holds this batch's `#[ignore]` red tests, run by the
 //! orchestrator against a fresh `pgvector/pg18` database with
-//! `infra/e2e/bootstrap_roles.sql` applied. Each is named after the invariant it
+//! `infra/rust/sql/bootstrap_roles.sql` applied. Each is named after the invariant it
 //! breaks when reverted.
 
 pub mod a2a;

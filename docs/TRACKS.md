@@ -14,8 +14,8 @@
 
 | 트랙 | 소유 파일군 (현행) | 트랙 브랜치 | 트랙 워크트리 |
 |---|---|---|---|
-| **UXUI** | `clients/web/**`(제품 웹 표면), `clients/desktop/**`(Tauri 셸), `clients/mobile/**`(React Native) — 그리고 은퇴 중인 `clients/macOS/**`·`clients/iOS/**` | `track/uxui` | `~/projects/momo-tracks/uxui` |
-| **엔진** | `server-rust/**`(Rust/Axum), `server/Migrations/**`(정본 DDL), `adapters/**`, `infra/**`, `scripts/**`, `.github/**` — 그리고 은퇴 중인 `server/Sources/**`·`relay/**`·`workers/**`·`services/**`·`clients/Core/**` | `track/engine` | `~/projects/momo-tracks/engine` |
+| **UXUI** | `clients/web/**`(제품 웹 표면), `clients/desktop/**`(Tauri 셸), `clients/mobile/**`(React Native) | `track/uxui` | `~/projects/momo-tracks/uxui` |
+| **엔진** | `server-rust/**`(Rust/Axum), `server/Migrations/**`(정본 DDL), `adapters/**`, `infra/**`, `scripts/**`, `.github/**` | `track/engine` | `~/projects/momo-tracks/engine` |
 
 - 트랙 워크트리 경로는 **메인테이너 로컬 관례**다. 다른 환경에서는 경로만 바꾸고 브랜치 이름(`track/uxui`·`track/engine`)을 지킨다.
 - **공유 계약은 가산 변경 원칙.** 은퇴 중인 `clients/Core`(Swift)의 자리를 지금은 `packages/momo-core`(TypeScript, `@momo/core`)가 맡는다. 계약을 좁히거나 깨는 변경은 반대편 트랙을 먼저 부순다 — `scripts/verify_merge_tree.sh`가 **병합 결과**에서 그것을 잡는다(#1108: 각 브랜치는 초록인데 병합 트리에서만 폰이 무너진 전례).

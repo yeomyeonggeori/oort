@@ -132,7 +132,7 @@ fn ensure_schema_and_roles() {
         .expect("apply every migration on the OAuth conformance DB");
     let roles = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .args([

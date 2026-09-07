@@ -28,7 +28,7 @@
 #   MIGRATE_IDEMPOTENCY_CHECK=0 으로 끌 수 있다.
 #
 # MOMO-001 runtime-verified: PG18 Docker + psql 18 apply 001/002 and idempotent
-# re-run pass. Later M1 tickets cover relay/RLS/hermes runtime gates.
+# re-run pass. Later M1 tickets cover relay, RLS, and hermes runtime gates.
 # =============================================================================
 set -eu
 
@@ -70,7 +70,7 @@ else
 
   적용하려면:
     1) PostgreSQL 18 client 설치 (psql)
-    2) DB 기동:        make up            # infra/docker-compose.yml (PG18)
+    2) DB 기동:        make up            # infra/rust/docker-compose.rust.yml (PG18)
     3) 연결 문자열 지정: export DATABASE_URL=postgres://momo:<pw>@localhost:5432/momo
     4) 재실행:          make migrate
 

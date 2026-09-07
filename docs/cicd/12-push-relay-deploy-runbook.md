@@ -1,5 +1,7 @@
 # 12 — PushRelay 배포·검증 런북 (goal PUSH-1 / ADR-0120 P-3)
 
+> relay 본체(Swift)는 ADR-0183으로 삭제됨 — Rust 이식 #1255(momo-push-relay, 셀프호스트 동봉) 진행 중. 이 문서의 env·서명·id-only 계약은 그대로 유효.
+
 > **이 문서가 있는 이유.** 푸시 종단 경로는 세 조각이다 — 서버(Rust notifier)가
 > 서명한 id-only dispatch를 relay가 받고, relay가 APNs로 HTTP/2 발송하고, 기기의
 > NSE가 그것으로 알림을 완성한다. 양 끝은 이미 있었다(#963, #972). 가운데만

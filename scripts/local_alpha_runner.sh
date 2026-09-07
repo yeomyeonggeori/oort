@@ -291,7 +291,7 @@ EOF
 
 compose_cmd() {
   docker compose --env-file "$ENV_FILE" \
-    -f "$REPO_ROOT/infra/docker-compose.yml" \
+    -f "$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
     -f "$COMPOSE_OVERRIDE" "$@"
 }
 
@@ -407,7 +407,7 @@ if [ -f "\$PIDS_FILE" ]; then
 fi
 
 docker compose --env-file "\$ENV_FILE" \
-  -f "\$REPO_ROOT/infra/docker-compose.yml" \
+  -f "\$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
   -f "\$COMPOSE_OVERRIDE" down
 EOF
   chmod +x "$STOP_SCRIPT"
@@ -507,7 +507,7 @@ print_plan() {
   echo "Execute will run:"
   echo "  1. docker compose up -d --wait (PG18 + Centrifugo v6, local subscribe proxy override)"
   echo "  2. scripts/migrate.sh"
-  echo "  3. scripts/verify_rls.sh to prepare momo_app/momo_relay/momo_worker roles"
+  echo "  3. scripts/verify_rls.sh to prepare momo_app, momo_relay, momo_worker roles"
   echo "  4. MomoServer on http://127.0.0.1:\${PORT:-8080}"
   echo "  5. OutboxRelay and AgentWorker from SwiftPM"
   if [ "$HERMES_MODE" = "external" ] && [ "$EXTERNAL_SMOKE" = "1" ]; then
@@ -649,10 +649,10 @@ echo "[local-alpha] AWS resources: none"
 # host 프로세스(mock Hermes/MomoServer)에만 남는다 — 이들은 compose 서비스가
 # 아니라 healthcheck를 붙일 수 없다.
 run_cmd docker-up docker compose --env-file "$ENV_FILE" \
-  -f "$REPO_ROOT/infra/docker-compose.yml" \
+  -f "$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
   -f "$COMPOSE_OVERRIDE" up -d --wait
 run_cmd docker-ps docker compose --env-file "$ENV_FILE" \
-  -f "$REPO_ROOT/infra/docker-compose.yml" \
+  -f "$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
   -f "$COMPOSE_OVERRIDE" ps
 
 # Persistent local-alpha starts with people/channels only. Agents appear after
@@ -668,7 +668,7 @@ run_cmd migrate env MOMO_AGENT_SEED_MODE=none sh "$REPO_ROOT/scripts/migrate.sh"
 # fail-closed until the documented sops takeover.
 LOCAL_LOGIN_PASSWORD=${MOMO_LOGIN_PASSWORD:-dev-password}
 run_cmd owner-login-bootstrap docker compose --env-file "$ENV_FILE" \
-  -f "$REPO_ROOT/infra/docker-compose.yml" \
+  -f "$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
   -f "$COMPOSE_OVERRIDE" exec -T \
   -e LOCAL_LOGIN_PASSWORD="$LOCAL_LOGIN_PASSWORD" postgres \
   psql -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" <<'SQL'
@@ -703,8 +703,8 @@ SERVER_PID=$(start_bg server env \
   AGENT_GATEWAY_MODE="$AGENT_GATEWAY_MODE" \
   AGENT_GATEWAY_SECRET="$AGENT_GATEWAY_SECRET" \
   MOMO_ALLOW_LEGACY_GATEWAY_SECRET="$MOMO_ALLOW_LEGACY_GATEWAY_SECRET" \
-  swift run --package-path server MomoServer)
-wait_http "http://127.0.0.1:${PORT}/health" "MomoServer"
+  cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-server)
+wait_http "http://127.0.0.1:${PORT}/health" "momo-server"
 
 RELAY_PID=$(start_bg relay env \
   RELAY_DATABASE_URL="$RELAY_DATABASE_URL" \
@@ -712,7 +712,7 @@ RELAY_PID=$(start_bg relay env \
   CENT_API_URL="$CENT_API_URL" \
   CENT_API_KEY="$CENT_API_KEY" \
   RELAY_POLL_INTERVAL_MS="${RELAY_POLL_INTERVAL_MS:-100}" \
-  swift run --package-path relay/OutboxRelay OutboxRelay)
+  cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-relay)
 
 WORKER_PID=$(start_bg worker env \
   RELAY_DATABASE_URL="$WORKER_DATABASE_URL" \
@@ -722,7 +722,7 @@ WORKER_PID=$(start_bg worker env \
   HERMES_BASE_URL="$HERMES_BASE_URL" \
   HERMES_API_KEY="$HERMES_API_KEY" \
   WORKER_POLL_INTERVAL_MS="${WORKER_POLL_INTERVAL_MS:-100}" \
-  swift run --package-path workers/AgentWorker AgentWorker)
+  cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-agent-worker)
 
 sleep 5
 assert_pid_alive "$SERVER_PID" server "$LOG_DIR/server.log"

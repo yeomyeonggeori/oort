@@ -383,7 +383,7 @@ impl From<sqlx::Error> for JoinError {
 /// definer function. Pass a plain pool connection; do not call this inside a
 /// tenant transaction, where it would be redundant.
 ///
-/// Only `momo_app` may execute it (009 + `infra/e2e/bootstrap_roles.sql`), so if
+/// Only `momo_app` may execute it (009 + `infra/rust/sql/bootstrap_roles.sql`), so if
 /// this call ever starts failing with `permission denied`, the API is running
 /// under the wrong role — which is precisely the alarm that grant exists to
 /// raise. The conformance test asserts both halves of it.

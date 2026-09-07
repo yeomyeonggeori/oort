@@ -154,7 +154,8 @@ jobs:
           printf '%s\n' "$files"
 
           # 레인별 관심 경로. 목록에 없는 경로(docs/·STATUS.md·infra/·scripts/·
-          # 은퇴 중인 Swift 트리 server/·relay/·workers/·services/)만 바뀐 PR은
+          # 은퇴한 Swift 트리 f399e417:server/ · f399e417:relay/ ·
+          # f399e417:workers/ · f399e417:services/)만 바뀐 PR은
           # rust/node 레인이 skip된다. skip된 잡은 GitHub에서 성공으로 집계되므로,
           # required check으로 승격해도 문서 PR이 막히지 않는다.
           # gitleaks는 여기 없다: 시크릿은 전 경로라 그 잡은 상시 실행한다.

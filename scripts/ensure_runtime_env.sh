@@ -55,7 +55,7 @@ centrifugo_container_digest() {
 }
 
 centrifugo_container_id() {
-  docker compose --env-file "$env_file" -f infra/docker-compose.yml ps -q centrifugo
+  docker compose --env-file "$env_file" -f infra/rust/docker-compose.rust.yml ps -q centrifugo
 }
 
 validate_centrifugo_running_config() {
@@ -64,7 +64,7 @@ validate_centrifugo_running_config() {
     echo "Centrifugo running-config check deferred: docker CLI unavailable"
     return 0
   fi
-  if [ ! -f infra/centrifugo.json ] || [ ! -f infra/docker-compose.yml ]; then
+  if [ ! -f infra/centrifugo.json ] || [ ! -f infra/rust/docker-compose.rust.yml ]; then
     echo "Centrifugo running-config check requires repo infra files; run from the repo root" >&2
     return 1
   fi
@@ -88,7 +88,7 @@ validate_centrifugo_running_config() {
   if [ "${MOMO_CENTRIFUGO_AUTO_RECREATE:-0}" = "1" ]; then
     echo "Centrifugo running-config drift detected; recreating opted-in service"
     MOMO_CENTRIFUGO_CONFIG_SHA256="$desired_digest" \
-      docker compose --env-file "$env_file" -f infra/docker-compose.yml \
+      docker compose --env-file "$env_file" -f infra/rust/docker-compose.rust.yml \
       up -d --wait --force-recreate centrifugo
     container_id="$(centrifugo_container_id)"
     running_digest="$(centrifugo_container_digest "$container_id")"

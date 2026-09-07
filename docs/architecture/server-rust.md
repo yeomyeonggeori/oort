@@ -1,6 +1,8 @@
 # 타깃 아키텍처 — Rust/Axum 서버 (D1)
 
 > ADR-0145 B안의 Phase 0 산출물 D1. 현재 Swift 서버 실측(`docs/planning/2026-07-30-server-rewrite-plan.md` §0, 조사 2026-07-30)에 기반. **설계 문서 — 코드 착수 전 성재 승인 대상.**
+>
+> LS-1 (#2165): `workd`·LinkShort·codex-workbench는 은퇴(git 히스토리 `f399e417:`). PushRelay 본체(Swift) 삭제 — **Rust 이식 중(#1255)**.
 
 ## 0. 실측이 바꾼 설계 전제 3가지
 

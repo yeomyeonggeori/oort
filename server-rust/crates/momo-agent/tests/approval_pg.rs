@@ -6,13 +6,13 @@
 //! ```
 //!
 //! No other env var is required. The three runtime passwords default to the
-//! committed test-only credentials in `infra/e2e/bootstrap_roles.sql` (:10/:16/
+//! committed test-only credentials in `infra/rust/sql/bootstrap_roles.sql` (:10/:16/
 //! :22) and are overridable with `MOMO_APP_PASSWORD`, `MOMO_WORKER_PASSWORD`
 //! and `MOMO_NOTIFIER_PASSWORD`.
 //!
 //! Harness contract (identical to `conformance_pg.rs` and the worker suite's):
 //! `DATABASE_URL` connects as a **superuser** — applies the migrations via
-//! `momo_db::run_migrations` plus `infra/e2e/bootstrap_roles.sql` through psql,
+//! `momo_db::run_migrations` plus `infra/rust/sql/bootstrap_roles.sql` through psql,
 //! and seeds fixtures bypassing RLS.
 //!
 //! ## Three roles, because the production posture is three roles
@@ -82,7 +82,7 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("DATABASE_URL must point at a throwaway conformance DB")
 }
 
-/// The committed test-only credentials from `infra/e2e/bootstrap_roles.sql`
+/// The committed test-only credentials from `infra/rust/sql/bootstrap_roles.sql`
 /// (not real secrets). Same defaults every other DB suite in this repo uses —
 /// a suite that invented its own would fail auth on the shared gate.
 fn momo_app_password() -> String {
@@ -176,7 +176,7 @@ fn bootstrap_roles_path() -> PathBuf {
     path.pop();
     path.pop();
     path.pop();
-    path.join("infra/e2e/bootstrap_roles.sql")
+    path.join("infra/rust/sql/bootstrap_roles.sql")
 }
 
 fn apply_bootstrap_roles() {
