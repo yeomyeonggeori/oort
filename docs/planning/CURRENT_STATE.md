@@ -1,8 +1,10 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → go: LS-0 #2142 · LS-4 #2143 워커 2기 가동 중 + 1차 목표 두 케이스 구체화·G1' 편성 확정).** 컴팩트 복원 진입점.
+> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → LS-α 완결(LS-4·LS-0 main 정본화, 파일 3,416→2,927) → LS-β(LS-1 #2165 ∥ LS-2 #2166) 패킷 발급, 발사 go 대기. 워커 0).** 컴팩트 복원 진입점.
 >
-> **★ 가동 중(go 2026-09-07 15:0x)**: LS-0(`wls0`, `feat/ls0-gate-rewire`, 정책 감사 대상)·LS-4(`wls4`, `feat/ls4-docs-rotation`) — 미션·rc 파일은 `claudedocs/resume-2026-09-07/RESUME.md`. 종료 시 planner 검토 → 병합 트리 게이트 → track/engine → 승격(LS-0은 감사) → LS-1(engine)·LS-2(uxui) 패킷 발급.
+> **★ 갱신(저녁)**: LS-4 → main `e1975ce9`(문서 −399) · LS-0 → main `6ed61cfb`(scripts 265→168, CI 레인 5→4, web 프로파일=clients/web) — 둘 다 R2 회전(LS-4: 정본·코드 인용 16본 복원+규칙 확장 / LS-0: 문서 명령 게이트·PATH 결정성·ncp 런북 유지). 교훈: 정책 파일 변경은 track·승격·sync PR 셋 다 감사. 선재 #2157. 다음: go → `launch-ls-beta.sh`(LS-1 engine `wls1` ∥ LS-2 uxui `wls2`) → LS-3 → 스냅샷 92.
+>
+> **★ (완료) LS-α**: LS-0 #2142 · LS-4 #2143 랜딩·승격·close.
 > **★ 1차 목표 구체화(성재 지시 「두 케이스 모두 커버」)**: `docs/planning/2026-09-07-first-goal-two-cases.md` — A 그록봇 VM(Funnel·`/workspace`·dial-in 합류·Reset 복구) · B 독립 셀프호스팅(Railway/VPS·hermes=설정 › AI 연결·Claude Code/Codex=Agent Port 자격). E2E 2본 수용기준 · 갭 8 · **G1' 확정**: SH-6a∥SH-5a → #1265∥UX-R2c → SH-8∥SH-9(hermes 런북 현행화) → E2E-B∥E2E-A(#1361, 성재 손) → ITO. 연기: 팔레트·DS-1 잔여·R2d·허들·TURN. 결정 3: 재편성 확정 · work 표면 숨김(LS-2) · G3 문서 삭제(LS-3, external-agent-provider 보존).
 >
 > **★ 갱신(오후)**: 결재 = Accept + 5건 권고안 + **초점 지시(셀프호스팅·그록봇 연동)** → `docs/planning/2026-09-07-lightening-program.md`(§1 초점 점검표: LS-0·1·3 직접 기여, LS-2·4·5 간접 · §4 출시 잔여 재편성 제안 · §5 질문 3: 팔레트·DS-1 연기 승인 / work 표면 숨김 / G3 문서 삭제). 브리프 2본 + 이슈 #2142·#2143 + 워크트리 `wls0`·`wls4`. 다음: go → LS-0 ∥ LS-4 발사(병렬 2) → LS-0 랜딩 시 정책 감사 승격 → LS-1·LS-2 패킷 발급.
