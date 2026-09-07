@@ -2,6 +2,16 @@
 
 > `docs/planning/CURRENT_STATE.md`에서 이동한 과거 스냅샷 원문(불변, newest-first 유지). 로테이션 시 새 이동분을 이 헤더 바로 아래에 prepend한다. 하단의 구 구조 절(§0~§5)은 2026-07 기준 정체 구획으로, 현행 운영과 다르다 — 역사 기록으로만 읽어라(현행: `docs/TRACKS.md`·`CLAUDE.md`).
 
+> 이하 스냅샷 86:
+> **2026-09-04 스냅샷 86 (Fable · momo-main — ★W1 uxui 1차 파도 완결: UX-R1c 5회전 폐곡선 랜딩 + 승격 배치 m → R1a·R1c·R1d·DS-2 전부 main 정본화. 잔여 = R1e·R1b·R2a·R2b(전부 ready, 발사 go 대기)).** 컴팩트 복원 진입점.
+>
+> **★ 랜딩**: **UX-R1c #2045**(스켈레톤 blur 크로스페이드 `Skeleton` 래퍼, **5회전** — R1 B2·H3(죽은 공간 76px·제품 결속 0·펄스) → R2 B1·H2(CI throw 상시 빨강·런타임 3회 초록·Inbox 비로딩) → R3 H1(**R2 수리가 만든 회귀**: 정착 250ms 뒤 152→104 / 136→60px 컨테이너 팝, 빈 상태 8표면) → R4 H1(**R3 수리가 반쪽**: 늘어남 +14/+224px 한 프레임 — `from`을 커밋 후 셀에서 재 `needsSize` false, 가드는 플립 다음 rAF부터 샘플해 maxStep=0) → **R5 PASS**: `from`을 `ready=false` 동안 저장 + `useLayoutEffect` 잠금, 샘플 먼저→플립 가드, 검수자 32트레이스 양방향 검증(플립 직후=플립 전, 정착 후 Δ0, host==content), cap 64 이탈은 「정직 — 상한 모양만 교정」 판정) → uxui `e0b03442`. 워커 1회 Cursor `[resource_exhausted]` 사망 → `--continue` 재개(수리 커밋 보존, 게이트·PR 본문·푸시만 이음).
+> **★ 승격 배치 m**: #2058(uxui→main) — 첫 시도가 「main is ancestor of both tracks」에 걸림(스냅샷 85 승격 #2055의 머지 커밋이 engine에 없었다) → sync #2059(engine m0) 선행 후 검사 재실행 → 머지 + sync #2060(engine m) → **main=f8cc7754·uxui=e0b03442·engine=0bd1b8a9**(uxui는 이 문서 체인의 sync n에서 정합). 보호 경로 변경 0.
+> **★ 발행**: **#2057** UX-R1c R5 잔여(상한 12/30/64 세 숫자 + 64는 120Hz 값(48Hz 빨강) → **이징 기반 단일 규칙** `step ≤ Δtotal·y(Δt/240)·margin`, 페이드 창은 Δh로 늘리지 않음(검수 권고 채택) · Sidebar 2차 래핑 소스 결속 · grow 위→아래 리빌 무기록 · 부하 선언 7개 무보호 · capture intro 선재 플레이크 2/5).
+> **★ 정정**: PIPELINE §3 재개 플래그 `-c` → **`--continue`**(cursor-agent 2026.09.02에서 `-c`=폐기된 `--cloud`, 즉시 exit 1). 승격 뒤 sync는 **소스 트랙에도**(머지 커밋) — 두 트랙 모두 main을 조상으로 둔 뒤 다음 승격.
+> **★ 교훈(85에 추가)**: ⑧수리가 수리를 부르는 사슬(R2→R3→R4)은 매번 「끝 상태는 옳고 **구간/방향**이 빠진」 모양 — 검수 프롬프트에 「이전 수리가 만든 회귀를 먼저 찾아라」 상설 ⑨per-case 숫자 상한은 프레임레이트에 묶인다 — 이징 함수에 대고 단정 ⑩워커 stdout 절단·접속 끊김·API 소진은 상시 — 보고 정본은 PR 본문, 감시는 rc 파일, 재개는 `--continue`.
+> **★ 다음(go 대기)**: UX-R1e #2000 · UX-R1b #1997 · UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2) · 성재 결정 #2050 N-2(바닥 동시 도착 상한) · ITO(G1) 준비.
+
 > 이하 스냅샷 85:
 > **2026-09-04 스냅샷 85 (Fable · momo-main — ★W1 3차 랜딩: UX-R1a·UX-R1d 폐곡선 랜딩 + DS-2 승격, 배치 l. UX-R1c는 R4 수리 중. 레인 = Fable planner + Opus 5 검수 + Cursor grok 4.6 워커).** 컴팩트 복원 진입점.
 >

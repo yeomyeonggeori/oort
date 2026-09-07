@@ -3,6 +3,14 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (재개·밤3) · Fable · ★LS-β 완결(LS-1·LS-2 main 정본화) + LS-5 이슈 위생 + LS-γ 패킷(LS-3 #2182 · SH-10 #1255) — 스냅샷 92
+
+- **LS-1 랜딩**(PR #2177 R1 8 + R2 2; 정정 1회 PushRelay): Swift 4트리·infra/prod·Swift e2e·eve·workd·codex-workbench·examples 삭제(313), `.swift` 224→8(RN 셸), Swift e2e 전제 verifier 19 삭제·재조준, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제 → 감사 랜딩·승격 ai·sync 감사 → main. R2 발견 선재 **#2181**(gate:csp-deploy가 SH-2 템플릿에서 빨강).
+- **LS-2 랜딩**(PR #2175): clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5), Case 6 라이선스 시험 정합, NOTICE 2본은 GHCR 매니페스트 해시 고정으로 base 유지 → 승격 ah → main. dependabot web-legacy 3건 close.
+- **LS-5**: `area:ios`·`area:macos` 29건 판정 — Swift 시대 17건 close(superseded/은퇴), iOS 앱스토어 v0 요건·RN 패리티 10건 유지(#20·#21·#22·#30·#31 등).
+- **경량화 누계**: 추적 파일 3,416 → **2,502**(−914, 27%) · scripts 265→149 · `.swift` 224→8 · handoffs 302→76 · research 112→36 · CI 레인 5→4. 남은 LS: **LS-3 #2182**(은퇴 문서·INDEX·Codex·G3·ncp 런북 회전 절 이식, 감사) — 패킷 발급. **SH-10 #1255**(momo-push-relay Rust, 셀프호스트 동봉 3 모드) 패킷 발급 → LS-γ = LS-3 ∥ SH-10(병렬 2), 발사는 go.
+- 열린 결재(성재): G2에 iOS 앱스토어 v0 포함(§7). 교훈: ①정책 파일 변경은 track·승격·sync PR 셋 다 감사(자동화됨) ②GHCR 고지 매니페스트가 NOTICE 해시를 고정 — 문구 정리 금지 ③수동 게이트(gate:csp-deploy)는 배선이 없으면 드리프트가 안 보인다(#2181 배선 결정).
+
 ## 2026-09-07 (밤2) · Fable · ★안전 중단 — LS-2 main 정본화 · LS-1 PR #2177 R2 대기 · 재개 절차 고정
 
 - **LS-2 랜딩**(PR #2175 R1 6 + R2 2 + planner 위생 1: NOTICE·THIRD_PARTY는 GHCR 고지 매니페스트 해시 고정이라 base 바이트 유지) → 감사(AGENTS 1행·test_license_gate Case 6) → track/uxui → #2166·dependabot #1355~1357 close → 승격 ah #2176 → main → sync engine #2178(자동 감사)·uxui #2179. 결과: clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5).
