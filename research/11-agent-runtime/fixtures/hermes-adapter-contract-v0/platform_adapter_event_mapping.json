@@ -1,0 +1,76 @@
+{
+  "schema": "momo.hermes_adapter_contract.platform_adapter_event_mapping.v0",
+  "mode": "hermes_platform_adapter_optional_ingress",
+  "owner": "hermes_gateway_loads_adapter_momo_owns_rest_write",
+  "adapter_contract": {
+    "class": "MomoAdapter",
+    "platform_name": "momo",
+    "primitives": [
+      "connect",
+      "send",
+      "handle_message"
+    ]
+  },
+  "input_centrifugo_push": {
+    "push": {
+      "channel": "user:ws10000000-0000-7000-8000-000000000001.30000000-0000-7000-8000-000000000020",
+      "pub": {
+        "data": {
+          "type": "mention",
+          "v": 1,
+          "seq": 42,
+          "ts": "2026-06-26T09:30:00Z",
+          "payload": {
+            "workspaceId": "10000000-0000-7000-8000-000000000001",
+            "channelId": "20000000-0000-7000-8000-000000000010",
+            "messageId": "50000000-0000-7000-8000-000000000040",
+            "authorMemberId": "70000000-0000-7000-8000-000000000060",
+            "agentMemberId": "30000000-0000-7000-8000-000000000020",
+            "body": "@kim-intern please draft the release checklist issue"
+          }
+        }
+      }
+    }
+  },
+  "unwrapped_adapter_event": {
+    "channel": "user:ws10000000-0000-7000-8000-000000000001.30000000-0000-7000-8000-000000000020",
+    "type": "mention",
+    "seq": 42,
+    "ts": "2026-06-26T09:30:00Z",
+    "payload": {
+      "workspaceId": "10000000-0000-7000-8000-000000000001",
+      "channelId": "20000000-0000-7000-8000-000000000010",
+      "messageId": "50000000-0000-7000-8000-000000000040",
+      "authorMemberId": "70000000-0000-7000-8000-000000000060",
+      "agentMemberId": "30000000-0000-7000-8000-000000000020",
+      "body": "@kim-intern please draft the release checklist issue"
+    }
+  },
+  "expected_momo_mapping": {
+    "actionability": "mention and dm.signal only",
+    "loop_guard": "ignore event when payload.authorMemberId equals the adapter agent member id",
+    "invoke": {
+      "method": "POST",
+      "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/channels/20000000-0000-7000-8000-000000000010/agents/30000000-0000-7000-8000-000000000020/invoke",
+      "body": {
+        "prompt": "@kim-intern please draft the release checklist issue",
+        "idempotencyKey": "momo:mention:50000000-0000-7000-8000-000000000040"
+      }
+    },
+    "final_message_send": {
+      "method": "POST",
+      "path": "/v1/workspaces/10000000-0000-7000-8000-000000000001/channels/20000000-0000-7000-8000-000000000010/messages",
+      "body": {
+        "clientMsgId": "40000000-0000-7000-8000-000000000030:final",
+        "type": "text",
+        "body": "Drafted a release checklist issue proposal for approval.",
+        "runId": "40000000-0000-7000-8000-000000000030"
+      }
+    }
+  },
+  "not_product_default_reasons": [
+    "Hermes gateway owns adapter loading and SDK shape",
+    "live plugin manifest/runtime is not verified in this ticket",
+    "momo approval/cost/audit controls must remain authoritative before broad product use"
+  ]
+}
