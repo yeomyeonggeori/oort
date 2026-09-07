@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Static fail-closed contract for the Rust/NCP Centrifugo subscribe boundary.
+# Static fail-closed contract for the Rust/public-edge Centrifugo subscribe boundary.
 #
 # This verifier never reads an operator env file and never contacts a host.  It
 # proves that the tracked edge/compose/runbook bytes still describe one private
 # callback rail.  Live status and secret-fingerprint equality are verified by
-# scripts/verify_ncp_centrifugo_boundary.sh after an attended deployment.
+# scripts/verify_public_edge_centrifugo_boundary.sh after an attended deployment.
 set -euo pipefail
 
 fail() {
-  printf '[ncp-cent-contract] FAIL %s\n' "$*" >&2
+  printf '[public-edge-cent-contract] FAIL %s\n' "$*" >&2
   exit 1
 }
 
 pass() {
-  printf '[ncp-cent-contract] PASS %s\n' "$*"
+  printf '[public-edge-cent-contract] PASS %s\n' "$*"
 }
 
 service_block() {
@@ -34,7 +34,7 @@ CONTRACT_ROOT="${MOMO_NCP_CONTRACT_ROOT:-$REPO_ROOT}"
 CADDYFILE="$CONTRACT_ROOT/infra/rust/Caddyfile"
 COMPOSE="$CONTRACT_ROOT/infra/rust/docker-compose.rust.yml"
 RUNBOOK="$CONTRACT_ROOT/docs/runbooks/ncp-rust-deploy.md"
-RUNTIME_VERIFIER="$CONTRACT_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
+RUNTIME_VERIFIER="$CONTRACT_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh"
 
 for path in "$CADDYFILE" "$COMPOSE" "$RUNBOOK" "$RUNTIME_VERIFIER"; do
   [ -f "$path" ] || fail "required_file_missing path=${path#"$CONTRACT_ROOT"/}"
@@ -122,4 +122,4 @@ grep -Fq '`--edge-url`은 목적지를 신뢰하게 만드는 입력이 아니�
   || fail "runbook_missing trusted-origin boundary"
 pass "runbook pins attended verification, rotation, and rollback"
 
-printf '[ncp-cent-contract] PASS complete\n'
+printf '[public-edge-cent-contract] PASS complete\n'

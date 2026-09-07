@@ -68,35 +68,27 @@ cd "$ROOT"
 # The table. One row per compose rendering this repository documents, in the
 # form `label|env templates|compose files`. A rendering is a command an operator
 # or a verifier actually runs, not a hypothetical layering: the sources are
-# docs/RUN.md §2.3, docs/DEPLOY.md, infra/rust/README.md §2, the header comment
-# of docker-compose.internal-smoke.yml, docs/runbooks/ncp-rust-deploy.md,
-# docs/cicd/12-push-relay-deploy-runbook.md and docs/SELF_HOST.md.
+# infra/rust/README.md §2, docs/cicd/12-push-relay-deploy-runbook.md,
+# docs/runbooks/pgbackrest-pitr.md and docs/SELF_HOST.md. Retired infra/prod
+# renderings and the NCP overlay row are out of this gate (#2142 / ADR-0183).
 #
 # Adding a compose file or an env template without adding it here is itself a
 # failure — see the two coverage checks at the bottom.
 # -----------------------------------------------------------------------------
 RENDERINGS=(
-  "prod deploy, host env file (docs/DEPLOY.md · infra/prod/install.sh --env-file)|infra/prod/.env.example|infra/prod/docker-compose.prod.yml"
-  "prod deploy, SOPS process env (docs/RUN.md §2.3 sops exec-env)|infra/prod/secrets.env.example|infra/prod/docker-compose.prod.yml"
-  "internal hosting smoke (scripts/verify_internal_hosting_smoke.sh)|infra/prod/internal-smoke.env.example|infra/prod/docker-compose.prod.yml infra/prod/docker-compose.internal-smoke.yml"
   "rust base stack (infra/rust/README.md §2)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml"
   "rust base + local build (infra/rust/README.md §3)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.rust.build.yml"
   "rust + push path (docs/cicd/12-push-relay-deploy-runbook.md)|infra/rust/rust-smoke.env.example infra/rust/push-relay.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.push.yml"
-  "rust + deploy overlays (docs/runbooks/ncp-rust-deploy.md)|infra/rust/rust-smoke.env.example infra/rust/overlays.env.example|infra/rust/docker-compose.rust.yml infra/rust/t3.override.yml infra/rust/caddy.override.yml infra/rust/cent-origin.override.yml"
+  "rust + public-edge overlays (infra/rust caddy/t3/cent-origin)|infra/rust/rust-smoke.env.example infra/rust/overlays.env.example|infra/rust/docker-compose.rust.yml infra/rust/t3.override.yml infra/rust/caddy.override.yml infra/rust/cent-origin.override.yml"
   "rust + local edge (docs/SELF_HOST.md)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml infra/rust/local.override.yml"
   "rust + encrypted POSIX backup pre-proof transition (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup-preproof.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
   "rust + encrypted POSIX backup/PITR signed run (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
   "rust + S3-compatible backup/PITR seam (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example infra/rust/pgbackrest-s3.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml infra/rust/pgbackrest.s3.override.yml"
 )
 
-# Env templates under infra/prod and infra/rust that are NOT compose env files.
+# Env templates under infra/rust that are NOT compose env files in this table.
 # Anything here is exempt from the table; everything else must be in it.
-NON_COMPOSE_ENV_TEMPLATES=(
-  # MOMO-233 topology fixture: consumed only by
-  # scripts/aws_internal_alpha_preflight.sh --env-file, which reads instance
-  # types and CIDRs. It is never handed to docker compose.
-  "infra/prod/aws-internal-alpha.env.example"
-)
+NON_COMPOSE_ENV_TEMPLATES=()
 
 FAILURES=0
 CHECKED=0
@@ -193,25 +185,33 @@ while IFS= read -r yml; do
   [ -n "$(required_keys "$yml")" ] || continue
   grep -qxF "$yml" <<<"$tabled_compose" ||
     fail "$yml requires \${VAR:?} but no rendering in this script names it — add a row so its variables are checked against some template"
-done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
+done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) ! -path 'infra/prod/*' | LC_ALL=C sort)
 
 # -----------------------------------------------------------------------------
 # Coverage 2 — no env template may sit outside the table unexplained.
 # -----------------------------------------------------------------------------
-tabled_env="$(for row in "${RENDERINGS[@]}"; do
-  rest="${row#*|}"; tr ' ' '\n' <<<"${rest%%|*}"
-done
-printf '%s\n' "${NON_COMPOSE_ENV_TEMPLATES[@]}" | LC_ALL=C sort -u)"
+tabled_env="$(
+{
+  for row in "${RENDERINGS[@]}"; do
+    rest="${row#*|}"; tr ' ' '\n' <<<"${rest%%|*}"
+  done
+  if [ "${#NON_COMPOSE_ENV_TEMPLATES[@]}" -gt 0 ]; then
+    printf '%s\n' "${NON_COMPOSE_ENV_TEMPLATES[@]}"
+  fi
+} | LC_ALL=C sort -u
+)"
 
 while IFS= read -r tpl; do
   [ -n "$tpl" ] || continue
   grep -qxF "$tpl" <<<"$tabled_env" ||
     fail "$tpl is an env template no rendering uses — add it to a row, or to NON_COMPOSE_ENV_TEMPLATES with the reason it is not a compose env"
-done < <(find infra/prod infra/rust -maxdepth 1 -type f -name '*.env.example' | LC_ALL=C sort)
+done < <(find infra/rust -maxdepth 1 -type f -name '*.env.example' | LC_ALL=C sort)
 
-for tpl in "${NON_COMPOSE_ENV_TEMPLATES[@]}"; do
-  [ -f "$tpl" ] || fail "NON_COMPOSE_ENV_TEMPLATES names a file that no longer exists: $tpl"
-done
+if [ "${#NON_COMPOSE_ENV_TEMPLATES[@]}" -gt 0 ]; then
+  for tpl in "${NON_COMPOSE_ENV_TEMPLATES[@]}"; do
+    [ -f "$tpl" ] || fail "NON_COMPOSE_ENV_TEMPLATES names a file that no longer exists: $tpl"
+  done
+fi
 
 if [ "$FAILURES" -ne 0 ]; then
   echo "[compose-env] $FAILURES check(s) failed" >&2
