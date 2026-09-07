@@ -17,7 +17,7 @@
 
 | 도메인 | 있는 것 | 없는 것 | 기존 예약 |
 |---|---|---|---|
-| 푸시 | `device`/`push_token`/`push_dispatch_log` 테이블(`001_init.sql:506-543`), APNs 운영 상수 문서(`docs/DEPLOY.md:447-451`) | 토큰 등록 라우트, 발송 worker, 판정 로직, **oort 운영 push relay(신규 결정 필요)** | M5 · MOMO-040~043 |
+| 푸시 | `device`/`push_token`/`push_dispatch_log` 테이블(`001_init.sql:506-543`), APNs 운영 상수 문서(`docs/SELF_HOST.md:447-451`) | 토큰 등록 라우트, 발송 worker, 판정 로직, **oort 운영 push relay(신규 결정 필요)** | M5 · MOMO-040~043 |
 | presence/typing | Centrifugo namespace presence 켜짐(`infra/centrifugo.json:4,9,12`), 클라 `PresenceDelta`/`TypingDelta` 모델, `ChatBackend.setTyping` 프로토콜 | 서버 소유 경로 전무 — `setTyping`은 no-op(`MomoServerRESTChatBackend.swift:562`), heartbeat 없음 | ADR-0104 (결정 큐) |
 | 파일 | `file` 테이블 + `message_type='artifact'`(`001_init.sql:227-246`), Drive 설계(`research/13-redesign/03`)·GWS 런북 | 업로드/서빙 라우트, 클라 경로 전부 | **동결** — ADR-0113/0116 게이트 |
 | 웹훅 | 채널 설정 placeholder 탭(`MomoAccountSettingsViews.swift:1060-1065`) | 발급·서명·수신 전부 | ADR-0115 + SE-04A/B |
@@ -25,13 +25,13 @@
 | iOS | MomoCore iOS 타깃(`clients/Core/Package.swift:16`), fastlane lane, release-ios.yml | 앱 소스(`clients/iOS` 없음) | M5 · EP-IOS · MOMO-040~043 |
 | 그룹채팅 | **완비** — channel/membership/channel_seq/DM(dm_key)·read_state 전부 코어 | (없음 — 신규 결정 불요) | — |
 | 배포판 | prod compose 8서비스 + Caddy TLS + SOPS + pgBackRest + GHCR 수동 발행 + preflight | install/upgrade 스크립트(ADR-0002 예약), 비개발자 포장, 단일노드 상한 문서 | ADR-0002/0107/0108 |
-| 리전 | 명시적 단일 노드(EC2 t4g.large) + 확장 레버 문서(`docs/DEPLOY.md:504-515`) | 멀티 리전 관련 일체(의도적) | **미예약** — 05 리서치 결론: 불요 |
+| 리전 | 명시적 단일 노드(EC2 t4g.large) + 확장 레버 문서(`docs/SELF_HOST.md:504-515`) | 멀티 리전 관련 일체(의도적) | **미예약** — 05 리서치 결론: 불요 |
 | 초대/합류 | invite hash 발급/redeem/revoke + 공개 `/v1/join`(`JoinRoutes.swift:20-57`) + 감사 | universal link/QR, 앱 미설치 관통 흐름 | ADR-0112 D4 (온보딩 여정) |
 | 멀티 워크스페이스 | 서버/DB day-1 멀티테넌트 (RLS FORCE) | 클라이언트 UI (의도적 잠금) | ADR-0117 |
 
 ## 스케일 준비도 (재확인)
 
-- API stateless (다중화 가능), relay/worker `SKIP LOCKED`(다중 안전), Centrifugo prod=Redis 엔진(노드 추가 가능), 순서/복구 권위는 PG(`docs/DEPLOY.md:279`).
+- API stateless (다중화 가능), relay/worker `SKIP LOCKED`(다중 안전), Centrifugo prod=Redis 엔진(노드 추가 가능), 순서/복구 권위는 PG(`docs/SELF_HOST.md:279`).
 - 유의: in-process rate limiter(`App.swift:37`)는 프로세스 로컬 — API 다중화 시 per-IP 한도가 인스턴스별로 쪼개진다. 다중화 티켓에 함께 기록할 것.
 
 ## 이 리서치가 존중하는 경계

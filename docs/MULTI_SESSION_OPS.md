@@ -1,6 +1,6 @@
 # Multi-session Worktree Operations
 
-> Purpose: run five or more Codex sessions without issue, branch, worktree, runtime, or review collisions.
+> Purpose: run five or more 워커 레인 sessions without issue, branch, worktree, runtime, or review collisions.
 > Canonical rule: one GitHub Issue = one goal = one branch = one worktree = one PR.
 
 ## 0. Operating Model
@@ -247,7 +247,7 @@ PR evidence must come from a clean worktree. Exploratory pre-commit runs may use
 
 ## 9. Resource Governance (호스트 부하 규칙 — 2026-07-17 발열 사고 후 정본)
 
-> 적용 대상: **oort에서 게이트/빌드/soak를 돌리는 모든 세션**(Fable 엔진 트랙, GPT momo-main/UX 트랙, Codex worker 러너). 이 머신에서는 tf-hwp 등 다른 프로젝트도 병행되므로 oort 세션 합산이 아니라 **호스트 전체 기준**으로 판단한다.
+> 적용 대상: **oort에서 게이트/빌드/soak를 돌리는 모든 세션**(기획 엔진 트랙, momo-main/UX 트랙, 워커 레인). 이 머신에서는 tf-hwp 등 다른 프로젝트도 병행되므로 oort 세션 합산이 아니라 **호스트 전체 기준**으로 판단한다.
 
 ### 9.1 부하 체크 게이트 (heavy 작업 전 의무)
 
@@ -273,7 +273,7 @@ docker ps --format '{{.Names}}' | grep -c momo   # 활성 momo 스택 수
 2. docker-heavy 게이트는 **호스트 전체에서 동시 1개** — 다른 트랙이 게이트 중이면(`docker ps`에서 분 단위 신생 oort 스택 관찰) 대기.
 3. goal 종결(머지·close) 시 해당 goal의 worktree 제거 + compose 스택 down + network rm까지가 종결이다.
 4. 배치 종결마다 `scripts/compose_janitor.sh --cleanup`(`momo_`와 `momo240_` stale project 대상, 볼륨 불변; [`LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md#2-standard-script)) + `docker builder prune -f --filter until=72h`. 주 1회 `~/.local/bin/momo-docker-reclaim.sh --aggressive`.
-5. 무거운 타 프로젝트 병행 시 Codex worker 동시 spawn 1~2로 제한(평시 상한 5와 별개의 부하 상한).
+5. 무거운 타 프로젝트 병행 시 워커 동시 spawn 1~2로 제한(평시 상한 5와 별개의 부하 상한).
 
 ### 9.3 판별 팁
 
@@ -281,4 +281,4 @@ docker ps --format '{{.Names}}' | grep -c momo   # 활성 momo 스택 수
 
 ## 10. Thread Tool Note
 
-If Codex thread tools are available, `momo-main` can create or hand off worker threads. If tools are unavailable or awkward, use the prompt template above. The durable lock remains GitHub Issue + remote branch + PR, not the chat itself.
+If worker-lane tools are available, `momo-main` can create or hand off worker threads. If tools are unavailable or awkward, use the prompt template above. The durable lock remains GitHub Issue + remote branch + PR, not the chat itself.

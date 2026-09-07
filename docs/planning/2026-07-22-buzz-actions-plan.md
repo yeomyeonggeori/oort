@@ -8,7 +8,7 @@
 
 **oort 태세 감사 — buzz A-RLS 공리 대비:**
 - A-RLS-1(전 테이블 정책) PASS(59개 중 의도적 제외 1) · A-RLS-3(SET LOCAL, 풀 잔류 없음) PASS · A-RLS-4(SECURITY DEFINER 1건, 통제됨) PASS · 에러 sanitize 양호.
-- **A-RLS-2 PARTIAL — Critical**: prod 정본 템플릿(`infra/prod/secrets.env.example:46` + `docker-compose.prod.yml:138`)의 API 접속 롤이 `momo` = **postgres 수퍼유저**. 수퍼유저는 FORCE RLS도 무시하므로 prod 템플릿 배포에서는 RLS가 전면 무효다. (검수 정정: 롤 부트스트랩 기계장치 자체는 이미 상당 부분 존재 — migrate 이미지의 `internal-smoke-migrate.sh`가 3롤 존재+NOBYPASSRLS 태세를 fail-closed 어서션하고, `prod_env_preflight.sh` internal-host 모드는 momo_app URL 검증까지 한다. **실갭은 4개로 좁혀진다**: ①시크릿 템플릿의 API URL이 `momo` ②install.sh 롤 프로비저닝 부재 ③api/migrate DATABASE_URL 변수 미분리 ④API 기동 시 current_user non-superuser 어서션 부재 + DEPLOY.md §5.2 표에 momo_app/momo_worker 부재.)
+- **A-RLS-2 PARTIAL — Critical**: prod 정본 템플릿(`infra/prod/secrets.env.example:46` + `docker-compose.prod.yml:138`)의 API 접속 롤이 `momo` = **postgres 수퍼유저**. 수퍼유저는 FORCE RLS도 무시하므로 prod 템플릿 배포에서는 RLS가 전면 무효다. (검수 정정: 롤 부트스트랩 기계장치 자체는 이미 상당 부분 존재 — migrate 이미지의 `internal-smoke-migrate.sh`가 3롤 존재+NOBYPASSRLS 태세를 fail-closed 어서션하고, `prod_env_preflight.sh` internal-host 모드는 momo_app URL 검증까지 한다. **실갭은 4개로 좁혀진다**: ①시크릿 템플릿의 API URL이 `momo` ②install.sh 롤 프로비저닝 부재 ③api/migrate DATABASE_URL 변수 미분리 ④API 기동 시 current_user non-superuser 어서션 부재 + SELF_HOST.md §5.2 표에 momo_app/momo_worker 부재.)
 - A-RLS-5 PARTIAL: 존재 누설 unique 3건(push token 409 문구가 "다른 워크스페이스에 등록됨"을 명시 반환 `DeviceRoutes.swift:199` / attachment drive_file_uniq 글로벌 / workspace slug — 미노출 예약 지뢰), 코어 FK 단일 컬럼(신규 마이그레이션은 복합 FK 채택 중).
 - 루프 방어 PASS(depth·round CHECK + G1~G3·G5 이중, A2A 핑퐁도 G2가 각자 3회 차단) — 단 **depth 전파 미구현**(enqueue 항상 0 → depth≤4 CHECK가 실제로 안 물림), G4 SimHash 스텁.
 - **휴먼 정지권 FAIL**: 진행 중 run을 사람이 멈추는 REST 부재(openapi 전 경로 확인), macOS `cancelRun` TODO 스텁(`LiveChatBackend.swift:1174`). work-control kill은 agent bearer 전용. buzz "킬스위치가 어떤 제품 표면에서도 도달 불가능" 교훈의 oort판.
@@ -25,7 +25,7 @@
 
 | 티켓 후보 | 내용 | 근거 갭 | 주 파일 |
 |---|---|---|---|
-| **MOMO-554** (Critical) | **prod 보안 태세 정정**: e2e bootstrap_roles의 prod 승격(momo_app/momo_worker 생성+NOBYPASSRLS 어서션), secrets.env.example API URL을 momo_app으로, install.sh 롤 단계, internal-smoke rolbypassrls 어서션의 prod 헬스게이트화, plugin_registry momo_app 쓰기 REVOKE, DeviceRoutes 409 문구 일반화, DEPLOY.md §5.2 정정 | A-RLS-2 Critical + A-RLS-5 문구 누설 | `infra/prod/*`, `server/.../DeviceRoutes.swift`, `docs/DEPLOY.md` |
+| **MOMO-554** (Critical) | **prod 보안 태세 정정**: e2e bootstrap_roles의 prod 승격(momo_app/momo_worker 생성+NOBYPASSRLS 어서션), secrets.env.example API URL을 momo_app으로, install.sh 롤 단계, internal-smoke rolbypassrls 어서션의 prod 헬스게이트화, plugin_registry momo_app 쓰기 REVOKE, DeviceRoutes 409 문구 일반화, SELF_HOST.md §5.2 정정 | A-RLS-2 Critical + A-RLS-5 문구 누설 | `infra/prod/*`, `server/.../DeviceRoutes.swift`, `docs/SELF_HOST.md` |
 | **MOMO-555** | **local_gate 하드닝 3종**: ①branch-skew 프리플라이트(merge-base 이후 origin/main이 내 변경 파일을 수정했으면 FAIL, pre-push hook 옵션) ②마이그레이션 중복 번호 검출(migrate.sh 선두+정적 검사) ③evidence artifact sha256 매니페스트 | 파이프라인 가드 FAIL 3종 | `scripts/local_gate.sh`, `scripts/migrate.sh` |
 | **MOMO-556** | **공급망 게이트**: check_spm_licenses.sh 신설(Package.resolved+checkouts LICENSE 대조, copyleft 거부)+THIRD_PARTY 자동 재생성+local_gate swift 프로파일 편입+dependabot(npm/docker/actions) | SPM 수동·renovate 부재 (evalexpr AGPL 실사건) | `scripts/`, `legal/`, `.github/` |
 
@@ -68,7 +68,7 @@ ADR-0132(`docs/adr/0132-agent-interaction-safety-contract.md`) 5결정: D1 휴�
 | **P0** | **MOMO-554 prod 롤 태세** | **main 랜딩+내부 알파 스택 재배포까지** — RLS 하드 룰의 실집행이 걸린 Critical. **리허설 Phase1 선행** | 성재 승인 즉시. 외부 공개·차기 배포 전 필수 |
 | P1 | MOMO-555→556 게이트 하드닝 (기존 위임 큐 ①과 합류) | main 랜딩(게이트는 랜딩=적용) | 554와 병렬, 555·556은 순차(local_gate 겹침) |
 | P1.5 | ADR-0132 승인 → 557→558, 559 | main 랜딩 — dogfood 안전 직결(폭주 에이전트를 사람이 못 멈추는 상태 해소) | 성재 option 승인 |
-| P2 | H3 560·561·563 셀프호스팅 제품화 (562는 ADR-0121 증보 선행) | main 랜딩, **공개 게이트(법무+공개 이미지 결정)와 정렬해 배포판에 편입** | H1 랜딩 후 순차(561은 554와 DEPLOY.md 겹침 — 후행). 리허설 Phase2(성재 VPS)와 정렬 |
+| P2 | H3 560·561·563 셀프호스팅 제품화 (562는 ADR-0121 증보 선행) | main 랜딩, **공개 게이트(법무+공개 이미지 결정)와 정렬해 배포판에 편입** | H1 랜딩 후 순차(561은 554와 SELF_HOST.md 겹침 — 후행). 리허설 Phase2(성재 VPS)와 정렬 |
 | P3 | Wave U″ | UXUI 트랙 재량(track/uxui까지 자율, main은 성재 승인) | ENGINE_HANDOFF 등재 후 |
 | 관찰 | buzz 재방문(4~6주 후 — 외부 기여 유입·Nostr 논쟁·승인 executor 향방) | — | 자동 |
 
@@ -82,7 +82,7 @@ ADR-0132(`docs/adr/0132-agent-interaction-safety-contract.md`) 5결정: D1 휴�
 momo Wave H(buzz 교훈 집행) 오케스트레이션을 인수한다.
 정본: docs/planning/2026-07-22-buzz-actions-plan.md (계획) + 2026-07-22-buzz-competitive-analysis.md (근거) + docs/adr/0132-agent-interaction-safety-contract.md. 검수 반영 완료본이다(§5).
 성재 승인 범위를 먼저 확인하라: (a) H1만 / (b) H1+ADR-0132(→H2) / (c) H1+H2+H3.
-집행 순서: ①H1 3장(554·555·556) 이슈 발급(§4.2 프롬프트=이슈 본문, 패킷은 handoffs/2026-07-22-buzz-hardening-batch.md로 승격. 기존 위임 큐 '게이트 부채 배치'와 같은 배치로 합쳐도 좋다) — 554∥555→556 순서(555·556은 local_gate.sh 겹침) ②554 랜딩 후 실배포 리허설 Phase1을 새 롤 태세로 실행(순서 고정: 554→리허설) + 내부 알파 재배포 여부 성재 확인 ③ADR-0132 Accepted면 557→558, 559 병렬 ④H3는 561이 DEPLOY.md에서 554와 겹치므로 554 랜딩 후 발급. 562는 ADR-0121 관측 증보 Accepted 전 발급 금지.
+집행 순서: ①H1 3장(554·555·556) 이슈 발급(§4.2 프롬프트=이슈 본문, 패킷은 handoffs/2026-07-22-buzz-hardening-batch.md로 승격. 기존 위임 큐 '게이트 부채 배치'와 같은 배치로 합쳐도 좋다) — 554∥555→556 순서(555·556은 local_gate.sh 겹침) ②554 랜딩 후 실배포 리허설 Phase1을 새 롤 태세로 실행(순서 고정: 554→리허설) + 내부 알파 재배포 여부 성재 확인 ③ADR-0132 Accepted면 557→558, 559 병렬 ④H3는 561이 SELF_HOST.md에서 554와 겹치므로 554 랜딩 후 발급. 562는 ADR-0121 관측 증보 Accepted 전 발급 금지.
 예약: 마이그레이션 다음=037부터(H2 필요 시), verifier 포트 다음=28170대부터. 이 배치 자체가 번호 충돌 사고 클래스를 만들지 않게 발급 시 이슈 본문에 명기하라.
 불변: 머지 순차, worker merge 금지, schema_v0 불변, 머지 후 push 전 마커 grep+macOS 빌드 게이트(통합 규율), 검수 시 verifier는 최종 소비 지점 단정, JOURNAL/CURRENT_STATE 플러시.
 ```
@@ -93,7 +93,7 @@ momo Wave H(buzz 교훈 집행) 오케스트레이션을 인수한다.
 ```
 목표: prod 배포 템플릿이 RLS FORCE 불변식을 실제로 집행하게 한다. 현재 API가 수퍼유저 `momo`로 접속해 RLS가 무효다.
 전제(기존 기계장치 — 새로 만들지 마라): migrate 이미지 엔트리포인트 `infra/prod/docker/internal-smoke-migrate.sh`가 이미 3롤 존재+NOSUPERUSER+BYPASSRLS 태세를 fail-closed 어서션하고(`MOMO_BOOTSTRAP_RUNTIME_ROLES=0` 분기), `scripts/prod_env_preflight.sh` internal-host 모드에 `MOMO_APP_DATABASE_URL`/`MIGRATE_DATABASE_URL` 검증 문법이 이미 있다. 이 배선을 staging/prod 템플릿까지 연장하는 작업이다.
-작업: ①install.sh에 롤 프로비저닝 단계(infra/e2e/bootstrap_roles.sql 패턴의 prod판, idempotent) ②docker-compose.prod.yml에서 api/migrate의 DATABASE_URL **변수 분리** — api=momo_app 계열, migrate=기존 상위 롤. secrets.env.example 갱신 ③API 기동 시 current_user non-superuser+NOBYPASSRLS 어서션(위반 시 기동 거부 fail-closed) ④plugin_registry에 momo_app INSERT/UPDATE/DELETE REVOKE ⑤DeviceRoutes.swift:199 409 문구를 워크스페이스 언급 없는 일반 문구로 ⑥DEPLOY.md §5.2 표에 momo_app/momo_worker 추가·실제와 일치화 ⑦기존 설치본 롤 전환: upgrade.sh가 migrate 실행 **전에** 롤 프로비저닝을 수행하도록 자동 스텝 추가(install만 자동이면 비대칭) + 런북에 절차 명시.
+작업: ①install.sh에 롤 프로비저닝 단계(infra/e2e/bootstrap_roles.sql 패턴의 prod판, idempotent) ②docker-compose.prod.yml에서 api/migrate의 DATABASE_URL **변수 분리** — api=momo_app 계열, migrate=기존 상위 롤. secrets.env.example 갱신 ③API 기동 시 current_user non-superuser+NOBYPASSRLS 어서션(위반 시 기동 거부 fail-closed) ④plugin_registry에 momo_app INSERT/UPDATE/DELETE REVOKE ⑤DeviceRoutes.swift:199 409 문구를 워크스페이스 언급 없는 일반 문구로 ⑥SELF_HOST.md §5.2 표에 momo_app/momo_worker 추가·실제와 일치화 ⑦기존 설치본 롤 전환: upgrade.sh가 migrate 실행 **전에** 롤 프로비저닝을 수행하도록 자동 스텝 추가(install만 자동이면 비대칭) + 런북에 절차 명시.
 수용기준: prod compose 스택에서 momo_app으로 기동한 API가 RLS 격리 스모크(교차 워크스페이스 0행)를 PASS하고, 수퍼유저 URL 주입 시 기동이 거부된다(fail-closed 증명). 기존 e2e/게이트 전체 회귀 PASS + `scripts/verify_internal_hosting_smoke.sh` PASS.
 함정: POSTGRES_USER(momo)는 컨테이너 초기화용으로 존치 — API 접속 롤만 교체. 롤 생성 SQL은 재실행 안전(idempotent). preflight의 기존 internal-host 모드 검증과 이중 구현 금지.
 게이트: runtime-db + internal-alpha(verify_internal_hosting_smoke.sh).

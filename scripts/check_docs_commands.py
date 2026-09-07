@@ -60,7 +60,7 @@ import tempfile
 GATED_DOCS = [
     (
         "AGENTS.md",
-        "Codex 운영 계약. §3이 스스로 'copy-paste, 그대로 실행'이라고 선언한다 — "
+        "워커 레인 운영 계약. §3이 스스로 'copy-paste, 그대로 실행'이라고 선언한다 — "
         "#1472에서 워커 3기를 오도한 명령이 살던 자리다.",
     ),
     (
@@ -392,7 +392,7 @@ def rule_scripts(tree, doc, line, command, argv, findings):
             continue
         # An executor is either the command word, or something with an
         # executable extension handed to an interpreter (`bash scripts/x.sh`).
-        # Anything else under scripts/ is a *reference* — RUN.md §3.2 points at
+        # Anything else under scripts/ is a *reference* — SELF_HOST.md §3.2 points at
         # scripts/transcription/README.md as reading, not as a program.
         if pos != 0 and not rel.endswith((".sh", ".py", ".mjs", ".js")):
             continue
@@ -603,7 +603,7 @@ def rule_file_flags(tree, doc, line, command, argv, findings):
       failing at its first step, and these paths move (infra/prod → infra/rust).
     * `--package-path` / `--manifest-path` — the tree the build is aimed at.
       W-S1 (#1215) deleted clients/{Core,macOS,iOS} and left the commands that
-      build them standing in RUN.md.
+      build them standing in SELF_HOST.md.
     """
     is_compose = "compose" in argv or "docker-compose" in argv[0]
     for i, tok in enumerate(argv):

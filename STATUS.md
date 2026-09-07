@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## LS-3 은퇴 문서 (#2182, 2026-09-07)
+
+- Track engine. `feat/ls3-retired-docs`. 루트 은퇴 문서·G3 런북(`05`/`06`)·Codex 스텁·NCP 런북 `git rm`. `CENT_PROXY_SECRET` 회전 절은 `docs/SELF_HOST.md`(+ko)로 원문 이식, public-edge 계약 `RUNBOOK=` 재지정. INDEX/README는 ADR-0183 D1 목록. `.conductor/`는 local_gate/goal_claim이 소비하므로 유지.
+- runtime-unverified: 공개 호스트 회전 증거는 attended `verify_public_edge_centrifugo_boundary.sh`가 닫기 전까지 `runtime-unverified(public host)`.
+
 ## LS-1 Swift 은퇴 (#2165, 2026-09-07)
 
 - Track engine. `feat/ls1-swift-retire`. Swift `server/Sources`·`workers`·`relay`·`services`·`infra/prod`·Swift e2e compose·examples·codex-workbench 삭제. `server/Migrations`·`server/Fixtures` 유지. PushRelay Swift 본체 삭제, **계약·overlay 유지**. Rust 본체는 #1255(`momo-push-relay`, 같은 멀티커맨드 이미지 `command: ["push-relay"]`).

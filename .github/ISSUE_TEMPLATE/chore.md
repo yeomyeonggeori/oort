@@ -12,7 +12,7 @@ labels: ["type:chore", "status:ready", "agent:codex-ok"]
 <!-- 한 문장. 예: .github/workflows/pr-ci.yml 의 node 레인에 lint 단계 추가 + actionlint 통과. -->
 
 ## Context
-<!-- 근거 경로/링크. 예: docs/cicd/04-codex-tickets.md CI2 티켓, ROADMAP MOMO-050. -->
+<!-- 근거 경로/링크. 예: docs/cicd/00-apple-cicd-pipeline.md CI2 티켓, ROADMAP MOMO-050. -->
 - Milestone: M_
 - Spine 티켓(ROADMAP): MOMO-NNN
 - 관련 문서: docs/ , ROADMAP.md / BUILD_TICKETS.md

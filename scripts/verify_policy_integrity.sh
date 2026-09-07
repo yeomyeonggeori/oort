@@ -223,7 +223,6 @@ read_pr() {
 policy_path() {
   case "$1" in
     AGENTS.md|\
-    CODEX.md|\
     CONTRIBUTING.md|\
     .github/workflows/*|\
     .github/labels.json|\

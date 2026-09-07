@@ -123,7 +123,7 @@ match(
   readonly: true,                 # CI 필수 (검증됨)
   api_key: api_key,               # API Key로 프로파일 갱신 인가
   # 앱과 확장은 각각 프로파일이 필요하다. 정본은 Xcode 프로젝트의
-  # PRODUCT_BUNDLE_IDENTIFIER — docs/cicd/10-ios-signing-identity-runbook.md §0.
+  # PRODUCT_BUNDLE_IDENTIFIER — docs/cicd/01-setup-runbook.md §0.
   app_identifier: ["app.momo.ios", "app.momo.ios.NotificationService"],
   git_url: ENV["MATCH_GIT_URL"],
   git_basic_authorization: Base64.strict_encode64("x-access-token:#{ENV['MATCH_GIT_TOKEN']}")
@@ -143,7 +143,7 @@ match(
 - **옵션 A (권장):** SwiftPM 라이브러리는 그대로 두고, **얇은 Xcode App 프로젝트**(`clients/macOS/MomoMac.xcodeproj`, `clients/iOS/MomoiOS.xcodeproj`)를 추가해 MomoCore/MomoMac을 **로컬 SwiftPM 의존**으로 임포트. 앱 타깃만 Xcode가 빌드/서명/아카이브.
 - **옵션 B:** `xcodebuild`로 SwiftPM executable을 직접 .app 번들링(코드사이닝/Info.plist 수작업) — 비권장(공증/엔타이틀먼트 관리 번거로움).
 
-→ **이 파이프라인은 옵션 A를 가정**한다. (이 Xcode 프로젝트 추가는 별도 티켓 — `docs/cicd/04-codex-tickets.md` C1/C2 참고.)
+→ **이 파이프라인은 옵션 A를 가정**한다. (이 Xcode 프로젝트 추가는 별도 티켓 — `docs/cicd/00-apple-cicd-pipeline.md` C1/C2 참고.)
 
 ### 3.2 gym (iOS .ipa)
 
@@ -346,7 +346,7 @@ PR/푸시 (main 외 브랜치, PR)
 - `docs/cicd/01-setup-runbook.md` — 1회 셋업 순서(키 발급→match init→secrets)
 - `docs/cicd/02-secrets-inventory.md` — 비밀값 전체 목록
 - `docs/cicd/03-store-readiness-gate.md` — 검수 게이트 DoD
-- `docs/cicd/04-codex-tickets.md` — Codex 실행 티켓(의존순/DoD/명령)
+- `docs/cicd/00-apple-cicd-pipeline.md` — Codex 실행 티켓(의존순/DoD/명령)
 
 ---
 
