@@ -20,7 +20,7 @@
 //! Harness contract is `http_smoke_pg.rs`'s: `DATABASE_URL` is a **superuser**
 //! (migrations + fixture seeding), the server runs as **`momo_app`**
 //! (NOBYPASSRLS, so the RLS policies actually apply), the `momo_app` password
-//! defaults to `infra/e2e/bootstrap_roles.sql`'s value and is overridable with
+//! defaults to `infra/rust/sql/bootstrap_roles.sql`'s value and is overridable with
 //! `MOMO_APP_PASSWORD`, and the schema/roles step is re-runnable — this binary
 //! may share one `pgvector/pgvector:pg18` container with the other suites, since
 //! every fixture id is a fresh UUID.
@@ -139,7 +139,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())

@@ -538,8 +538,8 @@ REST로 같은 PUT을 하는 절차는 심화: [`SELF_HOST.md`](SELF_HOST.md) §
 | [`SELF_HOST.md`](SELF_HOST.md) | 기동 실패, 시크릿 회전, REST로 키 넣기, outbox 질의 |
 | [`onboarding-deeplink.md`](onboarding-deeplink.md) | `oort://join` 바이트 계약 |
 | [`infra/rust/README.md`](../infra/rust/README.md) | compose 오버레이, 마이그레이션 로그 |
-| `infra/prod/momo-ops.sh invite-create` | 운영 호스트 CLI 발급. GUI와 같은 딥링크를 stdout에 찍는다. **이 문서의 경로가 아니다** |
-| [`AGENT_HOSTING_QUICKSTART.md`](AGENT_HOSTING_QUICKSTART.md) | ACP/workd. 내부 알파 전제. 셀프호스트 첫 하루가 아니다 |
+| `infra/prod/momo-ops.sh invite-create` | 은퇴 (`f399e417:infra/prod/momo-ops.sh`). 이 문서의 경로가 아니다 |
+| workd / ACP 호스팅 | LS-1(#2165)에서 은퇴. 원본 `f399e417:infra/workd` · `f399e417:docs/AGENT_HOSTING_QUICKSTART.md`. 셀프호스트 첫 하루가 아니다 |
 | `scripts/bench_onboarding.sh` | 설치→첫 응답 벽시계. GUI가 아니라 REST |
 
 ---

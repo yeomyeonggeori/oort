@@ -7,7 +7,7 @@ INTERVAL_SECONDS="${LOCAL_SOAK_INTERVAL_SECONDS:-300}"
 MAX_SAMPLES="${LOCAL_SOAK_SAMPLES:-0}"
 OUT_PARENT="${LOCAL_SOAK_EVIDENCE_DIR:-${TMPDIR:-/tmp}/momo-local-soak}"
 ENV_FILE="${ENV_FILE:-}"
-COMPOSE_FILE="${LOCAL_SOAK_COMPOSE_FILE:-infra/docker-compose.yml}"
+COMPOSE_FILE="${LOCAL_SOAK_COMPOSE_FILE:-infra/rust/docker-compose.rust.yml}"
 
 OUTBOX_WARN_COUNT="${LOCAL_SOAK_OUTBOX_WARN_COUNT:-10}"
 OUTBOX_FAIL_COUNT="${LOCAL_SOAK_OUTBOX_FAIL_COUNT:-100}"
@@ -30,7 +30,7 @@ Options:
   --samples N              Stop after N snapshots. Useful for smoke runs.
   --evidence-dir DIR       Parent directory outside the repo. Default: $TMPDIR/momo-local-soak.
   --env-file FILE          Env file to source. Default: .env.worktree, .env, then infra/.env.example.
-  --compose-file FILE      Compose file for compose ps fallback. Default: infra/docker-compose.yml.
+  --compose-file FILE      Compose file for compose ps fallback. Default: infra/rust/docker-compose.rust.yml.
   --smoke                  One snapshot, no sleep. Does not require a 72h run.
   -h, --help               Show this help.
 
@@ -480,7 +480,7 @@ write_summary() {
     echo
     echo "### PASS/WARN/FAIL Criteria"
     echo "- PASS: every required health/resource check responds and no operational warning is recorded."
-    echo "- WARN: no required check failed, but at least one P1 signal was observed, such as relay/worker/app not observed, outbox backlog crossing warn thresholds, or low free disk."
+    echo "- WARN: no required check failed, but at least one P1 signal was observed, such as relay, worker, or app not observed, outbox backlog crossing warn thresholds, or low free disk."
     echo "- FAIL: any P0 signal was observed, such as API/Centrifugo/DB unavailable, Docker unavailable/unhealthy, outbox backlog crossing fail thresholds, or critically low free disk."
     echo
     echo "### P0/P1 Detection Thresholds"

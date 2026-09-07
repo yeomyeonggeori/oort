@@ -2,9 +2,10 @@
 """Contract for the Rust/PostgreSQL GHCR artifacts and self-host consumers.
 
 This deliberately never calls GitHub or pushes an image. It parses the manual
-workflow, exercises its main-ref guard, mutates security-critical bindings to
-prove the validator fails closed, and checks the deploy verifier's exact SLSA
-v1 invocation with a fake ``gh`` executable.
+workflow, exercises its main-ref guard, and mutates security-critical bindings to
+prove the validator fails closed. LS-1 (#2165) retired
+``f399e417:infra/prod/deploy-lib.sh``; attestation binding for operators is the
+publish workflow plus ``scripts/self_host_env.sh``.
 """
 
 from copy import deepcopy
@@ -14,14 +15,12 @@ import os
 from pathlib import Path
 import re
 import subprocess
-import tempfile
 from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[2]
 CANONICAL_IMAGE = "ghcr.io/yeomyeonggeori/oort"
 POSTGRES_IMAGE = "ghcr.io/yeomyeonggeori/oort-postgres"
-SLSA_V1 = "https://slsa.dev/provenance/v1"
 POSTGRES_BASE_DIGEST = "9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
 DOCKERFILE_FRONTEND_DIGEST = "a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e"
 PGBACKREST_VERSION = "2.59.0-1.pgdg13+1"
@@ -787,63 +786,11 @@ def validate_backup_compose(overlay: str, s3_overlay: str, s3_config: str) -> No
     require("repo1-path=" not in s3_config, "S3 prefix comes from the fixed wrapper, not mutable config")
 
 
-def validate_deploy_contract(text: str) -> None:
-    require('gh attestation verify "oci://$image_ref"' in text, "deploy must verify the selected OCI digest")
-    require("--repo yeomyeonggeori/oort" in text, "deploy attestation must bind repository identity")
-    require(f"--predicate-type {SLSA_V1}" in text, "deploy attestation must require SLSA provenance v1")
-
-
-def validate_deploy_behavior() -> None:
-    digest_ref = f"{CANONICAL_IMAGE}@sha256:{'a' * 64}"
-    with tempfile.TemporaryDirectory(prefix="oort-attestation-contract-") as directory:
-        fixture = Path(directory)
-        trace = fixture / "gh.args"
-        fake_gh = fixture / "gh"
-        fake_gh.write_text('#!/bin/sh\nprintf \'%s\\n\' "$@" >"$TRACE_FILE"\n', encoding="utf-8")
-        fake_gh.chmod(0o755)
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "PATH": f"{fixture}:{environment.get('PATH', '')}",
-                "TRACE_FILE": str(trace),
-                "MOMO_IMAGE": digest_ref,
-                "MOMO_ATTESTATION_POLICY": "required",
-            }
-        )
-        result = subprocess.run(
-            [
-                "bash",
-                "-c",
-                'source "$1"; verify_momo_image_attestations',
-                "deploy-attestation-contract",
-                str(ROOT / "infra/prod/deploy-lib.sh"),
-            ],
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        require(result.returncode == 0, "deploy SLSA verifier must accept a successful gh verification")
-        require(
-            trace.read_text(encoding="utf-8").splitlines()
-            == [
-                "attestation",
-                "verify",
-                f"oci://{digest_ref}",
-                "--repo",
-                "yeomyeonggeori/oort",
-                "--predicate-type",
-                SLSA_V1,
-            ],
-            "deploy verifier arguments must bind OCI digest, repository, and SLSA v1",
-        )
-
-
 workflow_text = read(".github/workflows/publish-images.yml")
 workflow_model = parse_workflow()
 validate_workflow(workflow_model)
 validate_workflow_mutations(workflow_model)
-require("file: infra/prod/docker/momo.Dockerfile" not in workflow_text, "workflow still publishes retired Swift image")
+require("file: docker/momo.Dockerfile" not in workflow_text, "workflow still publishes retired Swift image")
 require("linux/arm64" in workflow_text, "multi-arch publication must name linux/arm64")
 require("ubuntu-24.04-arm" in workflow_text, "arm64 publication must use the native ubuntu-24.04-arm runner")
 require("docker/setup-qemu-action" not in workflow_text, "native publication must not install QEMU")
@@ -936,10 +883,6 @@ require(
     in dockerfile,
     "runtime image must copy bootstrap_owner_claim_if_absent from infra/rust/sql",
 )
-require(
-    "COPY infra/prod/bootstrap_runtime_roles.sql" not in dockerfile,
-    "runtime image must not still copy bootstrap SQL from infra/prod",
-)
 require('grep -q "content=\\"${MOMO_BUILD_SHA}\\"" dist/index.html' in dockerfile, "web bundle must retain build stamp")
 require(dockerfile.count("ENV MOMO_IN_CONTAINER=1") == 1, "runtime image must enable immutable SQL path policy")
 for forbidden_path_env in (
@@ -1011,16 +954,6 @@ require(
     "SELF_HOST must pin published images via releases/latest.json, not a prose digest",
 )
 require("@sha256:" not in self_host_doc, "SELF_HOST must not hard-code @sha256: digest literals")
-
-deploy_lib = read("infra/prod/deploy-lib.sh")
-validate_deploy_contract(deploy_lib)
-try:
-    validate_deploy_contract(deploy_lib.replace(SLSA_V1, "https://slsa.dev/provenance/v0.2"))
-except AssertionError:
-    pass
-else:
-    raise AssertionError("negative deploy mutation was accepted: SLSA v1 binding removed")
-validate_deploy_behavior()
 
 local_gate = read("scripts/local_gate.sh")
 require(

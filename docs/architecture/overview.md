@@ -15,6 +15,8 @@
 > ⚠️ **스택 갱신 (2026-08-03).** 아래 지도와 이후 절은 **Swift/Hummingbird 시절**을 그린다. 현재 배포되는 서버는 **Rust/Axum(`server-rust/`)**이고, 클라이언트는 **웹/Tauri(React) + RN 모바일**이다(ADR-0145 · ADR-0133 · ADR-0137).
 > **`server/`(Swift, 137 라우트)는 이식 원본이며 실행 대상이 아니다** — `server/README.md` 참조. 라우트 parity 도달 시 일괄 삭제한다(성재 승인).
 > **불변식 6개는 그대로 유효하다** — DB(59 마이그레이션 중 44개가 트리거·제약·RLS)가 최종 강제자라 언어 교체가 위협하지 않는다. 현재 위치는 `ROADMAP.md` §0이 정본.
+>
+> **LS-1 (#2165 / ADR-0183).** Swift `server/Sources`·`workers`·`relay`·`services`(LinkShort·workd)는 삭제됐다. 이식 원본은 git 이력(`f399e417:`). PushRelay 본체(Swift)도 삭제 — **Rust 이식 중(#1255)**. `adapters/codex-workbench`는 삭제(은퇴, git 히스토리).
 
 ## 시스템 지도
 
@@ -46,7 +48,7 @@ flowchart LR
 ```
 
 - 로컬 알파: PG·Centrifugo만 Docker, 나머지는 호스트 프로세스 (`scripts/momo` → `scripts/local_alpha_runner.sh`).
-- 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, NotifierWorker(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 기존 판정(DM/멘션/승인, 채널 음소거·자기 메시지 억제) 후 id-only v2 페이로드를 PushRelay로 dispatch한다. v2는 `thread_id=root_id ?? channel_id`, `momo.message|mention|approval|work` category, 승인에만 `approval_id`, ADR-0109 unread 합계 badge를 싣고 PushRelay가 APNs `thread-id`/`category`로 변환한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·AgentWorker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다.
+- 푸시 후보(ADR-0120): `message` INSERT와 같은 트랜잭션에서 migration 011의 AFTER INSERT 트리거가 outbox `push_candidate` 행을 기록하고, `momo-notifier`(BYPASSRLS `momo_notifier`)가 SKIP LOCKED로 소비해 기존 판정(DM/멘션/승인, 채널 음소거·자기 메시지 억제) 후 id-only v2 페이로드를 PushRelay로 dispatch한다. v2는 `thread_id=root_id ?? channel_id`, `momo.message|mention|approval|work` category, 승인에만 `approval_id`, ADR-0109 unread 합계 badge를 싣고 PushRelay가 APNs `thread-id`/`category`로 변환한다. **outbox 생산자 트리거는 이 1건이 유일하며, 신규 트리거 생산자는 Accepted ADR 없이 추가하지 않는다.** relay(`broadcast`)·agent-worker(`agent_job`)·notifier(`push_candidate`)는 kind로 상호 배제된다. PushRelay 본체(Swift)는 ADR-0183으로 삭제됨 — **Rust 이식 중(#1255)**. env·서명·id-only 계약은 그대로 유효.
 - 링크 언퍼얼(ADR-0170): `message` INSERT가 `unfurl_job` 파생 큐만 남긴다(outbox kind가 아니다). `momo-webhook-sender` 안의 워커가 URL≤3을 집어 OG/Twitter를 fetch하고 `message_unfurl`에 upsert한 뒤 `broadcast`/`message.unfurl`로 광고한다. `message.seq` 불변. **P9 경계: 서버는 링크 대상만 읽으며 본문 판독(알림 판정·에이전트 컨텍스트)이 아니다.** `MOMO_UNFURL_ENABLED` 기본 0. 클라 렌더는 별도 UXUI 티켓.
 - 에이전트 실행 경로는 역할이 분리된 **두 공식 경로**다(ADR-0102): `worker` = oort 소유 managed runtime, `gateway` = 사용자 소유 BYOA runtime. `AGENT_GATEWAY_MODE`는 전달 방식을 선택할 뿐 보장 소유권을 바꾸지 않는다.
 - Memory Plane의 `workspace_memory_policy.enabled`와 외부 provider 전송 동의는 별도 축이다. `workspace.memory_external_provider_consent`는 기존 워크스페이스도 기본 false이며, 서버가 admin PUT과 member read projection에서 provider trust(`local-mock|self-hosted|external`) 및 최종 허용 여부를 판정한다. AgentWorker 추출·임베딩은 같은 공유 trust 분류와 서버 소유 원장 값을 소비하며, external 미동의면 원문 provider 호출 전에 건너뛰고 `memory.extraction.consent_required`를 워크스페이스당 한 번 기록한다. local-mock과 literal loopback/RFC1918/ULA self-host는 동의와 무관하게 기존 동작을 유지한다.

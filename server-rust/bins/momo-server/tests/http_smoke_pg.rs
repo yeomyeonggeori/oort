@@ -20,7 +20,7 @@
 //! seeds its own random-UUID fixture, so neither mode changes an assertion.
 //!
 //! Harness contract: `DATABASE_URL` is a **superuser** (migrations via psql +
-//! `infra/e2e/bootstrap_roles.sql`, fixture seeding bypasses RLS); the server
+//! `infra/rust/sql/bootstrap_roles.sql`, fixture seeding bypasses RLS); the server
 //! runs on the **`momo_app`** role (NOBYPASSRLS), so every assertion below is
 //! made through the same RLS policies production uses.
 
@@ -47,7 +47,7 @@ fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a fresh pgvector/pg18 superuser DB")
 }
 
-/// Committed test-only role password from `infra/e2e/bootstrap_roles.sql`.
+/// Committed test-only role password from `infra/rust/sql/bootstrap_roles.sql`.
 fn momo_app_password() -> String {
     std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app_dev_pw".to_string())
 }
@@ -101,7 +101,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())

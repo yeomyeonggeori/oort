@@ -31,7 +31,7 @@
 //! ```
 //!
 //! Harness contract is `stream_edit_conformance_pg.rs`'s: `DATABASE_URL`
-//! connects as a **superuser** (migrations + `infra/e2e/bootstrap_roles.sql`,
+//! connects as a **superuser** (migrations + `infra/rust/sql/bootstrap_roles.sql`,
 //! fixture seeding bypasses RLS) while the server runs on the runtime
 //! **`momo_app`** role (`NOBYPASSRLS`), so every assertion is made through the
 //! policies production uses.
@@ -128,7 +128,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

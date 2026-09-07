@@ -60,42 +60,25 @@ def main() -> None:
     )
     require(
         read("scripts/local_gate.sh"),
-        "scripts/verify_prod_seed_password.sh",
-        "Production seed password fail-closed verification (MOMO-408)",
+        "scripts/verify_rls.sh",
+        "RLS runtime verification",
     )
 
     require(
         read("scripts/local_alpha_runner.sh"),
         'MOMO_AGENT_SEED_MODE=none sh "$REPO_ROOT/scripts/migrate.sh"',
     )
-    require(read("infra/docker-compose.e2e.yml"), "MOMO_AGENT_SEED_MODE: e2e")
-    require(read("infra/prod/docker-compose.internal-smoke.yml"), "MOMO_AGENT_SEED_MODE: e2e")
+    rust_compose = read("infra/rust/docker-compose.rust.yml")
+    require(rust_compose, "MOMO_AGENT_SEED_MODE")
+    require(rust_compose, "${MOMO_AGENT_SEED_MODE:-none}")
 
     isolated_verifiers = [
-        "scripts/verify_agent_worker.sh",
-        "scripts/verify_agent_context.sh",
-        "scripts/verify_agent_live_channel.sh",
-        "scripts/verify_external_agent_provider.sh",
         "scripts/verify_hermes_gateway_adapter.sh",
     ]
     for verifier in isolated_verifiers:
         require(read(verifier), 'MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh"')
 
-    # Every isolated verifier that uses the historical 101/102/103 identities
-    # as actual FK owners must create both member kinds itself under seed-none.
     fixed_seed_member_fixtures = {
-        "scripts/verify_agent_context.sh": (
-            "('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active'",
-            "('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active'",
-        ),
-        "scripts/verify_agent_live_channel.sh": (
-            "('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active'",
-            "('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active'",
-        ),
-        "scripts/verify_external_agent_provider.sh": (
-            "('$HUMAN_ID', '$WORKSPACE_ID', 'human', 'active'",
-            "('$AGENT_ID', '$WORKSPACE_ID', 'agent', 'active'",
-        ),
         "scripts/verify_hermes_gateway_adapter.sh": (
             "('${HUMAN_MEMBER_ID}', '${WORKSPACE_ID}', 'human', 'active'",
             "('${AGENT_ID}', '${WORKSPACE_ID}', 'agent', 'active'",
@@ -105,9 +88,6 @@ def main() -> None:
         require(read(verifier), "INSERT INTO member", *member_rows)
 
     digest_verifiers = [
-        "scripts/verify_agent_context.sh",
-        "scripts/verify_agent_live_channel.sh",
-        "scripts/verify_external_agent_provider.sh",
         "scripts/verify_hermes_gateway_adapter.sh",
     ]
     for verifier in digest_verifiers:
@@ -119,39 +99,9 @@ def main() -> None:
             "exit 96",
         )
 
-    agent_context = read("scripts/verify_agent_context.sh")
-    require(
-        agent_context,
-        "seeding isolated workspace/member/channel fixtures + context history",
-        "INSERT INTO workspace",
-        "'Agent Context Hermes', 'hermes'",
-        "INSERT INTO human",
-        "INSERT INTO agent",
-        "INSERT INTO channel",
-        "INSERT INTO channel_seq",
-        "INSERT INTO membership",
-        "'$TARGET_CHANNEL', '$AGENT_ID', 'member', NULL",
-    )
-
-    agent_worker = read("scripts/verify_agent_worker.sh")
-    require(
-        agent_worker,
-        'MOMO_AGENT_SEED_MODE=none "$REPO_ROOT/scripts/migrate.sh"',
-        "VERIFIER_DB_MARKER_PREFIX=",
-        "VERIFIER_DB_CREATED_OID",
-        "exit 96",
-        "TRANSPORT_CHANNEL_ID=$(printf '%s' \"$CHANNEL_ID\" | tr '[:lower:]' '[:upper:]')",
-        "user-owned Hermes seed",
-        "PRESERVED_HERMES_STATE_BEFORE",
-        "INSERT INTO agent",
-        "INSERT INTO membership",
-    )
-
-    # W-S1(#1215): `scripts/verify_macos_real_backend_ui.sh` 가 이 세 목록
-    # (isolated_verifiers · fixed_seed_member_fixtures · digest_verifiers)과 아래
-    # 전용 블록에서 함께 빠졌다. SwiftUI macOS 클라가 삭제되면서 그 검증기도 사라졌고,
-    # 그것이 지고 있던 seed-none·marker/OID·source-digest 계약은 남은 다섯 검증기가
-    # 같은 문장으로 계속 진다 — 계약이 준 것이 아니라 소비자 하나가 은퇴한 것이다.
+    # LS-1 (#2165) retired the Swift-host isolated verifiers (agent_worker /
+    # agent_context / agent_live_channel / external_agent_provider). Seed-none
+    # + marker/OID + source-digest stays on the remaining Rust-host verifier.
 
     cleanup = read("scripts/cleanup_dogfood_seed_agents.sh")
     require(

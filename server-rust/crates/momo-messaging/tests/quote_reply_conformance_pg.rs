@@ -14,7 +14,7 @@
 //! **superuser** which applies the migrations and seeds fixtures past RLS, while
 //! every assertion that matters runs as `momo_app` (`NOBYPASSRLS`) — the only
 //! faithful way to exercise the policies. `MOMO_APP_PASSWORD` defaults to the
-//! value `infra/e2e/bootstrap_roles.sql` sets. The migration runner is
+//! value `infra/rust/sql/bootstrap_roles.sql` sets. The migration runner is
 //! idempotent, so this binary may share a container with the others.
 //!
 //! ## The outbox-counting rule these tests obey (B1 gate lesson)
@@ -105,7 +105,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

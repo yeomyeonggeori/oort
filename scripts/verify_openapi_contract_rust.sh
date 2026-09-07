@@ -3,8 +3,8 @@
 # scripts/verify_openapi_contract_rust.sh — SRV-B7 / #1042
 # openapi 계약 게이트의 **2차 샘플 패스: 스펙 ↔ Rust**
 #
-# 1차 패스(scripts/verify_openapi_contract.sh)는 e2e 컴포즈의 swift:6.2 서버를
-# 띄워 docs/api/openapi.yaml 의 전 연산을 샘플한다. 그런데 스펙이 서술하는 대상은
+# 1차 패스(scripts/verify_openapi_contract.sh)는 f399e417:infra/docker-compose.e2e.yml
+# 의 Swift 서버를 띄워 docs/api/openapi.yaml 의 전 연산을 샘플했다. 스펙이 서술하는 대상은
 # 이제 Rust 배포본이다(#1040). 그래서 정본이 Rust 로 넘어간 경로에서는 1차 패스의
 # 초록이 "스펙대로 배포된다"를 증명하지 못한다 — Swift 가 스펙을 지킨다는 사실만
 # 증명한다. 이 스크립트가 그 간극을 닫는다:
@@ -1528,7 +1528,7 @@ else
 fi
 
 # 부분집합: api 만 올린다. depends_on 이 postgres·centrifugo·runtime-roles·migrate
-# 를 끌고 오고, relay/agent-worker 는 뜨지 않는다 — 등재된 연산의 응답은 전부
+# 를 끌고 오고, relay 와 agent-worker 는 뜨지 않는다 — 등재된 연산의 응답은 전부
 # 같은 트랜잭션 안에서 나오고, 브로드캐스트는 `outbox` 행으로 끝나기 때문이다.
 # (relay 가 그 행을 언제 빼 가는지는 이 패스가 대조하는 모양이 아니다.)
 echo "[openapi-rust] booting rust subset stack '$PROJECT' (api on $BASE_URL)"

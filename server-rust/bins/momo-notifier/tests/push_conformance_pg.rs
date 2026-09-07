@@ -13,7 +13,7 @@
 //!
 //! Harness contract (same as `notifier_conformance_pg`):
 //!   * `DATABASE_URL` connects as a **superuser** — applies every migration plus
-//!     `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS;
+//!     `infra/rust/sql/bootstrap_roles.sql`, and seeds fixtures bypassing RLS;
 //!   * the drain runs as **`momo_notifier`** (BYPASSRLS), the credential that
 //!     lets one process serve every tenant;
 //!   * the relay is an **injected mock** ([`RecordingDispatcher`]). Nothing in
@@ -117,7 +117,7 @@ fn ensure_schema_and_roles() {
         .arg("-f")
         .arg(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../infra/e2e/bootstrap_roles.sql"
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
         )))
         .status()
         .expect("spawn psql for bootstrap_roles.sql");

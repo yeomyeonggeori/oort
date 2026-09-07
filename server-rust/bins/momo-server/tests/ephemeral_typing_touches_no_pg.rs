@@ -597,9 +597,14 @@ async fn an_unconfigured_instance_refuses_the_whole_surface() {
 
 /// 「휘발 네임스페이스가 **모든 환경 설정**에서 `history_size: 0`이다」.
 ///
-/// Reads the shipped Centrifugo configs off disk rather than trusting that a
-/// reviewer noticed both. Adding a third environment file without the namespace
-/// turns this red; setting a history on one of them turns it red too.
+/// Reads shipped Centrifugo configs off disk rather than trusting that a
+/// reviewer noticed them. Adding another environment file without the
+/// namespace turns this red; setting a history on one of them turns it red too.
+///
+/// LS-1 (#2165) retired the Swift prod stack, so the live tree ships one
+/// config: `infra/centrifugo.json`. `infra/rust/docker-compose.rust.yml`
+/// mounts that same file for the rust image stack. The Redis-engine prod
+/// file remains at `f399e417:infra/prod/centrifugo.prod.json`.
 ///
 /// `clients/mobile-spike/tools/centrifugo-spike/centrifugo.json` is deliberately
 /// out of scope: it is a client-side spike harness with no momo server behind
@@ -611,8 +616,10 @@ fn the_ephemeral_namespace_keeps_no_history_in_every_environment() {
     collect_centrifugo_configs(&infra, &mut configs);
     configs.sort();
     assert!(
-        configs.len() >= 2,
-        "expected at least the dev and prod Centrifugo configs under {}, found {configs:?}",
+        configs
+            .iter()
+            .any(|path| path.ends_with("infra/centrifugo.json")),
+        "expected the live Centrifugo config under {}, found {configs:?}",
         infra.display()
     );
 
@@ -672,8 +679,9 @@ fn the_ephemeral_namespace_keeps_no_history_in_every_environment() {
 }
 
 /// ADR-0160 ②: the `presence` availability namespace keeps no history in every
-/// environment either. Same reasoning as `typing` — a replayed "online" on
+/// shipped config either. Same reasoning as `typing` — a replayed "online" on
 /// reconnect renders a ghost — and the same client-publish-stays-shut guard.
+/// Prod's Redis-engine file is history (`f399e417:infra/prod/centrifugo.prod.json`).
 #[test]
 fn the_presence_namespace_keeps_no_history_in_every_environment() {
     let infra = repo_root().join("infra");
@@ -681,8 +689,10 @@ fn the_presence_namespace_keeps_no_history_in_every_environment() {
     collect_centrifugo_configs(&infra, &mut configs);
     configs.sort();
     assert!(
-        configs.len() >= 2,
-        "dev and prod configs expected: {configs:?}"
+        configs
+            .iter()
+            .any(|path| path.ends_with("infra/centrifugo.json")),
+        "live config infra/centrifugo.json expected, found {configs:?}"
     );
 
     for path in &configs {

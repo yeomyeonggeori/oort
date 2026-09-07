@@ -14,7 +14,7 @@
 //!
 //! Harness contract (identical to `momo-messaging`'s suite):
 //!   * `DATABASE_URL` connects as a **superuser** — applies all migrations via
-//!     psql + `infra/e2e/bootstrap_roles.sql`, and seeds fixtures bypassing RLS.
+//!     psql + `infra/rust/sql/bootstrap_roles.sql`, and seeds fixtures bypassing RLS.
 //!   * every lifecycle assertion runs as the runtime **`momo_app`** role
 //!     (`NOBYPASSRLS`), the only faithful way to exercise the DB policies.
 //!
@@ -65,7 +65,7 @@ fn database_url() -> String {
 }
 
 /// The `momo_app` runtime password — the committed test-only credential from
-/// `infra/e2e/bootstrap_roles.sql` (not a real secret); override via env.
+/// `infra/rust/sql/bootstrap_roles.sql` (not a real secret); override via env.
 fn momo_app_password() -> String {
     std::env::var("MOMO_APP_PASSWORD").unwrap_or_else(|_| "momo_app_dev_pw".to_string())
 }
@@ -114,7 +114,7 @@ fn resolve_psql() -> PathBuf {
 fn bootstrap_roles_path() -> PathBuf {
     PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ))
 }
 

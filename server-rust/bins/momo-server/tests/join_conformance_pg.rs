@@ -29,7 +29,7 @@
 //! Test 2 walks **every refusal** the Swift route can answer, and test 3 is the
 //! one that is not about HTTP at all: `momo_join_private.invite_workspace_id` is
 //! EXECUTE-granted to `momo_app` alone (migration 009 +
-//! `infra/e2e/bootstrap_roles.sql`), and the join path is the only caller — so
+//! `infra/rust/sql/bootstrap_roles.sql`), and the join path is the only caller — so
 //! the test connects as each non-locked role and requires the call to fail.
 //! Test 4 is the tenant boundary on the rows a join creates.
 //!
@@ -126,7 +126,7 @@ fn resolve_psql() -> PathBuf {
 fn apply_bootstrap_roles() {
     let path = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .arg(database_url())
