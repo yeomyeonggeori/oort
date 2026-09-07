@@ -85,9 +85,9 @@ command in `railway.json` is that string.
 
 `infra/centrifugo.json` is not mounted. Equivalent settings are
 `CENTRIFUGO_*` in `railway.json` `services.centrifugo.environment`
-(namespaces + subscribe proxy endpoint `http://api.railway.internal:8080/v1/centrifugo/subscribe`).
-HMAC / API key / allowed origins / proxy static header come from the
-generator, same names as compose.
+(namespaces + subscribe proxy to the api private hostname, port 8080,
+path `/v1/centrifugo/subscribe`). HMAC / API key / allowed origins /
+proxy static header come from the generator, same names as compose.
 
 ## Public edge
 
