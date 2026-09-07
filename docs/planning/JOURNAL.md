@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 · Fable · ★클린 슬레이트 D-0 진단 완료 — 인벤토리·후보·ADR-0183(Proposed) 기안, 성재 결재 대기
+
+- 지시(성재 02:5x): 「clean slate라고 생각하고 불필요한 문서·Swift 코드 같은 레거시를 걷어내자. 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」 → 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md` §2 실행(read-only 실측).
+- 산출: `docs/planning/research/2026-09-07-clean-slate-inventory.md`(형상·LOC·접촉일·스크립트 배선·문서 참조·은퇴 흔적·게이트·라이브 의존) · `2026-09-07-clean-slate-candidates.md`(상위 20 + 영역별 + 감량 합) · **ADR-0183 Proposed**(정본 목록 D1 · 증보 1 삭제 게이트 → 「출시 범위 판정」 D3 · Swift 삭제 D4 · 이중 정본 D5 · 로테이션 규칙 D6 · LS-0~6).
+- 실측 요지: 파일 3,416 · 코드 ≈768k · md 107k. 은퇴 결정 난 채 남은 것 = Swift 4트리 222/78k(게이트: local_gate swift+runtime 7 프로파일·verifier 66본이 아직 빌드, 병합 권위엔 0) · web-legacy 26.8k(CI 계약 레인 1 + local_gate web 프로파일이 붙듦, 서빙·소비자 0) · mobile-spike 19.6k · infra/prod(SQL 4본은 Rust 이미지가 COPY — 이전 필요) · 핸드오프 닫힘/무참조 196 · research 비인용 ≈160. 감량 후보 ≈870 파일(25%)·≈203k LOC(23%).
+- 열린 것(성재 결정 5): ①PushRelay 지금 삭제(권고) ②workd/T3 데몬 삭제(권고, Rust 측 유지) ③`research/` ADR 인용분만 ④`claudedocs/` gitignore ⑤LS-0 정책 감사 자율 집행. 다음: Accept → `2026-09-07-lightening-program.md`(LS 티켓+G1/G2 재편성) → LS-0 ∥ LS-4 브리프 → 워커 발사는 go.
+
 ## 2026-09-06 · Fable(+Opus 5 검수) · ★W3 파도 1 완결 — 엔진 4/4(SH-2·SH-4a·SH-4b·SH-3b) + ST-1, 셀프호스팅 문서 영문 정본·공개 엣지·day-2 CLI main 정본화
 
 - 결재: 「런칭 준비 마무리?」 아니오(G1은 W3 뒤) → 엔진 우선 + UXUI 안정화 권장 채택 → go.

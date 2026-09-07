@@ -1,5 +1,15 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 진단 완료: 인벤토리·후보·ADR-0183 Proposed. 성재 결재 대기, 워커 0).** 컴팩트 복원 진입점.
+>
+> **★ 지시(성재 2026-09-07)**: 「clean slate — 불필요한 문서·Swift 코드 같은 레거시를 걷어내고 코드베이스·문서 경량화, 남은 작업도 그 기반으로 재설계」. 계획 `claudedocs/resume-2026-09-07/PLAN-clean-slate-diagnosis.md`(§0 불변 · §3 판정 A~E · §4 D-0~D-3).
+> **★ 산출**: `docs/planning/research/2026-09-07-clean-slate-inventory.md` · `2026-09-07-clean-slate-candidates.md` · **ADR-0183**(Proposed — D1 정본 목록 · D3 증보 1 삭제 게이트→출시 범위 판정 · D4 Swift 삭제 · D5 이중 정본 · D6 로테이션 · LS-0 게이트 재배선(정책 감사 1회) → LS-1 Swift ∥ LS-2 클라 → LS-3 문서 ∥ LS-4 로테이션 → LS-5·6).
+> **★ 실측**: 파일 3,416 · 코드 ≈768k · md 107k → 후보 ≈870 파일(25%)·≈203k LOC(23%). Swift 4트리 222/78k(local_gate swift+runtime 7 프로파일·verifier 66본이 붙듦, 병합 권위 0, 30일 실사용 0) · web-legacy 26.8k(CI 레인 1·web 프로파일) · mobile-spike 19.6k · infra/prod SQL 4본은 Rust 이미지 COPY(이전 필요) · handoffs 196 · research 비인용 ≈160.
+> **★ 성재 결정 포인트(Accept 시)**: ①PushRelay 지금 삭제(권고) vs #1255 유지 ②workd/T3 데몬 삭제(권고, Rust momo-t3·웹 표면 유지) vs 유지 ③`research/` ADR 인용분만 ④`claudedocs/` gitignore ⑤LS-0 정책 감사를 planner 자율 집행에 포함.
+> **★ 다음**: Accept → `docs/planning/2026-09-07-lightening-program.md`(LS 티켓 수용기준+브리프+이슈, G1/G2 잔여 재편성 = 출시 계획 개정) → LS-0 ∥ LS-4 발사(go) → … → 스냅샷 92. G1 잔여(UX-R2c·R2d·R3a~c·DS-1·SH-5a·SH-6a)는 LS 파도 뒤 경량화된 기반에서 재편성.
+
+> 이하 스냅샷 90:
+
 > **2026-09-06 스냅샷 90 (Fable · momo-main — ★W3 파도 1 완결: 엔진 레인 4/4(SH-2·SH-4a·SH-4b·SH-3b) + UXUI 안정화 ST-1 랜딩·승격. 셀프호스팅 문서 정본 3본 영문화·공개 엣지·day-2 CLI main 정본화).** 컴팩트 복원 진입점.
 >
 > **★ 결재(성재 2026-09-06)**: 「셀프호스팅 런칭 준비 마무리?」 → 아니오(출시 정본 게이트: W2 끝/엔진 W1 중간 → G1은 W3 뒤, G2는 W4~W5 뒤) → **권장 순서 채택: 엔진 우선 + UXUI 소형 안정화**, 「시작하자」 go.
@@ -42,16 +52,6 @@
 > **★ 정정**: PIPELINE §3 재개 플래그 `-c` → **`--continue`**(cursor-agent 2026.09.02에서 `-c`=폐기된 `--cloud`, 즉시 exit 1). 승격 뒤 sync는 **소스 트랙에도**(머지 커밋) — 두 트랙 모두 main을 조상으로 둔 뒤 다음 승격.
 > **★ 교훈(85에 추가)**: ⑧수리가 수리를 부르는 사슬(R2→R3→R4)은 매번 「끝 상태는 옳고 **구간/방향**이 빠진」 모양 — 검수 프롬프트에 「이전 수리가 만든 회귀를 먼저 찾아라」 상설 ⑨per-case 숫자 상한은 프레임레이트에 묶인다 — 이징 함수에 대고 단정 ⑩워커 stdout 절단·접속 끊김·API 소진은 상시 — 보고 정본은 PR 본문, 감시는 rc 파일, 재개는 `--continue`.
 > **★ 다음(go 대기)**: UX-R1e #2000 · UX-R1b #1997 · UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2) · 성재 결정 #2050 N-2(바닥 동시 도착 상한) · ITO(G1) 준비.
-
-> 이하 스냅샷 85:
-> **2026-09-04 스냅샷 85 (Fable · momo-main — ★W1 3차 랜딩: UX-R1a·UX-R1d 폐곡선 랜딩 + DS-2 승격, 배치 l. UX-R1c는 R4 수리 중. 레인 = Fable planner + Opus 5 검수 + Cursor grok 4.6 워커).** 컴팩트 복원 진입점.
->
-> **★ 레인(성재 2026-09-04 「Fable + opus5으로 가자」)**: planner/momo-main = **Fable**, design-review 서브에이전트 = **Opus 5**(`model: opus`), 워커 = **Cursor CLI grok 4.6 non-fast**(정본 PIPELINE §1·§3). 병렬 2는 **워커+검수 합산**(dwell ms·프레임 수·버스트 재생 같은 타이밍 측정이 CPU 경합에 흔들린다). 재개 체크포인트는 `/tmp` 스크래치가 아니라 **repo**에 — 이전 세션(Opus5)의 RESUME.md는 `claudedocs/resume-2026-09-03/`로 보존.
-> **★ 랜딩(전부 design-review 폐곡선)**: **UX-R1a #2043**(모달·팝오버·드롭다운·컨텍스트메뉴 enter/exit 비대칭, **2회전** — R1: 「다섯 제품 다이얼로그의 닫힘 애니메이션이 한 번도 돌지 않음」(`{open && <DialogContent/>}`가 Radix Presence보다 먼저 언마운트, 하네스만 150ms — 문서 3곳이 하네스 숫자를 제품 실측처럼 기재) + 「측정 파일이 브라우저 없으면 통과」 → R2 PASS: 제품 실측 12~20 closed frames / 173~193ms, 브라우저 없이도 wiring 단정 빨강) → uxui `8f607b26` · **UX-R1d #2042**(메시지 도착 모션, **4회전** — R3: 「같은 틱 버스트가 가상화 경로에서 1/3」(react-virtuoso가 다음 커밋에 마운트, paint-tick 캡 `useEffect`가 그 사이 grant를 먹음; 하네스는 가상화 없이 3/3) → R4 PASS: grant는 행 마운트까지 생존, 검수자 프로브 3/3·5/5·10/10, 백로그 스크롤업 0 → 바닥 점프 1, R5 생존 뮤테이션은 측정으로 무결함 판정) → uxui `cf70d743`. **UX-R1c #2045**: R2 FAIL(B1·H2 — `skel.test.ts`가 Chromium 없으면 throw → CI 상시 빨강, 옳은 답 `skipIf`가 형제 파일 40줄 옆에; 런타임 이중 크로스페이드 3회가 2483 초록; Inbox 프레임이 로딩 아님) → R3 워커 → R3 FAIL(B0·**H1**: 막대를 흐름에서 빼는 R2 수리가 **정착 한 프레임 뒤 152→104 / 136→60px 컨테이너 팝**을 만듦 — 팝을 콘텐츠에서 컨테이너로 옮겨 원인보다 250ms 늦춘 꼴, 빈 상태 8표면) → **R4 수리 중**(기획 결정: 높이 변화가 페이드와 같은 사다리를 탄다 — 프레임당 ≤12px·정착 후 0px 단정, 9호출부 실마운트 결속, `measure/**` lint·typecheck 편입).
-> **★ 승격 배치 l**: #2051(uxui→main: DS-2 #2020·UX-R1a·UX-R1d) + sync #2052(engine)·#2053(uxui) → **main=d584e95c·uxui=c9ec58c7·engine=ab6a2ba7**, alignment PASS. 보호 경로 변경 0(감사 불요).
-> **★ 발행 티켓**: **#2048** DS-2 `MOTION_VOCABULARY` 손수 목록이 10개 유틸리티 중 `enter-conversation`·`scrim-blur` 누락, 전수 미측정 · **#2049** UX-R1a R2 잔여(여섯째 확인 다이얼로그 `AgentHubRoute` 메모리 무효화 `open` 상수 true → exit 불가 · 마운트 가드가 정규식 한 모양(삼항·early return 초록) · 항상-마운트 시 opener 폴백 `<body>` 고정(명시 복원 하나만 지우면 포커스 BODY, 두 엔진) · 메뉴→다이얼로그 첫 Escape 1프레임(6/8 vs 0/8) · `measure/`가 lint·typecheck·프리플라이트 밖) · **#2050** UX-R1d R4 잔여(스크롤업 백로그 캡 가드가 렌더를 안 탐 — sweep deps `[]` → 스위트 2512 초록인 채 제품 43/50 캐스케이드 · **성재 결정 항목: 바닥 동시 도착 상한**(10건이 뷰포트 절반을 동시에 blur, 규칙 위반 아님) · AST dead-binding · capture wait 무보호 · 플레이크 1/90). 개방: #1997 UX-R1b · #2001 UX-R2a · #2002 UX-R2b(전부 ready).
-> **★ 교훈**: ①검수 스크래치 사본의 `.git` 파일이 실제 워크트리 gitdir을 가리킨다 — 사본 생성 직후 삭제(검수 프롬프트 상설) ②`pgrep -f`는 워커 프로세스 명령줄에 실린 **미션 전문**에 매치한다(랜딩 프리플라이트 false positive) — argv로 판별 ③루트 체크아웃의 폰 `node_modules`가 낡아 사후 게이트만 붉었다 — 병합 트리 게이트는 **빌려 쓰는 node_modules의 신선도**에 의존; 8레인은 이 머신에서 ~30초(웹 2474/7.5초, 폰 1320) ④워커가 형제 파일의 `skipIf` 형태를 두고 throw를 골라 CI가 구조적으로 붉었다(「옳은 답이 옆에 있었다」 코퍼스 최다 패턴) — 미션에 형제 형태를 **이름 대어** 적을 것 ⑤R2 수리가 R3에서 「끝 상태는 옳고 타이밍이 틀린」 회귀를 만들었다 — 단정은 **구간**을 재야 한다(프레임당 최대 변화량) ⑥워커 stdout 절단 반복(149B·159B) — 보고 정본은 PR 본문 ⑦bash 3.2엔 연관 배열이 없다(승격 스크립트 1회 즉사, 부작용 0).
-> **★ 다음**: UX-R1c R4 → 검수 R4 → 랜딩 → 승격 m · UX-R1e #2000 · UX-R1b #1997 · UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2, 발사는 go) · ITO(G1) 준비 · 성재 결정 #2050 N-2.
 
 > **과거 스냅샷은 `docs/planning/archive/CURRENT_STATE-snapshots.md`로 이동(로테이션 — 규칙은 아래 절).**
 
