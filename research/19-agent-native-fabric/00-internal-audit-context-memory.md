@@ -6,7 +6,7 @@
 ## 1. Context Packet
 
 **(a) 정본 스펙**
-- `research/11-agent-runtime/research/11-agent-runtime/04-context-packet-v0.md` (MOMO-151) — v0 규범 스펙. `:4` "No runtime/schema implementation in this ticket". 16개 최상위 필드 shape `:28-49`, 비협상 규칙 `:14-22`, 금지 필드 `:321-332`.
+- `research/11-agent-runtime/04-context-packet-v0.md` (MOMO-151) — v0 규범 스펙. `:4` "No runtime/schema implementation in this ticket". 16개 최상위 필드 shape `:28-49`, 비협상 규칙 `:14-22`, 금지 필드 `:321-332`.
 - 참조: `docs/architecture/overview.md:24`, ADR-0102. fixtures: `research/11-agent-runtime/fixtures/context-packet-v0/`.
 
 **(b) 구현**
