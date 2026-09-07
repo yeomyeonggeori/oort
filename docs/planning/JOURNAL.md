@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (오후2) · Fable · ★go → LS-0·LS-4 발사(병렬 2) + 1차 목표 두 케이스 구체화·결정 3건
+
+- go(성재) → `launch-ls.sh`: LS-0 #2142(`wls0`)·LS-4 #2143(`wls4`) grok 워커 2기 세션 분리 발사(프리플라이트: 패킷·ADR Accepted origin/main 확인).
+- 성재 지시: 「케이스 두 개 — ①그록봇 VM 안 설치·그록봇 중심 연동 ②독립 셀프호스팅 + 본인 hermes·별도 에이전트 연동 — 둘 다 커버. 1차 목표 구체화, 애매한 점은 지금 결정」 → `docs/planning/2026-09-07-first-goal-two-cases.md`: 매트릭스(설치 주체·호스트·엣지·합류 경로·영속·약관) · E2E 2본 수용기준 · 갭 8(A-1 §3.3 dial-in 합류 절 부재 · A-2 #1361 · A-3 Reset 복구 실측 0 · B-1 Railway · B-2 SH-6a · B-3 R2c · B-4 hermes 플러그인 문서 Swift 전제 · B-5 외부 호스트 upgrade 0회) · **G1' 편성 확정**(SH-6a∥SH-5a → #1265∥UX-R2c → SH-8∥SH-9 → E2E-B∥E2E-A → ITO; 팔레트·DS-1·R2d·허들·TURN 연기) · 결정 3(재편성 확정 · work 표면 숨김=LS-2 · G3 문서 삭제=LS-3, external-agent-provider 삭제 금지).
+- 다음: 워커 감시(rc 파일) → LS-0 planner 검토·정책 감사 승격 → LS-1·LS-2 패킷(§5 반영) 발급.
+
 ## 2026-09-07 (오후) · Fable · ★ADR-0183 Accepted(결정 5건 권고안 채택 + 초점 지시) — 경량화 프로그램·LS-0/LS-4 패킷·이슈 발급, 발사 go 대기
 
 - 결재(성재): 「ADR-0183 Accept, 결정 5건 전부 권고안대로. 애매하면 물어볼 것. 1차 최종 목표(셀프호스팅 + 그록봇 연동)에 초점을 두는 작업인지 점검」 → ADR 상태·결재 기록·정오표 2건(`research/` 제자리 보존 · D4-① 전제 문구) 반영.
