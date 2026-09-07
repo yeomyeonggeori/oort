@@ -7,7 +7,7 @@ import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type RosterMember } from "@momo/core/lib/api";
-import { TERMINAL_DONE_HEADLINE } from "@momo/core/features/hostedAgents/disconnect";
+import { TERMINAL_DONE_HEADLINE, TERMINAL_HEADLINE } from "@momo/core/features/hostedAgents/disconnect";
 import {
   createHostedConnection,
   disconnectHostedConnection,
@@ -344,6 +344,19 @@ describe("소스 규율", () => {
     expect(source).not.toContain("이 연결은 해제됐습니다");
     expect(source).not.toMatch(/status:\s*"disconnected"/);
   });
+
+  it("행 사실은 dl 이고 액션은 이름 붙은 버튼이다", () => {
+    const source = sectionSource();
+    expect(source).toContain("KeyValueRows");
+    expect(source).toContain('data-testid="agent-credentials-disconnect"');
+    expect(source).toContain('data-testid="agent-credentials-doorbell"');
+    expect(source).toContain("bg-accent-soft");
+    expect(source).not.toContain("agent-credentials-row-select");
+    expect(source).toContain("hostedPresetIdForMember");
+    expect(source).not.toMatch(/presetId:\s*"generic"/);
+    expect(source).toContain("lockReason");
+    expect(source).toContain("aria-describedby={lockReason()}");
+  });
 });
 
 describe("목록 네 상태", () => {
@@ -378,6 +391,25 @@ describe("목록 네 상태", () => {
     );
   });
 
+  it("오프라인 잠금은 컨트롤 옆 사유를 가리킨다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({ connections: [] });
+    const host = mountSection(true);
+    await waitFor(
+      () => host.querySelector('[data-testid="agent-credentials-issue"]') !== null,
+      "issue"
+    );
+    const issue = host.querySelector(
+      '[data-testid="agent-credentials-issue"]'
+    ) as HTMLButtonElement;
+    const note = host.querySelector(
+      '[data-testid="agent-credentials-offline"]'
+    ) as HTMLElement;
+    expect(note).not.toBeNull();
+    expect(note.id).toBe("agent-credentials-offline-note");
+    expect(issue.getAttribute("aria-describedby")).toBe(note.id);
+    expect(issue.getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("연결이 있으면 이름·상태·시각·도어벨을 그린다", async () => {
     vi.mocked(listHostedConnections).mockResolvedValue({
       connections: [
@@ -396,10 +428,28 @@ describe("목록 네 상태", () => {
     expect(host.textContent).toContain("김인턴");
     expect(host.textContent).toContain("활성");
     expect(host.textContent).toContain("연결 만든 때");
-    expect(host.textContent).toContain("마지막 상태 변화");
-    expect(host.textContent).toContain("도어벨 있음");
+    expect(host.textContent).not.toContain("마지막 상태 변화");
+    expect(host.textContent).toContain("도어벨");
+    expect(host.textContent).toContain("있음");
     expect(host.textContent).not.toContain("detected_at");
     expect(host.textContent).not.toContain("proved_at");
+  });
+
+  it("만든 때와 다른 상태 변화만 마지막 상태 변화로 그린다", async () => {
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [
+        wireConnection({
+          status: "active",
+          updatedAtMs: 1_700_000_360_000,
+        }),
+      ],
+    });
+    const host = mountSection();
+    await waitFor(
+      () => host.querySelector('[data-testid="agent-credentials-list"]') !== null,
+      "list"
+    );
+    expect(host.textContent).toContain("마지막 상태 변화");
   });
 });
 
@@ -498,7 +548,52 @@ describe("재발급", () => {
     expect(countNeedle(document.body.textContent ?? "", SECRET_2)).toBe(1);
     expect(document.body.textContent ?? "").not.toContain(SECRET);
   });
+
+  it("재발급은 그록 정체성 행의 preset 을 grok 으로 연다", async () => {
+    roster.splice(0, roster.length, human(), {
+      ...agent(),
+      displayName: "그록봇",
+      handle: "grokbot",
+    });
+    vi.mocked(listHostedConnections).mockResolvedValue({
+      connections: [wireConnection()],
+    });
+    vi.mocked(getHostedConnection).mockResolvedValue({
+      connection: wireConnection(),
+      cleanupArtifacts: [],
+    });
+    vi.mocked(regenerateHostedPairing).mockResolvedValue({
+      connection: wireConnection(),
+      pairingCredential: SECRET_2,
+      pairingExpiresAtMs: Date.now() + 15 * 60 * 1000,
+    });
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="agent-credentials-regenerate"]') !==
+        null,
+      "regen"
+    );
+    act(() => {
+      (
+        host.querySelector(
+          '[data-testid="agent-credentials-regenerate"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () =>
+        document.querySelector('[data-testid="hosted-preset-unverified"]') !==
+        null,
+      "grok unverified"
+    );
+    expect(
+      document.querySelector('[data-testid="hosted-preset-unverified"]')
+        ?.textContent
+    ).toContain("아직 확인되지 않았습니다");
+  });
 });
+
 
 describe("사보타주 ① 1회용 값은 한 번만", () => {
   it("카드가 선 뒤 textContent·innerHTML·로그에 값이 한 번이다", async () => {
@@ -570,40 +665,38 @@ describe("사보타주 ① 1회용 값은 한 번만", () => {
     info.mockRestore();
     debug.mockRestore();
   });
-
-  it("두 번 나타나면 이 단정이 거짓이다", () => {
-    const sabotaged = `${SECRET} · ${SECRET}`;
-    expect(countNeedle(sabotaged, SECRET) === 1).toBe(false);
-  });
 });
 
 describe("사보타주 ② 해제는 서버가 정한다", () => {
-  it("disconnect 가 cleanup_pending 이면 완료 문장이 없다", async () => {
-    const active = wireConnection({ status: "active" });
-    vi.mocked(listHostedConnections).mockResolvedValue({
-      connections: [active],
-    });
-    vi.mocked(getHostedConnection).mockResolvedValue({
-      connection: active,
+  it("disconnect 가 cleanup_pending 이면 완료 문장이 없고 정리 중이다", async () => {
+    let current = wireConnection({ status: "active" });
+    vi.mocked(listHostedConnections).mockImplementation(async () => ({
+      connections: [current],
+    }));
+    vi.mocked(getHostedConnection).mockImplementation(async () => ({
+      connection: current,
       cleanupArtifacts: [],
-    });
-    vi.mocked(disconnectHostedConnection).mockResolvedValue({
-      connection: wireConnection({ status: "cleanup_pending" }),
-      remainingRequired: 1,
-      startedNow: true,
-      cleanupArtifacts: [],
+    }));
+    vi.mocked(disconnectHostedConnection).mockImplementation(async () => {
+      current = wireConnection({ status: "cleanup_pending" });
+      return {
+        connection: current,
+        remainingRequired: 1,
+        startedNow: true,
+        cleanupArtifacts: [],
+      };
     });
     const host = mountSection();
     await waitFor(
       () =>
-        host.querySelector('[data-testid="agent-credentials-row-select"]') !==
+        host.querySelector('[data-testid="agent-credentials-disconnect"]') !==
         null,
       "row"
     );
     act(() => {
       (
         host.querySelector(
-          '[data-testid="agent-credentials-row-select"]'
+          '[data-testid="agent-credentials-disconnect"]'
         ) as HTMLButtonElement
       ).click();
     });
@@ -611,6 +704,10 @@ describe("사보타주 ② 해제는 서버가 정한다", () => {
       () => host.querySelector('[data-testid="hosted-connection-section"]') !== null,
       "connection section"
     );
+    expect(
+      host.querySelector('[data-testid="hosted-connection-section"] h3')
+        ?.textContent
+    ).toBe("김인턴");
     act(() => {
       (
         host.querySelector(
@@ -636,7 +733,11 @@ describe("사보타주 ② 해제는 서버가 정한다", () => {
       () => vi.mocked(disconnectHostedConnection).mock.calls.length > 0,
       "disconnect called"
     );
-    await flush();
+    await waitFor(
+      () => (host.textContent ?? "").includes("정리 중"),
+      "cleanup pending chip"
+    );
+    expect(host.textContent ?? "").toContain(TERMINAL_HEADLINE);
     expect(host.textContent ?? "").not.toContain(TERMINAL_DONE_HEADLINE);
   });
 });

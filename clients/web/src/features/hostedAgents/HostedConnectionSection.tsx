@@ -112,6 +112,7 @@ export function HostedConnectionSection({
   agentMemberId,
   agentLabel,
   offline,
+  title,
 }: {
   agentMemberId: string;
   agentLabel: string;
@@ -123,6 +124,11 @@ export function HostedConnectionSection({
    * 곳에서 따로 나면 배너와 잠금이 한 프레임 어긋난다.
    */
   offline: boolean;
+  /**
+   * Visible heading for whose ledger this is. `aria-label` stays the existing
+   * `${agentLabel} 호스티드 연결` so the region name does not fork.
+   */
+  title?: string;
 }) {
   const { workspaceId } = useSession();
   const client = useQueryClient();
@@ -289,7 +295,9 @@ export function HostedConnectionSection({
       data-testid="hosted-connection-section"
     >
       <div className="flex min-w-0 flex-col gap-1">
-        <h3 className="text-title font-semibold text-ink">호스티드 연결</h3>
+        <h3 className="text-title font-semibold text-ink">
+          {title ?? "호스티드 연결"}
+        </h3>
         <p className="break-keep text-body text-ink-muted">
           {DISCONNECT_SECTION_LEAD}
         </p>

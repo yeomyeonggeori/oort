@@ -528,7 +528,7 @@ export function QuickSwitcher({
             data-testid="switcher-settings-agents"
             onSelect={() => go("/settings?section=agents")}
           >
-            <KeyRound className="size-4 opacity-70" />
+            <KeyRound className="size-4 opacity-70" aria-hidden="true" />
             에이전트 자격
           </Command.Item>
           {isSurfaceProvided("workConsole") && (
