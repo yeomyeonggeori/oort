@@ -2,6 +2,14 @@
 
 > `docs/planning/CURRENT_STATE.md`에서 이동한 과거 스냅샷 원문(불변, newest-first 유지). 로테이션 시 새 이동분을 이 헤더 바로 아래에 prepend한다. 하단의 구 구조 절(§0~§5)은 2026-07 기준 정체 구획으로, 현행 운영과 다르다 — 역사 기록으로만 읽어라(현행: `docs/TRACKS.md`·`CLAUDE.md`).
 
+> 이하 스냅샷 87:
+> **2026-09-04 스냅샷 87 (Fable · momo-main — ★결정 4건 집행 + W1 uxui 2차 발사 준비 완료(go 대기). 세션 안전 중단 체크포인트 = `claudedocs/resume-2026-09-04/RESUME.md`).** 컴팩트 복원 진입점.
+>
+> **★ 성재 결정(2026-09-04)**: ①**#2050 N-2 = 바닥 동시 도착 상한 3**(초과분 즉시 정착, stagger 기각) → ADR-0179 D3 정오표 + #2050 수용 기준 갱신 ②W1 uxui 2차 발사 순서 권고 확인(**R1e + R1b 먼저**, 그 뒤 R2a·R2b) — **발사는 go 신호** ③**#2057 확정**: 페이드 창은 Δh로 늘리지 않음, 상한은 이징 기반 단일 규칙 ④7월 DEVIATION pending 3건 위임 판정: MOMO-412 → **아직 유효**(JWT_HMAC 폴백이 셀프호스트 기본값) → **#2066** 발행·`accepted` / MOMO-471·474 → macOS 표면 은퇴로 소멸 → `noted`·#495 close. 정정: 출시 프로그램 계획 머리글(ADR Accepted).
+> **★ 발사 준비(go 대기)**: 워크트리 `momo-worktrees/wuxr1e`(`feat/uxr1e-press-sweep`)·`wuxr1b`(`feat/uxr1b-panel-motion`) @ uxui `51f32202`, node_modules 설치, 미션 `claudedocs/resume-2026-09-04/mission-uxr1e.md`·`mission-uxr1b.md`(브리프 계약 + 「숫자로 잴 것」 + skipIf 형제 형태 + 판정 금지). 포트: R1e 8637/8639 · R1b 8625/8627. R1b는 `scripts/design_preflight_web.sh` 카테고리 1개 추가(`motion_lib_scope`)를 **별도 커밋**으로 — 승격 시 정책 감사 대상.
+> **★ 정본 헤드**: 스냅샷 86 체인 뒤 main=d46e90e9·uxui=51f32202·engine=846870c1(이 문서 PR 이후 갱신). 도는 것 없음.
+> **★ 다음**: go → R1e·R1b 워커 발사(병렬 2) → design-review 폐곡선 → 랜딩 → 승격 n(R1b의 보호 경로 감사 포함) → R2a·R2b → ITO(G1).
+
 > 이하 스냅샷 86:
 > **2026-09-04 스냅샷 86 (Fable · momo-main — ★W1 uxui 1차 파도 완결: UX-R1c 5회전 폐곡선 랜딩 + 승격 배치 m → R1a·R1c·R1d·DS-2 전부 main 정본화. 잔여 = R1e·R1b·R2a·R2b(전부 ready, 발사 go 대기)).** 컴팩트 복원 진입점.
 >

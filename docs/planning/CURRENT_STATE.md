@@ -1,5 +1,14 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-07 스냅샷 93 (Fable · momo-main — ★LS 시리즈 완결(LS-0~6) + SH-10 push relay Rust main 정본화. 추적 파일 3,416→2,491(−27%), md 107k→67k. 도는 것 없음, 워커 0).** 컴팩트 복원 진입점.
+>
+> **★ 정본 헤드**: main `47f4d6f0`(LS-3 승격 ak) · 이 문서의 승격 배치 am 뒤 갱신. 도는 것 없음.
+> **★ 오늘 정본화**: ADR-0183 Accepted(결재 5+3) · LS-4·LS-0·LS-2·LS-1·LS-3 · LS-5(17 close) · LS-6 원장 #2187 · **SH-10 #1255**(셀프호스트 동봉 APNs relay Rust, 3 모드) · 1차 목표 두 케이스 문서(`2026-09-07-first-goal-two-cases.md`).
+> **★ 성재 결재 대기**: G2 = 외부 셀프호스터 3 + **iOS 앱스토어 v0**(§7) → 확인 시 `2026-09-02-launch-program-plan.md` 개정. 실기기 APNs 실수신 세션(성재 iPhone, `claudedocs/resume-2026-09-07/checklist-apns-real-device.md`).
+> **★ 다음 파도(G1'-1, go 대기·브리프 필요)**: SH-6a(자격 관리 GUI + 로컬 OpenAI 호환 opt-in — HostedAgentWizard·OneTimeSecretCard 이미 존재, 잔여 범위 실측 후 브리프) ∥ SH-5a(Railway 템플릿 E2E). 선재: #2157·#2181·#2193.
+> **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md`.
+
+> 이하 스냅샷 92:
 > **2026-09-07 스냅샷 92 (Fable · momo-main — ★LS-β 완결: LS-1(Swift 은퇴)·LS-2(클라 이중 정본) main 정본화, LS-5 이슈 위생 17 close. 추적 파일 3,416→2,502. LS-γ 패킷 발급(LS-3 #2182 ∥ SH-10 #1255), 발사 go 대기. 워커 0).** 컴팩트 복원 진입점.
 >
 > **★ 정본 헤드**: 이 문서 PR 뒤 main=8bd05806(LS-1 승격 ai) · 이 문서의 승격 배치 aj 뒤 갱신. 도는 것 없음.
@@ -54,14 +63,6 @@
 > **★ 발행·정리**: #2076(R1e R7 잔여: 폭 규칙 정의 통일·390 CTA·shrink-0·인구 477·instant-fill 전이) · #2080(R1b R10 잔여) · #2073 close(#2072 랜딩) · #2074(`!` 계수) · #2075(UnreadPill이 스크림 위, 선재) · #2050 플레이크 원장 갱신. DEVIATION 2행 `accepted`(390 드로어 fast·⌘K 하우스 Dialog / 본문 행 채움만) + ADR-0179 D1 정오표.
 > **★ 교훈(87에 추가)**: ⑪워커 상습 축 두 개가 이번 두 티켓을 지배했다 — **「하네스에서 참, 제품에서 거짓」**(R1a·R1b·R1e 전부 첫 회전)과 **「실패할 수 없는 단정」**(사본 컴파일·부분문자열 핀·마커 인구·떨어진 노드 샘플·측정 없는 진단) — 미션에 「인구는 태그/role·가드는 정의·모든 return·연결된 노드·관측한 경로만」을 상설 ⑫수리가 수리를 부르는 사슬은 매 회전 「전 회전 수리가 만든 회귀 먼저」로 잡혔다(R1b R6 hunk·R1e R2 팝) ⑬브랜치 보호 「base 최신」: 랜딩 전 트랙 팁 병합 필수(코드 충돌이면 워커 병합 미션 + 병합 한정 검수) ⑭병합 트리 게이트 플레이크는 #2050 원장에 기록 후 재실행.
 > **★ 다음(go 대기)**: UX-R2a #2001 · UX-R2b #2002(uxui, 병렬 2) · ITO(G1) 준비 · 후속 #2076·#2080·#2074·#2075·#2057.
-
-> 이하 스냅샷 87:
-> **2026-09-04 스냅샷 87 (Fable · momo-main — ★결정 4건 집행 + W1 uxui 2차 발사 준비 완료(go 대기). 세션 안전 중단 체크포인트 = `claudedocs/resume-2026-09-04/RESUME.md`).** 컴팩트 복원 진입점.
->
-> **★ 성재 결정(2026-09-04)**: ①**#2050 N-2 = 바닥 동시 도착 상한 3**(초과분 즉시 정착, stagger 기각) → ADR-0179 D3 정오표 + #2050 수용 기준 갱신 ②W1 uxui 2차 발사 순서 권고 확인(**R1e + R1b 먼저**, 그 뒤 R2a·R2b) — **발사는 go 신호** ③**#2057 확정**: 페이드 창은 Δh로 늘리지 않음, 상한은 이징 기반 단일 규칙 ④7월 DEVIATION pending 3건 위임 판정: MOMO-412 → **아직 유효**(JWT_HMAC 폴백이 셀프호스트 기본값) → **#2066** 발행·`accepted` / MOMO-471·474 → macOS 표면 은퇴로 소멸 → `noted`·#495 close. 정정: 출시 프로그램 계획 머리글(ADR Accepted).
-> **★ 발사 준비(go 대기)**: 워크트리 `momo-worktrees/wuxr1e`(`feat/uxr1e-press-sweep`)·`wuxr1b`(`feat/uxr1b-panel-motion`) @ uxui `51f32202`, node_modules 설치, 미션 `claudedocs/resume-2026-09-04/mission-uxr1e.md`·`mission-uxr1b.md`(브리프 계약 + 「숫자로 잴 것」 + skipIf 형제 형태 + 판정 금지). 포트: R1e 8637/8639 · R1b 8625/8627. R1b는 `scripts/design_preflight_web.sh` 카테고리 1개 추가(`motion_lib_scope`)를 **별도 커밋**으로 — 승격 시 정책 감사 대상.
-> **★ 정본 헤드**: 스냅샷 86 체인 뒤 main=d46e90e9·uxui=51f32202·engine=846870c1(이 문서 PR 이후 갱신). 도는 것 없음.
-> **★ 다음**: go → R1e·R1b 워커 발사(병렬 2) → design-review 폐곡선 → 랜딩 → 승격 n(R1b의 보호 경로 감사 포함) → R2a·R2b → ITO(G1).
 
 > **과거 스냅샷은 `docs/planning/archive/CURRENT_STATE-snapshots.md`로 이동(로테이션 — 규칙은 아래 절).**
 
