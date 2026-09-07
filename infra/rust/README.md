@@ -31,8 +31,7 @@
 | `local.override.yml` + `Caddyfile.local` | **로컬 셀프호스트 엣지**(#1229) — `web-init` + `web`(Caddy `:80`, 루프백 바인딩, ACME 없음). SPA·`/v1`·`/connection` 을 같은 오리진에서 낸다. 정본 절차는 `docs/SELF_HOST.md` |
 | `Caddyfile` + `caddy.override.yml` | **공개 엣지 템플릿**(#1926) — 사이트 `{$OORT_SITE_ADDRESS}`, CSP `{$OORT_CSP_CONNECT_SRC}`. env 없으면 기동 거부. 로컬에서는 쓰지 마라. 절차: `docs/SELF_HOST.md` 공개 오리진으로 열기 |
 | `docker-compose.lane-phone.yml` | **기본 비활성** MAESTRO 폰 레인 오버레이(#1022) — `mock-hermes` + `agent-worker`의 프로바이더 배선. `clients/mobile/scripts/lane-phone.sh` 전용 |
-| `docker-compose.push.yml` | **기본 비활성** ADR-0120 푸시 경로 오버레이 — `push-relay` + `notifier`. `-f`로 명시할 때만 존재한다 |
-| `docker-compose.push.build.yml` | 위 오버레이의 로컬 빌드(`relay/PushRelay/Dockerfile`) |
+| `docker-compose.push.yml` | **기본 비활성** ADR-0120 푸시 경로 오버레이 — `push-relay` + `notifier`. `-f`로 명시할 때만 존재한다. 이미지는 #1255 Rust `momo-push-relay`(Swift 빌드는 LS-1에서 삭제; 원본 `f399e417:relay/PushRelay/Dockerfile`) |
 | `push-relay.env.example` | 푸시 경로 env 템플릿. `rust-smoke.secrets.env` **위에** 겹쳐 쓴다 |
 
 공개 digest 형상은 현재 `linux/amd64` 하나뿐이고 native `linux/arm64`/Apple
@@ -299,7 +298,7 @@ prod(`momo-pgdata`)와 분리돼 있다. 다른 프로젝트명으로 띄우면 
 api·centrifugo 포트는 compose가 loopback에만 바인딩한다. NCP에서는 SSH 터널로 접근하고,
 공개 노출은 `docs/SELF_HOST.md` 공개 오리진으로 열기(`caddy.override.yml` + env 2키)다.
 
-## 7. env 파리티 (정본 = `infra/prod/docker-compose.prod.yml`)
+## 7. env 파리티 (정본 = 삭제된 Swift prod compose `f399e417:infra/prod/docker-compose.prod.yml`의 env 이름)
 
 Rust 바이너리는 prod compose가 쓰는 **이름 그대로** 읽는다.
 

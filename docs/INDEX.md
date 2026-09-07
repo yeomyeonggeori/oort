@@ -11,7 +11,7 @@
 
 > 이 색인의 많은 문서는 **Swift/macOS 시절에 쓰였다.** 그 문서들을 폐기하지 않고 남겨 두되, 어느 것이 현행이고 어느 것이 은퇴 중인지 여기서 먼저 가른다 — 그러지 않으면 문서를 따르는 사람이 **실패하지 않고 잘못된 것을 성공적으로 짓는다**(#1226).
 
-| 층 | 현행(여기서 짓는다) | 은퇴 중(삭제 대기) |
+| 층 | 현행(여기서 짓는다) | 삭제됨 (git 이력 `f399e417:`) |
 |---|---|---|
 | 서버 | **`server-rust/`** Rust/Axum(ADR-0145) — `cargo` | `server/Sources`(Hummingbird 2) |
 | 발행/워커 | `bins/momo-relay` · `momo-agent-worker` · `momo-notifier` | `relay/OutboxRelay` · `workers/*` · `services/*` |
@@ -20,7 +20,7 @@
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
 | 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)(그록봇 3계층 플레이북) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행 + 데스크탑 dmg 공개 자산) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
-- **예외 — 은퇴 아님:** `relay/PushRelay`(라이브 푸시 경로가 지금도 빌드·배포) · `clients/web-legacy`(삭제 아님. 라이브 웹=`clients/web`, `server-rust/Dockerfile:147,157,173,231` web-assets / #1228. Swift prod `Dockerfile.web`·e2e `web-init`·`--profile web`가 아직 소비, #1610).
+- **예외 — 은퇴 아님:** PushRelay **계약**(env·서명·id-only, `infra/rust/docker-compose.push.yml`)은 유지, Swift 본체는 ADR-0183으로 삭제, Rust 이식 중(#1255). `clients/web-legacy`는 삭제 아님. **라이브 웹=`clients/web`**(`server-rust/Dockerfile` web-assets / #1228). Swift prod `Dockerfile.web`·e2e `web-init` 소비자는 LS-1에서 삭제(`f399e417:infra/prod/Dockerfile.web`, `f399e417:infra/docker-compose.e2e.yml`).
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
 
 ---
@@ -208,21 +208,21 @@
 | `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, #1228) |
 | `clients/desktop/` | Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다 |
 | `clients/mobile/` | React Native 앱(현재 iOS) |
-| `clients/web-legacy/` | ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod Dockerfile·e2e web-init·`--profile web`가 아직 소비(#1610). 생성 타입이 `docs/api/openapi.yaml`과 동기화돼야 한다 |
+| `clients/web-legacy/` | ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod/e2e 소비자는 LS-1에서 삭제(`f399e417:infra/prod/Dockerfile.web`, `f399e417:infra/docker-compose.e2e.yml`) |
 | `adapters/hermes/` · `adapters/prime/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) · prime-agent 어댑터(스트림 릴레이·하네스 refine·RPC) |
 | `infra/rust/` | **라이브 배포 경로** — Rust 이미지 compose + `Caddyfile`(정본) + 푸시/폰 오버레이 |
-| `infra/` | dev `docker-compose.yml`(PG18+Centrifugo v6) · e2e `docker-compose.e2e.yml`(local gate boundary) · `centrifugo.json` · `.env.example`. Compose layer 정본은 `docs/adr/0002-docker-compose-layering.md` |
+| `infra/` | `centrifugo.json` · `.env.example` · `infra/rust/`(현행 compose). 레거시 `docker-compose.yml`·e2e compose는 LS-1에서 삭제(`f399e417:`) |
 
-**은퇴 중(삭제 대기) — 읽어서 이해하는 용도이지 확장 대상이 아니다:**
+**삭제됨(LS-1 #2165 / ADR-0183) — 이식 원본은 git 이력 `f399e417:`:**
 
 | 경로 | 책임 |
 |---|---|
-| `clients/Core/` | MomoCore: 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜 |
-| `clients/macOS/` · `clients/iOS/` | MomoMac(SwiftUI D/B/C) · MomoiOSKit |
+| `clients/Core/` | MomoCore: 공유 모델 + `ChatBackend`/`AgentTransport` 프로토콜 (W-S1/#1215) |
+| `clients/macOS/` · `clients/iOS/` | MomoMac(SwiftUI D/B/C) · MomoiOSKit (W-S1/#1215) |
 | `server/Sources/` | MomoServer(Hummingbird 2) — Rust 재작성으로 대체됨 |
 | `relay/OutboxRelay/` · `workers/` · `services/` | Swift 실행체(AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등) |
-| `relay/PushRelay/` | ※ **예외 — 은퇴 아님**: 라이브 푸시 경로가 지금도 빌드·배포한다 |
-| `infra/prod/` · `fastlane/` | Swift prod compose(SOPS/age + pgBackRest 예시, 실제 secret 없음) · Apple 배포. ※ `infra/prod/Dockerfile.web`은 **Swift prod 경로**에서 web-legacy dist를 담는다(라이브 알파 아님, #1610) |
+| `relay/PushRelay/` | Swift 본체 삭제. 계약(env·서명·id-only)과 `infra/rust/docker-compose.push.yml`은 유지 — Rust 이식 중(#1255) |
+| `infra/prod/` · `fastlane/` | Swift prod compose. `fastlane/`는 W-S1에서 삭제 |
 
 ---
 

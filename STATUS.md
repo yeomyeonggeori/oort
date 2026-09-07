@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## LS-1 Swift 은퇴 (#2165, 2026-09-07)
+
+- Track engine. `feat/ls1-swift-retire`. Swift `server/Sources`·`workers`·`relay`·`services`·`infra/prod`·Swift e2e compose·examples·codex-workbench 삭제. `server/Migrations`·`server/Fixtures` 유지. PushRelay Swift 본체 삭제, **계약·overlay 유지, Rust 이식 중(#1255)**.
+- runtime-unverified: `scripts/verify_push_relay.sh`는 Swift `relay/PushRelay`를 실행하므로 #1255 착수 전까지 런타임 RED. workd 미이식 경로는 D4-② 폐기(출시 후 Rust 사이드카 ADR).
+
 ## LS-4 문서 로테이션 (#2143, 2026-09-07)
 
 - Track engine. ADR-0183 D6 + R2 live-cite restore: handoffs 304→76, planning-root 70→51, planning/research 112→78, `research/` 112→36 (26 ADR-cited md + 7 live-canon restores + 3 hermes fixtures). `claudedocs/` 39→0, `docs/archive/` 5→0. STATUS 2026-08 절 761줄을 `docs/planning/archive/STATUS-2026-08.md`로 이동. D6 수명 규칙은 살아 있는 정본·코드 인용을 포함한다.

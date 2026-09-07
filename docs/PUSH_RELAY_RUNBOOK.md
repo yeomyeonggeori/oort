@@ -1,5 +1,7 @@
 # PushRelay v0 운영 런북
 
+> relay 본체(Swift)는 ADR-0183으로 삭제됨 — Rust 이식 #1255(momo-push-relay, 셀프호스트 동봉) 진행 중. 이 문서의 env·서명·id-only 계약은 그대로 유효.
+
 PushRelay는 ADR-0120의 Dawn 운영 APNs 경계다. 셀프호스트 `NotifierWorker`가
 `momo.push.dispatch.v2` raw body를 Ed25519로 서명하고, relay는 등록 공개키를
 검증한 뒤 APNs에 id-only payload만 보낸다. 대화 본문·보낸 사람 표시명·채널명은
