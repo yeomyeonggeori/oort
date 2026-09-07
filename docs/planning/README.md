@@ -72,6 +72,12 @@ Work in its own worktree, run the required local gate, open one PR, move it to s
 
 목표/수용기준을 채팅에 다시 복사하지 않는다. 구현 중 컨텍스트 압축이 일어나도 worker는 Issue와 versioned packet을 다시 읽어 같은 계약으로 복원한다.
 
+### 문서 수명 규칙(ADR-0183 D6)
+- 핸드오프 패킷은 이슈가 열려 있는 동안만 존재한다. close 뒤 다음 플러시에서 삭제하고, git 히스토리가 아카이브다. **살아 있는 정본 문서 또는 코드가 경로(고유 basename이면 파일명)로 인용하면 보존**한다.
+- 리서치(`research/`·`docs/planning/research`)는 **살아 있는 정본 문서 또는 코드가 인용하는 것만** 보존한다(Accepted ADR·architecture·design-system만이 아님). 리서치가 리서치를 인용하는 것은 살아 있는 참조가 아니다.
+- `STATUS`·`JOURNAL`·`CURRENT_STATE`는 월 단위 1파일로 `docs/planning/archive/`에 로테이션한다.
+- `claudedocs/`는 세션 스크래치이며 추적하지 않는다.
+
 ## 3. 병렬 실행 규칙
 
 - 동시 구현 상한은 `PIPELINE.md` §2(현재 2). 초과분은 `status:ready`로 대기.

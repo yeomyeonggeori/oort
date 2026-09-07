@@ -7,7 +7,7 @@
 >
 > **불변식(스토어 게이트):** 🔒 스토어/공증 배포(external TestFlight 포함)는 사용성 검수 게이트 PASS 후에만 진행한다(체크리스트는 아카이브 §4~§5).
 >
-> **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 `docs/archive/ROADMAP-2026H1-M0-M8.md`. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
+> **아카이브(2026-09-01 경량화 재편, 성재 지시):** 직전 판 전문(2026-08-03 §0 + M0~M8 §1~§7)은 git 히스토리. M0~M8의 **스토어 제출·공증·법무·CI/CD 체크리스트는 폐기가 아니라 보류** — 축 셋이 폰에서 돈 뒤 그 부분만 다시 태운다.
 
 ---
 
@@ -73,7 +73,7 @@
 
 ## 2. 보류 (재점화 조건 명시)
 
-- **스토어 제출·공증·CI/CD·법무**: G3 조건 충족 뒤 재점화. 체크리스트 원문=`docs/archive/ROADMAP-2026H1-M0-M8.md` §4~§7(법무 항목은 법률 자문 아님 — 외부 변호사 1회 검토 필수).
+- **스토어 제출·공증·CI/CD·법무**: G3 조건 충족 뒤 재점화. 체크리스트 원문은 git 히스토리의 2026-08-03 ROADMAP 판 §4~§7(법무 항목은 법률 자문 아님 — 외부 변호사 1회 검토 필수).
 - **Android**: iOS v0 TestFlight 직후(ADR-0137 결정 6).
 - **VM/그록봇 릴레이 축**: SH-8 — 그록봇 복구 시 재개(S2·S3·허들 결함 B 서버 적용), 그록봇 "템플릿" 앱 표면 확인 전까지 루틴 지시문 정본화.
 - **buzz 제품축 6종 판정**(forum·projects·terminal·mesh-compute·workflows·agent-memory): 차별화 감사가 "싸우지 않을 자리"로 둔 축 — G2 뒤 재취사.
@@ -83,9 +83,9 @@
 | 무엇 | 어디 |
 |---|---|
 | 결정(왜) | `docs/adr/` (ADR-0100 거버넌스) |
-| 증거(됐나) | `STATUS.md` (당월+직전월 · 과거=`docs/archive/STATUS-YYYY-MM.md`) |
+| 증거(됐나) | `STATUS.md` (당월+직전월 · 과거=`docs/planning/archive/STATUS-YYYY-MM.md`) |
 | 현재 상태(어디까지) | `docs/planning/CURRENT_STATE.md` (스냅샷 최근 6) |
 | 계획(다음) | 이 문서 + GitHub Issues |
 | 티켓 수용기준 | `BUILD_TICKETS.md` (등급·활성 축·백로그만) |
 | 트랙·머지 규율 | `docs/TRACKS.md` |
-| 아카이브 색인 | `docs/archive/README.md` |
+| 아카이브 색인 | `docs/planning/archive/README.md` |
