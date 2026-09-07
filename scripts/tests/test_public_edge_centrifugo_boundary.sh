@@ -3,12 +3,12 @@
 set -euo pipefail
 
 fail() {
-  printf '[test-ncp-cent] FAIL %s\n' "$*" >&2
+  printf '[test-public-edge-cent] FAIL %s\n' "$*" >&2
   exit 1
 }
 
 pass() {
-  printf '[test-ncp-cent] PASS %s\n' "$*"
+  printf '[test-public-edge-cent] PASS %s\n' "$*"
 }
 
 if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
@@ -16,9 +16,9 @@ if ! REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"; then
 fi
 cd "$REPO_ROOT"
 
-CONTRACT="$REPO_ROOT/scripts/verify_ncp_centrifugo_contract.sh"
-RUNTIME="$REPO_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
-TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo-ncp-cent-test.XXXXXX")"
+CONTRACT="$REPO_ROOT/scripts/verify_public_edge_centrifugo_contract.sh"
+RUNTIME="$REPO_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh"
+TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/momo-public-edge-cent-test.XXXXXX")"
 trap 'rm -rf "$TMP_ROOT"' EXIT INT TERM
 
 BASE_TREE="$TMP_ROOT/base"
@@ -27,7 +27,7 @@ mkdir -p "$BASE_TREE/infra/rust" "$BASE_TREE/docs/runbooks" "$BASE_TREE/scripts"
 cp infra/rust/Caddyfile "$BASE_TREE/infra/rust/Caddyfile"
 cp infra/rust/docker-compose.rust.yml "$BASE_TREE/infra/rust/docker-compose.rust.yml"
 cp docs/runbooks/ncp-rust-deploy.md "$BASE_TREE/docs/runbooks/ncp-rust-deploy.md"
-cp scripts/verify_ncp_centrifugo_boundary.sh "$BASE_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+cp scripts/verify_public_edge_centrifugo_boundary.sh "$BASE_TREE/scripts/verify_public_edge_centrifugo_boundary.sh"
 
 MOMO_NCP_CONTRACT_ROOT="$BASE_TREE" "$CONTRACT" >/dev/null
 pass "canonical contract fixture is green"
@@ -52,10 +52,10 @@ expect_contract_red() {
 reset_mutation
 # shellcheck disable=SC2016 # Remove the literal runtime derivation expression.
 grep -Fv 'trusted_origin="$(derive_caddy_origin)"' \
-  "$MUT_TREE/scripts/verify_ncp_centrifugo_boundary.sh" \
-  > "$MUT_TREE/scripts/verify_ncp_centrifugo_boundary.sh.next"
-mv "$MUT_TREE/scripts/verify_ncp_centrifugo_boundary.sh.next" \
-  "$MUT_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+  "$MUT_TREE/scripts/verify_public_edge_centrifugo_boundary.sh" \
+  > "$MUT_TREE/scripts/verify_public_edge_centrifugo_boundary.sh.next"
+mv "$MUT_TREE/scripts/verify_public_edge_centrifugo_boundary.sh.next" \
+  "$MUT_TREE/scripts/verify_public_edge_centrifugo_boundary.sh"
 expect_contract_red "runtime_origin_binding"
 pass "missing canonical runtime origin binding is red"
 
@@ -259,14 +259,14 @@ pass "attacker/typo/port/userinfo/path/query/fragment/punycode origins are netwo
 
 BAD_ROOT="$TMP_ROOT/bad-runtime-root"
 mkdir -p "$BAD_ROOT/scripts" "$BAD_ROOT/infra/rust"
-cp "$RUNTIME" "$BAD_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
+cp "$RUNTIME" "$BAD_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh"
 cp infra/rust/docker-compose.rust.yml "$BAD_ROOT/infra/rust/docker-compose.rust.yml"
 printf 'edge.example.test {\nsecond.example.test {\n' > "$BAD_ROOT/infra/rust/Caddyfile"
-chmod +x "$BAD_ROOT/scripts/verify_ncp_centrifugo_boundary.sh"
+chmod +x "$BAD_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh"
 : > "$TOOL_LOG"
 BAD_CADDY_LOG="$TMP_ROOT/runtime-bad-caddy.log"
 if PATH="$FAKE_BIN:$PATH" FAKE_REAL_GREP="$REAL_GREP" FAKE_TOOL_LOG="$TOOL_LOG" \
-  "$BAD_ROOT/scripts/verify_ncp_centrifugo_boundary.sh" \
+  "$BAD_ROOT/scripts/verify_public_edge_centrifugo_boundary.sh" \
     --env-file "$SENTINEL_ENV" --edge-url "$TRUSTED_PROD_ORIGIN" \
     --evidence-dir "$TMP_ROOT/evidence-bad-caddy" > "$BAD_CADDY_LOG" 2>&1; then
   fail "runtime accepted ambiguous canonical Caddy sites"
@@ -278,17 +278,17 @@ pass "canonical Caddy ambiguity is network-zero before secret read"
 
 HARDCODED_TREE="$TMP_ROOT/hardcoded-site"
 mkdir -p "$HARDCODED_TREE/scripts" "$HARDCODED_TREE/infra/rust"
-cp "$RUNTIME" "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+cp "$RUNTIME" "$HARDCODED_TREE/scripts/verify_public_edge_centrifugo_boundary.sh"
 cp infra/rust/docker-compose.rust.yml "$HARDCODED_TREE/infra/rust/docker-compose.rust.yml"
 {
   printf 'evil.example.test {\n'
   cat infra/rust/Caddyfile
 } > "$HARDCODED_TREE/infra/rust/Caddyfile"
-chmod +x "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh"
+chmod +x "$HARDCODED_TREE/scripts/verify_public_edge_centrifugo_boundary.sh"
 : > "$TOOL_LOG"
 HARDCODED_LOG="$TMP_ROOT/runtime-hardcoded-site.log"
 if PATH="$FAKE_BIN:$PATH" FAKE_REAL_GREP="$REAL_GREP" FAKE_TOOL_LOG="$TOOL_LOG" \
-  "$HARDCODED_TREE/scripts/verify_ncp_centrifugo_boundary.sh" \
+  "$HARDCODED_TREE/scripts/verify_public_edge_centrifugo_boundary.sh" \
     --env-file "$SENTINEL_ENV" --edge-url "$TRUSTED_PROD_ORIGIN" \
     --evidence-dir "$TMP_ROOT/evidence-hardcoded-site" > "$HARDCODED_LOG" 2>&1; then
   fail "runtime accepted a hardcoded extra site next to the placeholder"
@@ -496,4 +496,4 @@ grep -Fq 'direct_status mode=current-secret expected=400(auth-passed) actual=401
   || fail "direct current-secret red proof did not fail by name"
 pass "private current secret must reach body validation, not 401"
 
-printf '[test-ncp-cent] PASS complete\n'
+printf '[test-public-edge-cent] PASS complete\n'

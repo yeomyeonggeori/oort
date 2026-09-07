@@ -11,7 +11,7 @@
 # The build context is the **repo root**, not `server-rust/`: the image must be
 # source-checkout-free at run time (prod contract), and the migration set plus
 # the two role SQL files it applies live outside `server-rust/`
-# (`server/Migrations`, `infra/e2e`, `infra/prod`). Those files are copied in,
+# (`server/Migrations`, `infra/e2e`, `infra/rust/sql`). Those files are copied in,
 # never modified.
 #
 # B5.1 adds `agent-worker`: the agent turn loop is what makes a mention produce
@@ -51,6 +51,24 @@
 ARG RUST_IMAGE=rust:1-slim-bookworm
 ARG NODE_IMAGE=node:22-bookworm-slim
 ARG RUNTIME_IMAGE=debian:bookworm-slim
+
+# Cheap proof stage: `docker build --target sql-payload` copies the bootstrap
+# SQL without waiting on cargo/npm. The runtime stage still COPYs the same
+# files from context so a production image stays source-checkout-free.
+FROM ${RUNTIME_IMAGE} AS sql-payload
+COPY server/Migrations /opt/momo/migrations
+COPY infra/e2e/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
+COPY infra/rust/sql/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
+COPY infra/rust/sql/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
+COPY infra/rust/sql/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
+COPY infra/rust/sql/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_owner_claim_if_absent.sql
+RUN set -eux; \
+    test -s /opt/momo/migrations/001_init.sql; \
+    test -s /opt/momo/sql/bootstrap_roles.sql; \
+    test -s /opt/momo/sql/bootstrap_runtime_roles.sql; \
+    test -s /opt/momo/sql/set_initial_owner.sql; \
+    test -s /opt/momo/sql/bootstrap_owner_if_absent.sql; \
+    test -s /opt/momo/sql/bootstrap_owner_claim_if_absent.sql
 
 # The commit this image was built from. Stamped into the OCI labels AND into
 # the SPA's `<meta name="momo-build">`, because a deployed artifact that cannot
@@ -218,11 +236,11 @@ COPY --from=build /out/ /usr/local/bin/
 # owns no migration of its own and edits none of these files.
 COPY server/Migrations /opt/momo/migrations
 COPY infra/e2e/bootstrap_roles.sql /opt/momo/sql/bootstrap_roles.sql
-COPY infra/prod/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
-COPY infra/prod/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
+COPY infra/rust/sql/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql
+COPY infra/rust/sql/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql
 # #1227: the only-if-absent twin the `migrate` command applies at first boot.
-COPY infra/prod/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
-COPY infra/prod/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_owner_claim_if_absent.sql
+COPY infra/rust/sql/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql
+COPY infra/rust/sql/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_owner_claim_if_absent.sql
 # #1332: four attribution files + sha256sum + Debian copyright scanner.
 # The hash file names the four files as they appear in this directory.
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/

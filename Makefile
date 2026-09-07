@@ -1,5 +1,5 @@
 # oort(momo) — Makefile
-# Targets: build / test / migrate / up / down  (+ 은퇴 중: swift-build / swift-test)
+# Targets: build / test / migrate / up / down
 #
 # 현행 스택 (ADR-0145 서버 재작성 · ADR-0119/0133 웹·데스크톱 · ADR-0137 공유 코어):
 #   서버        Rust/Axum 워크스페이스 `server-rust/` — cargo (bins: momo-server,
@@ -8,40 +8,20 @@
 #   모바일       `clients/mobile`(React Native)
 #   공유 코어    `packages/momo-core`(레포 루트 npm 워크스페이스)
 #
-# **Swift 트리는 은퇴 중이다.** 클라 3트리(`clients/macOS`·`clients/iOS`·`clients/Core`)는
-# W-S1(#1215)에서 **삭제됐다**. `server/Sources`(Hummingbird 2), `relay/OutboxRelay`,
-# `workers/*`, `services/*`는 아직 레포에 있지만 삭제 대기이며 새 작업의 기준이
-# 아니다(순서는 감사 `docs/planning/research/2026-08-09-swift-removal-audit.md` §6).
-# 그 빌드는 이 파일에서
-# `build`/`test`가 아니라 **`swift-build`/`swift-test`**로 이름이 바뀌었다
-# (`scripts/local_gate.sh`의 Swift 단계가 그 이름을 부른다).
-# 예외 — 은퇴 아님: `server/Migrations/*.sql`은 Rust 이미지가 그대로 싣는 정본 DDL이고,
-# `relay/PushRelay`는 라이브 푸시 경로가 여전히 빌드하는 Swift 컴포넌트다
-# (`infra/rust/docker-compose.push.build.yml`).
-#
-# up/down/migrate는 dev용 `infra/docker-compose.yml`(PG18 + Centrifugo v6)을 다룬다.
-# docker/psql이 없으면 runtime-unverified (no docker/psql).
+# up/down 은 `docs/SELF_HOST.md` 로컬 빌드 모드의 compose 명령을 그대로 감싼다
+# (`scripts/self_host_env.sh --compose …`). 기동 절차 정본은 그 문서다.
+# migrate 는 `server/Migrations/*.sql` 정본 DDL 을 적용한다.
 
 # --- 현행 스택 -----------------------------------------------------------------
 CARGO_MANIFEST := server-rust/Cargo.toml
 NPM_TREES      := . clients/web clients/mobile
 
-# --- 은퇴 중(Swift) ------------------------------------------------------------
-# 의존 순서: services → server/relay/worker/notifier
-# (클라 3트리는 W-S1 에서 삭제됨. `clients/Core` 를 경로 의존하던 것은
-#  `clients/macOS`·`clients/iOS` 뿐이었고 — 서버·워커·릴레이·서비스는
-#  `import MomoCore` 가 0건이다 — 그래서 이 목록에서 함께 빠진다.)
-SWIFT_PKGS := services/OutboundHTTPPolicy services/MomoMetrics services/CloudProviderKit server relay/OutboxRelay relay/PushRelay workers/AgentWorker workers/WorkHostDaemon workers/NotifierWorker services/LinkShort
-
-COMPOSE        := docker compose
-COMPOSE_FILE   := infra/docker-compose.yml
 MIGRATE_SCRIPT := scripts/migrate.sh
 ENV_FILE       ?= $(firstword $(wildcard .env.worktree .env infra/.env.example))
-COMPOSE_ENV    := $(if $(ENV_FILE),--env-file $(ENV_FILE),)
 
 .DEFAULT_GOAL := help
 .PHONY: help build test rust-build rust-test ts-check ts-test migrate up down \
-        swift-build swift-test local-alpha-plan local-alpha
+        local-alpha-plan local-alpha
 
 help: ## 사용 가능한 타깃 출력
 	@echo "oort — make targets:"
@@ -52,12 +32,12 @@ help: ## 사용 가능한 타깃 출력
 	@echo "  make ts-check    momo-core + web + mobile 타입체크"
 	@echo "  make ts-test     momo-core + web + mobile 테스트"
 	@echo "  make migrate     server/Migrations/*.sql 번호순 적용 (psql 필요)"
-	@echo "  make up          infra/docker-compose.yml 기동 (PG18 + Centrifugo v6)"
-	@echo "  make down        인프라 중지"
-	@echo "  make swift-build [은퇴 중] Swift 패키지 빌드 — 삭제 대기 트리"
-	@echo "  make swift-test  [은퇴 중] Swift 패키지 테스트 — 삭제 대기 트리"
+	@echo "  make up          docs/SELF_HOST.md 로컬 빌드 compose 기동"
+	@echo "  make down        docs/SELF_HOST.md compose 중지"
 	@echo "  make local-alpha-plan  MOMO-240 로컬 알파 runner dry-run"
 	@echo "  make local-alpha       MOMO-240 로컬 알파 runner execute(mock Hermes)"
+	@echo ""
+	@echo "셀프호스트 절차 정본: docs/SELF_HOST.md"
 
 # =============================================================================
 # 현행 스택
@@ -104,7 +84,7 @@ _npm_guard:
 	fi
 
 # =============================================================================
-# 인프라 (dev compose)
+# 인프라 (docs/SELF_HOST.md 로컬 빌드 compose)
 # =============================================================================
 
 migrate: ## server/Migrations/*.sql 번호순 적용 (psql 필요)
@@ -117,59 +97,11 @@ migrate: ## server/Migrations/*.sql 번호순 적용 (psql 필요)
 		echo "migrate: $(MIGRATE_SCRIPT) 없음. runtime-unverified (no docker/psql)."; \
 	fi
 
-up: ## 인프라 기동 (PostgreSQL 18 + Centrifugo v6)
-	@# --wait: postgres/centrifugo 모두 compose healthcheck가 정의되어 있어
-	@# healthy(=연결 수락 가능)까지 대기한다(MOMO-316). 폴링 루프 불필요.
-	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		if command -v shasum >/dev/null 2>&1; then \
-			config_sha="$$(shasum -a 256 infra/centrifugo.json | awk '{ print $$1 }')"; \
-		else \
-			config_sha="$$(sha256sum infra/centrifugo.json | awk '{ print $$1 }')"; \
-		fi; \
-		test -n "$$config_sha" || { echo "failed to fingerprint infra/centrifugo.json" >&2; exit 1; }; \
-		MOMO_CENTRIFUGO_CONFIG_SHA256="$$config_sha" $(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" up -d --wait; \
-	else \
-		echo "up: $(COMPOSE_FILE) 없음. runtime-unverified (no docker/psql)."; \
-	fi
+up: ## 셀프호스트 스택 기동 (docs/SELF_HOST.md 로컬 빌드 모드)
+	scripts/self_host_env.sh --compose up -d --build --wait
 
-down: ## 인프라 중지
-	@if [ -f "$(COMPOSE_FILE)" ]; then \
-		$(COMPOSE) $(COMPOSE_ENV) -f "$(COMPOSE_FILE)" down; \
-	else \
-		echo "down: $(COMPOSE_FILE) 없음. runtime-unverified (no docker/psql)."; \
-	fi
-
-# =============================================================================
-# 은퇴 중 — Swift 트리 (삭제 대기). 새 기능을 여기 얹지 마라.
-# =============================================================================
-
-swift-build: ## [은퇴 중] Swift 패키지 빌드 (Package.swift 존재하는 것만)
-	@echo "[은퇴 중] Swift 트리는 삭제 대기다. 현행 스택 빌드는 'make build'."
-	@found=0; \
-	for pkg in $(SWIFT_PKGS); do \
-		if [ -f "$$pkg/Package.swift" ]; then \
-			found=1; \
-			echo "==> swift build ($$pkg)"; \
-			( cd "$$pkg" && swift build ) || exit 1; \
-		fi; \
-	done; \
-	if [ "$$found" = "0" ]; then \
-		echo "swift-build: Package.swift가 하나도 없습니다 (Swift 트리 삭제 완료로 보입니다)."; \
-	fi
-
-swift-test: ## [은퇴 중] Swift 패키지 테스트 (Package.swift 존재하는 것만)
-	@echo "[은퇴 중] Swift 트리는 삭제 대기다. 현행 스택 테스트는 'make test'."
-	@found=0; \
-	for pkg in $(SWIFT_PKGS); do \
-		if [ -f "$$pkg/Package.swift" ]; then \
-			found=1; \
-			echo "==> swift test ($$pkg)"; \
-			( cd "$$pkg" && swift test ) || exit 1; \
-		fi; \
-	done; \
-	if [ "$$found" = "0" ]; then \
-		echo "swift-test: Package.swift가 하나도 없습니다 (Swift 트리 삭제 완료로 보입니다)."; \
-	fi
+down: ## 셀프호스트 스택 중지 (docs/SELF_HOST.md)
+	scripts/self_host_env.sh --compose down
 
 local-alpha-plan: ## MOMO-240 local alpha runner dry-run
 	@sh scripts/local_alpha_runner.sh plan

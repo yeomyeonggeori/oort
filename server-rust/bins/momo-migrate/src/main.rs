@@ -427,7 +427,7 @@ fn migrate() -> Result<(), MigrateError> {
         }
         let file = runtime_path(
             "MOMO_RUNTIME_ROLES_SQL",
-            "infra/prod/bootstrap_runtime_roles.sql",
+            "infra/rust/sql/bootstrap_runtime_roles.sql",
             "/opt/momo/sql/bootstrap_runtime_roles.sql",
         )?;
         psql_file(&database_url, &file, "runtime-roles")?;
@@ -571,7 +571,7 @@ fn bootstrap_owner(database_url: &str) -> Result<(), MigrateError> {
         OwnerBootstrapPlan::Apply => {
             let file = runtime_path(
                 "MOMO_BOOTSTRAP_OWNER_SQL",
-                "infra/prod/bootstrap_owner_if_absent.sql",
+                "infra/rust/sql/bootstrap_owner_if_absent.sql",
                 "/opt/momo/sql/bootstrap_owner_if_absent.sql",
             )?;
             // psql's NOTICE is the verdict and reaches the container log
@@ -713,7 +713,7 @@ fn bootstrap_owner_claim(database_url: &str, email: &str) -> Result<(), MigrateE
             let token = mint_claim_token()?;
             let file = runtime_path(
                 "MOMO_BOOTSTRAP_OWNER_CLAIM_SQL",
-                "infra/prod/bootstrap_owner_claim_if_absent.sql",
+                "infra/rust/sql/bootstrap_owner_claim_if_absent.sql",
                 "/opt/momo/sql/bootstrap_owner_claim_if_absent.sql",
             )?;
             let ttl = OWNER_CLAIM_TTL_SECONDS.to_string();
@@ -751,7 +751,7 @@ fn set_owner() -> Result<(), MigrateError> {
     }
     let file = runtime_path(
         "MOMO_SET_OWNER_SQL",
-        "infra/prod/set_initial_owner.sql",
+        "infra/rust/sql/set_initial_owner.sql",
         "/opt/momo/sql/set_initial_owner.sql",
     )?;
     psql_file(&database_url, &file, "set-owner")?;
@@ -888,8 +888,8 @@ mod tests {
     /// preserves an existing password, the other deliberately replaces it.
     #[test]
     fn the_owner_sql_files_are_distinct_and_present() {
-        let bootstrap = resolve_path(None, "infra/prod/bootstrap_owner_if_absent.sql");
-        let rotate = resolve_path(None, "infra/prod/set_initial_owner.sql");
+        let bootstrap = resolve_path(None, "infra/rust/sql/bootstrap_owner_if_absent.sql");
+        let rotate = resolve_path(None, "infra/rust/sql/set_initial_owner.sql");
         assert!(bootstrap.is_file(), "{}", bootstrap.display());
         assert!(rotate.is_file(), "{}", rotate.display());
         assert_ne!(bootstrap, rotate);
@@ -911,7 +911,7 @@ mod tests {
             "the deliberate rotation must still revoke live sessions"
         );
 
-        let claim = resolve_path(None, "infra/prod/bootstrap_owner_claim_if_absent.sql");
+        let claim = resolve_path(None, "infra/rust/sql/bootstrap_owner_claim_if_absent.sql");
         assert!(claim.is_file(), "{}", claim.display());
         let claim_sql = std::fs::read_to_string(&claim).expect("read claim sql");
         assert!(
@@ -972,7 +972,7 @@ mod tests {
                 true,
                 "MOMO_RUNTIME_ROLES_SQL",
                 None,
-                "infra/prod/bootstrap_runtime_roles.sql",
+                "infra/rust/sql/bootstrap_runtime_roles.sql",
                 "/opt/momo/sql/bootstrap_runtime_roles.sql",
             ),
             Ok(PathBuf::from("/opt/momo/sql/bootstrap_runtime_roles.sql"))
@@ -982,7 +982,7 @@ mod tests {
                 true,
                 "MOMO_RUNTIME_ROLES_SQL",
                 Some(value.to_string()),
-                "infra/prod/bootstrap_runtime_roles.sql",
+                "infra/rust/sql/bootstrap_runtime_roles.sql",
                 "/opt/momo/sql/bootstrap_runtime_roles.sql",
             )
             .expect_err("image override must fail closed");

@@ -1,4 +1,0 @@
-# MOMO-646 harness direct dependencies. Model repository commits are pinned in
-# model-lock.json and resolved before WhisperModel opens the local snapshot.
-faster-whisper==1.2.1
-huggingface-hub==0.34.4

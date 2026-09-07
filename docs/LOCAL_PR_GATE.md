@@ -9,7 +9,7 @@ As of 2026-08-12, public-repository `pr-ci` is active for PRs into `main`,
 `track/engine`, and `track/uxui`; `track-alignment` watches canonical topology.
 Release and paid macOS workflows remain manual and owner-gated.
 
-- `PR CI gate` and base-trusted `Policy integrity gate` are the two stable branch-protection contexts (ADR-0153 D5). Rust, Node, and generated-contract jobs may skip by path, while the PR CI aggregator itself always reports one result.
+- `PR CI gate` and base-trusted `Policy integrity gate` are the two stable branch-protection contexts (ADR-0153 D5). Rust and Node jobs may skip by path, while the PR CI aggregator itself always reports one result. The OpenAPI ↔ generated-contract lane is retired (#2142 / ADR-0183).
 - Local evidence remains the primary runtime merge gate because PR CI intentionally does not boot PostgreSQL/Centrifugo/Docker e2e or external providers.
 - Workers use local evidence to open a PR and hand it off; workers do not merge. `momo-main` owns review, final local gate, merge, issue close, and post-merge `main` verification.
 - Release workflow activation and M7/M8 gates are unchanged; green PR CI is not release authorization.
@@ -131,30 +131,27 @@ Profiles:
 
 | Profile | Use when | What it runs |
 |---|---|---|
-| `docs` | docs/spec/script-only changes, including internal alpha runbook/feedback/AWS topology updates | whitespace diff, **`cargo fmt --all --check` over both cargo workspaces (#1472)**, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, AWS internal alpha topology preflight fixture, **Rust publish + self-host image-mode contracts (#1266)**, NCP Centrifugo internal-only contract + mutation/redaction fixtures (#1329), JSON/shell/Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential) |
-| `swift` | 잔존 Swift 트리(`server`·`relay/*`·`workers/*`·`services/*`) 변경 | `docs` profile + `make swift-build` + `make swift-test`. **mac 디자인 pre-flight 래칫과 SwiftPM 라이선스 게이트는 W-S1(#1215/#1201)에서 은퇴** — 후속은 각각 `design_preflight_web.sh`(web/병합 트리)와 `--profile license`(cargo+npm) |
+| `docs` | docs/spec/script-only changes | whitespace diff, **`cargo fmt --all --check` over both cargo workspaces (#1472)**, **secret scan over all refs (#1236)**, workflow YAML parse, actionlint if installed, e2e compose config, **Rust publish + self-host image-mode contracts (#1266)**, public-edge Centrifugo contract + mutation/redaction fixtures (#1329), JSON/shell/Python syntax, Hermes adapter smoke, prime adapter contract tests + closed-loop smoke (`adapters/prime/tests/`, no docker/network/credential), SH day-2/doctor/public-edge tests (#2124), release-manifest contract |
 | `diagnostics` | diagnostics/observability bundle changes | `docs` profile + `scripts/collect_diagnostics.sh --smoke` redaction check |
-| `staging-smoke` | staging/prod/internal-hosting/NCP Rust config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_internal_hosting_smoke.sh` for prod compose config, internal single-node smoke overlay, Caddyfile structure, Centrifugo Redis config, API health route wiring, relay/worker enablement, secret-template guard, public/staging preflight evidence markdown/json, and SOPS/pgBackRest checklist. The static block also fixes the Rust/NCP edge 403, shared-secret source, rotation-runbook, and redacted verifier contracts |
+| `staging-smoke` | staging/prod/internal-hosting/self-host config or runbook changes that do not have real VPS secrets | `docs` profile + `scripts/verify_staging_smoke.sh` + `scripts/verify_momo_ops.sh`. The static block also fixes the Rust public-edge 403, shared-secret source, rotation-runbook, and redacted verifier contracts |
 | `backup` | backup/PITR image, archive, restore, signed-evidence or migration-gate changes | `docs` profile + legacy logical smoke + focused RED matrix + `scripts/verify_pgbackrest_pitr_e2e.sh`: pinned PostgreSQL 18+pgBackRest image, marker A, encrypted full backup, target UTC, marker B and forced WAL archive, distinct-volume time-target restore, A=1/B=0, signed JSON/Markdown/bindings/current-cipher artifact, candidate migrate verification, and labeled-resource cleanup 0 |
-| `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image prod+internal-smoke boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
+| `host-runtime` | internal single-node host-runtime smoke before internal test hosting | `docs` profile + `scripts/verify_internal_host_runtime.sh` + `scripts/verify_backup_restore_rehearsal.sh`; proves local image boot/health/agent-runtime-status redaction/migrate/message/relay/mock-agent and repo-local restore evidence |
 | `local-alpha` | AWS 전 1인 local Docker alpha RC gate | `docs` profile + host-runtime boot/health/migrate/message/relay/mock Kim Intern + backup restore rehearsal + redacted diagnostics bundle in one `local-alpha-<run-id>/` packet |
 | `internal-alpha` | internal alpha evidence packet before reviewer handoff | `docs` profile + host-runtime image boot/health/migrate/message/relay/mock Kim Intern evidence + backup restore rehearsal + redacted diagnostics bundle |
-| `runtime-db` | migrations/server/RLS/join changes | `swift` profile + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + `scripts/verify_rls.sh` + `scripts/verify_join.sh` + `scripts/verify_push_registration.sh` + `scripts/verify_push_notifier.sh` + `scripts/verify_plugin_registry.sh` + `scripts/verify_signed_webhook_ingress.sh` + `scripts/verify_drive_mcp.sh` + `scripts/verify_attachment_upload.sh` (both stub-only; no Google call) |
-| `runtime-relay` | outbox/relay/realtime changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
-| `runtime-live` | realtime-token/WebSocket live subscribe changes | `swift` profile + Docker/migration bootstrap + host MomoServer/OutboxRelay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
-| `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `swift` profile + Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
+| `runtime-db` | migrations/server/RLS/join changes | `docs` static checks + `make up` (compose `--wait`) + `make migrate` (single run: apply + idempotency verify pass with `IDEMPOTENCY_OK` marker) + remaining Rust-path verifiers (`verify_rls.sh`, `verify_join.sh`, Hosted Agent Port family, huddle, workd attach, ACP host, T3 migration repair, agent credentials) |
+| `runtime-relay` | outbox/relay/realtime changes | Docker/migration bootstrap + `scripts/verify_relay.sh` for server send, outbox pending, relay claim, Centrifugo history, outbox done, and `version=message.seq` evidence |
+| `runtime-live` | realtime-token/WebSocket live subscribe changes | Docker/migration bootstrap + host API/relay + compose-network `api:8080` proxy + `scripts/verify_realtime_live.sh` for token issuance, subscribe, REST send, live `message.new`, `payload.message.seq`, and invalid token rejection evidence |
+| `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | Docker/migration bootstrap + `scripts/verify_agent_worker.sh` + `scripts/verify_agent_live_channel.sh` |
 | `external-agent-provider` | real external agent runtime credentialed smoke, opt-in only | `docs` profile + `scripts/verify_local_hermes_credentialed_smoke.sh`; with credentials it delegates to the external verifier, checks OpenAI-compatible SSE, `/v1/agent-runtime/status` redaction/degraded reason, Hermes active agent + `#agent-lab` invite precondition, and one local MomoServer/AgentWorker/OutboxRelay `@hermes` roundtrip; without credentials it writes `NEEDS_USER_CREDENTIAL` / `runtime-unverified(external provider credentials)` evidence |
-| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `swift` profile + Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence |
-| `web-serving` | `infra/prod/Dockerfile.web`, prod Caddy/compose, LinkShort, or APP_DOMAIN serving verifier changes | `docs` static checks + `scripts/verify_web_serving.sh`; isolated e2e `web` profile on ports 28070-28074, real Vite dist via web-init named volume, `/join` fallback and `/i/*` LinkShort proxy included in the eight-assertion HTTP gate. Public DNS/ACME/TLS and the full invite round-trip are excluded. |
-| `web` | `clients/web-legacy` (ADR-0119 v0; still the `--profile web` / Swift prod `Dockerfile.web` / e2e `web-init` tree, **not** live alpha — live is `clients/web`, `server-rust/Dockerfile:147,157,173,231` / #1228), `docs/api/openapi.yaml`, or web serving/smoke script changes | worktree-clean + `npm ci` + `npm run lint` + `npm run test` (Vitest) + `npm run typecheck` + `scripts/verify_web_generated_types.sh` (openapi-typescript output vs committed `src/api/schema.d.ts`; `generator-failed` and `types-stale` are distinct named failures) + `npm run build` + permissive-only license gate (full transitive inventory markdown) + `scripts/web_serving_smoke.sh` + `scripts/verify_web_login_smoke.sh` (e2e compose Chromium login→timeline→realtime) + `scripts/verify_openapi_contract.sh` runtime drift gate |
+| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | Docker/migration bootstrap + `verify_agent_worker.sh` D/B evidence + `verify_approval_decision.sh` C evidence |
+| `web` | `clients/web` (live SPA; `server-rust/Dockerfile` web-assets), `docs/api/openapi.yaml`, or design-preflight changes | worktree-clean + design pre-flight + `clients/web` `npm ci --no-audit --no-fund` → `npm run lint` → `npm run typecheck` → `npm run test` → `npm run build` + permissive-only license gate on canonical npm roots |
 | `license` | dependency changes in any cargo/npm tree — `Cargo.lock`, `package-lock.json`, `deny.toml`, GHCR notice bundle (`legal/generated/`, `NOTICE`, `legal/THIRD_PARTY_NOTICES.md`), or the gate scripts themselves | `docs` profile + `scripts/tests/test_license_gate.sh` (red proofs) + `scripts/check_cargo_licenses.sh` (`cargo deny check licenses` over `server-rust` and `clients/desktop/src-tauri` with the root `deny.toml`) + `scripts/check_npm_licenses.mjs` over the canonical npm trees (workspace root incl. `packages/momo-core`, `clients/web`, `clients/mobile`; inventory markdown to the gate output dir) + `#1332` `scripts/tests/test_ghcr_notice_bundle.sh` (byte-identical + version/license-delete/Docker-COPY/GPL-as-permissive RED) + `scripts/check_ghcr_notice_bundle.sh` (lockfile-hash stale bundle + Dockerfile COPY of LICENSE/NOTICE/index/generated bundle). Policy (#1225 allow/deny) and attribution (#1332 generated notices) are separate gates. Requires `cargo-deny`; fails closed with install guidance when absent. Licenses only — no RUSTSEC advisories, no `npm audit`. Not a legal-sufficiency declaration |
 | `secrets` | fast standalone "did I just commit a credential" lane, or `.gitleaksignore` / secret-gate script changes | `scripts/tests/test_secrets_gate.sh` (red proofs) + `scripts/check_secrets.sh` — gitleaks over every ref with the `.gitleaksignore` triage baseline applied. ~3s, no static checks. The same two steps already run inside **every** other profile through the static block, so this profile is a convenience lane, not extra coverage. Requires `gitleaks`; fails closed with install guidance when absent, with no override env |
-| `all` | merge-critical/runtime-wide changes | broad static/Swift/runtime DB/relay/agent/macOS gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
+| `all` | merge-critical/runtime-wide changes | broad static/runtime DB/relay/agent gate in one run, with shared bootstrap deduped except migration idempotency; run `runtime-live` separately for WebSocket live evidence because it starts host API/relay processes and a compose-network proxy |
 
 Examples:
 
 ```bash
-scripts/local_gate.sh --profile swift
 scripts/local_gate.sh --profile diagnostics
 scripts/local_gate.sh --profile staging-smoke
 scripts/local_gate.sh --profile backup
@@ -167,7 +164,6 @@ scripts/local_gate.sh --profile runtime-agent
 scripts/local_gate.sh --profile external-agent-provider
 scripts/verify_local_hermes_credentialed_smoke.sh
 scripts/local_gate.sh --profile m3-dbc
-scripts/local_gate.sh --profile web-serving
 scripts/local_gate.sh --profile web
 scripts/local_gate.sh --profile license
 scripts/local_gate.sh --profile secrets
@@ -260,9 +256,9 @@ OPENAPI_GATE_DATABASE_URL=postgres://momo:...@127.0.0.1:18981/momo \
 scripts/verify_openapi_contract.sh
 ```
 
-The `docs` profile statically checks the spec parse and both gate scripts.
-The runtime drift gate is wired into the `web` profile (MOMO-391) and also
-runs standalone with the command above.
+The `docs` profile statically parses the spec. The Rust OpenAPI verifier
+(`scripts/verify_openapi_contract_rust.sh`) stays in the static block. The
+retired Swift OpenAPI pass is no longer a `web` profile step (#2142).
 
 ### 병합 트리 크로스-클라 게이트 (#1108)
 
@@ -279,11 +275,8 @@ scripts/verify_merge_tree.sh --typecheck-only    # 빠른 사전 확인
 한 번도 체크아웃되지 않는다 — 그것이 이미 초록인 판이기 때문이다.
 
 여덟 번째 레인(`web lint`)은 #1210 에서 붙었다. `clients/web/eslint.config.js` 의 두
-디자인 규칙(JSX 인라인 `style=` 금지 · `#rrggbb` 리터럴 금지)을 **어느 게이트도
-실행하지 않고** 있었기 때문이다 — `web` 프로파일의 lint 단계가 도는 것은 동결된
-`clients/web-legacy` 다. 그동안 손실이 없었던 것은 `design_preflight_web.sh` 의 그렙
-분류가 같은 두 규칙을 중복 커버한 덕이고, 중복이 유일한 안전망인 상태였다. 문턱은
-error 이고 경고는 통과한다(base 12건).
+디자인 규칙(JSX 인라인 `style=` 금지 · `#rrggbb` 리터럴 금지)을 병합 트리와
+`--profile web` 이 둘 다 실행한다. 문턱은 error 이고 경고는 통과한다(base 12건).
 
 같은 실패 양식이 두 번 왔기 때문에 세운다: ①U4-4 W-1(게이트 증거를 버려질 판에서
 수집) ②U4-6 B1(웹 PR이 코어 API를 재편, 폰 PR이 옛 API 소비 — 각 브랜치는 초록,
@@ -295,6 +288,8 @@ error 이고 경고는 통과한다(base 12건).
 사실을 경고로 말한다.
 
 ### Push device registration gate (MOMO-403, ADR-0120 P-1)
+
+> Retired in #2142 / ADR-0183. `scripts/verify_push_registration.sh` is no longer a local_gate subject and is deleted in the same issue.
 
 `scripts/verify_push_registration.sh` is the runtime gate for the APNs
 device/push_token registration REST (`DeviceRoutes.swift`). It boots an
@@ -317,6 +312,8 @@ and `momo_app` RLS isolation for `device`/`push_token`. Wired into the
 `PUSH_GATE_PROJECT`, `PUSH_GATE_BOOT_TIMEOUT`, `PUSH_GATE_KEEP=1`.
 
 ### Push notifier gate (MOMO-404, ADR-0120 P-2)
+
+> Retired in #2142 / ADR-0183. `scripts/verify_push_notifier.sh` is no longer a local_gate subject and is deleted in the same issue.
 
 `scripts/verify_push_notifier.sh` is the runtime gate for the server-side
 push pipeline: the 011 message trigger (durable `outbox
@@ -345,6 +342,8 @@ BYPASSRLS session, and 011 enum/trigger/index presence. Wired into the
 
 ### Plugin registry gate (MOMO-410, ADR-0113 SE-04A)
 
+> Retired in #2142 / ADR-0183. `scripts/verify_plugin_registry.sh` is no longer a local_gate subject and is deleted in the same issue.
+
 `scripts/verify_plugin_registry.sh` boots an isolated e2e API stack (project
 `momo410plugins`, loopback ports `19800`-`19803`) and verifies the official
 GitHub/Notion/Linear manifest seeds plus the `external_webhook` registry marker,
@@ -363,6 +362,8 @@ FORCE RLS isolation. Wired into `runtime-db`; also runs standalone. Overrides:
 
 ### Hosted Drive MCP gate (MOMO-457, ADR-0113 SE-04D)
 
+> Retired in #2142 / ADR-0183. `scripts/verify_drive_mcp.sh` is no longer a local_gate subject and is deleted in the same issue.
+
 `scripts/verify_drive_mcp.sh` boots an isolated e2e API stack with the explicit
 local-only stub backend. It verifies Drive manifest seeding, hosted endpoint
 absolute descriptor assembly, agent bearer + delegated channel binding,
@@ -373,6 +374,8 @@ the manual evidence in `docs/GWS_INTERNAL_CONSENT_RUNBOOK.md`. Wired into
 `runtime-db`; also runs standalone.
 
 ### Attachment archive gate (MOMO-474/521, ADR-0127)
+
+> Retired in #2142 / ADR-0183. `scripts/verify_attachment_upload.sh` is no longer a local_gate subject and is deleted in the same issue.
 
 `scripts/verify_attachment_upload.sh` defaults to the existing isolated Drive
 stub stack. `ATTACHMENT_GATE_BACKEND=s3` enables the compose MinIO profile on
@@ -390,6 +393,8 @@ standalone. Overrides: `ATTACHMENT_GATE_BACKEND=drive|s3`, `ATTACHMENT_GATE_PORT
 
 ### Signed webhook ingress gate (MOMO-412, ADR-0115 SE-04B)
 
+> Retired in #2142 / ADR-0183. `scripts/verify_signed_webhook_ingress.sh` is no longer a local_gate subject and is deleted in the same issue.
+
 `scripts/verify_signed_webhook_ingress.sh` boots an isolated e2e API stack
 (project `momo412webhook`, loopback ports `19900`-`19903`) and verifies native
 HMAC forgery/replay/stale timestamp/cross-workspace rejection, deterministic
@@ -405,111 +410,38 @@ runs standalone. Overrides: `WEBHOOK_GATE_PORT` /
 `WEBHOOK_GATE_HERMES_PORT`, `WEBHOOK_GATE_PROJECT`,
 `WEBHOOK_GATE_BOOT_TIMEOUT`, `WEBHOOK_GATE_KEEP=1`.
 
-### Web client gate (`web` profile, MOMO-391 + MOMO-400 + MOMO-401)
+### Web client gate (`web` profile, #2142 / ADR-0183)
 
-`scripts/local_gate.sh --profile web` is the merge gate for `clients/web-legacy`
-and web-serving changes (ADR-0119 W-2/W-4). Steps, in order:
+`scripts/local_gate.sh --profile web` is the merge gate for the live SPA
+`clients/web`. `--auto` maps `clients/web/*` here. Steps, in order:
 
-> **Path note (MOMO-596 / ADR-0133 / #1228 / #1610):** the v0 client this
-> profile builds moved from `clients/web` to `clients/web-legacy`. **Live
-> alpha serving is `clients/web`** (`server-rust/Dockerfile:147,157,173,231`
-> → `/opt/momo/web/` · `web-assets`). This profile still builds
-> `clients/web-legacy` because Swift prod `infra/prod/Dockerfile.web`, e2e
-> `web-init`, and this gate consume it (not discarded). `clients/web` and
-> `clients/desktop` are **not** covered by this profile — `--auto` widens
-> them to `all` (narrowing would green the wrong tree).
+1. worktree-clean guard.
+2. design pre-flight (`scripts/design_preflight_web.sh --selftest` then the
+   web 10 + core 3 discriminators, hard zero).
+3. `(cd clients/web && npm ci --no-audit --no-fund)`
+4. `(cd clients/web && npm run lint)`
+5. `(cd clients/web && npm run typecheck)`
+6. `(cd clients/web && npm run test)`
+7. `(cd clients/web && npm run build)`
+8. License gate: `scripts/check_npm_licenses.mjs` default roots (workspace
+   root incl. `packages/momo-core`, `clients/web`, `clients/mobile`).
 
-1. worktree-clean guard, `npm ci`, `eslint`, `tsc --noEmit` inside
-   `clients/web-legacy`.
-2. Generated-types sync — `scripts/verify_web_generated_types.sh`:
-   `npm run generate:types` re-renders `src/api/schema.d.ts` from
-   `docs/api/openapi.yaml` and the step fails if the committed file differs —
-   spec changes and client types cannot drift apart in one PR. Failures are
-   named: `generator-failed` (unparseable spec or missing/broken
-   openapi-typescript) is reported separately from `types-stale`, and the
-   regenerated file is restored on every exit path so a drift failure never
-   resurfaces as a worktree-clean failure on the next run. MOMO-678 repaired
-   this step after it sat permanently red (64 committed paths vs 101
-   documented) — a step that always fails carries no signal.
-3. `vite build` (production bundle must stay CSP-safe: no inline script;
-   ADR-0119 permits inline style, and the browser smoke enforces the policy).
-4. License gate: `scripts/check_npm_licenses.mjs --root clients/web-legacy`
-   walks the full transitive closure from `package-lock.json`, fails on
-   anything outside the shared permissive allowlist, and writes a Markdown
-   license inventory to the gate output dir — attach it to the PR.
-   #1225 moved this script out of `clients/web-legacy/scripts/` and pointed
-   its defaults at the canonical trees, so this profile now names the tree it
-   builds. The policy itself (including the reviewed MPL-2.0/BlueOak-1.0.0/
-   Python-2.0/CC-BY-4.0 entries and their reasons) lives in the script's
-   `ALLOWED` map and mirrors `deny.toml`; see the `license` profile.
-5. `scripts/web_serving_smoke.sh` — MOMO-390 regression: Caddyfile parse
-   matrix, SPA fallback, `/v1` proxy wiring, centrifugo edge 403, strict
-   CSP headers, and the APP_DOMAIN-unset sentinel fail-closed ordering
-   (guard evaluated before the proxy — PR #403 review Medium-1).
-6. `scripts/verify_web_login_smoke.sh` — boots an isolated e2e compose
-   stack (project `momo391web`, loopback ports `18990`-`18995`), serves the
-   built SPA through the real prod Caddyfile, and drives headless Chromium
-   (playwright) through login (workspace empty → demo fallback) → channel
-   list → timeline display of REST-seeded messages → wss realtime subscribe
-   under the strict CSP → a REST-sent message rendered live through
-   REST → PG → outbox → relay → Centrifugo → browser, plus REST `?after=`
-   catch-up evidence and zero CSP console violations. MOMO-400 extends the
-   same run with: composer `clientMsgId` idempotency (first send forwarded
-   to the server but answered 500; the retry must reuse the SAME
-   `clientMsgId` and leave exactly one DOM render and one committed row),
-   the read-state rail (bulk GET badge init; an EXTERNAL cursor PUT clears
-   the badge through the `user:read-state#<member-id>` push with zero
-   further read-state GETs; browser cursor PUTs asserted strictly
-   monotonic), ADR-0112 approval cards (no tool JSON/cost leakage;
-   in-browser approve → receipt 200; an externally pre-decided approval →
-   409 receipt handled as a card state transition, not an error), and DM
-   open via `POST /dms` + composer round-trip + `GET /dms` listing.
-   MOMO-401 extends the same run with the invite web join (ADR-0121 D2-B):
-   a disposable admin issues invites over REST
-   (`POST /v1/workspaces/:ws/invites` — smoke tooling, not web-client
-   surface), one invite is expired by fixture SQL and one exhausted through
-   a real `POST /v1/join`; a fresh browser context then opens
-   `/join?code=<code>`, asserts the code is stripped from browser history after
-   success (history.replaceState) and never appears in any non-document request URL
-   or console line, joins through the form (session established from the
-   JoinResponse token pair — the spec'd join-login path), enters the
-   #general timeline, logs out and re-logs-in with the join-created
-   credentials, and finally checks that expired / exhausted / invalid codes
-   each render their own Korean error copy (`data-error-kind`). First
-   run downloads the playwright Chromium build (cached) and cold-builds
-   the api/relay Swift containers — allow many minutes. Overrides:
-   `WEB_LOGIN_SMOKE_PORT`/`..._POSTGRES_PORT`/`..._CENT_PORT`/
-   `..._HERMES_PORT`/`..._EDGE_HTTPS`/`..._EDGE_HTTP` (port conflicts),
-   `WEB_LOGIN_SMOKE_PROJECT`, `WEB_LOGIN_SMOKE_BOOT_TIMEOUT`,
-   `WEB_LOGIN_SMOKE_KEEP=1`.
-7. `scripts/verify_openapi_contract.sh` — the MOMO-389 runtime drift gate
-   (its own isolated stack, see above).
+Generated-types, serving smoke, Chromium login smoke, and the Swift OpenAPI
+pass are retired with this profile retarget.
 
 CSP contract note: the web client uses centrifuge-js in websocket-only
 transport mode. The serving CSP allows `connect-src 'self'` plus
 `wss://REALTIME_DOMAIN` and `https://REALTIME_DOMAIN`. Adding another fallback
-transport requires updating the Caddyfile CSP and the
-`scripts/web_serving_smoke.sh` expectations in the same PR.
+transport requires updating the Caddyfile CSP in the same PR.
 
-`staging-smoke` now exercises `scripts/prod_env_preflight.sh --evidence-dir` in
-two ways: tracked example staging env must fail-fast on placeholders, while a
-synthetic non-placeholder public/staging env shape must pass and write
-`prod-env-preflight-staging.md` plus `.json`. This proves DNS/TLS/registry/
-SOPS/volume/pgBackRest required env coverage for PR review without touching a
-real host.
+`staging-smoke` no longer runs the retired prod-env-preflight / install-upgrade /
+internal-hosting-smoke Swift e2e subjects (#2142). Remaining commands are
+`verify_staging_smoke.sh` and `verify_momo_ops.sh`. `verify_prod_install_upgrade.sh`
+was deleted with those subjects.
 
-MOMO-406 adds `scripts/verify_prod_install_upgrade.sh` to the same profile. It
-uses a fake Docker command and synthetic non-secret env to cover the
-non-interactive argument matrix, strict per-service `@sha256` pins, preflight
-wiring, compose-config invocation, install/migrate ordering, backup-evidence
-gate, sequential upgrade, and previous-image app rollback. It does not start a
-container. `scripts/verify_staging_smoke.sh` still performs the real
-`docker compose config --quiet` render; the orchestrator records that Docker
-gate separately.
-
-#1329 adds two deliberately separate NCP checks. The static
-`scripts/verify_ncp_centrifugo_contract.sh` and
-`scripts/tests/test_ncp_centrifugo_boundary.sh` run in every full local-gate
+#1329 adds two deliberately separate public-edge checks. The static
+`scripts/verify_public_edge_centrifugo_contract.sh` and
+`scripts/tests/test_public_edge_centrifugo_boundary.sh` run in every full local-gate
 profile. They fail on a missing/reordered `/v1/centrifugo/*` 403, a compose
 secret-source drift, a missing rotation/rollback contract, the old public
 401/401/400 shape, unequal runtime fingerprints, a current secret that still
@@ -519,13 +451,13 @@ The H1 negative matrix covers attacker/typo/wrong-port/userinfo/path/query/
 fragment/punycode inputs and proves secret-read, Docker exec, curl/network, and
 evidence-write counts all stay zero. It also proves 3xx is never followed and
 production/staging cannot activate the synthetic-secret-only loopback escape.
-These fixtures do not contact NCP.
+These fixtures do not contact a public host.
 
 The read-only runtime closure is intentionally operator-attended and is not a
 PR CI or ordinary local-gate step:
 
 ```bash
-/opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+/opt/momo/scripts/verify_public_edge_centrifugo_boundary.sh \
   --env-file /opt/momo/infra/rust/smoke.secrets.env \
   --old-env-file /opt/momo/infra/rust/smoke.secrets.env.before-cent-proxy-<UTC> \
   --edge-url https://app.oor7.com \
@@ -825,20 +757,19 @@ Use the profile that matches the changed surface.
 | Profile | Use when | Commands |
 |---|---|---|
 | `docs` | docs/spec only | `scripts/local_gate.sh --profile docs` |
-| `swift` | Swift package/model/view changes | `scripts/local_gate.sh --profile swift` (includes design pre-flight ratchet + snapshot tests) |
 | `diagnostics` | diagnostics/observability bundle changes | `scripts/local_gate.sh --profile diagnostics` |
-| `staging-smoke` | MOMO-005/006/007/229/406 and #1329 deploy config, Caddy/Centrifugo, install/upgrade matrix, public host preflight, secret/backup/rotation runbooks | `scripts/local_gate.sh --profile staging-smoke` |
+| `staging-smoke` | deploy config, Caddy/Centrifugo, secret/backup/rotation runbooks | `scripts/local_gate.sh --profile staging-smoke` |
 | `backup` | encrypted pgBackRest/WAL/time-target restore + signed migration evidence | `scripts/local_gate.sh --profile backup` |
 | `host-runtime` | internal single-node runtime smoke, Kim Intern provider status/redaction, plus restore rehearsal evidence | `scripts/local_gate.sh --profile host-runtime` |
 | `local-alpha` | AWS-free local Docker alpha RC packet | `scripts/local_gate.sh --profile local-alpha` |
 | `internal-alpha` | internal alpha combined evidence packet | `LOCAL_GATE_LAUNCH_UI=1 scripts/local_gate.sh --profile internal-alpha` |
-| `runtime-db` | migrations/server/RLS/join/push-registration/push-notifier/work-session tier-fallback/plugin-registry/webhook-ingress changes | `scripts/local_gate.sh --profile runtime-db` |
+| `runtime-db` | migrations/server/RLS/join and remaining Rust-path verifiers | `scripts/local_gate.sh --profile runtime-db` |
 | `runtime-relay` | outbox/relay/realtime changes | `scripts/local_gate.sh --profile runtime-relay` |
 | `runtime-live` | realtime-token/WebSocket live subscribe changes | `scripts/local_gate.sh --profile runtime-live` |
 | `runtime-agent` | AgentWorker/hermes/cost/projection/agent live-channel changes | `scripts/local_gate.sh --profile runtime-agent` |
 | `external-agent-provider` | opt-in credentialed external agent runtime smoke | `scripts/local_gate.sh --profile external-agent-provider`; set `AGENT_PROVIDER_MODE=external-hermes`, `HERMES_BASE_URL`, and `HERMES_API_KEY` for PASS evidence |
-| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer scripts/local_gate.sh --profile m3-dbc`; add `LOCAL_GATE_LAUNCH_UI=1` for GUI process/window evidence |
-| `web` | `clients/web-legacy` (ADR-0119 v0; Swift prod/e2e/`--profile web` 소비, 라이브 서빙 아님 — 라이브=`clients/web` #1228), `docs/api/openapi.yaml`, web serving/login smoke changes | `scripts/local_gate.sh --profile web` (install/lint/typecheck/types-sync/build/license gate + serving smoke + Chromium login→timeline e2e smoke + OpenAPI runtime drift gate) |
+| `m3-dbc` | M3 D/B/C exit evidence or MOMO-020/021/022 close-readiness review | `scripts/local_gate.sh --profile m3-dbc` |
+| `web` | `clients/web` live SPA (lint/typecheck/test/build) | `scripts/local_gate.sh --profile web` |
 
 ## 5. PR Body Evidence
 

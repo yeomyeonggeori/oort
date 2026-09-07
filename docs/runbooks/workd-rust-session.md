@@ -10,7 +10,7 @@
 띄운다. 컨테이너로 넣지 않는 이유:
 
 1. `infra/rust` compose 에 Swift 툴체인이 없다.
-2. 기존 `scripts/verify_workd.sh` 도 같은 형태다 (차이는 API 가 Swift e2e
+2. 현행 `scripts/verify_workd_rust.sh` 도 같은 형태다 (차이는 API 가 Swift e2e
    가 아니라 Rust 라는 점).
 3. 실 PTY 바이트는 네이티브 `/bin/sh` 가 찍는다.
 4. 테스트 환경이 성재의 맥이다.
