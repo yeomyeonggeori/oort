@@ -916,6 +916,30 @@ require(
     "postgres per-Dockerfile ignore must not exclude notice COPY sources",
 )
 require("COPY --from=web-build" in dockerfile, "published Rust image must include current web bundle")
+require(
+    "COPY infra/rust/sql/bootstrap_runtime_roles.sql /opt/momo/sql/bootstrap_runtime_roles.sql"
+    in dockerfile,
+    "runtime image must copy bootstrap_runtime_roles from infra/rust/sql",
+)
+require(
+    "COPY infra/rust/sql/set_initial_owner.sql /opt/momo/sql/set_initial_owner.sql"
+    in dockerfile,
+    "runtime image must copy set_initial_owner from infra/rust/sql",
+)
+require(
+    "COPY infra/rust/sql/bootstrap_owner_if_absent.sql /opt/momo/sql/bootstrap_owner_if_absent.sql"
+    in dockerfile,
+    "runtime image must copy bootstrap_owner_if_absent from infra/rust/sql",
+)
+require(
+    "COPY infra/rust/sql/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_owner_claim_if_absent.sql"
+    in dockerfile,
+    "runtime image must copy bootstrap_owner_claim_if_absent from infra/rust/sql",
+)
+require(
+    "COPY infra/prod/bootstrap_runtime_roles.sql" not in dockerfile,
+    "runtime image must not still copy bootstrap SQL from infra/prod",
+)
 require('grep -q "content=\\"${MOMO_BUILD_SHA}\\"" dist/index.html' in dockerfile, "web bundle must retain build stamp")
 require(dockerfile.count("ENV MOMO_IN_CONTAINER=1") == 1, "runtime image must enable immutable SQL path policy")
 for forbidden_path_env in (
