@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (밤2) · Fable · ★안전 중단 — LS-2 main 정본화 · LS-1 PR #2177 R2 대기 · 재개 절차 고정
+
+- **LS-2 랜딩**(PR #2175 R1 6 + R2 2 + planner 위생 1: NOTICE·THIRD_PARTY는 GHCR 고지 매니페스트 해시 고정이라 base 바이트 유지) → 감사(AGENTS 1행·test_license_gate Case 6) → track/uxui → #2166·dependabot #1355~1357 close → 승격 ah #2176 → main → sync engine #2178(자동 감사)·uxui #2179. 결과: clients 1250→1136, work 표면 4 id 셀프호스트 기본 숨김(진입점 0/5).
+- **LS-1 R1 완주**(PR #2177, 커밋 8, 정정 1회: PushRelay 소스만 삭제·계약 보존): 삭제 313, `.swift` 224→8(RN 셸), 추적 2,929→2,616, 부록 A 실측(Swift 169 vs Rust 183, Swift-only 패밀리 전부 폐기), LinkShort 대체 없이 삭제. planner 검토 수용 + **R2 2건 대기**(engine 합류·AGENTS/INDEX 충돌 해소 / `gate-csp-deploy.mjs`의 삭제된 `infra/prod/Caddyfile` 대상 → `infra/rust/Caddyfile.local`). 랜딩은 감사 체인(`audit-ls1.md` 초안).
+- 재개 절차: `claudedocs/resume-2026-09-07/RESUME.md` 「★ 재개 첫 행동」. 열린 결재: G2에 iOS 앱스토어 v0 포함(§7).
+
 ## 2026-09-07 (밤) · Fable · ★결재 3건 — 푸시 relay Rust 승격(SH-10) · CDP 로컬 허용 · iOS 앱스토어 의도 + LS-β 발사
 
 - go → `launch-ls-beta.sh`: LS-1 #2165(`wls1`)·LS-2 #2166(`wls2`) 발사. LS-1은 PushRelay 결재 반영을 위해 1회 중단·정정 재개(`mission-ls1-b.md`: Swift relay 소스만 삭제, push 컴포즈·env·런북·검증기 보존).
