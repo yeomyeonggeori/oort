@@ -2,7 +2,7 @@
 
 > 이 파일은 구현 워커(어떤 하네스든 — **현재 레인·모델 값은 `docs/planning/PIPELINE.md`**)가 이 리포에서 goal을 수행할 때 따르는 **단일 운영 계약**이다.
 > 제품 이름은 **oort**, 레포 이름은 아직 **momo**다(작업명 유래 — README 각주). 두 이름이 섞여 있으면 오타가 아니라 이 사정이다.
-> Codex 계열 하네스는 `AGENTS.md`를 root→leaf로 자동 적재한다; 다른 하네스(grok CLI 등)는 브리프가 이 파일을 읽으라고 지시한다. 이 파일이 root 계약이다. (`CODEX.md`는 2026-09-02 이 파일로 병합됐고 링크 호환 스텁만 남아 있다.)
+> 워커 레인(`docs/planning/PIPELINE.md` §1)은 `AGENTS.md`를 root 계약으로 읽는다. 하네스가 자동 적재하든 브리프가 지시하든 이 파일이 정본이다.
 > 사람용 장문 배경은 `STATUS.md`/`ROADMAP.md`/`BUILD_TICKETS.md`/`research/07-deepdive/04·05`에. 여기엔 **에이전트가 추론으로 못 얻는 것만** 적는다.
 >
 > **실행 주체(레인):** product-owner(ADR·로드맵 승인) · planner/momo-main(기획·통합·머지) · worker(goal 구현) · reviewer(design/code). **각 레인의 현재 값(모델·도구)·병렬 상한·워크트리 경로는 `docs/planning/PIPELINE.md`가 유일한 정본**이다 — 이 파일은 그 값을 다시 적지 않는다. 기획/오케스트레이션 세션은 `scripts/planning_context.sh` → `docs/planning/CURRENT_STATE.md`부터 읽는다.
@@ -86,7 +86,7 @@ infra/prod/              Swift prod compose 계열
 > **Rust 툴체인 — 레포에 `rust-toolchain.toml`은 없다**(#1442 판정: 신설하지 않음). 고정이 없으니 네 환경의 기본 툴체인이 그대로 쓰이고, 그것이 아래 MSRV보다 낮으면 컴파일 이전 resolve 단계에서 거절된다(`rustc X is not supported by the following packages`). 카고 워크스페이스는 **둘**이고 MSRV가 서로 다르다(둘 다 #1442 실측): `server-rust` = **1.88.0**(time 0.3.54 계열), `clients/desktop/src-tauri` = **1.89.0**(notify-rust 4.18.0). 둘 다 만지면 **stable ≥ 1.89.0**을 써라. edition은 양쪽 다 `2021`이고 마이그레이션 계획 없음 — 그래프 안의 edition2024 크레이트는 서드파티이지 우리 코드가 아니다.
 > npm 트리는 lockfile이 셋이다 — 루트(`packages/*`), `clients/web`, `clients/mobile`. 셋 다 설치돼야 `make ts-check`가 돈다.
 
-> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`docs/RUN.md`·`docs/runbooks/*.md`(및 스텁 `CODEX.md`)의
+> **이 블록 자체가 게이트를 받는다(#1525).** 여기·`docs/runbooks/*.md`의
 > 명령은 `scripts/check_docs_commands.py`가 매 프로파일에서 트리에 대고 해소한다 — 실행체 존재/구문,
 > `make` 타깃, `--profile` 이름, npm 스크립트, 우리 스크립트에 넘기는 long flag, compose·`--package-path`
 > 경로, 그리고 위의 `cargo fmt --all` 규칙. **명령을 고칠 때 문서도 같은 커밋에서 고쳐라** — 안 고치면
@@ -136,7 +136,6 @@ cp infra/.env.example .env && make up && make migrate
 - `[python]` = `python3 -m py_compile` 통과. `[ci]` = actionlint 통과 + (게이트 전) dry-run.
 - `[runtime]` = Docker/psql로 가능한 검증은 수행한다. hermes 등 외부 의존이 필요하면 실제 의존성 또는 mock을 먼저 준비하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + 절차 문서화.
 - `[manual]` = 사람 1회(발급/계약/심사). 워커는 런북/파일만 준비하고 위임 표시.
-- `[swift]`(은퇴 중) = 삭제 대기 트리를 불가피하게 건드릴 때만. 새 goal의 수용기준으로 쓰지 마라.
 
 ## 4. Definition of Done (모든 이슈 공통 — 못 채우면 닫지 마라)
 1. **해당 등급 검증 통과**(§3). 서버 이슈는 `cargo test --workspace` + `clippy -D warnings` green이 **하드 게이트**, 웹·폰·코어 이슈는 자기 트리 게이트 **+ 병합 트리** green이 하드 게이트.
@@ -197,7 +196,7 @@ Closes #<issue>
 ## 7. 설계 맥락 + 런타임 미검증 + 게이트 + 라이선스
 **불변식(day-1 강제):** ①Postgres=SoT, Centrifugo=전송계층 ②쓰기경로 단일화(클라 직접 publish 금지) ③순서 SoT=`message.seq` ④에이전트=`member`(kind='agent'), 동일 REST/멱등 ⑤commit↔publish 무손실=transactional outbox ⑥seq=`channel_seq` 행카운터 `UPDATE...RETURNING`(시퀀스 금지), `client_msg_id` 멱등 ⑦멀티테넌시 `workspace→channel→membership`, 모든 행 `workspace_id`, RLS FORCE, tx마다 `SET LOCAL app.workspace_id`.
 
-**읽을 곳:** `STATUS.md`(항상 먼저) · `docs/adr/`(**결정 정본** — 특히 0100 거버넌스, 0101 에이전트 신원) · `docs/architecture/overview.md`(아키텍처 정본 — 어긋나는 변경은 같은 PR에서 갱신) · `docs/ux-bible/README.md`(UX 원칙 P1~P15 — UI 티켓 수용기준이 인용) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~04`(Apple CI/CD·setup·시크릿·티켓 — 은퇴 전제) · **`infra/rust/README.md`(현행 스택 기동 — 이미지+compose. §2 준비 절차는 수리 중, #1227)** · `docs/runbooks/ncp-rust-deploy.md`(**은퇴** — NCP 철수 2026-08-26, 역사 기록) · `docs/RUN.md`(은퇴 중 — Swift 기준 로컬 기동, 상단 배너 참조) · `legal/*`·`docs/legal/*`(법무).
+**읽을 곳:** `STATUS.md`(항상 먼저) · `docs/adr/`(**결정 정본** — 특히 0100 거버넌스, 0101 에이전트 신원) · `docs/architecture/overview.md`(아키텍처 정본 — 어긋나는 변경은 같은 PR에서 갱신) · `docs/ux-bible/README.md`(UX 원칙 P1~P15 — UI 티켓 수용기준이 인용) · `ROADMAP.md`(마일스톤/게이트/비용) · `schema_v0.sql`(정본 DDL) · `research/07-deepdive/04`(L4 스펙) · `…/05`(D/B/C 경험) · `BUILD_TICKETS.md`(빌드 STEPS) · `docs/cicd/05-qa-release-gate.md`(게이트 객관기준 정본) · `docs/cicd/03-store-readiness-gate.md`(PASS 블록 기록 위치) · `docs/cicd/00~03`·`05`(Apple CI/CD·setup·시크릿·게이트 — 은퇴 전제) · **`infra/rust/README.md`(현행 스택 기동 — 이미지+compose. §2 준비 절차는 수리 중, #1227)** · [`docs/SELF_HOST.md`](docs/SELF_HOST.md)(셀프호스트 첫 기동 + 공개 엣지 회전) · `legal/*`·`docs/legal/*`(법무).
 
 **런타임 미검증:** Docker/psql로 가능한 PG18+Centrifugo 검증은 각 goal에서 실제 수행한다. hermes, APNs 등 외부 의존이 남으면 실제 의존성 또는 mock 준비를 먼저 검토하고, 그래도 못 닫는 범위만 좁게 `runtime-unverified` 표기 + 절차를 문서에 남긴다(현행 스택 절차는 `infra/rust/README.md`).
 
