@@ -1,7 +1,7 @@
 # oort — 빌드 티켓 정본 (수용기준·활성 축·백로그)
 
 > **현행 티켓 흐름:** 신규 작업은 GitHub Issue + 핸드오프 패킷(`docs/planning/handoffs/`)이 정본이다(ADR-0100 · `docs/planning/README.md`). 이 파일이 계속 담는 것은 ① 공통 수용기준 등급 ② 아직 살아 있는 축의 티켓 계약 ③ 미착수 백로그.
-> **아카이브(2026-09-01 재편):** Phase 0/v0 데모 STEPS·티켓 상세, M1~M7 확장 티켓, ADR-0101 신원 티켓, MOMO-447, 에이전트-네이티브 패브릭 배치 등 2026-07 이전 체계 원문은 `docs/archive/BUILD_TICKETS-2026H1-legacy.md`로 이동(원문 불변). 완료 여부 추적은 GitHub Issue가 정본.
+> **아카이브(2026-09-01 재편):** Phase 0/v0 데모 STEPS·티켓 상세, M1~M7 확장 티켓, ADR-0101 신원 티켓, MOMO-447, 에이전트-네이티브 패브릭 배치 등 2026-07 이전 체계 원문은 git 히스토리. 완료 여부 추적은 GitHub Issue가 정본.
 
 ## 수용기준 등급 (공통)
 
@@ -54,7 +54,7 @@
 > 출처: 경험 설계 문서(`research/07-deepdive/05-agent-native-experiences.md`) §3·§6·§7.
 > v0 데모(D+B+C)는 **추가 프리미티브 0**으로 스펙 §9.2 위에서 성립(§7). 아래는 그 다음 단계.
 
-## v1 경험 (구 Phase 0/v0 STEPS — `docs/archive/BUILD_TICKETS-2026H1-legacy.md` — 완료 후)
+## v1 경험 (구 Phase 0/v0 STEPS — 완료 후)
 
 | 경험 | 한줄 | 신규 프리미티브 | 핵심 프리미티브(기존) | platform |
 |---|---|---|---|---|
