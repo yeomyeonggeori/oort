@@ -109,3 +109,9 @@
 - **초점 지시**: 모든 LS 작업은 1차 최종 목표(셀프호스팅 + 그록봇 연동 지원)에 기여하는지 점검한다 — 점검표는 `docs/planning/2026-09-07-lightening-program.md` §1. Agent Port·hosted agent 검증기·`scripts/oort`·`infra/rust`·`SELF_HOST*` 문서는 LS 전 파도에서 **무접촉**.
 - 이행 티켓: **LS-0 #2142** · **LS-4 #2143**(첫 파도, 병렬 2). LS-1·2·3은 LS-0 랜딩 뒤 패킷과 함께 발급.
 - 전제 확인 요청(미확인): D4-①의 「relay 배포 실체 없음」은 저널·런북 기록 부재로 추정한 것이다. 살아 있는 Dawn relay가 있다면 삭제 전 정지·기록이 선행돼야 한다.
+
+## 결재 기록 2 (2026-09-07 저녁, 성재) — 결정 ① 정정 · CDP · iOS
+
+- **결정 ① 정정 — PushRelay는 「삭제 후 G3 연기」가 아니라 「Swift 소스 삭제 + Rust 이식을 1차 목표 파도로 승격」.** 성재: 「셀프호스팅 레벨에서 모바일 알림도 포함. 일단 iOS만 앱스토어에 출시. buzz는 모바일 알림이 약함. Rust 기반이면 딱 좋다. 돌아가는 PushRelay는 없지만 셀프호스팅 레벨에서 포함할 수 있게.」 → #1255 = **SH-10 momo-push-relay**(같은 Rust 이미지·compose `push` 프로파일·3 운영 모드: Dawn 공용 / 자체 키 / stub). LS-1은 `relay/PushRelay`·`services/MomoMetrics`·`docker-compose.push.build.yml`만 삭제하고 push 컴포즈·env 템플릿·런북·검증기(`verify_push_relay.sh`·`push_relay_keygen.sh`)·compose 표 push 행은 **보존**(Rust relay가 그 계약을 이어받음). 편성: `2026-09-07-first-goal-two-cases.md` §4 G1'-2.
+- **CDP**: 그록봇 계정 살아 있음. 「로컬에서 셀프호스팅·연동 테스트만 하므로 CDP 제어는 정책 위반 아님」 → **로컬 테스트 한정 CDP 제어 허용**(2026-08-22 Q-CDP 자연어 릴레이 결재의 로컬 범위 해제). E2E-A(#1361)는 CDP 하네스로 자동화. 외부 사용자·공개 표면 자동화는 여전히 금지.
+- **iOS 앱스토어 v0 출시 의도**: 폰 축이 G3에서 앞당겨진다 — 출시 정의 개정은 §4 편성 개정과 함께(성재 확인).

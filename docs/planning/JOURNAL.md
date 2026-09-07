@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-07 (밤) · Fable · ★결재 3건 — 푸시 relay Rust 승격(SH-10) · CDP 로컬 허용 · iOS 앱스토어 의도 + LS-β 발사
+
+- go → `launch-ls-beta.sh`: LS-1 #2165(`wls1`)·LS-2 #2166(`wls2`) 발사. LS-1은 PushRelay 결재 반영을 위해 1회 중단·정정 재개(`mission-ls1-b.md`: Swift relay 소스만 삭제, push 컴포즈·env·런북·검증기 보존).
+- 성재: 「셀프호스팅 레벨에서 모바일 알림 포함, iOS만 앱스토어 출시, Rust 기반이면 좋다」 → ADR-0183 결재 기록 2(결정 ① 정정) · #1255 = SH-10 재정의 · `first-goal-two-cases.md` §4 G1'-2 승격 + §7. 「계정 살아 있음, 로컬 테스트는 CDP 정책 위반 아님」 → CDP 로컬 허용, E2E-A 자동화. 메모리 갱신.
+- 열린 것(성재): G2에 iOS 앱스토어 v0 포함 개정(§7) 확인.
+
 ## 2026-09-07 (저녁) · Fable · ★LS-α 완결 — LS-4(#2143)·LS-0(#2142) main 정본화, LS-β(LS-1 #2165·LS-2 #2166) 패킷 발급
 
 - **LS-4 랜딩**(PR #2152 R1 커밋 10 → planner 검토: 정본·코드 인용 16본 삭제 miss → R2 복원+규칙 확장(살아 있는 정본·코드 참조면 보존, 경로 인식) → miss 0) → 승격 ad #2153 → main `e1975ce9`. 결과: handoffs 302→76 · planning 루트 70→51 · planning/research 112→78 · `research/` 112→36 · claudedocs 39→0(+gitignore) · docs/archive 해체 · STATUS 2026-08 761줄 로테이션 · D6 규칙 README §2.
