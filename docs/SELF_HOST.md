@@ -641,6 +641,137 @@ and order ACME.
 | Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
 | CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
+
+| 레포 경로 | 서버 위 이름 | 역할 |
+|---|---|---|
+| `scripts/verify_public_edge_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
+
+## CENT_PROXY_SECRET 회전
+
+`CENT_PROXY_SECRET`은 사용자 자격증명이 아니라 Centrifugo가 compose-private API
+subscribe callback을 호출할 때 쓰는 공유 인증값이다. 그래도 **무중단 이중 키
+기간은 없다**. API와 Centrifugo가 다른 값을 든 순간 모든 신규 구독이 401로
+실패하므로, 둘을 같은 attended 창에서 함께 recreate하고 아래 verifier가 끝날
+때까지 창을 닫지 않는다. 원문은 터미널 출력·이슈·PR·evidence에 붙이지 않는다.
+
+아래 절차에서 `set +x`는 필수다. verifier는 env 파일과 두 컨테이너의 실행 환경을
+읽지만 변경하지 않으며, 외부 요청에는 no-header/wrong/current를 각각 보내도
+Caddy가 모두 403으로 끝내는지 확인한다. compose-private API에는 no/old/current를
+보내 401/401/400인지 확인한다. current + 고의로 잘못된 JSON의 400은 **secret 인증을
+통과한 뒤 body 검증에서 거절됐다는 증거**다. 마지막으로 host env · API env ·
+Centrifugo static header 값의 SHA-256이 같은지 비교하고 hash만 기록한다.
+
+`--edge-url`은 목적지를 신뢰하게 만드는 입력이 아니라 **정본과 같다는 주장**이다.
+verifier는 자기와 함께 배포된 `/opt/momo/infra/rust/Caddyfile`의 단일 site label에서
+`https://<site>`를 파생하고, 인자가 그 origin과 정확히 같지 않으면 env secret을
+읽거나 Docker/curl을 실행하기 전에 종료한다. curlrc는 끄고 HTTPS만 허용하며
+redirect는 0회라 3xx도 RED다. 따라서 오타·포트·userinfo·path/query/fragment 또는
+다른 호스트로 현재 secret을 보내는 진단 명령으로 사용할 수 없다.
+
+`--allow-http-local`은 회귀/격리 테스트 전용이다. env 파일의 `MOMO_ENV=test`,
+프로세스의 exact `MOMO_NCP_TEST_TRUSTED_ORIGIN=http://127.0.0.1:<port>`, 그리고
+`fixture-` synthetic secret을 모두 요구한다. production/staging env나 운영 secret은
+이 escape를 활성화할 수 없으므로 NCP 호스트에서는 사용하지 않는다.
+
+1. 서버에서 기존 env를 0600으로 백업하고 새 값을 **stdout 없이** 파일에 쓴다.
+   env 파일은 컨테이너 bind mount가 아니므로 임시파일→replace가 안전하다.
+
+   ```bash
+   set +x
+   umask 077
+   cd /opt/momo/infra/rust
+   stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+   old_env="smoke.secrets.env.before-cent-proxy-${stamp}"
+   cp -p smoke.secrets.env "$old_env"
+
+   new_secret="$(openssl rand -hex 32)"
+   printf '%s\n' "$new_secret" | python3 -c '
+import os, pathlib, sys
+path = pathlib.Path(sys.argv[1])
+secret = sys.stdin.readline().strip()
+if not secret or any(ch.isspace() for ch in secret):
+    raise SystemExit("generated secret has an invalid shape")
+lines = path.read_text().splitlines(keepends=True)
+hits = [i for i, line in enumerate(lines) if line.startswith("CENT_PROXY_SECRET=")]
+if len(hits) != 1:
+    raise SystemExit(f"expected exactly one CENT_PROXY_SECRET line, got {len(hits)}")
+lines[hits[0]] = f"CENT_PROXY_SECRET={secret}\n"
+tmp = path.with_name(path.name + ".rotate")
+tmp.write_text("".join(lines))
+os.chmod(tmp, 0o600)
+os.replace(tmp, path)
+' smoke.secrets.env
+   unset new_secret
+   chmod 600 smoke.secrets.env "$old_env"
+   ```
+
+2. 변경된 env도 raw Compose에 넘기지 않는다. 같은 attested app/PostgreSQL digest로
+   새 attach PITR proof를 만든 뒤, 배포 절차 4의 wrapper가 5개 env를 private snapshot에
+   고정하고 scoped rollout까지 끝내게 한다. 이 창에는 신규 realtime 연결이 재시도될
+   수 있지만 DB/message/outbox는 바뀌지 않는다.
+
+   ```bash
+   # docs/runbooks/pgbackrest-pitr.md §5 attach 명령으로 <fresh-run-id> 생성 후
+   /opt/momo/scripts/run_pitr_gated_migrate.sh \
+     --operator-env smoke.secrets.env \
+     --backup-env /run/momo-pitr/backup.env \
+     --bindings-env /opt/momo/evidence/pgbackrest-pitr-<fresh-run-id>.env \
+     --deploy-production-stack \
+     --push-env push-relay.secrets.env \
+     --overlays-env overlays.secrets.env
+   ```
+
+3. health 뒤 읽기 전용 verifier를 실행한다. 이 출력/JSON/Markdown에는 원문이 없고
+   SHA-256 동일성과 403/401/400만 남는다. `--old-env-file`을 빼면 old-secret 자리에
+   합성 invalid 값만 쓰므로, **회전 증거에는 반드시 백업 파일을 넘긴다**.
+
+   ```bash
+   curl -fsS https://app.oor7.com/healthz >/dev/null
+   /opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+     --env-file /opt/momo/infra/rust/smoke.secrets.env \
+     --old-env-file "/opt/momo/infra/rust/$old_env" \
+     --edge-url https://app.oor7.com \
+     --evidence-dir "/opt/momo/evidence/cent-proxy-${stamp}"
+   ```
+
+   PASS 뒤에도 백업은 즉시 지우지 않는다. 해당 배포 창 evidence와 직전 롤백 보존
+   기간이 끝난 뒤 운영자 정책에 따라 회수한다. Git·이슈·PR에는 올리지 않는다.
+
+### 회전 롤백
+
+gated deploy 또는 verifier가 실패하면 새 env를 별도 0600 파일로 보존한 뒤 직전 env를
+제자리 복원하고 **새 attach proof + gated deploy**를 다시 수행한다. 롤백 검증에서는 실패한
+새 env가 `--old-env-file`이다. 즉, 이전 값으로 돌아온 API가 새 값을 401로 거절하는
+것까지 확인한다.
+
+```bash
+set +x
+cd /opt/momo/infra/rust
+failed_env="smoke.secrets.env.failed-cent-proxy-${stamp}"
+cp -p smoke.secrets.env "$failed_env"
+cp -p "$old_env" smoke.secrets.env
+chmod 600 smoke.secrets.env "$failed_env"
+
+# docs/runbooks/pgbackrest-pitr.md §5 attach 명령으로 <rollback-run-id> 생성 후
+/opt/momo/scripts/run_pitr_gated_migrate.sh \
+  --operator-env smoke.secrets.env \
+  --backup-env /run/momo-pitr/backup.env \
+  --bindings-env /opt/momo/evidence/pgbackrest-pitr-<rollback-run-id>.env \
+  --deploy-production-stack \
+  --push-env push-relay.secrets.env \
+  --overlays-env overlays.secrets.env
+
+/opt/momo/scripts/verify_ncp_centrifugo_boundary.sh \
+  --env-file /opt/momo/infra/rust/smoke.secrets.env \
+  --old-env-file "/opt/momo/infra/rust/$failed_env" \
+  --edge-url https://app.oor7.com \
+  --evidence-dir "/opt/momo/evidence/cent-proxy-rollback-${stamp}"
+```
+
+이 PR/goal 자체는 운영 secret 회전이나 NCP reload/recreate를 수행하지 않는다.
+따라서 실제 `app.oor7.com`의 403·hash equality·old-secret 401 증거는 배포 전까지
+`runtime-unverified(public host)`이며, 위 attended 절차가 그 미검증 범위를 닫는다.
+
 Hardening, backup, upgrade, and multi-workspace operations:
 [`docs/DEPLOY.md`](DEPLOY.md); the pgBackRest closed loop and migrate gate:
 [`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md).
