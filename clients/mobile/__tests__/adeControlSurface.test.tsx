@@ -26,6 +26,21 @@ import AppShell from '../src/shell/AppShell';
 import {__resetSessionStore, sessionPort} from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
+jest.mock('@momo/core/features/capabilities/serverSurfaces', () => {
+  const actual = jest.requireActual(
+    '@momo/core/features/capabilities/serverSurfaces',
+  ) as typeof import('@momo/core/features/capabilities/serverSurfaces');
+  return {
+    ...actual,
+    isSurfaceProvided: (id: string) =>
+      (actual.WORK_SURFACE_IDS as readonly string[]).includes(id)
+        ? true
+        : actual.isSurfaceProvided(
+            id as import('@momo/core/features/capabilities/serverSurfaces').SurfaceId,
+          ),
+  };
+});
+
 // =============================================================================
 // ADE 관제 — 폰 (이슈 1137, ADR-0154 D2 "폰은 목록형").
 //

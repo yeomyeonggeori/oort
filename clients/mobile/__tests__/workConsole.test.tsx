@@ -33,6 +33,21 @@ import {
 } from '../src/storage/secureSession';
 import {__resetServerBaseCache, setServerBase} from '../src/storage/serverBase';
 
+jest.mock('@momo/core/features/capabilities/serverSurfaces', () => {
+  const actual = jest.requireActual(
+    '@momo/core/features/capabilities/serverSurfaces',
+  ) as typeof import('@momo/core/features/capabilities/serverSurfaces');
+  return {
+    ...actual,
+    isSurfaceProvided: (id: string) =>
+      (actual.WORK_SURFACE_IDS as readonly string[]).includes(id)
+        ? true
+        : actual.isSurfaceProvided(
+            id as import('@momo/core/features/capabilities/serverSurfaces').SurfaceId,
+          ),
+  };
+});
+
 // The RN Jest renderer has no native tag, so its default findNodeHandle returns
 // null. Give accessibility-focus tests a stable native seam while leaving the
 // rest of RendererProxy unchanged.

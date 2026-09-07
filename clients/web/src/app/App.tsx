@@ -185,7 +185,16 @@ export function App() {
           <Route path="activity" element={<ActivityRoute />} />
           <Route path="directory" element={<DirectoryRoute />} />
           <Route path="agents" element={<AgentHubRoute />} />
-          <Route path="work" element={<WorkConsoleRoute />} />
+          <Route
+            path="work"
+            element={
+              isSurfaceProvided("workConsole") ? (
+                <WorkConsoleRoute />
+              ) : (
+                <SurfaceUnavailableRoute surface="workConsole" />
+              )
+            }
+          />
           {/* 메시지 검색 (goal B12 H5). 서버가 이미 싣고 있는 경로 위에 선다. */}
           <Route
             path="search"
