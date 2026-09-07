@@ -45,6 +45,8 @@
 // this file settles is only how it is reached and left.
 // =============================================================================
 
+import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
+
 /**
  * The v0 tabs.
  *
@@ -63,6 +65,12 @@
 export type Tab = 'channels' | 'inbox' | 'agents' | 'work';
 
 export const TABS: readonly Tab[] = ['channels', 'inbox', 'agents', 'work'];
+
+export function visibleTabs(): readonly Tab[] {
+  return TABS.filter(
+    tab => tab !== 'work' || isSurfaceProvided('workConsole'),
+  );
+}
 
 const TAB_LABELS: Readonly<Record<Tab, string>> = {
   channels: '대화',

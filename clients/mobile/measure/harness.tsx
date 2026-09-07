@@ -26,7 +26,7 @@ import {useKeyboard} from '../src/lib/useKeyboard';
 
 // =============================================================================
 // The measurement harness. **Not app code** — it lives outside `src/` for the
-// same reason `clients/mobile-spike` lives outside `clients/mobile`.
+// same reason `f399e417:clients/mobile-spike` lived outside `clients/mobile`.
 //
 // It exists because these claims are about pixels, and a claim about pixels that
 // is argued rather than measured is a claim about nothing:

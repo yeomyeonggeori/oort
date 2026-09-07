@@ -20,7 +20,7 @@ import { hasRenderableBody } from "./bodySlot";
 //     quietly dropping the rest.
 // This file mirrors it line for line; where the two ever disagree, mac wins and
 // this is the file that is wrong. It is a straight port of the mirror that
-// shipped with MOMO-518 (clients/web-legacy/src/timeline/artifacts.ts), moved
+// shipped with MOMO-518 (f399e417:clients/web-legacy/src/timeline/artifacts.ts), moved
 // onto the ADR-0133 client's `Message` type.
 //
 // Everything the parser cannot name it declines: a malformed or oversized

@@ -529,7 +529,7 @@ dev `infra/centrifugo.json`의 namespace(ch/dm/agent/user) 스펙은 **그대로
 | 키 | 기본값 | 의미 |
 |---|---|---|
 | `APP_DOMAIN` | (unset) | 웹 SPA 공개 도메인(예: `momo.example.com`). unset이면 웹 서빙 비활성. |
-| `MOMO_WEB_IMAGE` | (required) | **Swift prod compose 경로**(`infra/prod/Dockerfile.web:8-17`, `infra/prod/docker/momo.Dockerfile:44-69`)는 여전히 `clients/web-legacy` dist를 담는다. **라이브 알파(Rust 이미지)는 이 키가 아니라** `server-rust/Dockerfile:147,157,173,231`이 `clients/web` dist를 `/opt/momo/web/`에 넣고 `command: ["web-assets"]`로 서빙한다(`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md` 「웹(정적 SPA) 배포」 / #1228). |
+| `MOMO_WEB_IMAGE` | (required) | **Swift prod compose 경로**(`infra/prod/Dockerfile.web:8-17`, `infra/prod/docker/momo.Dockerfile:44-69`)는 한때 `f399e417:clients/web-legacy` dist를 담았다(#2166에서 트리 삭제). **라이브 알파(Rust 이미지)는 이 키가 아니라** `server-rust/Dockerfile:147,157,173,231`이 `clients/web` dist를 `/opt/momo/web/`에 넣고 `command: ["web-assets"]`로 서빙한다(`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md` 「웹(정적 SPA) 배포」 / #1228). |
 | `MOMO_LINKSHORT_IMAGE` | (required) | `services/LinkShort`의 immutable digest image. `/i/*`를 `/join?code=...`로 리다이렉트한다. |
 | `WEB_STATIC_VOLUME_NAME` | `momo-web-static` | `web-init`이 채우고 Caddy가 read-only로 마운트하는 named volume 이름. |
 

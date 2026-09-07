@@ -11,9 +11,11 @@ import {
   Inbox,
   Lock,
   MessageSquare,
+  Milestone,
   Plus,
   Search,
   Settings,
+  SquareTerminal,
   User,
   Users,
 } from "lucide-react";
@@ -518,6 +520,30 @@ export function QuickSwitcher({
             <Settings className="size-4 opacity-70" />
             설정
           </Command.Item>
+          {isSurfaceProvided("workConsole") && (
+            <Command.Item
+              role="option"
+              className={itemClass}
+              value={`${serverSurface("workConsole").label} work console`}
+              data-testid="switcher-work-console"
+              onSelect={() => go("/work")}
+            >
+              <SquareTerminal className="size-4 opacity-70" />
+              {serverSurface("workConsole").label}
+            </Command.Item>
+          )}
+          {isSurfaceProvided("workstreams") && (
+            <Command.Item
+              role="option"
+              className={itemClass}
+              value={`${serverSurface("workstreams").label} workstreams`}
+              data-testid="switcher-workstreams"
+              onSelect={() => go("/workstreams")}
+            >
+              <Milestone className="size-4 opacity-70" />
+              {serverSurface("workstreams").label}
+            </Command.Item>
+          )}
         </Command.Group>
 
         {canCreate && (
