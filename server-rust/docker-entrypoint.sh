@@ -40,6 +40,11 @@ case "$command" in
     # credential — dispatches go to the push relay, never to Apple.
     exec /usr/local/bin/momo-notifier "$@"
     ;;
+  push-relay)
+    # The APNs hop (ADR-0120 D1-A / #1255). This is the only command that may
+    # hold a .p8. Same image as every other role; compose overlay-only.
+    exec /usr/local/bin/momo-push-relay "$@"
+    ;;
   migrate)
     # Sub-commands (`migrate set-owner`) are the binary's own; this script does
     # not interpret them.
@@ -71,7 +76,7 @@ case "$command" in
     ;;
   *)
     echo "[momo] unknown command: $command" >&2
-    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|webhook-sender|notifier|migrate|web-assets}" >&2
+    echo "usage: momo-rust-entrypoint {api|relay|agent-worker|webhook-sender|notifier|push-relay|migrate|web-assets}" >&2
     exit 2
     ;;
 esac
