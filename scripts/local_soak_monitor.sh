@@ -480,7 +480,7 @@ write_summary() {
     echo
     echo "### PASS/WARN/FAIL Criteria"
     echo "- PASS: every required health/resource check responds and no operational warning is recorded."
-    echo "- WARN: no required check failed, but at least one P1 signal was observed, such as relay/worker/app not observed, outbox backlog crossing warn thresholds, or low free disk."
+    echo "- WARN: no required check failed, but at least one P1 signal was observed, such as relay, worker, or app not observed, outbox backlog crossing warn thresholds, or low free disk."
     echo "- FAIL: any P0 signal was observed, such as API/Centrifugo/DB unavailable, Docker unavailable/unhealthy, outbox backlog crossing fail thresholds, or critically low free disk."
     echo
     echo "### P0/P1 Detection Thresholds"

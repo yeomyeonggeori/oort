@@ -28,7 +28,7 @@
 #   MIGRATE_IDEMPOTENCY_CHECK=0 으로 끌 수 있다.
 #
 # MOMO-001 runtime-verified: PG18 Docker + psql 18 apply 001/002 and idempotent
-# re-run pass. Later M1 tickets cover relay/RLS/hermes runtime gates.
+# re-run pass. Later M1 tickets cover relay, RLS, and hermes runtime gates.
 # =============================================================================
 set -eu
 

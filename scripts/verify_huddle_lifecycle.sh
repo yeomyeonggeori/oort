@@ -6,6 +6,10 @@
 # the database, and proves fail-closed configuration, lifecycle, LiveKit grant,
 # transactional outbox/audit, re-entry, single-active, and FORCE-RLS behavior.
 # Docker/PG execution belongs to momo-main; implementation workers run bash -n.
+#
+# LS-1 (#2165): boots the same pgvector/PG18 digest as infra/rust/docker-compose.rust.yml
+# via `docker run` (the Rust compose file interpolates every ${VAR:?} before a
+# postgres-only `up`, so it cannot isolate PG without a full smoke env).
 set -euo pipefail
 
 SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
@@ -17,27 +21,22 @@ need docker
 need cargo
 need psql
 
-COMPOSE_FILE="$REPO_ROOT/infra/docker-compose.e2e.yml"
+PG_IMAGE="pgvector/pgvector:0.8.5-pg18-trixie@sha256:9d2e61c7352b9e9f4798df5fd9a498f043f4cda1cdacc707de3d198650f4321e"
 PROJECT="${HUDDLE_GATE_PROJECT:-hd1-huddle-pg}"
+CONTAINER="${PROJECT}-postgres"
 PG_PORT="${HUDDLE_GATE_POSTGRES_PORT:-19861}"
 BOOT_TIMEOUT="${HUDDLE_GATE_BOOT_TIMEOUT:-180}"
 POSTGRES_DB="${HUDDLE_GATE_POSTGRES_DB:-momo}"
 POSTGRES_USER="${HUDDLE_GATE_POSTGRES_USER:-momo}"
 POSTGRES_PASSWORD="${HUDDLE_GATE_POSTGRES_PASSWORD:-huddle-pg-owner}"
 
-compose() {
-  POSTGRES_PORT="$PG_PORT" POSTGRES_DB="$POSTGRES_DB" \
-  POSTGRES_USER="$POSTGRES_USER" POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
-    docker compose -p "$PROJECT" -f "$COMPOSE_FILE" "$@"
-}
-
 cleanup() {
   local rc=$?
   trap - EXIT INT TERM
   if [ "${HUDDLE_GATE_KEEP:-0}" = "1" ]; then
-    echo "[huddle] leaving compose project '$PROJECT' up"
+    echo "[huddle] leaving container '$CONTAINER' up"
   else
-    compose down -v --remove-orphans >/dev/null 2>&1 || true
+    docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
   fi
   exit "$rc"
 }
@@ -45,17 +44,24 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 
-echo "[huddle] booting isolated PostgreSQL 18 project '$PROJECT'"
-compose up -d postgres
+echo "[huddle] booting isolated PostgreSQL 18 container '$CONTAINER'"
+docker rm -f "$CONTAINER" >/dev/null 2>&1 || true
+docker run -d --name "$CONTAINER" \
+  -e POSTGRES_DB="$POSTGRES_DB" \
+  -e POSTGRES_USER="$POSTGRES_USER" \
+  -e POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+  -p "127.0.0.1:${PG_PORT}:5432" \
+  "$PG_IMAGE" >/dev/null
+
 deadline=$(( $(date -u +%s) + BOOT_TIMEOUT ))
-until compose exec -T postgres pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
+until docker exec "$CONTAINER" pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1; do
   if [ "$(date -u +%s)" -ge "$deadline" ]; then
-    compose logs --tail 120 postgres >&2 || true
+    docker logs --tail 120 "$CONTAINER" >&2 || true
     echo "[huddle] PostgreSQL readiness timeout" >&2
     exit 1
   fi
-  if [ -n "$(compose ps -aq --status exited postgres 2>/dev/null)" ]; then
-    compose logs --tail 120 postgres >&2 || true
+  if [ "$(docker inspect -f '{{.State.Status}}' "$CONTAINER" 2>/dev/null)" = "exited" ]; then
+    docker logs --tail 120 "$CONTAINER" >&2 || true
     echo "[huddle] PostgreSQL exited" >&2
     exit 1
   fi
