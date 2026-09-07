@@ -19,7 +19,7 @@
 //! ```
 //!
 //! Harness contract is the sibling files': `DATABASE_URL` is a **superuser**
-//! (migrations + `infra/e2e/bootstrap_roles.sql`, fixture seeding bypasses RLS)
+//! (migrations + `infra/rust/sql/bootstrap_roles.sql`, fixture seeding bypasses RLS)
 //! while every assertion about the domain runs as the runtime **`momo_app`**
 //! role (`NOBYPASSRLS`).
 
@@ -105,7 +105,7 @@ fn ensure_schema_and_roles() {
         .arg("-f")
         .arg(PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../../infra/e2e/bootstrap_roles.sql"
+            "/../../../infra/rust/sql/bootstrap_roles.sql"
         )))
         .status()
         .expect("spawn psql for bootstrap_roles.sql");

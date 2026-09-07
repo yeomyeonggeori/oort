@@ -516,7 +516,7 @@ fn migrate() -> Result<(), MigrateError> {
     if bootstrap_roles {
         let file = runtime_path(
             "MOMO_BOOTSTRAP_ROLES_SQL",
-            "infra/e2e/bootstrap_roles.sql",
+            "infra/rust/sql/bootstrap_roles.sql",
             "/opt/momo/sql/bootstrap_roles.sql",
         )?;
         psql_file(&database_url, &file, "bootstrap-roles")?;
@@ -957,7 +957,7 @@ mod tests {
             resolve_path(Some("/opt/momo/sql/roles.sql".to_string()), "infra/x.sql"),
             PathBuf::from("/opt/momo/sql/roles.sql")
         );
-        let fallback = resolve_path(None, "infra/e2e/bootstrap_roles.sql");
+        let fallback = resolve_path(None, "infra/rust/sql/bootstrap_roles.sql");
         assert!(
             fallback.is_file(),
             "the compiled-in fallback must point at the repo file, got {}",

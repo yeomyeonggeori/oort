@@ -69,8 +69,9 @@ cd "$ROOT"
 # form `label|env templates|compose files`. A rendering is a command an operator
 # or a verifier actually runs, not a hypothetical layering: the sources are
 # infra/rust/README.md §2, docs/cicd/12-push-relay-deploy-runbook.md,
-# docs/runbooks/pgbackrest-pitr.md and docs/SELF_HOST.md. Retired infra/prod
-# renderings and the NCP overlay row are out of this gate (#2142 / ADR-0183).
+# docs/runbooks/pgbackrest-pitr.md and docs/SELF_HOST.md. Retired
+# f399e417:infra/prod renderings and the NCP overlay row are out of this
+# gate (#2142 / ADR-0183).
 #
 # Adding a compose file or an env template without adding it here is itself a
 # failure — see the two coverage checks at the bottom.
@@ -185,7 +186,7 @@ while IFS= read -r yml; do
   [ -n "$(required_keys "$yml")" ] || continue
   grep -qxF "$yml" <<<"$tabled_compose" ||
     fail "$yml requires \${VAR:?} but no rendering in this script names it — add a row so its variables are checked against some template"
-done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) ! -path 'infra/prod/*' | LC_ALL=C sort)
+done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
 
 # -----------------------------------------------------------------------------
 # Coverage 2 — no env template may sit outside the table unexplained.

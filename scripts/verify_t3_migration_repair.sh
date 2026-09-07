@@ -328,7 +328,7 @@ pass "053 canonicalizes subsequent repair calls through t3_terminate"
 ")" = "1" ] || fail "unsettled usage unique index missing after retry"
 pass "repair retry applies 051 and runner second pass applies zero files"
 
-psql_in "$RECOVERY_DB" -q -f /workspace/infra/e2e/bootstrap_roles.sql
+psql_in "$RECOVERY_DB" -q -f /workspace/infra/rust/sql/bootstrap_roles.sql
 
 free_port() {
   python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()'
@@ -339,31 +339,31 @@ SERVER_PORT="$(free_port)"
   cd "$REPO_ROOT"
   DATABASE_URL="postgres://momo_app:momo_app_dev_pw@127.0.0.1:$HOST_PORT/$RECOVERY_DB" \
     MOMO_ENV=local HOST=127.0.0.1 PORT="$SERVER_PORT" \
-    swift run --package-path server MomoServer
+    cargo run --manifest-path "$REPO_ROOT/server-rust/Cargo.toml" --bin momo-server
 ) >"$TMP_DIR/server.log" 2>&1 &
 SERVER_PID="$!"
 
 for _ in $(seq 1 180); do
   if curl -fsS --connect-timeout 2 --max-time 3 \
       "http://127.0.0.1:$SERVER_PORT/health" \
-      | jq -e '.status == "ok" and .service == "MomoServer"' >/dev/null 2>&1; then
+      | jq -e '.status == "ok" and .service == "momo-server"' >/dev/null 2>&1; then
     break
   fi
   if ! kill -0 "$SERVER_PID" >/dev/null 2>&1; then
     tail -160 "$TMP_DIR/server.log" >&2 || true
-    fail "MomoServer exited before health became green"
+    fail "momo-server exited before health became green"
   fi
   sleep 1
 done
 curl -fsS --connect-timeout 2 --max-time 3 \
   "http://127.0.0.1:$SERVER_PORT/health" \
-  | jq -e '.status == "ok" and .service == "MomoServer"' >/dev/null \
+  | jq -e '.status == "ok" and .service == "momo-server"' >/dev/null \
   || {
     tail -160 "$TMP_DIR/server.log" >&2 || true
-    fail "MomoServer health timeout after repaired migration"
+    fail "momo-server health timeout after repaired migration"
   }
 stop_server
-pass "MomoServer starts and serves health after repair and migration retry"
+pass "momo-server starts and serves health after repair and migration retry"
 
 log "building an already-applied-049 database with the legacy index present"
 apply_through_048 "$LEGACY_DB"

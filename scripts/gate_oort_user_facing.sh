@@ -44,7 +44,7 @@ SOURCE_DIRS = [
     ("clients/mobile/ios/MomoPushKit", (".swift",)),
     ("clients/mobile/ios/MomoMobile", (".swift",)),
     ("clients/mobile/ios/NotificationService", (".swift",)),
-    ("relay/PushRelay/Sources", (".swift",)),
+    # Swift PushRelay sources: f399e417:relay/PushRelay/Sources (retired #2165; #1255 Rust port).
     ("clients/web/src", (".ts", ".tsx")),
     ("clients/mobile/src", (".ts", ".tsx")),
     ("packages/momo-core/src", (".ts",)),

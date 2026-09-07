@@ -79,7 +79,7 @@ fn ensure_schema_and_roles() {
     run_migrations(&database_url(), &migrations, SeedMode::None).expect("apply all migrations");
     let roles = PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
-        "/../../../infra/e2e/bootstrap_roles.sql"
+        "/../../../infra/rust/sql/bootstrap_roles.sql"
     ));
     let status = Command::new(resolve_psql())
         .args(["-v", "ON_ERROR_STOP=1"])

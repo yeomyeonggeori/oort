@@ -173,7 +173,7 @@ services:
 
   # One-shot, source-checkout-free migration (prod :298). MOMO_BOOTSTRAP_RUNTIME_ROLES=0
   # makes this fail closed unless runtime-roles produced the exact posture, so the
-  # committed development role passwords in infra/e2e/bootstrap_roles.sql are
+  # committed development role passwords in infra/rust/sql/bootstrap_roles.sql are
   # never applied by this stack.
   #
   # Ops one-shots use the same service:

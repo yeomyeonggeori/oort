@@ -2,9 +2,8 @@
 # =============================================================================
 # scripts/verify_webhook_rust.sh — #1222 (T13) 웹훅·이벤트구독 Rust 런타임 검증기
 #
-# 기존 `verify_event_subscription.sh` 는 **Swift** 스택을 띄운다
-# (`infra/docker-compose.e2e.yml:287` = `swift:6.2` relay). 이 파일은 같은 폐곡선을
-# **Rust** 구현에 대고 잰다. 둘은 OutboxRelay 삭제(W-S)까지 공존한다.
+# Swift e2e twin lived at f399e417:infra/docker-compose.e2e.yml (retired #2165).
+# This file measures the same closed loop against the Rust implementation.
 #
 # 폐곡선:
 #   설치      실제 REST 8연산 (webhook_admin_conformance_pg)

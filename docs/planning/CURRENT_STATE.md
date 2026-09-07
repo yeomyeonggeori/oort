@@ -1,6 +1,8 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → LS-α 완결(LS-4·LS-0 main 정본화, 파일 3,416→2,927) → LS-β(LS-1 #2165 ∥ LS-2 #2166) **가동 중** · 결재 3건: SH-10 push relay Rust 승격 · CDP 로컬 허용 · iOS 앱스토어 의도).** 컴팩트 복원 진입점.
+> **2026-09-07 스냅샷 91 (Fable · momo-main — ★클린 슬레이트 D-0 → ADR-0183 Accepted → LS-α 완결(LS-4·LS-0 main 정본화, 파일 3,416→2,927) → LS-β: **LS-2 main 정본화** · **LS-1 PR #2177 R2 대기** · 결재 3건(SH-10 push relay Rust 승격 · CDP 로컬 허용 · iOS 앱스토어 의도). **안전 중단 19:1x — 재개는 `claudedocs/resume-2026-09-07/RESUME.md` ★절**).** 컴팩트 복원 진입점.
+>
+> **★ 중단 시점 상태**: 워커 0 · 열린 PR #2177(LS-1, R2 2건: engine 합류 충돌 해소·`gate-csp-deploy` 대상 교체) · 추적 파일 3,416→2,616(LS-1 랜딩 시) · 다음: LS-1 R2 → 감사 랜딩·승격 → LS-3 패킷 + SH-10 브리프 → 스냅샷 92 → 출시 계획 개정(§7 성재 확인).
 >
 > **★ 밤 결재(성재)**: ①셀프호스팅 레벨 폰 푸시 포함 → #1255=SH-10 momo-push-relay Rust(같은 이미지·3 모드), G1'-2 승격, LS-1은 Swift relay 소스만 삭제 ②그록봇 계정 살아 있음 + 로컬 테스트 CDP 허용 → E2E-A 자동화 ③iOS 앱스토어 v0 의도 → G2 개정 제안(`first-goal-two-cases.md` §7, 확인 대기). 가동: LS-1(`wls1`, 정정 재개)·LS-2(`wls2`).
 >
