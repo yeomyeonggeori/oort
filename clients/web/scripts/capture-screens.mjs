@@ -10382,10 +10382,17 @@ async function captureHostedPairingScenes(browser, scheme) {
 async function captureAgentCredentialsScenes(browser, scheme) {
   beginScene("settings-agents");
   const shots = [];
+  const LONG_AGENT_NAME =
+    "Claude Code 하네스 · 인프라 플랫폼팀 상주 에이전트 (프로덕션 배포 승인 담당)";
+  const LOOPBACK_REFUSAL =
+    "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1";
 
-  async function shoot(name, install, settle) {
+  async function shoot(name, install, settle, options = {}) {
+    const viewport = options.viewport ?? VIEWPORT;
+    const hash = options.hash ?? "/settings?section=agents";
+    const ready = options.ready ?? "agent-credentials-section";
     const context = await browser.newContext({
-      viewport: VIEWPORT,
+      viewport,
       deviceScaleFactor: 2,
       colorScheme: scheme,
       reducedMotion: "reduce",
@@ -10395,8 +10402,8 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
-    await page.evaluate('location.hash = "/settings?section=agents"');
-    await page.getByTestId("agent-credentials-section").waitFor({ state: "visible" });
+    await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
+    await page.getByTestId(ready).waitFor({ state: "visible" });
     await settle(page);
     const path = beginSceneFromShotPath(
       `${OUT_DIR}/settings-agents-${name}-${scheme}.png`
@@ -10404,6 +10411,14 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     await page.screenshot({ path });
     shots.push(path);
     await context.close();
+  }
+
+  async function shootPair(name, install, settle, options = {}) {
+    await shoot(name, install, settle, options);
+    await shoot(`${name}-390`, install, settle, {
+      ...options,
+      viewport: MOBILE_VIEWPORT,
+    });
   }
 
   const emptyList = (context) =>
@@ -10417,35 +10432,64 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         : json(route, { connections: [] })
     );
 
-  function listWith(connection) {
+  function listWith(connections) {
+    const rows = Array.isArray(connections) ? connections : [connections];
     return async (context) => {
       await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
-        json(route, { connections: [connection] })
+        json(route, { connections: rows })
       );
       await context.route(
         "**/v1/workspaces/*/hosted-agent-connections/*",
-        (route) => json(route, { connection, cleanupArtifacts: [] })
+        (route) => {
+          const url = route.request().url();
+          const connection =
+            rows.find((row) => url.includes(row.id)) ?? rows[0];
+          return json(route, { connection, cleanupArtifacts: [] });
+        }
       );
     };
   }
 
-  await shoot("empty", emptyList, (page) =>
+  const activeKim = hostedConnection({
+    status: "active",
+    doorbellUrl: "https://hooks.example/a",
+    doorbellSecretMasked: "••••abcd",
+  });
+  const pendingHermes = hostedConnection({
+    id: "019f9a01-0000-7000-8000-0000000005c2",
+    agentMemberId: HERMES,
+    status: "pairing_pending",
+  });
+
+  const longNameRoster = async (context) => {
+    await listWith(activeKim)(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, {
+        members: ROSTER.map((member) =>
+          member.id === "019f9a01-0000-7000-8000-000000000404"
+            ? { ...member, displayName: LONG_AGENT_NAME }
+            : member
+        ),
+      })
+    );
+  };
+
+  await shootPair("empty", emptyList, (page) =>
     page.getByTestId("agent-credentials-empty").waitFor({ state: "visible" })
   );
 
+  await shoot("list", listWith(activeKim), (page) =>
+    page.getByTestId("agent-credentials-list").waitFor({ state: "visible" })
+  );
   await shoot(
-    "list",
-    listWith(
-      hostedConnection({
-        status: "active",
-        doorbellUrl: "https://hooks.example/a",
-        doorbellSecretMasked: "••••abcd",
-      })
-    ),
-    (page) => page.getByTestId("agent-credentials-list").waitFor({ state: "visible" })
+    "list-390",
+    longNameRoster,
+    (page) =>
+      page.getByTestId("agent-credentials-list").waitFor({ state: "visible" }),
+    { viewport: MOBILE_VIEWPORT }
   );
 
-  await shoot("pairing", emptyList, async (page) => {
+  await shootPair("pairing", emptyList, async (page) => {
     await sceneClick(page, page.getByTestId("agent-credentials-issue"));
     await page.getByTestId("hosted-display-name").waitFor({ state: "visible" });
     await page.getByTestId("hosted-display-name").fill("김인턴");
@@ -10453,6 +10497,94 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     await sceneClick(page, page.getByTestId("hosted-create"));
     await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
   });
+
+  await shootPair(
+    "row-selected",
+    listWith([activeKim, pendingHermes]),
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
+      await sceneClick(
+        page,
+        page.getByTestId("agent-credentials-disconnect").first()
+      );
+      await page.getByTestId("hosted-connection-section").waitFor({
+        state: "visible",
+      });
+      await page.getByTestId("agent-credentials-row").nth(1).hover();
+      const report = await page.evaluate(() => {
+        const swatch = (token) => {
+          const el = document.createElement("div");
+          el.style.backgroundColor = `var(${token})`;
+          document.body.append(el);
+          const rgb = getComputedStyle(el).backgroundColor;
+          el.remove();
+          return rgb;
+        };
+        const rows = [
+          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        ];
+        return {
+          accentSoft: swatch("--accent-soft"),
+          surfaceHover: swatch("--surface-hover"),
+          selected: rows[0] ? getComputedStyle(rows[0]).backgroundColor : null,
+          hovered: rows[1] ? getComputedStyle(rows[1]).backgroundColor : null,
+        };
+      });
+      console.log(`ROW_FILL ${scheme}`, JSON.stringify(report));
+    }
+  );
+
+  await shootPair("offline", listWith(activeKim), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, "onLine", {
+        configurable: true,
+        get: () => false,
+      });
+      window.dispatchEvent(new Event("offline"));
+    });
+    await page.getByTestId("agent-credentials-offline").waitFor({
+      state: "visible",
+    });
+  });
+
+  await shootPair(
+    "loopback-hint",
+    async (context) => {
+      await context.route("**/v1/provider/link/test", (route) =>
+        json(route, {
+          schema: "momo.provider_link.test.v0",
+          ok: false,
+          reason: LOOPBACK_REFUSAL,
+          source: "database",
+          mode: "external-hermes",
+          endpointLabel: "127.0.0.1:11434",
+          checkedAtMs: FIXTURE_NOW,
+        })
+      );
+      await context.route("**/v1/provider/link/chain", (route) =>
+        route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "not found" } }),
+        })
+      );
+      await context.route("**/v1/provider/link", (route) =>
+        json(route, {
+          ...PROVIDER_LINK,
+          baseUrl: "http://127.0.0.1:11434/v1",
+          endpointLabel: "127.0.0.1:11434",
+        })
+      );
+    },
+    async (page) => {
+      await sceneClick(page, page.getByTestId("ai-link-check"));
+      await page.getByTestId("ai-link-loopback-hint").waitFor({
+        state: "visible",
+      });
+    },
+    { hash: "/settings?section=ai", ready: "ai-link-check" }
+  );
 
   return shots;
 }
