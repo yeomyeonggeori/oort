@@ -5,7 +5,7 @@
 > 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
 >
 > 📐 **객관 통과기준(measurable DoD) = `docs/cicd/05-qa-release-gate.md`.** 이 파일(03)은 체크리스트(무엇), 05는 "사용 가능 완전 판명"의 수치/방법(어떻게 증명)·PASS 기록 양식.
-> 관련: `06-beta-testflight-plan.md`(베타) · `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능) · `09-qa-codex-tickets.md`(Codex 티켓).
+> 관련: `06-beta-testflight-plan.md`(베타) · `07-crash-analytics-spec.md`(크래시-free 계측) · `08-e2e-accessibility-performance.md`(e2e/접근성/성능) · `05-qa-release-gate.md`(Codex 티켓).
 
 ## G-0. 런타임 e2e (STATUS.md §5 선결)
 - [ ] docker(PG18+Centrifugo v6) 기동 → `make migrate`(001→002) 멱등 적용.

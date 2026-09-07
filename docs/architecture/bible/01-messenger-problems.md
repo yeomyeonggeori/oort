@@ -46,7 +46,7 @@
 - 전파: DB 커밋과 같은 트랜잭션에 "전파할 것" 행을 남기고(outbox), 별도 프로세스가 그 행을 읽어 websocket 서버로 밀어 넣는다. DB가 진실, 전파는 파생.
 - 복구: ① websocket 서버가 최근 N개를 기억해서 재전송(빠르지만 한계 있음) ② 클라이언트가 "내가 마지막으로 본 seq 이후 전부"를 DB에 다시 묻는 backfill(느리지만 완전함). 성숙한 시스템은 둘 다 쓴다 — 짧은 끊김은 ①, 긴 끊김은 ②.
 
-**oort.** 교과서 그대로 구현되어 있다. REST → PG 커밋(메시지+seq+outbox 한 트랜잭션) → OutboxRelay가 `FOR UPDATE SKIP LOCKED`로 outbox를 집어 Centrifugo에 publish(`relay/OutboxRelay/Sources/OutboxRelay/RelayService.swift:11-16`) → websocket으로 각 클라이언트에 도착. 복구는 Centrifugo history(짧은 끊김, `infra/centrifugo.json:4-8`)와 REST `?after=<seq>` backfill(긴 끊김·진짜 권위, `docs/DEPLOY.md:279`) 이중이다. **Centrifugo는 순서도 권한도 히스토리의 원본도 아니다** — 전송 전용이라는 제1불변식이 여기서 나온다.
+**oort.** 교과서 그대로 구현되어 있다. REST → PG 커밋(메시지+seq+outbox 한 트랜잭션) → OutboxRelay가 `FOR UPDATE SKIP LOCKED`로 outbox를 집어 Centrifugo에 publish(`relay/OutboxRelay/Sources/OutboxRelay/RelayService.swift:11-16`) → websocket으로 각 클라이언트에 도착. 복구는 Centrifugo history(짧은 끊김, `infra/centrifugo.json:4-8`)와 REST `?after=<seq>` backfill(긴 끊김·진짜 권위, `docs/SELF_HOST.md:279`) 이중이다. **Centrifugo는 순서도 권한도 히스토리의 원본도 아니다** — 전송 전용이라는 제1불변식이 여기서 나온다.
 
 ---
 
@@ -82,7 +82,7 @@
 
 **해법의 뼈대.** ① 서버가 "이 이벤트가 이 사람에게 푸시할 가치가 있나"를 판정(멘션? DM? 채널 음소거?) — 판정 로직은 서버 한 곳에만 존재해야 한다(ux-bible P9) ② 기기 토큰 관리(등록·무효화) ③ APNs/FCM으로 발송 ④ 셀프호스팅이라면 벤더 운영 push relay 경유.
 
-**oort.** 스키마는 처음부터 준비되어 있었다 — `device`, `push_token`, `push_dispatch_log` 테이블과 APNs 운영 상수(ES256 키, 429/410 처리)까지 문서화됐다(`001_init.sql:506-543`, `docs/DEPLOY.md:447-451`). 그러나 토큰 등록 라우트도, 발송 worker도, 판정 로직도 아직 없다. 로드맵 M5(iOS)의 MOMO-040~043이 이 자리다. unread/멘션 판정(M4)이 먼저 서버에 있어야 푸시 판정(P9)이 설 수 있다는 의존관계에 주목.
+**oort.** 스키마는 처음부터 준비되어 있었다 — `device`, `push_token`, `push_dispatch_log` 테이블과 APNs 운영 상수(ES256 키, 429/410 처리)까지 문서화됐다(`001_init.sql:506-543`, `docs/SELF_HOST.md:447-451`). 그러나 토큰 등록 라우트도, 발송 worker도, 판정 로직도 아직 없다. 로드맵 M5(iOS)의 MOMO-040~043이 이 자리다. unread/멘션 판정(M4)이 먼저 서버에 있어야 푸시 판정(P9)이 설 수 있다는 의존관계에 주목.
 
 ---
 
@@ -124,7 +124,7 @@
 
 **핵심 감각.** 수십 명~수백 명 규모에서 ④는 오지 않는다. 대부분의 셀프호스팅 메신저는 단일 노드로 수천 명을 감당한다(05장). 진짜 위험은 스케일이 아니라 **백업 없는 디스크 사망**이다.
 
-**oort.** 명시적 단일 노드 전략(EC2 t4g.large 1대, `docs/AWS_INTERNAL_ALPHA.md:11`)이되, 확장이 코드 재작성이 아닌 설정 변경이 되도록 준비되어 있다: API는 stateless(다중화 가능), relay/worker는 `SKIP LOCKED`라 여러 개 떠도 안전, Centrifugo는 prod에서 Redis 엔진이라 노드 추가 가능(`infra/prod/centrifugo.prod.json:2-7`), 확장 레버 목록은 `docs/DEPLOY.md:504-515`. 백업은 pgBackRest + 리허설 스크립트. **멀티 리전은 현재 계획에 없음이 올바른 상태다** — 03장에서 보겠지만 Slack조차 데이터는 사실상 단일 리전이고 edge만 분산한다.
+**oort.** 명시적 단일 노드 전략(EC2 t4g.large 1대, `docs/SELF_HOST.md:11`)이되, 확장이 코드 재작성이 아닌 설정 변경이 되도록 준비되어 있다: API는 stateless(다중화 가능), relay/worker는 `SKIP LOCKED`라 여러 개 떠도 안전, Centrifugo는 prod에서 Redis 엔진이라 노드 추가 가능(`infra/prod/centrifugo.prod.json:2-7`), 확장 레버 목록은 `docs/SELF_HOST.md:504-515`. 백업은 pgBackRest + 리허설 스크립트. **멀티 리전은 현재 계획에 없음이 올바른 상태다** — 03장에서 보겠지만 Slack조차 데이터는 사실상 단일 리전이고 edge만 분산한다.
 
 ---
 

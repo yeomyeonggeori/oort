@@ -705,7 +705,5 @@ chmod 600 smoke.secrets.env "$failed_env"
 `runtime-unverified(public host)`이며, 위 attended 절차가 그 미검증 범위를 닫는다.
 
 보안 강화·백업·업그레이드·다중 워크스페이스 운영은
-[`docs/DEPLOY.md`](DEPLOY.md), pgBackRest 폐곡선과 migrate gate는
-[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md).
-은퇴한 NCP 런북은 [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)
-에 역사 기록으로만 남아 있다.
+[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md)와
+[`docs/runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).

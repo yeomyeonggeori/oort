@@ -11,7 +11,7 @@ quality** — P1 feature work replaces it surface by surface.
 **`f399e417:clients/web-legacy`** and was deleted in #2166. **Live serving is this
 directory** — the Rust image copies `clients/web` dist to `/opt/momo/web/`
 (`server-rust/Dockerfile:147,157,173,231`) and `web-assets` stages it for Caddy
-(`infra/rust/caddy.override.yml:85-87`, `docs/runbooks/ncp-rust-deploy.md`
+(`infra/rust/caddy.override.yml:85-87`, `docs/SELF_HOST.md`
 「웹(정적 SPA) 배포」 / #1228).
 
 work 표면은 서버 capability로 숨김(ADR-0183 D4-②).

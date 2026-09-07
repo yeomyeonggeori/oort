@@ -3,7 +3,7 @@
 //! Keys are the Swift AgentWorker's (`workers/AgentWorker/.../Config.swift`), so
 //! one env block drives either implementation:
 //!
-//! * `WORKER_DATABASE_URL` (preferred, `docs/DEPLOY.md:393`) → `RELAY_DATABASE_URL`
+//! * `WORKER_DATABASE_URL` (preferred, `docs/SELF_HOST.md:393`) → `RELAY_DATABASE_URL`
 //!   (what Swift reads first, `Config.swift:97`) → `DATABASE_URL`. The worker
 //!   connects as the **BYPASSRLS `momo_worker` role** (`SECURITY.md:67`,
 //!   `bootstrap_roles.sql:15-32`): it drains every tenant, which is exactly why

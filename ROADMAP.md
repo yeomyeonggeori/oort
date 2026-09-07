@@ -59,7 +59,7 @@
 | 엔진 | **BT 파도 마감** | BT-1~5 랜딩. **BT-6(#1934) 서버 절반 미커밋(wbt6-server) — 이어받기** | G0 |
 | 모바일 | **M0 QR 기기 연결** | ADR-0180 1회용 링크 토큰: 서버 라우트 2 + 웹 QR 카드 + 폰 스캔 화면. **G1 창 안에서 선행**(셀프호스팅 blocker 무관, Railway E2E 마지막 칸) | 편성 완료 |
 | 모바일 | **M1 폰 패리티 · M2 TestFlight internal** | 관전·승인 축 완주 + 웹 전용 축 이관(#1908 #1892 #1876 #1748 #1752 #1604 #1600 #1396) + 폰 온보딩. **G1 이후 ITO와 병렬**. TestFlight internal은 M0 직후(성재 손) | 편성 완료(순서 확정) |
-| 파이프 | **P1~P8** | PIPELINE.md 단일 설정(레인 추상화) · CODEX.md→AGENTS.md 병합 · `.claude/commands` · worker-lane 스킬 · handoffs archive · planning_context 갱신 | 편성 완료 |
+| 파이프 | **P1~P8** | PIPELINE.md 단일 설정(레인 추상화) · AGENTS.md→AGENTS.md 병합 · `.claude/commands` · worker-lane 스킬 · handoffs archive · planning_context 갱신 | 편성 완료 |
 | 공통 | **런칭 보조축 — Bring your hosted agent** | ADR-0162 축 — 계약·순서는 `BUILD_TICKETS.md` §런칭 보조축(유지). UX-R2c(첫 에이전트 연결 퍼널)·SH-6이 이 축의 UI/서버 잔여를 흡수 | 부분 랜딩 |
 
 ### 게이트

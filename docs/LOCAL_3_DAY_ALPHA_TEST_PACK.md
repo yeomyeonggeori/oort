@@ -6,10 +6,10 @@
 >
 > 정본 시나리오: [`docs/planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md`](planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md) §4–§5.
 > 호스팅 절차: [`docs/SELF_HOST.md`](SELF_HOST.md) (clone→브라우저 로그인). 데스크탑 셸: [`clients/desktop/README.md`](../clients/desktop/README.md).
-> 스모크 A–F: [`docs/INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md). 인테이크: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md).
+> 스모크 A–F: [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). 인테이크: [`docs/INDEX.md §6`](INDEX.md §6).
 >
 > 범위: 내부 리허설만. 이 팩은 GHCR 첫 발행·공개 DNS/TLS/SOPS/PITR·앱스토어/M7을
-> 증명하지 않는다. AWS 호스트 토폴로지는 [`docs/AWS_INTERNAL_ALPHA.md`](AWS_INTERNAL_ALPHA.md)이며
+> 증명하지 않는다. AWS 호스트 토폴로지는 [`docs/SELF_HOST.md`](AWS_LOCAL_3_DAY_ALPHA_TEST_PACK.md)이며
 > **ITO 판정값이 아니다.**
 
 런칭 정의(이 팩이 리허설하는 것):
@@ -45,7 +45,7 @@
 | ITO-3 | I1–I8 웹↔데스크탑 3일 도그푸드 | Day 1–3 | §4–§6 표 |
 | ITO-4 | 판정·환류 | Day 3 | 이 절의 `LAUNCH_READY` / `BLOCKED` / `NEEDS_MORE_INTERNAL` |
 
-스모크 절차(한 사람, 한 세션)는 [`INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) A–F. 3일 증거의 레이아웃·심각도·최종 보고서는 이 팩이 정본이다.
+스모크 절차(한 사람, 한 세션)는 [`LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) A–F. 3일 증거의 레이아웃·심각도·최종 보고서는 이 팩이 정본이다.
 
 ### 0.2 측정 기준선 (실측만)
 
@@ -93,7 +93,7 @@ mkdir -p "$MOMO_ITO_EVIDENCE_DIR"
 |---|---|---|
 | 웹 (셀프호스트 엣지) | same-origin. 브라우저 `http://localhost:<MOMO_WEB_PORT>` — SPA·`/v1`·Centrifugo가 한 오리진(`docs/SELF_HOST.md:241-257`). CORS가 성립할 여지가 없다. | 데스크탑 릴리스 origin(`tauri://localhost`) |
 | 데스크탑 (Tauri 2) | `clients/web` 번들을 감싼 셸. 딥링크 `oort://join`, mDNS, 키체인, 알림, next 채널 업데이터(`clients/desktop/README.md`). 개발은 `cargo tauri dev`, 증거의 본체는 **릴리스 번들** `cargo tauri build --bundles app`(`:353-370`). | `cargo tauri dev` 성공은 릴리스 로그인 증거가 아니다(dev proxy가 있다). |
-| iOS | I8: `npm --prefix clients/mobile run lane:phone` + 시뮬레이터 수동 로그인 1회 | 실기기·APNs·external TestFlight(`docs/IOS_TESTFLIGHT_RUNBOOK.md` — M7 PASS 전 금지) |
+| iOS | I8: `npm --prefix clients/mobile run lane:phone` + 시뮬레이터 수동 로그인 1회 | 실기기·APNs·external TestFlight(`docs/cicd/06-beta-testflight-plan.md` — M7 PASS 전 금지) |
 
 에이전트는 `member.kind='agent'`. 쓰기는 REST → Postgres 트랜잭션 → outbox → relay. 클라가 Centrifugo에 직접 publish하지 않는다. oort는 provider OAuth 토큰·원문 API 키를 DB·diagnostics·게이트 증거·앱 로그에 담지 않는다.
 
@@ -111,7 +111,7 @@ Mock provider는 메신저 도그푸드용. `LAUNCH_READY`에서 «에이전트 
 | H1 로컬 빌드 | `docs/SELF_HOST.md` 1–4장을 **그대로**. `scripts/self_host_env.sh --local-build` 그리고 스크립트가 인쇄한 `scripts/self_host_env.sh --compose up -d --build --wait` | 브라우저 로그인 + 채널 목록(`agent-lab` · `general`, 목록에는 `#` 없음 — `SELF_HOST.md:173-175`) + 메시지 1건. 문서 밖 임기응변 0 |
 | H1 측정 | `scripts/bench_onboarding.sh run` (또는 `plan` 후 `run`) | M1–M3 기록. 기준선은 §0.2. 새 시간을 지어내지 말 것 |
 | H2 digest pull | `SELF_HOST.md` §2 B. `IMAGE_REF='ghcr.io/yeomyeonggeori/oort@sha256:…'` | 첫 발행·익명 pull·attestation PASS(원장 #1332 코멘트 2026-08-21, 패키지 public, amd64 단일). **amd64 부팅 실측은 잔여** — Apple Silicon native pull 불가만 실측(2026-08-21). 구 `SELF_HOST.md:88` `runtime-unverified`·`SKIP(L2 unpublished)` 문면은 해당 없음. 이 잔여만으로 팩 전체를 `BLOCKED`로 만들지 않는다 |
-| H3 도메인+TLS | `SELF_HOST.md` §운영 + `docs/runbooks/ncp-rust-deploy.md` | 이 회전이 루프백이면 **`SKIP(public host)`**. `caddy.override.yml`을 노트북에서 이름 부르지 마라(`SELF_HOST.md:332-337`) |
+| H3 도메인+TLS | `SELF_HOST.md` §운영 + `docs/SELF_HOST.md` | 이 회전이 루프백이면 **`SKIP(public host)`**. `caddy.override.yml`을 노트북에서 이름 부르지 마라(`SELF_HOST.md:332-337`) |
 | Docs gate | `scripts/local_gate.sh --profile docs` | PASS 증거 경로 |
 | 이슈판 | `scripts/goal_status.sh --repo yeomyeonggeori/oort` | 이 실행을 막는 열린 P0/P1 없음 |
 | 증거 루트 | `$MOMO_ITO_EVIDENCE_DIR` | Day 0 노트 존재 |
@@ -149,7 +149,7 @@ Day 0 출력:
 | O2 셋째 또는 같은 둘째 (데스크탑 딥링크) | `oort://join?server=<percent-encoded base>&code=<code>` (`docs/onboarding-deeplink.md`). **릴리스 번들**에 `open -a <app> "oort://join?…"` (`clients/desktop/README.md:361-370`). `cargo tauri dev`는 스킴을 못 받는다 | 착지한 방/서버 프리필 |
 | I1 동일 계정 웹+데스크탑 | 메시지 실시간 양방향 · `message.seq` · unread 배지 수렴 · 프레즌스 | **T-A(#1607) 실기동 증거가 있을 때만 PASS.** 없으면 `BLOCKED` 또는 이 행 `FAIL(T-A)` — Known gaps를 낙관으로 덮지 말 것 |
 | 재시작 | 웹 새로고침, 데스크탑 재실행, `oort up -d --wait` 한 번. 메시지 유실 없음 | 노트 + 로그 |
-| 피드백 | 막힌 것이 없어도 1건 | GitHub 이슈/코멘트 또는 로컬 md (`INTERNAL_ALPHA_FEEDBACK.md`) |
+| 피드백 | 막힌 것이 없어도 1건 | GitHub 이슈/코멘트 또는 로컬 md (`INDEX.md §6`) |
 
 Day 1 출력:
 
@@ -204,7 +204,7 @@ Day 2 출력:
 
 | 시나리오 | PASS | 증거 |
 |---|---|---|
-| I5 데스크탑 자동업데이트 1왕복 | next 채널 재발행분 수신 → 자가 업데이트 → 재로그인 불요 | 현행 채널 정본 [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) · 발행 `scripts/publish_next_build.sh`. T-D(#1281) 준비 전제는 **실발행이 성재 맥**. 미발행이면 `SKIP(T-D/#1281)`. Swift/Sparkle 런북 [`MACOS_ALPHA_UPDATE_CHANNEL.md`](MACOS_ALPHA_UPDATE_CHANNEL.md)는 은퇴 — 실행하지 말 것 |
+| I5 데스크탑 자동업데이트 1왕복 | next 채널 재발행분 수신 → 자가 업데이트 → 재로그인 불요 | 현행 채널 정본 [`docs/NEXT_CHANNEL.md`](NEXT_CHANNEL.md) · 발행 `scripts/publish_next_build.sh`. T-D(#1281) 준비 전제는 **실발행이 성재 맥**. 미발행이면 `SKIP(T-D/#1281)`. Swift/Sparkle 런북 [`NEXT_CHANNEL.md`](NEXT_CHANNEL.md)는 은퇴 — 실행하지 말 것 |
 | I6 네이티브 알림 | 수신 확인. **클릭 라우팅은 known gap**(fire-and-forget) — `clients/desktop/README.md` Notification 절·Known gaps. 기대를 여기에 명시했으므로 결함으로 **중복 접수하지 않는다** | 배너가 보인 증거. 클릭 착지는 FAIL이 아님 |
 | I7 재연결 내성 | 네트워크 단절→복구 시 두 표면 타임라인 정합(outbox→relay 재구독) | 화면 + outbox 질의 |
 | I8 iOS 시뮬레이터 (보조) | `npm --prefix clients/mobile run lane:phone` 그린 + 수동 로그인·타임라인 1회 | 실기기/APNs는 스코프 밖 |
@@ -236,7 +236,7 @@ Day 3 출력:
 
 ## 7. 버그 심각도
 
-정본 트리아지: [`docs/INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md). 이 3일 실행에서:
+정본 트리아지: [`docs/INDEX.md §6`](INDEX.md §6). 이 3일 실행에서:
 
 | 심각도 | `LAUNCH_READY`를 막나 | 예 |
 |---|---|---|
@@ -380,14 +380,14 @@ ITO 산출 증거는 로컬에 두고 보고서만 레포/이슈로 올린다.
 |---|---|---|
 | H1 | 로컬 빌드 첫 설치 | `docs/SELF_HOST.md` 1–4 · Day 0 |
 | H2 | digest pull | `SELF_HOST.md` §2 B · 첫 발행 완료(원장 #1332). amd64 부팅 실측은 잔여 |
-| H3 | 도메인+TLS | `SELF_HOST.md` §운영 · `docs/runbooks/ncp-rust-deploy.md` |
+| H3 | 도메인+TLS | `SELF_HOST.md` §운영 · `docs/SELF_HOST.md` |
 | O1 | 키 둘 | `SELF_HOST.md` §5 · Day 1 |
 | O2 | GUI 초대 + 합류 | 설정 › 멤버와 초대 · `docs/onboarding-deeplink.md` · Day 1. 통합 첫 하루 런북은 T-B(#1608) |
 | O3 | 멘션 응답 | `SELF_HOST.md` §5 · `scripts/bench_onboarding.sh` M5 · Day 2 |
 | O4 | Grok E2E | #1361 · Day 2 |
-| I1–I8 | 웹↔데스크탑 | Day 1–3 + [`INTERNAL_ALPHA.md`](INTERNAL_ALPHA.md) A–F |
+| I1–I8 | 웹↔데스크탑 | Day 1–3 + [`LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) A–F |
 | 판정 | LAUNCH_READY 등 | §0 · §10 |
-| 인테이크 | 발견 전량 티켓 | [`INTERNAL_ALPHA_FEEDBACK.md`](INTERNAL_ALPHA_FEEDBACK.md) |
+| 인테이크 | 발견 전량 티켓 | [`INDEX.md §6`](INDEX.md §6) |
 
 ---
 
@@ -398,13 +398,13 @@ ITO 산출 증거는 로컬에 두고 보고서만 레포/이슈로 올린다.
 | 위치 | 분류 | 이 PR |
 |---|---|---|
 | `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` | 실행 문서였음 | **전면 개정** — 실행 지시 0 |
-| `docs/INTERNAL_ALPHA.md` | 실행 문서였음 | **전면 개정** — 실행 지시 0 |
-| `docs/INTERNAL_ALPHA_FEEDBACK.md` | 실행 문서(게이트 페어링) | **미세 정정** — 예시에서 제거 |
-| `docs/MACOS_ALPHA_UPDATE_CHANNEL.md` | 실행 문서였음 (Swift 업데이트) | **은퇴 배너** — 본문은 사문서 |
-| `docs/LOCAL_SOLO_ALPHA_ROADMAP.md` | 실행처럼 보이는 구 로드맵 | **은퇴 배너** — 본문은 사문서. 후속은 이 팩 |
+| `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` | 실행 문서였음 | **전면 개정** — 실행 지시 0 |
+| `docs/INDEX.md §6` | 실행 문서(게이트 페어링) | **미세 정정** — 예시에서 제거 |
+| `docs/NEXT_CHANNEL.md` | 실행 문서였음 (Swift 업데이트) | **은퇴 배너** — 본문은 사문서 |
+| `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md` | 실행처럼 보이는 구 로드맵 | **은퇴 배너** — 본문은 사문서. 후속은 이 팩 |
 | `docs/INDEX.md` 로컬 게이트 프로파일 목록 | 실행 지도 | 현행 usage에 맞춤 (`macos-ui` 삭제) |
 | `docs/GITHUB_OPS.md` | 실행 잔존 (게이트 명령 예시) | **비접촉** — 티켓 후보 |
-| `docs/BACKLOG.md` | 사문서 (역사 티켓) | 비접촉 |
+| `BUILD_TICKETS.md` | 사문서 (역사 티켓) | 비접촉 |
 | `docs/adr/0003-macos-packaging-architecture.md` | 사문서 (ADR) | 비접촉 |
 | `BUILD_TICKETS.md` · `ROADMAP.md` · `STATUS.md` (레포 루트) | 사문서/증거 원장 | T-C는 `docs/**`만 — 비접촉. 루트 정본의 은퇴 명령 일괄 정리는 #1525가 남긴 후속 |
 

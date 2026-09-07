@@ -772,8 +772,6 @@ chmod 600 smoke.secrets.env "$failed_env"
 따라서 실제 `app.oor7.com`의 403·hash equality·old-secret 401 증거는 배포 전까지
 `runtime-unverified(public host)`이며, 위 attended 절차가 그 미검증 범위를 닫는다.
 
-Hardening, backup, upgrade, and multi-workspace operations:
-[`docs/DEPLOY.md`](DEPLOY.md); the pgBackRest closed loop and migrate gate:
-[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md).
-The retired NCP runbook remains as historical record only in
-[`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md).
+Hardening, backup, upgrade, and multi-workspace operations live in
+[`docs/runbooks/pgbackrest-pitr.md`](runbooks/pgbackrest-pitr.md)
+and [`docs/runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md).

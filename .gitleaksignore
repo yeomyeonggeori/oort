@@ -29,20 +29,20 @@
 # ── compose 내부 서비스 주소를 API 키로 오인 (16건) ──────────────────
 # `http://api:8080/...` 는 docker compose 네트워크 안의 서비스 이름:포트다. 호스트에서
 # 도달하지 않고 자격증명도 아니다. generic-api-key 룰이 `api:` 뒤 문자열을 키로 읽는다.
-#   docs/AWS_INTERNAL_ALPHA.md:159  [generic-api-key]
-8d840a1b4cc8e15b31ee045a5a2dd76a9b3f4680:docs/AWS_INTERNAL_ALPHA.md:generic-api-key:159
-#   docs/DEPLOY.md:64  [generic-api-key]
-222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:64
-#   docs/DEPLOY.md:159  [generic-api-key]
-222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:159
-#   docs/DEPLOY.md:167  [generic-api-key]
-222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/DEPLOY.md:generic-api-key:167
-#   docs/DEPLOY.md:169  [generic-api-key]
-d036954038bdbefd3c3a750bbbe7f0e061fe9b9d:docs/DEPLOY.md:generic-api-key:169
-#   docs/RUN.md:122  [generic-api-key]
-222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/RUN.md:generic-api-key:122
-#   docs/RUN.md:372  [generic-api-key]
-0f98bed19e12ce3a34f074e603811c1097c2ed5f:docs/RUN.md:generic-api-key:372
+#   docs/SELF_HOST.md:159  [generic-api-key]
+8d840a1b4cc8e15b31ee045a5a2dd76a9b3f4680:docs/SELF_HOST.md:generic-api-key:159
+#   docs/SELF_HOST.md:64  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/SELF_HOST.md:generic-api-key:64
+#   docs/SELF_HOST.md:159  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/SELF_HOST.md:generic-api-key:159
+#   docs/SELF_HOST.md:167  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/SELF_HOST.md:generic-api-key:167
+#   docs/SELF_HOST.md:169  [generic-api-key]
+d036954038bdbefd3c3a750bbbe7f0e061fe9b9d:docs/SELF_HOST.md:generic-api-key:169
+#   docs/SELF_HOST.md:122  [generic-api-key]
+222e7c5e4a00c49292a3b9a0fdde12ab6ebe004b:docs/SELF_HOST.md:generic-api-key:122
+#   docs/SELF_HOST.md:372  [generic-api-key]
+0f98bed19e12ce3a34f074e603811c1097c2ed5f:docs/SELF_HOST.md:generic-api-key:372
 #   docs/adr/0002-docker-compose-layering.md:161  [generic-api-key]
 e081854e20100db5f9d3aae6ba3beba358b57820:docs/adr/0002-docker-compose-layering.md:generic-api-key:161
 #   infra/centrifugo.json:17  [generic-api-key]

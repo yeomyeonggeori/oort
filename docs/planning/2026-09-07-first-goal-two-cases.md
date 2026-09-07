@@ -52,7 +52,7 @@
 
 1. **출시 잔여 재편성 = §4 확정.** 기준은 「두 케이스 E2E에 필요한가」. 팔레트·DS-1 잔여·R2d·허들·TURN은 어느 케이스에도 필요 없어 ITO 뒤로.
 2. **work 표면 = 숨긴다.** 두 케이스 모두 work host(T3 데몬)를 쓰지 않는다. LS-2(uxui)에서 사이드바 `work`·`workConsole`·`workstreams`·`ade` 항목을 셀프호스트 기본 플래그 off로 숨기고 라우트·코드는 유지(플래그 1행 + 회귀 시험 1본).
-3. **G3 문서(`QA_GATE.md`·`IOS_TESTFLIGHT_RUNBOOK.md`) = LS-3에서 삭제.** 두 케이스 모두 스토어 제출과 무관. G3 진입 때 RN 기준으로 새로 쓴다(git 히스토리 참조). 단 **`docs/external-agent-provider/*`는 삭제 금지**(B-4 재작성 대상 — LS-3 브리프에 명시).
+3. **G3 문서(`05-qa-release-gate.md`·`06-beta-testflight-plan.md`) = LS-3에서 삭제.** 두 케이스 모두 스토어 제출과 무관. G3 진입 때 RN 기준으로 새로 쓴다(git 히스토리 참조). 단 **`docs/external-agent-provider/*`는 삭제 금지**(B-4 재작성 대상 — LS-3 브리프에 명시).
 
 ## 6. 이 문서가 바꾸는 정본
 
