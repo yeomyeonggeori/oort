@@ -250,3 +250,10 @@ e0e39dd74c384e3e1f788e97fac25f65c36704b3:clients/web/src/features/auth/ConnectPa
 # 2026-09-05 #2002 UX-R2b — 오탐: 세션 저장 슬롯 이름 "oort.freshSignup.v1" (generic-api-key), 시크릿 아님
 b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshSignup.ts:generic-api-key:13
 2874c2e8f449df8d08b3d143bebac783b3bb1d35:clients/web/src/features/welcome/freshSignup.test.ts:generic-api-key:10
+
+# 2026-09-08 #2205 SH-5a — 오탐: Railway 사설 DNS 상의 api 서비스 HTTP 주소
+# (compose `http://api:8080/...` 동형). generic-api-key 가 서비스명:포트를 키로 읽는다.
+#   infra/railway/railway.json  Centrifugo subscribe proxy endpoint
+#   infra/railway/README.md     같은 주소를 백틱으로 인용한 한 줄
+9819c1ca1a8520998c42b175863ad8db9f216eda:infra/railway/railway.json:generic-api-key:66
+9819c1ca1a8520998c42b175863ad8db9f216eda:infra/railway/README.md:generic-api-key:88
