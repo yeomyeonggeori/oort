@@ -23,6 +23,13 @@ import {
   providerTestMessage,
 } from "@momo/core/features/settings/model";
 import {
+  isLoopbackProviderRefusal,
+  isLoopbackProviderUrl,
+  loopbackProviderGuidance,
+  parseProbeEntries,
+} from "@momo/core/features/settings/chainModel";
+import { arrayField } from "@momo/core/lib/wire";
+import {
   ChoiceRadios,
   ConfirmButton,
   Field,
@@ -33,8 +40,6 @@ import {
   type KeyValue,
 } from "./SettingsFields";
 import { AiLinkChain, ChainProbeResult } from "./AiLinkChain";
-import { parseProbeEntries } from "@momo/core/features/settings/chainModel";
-import { arrayField } from "@momo/core/lib/wire";
 import {
   accessTokenStatus,
   buildOAuthLinkBody,
@@ -86,6 +91,13 @@ const LINK_OFFLINE_REASON =
   "연결이 끊겨 지금은 이 연결을 바꾸거나 확인할 수 없습니다.";
 const LINK_BUSY_REASON =
   "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 바꾸거나 확인할 수 있습니다.";
+
+function loopbackHint(error: unknown, url: string): string | null {
+  if (!isLoopbackProviderUrl(url) || !isLoopbackProviderRefusal(error)) {
+    return null;
+  }
+  return loopbackProviderGuidance(error);
+}
 
 /** Registration methods. Verb-free ids; the server sees neither of these. */
 const LINK_METHODS = [
@@ -753,11 +765,17 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             </>
           )}
 
-          {save.isError && (
-            <p className="text-meta text-danger" role="alert">
-              {errorMessage(save.error)}
-            </p>
-          )}
+          {save.isError &&
+            (loopbackHint(save.error, baseUrl) ? (
+              <InlineBanner
+                message={loopbackHint(save.error, baseUrl) ?? ""}
+                testId="ai-link-loopback-hint"
+              />
+            ) : (
+              <p className="text-meta text-danger" role="alert">
+                {errorMessage(save.error)}
+              </p>
+            ))}
 
           <div className="flex flex-wrap items-center gap-2">
             {/* 진행은 `aria-busy` 와 바뀐 낱말이 지고 흐리지 않는다. 잠금은
@@ -851,11 +869,17 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
         </p>
       )}
 
-      {check.isError && (
-        <p className="text-meta text-danger" role="alert">
-          {errorMessage(check.error)}
-        </p>
-      )}
+      {check.isError &&
+        (loopbackHint(check.error, link.baseUrl) ? (
+          <InlineBanner
+            message={loopbackHint(check.error, link.baseUrl) ?? ""}
+            testId="ai-link-loopback-hint"
+          />
+        ) : (
+          <p className="text-meta text-danger" role="alert">
+            {errorMessage(check.error)}
+          </p>
+        ))}
       {unlink.isError && (
         <p className="text-meta text-danger" role="alert">
           {errorMessage(unlink.error)}
@@ -886,7 +910,8 @@ export function AiLinkSection({ offline }: { offline: boolean }) {
             role="status"
             data-testid="ai-link-probe"
           >
-            {providerTestMessage(probe)}
+            {loopbackHint(probe.reason ?? "", link.baseUrl) ??
+              providerTestMessage(probe)}
           </p>
         ))}
 

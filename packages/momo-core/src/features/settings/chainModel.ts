@@ -677,6 +677,9 @@ export function probeReasonCopy(reason: string | undefined): string {
   if (reason === "probe_not_run") {
     return "확인이 끝나지 않았습니다.";
   }
+  if (isLoopbackProviderRefusal(reason)) {
+    return loopbackProviderGuidance(reason);
+  }
   const status = /^provider_status_(\d{3})$/.exec(reason);
   if (status) return `provider가 ${attachDirection(status[1])} 답했습니다.`;
   return `서버가 보고한 사유: ${reason}`;
@@ -765,3 +768,63 @@ export function cascadeProbeSummary(
     text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.`,
   };
 }
+
+/** Server `BaseUrlInvalid::LoopbackNotAllowed` (provider.rs). Do not paraphrase. */
+export const LOOPBACK_REFUSAL_WIRE =
+  "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1";
+
+/**
+ * Settings copy when the server refuses a laptop loopback provider URL.
+ * SH-6a-e (the env flag) is not a client switch: this sentence only names it.
+ */
+export const LOOPBACK_PROVIDER_HINT =
+  "셀프호스트 env에서 로컬 provider 허용(--allow-local-provider, SH-6a-e)을 켜야 합니다. 절차는 SELF_HOST.md의 AI 연결 절에 있습니다.";
+
+function refusalText(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "";
+}
+
+/** True for the loopback hosts the server names in the refusal. */
+export function isLoopbackProviderUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (trimmed === "") return false;
+  try {
+    const host = new URL(trimmed).hostname.replace(/^\[(.*)\]$/, "$1");
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    const lower = trimmed.toLowerCase();
+    return (
+      lower.startsWith("http://127.0.0.1") ||
+      lower.startsWith("http://localhost") ||
+      lower.startsWith("http://[::1]")
+    );
+  }
+}
+
+/** True when the error (or probe reason) is the measured loopback refusal. */
+export function isLoopbackProviderRefusal(error: unknown): boolean {
+  const message = refusalText(error);
+  return (
+    message.includes(LOOPBACK_REFUSAL_WIRE) ||
+    message.includes("loopback baseUrl") ||
+    message.includes("AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK")
+  );
+}
+
+/**
+ * The Korean hint, unless the server already sent that sentence (or the flag name).
+ */
+export function loopbackProviderGuidance(error: unknown): string {
+  const message = refusalText(error);
+  if (
+    message.includes("allow-local-provider") ||
+    message.includes("로컬 provider 허용")
+  ) {
+    return message;
+  }
+  return LOOPBACK_PROVIDER_HINT;
+}
+
