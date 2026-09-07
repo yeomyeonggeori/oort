@@ -20,7 +20,7 @@
 | 공유 코어 | **`packages/momo-core`**(TS, `@momo/core`) | `clients/Core`(Swift) |
 | 기동/배포 | [`docs/SELF_HOST.md`](SELF_HOST.md)(**처음 한 번** — clone→로그인) · [`docs/SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md)(그록봇 3계층 플레이북) · [`docs/RELEASING.md`](RELEASING.md)(서버/이미지 `v0.x` 발행 + 데스크탑 dmg 공개 자산) · [`infra/rust/README.md`](../infra/rust/README.md)(그다음 전부: 이미지+compose) · [`docs/runbooks/ncp-rust-deploy.md`](runbooks/ncp-rust-deploy.md)(라이브 정본) | [`docs/RUN.md`](RUN.md)(Swift 기준 — 상단 배너 참조) |
 
-- **예외 — 은퇴 아님:** PushRelay **계약**(env·서명·id-only, `infra/rust/docker-compose.push.yml`)은 유지, Swift 본체는 ADR-0183으로 삭제, Rust 이식 중(#1255). `clients/web-legacy`는 삭제 아님. **라이브 웹=`clients/web`**(`server-rust/Dockerfile` web-assets / #1228). Swift prod `Dockerfile.web`·e2e `web-init` 소비자는 LS-1에서 삭제(`f399e417:infra/prod/Dockerfile.web`, `f399e417:infra/docker-compose.e2e.yml`).
+- **예외 — 은퇴 아님:** PushRelay **계약**(env·서명·id-only, `infra/rust/docker-compose.push.yml`)은 유지, Swift 본체는 ADR-0183으로 삭제, Rust 이식 중(#1255). **라이브 웹=`clients/web`**(`server-rust/Dockerfile` web-assets / #1228). Swift prod `Dockerfile.web`·e2e `web-init` 소비자는 LS-1에서 삭제(`f399e417:infra/prod/Dockerfile.web`, `f399e417:infra/docker-compose.e2e.yml`). `f399e417:clients/web-legacy`는 #2166에서 삭제됐다.
 - 현행 스택 빌드·검증 명령의 정본은 [`AGENTS.md`](../AGENTS.md) §3(그리고 `Makefile`의 `build`/`test`).
 
 ---
@@ -208,7 +208,6 @@
 | `clients/web/` | React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` → `/opt/momo/web/` · `web-assets`, #1228) |
 | `clients/desktop/` | Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다 |
 | `clients/mobile/` | React Native 앱(현재 iOS) |
-| `clients/web-legacy/` | ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod/e2e 소비자는 LS-1에서 삭제(`f399e417:infra/prod/Dockerfile.web`, `f399e417:infra/docker-compose.e2e.yml`) |
 | `adapters/hermes/` · `adapters/prime/` | `momo_adapter.py`(BasePlatformAdapter) + plugin.yaml (py3) · prime-agent 어댑터(스트림 릴레이·하네스 refine·RPC) |
 | `infra/rust/` | **라이브 배포 경로** — Rust 이미지 compose + `Caddyfile`(정본) + 푸시/폰 오버레이 |
 | `infra/` | `centrifugo.json` · `.env.example` · `infra/rust/`(현행 compose). 레거시 `docker-compose.yml`·e2e compose는 LS-1에서 삭제(`f399e417:`) |
@@ -223,6 +222,7 @@
 | `relay/OutboxRelay/` · `workers/` · `services/` | Swift 실행체(AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등) |
 | `relay/PushRelay/` | Swift 본체 삭제. 계약(env·서명·id-only)과 `infra/rust/docker-compose.push.yml`은 유지 — Rust 이식 중(#1255) |
 | `infra/prod/` · `fastlane/` | Swift prod compose. `fastlane/`는 W-S1에서 삭제 |
+| `clients/web-legacy/` · `clients/mobile-spike/` | 이중 정본 — LS-2/#2166에서 삭제 (`f399e417:`) |
 
 ---
 

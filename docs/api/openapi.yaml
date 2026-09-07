@@ -4,7 +4,7 @@ openapi: 3.0.3
 # oort REST API — web v0 + plugin surface (MOMO-389/MOMO-459)
 #
 # This file is the canonical client contract for the web v0 surface. Clients
-# (clients/web-legacy via openapi-typescript, and packages/momo-core as a
+# (f399e417:clients/web-legacy via openapi-typescript, and packages/momo-core as a
 # conformance target) follow this spec. The live server is server-rust
 # (bins/momo-server, ADR-0145); drift between this spec and the running server
 # is detected by scripts/verify_openapi_contract.sh (docs/LOCAL_PR_GATE.md).

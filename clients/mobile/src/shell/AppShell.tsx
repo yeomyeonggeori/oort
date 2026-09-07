@@ -12,7 +12,7 @@ import {
   INITIAL_NAV,
   navReducer,
   tabLabel,
-  TABS,
+  visibleTabs,
   type OpenAgent,
   type OpenHostedConnection,
   type Tab,
@@ -30,6 +30,7 @@ import SidebarScreen from '../screens/SidebarScreen';
 import WorkConsoleScreen from '../screens/WorkConsoleScreen';
 import WorkSessionDetailScreen from '../screens/WorkSessionDetailScreen';
 import {SessionProvider} from '../session/useSession';
+import {isSurfaceProvided} from '@momo/core/features/capabilities/serverSurfaces';
 
 // =============================================================================
 // The signed-in tree: four tabs, and the surfaces that cover them.
@@ -169,7 +170,7 @@ function Shell(): React.JSX.Element {
             />
           </View>
         ) : null}
-        {visited.current.has('work') ? (
+        {visited.current.has('work') && isSurfaceProvided('workConsole') ? (
           <View style={nav.tab === 'work' ? styles.visible : styles.hidden}>
             <WorkConsoleScreen
               active={nav.tab === 'work' && nav.workSession === null}
@@ -299,7 +300,7 @@ function TabBar({
     <View
       accessibilityRole="tablist"
       style={[styles.tabBar, {paddingBottom: Math.max(insets.bottom, space.sm)}]}>
-      {TABS.map(tab => {
+      {visibleTabs().map(tab => {
         const selected = tab === current;
         const badge = tab === 'inbox' ? mentionCount : 0;
         return (

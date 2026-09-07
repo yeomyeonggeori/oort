@@ -70,6 +70,9 @@ export function serverSaysAbsent(error: unknown): boolean {
 
 export type SurfaceId =
   | "workstreams"
+  | "workConsole"
+  | "work"
+  | "ade"
   | "approvals"
   | "huddles"
   | "agentRunHistory"
@@ -77,6 +80,14 @@ export type SurfaceId =
   | "agentMemory"
   | "messageSearch"
   | "hostedAgentPairing";
+
+/** Workd/T3 데몬을 전제하는 표면. 셀프호스트 기본은 모두 숨긴다 (ADR-0183 D4-② · #2166). */
+export const WORK_SURFACE_IDS: readonly SurfaceId[] = [
+  "workstreams",
+  "workConsole",
+  "work",
+  "ade",
+];
 
 export interface ServerSurface {
   id: SurfaceId;
@@ -122,6 +133,36 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
     fallback: "채널에서 작업 세션을 열면 지금도 같은 일을 이어갈 수 있습니다.",
     measured:
       "GET/POST …/workstreams, …/workstreams/{id}, …/workstreams/{id}/runs: 라우터에 없음(404).",
+  },
+  workConsole: {
+    id: "workConsole",
+    label: "작업 콘솔",
+    provided: false,
+    absentReason: "이 서버는 작업 콘솔을 기본으로 열지 않습니다.",
+    fallback: "채널에서 글로 이야기하면 에이전트가 그대로 답합니다.",
+    measured:
+      "셀프호스트 1차 목표(2026-09-07 §5-2): workd/T3 데몬을 쓰지 않으므로 " +
+      "전역 작업 콘솔(/work) 진입점을 숨긴다. 라우트와 컴포넌트는 유지.",
+  },
+  work: {
+    id: "work",
+    label: "코드 실행 호스트",
+    provided: false,
+    absentReason: "이 서버는 코드 실행 호스트를 기본으로 다루지 않습니다.",
+    fallback: "에이전트는 채널에서 바로 이야기할 수 있습니다.",
+    measured:
+      "셀프호스트 1차 목표(2026-09-07 §5-2): 설정 › 코드 실행 호스트와 작업 세션 " +
+      "패널은 workd 레지스트리를 전제한다. 진입점만 접고 화면 코드는 남긴다.",
+  },
+  ade: {
+    id: "ade",
+    label: "관제",
+    provided: false,
+    absentReason: "이 서버는 작업 관제를 기본으로 보여 주지 않습니다.",
+    fallback: "에이전트가 한 일은 채널 메시지에서 확인할 수 있습니다.",
+    measured:
+      "셀프호스트 1차 목표(2026-09-07 §5-2): ADE 요약 줄·서랍은 작업 세션 원장을 " +
+      "전제한다. 진입점만 접고 컴포넌트는 유지.",
   },
   approvals: {
     id: "approvals",
@@ -264,7 +305,9 @@ const SURFACES: Record<SurfaceId, ServerSurface> = {
 // coreHost.ts). 판정도 표도 바뀌지 않는다.
 const GATE_FIXTURE_SURFACES: Record<string, readonly SurfaceId[]> = {
   "workstream-gate": ["workstreams"],
+  "work-console-gate": ["workConsole", "work"],
   "agent-hub-gate": ["agentMemory", "agentRunHistory"],
+  "ade-gate": ["ade"],
 };
 
 function gateProvided(id: SurfaceId): boolean {

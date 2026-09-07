@@ -19,6 +19,7 @@ import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { IS_TAURI } from "@/lib/env";
 import { isDesktop } from "@/lib/tauri";
+import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
@@ -58,7 +59,12 @@ export function SettingsRoute() {
   // panel instead of "open 설정 and click the fourth item".
   const [params] = useSearchParams();
   const sections = useMemo(
-    () => SETTINGS_SECTIONS.filter((item) => !item.desktopOnly || isDesktop()),
+    () =>
+      SETTINGS_SECTIONS.filter(
+        (item) =>
+          (!item.desktopOnly || isDesktop()) &&
+          (item.surface === undefined || isSurfaceProvided(item.surface))
+      ),
     []
   );
   const requested = params.get("section");

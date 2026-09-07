@@ -23,7 +23,7 @@ oort = AI 에이전트가 사람과 **동등한 1급 멤버**(`member.kind='agen
 
 > ### ⚠️ Swift 서버·릴레이·워커 트리는 삭제됐다 — 여기에 새로 짓지 마라
 > `clients/macOS`·`clients/iOS`·`clients/Core`는 **삭제됐다**(W-S1 / #1215). `server/Sources`(Hummingbird 2), `relay/OutboxRelay`, `workers/*`, `services/*`, `infra/prod`, Swift e2e compose도 **삭제됐다**(LS-1 / #2165 / ADR-0183 — 이식 원본은 `f399e417:`). 문서가 `swift build`를 시키더라도 그것은 현행 제품을 짓는 명령이 아니다 — 그 경로는 **실패하지 않고 잘못된 것을 성공적으로 짓는다**.
-> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② PushRelay **계약** — env·서명·id-only와 `infra/rust/docker-compose.push.yml`(이미지 ref). Swift 본체는 삭제, Rust 이식 중(#1255, 셀프호스트 동봉). ③ `clients/web-legacy` — 삭제 아님. **라이브 웹은 `clients/web`**(`server-rust/Dockerfile` → `/opt/momo/web/` · `web-assets`, `infra/rust/caddy.override.yml`, #1228). Swift prod `Dockerfile.web`·e2e `web-init` 소비자는 LS-1에서 삭제.
+> **은퇴 아님(계속 살아 있는 것):** ① `server/Migrations/*.sql` — Rust 이미지가 그대로 싣는 **정본 DDL**. ② PushRelay **계약** — env·서명·id-only와 `infra/rust/docker-compose.push.yml`(이미지 ref). Swift 본체는 삭제, Rust 이식 중(#1255, 셀프호스트 동봉). **라이브 웹은 `clients/web`**(`server-rust/Dockerfile` → `/opt/momo/web/` · `web-assets`, `infra/rust/caddy.override.yml`, #1228). `f399e417:clients/web-legacy`는 #2166에서 삭제됐다.
 
 **핵심 쓰기경로(절대 깨지 말 것):** `REST send → (channel_seq bump + message INSERT + outbox INSERT) 단일 tx → momo-relay가 Centrifugo /api/publish`. 클라는 절대 Centrifugo로 직접 publish 안 함. Postgres=SoT, Centrifugo=전송계층. 순서 SoT=`message.seq`.
 
@@ -59,7 +59,6 @@ packages/momo-core/      @momo/core — 웹·모바일이 공유하는 TS 도메
 clients/web/             React/Vite SPA — 제품 웹 표면이자 데스크톱이 감싸는 번들. **라이브 서빙**(`server-rust/Dockerfile:147,157,173,231` web-assets / #1228)
 clients/desktop/         Tauri 2 셸(딥링크·mDNS·알림·키체인·업데이터). UI를 포크하지 않는다
 clients/mobile/          React Native 앱(현재 iOS)
-clients/web-legacy/      ADR-0119 v0 웹 — 삭제 아님. 라이브 서빙은 `clients/web`. Swift prod/e2e 소비자는 LS-1에서 삭제
 adapters/hermes/         momo_adapter.py(BasePlatformAdapter) + plugin.yaml (py3)
 adapters/prime/          prime-agent 어댑터(하네스 refine·스트림 릴레이)
 infra/rust/              **라이브 배포 경로** — Rust 이미지 compose + Caddyfile(정본) + 푸시/폰 오버레이
@@ -77,6 +76,7 @@ relay/OutboxRelay/       outbox SKIP LOCKED 폴링 → Centrifugo publish (BYPAS
 relay/PushRelay/         Swift 본체 삭제. 계약(env·서명·id-only)과 compose overlay는 유지 — Rust 이식 중(#1255)
 workers/·services/       AgentWorker·WorkHostDaemon·NotifierWorker·LinkShort 등 Swift 실행체
 infra/prod/              Swift prod compose 계열
+(삭제됨 — LS-2/#2166) clients/web-legacy/ · clients/mobile-spike/
 (삭제됨 — W-S1/#1215) clients/{Core,macOS,iOS}/ · fastlane/ · .github/workflows/{ci-build,release-ios,release-macos}.yml
 ```
 **BYPASSRLS:** relay·agent-worker(`momo-relay`·`momo-agent-worker`)만(전 테넌트 폴링). **쓰기 경로엔 BYPASSRLS 금지**. 그 외 모든 경로는 `SET LOCAL app.workspace_id` + RLS FORCE.
