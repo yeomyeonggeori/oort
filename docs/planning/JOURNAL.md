@@ -3,6 +3,12 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-08 · Fable · ★결재: 실기기 APNs 보류(2) · 출시 정의 개정 확정(1) · G1'-1 브리프(3) + 남은 작업 지도
+
+- 성재: 「2번은 다음 진행으로, 1번·3번 중심으로 진행. 남은 작업도 파악」 → `2026-09-02-launch-program-plan.md` 상단 **개정 상자**(G1' = 두 케이스 E2E, G2 += iOS 앱스토어 v0, 파도 확정, 연기 목록) · `first-goal-two-cases.md` §7 확인·§8 · **`2026-09-08-remaining-work-map.md`**(G1'까지 파도 표 · G2 축 · 선재/위생 · 연기 · 이슈 위생 후속).
+- 발급: **SH-6a-w #2204**(uxui, 설정 › 연결 › 에이전트 자격 — 기존 hosted 연결 라우트·위저드 재사용, 새 API 없음) · **SH-5a #2205**(engine, Railway 템플릿 — 같은 이미지 서비스 4 + PG 플러그인 + Centrifugo env + Caddy 서비스, 생성기 `--railway`, 계정 의존). 패킷 2본. 워크트리 `wsh6a`(uxui)·`wsh5a`(engine). 발사는 go.
+- 미발급(지도 §1): UX-R2c · #1265 · SH-6a-e · SH-8 · SH-9 · E2E-A/B · ITO. iOS v0는 G1' 뒤(§2).
+
 ## 2026-09-07 (밤·종결) · Fable · ★LS 시리즈 완결(LS-0~6) + SH-10 push relay Rust main 정본화 — 스냅샷 93
 
 - **LS-γ 랜딩**: **SH-10 #1255**(PR #2192 커밋 6 + planner 위생 1: GHCR 고지 번들 재생성 — 새 crate 의존 fnv·h2) → 승격 al → main `5c670e98`. momo-push-relay Rust(같은 이미지 `push-relay`, 정적 레지스트리, raw-body Ed25519, id-only 봉투, live/stub, 401/400/429가 notifier 분류기와 정합, stub E2E `push_dispatch_log` 200, 런북 3 모드). **LS-3 #2182**(PR #2191 R1 10 + R2 링크 19 정정) → 승격 ak → main `47f4d6f0`: 은퇴 문서 24 삭제(RUN·DEPLOY·BACKLOG·…·G3 문서·Codex 잔재·ncp 런북), 회전 절 SELF_HOST 이식+계약 게이트 재지정, INDEX/README D1 재작성, 살아 있는 md 링크 0 깨짐.
