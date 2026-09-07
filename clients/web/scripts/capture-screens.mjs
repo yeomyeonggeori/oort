@@ -10478,14 +10478,41 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     page.getByTestId("agent-credentials-empty").waitFor({ state: "visible" })
   );
 
-  await shoot("list", listWith(activeKim), (page) =>
-    page.getByTestId("agent-credentials-list").waitFor({ state: "visible" })
-  );
+  await shoot("list", listWith(activeKim), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
+    const geom = await page.evaluate(() => {
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      return {
+        heights: rows.map((row) =>
+          Math.round(row.getBoundingClientRect().height)
+        ),
+        viewport: { w: window.innerWidth, h: window.innerHeight },
+      };
+    });
+    console.log(`ROW_HEIGHT_LIST ${scheme}`, JSON.stringify(geom));
+  });
   await shoot(
     "list-390",
     longNameRoster,
-    (page) =>
-      page.getByTestId("agent-credentials-list").waitFor({ state: "visible" }),
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({
+        state: "visible",
+      });
+      const geom = await page.evaluate(() => {
+        const rows = [
+          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        ];
+        return {
+          heights: rows.map((row) =>
+            Math.round(row.getBoundingClientRect().height)
+          ),
+          viewport: { w: window.innerWidth, h: window.innerHeight },
+        };
+      });
+      console.log(`ROW_HEIGHT_LIST_390 ${scheme}`, JSON.stringify(geom));
+    },
     { viewport: MOBILE_VIEWPORT }
   );
 
@@ -10496,6 +10523,80 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     await page.getByTestId("hosted-handle").fill("intern");
     await sceneClick(page, page.getByTestId("hosted-create"));
     await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
+  });
+
+  const fourConnections = [
+    activeKim,
+    pendingHermes,
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000005c3",
+      status: "detected",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000005c4",
+      agentMemberId: HERMES,
+      status: "active",
+    }),
+  ];
+
+  await shootPair("list-4", listWith(fourConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    await sceneClick(
+      page,
+      page.getByTestId("agent-credentials-disconnect").nth(3)
+    );
+    await page.getByTestId("hosted-connection-section").waitFor({
+      state: "visible",
+    });
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute("data-landing") === "heading"
+    );
+    const probe = await page.evaluate(() => {
+      const ledger = document.querySelector(
+        '[data-testid="hosted-connection-section"]'
+      );
+      const pane = document.querySelector(
+        ".min-w-0.flex-1.overflow-y-auto.p-6"
+      );
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      if (!ledger || !pane) {
+        return { missing: true };
+      }
+      const lr = ledger.getBoundingClientRect();
+      const pr = pane.getBoundingClientRect();
+      const visiblePx = Math.max(
+        0,
+        Math.min(lr.bottom, pr.bottom) - Math.max(lr.top, pr.top)
+      );
+      return {
+        visiblePx,
+        scrollTop: pane.scrollTop,
+        paneClientHeight: pane.clientHeight,
+        paneScrollHeight: pane.scrollHeight,
+        ledgerTop: lr.top,
+        ledgerBottom: lr.bottom,
+        paneTop: pr.top,
+        paneBottom: pr.bottom,
+        rowHeights: rows.map((row) =>
+          Math.round(row.getBoundingClientRect().height)
+        ),
+        active: document.activeElement
+          ? {
+              testid: document.activeElement.getAttribute("data-testid"),
+              landing: document.activeElement.getAttribute("data-landing"),
+              tag: document.activeElement.tagName,
+              text: (document.activeElement.textContent ?? "").slice(0, 40),
+            }
+          : null,
+        landingTarget: ledger.getAttribute("data-landing-target"),
+        connectionId: ledger.getAttribute("data-connection-id"),
+      };
+    });
+    console.log(`LEDGER_LANDING ${scheme}`, JSON.stringify(probe));
   });
 
   await shootPair(
@@ -10520,17 +10621,71 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           el.remove();
           return rgb;
         };
-        const rows = [
-          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        const parseRgb = (css) => {
+          const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css);
+          return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+        };
+        const srgb = (c) => {
+          const x = c / 255;
+          return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (rgb) =>
+          0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2]);
+        const contrast = (a, b) => {
+          const L1 = lum(a);
+          const L2 = lum(b);
+          const hi = Math.max(L1, L2);
+          const lo = Math.min(L1, L2);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const bodies = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-body"]'
+          ),
         ];
+        const actions = document.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const outline = actions?.querySelector("button");
+        const actionBg = actions
+          ? getComputedStyle(actions).backgroundColor
+          : null;
+        const border = outline ? getComputedStyle(outline).borderColor : null;
+        const ink = outline ? getComputedStyle(outline).color : null;
+        const actionRgb = actionBg ? parseRgb(actionBg) : null;
+        const borderRgb = border ? parseRgb(border) : null;
+        const inkRgb = ink ? parseRgb(ink) : null;
         return {
           accentSoft: swatch("--accent-soft"),
           surfaceHover: swatch("--surface-hover"),
-          selected: rows[0] ? getComputedStyle(rows[0]).backgroundColor : null,
-          hovered: rows[1] ? getComputedStyle(rows[1]).backgroundColor : null,
+          surface: swatch("--surface"),
+          selected: bodies[0]
+            ? getComputedStyle(bodies[0]).backgroundColor
+            : null,
+          hovered: bodies[1]
+            ? getComputedStyle(bodies[1]).backgroundColor
+            : null,
+          actionBg,
+          border,
+          ink,
+          borderContrast:
+            actionRgb && borderRgb
+              ? Number(contrast(actionRgb, borderRgb).toFixed(3))
+              : null,
+          inkContrast:
+            actionRgb && inkRgb
+              ? Number(contrast(actionRgb, inkRgb).toFixed(3))
+              : null,
         };
       });
       console.log(`ROW_FILL ${scheme}`, JSON.stringify(report));
+      console.log(`H1_CONTRAST ${scheme}`, JSON.stringify({
+        borderContrast: report.borderContrast,
+        inkContrast: report.inkContrast,
+        actionBg: report.actionBg,
+        border: report.border,
+        ink: report.ink,
+      }));
     }
   );
 

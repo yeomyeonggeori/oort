@@ -6,7 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type RosterMember } from "@momo/core/lib/api";
+import { ApiError, uuidEq, type RosterMember } from "@momo/core/lib/api";
 import { TERMINAL_DONE_HEADLINE, TERMINAL_HEADLINE } from "@momo/core/features/hostedAgents/disconnect";
 import {
   createHostedConnection,
@@ -17,7 +17,13 @@ import {
 } from "@momo/core/features/hostedAgents/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SETTINGS_SECTIONS } from "./settingsNav";
-import { AgentCredentialsSection } from "./AgentCredentialsSection";
+import {
+  AgentCredentialsSection,
+  hostedRowByConnectionId,
+  ledgerLandingFor,
+  offersDisconnect,
+} from "./AgentCredentialsSection";
+import { formatMoment } from "./oauthGrant";
 
 // =============================================================================
 // #2204 설정 › 연결 › 에이전트 자격.
@@ -345,17 +351,26 @@ describe("소스 규율", () => {
     expect(source).not.toMatch(/status:\s*"disconnected"/);
   });
 
-  it("행 사실은 dl 이고 액션은 이름 붙은 버튼이다", () => {
+  it("행 액션은 이름 붙은 버튼이고 선택은 연결 id 다", () => {
     const source = sectionSource();
-    expect(source).toContain("KeyValueRows");
+    expect(source).not.toContain("KeyValueRows");
     expect(source).toContain('data-testid="agent-credentials-disconnect"');
     expect(source).toContain('data-testid="agent-credentials-doorbell"');
     expect(source).toContain("bg-accent-soft");
+    expect(source).toContain("bg-surface");
     expect(source).not.toContain("agent-credentials-row-select");
     expect(source).toContain("hostedPresetIdForMember");
     expect(source).not.toMatch(/presetId:\s*"generic"/);
     expect(source).toContain("lockReason");
-    expect(source).toContain("aria-describedby={lockReason()}");
+    expect(source).toContain("aria-describedby={lockReason(writesLocked)}");
+    expect(source).toContain("setSelectedConnectionId(row.id)");
+    expect(source).not.toContain("setSelectedAgentId(row.agentMemberId)");
+    expect(source).toContain('openLedger(row, "disconnect")');
+    expect(source).toContain('openLedger(row, "doorbell")');
+    expect(source).toContain('aria-current={selectedRow ? "true" : undefined}');
+    expect(source).toContain("title={truncated ? name : undefined}");
+    expect(source).not.toMatch(/aria-label=\{fullName\}/);
+    expect(source).toContain('<span className="sr-only">{name}</span>');
   });
 });
 
@@ -427,15 +442,21 @@ describe("목록 네 상태", () => {
     );
     expect(host.textContent).toContain("김인턴");
     expect(host.textContent).toContain("활성");
-    expect(host.textContent).toContain("연결 만든 때");
+    expect(host.textContent).toContain(formatMoment(1_700_000_000_000));
+    expect(host.textContent).not.toContain("연결 만든 때");
     expect(host.textContent).not.toContain("마지막 상태 변화");
-    expect(host.textContent).toContain("도어벨");
-    expect(host.textContent).toContain("있음");
+    expect(host.textContent).not.toContain(
+      "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있습니다."
+    );
+    expect(
+      host.querySelector('[data-testid="agent-credentials-doorbell"]')
+        ?.textContent
+    ).toBe("도어벨");
     expect(host.textContent).not.toContain("detected_at");
     expect(host.textContent).not.toContain("proved_at");
   });
 
-  it("만든 때와 다른 상태 변화만 마지막 상태 변화로 그린다", async () => {
+  it("목록 행은 상태 산문을 장부에 두고 시각만 한 줄로 든다", async () => {
     vi.mocked(listHostedConnections).mockResolvedValue({
       connections: [
         wireConnection({
@@ -449,7 +470,12 @@ describe("목록 네 상태", () => {
       () => host.querySelector('[data-testid="agent-credentials-list"]') !== null,
       "list"
     );
-    expect(host.textContent).toContain("마지막 상태 변화");
+    const list = host.querySelector(
+      '[data-testid="agent-credentials-list"]'
+    ) as HTMLElement;
+    expect(list.textContent).toContain(formatMoment(1_700_000_360_000));
+    expect(list.textContent).not.toContain("마지막 상태 변화");
+    expect(list.textContent).not.toContain("연결 만든 때");
   });
 });
 
@@ -707,7 +733,7 @@ describe("사보타주 ② 해제는 서버가 정한다", () => {
     expect(
       host.querySelector('[data-testid="hosted-connection-section"] h3')
         ?.textContent
-    ).toBe("김인턴");
+    ).toBe("김인턴 · 활성");
     act(() => {
       (
         host.querySelector(
@@ -741,3 +767,281 @@ describe("사보타주 ② 해제는 서버가 정한다", () => {
     expect(host.textContent ?? "").not.toContain(TERMINAL_DONE_HEADLINE);
   });
 });
+
+const LIVE_ID = "019f9a01-0000-7000-8000-0000000005b2";
+const EXPIRED_ID = "019f9a01-0000-7000-8000-0000000005a1";
+
+function mockListAndDetail(
+  connections: ReturnType<typeof wireConnection>[]
+) {
+  vi.mocked(listHostedConnections).mockResolvedValue({ connections });
+  vi.mocked(getHostedConnection).mockImplementation(async (_ws, id) => {
+    const connection =
+      connections.find((row) => row.id === id) ?? connections[0];
+    return { connection, cleanupArtifacts: [] };
+  });
+}
+
+describe("B-1 선택은 연결 id 다", () => {
+  it("사보타주: 멤버 id 로 고르면 만료 행이 활성을 연다", () => {
+    const active = wireConnection({
+      id: LIVE_ID,
+      status: "active",
+      createdAtMs: 2_000,
+    });
+    const expired = wireConnection({
+      id: EXPIRED_ID,
+      status: "expired",
+      createdAtMs: 1_000,
+    });
+    const rows = [active, expired];
+    expect(hostedRowByConnectionId(rows, expired.id)?.id).toBe(EXPIRED_ID);
+    const sabotaged = rows.find((row) =>
+      uuidEq(row.agentMemberId, expired.agentMemberId)
+    );
+    expect(sabotaged?.id).toBe(LIVE_ID);
+    expect(sabotaged?.id).not.toBe(EXPIRED_ID);
+    expect(offersDisconnect("expired")).toBe(false);
+    expect(offersDisconnect("disconnected")).toBe(false);
+    expect(offersDisconnect("active")).toBe(true);
+  });
+
+  it("같은 에이전트의 만료·활성 행에서 만료 액션은 만료 id 를 연다", async () => {
+    const active = wireConnection({
+      id: LIVE_ID,
+      status: "active",
+      createdAtMs: 2_000,
+      updatedAtMs: 2_000,
+    });
+    const expired = wireConnection({
+      id: EXPIRED_ID,
+      status: "expired",
+      createdAtMs: 1_000,
+      updatedAtMs: 1_000,
+    });
+    mockListAndDetail([active, expired]);
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelectorAll('[data-testid="agent-credentials-row"]').length ===
+        2,
+      "two rows"
+    );
+    const rows = [
+      ...host.querySelectorAll('[data-testid="agent-credentials-row"]'),
+    ] as HTMLElement[];
+    const expiredRow = rows.find(
+      (row) => row.getAttribute("data-connection-id") === EXPIRED_ID
+    );
+    const activeRow = rows.find(
+      (row) => row.getAttribute("data-connection-id") === LIVE_ID
+    );
+    expect(expiredRow).toBeDefined();
+    expect(activeRow).toBeDefined();
+    expect(
+      expiredRow?.querySelector('[data-testid="agent-credentials-disconnect"]')
+    ).toBeNull();
+    expect(expiredRow?.textContent).toContain("만료됨");
+    act(() => {
+      (
+        expiredRow?.querySelector(
+          '[data-testid="agent-credentials-doorbell"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-connection-id") === EXPIRED_ID,
+      "expired ledger"
+    );
+    const section = host.querySelector(
+      '[data-testid="hosted-connection-section"]'
+    ) as HTMLElement;
+    expect(section.getAttribute("data-connection-id")).toBe(EXPIRED_ID);
+    expect(section.querySelector("h3")?.textContent).toBe("김인턴 · 만료됨");
+    const selected = rows.filter(
+      (row) => row.getAttribute("aria-current") === "true"
+    );
+    expect(selected).toHaveLength(1);
+    expect(selected[0]?.getAttribute("data-connection-id")).toBe(EXPIRED_ID);
+    act(() => {
+      (
+        activeRow?.querySelector(
+          '[data-testid="agent-credentials-disconnect"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-connection-id") === LIVE_ID,
+      "active ledger"
+    );
+    expect(
+      host
+        .querySelector('[data-testid="hosted-connection-section"]')
+        ?.getAttribute("data-connection-id")
+    ).toBe(LIVE_ID);
+    expect(
+      host.querySelector('[data-testid="hosted-connection-section"] h3')
+        ?.textContent
+    ).toBe("김인턴 · 활성");
+    const selectedAfter = [
+      ...host.querySelectorAll('[data-testid="agent-credentials-row"]'),
+    ].filter((row) => row.getAttribute("aria-current") === "true");
+    expect(selectedAfter).toHaveLength(1);
+    expect(selectedAfter[0]?.getAttribute("data-connection-id")).toBe(LIVE_ID);
+  });
+});
+
+describe("H-2 해제와 도어벨은 다른 착지다", () => {
+  it("사보타주: 두 착지가 같으면 붉다", () => {
+    expect(ledgerLandingFor("disconnect")).toBe("heading");
+    expect(ledgerLandingFor("doorbell")).toBe("doorbell");
+    expect(ledgerLandingFor("disconnect")).not.toBe(
+      ledgerLandingFor("doorbell")
+    );
+  });
+
+  it("같은 행을 다시 눌러도 착지가 갈리고 초점이 움직인다", async () => {
+    mockListAndDetail([
+      wireConnection({
+        status: "active",
+        doorbellUrl: "https://hooks.example/a",
+        doorbellSecretMasked: "••••abcd",
+      }),
+    ]);
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="agent-credentials-disconnect"]') !==
+        null,
+      "row"
+    );
+    const disconnect = host.querySelector(
+      '[data-testid="agent-credentials-disconnect"]'
+    ) as HTMLButtonElement;
+    const doorbell = host.querySelector(
+      '[data-testid="agent-credentials-doorbell"]'
+    ) as HTMLButtonElement;
+    act(() => {
+      disconnect.click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-landing-target") === "heading",
+      "heading land"
+    );
+    expect(document.activeElement?.getAttribute("data-landing")).toBe(
+      "heading"
+    );
+    act(() => {
+      doorbell.click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-landing-target") === "doorbell",
+      "doorbell land"
+    );
+    expect(
+      host
+        .querySelector('[data-testid="hosted-connection-section"]')
+        ?.getAttribute("data-landing-target")
+    ).toBe("doorbell");
+    act(() => {
+      disconnect.click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-landing-target") === "heading",
+      "re-land heading"
+    );
+    expect(document.activeElement?.getAttribute("data-landing")).toBe(
+      "heading"
+    );
+  });
+});
+
+describe("H-3 장부 착지는 화면 안으로 스크롤한다", () => {
+  it("해제 클릭이 heading 착지 훅을 부른다", async () => {
+    const scroll = HTMLElement.prototype.scrollIntoView as ReturnType<
+      typeof vi.fn
+    >;
+    scroll.mockClear();
+    mockListAndDetail([wireConnection({ status: "active" })]);
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="agent-credentials-disconnect"]') !==
+        null,
+      "row"
+    );
+    act(() => {
+      (
+        host.querySelector(
+          '[data-testid="agent-credentials-disconnect"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-landing="heading"]') !== null,
+      "heading"
+    );
+    expect(scroll).toHaveBeenCalled();
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-landing="heading"]')
+    );
+    expect(
+      host
+        .querySelector('[data-testid="hosted-connection-section"]')
+        ?.getAttribute("data-landing-target")
+    ).toBe("heading");
+  });
+});
+
+describe("M-1 잠금 사유는 잠긴 컨트롤만 가리킨다", () => {
+  it("오프라인에서 해제·도어벨은 describedby 가 없고 재발급만 옆 사유를 든다", async () => {
+    mockListAndDetail([wireConnection()]);
+    const host = mountSection(true);
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="agent-credentials-regenerate"]') !==
+        null,
+      "regen"
+    );
+    const disconnect = host.querySelector(
+      '[data-testid="agent-credentials-disconnect"]'
+    ) as HTMLButtonElement;
+    const doorbell = host.querySelector(
+      '[data-testid="agent-credentials-doorbell"]'
+    ) as HTMLButtonElement;
+    const regen = host.querySelector(
+      '[data-testid="agent-credentials-regenerate"]'
+    ) as HTMLButtonElement;
+    expect(disconnect.getAttribute("aria-describedby")).toBeNull();
+    expect(doorbell.getAttribute("aria-describedby")).toBeNull();
+    expect(regen.getAttribute("aria-disabled")).toBe("true");
+    const reasonId = regen.getAttribute("aria-describedby");
+    expect(reasonId).toBe(`agent-credentials-offline-${CONNECTION_ID}`);
+    const note = document.getElementById(reasonId ?? "");
+    expect(note).not.toBeNull();
+    expect(note?.textContent).toContain("연결이 끊겨");
+    const regenBox = regen.getBoundingClientRect();
+    const noteBox = note?.getBoundingClientRect();
+    expect(noteBox).toBeDefined();
+    if (noteBox) {
+      const gap = Math.abs(noteBox.top - regenBox.bottom);
+      expect(gap).toBeLessThanOrEqual(40);
+    }
+  });
+});
+

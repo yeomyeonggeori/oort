@@ -2,7 +2,7 @@
 
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08)
 
-- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`(만료+활성 공존 시 장부가 그 행을 연다). AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
 - runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
