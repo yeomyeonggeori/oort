@@ -117,8 +117,10 @@ STUB
 }
 
 run_workflow_lint() {
-  # Runs the extracted fragment the same way run_cmd does (bash -lc), with the
-  # stub first on PATH and a short timeout so the fixture stays cheap.
+  # Runs the extracted fragment the same way run_cmd does (bash -lc). A login
+  # shell rewrites PATH from the user profile, so the stub prefix has to be
+  # re-applied inside -c or a host actionlint (1.7.12) wins and absorbs the
+  # timeout fixture into a silent green (#2142 R2).
   local limit="$1"
   set +e
   ( cd "$REPO_ROOT" \
@@ -126,7 +128,7 @@ run_workflow_lint() {
        MOMO_GATE_ACTIONLINT_TIMEOUT="$limit" \
        STUB_INVOCATIONS="$SANDBOX/invocations" \
        STUB_SPINNERS="$SANDBOX/spinners" \
-       bash -lc "$WORKFLOW_LINT_CMD" ) >"$SANDBOX/lint.out" 2>&1
+       bash -lc "PATH='${STUB_BIN}':\"\$PATH\"; $WORKFLOW_LINT_CMD" ) >"$SANDBOX/lint.out" 2>&1
   LINT_RC=$?
   set -e
 }
@@ -206,11 +208,14 @@ git -C "$FAKE_REPO" add -A
 git -C "$FAKE_REPO" commit -qm base
 
 run_without_actionlint() {
+  # Same login-PATH rewrite as run_workflow_lint: EMPTY_BIN must be applied
+  # inside -c so a host actionlint cannot leak into the not-installed fixture.
+  local isolated_path="$EMPTY_BIN:/usr/bin:/bin:/usr/sbin:/sbin"
   set +e
   ( cd "$FAKE_REPO" \
-    && PATH="$EMPTY_BIN:/usr/bin:/bin:/usr/sbin:/sbin" \
+    && PATH="$isolated_path" \
        LOCAL_GATE_BASE_REF="refs/heads/does-not-exist" \
-       bash -lc "$WORKFLOW_LINT_CMD" ) >"$SANDBOX/lint.out" 2>&1
+       bash -lc "PATH='$isolated_path'; $WORKFLOW_LINT_CMD" ) >"$SANDBOX/lint.out" 2>&1
   LINT_RC=$?
   set -e
 }
