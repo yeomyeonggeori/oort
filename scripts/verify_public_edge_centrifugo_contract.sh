@@ -109,7 +109,7 @@ grep -Fq 'test_secret_must_be_synthetic' "$RUNTIME_VERIFIER" \
   || fail "runtime_test_escape missing synthetic-secret guard"
 pass "runtime binds canonical origin before secret use and disables redirects"
 
-grep -Fq 'scripts/verify_ncp_centrifugo_boundary.sh' "$RUNBOOK" \
+grep -Fq 'scripts/verify_public_edge_centrifugo_boundary.sh' "$RUNBOOK" \
   || fail "runbook_missing runtime verifier command"
 grep -Fq '## CENT_PROXY_SECRET 회전' "$RUNBOOK" \
   || fail "runbook_missing rotation heading"
