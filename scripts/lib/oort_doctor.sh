@@ -805,6 +805,7 @@ EOF
 
 oort_doctor_check_public() {
   local origins origin tok ws_origin ws_key code
+  if [ -n "${RAILWAY_ENVIRONMENT:-}${RAILWAY_PUBLIC_DOMAIN:-}" ] && ! oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then oort_doctor_record public.healthz major fail "Railway 형상인데 CENTRIFUGO_ALLOWED_ORIGINS 없음 (skip 금지)" "scripts/self_host_env.sh --railway"; oort_doctor_record public.websocket major fail "Railway 형상인데 공개 Origin 없음" ""; return; fi
   if ! oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then
     oort_doctor_skip_public "--public-origin 흔적 없음 (CENTRIFUGO_ALLOWED_ORIGINS 없음)"
     return
