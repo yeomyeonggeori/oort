@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
 ## LS-3 은퇴 문서 (#2182, 2026-09-07)
 
 - Track engine. `feat/ls3-retired-docs`. 루트 은퇴 문서·G3 런북(`05`/`06`)·Codex 스텁·NCP 런북 `git rm`. `CENT_PROXY_SECRET` 회전 절은 `docs/SELF_HOST.md`(+ko)로 원문 이식, public-edge 계약 `RUNBOOK=` 재지정. INDEX/README는 ADR-0183 D1 목록. `.conductor/`는 local_gate/goal_claim이 소비하므로 유지.

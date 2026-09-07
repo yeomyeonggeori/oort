@@ -954,8 +954,8 @@ password. Connection create/approve is the desktop wizard.
 
 1. User sets a password at the §3.3.14-3 claim URL and logs into
    `<TUNNEL_URL>` from the desktop.
-2. **Agents** → **Hosted agent connection** → create with a display
-   name/handle.
+2. **설정 › 연결 › 에이전트 자격** (or **Agents** → **Hosted agent connection**)
+   → create with a display name/handle.
 3. Paste the wizard's one-time **connection value** into this chat (15 min
    TTL).
 4. Receive it only as an environment variable. Do not echo/log/reply it.

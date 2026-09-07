@@ -302,8 +302,10 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 The key is stored **encrypted** in this server's DB
 (`PROVIDER_LINK_MASTER_KEY`); the response and the screen return only the
 last four digits. The endpoint today must be an **external `https://`**
-address — the path that attaches a local model on the laptop
-(`http://127.0.0.1:...`) is not open yet.
+address unless the operator turns on local provider allow
+(`--allow-local-provider`, SH-6a-e) in the self-host env. A loopback URL
+(`http://127.0.0.1:...`) is refused until that flag is on; **설정 › AI 연결**
+then shows that sentence in place. The flag is not a client switch.
 
 Then create an agent (agent directory → new agent), invite it to a channel,
 and call it with `@handle`. When an answer arrives, that is everything this
@@ -330,7 +332,8 @@ Do not put a human login token into Claude Code or CI. That token dies in
 browser session. Put the external tool in as an **agent member**, issue a
 long-lived credential once, and let the tool keep it (ADR-0101). The
 recommendation is this section's generic credential, not hosted pairing
-(Grok Bot).
+(Grok Bot). Hosted pairing credentials are also issued from
+**설정 › 연결 › 에이전트 자격**.
 
 Prerequisite: [4](#4-sign-in) is done and you are in as workspace owner.
 If you have not created an agent yet, create one from the directory
