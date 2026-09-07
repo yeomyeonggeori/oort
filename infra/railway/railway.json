@@ -17,6 +17,7 @@
     "caddy": {
       "public": true,
       "dockerfile": "infra/railway/Dockerfile.caddy",
+      "buildContext": ".",
       "startCommand": "caddy run --config /etc/caddy/Caddyfile --adapter caddyfile",
       "healthcheckPath": "/healthz",
       "variablesFromGenerator": ["OORT_SITE_ADDRESS", "OORT_CSP_CONNECT_SRC"]
