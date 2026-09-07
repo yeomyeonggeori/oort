@@ -12712,7 +12712,12 @@ async function main() {
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop" && profile !== "accent" && profile !== "gallery") {
+      if (
+        profile !== "desktop" &&
+        profile !== "accent" &&
+        profile !== "gallery" &&
+        profile !== "agents"
+      ) {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureMobile(browser, scheme)));
