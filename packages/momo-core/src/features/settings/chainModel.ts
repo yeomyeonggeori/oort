@@ -678,7 +678,7 @@ export function probeReasonCopy(reason: string | undefined): string {
     return "확인이 끝나지 않았습니다.";
   }
   if (isLoopbackProviderRefusal(reason)) {
-    return loopbackProviderGuidance(reason);
+    return loopbackProviderGuidance();
   }
   const status = /^provider_status_(\d{3})$/.exec(reason);
   if (status) return `provider가 ${attachDirection(status[1])} 답했습니다.`;
@@ -817,7 +817,7 @@ export function isLoopbackProviderRefusal(error: unknown): boolean {
 }
 
 /** Product sentence for a loopback refusal. The server wire stays beside it. */
-export function loopbackProviderGuidance(_error?: unknown): string {
+export function loopbackProviderGuidance(): string {
   return LOOPBACK_PROVIDER_HINT;
 }
 

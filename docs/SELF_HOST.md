@@ -270,7 +270,7 @@ PLATFORM_ADMIN_EMAILS=owner@oort.local     # = MOMO_INITIAL_OWNER_EMAIL
 ```
 
 That is the declaration 「the first owner of this instance is this
-instance's operator」, and it is why **설정 › AI 연결** and workspace
+instance's operator」, and it is why **Settings → AI link** and workspace
 creation open. The authorization rule itself is unchanged (MOMO-583:
 instance-global surfaces open only to a `platform:read` token **or** an
 owner/admin whose verified email is listed here). The self-host stack has
@@ -284,7 +284,7 @@ must be **verified**.
 
 ### Put the key in
 
-In the browser open **설정 › AI 연결** and put in the OpenAI-compatible
+In the browser open **Settings → AI link** and put in the OpenAI-compatible
 endpoint URL and the key. The same work can be done over REST (`<port>` is
 the value step 2 told you):
 
@@ -573,8 +573,8 @@ is refused ([two checkouts](#using-two-checkouts-at-once)).
 | Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
 | Sign-in says `invalid credentials` | Use the values step 2 told you (`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). To change the password, the rotate command below. |
 | The screen comes up but messages do not arrive in realtime | Check outbox first (query below). `broadcast \| done` means the server side is finished; look at the browser (`oort logs api`). `pending`/`failed` is relay (`oort logs relay`). |
-| 설정 › AI 연결 is **403** | This instance has no listed operator. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — if the line is missing, re-run `scripts/self_host_env.sh --local-build` (or the mode you chose) and it appends only that line. Then restart api with `oort up -d`. [§5](#5-make-an-agent-answer-ai-link). |
-| 설정 › AI 연결 is **503** | api came up without `PROVIDER_LINK_MASTER_KEY`. The env step 2 wrote has it — if you are using a hand-made env, fill that line and `oort up -d`. |
+| Settings → AI link is **403** | This instance has no listed operator. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — if the line is missing, re-run `scripts/self_host_env.sh --local-build` (or the mode you chose) and it appends only that line. Then restart api with `oort up -d`. [§5](#5-make-an-agent-answer-ai-link). |
+| Settings → AI link is **503** | api came up without `PROVIDER_LINK_MASTER_KEY`. The env step 2 wrote has it — if you are using a hand-made env, fill that line and `oort up -d`. |
 | You created an agent and it does not answer | You have not put the key in yet (§5), or the endpoint you put in does not respond. If the channel shows a 「응답하지 못했습니다」-style message, it is the latter (`oort logs agent-worker`). |
 | `--compose up` refuses because another checkout uses the same project/volume | `down` on that checkout (leave the volume), or change this clone's `COMPOSE_PROJECT_NAME` and `DB_VOLUME_NAME` **together**. [Two checkouts](#using-two-checkouts-at-once). |
 | After an upgrade, sign-in fails and the DB looks empty | The new env may be pointing at a volume that is not `oort-pgdata`. The data was not deleted — confirm `oort-pgdata` with `docker volume ls`, then adopt `DB_VOLUME_NAME=oort-pgdata` or recreate env with the default project name `oort`. |

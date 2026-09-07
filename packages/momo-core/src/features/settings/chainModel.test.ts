@@ -849,13 +849,6 @@ describe("loopback provider refusal (#2204)", () => {
       true
     );
     expect(isLoopbackProviderRefusal(new ApiError(500, "boom"))).toBe(false);
-    expect(loopbackProviderGuidance(new ApiError(400, LOOPBACK_REFUSAL_WIRE))).toBe(
-      LOOPBACK_PROVIDER_HINT
-    );
-    expect(
-      loopbackProviderGuidance(
-        new ApiError(400, "셀프호스트 env에서 로컬 provider 허용(--allow-local-provider)을 켜야 합니다")
-      )
-    ).toBe(LOOPBACK_PROVIDER_HINT);
+    expect(loopbackProviderGuidance()).toBe(LOOPBACK_PROVIDER_HINT);
   });
 });

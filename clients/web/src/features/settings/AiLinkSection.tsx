@@ -96,7 +96,7 @@ function loopbackHint(error: unknown, url: string): string | null {
   if (!isLoopbackProviderUrl(url) || !isLoopbackProviderRefusal(error)) {
     return null;
   }
-  return loopbackProviderGuidance(error);
+  return loopbackProviderGuidance();
 }
 
 function LoopbackRefusalBanner({
