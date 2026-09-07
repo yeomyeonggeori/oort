@@ -6,10 +6,10 @@
 >
 > 정본 시나리오: [`docs/planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md`](planning/research/2026-08-20-oss-launch-readiness-and-internal-test-plan.md) §4–§5.
 > 호스팅 절차: [`docs/SELF_HOST.md`](SELF_HOST.md) (clone→브라우저 로그인). 데스크탑 셸: [`clients/desktop/README.md`](../clients/desktop/README.md).
-> 스모크 A–F: [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). 인테이크: [`docs/INDEX.md §6`](INDEX.md §6).
+> 스모크 A–F: [`docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md). 인테이크: [`docs/INDEX.md` §6](INDEX.md#6-내부-테스트).
 >
 > 범위: 내부 리허설만. 이 팩은 GHCR 첫 발행·공개 DNS/TLS/SOPS/PITR·앱스토어/M7을
-> 증명하지 않는다. AWS 호스트 토폴로지는 [`docs/SELF_HOST.md`](AWS_LOCAL_3_DAY_ALPHA_TEST_PACK.md)이며
+> 증명하지 않는다. AWS 호스트 토폴로지는 [`docs/SELF_HOST.md`](SELF_HOST.md)이며
 > **ITO 판정값이 아니다.**
 
 런칭 정의(이 팩이 리허설하는 것):
@@ -236,7 +236,7 @@ Day 3 출력:
 
 ## 7. 버그 심각도
 
-정본 트리아지: [`docs/INDEX.md §6`](INDEX.md §6). 이 3일 실행에서:
+정본 트리아지: [`docs/INDEX.md` §6](INDEX.md#6-내부-테스트). 이 3일 실행에서:
 
 | 심각도 | `LAUNCH_READY`를 막나 | 예 |
 |---|---|---|
@@ -387,7 +387,7 @@ ITO 산출 증거는 로컬에 두고 보고서만 레포/이슈로 올린다.
 | O4 | Grok E2E | #1361 · Day 2 |
 | I1–I8 | 웹↔데스크탑 | Day 1–3 + [`LOCAL_3_DAY_ALPHA_TEST_PACK.md`](LOCAL_3_DAY_ALPHA_TEST_PACK.md) A–F |
 | 판정 | LAUNCH_READY 등 | §0 · §10 |
-| 인테이크 | 발견 전량 티켓 | [`INDEX.md §6`](INDEX.md §6) |
+| 인테이크 | 발견 전량 티켓 | [`INDEX.md` §6](INDEX.md#6-내부-테스트) |
 
 ---
 

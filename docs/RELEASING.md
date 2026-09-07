@@ -302,5 +302,5 @@ curl -sI https://github.com/yeomyeonggeori/oort/releases/latest/download/oort-ma
 - `linux/arm64` 재발행.
 - darwin-x86_64 / Windows 데스크탑 패키지.
 - 장기 버전 정책(semver 이후 자리).
-- 운영 호스트 배포 — [`docs/SELF_HOST.md`](runbooks/SELF_HOST.md).
+- 운영 호스트 배포 — [`docs/SELF_HOST.md`](SELF_HOST.md).
 - 셀프호스트 첫 로그인 — [`docs/SELF_HOST.md`](SELF_HOST.md).
