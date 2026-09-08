@@ -315,6 +315,12 @@ services:
       # worker re-reads it within its 2 s cache window (docs/SELF_HOST.md §5).
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:-}
       PLATFORM_ADMIN_EMAILS: ${PLATFORM_ADMIN_EMAILS:-}
+      # SH-6a-e / #2215 — operator opt-in for a same-machine OpenAI-compatible
+      # provider. Optional `:-`: unset keeps today's default deny. The two
+      # names are `oort_local_provider_env_keys` in scripts/self_host_env.sh.
+      # `host.docker.internal` is the host, not this container's loopback.
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
+      AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
       # MOMO-605 / DESK-1. Empty (the default) means the CORS layer is not
       # mounted at all, which is exactly the web deployment's same-origin case.
       # A value is required only for non-browser origins — the Tauri desktop
@@ -377,6 +383,8 @@ services:
         condition: service_completed_successfully
     networks:
       - private
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
       interval: 10s
@@ -480,6 +488,11 @@ services:
       # momo_worker — BYPASSRLS drain across tenants (bootstrap_roles.sql).
       WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@postgres:5432/${POSTGRES_DB:?}
       PROVIDER_LINK_MASTER_KEY: ${PROVIDER_LINK_MASTER_KEY:?set PROVIDER_LINK_MASTER_KEY}
+      # SH-6a-e / #2215 — same two keys as api. The worker is the process that
+      # actually dials the host provider; extra_hosts below makes
+      # host.docker.internal resolve on Linux.
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK: ${AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK:-}
+      AGENT_PROVIDER_LOCAL_HOSTS: ${AGENT_PROVIDER_LOCAL_HOSTS:-}
       LOG_LEVEL: ${LOG_LEVEL:-info}
     depends_on:
       postgres:
@@ -488,6 +501,8 @@ services:
         condition: service_completed_successfully
     networks:
       - private
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
 networks:
   private:

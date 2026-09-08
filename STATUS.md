@@ -5,6 +5,11 @@
 - Track engine. `feat/sh8-grokbot-join-harness`. `docs/SELF_HOST_AGENT.md`(+ko) §3.3.16 5단계 라우트 대조표(생성→pairing handshake→confirm→active 재핸드셰이크→regenerate)를 Rust 핸들러와 1:1로 맞춤. 어긋난 문장만 수정: foundation 요청만 `detected→active` 증명, pairing/`detected`의 `tools/call`은 HTTP 401 빈 본문, `active`에서 regenerate는 409. §3.3.19 Do not에 사용자·공개 표면 vs `scripts/dev/grokbot_cdp/README` 한 줄. 하네스 신규(`read`/`write`/`clear`.py). 제품 카피·`presets.test.ts` 무접촉.
 - 검증: `scripts/local_gate.sh --profile docs`. Agent Port 루틴 원문 vs 실측은 pairing bearer로 `oort_inbox_read` bytes를 실서버에 재현(문서 수정 근거). Grok Bot CDP 포트 9333이 닫혀 있으면 스크립트는 `SKIPPED: Grok Bot app not running (port 9333 closed)` + exit 0.
 
+## SH-6a-e 로컬 provider opt-in (#2215, 2026-09-08)
+
+- Track engine. `feat/sh6a-e-local-provider`. `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` 은 `MOMO_ENV=staging`에서도 운영자 opt-in으로 유효. `AGENT_PROVIDER_LOCAL_HOSTS` 정확 일치(기본 `host.docker.internal`). 생성기 `--allow-local-provider`, compose api·agent-worker 전달 + `extra_hosts`, doctor `env.local_provider`. ADR-0004 증보 1절.
+- 검증: `cargo test -p momo-settings` 79 passed · `scripts/tests/test_local_provider_optin.sh` · `scripts/tests/test_railway_template.sh` (키 집합 41) · docs/web 프로파일 PASS (`5587dadd`).
+- E2E (`COMPOSE_PROJECT_NAME=oort-sh6ae`, mock-hermes `127.0.0.1:18765`, `MOCK_HERMES_TOOL_CALLS=0`): `PUT /v1/provider/link` HTTP 200 `baseUrl=http://host.docker.internal:18765/v1`; `POST /v1/provider/link/test` HTTP 200 `ok=false reason=probe_not_run`; welcome `#general` seq=1 body `김인턴 mock reply: MOMO-004 SSE path verified.`. Flag off api recreate: same PUT HTTP 400 `non-loopback baseUrl must use https://`; `http://127.0.0.1:18765/v1` HTTP 400 `loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. Railway 무접촉.
 ## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
 
 - Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.

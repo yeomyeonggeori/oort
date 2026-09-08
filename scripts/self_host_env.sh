@@ -106,6 +106,7 @@ PUBLIC_ORIGINS=()
 # bash 3.2 + set -u treats an empty array as unbound (`${arr[@]}` / `${#arr[@]}`).
 # Count is the only length we read without expanding the array.
 PUBLIC_ORIGIN_COUNT=0
+ALLOW_LOCAL_PROVIDER=0
 
 # Compose contract의 단일 권위는 generated env의 실제 KEY= 행 + canonical file
 # 세 개의 `${KEY...}` interpolation이다. `compose_ambient_keys`가 둘을 실행 시
@@ -142,6 +143,13 @@ oort_public_edge_env_keys() {
   printf '%s\n' 'OORT_SITE_ADDRESS' 'OORT_CSP_CONNECT_SRC'
 }
 
+# Local OpenAI-compatible provider opt-in (#2215). Written only when
+# --allow-local-provider is set; absent from the generator heredoc so the
+# default deny (and --railway key set) stay unchanged.
+oort_local_provider_env_keys() {
+  printf '%s\n' 'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK' 'AGENT_PROVIDER_LOCAL_HOSTS'
+}
+
 # Keys the generator heredoc actually writes. Same awk as
 # oort_doctor_generator_keys — do not hand-copy the names.
 oort_generator_env_keys() {
@@ -169,6 +177,7 @@ Usage:
   scripts/self_host_env.sh --public-origin https://<host>
   scripts/self_host_env.sh --compose <docker-compose arguments...>
   scripts/self_host_env.sh --railway
+  scripts/self_host_env.sh --local-build --allow-local-provider
 
 No argument is a backwards-compatible alias for --local-build.
 --public-origin may be repeated. It idempotently adds the origin (and its
@@ -189,6 +198,10 @@ on stdout from Railway-provided RAILWAY_PUBLIC_DOMAIN and DATABASE_URL. It
 does not write a file. Those two variables are required (compose :? equivalent);
 missing RAILWAY_PUBLIC_DOMAIN is an explicit failure, not a public.* skip.
 Do not combine --railway with an image mode, --compose, or --public-origin.
+--allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
+AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
+oort_local_provider_env_keys). Without it those two keys are absent
+(default deny). Local-install only — do not combine with --railway.
 EOF
 }
 
@@ -226,7 +239,13 @@ while [ "$#" -gt 0 ]; do
       [ "$REQUESTED_ACTION" = "prepare" ] || fail "--railway는 한 번만 지정하라."
       [ -z "$REQUESTED_MODE" ] || fail "--railway와 이미지 생성 모드를 함께 지정할 수 없다."
       [ "$PUBLIC_ORIGIN_COUNT" -eq 0 ] || fail "--railway는 RAILWAY_PUBLIC_DOMAIN을 쓴다. --public-origin과 함께 지정하지 마라."
+      [ "$ALLOW_LOCAL_PROVIDER" -eq 0 ] || fail "--railway는 로컬 provider opt-in과 함께 지정하지 마라."
       REQUESTED_ACTION="railway"
+      shift
+      ;;
+    --allow-local-provider)
+      [ "$REQUESTED_ACTION" != "railway" ] || fail "--railway는 로컬 provider opt-in과 함께 지정하지 마라."
+      ALLOW_LOCAL_PROVIDER=1
       shift
       ;;
     -h|--help)
@@ -706,6 +725,29 @@ ensure_public_edge_env() {
   quoted="$(quote_env_file_value "$csp")"
   rewrite_env_assignment_quoted OORT_CSP_CONNECT_SRC "$quoted"
   printf '[self-host] %s 의 공개 엣지 키를 --public-origin 에서 파생했다.\n' \
+    "$ENV_FILE" >&2
+}
+
+ensure_local_provider_optin() {
+  [ "$ALLOW_LOCAL_PROVIDER" -eq 1 ] || return 0
+  local key
+  while IFS= read -r key; do
+    [ -n "$key" ] || continue
+    case "$key" in
+      AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK)
+        rewrite_env_assignment "$key" "1"
+        ;;
+      AGENT_PROVIDER_LOCAL_HOSTS)
+        rewrite_env_assignment "$key" "host.docker.internal"
+        ;;
+      *)
+        fail "oort_local_provider_env_keys 가 알 수 없는 키를 냈다: $key"
+        ;;
+    esac
+  done <<EOF
+$(oort_local_provider_env_keys)
+EOF
+  printf '[self-host] %s 에 로컬 provider opt-in 키를 썼다 (oort_local_provider_env_keys).\n' \
     "$ENV_FILE" >&2
 }
 
@@ -1335,6 +1377,7 @@ if [ -e "$ENV_FILE" ]; then
   ensure_public_origins
   ensure_local_drive_public_base
   ensure_public_edge_env
+  ensure_local_provider_optin
   warn_if_legacy_localhost_realtime_ws
   warn_if_legacy_localhost_drive_base
 
@@ -1555,6 +1598,7 @@ EOF
 chmod 600 "$ENV_FILE"
 
 ensure_public_edge_env
+ensure_local_provider_optin
 reject_duplicate_env_keys
 if [ "$MODE" = "published-digest" ]; then
   verify_published_compose_image "$IMAGE"
