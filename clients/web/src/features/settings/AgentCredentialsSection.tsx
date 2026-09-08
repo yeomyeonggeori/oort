@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
@@ -23,6 +23,7 @@ import {
 } from "@momo/core/features/hostedAgents/model";
 import { hostedListRow } from "@momo/core/features/hostedAgents/status";
 import { regenerateGate } from "@momo/core/features/hostedAgents/wizard";
+import { relativeLabel } from "@momo/core/features/inbox/model";
 import { uuidEq } from "@momo/core/lib/api";
 import {
   OperatorNotice,
@@ -47,9 +48,9 @@ const CREDENTIALS_OFFLINE_NOTE_ID = "agent-credentials-offline-note";
 const CREDENTIALS_OFFLINE_REASON =
   "연결이 끊겨 지금은 자격을 발급하거나 바꿀 수 없습니다.";
 
-export type CredentialsRowAction = "disconnect" | "doorbell";
+export type CredentialsRowAction = "disconnect" | "doorbell" | "record";
 
-/** 행 액션이 장부를 어느 `data-landing` 에 내릴지. 두 버튼은 목적지가 다르다. */
+/** 행 액션이 장부를 어느 `data-landing` 에 내릴지. 도어벨만 섹션으로 내린다. */
 export function ledgerLandingFor(
   action: CredentialsRowAction
 ): HostedLedgerLanding {
@@ -85,8 +86,72 @@ export function offersDoorbell(
   return status !== "cleanup_pending" && status !== "disconnected";
 }
 
+/** 해제된 행의 장부(정리 확인·RevokedFacts)로 가는 문. 빈 액션 칸을 두지 않는다. */
+export function offersRecord(
+  status: HostedAgentConnection["status"]
+): boolean {
+  return status === "disconnected";
+}
+
+const CREDENTIALS_ROW_WIDE_QUERY = "(min-width: 720px)";
+
+function subscribeCredentialsRowWide(onStoreChange: () => void): () => void {
+  const mq = window.matchMedia(CREDENTIALS_ROW_WIDE_QUERY);
+  mq.addEventListener("change", onStoreChange);
+  return () => mq.removeEventListener("change", onStoreChange);
+}
+
+function credentialsRowWideSnapshot(): boolean {
+  return window.matchMedia(CREDENTIALS_ROW_WIDE_QUERY).matches;
+}
+
+function credentialsRowWideServerSnapshot(): boolean {
+  return false;
+}
+
+function useCredentialsRowWide(): boolean {
+  return useSyncExternalStore(
+    subscribeCredentialsRowWide,
+    credentialsRowWideSnapshot,
+    credentialsRowWideServerSnapshot
+  );
+}
+
 function chipTone(tone: HostedChipTone): ChipTone {
   return tone === "neutral" ? "muted" : tone;
+}
+
+function ActivityFacts({
+  updatedAtMs,
+  labelVisible,
+}: {
+  updatedAtMs: number;
+  labelVisible: boolean;
+}) {
+  const absolute = formatMoment(updatedAtMs);
+  return (
+    <dl className={labelVisible ? "min-w-0" : "min-w-0 px-3 py-1"}>
+      <div className={labelVisible ? "flex min-w-0 flex-col" : undefined}>
+        <dt
+          className={
+            labelVisible ? "text-timestamp text-ink-muted" : "sr-only"
+          }
+        >
+          마지막 활동
+        </dt>
+        <dd className="text-meta text-ink-muted">
+          <time
+            dateTime={new Date(updatedAtMs).toISOString()}
+            title={absolute}
+            data-testid="agent-credentials-row-time"
+            className="whitespace-nowrap"
+          >
+            {relativeLabel(updatedAtMs, Date.now())}
+          </time>
+        </dd>
+      </div>
+    </dl>
+  );
 }
 
 function TruncatingName({ name }: { name: string }) {
@@ -140,6 +205,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
   const [wizardOpener, setWizardOpener] = useState<HTMLButtonElement | null>(
     null
   );
+  const wide = useCredentialsRowWide();
 
   const rows = list.data ?? [];
   const selected = hostedRowByConnectionId(rows, selectedConnectionId);
@@ -291,42 +357,59 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                 const gate = regenerateGate(row);
                 const rowOfflineId = `agent-credentials-offline-${row.id}`;
                 const regenerateLocked = writesLocked && gate.allowed;
+                const statusChip = (
+                  <StatusChip tone={chipTone(hostedStatusTone(row.status))}>
+                    {hostedStatusLabel(row.status)}
+                  </StatusChip>
+                );
                 return (
                   <li
                     key={row.id}
                     aria-current={selectedRow ? "true" : undefined}
-                    className="flex min-w-0 flex-col border-b border-line last:border-b-0"
+                    className="min-w-0 border-b border-line last:border-b-0"
                     data-testid="agent-credentials-row"
                     data-connection-id={row.id}
                     data-selected={selectedRow ? "" : undefined}
                   >
-                    <div className="flex min-w-0 flex-col sm:flex-row sm:items-stretch">
+                    <div
+                      className={cn(
+                        "min-w-0",
+                        wide
+                          ? "grid grid-cols-[minmax(9rem,1fr)_auto_11.5rem] items-stretch"
+                          : "flex flex-col",
+                        selectedRow && "bg-accent-soft"
+                      )}
+                      data-testid="agent-credentials-row-body"
+                      data-layout={wide ? "grid" : "stack"}
+                    >
                       <div
                         className={cn(
-                          "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 py-2",
-                          selectedRow && "bg-accent-soft"
+                          "flex min-w-0 items-center overflow-hidden px-3 py-2",
+                          !wide && "gap-2"
                         )}
-                        data-testid="agent-credentials-row-body"
                       >
                         <TruncatingName name={fullName} />
-                        <StatusChip
-                          tone={chipTone(hostedStatusTone(row.status))}
-                        >
-                          {hostedStatusLabel(row.status)}
-                        </StatusChip>
-                        <dl className="hidden shrink-0 sm:block">
-                          <div className="flex items-baseline gap-1">
-                            <dt className="text-meta text-ink-muted">
-                              마지막 활동
-                            </dt>
-                            <dd className="text-meta text-ink-muted">
-                              {formatMoment(row.updatedAtMs)}
-                            </dd>
-                          </div>
-                        </dl>
+                        {!wide && statusChip}
                       </div>
                       <div
-                        className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line bg-surface px-2 py-1 sm:shrink-0 sm:border-s sm:border-t-0"
+                        className={cn(
+                          "flex min-w-0 flex-col justify-center gap-1",
+                          wide && "px-2 py-1"
+                        )}
+                      >
+                        {wide && statusChip}
+                        <ActivityFacts
+                          updatedAtMs={row.updatedAtMs}
+                          labelVisible={wide}
+                        />
+                      </div>
+                      <div
+                        className={cn(
+                          "flex min-w-0 flex-wrap items-center gap-1 px-2 py-1",
+                          wide
+                            ? "border-s border-line"
+                            : "mx-3 border-t border-line/50"
+                        )}
                         data-testid="agent-credentials-row-actions"
                       >
                         {offersDisconnect(row.status) && (
@@ -349,6 +432,17 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                             data-testid="agent-credentials-doorbell"
                           >
                             도어벨 설정
+                          </Button>
+                        )}
+                        {offersRecord(row.status) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openLedger(row, "record")}
+                            data-testid="agent-credentials-record"
+                          >
+                            기록 보기
                           </Button>
                         )}
                         {gate.allowed && (
