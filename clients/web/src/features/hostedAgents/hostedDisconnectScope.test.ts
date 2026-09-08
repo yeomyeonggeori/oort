@@ -504,3 +504,36 @@ describe("RED PROOF ⑤ 저장이 막힌 사유는 하나뿐이고 갈래가 없
     expect(row).not.toContain("처분을 고르지 않았습니다");
   });
 });
+
+describe("해제 완료는 서버가 정한다 (#2204 R4-M1)", () => {
+  const section = source("HostedConnectionSection.tsx");
+
+  it("TerminalPanel 완료 분기는 disconnected 만 보고 cleanup_pending 을 섞지 않는다", () => {
+    const terminal = section.slice(section.indexOf("function TerminalPanel"));
+    expect(terminal).toMatch(
+      /if \(connection\.status === "disconnected"\) \{/
+    );
+    expect(terminal).not.toMatch(
+      /disconnected"\s*\|\|\s*connection\.status === "cleanup_pending"/
+    );
+  });
+
+  it("writeDetail 은 서버 응답을 그대로 두고 status 를 다시 쓰지 않는다", () => {
+    expect(section).toContain("writeDetail(started)");
+    expect(section).toContain("writeDetail(completed)");
+    expect(section).not.toMatch(/status:\s*"disconnected"/);
+    expect(section).not.toMatch(/\.status\s*=\s*"disconnected"/);
+  });
+
+  it("착지 노드가 없으면 장부 제목으로 내린다", () => {
+    const landEffect = section.slice(
+      section.indexOf("if (landOn === undefined) return;")
+    );
+    const landOnQuery = landEffect.indexOf("`[data-landing=\"${landOn}\"]`");
+    const headingFallback = landEffect.indexOf(
+      "'[data-landing=\"heading\"]'"
+    );
+    expect(landOnQuery).toBeGreaterThan(-1);
+    expect(headingFallback).toBeGreaterThan(landOnQuery);
+  });
+});

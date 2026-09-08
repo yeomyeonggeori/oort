@@ -33,8 +33,8 @@ import {
 // 여기서 하지 않는다. **두 클라가 공유하는 것은 어휘 프리미티브**다 —
 // `hostedStatusLabel`/`Tone`/`Detail`·`connectionFacts`·`cleanupRow*`·
 // `cleanupEvidenceText`. 웹은 그 낱말들을 자기 컴포넌트(`HostedConnectionSection`)
-// 로 조립하고, 이 파일이 짜는 **관전 화면 한 벌**(`hostedListRow`·`hostedDetailView`)
-// 은 **폰 전용**이다 — 웹에는 그 조립을 부르는 importer 가 하나도 없다.
+// 로 조립하고, 설정 › 에이전트 자격 목록은 `hostedListRow` 로 표시 이름을 읽는다.
+// `hostedDetailView` 조립은 **폰 전용**이다 — 웹에는 그 importer 가 없다.
 //
 // ## 어휘의 출처 — cleanup·disconnect·model 이 정본이다
 //

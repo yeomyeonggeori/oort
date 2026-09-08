@@ -1,5 +1,6 @@
 import { uuidEq, type RosterMember } from "../../lib/api";
 import type { HostedAgentConnection } from "./model";
+import type { HostedPresetId } from "./presets";
 import { regenerateGate } from "./wizard";
 
 // =============================================================================
@@ -108,6 +109,24 @@ function foldHandle(raw: string): string {
 
 function foldName(raw: string): string {
   return raw.trim().toLowerCase();
+}
+
+/**
+ * 목록 행의 멤버가 그록 시그니처와 같으면 grok recipe, 아니면 generic.
+ * 와이어에 preset 열이 없으므로(#1405) 디렉터리 정체성이 행이 가진 전부다.
+ */
+export function hostedPresetIdForMember(
+  member: { handle?: string; displayName?: string } | null | undefined
+): HostedPresetId {
+  const grok = hostedAgentSignature(GROK_HOSTED_AGENT_ID);
+  if (!member || !grok) return "generic";
+  if (
+    foldHandle(member.handle ?? "") === foldHandle(grok.identity.handle) ||
+    foldName(member.displayName ?? "") === foldName(grok.identity.displayName)
+  ) {
+    return "grok";
+  }
+  return "generic";
 }
 
 function isUsableAgent(member: RosterMember): boolean {

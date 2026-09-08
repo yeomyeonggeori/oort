@@ -175,12 +175,18 @@ export function HostedAgentWizard({
   onOpenChange,
   opener,
   launch = null,
+  entry = "hub",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   opener?: DialogFocusTarget | null;
   /** 원클릭 시드. 없으면 기존 목록/1단계 진입. 단계 기계는 바꾸지 않는다. */
   launch?: HostedWizardLaunch | null;
+  /**
+   * 설정 목록이 이미 바깥에 있으면 피커를 건너뛰고 새 발급으로 연다.
+   * 허브는 기존처럼 진행 중인 연결을 먼저 보여 준다.
+   */
+  entry?: "hub" | "settings";
 }) {
   if (!open) return null;
   return (
@@ -189,6 +195,7 @@ export function HostedAgentWizard({
         onClose={() => onOpenChange(false)}
         opener={opener ?? null}
         launch={launch}
+        entry={entry}
       />
     </Dialog>
   );
@@ -198,10 +205,12 @@ function HostedWizardBody({
   onClose,
   opener,
   launch,
+  entry,
 }: {
   onClose: () => void;
   opener: DialogFocusTarget | null;
   launch: HostedWizardLaunch | null;
+  entry: "hub" | "settings";
 }) {
   const { workspaceId, session } = useSession();
   const client = useQueryClient();
@@ -215,7 +224,8 @@ function HostedWizardBody({
     launch?.connectionId ?? null
   );
   const [startingNew, setStartingNew] = useState(
-    launch != null && launch.connectionId === undefined
+    (launch != null && launch.connectionId === undefined) ||
+      (entry === "settings" && launch?.connectionId === undefined)
   );
   const [draft, setDraft] = useState<Draft>(
     launch

@@ -424,6 +424,14 @@
    * 같은 이유로 이름을 갖는다. */
   --spacing-action-sm: 96px;
 
+  /* 자격 행 액션 띠 (#2204 R7). `--spacing-action`(144) 은 다이얼로그 주 버튼
+   * 최소 폭이고 `--spacing-action-sm`(96) 은 짧은 푸터 짝이다. 이 칸은 설정 ›
+   * 연결 목록에서 size="sm" 아웃라인 세 개(해제 · 도어벨 설정 · 재발급)를 **한 줄**
+   * 에 담는 고정 열이다. 실측(Chromium, 빌드된 CSS, size="sm"): 해제 46.77 ·
+   * 도어벨 설정 81.19 · 재발급 57.14 = 185.09. gap-1×2 8 + px-2×2 16 = 209.09.
+   * 240 은 더 긴 라벨을 위해 ~31px 를 남긴다 — 6px 여유가 아니다. */
+  --spacing-action-band: 240px;
+
   /* Panes are a third dimension: a secondary column is wider than any rhythm
    * step, so it gets a NAME rather than an off-grid number. Keeping them here
    * means w-pane / max-h-pane exist and w-[320px] still never compiles. */
@@ -1466,6 +1474,30 @@
   @media (width < 600px) {
     flex-direction: column;
   }
+}
+
+/* 자격 행 3열 (#2204 R8). 임의 `grid-cols-[…]` 금지 — 밴드 폭은
+ * `--spacing-action-band` 이름이다. `lg`(뷰포트 ≥1024) 에서만 붙인다.
+ *
+ * 산술: 설정 셸은 ≥600에서 사이드바 `--w-sidebar`(240) + 본문 p-6(48).
+ * 1024 → 본문 ≥736, 목록 ≈734. 목록 − 테두리 2 − ps-3 12 − band 240 −
+ * column-gap 12×2 − facts. 실측 이름 상자: SHORT 김인턴 302.5 / hermes 282.4
+ * (LONG 45자도 302.5). 둘 다 ≥ 144, 여유 있음. 720 → 본문 ≈430. 같은 3열은
+ * 이름에 144를 남기지 못하므로 접는다. */
+@utility credentials-row-grid {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: minmax(0, 1fr) auto var(--spacing-action-band);
+  column-gap: var(--spacing-3);
+  align-items: stretch;
+}
+
+/* 선택 행의 2px 액센트 바. `cn("border-b","border-l-2")` 는 폭을 지우지 않는다.
+ * 지워지는 것은 색이다: `border-accent` 가 `border-line` 을 덮어 행 구분선까지
+ * `--accent` 로 칠한다. 이 유틸은 `border-inline-start-color` 를 행의 아래
+ * 테두리와 따로 묶기 위해 있다. 마커 토큰을 이 이름이 소비한다. */
+@utility credentials-row-current {
+  border-inline-start: var(--spacing-marker) solid var(--accent);
 }
 
 @utility settings-nav {

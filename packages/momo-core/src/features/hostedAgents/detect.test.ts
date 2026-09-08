@@ -6,6 +6,7 @@ import {
   HOSTED_AGENT_SIGNATURES,
   hostedAgentDetected,
   hostedAgentSignature,
+  hostedPresetIdForMember,
   matchHostedAgentMember,
   planHostedInvite,
   type HostedAgentProbe,
@@ -69,6 +70,16 @@ describe("레지스트리 v1 은 Grok Bot 하나다", () => {
     expect(grok?.bundlePaths).toEqual(["/Applications/Grok Bot.app"]);
     expect(grok?.bundleIds).toEqual(["com.anysphere.sand"]);
     expect(grok?.processNames).toEqual(["Grok Bot"]);
+  });
+
+  it("목록 행 정체성에서 grok preset 을 고른다", () => {
+    expect(hostedPresetIdForMember({ handle: "grokbot", displayName: "그록봇" })).toBe(
+      "grok"
+    );
+    expect(hostedPresetIdForMember({ handle: "intern", displayName: "김인턴" })).toBe(
+      "generic"
+    );
+    expect(hostedPresetIdForMember(null)).toBe("generic");
   });
 
   it("초대 문장은 패킷의 원클릭 질문이고 엠대시·과장어가 없다", () => {
