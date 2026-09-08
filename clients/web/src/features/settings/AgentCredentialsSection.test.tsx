@@ -23,6 +23,7 @@ import {
   ledgerLandingFor,
   offersDisconnect,
   offersDoorbell,
+  offersRecord,
 } from "./AgentCredentialsSection";
 import { formatMoment } from "./oauthGrant";
 
@@ -365,7 +366,17 @@ describe("소스 규율", () => {
     expect(source).toContain('data-testid="agent-credentials-disconnect"');
     expect(source).toContain('data-testid="agent-credentials-doorbell"');
     expect(source).toContain("bg-accent-soft");
-    expect(source).toContain("bg-surface");
+    expect(source).not.toMatch(
+      /agent-credentials-row-actions[\s\S]{0,280}bg-surface/
+    );
+    expect(source).not.toContain("hidden sm:block");
+    expect(source).toContain("minmax(9rem,1fr)");
+    expect(source).not.toContain("minmax(0,1fr)");
+    expect(source).toContain("11.5rem");
+    expect(source).toContain("border-line/50");
+    expect(source).toContain("mx-3");
+    expect(source).toContain("기록 보기");
+    expect(source).toContain("relativeLabel");
     expect(source).not.toContain("agent-credentials-row-select");
     expect(source).toContain("hostedPresetIdForMember");
     expect(source).not.toMatch(/presetId:\s*"generic"/);
@@ -385,6 +396,9 @@ describe("소스 규율", () => {
     expect(source).toContain("도어벨 설정");
     expect(source).toContain("마지막 활동");
     expect(source).toContain("offersDoorbell");
+    expect(source).toContain("offersRecord");
+    expect(source).toContain('openLedger(row, "record")');
+    expect(source).toContain('data-testid="agent-credentials-record"');
   });
 
   it("이름 상자는 min-w-0 으로 접힌다", () => {
@@ -472,6 +486,15 @@ describe("목록 네 상태", () => {
       host.querySelector('[data-testid="agent-credentials-doorbell"]')
         ?.textContent
     ).toBe("도어벨 설정");
+    const time = host.querySelector(
+      '[data-testid="agent-credentials-row-time"]'
+    ) as HTMLTimeElement;
+    expect(time).not.toBeNull();
+    expect(time.getAttribute("title")).toContain(
+      formatMoment(1_700_000_000_000)
+    );
+    expect(time.dateTime).toBe(new Date(1_700_000_000_000).toISOString());
+    expect(time.textContent).toMatch(/\d+일 전|방금|\d+분 전|\d+시간 전/);
     expect(host.textContent).not.toContain("detected_at");
     expect(host.textContent).not.toContain("proved_at");
   });
@@ -493,7 +516,9 @@ describe("목록 네 상태", () => {
     const list = host.querySelector(
       '[data-testid="agent-credentials-list"]'
     ) as HTMLElement;
-    expect(list.textContent).toContain(formatMoment(1_700_000_360_000));
+    expect(list.querySelector('[data-testid="agent-credentials-row-time"]')
+      ?.getAttribute("title")).toContain(formatMoment(1_700_000_360_000));
+    expect(list.textContent).toMatch(/\d+일 전|방금|\d+분 전|\d+시간 전/);
     expect(list.textContent).not.toContain("마지막 상태 변화");
     expect(list.textContent).not.toContain("연결 만든 때");
   });
@@ -828,6 +853,9 @@ describe("B-1 선택은 연결 id 다", () => {
     expect(offersDoorbell("disconnected")).toBe(false);
     expect(offersDoorbell("active")).toBe(true);
     expect(offersDoorbell("expired")).toBe(true);
+    expect(offersRecord("disconnected")).toBe(true);
+    expect(offersRecord("cleanup_pending")).toBe(false);
+    expect(offersRecord("active")).toBe(false);
   });
 
   it("같은 에이전트의 만료·활성 행에서 만료 액션은 만료 id 를 연다", async () => {
@@ -925,6 +953,7 @@ describe("H-2 해제와 도어벨은 다른 착지다", () => {
   it("사보타주: 두 착지가 같으면 붉다", () => {
     expect(ledgerLandingFor("disconnect")).toBe("heading");
     expect(ledgerLandingFor("doorbell")).toBe("doorbell");
+    expect(ledgerLandingFor("record")).toBe("heading");
     expect(ledgerLandingFor("disconnect")).not.toBe(
       ledgerLandingFor("doorbell")
     );
@@ -1141,7 +1170,33 @@ describe("H-1 터미널 행은 도어벨을 두지 않는다", () => {
     expect(
       done.querySelector('[data-testid="agent-credentials-doorbell"]')
     ).toBeNull();
+    expect(
+      done.querySelector('[data-testid="agent-credentials-record"]')
+        ?.textContent
+    ).toBe("기록 보기");
+    expect(
+      pending.querySelector('[data-testid="agent-credentials-record"]')
+    ).toBeNull();
     expect(countNeedle(done.textContent ?? "", "연결 해제됨")).toBe(1);
+    act(() => {
+      (
+        done.querySelector(
+          '[data-testid="agent-credentials-record"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () =>
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-connection-id") === doneId,
+      "record ledger"
+    );
+    expect(
+      host
+        .querySelector('[data-testid="hosted-connection-section"]')
+        ?.getAttribute("data-landing-target")
+    ).toBe("heading");
     act(() => {
       (
         pending.querySelector(
@@ -1151,14 +1206,67 @@ describe("H-1 터미널 행은 도어벨을 두지 않는다", () => {
     });
     await waitFor(
       () =>
-        document.activeElement?.getAttribute("data-landing") === "heading",
+        host
+          .querySelector('[data-testid="hosted-connection-section"]')
+          ?.getAttribute("data-connection-id") === pendingId,
       "cleanup heading land"
+    );
+    expect(document.activeElement?.getAttribute("data-landing")).toBe(
+      "heading"
     );
     expect(
       host
         .querySelector('[data-testid="hosted-connection-section"]')
         ?.getAttribute("data-connection-id")
     ).toBe(pendingId);
+  });
+});
+
+describe("여섯 상태는 빈 액션 칸이 없다", () => {
+  it("disconnected 만 기록 보기를 두고 나머지는 각자 문이 있다", async () => {
+    const statuses = [
+      "pairing_pending",
+      "detected",
+      "active",
+      "expired",
+      "cleanup_pending",
+      "disconnected",
+    ] as const;
+    mockListAndDetail(
+      statuses.map((status, index) =>
+        wireConnection({
+          id: `019f9a01-0000-7000-8000-0000000008c${index + 1}`,
+          status,
+        })
+      )
+    );
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelectorAll('[data-testid="agent-credentials-row"]').length ===
+        6,
+      "six rows"
+    );
+    const rows = [
+      ...host.querySelectorAll('[data-testid="agent-credentials-row"]'),
+    ] as HTMLElement[];
+    for (const row of rows) {
+      const actions = row.querySelector(
+        '[data-testid="agent-credentials-row-actions"]'
+      );
+      expect(actions?.querySelectorAll("button").length ?? 0).toBeGreaterThan(0);
+    }
+    const done = rows[5];
+    expect(
+      done?.querySelector('[data-testid="agent-credentials-record"]')
+        ?.textContent
+    ).toBe("기록 보기");
+    expect(
+      done?.querySelector('[data-testid="agent-credentials-disconnect"]')
+    ).toBeNull();
+    expect(
+      rows[4]?.querySelector('[data-testid="agent-credentials-doorbell"]')
+    ).toBeNull();
   });
 });
 
