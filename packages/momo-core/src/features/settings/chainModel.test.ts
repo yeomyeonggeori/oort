@@ -20,6 +20,11 @@ import {
   headClaim,
   headEntry,
   hopOrdinal,
+  isLoopbackProviderRefusal,
+  isLoopbackProviderUrl,
+  loopbackProviderGuidance,
+  LOOPBACK_PROVIDER_HINT,
+  LOOPBACK_REFUSAL_WIRE,
   MAX_FALLBACK_HOPS,
   nextPosition,
   parseProbeEntries,
@@ -818,5 +823,32 @@ describe("probe results (entries[] + cascadeOk)", () => {
     expect(probeReasonCopy("brand_new_label")).toBe(
       "서버가 보고한 사유: brand_new_label"
     );
+  });
+
+  it("turns the measured loopback refusal into the Korean local-provider hint", () => {
+    expect(
+      probeReasonCopy(
+        "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1"
+      )
+    ).toBe(LOOPBACK_PROVIDER_HINT);
+    expect(probeReasonCopy("loopback baseUrl")).toBe(LOOPBACK_PROVIDER_HINT);
+    expect(LOOPBACK_PROVIDER_HINT).not.toMatch(/allow-local-provider|SH-6a/);
+  });
+});
+
+describe("loopback provider refusal (#2204)", () => {
+  it("names the three loopback hosts the server refuses", () => {
+    expect(isLoopbackProviderUrl("http://127.0.0.1:11434/v1")).toBe(true);
+    expect(isLoopbackProviderUrl("http://localhost:8080/v1")).toBe(true);
+    expect(isLoopbackProviderUrl("http://[::1]:11434/v1")).toBe(true);
+    expect(isLoopbackProviderUrl("https://api.example.com/v1")).toBe(false);
+  });
+
+  it("matches the measured English refusal and keeps a server Korean sentence", () => {
+    expect(isLoopbackProviderRefusal(new ApiError(400, LOOPBACK_REFUSAL_WIRE))).toBe(
+      true
+    );
+    expect(isLoopbackProviderRefusal(new ApiError(500, "boom"))).toBe(false);
+    expect(loopbackProviderGuidance()).toBe(LOOPBACK_PROVIDER_HINT);
   });
 });

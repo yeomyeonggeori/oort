@@ -27,7 +27,7 @@ const TEXT_ROLES = ["timestamp", "meta", "body", "title", "display"] as const;
 /**
  * The named measures from tokens.css `@theme { --spacing-* }` that are words,
  * not numbers: marker(2) · row(6) · control-sm/control/control-lg(28/32/40) ·
- * action-sm/action(96/144) · chat-min · rail 3종 · pane 5종 · settings-nav ·
+ * action-sm/action/action-band(96/144/240) · chat-min · rail 3종 · pane 5종 · settings-nav ·
  * diff-body · terminal-body · terminal-dock 3종 · terminal-floor ·
  * timeline-strip · preview-frame · unfurl-hero · tray-max · onboarding-mark ·
  * onboarding-copy · overflow-bowl.
@@ -52,6 +52,7 @@ export const NAMED_MEASURES = [
   "control-lg",
   "action-sm",
   "action",
+  "action-band",
   "chat-min",
   "rail",
   "rail-tile",

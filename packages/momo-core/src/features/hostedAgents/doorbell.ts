@@ -33,7 +33,7 @@ export interface HostedDoorbellRegistration {
   lastStatus?: string;
 }
 
-export const DOORBELL_HEADLINE = "도어벨";
+export const DOORBELL_HEADLINE = "도어벨 설정";
 export const DOORBELL_LEAD =
   "그록봇 webhook 루틴을 부름이 쌓일 때 깨웁니다. 도어벨이 실패해도 부름 자체는 그대로 남습니다.";
 export const DOORBELL_EMPTY_HEADLINE = "도어벨이 아직 없습니다.";
