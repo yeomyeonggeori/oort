@@ -309,20 +309,84 @@ address.
 A provider that already runs on this laptop (hermes, Ollama, LM Studio) is
 reached from the containers at `http://host.docker.internal:<port>/v1`, not
 at `127.0.0.1` (that address inside the container is the container itself).
-Write the opt-in when creating env, then put that URL in **설정 › AI 연결**:
+Write the opt-in when creating env, then put that URL in **설정 › AI 연결**.
+
+Measured hermes procedure (OpenAI-compatible SSE on this machine → welcome
+kickoff reply). If you already run a real hermes, use that process and skip
+the mock. This checkout has no hermes binary; the stand-in is
+`scripts/mock_hermes.py`.
+
+1. Start the provider on a host port Docker can reach. Pick a free port
+   (`<provider-port>` below). Bind `0.0.0.0` — `host.docker.internal` is the
+   host-gateway address (not `127.0.0.1` inside the container, and not the
+   host loopback from the VM). Keep this process running in that terminal.
+
+   ```sh
+   MOCK_HERMES_TOOL_CALLS=0 python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
+   ```
+
+2. Write env with the local-provider opt-in (isolated project name if this
+   checkout already has a stack):
+
+   ```sh
+   COMPOSE_PROJECT_NAME=<project> scripts/self_host_env.sh --local-build --allow-local-provider
+   ```
+
+   That writes `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` and
+   `AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal`. To turn it off, delete
+   those two lines and restart api + agent-worker. Railway / public installs
+   do not use this flag (`infra/railway/railway.json` is unchanged).
+
+3. Bring the stack up with the command step 2 printed
+   (`scripts/self_host_env.sh --compose up -d --build --wait`). Derive the
+   browser port the same way [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4
+   does:
+
+   ```sh
+   ENV_FILE=infra/rust/local.secrets.env
+   WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
+   ```
+
+4. Sign in (step 4), open **설정 › AI 연결**, and put
+   `http://host.docker.internal:<provider-port>/v1` plus a hermes-facing
+   bearer. REST equivalent (`<port>` is `$WEB_PORT`):
+
+   ```sh
+   TOKEN=$(curl -sS -X POST "http://127.0.0.1:${WEB_PORT}/v1/auth/login" \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"owner@oort.local","password":"<MOMO_INITIAL_OWNER_PASSWORD>"}' \
+     | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+   curl -sS -X PUT "http://127.0.0.1:${WEB_PORT}/v1/provider/link" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"baseUrl":"http://host.docker.internal:<provider-port>/v1","bearer":"<hermes-facing-bearer>"}'
+   ```
+
+5. Create an agent (agent directory → new agent), invite it to `#general`,
+   and let the welcome kickoff run (a new member join, or the first
+   `@handle` mention). The reply is a durable channel message with
+   `message.seq`. When that seq arrives, that is everything this document
+   promised.
+
+When you are done with an isolated project, reclaim it
+(`scripts/self_host_env.sh --compose down -v`) so leftover compose
+containers for that `COMPOSE_PROJECT_NAME` are 0.
+
+Plugin path (Hermes treats oort as a messaging platform; copy mode writes
+uppercase `PLUGIN.yaml` on a case-sensitive volume):
 
 ```sh
-scripts/self_host_env.sh --local-build --allow-local-provider
+MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin
+scripts/verify_hermes_gateway_adapter.sh
 ```
 
-That writes `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` and
-`AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal`. To turn it off, delete
-those two lines and restart api + agent-worker. Railway / public installs
-do not use this flag (`infra/railway/railway.json` is unchanged).
+Copy mode also writes uppercase `PLUGIN.yaml` next to `plugin.yaml` (Hermes
+on a case-sensitive volume looks up the uppercase name). The installer is
+the living check. `scripts/verify_hermes_gateway_adapter.sh` still starts
+the deleted Swift server package (`swift run --package-path server`, LS-1 /
+#2165) and is not a Rust-stack PASS.
 
-Then create an agent (agent directory → new agent), invite it to a channel,
-and call it with `@handle`. When an answer arrives, that is everything this
-document promised.
+See [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md).
 
 ### What takes effect immediately and what needs a restart
 
