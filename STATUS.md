@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-8 그록봇 합류 절 검수 + 로컬 CDP 하네스 (#2230, 2026-09-08)
+
+- Track engine. `feat/sh8-grokbot-join-harness`. `docs/SELF_HOST_AGENT.md`(+ko) §3.3.16 5단계 라우트 대조표(생성→pairing handshake→confirm→active 재핸드셰이크→regenerate)를 Rust 핸들러와 1:1로 맞춤. 어긋난 문장만 수정: foundation 요청만 `detected→active` 증명, pairing/`detected`의 `tools/call`은 HTTP 401 빈 본문, `active`에서 regenerate는 409. §3.3.19 Do not에 사용자·공개 표면 vs `scripts/dev/grokbot_cdp/README` 한 줄. 하네스 신규(`read`/`write`/`clear`.py). 제품 카피·`presets.test.ts` 무접촉.
+- 검증: `scripts/local_gate.sh --profile docs`. Agent Port 루틴 원문 vs 실측은 pairing bearer로 `oort_inbox_read` bytes를 실서버에 재현(문서 수정 근거). Grok Bot CDP 포트 9333이 닫혀 있으면 스크립트는 `SKIPPED: Grok Bot app not running (port 9333 closed)` + exit 0.
+
 ## SH-6a-e 로컬 provider opt-in (#2215, 2026-09-08)
 
 - Track engine. `feat/sh6a-e-local-provider`. `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` 은 `MOMO_ENV=staging`에서도 운영자 opt-in으로 유효. `AGENT_PROVIDER_LOCAL_HOSTS` 정확 일치(기본 `host.docker.internal`). 생성기 `--allow-local-provider`, compose api·agent-worker 전달 + `extra_hosts`, doctor `env.local_provider`. ADR-0004 증보 1절.
