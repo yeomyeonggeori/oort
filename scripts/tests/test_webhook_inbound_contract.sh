@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # #1265 inbound webhook contract (static). Runtime cases live in
 # scripts/verify_webhook_rust.sh → webhook_inbound_conformance_pg.
-# Direct INSERT into message is forbidden; Caddy public-edge 403 must not
-# cover /hooks; both ingress routes share one 404 sentence.
+# Direct INSERT into message is forbidden; all three public Caddyfiles must
+# reverse_proxy /hooks/* to the same API upstream as /v1/* (after the
+# centrifugo 403, before the SPA catch-all).
 set -euo pipefail
 
 REPO_ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd -P)"
@@ -53,20 +54,94 @@ echo "[test-webhook-inbound-contract] write path is send_message_in_tx"
 grep -q 'momo_messaging::send_message_in_tx' "$INGRESS_RS" \
   || fail "inbound must create messages through send_message_in_tx"
 
-echo "[test-webhook-inbound-contract] Caddy 403 does not cover /hooks"
+echo "[test-webhook-inbound-contract] Caddy /hooks/* reverse_proxy on all three edges"
 python3 - <<'PY'
-import re, pathlib, sys
-for path in ("infra/rust/Caddyfile", "infra/rust/Caddyfile.local"):
-    text = pathlib.Path(path).read_text()
-    if "handle /v1/centrifugo/*" not in text:
-        print(f"{path}: missing centrifugo 403 matcher", file=sys.stderr)
-        sys.exit(1)
-    for match in re.finditer(r"handle\s+(\S+)\s*\{([^}]*)\}", text):
-        matcher, body = match.group(1), match.group(2)
-        if "respond 403" in body and "hooks" in matcher:
-            print(f"{path}: {matcher} is 403", file=sys.stderr)
-            sys.exit(1)
-print("caddy 403 does not cover /hooks")
+import re
+import sys
+from pathlib import Path
+
+FILES = (
+    "infra/rust/Caddyfile",
+    "infra/rust/Caddyfile.local",
+    "infra/railway/Caddyfile.railway",
+)
+HANDLE_OPEN = re.compile(r"^(\t)handle(?: (\S+))? \{\s*$")
+PROXY = re.compile(r"^reverse_proxy\s+(\S+)\s*$")
+CSP = "Content-Security-Policy"
+
+
+def exclusive_proxy_body(lines, start_idx):
+    """start_idx is the handle-open line. Return (upstream, close_idx)."""
+    i = start_idx + 1
+    upstream = None
+    while i < len(lines):
+        stripped = lines[i].strip()
+        if stripped == "" or stripped.startswith("#"):
+            i += 1
+            continue
+        if upstream is None:
+            match = PROXY.match(stripped)
+            if not match:
+                raise ValueError(f"expected reverse_proxy, got {lines[i]!r}")
+            upstream = match.group(1)
+            i += 1
+            continue
+        if stripped == "}":
+            return upstream, i
+        raise ValueError(f"extra directive in handle: {lines[i]!r}")
+    raise ValueError("handle never closed")
+
+
+def check(path):
+    lines = Path(path).read_text().splitlines()
+    opens = []
+    for idx, line in enumerate(lines):
+        match = HANDLE_OPEN.match(line)
+        if match:
+            opens.append((idx, match.group(2) or ""))
+
+    matchers = [matcher for _, matcher in opens]
+    if matchers.count("/hooks/*") != 1:
+        raise SystemExit(f"{path}: expected exactly one handle /hooks/*, got {matchers.count('/hooks/*')}")
+    if "/v1/centrifugo/*" not in matchers:
+        raise SystemExit(f"{path}: missing centrifugo 403 matcher")
+    if "/v1/*" not in matchers:
+        raise SystemExit(f"{path}: missing /v1/*")
+    if "" not in matchers:
+        raise SystemExit(f"{path}: missing catch-all handle")
+
+    deny_idx = next(i for i, m in opens if m == "/v1/centrifugo/*")
+    v1_idx = next(i for i, m in opens if m == "/v1/*")
+    hooks_idx = next(i for i, m in opens if m == "/hooks/*")
+    catch_idx = next(i for i, m in opens if m == "")
+    if not (deny_idx < hooks_idx < catch_idx):
+        raise SystemExit(
+            f"{path}: /hooks/* must sit after centrifugo 403 (line {deny_idx + 1}) "
+            f"and before catch-all (line {catch_idx + 1}); hooks is line {hooks_idx + 1}"
+        )
+    if deny_idx >= v1_idx:
+        raise SystemExit(f"{path}: centrifugo 403 must precede /v1/*")
+
+    v1_up, _ = exclusive_proxy_body(lines, v1_idx)
+    hooks_up, hooks_close = exclusive_proxy_body(lines, hooks_idx)
+    if hooks_up != v1_up:
+        raise SystemExit(
+            f"{path}: /hooks/* reverse_proxy {hooks_up!r} != /v1/* {v1_up!r}"
+        )
+    hooks_block = "\n".join(lines[hooks_idx : hooks_close + 1])
+    if CSP in hooks_block:
+        raise SystemExit(f"{path}: /hooks/* must not carry SPA CSP")
+    csp_lines = [i for i, line in enumerate(lines) if CSP in line]
+    if not csp_lines:
+        raise SystemExit(f"{path}: missing SPA CSP")
+    if any(i < catch_idx for i in csp_lines):
+        raise SystemExit(f"{path}: CSP must stay only in the catch-all handle")
+    print(f"{path}: handle /hooks/* reverse_proxy {hooks_up} (after 403, before catch-all)")
+
+
+for path in FILES:
+    check(path)
+print("caddy /hooks/* present, same upstream as /v1/*, CSP only on catch-all")
 PY
 
 echo "[test-webhook-inbound-contract] OpenAPI documents 404 on both ingress ops"
@@ -95,4 +170,4 @@ grep -q '#1265-order: parse' "$INGRESS_RS" || fail "parse-order anchor missing"
 grep -q 'INSERT INTO webhook_receipt' "$INGRESS_SQL" || fail "receipt insert missing"
 grep -q 'parse_native' "$PAYLOAD_RS" || fail "payload parser missing"
 
-echo "PASS: webhook inbound contract (INSERT=0, same 404 sentence, Caddy /hooks not 403, OpenAPI)"
+echo "PASS: webhook inbound contract (INSERT=0, same 404 sentence, Caddy /hooks/* proxy, OpenAPI)"

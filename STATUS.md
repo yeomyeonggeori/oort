@@ -3,8 +3,8 @@
 ## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
 
 - Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.
-- 검증: `webhook_inbound_conformance_pg` · `scripts/verify_webhook_rust.sh` 인바운드 + `WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER` 사보타주 · `scripts/tests/test_webhook_inbound_contract.sh`. 공개 Caddyfile 무수정 — `/hooks/*` 는 403 매처가 아님(SPA catch-all; 네이티브 `/v1/webhooks/*` 는 `/v1/*` 프록시).
-- runtime-unverified: 셀프호스트 공개 엣지에서 Slack 호환 `/hooks/{token}` 을 Caddy가 API로 reverse_proxy 하지 않음(NOTES). 네이티브 경로는 `/v1/*` 로 통과.
+- R2: 공개 엣지 세 Caddyfile(`infra/rust/Caddyfile` · `Caddyfile.local` · `infra/railway/Caddyfile.railway`)에 `handle /hooks/* { reverse_proxy <same as /v1/*> }` — centrifugo 403 뒤, SPA catch-all 앞. CSP는 마지막 handle만.
+- 검증: `webhook_inbound_conformance_pg` · `scripts/verify_webhook_rust.sh` 인바운드 + `WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER` 사보타주 · `scripts/tests/test_webhook_inbound_contract.sh` (`/hooks/*` 블록 1개·업스트림 일치·순서; 삭제 사보타주 RED) · `scripts/verify_public_edge_centrifugo_contract.sh` · `scripts/tests/test_railway_template.sh`.
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
