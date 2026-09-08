@@ -168,7 +168,7 @@ jobs:
 
       - name: 아티팩트 업로드 (build-only)
         if: inputs.mode == 'build-only'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: oort-desktop-unsigned-${{ github.sha }}
           path: ${{ runner.temp }}/oort-desktop-unsigned-*.zip
