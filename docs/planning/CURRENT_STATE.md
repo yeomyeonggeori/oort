@@ -4,7 +4,7 @@
 >
 > **★ 정본 헤드**: main `47f4d6f0`(LS-3 승격 ak) · 이 문서의 승격 배치 am 뒤 갱신. 도는 것 없음.
 > **★ 오늘 정본화**: ADR-0183 Accepted(결재 5+3) · LS-4·LS-0·LS-2·LS-1·LS-3 · LS-5(17 close) · LS-6 원장 #2187 · **SH-10 #1255**(셀프호스트 동봉 APNs relay Rust, 3 모드) · 1차 목표 두 케이스 문서(`2026-09-07-first-goal-two-cases.md`).
-> **★ 2026-09-08 결재 반영**: 출시 정의 개정 확정(`2026-09-02-launch-program-plan.md` 개정 상자) · 실기기 APNs 실수신 **보류** · 남은 작업 지도 `2026-09-08-remaining-work-map.md`. **G1'-1 진행**: SH-5a 템플릿 main `03e90c4c`(실배포는 Railway 로그인 대기) · SH-6a-w PR #2214 design-review R1 FAIL(H4) → R2 수리 → R2 검수 중. **G1'-2 패킷**: SH-6a-e #2215 · UX-R2c #2216 · #1265 (go 대기, 워크트리 `wsh6ae`·`w1265`, `wuxr2c`는 SH-6a-w 랜딩 뒤).
+> **★ 2026-09-08 결재 반영**: 출시 정의 개정 확정(`2026-09-02-launch-program-plan.md` 개정 상자) · 실기기 APNs 실수신 **보류** · 남은 작업 지도 `2026-09-08-remaining-work-map.md`. **G1'-1 진행**: SH-5a 템플릿 main `03e90c4c`(실배포 E2E는 G1'-4 시점, Railway 로그인 필요 — 성재 「필요하면 다음 작업」) · SH-6a-w PR #2214 design-review **R3 FAIL(B1·H1·M2·N5)** → R4 워커 가동(09-08 오전). **G1'-2 패킷 main**(`bbb00168`): SH-6a-e #2215 · UX-R2c #2216 · #1265 — 엔진 쌍 go 대기(런처 `launch-g1-2-engine.sh` 자가 복구), UX-R2c는 #2214 랜딩 뒤.
 > **★ 선재**: #2157·#2181·#2193. 미발급 후속: UX-R2c · #1265 · SH-6a-e · SH-8 · SH-9.
 > **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md`.
 
