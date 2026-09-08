@@ -51,7 +51,6 @@ import {
   FIRST_AGENT_MENTION_ACTION,
   FIRST_AGENT_OFFLINE_REASON,
   FIRST_AGENT_OFFLINE_REASON_ID,
-  FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_REENTRY_HREF,
@@ -67,7 +66,6 @@ import {
   firstAgentDetectingDetail,
   firstAgentLead,
   formatDetectPollWait,
-  formatRecheckStill,
   isHostedDetected,
   nextDetectDelayMs,
   readFirstAgentCapturePoseFromLocation,
@@ -289,27 +287,20 @@ export function FirstAgentStage({
         setStep("mention");
         return;
       }
-      setRecheckStatus(formatRecheckStill(DETECT_INITIAL_MS));
+      setRecheckStatus(null);
       setNextPollMs(DETECT_INITIAL_MS);
+      setStep("detecting");
     } catch {
-      setRecheckStatus(formatRecheckStill(DETECT_INITIAL_MS));
+      setRecheckStatus(null);
       setNextPollMs(DETECT_INITIAL_MS);
+      setStep("detecting");
     }
   };
 
-  const mcpItems: ChoiceListItem[] = FIRST_AGENT_CARDS.filter(
-    (card) => card.presetId !== null
-  ).map((card) => ({
+  const cardItems: ChoiceListItem[] = FIRST_AGENT_CARDS.map((card) => ({
     id: card.id,
     label: card.label,
     detail: card.detail,
-  }));
-  const openaiItems: ChoiceListItem[] = FIRST_AGENT_CARDS.filter(
-    (card) => card.presetId === null
-  ).map((card) => ({
-    id: card.id,
-    label: card.label,
-    detail: "",
   }));
 
   const hintedAgentMemberId =
@@ -563,12 +554,8 @@ export function FirstAgentStage({
               legend="어떤 에이전트를 붙이나요"
               hint={FIRST_AGENT_GENERIC_HINT}
               multiple={false}
-              items={mcpItems}
-              selected={
-                selectedCard && selectedCard !== "openai-compat"
-                  ? [selectedCard]
-                  : []
-              }
+              items={cardItems}
+              selected={selectedCard ? [selectedCard] : []}
               onChange={(next) => {
                 const id = next[0];
                 if (id) setSelectedCard(id as FirstAgentCardId);
@@ -585,35 +572,14 @@ export function FirstAgentStage({
               }
               testId="first-agent-choice"
             />
-            <ChoiceList
-              name="first-agent-provider"
-              legend="이 서버에 provider를 붙이나요"
-              hint={FIRST_AGENT_OPENAI_DETAIL}
-              multiple={false}
-              items={openaiItems}
-              selected={selectedCard === "openai-compat" ? ["openai-compat"] : []}
-              onChange={(next) => {
-                const id = next[0];
-                if (id) setSelectedCard(id as FirstAgentCardId);
-              }}
-              onActivate={handlePick}
-              disabled={cardsLocked}
-              lockMode="aria"
-              describedBy={
-                showOffline
-                  ? FIRST_AGENT_OFFLINE_REASON_ID
-                  : showError
-                    ? FIRST_AGENT_ERROR_REASON_ID
-                    : undefined
-              }
-              testId="first-agent-provider-choice"
-            />
             <Button
               type="button"
               className={cn(
                 "self-start",
                 (!selectedCard || cardsLocked) &&
-                  "pointer-events-none cursor-default opacity-50 hover:opacity-50"
+                  "pointer-events-none cursor-default opacity-50 hover:opacity-50",
+                (!selectedCard || cardsLocked) &&
+                  "aria-disabled:active:transform-none"
               )}
               aria-disabled={!selectedCard || cardsLocked || undefined}
               onClick={() => {

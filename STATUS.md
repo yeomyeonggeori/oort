@@ -3,6 +3,7 @@
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
+- R5 (R4 FAIL B0·H3·M5·N3). 카드 줄은 이름(+미확인 주)만 — generic 단계는 그룹 힌트 한 번. 「다시 확인」은 detecting 폴링을 재개(2s→30s, 상한 리셋). `done` 샷은 보상 화면을 먼저 찍고 채널은 `done-handoff`. 한 ChoiceList·네 옵션. aria 잠금은 컨트롤만 `opacity-50`, 이름은 `text-ink-muted`. 잠긴 「계속」은 `aria-disabled:active:transform-none`. 빈 detail 은 묶지 않음. 캡처 픽스처는 `HOSTED_AUTH_MODE`/`HOSTED_AGENT_PORT_AUDIENCE`.
 - R4 (R3 FAIL B1·H1·M6·N3). 「계속」 잠금은 `aria-disabled`+`opacity-50`+`pointer-events-none` 렌더 가드. 핸드오프는 화면과 같은 `hintedAgentMemberId` 로 초안을 심는다. 카드 두 줄은 프리셋 단계가 다르다. MCP 힌트는 세 장만, OpenAI 는 자기 그룹. aria 잠금은 사유를 흐리지 않는다. 멘션 재진입은 tap-target. 다시 확인 결과는 리드를 반복하지 않는다.
 - R3 (R2 FAIL B2·H5·M7·N4). 발급·감지 뒤 roster invalidate + `agentMemberId` 만으로 멘션. `ChoiceList` 기본은 native `fieldset disabled`, 퍼널만 `lockMode="aria"` + 보이는 반쪽. 「다시 확인」은 즉시 poll + live region. cap 리드≠본문. 로딩 막대 호스트 폭. 「연결됨」은 렌더 가드. generic 문장은 그룹 hint 한 번. 멘션 설정 경로 한 번. provider `configured` 도 자동 통과. 실제 위저드 create 응답이 dd 한 칸.
 - R2 (R1 FAIL B2·H5·M7·N4). 화살표는 선택만, 커밋은 Enter/Space·「계속」. `detected`/`active` 멘션 스텝은 이름·채널(또는 승인 대기)+채널 핸드오프. 단계별 리드. 오프라인은 `aria-disabled`. OpenAI는 `deferred`. 자동 통과는 `detected|active`. 1회용 가드는 발급 비밀. 캡처 8포즈.

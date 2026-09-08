@@ -40,6 +40,9 @@ function mount(lockMode?: "native" | "aria"): HTMLElement {
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
+  const style = document.createElement("style");
+  style.textContent = ".opacity-50 { opacity: 0.5; }";
+  document.head.append(style);
 });
 
 afterEach(() => {
@@ -66,6 +69,7 @@ describe("ChoiceList 그룹 잠금", () => {
     const host = mount("aria");
     const fieldset = host.querySelector("fieldset");
     const row = host.querySelector<HTMLElement>("[data-choice-id='a']");
+    const input = host.querySelector<HTMLInputElement>("#lock-probe-a");
     const label = host.querySelector("#lock-probe-a")?.nextElementSibling
       ?.firstElementChild;
     const detail = host.querySelector("#lock-probe-a-detail");
@@ -74,7 +78,10 @@ describe("ChoiceList 그룹 잠금", () => {
     expect(row?.className).toMatch(/cursor-default/);
     expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
     expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
-    expect(label?.className.split(/\s+/)).toContain("opacity-50");
+    expect(input?.className.split(/\s+/)).toContain("opacity-50");
+    expect(input ? getComputedStyle(input).opacity : "").toBe("0.5");
+    expect(label?.className.split(/\s+/)).toContain("text-ink-muted");
+    expect(label?.className.split(/\s+/)).not.toContain("opacity-50");
     expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");
     const before = row ? getComputedStyle(row).backgroundColor : "";
     act(() => {
@@ -82,5 +89,29 @@ describe("ChoiceList 그룹 잠금", () => {
       row?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
     });
     expect(row ? getComputedStyle(row).backgroundColor : "").toBe(before);
+  });
+
+  it("빈 detail 은 그리지 않고 묶지도 않는다", () => {
+    const host = document.createElement("div");
+    document.body.append(host);
+    mountedHost = host;
+    mountedRoot = createRoot(host);
+    act(() => {
+      mountedRoot?.render(
+        createElement(ChoiceList, {
+          name: "empty-detail",
+          legend: "목록",
+          multiple: false,
+          items: [{ id: "a", label: "하나", detail: "" }],
+          selected: ["a"],
+          onChange: () => undefined,
+        })
+      );
+    });
+    const input = host.querySelector("#empty-detail-a");
+    expect(host.querySelector("#empty-detail-a-detail")).toBeNull();
+    expect(input?.getAttribute("aria-describedby") ?? "").not.toContain(
+      "empty-detail-a-detail"
+    );
   });
 });

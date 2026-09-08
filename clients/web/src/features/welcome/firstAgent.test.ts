@@ -19,6 +19,8 @@ import {
   copyClaimsConnected,
   countsTowardAutoPass,
   firstAgentCardsUseHostedPresets,
+  firstAgentCaptureAgent,
+  firstAgentCaptureDetected,
   firstAgentCaptureSecret,
   firstAgentDetectingDetail,
   firstAgentLead,
@@ -49,12 +51,22 @@ describe("첫 에이전트 카드 4종", () => {
     expect(grok?.verified).toBe(false);
     expect(grok?.unverifiedNote).toBeTruthy();
     expect(FIRST_AGENT_CARDS[2]?.detail).toBe(grok?.unverifiedNote);
-    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(FIRST_AGENT_CARDS[1]?.detail);
-    expect(FIRST_AGENT_CARDS[0]?.detail).toBe(generic?.steps[0]);
-    expect(FIRST_AGENT_CARDS[1]?.detail).toBe(generic?.steps[1]);
+    expect(FIRST_AGENT_CARDS[0]?.detail).toBe("");
+    expect(FIRST_AGENT_CARDS[1]?.detail).toBe("");
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(generic?.steps[1]);
+    expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe(generic?.steps[1]);
     expect(FIRST_AGENT_CARDS[0]?.detail).not.toContain(generic?.detail ?? "___");
     expect(FIRST_AGENT_CARDS[1]?.detail).not.toContain(generic?.detail ?? "___");
     expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
+  });
+
+  it("카드 설명은 나중 단계를 가리키지 않는다", () => {
+    const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
+    expect(generic?.steps[1]).toContain("아래");
+    for (const card of FIRST_AGENT_CARDS) {
+      expect(card.detail, card.id).not.toContain("아래");
+      expect(card.detail, card.id).not.toBe(generic?.steps[1]);
+    }
   });
 });
 
@@ -177,5 +189,35 @@ describe("캡처 비밀은 디자인 모드만", () => {
       'if (import.meta.env.MODE !== "design") return ""'
     );
     expect(firstAgentCaptureSecret()).toBe("");
+  });
+
+  it("제품 모드에서 캡처 detected 는 없다", () => {
+    expect(src("./firstAgent.ts")).toContain(
+      'if (import.meta.env.MODE !== "design") return null'
+    );
+    expect(firstAgentCaptureDetected()).toBeNull();
+    expect(firstAgentCaptureAgent()).toEqual({
+      agentMemberId: "",
+      displayName: "",
+      handle: "",
+    });
+  });
+
+  it("done 이 아닌 포즈는 detected 를 심지 않는다", () => {
+    expect(src("./FirstAgentStage.tsx")).toContain(
+      'pose === "done" ? firstAgentCaptureDetected() : null'
+    );
+    expect(src("./FirstAgentStage.tsx")).not.toMatch(
+      /useState<HostedAgentConnection \| null>\(\s*firstAgentCaptureDetected/
+    );
+  });
+
+  it("캡처 픽스처는 코어 상수를 쓴다", () => {
+    expect(src("./firstAgent.ts")).toContain("HOSTED_AUTH_MODE");
+    expect(src("./firstAgent.ts")).toContain("HOSTED_AGENT_PORT_AUDIENCE");
+    expect(src("./firstAgent.ts")).not.toMatch(/authMode:\s*"static_bearer"/);
+    expect(src("./firstAgent.ts")).not.toMatch(
+      /audience:\s*"\/v1\/mcp\/agent-port"/
+    );
   });
 });

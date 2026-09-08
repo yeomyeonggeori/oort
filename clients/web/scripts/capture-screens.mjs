@@ -12229,7 +12229,8 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
 
 /**
  * UX-R2c (#2216). Login-after first-agent poses. Design-mode `?firstAgent=`
- * only; not part of the default `all` profile.
+ * only; not part of the default `all` profile. Nine shot names: eight URL
+ * poses plus `done-handoff` from the same `done` page after the hand-off click.
  */
 async function captureFirstAgentScenes(browser, scheme) {
   beginScene("first-agent");
@@ -12347,9 +12348,9 @@ async function captureFirstAgentScenes(browser, scheme) {
             `first-agent done ${scheme} ${viewport.width}: truncate 폭이 0이다 (${JSON.stringify(mentionTruncates)})`
           );
         }
-        if (row.overflow !== true && row.overflow !== false) {
+        if (row.overflow !== false) {
           throw new Error(
-            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 없다 (${JSON.stringify(mentionTruncates)})`
+            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 false 가 아니다 (${JSON.stringify(mentionTruncates)})`
           );
         }
       }
@@ -12381,19 +12382,23 @@ async function captureFirstAgentScenes(browser, scheme) {
       );
     }
     if (pose === "done") {
-      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
-      await page.locator("#composer-input").waitFor({ state: "visible" });
-      const seeded = await page.evaluate(() => {
-        const el = document.querySelector("#composer-input");
-        const value =
-          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
-            ? el.value
-            : (el?.textContent ?? "");
-        return value;
+      const payoff = await page.evaluate(() => {
+        const heading = document.querySelector("#first-agent-heading");
+        return {
+          heading: heading?.textContent ?? "",
+          hasComposer: Boolean(document.querySelector("#composer-input")),
+          hasMention: Boolean(
+            document.querySelector('[data-testid="first-agent-mention"]')
+          ),
+        };
       });
-      if (!String(seeded).includes("@kim-intern ")) {
+      if (
+        !payoff.heading.includes("첫 에이전트 연결") ||
+        payoff.hasComposer ||
+        !payoff.hasMention
+      ) {
         throw new Error(
-          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
+          `first-agent done ${scheme} ${viewport.width}: done 이 보상 화면이 아니다 (${JSON.stringify(payoff)})`
         );
       }
     }
@@ -12422,6 +12427,29 @@ async function captureFirstAgentScenes(browser, scheme) {
     );
     await page.screenshot({ path });
     shots.push(path);
+    if (pose === "done") {
+      beginScene("first-agent");
+      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
+      await page.locator("#composer-input").waitFor({ state: "visible" });
+      const seeded = await page.evaluate(() => {
+        const el = document.querySelector("#composer-input");
+        const value =
+          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+            ? el.value
+            : (el?.textContent ?? "");
+        return value;
+      });
+      if (!String(seeded).includes("@kim-intern ")) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
+        );
+      }
+      const handoff = beginSceneFromShotPath(
+        `${OUT_DIR}/first-agent-done-handoff${suffix}-${scheme}.png`
+      );
+      await page.screenshot({ path: handoff });
+      shots.push(handoff);
+    }
     await context.close();
   }
 

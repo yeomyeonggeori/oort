@@ -30,9 +30,9 @@ import { cn } from "@/design/lib/cn";
 // 그룹 잠금의 기본은 native `fieldset disabled` 다. 위저드·동의·정리 목록이
 // 그 동작을 그대로 쓴다. 퍼널만 `lockMode="aria"` 로 옵트인한다: native
 // disabled 는 라디오를 탭 순서에서 지우고 초점을 `<body>` 로 떨어뜨리므로
-// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 잠금(컨트롤·이름은
-// `opacity-50`·`cursor-default`, hover 채움 없음, 사유 글자는 그대로) +
-// 클릭/Enter 가드다.
+// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 잠금(컨트롤만
+// `opacity-50`·`cursor-default`, 이름은 `text-ink-muted`, hover 채움 없음,
+// 사유 글자는 그대로) + 클릭/Enter 가드다.
 // =============================================================================
 
 export interface ChoiceListItem {
@@ -163,8 +163,10 @@ export function ChoiceList({
         {items.map((item) => {
           const checked = item.locked || selected.includes(item.id);
           const inert = Boolean(item.disabled) || Boolean(item.locked);
-          const detailId = `${name}-${item.id}-detail`;
-          const described = [groupDescribedBy, detailId].filter(Boolean).join(" ");
+          const hasDetail = item.detail !== "";
+          const detailId = hasDetail ? `${name}-${item.id}-detail` : undefined;
+          const described =
+            [groupDescribedBy, detailId].filter(Boolean).join(" ") || undefined;
           return (
             <label
               key={item.id}
@@ -203,17 +205,20 @@ export function ChoiceList({
               <span className="flex min-w-0 flex-col gap-px">
                 <span
                   className={cn(
-                    "break-keep text-body text-ink",
-                    ariaLock && "opacity-50"
+                    "break-keep text-body",
+                    ariaLock ? "text-ink-muted" : "text-ink"
                   )}
                 >
                   {item.label}
                 </span>
                 {/* 결과 문장은 hover 뒤가 아니라 언제나 여기 있다. 그룹 잠금은
-                    컨트롤·이름만 흐리고 사유는 읽힌다. */}
-                <span id={detailId} className="break-keep text-meta text-ink-muted">
-                  {item.detail}
-                </span>
+                    컨트롤만 흐리고 이름은 ink-muted, 사유는 읽힌다. 빈 설명은
+                    묶지도 그리지 않는다. */}
+                {hasDetail ? (
+                  <span id={detailId} className="break-keep text-meta text-ink-muted">
+                    {item.detail}
+                  </span>
+                ) : null}
               </span>
             </label>
           );

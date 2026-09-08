@@ -1,4 +1,9 @@
-import type { HostedConnectionStatus } from "@momo/core/features/hostedAgents/model";
+import {
+  HOSTED_AGENT_PORT_AUDIENCE,
+  HOSTED_AUTH_MODE,
+  type HostedAgentConnection,
+  type HostedConnectionStatus,
+} from "@momo/core/features/hostedAgents/model";
 import {
   HOSTED_PRESETS,
   hostedPreset,
@@ -96,18 +101,14 @@ function grokCardDetail(): string {
   return grokPreset().unverifiedNote ?? grokPreset().steps[0] ?? "";
 }
 
-function genericStep(index: number): string {
-  return genericPreset().steps[index] ?? genericPreset().steps[0] ?? "";
-}
-
-/** MCP 세 장 아래 한 번만 서는 공통 문장. OpenAI 호환 그룹에는 서지 않는다. */
+/** MCP 카드 아래 한 번만 서는 공통 문장. 카드 줄은 이름(+미확인 주)만. */
 export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: genericStep(0),
+    detail: "",
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -115,7 +116,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: genericStep(1),
+    detail: "",
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -189,11 +190,11 @@ export function firstAgentCardsUseHostedPresets(): boolean {
   return (
     grokCard.label === grok.label &&
     Boolean(grok.unverifiedNote && grokCard.detail === grok.unverifiedNote) &&
-    claude.detail === (generic.steps[0] ?? "") &&
-    codex.detail === (generic.steps[1] ?? "") &&
-    claude.detail !== "" &&
-    codex.detail !== "" &&
-    claude.detail !== codex.detail &&
+    claude.detail === "" &&
+    codex.detail === "" &&
+    !claude.detail.includes("아래") &&
+    !codex.detail.includes("아래") &&
+    !grokCard.detail.includes("아래") &&
     !claude.detail.includes(generic.detail) &&
     !codex.detail.includes(generic.detail) &&
     !grokCard.detail.includes(generic.detail) &&
@@ -319,25 +320,16 @@ export function firstAgentCaptureAgent(): {
 }
 
 /** 캡처 `done` 픽스처. 명부의 그 에이전트 id 를 싣는다. 제품 경로는 쓰지 않는다. */
-export function firstAgentCaptureDetected(): {
-  id: string;
-  agentMemberId: string;
-  status: "detected";
-  authMode: string;
-  audience: string;
-  approvedChannelIds: string[];
-  approvedScopes: [];
-  createdAtMs: number;
-  updatedAtMs: number;
-} | null {
+export function firstAgentCaptureDetected(): HostedAgentConnection | null {
+  if (import.meta.env.MODE !== "design") return null;
   const agent = firstAgentCaptureAgent();
   if (agent.agentMemberId === "") return null;
   return {
     id: "019f9a01-0000-7000-8000-0000000005c1",
     agentMemberId: agent.agentMemberId,
     status: "detected",
-    authMode: "static_bearer",
-    audience: "/v1/mcp/agent-port",
+    authMode: HOSTED_AUTH_MODE,
+    audience: HOSTED_AGENT_PORT_AUDIENCE,
     approvedChannelIds: [],
     approvedScopes: [],
     createdAtMs: 1_700_000_000_000,

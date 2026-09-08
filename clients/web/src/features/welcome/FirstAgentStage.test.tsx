@@ -19,7 +19,6 @@ import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore"
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import {
   DETECT_CAP_MS,
-  DETECT_INITIAL_MS,
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CHANNEL_PENDING,
@@ -33,7 +32,6 @@ import {
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
-  formatRecheckStill,
 } from "./firstAgent";
 import {
   applyFirstAgentFocus,
@@ -262,9 +260,9 @@ function pressKey(el: Element, key: string): void {
 }
 
 function commitCard(host: HTMLElement, id: string): void {
-  const radio =
-    host.querySelector<HTMLInputElement>(`#first-agent-harness-${id}`) ??
-    host.querySelector<HTMLInputElement>(`#first-agent-provider-${id}`);
+  const radio = host.querySelector<HTMLInputElement>(
+    `#first-agent-harness-${id}`
+  );
   if (!radio) throw new Error(`missing card ${id}`);
   radio.focus();
   pressKey(radio, "Enter");
@@ -302,6 +300,9 @@ function mountStage(): HTMLElement {
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
+  const style = document.createElement("style");
+  style.textContent = ".opacity-50 { opacity: 0.5; }";
+  document.head.append(style);
 });
 
 beforeEach(() => {
@@ -350,6 +351,21 @@ afterEach(() => {
   clearAllDrafts();
 });
 
+describe("M-2 캡처 detected 는 done 만", () => {
+  it("cards 포즈는 멘션을 심지 않는다", async () => {
+    poseSlot.current = "cards";
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id]") !== null,
+      "cards"
+    );
+    expect(host.querySelector('[data-testid="first-agent-mention"]')).toBeNull();
+    expect(source()).toContain(
+      'pose === "done" ? firstAgentCaptureDetected() : null'
+    );
+  });
+});
+
 describe("소스 규율", () => {
   it("위저드·1회용 카드·첫 멘션 조각·ChoiceList 를 복제하지 않는다", () => {
     const text = source();
@@ -383,6 +399,8 @@ describe("카드 4 · 건너뛰기", () => {
       node.getAttribute("data-choice-id")
     );
     expect(ids).toEqual(FIRST_AGENT_CARDS.map((card) => card.id));
+    expect(host.querySelectorAll("fieldset").length).toBe(1);
+    expect(host.querySelector('[data-testid="first-agent-provider-choice"]')).toBeNull();
     expect(host.querySelector('[data-testid="first-agent-skip"]')?.textContent).toBe(
       "나중에"
     );
@@ -396,13 +414,14 @@ describe("카드 4 · 건너뛰기", () => {
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
     ).toBe(1);
-    const claudeDetail = host.querySelector(
-      "#first-agent-harness-claude-code-detail"
+    expect(host.querySelector("#first-agent-harness-claude-code-detail")).toBeNull();
+    expect(host.querySelector("#first-agent-harness-codex-detail")).toBeNull();
+    expect(
+      host.querySelector("#first-agent-harness-claude-code")?.getAttribute("aria-describedby")
+    ).not.toContain("claude-code-detail");
+    expect(host.querySelector("#first-agent-harness-openai-compat-detail")?.textContent).toBe(
+      FIRST_AGENT_OPENAI_DETAIL
     );
-    const codexDetail = host.querySelector("#first-agent-harness-codex-detail");
-    expect(claudeDetail?.textContent).toBe(FIRST_AGENT_CARDS[0]?.detail);
-    expect(codexDetail?.textContent).toBe(FIRST_AGENT_CARDS[1]?.detail);
-    expect(claudeDetail?.textContent).not.toBe(codexDetail?.textContent);
     expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
       /\bmax-w-sm\b/
     );
@@ -446,7 +465,7 @@ describe("B-1 화살표는 선택만", () => {
       "cards"
     );
     expect(readFirstAgentMarker(WS)).toBeNull();
-    expect(document.activeElement?.id).toBe("first-agent-harness-grok");
+    expect(document.activeElement?.id).toBe("first-agent-harness-openai-compat");
     expect(continued).toBe(0);
   });
 });
@@ -568,10 +587,15 @@ describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
     expect(row?.className).toMatch(/cursor-default/);
     expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
     expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
+    const input = host.querySelector<HTMLInputElement>("#first-agent-harness-claude-code");
     const label = host.querySelector("#first-agent-harness-claude-code")
       ?.nextElementSibling?.firstElementChild;
-    const detail = host.querySelector("#first-agent-harness-claude-code-detail");
-    expect(label?.className.split(/\s+/)).toContain("opacity-50");
+    const detail = host.querySelector("#first-agent-harness-grok-detail");
+    expect(input?.className.split(/\s+/)).toContain("opacity-50");
+    expect(input ? getComputedStyle(input).opacity : "").toBe("0.5");
+    expect(label?.className.split(/\s+/)).toContain("text-ink-muted");
+    expect(label?.className.split(/\s+/)).not.toContain("opacity-50");
+    expect(detail).not.toBeNull();
     expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");
     const before = row ? getComputedStyle(row).backgroundColor : "";
     act(() => {
@@ -610,7 +634,7 @@ describe("M-5 OpenAI 호환은 보류 마커", () => {
   it("설정으로 넘기기 전에 deferred 를 쓰고 done 은 쓰지 않는다", async () => {
     const host = mountStage();
     await waitFor(
-      () => host.querySelector("#first-agent-provider-openai-compat") !== null,
+      () => host.querySelector("#first-agent-harness-openai-compat") !== null,
       "cards"
     );
     commitCard(host, "openai-compat");
@@ -833,6 +857,12 @@ describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
       "rechecking"
     );
     expect(host.textContent).toContain(FIRST_AGENT_RECHECKING);
+    expect(vi.mocked(getHostedConnection).mock.calls.length).toBe(before + 1);
+    expect(countNeedle(host.textContent ?? "", FIRST_AGENT_LEAD_CAP)).toBe(1);
+    vi.mocked(getHostedConnection).mockResolvedValue({
+      connection: wireConnection({ status: "pairing_pending" }),
+      cleanupArtifacts: [],
+    });
     await act(async () => {
       settle?.({
         connection: wireConnection({ status: "pairing_pending" }),
@@ -841,14 +871,94 @@ describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
       await Promise.resolve();
     });
     await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "recheck resumes detecting"
+    );
+    expect(host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("data-step")).toBe(
+      "detecting"
+    );
+    expect(host.textContent).not.toContain("다음 확인");
+  });
+});
+
+describe("H-H 다시 확인 뒤 폴링이 이어진다", () => {
+  it("다시 확인 뒤 30초면 getHostedConnection 이 더 불린다", async () => {
+    vi.mocked(getHostedConnection).mockResolvedValue({
+      connection: wireConnection({ status: "pairing_pending" }),
+      cleanupArtifacts: [],
+    });
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id='codex']") !== null,
+      "cards"
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    commitCard(host, "codex");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
+      "wizard"
+    );
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+        ?.click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
+    );
+    await act(async () => {
+      vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-cap-exceeded"]') !== null,
+      "cap"
+    );
+    let settle: ((value: {
+      connection: Record<string, unknown>;
+      cleanupArtifacts: unknown[];
+    }) => void) | undefined;
+    vi.mocked(getHostedConnection).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        })
+    );
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-recheck"]')
+        ?.click();
+    });
+    await waitFor(
       () =>
         host.querySelector('[data-testid="first-agent-recheck-status"]')
-          ?.textContent === formatRecheckStill(DETECT_INITIAL_MS),
-      "recheck result"
+          ?.textContent === FIRST_AGENT_RECHECKING,
+      "rechecking"
     );
-    expect(vi.mocked(getHostedConnection).mock.calls.length).toBe(before + 1);
-    expect(countNeedle(host.textContent ?? "", FIRST_AGENT_LEAD_CAP)).toBe(1);
-    expect(host.textContent).toContain(formatRecheckStill(DETECT_INITIAL_MS));
+    vi.mocked(getHostedConnection).mockResolvedValue({
+      connection: wireConnection({ status: "pairing_pending" }),
+      cleanupArtifacts: [],
+    });
+    await act(async () => {
+      settle?.({
+        connection: wireConnection({ status: "pairing_pending" }),
+        cleanupArtifacts: [],
+      });
+      await Promise.resolve();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting after recheck"
+    );
+    await flush();
+    const afterSettle = vi.mocked(getHostedConnection).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_000);
+    });
+    expect(vi.mocked(getHostedConnection).mock.calls.length).toBeGreaterThan(
+      afterSettle
+    );
   });
 });
 
@@ -906,10 +1016,9 @@ describe("B-C 잠긴 계속은 보이는 반쪽을 쌍으로 둔다", () => {
     expect(cont?.getAttribute("aria-disabled")).toBe("true");
     expect(cont?.className.split(/\s+/)).toContain("opacity-50");
     expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
-    act(() => {
-      cont?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    });
-    expect(cont ? getComputedStyle(cont).transform : "").not.toMatch(/matrix/);
+    expect(cont?.className.split(/\s+/)).toContain(
+      "aria-disabled:active:transform-none"
+    );
   }
 
   it("선택이 없으면 aria-disabled 와 opacity-50 과 눌림 없음이다", async () => {
