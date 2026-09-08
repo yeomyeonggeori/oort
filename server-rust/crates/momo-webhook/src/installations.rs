@@ -2,8 +2,7 @@
 //!
 //! Ports the management half of Swift `Routes/WebhookRoutes.swift` (:43-445).
 //! The public ingress half (`POST /v1/webhooks/{ws}/{id}`, `POST /hooks/{token}`)
-//! is **not** ported by #1222 and is tracked separately — see the crate-level
-//! note in the PR body. Everything here is the surface an admin drives.
+//! is ported by #1265 (`routes/webhook_ingress`).
 //!
 //! ## Why a create is this large
 //!
