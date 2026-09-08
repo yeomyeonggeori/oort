@@ -236,7 +236,7 @@ control 중 **T3 세션 상태기계(ADR-0140 9상태)는 불변** — VM `runni
 
 ## 증보 — 로컬 provider opt-in 경계(2026-09-08)
 
-- Status: **Proposed** — 성재 승인 대기(2026-09-08, planner 정정: 패킷 발사 go는 ADR 증보 승인이 아니다. 평문 provider 경계의 운영자 opt-in은 보안 결정이므로 승인 뒤 Accepted로 바꾸고 머지한다)
+- Status: **Accepted** — 성재 결재 2026-09-08 저녁(「ADR-0004 증보 Accept」). 평문 provider 경계의 운영자 opt-in은 보안 결정이므로 Proposed로 정정해 결재를 받은 뒤 Accepted로 바꿨다.
 - 발단: 셀프호스트 생성 env는 `MOMO_ENV=staging`이라 `validated_base_url`의
   `loopback_allowed = flag && !strict && is_loopback` 아래에서 플래그가
   죽어 있었다. 컨테이너 안의 `127.0.0.1`은 컨테이너 자신이고, 호스트의
