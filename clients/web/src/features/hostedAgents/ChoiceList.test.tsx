@@ -66,11 +66,16 @@ describe("ChoiceList 그룹 잠금", () => {
     const host = mount("aria");
     const fieldset = host.querySelector("fieldset");
     const row = host.querySelector<HTMLElement>("[data-choice-id='a']");
+    const label = host.querySelector("#lock-probe-a")?.nextElementSibling
+      ?.firstElementChild;
+    const detail = host.querySelector("#lock-probe-a-detail");
     expect(fieldset?.disabled).toBe(false);
     expect(fieldset?.getAttribute("aria-disabled")).toBe("true");
-    expect(row?.className).toMatch(/opacity-50/);
     expect(row?.className).toMatch(/cursor-default/);
     expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
+    expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
+    expect(label?.className.split(/\s+/)).toContain("opacity-50");
+    expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");
     const before = row ? getComputedStyle(row).backgroundColor : "";
     act(() => {
       row?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));

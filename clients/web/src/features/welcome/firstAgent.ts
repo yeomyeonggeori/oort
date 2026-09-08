@@ -61,6 +61,7 @@ export const FIRST_AGENT_OFFLINE_REASON =
 export const FIRST_AGENT_CAP_COPY =
   "5분이 지났습니다. 에이전트가 연결 값으로 접속했는지 다시 확인하세요.";
 export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
+export const FIRST_AGENT_RECHECK_STILL = "다시 확인했지만 아직입니다";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
@@ -95,18 +96,18 @@ function grokCardDetail(): string {
   return grokPreset().unverifiedNote ?? grokPreset().steps[0] ?? "";
 }
 
-function genericFirstLine(): string {
-  return genericPreset().steps[0] ?? "";
+function genericStep(index: number): string {
+  return genericPreset().steps[index] ?? genericPreset().steps[0] ?? "";
 }
 
-/** 그룹 아래 한 번만 서는 공통 문장. 카드 detail 에 반복하지 않는다. */
+/** MCP 세 장 아래 한 번만 서는 공통 문장. OpenAI 호환 그룹에는 서지 않는다. */
 export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: genericFirstLine(),
+    detail: genericStep(0),
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -114,7 +115,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: genericFirstLine(),
+    detail: genericStep(1),
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -173,6 +174,10 @@ export function formatDetectPollWait(delayMs: number): string {
   return `${Math.round(delayMs / 1000)}초 뒤 다시 확인합니다`;
 }
 
+export function formatRecheckStill(delayMs: number): string {
+  return `${FIRST_AGENT_RECHECK_STILL} · 다음 확인 ${Math.round(delayMs / 1000)}초 뒤`;
+}
+
 /** 프리셋 문구 정책: Grok 은 미확인이고, 카드는 HOSTED_PRESETS 를 복제하지 않는다. */
 export function firstAgentCardsUseHostedPresets(): boolean {
   const grok = HOSTED_PRESETS.find((preset) => preset.id === "grok");
@@ -185,7 +190,10 @@ export function firstAgentCardsUseHostedPresets(): boolean {
     grokCard.label === grok.label &&
     Boolean(grok.unverifiedNote && grokCard.detail === grok.unverifiedNote) &&
     claude.detail === (generic.steps[0] ?? "") &&
-    codex.detail === (generic.steps[0] ?? "") &&
+    codex.detail === (generic.steps[1] ?? "") &&
+    claude.detail !== "" &&
+    codex.detail !== "" &&
+    claude.detail !== codex.detail &&
     !claude.detail.includes(generic.detail) &&
     !codex.detail.includes(generic.detail) &&
     !grokCard.detail.includes(generic.detail) &&
@@ -307,5 +315,32 @@ export function firstAgentCaptureAgent(): {
     agentMemberId: "019f9a01-0000-7000-8000-000000000404",
     displayName: "김인턴",
     handle: "kim-intern",
+  };
+}
+
+/** 캡처 `done` 픽스처. 명부의 그 에이전트 id 를 싣는다. 제품 경로는 쓰지 않는다. */
+export function firstAgentCaptureDetected(): {
+  id: string;
+  agentMemberId: string;
+  status: "detected";
+  authMode: string;
+  audience: string;
+  approvedChannelIds: string[];
+  approvedScopes: [];
+  createdAtMs: number;
+  updatedAtMs: number;
+} | null {
+  const agent = firstAgentCaptureAgent();
+  if (agent.agentMemberId === "") return null;
+  return {
+    id: "019f9a01-0000-7000-8000-0000000005c1",
+    agentMemberId: agent.agentMemberId,
+    status: "detected",
+    authMode: "static_bearer",
+    audience: "/v1/mcp/agent-port",
+    approvedChannelIds: [],
+    approvedScopes: [],
+    createdAtMs: 1_700_000_000_000,
+    updatedAtMs: 1_700_000_000_000,
   };
 }

@@ -22,6 +22,7 @@ import {
   firstAgentCaptureSecret,
   firstAgentDetectingDetail,
   firstAgentLead,
+  formatRecheckStill,
   isHostedDetected,
   nextDetectDelayMs,
   parseFirstAgentCapturePose,
@@ -48,6 +49,9 @@ describe("첫 에이전트 카드 4종", () => {
     expect(grok?.verified).toBe(false);
     expect(grok?.unverifiedNote).toBeTruthy();
     expect(FIRST_AGENT_CARDS[2]?.detail).toBe(grok?.unverifiedNote);
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(FIRST_AGENT_CARDS[1]?.detail);
+    expect(FIRST_AGENT_CARDS[0]?.detail).toBe(generic?.steps[0]);
+    expect(FIRST_AGENT_CARDS[1]?.detail).toBe(generic?.steps[1]);
     expect(FIRST_AGENT_CARDS[0]?.detail).not.toContain(generic?.detail ?? "___");
     expect(FIRST_AGENT_CARDS[1]?.detail).not.toContain(generic?.detail ?? "___");
     expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
@@ -97,6 +101,8 @@ describe("감지는 서버 상태만 본다", () => {
     expect(copyClaimsConnected(FIRST_AGENT_CAP_COPY)).toBe(false);
     expect(FIRST_AGENT_CAP_COPY).not.toBe(FIRST_AGENT_LEAD_CAP);
     expect(FIRST_AGENT_CAP_COPY).not.toMatch(/[—–]/);
+    expect(formatRecheckStill(DETECT_INITIAL_MS)).not.toContain(FIRST_AGENT_LEAD_CAP);
+    expect(formatRecheckStill(DETECT_INITIAL_MS)).toContain("다시 확인했지만 아직입니다");
     expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
   });
 

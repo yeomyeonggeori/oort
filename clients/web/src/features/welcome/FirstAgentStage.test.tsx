@@ -9,14 +9,17 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { fetchRoster, listChannels } from "@momo/core/lib/api";
+import { firstMentionDraft } from "@momo/core/features/hostedAgents/firstMention";
 import { fetchProviderLink } from "@momo/core/features/settings/api";
 import {
   getHostedConnection,
   listHostedConnections,
 } from "@momo/core/features/hostedAgents/api";
+import { clearAllDrafts, draftKey, readDraft } from "@/features/chat/draftStore";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import {
   DETECT_CAP_MS,
+  DETECT_INITIAL_MS,
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CHANNEL_PENDING,
@@ -26,11 +29,14 @@ import {
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_MENTION_ACTION,
+  FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
+  formatRecheckStill,
 } from "./firstAgent";
 import {
+  applyFirstAgentFocus,
   clearAllFirstAgentMarkers,
   readFirstAgentMarker,
 } from "./firstAgentStore";
@@ -256,7 +262,9 @@ function pressKey(el: Element, key: string): void {
 }
 
 function commitCard(host: HTMLElement, id: string): void {
-  const radio = host.querySelector<HTMLInputElement>(`#first-agent-harness-${id}`);
+  const radio =
+    host.querySelector<HTMLInputElement>(`#first-agent-harness-${id}`) ??
+    host.querySelector<HTMLInputElement>(`#first-agent-provider-${id}`);
   if (!radio) throw new Error(`missing card ${id}`);
   radio.focus();
   pressKey(radio, "Enter");
@@ -339,6 +347,7 @@ afterEach(() => {
   mountedHost = null;
   queryClient?.clear();
   queryClient = null;
+  clearAllDrafts();
 });
 
 describe("소스 규율", () => {
@@ -383,6 +392,17 @@ describe("카드 4 · 건너뛰기", () => {
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_GENERIC_HINT)
     ).toBe(1);
+    expect(host.textContent).toContain(FIRST_AGENT_OPENAI_DETAIL);
+    expect(
+      countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
+    ).toBe(1);
+    const claudeDetail = host.querySelector(
+      "#first-agent-harness-claude-code-detail"
+    );
+    const codexDetail = host.querySelector("#first-agent-harness-codex-detail");
+    expect(claudeDetail?.textContent).toBe(FIRST_AGENT_CARDS[0]?.detail);
+    expect(codexDetail?.textContent).toBe(FIRST_AGENT_CARDS[1]?.detail);
+    expect(claudeDetail?.textContent).not.toBe(codexDetail?.textContent);
     expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
       /\bmax-w-sm\b/
     );
@@ -426,7 +446,7 @@ describe("B-1 화살표는 선택만", () => {
       "cards"
     );
     expect(readFirstAgentMarker(WS)).toBeNull();
-    expect(document.activeElement?.id).toBe("first-agent-harness-openai-compat");
+    expect(document.activeElement?.id).toBe("first-agent-harness-grok");
     expect(continued).toBe(0);
   });
 });
@@ -545,8 +565,14 @@ describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
       "first-agent-offline-reason"
     );
     const row = host.querySelector<HTMLElement>("[data-choice-id='claude-code']");
-    expect(row?.className).toMatch(/opacity-50/);
+    expect(row?.className).toMatch(/cursor-default/);
     expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
+    expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
+    const label = host.querySelector("#first-agent-harness-claude-code")
+      ?.nextElementSibling?.firstElementChild;
+    const detail = host.querySelector("#first-agent-harness-claude-code-detail");
+    expect(label?.className.split(/\s+/)).toContain("opacity-50");
+    expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");
     const before = row ? getComputedStyle(row).backgroundColor : "";
     act(() => {
       row?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
@@ -554,7 +580,9 @@ describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
     });
     expect(row ? getComputedStyle(row).backgroundColor : "").toBe(before);
     const cont = host.querySelector('[data-testid="first-agent-continue"]');
-    expect(cont?.className).toMatch(/opacity-50/);
+    expect(cont?.getAttribute("aria-disabled")).toBe("true");
+    expect(cont?.className.split(/\s+/)).toContain("opacity-50");
+    expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
   });
 });
 
@@ -582,7 +610,7 @@ describe("M-5 OpenAI 호환은 보류 마커", () => {
   it("설정으로 넘기기 전에 deferred 를 쓰고 done 은 쓰지 않는다", async () => {
     const host = mountStage();
     await waitFor(
-      () => host.querySelector("#first-agent-harness-openai-compat") !== null,
+      () => host.querySelector("#first-agent-provider-openai-compat") !== null,
       "cards"
     );
     commitCard(host, "openai-compat");
@@ -779,6 +807,10 @@ describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
     expect(host.textContent).toContain(FIRST_AGENT_LEAD_CAP);
     expect(host.textContent).toContain(FIRST_AGENT_CAP_COPY);
     expect(FIRST_AGENT_LEAD_CAP).not.toBe(FIRST_AGENT_CAP_COPY);
+    const status = host.querySelector('[data-testid="first-agent-recheck-status"]');
+    expect(status).not.toBeNull();
+    expect(status?.getAttribute("role")).toBe("status");
+    expect(status?.textContent).toBe("");
     const before = vi.mocked(getHostedConnection).mock.calls.length;
     let settle: ((value: {
       connection: Record<string, unknown>;
@@ -811,10 +843,12 @@ describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
     await waitFor(
       () =>
         host.querySelector('[data-testid="first-agent-recheck-status"]')
-          ?.textContent === FIRST_AGENT_LEAD_CAP,
+          ?.textContent === formatRecheckStill(DETECT_INITIAL_MS),
       "recheck result"
     );
     expect(vi.mocked(getHostedConnection).mock.calls.length).toBe(before + 1);
+    expect(countNeedle(host.textContent ?? "", FIRST_AGENT_LEAD_CAP)).toBe(1);
+    expect(host.textContent).toContain(formatRecheckStill(DETECT_INITIAL_MS));
   });
 });
 
@@ -860,6 +894,101 @@ describe("M-D provider 연결도 자동 통과다", () => {
     await waitFor(() => continued === 1, "provider auto-pass");
     expect(readFirstAgentMarker(WS)).toBe("done");
     expect(host.querySelector("[data-choice-id]")).toBeNull();
+  });
+});
+
+describe("B-C 잠긴 계속은 보이는 반쪽을 쌍으로 둔다", () => {
+  function assertLockedContinue(host: HTMLElement) {
+    const cont = host.querySelector<HTMLButtonElement>(
+      '[data-testid="first-agent-continue"]'
+    );
+    expect(cont).not.toBeNull();
+    expect(cont?.getAttribute("aria-disabled")).toBe("true");
+    expect(cont?.className.split(/\s+/)).toContain("opacity-50");
+    expect(cont?.className.split(/\s+/)).toContain("pointer-events-none");
+    act(() => {
+      cont?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(cont ? getComputedStyle(cont).transform : "").not.toMatch(/matrix/);
+  }
+
+  it("선택이 없으면 aria-disabled 와 opacity-50 과 눌림 없음이다", async () => {
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-continue"]') !== null,
+      "continue"
+    );
+    assertLockedContinue(host);
+  });
+
+  it("오프라인에서도 같은 잠금이다", async () => {
+    offlineSlot.current = true;
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-continue"]') !== null,
+      "offline continue"
+    );
+    assertLockedContinue(host);
+  });
+});
+
+describe("H-F 첫 멘션 쓰기는 초안을 심고 컴포저에 초점을 둔다", () => {
+  it("클릭 뒤 localStorage 초안이 @handle 이고 컴포저가 초점이다", async () => {
+    let status = "pairing_pending";
+    vi.mocked(getHostedConnection).mockImplementation(async () => ({
+      connection: wireConnection({ status }),
+      cleanupArtifacts: [],
+    }));
+    const composer = document.createElement("textarea");
+    composer.id = "composer-input";
+    document.body.append(composer);
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id='claude-code']") !== null,
+      "cards"
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    commitCard(host, "claude-code");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
+      "wizard"
+    );
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+        ?.click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
+    );
+    await waitFor(() => vi.mocked(fetchRoster).mock.calls.length >= 2, "roster refresh");
+    status = "detected";
+    await act(async () => {
+      vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-mention-action"]') !== null,
+      "mention"
+    );
+    const reentry = host.querySelector('[data-testid="first-agent-reentry"]');
+    expect(reentry?.className.split(/\s+/)).toContain("tap-target");
+    expect(reentry?.className.split(/\s+/)).toContain("h-control");
+    expect(readDraft(WS, GENERAL_ID)).toBe("");
+    act(() => {
+      host
+        .querySelector<HTMLButtonElement>('[data-testid="first-agent-mention-action"]')
+        ?.click();
+    });
+    const expected = firstMentionDraft(agent.handle);
+    expect(readDraft(WS, GENERAL_ID)).toBe(expected);
+    expect(localStorage.getItem(draftKey(WS, GENERAL_ID)) ?? "").toContain(
+      expected
+    );
+    applyFirstAgentFocus();
+    expect(document.activeElement).toBe(composer);
   });
 });
 

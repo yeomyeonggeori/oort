@@ -30,8 +30,9 @@ import { cn } from "@/design/lib/cn";
 // 그룹 잠금의 기본은 native `fieldset disabled` 다. 위저드·동의·정리 목록이
 // 그 동작을 그대로 쓴다. 퍼널만 `lockMode="aria"` 로 옵트인한다: native
 // disabled 는 라디오를 탭 순서에서 지우고 초점을 `<body>` 로 떨어뜨리므로
-// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 반쪽(`opacity-50`,
-// `cursor-default`, hover 채움 없음) + 클릭/Enter 가드다.
+// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 잠금(컨트롤·이름은
+// `opacity-50`·`cursor-default`, hover 채움 없음, 사유 글자는 그대로) +
+// 클릭/Enter 가드다.
 // =============================================================================
 
 export interface ChoiceListItem {
@@ -171,7 +172,7 @@ export function ChoiceList({
               className={cn(
                 "flex min-w-0 items-start gap-2 border-b border-line p-2 last:border-b-0",
                 ariaLock
-                  ? "cursor-default opacity-50"
+                  ? "cursor-default"
                   : item.disabled
                     ? "cursor-not-allowed bg-surface-hover"
                     : checked
@@ -194,11 +195,22 @@ export function ChoiceList({
                 aria-describedby={described}
                 onChange={() => toggle(item)}
                 onKeyDown={(event) => handleKeyDown(event, item)}
-                className="mt-1 accent-accent focus-visible:focus-ring"
+                className={cn(
+                  "mt-1 accent-accent focus-visible:focus-ring",
+                  ariaLock && "opacity-50"
+                )}
               />
               <span className="flex min-w-0 flex-col gap-px">
-                <span className="break-keep text-body text-ink">{item.label}</span>
-                {/* 결과 문장은 hover 뒤가 아니라 언제나 여기 있다. */}
+                <span
+                  className={cn(
+                    "break-keep text-body text-ink",
+                    ariaLock && "opacity-50"
+                  )}
+                >
+                  {item.label}
+                </span>
+                {/* 결과 문장은 hover 뒤가 아니라 언제나 여기 있다. 그룹 잠금은
+                    컨트롤·이름만 흐리고 사유는 읽힌다. */}
                 <span id={detailId} className="break-keep text-meta text-ink-muted">
                   {item.detail}
                 </span>

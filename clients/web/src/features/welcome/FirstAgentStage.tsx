@@ -47,11 +47,11 @@ import {
   FIRST_AGENT_ERROR_REASON_ID,
   FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_HEADING_ID,
-  FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LIST_ERROR,
   FIRST_AGENT_MENTION_ACTION,
   FIRST_AGENT_OFFLINE_REASON,
   FIRST_AGENT_OFFLINE_REASON_ID,
+  FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
   FIRST_AGENT_REENTRY_HREF,
@@ -61,11 +61,13 @@ import {
   FIRST_AGENT_SKIP_SENTENCE,
   FIRST_AGENT_TITLE,
   firstAgentCaptureAgent,
+  firstAgentCaptureDetected,
   firstAgentCaptureSecret,
   firstAgentCard,
   firstAgentDetectingDetail,
   firstAgentLead,
   formatDetectPollWait,
+  formatRecheckStill,
   isHostedDetected,
   nextDetectDelayMs,
   readFirstAgentCapturePoseFromLocation,
@@ -123,7 +125,9 @@ export function FirstAgentStage({
   const [wizardOpen, setWizardOpen] = useState(false);
   const [launch, setLaunch] = useState<HostedWizardLaunch | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
-  const [detected, setDetected] = useState<HostedAgentConnection | null>(null);
+  const [detected, setDetected] = useState<HostedAgentConnection | null>(
+    () => (pose === "done" ? firstAgentCaptureDetected() : null)
+  );
   const [listError, setListError] = useState<string | null>(null);
   const [detectStartedAtMs, setDetectStartedAtMs] = useState(() => Date.now());
   const [nextPollMs, setNextPollMs] = useState(DETECT_INITIAL_MS);
@@ -285,17 +289,35 @@ export function FirstAgentStage({
         setStep("mention");
         return;
       }
-      setRecheckStatus(FIRST_AGENT_LEAD_CAP);
+      setRecheckStatus(formatRecheckStill(DETECT_INITIAL_MS));
+      setNextPollMs(DETECT_INITIAL_MS);
     } catch {
-      setRecheckStatus(FIRST_AGENT_LEAD_CAP);
+      setRecheckStatus(formatRecheckStill(DETECT_INITIAL_MS));
+      setNextPollMs(DETECT_INITIAL_MS);
     }
   };
 
+  const mcpItems: ChoiceListItem[] = FIRST_AGENT_CARDS.filter(
+    (card) => card.presetId !== null
+  ).map((card) => ({
+    id: card.id,
+    label: card.label,
+    detail: card.detail,
+  }));
+  const openaiItems: ChoiceListItem[] = FIRST_AGENT_CARDS.filter(
+    (card) => card.presetId === null
+  ).map((card) => ({
+    id: card.id,
+    label: card.label,
+    detail: "",
+  }));
+
+  const hintedAgentMemberId =
+    detected?.agentMemberId ??
+    (pose === "done" ? firstAgentCaptureAgent().agentMemberId : null);
+
   const handleMentionHandoff = () => {
-    const agent = previewHintedAgent(
-      directory.members,
-      detected?.agentMemberId ?? null
-    );
+    const agent = previewHintedAgent(directory.members, hintedAgentMemberId);
     if (welcomeChannelId !== "" && agent && agent.handle !== "") {
       seedComposerText(
         workspaceId,
@@ -309,16 +331,6 @@ export function FirstAgentStage({
     window.location.hash = href;
     finish("done");
   };
-
-  const items: ChoiceListItem[] = FIRST_AGENT_CARDS.map((card) => ({
-    id: card.id,
-    label: card.label,
-    detail: card.detail,
-  }));
-
-  const hintedAgentMemberId =
-    detected?.agentMemberId ??
-    (pose === "done" ? firstAgentCaptureAgent().agentMemberId : null);
   const mentionAgent = previewHintedAgent(directory.members, hintedAgentMemberId);
   const mentionApproved =
     detected !== null && connectionAllowsChannel(detected, welcomeChannelId);
@@ -422,15 +434,13 @@ export function FirstAgentStage({
           data-testid="first-agent-cap-exceeded"
         >
           <p className="break-keep text-body text-ink">{FIRST_AGENT_CAP_COPY}</p>
-          {recheckStatus !== null && (
-            <p
-              role="status"
-              className="break-keep text-body text-ink-muted"
-              data-testid="first-agent-recheck-status"
-            >
-              {recheckStatus}
-            </p>
-          )}
+          <p
+            role="status"
+            className="break-keep text-body text-ink-muted"
+            data-testid="first-agent-recheck-status"
+          >
+            {recheckStatus ?? ""}
+          </p>
           <Button
             type="button"
             className="self-start"
@@ -479,7 +489,7 @@ export function FirstAgentStage({
                   {FIRST_AGENT_CHANNEL_PENDING}{" "}
                   <Link
                     to={FIRST_AGENT_REENTRY_HREF}
-                    className="press whitespace-nowrap underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+                    className="tap-target press inline-flex h-control items-center whitespace-nowrap rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
                     onClick={() => {
                       setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
                       finish("skipped");
@@ -511,11 +521,11 @@ export function FirstAgentStage({
     }
 
     return (
-      <div className="flex min-w-0 flex-col items-start gap-4" data-testid="first-agent-cards">
+      <div className="flex w-full min-w-0 flex-col items-stretch gap-4" data-testid="first-agent-cards">
         {showLoading && (
           <div
             role="status"
-            className="flex w-full min-w-0 flex-col items-start gap-3"
+            className="flex w-full min-w-0 flex-col gap-3"
             data-testid="first-agent-loading"
           >
             <p className="break-keep text-body text-ink-muted">
@@ -553,8 +563,12 @@ export function FirstAgentStage({
               legend="어떤 에이전트를 붙이나요"
               hint={FIRST_AGENT_GENERIC_HINT}
               multiple={false}
-              items={items}
-              selected={selectedCard ? [selectedCard] : []}
+              items={mcpItems}
+              selected={
+                selectedCard && selectedCard !== "openai-compat"
+                  ? [selectedCard]
+                  : []
+              }
               onChange={(next) => {
                 const id = next[0];
                 if (id) setSelectedCard(id as FirstAgentCardId);
@@ -571,11 +585,35 @@ export function FirstAgentStage({
               }
               testId="first-agent-choice"
             />
+            <ChoiceList
+              name="first-agent-provider"
+              legend="이 서버에 provider를 붙이나요"
+              hint={FIRST_AGENT_OPENAI_DETAIL}
+              multiple={false}
+              items={openaiItems}
+              selected={selectedCard === "openai-compat" ? ["openai-compat"] : []}
+              onChange={(next) => {
+                const id = next[0];
+                if (id) setSelectedCard(id as FirstAgentCardId);
+              }}
+              onActivate={handlePick}
+              disabled={cardsLocked}
+              lockMode="aria"
+              describedBy={
+                showOffline
+                  ? FIRST_AGENT_OFFLINE_REASON_ID
+                  : showError
+                    ? FIRST_AGENT_ERROR_REASON_ID
+                    : undefined
+              }
+              testId="first-agent-provider-choice"
+            />
             <Button
               type="button"
               className={cn(
                 "self-start",
-                (!selectedCard || cardsLocked) && "cursor-default opacity-50 hover:opacity-50"
+                (!selectedCard || cardsLocked) &&
+                  "pointer-events-none cursor-default opacity-50 hover:opacity-50"
               )}
               aria-disabled={!selectedCard || cardsLocked || undefined}
               onClick={() => {
@@ -606,7 +644,7 @@ export function FirstAgentStage({
           className="flex w-full justify-center"
         >
           <div
-            className="flex w-full max-w-sm flex-col items-start gap-4"
+            className="flex w-full max-w-sm flex-col items-stretch gap-4"
             data-testid="first-agent-stage"
             data-step={step}
             role="region"

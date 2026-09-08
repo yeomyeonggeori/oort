@@ -12248,20 +12248,38 @@ async function captureFirstAgentScenes(browser, scheme) {
     cards: [
       ["first-agent-skip", "나중에"],
       ["first-agent-continue", "계속"],
+      ["first-agent-reentry", "재진입"],
     ],
-    "one-time": [["first-agent-skip", "나중에"]],
-    detecting: [["first-agent-skip", "나중에"]],
+    "one-time": [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    detecting: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
     "cap-exceeded": [
       ["first-agent-skip", "나중에"],
       ["first-agent-recheck", "다시 확인"],
+      ["first-agent-reentry", "재진입"],
     ],
     done: [
       ["first-agent-skip", "나중에"],
       ["first-agent-mention-action", "첫 멘션"],
+      ["first-agent-reentry", "재진입"],
     ],
-    loading: [["first-agent-skip", "나중에"]],
-    offline: [["first-agent-skip", "나중에"]],
-    error: [["first-agent-skip", "나중에"]],
+    loading: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    offline: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    error: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
   };
 
   async function shoot(pose, viewport, suffix) {
@@ -12323,6 +12341,18 @@ async function captureFirstAgentScenes(browser, scheme) {
           `first-agent done ${scheme} ${viewport.width}: 멘션 이름에 truncate 가 없다`
         );
       }
+      for (const row of mentionTruncates) {
+        if (row.width <= 0) {
+          throw new Error(
+            `first-agent done ${scheme} ${viewport.width}: truncate 폭이 0이다 (${JSON.stringify(mentionTruncates)})`
+          );
+        }
+        if (row.overflow !== true && row.overflow !== false) {
+          throw new Error(
+            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 없다 (${JSON.stringify(mentionTruncates)})`
+          );
+        }
+      }
     }
     if (viewport.width === 390) {
       const crumb = await page.evaluate(() => {
@@ -12350,15 +12380,40 @@ async function captureFirstAgentScenes(browser, scheme) {
         tapTargetsByPose[pose]
       );
     }
-    if (pose === "loading") {
-      const widths = await page.evaluate(() =>
-        [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
-          (el) => el.getBoundingClientRect().width
-        )
-      );
-      if (widths.length === 0 || widths.some((width) => width <= 0)) {
+    if (pose === "done") {
+      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
+      await page.locator("#composer-input").waitFor({ state: "visible" });
+      const seeded = await page.evaluate(() => {
+        const el = document.querySelector("#composer-input");
+        const value =
+          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+            ? el.value
+            : (el?.textContent ?? "");
+        return value;
+      });
+      if (!String(seeded).includes("@kim-intern ")) {
         throw new Error(
-          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.join(", ")})`
+          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
+        );
+      }
+    }
+    if (pose === "loading") {
+      const widths = await page.evaluate(() => {
+        const stage = document.querySelector('[data-testid="first-agent-stage"]');
+        const stageW = stage ? stage.getBoundingClientRect().width : 0;
+        const bars = [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
+          (el) => el.getBoundingClientRect().width
+        );
+        return { stageW, bars };
+      });
+      if (widths.bars.length === 0 || widths.bars.some((width) => width <= 0)) {
+        throw new Error(
+          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.bars.join(", ")})`
+        );
+      }
+      if (widths.bars.some((width) => width < widths.stageW - 1)) {
+        throw new Error(
+          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대가 목록 폭이 아니다 stage=${widths.stageW} bars=${widths.bars.join(", ")}`
         );
       }
     }
