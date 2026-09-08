@@ -3,6 +3,14 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-08 (저녁·밤) → 09-09 새벽 · Fable · ★결재 4건 집행 + G1'-2·G1'-3 전량 main 정본화(SH-6a-w R7 PASS·SH-6a-e·#1265·SH-8·SH-9) — 스냅샷 94
+
+- **성재 결재(09-08 저녁)**: ①ADR-0004 증보 Accept(로컬 provider opt-in 경계 — planner가 워커의 「Accepted(성재 승인)」 표기를 Proposed로 정정해 결재를 받은 뒤 Accepted) ②SH-8·SH-9 발급 go ③Railway 실배포 E2E는 최종 셀프호스팅 검증 단계 ④실기기 APNs는 데스크톱 셀프호스팅 완료 뒤. 기록: `2026-09-08-remaining-work-map.md` 결재 절 · `first-goal-two-cases.md` §9.
+- **정본화(순서대로)**: #1265 웹훅 인바운드(PR #2226, R2: 세 Caddyfile `/hooks/*` 프록시 + 「403 아님」만 보던 계약 시험을 블록 실재·업스트림·순서 단정으로 교체; 승격 #2227) · G1'-3 패킷 docs(#2232→#2233) · **SH-6a-e**(PR #2225, 승격 #2237, ADR-0004 증보 Accepted, mock hermes E2E) · **SH-8 #2230**(PR #2236: §3.3.16 라우트 대조표 5/5·pairing bearer `tools/call` 401 문서 정정·로컬 CDP 하네스 READ/WRITE·SEND=사람 Enter 1탭; 승격 #2240) · **SH-9 #2231**(PR #2243: 4문서 Rust 현행화·SELF_HOST §5 로컬 provider 실측 seq=3·문서 인용 게이트; 승격 #2244) · **SH-6a-w #2204**(PR #2214, design-review **R5 FAIL B2 → R6 FAIL B1 → R7 PASS B0·H0·M0·N4**, R8 주석 정정; 승격 #2247). main `9dd350e1` · uxui `857f3277` · engine `3d1923e2`. UX-R2c #2216 워커 발사(00:2x).
+- **탐색 정정(SH-8/SH-9 브리프)**: §3.3.16 합류 절은 09-06에 이미 존재(검수·보강으로 축소) · CDP 하네스는 레포에 커밋된 적 없음(신규 작성, 사양 research/2026-08-22) · #1361 Deps 전부 CLOSED(blocked 라벨 낡음 — 재실측 코멘트 게시, 라벨 교체는 성재 승인 대기) · external-agent-provider 스테일은 국소적(Swift 이름 11·죽은 검증기 5·포트 2), 진짜 공백은 SELF_HOST §5.
+- **교훈**: ①planner의 레이아웃 규칙도 부작용을 낳는다(R5 규칙 3 → 컨트롤이 `--accent-soft` 위, R5 `minmax` 바닥은 산술상 dead) — 규칙은 「측정 열」과 함께 적고 사보타주가 실제로 붉어지는지까지 리뷰어가 잰다 ②감사 랜딩 템플릿: CONFLICTING이면 감사 전에 ABORT, 검증기는 4×30s 재시도(라벨 재부착 뒤 평가기 provenance 지연), 병합은 planner가 STATUS 합집합으로 ③발사기 셸 함정: `pipefail`+`grep -q`(SIGPIPE), 워커 0일 때 `pgrep` exit 1 + `set -e` ④체인 템플릿의 낡은 echo(「#2142 closed」)는 오독을 부른다 — 자리표시자로.
+- **잔여 후보(미발급)**: R7-N4 core `parseDisconnectStart` 상태 재기록 가드 · 프리플라이트 `arbitrary_tw` 사각(`[minmax`·다중행 `cn()`) · #1361 라벨 blocked→ready(승인 대기) · Railway E2E(최종 단계) · APNs 실기기(데스크톱 뒤).
+
 ## 2026-09-08 (오전·재개) · Fable · ★안전 중단 플러시 + 재개 — SH-6a-w R3 FAIL → R4 가동, Railway 실배포는 G1'-4 시점으로
 
 - 09-08 새벽 진행분(중단 시 미플러시): **SH-5a 템플릿 main `03e90c4c`**(#2210·승격 #2211; 실배포 E2E 미실행 — `RAILWAY_TOKEN` 부재, #2205 open) · **G1'-2 패킷 main `bbb00168`**(#2217·승격 #2218: SH-6a-e #2215·UX-R2c #2216·#1265 브리프, 지도 갱신) · **SH-6a-w #2214**: design-review R1 FAIL(H4·M5·N5, 브리프 결함 H-3 포함) → R2 수리 → R2 FAIL(B1·H3·M3·N5, 수리 회귀: 해제 대상 불일치) → R3 수리 → **R3 FAIL(B1·H1·M2·N5)**: R2 12건 CLOSED, R1 H-4 재발(한 줄 레이아웃 flex — 390px 이름 폭 0~3px), 터미널 행 도어벨 착지 결함. 성재 지시로 안전 중단(PR·머지 없이).
