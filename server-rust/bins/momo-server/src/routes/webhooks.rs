@@ -15,12 +15,7 @@
 //! ## What is NOT here
 //!
 //! The **public ingress** half (`POST /v1/webhooks/{ws}/{id}`,
-//! `POST /hooks/{token}`) is out of #1222's stated scope (관리 REST 8연산 +
-//! 송신 소비자) and is carried as an explicit deviation in the PR body. The
-//! consequence is honest and bounded: an admin can install, rotate and revoke a
-//! webhook, and the credential they are shown will not be accepted by this
-//! server until the ingress routes land. `momo-webhook` already holds the
-//! signing primitives that half needs.
+//! `POST /hooks/{token}`) lives in [`crate::routes::webhook_ingress`].
 //!
 //! ## The secret discipline, restated where it is enforced
 //!

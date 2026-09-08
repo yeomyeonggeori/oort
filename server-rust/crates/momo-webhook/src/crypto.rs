@@ -142,10 +142,95 @@ pub fn delivery_signature(secret: &str, timestamp: &str, body: &[u8]) -> String 
     hex::encode(mac.finalize().into_bytes())
 }
 
+/// Native ingress HMAC over the canonical signature base (ADR-0115 D1).
+/// Distinct from [`delivery_signature`]: outbound binds `ts.body`, inbound binds
+/// the versioned newline-joined base that includes the body SHA-256.
+pub fn ingress_signature(secret: &str, base: &str) -> String {
+    let mut mac = <HmacSha256 as Mac>::new_from_slice(secret.as_bytes())
+        .expect("HMAC accepts a key of any length");
+    mac.update(base.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+/// ADR-0115 D1 signature base, ported from Swift `WebhookCrypto.canonicalSignatureBase`.
+pub fn canonical_signature_base(
+    workspace_id: Uuid,
+    installation_id: Uuid,
+    timestamp: &str,
+    delivery_id: &str,
+    body_sha256: &str,
+) -> String {
+    let workspace = hyphenated(workspace_id);
+    let installation = hyphenated(installation_id);
+    [
+        "v1",
+        "POST",
+        &format!("/v1/webhooks/{workspace}/{installation}"),
+        installation.as_str(),
+        timestamp,
+        delivery_id,
+        body_sha256,
+    ]
+    .join("\n")
+}
+
+/// Replay window for native timestamps (Swift `replayWindowSeconds`).
+pub const REPLAY_WINDOW_SECONDS: i64 = 5 * 60;
+/// Slack-compatible approximate-idempotency bucket (Swift `slackDedupeWindowSeconds`).
+pub const SLACK_DEDUPE_WINDOW_SECONDS: i64 = 5 * 60;
+
+/// Native delivery-id shape: `^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$`.
+pub fn valid_delivery_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.is_empty() || bytes.len() > 200 {
+        return false;
+    }
+    if !bytes[0].is_ascii_alphanumeric() {
+        return false;
+    }
+    bytes[1..]
+        .iter()
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(*byte, b'.' | b'_' | b':' | b'-'))
+}
+
+/// Constant-time hex compare. Accepts the `v1=` prefix Swift strips.
+pub fn signatures_equal(expected_hex: &str, presented: &str) -> bool {
+    let presented = presented
+        .strip_prefix("v1=")
+        .unwrap_or(presented)
+        .to_ascii_lowercase();
+    if expected_hex.len() != presented.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (left, right) in expected_hex.bytes().zip(presented.bytes()) {
+        diff |= left ^ right;
+    }
+    diff == 0
+}
+
+/// Deterministic UUIDv5-shaped idempotency key from Swift `deterministicClientMessageID`.
+pub fn deterministic_client_message_id(components: &[&str]) -> Uuid {
+    let digest = Sha256::digest(components.join("\n").as_bytes());
+    let mut bytes = [0u8; 16];
+    bytes.copy_from_slice(&digest[..16]);
+    bytes[6] = (bytes[6] & 0x0f) | 0x50;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    Uuid::from_bytes(bytes)
+}
+
+/// Slack-compatible receipt bucket start, floored to the 5-minute window.
+pub fn slack_dedupe_window_start(now_unix: i64) -> chrono::DateTime<chrono::Utc> {
+    let window = SLACK_DEDUPE_WINDOW_SECONDS;
+    let bucket = now_unix.div_euclid(window) * window;
+    chrono::DateTime::from_timestamp(bucket, 0)
+        .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
+}
+
 /// The lowercase hyphenated uuid spelling every wire field and every derivation
 /// input in this family uses. Swift reaches `uuidString.lowercased()`; `uuid`'s
 /// `Display` is already that, so this exists to make the intent greppable.
-pub(crate) fn hyphenated(id: Uuid) -> String {
+pub fn hyphenated(id: Uuid) -> String {
     id.hyphenated().to_string()
 }
 
@@ -326,6 +411,61 @@ mod tests {
         assert!(hash["sha256:".len()..]
             .chars()
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+    }
+
+    #[test]
+    fn the_canonical_base_is_the_swift_newline_joined_shape() {
+        let workspace = Uuid::from_u128(1);
+        let installation = Uuid::from_u128(2);
+        let base = canonical_signature_base(
+            workspace,
+            installation,
+            "1700000000",
+            "delivery-1",
+            "aabbcc",
+        );
+        assert_eq!(
+            base,
+            "v1\nPOST\n/v1/webhooks/00000000-0000-0000-0000-000000000001/00000000-0000-0000-0000-000000000002\n00000000-0000-0000-0000-000000000002\n1700000000\ndelivery-1\naabbcc"
+        );
+        let secret = native_secret(
+            "test-master-key",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        );
+        let at_a = ingress_signature(&secret, &base);
+        let at_b = ingress_signature(
+            &secret,
+            &canonical_signature_base(
+                workspace,
+                installation,
+                "1700000001",
+                "delivery-1",
+                "aabbcc",
+            ),
+        );
+        assert_ne!(at_a, at_b);
+        assert_eq!(at_a.len(), 64);
+    }
+
+    #[test]
+    fn a_delivery_id_is_the_swift_character_class() {
+        assert!(valid_delivery_id("a"));
+        assert!(valid_delivery_id(&format!(
+            "{}{}",
+            "A",
+            "._:-09".repeat(33)
+        )));
+        assert!(!valid_delivery_id(""));
+        assert!(!valid_delivery_id("-abc"));
+        assert!(!valid_delivery_id(&"a".repeat(201)));
+    }
+
+    #[test]
+    fn ingress_signatures_compare_in_constant_time_and_accept_the_v1_prefix() {
+        let expected = ingress_signature("secret", "base");
+        assert!(signatures_equal(&expected, &expected));
+        assert!(signatures_equal(&expected, &format!("v1={expected}")));
+        assert!(!signatures_equal(&expected, "0".repeat(64).as_str()));
     }
 
     /// The timestamp is *inside* the signed bytes; moving it must break the

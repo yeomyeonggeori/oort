@@ -6408,7 +6408,15 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "401":
-          description: Signature, key, timestamp, delivery ID, or installation is invalid.
+          description: Signature, key headers, timestamp, or delivery ID is invalid.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: >
+            Installation is unknown or revoked. Same error sentence as
+            `POST /hooks/{token}` so the status cannot be used as an existence oracle.
           content:
             application/json:
               schema:
@@ -6466,8 +6474,10 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-        "401":
-          description: URL credential is invalid, expired, rotated out, or revoked.
+        "404":
+          description: >
+            URL credential is unknown, rotated out, or revoked. Same error
+            sentence as `POST /v1/webhooks/{workspaceId}/{installationId}`.
           content:
             application/json:
               schema:
