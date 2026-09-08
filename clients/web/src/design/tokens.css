@@ -424,13 +424,12 @@
    * 같은 이유로 이름을 갖는다. */
   --spacing-action-sm: 96px;
 
-  /* 자격 행 액션 띠 (#2204 R6). `--spacing-action`(144) 은 다이얼로그 주 버튼
+  /* 자격 행 액션 띠 (#2204 R7). `--spacing-action`(144) 은 다이얼로그 주 버튼
    * 최소 폭이고 `--spacing-action-sm`(96) 은 짧은 푸터 짝이다. 이 칸은 설정 ›
    * 연결 목록에서 size="sm" 아웃라인 세 개(해제 · 도어벨 설정 · 재발급)를 **한 줄**
-   * 에 담는 고정 열이다. 실측(Chromium, 빌드된 CSS, text-meta 12px, px-3, border
-   * 1px, gap-1, 칸 px-2): 해제 50 · 도어벨 설정 98 · 재발급 62 · gap-1×2 8 ·
-   * px-2×2 16 = 234. 234는 리듬 {4,8,12,16,24,32} 밖이고 pane 계열과도 축이
-   * 다르다 — 가로는 컨트롤 묶음의 합이지 패널이 아니다. 6px 여유를 둔 240. */
+   * 에 담는 고정 열이다. 실측(Chromium, 빌드된 CSS, size="sm"): 해제 46.77 ·
+   * 도어벨 설정 81.19 · 재발급 57.14 = 185.09. gap-1×2 8 + px-2×2 16 = 209.09.
+   * 240 은 더 긴 라벨을 위해 ~31px 를 남긴다 — 6px 여유가 아니다. */
   --spacing-action-band: 240px;
 
   /* Panes are a third dimension: a secondary column is wider than any rhythm
@@ -1492,8 +1491,10 @@
   align-items: stretch;
 }
 
-/* 선택 행의 2px 액센트 바. `border-l-*` 폭 유틸은 `border-b` 와 한 그룹으로
- * 합쳐져 폭이 0 이 된다. 마커 토큰을 이 이름이 소비한다. */
+/* 선택 행의 2px 액센트 바. `cn("border-b","border-l-2")` 는 폭을 지우지 않는다.
+ * 지워지는 것은 색이다: `border-accent` 가 `border-line` 을 덮어 행 구분선까지
+ * `--accent` 로 칠한다. 이 유틸은 `border-inline-start-color` 를 행의 아래
+ * 테두리와 따로 묶기 위해 있다. 마커 토큰을 이 이름이 소비한다. */
 @utility credentials-row-current {
   border-inline-start: var(--spacing-marker) solid var(--accent);
 }

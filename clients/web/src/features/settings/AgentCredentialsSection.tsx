@@ -357,23 +357,53 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                 );
                 const facts = (
                   <div
-                    className={cn(
-                      "flex shrink-0 flex-nowrap items-center gap-2",
-                      wide && selectedRow && "bg-accent-soft"
-                    )}
+                    className="flex shrink-0 flex-nowrap items-center gap-2"
                     data-credentials-facts=""
                   >
                     {statusChip}
                     <ActivityFacts updatedAtMs={row.updatedAtMs} />
                   </div>
                 );
+                const regenerateControl = gate.allowed && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    aria-disabled={regenerateLocked || undefined}
+                    aria-describedby={lockReason(
+                      regenerateLocked,
+                      rowOfflineId
+                    )}
+                    className={cn(regenerateLocked && "opacity-50")}
+                    onClick={(event) => {
+                      if (regenerateLocked) return;
+                      setWizardOpener(event.currentTarget);
+                      openRegenerate(row);
+                    }}
+                    data-testid="agent-credentials-regenerate"
+                  >
+                    재발급
+                  </Button>
+                );
+                const lockedReason = regenerateLocked && (
+                  <p
+                    id={rowOfflineId}
+                    className={cn(
+                      "min-w-0 break-keep text-meta text-ink-muted",
+                      wide ? "col-span-full" : "basis-full"
+                    )}
+                  >
+                    {CREDENTIALS_OFFLINE_REASON}
+                  </p>
+                );
                 return (
                   <li
                     key={row.id}
                     aria-current={selectedRow ? "true" : undefined}
                     className={cn(
-                      "min-w-0 border-b border-line last:border-b-0",
-                      selectedRow && "credentials-row-current"
+                      "min-w-0 border-b border-line last:border-b-0 ps-3",
+                      selectedRow &&
+                        "credentials-row-current bg-accent-soft"
                     )}
                     data-testid="agent-credentials-row"
                     data-connection-id={row.id}
@@ -389,10 +419,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                       {wide ? (
                         <>
                           <div
-                            className={cn(
-                              "flex min-w-0 items-center overflow-hidden py-1",
-                              selectedRow && "bg-accent-soft"
-                            )}
+                            className="flex min-w-0 items-center overflow-hidden py-1"
                             data-testid="agent-credentials-row-body"
                           >
                             <TruncatingName name={fullName} />
@@ -401,10 +428,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                         </>
                       ) : (
                         <div
-                          className={cn(
-                            "flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-3 py-1",
-                            selectedRow && "bg-accent-soft"
-                          )}
+                          className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden pr-3 py-1"
                           data-testid="agent-credentials-row-body"
                         >
                           <TruncatingName name={fullName} />
@@ -412,76 +436,65 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                         </div>
                       )}
                       <div
-                        className={cn(
-                          "flex min-w-0 items-center gap-1 bg-surface px-2 py-1",
+                        className={
                           wide
-                            ? "flex-nowrap border-s border-line"
-                            : "flex-wrap mx-3 border-t border-line/50"
-                        )}
-                        data-testid="agent-credentials-row-actions"
+                            ? "contents"
+                            : "mx-3 flex min-w-0 flex-wrap items-center gap-1 border-t border-line/50 bg-surface px-2 py-1"
+                        }
+                        data-testid={
+                          wide
+                            ? undefined
+                            : "agent-credentials-row-actions"
+                        }
                       >
-                        {offersDisconnect(row.status) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openLedger(row, "disconnect")}
-                            data-testid="agent-credentials-disconnect"
-                          >
-                            해제
-                          </Button>
-                        )}
-                        {offersDoorbell(row.status) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openLedger(row, "doorbell")}
-                            data-testid="agent-credentials-doorbell"
-                          >
-                            도어벨 설정
-                          </Button>
-                        )}
-                        {offersRecord(row.status) && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openLedger(row, "record")}
-                            data-testid="agent-credentials-record"
-                          >
-                            기록 보기
-                          </Button>
-                        )}
-                        {gate.allowed && (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            aria-disabled={regenerateLocked || undefined}
-                            aria-describedby={lockReason(
-                              regenerateLocked,
-                              rowOfflineId
-                            )}
-                            className={cn(regenerateLocked && "opacity-50")}
-                            onClick={(event) => {
-                              if (regenerateLocked) return;
-                              setWizardOpener(event.currentTarget);
-                              openRegenerate(row);
-                            }}
-                            data-testid="agent-credentials-regenerate"
-                          >
-                            재발급
-                          </Button>
-                        )}
-                        {regenerateLocked && (
-                          <p
-                            id={rowOfflineId}
-                            className="min-w-0 basis-full break-keep text-meta text-ink-muted"
-                          >
-                            {CREDENTIALS_OFFLINE_REASON}
-                          </p>
-                        )}
+                        <div
+                          className={
+                            wide
+                              ? "flex min-w-0 flex-nowrap items-center gap-1 border-s border-line bg-surface px-2 py-1"
+                              : "contents"
+                          }
+                          data-testid={
+                            wide
+                              ? "agent-credentials-row-actions"
+                              : undefined
+                          }
+                        >
+                          {offersDisconnect(row.status) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openLedger(row, "disconnect")}
+                              data-testid="agent-credentials-disconnect"
+                            >
+                              해제
+                            </Button>
+                          )}
+                          {offersDoorbell(row.status) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openLedger(row, "doorbell")}
+                              data-testid="agent-credentials-doorbell"
+                            >
+                              도어벨 설정
+                            </Button>
+                          )}
+                          {offersRecord(row.status) && (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openLedger(row, "record")}
+                              data-testid="agent-credentials-record"
+                            >
+                              기록 보기
+                            </Button>
+                          )}
+                          {regenerateControl}
+                        </div>
+                        {lockedReason}
                       </div>
                     </div>
                   </li>
