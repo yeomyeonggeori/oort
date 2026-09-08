@@ -10484,14 +10484,27 @@ async function captureAgentCredentialsScenes(browser, scheme) {
       const rows = [
         ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
       ];
+      const names = [
+        ...document.querySelectorAll(
+          '[data-testid="agent-credentials-row-name"]'
+        ),
+      ];
       return {
         heights: rows.map((row) =>
           Math.round(row.getBoundingClientRect().height)
         ),
         viewport: { w: window.innerWidth, h: window.innerHeight },
+        nameBoxes: names.map((box) => {
+          const inner = box.querySelector(".truncate") ?? box;
+          return {
+            clientWidth: Math.round(inner.clientWidth),
+            scrollWidth: Math.round(inner.scrollWidth),
+          };
+        }),
       };
     });
     console.log(`ROW_HEIGHT_LIST ${scheme}`, JSON.stringify(geom));
+    console.log(`NAME_1280 ${scheme}`, JSON.stringify(geom.nameBoxes));
   });
   await shoot(
     "list-390",
@@ -10504,14 +10517,46 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const rows = [
           ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
         ];
+        const viewport = window.innerWidth;
+        const names = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-name"]'
+          ),
+        ];
+        const nameBoxes = names.map((box) => {
+          const inner =
+            box.querySelector(".truncate") ?? box;
+          return {
+            clientWidth: Math.round(inner.clientWidth),
+            scrollWidth: Math.round(inner.scrollWidth),
+            title: inner.getAttribute("title"),
+            truncated: inner.scrollWidth > inner.clientWidth,
+            text: (inner.textContent ?? "").slice(0, 80),
+          };
+        });
+        let maxRight = 0;
+        for (const el of document.querySelectorAll(
+          '[data-testid="agent-credentials-list"] *'
+        )) {
+          maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+        }
         return {
           heights: rows.map((row) =>
             Math.round(row.getBoundingClientRect().height)
           ),
-          viewport: { w: window.innerWidth, h: window.innerHeight },
+          viewport: { w: viewport, h: window.innerHeight },
+          nameBoxes,
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > viewport + 1,
         };
       });
       console.log(`ROW_HEIGHT_LIST_390 ${scheme}`, JSON.stringify(geom));
+      console.log(`NAME_390 ${scheme}`, JSON.stringify({
+        nameBoxes: geom.nameBoxes,
+        maxRight: geom.maxRight,
+        overflow: geom.overflow,
+        viewport: geom.viewport.w,
+      }));
     },
     { viewport: MOBILE_VIEWPORT }
   );
@@ -10597,6 +10642,88 @@ async function captureAgentCredentialsScenes(browser, scheme) {
       };
     });
     console.log(`LEDGER_LANDING ${scheme}`, JSON.stringify(probe));
+  });
+
+  const twentyConnections = Array.from({ length: 20 }, (_, i) => {
+    const cycle = ["active", "pairing_pending", "detected", "expired"];
+    const status =
+      i === 18 ? "cleanup_pending" : i === 19 ? "disconnected" : cycle[i % 4];
+    return hostedConnection({
+      id: `019f9a01-0000-7000-8000-${(0x610 + i).toString(16).padStart(12, "0")}`,
+      agentMemberId:
+        i % 2 === 0 ? "019f9a01-0000-7000-8000-000000000404" : HERMES,
+      status,
+    });
+  });
+
+  await shootPair("list-20", listWith(twentyConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const rowCount = await page
+      .locator('[data-testid="agent-credentials-row"]')
+      .count();
+    const landings = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      const row = page.locator('[data-testid="agent-credentials-row"]').nth(i);
+      const connectionId = await row.getAttribute("data-connection-id");
+      for (const action of ["disconnect", "doorbell"]) {
+        const btn = row.locator(`[data-testid="agent-credentials-${action}"]`);
+        if ((await btn.count()) === 0) continue;
+        await sceneClick(page, btn);
+        await page.getByTestId("hosted-connection-section").waitFor({
+          state: "visible",
+        });
+        await page.waitForFunction(() => {
+          const landing = document.activeElement?.getAttribute("data-landing");
+          return (
+            landing === "heading" ||
+            landing === "doorbell" ||
+            landing === "start" ||
+            landing === "cleanup" ||
+            landing === "terminal"
+          );
+        });
+        const probe = await page.evaluate((meta) => {
+          const ledger = document.querySelector(
+            '[data-testid="hosted-connection-section"]'
+          );
+          const pane = document.querySelector(
+            ".min-w-0.flex-1.overflow-y-auto.p-6"
+          );
+          if (!ledger || !pane) {
+            return { missing: true, ...meta };
+          }
+          const lr = ledger.getBoundingClientRect();
+          const pr = pane.getBoundingClientRect();
+          const visiblePx = Math.max(
+            0,
+            Math.min(lr.bottom, pr.bottom) - Math.max(lr.top, pr.top)
+          );
+          const landing = document.activeElement?.getAttribute("data-landing");
+          return {
+            ...meta,
+            visiblePx,
+            focusMoved: Boolean(landing),
+            landing,
+            landingTarget: ledger.getAttribute("data-landing-target"),
+            ledgerId: ledger.getAttribute("data-connection-id"),
+            activeTag: document.activeElement?.tagName,
+          };
+        }, { index: i, connectionId, action });
+        landings.push(probe);
+      }
+    }
+    console.log(
+      `LANDING_20 ${scheme}`,
+      JSON.stringify({
+        rowCount,
+        actionCount: landings.length,
+        allVisible: landings.every((row) => (row.visiblePx ?? 0) > 0),
+        allFocused: landings.every((row) => row.focusMoved === true),
+        landings,
+      })
+    );
   });
 
   await shootPair(
@@ -10689,19 +10816,47 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     }
   );
 
-  await shootPair("offline", listWith(activeKim), async (page) => {
-    await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
-    await page.evaluate(() => {
-      Object.defineProperty(navigator, "onLine", {
-        configurable: true,
-        get: () => false,
+  await shootPair(
+    "offline",
+    listWith([activeKim, pendingHermes]),
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({
+        state: "visible",
       });
-      window.dispatchEvent(new Event("offline"));
-    });
-    await page.getByTestId("agent-credentials-offline").waitFor({
-      state: "visible",
-    });
-  });
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "onLine", {
+          configurable: true,
+          get: () => false,
+        });
+        window.dispatchEvent(new Event("offline"));
+      });
+      await page.getByTestId("agent-credentials-offline").waitFor({
+        state: "visible",
+      });
+      await page
+        .getByTestId("agent-credentials-regenerate")
+        .waitFor({ state: "visible" });
+      const overflow = await page.evaluate(() => {
+        const viewport = window.innerWidth;
+        let maxRight = 0;
+        for (const el of document.querySelectorAll(
+          '[data-testid="agent-credentials-list"] *'
+        )) {
+          maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+        }
+        const reason = document.querySelector(
+          '[id^="agent-credentials-offline-"]'
+        );
+        return {
+          viewport,
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > viewport + 1,
+          reasonText: (reason?.textContent ?? "").slice(0, 80),
+        };
+      });
+      console.log(`OFFLINE_OVERFLOW ${scheme}`, JSON.stringify(overflow));
+    }
+  );
 
   await shootPair(
     "loopback-hint",
