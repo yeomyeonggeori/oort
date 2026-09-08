@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-6a-e 로컬 provider opt-in (#2215, 2026-09-08)
+
+- Track engine. `feat/sh6a-e-local-provider`. `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` 은 `MOMO_ENV=staging`에서도 운영자 opt-in으로 유효. `AGENT_PROVIDER_LOCAL_HOSTS` 정확 일치(기본 `host.docker.internal`). 생성기 `--allow-local-provider`, compose api·agent-worker 전달 + `extra_hosts`, doctor `env.local_provider`. ADR-0004 증보 1절.
+- 검증: `cargo test -p momo-settings` · `scripts/tests/test_local_provider_optin.sh` · `scripts/tests/test_railway_template.sh` · docs/web 프로파일.
+- runtime: 로컬 빌드 스택 + 호스트 mock-hermes E2E는 PR 본문 원문. Railway 무접촉.
+
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
 - Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).

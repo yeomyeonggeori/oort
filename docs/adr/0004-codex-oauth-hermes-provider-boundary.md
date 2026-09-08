@@ -231,3 +231,35 @@ control 중 **T3 세션 상태기계(ADR-0140 9상태)는 불변** — VM `runni
 - (−) 비관측의 기술적 강제 검증기 필요(에이전트 화면 접근 경로의 control-상태 거부 — mutation 증명 포함).
 - (−) UI 어휘 신설("직접 조작")과 기존 "인수" 카피 혼동 방지 규율(design-review 관문).
 - 성재 잔여 결정: 본 증보 Accept · T1 확장 여부.
+
+---
+
+## 증보 — 로컬 provider opt-in 경계(2026-09-08)
+
+- Status: **Accepted** (성재 승인 — SH-6a-e #2215 패킷)
+- 발단: 셀프호스트 생성 env는 `MOMO_ENV=staging`이라 `validated_base_url`의
+  `loopback_allowed = flag && !strict && is_loopback` 아래에서 플래그가
+  죽어 있었다. 컨테이너 안의 `127.0.0.1`은 컨테이너 자신이고, 호스트의
+  OpenAI 호환 provider는 `host.docker.internal`이다. 이는 평문 `http://`
+  provider 경계의 운영자 opt-in이라 본 ADR 증보가 성문이다.
+
+### D1. 자격은 여전히 서버에 비유입
+본문 §Rules·증보 1 D1 불변. GUI/REST가 받는 것은 Hermes-facing base URL +
+opaque bearer뿐이다. Codex/OpenAI OAuth·원본 API 키는 유입하지 않는다.
+
+### D2. 플래그는 strict 환경에서도 유효한 운영자 opt-in
+`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`은 `MOMO_ENV=staging|prod|production|internal-host`
+에서도 적용된다. 플래그가 없으면 기존 거부 바이트는 동일하다
+(`LoopbackNotAllowed` Display, `PlaintextRemote`, `LoopbackPortMissing`).
+
+### D3. 로컬 호스트 목록은 정확 일치
+`AGENT_PROVIDER_LOCAL_HOSTS`(쉼표 구분)는 플래그가 켜졌을 때만 유효하다.
+판정은 호스트 정확 일치만 — 와일드카드·suffix 금지. 생성기 기본값은
+`host.docker.internal`. 목록 밖 사설 호스트(`10.0.0.5`)의 `http://`는
+계속 `PlaintextRemote`. `https://`는 플래그 무관 허용.
+
+### D4. 공개 오리진 경고
+로컬 provider는 로컬 설치 전용이다. `OORT_SITE_ADDRESS`가 있는 env에서
+플래그가 켜져 있으면 doctor `env.local_provider`는 major.
+`infra/railway/railway.json`은 이 키를 싣지 않는다.
+
