@@ -964,14 +964,32 @@ curl -sS -X POST "$EP" \
 
 6. 사용자가 채널·권한을 확인한다. 한 번만 보이는 **active credential**을
    붙여 넣는다. pairing과 다른 비밀이다.
-7. 같은 `EP` 로 active credential handshake를 한 번 더 한다(첫 유효
-   Agent Port 호출이 `active` / unpause 증명). 저장·재인쇄하지 않는다.
+7. 같은 `EP` 로 active credential handshake를 한 번 더 한다. 5단계와
+   같은 `server/discover` curl이다. `active` / unpause를 증명하는 것은
+   foundation 요청(`server/discover` 또는 `tools/list`)뿐이다.
+   pairing bearer나 아직 증명 안 된 `detected` 자격으로 `tools/call`
+   (§3.3.17.4 `oort_inbox_read` 원문 포함)을 보내면 HTTP 401, 본문
+   없음. 저장·재인쇄하지 않는다.
 
 **게이트:** 무인증 POST는 계속 401. 멘션에 에이전트 뱃지가 보이면 합류
 완료. 첫 멘션 왕복은 T-6, 감지 원클릭은 T-5 — 이 플레이북은 curl
 왕복까지다.
 
-Update/Reset 뒤 재합류 = 위저드 「연결 값 다시 발급」 + 같은 curl.
+Update/Reset 뒤 재합류: 위저드 **연결 값 다시 발급**
+(`POST …/pairing-challenge/regenerate`)은 `pairing_pending` ·
+`detected` · `expired` 에서만 된다 — `pairing_pending` 으로 되돌리고
+같은 pairing curl. `active` 에서는 regenerate가 409. active credential
+을 잃었으면 사람이 disconnect 한 뒤 새 연결을 만든다.
+
+라우트 대조표 (2026-09-08 #2230, Rust 핸들러 실측. 문서 줄은 이 절):
+
+| 단계 | 문서 | 라우트 | 인증 | 상태 |
+|---|---|---|---|---|
+| 1 생성 | `:944` 2단계 | `hosted_agent_connections.rs:127` `lib.rs:1045` | 사람 workspace-admin JWT | → `pairing_pending` (에이전트 paused) |
+| 2 pairing handshake | `:947` 5단계 curl | `agent_port.rs:33` `lib.rs:1225` | pairing bearer (`momo_pair_v1`, 15분 TTL) | `pairing_pending` → `detected` |
+| 3 confirm | `:965` 6단계 | `hosted_agent_connections.rs:714` `lib.rs:1057` | 사람 workspace-admin JWT | `detected` 유지; active credential 발급 |
+| 4 active 재핸드셰이크 | `:967` 7단계 `server/discover` | `agent_port.rs:33` + `prove_hosted_binding_in_tx` | hosted-active bearer | `detected` → `active` (unpause) |
+| 5 regenerate | `:978` 재합류 | `hosted_agent_connections.rs:653` `lib.rs:1053` | 사람 workspace-admin JWT | `pairing_pending`/`detected`/`expired` → `pairing_pending`; `active` → 409 |
 
 벤더 채팅 앱을 CDP·스크립트·셀렉터로 제어하지 않는다. 사람은 말하고,
 에이전트는 VM 셸에서 이 파일을 집행한다.
@@ -1248,6 +1266,8 @@ Postgres가 비어 보이거나 로그인이 안 되면 데이터가 소실된 �
 
 - 팀 VM을 공용 호스트로 쓰기
 - 벤더 채팅 앱 CDP / 자동화
+- 이 문서의 금지는 사용자·공개 표면 기준이며, 개발자 로컬 검증 하네스는
+  `scripts/dev/grokbot_cdp/README.md`를 따른다
 - 비밀번호 · pairing/active 원문을 회신에 반복
 - claim 실패를 `MOMO_INITIAL_OWNER_PASSWORD` 로 우회
 - 웹 브라우저를 터널 URL의 상시 클라이언트로 안내한다 (v1은 데스크탑)
