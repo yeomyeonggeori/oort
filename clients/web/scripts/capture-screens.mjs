@@ -10421,8 +10421,12 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     });
   }
 
-  async function shootTriple(name, install, settle, options = {}) {
+  async function shootQuad(name, install, settle, options = {}) {
     await shoot(name, install, settle, options);
+    await shoot(`${name}-1024`, install, settle, {
+      ...options,
+      viewport: { width: 1024, height: 800 },
+    });
     await shoot(`${name}-720`, install, settle, {
       ...options,
       viewport: { width: 720, height: 800 },
@@ -10434,8 +10438,14 @@ async function captureAgentCredentialsScenes(browser, scheme) {
   }
 
   const CREDENTIALS_SWEEP_WIDTHS = [
-    390, 480, 600, 640, 660, 700, 720, 800, 900, 1024, 1280,
+    390, 480, 600, 640, 660, 700, 720, 800, 900, 1024, 1100, 1280,
   ];
+
+  function failSweep(tag, rule, detail) {
+    throw new Error(
+      `SWEEP FAIL ${tag} ${rule}: ${JSON.stringify(detail)}`
+    );
+  }
 
   async function logCredentialsSweep(tag, install) {
     const context = await browser.newContext({
@@ -10473,15 +10483,51 @@ async function captureAgentCredentialsScenes(browser, scheme) {
       await page.waitForFunction(
         (w) => {
           if (window.innerWidth !== w) return false;
-          const body = document.querySelector(
-            '[data-testid="agent-credentials-row-body"]'
+          const row = document.querySelector(
+            '[data-testid="agent-credentials-row"]'
           );
-          const layout = body?.getAttribute("data-layout");
-          return w >= 720 ? layout === "grid" : layout === "stack";
+          const layout = row?.getAttribute("data-layout");
+          return w >= 1024 ? layout === "grid" : layout === "stack";
         },
         width
       );
       const row = await page.evaluate((w) => {
+        const parseRgb = (css) => {
+          const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css);
+          return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+        };
+        const srgb = (c) => {
+          const x = c / 255;
+          return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (rgb) =>
+          0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2]);
+        const contrast = (a, b) => {
+          const L1 = lum(a);
+          const L2 = lum(b);
+          const hi = Math.max(L1, L2);
+          const lo = Math.min(L1, L2);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const swatch = (token) => {
+          const el = document.createElement("div");
+          el.style.backgroundColor = `var(${token})`;
+          document.body.append(el);
+          const rgb = getComputedStyle(el).backgroundColor;
+          el.remove();
+          return rgb;
+        };
+        const opaqueBg = (el) => {
+          let node = el;
+          while (node && node !== document.documentElement) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return { css: bg, rgb: parseRgb(bg) };
+            }
+            node = node.parentElement;
+          }
+          return null;
+        };
         const list = document.querySelector(
           '[data-testid="agent-credentials-list"]'
         );
@@ -10521,13 +10567,20 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           );
           const buttons = [
             ...(actions?.querySelectorAll("button") ?? []),
-          ].map((btn) => btn.getAttribute("data-testid"));
+          ];
+          const tops = [
+            ...new Set(
+              buttons.map((btn) => Math.round(btn.getBoundingClientRect().top))
+            ),
+          ];
           return {
-            buttons,
+            buttons: buttons.map((btn) => btn.getAttribute("data-testid")),
             empty: buttons.length === 0,
             dividerX: actions
               ? Math.round(actions.getBoundingClientRect().left)
               : null,
+            buttonCount: buttons.length,
+            oneLine: buttons.length >= 3 ? tops.length === 1 : null,
           };
         });
         const dividerXs = actionCells.map((cell) => cell.dividerX);
@@ -10537,9 +10590,6 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const first = rows[0];
         const actions = first?.querySelector(
           '[data-testid="agent-credentials-row-actions"]'
-        );
-        const body = first?.querySelector(
-          '[data-testid="agent-credentials-row-body"]'
         );
         const actionCs = actions ? getComputedStyle(actions) : null;
         const rowCs = first ? getComputedStyle(first) : null;
@@ -10565,7 +10615,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           band !== null &&
           rowSep !== null &&
           band.topColor !== rowSep.bottomColor;
-        const bandDiffers = w < 720 && (inset || colorDiffers);
+        const bandDiffersMeasured = inset || colorDiffers;
         const selected = rows.find((li) => li.hasAttribute("data-selected"));
         const selectedBody = selected?.querySelector(
           '[data-testid="agent-credentials-row-body"]'
@@ -10579,16 +10629,65 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const actionFill = selectedActions
           ? getComputedStyle(selectedActions).backgroundColor
           : null;
-        const actionTransparent =
-          actionFill === "rgba(0, 0, 0, 0)" || actionFill === "transparent";
-        const fillCoversActions =
-          selectedBody !== null &&
-          selectedActions !== null &&
-          selectedBody.contains(selectedActions) &&
-          selectedFill !== null &&
-          selectedFill !== "rgba(0, 0, 0, 0)" &&
-          actionTransparent;
-        const layout = body?.getAttribute("data-layout") ?? null;
+        const accentSoft = swatch("--accent-soft");
+        const surface = swatch("--surface");
+        const actionOnAccentSoft = actionFill === accentSoft;
+        const controls = [
+          ...(selectedActions?.querySelectorAll("button") ?? []),
+        ].map((btn) => {
+          const border = getComputedStyle(btn).borderColor;
+          const bg = opaqueBg(btn);
+          const borderRgb = parseRgb(border);
+          const ratio =
+            bg?.rgb && borderRgb
+              ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
+              : null;
+          return {
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+            border,
+            bg: bg?.css ?? null,
+            ratio,
+            ok: ratio !== null && ratio >= 3,
+          };
+        });
+        const selectedCs = selected ? getComputedStyle(selected) : null;
+        const rowRect = selected?.getBoundingClientRect();
+        const bodyRect = selectedBody?.getBoundingClientRect();
+        const actRect = selectedActions?.getBoundingClientRect();
+        const barWidth = selectedCs
+          ? parseFloat(selectedCs.borderLeftWidth)
+          : null;
+        const barSpans =
+          selected && rowRect && bodyRect && actRect && selectedCs
+            ? {
+                width: barWidth,
+                widthOk: barWidth !== null && Math.abs(barWidth - 2) < 0.6,
+                color: selectedCs.borderLeftColor,
+                rowTop: Math.round(rowRect.top),
+                rowBottom: Math.round(rowRect.bottom),
+                bodyTop: Math.round(bodyRect.top),
+                actionsBottom: Math.round(actRect.bottom),
+                topOk: Math.abs(rowRect.top - bodyRect.top) <= 2,
+                bottomOk: Math.abs(rowRect.bottom - actRect.bottom) <= 2,
+              }
+            : null;
+        const times = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-time"]'
+          ),
+        ];
+        const relativeTimeOk =
+          times.length === rows.length &&
+          times.every((node) => {
+            const label = (node.textContent ?? "").trim();
+            const title = node.getAttribute("title") ?? "";
+            return (
+              /(\d+일 전|방금|\d+분 전|\d+시간 전)/.test(label) &&
+              title.startsWith("마지막 활동 ")
+            );
+          });
+        const layout = first?.getAttribute("data-layout") ?? null;
         const rowRects = rows.map((li) => {
           const r = li.getBoundingClientRect();
           return {
@@ -10596,45 +10695,109 @@ async function captureAgentCredentialsScenes(browser, scheme) {
             bottom: Math.round(r.bottom),
           };
         });
+        const listH = list
+          ? Math.round(list.getBoundingClientRect().height)
+          : null;
+        const wide = w >= 1024;
+        const tripleRows = actionCells.filter((cell) => cell.buttonCount >= 3);
+        const threeButtonOneLine = wide
+          ? tripleRows.length === 0
+            ? null
+            : tripleRows.every((cell) => cell.oneLine === true)
+          : null;
+        const dividerSame = wide ? uniqueDividers.length <= 1 : null;
+        const bandDiffers = wide ? null : bandDiffersMeasured;
+        const rowHeightCap = wide ? 40 : 76;
+        const rowHeightOk = rowRects.every((r) => r.h <= rowHeightCap);
+        const list20HeightOk =
+          wide && rows.length >= 20
+            ? listH !== null && listH <= 800
+            : null;
+        const fourFit800 = wide
+          ? null
+          : rows.length < 4
+            ? null
+            : rowRects.slice(0, 4).every((r) => r.bottom <= 800);
+        const contrastOk =
+          controls.length === 0
+            ? false
+            : !actionOnAccentSoft && controls.every((ctl) => ctl.ok);
+        const barOk =
+          barSpans !== null &&
+          barSpans.widthOk &&
+          barSpans.topOk &&
+          barSpans.bottomOk;
+        const measured = [
+          "nameFloor",
+          "overflow",
+          "emptyActions",
+          "relativeTime",
+          "rowHeight",
+          "contrast",
+          "barSpans",
+          ...(wide ? ["dividerSame"] : ["bandDiffers"]),
+          ...(threeButtonOneLine !== null ? ["threeButtonOneLine"] : []),
+          ...(fourFit800 !== null ? ["fourFit800"] : []),
+          ...(list20HeightOk !== null ? ["list20Height"] : []),
+        ];
         return {
           w,
           layout,
+          measured,
           nameBoxes,
           nameFloorOk: nameBoxes.every((box) => box.floorOk && box.titleOk),
           maxRight: Math.round(maxRight),
           overflow: maxRight > w + 1,
           emptyActions: actionCells.filter((cell) => cell.empty).length,
           dividerXs,
-          dividerSame: w < 720 ? true : uniqueDividers.length <= 1,
+          dividerSame,
+          threeButtonOneLine,
           band,
           rowSep,
-          bandDiffers: w >= 720 ? true : bandDiffers,
-          fillCoversActions: w >= 720 ? true : fillCoversActions,
+          bandDiffers,
+          selectedFill,
+          actionFill,
+          accentSoft,
+          surface,
+          actionOnAccentSoft,
+          controls,
+          contrastOk,
+          barSpans,
+          barOk,
+          relativeTimeOk,
           rowHeights: rowRects.map((r) => r.h),
-          fourFit800:
-            w !== 800
-              ? null
-              : rowRects.length <= 4
-                ? rowRects.every((r) => r.bottom <= 800)
-                : rowRects.slice(0, 4).every((r) => r.bottom <= 800),
+          rowHeightOk,
+          listH,
+          list20HeightOk,
+          fourFit800,
         };
       }, width);
       table.push(row);
     }
-    const pass = table.every(
-      (row) =>
-        row.nameFloorOk &&
-        !row.overflow &&
-        row.emptyActions === 0 &&
-        row.dividerSame &&
-        row.bandDiffers &&
-        row.fillCoversActions &&
-        (row.fourFit800 === null || row.fourFit800 === true)
-    );
+    const failing = table.flatMap((entry) => {
+      const missed = [];
+      if (!entry.nameFloorOk) missed.push("nameFloor");
+      if (entry.overflow) missed.push("overflow");
+      if (entry.emptyActions !== 0) missed.push("emptyActions");
+      if (entry.relativeTimeOk !== true) missed.push("relativeTime");
+      if (entry.rowHeightOk !== true) missed.push("rowHeight");
+      if (entry.contrastOk !== true) missed.push("contrast");
+      if (entry.barOk !== true) missed.push("barSpans");
+      if (entry.threeButtonOneLine === false) missed.push("threeButtonOneLine");
+      if (entry.dividerSame === false) missed.push("dividerSame");
+      if (entry.bandDiffers === false) missed.push("bandDiffers");
+      if (entry.fourFit800 === false) missed.push("fourFit800");
+      if (entry.list20HeightOk === false) missed.push("list20Height");
+      return missed.length ? [{ w: entry.w, missed, measured: entry.measured }] : [];
+    });
+    const pass = failing.length === 0;
     console.log(
       `SWEEP_${tag} ${scheme}`,
       JSON.stringify({ pass, table })
     );
+    if (!pass) {
+      failSweep(tag, "table", failing);
+    }
     await context.close();
   }
 
@@ -10801,7 +10964,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     }),
   ];
 
-  await shootTriple("list-4", listWith(fourConnections), async (page) => {
+  await shootQuad("list-4", listWith(fourConnections), async (page) => {
     await page.getByTestId("agent-credentials-list").waitFor({
       state: "visible",
     });
@@ -10893,7 +11056,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     }),
   ];
 
-  await shootTriple("list-6-status", listWith(sixConnections), async (page) => {
+  await shootQuad("list-6-status", listWith(sixConnections), async (page) => {
     await page.getByTestId("agent-credentials-list").waitFor({
       state: "visible",
     });
@@ -10946,7 +11109,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     });
   });
 
-  await shootTriple("list-20", listWith(twentyConnections), async (page) => {
+  await shootQuad("list-20", listWith(twentyConnections), async (page) => {
     await page.getByTestId("agent-credentials-list").waitFor({
       state: "visible",
     });
@@ -11055,63 +11218,100 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           const lo = Math.min(L1, L2);
           return (hi + 0.05) / (lo + 0.05);
         };
+        const opaqueBg = (el) => {
+          let node = el;
+          while (node && node !== document.documentElement) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return { css: bg, rgb: parseRgb(bg) };
+            }
+            node = node.parentElement;
+          }
+          return null;
+        };
         const bodies = [
           ...document.querySelectorAll(
             '[data-testid="agent-credentials-row-body"]'
           ),
         ];
-        const actions = document.querySelector(
-          '[data-testid="agent-credentials-row-actions"]'
-        );
-        const outline = actions?.querySelector("button");
-        const actionBg = actions
-          ? getComputedStyle(actions).backgroundColor
-          : null;
-        const bodyBg = bodies[0]
-          ? getComputedStyle(bodies[0]).backgroundColor
-          : null;
-        const contrastBg =
-          actionBg === "rgba(0, 0, 0, 0)" || actionBg === "transparent"
-            ? bodyBg
-            : actionBg;
-        const border = outline ? getComputedStyle(outline).borderColor : null;
-        const ink = outline ? getComputedStyle(outline).color : null;
-        const actionRgb = contrastBg ? parseRgb(contrastBg) : null;
-        const borderRgb = border ? parseRgb(border) : null;
-        const inkRgb = ink ? parseRgb(ink) : null;
         const selected = document.querySelector(
           '[data-testid="agent-credentials-row"][data-selected]'
         );
         const selectedActions = selected?.querySelector(
           '[data-testid="agent-credentials-row-actions"]'
         );
+        const selectedBody = selected?.querySelector(
+          '[data-testid="agent-credentials-row-body"]'
+        );
+        const actionBg = selectedActions
+          ? getComputedStyle(selectedActions).backgroundColor
+          : null;
+        const bodyBg = selectedBody
+          ? getComputedStyle(selectedBody).backgroundColor
+          : null;
+        const controls = [
+          ...(selectedActions?.querySelectorAll("button") ?? []),
+        ].map((btn) => {
+          const border = getComputedStyle(btn).borderColor;
+          const bg = opaqueBg(btn);
+          const borderRgb = parseRgb(border);
+          const ratio =
+            bg?.rgb && borderRgb
+              ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
+              : null;
+          return {
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+            border,
+            bg: bg?.css ?? null,
+            ratio,
+            ok: ratio !== null && ratio >= 3,
+          };
+        });
         const actionCs = selectedActions
           ? getComputedStyle(selectedActions)
           : null;
         const rowCs = selected ? getComputedStyle(selected) : null;
+        const rowRect = selected?.getBoundingClientRect();
+        const bodyRect = selectedBody?.getBoundingClientRect();
+        const actRect = selectedActions?.getBoundingClientRect();
+        const barWidth = rowCs ? parseFloat(rowCs.borderLeftWidth) : null;
         const fillCoversActions = Boolean(
           selected &&
             selectedActions &&
-            selected
-              .querySelector('[data-testid="agent-credentials-row-body"]')
-              ?.contains(selectedActions) &&
-            bodyBg &&
-            bodyBg !== "rgba(0, 0, 0, 0)" &&
-            (actionBg === "rgba(0, 0, 0, 0)" || actionBg === "transparent")
+            selectedBody?.contains(selectedActions)
         );
         return {
           accentSoft: swatch("--accent-soft"),
           surfaceHover: swatch("--surface-hover"),
           surface: swatch("--surface"),
-          selected: bodies[0]
-            ? getComputedStyle(bodies[0]).backgroundColor
-            : null,
+          selected: bodyBg,
           hovered: bodies[1]
             ? getComputedStyle(bodies[1]).backgroundColor
             : null,
           actionBg,
-          contrastBg,
           fillCoversActions,
+          actionOnAccentSoft: actionBg === swatch("--accent-soft"),
+          controls,
+          contrastOk: controls.length > 0 && controls.every((ctl) => ctl.ok),
+          bar: rowCs
+            ? {
+                width: barWidth,
+                color: rowCs.borderLeftColor,
+                rowTop: rowRect ? Math.round(rowRect.top) : null,
+                rowBottom: rowRect ? Math.round(rowRect.bottom) : null,
+                bodyTop: bodyRect ? Math.round(bodyRect.top) : null,
+                actionsBottom: actRect ? Math.round(actRect.bottom) : null,
+                spans:
+                  rowRect &&
+                  bodyRect &&
+                  actRect &&
+                  barWidth !== null &&
+                  Math.abs(barWidth - 2) < 0.6 &&
+                  Math.abs(rowRect.top - bodyRect.top) <= 2 &&
+                  Math.abs(rowRect.bottom - actRect.bottom) <= 2,
+              }
+            : null,
           band: actionCs
             ? {
                 top: actionCs.borderTopWidth,
@@ -11126,29 +11326,21 @@ async function captureAgentCredentialsScenes(browser, scheme) {
                 bottomColor: rowCs.borderBottomColor,
               }
             : null,
-          border,
-          ink,
-          borderContrast:
-            actionRgb && borderRgb
-              ? Number(contrast(actionRgb, borderRgb).toFixed(3))
-              : null,
-          inkContrast:
-            actionRgb && inkRgb
-              ? Number(contrast(actionRgb, inkRgb).toFixed(3))
-              : null,
         };
       });
       console.log(`ROW_FILL ${scheme}`, JSON.stringify(report));
       console.log(`H1_CONTRAST ${scheme}`, JSON.stringify({
-        borderContrast: report.borderContrast,
-        inkContrast: report.inkContrast,
-        actionBg: report.actionBg,
-        contrastBg: report.contrastBg,
+        contrastOk: report.contrastOk,
+        actionOnAccentSoft: report.actionOnAccentSoft,
         fillCoversActions: report.fillCoversActions,
+        controls: report.controls,
+        actionBg: report.actionBg,
+        selected: report.selected,
+        accentSoft: report.accentSoft,
+        surface: report.surface,
+        bar: report.bar,
         band: report.band,
         rowSep: report.rowSep,
-        border: report.border,
-        ink: report.ink,
       }));
     }
   );
@@ -11233,10 +11425,27 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     { hash: "/settings?section=ai", ready: "ai-link-check" }
   );
 
+  function assertSweepGateThrows() {
+    let threw = false;
+    try {
+      failSweep("META", "must-throw", { deliberate: true });
+    } catch (err) {
+      threw = String(err).includes("SWEEP FAIL META");
+    }
+    if (!threw) {
+      throw new Error("SWEEP GATE is print-only");
+    }
+    if (!logCredentialsSweep.toString().includes("failSweep(")) {
+      throw new Error("SWEEP GATE is print-only");
+    }
+  }
+
+  assertSweepGateThrows();
   await logCredentialsSweep("SHORT", listWith([activeKim, pendingHermes]));
   await logCredentialsSweep("LONG", longNameRoster);
   await logCredentialsSweep("FOUR", listWith(fourConnections));
   await logCredentialsSweep("SIX", listWith(sixConnections));
+  await logCredentialsSweep("TWENTY", listWith(twentyConnections));
 
   return shots;
 }

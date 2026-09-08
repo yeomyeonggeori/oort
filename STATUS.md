@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R6)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R6 (R5 FAIL B2·H1·M1·N3; R2-H1 회귀 복구). 레이아웃은 셸이 주는 폭으로만 고른다: `lg`≥1024 3열 `credentials-row-grid`(이름 `minmax(0,1fr)` · 사실 auto · `--spacing-action-band`), 미만은 이름+칩+상대시각 한 줄 다음에 액션 띠. 사실 칸은 모든 폭에서 한 줄(`dt`는 `sr-only`). 선택 채움은 이름/사실만 `--accent-soft`, 액션 띠는 `bg-surface`, 연속은 `border-l-marker`(2px) `--accent` 가 행 전체(스택이면 두 띠). `tokens.css` 신규는 `--spacing-action-band` 한 줄 + 그 토큰을 소비하는 named utility뿐. 스윕은 규칙 실패 시 throw. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R5)
 
 - Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
