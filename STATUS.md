@@ -3,8 +3,8 @@
 ## SH-6a-e 로컬 provider opt-in (#2215, 2026-09-08)
 
 - Track engine. `feat/sh6a-e-local-provider`. `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` 은 `MOMO_ENV=staging`에서도 운영자 opt-in으로 유효. `AGENT_PROVIDER_LOCAL_HOSTS` 정확 일치(기본 `host.docker.internal`). 생성기 `--allow-local-provider`, compose api·agent-worker 전달 + `extra_hosts`, doctor `env.local_provider`. ADR-0004 증보 1절.
-- 검증: `cargo test -p momo-settings` · `scripts/tests/test_local_provider_optin.sh` · `scripts/tests/test_railway_template.sh` · docs/web 프로파일.
-- runtime: 로컬 빌드 스택 + 호스트 mock-hermes E2E는 PR 본문 원문. Railway 무접촉.
+- 검증: `cargo test -p momo-settings` 79 passed · `scripts/tests/test_local_provider_optin.sh` · `scripts/tests/test_railway_template.sh` (키 집합 41) · docs/web 프로파일 PASS (`5587dadd`).
+- E2E (`COMPOSE_PROJECT_NAME=oort-sh6ae`, mock-hermes `127.0.0.1:18765`, `MOCK_HERMES_TOOL_CALLS=0`): `PUT /v1/provider/link` HTTP 200 `baseUrl=http://host.docker.internal:18765/v1`; `POST /v1/provider/link/test` HTTP 200 `ok=false reason=probe_not_run`; welcome `#general` seq=1 body `김인턴 mock reply: MOMO-004 SSE path verified.`. Flag off api recreate: same PUT HTTP 400 `non-loopback baseUrl must use https://`; `http://127.0.0.1:18765/v1` HTTP 400 `loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. Railway 무접촉.
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
