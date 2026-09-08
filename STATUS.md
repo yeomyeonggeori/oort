@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-8 그록봇 합류 절 검수 + 로컬 CDP 하네스 (#2230, 2026-09-08)
+
+- Track engine. `feat/sh8-grokbot-join-harness`. `docs/SELF_HOST_AGENT.md`(+ko) §3.3.16 5단계 라우트 대조표(생성→pairing handshake→confirm→active 재핸드셰이크→regenerate)를 Rust 핸들러와 1:1로 맞춤. 어긋난 문장만 수정: foundation 요청만 `detected→active` 증명, pairing/`detected`의 `tools/call`은 HTTP 401 빈 본문, `active`에서 regenerate는 409. §3.3.19 Do not에 사용자·공개 표면 vs `scripts/dev/grokbot_cdp/README` 한 줄. 하네스 신규(`read`/`write`/`clear`.py). 제품 카피·`presets.test.ts` 무접촉.
+- 검증: `scripts/local_gate.sh --profile docs`. Agent Port 루틴 원문 vs 실측은 pairing bearer로 `oort_inbox_read` bytes를 실서버에 재현(문서 수정 근거). Grok Bot CDP 포트 9333이 닫혀 있으면 스크립트는 `SKIPPED: Grok Bot app not running (port 9333 closed)` + exit 0.
+
 ## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
 
 - Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.
