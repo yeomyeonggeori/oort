@@ -2,7 +2,8 @@
 
 > Status: Accepted for MOMO-242; updated by MOMO-257 for local
 > Hermes/Codex-OAuth setup evidence and by MOMO-326 for real Hermes gateway
-> plugin/readiness smoke evidence.
+> plugin/readiness smoke evidence. SH-9 (#2231) rewrote the runtime names to
+> the live Rust compose stack after LS-1 deleted the Swift server/relay/worker.
 > Scope: local/internal-alpha smoke for an external agent runtime. This is not
 > provider account setup, billing setup, long-term memory, or AWS deployment.
 
@@ -10,9 +11,10 @@
 
 External Hermes can connect to oort through two product-supported paths:
 
-- **AgentWorker SSE path**: oort owns the worker loop and calls a
+- **agent-worker SSE path**: oort owns the worker loop and calls a
   Hermes/OpenAI-compatible `/v1/chat/completions` endpoint. This remains the
-  deterministic default for local gates.
+  deterministic default for local gates. Compose service:
+  `agent-worker` in `infra/rust/docker-compose.rust.yml`.
 - **Hermes gateway native platform path**: Hermes treats oort like a
   Slack/Telegram-style messaging platform, receives oort `agent.job` events,
   and reports status/results back to oort REST. See
@@ -58,14 +60,15 @@ HERMES_API_KEY=<hermes-facing-bearer>
 ```
 
 For a local developer-run Hermes process, loopback is allowed only with an
-explicit local opt-in:
+explicit local opt-in. A provider on the same machine that Docker must reach
+uses `host.docker.internal` (see [`SELF_HOST.md`](../SELF_HOST.md) §5):
 
 ```sh
 MOMO_ENV=local
 AGENT_PROVIDER_MODE=external-hermes
 AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1
 AGENT_MODEL=gpt-via-local-hermes
-HERMES_BASE_URL=http://127.0.0.1:22683/v1
+HERMES_BASE_URL=http://127.0.0.1:<provider-port>/v1
 HERMES_API_KEY=<local-hermes-bearer>
 ```
 
@@ -76,9 +79,9 @@ account secrets in this env file. Those belong inside the external runtime.
 
 | Path | Runtime | Credential | Coverage |
 |---|---|---|---|
-| repo-local mock | `scripts/mock_hermes.py` | dev-only local bearer | deterministic AgentWorker, tool-call, cost, status, and timeline smoke |
-| internal-host mock | compose `mock-hermes` image | internal smoke placeholder | image-based host-runtime smoke without real provider side effects |
-| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider SSE preflight plus one `@hermes` channel roundtrip through MomoServer, AgentWorker, OutboxRelay, and timeline |
+| repo-local mock | `scripts/mock_hermes.py` | dev-only local bearer | deterministic agent-worker, tool-call, cost, status, and timeline smoke |
+| internal-host mock | compose `mock-hermes` image (`infra/rust/docker-compose.lane-phone.yml`) | internal smoke placeholder | image-based host-runtime smoke without real provider side effects |
+| external runtime | Hermes/OpenAI-compatible provider | out-of-repo `HERMES_API_KEY` only | provider SSE preflight plus one `@hermes` channel roundtrip through compose `api`, `agent-worker`, `relay`, and timeline |
 
 ## Smoke Commands
 
@@ -97,14 +100,6 @@ LOCAL_HERMES_PROVIDER_ENV_FILE="$HOME/.momo/local-hermes-provider.env" \
   scripts/verify_local_hermes_credentialed_smoke.sh
 ```
 
-Credentialed external runtime smoke, lower-level equivalent:
-
-```sh
-EXTERNAL_AGENT_PROVIDER_REQUIRE_CREDENTIALS=1 \
-EXTERNAL_AGENT_PROVIDER_ENV_FILE="$HOME/.momo/external-agent.env" \
-scripts/verify_external_agent_provider.sh
-```
-
 Equivalent local-alpha runner option:
 
 ```sh
@@ -117,14 +112,15 @@ scripts/local_alpha_runner.sh execute \
 Expected credentialed coverage:
 
 1. OpenAI-compatible SSE preflight against `${HERMES_BASE_URL}/chat/completions`.
-2. Local MomoServer, OutboxRelay, AgentWorker, PostgreSQL, and Centrifugo boot.
+2. Local compose `api`, `relay`, `agent-worker`, `postgres`, and `centrifugo` boot
+   (`infra/rust/docker-compose.rust.yml`).
 3. `/v1/agent-runtime/status` reports `mode=external-hermes`,
    `availability=available`, `keyConfigured=true`, a redacted `endpointLabel`,
    and no `degradedReason`.
 4. Seeded Hermes is verified as an active `member.kind='agent'` in `#agent-lab`.
 5. A channel message mentioning `@hermes` creates an `agent_run`, calls the
    external runtime, writes a durable agent response message, and publishes the
-   final `message.new` through OutboxRelay.
+   final `message.new` through `relay`.
 
 On failure, evidence records a redacted failure category/reason. If status is
 reachable but degraded, `/v1/agent-runtime/status` includes `degradedReason`
@@ -138,4 +134,5 @@ without provider tokens or raw secrets.
 - `docs/external-agent-provider/local-hermes-gpt.md`
 - `docs/LOCAL_3_DAY_ALPHA_TEST_PACK.md`
 - `docs/LOCAL_PR_GATE.md`
-- `scripts/verify_external_agent_provider.sh`
+- `scripts/local_gate.sh`
+- `scripts/verify_local_hermes_credentialed_smoke.sh`

@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-9 hermes 합류 런북 Rust 현행화 (#2231, 2026-09-08)
+
+- Track engine. `feat/sh9-hermes-runbook-rust`. `docs/external-agent-provider/*` 재작성(삭제 아님): Swift 런타임 이름 → compose `api`/`relay`/`agent-worker`, 포트는 `MOMO_WEB_PORT` 파생, 죽은 `verify_external_agent_provider.sh` 5곳 → `scripts/local_gate.sh --profile external-agent-provider` + `scripts/verify_local_hermes_credentialed_smoke.sh`, Command Center → 설정 › AI 연결. `docs/SELF_HOST.md`(+ko) §5 로컬 provider를 hermes 실측 절차로 확장. 인용 게이트 `scripts/tests/test_external_agent_provider_docs.sh`.
+- 검증: 새 시험 PASS(인용 7, Swift 이름 0, 28180/28100 0) · 사보타주 RED(`scripts/verify_external_agent_provider.sh`) · `scripts/local_gate.sh --profile docs`. E2E `COMPOSE_PROJECT_NAME=oort-sh9`, mock `scripts/mock_hermes.py --host 0.0.0.0:19765` (`hermes serve`는 JSON-RPC라 `/v1/chat/completions` 대체), welcome `#general` seq=3 body `김인턴 mock reply: MOMO-004 SSE path verified.`. 회수 후 컨테이너 0. 플러그인 `MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin` PASS(`plugin.yaml`+`PLUGIN.yaml`). `verify_hermes_gateway_adapter.sh`는 삭제된 Swift 서버를 띄워 미실행(allow-list 밖).
+- runtime-unverified: 실 hermes OpenAI 호환 SSE(이 호스트의 `hermes`는 `serve` JSON-RPC). 자격 스모크 `verify_local_hermes_credentialed_smoke.sh` 기본 경로는 `NEEDS_USER_CREDENTIAL`(시크릿 없음).
+
 ## SH-8 그록봇 합류 절 검수 + 로컬 CDP 하네스 (#2230, 2026-09-08)
 
 - Track engine. `feat/sh8-grokbot-join-harness`. `docs/SELF_HOST_AGENT.md`(+ko) §3.3.16 5단계 라우트 대조표(생성→pairing handshake→confirm→active 재핸드셰이크→regenerate)를 Rust 핸들러와 1:1로 맞춤. 어긋난 문장만 수정: foundation 요청만 `detected→active` 증명, pairing/`detected`의 `tools/call`은 HTTP 401 빈 본문, `active`에서 regenerate는 409. §3.3.19 Do not에 사용자·공개 표면 vs `scripts/dev/grokbot_cdp/README` 한 줄. 하네스 신규(`read`/`write`/`clear`.py). 제품 카피·`presets.test.ts` 무접촉.
