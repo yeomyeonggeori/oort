@@ -10447,7 +10447,36 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     );
   }
 
-  async function logCredentialsSweep(tag, install) {
+  function finishSweep(tag, table) {
+    const failing = table.flatMap((entry) => {
+      const missed = [];
+      if (!entry.nameFloorOk) missed.push("nameFloor");
+      if (entry.overflow) missed.push("overflow");
+      if (entry.emptyActions !== 0) missed.push("emptyActions");
+      if (entry.relativeTimeOk !== true) missed.push("relativeTime");
+      if (entry.rowHeightOk !== true) missed.push("rowHeight");
+      if (entry.contrastOk !== true) missed.push("contrast");
+      if (entry.barOk !== true) missed.push("barSpans");
+      if (entry.threeButtonOneLine === false) missed.push("threeButtonOneLine");
+      if (entry.dividerSame === false) missed.push("dividerSame");
+      if (entry.bandDiffers === false) missed.push("bandDiffers");
+      if (entry.fourFit800 === false) missed.push("fourFit800");
+      if (entry.list20HeightOk === false) missed.push("list20Height");
+      if (entry.leftGutterOk !== true) missed.push("leftGutter");
+      if (entry.fillContinuousOk === false) missed.push("fillContinuous");
+      if (entry.reasonOk === false) missed.push("offlineReason");
+      return missed.length
+        ? [{ w: entry.w, missed, measured: entry.measured }]
+        : [];
+    });
+    const pass = failing.length === 0;
+    console.log(`SWEEP_${tag} ${scheme}`, JSON.stringify({ pass, table }));
+    if (!pass) {
+      failSweep(tag, "table", failing);
+    }
+  }
+
+  async function logCredentialsSweep(tag, install, options = {}) {
     const context = await browser.newContext({
       viewport: { width: 1280, height: 800 },
       deviceScaleFactor: 2,
@@ -10477,19 +10506,29 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         state: "visible",
       });
     }
+    if (options.offline) {
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "onLine", {
+          configurable: true,
+          get: () => false,
+        });
+        window.dispatchEvent(new Event("offline"));
+      });
+      await page.getByTestId("agent-credentials-offline").waitFor({
+        state: "visible",
+      });
+      await page.getByTestId("agent-credentials-regenerate").waitFor({
+        state: "visible",
+      });
+    }
     const table = [];
     for (const width of CREDENTIALS_SWEEP_WIDTHS) {
       await page.setViewportSize({ width, height: 800 });
-      await page.waitForFunction(
-        (w) => {
-          if (window.innerWidth !== w) return false;
-          const row = document.querySelector(
-            '[data-testid="agent-credentials-row"]'
-          );
-          const layout = row?.getAttribute("data-layout");
-          return w >= 1024 ? layout === "grid" : layout === "stack";
-        },
-        width
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          })
       );
       const row = await page.evaluate((w) => {
         const parseRgb = (css) => {
@@ -10525,6 +10564,16 @@ async function captureAgentCredentialsScenes(browser, scheme) {
               return { css: bg, rgb: parseRgb(bg) };
             }
             node = node.parentElement;
+          }
+          return null;
+        };
+        const sampleBgAt = (x, y) => {
+          const hit = document.elementsFromPoint(x, y);
+          for (const node of hit) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return bg;
+            }
           }
           return null;
         };
@@ -10623,8 +10672,8 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const selectedActions = selected?.querySelector(
           '[data-testid="agent-credentials-row-actions"]'
         );
-        const selectedFill = selectedBody
-          ? getComputedStyle(selectedBody).backgroundColor
+        const selectedFill = selected
+          ? getComputedStyle(selected).backgroundColor
           : null;
         const actionFill = selectedActions
           ? getComputedStyle(selectedActions).backgroundColor
@@ -10642,13 +10691,15 @@ async function captureAgentCredentialsScenes(browser, scheme) {
             bg?.rgb && borderRgb
               ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
               : null;
+          const onAccentSoft = bg?.css === accentSoft;
           return {
             testid: btn.getAttribute("data-testid"),
             text: (btn.textContent ?? "").trim(),
             border,
             bg: bg?.css ?? null,
             ratio,
-            ok: ratio !== null && ratio >= 3,
+            onAccentSoft,
+            ok: ratio !== null && ratio >= 3 && !onAccentSoft,
           };
         });
         const selectedCs = selected ? getComputedStyle(selected) : null;
@@ -10658,6 +10709,14 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const barWidth = selectedCs
           ? parseFloat(selectedCs.borderLeftWidth)
           : null;
+        const selectedReason = selected?.querySelector(
+          '[id^="agent-credentials-offline-"]'
+        );
+        const reasonRect = selectedReason?.getBoundingClientRect();
+        const spanBottom =
+          actRect && reasonRect
+            ? Math.max(actRect.bottom, reasonRect.bottom)
+            : actRect?.bottom;
         const barSpans =
           selected && rowRect && bodyRect && actRect && selectedCs
             ? {
@@ -10669,7 +10728,9 @@ async function captureAgentCredentialsScenes(browser, scheme) {
                 bodyTop: Math.round(bodyRect.top),
                 actionsBottom: Math.round(actRect.bottom),
                 topOk: Math.abs(rowRect.top - bodyRect.top) <= 2,
-                bottomOk: Math.abs(rowRect.bottom - actRect.bottom) <= 2,
+                bottomOk:
+                  spanBottom !== undefined &&
+                  Math.abs(rowRect.bottom - spanBottom) <= 2,
               }
             : null;
         const times = [
@@ -10707,8 +10768,14 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           : null;
         const dividerSame = wide ? uniqueDividers.length <= 1 : null;
         const bandDiffers = wide ? null : bandDiffersMeasured;
-        const rowHeightCap = wide ? 40 : 76;
-        const rowHeightOk = rowRects.every((r) => r.h <= rowHeightCap);
+        const rowHeightOk = rows.every((li) => {
+          const h = li.getBoundingClientRect().height;
+          const offline = li.querySelector(
+            '[id^="agent-credentials-offline-"]'
+          );
+          const cap = offline ? (wide ? 64 : 124) : wide ? 40 : 76;
+          return h <= cap;
+        });
         const list20HeightOk =
           wide && rows.length >= 20
             ? listH !== null && listH <= 800
@@ -10727,6 +10794,82 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           barSpans.widthOk &&
           barSpans.topOk &&
           barSpans.bottomOk;
+        const leftGutters = rows.map((li) => {
+          const name = li.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const inner = name?.querySelector(".truncate") ?? name;
+          if (!inner) {
+            return { barGap: null, nameInset: null, ok: false };
+          }
+          const liRect = li.getBoundingClientRect();
+          const nameRect = inner.getBoundingClientRect();
+          const barW = parseFloat(getComputedStyle(li).borderLeftWidth) || 0;
+          const nameInset = nameRect.left - liRect.left;
+          const barGap = nameRect.left - (liRect.left + barW);
+          return {
+            barGap: Number(barGap.toFixed(2)),
+            nameInset: Number(nameInset.toFixed(2)),
+            ok: barGap >= 12 && nameInset >= 12,
+          };
+        });
+        const leftGutterOk =
+          leftGutters.length > 0 && leftGutters.every((g) => g.ok);
+        let fillContinuous = null;
+        if (wide && selected) {
+          const nameEl = selected.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const factsEl = selected.querySelector("[data-credentials-facts]");
+          const actionsEl = selected.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const nameR = nameEl?.getBoundingClientRect();
+          const factsR = factsEl?.getBoundingClientRect();
+          const actR = actionsEl?.getBoundingClientRect();
+          if (nameR && factsR && actR && nameR.height > 0) {
+            const y = nameR.top + nameR.height / 2;
+            const samples = [
+              nameR.left + nameR.width / 2,
+              (nameR.right + factsR.left) / 2,
+              factsR.left + factsR.width / 2,
+              (factsR.right + actR.left) / 2,
+            ].map((x) => sampleBgAt(x, y));
+            fillContinuous = {
+              samples,
+              accentSoft,
+              ok: samples.every((s) => s === accentSoft),
+            };
+          }
+        }
+        const fillContinuousOk =
+          fillContinuous === null ? null : fillContinuous.ok;
+        const reasons = rows.map((li) => {
+          const el = li.querySelector('[id^="agent-credentials-offline-"]');
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          let lh = parseFloat(cs.lineHeight);
+          if (!Number.isFinite(lh) || lh <= 0) {
+            lh = parseFloat(cs.fontSize) * 1.5;
+          }
+          const lines = Math.max(1, Math.round(r.height / lh));
+          const cap = wide ? 64 : 124;
+          const rowH = li.getBoundingClientRect().height;
+          return {
+            width: Number(r.width.toFixed(2)),
+            lines,
+            rowHeight: Math.round(rowH),
+            widthOk: r.width >= 200,
+            linesOk: lines <= 2,
+            heightOk: rowH <= cap,
+          };
+        });
+        const reasonWidth = reasons.map((r) => r?.width ?? null);
+        const reasonLines = reasons.map((r) => r?.lines ?? null);
+        const reasonOk = reasons.every(
+          (r) => r === null || (r.widthOk && r.linesOk && r.heightOk)
+        );
         const measured = [
           "nameFloor",
           "overflow",
@@ -10735,10 +10878,13 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           "rowHeight",
           "contrast",
           "barSpans",
+          "leftGutter",
           ...(wide ? ["dividerSame"] : ["bandDiffers"]),
           ...(threeButtonOneLine !== null ? ["threeButtonOneLine"] : []),
           ...(fourFit800 !== null ? ["fourFit800"] : []),
           ...(list20HeightOk !== null ? ["list20Height"] : []),
+          ...(fillContinuousOk !== null ? ["fillContinuous"] : []),
+          ...(reasons.some((r) => r !== null) ? ["offlineReason"] : []),
         ];
         return {
           w,
@@ -10770,34 +10916,27 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           listH,
           list20HeightOk,
           fourFit800,
+          leftGutters,
+          leftGutterOk,
+          fillContinuous,
+          fillContinuousOk,
+          reasonWidth,
+          reasonLines,
+          reasonOk,
         };
       }, width);
+      const expected = width >= 1024 ? "grid" : "stack";
+      if (row.layout !== expected) {
+        const nameBox = row.nameBoxes?.[0]?.box ?? "none";
+        failSweep(
+          tag,
+          "layout",
+          `w=${width} expected=${expected} got=${row.layout} nameBox=${nameBox}`
+        );
+      }
       table.push(row);
     }
-    const failing = table.flatMap((entry) => {
-      const missed = [];
-      if (!entry.nameFloorOk) missed.push("nameFloor");
-      if (entry.overflow) missed.push("overflow");
-      if (entry.emptyActions !== 0) missed.push("emptyActions");
-      if (entry.relativeTimeOk !== true) missed.push("relativeTime");
-      if (entry.rowHeightOk !== true) missed.push("rowHeight");
-      if (entry.contrastOk !== true) missed.push("contrast");
-      if (entry.barOk !== true) missed.push("barSpans");
-      if (entry.threeButtonOneLine === false) missed.push("threeButtonOneLine");
-      if (entry.dividerSame === false) missed.push("dividerSame");
-      if (entry.bandDiffers === false) missed.push("bandDiffers");
-      if (entry.fourFit800 === false) missed.push("fourFit800");
-      if (entry.list20HeightOk === false) missed.push("list20Height");
-      return missed.length ? [{ w: entry.w, missed, measured: entry.measured }] : [];
-    });
-    const pass = failing.length === 0;
-    console.log(
-      `SWEEP_${tag} ${scheme}`,
-      JSON.stringify({ pass, table })
-    );
-    if (!pass) {
-      failSweep(tag, "table", failing);
-    }
+    finishSweep(tag, table);
     await context.close();
   }
 
@@ -11345,7 +11484,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     }
   );
 
-  await shootPair(
+  await shootQuad(
     "offline",
     listWith([activeKim, pendingHermes]),
     async (page) => {
@@ -11426,17 +11565,41 @@ async function captureAgentCredentialsScenes(browser, scheme) {
   );
 
   function assertSweepGateThrows() {
-    let threw = false;
+    const synthetic = [
+      {
+        w: 800,
+        nameFloorOk: false,
+        overflow: false,
+        emptyActions: 0,
+        relativeTimeOk: true,
+        rowHeightOk: true,
+        contrastOk: true,
+        barOk: true,
+        threeButtonOneLine: null,
+        dividerSame: null,
+        bandDiffers: true,
+        fourFit800: null,
+        list20HeightOk: null,
+        leftGutterOk: true,
+        fillContinuousOk: null,
+        reasonOk: true,
+        measured: ["nameFloor"],
+      },
+    ];
+    let thrown = null;
     try {
-      failSweep("META", "must-throw", { deliberate: true });
+      finishSweep("META", synthetic);
     } catch (err) {
-      threw = String(err).includes("SWEEP FAIL META");
+      thrown = err;
     }
-    if (!threw) {
+    if (thrown == null) {
       throw new Error("SWEEP GATE is print-only");
     }
-    if (!logCredentialsSweep.toString().includes("failSweep(")) {
-      throw new Error("SWEEP GATE is print-only");
+    const message = thrown instanceof Error ? thrown.message : "";
+    if (!message.includes("800") || !message.includes("nameFloor")) {
+      throw new Error(
+        `SWEEP GATE error must name width and rule, got: ${message}`
+      );
     }
   }
 
@@ -11446,6 +11609,9 @@ async function captureAgentCredentialsScenes(browser, scheme) {
   await logCredentialsSweep("FOUR", listWith(fourConnections));
   await logCredentialsSweep("SIX", listWith(sixConnections));
   await logCredentialsSweep("TWENTY", listWith(twentyConnections));
+  await logCredentialsSweep("OFFLINE", listWith([activeKim, pendingHermes]), {
+    offline: true,
+  });
 
   return shots;
 }
