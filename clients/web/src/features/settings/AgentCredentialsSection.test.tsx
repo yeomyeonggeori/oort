@@ -22,6 +22,7 @@ import {
   hostedRowByConnectionId,
   ledgerLandingFor,
   offersDisconnect,
+  offersDoorbell,
 } from "./AgentCredentialsSection";
 import { formatMoment } from "./oauthGrant";
 
@@ -117,6 +118,13 @@ function setInputValue(input: HTMLInputElement, value: string) {
 
 function sectionSource(): string {
   return readFileSync("src/features/settings/AgentCredentialsSection.tsx", "utf8");
+}
+
+function hostedSectionSource(): string {
+  return readFileSync(
+    "src/features/hostedAgents/HostedConnectionSection.tsx",
+    "utf8"
+  );
 }
 
 function switcherSource(): string {
@@ -371,6 +379,19 @@ describe("소스 규율", () => {
     expect(source).toContain("title={truncated ? name : undefined}");
     expect(source).not.toMatch(/aria-label=\{fullName\}/);
     expect(source).toContain('<span className="sr-only">{name}</span>');
+    expect(source).toContain('data-testid="agent-credentials-row-name"');
+    expect(source).toContain('className="min-w-0 flex-1"');
+    expect(source).not.toContain("hover:bg-surface-hover");
+    expect(source).toContain("도어벨 설정");
+    expect(source).toContain("마지막 활동");
+    expect(source).toContain("offersDoorbell");
+  });
+
+  it("이름 상자는 min-w-0 으로 접힌다", () => {
+    const source = sectionSource();
+    expect(source).toMatch(
+      /data-testid="agent-credentials-row-name"[\s\S]{0,40}min-w-0 flex-1|min-w-0 flex-1"[\s\S]{0,80}agent-credentials-row-name/
+    );
   });
 });
 
@@ -442,8 +463,7 @@ describe("목록 네 상태", () => {
     );
     expect(host.textContent).toContain("김인턴");
     expect(host.textContent).toContain("활성");
-    expect(host.textContent).toContain(formatMoment(1_700_000_000_000));
-    expect(host.textContent).not.toContain("연결 만든 때");
+    expect(host.textContent).toContain("마지막 활동");
     expect(host.textContent).not.toContain("마지막 상태 변화");
     expect(host.textContent).not.toContain(
       "자격증명 증명이 성공했고 승인한 채널에서 이 에이전트가 일할 수 있습니다."
@@ -451,7 +471,7 @@ describe("목록 네 상태", () => {
     expect(
       host.querySelector('[data-testid="agent-credentials-doorbell"]')
         ?.textContent
-    ).toBe("도어벨");
+    ).toBe("도어벨 설정");
     expect(host.textContent).not.toContain("detected_at");
     expect(host.textContent).not.toContain("proved_at");
   });
@@ -804,6 +824,10 @@ describe("B-1 선택은 연결 id 다", () => {
     expect(offersDisconnect("expired")).toBe(false);
     expect(offersDisconnect("disconnected")).toBe(false);
     expect(offersDisconnect("active")).toBe(true);
+    expect(offersDoorbell("cleanup_pending")).toBe(false);
+    expect(offersDoorbell("disconnected")).toBe(false);
+    expect(offersDoorbell("active")).toBe(true);
+    expect(offersDoorbell("expired")).toBe(true);
   });
 
   it("같은 에이전트의 만료·활성 행에서 만료 액션은 만료 id 를 연다", async () => {
@@ -1035,13 +1059,106 @@ describe("M-1 잠금 사유는 잠긴 컨트롤만 가리킨다", () => {
     const note = document.getElementById(reasonId ?? "");
     expect(note).not.toBeNull();
     expect(note?.textContent).toContain("연결이 끊겨");
-    const regenBox = regen.getBoundingClientRect();
-    const noteBox = note?.getBoundingClientRect();
-    expect(noteBox).toBeDefined();
-    if (noteBox) {
-      const gap = Math.abs(noteBox.top - regenBox.bottom);
-      expect(gap).toBeLessThanOrEqual(40);
-    }
+    expect(note?.closest("li")).toBe(regen.closest("li"));
+    expect(regen.nextElementSibling).toBe(note);
+  });
+});
+
+describe("사보타주 ② 해제는 서버가 정한다 — HostedConnectionSection", () => {
+  it("완료 분기는 서버 status 만 보고 응답을 다시 쓰지 않는다", () => {
+    const source = hostedSectionSource();
+    const terminal = source.slice(source.indexOf("function TerminalPanel"));
+    expect(terminal).toMatch(
+      /if \(connection\.status === "disconnected"\) \{/
+    );
+    expect(terminal).not.toMatch(
+      /disconnected"\s*\|\|\s*connection\.status === "cleanup_pending"/
+    );
+    expect(source).toContain("writeDetail(started)");
+    expect(source).toContain("writeDetail(completed)");
+    expect(source).not.toMatch(/status:\s*"disconnected"/);
+    expect(source).not.toMatch(/\.status\s*=\s*"disconnected"/);
+  });
+
+  it("착지 노드가 없으면 장부 제목으로 내린다", () => {
+    const source = hostedSectionSource();
+    expect(source).toContain("`[data-landing=\"${landOn}\"]`");
+    expect(source).toContain('[data-landing="heading"]');
+    const landEffect = source.slice(
+      source.indexOf("if (landOn === undefined) return;")
+    );
+    const landOnQuery = landEffect.indexOf(
+      '`[data-landing="${landOn}"]`'
+    );
+    const headingFallback = landEffect.indexOf(
+      "'[data-landing=\"heading\"]'"
+    );
+    expect(landOnQuery).toBeGreaterThan(-1);
+    expect(headingFallback).toBeGreaterThan(landOnQuery);
+  });
+
+  it("허브 region 은 에이전트 이름을 들고 설정은 labelledby 만 쓴다", () => {
+    const source = hostedSectionSource();
+    expect(source).toContain(
+      "aria-labelledby={title ? headingId : undefined}"
+    );
+    expect(source).toContain(
+      "aria-label={title ? undefined : `${agentLabel} 호스티드 연결`}"
+    );
+  });
+});
+
+describe("H-1 터미널 행은 도어벨을 두지 않는다", () => {
+  it("정리 중·해제됨 행에는 도어벨이 없고 상태는 칩 한 번이다", async () => {
+    const pendingId = "019f9a01-0000-7000-8000-0000000007c1";
+    const doneId = "019f9a01-0000-7000-8000-0000000007c2";
+    mockListAndDetail([
+      wireConnection({ id: pendingId, status: "cleanup_pending" }),
+      wireConnection({ id: doneId, status: "disconnected" }),
+    ]);
+    const host = mountSection();
+    await waitFor(
+      () =>
+        host.querySelectorAll('[data-testid="agent-credentials-row"]').length ===
+        2,
+      "two terminal rows"
+    );
+    const pending = host.querySelector(
+      `[data-connection-id="${pendingId}"]`
+    ) as HTMLElement;
+    const done = host.querySelector(
+      `[data-connection-id="${doneId}"]`
+    ) as HTMLElement;
+    expect(
+      pending.querySelector('[data-testid="agent-credentials-disconnect"]')
+    ).not.toBeNull();
+    expect(
+      pending.querySelector('[data-testid="agent-credentials-doorbell"]')
+    ).toBeNull();
+    expect(
+      done.querySelector('[data-testid="agent-credentials-disconnect"]')
+    ).toBeNull();
+    expect(
+      done.querySelector('[data-testid="agent-credentials-doorbell"]')
+    ).toBeNull();
+    expect(countNeedle(done.textContent ?? "", "연결 해제됨")).toBe(1);
+    act(() => {
+      (
+        pending.querySelector(
+          '[data-testid="agent-credentials-disconnect"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await waitFor(
+      () =>
+        document.activeElement?.getAttribute("data-landing") === "heading",
+      "cleanup heading land"
+    );
+    expect(
+      host
+        .querySelector('[data-testid="hosted-connection-section"]')
+        ?.getAttribute("data-connection-id")
+    ).toBe(pendingId);
   });
 });
 
