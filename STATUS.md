@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R5)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R5 (R4 FAIL B1·H1·M1·N4; R2 열둘·R3 닫힌 항목 유지). 행 레이아웃을 flex 잔여폭에서 **3트랙 그리드**로 교체: ≥720 `grid-cols-[minmax(9rem,1fr)_auto_11.5rem]`, <720 한 컨테이너 세로 스택. 시각은 모든 폭에서 상대 시각(`n일 전`, `title`+`<time datetime>`). 선택 `--accent-soft` 가 이름·사실·액션 띠를 한 원소로 덮고, 스택 띠 경계는 `mx-3 border-line/50`. `disconnected` 행 「기록 보기」. 도어벨 목적지 명사 「도어벨 설정」(행 버튼 = 장부 제목). `HostedConnectionSection` 렌더 가드: `cleanup_pending` 에 완료 헤드라인 없음. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R4)
 
 - Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`(만료+활성 공존 시 장부가 그 행을 연다). AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.

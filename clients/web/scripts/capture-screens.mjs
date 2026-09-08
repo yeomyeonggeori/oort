@@ -10421,6 +10421,223 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     });
   }
 
+  async function shootTriple(name, install, settle, options = {}) {
+    await shoot(name, install, settle, options);
+    await shoot(`${name}-720`, install, settle, {
+      ...options,
+      viewport: { width: 720, height: 800 },
+    });
+    await shoot(`${name}-390`, install, settle, {
+      ...options,
+      viewport: MOBILE_VIEWPORT,
+    });
+  }
+
+  const CREDENTIALS_SWEEP_WIDTHS = [
+    390, 480, 600, 640, 660, 700, 720, 800, 900, 1024, 1280,
+  ];
+
+  async function logCredentialsSweep(tag, install) {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/settings?section=agents"');
+    await page.getByTestId("agent-credentials-section").waitFor({
+      state: "visible",
+    });
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const firstAction = page
+      .locator(
+        '[data-testid="agent-credentials-disconnect"], [data-testid="agent-credentials-doorbell"], [data-testid="agent-credentials-record"]'
+      )
+      .first();
+    if ((await firstAction.count()) > 0) {
+      await sceneClick(page, firstAction);
+      await page.getByTestId("hosted-connection-section").waitFor({
+        state: "visible",
+      });
+    }
+    const table = [];
+    for (const width of CREDENTIALS_SWEEP_WIDTHS) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.waitForFunction(
+        (w) => {
+          if (window.innerWidth !== w) return false;
+          const body = document.querySelector(
+            '[data-testid="agent-credentials-row-body"]'
+          );
+          const layout = body?.getAttribute("data-layout");
+          return w >= 720 ? layout === "grid" : layout === "stack";
+        },
+        width
+      );
+      const row = await page.evaluate((w) => {
+        const list = document.querySelector(
+          '[data-testid="agent-credentials-list"]'
+        );
+        const rows = [
+          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        ];
+        const names = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-name"]'
+          ),
+        ];
+        const nameBoxes = names.map((box) => {
+          const inner = box.querySelector(".truncate") ?? box;
+          const boxW = inner.getBoundingClientRect().width;
+          const full = inner.scrollWidth;
+          const truncated = full > inner.clientWidth + 1;
+          return {
+            text: (inner.textContent ?? "").trim().slice(0, 24),
+            box: Math.round(boxW),
+            scroll: Math.round(full),
+            floor: Math.min(144, full),
+            floorOk: boxW + 0.5 >= Math.min(144, full),
+            truncated,
+            title: inner.getAttribute("title"),
+            titleOk: truncated ? Boolean(inner.getAttribute("title")) : true,
+          };
+        });
+        let maxRight = 0;
+        if (list) {
+          for (const el of list.querySelectorAll("*")) {
+            maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+          }
+        }
+        const actionCells = rows.map((li) => {
+          const actions = li.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const buttons = [
+            ...(actions?.querySelectorAll("button") ?? []),
+          ].map((btn) => btn.getAttribute("data-testid"));
+          return {
+            buttons,
+            empty: buttons.length === 0,
+            dividerX: actions
+              ? Math.round(actions.getBoundingClientRect().left)
+              : null,
+          };
+        });
+        const dividerXs = actionCells.map((cell) => cell.dividerX);
+        const uniqueDividers = [
+          ...new Set(dividerXs.filter((x) => x !== null)),
+        ];
+        const first = rows[0];
+        const actions = first?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const body = first?.querySelector(
+          '[data-testid="agent-credentials-row-body"]'
+        );
+        const actionCs = actions ? getComputedStyle(actions) : null;
+        const rowCs = first ? getComputedStyle(first) : null;
+        const band = actionCs
+          ? {
+              top: actionCs.borderTopWidth,
+              topColor: actionCs.borderTopColor,
+              ml: actionCs.marginLeft,
+              mr: actionCs.marginRight,
+            }
+          : null;
+        const rowSep = rowCs
+          ? {
+              bottom: rowCs.borderBottomWidth,
+              bottomColor: rowCs.borderBottomColor,
+            }
+          : null;
+        const inset =
+          actionCs !== null &&
+          (parseFloat(actionCs.marginLeft) > 0 ||
+            parseFloat(actionCs.marginRight) > 0);
+        const colorDiffers =
+          band !== null &&
+          rowSep !== null &&
+          band.topColor !== rowSep.bottomColor;
+        const bandDiffers = w < 720 && (inset || colorDiffers);
+        const selected = rows.find((li) => li.hasAttribute("data-selected"));
+        const selectedBody = selected?.querySelector(
+          '[data-testid="agent-credentials-row-body"]'
+        );
+        const selectedActions = selected?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const selectedFill = selectedBody
+          ? getComputedStyle(selectedBody).backgroundColor
+          : null;
+        const actionFill = selectedActions
+          ? getComputedStyle(selectedActions).backgroundColor
+          : null;
+        const actionTransparent =
+          actionFill === "rgba(0, 0, 0, 0)" || actionFill === "transparent";
+        const fillCoversActions =
+          selectedBody !== null &&
+          selectedActions !== null &&
+          selectedBody.contains(selectedActions) &&
+          selectedFill !== null &&
+          selectedFill !== "rgba(0, 0, 0, 0)" &&
+          actionTransparent;
+        const layout = body?.getAttribute("data-layout") ?? null;
+        const rowRects = rows.map((li) => {
+          const r = li.getBoundingClientRect();
+          return {
+            h: Math.round(r.height),
+            bottom: Math.round(r.bottom),
+          };
+        });
+        return {
+          w,
+          layout,
+          nameBoxes,
+          nameFloorOk: nameBoxes.every((box) => box.floorOk && box.titleOk),
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > w + 1,
+          emptyActions: actionCells.filter((cell) => cell.empty).length,
+          dividerXs,
+          dividerSame: w < 720 ? true : uniqueDividers.length <= 1,
+          band,
+          rowSep,
+          bandDiffers: w >= 720 ? true : bandDiffers,
+          fillCoversActions: w >= 720 ? true : fillCoversActions,
+          rowHeights: rowRects.map((r) => r.h),
+          fourFit800:
+            w !== 800
+              ? null
+              : rowRects.length <= 4
+                ? rowRects.every((r) => r.bottom <= 800)
+                : rowRects.slice(0, 4).every((r) => r.bottom <= 800),
+        };
+      }, width);
+      table.push(row);
+    }
+    const pass = table.every(
+      (row) =>
+        row.nameFloorOk &&
+        !row.overflow &&
+        row.emptyActions === 0 &&
+        row.dividerSame &&
+        row.bandDiffers &&
+        row.fillCoversActions &&
+        (row.fourFit800 === null || row.fourFit800 === true)
+    );
+    console.log(
+      `SWEEP_${tag} ${scheme}`,
+      JSON.stringify({ pass, table })
+    );
+    await context.close();
+  }
+
   const emptyList = (context) =>
     context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
       route.request().method() === "POST"
@@ -10584,7 +10801,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     }),
   ];
 
-  await shootPair("list-4", listWith(fourConnections), async (page) => {
+  await shootTriple("list-4", listWith(fourConnections), async (page) => {
     await page.getByTestId("agent-credentials-list").waitFor({
       state: "visible",
     });
@@ -10644,6 +10861,79 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     console.log(`LEDGER_LANDING ${scheme}`, JSON.stringify(probe));
   });
 
+  const sixConnections = [
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c1",
+      status: "pairing_pending",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c2",
+      agentMemberId: HERMES,
+      status: "detected",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c3",
+      status: "active",
+      doorbellUrl: "https://hooks.example/a",
+      doorbellSecretMasked: "••••abcd",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c4",
+      agentMemberId: HERMES,
+      status: "expired",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c5",
+      status: "cleanup_pending",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c6",
+      agentMemberId: HERMES,
+      status: "disconnected",
+    }),
+  ];
+
+  await shootTriple("list-6-status", listWith(sixConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const probe = await page.evaluate(() => {
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      return {
+        rowCount: rows.length,
+        actions: rows.map((row) => {
+          const actions = row.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const buttons = [
+            ...(actions?.querySelectorAll("button") ?? []),
+          ].map((btn) => ({
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+          }));
+          return {
+            id: row.getAttribute("data-connection-id"),
+            buttons,
+            empty: buttons.length === 0,
+            dividerX: actions
+              ? Math.round(actions.getBoundingClientRect().left)
+              : null,
+            height: Math.round(row.getBoundingClientRect().height),
+          };
+        }),
+        emptyCount: rows.filter((row) => {
+          const actions = row.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          return (actions?.querySelectorAll("button").length ?? 0) === 0;
+        }).length,
+      };
+    });
+    console.log(`LIST_6_STATUS ${scheme}`, JSON.stringify(probe));
+  });
+
   const twentyConnections = Array.from({ length: 20 }, (_, i) => {
     const cycle = ["active", "pairing_pending", "detected", "expired"];
     const status =
@@ -10656,7 +10946,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     });
   });
 
-  await shootPair("list-20", listWith(twentyConnections), async (page) => {
+  await shootTriple("list-20", listWith(twentyConnections), async (page) => {
     await page.getByTestId("agent-credentials-list").waitFor({
       state: "visible",
     });
@@ -10667,7 +10957,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     for (let i = 0; i < rowCount; i += 1) {
       const row = page.locator('[data-testid="agent-credentials-row"]').nth(i);
       const connectionId = await row.getAttribute("data-connection-id");
-      for (const action of ["disconnect", "doorbell"]) {
+      for (const action of ["disconnect", "doorbell", "record"]) {
         const btn = row.locator(`[data-testid="agent-credentials-${action}"]`);
         if ((await btn.count()) === 0) continue;
         await sceneClick(page, btn);
@@ -10777,11 +11067,38 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const actionBg = actions
           ? getComputedStyle(actions).backgroundColor
           : null;
+        const bodyBg = bodies[0]
+          ? getComputedStyle(bodies[0]).backgroundColor
+          : null;
+        const contrastBg =
+          actionBg === "rgba(0, 0, 0, 0)" || actionBg === "transparent"
+            ? bodyBg
+            : actionBg;
         const border = outline ? getComputedStyle(outline).borderColor : null;
         const ink = outline ? getComputedStyle(outline).color : null;
-        const actionRgb = actionBg ? parseRgb(actionBg) : null;
+        const actionRgb = contrastBg ? parseRgb(contrastBg) : null;
         const borderRgb = border ? parseRgb(border) : null;
         const inkRgb = ink ? parseRgb(ink) : null;
+        const selected = document.querySelector(
+          '[data-testid="agent-credentials-row"][data-selected]'
+        );
+        const selectedActions = selected?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const actionCs = selectedActions
+          ? getComputedStyle(selectedActions)
+          : null;
+        const rowCs = selected ? getComputedStyle(selected) : null;
+        const fillCoversActions = Boolean(
+          selected &&
+            selectedActions &&
+            selected
+              .querySelector('[data-testid="agent-credentials-row-body"]')
+              ?.contains(selectedActions) &&
+            bodyBg &&
+            bodyBg !== "rgba(0, 0, 0, 0)" &&
+            (actionBg === "rgba(0, 0, 0, 0)" || actionBg === "transparent")
+        );
         return {
           accentSoft: swatch("--accent-soft"),
           surfaceHover: swatch("--surface-hover"),
@@ -10793,6 +11110,22 @@ async function captureAgentCredentialsScenes(browser, scheme) {
             ? getComputedStyle(bodies[1]).backgroundColor
             : null,
           actionBg,
+          contrastBg,
+          fillCoversActions,
+          band: actionCs
+            ? {
+                top: actionCs.borderTopWidth,
+                topColor: actionCs.borderTopColor,
+                ml: actionCs.marginLeft,
+                mr: actionCs.marginRight,
+              }
+            : null,
+          rowSep: rowCs
+            ? {
+                bottom: rowCs.borderBottomWidth,
+                bottomColor: rowCs.borderBottomColor,
+              }
+            : null,
           border,
           ink,
           borderContrast:
@@ -10810,6 +11143,10 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         borderContrast: report.borderContrast,
         inkContrast: report.inkContrast,
         actionBg: report.actionBg,
+        contrastBg: report.contrastBg,
+        fillCoversActions: report.fillCoversActions,
+        band: report.band,
+        rowSep: report.rowSep,
         border: report.border,
         ink: report.ink,
       }));
@@ -10895,6 +11232,11 @@ async function captureAgentCredentialsScenes(browser, scheme) {
     },
     { hash: "/settings?section=ai", ready: "ai-link-check" }
   );
+
+  await logCredentialsSweep("SHORT", listWith([activeKim, pendingHermes]));
+  await logCredentialsSweep("LONG", longNameRoster);
+  await logCredentialsSweep("FOUR", listWith(fourConnections));
+  await logCredentialsSweep("SIX", listWith(sixConnections));
 
   return shots;
 }
