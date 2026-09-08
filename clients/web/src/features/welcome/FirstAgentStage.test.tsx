@@ -219,6 +219,16 @@ function countNeedle(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
+function describedText(host: HTMLElement, choiceId: string): string {
+  const input = host.querySelector(`#first-agent-harness-${choiceId}`);
+  const ids = (input?.getAttribute("aria-describedby") ?? "")
+    .split(/\s+/)
+    .filter(Boolean);
+  return ids
+    .map((id) => host.querySelector(`#${id}`)?.textContent ?? "")
+    .join(" ");
+}
+
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
 };
@@ -300,9 +310,20 @@ function mountStage(): HTMLElement {
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
   HTMLElement.prototype.scrollIntoView = vi.fn();
-  const style = document.createElement("style");
-  style.textContent = ".opacity-50 { opacity: 0.5; }";
-  document.head.append(style);
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {
+        return undefined;
+      }
+      unobserve() {
+        return undefined;
+      }
+      disconnect() {
+        return undefined;
+      }
+    }
+  );
 });
 
 beforeEach(() => {
@@ -361,8 +382,158 @@ describe("M-2 캡처 detected 는 done 만", () => {
     );
     expect(host.querySelector('[data-testid="first-agent-mention"]')).toBeNull();
     expect(source()).toContain(
-      'pose === "done" ? firstAgentCaptureDetected() : null'
+      "firstAgentCaptureDetected(pose)"
     );
+  });
+});
+
+describe("H-J 긴 이름은 패널 안에서 자른다", () => {
+  const FIRST_AGENT_LONG_NAME =
+    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
+
+  it("60자 이름은 말줄임과 title 이 있고 핸들은 남는다", async () => {
+    expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThanOrEqual(60);
+    const longAgent: RosterMember = {
+      ...agent,
+      displayName: FIRST_AGENT_LONG_NAME,
+    };
+    let rosterCalls = 0;
+    vi.mocked(fetchRoster).mockImplementation(async () => {
+      rosterCalls += 1;
+      return rosterCalls === 1 ? [human] : [human, longAgent];
+    });
+    const nameId = "first-agent-mention-name";
+    const clientDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "clientWidth"
+    );
+    const scrollDesc = Object.getOwnPropertyDescriptor(
+      HTMLElement.prototype,
+      "scrollWidth"
+    );
+    const rectDesc = Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "getBoundingClientRect"
+    );
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+      configurable: true,
+      get() {
+        if (this.getAttribute?.("data-testid") === nameId) return 180;
+        return 342;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
+      configurable: true,
+      get() {
+        if (this.getAttribute?.("data-testid") === nameId) return 434;
+        return 342;
+      },
+    });
+    Object.defineProperty(Element.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value() {
+        if (this.getAttribute?.("data-testid") === nameId) {
+          return {
+            x: 24,
+            y: 120,
+            width: 180,
+            height: 20,
+            top: 120,
+            left: 24,
+            bottom: 140,
+            right: 204,
+            toJSON() {
+              return this;
+            },
+          };
+        }
+        return {
+          x: 0,
+          y: 0,
+          width: 390,
+          height: 844,
+          top: 0,
+          left: 0,
+          bottom: 844,
+          right: 390,
+          toJSON() {
+            return this;
+          },
+        };
+      },
+    });
+    try {
+      let status = "pairing_pending";
+      vi.mocked(getHostedConnection).mockImplementation(async () => ({
+        connection: wireConnection({ status }),
+        cleanupArtifacts: [],
+      }));
+      const host = mountStage();
+      await waitFor(
+        () => host.querySelector("[data-choice-id='claude-code']") !== null,
+        "cards"
+      );
+      vi.useFakeTimers();
+      vi.setSystemTime(1_000_000);
+      commitCard(host, "claude-code");
+      await waitFor(
+        () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
+        "wizard"
+      );
+      act(() => {
+        document
+          .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+          ?.click();
+      });
+      await waitFor(
+        () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+        "detecting"
+      );
+      await waitFor(
+        () => vi.mocked(fetchRoster).mock.calls.length >= 2,
+        "roster refresh"
+      );
+      status = "detected";
+      await act(async () => {
+        vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
+        await vi.advanceTimersByTimeAsync(2_000);
+      });
+      await waitFor(
+        () =>
+          host.querySelector('[data-testid="first-agent-mention-name"]')
+            ?.getAttribute("title") === FIRST_AGENT_LONG_NAME,
+        "mention title"
+      );
+      const mention = host.querySelector('[data-testid="first-agent-mention"]');
+      const name = host.querySelector<HTMLElement>(
+        '[data-testid="first-agent-mention-name"]'
+      );
+      const handle = host.querySelector('[data-testid="first-agent-mention-handle"]');
+      expect(mention?.className.split(/\s+/)).toContain("w-full");
+      expect(mention?.className.split(/\s+/)).toContain("min-w-0");
+      expect(name?.className.split(/\s+/)).toContain("truncate");
+      expect(name?.className.split(/\s+/)).toContain("min-w-0");
+      expect(name?.scrollWidth ?? 0).toBeGreaterThan(name?.clientWidth ?? 0);
+      expect(name?.getAttribute("title")).toBe(FIRST_AGENT_LONG_NAME);
+      expect(name?.getBoundingClientRect().right ?? 999).toBeLessThanOrEqual(390);
+      expect(handle).not.toBeNull();
+      expect(handle?.textContent).toContain("@intern");
+      expect(source()).toContain("title={truncated ? name : undefined}");
+    } finally {
+      if (clientDesc) {
+        Object.defineProperty(HTMLElement.prototype, "clientWidth", clientDesc);
+      } else {
+        delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
+      }
+      if (scrollDesc) {
+        Object.defineProperty(HTMLElement.prototype, "scrollWidth", scrollDesc);
+      } else {
+        delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
+      }
+      if (rectDesc) {
+        Object.defineProperty(Element.prototype, "getBoundingClientRect", rectDesc);
+      }
+    }
   });
 });
 
@@ -409,19 +580,33 @@ describe("카드 4 · 건너뛰기", () => {
     expect(host.textContent).toContain(FIRST_AGENT_GENERIC_HINT);
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_GENERIC_HINT)
-    ).toBe(1);
+    ).toBe(2);
     expect(host.textContent).toContain(FIRST_AGENT_OPENAI_DETAIL);
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
     ).toBe(1);
-    expect(host.querySelector("#first-agent-harness-claude-code-detail")).toBeNull();
-    expect(host.querySelector("#first-agent-harness-codex-detail")).toBeNull();
+    expect(host.querySelector("#first-agent-harness-hint")).toBeNull();
+    expect(host.querySelector("#first-agent-harness-claude-code-detail")?.textContent).toBe(
+      FIRST_AGENT_GENERIC_HINT
+    );
+    expect(host.querySelector("#first-agent-harness-codex-detail")?.textContent).toBe(
+      FIRST_AGENT_GENERIC_HINT
+    );
     expect(
       host.querySelector("#first-agent-harness-claude-code")?.getAttribute("aria-describedby")
-    ).not.toContain("claude-code-detail");
+    ).toContain("claude-code-detail");
     expect(host.querySelector("#first-agent-harness-openai-compat-detail")?.textContent).toBe(
       FIRST_AGENT_OPENAI_DETAIL
     );
+    expect(describedText(host, "openai-compat")).not.toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "claude-code")).toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "codex")).toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "grok")).not.toContain(FIRST_AGENT_GENERIC_HINT);
+    for (const id of ["claude-code", "codex", "grok", "openai-compat"] as const) {
+      const detail = host.querySelector(`#first-agent-harness-${id}-detail`);
+      expect(detail?.textContent, id).not.toBe("");
+      expect(detail?.textContent, id).not.toContain("아래");
+    }
     expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
       /\bmax-w-sm\b/
     );
@@ -592,7 +777,7 @@ describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
       ?.nextElementSibling?.firstElementChild;
     const detail = host.querySelector("#first-agent-harness-grok-detail");
     expect(input?.className.split(/\s+/)).toContain("opacity-50");
-    expect(input ? getComputedStyle(input).opacity : "").toBe("0.5");
+    expect(input?.getAttribute("aria-disabled")).toBe("true");
     expect(label?.className.split(/\s+/)).toContain("text-ink-muted");
     expect(label?.className.split(/\s+/)).not.toContain("opacity-50");
     expect(detail).not.toBeNull();

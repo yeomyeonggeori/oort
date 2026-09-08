@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { uuidEq } from "@momo/core/lib/api";
@@ -45,7 +45,6 @@ import {
   FIRST_AGENT_CHANNEL_PENDING,
   FIRST_AGENT_CONTINUE_LABEL,
   FIRST_AGENT_ERROR_REASON_ID,
-  FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_HEADING_ID,
   FIRST_AGENT_LIST_ERROR,
   FIRST_AGENT_MENTION_ACTION,
@@ -100,6 +99,35 @@ function channelHref(channelId: string): string {
   return channelId === "" ? "/" : `/c/${channelId}`;
 }
 
+function FirstAgentMentionName({ name }: { name: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const [truncated, setTruncated] = useState(false);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (el === null) return;
+    const measure = () => {
+      setTruncated(el.scrollWidth > el.clientWidth);
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [name]);
+
+  return (
+    <p
+      ref={ref}
+      className="min-w-0 truncate text-body font-semibold text-agent"
+      data-testid="first-agent-mention-name"
+      title={truncated ? name : undefined}
+    >
+      {name}
+    </p>
+  );
+}
+
 function connectionAllowsChannel(
   connection: HostedAgentConnection,
   channelId: string
@@ -124,7 +152,7 @@ export function FirstAgentStage({
   const [launch, setLaunch] = useState<HostedWizardLaunch | null>(null);
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [detected, setDetected] = useState<HostedAgentConnection | null>(
-    () => (pose === "done" ? firstAgentCaptureDetected() : null)
+    () => firstAgentCaptureDetected(pose)
   );
   const [listError, setListError] = useState<string | null>(null);
   const [detectStartedAtMs, setDetectStartedAtMs] = useState(() => Date.now());
@@ -452,21 +480,26 @@ export function FirstAgentStage({
       const actionHref = channelHref(welcomeChannelId);
       return (
         <div
-          className="flex min-w-0 flex-col items-start gap-3"
+          className="flex w-full min-w-0 flex-col items-stretch gap-3"
           data-testid="first-agent-mention"
         >
           {mentionAgent && mentionAgent.displayName !== "" ? (
             <>
-              <div className="flex min-w-0 items-center gap-3">
-                <Avatar member={rosterAgent} />
-                <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2">
-                  <p className="min-w-0 truncate text-body font-semibold text-agent">
-                    {mentionAgent.displayName}
-                  </p>
-                  <span className="rounded-sm bg-agent-soft px-1 text-timestamp text-agent">
-                    {FIRST_MENTION_AGENT_BADGE}
-                  </span>
-                  <span className="min-w-0 truncate text-meta text-ink-muted">
+              <div className="flex w-full min-w-0 items-center gap-3">
+                <div className="shrink-0">
+                  <Avatar member={rosterAgent} />
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-px">
+                  <div className="flex min-w-0 items-baseline gap-2">
+                    <FirstAgentMentionName name={mentionAgent.displayName} />
+                    <span className="shrink-0 rounded-sm bg-agent-soft px-1 text-timestamp text-agent">
+                      {FIRST_MENTION_AGENT_BADGE}
+                    </span>
+                  </div>
+                  <span
+                    className="min-w-0 truncate text-meta text-ink-muted"
+                    data-testid="first-agent-mention-handle"
+                  >
                     @{mentionAgent.handle}
                   </span>
                 </div>
@@ -552,7 +585,6 @@ export function FirstAgentStage({
             <ChoiceList
               name="first-agent-harness"
               legend="어떤 에이전트를 붙이나요"
-              hint={FIRST_AGENT_GENERIC_HINT}
               multiple={false}
               items={cardItems}
               selected={selectedCard ? [selectedCard] : []}

@@ -40,9 +40,6 @@ function mount(lockMode?: "native" | "aria"): HTMLElement {
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
-  const style = document.createElement("style");
-  style.textContent = ".opacity-50 { opacity: 0.5; }";
-  document.head.append(style);
 });
 
 afterEach(() => {
@@ -79,7 +76,6 @@ describe("ChoiceList 그룹 잠금", () => {
     expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
     expect(row?.className.split(/\s+/)).not.toContain("opacity-50");
     expect(input?.className.split(/\s+/)).toContain("opacity-50");
-    expect(input ? getComputedStyle(input).opacity : "").toBe("0.5");
     expect(label?.className.split(/\s+/)).toContain("text-ink-muted");
     expect(label?.className.split(/\s+/)).not.toContain("opacity-50");
     expect(detail?.className.split(/\s+/)).not.toContain("opacity-50");

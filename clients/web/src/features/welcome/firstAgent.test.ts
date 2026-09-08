@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HOSTED_PRESETS } from "@momo/core/features/hostedAgents/presets";
 import {
   DETECT_CAP_MS,
@@ -11,10 +11,12 @@ import {
   FIRST_AGENT_CONNECTED_CLAIM,
   FIRST_AGENT_DETECTING_WAIT,
   FIRST_AGENT_GENERIC_HINT,
+  FIRST_AGENT_GROK_WHAT_HAPPENS,
   FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_LEAD_MENTION,
+  FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_STAGE_ORDER,
   copyClaimsConnected,
   countsTowardAutoPass,
@@ -24,12 +26,12 @@ import {
   firstAgentCaptureSecret,
   firstAgentDetectingDetail,
   firstAgentLead,
-  formatRecheckStill,
   isHostedDetected,
   nextDetectDelayMs,
   parseFirstAgentCapturePose,
   shouldAutoPass,
   type DetectDelay,
+  FIRST_AGENT_CAPTURE_POSES,
 } from "./firstAgent";
 
 function src(name: string): string {
@@ -50,13 +52,15 @@ describe("첫 에이전트 카드 4종", () => {
     const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
     expect(grok?.verified).toBe(false);
     expect(grok?.unverifiedNote).toBeTruthy();
-    expect(FIRST_AGENT_CARDS[2]?.detail).toBe(grok?.unverifiedNote);
-    expect(FIRST_AGENT_CARDS[0]?.detail).toBe("");
-    expect(FIRST_AGENT_CARDS[1]?.detail).toBe("");
+    expect(FIRST_AGENT_CARDS[2]?.detail).toContain(grok?.unverifiedNote ?? "");
+    expect(FIRST_AGENT_CARDS[2]?.detail).toContain(FIRST_AGENT_GROK_WHAT_HAPPENS);
+    expect(FIRST_AGENT_CARDS[0]?.detail).toBe(generic?.detail);
+    expect(FIRST_AGENT_CARDS[1]?.detail).toBe(generic?.detail);
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe("");
+    expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe("");
+    expect(FIRST_AGENT_CARDS[3]?.detail).toBe(FIRST_AGENT_OPENAI_DETAIL);
     expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(generic?.steps[1]);
     expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe(generic?.steps[1]);
-    expect(FIRST_AGENT_CARDS[0]?.detail).not.toContain(generic?.detail ?? "___");
-    expect(FIRST_AGENT_CARDS[1]?.detail).not.toContain(generic?.detail ?? "___");
     expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
   });
 
@@ -64,6 +68,7 @@ describe("첫 에이전트 카드 4종", () => {
     const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
     expect(generic?.steps[1]).toContain("아래");
     for (const card of FIRST_AGENT_CARDS) {
+      expect(card.detail, card.id).not.toBe("");
       expect(card.detail, card.id).not.toContain("아래");
       expect(card.detail, card.id).not.toBe(generic?.steps[1]);
     }
@@ -113,8 +118,6 @@ describe("감지는 서버 상태만 본다", () => {
     expect(copyClaimsConnected(FIRST_AGENT_CAP_COPY)).toBe(false);
     expect(FIRST_AGENT_CAP_COPY).not.toBe(FIRST_AGENT_LEAD_CAP);
     expect(FIRST_AGENT_CAP_COPY).not.toMatch(/[—–]/);
-    expect(formatRecheckStill(DETECT_INITIAL_MS)).not.toContain(FIRST_AGENT_LEAD_CAP);
-    expect(formatRecheckStill(DETECT_INITIAL_MS)).toContain("다시 확인했지만 아직입니다");
     expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
   });
 
@@ -184,6 +187,10 @@ describe("캡처 포즈", () => {
 });
 
 describe("캡처 비밀은 디자인 모드만", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it("제품 번들 경로에서 캡처 비밀을 비운다", () => {
     expect(src("./firstAgent.ts")).toContain(
       'if (import.meta.env.MODE !== "design") return ""'
@@ -192,10 +199,11 @@ describe("캡처 비밀은 디자인 모드만", () => {
   });
 
   it("제품 모드에서 캡처 detected 는 없다", () => {
-    expect(src("./firstAgent.ts")).toContain(
-      'if (import.meta.env.MODE !== "design") return null'
-    );
-    expect(firstAgentCaptureDetected()).toBeNull();
+    vi.stubEnv("MODE", "production");
+    for (const pose of FIRST_AGENT_CAPTURE_POSES) {
+      expect(firstAgentCaptureDetected(pose), pose).toBeNull();
+    }
+    expect(firstAgentCaptureDetected(null)).toBeNull();
     expect(firstAgentCaptureAgent()).toEqual({
       agentMemberId: "",
       displayName: "",
@@ -203,9 +211,25 @@ describe("캡처 비밀은 디자인 모드만", () => {
     });
   });
 
+  it("디자인 모드에서 detected 픽스처는 done 만이다", () => {
+    vi.stubEnv("MODE", "design");
+    const fixture = firstAgentCaptureDetected("done");
+    expect(fixture).not.toBeNull();
+    expect(fixture?.status).toBe("detected");
+    expect(fixture?.agentMemberId).not.toBe("");
+    for (const pose of FIRST_AGENT_CAPTURE_POSES) {
+      if (pose === "done") continue;
+      expect(firstAgentCaptureDetected(pose), pose).toBeNull();
+    }
+    expect(firstAgentCaptureDetected(null)).toBeNull();
+  });
+
   it("done 이 아닌 포즈는 detected 를 심지 않는다", () => {
     expect(src("./FirstAgentStage.tsx")).toContain(
-      'pose === "done" ? firstAgentCaptureDetected() : null'
+      "firstAgentCaptureDetected(pose)"
+    );
+    expect(src("./FirstAgentStage.tsx")).not.toContain(
+      'firstAgentCaptureDetected("done")'
     );
     expect(src("./FirstAgentStage.tsx")).not.toMatch(
       /useState<HostedAgentConnection \| null>\(\s*firstAgentCaptureDetected/

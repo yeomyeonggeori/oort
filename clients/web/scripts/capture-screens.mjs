@@ -12301,6 +12301,19 @@ async function captureFirstAgentScenes(browser, scheme) {
     await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
     await page.mouse.move(viewport.width + 80, viewport.height + 80);
     await waitForAnimations(page);
+    if (pose === "offline" || pose === "error") {
+      const opacity = await page.evaluate(() => {
+        const input = document.querySelector(
+          "#first-agent-harness-claude-code"
+        );
+        return input ? getComputedStyle(input).opacity : "";
+      });
+      if (opacity !== "0.5") {
+        throw new Error(
+          `first-agent ${pose} ${scheme} ${viewport.width}: locked input opacity ${opacity}`
+        );
+      }
+    }
     if (pose === "cards") {
       const hovered = await page.evaluate(() => {
         const hover = getComputedStyle(document.documentElement)
@@ -12444,6 +12457,24 @@ async function captureFirstAgentScenes(browser, scheme) {
           `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
         );
       }
+      await page.mouse.move(viewport.width + 80, viewport.height + 80);
+      await waitForAnimations(page);
+      await assertHoverToolbarCount(
+        page,
+        `first-agent done-handoff ${scheme} ${viewport.width}`,
+        0
+      );
+      const hoverBits = await page.evaluate(() => ({
+        hoverToolbar: document.querySelector("[data-hover-toolbar]") !== null,
+        messageToolbar:
+          document.querySelector('[data-testid="message-hover-toolbar"]') !==
+          null,
+      }));
+      if (hoverBits.hoverToolbar || hoverBits.messageToolbar) {
+        throw new Error(
+          `first-agent done-handoff ${scheme} ${viewport.width}: hover toolbar in shot (${JSON.stringify(hoverBits)})`
+        );
+      }
       const handoff = beginSceneFromShotPath(
         `${OUT_DIR}/first-agent-done-handoff${suffix}-${scheme}.png`
       );
@@ -12465,6 +12496,110 @@ async function captureFirstAgentScenes(browser, scheme) {
   ]) {
     await shoot(pose, VIEWPORT, "");
     await shoot(pose, MOBILE_VIEWPORT, "-390");
+  }
+
+  const FIRST_AGENT_LONG_NAME =
+    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
+  if (FIRST_AGENT_LONG_NAME.length < 60) {
+    throw new Error(
+      `first-agent long-name fixture is ${FIRST_AGENT_LONG_NAME.length} chars`
+    );
+  }
+  {
+    const viewport = MOBILE_VIEWPORT;
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, {
+        members: ROSTER.map((member) =>
+          member.id === "019f9a01-0000-7000-8000-000000000404"
+            ? { ...member, displayName: FIRST_AGENT_LONG_NAME }
+            : member
+        ),
+      })
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate(() => {
+      window.location.hash = "/?firstAgent=done";
+    });
+    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
+    await page.getByTestId("first-agent-mention-name").waitFor({
+      state: "visible",
+    });
+    await page.waitForFunction((expected) => {
+      const el = document.querySelector(
+        '[data-testid="first-agent-mention-name"]'
+      );
+      return (
+        el?.textContent === expected && el.getAttribute("title") === expected
+      );
+    }, FIRST_AGENT_LONG_NAME);
+    await page.mouse.move(viewport.width + 80, viewport.height + 80);
+    await waitForAnimations(page);
+    const probe = await page.evaluate(() => {
+      const name = document.querySelector(
+        '[data-testid="first-agent-mention-name"]'
+      );
+      const handle = document.querySelector(
+        '[data-testid="first-agent-mention-handle"]'
+      );
+      if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
+        return { missing: true };
+      }
+      const nameRect = name.getBoundingClientRect();
+      const handleRect = handle.getBoundingClientRect();
+      return {
+        missing: false,
+        title: name.getAttribute("title"),
+        overflow: name.scrollWidth > name.clientWidth,
+        nameRight: nameRect.right,
+        handleRight: handleRect.right,
+        handleText: handle.textContent,
+      };
+    });
+    if (probe.missing) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: mention name missing`
+      );
+    }
+    if (probe.nameRight > viewport.width + 1) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: name right ${probe.nameRight}`
+      );
+    }
+    if (probe.handleRight > viewport.width + 1) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle right ${probe.handleRight}`
+      );
+    }
+    if (probe.overflow !== true) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: ellipsis did not fire (${JSON.stringify(probe)})`
+      );
+    }
+    if (probe.title !== FIRST_AGENT_LONG_NAME) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: title ${JSON.stringify(probe.title)}`
+      );
+    }
+    if (!String(probe.handleText).includes("@kim-intern")) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle ${JSON.stringify(probe.handleText)}`
+      );
+    }
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/first-agent-done-longname-390-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
   }
   return shots;
 }

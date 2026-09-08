@@ -66,12 +66,14 @@ export const FIRST_AGENT_OFFLINE_REASON =
 export const FIRST_AGENT_CAP_COPY =
   "5분이 지났습니다. 에이전트가 연결 값으로 접속했는지 다시 확인하세요.";
 export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
-export const FIRST_AGENT_RECHECK_STILL = "다시 확인했지만 아직입니다";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
 export const FIRST_AGENT_OPENAI_DETAIL =
-  "에이전트가 사용할 provider를 이 서버 전체에 하나로 연결합니다.";
+  "설정 › AI 연결에서 이 서버의 provider를 붙입니다.";
+
+export const FIRST_AGENT_GROK_WHAT_HAPPENS =
+  "고르면 그록봇 연결 값을 발급합니다.";
 
 export type FirstAgentCardId =
   | "claude-code"
@@ -98,17 +100,18 @@ function genericPreset() {
 }
 
 function grokCardDetail(): string {
-  return grokPreset().unverifiedNote ?? grokPreset().steps[0] ?? "";
+  const note = grokPreset().unverifiedNote ?? "";
+  return `${note} ${FIRST_AGENT_GROK_WHAT_HAPPENS}`.trim();
 }
 
-/** MCP 카드 아래 한 번만 서는 공통 문장. 카드 줄은 이름(+미확인 주)만. */
+/** Claude Code·Codex 줄의 MCP 순서 문장. OpenAI 줄에는 묶지 않는다. */
 export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: "",
+    detail: FIRST_AGENT_GENERIC_HINT,
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -116,7 +119,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: "",
+    detail: FIRST_AGENT_GENERIC_HINT,
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -175,11 +178,7 @@ export function formatDetectPollWait(delayMs: number): string {
   return `${Math.round(delayMs / 1000)}초 뒤 다시 확인합니다`;
 }
 
-export function formatRecheckStill(delayMs: number): string {
-  return `${FIRST_AGENT_RECHECK_STILL} · 다음 확인 ${Math.round(delayMs / 1000)}초 뒤`;
-}
-
-/** 프리셋 문구 정책: Grok 은 미확인이고, 카드는 HOSTED_PRESETS 를 복제하지 않는다. */
+/** 프리셋 문구 정책: 네 줄 모두 고르면 생기는 일을 한 줄로 말하고, 단계는 카드에 없다. */
 export function firstAgentCardsUseHostedPresets(): boolean {
   const grok = HOSTED_PRESETS.find((preset) => preset.id === "grok");
   const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
@@ -187,17 +186,26 @@ export function firstAgentCardsUseHostedPresets(): boolean {
   const grokCard = firstAgentCard("grok");
   const claude = firstAgentCard("claude-code");
   const codex = firstAgentCard("codex");
+  const openai = firstAgentCard("openai-compat");
+  const recipe = generic.steps[1] ?? "";
   return (
     grokCard.label === grok.label &&
-    Boolean(grok.unverifiedNote && grokCard.detail === grok.unverifiedNote) &&
-    claude.detail === "" &&
-    codex.detail === "" &&
+    Boolean(grok.unverifiedNote) &&
+    grokCard.detail.includes(grok.unverifiedNote ?? "") &&
+    grokCard.detail.includes(FIRST_AGENT_GROK_WHAT_HAPPENS) &&
+    claude.detail === generic.detail &&
+    codex.detail === generic.detail &&
+    openai.detail === FIRST_AGENT_OPENAI_DETAIL &&
     !claude.detail.includes("아래") &&
     !codex.detail.includes("아래") &&
     !grokCard.detail.includes("아래") &&
-    !claude.detail.includes(generic.detail) &&
-    !codex.detail.includes(generic.detail) &&
+    !openai.detail.includes("아래") &&
+    claude.detail !== recipe &&
+    codex.detail !== recipe &&
+    grokCard.detail !== recipe &&
+    openai.detail !== recipe &&
     !grokCard.detail.includes(generic.detail) &&
+    !openai.detail.includes(generic.detail) &&
     FIRST_AGENT_GENERIC_HINT === generic.detail
   );
 }
@@ -320,10 +328,12 @@ export function firstAgentCaptureAgent(): {
 }
 
 /** 캡처 `done` 픽스처. 명부의 그 에이전트 id 를 싣는다. 제품 경로는 쓰지 않는다. */
-export function firstAgentCaptureDetected(): HostedAgentConnection | null {
+export function firstAgentCaptureDetected(
+  pose: FirstAgentCapturePose | null = null
+): HostedAgentConnection | null {
   if (import.meta.env.MODE !== "design") return null;
+  if (pose !== "done") return null;
   const agent = firstAgentCaptureAgent();
-  if (agent.agentMemberId === "") return null;
   return {
     id: "019f9a01-0000-7000-8000-0000000005c1",
     agentMemberId: agent.agentMemberId,
