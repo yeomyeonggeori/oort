@@ -141,15 +141,22 @@ impl ProviderConfig {
                     return errors;
                 }
                 Some(parts) => {
-                    let is_loopback = is_allowed_loopback_host(&parts.host);
+                    let local_ok = http_loopback_or_listed(
+                        local_loopback_allowed,
+                        &parts.host,
+                        &local_hosts_from_env(),
+                    );
                     if parts.scheme == "http" {
-                        if !(local_loopback_allowed && is_loopback) {
+                        if !local_ok {
                             errors.push(
                                 "HERMES_BASE_URL must use https:// unless \
                                  AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 targets localhost/127.0.0.1 \
                                  in local mode"
                                     .to_string(),
                             );
+                            if local_loopback_allowed {
+                                errors.push(LOCAL_HOSTS_HINT.to_string());
+                            }
                         }
                     } else if parts.scheme != "https" {
                         errors.push("HERMES_BASE_URL must use http:// or https://".to_string());
@@ -159,9 +166,7 @@ impl ProviderConfig {
                             "HERMES_BASE_URL must not point at mock-hermes for external-hermes"
                                 .to_string(),
                         );
-                    } else if is_local_or_mock_host(&parts.host)
-                        && !(local_loopback_allowed && is_loopback)
-                    {
+                    } else if is_local_or_mock_host(&parts.host) && !local_ok {
                         errors.push(
                             "HERMES_BASE_URL must not point at localhost for external-hermes \
                              unless AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 in local mode"
@@ -239,12 +244,55 @@ pub fn is_local_or_mock_host(host: &str) -> bool {
     ) || lowered.contains("mock")
 }
 
-/// Swift `isAllowedLoopbackHost` (:671-676).
+/// Swift `isAllowedLoopbackHost` (:671-676). Physical loopback only — the
+/// operator allow-list is a separate exact-host set (ADR-0004 증보 2026-09-08).
 pub fn is_allowed_loopback_host(host: &str) -> bool {
     matches!(
         host.to_ascii_lowercase().as_str(),
         "localhost" | "127.0.0.1" | "::1"
     )
+}
+
+/// Diagnostics sentence when the operator flag is on but the host is not on
+/// the exact-match list. Separate from [`BaseUrlInvalid::LoopbackNotAllowed`],
+/// whose Display bytes are pinned by the web (SH-6a-w).
+const LOCAL_HOSTS_HINT: &str =
+    "AGENT_PROVIDER_LOCAL_HOSTS matches exact hosts only (no wildcard or suffix)";
+
+/// Parse `AGENT_PROVIDER_LOCAL_HOSTS` (comma-separated). Wildcard, suffix,
+/// empty, and port-bearing tokens are dropped so a list of `*.internal` cannot
+/// open `foo.internal`.
+fn parse_local_hosts(raw: Option<&str>) -> Vec<String> {
+    let Some(raw) = raw else {
+        return Vec::new();
+    };
+    raw.split(',')
+        .map(str::trim)
+        .filter(|token| !token.is_empty())
+        .filter(|token| is_exact_host_token(token))
+        .map(|token| token.to_ascii_lowercase())
+        .collect()
+}
+
+fn is_exact_host_token(token: &str) -> bool {
+    !token.is_empty()
+        && !token.contains(['*', '?', '/', '\\', ':', '['])
+        && !token.starts_with('.')
+        && !token.ends_with('.')
+}
+
+fn local_hosts_from_env() -> Vec<String> {
+    parse_local_hosts(std::env::var("AGENT_PROVIDER_LOCAL_HOSTS").ok().as_deref())
+}
+
+fn is_exact_listed_host(host: &str, hosts: &[String]) -> bool {
+    let lowered = host.to_ascii_lowercase();
+    hosts.iter().any(|allowed| allowed == &lowered)
+}
+
+/// Operator opt-in: flag ∧ (physical loopback ∨ exact listed host).
+fn http_loopback_or_listed(flag: bool, host: &str, hosts: &[String]) -> bool {
+    flag && (is_allowed_loopback_host(host) || is_exact_listed_host(host, hosts))
 }
 
 /// Swift `isMockHost` (:678-680).
@@ -300,6 +348,18 @@ pub fn validated_base_url(
     environment_name: &str,
     allow_local_loopback: bool,
 ) -> Result<String, BaseUrlInvalid> {
+    // ADR-0004 증보 (2026-09-08): the operator flag is valid in strict
+    // environments (`MOMO_ENV=staging` is the self-host default). The
+    // parameter stays so the two call sites are unchanged.
+    let _ = environment_name;
+    validated_base_url_with_local_hosts(raw, allow_local_loopback, &local_hosts_from_env())
+}
+
+fn validated_base_url_with_local_hosts(
+    raw: &str,
+    allow_local_loopback: bool,
+    local_hosts: &[String],
+) -> Result<String, BaseUrlInvalid> {
     let value = raw.trim();
     let parts = split_url(value).ok_or(BaseUrlInvalid::Shape)?;
     if parts.has_userinfo || parts.has_query || parts.has_fragment {
@@ -313,16 +373,19 @@ pub fn validated_base_url(
     }
 
     let is_loopback = is_allowed_loopback_host(&parts.host);
-    let strict = requires_strict_external_provider(environment_name);
-    let loopback_allowed = allow_local_loopback && !strict && is_loopback;
+    let listed = is_exact_listed_host(&parts.host, local_hosts);
+    let local_ok = http_loopback_or_listed(allow_local_loopback, &parts.host, local_hosts);
 
     if is_loopback {
-        if !loopback_allowed {
+        if !local_ok {
             return Err(BaseUrlInvalid::LoopbackNotAllowed);
         }
         if parts.port.is_none() {
             return Err(BaseUrlInvalid::LoopbackPortMissing);
         }
+    } else if listed && allow_local_loopback {
+        // http://host.docker.internal:<port>/v1 — listed hosts are not
+        // physical loopback, so LoopbackPortMissing does not apply.
     } else if parts.scheme != "https" {
         return Err(BaseUrlInvalid::PlaintextRemote);
     }
@@ -485,7 +548,7 @@ mod tests {
     }
 
     #[test]
-    fn loopback_needs_local_mode_the_flag_and_an_explicit_port() {
+    fn loopback_needs_the_flag_and_an_explicit_port() {
         assert_eq!(
             validated_base_url("http://127.0.0.1:8088/v1", "local", true).expect("allowed"),
             "http://127.0.0.1:8088/v1"
@@ -495,13 +558,140 @@ mod tests {
             BaseUrlInvalid::LoopbackNotAllowed
         );
         assert_eq!(
-            validated_base_url("http://127.0.0.1:8088/v1", "prod", true).expect_err("prod"),
-            BaseUrlInvalid::LoopbackNotAllowed,
-            "a strict environment overrides the operator's local-loopback flag"
+            validated_base_url("http://127.0.0.1:8088/v1", "staging", true)
+                .expect("flag is opt-in"),
+            "http://127.0.0.1:8088/v1",
+            "ADR-0004 증보: the operator flag is valid under MOMO_ENV=staging"
+        );
+        assert_eq!(
+            validated_base_url("http://127.0.0.1:8088/v1", "staging", false)
+                .expect_err("staging flag off")
+                .to_string(),
+            "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1",
+            "without the flag, staging loopback refusal bytes stay identical"
+        );
+        assert_eq!(
+            validated_base_url("http://127.0.0.1:8088/v1", "prod", false)
+                .expect_err("prod flag off"),
+            BaseUrlInvalid::LoopbackNotAllowed
         );
         assert_eq!(
             validated_base_url("http://localhost/v1", "local", true).expect_err("no port"),
             BaseUrlInvalid::LoopbackPortMissing
+        );
+        assert_eq!(
+            validated_base_url("http://localhost/v1", "staging", true)
+                .expect_err("no port staging"),
+            BaseUrlInvalid::LoopbackPortMissing,
+            "LoopbackPortMissing is unchanged under staging + flag"
+        );
+    }
+
+    #[test]
+    fn local_hosts_opt_in_is_exact_match_only() {
+        let listed = parse_local_hosts(Some("host.docker.internal"));
+        assert_eq!(
+            validated_base_url_with_local_hosts(
+                "http://host.docker.internal:11434/v1",
+                true,
+                &listed,
+            )
+            .expect("listed host"),
+            "http://host.docker.internal:11434/v1"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts(
+                "http://host.docker.internal:11434/v1",
+                false,
+                &listed,
+            )
+            .expect_err("flag off"),
+            BaseUrlInvalid::PlaintextRemote,
+            "without the flag, host.docker.internal stays PlaintextRemote (today's bytes)"
+        );
+        assert_eq!(
+            validated_base_url("http://host.docker.internal:11434/v1", "staging", false)
+                .expect_err("no env list, flag off"),
+            BaseUrlInvalid::PlaintextRemote
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts("http://10.0.0.5:11434/v1", true, &listed)
+                .expect_err("private IP not listed"),
+            BaseUrlInvalid::PlaintextRemote
+        );
+        let wildcard = parse_local_hosts(Some("*.internal"));
+        assert!(
+            wildcard.is_empty(),
+            "wildcard tokens are dropped, not treated as a pattern"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts(
+                "http://foo.internal:11434/v1",
+                true,
+                &parse_local_hosts(Some("*.internal")),
+            )
+            .expect_err("wildcard list"),
+            BaseUrlInvalid::PlaintextRemote
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts(
+                "http://evil.host.docker.internal:11434/v1",
+                true,
+                &listed,
+            )
+            .expect_err("suffix must not match"),
+            BaseUrlInvalid::PlaintextRemote,
+            "sabotage: suffix matching would allow evil.host.docker.internal"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://api.example.com/v1", false, &listed,)
+                .expect("https"),
+            "https://api.example.com/v1",
+            "https is allowed regardless of the flag"
+        );
+        assert_eq!(
+            validated_base_url_with_local_hosts("https://host.docker.internal/v1", false, &listed,)
+                .expect("https listed host, flag off"),
+            "https://host.docker.internal/v1"
+        );
+    }
+
+    #[test]
+    fn loopback_not_allowed_display_bytes_are_pinned() {
+        assert_eq!(
+            BaseUrlInvalid::LoopbackNotAllowed.to_string(),
+            "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1"
+        );
+    }
+
+    #[test]
+    fn validation_errors_hint_only_when_flag_is_on() {
+        let off = ProviderConfig {
+            mode: ProviderMode::ExternalHermes,
+            base_url: "http://host.docker.internal:11434/v1".into(),
+            bearer: "sk-live-9f2c4a".into(),
+            allow_local_loopback: false,
+        };
+        let off_errors = off.validation_errors(true, None);
+        assert!(
+            off_errors.iter().any(|e| e.contains("must use https://")),
+            "{off_errors:?}"
+        );
+        assert!(
+            !off_errors
+                .iter()
+                .any(|e| e.contains("AGENT_PROVIDER_LOCAL_HOSTS")),
+            "flag off must not grow a hosts hint: {off_errors:?}"
+        );
+
+        let on = ProviderConfig {
+            allow_local_loopback: true,
+            ..off
+        };
+        let on_errors = on.validation_errors(true, None);
+        assert!(
+            on_errors.iter().any(|e| e.as_str() == LOCAL_HOSTS_HINT),
+            "flag on + unlistable host adds the exact-match hint: {on_errors:?}"
         );
     }
 
