@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearAllFirstAgentMarkers,
+  dismissFirstAgentDeferred,
   firstAgentIsPending,
   firstAgentMarkerKey,
   markFirstAgentPending,
@@ -72,6 +73,20 @@ describe("세션 pending 과 재개 해시", () => {
     expect(firstAgentIsPending(WS)).toBe(true);
     writeFirstAgentMarker(WS, "skipped", NOW);
     expect(firstAgentIsPending(WS)).toBe(false);
+  });
+
+  it("보류는 이번 탭을 닫고 다음 세션에서 다시 선다", () => {
+    writeFirstAgentMarker(WS, "deferred", NOW);
+    expect(readFirstAgentMarker(WS)).toBe("deferred");
+    expect(firstAgentIsPending(WS)).toBe(true);
+    dismissFirstAgentDeferred();
+    expect(firstAgentIsPending(WS)).toBe(false);
+  });
+
+  it("완료는 보류로 낮아지지 않는다", () => {
+    writeFirstAgentMarker(WS, "done", NOW);
+    writeFirstAgentMarker(WS, "deferred", NOW + 1);
+    expect(readFirstAgentMarker(WS)).toBe("done");
   });
 
   it("재개 해시는 한 번만 꺼낸다", () => {

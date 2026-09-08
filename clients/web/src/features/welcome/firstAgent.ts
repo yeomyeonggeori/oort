@@ -26,21 +26,39 @@ export const DETECT_MAX_DELAY_MS = 30_000;
 export const DETECT_CAP_MS = 5 * 60_000;
 
 export const FIRST_AGENT_TITLE = "첫 에이전트 연결";
-export const FIRST_AGENT_LEAD =
-  "팀에 붙일 에이전트를 고르세요. 나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다.";
+export const FIRST_AGENT_SKIP_SENTENCE =
+  "나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다.";
 export const FIRST_AGENT_SKIP_LABEL = "나중에";
 export const FIRST_AGENT_CONTINUE_LABEL = "계속";
+export const FIRST_AGENT_RECHECK_LABEL = "다시 확인";
+export const FIRST_AGENT_RETRY_LABEL = "다시 시도";
+export const FIRST_AGENT_MENTION_ACTION = "채널에서 첫 멘션 쓰기";
 export const FIRST_AGENT_REENTRY_LABEL = "설정 › 연결 › 에이전트 자격";
 export const FIRST_AGENT_REENTRY_HREF = "/settings?section=agents";
 export const FIRST_AGENT_AI_HREF = "/settings?section=ai";
 
-export const FIRST_AGENT_DETECTING_HEADLINE =
-  "에이전트가 연결 값으로 접속하면 이 화면이 바뀝니다.";
-export const FIRST_AGENT_DETECTING_DETAIL =
-  "provider 설정에 값을 넣고 커넥터나 routine을 한 번 실행하세요. 감지는 서버 상태만 따릅니다.";
+export const FIRST_AGENT_HEADING_ID = "first-agent-heading";
+export const FIRST_AGENT_OFFLINE_REASON_ID = "first-agent-offline-reason";
+export const FIRST_AGENT_ERROR_REASON_ID = "first-agent-error-reason";
 
-export const FIRST_AGENT_CAP_COPY =
-  "아직 감지되지 않았습니다. 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다.";
+export const FIRST_AGENT_LEAD_CARDS = "팀에 붙일 에이전트를 고르세요.";
+export const FIRST_AGENT_LEAD_ISSUING = "연결 값을 에이전트 쪽에 넣으세요.";
+export const FIRST_AGENT_LEAD_DETECTING =
+  "에이전트가 연결 값으로 접속하면 이 화면이 바뀝니다.";
+export const FIRST_AGENT_LEAD_CAP = "아직 감지되지 않았습니다.";
+export const FIRST_AGENT_LEAD_MENTION = "감지된 에이전트에게 첫 멘션을 보냅니다.";
+
+export const FIRST_AGENT_DETECTING_WAIT =
+  "이 서버가 에이전트 접속을 확인하면 다음 화면으로 넘어갑니다.";
+
+export const FIRST_AGENT_CHANNEL_PENDING =
+  "이 에이전트가 답할 채널 승인이 아직 끝나지 않았습니다.";
+
+export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했습니다.";
+export const FIRST_AGENT_OFFLINE_REASON =
+  "연결이 끊겼습니다. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있습니다.";
+
+export const FIRST_AGENT_CAP_COPY = "아직 감지되지 않았습니다.";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
@@ -76,11 +94,15 @@ function grokCardDetail(): string {
   return [grok.detail, grok.unverifiedNote].filter(Boolean).join(" ");
 }
 
+function namedGenericDetail(label: string): string {
+  return `${label}. 원격 MCP 서버로 붙습니다. ${genericPreset().detail}`;
+}
+
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: genericPreset().detail,
+    detail: namedGenericDetail("Claude Code"),
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -88,7 +110,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: genericPreset().detail,
+    detail: namedGenericDetail("Codex"),
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -117,6 +139,36 @@ export function firstAgentCard(id: FirstAgentCardId): FirstAgentCard {
   );
 }
 
+export function firstAgentLead(step: FirstAgentStep): string {
+  if (step === "issuing") return FIRST_AGENT_LEAD_ISSUING;
+  if (step === "detecting") return FIRST_AGENT_LEAD_DETECTING;
+  if (step === "cap-exceeded") return FIRST_AGENT_LEAD_CAP;
+  if (step === "mention" || step === "done") return FIRST_AGENT_LEAD_MENTION;
+  return FIRST_AGENT_LEAD_CARDS;
+}
+
+/**
+ * 그 도구에서 지금 할 일. `routine`/`provider` 는 그 프리셋이 쓰는 낱말일
+ * 때만 따른다. 감지는 서버 상태만 따른다는 문장은 여기 주석이지 화면 문장이
+ * 아니다.
+ */
+export function firstAgentDetectingDetail(
+  cardId: FirstAgentCardId | null
+): string {
+  if (cardId === "grok") {
+    return grokPreset().steps[0] ?? FIRST_AGENT_DETECTING_WAIT;
+  }
+  if (cardId === "claude-code" || cardId === "codex") {
+    const card = firstAgentCard(cardId);
+    return `${card.label} 원격 서버 설정에 주소와 연결 값을 넣고 한 번 실행하세요.`;
+  }
+  return "주소와 연결 값을 에이전트 쪽에 넣고 한 번 실행하세요.";
+}
+
+export function formatDetectPollWait(delayMs: number): string {
+  return `${Math.round(delayMs / 1000)}초 뒤 다시 확인합니다`;
+}
+
 /** 프리셋 문구 정책: Grok 은 미확인이고, 카드는 HOSTED_PRESETS 를 복제하지 않는다. */
 export function firstAgentCardsUseHostedPresets(): boolean {
   const grok = HOSTED_PRESETS.find((preset) => preset.id === "grok");
@@ -124,11 +176,14 @@ export function firstAgentCardsUseHostedPresets(): boolean {
   if (!grok || !generic) return false;
   const grokCard = firstAgentCard("grok");
   const claude = firstAgentCard("claude-code");
+  const codex = firstAgentCard("codex");
   return (
     grokCard.label === grok.label &&
     grokCard.detail.includes(grok.detail) &&
     Boolean(grok.unverifiedNote && grokCard.detail.includes(grok.unverifiedNote)) &&
-    claude.detail === generic.detail
+    claude.detail.includes(generic.detail) &&
+    codex.detail.includes(generic.detail) &&
+    claude.detail !== codex.detail
   );
 }
 
@@ -158,12 +213,12 @@ export function copyClaimsConnected(text: string): boolean {
 
 export type LiveHostedStatus = HostedConnectionStatus;
 
+/**
+ * 자동 통과는 감지 규칙과 같다. `pairing_pending` 은 자격만 발급된 상태라
+ * 접속이 없는 사람에게 이 퍼널을 다시 보여야 한다.
+ */
 export function countsTowardAutoPass(status: HostedConnectionStatus): boolean {
-  return (
-    status === "pairing_pending" ||
-    status === "detected" ||
-    status === "active"
-  );
+  return isHostedDetected(status);
 }
 
 export function shouldAutoPass(
@@ -185,7 +240,10 @@ export type FirstAgentCapturePose =
   | "one-time"
   | "detecting"
   | "cap-exceeded"
-  | "done";
+  | "done"
+  | "loading"
+  | "offline"
+  | "error";
 
 export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "cards",
@@ -193,11 +251,10 @@ export const FIRST_AGENT_CAPTURE_POSES: readonly FirstAgentCapturePose[] = [
   "detecting",
   "cap-exceeded",
   "done",
+  "loading",
+  "offline",
+  "error",
 ];
-
-/** 캡처 전용 1회용 값. 제품 발급 경로의 비밀과 섞이지 않는다. */
-export const FIRST_AGENT_CAPTURE_SECRET =
-  "momo_pair_v1.capture.once-only-fixture-do-not-repeat";
 
 export function parseFirstAgentCapturePose(
   raw: string | null
@@ -207,6 +264,9 @@ export function parseFirstAgentCapturePose(
   if (raw === "detecting") return "detecting";
   if (raw === "cap-exceeded") return "cap-exceeded";
   if (raw === "done") return "done";
+  if (raw === "loading") return "loading";
+  if (raw === "offline") return "offline";
+  if (raw === "error") return "error";
   return null;
 }
 
@@ -219,4 +279,20 @@ export function readFirstAgentCapturePoseFromLocation(): FirstAgentCapturePose |
       ? ""
       : window.location.search;
   return parseFirstAgentCapturePose(new URLSearchParams(query).get("firstAgent"));
+}
+
+/** 캡처 전용 1회용 값. 제품 발급 경로의 비밀과 섞이지 않는다. */
+export function firstAgentCaptureSecret(): string {
+  if (import.meta.env.MODE !== "design") return "";
+  return "momo_pair_v1.capture.once-only-fixture-do-not-repeat";
+}
+
+export function firstAgentCaptureAgent(): {
+  displayName: string;
+  handle: string;
+} {
+  if (import.meta.env.MODE !== "design") {
+    return { displayName: "", handle: "" };
+  }
+  return { displayName: "김인턴", handle: "intern" };
 }

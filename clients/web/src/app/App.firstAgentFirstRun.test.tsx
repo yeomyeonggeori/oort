@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -50,6 +52,23 @@ vi.mock("@/app/AppShell", async () => {
 vi.mock("@/features/updates/store", () => ({
   startUpdateWatch: () => () => undefined,
 }));
+
+vi.mock("@/lib/realtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/realtime")>();
+  return {
+    ...actual,
+    createRealtime: () => ({
+      subscribeChannel: () => () => undefined,
+      subscribeAgent: () => () => undefined,
+      subscribeTyping: () => () => undefined,
+      subscribeWorkSession: () => () => undefined,
+      subscribeCascade: () => () => undefined,
+      subscribeHuddle: () => () => undefined,
+      reconnect: () => undefined,
+      dispose: () => undefined,
+    }),
+  };
+});
 
 const reactActEnvironment = globalThis as typeof globalThis & {
   IS_REACT_ACT_ENVIRONMENT?: boolean;
@@ -137,6 +156,10 @@ describe("App post-login first-agent then phone (#2216)", () => {
     markFirstAgentPending(session.member.workspaceId);
     markPhoneLinkFirstRunPending();
     const host = await mountApp();
+    const appSrc = readFileSync(resolve(process.cwd(), "src/app/App.tsx"), "utf8");
+    expect(appSrc).toContain("createRealtime(");
+    expect(appSrc).toContain("resolveSpikeRealtimeUrl");
+    expect(appSrc).not.toMatch(/connStatus:\s*"connected"/);
     expect(host.querySelector('[data-testid="first-agent-stage"]')).not.toBeNull();
     expect(host.querySelector('[data-testid="onboarding-phone-link"]')).toBeNull();
     expect(host.querySelector('[data-testid="channel-list"]')).toBeNull();

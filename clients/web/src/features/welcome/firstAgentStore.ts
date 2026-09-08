@@ -5,13 +5,16 @@ import { uuidEq } from "@momo/core/lib/api";
 //
 // firstMentionStore 와 같은 자리(localStorage, 워크스페이스 키)이고, 완료는
 // 건너뛰기보다 강하다. 세션 pending 은 이번 로그인 탭에만 산다.
+// `deferred` 는 아직 접속이 없을 때 OpenAI 호환으로 설정에 넘긴 기록이다.
+// 이번 탭에서는 오버레이를 닫고, 다음 세션에서 접속이 없으면 다시 선다.
 // =============================================================================
 
 const MARKER_PREFIX = "momo.web.firstAgent.v1:";
 const PENDING_SLOT = "momo.web.firstAgentPending.v1";
 const RESUME_HASH_SLOT = "momo.web.firstAgentResumeHash.v1";
+const DEFER_DISMISS_SLOT = "momo.web.firstAgentDeferDismiss.v1";
 
-export type FirstAgentMarker = "skipped" | "done";
+export type FirstAgentMarker = "skipped" | "done" | "deferred";
 
 interface StoredRecord {
   kind: FirstAgentMarker;
@@ -44,7 +47,7 @@ function parse(raw: string | null): StoredRecord | null {
     const value: unknown = JSON.parse(raw);
     if (typeof value !== "object" || value === null) return null;
     const { kind, atMs } = value as Record<string, unknown>;
-    if (kind !== "skipped" && kind !== "done") return null;
+    if (kind !== "skipped" && kind !== "done" && kind !== "deferred") return null;
     if (typeof atMs !== "number" || !Number.isFinite(atMs)) return null;
     return { kind, atMs };
   } catch {
@@ -58,7 +61,7 @@ export function readFirstAgentMarker(workspaceId: string): FirstAgentMarker | nu
 }
 
 /**
- * 완료는 건너뛰기보다 강하다. 이미 끝난 퍼널을 건너뛰기로 낮추지 않는다.
+ * 완료는 건너뛰기·보류보다 강하다. 이미 끝난 퍼널을 낮추지 않는다.
  */
 export function writeFirstAgentMarker(
   workspaceId: string,
@@ -66,7 +69,8 @@ export function writeFirstAgentMarker(
   nowMs: number = Date.now()
 ): void {
   const key = firstAgentMarkerKey(workspaceId);
-  if (parse(localStore()?.getItem(key) ?? null)?.kind === "done") return;
+  const existing = parse(localStore()?.getItem(key) ?? null)?.kind;
+  if (existing === "done") return;
   try {
     localStore()?.setItem(
       key,
@@ -75,11 +79,12 @@ export function writeFirstAgentMarker(
   } catch {
     /* 초안 저장소와 같다: 막힌 저장소는 기록이 안 남을 뿐 표면은 동작한다. */
   }
-  clearFirstAgentPending();
+  if (kind !== "deferred") clearFirstAgentPending();
 }
 
 export function markFirstAgentPending(workspaceId: string): void {
-  if (readFirstAgentMarker(workspaceId) !== null) return;
+  const marker = readFirstAgentMarker(workspaceId);
+  if (marker === "done" || marker === "skipped") return;
   try {
     sessionStore()?.setItem(PENDING_SLOT, workspaceId);
   } catch {
@@ -87,8 +92,27 @@ export function markFirstAgentPending(workspaceId: string): void {
   }
 }
 
+export function dismissFirstAgentDeferred(): void {
+  try {
+    sessionStore()?.setItem(DEFER_DISMISS_SLOT, "1");
+  } catch {
+    // same as mark
+  }
+}
+
+function firstAgentDeferDismissed(): boolean {
+  try {
+    return sessionStore()?.getItem(DEFER_DISMISS_SLOT) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function firstAgentIsPending(workspaceId: string): boolean {
-  if (readFirstAgentMarker(workspaceId) !== null) return false;
+  const marker = readFirstAgentMarker(workspaceId);
+  if (marker === "done" || marker === "skipped") return false;
+  if (firstAgentDeferDismissed()) return false;
+  if (marker === "deferred") return true;
   try {
     const pending = sessionStore()?.getItem(PENDING_SLOT);
     return typeof pending === "string" && uuidEq(pending, workspaceId);
@@ -140,4 +164,9 @@ export function clearAllFirstAgentMarkers(): void {
     }
   }
   clearFirstAgentPending();
+  try {
+    sessionStore()?.removeItem(DEFER_DISMISS_SLOT);
+  } catch {
+    // same as mark
+  }
 }

@@ -9,11 +9,17 @@ import {
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CONNECTED_CLAIM,
-  FIRST_AGENT_DETECTING_DETAIL,
-  FIRST_AGENT_DETECTING_HEADLINE,
+  FIRST_AGENT_DETECTING_WAIT,
+  FIRST_AGENT_LEAD_CARDS,
+  FIRST_AGENT_LEAD_DETECTING,
+  FIRST_AGENT_LEAD_MENTION,
   FIRST_AGENT_STAGE_ORDER,
   copyClaimsConnected,
+  countsTowardAutoPass,
   firstAgentCardsUseHostedPresets,
+  firstAgentCaptureSecret,
+  firstAgentDetectingDetail,
+  firstAgentLead,
   isHostedDetected,
   nextDetectDelayMs,
   parseFirstAgentCapturePose,
@@ -39,6 +45,7 @@ describe("첫 에이전트 카드 4종", () => {
     expect(grok?.verified).toBe(false);
     expect(grok?.unverifiedNote).toBeTruthy();
     expect(FIRST_AGENT_CARDS[2]?.detail).toContain(grok?.unverifiedNote ?? "");
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(FIRST_AGENT_CARDS[1]?.detail);
   });
 });
 
@@ -53,12 +60,19 @@ describe("로그인 뒤 first-run 순서", () => {
 });
 
 describe("자동 통과", () => {
-  it("연결이 하나라도 있으면 통과한다", () => {
+  it("감지된 연결이 있을 때만 통과한다", () => {
     expect(shouldAutoPass([])).toBe(false);
     expect(shouldAutoPass([{ status: "expired" }])).toBe(false);
-    expect(shouldAutoPass([{ status: "pairing_pending" }])).toBe(true);
+    expect(shouldAutoPass([{ status: "pairing_pending" }])).toBe(false);
     expect(shouldAutoPass([{ status: "detected" }])).toBe(true);
     expect(shouldAutoPass([{ status: "active" }])).toBe(true);
+  });
+
+  it("pairing_pending 은 감지 규칙과 같이 자동 통과가 아니다", () => {
+    expect(countsTowardAutoPass("pairing_pending")).toBe(false);
+    expect(countsTowardAutoPass("detected")).toBe(isHostedDetected("detected"));
+    expect(countsTowardAutoPass("active")).toBe(isHostedDetected("active"));
+    expect(src("./firstAgent.ts")).toContain("`pairing_pending` 은 자격만 발급된 상태");
   });
 });
 
@@ -70,13 +84,29 @@ describe("감지는 서버 상태만 본다", () => {
   });
 
   it("감지 문장은 연결됨을 말하지 않는다", () => {
-    expect(copyClaimsConnected(FIRST_AGENT_DETECTING_HEADLINE)).toBe(false);
-    expect(copyClaimsConnected(FIRST_AGENT_DETECTING_DETAIL)).toBe(false);
+    expect(copyClaimsConnected(FIRST_AGENT_LEAD_DETECTING)).toBe(false);
+    expect(copyClaimsConnected(FIRST_AGENT_DETECTING_WAIT)).toBe(false);
+    expect(copyClaimsConnected(firstAgentDetectingDetail("grok"))).toBe(false);
     expect(copyClaimsConnected(FIRST_AGENT_CAP_COPY)).toBe(false);
-    expect(FIRST_AGENT_CAP_COPY).toBe(
-      "아직 감지되지 않았습니다. 설정 › 연결 › 에이전트 자격에서 이어갈 수 있습니다."
-    );
+    expect(FIRST_AGENT_CAP_COPY).toBe("아직 감지되지 않았습니다.");
     expect(FIRST_AGENT_CAP_COPY).not.toMatch(/[—–]/);
+  });
+
+  it("감지 안내는 그 도구의 할 일이고 구현 계약을 말하지 않는다", () => {
+    expect(firstAgentDetectingDetail("claude-code")).not.toMatch(/routine|provider/);
+    expect(firstAgentDetectingDetail("claude-code")).not.toContain("감지는 서버");
+    expect(firstAgentDetectingDetail("grok")).toContain("그록봇");
+    expect(firstAgentDetectingDetail("grok")).not.toContain("감지는 서버");
+    expect(src("./firstAgent.ts")).toContain("감지는 서버 상태만 따른다는 문장은 여기 주석");
+  });
+});
+
+describe("단계별 리드", () => {
+  it("카드·발급·감지·멘션 리드가 갈린다", () => {
+    expect(firstAgentLead("cards")).toBe(FIRST_AGENT_LEAD_CARDS);
+    expect(firstAgentLead("detecting")).toBe(FIRST_AGENT_LEAD_DETECTING);
+    expect(firstAgentLead("mention")).toBe(FIRST_AGENT_LEAD_MENTION);
+    expect(firstAgentLead("cards")).not.toBe(firstAgentLead("detecting"));
   });
 });
 
@@ -108,19 +138,31 @@ describe("사보타주 ② 서버 전에 연결됨을 말하면 붉다", () => {
   it("감지 카피가 연결됨을 포함하면 이 단정이 실패한다", () => {
     expect(FIRST_AGENT_CONNECTED_CLAIM).toBe("연결됨");
     expect(copyClaimsConnected("연결됨")).toBe(true);
-    expect(copyClaimsConnected(FIRST_AGENT_DETECTING_HEADLINE)).toBe(false);
+    expect(copyClaimsConnected(FIRST_AGENT_LEAD_DETECTING)).toBe(false);
     const stage = src("./FirstAgentStage.tsx");
     expect(stage).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
   });
 });
 
 describe("캡처 포즈", () => {
-  it("다섯 포즈만 받는다", () => {
+  it("여덟 포즈만 받는다", () => {
     expect(parseFirstAgentCapturePose("cards")).toBe("cards");
     expect(parseFirstAgentCapturePose("one-time")).toBe("one-time");
     expect(parseFirstAgentCapturePose("detecting")).toBe("detecting");
     expect(parseFirstAgentCapturePose("cap-exceeded")).toBe("cap-exceeded");
     expect(parseFirstAgentCapturePose("done")).toBe("done");
+    expect(parseFirstAgentCapturePose("loading")).toBe("loading");
+    expect(parseFirstAgentCapturePose("offline")).toBe("offline");
+    expect(parseFirstAgentCapturePose("error")).toBe("error");
     expect(parseFirstAgentCapturePose("wizard")).toBeNull();
+  });
+});
+
+describe("캡처 비밀은 디자인 모드만", () => {
+  it("제품 번들 경로에서 캡처 비밀을 비운다", () => {
+    expect(src("./firstAgent.ts")).toContain(
+      'if (import.meta.env.MODE !== "design") return ""'
+    );
+    expect(firstAgentCaptureSecret()).toBe("");
   });
 });

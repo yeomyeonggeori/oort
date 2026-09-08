@@ -2,6 +2,12 @@ import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNo
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
 import { SessionProvider, useRestoredSession } from "@/app/session";
+import {
+  createRealtime,
+  resolveSpikeRealtimeUrl,
+  type RealtimeHandle,
+  type RealtimeStatus,
+} from "@/lib/realtime";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { PhoneLinkFirstRun } from "@/features/auth/PhoneLinkFirstRun";
@@ -73,13 +79,27 @@ function FirstRunSession({
   replaceSessionMember: (member: Member) => void;
   children: ReactNode;
 }) {
+  const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
+  const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
+  useEffect(() => {
+    const handle = createRealtime(
+      resolveSpikeRealtimeUrl(session.realtimeWebSocketUrl),
+      setConnStatus
+    );
+    setRealtime(handle);
+    return () => {
+      handle.dispose();
+      setRealtime(null);
+    };
+  }, [session.realtimeWebSocketUrl]);
+
   return (
     <SessionProvider
       value={{
         session,
         workspaceId: session.member.workspaceId,
-        realtime: null,
-        connStatus: "connected",
+        realtime,
+        connStatus,
         logout: () => undefined,
         replaceSessionMember,
       }}

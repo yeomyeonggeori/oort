@@ -12240,7 +12240,17 @@ async function captureFirstAgentScenes(browser, scheme) {
     detecting: "first-agent-detecting",
     "cap-exceeded": "first-agent-cap-exceeded",
     done: "first-agent-mention",
+    loading: "first-agent-loading",
+    offline: "first-agent-offline",
+    error: "first-agent-error",
   };
+  const tapTargets = [
+    ["first-agent-skip", "나중에"],
+    ["first-agent-reentry", "재진입", "optional"],
+    ["first-agent-continue", "계속", "optional"],
+    ["first-agent-recheck", "다시 확인", "optional"],
+    ["first-agent-mention-action", "첫 멘션", "optional"],
+  ];
 
   async function shoot(pose, viewport, suffix) {
     const context = await browser.newContext({
@@ -12258,7 +12268,42 @@ async function captureFirstAgentScenes(browser, scheme) {
     }, pose);
     await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
     await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
+    await page.mouse.move(viewport.width + 80, viewport.height + 80);
     await waitForAnimations(page);
+    if (pose === "cards") {
+      const hovered = await page.evaluate(() => {
+        const hover = getComputedStyle(document.documentElement)
+          .getPropertyValue("--surface-hover")
+          .trim();
+        return [...document.querySelectorAll("[data-choice-id]")].flatMap((el) => {
+          const bg = getComputedStyle(el).backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return [];
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = hover || "var(--surface-hover)";
+          document.body.append(probe);
+          const target = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          if (bg === target) return [el.getAttribute("data-choice-id")];
+          return [];
+        });
+      });
+      if (hovered.length > 0) {
+        throw new Error(
+          `first-agent cards ${scheme} ${viewport.width}: hover fill on ${hovered.join(", ")}`
+        );
+      }
+    }
+    await assertNoHorizontalOverflow(
+      page,
+      `first-agent ${pose} ${scheme} ${viewport.width}`
+    );
+    if (viewport.width === 390) {
+      await assertTapTargets(
+        page,
+        `first-agent ${pose} ${scheme} 390`,
+        tapTargets
+      );
+    }
     const path = beginSceneFromShotPath(
       `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`
     );
@@ -12267,7 +12312,16 @@ async function captureFirstAgentScenes(browser, scheme) {
     await context.close();
   }
 
-  for (const pose of ["cards", "one-time", "detecting", "cap-exceeded", "done"]) {
+  for (const pose of [
+    "cards",
+    "one-time",
+    "detecting",
+    "cap-exceeded",
+    "done",
+    "loading",
+    "offline",
+    "error",
+  ]) {
     await shoot(pose, VIEWPORT, "");
     await shoot(pose, MOBILE_VIEWPORT, "-390");
   }

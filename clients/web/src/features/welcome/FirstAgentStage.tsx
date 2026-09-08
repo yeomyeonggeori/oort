@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { uuidEq } from "@momo/core/lib/api";
+import { attachParticle } from "@momo/core/lib/koreanParticle";
+import {
+  FIRST_MENTION_AGENT_BADGE,
+  firstMentionDraft,
+  previewHintedAgent,
+} from "@momo/core/features/hostedAgents/firstMention";
 import { useSession } from "@/app/session";
 import { Button } from "@/design/ui/button";
 import { InlineBanner, Skeleton } from "@/features/common/States";
@@ -11,12 +18,9 @@ import { IS_TAURI } from "@/lib/env";
 import { ChoiceList, type ChoiceListItem } from "@/features/hostedAgents/ChoiceList";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { OneTimeSecretCard } from "@/features/hostedAgents/OneTimeSecretCard";
-import { FirstMentionOnboarding } from "@/features/hostedAgents/FirstMentionOnboarding";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
 import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
-import {
-  getHostedConnection,
-} from "@momo/core/features/hostedAgents/api";
+import { getHostedConnection } from "@momo/core/features/hostedAgents/api";
 import {
   parseHostedConnection,
   type HostedAgentConnection,
@@ -26,22 +30,38 @@ import {
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
 } from "@momo/core/features/hostedAgents/presets";
+import { seedComposerText } from "@/features/chat/draftStore";
+import { elapsedLabel, useTickingNow } from "@/features/agents/agentWorkingSignal";
+import { Avatar } from "@/features/timeline/MessageRow";
 import { memberFor, useChannels, useDirectory } from "@/features/workspace/useWorkspace";
 import { isDefaultWelcomeChannel } from "./welcomeKickoff";
 import {
+  DETECT_INITIAL_MS,
   FIRST_AGENT_AI_HREF,
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
+  FIRST_AGENT_CHANNEL_PENDING,
   FIRST_AGENT_CONTINUE_LABEL,
-  FIRST_AGENT_DETECTING_DETAIL,
-  FIRST_AGENT_DETECTING_HEADLINE,
-  FIRST_AGENT_LEAD,
+  FIRST_AGENT_DETECTING_WAIT,
+  FIRST_AGENT_ERROR_REASON_ID,
+  FIRST_AGENT_HEADING_ID,
+  FIRST_AGENT_LIST_ERROR,
+  FIRST_AGENT_MENTION_ACTION,
+  FIRST_AGENT_OFFLINE_REASON,
+  FIRST_AGENT_OFFLINE_REASON_ID,
+  FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_REENTRY_HREF,
   FIRST_AGENT_REENTRY_LABEL,
+  FIRST_AGENT_RETRY_LABEL,
   FIRST_AGENT_SKIP_LABEL,
+  FIRST_AGENT_SKIP_SENTENCE,
   FIRST_AGENT_TITLE,
-  FIRST_AGENT_CAPTURE_SECRET,
+  firstAgentCaptureAgent,
+  firstAgentCaptureSecret,
   firstAgentCard,
+  firstAgentDetectingDetail,
+  firstAgentLead,
+  formatDetectPollWait,
   isHostedDetected,
   nextDetectDelayMs,
   readFirstAgentCapturePoseFromLocation,
@@ -51,6 +71,7 @@ import {
   type FirstAgentStep,
 } from "./firstAgent";
 import {
+  dismissFirstAgentDeferred,
   setFirstAgentResumeHash,
   writeFirstAgentMarker,
 } from "./firstAgentStore";
@@ -70,12 +91,25 @@ function stepFromPose(pose: FirstAgentCapturePose | null): FirstAgentStep {
   return "cards";
 }
 
+function channelHref(channelId: string): string {
+  return channelId === "" ? "/" : `/c/${channelId}`;
+}
+
+function connectionAllowsChannel(
+  connection: HostedAgentConnection,
+  channelId: string
+): boolean {
+  if (channelId === "") return false;
+  if (connection.status !== "active") return false;
+  return connection.approvedChannelIds.some((id) => uuidEq(id, channelId));
+}
+
 export function FirstAgentStage({
   onContinue,
 }: {
   onContinue: () => void;
 }) {
-  const { workspaceId, session } = useSession();
+  const { workspaceId } = useSession();
   const offline = useOffline();
   const pose = readCapturePose();
   const [step, setStep] = useState<FirstAgentStep>(() => stepFromPose(pose));
@@ -85,29 +119,44 @@ export function FirstAgentStage({
   const [connectionId, setConnectionId] = useState<string | null>(null);
   const [detected, setDetected] = useState<HostedAgentConnection | null>(null);
   const [listError, setListError] = useState<string | null>(null);
+  const [detectStartedAtMs, setDetectStartedAtMs] = useState(() => Date.now());
+  const [nextPollMs, setNextPollMs] = useState(DETECT_INITIAL_MS);
   const autoPassedRef = useRef(false);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const prevStepRef = useRef(step);
 
   const list = useQuery({
     ...hostedListQuery(workspaceId),
     enabled: pose === null,
   });
-  const { directory, isPending: directoryPending } = useDirectory(workspaceId);
+  const { directory } = useDirectory(workspaceId);
   const { groups } = useChannels(workspaceId);
 
-  const welcomeChannelId = useMemo(() => {
-    const welcome = groups.channels.find((channel) =>
-      isDefaultWelcomeChannel({ kind: channel.kind, name: channel.name })
+  const welcomeChannel = useMemo(() => {
+    return (
+      groups.channels.find((channel) =>
+        isDefaultWelcomeChannel({ kind: channel.kind, name: channel.name })
+      ) ?? groups.channels[0] ?? null
     );
-    return welcome?.id ?? groups.channels[0]?.id ?? "";
   }, [groups.channels]);
+  const welcomeChannelId = welcomeChannel?.id ?? "";
+
+  const nowMs = useTickingNow(step === "detecting");
+
+  useEffect(() => {
+    if (prevStepRef.current === step) return;
+    prevStepRef.current = step;
+    headingRef.current?.focus();
+  }, [step]);
 
   useEffect(() => {
     if (pose !== null || autoPassedRef.current) return;
     if (list.isPending) return;
     if (list.isError) {
-      setListError("연결 목록을 불러오지 못했습니다. 나중에 설정에서 이어갈 수 있습니다.");
+      setListError(FIRST_AGENT_LIST_ERROR);
       return;
     }
+    setListError(null);
     if (shouldAutoPass(list.data ?? [])) {
       autoPassedRef.current = true;
       writeFirstAgentMarker(workspaceId, "done");
@@ -120,7 +169,6 @@ export function FirstAgentStage({
     let cancelled = false;
     let attempt = 0;
     let timer = 0;
-    const started = Date.now();
 
     const poll = async () => {
       if (cancelled) return;
@@ -138,11 +186,12 @@ export function FirstAgentStage({
         /* 다음 간격에서 다시 묻는다. 상한이 무한 폴링을 막는다. */
       }
       if (cancelled) return;
-      const delay = nextDetectDelayMs(Date.now() - started, attempt);
+      const delay = nextDetectDelayMs(Date.now() - detectStartedAtMs, attempt);
       if (delay === "cap") {
         setStep("cap-exceeded");
         return;
       }
+      setNextPollMs(delay);
       attempt += 1;
       timer = window.setTimeout(() => {
         void poll();
@@ -154,7 +203,7 @@ export function FirstAgentStage({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [step, connectionId, workspaceId, pose]);
+  }, [step, connectionId, workspaceId, pose, detectStartedAtMs]);
 
   const finish = (kind: "skipped" | "done") => {
     writeFirstAgentMarker(workspaceId, kind);
@@ -167,11 +216,16 @@ export function FirstAgentStage({
   };
 
   const handleOpenAi = () => {
-    setFirstAgentResumeHash(`#${FIRST_AGENT_AI_HREF}`);
-    finish("done");
+    const hash = `#${FIRST_AGENT_AI_HREF}`;
+    window.location.hash = hash;
+    setFirstAgentResumeHash(hash);
+    writeFirstAgentMarker(workspaceId, "deferred");
+    dismissFirstAgentDeferred();
+    onContinue();
   };
 
   const handlePick = (id: string) => {
+    if (offline || listError) return;
     const cardId = id as FirstAgentCardId;
     setSelectedCard(cardId);
     const card = firstAgentCard(cardId);
@@ -189,6 +243,38 @@ export function FirstAgentStage({
     setWizardOpen(true);
   };
 
+  const handleRecheck = async () => {
+    if (offline || connectionId === null) return;
+    try {
+      const connection = parseHostedConnection(
+        await getHostedConnection(workspaceId, connectionId)
+      );
+      if (isHostedDetected(connection.status)) {
+        setDetected(connection);
+        setStep("mention");
+      }
+    } catch {
+      /* 한 번 더 물은 뒤에도 없으면 이 자리에 남는다. */
+    }
+  };
+
+  const handleMentionHandoff = () => {
+    const agent =
+      previewHintedAgent(directory.members, detected?.agentMemberId ?? null) ??
+      (pose === "done" ? firstAgentCaptureAgent() : null);
+    if (welcomeChannelId !== "" && agent && agent.handle !== "") {
+      seedComposerText(
+        workspaceId,
+        welcomeChannelId,
+        firstMentionDraft(agent.handle)
+      );
+    }
+    const href = `#${channelHref(welcomeChannelId)}`;
+    setFirstAgentResumeHash(href);
+    window.location.hash = href;
+    finish("done");
+  };
+
   const items: ChoiceListItem[] = FIRST_AGENT_CARDS.map((card) => ({
     id: card.id,
     label: card.label,
@@ -196,13 +282,28 @@ export function FirstAgentStage({
   }));
 
   const hintedAgentMemberId = detected?.agentMemberId ?? null;
-  const self = session.member;
+  const mentionAgent =
+    previewHintedAgent(directory.members, hintedAgentMemberId) ??
+    (pose === "done"
+      ? {
+          connectionId: "",
+          agentMemberId: "",
+          displayName: firstAgentCaptureAgent().displayName,
+          handle: firstAgentCaptureAgent().handle,
+        }
+      : null);
+  const mentionApproved =
+    detected !== null && connectionAllowsChannel(detected, welcomeChannelId);
+  const rosterAgent =
+    mentionAgent === null || mentionAgent.agentMemberId === ""
+      ? (directory.members.find((row) => row.kind === "agent") ?? null)
+      : (memberFor(directory, mentionAgent.agentMemberId) ?? null);
 
   const skipRow = (
     <div className="flex flex-wrap items-center gap-2">
       <Button
         type="button"
-        variant="outline"
+        variant="ghost"
         className="self-start"
         onClick={handleSkip}
         data-testid="first-agent-skip"
@@ -211,7 +312,7 @@ export function FirstAgentStage({
       </Button>
       <Link
         to={FIRST_AGENT_REENTRY_HREF}
-        className="touch-target press rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+        className="tap-target press inline-flex h-control items-center rounded-sm text-body text-ink-muted underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
         onClick={() => {
           setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
           finish("skipped");
@@ -223,20 +324,38 @@ export function FirstAgentStage({
     </div>
   );
 
+  const autoPassing =
+    pose === null &&
+    !list.isPending &&
+    !list.isError &&
+    shouldAutoPass(list.data ?? []);
+  const showLoading = pose === "loading" || (pose === null && (list.isPending || autoPassing));
+  const showOffline = pose === "offline" || offline;
+  const showError = pose === "error" || Boolean(listError);
+  const cardsInert = Boolean(listError) || pose === "error";
+  const cardsLocked = showOffline || cardsInert;
+
   const body = (() => {
     if (pose === "one-time") {
       return (
-        <OneTimeSecretCard
-          headline={PAIRING_REVEAL_HEADLINE}
-          warning={PAIRING_REVEAL_WARNING}
-          notes={[PAIRING_REVEAL_SCOPE_NOTE]}
-          secretLabel="연결 값"
-          secret={FIRST_AGENT_CAPTURE_SECRET}
-          copyLabel="연결 값 복사"
-          onDone={() => undefined}
-          testId="hosted-pairing-card"
-        />
+        <div className="flex min-w-0 flex-col items-start gap-3">
+          <OneTimeSecretCard
+            headline={PAIRING_REVEAL_HEADLINE}
+            warning={PAIRING_REVEAL_WARNING}
+            notes={[PAIRING_REVEAL_SCOPE_NOTE]}
+            secretLabel="연결 값"
+            secret={firstAgentCaptureSecret()}
+            copyLabel="연결 값 복사"
+            onDone={() => undefined}
+            testId="hosted-pairing-card"
+          />
+          {skipRow}
+        </div>
       );
+    }
+
+    if (step === "issuing") {
+      return null;
     }
 
     if (step === "detecting" || pose === "detecting") {
@@ -244,15 +363,25 @@ export function FirstAgentStage({
         <div
           className="flex min-w-0 flex-col items-start gap-3"
           data-testid="first-agent-detecting"
-          role="status"
         >
-          <p className="break-keep text-body text-ink">
-            {FIRST_AGENT_DETECTING_HEADLINE}
-          </p>
-          <p className="break-keep text-body text-ink-muted">
-            {FIRST_AGENT_DETECTING_DETAIL}
-          </p>
-          <Skeleton ready={false} rows={2} className="w-full p-0" />
+          <div role="status" className="flex min-w-0 flex-col items-start gap-3">
+            <p
+              className="text-body text-ink"
+              data-numeric
+              data-testid="first-agent-elapsed"
+            >
+              {elapsedLabel(detectStartedAtMs, nowMs)}
+            </p>
+            <p className="break-keep text-body text-ink">
+              {formatDetectPollWait(nextPollMs)}
+            </p>
+            <p className="break-keep text-body text-ink-muted">
+              {firstAgentDetectingDetail(selectedCard)}
+            </p>
+            <p className="break-keep text-body text-ink-muted">
+              {FIRST_AGENT_DETECTING_WAIT}
+            </p>
+          </div>
           {skipRow}
         </div>
       );
@@ -265,99 +394,154 @@ export function FirstAgentStage({
           data-testid="first-agent-cap-exceeded"
         >
           <p className="break-keep text-body text-ink">{FIRST_AGENT_CAP_COPY}</p>
-          {skipRow}
           <Button
             type="button"
             className="self-start"
-            onClick={() => finish("done")}
-            data-testid="first-agent-continue"
+            onClick={() => {
+              void handleRecheck();
+            }}
+            data-testid="first-agent-recheck"
           >
-            {FIRST_AGENT_CONTINUE_LABEL}
+            {FIRST_AGENT_RECHECK_LABEL}
           </Button>
+          {skipRow}
         </div>
       );
     }
 
     if (step === "mention" || pose === "done") {
+      const channelName = welcomeChannel?.name ?? "";
+      const actionHref = channelHref(welcomeChannelId);
       return (
         <div
           className="flex min-w-0 flex-col items-start gap-3"
           data-testid="first-agent-mention"
         >
-          {welcomeChannelId !== "" && hintedAgentMemberId !== null ? (
-            <FirstMentionOnboarding
-              workspaceId={workspaceId}
-              channelId={welcomeChannelId}
-              members={directory.members}
-              selfMemberId={self.id}
-              selfKind={self.kind}
-              selfRole={memberFor(directory, self.id)?.role ?? "member"}
-              rosterSettled={!directoryPending}
-              messages={[]}
-              pending={[]}
-              messagesStatus="ready"
-              hintedAgentMemberId={hintedAgentMemberId}
-              onRetryMessages={() => undefined}
-            />
+          {mentionAgent && mentionAgent.displayName !== "" ? (
+            <>
+              <div className="flex min-w-0 items-center gap-3">
+                <Avatar member={rosterAgent} />
+                <div className="flex min-w-0 flex-1 flex-wrap items-baseline gap-2">
+                  <p className="min-w-0 truncate text-body font-semibold text-agent">
+                    {mentionAgent.displayName}
+                  </p>
+                  <span className="rounded-sm bg-agent-soft px-1 text-timestamp text-agent">
+                    {FIRST_MENTION_AGENT_BADGE}
+                  </span>
+                  <span className="min-w-0 truncate text-meta text-ink-muted">
+                    @{mentionAgent.handle}
+                  </span>
+                </div>
+              </div>
+              {mentionApproved && channelName !== "" ? (
+                <p className="break-keep text-body text-ink">
+                  {`${attachParticle(mentionAgent.displayName, "subject")} ${channelName}에서 답합니다.`}
+                </p>
+              ) : (
+                <p className="break-keep text-body text-ink-muted">
+                  {FIRST_AGENT_CHANNEL_PENDING}{" "}
+                  <Link
+                    to={FIRST_AGENT_REENTRY_HREF}
+                    className="press underline underline-offset-2 hover:text-ink focus-visible:focus-ring"
+                    onClick={() => {
+                      setFirstAgentResumeHash(`#${FIRST_AGENT_REENTRY_HREF}`);
+                      finish("skipped");
+                    }}
+                  >
+                    {FIRST_AGENT_REENTRY_LABEL}
+                  </Link>
+                </p>
+              )}
+              <Button
+                type="button"
+                className="self-start"
+                onClick={handleMentionHandoff}
+                data-testid="first-agent-mention-action"
+                data-href={`#${actionHref}`}
+              >
+                {FIRST_AGENT_MENTION_ACTION}
+              </Button>
+            </>
           ) : (
             <p className="break-keep text-body text-ink">
               첫 멘션은 채널에서 이어갈 수 있습니다.
             </p>
           )}
           {skipRow}
-          <Button
-            type="button"
-            className="self-start"
-            onClick={() => finish("done")}
-            data-testid="first-agent-continue"
-          >
-            {FIRST_AGENT_CONTINUE_LABEL}
-          </Button>
         </div>
       );
     }
 
-    const autoPassing =
-      pose === null &&
-      !list.isPending &&
-      !list.isError &&
-      shouldAutoPass(list.data ?? []);
-
     return (
       <div className="flex min-w-0 flex-col items-start gap-4" data-testid="first-agent-cards">
-        {(list.isPending || autoPassing) && pose === null && (
-          <div role="status" data-testid="first-agent-loading">
-            <span className="sr-only">연결 목록을 불러옵니다.</span>
+        {showLoading && (
+          <div
+            role="status"
+            className="flex w-full min-w-0 flex-col items-start gap-3"
+            data-testid="first-agent-loading"
+          >
+            <p className="break-keep text-body text-ink-muted">
+              연결 목록을 불러옵니다.
+            </p>
             <Skeleton ready={false} rows={3} className="w-full p-0" />
           </div>
         )}
-        {offline && (
+        {showOffline && (
           <InlineBanner
             tone="neutral"
-            message="연결이 끊겼습니다. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있습니다."
+            message={FIRST_AGENT_OFFLINE_REASON}
+            messageId={FIRST_AGENT_OFFLINE_REASON_ID}
             testId="first-agent-offline"
           />
         )}
-        {listError && (
+        {showError && (
           <InlineBanner
-            message={listError}
+            message={listError ?? FIRST_AGENT_LIST_ERROR}
+            messageId={FIRST_AGENT_ERROR_REASON_ID}
+            actionLabel={FIRST_AGENT_RETRY_LABEL}
+            onAction={() => {
+              setListError(null);
+              void list.refetch();
+            }}
             testId="first-agent-error"
           />
         )}
-        {((!list.isPending && !autoPassing) || pose !== null) && (
-          <ChoiceList
-            name="first-agent-harness"
-            legend="어떤 에이전트를 붙이나요"
-            multiple={false}
-            items={items}
-            selected={selectedCard ? [selectedCard] : []}
-            onChange={(next) => {
-              const id = next[0];
-              if (id) handlePick(id);
-            }}
-            disabled={offline}
-            testId="first-agent-choice"
-          />
+        {pose !== "loading" && !showLoading && (
+          <>
+            <ChoiceList
+              name="first-agent-harness"
+              legend="어떤 에이전트를 붙이나요"
+              multiple={false}
+              items={items}
+              selected={selectedCard ? [selectedCard] : []}
+              onChange={(next) => {
+                const id = next[0];
+                if (id) setSelectedCard(id as FirstAgentCardId);
+              }}
+              onActivate={handlePick}
+              disabled={cardsLocked}
+              describedBy={
+                showOffline
+                  ? FIRST_AGENT_OFFLINE_REASON_ID
+                  : showError
+                    ? FIRST_AGENT_ERROR_REASON_ID
+                    : undefined
+              }
+              testId="first-agent-choice"
+            />
+            <Button
+              type="button"
+              className="self-start"
+              aria-disabled={!selectedCard || cardsLocked || undefined}
+              onClick={() => {
+                if (!selectedCard || cardsLocked) return;
+                handlePick(selectedCard);
+              }}
+              data-testid="first-agent-continue"
+            >
+              {FIRST_AGENT_CONTINUE_LABEL}
+            </Button>
+          </>
         )}
         {skipRow}
       </div>
@@ -371,7 +555,7 @@ export function FirstAgentStage({
         data-testid="onboarding-step-chrome"
         {...titlebarDragProps(IS_TAURI)}
       />
-      <div className="flex flex-1 items-center justify-center p-6">
+      <div className="flex min-h-0 flex-1 items-center justify-center p-6">
         <OnboardingSlideTransition
           transitionKey={step}
           className="flex w-full justify-center"
@@ -380,10 +564,23 @@ export function FirstAgentStage({
             className="flex w-full max-w-sm flex-col items-start gap-4"
             data-testid="first-agent-stage"
             data-step={step}
+            aria-labelledby={FIRST_AGENT_HEADING_ID}
           >
             <div className="flex flex-col gap-1">
-              <h1 className="text-title font-semibold text-ink">{FIRST_AGENT_TITLE}</h1>
-              <p className="break-keep text-body text-ink-muted">{FIRST_AGENT_LEAD}</p>
+              <h1
+                ref={headingRef}
+                id={FIRST_AGENT_HEADING_ID}
+                tabIndex={-1}
+                className="text-title font-semibold text-ink focus-visible:focus-ring"
+              >
+                {FIRST_AGENT_TITLE}
+              </h1>
+              <p className="break-keep text-body text-ink-muted">
+                {firstAgentLead(step)}
+              </p>
+              <p className="break-keep text-meta text-ink-muted">
+                {FIRST_AGENT_SKIP_SENTENCE}
+              </p>
             </div>
             {body}
           </div>
@@ -404,6 +601,8 @@ export function FirstAgentStage({
         onPairingSaved={(id) => {
           setConnectionId(id);
           setWizardOpen(false);
+          setDetectStartedAtMs(Date.now());
+          setNextPollMs(DETECT_INITIAL_MS);
           setStep("detecting");
         }}
       />

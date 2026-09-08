@@ -3,6 +3,7 @@
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
+- R2 (R1 FAIL B2·H5·M7·N4). 화살표는 선택만, 커밋은 Enter/Space·「계속」. `detected`/`active` 멘션 스텝은 이름·채널(또는 승인 대기)+채널 핸드오프. 단계별 리드. 오프라인은 `aria-disabled`. OpenAI는 `deferred`. 자동 통과는 `detected|active`. 1회용 가드는 발급 비밀. 캡처 8포즈.
 - runtime-unverified: 실서버 hosted create/detect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R7)

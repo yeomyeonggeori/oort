@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -25,6 +26,10 @@ import { cn } from "@/design/lib/cn";
 // 잠긴 줄을 흐리게 만들지 않는 이유는 이 레포가 이미 정한 것이다(에이전트 허브의
 // 오프라인 지시문 상자, design-review 2R High): 못 고르는 표시는 바탕이 지고,
 // 글자는 읽을 수 있어야 한다. 사유가 안 읽히면 사유가 아니다.
+//
+// 그룹 잠금은 native `fieldset disabled` 가 아니다. 그 속성은 라디오를 탭
+// 순서에서 지우고 초점을 `<body>` 로 떨어뜨린다 (SH-6a-w R4 M-1). 잠금은
+// `aria-disabled` + 가드이고, 사유는 `aria-describedby` 가 가리킨다.
 // =============================================================================
 
 export interface ChoiceListItem {
@@ -45,10 +50,12 @@ export function ChoiceList({
   name,
   legend,
   hint,
+  describedBy,
   multiple,
   items,
   selected,
   onChange,
+  onActivate,
   disabled,
   testId,
 }: {
@@ -57,18 +64,33 @@ export function ChoiceList({
   legend: string;
   /** 그룹 전체에 걸리는 한 문장. 저장 상태나 잠금 사유. */
   hint?: string;
+  /**
+   * 이미 화면에 있는 사유(배너 `messageId`)를 가리킨다. `hint` 문장을 한 번 더
+   * 그리지 않는다.
+   */
+  describedBy?: string;
   multiple: boolean;
   items: readonly ChoiceListItem[];
   selected: readonly string[];
   /** 다음 선택 전체. 컴포넌트가 토글 규칙을 들고 호출부는 결과만 받는다. */
   onChange: (next: string[]) => void;
+  /**
+   * 있으면 화살표·클릭은 선택만 옮기고, 커밋은 Enter/Space 다. 호출부의
+   * 「계속」도 같은 `onActivate` 를 부른다. 없으면 `onChange` 가 곧 커밋이다
+   * (위저드 라디오).
+   */
+  onActivate?: (id: string) => void;
   /** 그룹 전체가 지금 조작 대상이 아니다(오프라인 등). */
   disabled?: boolean;
   testId?: string;
 }) {
   const hintId = hint ? `${name}-hint` : undefined;
+  const groupDescribedBy = [describedBy, hintId].filter(Boolean).join(" ") || undefined;
+  const activateOnly = onActivate !== undefined;
+  const selectable = items.filter((item) => !item.disabled && !item.locked);
 
   function toggle(item: ChoiceListItem) {
+    if (disabled) return;
     if (item.disabled || item.locked) return;
     if (!multiple) {
       onChange([item.id]);
@@ -80,11 +102,49 @@ export function ChoiceList({
     );
   }
 
+  function activate(item: ChoiceListItem) {
+    if (disabled) return;
+    if (item.disabled || item.locked) return;
+    onActivate?.(item.id);
+  }
+
+  function focusItem(item: ChoiceListItem) {
+    const node = document.getElementById(`${name}-${item.id}`);
+    if (node instanceof HTMLElement) node.focus();
+  }
+
+  function moveRoving(current: ChoiceListItem, direction: 1 | -1) {
+    const index = selectable.findIndex((row) => row.id === current.id);
+    const from = index < 0 ? (direction === 1 ? -1 : selectable.length) : index;
+    const next = selectable[from + direction];
+    if (!next) return;
+    toggle(next);
+    focusItem(next);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, item: ChoiceListItem) {
+    if (!activateOnly) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveRoving(item, 1);
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveRoving(item, -1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      activate(item);
+    }
+  }
+
   return (
     <fieldset
       className="flex min-w-0 flex-col gap-1"
-      disabled={disabled}
-      aria-describedby={hintId}
+      aria-disabled={disabled || undefined}
+      aria-describedby={groupDescribedBy}
       data-testid={testId}
     >
       <legend className="pb-1 text-meta text-ink-muted">{legend}</legend>
@@ -93,6 +153,7 @@ export function ChoiceList({
           const checked = item.locked || selected.includes(item.id);
           const inert = Boolean(item.disabled) || Boolean(item.locked);
           const detailId = `${name}-${item.id}-detail`;
+          const described = [groupDescribedBy, detailId].filter(Boolean).join(" ");
           return (
             <label
               key={item.id}
@@ -117,8 +178,10 @@ export function ChoiceList({
                 value={item.id}
                 checked={checked}
                 disabled={inert}
-                aria-describedby={detailId}
+                aria-disabled={disabled || undefined}
+                aria-describedby={described}
                 onChange={() => toggle(item)}
+                onKeyDown={(event) => handleKeyDown(event, item)}
                 className="mt-1 accent-accent focus-visible:focus-ring"
               />
               <span className="flex min-w-0 flex-col gap-px">
