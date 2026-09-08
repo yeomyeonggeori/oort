@@ -265,7 +265,7 @@ oort_doctor_check_unfurl() {
 
 oort_doctor_check_env() {
   local mode dup key missing="" claim="" value trimmed
-  local class verdict lowered
+  local class verdict lowered local_on=0
 
   mode="$(oort_doctor_file_mode "$OORT_DOCTOR_ENV")"
   if [ "$mode" -eq 600 ]; then
@@ -434,6 +434,30 @@ EOF
           ;;
       esac
     fi
+  fi
+
+  # SH-6a-e / #2215 — one row. Off = informational pass. On = warn. On +
+  # public origin = major (local provider is for local installs).
+  local_on=0
+  if oort_doctor_has AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK; then
+    value="$(oort_doctor_trim "$(oort_doctor_get AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK)")"
+    lowered="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+    case "$lowered" in
+      1|true|yes|on) local_on=1 ;;
+    esac
+  fi
+  if [ "$local_on" -eq 0 ]; then
+    oort_doctor_record env.local_provider minor pass \
+      "로컬 provider 꺼짐 (기본 거부)" ""
+  elif oort_doctor_has OORT_SITE_ADDRESS \
+    && [ -n "$(oort_doctor_trim "$(oort_doctor_get OORT_SITE_ADDRESS)")" ]; then
+    oort_doctor_record env.local_provider major fail \
+      "공개 오리진에서 로컬 provider 허용은 권장하지 않는다" \
+      "AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK 과 AGENT_PROVIDER_LOCAL_HOSTS 를 지우고 api·agent-worker 를 재시작하라."
+  else
+    oort_doctor_record env.local_provider major pass \
+      "로컬 provider 허용 — 같은 머신의 provider만" \
+      "끄려면 두 키를 지우고 api·agent-worker 를 재시작하라."
   fi
 
   oort_doctor_check_role_passwords
