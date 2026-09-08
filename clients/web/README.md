@@ -21,6 +21,7 @@ work 표면은 서버 capability로 숨김(ADR-0183 D4-②).
 ```
 src/app/          # App shell (realtime rail + sidebar frame), routes, ⌘K switcher
 src/features/     # auth, sidebar, workspace reads, timeline, chat, inbox/activity/settings
+                  # 설정 › 연결 › 에이전트 자격 = hosted pairing GUI (#2204)
 src/design/       # tokens.css (여명 placeholder palette) + shadcn/ui primitives
 src/lib/          # api (REST, contract-faithful), realtime (Centrifugo), env
 gates/            # measurement runners (seq / resume / scroll+coldstart / shell layout / inject)

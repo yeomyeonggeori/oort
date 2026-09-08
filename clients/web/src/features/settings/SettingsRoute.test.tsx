@@ -25,6 +25,10 @@ vi.mock("react-router-dom", async (importOriginal) => {
 vi.mock("./AiLinkSection", () => ({
   AiLinkSection: () => createElement("div", { "data-testid": "section-ai" }),
 }));
+vi.mock("./AgentCredentialsSection", () => ({
+  AgentCredentialsSection: () =>
+    createElement("div", { "data-testid": "section-agents" }),
+}));
 vi.mock("./WorkHostSection", () => ({
   WorkHostSection: () => createElement("div", { "data-testid": "section-code" }),
 }));
@@ -207,6 +211,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
         "settings-nav-link-previews",
         "settings-nav-notifications",
         "settings-nav-ai",
+        "settings-nav-agents",
         "settings-nav-workspace",
         "settings-nav-plugins",
         "settings-nav-usage",
@@ -266,6 +271,7 @@ describe("SettingsRoute 전면 레이아웃", () => {
       ["settings-nav-plugins", "section-plugins"],
       ["settings-nav-members", "section-members"],
       ["settings-nav-ai", "section-ai"],
+      ["settings-nav-agents", "section-agents"],
       ["settings-nav-usage", "section-usage"],
       ["settings-nav-webhooks", "section-webhooks"],
       ["settings-nav-events", "section-events"],
