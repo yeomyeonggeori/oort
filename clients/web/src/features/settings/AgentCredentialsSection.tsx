@@ -93,13 +93,7 @@ export function offersRecord(
   return status === "disconnected";
 }
 
-/**
- * `lg`(min-width: 1024px) 에서만 3열 그리드.
- *
- * 설정 셸 ≥600: 사이드바 240 + 본문 p-6 48. 뷰포트 1024 → 목록 ≈734.
- * band + facts max + gaps ≤ ~414 → 이름 상자 ≥ 320 ≥ 144.
- * 뷰포트 720 → 목록 ≈430. 3열은 이름 144를 남기지 못하므로 두 띠로 접는다.
- */
+/** `lg`(min-width: 1024px) 에서만 3열 `credentials-row-grid`. */
 const CREDENTIALS_ROW_WIDE_QUERY = "(min-width: 1024px)";
 
 function subscribeCredentialsRowWide(onStoreChange: () => void): () => void {
