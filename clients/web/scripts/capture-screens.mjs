@@ -10666,6 +10666,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           band.topColor !== rowSep.bottomColor;
         const bandDiffersMeasured = inset || colorDiffers;
         const selected = rows.find((li) => li.hasAttribute("data-selected"));
+        selected?.scrollIntoView({ block: "center" });
         const selectedBody = selected?.querySelector(
           '[data-testid="agent-credentials-row-body"]'
         );
@@ -11376,6 +11377,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const selected = document.querySelector(
           '[data-testid="agent-credentials-row"][data-selected]'
         );
+        selected?.scrollIntoView({ block: "center" });
         const selectedActions = selected?.querySelector(
           '[data-testid="agent-credentials-row-actions"]'
         );
@@ -11385,8 +11387,8 @@ async function captureAgentCredentialsScenes(browser, scheme) {
         const actionBg = selectedActions
           ? getComputedStyle(selectedActions).backgroundColor
           : null;
-        const bodyBg = selectedBody
-          ? getComputedStyle(selectedBody).backgroundColor
+        const rowFill = selected
+          ? getComputedStyle(selected).backgroundColor
           : null;
         const controls = [
           ...(selectedActions?.querySelectorAll("button") ?? []),
@@ -11424,7 +11426,7 @@ async function captureAgentCredentialsScenes(browser, scheme) {
           accentSoft: swatch("--accent-soft"),
           surfaceHover: swatch("--surface-hover"),
           surface: swatch("--surface"),
-          selected: bodyBg,
+          selected: rowFill,
           hovered: bodies[1]
             ? getComputedStyle(bodies[1]).backgroundColor
             : null,
