@@ -24,6 +24,22 @@
 - R4 (R3 FAIL B1·H1·M2·N5; R2 열둘 CLOSED 유지). 390 행은 이름 `min-w-0 flex-1` + 시각 `hidden sm:block` + 잠금 사유 `basis-full` 줄바꿈. 터미널 행은 도어벨을 거두고 착지는 heading 으로 내린다. `HostedConnectionSection` TerminalPanel 완료 분기는 `disconnected` 만. 행 본문 hover 채움 삭제. 허브 region 은 `aria-label={`${agentLabel} 호스티드 연결`}`, 설정은 labelledby. 버튼 「도어벨 설정」. `AgentHubRoute.tsx` 무접촉.
 - runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 
+## SH-9 hermes 합류 런북 Rust 현행화 (#2231, 2026-09-08)
+
+- Track engine. `feat/sh9-hermes-runbook-rust`. `docs/external-agent-provider/*` 재작성(삭제 아님): Swift 런타임 이름 → compose `api`/`relay`/`agent-worker`, 포트는 `MOMO_WEB_PORT` 파생, 죽은 `verify_external_agent_provider.sh` 5곳 → `scripts/local_gate.sh --profile external-agent-provider` + `scripts/verify_local_hermes_credentialed_smoke.sh`, Command Center → 설정 › AI 연결. `docs/SELF_HOST.md`(+ko) §5 로컬 provider를 hermes 실측 절차로 확장. 인용 게이트 `scripts/tests/test_external_agent_provider_docs.sh`.
+- 검증: 새 시험 PASS(인용 7, Swift 이름 0, 28180/28100 0) · 사보타주 RED(`scripts/verify_external_agent_provider.sh`) · `scripts/local_gate.sh --profile docs`. E2E `COMPOSE_PROJECT_NAME=oort-sh9`, mock `scripts/mock_hermes.py --host 0.0.0.0:19765` (`hermes serve`는 JSON-RPC라 `/v1/chat/completions` 대체), welcome `#general` seq=3 body `김인턴 mock reply: MOMO-004 SSE path verified.`. 회수 후 컨테이너 0. 플러그인 `MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin` PASS(`plugin.yaml`+`PLUGIN.yaml`). `verify_hermes_gateway_adapter.sh`는 삭제된 Swift 서버를 띄워 미실행(allow-list 밖).
+- runtime-unverified: 실 hermes OpenAI 호환 SSE(이 호스트의 `hermes`는 `serve` JSON-RPC). 자격 스모크 `verify_local_hermes_credentialed_smoke.sh` 기본 경로는 `NEEDS_USER_CREDENTIAL`(시크릿 없음).
+
+## SH-8 그록봇 합류 절 검수 + 로컬 CDP 하네스 (#2230, 2026-09-08)
+
+- Track engine. `feat/sh8-grokbot-join-harness`. `docs/SELF_HOST_AGENT.md`(+ko) §3.3.16 5단계 라우트 대조표(생성→pairing handshake→confirm→active 재핸드셰이크→regenerate)를 Rust 핸들러와 1:1로 맞춤. 어긋난 문장만 수정: foundation 요청만 `detected→active` 증명, pairing/`detected`의 `tools/call`은 HTTP 401 빈 본문, `active`에서 regenerate는 409. §3.3.19 Do not에 사용자·공개 표면 vs `scripts/dev/grokbot_cdp/README` 한 줄. 하네스 신규(`read`/`write`/`clear`.py). 제품 카피·`presets.test.ts` 무접촉.
+- 검증: `scripts/local_gate.sh --profile docs`. Agent Port 루틴 원문 vs 실측은 pairing bearer로 `oort_inbox_read` bytes를 실서버에 재현(문서 수정 근거). Grok Bot CDP 포트 9333이 닫혀 있으면 스크립트는 `SKIPPED: Grok Bot app not running (port 9333 closed)` + exit 0.
+
+## SH-6a-e 로컬 provider opt-in (#2215, 2026-09-08)
+
+- Track engine. `feat/sh6a-e-local-provider`. `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK` 은 `MOMO_ENV=staging`에서도 운영자 opt-in으로 유효. `AGENT_PROVIDER_LOCAL_HOSTS` 정확 일치(기본 `host.docker.internal`). 생성기 `--allow-local-provider`, compose api·agent-worker 전달 + `extra_hosts`, doctor `env.local_provider`. ADR-0004 증보 1절.
+- 검증: `cargo test -p momo-settings` 79 passed · `scripts/tests/test_local_provider_optin.sh` · `scripts/tests/test_railway_template.sh` (키 집합 41) · docs/web 프로파일 PASS (`5587dadd`).
+- E2E (`COMPOSE_PROJECT_NAME=oort-sh6ae`, mock-hermes `127.0.0.1:18765`, `MOCK_HERMES_TOOL_CALLS=0`): `PUT /v1/provider/link` HTTP 200 `baseUrl=http://host.docker.internal:18765/v1`; `POST /v1/provider/link/test` HTTP 200 `ok=false reason=probe_not_run`; welcome `#general` seq=1 body `김인턴 mock reply: MOMO-004 SSE path verified.`. Flag off api recreate: same PUT HTTP 400 `non-loopback baseUrl must use https://`; `http://127.0.0.1:18765/v1` HTTP 400 `loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. Railway 무접촉.
 ## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
 
 - Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.

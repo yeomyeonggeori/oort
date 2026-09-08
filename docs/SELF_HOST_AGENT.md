@@ -983,15 +983,34 @@ connection value**. A wrong era/body does not consume the value.
 
 6. User confirms channel/permissions. Paste the **active credential** shown
    once. It is a different secret from pairing.
-7. Handshake again on the same `EP` with the active credential (first valid
-   Agent Port call proves `active` / unpause). Do not store or reprint it.
+7. Handshake again on the same `EP` with the active credential, using the
+   same `server/discover` curl as step 5. Only a foundation request
+   (`server/discover` or `tools/list`) proves `active` / unpause. A
+   `tools/call` (including the §3.3.17.4 `oort_inbox_read` bytes) against a
+   pairing bearer, or against an unproved `detected` credential, is HTTP 401
+   with an empty body. Do not store or reprint it.
 
 **Gate:** unauthenticated POST stays 401. An agent badge on a mention means
 join is complete. First mention round-trip is T-6; detect one-click is
 T-5 — this playbook stops at the curl round-trip.
 
-Re-join after Update/Reset = wizard "re-issue connection value" + the same
-curl.
+Re-join after Update/Reset: wizard **re-issue connection value**
+(`POST …/pairing-challenge/regenerate`) is allowed only from
+`pairing_pending`, `detected`, or `expired` — it resets to `pairing_pending`
+and the same pairing curl. An `active` connection cannot regenerate (409).
+If the active credential is lost, the human disconnects and creates a new
+connection.
+
+Route table (2026-09-08 #2230, measured against the Rust handlers; document
+lines are this section):
+
+| Step | Doc | Route | Auth | Status |
+|---|---|---|---|---|
+| 1 Create | `:961` step 2 | `hosted_agent_connections.rs:127` `lib.rs:1045` | human workspace-admin JWT | → `pairing_pending` (paused agent) |
+| 2 Pairing handshake | `:966` step 5 curl | `agent_port.rs:33` `lib.rs:1225` | pairing bearer (`momo_pair_v1`, 15 min TTL) | `pairing_pending` → `detected` |
+| 3 Confirm | `:984` step 6 | `hosted_agent_connections.rs:714` `lib.rs:1057` | human workspace-admin JWT | stays `detected`; mints active credential |
+| 4 Active re-handshake | `:986` step 7 `server/discover` | `agent_port.rs:33` + `prove_hosted_binding_in_tx` | hosted-active bearer | `detected` → `active` (unpause) |
+| 5 Regenerate | `:997` re-join | `hosted_agent_connections.rs:653` `lib.rs:1053` | human workspace-admin JWT | `pairing_pending`/`detected`/`expired` → `pairing_pending`; `active` → 409 |
 
 Do not drive the vendor chat app with CDP, scripts, or selectors. The human
 speaks; the agent runs this file in the VM shell.
@@ -1281,6 +1300,9 @@ invent a password.
 
 - use a team VM as a shared host
 - CDP / automation of the vendor chat app
+- the CDP prohibition above is for users and public surfaces; the
+  developer-local verification harness follows
+  `scripts/dev/grokbot_cdp/README.md`
 - repeat password · pairing/active plaintext in a reply
 - bypass claim failure via `MOMO_INITIAL_OWNER_PASSWORD`
 - send people to a web browser as the standing client of the tunnel URL
