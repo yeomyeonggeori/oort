@@ -93,7 +93,14 @@ export function offersRecord(
   return status === "disconnected";
 }
 
-const CREDENTIALS_ROW_WIDE_QUERY = "(min-width: 720px)";
+/**
+ * `lg`(min-width: 1024px) 에서만 3열 그리드.
+ *
+ * 설정 셸 ≥600: 사이드바 240 + 본문 p-6 48. 뷰포트 1024 → 목록 ≈734.
+ * band + facts max + gaps ≤ ~414 → 이름 상자 ≥ 320 ≥ 144.
+ * 뷰포트 720 → 목록 ≈430. 3열은 이름 144를 남기지 못하므로 두 띠로 접는다.
+ */
+const CREDENTIALS_ROW_WIDE_QUERY = "(min-width: 1024px)";
 
 function subscribeCredentialsRowWide(onStoreChange: () => void): () => void {
   const mq = window.matchMedia(CREDENTIALS_ROW_WIDE_QUERY);
@@ -121,35 +128,21 @@ function chipTone(tone: HostedChipTone): ChipTone {
   return tone === "neutral" ? "muted" : tone;
 }
 
-function ActivityFacts({
-  updatedAtMs,
-  labelVisible,
-}: {
-  updatedAtMs: number;
-  labelVisible: boolean;
-}) {
+function ActivityFacts({ updatedAtMs }: { updatedAtMs: number }) {
   const absolute = formatMoment(updatedAtMs);
   return (
-    <dl className={labelVisible ? "min-w-0" : "min-w-0 px-3 py-1"}>
-      <div className={labelVisible ? "flex min-w-0 flex-col" : undefined}>
-        <dt
-          className={
-            labelVisible ? "text-timestamp text-ink-muted" : "sr-only"
-          }
+    <dl className="min-w-0 shrink-0">
+      <dt className="sr-only">마지막 활동</dt>
+      <dd className="text-meta text-ink-muted">
+        <time
+          dateTime={new Date(updatedAtMs).toISOString()}
+          title={`마지막 활동 ${absolute}`}
+          data-testid="agent-credentials-row-time"
+          className="whitespace-nowrap"
         >
-          마지막 활동
-        </dt>
-        <dd className="text-meta text-ink-muted">
-          <time
-            dateTime={new Date(updatedAtMs).toISOString()}
-            title={absolute}
-            data-testid="agent-credentials-row-time"
-            className="whitespace-nowrap"
-          >
-            {relativeLabel(updatedAtMs, Date.now())}
-          </time>
-        </dd>
-      </div>
+          {relativeLabel(updatedAtMs, Date.now())}
+        </time>
+      </dd>
     </dl>
   );
 }
@@ -362,53 +355,68 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                     {hostedStatusLabel(row.status)}
                   </StatusChip>
                 );
+                const facts = (
+                  <div
+                    className={cn(
+                      "flex shrink-0 flex-nowrap items-center gap-2",
+                      wide && selectedRow && "bg-accent-soft"
+                    )}
+                    data-credentials-facts=""
+                  >
+                    {statusChip}
+                    <ActivityFacts updatedAtMs={row.updatedAtMs} />
+                  </div>
+                );
                 return (
                   <li
                     key={row.id}
                     aria-current={selectedRow ? "true" : undefined}
-                    className="min-w-0 border-b border-line last:border-b-0"
+                    className={cn(
+                      "min-w-0 border-b border-line last:border-b-0",
+                      selectedRow && "credentials-row-current"
+                    )}
                     data-testid="agent-credentials-row"
                     data-connection-id={row.id}
                     data-selected={selectedRow ? "" : undefined}
+                    data-layout={wide ? "grid" : "stack"}
                   >
                     <div
                       className={cn(
                         "min-w-0",
-                        wide
-                          ? "grid grid-cols-[minmax(9rem,1fr)_auto_11.5rem] items-stretch"
-                          : "flex flex-col",
-                        selectedRow && "bg-accent-soft"
+                        wide ? "credentials-row-grid" : "flex flex-col"
                       )}
-                      data-testid="agent-credentials-row-body"
-                      data-layout={wide ? "grid" : "stack"}
                     >
+                      {wide ? (
+                        <>
+                          <div
+                            className={cn(
+                              "flex min-w-0 items-center overflow-hidden py-1",
+                              selectedRow && "bg-accent-soft"
+                            )}
+                            data-testid="agent-credentials-row-body"
+                          >
+                            <TruncatingName name={fullName} />
+                          </div>
+                          {facts}
+                        </>
+                      ) : (
+                        <div
+                          className={cn(
+                            "flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden px-3 py-1",
+                            selectedRow && "bg-accent-soft"
+                          )}
+                          data-testid="agent-credentials-row-body"
+                        >
+                          <TruncatingName name={fullName} />
+                          {facts}
+                        </div>
+                      )}
                       <div
                         className={cn(
-                          "flex min-w-0 items-center overflow-hidden px-3 py-2",
-                          !wide && "gap-2"
-                        )}
-                      >
-                        <TruncatingName name={fullName} />
-                        {!wide && statusChip}
-                      </div>
-                      <div
-                        className={cn(
-                          "flex min-w-0 flex-col justify-center gap-1",
-                          wide && "px-2 py-1"
-                        )}
-                      >
-                        {wide && statusChip}
-                        <ActivityFacts
-                          updatedAtMs={row.updatedAtMs}
-                          labelVisible={wide}
-                        />
-                      </div>
-                      <div
-                        className={cn(
-                          "flex min-w-0 flex-wrap items-center gap-1 px-2 py-1",
+                          "flex min-w-0 items-center gap-1 bg-surface px-2 py-1",
                           wide
-                            ? "border-s border-line"
-                            : "mx-3 border-t border-line/50"
+                            ? "flex-nowrap border-s border-line"
+                            : "flex-wrap mx-3 border-t border-line/50"
                         )}
                         data-testid="agent-credentials-row-actions"
                       >
