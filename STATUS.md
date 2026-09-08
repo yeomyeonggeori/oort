@@ -3,7 +3,7 @@
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R6)
 
 - Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
-- R6 (R5 FAIL B2·H1·M1·N3; R2-H1 회귀 복구). 레이아웃은 셸이 주는 폭으로만 고른다: `lg`≥1024 3열 `credentials-row-grid`(이름 `minmax(0,1fr)` · 사실 auto · `--spacing-action-band`), 미만은 이름+칩+상대시각 한 줄 다음에 액션 띠. 사실 칸은 모든 폭에서 한 줄(`dt`는 `sr-only`). 선택 채움은 이름/사실만 `--accent-soft`, 액션 띠는 `bg-surface`, 연속은 `border-l-marker`(2px) `--accent` 가 행 전체(스택이면 두 띠). `tokens.css` 신규는 `--spacing-action-band` 한 줄 + 그 토큰을 소비하는 named utility뿐. 스윕은 규칙 실패 시 throw. `AgentHubRoute.tsx` 무접촉.
+- R6 (R5 FAIL B2·H1·M1·N3; R2-H1 회귀 복구). 레이아웃은 셸이 주는 폭으로만 고른다: `lg`≥1024 3열 `credentials-row-grid`(이름 `minmax(0,1fr)` · 사실 auto · `--spacing-action-band`), 미만은 이름+칩+상대시각 한 줄 다음에 액션 띠. 사실 칸은 모든 폭에서 한 줄(`dt`는 `sr-only`). 선택 채움은 이름/사실만 `--accent-soft`, 액션 띠는 `bg-surface`, 연속은 `credentials-row-current`(2px `--accent`) 가 행 전체(스택이면 두 띠). `tokens.css` 신규는 `--spacing-action-band` 한 줄 + 그 토큰을 소비하는 named utility. 스윕은 규칙 실패 시 throw. `AgentHubRoute.tsx` 무접촉.
 - runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 
 ## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R5)
@@ -17,6 +17,12 @@
 - Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`(만료+활성 공존 시 장부가 그 행을 연다). AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
 - R4 (R3 FAIL B1·H1·M2·N5; R2 열둘 CLOSED 유지). 390 행은 이름 `min-w-0 flex-1` + 시각 `hidden sm:block` + 잠금 사유 `basis-full` 줄바꿈. 터미널 행은 도어벨을 거두고 착지는 heading 으로 내린다. `HostedConnectionSection` TerminalPanel 완료 분기는 `disconnected` 만. 행 본문 hover 채움 삭제. 허브 region 은 `aria-label={`${agentLabel} 호스티드 연결`}`, 설정은 labelledby. 버튼 「도어벨 설정」. `AgentHubRoute.tsx` 무접촉.
 - runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
+## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
+
+- Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.
+- R2: 공개 엣지 세 Caddyfile(`infra/rust/Caddyfile` · `Caddyfile.local` · `infra/railway/Caddyfile.railway`)에 `handle /hooks/* { reverse_proxy <same as /v1/*> }` — centrifugo 403 뒤, SPA catch-all 앞. CSP는 마지막 handle만.
+- 검증: `webhook_inbound_conformance_pg` · `scripts/verify_webhook_rust.sh` 인바운드 + `WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER` 사보타주 · `scripts/tests/test_webhook_inbound_contract.sh` (`/hooks/*` 블록 1개·업스트림 일치·순서; 삭제 사보타주 RED) · `scripts/verify_public_edge_centrifugo_contract.sh` · `scripts/tests/test_railway_template.sh`.
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 

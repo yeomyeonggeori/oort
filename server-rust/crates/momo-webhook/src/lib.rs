@@ -36,15 +36,20 @@
 
 pub mod crypto;
 pub mod doorbell;
+pub mod ingress;
 pub mod installations;
 pub mod outbound;
+pub mod payload;
 pub mod subscriptions;
 
 pub use crypto::{
-    delivery_signature, masked_doorbell_secret, native_secret, open_doorbell_secret,
-    outbound_secret, random_reference, seal_doorbell_secret, sha256_hex, slack_token, token_hash,
+    canonical_signature_base, delivery_signature, deterministic_client_message_id,
+    ingress_signature, masked_doorbell_secret, native_secret, open_doorbell_secret,
+    outbound_secret, random_reference, seal_doorbell_secret, sha256_hex, signatures_equal,
+    slack_dedupe_window_start, slack_token, token_hash, valid_delivery_id,
     workspace_id_from_slack_token, DoorbellSealError, DOORBELL_SECRET_MAX_BYTES,
-    NATIVE_SECRET_PREFIX, OUTBOUND_SECRET_PREFIX, SLACK_TOKEN_PREFIX,
+    NATIVE_SECRET_PREFIX, OUTBOUND_SECRET_PREFIX, REPLAY_WINDOW_SECONDS,
+    SLACK_DEDUPE_WINDOW_SECONDS, SLACK_TOKEN_PREFIX,
 };
 pub use doorbell::{
     claim_doorbell_batch, coalesce_action, consume_for_fire_in_tx, doorbell_body,
@@ -52,6 +57,11 @@ pub use doorbell::{
     open_claimed_secret, record_doorbell_fire_in_tx, register_doorbell_in_tx,
     unguarded_fire_every_new_event, unregister_doorbell_in_tx, CoalesceAction, DoorbellClaim,
     DoorbellProjection, DoorbellRegisterError, DOORBELL_BODY, DOORBELL_KIND,
+};
+pub use ingress::{
+    attach_receipt_message, insert_receipt, load_native_ingress, load_native_receipt,
+    load_slack_ingress, load_slack_receipt, native_hmac_secret, IngressReceipt, IngressTarget,
+    NewReceipt,
 };
 pub use installations::{
     active_channel_exists, create_installation, list_installations, load_installation_for_update,
@@ -62,6 +72,10 @@ pub use installations::{
 pub use outbound::{
     is_denied_address, parse_outbound_url, validated_resolved_addresses, validated_url,
     HostResolver, OutboundUrl, OutboundUrlError, SystemHostResolver, MAX_URL_BYTES,
+};
+pub use payload::{
+    parse_native, parse_slack_compatible, translate_slack_markup, PayloadError, RenderedMessage,
+    MAXIMUM_BODY_BYTES, MAXIMUM_MESSAGE_CHARACTERS,
 };
 pub use subscriptions::{
     create_subscription, delete_subscription, list_subscriptions, load_delivery_target,

@@ -151,6 +151,7 @@ async fn start_server(pool: PgPool) -> String {
         outbound_master_key: Some(TEST_OUTBOUND_MASTER_KEY.to_string()),
         allow_development_http: false,
         doorbell_enabled: false,
+        per_installation_limit: 60,
     });
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
