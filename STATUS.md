@@ -1,5 +1,29 @@
 # oort 진행 현황
 
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R7)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R7 (R6 FAIL B1·H1·M3·N2). ≥1024 액션 셀 `contents`: 버튼 셋은 track 3 밴드(`bg-surface` `flex-nowrap` `px-2`, 행 우측에 붙음), 잠긴 사유는 `col-span-full` 둘째 격자 행(띠 밖). 선택 채움은 행 원소 `bg-accent-soft`(열 간격이 못 끊음), 컨트롤은 `--surface` 위(R2-H1 ≥3:1 유지). 행 `ps-3`(바→글자 ≥12). `tokens.css` 주석만 실측(209.09 / ~31px 여유, 바 유틸은 색 분리)으로 고침 — 값 240·2px 유지. 스윕 12폭 × 6픽스처(OFFLINE 포함) × 2스킴, `finishSweep` 행동 게이트(합성 실패 행이 throw), 리사이즈 후 배치를 한 번 읽고 숫자와 함께 단정. N2(`parseDisconnectStart` status 재기록)는 이 diff 밖. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R6)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R6 (R5 FAIL B2·H1·M1·N3; R2-H1 회귀 복구). 레이아웃은 셸이 주는 폭으로만 고른다: `lg`≥1024 3열 `credentials-row-grid`(이름 `minmax(0,1fr)` · 사실 auto · `--spacing-action-band`), 미만은 이름+칩+상대시각 한 줄 다음에 액션 띠. 사실 칸은 모든 폭에서 한 줄(`dt`는 `sr-only`). 선택 채움은 이름/사실만 `--accent-soft`, 액션 띠는 `bg-surface`, 연속은 `credentials-row-current`(2px `--accent`) 가 행 전체(스택이면 두 띠). `tokens.css` 신규는 `--spacing-action-band` 한 줄 + 그 토큰을 소비하는 named utility. 스윕은 규칙 실패 시 throw. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R5)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`. AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R5 (R4 FAIL B1·H1·M1·N4; R2 열둘·R3 닫힌 항목 유지). 행 레이아웃을 flex 잔여폭에서 **3트랙 그리드**로 교체: ≥720 `grid-cols-[minmax(9rem,1fr)_auto_11.5rem]`, <720 한 컨테이너 세로 스택. 시각은 모든 폭에서 상대 시각(`n일 전`, `title`+`<time datetime>`). 선택 `--accent-soft` 가 이름·사실·액션 띠를 한 원소로 덮고, 스택 띠 경계는 `mx-3 border-line/50`. `disconnected` 행 「기록 보기」. 도어벨 목적지 명사 「도어벨 설정」(행 버튼 = 장부 제목). `HostedConnectionSection` 렌더 가드: `cleanup_pending` 에 완료 헤드라인 없음. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
+## SH-6a-w 설정 › 연결 › 에이전트 자격 (#2204, 2026-09-08, R4)
+
+- Track UXUI. `feat/sh6a-w-agent-credentials` onto `origin/track/uxui`. 설정 내비 「에이전트 자격」+ ⌘K. 목록은 기존 hosted list를 소비하고, 발급/재발급은 `HostedAgentWizard`(`entry=settings`), 해제·도어벨은 `HostedConnectionSection`. 행 키는 연결 `id`(만료+활성 공존 시 장부가 그 행을 연다). AI 연결 loopback 거부는 자리의 InlineBanner. Worker does not claim design-review PASS.
+- R4 (R3 FAIL B1·H1·M2·N5; R2 열둘 CLOSED 유지). 390 행은 이름 `min-w-0 flex-1` + 시각 `hidden sm:block` + 잠금 사유 `basis-full` 줄바꿈. 터미널 행은 도어벨을 거두고 착지는 heading 으로 내린다. `HostedConnectionSection` TerminalPanel 완료 분기는 `disconnected` 만. 행 본문 hover 채움 삭제. 허브 region 은 `aria-label={`${agentLabel} 호스티드 연결`}`, 설정은 labelledby. 버튼 「도어벨 설정」. `AgentHubRoute.tsx` 무접촉.
+- runtime-unverified: 실서버 hosted create/disconnect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
+
 ## SH-9 hermes 합류 런북 Rust 현행화 (#2231, 2026-09-08)
 
 - Track engine. `feat/sh9-hermes-runbook-rust`. `docs/external-agent-provider/*` 재작성(삭제 아님): Swift 런타임 이름 → compose `api`/`relay`/`agent-worker`, 포트는 `MOMO_WEB_PORT` 파생, 죽은 `verify_external_agent_provider.sh` 5곳 → `scripts/local_gate.sh --profile external-agent-provider` + `scripts/verify_local_hermes_credentialed_smoke.sh`, Command Center → 설정 › AI 연결. `docs/SELF_HOST.md`(+ko) §5 로컬 provider를 hermes 실측 절차로 확장. 인용 게이트 `scripts/tests/test_external_agent_provider_docs.sh`.

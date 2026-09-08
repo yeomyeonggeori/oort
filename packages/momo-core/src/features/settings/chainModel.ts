@@ -677,6 +677,9 @@ export function probeReasonCopy(reason: string | undefined): string {
   if (reason === "probe_not_run") {
     return "확인이 끝나지 않았습니다.";
   }
+  if (isLoopbackProviderRefusal(reason)) {
+    return loopbackProviderGuidance();
+  }
   const status = /^provider_status_(\d{3})$/.exec(reason);
   if (status) return `provider가 ${attachDirection(status[1])} 답했습니다.`;
   return `서버가 보고한 사유: ${reason}`;
@@ -765,3 +768,56 @@ export function cascadeProbeSummary(
     text: `확인한 provider ${probed.length}개 중 응답한 곳이 없습니다. 지금은 실행이 실패합니다.`,
   };
 }
+
+/** Server `BaseUrlInvalid::LoopbackNotAllowed` (provider.rs). Do not paraphrase. */
+export const LOOPBACK_REFUSAL_WIRE =
+  "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1";
+
+/**
+ * Settings copy when the server refuses a laptop loopback provider URL.
+ * Product words only: what happened, and what to do. No switch names, ticket
+ * ids, or file names — the enabling control is a server-operator setting, not
+ * a client switch, and this sentence must not claim a flag that is not there.
+ */
+export const LOOPBACK_PROVIDER_HINT =
+  "이 서버는 같은 컴퓨터의 주소(127.0.0.1·localhost)로 가는 연결을 기본으로 거절합니다. 서버 운영자가 셀프호스트 설정에서 로컬 provider 허용을 켠 뒤 다시 확인해 주세요.";
+
+function refusalText(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof ApiError) return error.message;
+  if (error instanceof Error) return error.message;
+  return "";
+}
+
+/** True for the loopback hosts the server names in the refusal. */
+export function isLoopbackProviderUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (trimmed === "") return false;
+  try {
+    const host = new URL(trimmed).hostname.replace(/^\[(.*)\]$/, "$1");
+    return host === "127.0.0.1" || host === "localhost" || host === "::1";
+  } catch {
+    const lower = trimmed.toLowerCase();
+    return (
+      lower.startsWith("http://127.0.0.1") ||
+      lower.startsWith("http://localhost") ||
+      lower.startsWith("http://[::1]")
+    );
+  }
+}
+
+/** True when the error (or probe reason) is the measured loopback refusal. */
+export function isLoopbackProviderRefusal(error: unknown): boolean {
+  const message = refusalText(error);
+  return (
+    message.includes(LOOPBACK_REFUSAL_WIRE) ||
+    message.includes("loopback baseUrl") ||
+    message.includes("AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK")
+  );
+}
+
+/** Product sentence for a loopback refusal. The server wire stays beside it. */
+export function loopbackProviderGuidance(): string {
+  return LOOPBACK_PROVIDER_HINT;
+}
+

@@ -10379,6 +10379,1245 @@ async function captureHostedPairingScenes(browser, scheme) {
   return shots;
 }
 
+async function captureAgentCredentialsScenes(browser, scheme) {
+  beginScene("settings-agents");
+  const shots = [];
+  const LONG_AGENT_NAME =
+    "Claude Code 하네스 · 인프라 플랫폼팀 상주 에이전트 (프로덕션 배포 승인 담당)";
+  const LOOPBACK_REFUSAL =
+    "loopback baseUrl requires local mode and AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1";
+
+  async function shoot(name, install, settle, options = {}) {
+    const viewport = options.viewport ?? VIEWPORT;
+    const hash = options.hash ?? "/settings?section=agents";
+    const ready = options.ready ?? "agent-credentials-section";
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate(`location.hash = ${JSON.stringify(hash)}`);
+    await page.getByTestId(ready).waitFor({ state: "visible" });
+    await settle(page);
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/settings-agents-${name}-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  async function shootPair(name, install, settle, options = {}) {
+    await shoot(name, install, settle, options);
+    await shoot(`${name}-390`, install, settle, {
+      ...options,
+      viewport: MOBILE_VIEWPORT,
+    });
+  }
+
+  async function shootQuad(name, install, settle, options = {}) {
+    await shoot(name, install, settle, options);
+    await shoot(`${name}-1024`, install, settle, {
+      ...options,
+      viewport: { width: 1024, height: 800 },
+    });
+    await shoot(`${name}-720`, install, settle, {
+      ...options,
+      viewport: { width: 720, height: 800 },
+    });
+    await shoot(`${name}-390`, install, settle, {
+      ...options,
+      viewport: MOBILE_VIEWPORT,
+    });
+  }
+
+  const CREDENTIALS_SWEEP_WIDTHS = [
+    390, 480, 600, 640, 660, 700, 720, 800, 900, 1024, 1100, 1280,
+  ];
+
+  function failSweep(tag, rule, detail) {
+    throw new Error(
+      `SWEEP FAIL ${tag} ${rule}: ${JSON.stringify(detail)}`
+    );
+  }
+
+  function finishSweep(tag, table) {
+    const failing = table.flatMap((entry) => {
+      const missed = [];
+      if (!entry.nameFloorOk) missed.push("nameFloor");
+      if (entry.overflow) missed.push("overflow");
+      if (entry.emptyActions !== 0) missed.push("emptyActions");
+      if (entry.relativeTimeOk !== true) missed.push("relativeTime");
+      if (entry.rowHeightOk !== true) missed.push("rowHeight");
+      if (entry.contrastOk !== true) missed.push("contrast");
+      if (entry.barOk !== true) missed.push("barSpans");
+      if (entry.threeButtonOneLine === false) missed.push("threeButtonOneLine");
+      if (entry.dividerSame === false) missed.push("dividerSame");
+      if (entry.bandDiffers === false) missed.push("bandDiffers");
+      if (entry.fourFit800 === false) missed.push("fourFit800");
+      if (entry.list20HeightOk === false) missed.push("list20Height");
+      if (entry.leftGutterOk !== true) missed.push("leftGutter");
+      if (entry.fillContinuousOk === false) missed.push("fillContinuous");
+      if (entry.reasonOk === false) missed.push("offlineReason");
+      return missed.length
+        ? [{ w: entry.w, missed, measured: entry.measured }]
+        : [];
+    });
+    const pass = failing.length === 0;
+    console.log(`SWEEP_${tag} ${scheme}`, JSON.stringify({ pass, table }));
+    if (!pass) {
+      failSweep(tag, "table", failing);
+    }
+  }
+
+  async function logCredentialsSweep(tag, install, options = {}) {
+    const context = await browser.newContext({
+      viewport: { width: 1280, height: 800 },
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await install(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate('location.hash = "/settings?section=agents"');
+    await page.getByTestId("agent-credentials-section").waitFor({
+      state: "visible",
+    });
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const firstAction = page
+      .locator(
+        '[data-testid="agent-credentials-disconnect"], [data-testid="agent-credentials-doorbell"], [data-testid="agent-credentials-record"]'
+      )
+      .first();
+    if ((await firstAction.count()) > 0) {
+      await sceneClick(page, firstAction);
+      await page.getByTestId("hosted-connection-section").waitFor({
+        state: "visible",
+      });
+    }
+    if (options.offline) {
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "onLine", {
+          configurable: true,
+          get: () => false,
+        });
+        window.dispatchEvent(new Event("offline"));
+      });
+      await page.getByTestId("agent-credentials-offline").waitFor({
+        state: "visible",
+      });
+      await page.getByTestId("agent-credentials-regenerate").waitFor({
+        state: "visible",
+      });
+    }
+    const table = [];
+    for (const width of CREDENTIALS_SWEEP_WIDTHS) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.evaluate(
+        () =>
+          new Promise((resolve) => {
+            requestAnimationFrame(() => requestAnimationFrame(resolve));
+          })
+      );
+      const row = await page.evaluate((w) => {
+        const parseRgb = (css) => {
+          const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css);
+          return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+        };
+        const srgb = (c) => {
+          const x = c / 255;
+          return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (rgb) =>
+          0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2]);
+        const contrast = (a, b) => {
+          const L1 = lum(a);
+          const L2 = lum(b);
+          const hi = Math.max(L1, L2);
+          const lo = Math.min(L1, L2);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const swatch = (token) => {
+          const el = document.createElement("div");
+          el.style.backgroundColor = `var(${token})`;
+          document.body.append(el);
+          const rgb = getComputedStyle(el).backgroundColor;
+          el.remove();
+          return rgb;
+        };
+        const opaqueBg = (el) => {
+          let node = el;
+          while (node && node !== document.documentElement) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return { css: bg, rgb: parseRgb(bg) };
+            }
+            node = node.parentElement;
+          }
+          return null;
+        };
+        const sampleBgAt = (x, y) => {
+          const hit = document.elementsFromPoint(x, y);
+          for (const node of hit) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return bg;
+            }
+          }
+          return null;
+        };
+        const list = document.querySelector(
+          '[data-testid="agent-credentials-list"]'
+        );
+        const rows = [
+          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        ];
+        const names = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-name"]'
+          ),
+        ];
+        const nameBoxes = names.map((box) => {
+          const inner = box.querySelector(".truncate") ?? box;
+          const boxW = inner.getBoundingClientRect().width;
+          const full = inner.scrollWidth;
+          const truncated = full > inner.clientWidth + 1;
+          return {
+            text: (inner.textContent ?? "").trim().slice(0, 24),
+            box: Math.round(boxW),
+            scroll: Math.round(full),
+            floor: Math.min(144, full),
+            floorOk: boxW + 0.5 >= Math.min(144, full),
+            truncated,
+            title: inner.getAttribute("title"),
+            titleOk: truncated ? Boolean(inner.getAttribute("title")) : true,
+          };
+        });
+        let maxRight = 0;
+        if (list) {
+          for (const el of list.querySelectorAll("*")) {
+            maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+          }
+        }
+        const actionCells = rows.map((li) => {
+          const actions = li.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const buttons = [
+            ...(actions?.querySelectorAll("button") ?? []),
+          ];
+          const tops = [
+            ...new Set(
+              buttons.map((btn) => Math.round(btn.getBoundingClientRect().top))
+            ),
+          ];
+          return {
+            buttons: buttons.map((btn) => btn.getAttribute("data-testid")),
+            empty: buttons.length === 0,
+            dividerX: actions
+              ? Math.round(actions.getBoundingClientRect().left)
+              : null,
+            buttonCount: buttons.length,
+            oneLine: buttons.length >= 3 ? tops.length === 1 : null,
+          };
+        });
+        const dividerXs = actionCells.map((cell) => cell.dividerX);
+        const uniqueDividers = [
+          ...new Set(dividerXs.filter((x) => x !== null)),
+        ];
+        const first = rows[0];
+        const actions = first?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const actionCs = actions ? getComputedStyle(actions) : null;
+        const rowCs = first ? getComputedStyle(first) : null;
+        const band = actionCs
+          ? {
+              top: actionCs.borderTopWidth,
+              topColor: actionCs.borderTopColor,
+              ml: actionCs.marginLeft,
+              mr: actionCs.marginRight,
+            }
+          : null;
+        const rowSep = rowCs
+          ? {
+              bottom: rowCs.borderBottomWidth,
+              bottomColor: rowCs.borderBottomColor,
+            }
+          : null;
+        const inset =
+          actionCs !== null &&
+          (parseFloat(actionCs.marginLeft) > 0 ||
+            parseFloat(actionCs.marginRight) > 0);
+        const colorDiffers =
+          band !== null &&
+          rowSep !== null &&
+          band.topColor !== rowSep.bottomColor;
+        const bandDiffersMeasured = inset || colorDiffers;
+        const selected = rows.find((li) => li.hasAttribute("data-selected"));
+        selected?.scrollIntoView({ block: "center" });
+        const selectedBody = selected?.querySelector(
+          '[data-testid="agent-credentials-row-body"]'
+        );
+        const selectedActions = selected?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const selectedFill = selected
+          ? getComputedStyle(selected).backgroundColor
+          : null;
+        const actionFill = selectedActions
+          ? getComputedStyle(selectedActions).backgroundColor
+          : null;
+        const accentSoft = swatch("--accent-soft");
+        const surface = swatch("--surface");
+        const actionOnAccentSoft = actionFill === accentSoft;
+        const controls = [
+          ...(selectedActions?.querySelectorAll("button") ?? []),
+        ].map((btn) => {
+          const border = getComputedStyle(btn).borderColor;
+          const bg = opaqueBg(btn);
+          const borderRgb = parseRgb(border);
+          const ratio =
+            bg?.rgb && borderRgb
+              ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
+              : null;
+          const onAccentSoft = bg?.css === accentSoft;
+          return {
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+            border,
+            bg: bg?.css ?? null,
+            ratio,
+            onAccentSoft,
+            ok: ratio !== null && ratio >= 3 && !onAccentSoft,
+          };
+        });
+        const selectedCs = selected ? getComputedStyle(selected) : null;
+        const rowRect = selected?.getBoundingClientRect();
+        const bodyRect = selectedBody?.getBoundingClientRect();
+        const actRect = selectedActions?.getBoundingClientRect();
+        const barWidth = selectedCs
+          ? parseFloat(selectedCs.borderLeftWidth)
+          : null;
+        const selectedReason = selected?.querySelector(
+          '[id^="agent-credentials-offline-"]'
+        );
+        const reasonRect = selectedReason?.getBoundingClientRect();
+        const spanBottom =
+          actRect && reasonRect
+            ? Math.max(actRect.bottom, reasonRect.bottom)
+            : actRect?.bottom;
+        const barSpans =
+          selected && rowRect && bodyRect && actRect && selectedCs
+            ? {
+                width: barWidth,
+                widthOk: barWidth !== null && Math.abs(barWidth - 2) < 0.6,
+                color: selectedCs.borderLeftColor,
+                rowTop: Math.round(rowRect.top),
+                rowBottom: Math.round(rowRect.bottom),
+                bodyTop: Math.round(bodyRect.top),
+                actionsBottom: Math.round(actRect.bottom),
+                topOk: Math.abs(rowRect.top - bodyRect.top) <= 2,
+                bottomOk:
+                  spanBottom !== undefined &&
+                  Math.abs(rowRect.bottom - spanBottom) <= 2,
+              }
+            : null;
+        const times = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-time"]'
+          ),
+        ];
+        const relativeTimeOk =
+          times.length === rows.length &&
+          times.every((node) => {
+            const label = (node.textContent ?? "").trim();
+            const title = node.getAttribute("title") ?? "";
+            return (
+              /(\d+일 전|방금|\d+분 전|\d+시간 전)/.test(label) &&
+              title.startsWith("마지막 활동 ")
+            );
+          });
+        const layout = first?.getAttribute("data-layout") ?? null;
+        const rowRects = rows.map((li) => {
+          const r = li.getBoundingClientRect();
+          return {
+            h: Math.round(r.height),
+            bottom: Math.round(r.bottom),
+          };
+        });
+        const listH = list
+          ? Math.round(list.getBoundingClientRect().height)
+          : null;
+        const wide = w >= 1024;
+        const tripleRows = actionCells.filter((cell) => cell.buttonCount >= 3);
+        const threeButtonOneLine = wide
+          ? tripleRows.length === 0
+            ? null
+            : tripleRows.every((cell) => cell.oneLine === true)
+          : null;
+        const dividerSame = wide ? uniqueDividers.length <= 1 : null;
+        const bandDiffers = wide ? null : bandDiffersMeasured;
+        const rowHeightOk = rows.every((li) => {
+          const h = li.getBoundingClientRect().height;
+          const offline = li.querySelector(
+            '[id^="agent-credentials-offline-"]'
+          );
+          const cap = offline ? (wide ? 64 : 124) : wide ? 40 : 76;
+          return h <= cap;
+        });
+        const list20HeightOk =
+          wide && rows.length >= 20
+            ? listH !== null && listH <= 800
+            : null;
+        const fourFit800 = wide
+          ? null
+          : rows.length < 4
+            ? null
+            : rowRects.slice(0, 4).every((r) => r.bottom <= 800);
+        const contrastOk =
+          controls.length === 0
+            ? false
+            : !actionOnAccentSoft && controls.every((ctl) => ctl.ok);
+        const barOk =
+          barSpans !== null &&
+          barSpans.widthOk &&
+          barSpans.topOk &&
+          barSpans.bottomOk;
+        const leftGutters = rows.map((li) => {
+          const name = li.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const inner = name?.querySelector(".truncate") ?? name;
+          if (!inner) {
+            return { barGap: null, nameInset: null, ok: false };
+          }
+          const liRect = li.getBoundingClientRect();
+          const nameRect = inner.getBoundingClientRect();
+          const barW = parseFloat(getComputedStyle(li).borderLeftWidth) || 0;
+          const nameInset = nameRect.left - liRect.left;
+          const barGap = nameRect.left - (liRect.left + barW);
+          return {
+            barGap: Number(barGap.toFixed(2)),
+            nameInset: Number(nameInset.toFixed(2)),
+            ok: barGap >= 12 && nameInset >= 12,
+          };
+        });
+        const leftGutterOk =
+          leftGutters.length > 0 && leftGutters.every((g) => g.ok);
+        let fillContinuous = null;
+        if (wide && selected) {
+          const nameEl = selected.querySelector(
+            '[data-testid="agent-credentials-row-name"]'
+          );
+          const factsEl = selected.querySelector("[data-credentials-facts]");
+          const actionsEl = selected.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const nameR = nameEl?.getBoundingClientRect();
+          const factsR = factsEl?.getBoundingClientRect();
+          const actR = actionsEl?.getBoundingClientRect();
+          if (nameR && factsR && actR && nameR.height > 0) {
+            const y = nameR.top + nameR.height / 2;
+            const samples = [
+              nameR.left + nameR.width / 2,
+              (nameR.right + factsR.left) / 2,
+              factsR.left + factsR.width / 2,
+              (factsR.right + actR.left) / 2,
+            ].map((x) => sampleBgAt(x, y));
+            fillContinuous = {
+              samples,
+              accentSoft,
+              ok: samples.every((s) => s === accentSoft),
+            };
+          }
+        }
+        const fillContinuousOk =
+          fillContinuous === null ? null : fillContinuous.ok;
+        const reasons = rows.map((li) => {
+          const el = li.querySelector('[id^="agent-credentials-offline-"]');
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          const cs = getComputedStyle(el);
+          let lh = parseFloat(cs.lineHeight);
+          if (!Number.isFinite(lh) || lh <= 0) {
+            lh = parseFloat(cs.fontSize) * 1.5;
+          }
+          const lines = Math.max(1, Math.round(r.height / lh));
+          const cap = wide ? 64 : 124;
+          const rowH = li.getBoundingClientRect().height;
+          return {
+            width: Number(r.width.toFixed(2)),
+            lines,
+            rowHeight: Math.round(rowH),
+            widthOk: r.width >= 200,
+            linesOk: lines <= 2,
+            heightOk: rowH <= cap,
+          };
+        });
+        const reasonWidth = reasons.map((r) => r?.width ?? null);
+        const reasonLines = reasons.map((r) => r?.lines ?? null);
+        const reasonOk = reasons.every(
+          (r) => r === null || (r.widthOk && r.linesOk && r.heightOk)
+        );
+        const measured = [
+          "nameFloor",
+          "overflow",
+          "emptyActions",
+          "relativeTime",
+          "rowHeight",
+          "contrast",
+          "barSpans",
+          "leftGutter",
+          ...(wide ? ["dividerSame"] : ["bandDiffers"]),
+          ...(threeButtonOneLine !== null ? ["threeButtonOneLine"] : []),
+          ...(fourFit800 !== null ? ["fourFit800"] : []),
+          ...(list20HeightOk !== null ? ["list20Height"] : []),
+          ...(fillContinuousOk !== null ? ["fillContinuous"] : []),
+          ...(reasons.some((r) => r !== null) ? ["offlineReason"] : []),
+        ];
+        return {
+          w,
+          layout,
+          measured,
+          nameBoxes,
+          nameFloorOk: nameBoxes.every((box) => box.floorOk && box.titleOk),
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > w + 1,
+          emptyActions: actionCells.filter((cell) => cell.empty).length,
+          dividerXs,
+          dividerSame,
+          threeButtonOneLine,
+          band,
+          rowSep,
+          bandDiffers,
+          selectedFill,
+          actionFill,
+          accentSoft,
+          surface,
+          actionOnAccentSoft,
+          controls,
+          contrastOk,
+          barSpans,
+          barOk,
+          relativeTimeOk,
+          rowHeights: rowRects.map((r) => r.h),
+          rowHeightOk,
+          listH,
+          list20HeightOk,
+          fourFit800,
+          leftGutters,
+          leftGutterOk,
+          fillContinuous,
+          fillContinuousOk,
+          reasonWidth,
+          reasonLines,
+          reasonOk,
+        };
+      }, width);
+      const expected = width >= 1024 ? "grid" : "stack";
+      if (row.layout !== expected) {
+        const nameBox = row.nameBoxes?.[0]?.box ?? "none";
+        failSweep(
+          tag,
+          "layout",
+          `w=${width} expected=${expected} got=${row.layout} nameBox=${nameBox}`
+        );
+      }
+      table.push(row);
+    }
+    finishSweep(tag, table);
+    await context.close();
+  }
+
+  const emptyList = (context) =>
+    context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+      route.request().method() === "POST"
+        ? json(route, {
+            connection: hostedConnection(),
+            pairingCredential: HOSTED_PAIRING_VALUE,
+            pairingExpiresAtMs: FIXTURE_NOW + 15 * 60 * 1000,
+          })
+        : json(route, { connections: [] })
+    );
+
+  function listWith(connections) {
+    const rows = Array.isArray(connections) ? connections : [connections];
+    return async (context) => {
+      await context.route("**/v1/workspaces/*/hosted-agent-connections", (route) =>
+        json(route, { connections: rows })
+      );
+      await context.route(
+        "**/v1/workspaces/*/hosted-agent-connections/*",
+        (route) => {
+          const url = route.request().url();
+          const connection =
+            rows.find((row) => url.includes(row.id)) ?? rows[0];
+          return json(route, { connection, cleanupArtifacts: [] });
+        }
+      );
+    };
+  }
+
+  const activeKim = hostedConnection({
+    status: "active",
+    doorbellUrl: "https://hooks.example/a",
+    doorbellSecretMasked: "••••abcd",
+  });
+  const pendingHermes = hostedConnection({
+    id: "019f9a01-0000-7000-8000-0000000005c2",
+    agentMemberId: HERMES,
+    status: "pairing_pending",
+  });
+
+  const longNameRoster = async (context) => {
+    await listWith(activeKim)(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, {
+        members: ROSTER.map((member) =>
+          member.id === "019f9a01-0000-7000-8000-000000000404"
+            ? { ...member, displayName: LONG_AGENT_NAME }
+            : member
+        ),
+      })
+    );
+  };
+
+  await shootPair("empty", emptyList, (page) =>
+    page.getByTestId("agent-credentials-empty").waitFor({ state: "visible" })
+  );
+
+  await shoot("list", listWith(activeKim), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
+    const geom = await page.evaluate(() => {
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      const names = [
+        ...document.querySelectorAll(
+          '[data-testid="agent-credentials-row-name"]'
+        ),
+      ];
+      return {
+        heights: rows.map((row) =>
+          Math.round(row.getBoundingClientRect().height)
+        ),
+        viewport: { w: window.innerWidth, h: window.innerHeight },
+        nameBoxes: names.map((box) => {
+          const inner = box.querySelector(".truncate") ?? box;
+          return {
+            clientWidth: Math.round(inner.clientWidth),
+            scrollWidth: Math.round(inner.scrollWidth),
+          };
+        }),
+      };
+    });
+    console.log(`ROW_HEIGHT_LIST ${scheme}`, JSON.stringify(geom));
+    console.log(`NAME_1280 ${scheme}`, JSON.stringify(geom.nameBoxes));
+  });
+  await shoot(
+    "list-390",
+    longNameRoster,
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({
+        state: "visible",
+      });
+      const geom = await page.evaluate(() => {
+        const rows = [
+          ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+        ];
+        const viewport = window.innerWidth;
+        const names = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-name"]'
+          ),
+        ];
+        const nameBoxes = names.map((box) => {
+          const inner =
+            box.querySelector(".truncate") ?? box;
+          return {
+            clientWidth: Math.round(inner.clientWidth),
+            scrollWidth: Math.round(inner.scrollWidth),
+            title: inner.getAttribute("title"),
+            truncated: inner.scrollWidth > inner.clientWidth,
+            text: (inner.textContent ?? "").slice(0, 80),
+          };
+        });
+        let maxRight = 0;
+        for (const el of document.querySelectorAll(
+          '[data-testid="agent-credentials-list"] *'
+        )) {
+          maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+        }
+        return {
+          heights: rows.map((row) =>
+            Math.round(row.getBoundingClientRect().height)
+          ),
+          viewport: { w: viewport, h: window.innerHeight },
+          nameBoxes,
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > viewport + 1,
+        };
+      });
+      console.log(`ROW_HEIGHT_LIST_390 ${scheme}`, JSON.stringify(geom));
+      console.log(`NAME_390 ${scheme}`, JSON.stringify({
+        nameBoxes: geom.nameBoxes,
+        maxRight: geom.maxRight,
+        overflow: geom.overflow,
+        viewport: geom.viewport.w,
+      }));
+    },
+    { viewport: MOBILE_VIEWPORT }
+  );
+
+  await shootPair("pairing", emptyList, async (page) => {
+    await sceneClick(page, page.getByTestId("agent-credentials-issue"));
+    await page.getByTestId("hosted-display-name").waitFor({ state: "visible" });
+    await page.getByTestId("hosted-display-name").fill("김인턴");
+    await page.getByTestId("hosted-handle").fill("intern");
+    await sceneClick(page, page.getByTestId("hosted-create"));
+    await page.getByTestId("hosted-pairing-card").waitFor({ state: "visible" });
+  });
+
+  const fourConnections = [
+    activeKim,
+    pendingHermes,
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000005c3",
+      status: "detected",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000005c4",
+      agentMemberId: HERMES,
+      status: "active",
+    }),
+  ];
+
+  await shootQuad("list-4", listWith(fourConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    await sceneClick(
+      page,
+      page.getByTestId("agent-credentials-disconnect").nth(3)
+    );
+    await page.getByTestId("hosted-connection-section").waitFor({
+      state: "visible",
+    });
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute("data-landing") === "heading"
+    );
+    const probe = await page.evaluate(() => {
+      const ledger = document.querySelector(
+        '[data-testid="hosted-connection-section"]'
+      );
+      const pane = document.querySelector(
+        ".min-w-0.flex-1.overflow-y-auto.p-6"
+      );
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      if (!ledger || !pane) {
+        return { missing: true };
+      }
+      const lr = ledger.getBoundingClientRect();
+      const pr = pane.getBoundingClientRect();
+      const visiblePx = Math.max(
+        0,
+        Math.min(lr.bottom, pr.bottom) - Math.max(lr.top, pr.top)
+      );
+      return {
+        visiblePx,
+        scrollTop: pane.scrollTop,
+        paneClientHeight: pane.clientHeight,
+        paneScrollHeight: pane.scrollHeight,
+        ledgerTop: lr.top,
+        ledgerBottom: lr.bottom,
+        paneTop: pr.top,
+        paneBottom: pr.bottom,
+        rowHeights: rows.map((row) =>
+          Math.round(row.getBoundingClientRect().height)
+        ),
+        active: document.activeElement
+          ? {
+              testid: document.activeElement.getAttribute("data-testid"),
+              landing: document.activeElement.getAttribute("data-landing"),
+              tag: document.activeElement.tagName,
+              text: (document.activeElement.textContent ?? "").slice(0, 40),
+            }
+          : null,
+        landingTarget: ledger.getAttribute("data-landing-target"),
+        connectionId: ledger.getAttribute("data-connection-id"),
+      };
+    });
+    console.log(`LEDGER_LANDING ${scheme}`, JSON.stringify(probe));
+  });
+
+  const sixConnections = [
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c1",
+      status: "pairing_pending",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c2",
+      agentMemberId: HERMES,
+      status: "detected",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c3",
+      status: "active",
+      doorbellUrl: "https://hooks.example/a",
+      doorbellSecretMasked: "••••abcd",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c4",
+      agentMemberId: HERMES,
+      status: "expired",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c5",
+      status: "cleanup_pending",
+    }),
+    hostedConnection({
+      id: "019f9a01-0000-7000-8000-0000000006c6",
+      agentMemberId: HERMES,
+      status: "disconnected",
+    }),
+  ];
+
+  await shootQuad("list-6-status", listWith(sixConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const probe = await page.evaluate(() => {
+      const rows = [
+        ...document.querySelectorAll('[data-testid="agent-credentials-row"]'),
+      ];
+      return {
+        rowCount: rows.length,
+        actions: rows.map((row) => {
+          const actions = row.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          const buttons = [
+            ...(actions?.querySelectorAll("button") ?? []),
+          ].map((btn) => ({
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+          }));
+          return {
+            id: row.getAttribute("data-connection-id"),
+            buttons,
+            empty: buttons.length === 0,
+            dividerX: actions
+              ? Math.round(actions.getBoundingClientRect().left)
+              : null,
+            height: Math.round(row.getBoundingClientRect().height),
+          };
+        }),
+        emptyCount: rows.filter((row) => {
+          const actions = row.querySelector(
+            '[data-testid="agent-credentials-row-actions"]'
+          );
+          return (actions?.querySelectorAll("button").length ?? 0) === 0;
+        }).length,
+      };
+    });
+    console.log(`LIST_6_STATUS ${scheme}`, JSON.stringify(probe));
+  });
+
+  const twentyConnections = Array.from({ length: 20 }, (_, i) => {
+    const cycle = ["active", "pairing_pending", "detected", "expired"];
+    const status =
+      i === 18 ? "cleanup_pending" : i === 19 ? "disconnected" : cycle[i % 4];
+    return hostedConnection({
+      id: `019f9a01-0000-7000-8000-${(0x610 + i).toString(16).padStart(12, "0")}`,
+      agentMemberId:
+        i % 2 === 0 ? "019f9a01-0000-7000-8000-000000000404" : HERMES,
+      status,
+    });
+  });
+
+  await shootQuad("list-20", listWith(twentyConnections), async (page) => {
+    await page.getByTestId("agent-credentials-list").waitFor({
+      state: "visible",
+    });
+    const rowCount = await page
+      .locator('[data-testid="agent-credentials-row"]')
+      .count();
+    const landings = [];
+    for (let i = 0; i < rowCount; i += 1) {
+      const row = page.locator('[data-testid="agent-credentials-row"]').nth(i);
+      const connectionId = await row.getAttribute("data-connection-id");
+      for (const action of ["disconnect", "doorbell", "record"]) {
+        const btn = row.locator(`[data-testid="agent-credentials-${action}"]`);
+        if ((await btn.count()) === 0) continue;
+        await sceneClick(page, btn);
+        await page.getByTestId("hosted-connection-section").waitFor({
+          state: "visible",
+        });
+        await page.waitForFunction(() => {
+          const landing = document.activeElement?.getAttribute("data-landing");
+          return (
+            landing === "heading" ||
+            landing === "doorbell" ||
+            landing === "start" ||
+            landing === "cleanup" ||
+            landing === "terminal"
+          );
+        });
+        const probe = await page.evaluate((meta) => {
+          const ledger = document.querySelector(
+            '[data-testid="hosted-connection-section"]'
+          );
+          const pane = document.querySelector(
+            ".min-w-0.flex-1.overflow-y-auto.p-6"
+          );
+          if (!ledger || !pane) {
+            return { missing: true, ...meta };
+          }
+          const lr = ledger.getBoundingClientRect();
+          const pr = pane.getBoundingClientRect();
+          const visiblePx = Math.max(
+            0,
+            Math.min(lr.bottom, pr.bottom) - Math.max(lr.top, pr.top)
+          );
+          const landing = document.activeElement?.getAttribute("data-landing");
+          return {
+            ...meta,
+            visiblePx,
+            focusMoved: Boolean(landing),
+            landing,
+            landingTarget: ledger.getAttribute("data-landing-target"),
+            ledgerId: ledger.getAttribute("data-connection-id"),
+            activeTag: document.activeElement?.tagName,
+          };
+        }, { index: i, connectionId, action });
+        landings.push(probe);
+      }
+    }
+    console.log(
+      `LANDING_20 ${scheme}`,
+      JSON.stringify({
+        rowCount,
+        actionCount: landings.length,
+        allVisible: landings.every((row) => (row.visiblePx ?? 0) > 0),
+        allFocused: landings.every((row) => row.focusMoved === true),
+        landings,
+      })
+    );
+  });
+
+  await shootPair(
+    "row-selected",
+    listWith([activeKim, pendingHermes]),
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({ state: "visible" });
+      await sceneClick(
+        page,
+        page.getByTestId("agent-credentials-disconnect").first()
+      );
+      await page.getByTestId("hosted-connection-section").waitFor({
+        state: "visible",
+      });
+      await page.getByTestId("agent-credentials-row").nth(1).hover();
+      const report = await page.evaluate(() => {
+        const swatch = (token) => {
+          const el = document.createElement("div");
+          el.style.backgroundColor = `var(${token})`;
+          document.body.append(el);
+          const rgb = getComputedStyle(el).backgroundColor;
+          el.remove();
+          return rgb;
+        };
+        const parseRgb = (css) => {
+          const m = /rgba?\((\d+)[,\s]+(\d+)[,\s]+(\d+)/.exec(css);
+          return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+        };
+        const srgb = (c) => {
+          const x = c / 255;
+          return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+        };
+        const lum = (rgb) =>
+          0.2126 * srgb(rgb[0]) + 0.7152 * srgb(rgb[1]) + 0.0722 * srgb(rgb[2]);
+        const contrast = (a, b) => {
+          const L1 = lum(a);
+          const L2 = lum(b);
+          const hi = Math.max(L1, L2);
+          const lo = Math.min(L1, L2);
+          return (hi + 0.05) / (lo + 0.05);
+        };
+        const opaqueBg = (el) => {
+          let node = el;
+          while (node && node !== document.documentElement) {
+            const bg = getComputedStyle(node).backgroundColor;
+            if (bg && bg !== "rgba(0, 0, 0, 0)" && bg !== "transparent") {
+              return { css: bg, rgb: parseRgb(bg) };
+            }
+            node = node.parentElement;
+          }
+          return null;
+        };
+        const bodies = [
+          ...document.querySelectorAll(
+            '[data-testid="agent-credentials-row-body"]'
+          ),
+        ];
+        const selected = document.querySelector(
+          '[data-testid="agent-credentials-row"][data-selected]'
+        );
+        selected?.scrollIntoView({ block: "center" });
+        const selectedActions = selected?.querySelector(
+          '[data-testid="agent-credentials-row-actions"]'
+        );
+        const selectedBody = selected?.querySelector(
+          '[data-testid="agent-credentials-row-body"]'
+        );
+        const actionBg = selectedActions
+          ? getComputedStyle(selectedActions).backgroundColor
+          : null;
+        const rowFill = selected
+          ? getComputedStyle(selected).backgroundColor
+          : null;
+        const controls = [
+          ...(selectedActions?.querySelectorAll("button") ?? []),
+        ].map((btn) => {
+          const border = getComputedStyle(btn).borderColor;
+          const bg = opaqueBg(btn);
+          const borderRgb = parseRgb(border);
+          const ratio =
+            bg?.rgb && borderRgb
+              ? Number(contrast(bg.rgb, borderRgb).toFixed(3))
+              : null;
+          return {
+            testid: btn.getAttribute("data-testid"),
+            text: (btn.textContent ?? "").trim(),
+            border,
+            bg: bg?.css ?? null,
+            ratio,
+            ok: ratio !== null && ratio >= 3,
+          };
+        });
+        const actionCs = selectedActions
+          ? getComputedStyle(selectedActions)
+          : null;
+        const rowCs = selected ? getComputedStyle(selected) : null;
+        const rowRect = selected?.getBoundingClientRect();
+        const bodyRect = selectedBody?.getBoundingClientRect();
+        const actRect = selectedActions?.getBoundingClientRect();
+        const barWidth = rowCs ? parseFloat(rowCs.borderLeftWidth) : null;
+        const fillCoversActions = Boolean(
+          selected &&
+            selectedActions &&
+            selectedBody?.contains(selectedActions)
+        );
+        return {
+          accentSoft: swatch("--accent-soft"),
+          surfaceHover: swatch("--surface-hover"),
+          surface: swatch("--surface"),
+          selected: rowFill,
+          hovered: bodies[1]
+            ? getComputedStyle(bodies[1]).backgroundColor
+            : null,
+          actionBg,
+          fillCoversActions,
+          actionOnAccentSoft: actionBg === swatch("--accent-soft"),
+          controls,
+          contrastOk: controls.length > 0 && controls.every((ctl) => ctl.ok),
+          bar: rowCs
+            ? {
+                width: barWidth,
+                color: rowCs.borderLeftColor,
+                rowTop: rowRect ? Math.round(rowRect.top) : null,
+                rowBottom: rowRect ? Math.round(rowRect.bottom) : null,
+                bodyTop: bodyRect ? Math.round(bodyRect.top) : null,
+                actionsBottom: actRect ? Math.round(actRect.bottom) : null,
+                spans:
+                  rowRect &&
+                  bodyRect &&
+                  actRect &&
+                  barWidth !== null &&
+                  Math.abs(barWidth - 2) < 0.6 &&
+                  Math.abs(rowRect.top - bodyRect.top) <= 2 &&
+                  Math.abs(rowRect.bottom - actRect.bottom) <= 2,
+              }
+            : null,
+          band: actionCs
+            ? {
+                top: actionCs.borderTopWidth,
+                topColor: actionCs.borderTopColor,
+                ml: actionCs.marginLeft,
+                mr: actionCs.marginRight,
+              }
+            : null,
+          rowSep: rowCs
+            ? {
+                bottom: rowCs.borderBottomWidth,
+                bottomColor: rowCs.borderBottomColor,
+              }
+            : null,
+        };
+      });
+      console.log(`ROW_FILL ${scheme}`, JSON.stringify(report));
+      console.log(`H1_CONTRAST ${scheme}`, JSON.stringify({
+        contrastOk: report.contrastOk,
+        actionOnAccentSoft: report.actionOnAccentSoft,
+        fillCoversActions: report.fillCoversActions,
+        controls: report.controls,
+        actionBg: report.actionBg,
+        selected: report.selected,
+        accentSoft: report.accentSoft,
+        surface: report.surface,
+        bar: report.bar,
+        band: report.band,
+        rowSep: report.rowSep,
+      }));
+    }
+  );
+
+  await shootQuad(
+    "offline",
+    listWith([activeKim, pendingHermes]),
+    async (page) => {
+      await page.getByTestId("agent-credentials-list").waitFor({
+        state: "visible",
+      });
+      await page.evaluate(() => {
+        Object.defineProperty(navigator, "onLine", {
+          configurable: true,
+          get: () => false,
+        });
+        window.dispatchEvent(new Event("offline"));
+      });
+      await page.getByTestId("agent-credentials-offline").waitFor({
+        state: "visible",
+      });
+      await page
+        .getByTestId("agent-credentials-regenerate")
+        .waitFor({ state: "visible" });
+      const overflow = await page.evaluate(() => {
+        const viewport = window.innerWidth;
+        let maxRight = 0;
+        for (const el of document.querySelectorAll(
+          '[data-testid="agent-credentials-list"] *'
+        )) {
+          maxRight = Math.max(maxRight, el.getBoundingClientRect().right);
+        }
+        const reason = document.querySelector(
+          '[id^="agent-credentials-offline-"]'
+        );
+        return {
+          viewport,
+          maxRight: Math.round(maxRight),
+          overflow: maxRight > viewport + 1,
+          reasonText: (reason?.textContent ?? "").slice(0, 80),
+        };
+      });
+      console.log(`OFFLINE_OVERFLOW ${scheme}`, JSON.stringify(overflow));
+    }
+  );
+
+  await shootPair(
+    "loopback-hint",
+    async (context) => {
+      await context.route("**/v1/provider/link/test", (route) =>
+        json(route, {
+          schema: "momo.provider_link.test.v0",
+          ok: false,
+          reason: LOOPBACK_REFUSAL,
+          source: "database",
+          mode: "external-hermes",
+          endpointLabel: "127.0.0.1:11434",
+          checkedAtMs: FIXTURE_NOW,
+        })
+      );
+      await context.route("**/v1/provider/link/chain", (route) =>
+        route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { message: "not found" } }),
+        })
+      );
+      await context.route("**/v1/provider/link", (route) =>
+        json(route, {
+          ...PROVIDER_LINK,
+          baseUrl: "http://127.0.0.1:11434/v1",
+          endpointLabel: "127.0.0.1:11434",
+        })
+      );
+    },
+    async (page) => {
+      await sceneClick(page, page.getByTestId("ai-link-check"));
+      await page.getByTestId("ai-link-loopback-hint").waitFor({
+        state: "visible",
+      });
+    },
+    { hash: "/settings?section=ai", ready: "ai-link-check" }
+  );
+
+  function assertSweepGateThrows() {
+    const synthetic = [
+      {
+        w: 800,
+        nameFloorOk: false,
+        overflow: false,
+        emptyActions: 0,
+        relativeTimeOk: true,
+        rowHeightOk: true,
+        contrastOk: true,
+        barOk: true,
+        threeButtonOneLine: null,
+        dividerSame: null,
+        bandDiffers: true,
+        fourFit800: null,
+        list20HeightOk: null,
+        leftGutterOk: true,
+        fillContinuousOk: null,
+        reasonOk: true,
+        measured: ["nameFloor"],
+      },
+    ];
+    let thrown = null;
+    try {
+      finishSweep("META", synthetic);
+    } catch (err) {
+      thrown = err;
+    }
+    if (thrown == null) {
+      throw new Error("SWEEP GATE is print-only");
+    }
+    const message = thrown instanceof Error ? thrown.message : "";
+    if (!message.includes("800") || !message.includes("nameFloor")) {
+      throw new Error(
+        `SWEEP GATE error must name width and rule, got: ${message}`
+      );
+    }
+  }
+
+  assertSweepGateThrows();
+  await logCredentialsSweep("SHORT", listWith([activeKim, pendingHermes]));
+  await logCredentialsSweep("LONG", longNameRoster);
+  await logCredentialsSweep("FOUR", listWith(fourConnections));
+  await logCredentialsSweep("SIX", listWith(sixConnections));
+  await logCredentialsSweep("TWENTY", listWith(twentyConnections));
+  await logCredentialsSweep("OFFLINE", listWith([activeKim, pendingHermes]), {
+    offline: true,
+  });
+
+  return shots;
+}
+
 // =============================================================================
 // 호스티드 연결 해제와 정리 확인 (goal HAP-UX2 / #1362).
 //
@@ -12571,6 +13810,11 @@ async function main() {
           assertThisPreview();
           all.push(...(await captureAccentCandidates(browser, scheme)));
         }
+      } else if (profile === "agents") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureAgentCredentialsScenes(browser, scheme)));
+        }
       } else if (profile === "gallery") {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
@@ -12620,6 +13864,7 @@ async function main() {
           all.push(...(await shot(() => captureSetStatusScenes(browser, scheme))));
           all.push(...(await shot(() => captureSearchScopeScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedPairingScenes(browser, scheme))));
+          all.push(...(await shot(() => captureAgentCredentialsScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedDisconnectScenes(browser, scheme))));
           all.push(...(await shot(() => captureHostedDoorbellScenes(browser, scheme))));
           all.push(...(await shot(() => captureConsent(browser, scheme))));
@@ -12628,7 +13873,12 @@ async function main() {
       }
       // 폰 프로파일 (goal B6). 데스크탑 프레임 뒤에 붙는 이유는 회귀를 읽는
       // 순서 때문이다: 1280 프레임이 먼저 전부 나오고, 그 다음이 390이다.
-      if (profile !== "desktop" && profile !== "accent" && profile !== "gallery") {
+      if (
+        profile !== "desktop" &&
+        profile !== "accent" &&
+        profile !== "gallery" &&
+        profile !== "agents"
+      ) {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
           all.push(...(await captureMobile(browser, scheme)));

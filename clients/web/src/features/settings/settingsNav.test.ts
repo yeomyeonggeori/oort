@@ -38,6 +38,7 @@ describe("settingsNav", () => {
       )
     ).toEqual([
       "AI 연결",
+      "에이전트 자격",
       "코드 실행 호스트",
       "사용량",
       "웹훅",
@@ -62,6 +63,7 @@ describe("settingsNav", () => {
     expect(idsIn("워크스페이스")).toEqual(["workspace", "plugins", "members"]);
     expect(idsIn("연결")).toEqual([
       "ai",
+      "agents",
       "code",
       "usage",
       "webhooks",

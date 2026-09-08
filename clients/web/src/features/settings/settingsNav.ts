@@ -17,6 +17,7 @@ export type SettingsSectionId =
   | "notifications"
   | "updates"
   | "ai"
+  | "agents"
   | "code"
   | "workspace"
   | "plugins"
@@ -51,6 +52,7 @@ export const SETTINGS_SECTIONS: SettingsSectionMeta[] = [
   { id: "plugins", label: "앱", group: "워크스페이스" },
   { id: "members", label: "멤버와 초대", group: "워크스페이스" },
   { id: "ai", label: "AI 연결", group: "연결" },
+  { id: "agents", label: "에이전트 자격", group: "연결" },
   { id: "code", label: "코드 실행 호스트", group: "연결", surface: "work" },
   { id: "usage", label: "사용량", group: "연결" },
   // 연결 그룹 안에서의 상대 순서: 사용량 다음, 이벤트 구독 앞. 전역으로
