@@ -1494,6 +1494,9 @@ pub struct WebhookSettings {
     /// ADR-0171 D6. Exactly the lowercase word `true` opens the doorbell
     /// register/unregister routes and the sender drain. Default off.
     pub doorbell_enabled: bool,
+    /// ADR-0115 D3: sliding-window per-installation ingress cap.
+    /// `RATE_LIMIT_WEBHOOK_PER_INSTALLATION` (default 60). 0 disables.
+    pub per_installation_limit: u32,
 }
 
 impl Default for WebhookSettings {
@@ -1504,6 +1507,7 @@ impl Default for WebhookSettings {
             outbound_master_key: None,
             allow_development_http: false,
             doorbell_enabled: false,
+            per_installation_limit: 60,
         }
     }
 }
@@ -1520,6 +1524,7 @@ impl std::fmt::Debug for WebhookSettings {
             )
             .field("allow_development_http", &self.allow_development_http)
             .field("doorbell_enabled", &self.doorbell_enabled)
+            .field("per_installation_limit", &self.per_installation_limit)
             .finish_non_exhaustive()
     }
 }
@@ -1533,6 +1538,9 @@ impl WebhookSettings {
                 .eq_ignore_ascii_case("local")
                 && env_or("MOMO_EVENT_SUBSCRIPTION_ALLOW_HTTP", "0").trim() == "1",
             doorbell_enabled: doorbell_gate_open(env("MOMO_DOORBELL_ENABLED").as_deref()),
+            per_installation_limit: env("RATE_LIMIT_WEBHOOK_PER_INSTALLATION")
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .unwrap_or(60),
         }
     }
 
