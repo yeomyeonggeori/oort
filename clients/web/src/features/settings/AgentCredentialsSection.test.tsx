@@ -375,6 +375,15 @@ describe("소스 규율", () => {
     expect(source).not.toContain("minmax(9rem");
     expect(source).not.toContain("11.5rem");
     expect(source).toContain("credentials-row-current");
+    expect(source).toContain("ps-3");
+    expect(source).toContain("contents");
+    expect(source).toContain("col-span-full");
+    expect(source).toMatch(
+      /selectedRow &&\s+"credentials-row-current bg-accent-soft"/
+    );
+    expect(source).not.toMatch(
+      /agent-credentials-row-body[\s\S]{0,220}bg-accent-soft/
+    );
     expect(source).not.toContain("border-l-2");
     expect(source).toMatch(/<dt className="sr-only">마지막 활동<\/dt>/);
     expect(source).not.toMatch(
@@ -1097,7 +1106,10 @@ describe("M-1 잠금 사유는 잠긴 컨트롤만 가리킨다", () => {
     expect(note).not.toBeNull();
     expect(note?.textContent).toContain("연결이 끊겨");
     expect(note?.closest("li")).toBe(regen.closest("li"));
-    expect(regen.nextElementSibling).toBe(note);
+    expect(
+      regen.nextElementSibling === note ||
+        regen.parentElement?.nextElementSibling === note
+    ).toBe(true);
   });
 });
 
