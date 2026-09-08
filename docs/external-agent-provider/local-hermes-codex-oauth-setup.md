@@ -5,6 +5,8 @@
 > Hermes-compatible runtime. This document does not implement Codex OAuth inside
 > oort, does not store provider credentials in oort, and does not replace the
 > deterministic repo-local mock Hermes gates.
+> SH-9 (#2231): the oort side is the Rust compose stack
+> (`api` · `relay` · `agent-worker` · `postgres` · `centrifugo`).
 
 ## Goal
 
@@ -13,7 +15,7 @@ OpenAI, or another GPT provider, then let oort prove one safe `@hermes`
 roundtrip through:
 
 ```text
-macOS app -> MomoServer -> agent_job -> AgentWorker -> local Hermes-compatible SSE provider -> channel timeline
+web (설정 › AI 연결) -> api -> agent_job -> agent-worker -> local Hermes-compatible SSE provider -> channel timeline
 ```
 
 The user performs OAuth login/token entry in the provider. Codex and oort only
@@ -35,8 +37,8 @@ the verifier fails before contacting the provider.
 ## Safe Local Topology
 
 ```text
-User browser/provider UI
-  performs OAuth/login/token setup
+User browser / 설정 › AI 연결
+  performs OAuth/login/token setup inside the provider
         |
         v
 Local Hermes-compatible provider
@@ -44,14 +46,18 @@ Local Hermes-compatible provider
   owns provider credentials
         ^
         | HERMES_BASE_URL + HERMES_API_KEY only
+        | (from Docker: http://host.docker.internal:<provider-port>/v1)
         |
-momo AgentWorker
-  Docker Postgres/Centrifugo + host Swift server/relay/worker
+compose agent-worker
+  infra/rust/docker-compose.rust.yml
+  + api + relay + postgres + centrifugo
 ```
 
 Non-loopback `http://` provider URLs are rejected. Loopback `http://127.0.0.1`
 or `http://localhost` is allowed only with `MOMO_ENV=local` and
-`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`.
+`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. A self-host stack that must reach a
+provider on the same machine also needs `--allow-local-provider` so
+`host.docker.internal` is on `AGENT_PROVIDER_LOCAL_HOSTS` (SH-6a-e / #2215).
 
 ## User Steps
 
@@ -59,7 +65,12 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 
    The exact command depends on the provider. Complete any Codex OAuth, OpenAI
    API key, or GPT provider login inside that provider process. Do not export
-   Codex/OpenAI credentials into the oort shell.
+   Codex/OpenAI credentials into the oort shell. If you have no real Hermes,
+   the repo mock is an OpenAI-compatible SSE stand-in:
+
+   ```sh
+   python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
+   ```
 
 2. Confirm the provider exposes an OpenAI-compatible SSE endpoint.
 
@@ -110,9 +121,17 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
    LOCAL_HERMES_REQUIRE_CREDENTIALS=1 scripts/verify_local_hermes_credentialed_smoke.sh
    ```
 
+   The default no-secret gate is:
+
+   ```bash
+   scripts/local_gate.sh --profile external-agent-provider
+   ```
+
 5. Use the app.
 
-   Start oort, open `#agent-lab`, and send:
+   Start oort, open **설정 › AI 연결**, put in the OpenAI-compatible URL (from
+   Docker: `http://host.docker.internal:<provider-port>/v1`), open `#agent-lab`,
+   and send:
 
    ```text
    @hermes summarize this channel in one paragraph.
@@ -129,9 +148,9 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
   `keyConfigured=true`, and a redacted endpoint label.
 - Seeded Hermes is an active `member.kind='agent'` with `#agent-lab`
   membership.
-- `@hermes` created an `agent_run`/`agent_job`, AgentWorker called the provider,
-  usage/cost records were written, and the final agent response appeared in the
-  same channel timeline.
+- `@hermes` created an `agent_run`/`agent_job`, `agent-worker` called the
+  provider, usage/cost records were written, and the final agent response
+  appeared in the same channel timeline.
 - Evidence contains no raw `HERMES_API_KEY`, bearer token, database password,
   app token, Codex OAuth token, or OpenAI provider API key.
 
@@ -144,8 +163,8 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 | `HERMES_BASE_URL must not point at localhost` | Missing local opt-in | Set `MOMO_ENV=local` and `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` |
 | `provider/network` fail | Provider is not running or wrong port/path | Check provider `/v1/chat/completions` endpoint and port |
 | `provider/protocol` fail | Provider did not stream SSE data | Enable streaming or choose an OpenAI-compatible endpoint |
-| `runtime/status` degraded | Server/worker rejected provider config | Open Command Center, copy the redacted reason, and rerun the script |
-| `runtime/timeout` | Provider responded too slowly or worker failed | Check redacted worker/server logs from the evidence block |
+| `runtime/status` degraded | `api` / `agent-worker` rejected provider config | Open **설정 › AI 연결**, copy the redacted reason, and rerun the script |
+| `runtime/timeout` | Provider responded too slowly or worker failed | Check redacted worker/api logs from the evidence block |
 
 ## References
 
@@ -154,4 +173,4 @@ or `http://localhost` is allowed only with `MOMO_ENV=local` and
 - `docs/external-agent-provider/local-hermes-gpt.md`
 - `docs/external-agent-provider/local-hermes-provider.env.example`
 - `scripts/verify_local_hermes_credentialed_smoke.sh`
-- `scripts/verify_external_agent_provider.sh`
+- `scripts/local_gate.sh`

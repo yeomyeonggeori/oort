@@ -1,7 +1,7 @@
 # Local Hermes GPT Provider Contract
 
 > Status: Accepted for MOMO-238; updated by MOMO-257 for credentialed
-> local-provider setup.
+> local-provider setup. SH-9 (#2231) names the live Rust compose services.
 > Scope: local-only development and smoke verification.
 
 For the provider-neutral MOMO-242 smoke contract, start with
@@ -59,16 +59,19 @@ opaque `HERMES_API_KEY` used to authenticate to Hermes.
 
 ## Smoke Behavior
 
-`scripts/verify_external_agent_provider.sh` is the contract gate.
+`scripts/local_gate.sh --profile external-agent-provider` is the default
+no-secret contract gate. Credentialed dogfood uses
+`scripts/verify_local_hermes_credentialed_smoke.sh`.
 
-- If `AGENT_PROVIDER_MODE` is unset or not `external-hermes`, it exits 0 with
-  explicit SKIP/PASS evidence and does not touch Docker/provider side effects.
+- If `AGENT_PROVIDER_MODE` is unset or not `external-hermes`, the no-secret
+  profile exits 0 with explicit SKIP/PASS evidence and does not touch
+  Docker/provider side effects.
 - If `AGENT_PROVIDER_MODE=external-hermes` and no valid Hermes-facing config is
   present, it fails fast unless the run is simply the default no-credential skip.
 - If local loopback is requested, both `MOMO_ENV=local` and
   `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` must be present.
 - If credentialed config is valid, it checks the OpenAI-compatible SSE provider,
-  boots local MomoServer/OutboxRelay/AgentWorker, verifies redacted
+  boots local compose `api` / `relay` / `agent-worker`, verifies redacted
   `/v1/agent-runtime/status`, proves Hermes is an active `#agent-lab` agent
   member, and sends one `@hermes` roundtrip.
 
@@ -88,7 +91,7 @@ oort owns:
 - message order and `message.seq`
 - Context Packet projection and redaction
 - approval/cost/audit ledgers
-- outbox and Centrifugo publish path
+- outbox and Centrifugo publish path (`relay`)
 - redacted provider availability/status projection
 
 The provider must not publish directly to Centrifugo or mutate oort DB state.
@@ -98,11 +101,13 @@ All user-visible writes still enter through oort REST, Postgres, and outbox.
 
 Run Hermes separately with its provider credential in that process only. The
 specific command depends on the local provider; OAuth login or provider API keys
-must stay in that provider runtime:
+must stay in that provider runtime. If you have no real Hermes, use the repo
+mock:
 
 ```sh
 # Terminal A: Hermes owns Codex/OpenAI OAuth or provider keys internally.
-hermes --host 127.0.0.1 --port 22683
+# No real hermes on this host → scripts/mock_hermes.py (OpenAI-compatible SSE).
+python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
 ```
 
 Run oort smoke without exporting any provider credential:
@@ -114,8 +119,8 @@ scripts/verify_local_hermes_credentialed_smoke.sh
 ```
 
 The evidence may contain the redacted endpoint label
-`http://127.0.0.1:22683/v1`; it must not contain the Hermes bearer or any
-GPT/OpenAI credential.
+`http://127.0.0.1:<provider-port>/v1`; it must not contain the Hermes bearer or
+any GPT/OpenAI credential.
 
 ## References
 
@@ -123,4 +128,6 @@ GPT/OpenAI credential.
 - `docs/external-agent-provider/local-hermes-codex-oauth-setup.md`
 - `docs/LOCAL_PR_GATE.md`
 - `docs/SELF_HOST.md`
-- `scripts/verify_external_agent_provider.sh`
+- `scripts/local_gate.sh`
+- `scripts/verify_local_hermes_credentialed_smoke.sh`
+- `scripts/mock_hermes.py`
