@@ -301,6 +301,10 @@ test "$code" = 200
 
 claim 로그인 (`/claim/<token>`) 은 §3.3.5이지 이 절이 아니다.
 
+### 2.7 웹훅으로 보내기
+
+**설정 → 웹훅**에서 설치를 만든다 (`native` 또는 `slack_compatible`). 네이티브는 `POST /v1/webhooks/{workspace}/{installation}` 에 일회 시크릿으로 HMAC 헤더를 붙인다 (ADR-0115). Slack 호환은 `POST /hooks/{token}` 에 `{"text":"…"}` (`blocks` 는 400). 폐기·미지 자격은 두 경로 모두 **404** 같은 문장, HMAC 실패는 **401**. 본문 상한 262144바이트(413), 설치별 레이트리밋은 429. 공개 Caddy는 `/v1/*` 를 프록시하므로 네이티브 ingress는 통과하고, `/hooks/*` 를 403 하지 않는다.
+
 ---
 
 ## 3. 환경별 분기

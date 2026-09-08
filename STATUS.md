@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## #1265 웹훅 인바운드 공개 ingress (#1265, 2026-09-08)
+
+- Track engine. `feat/1265-webhook-inbound`. ADR-0115 D1/D2/D3/D4: `POST /v1/webhooks/{ws}/{installation}` (HMAC) · `POST /hooks/{token}` (Slack 호환 URL-시크릿). 메시지는 `send_message_in_tx`만 — 직접 `INSERT INTO message` 0. 폐기/미지 토큰·설치는 두 경로 동일 404 문장, HMAC 실패는 401, 본문 262144(413), 설치별 429.
+- 검증: `webhook_inbound_conformance_pg` · `scripts/verify_webhook_rust.sh` 인바운드 + `WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER` 사보타주 · `scripts/tests/test_webhook_inbound_contract.sh`. 공개 Caddyfile 무수정 — `/hooks/*` 는 403 매처가 아님(SPA catch-all; 네이티브 `/v1/webhooks/*` 는 `/v1/*` 프록시).
+- runtime-unverified: 셀프호스트 공개 엣지에서 Slack 호환 `/hooks/{token}` 을 Caddy가 API로 reverse_proxy 하지 않음(NOTES). 네이티브 경로는 `/v1/*` 로 통과.
+
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
 - Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).

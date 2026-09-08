@@ -307,6 +307,10 @@ list after a browser login: `agent-lab` and `general`.
 
 Claim login (`/claim/<token>`) is §3.3.5, not this section.
 
+### 2.7 Send via webhook
+
+Create an installation in **Settings → Webhooks** (`native` or `slack_compatible`). Native ingress is `POST /v1/webhooks/{workspace}/{installation}` with the HMAC headers on the one-time secret (ADR-0115). Slack-compatible ingress is `POST /hooks/{token}` with `{"text":"…"}` (`blocks` is 400). Unknown or revoked credentials return **404** with the same sentence on both routes; a bad HMAC is **401**. Body cap is 262144 bytes (413); per-installation rate limit is 429. Public Caddy proxies `/v1/*` (so native ingress) and does not 403 `/hooks/*`.
+
 ---
 
 ## 3. Per-environment branches
