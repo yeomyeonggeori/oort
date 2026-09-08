@@ -1,5 +1,14 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-09 스냅샷 94 (Fable · momo-main — ★G1'-2·G1'-3 전량 main 정본화: SH-6a-w(design-review R7 PASS)·SH-6a-e(ADR-0004 증보 Accepted)·#1265·SH-8·SH-9. UX-R2c #2216 워커 진행 중. 워커 1).** 컴팩트 복원 진입점.
+>
+> **★ 정본 헤드**: main `9dd350e1`(SH-6a-w 승격 ap) · uxui `857f3277` · engine `3d1923e2`. 이 문서의 승격 뒤 갱신.
+> **★ 성재 결재(09-08 저녁)**: ADR-0004 증보 Accept · SH-8 #2230·SH-9 #2231 go(둘 다 정본화 완료) · Railway 실배포 E2E = 최종 셀프호스팅 검증 단계 · 실기기 APNs = 데스크톱 셀프호스팅 완료 뒤.
+> **★ 다음**: UX-R2c 워커 완주 → planner 검토 + design-review(B0·H0) → uxui 랜딩·승격 → **G1'-4**(E2E-A: #1361 CDP 하네스 + 사람 Enter 1탭 / E2E-B: VPS·로컬 경로로 선행, Railway는 최종 단계) → ITO. 결정 대기: #1361 라벨 blocked→ready.
+> **★ 잔여 후보(미발급)**: R7-N4 core `parseDisconnectStart` 가드 · 프리플라이트 `arbitrary_tw` 사각 · 선재 #2157·#2181·#2193.
+> **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md`(체인 템플릿 `land-engine-audited-template.sh`: CONFLICTING 조기 ABORT·검증기 재시도).
+
+> 이하 스냅샷 93:
 > **2026-09-07 스냅샷 93 (Fable · momo-main — ★LS 시리즈 완결(LS-0~6) + SH-10 push relay Rust main 정본화. 추적 파일 3,416→2,491(−27%), md 107k→67k. 도는 것 없음, 워커 0).** 컴팩트 복원 진입점.
 >
 > **★ 정본 헤드**: main `47f4d6f0`(LS-3 승격 ak) · 이 문서의 승격 배치 am 뒤 갱신. 도는 것 없음.
