@@ -366,14 +366,22 @@ describe("소스 규율", () => {
     expect(source).toContain('data-testid="agent-credentials-disconnect"');
     expect(source).toContain('data-testid="agent-credentials-doorbell"');
     expect(source).toContain("bg-accent-soft");
+    expect(source).toContain("bg-surface");
+    expect(source).toContain("credentials-row-grid");
+    expect(source).toContain("(min-width: 1024px)");
+    expect(source).not.toContain("(min-width: 768px)");
+    expect(source).not.toContain("(min-width: 720px)");
+    expect(source).not.toContain("grid-cols-[");
+    expect(source).not.toContain("minmax(9rem");
+    expect(source).not.toContain("11.5rem");
+    expect(source).toContain("credentials-row-current");
+    expect(source).not.toContain("border-l-2");
+    expect(source).toMatch(/<dt className="sr-only">마지막 활동<\/dt>/);
     expect(source).not.toMatch(
-      /agent-credentials-row-actions[\s\S]{0,280}bg-surface/
+      /agent-credentials-row-actions[\s\S]{0,220}bg-accent-soft/
     );
-    expect(source).not.toContain("hidden sm:block");
-    expect(source).toContain("minmax(9rem,1fr)");
-    expect(source).not.toContain("minmax(0,1fr)");
-    expect(source).toContain("11.5rem");
     expect(source).toContain("border-line/50");
+    expect(source).not.toContain("hidden sm:block");
     expect(source).toContain("mx-3");
     expect(source).toContain("기록 보기");
     expect(source).toContain("relativeLabel");
@@ -490,8 +498,8 @@ describe("목록 네 상태", () => {
       '[data-testid="agent-credentials-row-time"]'
     ) as HTMLTimeElement;
     expect(time).not.toBeNull();
-    expect(time.getAttribute("title")).toContain(
-      formatMoment(1_700_000_000_000)
+    expect(time.getAttribute("title")).toBe(
+      `마지막 활동 ${formatMoment(1_700_000_000_000)}`
     );
     expect(time.dateTime).toBe(new Date(1_700_000_000_000).toISOString());
     expect(time.textContent).toMatch(/\d+일 전|방금|\d+분 전|\d+시간 전/);
