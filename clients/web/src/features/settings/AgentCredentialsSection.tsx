@@ -75,6 +75,16 @@ export function offersDisconnect(
   return status !== "expired" && status !== "disconnected";
 }
 
+/**
+ * 장부가 도어벨 섹션을 마운트하지 않는 행에는 그 버튼을 두지 않는다.
+ * 목적지가 없는 착지는 스크롤·초점을 먹기 전에 빠져나간다.
+ */
+export function offersDoorbell(
+  status: HostedAgentConnection["status"]
+): boolean {
+  return status !== "cleanup_pending" && status !== "disconnected";
+}
+
 function chipTone(tone: HostedChipTone): ChipTone {
   return tone === "neutral" ? "muted" : tone;
 }
@@ -86,21 +96,30 @@ function TruncatingName({ name }: { name: string }) {
   useLayoutEffect(() => {
     const el = ref.current;
     if (el === null) return;
-    setTruncated(el.scrollWidth > el.clientWidth);
+    const measure = () => {
+      setTruncated(el.scrollWidth > el.clientWidth);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, [name]);
 
   return (
-    <>
+    <span
+      className="min-w-0 flex-1"
+      data-testid="agent-credentials-row-name"
+    >
       <span
         ref={ref}
         aria-hidden="true"
-        className="min-w-0 flex-1 truncate text-body text-ink"
+        className="block truncate text-body text-ink"
         title={truncated ? name : undefined}
       >
         {name}
       </span>
       <span className="sr-only">{name}</span>
-    </>
+    </span>
   );
 }
 
@@ -276,60 +295,63 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                   <li
                     key={row.id}
                     aria-current={selectedRow ? "true" : undefined}
-                    className="flex min-w-0 items-stretch border-b border-line last:border-b-0"
+                    className="flex min-w-0 flex-col border-b border-line last:border-b-0"
                     data-testid="agent-credentials-row"
                     data-connection-id={row.id}
                     data-selected={selectedRow ? "" : undefined}
                   >
-                    <div
-                      className={cn(
-                        "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 py-2",
-                        selectedRow
-                          ? "bg-accent-soft"
-                          : "hover:bg-surface-hover"
-                      )}
-                      data-testid="agent-credentials-row-body"
-                    >
-                      <TruncatingName name={fullName} />
-                      <StatusChip
-                        tone={chipTone(hostedStatusTone(row.status))}
+                    <div className="flex min-w-0 flex-col sm:flex-row sm:items-stretch">
+                      <div
+                        className={cn(
+                          "flex min-w-0 flex-1 items-center gap-2 overflow-hidden px-3 py-2",
+                          selectedRow && "bg-accent-soft"
+                        )}
+                        data-testid="agent-credentials-row-body"
                       >
-                        {hostedStatusLabel(row.status)}
-                      </StatusChip>
-                      <span className="min-w-0 shrink truncate text-meta text-ink-muted">
-                        {formatMoment(row.updatedAtMs)}
-                      </span>
-                    </div>
-                    <div
-                      className="flex shrink-0 items-center gap-1.5 border-s border-line bg-surface px-2 py-1"
-                      data-testid="agent-credentials-row-actions"
-                    >
-                      {offersDisconnect(row.status) ? (
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => openLedger(row, "disconnect")}
-                          data-testid="agent-credentials-disconnect"
+                        <TruncatingName name={fullName} />
+                        <StatusChip
+                          tone={chipTone(hostedStatusTone(row.status))}
                         >
-                          해제
-                        </Button>
-                      ) : (
-                        <span className="text-meta text-ink-muted">
                           {hostedStatusLabel(row.status)}
-                        </span>
-                      )}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => openLedger(row, "doorbell")}
-                        data-testid="agent-credentials-doorbell"
+                        </StatusChip>
+                        <dl className="hidden shrink-0 sm:block">
+                          <div className="flex items-baseline gap-1">
+                            <dt className="text-meta text-ink-muted">
+                              마지막 활동
+                            </dt>
+                            <dd className="text-meta text-ink-muted">
+                              {formatMoment(row.updatedAtMs)}
+                            </dd>
+                          </div>
+                        </dl>
+                      </div>
+                      <div
+                        className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-line bg-surface px-2 py-1 sm:shrink-0 sm:border-s sm:border-t-0"
+                        data-testid="agent-credentials-row-actions"
                       >
-                        도어벨
-                      </Button>
-                      {gate.allowed && (
-                        <div className="flex min-w-0 items-center gap-1.5">
+                        {offersDisconnect(row.status) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openLedger(row, "disconnect")}
+                            data-testid="agent-credentials-disconnect"
+                          >
+                            해제
+                          </Button>
+                        )}
+                        {offersDoorbell(row.status) && (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => openLedger(row, "doorbell")}
+                            data-testid="agent-credentials-doorbell"
+                          >
+                            도어벨 설정
+                          </Button>
+                        )}
+                        {gate.allowed && (
                           <Button
                             type="button"
                             variant="outline"
@@ -349,16 +371,16 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                           >
                             재발급
                           </Button>
-                          {regenerateLocked && (
-                            <p
-                              id={rowOfflineId}
-                              className="break-keep text-meta text-ink-muted"
-                            >
-                              {CREDENTIALS_OFFLINE_REASON}
-                            </p>
-                          )}
-                        </div>
-                      )}
+                        )}
+                        {regenerateLocked && (
+                          <p
+                            id={rowOfflineId}
+                            className="min-w-0 basis-full break-keep text-meta text-ink-muted"
+                          >
+                            {CREDENTIALS_OFFLINE_REASON}
+                          </p>
+                        )}
+                      </div>
                     </div>
                   </li>
                 );

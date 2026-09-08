@@ -207,9 +207,9 @@ export function HostedConnectionSection({
     if (landOn === undefined) return;
     const root = sectionRef.current;
     if (root === null) return;
-    const node = root.querySelector<HTMLElement>(
-      `[data-landing="${landOn}"]`
-    );
+    const node =
+      root.querySelector<HTMLElement>(`[data-landing="${landOn}"]`) ??
+      root.querySelector<HTMLElement>('[data-landing="heading"]');
     if (node === null) return;
     root.scrollIntoView({ block: "nearest" });
     node.focus({ preventScroll: true });
@@ -321,8 +321,8 @@ export function HostedConnectionSection({
     <section
       ref={sectionRef}
       className="flex min-w-0 flex-col gap-4 p-4"
-      aria-labelledby={headingId}
-      aria-label={`${agentLabel} 호스티드 연결`}
+      aria-labelledby={title ? headingId : undefined}
+      aria-label={title ? undefined : `${agentLabel} 호스티드 연결`}
       data-testid="hosted-connection-section"
       data-connection-id={found?.id}
       data-landing-target={landOn}
