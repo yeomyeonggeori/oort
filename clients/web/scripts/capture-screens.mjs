@@ -12228,6 +12228,53 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
 }
 
 /**
+ * UX-R2c (#2216). Login-after first-agent poses. Design-mode `?firstAgent=`
+ * only; not part of the default `all` profile.
+ */
+async function captureFirstAgentScenes(browser, scheme) {
+  beginScene("first-agent");
+  const shots = [];
+  const readyByPose = {
+    cards: "first-agent-cards",
+    "one-time": "hosted-pairing-card",
+    detecting: "first-agent-detecting",
+    "cap-exceeded": "first-agent-cap-exceeded",
+    done: "first-agent-mention",
+  };
+
+  async function shoot(pose, viewport, suffix) {
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate((nextPose) => {
+      window.location.hash = `/?firstAgent=${nextPose}`;
+    }, pose);
+    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
+    await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
+    await waitForAnimations(page);
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+
+  for (const pose of ["cards", "one-time", "detecting", "cap-exceeded", "done"]) {
+    await shoot(pose, VIEWPORT, "");
+    await shoot(pose, MOBILE_VIEWPORT, "-390");
+  }
+  return shots;
+}
+
+/**
  * Hash navigation and `data-accent` both start 150ms color transitions.
  * Dawn is a no-op accent change, so `--accent` probes would pass on the
  * first tick while the selected row is still mid-transition. Finite
@@ -13828,6 +13875,11 @@ async function main() {
             }))
           );
         }
+      } else if (profile === "first-agent") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureFirstAgentScenes(browser, scheme)));
+        }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           const shot = async (fn) => {
@@ -13877,7 +13929,8 @@ async function main() {
         profile !== "desktop" &&
         profile !== "accent" &&
         profile !== "gallery" &&
-        profile !== "agents"
+        profile !== "agents" &&
+        profile !== "first-agent"
       ) {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
