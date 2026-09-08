@@ -75,6 +75,26 @@ export const FIRST_AGENT_OPENAI_DETAIL =
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급합니다.";
 
+/** 보상 행 이름이 이 길이를 넘으면 `title` 에 전체 이름을 싣는다. */
+export const FIRST_AGENT_MENTION_TITLE_CHARS = 16;
+
+export const FIRST_AGENT_CHOICE_LEGEND = "무엇을 붙이나요";
+
+export const FIRST_AGENT_DETAIL_FORBIDDEN = [
+  "아래",
+  "이 순서로",
+  "다음 단계",
+  "두 화면",
+] as const;
+
+/** Claude Code 줄: 고르면 생기는 일. generic 프리셋의 「원격 MCP 서버를 등록」. */
+export const FIRST_AGENT_CLAUDE_DETAIL =
+  "원격 MCP 서버 주소를 등록하면 이 팀에 붙습니다.";
+
+/** Codex 줄: 고르면 생기는 일. generic 단계의 「MCP 커넥터」·「원격 서버를 추가」. */
+export const FIRST_AGENT_CODEX_DETAIL =
+  "MCP 커넥터에 원격 서버를 추가하면 이 팀에 붙습니다.";
+
 export type FirstAgentCardId =
   | "claude-code"
   | "codex"
@@ -104,14 +124,14 @@ function grokCardDetail(): string {
   return `${note} ${FIRST_AGENT_GROK_WHAT_HAPPENS}`.trim();
 }
 
-/** Claude Code·Codex 줄의 MCP 순서 문장. OpenAI 줄에는 묶지 않는다. */
+/** generic 프리셋 분류 문장. 카드 줄에는 쓰지 않는다. */
 export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: FIRST_AGENT_GENERIC_HINT,
+    detail: FIRST_AGENT_CLAUDE_DETAIL,
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -119,7 +139,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: FIRST_AGENT_GENERIC_HINT,
+    detail: FIRST_AGENT_CODEX_DETAIL,
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -178,7 +198,7 @@ export function formatDetectPollWait(delayMs: number): string {
   return `${Math.round(delayMs / 1000)}초 뒤 다시 확인합니다`;
 }
 
-/** 프리셋 문구 정책: 네 줄 모두 고르면 생기는 일을 한 줄로 말하고, 단계는 카드에 없다. */
+/** 프리셋 문구 정책: 네 줄이 서로 다른 한 줄이고, 단계는 카드에 없다. */
 export function firstAgentCardsUseHostedPresets(): boolean {
   const grok = HOSTED_PRESETS.find((preset) => preset.id === "grok");
   const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
@@ -188,18 +208,27 @@ export function firstAgentCardsUseHostedPresets(): boolean {
   const codex = firstAgentCard("codex");
   const openai = firstAgentCard("openai-compat");
   const recipe = generic.steps[1] ?? "";
+  const details = FIRST_AGENT_CARDS.map((card) => card.detail);
+  const pairwiseDifferent = details.every(
+    (detail, index) => details.indexOf(detail) === index
+  );
+  const noForbidden = FIRST_AGENT_CARDS.every((card) =>
+    FIRST_AGENT_DETAIL_FORBIDDEN.every((needle) => !card.detail.includes(needle))
+  );
   return (
     grokCard.label === grok.label &&
     Boolean(grok.unverifiedNote) &&
     grokCard.detail.includes(grok.unverifiedNote ?? "") &&
     grokCard.detail.includes(FIRST_AGENT_GROK_WHAT_HAPPENS) &&
-    claude.detail === generic.detail &&
-    codex.detail === generic.detail &&
+    claude.detail === FIRST_AGENT_CLAUDE_DETAIL &&
+    codex.detail === FIRST_AGENT_CODEX_DETAIL &&
     openai.detail === FIRST_AGENT_OPENAI_DETAIL &&
-    !claude.detail.includes("아래") &&
-    !codex.detail.includes("아래") &&
-    !grokCard.detail.includes("아래") &&
-    !openai.detail.includes("아래") &&
+    claude.detail.includes("원격 MCP 서버") &&
+    codex.detail.includes("MCP 커넥터") &&
+    claude.detail !== generic.detail &&
+    codex.detail !== generic.detail &&
+    pairwiseDifferent &&
+    noForbidden &&
     claude.detail !== recipe &&
     codex.detail !== recipe &&
     grokCard.detail !== recipe &&

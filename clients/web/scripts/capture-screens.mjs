@@ -12465,12 +12465,15 @@ async function captureFirstAgentScenes(browser, scheme) {
         0
       );
       const hoverBits = await page.evaluate(() => ({
-        hoverToolbar: document.querySelector("[data-hover-toolbar]") !== null,
         messageToolbar:
           document.querySelector('[data-testid="message-hover-toolbar"]') !==
           null,
+        straddle:
+          document.querySelector(
+            ".hover-toolbar-straddle, .hover-toolbar-straddle-below"
+          ) !== null,
       }));
-      if (hoverBits.hoverToolbar || hoverBits.messageToolbar) {
+      if (hoverBits.messageToolbar || hoverBits.straddle) {
         throw new Error(
           `first-agent done-handoff ${scheme} ${viewport.width}: hover toolbar in shot (${JSON.stringify(hoverBits)})`
         );

@@ -22,12 +22,17 @@ import {
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CHANNEL_PENDING,
+  FIRST_AGENT_CHOICE_LEGEND,
+  FIRST_AGENT_CLAUDE_DETAIL,
+  FIRST_AGENT_CODEX_DETAIL,
   FIRST_AGENT_CONNECTED_CLAIM,
+  FIRST_AGENT_DETAIL_FORBIDDEN,
   FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_MENTION_ACTION,
+  FIRST_AGENT_MENTION_TITLE_CHARS,
   FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
@@ -387,12 +392,15 @@ describe("M-2 캡처 detected 는 done 만", () => {
   });
 });
 
-describe("H-J 긴 이름은 패널 안에서 자른다", () => {
+describe("H-K 긴 이름은 패널 안에서 자른다", () => {
   const FIRST_AGENT_LONG_NAME =
     "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
 
-  it("60자 이름은 말줄임과 title 이 있고 핸들은 남는다", async () => {
+  it("60자 이름은 말줄임 클래스와 title 이 있고 핸들은 남는다", async () => {
     expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThanOrEqual(60);
+    expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThan(
+      FIRST_AGENT_MENTION_TITLE_CHARS
+    );
     const longAgent: RosterMember = {
       ...agent,
       displayName: FIRST_AGENT_LONG_NAME,
@@ -402,138 +410,64 @@ describe("H-J 긴 이름은 패널 안에서 자른다", () => {
       rosterCalls += 1;
       return rosterCalls === 1 ? [human] : [human, longAgent];
     });
-    const nameId = "first-agent-mention-name";
-    const clientDesc = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "clientWidth"
+    let status = "pairing_pending";
+    vi.mocked(getHostedConnection).mockImplementation(async () => ({
+      connection: wireConnection({ status }),
+      cleanupArtifacts: [],
+    }));
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id='claude-code']") !== null,
+      "cards"
     );
-    const scrollDesc = Object.getOwnPropertyDescriptor(
-      HTMLElement.prototype,
-      "scrollWidth"
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    commitCard(host, "claude-code");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
+      "wizard"
     );
-    const rectDesc = Object.getOwnPropertyDescriptor(
-      Element.prototype,
-      "getBoundingClientRect"
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+        ?.click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
     );
-    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
-      configurable: true,
-      get() {
-        if (this.getAttribute?.("data-testid") === nameId) return 180;
-        return 342;
-      },
+    await waitFor(
+      () => vi.mocked(fetchRoster).mock.calls.length >= 2,
+      "roster refresh"
+    );
+    status = "detected";
+    await act(async () => {
+      vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
+      await vi.advanceTimersByTimeAsync(2_000);
     });
-    Object.defineProperty(HTMLElement.prototype, "scrollWidth", {
-      configurable: true,
-      get() {
-        if (this.getAttribute?.("data-testid") === nameId) return 434;
-        return 342;
-      },
-    });
-    Object.defineProperty(Element.prototype, "getBoundingClientRect", {
-      configurable: true,
-      value() {
-        if (this.getAttribute?.("data-testid") === nameId) {
-          return {
-            x: 24,
-            y: 120,
-            width: 180,
-            height: 20,
-            top: 120,
-            left: 24,
-            bottom: 140,
-            right: 204,
-            toJSON() {
-              return this;
-            },
-          };
-        }
-        return {
-          x: 0,
-          y: 0,
-          width: 390,
-          height: 844,
-          top: 0,
-          left: 0,
-          bottom: 844,
-          right: 390,
-          toJSON() {
-            return this;
-          },
-        };
-      },
-    });
-    try {
-      let status = "pairing_pending";
-      vi.mocked(getHostedConnection).mockImplementation(async () => ({
-        connection: wireConnection({ status }),
-        cleanupArtifacts: [],
-      }));
-      const host = mountStage();
-      await waitFor(
-        () => host.querySelector("[data-choice-id='claude-code']") !== null,
-        "cards"
-      );
-      vi.useFakeTimers();
-      vi.setSystemTime(1_000_000);
-      commitCard(host, "claude-code");
-      await waitFor(
-        () => document.querySelector('[data-testid="hosted-pairing-card"]') !== null,
-        "wizard"
-      );
-      act(() => {
-        document
-          .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
-          ?.click();
-      });
-      await waitFor(
-        () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
-        "detecting"
-      );
-      await waitFor(
-        () => vi.mocked(fetchRoster).mock.calls.length >= 2,
-        "roster refresh"
-      );
-      status = "detected";
-      await act(async () => {
-        vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
-        await vi.advanceTimersByTimeAsync(2_000);
-      });
-      await waitFor(
-        () =>
-          host.querySelector('[data-testid="first-agent-mention-name"]')
-            ?.getAttribute("title") === FIRST_AGENT_LONG_NAME,
-        "mention title"
-      );
-      const mention = host.querySelector('[data-testid="first-agent-mention"]');
-      const name = host.querySelector<HTMLElement>(
-        '[data-testid="first-agent-mention-name"]'
-      );
-      const handle = host.querySelector('[data-testid="first-agent-mention-handle"]');
-      expect(mention?.className.split(/\s+/)).toContain("w-full");
-      expect(mention?.className.split(/\s+/)).toContain("min-w-0");
-      expect(name?.className.split(/\s+/)).toContain("truncate");
-      expect(name?.className.split(/\s+/)).toContain("min-w-0");
-      expect(name?.scrollWidth ?? 0).toBeGreaterThan(name?.clientWidth ?? 0);
-      expect(name?.getAttribute("title")).toBe(FIRST_AGENT_LONG_NAME);
-      expect(name?.getBoundingClientRect().right ?? 999).toBeLessThanOrEqual(390);
-      expect(handle).not.toBeNull();
-      expect(handle?.textContent).toContain("@intern");
-      expect(source()).toContain("title={truncated ? name : undefined}");
-    } finally {
-      if (clientDesc) {
-        Object.defineProperty(HTMLElement.prototype, "clientWidth", clientDesc);
-      } else {
-        delete (HTMLElement.prototype as { clientWidth?: number }).clientWidth;
-      }
-      if (scrollDesc) {
-        Object.defineProperty(HTMLElement.prototype, "scrollWidth", scrollDesc);
-      } else {
-        delete (HTMLElement.prototype as { scrollWidth?: number }).scrollWidth;
-      }
-      if (rectDesc) {
-        Object.defineProperty(Element.prototype, "getBoundingClientRect", rectDesc);
-      }
-    }
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="first-agent-mention-name"]')
+          ?.textContent === FIRST_AGENT_LONG_NAME,
+      "mention name"
+    );
+    const mention = host.querySelector('[data-testid="first-agent-mention"]');
+    const column = host.querySelector('[data-testid="first-agent-mention-column"]');
+    const name = host.querySelector<HTMLElement>(
+      '[data-testid="first-agent-mention-name"]'
+    );
+    const handle = host.querySelector('[data-testid="first-agent-mention-handle"]');
+    expect(mention).toBeTruthy();
+    expect(mention?.className.split(/\s+/)).toContain("w-full");
+    expect(mention?.className.split(/\s+/)).toContain("min-w-0");
+    expect(column).toBeTruthy();
+    expect(column?.className.split(/\s+/)).toContain("min-w-0");
+    expect(name).toBeTruthy();
+    expect(name?.className.split(/\s+/)).toContain("truncate");
+    expect(name?.className.split(/\s+/)).toContain("min-w-0");
+    expect(name?.getAttribute("title")).toBe(FIRST_AGENT_LONG_NAME);
+    expect(handle).toBeTruthy();
+    expect(handle?.textContent).toContain("@intern");
   });
 });
 
@@ -571,42 +505,52 @@ describe("카드 4 · 건너뛰기", () => {
     );
     expect(ids).toEqual(FIRST_AGENT_CARDS.map((card) => card.id));
     expect(host.querySelectorAll("fieldset").length).toBe(1);
+    expect(host.querySelector("legend")?.textContent).toBe(FIRST_AGENT_CHOICE_LEGEND);
     expect(host.querySelector('[data-testid="first-agent-provider-choice"]')).toBeNull();
     expect(host.querySelector('[data-testid="first-agent-skip"]')?.textContent).toBe(
       "나중에"
     );
     expect(host.textContent).toContain("Grok Bot");
     expect(host.textContent).toContain(FIRST_AGENT_LEAD_CARDS);
-    expect(host.textContent).toContain(FIRST_AGENT_GENERIC_HINT);
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_GENERIC_HINT)
-    ).toBe(2);
+    ).toBe(0);
     expect(host.textContent).toContain(FIRST_AGENT_OPENAI_DETAIL);
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
     ).toBe(1);
     expect(host.querySelector("#first-agent-harness-hint")).toBeNull();
-    expect(host.querySelector("#first-agent-harness-claude-code-detail")?.textContent).toBe(
-      FIRST_AGENT_GENERIC_HINT
+    const claudeDetail = host.querySelector("#first-agent-harness-claude-code-detail");
+    const codexDetail = host.querySelector("#first-agent-harness-codex-detail");
+    const openaiDetail = host.querySelector(
+      "#first-agent-harness-openai-compat-detail"
     );
-    expect(host.querySelector("#first-agent-harness-codex-detail")?.textContent).toBe(
-      FIRST_AGENT_GENERIC_HINT
-    );
+    expect(claudeDetail).toBeTruthy();
+    expect(claudeDetail?.textContent).toBe(FIRST_AGENT_CLAUDE_DETAIL);
+    expect(codexDetail).toBeTruthy();
+    expect(codexDetail?.textContent).toBe(FIRST_AGENT_CODEX_DETAIL);
+    expect(claudeDetail?.textContent).not.toBe(codexDetail?.textContent);
     expect(
       host.querySelector("#first-agent-harness-claude-code")?.getAttribute("aria-describedby")
     ).toContain("claude-code-detail");
-    expect(host.querySelector("#first-agent-harness-openai-compat-detail")?.textContent).toBe(
-      FIRST_AGENT_OPENAI_DETAIL
-    );
+    expect(openaiDetail).toBeTruthy();
+    expect(openaiDetail?.textContent).toBe(FIRST_AGENT_OPENAI_DETAIL);
     expect(describedText(host, "openai-compat")).not.toContain(FIRST_AGENT_GENERIC_HINT);
-    expect(describedText(host, "claude-code")).toContain(FIRST_AGENT_GENERIC_HINT);
-    expect(describedText(host, "codex")).toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "claude-code")).toContain(FIRST_AGENT_CLAUDE_DETAIL);
+    expect(describedText(host, "codex")).toContain(FIRST_AGENT_CODEX_DETAIL);
     expect(describedText(host, "grok")).not.toContain(FIRST_AGENT_GENERIC_HINT);
+    const renderedDetails: string[] = [];
     for (const id of ["claude-code", "codex", "grok", "openai-compat"] as const) {
       const detail = host.querySelector(`#first-agent-harness-${id}-detail`);
-      expect(detail?.textContent, id).not.toBe("");
-      expect(detail?.textContent, id).not.toContain("아래");
+      expect(detail).toBeTruthy();
+      const text = detail?.textContent ?? "";
+      expect(text, id).not.toBe("");
+      for (const needle of FIRST_AGENT_DETAIL_FORBIDDEN) {
+        expect(text, `${id} ${needle}`).not.toContain(needle);
+      }
+      renderedDetails.push(text);
     }
+    expect(new Set(renderedDetails).size).toBe(renderedDetails.length);
     expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
       /\bmax-w-sm\b/
     );
@@ -695,6 +639,12 @@ describe("B-2 감지 멘션은 보이는 문장과 핸드오프", () => {
       "mention"
     );
     expect(host.textContent).toContain("김인턴");
+    expect(
+      host.querySelector('[data-testid="first-agent-mention-name"]')
+    ).toBeTruthy();
+    expect(
+      host.querySelector('[data-testid="first-agent-mention-name"]')?.getAttribute("title")
+    ).toBeNull();
     expect(host.textContent).toContain(FIRST_AGENT_CHANNEL_PENDING);
     expect(host.textContent).toContain(FIRST_AGENT_MENTION_ACTION);
     expect(

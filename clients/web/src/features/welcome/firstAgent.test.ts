@@ -8,7 +8,10 @@ import {
   DETECT_MAX_DELAY_MS,
   FIRST_AGENT_CAP_COPY,
   FIRST_AGENT_CARDS,
+  FIRST_AGENT_CLAUDE_DETAIL,
+  FIRST_AGENT_CODEX_DETAIL,
   FIRST_AGENT_CONNECTED_CLAIM,
+  FIRST_AGENT_DETAIL_FORBIDDEN,
   FIRST_AGENT_DETECTING_WAIT,
   FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_GROK_WHAT_HAPPENS,
@@ -54,22 +57,28 @@ describe("첫 에이전트 카드 4종", () => {
     expect(grok?.unverifiedNote).toBeTruthy();
     expect(FIRST_AGENT_CARDS[2]?.detail).toContain(grok?.unverifiedNote ?? "");
     expect(FIRST_AGENT_CARDS[2]?.detail).toContain(FIRST_AGENT_GROK_WHAT_HAPPENS);
-    expect(FIRST_AGENT_CARDS[0]?.detail).toBe(generic?.detail);
-    expect(FIRST_AGENT_CARDS[1]?.detail).toBe(generic?.detail);
-    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe("");
-    expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe("");
+    expect(FIRST_AGENT_CARDS[0]?.detail).toBe(FIRST_AGENT_CLAUDE_DETAIL);
+    expect(FIRST_AGENT_CARDS[1]?.detail).toBe(FIRST_AGENT_CODEX_DETAIL);
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(FIRST_AGENT_CARDS[1]?.detail);
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(generic?.detail);
+    expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe(generic?.detail);
     expect(FIRST_AGENT_CARDS[3]?.detail).toBe(FIRST_AGENT_OPENAI_DETAIL);
     expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(generic?.steps[1]);
     expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe(generic?.steps[1]);
     expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
   });
 
-  it("카드 설명은 나중 단계를 가리키지 않는다", () => {
+  it("네 줄 설명은 서로 다르고 금지 문구가 없다", () => {
     const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
     expect(generic?.steps[1]).toContain("아래");
+    const details = FIRST_AGENT_CARDS.map((card) => card.detail);
+    expect(new Set(details).size).toBe(details.length);
     for (const card of FIRST_AGENT_CARDS) {
+      expect(card.detail, card.id).toBeTruthy();
       expect(card.detail, card.id).not.toBe("");
-      expect(card.detail, card.id).not.toContain("아래");
+      for (const needle of FIRST_AGENT_DETAIL_FORBIDDEN) {
+        expect(card.detail, `${card.id} ${needle}`).not.toContain(needle);
+      }
       expect(card.detail, card.id).not.toBe(generic?.steps[1]);
     }
   });

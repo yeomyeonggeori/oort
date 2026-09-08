@@ -3,6 +3,7 @@
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
+- R7 (R6 FAIL B0·H1·M1·N4). 보상 열 `min-w-0`/`truncate`/`title`(길이 N) 는 렌더 DOM 가드 — 가짜 geometry 삭제. Claude/Codex 설명은 서로 다른 한 줄(금지: 아래/이 순서로/다음 단계/두 화면). legend 「무엇을 붙이나요」. `done-handoff` 는 실제 hover toolbar 셀렉터. 빈 detail 은 원소 존재 먼저.
 - R6 (R5 FAIL B1·H1·M1·N5). 캡처 detected 가드는 `vi.stubEnv("MODE")` 행동 시험(production 전 포즈 null, design 은 `done` 만). 보상 행은 `min-w-0`/`w-full` + 이름 `truncate`/`title`. MCP 문장은 Claude/Codex `detail` 만, OpenAI 는 설정 › AI 연결. `done-handoff` 는 포인터를 치운 뒤 찍는다. 죽은 `formatRecheckStill` 삭제. 잠금 opacity 는 class/`aria-disabled`(jsdom) + 캡처 computed.
 - R5 (R4 FAIL B0·H3·M5·N3). 카드 줄은 이름(+미확인 주)만 — generic 단계는 그룹 힌트 한 번. 「다시 확인」은 detecting 폴링을 재개(2s→30s, 상한 리셋). `done` 샷은 보상 화면을 먼저 찍고 채널은 `done-handoff`. 한 ChoiceList·네 옵션. aria 잠금은 컨트롤만 `opacity-50`, 이름은 `text-ink-muted`. 잠긴 「계속」은 `aria-disabled:active:transform-none`. 빈 detail 은 묶지 않음. 캡처 픽스처는 `HOSTED_AUTH_MODE`/`HOSTED_AGENT_PORT_AUDIENCE`.
 - R4 (R3 FAIL B1·H1·M6·N3). 「계속」 잠금은 `aria-disabled`+`opacity-50`+`pointer-events-none` 렌더 가드. 핸드오프는 화면과 같은 `hintedAgentMemberId` 로 초안을 심는다. 카드 두 줄은 프리셋 단계가 다르다. MCP 힌트는 세 장만, OpenAI 는 자기 그룹. aria 잠금은 사유를 흐리지 않는다. 멘션 재진입은 tap-target. 다시 확인 결과는 리드를 반복하지 않는다.
