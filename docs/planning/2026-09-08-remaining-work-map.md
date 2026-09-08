@@ -14,8 +14,8 @@
 | G1'-2 | **UX-R2c #2216** 로그인 뒤 「첫 에이전트 연결」 퍼널(카드 4종) | uxui | L | 패킷 발급(`handoffs/2026-09-08-uxr2c-first-agent-funnel-brief.md`), SH-6a-w 랜딩 뒤 go | A·B |
 | G1'-2 | **#1265** 웹훅 인바운드 2경로 Rust 이식(SH-7 첫 blocker) | engine | M | 패킷 발급(`handoffs/2026-09-08-1265-webhook-inbound-brief.md`), go 대기 | B(별도 에이전트) |
 | G1'-2 | **SH-6a-e #2215** 로컬 provider opt-in — 생성기 플래그 → 컴포즈 전달 → `host.docker.internal` 허용 목록 → staging에서도 유효(ADR-0004 증보, 보안 결정) → doctor | engine | S~M | 패킷 발급(`handoffs/2026-09-08-sh6a-e-local-provider-optin-brief.md`), go 대기 | B(hermes 로컬) |
-| G1'-3 | SH-8 그록봇: 루틴 지시문 정본화 + `SELF_HOST_AGENT.md` §3.3 「설치 뒤 그록봇 자신의 합류(dial-in pairing)」 절 + CDP 하네스 복구(로컬 한정, 2026-09-07 결재) | engine/docs | M | 미발급 | A |
-| G1'-3 | SH-9 hermes 합류 런북 현행화 — `docs/external-agent-provider/*` Swift 전제 → Rust 현행(AI 연결 provider link + 플러그인 경로 1회 실측) | engine/docs | M | 미발급 | B |
+| G1'-3 | SH-8 그록봇: 루틴 지시문 정본화 + `SELF_HOST_AGENT.md` §3.3 「설치 뒤 그록봇 자신의 합류(dial-in pairing)」 절 + CDP 하네스 복구(로컬 한정, 2026-09-07 결재) | engine/docs | M | 발급 #2230 (09-08 go, 발사) | A |
+| G1'-3 | SH-9 hermes 합류 런북 현행화 — `docs/external-agent-provider/*` Swift 전제 → Rust 현행(AI 연결 provider link + 플러그인 경로 1회 실측) | engine/docs | M | 발급 #2231 (09-08 go, SH-6a-e 랜딩 뒤 발사) | B |
 | G1'-4 | **E2E-A**: README 붙여넣기 → 그록봇 VM 설치(§3.3) → doctor PASS → 팀 로그인 → 그록봇 pair→멘션→답장(#1361, CDP) → VM Reset 복구 → 잔여 0 | planner+CDP | — | #1361 blocked 해제 필요(SH-8 뒤) | A |
 | G1'-4 | **E2E-B**: Claude Code 붙여넣기 → Railway 설치 → doctor PASS → 팀 로그인 2인 → hermes 등록·킥오프 답장 → Claude Code 합류·멘션·답장 → upgrade·백업 · 폰 QR(+푸시 stub) | planner+성재 | — | SH-5a·SH-6a-w·SH-9 뒤 | B |
 | → ITO | 성재+1인 내부 테스트(웹+데스크톱+폰 QR), 인테이크 규칙 `docs/INDEX.md` §6 | — | — | E2E 2본 뒤 | |
@@ -39,3 +39,9 @@ UX-R3a~c 팔레트 · DS-1(·3·4) 잔여 · UX-R2d · #1925 허들 자격 · #1
 ## 5. 이슈 위생 후속(planner)
 - 열린 201건 중 6~7월 51건은 대부분 Swift·M0~M8 시대 — LS-5와 같은 기준(두 케이스 + iOS v0)으로 2차 판정 필요(예: #1108·#1101·#1099·#1089 등 게이트 선재, U4 폰 묶음은 M1로 라벨).
 - `status:needs-review` 23건·`in-progress` 11건은 랜딩 여부 대조 후 close/relabel.
+
+## 결재 2026-09-08 저녁 (성재)
+- **ADR-0004 증보 Accept** — 로컬 provider opt-in 경계. SH-6a-e(#2215, PR #2225) 감사 랜딩 진행.
+- **SH-8·SH-9 발급 go** — 브리프 `handoffs/2026-09-08-sh8-grokbot-join-cdp-harness-brief.md`(#2230) · `handoffs/2026-09-08-sh9-hermes-runbook-rust-brief.md`(#2231). 탐색 정정 반영: SH-8은 §3.3.16이 이미 있어 검수·보강, CDP 하네스는 레포에 없었으므로 신규 작성, #1361 Deps 전부 CLOSED; SH-9는 `external-agent-provider/*` 국소 스테일 + SELF_HOST §5 로컬 provider 절 신설(SH-6a-e 의존).
+- **Railway 실배포 E2E** — 최종 단계(셀프호스팅 완료·검증 단계)에서 수행. G1'-4 E2E-B 시점.
+- **실기기 APNs** — 데스크톱 셀프호스팅 완료 뒤 테스트 진행 계획으로 편성(G2 iOS v0 앞).
