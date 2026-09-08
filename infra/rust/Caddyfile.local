@@ -1,7 +1,7 @@
 # 로컬 셀프호스트 엣지 (#1229). 정본 절차: docs/SELF_HOST.md
 #
 # infra/rust/Caddyfile 의 로컬 쌍둥이다. 하는 일은 같다 — SPA를 서빙하고
-# /v1 · /healthz · /connection 을 같은 오리진에서 프록시한다. 다른 것은 딱 하나,
+# /v1 · /hooks · /healthz · /connection 을 같은 오리진에서 프록시한다. 다른 것은 딱 하나,
 # **사이트 주소**다.
 #
 #   infra/rust/Caddyfile   {$OORT_SITE_ADDRESS}  → 자동 HTTPS. env 가 없으면
@@ -38,6 +38,9 @@
 		respond 403
 	}
 	handle /v1/* {
+		reverse_proxy api:8080
+	}
+	handle /hooks/* {
 		reverse_proxy api:8080
 	}
 	# ADR-0169 — local archive PUT is same-origin. The capability URL the

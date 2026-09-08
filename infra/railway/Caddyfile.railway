@@ -56,6 +56,9 @@ http://{$OORT_SITE_ADDRESS} {
 	handle /v1/* {
 		reverse_proxy api.railway.internal:8080
 	}
+	handle /hooks/* {
+		reverse_proxy api.railway.internal:8080
+	}
 	handle /healthz {
 		reverse_proxy api.railway.internal:8080
 	}

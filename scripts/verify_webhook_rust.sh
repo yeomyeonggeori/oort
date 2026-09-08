@@ -7,6 +7,7 @@
 #
 # 폐곡선:
 #   설치      실제 REST 8연산 (webhook_admin_conformance_pg)
+#   인바운드  HMAC·토큰 ingress (webhook_inbound_conformance_pg, #1265)
 #   발생      033 mention 트리거 → outbox 행
 #   전송      sender 1회 drain → 실제 소켓 POST → 실제 수신기
 #   서명검증  수신기가 HMAC-SHA256("<ts>." || body) 를 독립 재계산
@@ -16,7 +17,8 @@
 # red proof (제품 소스를 실제로 깨고 빨강을 확인한 뒤 되돌린다):
 #   WEBHOOK_RUST_PROVE_RED_AUDIT=1   #1204 감사 기록 제거 → 감사 단정 FAIL
 #   WEBHOOK_RUST_PROVE_RED_SIGNATURE=1  서명에서 timestamp 제거 → 서명 단정 FAIL
-# 둘 다 "expected FAIL" 이며, 초록이 나오면 그 단정이 아무것도 재고 있지 않다는 뜻이므로
+#   WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER=1  인바운드 서명 검증을 본문 파싱 뒤로 → 리플레이 케이스 FAIL
+# 셋 다 "expected FAIL" 이며, 초록이 나오면 그 단정이 아무것도 재고 있지 않다는 뜻이므로
 # 이 스크립트가 실패로 보고한다.
 #
 # Docker 실행은 오케스트레이터 몫이다. 워커는 `bash -n` 만 돌린다.
@@ -112,9 +114,15 @@ start_pg() {
 
 export DATABASE_URL="postgres://momo:momo@127.0.0.1:${PG_PORT}/momo"
 
+run_inbound() {
+  ( cd server-rust && cargo test -p momo-server --test webhook_inbound_conformance_pg \
+      -- --ignored --test-threads=1 )
+}
+
 run_suites() {
   ( cd server-rust && cargo test -p momo-server --test webhook_admin_conformance_pg \
       -- --ignored --test-threads=1 ) || return 1
+  run_inbound || return 1
   ( cd server-rust && cargo test -p momo-webhook-sender --test webhook_delivery_conformance_pg \
       -- --include-ignored --test-threads=1 ) || return 1
   ( cd server-rust && cargo test -p momo-webhook ) || return 1
@@ -145,11 +153,32 @@ assert needle in source, "red-proof anchor moved; update verify_webhook_rust.sh"
 source = source.replace(needle, "", 1)
 open(path, "w").write(source)
 PY
+
+RED_INGRESS_ORDER_SNIPPET="$(mktemp)"
+cat >"$RED_INGRESS_ORDER_SNIPPET" <<'PY'
+import sys
+path = sys.argv[1]
+source = open(path).read()
+sig = "                // #1265-order: signature check (must stay above parse)"
+parse = "                // #1265-order: parse"
+assert sig in source, "red-proof signature-order anchor moved; update verify_webhook_rust.sh"
+assert parse in source, "red-proof parse-order anchor moved; update verify_webhook_rust.sh"
+start_parse = source.index(parse)
+end_marker = "                let client_msg_id = deterministic_client_message_id(&["
+assert end_marker in source[start_parse:], "red-proof parse block end moved"
+end_parse = source.index(end_marker, start_parse)
+parse_block = source[start_parse:end_parse]
+without = source[:start_parse] + source[end_parse:]
+insert_at = without.index(sig)
+source = without[:insert_at] + parse_block + without[insert_at:]
+open(path, "w").write(source)
+PY
 # shellcheck disable=SC2064
-trap "rm -f '$RED_AUDIT_SNIPPET' '$RED_SIGNATURE_SNIPPET'; restore_sources; reclaim" EXIT INT TERM
+trap "rm -f '$RED_AUDIT_SNIPPET' '$RED_SIGNATURE_SNIPPET' '$RED_INGRESS_ORDER_SNIPPET'; restore_sources; reclaim" EXIT INT TERM
 
 SENDER_LIB="server-rust/bins/momo-webhook-sender/src/lib.rs"
 CRYPTO="server-rust/crates/momo-webhook/src/crypto.rs"
+INGRESS="server-rust/bins/momo-server/src/routes/webhook_ingress.rs"
 
 start_pg
 
@@ -177,6 +206,18 @@ if [ "${WEBHOOK_RUST_PROVE_RED_SIGNATURE:-0}" = "1" ]; then
   exit 0
 fi
 
-echo "[webhook-rust] running the #1222 closed loop against ${DATABASE_URL%%:*}…"
+if [ "${WEBHOOK_RUST_PROVE_RED_INGRESS_ORDER:-0}" = "1" ]; then
+  echo "[webhook-rust] RED PROOF: moving native signature check after body parse (expected FAIL)"
+  patch_source "$INGRESS" "$RED_INGRESS_ORDER_SNIPPET"
+  if run_inbound; then
+    echo "[webhook-rust] FAIL — inbound stayed green with parse-before-signature;" >&2
+    echo "               the replay-before-parse assertion is not measuring anything." >&2
+    exit 1
+  fi
+  echo "[webhook-rust] PASS — the replay-before-parse assertion went red as required."
+  exit 0
+fi
+
+echo "[webhook-rust] running the #1222/#1265 closed loop against ${DATABASE_URL%%:*}…"
 run_suites
-echo "[webhook-rust] PASS — 설치·전송·서명검증·감사행·재시도·자동disable 폐곡선 그린."
+echo "[webhook-rust] PASS — 설치·인바운드·전송·서명검증·감사행·재시도·자동disable 폐곡선 그린."
