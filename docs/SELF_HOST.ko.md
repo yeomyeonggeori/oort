@@ -274,19 +274,82 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 
 이 노트북에서 이미 도는 provider(hermes, Ollama, LM Studio)는 컨테이너에서
 `http://host.docker.internal:<port>/v1` 로 닿는다. `127.0.0.1` 은 컨테이너
-자신이다. env를 만들 때 opt-in을 켠 뒤 **설정 › AI 연결**에 그 주소를 넣는다:
+자신이다. env를 만들 때 opt-in을 켠 뒤 **설정 › AI 연결**에 그 주소를 넣는다.
+
+실측 hermes 절차(이 머신의 OpenAI 호환 SSE → 웰컴 킥오프 답장). 이미 본인
+hermes가 돌고 있으면 그 프로세스를 쓰고 mock은 건너뛴다. 이 체크아웃에는
+hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
+
+1. Docker가 닿을 호스트 포트에 provider를 띄운다. 아래 `<provider-port>` 는
+   빈 포트를 고른다. `0.0.0.0` 에 바인드한다 — `host.docker.internal` 은
+   host-gateway 주소다(컨테이너 안의 `127.0.0.1` 도, VM에서 본 호스트
+   루프백도 아니다). 그 터미널에서 프로세스를 켜 둔다.
+
+   ```sh
+   MOCK_HERMES_TOOL_CALLS=0 python3 scripts/mock_hermes.py --host 0.0.0.0 --port <provider-port>
+   ```
+
+2. 로컬 provider opt-in으로 env를 만든다(이 체크아웃에 이미 스택이 있으면
+   프로젝트 이름을 격리한다):
+
+   ```sh
+   COMPOSE_PROJECT_NAME=<project> scripts/self_host_env.sh --local-build --allow-local-provider
+   ```
+
+   `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` 과
+   `AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal` 이 기록된다. 끄려면 그 두
+   줄을 지우고 api·agent-worker를 재시작한다. Railway/공개 설치는 이 플래그를
+   쓰지 않는다(`infra/railway/railway.json` 무변화).
+
+3. 2단계가 인쇄한 명령으로 스택을 띄운다
+   (`scripts/self_host_env.sh --compose up -d --build --wait`). 브라우저 포트는
+   [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4 와 같이 파생한다:
+
+   ```sh
+   ENV_FILE=infra/rust/local.secrets.env
+   WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
+   ```
+
+4. 로그인(4단계) 뒤 **설정 › AI 연결**에
+   `http://host.docker.internal:<provider-port>/v1` 과 hermes 쪽 bearer를
+   넣는다. REST 동치(`<port>` 는 `$WEB_PORT`):
+
+   ```sh
+   TOKEN=$(curl -sS -X POST "http://127.0.0.1:${WEB_PORT}/v1/auth/login" \
+     -H 'Content-Type: application/json' \
+     -d '{"email":"owner@oort.local","password":"<MOMO_INITIAL_OWNER_PASSWORD>"}' \
+     | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+
+   curl -sS -X PUT "http://127.0.0.1:${WEB_PORT}/v1/provider/link" \
+     -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"baseUrl":"http://host.docker.internal:<provider-port>/v1","bearer":"<hermes-facing-bearer>"}'
+   ```
+
+5. 에이전트를 만들고(에이전트 명부 → 새 에이전트) `#general` 에 초대한 뒤
+   웰컴 킥오프가 돌게 한다(새 멤버 합류, 또는 첫 `@핸들` 멘션). 답장은
+   `message.seq` 가 있는 내구성 채널 메시지다. 그 seq가 오면 이 문서가
+   약속한 전부다.
+
+격리 프로젝트를 썼으면
+`scripts/self_host_env.sh --compose down -v` 로 회수해 그
+`COMPOSE_PROJECT_NAME` 의 잔여 컨테이너가 0이 되게 한다.
+
+플러그인 경로(Hermes가 oort를 메시징 플랫폼으로 다룬다. copy 모드는
+대소문자 구분 볼륨에 대문자 `PLUGIN.yaml` 을 쓴다):
 
 ```sh
-scripts/self_host_env.sh --local-build --allow-local-provider
+MOMO_HERMES_PLUGIN_INSTALL_MODE=copy scripts/momo hermes-gateway-install-plugin
+scripts/verify_hermes_gateway_adapter.sh
 ```
 
-`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` 과
-`AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal` 이 기록된다. 끄려면 그 두
-줄을 지우고 api·agent-worker를 재시작한다. Railway/공개 설치는 이 플래그를
-쓰지 않는다(`infra/railway/railway.json` 무변화).
+copy 모드는 `plugin.yaml` 옆에 대문자 `PLUGIN.yaml` 도 쓴다(대소문자 구분
+볼륨에서 Hermes가 대문자 이름을 찾는다). 살아 있는 검사는 설치기다.
+`scripts/verify_hermes_gateway_adapter.sh` 는 삭제된 Swift 서버 패키지를
+띄운다(`swift run --package-path server`, LS-1 / #2165). Rust 스택 PASS가
+아니다.
 
-그다음 에이전트를 만들고(에이전트 명부 → 새 에이전트) 채널에 초대한 뒤 `@핸들`로
-부른다. 대답이 오면 거기까지가 이 문서가 약속한 전부다.
+[`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)
+를 본다.
 
 ### 무엇이 즉시 반영되고 무엇이 재시작을 요구하나
 

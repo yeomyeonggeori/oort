@@ -3,6 +3,10 @@
 > Status: MOMO-337 server bearer surfaces verified; MOMO-338 adapter bearer
 > migration implemented. Real provider completion remains user-credentialed and
 > runs only after the operator completes provider OAuth/login inside Hermes.
+> SH-9 (#2231): runtime names are the live Rust compose services
+> (`api` · `relay` · `agent-worker`). Loopback ports are derived from
+> `MOMO_WEB_PORT`, the same way [`SELF_HOST_AGENT.md`](../SELF_HOST_AGENT.md)
+> §3.3.4 derives health.
 
 ## Product Boundary
 
@@ -10,7 +14,7 @@ Momo supports two Hermes integration paths:
 
 | Path | Owner of agent turn | When to use |
 |---|---|---|
-| AgentWorker SSE | oort worker polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider, writes the final message | deterministic local gates, existing runtime path, hosted worker control |
+| agent-worker SSE | oort `agent-worker` polls `agent_job`, calls an OpenAI-compatible `/v1/chat/completions` provider, writes the final message | deterministic local gates, existing runtime path, hosted worker control |
 | Hermes gateway native platform | Hermes treats oort as a messaging platform, receives `agent.job`, runs its provider runtime, then reports status/result to oort REST | local 1-person dogfood where Hermes should behave like Slack/Telegram adapter sync |
 
 Both paths keep the same invariant: **oort is the source of truth for the agent
@@ -21,27 +25,28 @@ REST and is persisted as `message` + `outbox` with `message.seq` ordering.
 ## Runtime Flow
 
 1. A user sends a channel message mentioning `@hermes`.
-2. MomoServer creates `agent_run` plus Context Packet projection and audit shell.
-3. In `AGENT_GATEWAY_MODE=gateway`, MomoServer writes:
+2. Compose `api` (`command: ["api"]`) creates `agent_run` plus Context Packet
+   projection and audit shell.
+3. In `AGENT_GATEWAY_MODE=gateway`, `api` writes:
    - `outbox(kind='agent_job', method='gateway')` for ledger tracking.
    - `outbox(kind='broadcast')` on `agentwork:ws<workspace>.<agentMember>` with
      `data.type='agent.job'`.
-4. OutboxRelay publishes the realtime job; AgentWorker intentionally skips
-   `method='gateway'`.
+4. Compose `relay` (`command: ["relay"]`) publishes the realtime job;
+   `agent-worker` intentionally skips `method='gateway'`.
 5. Hermes gateway adapter receives `agent.job`, invokes its provider runtime,
    and reports progress/result to oort REST:
    - `POST /v1/workspaces/:workspace/agent-runs/:run/gateway/events`
    - `POST /v1/workspaces/:workspace/agent-runs/:run/gateway/complete`
-6. MomoServer records `agent.gateway.*` audit events, writes the durable final
+6. `api` records `agent.gateway.*` audit events, writes the durable final
    agent response message, writes minimal `usage_ledger`, and marks the gateway
    `agent_job` outbox row `done`.
 
 ```mermaid
 sequenceDiagram
   participant User
-  participant API as MomoServer
+  participant API as api
   participant DB as Postgres SoT
-  participant Relay as OutboxRelay
+  participant Relay as relay
   participant Hermes as Hermes gateway adapter
   User->>API: POST message "@hermes ..."
   API->>DB: tx: message + agent_run + agent_job(method=gateway) + agent.job outbox
@@ -68,11 +73,18 @@ scripts/momo hermes-gateway-init
 ```
 
 The helper writes `$HOME/.momo/hermes-gateway.env` outside the repo. It contains
-only oort-facing connection values:
+only oort-facing connection values. Derive the loopback API and websocket
+addresses from `MOMO_WEB_PORT` in the generated env (Caddy on that port is the
+same-origin edge for `/v1` and `/connection/websocket`):
 
 ```sh
-MOMO_API_URL=http://127.0.0.1:28180
-MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:28100/connection/websocket
+ENV_FILE="${ENV_FILE:-infra/rust/local.secrets.env}"
+WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
+```
+
+```sh
+MOMO_API_URL=http://127.0.0.1:<MOMO_WEB_PORT>
+MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:<MOMO_WEB_PORT>/connection/websocket
 MOMO_WORKSPACE_ID=00000000-0000-7000-8000-000000000001
 MOMO_AGENT_MEMBER_ID=00000000-0000-7000-8000-000000000103
 MOMO_AGENT_HANDLE=hermes
@@ -90,7 +102,7 @@ The helper also configures the Hermes home target before startup; Hermes
 lifecycle/setup notices remain adapter-local and are not durable oort messages.
 
 The `agentwork:` work stream is a Centrifugo subscription, not a durable write path.
-It still goes through MomoServer's subscribe proxy. Dev, local-alpha, and prod
+It still goes through `api`'s subscribe proxy. Dev, local-alpha, and prod
 Centrifugo configs must all allow `agentwork:ws<workspace>.<agentMember>` through
 the same workspace-qualified regex and proxy check. The proxy authorizes this
 namespace **self-only**: the connection JWT member must equal the target agent
@@ -172,7 +184,9 @@ Operator flow:
    ```
    The default target is `$HERMES_HOME/plugins/momo`, usually
    `$HOME/.hermes/plugins/momo`. Set `MOMO_HERMES_PLUGIN_INSTALL_MODE=copy` if a
-   symlink is not acceptable for the local runtime.
+   symlink is not acceptable for the local runtime. Copy mode also writes
+   uppercase `PLUGIN.yaml` next to `plugin.yaml` when the target filesystem is
+   case-sensitive.
 4. Complete provider OAuth/login inside Hermes. The OAuth/token material stays
    inside Hermes/provider runtime and is not copied into oort.
 5. Start oort with `AGENT_GATEWAY_MODE=gateway` and legacy secret support off.
