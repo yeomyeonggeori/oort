@@ -268,8 +268,22 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 ```
 
 키는 이 서버의 DB에 **암호화되어** 저장되고(`PROVIDER_LINK_MASTER_KEY`), 응답과 화면에는
-끝 네 자리만 돌아온다. 엔드포인트는 오늘 **외부 `https://`** 주소여야 한다 — 노트북에
-띄운 로컬 모델(`http://127.0.0.1:...`)을 붙이는 경로는 아직 열려 있지 않다.
+끝 네 자리만 돌아온다. 엔드포인트는 보통 **외부 `https://`** 주소다.
+
+### 로컬 provider (같은 머신)
+
+이 노트북에서 이미 도는 provider(hermes, Ollama, LM Studio)는 컨테이너에서
+`http://host.docker.internal:<port>/v1` 로 닿는다. `127.0.0.1` 은 컨테이너
+자신이다. env를 만들 때 opt-in을 켠 뒤 **설정 › AI 연결**에 그 주소를 넣는다:
+
+```sh
+scripts/self_host_env.sh --local-build --allow-local-provider
+```
+
+`AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` 과
+`AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal` 이 기록된다. 끄려면 그 두
+줄을 지우고 api·agent-worker를 재시작한다. Railway/공개 설치는 이 플래그를
+쓰지 않는다(`infra/railway/railway.json` 무변화).
 
 그다음 에이전트를 만들고(에이전트 명부 → 새 에이전트) 채널에 초대한 뒤 `@핸들`로
 부른다. 대답이 오면 거기까지가 이 문서가 약속한 전부다.
@@ -608,7 +622,9 @@ scripts/self_host_env.sh --railway
 
 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. 출력 키 집합은 생성기
 heredoc + `oort_public_edge_env_keys` — `OORT_SITE_ADDRESS` /
-`OORT_CSP_CONNECT_SRC`를 손으로 적지 마라. 게이트:
+`OORT_CSP_CONNECT_SRC`를 손으로 적지 마라. 로컬 provider opt-in
+(`--allow-local-provider`)은 로컬 설치 전용이며 이 템플릿은 그 키를 싣지
+않는다. 게이트:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
 | 레포 경로 | 서버 위 이름 | 역할 |

@@ -301,9 +301,24 @@ curl -sS -X PUT http://localhost:8088/v1/provider/link \
 
 The key is stored **encrypted** in this server's DB
 (`PROVIDER_LINK_MASTER_KEY`); the response and the screen return only the
-last four digits. The endpoint today must be an **external `https://`**
-address — the path that attaches a local model on the laptop
-(`http://127.0.0.1:...`) is not open yet.
+last four digits. The endpoint is normally an **external `https://`**
+address.
+
+### Local provider (same machine)
+
+A provider that already runs on this laptop (hermes, Ollama, LM Studio) is
+reached from the containers at `http://host.docker.internal:<port>/v1`, not
+at `127.0.0.1` (that address inside the container is the container itself).
+Write the opt-in when creating env, then put that URL in **설정 › AI 연결**:
+
+```sh
+scripts/self_host_env.sh --local-build --allow-local-provider
+```
+
+That writes `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1` and
+`AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal`. To turn it off, delete
+those two lines and restart api + agent-worker. Railway / public installs
+do not use this flag (`infra/railway/railway.json` is unchanged).
 
 Then create an agent (agent directory → new agent), invite it to a channel,
 and call it with `@handle`. When an answer arrives, that is everything this
@@ -679,7 +694,9 @@ scripts/self_host_env.sh --railway
 
 `RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. The output key set
 is the generator heredoc plus `oort_public_edge_env_keys` — do not type
-`OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Gate:
+`OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC` by hand. Local provider opt-in
+(`--allow-local-provider`) is for local installs only; this template does
+not carry those keys. Gate:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
 | 레포 경로 | 서버 위 이름 | 역할 |
