@@ -12244,13 +12244,25 @@ async function captureFirstAgentScenes(browser, scheme) {
     offline: "first-agent-offline",
     error: "first-agent-error",
   };
-  const tapTargets = [
-    ["first-agent-skip", "나중에"],
-    ["first-agent-reentry", "재진입", "optional"],
-    ["first-agent-continue", "계속", "optional"],
-    ["first-agent-recheck", "다시 확인", "optional"],
-    ["first-agent-mention-action", "첫 멘션", "optional"],
-  ];
+  const tapTargetsByPose = {
+    cards: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-continue", "계속"],
+    ],
+    "one-time": [["first-agent-skip", "나중에"]],
+    detecting: [["first-agent-skip", "나중에"]],
+    "cap-exceeded": [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-recheck", "다시 확인"],
+    ],
+    done: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-mention-action", "첫 멘션"],
+    ],
+    loading: [["first-agent-skip", "나중에"]],
+    offline: [["first-agent-skip", "나중에"]],
+    error: [["first-agent-skip", "나중에"]],
+  };
 
   async function shoot(pose, viewport, suffix) {
     const context = await browser.newContext({
@@ -12297,12 +12309,58 @@ async function captureFirstAgentScenes(browser, scheme) {
       page,
       `first-agent ${pose} ${scheme} ${viewport.width}`
     );
+    if (pose === "done") {
+      const mentionTruncates = await page.evaluate(() =>
+        [...document.querySelectorAll(
+          '[data-testid="first-agent-mention"] .truncate'
+        )].map((el) => ({
+          overflow: el.scrollWidth > el.clientWidth + 1,
+          width: Math.round(el.getBoundingClientRect().width),
+        }))
+      );
+      if (mentionTruncates.length === 0) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 멘션 이름에 truncate 가 없다`
+        );
+      }
+    }
     if (viewport.width === 390) {
+      const crumb = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="first-agent-reentry"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          whiteSpace: getComputedStyle(el).whiteSpace,
+          right: r.right,
+        };
+      });
+      if (crumb && crumb.whiteSpace !== "nowrap") {
+        throw new Error(
+          `first-agent ${pose} ${scheme} 390: 재진입 경로가 nowrap 이 아니다 (${crumb.whiteSpace})`
+        );
+      }
+      if (crumb && crumb.right > 390 + 1) {
+        throw new Error(
+          `first-agent ${pose} ${scheme} 390: 재진입 경로가 화면을 넘긴다 (${crumb.right}px)`
+        );
+      }
       await assertTapTargets(
         page,
         `first-agent ${pose} ${scheme} 390`,
-        tapTargets
+        tapTargetsByPose[pose]
       );
+    }
+    if (pose === "loading") {
+      const widths = await page.evaluate(() =>
+        [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
+          (el) => el.getBoundingClientRect().width
+        )
+      );
+      if (widths.length === 0 || widths.some((width) => width <= 0)) {
+        throw new Error(
+          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.join(", ")})`
+        );
+      }
     }
     const path = beginSceneFromShotPath(
       `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`

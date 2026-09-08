@@ -8,7 +8,8 @@ import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
-import { makeDirectory } from "@momo/core/features/workspace/directory";
+import { fetchRoster, listChannels } from "@momo/core/lib/api";
+import { fetchProviderLink } from "@momo/core/features/settings/api";
 import {
   getHostedConnection,
   listHostedConnections,
@@ -20,10 +21,13 @@ import {
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CHANNEL_PENDING,
   FIRST_AGENT_CONNECTED_CLAIM,
+  FIRST_AGENT_GENERIC_HINT,
+  FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_MENTION_ACTION,
   FIRST_AGENT_RECHECK_LABEL,
+  FIRST_AGENT_RECHECKING,
   FIRST_AGENT_RETRY_LABEL,
 } from "./firstAgent";
 import {
@@ -69,51 +73,64 @@ const CONNECTION_ID = "019f9a01-0000-7000-8000-0000000005c1";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
 const PRODUCT_SECRET = "momo_pair_v1.issued-from-create-response";
 
-const roster: RosterMember[] = [];
+const human: RosterMember = {
+  id: MEMBER_ID,
+  workspaceId: WS,
+  kind: "human",
+  status: "active",
+  displayName: "곽성재",
+  handle: "seongjae",
+  role: "owner",
+  channelCount: 1,
+  channelIds: [GENERAL_ID],
+  capabilities: [],
+  createdAtMs: 0,
+  updatedAtMs: 0,
+};
 
-vi.mock("@/features/workspace/useWorkspace", async (importOriginal) => {
-  const actual =
-    await importOriginal<typeof import("@/features/workspace/useWorkspace")>();
+const agent: RosterMember = {
+  id: AGENT_ID,
+  workspaceId: WS,
+  kind: "agent",
+  status: "active",
+  displayName: "김인턴",
+  handle: "intern",
+  role: "member",
+  channelCount: 1,
+  channelIds: [GENERAL_ID],
+  capabilities: [],
+  createdAtMs: 0,
+  updatedAtMs: 0,
+};
+
+const unconfiguredLink = {
+  schema: "momo.provider_link.v0",
+  configured: false,
+  source: "none",
+  mode: "external-hermes",
+  baseUrl: "",
+  endpointLabel: "",
+  bearerConfigured: false,
+  availability: "unknown",
+  keyConfigured: false,
+  diagnostics: [] as string[],
+};
+
+vi.mock("@momo/core/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
-    useDirectory: () => ({
-      directory: makeDirectory(roster),
-      isPending: false,
-      isError: false,
-      data: roster,
-      refetch: () => undefined,
-    }),
-    useChannels: () => ({
-      isPending: false,
-      isSuccess: true,
-      isError: false,
-      data: [
-        {
-          id: GENERAL_ID,
-          workspaceId: WS,
-          name: "general",
-          kind: "public",
-          muted: false,
-          createdAtMs: 0,
-          updatedAtMs: 0,
-        },
-      ],
-      groups: {
-        channels: [
-          {
-            id: GENERAL_ID,
-            workspaceId: WS,
-            name: "general",
-            kind: "public",
-            muted: false,
-            createdAtMs: 0,
-            updatedAtMs: 0,
-          },
-        ],
-        dms: [],
-      },
-      refetch: () => undefined,
-    }),
+    fetchRoster: vi.fn(),
+    listChannels: vi.fn(),
+  };
+});
+
+vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/api")>();
+  return {
+    ...actual,
+    fetchProviderLink: vi.fn(),
   };
 });
 
@@ -247,7 +264,9 @@ function commitCard(host: HTMLElement, id: string): void {
 
 function mountStage(): HTMLElement {
   queryClient = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    defaultOptions: {
+      queries: { retry: false, staleTime: 30_000, refetchOnWindowFocus: false },
+    },
   });
   const host = document.createElement("div");
   document.body.append(host);
@@ -282,38 +301,24 @@ beforeEach(() => {
   offlineSlot.current = false;
   continued = 0;
   window.history.replaceState(null, "", "/");
-  roster.splice(
-    0,
-    roster.length,
+  vi.mocked(fetchRoster).mockReset();
+  vi.mocked(listChannels).mockReset();
+  vi.mocked(fetchProviderLink).mockReset();
+  let rosterCalls = 0;
+  vi.mocked(fetchRoster).mockImplementation(async () => {
+    rosterCalls += 1;
+    return rosterCalls === 1 ? [human] : [human, agent];
+  });
+  vi.mocked(listChannels).mockResolvedValue([
     {
-      id: MEMBER_ID,
+      id: GENERAL_ID,
       workspaceId: WS,
-      kind: "human",
-      status: "active",
-      displayName: "곽성재",
-      handle: "seongjae",
-      role: "owner",
-      channelCount: 1,
-      channelIds: [GENERAL_ID],
-      capabilities: [],
-      createdAtMs: 0,
-      updatedAtMs: 0,
+      name: "general",
+      kind: "public",
+      muted: false,
     },
-    {
-      id: AGENT_ID,
-      workspaceId: WS,
-      kind: "agent",
-      status: "active",
-      displayName: "김인턴",
-      handle: "intern",
-      role: "member",
-      channelCount: 1,
-      channelIds: [GENERAL_ID],
-      capabilities: [],
-      createdAtMs: 0,
-      updatedAtMs: 0,
-    }
-  );
+  ]);
+  vi.mocked(fetchProviderLink).mockResolvedValue(unconfiguredLink);
   clearAllFirstAgentMarkers();
   vi.mocked(listHostedConnections).mockReset();
   vi.mocked(getHostedConnection).mockReset();
@@ -347,12 +352,13 @@ describe("소스 규율", () => {
     expect(text).toContain("FIRST_MENTION_AGENT_BADGE");
     expect(text).toContain("elapsedLabel");
     expect(text).toContain("ChoiceList");
+    expect(text).toContain('lockMode="aria"');
+    expect(text).toContain("rosterQueryKey");
     expect(text).toContain("OnboardingSlideTransition");
     expect(text).not.toContain("FirstMentionOnboarding");
     expect(text).not.toContain("focusComposer");
     expect(text).not.toMatch(/function OneTimeSecretCard/);
     expect(text).not.toMatch(/function HostedAgentWizard/);
-    expect(text).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
     expect(text).not.toContain(PRODUCT_SECRET);
   });
 });
@@ -373,6 +379,10 @@ describe("카드 4 · 건너뛰기", () => {
     );
     expect(host.textContent).toContain("Grok Bot");
     expect(host.textContent).toContain(FIRST_AGENT_LEAD_CARDS);
+    expect(host.textContent).toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(
+      countNeedle(host.textContent ?? "", FIRST_AGENT_GENERIC_HINT)
+    ).toBe(1);
     expect(host.querySelector('[data-testid="first-agent-stage"]')?.className).toMatch(
       /\bmax-w-sm\b/
     );
@@ -534,6 +544,17 @@ describe("H-4 오프라인은 라디오를 탭 순서에 둔다", () => {
     expect(radio?.getAttribute("aria-describedby") ?? "").toContain(
       "first-agent-offline-reason"
     );
+    const row = host.querySelector<HTMLElement>("[data-choice-id='claude-code']");
+    expect(row?.className).toMatch(/opacity-50/);
+    expect(row?.className).not.toMatch(/hover:bg-surface-hover/);
+    const before = row ? getComputedStyle(row).backgroundColor : "";
+    act(() => {
+      row?.dispatchEvent(new MouseEvent("mouseenter", { bubbles: true }));
+      row?.dispatchEvent(new MouseEvent("mouseover", { bubbles: true }));
+    });
+    expect(row ? getComputedStyle(row).backgroundColor : "").toBe(before);
+    const cont = host.querySelector('[data-testid="first-agent-continue"]');
+    expect(cont?.className).toMatch(/opacity-50/);
   });
 });
 
@@ -632,6 +653,9 @@ describe("N-4 live region 은 컨트롤을 감싸지 않는다", () => {
     expect(
       host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("aria-labelledby")
     ).toBe("first-agent-heading");
+    expect(
+      host.querySelector('[data-testid="first-agent-stage"]')?.getAttribute("role")
+    ).toBe("region");
   });
 });
 
@@ -670,3 +694,172 @@ describe("사보타주 ① 1회용 값은 한 번만 (M-7)", () => {
     debug.mockRestore();
   });
 });
+
+describe("B-A 발급 뒤 명부가 비면 멘션이 비지 않는다", () => {
+  it("발급 전 명부에 에이전트가 없어도 detected 뒤 이름과 핸드오프가 선다", async () => {
+    let status = "pairing_pending";
+    vi.mocked(getHostedConnection).mockImplementation(async () => ({
+      connection: wireConnection({ status }),
+      cleanupArtifacts: [],
+    }));
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id='claude-code']") !== null,
+      "cards"
+    );
+    expect(vi.mocked(fetchRoster).mock.calls.length).toBe(1);
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    commitCard(host, "claude-code");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
+      "wizard"
+    );
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+        ?.click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
+    );
+    await waitFor(() => vi.mocked(fetchRoster).mock.calls.length >= 2, "roster refresh");
+    status = "detected";
+    await act(async () => {
+      vi.setSystemTime(1_000_000 + DETECT_CAP_MS - 1);
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-mention"]') !== null,
+      "mention"
+    );
+    expect(host.textContent).toContain("김인턴");
+    expect(host.querySelector('[data-testid="first-agent-mention-action"]')).not.toBeNull();
+    expect(host.textContent).not.toContain("첫 멘션은 채널에서 이어갈 수 있습니다.");
+    expect(countNeedle(host.textContent ?? "", "설정 › 연결 › 에이전트 자격")).toBe(1);
+  });
+});
+
+describe("H-A 다시 확인은 요청과 상태를 남긴다", () => {
+  it("다시 확인을 누르면 get 이 하나 늘고 다시 확인 중이 선다", async () => {
+    vi.mocked(getHostedConnection).mockResolvedValue({
+      connection: wireConnection({ status: "pairing_pending" }),
+      cleanupArtifacts: [],
+    });
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector("[data-choice-id='codex']") !== null,
+      "cards"
+    );
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    commitCard(host, "codex");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-secret-done"]') !== null,
+      "wizard"
+    );
+    act(() => {
+      document
+        .querySelector<HTMLButtonElement>('[data-testid="hosted-secret-done"]')
+        ?.click();
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
+    );
+    await act(async () => {
+      vi.setSystemTime(1_000_000 + DETECT_CAP_MS);
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-cap-exceeded"]') !== null,
+      "cap"
+    );
+    expect(host.textContent).toContain(FIRST_AGENT_LEAD_CAP);
+    expect(host.textContent).toContain(FIRST_AGENT_CAP_COPY);
+    expect(FIRST_AGENT_LEAD_CAP).not.toBe(FIRST_AGENT_CAP_COPY);
+    const before = vi.mocked(getHostedConnection).mock.calls.length;
+    let settle: ((value: {
+      connection: Record<string, unknown>;
+      cleanupArtifacts: unknown[];
+    }) => void) | undefined;
+    vi.mocked(getHostedConnection).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          settle = resolve;
+        })
+    );
+    act(() => {
+      host.querySelector<HTMLButtonElement>('[data-testid="first-agent-recheck"]')
+        ?.click();
+    });
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="first-agent-recheck-status"]')
+          ?.textContent === FIRST_AGENT_RECHECKING,
+      "rechecking"
+    );
+    expect(host.textContent).toContain(FIRST_AGENT_RECHECKING);
+    await act(async () => {
+      settle?.({
+        connection: wireConnection({ status: "pairing_pending" }),
+        cleanupArtifacts: [],
+      });
+      await Promise.resolve();
+    });
+    await waitFor(
+      () =>
+        host.querySelector('[data-testid="first-agent-recheck-status"]')
+          ?.textContent === FIRST_AGENT_LEAD_CAP,
+      "recheck result"
+    );
+    expect(vi.mocked(getHostedConnection).mock.calls.length).toBe(before + 1);
+  });
+});
+
+describe("H-C 로딩 막대 호스트는 폭을 갖는다", () => {
+  it("막대 레이어가 아니라 감싼 쪽이 w-full 이다", async () => {
+    poseSlot.current = "loading";
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-loading"]') !== null,
+      "loading"
+    );
+    const skel = host.querySelector('[data-testid="skeleton"]');
+    expect(skel?.parentElement?.className).toMatch(/\bw-full\b/);
+    expect(skel?.parentElement?.className).toMatch(/\bmin-w-0\b/);
+    expect(host.querySelector('[data-skel="bars"]')?.className).not.toMatch(
+      /\bw-full\b/
+    );
+    expect(host.querySelectorAll('[data-testid="skeleton-row"]').length).toBe(3);
+  });
+});
+
+describe("H-E 감지 화면은 연결됨을 그리지 않는다", () => {
+  it("pairing_pending 감지 스텝 textContent 에 연결됨이 없다", async () => {
+    poseSlot.current = "detecting";
+    const host = mountStage();
+    await waitFor(
+      () => host.querySelector('[data-testid="first-agent-detecting"]') !== null,
+      "detecting"
+    );
+    expect(host.textContent).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
+    expect(host.textContent).not.toContain("\u{c5f0}\u{acb0}\u{b428}");
+  });
+});
+
+describe("M-D provider 연결도 자동 통과다", () => {
+  it("configured 이면 호스티드 감지 없이 완료한다", async () => {
+    vi.mocked(fetchProviderLink).mockResolvedValue({
+      ...unconfiguredLink,
+      configured: true,
+      source: "database",
+    });
+    const host = mountStage();
+    await waitFor(() => continued === 1, "provider auto-pass");
+    expect(readFirstAgentMarker(WS)).toBe("done");
+    expect(host.querySelector("[data-choice-id]")).toBeNull();
+  });
+});
+

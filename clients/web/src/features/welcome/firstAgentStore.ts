@@ -13,6 +13,7 @@ const MARKER_PREFIX = "momo.web.firstAgent.v1:";
 const PENDING_SLOT = "momo.web.firstAgentPending.v1";
 const RESUME_HASH_SLOT = "momo.web.firstAgentResumeHash.v1";
 const DEFER_DISMISS_SLOT = "momo.web.firstAgentDeferDismiss.v1";
+const FOCUS_TARGET_SLOT = "momo.web.firstAgentFocusTarget.v1";
 
 export type FirstAgentMarker = "skipped" | "done" | "deferred";
 
@@ -148,6 +149,46 @@ export function takeFirstAgentResumeHash(): string | null {
   }
 }
 
+export function markFirstAgentFocusTarget(): void {
+  try {
+    sessionStore()?.setItem(FOCUS_TARGET_SLOT, "1");
+  } catch {
+    // same as mark
+  }
+}
+
+export function takeFirstAgentFocusTarget(): boolean {
+  try {
+    const store = sessionStore();
+    const value = store?.getItem(FOCUS_TARGET_SLOT);
+    store?.removeItem(FOCUS_TARGET_SLOT);
+    return value === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** 핸드오프 뒤 초점은 채널 제목 또는 컴포저. `<body>` 로 떨어지지 않는다. */
+export function applyFirstAgentFocus(): void {
+  if (!takeFirstAgentFocusTarget()) return;
+  const input = document.getElementById("composer-input");
+  if (input instanceof HTMLElement) {
+    input.focus();
+    return;
+  }
+  const heading = document.querySelector<HTMLElement>(
+    '[data-testid="channel-header"] h1'
+  );
+  if (heading) {
+    heading.focus();
+    return;
+  }
+  const header = document.querySelector<HTMLElement>(
+    '[data-testid="channel-header"]'
+  );
+  header?.focus();
+}
+
 export function clearAllFirstAgentMarkers(): void {
   const store = localStore();
   if (!store) return;
@@ -166,6 +207,7 @@ export function clearAllFirstAgentMarkers(): void {
   clearFirstAgentPending();
   try {
     sessionStore()?.removeItem(DEFER_DISMISS_SLOT);
+    sessionStore()?.removeItem(FOCUS_TARGET_SLOT);
   } catch {
     // same as mark
   }

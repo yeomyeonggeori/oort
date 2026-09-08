@@ -9,7 +9,9 @@ import {
   markFirstAgentPending,
   readFirstAgentMarker,
   setFirstAgentResumeHash,
+  takeFirstAgentFocusTarget,
   takeFirstAgentResumeHash,
+  markFirstAgentFocusTarget,
   writeFirstAgentMarker,
 } from "./firstAgentStore";
 
@@ -93,6 +95,12 @@ describe("세션 pending 과 재개 해시", () => {
     setFirstAgentResumeHash("#/settings?section=ai");
     expect(takeFirstAgentResumeHash()).toBe("#/settings?section=ai");
     expect(takeFirstAgentResumeHash()).toBeNull();
+  });
+
+  it("핸드오프 초점은 한 번만 꺼낸다", () => {
+    markFirstAgentFocusTarget();
+    expect(takeFirstAgentFocusTarget()).toBe(true);
+    expect(takeFirstAgentFocusTarget()).toBe(false);
   });
 });
 

@@ -27,9 +27,11 @@ import { cn } from "@/design/lib/cn";
 // 오프라인 지시문 상자, design-review 2R High): 못 고르는 표시는 바탕이 지고,
 // 글자는 읽을 수 있어야 한다. 사유가 안 읽히면 사유가 아니다.
 //
-// 그룹 잠금은 native `fieldset disabled` 가 아니다. 그 속성은 라디오를 탭
-// 순서에서 지우고 초점을 `<body>` 로 떨어뜨린다 (SH-6a-w R4 M-1). 잠금은
-// `aria-disabled` + 가드이고, 사유는 `aria-describedby` 가 가리킨다.
+// 그룹 잠금의 기본은 native `fieldset disabled` 다. 위저드·동의·정리 목록이
+// 그 동작을 그대로 쓴다. 퍼널만 `lockMode="aria"` 로 옵트인한다: native
+// disabled 는 라디오를 탭 순서에서 지우고 초점을 `<body>` 로 떨어뜨리므로
+// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 반쪽(`opacity-50`,
+// `cursor-default`, hover 채움 없음) + 클릭/Enter 가드다.
 // =============================================================================
 
 export interface ChoiceListItem {
@@ -57,6 +59,7 @@ export function ChoiceList({
   onChange,
   onActivate,
   disabled,
+  lockMode = "native",
   testId,
 }: {
   name: string;
@@ -82,12 +85,18 @@ export function ChoiceList({
   onActivate?: (id: string) => void;
   /** 그룹 전체가 지금 조작 대상이 아니다(오프라인 등). */
   disabled?: boolean;
+  /**
+   * `native`(기본) = `<fieldset disabled>`. 다른 소비자는 이 기본값을 그대로 둔다.
+   * `aria` = native disabled 없이 `aria-disabled` + 보이는 잠금. 퍼널만 쓴다.
+   */
+  lockMode?: "native" | "aria";
   testId?: string;
 }) {
   const hintId = hint ? `${name}-hint` : undefined;
   const groupDescribedBy = [describedBy, hintId].filter(Boolean).join(" ") || undefined;
   const activateOnly = onActivate !== undefined;
   const selectable = items.filter((item) => !item.disabled && !item.locked);
+  const ariaLock = lockMode === "aria" && Boolean(disabled);
 
   function toggle(item: ChoiceListItem) {
     if (disabled) return;
@@ -143,7 +152,8 @@ export function ChoiceList({
   return (
     <fieldset
       className="flex min-w-0 flex-col gap-1"
-      aria-disabled={disabled || undefined}
+      disabled={lockMode === "native" ? disabled : undefined}
+      aria-disabled={ariaLock || undefined}
       aria-describedby={groupDescribedBy}
       data-testid={testId}
     >
@@ -160,11 +170,13 @@ export function ChoiceList({
               htmlFor={`${name}-${item.id}`}
               className={cn(
                 "flex min-w-0 items-start gap-2 border-b border-line p-2 last:border-b-0",
-                item.disabled
-                  ? "cursor-not-allowed bg-surface-hover"
-                  : checked
-                    ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
-                    : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
+                ariaLock
+                  ? "cursor-default opacity-50"
+                  : item.disabled
+                    ? "cursor-not-allowed bg-surface-hover"
+                    : checked
+                      ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
+                      : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
               )}
               data-testid={`${name}-row`}
               data-choice-id={item.id}
@@ -178,7 +190,7 @@ export function ChoiceList({
                 value={item.id}
                 checked={checked}
                 disabled={inert}
-                aria-disabled={disabled || undefined}
+                aria-disabled={ariaLock || undefined}
                 aria-describedby={described}
                 onChange={() => toggle(item)}
                 onKeyDown={(event) => handleKeyDown(event, item)}

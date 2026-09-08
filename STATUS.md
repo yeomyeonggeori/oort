@@ -3,6 +3,7 @@
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
+- R3 (R2 FAIL B2·H5·M7·N4). 발급·감지 뒤 roster invalidate + `agentMemberId` 만으로 멘션. `ChoiceList` 기본은 native `fieldset disabled`, 퍼널만 `lockMode="aria"` + 보이는 반쪽. 「다시 확인」은 즉시 poll + live region. cap 리드≠본문. 로딩 막대 호스트 폭. 「연결됨」은 렌더 가드. generic 문장은 그룹 hint 한 번. 멘션 설정 경로 한 번. provider `configured` 도 자동 통과. 실제 위저드 create 응답이 dd 한 칸.
 - R2 (R1 FAIL B2·H5·M7·N4). 화살표는 선택만, 커밋은 Enter/Space·「계속」. `detected`/`active` 멘션 스텝은 이름·채널(또는 승인 대기)+채널 핸드오프. 단계별 리드. 오프라인은 `aria-disabled`. OpenAI는 `deferred`. 자동 통과는 `detected|active`. 1회용 가드는 발급 비밀. 캡처 8포즈.
 - runtime-unverified: 실서버 hosted create/detect 왕복은 이 티켓의 mock·캡처 범위. planner design-review는 PR 이후 fresh context.
 

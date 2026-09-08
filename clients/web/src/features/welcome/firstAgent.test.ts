@@ -10,6 +10,8 @@ import {
   FIRST_AGENT_CARDS,
   FIRST_AGENT_CONNECTED_CLAIM,
   FIRST_AGENT_DETECTING_WAIT,
+  FIRST_AGENT_GENERIC_HINT,
+  FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_LEAD_MENTION,
@@ -42,10 +44,13 @@ describe("첫 에이전트 카드 4종", () => {
     ]);
     expect(firstAgentCardsUseHostedPresets()).toBe(true);
     const grok = HOSTED_PRESETS.find((preset) => preset.id === "grok");
+    const generic = HOSTED_PRESETS.find((preset) => preset.id === "generic");
     expect(grok?.verified).toBe(false);
     expect(grok?.unverifiedNote).toBeTruthy();
-    expect(FIRST_AGENT_CARDS[2]?.detail).toContain(grok?.unverifiedNote ?? "");
-    expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(FIRST_AGENT_CARDS[1]?.detail);
+    expect(FIRST_AGENT_CARDS[2]?.detail).toBe(grok?.unverifiedNote);
+    expect(FIRST_AGENT_CARDS[0]?.detail).not.toContain(generic?.detail ?? "___");
+    expect(FIRST_AGENT_CARDS[1]?.detail).not.toContain(generic?.detail ?? "___");
+    expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
   });
 });
 
@@ -66,6 +71,8 @@ describe("자동 통과", () => {
     expect(shouldAutoPass([{ status: "pairing_pending" }])).toBe(false);
     expect(shouldAutoPass([{ status: "detected" }])).toBe(true);
     expect(shouldAutoPass([{ status: "active" }])).toBe(true);
+    expect(shouldAutoPass([], true)).toBe(true);
+    expect(shouldAutoPass([{ status: "pairing_pending" }], true)).toBe(true);
   });
 
   it("pairing_pending 은 감지 규칙과 같이 자동 통과가 아니다", () => {
@@ -88,8 +95,9 @@ describe("감지는 서버 상태만 본다", () => {
     expect(copyClaimsConnected(FIRST_AGENT_DETECTING_WAIT)).toBe(false);
     expect(copyClaimsConnected(firstAgentDetectingDetail("grok"))).toBe(false);
     expect(copyClaimsConnected(FIRST_AGENT_CAP_COPY)).toBe(false);
-    expect(FIRST_AGENT_CAP_COPY).toBe("아직 감지되지 않았습니다.");
+    expect(FIRST_AGENT_CAP_COPY).not.toBe(FIRST_AGENT_LEAD_CAP);
     expect(FIRST_AGENT_CAP_COPY).not.toMatch(/[—–]/);
+    expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
   });
 
   it("감지 안내는 그 도구의 할 일이고 구현 계약을 말하지 않는다", () => {
@@ -138,9 +146,8 @@ describe("사보타주 ② 서버 전에 연결됨을 말하면 붉다", () => {
   it("감지 카피가 연결됨을 포함하면 이 단정이 실패한다", () => {
     expect(FIRST_AGENT_CONNECTED_CLAIM).toBe("연결됨");
     expect(copyClaimsConnected("연결됨")).toBe(true);
+    expect(copyClaimsConnected("\u{c5f0}\u{acb0}\u{b428}")).toBe(true);
     expect(copyClaimsConnected(FIRST_AGENT_LEAD_DETECTING)).toBe(false);
-    const stage = src("./FirstAgentStage.tsx");
-    expect(stage).not.toContain(FIRST_AGENT_CONNECTED_CLAIM);
   });
 });
 

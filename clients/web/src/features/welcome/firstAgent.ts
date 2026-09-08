@@ -58,7 +58,9 @@ export const FIRST_AGENT_LIST_ERROR = "연결 목록을 불러오지 못했습�
 export const FIRST_AGENT_OFFLINE_REASON =
   "연결이 끊겼습니다. 목록은 이어서 볼 수 있고, 발급은 다시 연결된 뒤에 할 수 있습니다.";
 
-export const FIRST_AGENT_CAP_COPY = "아직 감지되지 않았습니다.";
+export const FIRST_AGENT_CAP_COPY =
+  "5분이 지났습니다. 에이전트가 연결 값으로 접속했는지 다시 확인하세요.";
+export const FIRST_AGENT_RECHECKING = "다시 확인 중…";
 
 export const FIRST_AGENT_CONNECTED_CLAIM = "연결됨";
 
@@ -90,19 +92,21 @@ function genericPreset() {
 }
 
 function grokCardDetail(): string {
-  const grok = grokPreset();
-  return [grok.detail, grok.unverifiedNote].filter(Boolean).join(" ");
+  return grokPreset().unverifiedNote ?? grokPreset().steps[0] ?? "";
 }
 
-function namedGenericDetail(label: string): string {
-  return `${label}. 원격 MCP 서버로 붙습니다. ${genericPreset().detail}`;
+function genericFirstLine(): string {
+  return genericPreset().steps[0] ?? "";
 }
+
+/** 그룹 아래 한 번만 서는 공통 문장. 카드 detail 에 반복하지 않는다. */
+export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "claude-code",
     label: "Claude Code",
-    detail: namedGenericDetail("Claude Code"),
+    detail: genericFirstLine(),
     presetId: "generic",
     displayName: "Claude Code",
     handle: "claude-code",
@@ -110,7 +114,7 @@ export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
     id: "codex",
     label: "Codex",
-    detail: namedGenericDetail("Codex"),
+    detail: genericFirstLine(),
     presetId: "generic",
     displayName: "Codex",
     handle: "codex",
@@ -179,11 +183,13 @@ export function firstAgentCardsUseHostedPresets(): boolean {
   const codex = firstAgentCard("codex");
   return (
     grokCard.label === grok.label &&
-    grokCard.detail.includes(grok.detail) &&
-    Boolean(grok.unverifiedNote && grokCard.detail.includes(grok.unverifiedNote)) &&
-    claude.detail.includes(generic.detail) &&
-    codex.detail.includes(generic.detail) &&
-    claude.detail !== codex.detail
+    Boolean(grok.unverifiedNote && grokCard.detail === grok.unverifiedNote) &&
+    claude.detail === (generic.steps[0] ?? "") &&
+    codex.detail === (generic.steps[0] ?? "") &&
+    !claude.detail.includes(generic.detail) &&
+    !codex.detail.includes(generic.detail) &&
+    !grokCard.detail.includes(generic.detail) &&
+    FIRST_AGENT_GENERIC_HINT === generic.detail
   );
 }
 
@@ -222,8 +228,10 @@ export function countsTowardAutoPass(status: HostedConnectionStatus): boolean {
 }
 
 export function shouldAutoPass(
-  connections: readonly { status: HostedConnectionStatus }[]
+  connections: readonly { status: HostedConnectionStatus }[],
+  providerConfigured = false
 ): boolean {
+  if (providerConfigured) return true;
   return connections.some((row) => countsTowardAutoPass(row.status));
 }
 
@@ -288,11 +296,16 @@ export function firstAgentCaptureSecret(): string {
 }
 
 export function firstAgentCaptureAgent(): {
+  agentMemberId: string;
   displayName: string;
   handle: string;
 } {
   if (import.meta.env.MODE !== "design") {
-    return { displayName: "", handle: "" };
+    return { agentMemberId: "", displayName: "", handle: "" };
   }
-  return { displayName: "김인턴", handle: "intern" };
+  return {
+    agentMemberId: "019f9a01-0000-7000-8000-000000000404",
+    displayName: "김인턴",
+    handle: "kim-intern",
+  };
 }
