@@ -1318,6 +1318,17 @@ pub fn build_app(state: AppState) -> Router {
                 rate_limit::per_ip_device_link,
             )),
         )
+        // #1265 / ADR-0115 — public ingress. Authenticated by HMAC headers or
+        // the URL token, never by a bearer. Mounted outside require_principal
+        // for the same reason Swift's `addPublic` did.
+        .route(
+            "/v1/webhooks/{ws}/{installation}",
+            post(routes::webhook_ingress::receive_native),
+        )
+        .route(
+            "/hooks/{token}",
+            post(routes::webhook_ingress::receive_slack),
+        )
         .merge(protected);
 
     // The stand-in for Google's resumable session URL. Public for the same
