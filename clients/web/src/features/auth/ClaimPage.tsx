@@ -12,7 +12,7 @@ import {
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
-import { markFreshSignup } from "@/features/welcome/freshSignup";
+import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
 import { readClaimToken } from "./claimPath";
 
 // Reading this as: onboarding claim-password form for self-host operators on
@@ -76,10 +76,10 @@ export function ClaimPage({
     try {
       const session = await claimOwnerPassword(token, password);
       window.history.replaceState(null, "", "/");
-      markFreshSignup({
-        workspaceId: session.member.workspaceId,
-        memberId: session.member.id,
-      });
+      // invite-join(ConnectPage)과 같은 넷 — 폰 연결 · 첫 에이전트 · fresh-signup ·
+      // 킥오프 홀드. markFreshSignup 하나만 찍던 동안 first-run 게이트는 곧장
+      // "app"이었다(#2301).
+      recordFreshSignupFirstRun(session);
       onLoggedIn(session);
     } catch (err) {
       setFailure(claimFailureCopy(err));
