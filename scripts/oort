@@ -25,8 +25,9 @@ Commands:
 
   upgrade [--to <image ref pinned by its list digest, read from releases/latest.json>|--manifest URL|--local-build]
           [--yes] [--no-backup] [--env FILE]
-      Backup, re-check volumes/env, pull/up, wait IDEMPOTENCY_OK, doctor PASS.
-      Prints a rollback command on failure. Never auto-rolls back.
+      Backup, re-check volumes/env, then pull (digest) or build (local-build),
+      up, wait IDEMPOTENCY_OK, doctor PASS. Prints a rollback command that is
+      not the failed command. Never auto-rolls back.
 
   backup [--out DIR] [--env FILE]
       pg_dump via scripts/self_host_pg_dump.sh. Name includes version/time/digest.
