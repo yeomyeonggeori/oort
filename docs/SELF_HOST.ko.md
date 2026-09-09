@@ -200,6 +200,11 @@ scripts/self_host_env.sh --compose up -d --pull missing --wait
 롤 생성 → 마이그레이션 전량 적용(+2패스 멱등 검사) → 첫 로그인 계정 생성 →
 api·relay·agent-worker·웹 엣지 기동.
 
+로컬 빌드는 이 checkout의 커밋 SHA(git이 없으면 `unknown`)를 SPA
+`<meta name="momo-build">` 로 `index.html`에 박는다.
+`curl -s http://localhost:<port>/ | grep momo-build` 로 확인한다. `/healthz` 에는
+스탬프가 없다.
+
 이 경로는 생성 env에 `MOMO_MIGRATE_ENV=development`와 evidence gate 비활성 상태를
 **명시적으로** 기록하고, migrate가 같은 사실을 warning으로 남긴다. API의
 `MOMO_ENV=staging` 보안 자세는 그대로다. 운영에서 이 로컬 예외를 복사하지 말 것:
@@ -442,7 +447,9 @@ centrifugo (전송 전용) <── publish ── relay ┘
 
 브라우저가 아는 주소가 **포트 하나뿐**이라는 점이 이 경로의 설계다 — SPA도 REST도
 실시간도 같은 오리진에서 나오므로 CORS가 성립할 여지가 없고, 실시간 주소는
-로그인 응답이 돌려주는 값을 클라이언트가 그대로 쓴다(ADR-0110).
+로그인 응답이 돌려주는 값을 클라이언트가 그대로 쓴다(ADR-0110). SPA는 이미지의
+커밋(또는 `unknown`)을 `<meta name="momo-build">` 에 적는다 — §3과 같은
+`grep momo-build`.
 
 ## 두 체크아웃을 같이 쓸 때
 

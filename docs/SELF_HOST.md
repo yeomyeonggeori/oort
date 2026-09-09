@@ -225,6 +225,11 @@ least-privilege runtime roles created → all migrations applied (+ a 2-pass
 idempotence check) → first login account created → api·relay·agent-worker·
 web edge up.
 
+A local-build stamps this checkout's commit SHA (or `unknown` if git is
+unavailable) into the SPA as `<meta name="momo-build">` in `index.html`.
+Confirm with `curl -s http://localhost:<port>/ | grep momo-build`. `/healthz`
+does not carry the stamp.
+
 This path **explicitly** records `MOMO_MIGRATE_ENV=development` and
 evidence-gate-off in the generated env, and migrate logs the same fact as a
 warning. The API's `MOMO_ENV=staging` security posture is unchanged. Do not
@@ -490,7 +495,8 @@ transport offset. The full contract is the
 That the browser knows **one port only** is this path's design — SPA, REST,
 and realtime all come from the same origin, so CORS has no room to arise,
 and the realtime URL is the value the login response returns, which the
-client uses as-is (ADR-0110).
+client uses as-is (ADR-0110). The SPA names the image's commit (or `unknown`)
+in `<meta name="momo-build">` — same `grep momo-build` as §3.
 
 ## Using two checkouts at once
 

@@ -17,6 +17,10 @@
 x-rust-build: &rust-build
   context: ../..
   dockerfile: server-rust/Dockerfile
+  # Build-arg only (#2258). Do not add this key to service `environment:` —
+  # the image already stamps it via Dockerfile ENV / OCI revision.
+  args:
+    MOMO_BUILD_SHA: ${MOMO_BUILD_SHA:-unknown}
 
 # Every service declares the same build so `docker compose build` (no service
 # argument) works and all of them resolve to the identical local tag; after the

@@ -74,6 +74,8 @@
 #   MOMO_RUST_API_PORT          기본 8080 (루프백 직접 접속용)
 #   CENT_HOST_PORT              기본 8000 (루프백 직접 접속용)
 #   MOMO_RUST_IMAGE             --local-build 태그(기본 oort:local)
+#   MOMO_BUILD_SHA              신규 env에 git HEAD(40 hex) 또는 unknown.
+#                               compose 빌드 인자로만 쓰인다 (#2258).
 #   MOMO_INITIAL_OWNER_EMAIL    기본 owner@oort.local (소문자여야 한다)
 #   MOMO_INITIAL_OWNER_PASSWORD 기본 생성
 #
@@ -167,6 +169,47 @@ oort_generator_env_keys() {
 # Railway output must equal this set (generator heredoc + public-edge keys).
 oort_canonical_env_keys() {
   { oort_generator_env_keys; oort_public_edge_env_keys; } | LC_ALL=C sort -u
+}
+
+# SPA <meta name="momo-build"> / OCI revision stamp (#2258). Written on
+# *create* only — not in the heredoc, so the Railway 41-key set and doctor
+# required-keys stay unchanged. Existing env without the line is `unknown`
+# at compose interpolation (`${MOMO_BUILD_SHA:-unknown}`); do not backfill.
+momo_build_sha() {
+  local sha
+  if ! command -v git >/dev/null 2>&1; then
+    printf 'unknown'
+    return 0
+  fi
+  sha="$(git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null || true)"
+  if printf '%s' "$sha" | grep -Eq '^[0-9a-f]{40}$'; then
+    printf '%s' "$sha"
+  else
+    printf 'unknown'
+  fi
+}
+
+append_momo_build_sha() {
+  local sha
+  sha="$(momo_build_sha)"
+  validate_env_scalar MOMO_BUILD_SHA "$sha"
+  {
+    printf '\n# --- 빌드 스탬프 (#2258) ------------------------------------------------\n'
+    printf '# SPA <meta name="momo-build"> 와 OCI revision. compose 빌드 인자로만 전달한다.\n'
+    printf '# 런타임 컨테이너 env 로 새지 않는다 — 이미지 Dockerfile ENV 가 이미 싣는다.\n'
+    printf 'MOMO_BUILD_SHA=%s\n' "$sha"
+  } >>"$ENV_FILE"
+}
+
+# Missing is honest `unknown` at compose time. Present → scalar check only.
+# Never rewrite or append on an existing file (secrets stay put).
+check_existing_momo_build_sha() {
+  local count
+  count="$(env_key_count MOMO_BUILD_SHA)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_BUILD_SHA 항목은 최대 한 번만 있어야 한다."
+  [ "$count" -eq 1 ] || return 0
+  validate_env_scalar MOMO_BUILD_SHA "$(env_value_once MOMO_BUILD_SHA)"
 }
 
 usage() {
@@ -1339,6 +1382,7 @@ EOF
 # ---------------------------------------------------------------------------
 if [ -e "$ENV_FILE" ]; then
   reject_duplicate_env_keys
+  check_existing_momo_build_sha
   existing_image="$(env_value_once MOMO_RUST_IMAGE)"
   existing_web_port="$(env_value_once MOMO_WEB_PORT)"
   existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
@@ -1597,6 +1641,7 @@ MOMO_LIVEKIT_NODE_IP=127.0.0.1
 EOF
 chmod 600 "$ENV_FILE"
 
+append_momo_build_sha
 ensure_public_edge_env
 ensure_local_provider_optin
 reject_duplicate_env_keys
