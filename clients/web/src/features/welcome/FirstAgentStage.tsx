@@ -18,6 +18,7 @@ import { OnboardingSlideTransition } from "@/features/auth/OnboardingSlideTransi
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { IS_TAURI } from "@/lib/env";
 import { ChoiceList, type ChoiceListItem } from "@/features/hostedAgents/ChoiceList";
+import { TruncatingName } from "@/features/hostedAgents/TruncatingName";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
 import { OneTimeSecretCard } from "@/features/hostedAgents/OneTimeSecretCard";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
@@ -49,7 +50,6 @@ import {
   FIRST_AGENT_HEADING_ID,
   FIRST_AGENT_LIST_ERROR,
   FIRST_AGENT_MENTION_ACTION,
-  FIRST_AGENT_MENTION_TITLE_CHARS,
   FIRST_AGENT_OFFLINE_REASON,
   FIRST_AGENT_OFFLINE_REASON_ID,
   FIRST_AGENT_RECHECK_LABEL,
@@ -99,18 +99,6 @@ function stepFromPose(pose: FirstAgentCapturePose | null): FirstAgentStep {
 
 function channelHref(channelId: string): string {
   return channelId === "" ? "/" : `/c/${channelId}`;
-}
-
-function FirstAgentMentionName({ name }: { name: string }) {
-  return (
-    <p
-      className="min-w-0 truncate text-body font-semibold text-agent"
-      data-testid="first-agent-mention-name"
-      title={name.length > FIRST_AGENT_MENTION_TITLE_CHARS ? name : undefined}
-    >
-      {name}
-    </p>
-  );
 }
 
 function connectionAllowsChannel(
@@ -479,17 +467,20 @@ export function FirstAgentStage({
                   data-testid="first-agent-mention-column"
                 >
                   <div className="flex min-w-0 items-baseline gap-2">
-                    <FirstAgentMentionName name={mentionAgent.displayName} />
+                    <TruncatingName
+                      name={mentionAgent.displayName}
+                      className="min-w-0 truncate text-body font-semibold text-agent"
+                      testId="first-agent-mention-name"
+                    />
                     <span className="shrink-0 rounded-sm bg-agent-soft px-1 text-timestamp text-agent">
                       {FIRST_MENTION_AGENT_BADGE}
                     </span>
                   </div>
-                  <span
+                  <TruncatingName
+                    name={`@${mentionAgent.handle}`}
                     className="min-w-0 truncate text-meta text-ink-muted"
-                    data-testid="first-agent-mention-handle"
-                  >
-                    @{mentionAgent.handle}
-                  </span>
+                    testId="first-agent-mention-handle"
+                  />
                 </div>
               </div>
               {mentionApproved && channelName !== "" ? (

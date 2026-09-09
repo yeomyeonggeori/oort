@@ -75,9 +75,6 @@ export const FIRST_AGENT_OPENAI_DETAIL =
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급합니다.";
 
-/** 보상 행 이름이 이 길이를 넘으면 `title` 에 전체 이름을 싣는다. */
-export const FIRST_AGENT_MENTION_TITLE_CHARS = 16;
-
 export const FIRST_AGENT_CHOICE_LEGEND = "무엇을 붙이나요";
 
 export const FIRST_AGENT_DETAIL_FORBIDDEN = [
