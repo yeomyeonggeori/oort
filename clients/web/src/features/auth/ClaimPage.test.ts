@@ -34,3 +34,24 @@ describe("claim page failure landing", () => {
     expect(source.match(/data-landing="claim-failure"/g)?.length).toBe(3);
   });
 });
+
+describe("claim page first-run markers (#2301)", () => {
+  it("records first-run through the one helper shared with invite-join", () => {
+    const connect = readFileSync(
+      fileURLToPath(new URL("./ConnectPage.tsx", import.meta.url)),
+      "utf8"
+    );
+    for (const [name, src] of [
+      ["ClaimPage", source],
+      ["ConnectPage", connect],
+    ] as const) {
+      expect(src, name).toContain('from "@/features/welcome/freshSignupFirstRun"');
+      expect(src, name).toContain("recordFreshSignupFirstRun(session)");
+      // 마커를 낱개로 찍는 자리가 다시 생기면 두 경로가 갈라진다.
+      expect(src, name).not.toMatch(/\bmarkFreshSignup\(/);
+      expect(src, name).not.toMatch(/\bholdKickoffForFreshSignup\(/);
+      expect(src, name).not.toMatch(/\bmarkFirstAgentPending\(/);
+      expect(src, name).not.toMatch(/\bmarkPhoneLinkFirstRunPending\(/);
+    }
+  });
+});
