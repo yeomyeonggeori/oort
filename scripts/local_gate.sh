@@ -172,6 +172,8 @@ auto_classify_script() {
       AUTO_NEED_BACKUP=1; AUTO_REASONS+=("$1 -> backup (encrypted pgBackRest/PITR proof)") ;;
     scripts/publish_next_build.sh|scripts/tests/test_next_channel_hygiene.sh)
       AUTO_REASONS+=("$1 -> docs") ;;
+    scripts/tests/test_railway_template.sh)
+      AUTO_REASONS+=("$1 -> docs (#2297 platform template contract runs in the docs profile)") ;;
     scripts/verify_backup_restore_rehearsal.sh)
       AUTO_NEED_HOSTRT=1; AUTO_REASONS+=("$1 -> host-runtime") ;;
     scripts/openapi_shape_check.py)
@@ -940,8 +942,9 @@ case "$PROFILE" in
     add_cmd_once "oort doctor contract (#2124)" 'scripts/tests/test_oort_doctor.sh'
     add_cmd_once "oort doctor outbox verdict (#2264)" 'scripts/tests/test_oort_doctor_outbox.sh'
     add_cmd_once "public edge contract (#2124)" 'scripts/tests/test_public_edge.sh'
+    add_cmd_once "platform template contract — Railway (#2297 · ADR-0184 D5)" 'scripts/tests/test_railway_template.sh'
     add_cmd_once "release manifest contract" 'scripts/tests/test_release_manifest.sh'
-    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124) and the release-manifest contract."
+    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124), the Railway platform template contract (#2297: railway.json services/digest pin, --railway key-set equality, Caddyfile.railway caddy adapt + 403 order, public-edge contract on the Caddyfile.railway fixture root) and the release-manifest contract."
     add_note_once not_covered "Runtime Docker profiles are not run for docs profile."
     ;;
   diagnostics)
