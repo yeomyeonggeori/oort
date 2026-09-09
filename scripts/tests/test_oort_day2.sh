@@ -162,7 +162,7 @@ jq -e '
     .checks | all(
       (.id | type == "string" and length > 0)
       and (.severity == "blocker" or .severity == "major" or .severity == "minor")
-      and (.status == "pass" or .status == "fail" or .status == "skip")
+      and (.status == "pass" or .status == "fail" or .status == "skip" or .status == "info")
       and (.detail | type == "string")
       and (.fix | type == "string")
     )
