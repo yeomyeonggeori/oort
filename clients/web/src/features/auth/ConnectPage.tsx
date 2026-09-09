@@ -43,9 +43,10 @@ import {
 import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
-import { markPhoneLinkFirstRunPending } from "./phoneLinkFirstRunStore";
-import { markFirstAgentPending } from "@/features/welcome/firstAgentStore";
-import { holdKickoffForFreshSignup } from "@/features/welcome/firstRunGate";
+import {
+  recordFirstRunPending,
+  recordFreshSignupFirstRun,
+} from "@/features/welcome/freshSignupFirstRun";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
 import { DiscoveredServerList } from "./DiscoveredServerList";
@@ -76,7 +77,6 @@ import {
   displayNameFieldError,
   displayNameSaveMessage,
 } from "@momo/core/features/settings/model";
-import { markFreshSignup } from "@/features/welcome/freshSignup";
 import {
   holdSessionRestore,
   releaseSessionRestore,
@@ -330,16 +330,11 @@ export function ConnectPage({
       if (mode === "join") {
         holdSessionRestore();
         const session = await joinWithInvite(inviteCode, email, password);
-        markPhoneLinkFirstRunPending();
-        markFirstAgentPending(session.member.workspaceId);
         if (session.createdMember) {
           // Written at join success, before S3. sessionStorage survives a
           // same-tab reload, so a reload at S3 keeps the UX-R2b kickoff marker.
-          markFreshSignup({
-            workspaceId: session.member.workspaceId,
-            memberId: session.member.id,
-          });
-          holdKickoffForFreshSignup();
+          // The four markers are one helper shared with ClaimPage (#2301).
+          recordFreshSignupFirstRun(session);
           setPendingJoin(session);
           setProfileName(session.member.displayName);
           setProfileFailed(false);
@@ -348,6 +343,8 @@ export function ConnectPage({
           focusLater("profile-name");
           return;
         }
+        // An existing member re-joining still gets the two pending stages.
+        recordFirstRunPending(session.member.workspaceId);
         onLoggedIn(session);
         releaseSessionRestore();
         return;
