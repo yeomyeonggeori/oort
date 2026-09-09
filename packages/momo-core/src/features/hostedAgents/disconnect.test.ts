@@ -151,6 +151,21 @@ describe("RED PROOF ② 해제 시작 응답은 cleanup_pending 이어야 한다
     expect(started.startedNow).toBe(true);
     expect(started.remainingRequired).toBe(6);
     expect(started.artifacts).toHaveLength(6);
+    expect(started.connection.status).toBe("cleanup_pending");
+    expect(started.connection.status).not.toBe("disconnected");
+  });
+
+  it("돌려주는 status 를 disconnected 로 다시 쓰면 실패한다", () => {
+    const started = parseDisconnectStart(body, { connectionId: CONNECTION_ID });
+    expect(started.connection).toEqual(
+      expect.objectContaining({
+        id: CONNECTION_ID,
+        status: "cleanup_pending",
+      })
+    );
+    expect(JSON.stringify(started.connection)).not.toMatch(
+      /"status":"disconnected"/
+    );
   });
 
   it("재시도는 같은 형상에 startedNow=false 다", () => {

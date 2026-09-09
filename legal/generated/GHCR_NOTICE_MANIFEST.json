@@ -1,20 +1,20 @@
 {
   "counts": {
     "cargo": 294,
-    "npm": 455,
-    "unique_blobs": 374
+    "npm": 467,
+    "unique_blobs": 380
   },
   "format": "ghcr-notice-bundle/v1",
   "generator": "scripts/generate_ghcr_notice_bundle.py",
   "image_files": {
-    "GHCR_THIRD_PARTY_NOTICES.txt": "938dca4db5dc3d788f5a9a35fb30eac016413269750d5dc31d720803078805eb",
+    "GHCR_THIRD_PARTY_NOTICES.txt": "3efbde5454c01bd4c11fa34aaa005c1dafc703662c4dba2b07f275594fc1917e",
     "LICENSE": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "NOTICE": "bb85609df736f68f239429c5d7fd929183d80d109fdc1ba54a21a52489c53882",
     "THIRD_PARTY_NOTICES.md": "38b3ef09142e28aa47260819f21ed5cdbc22eee85568efdc9b832e727c14869b"
   },
   "inputs": {
     "clarify_sha256": "82ccac6d0af1fb9029a27b19e0ac8b3708e5be2eb6909ce22e6a4128ab6a19d4",
-    "clients_web_package_lock_sha256": "77361e075c19d5f5a053afaef3cc34b980712137153c4e712b55000458924584",
+    "clients_web_package_lock_sha256": "61de099231ddb9d0634864b3b03bda1e167bdc78296cb64d31e3586e2a5af858",
     "server_rust_cargo_lock_sha256": "9e932bad8308c014881315ef821ce0d0b6a39a06847abde370a55ec5e7b175dc",
     "spdx_texts_sha256": {
       "0BSD.txt": "3662a9adfe6feddb077f96dfad3cb30408540a2a3eae5a656b7ff4375e622be0",
@@ -29,8 +29,8 @@
     }
   },
   "outputs": {
-    "bundle_sha256": "938dca4db5dc3d788f5a9a35fb30eac016413269750d5dc31d720803078805eb",
-    "sha256_manifest_sha256": "d3eb14fda770b007bb316ed43fd4db0ad29d0beb72108b66764179015a16fb2f"
+    "bundle_sha256": "3efbde5454c01bd4c11fa34aaa005c1dafc703662c4dba2b07f275594fc1917e",
+    "sha256_manifest_sha256": "c7408fcb893941262e57c2fa2e6d3d4498d0cce0b88c806647f3634e019ed853"
   },
   "packages": [
     {
@@ -6279,6 +6279,22 @@
           "source": "package-tree"
         }
       ],
+      "name": "@babel/runtime",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "7.29.7"
+    },
+    {
+      "copyright": "Copyright (c) 2014-present Sebastian McKenzie and other contributors",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "117da2af0d4ce0fe1c8e19b5cff9dcd806adf973d328d27b11d4448c4ff24f76",
+          "source": "package-tree"
+        }
+      ],
       "name": "@babel/template",
       "repository": "",
       "source": "package-tree",
@@ -9160,6 +9176,38 @@
       "version": "2.11.1"
     },
     {
+      "copyright": "Copyright (c) 2017 Kent C. Dodds",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "bf8fd38056b7606deccfcadb4d8ca1c210082d8ef5513426d2650daedc30bed3",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@testing-library/dom",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "10.4.1"
+    },
+    {
+      "copyright": "Copyright (c) 2017-Present Kent C. Dodds",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "9680978280d509520d2a7b51e93ffbf7d9ec2b9de4411a6989daba5b659048e0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@testing-library/react",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "16.3.3"
+    },
+    {
       "copyright": "copyright not stated in license file",
       "ecosystem": "npm",
       "files": [
@@ -9174,6 +9222,22 @@
       "source": "optional-not-installed",
       "spdx": "MIT",
       "version": "0.10.2"
+    },
+    {
+      "copyright": "Copyright (c) Microsoft Corporation.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+          "source": "package-tree"
+        }
+      ],
+      "name": "@types/aria-query",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.0.4"
     },
     {
       "copyright": "Copyright (c) Microsoft Corporation.",
@@ -9745,11 +9809,43 @@
           "source": "package-tree"
         }
       ],
+      "name": "ansi-regex",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.0.1"
+    },
+    {
+      "copyright": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
+          "source": "package-tree"
+        }
+      ],
       "name": "ansi-styles",
       "repository": "",
       "source": "package-tree",
       "spdx": "MIT",
       "version": "4.3.0"
+    },
+    {
+      "copyright": "Copyright (c) Sindre Sorhus <sindresorhus@gmail.com> (sindresorhus.com)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "license",
+          "sha256": "48da2f39e100d4085767e94966b43f4fa95ff6a0698fba57ed460914e35f94a0",
+          "source": "package-tree"
+        }
+      ],
+      "name": "ansi-styles",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "5.2.0"
     },
     {
       "copyright": "Copyright (c) 1991 - 1995, Stichting Mathematisch Centrum Amsterdam,",
@@ -9782,6 +9878,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "1.2.6"
+    },
+    {
+      "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright 2020 A11yance",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "c8df456c7ccba74b959087dff494d4ac2a12dfb0400c08b46b2494a08a000567",
+          "source": "package-tree"
+        }
+      ],
+      "name": "aria-query",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "Apache-2.0",
+      "version": "5.3.0"
     },
     {
       "copyright": "Copyright (c) 2013 Jake Luer jake@qualiancy.com (http://qualiancy.com)",
@@ -10248,6 +10360,22 @@
       "version": "0.1.4"
     },
     {
+      "copyright": "Copyright (c) Luke Edwards <luke.edwards05@gmail.com> (lukeed.com)",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "license",
+          "sha256": "306fa513e39b23a6e8747520de761809d206b99800ef41907b530226574c59ae",
+          "source": "package-tree"
+        }
+      ],
+      "name": "dequal",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "2.0.3"
+    },
+    {
       "copyright": "copyright notice that is included in or attached to the work; copyright license to reproduce, prepare Derivative Works of,; (c) You must retain, in the Source form of any Derivative Works; Copyright {yyyy} {name of copyright owner}",
       "ecosystem": "npm",
       "files": [
@@ -10278,6 +10406,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "1.1.0"
+    },
+    {
+      "copyright": "Copyright (c) 2020 Sebastian Silbermann",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE.md",
+          "sha256": "0ffe67fe630169de46df2d29dc18f5857b4c98f0f95b0cd9e3c21fef51f9a9b8",
+          "source": "package-tree"
+        }
+      ],
+      "name": "dom-accessibility-api",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "0.5.16"
     },
     {
       "copyright": "Copyright 2018 Kilian Valkhof",
@@ -11704,6 +11848,22 @@
       "version": "0.454.0"
     },
     {
+      "copyright": "Copyright (c) 2013 pieroxy",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "433fc9dfe659dbfb1e91eed8351f13651e97bfa3ac6d03394c3d63f61d4bbc80",
+          "source": "package-tree"
+        }
+      ],
+      "name": "lz-string",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "1.5.0"
+    },
+    {
       "copyright": "Copyright 2018 Rich Harris",
       "ecosystem": "npm",
       "files": [
@@ -12130,6 +12290,22 @@
       "version": "1.2.1"
     },
     {
+      "copyright": "Copyright (c) Facebook, Inc. and its affiliates.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85",
+          "source": "package-tree"
+        }
+      ],
+      "name": "pretty-format",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "27.5.1"
+    },
+    {
       "copyright": "Copyright (c) 2016, Daniel Wirtz All rights reserved.",
       "ecosystem": "npm",
       "files": [
@@ -12192,6 +12368,22 @@
       "source": "package-tree",
       "spdx": "MIT",
       "version": "18.3.1"
+    },
+    {
+      "copyright": "Copyright (c) Facebook, Inc. and its affiliates.",
+      "ecosystem": "npm",
+      "files": [
+        {
+          "name": "LICENSE",
+          "sha256": "52412d7bc7ce4157ea628bbaacb8829e0a9cb3c58f57f99176126bc8cf2bfc85",
+          "source": "package-tree"
+        }
+      ],
+      "name": "react-is",
+      "repository": "",
+      "source": "package-tree",
+      "spdx": "MIT",
+      "version": "17.0.2"
     },
     {
       "copyright": "Copyright (c) Meta Platforms, Inc. and affiliates.",

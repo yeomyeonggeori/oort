@@ -249,18 +249,24 @@ describe("완료 헤드라인은 서버 disconnected 만 그린다", () => {
   });
 
   it("해제 시작 응답이 cleanup_pending 이면 완료 문장이 없다", async () => {
-    let current = wireConnection({ status: "active" });
+    const current = wireConnection({ status: "active" });
+    let detailHang = false;
     vi.mocked(listHostedConnections).mockImplementation(async () => ({
       connections: [current],
     }));
-    vi.mocked(getHostedConnection).mockImplementation(async () => ({
-      connection: current,
-      cleanupArtifacts: [],
-    }));
-    vi.mocked(disconnectHostedConnection).mockImplementation(async () => {
-      current = wireConnection({ status: "cleanup_pending" });
+    vi.mocked(getHostedConnection).mockImplementation(async () => {
+      if (detailHang) return new Promise(() => {});
       return {
         connection: current,
+        cleanupArtifacts: [],
+      };
+    });
+    vi.mocked(disconnectHostedConnection).mockImplementation(async () => {
+      // GET 을 멈추면 writeDetail 이 실은 parseDisconnectStart 결과가 화면의 유일한
+      // 상태다. 파서가 status 를 disconnected 로 다시 쓰면 완료 헤드라인이 선다.
+      detailHang = true;
+      return {
+        connection: wireConnection({ status: "cleanup_pending" }),
         remainingRequired: 1,
         startedNow: true,
         cleanupArtifacts: [],
