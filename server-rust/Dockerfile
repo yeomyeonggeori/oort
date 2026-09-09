@@ -200,7 +200,7 @@ COPY packages/momo-core /src/packages/momo-core
 COPY server/Fixtures /src/server/Fixtures
 COPY clients/web/ ./
 
-ARG MOMO_BUILD_SHA
+ARG MOMO_BUILD_SHA=unknown
 ENV MOMO_BUILD_SHA=${MOMO_BUILD_SHA}
 RUN set -eux; \
     npm run build; \
