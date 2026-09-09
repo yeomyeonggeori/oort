@@ -1,6 +1,6 @@
 # ADR-0185: 제로베이스 온보딩 — 셀프호스트 첫 소유자가 「내 워크스페이스·내 이름」으로 시작한다
 
-- Status: **Proposed** (2026-09-09 기안 Fable · **결재 대기 — 성재**. 결정 항목 D-A·D-B·D-C는 선택지와 planner 권고만 적혀 있고 채택은 §10 결재 기록에 남긴다. ADR-0100 규칙대로 Proposed 상태에서는 구현 티켓으로 변환하지 않는다 — 유일한 예외는 본 ADR과 독립인 결함 수리 SH-12a(§9))
+- Status: **Proposed** (2026-09-09 기안 Fable · **결재 대기 — 성재**. 결정 항목 D-A·D-B·D-C는 선택지와 planner 권고만 적혀 있고 채택은 §10 결재 기록에 남긴다. ADR-0100 규칙대로 Proposed 상태에서는 구현 티켓으로 변환하지 않는다 — 유일한 예외는 본 ADR과 독립인 결함 수리 SH-12a(#2301, §9))
 - Date: 2026-09-09
 - Deciders: 성재
 - 발제: 성재 2026-09-09 「데모 사용자로 momo 워크스페이스로 접근하는 것보다 워크스페이스 생성·프로필 등록·팀 규모·팀원 초대(skip 포함)를 포함해 실제 처음 온보딩을 하는 것처럼 설계해야. v0.1.5는 가능하다면 실제 온보딩을 경험하는 구조로 작업하고 발행」 · ADR-0184 결재 기록 「데모 사용자/데모 워크스페이스 경유 E2E는 제로베이스 E2E가 아님(별도 계획 SH-12)」
@@ -16,7 +16,7 @@ E2E-A/B(2026-09-09, 1차 목표 두 케이스 G1'-4)에서 셀프호스트 claim
 ### 1.2 코드가 말하는 것
 - **데모 시드는 끌 수 없다.** `server/Migrations/002_seed.sql`은 워크스페이스 `momo Demo Workspace`·사람 「데모 사용자」@demo·채널 `#general`/`#agent-lab`·membership을 **무조건** 심는다. psql 변수 `MOMO_AGENT_SEED_ENABLED`(`MOMO_AGENT_SEED_MODE` → `scripts/migrate.sh`·`server-rust/crates/momo-db/src/migrate.rs`가 `none`→0, `demo`/`e2e`→1로 변환)는 **김인턴(`…0102`) 픽스처만** 게이트한다. `server-rust/Dockerfile`이 `server/Migrations` 전체를 `/opt/momo/migrations`로 COPY하므로 셀프호스트 이미지에도 그대로 출하된다.
 - **claim은 시드 워크스페이스의 시드 오너에 바인딩된다.** `infra/rust/sql/bootstrap_owner_if_absent.sql`·`bootstrap_owner_claim_if_absent.sql`은 `…0001`/`…0101`을 하드코딩하고, claim 판은 `email`·`email_verified`만 갱신한다 — 표시명 「데모 사용자」·핸들 `demo`는 남는다. `server-rust/bins/momo-server/src/routes/claim.rs`는 토큰→워크스페이스를 정의자 함수(`momo_join_private.owner_claim_workspace_id`, 마이그레이션 078/081)로 풀어 **기존** 워크스페이스에 세션을 발급하고, `owner_bootstrap` 종류면 같은 tx에서 웰컴 킥오프를 enqueue한다. ADR-0166 §6은 워크스페이스 생성을 명시적으로 범위 밖에 두었다. (ADR-0166 본문과 `docs/SELF_HOST_FIRST_DAY.ko.md`가 인용하는 `infra/prod/bootstrap_owner_if_absent.sql` 좌표는 드리프트 — 파일은 `infra/rust/sql/`에 있다.)
-- **claim 직후 first-run 퍼널이 전부 스킵된다(결함, SH-12a).** `clients/web/src/features/auth/ClaimPage.tsx`는 `markFreshSignup` 하나만 찍는다. invite-join(`clients/web/src/features/auth/ConnectPage.tsx:333-342`)은 `markPhoneLinkFirstRunPending`·`markFirstAgentPending`·`markFreshSignup`·`holdKickoffForFreshSignup` 네 마커를 찍는다. `clients/web/src/features/welcome/firstRunGate.ts`의 `decideFirstRun`은 hold·first-agent·phone 셋이 다 비면 곧장 `"app"`이므로 claim 경로에서는 kickoff-hold·first-agent(UX-R2c)·phone-link(ADR-0180) 어느 것도 재생되지 않는다.
+- **claim 직후 first-run 퍼널이 전부 스킵된다(결함, SH-12a #2301).** `clients/web/src/features/auth/ClaimPage.tsx`는 `markFreshSignup` 하나만 찍는다. invite-join(`clients/web/src/features/auth/ConnectPage.tsx:333-342`)은 `markPhoneLinkFirstRunPending`·`markFirstAgentPending`·`markFreshSignup`·`holdKickoffForFreshSignup` 네 마커를 찍는다. `clients/web/src/features/welcome/firstRunGate.ts`의 `decideFirstRun`은 hold·first-agent·phone 셋이 다 비면 곧장 `"app"`이므로 claim 경로에서는 kickoff-hold·first-agent(UX-R2c)·phone-link(ADR-0180) 어느 것도 재생되지 않는다.
 - **덮어쓸 쓰기 경로가 없다.** `routes/workspaces.rs` 헤더가 「Still absent: `PATCH /v1/workspaces/{ws}` (the rename write)」를 명시한다. 있는 것은 `workspace_settings.rs`(settings JSON)·`workspace_avatar.rs`뿐. `POST /v1/workspaces`는 `require_instance_operator`(`routes/shared.rs`: 사람 + `platform:read` 스코프 또는 admin+`PLATFORM_ADMIN_EMAILS`)라 **기존 워크스페이스 세션이 전제** — 워크스페이스 0개 상태에서는 구조적으로 호출할 수 없다. 멤버 자기 이름은 `routes/self_profile.rs` `PATCH /v1/workspaces/{ws}/members/me {"displayName"}`(BZ-4e #1873)로 **표시명만** 바꿀 수 있고, **핸들 변경 라우트는 `routes/` 어디에도 없다**(서버 크레이트 전수 grep `SET handle` 0건). 핸들은 join 시 `normalized_requested_handle`/`fallback_handle(email)`로 1회 정해지고 `member_handle_uniq UNIQUE (workspace_id, handle)`(`server/Migrations/001_init.sql`)로 묶인다. 「팀 규모」는 칼럼·화면·문구 어디에도 없다.
 - **셀프호스트는 에이전트 0명 → 킥오프가 항상 no-op.** 생성기 env는 `MOMO_AGENT_SEED_MODE=none`(`scripts/self_host_env.sh:952`·`:1642`; FIRST_DAY.ko가 인용하는 `:658`은 드리프트). `routes/welcome.rs` `enqueue_welcome_kickoff_in_tx`는 `momo-agent/src/welcome.rs` `resolve_welcome_target_in_tx`가 활성 에이전트를 못 찾으면 `None` → `Ok(())`로 **조용히 끝난다**(ADR-0181 D3 「없으면 조용히」). 클라 마운트 게이트 `clients/web/src/features/welcome/welcomeKickoff.ts` `decideWelcomeMount`의 거부 사유에는 「에이전트 없음」이 없어서, hold가 살아 있는 경로에서는 스테이지 「팀이 준비하고 있어요」가 오지 않을 `agent.partial`을 기다리다 `WELCOME_BACKSTOP_MS = 120_000` 뒤 「아직 준비하고 있어요…」 카드로 끝난다. 결과: ADR-0181 「첫 화면에서 에이전트가 말한다」가 셀프호스트에서 **한 번도 재생된 적이 없다**(E2E-B에서 킥오프가 뛴 것은 에이전트가 생긴 뒤 합류한 2인째뿐 — `2026-09-09-e2e-b-selfhost-run.md` 「사람 합류 킥오프 seq 5」).
 
@@ -122,7 +122,7 @@ E1 라우트 경로·요청 본문 필드명 · E2가 `members/me` 확장인지 
 ## 9. 패킷 지도
 | ID | 내용 | 결재 의존 | 트랙 |
 |---|---|---|---|
-| **SH-12a** | claim 뒤 first-run 퍼널 복원 — `ClaimPage`가 invite-join과 동형으로 4개 마커 기록(§5-5) | **없음 — 결함 수리, 발급 완료**(본 ADR과 독립) | uxui |
+| **SH-12a** | claim 뒤 first-run 퍼널 복원 — `ClaimPage`가 invite-join과 동형으로 4개 마커 기록(§5-5) | **없음 — 결함 수리, 발급 완료 #2301**(본 ADR과 독립) | uxui |
 | SH-12b | E1 workspace rename + E2 오너 핸들 변경(+E0 표시명) 엔진 쓰기 경로 → S1 「내 워크스페이스·내 이름」 스테이지 | D-A·D-B(b) | engine → uxui |
 | SH-12c | S2 「팀원 초대」 스테이지(초대 발급·복사·skip 탈출구, §1-A 규율) | D-A | uxui |
 | SH-12d | D-C: (c1) `no-active-agent` hold 해제 → first-agent · (c2) 첫 에이전트 활성 전이 킥오프(ADR-0181 D2 개정) | D-C | engine(+uxui c1) |
