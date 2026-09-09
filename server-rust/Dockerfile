@@ -255,6 +255,9 @@ COPY infra/rust/sql/bootstrap_owner_claim_if_absent.sql /opt/momo/sql/bootstrap_
 COPY LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /usr/share/licenses/momo-rust/
 COPY legal/generated/GHCR_NOTICE_BUNDLE.sha256 /usr/share/licenses/momo-rust/
 COPY scripts/check_debian_copyrights.sh /usr/local/bin/check_debian_copyrights.sh
+# SH-11e: day-2 CLI inside the image (`scripts/oort backup --tier t2` one-off).
+COPY scripts/oort scripts/self_host_pg_dump.sh scripts/self_host_pg_restore.sh scripts/self_host_env.sh /opt/momo/scripts/
+COPY scripts/lib/oort_common.sh scripts/lib/oort_doctor.sh scripts/lib/oort_day2.sh scripts/lib/pg_dump_custom.sh /opt/momo/scripts/lib/
 COPY server-rust/docker-entrypoint.sh /usr/local/bin/momo-rust-entrypoint
 
 # The SPA payload, LAST of the COPYs on purpose: a web-only change then
@@ -266,7 +269,10 @@ RUN mkdir -p /opt/momo/web/legal && chown momo:momo /opt/momo/web/legal
 COPY --chown=momo:momo LICENSE NOTICE legal/THIRD_PARTY_NOTICES.md legal/generated/GHCR_THIRD_PARTY_NOTICES.txt /opt/momo/web/legal/
 
 RUN set -eux; \
-    chmod +x /usr/local/bin/momo-rust-entrypoint /usr/local/bin/check_debian_copyrights.sh; \
+    chmod +x /usr/local/bin/momo-rust-entrypoint /usr/local/bin/check_debian_copyrights.sh \
+      /opt/momo/scripts/oort /opt/momo/scripts/self_host_pg_dump.sh /opt/momo/scripts/self_host_pg_restore.sh; \
+    test -s /opt/momo/scripts/oort; \
+    test -s /opt/momo/scripts/lib/pg_dump_custom.sh; \
     test -s /opt/momo/migrations/001_init.sql; \
     test -s /opt/momo/sql/bootstrap_roles.sql; \
     test -s /opt/momo/sql/bootstrap_runtime_roles.sql; \

@@ -828,6 +828,184 @@ EOF
   fi
 }
 
+# schema_migrations.version is the migration filename (momo-db::migrate / momo-migrate).
+oort_doctor_expected_migration_count() {
+  local dir=""
+  if [ -n "${OORT_ROOT:-}" ] && [ -d "$OORT_ROOT/server/Migrations" ]; then
+    dir="$OORT_ROOT/server/Migrations"
+  elif [ -d /opt/momo/migrations ]; then
+    dir=/opt/momo/migrations
+  else
+    printf '0'
+    return 0
+  fi
+  find "$dir" -maxdepth 1 -name '[0-9][0-9][0-9]_*.sql' | wc -l | tr -d '[:space:]'
+}
+
+# Must observe schema_migrations. A tautology (`SELECT 1`) is a defect.
+oort_doctor_migrate_idempotency_sql() {
+  local expected
+  expected="${1:-}"
+  if [ -z "$expected" ]; then
+    expected="$(oort_doctor_expected_migration_count)"
+  fi
+  if ! printf '%s' "$expected" | grep -Eq '^[0-9]+$'; then
+    expected=0
+  fi
+  printf "SELECT CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN 'MISSING_TABLE' WHEN (SELECT count(*) FROM schema_migrations) = %s THEN 'IDEMPOTENCY_OK' ELSE 'INCOMPLETE' END;" "$expected"
+}
+
+oort_doctor_t2_http_origin() {
+  local origins origin="" tok domain
+  if oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then
+    origins="$(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS)"
+    for tok in $origins; do
+      case "$tok" in
+        http://* | https://*)
+          origin="$tok"
+          break
+          ;;
+      esac
+    done
+  fi
+  if [ -z "$origin" ]; then
+    domain="${RAILWAY_PUBLIC_DOMAIN:-}"
+    if [ -z "$domain" ] && oort_doctor_has RAILWAY_PUBLIC_DOMAIN; then
+      domain="$(oort_doctor_trim "$(oort_doctor_get RAILWAY_PUBLIC_DOMAIN)")"
+    fi
+    if [ -n "$domain" ]; then
+      origin="https://${domain}"
+    fi
+  fi
+  printf '%s' "$origin"
+}
+
+oort_doctor_check_stack_t2() {
+  local origin body hdr code db auth_line
+  local outbox outbox_rc outbox_err errf
+  local expected sql result applied_health
+  local url_present=0
+
+  oort_doctor_record stack.compose_ps major skip \
+    "T2: compose 없음, 플랫폼 서비스 상태는 레시피 CLI 소관" \
+    "플랫폼 레시피 CLI/MCP 로 서비스 상태를 확인하라."
+
+  origin="$(oort_doctor_t2_http_origin)"
+  if ! command -v curl >/dev/null 2>&1; then
+    oort_doctor_record stack.healthz blocker fail "curl 없음 — /healthz 를 확인하지 못했다" "curl을 설치하라."
+    oort_doctor_record stack.agent_port major fail "curl 없음 — agent-port 를 확인하지 못했다" "curl을 설치하라."
+  elif [ -z "$origin" ]; then
+    oort_doctor_record stack.healthz blocker fail \
+      "T2 공개 오리진 없음 (CENTRIFUGO_ALLOWED_ORIGINS / RAILWAY_PUBLIC_DOMAIN)" \
+      "scripts/self_host_env.sh --platform railway 로 공개 Origin 을 설정하라."
+    oort_doctor_record stack.agent_port major fail \
+      "T2 공개 오리진 없음 — agent-port 생략 금지" \
+      "공개 Origin 을 설정하라."
+  else
+    body="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-healthz.XXXXXX")"
+    code="$(curl -sS -m 5 -o "$body" -w '%{http_code}' "${origin}/healthz" 2>/dev/null || true)"
+    [ -n "$code" ] || code="000"
+    db=""
+    if grep -Eq '"database"[[:space:]]*:[[:space:]]*"ok"' "$body" 2>/dev/null; then
+      db=ok
+    fi
+    if [ "$code" = "200" ] && [ "$db" = "ok" ]; then
+      oort_doctor_record stack.healthz blocker pass \
+        "${origin}/healthz 200 database:ok" ""
+    else
+      oort_doctor_record stack.healthz blocker fail \
+        "${origin}/healthz HTTP ${code} (database:ok 필요)" \
+        "플랫폼 서비스 /healthz 를 확인하라."
+    fi
+    applied_health="$(python3 -c 'import json,sys
+try:
+  doc=json.load(open(sys.argv[1],encoding="utf-8"))
+  schema=doc.get("schema") or {}
+  print(schema.get("applied",""))
+except Exception:
+  print("")
+' "$body" 2>/dev/null || true)"
+    rm -f "$body"
+
+    hdr="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-agentport.XXXXXX")"
+    code="$(curl -sS -m 5 -D "$hdr" -o /dev/null -w '%{http_code}' \
+      -X POST "${origin}/v1/mcp/agent-port" 2>/dev/null || true)"
+    [ -n "$code" ] || code="000"
+    auth_line="$(tr -d '\r' <"$hdr" | grep -i '^WWW-Authenticate:' || true)"
+    rm -f "$hdr"
+    if [ "$code" = "401" ] && printf '%s' "$auth_line" | grep -Fq 'Bearer scope="agent:port:connect"'; then
+      oort_doctor_record stack.agent_port major pass \
+        "POST /v1/mcp/agent-port 401 + WWW-Authenticate Bearer scope=\"agent:port:connect\"" ""
+    else
+      oort_doctor_record stack.agent_port major fail \
+        "agent-port HTTP ${code} (401 + Bearer scope=\"agent:port:connect\" 필요)" \
+        "합류 표면이 없는 이미지일 수 있다. 발행 digest를 확인하라."
+    fi
+  fi
+
+  if oort_doctor_has MIGRATE_DATABASE_URL && [ -n "$(oort_doctor_trim "$(oort_doctor_get MIGRATE_DATABASE_URL)")" ]; then
+    url_present=1
+  fi
+  if [ "$url_present" -ne 1 ]; then
+    oort_doctor_record stack.outbox major fail \
+      "MIGRATE_DATABASE_URL 없음 — outbox SQL-over-URL 실패" \
+      "슈퍼유저 URL (MIGRATE_DATABASE_URL) 을 env 에 넣어라. DATABASE_URL 로 질의하지 않는다."
+    oort_doctor_record stack.migrate_idempotency major fail \
+      "MIGRATE_DATABASE_URL 없음 — migrate 원장을 읽지 못했다" \
+      "슈퍼유저 URL 을 env 에 넣어라."
+    return
+  fi
+
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-outbox.XXXXXX")"
+  set +e
+  outbox="$(oort_psql_migrate_all "$(oort_doctor_outbox_sql)" 2>"$errf")"
+  outbox_rc=$?
+  set -e
+  outbox_err="$(cat "$errf" 2>/dev/null || true)"
+  rm -f "$errf"
+  if [ "$outbox_rc" -ne 0 ]; then
+    oort_doctor_record stack.outbox major fail \
+      "MIGRATE_DATABASE_URL 로 outbox 질의가 실패했다" \
+      "MIGRATE_DATABASE_URL 과 outbox 원장 상태를 확인하라."
+  else
+    oort_doctor_classify_outbox 0 <<EOF
+$outbox
+EOF
+    oort_doctor_record stack.outbox \
+      "${OORT_DOCTOR_OUTBOX_SEVERITY:-major}" \
+      "$OORT_DOCTOR_OUTBOX_STATUS" \
+      "$OORT_DOCTOR_OUTBOX_DETAIL" \
+      "$OORT_DOCTOR_OUTBOX_FIX"
+  fi
+
+  expected="$(oort_doctor_expected_migration_count)"
+  sql="$(oort_doctor_migrate_idempotency_sql "$expected")"
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-migrate.XXXXXX")"
+  set +e
+  result="$(oort_psql_migrate "$sql" 2>"$errf")"
+  outbox_rc=$?
+  set -e
+  rm -f "$errf"
+  if [ "$outbox_rc" -ne 0 ]; then
+    oort_doctor_record stack.migrate_idempotency major fail \
+      "schema_migrations 질의 실패" \
+      "MIGRATE_DATABASE_URL 로 원장 테이블을 읽을 수 있어야 한다."
+  elif [ "$result" = "IDEMPOTENCY_OK" ]; then
+    if [ -n "${applied_health:-}" ] && [ "$applied_health" != "$expected" ]; then
+      oort_doctor_record stack.migrate_idempotency major fail \
+        "/healthz schema.applied=${applied_health} 가 원장 ${expected} 과 다르다" \
+        "migrate 원장과 /healthz schema 필드를 확인하라."
+    else
+      oort_doctor_record stack.migrate_idempotency major pass \
+        "schema_migrations count=${expected} IDEMPOTENCY_OK" ""
+    fi
+  else
+    oort_doctor_record stack.migrate_idempotency major fail \
+      "schema_migrations 원장 ${result:-empty} (expected count=${expected})" \
+      "플랫폼 preDeploy(momo-migrate) 가 모든 NNN_*.sql 을 적용했는지 확인하라."
+  fi
+}
+
 oort_doctor_check_stack() {
   local project="$1"
   local ps_out svc state health line missing="" unhealthy="" report=""
@@ -1250,7 +1428,9 @@ oort_doctor() {
       stack_up=1
     fi
     oort_doctor_check_ports "$stack_up"
-    if [ "$stack_up" -eq 1 ]; then
+    if [ "$(oort_tier)" = "t2" ]; then
+      oort_doctor_check_stack_t2
+    elif [ "$stack_up" -eq 1 ]; then
       oort_doctor_check_stack "$project"
     else
       oort_doctor_skip_stack \

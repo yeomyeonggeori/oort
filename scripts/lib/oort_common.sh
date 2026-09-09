@@ -107,6 +107,24 @@ oort_psql_migrate() {
   return "$rc"
 }
 
+oort_psql_migrate_all() {
+  local sql="$1" url bin errf out rc
+  url="$(oort_migrate_database_url)" || return 1
+  bin="$(momo_pg_client_bin psql)" || return 1
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-psql-url.XXXXXX")"
+  set +e
+  out="$("$bin" "$url" -At -F $'\t' --no-psqlrc -v ON_ERROR_STOP=1 -c "$sql" 2>"$errf")"
+  rc=$?
+  set -e
+  if [ -s "$errf" ]; then
+    momo_pg_mask_url_text "$(cat "$errf")" >&2
+    printf '\n' >&2
+  fi
+  rm -f "$errf"
+  printf '%s' "$out" | tr -d '\r'
+  return "$rc"
+}
+
 oort_common_is_secret_key() {
   case "$1" in
     *PASSWORD* | *SECRET* | *HMAC* | *DATABASE_URL | PROVIDER_LINK_MASTER_KEY | CENT_API_KEY)
