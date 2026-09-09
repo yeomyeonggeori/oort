@@ -119,10 +119,6 @@
     },
     {
       "method": "post",
-      "path": "/v1/workspaces/{}/channels/{}/members"
-    },
-    {
-      "method": "post",
       "path": "/v1/workspaces/{}/devices"
     },
     {

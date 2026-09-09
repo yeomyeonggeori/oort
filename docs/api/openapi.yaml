@@ -1249,6 +1249,74 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /v1/workspaces/{workspaceId}/channels/{channelId}/members:
+    post:
+      tags: [membership-admin]
+      operationId: addChannelMember
+      summary: Add a human or agent member to a public or private channel.
+      description: >
+        Workspace owner/admin only. This is the invite that makes an agent
+        mentionable — `POST …/agents` creates workspace identity only.
+        There is no agent branch: the same row and authority add a human
+        or an agent (routes::channels::add_member). `memberId` is required;
+        `role` is optional and defaults to `member`. `owner` is rejected
+        (400) — channel ownership is minted at create. Closed-world body
+        (`deny_unknown_fields`): an unknown key is 422, not a silently
+        dropped intent. `member_id` is accepted as an alias of `memberId`.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+        - $ref: "#/components/parameters/ChannelId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddChannelMemberRequest"
+      responses:
+        "200":
+          description: >
+            Live channel membership. Wrapper `{membership}` — role defaults
+            to `member` when omitted; `leftAtMs` is absent on a live row
+            (agent_ops_conformance_pg).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChannelMembershipResponse"
+        "400":
+          description: >
+            Invalid role (`membership role must be admin, member, or guest`)
+            or invalid channel id.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: >
+            Caller is not a workspace member, or lacks owner/admin
+            (`workspace owner or admin role required`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: channel or member not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: >
+            The body is not an add-member payload (missing `memberId`,
+            unknown key, or invalid UUID). Axum closed-world decoder —
+            422, not 400.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /v1/workspaces/{workspaceId}/channels/{channelId}/members/me:
     delete:
       tags: [membership]
@@ -1426,8 +1494,14 @@ paths:
         `POST /v1/workspaces/{workspaceId}/channels/{channelId}/members` and
         `POST /v1/workspaces/{workspaceId}/agents/{agentId}/credentials`
         routes. baseUrl never accepts userinfo/query/fragment credential
-        material; non-loopback endpoints require HTTPS, while loopback HTTP
-        requires the server's explicit local-only opt-in.
+        material. Non-loopback endpoints require HTTPS. Loopback HTTP
+        (`localhost` / `127.0.0.1` / `::1`) and listed local hosts
+        (`AGENT_PROVIDER_LOCAL_HOSTS`, exact match, default
+        `host.docker.internal`) require
+        `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. That flag is valid in
+        `MOMO_ENV=staging` (self-host default) as well as `local`
+        (ADR-0004 증보, 2026-09-08). Loopback HTTP still needs an explicit
+        port. `https://` is allowed regardless of the flag.
       security:
         - bearerAuth: []
       parameters:
@@ -8536,6 +8610,31 @@ components:
         memberId: {type: string, format: uuid}
         archived: {type: boolean}
 
+    AddChannelMemberRequest:
+      type: object
+      required: [memberId]
+      additionalProperties: false
+      properties:
+        memberId:
+          type: string
+          format: uuid
+          description: >
+            Target workspace member (human or agent). The server also
+            accepts `member_id`.
+        role:
+          type: string
+          enum: [admin, member, guest]
+          description: >
+            Optional; absent defaults to `member`. `owner` is 400.
+
+    ChannelMembershipResponse:
+      type: object
+      required: [membership]
+      additionalProperties: false
+      properties:
+        membership:
+          $ref: "#/components/schemas/ChannelMembership"
+
     AuditEvent:
       type: object
       required: [id, action, detail, createdAtMs]
@@ -8627,9 +8726,16 @@ components:
           format: uri
           description: >
             OpenAI-compatible base URL. Userinfo, query, and fragment are
-            forbidden. Non-loopback hosts require HTTPS; local loopback HTTP
-            requires MOMO_ENV=local plus AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1
-            and an explicit port.
+            forbidden. Non-loopback hosts require HTTPS. Loopback HTTP
+            (`localhost` / `127.0.0.1` / `::1`) and hosts listed in
+            `AGENT_PROVIDER_LOCAL_HOSTS` (comma-separated, exact match only —
+            no wildcard or suffix; generator default
+            `host.docker.internal`) require
+            `AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1`. The flag is valid in
+            strict environments including `MOMO_ENV=staging` (self-host
+            default). Loopback HTTP still needs an explicit port.
+            `https://` is allowed regardless of the flag.
+            `True`/`1`/`yes` are not this flag — it is exactly `1`.
         systemPrompt:
           type: string
           maxLength: 32768

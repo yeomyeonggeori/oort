@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## E2E-B 문서 정정 + 신규 env hosted delivery 기본값 (#2263, 2026-09-09)
+
+- Track engine. `docs/2263-e2e-b-corrections` onto `origin/track/engine`. SELF_HOST(+ko) D1/D3/D4/D6/D9, SELF_HOST_AGENT(+ko) §3.3.17.2, OpenAPI `CreateAgentRequest.baseUrl`(ADR-0004 증보) + `POST …/channels/{channelId}/members`. 생성기 신규 env만 `MOMO_HOSTED_DELIVERY_ENABLED=true`(기존 env 무접촉, Railway 41키 유지).
+- 검증: `scripts/tests/test_self_host_env_modes.sh`(신규 true · 기존 무백필 · 사보타주 RED) · `scripts/verify_openapi_contract_rust.sh --verify-cleanup-contract` · `scripts/local_gate.sh --profile docs`.
+- runtime-unverified: 실스택에서 신규 env 기본값으로 Agent Port `tools/list` 비지 않음은 E2E-B 런 뒤 문서화 범위(측정은 research/2026-09-09-e2e-b-selfhost-run.md). D4 후속은 #2231.
+
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
