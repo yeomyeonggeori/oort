@@ -75,9 +75,6 @@ export const FIRST_AGENT_OPENAI_DETAIL =
 export const FIRST_AGENT_GROK_WHAT_HAPPENS =
   "고르면 그록봇 연결 값을 발급합니다.";
 
-/** 보상 행 이름이 이 길이를 넘으면 `title` 에 전체 이름을 싣는다. */
-export const FIRST_AGENT_MENTION_TITLE_CHARS = 16;
-
 export const FIRST_AGENT_CHOICE_LEGEND = "무엇을 붙이나요";
 
 export const FIRST_AGENT_DETAIL_FORBIDDEN = [
@@ -115,17 +112,10 @@ function grokPreset() {
   return hostedPreset("grok");
 }
 
-function genericPreset() {
-  return hostedPreset("generic");
-}
-
 function grokCardDetail(): string {
   const note = grokPreset().unverifiedNote ?? "";
   return `${note} ${FIRST_AGENT_GROK_WHAT_HAPPENS}`.trim();
 }
-
-/** generic 프리셋 분류 문장. 카드 줄에는 쓰지 않는다. */
-export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
@@ -234,8 +224,7 @@ export function firstAgentCardsUseHostedPresets(): boolean {
     grokCard.detail !== recipe &&
     openai.detail !== recipe &&
     !grokCard.detail.includes(generic.detail) &&
-    !openai.detail.includes(generic.detail) &&
-    FIRST_AGENT_GENERIC_HINT === generic.detail
+    !openai.detail.includes(generic.detail)
   );
 }
 

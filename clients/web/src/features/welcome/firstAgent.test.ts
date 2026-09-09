@@ -13,7 +13,6 @@ import {
   FIRST_AGENT_CONNECTED_CLAIM,
   FIRST_AGENT_DETAIL_FORBIDDEN,
   FIRST_AGENT_DETECTING_WAIT,
-  FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_GROK_WHAT_HAPPENS,
   FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
@@ -65,7 +64,9 @@ describe("첫 에이전트 카드 4종", () => {
     expect(FIRST_AGENT_CARDS[3]?.detail).toBe(FIRST_AGENT_OPENAI_DETAIL);
     expect(FIRST_AGENT_CARDS[0]?.detail).not.toBe(generic?.steps[1]);
     expect(FIRST_AGENT_CARDS[1]?.detail).not.toBe(generic?.steps[1]);
-    expect(FIRST_AGENT_GENERIC_HINT).toBe(generic?.detail);
+    expect(src("./firstAgent.ts")).not.toContain("FIRST_AGENT_GENERIC_HINT");
+    expect(src("./firstAgent.ts")).not.toContain("FIRST_AGENT_MENTION_TITLE_CHARS");
+    expect(src("./FirstAgentStage.tsx")).not.toContain("FIRST_AGENT_GENERIC_HINT");
   });
 
   it("네 줄 설명은 서로 다르고 금지 문구가 없다", () => {
