@@ -3,12 +3,108 @@
 # Reuses oort_doctor_* (load, get, sanitize, record, JSON). Do not copy those.
 # Relies on OORT_ROOT from the dispatcher.
 
+if [ "${OORT_COMMON_SOURCED:-}" = "1" ]; then
+  return 0
+fi
+OORT_COMMON_SOURCED=1
+
 OORT_DIGEST_RE='^sha256:[0-9a-f]{64}$'
 OORT_PUBLISHED_REF='ghcr.io/yeomyeonggeori/oort'
+# shellcheck source=pg_dump_custom.sh
+# shellcheck disable=SC1091
+. "${OORT_ROOT:?oort: OORT_ROOT unset}/scripts/lib/pg_dump_custom.sh"
 
 oort_die() {
   printf 'scripts/oort: %s\n' "$*" >&2
   exit 1
+}
+
+# Single tier decision: env MOMO_SELF_HOST_PLATFORM (SH-11g platform_profiles)
+# → T1/T2, default T1. `scripts/oort <cmd> --tier t2` must match that value.
+oort_set_tier_override() {
+  local raw="$1"
+  raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  case "$raw" in
+    t1 | t2)
+      OORT_TIER_OVERRIDE="$raw"
+      ;;
+    *)
+      oort_die "--tier 는 t1 또는 t2 다."
+      ;;
+  esac
+}
+
+oort_platform_profiles_rows() {
+  awk '
+    /^platform_profiles\(\)/ { grab = 1; next }
+    grab && /^EOF$/ { exit }
+    grab && /^[a-z0-9-]+\|/ { print }
+  ' "$OORT_ROOT/scripts/self_host_env.sh"
+}
+
+oort_platform_name() {
+  local name="${MOMO_SELF_HOST_PLATFORM:-}"
+  if [ -z "$name" ] && [ -n "${OORT_DOCTOR_ENV_NORM:-}" ] && [ -f "$OORT_DOCTOR_ENV_NORM" ]; then
+    name="$(oort_doctor_get MOMO_SELF_HOST_PLATFORM || true)"
+  fi
+  printf '%s' "$name"
+}
+
+oort_env_tier() {
+  local name tier
+  name="$(oort_platform_name)"
+  if [ -z "$name" ]; then
+    printf 't1'
+    return 0
+  fi
+  tier="$(oort_platform_profiles_rows | awk -F'|' -v n="$name" '
+    NF == 8 && $1 == n { print tolower($3); exit }
+  ')"
+  case "$tier" in
+    t1 | t2 | t3)
+      printf '%s' "$tier"
+      ;;
+    *)
+      oort_die "알 수 없는 MOMO_SELF_HOST_PLATFORM=${name}. platform_profiles 행이 아니다."
+      ;;
+  esac
+}
+
+oort_tier() {
+  local env_tier override
+  env_tier="$(oort_env_tier)"
+  override="${OORT_TIER_OVERRIDE:-}"
+  if [ -n "$override" ] && [ "$override" != "$env_tier" ]; then
+    oort_die "--tier ${override} 는 env MOMO_SELF_HOST_PLATFORM 의 tier(${env_tier}) 와 다르다. T1 스택을 URL 로 백업하지 않는다."
+  fi
+  printf '%s' "$env_tier"
+}
+
+oort_migrate_database_url() {
+  local url
+  url="$(oort_doctor_trim "$(oort_doctor_get MIGRATE_DATABASE_URL)")"
+  if [ -z "$url" ]; then
+    oort_die "T2 는 MIGRATE_DATABASE_URL 이 필요하다. DATABASE_URL(momo_app, RLS) 로 dump 하지 않는다."
+  fi
+  printf '%s' "$url"
+}
+
+oort_psql_migrate() {
+  local sql="$1" url bin errf out rc
+  url="$(oort_migrate_database_url)" || return 1
+  bin="$(momo_pg_client_bin psql)" || return 1
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-psql-url.XXXXXX")"
+  set +e
+  out="$("$bin" "$url" -At --no-psqlrc -v ON_ERROR_STOP=1 -c "$sql" 2>"$errf")"
+  rc=$?
+  set -e
+  if [ -s "$errf" ]; then
+    momo_pg_mask_url_text "$(cat "$errf")" >&2
+    printf '\n' >&2
+  fi
+  rm -f "$errf"
+  printf '%s' "$out" | tr -d '\r' | awk 'NF { print; exit }'
+  return "$rc"
 }
 
 oort_common_is_secret_key() {
@@ -203,6 +299,22 @@ PY
 
 oort_message_count() {
   local user db exists out
+  if [ "$(oort_tier)" = "t2" ]; then
+    exists="$(oort_psql_migrate "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='message') THEN 1 ELSE 0 END;" || true)"
+    if [ -z "$exists" ]; then
+      return 1
+    fi
+    if [ "$exists" != "1" ]; then
+      printf '0'
+      return 0
+    fi
+    out="$(oort_psql_migrate "SELECT count(*)::text FROM message;" || true)"
+    if [ -z "$out" ]; then
+      return 1
+    fi
+    printf '%s' "$out"
+    return 0
+  fi
   user="$(oort_doctor_get POSTGRES_USER)"
   db="$(oort_doctor_get POSTGRES_DB)"
   [ -n "$user" ] || user=momo
@@ -231,6 +343,11 @@ oort_message_count() {
 
 oort_schema_present() {
   local user db out
+  if [ "$(oort_tier)" = "t2" ]; then
+    out="$(oort_psql_migrate "SELECT CASE WHEN EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='message') THEN 1 ELSE 0 END;" || true)"
+    [ "$out" = "1" ]
+    return
+  fi
   user="$(oort_doctor_get POSTGRES_USER)"
   db="$(oort_doctor_get POSTGRES_DB)"
   [ -n "$user" ] || user=momo

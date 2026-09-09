@@ -28,6 +28,15 @@ oort_status() {
         json=1
         shift
         ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_status_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
+        shift
+        ;;
       -h | --help)
         oort_status_usage
         return 0
@@ -49,21 +58,22 @@ oort_status() {
   fi
 
   set +e
-  if [ "$json" -eq 1 ]; then
-    if [ -n "$env_path" ]; then
-      oort_doctor --env "$env_path" --json >"$report"
-    else
-      oort_doctor --json >"$report"
-    fi
-    code=$?
-  else
-    if [ -n "$env_path" ]; then
-      oort_doctor --env "$env_path"
-    else
-      oort_doctor
-    fi
-    code=$?
+  set --
+  if [ -n "$env_path" ]; then
+    set -- "$@" --env "$env_path"
   fi
+  if [ "$json" -eq 1 ]; then
+    set -- "$@" --json
+  fi
+  if [ -n "${OORT_TIER_OVERRIDE:-}" ]; then
+    set -- "$@" --tier "$OORT_TIER_OVERRIDE"
+  fi
+  if [ "$json" -eq 1 ]; then
+    oort_doctor "$@" >"$report"
+  else
+    oort_doctor "$@"
+  fi
+  code=$?
   set -e
 
   current=""
@@ -132,6 +142,15 @@ oort_logs() {
         ;;
       --follow | -f)
         follow=1
+        shift
+        ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_logs_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
         shift
         ;;
       -h | --help)
@@ -345,6 +364,15 @@ oort_upgrade() {
         no_backup=1
         shift
         ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_upgrade_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
+        shift
+        ;;
       -h | --help)
         oort_upgrade_usage
         return 0
@@ -365,6 +393,7 @@ oort_upgrade() {
   fi
 
   oort_prepare_env "$env_path"
+  oort_tier >/dev/null
 
   local target_image target_mode digest previous previous_mode dump_path="" backup_out backup_rc
   previous="$(oort_doctor_get MOMO_RUST_IMAGE)"
@@ -491,6 +520,15 @@ oort_backup() {
         out_dir="${1#*=}"
         shift
         ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_backup_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
+        shift
+        ;;
       -h | --help)
         oort_backup_usage
         return 0
@@ -504,6 +542,7 @@ oort_backup() {
   done
 
   oort_prepare_env "$env_path"
+  oort_tier >/dev/null
   if [ -z "$out_dir" ]; then
     out_dir="${HOME}/oort-backups"
   fi
@@ -513,12 +552,24 @@ oort_backup() {
   local dump_log path stamp version digest_slug image digest
   dump_log="$(mktemp "${TMPDIR:-/tmp}/oort-backup-log.XXXXXX")"
   chmod 600 "$dump_log"
-  "$OORT_ROOT/scripts/self_host_pg_dump.sh" \
-    --env-file "$OORT_DOCTOR_ENV" \
-    --output-dir "$out_dir" \
-    --compose-project "$(oort_project_name)" \
-    >"$dump_log"
-  cat "$dump_log"
+  if [ "$(oort_tier)" = "t2" ]; then
+    "$OORT_ROOT/scripts/self_host_pg_dump.sh" \
+      --env-file "$OORT_DOCTOR_ENV" \
+      --output-dir "$out_dir" \
+      --migrate-url \
+      >"$dump_log"
+  else
+    "$OORT_ROOT/scripts/self_host_pg_dump.sh" \
+      --env-file "$OORT_DOCTOR_ENV" \
+      --output-dir "$out_dir" \
+      --compose-project "$(oort_project_name)" \
+      >"$dump_log"
+  fi
+  if [ "$(oort_tier)" = "t2" ]; then
+    sed -E 's#(postgres(ql)?://)[^:/@]+:[^@]+@#\1***:***@#g' "$dump_log"
+  else
+    cat "$dump_log"
+  fi
   path="$(awk -F': ' '$1 == "[self-host-backup] path" { print $2; exit }' "$dump_log")"
   rm -f "$dump_log"
   [ -n "$path" ] && [ -s "$path" ] || oort_die "덤프 경로를 읽지 못했다."
@@ -552,6 +603,14 @@ EOF
 
 oort_runtime_roles_count() {
   local user db out
+  if [ "$(oort_tier)" = "t2" ]; then
+    out="$(oort_psql_migrate "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" || true)"
+    if [ -z "$out" ]; then
+      return 1
+    fi
+    printf '%s' "$out"
+    return 0
+  fi
   user="$(oort_doctor_get POSTGRES_USER)"
   db="$(oort_doctor_get POSTGRES_DB)"
   [ -n "$user" ] || user=momo
@@ -572,6 +631,9 @@ oort_ensure_runtime_roles() {
   n="$(oort_runtime_roles_count || true)"
   if [ "$n" = "3" ]; then
     return 0
+  fi
+  if [ "$(oort_tier)" = "t2" ]; then
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent (${n:-0}/3). 플랫폼 preDeploy(\`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate\`)를 먼저 돌려라"
   fi
   printf 'oort restore: runtime roles absent (%s/3); running compose service runtime-roles\n' \
     "${n:-0}"
@@ -601,6 +663,15 @@ oort_restore() {
         yes=1
         shift
         ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_restore_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
+        shift
+        ;;
       -h | --help)
         oort_restore_usage
         return 0
@@ -623,6 +694,7 @@ oort_restore() {
   [ -s "$dump" ] || oort_die "덤프 파일이 없거나 비었다: $dump"
 
   oort_prepare_env "$env_path"
+  oort_tier >/dev/null
 
   if [ "$yes" -ne 1 ]; then
     if [ ! -t 0 ]; then
@@ -651,7 +723,18 @@ oort_restore() {
 
   oort_ensure_runtime_roles
 
-  if oort_schema_present; then
+  if [ "$(oort_tier)" = "t2" ]; then
+    if oort_schema_present; then
+      "$OORT_ROOT/scripts/self_host_pg_restore.sh" --dump "$dump" \
+        --env-file "$OORT_DOCTOR_ENV" \
+        --migrate-url \
+        --clean
+    else
+      "$OORT_ROOT/scripts/self_host_pg_restore.sh" --dump "$dump" \
+        --env-file "$OORT_DOCTOR_ENV" \
+        --migrate-url
+    fi
+  elif oort_schema_present; then
     # shellcheck disable=SC2086
     "$OORT_ROOT/scripts/self_host_pg_restore.sh" --dump "$dump" \
       --env-file "$OORT_DOCTOR_ENV" \

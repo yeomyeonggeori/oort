@@ -9,8 +9,35 @@
 #
 # Do not add a second `pg_dump -Fc` / `pg_restore` call site. Operators and
 # gates must go through these functions so the dump contract cannot drift.
+# URL variants (`momo_pg_dump_custom_url` / `momo_pg_restore_custom_url`) live
+# in this same file — that is not a second call site.
 #
 # This file is sourced; callers already set -euo pipefail. Do not `exit` here.
+
+momo_pg_client_bin() {
+  local name="$1" p
+  if command -v "$name" >/dev/null 2>&1; then
+    command -v "$name"
+    return 0
+  fi
+  for p in \
+    /opt/homebrew/opt/libpq/bin \
+    /usr/local/opt/libpq/bin \
+    /usr/lib/postgresql/18/bin \
+    /usr/lib/postgresql/16/bin
+  do
+    if [ -x "$p/$name" ]; then
+      printf '%s/%s\n' "$p" "$name"
+      return 0
+    fi
+  done
+  echo "momo_pg_client_bin: ${name} 없음 (postgresql-client 필요)" >&2
+  return 1
+}
+
+momo_pg_mask_url_text() {
+  printf '%s' "$1" | sed -E 's#(postgres(ql)?://)[^:/@]+:[^@]+@#\1***:***@#g'
+}
 
 momo_pg_dump_custom() {
   local container="$1"
@@ -43,6 +70,67 @@ momo_pg_restore_custom() {
     return 1
   fi
   docker exec -i "$container" pg_restore -U "$user" -d "$db" --no-owner "$@" <"$infile"
+}
+
+# Connection-string dump for T2 (managed PG). Never print the URL.
+momo_pg_dump_custom_url() {
+  local url="$1"
+  local outfile="$2"
+  local bin errf rc
+  if [ "$#" -ne 2 ] || [ -z "$url" ] || [ -z "$outfile" ]; then
+    echo "momo_pg_dump_custom_url: usage: url outfile" >&2
+    return 2
+  fi
+  bin="$(momo_pg_client_bin pg_dump)" || return 1
+  errf="$(mktemp "${TMPDIR:-/tmp}/momo-pg-dump-url.XXXXXX")"
+  set +e
+  "$bin" -Fc "$url" >"$outfile" 2>"$errf"
+  rc=$?
+  set -e
+  if [ -s "$errf" ]; then
+    momo_pg_mask_url_text "$(cat "$errf")" >&2
+    printf '\n' >&2
+  fi
+  rm -f "$errf"
+  if [ "$rc" -ne 0 ]; then
+    echo "momo_pg_dump_custom_url: pg_dump -Fc 실패" >&2
+    return "$rc"
+  fi
+  if [ ! -s "$outfile" ]; then
+    echo "momo_pg_dump_custom_url: dump file is empty: $outfile" >&2
+    return 1
+  fi
+}
+
+# Connection-string restore for T2. Never print the URL.
+momo_pg_restore_custom_url() {
+  local url="$1"
+  local infile="$2"
+  local bin errf rc
+  if [ "$#" -lt 2 ] || [ -z "$url" ] || [ -z "$infile" ]; then
+    echo "momo_pg_restore_custom_url: usage: url infile [pg_restore args...]" >&2
+    return 2
+  fi
+  shift 2
+  if [ ! -s "$infile" ]; then
+    echo "momo_pg_restore_custom_url: dump file missing or empty: $infile" >&2
+    return 1
+  fi
+  bin="$(momo_pg_client_bin pg_restore)" || return 1
+  errf="$(mktemp "${TMPDIR:-/tmp}/momo-pg-restore-url.XXXXXX")"
+  set +e
+  "$bin" --no-owner "$@" -d "$url" "$infile" 2>"$errf"
+  rc=$?
+  set -e
+  if [ -s "$errf" ]; then
+    momo_pg_mask_url_text "$(cat "$errf")" >&2
+    printf '\n' >&2
+  fi
+  rm -f "$errf"
+  if [ "$rc" -ne 0 ]; then
+    echo "momo_pg_restore_custom_url: pg_restore 실패" >&2
+    return "$rc"
+  fi
 }
 
 # Read KEY=value from a Docker env file. Comments and blank lines are skipped.

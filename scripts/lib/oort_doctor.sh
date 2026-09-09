@@ -5,13 +5,14 @@
 
 oort_doctor_usage() {
   cat <<'EOF'
-Usage: scripts/oort doctor [--env FILE] [--json] [--strict]
+Usage: scripts/oort doctor [--env FILE] [--json] [--strict] [--tier t1|t2]
 
 Read-only self-host verdict (tools, env, stack). Secrets are never printed.
 
   --env FILE   Env file to inspect (default: infra/rust/local.secrets.env)
   --json       Machine report: {summary, checks[]}
   --strict     Promote major failures to exit 2
+  --tier t1|t2 Must match MOMO_SELF_HOST_PLATFORM (SH-11g). Default: env, else T1.
 
 Exit: 0 pass, 1 major-only, 2 any blocker.
 EOF
@@ -1157,6 +1158,13 @@ oort_doctor() {
   OORT_DOCTOR_STRICT=0
   OORT_DOCTOR_ENV=""
 
+  : "${OORT_ROOT:?oort doctor: OORT_ROOT unset}"
+  if [ "${OORT_COMMON_SOURCED:-}" != "1" ]; then
+    # shellcheck source=oort_common.sh
+    # shellcheck disable=SC1091
+    . "$OORT_ROOT/scripts/lib/oort_common.sh"
+  fi
+
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --env)
@@ -1176,6 +1184,15 @@ oort_doctor() {
         ;;
       --strict)
         OORT_DOCTOR_STRICT=1
+        shift
+        ;;
+      --tier)
+        [ "$#" -ge 2 ] || { oort_doctor_usage >&2; return 2; }
+        oort_set_tier_override "$2"
+        shift 2
+        ;;
+      --tier=*)
+        oort_set_tier_override "${1#--tier=}"
         shift
         ;;
       -h | --help)
@@ -1214,10 +1231,12 @@ oort_doctor() {
         "scripts/self_host_env.sh --local-build 또는 --published-image 로 생성하라."
       oort_doctor_skip_env_rest "설치 전 preflight — env 없음"
     fi
+    oort_tier >/dev/null
   else
     oort_doctor_record env.exists blocker pass "env 파일 존재" ""
     OORT_DOCTOR_ENV_RAW="$OORT_DOCTOR_ENV"
     oort_doctor_load_env "$OORT_DOCTOR_ENV"
+    oort_tier >/dev/null
     oort_doctor_check_env
 
     project=""
