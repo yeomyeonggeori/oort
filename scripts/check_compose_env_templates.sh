@@ -74,7 +74,8 @@ cd "$ROOT"
 # gate (#2142 / ADR-0183).
 #
 # Adding a compose file or an env template without adding it here is itself a
-# failure — see the two coverage checks at the bottom.
+# failure — see the coverage checks at the bottom (1 · 1b · 2 · 3). Platform
+# templates that are not compose renderings have their own table below.
 # -----------------------------------------------------------------------------
 RENDERINGS=(
   "rust base stack (infra/rust/README.md §2)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml"
@@ -90,6 +91,38 @@ RENDERINGS=(
 # Env templates under infra/rust that are NOT compose env files in this table.
 # Anything here is exempt from the table; everything else must be in it.
 NON_COMPOSE_ENV_TEMPLATES=()
+
+# -----------------------------------------------------------------------------
+# Platform templates (non-compose) — ADR-0184 D5 / #2297.
+#
+# A managed platform (Railway today; Fly/AWS rows arrive with SH-11b/c) ships
+# its deployment as a service catalog + edge file + image recipe, not as a
+# compose rendering. Those files sit outside the RENDERINGS table by nature,
+# and until #2297 the only record of that was a prose note inside
+# infra/railway/railway.json ("Not a docker-compose rendering …") — an
+# exemption nothing checked. This table makes the exemption explicit and
+# bounded. One row per platform directory, `directory|contract|files`:
+#   * `contract` is the test that actually exercises the row; it runs in
+#     scripts/local_gate.sh's docs profile, so this script only checks that it
+#     still exists and is executable (on a tree that carries scripts/tests).
+#   * `files` is the COMPLETE inventory of the directory. Coverage 3 below
+#     enforces both directions: a listed file that disappears is red, and a
+#     file that appears in the directory without a listing is red — so a
+#     compose file or env template dropped into infra/<platform>/ cannot hide
+#     behind the platform's exemption. An infra/ directory that carries
+#     deployment material without a row here is red as well.
+# -----------------------------------------------------------------------------
+PLATFORM_TEMPLATES=(
+  "infra/railway|scripts/tests/test_railway_template.sh|infra/railway/README.md infra/railway/railway.json infra/railway/Caddyfile.railway infra/railway/Dockerfile.caddy"
+)
+
+# Compose-shaped files under infra/ that no rendering row names, with the
+# reason. A compose file is a rendering until proven otherwise: everything
+# compose-shaped that is neither tabled nor listed here is red (Coverage 1b),
+# whether or not it happens to contain a `${VAR:?}` today.
+COMPOSE_FILES_OUTSIDE_TABLE=(
+  "infra/rust/docker-compose.lane-phone.yml|MAESTRO-1 phone lane overlay (#1022): rendered only by clients/mobile/scripts/lane-phone.sh with an env file it generates at run time — no operator template to check it against — and it declares no \${VAR:?}"
+)
 
 FAILURES=0
 CHECKED=0
@@ -189,6 +222,23 @@ while IFS= read -r yml; do
 done < <(find infra -type f \( -name '*.yml' -o -name '*.yaml' \) | LC_ALL=C sort)
 
 # -----------------------------------------------------------------------------
+# Coverage 1b — no compose-shaped file may sit outside the table unexplained,
+# `${VAR:?}` or not (#2297). A compose file without a required variable today
+# is one edit away from having one, and Coverage 1 would only notice then.
+# -----------------------------------------------------------------------------
+exempt_compose="$(for row in "${COMPOSE_FILES_OUTSIDE_TABLE[@]}"; do printf '%s\n' "${row%%|*}"; done | LC_ALL=C sort -u)"
+while IFS= read -r yml; do
+  [ -n "$yml" ] || continue
+  grep -qxF "$yml" <<<"$tabled_compose" && continue
+  grep -qxF "$yml" <<<"$exempt_compose" && continue
+  fail "$yml is compose-shaped but no rendering in this script names it — add a row, or add it to COMPOSE_FILES_OUTSIDE_TABLE with the reason it is not an operator rendering"
+done < <(find infra -type f \( -name 'docker-compose*.yml' -o -name 'docker-compose*.yaml' -o -name 'compose*.yml' -o -name 'compose*.yaml' -o -name '*.override.yml' -o -name '*.override.yaml' \) | LC_ALL=C sort)
+for row in "${COMPOSE_FILES_OUTSIDE_TABLE[@]}"; do
+  yml="${row%%|*}"
+  [ -f "$yml" ] || fail "COMPOSE_FILES_OUTSIDE_TABLE names a file that no longer exists: $yml"
+done
+
+# -----------------------------------------------------------------------------
 # Coverage 2 — no env template may sit outside the table unexplained.
 # -----------------------------------------------------------------------------
 tabled_env="$(
@@ -214,9 +264,53 @@ if [ "${#NON_COMPOSE_ENV_TEMPLATES[@]}" -gt 0 ]; then
   done
 fi
 
+# -----------------------------------------------------------------------------
+# Coverage 3 — platform template rows are complete inventories (#2297), and
+# every infra/ directory that carries deployment material is either infra/rust
+# (the RENDERINGS domain) or a PLATFORM_TEMPLATES row.
+# -----------------------------------------------------------------------------
+PLATFORM_ROWS=0
+platform_dirs="$(for row in "${PLATFORM_TEMPLATES[@]}"; do printf '%s\n' "${row%%|*}"; done | LC_ALL=C sort -u)"
+for row in "${PLATFORM_TEMPLATES[@]}"; do
+  dir="${row%%|*}"
+  rest="${row#*|}"
+  contract="${rest%%|*}"
+  read -r -a listed <<<"${rest#*|}"
+  PLATFORM_ROWS=$((PLATFORM_ROWS + 1))
+
+  [ -d "$dir" ] || { fail "$dir: PLATFORM_TEMPLATES names a directory that does not exist"; continue; }
+  for f in "${listed[@]}"; do
+    [ -f "$f" ] || fail "$dir: PLATFORM_TEMPLATES names a file that no longer exists: $f"
+  done
+  # The contract lives under scripts/tests; regression fixtures hand this
+  # script an infra/-only tree, so the check is conditional on the tree
+  # carrying scripts/tests at all — and says so when it is not.
+  if [ -d scripts/tests ]; then
+    [ -f "$contract" ] && [ -x "$contract" ] ||
+      fail "$dir: platform contract test $contract is missing or not executable — the row's exemption from the compose table rests on that test running in the docs profile"
+  else
+    echo "[compose-env] note: $dir contract $contract not checked — this tree carries no scripts/tests (fixture tree)"
+  fi
+  listed_lines="$(printf '%s\n' "${listed[@]}")"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    grep -qxF "$f" <<<"$listed_lines" ||
+      fail "$f sits in platform directory $dir but PLATFORM_TEMPLATES does not list it — a platform row is a complete inventory, so a new compose file or env template cannot hide behind the platform exemption; list it there (or table it as a rendering)"
+  done < <(find "$dir" -type f | LC_ALL=C sort)
+done
+
+while IFS= read -r dir; do
+  [ -n "$dir" ] || continue
+  [ "$dir" = "infra/rust" ] && continue
+  grep -qxF "$dir" <<<"$platform_dirs" && continue
+  material="$(find "$dir" -type f \( -name 'docker-compose*.y*ml' -o -name 'compose*.y*ml' -o -name '*.override.y*ml' -o -name '*.env.example' -o -name 'Caddyfile*' -o -name 'railway.json' -o -name 'fly.toml' -o -name '*.tf' \) | LC_ALL=C sort | tr '\n' ' ')"
+  [ -z "$material" ] ||
+    fail "$dir carries deployment templates but is neither infra/rust nor a PLATFORM_TEMPLATES row: ${material% }— add a row naming its contract test and its complete file list"
+done < <(find infra -mindepth 1 -maxdepth 1 -type d | LC_ALL=C sort)
+
 if [ "$FAILURES" -ne 0 ]; then
   echo "[compose-env] $FAILURES check(s) failed" >&2
   exit 1
 fi
 
-echo "[compose-env] PASS: $CHECKED rendering(s); every \${VAR:?} is filled in its template$([ "$SKIP_DOCKER" -eq 1 ] && echo ' (static only — docker cross-check skipped)')"
+echo "[compose-env] PASS: $CHECKED rendering(s); every \${VAR:?} is filled in its template$([ "$SKIP_DOCKER" -eq 1 ] && echo ' (static only — docker cross-check skipped)'); $PLATFORM_ROWS platform template row(s) complete; ${#COMPOSE_FILES_OUTSIDE_TABLE[@]} compose file(s) exempt by reason"
