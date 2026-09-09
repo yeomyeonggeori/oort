@@ -1,7 +1,13 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 import { queryClient } from "@/app/queryClient";
-import { useRestoredSession } from "@/app/session";
+import { SessionProvider, useRestoredSession } from "@/app/session";
+import {
+  createRealtime,
+  resolveSpikeRealtimeUrl,
+  type RealtimeHandle,
+  type RealtimeStatus,
+} from "@/lib/realtime";
 import { startUpdateWatch } from "@/features/updates/store";
 import { ConnectPage } from "@/features/auth/ConnectPage";
 import { PhoneLinkFirstRun } from "@/features/auth/PhoneLinkFirstRun";
@@ -32,6 +38,15 @@ import { resetAdeDrawer } from "@/features/ade/adeDrawerStore";
 import { WorkConsoleRoute } from "@/features/workConsole/WorkConsoleRoute";
 import { OAuthConsentRoute } from "@/features/hostedAgents/OAuthConsentRoute";
 import { isOauthConsentPath } from "@/features/hostedAgents/oauthConsentPath";
+import type { LoginResponse, Member } from "@momo/core/lib/api";
+import { FirstAgentStage } from "@/features/welcome/FirstAgentStage";
+import { readFirstAgentCapturePoseFromLocation } from "@/features/welcome/firstAgent";
+import { takeFirstAgentResumeHash } from "@/features/welcome/firstAgentStore";
+import {
+  decideFirstRunForSession,
+  snapshotFirstRun,
+  subscribeFirstRun,
+} from "@/features/welcome/firstRunGate";
 
 const DESIGN_GALLERY_ENABLED =
   import.meta.env.MODE === "design" ||
@@ -55,13 +70,67 @@ function DesignGalleryRoute() {
   );
 }
 
+function FirstRunSession({
+  session,
+  replaceSessionMember,
+  children,
+}: {
+  session: LoginResponse;
+  replaceSessionMember: (member: Member) => void;
+  children: ReactNode;
+}) {
+  const [realtime, setRealtime] = useState<RealtimeHandle | null>(null);
+  const [connStatus, setConnStatus] = useState<RealtimeStatus>("connecting");
+  useEffect(() => {
+    const handle = createRealtime(
+      resolveSpikeRealtimeUrl(session.realtimeWebSocketUrl),
+      setConnStatus
+    );
+    setRealtime(handle);
+    return () => {
+      handle.dispose();
+      setRealtime(null);
+    };
+  }, [session.realtimeWebSocketUrl]);
+
+  return (
+    <SessionProvider
+      value={{
+        session,
+        workspaceId: session.member.workspaceId,
+        realtime,
+        connStatus,
+        logout: () => undefined,
+        replaceSessionMember,
+      }}
+    >
+      <HashRouter>{children}</HashRouter>
+    </SessionProvider>
+  );
+}
+
 // HashRouter, not BrowserRouter: the Tauri release build loads the bundle from
 // `tauri://localhost` with no server to rewrite deep paths, so the same routes
 // have to resolve identically in both runtimes (ADR-0133 "one codebase").
 export function App() {
   const { status, session, signIn, signOut, replaceSessionMember } =
     useRestoredSession();
-  const [, setPhoneLinkFirstRunTick] = useState(0);
+  const [firstRunTick, setFirstRunTick] = useState(0);
+  useSyncExternalStore(subscribeFirstRun, snapshotFirstRun, snapshotFirstRun);
+
+  const capturePose = readFirstAgentCapturePoseFromLocation();
+  const firstRun = session
+    ? decideFirstRunForSession({
+        workspaceId: session.member.workspaceId,
+        phonePending: phoneLinkFirstRunIsPending(),
+      })
+    : null;
+
+  useEffect(() => {
+    const onHash = () => setFirstRunTick((n) => n + 1);
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
 
   // Above the signed-in/anonymous split on purpose (MOMO-606): someone stuck on
   // the connect screen is the reader most likely to need the build that fixes
@@ -73,6 +142,12 @@ export function App() {
       window.history.replaceState(null, "", "/");
     }
   }, [session]);
+
+  useEffect(() => {
+    if (firstRun !== "app") return;
+    const resumeHash = takeFirstAgentResumeHash();
+    if (resumeHash) window.location.hash = resumeHash;
+  }, [firstRun, firstRunTick]);
 
   // OAuth resource-owner consent 는 HashRouter 밖의 실경로다(#1369). provider
   // 리다이렉트가 `/oauth/consent?request=...` 로 떨어뜨리는데, 그 쿼리는 해시가
@@ -116,14 +191,27 @@ export function App() {
     return <ConnectPage onLoggedIn={signIn} />;
   }
 
-  // ADR-0180 D7 ships as a post-login first-run card, not onboarding S5.
-  // Owned here so the session gate cannot unmount it (B2).
-  if (phoneLinkFirstRunIsPending()) {
+  // ADR-0181 kickoff lives in the welcome channel, so a fresh signup holds the
+  // app open first. Then first-agent (#2216), then phone (ADR-0180 D7).
+  const bumpFirstRun = () => setFirstRunTick((n) => n + 1);
+
+  if (capturePose !== null || firstRun === "first-agent") {
+    return (
+      <FirstRunSession
+        session={session}
+        replaceSessionMember={replaceSessionMember}
+      >
+        <FirstAgentStage onContinue={bumpFirstRun} />
+      </FirstRunSession>
+    );
+  }
+
+  if (firstRun === "phone-link") {
     return (
       <PhoneLinkFirstRun
         onEnterApp={() => {
           dismissPhoneLinkFirstRun();
-          setPhoneLinkFirstRunTick((n) => n + 1);
+          bumpFirstRun();
         }}
       />
     );

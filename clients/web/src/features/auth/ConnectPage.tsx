@@ -44,6 +44,8 @@ import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { RuntimeBadge } from "@/app/RuntimeBadge";
 import { markPhoneLinkFirstRunPending } from "./phoneLinkFirstRunStore";
+import { markFirstAgentPending } from "@/features/welcome/firstAgentStore";
+import { holdKickoffForFreshSignup } from "@/features/welcome/firstRunGate";
 import { titlebarDragProps } from "@/app/sidebarPane";
 import { UpdateNotice } from "@/features/updates/UpdateNotice";
 import { DiscoveredServerList } from "./DiscoveredServerList";
@@ -329,6 +331,7 @@ export function ConnectPage({
         holdSessionRestore();
         const session = await joinWithInvite(inviteCode, email, password);
         markPhoneLinkFirstRunPending();
+        markFirstAgentPending(session.member.workspaceId);
         if (session.createdMember) {
           // Written at join success, before S3. sessionStorage survives a
           // same-tab reload, so a reload at S3 keeps the UX-R2b kickoff marker.
@@ -336,6 +339,7 @@ export function ConnectPage({
             workspaceId: session.member.workspaceId,
             memberId: session.member.id,
           });
+          holdKickoffForFreshSignup();
           setPendingJoin(session);
           setProfileName(session.member.displayName);
           setProfileFailed(false);

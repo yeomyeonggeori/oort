@@ -1,3 +1,4 @@
+import type { KeyboardEvent } from "react";
 import { cn } from "@/design/lib/cn";
 
 // =============================================================================
@@ -25,6 +26,13 @@ import { cn } from "@/design/lib/cn";
 // 잠긴 줄을 흐리게 만들지 않는 이유는 이 레포가 이미 정한 것이다(에이전트 허브의
 // 오프라인 지시문 상자, design-review 2R High): 못 고르는 표시는 바탕이 지고,
 // 글자는 읽을 수 있어야 한다. 사유가 안 읽히면 사유가 아니다.
+//
+// 그룹 잠금의 기본은 native `fieldset disabled` 다. 위저드·동의·정리 목록이
+// 그 동작을 그대로 쓴다. 퍼널만 `lockMode="aria"` 로 옵트인한다: native
+// disabled 는 라디오를 탭 순서에서 지우고 초점을 `<body>` 로 떨어뜨리므로
+// (SH-6a-w R4 M-1), 그 자리는 `aria-disabled` + 보이는 잠금(컨트롤만
+// `opacity-50`·`cursor-default`, 이름은 `text-ink-muted`, hover 채움 없음,
+// 사유 글자는 그대로) + 클릭/Enter 가드다.
 // =============================================================================
 
 export interface ChoiceListItem {
@@ -45,11 +53,14 @@ export function ChoiceList({
   name,
   legend,
   hint,
+  describedBy,
   multiple,
   items,
   selected,
   onChange,
+  onActivate,
   disabled,
+  lockMode = "native",
   testId,
 }: {
   name: string;
@@ -57,18 +68,39 @@ export function ChoiceList({
   legend: string;
   /** 그룹 전체에 걸리는 한 문장. 저장 상태나 잠금 사유. */
   hint?: string;
+  /**
+   * 이미 화면에 있는 사유(배너 `messageId`)를 가리킨다. `hint` 문장을 한 번 더
+   * 그리지 않는다.
+   */
+  describedBy?: string;
   multiple: boolean;
   items: readonly ChoiceListItem[];
   selected: readonly string[];
   /** 다음 선택 전체. 컴포넌트가 토글 규칙을 들고 호출부는 결과만 받는다. */
   onChange: (next: string[]) => void;
+  /**
+   * 있으면 화살표·클릭은 선택만 옮기고, 커밋은 Enter/Space 다. 호출부의
+   * 「계속」도 같은 `onActivate` 를 부른다. 없으면 `onChange` 가 곧 커밋이다
+   * (위저드 라디오).
+   */
+  onActivate?: (id: string) => void;
   /** 그룹 전체가 지금 조작 대상이 아니다(오프라인 등). */
   disabled?: boolean;
+  /**
+   * `native`(기본) = `<fieldset disabled>`. 다른 소비자는 이 기본값을 그대로 둔다.
+   * `aria` = native disabled 없이 `aria-disabled` + 보이는 잠금. 퍼널만 쓴다.
+   */
+  lockMode?: "native" | "aria";
   testId?: string;
 }) {
   const hintId = hint ? `${name}-hint` : undefined;
+  const groupDescribedBy = [describedBy, hintId].filter(Boolean).join(" ") || undefined;
+  const activateOnly = onActivate !== undefined;
+  const selectable = items.filter((item) => !item.disabled && !item.locked);
+  const ariaLock = lockMode === "aria" && Boolean(disabled);
 
   function toggle(item: ChoiceListItem) {
+    if (disabled) return;
     if (item.disabled || item.locked) return;
     if (!multiple) {
       onChange([item.id]);
@@ -80,11 +112,50 @@ export function ChoiceList({
     );
   }
 
+  function activate(item: ChoiceListItem) {
+    if (disabled) return;
+    if (item.disabled || item.locked) return;
+    onActivate?.(item.id);
+  }
+
+  function focusItem(item: ChoiceListItem) {
+    const node = document.getElementById(`${name}-${item.id}`);
+    if (node instanceof HTMLElement) node.focus();
+  }
+
+  function moveRoving(current: ChoiceListItem, direction: 1 | -1) {
+    const index = selectable.findIndex((row) => row.id === current.id);
+    const from = index < 0 ? (direction === 1 ? -1 : selectable.length) : index;
+    const next = selectable[from + direction];
+    if (!next) return;
+    toggle(next);
+    focusItem(next);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLInputElement>, item: ChoiceListItem) {
+    if (!activateOnly) return;
+    if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+      event.preventDefault();
+      moveRoving(item, 1);
+      return;
+    }
+    if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+      event.preventDefault();
+      moveRoving(item, -1);
+      return;
+    }
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      activate(item);
+    }
+  }
+
   return (
     <fieldset
       className="flex min-w-0 flex-col gap-1"
-      disabled={disabled}
-      aria-describedby={hintId}
+      disabled={lockMode === "native" ? disabled : undefined}
+      aria-disabled={ariaLock || undefined}
+      aria-describedby={groupDescribedBy}
       data-testid={testId}
     >
       <legend className="pb-1 text-meta text-ink-muted">{legend}</legend>
@@ -92,18 +163,23 @@ export function ChoiceList({
         {items.map((item) => {
           const checked = item.locked || selected.includes(item.id);
           const inert = Boolean(item.disabled) || Boolean(item.locked);
-          const detailId = `${name}-${item.id}-detail`;
+          const hasDetail = item.detail !== "";
+          const detailId = hasDetail ? `${name}-${item.id}-detail` : undefined;
+          const described =
+            [groupDescribedBy, detailId].filter(Boolean).join(" ") || undefined;
           return (
             <label
               key={item.id}
               htmlFor={`${name}-${item.id}`}
               className={cn(
                 "flex min-w-0 items-start gap-2 border-b border-line p-2 last:border-b-0",
-                item.disabled
-                  ? "cursor-not-allowed bg-surface-hover"
-                  : checked
-                    ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
-                    : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
+                ariaLock
+                  ? "cursor-default"
+                  : item.disabled
+                    ? "cursor-not-allowed bg-surface-hover"
+                    : checked
+                      ? "cursor-pointer bg-accent-soft active:bg-surface-pressed"
+                      : "cursor-pointer hover:bg-surface-hover active:bg-surface-pressed"
               )}
               data-testid={`${name}-row`}
               data-choice-id={item.id}
@@ -117,16 +193,32 @@ export function ChoiceList({
                 value={item.id}
                 checked={checked}
                 disabled={inert}
-                aria-describedby={detailId}
+                aria-disabled={ariaLock || undefined}
+                aria-describedby={described}
                 onChange={() => toggle(item)}
-                className="mt-1 accent-accent focus-visible:focus-ring"
+                onKeyDown={(event) => handleKeyDown(event, item)}
+                className={cn(
+                  "mt-1 accent-accent focus-visible:focus-ring",
+                  ariaLock && "opacity-50"
+                )}
               />
               <span className="flex min-w-0 flex-col gap-px">
-                <span className="break-keep text-body text-ink">{item.label}</span>
-                {/* 결과 문장은 hover 뒤가 아니라 언제나 여기 있다. */}
-                <span id={detailId} className="break-keep text-meta text-ink-muted">
-                  {item.detail}
+                <span
+                  className={cn(
+                    "break-keep text-body",
+                    ariaLock ? "text-ink-muted" : "text-ink"
+                  )}
+                >
+                  {item.label}
                 </span>
+                {/* 결과 문장은 hover 뒤가 아니라 언제나 여기 있다. 그룹 잠금은
+                    컨트롤만 흐리고 이름은 ink-muted, 사유는 읽힌다. 빈 설명은
+                    묶지도 그리지 않는다. */}
+                {hasDetail ? (
+                  <span id={detailId} className="break-keep text-meta text-ink-muted">
+                    {item.detail}
+                  </span>
+                ) : null}
               </span>
             </label>
           );

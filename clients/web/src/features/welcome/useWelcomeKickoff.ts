@@ -4,6 +4,7 @@ import { memberFor, type Directory } from "@momo/core/features/workspace/directo
 import { prefersReducedMotion } from "@/app/sidebarPane";
 import type { RealtimeHandle } from "@/lib/realtime";
 import { peekFreshSignup, clearFreshSignup } from "./freshSignup";
+import { settleKickoffHold } from "./firstRunGate";
 import {
   WELCOME_BACKSTOP_MS,
   decideWelcomeMount,
@@ -100,6 +101,13 @@ export function useWelcomeKickoff(input: {
         messages.map((message) => message.id.toLowerCase())
       );
       setPhase("stage");
+    } else if (
+      decision.reason !== "timeline-not-ready" &&
+      decision.reason !== "directory-not-ready" &&
+      decision.reason !== "unresolved-author" &&
+      decision.reason !== "not-default-channel"
+    ) {
+      queueMicrotask(() => settleKickoffHold());
     }
   }
 
@@ -116,6 +124,7 @@ export function useWelcomeKickoff(input: {
   const persistExit = useCallback(() => {
     clearFreshSignup();
     writeShownMarker(workspaceId, memberId);
+    settleKickoffHold();
   }, [workspaceId, memberId]);
 
   const finish = useCallback(() => {
