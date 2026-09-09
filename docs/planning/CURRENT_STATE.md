@@ -1,11 +1,11 @@
 # oort 기획 현재 상태 (Planning Current State)
 
-> **2026-09-09 스냅샷 96 (Fable · momo-main — ★E2E-A 그록봇 폐곡선 PASS(설치→doctor→터널/claim→Agent Port active→멘션 답장→disconnect 잔여 0). ADR-0184 Accepted. SH-11g/f·SH-12a·ADR-0185 병렬 진행(Fable 워커·Workflow). 워커 3 · 체인 1.)** 컴팩트 복원 진입점.
+> **2026-09-09 스냅샷 96 (Fable · momo-main — ★E2E-A 그록봇 폐곡선 PASS(설치→doctor→터널/claim→Agent Port active→멘션 답장→disconnect 잔여 0). ADR-0184 Accepted. ADR-0185 Proposed main 도달. SH-12a #2308 리뷰 PASS·랜딩 중, SH-11f #2307·SH-11g #2310 검토+감사 중. 워커 0 · 검토 2 · 체인 1.)** 컴팩트 복원 진입점.
 >
-> **★ 정본 헤드**: main `__MAIN__` · uxui `__UXUI__` · engine `__ENGINE__`. 정합 PASS.
+> **★ 정본 헤드**: main `4361cba7`(ADR-0185 Proposed 승격 bj) · uxui `4345ac3c` · engine `43192b1e`. 정합 PASS. **진행 중 체인**: `land-2308.sh`(SH-12a → uxui → main, 배치 bk) → 이 스냅샷 PR → (검토·감사 PASS 시) `land-2307.sh`(SH-11f, bl) → `land-2310.sh`(SH-11g, bm).
 > **★ 성재 결재(09-09 오후)**: ADR-0184 Accept · SH-12 제로베이스 온보딩 계획(데모 시드 착륙 ≠ 제로베이스) · **v0.1.5는 실제 온보딩 구조로 작업 뒤 발행** · 19:00까지 Fable 워커·Workflow 허용 · `Bash(osascript:*)` 허용(그록봇 로컬 제어).
 > **★ 결재 대기(ADR-0185 Proposed)**: D-A 온보딩 노선(권고 절충 3: 필수 이름+프로필 1화면 · 선택 초대 skip 탈출구 · 팀 규모 추론) · D-B 제로베이스 정의(권고 v0.1.5=(b) 시드 유지+덮어쓰기, (a) 시드 제거는 후속) · D-C 셀프호스트 킥오프 첫 에이전트 유도. 결재 뒤 SH-12b~e 발급.
-> **★ 다음**: 진행 중 PR 검토·랜딩(SH-11g #2296 · SH-11f #2297 · SH-12a #2301 · ADR-0185) → SH-11a~e 이슈화 → SH-12b~e(결재 뒤) → **v0.1.5 발행 준비**(CHANGELOG `[0.1.5]`·`releases/latest.json`, 성재 dispatch) → 제로베이스 온보딩 E2E 재실측 → ITO → G2(iOS v0·Railway 최종·APNs).
+> **★ 다음**: 체인 완주 확인(`$S/land-2308.log`·`land-2307.log`·`land-2310.log` DONE/ABORT) → SH-11f/g 검토 결과에 따라 랜딩 → SH-11a~e 이슈화 → SH-12b~e(결재 뒤) → **v0.1.5 발행 준비**(CHANGELOG `[0.1.5]`·`releases/latest.json`, 성재 dispatch) → 제로베이스 온보딩 E2E 재실측 → ITO → G2(iOS v0·Railway 최종·APNs).
 > **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md` · 브리프 `brief-sh12.md`·`brief-sh11*.md` · E2E-A 원장 `claudedocs/e2e-a-2026-09-09/LOG.md`.
 
 > 이하 스냅샷 95:
