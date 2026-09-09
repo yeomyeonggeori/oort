@@ -112,17 +112,10 @@ function grokPreset() {
   return hostedPreset("grok");
 }
 
-function genericPreset() {
-  return hostedPreset("generic");
-}
-
 function grokCardDetail(): string {
   const note = grokPreset().unverifiedNote ?? "";
   return `${note} ${FIRST_AGENT_GROK_WHAT_HAPPENS}`.trim();
 }
-
-/** generic 프리셋 분류 문장. 카드 줄에는 쓰지 않는다. */
-export const FIRST_AGENT_GENERIC_HINT = genericPreset().detail;
 
 export const FIRST_AGENT_CARDS: readonly FirstAgentCard[] = [
   {
@@ -231,8 +224,7 @@ export function firstAgentCardsUseHostedPresets(): boolean {
     grokCard.detail !== recipe &&
     openai.detail !== recipe &&
     !grokCard.detail.includes(generic.detail) &&
-    !openai.detail.includes(generic.detail) &&
-    FIRST_AGENT_GENERIC_HINT === generic.detail
+    !openai.detail.includes(generic.detail)
   );
 }
 
