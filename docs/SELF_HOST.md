@@ -155,7 +155,10 @@ in**. It creates nine secrets with `openssl`, writes values that must match
 (runtime-role passwords and the passwords inside connection URLs) the same,
 and if a port is already taken it picks the next free one and tells you.
 It also records the **first login account** and the chosen
-`MOMO_SELF_HOST_MODE`.
+`MOMO_SELF_HOST_MODE`. If stdout says it **adopted** an existing volume
+(`oort-pgdata`), confirm that is the data you want (it may be another
+checkout's) — to isolate this clone, see
+[Using two checkouts](#using-two-checkouts-at-once).
 
 Every value that goes from environment to file is first checked as a
 one-line scalar. A value containing LF/CR, a duplicate env key, or a port
@@ -371,10 +374,11 @@ the mock. This checkout has no hermes binary; the stand-in is
    ```
 
 5. Create an agent (agent directory → new agent), invite it to `#general`,
-   and let the welcome kickoff run (a new member join, or the first
-   `@handle` mention). The reply is a durable channel message with
-   `message.seq`. When that seq arrives, that is everything this document
-   promised.
+   and let the welcome kickoff run (a new **human** member joins
+   (invite/claim) — inviting an agent does not trigger it, ADR-0181 D2;
+   or the first `@handle` mention). The reply is a durable channel message
+   with `message.seq`. When that seq arrives, that is everything this
+   document promised.
 
 When you are done with an isolated project, reclaim it
 (`scripts/self_host_env.sh --compose down -v`) so leftover compose
@@ -392,7 +396,8 @@ Copy mode also writes uppercase `PLUGIN.yaml` next to `plugin.yaml` (Hermes
 on a case-sensitive volume looks up the uppercase name). The installer is
 the living check. `scripts/verify_hermes_gateway_adapter.sh` still starts
 the deleted Swift server package (`swift run --package-path server`, LS-1 /
-#2165) and is not a Rust-stack PASS.
+#2165) and is not a Rust-stack PASS — remainder of SH-9
+[#2231](https://github.com/yeomyeonggeori/oort/issues/2231).
 
 See [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md).
 
@@ -472,6 +477,25 @@ on a hosted-connection-only member returns `409 hosted_connection_managed`
 
 Evidence and ruling: [EXT-1 credential research](planning/research/2026-08-27-ext1-agent-credential-external-tools.md)
 (#1797) · [ADR-0173](adr/0173-external-tool-message-read.md).
+
+### Hosted agent (Agent Port) on self-host
+
+After Agent Port join ([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16),
+an **active** credential's `tools/list` must advertise the inbox tools. If
+that list is empty, hosted delivery is closed: set
+`MOMO_HOSTED_DELIVERY_ENABLED=true` (lowercase only — `True` / `1` / `yes`
+are closed) and restart **api** and **webhook-sender**. New env from
+`scripts/self_host_env.sh` already writes that line; existing env is not
+backfilled. `--railway` does not emit this key (the 41-key set is
+unchanged — putting it in the heredoc would make doctor require it on
+every existing install). To add the two gate lines, run the awk block in
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 — do not paste it
+here.
+
+`tools/list` needs the modern `params._meta` object
+([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16). `tools/call` needs
+the same `_meta` plus the `mcp-name` request header
+([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.4).
 
 ---
 
@@ -658,6 +682,7 @@ is refused ([two checkouts](#using-two-checkouts-at-once)).
 | Day-2: take or restore a dump | `scripts/oort backup` (`--out DIR`) and `scripts/oort restore <dump>`. Restore refuses a non-empty stack. If `momo_app`/`momo_relay`/`momo_worker` are absent it runs the stack's `runtime-roles` one-shot first, then `scripts/self_host_pg_restore.sh`. |
 | Day-2: invite a human or issue an agent bearer | `scripts/oort member invite` and `scripts/oort member credential --agent <handle>`. The invite code and agent token print once. |
 | Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
+| Bind mount fails (`Caddyfile.local`: not a directory) or the clone is outside the Docker VM share | Docker Desktop / Colima often does not share `/tmp` (and other non-home paths) with the VM. Clone under the home directory (`~/oort`), matching [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.1. |
 | Sign-in says `invalid credentials` | Use the values step 2 told you (`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). To change the password, the rotate command below. |
 | The screen comes up but messages do not arrive in realtime | Check outbox first (query below). `broadcast \| done` means the server side is finished; look at the browser (`oort logs api`). `pending`/`failed` is relay (`oort logs relay`). |
 | Settings → AI link is **403** | This instance has no listed operator. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — if the line is missing, re-run `scripts/self_host_env.sh --local-build` (or the mode you chose) and it appends only that line. Then restart api with `oort up -d`. [§5](#5-make-an-agent-answer-ai-link). |

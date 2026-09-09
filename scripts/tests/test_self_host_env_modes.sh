@@ -207,6 +207,8 @@ grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' \
 grep -Fxq 'DRIVE_VOLUME_NAME=oort-drive' "$local_fixture/infra/rust/local.secrets.env"
 # #1856 — local huddle advertises loopback. New files only.
 grep -Fxq 'MOMO_LIVEKIT_NODE_IP=127.0.0.1' "$local_fixture/infra/rust/local.secrets.env"
+# #2263 — new env opens hosted Agent Port delivery. Exact lowercase true.
+grep -Fxq 'MOMO_HOSTED_DELIVERY_ENABLED=true' "$local_fixture/infra/rust/local.secrets.env"
 grep -Fq 'scripts/self_host_env.sh --compose' "$local_output"
 grep -Fq 'production 백업/PITR가 아니다' "$local_output"
 grep -Fq -- 'up -d --build --wait' "$local_output"
@@ -230,6 +232,7 @@ run_generator "$published_fixture" "$published_output" 49200 --published-image "
 grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq "MOMO_RUST_IMAGE=$GOOD_DIGEST" "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_LIVEKIT_NODE_IP=127.0.0.1' "$published_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_HOSTED_DELIVERY_ENABLED=true' "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'MOMO_CORS_ALLOWED_ORIGINS=tauri://localhost,http://tauri.localhost' \
   "$published_fixture/infra/rust/local.secrets.env"
 grep -Fxq 'CENTRIFUGO_ALLOWED_ORIGINS=http://localhost:49200 http://127.0.0.1:49200 tauri://localhost http://tauri.localhost' \
@@ -578,6 +581,44 @@ if grep -q '^MOMO_LIVEKIT_NODE_IP=' "$legacy_nodeip_env"; then
 fi
 test "$legacy_nodeip_before" = "$(hash_file "$legacy_nodeip_env")"
 grep -Fq '이미 있다' "$legacy_nodeip_fixture/rerun-output"
+
+# #2263 — an env written before the hosted-delivery line existed is left
+# alone. Unlike PLATFORM_ADMIN_EMAILS this is not a repair key: backfilling
+# `true` onto an operator who closed the gate would open mention routing
+# they did not ask for.
+legacy_hosted_fixture="$(make_fixture legacy-hosted-delivery)"
+run_generator "$legacy_hosted_fixture" "$legacy_hosted_fixture/first-output" 49396 \
+  --local-build
+legacy_hosted_env="$legacy_hosted_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_HOSTED_DELIVERY_ENABLED=true' "$legacy_hosted_env"
+awk 'index($0, "MOMO_HOSTED_DELIVERY_ENABLED=") != 1 { print }' \
+  "$legacy_hosted_env" >"$legacy_hosted_fixture/stripped.env"
+mv "$legacy_hosted_fixture/stripped.env" "$legacy_hosted_env"
+if grep -q '^MOMO_HOSTED_DELIVERY_ENABLED=' "$legacy_hosted_env"; then
+  echo "fixture setup failed: MOMO_HOSTED_DELIVERY_ENABLED still present" >&2
+  exit 1
+fi
+legacy_hosted_before="$(hash_file "$legacy_hosted_env")"
+legacy_hosted_secrets_before="$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$legacy_hosted_env")"
+run_generator "$legacy_hosted_fixture" "$legacy_hosted_fixture/rerun-output" 49396 \
+  --local-build
+if grep -q '^MOMO_HOSTED_DELIVERY_ENABLED=' "$legacy_hosted_env"; then
+  echo "existing env was backfilled with MOMO_HOSTED_DELIVERY_ENABLED" >&2
+  exit 1
+fi
+test "$legacy_hosted_before" = "$(hash_file "$legacy_hosted_env")"
+test "$legacy_hosted_secrets_before" = "$(grep -E '^(JWT_HMAC|PROVIDER_LINK_MASTER_KEY|MOMO_APP_POSTGRES_PASSWORD|MOMO_INITIAL_OWNER_PASSWORD)=' "$legacy_hosted_env")"
+grep -Fq '이미 있다' "$legacy_hosted_fixture/rerun-output"
+
+# #2263 sabotage — dropping the key from a fresh env must make the
+# happy-path assertion RED, or the grep is not load-bearing.
+hosted_sabotage="$TMP_ROOT/hosted-sabotage.env"
+awk 'index($0, "MOMO_HOSTED_DELIVERY_ENABLED=") != 1 { print }' \
+  "$local_fixture/infra/rust/local.secrets.env" >"$hosted_sabotage"
+if grep -Fxq 'MOMO_HOSTED_DELIVERY_ENABLED=true' "$hosted_sabotage"; then
+  echo "sabotage (drop MOMO_HOSTED_DELIVERY_ENABLED) still matched true — assertion is not load-bearing" >&2
+  exit 1
+fi
 
 # Reject arithmetic expressions before Bash arithmetic or /dev/tcp sees them.
 port_fixture="$(make_fixture malicious-port)"

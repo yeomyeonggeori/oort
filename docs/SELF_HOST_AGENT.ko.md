@@ -1033,7 +1033,9 @@ URL·key 원문을 이 파일에 다시 적지 않는다. §3.3.17.3에 쓸 때�
 
 등록 REST와 sender drain은 `MOMO_DOORBELL_ENABLED` 가 소문자 **`true`**
 일 때만 열린다(ADR-0171 D6). **선행** 게이트는
-`MOMO_HOSTED_DELIVERY_ENABLED` — 같은 철자, 기본 off. 그 값이 없거나
+`MOMO_HOSTED_DELIVERY_ENABLED` — 같은 철자. `scripts/self_host_env.sh` 가
+만든 신규 env 는 소문자 `true` 를 쓴다. 기존 env 는 이 블록을 돌리기
+전까지 off. 그 값이 없거나
 `true`가 아닌 채 도어벨만 켜면 멘션이 hosted inbox로 가지 않아
 (`hosted_delivery_not_enabled` skip) 울릴 대상이 없다. 켠 것처럼
 보이는데 아무 일도 안 일어난다. `True` / `TRUE` / `1` / `yes` / `on`
