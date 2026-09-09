@@ -22,6 +22,7 @@ import {
   type OpenedReadSnapshot,
 } from "@/features/chat/openedReadState";
 import { useSession } from "@/app/session";
+import { applyFirstAgentFocus } from "@/features/welcome/firstAgentStore";
 import { SidebarDrawerToggle } from "@/app/SidebarDrawerToggle";
 import {
   channelLabel,
@@ -852,6 +853,10 @@ export function ChatShell() {
     if (input instanceof HTMLTextAreaElement) input.focus();
   }, []);
 
+  useEffect(() => {
+    applyFirstAgentFocus();
+  }, [channelId]);
+
   // Re-send a row the SERVER stored as `failed`. That message is durable and
   // will not change, so this is a genuinely new send with a fresh idempotency
   // key, not a retry of the old one: it goes through the same send path as the
@@ -939,7 +944,10 @@ export function ChatShell() {
               뒤에 서버 행이 없다. DM 헤더의 이름은 상대 프로필 카드를 여는
               트리거다(#1679). */}
           {stressCount === 0 && channel && channel.kind !== "dm" ? (
-            <h1 className="min-w-0 truncate text-body font-semibold text-ink">
+            <h1
+              tabIndex={-1}
+              className="min-w-0 truncate text-body font-semibold text-ink outline-none focus-visible:focus-ring"
+            >
               {labelParts?.text ?? label}
             </h1>
           ) : stressCount === 0 && channel?.kind === "dm" && peer ? (

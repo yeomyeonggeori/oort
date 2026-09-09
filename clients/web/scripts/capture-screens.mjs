@@ -12228,6 +12228,386 @@ async function waitUntilTokenPaint(page, selector, cssVar) {
 }
 
 /**
+ * UX-R2c (#2216). Login-after first-agent poses. Design-mode `?firstAgent=`
+ * only; not part of the default `all` profile. Nine shot names: eight URL
+ * poses plus `done-handoff` from the same `done` page after the hand-off click.
+ */
+async function captureFirstAgentScenes(browser, scheme) {
+  beginScene("first-agent");
+  const shots = [];
+  const readyByPose = {
+    cards: "first-agent-cards",
+    "one-time": "hosted-pairing-card",
+    detecting: "first-agent-detecting",
+    "cap-exceeded": "first-agent-cap-exceeded",
+    done: "first-agent-mention",
+    loading: "first-agent-loading",
+    offline: "first-agent-offline",
+    error: "first-agent-error",
+  };
+  const tapTargetsByPose = {
+    cards: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-continue", "계속"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    "one-time": [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    detecting: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    "cap-exceeded": [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-recheck", "다시 확인"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    done: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-mention-action", "첫 멘션"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    loading: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    offline: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+    error: [
+      ["first-agent-skip", "나중에"],
+      ["first-agent-reentry", "재진입"],
+    ],
+  };
+
+  async function shoot(pose, viewport, suffix) {
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate((nextPose) => {
+      window.location.hash = `/?firstAgent=${nextPose}`;
+    }, pose);
+    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
+    await page.getByTestId(readyByPose[pose]).waitFor({ state: "visible" });
+    await page.mouse.move(viewport.width + 80, viewport.height + 80);
+    await waitForAnimations(page);
+    if (pose === "offline" || pose === "error") {
+      const opacity = await page.evaluate(() => {
+        const input = document.querySelector(
+          "#first-agent-harness-claude-code"
+        );
+        return input ? getComputedStyle(input).opacity : "";
+      });
+      if (opacity !== "0.5") {
+        throw new Error(
+          `first-agent ${pose} ${scheme} ${viewport.width}: locked input opacity ${opacity}`
+        );
+      }
+    }
+    if (pose === "cards") {
+      const hovered = await page.evaluate(() => {
+        const hover = getComputedStyle(document.documentElement)
+          .getPropertyValue("--surface-hover")
+          .trim();
+        return [...document.querySelectorAll("[data-choice-id]")].flatMap((el) => {
+          const bg = getComputedStyle(el).backgroundColor;
+          if (bg === "rgba(0, 0, 0, 0)" || bg === "transparent") return [];
+          const probe = document.createElement("div");
+          probe.style.backgroundColor = hover || "var(--surface-hover)";
+          document.body.append(probe);
+          const target = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          if (bg === target) return [el.getAttribute("data-choice-id")];
+          return [];
+        });
+      });
+      if (hovered.length > 0) {
+        throw new Error(
+          `first-agent cards ${scheme} ${viewport.width}: hover fill on ${hovered.join(", ")}`
+        );
+      }
+    }
+    await assertNoHorizontalOverflow(
+      page,
+      `first-agent ${pose} ${scheme} ${viewport.width}`
+    );
+    if (pose === "done") {
+      const mentionTruncates = await page.evaluate(() =>
+        [...document.querySelectorAll(
+          '[data-testid="first-agent-mention"] .truncate'
+        )].map((el) => ({
+          overflow: el.scrollWidth > el.clientWidth + 1,
+          width: Math.round(el.getBoundingClientRect().width),
+        }))
+      );
+      if (mentionTruncates.length === 0) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 멘션 이름에 truncate 가 없다`
+        );
+      }
+      for (const row of mentionTruncates) {
+        if (row.width <= 0) {
+          throw new Error(
+            `first-agent done ${scheme} ${viewport.width}: truncate 폭이 0이다 (${JSON.stringify(mentionTruncates)})`
+          );
+        }
+        if (row.overflow !== false) {
+          throw new Error(
+            `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 false 가 아니다 (${JSON.stringify(mentionTruncates)})`
+          );
+        }
+      }
+    }
+    if (viewport.width === 390) {
+      const crumb = await page.evaluate(() => {
+        const el = document.querySelector('[data-testid="first-agent-reentry"]');
+        if (!el) return null;
+        const r = el.getBoundingClientRect();
+        return {
+          whiteSpace: getComputedStyle(el).whiteSpace,
+          right: r.right,
+        };
+      });
+      if (crumb && crumb.whiteSpace !== "nowrap") {
+        throw new Error(
+          `first-agent ${pose} ${scheme} 390: 재진입 경로가 nowrap 이 아니다 (${crumb.whiteSpace})`
+        );
+      }
+      if (crumb && crumb.right > 390 + 1) {
+        throw new Error(
+          `first-agent ${pose} ${scheme} 390: 재진입 경로가 화면을 넘긴다 (${crumb.right}px)`
+        );
+      }
+      await assertTapTargets(
+        page,
+        `first-agent ${pose} ${scheme} 390`,
+        tapTargetsByPose[pose]
+      );
+    }
+    if (pose === "done") {
+      const payoff = await page.evaluate(() => {
+        const heading = document.querySelector("#first-agent-heading");
+        return {
+          heading: heading?.textContent ?? "",
+          hasComposer: Boolean(document.querySelector("#composer-input")),
+          hasMention: Boolean(
+            document.querySelector('[data-testid="first-agent-mention"]')
+          ),
+        };
+      });
+      if (
+        !payoff.heading.includes("첫 에이전트 연결") ||
+        payoff.hasComposer ||
+        !payoff.hasMention
+      ) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: done 이 보상 화면이 아니다 (${JSON.stringify(payoff)})`
+        );
+      }
+    }
+    if (pose === "loading") {
+      const widths = await page.evaluate(() => {
+        const stage = document.querySelector('[data-testid="first-agent-stage"]');
+        const stageW = stage ? stage.getBoundingClientRect().width : 0;
+        const bars = [...document.querySelectorAll('[data-testid="skeleton-row"]')].map(
+          (el) => el.getBoundingClientRect().width
+        );
+        return { stageW, bars };
+      });
+      if (widths.bars.length === 0 || widths.bars.some((width) => width <= 0)) {
+        throw new Error(
+          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대 폭이 0이다 (${widths.bars.join(", ")})`
+        );
+      }
+      if (widths.bars.some((width) => width < widths.stageW - 1)) {
+        throw new Error(
+          `first-agent loading ${scheme} ${viewport.width}: 로딩 막대가 목록 폭이 아니다 stage=${widths.stageW} bars=${widths.bars.join(", ")}`
+        );
+      }
+    }
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/first-agent-${pose}${suffix}-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    if (pose === "done") {
+      beginScene("first-agent");
+      await sceneClick(page, page.getByTestId("first-agent-mention-action"));
+      await page.locator("#composer-input").waitFor({ state: "visible" });
+      const seeded = await page.evaluate(() => {
+        const el = document.querySelector("#composer-input");
+        const value =
+          el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement
+            ? el.value
+            : (el?.textContent ?? "");
+        return value;
+      });
+      if (!String(seeded).includes("@kim-intern ")) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 컴포저 초안이 없다 (${JSON.stringify(seeded)})`
+        );
+      }
+      await page.mouse.move(viewport.width + 80, viewport.height + 80);
+      await waitForAnimations(page);
+      await assertHoverToolbarCount(
+        page,
+        `first-agent done-handoff ${scheme} ${viewport.width}`,
+        0
+      );
+      const hoverBits = await page.evaluate(() => ({
+        messageToolbar:
+          document.querySelector('[data-testid="message-hover-toolbar"]') !==
+          null,
+        straddle:
+          document.querySelector(
+            ".hover-toolbar-straddle, .hover-toolbar-straddle-below"
+          ) !== null,
+      }));
+      if (hoverBits.messageToolbar || hoverBits.straddle) {
+        throw new Error(
+          `first-agent done-handoff ${scheme} ${viewport.width}: hover toolbar in shot (${JSON.stringify(hoverBits)})`
+        );
+      }
+      const handoff = beginSceneFromShotPath(
+        `${OUT_DIR}/first-agent-done-handoff${suffix}-${scheme}.png`
+      );
+      await page.screenshot({ path: handoff });
+      shots.push(handoff);
+    }
+    await context.close();
+  }
+
+  for (const pose of [
+    "cards",
+    "one-time",
+    "detecting",
+    "cap-exceeded",
+    "done",
+    "loading",
+    "offline",
+    "error",
+  ]) {
+    await shoot(pose, VIEWPORT, "");
+    await shoot(pose, MOBILE_VIEWPORT, "-390");
+  }
+
+  const FIRST_AGENT_LONG_NAME =
+    "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
+  if (FIRST_AGENT_LONG_NAME.length < 60) {
+    throw new Error(
+      `first-agent long-name fixture is ${FIRST_AGENT_LONG_NAME.length} chars`
+    );
+  }
+  {
+    const viewport = MOBILE_VIEWPORT;
+    const context = await browser.newContext({
+      viewport,
+      deviceScaleFactor: 2,
+      colorScheme: scheme,
+      reducedMotion: "reduce",
+    });
+    await installMocks(context);
+    await context.route("**/v1/workspaces/*/roster", (route) =>
+      json(route, {
+        members: ROSTER.map((member) =>
+          member.id === "019f9a01-0000-7000-8000-000000000404"
+            ? { ...member, displayName: FIRST_AGENT_LONG_NAME }
+            : member
+        ),
+      })
+    );
+    const page = await context.newPage();
+    await page.goto(ORIGIN, { waitUntil: "networkidle" });
+    await signIn(page);
+    await page.evaluate(() => {
+      window.location.hash = "/?firstAgent=done";
+    });
+    await page.getByTestId("first-agent-stage").waitFor({ state: "visible" });
+    await page.getByTestId("first-agent-mention-name").waitFor({
+      state: "visible",
+    });
+    await page.waitForFunction((expected) => {
+      const el = document.querySelector(
+        '[data-testid="first-agent-mention-name"]'
+      );
+      return (
+        el?.textContent === expected && el.getAttribute("title") === expected
+      );
+    }, FIRST_AGENT_LONG_NAME);
+    await page.mouse.move(viewport.width + 80, viewport.height + 80);
+    await waitForAnimations(page);
+    const probe = await page.evaluate(() => {
+      const name = document.querySelector(
+        '[data-testid="first-agent-mention-name"]'
+      );
+      const handle = document.querySelector(
+        '[data-testid="first-agent-mention-handle"]'
+      );
+      if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
+        return { missing: true };
+      }
+      const nameRect = name.getBoundingClientRect();
+      const handleRect = handle.getBoundingClientRect();
+      return {
+        missing: false,
+        title: name.getAttribute("title"),
+        overflow: name.scrollWidth > name.clientWidth,
+        nameRight: nameRect.right,
+        handleRight: handleRect.right,
+        handleText: handle.textContent,
+      };
+    });
+    if (probe.missing) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: mention name missing`
+      );
+    }
+    if (probe.nameRight > viewport.width + 1) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: name right ${probe.nameRight}`
+      );
+    }
+    if (probe.handleRight > viewport.width + 1) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle right ${probe.handleRight}`
+      );
+    }
+    if (probe.overflow !== true) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: ellipsis did not fire (${JSON.stringify(probe)})`
+      );
+    }
+    if (probe.title !== FIRST_AGENT_LONG_NAME) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: title ${JSON.stringify(probe.title)}`
+      );
+    }
+    if (!String(probe.handleText).includes("@kim-intern")) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle ${JSON.stringify(probe.handleText)}`
+      );
+    }
+    const path = beginSceneFromShotPath(
+      `${OUT_DIR}/first-agent-done-longname-390-${scheme}.png`
+    );
+    await page.screenshot({ path });
+    shots.push(path);
+    await context.close();
+  }
+  return shots;
+}
+
+/**
  * Hash navigation and `data-accent` both start 150ms color transitions.
  * Dawn is a no-op accent change, so `--accent` probes would pass on the
  * first tick while the selected row is still mid-transition. Finite
@@ -13828,6 +14208,11 @@ async function main() {
             }))
           );
         }
+      } else if (profile === "first-agent") {
+        for (const scheme of ["light", "dark"]) {
+          assertThisPreview();
+          all.push(...(await captureFirstAgentScenes(browser, scheme)));
+        }
       } else if (profile !== "mobile") {
         for (const scheme of ["light", "dark"]) {
           const shot = async (fn) => {
@@ -13877,7 +14262,8 @@ async function main() {
         profile !== "desktop" &&
         profile !== "accent" &&
         profile !== "gallery" &&
-        profile !== "agents"
+        profile !== "agents" &&
+        profile !== "first-agent"
       ) {
         for (const scheme of ["light", "dark"]) {
           assertThisPreview();
