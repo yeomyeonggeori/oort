@@ -12283,6 +12283,13 @@ async function captureFirstAgentScenes(browser, scheme) {
     ],
   };
 
+  const FIRST_AGENT_FIT_NAME = "김인턴데이터플랫폼온콜대기열용자명";
+  if (FIRST_AGENT_FIT_NAME.length !== 17) {
+    throw new Error(
+      `first-agent fit-name fixture is ${FIRST_AGENT_FIT_NAME.length} chars`
+    );
+  }
+
   async function shoot(pose, viewport, suffix) {
     const context = await browser.newContext({
       viewport,
@@ -12291,6 +12298,17 @@ async function captureFirstAgentScenes(browser, scheme) {
       reducedMotion: "reduce",
     });
     await installMocks(context);
+    if (pose === "done") {
+      await context.route("**/v1/workspaces/*/roster", (route) =>
+        json(route, {
+          members: ROSTER.map((member) =>
+            member.id === "019f9a01-0000-7000-8000-000000000404"
+              ? { ...member, displayName: FIRST_AGENT_FIT_NAME }
+              : member
+          ),
+        })
+      );
+    }
     const page = await context.newPage();
     await page.goto(ORIGIN, { waitUntil: "networkidle" });
     await signIn(page);
@@ -12342,6 +12360,12 @@ async function captureFirstAgentScenes(browser, scheme) {
       `first-agent ${pose} ${scheme} ${viewport.width}`
     );
     if (pose === "done") {
+      await page.waitForFunction((expected) => {
+        const el = document.querySelector(
+          '[data-testid="first-agent-mention-name"]'
+        );
+        return el?.textContent === expected;
+      }, FIRST_AGENT_FIT_NAME);
       const mentionTruncates = await page.evaluate(() =>
         [...document.querySelectorAll(
           '[data-testid="first-agent-mention"] .truncate'
@@ -12366,6 +12390,45 @@ async function captureFirstAgentScenes(browser, scheme) {
             `first-agent done ${scheme} ${viewport.width}: truncate overflow 가 false 가 아니다 (${JSON.stringify(mentionTruncates)})`
           );
         }
+      }
+      const fitName = await page.evaluate(() => {
+        const name = document.querySelector(
+          '[data-testid="first-agent-mention-name"]'
+        );
+        const handle = document.querySelector(
+          '[data-testid="first-agent-mention-handle"]'
+        );
+        if (!(name instanceof HTMLElement) || !(handle instanceof HTMLElement)) {
+          return { missing: true };
+        }
+        return {
+          missing: false,
+          text: name.textContent,
+          title: name.getAttribute("title"),
+          overflow: name.scrollWidth > name.clientWidth,
+          handleTitle: handle.getAttribute("title"),
+          handleOverflow: handle.scrollWidth > handle.clientWidth,
+        };
+      });
+      if (fitName.missing) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: mention name missing`
+        );
+      }
+      if (fitName.text !== FIRST_AGENT_FIT_NAME) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: name ${JSON.stringify(fitName.text)}`
+        );
+      }
+      if (fitName.overflow !== false || fitName.title != null) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 17자 이름에 title 이 있다 (${JSON.stringify(fitName)})`
+        );
+      }
+      if (fitName.handleOverflow !== false || fitName.handleTitle != null) {
+        throw new Error(
+          `first-agent done ${scheme} ${viewport.width}: 핸들 title ${JSON.stringify(fitName)}`
+        );
       }
     }
     if (viewport.width === 390) {
@@ -12565,6 +12628,8 @@ async function captureFirstAgentScenes(browser, scheme) {
         nameRight: nameRect.right,
         handleRight: handleRect.right,
         handleText: handle.textContent,
+        handleTitle: handle.getAttribute("title"),
+        handleOverflow: handle.scrollWidth > handle.clientWidth,
       };
     });
     if (probe.missing) {
@@ -12595,6 +12660,16 @@ async function captureFirstAgentScenes(browser, scheme) {
     if (!String(probe.handleText).includes("@kim-intern")) {
       throw new Error(
         `first-agent long-name ${scheme} 390: handle ${JSON.stringify(probe.handleText)}`
+      );
+    }
+    if (probe.handleOverflow === true && probe.handleTitle !== probe.handleText) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle truncated without title (${JSON.stringify(probe)})`
+      );
+    }
+    if (probe.handleOverflow !== true && probe.handleTitle != null) {
+      throw new Error(
+        `first-agent long-name ${scheme} 390: handle title without overflow (${JSON.stringify(probe)})`
       );
     }
     const path = beginSceneFromShotPath(

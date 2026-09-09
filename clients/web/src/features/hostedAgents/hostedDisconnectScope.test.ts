@@ -519,10 +519,12 @@ describe("해제 완료는 서버가 정한다 (#2204 R4-M1)", () => {
   });
 
   it("writeDetail 은 서버 응답을 그대로 두고 status 를 다시 쓰지 않는다", () => {
+    expect(section).toContain("parseDisconnectStart(wire, { connectionId: found.id })");
     expect(section).toContain("writeDetail(started)");
     expect(section).toContain("writeDetail(completed)");
     expect(section).not.toMatch(/status:\s*"disconnected"/);
     expect(section).not.toMatch(/\.status\s*=\s*"disconnected"/);
+    expect(section).not.toContain('status: "disconnected" as const');
   });
 
   it("착지 노드가 없으면 장부 제목으로 내린다", () => {
