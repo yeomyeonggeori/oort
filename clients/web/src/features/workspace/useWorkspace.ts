@@ -30,6 +30,9 @@ export * from "@momo/core/features/workspace/directory";
 export const workspaceIdentityKey = (workspaceId: string) =>
   ["settings", "workspace", workspaceId] as const;
 
+export const rosterQueryKey = (workspaceId: string) =>
+  ["roster", workspaceId] as const;
+
 /**
  * Display-only role name overrides from GET /v1/workspaces/{ws}.
  * Shares the settings workspace query so the rail, directory, and settings
@@ -46,7 +49,7 @@ export function useRoleLabels(workspaceId: string): RoleLabels {
 
 export function useDirectory(workspaceId: string) {
   const query = useQuery({
-    queryKey: ["roster", workspaceId],
+    queryKey: rosterQueryKey(workspaceId),
     queryFn: () => fetchRoster(workspaceId),
   });
   const directory = useMemo<Directory>(
