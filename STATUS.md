@@ -6,6 +6,10 @@
 - 검증: `scripts/tests/test_self_host_env_modes.sh`(신규 true · 기존 무백필 · 사보타주 RED) · `scripts/verify_openapi_contract_rust.sh --verify-cleanup-contract` · `scripts/local_gate.sh --profile docs`.
 - runtime-unverified: 실스택에서 신규 env 기본값으로 Agent Port `tools/list` 비지 않음은 E2E-B 런 뒤 문서화 범위(측정은 research/2026-09-09-e2e-b-selfhost-run.md). D4 후속은 #2231.
 
+## #2260 day-2 `oort upgrade --local-build` rebuilds (engine, 2026-09-09)
+
+- Track engine. `fix/oort-upgrade-local-build` onto `origin/track/engine`. Local-build (`--local-build` or env `MOMO_SELF_HOST_MODE=local-build`) skips `compose pull`, runs `compose build` then `up -d --wait`, waits for `IDEMPOTENCY_OK`, then doctor PASS. Digest `--to`/`--manifest` still pulls. Failure prints checkout-or-`restore` (not the failed `upgrade --local-build`). Red proof: `scripts/tests/test_oort_upgrade_localbuild.sh`. Isolated live upgrade transcript is in the PR. `oort-e2eb`/`oortv013` untouched. `stack.outbox` fail-row wording is #2264.
+
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
