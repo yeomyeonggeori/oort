@@ -1099,6 +1099,201 @@ fi
 grep -Fq 'MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다' \
   "$no_claim_fixture/origin-output"
 
+# ---------------------------------------------------------------------------
+# #2296 / ADR-0184 D3 — `--platform <name>` reads one row of
+# platform_profiles; `--railway` is an alias for `--platform railway`.
+# The generator runs the T2 path without docker, so the fixture only needs
+# python3 + jq on PATH next to the fake openssl (deterministic secrets).
+# ---------------------------------------------------------------------------
+PLATFORM_TOOL_PATH="$(dirname "$(command -v jq)"):$(dirname "$(command -v python3)")"
+PLATFORM_DB_URL="postgres://momo:fixturepass@pg.example.test:5432/momo?sslmode=require"
+
+# stdout and stderr are kept apart: the T2 contract is "KEY=value on stdout".
+run_platform_stdout() {
+  local fixture="$1" stdout="$2" stderr="$3"
+  shift 3
+  (
+    cd "$fixture"
+    PATH="$fixture/fake-bin:$PLATFORM_TOOL_PATH:/usr/bin:/bin" \
+      RAILWAY_PUBLIC_DOMAIN="platform.example.test" \
+      DATABASE_URL="$PLATFORM_DB_URL" \
+      MOMO_RUST_IMAGE="$GOOD_DIGEST" \
+      bash scripts/self_host_env.sh "$@"
+  ) >"$stdout" 2>"$stderr"
+}
+
+# --platform railway ≡ --railway: byte-identical stdout, same exit code.
+alias_fixture="$(make_fixture platform-alias)"
+run_platform_stdout "$alias_fixture" "$alias_fixture/railway.out" "$alias_fixture/railway.err" --railway || {
+  cat "$alias_fixture/railway.err" >&2
+  echo "--railway failed on the fixture (is the railway row still in platform_profiles?)" >&2
+  exit 1
+}
+run_platform_stdout "$alias_fixture" "$alias_fixture/platform.out" "$alias_fixture/platform.err" --platform railway || {
+  cat "$alias_fixture/platform.err" >&2
+  echo "--platform railway failed on the fixture" >&2
+  exit 1
+}
+test -s "$alias_fixture/railway.out" || { echo "--railway wrote nothing to stdout" >&2; exit 1; }
+cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
+  echo "--platform railway is not byte-identical to --railway" >&2
+  exit 1
+}
+grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
+grep -Fq -e '--platform railway 키 41개를 stdout에 썼다' "$alias_fixture/platform.err"
+# The hand-set keys and the internal hostname suffix come from the same row.
+grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
+grep -Fq '.railway.internal' "$alias_fixture/platform.err"
+# T2 stdout is exactly the canonical set: no stamp, no hosted-delivery key, no file.
+if grep -q '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out"; then
+  echo "--platform railway leaked MOMO_SELF_HOST_PLATFORM into the canonical set" >&2
+  exit 1
+fi
+if grep -q '^MOMO_HOSTED_DELIVERY_ENABLED=' "$alias_fixture/platform.out"; then
+  echo "--platform railway leaked MOMO_HOSTED_DELIVERY_ENABLED into the canonical set" >&2
+  exit 1
+fi
+if [ -e "$alias_fixture/infra/rust/local.secrets.env" ]; then
+  echo "--platform railway wrote an env file" >&2
+  exit 1
+fi
+
+# Unknown platform is refused before anything is read or written; the message
+# names the rows that exist.
+if run_platform_stdout "$alias_fixture" "$alias_fixture/unknown.out" "$alias_fixture/unknown.err" --platform heroku; then
+  echo "--platform heroku unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '알 수 없는 플랫폼: heroku' "$alias_fixture/unknown.err"
+grep -Fq 'railway' "$alias_fixture/unknown.err"
+test ! -s "$alias_fixture/unknown.out"
+if run_platform_stdout "$alias_fixture" "$alias_fixture/shape.out" "$alias_fixture/shape.err" --platform 'Rail way'; then
+  echo "--platform with a space unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '알 수 없는 플랫폼' "$alias_fixture/shape.err"
+if run_platform_stdout "$alias_fixture" "$alias_fixture/noname.out" "$alias_fixture/noname.err" --platform; then
+  echo "--platform without a name unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq -e '--platform 뒤에 플랫폼 이름이 필요하다' "$alias_fixture/noname.err"
+
+# T2 combination rules, independent of flag order.
+for combo in \
+  "--platform railway --local-build" \
+  "--local-build --platform railway" \
+  "--platform railway --published-image $GOOD_DIGEST" \
+  "--platform railway --public-origin https://other.example.test" \
+  "--public-origin https://other.example.test --platform railway" \
+  "--platform railway --allow-local-provider" \
+  "--allow-local-provider --platform railway" \
+  "--railway --platform railway" \
+  "--platform railway --platform railway" \
+  "--platform railway --compose up -d"; do
+  # shellcheck disable=SC2086 — the combo string is a deliberate word list.
+  if run_platform_stdout "$alias_fixture" "$alias_fixture/combo.out" "$alias_fixture/combo.err" $combo; then
+    echo "T2 combo unexpectedly succeeded: $combo" >&2
+    exit 1
+  fi
+  test ! -s "$alias_fixture/combo.out" || {
+    echo "T2 combo wrote stdout before failing: $combo" >&2
+    exit 1
+  }
+done
+grep -Fq -e '--platform 은 --compose 와 함께 지정할 수 없다' "$alias_fixture/combo.err"
+
+# T1 (fly · aws-lightsail · gcp-vm): the --public-origin file path plus the
+# MOMO_SELF_HOST_PLATFORM stamp outside the heredoc. Prove "same derivation"
+# by diffing against a plain --public-origin env on the same ports: the only
+# difference is the stamp block.
+t1_plain_fixture="$(make_fixture platform-t1-plain)"
+run_generator "$t1_plain_fixture" "$t1_plain_fixture/output" 49800 \
+  --local-build --public-origin https://fly.example.test
+t1_fly_fixture="$(make_fixture platform-t1-fly)"
+run_generator "$t1_fly_fixture" "$t1_fly_fixture/output" 49800 \
+  --platform fly --local-build --public-origin https://fly.example.test
+t1_plain_env="$t1_plain_fixture/infra/rust/local.secrets.env"
+t1_fly_env="$t1_fly_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=fly' "$t1_fly_env"
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$t1_fly_env")" = "1"
+grep -Fxq 'OORT_SITE_ADDRESS=fly.example.test' "$t1_fly_env"
+grep -Fxq 'MOMO_HOSTED_DELIVERY_ENABLED=true' "$t1_fly_env"
+grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$t1_fly_env"
+grep -Fq 'https://fly.example.test wss://fly.example.test' "$t1_fly_env"
+test "$(file_mode "$t1_fly_env")" = "600"
+if grep -q '^MOMO_SELF_HOST_PLATFORM=' "$t1_plain_env"; then
+  echo "plain --public-origin env carries a platform stamp" >&2
+  exit 1
+fi
+# Strip the stamp block (leading blank line + comment header + key) and the
+# files must be identical. Blank lines are held so the one that introduces
+# the stamp block is dropped with it, not squeezed globally.
+awk '
+  index($0, "# --- 플랫폼 프로파일") == 1 { skip = 1; held_blank = 0; next }
+  skip { if (index($0, "MOMO_SELF_HOST_PLATFORM=") == 1) skip = 0; next }
+  { if (held_blank) print ""; held_blank = 0 }
+  $0 == "" { held_blank = 1; next }
+  { print }
+  END { if (held_blank) print "" }
+' "$t1_fly_env" >"$t1_fly_fixture/stripped.env"
+diff -u "$t1_plain_env" "$t1_fly_fixture/stripped.env"
+# The stamp is outside the heredoc: the canonical key set does not grow.
+if awk '
+  /^cat >"\$ENV_FILE" <<EOF$/ { grab = 1; next }
+  grab && /^EOF$/ { exit }
+  grab && index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { found = 1 }
+  END { exit !found }
+' "$ROOT/scripts/self_host_env.sh"; then
+  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 41-key set would grow" >&2
+  exit 1
+fi
+
+# Same row again = idempotent maintenance (secrets untouched, still one stamp).
+t1_jwt_before="$(sed -n 's/^JWT_HMAC=//p' "$t1_fly_env")"
+run_generator "$t1_fly_fixture" "$t1_fly_fixture/again-output" 49800 \
+  --platform fly --public-origin https://fly.example.test
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$t1_fly_env")" = "1"
+test "$(sed -n 's/^JWT_HMAC=//p' "$t1_fly_env")" = "$t1_jwt_before"
+grep -Fq '시크릿은 그대로 두고 공개 오리진만 반영했다' "$t1_fly_fixture/again-output"
+# A different row on the same env is refused (like a mode change).
+if run_generator "$t1_fly_fixture" "$t1_fly_fixture/switch-output" 49800 \
+  --platform aws-lightsail --public-origin https://fly.example.test; then
+  echo "switching an existing env from fly to aws-lightsail unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '플랫폼 fly 으로 만들었다' "$t1_fly_fixture/switch-output"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=fly' "$t1_fly_env"
+# An env made without a row gets the stamp exactly once when a T1 row is named.
+run_generator "$t1_plain_fixture" "$t1_plain_fixture/stamp-output" 49800 \
+  --platform gcp-vm --public-origin https://fly.example.test
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=gcp-vm' "$t1_plain_env"
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$t1_plain_env")" = "1"
+grep -Fq 'MOMO_SELF_HOST_PLATFORM=gcp-vm 를 추가했다' "$t1_plain_fixture/stamp-output"
+
+# T1 without --public-origin is refused: the row says the origin is the flag.
+t1_noorigin_fixture="$(make_fixture platform-t1-no-origin)"
+for combo in "--platform fly" "--platform fly --local-build" "--platform aws-lightsail --published-image $GOOD_DIGEST"; do
+  # shellcheck disable=SC2086
+  if run_generator "$t1_noorigin_fixture" "$t1_noorigin_fixture/output" 49810 $combo; then
+    echo "T1 without --public-origin unexpectedly succeeded: $combo" >&2
+    exit 1
+  fi
+  grep -Fq '공개 오리진을 --public-origin 으로 받는다' "$t1_noorigin_fixture/output"
+  if [ -e "$t1_noorigin_fixture/infra/rust/local.secrets.env" ]; then
+    echo "T1 without --public-origin wrote an env file: $combo" >&2
+    exit 1
+  fi
+done
+# Every T1 row creates; the stamp is the row name verbatim.
+for name in aws-lightsail gcp-vm; do
+  row_fixture="$(make_fixture "platform-t1-$name")"
+  run_generator "$row_fixture" "$row_fixture/output" 49820 \
+    --platform "$name" --published-image "$GOOD_DIGEST" --public-origin "https://$name.example.test"
+  grep -Fxq "MOMO_SELF_HOST_PLATFORM=$name" "$row_fixture/infra/rust/local.secrets.env"
+  grep -Fxq "OORT_SITE_ADDRESS=$name.example.test" "$row_fixture/infra/rust/local.secrets.env"
+  grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$row_fixture/infra/rust/local.secrets.env"
+done
+
 echo "self-host image mode contract: PASS"
 
 # Real docker proof is a separate script so local_gate profiles do not each
