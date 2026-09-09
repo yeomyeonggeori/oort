@@ -1431,7 +1431,7 @@ scripts/self_host_env.sh --compose logs relay
 | `stack.compose_ps` | 서비스 없음/unhealthy | 그 서비스에 `--compose ps` / `logs`. claim 모드: `oort_compose`. `runtime-roles` 종료코드 1에 `password authentication failed for user "momo"` 는 남은 pgdata vs 새로 만든 env — `down -v`, env 삭제, §2.3 다시 (또는 **원래** env로 `up` 재시도). |
 | `stack.healthz` | 200 `database:ok` 아님 | `logs api`. |
 | `stack.agent_port` | 401 + Bearer scope 아님 | 잘못된 이미지. `releases/latest.json` 확인. |
-| `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 실패가 아니다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). 다른 kind: pending/failed면 `logs relay`. |
+| `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 **info**(개수)이다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). `agent_job` pending 은 5분 미만 info, 이상이면 major(kind/status/개수/최고 나이 나열). 다른 kind: pending/failed면 `logs relay`. |
 | `stack.migrate_idempotency` | `IDEMPOTENCY_OK` 없음 | `logs migrate`. |
 | `public.healthz` / `public.websocket` | 공개 오리진은 등록됐는데 200/101 없음 | 터널/Caddy와 `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 1회 재시작. |
 

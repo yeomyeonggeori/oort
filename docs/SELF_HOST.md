@@ -635,7 +635,8 @@ mounted `.p8`. Local stub never contacts Apple and refuses to boot without
 
 `scripts/oort doctor` treats the overlay as configured when compose lists
 `push-relay`/`notifier` or the overlay keys are set; pending `push_candidate`
-rows then fail the outbox check instead of being ignored.
+rows then fail the outbox check. Without that overlay they are **info**
+(count only), not fail.
 
 ## Stop · wipe
 

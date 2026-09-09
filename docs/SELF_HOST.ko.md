@@ -577,7 +577,8 @@ Dawn에 server id + 공개키만 넘긴 뒤:
 부팅을 거부한다. 계약: [docs/PUSH_RELAY_RUNBOOK.md](PUSH_RELAY_RUNBOOK.md).
 
 `scripts/oort doctor`는 오버레이가 구성되면(`push-relay`/`notifier` 또는
-오버레이 키) pending `push_candidate`를 outbox 실패로 본다.
+오버레이 키) pending `push_candidate`를 outbox 실패로 본다. 오버레이가
+없으면 개수만 **info**이지 fail이 아니다.
 
 ## 멈추기 · 지우기
 
