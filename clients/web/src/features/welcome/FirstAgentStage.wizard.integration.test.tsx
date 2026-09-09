@@ -4,6 +4,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { createHostedConnection, getHostedConnection, listHostedConnections } from "@momo/core/features/hostedAgents/api";
@@ -130,20 +131,26 @@ function countNeedle(haystack: string, needle: string): number {
   return haystack.split(needle).length - 1;
 }
 
-async function flush(): Promise<void> {
-  await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-  });
-}
-
 async function waitFor(check: () => boolean, label: string): Promise<void> {
-  for (let i = 0; i < 120; i += 1) {
-    if (check()) return;
-    await flush();
+  const assertHeld = () => {
+    if (!check()) throw new Error(`waitFor ${label}`);
+  };
+  const previousJest = (globalThis as { jest?: unknown }).jest;
+  const patchedJest = vi.isFakeTimers();
+  if (patchedJest) {
+    (globalThis as { jest?: unknown }).jest = vi;
   }
-  throw new Error(`waitFor ${label}`);
+  try {
+    await rtlWaitFor(assertHeld, { timeout: 5000 });
+  } finally {
+    if (patchedJest) {
+      if (previousJest === undefined) {
+        delete (globalThis as { jest?: unknown }).jest;
+      } else {
+        (globalThis as { jest?: unknown }).jest = previousJest;
+      }
+    }
+  }
 }
 
 function pressKey(el: Element, key: string): void {

@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useSession } from "@/app/session";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import { HostedAgentWizard } from "@/features/hostedAgents/HostedAgentWizard";
+import { TruncatingName } from "@/features/hostedAgents/TruncatingName";
 import {
   HostedConnectionSection,
   type HostedLedgerLanding,
@@ -141,35 +142,17 @@ function ActivityFacts({ updatedAtMs }: { updatedAtMs: number }) {
   );
 }
 
-function TruncatingName({ name }: { name: string }) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const [truncated, setTruncated] = useState(false);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (el === null) return;
-    const measure = () => {
-      setTruncated(el.scrollWidth > el.clientWidth);
-    };
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [name]);
-
+function CredentialsRowName({ name }: { name: string }) {
   return (
     <span
       className="min-w-0 flex-1"
       data-testid="agent-credentials-row-name"
     >
-      <span
-        ref={ref}
-        aria-hidden="true"
+      <TruncatingName
+        name={name}
         className="block truncate text-body text-ink"
-        title={truncated ? name : undefined}
-      >
-        {name}
-      </span>
+        visualOnly
+      />
       <span className="sr-only">{name}</span>
     </span>
   );
@@ -416,7 +399,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                             className="flex min-w-0 items-center overflow-hidden py-1"
                             data-testid="agent-credentials-row-body"
                           >
-                            <TruncatingName name={fullName} />
+                            <CredentialsRowName name={fullName} />
                           </div>
                           {facts}
                         </>
@@ -425,7 +408,7 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
                           className="flex min-w-0 flex-nowrap items-center gap-2 overflow-hidden pr-3 py-1"
                           data-testid="agent-credentials-row-body"
                         >
-                          <TruncatingName name={fullName} />
+                          <CredentialsRowName name={fullName} />
                           {facts}
                         </div>
                       )}

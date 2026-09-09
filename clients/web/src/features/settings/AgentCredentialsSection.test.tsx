@@ -404,7 +404,9 @@ describe("소스 규율", () => {
     expect(source).toContain('openLedger(row, "disconnect")');
     expect(source).toContain('openLedger(row, "doorbell")');
     expect(source).toContain('aria-current={selectedRow ? "true" : undefined}');
-    expect(source).toContain("title={truncated ? name : undefined}");
+    expect(source).toContain('from "@/features/hostedAgents/TruncatingName"');
+    expect(source).toContain("TruncatingName");
+    expect(source).toContain("visualOnly");
     expect(source).not.toMatch(/aria-label=\{fullName\}/);
     expect(source).toContain('<span className="sr-only">{name}</span>');
     expect(source).toContain('data-testid="agent-credentials-row-name"');

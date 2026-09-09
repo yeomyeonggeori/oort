@@ -6,10 +6,12 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { fetchRoster, listChannels } from "@momo/core/lib/api";
 import { firstMentionDraft } from "@momo/core/features/hostedAgents/firstMention";
+import { HOSTED_PRESETS } from "@momo/core/features/hostedAgents/presets";
 import { fetchProviderLink } from "@momo/core/features/settings/api";
 import {
   getHostedConnection,
@@ -27,12 +29,10 @@ import {
   FIRST_AGENT_CODEX_DETAIL,
   FIRST_AGENT_CONNECTED_CLAIM,
   FIRST_AGENT_DETAIL_FORBIDDEN,
-  FIRST_AGENT_GENERIC_HINT,
   FIRST_AGENT_LEAD_CAP,
   FIRST_AGENT_LEAD_CARDS,
   FIRST_AGENT_LEAD_DETECTING,
   FIRST_AGENT_MENTION_ACTION,
-  FIRST_AGENT_MENTION_TITLE_CHARS,
   FIRST_AGENT_OPENAI_DETAIL,
   FIRST_AGENT_RECHECK_LABEL,
   FIRST_AGENT_RECHECKING,
@@ -259,11 +259,26 @@ async function flush(): Promise<void> {
 }
 
 async function waitFor(check: () => boolean, label: string): Promise<void> {
-  for (let i = 0; i < 80; i += 1) {
-    if (check()) return;
-    await flush();
+  const assertHeld = () => {
+    if (!check()) throw new Error(`waitFor ${label}`);
+  };
+  // RTL 의 fake-timer 분기는 `jest` 를 본다. vitest 는 `vi` 만 있다.
+  const previousJest = (globalThis as { jest?: unknown }).jest;
+  const patchedJest = vi.isFakeTimers();
+  if (patchedJest) {
+    (globalThis as { jest?: unknown }).jest = vi;
   }
-  throw new Error(`waitFor ${label}`);
+  try {
+    await rtlWaitFor(assertHeld, { timeout: 5000 });
+  } finally {
+    if (patchedJest) {
+      if (previousJest === undefined) {
+        delete (globalThis as { jest?: unknown }).jest;
+      } else {
+        (globalThis as { jest?: unknown }).jest = previousJest;
+      }
+    }
+  }
 }
 
 function pressKey(el: Element, key: string): void {
@@ -396,11 +411,8 @@ describe("H-K 긴 이름은 패널 안에서 자른다", () => {
   const FIRST_AGENT_LONG_NAME =
     "김인턴-데이터플랫폼-온콜 Agent Runtime Operations Assistant 김인턴-온콜대기열용자";
 
-  it("60자 이름은 말줄임 클래스와 title 이 있고 핸들은 남는다", async () => {
+  it("60자 이름은 말줄임 클래스와 핸들이 있고 title 은 측정에 맡긴다", async () => {
     expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThanOrEqual(60);
-    expect(FIRST_AGENT_LONG_NAME.length).toBeGreaterThan(
-      FIRST_AGENT_MENTION_TITLE_CHARS
-    );
     const longAgent: RosterMember = {
       ...agent,
       displayName: FIRST_AGENT_LONG_NAME,
@@ -465,13 +477,34 @@ describe("H-K 긴 이름은 패널 안에서 자른다", () => {
     expect(name).toBeTruthy();
     expect(name?.className.split(/\s+/)).toContain("truncate");
     expect(name?.className.split(/\s+/)).toContain("min-w-0");
-    expect(name?.getAttribute("title")).toBe(FIRST_AGENT_LONG_NAME);
+    expect(name?.getAttribute("title")).toBeNull();
     expect(handle).toBeTruthy();
+    expect(handle?.className.split(/\s+/)).toContain("truncate");
+    expect(handle?.className.split(/\s+/)).toContain("min-w-0");
     expect(handle?.textContent).toContain("@intern");
+    expect(source()).toContain('from "@/features/hostedAgents/TruncatingName"');
+    expect(source()).toMatch(
+      /<TruncatingName\b[^>]*testId="first-agent-mention-name"/
+    );
+    expect(source()).toMatch(
+      /<TruncatingName\b[^>]*testId="first-agent-mention-handle"/
+    );
+    expect(source()).not.toContain("FIRST_AGENT_MENTION_TITLE_CHARS");
+    expect(source()).not.toMatch(/name\.length\s*>/);
   });
 });
 
 describe("소스 규율", () => {
+  it("waitFor 는 Testing Library 5s 이고 80회 flush 가 아니다", () => {
+    const text = readFileSync(
+      resolve(process.cwd(), "src/features/welcome/FirstAgentStage.test.tsx"),
+      "utf8"
+    );
+    expect(text).toContain('from "@testing-library/react"');
+    expect(text).toContain("timeout: 5000");
+    expect(text).not.toMatch(/for \(let i = 0; i < 80/);
+  });
+
   it("위저드·1회용 카드·첫 멘션 조각·ChoiceList 를 복제하지 않는다", () => {
     const text = source();
     expect(text).toContain("HostedAgentWizard");
@@ -483,6 +516,7 @@ describe("소스 규율", () => {
     expect(text).toContain("elapsedLabel");
     expect(text).toContain("ChoiceList");
     expect(text).toContain('lockMode="aria"');
+    expect(text).toContain("TruncatingName");
     expect(text).toContain("rosterQueryKey");
     expect(text).toContain("OnboardingSlideTransition");
     expect(text).not.toContain("FirstMentionOnboarding");
@@ -512,9 +546,10 @@ describe("카드 4 · 건너뛰기", () => {
     );
     expect(host.textContent).toContain("Grok Bot");
     expect(host.textContent).toContain(FIRST_AGENT_LEAD_CARDS);
-    expect(
-      countNeedle(host.textContent ?? "", FIRST_AGENT_GENERIC_HINT)
-    ).toBe(0);
+    const genericDetail =
+      HOSTED_PRESETS.find((preset) => preset.id === "generic")?.detail ?? "";
+    expect(genericDetail).not.toBe("");
+    expect(countNeedle(host.textContent ?? "", genericDetail)).toBe(0);
     expect(host.textContent).toContain(FIRST_AGENT_OPENAI_DETAIL);
     expect(
       countNeedle(host.textContent ?? "", FIRST_AGENT_OPENAI_DETAIL)
@@ -535,10 +570,10 @@ describe("카드 4 · 건너뛰기", () => {
     ).toContain("claude-code-detail");
     expect(openaiDetail).toBeTruthy();
     expect(openaiDetail?.textContent).toBe(FIRST_AGENT_OPENAI_DETAIL);
-    expect(describedText(host, "openai-compat")).not.toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "openai-compat")).not.toContain(genericDetail);
     expect(describedText(host, "claude-code")).toContain(FIRST_AGENT_CLAUDE_DETAIL);
     expect(describedText(host, "codex")).toContain(FIRST_AGENT_CODEX_DETAIL);
-    expect(describedText(host, "grok")).not.toContain(FIRST_AGENT_GENERIC_HINT);
+    expect(describedText(host, "grok")).not.toContain(genericDetail);
     const renderedDetails: string[] = [];
     for (const id of ["claude-code", "codex", "grok", "openai-compat"] as const) {
       const detail = host.querySelector(`#first-agent-harness-${id}-detail`);
