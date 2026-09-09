@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## doctor/status `stack.outbox` 판정 (#2264, 2026-09-09)
+
+- Track engine. `fix/doctor-outbox-verdict` onto `origin/track/engine`. Isolated compose `oort2264d` (did not touch `oortv013`): first `docker compose exec postgres psql` while health=`starting` is rc=2 / empty stdout (`socket ... No such file or directory`); empty `GROUP BY` is also empty stdout rc=0; measured TSV `push_candidate|pending|4` + `agent_job|pending|1` classified **fail** with 「값 미나열」.
+- Fix in `scripts/lib/oort_doctor.sh`: unconfigured `push_candidate` pending is **info** (count); configured still **fail**. `agent_job` pending age (`lease_acquired_at` else `created_at`) `<5m` info / `≥5m` major, values listed (`kind|status|count max_age=`). Empty successful query is pass. Exec failure skip names 「postgres 컨테이너가 아직 준비되지 않음(재시도)」 or migrate-대기. `scripts/tests/test_oort_doctor_outbox.sh` 3 fixtures + unconfigured-branch sabotage RED.
+- runtime-unverified: full local-build bring-up of doctor-then-status on a product stack (reproduced the two oracles on postgres-only `oort2264d`).
+
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-first-agent-funnel` onto `origin/track/uxui`. 로그인 뒤 first-run = 킥오프(ADR-0181) → 첫 에이전트 카드 4종 → 폰 연결(M0w). 카드는 `HOSTED_PRESETS` + `ChoiceList`, 발급은 `HostedAgentWizard(entry="settings")`, 1회용은 `OneTimeSecretCard`, 감지는 hosted `get` 지수 백오프(2s→30s, 상한 5분). 「나중에」 상시. ConnectPage 4/4 무접촉.
