@@ -368,7 +368,9 @@ macOS LaunchServices는 dev/release 스킴 핸들러를 하나만 고른다. 링
 
 좌표: `packages/momo-core/src/features/auth/connectModel.ts:47,75-123`.
 
-둘째 사용자가 채널 목록을 보면 합류는 끝난 것이다.
+둘째 사용자가 채널 목록을 보면 합류는 끝난 것이다. 그 로그인 뒤 first-run
+순서는 웰컴 킥오프 → 첫 에이전트 연결 → 폰 연결이다. 로그인 전 4/4 카운터
+(`ConnectPage`)는 그대로다.
 
 ---
 

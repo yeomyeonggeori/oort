@@ -176,6 +176,7 @@ export function HostedAgentWizard({
   opener,
   launch = null,
   entry = "hub",
+  onPairingSaved,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -187,6 +188,8 @@ export function HostedAgentWizard({
    * 허브는 기존처럼 진행 중인 연결을 먼저 보여 준다.
    */
   entry?: "hub" | "settings";
+  /** 1회용 연결 값을 저장한 뒤. 호출부가 감지 폴링을 이어받을 때 쓴다. */
+  onPairingSaved?: (connectionId: string) => void;
 }) {
   if (!open) return null;
   return (
@@ -196,6 +199,7 @@ export function HostedAgentWizard({
         opener={opener ?? null}
         launch={launch}
         entry={entry}
+        onPairingSaved={onPairingSaved}
       />
     </Dialog>
   );
@@ -206,11 +210,13 @@ function HostedWizardBody({
   opener,
   launch,
   entry,
+  onPairingSaved,
 }: {
   onClose: () => void;
   opener: DialogFocusTarget | null;
   launch: HostedWizardLaunch | null;
   entry: "hub" | "settings";
+  onPairingSaved?: (connectionId: string) => void;
 }) {
   const { workspaceId, session } = useSession();
   const client = useQueryClient();
@@ -561,8 +567,10 @@ function HostedWizardBody({
             pairing={pairing}
             nowMs={nowMs}
             onDone={() => {
+              const id = selectedId;
               setPairing(null);
               purgeHostedCredentials(client);
+              if (id !== null) onPairingSaved?.(id);
             }}
           />
         )}
