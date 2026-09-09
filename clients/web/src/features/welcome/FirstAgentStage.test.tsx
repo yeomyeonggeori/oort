@@ -6,6 +6,7 @@ import { act, createElement, type ReactElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { HashRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { waitFor as rtlWaitFor } from "@testing-library/react";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { RosterMember } from "@momo/core/lib/api";
 import { fetchRoster, listChannels } from "@momo/core/lib/api";
@@ -258,11 +259,25 @@ async function flush(): Promise<void> {
 }
 
 async function waitFor(check: () => boolean, label: string): Promise<void> {
-  for (let i = 0; i < 80; i += 1) {
-    if (check()) return;
-    await flush();
+  const assertHeld = () => {
+    if (!check()) throw new Error(`waitFor ${label}`);
+  };
+  // RTL 의 fake-timer 분기는 `jest` 를 본다. vitest 는 `vi` 만 있다.
+  const previousJest = (globalThis as { jest?: unknown }).jest;
+  const patchedJest = vi.isFakeTimers();
+  if (patchedJest) {
+    (globalThis as { jest?: unknown }).jest = vi;
   }
-  throw new Error(`waitFor ${label}`);
+  try {
+    await rtlWaitFor(assertHeld, { timeout: 5000 });
+  } finally {
+    if (!patchedJest) return;
+    if (previousJest === undefined) {
+      delete (globalThis as { jest?: unknown }).jest;
+    } else {
+      (globalThis as { jest?: unknown }).jest = previousJest;
+    }
+  }
 }
 
 function pressKey(el: Element, key: string): void {
@@ -479,6 +494,16 @@ describe("H-K 긴 이름은 패널 안에서 자른다", () => {
 });
 
 describe("소스 규율", () => {
+  it("waitFor 는 Testing Library 5s 이고 80회 flush 가 아니다", () => {
+    const text = readFileSync(
+      resolve(process.cwd(), "src/features/welcome/FirstAgentStage.test.tsx"),
+      "utf8"
+    );
+    expect(text).toContain('from "@testing-library/react"');
+    expect(text).toContain("timeout: 5000");
+    expect(text).not.toMatch(/for \(let i = 0; i < 80/);
+  });
+
   it("위저드·1회용 카드·첫 멘션 조각·ChoiceList 를 복제하지 않는다", () => {
     const text = source();
     expect(text).toContain("HostedAgentWizard");
