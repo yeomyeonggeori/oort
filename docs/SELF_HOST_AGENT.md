@@ -33,7 +33,17 @@ in a shell on that machine.
 - leave the user's machine or account
 - paste secrets into chat (passwords, pairing/active credentials, claim
   tokens, doorbell keys, session tokens, `DATABASE_URL`)
-- control apps by automation (selectors, remote debugging, scripted UI)
+- drive a vendor chat app (Grok Bot and the like) by automation —
+  selectors, remote debugging, scripted UI
+- click through a platform console on the user's behalf. A platform
+  console (Railway, Fly, AWS, GCP, Cloudflare, …) is reached in this order:
+  **official CLI / MCP → REST API with a user-provided token → browser
+  automation**. Browser automation is only a **human-approval point** for
+  steps that have no API — sign-up, billing, DNS delegation, OAuth consent.
+  At that point the agent **stops and hands the screen to the user**; it
+  does not click for them (ADR-0184 D2). Platform CLI/MCP reuse the user's
+  own login session; platform tokens never land in chat, issues, or the
+  tree (ADR-0004)
 - run ACME / Let's Encrypt against a host this machine does not own
 - name `caddy.override.yml` or the production `Caddyfile` on a loopback
   install (that overlay orders certificates)
@@ -71,14 +81,30 @@ Human playbook (same stack, longer prose): [`SELF_HOST.md`](SELF_HOST.md).
 Pick **one** row. Then do §2 (shared core). Then the matching §3 branch.
 Do not mix edges (loopback `Caddyfile.local` vs public `Caddyfile`).
 
-| | Local machine | VPS with own domain | Grok Bot VM (Tailscale Funnel) | Railway | Fly | AWS | GCP |
+Tiers are ADR-0184 D1. **T1** runs the compose canon as-is (doctor
+`stack.*` and every day-2 command work). **T2** is managed containers + a
+PG plugin: image, edge and env are derived from the canon; `stack.*`,
+`oort backup/restore/upgrade` wait for day-2 v2 (SH-11e). **T3** is edge
+only — never compute. "Operated by" is the §0 order: official CLI/MCP in
+the user's own session → REST with a user token → browser only at a human
+approval point. Env derivation for every row is
+`scripts/self_host_env.sh --platform <name>` reading one table
+(`platform_profiles`): `railway` (T2, alias `--railway`) · `fly` ·
+`aws-lightsail` · `gcp-vm` (T1, same derivation as `--public-origin` plus
+`MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; the canonical 41-key
+set never grows). Local, VPS and the Grok Bot VM have no row — they are
+the compose canon itself.
+
+| Platform | Tier | Branch · recipe | Operated by | Human approval points | Prerequisites | Edge · URL model | Done means |
 |---|---|---|---|---|---|---|---|
-| **Prerequisites** | Docker Engine + Compose v2, git, jq, openssl, curl. ≥ 1 GiB free (2 GiB better). | Same, plus DNS for a host this machine owns. | curl, tar, Docker Engine + Compose v2, openssl, jq. git is not required. Durable dir `/workspace`. Tailscale account (one). | Docker-capable runtime. Template lands in SH-5a; until then follow §3.2. | Same as VPS until SH-5b `fly.toml`. | VM + compose + domain (SH-5b). | Same as AWS. |
-| **Edge** | `local.override.yml` + `Caddyfile.local` (`:80`, no ACME). | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). Keys `OORT_SITE_ADDRESS` and `OORT_CSP_CONNECT_SRC` are derived by `scripts/self_host_env.sh --public-origin` — do not type them by hand. | Loopback Caddy + Tailscale Funnel to the web port. **Do not** start `caddy.override.yml` here (ACME). `--public-origin` still registers the Funnel URL in Centrifugo. | Public origin of the platform domain, same two env keys as VPS. | Same as VPS. | Same as VPS. | Same as VPS. |
-| **URL model** | `http://127.0.0.1:<MOMO_WEB_PORT>` (generator default 8088 if free). | Operator-declared `https://<host>`. | `https://<machine>.<tailnet>.ts.net` while Funnel state under `/workspace` lives. | Platform hostname. | Fly hostname or custom domain. | Operator domain. | Operator domain. |
-| **Accounts** | None beyond this machine. | DNS for the domain. | Tailscale (one). Zero-account + stable URL is **not** something this playbook delivers (RA-7). | Platform account (SH-5a). | Fly account (SH-5b). | Cloud account (SH-5b). | Same. |
-| **Doctor** | `scripts/oort doctor --json` after up. `public.*` skip is OK. | Same, then again after the public overlay: `public.healthz` and `public.websocket` must pass. | Same after Funnel + `--public-origin`. `public.*` must pass against the Funnel origin. | Same as VPS once a public origin exists. | Same. | Same. | Same. |
-| **Done means** | Doctor `summary.verdict=PASS` and a browser (or login API) session as `owner@oort.local`. | Doctor PASS including public checks, HTTPS login. | Doctor PASS including public checks, one-time claim URL sent to the user, first-day dump on `/workspace`. | Doctor PASS on the deployed origin (SH-5a). | Same. | Same. | Same. |
+| **Local machine** | T1 | §3.1 | Shell on this machine (compose). | None. | Docker Engine + Compose v2, git, jq, openssl, curl. ≥ 1 GiB free (2 GiB better). | `local.override.yml` + `Caddyfile.local` (`:80`, no ACME). `http://127.0.0.1:<MOMO_WEB_PORT>` (generator default 8088 if free). | Doctor `summary.verdict=PASS` (`public.*` skip is OK) and a browser (or login API) session as `owner@oort.local`. |
+| **VPS with own domain** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. Provider CLI only if the user already has one logged in. | Provider sign-up/billing; the DNS record for the host. | Same as Local, plus DNS for a host this machine owns. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). Keys `OORT_SITE_ADDRESS` and `OORT_CSP_CONNECT_SRC` are derived by `scripts/self_host_env.sh --public-origin` — do not type them by hand. Operator-declared `https://<host>`. | Doctor PASS including `public.healthz` and `public.websocket`, HTTPS login. |
+| **Fly.io** (single VM + volume) | T1 | §3.5 · provisioning recipe SH-11b (`fly.toml` + volume) | `flyctl` in the user's login → Fly REST with a user token → browser. | Fly sign-up/billing; custom-domain DNS. | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly hostname or custom domain. | Same as VPS. |
+| **AWS Lightsail / EC2** | T1 | §3.6 · provisioning recipe SH-11c (+ minimal Terraform) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS sign-up/billing; IAM consent; the DNS record. | Cloud account; VM + compose + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
+| **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
+| **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). `stack.*` and `oort backup/restore/upgrade` are not available until day-2 v2 (SH-11e). |
+| **Cloudflare** (edge only) | T3 | Recipe SH-11d — DNS · Tunnel · TLS in front of a T1/T2 row | `wrangler` / MCP `mcp.cloudflare.com` in the user's session → REST with an API token → browser. | Cloudflare sign-up; nameserver delegation at the registrar; Tunnel token creation. | A T1/T2 row already up. Not compute: Containers/Workers are not adopted (ADR-0184 D1). | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS. | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. |
+| **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | Shell in the VM (compose) + `tailscale` CLI. | Tailscale login and Funnel enable (4–5 clicks); opening the one-time claim URL. Zero-account + stable URL is **not** something this playbook delivers (RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git is not required. Durable dir `/workspace`. Tailscale account (one). | Loopback Caddy + Tailscale Funnel to the web port. **Do not** start `caddy.override.yml` here (ACME). `--public-origin` still registers the Funnel URL in Centrifugo. `https://<machine>.<tailnet>.ts.net` while Funnel state under `/workspace` lives. | Doctor PASS including public checks against the Funnel origin, one-time claim URL sent to the user, first-day dump on `/workspace`. |
 
 Desktop Tauri Origins (`tauri://localhost`, `http://tauri.localhost`) are on the
 self-host allow list. Opening the **public** URL from a browser or RN needs
@@ -1336,11 +1362,13 @@ does not ship. Do not paste platform secrets into chat.
 2. After the plugin URL and the caddy hostname exist:
 
 ```sh
-scripts/self_host_env.sh --railway
+scripts/self_host_env.sh --platform railway
 ```
 
-   Requires `RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` in the environment
-   (explicit fail if either is missing — not a doctor `public.*` skip).
+   (`--railway` is the alias.) Requires `RAILWAY_PUBLIC_DOMAIN` and
+   `DATABASE_URL` in the environment (explicit fail if either is missing —
+   not a doctor `public.*` skip). The row in `platform_profiles` says which
+   variables are read and which keys stay by hand.
    Apply the KEY=value stdout as Railway variables. Also set the three keys
    compose interpolates that are not in the generator file (`CENT_API_URL`,
    `WORKER_DATABASE_URL`, Centrifugo proxy header) — listed in the README.
@@ -1360,21 +1388,33 @@ scripts/oort doctor --json
 
 ### 3.5 Fly
 
-SH-5b lands `fly.toml` + volume. Until then, follow §3.2 on a Fly VM.
+T1. The compose procedure is §3.2 on one Fly VM with a volume; the
+platform provisioning recipe (`fly.toml` + volume, `flyctl` in the user's
+login) is SH-11b. Env is the §3.2 derivation with the row name (`IMAGE_REF` read in §2.2):
+
+```sh
+scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-origin https://<host>
+```
+
+Human approval points: Fly sign-up/billing, custom-domain DNS.
 **Gate:** `scripts/oort doctor --json` after the public origin is registered.
 
 ### 3.6 AWS
 
-SH-5b is "VM + compose + domain" (minimal Terraform later). Until then:
-provision a VM you own, §2 + §3.2. ACME only for a hostname this VM's DNS
-owns.
+T1. The compose procedure is §3.2 on a Lightsail/EC2 VM you own; the
+provisioning recipe (`aws` CLI / AWS MCP in the user's session, minimal
+Terraform) is SH-11c. Env: `--platform aws-lightsail --public-origin
+https://<host>` with the image mode. ACME only for a hostname this VM's
+DNS owns. Human approval points: AWS sign-up/billing, IAM consent, the
+DNS record.
 
 **Gate:** `scripts/oort doctor --json` including public checks.
 
 ### 3.7 GCP
 
-Same contract as §3.6. **Gate:** `scripts/oort doctor --json` including
-public checks.
+T1, same contract as §3.6 with `gcloud` and `--platform gcp-vm`. Human
+approval points: GCP sign-up/billing, OAuth consent, the DNS record.
+**Gate:** `scripts/oort doctor --json` including public checks.
 
 ---
 
