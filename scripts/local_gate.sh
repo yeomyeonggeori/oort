@@ -938,6 +938,7 @@ case "$PROFILE" in
     add_static_commands
     add_cmd_once "self-host day-2 contract (#2124)" 'scripts/tests/test_oort_day2.sh'
     add_cmd_once "oort doctor contract (#2124)" 'scripts/tests/test_oort_doctor.sh'
+    add_cmd_once "oort doctor outbox verdict (#2264)" 'scripts/tests/test_oort_doctor_outbox.sh'
     add_cmd_once "public edge contract (#2124)" 'scripts/tests/test_public_edge.sh'
     add_cmd_once "release manifest contract" 'scripts/tests/test_release_manifest.sh'
     add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124) and the release-manifest contract."
