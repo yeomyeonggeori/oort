@@ -271,11 +271,12 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
   try {
     await rtlWaitFor(assertHeld, { timeout: 5000 });
   } finally {
-    if (!patchedJest) return;
-    if (previousJest === undefined) {
-      delete (globalThis as { jest?: unknown }).jest;
-    } else {
-      (globalThis as { jest?: unknown }).jest = previousJest;
+    if (patchedJest) {
+      if (previousJest === undefined) {
+        delete (globalThis as { jest?: unknown }).jest;
+      } else {
+        (globalThis as { jest?: unknown }).jest = previousJest;
+      }
     }
   }
 }
