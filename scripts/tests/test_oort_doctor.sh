@@ -12,7 +12,13 @@ OORT="$REPO_ROOT/scripts/oort"
 TEMPLATE="$SCRIPT_DIR/fixtures/oort-doctor/valid.env.template"
 OVERLAY="$SCRIPT_DIR/fixtures/oort-doctor/doorbell-true.env.overlay"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-doctor-test.XXXXXX")"
-cleanup() { rm -rf "$SANDBOX"; }
+PG_CID=""
+HTTP_PID=""
+cleanup() {
+  [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
+  [ -n "$PG_CID" ] && docker rm -f "$PG_CID" >/dev/null 2>&1 || true
+  rm -rf "$SANDBOX"
+}
 trap cleanup EXIT INT TERM
 cd "$REPO_ROOT"
 
@@ -364,5 +370,220 @@ fi
 assert_no_secret_leak "status json" "$SANDBOX/status.out"
 assert_no_secret_leak "status stderr" "$SANDBOX/status.err"
 pass "status is live (doctor reuse + image); not a stub"
+
+# -----------------------------------------------------------------------------
+# 7. T2 stack.* v2 (local PG URL + HTTP origin fixture)
+# -----------------------------------------------------------------------------
+command -v docker >/dev/null 2>&1 || fail "docker is required for T2 doctor proofs"
+docker info >/dev/null 2>&1 || fail "docker daemon is required for T2 doctor proofs"
+# shellcheck source=../lib/oort_common.sh
+# shellcheck disable=SC1091
+OORT_ROOT="$REPO_ROOT"
+export OORT_ROOT
+. "$REPO_ROOT/scripts/lib/oort_doctor.sh"
+. "$REPO_ROOT/scripts/lib/oort_common.sh"
+
+EXPECTED_MIG="$(oort_doctor_expected_migration_count)"
+printf '%s' "$EXPECTED_MIG" | grep -Eq '^[1-9][0-9]*$' || \
+  fail "expected migration count is not a positive integer: ${EXPECTED_MIG}"
+SQL_FN="$(oort_doctor_migrate_idempotency_sql "$EXPECTED_MIG")"
+printf '%s' "$SQL_FN" | grep -Fq 'schema_migrations' || \
+  fail "migrate SQL does not observe schema_migrations: $SQL_FN"
+printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
+  fail "migrate SQL is a tautology SELECT 1"
+
+T1_IDS="$SANDBOX/t1.ids"
+jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
+# status --json includes the same checks as doctor plus image; ids come from doctor.
+T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
+
+PG_PORT="$(pick_port 25432)"
+MOCK_PORT="$(pick_port 18765)"
+PG_CID="$(docker run -d --rm \
+  -e POSTGRES_USER=momo \
+  -e POSTGRES_PASSWORD="$TOKEN_PG" \
+  -e POSTGRES_DB=momo \
+  -p "127.0.0.1:${PG_PORT}:5432" \
+  postgres:18)"
+i=0
+while [ "$i" -lt 40 ]; do
+  docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1 && break
+  i=$((i + 1))
+  sleep 1
+done
+docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1 || fail "T2 doctor postgres not ready"
+T2_URL="postgres://momo:${TOKEN_PG}@127.0.0.1:${PG_PORT}/momo"
+
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <<SQL
+CREATE TABLE outbox (
+  kind text NOT NULL,
+  status text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  lease_acquired_at timestamptz
+);
+CREATE TABLE schema_migrations (
+  version text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+SQL
+MIG_SQL="$SANDBOX/schema_migrations.sql"
+{
+  echo "BEGIN;"
+  find "$REPO_ROOT/server/Migrations" -maxdepth 1 -name '[0-9][0-9][0-9]_*.sql' \
+    | sort | while IFS= read -r f; do
+    printf "INSERT INTO schema_migrations(version) VALUES ('%s');\n" "$(basename "$f")"
+  done
+  echo "COMMIT;"
+} >"$MIG_SQL"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <"$MIG_SQL" >/dev/null
+APPLIED_N="$(docker exec -i "$PG_CID" psql -U momo -d momo -At -c "SELECT count(*)::text FROM schema_migrations;")"
+[ "$APPLIED_N" = "$EXPECTED_MIG" ] || \
+  fail "seeded schema_migrations count ${APPLIED_N} != expected ${EXPECTED_MIG}"
+
+python3 - "$MOCK_PORT" "$EXPECTED_MIG" <<'PY' &
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+port = int(sys.argv[1])
+applied = int(sys.argv[2])
+body = json.dumps({
+    "status": "ok",
+    "service": "momo-server",
+    "database": "ok",
+    "schema": {"applied": applied, "head": "086_device_link_token.sql"},
+}).encode()
+
+class H(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path.split("?")[0] == "/healthz":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def do_POST(self):
+        if self.path.split("?")[0] == "/v1/mcp/agent-port":
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Bearer scope="agent:port:connect"')
+            self.end_headers()
+            return
+        self.send_response(404)
+        self.end_headers()
+
+    def log_message(self, *_args):
+        return
+
+HTTPServer(("127.0.0.1", port), H).serve_forever()
+PY
+HTTP_PID=$!
+i=0
+while [ "$i" -lt 20 ]; do
+  curl -sS -m 1 "http://127.0.0.1:${MOCK_PORT}/healthz" >/dev/null 2>&1 && break
+  i=$((i + 1))
+  sleep 0.2
+done
+curl -sS -m 1 "http://127.0.0.1:${MOCK_PORT}/healthz" >/dev/null || fail "T2 mock /healthz did not start"
+HEALTHZ_BODY="$(curl -sS -m 2 "http://127.0.0.1:${MOCK_PORT}/healthz")"
+printf '%s' "$HEALTHZ_BODY" | jq -e '.status=="ok" and .service=="momo-server" and .database=="ok" and (.schema|type=="object")' >/dev/null || \
+  fail "mock /healthz missing schema or original fields: $HEALTHZ_BODY"
+
+T2_ENV="$SANDBOX/t2.env"
+awk -v url="$T2_URL" -v origin="http://127.0.0.1:${MOCK_PORT}" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
+  index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 {
+    print "CENTRIFUGO_ALLOWED_ORIGINS=" origin " http://localhost:8088"
+    next
+  }
+  { print }
+' "$VALID" >"$T2_ENV"
+printf '\nMOMO_SELF_HOST_PLATFORM=railway\n' >>"$T2_ENV"
+chmod 600 "$T2_ENV"
+
+OUT="$SANDBOX/t2-doctor.json"
+ERR="$SANDBOX/t2-doctor.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
+T2_IDS="$SANDBOX/t2.ids"
+jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
+T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
+[ "$T1_COUNT" = "$T2_COUNT" ] || \
+  fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
+cmp -s "$T1_IDS" "$T2_IDS" || \
+  fail "T2 checks[].id set != T1: $(diff "$T1_IDS" "$T2_IDS" || true)"
+[ "$(check_field "$OUT" stack.compose_ps status)" = "skip" ] || \
+  fail "T2 stack.compose_ps should skip: $(check_field "$OUT" stack.compose_ps status)"
+detail="$(check_field "$OUT" stack.compose_ps detail)"
+printf '%s' "$detail" | grep -Fq 'T2: compose 없음, 플랫폼 서비스 상태는 레시피 CLI 소관' || \
+  fail "compose_ps skip wording: $detail"
+for id in stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency; do
+  st="$(check_field "$OUT" "$id" status)"
+  [ "$st" = "pass" ] || [ "$st" = "fail" ] || \
+    fail "$id T2 status was $st (pass/fail only)"
+  [ "$st" != "skip" ] || fail "$id T2 skipped (only compose_ps may skip)"
+done
+[ "$(check_field "$OUT" stack.healthz status)" = "pass" ] || \
+  fail "T2 stack.healthz want pass: $(check_field "$OUT" stack.healthz detail)"
+[ "$(check_field "$OUT" stack.agent_port status)" = "pass" ] || \
+  fail "T2 stack.agent_port want pass: $(check_field "$OUT" stack.agent_port detail)"
+[ "$(check_field "$OUT" stack.outbox status)" = "pass" ] || \
+  fail "T2 stack.outbox want pass: $(check_field "$OUT" stack.outbox detail)"
+[ "$(check_field "$OUT" stack.migrate_idempotency status)" = "pass" ] || \
+  fail "T2 stack.migrate_idempotency want pass: $(check_field "$OUT" stack.migrate_idempotency detail)"
+assert_no_secret_leak "t2 doctor json" "$OUT"
+assert_no_secret_leak "t2 doctor stderr" "$ERR"
+if grep -Fq "$T2_URL" "$OUT" "$ERR"; then
+  fail "T2 doctor leaked MIGRATE_DATABASE_URL"
+fi
+if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
+  fail "T2 doctor leaked postgres password"
+fi
+pass "T2 doctor ids=${T2_COUNT} match T1; stack.* skip only compose_ps; other 4 pass"
+
+# Incomplete ledger (one migration missing) → migrate_idempotency fail.
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
+  -c "DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations);" >/dev/null
+OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/t2-norm.XXXXXX")"
+export OORT_DOCTOR_ENV_NORM
+oort_doctor_load_env "$T2_ENV"
+INCOMPLETE="$(oort_psql_migrate "$(oort_doctor_migrate_idempotency_sql "$EXPECTED_MIG")")"
+[ "$INCOMPLETE" = "INCOMPLETE" ] || \
+  fail "incomplete ledger SQL want INCOMPLETE got ${INCOMPLETE}"
+OUT="$SANDBOX/t2-incomplete.json"
+ERR="$SANDBOX/t2-incomplete.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$(check_field "$OUT" stack.migrate_idempotency status)" = "fail" ] || \
+  fail "incomplete ledger should fail migrate_idempotency: $(check_field "$OUT" stack.migrate_idempotency status) $(check_field "$OUT" stack.migrate_idempotency detail)"
+pass "incomplete schema_migrations (1 missing) → stack.migrate_idempotency fail"
+
+# Wrong password → stack.outbox fail (not skip/pass).
+BAD_ENV="$SANDBOX/t2-badpw.env"
+awk -v url="$T2_URL" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 {
+    sub(/:'"$TOKEN_PG"'@/, ":x'"${TOKEN_PG}"'@")
+    print
+    next
+  }
+  { print }
+' "$T2_ENV" >"$BAD_ENV"
+# Keep POSTGRES_PASSWORD matching the real secret so env.role_passwords is not
+# the only failure; pair check compares POSTGRES_PASSWORD to URL password.
+# After mutation they will mismatch — that is a blocker. Still require outbox fail.
+chmod 600 "$BAD_ENV"
+OUT="$SANDBOX/t2-badpw.json"
+ERR="$SANDBOX/t2-badpw.err"
+code="$(run_doctor "$BAD_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$(check_field "$OUT" stack.outbox status)" = "fail" ] || \
+  fail "bad MIGRATE_DATABASE_URL password: outbox status=$(check_field "$OUT" stack.outbox status) (want fail)"
+[ "$(check_field "$OUT" stack.outbox status)" != "skip" ] || fail "bad password outbox skipped"
+[ "$(check_field "$OUT" stack.outbox status)" != "pass" ] || fail "bad password outbox passed"
+if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
+  fail "bad-password doctor leaked the real password"
+fi
+pass "bad MIGRATE_DATABASE_URL password → stack.outbox fail; password not printed"
 
 echo "[oort-doctor-test] PASS: $CASES case(s)"

@@ -10,7 +10,13 @@ REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/../.." && pwd)"
 OORT="$REPO_ROOT/scripts/oort"
 TEMPLATE="$SCRIPT_DIR/fixtures/oort-doctor/valid.env.template"
 SANDBOX="$(mktemp -d "${TMPDIR:-/tmp}/oort-day2-test.XXXXXX")"
-cleanup() { rm -rf "$SANDBOX"; }
+PG_CID=""
+HTTP_PID=""
+cleanup() {
+  [ -n "$HTTP_PID" ] && kill "$HTTP_PID" >/dev/null 2>&1 || true
+  [ -n "$PG_CID" ] && docker rm -f "$PG_CID" >/dev/null 2>&1 || true
+  rm -rf "$SANDBOX"
+}
 trap cleanup EXIT INT TERM
 cd "$REPO_ROOT"
 
@@ -412,5 +418,144 @@ if grep -Fq "planted-bearer-${TOKEN_JWT}" "$OUT" "$ERR"; then
 fi
 grep -Fq '***' "$OUT" || fail "logs did not mask secrets with ***"
 pass "logs masks planted secrets (0 hits) and keeps non-secret lines"
+
+# -----------------------------------------------------------------------------
+# 7. T2 URL backup/restore (local postgres:18 pretending to be railway)
+# -----------------------------------------------------------------------------
+command -v docker >/dev/null 2>&1 || fail "docker is required for T2 URL proofs"
+docker info >/dev/null 2>&1 || fail "docker daemon is required for T2 URL proofs"
+# shellcheck source=../lib/pg_dump_custom.sh
+# shellcheck disable=SC1091
+. "$REPO_ROOT/scripts/lib/pg_dump_custom.sh"
+PG_RESTORE_BIN="$(momo_pg_client_bin pg_restore)" || fail "pg_restore 없음 (postgresql-client 필요)"
+PSQL_BIN="$(momo_pg_client_bin psql)" || fail "psql 없음 (postgresql-client 필요)"
+
+PG_PORT="$(pick_port 25432)"
+PG_CID="$(docker run -d --rm \
+  -e POSTGRES_USER=momo \
+  -e POSTGRES_PASSWORD="$TOKEN_PG" \
+  -e POSTGRES_DB=momo \
+  -p "127.0.0.1:${PG_PORT}:5432" \
+  postgres:18)"
+i=0
+while [ "$i" -lt 40 ]; do
+  if docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1; then
+    break
+  fi
+  i=$((i + 1))
+  sleep 1
+done
+docker exec "$PG_CID" pg_isready -U momo >/dev/null 2>&1 || \
+  fail "throwaway postgres:18 did not become ready"
+T2_URL="postgres://momo:${TOKEN_PG}@127.0.0.1:${PG_PORT}/momo"
+
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <<'SQL'
+CREATE TABLE message (id int);
+CREATE TABLE outbox (
+  kind text NOT NULL,
+  status text NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  lease_acquired_at timestamptz
+);
+CREATE TABLE schema_migrations (
+  version text PRIMARY KEY,
+  applied_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE ROLE momo_app;
+CREATE ROLE momo_relay;
+CREATE ROLE momo_worker;
+SQL
+
+T2_ENV="$SANDBOX/t2.env"
+awk -v url="$T2_URL" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
+  { print }
+' "$VALID" >"$T2_ENV"
+printf '\nMOMO_SELF_HOST_PLATFORM=railway\n' >>"$T2_ENV"
+chmod 600 "$T2_ENV"
+
+T2_OUT="$SANDBOX/t2-backup.out"
+T2_ERR="$SANDBOX/t2-backup.err"
+T2_DUMP_DIR="$SANDBOX/t2-dumps"
+mkdir -p "$T2_DUMP_DIR"
+code="$(run_cmd "$T2_OUT" "$T2_ERR" "$OORT" backup --tier t2 --env "$T2_ENV" --out "$T2_DUMP_DIR")"
+[ "$code" = "0" ] || fail "T2 backup exit $code stdout=$(cat "$T2_OUT") stderr=$(cat "$T2_ERR")"
+T2_DUMP="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$T2_OUT")"
+[ -n "$T2_DUMP" ] && [ -s "$T2_DUMP" ] || fail "T2 backup produced no dump: $(cat "$T2_OUT")"
+T2_BYTES="$(wc -c <"$T2_DUMP" | tr -d '[:space:]')"
+[ "$T2_BYTES" -gt 0 ] || fail "T2 dump was 0 bytes"
+assert_no_secret_leak "t2 backup" "$T2_OUT" "$T2_ERR"
+if grep -Fq "$T2_URL" "$T2_OUT" "$T2_ERR"; then
+  fail "T2 backup leaked MIGRATE_DATABASE_URL"
+fi
+pass "T2 backup --tier t2 dump bytes=${T2_BYTES} >0; no URL leak"
+
+T1_DUMP="$SANDBOX/t1-container.dump"
+momo_pg_dump_custom "$PG_CID" momo momo "$T1_DUMP"
+toc_count() {
+  "$PG_RESTORE_BIN" -l "$1" | awk '/^[0-9]+;/{ n++ } END { print n + 0 }'
+}
+T2_TOC="$(toc_count "$T2_DUMP")"
+T1_TOC="$(toc_count "$T1_DUMP")"
+[ "$T2_TOC" = "$T1_TOC" ] || \
+  fail "T2 TOC ${T2_TOC} != T1 container dump TOC ${T1_TOC}"
+[ "$T2_TOC" -gt 0 ] || fail "TOC item count was 0"
+pass "T2 URL dump TOC items=${T2_TOC} match T1 container dump"
+
+MSG_BEFORE="$("$PSQL_BIN" "$T2_URL" -At -c "SELECT count(*)::text FROM message;")"
+T2_REST_OUT="$SANDBOX/t2-restore.out"
+T2_REST_ERR="$SANDBOX/t2-restore.err"
+code="$(run_cmd "$T2_REST_OUT" "$T2_REST_ERR" "$OORT" restore "$T2_DUMP" --tier t2 --env "$T2_ENV" --yes)"
+[ "$code" = "0" ] || fail "T2 restore exit $code stdout=$(cat "$T2_REST_OUT") stderr=$(cat "$T2_REST_ERR")"
+MSG_AFTER="$("$PSQL_BIN" "$T2_URL" -At -c "SELECT count(*)::text FROM message;")"
+[ "$MSG_BEFORE" = "$MSG_AFTER" ] || \
+  fail "T2 restore message count ${MSG_AFTER} != ${MSG_BEFORE}"
+assert_no_secret_leak "t2 restore" "$T2_REST_OUT" "$T2_REST_ERR"
+if grep -Fq "$T2_URL" "$T2_REST_OUT" "$T2_REST_ERR"; then
+  fail "T2 restore leaked MIGRATE_DATABASE_URL"
+fi
+pass "T2 restore into empty stack keeps message count=${MSG_AFTER}"
+
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <<'SQL'
+DROP ROLE IF EXISTS momo_app;
+DROP ROLE IF EXISTS momo_relay;
+DROP ROLE IF EXISTS momo_worker;
+SQL
+T2_NOROLE_OUT="$SANDBOX/t2-norole.out"
+T2_NOROLE_ERR="$SANDBOX/t2-norole.err"
+code="$(run_cmd "$T2_NOROLE_OUT" "$T2_NOROLE_ERR" "$OORT" restore "$T2_DUMP" --tier t2 --env "$T2_ENV" --yes)"
+[ "$code" != "0" ] || fail "T2 roles-less restore exited 0"
+if ! grep -F '플랫폼 preDeploy(' "$T2_NOROLE_ERR" "$T2_NOROLE_OUT" | grep -Fq 'MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate'; then
+  fail "T2 roles-less die phrase mismatch: stdout=$(cat "$T2_NOROLE_OUT") stderr=$(cat "$T2_NOROLE_ERR")"
+fi
+if ! grep -Fq '를 먼저 돌려라' "$T2_NOROLE_ERR" "$T2_NOROLE_OUT"; then
+  fail "T2 roles-less die phrase missing 먼저 돌려라: stdout=$(cat "$T2_NOROLE_OUT") stderr=$(cat "$T2_NOROLE_ERR")"
+fi
+assert_no_secret_leak "t2 norole" "$T2_NOROLE_OUT" "$T2_NOROLE_ERR"
+pass "T2 roles-less restore stops with preDeploy phrase"
+
+# ③ T1 env + --tier t2 is an explicit mismatch (do not URL-backup a T1 stack).
+MIS_OUT="$SANDBOX/tier-mismatch.out"
+MIS_ERR="$SANDBOX/tier-mismatch.err"
+code="$(run_cmd "$MIS_OUT" "$MIS_ERR" "$OORT" backup --tier t2 --env "$VALID" --out "$T2_DUMP_DIR")"
+[ "$code" != "0" ] || fail "T1 env --tier t2 backup exited 0"
+grep -Eqi 'tier|T1|다르다|URL' "$MIS_ERR" "$MIS_OUT" || \
+  fail "tier mismatch did not explain the refusal: $(cat "$MIS_ERR") $(cat "$MIS_OUT")"
+assert_no_secret_leak "tier mismatch" "$MIS_OUT" "$MIS_ERR"
+pass "T1 env + --tier t2 refuses (does not URL-backup T1)"
+
+# T2 upgrade --no-backup prints digest replace and does not inspect volumes.
+UP_OUT="$SANDBOX/t2-upgrade.out"
+UP_ERR="$SANDBOX/t2-upgrade.err"
+code="$(run_cmd "$UP_OUT" "$UP_ERR" "$OORT" upgrade --tier t2 --env "$T2_ENV" --yes --no-backup --to "$LIST_DIGEST")"
+[ "$code" = "0" ] || fail "T2 upgrade --no-backup exit $code stdout=$(cat "$UP_OUT") stderr=$(cat "$UP_ERR")"
+grep -Fq "$LIST_DIGEST" "$UP_OUT" "$UP_ERR" || \
+  fail "T2 upgrade did not print the target list digest"
+grep -Fq 'scripts/oort doctor --tier t2 --json' "$UP_OUT" "$UP_ERR" || \
+  fail "T2 upgrade did not name doctor --tier t2 PASS as the done condition"
+grep -Eqi '볼륨이 없다|oort_require_volumes|compose pull|compose build|compose up' "$UP_OUT" "$UP_ERR" && \
+  fail "T2 upgrade invoked compose/volumes: $(cat "$UP_OUT") $(cat "$UP_ERR")"
+assert_no_secret_leak "t2 upgrade" "$UP_OUT" "$UP_ERR"
+pass "T2 upgrade --no-backup prints digest replace; no volume/compose"
 
 echo "[oort-day2-test] PASS: $CASES case(s)"
