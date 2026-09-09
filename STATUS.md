@@ -5,6 +5,11 @@
 - Track UXUI. `feat/uxr2c-followup` onto `origin/track/uxui`. UX-R2c R7 M-8/N-13/N-14 + SH-6a-w R7-N4.
 - 첫 에이전트 보상 이름·핸들은 `features/hostedAgents/TruncatingName` 을 재사용한다 (`scrollWidth > clientWidth` 일 때만 `title`). 길이 16 휴리스틱·`FIRST_AGENT_GENERIC_HINT` 삭제. `parseDisconnectStart` 는 서버 `cleanup_pending` 을 그대로 돌리고, 웹 해제 시작 렌더 시험은 GET 을 멈추어 파서 결과를 그린다.
 - runtime-unverified: 실서버 hosted create/detect/disconnect 왕복은 mock·캡처 범위. `capture:design` 은 `verify_merge_tree.sh`·`local_gate.sh`·CI 에 없음 — 별건.
+## E2E-B 문서 정정 + 신규 env hosted delivery 기본값 (#2263, 2026-09-09)
+
+- Track engine. `docs/2263-e2e-b-corrections` onto `origin/track/engine`. SELF_HOST(+ko) D1/D3/D4/D6/D9, SELF_HOST_AGENT(+ko) §3.3.17.2, OpenAPI `CreateAgentRequest.baseUrl`(ADR-0004 증보) + `POST …/channels/{channelId}/members`. 생성기 신규 env만 `MOMO_HOSTED_DELIVERY_ENABLED=true`(기존 env 무접촉, Railway 41키 유지).
+- 검증: `scripts/tests/test_self_host_env_modes.sh`(신규 true · 기존 무백필 · 사보타주 RED) · `scripts/verify_openapi_contract_rust.sh --verify-cleanup-contract` · `scripts/local_gate.sh --profile docs`.
+- runtime-unverified: 실스택에서 신규 env 기본값으로 Agent Port `tools/list` 비지 않음은 E2E-B 런 뒤 문서화 범위(측정은 research/2026-09-09-e2e-b-selfhost-run.md). D4 후속은 #2231.
 
 ## doctor/status `stack.outbox` 판정 (#2264, 2026-09-09)
 
