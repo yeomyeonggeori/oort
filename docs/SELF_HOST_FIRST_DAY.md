@@ -391,7 +391,9 @@ Join-failure sentences (same screen on web and desktop):
 
 Coordinates: `packages/momo-core/src/features/auth/connectModel.ts:47,75-123`.
 
-When the second user sees the channel list, join is done.
+When the second user sees the channel list, join is done. After that login,
+first-run order is welcome kickoff → first agent connection → phone link.
+The pre-login 4/4 counter (`ConnectPage`) is unchanged.
 
 ---
 
