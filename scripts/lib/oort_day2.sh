@@ -269,6 +269,28 @@ oort_print_rollback() {
     "$previous" "$env_path" >&2
 }
 
+oort_upgrade_t2() {
+  local previous="$1" target_image="$2" dump_path="$3"
+  local env_path platform
+  env_path="${OORT_DOCTOR_ENV:-infra/rust/local.secrets.env}"
+  platform="$(oort_platform_name)"
+  [ -n "$platform" ] || platform="t2"
+  printf 'oort upgrade: T2 — compose/volume 를 쓰지 않는다. 선행 백업 후 플랫폼 digest 교체.\n'
+  if [ -n "$dump_path" ]; then
+    printf 'oort upgrade: backup path %s\n' "$dump_path"
+  fi
+  printf '대상 image: %s\n' "$target_image"
+  printf 'oort upgrade: 플랫폼 digest 교체 명령 (실행은 레시피/에이전트 — 이 CLI 는 토큰을 쥐지 않는다, ADR-0004):\n'
+  printf '  # platform=%s\n' "$platform"
+  printf '  # Pin the managed service image to %s via the official CLI/MCP in the user session.\n' \
+    "$target_image"
+  printf '완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS\n'
+  printf '롤백 안내 (이전 digest 문자열): %s\n' "$previous"
+  if [ -n "$dump_path" ]; then
+    printf '  scripts/oort restore %s --yes --tier t2 --env %s\n' "$dump_path" "$env_path"
+  fi
+}
+
 oort_wait_idempotency() {
   local i=0 logs
   while [ "$i" -lt 90 ]; do
@@ -431,6 +453,37 @@ oort_upgrade() {
       y | Y | yes | YES) ;;
       *) oort_die "취소했다." ;;
     esac
+  fi
+
+  if [ "$(oort_tier)" = "t2" ]; then
+    if [ "$local_build" -eq 1 ]; then
+      oort_die "T2 는 --local-build 가 없다. 플랫폼 digest 교체다."
+    fi
+    dump_path=""
+    if [ "$no_backup" -ne 1 ]; then
+      printf 'oort upgrade: 선행 백업\n'
+      backup_out="$(mktemp "${TMPDIR:-/tmp}/oort-upgrade-backup.XXXXXX")"
+      set +e
+      if [ -n "${OORT_TIER_OVERRIDE:-}" ]; then
+        oort_backup --env "$OORT_DOCTOR_ENV" --tier "$OORT_TIER_OVERRIDE" >"$backup_out"
+      else
+        oort_backup --env "$OORT_DOCTOR_ENV" >"$backup_out"
+      fi
+      backup_rc=$?
+      set -e
+      if [ -s "$backup_out" ]; then
+        sed -E 's#(postgres(ql)?://)[^:/@]+:[^@]+@#\1***:***@#g' "$backup_out"
+      fi
+      dump_path="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$backup_out")"
+      rm -f "$backup_out"
+      if [ "$backup_rc" -ne 0 ]; then
+        oort_die "선행 백업이 실패했다."
+      fi
+      oort_prepare_env "$OORT_DOCTOR_ENV"
+    fi
+    oort_upgrade_t2 "$previous" "$target_image" "$dump_path"
+    oort_release_env
+    return 0
   fi
 
   oort_require_volumes
