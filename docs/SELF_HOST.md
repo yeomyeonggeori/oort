@@ -486,8 +486,8 @@ that list is empty, hosted delivery is closed: set
 `MOMO_HOSTED_DELIVERY_ENABLED=true` (lowercase only — `True` / `1` / `yes`
 are closed) and restart **api** and **webhook-sender**. New env from
 `scripts/self_host_env.sh` already writes that line; existing env is not
-backfilled. `--railway` does not emit this key (the 41-key set is
-unchanged — putting it in the heredoc would make doctor require it on
+backfilled. `--platform railway` (alias `--railway`) does not emit this
+key (the 41-key set is unchanged — putting it in the heredoc would make doctor require it on
 every existing install). To add the two gate lines, run the awk block in
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 — do not paste it
 here.
@@ -778,7 +778,39 @@ and order ACME.
 | Address | `http://localhost:<port>` | Operator-declared `https://<host>` |
 | CSP connect-src | loopback `ws://localhost:*` / `ws://127.0.0.1:*` | `OORT_CSP_CONNECT_SRC` derived by `--public-origin` |
 
-## Railway
+## Platforms
+
+The same stack on a hosting platform. Tiers are ADR-0184 D1: **T1** runs
+the compose canon on a VM you own (everything above applies, plus
+[Open on a public origin](#open-on-a-public-origin)); **T2** is managed
+containers + a PG plugin (image, edge and env derived from the canon;
+`oort backup/restore/upgrade` and doctor `stack.*` wait for day-2 v2);
+**T3** is edge only, never compute. The agent-driven recipe per row is
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §1 — including which steps are
+human approval points (sign-up, billing, DNS delegation, OAuth consent).
+
+Env derivation for every platform is **one generator flag reading one
+table** — `platform_profiles` in `scripts/self_host_env.sh`. The
+canonical key set (generator heredoc + `oort_public_edge_env_keys`, 41
+keys) never grows: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
+the heredoc, a T2 row prints exactly the canonical set.
+
+| `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
+|---|---|---|---|---|---|
+| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED` |
+| `fly` | T1 | `--public-origin https://<host>` (required) | compose `postgres` | none | `infra/rust/local.secrets.env` as the local path + `MOMO_SELF_HOST_PLATFORM=fly` |
+| `aws-lightsail` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
+| `gcp-vm` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
+
+An unknown name is refused. A T2 row refuses an image mode, `--compose`,
+`--public-origin` and `--allow-local-provider`. A T1 row is created with an
+image mode, or maintained alone with `--public-origin`; a different stamp
+already in the file is refused (drop the volume and the env to switch).
+Local, VPS and the Grok Bot VM have no row — they are the compose canon.
+Cloudflare has no row either: it is a T3 edge in front of one of these
+(recipe SH-11d).
+
+### Railway
 
 Cloud install of the same stack: [`infra/railway/README.md`](../infra/railway/README.md).
 Caddy is the public service (Railway TLS); api stays internal so
@@ -789,7 +821,7 @@ After the plugin `DATABASE_URL` and the caddy public hostname exist, the
 same generator prints Railway variables (no file, no compose stack):
 
 ```sh
-scripts/self_host_env.sh --railway
+scripts/self_host_env.sh --platform railway
 ```
 
 `RAILWAY_PUBLIC_DOMAIN` and `DATABASE_URL` are required. The output key set
