@@ -182,24 +182,72 @@ Usage: scripts/oort upgrade [--to <image ref pinned by its list digest, read fro
                           [--yes] [--no-backup] [--env FILE]
 
 Idempotent image replace. Backs up first unless --no-backup.
-Never creates or deletes volumes. Never auto-rolls back — prints the
-rollback command instead.
+local-build rebuilds (`compose build`, not `pull`) then `up -d --wait`.
+Digest mode still `pull` then `up -d`. Never creates or deletes volumes.
+Never auto-rolls back — prints a rollback command that is not the
+failed command (local-build: previous-commit checkout or restore).
 EOF
 }
 
-oort_print_rollback() {
-  local previous="$1"
-  printf '자동 롤백은 하지 않는다. 이전 이미지로 되돌리려면:\n' >&2
-  case "$previous" in
-    oort:local | *:local)
-      printf '  scripts/oort upgrade --local-build --no-backup --yes --env %s\n' \
-        "$OORT_DOCTOR_ENV" >&2
+# Mode → compose refresh lines (one compose subcommand + flags per line).
+# local-build must never emit `pull`. Digest must never emit `build`.
+oort_upgrade_refresh_plan() {
+  local mode="$1"
+  case "$mode" in
+    local-build)
+      printf 'build\n'
+      printf 'up -d --wait\n'
       ;;
     *)
-      printf '  scripts/oort upgrade --to %s --no-backup --yes --env %s\n' \
-        "$previous" "$OORT_DOCTOR_ENV" >&2
+      printf 'pull\n'
+      printf 'up -d\n'
       ;;
   esac
+}
+
+oort_upgrade_refresh() {
+  local mode="$1" line
+  OORT_UPGRADE_REFRESH_STEP=""
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    OORT_UPGRADE_REFRESH_STEP="$line"
+    printf 'oort upgrade: compose %s\n' "$line"
+    # Intentional splitting of the plan line into compose argv.
+    # shellcheck disable=SC2086
+    set -- $line
+    if ! oort_compose "$@" </dev/null; then
+      return 1
+    fi
+  done <<EOF
+$(oort_upgrade_refresh_plan "$mode")
+EOF
+  return 0
+}
+
+# Rollback is keyed on the *previous* mode, not the target. local-build has
+# no prior image tag to pull, so printing the same `upgrade --local-build`
+# is not a rollback.
+oort_print_rollback() {
+  local previous="$1"
+  local previous_mode="${2:-}"
+  local dump="${3:-}"
+  local env_path="${OORT_DOCTOR_ENV:-infra/rust/local.secrets.env}"
+  printf '자동 롤백은 하지 않는다.\n' >&2
+  if [ "$previous_mode" = "local-build" ]; then
+    printf '로컬 빌드는 이전 이미지 태그로 되돌릴 수 없다.\n' >&2
+    printf '이전 커밋을 체크아웃한 뒤 같은 upgrade를 다시 실행하거나, 백업 덤프를 복원한다:\n' >&2
+    printf '  git checkout <이전 커밋> && scripts/oort upgrade --local-build --yes --env %s\n' \
+      "$env_path" >&2
+    if [ -n "$dump" ]; then
+      printf '  scripts/oort restore %s --yes --env %s\n' "$dump" "$env_path" >&2
+    else
+      printf '  scripts/oort restore <dump> --yes --env %s\n' "$env_path" >&2
+    fi
+    return 0
+  fi
+  printf '이전 이미지로 되돌리려면:\n' >&2
+  printf '  scripts/oort upgrade --to %s --no-backup --yes --env %s\n' \
+    "$previous" "$env_path" >&2
 }
 
 oort_wait_idempotency() {
@@ -318,8 +366,13 @@ oort_upgrade() {
 
   oort_prepare_env "$env_path"
 
-  local target_image target_mode digest previous
+  local target_image target_mode digest previous previous_mode dump_path="" backup_out backup_rc
   previous="$(oort_doctor_get MOMO_RUST_IMAGE)"
+  previous_mode="$(oort_doctor_get MOMO_SELF_HOST_MODE)"
+  if [ "$local_build" -ne 1 ] && [ -z "$to" ] && [ -z "$manifest" ] && \
+    [ "$previous_mode" = "local-build" ]; then
+    local_build=1
+  fi
   if [ "$local_build" -eq 1 ]; then
     target_image="oort:local"
     target_mode="local-build"
@@ -355,30 +408,34 @@ oort_upgrade() {
 
   if [ "$no_backup" -ne 1 ]; then
     printf 'oort upgrade: 선행 백업\n'
-    oort_backup --env "$OORT_DOCTOR_ENV" || {
-      oort_print_rollback "$previous"
+    backup_out="$(mktemp "${TMPDIR:-/tmp}/oort-upgrade-backup.XXXXXX")"
+    set +e
+    oort_backup --env "$OORT_DOCTOR_ENV" >"$backup_out"
+    backup_rc=$?
+    set -e
+    cat "$backup_out"
+    dump_path="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$backup_out")"
+    rm -f "$backup_out"
+    if [ "$backup_rc" -ne 0 ]; then
+      oort_print_rollback "$previous" "$previous_mode" "$dump_path"
       oort_die "선행 백업이 실패했다."
-    }
+    fi
     oort_prepare_env "$OORT_DOCTOR_ENV"
   fi
 
   oort_rewrite_image_line "$OORT_DOCTOR_ENV" "$target_image" "$target_mode"
   oort_doctor_load_env "$OORT_DOCTOR_ENV"
 
-  if ! oort_compose pull; then
-    oort_print_rollback "$previous"
-    oort_die "compose pull 이 실패했다."
-  fi
-  if ! oort_compose up -d; then
-    oort_print_rollback "$previous"
-    oort_die "compose up -d 가 실패했다."
+  if ! oort_upgrade_refresh "$target_mode"; then
+    oort_print_rollback "$previous" "$previous_mode" "$dump_path"
+    oort_die "compose ${OORT_UPGRADE_REFRESH_STEP:-refresh} 가 실패했다."
   fi
   if ! oort_wait_idempotency; then
-    oort_print_rollback "$previous"
+    oort_print_rollback "$previous" "$previous_mode" "$dump_path"
     oort_die "migrate 로그에 IDEMPOTENCY_OK 가 없다."
   fi
   if ! oort_wait_healthz; then
-    oort_print_rollback "$previous"
+    oort_print_rollback "$previous" "$previous_mode" "$dump_path"
     oort_die "/healthz 가 200 database:ok 가 되지 않았다."
   fi
 
@@ -393,7 +450,7 @@ oort_upgrade() {
     "$(jq -c '.summary' "$doctor_json" 2>/dev/null || printf '{"verdict":"unknown"}')"
   rm -f "$doctor_json"
   if [ "$doctor_code" -ne 0 ] || [ "$verdict" != "PASS" ]; then
-    oort_print_rollback "$previous"
+    oort_print_rollback "$previous" "$previous_mode" "$dump_path"
     oort_release_env
     return "$doctor_code"
   fi
