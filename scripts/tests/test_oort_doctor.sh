@@ -55,7 +55,7 @@ validate_schema() {
       .checks | all(
         (.id | type == "string" and length > 0)
         and (.severity == "blocker" or .severity == "major" or .severity == "minor")
-        and (.status == "pass" or .status == "fail" or .status == "skip")
+        and (.status == "pass" or .status == "fail" or .status == "skip" or .status == "info")
         and (.detail | type == "string")
         and (.fix | type == "string")
       )
@@ -297,13 +297,13 @@ OUTBOX_PUSH_PENDING="$(printf 'push_candidate\tpending\t5\nbroadcast\tdone\t5\n'
 oort_doctor_classify_outbox 0 <<EOF
 $OUTBOX_PUSH_PENDING
 EOF
-[ "$OORT_DOCTOR_OUTBOX_STATUS" = "pass" ] || \
-  fail "push_candidate|pending + no relay want pass, got $OORT_DOCTOR_OUTBOX_STATUS"
+[ "$OORT_DOCTOR_OUTBOX_STATUS" = "info" ] || \
+  fail "push_candidate|pending + no relay want info, got $OORT_DOCTOR_OUTBOX_STATUS"
 printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Eq '5|pending' || \
-  fail "no-relay pass detail must name the pending count: $OORT_DOCTOR_OUTBOX_DETAIL"
+  fail "no-relay info detail must name the pending count: $OORT_DOCTOR_OUTBOX_DETAIL"
 printf '%s' "$OORT_DOCTOR_OUTBOX_DETAIL" | grep -Eqi 'push relay|push-relay|PUSH_RELAY|docker-compose.push' || \
-  fail "no-relay pass detail must state the rule: $OORT_DOCTOR_OUTBOX_DETAIL"
-pass "push_candidate|pending + no relay → pass (detail names count)"
+  fail "no-relay info detail must state the rule: $OORT_DOCTOR_OUTBOX_DETAIL"
+pass "push_candidate|pending + no relay → info (detail names count)"
 
 oort_doctor_classify_outbox 1 <<EOF
 $OUTBOX_PUSH_PENDING

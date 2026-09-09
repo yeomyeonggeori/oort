@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## doctor/status `stack.outbox` 판정 (#2264, 2026-09-09)
+
+- Track engine. `fix/doctor-outbox-verdict` onto `origin/track/engine`. Isolated compose `oort2264d` (did not touch `oortv013`): first `docker compose exec postgres psql` while health=`starting` is rc=2 / empty stdout (`socket ... No such file or directory`); empty `GROUP BY` is also empty stdout rc=0; measured TSV `push_candidate|pending|4` + `agent_job|pending|1` classified **fail** with 「값 미나열」.
+- Fix in `scripts/lib/oort_doctor.sh`: unconfigured `push_candidate` pending is **info** (count); configured still **fail**. `agent_job` pending age (`lease_acquired_at` else `created_at`) `<5m` info / `≥5m` major, values listed (`kind|status|count max_age=`). Empty successful query is pass. Exec failure skip names 「postgres 컨테이너가 아직 준비되지 않음(재시도)」 or migrate-대기. `scripts/tests/test_oort_doctor_outbox.sh` 3 fixtures + unconfigured-branch sabotage RED.
+- runtime-unverified: full local-build bring-up of doctor-then-status on a product stack (reproduced the two oracles on postgres-only `oort2264d`).
 ## #2260 day-2 `oort upgrade --local-build` rebuilds (engine, 2026-09-09)
 
 - Track engine. `fix/oort-upgrade-local-build` onto `origin/track/engine`. Local-build (`--local-build` or env `MOMO_SELF_HOST_MODE=local-build`) skips `compose pull`, runs `compose build` then `up -d --wait`, waits for `IDEMPOTENCY_OK`, then doctor PASS. Digest `--to`/`--manifest` still pulls. Failure prints checkout-or-`restore` (not the failed `upgrade --local-build`). Red proof: `scripts/tests/test_oort_upgrade_localbuild.sh`. Isolated live upgrade transcript is in the PR. `oort-e2eb`/`oortv013` untouched. `stack.outbox` fail-row wording is #2264.
