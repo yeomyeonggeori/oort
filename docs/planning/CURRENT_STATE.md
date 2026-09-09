@@ -1,5 +1,14 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-09 스냅샷 95 (Fable · momo-main — ★E2E-B 케이스 B 폐곡선 PASS(설치→provider→Agent Port 합류→멘션 답장→2인 합류 킥오프). 실결함 D2·D10·D8/D11·D9·문서 묶음 전량 main 정본화. UX-R2c 잔여 폐곡선 정본화. 워커 0 · 체인 0.)** 컴팩트 복원 진입점.
+>
+> **★ 정본 헤드**: main `1184271f` · uxui `88ff8d0f` · engine `820382a7`. 정합 PASS.
+> **★ 성재 결재(09-09)**: 재개 go(Fable 위주·타이트) · D9 생성 env 기본 `MOMO_HOSTED_DELIVERY_ENABLED=true`(정본화) · #1361 ready · E2E-A는 planner가 CDP/컴퓨터 제어로.
+> **★ 막힌 것**: E2E-A 전송 — Claude Code 자동 모드 분류기가 Grok Bot 앱으로의 Enter(osascript·CDP 키 이벤트) 거부. 성재 결정 대기: Enter 1탭(메시지마다) 또는 `Bash(osascript:*)` 허용 규칙. 지시문은 컴포저에 스테이징됨(앱 :9333 유지 필요; 재기동 시 `open -a "Grok Bot" --args --remote-debugging-port=9333`).
+> **★ 다음**: E2E-A 본 실행(설치→cloudflared 폴백 URL→claim 로그인(Chrome 도구)→SH-6a-w 자격 발급→페어링 값 붙여넣기→active→멘션 답장→Reset 복구) → ITO → G2(iOS v0·Railway 최종 검증·APNs). 잔여 후보는 저널 참조.
+> **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md` · 체인 템플릿 `claudedocs/resume-2026-09-07/chain-templates/`(BEHIND 재확인·CONFLICTING ABORT·검증기 재시도 반영본은 세션 스크래치 `land-engine-audited-template.sh` — 복사 필요).
+
+> 이하 스냅샷 94:
 > **2026-09-09 스냅샷 94 (Fable · momo-main — ★G1'-2·G1'-3 전량 main 정본화: SH-6a-w(design-review R7 PASS)·SH-6a-e(ADR-0004 증보 Accepted)·#1265·SH-8·SH-9. UX-R2c #2216 워커 진행 중. 워커 1).** 컴팩트 복원 진입점.
 >
 > **★ 정본 헤드**: main `9dd350e1`(SH-6a-w 승격 ap) · uxui `857f3277` · engine `3d1923e2`. 이 문서의 승격 뒤 갱신.
