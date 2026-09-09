@@ -77,8 +77,9 @@ scripts/oort doctor --json
 
 tier는 ADR-0184 D1이다. **T1**은 compose 정본을 그대로 돌린다(doctor
 `stack.*`·day-2 명령 전부 유효). **T2**는 관리형 컨테이너 + PG 플러그인:
-이미지·엣지·env는 정본에서 파생하고, `stack.*`·`oort backup/restore/upgrade`는
-day-2 v2(SH-11e)를 기다린다. **T3**은 엣지 전용 — 컴퓨트가 아니다. 「조작
+이미지·엣지·env는 정본에서 파생하고, day-2 v2(SH-11e)는 `MIGRATE_DATABASE_URL`과
+공개 오리진으로 돈다(`scripts/oort backup --tier t2`, `restore`, `upgrade`,
+`doctor --tier t2 --json`). **T3**은 엣지 전용 — 컴퓨트가 아니다. 「조작
 수단」은 §0의 순서다: 사용자 본인 세션의 공식 CLI/MCP → 사용자 토큰의 REST →
 브라우저는 사람 승인 지점에서만. 모든 행의 env 파생은
 `scripts/self_host_env.sh --platform <name>`이 표 하나(`platform_profiles`)를
@@ -94,7 +95,7 @@ day-2 v2(SH-11e)를 기다린다. **T3**은 엣지 전용 — 컴퓨트가 아�
 | **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · 프로비저닝 레시피 SH-11b (`fly.toml` + 볼륨) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | Fly 가입·결제; 커스텀 도메인 DNS. | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · 프로비저닝 레시피 SH-11c (+ 최소 Terraform) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS 가입·결제; IAM 동의; DNS 레코드. | 클라우드 계정; VM + compose + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
-| **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). `stack.*`·`oort backup/restore/upgrade`는 day-2 v2(SH-11e) 전까지 없음. |
+| **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
 | **Cloudflare** (엣지 전용) | T3 | 레시피 SH-11d — T1/T2 행 앞단의 DNS · Tunnel · TLS | 사용자 세션의 `wrangler` / MCP `mcp.cloudflare.com` → API 토큰의 REST → 브라우저. | Cloudflare 가입; 레지스트라의 네임서버 위임; Tunnel 토큰 생성. | 이미 떠 있는 T1/T2 행. 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명. | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | VM 안의 셸(compose) + `tailscale` CLI. | Tailscale 로그인·Funnel 켜기(4~5 클릭); 1회용 claim URL 열기. 계정 0개 + 고정 URL은 이 플레이북이 **달성하지 못한다**(RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git 불필요. durable 디렉터리 `/workspace`. Tailscale 계정 1개. | 루프백 Caddy + 웹 포트로 Tailscale Funnel. 여기서 `caddy.override.yml` 을 **켜지 마라** (ACME). `--public-origin` 은 Funnel URL을 Centrifugo에 등록한다. `/workspace` 아래 Funnel state가 살아 있는 동안 `https://<machine>.<tailnet>.ts.net`. | Funnel 오리진 기준 공개 검사 포함 doctor PASS, 1회용 claim URL을 사용자에게 회신, `/workspace` 첫날 덤프. |
 
@@ -1428,6 +1429,22 @@ scripts/oort restore ./oort-backups/oort-pg.dump --yes
 
 첨부는 `DRIVE_VOLUME_NAME`(기본 `oort-drive`)에 산다. 덤프와 그 볼륨을
 같이 가져간다. `down -v` 는 이 env가 이름 붙인 볼륨을 지운다.
+
+**T2 (관리형 PG):** 같은 네 명령에 `--tier t2`, 경로는
+`MIGRATE_DATABASE_URL`. 이미지 경로 `/opt/momo/scripts/oort`. 플랫폼
+one-off(Railway CLI/MCP)는 SH-11a이지 이 CLI가 아니다. upgrade는
+토큰 없는 digest 교체 명령을 인쇄하고, 볼륨 inspect·compose 재작성은
+하지 않는다. 완료 조건은 `scripts/oort doctor --tier t2 --json` PASS.
+런북:
+[`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
+§ T2.
+
+```sh
+scripts/oort backup --tier t2 --env <env> --out <dir>
+scripts/oort restore <dump> --tier t2 --yes --env <env>
+scripts/oort upgrade --tier t2 --yes --env <env>
+scripts/oort doctor --tier t2 --json
+```
 
 **로그:** `scripts/oort logs api` (시크릿 값은 `***`). claim 모드의
 직접 compose 는 그대로 유효하다:
