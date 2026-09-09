@@ -5,6 +5,9 @@
 - Track UXUI. `feat/uxr2c-followup` onto `origin/track/uxui`. UX-R2c R7 M-8/N-13/N-14 + SH-6a-w R7-N4.
 - 첫 에이전트 보상 이름·핸들은 `features/hostedAgents/TruncatingName` 을 재사용한다 (`scrollWidth > clientWidth` 일 때만 `title`). 길이 16 휴리스틱·`FIRST_AGENT_GENERIC_HINT` 삭제. `parseDisconnectStart` 는 서버 `cleanup_pending` 을 그대로 돌리고, 웹 해제 시작 렌더 시험은 GET 을 멈추어 파서 결과를 그린다.
 - runtime-unverified: 실서버 hosted create/detect/disconnect 왕복은 mock·캡처 범위. `capture:design` 은 `verify_merge_tree.sh`·`local_gate.sh`·CI 에 없음 — 별건.
+## #2260 day-2 `oort upgrade --local-build` rebuilds (engine, 2026-09-09)
+
+- Track engine. `fix/oort-upgrade-local-build` onto `origin/track/engine`. Local-build (`--local-build` or env `MOMO_SELF_HOST_MODE=local-build`) skips `compose pull`, runs `compose build` then `up -d --wait`, waits for `IDEMPOTENCY_OK`, then doctor PASS. Digest `--to`/`--manifest` still pulls. Failure prints checkout-or-`restore` (not the failed `upgrade --local-build`). Red proof: `scripts/tests/test_oort_upgrade_localbuild.sh`. Isolated live upgrade transcript is in the PR. `oort-e2eb`/`oortv013` untouched. `stack.outbox` fail-row wording is #2264.
 
 ## UX-R2c 온보딩 「첫 에이전트 연결」 퍼널 (#2216, 2026-09-09)
 

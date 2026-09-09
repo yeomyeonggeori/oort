@@ -225,6 +225,11 @@ least-privilege runtime roles created → all migrations applied (+ a 2-pass
 idempotence check) → first login account created → api·relay·agent-worker·
 web edge up.
 
+A local-build stamps this checkout's commit SHA (or `unknown` if git is
+unavailable) into the SPA as `<meta name="momo-build">` in `index.html`.
+Confirm with `curl -s http://localhost:<port>/ | grep momo-build`. `/healthz`
+does not carry the stamp.
+
 This path **explicitly** records `MOMO_MIGRATE_ENV=development` and
 evidence-gate-off in the generated env, and migrate logs the same fact as a
 warning. The API's `MOMO_ENV=staging` security posture is unchanged. Do not
@@ -490,7 +495,8 @@ transport offset. The full contract is the
 That the browser knows **one port only** is this path's design — SPA, REST,
 and realtime all come from the same origin, so CORS has no room to arise,
 and the realtime URL is the value the login response returns, which the
-client uses as-is (ADR-0110).
+client uses as-is (ADR-0110). The SPA names the image's commit (or `unknown`)
+in `<meta name="momo-build">` — same `grep momo-build` as §3.
 
 ## Using two checkouts at once
 
@@ -647,7 +653,7 @@ is refused ([two checkouts](#using-two-checkouts-at-once)).
 | Judge first whether the install is stuck | `scripts/oort doctor` (`--json` if you need it). Tools, env, and stack as one verdict. If the stack is not up yet those checks skip and only the env side is judged. |
 | Day-2: is this stack healthy, current, behind? | `scripts/oort status` (`--json` if you need it). Same exit codes as doctor, plus image digest vs `releases/latest.json`. |
 | Day-2: read service logs without leaking secrets | `scripts/oort logs` `[service] [--since 10m] [--follow]`. Env secret keys, Bearer tokens, and postgres URL passwords are `***`. |
-| Day-2: replace the image (Update / new digest) | `scripts/oort upgrade` (`--to <image ref pinned by its list digest, read from releases/latest.json>` or `--manifest URL` or `--local-build`). Backs up first, refuses missing env/volumes, waits for `IDEMPOTENCY_OK`, then doctor PASS. Prints a rollback command on failure; never auto-rolls back; never `down -v`. |
+| Day-2: replace the image (Update / new digest) | `scripts/oort upgrade` (`--to <image ref pinned by its list digest, read from releases/latest.json>` or `--manifest URL` or `--local-build`). Backs up first, refuses missing env/volumes. Local-build rebuilds (`compose build`, not `pull`) then `up -d --wait`; digest mode still `pull` then `up -d`. Waits for `IDEMPOTENCY_OK`, then doctor PASS. On failure prints a rollback that is not the failed command (local-build: previous-commit checkout or `scripts/oort restore <dump>`); never auto-rolls back; never `down -v`. |
 | Day-2: take or restore a dump | `scripts/oort backup` (`--out DIR`) and `scripts/oort restore <dump>`. Restore refuses a non-empty stack. If `momo_app`/`momo_relay`/`momo_worker` are absent it runs the stack's `runtime-roles` one-shot first, then `scripts/self_host_pg_restore.sh`. |
 | Day-2: invite a human or issue an agent bearer | `scripts/oort member invite` and `scripts/oort member credential --agent <handle>`. The invite code and agent token print once. |
 | Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
