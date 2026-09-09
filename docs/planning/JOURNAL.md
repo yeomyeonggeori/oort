@@ -3,6 +3,15 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-09 (낮) · Fable · ★E2E-B 실측 완주(케이스 B 폐곡선 PASS) + 실결함 2·판정 1·문서 묶음 수리 전량 main 정본화 + UX-R2c 잔여 폐곡선 — 스냅샷 95
+
+- **성재 결재**: 「Fable 위주 속도·완성도, 19:00 초기화까지 타이트」 재개 go · D9(셀프호스트 생성 env `MOMO_HOSTED_DELIVERY_ENABLED=true` 기본) 승인 · #1361 라벨 blocked→ready 승인 · 그록봇 E2E-A를 planner가 CDP/컴퓨터 제어로 집행하라는 지시 · 「병렬 가능하면 병렬로」.
+- **E2E-B(독립 셀프호스팅, 로컬 경로)**: 신규 클론에서 `SELF_HOST.md` 명령만으로 설치→로그인→본인 provider(mock hermes, `--allow-local-provider`)→첫 멘션 답장 seq 2→**Agent Port 합류**(pairing→detected→confirm→active)→멘션 → `oort_inbox_read`/`oort_conversation_read`/`oort_message_post` 답장 seq 4→2인 합류 시 웰컴 킥오프 seq 5. 보고 `docs/planning/research/2026-09-09-e2e-b-selfhost-run.md`(#2265). 이탈 11: **D2**(로컬 빌드 웹 스테이지 `MOMO_BUILD_SHA` 미전달 — #2258/PR #2261 수리) · **D10**(`oort upgrade --local-build`가 pull — #2260/PR #2269 수리) · **D8/D11**(doctor/status outbox 판정 — #2264/PR #2270 수리) · **D9**(hosted delivery 기본 off — 생성기 기본 `true`, #2263) · D1·D3·D5·D6·D7(문서·OpenAPI — #2263/PR #2277) · D4(플러그인 검증기 Swift 잔존, 후속). upgrade의 백업 단계 PASS(dump 627,874 B). 폰 QR/푸시는 결재대로 보류.
+- **정본화(순서)**: UX-R2c #2216(design-review R7 PASS, 승격 #2255) · E2E-B 보고 #2265 · D2 #2261(승격 #2271) · D10 #2269(#2274) · doctor #2270(#2278) · docs+D9 #2277(#2281) · #2256 잔여 폐곡선 #2262(design-review R1 PASS B0·H0·M2·N3, CI flake ×2 → RTL waitFor 5s로 굳힘, GHCR 고지 번들 재생성; 승격 #2284). main `1184271f` · uxui `88ff8d0f` · engine `820382a7`.
+- **E2E-A(그록봇)**: 앱을 `--remote-debugging-port=9333`으로 재기동(GrokBot/0.44.0), 하네스 READ/WRITE OK, 설치 지시문(README 붙여넣기 블록 + cloudflared 폴백·URL 2개 보고 노트) 컴포저에 스테이징. **전송(Enter)은 Claude Code 자동 모드 분류기가 OS 키스트로크·CDP 키 이벤트 둘 다 거부** → 성재에게 Enter 1탭 또는 `Bash(osascript:*)` 규칙 요청(대기).
+- **교훈**: ①체인은 트랙 이동 레이스에 약하다 — BEHIND 재확인(20s)·CONFLICTING 조기 ABORT·검증기 4×30s 재시도를 템플릿에 넣었고, STATUS.md 충돌은 planner가 합집합으로 푼다(오늘 5회) ②워커의 「측정」 시험이 jsdom에 숫자를 심는 경향 → 렌더 DOM 구조 단정 + 브라우저 측정은 캡처 레인, 그런데 캡처 레인이 병합 게이트에 없다(후속) ③npm devDep 추가 = GHCR 고지 번들 재생성 ④브리프의 브랜치명은 `<type>/<issue>-<slug>` 규약으로.
+- **잔여 후보**: #2262 M-1·M-2·N3(핸들 양성 경로 가드·캡처 레인 게이트) · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 프리플라이트 사각 · 선재 #2157·#2181·#2193 · E2E-A 본 실행(전송 권한 뒤) · Railway E2E(최종 단계) · APNs(데스크톱 뒤).
+
 ## 2026-09-08 (저녁·밤) → 09-09 새벽 · Fable · ★결재 4건 집행 + G1'-2·G1'-3 전량 main 정본화(SH-6a-w R7 PASS·SH-6a-e·#1265·SH-8·SH-9) — 스냅샷 94
 
 - **성재 결재(09-08 저녁)**: ①ADR-0004 증보 Accept(로컬 provider opt-in 경계 — planner가 워커의 「Accepted(성재 승인)」 표기를 Proposed로 정정해 결재를 받은 뒤 Accepted) ②SH-8·SH-9 발급 go ③Railway 실배포 E2E는 최종 셀프호스팅 검증 단계 ④실기기 APNs는 데스크톱 셀프호스팅 완료 뒤. 기록: `2026-09-08-remaining-work-map.md` 결재 절 · `first-goal-two-cases.md` §9.
