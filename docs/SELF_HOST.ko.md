@@ -441,8 +441,8 @@ Agent Port 합류([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16) 뒤
 `MOMO_HOSTED_DELIVERY_ENABLED=true`(소문자만 — `True` / `1` / `yes` 는
 닫힘)를 쓰고 **api** 와 **webhook-sender** 를 재시작한다.
 `scripts/self_host_env.sh` 가 만든 신규 env 는 이미 그 줄을 쓴다. 기존
-env 는 백필하지 않는다. `--railway` 는 이 키를 내지 않는다(41키 집합
-유지 — heredoc 에 넣으면 doctor 가 기존 설치마다 그 줄을 요구한다).
+env 는 백필하지 않는다. `--platform railway`(별칭 `--railway`)는 이 키를
+내지 않는다(41키 집합 유지 — heredoc 에 넣으면 doctor 가 기존 설치마다 그 줄을 요구한다).
 게이트 두 줄을 넣는 awk 는
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 에 있다 — 여기다
 붙이지 말고 그 블록을 실행한다.
@@ -708,7 +708,37 @@ docker compose --env-file infra/rust/local.secrets.env \
 | 주소 | `http://localhost:<port>` | 운영자가 선언한 `https://<host>` |
 | CSP connect-src | 루프백 `ws://localhost:*` / `ws://127.0.0.1:*` | `--public-origin` 이 파생한 `OORT_CSP_CONNECT_SRC` |
 
-## Railway
+## Platforms
+
+같은 스택을 호스팅 플랫폼에 올린다. tier는 ADR-0184 D1이다. **T1**은 소유한
+VM에서 compose 정본을 돌린다(위 절차 전부 + [공개 오리진으로
+열기](#공개-오리진으로-열기)); **T2**는 관리형 컨테이너 + PG 플러그인(이미지·
+엣지·env는 정본에서 파생, `oort backup/restore/upgrade`와 doctor `stack.*`는
+day-2 v2를 기다린다); **T3**은 엣지 전용, 컴퓨트가 아니다. 행별 에이전트
+주도 레시피는 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §1 — 어느 단계가
+사람 승인 지점(가입·결제·DNS 위임·OAuth 동의)인지 포함.
+
+모든 플랫폼의 env 파생은 **생성기 플래그 하나가 표 하나를 읽는다** —
+`scripts/self_host_env.sh`의 `platform_profiles`. 정본 키 집합(생성기
+heredoc + `oort_public_edge_env_keys`, 41키)은 늘지 않는다: T1 행은 heredoc
+밖에 `MOMO_SELF_HOST_PLATFORM=<name>`을 더하고, T2 행은 정본 집합을 그대로
+출력한다.
+
+| `--platform` | Tier | 공개 오리진 소스 | Postgres | 손으로 넣는 키 | 출력 |
+|---|---|---|---|---|---|
+| `railway` (별칭 `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | 플러그인 `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | stdout KEY=value, 파일 없음, `MOMO_HOSTED_DELIVERY_ENABLED` 없음 |
+| `fly` | T1 | `--public-origin https://<host>` (필수) | compose `postgres` | 없음 | 로컬 경로와 같은 `infra/rust/local.secrets.env` + `MOMO_SELF_HOST_PLATFORM=fly` |
+| `aws-lightsail` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
+| `gcp-vm` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
+
+모르는 이름은 거절한다. T2 행은 이미지 모드·`--compose`·`--public-origin`·
+`--allow-local-provider`를 거절한다. T1 행은 이미지 모드와 함께 생성하거나
+`--public-origin`만으로 기존 env를 유지보수한다; 파일에 이미 다른 스탬프가
+있으면 거절한다(바꾸려면 볼륨과 env를 지운다). 로컬·VPS·Grok Bot VM은 행이
+없다 — compose 정본 그 자체다. Cloudflare도 행이 없다: 이들 앞단의 T3
+엣지다(레시피 SH-11d).
+
+### Railway
 
 같은 스택의 클라우드 설치: [`infra/railway/README.md`](../infra/railway/README.md).
 공개 서비스는 Caddy(Railway TLS), api는 내부 — `/v1/centrifugo/*` 전용 403
@@ -718,7 +748,7 @@ docker compose --env-file infra/rust/local.secrets.env \
 Railway 변수를 출력한다(파일 없음, compose 스택 발명 없음):
 
 ```sh
-scripts/self_host_env.sh --railway
+scripts/self_host_env.sh --platform railway
 ```
 
 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`은 필수다. 출력 키 집합은 생성기
