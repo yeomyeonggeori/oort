@@ -663,37 +663,167 @@ oort_doctor_push_relay_configured() {
   return 1
 }
 
-# stdin: kind<TAB>status<TAB>count from `GROUP BY kind, status`.
+# agent_job pending younger than this is info; this age and above is major.
+OORT_DOCTOR_AGENT_JOB_STALE_SECS=300
+
+oort_doctor_postgres_line() {
+  printf '%s\n' "${1:-}" | awk '$1 == "postgres" { print; exit }'
+}
+
+oort_doctor_outbox_sql() {
+  printf '%s' "SELECT kind::text, status::text, count(*)::bigint, COALESCE(EXTRACT(EPOCH FROM (now() - min(COALESCE(lease_acquired_at, created_at))))::bigint, 0) FROM outbox GROUP BY 1, 2 ORDER BY 1, 2;"
+}
+
+oort_doctor_int_or_zero() {
+  case "$1" in
+    '' | *[!0-9]*) printf '0' ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
+# stdin: kind<TAB>status<TAB>count[<TAB>max_age_seconds] from GROUP BY kind, status.
 # $1 = 1 if push relay is configured, else 0.
-# Sets OORT_DOCTOR_OUTBOX_STATUS / DETAIL / FIX.
+# Sets OORT_DOCTOR_OUTBOX_STATUS / SEVERITY / DETAIL / FIX.
 oort_doctor_classify_outbox() {
-  local relay="${1:-0}" tsv failing push_pending
-  tsv="$(cat)"
-  failing="$(printf '%s\n' "$tsv" | awk -F '\t' -v relay="$relay" '
-    NF < 2 { next }
-    $2 != "done" && !(relay == 0 && $1 == "push_candidate") { n += 1 }
-    END { print n + 0 }
-  ')"
-  push_pending="$(printf '%s\n' "$tsv" | awk -F '\t' '
-    $1 == "push_candidate" && $2 != "done" { n += $3 + 0 }
-    END { print n + 0 }
-  ')"
+  local relay="${1:-0}"
+  local line kind status count age row
+  local fail_n=0 info_n=0 push_pending=0
+  local fail_bits="" info_bits=""
+  local stale_secs="${OORT_DOCTOR_AGENT_JOB_STALE_SECS:-300}"
+
+  OORT_DOCTOR_OUTBOX_STATUS=pass
+  OORT_DOCTOR_OUTBOX_SEVERITY=major
+  OORT_DOCTOR_OUTBOX_DETAIL="outbox 잔량 없음 (broadcast|done 외 0)"
   OORT_DOCTOR_OUTBOX_FIX=""
-  if [ "$failing" -gt 0 ]; then
-    OORT_DOCTOR_OUTBOX_STATUS=fail
-    if [ "$relay" = "1" ] && [ "$push_pending" -gt 0 ]; then
-      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (push_candidate pending=${push_pending}; push relay configured: docker-compose.push.yml / PUSH_RELAY_URL or compose push-relay/notifier)"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="$(printf '%s' "$line" | tr -d '\r')"
+    [ -n "$line" ] || continue
+    kind="$(printf '%s' "$line" | awk -F '\t' '{ print $1 }')"
+    status="$(printf '%s' "$line" | awk -F '\t' '{ print $2 }')"
+    count="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $3 }')")"
+    age="$(oort_doctor_int_or_zero "$(printf '%s' "$line" | awk -F '\t' '{ print $4 }')")"
+    [ -n "$kind" ] || continue
+    [ -n "$status" ] || continue
+    [ "$status" = "done" ] && continue
+
+    row="${kind}|${status}|${count}"
+    if [ "$kind" = "agent_job" ]; then
+      row="${row} max_age=${age}s"
+    fi
+
+    if [ "$kind" = "push_candidate" ]; then
+      push_pending=$((push_pending + count))
+      # BEGIN oort-doctor-unconfigured-push
+      if [ "$relay" = "0" ]; then
+        info_n=$((info_n + 1))
+        if [ -n "$info_bits" ]; then
+          info_bits="${info_bits}; ${row}"
+        else
+          info_bits="$row"
+        fi
+        continue
+      fi
+      # END oort-doctor-unconfigured-push
+      fail_n=$((fail_n + 1))
+      if [ -n "$fail_bits" ]; then
+        fail_bits="${fail_bits}; ${row}"
+      else
+        fail_bits="$row"
+      fi
+      continue
+    fi
+
+    if [ "$kind" = "agent_job" ]; then
+      if [ "$age" -lt "$stale_secs" ]; then
+        info_n=$((info_n + 1))
+        if [ -n "$info_bits" ]; then
+          info_bits="${info_bits}; ${row}"
+        else
+          info_bits="$row"
+        fi
+      else
+        fail_n=$((fail_n + 1))
+        if [ -n "$fail_bits" ]; then
+          fail_bits="${fail_bits}; ${row}"
+        else
+          fail_bits="$row"
+        fi
+      fi
+      continue
+    fi
+
+    fail_n=$((fail_n + 1))
+    if [ -n "$fail_bits" ]; then
+      fail_bits="${fail_bits}; ${row}"
     else
-      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (kind/status 집계, 값 미나열)"
+      fail_bits="$row"
+    fi
+  done
+
+  if [ "$fail_n" -gt 0 ]; then
+    OORT_DOCTOR_OUTBOX_STATUS=fail
+    OORT_DOCTOR_OUTBOX_SEVERITY=major
+    if [ "$relay" = "1" ] && [ "$push_pending" -gt 0 ]; then
+      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (${fail_bits}; push_candidate pending=${push_pending}; push relay configured: docker-compose.push.yml / PUSH_RELAY_URL or compose push-relay/notifier)"
+    else
+      OORT_DOCTOR_OUTBOX_DETAIL="outbox 에 done 아닌 행이 있다 (${fail_bits}${info_bits:+; info: ${info_bits}})"
     fi
     OORT_DOCTOR_OUTBOX_FIX="pending/failed 면 relay 로그: scripts/self_host_env.sh --compose logs relay"
     return
   fi
-  OORT_DOCTOR_OUTBOX_STATUS=pass
-  if [ "$push_pending" -gt 0 ]; then
-    OORT_DOCTOR_OUTBOX_DETAIL="push_candidate pending=${push_pending} non-failing (no push relay configured: compose has no push-relay/notifier; overlay keys PUSH_RELAY_URL/MOMO_PUSH_RELAY_IMAGE/MOMO_APNS_KEY_HOST_PATH unset; infra/rust/docker-compose.push.yml)"
+
+  if [ "$info_n" -gt 0 ]; then
+    OORT_DOCTOR_OUTBOX_STATUS=info
+    OORT_DOCTOR_OUTBOX_SEVERITY=minor
+    if [ "$push_pending" -gt 0 ] && [ "$relay" = "0" ]; then
+      OORT_DOCTOR_OUTBOX_DETAIL="push_candidate pending=${push_pending} info (no push relay configured: compose has no push-relay/notifier; overlay keys PUSH_RELAY_URL/MOMO_PUSH_RELAY_IMAGE/MOMO_APNS_KEY_HOST_PATH unset; infra/rust/docker-compose.push.yml)"
+      if [ -n "$info_bits" ]; then
+        OORT_DOCTOR_OUTBOX_DETAIL="${OORT_DOCTOR_OUTBOX_DETAIL}; ${info_bits}"
+      fi
+    else
+      OORT_DOCTOR_OUTBOX_DETAIL="outbox 정보 (${info_bits})"
+    fi
+    return
+  fi
+}
+
+# Map a psql exec result onto classify_outbox or an accurate skip.
+# $1=relay 0/1  $2=psql rc  $3=postgres state  $4=postgres health  $5=stderr
+# stdin = psql stdout (possibly empty).
+oort_doctor_apply_outbox_query() {
+  local relay="${1:-0}" rc="${2:-1}" state="${3:-}" health="${4:-}" err="${5:-}"
+  local tsv
+  tsv="$(cat)"
+  err="$(printf '%s' "$err" | tr '\t\r\n' '   ')"
+
+  if [ "$rc" = "0" ]; then
+    oort_doctor_classify_outbox "$relay" <<EOF
+$tsv
+EOF
+    return
+  fi
+
+  OORT_DOCTOR_OUTBOX_STATUS=skip
+  OORT_DOCTOR_OUTBOX_SEVERITY=minor
+  OORT_DOCTOR_OUTBOX_FIX="스택이 기동 중이면 잠시 후 다시 실행하라 (재시도)."
+
+  if [ "$state" != "running" ] || [ "$health" = "starting" ] || [ "$health" = "unhealthy" ]; then
+    OORT_DOCTOR_OUTBOX_DETAIL="postgres 컨테이너가 아직 준비되지 않음(재시도) (state=${state:-unknown} health=${health:-none})"
+    return
+  fi
+  if printf '%s' "$err" | grep -Eqi 'No such file or directory|the database system is starting|connection refused|not running|is not running'; then
+    OORT_DOCTOR_OUTBOX_DETAIL="postgres 컨테이너가 아직 준비되지 않음(재시도) (state=${state:-unknown} health=${health:-none})"
+    return
+  fi
+  if printf '%s' "$err" | grep -Fq 'does not exist'; then
+    OORT_DOCTOR_OUTBOX_DETAIL="outbox 테이블이 아직 없다 (migrate 대기, 재시도)"
+    return
+  fi
+  if [ -n "$err" ]; then
+    OORT_DOCTOR_OUTBOX_DETAIL="outbox 오라클을 실행하지 못했다 (${err})"
   else
-    OORT_DOCTOR_OUTBOX_DETAIL="outbox 잔량 없음 (broadcast|done 외 0)"
+    OORT_DOCTOR_OUTBOX_DETAIL="outbox 오라클을 실행하지 못했다 (postgres exec)"
   fi
 }
 
@@ -701,7 +831,8 @@ oort_doctor_check_stack() {
   local project="$1"
   local ps_out svc state health line missing="" unhealthy="" report=""
   local web_port api_port base body hdr code db auth_line
-  local pg_user pg_db outbox push_relay
+  local pg_user pg_db outbox push_relay pg_line pg_state pg_health
+  local outbox_rc outbox_err errf attempt
   local logs
 
   ps_out="$(docker compose -p "$project" ps --format '{{.Service}} {{.State}} {{.Health}}' 2>/dev/null || true)"
@@ -791,26 +922,41 @@ oort_doctor_check_stack() {
   pg_db="$(oort_doctor_get POSTGRES_DB)"
   [ -n "$pg_user" ] || pg_user=momo
   [ -n "$pg_db" ] || pg_db=momo
-  outbox="$(docker compose -p "$project" exec -T postgres \
-    psql -U "$pg_user" -d "$pg_db" -At -F $'\t' \
-    -c "SELECT kind, status, count(*) FROM outbox GROUP BY 1,2;" 2>/dev/null || true)"
-  if [ -z "$outbox" ]; then
-    oort_doctor_record stack.outbox major skip \
-      "outbox 오라클을 실행하지 못했다 (postgres exec)" \
-      "스택이 기동 중이면 scripts/self_host_env.sh --compose exec postgres psql 로 확인하라."
-  else
-    push_relay=0
-    if oort_doctor_push_relay_configured "$ps_out"; then
-      push_relay=1
+  pg_line="$(oort_doctor_postgres_line "$ps_out")"
+  pg_state="$(printf '%s' "$pg_line" | awk '{ print $2 }')"
+  pg_health="$(printf '%s' "$pg_line" | awk '{ print $3 }')"
+  outbox=""
+  outbox_rc=1
+  outbox_err=""
+  attempt=0
+  while [ "$attempt" -lt 3 ]; do
+    errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-outbox.XXXXXX")"
+    set +e
+    outbox="$(docker compose -p "$project" exec -T postgres \
+      psql -U "$pg_user" -d "$pg_db" -At -F $'\t' \
+      -c "$(oort_doctor_outbox_sql)" 2>"$errf")"
+    outbox_rc=$?
+    set -e
+    outbox_err="$(cat "$errf" 2>/dev/null || true)"
+    rm -f "$errf"
+    if [ "$outbox_rc" -eq 0 ]; then
+      break
     fi
-    oort_doctor_classify_outbox "$push_relay" <<EOF
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt 3 ] && sleep 1
+  done
+  push_relay=0
+  if oort_doctor_push_relay_configured "$ps_out"; then
+    push_relay=1
+  fi
+  oort_doctor_apply_outbox_query "$push_relay" "$outbox_rc" "$pg_state" "$pg_health" "$outbox_err" <<EOF
 $outbox
 EOF
-    oort_doctor_record stack.outbox major \
-      "$OORT_DOCTOR_OUTBOX_STATUS" \
-      "$OORT_DOCTOR_OUTBOX_DETAIL" \
-      "$OORT_DOCTOR_OUTBOX_FIX"
-  fi
+  oort_doctor_record stack.outbox \
+    "${OORT_DOCTOR_OUTBOX_SEVERITY:-major}" \
+    "$OORT_DOCTOR_OUTBOX_STATUS" \
+    "$OORT_DOCTOR_OUTBOX_DETAIL" \
+    "$OORT_DOCTOR_OUTBOX_FIX"
 
   logs="$(docker compose -p "$project" logs migrate 2>/dev/null || true)"
   if [ -z "$logs" ]; then
@@ -913,6 +1059,9 @@ oort_doctor_emit_human() {
     if [ "$status" = "skip" ] && [ -n "$fix" ]; then
       printf '       next: %s\n' "$fix"
     fi
+    if [ "$status" = "info" ] && [ -n "$fix" ]; then
+      printf '       note: %s\n' "$fix"
+    fi
   done <"$OORT_DOCTOR_CHECKS"
 }
 
@@ -920,6 +1069,7 @@ oort_doctor_summarize() {
   OORT_DOCTOR_PASS="$(awk -F '\t' '$3 == "pass" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
   OORT_DOCTOR_FAIL="$(awk -F '\t' '$3 == "fail" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
   OORT_DOCTOR_SKIP="$(awk -F '\t' '$3 == "skip" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
+  OORT_DOCTOR_INFO="$(awk -F '\t' '$3 == "info" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
   OORT_DOCTOR_BLOCKER_FAIL="$(awk -F '\t' '$2 == "blocker" && $3 == "fail" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
   OORT_DOCTOR_MAJOR_FAIL="$(awk -F '\t' '$2 == "major" && $3 == "fail" { n += 1 } END { print n + 0 }' "$OORT_DOCTOR_CHECKS")"
   if [ "$OORT_DOCTOR_BLOCKER_FAIL" -gt 0 ] || [ "$OORT_DOCTOR_MAJOR_FAIL" -gt 0 ]; then
@@ -936,7 +1086,7 @@ import sys
 
 path = sys.argv[1]
 checks = []
-pass_n = fail_n = skip_n = 0
+pass_n = fail_n = skip_n = info_n = 0
 blocker_fail = major_fail = False
 with open(path, encoding="utf-8") as fh:
     for raw in fh:
@@ -966,6 +1116,8 @@ with open(path, encoding="utf-8") as fh:
                 major_fail = True
         elif status == "skip":
             skip_n += 1
+        elif status == "info":
+            info_n += 1
 verdict = "FAIL" if (blocker_fail or major_fail) else "PASS"
 json.dump(
     {
@@ -973,6 +1125,7 @@ json.dump(
             "pass": pass_n,
             "fail": fail_n,
             "skip": skip_n,
+            "info": info_n,
             "verdict": verdict,
         },
         "checks": checks,
@@ -1093,8 +1246,9 @@ oort_doctor() {
     oort_doctor_emit_json
   else
     oort_doctor_emit_human
-    printf '\nsummary: pass=%s fail=%s skip=%s verdict=%s\n' \
-      "$OORT_DOCTOR_PASS" "$OORT_DOCTOR_FAIL" "$OORT_DOCTOR_SKIP" "$OORT_DOCTOR_VERDICT"
+    printf '\nsummary: pass=%s fail=%s skip=%s info=%s verdict=%s\n' \
+      "$OORT_DOCTOR_PASS" "$OORT_DOCTOR_FAIL" "$OORT_DOCTOR_SKIP" \
+      "${OORT_DOCTOR_INFO:-0}" "$OORT_DOCTOR_VERDICT"
   fi
 
   code="$(oort_doctor_exit_code)"
