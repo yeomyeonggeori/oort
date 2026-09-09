@@ -139,7 +139,10 @@ attestation 2본 PASS(오케스트레이터 2026-08-23). (구 `SELF_HOST.md:88`
 시크릿 아홉 개를 `openssl` 로 만들고, 서로 같아야 하는 값들(런타임 롤 비밀번호와
 접속 URL 안의 비밀번호)을 같게 쓰고, 포트가 이미 쓰이고 있으면 비어 있는 다음
 포트를 골라 알려 준다. 그리고 **첫 로그인 계정**과 선택한
-`MOMO_SELF_HOST_MODE`를 함께 기록한다.
+`MOMO_SELF_HOST_MODE`를 함께 기록한다. stdout 이 기존 볼륨(`oort-pgdata`)을
+**채택**했다고 하면, 그게 이 클론이 이어받을 데이터인지 확인하라(다른
+체크아웃의 데이터일 수 있다). 분리하려면
+[두 체크아웃을 같이 쓸 때](#두-체크아웃을-같이-쓸-때)를 본다.
 
 환경변수에서 파일로 들어가는 모든 값은 한 줄 scalar인지 먼저 검사한다. LF/CR을
 포함한 값, 중복 env 키, 1..65535 밖이거나 ASCII 10진수가 아닌 포트는 파일을 쓰거나
@@ -334,7 +337,9 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
    ```
 
 5. 에이전트를 만들고(에이전트 명부 → 새 에이전트) `#general` 에 초대한 뒤
-   웰컴 킥오프가 돌게 한다(새 멤버 합류, 또는 첫 `@핸들` 멘션). 답장은
+   웰컴 킥오프가 돌게 한다(새 **사람** 멤버가 합류할 때(초대/claim) —
+   에이전트를 초대하는 것은 트리거가 아니다, ADR-0181 D2; 또는 첫
+   `@핸들` 멘션). 답장은
    `message.seq` 가 있는 내구성 채널 메시지다. 그 seq가 오면 이 문서가
    약속한 전부다.
 
@@ -354,7 +359,8 @@ copy 모드는 `plugin.yaml` 옆에 대문자 `PLUGIN.yaml` 도 쓴다(대소문
 볼륨에서 Hermes가 대문자 이름을 찾는다). 살아 있는 검사는 설치기다.
 `scripts/verify_hermes_gateway_adapter.sh` 는 삭제된 Swift 서버 패키지를
 띄운다(`swift run --package-path server`, LS-1 / #2165). Rust 스택 PASS가
-아니다.
+아니다 — SH-9 잔여
+[#2231](https://github.com/yeomyeonggeori/oort/issues/2231).
 
 [`external-agent-provider/hermes-gateway-native-platform.md`](external-agent-provider/hermes-gateway-native-platform.md)
 를 본다.
@@ -426,6 +432,25 @@ hosted 연결 전용 멤버에 generic 발급을 치면
 `409 hosted_connection_managed` — 그 멤버는 pairing 화면에서만 자격을 만든다.
 
 근거와 판정: [EXT-1 자격 조사](planning/research/2026-08-27-ext1-agent-credential-external-tools.md) (#1797) · [ADR-0173](adr/0173-external-tool-message-read.md).
+
+### 셀프호스트의 hosted 에이전트 (Agent Port)
+
+Agent Port 합류([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16) 뒤
+**활성** 자격의 `tools/list` 가 인박스 도구를 광고해야 한다. 목록이 비어
+있으면 hosted delivery 가 닫힌 것이다:
+`MOMO_HOSTED_DELIVERY_ENABLED=true`(소문자만 — `True` / `1` / `yes` 는
+닫힘)를 쓰고 **api** 와 **webhook-sender** 를 재시작한다.
+`scripts/self_host_env.sh` 가 만든 신규 env 는 이미 그 줄을 쓴다. 기존
+env 는 백필하지 않는다. `--railway` 는 이 키를 내지 않는다(41키 집합
+유지 — heredoc 에 넣으면 doctor 가 기존 설치마다 그 줄을 요구한다).
+게이트 두 줄을 넣는 awk 는
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 에 있다 — 여기다
+붙이지 말고 그 블록을 실행한다.
+
+`tools/list` 는 modern `params._meta` 가 필요하다
+([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16). `tools/call` 은 같은
+`_meta` 에다 `mcp-name` 요청 헤더가 필요하다
+([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.4).
 
 ---
 
@@ -593,6 +618,7 @@ oort down -v
 | 설치가 막혔는지 먼저 판정 | `scripts/oort doctor` (필요하면 `--json`). 도구·env·스택을 한 판정으로 본다. 스택이 아직 없으면 그 검사는 skip 하고 env 쪽만 판정한다. |
 | Day-2: 이미지 교체 (Update / 새 digest) | `scripts/oort upgrade` (`--to <releases/latest.json의 list digest로 pin된 이미지>` 또는 `--manifest URL` 또는 `--local-build`). 먼저 백업, 없는 env/볼륨은 거절. 로컬 빌드는 `compose build`(pull 아님) 후 `up -d --wait`; 디지스트 모드는 기존처럼 `pull` 후 `up -d`. `IDEMPOTENCY_OK` 대기 후 doctor PASS. 실패 시 인쇄하는 롤백 명령은 실패한 명령과 다르다(로컬 빌드: 이전 커밋 체크아웃 또는 `scripts/oort restore <dump>`); 자동 롤백 없음; `down -v` 없음. |
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
+| bind mount 가 실패한다 (`Caddyfile.local`: not a directory) 또는 클론이 Docker VM 공유 밖이다 | Docker Desktop / Colima 는 `/tmp`(그리고 홈이 아닌 경로)를 VM 과 공유하지 않는 경우가 많다. 홈 아래에 클론한다(`~/oort`). [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.1 과 같다. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |
 | 화면은 뜨는데 메시지가 실시간으로 안 온다 | outbox가 빠졌는지 먼저 본다(아래 질의). `broadcast \| done` 이면 서버 쪽은 끝난 것이고 브라우저 쪽을 본다(`oort logs api`). `pending`/`failed` 면 relay다(`oort logs relay`). |
 | 설정 › AI 연결이 **403** | 이 인스턴스에 등재된 운영자가 없다. `grep PLATFORM_ADMIN_EMAILS infra/rust/local.secrets.env` — 줄이 없으면 `scripts/self_host_env.sh --local-build`(또는 자신이 고른 모드)를 다시 실행하면 그 줄만 덧붙는다. 그 뒤 `oort up -d`로 api 재시작. [§5](#5-에이전트가-대답하게-하기-ai-연결). |

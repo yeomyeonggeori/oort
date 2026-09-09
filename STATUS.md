@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## E2E-B 문서 정정 + 신규 env hosted delivery 기본값 (#2263, 2026-09-09)
+
+- Track engine. `docs/2263-e2e-b-corrections` onto `origin/track/engine`. SELF_HOST(+ko) D1/D3/D4/D6/D9, SELF_HOST_AGENT(+ko) §3.3.17.2, OpenAPI `CreateAgentRequest.baseUrl`(ADR-0004 증보) + `POST …/channels/{channelId}/members`. 생성기 신규 env만 `MOMO_HOSTED_DELIVERY_ENABLED=true`(기존 env 무접촉, Railway 41키 유지).
+- 검증: `scripts/tests/test_self_host_env_modes.sh`(신규 true · 기존 무백필 · 사보타주 RED) · `scripts/verify_openapi_contract_rust.sh --verify-cleanup-contract` · `scripts/local_gate.sh --profile docs`.
+- runtime-unverified: 실스택에서 신규 env 기본값으로 Agent Port `tools/list` 비지 않음은 E2E-B 런 뒤 문서화 범위(측정은 research/2026-09-09-e2e-b-selfhost-run.md). D4 후속은 #2231.
+
 ## doctor/status `stack.outbox` 판정 (#2264, 2026-09-09)
 
 - Track engine. `fix/doctor-outbox-verdict` onto `origin/track/engine`. Isolated compose `oort2264d` (did not touch `oortv013`): first `docker compose exec postgres psql` while health=`starting` is rc=2 / empty stdout (`socket ... No such file or directory`); empty `GROUP BY` is also empty stdout rc=0; measured TSV `push_candidate|pending|4` + `agent_job|pending|1` classified **fail** with 「값 미나열」.

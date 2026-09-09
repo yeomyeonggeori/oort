@@ -52,6 +52,12 @@
 # 주입하지 않는다 — 이미 있는 env는 자동 감지를 유지한다. LAN/원격 클라
 # 배치면 그 호스트의 클라 도달 가능 IP로 바꾼다.
 #
+# `MOMO_HOSTED_DELIVERY_ENABLED`(#2263)도 신규 생성 env에만 소문자
+# `true`를 쓴다. Agent Port 합류 뒤 tools/list 가 비지 않게 하는 운영자
+# 자기 인스턴스 기본값이다. heredoc 밖 append 라 Railway 41키 집합과
+# doctor required-keys 는 그대로다. 기존 env는 백필하지 않는다 — 켜는
+# 법은 docs/SELF_HOST.md §6 hosted 절.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **시크릿을 다시 만들지 않는다.** 볼륨이 살아 있는 상태에서
@@ -175,6 +181,11 @@ oort_canonical_env_keys() {
 # *create* only — not in the heredoc, so the Railway 41-key set and doctor
 # required-keys stay unchanged. Existing env without the line is `unknown`
 # at compose interpolation (`${MOMO_BUILD_SHA:-unknown}`); do not backfill.
+#
+# Hosted Agent Port delivery (#2263) is the same create-only shape: append
+# `MOMO_HOSTED_DELIVERY_ENABLED=true` after the heredoc. Not a Railway
+# canonical key — public Railway env stays the 41-key set; compose default
+# remains `${VAR:-}` (closed). Existing env is not backfilled.
 momo_build_sha() {
   local sha
   if ! command -v git >/dev/null 2>&1; then
@@ -210,6 +221,33 @@ check_existing_momo_build_sha() {
     fail "${ENV_FILE}의 MOMO_BUILD_SHA 항목은 최대 한 번만 있어야 한다."
   [ "$count" -eq 1 ] || return 0
   validate_env_scalar MOMO_BUILD_SHA "$(env_value_once MOMO_BUILD_SHA)"
+}
+
+# #2263 — hosted Agent Port delivery. Create-only lowercase `true`.
+# Compose interpolates `${MOMO_HOSTED_DELIVERY_ENABLED:-}` so absence is
+# closed. Do not put this in the heredoc: doctor required-keys and the
+# Railway 41-key set stay the pre-#2263 set. Existing env is not repaired
+# (unlike PLATFORM_ADMIN_EMAILS) — the operator may have left the gate
+# closed on purpose; docs/SELF_HOST.md §6 tells them how to open it.
+append_hosted_delivery_enabled() {
+  validate_env_scalar MOMO_HOSTED_DELIVERY_ENABLED true
+  {
+    printf '\n# --- Hosted Agent Port delivery (#2263) --------------------------------\n'
+    printf '# 신규 env 만. 소문자 true 만 멘션→hosted inbox. True/1/yes 는 닫힘.\n'
+    printf '# 기존 파일에는 소급하지 않는다. 켜는 법: docs/SELF_HOST.md §6.\n'
+    printf 'MOMO_HOSTED_DELIVERY_ENABLED=true\n'
+  } >>"$ENV_FILE"
+}
+
+# Present → scalar + exact-once. Absent → leave absent (no backfill).
+check_existing_hosted_delivery_enabled() {
+  local count
+  count="$(env_key_count MOMO_HOSTED_DELIVERY_ENABLED)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_HOSTED_DELIVERY_ENABLED 항목은 최대 한 번만 있어야 한다."
+  [ "$count" -eq 1 ] || return 0
+  validate_env_scalar MOMO_HOSTED_DELIVERY_ENABLED \
+    "$(env_value_once MOMO_HOSTED_DELIVERY_ENABLED)"
 }
 
 usage() {
@@ -1383,6 +1421,7 @@ EOF
 if [ -e "$ENV_FILE" ]; then
   reject_duplicate_env_keys
   check_existing_momo_build_sha
+  check_existing_hosted_delivery_enabled
   existing_image="$(env_value_once MOMO_RUST_IMAGE)"
   existing_web_port="$(env_value_once MOMO_WEB_PORT)"
   existing_email="$(env_value_once MOMO_INITIAL_OWNER_EMAIL)"
@@ -1642,6 +1681,7 @@ EOF
 chmod 600 "$ENV_FILE"
 
 append_momo_build_sha
+append_hosted_delivery_enabled
 ensure_public_edge_env
 ensure_local_provider_optin
 reject_duplicate_env_keys
