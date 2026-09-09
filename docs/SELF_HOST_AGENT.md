@@ -1058,7 +1058,9 @@ for §3.3.17.3 only; do not repeat them in later replies or logs.
 
 Register REST and sender drain open only when `MOMO_DOORBELL_ENABLED` is
 lowercase **`true`** (ADR-0171 D6). The **prior** gate is
-`MOMO_HOSTED_DELIVERY_ENABLED` — same spelling, default off. Doorbell-only
+`MOMO_HOSTED_DELIVERY_ENABLED` — same spelling. New env from
+`scripts/self_host_env.sh` writes lowercase `true`; existing env stays
+off until this block. Doorbell-only
 without that value (or not `true`) means mentions never reach hosted inbox
 (`hosted_delivery_not_enabled` skip) so there is nothing to ring. Looks on,
 nothing happens. `True` / `TRUE` / `1` / `yes` / `on` are closed for both.
