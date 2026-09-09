@@ -45,3 +45,10 @@ UX-R3a~c 팔레트 · DS-1(·3·4) 잔여 · UX-R2d · #1925 허들 자격 · #1
 - **SH-8·SH-9 발급 go** — 브리프 `handoffs/2026-09-08-sh8-grokbot-join-cdp-harness-brief.md`(#2230) · `handoffs/2026-09-08-sh9-hermes-runbook-rust-brief.md`(#2231). 탐색 정정 반영: SH-8은 §3.3.16이 이미 있어 검수·보강, CDP 하네스는 레포에 없었으므로 신규 작성, #1361 Deps 전부 CLOSED; SH-9는 `external-agent-provider/*` 국소 스테일 + SELF_HOST §5 로컬 provider 절 신설(SH-6a-e 의존).
 - **Railway 실배포 E2E** — 최종 단계(셀프호스팅 완료·검증 단계)에서 수행. G1'-4 E2E-B 시점.
 - **실기기 APNs** — 데스크톱 셀프호스팅 완료 뒤 테스트 진행 계획으로 편성(G2 iOS v0 앞).
+
+## 갱신 2026-09-09 (저녁, 스냅샷 96) — 1차 목표 두 케이스 실측 뒤 지도 재조정
+- **끝난 것(09-09)**: G1'-4 **E2E-B 케이스 B PASS**(결함 D2·D8/D9/D11·D10 정본화) · **E2E-A 케이스 A PASS**(설치→합류→답장→disconnect 잔여 0; 보고 `research/2026-09-09-e2e-a-grokbot-run.md`) · UX-R2c 잔여 폐곡선 · doctor outbox · **ADR-0184 Accepted**(플랫폼 중립·에이전트 주도 셀프호스팅).
+- **§1 파도 재조정(G1'까지)**: ①**SH-11 플랫폼 중립화**(g `--platform` 프로파일·f 게이트/템플릿 시험 → a~e: Cloudflare 에지·AWS/Fly/Render 프로파일·MCP 도구·day-2 v2·문서) ②**SH-12 제로베이스 온보딩**(a: claim 뒤 first-run 퍼널 복원[결함] → ADR-0185 결재 뒤 b: 워크스페이스 rename·오너 프로필 · c: 초대 스테이지 skip 탈출구 · d: 셀프호스트 킥오프 첫 에이전트 유도 · e: FIRST_DAY 문서·ADR-0166 §6 개정) ③**v0.1.5 발행**(A5: 그록봇 경로가 v0.1.4에 묶임 — SH-6a-w 자격 화면·UX-R2c·D9 기본값 포함 필요; 성재 dispatch·owner 승인 3회) ④제로베이스 온보딩 E2E 재실측(A·B 둘 다, 시드 착륙 금지) ⑤E2E-A 문서 티켓(A1/A3/A4 VM Docker 전제·A6·A7 사람 승인 지점·A8 카피 한정) ⑥VM Update/Reset 복구 실측.
+- **§2 유지**: ITO → G2(iOS v0 · Railway 실배포 최종 검증 · 실기기 APNs는 데스크톱 뒤).
+- **§3 선재·위생**: #2262 M-1·M-2·N3 · 캡처 레인 병합 게이트 · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 프리플라이트 사각 · #2157·#2181·#2193 · SH-11a~e 이슈화.
+- **결재 대기(ADR-0185 Proposed)**: D-A 온보딩 노선 · D-B 제로베이스 정의 · D-C 셀프호스트 킥오프. 권고는 브리프 `claudedocs/resume-2026-09-07/brief-sh12.md` §1.
