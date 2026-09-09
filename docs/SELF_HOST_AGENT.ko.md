@@ -433,7 +433,7 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 > **하네스 메모:** Grok Bot 창이 다른 Space에 있으면 OS Return이 실패한다.
 > `open -a "Grok Bot"` 으로 앱을 앞으로 가져온 뒤 Return.
 
-#### VM Docker 점검·대안
+#### 3.3.0 VM Docker 점검·대안
 
 이 벤더 VM에서 실측됨(E2E-A, 2026-09-09): overlayfs가 불가할 수 있다
 (스토리지 드라이버가 `vfs`로 떨어진다), Docker bridge와 iptables가
@@ -476,7 +476,8 @@ docker network rm oort-preflight-bridge
 `--platform`, `--public-origin` 등). 이 트리는 host-network용으로
 compose Postgres 호스트를 `postgres` 에서 `127.0.0.1` 로 바꾸는 생성기
 옵션이 없다. host-network가 그 호스트 재기록이 필요해도 **env를 고치지
-마라** — 우회를 §3.3.14 핸드오프 메시지에 남기고 멈춘다.
+마라** — 우회를 §3.3.14 핸드오프 메시지에 남기고 멈춘다: 화면을 사람에게
+넘긴다(ADR-0184 D2). 이 호스트 재기록용 생성기 옵션은 #2340 에서 다룬다.
 
 #### 3.3.1 스냅샷 (git 없음)
 
@@ -1369,6 +1370,8 @@ curl -sS -o /tmp/oort-disconnect.body -w '%{http_code}' \
 ```
 
 2. 에이전트에게 지시 1회 → 정리 매니페스트 **1회**. 두 번 묻지 마라.
+   어떤 줄의 `residual` 이 `none` 이 아니면 그 항목만 지목한 후속 지시
+   1회 → 매니페스트 1회 더(최대 2라운드; 실측: 잔여 파일 4, 후속 1회).
    필수 줄 형식(실측):
 
 ```text
@@ -1385,8 +1388,11 @@ plugin · (none) · absent · residual none
 bot · grokbot · preserved · residual none
 ```
 
-3. 서버 매니페스트 각 행을 `{currentStatus, disposition, evidence}` 로
-   acknowledge 한다. **`disposition` 을 주면 `evidence`(1..2000B)가
+3. 서버 매니페스트 각 행을(사람 관리자 세션만 — 라우트가 `require_human`)
+   `{currentStatus, disposition, evidence}` 로 acknowledge 한다. 행 id는
+   disconnect 응답에서 읽는다:
+   `jq -r '.cleanupArtifacts[]|[.id,.kind,(.externalRef//"-")]|@tsv' /tmp/oort-disconnect.body`
+   — 그 값으로 `ARTIFACT_ID` 를 돌린다. **`disposition` 을 주면 `evidence`(1..2000B)가
    필수다.** 빼먹으면 HTTP 400
    `a manual acknowledgement requires 1..=2000 bytes of evidence`.
    `evidence` 에는 봇 매니페스트 한 줄을 붙여 넣는다. 실측 짝:
@@ -1403,7 +1409,7 @@ curl -sS -o /tmp/oort-ack.body -w '%{http_code}' \
 ```
 
 4. required 행이 모두 해결되면 disconnect를 완료한다. **게이트:** HTTP
-   200, `disconnected`, unresolved 0.
+   200, `connection.status` `disconnected`, `remainingRequired` 0.
 
 ```sh
 curl -sS -o /tmp/oort-disconnect-complete.body -w '%{http_code}' \

@@ -445,7 +445,7 @@ have no public inbound.
 > **Harness note:** OS Return fails when the Grok Bot window is on another
 > Space. Bring the app forward with `open -a "Grok Bot"`, then Return.
 
-#### VM Docker preflight and fallbacks
+#### 3.3.0 VM Docker preflight and fallbacks
 
 Measured on this vendor VM (E2E-A, 2026-09-09): overlayfs may be
 unavailable (storage driver falls to `vfs`), Docker bridge and iptables
@@ -488,7 +488,8 @@ generator options (`scripts/self_host_env.sh` flags such as
 generator option that retargets compose Postgres from `postgres` to
 `127.0.0.1` for host-network. If host-network still needs that host rewrite,
 **do not edit env** — record the bypass in the §3.3.14 handoff message and
-stop.
+stop: hand the screen to the human (ADR-0184 D2). A generator option for this
+host rewrite is tracked as #2340.
 
 #### 3.3.1 Snapshot (no git)
 
@@ -1407,7 +1408,10 @@ curl -sS -o /tmp/oort-disconnect.body -w '%{http_code}' \
 ```
 
 2. One instruction to the agent → **one** cleanup manifest. Do not ask
-   twice. Required line format (measured):
+   twice. If any line reports `residual` other than `none`, send exactly
+   one follow-up naming those items → one more manifest (two rounds
+   maximum; measured: 4 leftover files, one follow-up). Required line
+   format (measured):
 
 ```text
 kind · name · status(deleted/absent/preserved) · residual
@@ -1423,8 +1427,11 @@ plugin · (none) · absent · residual none
 bot · grokbot · preserved · residual none
 ```
 
-3. Acknowledge each server manifest row with
-   `{currentStatus, disposition, evidence}`. **If you send `disposition`,
+3. Acknowledge each server manifest row (human admin session only — the
+   route is `require_human`) with `{currentStatus, disposition, evidence}`.
+   Read the row ids from the disconnect response:
+   `jq -r '.cleanupArtifacts[]|[.id,.kind,(.externalRef//"-")]|@tsv' /tmp/oort-disconnect.body`
+   and loop `ARTIFACT_ID` over them. **If you send `disposition`,
    `evidence` is required (1..2000 bytes).** Omitting it is HTTP 400
    `a manual acknowledgement requires 1..=2000 bytes of evidence`. Paste one
    bot-manifest line into `evidence`. Measured pairing: `bot` = preserve /
@@ -1441,7 +1448,7 @@ curl -sS -o /tmp/oort-ack.body -w '%{http_code}' \
 ```
 
 4. When required rows are resolved, complete disconnect. **Gate:** HTTP
-   200, `disconnected`, unresolved 0.
+   200, `connection.status` `disconnected`, `remainingRequired` 0.
 
 ```sh
 curl -sS -o /tmp/oort-disconnect-complete.body -w '%{http_code}' \
