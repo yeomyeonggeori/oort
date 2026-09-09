@@ -1,6 +1,6 @@
 # ADR-0184: 플랫폼 중립·에이전트 주도 셀프호스팅 — 「이 플랫폼에 올려줘」 한 문장으로 설치·연동·시작
 
-- Status: **Proposed** (기안 Fable 2026-09-09 · 성재 지시 「Railway뿐 아니라 Cloudflare·AWS 등 여러 플랫폼에서 가능하게, 에이전트가 브라우저 조작·로그인·발급·연동·호스팅까지 알아서」)
+- Status: **Accepted** (2026-09-09 성재 결재 「ADR 0184 accept」 · 기안 Fable 2026-09-09 · 성재 지시 「Railway뿐 아니라 Cloudflare·AWS 등 여러 플랫폼에서 가능하게, 에이전트가 브라우저 조작·로그인·발급·연동·호스팅까지 알아서」)
 - Deciders: 성재
 - Consumes: ADR-0121(배포판·온보딩) · ADR-0166(claim) · ADR-0167(same-origin) · ADR-0169(로컬 Drive) · ADR-0162(Agent Port) · ADR-0004(provider 경계) · 2026-09-02 두 기둥 브리프(SH-4/SH-5)
 - 근거 조사: `docs/planning/research/2026-09-09-platform-neutral-selfhost-inventory.md`
@@ -35,6 +35,9 @@ Cloudflare Containers·Workers를 컴퓨트로 쓰는 경로는 **채택하지 �
 ### D6. 수용 = 사용자 경험
 README 프롬프트 1블록 → 에이전트가 환경을 묻고 플랫폼 이름을 받으면 → D2 수단으로 프로비저닝 → doctor PASS → 핸드오프(URL·claim·QR) → 첫 에이전트 합류까지. 사람 승인 지점은 플랫폼당 명시 목록으로 문서화하고 그 외 개입 0이 목표.
 
+### D7. 사전에 파악하지 않은 플랫폼 — 특성 기반 분류와 일반 레시피
+플랫폼 이름이 §1 표에 없어도 에이전트는 **특성 질문 6개**로 tier를 정한 뒤 그 tier의 일반 레시피를 따른다: ①Docker Compose(또는 단일 VM+Docker)를 그대로 돌릴 수 있는가 ②영속 볼륨(PG 데이터·첨부)이 있는가 ③상시 프로세스(유휴 정지 없음)와 장수 WebSocket이 되는가 ④관리형 Postgres가 있다면 롤 4URL·3롤을 만들 수 있는가 ⑤리버스 프록시를 공개하고 api를 내부에 둘 수 있는가(`/v1/centrifugo/*` 403 순서) ⑥공식 CLI/MCP/REST 중 무엇이 있는가. ①②③이 모두 예 → T1(compose 레시피 §3.2 그대로), ①이 아니고 ②④⑤가 예 → T2(관리형 레시피 + day-2 v2), ②③이 아니오 → T3(엣지 전용, 컴퓨트 불가 판정을 사용자에게 말한다). 판정과 근거는 설치 보고에 남기고, 성공한 플랫폼은 §1 표 행 후보로 환류한다(1회 실측 E2E가 수용기준). 미지 플랫폼에서도 D2의 조작 수단 우선순위와 사람 승인 지점 규율은 동일하다.
+
 ## 대안
 - 「Railway 하나로 충분」: 성재 지시로 기각(다플랫폼).
 - 「모든 플랫폼을 Terraform 단일 스택」: T2의 관리형 PG·엣지 차이와 에이전트 조작 수단(MCP/CLI) 차이가 커서 레시피 분리가 정직. Terraform은 AWS/GCP T1 VM 레시피 안에서만 최소 사용(09-02 브리프 그대로).
@@ -44,4 +47,4 @@ README 프롬프트 1블록 → 에이전트가 환경을 묻고 플랫폼 이�
 SH-11a Railway 에이전트 경로 1회 실측(`railway setup agent`+MCP, 성재 로그인 = 승인 지점) · SH-11b Fly T1 레시피(`fly.toml`+볼륨) · SH-11c AWS Lightsail/EC2 T1 레시피(+최소 Terraform) · SH-11d Cloudflare 엣지 레시피(VPS/T1 앞단 DNS·Tunnel) · SH-11e day-2 v2(T2) · SH-11f 게이트 배선(#2181 선행) · SH-11g §0 경계 개정 + 생성기 `--platform` 일반화. 순서: 11g·11f(문서·게이트) → 11a(Railway 실측) → 11b/11c → 11d → 11e.
 
 ## 결재 기록
-- (대기) 성재 Accept.
+- 2026-09-09 성재: **Accept**. 추가 지시: 「우리가 먼저 파악한 플랫폼이 아니더라도 플랫폼의 특징을 기반으로 잘 구축할 수 있게」(→ D7) · v0.1.5는 실제 온보딩(제로베이스: 워크스페이스 생성·프로필·팀 규모·초대/skip)을 경험하는 구조로 작업 후 발행 · 데모 사용자/데모 워크스페이스 경유 E2E는 제로베이스 E2E가 아님(별도 계획 SH-12).
