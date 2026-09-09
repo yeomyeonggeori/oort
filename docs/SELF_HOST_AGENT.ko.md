@@ -30,7 +30,15 @@ claim URL은 사용자에게 **한 번만** 회신한다.
 - 사용자의 기계·계정을 떠난다
 - 시크릿을 대화에 붙인다 (비밀번호, pairing/active 자격, claim 토큰,
   도어벨 키, 세션 토큰, `DATABASE_URL`)
-- 앱을 자동화로 제어한다 (셀렉터, 원격 디버깅, 스크립트 UI)
+- 벤더 채팅 앱(그록봇 등)을 자동화로 조종한다 (셀렉터, 원격 디버깅,
+  스크립트 UI)
+- 플랫폼 콘솔을 사용자 대신 클릭한다. 플랫폼 콘솔(Railway, Fly, AWS, GCP,
+  Cloudflare, …)은 **공식 CLI/MCP → REST API + 사용자 제공 토큰 → 브라우저
+  자동화** 순으로 닿는다. 브라우저 자동화는 회원가입·결제·DNS 위임·OAuth
+  동의처럼 API가 없는 단계의 **사람 승인 지점**에서만 쓴다. 그 지점에서
+  에이전트는 **멈추고 화면을 사용자에게 넘긴다** — 대신 클릭하지 않는다
+  (ADR-0184 D2). 플랫폼 CLI/MCP는 사용자 본인의 로그인 세션을 재사용하고,
+  플랫폼 토큰은 대화·이슈·트리에 남기지 않는다(ADR-0004)
 - 이 기계가 소유하지 않은 호스트에 ACME / Let's Encrypt를 돌린다
 - 루프백 설치에서 `caddy.override.yml` 이나 운영 `Caddyfile` 을 이름 부른다
   (그 오버레이는 인증서를 주문한다)
@@ -67,14 +75,28 @@ scripts/oort doctor --json
 **한 행만** 고른다. 그다음 §2(공통 코어). 그다음 맞는 §3 분기.
 엣지를 섞지 않는다 (루프백 `Caddyfile.local` vs 공개 `Caddyfile`).
 
-| | 로컬 머신 | 자기 도메인 VPS | Grok Bot VM (Tailscale Funnel) | Railway | Fly | AWS | GCP |
+tier는 ADR-0184 D1이다. **T1**은 compose 정본을 그대로 돌린다(doctor
+`stack.*`·day-2 명령 전부 유효). **T2**는 관리형 컨테이너 + PG 플러그인:
+이미지·엣지·env는 정본에서 파생하고, `stack.*`·`oort backup/restore/upgrade`는
+day-2 v2(SH-11e)를 기다린다. **T3**은 엣지 전용 — 컴퓨트가 아니다. 「조작
+수단」은 §0의 순서다: 사용자 본인 세션의 공식 CLI/MCP → 사용자 토큰의 REST →
+브라우저는 사람 승인 지점에서만. 모든 행의 env 파생은
+`scripts/self_host_env.sh --platform <name>`이 표 하나(`platform_profiles`)를
+읽는다: `railway`(T2, 별칭 `--railway`) · `fly` · `aws-lightsail` ·
+`gcp-vm`(T1, `--public-origin` 파생과 같고 heredoc 밖에
+`MOMO_SELF_HOST_PLATFORM=<name>`만 추가; 정본 41키 집합은 늘지 않는다).
+로컬·VPS·Grok Bot VM은 행이 없다 — compose 정본 그 자체다.
+
+| 플랫폼 | Tier | 분기 · 레시피 | 조작 수단 | 사람 승인 지점 | 전제 | 엣지 · URL 모델 | 완료 |
 |---|---|---|---|---|---|---|---|
-| **전제** | Docker Engine + Compose v2, git, jq, openssl, curl. 여유 ≥ 1 GiB (2 GiB 권장). | 같음 + 이 기계가 소유한 호스트의 DNS. | curl, tar, Docker Engine + Compose v2, openssl, jq. git 불필요. durable 디렉터리 `/workspace`. Tailscale 계정 1개. | Docker를 돌릴 런타임. 템플릿은 SH-5a. 그 전에는 §3.2. | SH-5b `fly.toml` 전까지 VPS와 같음. | VM + compose + 도메인 (SH-5b). | AWS와 같음. |
-| **엣지** | `local.override.yml` + `Caddyfile.local` (`:80`, ACME 없음). | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). `OORT_SITE_ADDRESS` 와 `OORT_CSP_CONNECT_SRC` 는 `scripts/self_host_env.sh --public-origin` 이 파생한다 — 손으로 적지 마라. | 루프백 Caddy + 웹 포트로 Tailscale Funnel. 여기서 `caddy.override.yml` 을 **켜지 마라** (ACME). `--public-origin` 은 Funnel URL을 Centrifugo에 등록한다. | 플랫폼 도메인의 공개 오리진, VPS와 같은 env 키 둘. | VPS와 같음. | VPS와 같음. | VPS와 같음. |
-| **URL 모델** | `http://127.0.0.1:<MOMO_WEB_PORT>` (생성기 기본 8088, 비어 있으면). | 운영자가 선언한 `https://<host>`. | `/workspace` 아래 Funnel state가 살아 있는 동안 `https://<machine>.<tailnet>.ts.net`. | 플랫폼 호스트명. | Fly 호스트명 또는 커스텀 도메인. | 운영자 도메인. | 운영자 도메인. |
-| **계정** | 이 기계 외 없음. | 도메인 DNS. | Tailscale 1개. 계정 0개 + 고정 URL은 이 플레이북이 **달성하지 못한다**(RA-7). | 플랫폼 계정 (SH-5a). | Fly 계정 (SH-5b). | 클라우드 계정 (SH-5b). | 같음. |
-| **Doctor** | 기동 후 `scripts/oort doctor --json`. `public.*` skip 은 OK. | 같음, 공개 오버레이 뒤 한 번 더: `public.healthz` 와 `public.websocket` 이 pass 여야 한다. | Funnel + `--public-origin` 뒤 같음. `public.*` 는 Funnel 오리진 기준 pass. | 공개 오리진이 생기면 VPS와 같음. | 같음. | 같음. | 같음. |
-| **완료** | Doctor `summary.verdict=PASS` 그리고 `owner@oort.local` 브라우저(또는 로그인 API) 세션. | 공개 검사 포함 doctor PASS, HTTPS 로그인. | 공개 검사 포함 doctor PASS, 1회용 claim URL을 사용자에게 회신, `/workspace` 첫날 덤프. | 배포 오리진에서 doctor PASS (SH-5a). | 같음. | 같음. | 같음. |
+| **로컬 머신** | T1 | §3.1 | 이 기계의 셸(compose). | 없음. | Docker Engine + Compose v2, git, jq, openssl, curl. 여유 ≥ 1 GiB (2 GiB 권장). | `local.override.yml` + `Caddyfile.local` (`:80`, ACME 없음). `http://127.0.0.1:<MOMO_WEB_PORT>` (생성기 기본 8088, 비어 있으면). | Doctor `summary.verdict=PASS`(`public.*` skip 은 OK) 그리고 `owner@oort.local` 브라우저(또는 로그인 API) 세션. |
+| **자기 도메인 VPS** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. 프로바이더 CLI는 사용자가 이미 로그인해 둔 것만. | 프로바이더 가입·결제; 그 호스트의 DNS 레코드. | 로컬과 같음 + 이 기계가 소유한 호스트의 DNS. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). `OORT_SITE_ADDRESS` 와 `OORT_CSP_CONNECT_SRC` 는 `scripts/self_host_env.sh --public-origin` 이 파생한다 — 손으로 적지 마라. 운영자가 선언한 `https://<host>`. | `public.healthz`·`public.websocket` 포함 doctor PASS, HTTPS 로그인. |
+| **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · 프로비저닝 레시피 SH-11b (`fly.toml` + 볼륨) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | Fly 가입·결제; 커스텀 도메인 DNS. | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
+| **AWS Lightsail / EC2** | T1 | §3.6 · 프로비저닝 레시피 SH-11c (+ 최소 Terraform) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS 가입·결제; IAM 동의; DNS 레코드. | 클라우드 계정; VM + compose + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
+| **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
+| **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). `stack.*`·`oort backup/restore/upgrade`는 day-2 v2(SH-11e) 전까지 없음. |
+| **Cloudflare** (엣지 전용) | T3 | 레시피 SH-11d — T1/T2 행 앞단의 DNS · Tunnel · TLS | 사용자 세션의 `wrangler` / MCP `mcp.cloudflare.com` → API 토큰의 REST → 브라우저. | Cloudflare 가입; 레지스트라의 네임서버 위임; Tunnel 토큰 생성. | 이미 떠 있는 T1/T2 행. 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명. | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. |
+| **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | VM 안의 셸(compose) + `tailscale` CLI. | Tailscale 로그인·Funnel 켜기(4~5 클릭); 1회용 claim URL 열기. 계정 0개 + 고정 URL은 이 플레이북이 **달성하지 못한다**(RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git 불필요. durable 디렉터리 `/workspace`. Tailscale 계정 1개. | 루프백 Caddy + 웹 포트로 Tailscale Funnel. 여기서 `caddy.override.yml` 을 **켜지 마라** (ACME). `--public-origin` 은 Funnel URL을 Centrifugo에 등록한다. `/workspace` 아래 Funnel state가 살아 있는 동안 `https://<machine>.<tailnet>.ts.net`. | Funnel 오리진 기준 공개 검사 포함 doctor PASS, 1회용 claim URL을 사용자에게 회신, `/workspace` 첫날 덤프. |
 
 데스크탑 Tauri Origin(`tauri://localhost`, `http://tauri.localhost`)은
 셀프호스트 허용 목록에 있다. **공개** URL을 브라우저·RN이 열려면 그 오리진이
@@ -1301,11 +1323,13 @@ LiveKit은 이 템플릿에 없다. 이 레포가 싣지 않는 compose 스택�
 2. 플러그인 URL과 caddy 호스트명이 생긴 뒤:
 
 ```sh
-scripts/self_host_env.sh --railway
+scripts/self_host_env.sh --platform railway
 ```
 
-   환경에 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`이 필요하다(둘 중 하나라도
-   없으면 명시 실패 — doctor `public.*` skip이 아니다). stdout KEY=value를
+   (`--railway`는 별칭.) 환경에 `RAILWAY_PUBLIC_DOMAIN`과 `DATABASE_URL`이
+   필요하다(둘 중 하나라도 없으면 명시 실패 — doctor `public.*` skip이
+   아니다). 어떤 변수를 읽고 어떤 키가 손에 남는지는 `platform_profiles`
+   행이 말한다. stdout KEY=value를
    Railway 변수로 넣는다. 생성기 파일에 없는 compose 보간 키 셋
    (`CENT_API_URL`, `WORKER_DATABASE_URL`, Centrifugo proxy 헤더)은 README.
 3. 배포. api preDeploy(런타임 롤 → migrate)가 끝나고 caddy `/healthz`가
@@ -1324,20 +1348,32 @@ scripts/oort doctor --json
 
 ### 3.5 Fly
 
-SH-5b가 `fly.toml` + volume을 랜딩한다. 그 전까지 Fly VM에서 §3.2를
-따른다. **게이트:** 공개 오리진 등록 뒤 `scripts/oort doctor --json`.
+T1. compose 절차는 볼륨 달린 Fly VM 1대 위의 §3.2다. 플랫폼 프로비저닝
+레시피(`fly.toml` + 볼륨, 사용자 로그인의 `flyctl`)는 SH-11b. env는 §3.2(`IMAGE_REF`는 §2.2에서 읽은 값)
+파생에 행 이름을 더한 것이다:
+
+```sh
+scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-origin https://<host>
+```
+
+사람 승인 지점: Fly 가입·결제, 커스텀 도메인 DNS.
+**게이트:** 공개 오리진 등록 뒤 `scripts/oort doctor --json`.
 
 ### 3.6 AWS
 
-SH-5b는 "VM + compose + 도메인"(나중에 최소 Terraform). 그 전까지:
-소유한 VM을 준비하고 §2 + §3.2. ACME는 이 VM의 DNS가 소유한
-호스트명에만.
+T1. compose 절차는 소유한 Lightsail/EC2 VM 위의 §3.2다. 프로비저닝
+레시피(사용자 세션의 `aws` CLI / AWS MCP, 최소 Terraform)는 SH-11c. env:
+이미지 모드와 함께 `--platform aws-lightsail --public-origin
+https://<host>`. ACME는 이 VM의 DNS가 소유한 호스트명에만. 사람 승인
+지점: AWS 가입·결제, IAM 동의, DNS 레코드.
 
 **게이트:** 공개 검사 포함 `scripts/oort doctor --json`.
 
 ### 3.7 GCP
 
-§3.6과 같은 계약. **게이트:** 공개 검사 포함 `scripts/oort doctor --json`.
+T1, `gcloud`와 `--platform gcp-vm`으로 §3.6과 같은 계약. 사람 승인 지점:
+GCP 가입·결제, OAuth 동의, DNS 레코드.
+**게이트:** 공개 검사 포함 `scripts/oort doctor --json`.
 
 ---
 

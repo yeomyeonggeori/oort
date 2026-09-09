@@ -58,6 +58,13 @@
 # doctor required-keys 는 그대로다. 기존 env는 백필하지 않는다 — 켜는
 # 법은 docs/SELF_HOST.md §6 hosted 절.
 #
+# `--platform <name>`(ADR-0184 D3 / #2296)은 플랫폼별 파생을 **표 하나**
+# (`platform_profiles`)에서 읽는다. `--railway`는 `--platform railway`의
+# 별칭이다. T2(관리형 컨테이너+PG) 행은 정본 키 집합(41)을 stdout에 쓰고,
+# T1(compose 컴퓨트) 행은 `--public-origin` 파생과 같은 파일을 만들며
+# `MOMO_SELF_HOST_PLATFORM=<name>`만 heredoc 밖에 덧붙인다. 정본 키 집합은
+# 어느 행에서도 늘지 않는다.
+#
 # ## 규율
 #
 # * 이미 파일이 있으면 **시크릿을 다시 만들지 않는다.** 볼륨이 살아 있는 상태에서
@@ -115,6 +122,8 @@ PUBLIC_ORIGINS=()
 # Count is the only length we read without expanding the array.
 PUBLIC_ORIGIN_COUNT=0
 ALLOW_LOCAL_PROVIDER=0
+REQUESTED_PLATFORM=""
+PLATFORM_TIER=""
 
 # Compose contract의 단일 권위는 generated env의 실제 KEY= 행 + canonical file
 # 세 개의 `${KEY...}` interpolation이다. `compose_ambient_keys`가 둘을 실행 시
@@ -156,6 +165,131 @@ oort_public_edge_env_keys() {
 # default deny (and --railway key set) stay unchanged.
 oort_local_provider_env_keys() {
   printf '%s\n' 'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK' 'AGENT_PROVIDER_LOCAL_HOSTS'
+}
+
+# ---------------------------------------------------------------------------
+# Platform profiles (ADR-0184 D3, #2296). ONE table: every platform this
+# generator derives env for is a row here and nowhere else. `--railway` is
+# an alias for `--platform railway`. Columns, `|` separated:
+#   1 name      the `--platform <name>` argument (exact, lowercase)
+#   2 label     human name used in messages
+#   3 tier      T1 = compose compute (env file, --public-origin derivation,
+#               MOMO_SELF_HOST_PLATFORM stamp outside the heredoc)
+#               T2 = managed containers + PG plugin (canonical key set on
+#               stdout, no file, no stamp)
+#   4 origin    public-origin source: `env:<VAR>` reads a platform-provided
+#               host variable; `flag` means the operator passes --public-origin
+#   5 database  `env:<VAR>` reads a platform PG URL; `compose` is the postgres
+#               service of the compose canon
+#   6 internal  hostname suffix sibling services resolve inside the platform
+#               network (`-` = compose service names)
+#   7 hand_keys keys compose interpolates that the generator does NOT emit
+#               (comma list, `-` none) — the operator sets them by hand
+#   8 hosted    1 = MOMO_HOSTED_DELIVERY_ENABLED=true is appended outside the
+#               heredoc on create (T1 file path); 0 = never emitted (T2 stdout
+#               is exactly oort_canonical_env_keys)
+# The canonical key set (oort_canonical_env_keys, 41) never changes here.
+# docs/SELF_HOST_AGENT.md §1 is the prose view of this table.
+platform_profiles() {
+  cat <<'EOF'
+railway|Railway|T2|env:RAILWAY_PUBLIC_DOMAIN|env:DATABASE_URL|.railway.internal|CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS|0
+fly|Fly.io|T1|flag|compose|-|-|1
+aws-lightsail|AWS Lightsail/EC2|T1|flag|compose|-|-|1
+gcp-vm|GCP Compute Engine VM|T1|flag|compose|-|-|1
+EOF
+}
+
+platform_names() {
+  platform_profiles | awk -F'|' 'NF == 8 { print $1 }'
+}
+
+# Column N of the row named $1. Empty output = unknown platform.
+platform_profile_field() {
+  local name="$1" column="$2"
+  platform_profiles | awk -F'|' -v name="$name" -v column="$column" '
+    NF == 8 && $1 == name { print $column; exit }
+  '
+}
+
+request_platform() {
+  local name="$1" tier
+  [ -z "$REQUESTED_PLATFORM" ] ||
+    fail "--platform 은 한 번만 지정하라 (--railway 는 --platform railway 의 별칭이다)."
+  # Parse-time: only the row names' character class is accepted, so a
+  # multi-line or shell-ish value never reaches awk or the env file.
+  [[ "$name" =~ ^[a-z0-9-]+$ ]] ||
+    fail "알 수 없는 플랫폼: 이름은 소문자·숫자·- 만 쓴다. platform_profiles 에 있는 이름: $(platform_names | tr '\n' ' ' | sed 's/ $//')"
+  tier="$(platform_profile_field "$name" 3)"
+  [ -n "$tier" ] ||
+    fail "알 수 없는 플랫폼: $name. platform_profiles 에 있는 이름: $(platform_names | tr '\n' ' ' | sed 's/ $//')"
+  REQUESTED_PLATFORM="$name"
+  PLATFORM_TIER="$tier"
+}
+
+# Combination rules are checked once after parsing so flag order does not
+# matter. T2 prints the canonical set to stdout and therefore refuses every
+# file-writing flag; T1 is the --public-origin file path plus a stamp.
+validate_platform_request() {
+  [ -n "$REQUESTED_PLATFORM" ] || return 0
+  local origin_source
+  origin_source="$(platform_profile_field "$REQUESTED_PLATFORM" 4)"
+  [ "$REQUESTED_ACTION" = "prepare" ] ||
+    fail "--platform 은 --compose 와 함께 지정할 수 없다."
+  case "$PLATFORM_TIER" in
+    T2)
+      case "$origin_source" in
+        env:?*) ;;
+        *) fail "platform_profiles 내부 오류: T2 행의 origin 은 env:<VAR> 여야 한다: $REQUESTED_PLATFORM" ;;
+      esac
+      [ -z "$REQUESTED_MODE" ] ||
+        fail "--platform $REQUESTED_PLATFORM (T2) 은 파일을 쓰지 않는다. 이미지 생성 모드와 함께 지정할 수 없다."
+      [ "$PUBLIC_ORIGIN_COUNT" -eq 0 ] ||
+        fail "--platform $REQUESTED_PLATFORM 은 ${origin_source#env:} 을 쓴다. --public-origin과 함께 지정하지 마라."
+      [ "$ALLOW_LOCAL_PROVIDER" -eq 0 ] ||
+        fail "--platform $REQUESTED_PLATFORM 은 로컬 provider opt-in과 함께 지정하지 마라."
+      REQUESTED_ACTION="platform-env"
+      ;;
+    T1)
+      [ "$origin_source" = "flag" ] ||
+        fail "platform_profiles 내부 오류: T1 행의 origin 은 flag 여야 한다: $REQUESTED_PLATFORM"
+      [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] ||
+        fail "--platform $REQUESTED_PLATFORM (T1) 은 공개 오리진을 --public-origin 으로 받는다. 함께 지정하라."
+      ;;
+    *) fail "platform_profiles 내부 오류: 알 수 없는 tier: $PLATFORM_TIER" ;;
+  esac
+}
+
+# #2296 — T1 platform stamp. Appended outside the heredoc on create (the
+# canonical 41-key set is unchanged); on an existing env it is added once
+# when absent and must match when present. Never emitted for T2.
+append_platform_stamp() {
+  [ -n "$REQUESTED_PLATFORM" ] || return 0
+  validate_env_scalar MOMO_SELF_HOST_PLATFORM "$REQUESTED_PLATFORM"
+  {
+    printf '\n# --- 플랫폼 프로파일 (ADR-0184 / #2296) -----------------------------------\n'
+    printf '# scripts/self_host_env.sh --platform %s (tier %s). 레시피: docs/SELF_HOST_AGENT.md §1.\n' \
+      "$REQUESTED_PLATFORM" "$PLATFORM_TIER"
+    printf 'MOMO_SELF_HOST_PLATFORM=%s\n' "$REQUESTED_PLATFORM"
+  } >>"$ENV_FILE"
+}
+
+ensure_platform_stamp() {
+  local count existing
+  count="$(env_key_count MOMO_SELF_HOST_PLATFORM)"
+  [ "$count" -le 1 ] ||
+    fail "${ENV_FILE}의 MOMO_SELF_HOST_PLATFORM 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 1 ]; then
+    existing="$(env_value_once MOMO_SELF_HOST_PLATFORM)"
+    validate_env_scalar MOMO_SELF_HOST_PLATFORM "$existing"
+    if [ -n "$REQUESTED_PLATFORM" ] && [ "$existing" != "$REQUESTED_PLATFORM" ]; then
+      fail "${ENV_FILE}은 플랫폼 ${existing} 으로 만들었다. --platform ${REQUESTED_PLATFORM} 으로 바꿀 수 없다 — 볼륨을 내리고 env를 지운 뒤 다시 만들라."
+    fi
+    return 0
+  fi
+  [ -n "$REQUESTED_PLATFORM" ] || return 0
+  append_platform_stamp
+  printf '[self-host] %s 에 MOMO_SELF_HOST_PLATFORM=%s 를 추가했다 (시크릿은 그대로).\n' \
+    "$ENV_FILE" "$REQUESTED_PLATFORM" >&2
 }
 
 # Keys the generator heredoc actually writes. Same awk as
@@ -257,7 +391,8 @@ Usage:
   scripts/self_host_env.sh --published-image ghcr.io/yeomyeonggeori/oort@sha256:<64 lowercase hex>
   scripts/self_host_env.sh --public-origin https://<host>
   scripts/self_host_env.sh --compose <docker-compose arguments...>
-  scripts/self_host_env.sh --railway
+  scripts/self_host_env.sh --platform railway        (alias: --railway)
+  scripts/self_host_env.sh --platform fly --published-image <ref@sha256:…> --public-origin https://<host>
   scripts/self_host_env.sh --local-build --allow-local-provider
 
 No argument is a backwards-compatible alias for --local-build.
@@ -274,15 +409,26 @@ On an existing env it does not regenerate secrets. Claim-mode env
 After preparation, use --compose for every start/stop/log command so ambient
 Compose variables cannot override infra/rust/local.secrets.env. Use the
 playbook's docker compose helper in claim mode instead of --compose.
---railway prints the canonical key set (oort_canonical_env_keys) as KEY=value
-on stdout from Railway-provided RAILWAY_PUBLIC_DOMAIN and DATABASE_URL. It
-does not write a file. Those two variables are required (compose :? equivalent);
-missing RAILWAY_PUBLIC_DOMAIN is an explicit failure, not a public.* skip.
-Do not combine --railway with an image mode, --compose, or --public-origin.
+--platform <name> reads one row of platform_profiles (ADR-0184 D3): the
+public-origin source, the PG source, the internal hostname suffix, the keys
+the operator sets by hand, and whether MOMO_HOSTED_DELIVERY_ENABLED is
+emitted. Known names: railway (T2) · fly · aws-lightsail · gcp-vm (T1). An
+unknown name is refused. --railway is an alias for --platform railway.
+  T2 (railway): prints the canonical key set (oort_canonical_env_keys) as
+  KEY=value on stdout from platform-provided RAILWAY_PUBLIC_DOMAIN and
+  DATABASE_URL. It does not write a file. Both variables are required
+  (compose :? equivalent); a missing one is an explicit failure, not a
+  public.* skip. Do not combine with an image mode, --compose,
+  --public-origin, or --allow-local-provider.
+  T1 (fly, aws-lightsail, gcp-vm): the same derivation as --public-origin
+  (which is required) plus MOMO_SELF_HOST_PLATFORM=<name> appended outside
+  the heredoc. Combine with an image mode to create, or alone with
+  --public-origin to maintain an existing env; a different stamp already in
+  the file is refused.
 --allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
 AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
 oort_local_provider_env_keys). Without it those two keys are absent
-(default deny). Local-install only — do not combine with --railway.
+(default deny). Local-install only — do not combine with a T2 platform.
 EOF
 }
 
@@ -301,7 +447,6 @@ while [ "$#" -gt 0 ]; do
       shift 2
       ;;
     --public-origin)
-      [ "$REQUESTED_ACTION" != "railway" ] || fail "--railway는 RAILWAY_PUBLIC_DOMAIN을 쓴다. --public-origin과 함께 지정하지 마라."
       [ "$#" -ge 2 ] || fail "--public-origin 뒤에 http(s)://host 가 필요하다."
       PUBLIC_ORIGINS+=("$2")
       PUBLIC_ORIGIN_COUNT=$((PUBLIC_ORIGIN_COUNT + 1))
@@ -316,16 +461,16 @@ while [ "$#" -gt 0 ]; do
       COMPOSE_COMMAND_ARGS=("$@")
       set --
       ;;
+    --platform)
+      [ "$#" -ge 2 ] || fail "--platform 뒤에 플랫폼 이름이 필요하다 (platform_profiles)."
+      request_platform "$2"
+      shift 2
+      ;;
     --railway)
-      [ "$REQUESTED_ACTION" = "prepare" ] || fail "--railway는 한 번만 지정하라."
-      [ -z "$REQUESTED_MODE" ] || fail "--railway와 이미지 생성 모드를 함께 지정할 수 없다."
-      [ "$PUBLIC_ORIGIN_COUNT" -eq 0 ] || fail "--railway는 RAILWAY_PUBLIC_DOMAIN을 쓴다. --public-origin과 함께 지정하지 마라."
-      [ "$ALLOW_LOCAL_PROVIDER" -eq 0 ] || fail "--railway는 로컬 provider opt-in과 함께 지정하지 마라."
-      REQUESTED_ACTION="railway"
+      request_platform railway
       shift
       ;;
     --allow-local-provider)
-      [ "$REQUESTED_ACTION" != "railway" ] || fail "--railway는 로컬 provider opt-in과 함께 지정하지 마라."
       ALLOW_LOCAL_PROVIDER=1
       shift
       ;;
@@ -339,6 +484,7 @@ while [ "$#" -gt 0 ]; do
       ;;
   esac
 done
+validate_platform_request
 
 validate_local_image() {
   local image="$1"
@@ -832,14 +978,17 @@ EOF
     "$ENV_FILE" >&2
 }
 
-railway_parse_database_url() {
-  local json
-  [ -n "${DATABASE_URL:-}" ] ||
-    fail "DATABASE_URL 이 없다. Postgres 플러그인 변수 없이 env를 만들 수 없다."
+# Managed-platform PG URL (profile column 5, `env:<VAR>`). Parsed once into
+# PLATFORM_PG_*; the role URLs below are rebuilt from those parts.
+managed_pg_parse_database_url() {
+  local var="$1" json
+  PLATFORM_DATABASE_URL="${!var:-}"
+  [ -n "$PLATFORM_DATABASE_URL" ] ||
+    fail "${var} 이 없다. Postgres 플러그인 변수 없이 env를 만들 수 없다."
   command -v python3 >/dev/null 2>&1 ||
-    fail "python3 이 필요하다 (--railway 가 DATABASE_URL 을 파싱한다)."
+    fail "python3 이 필요하다 (--platform 이 ${var} 을 파싱한다)."
   json="$(
-    DATABASE_URL="$DATABASE_URL" python3 -c '
+    DATABASE_URL="$PLATFORM_DATABASE_URL" python3 -c '
 import json, os, sys, urllib.parse
 raw = os.environ.get("DATABASE_URL", "")
 u = urllib.parse.urlparse(raw)
@@ -864,22 +1013,22 @@ print(json.dumps({
     "query": u.query or "",
 }))
 '
-  )" || fail "DATABASE_URL 을 파싱하지 못했다."
-  command -v jq >/dev/null 2>&1 || fail "jq 이 필요하다 (--railway 가 DATABASE_URL 을 파싱한다)."
-  RAILWAY_PG_USER="$(printf '%s' "$json" | jq -er '.user')"
-  RAILWAY_PG_PASSWORD="$(printf '%s' "$json" | jq -er '.password')"
-  RAILWAY_PG_HOST="$(printf '%s' "$json" | jq -er '.host')"
-  RAILWAY_PG_PORT="$(printf '%s' "$json" | jq -er '.port')"
-  RAILWAY_PG_DB="$(printf '%s' "$json" | jq -er '.db')"
-  RAILWAY_PG_QUERY="$(printf '%s' "$json" | jq -er '.query')"
-  [ -n "$RAILWAY_PG_USER" ] || fail "DATABASE_URL 에 사용자가 없다."
-  [ -n "$RAILWAY_PG_PASSWORD" ] || fail "DATABASE_URL 에 비밀번호가 없다."
+  )" || fail "${var} 을 파싱하지 못했다."
+  command -v jq >/dev/null 2>&1 || fail "jq 이 필요하다 (--platform 이 ${var} 을 파싱한다)."
+  PLATFORM_PG_USER="$(printf '%s' "$json" | jq -er '.user')"
+  PLATFORM_PG_PASSWORD="$(printf '%s' "$json" | jq -er '.password')"
+  PLATFORM_PG_HOST="$(printf '%s' "$json" | jq -er '.host')"
+  PLATFORM_PG_PORT="$(printf '%s' "$json" | jq -er '.port')"
+  PLATFORM_PG_DB="$(printf '%s' "$json" | jq -er '.db')"
+  PLATFORM_PG_QUERY="$(printf '%s' "$json" | jq -er '.query')"
+  [ -n "$PLATFORM_PG_USER" ] || fail "${var} 에 사용자가 없다."
+  [ -n "$PLATFORM_PG_PASSWORD" ] || fail "${var} 에 비밀번호가 없다."
 }
 
-railway_role_url() {
+managed_role_url() {
   local user="$1" password="$2" suffix=""
-  [ -n "$RAILWAY_PG_QUERY" ] && suffix="?${RAILWAY_PG_QUERY}"
-  DATABASE_URL="postgres://unused:unused@${RAILWAY_PG_HOST}:${RAILWAY_PG_PORT}/${RAILWAY_PG_DB}${suffix}" \
+  [ -n "$PLATFORM_PG_QUERY" ] && suffix="?${PLATFORM_PG_QUERY}"
+  DATABASE_URL="postgres://unused:unused@${PLATFORM_PG_HOST}:${PLATFORM_PG_PORT}/${PLATFORM_PG_DB}${suffix}" \
     RAILWAY_ROLE_USER="$user" RAILWAY_ROLE_PASSWORD="$password" python3 -c '
 import os, urllib.parse
 u = urllib.parse.urlparse(os.environ["DATABASE_URL"])
@@ -894,7 +1043,7 @@ print(urllib.parse.urlunparse(("postgres", netloc, u.path, "", u.query, "")))
 '
 }
 
-railway_published_image() {
+platform_published_image() {
   local latest="$REPO_ROOT/releases/latest.json" image
   if [ -n "${MOMO_RUST_IMAGE:-}" ]; then
     image="$MOMO_RUST_IMAGE"
@@ -908,7 +1057,7 @@ railway_published_image() {
   printf '%s' "$image"
 }
 
-railway_secret() {
+platform_secret() {
   local key="$1" current
   current="$(eval "printf '%s' \"\${$key:-}\"")"
   if [ -n "$current" ]; then
@@ -918,7 +1067,7 @@ railway_secret() {
   fi
 }
 
-railway_value_for() {
+platform_value_for() {
   case "$1" in
     COMPOSE_PROJECT_NAME) printf '%s' "$PROJECT" ;;
     MOMO_SELF_HOST_MODE) printf '%s' "published-digest" ;;
@@ -928,10 +1077,10 @@ railway_value_for() {
     MOMO_PITR_EVIDENCE_REQUIRED) printf '%s' "0" ;;
     MOMO_PITR_BOOTSTRAP_EMPTY) printf '%s' "0" ;;
     LOG_LEVEL) printf '%s' "info" ;;
-    POSTGRES_DB) printf '%s' "$RAILWAY_PG_DB" ;;
-    POSTGRES_USER) printf '%s' "$RAILWAY_PG_USER" ;;
-    POSTGRES_PASSWORD) printf '%s' "$RAILWAY_PG_PASSWORD" ;;
-    MIGRATE_DATABASE_URL) printf '%s' "$DATABASE_URL" ;;
+    POSTGRES_DB) printf '%s' "$PLATFORM_PG_DB" ;;
+    POSTGRES_USER) printf '%s' "$PLATFORM_PG_USER" ;;
+    POSTGRES_PASSWORD) printf '%s' "$PLATFORM_PG_PASSWORD" ;;
+    MIGRATE_DATABASE_URL) printf '%s' "$PLATFORM_DATABASE_URL" ;;
     DB_VOLUME_NAME) printf '%s' "${PROJECT}-pgdata" ;;
     MOMO_APP_POSTGRES_PASSWORD) printf '%s' "$APP_PASSWORD" ;;
     RELAY_POSTGRES_PASSWORD) printf '%s' "$RELAY_PASSWORD" ;;
@@ -961,17 +1110,30 @@ railway_value_for() {
     MOMO_LIVEKIT_NODE_IP) printf '%s' "127.0.0.1" ;;
     OORT_SITE_ADDRESS) printf '%s' "$SITE_HOST" ;;
     OORT_CSP_CONNECT_SRC) printf '%s' "$CSP" ;;
-    *) fail "--railway 이 키를 파생하지 못한다: $1" ;;
+    *) fail "--platform 이 이 키를 파생하지 못한다: $1" ;;
   esac
 }
 
-emit_railway_env() {
+# T2 rows: every value comes from the profile row + platform-provided env.
+# Output is exactly oort_canonical_env_keys (41) — no stamp, no hosted key.
+emit_managed_platform_env() {
+  local name="$REQUESTED_PLATFORM" label origin_var db_var internal hand_keys hosted
   local origin raw key value quoted
-  raw="${RAILWAY_PUBLIC_DOMAIN:-}"
+  label="$(platform_profile_field "$name" 2)"
+  origin_var="$(platform_profile_field "$name" 4)"
+  origin_var="${origin_var#env:}"
+  db_var="$(platform_profile_field "$name" 5)"
+  db_var="${db_var#env:}"
+  internal="$(platform_profile_field "$name" 6)"
+  hand_keys="$(platform_profile_field "$name" 7)"
+  hosted="$(platform_profile_field "$name" 8)"
+  [ "$hosted" = "0" ] ||
+    fail "platform_profiles 내부 오류: T2 행은 hosted 0 이어야 한다 (stdout 은 정본 키 집합뿐): $name"
+  raw="${!origin_var:-}"
   [ -n "$raw" ] ||
-    fail "RAILWAY_PUBLIC_DOMAIN 이 없다. Railway 공개 도메인 없이 env를 만들 수 없다."
+    fail "${origin_var} 이 없다. ${label} 공개 도메인 없이 env를 만들 수 없다."
   case "$raw" in
-    *'*'*) fail "--railway 의 RAILWAY_PUBLIC_DOMAIN 은 와일드카드를 허용하지 않는다 (#1792)." ;;
+    *'*'*) fail "--platform ${name} 의 ${origin_var} 은 와일드카드를 허용하지 않는다 (#1792)." ;;
     https://*|http://*) origin="$raw" ;;
     *) origin="https://${raw}" ;;
   esac
@@ -981,10 +1143,10 @@ emit_railway_env() {
   SITE_HOST="$(public_edge_site_address "$origin")"
   CSP="$(public_edge_csp_connect_src "$origin")"
 
-  railway_parse_database_url
+  managed_pg_parse_database_url "$db_var"
   PROJECT="${COMPOSE_PROJECT_NAME:-oort}"
   validate_project_name "$PROJECT"
-  IMAGE="$(railway_published_image)"
+  IMAGE="$(platform_published_image)"
 
   RAW_OWNER_EMAIL="${MOMO_INITIAL_OWNER_EMAIL:-owner@oort.local}"
   validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$RAW_OWNER_EMAIL"
@@ -996,14 +1158,14 @@ emit_railway_env() {
   APP_PASSWORD="${MOMO_APP_POSTGRES_PASSWORD:-$(gen)}"
   RELAY_PASSWORD="${RELAY_POSTGRES_PASSWORD:-$(gen)}"
   WORKER_PASSWORD="${WORKER_POSTGRES_PASSWORD:-$(gen)}"
-  JWT_SECRET="$(railway_secret JWT_HMAC)"
-  CENT_TOKEN_SECRET="$(railway_secret CENT_TOKEN_HMAC)"
-  CENT_API_SECRET="$(railway_secret CENT_API_KEY)"
-  CENT_PROXY_SECRET_VALUE="$(railway_secret CENT_PROXY_SECRET)"
-  PROVIDER_LINK_SECRET="$(railway_secret PROVIDER_LINK_MASTER_KEY)"
+  JWT_SECRET="$(platform_secret JWT_HMAC)"
+  CENT_TOKEN_SECRET="$(platform_secret CENT_TOKEN_HMAC)"
+  CENT_API_SECRET="$(platform_secret CENT_API_KEY)"
+  CENT_PROXY_SECRET_VALUE="$(platform_secret CENT_PROXY_SECRET)"
+  PROVIDER_LINK_SECRET="$(platform_secret PROVIDER_LINK_MASTER_KEY)"
 
-  APP_DATABASE_URL="$(railway_role_url momo_app "$APP_PASSWORD")"
-  RELAY_DB_URL="$(railway_role_url momo_relay "$RELAY_PASSWORD")"
+  APP_DATABASE_URL="$(managed_role_url momo_app "$APP_PASSWORD")"
+  RELAY_DB_URL="$(managed_role_url momo_relay "$RELAY_PASSWORD")"
   CENTRIFUGO_ORIGINS="$SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
   CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
 
@@ -1016,14 +1178,16 @@ emit_railway_env() {
 
   while IFS= read -r key; do
     [ -n "$key" ] || continue
-    value="$(railway_value_for "$key")"
+    value="$(platform_value_for "$key")"
     quoted="$(quote_env_file_value "$value")"
     printf '%s=%s\n' "$key" "$quoted"
   done <<EOF
 $(oort_canonical_env_keys)
 EOF
-  printf '[self-host] --railway 키 %s개를 stdout에 썼다 (파일 없음).\n' \
-    "$(oort_canonical_env_keys | grep -c .)" >&2
+  printf '[self-host] --platform %s 키 %s개를 stdout에 썼다 (파일 없음).\n' \
+    "$name" "$(oort_canonical_env_keys | grep -c .)" >&2
+  printf '[self-host] 손으로 넣는 키(생성기가 내지 않는다): %s · 내부 호스트 접미사: %s\n' \
+    "$hand_keys" "$internal" >&2
 }
 
 normalize_requested_public_origins() {
@@ -1322,8 +1486,8 @@ verify_published_compose_image() {
 normalize_requested_public_origins
 
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음 — 시크릿을 만들 수 없다."
-if [ "$REQUESTED_ACTION" = "railway" ]; then
-  emit_railway_env
+if [ "$REQUESTED_ACTION" = "platform-env" ]; then
+  emit_managed_platform_env
   exit 0
 fi
 DOCKER_BIN="$(command -v docker || true)"
@@ -1460,6 +1624,7 @@ if [ -e "$ENV_FILE" ]; then
   ensure_public_origins
   ensure_local_drive_public_base
   ensure_public_edge_env
+  ensure_platform_stamp
   ensure_local_provider_optin
   warn_if_legacy_localhost_realtime_ws
   warn_if_legacy_localhost_drive_base
@@ -1682,6 +1847,7 @@ chmod 600 "$ENV_FILE"
 
 append_momo_build_sha
 append_hosted_delivery_enabled
+append_platform_stamp
 ensure_public_edge_env
 ensure_local_provider_optin
 reject_duplicate_env_keys
