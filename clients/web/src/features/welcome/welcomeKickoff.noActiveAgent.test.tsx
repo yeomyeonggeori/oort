@@ -8,6 +8,8 @@ import {
   forwardRef,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
+  useState,
   useSyncExternalStore,
   type ReactElement,
   type Ref,
@@ -30,6 +32,7 @@ import type { RealtimeHandle } from "@/lib/realtime";
 import { phoneLinkFirstRunIsPending } from "@/features/auth/phoneLinkFirstRunStore";
 import { FirstAgentStage } from "./FirstAgentStage";
 import { FIRST_AGENT_TITLE } from "./firstAgent";
+import { WelcomeKickoffStage } from "./WelcomeKickoffStage";
 import {
   clearAllFirstAgentMarkers,
 } from "./firstAgentStore";
@@ -199,6 +202,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 let mountedRoot: Root | null = null;
 let host: HTMLElement | null = null;
 let backstopSeen = 0;
+let stopBackstop: { stop: () => void; flush: () => void } | null = null;
 
 function humanMember(): RosterMember {
   return {
@@ -326,23 +330,59 @@ async function settle(): Promise<void> {
     await Promise.resolve();
     await Promise.resolve();
   });
+  stopBackstop?.flush();
 }
 
-function watchBackstop(root: HTMLElement): () => void {
+function watchBackstop(root: HTMLElement): { stop: () => void; flush: () => void } {
   const seen = new Set<Element>();
-  const note = () => {
-    for (const node of root.querySelectorAll(
+  const count = (node: Element) => {
+    if (seen.has(node)) return;
+    seen.add(node);
+    backstopSeen += 1;
+  };
+  const isBackstop = (node: Element) =>
+    node.getAttribute("data-testid") === "welcome-kickoff-backstop";
+  const scan = (node: Element) => {
+    if (isBackstop(node)) count(node);
+    for (const child of node.querySelectorAll(
       "[data-testid='welcome-kickoff-backstop']"
     )) {
-      if (seen.has(node)) continue;
-      seen.add(node);
-      backstopSeen += 1;
+      count(child);
     }
   };
-  const observer = new MutationObserver(note);
-  observer.observe(root, { subtree: true, childList: true, attributes: true });
-  note();
-  return () => observer.disconnect();
+  const ingest = (mutations: MutationRecord[]) => {
+    for (const mutation of mutations) {
+      if (mutation.type === "attributes") {
+        const el = mutation.target;
+        if (!(el instanceof Element)) continue;
+        if (isBackstop(el) || mutation.oldValue === "welcome-kickoff-backstop") {
+          count(el);
+        }
+      }
+      if (mutation.type === "childList") {
+        for (const node of mutation.addedNodes) {
+          if (node instanceof Element) scan(node);
+        }
+      }
+    }
+  };
+  const observer = new MutationObserver(ingest);
+  const flush = () => ingest(observer.takeRecords());
+  observer.observe(root, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeFilter: ["data-testid"],
+    attributeOldValue: true,
+  });
+  scan(root);
+  return {
+    flush,
+    stop: () => {
+      flush();
+      observer.disconnect();
+    },
+  };
 }
 
 async function mountAfterClaim(
@@ -350,6 +390,8 @@ async function mountAfterClaim(
 ): Promise<HTMLElement> {
   host = document.createElement("div");
   document.body.append(host);
+  stopBackstop?.stop();
+  stopBackstop = watchBackstop(host);
   mountedRoot = createRoot(host);
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -364,6 +406,7 @@ async function mountAfterClaim(
     rail.handlers?.onSubscribed({ recovered: false });
   });
   await settle();
+  stopBackstop.flush();
   return host;
 }
 
@@ -439,6 +482,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  stopBackstop?.stop();
+  stopBackstop = null;
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -460,14 +505,12 @@ describe("no-active-agent hold (#2335)", () => {
     expect(decide()).toBe("kickoff-hold");
 
     const root = await mountAfterClaim(makeDirectory([humanMember()]));
-    const stop = watchBackstop(root);
 
     await act(async () => {
       await Promise.resolve();
       vi.advanceTimersByTime(WITHIN_TWO_SECONDS_MS);
     });
     await settle();
-    stop();
 
     expect(root.querySelector("[data-testid='first-agent-stage']")).not.toBeNull();
     expect(root.textContent).toContain(FIRST_AGENT_TITLE);
@@ -487,7 +530,6 @@ describe("no-active-agent hold (#2335)", () => {
     const root = await mountAfterClaim(
       makeDirectory([humanMember(), agentMember()])
     );
-    const stop = watchBackstop(root);
 
     await act(async () => {
       await Promise.resolve();
@@ -519,9 +561,36 @@ describe("no-active-agent hold (#2335)", () => {
       stage?.dispatchEvent(event);
     });
     await settle();
-    stop();
     expect(root.querySelector("[data-testid='welcome-kickoff-stage']")).toBeNull();
     expect(root.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
     expect(backstopSeen).toBe(0);
+  });
+
+  it("observer before mount counts a 1-frame backstop flash (#2356)", async () => {
+    host = document.createElement("div");
+    document.body.append(host);
+    stopBackstop = watchBackstop(host);
+    mountedRoot = createRoot(host);
+
+    function FlashThenClear(): ReactElement {
+      const [phase, setPhase] = useState<"stage" | "backstop">("backstop");
+      useLayoutEffect(() => {
+        setPhase("stage");
+      }, []);
+      return createElement(WelcomeKickoffStage, {
+        phase,
+        reducedMotion: true,
+        onExitComplete: () => undefined,
+      });
+    }
+
+    await act(async () => {
+      mountedRoot?.render(
+        createElement(HashRouter, null, createElement(FlashThenClear))
+      );
+    });
+    await settle();
+    expect(backstopSeen).toBeGreaterThan(0);
+    expect(host.querySelector("[data-testid='welcome-kickoff-backstop']")).toBeNull();
   });
 });
