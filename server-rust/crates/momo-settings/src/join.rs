@@ -902,7 +902,7 @@ async fn create_human_member(
 /// `23505` on `member_handle_uniq` specifically. Any *other* unique violation
 /// (an email racing itself into `human_email_norm_uniq`) stays a 500, because Swift
 /// has no wording for it and inventing one here would be a wire change.
-fn is_handle_unique_violation(error: &sqlx::Error) -> bool {
+pub fn is_handle_unique_violation(error: &sqlx::Error) -> bool {
     let Some(db_error) = error.as_database_error() else {
         return false;
     };

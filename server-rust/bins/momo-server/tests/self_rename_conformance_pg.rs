@@ -1,12 +1,19 @@
-//! #1873 / BZ-4e — `PATCH /v1/workspaces/{ws}/members/me` against real Postgres.
+//! #1873 / BZ-4e + #2331 / ADR-0185 E2 — `PATCH /v1/workspaces/{ws}/members/me`.
 //!
-//! Red proofs:
+//! Display-name red proofs (BZ-4e):
 //!   1. caller PATCH 200, `member.display_name` stored, roster GET shows it
 //!   2. join-normalization 400 (`displayName is required`)
 //!   3. agent bearer 403 (not on the agent-route allow-list)
 //!   4. foreign workspace / dropped membership 403
 //!   5. audit `member.renamed` row exists; handle/role/avatar untouched
 //!   6. outbox `member.renamed` broadcasts only the caller's `ch:` channels
+//!
+//! Handle red proofs (ADR-0185 E2 — each status code is its own assertion):
+//!   7. format 400 (`handle must be 2-32 chars of a-z, 0-9, _ or -`)
+//!   8. `member_handle_uniq` **409** (`handle is already in use`)
+//!   9. agent bearer **403**
+//!  10. success **200** + `me.handle` + audit `member.handle_changed` 1
+//!  11. message body containing `@<old handle>` is byte-identical after the change
 //!
 //! `#[ignore]` — needs a real Postgres. Gate PG is the 15432 convention:
 //!
@@ -446,7 +453,10 @@ async fn self_rename_writes_db_roster_audit_and_outbox() {
 
     let (display_name, handle, avatar) = stored_member(&su, fixture.member.id).await;
     assert_eq!(display_name, "곽성재");
-    assert_eq!(handle, fixture.member.handle, "handle is not writable here");
+    assert_eq!(
+        handle, fixture.member.handle,
+        "a displayName-only PATCH must not write handle"
+    );
     assert_eq!(
         avatar.as_deref(),
         Some(format!("https://avatar.invalid/{}", fixture.member.handle).as_str()),
@@ -543,16 +553,21 @@ async fn agent_bearer_is_forbidden() {
     let base = start_server(app).await;
     let http = reqwest::Client::new();
     let token = agent_bearer(&su, fixture.workspace, fixture.agent).await;
-    let response = patch_me(
-        &http,
-        &me_url(&base, fixture.workspace),
-        &token,
-        &json!({"displayName": "김인턴"}),
-    )
-    .await;
-    assert_eq!(response.status(), 403, "agent bearer cannot rename");
-    let (display_name, _, _) = stored_member(&su, fixture.agent).await;
+    assert!(
+        include_str!("../src/routes/self_profile.rs")
+            .contains("require_human(&principal, AGENTS_USE_THE_PROFILE_PATH)?"),
+        "require_human is the handler-level agent 403; sabotage of that call must turn this RED"
+    );
+    for body in [
+        json!({"displayName": "김인턴"}),
+        json!({"handle": "stolen-handle"}),
+    ] {
+        let response = patch_me(&http, &me_url(&base, fixture.workspace), &token, &body).await;
+        assert_eq!(response.status(), 403, "agent bearer cannot rename: {body}");
+    }
+    let (display_name, handle, _) = stored_member(&su, fixture.agent).await;
     assert_ne!(display_name, "김인턴");
+    assert_ne!(handle, "stolen-handle");
 }
 
 #[tokio::test]
@@ -602,4 +617,170 @@ async fn foreign_workspace_and_dropped_membership_are_forbidden() {
     assert_eq!(dropped.status(), 403, "no workspace membership → 403");
     let (display_name, _, _) = stored_member(&su, fixture.other.id).await;
     assert_eq!(display_name, fixture.other.handle);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn invalid_handle_is_the_join_sentence() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "handle-invalid").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+    let url = me_url(&base, fixture.workspace);
+
+    for bad in [
+        json!({"handle": ""}),
+        json!({"handle": "a"}),
+        json!({"handle": "!!!"}),
+        json!({"handle": "A".repeat(33)}),
+    ] {
+        let response = patch_me(&http, &url, &token, &bad).await;
+        assert_eq!(response.status(), 400, "{bad}");
+        let err: Value = response.json().await.expect("error body");
+        assert_eq!(
+            err["error"]["message"], "handle must be 2-32 chars of a-z, 0-9, _ or -",
+            "join sentence, not a second vocabulary: {err}"
+        );
+    }
+
+    let (_, handle, _) = stored_member(&su, fixture.member.id).await;
+    assert_eq!(handle, fixture.member.handle, "a 400 must not write");
+    assert_eq!(
+        audit_count(&su, fixture.workspace, "member.handle_changed").await,
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn taken_handle_is_the_join_sentence() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "handle-taken").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+
+    let response = patch_me(
+        &http,
+        &me_url(&base, fixture.workspace),
+        &token,
+        &json!({"handle": fixture.other.handle}),
+    )
+    .await;
+    assert_eq!(response.status(), 409, "member_handle_uniq is 409");
+    let err: Value = response.json().await.expect("error body");
+    assert_eq!(
+        err["error"]["message"], "handle is already in use",
+        "join HandleTaken sentence: {err}"
+    );
+
+    let (_, handle, _) = stored_member(&su, fixture.member.id).await;
+    assert_eq!(handle, fixture.member.handle, "a 409 must not write");
+    assert_eq!(
+        audit_count(&su, fixture.workspace, "member.handle_changed").await,
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn self_handle_change_writes_me_audit_and_leaves_message_bodies() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "handle-ok").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+
+    let old_handle = fixture.member.handle.clone();
+    let mention_body = format!("ping @{old_handle} please");
+    let client_msg_id = Uuid::new_v4();
+    let sent = http
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel_a
+        ))
+        .bearer_auth(&token)
+        .json(&json!({"clientMsgId": client_msg_id, "body": mention_body}))
+        .send()
+        .await
+        .expect("POST message");
+    assert_eq!(sent.status(), 201, "seed mention is 201");
+
+    let stored_before: String =
+        sqlx::query_scalar("SELECT body FROM message WHERE client_msg_id = $1")
+            .bind(client_msg_id)
+            .fetch_one(&su)
+            .await
+            .expect("read stored body before handle change");
+    assert_eq!(
+        stored_before.as_bytes(),
+        mention_body.as_bytes(),
+        "the posted body is stored verbatim"
+    );
+
+    let new_handle = format!("nw-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    let response = patch_me(
+        &http,
+        &me_url(&base, fixture.workspace),
+        &token,
+        &json!({"handle": new_handle}),
+    )
+    .await;
+    assert_eq!(response.status(), 200, "self handle PATCH is 200");
+    let body: Value = response.json().await.expect("rename body");
+    assert_eq!(body["member"]["handle"], new_handle);
+    assert_eq!(body["member"]["displayName"], fixture.member.handle);
+    assert_eq!(body["member"]["kind"], "human");
+
+    let (_, handle, _) = stored_member(&su, fixture.member.id).await;
+    assert_eq!(handle, new_handle);
+
+    let roster = http
+        .get(format!("{base}/v1/workspaces/{}/roster", fixture.workspace))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("roster GET");
+    assert_eq!(roster.status(), 200);
+    let roster: Value = roster.json().await.expect("roster body");
+    let members = roster["members"].as_array().expect("members");
+    let mine = members
+        .iter()
+        .find(|row| {
+            row["id"]
+                .as_str()
+                .map(|id| id.eq_ignore_ascii_case(&fixture.member.id.to_string()))
+                .unwrap_or(false)
+        })
+        .expect("caller is on the roster");
+    assert_eq!(mine["handle"], new_handle);
+
+    assert_eq!(
+        audit_count(&su, fixture.workspace, "member.handle_changed").await,
+        1,
+        "one audit row for the handle change"
+    );
+
+    let stored_after: String =
+        sqlx::query_scalar("SELECT body FROM message WHERE client_msg_id = $1")
+            .bind(client_msg_id)
+            .fetch_one(&su)
+            .await
+            .expect("read stored body after handle change");
+    assert_eq!(
+        stored_after.as_bytes(),
+        stored_before.as_bytes(),
+        "past message bodies that mention @<old handle> are never rewritten"
+    );
+    assert_eq!(stored_after, mention_body);
 }

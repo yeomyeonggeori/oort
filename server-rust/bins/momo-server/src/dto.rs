@@ -70,13 +70,15 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-/// `PATCH /v1/workspaces/{ws}/members/me` (#1873). CamelCase only; unknown
-/// keys (handle, role, avatar, snake_case aliases) are refused so this surface
-/// cannot become a second write for identity fields it does not own.
+/// `PATCH /v1/workspaces/{ws}/members/me` (#1873 + ADR-0185 E2). CamelCase
+/// only. At least one of `displayName` / `handle` is required. Unknown keys
+/// (role, avatar, snake_case aliases) are refused so this surface cannot become
+/// a second write for identity fields it does not own.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenameSelfMemberRequest {
-    pub display_name: String,
+    pub display_name: Option<String>,
+    pub handle: Option<String>,
 }
 
 /// Envelope for the updated member summary — login/join `Member` shape.
@@ -4878,7 +4880,14 @@ mod tests {
         let body: RenameSelfMemberRequest =
             serde_json::from_value(serde_json::json!({"displayName": "  곽성재  "}))
                 .expect("camelCase decodes");
-        assert_eq!(body.display_name, "  곽성재  ");
+        assert_eq!(body.display_name.as_deref(), Some("  곽성재  "));
+        assert_eq!(body.handle, None);
+
+        let handle_only: RenameSelfMemberRequest =
+            serde_json::from_value(serde_json::json!({"handle": "seongjae"}))
+                .expect("handle-only decodes");
+        assert_eq!(handle_only.handle.as_deref(), Some("seongjae"));
+        assert_eq!(handle_only.display_name, None);
 
         assert!(
             serde_json::from_value::<RenameSelfMemberRequest>(serde_json::json!({
@@ -4888,7 +4897,6 @@ mod tests {
             "snake_case is not an alias on this surface"
         );
         for smuggled in [
-            serde_json::json!({"displayName": "곽성재", "handle": "stolen"}),
             serde_json::json!({"displayName": "곽성재", "role": "owner"}),
             serde_json::json!({"displayName": "곽성재", "avatarUrl": "https://example.invalid/a.png"}),
         ] {

@@ -40,6 +40,15 @@ pub struct DisplayNameRename {
     pub broadcast_outbox_ids: Vec<i64>,
 }
 
+/// Outcome of a successful self handle change. No outbox: a handle is a roster
+/// fact, but **past message bodies that mention `@oldhandle` are not rewritten**
+/// (ADR-0185 E2). The stored text is the SoT the author typed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandleRename {
+    pub member: Member,
+    pub previous_handle: String,
+}
+
 /// The `outbox.payload` for a display-name change on one channel, matching the
 /// shared envelope every other broadcast uses (`{type, v, ts, payload}`).
 ///
@@ -191,6 +200,98 @@ pub async fn rename_own_display_name_in_tx(
         member,
         previous_display_name,
         broadcast_outbox_ids,
+    }))
+}
+
+/// Set the **caller's own** handle. `kind = 'human'` is belt-and-suspenders on
+/// top of the route's `require_human`. Display name, role, and avatar stay put.
+///
+/// A unique violation on `member_handle_uniq` is returned as [`DbError`] so the
+/// transaction rolls back; the route maps it onto join's `HandleTaken` 409
+/// sentence. Past `message.body` bytes are not touched — `@oldhandle` in a
+/// previously stored body stays `@oldhandle`.
+pub async fn change_own_handle_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    handle: &str,
+) -> Result<Option<HandleRename>, DbError> {
+    let previous = sqlx::query(
+        "SELECT id, workspace_id, kind::text AS kind, status::text AS status, \
+                display_name, handle \
+           FROM member \
+          WHERE id = $1 \
+            AND workspace_id = $2 \
+            AND kind = 'human' \
+            AND status = 'active' \
+            AND deleted_at IS NULL \
+            AND EXISTS ( \
+                  SELECT 1 FROM workspace_membership wm \
+                   WHERE wm.workspace_id = $2 \
+                     AND wm.member_id = $1 \
+                ) \
+          FOR UPDATE",
+    )
+    .bind(member_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(previous) = previous else {
+        return Ok(None);
+    };
+    let previous_handle: String = previous.try_get("handle")?;
+    if previous_handle == handle {
+        let kind_label: String = previous.try_get("kind")?;
+        let kind = MemberKind::from_db_label(&kind_label).ok_or_else(|| {
+            sqlx::Error::Decode(format!("unknown member_kind '{kind_label}'").into())
+        })?;
+        return Ok(Some(HandleRename {
+            member: Member {
+                id: previous.try_get("id")?,
+                workspace_id: previous.try_get("workspace_id")?,
+                kind,
+                status: previous.try_get("status")?,
+                display_name: previous.try_get("display_name")?,
+                handle: previous_handle.clone(),
+            },
+            previous_handle,
+        }));
+    }
+
+    let row = sqlx::query(
+        "UPDATE member \
+            SET handle = $1, \
+                updated_at = now() \
+          WHERE id = $2 \
+            AND workspace_id = $3 \
+            AND kind = 'human' \
+            AND status = 'active' \
+            AND deleted_at IS NULL \
+        RETURNING id, workspace_id, kind::text AS kind, status::text AS status, \
+                  display_name, handle",
+    )
+    .bind(handle)
+    .bind(member_id)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let kind_label: String = row.try_get("kind")?;
+    let kind = MemberKind::from_db_label(&kind_label)
+        .ok_or_else(|| sqlx::Error::Decode(format!("unknown member_kind '{kind_label}'").into()))?;
+    let member = Member {
+        id: row.try_get("id")?,
+        workspace_id: row.try_get("workspace_id")?,
+        kind,
+        status: row.try_get("status")?,
+        display_name: row.try_get("display_name")?,
+        handle: row.try_get("handle")?,
+    };
+    Ok(Some(HandleRename {
+        member,
+        previous_handle,
     }))
 }
 

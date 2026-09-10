@@ -87,8 +87,8 @@ pub use invite::{
     RedeemedInvite, RevokedInvite,
 };
 pub use join::{
-    fallback_handle, is_handle_banned_in_tx, is_identity_banned_in_tx, is_valid_handle,
-    normalized_invite_code, normalized_join_display_name, normalized_join_email,
+    fallback_handle, is_handle_banned_in_tx, is_handle_unique_violation, is_identity_banned_in_tx,
+    is_valid_handle, normalized_invite_code, normalized_join_display_name, normalized_join_email,
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
     redeem_invite_in_tx, resolve_invite_workspace, role_rank, JoinError, JoinOutcome,
     JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember, JoinedMembership,
