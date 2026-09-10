@@ -807,8 +807,28 @@ An unknown name is refused. A T2 row refuses an image mode, `--compose`,
 image mode, or maintained alone with `--public-origin`; a different stamp
 already in the file is refused (drop the volume and the env to switch).
 Local, VPS and the Grok Bot VM have no row — they are the compose canon.
-Cloudflare has no row either: it is a T3 edge in front of one of these
-(recipe SH-11d).
+Cloudflare has no `--platform` row: it is T3 edge, never compute
+(ADR-0184 D1). Do not put api, Postgres, or Centrifugo on Workers, Pages,
+or Containers. After a T1 or T2 install already has doctor PASS, attach
+DNS or a named tunnel in front of it — recipe
+[`infra/cloudflare/README.md`](../infra/cloudflare/README.md) (SH-11d,
+agent path [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.8). If the user
+says “on Cloudflare”, pick a compute tier first.
+
+### AWS Lightsail / EC2
+
+T1 VM recipe: [`infra/aws/README.md`](../infra/aws/README.md). Canonical
+compose on one Lightsail instance (EC2 is the same module,
+`compute = "ec2"`). Extra disk at `/data`, Docker `data-root=/data/docker`,
+firewall 22/80/443 only (Postgres 5432 stays private). Env:
+
+```sh
+scripts/self_host_env.sh --platform aws-lightsail --public-origin https://<host>
+```
+
+Human approval points (owner's account and bill): AWS login/SSO,
+`terraform apply`, Budgets email, DNS A, `terraform destroy`. Gate:
+`scripts/oort doctor --json`.
 
 ### Railway
 
@@ -830,6 +850,15 @@ is the generator heredoc plus `oort_public_edge_env_keys` — do not type
 (`--allow-local-provider`) is for local installs only; this template does
 not carry those keys. Gate:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
+
+### Fly.io
+
+T1. One Machine + one volume runs the compose canon:
+[`infra/fly/README.md`](../infra/fly/README.md). TLS passthrough on 443
+lets Caddy inside the VM use `caddy.override.yml` + `Caddyfile` (no new
+Caddyfile). Env is `scripts/self_host_env.sh --platform fly --public-origin https://<host>`
+written on the volume only. Live `flyctl` deploy is the owner's login
+(human approval: `fly auth login`, billing, optional DNS, `fly apps destroy`).
 
 | 레포 경로 | 서버 위 이름 | 역할 |
 |---|---|---|

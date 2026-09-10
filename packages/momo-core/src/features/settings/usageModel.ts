@@ -19,6 +19,8 @@
 //     which side of a limit a workspace is on.
 // =============================================================================
 
+import { HOSTED_AGENT_MISSING_NAME } from "../hostedAgents/model";
+
 /** Time grain the server aggregates into. `month` exists in the contract but
  *  is not offered for the 7/30-day ranges this panel asks for. */
 export type UsageBucketUnit = "day" | "week" | "month";
@@ -381,7 +383,7 @@ export function agentRowLabel(
   const named = (identity?.displayName || row.displayName).trim();
   const handle = identity?.handle.trim() ?? "";
   return {
-    text: named || "이름 없는 에이전트",
+    text: named || HOSTED_AGENT_MISSING_NAME,
     handle: handle && identity?.ambiguous ? `@${handle}` : null,
   };
 }

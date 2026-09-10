@@ -1,0 +1,18 @@
+# Named-tunnel ingress for oort (SH-11d). Host-side cloudflared config — not a
+# compose overlay. Copy to /etc/cloudflared/config.yml (or
+# $HOME/.cloudflared/config.yml). Replace TUNNEL_UUID and the hostname with
+# values from `cloudflared tunnel create` / `cloudflared tunnel route dns`.
+# Never put a token or credentials JSON in this file or in the tree.
+#
+# ingress.service MUST be loopback Caddy (Caddyfile.local). Default
+# MOMO_WEB_PORT is 8088; change the port to match the env. Last rule MUST be
+# http_status:404. Do not point service at a public IP, 0.0.0.0, or a docker
+# network hostname.
+
+tunnel: TUNNEL_UUID
+credentials-file: /etc/cloudflared/TUNNEL_UUID.json
+
+ingress:
+  - hostname: app.example.test
+    service: http://127.0.0.1:8088
+  - service: http_status:404

@@ -392,6 +392,50 @@ export function boundedLabel(raw: string, max = 60): string {
   return points.length <= max ? collapsed : `${points.slice(0, max).join("")}…`;
 }
 
+/**
+ * 4단계 승인 문장이 쓰는 대명사. 비어 있으면 조사만 남는 구멍
+ * (E2E-A A6: 「승인하면 는」)을 막기 위해, 같은 단락(둘째 문장·보안 문구)이
+ * 이미 쓰는 낱말로 대체한다. 사실 칸·이름 칸에는 쓰지 않는다 —
+ * 그 자리는 지시어의 선행어여야 하므로 `hostedAgentFactLabel` 을 탄다.
+ */
+export const HOSTED_AGENT_LABEL_FALLBACK = "이 에이전트";
+
+/**
+ * 사실 칸·재개 행·자격 목록이 쓰는 없는-이름 문구.
+ *
+ * 「이 에이전트」는 앞선 주어가 있는 문장의 대명사고, 사실 행은 그 주어가
+ * 서야 하는 자리라 지시어가 순환한다. 폰의 「이름 확인 안 됨」은 조회 실패의
+ * 진단이라 이름 칸에 서면 상태가 이름인 척한다. 빈 표시 이름은 이름이 없다는
+ * 사실이므로, 핸들도 없을 때의 정직한 값은 「이름 없는 에이전트」다.
+ */
+export const HOSTED_AGENT_MISSING_NAME = "이름 없는 에이전트";
+
+export function hostedAgentLabel(raw: string, max = 60): string {
+  const cleaned = boundedLabel(raw, max);
+  return cleaned === "" ? HOSTED_AGENT_LABEL_FALLBACK : cleaned;
+}
+
+/**
+ * 사실 칸·이름 칸의 값. 표시 이름이 있으면 그것을 쓰고, 비었으면 위저드가
+ * 이미 쥔 핸들(`@grokbot`)을 쓰며, 둘 다 없으면 `HOSTED_AGENT_MISSING_NAME`.
+ * 문장 폴백 「이 에이전트」는 여기 오지 않는다.
+ */
+export function hostedAgentFactLabel(
+  raw: string,
+  handle = "",
+  max = 60
+): string {
+  const cleaned = boundedLabel(raw, max);
+  if (cleaned !== "") return cleaned;
+  const trimmed = handle.trim();
+  if (trimmed !== "") {
+    const withAt = trimmed.startsWith("@") ? trimmed : `@${trimmed}`;
+    const fact = boundedLabel(withAt, max);
+    if (fact !== "") return fact;
+  }
+  return HOSTED_AGENT_MISSING_NAME;
+}
+
 export interface HostedFact {
   key: string;
   value: string;
@@ -408,10 +452,11 @@ export interface HostedFact {
  */
 export function connectionFacts(
   connection: HostedAgentConnection,
-  agentLabel: string
+  agentLabel: string,
+  agentHandle = ""
 ): HostedFact[] {
   return [
-    { key: "전용 에이전트", value: boundedLabel(agentLabel) },
+    { key: "전용 에이전트", value: hostedAgentFactLabel(agentLabel, agentHandle) },
     { key: "연결 상태", value: hostedStatusLabel(connection.status) },
     { key: "인증 방식", value: hostedAuthModeLabel(connection.authMode) },
     { key: "허용 대상", value: connection.audience, token: true },
