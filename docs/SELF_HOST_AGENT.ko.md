@@ -276,9 +276,9 @@ postgres가 볼륨을 초기화한 **뒤에** `up` 이 실패하면, **이 env�
 `runtime-roles` 종료코드 1이다. 처음부터 다시: `--compose down -v`,
 `infra/rust/local.secrets.env` 삭제, 그다음 §2.3.
 
-**claim 모드 예외:** `--compose` 는 `MOMO_BOOTSTRAP_CLAIM=1` 이고
-비밀번호 키가 없는 env를 거절한다. 그 형상은 §3.3만 쓰고,
-`docker compose` 를 직접 호출한다.
+**claim 모드:** 생성기에 `--claim` 을 붙인다. `--compose` 가 그 env를
+기동한다. 두 키가 함께 있을 때만 거절한다(ADR-0166). 첫 `up` 뒤
+launcher가 migrate 로그를 가리킨다 (`grep MOMO_CLAIM_PATH`).
 
 ### 2.5 게이트: doctor PASS
 
@@ -543,47 +543,35 @@ fi
 
 ```sh
 scripts/self_host_env.sh --published-image \
-  "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
+  "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)" \
+  --claim
 ```
 
 §3.3.0 (b) 또는 (c)가 실패했으면 `--published-image` 앞에
 `--platform host-network` 를 넣는다. 생성된 env를 손으로 고치지 마라.
 
-생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를 쓴다. ADR-0166 claim
-모드는 **상호 배타**다 (`MOMO_BOOTSTRAP_CLAIM=1` + 이메일만).
-`--compose` 는 비밀번호 키를 요구하므로, claim 부팅은 같은 canonical
-파일로 `docker compose` 를 직접 호출한다.
+`--claim` 은 `MOMO_BOOTSTRAP_CLAIM=1` 을 쓰고
+`MOMO_INITIAL_OWNER_PASSWORD` 는 **쓰지 않는다**. ADR-0166: 두 키는
+상호 배타다. 비밀번호 env에 `--claim` 을 다시 돌리면 거절한다(조용히
+바꾸지 않는다). `--compose` 는 이 env를 기동한다. 두 키가 함께 있을
+때만 거절한다.
 
-```sh
-ENV_FILE=infra/rust/local.secrets.env
-umask 077
-tmp="${ENV_FILE}.claim"
-awk '
-  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
-  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
-  { print }
-  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
-' "$ENV_FILE" >"$tmp"
-mv "$tmp" "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-```
-
-env를 cat/grep 해서 stdout에 흘리지 않는다. 이미 claim 수술된 파일이면
-같은 awk가 멱등이다.
+env를 cat/grep 해서 stdout에 흘리지 않는다.
 
 **「생성기를 다시 돌리지 않는다」의 범위 (#1790).**
 
-- **유효 — 시크릿 재생성·`--compose` 기동.** 비밀번호 키가 없으면
-  `--compose`와 파일-없음 재생성 경로는 거절한다(ADR-0166). 기동은
-  아래 `oort_compose`다.
-- **무효 — 이미 있는 env의 유지보수.** 공개 주소가 생긴 뒤
+- **유효 — 시크릿 재생성.** 파일-없음 재생성 경로는 여전히 이미지
+  모드가 필요하다. 같은 볼륨에 두 번째 env를 만들지 마라.
+- **무효 — 유지보수와 `--compose`.** 공개 주소가 생긴 뒤
   `--public-origin` (§3.3.9)은 시크릿을 다시 만들지 않는다.
-  `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 그 경로만
-  비밀번호 검증을 면제하고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` 과
+  `MOMO_BOOTSTRAP_CLAIM=1` 이고 비밀번호 키가 없으면 비밀번호 검증을
+  면제하고 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` 과
   `CENTRIFUGO_ALLOWED_ORIGINS` 를 갱신한다. 비밀번호가 **있는** env는
-  12–128자 dotenv-safe를 강제한다.
+  12–128자 dotenv-safe를 강제한다. `--claim` 없이 claim env를 다시
+  돌리면 claim으로 남는다(비밀번호 키를 넣지 않는다).
 
 ```sh
+ENV_FILE=infra/rust/local.secrets.env
 oort_compose() {
   extra=()
   if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
@@ -596,15 +584,18 @@ oort_compose() {
     "$@"
 }
 
-oort_compose up -d --pull missing --wait
+scripts/self_host_env.sh --compose up -d --pull missing --wait
 ```
 
 `--wait` = 컨테이너 healthy. 제품 게이트는 doctor다. 이 엣지는
-`127.0.0.1` 에만 바인딩된다(TLS 없음).
+`127.0.0.1` 에만 바인딩된다(TLS 없음). 첫 `up` 뒤 launcher가 migrate
+로그를 가리키는 한 줄을 찍는다
+(`scripts/self_host_env.sh --compose logs migrate | grep MOMO_CLAIM_PATH`).
+토큰을 붙여 넣지 마라(ADR-0004). `oort_compose` 는 이후 단계에서
+`docker compose` 를 직접 부르는 플레이북 헬퍼로 남는다.
 
 **게이트:** `scripts/oort doctor --json` — 스택이 PASS여야 한다.
-doctor의 fix 문구가 `--compose` 이고 이 env가 claim 모드면
-`oort_compose` 를 쓴다.
+doctor는 비밀번호 키 자리에 claim 키를 받는다 (`env.required_keys`).
 
 #### 3.3.4 헬스와 합류 표면 (루프백)
 
@@ -799,20 +790,19 @@ oort_compose up -d --pull missing --wait
 브라우저 Origin(`https://…`)과 RN 소켓 Origin(`wss://…`)을 같이 넣는다.
 신규 설치는 `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin` 이라 요청
 Host가 출처다(ADR-0169 증보 1). `--public-origin` 은 그 센티널을
-건드리지 않는다. 두 번 실행해도 항목은 하나다. claim 수술 env
+건드리지 않는다. 두 번 실행해도 항목은 하나다. claim env
 (`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)는 이 유지보수 경로에서
-허용된다 — 「생성기를 다시 돌리지 않는다」(§3.3.3)는 시크릿 발행과
-`--compose` 에만 적용된다.
+허용된다 — 「생성기를 다시 돌리지 않는다」(§3.3.3)는 시크릿 발행에만
+적용된다.
 
 ```sh
 scripts/self_host_env.sh --public-origin https://<public-host>
 oort_compose up -d
 ```
 
-재시작은 `oort_compose`다. claim 모드에서
-`scripts/self_host_env.sh --compose` 는 거절한다(비밀번호 키 필요).
-비밀번호가 **있는** 사람 노트북 env는 [`SELF_HOST.md`](SELF_HOST.md)처럼
-`--compose` 를 쓴다.
+재시작은 `--compose`(또는 `oort_compose`)다. claim env와 비밀번호 env
+모두 `--compose` 를 쓴다. 비밀번호가 **있는** 사람 노트북 env는
+[`SELF_HOST.md`](SELF_HOST.md)처럼 `--compose` 를 쓴다.
 
 **레거시 env 한 줄 (#1790 복원).** 생성기가
 `MOMO_CENTRIFUGO_WS_URL points at loopback` 을 경고하면 — 경고만 하고
@@ -1654,7 +1644,7 @@ APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/late
 scripts/oort upgrade --to "$APP_REF" --yes
 ```
 
-claim 모드: `--compose` 대신 `oort_compose` (§3.3.3). Grok Bot VM은
+claim 모드: `--claim` env에서 `--compose` (§3.3.3). Grok Bot VM은
 `/workspace` bind와 Funnel state도 다시 본다(§3.3.8).
 
 **백업 / 복원** (PITR 아님; 정본
@@ -1726,7 +1716,7 @@ scripts/self_host_env.sh --compose logs relay
 | `env.role_passwords` | 롤 비밀번호 ≠ URL 비밀번호 | 새 env를 만들지 마라. URL 비밀번호를 `*_POSTGRES_PASSWORD` 에 맞추거나, `down -v` 와 함께만 재생성. |
 | `env.digest` | 공개 이미지가 list-digest pin이 아니거나 `releases/latest.json` 과 다름 | 매니페스트에서 pin. 업그레이드하려고 시크릿을 다시 만들지 마라. |
 | `port.web` / `port.api` / `port.centrifugo` | 스택이 꺼져 있는데 포트 점유 | 점유 프로세스를 멈추거나 env 포트를 바꾼 뒤 up. |
-| `stack.compose_ps` | 서비스 없음/unhealthy | 그 서비스에 `--compose ps` / `logs`. claim 모드: `oort_compose`. `runtime-roles` 종료코드 1에 `password authentication failed for user "momo"` 는 남은 pgdata vs 새로 만든 env — `down -v`, env 삭제, §2.3 다시 (또는 **원래** env로 `up` 재시도). |
+| `stack.compose_ps` | 서비스 없음/unhealthy | 그 서비스에 `--compose ps` / `logs`. `runtime-roles` 종료코드 1에 `password authentication failed for user "momo"` 는 남은 pgdata vs 새로 만든 env — `down -v`, env 삭제, §2.3 다시 (또는 **원래** env로 `up` 재시도). |
 | `stack.healthz` | 200 `database:ok` 아님 | `logs api`. |
 | `stack.agent_port` | 401 + Bearer scope 아님 | 잘못된 이미지. `releases/latest.json` 확인. |
 | `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 **info**(개수)이다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). `agent_job` pending 은 5분 미만 info, 이상이면 major(kind/status/개수/최고 나이 나열). 다른 kind: pending/failed면 `logs relay`. |

@@ -286,9 +286,9 @@ pgdata plus new secrets is `password authentication failed for user "momo"`
 and `runtime-roles` exit 1. To start over: `--compose down -v`, delete
 `infra/rust/local.secrets.env`, then §2.3 again.
 
-**Claim-mode exception:** `--compose` refuses an env with
-`MOMO_BOOTSTRAP_CLAIM=1` and no password key. Only §3.3 uses that shape, and
-it calls `docker compose` directly.
+**Claim-mode:** pass `--claim` on the generator. `--compose` brings that
+env up; it refuses only when both keys are present (ADR-0166). After the
+first `up` the launcher points at migrate logs (`grep MOMO_CLAIM_PATH`).
 
 ### 2.5 Gate: doctor PASS
 
@@ -556,47 +556,35 @@ If a volume already exists and is **not** a bind to `/workspace/oort-pgdata`,
 
 ```sh
 scripts/self_host_env.sh --published-image \
-  "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
+  "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)" \
+  --claim
 ```
 
 If §3.3.0 (b) or (c) failed, insert `--platform host-network` before
 `--published-image`. Do not hand-edit the generated env.
 
-The generator always writes `MOMO_INITIAL_OWNER_PASSWORD`. ADR-0166 claim
-mode is **mutually exclusive** (`MOMO_BOOTSTRAP_CLAIM=1` + email only).
-`--compose` requires the password key, so claim boot calls `docker compose`
-directly on the same canonical files.
+`--claim` writes `MOMO_BOOTSTRAP_CLAIM=1` and does **not** write
+`MOMO_INITIAL_OWNER_PASSWORD`. ADR-0166: the two keys are mutually
+exclusive. Re-running `--claim` on a password env is refused (never
+silently converted). `--compose` brings this env up; it refuses only when
+both keys are present.
 
-```sh
-ENV_FILE=infra/rust/local.secrets.env
-umask 077
-tmp="${ENV_FILE}.claim"
-awk '
-  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
-  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
-  { print }
-  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
-' "$ENV_FILE" >"$tmp"
-mv "$tmp" "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-```
-
-Do not cat/grep the env to stdout. The same awk is idempotent on an already
-claimed file.
+Do not cat/grep the env to stdout.
 
 **Scope of "do not re-run the generator" (#1790).**
 
-- **Applies — secret regeneration and `--compose` bring-up.** Without the
-  password key, `--compose` and the missing-file recreate path refuse
-  (ADR-0166). Bring-up is `oort_compose` below.
-- **Does not apply — maintenance of an existing env.** `--public-origin`
+- **Applies — secret regeneration.** The missing-file recreate path still
+  needs an image mode. Do not mint a second env against the same volume.
+- **Does not apply — maintenance and `--compose`.** `--public-origin`
   after a public address exists (§3.3.9) does not mint secrets.
-  `MOMO_BOOTSTRAP_CLAIM=1` with no password key is the one path that skips
-  password validation and updates `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` and
+  `MOMO_BOOTSTRAP_CLAIM=1` with no password key skips password validation
+  and updates `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL` and
   `CENTRIFUGO_ALLOWED_ORIGINS`. An env that **has** a password still enforces
-  12–128 dotenv-safe chars.
+  12–128 dotenv-safe chars. Re-running without `--claim` on a claim env
+  keeps it claim (no password injected).
 
 ```sh
+ENV_FILE=infra/rust/local.secrets.env
 oort_compose() {
   extra=()
   if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
@@ -609,15 +597,18 @@ oort_compose() {
     "$@"
 }
 
-oort_compose up -d --pull missing --wait
+scripts/self_host_env.sh --compose up -d --pull missing --wait
 ```
 
 `--wait` = containers healthy. Product gate is doctor. This edge binds
-`127.0.0.1` only (no TLS).
+`127.0.0.1` only (no TLS). After the first `up`, the launcher prints one
+line pointing at migrate logs
+(`scripts/self_host_env.sh --compose logs migrate | grep MOMO_CLAIM_PATH`).
+Do not paste the token (ADR-0004). `oort_compose` remains the playbook
+helper for later steps that call `docker compose` directly.
 
-**Gate:** `scripts/oort doctor --json` — stack must PASS. If doctor's fix
-text says `--compose` and this env is claim mode, use `oort_compose`
-instead.
+**Gate:** `scripts/oort doctor --json` — stack must PASS. Doctor accepts
+the claim key in place of the password key (`env.required_keys`).
 
 #### 3.3.4 Health and join surface (loopback)
 
@@ -815,18 +806,18 @@ Browser Origin (`https://…`) and RN socket Origin (`wss://…`) go in
 together. New installs use `MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin`
 so the request Host is the source (ADR-0169 amendment 1).
 `--public-origin` does not touch that sentinel. Running twice keeps one
-entry. Claim-surgery env (`MOMO_BOOTSTRAP_CLAIM=1`, no password key) is
+entry. Claim env (`MOMO_BOOTSTRAP_CLAIM=1`, no password key) is
 allowed on this maintenance path — "do not re-run the generator" (§3.3.3)
-applies to secret minting and `--compose` only.
+applies to secret minting only.
 
 ```sh
 scripts/self_host_env.sh --public-origin https://<public-host>
 oort_compose up -d
 ```
 
-Restart is `oort_compose`. `scripts/self_host_env.sh --compose` in claim
-mode refuses (password key required). A human laptop env **with** a
-password uses `--compose` as in [`SELF_HOST.md`](SELF_HOST.md).
+Restart is `--compose` (or `oort_compose`). Claim env and password env
+both use `--compose`. A human laptop env **with** a password uses
+`--compose` as in [`SELF_HOST.md`](SELF_HOST.md).
 
 **Legacy env one-liner (#1790 restore).** If the generator warns
 `MOMO_CENTRIFUGO_WS_URL points at loopback` — it warns and does not fix —
@@ -1700,7 +1691,7 @@ APP_REF="$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/late
 scripts/oort upgrade --to "$APP_REF" --yes
 ```
 
-Claim-mode: `oort_compose` instead of `--compose` (§3.3.3). Grok Bot VM
+Claim-mode: `--compose` on a `--claim` env (§3.3.3). Grok Bot VM
 also re-checks `/workspace` binds and Funnel state (§3.3.8).
 
 **Backup / restore** (not PITR; see
@@ -1774,7 +1765,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `env.role_passwords` | role password ≠ URL password | Do not mint a new env. Align URL passwords with `*_POSTGRES_PASSWORD`, or regenerate only with `down -v`. |
 | `env.digest` | published image not list-digest-pinned, or ≠ `releases/latest.json` | Pin from the manifest. Do not regenerate secrets to upgrade. |
 | `port.web` / `port.api` / `port.centrifugo` | port taken while stack is down | Stop the occupant or change the env port, then up. |
-| `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. Claim-mode: `oort_compose`. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
+| `stack.compose_ps` | missing/unhealthy service | `--compose ps` / `logs` for that service. `runtime-roles` exit 1 with `password authentication failed for user "momo"` means leftover pgdata vs a newly generated env — `down -v`, delete env, §2.3 again (or retry `up` with the **original** env). |
 | `stack.healthz` | not 200 `database:ok` | `logs api`. |
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
 | `stack.outbox` | non-`done` rows | `push_candidate` pending is **info** (count) when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). `agent_job` pending younger than 5 minutes is info; older is major (kind/status/count/max age listed). Other kinds: `logs relay` if pending/failed. |

@@ -171,6 +171,40 @@ grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
   fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
 pass "key-set equality (diff empty) count=$key_count"
 
+# #2438 — --railway --claim swaps password ↔ claim; count stays 44.
+claim_env="$TMP_ROOT/railway-claim.env"
+claim_ec="$(
+  run_railway "$claim_env" env \
+    RAILWAY_PUBLIC_DOMAIN="$FIXTURE_HOST" \
+    DATABASE_URL="$FIXTURE_DB_URL" \
+    MOMO_RUST_IMAGE="$FIXTURE_IMAGE" \
+    "$GENERATOR" --railway --claim
+)"
+[ "$claim_ec" = "0" ] || {
+  cat "$claim_env.err" >&2
+  fail "--railway --claim fixture env failed exit=$claim_ec"
+}
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$claim_env" || fail "--railway --claim missing MOMO_BOOTSTRAP_CLAIM=1"
+if grep -q '^MOMO_INITIAL_OWNER_PASSWORD=' "$claim_env"; then
+  fail "--railway --claim wrote MOMO_INITIAL_OWNER_PASSWORD"
+fi
+{
+  canonical_keys | awk '
+    $0 == "MOMO_INITIAL_OWNER_PASSWORD" { print "MOMO_BOOTSTRAP_CLAIM"; next }
+    { print }
+  '
+  printf 'MOMO_SELF_HOST_PLATFORM\n'
+} | LC_ALL=C sort -u >"$TMP_ROOT/claim.expected.keys"
+output_keys "$claim_env" >"$TMP_ROOT/claim.got.keys"
+if ! diff -u "$TMP_ROOT/claim.expected.keys" "$TMP_ROOT/claim.got.keys" \
+  >"$TMP_ROOT/claim.keys.diff"; then
+  cat "$TMP_ROOT/claim.keys.diff" >&2
+  fail "--railway --claim key-set diff not empty"
+fi
+claim_count="$(wc -l <"$TMP_ROOT/claim.got.keys" | tr -d ' ')"
+[ "$claim_count" = "44" ] || fail "--railway --claim key-set count expected 44 got $claim_count"
+pass "key-set --claim equality (diff empty) count=$claim_count (password variant $key_count; 1:1 swap)"
+
 sabotaged="$TMP_ROOT/sabotaged.env"
 grep -v '^JWT_HMAC=' "$happy_env" >"$sabotaged" || true
 output_keys "$sabotaged" >"$TMP_ROOT/sabotaged.keys"
