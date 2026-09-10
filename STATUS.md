@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## hostedRoutineLabel 빈 핸들 식별자 (#2395, 2026-09-10)
+
+- Track UXUI. `fix/2395-routine-label-empty-handle` onto `origin/track/uxui`. ADR-0162 D6 결정 (a): 빈 핸들이면 식별자 세그먼트는 `m-<member id hex 8>`(끝에 ` / ` 금지). 비어 있지 않은 핸들 출력은 바이트 불변. `parseHostedRoutineLabel`이 그 세그먼트를 왕복한다. UI 변경 없음.
+- 검증: `@momo/core` typecheck+vitest · 사보타주(정규화 제거 / 왕복 파괴) RED.
+- runtime-unverified: 실스택 grok routine 생성·cleanup 매니페스트 왕복.
+
 ## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
 
 - Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).

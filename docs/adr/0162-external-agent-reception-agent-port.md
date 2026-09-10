@@ -127,6 +127,7 @@ Grok preset의 mode는 loader가 공개 URL까지 도달한 사실만으로 정�
 pairing secret은 짧은 만료, hash-only 저장, 1회 소비, replay 거부를 강제한다. 감지에 소비된 pairing secret은 active bearer로 승격하거나 다시 쓰지 않는다. 만료되면 `expired`가 되고 새 secret을 발급해야 한다. 클라이언트가 제출한 provider/Bot metadata는 표시용 힌트일 뿐 권한의 근거가 아니다.
 
 v0의 운영 단위는 **one Bot = one connection = one dedicated agent member = one deterministic routine**이다. 한 dedicated member에는 `pairing_pending|detected|active|cleanup_pending` connection이 동시에 하나만 존재할 수 있다. 따라서 disconnect의 pause는 그 connection 전용 member만 멈추며 managed/BYOA/다른 hosted runtime을 함께 정지시키지 않는다. 재연결은 이전 connection이 `disconnected`가 된 뒤 같은 dedicated member에 새 pairing/credential을 발급하는 순차 흐름이다. 예시 routine label은 `Oort Inbox: <workspace> / <agent>`이며, 실제 이름·connector id·생성 시각을 cleanup manifest에 기록한다.
+개정 2026-09-10: 빈 핸들이면 식별자 세그먼트는 member id 단축형.
 
 ### D7. 연결 해제는 local revoke와 provider cleanup을 분리한다
 
