@@ -13,7 +13,16 @@ import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
+import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
+import {
+  clearOwnerOnboardingPending,
+  markOwnerOnboardingPending,
+} from "@/features/onboarding/ownerOnboardingStore";
 import { readClaimToken } from "./claimPath";
+import {
+  holdSessionRestore,
+  releaseSessionRestore,
+} from "./onboardingSessionHold";
 
 // Reading this as: onboarding claim-password form for self-host operators on
 // web+Tauri, density 6/10, motion 2/10.
@@ -45,6 +54,7 @@ export function ClaimPage({
   onLoggedIn: (session: LoginResponse) => void;
 }) {
   const token = readClaimToken(window.location.pathname);
+  const [claimed, setClaimed] = useState<LoginResponse | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,6 +62,12 @@ export function ClaimPage({
   const [failure, setFailure] = useState<ClaimFailure | null>(null);
   const offline = useBrowserOffline();
   const landingRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      releaseSessionRestore();
+    };
+  }, []);
 
   const missingToken = token === null;
   const showForm = !missingToken && (failure === null || failure.keepForm);
@@ -74,14 +90,16 @@ export function ClaimPage({
     setFailure(null);
     setBusy(true);
     try {
+      // applyLogin fires inside claimOwnerPassword. Hold restore BEFORE the
+      // await so App does not unmount this page into `restoring` (ConnectPage
+      // join → S3, same order).
+      holdSessionRestore();
       const session = await claimOwnerPassword(token, password);
-      window.history.replaceState(null, "", "/");
-      // invite-join(ConnectPage)과 같은 넷 — 폰 연결 · 첫 에이전트 · fresh-signup ·
-      // 킥오프 홀드. markFreshSignup 하나만 찍던 동안 first-run 게이트는 곧장
-      // "app"이었다(#2301).
       recordFreshSignupFirstRun(session);
-      onLoggedIn(session);
+      markOwnerOnboardingPending();
+      setClaimed(session);
     } catch (err) {
+      releaseSessionRestore();
       setFailure(claimFailureCopy(err));
     } finally {
       setBusy(false);
@@ -91,6 +109,24 @@ export function ClaimPage({
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     void attempt();
+  }
+
+  function finishOwnerOnboarding(session: LoginResponse) {
+    window.history.replaceState(null, "", "/");
+    // Markers were written at claim success. onLoggedIn still opens the
+    // first-run gate; clear S2 pending so App does not remount this stage.
+    clearOwnerOnboardingPending();
+    onLoggedIn(session);
+    releaseSessionRestore();
+  }
+
+  if (claimed) {
+    return (
+      <OwnerOnboarding
+        session={claimed}
+        onFinished={() => finishOwnerOnboarding(claimed)}
+      />
+    );
   }
 
   return (
