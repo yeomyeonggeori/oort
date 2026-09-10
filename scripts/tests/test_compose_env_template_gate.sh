@@ -288,4 +288,58 @@ case "$out" in
 esac
 pass "an absent docker compose fails the guard instead of silently reducing it"
 
+# =============================================================================
+# Case 10 — Coverage 3 inventories with git ls-files (#2328). gitignored
+# stray files (.DS_Store) must stay green; deleting a tracked listed file
+# is red; reverting the inventory to find makes .DS_Store red (the
+# git ls-files swap is load-bearing).
+# =============================================================================
+init_git_fixture() {
+  local dir="$1"
+  (
+    cd "$dir" || exit 1
+    git init -q
+    printf '%s\n' '.DS_Store' >.gitignore
+    git add -A
+    git -c user.email=compose-env-test@oort.invalid -c user.name=compose-env-test \
+      commit -q -m init
+  )
+}
+
+tree="$(new_tree coverage3-dsstore)"
+init_git_fixture "$tree"
+: >"$tree/infra/railway/.DS_Store"
+run_guard "$tree" --skip-docker
+[ "$GUARD_STATUS" -eq 0 ] || fail "gitignored .DS_Store turned Coverage 3 red
+$GUARD_OUT"
+pass "gitignored .DS_Store in a platform dir is green (git ls-files)"
+
+tree="$(new_tree coverage3-deleted-tracked)"
+init_git_fixture "$tree"
+rm -f "$tree/infra/railway/README.md"
+run_guard "$tree" --skip-docker
+expect_red "deleted tracked platform file" "infra/railway/README.md"
+pass "deleting a tracked listed platform file is red"
+
+tree="$(new_tree coverage3-find-sabotage)"
+init_git_fixture "$tree"
+: >"$tree/infra/railway/.DS_Store"
+guard_copy="$tree/check_compose_env_templates.sh"
+# Revert the inventory to find -type f. .DS_Store must then turn red,
+# proving git ls-files (not find) is what keeps the stray green.
+awk '
+  /ls-files --cached --others --exclude-standard/ {
+    print "    find \"$" "dir\" -type f"
+    next
+  }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "find inventory sees .DS_Store" "infra/railway/.DS_Store"
+pass "sabotage Coverage 3 inventory back to find → .DS_Store RED"
+
 echo "[compose-env-test] PASS: $CASES case(s)"

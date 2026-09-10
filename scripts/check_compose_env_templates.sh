@@ -144,6 +144,22 @@ CHECKED=0
 
 fail() { echo "[compose-env] FAIL: $*" >&2; FAILURES=$((FAILURES + 1)); }
 
+# Coverage 3 inventory. `find -type f` listed gitignored stray files
+# (.DS_Store) and turned a healthy tree red (#2328). git ls-files with
+# --cached --others --exclude-standard matches find for every file git
+# would consider adding, and ignores gitignore (so this is not a
+# weakening: a new compose.yml still reds; .DS_Store does not).
+# Fixture trees (--root of a copy that is not a git worktree) fall back
+# to find so the regression harness still sees every copied file.
+platform_dir_files() {
+  local dir="$1"
+  if git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git -C "$ROOT" ls-files --cached --others --exclude-standard -- "$dir"
+  else
+    find "$dir" -type f
+  fi | LC_ALL=C sort
+}
+
 # Variables a compose file demands. Full-line YAML comments are stripped first —
 # infra/rust/docker-compose.push.yml documents the `${VAR:?}` idiom in prose and
 # that sentence is not a requirement. `$${VAR:?}` is stripped next: compose
@@ -320,7 +336,7 @@ for row in "${PLATFORM_TEMPLATES[@]}"; do
     [ -n "$f" ] || continue
     grep -qxF "$f" <<<"$listed_lines" ||
       fail "$f sits in platform directory $dir but PLATFORM_TEMPLATES does not list it — a platform row is a complete inventory, so a new compose file or env template cannot hide behind the platform exemption; list it there (or table it as a rendering)"
-  done < <(find "$dir" -type f | LC_ALL=C sort)
+  done < <(platform_dir_files "$dir")
 done
 
 while IFS= read -r dir; do
