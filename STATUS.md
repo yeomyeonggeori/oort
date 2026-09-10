@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## SH-12c design-review 잔여 + kickoff 백스톱 관찰자 (#2356)
+
+- Track UXUI. `chore/2356-sh12c-nits` onto `origin/track/uxui`. IssuedInviteCard 공유 문장 `break-keep`(390px 「화면에서|만」 분절 0). 발급 뒤 채워진 primary는 「계속」, 복사 outline은 Button default/`h-control`(28px `sm` 예외 제거; 플래너 36px는 컨트롤 축에 없어 named `h-control` 32). S2 발급 CTA·복사 라벨은 설정 › 멤버와 초대와 `inviteLabels.ts` 상수 공유. `welcomeKickoff.noActiveAgent` 백스톱 관찰자는 mount 전에 부착해 1프레임 플래시를 센다.
+- runtime-unverified: 실서버 claim→S2 390px 캡처는 design-review 범위(정적 PASS, 픽셀 SKIPPED). 백스톱 플래시는 jsdom MutationObserver.
 ## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
 
 - Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.
