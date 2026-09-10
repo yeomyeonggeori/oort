@@ -146,7 +146,7 @@
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
-- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
+- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
 - 검증: `scripts/tests/test_railway_template.sh` (키 집합 diff 0 · JWT_HMAC 사보타주 RED · `caddy adapt` · 403 순서 · 게이트 픽스처 PASS/RED) · `scripts/local_gate.sh --profile docs`.
 - runtime-unverified: `RAILWAY_TOKEN` 없음 — 실배포 `railway up` / 원격 `public.healthz`·`public.websocket`은 planner 수행.
 
