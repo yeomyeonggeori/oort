@@ -1,5 +1,14 @@
 # oort 기획 현재 상태 (Planning Current State)
 
+> **2026-09-10 스냅샷 97 (Fable · momo-main — ★ADR-0185 Accepted 집행: SH-12 온보딩 5/6 main(S1 R3 진행) · SH-11 e·e-2·b·c·host-network main(d 리뷰 중) · 워커 레인 Grok Build CLI 복귀. 워커 4(grok 2·Cursor 2) · 체인 0.)** 컴팩트 복원 진입점.
+>
+> **★ 정본 헤드**: main `__MAIN__` · uxui `__UXUI__` · engine `__ENGINE__`. 정합 PASS.
+> **★ 성재 결재(09-10)**: 「결정 없이 재개」 · **ADR-0185 권고안 Accept**(D-A 절충·D-B 시드 유지 v0.1.5·D-C 첫 에이전트 연결) · **Fable orchestrator 모드 + grok build grok 4.6 적극 활용**(PIPELINE #2357).
+> **★ 진행 중**: SH-12b-w #2365(S1) R3 → design-review R3 · A6 #2374 R3 · #2356 잔여 · SH-11d #2390 리뷰. 대기: #2328·#2347 · SH-12e #2336(S1 뒤).
+> **★ 다음**: S1 랜딩 → SH-12e 발급 → **v0.1.5 발행**(노트 초안 `claudedocs/release-v0.1.5-notes-draft.md`, CHANGELOG `[0.1.5]`·manifest, 성재 dispatch·owner 승인 3회) → 제로베이스 온보딩 E2E 재실측(A·B) → ITO → G2(iOS v0·Railway 최종·APNs).
+> **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md` · 미션 `mission-*.md` · 스폰 `chain-templates/spawn-grok.sh`(grok) / 세션 `spawn-worker.sh`(Cursor 폴백).
+
+> 이하 스냅샷 96:
 > **2026-09-09 스냅샷 96 (Fable · momo-main — ★E2E-A 그록봇 폐곡선 PASS(설치→doctor→터널/claim→Agent Port active→멘션 답장→disconnect 잔여 0). ADR-0184 Accepted. ADR-0185 Proposed main 도달. SH-12a #2308 리뷰 PASS·랜딩 중, SH-11f #2307·SH-11g #2310 검토+감사 중. 워커 0 · 검토 2 · 체인 1.)** 컴팩트 복원 진입점.
 >
 > **★ 정본 헤드**: main `4361cba7`(ADR-0185 Proposed 승격 bj) · uxui `4345ac3c` · engine `43192b1e`. 정합 PASS. **진행 중 체인**: `land-2308.sh`(SH-12a → uxui → main, 배치 bk) → 이 스냅샷 PR → (검토·감사 PASS 시) `land-2307.sh`(SH-11f, bl) → `land-2310.sh`(SH-11g, bm).
