@@ -5,6 +5,19 @@
 - Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.
 - runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
 
+## pgBackRest PITR 계약 시험 attach cleanup (#2157, 2026-09-10)
+
+- Track engine. `fix/2157-pgbackrest-pitr-test` onto `origin/track/engine`. 원인은 스크립트 회귀가 아니라 Colima virtiofs: macOS `TMPDIR=/var/folders/...`는 VM에 마운트되지 않아 attach 픽스처 bind-mount가 거부되고 주입된 `docker cp` exit 55에 도달하지 못함 (`56b08078` #1342부터 선재). 픽스처를 워크트리 `.tmp-momo-pitr-contract.*`로 옮김 (`test_image_day2_tools.sh`와 동일).
+- 검증: `bash scripts/tests/test_pgbackrest_pitr_contract.sh` PASS ×3. red proof(주입 `cp` 실패 제거) → `FAIL attach cleanup fixture did not reach injected cp failure status=1 output=[pgbackrest-pitr] RED candidate_migrations_hash_invalid`. `bash -n` green. `local_gate.sh` 실행 배선은 스코프 밖(기획 정책 배치).
+
+## 제로베이스 E2E-B 문서 이탈 D1~D4 (#2429, 2026-09-10)
+
+- Track engine. `docs/2429-e2ezb-deviations`. `SELF_HOST_FIRST_DAY`(en+ko) §1을 claim 설치 경로로 정합(awk + `docker compose` 직접 호출). `SELF_HOST`(en+ko) §3에 claim 기동 소절(`--compose` 거절, ADR-0166). §5·FIRST_DAY §7: GUI `plaintextRemote` vs `--allow-local-provider` + `host.docker.internal` / `PUT /v1/provider/link`. D4 「계속」 문장 유지.
+- runtime-unverified: 이 워크트리에서 스택 `up` 없음. 생성기 claim 수락은 temp-dir dry-run. GUI 클릭은 E2E-B 실측(`~/projects/e2e-zb/REPORT.md`).
+## S1 온보딩 잔여 nits (#2418, 2026-09-10)
+
+- Track UXUI. `chore/2418-s1-nits` onto `origin/track/uxui`. 설정 › 워크스페이스 초기 `aria-invalid="false"` 미노출. `S1_FAILURE` 「지금은」 1회. `HandleField`/`identityCopy` → `features/profile/shared`, `StaleWorkspaceNameConflict` → `features/workspace/shared`. 시드 워크스페이스명 대소문자 무시. S1 완료 시 settings-door 플래그 잔여 제거.
+- runtime-unverified: 실서버 claim→S1→설정 왕복은 mock·RTL 범위. 시각(픽셀) 변경 없음. `S1_FAILURE` 문구만 두 번째 「지금은」 삭제.
 
 ## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
 

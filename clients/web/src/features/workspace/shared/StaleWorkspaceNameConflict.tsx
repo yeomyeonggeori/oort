@@ -2,7 +2,7 @@ import type { ReactNode, Ref } from "react";
 import { directionParticle } from "@momo/core/lib/koreanParticle";
 import { Button } from "@/design/ui/button";
 import { InlineBanner } from "@/features/common/States";
-import { S1_KEEP_MINE, S1_KEEP_THEIRS } from "./s1Copy";
+import { S1_KEEP_MINE, S1_KEEP_THEIRS } from "@/features/onboarding/s1Copy";
 
 // Reading this as: onboarding / settings stale-409 workspace name for internal
 // team users on web+Tauri, density 6/10, motion 2/10.

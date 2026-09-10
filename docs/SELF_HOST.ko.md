@@ -178,7 +178,10 @@ DB가 있는데 시크릿을 다시 만들면 그 DB와 어긋나기 때문이�
 
 ## 3. 기동
 
-2단계가 찍어 준 명령을 그대로 붙여 넣는다. `--compose` 경유는 필수다. generated
+2단계가 찍어 준 명령을 그대로 붙여 넣는다. **env에
+`MOMO_INITIAL_OWNER_PASSWORD` 가 있을 때.** 그 비밀번호 경로에서
+`--compose` 경유는 필수다. claim env는 아래 소절 — `--compose` 는 그것을
+거절한다(ADR-0166). generated
 env의 모든 실제 키, canonical Compose 파일의 모든 interpolation 키와 `COMPOSE_FILE`·
 `COMPOSE_PROFILES` 같은 제어 키를 process env에서 제거한 뒤 정본 env/file set을
 호출한다. caller의 config-source 대체 인자와 Compose global control 인자도
@@ -213,6 +216,31 @@ api·relay·agent-worker·웹 엣지 기동.
 `MOMO_ENV=staging` 보안 자세는 그대로다. 운영에서 이 로컬 예외를 복사하지 말 것:
 staging/production migrate는 서명된 15분 이내 PITR evidence 또는 실제 빈 DB의
 단발 bootstrap probe 중 정확히 하나가 없으면 실패한다.
+
+### claim 모드 기동
+
+`--compose` 는 비밀번호 경로의 launcher다. env가 claim이면
+(`MOMO_BOOTSTRAP_CLAIM=1` 이고 `MOMO_INITIAL_OWNER_PASSWORD` 없음 —
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 의 awk,
+[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) §1 이 S1/S2 를 열려고
+쓰는 형태) `--compose` 는 **거절**한다. ADR-0166: 그 launcher는 비밀번호
+키를 계속 요구하고, claim과 비밀번호 키는 상호 배타다. 생성기도 같다:
+「이 env는 claim 모드다. --compose는 비밀번호 키를 요구하므로 거절한다.」
+
+로컬 빌드 기동은 `--compose` 가 썼을 같은 파일 집합을 직접 호출한다:
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/docker-compose.rust.build.yml \
+  -f infra/rust/local.override.yml \
+  up -d --build --wait
+```
+
+digest 모드 claim은 AGENT §3.3.3 `oort_compose up -d --pull missing
+--wait`(빌드 오버레이 없음). claim 뒤 첫 하루 GUI는
+[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
 
 ## 4. 로그인
 
@@ -312,8 +340,10 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
    줄을 지우고 api·agent-worker를 재시작한다. Railway/공개 설치는 이 플래그를
    쓰지 않는다(`infra/railway/railway.json` 무변화).
 
-3. 2단계가 인쇄한 명령으로 스택을 띄운다
-   (`scripts/self_host_env.sh --compose up -d --build --wait`). 브라우저 포트는
+3. 이 env에 맞는 명령으로 스택을 띄운다([§3](#3-기동)). 비밀번호 env:
+   2단계가 인쇄한 `--compose` 한 줄. claim env(`MOMO_BOOTSTRAP_CLAIM=1`,
+   비밀번호 키 없음): §3 의 로컬 빌드 `docker compose` 형태 —
+   `--compose` 는 거절한다(ADR-0166). 브라우저 포트는
    [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4 와 같이 파생한다:
 
    ```sh
@@ -321,9 +351,14 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
    WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
    ```
 
-4. 로그인(4단계) 뒤 **설정 › AI 연결**에
+4. 로그인(4단계; claim 모드: `/claim/<token>` 에서 설정한 비밀번호, env
+   키 아님) 뒤 **설정 › AI 연결**에
    `http://host.docker.internal:<provider-port>/v1` 과 hermes 쪽 bearer를
-   넣는다. REST 동치(`<port>` 는 `$WEB_PORT`):
+   넣는다. 그 호스트는 루프백이 **아니다** — 에이전트 만들기 GUI
+   (`createModel.agentBaseUrlIssue`)는 `plaintextRemote` 로 거절한다.
+   **설정 › AI 연결** / `PUT /v1/provider/link` 는
+   `--allow-local-provider` 가 켜져 있으면 받는다. REST 동치(`<port>` 는
+   `$WEB_PORT`):
 
    ```sh
    TOKEN=$(curl -sS -X POST "http://127.0.0.1:${WEB_PORT}/v1/auth/login" \
@@ -336,12 +371,16 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
      -d '{"baseUrl":"http://host.docker.internal:<provider-port>/v1","bearer":"<hermes-facing-bearer>"}'
    ```
 
-5. 에이전트를 만들고(에이전트 명부 → 새 에이전트) `#general` 에 초대한 뒤
-   웰컴 킥오프가 돌게 한다(새 **사람** 멤버가 합류할 때(초대/claim) —
+5. 에이전트를 만들어 `#general` 에 넣는다. 에이전트 만들기 GUI는
+   `https://…` 와 루프백 `http://localhost` / `127.0.0.1` / `[::1]` 만
+   받고, 비-루프백 `http://`(`http://host.docker.internal:<port>/v1`
+   포함)는 `plaintextRemote` 다. 실제로 답하는 로컬 mock 경로는 4단계의
+   `PUT /v1/provider/link` 같은 주소와 REST
+   `POST /v1/workspaces/{ws}/agents` 에 그 `baseUrl`(E2E-B). 그다음 웰컴
+   킥오프가 돌게 한다(새 **사람** 멤버가 합류할 때(초대/claim) —
    에이전트를 초대하는 것은 트리거가 아니다, ADR-0181 D2; 또는 첫
-   `@핸들` 멘션). 답장은
-   `message.seq` 가 있는 내구성 채널 메시지다. 그 seq가 오면 이 문서가
-   약속한 전부다.
+   `@핸들` 멘션). 답장은 `message.seq` 가 있는 내구성 채널 메시지다. 그
+   seq가 오면 이 문서가 약속한 전부다.
 
 격리 프로젝트를 썼으면
 `scripts/self_host_env.sh --compose down -v` 로 회수해 그

@@ -199,8 +199,10 @@ mode/digest than the existing env, fail instead of changing quietly.
 
 ## 3. Bring-up
 
-Paste the command step 2 printed, as-is. Going through `--compose` is
-required. It strips every real key of the generated env, every
+Paste the command step 2 printed, as-is, **when the env still has
+`MOMO_INITIAL_OWNER_PASSWORD`**. Going through `--compose` is required on
+that password path. Claim env is the subsection below — `--compose`
+refuses it (ADR-0166). It strips every real key of the generated env, every
 interpolation key of the canonical Compose files, and control keys such as
 `COMPOSE_FILE`·`COMPOSE_PROFILES` from the process env, then invokes the
 canon env/file set. Caller config-source override arguments and Compose
@@ -239,6 +241,33 @@ warning. The API's `MOMO_ENV=staging` security posture is unchanged. Do not
 copy this local exception into operations: staging/production migrate fails
 unless exactly one of signed PITR evidence not older than 15 minutes, or a
 one-shot bootstrap probe of a truly empty DB, is present.
+
+### Claim-mode bring-up
+
+`--compose` is the password-path launcher. If the env is claim
+(`MOMO_BOOTSTRAP_CLAIM=1` and no `MOMO_INITIAL_OWNER_PASSWORD` — the awk
+in [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3, which
+[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) §1 uses so S1/S2
+open), `--compose` **refuses**. ADR-0166: that launcher still requires
+the password key; claim and the password key are mutually exclusive. The
+generator says the same: 「이 env는 claim 모드다. --compose는 비밀번호
+키를 요구하므로 거절한다.」
+
+Local-build bring-up is the same file set `--compose` would have used,
+called directly:
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/docker-compose.rust.build.yml \
+  -f infra/rust/local.override.yml \
+  up -d --build --wait
+```
+
+Digest-mode claim uses AGENT §3.3.3 `oort_compose up -d --pull missing
+--wait` (no build overlay). The first-day GUI after claim is
+[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
 
 ## 4. Sign in
 
@@ -348,8 +377,10 @@ the mock. This checkout has no hermes binary; the stand-in is
    those two lines and restart api + agent-worker. Railway / public installs
    do not use this flag (`infra/railway/railway.json` is unchanged).
 
-3. Bring the stack up with the command step 2 printed
-   (`scripts/self_host_env.sh --compose up -d --build --wait`). Derive the
+3. Bring the stack up with the command that matches this env
+   ([§3](#3-bring-up)). Password env: the `--compose` line step 2 printed.
+   Claim env (`MOMO_BOOTSTRAP_CLAIM=1`, no password key): the local-build
+   `docker compose` form in §3 — `--compose` refuses (ADR-0166). Derive the
    browser port the same way [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4
    does:
 
@@ -358,9 +389,14 @@ the mock. This checkout has no hermes binary; the stand-in is
    WEB_PORT=$(awk -F= '$1=="MOMO_WEB_PORT"{print substr($0, index($0,"=")+1); exit}' "$ENV_FILE")
    ```
 
-4. Sign in (step 4), open **설정 › AI 연결**, and put
+4. Sign in (step 4; claim-mode: the password set on `/claim/<token>`, not
+   an env key), open **설정 › AI 연결**, and put
    `http://host.docker.internal:<provider-port>/v1` plus a hermes-facing
-   bearer. REST equivalent (`<port>` is `$WEB_PORT`):
+   bearer. That host is **not** loopback — the agent-create GUI
+   (`createModel.agentBaseUrlIssue`) rejects it as `plaintextRemote`.
+   **설정 › AI 연결** / `PUT /v1/provider/link` accept it when
+   `--allow-local-provider` is on. REST equivalent (`<port>` is
+   `$WEB_PORT`):
 
    ```sh
    TOKEN=$(curl -sS -X POST "http://127.0.0.1:${WEB_PORT}/v1/auth/login" \
@@ -373,12 +409,18 @@ the mock. This checkout has no hermes binary; the stand-in is
      -d '{"baseUrl":"http://host.docker.internal:<provider-port>/v1","bearer":"<hermes-facing-bearer>"}'
    ```
 
-5. Create an agent (agent directory → new agent), invite it to `#general`,
-   and let the welcome kickoff run (a new **human** member joins
-   (invite/claim) — inviting an agent does not trigger it, ADR-0181 D2;
-   or the first `@handle` mention). The reply is a durable channel message
-   with `message.seq`. When that seq arrives, that is everything this
-   document promised.
+5. Create an agent and invite it to `#general`. The agent-create GUI
+   accepts `https://…` and loopback `http://localhost` / `127.0.0.1` /
+   `[::1]`; non-loopback `http://` (including
+   `http://host.docker.internal:<port>/v1`) is `plaintextRemote`. The
+   local-mock path that actually answers is the same address on
+   `PUT /v1/provider/link` (step 4) plus REST
+   `POST /v1/workspaces/{ws}/agents` with that `baseUrl` (E2E-B). Then let
+   the welcome kickoff run (a new **human** member joins (invite/claim) —
+   inviting an agent does not trigger it, ADR-0181 D2; or the first
+   `@handle` mention). The reply is a durable channel message with
+   `message.seq`. When that seq arrives, that is everything this document
+   promised.
 
 When you are done with an isolated project, reclaim it
 (`scripts/self_host_env.sh --compose down -v`) so leftover compose

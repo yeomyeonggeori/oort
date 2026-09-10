@@ -11,13 +11,13 @@ import {
 import { useSession } from "@/app/session";
 import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
-import { Avatar } from "@/features/timeline/MessageRow";
-import { HandleField } from "@/features/onboarding/HandleField";
+import { HandleField } from "@/features/profile/shared/HandleField";
 import {
   isField400,
   isHandleTaken,
-} from "@/features/onboarding/identityCopy";
-import { recordOwnerOnboardingSettingsSave } from "@/features/onboarding/ownerOnboardingStore";
+} from "@/features/profile/shared/identityCopy";
+import { recordOwnerOnboardingSettingsSave } from "@/features/profile/shared/onboardingSettingsSave";
+import { Avatar } from "@/features/timeline/MessageRow";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { Field, SaveButton, SectionShell } from "./SettingsFields";
 

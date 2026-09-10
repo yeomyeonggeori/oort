@@ -44,7 +44,7 @@ mention utterance (`scripts/bench_onboarding.sh` preamble M5: `ANSWERED` /
 | git | `git --version` | doc-inherited |
 | A **different browser profile** (or a private window) for the second user | If an operator session remains on the same origin, the join screen does not appear | needs live run |
 | (desktop join) A packaged oort app | Scheme `oort`·`momo` registered (`clients/desktop/src-tauri/tauri.conf.json:30`) | code-derived |
-| (⑤ reply) An OpenAI-compatible **external `https://` endpoint and key** | Self-host env is `MOMO_ENV=staging`, so a loopback provider is refused | code-derived (`scripts/self_host_env.sh:607`, `server-rust/crates/momo-settings/src/provider.rs:193-198,287`) |
+| (⑤ reply) An OpenAI-compatible **external `https://` endpoint and key**, or a local mock with `--allow-local-provider` | Default: `MOMO_ENV=staging` refuses loopback. Opt-in: `--allow-local-provider` + `http://host.docker.internal:<port>/v1` on **설정 › AI 연결** / `PUT /v1/provider/link`. Agent-create GUI still rejects non-loopback `http` as `plaintextRemote` | code-derived (`scripts/self_host_env.sh` `--allow-local-provider`, `createModel.agentBaseUrlIssue`, `provider.rs:193-198,287`) |
 
 Do not install Rust, Node, or `psql`. Server and web live in one image
 (doc-inherited: [`SELF_HOST.md`](SELF_HOST.md) "Prerequisites").
@@ -62,30 +62,70 @@ stack does not issue a `platform:read` token.
 Verification: **doc-inherited** (commands) · **code-derived** (the two keys
 · CORS defaults).
 
+This document's first path is claim. S1/S2 open only after
+`/claim/<token>` — the env-password ConnectPage in
+[`SELF_HOST.md`](SELF_HOST.md) does **not** open them (§2). The generator
+always writes `MOMO_INITIAL_OWNER_PASSWORD`. Convert to claim **before**
+`up`. Claim and the password key are mutually exclusive (ADR-0166).
+
+### Claim-mode install
+
 ```sh
 git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
 scripts/self_host_env.sh --local-build
-scripts/self_host_env.sh --compose up -d --build --wait
+```
+
+For a local mock gateway on this machine, add `--allow-local-provider`
+(or re-run the same mode with that flag on the existing env). Recipe: §6 ·
+§7 and [`SELF_HOST.md`](SELF_HOST.md) §5.
+
+The same awk as [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 — strip
+the password key, write `MOMO_BOOTSTRAP_CLAIM=1`. Do not cat/grep the env
+to stdout.
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+umask 077
+tmp="${ENV_FILE}.claim"
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
+  { print }
+  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
+' "$ENV_FILE" >"$tmp"
+mv "$tmp" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+```
+
+`--compose` refuses this env: the launcher still requires the password
+key (ADR-0166). Do not paste `scripts/self_host_env.sh --compose up …`
+here. Local-build bring-up is the same file set `--compose` would have
+used, called directly (AGENT §3.3.3 + `docker-compose.rust.build.yml`):
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/docker-compose.rust.build.yml \
+  -f infra/rust/local.override.yml \
+  up -d --build --wait
 ```
 
 If another clone's self-host stack is already up on the same machine, this
 `up` is refused. Two-checkout rule: [`SELF_HOST.md`](SELF_HOST.md)
 "Using two checkouts at once".
 
-If a public digest exists you can use the `--published-image` path. Deeper:
-[`SELF_HOST.md`](SELF_HOST.md) §2.
+If a public digest exists you can use the `--published-image` path, then
+the same awk, then AGENT §3.3.3 `oort_compose up -d --pull missing --wait`
+(no build overlay). Deeper: [`SELF_HOST.md`](SELF_HOST.md) §2 ·
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3.
 
-When `--wait` finishes, ready is finished. The login hint the script prints
-is roughly this (`scripts/self_host_env.sh:458-476`):
-
-```
-http://localhost:<MOMO_WEB_PORT>     # 기본 8088
-email    owner@oort.local           # 또는 MOMO_INITIAL_OWNER_EMAIL
-password infra/rust/local.secrets.env 의 MOMO_INITIAL_OWNER_PASSWORD
-```
-
-The password is not on stdout. File mode 600, not a commit target.
+When `--wait` finishes, ready is finished. Open migrate's one-shot
+`MOMO_CLAIM_PATH=/claim/<token>` on first `up` (restarts print
+`MOMO_BOOTSTRAP_CLAIM=skipped`). Do not paste the token into chat
+(ADR-0004). The generator's password login hint does not apply — there is
+no password key in this file. File mode 600, not a commit target.
 
 ### The two keys
 
@@ -100,7 +140,9 @@ following. Do not fill them in by hand.
 An existing env may lack those lines. Re-run `scripts/self_host_env.sh` in
 the same mode and it **appends only those lines** — it does not regenerate
 secrets (`ensure_operator_allowlist`, `scripts/self_host_env.sh:300-318`).
-After the append, restart api: `scripts/self_host_env.sh --compose up -d`.
+After the append, restart api with the same `docker compose --env-file`
+file set as the install, `up -d`. `--compose` still refuses claim env
+(ADR-0166).
 
 Confirm:
 
@@ -345,9 +387,11 @@ CLI. S2 and 설정 › 멤버와 초대 share `useIssueInvite` + `IssuedInviteCa
 ### S2 during first run
 
 S2 is the first-day invite: one sealed link (member · 1 use · 24h) or
-**나중에**. Copy and the one-time card are the same component as settings;
-S2's card is `copyMode="single"` (only **초대 카드 복사**). Details of
-the card bytes are below. After skip or **계속**, first-run in §2 starts.
+skip **나중에** (0 POSTs). After the link is issued, skip **나중에**
+disappears and the primary is **계속** (`S2_CONTINUE_LABEL`). Copy and
+the one-time card are the same component as settings; S2's card is
+`copyMode="single"` (only **초대 카드 복사**). Details of the card bytes
+are below. After skip or **계속**, first-run in §2 starts.
 
 ### Settings › 멤버와 초대
 
@@ -531,10 +575,17 @@ From the operator session:
 | **모드** | Default **외부 provider** 「저장한 주소와 키로 실제 provider에 연결합니다。」 | `:662-668` · `model.ts:25-30` |
 
 The address must start with `http://` or `https://`. Otherwise 「주소는
-http:// 또는 https:// 로 시작해야 합니다。」 (`oauthGrant.ts:234-237`). The
-server refuses loopback when `MOMO_ENV=staging`, and a non-loopback address
-must be **https only** (`provider.rs:193-198,287,319-327`). A laptop local
-model at `http://127.0.0.1:…` does not attach on this path today.
+http:// 또는 https:// 로 시작해야 합니다。」 (`oauthGrant.ts:234-237`).
+Without `--allow-local-provider` the server refuses loopback when
+`MOMO_ENV=staging`, and a non-loopback address must be **https only**
+(`provider.rs:193-198,287,319-327`). A laptop local model at
+`http://127.0.0.1:…` does not attach on this path today.
+
+The local-mock recipe that answers (E2E-B): generate with
+`--allow-local-provider`, bind the mock on `0.0.0.0`, then put
+`http://host.docker.internal:<port>/v1` here or on REST
+`PUT /v1/provider/link`. That host is allowed on **this** form. It is
+**not** allowed on the agent-create GUI (§7).
 
 6. **연결 저장** (if a link already exists **연결 교체 저장**, in progress
    **저장 중**) (`AiLinkSection.tsx:777-781`).
@@ -589,8 +640,22 @@ Coordinates: `CreateAgentDialog.tsx:252-375`.
 
 Fixed sentence under the form: 「API 키는 여기에 넣지 않습니다. 프로바이더
 자격증명은 설정의 AI 연결에서 한 번만 등록하고, 에이전트는 그 연결을 통해
-실행됩니다。」 (`:392-397`). Put the same OpenAI-compatible `https://…/v1`
-as step 6 into **게이트웨이 주소**.
+실행됩니다。」 (`:392-397`).
+
+**게이트웨이 주소** (`createModel.agentBaseUrlIssue`): `https://…` is
+accepted; loopback `http://localhost` / `http://127.0.0.1` / `http://[::1]`
+is accepted; any other `http://` is `plaintextRemote` (copy: 「외부 주소는
+https:// 여야 합니다. http는 같은 기기(localhost)에서만 쓸 수 있습니다。」).
+`http://host.docker.internal:<port>/v1` is that last case — this dialog
+will not take it. That address belongs on **설정 › AI 연결** / REST
+`PUT /v1/provider/link` (§6, [`SELF_HOST.md`](SELF_HOST.md) §5) after
+`--allow-local-provider`.
+
+External https: put the same OpenAI-compatible `https://…/v1` as step 6
+into **게이트웨이 주소**. Local mock (E2E-B): keep the provider on
+`PUT /v1/provider/link` as `http://host.docker.internal:<port>/v1`, and
+create the agent over REST `POST /v1/workspaces/{ws}/agents` with that
+`baseUrl`. The worker inside Docker cannot reach the host at `127.0.0.1`.
 
 5. **에이전트 만들기** (in progress **에이전트 만드는 중**) (`:434`).
 
@@ -646,9 +711,10 @@ Whether that message is an **answer** or a **failure notice** is separate
 | `NOTICE` | The worker posted a failure into the channel. The default measured value without a key |
 | `BLOCKED` | No agent message appeared |
 
-If a failure notice appears in the channel,
-`scripts/self_host_env.sh --compose logs agent-worker`
-(doc-inherited: [`SELF_HOST.md`](SELF_HOST.md) "When stuck").
+If a failure notice appears in the channel, the same `docker compose
+--env-file` file set as §1, `logs agent-worker` (claim env: `--compose`
+refuses, ADR-0166; doc-inherited: [`SELF_HOST.md`](SELF_HOST.md) "When
+stuck").
 
 ---
 
@@ -662,7 +728,7 @@ If a failure notice appears in the channel,
 | You put the deeplink `oort://join` in the browser address bar | A custom scheme is not a browser path. Take 5A | code-derived |
 | After desktop sign-in, only realtime fails | REST CORS and Centrifugo origin are separate. Check that `CENTRIFUGO_ALLOWED_ORIGINS` has both tauri origins | code-derived (#1607) |
 | You created an agent and mention does nothing | Not in a channel (step 7 placement), or no key (step 6), or the endpoint refuses | code-derived |
-| A loopback provider address is refused | `MOMO_ENV=staging` + loopback ban. External https only | code-derived |
+| A loopback provider address is refused | Default `MOMO_ENV=staging` + loopback ban. Local mock: `--allow-local-provider` + `host.docker.internal` on **설정 › AI 연결** / `PUT /v1/provider/link`, not the agent-create GUI (`plaintextRemote`) | code-derived |
 
 Stack stop · wipe · port collision: [`SELF_HOST.md`](SELF_HOST.md)
 "Stop · wipe" "When stuck".
@@ -696,7 +762,7 @@ document that is not on the screen is a defect.
 | Join parser | `packages/momo-core/src/features/auth/deepLink.ts` |
 | Settings nav | `clients/web/src/features/settings/settingsNav.ts`, `SettingsRoute.tsx`, `ProfileCard.tsx` |
 | Workspace | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
-| Profile door | `…/ProfileSection.tsx`, `…/onboarding/HandleField.tsx` |
+| Profile door | `…/ProfileSection.tsx`, `…/profile/shared/HandleField.tsx` |
 | Members and invites | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
 | First-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
 | Welcome enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |
