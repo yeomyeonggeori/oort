@@ -1,0 +1,55 @@
+# oort on Fly.io — T1 host (SH-11b / ADR-0184 D1).
+#
+# One Machine + one volume. The process in the VM is dockerd + the compose
+# canon (infra/rust/docker-compose.rust.yml + caddy.override.yml). This file
+# is not a compose rendering and does not pin an app image; the digest is
+# read at boot from releases/latest.json (see entrypoint.sh).
+#
+# `app` and `primary_region` are filled by `fly launch --no-deploy --copy-config`
+# from this directory. Do not commit a live app name or a real origin.
+#
+# Edge (A): 443 is TLS passthrough (empty handlers) so Caddy inside the VM
+# terminates HTTPS with the canonical Caddyfile. 80 is HTTP for ACME http-01
+# and the Fly HTTP proxy. Dedicated IPv4 (`fly ips allocate-v4`) is required
+# for passthrough; that is a paid, human-approved step.
+
+kill_signal = "SIGTERM"
+kill_timeout = 120
+
+[build]
+  dockerfile = "Dockerfile.host"
+
+[[mounts]]
+  source = "oort_data"
+  destination = "/data"
+  initial_size = "10gb"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 2
+  memory = "2gb"
+
+# Always-on: long-lived WebSocket + compose daemons (ADR-0184 D7 ③).
+# Boolean false is the `"off"` alias in current Fly docs.
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 80
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+[[services]]
+  protocol = "tcp"
+  internal_port = 443
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[services.ports]]
+    port = 443
+    handlers = []
