@@ -1,0 +1,102 @@
+# Host-network overlay for docker-compose.rust.yml + local.override.yml (#2340).
+#
+#   scripts/self_host_env.sh --platform host-network --published-image <ref@sha256:…>
+#   scripts/self_host_env.sh --compose up -d --pull missing --wait
+#
+# `--compose` appends this file when MOMO_SELF_HOST_PLATFORM=host-network.
+# Claim-mode `oort_compose` in docs/SELF_HOST_AGENT.md §3.3.3 does the same.
+#
+# Why: on a VM where Docker bridge/iptables are blocked (Grok Bot VM, E2E-A
+# A3/A4), compose service DNS (`postgres:5432`, `centrifugo:8000`, `api:8080`)
+# never works. `network_mode: host` puts every process on the host netns, and
+# the generator writes internal URLs as 127.0.0.1:<published port>. Compose
+# `ports:` mappings are ignored under host mode, so listen addresses/ports
+# below match those published host ports (postgres 5432, api
+# MOMO_RUST_API_PORT, centrifugo CENT_HOST_PORT, web MOMO_WEB_PORT).
+#
+# Do not combine with caddy.override.yml (ACME). Loopback only.
+#
+# `networks: !reset` at the top level: an unused `private` network would
+# still make compose create a bridge, which is the thing this overlay exists
+# to avoid.
+
+networks: !reset {}
+
+services:
+  postgres:
+    network_mode: host
+    networks: !reset []
+    command: ["postgres", "-c", "listen_addresses=127.0.0.1"]
+
+  centrifugo:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment:
+      CENTRIFUGO_HTTP_SERVER_ADDRESS: 127.0.0.1
+      CENTRIFUGO_HTTP_SERVER_PORT: ${CENT_HOST_PORT:-8000}
+      CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_ENDPOINT: http://127.0.0.1:${MOMO_RUST_API_PORT:-8080}/v1/centrifugo/subscribe
+
+  livekit:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+
+  runtime-roles:
+    network_mode: host
+    networks: !reset []
+
+  migrate:
+    network_mode: host
+    networks: !reset []
+
+  api:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    extra_hosts: !reset []
+    environment:
+      HOST: 127.0.0.1
+      PORT: ${MOMO_RUST_API_PORT:-8080}
+      CENT_API_URL: http://127.0.0.1:${CENT_HOST_PORT:-8000}/api
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:${MOMO_RUST_API_PORT:-8080}/healthz"]
+
+  relay:
+    network_mode: host
+    networks: !reset []
+    environment:
+      CENT_API_URL: http://127.0.0.1:${CENT_HOST_PORT:-8000}/api
+
+  webhook-sender:
+    network_mode: host
+    networks: !reset []
+
+  agent-worker:
+    network_mode: host
+    networks: !reset []
+    extra_hosts: !reset []
+    environment:
+      WORKER_DATABASE_URL: postgres://momo_worker:${WORKER_POSTGRES_PASSWORD:?}@127.0.0.1:5432/${POSTGRES_DB:?}
+
+  drive-init:
+    network_mode: host
+    networks: !reset []
+
+  web-init:
+    network_mode: host
+    networks: !reset []
+
+  web:
+    network_mode: host
+    networks: !reset []
+    ports: !reset []
+    environment:
+      MOMO_WEB_PORT: ${MOMO_WEB_PORT:-8088}
+      MOMO_RUST_API_PORT: ${MOMO_RUST_API_PORT:-8080}
+      CENT_HOST_PORT: ${CENT_HOST_PORT:-8000}
+    volumes: !override
+      - ./Caddyfile.host-network:/etc/caddy/Caddyfile:ro
+      - web-static:/srv/web:ro
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:${MOMO_WEB_PORT:-8088}/index.html"]

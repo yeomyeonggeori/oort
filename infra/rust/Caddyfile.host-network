@@ -1,0 +1,44 @@
+# Host-network local edge (#2340). Pair of Caddyfile.local for
+# `network_mode: host` (Docker bridge/iptables blocked).
+#
+# Under host networking Compose `ports:` mappings are ignored, so this
+# file binds 127.0.0.1:{$MOMO_WEB_PORT} directly and reverse-proxies the
+# api / centrifugo published host ports. The web service overlay must
+# pass MOMO_WEB_PORT, MOMO_RUST_API_PORT, and CENT_HOST_PORT into the
+# container (Caddy {$VAR} substitution). Do not use this file on the
+# compose `private` network — hostnames `api` / `centrifugo` are the
+# canon there (Caddyfile.local).
+
+127.0.0.1:{$MOMO_WEB_PORT} {
+	encode zstd gzip
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+	}
+
+	handle /v1/centrifugo/* {
+		respond 403
+	}
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:{$MOMO_RUST_API_PORT}
+	}
+	handle /hooks/* {
+		reverse_proxy 127.0.0.1:{$MOMO_RUST_API_PORT}
+	}
+	handle /__momo_stub/* {
+		reverse_proxy 127.0.0.1:{$MOMO_RUST_API_PORT}
+	}
+	handle /healthz {
+		reverse_proxy 127.0.0.1:{$MOMO_RUST_API_PORT}
+	}
+	handle /connection/* {
+		reverse_proxy 127.0.0.1:{$CENT_HOST_PORT}
+	}
+	handle {
+		root * /srv/web
+		header Content-Security-Policy "default-src 'self'; connect-src 'self' ws://localhost:* ws://127.0.0.1:* https://www.googleapis.com; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'"
+		try_files {path} /index.html
+		file_server
+	}
+}
