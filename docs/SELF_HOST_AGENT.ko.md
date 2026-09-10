@@ -1435,7 +1435,8 @@ scripts/oort restore ./oort-backups/oort-pg.dump --yes
 one-off(Railway CLI/MCP)는 SH-11a이지 이 CLI가 아니다. upgrade는
 토큰 없는 digest 교체 명령을 인쇄하고, 볼륨 inspect·compose 재작성은
 하지 않는다. 완료 조건은 `scripts/oort doctor --tier t2 --json` PASS.
-런북:
+생성기가 T2 스탬프를 찍기 전까지(#2328)는 `--tier t2`를 넘기거나
+서비스 변수 `MOMO_SELF_HOST_PLATFORM=railway`를 설정한다. 런북:
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
 § T2.
 

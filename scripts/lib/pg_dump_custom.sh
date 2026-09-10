@@ -93,10 +93,12 @@ momo_pg_dump_custom_url() {
   fi
   rm -f "$errf"
   if [ "$rc" -ne 0 ]; then
+    rm -f "$outfile"
     echo "momo_pg_dump_custom_url: pg_dump -Fc 실패" >&2
     return "$rc"
   fi
   if [ ! -s "$outfile" ]; then
+    rm -f "$outfile"
     echo "momo_pg_dump_custom_url: dump file is empty: $outfile" >&2
     return 1
   fi

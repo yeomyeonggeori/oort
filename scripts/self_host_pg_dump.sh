@@ -124,7 +124,7 @@ DUMP_FILE="$DEST_DIR/oort-pg-$STAMP.dump"
 if [ "$MIGRATE_URL_MODE" = "1" ]; then
   MIGRATE_URL="$(momo_pg_env_get "$ENV_FILE" MIGRATE_DATABASE_URL || true)"
   [ -n "$MIGRATE_URL" ] || fail "MIGRATE_DATABASE_URL 이 env 에 없다. DATABASE_URL 로 dump 하지 않는다."
-  momo_pg_dump_custom_url "$MIGRATE_URL" "$DUMP_FILE"
+  momo_pg_dump_custom_url "$MIGRATE_URL" "$DUMP_FILE" || { rm -f "$DUMP_FILE"; exit 1; }
 else
   MOMO_PG_CONTAINER="$CONTAINER"
   MOMO_PG_COMPOSE_PROJECT="$COMPOSE_PROJECT"

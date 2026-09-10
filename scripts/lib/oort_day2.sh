@@ -111,10 +111,11 @@ PY
 
 oort_logs_usage() {
   cat <<'EOF'
-Usage: scripts/oort logs [service] [--since 10m] [--follow] [--env FILE]
+Usage: scripts/oort logs [service] [--since 10m] [--follow] [--env FILE] [--tier t1|t2]
 
 docker compose logs wrapper. Secret values, Bearer tokens, and postgres
 URL passwords are replaced with ***.
+--tier must match MOMO_SELF_HOST_PLATFORM when that stamp exists.
 EOF
 }
 
@@ -173,6 +174,7 @@ oort_logs() {
   done
 
   oort_prepare_env "$env_path"
+  oort_tier >/dev/null
   local secrets rc
   secrets="$(mktemp "${TMPDIR:-/tmp}/oort-log-secrets.XXXXXX")"
   chmod 600 "$secrets"
@@ -198,13 +200,14 @@ oort_logs() {
 oort_upgrade_usage() {
   cat <<'EOF'
 Usage: scripts/oort upgrade [--to <image ref pinned by its list digest, read from releases/latest.json>|--manifest URL|--local-build]
-                          [--yes] [--no-backup] [--env FILE]
+                          [--yes] [--no-backup] [--env FILE] [--tier t1|t2]
 
 Idempotent image replace. Backs up first unless --no-backup.
 local-build rebuilds (`compose build`, not `pull`) then `up -d --wait`.
 Digest mode still `pull` then `up -d`. Never creates or deletes volumes.
 Never auto-rolls back — prints a rollback command that is not the
 failed command (local-build: previous-commit checkout or restore).
+--tier must match MOMO_SELF_HOST_PLATFORM when that stamp exists.
 EOF
 }
 
@@ -544,10 +547,11 @@ oort_upgrade() {
 
 oort_backup_usage() {
   cat <<'EOF'
-Usage: scripts/oort backup [--out DIR] [--env FILE]
+Usage: scripts/oort backup [--out DIR] [--env FILE] [--tier t1|t2]
 
 Calls scripts/self_host_pg_dump.sh. The dump name gets version, UTC time,
 and image digest suffixes. Does not print secrets.
+--tier must match MOMO_SELF_HOST_PLATFORM when that stamp exists.
 EOF
 }
 
@@ -646,11 +650,12 @@ oort_backup() {
 
 oort_restore_usage() {
   cat <<'EOF'
-Usage: scripts/oort restore <dump> [--yes] [--env FILE]
+Usage: scripts/oort restore <dump> [--yes] [--env FILE] [--tier t1|t2]
 
 Restores into an empty stack only (message count == 0). Ensures the
 destination has runtime roles (compose service runtime-roles) then calls
 scripts/self_host_pg_restore.sh. Never prints secrets.
+--tier must match MOMO_SELF_HOST_PLATFORM when that stamp exists.
 EOF
 }
 

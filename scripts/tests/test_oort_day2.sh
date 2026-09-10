@@ -145,6 +145,17 @@ run_cmd() {
 VALID="$SANDBOX/valid.env"
 materialize "$VALID"
 
+# --help lists --tier for backup/restore/upgrade/logs
+for cmd in backup restore upgrade logs; do
+  HELP_OUT="$SANDBOX/help-${cmd}.out"
+  HELP_ERR="$SANDBOX/help-${cmd}.err"
+  code="$(run_cmd "$HELP_OUT" "$HELP_ERR" "$OORT" "$cmd" --help)"
+  [ "$code" = "0" ] || fail "$cmd --help exit $code stderr=$(cat "$HELP_ERR")"
+  grep -Fq -- '--tier' "$HELP_OUT" "$HELP_ERR" || \
+    fail "$cmd --help missing --tier: $(cat "$HELP_OUT") $(cat "$HELP_ERR")"
+  pass "$cmd --help lists --tier"
+done
+
 # -----------------------------------------------------------------------------
 # 1. status --json schema (doctor reuse + image object)
 # -----------------------------------------------------------------------------
@@ -514,6 +525,13 @@ assert_no_secret_leak "t2 restore" "$T2_REST_OUT" "$T2_REST_ERR"
 if grep -Fq "$T2_URL" "$T2_REST_OUT" "$T2_REST_ERR"; then
   fail "T2 restore leaked MIGRATE_DATABASE_URL"
 fi
+if grep -Fq 'compose up -d --wait' "$T2_REST_OUT" "$T2_REST_ERR"; then
+  fail "T2 restore printed compose up -d --wait: $(cat "$T2_REST_OUT") $(cat "$T2_REST_ERR")"
+fi
+grep -Fq 'T2 — compose/volume 를 쓰지 않는다. 플랫폼 digest 교체.' "$T2_REST_OUT" "$T2_REST_ERR" || \
+  fail "T2 restore missing platform redeploy wording: $(cat "$T2_REST_OUT") $(cat "$T2_REST_ERR")"
+grep -Fq 'scripts/oort doctor --tier t2 --json' "$T2_REST_OUT" "$T2_REST_ERR" || \
+  fail "T2 restore did not name doctor --tier t2 PASS: $(cat "$T2_REST_OUT") $(cat "$T2_REST_ERR")"
 pass "T2 restore into empty stack keeps message count=${MSG_AFTER}"
 
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <<'SQL'
@@ -534,15 +552,69 @@ fi
 assert_no_secret_leak "t2 norole" "$T2_NOROLE_OUT" "$T2_NOROLE_ERR"
 pass "T2 roles-less restore stops with preDeploy phrase"
 
-# ③ T1 env + --tier t2 is an explicit mismatch (do not URL-backup a T1 stack).
+# ③ Conflicting stamp (T1) + --tier t2 dies. No stamp + --tier t2 is accepted.
+T1_STAMP="$SANDBOX/t1-stamped.env"
+cp "$VALID" "$T1_STAMP"
+printf '\nMOMO_SELF_HOST_PLATFORM=gcp-vm\n' >>"$T1_STAMP"
+chmod 600 "$T1_STAMP"
 MIS_OUT="$SANDBOX/tier-mismatch.out"
 MIS_ERR="$SANDBOX/tier-mismatch.err"
-code="$(run_cmd "$MIS_OUT" "$MIS_ERR" "$OORT" backup --tier t2 --env "$VALID" --out "$T2_DUMP_DIR")"
-[ "$code" != "0" ] || fail "T1 env --tier t2 backup exited 0"
-grep -Eqi 'tier|T1|다르다|URL' "$MIS_ERR" "$MIS_OUT" || \
+code="$(run_cmd "$MIS_OUT" "$MIS_ERR" "$OORT" backup --tier t2 --env "$T1_STAMP" --out "$T2_DUMP_DIR")"
+[ "$code" != "0" ] || fail "stamped T1 --tier t2 backup exited 0"
+grep -Fq 'T1 스택을 URL 로 백업하지 않는다.' "$MIS_ERR" "$MIS_OUT" || \
   fail "tier mismatch did not explain the refusal: $(cat "$MIS_ERR") $(cat "$MIS_OUT")"
 assert_no_secret_leak "tier mismatch" "$MIS_OUT" "$MIS_ERR"
-pass "T1 env + --tier t2 refuses (does not URL-backup T1)"
+pass "conflicting stamp + --tier t2 refuses (does not URL-backup T1)"
+
+LOGS_MIS_OUT="$SANDBOX/logs-tier-mismatch.out"
+LOGS_MIS_ERR="$SANDBOX/logs-tier-mismatch.err"
+code="$(run_cmd "$LOGS_MIS_OUT" "$LOGS_MIS_ERR" "$OORT" logs --tier t2 --env "$T1_STAMP")"
+[ "$code" != "0" ] || fail "logs --tier t2 on stamped T1 exited 0"
+grep -Fq 'T1 스택을 URL 로 백업하지 않는다.' "$LOGS_MIS_ERR" "$LOGS_MIS_OUT" || \
+  fail "logs --tier t2 mismatch sentence: $(cat "$LOGS_MIS_ERR") $(cat "$LOGS_MIS_OUT")"
+assert_no_secret_leak "logs tier mismatch" "$LOGS_MIS_OUT" "$LOGS_MIS_ERR"
+pass "logs --tier t2 on stamped T1 dies with the same mismatch sentence"
+
+NOSTAMP="$SANDBOX/t2-nostamp.env"
+grep -v '^MOMO_SELF_HOST_PLATFORM=' "$T2_ENV" >"$NOSTAMP"
+chmod 600 "$NOSTAMP"
+NOSTAMP_OUT="$SANDBOX/t2-nostamp.out"
+NOSTAMP_ERR="$SANDBOX/t2-nostamp.err"
+NOSTAMP_DIR="$SANDBOX/t2-nostamp-dumps"
+mkdir -p "$NOSTAMP_DIR"
+code="$(run_cmd "$NOSTAMP_OUT" "$NOSTAMP_ERR" "$OORT" backup --tier t2 --env "$NOSTAMP" --out "$NOSTAMP_DIR")"
+[ "$code" = "0" ] || fail "no stamp + --tier t2 backup exit $code stdout=$(cat "$NOSTAMP_OUT") stderr=$(cat "$NOSTAMP_ERR")"
+grep -Fq 'tier: t2 (explicit, env has no MOMO_SELF_HOST_PLATFORM)' "$NOSTAMP_ERR" "$NOSTAMP_OUT" || \
+  fail "no-stamp --tier t2 missing note: $(cat "$NOSTAMP_ERR") $(cat "$NOSTAMP_OUT")"
+NOSTAMP_DUMP="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$NOSTAMP_OUT")"
+[ -n "$NOSTAMP_DUMP" ] && [ -s "$NOSTAMP_DUMP" ] || fail "no-stamp T2 backup produced no dump"
+assert_no_secret_leak "no stamp tier t2" "$NOSTAMP_OUT" "$NOSTAMP_ERR"
+pass "no stamp + --tier t2 accepted"
+
+# Failed T2 backup must not leave a 0-byte dump.
+SAB_ENV="$SANDBOX/t2-sabotage.env"
+awk -v url="$T2_URL" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 {
+    sub(/:'"$TOKEN_PG"'@/, ":wrong-'"${TOKEN_PG}"'@")
+    print
+    next
+  }
+  { print }
+' "$T2_ENV" >"$SAB_ENV"
+chmod 600 "$SAB_ENV"
+SAB_OUT="$SANDBOX/t2-sabotage.out"
+SAB_ERR="$SANDBOX/t2-sabotage.err"
+SAB_DIR="$SANDBOX/t2-sabotage-out"
+mkdir -p "$SAB_DIR"
+code="$(run_cmd "$SAB_OUT" "$SAB_ERR" "$OORT" backup --tier t2 --env "$SAB_ENV" --out "$SAB_DIR")"
+[ "$code" != "0" ] || fail "sabotage-password backup exited 0"
+SAB_DUMPS="$(find "$SAB_DIR" -type f -name '*.dump' 2>/dev/null | wc -l | tr -d '[:space:]')"
+[ "$SAB_DUMPS" = "0" ] || fail "failed T2 backup left dump file(s) in --out: $(ls -la "$SAB_DIR")"
+assert_no_secret_leak "t2 sabotage backup" "$SAB_OUT" "$SAB_ERR"
+if grep -F -- "$TOKEN_PG" "$SAB_OUT" "$SAB_ERR" >/dev/null; then
+  fail "sabotage backup leaked postgres password"
+fi
+pass "failed T2 backup leaves no dump in --out"
 
 # T2 upgrade --no-backup prints digest replace and does not inspect volumes.
 UP_OUT="$SANDBOX/t2-upgrade.out"

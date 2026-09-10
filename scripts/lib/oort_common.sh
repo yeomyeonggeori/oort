@@ -20,7 +20,8 @@ oort_die() {
 }
 
 # Single tier decision: env MOMO_SELF_HOST_PLATFORM (SH-11g platform_profiles)
-# → T1/T2, default T1. `scripts/oort <cmd> --tier t2` must match that value.
+# → T1/T2, default T1. Explicit `--tier` is accepted when the env has no stamp.
+# `--tier` still dies when the stamp exists and conflicts.
 oort_set_tier_override() {
   local raw="$1"
   raw="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
@@ -63,17 +64,44 @@ oort_env_tier() {
   case "$tier" in
     t1 | t2 | t3)
       printf '%s' "$tier"
-      ;;
-    *)
-      oort_die "알 수 없는 MOMO_SELF_HOST_PLATFORM=${name}. platform_profiles 행이 아니다."
+      return 0
       ;;
   esac
+  OORT_TIER_UNKNOWN_NAME="$name"
+  printf ''
+  return 1
 }
 
 oort_tier() {
-  local env_tier override
-  env_tier="$(oort_env_tier)"
+  local env_tier override name
+  name="$(oort_platform_name)"
   override="${OORT_TIER_OVERRIDE:-}"
+  if [ -z "$name" ]; then
+    if [ -n "$override" ]; then
+      if [ "${OORT_TIER_NOTE_PRINTED:-}" != "1" ]; then
+        printf 'tier: %s (explicit, env has no MOMO_SELF_HOST_PLATFORM)\n' "$override" >&2
+        OORT_TIER_NOTE_PRINTED=1
+      fi
+      printf '%s' "$override"
+      return 0
+    fi
+    printf 't1'
+    return 0
+  fi
+  if ! env_tier="$(oort_env_tier)"; then
+    name="${OORT_TIER_UNKNOWN_NAME:-$name}"
+    if [ -n "${OORT_DOCTOR_CHECKS:-}" ]; then
+      if [ "${OORT_TIER_UNKNOWN_RECORDED:-}" != "1" ]; then
+        oort_doctor_record env.platform major fail \
+          "알 수 없는 MOMO_SELF_HOST_PLATFORM=${name}. platform_profiles 행이 아니다." \
+          "platform_profiles 에 있는 이름을 쓰거나 스탬프를 고쳐라."
+        OORT_TIER_UNKNOWN_RECORDED=1
+      fi
+      printf 't1'
+      return 0
+    fi
+    oort_die "알 수 없는 MOMO_SELF_HOST_PLATFORM=${name}. platform_profiles 행이 아니다."
+  fi
   if [ -n "$override" ] && [ "$override" != "$env_tier" ]; then
     oort_die "--tier ${override} 는 env MOMO_SELF_HOST_PLATFORM 의 tier(${env_tier}) 와 다르다. T1 스택을 URL 로 백업하지 않는다."
   fi

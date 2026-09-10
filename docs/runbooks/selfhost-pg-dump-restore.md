@@ -51,7 +51,7 @@ scripts/self_host_pg_dump.sh --output-dir /var/tmp/oort-backups
 
 ## T2 (관리형 컨테이너 + PG 플러그인)
 
-T2는 compose postgres 컨테이너가 없다. dump/restore는 `MIGRATE_DATABASE_URL`(슈퍼유저)만 쓴다. `DATABASE_URL`(momo_app, RLS)로 dump하지 않는다. `--tier t2`는 env `MOMO_SELF_HOST_PLATFORM`의 tier와 같아야 한다 — T1 스택을 URL로 백업하지 않는다.
+T2는 compose postgres 컨테이너가 없다. dump/restore는 `MIGRATE_DATABASE_URL`(슈퍼유저)만 쓴다. `DATABASE_URL`(momo_app, RLS)로 dump하지 않는다. `--tier t2`는 env `MOMO_SELF_HOST_PLATFORM`의 tier와 같아야 한다 — T1 스택을 URL로 백업하지 않는다. 생성기가 T2 스탬프를 찍기 전까지(#2328)는 `--tier t2`를 넘기거나 서비스 변수 `MOMO_SELF_HOST_PLATFORM=railway`를 설정한다.
 
 실행 위치는 이미지 안 one-off다. 스크립트 경로: `/opt/momo/scripts/oort` (Dockerfile COPY). 그 one-off를 플랫폼 CLI/MCP로 띄우는 명령은 SH-11a 레시피 소유다.
 

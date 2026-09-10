@@ -1477,7 +1477,8 @@ volume with the dump. `down -v` deletes the volume this env names.
 one-off (Railway CLI/MCP) is SH-11a, not this CLI. Upgrade prints a
 token-free digest-replace command; it does not inspect volumes or
 rewrite compose. Done when `scripts/oort doctor --tier t2 --json` is
-PASS. Runbook:
+PASS. Until the generator stamps T2 (#2328 tracks it), pass `--tier t2`
+or set the service variable `MOMO_SELF_HOST_PLATFORM=railway`. Runbook:
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
 § T2.
 

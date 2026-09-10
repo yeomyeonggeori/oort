@@ -131,4 +131,9 @@ fi
 
 printf '[self-host-restore] restore finished\n'
 printf '[self-host-restore] dump: %s\n' "$DUMP_FILE"
-printf '[self-host-restore] 이어서 나머지 서비스를 올린다: scripts/self_host_env.sh --compose up -d --wait\n'
+if [ "$MIGRATE_URL_MODE" = "1" ]; then
+  printf '[self-host-restore] T2 — compose/volume 를 쓰지 않는다. 플랫폼 digest 교체.\n'
+  printf '완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS\n'
+else
+  printf '[self-host-restore] 이어서 나머지 서비스를 올린다: scripts/self_host_env.sh --compose up -d --wait\n'
+fi

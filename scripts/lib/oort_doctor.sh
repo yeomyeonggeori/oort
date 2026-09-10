@@ -12,7 +12,8 @@ Read-only self-host verdict (tools, env, stack). Secrets are never printed.
   --env FILE   Env file to inspect (default: infra/rust/local.secrets.env)
   --json       Machine report: {summary, checks[]}
   --strict     Promote major failures to exit 2
-  --tier t1|t2 Must match MOMO_SELF_HOST_PLATFORM (SH-11g). Default: env, else T1.
+  --tier t1|t2 Must match MOMO_SELF_HOST_PLATFORM when that stamp exists.
+               Explicit --tier is accepted if the env has no stamp. Default: env, else T1.
 
 Exit: 0 pass, 1 major-only, 2 any blocker.
 EOF
@@ -836,6 +837,11 @@ oort_doctor_expected_migration_count() {
   elif [ -d /opt/momo/migrations ]; then
     dir=/opt/momo/migrations
   else
+    if [ -n "${OORT_DOCTOR_CHECKS:-}" ]; then
+      oort_doctor_record stack.migrate_files minor info \
+        "migrations dir 없음 (server/Migrations 또는 /opt/momo/migrations)" \
+        "이미지에 /opt/momo/migrations 가 있는지, 또는 체크아웃에 server/Migrations 가 있는지 확인하라."
+    fi
     printf '0'
     return 0
   fi
@@ -855,18 +861,47 @@ oort_doctor_migrate_idempotency_sql() {
   printf "SELECT CASE WHEN to_regclass('public.schema_migrations') IS NULL THEN 'MISSING_TABLE' WHEN (SELECT count(*) FROM schema_migrations) = %s THEN 'IDEMPOTENCY_OK' ELSE 'INCOMPLETE' END;" "$expected"
 }
 
+# Loopback/tauri skip-list shared with public.* (oort_doctor_check_public).
+# T2 additionally never selects wss://. 127.0.0.1 is skipped for public.*
+# but T2 must still accept a fixture/mock origin bound there after tauri tokens.
+oort_doctor_origin_is_loopback_or_tauri() {
+  case "$1" in
+    http://localhost* | https://localhost* | http://127.0.0.1* | https://127.0.0.1* | \
+    tauri://* | http://tauri.localhost* | https://tauri.localhost*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
 oort_doctor_t2_http_origin() {
-  local origins origin="" tok domain
+  local origins origin="" tok domain http_fallback=""
   if oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then
     origins="$(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS)"
     for tok in $origins; do
       case "$tok" in
-        http://* | https://*)
+        http://* | https://*) ;;
+        *) continue ;;
+      esac
+      if oort_doctor_origin_is_loopback_or_tauri "$tok"; then
+        case "$tok" in
+          http://127.0.0.1* | https://127.0.0.1*)
+            [ -n "$http_fallback" ] || http_fallback="$tok"
+            ;;
+        esac
+        continue
+      fi
+      case "$tok" in
+        https://*)
           origin="$tok"
           break
           ;;
+        http://*)
+          [ -n "$http_fallback" ] || http_fallback="$tok"
+          ;;
       esac
     done
+    [ -n "$origin" ] || origin="$http_fallback"
   fi
   if [ -z "$origin" ]; then
     domain="${RAILWAY_PUBLIC_DOMAIN:-}"
@@ -884,7 +919,7 @@ oort_doctor_check_stack_t2() {
   local origin body hdr code db auth_line
   local outbox outbox_rc outbox_err errf
   local expected sql result applied_health
-  local url_present=0
+  local url_present=0 push_relay=0
 
   oort_doctor_record stack.compose_ps major skip \
     "T2: compose 없음, 플랫폼 서비스 상태는 레시피 CLI 소관" \
@@ -965,10 +1000,14 @@ except Exception:
   rm -f "$errf"
   if [ "$outbox_rc" -ne 0 ]; then
     oort_doctor_record stack.outbox major fail \
-      "MIGRATE_DATABASE_URL 로 outbox 질의가 실패했다" \
+      "MIGRATE_DATABASE_URL 로 outbox 질의가 실패했다${outbox_err:+ (${outbox_err})}" \
       "MIGRATE_DATABASE_URL 과 outbox 원장 상태를 확인하라."
   else
-    oort_doctor_classify_outbox 0 <<EOF
+    push_relay=0
+    if oort_doctor_push_relay_configured ""; then
+      push_relay=1
+    fi
+    oort_doctor_classify_outbox "$push_relay" <<EOF
 $outbox
 EOF
     oort_doctor_record stack.outbox \
@@ -1162,11 +1201,8 @@ oort_doctor_check_public() {
   origins="$(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS)"
   origin=""
   for tok in $origins; do
+    oort_doctor_origin_is_loopback_or_tauri "$tok" && continue
     case "$tok" in
-      http://localhost* | https://localhost* | http://127.0.0.1* | https://127.0.0.1* | \
-      tauri://* | http://tauri.localhost*)
-        continue
-        ;;
       http://* | https://*)
         origin="$tok"
         break

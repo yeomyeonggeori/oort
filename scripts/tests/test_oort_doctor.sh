@@ -290,6 +290,24 @@ if grep -F -- "mismatch-${TOKEN_APP}" "$OUT" "$ERR" >/dev/null 2>&1; then
 fi
 pass "role password ≠ DATABASE_URL → fail(blocker), exit 2"
 
+# Unknown stamp → exit 1 and still emit JSON (no JSON-less oort_die).
+UNK="$SANDBOX/unknown-platform.env"
+cp "$VALID" "$UNK"
+printf '\nMOMO_SELF_HOST_PLATFORM=not-a-platform\n' >>"$UNK"
+chmod 600 "$UNK"
+OUT="$SANDBOX/unknown-platform.json"
+ERR="$SANDBOX/unknown-platform.err"
+code="$(run_doctor "$UNK" "$OUT" "$ERR" --json)"
+[ "$code" = "1" ] || fail "unknown platform exit $code (want 1); stderr=$(cat "$ERR") stdout=$(head -c 200 "$OUT")"
+[ -s "$OUT" ] || fail "unknown platform emitted no JSON"
+validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OUT")"
+[ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
+  fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
+if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
+  fail "unknown platform leaked password"
+fi
+pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail"
+
 # -----------------------------------------------------------------------------
 # 5. outbox oracle: push_candidate|pending is non-failing without a push relay
 #    (fixture TSV / mocked query — no live postgres). Other kinds unchanged.
@@ -386,6 +404,19 @@ export OORT_ROOT
 EXPECTED_MIG="$(oort_doctor_expected_migration_count)"
 printf '%s' "$EXPECTED_MIG" | grep -Eq '^[1-9][0-9]*$' || \
   fail "expected migration count is not a positive integer: ${EXPECTED_MIG}"
+MIG_INFO="$SANDBOX/migrate-files.tsv"
+: >"$MIG_INFO"
+OORT_DOCTOR_CHECKS="$MIG_INFO"
+saved_root="$OORT_ROOT"
+OORT_ROOT="$SANDBOX/no-mig-root"
+mkdir -p "$OORT_ROOT"
+mig_n="$(oort_doctor_expected_migration_count)"
+OORT_ROOT="$saved_root"
+unset OORT_DOCTOR_CHECKS
+[ "$mig_n" = "0" ] || fail "missing migrations dir count want 0 got ${mig_n}"
+grep -Fq 'stack.migrate_files' "$MIG_INFO" || fail "missing dir did not record stack.migrate_files"
+grep -Fq 'migrations dir 없음' "$MIG_INFO" || fail "missing dir info reason: $(cat "$MIG_INFO")"
+pass "missing migrations dir → info (not silent 0)"
 SQL_FN="$(oort_doctor_migrate_idempotency_sql "$EXPECTED_MIG")"
 printf '%s' "$SQL_FN" | grep -Fq 'schema_migrations' || \
   fail "migrate SQL does not observe schema_migrations: $SQL_FN"
@@ -496,13 +527,23 @@ T2_ENV="$SANDBOX/t2.env"
 awk -v url="$T2_URL" -v origin="http://127.0.0.1:${MOCK_PORT}" '
   index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
   index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 {
-    print "CENTRIFUGO_ALLOWED_ORIGINS=" origin " http://localhost:8088"
+    print "CENTRIFUGO_ALLOWED_ORIGINS=tauri://localhost http://tauri.localhost " origin
     next
   }
   { print }
 ' "$VALID" >"$T2_ENV"
 printf '\nMOMO_SELF_HOST_PLATFORM=railway\n' >>"$T2_ENV"
 chmod 600 "$T2_ENV"
+
+OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/t2-origin-norm.XXXXXX")"
+export OORT_DOCTOR_ENV_NORM
+oort_doctor_load_env "$T2_ENV"
+picked="$(oort_doctor_t2_http_origin)"
+printf '%s' "$picked" | grep -Fq "http://127.0.0.1:${MOCK_PORT}" || \
+  fail "T2 origin picker want mock origin, got ${picked}"
+printf '%s' "$picked" | grep -Fq 'tauri.localhost' && \
+  fail "T2 origin picker chose tauri: ${picked}"
+pass "T2 origin picker skips tauri:// and http://tauri.localhost"
 
 OUT="$SANDBOX/t2-doctor.json"
 ERR="$SANDBOX/t2-doctor.err"
