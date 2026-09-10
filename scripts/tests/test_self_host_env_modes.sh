@@ -1272,6 +1272,63 @@ grep -Fxq 'MOMO_SELF_HOST_PLATFORM=gcp-vm' "$t1_plain_env"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$t1_plain_env")" = "1"
 grep -Fq 'MOMO_SELF_HOST_PLATFORM=gcp-vm 를 추가했다' "$t1_plain_fixture/stamp-output"
 
+# #2328: an existing stamp that is not a platform_profiles row is refused
+# (maintenance without --platform). Character-class is not enough.
+unknown_stamp_fixture="$(make_fixture platform-unknown-stamp)"
+run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/first-output" 49805 \
+  --platform fly --local-build --public-origin https://fly.example.test
+awk '
+  index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { print "MOMO_SELF_HOST_PLATFORM=not-a-platform"; next }
+  { print }
+' "$unknown_stamp_fixture/infra/rust/local.secrets.env" >"$unknown_stamp_fixture/stamped.env"
+mv "$unknown_stamp_fixture/stamped.env" "$unknown_stamp_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=not-a-platform' \
+  "$unknown_stamp_fixture/infra/rust/local.secrets.env"
+if run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/unknown-output" 49805 \
+  --public-origin https://fly.example.test; then
+  echo "existing MOMO_SELF_HOST_PLATFORM=not-a-platform unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '알 수 없는 MOMO_SELF_HOST_PLATFORM=not-a-platform' \
+  "$unknown_stamp_fixture/unknown-output"
+grep -Fq 'platform_profiles' "$unknown_stamp_fixture/unknown-output"
+
+# Sabotage: strip the platform_profiles lookup from a copy. The copy must
+# accept the unknown stamp — if it still refuses, this case is not testing
+# that check. The original must keep the lookup (source grep).
+stamp_sabotage="$unknown_stamp_fixture/scripts/self_host_env.sh"
+python3 - "$ROOT/scripts/self_host_env.sh" "$stamp_sabotage" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+start = text.find("    # #2328: a stamp that is not a platform_profiles row")
+if start < 0:
+    raise SystemExit("could not locate stamp vs platform_profiles check to sabotage")
+end = text.find(
+    '    if [ -n "$REQUESTED_PLATFORM" ] && [ "$existing" != "$REQUESTED_PLATFORM" ]; then',
+    start,
+)
+if end < 0:
+    raise SystemExit("could not locate end of stamp vs platform_profiles check")
+dst.write_text(text[:start] + text[end:])
+PY
+chmod +x "$stamp_sabotage"
+if ! grep -Fq 'platform_profile_field "$existing"' "$ROOT/scripts/self_host_env.sh"; then
+  echo "ensure_platform_stamp no longer consults platform_profiles for an existing stamp" >&2
+  exit 1
+fi
+if run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/sabotage-output" 49805 \
+  --public-origin https://fly.example.test; then
+  : # copy without the check accepts the unknown stamp — the check is load-bearing
+else
+  echo "sabotage (strip platform_profiles lookup) still refused the unknown stamp — check is not the one under test" >&2
+  cat "$unknown_stamp_fixture/sabotage-output" >&2
+  exit 1
+fi
+# Restore the real generator for later cases in this fixture dir.
+cp "$ROOT/scripts/self_host_env.sh" "$stamp_sabotage"
+
 # T1 without --public-origin is refused: the row says the origin is the flag.
 t1_noorigin_fixture="$(make_fixture platform-t1-no-origin)"
 for combo in "--platform fly" "--platform fly --local-build" "--platform aws-lightsail --published-image $GOOD_DIGEST"; do

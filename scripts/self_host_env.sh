@@ -285,13 +285,19 @@ append_platform_stamp() {
 }
 
 ensure_platform_stamp() {
-  local count existing
+  local count existing existing_tier
   count="$(env_key_count MOMO_SELF_HOST_PLATFORM)"
   [ "$count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_SELF_HOST_PLATFORM 항목은 최대 한 번만 있어야 한다."
   if [ "$count" -eq 1 ]; then
     existing="$(env_value_once MOMO_SELF_HOST_PLATFORM)"
     validate_env_scalar MOMO_SELF_HOST_PLATFORM "$existing"
+    # #2328: a stamp that is not a platform_profiles row is refused, even
+    # on maintenance without --platform. Character-class alone is not enough
+    # (heroku / not-a-platform would pass validate_env_scalar).
+    existing_tier="$(platform_profile_field "$existing" 3)"
+    [ -n "$existing_tier" ] ||
+      fail "알 수 없는 MOMO_SELF_HOST_PLATFORM=${existing}. platform_profiles 행이 아니다. 있는 이름: $(platform_names | tr '\n' ' ' | sed 's/ $//')"
     if [ -n "$REQUESTED_PLATFORM" ] && [ "$existing" != "$REQUESTED_PLATFORM" ]; then
       fail "${ENV_FILE}은 플랫폼 ${existing} 으로 만들었다. --platform ${REQUESTED_PLATFORM} 으로 바꿀 수 없다 — 볼륨을 내리고 env를 지운 뒤 다시 만들라."
     fi
