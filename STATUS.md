@@ -2,7 +2,7 @@
 
 ## momo_notifier 런타임 롤 (#2193, 2026-09-10)
 
-- Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `bootstrap_runtime_roles.sql`에 `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS) + push 드레인이 만지는 테이블만 SELECT/INSERT/UPDATE GRANT. 생성기·compose가 `NOTIFIER_DATABASE_URL`을 그 롤로 가리킴. doctor `roles.momo_notifier` fail-closed(롤 DROP → RED). stub E2E는 owner URL 없이 통과.
+- Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.
 - runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
 
 

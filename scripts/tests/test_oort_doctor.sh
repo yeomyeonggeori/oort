@@ -650,6 +650,22 @@ if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
 fi
 pass "T2 doctor ids=${T2_COUNT} match T1; stack.* skip only compose_ps; other 5 pass"
 
+# Sabotage: GRANT DELETE ON outbox still passed attribute-only checks (N-2).
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
+  -c "GRANT DELETE ON TABLE outbox TO momo_notifier;" >/dev/null
+OUT="$SANDBOX/t2-delete-grant.json"
+ERR="$SANDBOX/t2-delete-grant.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$code" != "0" ] || fail "GRANT DELETE ON outbox still exited 0"
+[ "$(check_field "$OUT" roles.momo_notifier status)" = "fail" ] || \
+  fail "GRANT DELETE: roles.momo_notifier status=$(check_field "$OUT" roles.momo_notifier status) (want fail)"
+printf '%s' "$(check_field "$OUT" roles.momo_notifier detail)" | grep -Fq 'momo_notifier 에 DELETE 가 있다' || \
+  fail "GRANT DELETE detail: $(check_field "$OUT" roles.momo_notifier detail)"
+assert_no_secret_leak "delete-grant json" "$OUT"
+pass "sabotage GRANT DELETE ON outbox → roles.momo_notifier fail (blocker)"
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
+  -c "REVOKE DELETE ON TABLE outbox FROM momo_notifier;" >/dev/null
+
 # Incomplete ledger (one migration missing) → migrate_idempotency fail.
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
   -c "DELETE FROM schema_migrations WHERE version = (SELECT max(version) FROM schema_migrations);" >/dev/null

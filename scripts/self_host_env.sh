@@ -108,7 +108,7 @@ SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 REPO_ROOT="$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
-ENV_FILE="infra/rust/local.secrets.env"
+ENV_FILE="${SELF_HOST_ENV_FILE:-infra/rust/local.secrets.env}"
 CANONICAL_PUBLISHED_IMAGE="ghcr.io/yeomyeonggeori/oort"
 # rust.yml + local.override.yml: runtime-roles migrate api relay
 # webhook-sender agent-worker web-init drive-init
@@ -554,6 +554,12 @@ while [ "$#" -gt 0 ]; do
       request_platform railway
       shift
       ;;
+    --ensure-managed-keys)
+      [ "$REQUESTED_ACTION" = "prepare" ] || fail "--ensure-managed-keys 는 한 번만 지정하라."
+      [ -z "$REQUESTED_MODE" ] || fail "--ensure-managed-keys 와 이미지 생성 모드를 함께 지정할 수 없다."
+      REQUESTED_ACTION="ensure-managed-keys"
+      shift
+      ;;
     --allow-local-provider)
       ALLOW_LOCAL_PROVIDER=1
       shift
@@ -792,6 +798,105 @@ ensure_desktop_cors_allowlist() {
     "$ENV_FILE" "$SELF_HOST_DESKTOP_CORS_ORIGINS" >&2
   printf '[self-host] 이미 떠 있는 스택이라면 api를 재시작해야 반영된다: %s\n' \
     "$(stack_restart_hint)" >&2
+}
+
+# #2193 — managed role passwords/URLs compose interpolates with :?.
+# Existing env written before the notifier role is missing two keys; re-running
+# the generator used to exit 0 and leave the file untouched. Add-only: never
+# rewrite a value that is already present (it may already match the DB role).
+ensure_managed_role_keys() {
+  local added="" sample_url password count quoted url pw tmp
+  sample_url=""
+  if [ "$(env_key_count MIGRATE_DATABASE_URL)" -eq 1 ]; then
+    sample_url="$(env_value_once MIGRATE_DATABASE_URL)"
+  elif [ "$(env_key_count MOMO_APP_DATABASE_URL)" -eq 1 ]; then
+    sample_url="$(env_value_once MOMO_APP_DATABASE_URL)"
+  fi
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-managed-keys.XXXXXX")"
+
+  derive_managed_role_url() {
+    local role="$1" pass="$2"
+    [ -n "$sample_url" ] || fail "MIGRATE_DATABASE_URL 또는 MOMO_APP_DATABASE_URL 이 있어야 롤 URL을 보강한다."
+    DATABASE_URL="$sample_url" PLATFORM_ROLE_USER="$role" PLATFORM_ROLE_PASSWORD="$pass" python3 -c '
+import os, urllib.parse
+u = urllib.parse.urlparse(os.environ["DATABASE_URL"])
+user = os.environ["PLATFORM_ROLE_USER"]
+password = os.environ["PLATFORM_ROLE_PASSWORD"]
+netloc = "%s:%s@%s" % (
+    urllib.parse.quote(user, safe=""),
+    urllib.parse.quote(password, safe=""),
+    u.netloc.split("@", 1)[-1],
+)
+print(urllib.parse.urlunparse(("postgres", netloc, u.path, "", u.query, "")))
+'
+  }
+
+  password_from_url() {
+    local from="$1"
+    DATABASE_URL="$from" python3 -c '
+import os, urllib.parse
+u = urllib.parse.urlparse(os.environ["DATABASE_URL"])
+print(urllib.parse.unquote(u.password or ""))
+'
+  }
+
+  ensure_one_managed_pair() {
+    local pw_key="$1" url_key="$2" role="$3"
+    local pw_count url_count
+    pw_count="$(env_key_count "$pw_key")"
+    url_count="$(env_key_count "$url_key")"
+    [ "$pw_count" -le 1 ] || fail "${ENV_FILE}의 ${pw_key} 항목은 최대 한 번만 있어야 한다."
+    [ "$url_count" -le 1 ] || fail "${ENV_FILE}의 ${url_key} 항목은 최대 한 번만 있어야 한다."
+    pw=""
+    url=""
+    [ "$pw_count" -eq 1 ] && pw="$(env_value_once "$pw_key")"
+    [ "$url_count" -eq 1 ] && url="$(env_value_once "$url_key")"
+    if [ "$pw_count" -eq 0 ] && [ "$url_count" -eq 1 ]; then
+      pw="$(password_from_url "$url")"
+      [ -n "$pw" ] || fail "${url_key} 에서 비밀번호를 읽지 못했다."
+      validate_env_scalar "$pw_key" "$pw"
+      printf '%s=%s\n' "$pw_key" "$(quote_env_file_value "$pw")" >>"$tmp"
+      added="${added}${pw_key} "
+    elif [ "$pw_count" -eq 0 ]; then
+      pw="$(gen)"
+      validate_env_scalar "$pw_key" "$pw"
+      printf '%s=%s\n' "$pw_key" "$(quote_env_file_value "$pw")" >>"$tmp"
+      added="${added}${pw_key} "
+    fi
+    if [ "$url_count" -eq 0 ]; then
+      [ -n "$pw" ] || pw="$(env_value_once "$pw_key")"
+      url="$(derive_managed_role_url "$role" "$pw")"
+      validate_env_scalar "$url_key" "$url"
+      printf '%s=%s\n' "$url_key" "$(quote_env_file_value "$url")" >>"$tmp"
+      added="${added}${url_key} "
+    fi
+  }
+
+  ensure_one_managed_pair MOMO_APP_POSTGRES_PASSWORD MOMO_APP_DATABASE_URL momo_app
+  ensure_one_managed_pair RELAY_POSTGRES_PASSWORD RELAY_DATABASE_URL momo_relay
+  count="$(env_key_count WORKER_POSTGRES_PASSWORD)"
+  [ "$count" -le 1 ] || fail "${ENV_FILE}의 WORKER_POSTGRES_PASSWORD 항목은 최대 한 번만 있어야 한다."
+  if [ "$count" -eq 0 ]; then
+    password="$(gen)"
+    validate_env_scalar WORKER_POSTGRES_PASSWORD "$password"
+    printf 'WORKER_POSTGRES_PASSWORD=%s\n' "$(quote_env_file_value "$password")" >>"$tmp"
+    added="${added}WORKER_POSTGRES_PASSWORD "
+  fi
+  ensure_one_managed_pair NOTIFIER_POSTGRES_PASSWORD NOTIFIER_DATABASE_URL momo_notifier
+
+  if [ -z "$added" ]; then
+    rm -f "$tmp"
+    return 0
+  fi
+  {
+    printf '\n# --- 런타임 롤 보강 (#2193, 기존 env에 추가) ------------------------------\n'
+    printf '# 없는 키만 덧붙인다. 이미 있는 값은 그대로 둔다 (DB 롤 비밀번호와 어긋나지 않게).\n'
+    cat "$tmp"
+  } >>"$ENV_FILE"
+  rm -f "$tmp"
+  added="$(printf '%s' "$added" | awk '{$1=$1; print}')"
+  count="$(printf '%s' "$added" | awk '{ print NF }')"
+  printf '[self-host] env 보강: %s키 추가(%s)\n' "$count" "$added" >&2
 }
 
 # #1696 / ADR-0169 — local file archive, for env files written before it existed.
@@ -1599,8 +1704,14 @@ if [ "$REQUESTED_ACTION" = "platform-env" ]; then
   emit_managed_platform_env
   exit 0
 fi
-DOCKER_BIN="$(command -v docker || true)"
-[ -n "$DOCKER_BIN" ] || fail "docker 없음 — https://docs.docker.com/get-docker/"
+# --ensure-managed-keys is add-only env surgery. Upgrade calls it before
+# compose, including under a fake docker PATH in tests; do not require a daemon.
+if [ "$REQUESTED_ACTION" != "ensure-managed-keys" ]; then
+  DOCKER_BIN="$(command -v docker || true)"
+  [ -n "$DOCKER_BIN" ] || fail "docker 없음 — https://docs.docker.com/get-docker/"
+else
+  DOCKER_BIN="$(command -v docker || true)"
+fi
 
 # 이미 쓰이는 포트인가. bash /dev/tcp 로만 재므로 추가 의존이 없다.
 port_busy() {
@@ -1737,6 +1848,10 @@ if [ -e "$ENV_FILE" ]; then
   ensure_operator_allowlist "$existing_email"
   ensure_desktop_cors_allowlist
   ensure_local_drive_archive
+  ensure_managed_role_keys
+  if [ "$REQUESTED_ACTION" = "ensure-managed-keys" ]; then
+    exit 0
+  fi
   warn_if_centrifugo_missing_desktop_origins
   ensure_public_origins
   ensure_local_drive_public_base

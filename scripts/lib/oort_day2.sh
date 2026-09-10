@@ -232,6 +232,17 @@ oort_upgrade_refresh_plan() {
   esac
 }
 
+# #2193: compose interpolates NOTIFIER_* with :?. Pre-#2193 env is missing
+# those keys; the generator's existing-env branch now backfills them. Call
+# this before `compose build` so a v0.1.5 install upgrades without edits.
+oort_ensure_managed_env_keys() {
+  local envfile="${OORT_DOCTOR_ENV:-}"
+  [ -n "$envfile" ] || oort_die "env 파일이 없다."
+  [ -f "$envfile" ] || oort_die "env 파일이 없다: $envfile"
+  SELF_HOST_ENV_FILE="$envfile" "$OORT_ROOT/scripts/self_host_env.sh" --ensure-managed-keys
+  oort_doctor_load_env "$envfile"
+}
+
 oort_upgrade_refresh() {
   local mode="$1" line
   OORT_UPGRADE_REFRESH_STEP=""
@@ -515,6 +526,8 @@ oort_upgrade() {
 
   oort_rewrite_image_line "$OORT_DOCTOR_ENV" "$target_image" "$target_mode"
   oort_doctor_load_env "$OORT_DOCTOR_ENV"
+
+  oort_ensure_managed_env_keys
 
   if ! oort_upgrade_refresh "$target_mode"; then
     oort_print_rollback "$previous" "$previous_mode" "$dump_path"

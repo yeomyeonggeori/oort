@@ -616,7 +616,7 @@ oort down -v
 | 증상 | 원인과 조치 |
 |---|---|
 | 설치가 막혔는지 먼저 판정 | `scripts/oort doctor` (필요하면 `--json`). 도구·env·스택을 한 판정으로 본다. 스택이 아직 없으면 그 검사는 skip 하고 env 쪽만 판정한다. |
-| Day-2: 이미지 교체 (Update / 새 digest) | `scripts/oort upgrade` (`--to <releases/latest.json의 list digest로 pin된 이미지>` 또는 `--manifest URL` 또는 `--local-build`). 먼저 백업, 없는 env/볼륨은 거절. 로컬 빌드는 `compose build`(pull 아님) 후 `up -d --wait`; 디지스트 모드는 기존처럼 `pull` 후 `up -d`. `IDEMPOTENCY_OK` 대기 후 doctor PASS. 실패 시 인쇄하는 롤백 명령은 실패한 명령과 다르다(로컬 빌드: 이전 커밋 체크아웃 또는 `scripts/oort restore <dump>`); 자동 롤백 없음; `down -v` 없음. |
+| Day-2: 이미지 교체 (Update / 새 digest) | `scripts/oort upgrade` (`--to <releases/latest.json의 list digest로 pin된 이미지>` 또는 `--manifest URL` 또는 `--local-build`). 먼저 백업, 없는 env/볼륨은 거절. `compose build`/`pull` 전에 빠진 관리 키(`NOTIFIER_POSTGRES_PASSWORD`, `NOTIFIER_DATABASE_URL`)만 보강하고 기존 값은 건드리지 않는다 — v0.1.5(41키) env도 손편집 없이 업그레이드된다. 로컬 빌드는 `compose build`(pull 아님) 후 `up -d --wait`; 디지스트 모드는 기존처럼 `pull` 후 `up -d`. `IDEMPOTENCY_OK` 대기 후 doctor PASS. 실패 시 인쇄하는 롤백 명령은 실패한 명령과 다르다(로컬 빌드: 이전 커밋 체크아웃 또는 `scripts/oort restore <dump>`); 자동 롤백 없음; `down -v` 없음. |
 | 3단계가 `port is already allocated` 로 실패 | 2단계 이후에 그 포트를 누가 잡았다. `down` 후 `local.secrets.env` 의 `MOMO_WEB_PORT` 를 바꾸고 다시 `up`. |
 | bind mount 가 실패한다 (`Caddyfile.local`: not a directory) 또는 클론이 Docker VM 공유 밖이다 | Docker Desktop / Colima 는 `/tmp`(그리고 홈이 아닌 경로)를 VM 과 공유하지 않는 경우가 많다. 홈 아래에 클론한다(`~/oort`). [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.1 과 같다. |
 | 로그인이 `invalid credentials` | 2단계가 알려 준 값을 쓴다(`grep MOMO_INITIAL_OWNER infra/rust/local.secrets.env`). 비밀번호를 바꾸려면 아래 회전 명령. |

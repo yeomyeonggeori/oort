@@ -131,6 +131,8 @@ services:
       # BYPASSRLS `momo_notifier` — provisioned by runtime-roles / momo-migrate
       # (`bootstrap_runtime_roles.sql`). Owner URL is forbidden here.
       NOTIFIER_DATABASE_URL: ${NOTIFIER_DATABASE_URL:?set NOTIFIER_DATABASE_URL}
+      MOMO_T3_ENABLED: ${MOMO_T3_ENABLED:-0}
+      MOMO_NOTIFIER_SWEEP_INTERVAL_MS: ${MOMO_NOTIFIER_SWEEP_INTERVAL_MS:-300}
       # The drain's own switch. Off by default even inside this overlay: adding
       # the file gets you the processes, turning this on gets you dispatches.
       MOMO_PUSH_NOTIFIER_ENABLED: ${MOMO_PUSH_NOTIFIER_ENABLED:-0}

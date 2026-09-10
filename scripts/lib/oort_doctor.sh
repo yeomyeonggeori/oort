@@ -535,13 +535,52 @@ oort_doctor_check_role_passwords() {
   fi
 }
 
+# Tables named by `GRANT … ON TABLE <name> TO momo_notifier` in the bootstrap
+# SQL. One list — doctor extra/DELETE checks and test_notifier_role_grants.sh.
+oort_notifier_grant_tables() {
+  local sql="${1:-$OORT_ROOT/infra/rust/sql/bootstrap_runtime_roles.sql}"
+  awk '
+    /GRANT / && / ON TABLE / && / TO momo_notifier/ {
+      line = $0
+      sub(/.*ON TABLE /, "", line)
+      sub(/ TO momo_notifier.*/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      if (line ~ /^[a-z][a-z0-9_]*$/) print line
+    }
+  ' "$sql" | LC_ALL=C sort -u
+}
+
 oort_doctor_notifier_role_sql() {
+  local tables sql_list t
+  tables="$(oort_notifier_grant_tables)"
+  sql_list=""
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    if [ -n "$sql_list" ]; then
+      sql_list="${sql_list},"
+    fi
+    sql_list="${sql_list}'${t}'"
+  done <<EOF
+$tables
+EOF
+  [ -n "$sql_list" ] || sql_list="'outbox'"
   printf '%s' "SELECT CASE \
 WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN 'missing' \
-WHEN EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier' \
+WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier' \
   AND rolcanlogin AND NOT rolsuper AND rolbypassrls \
-  AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication) THEN 'ok' \
-ELSE 'unsafe' END;"
+  AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication) THEN 'unsafe' \
+WHEN EXISTS ( \
+  SELECT 1 FROM unnest(ARRAY[${sql_list}]::text[]) AS t(rel) \
+  WHERE to_regclass('public.' || rel) IS NOT NULL \
+    AND has_table_privilege('momo_notifier', 'public.' || rel, 'DELETE') \
+) THEN 'delete' \
+WHEN EXISTS ( \
+  SELECT 1 FROM information_schema.role_table_grants g \
+  WHERE g.grantee = 'momo_notifier' AND g.table_schema = 'public' \
+    AND g.privilege_type IN ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER') \
+    AND g.table_name <> ALL (ARRAY[${sql_list}]::text[]) \
+) THEN 'extra' \
+ELSE 'ok' END;"
 }
 
 oort_doctor_record_notifier_role() {
@@ -561,6 +600,16 @@ oort_doctor_record_notifier_role() {
       oort_doctor_record roles.momo_notifier blocker fail \
         "momo_notifier 롤 없음" \
         "infra/rust/sql/bootstrap_runtime_roles.sql 을 momo-migrate runtime-roles 로 적용하라."
+      ;;
+    delete)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 에 DELETE 가 있다" \
+        "bootstrap_runtime_roles.sql 은 SELECT/INSERT/UPDATE 만 허용한다. DELETE 를 REVOKE 하라."
+      ;;
+    extra)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 허용목록 밖 테이블 GRANT" \
+        "bootstrap_runtime_roles.sql 의 GRANT ON TABLE 목록만 남겨라."
       ;;
     *)
       oort_doctor_record roles.momo_notifier blocker fail \
