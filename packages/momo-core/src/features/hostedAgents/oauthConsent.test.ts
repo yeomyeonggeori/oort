@@ -20,10 +20,8 @@ import {
   oauthScopeChoices,
   parseOauthConsentPreview,
   parseOauthDecision,
-  OAUTH_CONSENT_AGENT_FALLBACK,
   type OauthConsentScreenInput,
 } from "./oauthConsent";
-import { HOSTED_AGENT_MISSING_NAME } from "./model";
 
 // =============================================================================
 // #1369 HAP-UX4 — resource-owner OAuth consent 판정.
@@ -333,7 +331,6 @@ describe("RED PROOF ⑤ 결과 문장은 닫히는 쪽을 말한다", () => {
       "승인하면 이 에이전트는 2개 채널에서 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
     );
     expect(empty).not.toMatch(/승인하면\s+는\s/);
-    expect(OAUTH_CONSENT_AGENT_FALLBACK).toBe(HOSTED_AGENT_MISSING_NAME);
   });
 
   it("주어를 두 번 표지하지 않는다 (design-review M1)", () => {

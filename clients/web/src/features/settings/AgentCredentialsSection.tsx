@@ -11,7 +11,10 @@ import {
   type HostedLedgerLanding,
 } from "@/features/hostedAgents/HostedConnectionSection";
 import { hostedListQuery } from "@/features/hostedAgents/hostedCredentialScope";
-import type { HostedWizardLaunch } from "@/features/hostedAgents/hostedWizardLaunch";
+import {
+  regenerateLaunchFromMember,
+  type HostedWizardLaunch,
+} from "@/features/hostedAgents/hostedWizardLaunch";
 import { memberFor, memberNameParts, useDirectory } from "@/features/workspace/useWorkspace";
 import { hostedPresetIdForMember } from "@momo/core/features/hostedAgents/detect";
 import {
@@ -209,17 +212,14 @@ export function AgentCredentialsSection({ offline }: { offline: boolean }) {
   const openRegenerate = (row: HostedAgentConnection) => {
     const member = memberFor(directory, row.agentMemberId);
     setSelectedConnectionId(row.id);
-    setLaunch({
-      presetId: hostedPresetIdForMember(member),
-      displayName: memberNameParts(
-        directory,
-        row.agentMemberId,
-        HOSTED_AGENT_MISSING_NAME
-      ).name,
-      handle: member?.handle ?? "",
-      connectionId: row.id,
-      autoAdvance: "regenerate",
-    });
+    setLaunch(
+      regenerateLaunchFromMember({
+        displayName: member?.displayName ?? "",
+        handle: member?.handle ?? "",
+        connectionId: row.id,
+        presetId: hostedPresetIdForMember(member),
+      })
+    );
     setWizardOpen(true);
   };
 

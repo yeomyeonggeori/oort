@@ -9,6 +9,7 @@ import { fetchRoster, listChannels } from "@momo/core/lib/api";
 import {
   getHostedConnection,
   listHostedConnections,
+  regenerateHostedPairing,
 } from "@momo/core/features/hostedAgents/api";
 import {
   HOSTED_AGENT_LABEL_FALLBACK,
@@ -17,6 +18,10 @@ import {
 } from "@momo/core/features/hostedAgents/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { HostedAgentWizard } from "./HostedAgentWizard";
+import {
+  regenerateLaunchFromMember,
+  type HostedWizardLaunch,
+} from "./hostedWizardLaunch";
 
 // =============================================================================
 // #2327 E2E-A A6 — 호스티드 위저드 4단계 이름 보간.
@@ -165,17 +170,13 @@ function factValue(key: string): string {
 
 function mountWizard(
   agentDisplayName: string,
-  launch: {
-    presetId: "grok";
-    displayName: string;
-    handle: string;
-    connectionId?: string;
-  } | null = {
+  launch: HostedWizardLaunch | null = {
     presetId: "grok",
     displayName: "",
     handle: "grokbot",
     connectionId: CONNECTION_ID,
-  }
+  },
+  agentHandle = "grokbot"
 ): HTMLElement {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
@@ -201,6 +202,7 @@ function mountWizard(
       id: AGENT_ID,
       kind: "agent",
       displayName: agentDisplayName,
+      handle: agentHandle,
     }),
   ]);
   vi.mocked(listChannels).mockResolvedValue([
@@ -279,6 +281,7 @@ beforeEach(() => {
   vi.mocked(getHostedConnection).mockReset();
   vi.mocked(fetchRoster).mockReset();
   vi.mocked(listChannels).mockReset();
+  vi.mocked(regenerateHostedPairing).mockReset();
 });
 
 afterEach(() => {
@@ -322,6 +325,27 @@ describe("위저드 4단계 이름 보간 (#2327)", () => {
     expect(value).toBe("@grokbot");
     expect(value).not.toBe(HOSTED_AGENT_LABEL_FALLBACK);
     expect(value).not.toBe("이 에이전트");
+  });
+
+  it("재발급 런치가 빈 이름이면 사실 칸은 핸들이고 문장은 이 에이전트다 (H-R2-1)", async () => {
+    const launch = regenerateLaunchFromMember({
+      displayName: "",
+      handle: "kim-intern",
+      connectionId: CONNECTION_ID,
+      presetId: "grok",
+    });
+    expect(launch.displayName).toBe("");
+    expect(launch.displayName).not.toBe(HOSTED_AGENT_MISSING_NAME);
+    vi.mocked(regenerateHostedPairing).mockRejectedValue(new Error("offline"));
+    mountWizard("", launch, "kim-intern");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-consequence"]') !== null,
+      "regen consequence"
+    );
+    expect(factValue("전용 에이전트")).toBe("@kim-intern");
+    const sentence = document.querySelector('[data-testid="hosted-consequence"]');
+    expect(sentence?.textContent).toContain("이 에이전트는");
+    expect(sentence?.textContent).not.toContain(HOSTED_AGENT_MISSING_NAME);
   });
 
   it("빈 이름 재개 행은 memberNameParts 폴백을 그린다 (H2)", async () => {
