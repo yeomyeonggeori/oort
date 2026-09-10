@@ -8,7 +8,7 @@
 //! | compose service | command | env that selects the behaviour |
 //! |---|---|---|
 //! | `runtime-roles` | `["migrate"]` | `MOMO_RUNTIME_ROLE_PROVISION=1` → apply `bootstrap_runtime_roles.sql`, exit |
-//! | `migrate` | `["migrate"]` | `MOMO_BOOTSTRAP_RUNTIME_ROLES=0` → verify the three roles, then apply `001..NNN` |
+//! | `migrate` | `["migrate"]` | `MOMO_BOOTSTRAP_RUNTIME_ROLES=0` → verify the four roles, then apply `001..NNN` |
 //! | ops one-shot | `["migrate","set-owner"]` | `MOMO_INITIAL_OWNER_EMAIL`/`_PASSWORD` → `set_initial_owner.sql` |
 //!
 //! **#1227 — first-boot owner bootstrap.** The `migrate` command reads the same
@@ -61,12 +61,21 @@ mod pitr;
 const REPO_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../../..");
 const IMAGE_RUNTIME_ENV: &str = "MOMO_IN_CONTAINER";
 
+/// Passwords `\getenv` reads in `bootstrap_runtime_roles.sql`. Missing any one
+/// is a usage error — the SQL file has no fallback and must not run half-applied.
+const RUNTIME_ROLE_PASSWORD_KEYS: [&str; 4] = [
+    "MOMO_APP_POSTGRES_PASSWORD",
+    "RELAY_POSTGRES_PASSWORD",
+    "WORKER_POSTGRES_PASSWORD",
+    "NOTIFIER_POSTGRES_PASSWORD",
+];
+
 /// The role contract `internal-smoke-migrate.sh:97-101` asserts before it will
 /// migrate a database whose runtime roles were provisioned externally.
-const ROLE_CONTRACT_SQL: &str = "SELECT count(*) = 3 AND bool_and(rolcanlogin AND NOT rolsuper \
+const ROLE_CONTRACT_SQL: &str = "SELECT count(*) = 4 AND bool_and(rolcanlogin AND NOT rolsuper \
      AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication \
      AND CASE WHEN rolname = 'momo_app' THEN NOT rolbypassrls ELSE rolbypassrls END) \
-     FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');";
+     FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');";
 
 const USAGE: &str = "usage: momo-migrate {migrate|set-owner}";
 
@@ -358,7 +367,7 @@ fn psql_file_with_env(
     Ok(())
 }
 
-/// The `MOMO_BOOTSTRAP_RUNTIME_ROLES=0` gate: refuse to migrate unless the three
+/// The `MOMO_BOOTSTRAP_RUNTIME_ROLES=0` gate: refuse to migrate unless the four
 /// runtime roles already exist with the exact least-privilege posture
 /// (`internal-smoke-migrate.sh:95-105`). Fail closed — a probe that cannot run
 /// is also a refusal.
@@ -384,6 +393,27 @@ fn assert_external_runtime_roles(database_url: &str) -> Result<(), MigrateError>
                 .to_string(),
         ));
     }
+    Ok(())
+}
+
+fn require_runtime_role_passwords() -> Result<(), MigrateError> {
+    for key in RUNTIME_ROLE_PASSWORD_KEYS {
+        if env(key).is_none() {
+            return Err(MigrateError::Usage(format!("set {key}")));
+        }
+    }
+    Ok(())
+}
+
+fn provision_runtime_roles(database_url: &str) -> Result<(), MigrateError> {
+    require_runtime_role_passwords()?;
+    let file = runtime_path(
+        "MOMO_RUNTIME_ROLES_SQL",
+        "infra/rust/sql/bootstrap_runtime_roles.sql",
+        "/opt/momo/sql/bootstrap_runtime_roles.sql",
+    )?;
+    psql_file(database_url, &file, "runtime-roles")?;
+    println!("[migrate] runtime roles provisioned (no password printed)");
     Ok(())
 }
 
@@ -416,22 +446,7 @@ fn migrate() -> Result<(), MigrateError> {
         env("MOMO_RUNTIME_ROLE_PROVISION").as_deref(),
         false,
     )? {
-        for key in [
-            "MOMO_APP_POSTGRES_PASSWORD",
-            "RELAY_POSTGRES_PASSWORD",
-            "WORKER_POSTGRES_PASSWORD",
-        ] {
-            if env(key).is_none() {
-                return Err(MigrateError::Usage(format!("set {key}")));
-            }
-        }
-        let file = runtime_path(
-            "MOMO_RUNTIME_ROLES_SQL",
-            "infra/rust/sql/bootstrap_runtime_roles.sql",
-            "/opt/momo/sql/bootstrap_runtime_roles.sql",
-        )?;
-        psql_file(&database_url, &file, "runtime-roles")?;
-        println!("[migrate] runtime roles provisioned (no password printed)");
+        provision_runtime_roles(&database_url)?;
         return Ok(());
     }
 
@@ -512,7 +527,9 @@ fn migrate() -> Result<(), MigrateError> {
         );
     }
 
-    // (6) local/e2e role file, after the schema exists (its GRANTs need tables).
+    // (6) role GRANTs that need tables. Dev applies bootstrap_roles.sql
+    // (committed passwords, ALL TABLES). Prod re-applies the runtime-roles
+    // file so momo_notifier's table-scoped GRANTs land after CREATE TABLE.
     if bootstrap_roles {
         let file = runtime_path(
             "MOMO_BOOTSTRAP_ROLES_SQL",
@@ -521,6 +538,8 @@ fn migrate() -> Result<(), MigrateError> {
         )?;
         psql_file(&database_url, &file, "bootstrap-roles")?;
         println!("[migrate] bootstrap roles applied (development passwords)");
+    } else {
+        provision_runtime_roles(&database_url)?;
     }
 
     // (7) #1227 first-boot owner. Last, because it is the only step that cares
