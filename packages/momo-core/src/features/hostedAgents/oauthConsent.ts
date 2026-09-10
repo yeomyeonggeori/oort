@@ -19,6 +19,7 @@ import {
 } from "./approval";
 import {
   hostedAgentLabel,
+  HOSTED_AGENT_MISSING_NAME,
   isHostedScope,
   HOSTED_AGENT_SCOPES,
   type HostedAgentScope,
@@ -651,8 +652,8 @@ export const OAUTH_CONSENT_OFFLINE_NOTE =
 export const OAUTH_CONSENT_WORKSPACE_KEY = "워크스페이스";
 export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
 export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
-/** candidate 를 아직 못 고른 자리의 대체 이름. 결과 문장의 주어로도 쓰인다. */
-export const OAUTH_CONSENT_AGENT_FALLBACK = "전용 에이전트";
+/** 이름 칸의 대체. 문장 주어는 `hostedAgentLabel`(「이 에이전트」)이 맡는다. */
+export const OAUTH_CONSENT_AGENT_FALLBACK = HOSTED_AGENT_MISSING_NAME;
 export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_DETAIL =
   "이 에이전트로 외부 provider의 접속을 허용합니다.";

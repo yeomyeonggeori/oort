@@ -10,7 +10,11 @@ import {
   getHostedConnection,
   listHostedConnections,
 } from "@momo/core/features/hostedAgents/api";
-import { HOSTED_AGENT_PORT_AUDIENCE } from "@momo/core/features/hostedAgents/model";
+import {
+  HOSTED_AGENT_LABEL_FALLBACK,
+  HOSTED_AGENT_MISSING_NAME,
+  HOSTED_AGENT_PORT_AUDIENCE,
+} from "@momo/core/features/hostedAgents/model";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { HostedAgentWizard } from "./HostedAgentWizard";
 
@@ -152,7 +156,27 @@ async function waitFor(check: () => boolean, label: string): Promise<void> {
   throw new Error(`waitFor ${label}`);
 }
 
-function mountWizard(agentDisplayName: string): HTMLElement {
+function factValue(key: string): string {
+  const term = [...document.querySelectorAll("dt")].find(
+    (node) => node.textContent === key
+  );
+  return term?.nextElementSibling?.textContent ?? "";
+}
+
+function mountWizard(
+  agentDisplayName: string,
+  launch: {
+    presetId: "grok";
+    displayName: string;
+    handle: string;
+    connectionId?: string;
+  } | null = {
+    presetId: "grok",
+    displayName: "",
+    handle: "grokbot",
+    connectionId: CONNECTION_ID,
+  }
+): HTMLElement {
   if (mountedRoot) {
     act(() => mountedRoot?.unmount());
     mountedRoot = null;
@@ -214,12 +238,7 @@ function mountWizard(agentDisplayName: string): HTMLElement {
         onOpenChange: () => undefined,
         opener: null,
         entry: "hub",
-        launch: {
-          presetId: "grok",
-          displayName: "",
-          handle: "grokbot",
-          connectionId: CONNECTION_ID,
-        },
+        launch,
       })
     )
   );
@@ -291,5 +310,30 @@ describe("위저드 4단계 이름 보간 (#2327)", () => {
     await selectTwoChannels();
     const named = document.querySelector('[data-testid="hosted-consequence"]');
     expect(named?.textContent).toBe(NAMED_SENTENCE);
+  });
+
+  it("빈 이름의 사실 칸은 핸들이고 문장 폴백이 아니다 (H1)", async () => {
+    mountWizard("");
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-consequence"]') !== null,
+      "empty fact row"
+    );
+    const value = factValue("전용 에이전트");
+    expect(value).toBe("@grokbot");
+    expect(value).not.toBe(HOSTED_AGENT_LABEL_FALLBACK);
+    expect(value).not.toBe("이 에이전트");
+  });
+
+  it("빈 이름 재개 행은 memberNameParts 폴백을 그린다 (H2)", async () => {
+    mountWizard("", null);
+    await waitFor(
+      () => document.querySelector('[data-testid="hosted-wizard-resume"]') !== null,
+      "resume row"
+    );
+    const row = document.querySelector('[data-testid="hosted-wizard-resume"]');
+    const name = row?.querySelector(".text-body");
+    expect(name?.textContent).toBe(HOSTED_AGENT_MISSING_NAME);
+    expect(name?.textContent).not.toBe("");
+    expect(row?.textContent).toContain("감지됨");
   });
 });

@@ -2,8 +2,9 @@
 
 ## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
 
-- Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). `hostedAgentLabel` 폴백 「이 에이전트」+ 위저드 `??`→빈 문자열은 draft로. 이름 있는 카피 불변.
-- 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사보타주(폴백 제거) RED 후 복구.
+- Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.
+- R2: 사실 행 동어반복 해소(H1) · 재개 행 `??` 제거(H2) · 이름 칸 폴백 상수 단일화(M1). 문장 다섯 문장은 불변.
+- 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사실 칸 `@handle` · 재개 행 폴백 · 사보타주(문장 폴백을 사실 칸에 / `??` 복구) RED.
 - runtime-unverified: 실스택 hosted 4단계 왕복은 mock·RTL 범위.
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 

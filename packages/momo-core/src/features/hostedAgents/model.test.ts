@@ -5,8 +5,10 @@ import { WireShapeError } from "../../lib/wire";
 import {
   boundedLabel,
   connectionFacts,
+  hostedAgentFactLabel,
   hostedAgentLabel,
   HOSTED_AGENT_LABEL_FALLBACK,
+  HOSTED_AGENT_MISSING_NAME,
   hostedFailureMessage,
   hostedStatusDetail,
   hostedStatusLabel,
@@ -316,12 +318,33 @@ describe("이름 다듬기", () => {
     expect(hostedAgentLabel("그록봇")).toBe("그록봇");
   });
 
-  it("사실 목록의 전용 에이전트 칸도 빈 이름을 구멍으로 두지 않는다", () => {
-    const facts = connectionFacts(connection({ status: "detected" }), "");
-    expect(facts[0]).toEqual({
+  it("사실 칸은 빈 이름에 핸들을 쓰고 문장 폴백을 쓰지 않는다", () => {
+    expect(hostedAgentFactLabel("", "grokbot")).toBe("@grokbot");
+    expect(hostedAgentFactLabel("", "@grokbot")).toBe("@grokbot");
+    expect(hostedAgentFactLabel("그록봇", "grokbot")).toBe("그록봇");
+    expect(hostedAgentFactLabel("", "")).toBe(HOSTED_AGENT_MISSING_NAME);
+    expect(hostedAgentFactLabel("   ", "  ")).toBe(HOSTED_AGENT_MISSING_NAME);
+
+    const withHandle = connectionFacts(
+      connection({ status: "detected" }),
+      "",
+      "grokbot"
+    );
+    expect(withHandle[0]).toEqual({
       key: "전용 에이전트",
-      value: HOSTED_AGENT_LABEL_FALLBACK,
+      value: "@grokbot",
     });
+    expect(withHandle[0]?.value).not.toBe(HOSTED_AGENT_LABEL_FALLBACK);
+
+    const withoutHandle = connectionFacts(
+      connection({ status: "detected" }),
+      ""
+    );
+    expect(withoutHandle[0]).toEqual({
+      key: "전용 에이전트",
+      value: HOSTED_AGENT_MISSING_NAME,
+    });
+    expect(withoutHandle[0]?.value).not.toBe(HOSTED_AGENT_LABEL_FALLBACK);
   });
 });
 
