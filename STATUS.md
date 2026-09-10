@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## local_gate docs 프로파일: check_release_manifest 실주행 + oort day-2 하네스 + GATED_DOCS SELF_HOST 등재 (#1984 #2124, 2026-09-10)
+
+- Track engine. `policy/1984-2124-local-gate-docs` onto `origin/track/engine`. `scripts/local_gate.sh --profile docs`가 `scripts/check_release_manifest.sh`를 no-arg로 실주행(`releases/latest.json`, `bash -n`만이 아님). `add_static_commands`가 `scripts/oort`·`scripts/lib/oort_{common,day2,doctor}.sh`에 `bash -n` + shellcheck. day-2/doctor 하네스는 docs 프로파일에 유지(docker 부재는 RED). `GATED_DOCS`에 `SELF_HOST`/`FIRST_DAY`(+`.ko.md`)와 `SELF_HOST_AGENT.ko.md` 등재. docs-cmd 11→16 문서 / 261→546 fact.
+- R2: oort `bash -n`은 파일별 반복(첫 파일만 검사하던 `bash -n a b c d` 구멍). `shell syntax` 루프는 `bash -n` 실패 시 `exit 1`. hardening 잠금은 주석이 아닌 `add_cmd_once` 행.
+- 문서 결함: 등재 직후 `SELF_HOST.md`(+ko) 공개 오리진 compose가 생성 파일 `infra/rust/local.secrets.env`를 `--env-file` 리터럴로 가리켜 docs-cmd RED. claim-mode와 같이 `ENV_FILE=` + `"$ENV_FILE"`로 정합.
+- runtime-unverified: 없음(정적 게이트).
 ## momo_notifier 런타임 롤 (#2193, 2026-09-10)
 
 - Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.
