@@ -1,39 +1,33 @@
-import { useEffect, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
 import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
 import {
-  createInvite,
   fetchWorkspace,
   listInvites,
-  resolveServerBaseUrl,
-  type CreatedInvite,
 } from "@momo/core/features/settings/api";
 import {
-  buildInviteMailto,
-  buildJoinLink,
   choiceLabel,
   errorMessage,
   formatDay,
   INVITE_EXPIRY_DAYS,
-  inviteCardText,
   inviteRoles,
   inviteStatus,
   isOperatorDenied,
-  type InviteCardInput,
 } from "@momo/core/features/settings/model";
+import { inviteIssueErrorCopy } from "./inviteIssueError";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { IssuedInviteCard } from "./IssuedInviteCard";
 import {
   ChoiceRadios,
-  CopyButton,
   Field,
-  KeyValueRows,
   OperatorNotice,
   SectionShell,
   StatusChip,
 } from "./SettingsFields";
+import { useIssueInvite } from "./useIssueInvite";
 
 // =============================================================================
 // 멤버와 초대 (R-1 §5, 온보딩 감사 W-O1/W-O5): issue an invite code and hand
@@ -75,7 +69,6 @@ export function InviteSection({
   workspaceId: string;
   offline: boolean;
 }) {
-  const client = useQueryClient();
   const invites = useQuery({
     queryKey: ["settings", "invites", workspaceId],
     queryFn: () => listInvites(workspaceId),
@@ -91,31 +84,7 @@ export function InviteSection({
   const [maxUses, setMaxUses] = useState("1");
   const [days, setDays] = useState("7");
   const [formError, setFormError] = useState<string | null>(null);
-  const [issued, setIssued] = useState<CreatedInvite | null>(null);
-  // 3R High: 코드는 1회 노출인데 발급 카드가 폴드 아래 렌더될 수 있다.
-  // 발급 즉시 카드로 포커스를 옮겨 시각·키보드 사용자 모두에게 착지시킨다.
-  const issuedRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (issued && issuedRef.current) {
-      issuedRef.current.focus({ preventScroll: true });
-      issuedRef.current.scrollIntoView({ block: "nearest" });
-    }
-  }, [issued]);
-
-  const create = useMutation({
-    mutationFn: () =>
-      createInvite(workspaceId, {
-        role,
-        maxUses: Number(maxUses),
-        expiresAtMs: Date.now() + Number(days) * DAY_MS,
-      }),
-    onSuccess: (result) => {
-      setIssued(result);
-      void client.invalidateQueries({
-        queryKey: ["settings", "invites", workspaceId],
-      });
-    },
-  });
+  const { issued, issuedRef, create, clearIssued } = useIssueInvite(workspaceId);
 
   function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -129,8 +98,12 @@ export function InviteSection({
       return;
     }
     setFormError(null);
-    setIssued(null);
-    create.mutate();
+    clearIssued();
+    create.mutate({
+      role,
+      maxUses: uses,
+      expiresAtMs: Date.now() + Number(days) * DAY_MS,
+    });
   }
 
   const roles = inviteRoles(workspace.data?.roleLabels);
@@ -169,16 +142,7 @@ export function InviteSection({
   }
 
   const rows = invites.data;
-  const serverBaseUrl = resolveServerBaseUrl();
-  const card: InviteCardInput | null = issued
-    ? {
-        workspaceName: workspace.data?.name ?? "oort",
-        serverBaseUrl,
-        code: issued.code,
-        expiresAtMs: issued.invite.expiresAtMs,
-        maxUses: issued.invite.maxUses,
-      }
-    : null;
+  const createError = create.isError ? inviteIssueErrorCopy(create.error) : null;
 
   return (
     <SectionShell title="멤버와 초대" lines={lines}>
@@ -278,9 +242,13 @@ export function InviteSection({
             {formError}
           </p>
         )}
-        {create.isError && (
-          <p className="text-meta text-danger" role="alert">
-            {errorMessage(create.error)}
+        {createError && (
+          <p
+            className="text-meta text-danger"
+            role="alert"
+            title={createError.detail}
+          >
+            {createError.message}
           </p>
         )}
 
@@ -318,57 +286,12 @@ export function InviteSection({
         </div>
       </form>
 
-      {card && issued && (
-        <div
-          ref={issuedRef}
-          tabIndex={-1}
-          className="flex flex-col gap-3 rounded-md border border-ok bg-surface-raised p-4 focus-visible:focus-ring"
-          role="status"
-          data-testid="invite-issued"
-        >
-          <p className="text-body text-ink">
-            초대 링크를 만들었습니다. 코드는 이 화면에서만 볼 수 있으니 지금
-            전달하세요.
-          </p>
-
-          <KeyValueRows
-            rows={[
-              {
-                key: "딥링크",
-                value: buildJoinLink(serverBaseUrl, issued.code),
-                numeric: true,
-              },
-              { key: "서버 주소", value: serverBaseUrl, numeric: true },
-              { key: "초대 코드", value: issued.code, numeric: true },
-              {
-                key: "만료",
-                value: `${formatDay(issued.invite.expiresAtMs)}, ${issued.invite.maxUses}명까지`,
-                numeric: true,
-              },
-            ]}
-          />
-
-          <div className="flex flex-wrap items-center gap-2">
-            <CopyButton
-              value={buildJoinLink(serverBaseUrl, issued.code)}
-              label="딥링크 복사"
-              testId="invite-copy-link"
-            />
-            <CopyButton
-              value={inviteCardText(card)}
-              label="초대 카드 복사"
-              testId="invite-copy-card"
-            />
-            <Button asChild variant="outline" size="sm">
-              <a href={buildInviteMailto(card)}>메일 초안 열기</a>
-            </Button>
-          </div>
-
-          <p className="text-meta text-ink-muted">
-            받는 사람은 앱을 설치한 뒤 딥링크를 열면 서버 주소와 코드가 채워진
-            상태로 참여 화면에 도착합니다.
-          </p>
-        </div>
+      {issued && (
+        <IssuedInviteCard
+          issued={issued}
+          workspaceName={workspace.data?.name ?? "oort"}
+          issuedRef={issuedRef}
+        />
       )}
     </SectionShell>
   );
