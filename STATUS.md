@@ -4,6 +4,11 @@
 
 - Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.
 - runtime-unverified: GUI 클릭 경로는 이 워크트리에서 브라우저를 누르지 않음(기존 FIRST_DAY 규율). S1 카피는 `feat/2332-onboarding-s1`에서 인용(아직 track/engine 미랜딩).
+## hostedRoutineLabel 빈 핸들 식별자 (#2395, 2026-09-10)
+
+- Track UXUI. `fix/2395-routine-label-empty-handle` onto `origin/track/uxui`. ADR-0162 D6 결정 (a): 빈 핸들이면 식별자 세그먼트는 `m-<member id hex 8>`(끝에 ` / ` 금지). 비어 있지 않은 핸들 출력은 바이트 불변. `parseHostedRoutineLabel`이 그 세그먼트를 왕복한다. UI 변경 없음.
+- 검증: `@momo/core` typecheck+vitest · 사보타주(정규화 제거 / 왕복 파괴) RED.
+- runtime-unverified: 실스택 grok routine 생성·cleanup 매니페스트 왕복.
 ## SH-11g/f 리뷰 잔여 (#2328, 2026-09-10)
 
 - Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
