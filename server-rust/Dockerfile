@@ -220,17 +220,37 @@ LABEL org.opencontainers.image.title="momo-rust" \
       org.opencontainers.image.licenses="Apache-2.0" \
       org.opencontainers.image.revision="${MOMO_BUILD_SHA}"
 
-# postgresql-client is NOT optional: the migration runner shells out to psql
-# because migrations 002/006/012 use psql *client* meta-commands (`\if`,
-# `\getenv`) that the wire protocol cannot execute (B0 lesson, momo-db::migrate).
+# postgresql-client-18 (PGDG) is NOT optional: the migration runner shells out
+# to psql because migrations 002/006/012 use psql *client* meta-commands (`\if`,
+# `\getenv`) that the wire protocol cannot execute (B0 lesson, momo-db::migrate),
+# and T2 `oort backup` needs pg_dump that will talk to a PG18 server. Bookworm's
+# `postgresql-client` is 15.x — pg_dump then refuses the dump (#2346 / SH-11e-2).
+# python3 (full, not python3-minimal) is required for `oort doctor --json`
+# (`oort_doctor_emit_json` imports json; measured: python3-minimal has no json).
 # curl exists so the api service has a container-local healthcheck.
+#
+# PGDG signing key ACCC4CF8, fingerprint
+# B97B 0AFC AA1A 47F0 44F2  44A0 7FCC 7D46 ACCC 4CF8.
+# Bytes pinned by sha256. Never a piped installer script.
+COPY server-rust/apt/ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
 RUN set -eux; \
+    echo "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76  /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc" | sha256sum -c; \
+    chmod 0644 /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       ca-certificates \
       curl \
-      postgresql-client \
       tzdata; \
+    printf 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main\n' \
+      > /etc/apt/sources.list.d/pgdg.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+      postgresql-client-18=18.6-1.pgdg12+2 \
+      python3; \
+    test "$(dpkg-query -W -f='${Version}' postgresql-client-18)" = "18.6-1.pgdg12+2"; \
+    pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 18\.'; \
+    test -x /usr/lib/postgresql/18/bin/pg_dump; \
+    python3 -c 'import json'; \
     rm -rf /var/lib/apt/lists/*; \
     useradd --system --create-home --uid 10001 momo; \
     mkdir -p /opt/momo/sql /opt/momo/web /srv/web /usr/share/licenses/momo-rust; \
