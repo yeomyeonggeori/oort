@@ -170,12 +170,15 @@ export function Field({
   htmlFor,
   hint,
   error,
+  reserveError = false,
   children,
 }: {
   label: string;
   htmlFor: string;
   hint?: string;
   error?: string | null;
+  /** Keep a one-line slot so a blur error does not move the save control. */
+  reserveError?: boolean;
   children: ReactNode;
 }) {
   const errorId = `${htmlFor}-error`;
@@ -208,11 +211,16 @@ export function Field({
           {hint}
         </p>
       )}
-      {error && (
-        <p className="text-meta text-danger" role="alert" id={errorId}>
+      {error || reserveError ? (
+        <p
+          className={cn("text-meta", error ? "text-danger" : null, reserveError && "min-h-6")}
+          role={error ? "alert" : undefined}
+          aria-live={reserveError && !error ? "polite" : undefined}
+          id={error ? errorId : undefined}
+        >
           {error}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -601,6 +609,7 @@ export function CopyButton({
   label = "복사",
   subject,
   testId,
+  size = "sm",
 }: {
   value: string;
   label?: string;
@@ -617,6 +626,8 @@ export function CopyButton({
    */
   subject?: string;
   testId?: string;
+  /** Settings rows stay `sm` (28px toolbar). Form-level copy (S2 issued card) uses default = `h-control`. */
+  size?: "sm" | "default";
 }) {
   const { copied, copy } = useClipboardCopy(value);
 
@@ -629,7 +640,7 @@ export function CopyButton({
     <Button
       type="button"
       variant="outline"
-      size="sm"
+      size={size}
       onClick={() => void copy()}
       aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}

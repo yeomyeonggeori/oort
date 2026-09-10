@@ -176,6 +176,8 @@ auto_classify_script() {
       AUTO_REASONS+=("$1 -> docs (#2297 platform template contract runs in the docs profile)") ;;
     scripts/tests/test_aws_recipe.sh)
       AUTO_REASONS+=("$1 -> docs (SH-11c AWS T1 recipe; terraform is an optional tool)") ;;
+    scripts/tests/test_cloudflare_recipe.sh)
+      AUTO_REASONS+=("$1 -> docs (SH-11d Cloudflare T3 edge recipe)") ;;
     scripts/tests/test_image_day2_tools.sh)
       AUTO_REASONS+=("$1 -> docs (#2346 in-image day-2 tools proof runs in the docs profile)") ;;
     scripts/tests/test_fly_recipe.sh)
@@ -237,10 +239,19 @@ auto_classify_path() {
       AUTO_REASONS+=("$1 -> docs (SH-11b Fly T1 recipe; contract is test_fly_recipe.sh)") ;;
     infra/aws*)
       AUTO_REASONS+=("$1 -> docs (SH-11c AWS T1 recipe; terraform is an optional tool)") ;;
+    infra/cloudflare/*)
+      AUTO_REASONS+=("$1 -> docs (SH-11d Cloudflare T3 edge recipe; contract is test_cloudflare_recipe.sh)") ;;
     infra/*)
       # 로컬 런타임 정본(compose/centrifugo.json/e2e roles). staging-smoke는 이
       # 파일들을 기동하지 않으므로(리뷰 blocker: silent coverage loss) all로 확대.
       AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (local runtime compose surface; widen, do not narrow)") ;;
+    server-rust/Dockerfile|server-rust/apt/*)
+      # #2347: in-image day-2 proof is docs-profile only. Docker is required
+      # there (no optional-tool skip — a skip would hide a python3/pg_dump
+      # float). `all` only bash -n's the test; --auto on this path must
+      # actually run the image build, so classify as docs rather than the
+      # unmapped → all widening.
+      AUTO_REASONS+=("$1 -> docs (#2346/#2347 in-image day-2 tools; docker required in docs, not optional-skip; not wired into all)") ;;
     scripts/*)
       auto_classify_script "$1" ;;
     *)
@@ -880,8 +891,13 @@ add_web_commands() {
   add_cmd "web unit tests (vitest)" '(cd clients/web && npm run test)'
   add_cmd "web build (vite)" '(cd clients/web && npm run build)'
   add_cmd "web dependency license gate (canonical npm roots)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; NPM_LICENSE_REPORT="$out" node scripts/check_npm_licenses.mjs && echo "license inventory: $out"'
-  add_note_once coverage "#2142 web profile: clients/web npm ci --no-audit --no-fund, lint, typecheck, test, build. License gate uses check_npm_licenses.mjs default roots."
-  add_note_once not_covered "Generated-types, serving smoke, Chromium login smoke, and the Swift OpenAPI pass are retired."
+  # #2181/#2328: gate:csp-deploy needs caddy adapt (PATH caddy or docker).
+  # Absent tools print a visible skip line (silent skip forbidden, not RED).
+  # Present tools run the gate; failure is RED. RELEASING.md pre-publish
+  # does not skip — that checklist is mandatory before dispatch.
+  add_cmd "deploy CSP gate (gate:csp-deploy; optional docker/caddy)" "if ! command -v caddy >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then echo '[local-gate] optional-tool skip: gate:csp-deploy — docker and caddy not on PATH (#2181/#2328)'; exit 0; fi; npm --prefix clients/web run gate:csp-deploy"
+  add_note_once coverage "#2142 web profile: clients/web npm ci --no-audit --no-fund, lint, typecheck, test, build. License gate uses check_npm_licenses.mjs default roots. #2181/#2328 gate:csp-deploy is an optional-tool step (docker or caddy on PATH to run; both absent → visible skip line, not silent, not RED; present → run, failure RED)."
+  add_note_once not_covered "Generated-types, serving smoke, Chromium login smoke, and the Swift OpenAPI pass are retired. gate:csp-deploy is skipped (visible line) when neither docker nor caddy is on PATH — RELEASING.md pre-publish still requires it before dispatch."
 }
 
 add_license_commands() {
@@ -957,9 +973,10 @@ case "$PROFILE" in
     add_cmd_once "platform template contract — Railway (#2297 · ADR-0184 D5)" 'scripts/tests/test_railway_template.sh'
     add_cmd_once "platform template contract — Fly T1 (SH-11b · ADR-0184 D1/D5)" 'scripts/tests/test_fly_recipe.sh'
     add_cmd_once "platform template contract — AWS Lightsail/EC2 T1 (SH-11c · #2377 · ADR-0184 D1)" 'scripts/tests/test_aws_recipe.sh'
+    add_cmd_once "platform template contract — Cloudflare T3 (SH-11d · #2386 · ADR-0184 D1)" 'scripts/tests/test_cloudflare_recipe.sh'
     add_cmd_once "release manifest contract" 'scripts/tests/test_release_manifest.sh'
-    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124), in-image T2 doctor/backup tools (#2346: PGDG postgresql-client-18 + python3 json), the Railway platform template contract (#2297: railway.json services/digest pin, --railway key-set equality, Caddyfile.railway caddy adapt + 403 order, public-edge contract on the Caddyfile.railway fixture root), the AWS T1 recipe contract (#2377: prevent_destroy, ports {22,80,443}, Budgets, data-root /data/docker; terraform fmt/validate when terraform is installed, otherwise a visible optional-tool skip line) and the release-manifest contract."
-    add_note_once not_covered "Runtime Docker profiles are not run for docs profile. terraform apply on an operator AWS account is not part of this profile (SH-11c approval points 1–5)."
+    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124), in-image T2 doctor/backup tools (#2346/#2347: PGDG postgresql-client-18 + python3=3.11.* json; docs profile runs scripts/tests/test_image_day2_tools.sh which docker-builds server-rust/Dockerfile when MOMO_RUST_IMAGE is unset; docker missing is RED, not an optional-tool skip), the Railway platform template contract (#2297: railway.json services/digest pin, --railway key-set equality, Caddyfile.railway caddy adapt + 403 order, public-edge contract on the Caddyfile.railway fixture root), the AWS T1 recipe contract (#2377: prevent_destroy, ports {22,80,443}, Budgets, data-root /data/docker; terraform fmt/validate when terraform is installed, otherwise a visible optional-tool skip line), the Fly T1 recipe contract (SH-11b), the Cloudflare T3 edge recipe contract (SH-11d: loopback ingress, catch-all 404, no quick-tunnel, Mode B --public-origin, approval section) and the release-manifest contract."
+    add_note_once not_covered "Runtime compose profiles (runtime-db/relay/live/agent) are not run for docs profile. The in-image day-2 proof is not wired into profile all (all only bash -n's test_image_day2_tools.sh); --auto on server-rust/Dockerfile selects docs so the proof actually runs. terraform apply on an operator AWS account is not part of this profile (SH-11c approval points 1–5)."
     ;;
   diagnostics)
     add_static_commands

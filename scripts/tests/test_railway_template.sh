@@ -69,6 +69,21 @@ output_keys() {
   awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$1" | LC_ALL=C sort -u
 }
 
+# T2 stdout = canonical 41 + stamp outside the heredoc (#2328).
+expected_keys() {
+  {
+    canonical_keys
+    printf 'MOMO_SELF_HOST_PLATFORM\n'
+  } | LC_ALL=C sort -u
+}
+
+assert_stamp_in_table() {
+  local json="$1" readme="$2"
+  grep -Fq 'MOMO_SELF_HOST_PLATFORM=railway' "$json" || return 1
+  grep -Fq 'MOMO_SELF_HOST_PLATFORM=railway' "$readme" || return 1
+  return 0
+}
+
 run_railway() {
   local out="$1"
   shift
@@ -144,13 +159,17 @@ grep -Fxq "MOMO_CENTRIFUGO_WS_URL=same-origin" "$happy_env" || fail "MOMO_CENTRI
 
 canon="$TMP_ROOT/canonical.keys"
 got="$TMP_ROOT/railway.keys"
-canonical_keys >"$canon"
+expected_keys >"$canon"
 output_keys "$happy_env" >"$got"
 if ! diff -u "$canon" "$got" >"$TMP_ROOT/keys.diff"; then
   cat "$TMP_ROOT/keys.diff" >&2
   fail "key-set diff not empty"
 fi
-pass "key-set equality (diff empty) count=$(wc -l <"$canon" | tr -d ' ')"
+key_count="$(wc -l <"$canon" | tr -d ' ')"
+[ "$key_count" = "42" ] || fail "key-set count expected 42 got $key_count"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
+  fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
+pass "key-set equality (diff empty) count=$key_count"
 
 sabotaged="$TMP_ROOT/sabotaged.env"
 grep -v '^JWT_HMAC=' "$happy_env" >"$sabotaged" || true
@@ -159,6 +178,26 @@ if diff -q "$canon" "$TMP_ROOT/sabotaged.keys" >/dev/null; then
   fail "sabotage (drop JWT_HMAC) still compared equal — comparison is not load-bearing"
 fi
 pass "sabotage drop JWT_HMAC → key-set RED"
+
+README_RAILWAY="$ROOT/infra/railway/README.md"
+assert_stamp_in_table "$RAILWAY_JSON" "$README_RAILWAY" || \
+  fail "MOMO_SELF_HOST_PLATFORM=railway missing from railway.json or README variable table"
+pass "stamp listed in railway.json notes.platformStamp and README variable table"
+
+python3 - "$RAILWAY_JSON" "$TMP_ROOT/railway.nostamp.json" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+needle = "MOMO_SELF_HOST_PLATFORM=railway"
+if needle not in text:
+    raise SystemExit("railway.json missing stamp line to sabotage")
+dst.write_text(text.replace(needle, "MOMO_SELF_HOST_TIER=t2", 1))
+PY
+if assert_stamp_in_table "$TMP_ROOT/railway.nostamp.json" "$README_RAILWAY"; then
+  fail "sabotage (remove stamp from railway.json table) still asserted present"
+fi
+pass "sabotage remove MOMO_SELF_HOST_PLATFORM from railway.json table → RED"
 
 # ---------------------------------------------------------------------------
 # ④ missing public domain / DATABASE_URL → explicit fail sentences

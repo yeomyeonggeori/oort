@@ -108,7 +108,7 @@ when §3.3.0 (b)/(c) fail.
 | **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS SSO/login; `terraform apply` (plan resource count); Budgets email; DNS A; `terraform destroy` (data disk). | Cloud account; IAM user/SSO role (not root); VM + extra disk + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
-| **Cloudflare** (edge only) | T3 | Recipe SH-11d — DNS · Tunnel · TLS in front of a T1/T2 row | `wrangler` / MCP `mcp.cloudflare.com` in the user's session → REST with an API token → browser. | Cloudflare sign-up; nameserver delegation at the registrar; Tunnel token creation. | A T1/T2 row already up. Not compute: Containers/Workers are not adopted (ADR-0184 D1). | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS. | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. |
+| **Cloudflare** (edge only) | T3 | §3.8 · recipe SH-11d (`infra/cloudflare/`) — DNS · Tunnel · TLS in front of a T1/T2 row | MCP `mcp.cloudflare.com` (OAuth = approval) or REST with a user API token (`Zone:DNS:Edit` + Tunnel) → `cloudflared` on the host. `wrangler` is unused (Workers/Pages CLI, not DNS/Tunnel). | Cloudflare sign-up / MCP OAuth or API token; nameserver delegation at the registrar; tunnel token on the host; cleanup confirm. | A T1/T2 row already up (doctor PASS). Not compute: Containers/Workers are not adopted (ADR-0184 D1). If the user says "on Cloudflare", pick T1/T2 first. | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS (mode A) or named tunnel to loopback Caddy (mode B). | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. A `public.*` skip is a user error (§3.8), not PASS. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | Shell in the VM (compose) + `tailscale` CLI. | Tailscale login and Funnel enable (4–5 clicks); opening the one-time claim URL. Zero-account + stable URL is **not** something this playbook delivers (RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git is not required. Durable dir `/workspace`. Tailscale account (one). | Loopback Caddy + Tailscale Funnel to the web port. **Do not** start `caddy.override.yml` here (ACME). `--public-origin` still registers the Funnel URL in Centrifugo. `https://<machine>.<tailnet>.ts.net` while Funnel state under `/workspace` lives. | Doctor PASS including public checks against the Funnel origin, one-time claim URL sent to the user, first-day dump on `/workspace`. |
 
 Desktop Tauri Origins (`tauri://localhost`, `http://tauri.localhost`) are on the
@@ -915,7 +915,8 @@ volatile per process. This VM's egress shares Cloudflare address space, so
 quick tunnel 1015 rate limit is a **structural** exposure (RA-5).
 Cloudflare themselves forbid production and offer no SLA. **An address
 handed off on this path is not production.** Tell the user about volatility
-and 1015 together. Stable URL → Funnel or §3.2.
+and 1015 together. Stable URL → Funnel or §3.2. **Standing install = named
+tunnel (§3.8 / `infra/cloudflare/`), not this fallback.**
 
 ```sh
 curl -fsSL -o /usr/local/bin/cloudflared \
@@ -937,7 +938,7 @@ default path.
 | Path | Domain | Stable URL | WS | Account |
 |---|---|---|---|---|
 | Tailscale Funnel | not required | yes (state durable) | yes — #18827 unmeasured | Tailscale |
-| Cloudflare named tunnel | **required** | yes | long-session unmeasured | Cloudflare |
+| Cloudflare named tunnel | **required** | yes | long-session unmeasured | Cloudflare — standing procedure §3.8 |
 | Own reverse proxy | **required** | yes | own infra | own infra |
 | quick tunnel | not required | no | yes (R-2 measured) | none |
 
@@ -1608,6 +1609,63 @@ T1, same contract as §3.6 with `gcloud` and `--platform gcp-vm`. Human
 approval points: GCP sign-up/billing, OAuth consent, the DNS record.
 **Gate:** `scripts/oort doctor --json` including public checks.
 
+### 3.8 Cloudflare (T3 edge, not compute)
+
+There is no “deploy oort to Cloudflare.” api, Postgres, and Centrifugo do
+not go on Workers, Pages, or Containers (ADR-0184 D1). This is DNS ·
+Tunnel · TLS **in front of** a T1/T2 row that already has doctor PASS.
+Recipe: [`infra/cloudflare/README.md`](../infra/cloudflare/README.md).
+
+If the user says “on Cloudflare,” pick a compute tier first. Install-report
+line (D7): **여기엔 컴퓨트를 올릴 수 없다, T1/T2를 고르자.** Any unnamed
+platform that fails D7 ② (persist volume) or ③ (always-on long WebSocket)
+is T3 the same way.
+
+`wrangler` is unused here: it is the Workers/Pages CLI. DNS writes are MCP
+`mcp.cloudflare.com` (OAuth consent = approval) or REST with a user API
+token (`Zone:DNS:Edit` + Tunnel, env only). Named tunnels are `cloudflared`
+on the host (systemd, not compose).
+
+Human approval (owner account; agent does not click): (1) Cloudflare login
+/ MCP OAuth or API token, (2) nameserver delegation at the registrar,
+(3) tunnel token on the host, (4) cleanup confirm.
+
+**Mode A — DNS.** T1 with a public IP. Grey-cloud A/AAAA while origin Caddy
+(`Caddyfile` + `caddy.override.yml`) issues ACME; then orange-cloud + SSL
+**Full (strict)**. Measure HTTP-01 through the proxy and WebSocket 101.
+
+**Mode B — named tunnel.** No public IP / no open port (Grok Bot VM, NAT
+VPS). Loopback Caddy (`Caddyfile.local`). Ingress
+`http://127.0.0.1:<MOMO_WEB_PORT>` + last rule `http_status:404`
+([`infra/cloudflare/cloudflared.config.example.yml`](../infra/cloudflare/cloudflared.config.example.yml)).
+Do not use the §3.3.11 quick-tunnel fallback as a standing install.
+
+Both modes, Cloudflare hostname as the public origin:
+
+```sh
+scripts/self_host_env.sh --public-origin https://<host>
+scripts/oort doctor --json
+```
+
+`--public-origin` is required. Omitting it makes doctor skip `public.*`
+(doctor function `oort_doctor_check_public`, 「--public-origin
+흔적 없음」). On this T3 front that skip is a **user error**, not PASS.
+Expect `public.healthz` 200 and `public.websocket` **101**. Then
+`GET https://<host>/v1/centrifugo/subscribe` → **403**. Loopback Caddy
+already has that exclusive deny (`infra/rust/Caddyfile.local` `handle
+/v1/centrifugo/*` / `respond 403`). If the handle were missing, stop and
+report to planner — do not patch Caddy here.
+
+Tunnel mode: TLS ends at Cloudflare. `Caddyfile.local` does not emit HSTS
+and emits CSP only on the SPA handle — if the edge response lacks those
+origin headers, that is an SH-11f list-constant candidate, not a Caddy
+edit in this recipe. Diff origin vs edge headers and list Cloudflare
+additions.
+
+**Gate:** `scripts/oort doctor --json` with `public.healthz` and
+`public.websocket` PASS through the Cloudflare hostname. Static proof:
+`scripts/tests/test_cloudflare_recipe.sh`.
+
 ---
 
 ## 4. Day-2
@@ -1668,8 +1726,9 @@ volume with the dump. `down -v` deletes the volume this env names.
 one-off (Railway CLI/MCP) is SH-11a, not this CLI. Upgrade prints a
 token-free digest-replace command; it does not inspect volumes or
 rewrite compose. Done when `scripts/oort doctor --tier t2 --json` is
-PASS. Until the generator stamps T2 (#2328 tracks it), pass `--tier t2`
-or set the service variable `MOMO_SELF_HOST_PLATFORM=railway`. Runbook:
+PASS. `--platform railway` (alias `--railway`) now stamps
+`MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc, so `--tier t2`
+matches the env. Runbook:
 [`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
 § T2.
 
@@ -1720,7 +1779,7 @@ string (doctor already prints `fix` on fail). Summary of ids:
 | `stack.agent_port` | not 401 + Bearer scope | Wrong image; check `releases/latest.json`. |
 | `stack.outbox` | non-`done` rows | `push_candidate` pending is **info** (count) when no push relay is configured (no `PUSH_RELAY_URL` / `docker-compose.push.yml` `push-relay`/`notifier`). `agent_job` pending younger than 5 minutes is info; older is major (kind/status/count/max age listed). Other kinds: `logs relay` if pending/failed. |
 | `stack.migrate_idempotency` | no `IDEMPOTENCY_OK` | `logs migrate`. |
-| `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. |
+| `public.healthz` / `public.websocket` | public origin registered but 200/101 missing | Tunnel/Caddy and `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 restart-once. Cloudflare T3 (§3.8): a `public.*` skip (「흔적 없음」) is a user error — run `--public-origin` first; skip is not PASS. |
 
 Doctor exit **2** (blocker) → do not hand off. Exit **1** (major-only) →
 do not hand off on Local/VPS/Grok Bot install; fix then re-run. Preflight

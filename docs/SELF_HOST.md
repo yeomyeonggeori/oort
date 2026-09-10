@@ -793,11 +793,12 @@ Env derivation for every platform is **one generator flag reading one
 table** — `platform_profiles` in `scripts/self_host_env.sh`. The
 canonical key set (generator heredoc + `oort_public_edge_env_keys`, 41
 keys) never grows: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
-the heredoc, a T2 row prints exactly the canonical set.
+the heredoc, a T2 row prints the canonical set plus the same stamp
+outside the heredoc (42 on stdout; doctor `env.required_keys` stays 41).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|
-| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED` |
+| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
 | `fly` | T1 | `--public-origin https://<host>` (required) | compose `postgres` | none | `infra/rust/local.secrets.env` as the local path + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |
@@ -807,8 +808,13 @@ An unknown name is refused. A T2 row refuses an image mode, `--compose`,
 image mode, or maintained alone with `--public-origin`; a different stamp
 already in the file is refused (drop the volume and the env to switch).
 Local, VPS and the Grok Bot VM have no row — they are the compose canon.
-Cloudflare has no row either: it is a T3 edge in front of one of these
-(recipe SH-11d).
+Cloudflare has no `--platform` row: it is T3 edge, never compute
+(ADR-0184 D1). Do not put api, Postgres, or Centrifugo on Workers, Pages,
+or Containers. After a T1 or T2 install already has doctor PASS, attach
+DNS or a named tunnel in front of it — recipe
+[`infra/cloudflare/README.md`](../infra/cloudflare/README.md) (SH-11d,
+agent path [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.8). If the user
+says “on Cloudflare”, pick a compute tier first.
 
 ### AWS Lightsail / EC2
 

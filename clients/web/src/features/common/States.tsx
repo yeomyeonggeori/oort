@@ -1,4 +1,10 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { cn } from "@/design/lib/cn";
 import { Button } from "@/design/ui/button";
 
@@ -218,7 +224,7 @@ export function InlineBanner({
   testId,
 }: {
   tone?: "error" | "neutral";
-  message: string;
+  message: ReactNode;
   /**
    * id on the SENTENCE, so a control this banner explains can point at it with
    * `aria-describedby` (#1559: 잠긴 컨트롤은 사유를 든다).

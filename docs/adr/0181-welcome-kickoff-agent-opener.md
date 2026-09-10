@@ -33,3 +33,26 @@
 - 서버: `RunTrigger::Welcome` + 가입 3경로의 tx 내 잡 삽입 + worker의 `provider-required` 정적 경로 + workspace settings 키 2(`welcome_agent_member_id`, `welcome_prompt`). 스키마 변경 없음(idempotency_key·settings JSONB 재사용). `schema_v0.sql` 무접촉.
 - red proof: ①같은 멤버 2회 진입 → 오프너 1회 ②provider 없음 → `provider-required` 1회, 연결 후 opener 1회 ③재가입 무트리거 ④웰컴 에이전트 없음 → 게시 0·오류 0 ⑤원장 행 존재 ⑥오프너가 G2 streak에 미계수.
 - 클라: 킥오프 스테이지 캡처(두 스킴·reduced-motion) + 120s 백스톱 시험. 티켓: UX-R2s(engine) → UX-R2b(uxui).
+
+## 개정 (2026-09-10, ADR-0185 D-C)
+
+위 D2·D3 원문은 그대로 둔다. SH-12d-e(ADR-0185 D-C (iii))가 셀프호스트
+에이전트 0명 경로를 개정한다.
+
+- **D2 추가 트리거.** 사람 멤버 첫 합류 tx(원문)는 유지한다. 여기에 **첫
+  에이전트가 웰컴 발화 가능 상태가 되는 전이**를 더한다: 네이티브 에이전트
+  생성 tx, 그리고 hosted connection `active`. 훅은
+  `enqueue_owner_welcome_kickoff_in_tx`(`routes/welcome.rs`). 멱등 키 D4
+  (`welcome:{workspace}:{member}:opener:v1`) 그대로라 중복 0. 대상 v1은
+  오너 1인.
+- **D3 침묵 no-op 폐지(클라).** 활성 스피커가 없으면 서버는 여전히 잡을
+  넣지 않는다(시스템 라인 대체 금지는 유지). 클라는 `decideWelcomeMount`
+  사유 `no-active-agent`로 kickoff-hold를 즉시 풀고 「첫 에이전트 연결」
+  스테이지(`FirstAgentStage`, `FIRST_AGENT_TITLE`)가 첫 대화의 문을 잇는다.
+  120s 백스톱 카드는 이 경로에서 오지 않는다.
+- **D3 스피커 후보(엔진).** 웰컴 스피커는 더 이상 「첫 활성 네이티브
+  에이전트」만이 아니다. hosted(Agent Port) 에이전트가 후보가 되고, 그
+  오프너는 **게이트웨이 레일**로 배달된다(멘션과 동형: hosted 대상에
+  worker `publish` 잡을 넣으면 마커만 소비하고 배달되지 않는다). 네이티브는
+  워커 레일. 게이트가 닫혔거나 `#general`이 승인되지 않은 hosted 스피커는
+  마커를 쓰지 않고 no-op한다.

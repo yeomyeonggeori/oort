@@ -19,8 +19,8 @@ import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
 import {
-  clearOwnerOnboardingPending,
-  ownerOnboardingIsPending,
+  finishOwnerOnboardingInvite,
+  ownerOnboardingShouldMount,
   subscribeOwnerOnboarding,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { AppShell } from "@/app/AppShell";
@@ -125,8 +125,8 @@ export function App() {
   useSyncExternalStore(subscribeFirstRun, snapshotFirstRun, snapshotFirstRun);
   useSyncExternalStore(
     subscribeOwnerOnboarding,
-    ownerOnboardingIsPending,
-    ownerOnboardingIsPending
+    ownerOnboardingShouldMount,
+    ownerOnboardingShouldMount
   );
 
   const capturePose = readFirstAgentCapturePoseFromLocation();
@@ -206,12 +206,13 @@ export function App() {
   // app open first. Then first-agent (#2216), then phone (ADR-0180 D7).
   const bumpFirstRun = () => setFirstRunTick((n) => n + 1);
 
-  if (ownerOnboardingIsPending()) {
+  if (ownerOnboardingShouldMount()) {
     return (
       <OwnerOnboarding
         session={session}
+        replaceSessionMember={replaceSessionMember}
         onFinished={() => {
-          clearOwnerOnboardingPending();
+          finishOwnerOnboardingInvite();
           bumpFirstRun();
         }}
       />

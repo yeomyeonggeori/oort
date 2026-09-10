@@ -367,6 +367,17 @@ describe("줄 제목과 예시", () => {
     ).toBe("자동 실행 루틴: Oort Inbox: 디자인 / 김인턴");
   });
 
+  it("빈 핸들 단축형 식별자도 종류와 이름을 함께 세운다", () => {
+    expect(
+      cleanupRowTitle(
+        artifact({
+          kind: "routine",
+          externalRef: "Oort Inbox: oort / m-019f9a01",
+        })
+      )
+    ).toBe("자동 실행 루틴: Oort Inbox: oort / m-019f9a01");
+  });
+
   it("제어문자가 섞인 이름은 한 줄로 접힌다", () => {
     const title = cleanupRowTitle(
       artifact({ kind: "plugin", externalRef: "oort\n\ninbox\tloader" })

@@ -3,8 +3,10 @@ import {
   ACTIVE_REVEAL_PROOF_NOTE,
   ACTIVE_REVEAL_WARNING,
   agentPortEndpoint,
+  hostedMemberIdShort,
   hostedPreset,
   hostedRoutineLabel,
+  parseHostedRoutineLabel,
   GROK_PAIRING_PURPOSE,
   GROK_PAIRING_REVEAL_HEADLINE,
   HOSTED_AUTH_MODE_CHOICES,
@@ -15,6 +17,7 @@ import {
   PAIRING_REVEAL_SCOPE_NOTE,
   PAIRING_REVEAL_WARNING,
 } from "./presets";
+import { parseCleanupArtifacts } from "./cleanup";
 
 // =============================================================================
 // #1360 HAP-UX1 — preset 과 주소.
@@ -152,14 +155,84 @@ describe("RED PROOF ④ 두 비밀값의 문구는 서로를 대신하지 않는
 });
 
 describe("routine 이름과 지시", () => {
+  const MEMBER = "019F9A01-0000-7000-8000-0000000000aa";
+  const SHORT = "m-019f9a01";
+
   it("이름은 결정적이라 나중에 정리할 때 찾을 수 있다", () => {
     expect(hostedRoutineLabel("오르트", "김인턴")).toBe("Oort Inbox: 오르트 / 김인턴");
+  });
+
+  it("비어 있지 않은 핸들 출력은 member id 를 넘겨도 바이트가 같다", () => {
+    expect(hostedRoutineLabel("오르트", "김인턴", MEMBER)).toBe(
+      "Oort Inbox: 오르트 / 김인턴"
+    );
   });
 
   it("긴 이름도 한 줄 안에 담긴다", () => {
     const label = hostedRoutineLabel("가".repeat(50), "나".repeat(50));
     expect(label).toContain("…");
     expect(label.startsWith("Oort Inbox: ")).toBe(true);
+  });
+
+  it("빈 핸들은 끝에 구분자를 남기지 않고 member id 단축형을 쓴다", () => {
+    const label = hostedRoutineLabel("oort", "", MEMBER);
+    expect(label).toBe(`Oort Inbox: oort / ${SHORT}`);
+    expect(label.endsWith(" / ")).toBe(false);
+    expect(label).toContain(SHORT);
+    expect(hostedRoutineLabel("oort", "   ", MEMBER)).toBe(label);
+    expect(hostedMemberIdShort(MEMBER)).toBe(SHORT);
+  });
+
+  it("단축형을 만들 수 없으면 구분자를 붙이지 않는다", () => {
+    expect(hostedRoutineLabel("oort", "")).toBe("Oort Inbox: oort");
+    expect(hostedRoutineLabel("oort", "", "zz")).toBe("Oort Inbox: oort");
+    expect(hostedRoutineLabel("oort", "").endsWith(" / ")).toBe(false);
+  });
+
+  it("라벨을 파싱하면 같은 식별자가 나온다", () => {
+    const emptyHandle = hostedRoutineLabel("oort", "", MEMBER);
+    expect(parseHostedRoutineLabel(emptyHandle)).toEqual({
+      workspace: "oort",
+      identifier: SHORT,
+    });
+    expect(parseHostedRoutineLabel(emptyHandle)?.identifier).toBe(
+      hostedMemberIdShort(MEMBER)
+    );
+
+    const named = hostedRoutineLabel("오르트", "김인턴", MEMBER);
+    expect(parseHostedRoutineLabel(named)).toEqual({
+      workspace: "오르트",
+      identifier: "김인턴",
+    });
+  });
+
+  it("개정 전의 빈 핸들 꼬리 구분자는 식별자가 아니므로 거절한다", () => {
+    expect(parseHostedRoutineLabel("Oort Inbox: oort / ")).toBeNull();
+  });
+
+  it("cleanup 매니페스트 파서가 단축형 라벨을 그대로 왕복한다", () => {
+    const label = hostedRoutineLabel("oort", "", MEMBER);
+    const rows = parseCleanupArtifacts({
+      cleanupArtifacts: [
+        {
+          id: MEMBER,
+          kind: "routine",
+          externalRef: label,
+          expectedAction: "remove",
+          currentStatus: "present",
+          disposition: "pending",
+          resolved: false,
+          required: true,
+          updatedAtMs: 1_700_000_000_000,
+        },
+      ],
+    });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.externalRef).toBe(label);
+    expect(parseHostedRoutineLabel(rows[0]?.externalRef ?? "")).toEqual({
+      workspace: "oort",
+      identifier: SHORT,
+    });
   });
 
   it("routine 지시는 inbox 확인, claim, 원래 자리 게시 셋을 말한다", () => {

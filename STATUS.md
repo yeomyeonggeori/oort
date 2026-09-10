@@ -1,10 +1,47 @@
 # oort 진행 현황
 
+## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
+
+- Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.
+- runtime-unverified: GUI 클릭 경로는 이 워크트리에서 브라우저를 누르지 않음(기존 FIRST_DAY 규율). S1 카피는 `feat/2332-onboarding-s1`에서 인용(아직 track/engine 미랜딩).
+## hostedRoutineLabel 빈 핸들 식별자 (#2395, 2026-09-10)
+
+- Track UXUI. `fix/2395-routine-label-empty-handle` onto `origin/track/uxui`. ADR-0162 D6 결정 (a): 빈 핸들이면 식별자 세그먼트는 `m-<member id hex 8>`(끝에 ` / ` 금지). 비어 있지 않은 핸들 출력은 바이트 불변. `parseHostedRoutineLabel`이 그 세그먼트를 왕복한다. UI 변경 없음.
+- 검증: `@momo/core` typecheck+vitest · 사보타주(정규화 제거 / 왕복 파괴) RED.
+- runtime-unverified: 실스택 grok routine 생성·cleanup 매니페스트 왕복.
+## SH-11g/f 리뷰 잔여 (#2328, 2026-09-10)
+
+- Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
+- runtime-unverified: RELEASING dispatch 실주행의 gate:csp-deploy는 발행 창. T2 스탬프 실서비스 day-2는 SH-11a.
+
+## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
+
+- Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).
+- runtime-unverified: Railway one-off 실측은 SH-11a.
+
+## SH-12c design-review 잔여 + kickoff 백스톱 관찰자 (#2356)
+
+- Track UXUI. `chore/2356-sh12c-nits` onto `origin/track/uxui`. IssuedInviteCard 공유 문장 `break-keep`(390px 「화면에서|만」 분절 0). 발급 뒤 채워진 primary는 「계속」, 복사 outline은 Button default/`h-control`(28px `sm` 예외 제거; 플래너 36px는 컨트롤 축에 없어 named `h-control` 32). S2 발급 CTA·복사 라벨은 설정 › 멤버와 초대와 `inviteLabels.ts` 상수 공유. `welcomeKickoff.noActiveAgent` 백스톱 관찰자는 mount 전에 부착해 1프레임 플래시를 센다.
+- runtime-unverified: 실서버 claim→S2 390px 캡처는 design-review 범위(정적 PASS, 픽셀 SKIPPED). 백스톱 플래시는 jsdom MutationObserver.
+## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
+
+- Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.
+- R2: 사실 행 동어반복 해소(H1) · 재개 행 `??` 제거(H2) · 이름 칸 폴백 상수 단일화(M1). 문장 다섯 문장은 불변.
+- R3: 재발급 런치는 원문 이름(`member?.displayName ?? ""`). `OAUTH_CONSENT_AGENT_FALLBACK` 별칭 삭제. 사용량 라벨은 `HOSTED_AGENT_MISSING_NAME`.
+- 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사실 칸 `@handle` · 재개 행 폴백 · 사보타주(문장 폴백을 사실 칸에 / `??` 복구) RED.
+- runtime-unverified: 실스택 hosted 4단계 왕복은 mock·RTL 범위.
+## SH-11d Cloudflare T3 엣지 레시피 (#2386, 2026-09-10)
+
+- Track engine. `feat/2386-cloudflare-edge` onto `origin/track/engine`. T3 앞단만: `infra/cloudflare/`(README 첫 문단 = 「Cloudflare에 oort를 배포」는 없다 · `cloudflared.config.example.yml` 루프백 ingress + 마지막 `http_status:404` · `dns.example.md`). compose/Caddyfile 무수정. `wrangler` 미사용(Workers/Pages CLI).
+- `docs/SELF_HOST_AGENT.md`(+ko) §1 행 · §3.8 · §3.3.11 「상시 = named tunnel」상호 링크. `SELF_HOST.md`(+ko) Platforms 1문단. 정적 시험 `scripts/tests/test_cloudflare_recipe.sh` (사보타주 ①공개IP ingress ②404 제거 ③quick-tunnel ④`--public-origin` 생략 → 전부 RED).
+- runtime-unverified: 성재 Cloudflare 계정·앞단 T1(SH-11b/11c) 실측 E2E(모드 B 101/403/헤더 diff/재부팅 복귀, 모드 A DNS 1레코드). `--public-origin` 생략 시 doctor `public.*` skip은 레시피가 사용자 오류로 단정(doctor 본체 무수정).
+
 ## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
 
 - Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
 - 검증: 정적 계약(mounts·always-on·RAM≥2GiB·ports {80,443}·digest 리터럴 0·README 스크립트 실재·data-root `/data`). `local_gate.sh --profile docs`.
 - runtime-unverified: 소유자 `fly auth login` 실배포·doctor 27/27·재시작 보존(승인 지점 1–4 대기).
+
 ## SH-11c AWS Lightsail/EC2 T1 레시피 (#2377, 2026-09-10)
 
 - Track engine. `feat/2377-aws-t1-recipe` onto `origin/track/engine`. `infra/aws/`: Lightsail 인스턴스 1 + 고정 IP + `/data` 디스크(`prevent_destroy`) + 포트 22/80/443만 + Budgets + EC2 변수 분기. cloud-init는 Docker `data-root=/data/docker`, 시크릿 비생성. IAM 최소권한(루트 금지). `scripts/tests/test_aws_recipe.sh` 정적 계약 + 사보타주 3 RED. terraform 부재 시 SH-11f 선택 도구 skip 1줄.
@@ -22,7 +59,6 @@
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
-
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 
 - Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
@@ -34,6 +70,13 @@
 - R2: hosted opener는 mentions와 같은 gateway 레일(run in-tx · inbox · `method=gateway`). 배달 불가면 마커를 쓰지 않음. `pg_advisory_xact_lock(hashtext(opener key))`. provider_required 완료는 opener 마커가 아님. native `#general` join은 오프너 speaker만, audit `channel_memberships_created`가 그 수를 반영.
 - 멱등: `welcome:{ws}:{owner}:opener:v1`. 오너 탐지 = 가장 먼저 만들어진 active human owner.
 - runtime-unverified: 실스택 셀프호스트 first-agent 왕복(웹 SH-12d-w). PG conformance는 로컬 throwaway PG.
+
+## SH-12b-w 온보딩 S1 「내 워크스페이스·내 이름」 (#2332)
+
+- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2/E0 `changeMyProfile` `{handle, displayName}` 1회. 핸들 409는 제품 한국어, stale 409는 상대 이름+유지/저장, 비필드 실패는 「다시 시도」+「지금은 건너뛰기」. `oort.onboarding.v1` 은 S1(`workspace-profile`)·S2(`invite`) 독립 플래그. S2 skip은 invite만 지운다. 설정 › 워크스페이스·프로필은 S1과 같은 stale 조각·한 PATCH.
+- R3: S2 「나중에」가 S1 재제안을 지우지 않음. 설정 stale 409는 초안 유지+공용 컴포넌트. 방향 조사·검증은 제출/blur. 프로필은 단일 폼.
+- R4: stale 긴 이름은 이름만 줄바꿈(」+조사만 nowrap). 재제안 S1은 서버 멤버/워크스페이스를 우선하고 설정에서 저장한 문은 PATCH하지 않는다. S1 완료가 이미 거절한 S2를 다시 열지 않는다. 설정 409 초점은 effect. 프로필 검증 칸 높이 예약. 500은 배너만.
+- runtime-unverified: 실서버 claim→S1→S2 왕복은 mock·RTL 범위.
 
 ## SH-12c 온보딩 S2 「팀원 초대」 (#2333)
 
@@ -131,7 +174,7 @@
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
-- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
+- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
 - 검증: `scripts/tests/test_railway_template.sh` (키 집합 diff 0 · JWT_HMAC 사보타주 RED · `caddy adapt` · 403 순서 · 게이트 픽스처 PASS/RED) · `scripts/local_gate.sh --profile docs`.
 - runtime-unverified: `RAILWAY_TOKEN` 없음 — 실배포 `railway up` / 원격 `public.healthz`·`public.websocket`은 planner 수행.
 
