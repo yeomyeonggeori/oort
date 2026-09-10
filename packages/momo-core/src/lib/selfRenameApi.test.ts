@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { changeMyDisplayName, changeMyHandle, memberFromWire } from "./api";
+import { changeMyDisplayName, changeMyHandle, changeMyProfile, memberFromWire } from "./api";
 import { WireShapeError } from "./wire";
 
 function installHost(): void {
@@ -42,6 +42,32 @@ describe("memberFromWire", () => {
 
   it("refuses a body without member fields", () => {
     expect(() => memberFromWire({ displayName: "성재" })).toThrow(WireShapeError);
+  });
+});
+
+describe("changeMyProfile", () => {
+  it("PATCHes members/me once with handle and displayName", async () => {
+    installHost();
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ member: MEMBER }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(
+      changeMyProfile(WS, { handle: "seongjae", displayName: "성재" })
+    ).resolves.toEqual(MEMBER);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/members/me`,
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ displayName: "성재", handle: "seongjae" }),
+      })
+    );
   });
 });
 

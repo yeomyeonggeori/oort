@@ -37,12 +37,11 @@ export function progressLabel(step: OnboardingStep): string | null {
 }
 
 /**
- * Post-claim zero-base stages (ADR-0185 D-A (3), SH-12c).
+ * Post-claim zero-base stages (ADR-0185 D-A (3), SH-12b-w / SH-12c).
  *
- * Order is the table. Counter text is derived from it, so S2 is always
- * `2/2` while this list has two slots. S1 (`workspace-profile`, SH-12b-w)
- * is built in parallel and is not mounted here; inserting it later means
- * adding it to `OWNER_ONBOARDING_MOUNTED` without changing the S2 component.
+ * Order is the table. Counter text is derived from it, so S1 is `1/2` and
+ * S2 is `2/2` while this list has two slots. Claim password is not a step.
+ * Inserting a stage means adding it here; S2 does not fork.
  */
 export const OWNER_ONBOARDING_STAGES = [
   "workspace-profile",
@@ -51,10 +50,17 @@ export const OWNER_ONBOARDING_STAGES = [
 
 export type OwnerOnboardingStage = (typeof OWNER_ONBOARDING_STAGES)[number];
 
-/** Stages this checkout actually mounts. S1 lands in #2332. */
+/** Stages this checkout actually mounts. Claim → S1 (required) → S2 (skip). */
 export const OWNER_ONBOARDING_MOUNTED: readonly OwnerOnboardingStage[] = [
+  "workspace-profile",
   "invite",
 ];
+
+export function isOwnerOnboardingStage(
+  value: string | null | undefined
+): value is OwnerOnboardingStage {
+  return value === "workspace-profile" || value === "invite";
+}
 
 export function ownerOnboardingTotalSteps(): number {
   return OWNER_ONBOARDING_STAGES.length;
@@ -67,8 +73,28 @@ export function ownerOnboardingProgressLabel(
   return `${index + 1}/${OWNER_ONBOARDING_STAGES.length}`;
 }
 
-export function initialOwnerOnboardingStage(): OwnerOnboardingStage {
+export function resolveOwnerOnboardingStage(
+  pending: string | null | undefined
+): OwnerOnboardingStage {
+  if (
+    isOwnerOnboardingStage(pending) &&
+    OWNER_ONBOARDING_MOUNTED.includes(pending)
+  ) {
+    return pending;
+  }
   return OWNER_ONBOARDING_MOUNTED[0] ?? "invite";
+}
+
+export function nextOwnerOnboardingStage(
+  current: OwnerOnboardingStage
+): OwnerOnboardingStage | null {
+  const index = OWNER_ONBOARDING_MOUNTED.indexOf(current);
+  if (index < 0) return OWNER_ONBOARDING_MOUNTED[0] ?? null;
+  return OWNER_ONBOARDING_MOUNTED[index + 1] ?? null;
+}
+
+export function initialOwnerOnboardingStage(): OwnerOnboardingStage {
+  return resolveOwnerOnboardingStage(null);
 }
 
 /** ADR-0185 §8 sealed S2 defaults: TTL 24h, uses 1, re-issuable in settings. */

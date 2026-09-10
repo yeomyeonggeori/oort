@@ -51,6 +51,19 @@ describe("claim page restore hold (ConnectPage order)", () => {
     expect(body.indexOf("markOwnerOnboardingPending()")).toBeLessThan(
       body.indexOf("setClaimed(session)")
     );
+    expect(source).toContain("finishOwnerOnboardingInvite()");
+    expect(source).not.toContain("clearOwnerOnboardingPending()");
+  });
+});
+
+describe("app onboarding finish (H-R2-1)", () => {
+  it("S2 finish clears only invite", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../../app/App.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(source).toContain("finishOwnerOnboardingInvite()");
+    expect(source).not.toContain("clearOwnerOnboardingPending()");
   });
 });
 

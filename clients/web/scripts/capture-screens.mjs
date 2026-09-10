@@ -7029,7 +7029,7 @@ async function captureMobile(browser, scheme) {
   await assertTapTargets(page, `settings ${scheme}`, [
     ["settings-back-to-app", "앱으로 돌아가기"],
     ["profile-display-name", "표시 이름 입력"],
-    ["profile-display-name-save", "표시 이름 저장"],
+    ["profile-save", "프로필 저장"],
   ]);
   await shoot(page, "settings");
 
