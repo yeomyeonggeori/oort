@@ -3,10 +3,13 @@ import {
   gatewayPrefillFocus,
   initialOnboarding,
   initialOwnerOnboardingStage,
+  nextOwnerOnboardingStage,
   ownerOnboardingProgressLabel,
   ownerOnboardingTotalSteps,
+  OWNER_ONBOARDING_MOUNTED,
   OWNER_ONBOARDING_STAGES,
   progressLabel,
+  resolveOwnerOnboardingStage,
   transitionFor,
 } from "./onboardingFlow";
 
@@ -80,9 +83,15 @@ describe("owner onboarding stages (ADR-0185)", () => {
   it("totalSteps_is_2", () => {
     expect(ownerOnboardingTotalSteps()).toBe(2);
     expect(OWNER_ONBOARDING_STAGES).toHaveLength(2);
+    expect(OWNER_ONBOARDING_STAGES).toEqual(["workspace-profile", "invite"]);
     expect(ownerOnboardingProgressLabel("workspace-profile")).toBe("1/2");
     expect(ownerOnboardingProgressLabel("invite")).toBe("2/2");
-    expect(initialOwnerOnboardingStage()).toBe("invite");
+    expect(initialOwnerOnboardingStage()).toBe("workspace-profile");
+    expect(OWNER_ONBOARDING_MOUNTED[0]).toBe("workspace-profile");
+    expect(resolveOwnerOnboardingStage(null)).toBe("workspace-profile");
+    expect(resolveOwnerOnboardingStage("invite")).toBe("invite");
+    expect(nextOwnerOnboardingStage("workspace-profile")).toBe("invite");
+    expect(nextOwnerOnboardingStage("invite")).toBeNull();
   });
 });
 

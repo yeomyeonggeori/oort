@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
-import { claimOwnerPassword, type LoginResponse } from "@momo/core/lib/api";
+import { claimOwnerPassword, type LoginResponse, type Member } from "@momo/core/lib/api";
 import { claimFailureCopy, type ClaimFailure } from "@momo/core/features/auth/claimModel";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
@@ -15,9 +15,10 @@ import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
 import {
-  clearOwnerOnboardingPending,
+  finishOwnerOnboardingInvite,
   markOwnerOnboardingPending,
 } from "@/features/onboarding/ownerOnboardingStore";
+import { applyLogin } from "@/lib/session";
 import { readClaimToken } from "./claimPath";
 import {
   holdSessionRestore,
@@ -55,6 +56,7 @@ export function ClaimPage({
 }) {
   const token = readClaimToken(window.location.pathname);
   const [claimed, setClaimed] = useState<LoginResponse | null>(null);
+  const claimedRef = useRef<LoginResponse | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -97,6 +99,7 @@ export function ClaimPage({
       const session = await claimOwnerPassword(token, password);
       recordFreshSignupFirstRun(session);
       markOwnerOnboardingPending();
+      claimedRef.current = session;
       setClaimed(session);
     } catch (err) {
       releaseSessionRestore();
@@ -111,11 +114,23 @@ export function ClaimPage({
     void attempt();
   }
 
-  function finishOwnerOnboarding(session: LoginResponse) {
+  function replaceClaimedMember(member: Member) {
+    const current = claimedRef.current;
+    if (!current) return;
+    const next = { ...current, member };
+    claimedRef.current = next;
+    applyLogin(next);
+    setClaimed(next);
+  }
+
+  function finishOwnerOnboarding() {
+    const session = claimedRef.current;
+    if (!session) return;
     window.history.replaceState(null, "", "/");
     // Markers were written at claim success. onLoggedIn still opens the
-    // first-run gate; clear S2 pending so App does not remount this stage.
-    clearOwnerOnboardingPending();
+    // first-run gate. Clear ONLY the invite flag so a skipped S1 is
+    // re-offered on the next load (ADR-0185 §5-1).
+    finishOwnerOnboardingInvite();
     onLoggedIn(session);
     releaseSessionRestore();
   }
@@ -124,7 +139,8 @@ export function ClaimPage({
     return (
       <OwnerOnboarding
         session={claimed}
-        onFinished={() => finishOwnerOnboarding(claimed)}
+        replaceSessionMember={replaceClaimedMember}
+        onFinished={finishOwnerOnboarding}
       />
     );
   }

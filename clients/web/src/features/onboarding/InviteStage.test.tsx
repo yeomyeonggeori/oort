@@ -14,6 +14,10 @@ import {
 } from "@/features/settings/inviteLabels";
 import { InviteStage } from "./InviteStage";
 import { OwnerOnboarding } from "./OwnerOnboarding";
+import {
+  clearOwnerOnboardingPending,
+  markOwnerOnboardingStage,
+} from "./ownerOnboardingStore";
 import { S2_PRIMARY_LABEL, S2_REENTRY } from "./s2Copy";
 
 const createInvite = vi.hoisted(() => vi.fn());
@@ -75,6 +79,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  clearOwnerOnboardingPending();
+  markOwnerOnboardingStage("invite");
   createInvite.mockReset();
   createInvite.mockResolvedValue(issued);
   fetchWorkspace.mockReset();
@@ -110,6 +116,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  clearOwnerOnboardingPending();
   vi.unstubAllGlobals();
 });
 
@@ -195,6 +202,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );
@@ -249,6 +257,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );
@@ -352,6 +361,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );
