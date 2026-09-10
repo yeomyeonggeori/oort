@@ -97,7 +97,7 @@ NON_COMPOSE_ENV_TEMPLATES=()
 # -----------------------------------------------------------------------------
 # Platform templates (non-compose) — ADR-0184 D5 / #2297.
 #
-# A managed platform (Railway; Fly T1 host image + fly.toml in SH-11b; AWS T1 terraform recipe in SH-11c) ships
+# A managed platform (Railway; Fly T1 host image + fly.toml in SH-11b; AWS T1 terraform recipe in SH-11c; Cloudflare T3 edge in SH-11d) ships
 # its deployment as a service catalog + edge file + image recipe, not as a
 # compose rendering. Those files sit outside the RENDERINGS table by nature,
 # and until #2297 the only record of that was a prose note inside
@@ -118,6 +118,7 @@ PLATFORM_TEMPLATES=(
   "infra/railway|scripts/tests/test_railway_template.sh|infra/railway/README.md infra/railway/railway.json infra/railway/Caddyfile.railway infra/railway/Dockerfile.caddy"
   "infra/fly|scripts/tests/test_fly_recipe.sh|infra/fly/README.md infra/fly/fly.toml infra/fly/Dockerfile.host infra/fly/entrypoint.sh"
   "infra/aws|scripts/tests/test_aws_recipe.sh|infra/aws/README.md infra/aws/cloud-init.yaml infra/aws/iam-policy.json infra/aws/terraform/main.tf infra/aws/terraform/variables.tf infra/aws/terraform/outputs.tf"
+  "infra/cloudflare|scripts/tests/test_cloudflare_recipe.sh|infra/cloudflare/README.md infra/cloudflare/cloudflared.config.example.yml infra/cloudflare/dns.example.md"
 )
 
 # Compose-shaped files under infra/ that no rendering row names, with the
