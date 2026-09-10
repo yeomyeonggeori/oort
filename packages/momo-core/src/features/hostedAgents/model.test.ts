@@ -5,6 +5,8 @@ import { WireShapeError } from "../../lib/wire";
 import {
   boundedLabel,
   connectionFacts,
+  hostedAgentLabel,
+  HOSTED_AGENT_LABEL_FALLBACK,
   hostedFailureMessage,
   hostedStatusDetail,
   hostedStatusLabel,
@@ -306,6 +308,20 @@ describe("이름 다듬기", () => {
 
   it("짧은 이름은 그대로 둔다", () => {
     expect(boundedLabel("hermes")).toBe("hermes");
+  });
+
+  it("빈 이름은 구멍을 남기지 않는다", () => {
+    expect(hostedAgentLabel("")).toBe(HOSTED_AGENT_LABEL_FALLBACK);
+    expect(hostedAgentLabel("   ")).toBe(HOSTED_AGENT_LABEL_FALLBACK);
+    expect(hostedAgentLabel("그록봇")).toBe("그록봇");
+  });
+
+  it("사실 목록의 전용 에이전트 칸도 빈 이름을 구멍으로 두지 않는다", () => {
+    const facts = connectionFacts(connection({ status: "detected" }), "");
+    expect(facts[0]).toEqual({
+      key: "전용 에이전트",
+      value: HOSTED_AGENT_LABEL_FALLBACK,
+    });
   });
 });
 

@@ -287,7 +287,9 @@ function HostedWizardBody({
       : null;
 
   const agent = connection ? memberFor(directory, connection.agentMemberId) : null;
-  const agentLabel = agent?.displayName ?? draft.displayName.trim();
+  // Empty directory names are missing, not "present and blank". `??` kept ""
+  // and dropped the 1단계 draft (E2E-A A6: 「승인하면 는」).
+  const agentLabel = (agent?.displayName ?? "").trim() || draft.displayName.trim();
   const agentHandle = agent?.handle ?? normalizeAgentHandle(draft.handle);
   const endpoint = agentPortEndpoint(absoluteApiBase());
 

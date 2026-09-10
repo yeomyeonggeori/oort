@@ -18,7 +18,7 @@ import {
   type HostedScopeChoice,
 } from "./approval";
 import {
-  boundedLabel,
+  hostedAgentLabel,
   isHostedScope,
   HOSTED_AGENT_SCOPES,
   type HostedAgentScope,
@@ -223,7 +223,7 @@ export function oauthConsentConsequence(
   channelCount: number,
   approvedScopes: readonly HostedAgentScope[]
 ): string {
-  const name = attachParticle(boundedLabel(agentLabel), "topic");
+  const name = attachParticle(hostedAgentLabel(agentLabel), "topic");
   const actions = scopeActionList(approvedScopes);
   if (channelCount === 0) {
     return `${name} 접속만 하고 어떤 대화에도 닿지 못합니다. 채널을 하나도 승인하지 않았기 때문입니다.`;

@@ -392,6 +392,17 @@ export function boundedLabel(raw: string, max = 60): string {
   return points.length <= max ? collapsed : `${points.slice(0, max).join("")}…`;
 }
 
+/**
+ * 4단계 승인 문장·사실 목록이 쓰는 이름. 비어 있으면 조사만 남는 구멍
+ * (E2E-A A6: 「승인하면 는」)을 막기 위해 같은 단락이 이미 쓰는 낱말로 대체한다.
+ */
+export const HOSTED_AGENT_LABEL_FALLBACK = "이 에이전트";
+
+export function hostedAgentLabel(raw: string, max = 60): string {
+  const cleaned = boundedLabel(raw, max);
+  return cleaned === "" ? HOSTED_AGENT_LABEL_FALLBACK : cleaned;
+}
+
 export interface HostedFact {
   key: string;
   value: string;
@@ -411,7 +422,7 @@ export function connectionFacts(
   agentLabel: string
 ): HostedFact[] {
   return [
-    { key: "전용 에이전트", value: boundedLabel(agentLabel) },
+    { key: "전용 에이전트", value: hostedAgentLabel(agentLabel) },
     { key: "연결 상태", value: hostedStatusLabel(connection.status) },
     { key: "인증 방식", value: hostedAuthModeLabel(connection.authMode) },
     { key: "허용 대상", value: connection.audience, token: true },
