@@ -26,6 +26,7 @@ use uuid::Uuid;
 
 use crate::identity::{Member, MemberKind};
 use crate::message::cent_channel;
+use momo_settings::is_handle_banned_in_tx;
 
 /// The `data.type` of a self-rename broadcast. Same dotted family as
 /// `message.new` / `message.edited`; distinct from the ephemeral rail.
@@ -40,13 +41,23 @@ pub struct DisplayNameRename {
     pub broadcast_outbox_ids: Vec<i64>,
 }
 
-/// Outcome of a successful self handle change. No outbox: a handle is a roster
-/// fact, but **past message bodies that mention `@oldhandle` are not rewritten**
-/// (ADR-0185 E2). The stored text is the SoT the author typed.
+/// Outcome of a successful self handle change. Past `message.body` bytes that
+/// mention `@oldhandle` are not rewritten (ADR-0185 E2). Co-members still
+/// need the new handle, so a successful change rides the same `member.renamed`
+/// rail as a display-name write — with `handle` in the payload.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandleRename {
     pub member: Member,
     pub previous_handle: String,
+    pub broadcast_outbox_ids: Vec<i64>,
+}
+
+/// Handle-allocation refusal that is not a unique-constraint 409.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HandleChangeRejected {
+    /// Same sentence/status join, agent create, and hosted-agent create use
+    /// (`JoinRejection::Banned` → 403 `member is banned from this workspace`).
+    Banned,
 }
 
 /// The `outbox.payload` for a display-name change on one channel, matching the
@@ -59,6 +70,7 @@ pub fn build_member_renamed_payload(
     channel_id: Uuid,
     member_id: Uuid,
     display_name: &str,
+    handle: &str,
     timestamp_ms: i64,
 ) -> Value {
     let channel = cent_channel(workspace_id, channel_id);
@@ -71,6 +83,7 @@ pub fn build_member_renamed_payload(
             "workspace_id": workspace_id.to_string().to_uppercase(),
             "member_id": member_token,
             "display_name": display_name,
+            "handle": handle,
         },
     });
     let envelope = BroadcastPayload {
@@ -157,6 +170,33 @@ pub async fn rename_own_display_name_in_tx(
         handle: row.try_get("handle")?,
     };
 
+    let broadcast_outbox_ids = enqueue_member_renamed(
+        conn,
+        workspace_id,
+        member_id,
+        &member.display_name,
+        &member.handle,
+    )
+    .await?;
+
+    Ok(Some(DisplayNameRename {
+        member,
+        previous_display_name,
+        broadcast_outbox_ids,
+    }))
+}
+
+/// One `member.renamed` broadcast per live `ch:` channel the member is in.
+/// Display-name and handle writes share this rail so co-members refetch the
+/// same roster event. Sabotage of the handle path: stop calling
+/// [`enqueue_handle_change_fanout`].
+async fn enqueue_member_renamed(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    display_name: &str,
+    handle: &str,
+) -> Result<Vec<i64>, DbError> {
     let channel_ids: Vec<Uuid> = sqlx::query_scalar(
         "SELECT ms.channel_id \
            FROM membership ms \
@@ -181,7 +221,8 @@ pub async fn rename_own_display_name_in_tx(
             workspace_id,
             channel_id,
             member_id,
-            &member.display_name,
+            display_name,
+            handle,
             now_ms,
         );
         let id = emit_outbox(
@@ -195,12 +236,19 @@ pub async fn rename_own_display_name_in_tx(
         .await?;
         broadcast_outbox_ids.push(id);
     }
+    Ok(broadcast_outbox_ids)
+}
 
-    Ok(Some(DisplayNameRename {
-        member,
-        previous_display_name,
-        broadcast_outbox_ids,
-    }))
+/// Load-bearing name: the handle-change test's include_str names this call.
+/// Sabotage: delete the call in [`change_own_handle_in_tx`].
+async fn enqueue_handle_change_fanout(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    display_name: &str,
+    handle: &str,
+) -> Result<Vec<i64>, DbError> {
+    enqueue_member_renamed(conn, workspace_id, member_id, display_name, handle).await
 }
 
 /// Set the **caller's own** handle. `kind = 'human'` is belt-and-suspenders on
@@ -208,14 +256,15 @@ pub async fn rename_own_display_name_in_tx(
 ///
 /// A unique violation on `member_handle_uniq` is returned as [`DbError`] so the
 /// transaction rolls back; the route maps it onto join's `HandleTaken` 409
-/// sentence. Past `message.body` bytes are not touched — `@oldhandle` in a
+/// sentence. A banned handle is [`HandleChangeRejected::Banned`] (join's
+/// 403 sentence). Past `message.body` bytes are not touched — `@oldhandle` in a
 /// previously stored body stays `@oldhandle`.
 pub async fn change_own_handle_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     handle: &str,
-) -> Result<Option<HandleRename>, DbError> {
+) -> Result<Result<Option<HandleRename>, HandleChangeRejected>, DbError> {
     let previous = sqlx::query(
         "SELECT id, workspace_id, kind::text AS kind, status::text AS status, \
                 display_name, handle \
@@ -237,7 +286,7 @@ pub async fn change_own_handle_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(previous) = previous else {
-        return Ok(None);
+        return Ok(Ok(None));
     };
     let previous_handle: String = previous.try_get("handle")?;
     if previous_handle == handle {
@@ -245,7 +294,7 @@ pub async fn change_own_handle_in_tx(
         let kind = MemberKind::from_db_label(&kind_label).ok_or_else(|| {
             sqlx::Error::Decode(format!("unknown member_kind '{kind_label}'").into())
         })?;
-        return Ok(Some(HandleRename {
+        return Ok(Ok(Some(HandleRename {
             member: Member {
                 id: previous.try_get("id")?,
                 workspace_id: previous.try_get("workspace_id")?,
@@ -255,7 +304,15 @@ pub async fn change_own_handle_in_tx(
                 handle: previous_handle.clone(),
             },
             previous_handle,
-        }));
+            broadcast_outbox_ids: Vec::new(),
+        })));
+    }
+
+    // Load-bearing ban. Sabotage: delete this check and the banned-handle
+    // test must go RED — join/agents/hosted-agent would still refuse, this
+    // path would allocate.
+    if is_handle_banned_in_tx(conn, handle).await? {
+        return Ok(Err(HandleChangeRejected::Banned));
     }
 
     let row = sqlx::query(
@@ -276,7 +333,7 @@ pub async fn change_own_handle_in_tx(
     .fetch_optional(&mut *conn)
     .await?;
     let Some(row) = row else {
-        return Ok(None);
+        return Ok(Ok(None));
     };
     let kind_label: String = row.try_get("kind")?;
     let kind = MemberKind::from_db_label(&kind_label)
@@ -289,10 +346,19 @@ pub async fn change_own_handle_in_tx(
         display_name: row.try_get("display_name")?,
         handle: row.try_get("handle")?,
     };
-    Ok(Some(HandleRename {
+    let broadcast_outbox_ids = enqueue_handle_change_fanout(
+        conn,
+        workspace_id,
+        member_id,
+        &member.display_name,
+        &member.handle,
+    )
+    .await?;
+    Ok(Ok(Some(HandleRename {
         member,
         previous_handle,
-    }))
+        broadcast_outbox_ids,
+    })))
 }
 
 #[cfg(test)]
@@ -304,7 +370,7 @@ mod tests {
         let ws = Uuid::from_u128(1);
         let channel = Uuid::from_u128(2);
         let member = Uuid::from_u128(3);
-        let payload = build_member_renamed_payload(ws, channel, member, "곽성재", 1234);
+        let payload = build_member_renamed_payload(ws, channel, member, "곽성재", "seongjae", 1234);
 
         assert_eq!(payload["channel"], json!(cent_channel(ws, channel)));
         assert_eq!(
@@ -312,6 +378,7 @@ mod tests {
             json!(MEMBER_RENAMED_BROADCAST_TYPE)
         );
         assert_eq!(payload["data"]["payload"]["display_name"], json!("곽성재"));
+        assert_eq!(payload["data"]["payload"]["handle"], json!("seongjae"));
         assert_eq!(
             payload["data"]["payload"]["member_id"],
             json!(member.to_string().to_uppercase())

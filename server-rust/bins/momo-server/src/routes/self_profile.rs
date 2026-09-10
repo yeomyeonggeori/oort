@@ -22,7 +22,9 @@ use axum::{Extension, Json};
 use momo_auth::Principal;
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::DbError;
-use momo_messaging::{change_own_handle_in_tx, rename_own_display_name_in_tx, HandleRename};
+use momo_messaging::{
+    change_own_handle_in_tx, rename_own_display_name_in_tx, HandleChangeRejected, HandleRename,
+};
 use momo_settings::{
     is_handle_unique_violation, normalized_join_display_name, normalized_requested_handle,
     JoinRejection,
@@ -129,28 +131,35 @@ pub async fn rename_self(
                     let applied: HandleRename =
                         match change_own_handle_in_tx(conn, workspace_id, member_id, handle).await?
                         {
-                            Some(applied) => applied,
-                            None => {
+                            Ok(Some(applied)) => applied,
+                            Ok(None) => {
                                 return Ok(Err(ApiError::forbidden(
                                     "not a live member of this workspace",
                                 )))
                             }
+                            Err(HandleChangeRejected::Banned) => {
+                                return Ok(Err(ApiError::forbidden(
+                                    JoinRejection::Banned.to_string(),
+                                )))
+                            }
                         };
-                    write_audit(
-                        conn,
-                        &AuditEntry::new(workspace_id, "member.handle_changed")
-                            .by(member_id)
-                            .target("member", member_id)
-                            .via_token(via_token)
-                            .with_schema(
-                                "momo.member.handle_changed.v1",
-                                serde_json::json!({
-                                    "old": applied.previous_handle,
-                                    "new": applied.member.handle,
-                                }),
-                            ),
-                    )
-                    .await?;
+                    if applied.previous_handle != applied.member.handle {
+                        write_audit(
+                            conn,
+                            &AuditEntry::new(workspace_id, "member.handle_changed")
+                                .by(member_id)
+                                .target("member", member_id)
+                                .via_token(via_token)
+                                .with_schema(
+                                    "momo.member.handle_changed.v1",
+                                    serde_json::json!({
+                                        "old": applied.previous_handle,
+                                        "new": applied.member.handle,
+                                    }),
+                                ),
+                        )
+                        .await?;
+                    }
                     member = Some(applied.member);
                 }
                 let member = member.expect("at least one field was set");
@@ -209,6 +218,11 @@ mod tests {
             "handle is already in use"
         );
         assert_eq!(JoinRejection::HandleTaken.status_code(), 409);
+        assert_eq!(
+            JoinRejection::Banned.to_string(),
+            "member is banned from this workspace"
+        );
+        assert_eq!(JoinRejection::Banned.status_code(), 403);
     }
 
     #[test]

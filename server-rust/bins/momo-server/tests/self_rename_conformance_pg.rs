@@ -405,11 +405,12 @@ async fn audit_count(su: &PgPool, workspace: Uuid, action: &str) -> i64 {
     .expect("count audit rows")
 }
 
-async fn rename_broadcasts(su: &PgPool, workspace: Uuid) -> Vec<(Uuid, String, String)> {
+async fn rename_broadcasts(su: &PgPool, workspace: Uuid) -> Vec<(Uuid, String, String, String)> {
     sqlx::query_as(
         "SELECT partition_key, \
                 payload->>'channel', \
-                payload->'data'->'payload'->>'display_name' \
+                payload->'data'->'payload'->>'display_name', \
+                payload->'data'->'payload'->>'handle' \
            FROM outbox \
           WHERE workspace_id = $1 \
             AND kind = 'broadcast' \
@@ -506,6 +507,7 @@ async fn self_rename_writes_db_roster_audit_and_outbox() {
     assert_eq!(broadcasts.len(), 2);
     assert_eq!(broadcasts[0].1, cent_channel(fixture.workspace, hit[0]));
     assert!(broadcasts.iter().all(|row| row.2 == "곽성재"));
+    assert!(broadcasts.iter().all(|row| row.3 == fixture.member.handle));
 }
 
 #[tokio::test]
@@ -771,6 +773,33 @@ async fn self_handle_change_writes_me_audit_and_leaves_message_bodies() {
         "one audit row for the handle change"
     );
 
+    assert!(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../crates/momo-messaging/src/member_rename.rs"
+        ))
+        .contains("let broadcast_outbox_ids = enqueue_handle_change_fanout("),
+        "handle-change fan-out is load-bearing; sabotage of that call must turn this RED"
+    );
+    let broadcasts = rename_broadcasts(&su, fixture.workspace).await;
+    let hit: Vec<Uuid> = broadcasts.iter().map(|row| row.0).collect();
+    assert!(hit.contains(&fixture.channel_a));
+    assert!(hit.contains(&fixture.channel_b));
+    assert!(
+        !hit.contains(&fixture.outsider_channel),
+        "a channel the caller is not in must not carry the handle change"
+    );
+    assert_eq!(
+        broadcasts.len(),
+        2,
+        "handle-change fan-out count equals display-name change"
+    );
+    assert!(
+        broadcasts.iter().all(|row| row.3 == new_handle),
+        "payload carries the new handle: {broadcasts:?}"
+    );
+    assert!(broadcasts.iter().all(|row| row.2 == fixture.member.handle));
+
     let stored_after: String =
         sqlx::query_scalar("SELECT body FROM message WHERE client_msg_id = $1")
             .bind(client_msg_id)
@@ -783,4 +812,94 @@ async fn self_handle_change_writes_me_audit_and_leaves_message_bodies() {
         "past message bodies that mention @<old handle> are never rewritten"
     );
     assert_eq!(stored_after, mention_body);
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn banned_handle_is_the_join_sentence() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "handle-ban").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+    let banned = format!("bn-{}", &Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query(
+        "INSERT INTO workspace_ban (workspace_id, handle_norm, created_by, reason) \
+         VALUES ($1, $2, $3, 'r2 handle ban')",
+    )
+    .bind(fixture.workspace)
+    .bind(&banned)
+    .bind(fixture.other.id)
+    .execute(&su)
+    .await
+    .expect("seed handle ban");
+
+    assert!(
+        include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../crates/momo-messaging/src/member_rename.rs"
+        ))
+        .contains("if is_handle_banned_in_tx(conn, handle).await?"),
+        "ban check is load-bearing; sabotage of that call must turn this RED"
+    );
+
+    let response = patch_me(
+        &http,
+        &me_url(&base, fixture.workspace),
+        &token,
+        &json!({"handle": banned}),
+    )
+    .await;
+    assert_eq!(response.status(), 403, "banned handle is 403");
+    let err: Value = response.json().await.expect("error body");
+    assert_eq!(
+        err["error"]["message"], "member is banned from this workspace",
+        "join Banned sentence: {err}"
+    );
+
+    let (_, handle, _) = stored_member(&su, fixture.member.id).await;
+    assert_eq!(handle, fixture.member.handle, "a 403 must not write");
+    assert_eq!(
+        audit_count(&su, fixture.workspace, "member.handle_changed").await,
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn no_op_handle_writes_no_audit() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su, "handle-noop").await;
+    let base = start_server(app).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.member.email).await;
+
+    let response = patch_me(
+        &http,
+        &me_url(&base, fixture.workspace),
+        &token,
+        &json!({"handle": fixture.member.handle}),
+    )
+    .await;
+    assert_eq!(response.status(), 200, "no-op handle PATCH is 200");
+    let body: Value = response.json().await.expect("rename body");
+    assert_eq!(body["member"]["handle"], fixture.member.handle);
+
+    let (_, handle, _) = stored_member(&su, fixture.member.id).await;
+    assert_eq!(handle, fixture.member.handle);
+    assert_eq!(
+        audit_count(&su, fixture.workspace, "member.handle_changed").await,
+        0,
+        "a no-op must not write member.handle_changed"
+    );
+    assert!(
+        rename_broadcasts(&su, fixture.workspace).await.is_empty(),
+        "a no-op must not fan out"
+    );
 }

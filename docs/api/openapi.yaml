@@ -1216,8 +1216,9 @@ paths:
         "401": {$ref: "#/components/responses/Unauthorized"}
         "403":
           description: >
-            Caller is not a human live member of this workspace, or presented
-            an agent bearer (not on the agent-route allow-list).
+            Caller is not a human live member of this workspace, presented
+            an agent bearer (not on the agent-route allow-list), or the
+            requested handle is banned (`member is banned from this workspace`).
           content:
             application/json:
               schema:

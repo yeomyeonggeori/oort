@@ -41,7 +41,7 @@ describe("renameWorkspace", () => {
     installHost();
     const renamed = { ...WORKSPACE, name: "새 이름", updatedAtMs: 1_700_000_000_999 };
     const fetchMock = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(JSON.stringify({ workspace: renamed }), {
           status: 200,
           headers: { "content-type": "application/json" },
@@ -89,7 +89,7 @@ describe("fetchWorkspace", () => {
   it("GETs the identity envelope the rename token lives on", async () => {
     installHost();
     const fetchMock = vi.fn(
-      async () =>
+      async (_input: RequestInfo | URL, _init?: RequestInit) =>
         new Response(JSON.stringify({ workspace: WORKSPACE }), {
           status: 200,
           headers: { "content-type": "application/json" },
