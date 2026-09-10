@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-11e-2 런타임 이미지 day-2 도구 (#2346, 2026-09-10)
+
+- Track engine. `feat/2346-image-day2-tools` onto `origin/track/engine`. 선택 A: PGDG `postgresql-client-18=18.6-1.pgdg12+2`(키 ACCC4CF8 sha256 핀, curl|sh 없음) + `python3`(json; `python3-minimal`은 json 없음). apt-layer 실측 47599335 → 59871688 B (**+11.70 MiB**). 풀 이미지 inspect 78807654 → 91229002 B (**+11.85 MiB**, 예산 60 MiB).
+- 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
+- runtime-unverified: Railway one-off 실측은 SH-11a.
+
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 
 - Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
