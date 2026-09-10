@@ -1142,15 +1142,14 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 41개를 stdout에 썼다' "$alias_fixture/platform.err"
+grep -Fq -e '--platform railway 키 42개를 stdout에 썼다' "$alias_fixture/platform.err"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is exactly the canonical set: no stamp, no hosted-delivery key, no file.
-if grep -q '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out"; then
-  echo "--platform railway leaked MOMO_SELF_HOST_PLATFORM into the canonical set" >&2
-  exit 1
-fi
+# T2 stdout is the canonical 41 plus the stamp outside the heredoc. No
+# hosted-delivery key, no file. --railway is byte-identical by construction.
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
 if grep -q '^MOMO_HOSTED_DELIVERY_ENABLED=' "$alias_fixture/platform.out"; then
   echo "--platform railway leaked MOMO_HOSTED_DELIVERY_ENABLED into the canonical set" >&2
   exit 1
@@ -1159,6 +1158,16 @@ if [ -e "$alias_fixture/infra/rust/local.secrets.env" ]; then
   echo "--platform railway wrote an env file" >&2
   exit 1
 fi
+# #2328: managed_role_url internals are platform-neutral. Railway-named
+# env vars in the helper would survive a copy-paste into a second T2 row.
+if grep -q 'RAILWAY_ROLE_' "$ROOT/scripts/self_host_env.sh"; then
+  echo "managed_role_url still uses RAILWAY_ROLE_* internal names" >&2
+  exit 1
+fi
+grep -q 'PLATFORM_ROLE_USER' "$ROOT/scripts/self_host_env.sh" || {
+  echo "managed_role_url lost PLATFORM_ROLE_USER" >&2
+  exit 1
+}
 
 # Unknown platform is refused before anything is read or written; the message
 # names the rows that exist.
@@ -1272,6 +1281,63 @@ grep -Fxq 'MOMO_SELF_HOST_PLATFORM=gcp-vm' "$t1_plain_env"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$t1_plain_env")" = "1"
 grep -Fq 'MOMO_SELF_HOST_PLATFORM=gcp-vm 를 추가했다' "$t1_plain_fixture/stamp-output"
 
+# #2328: an existing stamp that is not a platform_profiles row is refused
+# (maintenance without --platform). Character-class is not enough.
+unknown_stamp_fixture="$(make_fixture platform-unknown-stamp)"
+run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/first-output" 49805 \
+  --platform fly --local-build --public-origin https://fly.example.test
+awk '
+  index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { print "MOMO_SELF_HOST_PLATFORM=not-a-platform"; next }
+  { print }
+' "$unknown_stamp_fixture/infra/rust/local.secrets.env" >"$unknown_stamp_fixture/stamped.env"
+mv "$unknown_stamp_fixture/stamped.env" "$unknown_stamp_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=not-a-platform' \
+  "$unknown_stamp_fixture/infra/rust/local.secrets.env"
+if run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/unknown-output" 49805 \
+  --public-origin https://fly.example.test; then
+  echo "existing MOMO_SELF_HOST_PLATFORM=not-a-platform unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '알 수 없는 MOMO_SELF_HOST_PLATFORM=not-a-platform' \
+  "$unknown_stamp_fixture/unknown-output"
+grep -Fq 'platform_profiles' "$unknown_stamp_fixture/unknown-output"
+
+# Sabotage: strip the platform_profiles lookup from a copy. The copy must
+# accept the unknown stamp — if it still refuses, this case is not testing
+# that check. The original must keep the lookup (source grep).
+stamp_sabotage="$unknown_stamp_fixture/scripts/self_host_env.sh"
+python3 - "$ROOT/scripts/self_host_env.sh" "$stamp_sabotage" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text()
+start = text.find("    # #2328: a stamp that is not a platform_profiles row")
+if start < 0:
+    raise SystemExit("could not locate stamp vs platform_profiles check to sabotage")
+end = text.find(
+    '    if [ -n "$REQUESTED_PLATFORM" ] && [ "$existing" != "$REQUESTED_PLATFORM" ]; then',
+    start,
+)
+if end < 0:
+    raise SystemExit("could not locate end of stamp vs platform_profiles check")
+dst.write_text(text[:start] + text[end:])
+PY
+chmod +x "$stamp_sabotage"
+if ! grep -Fq 'platform_profile_field "$existing"' "$ROOT/scripts/self_host_env.sh"; then
+  echo "ensure_platform_stamp no longer consults platform_profiles for an existing stamp" >&2
+  exit 1
+fi
+if run_generator "$unknown_stamp_fixture" "$unknown_stamp_fixture/sabotage-output" 49805 \
+  --public-origin https://fly.example.test; then
+  : # copy without the check accepts the unknown stamp — the check is load-bearing
+else
+  echo "sabotage (strip platform_profiles lookup) still refused the unknown stamp — check is not the one under test" >&2
+  cat "$unknown_stamp_fixture/sabotage-output" >&2
+  exit 1
+fi
+# Restore the real generator for later cases in this fixture dir.
+cp "$ROOT/scripts/self_host_env.sh" "$stamp_sabotage"
+
 # T1 without --public-origin is refused: the row says the origin is the flag.
 t1_noorigin_fixture="$(make_fixture platform-t1-no-origin)"
 for combo in "--platform fly" "--platform fly --local-build" "--platform aws-lightsail --published-image $GOOD_DIGEST"; do
@@ -1347,6 +1413,32 @@ if grep -q '^WORKER_DATABASE_URL=' "$t1_fly_env"; then
   echo "fly env unexpectedly grew WORKER_DATABASE_URL" >&2
   exit 1
 fi
+
+# #2328 / #2373 L1: write_host_network_overlay counts anchored YAML keys
+# (`^[[:space:]]*network_mode: host$`). Deleting all 12 keys (comments
+# remain) must RED — unanchored grep counted the header and stayed green.
+hn_sab_fixture="$(make_fixture platform-host-network-sabotage)"
+grep -vE '^[[:space:]]*network_mode: host$' \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" \
+  >"$hn_sab_fixture/infra/rust/docker-compose.host-network.yml.stripped"
+mv "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml.stripped" \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml"
+# Comments that mention the string must still be there (the old hole).
+grep -Fq 'network_mode: host' "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" || {
+  echo "sabotage overlay lost the header comment that unanchored grep counted" >&2
+  exit 1
+}
+if grep -cE '^[[:space:]]*network_mode: host$' \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" >/dev/null; then
+  echo "sabotage failed to delete YAML network_mode keys" >&2
+  exit 1
+fi
+if run_generator "$hn_sab_fixture" "$hn_sab_fixture/output" 49850 \
+  --platform host-network --local-build; then
+  echo "host-network overlay with all YAML keys deleted unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'network_mode: host 가 없다' "$hn_sab_fixture/output"
 
 echo "self-host image mode contract: PASS"
 
