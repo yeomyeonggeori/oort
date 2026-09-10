@@ -17,7 +17,9 @@ for path in "$RESTORE" "$VERIFY" "$ROOT/infra/rust/pgbackrest.conf"; do
   [ -f "$path" ] || fail "missing path=$path"
 done
 
-fixture="$(mktemp -d "${TMPDIR:-/tmp}/momo-pitr-contract.XXXXXX")"
+# Colima/macOS: default TMPDIR (/var/folders) and /tmp are not bind-mounted
+# into the VM. Keep the fixture under the worktree so the attach bind-mount works.
+fixture="$(mktemp -d "$ROOT/.tmp-momo-pitr-contract.XXXXXX")"
 cleanup() {
   if [ -d "$fixture" ]; then
     find "$fixture" -depth -delete >/dev/null 2>&1 || true
@@ -356,26 +358,27 @@ chmod +x "$root_fake_bin/docker" "$root_fake_bin/python3" \
   "$root_fake_bin/jq" "$root_fake_bin/openssl"
 
 set +e
-docker run --rm --network none \
-  --mount "type=bind,src=$ROOT,dst=/repo,readonly" \
-  --mount "type=bind,src=$fixture,dst=/fixture" \
-  -e PATH=/fixture/root-bin:/usr/bin:/bin \
-  -e FAKE_DOCKER_LOG=/fixture/docker.log \
-  -e FAKE_DOCKER_CASE=attach_cleanup \
-  -e "FAKE_RUN_ID=$attach_run_id" \
-  -e "FAKE_PROJECT=$attach_project" \
-  -e "FAKE_SOURCE_CONTAINER=$attach_source_container" \
-  -e "FAKE_ORPHAN_CONTAINER=$attach_orphan_container" \
-  -e "FAKE_SOURCE_VOLUME=$attach_source_volume" \
-  -e "FAKE_REPO_VOLUME=$attach_repo_volume" \
-  -e "FAKE_RESTORE_VOLUME=$attach_restore_volume" \
-  -e "FAKE_IMAGE_ID=$image_id" \
-  -e "FAKE_IMAGE_REVISION=$(printf 'b%.0s' {1..40})" \
-  -e "FAKE_FOREIGN_MARKER=/fixture/foreign-volume-still-alive" \
-  -e "FAKE_FOREIGN_VOLUME=$attach_actual_restore_volume" \
-  -e "FAKE_EXPECT_INVOCATION_ID=$attach_resource_suffix" \
-  --entrypoint /bin/bash \
-  debian:bookworm-slim -ceu '
+attach_output="$(
+  docker run --rm --network none \
+    --mount "type=bind,src=$ROOT,dst=/repo,readonly" \
+    --mount "type=bind,src=$fixture,dst=/fixture" \
+    -e PATH=/fixture/root-bin:/usr/bin:/bin \
+    -e FAKE_DOCKER_LOG=/fixture/docker.log \
+    -e FAKE_DOCKER_CASE=attach_cleanup \
+    -e "FAKE_RUN_ID=$attach_run_id" \
+    -e "FAKE_PROJECT=$attach_project" \
+    -e "FAKE_SOURCE_CONTAINER=$attach_source_container" \
+    -e "FAKE_ORPHAN_CONTAINER=$attach_orphan_container" \
+    -e "FAKE_SOURCE_VOLUME=$attach_source_volume" \
+    -e "FAKE_REPO_VOLUME=$attach_repo_volume" \
+    -e "FAKE_RESTORE_VOLUME=$attach_restore_volume" \
+    -e "FAKE_IMAGE_ID=$image_id" \
+    -e "FAKE_IMAGE_REVISION=$(printf 'b%.0s' {1..40})" \
+    -e "FAKE_FOREIGN_MARKER=/fixture/foreign-volume-still-alive" \
+    -e "FAKE_FOREIGN_VOLUME=$attach_actual_restore_volume" \
+    -e "FAKE_EXPECT_INVOCATION_ID=$attach_resource_suffix" \
+    --entrypoint /bin/bash \
+    debian:bookworm-slim -ceu '
     install -o root -g root -m 0600 /fixture/cipher /tmp/cipher
     install -o root -g root -m 0600 /fixture/hmac /tmp/hmac
     install -d -o root -g root -m 0700 /tmp/evidence
@@ -389,10 +392,12 @@ docker run --rm --network none \
       --source-container "$FAKE_SOURCE_CONTAINER" \
       --source-volume "$FAKE_SOURCE_VOLUME" \
       --repo-volume "$FAKE_REPO_VOLUME"
-  ' >/dev/null 2>&1
+  ' 2>&1
+)"
 attach_status=$?
 set -e
-[ "$attach_status" -eq 55 ] || fail "attach cleanup fixture did not reach injected cp failure"
+[ "$attach_status" -eq 55 ] \
+  || fail "attach cleanup fixture did not reach injected cp failure status=$attach_status output=$attach_output"
 ! grep -Fq "rm -f $attach_source_container " "$fake_log" \
   || fail "attach cleanup attempted to remove the live source container"
 ! grep -Fq "volume rm $attach_source_volume " "$fake_log" \
