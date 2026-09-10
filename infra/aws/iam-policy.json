@@ -1,0 +1,50 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "LightsailT1Minimum",
+      "Effect": "Allow",
+      "Action": [
+        "lightsail:CreateInstances",
+        "lightsail:DeleteInstance",
+        "lightsail:GetInstance",
+        "lightsail:GetInstances",
+        "lightsail:GetInstanceState",
+        "lightsail:StartInstance",
+        "lightsail:StopInstance",
+        "lightsail:RebootInstance",
+        "lightsail:CreateDisk",
+        "lightsail:DeleteDisk",
+        "lightsail:GetDisk",
+        "lightsail:GetDisks",
+        "lightsail:AttachDisk",
+        "lightsail:DetachDisk",
+        "lightsail:OpenInstancePublicPorts",
+        "lightsail:CloseInstancePublicPorts",
+        "lightsail:PutInstancePublicPorts",
+        "lightsail:GetInstancePortStates",
+        "lightsail:AllocateStaticIp",
+        "lightsail:ReleaseStaticIp",
+        "lightsail:AttachStaticIp",
+        "lightsail:DetachStaticIp",
+        "lightsail:GetStaticIp",
+        "lightsail:GetStaticIps",
+        "lightsail:GetBlueprints",
+        "lightsail:GetBundles",
+        "lightsail:GetRegions",
+        "lightsail:TagResource",
+        "lightsail:UntagResource"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BudgetsT1Minimum",
+      "Effect": "Allow",
+      "Action": [
+        "budgets:ViewBudget",
+        "budgets:ModifyBudget"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
