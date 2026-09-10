@@ -44,10 +44,10 @@ import {
   roleLabelsSaveMessage,
   slugError,
   workspaceNameError,
+  workspaceNameSaveMessage,
 } from "@momo/core/features/settings/model";
-import { workspaceNameSaveMessage } from "@/features/onboarding/identityCopy";
-import { recordOwnerOnboardingSettingsSave } from "@/features/onboarding/ownerOnboardingStore";
-import { StaleWorkspaceNameConflict } from "@/features/onboarding/StaleWorkspaceNameConflict";
+import { recordOwnerOnboardingSettingsSave } from "@/features/profile/shared/onboardingSettingsSave";
+import { StaleWorkspaceNameConflict } from "@/features/workspace/shared/StaleWorkspaceNameConflict";
 import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   WELCOME_PROMPT_LIMIT_SENTENCE,
@@ -930,7 +930,9 @@ function WorkspaceRenameField({
           name="workspaceName"
           value={draft}
           disabled={offline}
-          aria-invalid={Boolean(fieldError || saveError || staleName)}
+          aria-invalid={
+            fieldError || saveError || staleName ? true : undefined
+          }
           aria-describedby={
             [
               fieldError ? "workspace-rename-name-error" : null,
@@ -1192,7 +1194,7 @@ export function WorkspaceSection({
               id="workspace-name"
               name="name"
               value={name}
-              aria-invalid={Boolean(fieldErrors.name)}
+              aria-invalid={fieldErrors.name ? true : undefined}
               aria-describedby={
                 fieldErrors.name ? "workspace-name-error" : undefined
               }
@@ -1213,7 +1215,7 @@ export function WorkspaceSection({
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
-              aria-invalid={Boolean(fieldErrors.slug)}
+              aria-invalid={fieldErrors.slug ? true : undefined}
               aria-describedby={
                 fieldErrors.slug ? "workspace-slug-error" : undefined
               }

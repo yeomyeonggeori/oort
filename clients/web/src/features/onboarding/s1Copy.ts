@@ -9,7 +9,7 @@ export const S1_SKIP_LABEL = "지금은 건너뛰기";
 export const S1_REENTRY =
   "나중에 설정 › 워크스페이스 / 프로필에서 바꿀 수 있습니다.";
 export const S1_FAILURE =
-  "지금은 저장하지 못했습니다. 다시 시도하거나, 지금은 건너뛴 뒤 설정에서 바꿀 수 있습니다.";
+  "지금은 저장하지 못했습니다. 다시 시도하거나, 건너뛴 뒤 설정에서 바꿀 수 있습니다.";
 export const S1_KEEP_THEIRS = "이 이름으로 유지";
 export const S1_KEEP_MINE = "내 이름으로 저장";
 export const S1_OFFLINE_NOTE_ID = "onboarding-s1-offline-note";

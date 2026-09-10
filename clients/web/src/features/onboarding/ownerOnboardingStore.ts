@@ -93,10 +93,16 @@ export function markOwnerOnboardingPending(): void {
   });
 }
 
+function dropWorkspaceProfile(doc: PendingDoc): void {
+  doc["workspace-profile"] = false;
+  doc["settings-workspace"] = false;
+  doc["settings-profile"] = false;
+}
+
 export function markOwnerOnboardingStage(stage: OwnerOnboardingStage): void {
   const doc = readDoc();
   if (stage === "invite") {
-    doc["workspace-profile"] = false;
+    dropWorkspaceProfile(doc);
     doc.invite = true;
   } else {
     doc["workspace-profile"] = true;
@@ -113,7 +119,7 @@ export function clearOwnerOnboardingFlag(flag: OwnerOnboardingStage): void {
   const doc = readDoc();
   if (flag === "invite") doc.invite = false;
   else {
-    doc["workspace-profile"] = false;
+    dropWorkspaceProfile(doc);
     clearS1Draft();
   }
   writeDoc(doc);
@@ -163,7 +169,7 @@ export function recordOwnerOnboardingSettingsSave(
   if (door === "workspace") doc["settings-workspace"] = true;
   else doc["settings-profile"] = true;
   if (doc["settings-workspace"] && doc["settings-profile"]) {
-    doc["workspace-profile"] = false;
+    dropWorkspaceProfile(doc);
     clearS1Draft();
   }
   writeDoc(doc);

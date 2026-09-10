@@ -390,6 +390,14 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
 });
 
 describe("워크스페이스 이름 E1", () => {
+  it("초기 이름 칸은 aria-invalid 속성이 없다 (N-R2-1)", () => {
+    const host = mountSection({ role: "owner" });
+    const input = host.querySelector('[data-testid="workspace-rename-name"]');
+    expect(input).not.toBeNull();
+    expect(input?.hasAttribute("aria-invalid")).toBe(false);
+    expect(input?.getAttribute("aria-invalid")).toBeNull();
+  });
+
   it("오너는 이름 저장이 E1 PATCH 1회이다", async () => {
     renameWorkspace.mockResolvedValue({
       ...workspace({}),

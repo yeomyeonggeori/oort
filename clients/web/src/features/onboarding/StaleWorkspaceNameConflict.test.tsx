@@ -109,4 +109,10 @@ describe("StaleWorkspaceNamePhrase wrap and particle (B-R3-1, M-R3-5)", () => {
     expect(visibleText(host)).toContain("「여명거리 스튜디오」로 바뀌었습니다.");
     expect(visibleText(host)).not.toContain("」으로");
   });
+
+  it("glues 」 to the last character with WORD_JOINER (U+2060)", () => {
+    const host = mountPhrase("여명거리");
+    const banner = host.querySelector('[data-testid="onboarding-s1-stale"]');
+    expect(banner?.textContent).toContain(`여명거리${WORD_JOINER}`);
+  });
 });

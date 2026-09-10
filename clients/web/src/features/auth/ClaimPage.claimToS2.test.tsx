@@ -73,7 +73,6 @@ vi.mock("@/app/AppShell", async () => {
         "div",
         { "data-testid": "app-shell" },
         h("span", { "data-testid": "self-name" }, props.session.member.displayName),
-        h("span", { "data-testid": "self-handle" }, props.session.member.handle),
         h(Outlet)
       ),
   };
@@ -390,9 +389,6 @@ describe("reload during S1 re-enters S1", () => {
     expect(afterS1.querySelector('[data-testid="self-name"]')?.textContent).toBe(
       "성재"
     );
-    expect(afterS1.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
-      "seongjae"
-    );
     expect(getPersistedSession()?.member.displayName).toBe("성재");
     expect(getPersistedSession()?.member.handle).toBe("seongjae");
   });
@@ -418,9 +414,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
         "성재"
       );
     });
-    expect(host.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
-      "seongjae"
-    );
+    expect(getPersistedSession()?.member.handle).toBe("seongjae");
 
     unmountApp();
     const reloaded = await mountApp();
@@ -430,9 +424,7 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(reloaded.querySelector('[data-testid="self-name"]')?.textContent).toBe(
       "성재"
     );
-    expect(reloaded.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
-      "seongjae"
-    );
+    expect(getPersistedSession()?.member.handle).toBe("seongjae");
     expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
   });
 });
