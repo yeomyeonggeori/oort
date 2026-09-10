@@ -52,3 +52,8 @@ UX-R3a~c 팔레트 · DS-1(·3·4) 잔여 · UX-R2d · #1925 허들 자격 · #1
 - **§2 유지**: ITO → G2(iOS v0 · Railway 실배포 최종 검증 · 실기기 APNs는 데스크톱 뒤).
 - **§3 선재·위생**: #2262 M-1·M-2·N3 · 캡처 레인 병합 게이트 · D4 플러그인 검증기 Rust화 · `arbitrary_tw` 프리플라이트 사각 · #2157·#2181·#2193 · SH-11a~e 이슈화.
 - **결재 대기(ADR-0185 Proposed)**: D-A 온보딩 노선 · D-B 제로베이스 정의 · D-C 셀프호스트 킥오프. 권고는 브리프 `claudedocs/resume-2026-09-07/brief-sh12.md` §1.
+
+## 갱신 2026-09-10 (낮, 스냅샷 97)
+- **끝난 것(09-10)**: ADR-0185 Accepted · SH-12 a·b-e·c·d-e·d-w · SH-11 e·e-2·b·c·host-network 행 · PIPELINE 레인 Grok Build 복귀 · E2E-A 문서 정정.
+- **§1 잔여(G1'까지)**: SH-12b-w(S1, R3) → SH-12e 문서 → **v0.1.5 발행** → 제로베이스 온보딩 E2E 재실측(A·B) · SH-11d 랜딩 · nits(#2328·#2347·#2356) · A6 R3 · SH-11a Railway 실배포(최종 단계).
+- **§2 유지**: ITO → G2(iOS v0 · Railway 최종 · APNs 데스크톱 뒤).
