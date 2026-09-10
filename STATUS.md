@@ -6,6 +6,12 @@
 - `docs/SELF_HOST_AGENT.md`(+ko) §1 행 · §3.8 · §3.3.11 「상시 = named tunnel」상호 링크. `SELF_HOST.md`(+ko) Platforms 1문단. 정적 시험 `scripts/tests/test_cloudflare_recipe.sh` (사보타주 ①공개IP ingress ②404 제거 ③quick-tunnel ④`--public-origin` 생략 → 전부 RED).
 - runtime-unverified: 성재 Cloudflare 계정·앞단 T1(SH-11b/11c) 실측 E2E(모드 B 101/403/헤더 diff/재부팅 복귀, 모드 A DNS 1레코드). `--public-origin` 생략 시 doctor `public.*` skip은 레시피가 사용자 오류로 단정(doctor 본체 무수정).
 
+## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
+
+- Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
+- 검증: 정적 계약(mounts·always-on·RAM≥2GiB·ports {80,443}·digest 리터럴 0·README 스크립트 실재·data-root `/data`). `local_gate.sh --profile docs`.
+- runtime-unverified: 소유자 `fly auth login` 실배포·doctor 27/27·재시작 보존(승인 지점 1–4 대기).
+
 ## SH-11c AWS Lightsail/EC2 T1 레시피 (#2377, 2026-09-10)
 
 - Track engine. `feat/2377-aws-t1-recipe` onto `origin/track/engine`. `infra/aws/`: Lightsail 인스턴스 1 + 고정 IP + `/data` 디스크(`prevent_destroy`) + 포트 22/80/443만 + Budgets + EC2 변수 분기. cloud-init는 Docker `data-root=/data/docker`, 시크릿 비생성. IAM 최소권한(루트 금지). `scripts/tests/test_aws_recipe.sh` 정적 계약 + 사보타주 3 RED. terraform 부재 시 SH-11f 선택 도구 skip 1줄.
@@ -22,6 +28,7 @@
 - Track engine. `feat/2346-image-day2-tools` onto `origin/track/engine`. 선택 A: PGDG `postgresql-client-18=18.6-1.pgdg12+2`(키 ACCC4CF8 sha256 핀, curl|sh 없음) + `python3`(json; `python3-minimal`은 json 없음). apt-layer 실측 47599335 → 59871688 B (**+11.70 MiB**). 풀 이미지 inspect 78807654 → 91229002 B (**+11.85 MiB**, 예산 60 MiB).
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
+
 
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 

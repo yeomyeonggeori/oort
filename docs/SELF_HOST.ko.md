@@ -778,6 +778,15 @@ heredoc + `oort_public_edge_env_keys` — `OORT_SITE_ADDRESS` /
 않는다. 게이트:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
+### Fly.io
+
+T1. Machine 1대 + 볼륨 1개에서 compose 정본을 돌린다:
+[`infra/fly/README.md`](../infra/fly/README.md). 443 TLS 패스스루로 VM 안
+Caddy가 `caddy.override.yml` + `Caddyfile`을 쓴다(새 Caddyfile 없음).
+env는 `scripts/self_host_env.sh --platform fly --public-origin https://<host>`
+를 볼륨에만 기록. 실제 `flyctl` 배포는 소유자 로그인(사람 승인:
+`fly auth login`, 결제, 선택 DNS, `fly apps destroy`).
+
 | 레포 경로 | 서버 위 이름 | 역할 |
 |---|---|---|
 | `scripts/verify_public_edge_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
