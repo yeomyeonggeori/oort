@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
+
+- Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
+- 검증: 정적 계약(mounts·always-on·RAM≥2GiB·ports {80,443}·digest 리터럴 0·README 스크립트 실재·data-root `/data`). `local_gate.sh --profile docs`.
+- runtime-unverified: 소유자 `fly auth login` 실배포·doctor 27/27·재시작 보존(승인 지점 1–4 대기).
+
 ## 생성기 `--platform host-network` (#2340, 2026-09-10)
 
 - Track engine. `feat/2340-platform-host-network` onto `origin/track/engine`. `platform_profiles` T1 행 `host-network`: 내부 URL 4키를 `127.0.0.1:<compose port>` 로 파생하고 `infra/rust/docker-compose.host-network.yml` (`network_mode: host`, 서비스당 1회·12) 을 렌더. `--compose` 가 스탬프를 보고 오버레이를 붙인다. 기존 railway/fly/aws-lightsail/gcp-vm 출력 바이트 불변.
@@ -10,6 +16,7 @@
 - Track engine. `feat/2346-image-day2-tools` onto `origin/track/engine`. 선택 A: PGDG `postgresql-client-18=18.6-1.pgdg12+2`(키 ACCC4CF8 sha256 핀, curl|sh 없음) + `python3`(json; `python3-minimal`은 json 없음). apt-layer 실측 47599335 → 59871688 B (**+11.70 MiB**). 풀 이미지 inspect 78807654 → 91229002 B (**+11.85 MiB**, 예산 60 MiB).
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
+
 
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 

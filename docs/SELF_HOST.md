@@ -831,6 +831,15 @@ is the generator heredoc plus `oort_public_edge_env_keys` — do not type
 not carry those keys. Gate:
 `scripts/oort doctor --json` (`public.healthz` · `public.websocket`).
 
+### Fly.io
+
+T1. One Machine + one volume runs the compose canon:
+[`infra/fly/README.md`](../infra/fly/README.md). TLS passthrough on 443
+lets Caddy inside the VM use `caddy.override.yml` + `Caddyfile` (no new
+Caddyfile). Env is `scripts/self_host_env.sh --platform fly --public-origin https://<host>`
+written on the volume only. Live `flyctl` deploy is the owner's login
+(human approval: `fly auth login`, billing, optional DNS, `fly apps destroy`).
+
 | 레포 경로 | 서버 위 이름 | 역할 |
 |---|---|---|
 | `scripts/verify_public_edge_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |

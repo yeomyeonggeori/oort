@@ -104,7 +104,7 @@ when §3.3.0 (b)/(c) fail.
 |---|---|---|---|---|---|---|---|
 | **Local machine** | T1 | §3.1 | Shell on this machine (compose). | None. | Docker Engine + Compose v2, git, jq, openssl, curl. ≥ 1 GiB free (2 GiB better). | `local.override.yml` + `Caddyfile.local` (`:80`, no ACME). `http://127.0.0.1:<MOMO_WEB_PORT>` (generator default 8088 if free). | Doctor `summary.verdict=PASS` (`public.*` skip is OK) and a browser (or login API) session as `owner@oort.local`. |
 | **VPS with own domain** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. Provider CLI only if the user already has one logged in. | Provider sign-up/billing; the DNS record for the host. | Same as Local, plus DNS for a host this machine owns. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). Keys `OORT_SITE_ADDRESS` and `OORT_CSP_CONNECT_SRC` are derived by `scripts/self_host_env.sh --public-origin` — do not type them by hand. Operator-declared `https://<host>`. | Doctor PASS including `public.healthz` and `public.websocket`, HTTPS login. |
-| **Fly.io** (single VM + volume) | T1 | §3.5 · provisioning recipe SH-11b (`fly.toml` + volume) | `flyctl` in the user's login → Fly REST with a user token → browser. | Fly sign-up/billing; custom-domain DNS. | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly hostname or custom domain. | Same as VPS. |
+| **Fly.io** (single VM + volume) | T1 | §3.5 · [`infra/fly/README.md`](../infra/fly/README.md) | `flyctl` in the user's login → Fly REST with a user token → browser. | `fly auth login`; Fly billing (volume + dedicated IPv4); optional custom-domain DNS; `fly apps destroy` (volume wipe). | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM (`caddy.override.yml` + `Caddyfile`, TLS passthrough). Env `scripts/self_host_env.sh --platform fly --public-origin https://<host>` onto the volume. Fly hostname or custom domain. | Same as VPS. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · provisioning recipe SH-11c (+ minimal Terraform) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS sign-up/billing; IAM consent; the DNS record. | Cloud account; VM + compose + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
@@ -1535,15 +1535,37 @@ scripts/oort doctor --json
 
 ### 3.5 Fly
 
-T1. The compose procedure is §3.2 on one Fly VM with a volume; the
-platform provisioning recipe (`fly.toml` + volume, `flyctl` in the user's
-login) is SH-11b. Env is the §3.2 derivation with the row name (`IMAGE_REF` read in §2.2):
+T1. The compose procedure is §3.2 on one Fly VM with a volume. Catalog:
+[`infra/fly/README.md`](../infra/fly/README.md) ·
+[`infra/fly/fly.toml`](../infra/fly/fly.toml). One Machine, one volume
+(`/data`), dockerd `data-root` on that volume, canonical
+`caddy.override.yml` + `Caddyfile` (TLS passthrough on 443 — no new
+Caddyfile). `flyctl` in the user's login. Do not paste platform secrets
+into chat.
+
+1. Human approval: `fly auth login`, then billing if the account has no
+   payment method (volume + dedicated IPv4 are paid).
+2. From `infra/fly/`: `fly launch --no-deploy --copy-config`,
+   `fly volumes create oort_data --size 10`, `fly ips allocate-v4`,
+   `fly deploy` (builds `Dockerfile.host`, not `--image`).
+3. Env is the §3.2 derivation with the row name (`IMAGE_REF` read in §2.2).
+   First boot writes it on the volume; do not import the env file as Fly
+   secrets.
 
 ```sh
 scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-origin https://<host>
 ```
 
-Human approval points: Fly sign-up/billing, custom-domain DNS.
+4. Gate:
+
+```sh
+scripts/oort doctor --json
+```
+
+   `public.healthz` and `public.websocket` must PASS. Day-2 is T1 inside
+   the VM (`scripts/oort backup`, `upgrade`). Optional custom-domain DNS
+   is human. Destroy (`fly apps destroy`) is a data-loss confirmation.
+
 **Gate:** `scripts/oort doctor --json` after the public origin is registered.
 
 ### 3.6 AWS

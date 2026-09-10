@@ -96,7 +96,7 @@ bridge/iptables가 막힌 VM의 루프백 내부 URL + compose `network_mode: ho
 |---|---|---|---|---|---|---|---|
 | **로컬 머신** | T1 | §3.1 | 이 기계의 셸(compose). | 없음. | Docker Engine + Compose v2, git, jq, openssl, curl. 여유 ≥ 1 GiB (2 GiB 권장). | `local.override.yml` + `Caddyfile.local` (`:80`, ACME 없음). `http://127.0.0.1:<MOMO_WEB_PORT>` (생성기 기본 8088, 비어 있으면). | Doctor `summary.verdict=PASS`(`public.*` skip 은 OK) 그리고 `owner@oort.local` 브라우저(또는 로그인 API) 세션. |
 | **자기 도메인 VPS** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. 프로바이더 CLI는 사용자가 이미 로그인해 둔 것만. | 프로바이더 가입·결제; 그 호스트의 DNS 레코드. | 로컬과 같음 + 이 기계가 소유한 호스트의 DNS. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). `OORT_SITE_ADDRESS` 와 `OORT_CSP_CONNECT_SRC` 는 `scripts/self_host_env.sh --public-origin` 이 파생한다 — 손으로 적지 마라. 운영자가 선언한 `https://<host>`. | `public.healthz`·`public.websocket` 포함 doctor PASS, HTTPS 로그인. |
-| **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · 프로비저닝 레시피 SH-11b (`fly.toml` + 볼륨) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | Fly 가입·결제; 커스텀 도메인 DNS. | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
+| **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · [`infra/fly/README.md`](../infra/fly/README.md) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | `fly auth login`; Fly 결제(볼륨·전용 IPv4); 선택 커스텀 도메인 DNS; `fly apps destroy`(볼륨 삭제). | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2(`caddy.override.yml` + `Caddyfile`, TLS 패스스루). env `scripts/self_host_env.sh --platform fly --public-origin https://<host>` 를 볼륨에. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · 프로비저닝 레시피 SH-11c (+ 최소 Terraform) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS 가입·결제; IAM 동의; DNS 레코드. | 클라우드 계정; VM + compose + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
@@ -1493,15 +1493,35 @@ scripts/oort doctor --json
 
 ### 3.5 Fly
 
-T1. compose 절차는 볼륨 달린 Fly VM 1대 위의 §3.2다. 플랫폼 프로비저닝
-레시피(`fly.toml` + 볼륨, 사용자 로그인의 `flyctl`)는 SH-11b. env는 §3.2(`IMAGE_REF`는 §2.2에서 읽은 값)
-파생에 행 이름을 더한 것이다:
+T1. compose 절차는 볼륨 달린 Fly VM 1대 위의 §3.2다. 카탈로그:
+[`infra/fly/README.md`](../infra/fly/README.md) ·
+[`infra/fly/fly.toml`](../infra/fly/fly.toml). Machine 1대, 볼륨 1개
+(`/data`), 그 볼륨의 dockerd `data-root`, 정본
+`caddy.override.yml` + `Caddyfile`(443 TLS 패스스루 — 새 Caddyfile 없음).
+사용자 로그인의 `flyctl`. 플랫폼 시크릿을 채팅에 붙이지 마라.
+
+1. 사람 승인: `fly auth login`, 계정에 결제 수단이 없으면 결제(볼륨·전용
+   IPv4는 유료).
+2. `infra/fly/`에서: `fly launch --no-deploy --copy-config`,
+   `fly volumes create oort_data --size 10`, `fly ips allocate-v4`,
+   `fly deploy`(`Dockerfile.host` 빌드, `--image` 아님).
+3. env는 §3.2 파생에 행 이름을 더한 것이다(`IMAGE_REF`는 §2.2에서 읽은 값).
+   첫 부팅이 볼륨에 쓴다. env 파일을 Fly 시크릿으로 import 하지 마라.
 
 ```sh
 scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-origin https://<host>
 ```
 
-사람 승인 지점: Fly 가입·결제, 커스텀 도메인 DNS.
+4. 게이트:
+
+```sh
+scripts/oort doctor --json
+```
+
+   `public.healthz`와 `public.websocket`이 PASS여야 한다. day-2는 VM 안의
+   T1(`scripts/oort backup`, `upgrade`). 커스텀 도메인 DNS는 사람.
+   삭제(`fly apps destroy`)는 데이터 파괴 확인.
+
 **게이트:** 공개 오리진 등록 뒤 `scripts/oort doctor --json`.
 
 ### 3.6 AWS
