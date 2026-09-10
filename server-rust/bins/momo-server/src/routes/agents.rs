@@ -149,6 +149,7 @@ pub async fn create(
     let actor_member_id = principal.member_id;
     let owner_human_id = request.owner_human_id.unwrap_or(actor_member_id);
     let via_token_id = audit_via_token_id(&principal);
+    let gateway_enabled = state.agent_gateway.enabled();
     let input = NewAgentMember {
         display_name,
         handle,
@@ -256,6 +257,17 @@ pub async fn create(
                                 "channel_memberships_created": 0,
                             }),
                         ),
+                )
+                .await?;
+
+                // ADR-0185 D-C (c2): first native agent that can speak kicks off
+                // the owner. Membership in `#general` is the welcome helper's
+                // write, not this create's.
+                crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
+                    conn,
+                    workspace_id,
+                    Some(agent.id),
+                    gateway_enabled,
                 )
                 .await?;
 

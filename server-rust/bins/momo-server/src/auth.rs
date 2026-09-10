@@ -249,6 +249,7 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
     let limiter_after_tx = agent_port.clone();
     let reserved_rate_logs = Arc::new(Mutex::new(Vec::<(String, u64)>::new()));
     let reserved_rate_logs_in_tx = reserved_rate_logs.clone();
+    let gateway_enabled = state.agent_gateway.enabled();
     let outcome = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
         Box::pin(async move {
             let (identity, scope_granted, pairing_detection) = if pairing.is_some() {
@@ -562,6 +563,16 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                             "momo.hosted_agent.connection.activated.v1",
                             json!({"audience":"/v1/mcp/agent-port"}),
                         ),
+                    )
+                    .await?;
+                    // ADR-0185 D-C (c2): pairing→detected→active is the first
+                    // moment resolve_welcome_target_in_tx can return Some for
+                    // a hosted agent. Confirm is still paused/`detected`.
+                    crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
+                        conn,
+                        identity.workspace_id,
+                        None,
+                        gateway_enabled,
                     )
                     .await?;
                 }

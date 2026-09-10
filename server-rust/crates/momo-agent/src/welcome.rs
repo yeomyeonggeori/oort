@@ -1,8 +1,11 @@
 //! Welcome kickoff — resolve the default-channel agent and build the job
-//! (ADR-0181).
+//! (ADR-0181, ADR-0185 D-C c2).
 //!
 //! The route layer composes this with `create_agent_run_in_tx` (the worker
-//! does that, not join) and `emit_outbox`. This module owns **no INSERT**.
+//! does that, not join) and `emit_outbox`. Job INSERT stays with the caller.
+//! The one write here is `#general` membership for a newly created native
+//! agent, so `resolve_welcome_target_in_tx` can return `Some` in the same
+//! native-create transaction (D3: the opener speaks in `#general`).
 
 use momo_db::DbError;
 use serde_json::{json, Map, Value};
@@ -60,8 +63,96 @@ fn stored_welcome_agent(settings: &Value) -> Option<Uuid> {
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
+/// ADR-0181 D4 opener marker for one human in one workspace.
+pub fn welcome_opener_idempotency_key(workspace_id: Uuid, member_id: Uuid) -> String {
+    RunTrigger::Welcome {
+        workspace_id,
+        member_id,
+        agent_member_id: Uuid::nil(),
+        channel_id: Uuid::nil(),
+        kind: WelcomeKind::Opener,
+    }
+    .idempotency_key()
+}
+
+/// Earliest-created active human with `workspace_membership.role = 'owner'`.
+/// v1 kickoff target is that one person (ADR-0185 §8).
+pub async fn resolve_welcome_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT m.id \
+           FROM workspace_membership wm \
+           JOIN member m ON m.id = wm.member_id AND m.workspace_id = wm.workspace_id \
+          WHERE wm.workspace_id = $1 \
+            AND wm.role = 'owner' \
+            AND m.kind = 'human' \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+          ORDER BY m.created_at ASC, m.id ASC \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(owner)
+}
+
+/// True when an opener job or run already exists for this member.
+pub async fn welcome_opener_already_queued_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, DbError> {
+    let key = welcome_opener_idempotency_key(workspace_id, member_id);
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 WHERE EXISTS ( \
+            SELECT 1 FROM agent_run \
+             WHERE workspace_id = $1 AND idempotency_key = $2 \
+         ) OR EXISTS ( \
+            SELECT 1 FROM outbox \
+             WHERE workspace_id = $1 \
+               AND kind = 'agent_job' \
+               AND payload->>'idempotency_key' = $2 \
+         )",
+    )
+    .bind(workspace_id)
+    .bind(&key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// Put a native agent in `#general` so it can be the welcome speaker (D3).
+/// Idempotent: a second create that already sits in the channel is a no-op.
+pub async fn ensure_agent_in_general_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<(), DbError> {
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         SELECT $1, id, $2, 'member' \
+           FROM channel \
+          WHERE workspace_id = $1 \
+            AND kind = 'public' \
+            AND name = 'general' \
+            AND archived_at IS NULL \
+          ORDER BY created_at ASC, id ASC \
+          LIMIT 1 \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL \
+           WHERE membership.workspace_id = EXCLUDED.workspace_id",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(())
+}
+
 /// Default channel `#general`, plus the welcome agent (settings override, else
-/// first active native agent in that channel).
+/// first active native agent in that channel, else first active hosted agent).
 pub async fn resolve_welcome_target_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -136,9 +227,17 @@ async fn load_welcome_agent_in_tx(
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
             AND COALESCE(ap.paused, false) = false \
-            AND NOT EXISTS ( \
-                  SELECT 1 FROM hosted_agent_connection hc \
-                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+            AND ( \
+                  NOT EXISTS ( \
+                    SELECT 1 FROM hosted_agent_connection hc \
+                     WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                  ) \
+                  OR EXISTS ( \
+                    SELECT 1 FROM hosted_agent_connection hc \
+                     WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                       AND hc.status = 'active' \
+                       AND hc.proved_at IS NOT NULL \
+                  ) \
                 ) \
             AND EXISTS ( \
                   SELECT 1 FROM membership ms \
@@ -287,6 +386,29 @@ mod tests {
         assert_eq!(
             stored_prompt(&json!({"welcome_prompt": "직접 편집한 프롬프트"})),
             "직접 편집한 프롬프트"
+        );
+    }
+
+    #[test]
+    fn opener_key_is_per_workspace_member_and_ignores_agent() {
+        let workspace = Uuid::from_u128(1);
+        let member = Uuid::from_u128(2);
+        let key = welcome_opener_idempotency_key(workspace, member);
+        assert_eq!(
+            key,
+            RunTrigger::Welcome {
+                workspace_id: workspace,
+                member_id: member,
+                agent_member_id: Uuid::from_u128(99),
+                channel_id: Uuid::from_u128(7),
+                kind: WelcomeKind::Opener,
+            }
+            .idempotency_key()
+        );
+        assert!(key.contains(":opener:v1"));
+        assert_ne!(
+            key,
+            welcome_opener_idempotency_key(workspace, Uuid::from_u128(3))
         );
     }
 }
