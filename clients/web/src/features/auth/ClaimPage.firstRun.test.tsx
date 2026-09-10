@@ -4,7 +4,8 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { ApiError, type LoginResponse } from "@momo/core/lib/api";
+import { ApiError, type LoginResponse, type Member } from "@momo/core/lib/api";
+import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { ClaimPage } from "./ClaimPage";
 import {
   dismissPhoneLinkFirstRun,
@@ -37,6 +38,10 @@ import {
 // =============================================================================
 
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
+const fetchWorkspace = vi.hoisted(() => vi.fn());
+const renameWorkspace = vi.hoisted(() => vi.fn());
+const changeMyHandle = vi.hoisted(() => vi.fn());
+const changeMyDisplayName = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -44,6 +49,21 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     claimOwnerPassword: (...args: unknown[]) =>
       claimOwnerPassword(...args) as Promise<LoginResponse>,
+    changeMyHandle: (...args: unknown[]) =>
+      changeMyHandle(...args) as Promise<Member>,
+    changeMyDisplayName: (...args: unknown[]) =>
+      changeMyDisplayName(...args) as Promise<Member>,
+  };
+});
+
+vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/settings/api")>();
+  return {
+    ...actual,
+    fetchWorkspace: (...args: unknown[]) => fetchWorkspace(...args),
+    renameWorkspace: (...args: unknown[]) =>
+      renameWorkspace(...args) as Promise<WorkspaceIdentity>,
   };
 });
 
@@ -85,7 +105,34 @@ function resetFirstRunState() {
 beforeEach(() => {
   resetFirstRunState();
   claimOwnerPassword.mockReset();
+  fetchWorkspace.mockReset();
+  renameWorkspace.mockReset();
+  changeMyHandle.mockReset();
+  changeMyDisplayName.mockReset();
   claimOwnerPassword.mockResolvedValue(session);
+  fetchWorkspace.mockResolvedValue({
+    id: session.member.workspaceId,
+    slug: "demo",
+    name: "momo Demo Workspace",
+    updatedAtMs: 1,
+    roleLabels: {},
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
+  });
+  renameWorkspace.mockResolvedValue({
+    id: session.member.workspaceId,
+    slug: "demo",
+    name: "새벽",
+    updatedAtMs: 2,
+    roleLabels: {},
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
+  });
+  changeMyHandle.mockResolvedValue({ ...session.member, handle: "seongjae" });
+  changeMyDisplayName.mockResolvedValue({
+    ...session.member,
+    displayName: "성재",
+  });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
@@ -183,18 +230,36 @@ describe("claim → first-run 사다리 (#2301)", () => {
     await submitClaim(onLoggedIn);
     await vi.waitFor(() => {
       expect(
+        document.querySelector('[data-testid="onboarding-s1"]')
+      ).not.toBeNull();
+    });
+    // Markers are written at claim success, before S1/S2 (ConnectPage S3 order).
+    // S1 does not rewrite them. onLoggedIn waits for S2 skip/continue.
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(peekFreshSignup()).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
+    });
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("workspace-profile");
+    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
+
+    fill("onboarding-s1-workspace-name", "새벽");
+    fill("onboarding-s1-display-name", "성재");
+    fill("onboarding-s1-handle", "seongjae");
+    await act(async () => {
+      click("onboarding-s1-submit");
+    });
+    await vi.waitFor(() => {
+      expect(
         document.querySelector('[data-testid="onboarding-s2"]')
       ).not.toBeNull();
     });
-    // Markers are written at claim success, before S2 (ConnectPage S3 order).
-    // onLoggedIn still waits for skip/continue so the first-run gate opens then.
     expect(onLoggedIn).not.toHaveBeenCalled();
     expect(peekFreshSignup()).toEqual({
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("invite");
-    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
 
     click("onboarding-s2-skip");
     await vi.waitFor(() => {

@@ -33,6 +33,7 @@ describe("issued invite code stays off the console", () => {
     const files = [
       fileURLToPath(new URL("./InviteStage.tsx", import.meta.url)),
       fileURLToPath(new URL("./OwnerOnboarding.tsx", import.meta.url)),
+      fileURLToPath(new URL("./WorkspaceProfileStage.tsx", import.meta.url)),
       fileURLToPath(new URL("../settings/useIssueInvite.ts", import.meta.url)),
       fileURLToPath(new URL("../settings/IssuedInviteCard.tsx", import.meta.url)),
     ];

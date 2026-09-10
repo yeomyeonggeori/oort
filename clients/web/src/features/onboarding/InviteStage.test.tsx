@@ -10,6 +10,10 @@ import { buttonVariants } from "@/design/ui/button";
 import { INVITE_ISSUE_ERROR } from "@/features/settings/inviteIssueError";
 import { InviteStage } from "./InviteStage";
 import { OwnerOnboarding } from "./OwnerOnboarding";
+import {
+  clearOwnerOnboardingPending,
+  markOwnerOnboardingStage,
+} from "./ownerOnboardingStore";
 import { S2_REENTRY } from "./s2Copy";
 
 const createInvite = vi.hoisted(() => vi.fn());
@@ -71,6 +75,8 @@ beforeAll(() => {
 });
 
 beforeEach(() => {
+  clearOwnerOnboardingPending();
+  markOwnerOnboardingStage("invite");
   createInvite.mockReset();
   createInvite.mockResolvedValue(issued);
   fetchWorkspace.mockReset();
@@ -106,6 +112,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  clearOwnerOnboardingPending();
   vi.unstubAllGlobals();
 });
 

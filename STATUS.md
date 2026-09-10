@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-12b-w 온보딩 S1 「내 워크스페이스·내 이름」 (#2332)
+
+- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2 `changeMyHandle` `{handle}` + E0 `changeMyDisplayName`. 핸들 409 인라인, stale 409 재시도, 실패는 설정 › 워크스페이스 / 프로필. `oort.onboarding.v1` 값이 `workspace-profile`→`invite`. `totalSteps_is_2` 유지. 팀 규모 질문 0.
+- runtime-unverified: 실서버 claim→S1→S2 왕복은 mock·RTL 범위.
+
 ## SH-12c 온보딩 S2 「팀원 초대」 (#2333)
 
 - Track UXUI. `feat/2333-onboarding-s2-invite` onto `origin/track/uxui`. claim 성공 뒤 S2 「팀원 초대」 1장(카운터 2/2). skip 「나중에」 상시, 재진입 「설정 › 멤버와 초대에서 언제든」. 발급은 기존 `POST /v1/workspaces/{ws}/invites`(TTL 24h·1회). S1(#2332) 미랜딩 — 스테이지 표는 2칸, 마운트는 invite만.

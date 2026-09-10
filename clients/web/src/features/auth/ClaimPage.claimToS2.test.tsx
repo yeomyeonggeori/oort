@@ -4,9 +4,11 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LoginResponse } from "@momo/core/lib/api";
+import type { LoginResponse, Member } from "@momo/core/lib/api";
+import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { applyLogin, clearSession } from "@/lib/session";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
+import { peekFreshSignup } from "@/features/welcome/freshSignup";
 import {
   clearOwnerOnboardingPending,
   ownerOnboardingIsPending,
@@ -17,6 +19,9 @@ import { releaseSessionRestore } from "@/features/auth/onboardingSessionHold";
 const restoreSession = vi.hoisted(() => vi.fn());
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
+const renameWorkspace = vi.hoisted(() => vi.fn());
+const changeMyHandle = vi.hoisted(() => vi.fn());
+const changeMyDisplayName = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -25,6 +30,10 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     restoreSession: (...args: unknown[]) => restoreSession(...args),
     claimOwnerPassword: (...args: unknown[]) =>
       claimOwnerPassword(...args) as Promise<LoginResponse>,
+    changeMyHandle: (...args: unknown[]) =>
+      changeMyHandle(...args) as Promise<Member>,
+    changeMyDisplayName: (...args: unknown[]) =>
+      changeMyDisplayName(...args) as Promise<Member>,
   };
 });
 
@@ -34,6 +43,8 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   return {
     ...actual,
     fetchWorkspace: (...args: unknown[]) => fetchWorkspace(...args),
+    renameWorkspace: (...args: unknown[]) =>
+      renameWorkspace(...args) as Promise<WorkspaceIdentity>,
   };
 });
 
@@ -120,6 +131,9 @@ beforeEach(() => {
   restoreSession.mockReset();
   claimOwnerPassword.mockReset();
   fetchWorkspace.mockReset();
+  renameWorkspace.mockReset();
+  changeMyHandle.mockReset();
+  changeMyDisplayName.mockReset();
   restoreSession.mockResolvedValue(session);
   claimOwnerPassword.mockImplementation(async () => {
     applyLogin(session);
@@ -136,6 +150,20 @@ beforeEach(() => {
     roleLabels: {},
     welcomeAgentMemberId: null,
     welcomePrompt: "",
+  });
+  renameWorkspace.mockResolvedValue({
+    id: session.member.workspaceId,
+    slug: "dawn",
+    name: "새벽",
+    updatedAtMs: 2,
+    roleLabels: {},
+    welcomeAgentMemberId: null,
+    welcomePrompt: "",
+  });
+  changeMyHandle.mockResolvedValue(session.member);
+  changeMyDisplayName.mockResolvedValue({
+    ...session.member,
+    displayName: "성재",
   });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -207,60 +235,138 @@ function click(testId: string) {
   });
 }
 
-describe("claim → S2 through App restore hold (B-1)", () => {
-  it("renders S2 after claim applyLogin instead of the session-restoring skeleton", async () => {
+async function submitClaimFrom(host: HTMLElement) {
+  await vi.waitFor(() => {
+    expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
+  });
+  fill("claim-password", PASSWORD);
+  fill("claim-confirm", PASSWORD);
+  click("claim-submit");
+  await vi.waitFor(() => {
+    expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
+  });
+}
+
+async function submitS1() {
+  await vi.waitFor(() => {
+    expect(
+      document.querySelector('[data-testid="onboarding-s1-workspace-name"]')
+    ).not.toBeNull();
+  });
+  fill("onboarding-s1-workspace-name", "새벽");
+  fill("onboarding-s1-display-name", "성재");
+  fill("onboarding-s1-handle", "seongjae");
+  await act(async () => {
+    click("onboarding-s1-submit");
+  });
+  await vi.waitFor(() => {
+    expect(document.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+  });
+}
+
+function unmountApp() {
+  act(() => {
+    mountedRoot?.unmount();
+    mountedRoot = null;
+  });
+  mountedHost?.remove();
+  mountedHost = null;
+}
+
+describe("claim → S1 through App restore hold (B-1)", () => {
+  it("renders S1 after claim applyLogin instead of the session-restoring skeleton", async () => {
     // A late hold cancels an in-flight restore and parks the skeleton.
-    // Keep restore pending so that race cannot "win" and still paint S2.
+    // Keep restore pending so that race cannot "win" and still paint S1.
     restoreSession.mockImplementation(() => new Promise(() => undefined));
     const host = await mountApp();
-    await vi.waitFor(() => {
-      expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
-    });
-    fill("claim-password", PASSWORD);
-    fill("claim-confirm", PASSWORD);
-    click("claim-submit");
-    await vi.waitFor(() => {
-      expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
-    });
+    await submitClaimFrom(host);
+    expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
+    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
+      "1/2"
+    );
+    expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(host.querySelector('[data-testid="session-restoring"]')).toBeNull();
     expect(restoreSession).not.toHaveBeenCalled();
     expect(ownerOnboardingIsPending()).toBe(true);
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
   });
 });
 
-describe("reload during S2 re-enters S2 (H-1)", () => {
-  it("reload during S2 re-enters S2 then skip proceeds", async () => {
+describe("claim → S1 submit → S2", () => {
+  it("calls E1 and E2 once then renders S2 at 2/2", async () => {
     const host = await mountApp();
+    await submitClaimFrom(host);
     await vi.waitFor(() => {
-      expect(host.querySelector('[data-testid="claim-submit"]')).not.toBeNull();
+      expect(fetchWorkspace).toHaveBeenCalled();
     });
-    fill("claim-password", PASSWORD);
-    fill("claim-confirm", PASSWORD);
-    click("claim-submit");
-    await vi.waitFor(() => {
-      expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
     });
+    await submitS1();
+    expect(renameWorkspace).toHaveBeenCalledTimes(1);
+    expect(renameWorkspace).toHaveBeenCalledWith(
+      session.member.workspaceId,
+      "새벽",
+      1
+    );
+    expect(changeMyHandle).toHaveBeenCalledTimes(1);
+    expect(changeMyHandle).toHaveBeenCalledWith(
+      session.member.workspaceId,
+      "seongjae"
+    );
+    expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
+      "2/2"
+    );
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
-
-    act(() => {
-      mountedRoot?.unmount();
-      mountedRoot = null;
+    expect(peekFreshSignup()).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
     });
-    mountedHost?.remove();
-    mountedHost = null;
+  });
+});
+
+describe("reload during S1 re-enters S1", () => {
+  it("reload during S1 re-enters S1; after S1 a reload re-enters S2", async () => {
+    const host = await mountApp();
+    await submitClaimFrom(host);
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+
+    unmountApp();
 
     const reloaded = await mountApp();
     await vi.waitFor(() => {
       expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
     });
-    expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
+    expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(reloaded.querySelector('[data-testid="app-shell"]')).toBeNull();
+
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await submitS1();
+    expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
+
+    unmountApp();
+
+    const afterS1 = await mountApp();
+    await vi.waitFor(() => {
+      expect(afterS1.querySelector('[data-testid="session-restoring"]')).toBeNull();
+    });
+    expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    expect(afterS1.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
 
     click("onboarding-s2-skip");
     await vi.waitFor(() => {
-      expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
+      expect(afterS1.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     });
     expect(ownerOnboardingIsPending()).toBe(false);
-    expect(reloaded.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+    expect(afterS1.querySelector('[data-testid="app-shell"]')).not.toBeNull();
   });
 });
