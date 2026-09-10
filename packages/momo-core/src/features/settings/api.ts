@@ -492,6 +492,37 @@ export async function fetchWorkspace(
 }
 
 /**
+ * PATCH /v1/workspaces/{ws} — rename (ADR-0185 E1 / #2331).
+ * Body `{name, updatedAtMs}`. Slug is immutable. Stale `updatedAtMs` is 409.
+ */
+export async function renameWorkspace(
+  workspaceId: string,
+  name: string,
+  updatedAtMs: number
+): Promise<WorkspaceIdentity> {
+  const res = await settingsRequest<{ workspace: WorkspaceIdentity }>(
+    `/v1/workspaces/${encodeURIComponent(workspaceId)}`,
+    { method: "PATCH", body: JSON.stringify({ name, updatedAtMs }) }
+  );
+  if (!res.workspace || typeof res.workspace !== "object") {
+    throw new Error("서버 응답을 읽지 못했습니다. 다시 시도하세요.");
+  }
+  const workspace = res.workspace;
+  const raw = workspace as WorkspaceIdentity & {
+    roleLabels?: unknown;
+    welcomeAgentMemberId?: unknown;
+    welcomePrompt?: unknown;
+  };
+  return {
+    ...workspace,
+    roleLabels: parseRoleLabels(raw.roleLabels),
+    welcomeAgentMemberId:
+      typeof raw.welcomeAgentMemberId === "string" ? raw.welcomeAgentMemberId : null,
+    welcomePrompt: typeof raw.welcomePrompt === "string" ? raw.welcomePrompt : "",
+  };
+}
+
+/**
  * PATCH /v1/workspaces/{ws}/settings — top-level merge. `role_labels` is
  * replaced whole: omit a role key to drop that override, `null` deletes the
  * key (every default restored). Other settings keys are left untouched.

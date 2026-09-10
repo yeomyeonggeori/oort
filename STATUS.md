@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-12b-e workspace rename + self handle (#2331, 2026-09-09)
+
+- Track engine. `feat/2331-workspace-rename-handle` onto `origin/track/engine`. E1 `PATCH /v1/workspaces/{ws}` `{name, updatedAtMs}` (owner/admin, slug immutable, stale 409, audit `workspace.renamed`). E2 `PATCH …/members/me` `handle` (join normalize, `member_handle_uniq` 409 `handle is already in use`, audit `member.handle_changed`, past `@oldhandle` bodies untouched). OpenAPI + `@momo/core` `renameWorkspace` / `changeMyHandle`. No migration.
+- 검증: `workspace_rename_conformance_pg` · `self_rename_conformance_pg` (각 상태코드 단정 + 메시지 본문 diff-0) · `scripts/verify_openapi_contract_rust.sh` · 사보타주 3건 RED 후 복구.
+- runtime-unverified: 없음 (로컬 PG 15432 컨벤션).
+
 ## UX-R2c·SH-6a-w design-review 잔여 (#2256, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-followup` onto `origin/track/uxui`. UX-R2c R7 M-8/N-13/N-14 + SH-6a-w R7-N4.

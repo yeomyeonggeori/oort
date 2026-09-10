@@ -17,8 +17,9 @@ openapi: 3.0.3
 #
 # Scope: web v0 (ADR-0119 D5-A) plus admin agent creation, the plugin
 # registry/grant, incoming webhook, hosted Drive MCP, hosted-agent Agent Port,
-# and interactive Work Console control surfaces. Other routes (workspace
-# identity GET path, legacy agent credential/run surfaces, cost projection,
+# and interactive Work Console control surfaces. Workspace identity
+# GET/PATCH /v1/workspaces/{workspaceId} is documented (#2331 / ADR-0185 E1).
+# Other routes (legacy agent credential/run surfaces, cost projection,
 # platform admin, centrifugo proxy, health) remain intentionally undocumented
 # here. WorkspaceDto (roleLabels) is the identity projection schema (#1770).
 # Operator/instance-admin surfaces (e.g. the MOMO-572 provider link) are
@@ -502,6 +503,83 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "429":
           $ref: "#/components/responses/RateLimited"
+
+  /v1/workspaces/{workspaceId}:
+    get:
+      tags: [workspace-settings]
+      operationId: getWorkspace
+      summary: Read workspace identity for a live member.
+      description: >
+        Any live member. Returns the identity envelope (`WorkspaceResponse`)
+        the settings panel and onboarding rename use: name, slug,
+        `updatedAtMs` (the optimistic-concurrency token for PATCH),
+        roleLabels, and welcome projections. The settings bag is never on
+        this response — that is `GET /v1/workspaces/{workspaceId}/settings`.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      responses:
+        "200":
+          description: Workspace identity.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WorkspaceResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not a live member of this workspace.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "404":
+          description: Workspace does not exist.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+    patch:
+      tags: [workspace-settings]
+      operationId: renameWorkspace
+      summary: Rename the workspace (slug is immutable).
+      description: >
+        #2331 / ADR-0185 E1. Human owner/admin only. Body is `{name,
+        updatedAtMs}` (camelCase, closed world). Name reuses
+        `normalized_workspace_name` (trimmed, 1..80 chars, control
+        characters refused); a violation is 400. `updatedAtMs` is the
+        token GET already returns; a mismatch is 409. Slug is not
+        writable. Agent bearers are 403. Success writes `workspace.name`
+        and `updated_at` in one tenant transaction with audit
+        `workspace.renamed`, and answers with the same envelope GET does.
+      security: [{bearerAuth: []}]
+      parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RenameWorkspaceRequest"}
+      responses:
+        "200":
+          description: Workspace renamed. Envelope matches GET.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/WorkspaceResponse"}
+        "400":
+          description: Name failed normalization (empty, longer than 80 chars after trim, or control characters).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: >
+            Caller is not a human owner/admin of this workspace, or presented
+            an agent bearer (not on the agent-route allow-list).
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "409":
+          description: Stale `updatedAtMs` — refetch GET and retry.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
+        "429": {$ref: "#/components/responses/RateLimited"}
 
   /v1/workspaces/{workspaceId}/invites:
     get:
@@ -1094,17 +1172,23 @@ paths:
     patch:
       tags: [membership]
       operationId: renameSelfMember
-      summary: Change the caller's own display name.
+      summary: Change the caller's own display name and/or handle.
       description: >
-        #1873 / BZ-4e. Human active members only. Body is `{displayName}`
-        (camelCase, closed world). Normalization reuses the join rule
+        #1873 / BZ-4e + #2331 / ADR-0185 E2. Human active members only.
+        Body is `{displayName?, handle?}` (camelCase, closed world; at least
+        one field required). Display-name normalization reuses the join rule
         (`normalized_join_display_name`: trimmed, 1..100 chars); a violation
-        is 400 `displayName is required`. Handle, role, and avatar are not
-        writable here. Agent bearers are 403 — an agent's display name is
-        the agent profile path. Writes `member.display_name` and `updated_at`
-        in one tenant transaction with audit `member.renamed` and a
-        `member.renamed` outbox broadcast per co-member channel (presence
-        fan-out shape; no new rail).
+        is 400 `displayName is required`. Handle normalization reuses
+        `normalized_requested_handle` (2..32 chars of a-z, 0-9, `_` or `-`);
+        a format violation is 400 with that join sentence. A
+        `member_handle_uniq` collision is 409 `handle is already in use`
+        (join `HandleTaken`). Role and avatar are not writable here. Agent
+        bearers are 403 — an agent's display name/handle is the agent profile
+        path. Display-name writes `member.display_name` with audit
+        `member.renamed` and a `member.renamed` outbox broadcast per
+        co-member channel. Handle writes `member.handle` with audit
+        `member.handle_changed` and does **not** rewrite past message bodies
+        that contain `@<old handle>`. No cooldown.
       security: [{bearerAuth: []}]
       parameters: [{$ref: "#/components/parameters/WorkspaceId"}]
       requestBody:
@@ -1115,13 +1199,16 @@ paths:
               $ref: "#/components/schemas/RenameSelfMemberRequest"
       responses:
         "200":
-          description: Display name updated.
+          description: Display name and/or handle updated.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/SelfMemberResponse"
         "400":
-          description: displayName failed join normalization (empty or longer than 100 chars after trim).
+          description: >
+            displayName failed join normalization (empty or longer than 100
+            chars after trim), handle failed join format, or the body named
+            neither field.
           content:
             application/json:
               schema:
@@ -1131,6 +1218,12 @@ paths:
           description: >
             Caller is not a human live member of this workspace, or presented
             an agent bearer (not on the agent-route allow-list).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: Handle is already in use in this workspace (`member_handle_uniq`).
           content:
             application/json:
               schema:
@@ -7941,16 +8034,39 @@ components:
           type: string
           description: Replacement password, at most 1024 chars, must differ.
 
+    RenameWorkspaceRequest:
+      type: object
+      additionalProperties: false
+      required: [name, updatedAtMs]
+      properties:
+        name:
+          type: string
+          description: >
+            1..80 chars after trimming. Control characters are refused.
+            Slug is not accepted.
+        updatedAtMs:
+          type: integer
+          format: int64
+          description: Optimistic-concurrency token from GET. Stale values are 409.
+
     RenameSelfMemberRequest:
       type: object
       additionalProperties: false
-      required: [displayName]
       properties:
         displayName:
           type: string
           description: >
             1..100 chars after trimming. Same rule and 400 sentence as join
-            (`displayName is required`). Handle/role/avatar are not accepted.
+            (`displayName is required`).
+        handle:
+          type: string
+          description: >
+            2..32 chars of a-z, 0-9, `_` or `-` after trim/lower. Same rule
+            and 400 sentence as join. A taken handle is 409
+            `handle is already in use`. Role/avatar are not accepted.
+      description: >
+        At least one of `displayName` / `handle` is required. An empty object
+        is 400.
 
     SelfMemberResponse:
       type: object
