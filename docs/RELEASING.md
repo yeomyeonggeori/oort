@@ -19,8 +19,9 @@
 
 ## 한 줄 순서
 
-**승격 → 발행(dispatch · owner 승인) → digest 수거 → 태그(빌드 커밋에) →
-Release(digest 표) → 매니페스트 생성·커밋 → SELF_HOST 문면 확인.**
+**승격 → 프리퍼블리시(`gate:csp-deploy`) → 발행(dispatch · owner 승인) →
+digest 수거 → 태그(빌드 커밋에) → Release(digest 표) → 매니페스트 생성·커밋 →
+SELF_HOST 문면 확인.**
 
 릴리스는 **main 기준**이다. 태그는 승격 커밋에 앉힌다 — track 브랜치 HEAD가
 아니다.
@@ -36,6 +37,23 @@ Release(digest 표) → 매니페스트 생성·커밋 → SELF_HOST 문면 확�
 않는다.
 
 첫 공개 발행의 빌드 커밋은 `main=45a154d2` 다 (패킷 §G1).
+
+---
+
+## 1.5 프리퍼블리시 체크리스트 (dispatch 전)
+
+발행을 dispatch 하기 **전에** 배포 CSP 게이트를 통과시킨다. 이 단계는
+필수다 — 도구가 없다고 건너뛰고 dispatch 하지 않는다. `gate:csp-deploy` 는
+엣지 파일을 `caddy adapt` 로 렌더하므로 **docker 또는 PATH 의 caddy** 가
+필요하다 (`MOMO_CADDY_IMAGE`, 기본 `caddy:2-alpine`).
+
+```sh
+npm --prefix clients/web run gate:csp-deploy
+```
+
+로컬 PR 게이트 `--profile web` 은 같은 명령을 **선택 도구** 로 돌린다:
+docker/caddy 가 PATH 에 없으면 눈에 보이는 skip 줄(silent skip 금지,
+RED 아님), 있으면 실행하고 실패는 RED. 릴리스 체크리스트는 skip 이 없다.
 
 ---
 

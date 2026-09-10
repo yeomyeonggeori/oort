@@ -609,6 +609,7 @@ export function CopyButton({
   label = "복사",
   subject,
   testId,
+  size = "sm",
 }: {
   value: string;
   label?: string;
@@ -625,6 +626,8 @@ export function CopyButton({
    */
   subject?: string;
   testId?: string;
+  /** Settings rows stay `sm` (28px toolbar). Form-level copy (S2 issued card) uses default = `h-control`. */
+  size?: "sm" | "default";
 }) {
   const { copied, copy } = useClipboardCopy(value);
 
@@ -637,7 +640,7 @@ export function CopyButton({
     <Button
       type="button"
       variant="outline"
-      size="sm"
+      size={size}
       onClick={() => void copy()}
       aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}

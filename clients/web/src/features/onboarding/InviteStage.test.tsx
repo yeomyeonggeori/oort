@@ -8,13 +8,17 @@ import type { CreatedInvite } from "@momo/core/features/settings/api";
 import { ApiError, type LoginResponse } from "@momo/core/lib/api";
 import { buttonVariants } from "@/design/ui/button";
 import { INVITE_ISSUE_ERROR } from "@/features/settings/inviteIssueError";
+import {
+  INVITE_COPY_CARD_LABEL,
+  INVITE_CREATE_LABEL,
+} from "@/features/settings/inviteLabels";
 import { InviteStage } from "./InviteStage";
 import { OwnerOnboarding } from "./OwnerOnboarding";
 import {
   clearOwnerOnboardingPending,
   markOwnerOnboardingStage,
 } from "./ownerOnboardingStore";
-import { S2_REENTRY } from "./s2Copy";
+import { S2_PRIMARY_LABEL, S2_REENTRY } from "./s2Copy";
 
 const createInvite = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
@@ -244,6 +248,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(primary).toContain("text-on-accent");
     expect(issue?.className).toContain("bg-accent");
     expect(issue?.className).toContain("text-on-accent");
+    expect(issue?.textContent).toBe(INVITE_CREATE_LABEL);
     expect(skip?.className).not.toContain("bg-accent");
     expect(skip?.className).not.toContain("border-line-strong");
   });
@@ -310,6 +315,42 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(host.querySelector('[data-testid="invite-copy-link"]')).toBeNull();
   });
 
+  it("issued filled primary stays 계속; copy is form-control outline (M-8)", async () => {
+    const host = mount(
+      createElement(InviteStage, {
+        workspaceId: WS,
+        onSkip: vi.fn(),
+        onContinue: vi.fn(),
+      })
+    );
+    await act(async () => {
+      click("onboarding-s2-issue");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="invite-issued"]')).not.toBeNull();
+    });
+    const continueBtn = host.querySelector(
+      '[data-testid="onboarding-s2-continue"]'
+    ) as HTMLButtonElement | null;
+    const copyBtn = host.querySelector(
+      '[data-testid="invite-copy-card"]'
+    ) as HTMLButtonElement | null;
+    expect(continueBtn, "continue").not.toBeNull();
+    expect(copyBtn, "copy").not.toBeNull();
+    expect(continueBtn?.textContent).toBe("계속");
+    expect(copyBtn?.textContent).toBe(INVITE_COPY_CARD_LABEL);
+    expect(continueBtn?.className).toContain("bg-accent");
+    expect(continueBtn?.className).toContain("text-on-accent");
+    expect(continueBtn?.className.split(/\s+/)).toContain("h-control");
+    expect(copyBtn?.className).toContain("border-line-strong");
+    expect(copyBtn?.className).not.toContain("bg-accent");
+    expect(copyBtn?.className.split(/\s+/)).toContain("h-control");
+    expect(copyBtn?.className.split(/\s+/)).not.toContain("h-control-sm");
+    const outline = buttonVariants({ variant: "outline", size: "default" });
+    expect(outline).toContain("h-control");
+    expect(outline).not.toContain("h-control-sm");
+  });
+
   it("copied invite text uses the workspace name (M-7)", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", {
@@ -328,6 +369,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await act(async () => {
+      await Promise.resolve(fetchWorkspace.mock.results[0]?.value);
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -347,5 +389,31 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     expect(copied).toContain("새벽");
     expect(copied).toContain("새벽 워크스페이스에 초대합니다.");
     expect(copied).not.toMatch(/^oort 워크스페이스/);
+  });
+});
+
+describe("S2 naming parity with 설정 › 멤버와 초대 (#2356 M-9)", () => {
+  it("issue CTA is the same constant as settings", () => {
+    expect(S2_PRIMARY_LABEL).toBe(INVITE_CREATE_LABEL);
+    expect(S2_PRIMARY_LABEL).toBe("초대 링크 만들기");
+  });
+
+  it("copy control uses the shared card-copy label", async () => {
+    const host = mount(
+      createElement(InviteStage, {
+        workspaceId: WS,
+        onSkip: vi.fn(),
+        onContinue: vi.fn(),
+      })
+    );
+    await act(async () => {
+      click("onboarding-s2-issue");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="invite-copy-card"]')).not.toBeNull();
+    });
+    expect(host.querySelector('[data-testid="invite-copy-card"]')?.textContent).toBe(
+      INVITE_COPY_CARD_LABEL
+    );
   });
 });

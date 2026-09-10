@@ -45,6 +45,24 @@ describe("issued invite code stays off the console", () => {
   });
 });
 
+describe("issued invite card Korean keep-all (#2356 M-2b)", () => {
+  it("both shared sentences carry break-keep so 화면에서만 cannot split", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../settings/IssuedInviteCard.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(source).toContain("화면에서만");
+    expect(source).not.toMatch(/화면에서\s*\n\s*만/);
+    const tags = [...source.matchAll(/<p className="([^"]*)">/g)].map(
+      (match) => match[1]
+    );
+    expect(tags.length).toBe(2);
+    expect(tags.every((cls) => cls.split(/\s+/).includes("break-keep"))).toBe(
+      true
+    );
+  });
+});
+
 describe("S2 skip does not issue", () => {
   it("skip 버튼 onClick 은 handleSkipClick 만 부르고 발급을 넣지 않는다", () => {
     const source = readFileSync(
@@ -122,5 +140,39 @@ describe("settings doors record the S1 flag (M-R3-5)", () => {
     );
     expect(workspace).toContain('recordOwnerOnboardingSettingsSave("workspace")');
     expect(profile).toContain('recordOwnerOnboardingSettingsSave("profile")');
+  });
+});
+
+describe("S2 naming shares settings invite labels (#2356 M-9)", () => {
+  it("S2 issue CTA is assigned the settings constant, not a second literal", () => {
+    const s2 = readFileSync(
+      fileURLToPath(new URL("./s2Copy.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(s2).toMatch(/S2_PRIMARY_LABEL = INVITE_CREATE_LABEL/);
+    expect(s2).not.toMatch(/S2_PRIMARY_LABEL = "/);
+    const settings = readFileSync(
+      fileURLToPath(new URL("../settings/InviteSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(settings).toContain(
+      '{create.isPending ? "만드는 중" : INVITE_CREATE_LABEL}'
+    );
+    const labels = readFileSync(
+      fileURLToPath(new URL("../settings/inviteLabels.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(labels).toContain('export const INVITE_CREATE_LABEL = "초대 링크 만들기"');
+    expect(labels).toContain('export const INVITE_COPY_CARD_LABEL = "초대 카드 복사"');
+  });
+
+  it("issued card copy control uses INVITE_COPY_CARD_LABEL on both modes", () => {
+    const card = readFileSync(
+      fileURLToPath(new URL("../settings/IssuedInviteCard.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(card).toContain("label={INVITE_COPY_CARD_LABEL}");
+    expect(card).not.toMatch(/label="링크 복사"/);
+    expect(card).not.toMatch(/label="초대 카드 복사"/);
   });
 });

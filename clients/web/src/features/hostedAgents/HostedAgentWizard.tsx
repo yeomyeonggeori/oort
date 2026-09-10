@@ -568,7 +568,8 @@ function HostedWizardBody({
             endpoint={endpoint}
             routineLabel={hostedRoutineLabel(
               workspace.data?.name ?? "oort",
-              agentLabel
+              agentLabel,
+              pairing.connection.agentMemberId
             )}
             pairing={pairing}
             nowMs={nowMs}
