@@ -718,6 +718,7 @@ async fn exchange_code(
     let canonical_resource = canonical_resource.to_string();
     let client_id = client_id.to_string();
     let gateway_enabled = state.agent_gateway.enabled();
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
         Box::pin(async move {
             let Some(locked) = lock_hosted_oauth_code_in_tx(conn, workspace_id, &raw_code)
@@ -791,8 +792,9 @@ async fn exchange_code(
             crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
                 conn,
                 workspace_id,
-                None,
+                Some(issuance.agent_member_id),
                 gateway_enabled,
+                hosted_delivery_enabled,
             )
             .await?;
             Ok(Ok(issuance))

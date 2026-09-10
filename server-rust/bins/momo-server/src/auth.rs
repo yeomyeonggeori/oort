@@ -250,6 +250,7 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
     let reserved_rate_logs = Arc::new(Mutex::new(Vec::<(String, u64)>::new()));
     let reserved_rate_logs_in_tx = reserved_rate_logs.clone();
     let gateway_enabled = state.agent_gateway.enabled();
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let outcome = with_tenant_tx(&state.pool, claimed_workspace, move |conn| {
         Box::pin(async move {
             let (identity, scope_granted, pairing_detection) = if pairing.is_some() {
@@ -571,8 +572,9 @@ pub(crate) async fn authenticate_and_admit_agent_port_credential(
                     crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
                         conn,
                         identity.workspace_id,
-                        None,
+                        Some(identity.member_id),
                         gateway_enabled,
+                        hosted_delivery_enabled,
                     )
                     .await?;
                 }

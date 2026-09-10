@@ -10,9 +10,14 @@
 //!   ⑤ opener run has a `usage_ledger` row
 //!   ⑥ opener does not count toward the G2 consecutive auto-reply streak
 //!   ⑦ settings validation: inactive agent id → 400, 2001-char prompt → 400
-//!   ⑧ 0 agents → owner claim/seed → 0 jobs; hosted `active` → 1 job;
-//!      second hosted `active` → still 1 job
-//!   ⑨ native `POST …/agents` → 1 job; a second native create stays 1
+//!   ⑧ 0 agents → hosted `active` delivers the owner opener on the gateway
+//!      rail (run + inbox + claim); second hosted `active` stays 1
+//!   ⑨ native `POST …/agents` → 1 job and `channel_memberships_created=1`;
+//!      a second native create stays 1 and audit count 0
+//!  ⑩ earlier non-owner + later second owner → earliest owner is targeted
+//!  ⑪ two concurrent native creates → 1 job (advisory lock)
+//!  ⑫ native provider_required done → later hosted active delivers opener
+//!  ⑬ hosted delivery disabled → 0 jobs, marker free; native create delivers 1
 //!
 //! `#[ignore]` — needs a real Postgres. Gate PG is the 15432 convention:
 //!
@@ -150,6 +155,10 @@ async fn settle_residual_worker_jobs(su: &PgPool) {
 }
 
 async fn start_server(pool: PgPool) -> String {
+    start_server_with_delivery(pool, true).await
+}
+
+async fn start_server_with_delivery(pool: PgPool, hosted_delivery_enabled: bool) -> String {
     let state = AppState::new(
         pool,
         TEST_JWT_SECRET.to_string(),
@@ -166,7 +175,7 @@ async fn start_server(pool: PgPool) -> String {
         per_token_limit: 0,
         per_agent_limit: 0,
         per_ip_limit: 0,
-        hosted_delivery_enabled: true,
+        hosted_delivery_enabled,
         oauth: Default::default(),
     });
     let app = build_app(state);
@@ -408,6 +417,124 @@ async fn count_welcome_jobs(su: &PgPool, workspace: Uuid) -> i64 {
     .fetch_one(su)
     .await
     .expect("count welcome jobs")
+}
+
+async fn agent_created_membership_counts(su: &PgPool, workspace: Uuid) -> Vec<i32> {
+    sqlx::query_scalar(
+        "SELECT COALESCE((detail->>'channel_memberships_created')::int, -1) \
+           FROM audit_log \
+          WHERE workspace_id = $1 AND action = 'agent.created' \
+          ORDER BY created_at ASC, id ASC",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("agent.created membership counts")
+}
+
+struct HostedActivation {
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+    credential: String,
+}
+
+async fn claim_hosted_welcome_jobs(
+    pool: &PgPool,
+    workspace: Uuid,
+    agent_member_id: Uuid,
+    connection_id: Uuid,
+) -> Vec<momo_outbox::ClaimedGatewayJob> {
+    momo_db::with_tenant_tx(pool, workspace, move |conn| {
+        Box::pin(async move {
+            momo_outbox::claim_hosted_gateway_jobs_in_tx(
+                conn,
+                workspace,
+                agent_member_id,
+                connection_id,
+                10,
+            )
+            .await
+            .map_err(momo_db::DbError::from)
+        })
+    })
+    .await
+    .expect("claim hosted gateway jobs")
+}
+
+async fn count_hosted_job_inbox(
+    su: &PgPool,
+    workspace: Uuid,
+    connection_id: Uuid,
+    run_id: Uuid,
+) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*)::bigint FROM hosted_agent_inbox_event \
+          WHERE workspace_id = $1 \
+            AND connection_id = $2 \
+            AND event_kind = 'agent_job' \
+            AND source_run_id = $3",
+    )
+    .bind(workspace)
+    .bind(connection_id)
+    .bind(run_id)
+    .fetch_one(su)
+    .await
+    .expect("count hosted inbox job refs")
+}
+
+async fn opener_run_id(su: &PgPool, workspace: Uuid, owner: Uuid) -> Option<Uuid> {
+    let key = momo_agent::welcome_opener_idempotency_key(workspace, owner);
+    sqlx::query_scalar(
+        "SELECT id FROM agent_run WHERE workspace_id = $1 AND idempotency_key = $2 LIMIT 1",
+    )
+    .bind(workspace)
+    .bind(key)
+    .fetch_optional(su)
+    .await
+    .expect("opener run")
+}
+
+fn mcp_tools_call_body(tool: &str, arguments: Value) -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": Uuid::new_v4().to_string(),
+        "method": "tools/call",
+        "params": {
+            "name": tool,
+            "arguments": arguments,
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MCP_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": "welcome-kickoff-conformance",
+                    "version": "1.0.0"
+                }
+            }
+        }
+    })
+}
+
+async fn agent_port_tool_call(
+    http: &reqwest::Client,
+    base: &str,
+    bearer: &str,
+    tool: &str,
+    arguments: Value,
+) -> Value {
+    let response = http
+        .post(format!("{base}{MCP_PATH}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MCP_VERSION)
+        .header("mcp-method", "tools/call")
+        .header("mcp-name", tool)
+        .bearer_auth(bearer)
+        .json(&mcp_tools_call_body(tool, arguments))
+        .send()
+        .await
+        .expect("agent port tools/call");
+    assert_eq!(response.status().as_u16(), 200, "tools/call {tool}");
+    response.json().await.expect("tools/call body")
 }
 
 async fn count_ledger(su: &PgPool, workspace: Uuid) -> i64 {
@@ -744,7 +871,7 @@ async fn activate_hosted_connection(
     channel: Uuid,
     handle: &str,
     display_name: &str,
-) -> Uuid {
+) -> HostedActivation {
     let created = http
         .post(format!(
             "{base}/v1/workspaces/{workspace}/hosted-agent-connections"
@@ -818,7 +945,11 @@ async fn activate_hosted_connection(
         activated, 200,
         "foundation request activates the connection"
     );
-    Uuid::parse_str(&agent_member_id).expect("agent member uuid")
+    HostedActivation {
+        agent_member_id: Uuid::parse_str(&agent_member_id).expect("agent member uuid"),
+        connection_id: Uuid::parse_str(connection_id).expect("connection uuid"),
+        credential: credential.to_string(),
+    }
 }
 
 #[tokio::test]
@@ -829,6 +960,7 @@ async fn proof_8_hosted_active_enqueues_owner_once() {
     let su = superuser_pool().await;
     settle_residual_worker_jobs(&su).await;
     let fixture = seed(&su, "host", false).await;
+    let app = momo_app_pool().await;
     let base = start_server(momo_app_pool().await).await;
     let http = reqwest::Client::new();
     let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
@@ -839,7 +971,7 @@ async fn proof_8_hosted_active_enqueues_owner_once() {
         "zero agents must leave the kickoff ledger empty"
     );
 
-    activate_hosted_connection(
+    let first = activate_hosted_connection(
         &http,
         &base,
         &token,
@@ -859,6 +991,46 @@ async fn proof_8_hosted_active_enqueues_owner_once() {
         authors,
         vec![fixture.owner.to_string().to_uppercase()],
         "target is the workspace owner: {authors:?}"
+    );
+    let run_id = opener_run_id(&su, fixture.workspace, fixture.owner)
+        .await
+        .expect("hosted opener must create the agent run in-tx");
+    assert_eq!(
+        count_hosted_job_inbox(&su, fixture.workspace, first.connection_id, run_id).await,
+        1,
+        "hosted inbox must reference the opener job"
+    );
+    let claimed = claim_hosted_welcome_jobs(
+        &app,
+        fixture.workspace,
+        first.agent_member_id,
+        first.connection_id,
+    )
+    .await;
+    assert_eq!(
+        claimed.len(),
+        1,
+        "hosted gateway claim must return the opener"
+    );
+    assert_eq!(claimed[0].run_id_field(), run_id.to_string().to_uppercase());
+    let inbox = agent_port_tool_call(
+        &http,
+        &base,
+        &first.credential,
+        "oort_inbox_read",
+        json!({"limit": 50}),
+    )
+    .await;
+    let events = inbox["result"]["structuredContent"]["events"]
+        .as_array()
+        .expect("inbox events");
+    assert!(
+        events
+            .iter()
+            .any(|event| event["kind"] == json!("agent_job")
+                || event["eventKind"] == json!("agent_job")
+                || event["event_kind"] == json!("agent_job")),
+        "Agent Port inbox must surface the opener job: {inbox}"
     );
 
     activate_hosted_connection(
@@ -941,5 +1113,234 @@ async fn proof_9_native_create_enqueues_owner_once() {
         count_welcome_jobs(&su, fixture.workspace).await,
         1,
         "a second native create must not enqueue a second opener"
+    );
+    assert_eq!(
+        agent_created_membership_counts(&su, fixture.workspace).await,
+        vec![1, 0],
+        "first native create joins #general for the speaker; the second must not"
+    );
+}
+
+async fn insert_human(
+    su: &PgPool,
+    workspace: Uuid,
+    channel: Uuid,
+    role: &str,
+    created_at: chrono::DateTime<chrono::Utc>,
+) -> Uuid {
+    let id = Uuid::new_v4();
+    let handle = format!("h-{}", &id.to_string()[..8]);
+    sqlx::query(
+        "INSERT INTO member (id, workspace_id, kind, display_name, handle, created_at) \
+         VALUES ($1, $2, 'human', $3, $3, $4)",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(&handle)
+    .bind(created_at)
+    .execute(su)
+    .await
+    .expect("seed extra human");
+    sqlx::query(
+        "INSERT INTO workspace_membership (workspace_id, member_id, role) VALUES ($1, $2, $3::membership_role)",
+    )
+    .bind(workspace)
+    .bind(id)
+    .bind(role)
+    .execute(su)
+    .await
+    .expect("seed extra workspace membership");
+    let email = format!("{id}@welcome.test");
+    sqlx::query(
+        "INSERT INTO human (member_id, workspace_id, email, email_verified, password_hash) \
+         VALUES ($1, $2, $3, true, momo_password_hash($4))",
+    )
+    .bind(id)
+    .bind(workspace)
+    .bind(&email)
+    .bind(OWNER_PASSWORD)
+    .execute(su)
+    .await
+    .expect("seed extra human login");
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         VALUES ($1, $2, $3, 'member')",
+    )
+    .bind(workspace)
+    .bind(channel)
+    .bind(id)
+    .execute(su)
+    .await
+    .expect("seed extra channel membership");
+    id
+}
+
+async fn native_create_agent(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    display_name: &str,
+) {
+    let response = http
+        .post(format!("{base}/v1/workspaces/{workspace}/agents"))
+        .bearer_auth(token)
+        .json(&json!({
+            "displayName": display_name,
+            "handle": format!("hermes-{}", &Uuid::new_v4().simple().to_string()[..8]),
+            "model": AGENT_MODEL,
+            "baseUrl": "https://gateway.example.com/v1",
+        }))
+        .send()
+        .await
+        .expect("native create");
+    let status = response.status().as_u16();
+    let body: Value = response.json().await.expect("native create body");
+    assert_eq!(status, 201, "native create must be 201: {body}");
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_10_earliest_owner_not_earliest_human() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "ownr", false).await;
+    let earlier_member = insert_human(
+        &su,
+        fixture.workspace,
+        fixture.channel,
+        "member",
+        chrono::Utc::now() - chrono::Duration::minutes(2),
+    )
+    .await;
+    insert_human(
+        &su,
+        fixture.workspace,
+        fixture.channel,
+        "owner",
+        chrono::Utc::now() + chrono::Duration::minutes(1),
+    )
+    .await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+    native_create_agent(&http, &base, &token, fixture.workspace, "hermes").await;
+    let authors = welcome_job_authors(&su, fixture.workspace).await;
+    assert_eq!(
+        authors,
+        vec![fixture.owner.to_string().to_uppercase()],
+        "must target the earliest owner, not the earlier non-owner {earlier_member}"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_11_concurrent_activations_one_opener() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "race", false).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+    let (a, b) = tokio::join!(
+        native_create_agent(&http, &base, &token, fixture.workspace, "hermes-a"),
+        native_create_agent(&http, &base, &token, fixture.workspace, "hermes-b"),
+    );
+    let _ = (a, b);
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "two concurrent first activations must enqueue exactly one opener"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_12_provider_required_does_not_keep_opener_marker() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "prereq", false).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+    native_create_agent(&http, &base, &token, fixture.workspace, "hermes").await;
+    let mock = std::sync::Arc::new(MockChatProvider::echo());
+    worker(mock, false)
+        .await
+        .drain_once()
+        .await
+        .expect("drain provider_required");
+    assert_eq!(
+        count_runs_like(&su, fixture.workspace, "provider-required").await,
+        1
+    );
+    assert_eq!(count_runs_like(&su, fixture.workspace, "opener").await, 0);
+    let hosted = activate_hosted_connection(
+        &http,
+        &base,
+        &token,
+        fixture.workspace,
+        fixture.channel,
+        &format!("hosted-{}", &Uuid::new_v4().simple().to_string()[..8]),
+        "After Provider Required",
+    )
+    .await;
+    assert_eq!(
+        count_runs_like(&su, fixture.workspace, "opener").await,
+        1,
+        "hosted activation after provider_required must create the opener run"
+    );
+    let run_id = opener_run_id(&su, fixture.workspace, fixture.owner)
+        .await
+        .expect("opener run");
+    assert_eq!(
+        count_hosted_job_inbox(&su, fixture.workspace, hosted.connection_id, run_id).await,
+        1
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_13_hosted_delivery_disabled_leaves_marker_for_native() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "off", false).await;
+    let base = start_server_with_delivery(momo_app_pool().await, false).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+    activate_hosted_connection(
+        &http,
+        &base,
+        &token,
+        fixture.workspace,
+        fixture.channel,
+        &format!("hosted-{}", &Uuid::new_v4().simple().to_string()[..8]),
+        "Disabled Delivery",
+    )
+    .await;
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        0,
+        "hosted delivery disabled must not consume the opener marker"
+    );
+    native_create_agent(&http, &base, &token, fixture.workspace, "hermes").await;
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "native create must still deliver the opener after a hosted no-op"
+    );
+    assert!(
+        opener_run_id(&su, fixture.workspace, fixture.owner)
+            .await
+            .is_none(),
+        "native rail defers the opener run to the worker"
     );
 }

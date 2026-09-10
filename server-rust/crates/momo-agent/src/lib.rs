@@ -237,9 +237,9 @@ pub use usage::{
     DEFAULT_LOOKBACK_DAYS, MAX_RANGE_DAYS,
 };
 pub use welcome::{
-    ensure_agent_in_general_in_tx, resolve_welcome_owner_in_tx, resolve_welcome_target_in_tx,
-    welcome_job_payload, welcome_opener_already_queued_in_tx, welcome_opener_idempotency_key,
-    welcome_run_input, WelcomeTarget, DEFAULT_WELCOME_PROMPT, PROVIDER_REQUIRED_BODY,
-    WELCOME_AUDIT_PROVIDER_REQUIRED, WELCOME_AUDIT_QUEUED, WELCOME_AUDIT_SCHEMA,
-    WELCOME_JOB_CREATED_FROM, WELCOME_RUN_INPUT_SCHEMA,
+    ensure_agent_in_general_in_tx, lock_welcome_opener_in_tx, resolve_welcome_owner_in_tx,
+    resolve_welcome_target_in_tx, welcome_job_payload, welcome_opener_already_queued_in_tx,
+    welcome_opener_idempotency_key, welcome_run_input, WelcomeTarget, DEFAULT_WELCOME_PROMPT,
+    PROVIDER_REQUIRED_BODY, WELCOME_AUDIT_PROVIDER_REQUIRED, WELCOME_AUDIT_QUEUED,
+    WELCOME_AUDIT_SCHEMA, WELCOME_JOB_CREATED_FROM, WELCOME_RUN_INPUT_SCHEMA,
 };

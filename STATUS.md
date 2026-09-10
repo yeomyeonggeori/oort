@@ -2,8 +2,9 @@
 
 ## SH-12d-e 첫 에이전트 활성 전이 오너 킥오프 (#2334, 2026-09-10)
 
-- Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프를 같은 tx·같은 outbox 경로로 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.
-- 멱등: `welcome:{ws}:{owner}:opener:v1` UNIQUE + enqueue 전 outbox/run 마커 조회. 오너 탐지 = 가장 먼저 만들어진 active human owner.
+- Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 배달 가능한 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.
+- R2: hosted opener는 mentions와 같은 gateway 레일(run in-tx · inbox · `method=gateway`). 배달 불가면 마커를 쓰지 않음. `pg_advisory_xact_lock(hashtext(opener key))`. provider_required 완료는 opener 마커가 아님. native `#general` join은 오프너 speaker만, audit `channel_memberships_created`가 그 수를 반영.
+- 멱등: `welcome:{ws}:{owner}:opener:v1`. 오너 탐지 = 가장 먼저 만들어진 active human owner.
 - runtime-unverified: 실스택 셀프호스트 first-agent 왕복(웹 SH-12d-w). PG conformance는 로컬 throwaway PG.
 
 ## SH-12b-e workspace rename + self handle (#2331, 2026-09-09)
@@ -13,7 +14,6 @@
 - runtime-unverified: 없음 (로컬 PG 15432 컨벤션).
 
 ## SH-11e day-2 계약 v2 T2 (#2325, 2026-09-09)
-
 
 - Track engine. `feat/2325-day2-v2` onto `origin/track/engine`. T2: backup/restore는 `MIGRATE_DATABASE_URL`만, doctor `stack.*`는 SQL-over-URL + 공개 `/healthz`(`schema.{applied,head}` 추가), upgrade는 플랫폼 digest 교체 명령을 인쇄한다. T1 경로 바이트 불변(기존 day2 10·doctor 15 케이스 GREEN 유지, 신규 +6/+3).
 - R2: T2 origin picker가 tauri/loopback을 건너뛴다(Railway `http://tauri.localhost`를 `/healthz`로 쓰지 않음). 스탬프 없는 env의 `--tier t2`는 수용, 충돌 스탬프는 거절. 검증: day2 23 · doctor 21 · check id 32==T1.

@@ -150,6 +150,7 @@ pub async fn create(
     let owner_human_id = request.owner_human_id.unwrap_or(actor_member_id);
     let via_token_id = audit_via_token_id(&principal);
     let gateway_enabled = state.agent_gateway.enabled();
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
     let input = NewAgentMember {
         display_name,
         handle,
@@ -236,6 +237,18 @@ pub async fn create(
                     }
                 }
 
+                // ADR-0185 D-C (c2): first native agent that can speak kicks off
+                // the owner. `#general` membership is only the opener speaker.
+                let channel_memberships_created =
+                    crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
+                        conn,
+                        workspace_id,
+                        Some(agent.id),
+                        gateway_enabled,
+                        hosted_delivery_enabled,
+                    )
+                    .await?;
+
                 write_audit(
                     conn,
                     &AuditEntry::new(workspace_id, "agent.created")
@@ -250,24 +263,9 @@ pub async fn create(
                                 "model": input.model,
                                 "endpoint_label": input.base_url,
                                 "owner_human_id": input.owner_human_id.to_string(),
-                                // Creation stops at the identity boundary: adding
-                                // the agent to channels is a separate, explicit
-                                // decision (Swift's header says so, and the count
-                                // is recorded so an auditor sees it was zero).
-                                "channel_memberships_created": 0,
+                                "channel_memberships_created": channel_memberships_created,
                             }),
                         ),
-                )
-                .await?;
-
-                // ADR-0185 D-C (c2): first native agent that can speak kicks off
-                // the owner. Membership in `#general` is the welcome helper's
-                // write, not this create's.
-                crate::routes::welcome::enqueue_owner_welcome_kickoff_in_tx(
-                    conn,
-                    workspace_id,
-                    Some(agent.id),
-                    gateway_enabled,
                 )
                 .await?;
 
