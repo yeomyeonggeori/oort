@@ -822,6 +822,44 @@ require(
     "app image must verify notice file hashes at build",
 )
 require("scripts/check_debian_copyrights.sh" in dockerfile, "app image must scan dpkg copyright files")
+require(
+    "COPY server-rust/apt/ACCC4CF8.asc /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc"
+    in dockerfile,
+    "runtime image must COPY the committed PGDG ACCC4CF8 key",
+)
+require(
+    "0144068502a1eddd2a0280ede10ef607d1ec592ce819940991203941564e8e76" in dockerfile,
+    "runtime image must pin the PGDG key by sha256",
+)
+require(
+    "postgresql-client-18=18.6-1.pgdg12+2" in dockerfile,
+    "runtime image must pin PGDG postgresql-client-18",
+)
+require(
+    "python3 -c 'import json'" in dockerfile,
+    "runtime image must prove python3 json (doctor --json) at build",
+)
+require(
+    re.search(r"(?m)^\s*(RUN|CMD).*apt\.postgresql\.org\.sh", dockerfile) is None,
+    "PGDG install must not invoke the PGDG convenience installer script",
+)
+require(
+    re.search(r"curl\s*\|\s*sh", dockerfile) is None,
+    "PGDG install must not use curl | sh",
+)
+require(
+    re.search(r"(?m)^\s+postgresql-client\s*\\$", dockerfile) is None,
+    "runtime image must not install unversioned debian postgresql-client (15.x)",
+)
+require(
+    "COPY scripts/oort scripts/self_host_pg_dump.sh scripts/self_host_pg_restore.sh scripts/self_host_env.sh /opt/momo/scripts/"
+    in dockerfile,
+    "runtime image must copy day-2 oort CLI (SH-11e)",
+)
+require(
+    (ROOT / "server-rust" / "apt" / "ACCC4CF8.asc").is_file(),
+    "committed PGDG signing key server-rust/apt/ACCC4CF8.asc is missing",
+)
 _notice_mod_spec = importlib.util.spec_from_file_location(
     "generate_ghcr_notice_bundle",
     ROOT / "scripts" / "generate_ghcr_notice_bundle.py",
@@ -959,6 +997,10 @@ local_gate = read("scripts/local_gate.sh")
 require(
     "python3 scripts/tests/test_publish_images_contract.py" in local_gate,
     "the Rust publish contract must run in the local gate",
+)
+require(
+    "scripts/tests/test_image_day2_tools.sh" in local_gate,
+    "the in-image day-2 tools proof (#2346) must run in the local gate",
 )
 require(
     "scripts/tests/test_self_host_env_modes.sh" in local_gate,

@@ -62,7 +62,10 @@ scripts/oort restore <dump> --tier t2 --yes --env <env>
 
 복원 전 message count=0 전제는 T1과 같다. dest에 런타임 롤(`momo_app`/`momo_relay`/`momo_worker`)이 없으면 compose `runtime-roles`를 돌리지 않고 정지한다. 문장 원문: 플랫폼 preDeploy(`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate`)를 먼저 돌려라.
 
-버전(실측): 호스트 `pg_dump` (Homebrew libpq) **18.4**, 픽스처 서버 `postgres:18`. 이미지 `postgresql-client` major가 서버 PG18보다 낮으면 dump가 거부된다. URL·비밀번호는 stdout/stderr/`--json`에 없다. 예시 호스트는 `db.example.test`만.
+버전(실측): 호스트 `pg_dump` (Homebrew libpq) **18.4**, 픽스처 서버 `postgres:18` /
+`pgvector/pgvector:0.8.5-pg18-trixie`. 런타임 이미지는 PGDG **`postgresql-client-18=18.6-1.pgdg12+2`**
+(#2346). 이미지 클라이언트 major가 서버 PG18보다 낮으면 dump가 거부된다. URL·비밀번호는
+stdout/stderr/`--json`에 없다. 예시 호스트는 `db.example.test`만.
 
 ## 복원 (새 oort 스택)
 

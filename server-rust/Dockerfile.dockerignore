@@ -24,6 +24,8 @@
 **/age.key
 **/keys.txt
 local-gate-evidence
+# Test sandboxes (#2346 in-image day-2 tools). May hold throwaway env files.
+.tmp-*
 
 # --- build output (server-rust/target alone is multi-GB) --------------------
 target
