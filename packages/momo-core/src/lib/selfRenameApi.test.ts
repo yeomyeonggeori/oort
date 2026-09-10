@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { installCoreHost, resetCoreHost, type SessionPort } from "../runtime/host";
-import { changeMyDisplayName, memberFromWire } from "./api";
+import { changeMyDisplayName, changeMyHandle, memberFromWire } from "./api";
 import { WireShapeError } from "./wire";
 
 function installHost(): void {
@@ -85,6 +85,75 @@ describe("changeMyDisplayName", () => {
       name: "ApiError",
       status: 400,
       message: "displayName is required",
+    });
+  });
+});
+
+describe("changeMyHandle", () => {
+  it("PATCHes members/me with handle and returns the member envelope", async () => {
+    installHost();
+    const renamed = { ...MEMBER, handle: "seongjae-new" };
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ member: renamed }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(changeMyHandle(WS, "seongjae-new")).resolves.toEqual(renamed);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `https://oort.test/v1/workspaces/${WS}/members/me`,
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify({ handle: "seongjae-new" }),
+      })
+    );
+  });
+
+  it("surfaces the join 409 sentence", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({ error: { message: "handle is already in use" } }),
+            { status: 409, headers: { "content-type": "application/json" } }
+          )
+      )
+    );
+
+    await expect(changeMyHandle(WS, "taken")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 409,
+      message: "handle is already in use",
+    });
+  });
+
+  it("surfaces the join 400 sentence", async () => {
+    installHost();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              error: {
+                message: "handle must be 2-32 chars of a-z, 0-9, _ or -",
+              },
+            }),
+            { status: 400, headers: { "content-type": "application/json" } }
+          )
+      )
+    );
+
+    await expect(changeMyHandle(WS, "!")).rejects.toMatchObject({
+      name: "ApiError",
+      status: 400,
+      message: "handle must be 2-32 chars of a-z, 0-9, _ or -",
     });
   });
 });

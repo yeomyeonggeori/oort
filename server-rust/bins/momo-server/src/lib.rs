@@ -657,7 +657,10 @@ pub fn build_app(state: AppState) -> Router {
         .route("/v1/workspaces/{ws}/members", get(routes::roster::roster))
         // B4.1 — the settings panel's first read (workspace name + the rename
         // endpoint's concurrency token).
-        .route("/v1/workspaces/{ws}", get(routes::workspaces::get))
+        .route(
+            "/v1/workspaces/{ws}",
+            get(routes::workspaces::get).patch(routes::workspaces::rename),
+        )
         // #1800 — operator-only bag. Not folded into GET /{ws}: that surface is
         // every member, and settings may later hold keys not every member may read.
         .route(
