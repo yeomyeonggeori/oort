@@ -1115,11 +1115,11 @@ managed_role_url() {
   local user="$1" password="$2" suffix=""
   [ -n "$PLATFORM_PG_QUERY" ] && suffix="?${PLATFORM_PG_QUERY}"
   DATABASE_URL="postgres://unused:unused@${PLATFORM_PG_HOST}:${PLATFORM_PG_PORT}/${PLATFORM_PG_DB}${suffix}" \
-    RAILWAY_ROLE_USER="$user" RAILWAY_ROLE_PASSWORD="$password" python3 -c '
+    PLATFORM_ROLE_USER="$user" PLATFORM_ROLE_PASSWORD="$password" python3 -c '
 import os, urllib.parse
 u = urllib.parse.urlparse(os.environ["DATABASE_URL"])
-user = os.environ["RAILWAY_ROLE_USER"]
-password = os.environ["RAILWAY_ROLE_PASSWORD"]
+user = os.environ["PLATFORM_ROLE_USER"]
+password = os.environ["PLATFORM_ROLE_PASSWORD"]
 netloc = "%s:%s@%s" % (
     urllib.parse.quote(user, safe=""),
     urllib.parse.quote(password, safe=""),

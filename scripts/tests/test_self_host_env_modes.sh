@@ -1159,6 +1159,16 @@ if [ -e "$alias_fixture/infra/rust/local.secrets.env" ]; then
   echo "--platform railway wrote an env file" >&2
   exit 1
 fi
+# #2328: managed_role_url internals are platform-neutral. Railway-named
+# env vars in the helper would survive a copy-paste into a second T2 row.
+if grep -q 'RAILWAY_ROLE_' "$ROOT/scripts/self_host_env.sh"; then
+  echo "managed_role_url still uses RAILWAY_ROLE_* internal names" >&2
+  exit 1
+fi
+grep -q 'PLATFORM_ROLE_USER' "$ROOT/scripts/self_host_env.sh" || {
+  echo "managed_role_url lost PLATFORM_ROLE_USER" >&2
+  exit 1
+}
 
 # Unknown platform is refused before anything is read or written; the message
 # names the rows that exist.
