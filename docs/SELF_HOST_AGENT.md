@@ -91,10 +91,14 @@ the user's own session → REST with a user token → browser only at a human
 approval point. Env derivation for every row is
 `scripts/self_host_env.sh --platform <name>` reading one table
 (`platform_profiles`): `railway` (T2, alias `--railway`) · `fly` ·
-`aws-lightsail` · `gcp-vm` (T1, same derivation as `--public-origin` plus
-`MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; the canonical 41-key
-set never grows). Local, VPS and the Grok Bot VM have no row — they are
-the compose canon itself.
+`aws-lightsail` · `gcp-vm` · `host-network` (T1; `fly` / `aws-lightsail` /
+`gcp-vm` are the same derivation as `--public-origin` plus
+`MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; `host-network` is
+loopback internal URLs + compose `network_mode: host` when Docker
+bridge/iptables are blocked, §3.3.0; the canonical 41-key set never
+grows). Local and VPS have no row — they are the compose canon itself.
+The Grok Bot VM is the compose canon, plus `--platform host-network`
+when §3.3.0 (b)/(c) fail.
 
 | Platform | Tier | Branch · recipe | Operated by | Human approval points | Prerequisites | Edge · URL model | Done means |
 |---|---|---|---|---|---|---|---|
@@ -443,8 +447,7 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 Even if `ip=` is not RFC1918/link-local, continue at §3.3.6. Measured VMs
 have no public inbound.
 
-> **Harness note:** OS Return fails when the Grok Bot window is on another
-> Space. Bring the app forward with `open -a "Grok Bot"`, then Return.
+> Harness (planner/operator only): `scripts/dev/grokbot_cdp/README.md`.
 
 #### 3.3.0 VM Docker preflight and fallbacks
 
@@ -473,24 +476,24 @@ One allowed fallback per failure:
    or the engine will not start on overlayfs): the allowed fallback is the
    `vfs` storage driver. Write `{"storage-driver":"vfs"}` to
    `/etc/docker/daemon.json` and restart Docker. Do not pick a third driver.
-2. **Bridge** (`docker network create --driver bridge` fails): the allowed
-   fallback is compose `network_mode: host` on a VM-local override that is
-   **not** a file in this repository. Do not add or name a repo overlay for
-   this.
+2. **Bridge** (`docker network create --driver bridge` fails): generate env
+   with `--platform host-network` (add that flag to the §3.3.3 command).
+   The generator writes internal URLs as `127.0.0.1:<port>` and
+   `infra/rust/docker-compose.host-network.yml` (`network_mode: host`).
+   `--compose` and `oort_compose` below append that overlay from the stamp.
+   Do not hand-edit env.
 3. **iptables** (`iptables -L` is permission-denied or otherwise unusable):
-   the same allowed fallback as bridge — `network_mode: host`. Do not try
-   to unlock iptables on this VM.
+   the same generator option as bridge — `--platform host-network`. Do not
+   try to unlock iptables on this VM.
 
 **Env hand-edit is not a fallback.** Do not rewrite `DATABASE_URL` /
 `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` / `MIGRATE_DATABASE_URL`
 hosts in `infra/rust/local.secrets.env`. Express a change only through
 generator options (`scripts/self_host_env.sh` flags such as
-`--published-image`, `--platform`, `--public-origin`). This tree has no
-generator option that retargets compose Postgres from `postgres` to
-`127.0.0.1` for host-network. If host-network still needs that host rewrite,
-**do not edit env** — record the bypass in the §3.3.14 handoff message and
-stop: hand the screen to the human (ADR-0184 D2). A generator option for this
-host rewrite is tracked as #2340.
+`--published-image`, `--platform host-network`, `--public-origin`). If a
+§3.3.0 fallback still cannot bring the stack up, **do not edit env** —
+record the bypass in the §3.3.14 handoff message and stop: hand the
+screen to the human (ADR-0184 D2).
 
 #### 3.3.1 Snapshot (no git)
 
@@ -556,6 +559,9 @@ scripts/self_host_env.sh --published-image \
   "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 ```
 
+If §3.3.0 (b) or (c) failed, insert `--platform host-network` before
+`--published-image`. Do not hand-edit the generated env.
+
 The generator always writes `MOMO_INITIAL_OWNER_PASSWORD`. ADR-0166 claim
 mode is **mutually exclusive** (`MOMO_BOOTSTRAP_CLAIM=1` + email only).
 `--compose` requires the password key, so claim boot calls `docker compose`
@@ -592,9 +598,14 @@ claimed file.
 
 ```sh
 oort_compose() {
+  extra=()
+  if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
+    extra+=(-f infra/rust/docker-compose.host-network.yml)
+  fi
   docker compose --env-file "$ENV_FILE" \
     -f infra/rust/docker-compose.rust.yml \
     -f infra/rust/local.override.yml \
+    "${extra[@]}" \
     "$@"
 }
 
@@ -957,7 +968,9 @@ CNAME as an "expert" path.
 #### 3.3.14 User handoff
 
 Reply only after the §3.3.10 gate. Do not send a password. The claim token
-exists only inside the URL, once. TTL 24h, single use.
+exists only inside the URL, once. TTL 24h, single use. If a §3.3.0
+fallback was used (`vfs` and/or `--platform host-network`), say so in
+this message.
 
 Fill the brackets with real values. Do not rewrite `<token>` into this
 file; append `MOMO_CLAIM_PATH` from `/workspace/oort-claim.env` to the

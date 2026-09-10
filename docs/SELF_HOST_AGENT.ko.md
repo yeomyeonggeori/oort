@@ -84,9 +84,13 @@ tier는 ADR-0184 D1이다. **T1**은 compose 정본을 그대로 돌린다(docto
 브라우저는 사람 승인 지점에서만. 모든 행의 env 파생은
 `scripts/self_host_env.sh --platform <name>`이 표 하나(`platform_profiles`)를
 읽는다: `railway`(T2, 별칭 `--railway`) · `fly` · `aws-lightsail` ·
-`gcp-vm`(T1, `--public-origin` 파생과 같고 heredoc 밖에
-`MOMO_SELF_HOST_PLATFORM=<name>`만 추가; 정본 41키 집합은 늘지 않는다).
-로컬·VPS·Grok Bot VM은 행이 없다 — compose 정본 그 자체다.
+`gcp-vm` · `host-network`(T1; `fly` / `aws-lightsail` / `gcp-vm` 은
+`--public-origin` 파생과 같고 heredoc 밖에
+`MOMO_SELF_HOST_PLATFORM=<name>`만 추가; `host-network` 는 Docker
+bridge/iptables가 막힌 VM의 루프백 내부 URL + compose `network_mode: host`,
+§3.3.0; 정본 41키 집합은 늘지 않는다). 로컬·VPS는 행이 없다 — compose
+정본 그 자체다. Grok Bot VM은 compose 정본이고, §3.3.0 (b)/(c)가
+실패하면 `--platform host-network` 를 붙인다.
 
 | 플랫폼 | Tier | 분기 · 레시피 | 조작 수단 | 사람 승인 지점 | 전제 | 엣지 · URL 모델 | 완료 |
 |---|---|---|---|---|---|---|---|
@@ -431,8 +435,7 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 `ip=` 가 RFC1918/링크로컬이 아니어도 §3.3.6으로 간다. 실측 VM은
 공인 inbound가 없다.
 
-> **하네스 메모:** Grok Bot 창이 다른 Space에 있으면 OS Return이 실패한다.
-> `open -a "Grok Bot"` 으로 앱을 앞으로 가져온 뒤 Return.
+> 하네스(기획/운영자 전용): `scripts/dev/grokbot_cdp/README.md`.
 
 #### 3.3.0 VM Docker 점검·대안
 
@@ -462,23 +465,23 @@ docker network rm oort-preflight-bridge
    스토리지 드라이버다. `/etc/docker/daemon.json` 에
    `{"storage-driver":"vfs"}` 를 쓰고 Docker를 재시작한다. 세 번째
    드라이버를 고르지 마라.
-2. **Bridge** (`docker network create --driver bridge` 실패): 허용된
-   우회는 이 저장소에 **없는** VM-로컬 오버라이드의 compose
-   `network_mode: host` 다. 이 우회용 레포 오버레이를 추가하거나 이름
-   부르지 마라.
+2. **Bridge** (`docker network create --driver bridge` 실패): env 생성에
+   `--platform host-network` 를 붙인다(§3.3.3 명령에 그 플래그를 넣는다).
+   생성기가 내부 URL을 `127.0.0.1:<port>` 로 쓰고
+   `infra/rust/docker-compose.host-network.yml` (`network_mode: host`) 을
+   렌더한다. `--compose` 와 아래 `oort_compose` 가 스탬프를 보고 그
+   오버레이를 붙인다. env를 손으로 고치지 마라.
 3. **iptables** (`iptables -L` 이 permission-denied이거나 쓸 수 없음):
-   bridge와 같은 허용 우회 — `network_mode: host`. 이 VM에서 iptables를
-   풀려고 하지 마라.
+   bridge와 같은 생성기 옵션 — `--platform host-network`. 이 VM에서
+   iptables를 풀려고 하지 마라.
 
 **env 손수정은 우회가 아니다.** `infra/rust/local.secrets.env` 의
 `DATABASE_URL` / `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` /
 `MIGRATE_DATABASE_URL` 호스트를 다시 쓰지 마라. 변경은 생성기 옵션으로만
 표현한다 (`scripts/self_host_env.sh` 의 `--published-image`,
-`--platform`, `--public-origin` 등). 이 트리는 host-network용으로
-compose Postgres 호스트를 `postgres` 에서 `127.0.0.1` 로 바꾸는 생성기
-옵션이 없다. host-network가 그 호스트 재기록이 필요해도 **env를 고치지
-마라** — 우회를 §3.3.14 핸드오프 메시지에 남기고 멈춘다: 화면을 사람에게
-넘긴다(ADR-0184 D2). 이 호스트 재기록용 생성기 옵션은 #2340 에서 다룬다.
+`--platform host-network`, `--public-origin` 등). §3.3.0 우회로도
+스택이 안 뜨면 **env를 고치지 마라** — 우회를 §3.3.14 핸드오프 메시지에
+남기고 멈춘다: 화면을 사람에게 넘긴다(ADR-0184 D2).
 
 #### 3.3.1 스냅샷 (git 없음)
 
@@ -543,6 +546,9 @@ scripts/self_host_env.sh --published-image \
   "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 ```
 
+§3.3.0 (b) 또는 (c)가 실패했으면 `--published-image` 앞에
+`--platform host-network` 를 넣는다. 생성된 env를 손으로 고치지 마라.
+
 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를 쓴다. ADR-0166 claim
 모드는 **상호 배타**다 (`MOMO_BOOTSTRAP_CLAIM=1` + 이메일만).
 `--compose` 는 비밀번호 키를 요구하므로, claim 부팅은 같은 canonical
@@ -579,9 +585,14 @@ env를 cat/grep 해서 stdout에 흘리지 않는다. 이미 claim 수술된 파
 
 ```sh
 oort_compose() {
+  extra=()
+  if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
+    extra+=(-f infra/rust/docker-compose.host-network.yml)
+  fi
   docker compose --env-file "$ENV_FILE" \
     -f infra/rust/docker-compose.rust.yml \
     -f infra/rust/local.override.yml \
+    "${extra[@]}" \
     "$@"
 }
 
@@ -940,6 +951,8 @@ cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
 
 §3.3.10 게이트를 통과한 뒤에만 회신한다. 비밀번호를 보내지 않는다.
 claim 토큰은 URL 안에만 있고, 이 한 번뿐이다. TTL 24h, 단회 소비.
+§3.3.0 우회를 썼으면 (`vfs` 그리고/또는 `--platform host-network`) 이
+메시지에 적는다.
 
 아래 괄호를 실값으로 바꾼다. `<token>` 원문을 이 파일에 다시 적지 말고,
 `/workspace/oort-claim.env` 의 `MOMO_CLAIM_PATH` 를 터널 주소 뒤에 붙인다.

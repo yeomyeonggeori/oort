@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 생성기 `--platform host-network` (#2340, 2026-09-10)
+
+- Track engine. `feat/2340-platform-host-network` onto `origin/track/engine`. `platform_profiles` T1 행 `host-network`: 내부 URL 4키를 `127.0.0.1:<compose port>` 로 파생하고 `infra/rust/docker-compose.host-network.yml` (`network_mode: host`, 서비스당 1회·12) 을 렌더. `--compose` 가 스탬프를 보고 오버레이를 붙인다. 기존 railway/fly/aws-lightsail/gcp-vm 출력 바이트 불변.
+- `docs/SELF_HOST_AGENT.md`(+ko) §3.3.0 대안 (b)/(c)를 `--platform host-network` 로 정정. 하네스 메모는 `scripts/dev/grokbot_cdp/README.md`. §3.3.14 우회 기록 유지.
+- runtime-unverified: Grok Bot VM에서 bridge 차단 + 이 행으로 재설치 e2e (E2E-A 후속). 로컬은 `docker compose … config` 스모크.
+
 ## SH-12d-e 첫 에이전트 활성 전이 오너 킥오프 (#2334, 2026-09-10)
 
 - Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 배달 가능한 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.
