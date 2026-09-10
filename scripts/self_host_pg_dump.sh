@@ -21,6 +21,7 @@ CONTAINER=""
 COMPOSE_PROJECT=""
 POSTGRES_USER_FLAG=""
 POSTGRES_DB_FLAG=""
+MIGRATE_URL_MODE=0
 
 fail() { printf '[self-host-backup] %s\n' "$*" >&2; exit 1; }
 
@@ -71,6 +72,10 @@ while [ "$#" -gt 0 ]; do
       POSTGRES_DB_FLAG="$2"
       shift 2
       ;;
+    --migrate-url)
+      MIGRATE_URL_MODE=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -82,7 +87,7 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
-command -v docker >/dev/null 2>&1 || fail "docker 없음"
+command -v docker >/dev/null 2>&1 || { [ "$MIGRATE_URL_MODE" = "1" ] || fail "docker 없음"; }
 
 resolve_output_dir() {
   local root
@@ -113,15 +118,20 @@ fi
 PG_USER="${PG_USER:-momo}"
 PG_DB="${PG_DB:-momo}"
 
-MOMO_PG_CONTAINER="$CONTAINER"
-MOMO_PG_COMPOSE_PROJECT="$COMPOSE_PROJECT"
-MOMO_PG_ENV_FILE="$ENV_FILE"
-PG_CONTAINER="$(momo_pg_resolve_postgres_container)" || fail "실행 중인 postgres 컨테이너를 찾지 못했다."
-
 STAMP="$(date -u +"%Y%m%dT%H%M%SZ")"
 DUMP_FILE="$DEST_DIR/oort-pg-$STAMP.dump"
 
-momo_pg_dump_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE"
+if [ "$MIGRATE_URL_MODE" = "1" ]; then
+  MIGRATE_URL="$(momo_pg_env_get "$ENV_FILE" MIGRATE_DATABASE_URL || true)"
+  [ -n "$MIGRATE_URL" ] || fail "MIGRATE_DATABASE_URL 이 env 에 없다. DATABASE_URL 로 dump 하지 않는다."
+  momo_pg_dump_custom_url "$MIGRATE_URL" "$DUMP_FILE" || { rm -f "$DUMP_FILE"; exit 1; }
+else
+  MOMO_PG_CONTAINER="$CONTAINER"
+  MOMO_PG_COMPOSE_PROJECT="$COMPOSE_PROJECT"
+  MOMO_PG_ENV_FILE="$ENV_FILE"
+  PG_CONTAINER="$(momo_pg_resolve_postgres_container)" || fail "실행 중인 postgres 컨테이너를 찾지 못했다."
+  momo_pg_dump_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE"
+fi
 chmod 600 "$DUMP_FILE"
 
 DUMP_BYTES="$(wc -c <"$DUMP_FILE" | tr -d '[:space:]')"
