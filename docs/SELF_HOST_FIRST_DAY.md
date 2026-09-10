@@ -245,7 +245,7 @@ not consume the opener marker.
 
 Then **폰에서도 쓰기** (`PhoneLinkFirstRun.tsx`). Lead: 「같은 계정으로
 폰을 붙이려면 지금 QR을 만들 수 있습니다. 나중에 설정 기기에서도 열 수
-있습니다。」 Ghost **앱으로 들어가기**.
+있습니다。」 outline **앱으로 들어가기**.
 
 Settings after you are in: profile-card row **설정**, tooltip 「설정
 (⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
