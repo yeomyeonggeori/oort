@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## SH-12c 온보딩 S2 「팀원 초대」 (#2333)
+
+- Track UXUI. `feat/2333-onboarding-s2-invite` onto `origin/track/uxui`. claim 성공 뒤 S2 「팀원 초대」 1장(카운터 2/2). skip 「나중에」 상시, 재진입 「설정 › 멤버와 초대에서 언제든」. 발급은 기존 `POST /v1/workspaces/{ws}/invites`(TTL 24h·1회). S1(#2332) 미랜딩 — 스테이지 표는 2칸, 마운트는 invite만.
+- R2: claim hold는 await 앞(ConnectPage 동형). first-run 마커는 S2 전에 기록하고 `oort.onboarding.v1` pending으로 리로드 재진입. 카드 `max-w-sm` · 제목/리드 형제 클래스 · 오류는 「설정 › 멤버와 초대에서 다시」. runtime-unverified: 실서버 claim→S2 왕복은 mock·RTL 범위.
 ## SH-12b-e workspace rename + self handle (#2331, 2026-09-09)
 
 - Track engine. `feat/2331-workspace-rename-handle` onto `origin/track/engine`. E1 `PATCH /v1/workspaces/{ws}` `{name, updatedAtMs}` (owner/admin, slug immutable, stale 409, audit `workspace.renamed`). E2 `PATCH …/members/me` `handle` (join normalize, `member_handle_uniq` 409 `handle is already in use`, audit `member.handle_changed`, past `@oldhandle` bodies untouched). OpenAPI + `@momo/core` `renameWorkspace` / `changeMyHandle`. No migration.

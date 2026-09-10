@@ -2,6 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type LoginResponse } from "@momo/core/lib/api";
 import { ClaimPage } from "./ClaimPage";
@@ -147,8 +148,20 @@ async function submitClaim(
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   act(() => {
-    mountedRoot?.render(createElement(ClaimPage, { onLoggedIn }));
+    mountedRoot?.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(ClaimPage, { onLoggedIn })
+      )
+    );
   });
   fill("claim-password", PASSWORD);
   fill("claim-confirm", PASSWORD);
@@ -169,11 +182,27 @@ describe("claim → first-run 사다리 (#2301)", () => {
     });
     await submitClaim(onLoggedIn);
     await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="onboarding-s2"]')
+      ).not.toBeNull();
+    });
+    // Markers are written at claim success, before S2 (ConnectPage S3 order).
+    // onLoggedIn still waits for skip/continue so the first-run gate opens then.
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(peekFreshSignup()).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
+    });
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("invite");
+    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
+
+    click("onboarding-s2-skip");
+    await vi.waitFor(() => {
       expect(onLoggedIn).toHaveBeenCalledTimes(1);
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
-    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
     expect(window.location.pathname).toBe("/");
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
 
     // 마커는 세션을 넘기기 전에 다 찍혀 있다 — App 이 첫 렌더에서 "app" 을 보지 않게.
     expect(surfacesAtHandoff).toEqual(["kickoff-hold"]);
@@ -211,6 +240,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
     expect(peekFreshSignup()).toBeNull();
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(false);
     expect(phoneLinkFirstRunIsPending()).toBe(false);
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
     expect(decide()).toBe("app");
   });
 });
