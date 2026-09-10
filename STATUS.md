@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-12c design-review 잔여 + kickoff 백스톱 관찰자 (#2356)
+
+- Track UXUI. `chore/2356-sh12c-nits` onto `origin/track/uxui`. IssuedInviteCard 공유 문장 `break-keep`(390px 「화면에서|만」 분절 0). 발급 뒤 채워진 primary는 「계속」, 복사 outline은 Button default/`h-control`(28px `sm` 예외 제거; 플래너 36px는 컨트롤 축에 없어 named `h-control` 32). S2 발급 CTA·복사 라벨은 설정 › 멤버와 초대와 `inviteLabels.ts` 상수 공유. `welcomeKickoff.noActiveAgent` 백스톱 관찰자는 mount 전에 부착해 1프레임 플래시를 센다.
+- runtime-unverified: 실서버 claim→S2 390px 캡처는 design-review 범위(정적 PASS, 픽셀 SKIPPED). 백스톱 플래시는 jsdom MutationObserver.
+
 ## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
 
 - Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
