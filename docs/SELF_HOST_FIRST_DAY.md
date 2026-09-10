@@ -696,7 +696,7 @@ document that is not on the screen is a defect.
 | Join parser | `packages/momo-core/src/features/auth/deepLink.ts` |
 | Settings nav | `clients/web/src/features/settings/settingsNav.ts`, `SettingsRoute.tsx`, `ProfileCard.tsx` |
 | Workspace | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
-| Profile door | `…/ProfileSection.tsx`, `…/onboarding/HandleField.tsx` |
+| Profile door | `…/ProfileSection.tsx`, `…/profile/shared/HandleField.tsx` |
 | Members and invites | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
 | First-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
 | Welcome enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |

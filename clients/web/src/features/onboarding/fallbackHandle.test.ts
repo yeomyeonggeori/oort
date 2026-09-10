@@ -41,6 +41,11 @@ describe("S1 field defaults", () => {
     expect(defaultWorkspaceName("새벽")).toBe("새벽");
   });
 
+  it("clears the seed workspace name without regard to case (N-R2-5)", () => {
+    expect(defaultWorkspaceName("MOMO DEMO WORKSPACE")).toBe("");
+    expect(defaultWorkspaceName("Momo Demo Workspace")).toBe("");
+  });
+
   it("blanks a seed demo handle and derives from the email local part", () => {
     expect(suggestedHandle("demo")).toBe("");
     expect(suggestedHandle("demo@momo.local")).toBe("");
