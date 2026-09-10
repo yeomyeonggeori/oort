@@ -1,6 +1,7 @@
 import { attachParticle } from "../../lib/koreanParticle";
 import {
   boundedLabel,
+  hostedAgentLabel,
   isHostedScope,
   HOSTED_AGENT_PORT_AUDIENCE,
   HOSTED_AUTH_MODE,
@@ -277,7 +278,7 @@ export function approvalConsequence(
   channelCount: number,
   scopes: readonly HostedAgentScope[]
 ): string {
-  const name = attachParticle(boundedLabel(agentLabel), "topic");
+  const name = attachParticle(hostedAgentLabel(agentLabel), "topic");
   const actions = scopeActionList(scopes);
   if (channelCount === 0) {
     return `${name} 접속만 하고 어떤 대화에도 닿지 못합니다. 채널을 하나도 승인하지 않았기 때문입니다.`;

@@ -24,6 +24,7 @@ import {
 import {
   channelLabel,
   memberFor,
+  memberNameParts,
   useChannels,
   useDirectory,
 } from "@/features/workspace/useWorkspace";
@@ -52,6 +53,7 @@ import {
   isHostedTerminal,
   parseActivationIssuance,
   parsePairingIssuance,
+  HOSTED_AGENT_MISSING_NAME,
   HOSTED_AUTH_MODE,
   type HostedAgentConnection,
   type RevealedActiveCredential,
@@ -287,7 +289,9 @@ function HostedWizardBody({
       : null;
 
   const agent = connection ? memberFor(directory, connection.agentMemberId) : null;
-  const agentLabel = agent?.displayName ?? draft.displayName.trim();
+  // Empty directory names are missing, not "present and blank". `??` kept ""
+  // and dropped the 1단계 draft (E2E-A A6: 「승인하면 는」).
+  const agentLabel = (agent?.displayName ?? "").trim() || draft.displayName.trim();
   const agentHandle = agent?.handle ?? normalizeAgentHandle(draft.handle);
   const endpoint = agentPortEndpoint(absoluteApiBase());
 
@@ -541,7 +545,9 @@ function HostedWizardBody({
               setFailure(null);
               setStartingNew(true);
             }}
-            nameFor={(id) => memberFor(directory, id)?.displayName ?? "이름을 읽지 못한 에이전트"}
+            nameFor={(id) =>
+              memberNameParts(directory, id, HOSTED_AGENT_MISSING_NAME).name
+            }
           />
         )}
 
@@ -579,6 +585,7 @@ function HostedWizardBody({
           <DetectingStep
             connection={connection}
             agentLabel={agentLabel}
+            agentHandle={agentHandle}
             checking={detail.isFetching}
             onRecheck={() => void detail.refetch()}
           />
@@ -592,6 +599,7 @@ function HostedWizardBody({
           <ApprovalStep
             connection={connection}
             agentLabel={agentLabel}
+            agentHandle={agentHandle}
             channels={channelInputs}
             channelSelection={channelSelection}
             setChannelSelection={setChannelSelection}
@@ -1117,11 +1125,13 @@ function SetupSteps({ preset }: { preset: ReturnType<typeof hostedPreset> }) {
 function DetectingStep({
   connection,
   agentLabel,
+  agentHandle,
   checking,
   onRecheck,
 }: {
   connection: HostedAgentConnection;
   agentLabel: string;
+  agentHandle: string;
   checking: boolean;
   onRecheck: () => void;
 }) {
@@ -1148,7 +1158,7 @@ function DetectingStep({
         testId="hosted-detecting-empty"
       />
       <KeyValueRows
-        rows={connectionFacts(connection, agentLabel).map((fact) => ({
+        rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,
           value: fact.value,
           numeric: fact.token,
@@ -1183,6 +1193,7 @@ function ExpiredStep({ connection }: { connection: HostedAgentConnection }) {
 function ApprovalStep({
   connection,
   agentLabel,
+  agentHandle,
   channels,
   channelSelection,
   setChannelSelection,
@@ -1192,6 +1203,7 @@ function ApprovalStep({
 }: {
   connection: HostedAgentConnection;
   agentLabel: string;
+  agentHandle: string;
   channels: readonly ApprovalChannelInput[];
   channelSelection: string[];
   setChannelSelection: (next: string[]) => void;
@@ -1224,7 +1236,7 @@ function ApprovalStep({
     <div className="flex min-w-0 flex-col gap-6">
       <StepHeading step="approval" />
       <KeyValueRows
-        rows={connectionFacts(connection, agentLabel).map((fact) => ({
+        rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,
           value: fact.value,
           numeric: fact.token,
@@ -1360,7 +1372,7 @@ function ActivationStep({
         </div>
       )}
       <KeyValueRows
-        rows={connectionFacts(connection, agentLabel).map((fact) => ({
+        rows={connectionFacts(connection, agentLabel, agentHandle).map((fact) => ({
           key: fact.key,
           value: fact.value,
           numeric: fact.token,
