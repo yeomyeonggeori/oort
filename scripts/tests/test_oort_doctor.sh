@@ -209,6 +209,51 @@ code="$(run_doctor "$NOLK" "$OUT" "$ERR" --json)"
   fail "LIVEKIT missing should skip: $(check_field "$OUT" env.livekit_node_ip status)"
 pass "MOMO_LIVEKIT_NODE_IP absent on old env is skip, not blocker"
 
+# #2438 — claim env: MOMO_BOOTSTRAP_CLAIM=1 stands in for the password key.
+CLAIM="$SANDBOX/claim.env"
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  { print }
+  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
+' "$VALID" >"$CLAIM"
+chmod 600 "$CLAIM"
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$CLAIM" || fail "claim fixture missing claim key"
+if grep -q '^MOMO_INITIAL_OWNER_PASSWORD=' "$CLAIM"; then
+  fail "claim fixture still has password key"
+fi
+OUT="$SANDBOX/claim.json"
+ERR="$SANDBOX/claim.err"
+code="$(run_doctor "$CLAIM" "$OUT" "$ERR" --json)"
+[ "$code" = "0" ] || fail "claim fixture exit $code (want 0); stderr=$(cat "$ERR")"
+validate_schema "$OUT" || fail "claim fixture JSON schema"
+[ "$(jq -r '.summary.verdict' "$OUT")" = "PASS" ] || \
+  fail "claim fixture verdict $(jq -r '.summary.verdict' "$OUT") (want PASS)"
+[ "$(check_field "$OUT" env.required_keys status)" = "pass" ] || \
+  fail "claim env.required_keys $(check_field "$OUT" env.required_keys status) detail=$(check_field "$OUT" env.required_keys detail)"
+printf '%s' "$(check_field "$OUT" env.required_keys detail)" | grep -Fq 'claim 키' || \
+  fail "claim required_keys detail should name the swap: $(check_field "$OUT" env.required_keys detail)"
+CLAIM_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
+VALID_COUNT="$(jq -r '.checks[].id' "$SANDBOX/valid.json" | wc -l | tr -d '[:space:]')"
+[ "$CLAIM_COUNT" = "$VALID_COUNT" ] || \
+  fail "claim check id count ${CLAIM_COUNT} != valid ${VALID_COUNT}"
+assert_no_secret_leak "claim json" "$OUT"
+pass "claim fixture PASS env.required_keys (claim key in place of password); checks=$CLAIM_COUNT"
+
+# Both keys → env.required_keys fail (ADR-0166).
+BOTH="$SANDBOX/claim-and-password.env"
+cp "$VALID" "$BOTH"
+printf '\nMOMO_BOOTSTRAP_CLAIM=1\n' >>"$BOTH"
+chmod 600 "$BOTH"
+OUT="$SANDBOX/claim-and-password.json"
+ERR="$SANDBOX/claim-and-password.err"
+code="$(run_doctor "$BOTH" "$OUT" "$ERR" --json)"
+[ "$code" = "2" ] || fail "claim+password doctor exit $code (want 2); stderr=$(cat "$ERR")"
+[ "$(check_field "$OUT" env.required_keys status)" = "fail" ] || \
+  fail "claim+password required_keys $(check_field "$OUT" env.required_keys status)"
+printf '%s' "$(check_field "$OUT" env.required_keys detail)" | grep -Fq '상호 배타' || \
+  fail "claim+password detail: $(check_field "$OUT" env.required_keys detail)"
+pass "claim+password fixture → env.required_keys fail (ADR-0166)"
+
 # -----------------------------------------------------------------------------
 # 2. MOMO_DOORBELL_ENABLED=True → fail major, fix mentions lowercase true
 # -----------------------------------------------------------------------------

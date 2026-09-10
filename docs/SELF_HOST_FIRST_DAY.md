@@ -64,68 +64,49 @@ Verification: **doc-inherited** (commands) · **code-derived** (the two keys
 
 This document's first path is claim. S1/S2 open only after
 `/claim/<token>` — the env-password ConnectPage in
-[`SELF_HOST.md`](SELF_HOST.md) does **not** open them (§2). The generator
-always writes `MOMO_INITIAL_OWNER_PASSWORD`. Convert to claim **before**
-`up`. Claim and the password key are mutually exclusive (ADR-0166).
+[`SELF_HOST.md`](SELF_HOST.md) does **not** open them (§2). Pass `--claim`
+so the generator writes `MOMO_BOOTSTRAP_CLAIM=1` and does **not** write
+`MOMO_INITIAL_OWNER_PASSWORD`. Claim and the password key are mutually
+exclusive (ADR-0166). Do not convert a password env by hand.
 
 ### Claim-mode install
 
 ```sh
 git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
-scripts/self_host_env.sh --local-build
+scripts/self_host_env.sh --local-build --claim
 ```
 
 For a local mock gateway on this machine, add `--allow-local-provider`
 (or re-run the same mode with that flag on the existing env). Recipe: §6 ·
 §7 and [`SELF_HOST.md`](SELF_HOST.md) §5.
 
-The same awk as [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 — strip
-the password key, write `MOMO_BOOTSTRAP_CLAIM=1`. Do not cat/grep the env
-to stdout.
+`--claim` is first-class: it composes with `--local-build`,
+`--published-image`, `--platform <name>`, `--railway`, `--public-origin`,
+`--allow-local-provider`, and `--host-network`. Do not cat/grep the env
+to stdout. Re-running `--claim` on a password env is refused (never
+silently converted).
 
 ```sh
-ENV_FILE=infra/rust/local.secrets.env
-umask 077
-tmp="${ENV_FILE}.claim"
-awk '
-  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
-  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
-  { print }
-  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
-' "$ENV_FILE" >"$tmp"
-mv "$tmp" "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-`--compose` refuses this env: the launcher still requires the password
-key (ADR-0166). Do not paste `scripts/self_host_env.sh --compose up …`
-here. Local-build bring-up is the same file set `--compose` would have
-used, called directly (AGENT §3.3.3 + `docker-compose.rust.build.yml`):
+`--compose` brings a claim env up. It refuses only when **both** keys are
+present (ADR-0166). If another clone's self-host stack is already up on
+the same machine, this `up` is refused. Two-checkout rule:
+[`SELF_HOST.md`](SELF_HOST.md) "Using two checkouts at once".
 
-```sh
-ENV_FILE=infra/rust/local.secrets.env
-docker compose --env-file "$ENV_FILE" \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-  up -d --build --wait
-```
-
-If another clone's self-host stack is already up on the same machine, this
-`up` is refused. Two-checkout rule: [`SELF_HOST.md`](SELF_HOST.md)
-"Using two checkouts at once".
-
-If a public digest exists you can use the `--published-image` path, then
-the same awk, then AGENT §3.3.3 `oort_compose up -d --pull missing --wait`
-(no build overlay). Deeper: [`SELF_HOST.md`](SELF_HOST.md) §2 ·
+If a public digest exists you can use the `--published-image` path with
+`--claim`, then `--compose up -d --pull missing --wait` (no build
+overlay). Deeper: [`SELF_HOST.md`](SELF_HOST.md) §2 ·
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3.
 
-When `--wait` finishes, ready is finished. Open migrate's one-shot
-`MOMO_CLAIM_PATH=/claim/<token>` on first `up` (restarts print
-`MOMO_BOOTSTRAP_CLAIM=skipped`). Do not paste the token into chat
-(ADR-0004). The generator's password login hint does not apply — there is
-no password key in this file. File mode 600, not a commit target.
+When `--wait` finishes, ready is finished. The launcher prints one line
+pointing at migrate logs (`scripts/self_host_env.sh --compose logs migrate
+| grep MOMO_CLAIM_PATH`). Open that one-shot `MOMO_CLAIM_PATH=/claim/<token>`
+on first `up` (restarts print `MOMO_BOOTSTRAP_CLAIM=skipped`). Do not paste
+the token into chat (ADR-0004). There is no password key in this file.
+File mode 600, not a commit target.
 
 ### The two keys
 
@@ -140,9 +121,8 @@ following. Do not fill them in by hand.
 An existing env may lack those lines. Re-run `scripts/self_host_env.sh` in
 the same mode and it **appends only those lines** — it does not regenerate
 secrets (`ensure_operator_allowlist`, `scripts/self_host_env.sh:300-318`).
-After the append, restart api with the same `docker compose --env-file`
-file set as the install, `up -d`. `--compose` still refuses claim env
-(ADR-0166).
+After the append, restart api with `--compose up -d`. Re-running without
+`--claim` on a claim env keeps it claim (no password injected).
 
 Confirm:
 
@@ -711,10 +691,9 @@ Whether that message is an **answer** or a **failure notice** is separate
 | `NOTICE` | The worker posted a failure into the channel. The default measured value without a key |
 | `BLOCKED` | No agent message appeared |
 
-If a failure notice appears in the channel, the same `docker compose
---env-file` file set as §1, `logs agent-worker` (claim env: `--compose`
-refuses, ADR-0166; doc-inherited: [`SELF_HOST.md`](SELF_HOST.md) "When
-stuck").
+If a failure notice appears in the channel, `scripts/self_host_env.sh
+--compose logs agent-worker` (doc-inherited: [`SELF_HOST.md`](SELF_HOST.md)
+"When stuck").
 
 ---
 
