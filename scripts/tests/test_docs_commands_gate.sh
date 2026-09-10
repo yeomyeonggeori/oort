@@ -41,6 +41,11 @@ new_tree() {
   : >"$dir/docs/NEXT_CHANNEL.md"
   : >"$dir/CONTRIBUTING.md"
   : >"$dir/docs/SELF_HOST_AGENT.md"
+  : >"$dir/docs/SELF_HOST_AGENT.ko.md"
+  : >"$dir/docs/SELF_HOST.md"
+  : >"$dir/docs/SELF_HOST.ko.md"
+  : >"$dir/docs/SELF_HOST_FIRST_DAY.md"
+  : >"$dir/docs/SELF_HOST_FIRST_DAY.ko.md"
 
   printf 'build:\n\t@true\nts-check:\n\t@true\n' >"$dir/Makefile"
   printf '{"scripts":{"lint":"true"}}\n' >"$dir/package.json"
@@ -105,6 +110,17 @@ case "$GUARD_OUT" in
   *"fact(s) decided"*) ;;
   *) fail "the pass line no longer reports how much it decided: $GUARD_OUT" ;;
 esac
+
+# #2124: SELF_HOST family is tabled. A missing row is a coverage hole, not a
+# quieter gate.
+for gated in \
+  docs/SELF_HOST.md docs/SELF_HOST.ko.md \
+  docs/SELF_HOST_FIRST_DAY.md docs/SELF_HOST_FIRST_DAY.ko.md \
+  docs/SELF_HOST_AGENT.md docs/SELF_HOST_AGENT.ko.md
+do
+  grep -Fq "\"$gated\"" "$GUARD" || fail "$gated is not in GATED_DOCS"
+done
+pass "SELF_HOST family is tabled in GATED_DOCS (#2124)"
 
 # =============================================================================
 # Case 2 — #1472 itself, put back. `cargo fmt --check` against a virtual

@@ -426,3 +426,32 @@ grep -Fq 'no qualified YAML reader' "$SPEC_SANDBOX/none.err" \
 grep -Fq 'ruby  :' "$SPEC_SANDBOX/none.err" || fail "ruby 갈래 실격 사유가 없다"
 grep -Fq 'python:' "$SPEC_SANDBOX/none.err" || fail "python 갈래 실격 사유가 없다"
 echo "[local-gate-hardening-test] PASS spec->json 리더 부재 정직한 실패 (#1185)"
+
+# #1984 / #2124: docs-profile wiring locks. Removing these from local_gate.sh
+# is a coverage hole, not a quieter gate.
+LOCAL_GATE="$REPO_ROOT/scripts/local_gate.sh"
+grep -Fq "add_cmd_once \"release manifest drift (#1984)\" 'scripts/check_release_manifest.sh'" \
+  "$LOCAL_GATE" \
+  || fail "docs profile does not run scripts/check_release_manifest.sh (#1984)"
+grep -Fq "add_cmd_once \"release manifest contract\" 'scripts/tests/test_release_manifest.sh'" \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped the release-manifest harness"
+grep -Fq "add_cmd_once \"self-host day-2 contract (#2124)\" 'scripts/tests/test_oort_day2.sh'" \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped test_oort_day2.sh (#2124)"
+grep -Fq "add_cmd_once \"oort doctor contract (#2124)\" 'scripts/tests/test_oort_doctor.sh'" \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped test_oort_doctor.sh (#2124)"
+grep -Fq 'shellcheck -x scripts/oort scripts/lib/oort_common.sh scripts/lib/oort_day2.sh scripts/lib/oort_doctor.sh' \
+  "$LOCAL_GATE" \
+  || fail "oort dispatcher/libs are not under shellcheck in local_gate (#2124)"
+for oort_sh in \
+  scripts/oort \
+  scripts/lib/oort_common.sh \
+  scripts/lib/oort_day2.sh \
+  scripts/lib/oort_doctor.sh \
+  scripts/check_release_manifest.sh
+do
+  grep -Fq "$oort_sh" "$LOCAL_GATE" || fail "$oort_sh missing from local_gate allowlist"
+done
+echo "[local-gate-hardening-test] PASS docs profile check_release_manifest live run + oort day-2 wiring (#1984 #2124)"

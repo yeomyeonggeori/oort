@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## local_gate docs 프로파일: check_release_manifest 실주행 + oort day-2 하네스 + GATED_DOCS SELF_HOST 등재 (#1984 #2124, 2026-09-10)
+
+- Track engine. `policy/1984-2124-local-gate-docs` onto `origin/track/engine`. `scripts/local_gate.sh --profile docs`가 `scripts/check_release_manifest.sh`를 no-arg로 실주행(`releases/latest.json`, `bash -n`만이 아님). `add_static_commands`가 `scripts/oort`·`scripts/lib/oort_{common,day2,doctor}.sh`에 `bash -n` + shellcheck. day-2/doctor 하네스는 docs 프로파일에 유지(docker 부재는 RED). `GATED_DOCS`에 `SELF_HOST`/`FIRST_DAY`(+`.ko.md`)와 `SELF_HOST_AGENT.ko.md` 등재. docs-cmd 11→16 문서 / 261→546 fact.
+- 문서 결함: 등재 직후 `SELF_HOST.md`(+ko) 공개 오리진 compose가 생성 파일 `infra/rust/local.secrets.env`를 `--env-file` 리터럴로 가리켜 docs-cmd RED. claim-mode와 같이 `ENV_FILE=` + `"$ENV_FILE"`로 정합.
+- runtime-unverified: 없음(정적 게이트).
+
 ## 제로베이스 E2E-B 문서 이탈 D1~D4 (#2429, 2026-09-10)
 
 - Track engine. `docs/2429-e2ezb-deviations`. `SELF_HOST_FIRST_DAY`(en+ko) §1을 claim 설치 경로로 정합(awk + `docker compose` 직접 호출). `SELF_HOST`(en+ko) §3에 claim 기동 소절(`--compose` 거절, ADR-0166). §5·FIRST_DAY §7: GUI `plaintextRemote` vs `--allow-local-provider` + `host.docker.internal` / `PUT /v1/provider/link`. D4 「계속」 문장 유지.
