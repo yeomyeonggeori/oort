@@ -793,11 +793,12 @@ Env derivation for every platform is **one generator flag reading one
 table** — `platform_profiles` in `scripts/self_host_env.sh`. The
 canonical key set (generator heredoc + `oort_public_edge_env_keys`, 41
 keys) never grows: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
-the heredoc, a T2 row prints exactly the canonical set.
+the heredoc, a T2 row prints the canonical set plus the same stamp
+outside the heredoc (42 on stdout; doctor `env.required_keys` stays 41).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|
-| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED` |
+| `railway` (alias `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | plugin `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | KEY=value on stdout, no file, no `MOMO_HOSTED_DELIVERY_ENABLED`, stamp `MOMO_SELF_HOST_PLATFORM=railway` outside the heredoc |
 | `fly` | T1 | `--public-origin https://<host>` (required) | compose `postgres` | none | `infra/rust/local.secrets.env` as the local path + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | same | compose `postgres` | none | same, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |

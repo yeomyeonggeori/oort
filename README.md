@@ -180,7 +180,7 @@ Docker cache. The full walk-through, what each step does, and how to stop or
 reset live in [`docs/SELF_HOST.md`](docs/SELF_HOST.md). A public origin (TLS
 edge, the two Caddy env keys) starts from
 [Open on a public origin](docs/SELF_HOST.md#open-on-a-public-origin).
-Railway: [`infra/railway/README.md`](infra/railway/README.md) (`scripts/self_host_env.sh --railway`).
+Railway: [`infra/railway/README.md`](infra/railway/README.md) (`scripts/self_host_env.sh --platform railway`, alias `--railway`).
 
 ## Getting started with the code
 
