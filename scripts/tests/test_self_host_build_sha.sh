@@ -201,6 +201,45 @@ key_count="$(grep -c . "$TMP/canonical.keys" | tr -d ' ')"
 [ "$key_count" = "43" ] || fail "Railway canonical key set must stay 43, got $key_count"
 pass "Railway canonical key set unchanged (43, no MOMO_BUILD_SHA; stamp outside)"
 
+# #2438 — --railway --claim is the same 43 with one key swapped, plus stamp.
+claim_out="$TMP/railway-claim.env"
+set +e
+env \
+  RAILWAY_PUBLIC_DOMAIN="$FIXTURE_HOST" \
+  DATABASE_URL="$FIXTURE_DB_URL" \
+  MOMO_RUST_IMAGE="$GOOD_DIGEST" \
+  "$GENERATOR" --railway --claim >"$claim_out" 2>"$claim_out.err"
+claim_ec=$?
+set -e
+[ "$claim_ec" = "0" ] || {
+  cat "$claim_out.err" >&2
+  fail "--railway --claim fixture failed exit=$claim_ec"
+}
+awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$claim_out" | LC_ALL=C sort -u \
+  >"$TMP/railway-claim.keys"
+grep -Fxv 'MOMO_SELF_HOST_PLATFORM' "$TMP/railway-claim.keys" \
+  >"$TMP/railway-claim.canonical.keys"
+awk '{
+  if ($0 == "MOMO_INITIAL_OWNER_PASSWORD") print "MOMO_BOOTSTRAP_CLAIM"
+  else print
+}' "$TMP/canonical.keys" | LC_ALL=C sort -u >"$TMP/claim.canonical.keys"
+if ! diff -u "$TMP/claim.canonical.keys" "$TMP/railway-claim.canonical.keys" \
+  >"$TMP/claim.keys.diff"; then
+  cat "$TMP/claim.keys.diff" >&2
+  fail "Railway --claim key-set diff not empty"
+fi
+if grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP/railway-claim.keys"; then
+  fail "--railway --claim leaked MOMO_INITIAL_OWNER_PASSWORD"
+fi
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP/railway-claim.keys" || \
+  fail "--railway --claim missing MOMO_BOOTSTRAP_CLAIM"
+if grep -Fxq 'MOMO_BUILD_SHA' "$TMP/railway-claim.keys"; then
+  fail "MOMO_BUILD_SHA leaked into Railway --claim output"
+fi
+claim_count="$(grep -c . "$TMP/claim.canonical.keys" | tr -d ' ')"
+[ "$claim_count" = "43" ] || fail "Railway --claim canonical key set must stay 43, got $claim_count"
+pass "Railway --claim canonical key set 43 (password variant $key_count; 1:1 swap; no MOMO_BUILD_SHA)"
+
 # Compose interpolation: build.args only, never service environment.
 local_fix="$(make_fixture compose-local)"
 if ! run_gen "$local_fix" "$local_fix/out" --local-build; then

@@ -71,7 +71,9 @@
 #   시크릿을 다시 만들면 DB 안의 롤 비밀번호와 env가 어긋나 스택이 부팅하지 못한다.
 #   `--public-origin` 유지보수는 시크릿을 건드리지 않는다. claim 모드
 #   (`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)에서도 그 경로만 통과한다(#1790).
-#   `--compose`는 비밀번호 키를 계속 요구한다(ADR-0166).
+#   `--claim`은 비밀번호 키를 쓰지 않고 `MOMO_BOOTSTRAP_CLAIM=1`을 기록한다
+#   (ADR-0166: 두 키는 상호 배타, 기존 비밀번호 env를 조용히 바꾸지 않는다).
+#   `--compose`는 두 키가 함께 있을 때만 거절한다. claim env 기동은 허용한다.
 # * 값은 openssl로 만들고, 파일은 0600으로 쓴다. `*.secrets.env` 는 레포 전역
 #   gitignore 대상이다.
 # * 포트가 이미 쓰이고 있으면 **비어 있는 다음 포트를 골라** 알려 준다. 사람이
@@ -90,7 +92,8 @@
 #   MOMO_BUILD_SHA              신규 env에 git HEAD(40 hex) 또는 unknown.
 #                               compose 빌드 인자로만 쓰인다 (#2258).
 #   MOMO_INITIAL_OWNER_EMAIL    기본 owner@oort.local (소문자여야 한다)
-#   MOMO_INITIAL_OWNER_PASSWORD 기본 생성
+#   MOMO_INITIAL_OWNER_PASSWORD 기본 생성. --claim 이면 이 키를 쓰지 않고
+#                               MOMO_BOOTSTRAP_CLAIM=1 을 기록한다.
 #
 # 생성 뒤의 모든 Compose 명령은 이 스크립트의 `--compose` 경유로 실행한다.
 # `--env-file`보다 process env가 우선인 Compose 규칙 때문에, 파일을 만들 때만
@@ -122,6 +125,7 @@ PUBLIC_ORIGINS=()
 # Count is the only length we read without expanding the array.
 PUBLIC_ORIGIN_COUNT=0
 ALLOW_LOCAL_PROVIDER=0
+REQUESTED_CLAIM=0
 REQUESTED_PLATFORM=""
 PLATFORM_TIER=""
 
@@ -384,9 +388,22 @@ oort_generator_env_keys() {
 
 # Canonical 43-key set (generator heredoc + public-edge keys). T2 stdout is
 # this set plus MOMO_SELF_HOST_PLATFORM outside the heredoc (#2328). Doctor
-# env.required_keys reads the heredoc only.
+# env.required_keys reads the heredoc only. --claim swaps exactly one key
+# (MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM); the count stays 43.
 oort_canonical_env_keys() {
   { oort_generator_env_keys; oort_public_edge_env_keys; } | LC_ALL=C sort -u
+}
+
+# Emit-time view of the canonical set. Default is the heredoc (password key).
+# --claim replaces that one key; nothing else is added or dropped.
+oort_emit_canonical_keys() {
+  oort_canonical_env_keys | awk -v claim="${REQUESTED_CLAIM:-0}" '
+    $0 == "MOMO_INITIAL_OWNER_PASSWORD" && claim == 1 {
+      print "MOMO_BOOTSTRAP_CLAIM"
+      next
+    }
+    { print }
+  '
 }
 
 # SPA <meta name="momo-build"> / OCI revision stamp (#2258). Written on
@@ -466,10 +483,12 @@ usage() {
   cat <<'EOF'
 Usage:
   scripts/self_host_env.sh --local-build
+  scripts/self_host_env.sh --local-build --claim
   scripts/self_host_env.sh --published-image ghcr.io/yeomyeonggeori/oort@sha256:<64 lowercase hex>
   scripts/self_host_env.sh --public-origin https://<host>
   scripts/self_host_env.sh --compose <docker-compose arguments...>
   scripts/self_host_env.sh --platform railway        (alias: --railway)
+  scripts/self_host_env.sh --platform railway --claim
   scripts/self_host_env.sh --platform fly --published-image <ref@sha256:…> --public-origin https://<host>
   scripts/self_host_env.sh --local-build --allow-local-provider
 
@@ -482,11 +501,13 @@ names: oort_public_edge_env_keys) for the public Caddy template. A wildcard
 in the origin is rejected (#1792). Without --public-origin those two keys
 are not written (local loopback path unchanged).
 On an existing env it does not regenerate secrets. Claim-mode env
-(MOMO_BOOTSTRAP_CLAIM=1, no owner password) may use this maintenance path;
---compose still requires the password key (ADR-0166).
+(MOMO_BOOTSTRAP_CLAIM=1, no owner password) may use this maintenance path
+and --compose. --claim on a password env is refused (ADR-0166: never
+silently convert). --compose refuses only when both keys are present.
 After preparation, use --compose for every start/stop/log command so ambient
-Compose variables cannot override infra/rust/local.secrets.env. Use the
-playbook's docker compose helper in claim mode instead of --compose.
+Compose variables cannot override infra/rust/local.secrets.env. --claim
+writes MOMO_BOOTSTRAP_CLAIM=1 and omits MOMO_INITIAL_OWNER_PASSWORD; it
+composes with every image/platform/origin/opt-in flag and not with --compose.
 --platform <name> reads one row of platform_profiles (ADR-0184 D3): the
 public-origin source, the PG source, the internal hostname suffix, the keys
 the operator sets by hand, and whether MOMO_HOSTED_DELIVERY_ENABLED is
@@ -564,6 +585,11 @@ while [ "$#" -gt 0 ]; do
       ALLOW_LOCAL_PROVIDER=1
       shift
       ;;
+    --claim)
+      [ "$REQUESTED_CLAIM" -eq 0 ] || fail "--claim 은 한 번만 지정하라."
+      REQUESTED_CLAIM=1
+      shift
+      ;;
     -h|--help)
       usage
       exit 0
@@ -575,6 +601,12 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 validate_platform_request
+if [ "$REQUESTED_CLAIM" -eq 1 ] && [ "$REQUESTED_ACTION" = "compose" ]; then
+  fail "--claim 은 env 생성 플래그다. --compose 와 함께 지정할 수 없다."
+fi
+if [ "$REQUESTED_CLAIM" -eq 1 ] && [ -n "${MOMO_INITIAL_OWNER_PASSWORD:-}" ]; then
+  fail "--claim 은 MOMO_INITIAL_OWNER_PASSWORD 를 쓰지 않는다 (ADR-0166)."
+fi
 
 validate_local_image() {
   local image="$1"
@@ -656,22 +688,59 @@ env_value_once() {
   awk -v key="$key" 'index($0, key "=") == 1 { print substr($0, length(key) + 2) }' "$ENV_FILE"
 }
 
-# ADR-0166 claim bootstrap: the playbook strips MOMO_INITIAL_OWNER_PASSWORD
-# and writes MOMO_BOOTSTRAP_CLAIM=1. That absence is the contract, not a
-# malformed env. Other values (created/skipped) are migrate stdout, not this file.
+# ADR-0166 claim bootstrap: --claim writes MOMO_BOOTSTRAP_CLAIM=1 and omits
+# MOMO_INITIAL_OWNER_PASSWORD. That absence is the contract, not a malformed
+# env. Other values (created/skipped) are migrate stdout, not this file.
 is_claim_bootstrap_env() {
+  [ -f "$ENV_FILE" ] || return 1
+  [ "$(env_key_count MOMO_BOOTSTRAP_CLAIM)" -eq 1 ] || return 1
+  [ "$(env_value_once MOMO_BOOTSTRAP_CLAIM)" = "1" ] || return 1
+  [ "$(env_key_count MOMO_INITIAL_OWNER_PASSWORD)" -eq 0 ]
+}
+
+env_has_claim_and_password() {
+  [ -f "$ENV_FILE" ] || return 1
+  [ "$(env_key_count MOMO_INITIAL_OWNER_PASSWORD)" -ge 1 ] || return 1
   [ "$(env_key_count MOMO_BOOTSTRAP_CLAIM)" -eq 1 ] || return 1
   [ "$(env_value_once MOMO_BOOTSTRAP_CLAIM)" = "1" ]
 }
 
-stack_restart_hint() {
-  # 두 갈래 모두 %s 로 낸다. 비-claim 문자열은 `--` 로 시작하는데, bash printf 는
-  # 그것을 자기 옵션으로 읽어 `invalid option` 으로 죽는다(#1790 회귀).
-  if is_claim_bootstrap_env; then
-    printf '%s' 'docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출'
-  else
-    printf '%s' '--compose up -d'
+refuse_claim_password_coexistence() {
+  env_has_claim_and_password || return 0
+  fail "${ENV_FILE}에 MOMO_INITIAL_OWNER_PASSWORD 와 MOMO_BOOTSTRAP_CLAIM=1 이 함께 있다. 상호 배타다 (ADR-0166)."
+}
+
+# After the heredoc (which always contains the password key so the static
+# 43-key extractor stays stable), --claim swaps that one line in place.
+apply_claim_key_swap() {
+  [ "$REQUESTED_CLAIM" -eq 1 ] || return 0
+  local tmp
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-claim-env.XXXXXX")"
+  awk '
+    index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+    index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
+    index($0, "MOMO_INITIAL_OWNER_EMAIL=") == 1 {
+      print
+      print "MOMO_BOOTSTRAP_CLAIM=1"
+      next
+    }
+    { print }
+  ' "$ENV_FILE" >"$tmp"
+  if ! awk 'index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { found = 1 } END { exit !found }' "$tmp"; then
+    printf 'MOMO_BOOTSTRAP_CLAIM=1\n' >>"$tmp"
   fi
+  if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$tmp"; then
+    rm -f "$tmp"
+    fail "내부 오류: --claim 이 비밀번호 키를 남겼다."
+  fi
+  chmod 600 "$tmp"
+  mv "$tmp" "$ENV_FILE"
+}
+
+stack_restart_hint() {
+  # 두 갈래 모두 %s 로 낸다. 문자열이 `--` 로 시작하는데, bash printf 는
+  # 그것을 자기 옵션으로 읽어 `invalid option` 으로 죽는다(#1790 회귀).
+  printf '%s' '--compose up -d'
 }
 
 reject_duplicate_env_keys() {
@@ -1304,6 +1373,7 @@ platform_value_for() {
     MIGRATE_IDEMPOTENCY_CHECK) printf '%s' "1" ;;
     MOMO_INITIAL_OWNER_EMAIL) printf '%s' "$OWNER_EMAIL" ;;
     MOMO_INITIAL_OWNER_PASSWORD) printf '%s' "$OWNER_PASSWORD" ;;
+    MOMO_BOOTSTRAP_CLAIM) printf '%s' "1" ;;
     PLATFORM_ADMIN_EMAILS) printf '%s' "$OWNER_EMAIL" ;;
     MOMO_DRIVE_ARCHIVE_BACKEND) printf '%s' "local" ;;
     MOMO_DRIVE_LOCAL_DIR) printf '%s' "$SELF_HOST_DRIVE_LOCAL_DIR" ;;
@@ -1355,8 +1425,12 @@ emit_managed_platform_env() {
   validate_env_scalar MOMO_INITIAL_OWNER_EMAIL "$RAW_OWNER_EMAIL"
   OWNER_EMAIL="$(printf '%s' "$RAW_OWNER_EMAIL" | LC_ALL=C tr '[:upper:]' '[:lower:]')"
   validate_owner_email "$OWNER_EMAIL"
-  OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
-  validate_owner_password "$OWNER_PASSWORD"
+  if [ "$REQUESTED_CLAIM" -eq 1 ]; then
+    OWNER_PASSWORD=""
+  else
+    OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
+    validate_owner_password "$OWNER_PASSWORD"
+  fi
 
   APP_PASSWORD="${MOMO_APP_POSTGRES_PASSWORD:-$(gen)}"
   RELAY_PASSWORD="${RELAY_POSTGRES_PASSWORD:-$(gen)}"
@@ -1387,13 +1461,13 @@ emit_managed_platform_env() {
     quoted="$(quote_env_file_value "$value")"
     printf '%s=%s\n' "$key" "$quoted"
   done <<EOF
-$(oort_canonical_env_keys)
+$(oort_emit_canonical_keys)
 EOF
   # Stamp outside the heredoc — not a generator/required-keys member.
   validate_env_scalar MOMO_SELF_HOST_PLATFORM "$name"
   printf 'MOMO_SELF_HOST_PLATFORM=%s\n' "$name"
   printf '[self-host] --platform %s 키 %s개를 stdout에 썼다 (파일 없음).\n' \
-    "$name" "$(($(oort_canonical_env_keys | grep -c .) + 1))" >&2
+    "$name" "$(($(oort_emit_canonical_keys | grep -c .) + 1))" >&2
   printf '[self-host] 손으로 넣는 키(생성기가 내지 않는다): %s · 내부 호스트 접미사: %s\n' \
     "$hand_keys" "$internal" >&2
 }
@@ -1750,33 +1824,6 @@ print_next_steps() {
       ;;
     *) fail "저장된 MOMO_SELF_HOST_MODE가 잘못됐다: $mode" ;;
   esac
-  if is_claim_bootstrap_env; then
-    cat <<EOF
-
-[self-host] 준비됐다. 모드: $mode_summary
-[self-host] 이 env는 claim 모드다. --compose는 비밀번호 키를 요구하므로 거절한다.
-[self-host] 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다.
-[self-host] 주의: 이 quickstart는 로컬 named volume만 사용하며 production 백업/PITR가 아니다.
-[self-host] 운영 업그레이드는 pgBackRest 오버레이+서명된 fresh evidence gate를 따라야 한다.
-[self-host] 브라우저에서 열고 migrate가 출력한 /claim/<token> 으로 첫 비밀번호를 설정한다:
-
-  http://localhost:${web_port}
-  email    ${owner_email}
-
-[self-host] 비밀번호 키는 이 파일에 없다. 원문 토큰을 stdout·이슈에 다시 적지 않는다.
-[self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
-[self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
-[self-host] 패키징된 데스크탑 릴리스(tauri://localhost)는 같은 스택에 교차 오리진으로
-[self-host] 붙는다. 새 env 는 MOMO_CORS_ALLOWED_ORIGINS 와 CENTRIFUGO_ALLOWED_ORIGINS 에
-[self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
-[self-host] CORS가 필요 없다.
-EOF
-    if env_is_host_network; then
-      printf '[self-host] host-network: claim 기동은 docs/SELF_HOST_AGENT.md §3.3.3 oort_compose 가 %s 를 붙인다.\n' \
-        "$HOST_NETWORK_OVERLAY"
-    fi
-    return
-  fi
   cat <<EOF
 
 [self-host] 준비됐다. 모드: $mode_summary
@@ -1791,9 +1838,21 @@ EOF
 
   http://localhost:${web_port}
   email    ${owner_email}
+EOF
+  if is_claim_bootstrap_env; then
+    cat <<EOF
+[self-host] 이 env는 claim 모드다. 비밀번호 키는 이 파일에 없다 (ADR-0166).
+[self-host] 기동 뒤 claim 경로는 migrate 로그에서 수거한다 (토큰 원문은 로그에만, ADR-0004):
+[self-host]   scripts/self_host_env.sh --compose logs migrate | grep MOMO_CLAIM_PATH
+EOF
+  else
+    cat <<EOF
   password $ENV_FILE 의 MOMO_INITIAL_OWNER_PASSWORD 값
 
 [self-host] 비밀번호는 stdout에 쓰지 않는다. $ENV_FILE 에서 직접 확인하라(파일 권한 600).
+EOF
+  fi
+  cat <<EOF
 [self-host] 이 계정이 이 인스턴스의 운영자다(PLATFORM_ADMIN_EMAILS) — 설정 › AI 연결에서
 [self-host] 프로바이더 키를 넣을 수 있다. 절차: docs/SELF_HOST.md §5.
 [self-host] 패키징된 데스크탑 릴리스(tauri://localhost)는 같은 스택에 교차 오리진으로
@@ -1805,6 +1864,14 @@ EOF
     printf '[self-host] host-network: --compose 가 %s 를 붙인다 (network_mode: host).\n' \
       "$HOST_NETWORK_OVERLAY"
   fi
+}
+
+print_claim_path_hint() {
+  is_claim_bootstrap_env || return 0
+  # Point at migrate stdout (`MOMO_CLAIM_PATH=/claim/<token>` —
+  # server-rust/bins/momo-migrate/src/main.rs println of that key). Never
+  # print the token itself (ADR-0004).
+  printf '[self-host] claim 경로는 migrate 로그에 있다: scripts/self_host_env.sh --compose logs migrate | grep MOMO_CLAIM_PATH\n'
 }
 
 # ---------------------------------------------------------------------------
@@ -1823,15 +1890,18 @@ if [ -e "$ENV_FILE" ]; then
   claim_count="$(env_key_count MOMO_BOOTSTRAP_CLAIM)"
   [ "$claim_count" -le 1 ] ||
     fail "${ENV_FILE}의 MOMO_BOOTSTRAP_CLAIM 항목은 최대 한 번만 있어야 한다."
+  refuse_claim_password_coexistence
   if [ "$password_count" -eq 1 ]; then
+    # ADR-0166: never silently convert a password env into claim.
+    if [ "$REQUESTED_CLAIM" -eq 1 ]; then
+      fail "${ENV_FILE}는 비밀번호 키를 가지고 있다. --claim 으로 조용히 바꾸지 않는다 (ADR-0166)."
+    fi
     validate_owner_password "$(env_value_once MOMO_INITIAL_OWNER_PASSWORD)"
   elif is_claim_bootstrap_env; then
-    # #1790 — password absence is normal in claim mode. Origin refresh and
-    # other existing-env maintenance may proceed. --compose stays closed
-    # (ADR-0166: the launcher still requires the password key).
-    if [ "$REQUESTED_ACTION" = "compose" ]; then
-      fail "${ENV_FILE}은 claim 모드다. --compose는 비밀번호 키를 요구한다(ADR-0166). 스택 기동은 docs/SELF_HOST_AGENT.md §1.4의 docker compose 직접 호출을 쓴다."
-    fi
+    # #1790 — password absence is normal in claim mode. Origin refresh,
+    # backfill, and --compose may proceed. Backfill must not inject a
+    # password key. --compose refuses only when both keys are present.
+    :
   else
     fail "${ENV_FILE}의 MOMO_INITIAL_OWNER_PASSWORD 항목은 정확히 한 번 있어야 한다."
   fi
@@ -1890,7 +1960,11 @@ if [ -e "$ENV_FILE" ]; then
   fi
   if [ "$REQUESTED_ACTION" = "compose" ]; then
     run_self_host_compose "$existing_mode" "${COMPOSE_COMMAND_ARGS[@]}"
-    exit $?
+    compose_ec=$?
+    if [ "$compose_ec" -eq 0 ] && [ "${COMPOSE_COMMAND_ARGS[0]}" = "up" ]; then
+      print_claim_path_hint
+    fi
+    exit "$compose_ec"
   fi
   if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
     printf '[self-host] %s 시크릿은 그대로 두고 공개 오리진만 반영했다.\n' "$ENV_FILE"
@@ -1942,8 +2016,14 @@ OWNER_EMAIL="$(printf '%s' "$RAW_OWNER_EMAIL" | LC_ALL=C tr '[:upper:]' '[:lower
 validate_owner_email "$OWNER_EMAIL"
 # 사람이 브라우저에 타이핑할 값이라 hex로 만든다(96비트). 복붙도 쉽고, base64가
 # 흘리는 +/= 가 env 파일과 셸 인용을 지나며 만드는 사고가 없다.
-OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
-validate_owner_password "$OWNER_PASSWORD"
+# --claim: 비밀번호를 만들지 않는다. heredoc 은 정적 43키를 위해 비밀번호
+# 줄을 쓰지만 apply_claim_key_swap 이 그 한 줄을 claim 키로 바꾼다.
+if [ "$REQUESTED_CLAIM" -eq 1 ]; then
+  OWNER_PASSWORD="claim-unused"
+else
+  OWNER_PASSWORD="${MOMO_INITIAL_OWNER_PASSWORD:-$(openssl rand -hex 12)}"
+  validate_owner_password "$OWNER_PASSWORD"
+fi
 
 PG_PASSWORD="$(gen)"
 APP_PASSWORD="$(gen)"
@@ -2091,6 +2171,7 @@ DRIVE_VOLUME_NAME=$DRIVE_VOLUME
 MOMO_LIVEKIT_NODE_IP=127.0.0.1
 EOF
 chmod 600 "$ENV_FILE"
+apply_claim_key_swap
 
 append_momo_build_sha
 append_hosted_delivery_enabled

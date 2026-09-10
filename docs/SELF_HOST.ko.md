@@ -219,28 +219,22 @@ staging/production migrate는 서명된 15분 이내 PITR evidence 또는 실제
 
 ### claim 모드 기동
 
-`--compose` 는 비밀번호 경로의 launcher다. env가 claim이면
-(`MOMO_BOOTSTRAP_CLAIM=1` 이고 `MOMO_INITIAL_OWNER_PASSWORD` 없음 —
-[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 의 awk,
-[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) §1 이 S1/S2 를 열려고
-쓰는 형태) `--compose` 는 **거절**한다. ADR-0166: 그 launcher는 비밀번호
-키를 계속 요구하고, claim과 비밀번호 키는 상호 배타다. 생성기도 같다:
-「이 env는 claim 모드다. --compose는 비밀번호 키를 요구하므로 거절한다.」
-
-로컬 빌드 기동은 `--compose` 가 썼을 같은 파일 집합을 직접 호출한다:
+`--claim` 을 넘기면 생성기는 `MOMO_BOOTSTRAP_CLAIM=1` 을 쓰고
+`MOMO_INITIAL_OWNER_PASSWORD` 는 **쓰지 않는다**. ADR-0166: 두 키는
+상호 배타다. `--compose` 는 이 env를 기동한다. **두 키가 함께 있을
+때만** 거절한다. 비밀번호 env에 `--claim` 을 다시 돌리면 거절한다
+(조용히 바꾸지 않는다). 첫 `up` 뒤 launcher가 migrate 로그를 가리키는
+한 줄을 찍는다 (`scripts/self_host_env.sh --compose logs migrate | grep
+MOMO_CLAIM_PATH`) — 토큰 원문은 찍지 않는다(ADR-0004).
 
 ```sh
-ENV_FILE=infra/rust/local.secrets.env
-docker compose --env-file "$ENV_FILE" \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-  up -d --build --wait
+scripts/self_host_env.sh --local-build --claim
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-digest 모드 claim은 AGENT §3.3.3 `oort_compose up -d --pull missing
---wait`(빌드 오버레이 없음). claim 뒤 첫 하루 GUI는
-[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
+digest 모드 claim은 `--published-image … --claim` 그다음
+`--compose up -d --pull missing --wait`(빌드 오버레이 없음). claim 뒤
+첫 하루 GUI는 [`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
 
 ## 4. 로그인
 
@@ -340,10 +334,9 @@ hermes 바이너리가 없다. 대체는 `scripts/mock_hermes.py` 다.
    줄을 지우고 api·agent-worker를 재시작한다. Railway/공개 설치는 이 플래그를
    쓰지 않는다(`infra/railway/railway.json` 무변화).
 
-3. 이 env에 맞는 명령으로 스택을 띄운다([§3](#3-기동)). 비밀번호 env:
-   2단계가 인쇄한 `--compose` 한 줄. claim env(`MOMO_BOOTSTRAP_CLAIM=1`,
-   비밀번호 키 없음): §3 의 로컬 빌드 `docker compose` 형태 —
-   `--compose` 는 거절한다(ADR-0166). 브라우저 포트는
+3. 2단계가 인쇄한 `--compose` 한 줄로 스택을 띄운다([§3](#3-기동)).
+   claim env(`MOMO_BOOTSTRAP_CLAIM=1`, 비밀번호 키 없음)도 같은
+   launcher다. 브라우저 포트는
    [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4 와 같이 파생한다:
 
    ```sh

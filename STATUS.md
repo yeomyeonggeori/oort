@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 생성기 claim 1급 (#2438, 2026-09-11)
+
+- Track engine. `feat/2438-generator-claim` onto `origin/track/engine`. `scripts/self_host_env.sh --claim`이 비밀번호 키를 쓰지 않고 `MOMO_BOOTSTRAP_CLAIM=1`을 기록(키 집합 1:1 스왑, canonical 43 / T2 stdout 44). `--compose`는 claim env를 기동하고, 두 키 동시만 거절(ADR-0166). 기존 비밀번호 env에 `--claim`은 거절(조용히 변환 없음). 문서 awk 수술 은퇴.
+- runtime-unverified: 공개 이미지 실배포 Railway(--claim). 로컬 Colima `up`은 증거 란에 표기.
+
 ## local_gate docs 프로파일: check_release_manifest 실주행 + oort day-2 하네스 + GATED_DOCS SELF_HOST 등재 (#1984 #2124, 2026-09-10)
 
 - Track engine. `policy/1984-2124-local-gate-docs` onto `origin/track/engine`. `scripts/local_gate.sh --profile docs`가 `scripts/check_release_manifest.sh`를 no-arg로 실주행(`releases/latest.json`, `bash -n`만이 아님). `add_static_commands`가 `scripts/oort`·`scripts/lib/oort_{common,day2,doctor}.sh`에 `bash -n` + shellcheck. day-2/doctor 하네스는 docs 프로파일에 유지(docker 부재는 RED). `GATED_DOCS`에 `SELF_HOST`/`FIRST_DAY`(+`.ko.md`)와 `SELF_HOST_AGENT.ko.md` 등재. docs-cmd 11→16 문서 / 261→546 fact.
