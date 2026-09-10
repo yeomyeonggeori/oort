@@ -430,6 +430,55 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 `ip=` 가 RFC1918/링크로컬이 아니어도 §3.3.6으로 간다. 실측 VM은
 공인 inbound가 없다.
 
+> **하네스 메모:** Grok Bot 창이 다른 Space에 있으면 OS Return이 실패한다.
+> `open -a "Grok Bot"` 으로 앱을 앞으로 가져온 뒤 Return.
+
+#### 3.3.0 VM Docker 점검·대안
+
+이 벤더 VM에서 실측됨(E2E-A, 2026-09-09): overlayfs가 불가할 수 있다
+(스토리지 드라이버가 `vfs`로 떨어진다), Docker bridge와 iptables가
+막힐 수 있다(허용된 우회는 `network_mode: host`), env DB 호스트를
+손으로 고치는 것은 이탈이며 허용된 우회가 아니다.
+
+Engine / Compose 설치(§3.3.1) **전에** 점검 명령 3개:
+
+```sh
+docker info --format '{{.Driver}}'
+docker network create --driver bridge oort-preflight-bridge
+iptables -L
+```
+
+`docker network create` 가 성공하면 프로브 네트워크를 즉시 지운다:
+
+```sh
+docker network rm oort-preflight-bridge
+```
+
+실패당 허용된 우회는 하나뿐이다:
+
+1. **스토리지 드라이버** (`docker info` Driver가 `overlay2` / `overlay`
+   가 아니거나, overlayfs에서 엔진이 뜨지 않음): 허용된 우회는 `vfs`
+   스토리지 드라이버다. `/etc/docker/daemon.json` 에
+   `{"storage-driver":"vfs"}` 를 쓰고 Docker를 재시작한다. 세 번째
+   드라이버를 고르지 마라.
+2. **Bridge** (`docker network create --driver bridge` 실패): 허용된
+   우회는 이 저장소에 **없는** VM-로컬 오버라이드의 compose
+   `network_mode: host` 다. 이 우회용 레포 오버레이를 추가하거나 이름
+   부르지 마라.
+3. **iptables** (`iptables -L` 이 permission-denied이거나 쓸 수 없음):
+   bridge와 같은 허용 우회 — `network_mode: host`. 이 VM에서 iptables를
+   풀려고 하지 마라.
+
+**env 손수정은 우회가 아니다.** `infra/rust/local.secrets.env` 의
+`DATABASE_URL` / `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` /
+`MIGRATE_DATABASE_URL` 호스트를 다시 쓰지 마라. 변경은 생성기 옵션으로만
+표현한다 (`scripts/self_host_env.sh` 의 `--published-image`,
+`--platform`, `--public-origin` 등). 이 트리는 host-network용으로
+compose Postgres 호스트를 `postgres` 에서 `127.0.0.1` 로 바꾸는 생성기
+옵션이 없다. host-network가 그 호스트 재기록이 필요해도 **env를 고치지
+마라** — 우회를 §3.3.14 핸드오프 메시지에 남기고 멈춘다: 화면을 사람에게
+넘긴다(ADR-0184 D2). 이 호스트 재기록용 생성기 옵션은 #2340 에서 다룬다.
+
 #### 3.3.1 스냅샷 (git 없음)
 
 git clone은 하지 않는다. **curl + tar + Docker Engine + Compose v2 +
@@ -1044,12 +1093,19 @@ Agent Hub UI 등록은 WD-2(#1735). 랜딩 전까지 WD-1 REST가 정본이다.
 다른 말로 바꾸지 않는다(실측된 webhook 문안).
 
 ```text
-루틴을 하나 만들어줘. 이름 oort-doorbell / 트리거: webhook(외부 시스템이 HTTP POST로 시작) / 내용: (아래 §3.3.17.4 프로덕션 지시문을 그대로) / 만든 뒤 webhook URL과 sender key, enabled 여부를 알려줘.
+루틴을 하나 만들어줘. 이름 oort-doorbell / 트리거: webhook(외부 시스템이 HTTP POST로 시작) / 내용: (아래 §3.3.17.4 프로덕션 지시문을 그대로) / enabled 로 켜 둬. 만든 뒤에는 enabled 여부만 알려줘. 거기서 멈춰.
 ```
 
-**게이트:** 루틴이 enabled 이고, https webhook URL과 sender key를 받았다.
-URL·key 원문을 이 파일에 다시 적지 않는다. §3.3.17.3에 쓸 때만 환경
-변수로 받고, 이후 회신·로그에 되풀이하지 않는다.
+**사람 승인 지점 (ADR-0184 D2).** webhook URL과 sender key는 벤더 앱
+**Info pane** 에만 있다. 에이전트는 그 pane을 읽을 수 없고, 읽겠다고
+말해서도 안 된다. 루틴이 생기면 에이전트는 **멈추고 화면을 사람에게
+넘긴 뒤** 기다린다. 사람이 Info pane을 열어 https webhook URL과 sender
+key를 이 대화에 한 번 붙여 넣는다. 그 값이 오기 전에 에이전트는
+§3.3.17.3으로 넘어가지 않는다.
+
+**게이트:** 루틴이 enabled 이고, 사람이 https webhook URL과 sender key를
+붙여 넣었다. URL·key 원문을 이 파일에 다시 적지 않는다. §3.3.17.3에
+쓸 때만 환경 변수로 받고, 이후 회신·로그에 되풀이하지 않는다.
 
 ##### 3.3.17.2 oort 쪽 — 게이트를 연다
 
@@ -1243,11 +1299,17 @@ params.name 만 바꾼다. 자격·커서를 회신 본문에 반복하지 않�
 (`/workspace/oort-inbox.cursor`)을 쓴다. 이미 소비한 자리 뒤는 빈
 페이지라 중복 wake는 무해하다.
 
+도어벨(§3.3.17.1)이 **1차 wake** 이고, 스윕은 **보조**다. 자발 발화를
+약속하지 않는다. `@every 15m` 스케줄 루틴의 첫 실행은
+지연 가능(수십 분)이다 — 실측 E2E-A 첫 발화는 ~28분. 카피는
+manual-run 수준으로 한정한다(#1361 기준 3).
+
 ```text
 루틴을 하나 만들어줘. 이름 oort-inbox-sweep / 트리거: 15분마다 반복(cron). webhook이 아님. / 내용: (oort-doorbell과 같은 프로덕션 지시문 §3.3.17.4를 그대로) / 만든 뒤 enabled 여부를 알려줘.
 ```
 
 **게이트:** 루틴이 enabled 이고 주기가 15분. 1분 폴링으로 낮추지 않는다.
+첫 실행 지연을 설치 실패로 보지 마라.
 
 ##### 3.3.17.6 고지
 
@@ -1286,6 +1348,75 @@ scripts/self_host_pg_restore.sh --dump /workspace/oort-backups/oort-pg.dump
 Postgres가 비어 보이거나 로그인이 안 되면 데이터가 소실된 것이다.
 덤프가 있으면 `/workspace/oort-backups` 에서 복원한다. 없으면
 사용자에게 알리고, 비밀번호를 만들지 마라.
+
+##### 3.3.18.1 연결 해제 (HAP-E6)
+
+호스티드 연결을 끊는 것은 위의 덤프와 별개 단계다. 히스토리는 남는다.
+이 경로는 live bearer를 회수하고 provider 정리를 기다린다.
+`ACCESS_TOKEN` / `WS` / `CONN` / `WEB_PORT` 는 §3.3.17.3 것을 재사용한다.
+
+1. 사람 관리자 세션이 disconnect를 시작한다. **게이트:** HTTP 200,
+   `connection.status` 가 `cleanup_pending`, kind별 매니페스트가
+   시드된다(kind 행 + 명명 항목). live active 자격은 이미 회수됐다
+   (Agent Port discover → 401).
+
+```sh
+curl -sS -o /tmp/oort-disconnect.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  -H 'content-type: application/json' \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/disconnect" \
+  -d '{"artifacts":[{"kind":"routine","externalRef":"oort-doorbell"},{"kind":"routine","externalRef":"oort-inbox-sweep"},{"kind":"secret","externalRef":"active-credential"},{"kind":"bot","externalRef":"grokbot"}]}'
+```
+
+2. 에이전트에게 지시 1회 → 정리 매니페스트 **1회**. 두 번 묻지 마라.
+   어떤 줄의 `residual` 이 `none` 이 아니면 그 항목만 지목한 후속 지시
+   1회 → 매니페스트 1회 더(최대 2라운드; 실측: 잔여 파일 4, 후속 1회).
+   필수 줄 형식(실측):
+
+```text
+kind · name · status(deleted/absent/preserved) · residual
+```
+
+예시:
+
+```text
+routine · oort-doorbell · deleted · residual none
+routine · oort-inbox-sweep · deleted · residual none
+secret · oort-active-credential · deleted · residual none
+plugin · (none) · absent · residual none
+bot · grokbot · preserved · residual none
+```
+
+3. 서버 매니페스트 각 행을(사람 관리자 세션만 — 라우트가 `require_human`)
+   `{currentStatus, disposition, evidence}` 로 acknowledge 한다. 행 id는
+   disconnect 응답에서 읽는다:
+   `jq -r '.cleanupArtifacts[]|[.id,.kind,(.externalRef//"-")]|@tsv' /tmp/oort-disconnect.body`
+   — 그 값으로 `ARTIFACT_ID` 를 돌린다. **`disposition` 을 주면 `evidence`(1..2000B)가
+   필수다.** 빼먹으면 HTTP 400
+   `a manual acknowledgement requires 1..=2000 bytes of evidence`.
+   `evidence` 에는 봇 매니페스트 한 줄을 붙여 넣는다. 실측 짝:
+   `bot` = preserve / `present`; `secret` = revoke / `absent`; 나머지는
+   delete / `absent`.
+
+```sh
+curl -sS -o /tmp/oort-ack.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  -H 'content-type: application/json' \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/cleanup-artifacts/${ARTIFACT_ID}/acknowledge" \
+  -d '{"currentStatus":"absent","disposition":"delete","evidence":"routine · oort-doorbell · deleted · residual none"}'
+```
+
+4. required 행이 모두 해결되면 disconnect를 완료한다. **게이트:** HTTP
+   200, `connection.status` `disconnected`, `remainingRequired` 0.
+
+```sh
+curl -sS -o /tmp/oort-disconnect-complete.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/disconnect/complete"
+```
 
 #### 3.3.19 하지 말 것
 
