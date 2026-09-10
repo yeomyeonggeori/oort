@@ -175,6 +175,11 @@ oort_logs() {
 
   oort_prepare_env "$env_path"
   oort_tier >/dev/null
+  if [ "$(oort_tier)" = "t2" ]; then
+    printf 'T2 로그는 compose 가 아니다. 플랫폼 레시피 CLI/MCP 로 서비스 로그를 보라.\n'
+    oort_release_env
+    return 0
+  fi
   local secrets rc
   secrets="$(mktemp "${TMPDIR:-/tmp}/oort-log-secrets.XXXXXX")"
   chmod 600 "$secrets"
@@ -287,7 +292,7 @@ oort_upgrade_t2() {
   printf '  # platform=%s\n' "$platform"
   printf '  # Pin the managed service image to %s via the official CLI/MCP in the user session.\n' \
     "$target_image"
-  printf '완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS\n'
+  momo_t2_done_condition_line
   printf '롤백 안내 (이전 digest 문자열): %s\n' "$previous"
   if [ -n "$dump_path" ]; then
     printf '  scripts/oort restore %s --yes --tier t2 --env %s\n' "$dump_path" "$env_path"
