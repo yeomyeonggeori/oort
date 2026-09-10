@@ -220,12 +220,13 @@ export interface HostedDetailView {
  */
 export function hostedDetailView(
   detail: HostedConnectionDetail,
-  agentLabel: string
+  agentLabel: string,
+  agentHandle = ""
 ): HostedDetailView {
   const { connection, artifacts } = detail;
   const progress = cleanupProgress(artifacts);
   return {
-    facts: connectionFacts(connection, agentLabel),
+    facts: connectionFacts(connection, agentLabel, agentHandle),
     statusLabel: hostedStatusLabel(connection.status),
     statusTone: hostedStatusTone(connection.status),
     statusDetail: hostedStatusDetail(connection),

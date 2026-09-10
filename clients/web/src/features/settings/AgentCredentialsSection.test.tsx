@@ -604,6 +604,19 @@ describe("발급 왕복", () => {
 });
 
 describe("재발급", () => {
+  it("재발급 런치는 원문 이름이고 없는-이름 문구가 아니다 (H-R2-1)", () => {
+    const source = sectionSource();
+    const start = source.indexOf("const openRegenerate");
+    const end = source.indexOf("const writesLocked");
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const regen = source.slice(start, end);
+    expect(regen).toContain("regenerateLaunchFromMember");
+    expect(regen).toContain("member?.displayName ?? \"\"");
+    expect(regen).not.toContain("memberNameParts");
+    expect(regen).not.toContain("HOSTED_AGENT_MISSING_NAME");
+  });
+
   it("재발급 응답이 카드를 교체한다", async () => {
     vi.mocked(listHostedConnections).mockResolvedValue({
       connections: [wireConnection()],

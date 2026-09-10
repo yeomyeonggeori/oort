@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
+
+- Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.
+- R2: 사실 행 동어반복 해소(H1) · 재개 행 `??` 제거(H2) · 이름 칸 폴백 상수 단일화(M1). 문장 다섯 문장은 불변.
+- R3: 재발급 런치는 원문 이름(`member?.displayName ?? ""`). `OAUTH_CONSENT_AGENT_FALLBACK` 별칭 삭제. 사용량 라벨은 `HOSTED_AGENT_MISSING_NAME`.
+- 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사실 칸 `@handle` · 재개 행 폴백 · 사보타주(문장 폴백을 사실 칸에 / `??` 복구) RED.
+- runtime-unverified: 실스택 hosted 4단계 왕복은 mock·RTL 범위.
 ## SH-11d Cloudflare T3 엣지 레시피 (#2386, 2026-09-10)
 
 - Track engine. `feat/2386-cloudflare-edge` onto `origin/track/engine`. T3 앞단만: `infra/cloudflare/`(README 첫 문단 = 「Cloudflare에 oort를 배포」는 없다 · `cloudflared.config.example.yml` 루프백 ingress + 마지막 `http_status:404` · `dns.example.md`). compose/Caddyfile 무수정. `wrangler` 미사용(Workers/Pages CLI).
@@ -29,6 +36,7 @@
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
+>>>>>>> origin/track/uxui
 
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 
