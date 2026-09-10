@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## momo_notifier 런타임 롤 (#2193, 2026-09-10)
+
+- Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `bootstrap_runtime_roles.sql`에 `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS) + push 드레인이 만지는 테이블만 SELECT/INSERT/UPDATE GRANT. 생성기·compose가 `NOTIFIER_DATABASE_URL`을 그 롤로 가리킴. doctor `roles.momo_notifier` fail-closed(롤 DROP → RED). stub E2E는 owner URL 없이 통과.
+- runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
+
+
 ## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
 
 - Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.

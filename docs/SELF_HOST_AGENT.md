@@ -95,8 +95,8 @@ approval point. Env derivation for every row is
 `gcp-vm` are the same derivation as `--public-origin` plus
 `MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; `host-network` is
 loopback internal URLs + compose `network_mode: host` when Docker
-bridge/iptables are blocked, §3.3.0; the canonical 41-key set never
-grows). Local and VPS have no row — they are the compose canon itself.
+bridge/iptables are blocked, §3.3.0; the canonical 43-key set is the
+generator heredoc plus public-edge keys). Local and VPS have no row — they are the compose canon itself.
 The Grok Bot VM is the compose canon, plus `--platform host-network`
 when §3.3.0 (b)/(c) fail.
 

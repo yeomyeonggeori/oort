@@ -109,6 +109,7 @@ TOKEN_PG="$(openssl rand -hex 12)"
 TOKEN_APP="$(openssl rand -hex 12)"
 TOKEN_RELAY="$(openssl rand -hex 12)"
 TOKEN_WORKER="$(openssl rand -hex 12)"
+TOKEN_NOTIFIER="$(openssl rand -hex 12)"
 TOKEN_JWT="$(openssl rand -hex 12)"
 TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
@@ -127,6 +128,7 @@ repl = {
     "__TOKEN_APP__": "${TOKEN_APP}",
     "__TOKEN_RELAY__": "${TOKEN_RELAY}",
     "__TOKEN_WORKER__": "${TOKEN_WORKER}",
+    "__TOKEN_NOTIFIER__": "${TOKEN_NOTIFIER}",
     "__TOKEN_JWT__": "${TOKEN_JWT}",
     "__TOKEN_CENT_TOKEN__": "${TOKEN_CENT_TOKEN}",
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",

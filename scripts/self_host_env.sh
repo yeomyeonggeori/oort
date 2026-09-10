@@ -54,13 +54,13 @@
 #
 # `MOMO_HOSTED_DELIVERY_ENABLED`(#2263)도 신규 생성 env에만 소문자
 # `true`를 쓴다. Agent Port 합류 뒤 tools/list 가 비지 않게 하는 운영자
-# 자기 인스턴스 기본값이다. heredoc 밖 append 라 Railway 41키 집합과
+# 자기 인스턴스 기본값이다. heredoc 밖 append 라 Railway 정본 키 집합과
 # doctor required-keys 는 그대로다. 기존 env는 백필하지 않는다 — 켜는
 # 법은 docs/SELF_HOST.md §6 hosted 절.
 #
 # `--platform <name>`(ADR-0184 D3 / #2296)은 플랫폼별 파생을 **표 하나**
 # (`platform_profiles`)에서 읽는다. `--railway`는 `--platform railway`의
-# 별칭이다. T2(관리형 컨테이너+PG) 행은 정본 키 집합(41)을 stdout에 쓰고,
+# 별칭이다. T2(관리형 컨테이너+PG) 행은 정본 키 집합을 stdout에 쓰고,
 # T1(compose 컴퓨트) 행은 `--public-origin` 파생과 같은 파일을 만들며
 # `MOMO_SELF_HOST_PLATFORM=<name>`만 heredoc 밖에 덧붙인다. 정본 키 집합은
 # 어느 행에서도 늘지 않는다.
@@ -192,8 +192,8 @@ oort_local_provider_env_keys() {
 #   8 hosted    1 = MOMO_HOSTED_DELIVERY_ENABLED=true is appended outside the
 #               heredoc on create (T1 file path); 0 = never emitted (T2 stdout
 #               is exactly oort_canonical_env_keys)
-# The canonical key set (oort_canonical_env_keys, 41) never changes here.
-# T2 stdout is that set plus the stamp (42); the stamp is not a heredoc key.
+# The canonical key set (oort_canonical_env_keys, 43) never changes here.
+# T2 stdout is that set plus the stamp (44); the stamp is not a heredoc key.
 # docs/SELF_HOST_AGENT.md §1 is the prose view of this table.
 platform_profiles() {
   cat <<'EOF'
@@ -273,7 +273,7 @@ validate_platform_request() {
 }
 
 # #2296 — T1 platform stamp. Appended outside the heredoc on create (the
-# canonical 41-key set is unchanged); on an existing env it is added once
+# canonical key set is unchanged); on an existing env it is added once
 # when absent and must match when present. Never emitted for T2.
 append_platform_stamp() {
   [ -n "$REQUESTED_PLATFORM" ] || return 0
@@ -353,8 +353,8 @@ write_host_network_overlay() {
 }
 
 # WORKER_DATABASE_URL is compose-hardcoded (@postgres) for other T1 rows, so
-# it is not in the generator heredoc (doctor required-keys / Railway 41 stay
-# put). Host-network is the one row that must emit it as 127.0.0.1 — outside
+# it is not in the generator heredoc (doctor required-keys / Railway canonical
+# set stay put). Host-network is the one row that must emit it as 127.0.0.1 — outside
 # the heredoc, like the platform stamp.
 append_host_network_internal_urls() {
   platform_uses_loopback || return 0
@@ -363,7 +363,7 @@ append_host_network_internal_urls() {
   validate_env_scalar WORKER_DATABASE_URL "$worker_url"
   {
     printf '\n# --- host-network 내부 URL (#2340) -------------------------------------\n'
-    printf '# 4번째 롤 URL. compose overlay 가 CENT_API_URL 을 같은 루프백으로 덮는다.\n'
+    printf '# WORKER 롤 URL (heredoc 밖). compose overlay 가 CENT_API_URL 을 같은 루프백으로 덮는다.\n'
     printf 'WORKER_DATABASE_URL=%s\n' "$worker_url"
   } >>"$ENV_FILE"
 }
@@ -382,21 +382,21 @@ oort_generator_env_keys() {
   ' "$SCRIPT_DIR/self_host_env.sh"
 }
 
-# Canonical 41-key set (generator heredoc + public-edge keys). T2 stdout is
+# Canonical 43-key set (generator heredoc + public-edge keys). T2 stdout is
 # this set plus MOMO_SELF_HOST_PLATFORM outside the heredoc (#2328). Doctor
-# env.required_keys reads the heredoc only and stays 41.
+# env.required_keys reads the heredoc only.
 oort_canonical_env_keys() {
   { oort_generator_env_keys; oort_public_edge_env_keys; } | LC_ALL=C sort -u
 }
 
 # SPA <meta name="momo-build"> / OCI revision stamp (#2258). Written on
-# *create* only — not in the heredoc, so the Railway 41-key set and doctor
+# *create* only — not in the heredoc, so the Railway canonical set and doctor
 # required-keys stay unchanged. Existing env without the line is `unknown`
 # at compose interpolation (`${MOMO_BUILD_SHA:-unknown}`); do not backfill.
 #
 # Hosted Agent Port delivery (#2263) is the same create-only shape: append
 # `MOMO_HOSTED_DELIVERY_ENABLED=true` after the heredoc. Not a Railway
-# canonical key — public Railway env stays the 41-key set; compose default
+# canonical key — public Railway env stays the generator set; compose default
 # remains `${VAR:-}` (closed). Existing env is not backfilled.
 momo_build_sha() {
   local sha
@@ -438,7 +438,7 @@ check_existing_momo_build_sha() {
 # #2263 — hosted Agent Port delivery. Create-only lowercase `true`.
 # Compose interpolates `${MOMO_HOSTED_DELIVERY_ENABLED:-}` so absence is
 # closed. Do not put this in the heredoc: doctor required-keys and the
-# Railway 41-key set stay the pre-#2263 set. Existing env is not repaired
+# Railway canonical set stay the pre-#2263 set. Existing env is not repaired
 # (unlike PLATFORM_ADMIN_EMAILS) — the operator may have left the gate
 # closed on purpose; docs/SELF_HOST.md §6 tells them how to open it.
 append_hosted_delivery_enabled() {
@@ -1180,8 +1180,10 @@ platform_value_for() {
     MOMO_APP_POSTGRES_PASSWORD) printf '%s' "$APP_PASSWORD" ;;
     RELAY_POSTGRES_PASSWORD) printf '%s' "$RELAY_PASSWORD" ;;
     WORKER_POSTGRES_PASSWORD) printf '%s' "$WORKER_PASSWORD" ;;
+    NOTIFIER_POSTGRES_PASSWORD) printf '%s' "$NOTIFIER_PASSWORD" ;;
     MOMO_APP_DATABASE_URL) printf '%s' "$APP_DATABASE_URL" ;;
     RELAY_DATABASE_URL) printf '%s' "$RELAY_DB_URL" ;;
+    NOTIFIER_DATABASE_URL) printf '%s' "$NOTIFIER_DB_URL" ;;
     JWT_HMAC) printf '%s' "$JWT_SECRET" ;;
     CENT_TOKEN_HMAC) printf '%s' "$CENT_TOKEN_SECRET" ;;
     CENT_API_KEY) printf '%s' "$CENT_API_SECRET" ;;
@@ -1210,7 +1212,7 @@ platform_value_for() {
 }
 
 # T2 rows: every value comes from the profile row + platform-provided env.
-# Output is oort_canonical_env_keys (41) plus MOMO_SELF_HOST_PLATFORM=<name>
+# Output is oort_canonical_env_keys (43) plus MOMO_SELF_HOST_PLATFORM=<name>
 # appended outside the heredoc (#2328). No hosted-delivery key, no file.
 emit_managed_platform_env() {
   local name="$REQUESTED_PLATFORM" label origin_var db_var internal hand_keys hosted
@@ -1254,6 +1256,7 @@ emit_managed_platform_env() {
   APP_PASSWORD="${MOMO_APP_POSTGRES_PASSWORD:-$(gen)}"
   RELAY_PASSWORD="${RELAY_POSTGRES_PASSWORD:-$(gen)}"
   WORKER_PASSWORD="${WORKER_POSTGRES_PASSWORD:-$(gen)}"
+  NOTIFIER_PASSWORD="${NOTIFIER_POSTGRES_PASSWORD:-$(gen)}"
   JWT_SECRET="$(platform_secret JWT_HMAC)"
   CENT_TOKEN_SECRET="$(platform_secret CENT_TOKEN_HMAC)"
   CENT_API_SECRET="$(platform_secret CENT_API_KEY)"
@@ -1262,13 +1265,14 @@ emit_managed_platform_env() {
 
   APP_DATABASE_URL="$(managed_role_url momo_app "$APP_PASSWORD")"
   RELAY_DB_URL="$(managed_role_url momo_relay "$RELAY_PASSWORD")"
+  NOTIFIER_DB_URL="$(managed_role_url momo_notifier "$NOTIFIER_PASSWORD")"
   CENTRIFUGO_ORIGINS="$SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS"
   CENTRIFUGO_ORIGINS="$(centrifugo_origins_with_public "$CENTRIFUGO_ORIGINS")"
 
   for key in PROJECT IMAGE APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
-             JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
-             PROVIDER_LINK_SECRET OWNER_EMAIL SITE_HOST CSP CENTRIFUGO_ORIGINS \
-             APP_DATABASE_URL RELAY_DB_URL; do
+             NOTIFIER_PASSWORD JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET \
+             CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET OWNER_EMAIL SITE_HOST \
+             CSP CENTRIFUGO_ORIGINS APP_DATABASE_URL RELAY_DB_URL NOTIFIER_DB_URL; do
     validate_env_scalar "$key" "$(eval "printf '%s' \"\${$key}\"")"
   done
 
@@ -1280,7 +1284,7 @@ emit_managed_platform_env() {
   done <<EOF
 $(oort_canonical_env_keys)
 EOF
-  # Stamp outside the heredoc — doctor env.required_keys stays 41.
+  # Stamp outside the heredoc — not a generator/required-keys member.
   validate_env_scalar MOMO_SELF_HOST_PLATFORM "$name"
   printf 'MOMO_SELF_HOST_PLATFORM=%s\n' "$name"
   printf '[self-host] --platform %s 키 %s개를 stdout에 썼다 (파일 없음).\n' \
@@ -1830,6 +1834,7 @@ PG_PASSWORD="$(gen)"
 APP_PASSWORD="$(gen)"
 RELAY_PASSWORD="$(gen)"
 WORKER_PASSWORD="$(gen)"
+NOTIFIER_PASSWORD="$(gen)"
 JWT_SECRET="$(gen)"
 CENT_TOKEN_SECRET="$(gen)"
 CENT_API_SECRET="$(gen)"
@@ -1855,11 +1860,11 @@ fi
 
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
-           JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
-           PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL \
-           SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS \
-           CENTRIFUGO_ORIGINS DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE \
-           PG_HOST PG_PORT; do
+           NOTIFIER_PASSWORD JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET \
+           CENT_PROXY_SECRET_VALUE PROVIDER_LINK_SECRET WEB_PORT API_PORT \
+           CENT_PORT OWNER_EMAIL SELF_HOST_DESKTOP_CORS_ORIGINS \
+           SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS CENTRIFUGO_ORIGINS \
+           DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE PG_HOST PG_PORT; do
   validate_env_scalar "$key" "${!key}"
 done
 
@@ -1888,12 +1893,14 @@ MIGRATE_DATABASE_URL=postgres://momo:$PG_PASSWORD@$PG_HOST:$PG_PORT/momo
 DB_VOLUME_NAME=$PROJECT-pgdata
 
 # --- 런타임 롤 (MOMO-554) ---------------------------------------------------
-# 아래 세 비밀번호와 두 URL 안의 비밀번호는 같아야 한다. 이 파일에서는 같다.
+# 아래 네 비밀번호와 롤 URL 안의 비밀번호는 같아야 한다. 이 파일에서는 같다.
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
 MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@$PG_HOST:$PG_PORT/momo
 RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@$PG_HOST:$PG_PORT/momo
+NOTIFIER_DATABASE_URL=postgres://momo_notifier:$NOTIFIER_PASSWORD@$PG_HOST:$PG_PORT/momo
 
 # --- 앱 시크릿 --------------------------------------------------------------
 JWT_HMAC=$JWT_SECRET

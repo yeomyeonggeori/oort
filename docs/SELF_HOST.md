@@ -487,7 +487,7 @@ that list is empty, hosted delivery is closed: set
 are closed) and restart **api** and **webhook-sender**. New env from
 `scripts/self_host_env.sh` already writes that line; existing env is not
 backfilled. `--platform railway` (alias `--railway`) does not emit this
-key (the 41-key set is unchanged — putting it in the heredoc would make doctor require it on
+key (the 43-key canonical set is unchanged by this gate — putting it in the heredoc would make doctor require it on
 every existing install). To add the two gate lines, run the awk block in
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 — do not paste it
 here.
@@ -791,10 +791,10 @@ human approval points (sign-up, billing, DNS delegation, OAuth consent).
 
 Env derivation for every platform is **one generator flag reading one
 table** — `platform_profiles` in `scripts/self_host_env.sh`. The
-canonical key set (generator heredoc + `oort_public_edge_env_keys`, 41
-keys) never grows: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
+canonical key set (generator heredoc + `oort_public_edge_env_keys`, 43
+keys) never grows except by an explicit role/URL key: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
 the heredoc, a T2 row prints the canonical set plus the same stamp
-outside the heredoc (42 on stdout; doctor `env.required_keys` stays 41).
+outside the heredoc (44 on stdout).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|

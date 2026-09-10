@@ -140,12 +140,11 @@ notifier만 연결 거부를 맞는다 — 초록 컨테이너 + 배달 안 됨.
 1. **성재 — Apple 자격증명.** APNs Auth Key(`.p8`), Key ID, Team ID. worker/이
    문서/이 repo는 이것을 만들지도 요구하지도 않는다. `.p8`은 repo·이미지·빌드
    산출물·로그 어디에도 넣지 않고, 호스트 절대경로에 두고 read-only로 마운트한다.
-2. **`momo_notifier` DB 롤 — 미해결 갭.** notifier는 BYPASSRLS 롤로 붙어야 하는데
-   `infra/rust/sql/bootstrap_runtime_roles.sql`은 `momo_app`/`momo_relay`/`momo_worker`
-   **셋만** 만든다. `momo_notifier`는 `infra/rust/sql/bootstrap_roles.sql`에만 있고 그건
-   커밋된 개발용 비밀번호라 이 스택이 일부러 적용하지 않는 파일이다. 그래서
-   `NOTIFIER_DATABASE_URL`에는 **옳은 기본값이 없다**. 스모크만 할 거면 소유자
-   URL로 대신하고, 실배포 전에는 롤 프로비저닝을 별도로 결정해야 한다(§5).
+2. **`momo_notifier` DB 롤.** notifier는 BYPASSRLS 롤 `momo_notifier`로 붙는다.
+   `infra/rust/sql/bootstrap_runtime_roles.sql`이 `momo_app`/`momo_relay`/
+   `momo_worker`/`momo_notifier`를 만들고, push 후보(`outbox`)·`push_dispatch_log`·
+   `device`(및 judgment가 읽는 테이블)에 SELECT/INSERT/UPDATE만 GRANT한다.
+   `NOTIFIER_DATABASE_URL`은 생성기가 `momo_notifier` URL로 쓴다. owner URL 금지.
 
 ### 3-1. env 준비
 
@@ -306,11 +305,10 @@ fail-open한 것이다. relay 문제가 아니라 클라 문제다(2026-08-02 �
 
 ## 6. 알려진 미해결 (이 배치가 남긴 것)
 
-1. **`momo_notifier` 롤 미프로비저닝** — §3-0. 실배포 전 결정 필요.
-2. **`apns_topic` 허용목록 없음** — 번들 ID를 dispatch가 나르므로, 등록된 서버는
+1. **`apns_topic` 허용목록 없음** — 번들 ID를 dispatch가 나르므로, 등록된 서버는
    Dawn의 `.p8`으로 Dawn 팀의 **아무 번들 ID에나** 발송을 시도할 수 있다. APNs가
    팀 밖 topic은 거절하므로 폭발 반경은 Dawn 자신의 앱들로 제한되고, 등록 서버가
    Dawn 하나인 지금은 실질 위험이 없다. 등록 서버가 늘어나기 전에 relay 쪽
    허용목록을 넣어야 한다 — 계약 변경이라 이 배치 범위 밖으로 두었다.
-3. **레지스트리 운영 도구 없음** — §2. env 변수 + 재시작이 전부다.
-4. **실 APNs 발송 미실행** — 이 배치는 하지 않았다(패킷 금지). §4가 그 자리다.
+2. **레지스트리 운영 도구 없음** — §2. env 변수 + 재시작이 전부다.
+3. **실 APNs 발송 미실행** — 이 배치는 하지 않았다(패킷 금지). §4가 그 자리다.

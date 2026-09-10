@@ -271,6 +271,8 @@ operator = {
     "RELAY_DATABASE_URL": "postgres://momo_relay:relay-password@postgres:5432/momo",
     "RELAY_POSTGRES_PASSWORD": "relay-password",
     "WORKER_POSTGRES_PASSWORD": "worker-password",
+    "NOTIFIER_POSTGRES_PASSWORD": "notifier-password",
+    "NOTIFIER_DATABASE_URL": "postgres://momo_notifier:notifier-password@postgres:5432/momo",
 }
 backup = {
     "MOMO_PGBACKREST_CIPHER_FILE": str(archive_cipher_path),

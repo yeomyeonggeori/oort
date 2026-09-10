@@ -667,7 +667,7 @@ EOF
 oort_runtime_roles_count() {
   local user db out
   if [ "$(oort_tier)" = "t2" ]; then
-    out="$(oort_psql_migrate "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" || true)"
+    out="$(oort_psql_migrate "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');" || true)"
     if [ -z "$out" ]; then
       return 1
     fi
@@ -680,7 +680,7 @@ oort_runtime_roles_count() {
   [ -n "$db" ] || db=momo
   out="$(oort_compose exec -T postgres \
     psql -U "$user" -d "$db" -At -c \
-    "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" \
+    "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');" \
     2>/dev/null || true)"
   out="$(printf '%s' "$out" | tr -d '\r' | awk 'NF { print; exit }')"
   if [ -z "$out" ]; then
@@ -692,20 +692,20 @@ oort_runtime_roles_count() {
 oort_ensure_runtime_roles() {
   local n
   n="$(oort_runtime_roles_count || true)"
-  if [ "$n" = "3" ]; then
+  if [ "$n" = "4" ]; then
     return 0
   fi
   if [ "$(oort_tier)" = "t2" ]; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent (${n:-0}/3). 플랫폼 preDeploy(\`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate\`)를 먼저 돌려라"
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are absent (${n:-0}/4). 플랫폼 preDeploy(\`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate\`)를 먼저 돌려라"
   fi
-  printf 'oort restore: runtime roles absent (%s/3); running compose service runtime-roles\n' \
+  printf 'oort restore: runtime roles absent (%s/4); running compose service runtime-roles\n' \
     "${n:-0}"
   if ! oort_compose run --rm runtime-roles; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are absent. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
   fi
   n="$(oort_runtime_roles_count || true)"
-  if [ "$n" != "3" ]; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are still absent after runtime-roles. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+  if [ "$n" != "4" ]; then
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are still absent after runtime-roles. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
   fi
 }
 

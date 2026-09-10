@@ -127,6 +127,7 @@ PG_PASSWORD="$(secret)"
 APP_PASSWORD="$(secret)"
 RELAY_PASSWORD="$(secret)"
 WORKER_PASSWORD="$(secret)"
+NOTIFIER_PASSWORD="$(secret)"
 JWT="$(secret)"
 CENT_TOKEN="$(secret)"
 CENT_API="$(secret)"
@@ -149,8 +150,10 @@ MIGRATE_DATABASE_URL=postgres://momo:${PG_PASSWORD}@postgres:5432/momo
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
 MOMO_APP_DATABASE_URL=postgres://momo_app:${APP_PASSWORD}@postgres:5432/momo
 RELAY_DATABASE_URL=postgres://momo_relay:${RELAY_PASSWORD}@postgres:5432/momo
+NOTIFIER_DATABASE_URL=postgres://momo_notifier:${NOTIFIER_PASSWORD}@postgres:5432/momo
 JWT_HMAC=$JWT
 CENT_TOKEN_HMAC=$CENT_TOKEN
 CENT_API_KEY=$CENT_API
@@ -186,8 +189,13 @@ MOMO_PUSH_NOTIFIER_ENABLED=1
 PUSH_RELAY_SERVER_ID=momo-local
 PUSH_RELAY_URL=http://push-relay:28195/v1/push
 MOMO_RELAY_SIGNING_KEY_HOST_PATH=$PRIVATE_KEY
-NOTIFIER_DATABASE_URL=postgres://momo:${PG_PASSWORD}@postgres:5432/momo
 EOF
+
+grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:' "$WORKDIR/rust.env" >/dev/null \
+  || fail "NOTIFIER_DATABASE_URL is not the momo_notifier role"
+if grep -E '^NOTIFIER_DATABASE_URL=postgres://momo:' "$WORKDIR"/*.env >/dev/null; then
+  fail "NOTIFIER_DATABASE_URL still uses the owner URL"
+fi
 
 echo "[test-push-relay-stub-e2e] compose up (project $PROJ)"
 compose up -d --wait
@@ -300,3 +308,26 @@ APNS_STATUS="$(printf '%s\n' "$LOG_ROW" | awk -F '\t' '{print $2}')"
 test "$APNS_STATUS" = 200
 
 echo "PASS: stub E2E device-register → mention → notifier → id-only capture → push_dispatch_log (Apple never contacted)"
+
+echo "[test-push-relay-stub-e2e] sabotage: DROP ROLE momo_notifier → notifier must fail to start"
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'momo_notifier' AND pid <> pg_backend_pid();" \
+  >/dev/null
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "DROP OWNED BY momo_notifier; DROP ROLE momo_notifier;" >/dev/null
+compose stop notifier >/dev/null
+compose up -d --no-deps notifier >/dev/null
+found=0
+for _ in $(seq 1 30); do
+  logs="$(compose logs --tail=80 notifier 2>/dev/null || true)"
+  if printf '%s' "$logs" | grep -Eqi 'role .*momo_notifier.* does not exist|password authentication failed'; then
+    found=1
+    break
+  fi
+  sleep 1
+done
+[ "$found" = 1 ] || {
+  compose logs --tail=80 notifier >&2 || true
+  fail "notifier still started after DROP ROLE momo_notifier"
+}
+echo "PASS: sabotage DROP ROLE momo_notifier → notifier failed to start"

@@ -86,6 +86,7 @@ TOKEN_PG="$(openssl rand -hex 12)"
 TOKEN_APP="$(openssl rand -hex 12)"
 TOKEN_RELAY="$(openssl rand -hex 12)"
 TOKEN_WORKER="$(openssl rand -hex 12)"
+TOKEN_NOTIFIER="$(openssl rand -hex 12)"
 TOKEN_JWT="$(openssl rand -hex 12)"
 TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
@@ -107,6 +108,7 @@ repl = {
     "__TOKEN_APP__": "${TOKEN_APP}",
     "__TOKEN_RELAY__": "${TOKEN_RELAY}",
     "__TOKEN_WORKER__": "${TOKEN_WORKER}",
+    "__TOKEN_NOTIFIER__": "${TOKEN_NOTIFIER}",
     "__TOKEN_JWT__": "${TOKEN_JWT}",
     "__TOKEN_CENT_TOKEN__": "${TOKEN_CENT_TOKEN}",
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
@@ -138,7 +140,7 @@ assert_no_secret_leak() {
   local label="$1" file="$2"
   local token
   for token in \
-    "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" \
+    "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" "$TOKEN_NOTIFIER" \
     "$TOKEN_JWT" "$TOKEN_CENT_TOKEN" "$TOKEN_CENT_API" "$TOKEN_CENT_PROXY" \
     "$TOKEN_PLINK" "$TOKEN_OWNER"
   do
@@ -171,7 +173,7 @@ has_check "$OUT" env.role_passwords || fail "missing env.role_passwords"
 [ "$(check_field "$OUT" env.role_passwords status)" = "pass" ] || \
   fail "valid role passwords should pass"
 
-for id in stack.compose_ps stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency; do
+for id in stack.compose_ps stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency roles.momo_notifier; do
   has_check "$OUT" "$id" || fail "missing $id"
   [ "$(check_field "$OUT" "$id" status)" = "skip" ] || \
     fail "$id should skip when stack is down: $(check_field "$OUT" "$id" status)"
@@ -304,12 +306,12 @@ validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OU
 [ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
   fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
 UNK_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
-[ "$UNK_COUNT" = "33" ] || \
-  fail "unknown platform check id count ${UNK_COUNT} != 33 (env.platform extra on the normal 32)"
+[ "$UNK_COUNT" = "34" ] || \
+  fail "unknown platform check id count ${UNK_COUNT} != 34 (env.platform extra on the normal 33)"
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "unknown platform leaked password"
 fi
-pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 33 ids"
+pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 34 ids"
 
 # -----------------------------------------------------------------------------
 # 5. outbox oracle: push_candidate|pending is non-failing without a push relay
@@ -429,12 +431,12 @@ printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
 T1_IDS="$SANDBOX/t1.ids"
 jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 # status --json includes the same checks as doctor plus image; ids come from doctor.
-# Normal case is 32. 33 is not the happy path:
+# Normal case is 33. 34 is not the happy path:
 #   - stack.migrate_files (info) when server/Migrations and /opt/momo/migrations
 #     are both missing (see the missing-dir probe above)
 #   - env.platform (fail) when MOMO_SELF_HOST_PLATFORM is not a platform_profiles row
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
-[ "$T1_COUNT" = "32" ] || fail "T1 check id count ${T1_COUNT} != 32 (normal case)"
+[ "$T1_COUNT" = "33" ] || fail "T1 check id count ${T1_COUNT} != 33 (normal case)"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
@@ -464,6 +466,7 @@ CREATE TABLE schema_migrations (
   version text PRIMARY KEY,
   applied_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE ROLE momo_notifier LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION BYPASSRLS;
 SQL
 MIG_SQL="$SANDBOX/schema_migrations.sql"
 {
@@ -611,7 +614,7 @@ validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
 T2_IDS="$SANDBOX/t2.ids"
 jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
 T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
-[ "$T2_COUNT" = "32" ] || fail "T2 check id count ${T2_COUNT} != 32 (normal case)"
+[ "$T2_COUNT" = "33" ] || fail "T2 check id count ${T2_COUNT} != 33 (normal case)"
 [ "$T1_COUNT" = "$T2_COUNT" ] || \
   fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
 cmp -s "$T1_IDS" "$T2_IDS" || \
@@ -621,7 +624,7 @@ cmp -s "$T1_IDS" "$T2_IDS" || \
 detail="$(check_field "$OUT" stack.compose_ps detail)"
 printf '%s' "$detail" | grep -Fq 'T2: compose 없음, 플랫폼 서비스 상태는 레시피 CLI 소관' || \
   fail "compose_ps skip wording: $detail"
-for id in stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency; do
+for id in stack.healthz stack.agent_port stack.outbox stack.migrate_idempotency roles.momo_notifier; do
   st="$(check_field "$OUT" "$id" status)"
   [ "$st" = "pass" ] || [ "$st" = "fail" ] || \
     fail "$id T2 status was $st (pass/fail only)"
@@ -635,6 +638,8 @@ done
   fail "T2 stack.outbox want pass: $(check_field "$OUT" stack.outbox detail)"
 [ "$(check_field "$OUT" stack.migrate_idempotency status)" = "pass" ] || \
   fail "T2 stack.migrate_idempotency want pass: $(check_field "$OUT" stack.migrate_idempotency detail)"
+[ "$(check_field "$OUT" roles.momo_notifier status)" = "pass" ] || \
+  fail "T2 roles.momo_notifier want pass: $(check_field "$OUT" roles.momo_notifier detail)"
 assert_no_secret_leak "t2 doctor json" "$OUT"
 assert_no_secret_leak "t2 doctor stderr" "$ERR"
 if grep -Fq "$T2_URL" "$OUT" "$ERR"; then
@@ -643,7 +648,7 @@ fi
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "T2 doctor leaked postgres password"
 fi
-pass "T2 doctor ids=${T2_COUNT} match T1; stack.* skip only compose_ps; other 4 pass"
+pass "T2 doctor ids=${T2_COUNT} match T1; stack.* skip only compose_ps; other 5 pass"
 
 # Incomplete ledger (one migration missing) → migrate_idempotency fail.
 docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
@@ -686,5 +691,21 @@ if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "bad-password doctor leaked the real password"
 fi
 pass "bad MIGRATE_DATABASE_URL password → stack.outbox fail; password not printed"
+
+# Sabotage: drop momo_notifier → roles.momo_notifier RED (fail-closed).
+docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 \
+  -c "DROP ROLE IF EXISTS momo_notifier;" >/dev/null
+OUT="$SANDBOX/t2-drop-notifier.json"
+ERR="$SANDBOX/t2-drop-notifier.err"
+code="$(run_doctor "$T2_ENV" "$OUT" "$ERR" --json --tier t2)"
+[ "$code" != "0" ] || fail "drop momo_notifier still exited 0"
+[ "$(check_field "$OUT" roles.momo_notifier status)" = "fail" ] || \
+  fail "drop momo_notifier: roles.momo_notifier status=$(check_field "$OUT" roles.momo_notifier status) (want fail)"
+[ "$(check_field "$OUT" roles.momo_notifier severity)" = "blocker" ] || \
+  fail "drop momo_notifier severity=$(check_field "$OUT" roles.momo_notifier severity)"
+printf '%s' "$(check_field "$OUT" roles.momo_notifier detail)" | grep -Fq 'momo_notifier 롤 없음' || \
+  fail "drop momo_notifier detail: $(check_field "$OUT" roles.momo_notifier detail)"
+assert_no_secret_leak "drop notifier json" "$OUT"
+pass "sabotage DROP ROLE momo_notifier → roles.momo_notifier fail (blocker)"
 
 echo "[oort-doctor-test] PASS: $CASES case(s)"

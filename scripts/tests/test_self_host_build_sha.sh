@@ -146,8 +146,9 @@ $(cat "$legacy/compose")"
 fi
 pass "existing env without MOMO_BUILD_SHA is left alone (compose treats unknown)"
 
-# Railway key set must stay the generator heredoc + public-edge keys (41).
-# MOMO_BUILD_SHA is appended after the heredoc and must not appear here.
+# Railway canonical set is the generator heredoc + public-edge keys (43).
+# T2 stdout adds MOMO_SELF_HOST_PLATFORM outside the heredoc (not compared
+# here). MOMO_BUILD_SHA is appended after the heredoc and must not appear.
 canonical_keys() {
   {
     awk '
@@ -186,16 +187,19 @@ set -e
 }
 awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$railway_out" | LC_ALL=C sort -u >"$TMP/railway.keys"
 canonical_keys >"$TMP/canonical.keys"
+grep -Fxv 'MOMO_SELF_HOST_PLATFORM' "$TMP/railway.keys" >"$TMP/railway.canonical.keys"
 if grep -Fxq 'MOMO_BUILD_SHA' "$TMP/canonical.keys" "$TMP/railway.keys"; then
   fail "MOMO_BUILD_SHA leaked into Railway canonical/output key set"
 fi
-if ! diff -u "$TMP/canonical.keys" "$TMP/railway.keys" >"$TMP/keys.diff"; then
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM' "$TMP/railway.keys" || \
+  fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM stamp"
+if ! diff -u "$TMP/canonical.keys" "$TMP/railway.canonical.keys" >"$TMP/keys.diff"; then
   cat "$TMP/keys.diff" >&2
   fail "Railway key-set diff not empty"
 fi
 key_count="$(grep -c . "$TMP/canonical.keys" | tr -d ' ')"
-[ "$key_count" = "41" ] || fail "Railway key set must stay 41, got $key_count"
-pass "Railway key set unchanged (41, no MOMO_BUILD_SHA)"
+[ "$key_count" = "43" ] || fail "Railway canonical key set must stay 43, got $key_count"
+pass "Railway canonical key set unchanged (43, no MOMO_BUILD_SHA; stamp outside)"
 
 # Compose interpolation: build.args only, never service environment.
 local_fix="$(make_fixture compose-local)"
