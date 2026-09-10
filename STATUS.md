@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## SH-11e day-2 계약 v2 T2 (#2325, 2026-09-09)
+
+- Track engine. `feat/2325-day2-v2` onto `origin/track/engine`. T2: backup/restore는 `MIGRATE_DATABASE_URL`만, doctor `stack.*`는 SQL-over-URL + 공개 `/healthz`(`schema.{applied,head}` 추가), upgrade는 플랫폼 digest 교체 명령을 인쇄한다. T1 경로 바이트 불변(기존 day2 10·doctor 15 케이스 GREEN 유지, 신규 +6/+3).
+- R2: T2 origin picker가 tauri/loopback을 건너뛴다(Railway `http://tauri.localhost`를 `/healthz`로 쓰지 않음). 스탬프 없는 env의 `--tier t2`는 수용, 충돌 스탬프는 거절. 검증: day2 23 · doctor 21 · check id 32==T1.
+- 검증: `scripts/tests/test_oort_day2.sh` 23 · `test_oort_doctor.sh` 21 · check id 32==T1 · dump >0바이트 · TOC T1=T2. 이미지 `/opt/momo/scripts/oort`. 호스트 `pg_dump` 18.4 vs 픽스처 PG18.
+- runtime-unverified: Railway one-off 실측은 SH-11a(planner). `/healthz` 필드 이름은 성재 리뷰.
+
 ## UX-R2c·SH-6a-w design-review 잔여 (#2256, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-followup` onto `origin/track/uxui`. UX-R2c R7 M-8/N-13/N-14 + SH-6a-w R7-N4.

@@ -43,11 +43,20 @@ pub use momo_messaging::MessageAttachment;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
+pub struct HealthSchema {
+    /// Rows in `schema_migrations` (filename PK; momo-migrate / momo-db::migrate).
+    pub applied: i64,
+    /// Lexicographic max `schema_migrations.version`, or empty when none.
+    pub head: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub service: &'static str,
     /// `"ok"` once the DB round-trip succeeds — the packet's DB ping.
     pub database: &'static str,
+    pub schema: HealthSchema,
 }
 
 // ---------------------------------------------------------------------------

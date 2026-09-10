@@ -6,14 +6,15 @@
 //! Postgres is the SoT (invariant #1).
 //!
 //! The ping goes through the pool's connection health check (`Connection::ping`),
-//! not a hand-written `SELECT 1` — the route layer owns no SQL.
+//! not a hand-written `SELECT 1`. The optional `schema` object reads the migrate
+//! ledger (`schema_migrations.version` = filename) and carries no secrets.
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use momo_db::sqlx::Connection;
+use momo_db::sqlx::{self, Connection, Row};
 
-use crate::dto::HealthResponse;
+use crate::dto::{HealthResponse, HealthSchema};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -27,9 +28,31 @@ pub async fn health(State(state): State<AppState>) -> Result<Json<HealthResponse
         ApiError::new(StatusCode::SERVICE_UNAVAILABLE, "database unavailable")
     })?;
 
+    let schema = match sqlx::query(
+        "SELECT count(*)::bigint AS applied, \
+                COALESCE(max(version), '') AS head \
+           FROM schema_migrations",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    {
+        Ok(row) => HealthSchema {
+            applied: row.try_get::<i64, _>("applied").unwrap_or(0),
+            head: row.try_get::<String, _>("head").unwrap_or_default(),
+        },
+        Err(error) => {
+            tracing::debug!(error = %error, "health: schema_migrations unread");
+            HealthSchema {
+                applied: 0,
+                head: String::new(),
+            }
+        }
+    };
+
     Ok(Json(HealthResponse {
         status: "ok",
         service: "momo-server",
         database: "ok",
+        schema,
     }))
 }

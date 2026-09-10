@@ -151,4 +151,10 @@ leaked="$(grep -n 'pg_dump -U' \
 [ -z "$leaked" ] || fail "pg_dump -U leaked outside scripts/lib/pg_dump_custom.sh: $leaked"
 pass "shared lib is the unique pg_dump -U implementation"
 
+grep -Fq 'momo_pg_dump_custom_url' "$ROOT/scripts/lib/pg_dump_custom.sh" || \
+  fail "momo_pg_dump_custom_url missing from pg_dump_custom.sh"
+grep -Fq 'momo_pg_restore_custom_url' "$ROOT/scripts/lib/pg_dump_custom.sh" || \
+  fail "momo_pg_restore_custom_url missing from pg_dump_custom.sh"
+pass "URL dump/restore helpers live only in pg_dump_custom.sh"
+
 echo "PASS: self-host pg_dump contract"
