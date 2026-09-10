@@ -24,6 +24,7 @@ import {
   channelApprovalChoices,
   type ApprovalChannelInput,
 } from "@momo/core/features/hostedAgents/approval";
+import { hostedAgentFactLabel } from "@momo/core/features/hostedAgents/model";
 import {
   buildOauthApprove,
   buildOauthDeny,
@@ -39,7 +40,6 @@ import {
   parseOauthConsentPreview,
   parseOauthDecision,
   type OauthDecisionTerminal,
-  OAUTH_CONSENT_AGENT_FALLBACK,
   OAUTH_CONSENT_AGENT_KEY,
   OAUTH_CONSENT_ALREADY_DECIDED_DETAIL,
   OAUTH_CONSENT_ALREADY_DECIDED_HEADLINE,
@@ -444,7 +444,7 @@ function ConsentBody({
   const selectedCandidate = data.candidates.find((candidate) =>
     uuidEq(candidate.connectionId, connectionId ?? "")
   );
-  const agentLabel = selectedCandidate?.agentDisplayName ?? OAUTH_CONSENT_AGENT_FALLBACK;
+  const agentLabel = selectedCandidate?.agentDisplayName ?? "";
   const approvedScopes = normalizeOauthScopes(data.requestedScopes, scopeSelection);
   const approvedChannelCount = channelApprovalChoices(channelInputs).filter(
     (choice) => !choice.disabled && channelSelection.includes(choice.id)
@@ -511,7 +511,7 @@ function ConsentBody({
             ? [
                 {
                   key: OAUTH_CONSENT_AGENT_KEY,
-                  value: selectedCandidate.agentDisplayName,
+                  value: hostedAgentFactLabel(selectedCandidate.agentDisplayName),
                   prose: true,
                 },
               ]
@@ -545,7 +545,7 @@ function ConsentBody({
           multiple={false}
           items={data.candidates.map((candidate) => ({
             id: candidate.connectionId,
-            label: candidate.agentDisplayName,
+            label: hostedAgentFactLabel(candidate.agentDisplayName),
             detail: OAUTH_CONSENT_CANDIDATE_DETAIL,
           }))}
           selected={connectionId ? [connectionId] : []}

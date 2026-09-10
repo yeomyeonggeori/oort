@@ -100,7 +100,7 @@ bridge/iptables가 막힌 VM의 루프백 내부 URL + compose `network_mode: ho
 | **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS SSO/로그인; `terraform apply`(plan 리소스 수); Budgets 이메일; DNS A; `terraform destroy`(데이터 디스크). | 클라우드 계정; IAM 사용자/SSO 역할(루트 금지); VM + 추가 디스크 + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
-| **Cloudflare** (엣지 전용) | T3 | 레시피 SH-11d — T1/T2 행 앞단의 DNS · Tunnel · TLS | 사용자 세션의 `wrangler` / MCP `mcp.cloudflare.com` → API 토큰의 REST → 브라우저. | Cloudflare 가입; 레지스트라의 네임서버 위임; Tunnel 토큰 생성. | 이미 떠 있는 T1/T2 행. 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명. | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. |
+| **Cloudflare** (엣지 전용) | T3 | §3.8 · 레시피 SH-11d (`infra/cloudflare/`) — T1/T2 행 앞단의 DNS · Tunnel · TLS | MCP `mcp.cloudflare.com`(OAuth = 승인) 또는 사용자 API 토큰 REST(`Zone:DNS:Edit` + Tunnel) → 호스트의 `cloudflared`. `wrangler`는 쓰지 않는다(Workers/Pages CLI이지 DNS/Tunnel이 아님). | Cloudflare 가입 / MCP OAuth 또는 API 토큰; 레지스트라의 네임서버 위임; 호스트의 터널 토큰; 정리 확인. | 이미 떠 있는 T1/T2 행(doctor PASS). 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). 사용자가 「Cloudflare로」라고 하면 먼저 T1/T2를 고른다. | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명(모드 A) 또는 루프백 Caddy로의 named tunnel(모드 B). | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. `public.*` skip은 사용자 오류다(§3.8) — PASS가 아니다. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | VM 안의 셸(compose) + `tailscale` CLI. | Tailscale 로그인·Funnel 켜기(4~5 클릭); 1회용 claim URL 열기. 계정 0개 + 고정 URL은 이 플레이북이 **달성하지 못한다**(RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git 불필요. durable 디렉터리 `/workspace`. Tailscale 계정 1개. | 루프백 Caddy + 웹 포트로 Tailscale Funnel. 여기서 `caddy.override.yml` 을 **켜지 마라** (ACME). `--public-origin` 은 Funnel URL을 Centrifugo에 등록한다. `/workspace` 아래 Funnel state가 살아 있는 동안 `https://<machine>.<tailnet>.ts.net`. | Funnel 오리진 기준 공개 검사 포함 doctor PASS, 1회용 claim URL을 사용자에게 회신, `/workspace` 첫날 덤프. |
 
 데스크탑 Tauri Origin(`tauri://localhost`, `http://tauri.localhost`)은
@@ -900,6 +900,7 @@ Funnel을 켤 수 없을 때만. **임시·개발용.** URL은 프로세스마�
 limit에 **구조적으로 노출**된다(RA-5). Cloudflare 자신도 production을
 금하고 SLA가 없다. **이 경로로 핸드오프한 주소는 production이 아니다.**
 사용자에게 휘발과 1015를 같이 고지한다. 고정 URL → Funnel 또는 §3.2.
+**상시 설치 = named tunnel(§3.8 / `infra/cloudflare/`)이지 이 폴백이 아니다.**
 
 ```sh
 curl -fsSL -o /usr/local/bin/cloudflared \
@@ -921,7 +922,7 @@ cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
 | 경로 | 도메인 | 고정 URL | WS | 계정 |
 |---|---|---|---|---|
 | Tailscale Funnel | 불요 | 예 (state 영속) | 예 — #18827 미실측 | Tailscale |
-| Cloudflare named tunnel | **필요** | 예 | 장시간 미실측 | Cloudflare |
+| Cloudflare named tunnel | **필요** | 예 | 장시간 미실측 | Cloudflare — 상시 절차 §3.8 |
 | 자기 리버스 프록시 | **필요** | 예 | 자기 인프라 | 자기 인프라 |
 | quick tunnel | 불요 | 아니오 | 예 (R-2 실측) | 없음 |
 
@@ -1562,6 +1563,63 @@ T1, `gcloud`와 `--platform gcp-vm`으로 §3.6과 같은 계약. 사람 승인 
 GCP 가입·결제, OAuth 동의, DNS 레코드.
 **게이트:** 공개 검사 포함 `scripts/oort doctor --json`.
 
+### 3.8 Cloudflare (T3 엣지, 컴퓨트 아님)
+
+「Cloudflare에 oort를 배포」는 없다. api·Postgres·Centrifugo는
+Workers/Pages/Containers에 올리지 않는다(ADR-0184 D1). 이미 doctor PASS인
+T1/T2 행 **앞단**의 DNS · Tunnel · TLS다. 레시피:
+[`infra/cloudflare/README.md`](../infra/cloudflare/README.md).
+
+사용자가 「Cloudflare로」라고 하면 먼저 컴퓨트 tier를 고른다. 설치 보고
+한 줄(D7): **여기엔 컴퓨트를 올릴 수 없다, T1/T2를 고르자.** D7 ②(영속
+볼륨) 또는 ③(상시 프로세스·장수 WebSocket)이 아니오인 미지 플랫폼도 같은
+T3다.
+
+`wrangler`는 여기서 쓰지 않는다: Workers/Pages CLI다. DNS 쓰기는 MCP
+`mcp.cloudflare.com`(OAuth 동의 = 승인) 또는 사용자 API 토큰 REST
+(`Zone:DNS:Edit` + Tunnel, env만). named tunnel은 호스트의 `cloudflared`
+(systemd, compose 아님).
+
+사람 승인(소유자 계정; 에이전트는 클릭하지 않음): (1) Cloudflare 로그인 /
+MCP OAuth 또는 API 토큰, (2) 레지스트라의 네임서버 위임, (3) 호스트의
+터널 토큰, (4) 정리 확인.
+
+**모드 A — DNS.** 공개 IP가 있는 T1. 오리진 Caddy(`Caddyfile` +
+`caddy.override.yml`)가 ACME를 발급하는 동안 A/AAAA는 그레이 클라우드,
+그다음 오렌지 클라우드 + SSL **Full (strict)**. 프록시를 통과하는
+HTTP-01과 WebSocket 101을 실측한다.
+
+**모드 B — named tunnel.** 공개 IP·포트 개방 없음(그록봇 VM, NAT VPS).
+루프백 Caddy(`Caddyfile.local`). ingress
+`http://127.0.0.1:<MOMO_WEB_PORT>` + 마지막 규칙 `http_status:404`
+([`infra/cloudflare/cloudflared.config.example.yml`](../infra/cloudflare/cloudflared.config.example.yml)).
+§3.3.11 quick-tunnel 폴백을 상시 설치로 쓰지 않는다.
+
+두 모드 모두 Cloudflare 호스트명을 공개 오리진으로:
+
+```sh
+scripts/self_host_env.sh --public-origin https://<host>
+scripts/oort doctor --json
+```
+
+`--public-origin`은 필수다. 빼면 doctor가 `public.*`를 skip한다
+(doctor 함수 `oort_doctor_check_public`, 「--public-origin
+흔적 없음」). 이 T3 앞단에서 그 skip은 **사용자 오류**이지 PASS가 아니다.
+`public.healthz` 200과 `public.websocket` **101**을 기대한다. 이어서
+`GET https://<host>/v1/centrifugo/subscribe` → **403**. 루프백 Caddy에
+이미 전용 deny가 있다(`infra/rust/Caddyfile.local` `handle
+/v1/centrifugo/*` / `respond 403`). 핸들이 없으면 멈추고 planner에 보고 —
+여기서 Caddy를 고치지 않는다.
+
+터널 모드: TLS는 Cloudflare에서 끝난다. `Caddyfile.local`은 HSTS를 내지
+않고 CSP는 SPA handle에만 붙는다 — 엣지 응답에 그 오리진 헤더가 없으면
+SH-11f 목록 상수 후보지, 이 레시피의 Caddy 수정이 아니다. 오리진 vs 엣지
+헤더를 diff하고 Cloudflare가 더한 것을 목록으로.
+
+**게이트:** Cloudflare 호스트명 경유 `scripts/oort doctor --json`에서
+`public.healthz`와 `public.websocket` PASS. 정적 증명:
+`scripts/tests/test_cloudflare_recipe.sh`.
+
 ---
 
 ## 4. Day-2
@@ -1673,7 +1731,7 @@ scripts/self_host_env.sh --compose logs relay
 | `stack.agent_port` | 401 + Bearer scope 아님 | 잘못된 이미지. `releases/latest.json` 확인. |
 | `stack.outbox` | `done`이 아닌 행 | `push_candidate` pending 은 푸시 릴레이가 없으면 **info**(개수)이다 (`PUSH_RELAY_URL` / `docker-compose.push.yml` 의 `push-relay`/`notifier` 없음). `agent_job` pending 은 5분 미만 info, 이상이면 major(kind/status/개수/최고 나이 나열). 다른 kind: pending/failed면 `logs relay`. |
 | `stack.migrate_idempotency` | `IDEMPOTENCY_OK` 없음 | `logs migrate`. |
-| `public.healthz` / `public.websocket` | 공개 오리진은 등록됐는데 200/101 없음 | 터널/Caddy와 `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 1회 재시작. |
+| `public.healthz` / `public.websocket` | 공개 오리진은 등록됐는데 200/101 없음 | 터널/Caddy와 `CENTRIFUGO_ALLOWED_ORIGINS`. Funnel: §3.3.10 1회 재시작. Cloudflare T3(§3.8): `public.*` skip(「흔적 없음」)은 사용자 오류다 — 먼저 `--public-origin`을 돌려라. skip은 PASS가 아니다. |
 
 Doctor 종료코드 **2**(blocker) → 핸드오프하지 않는다. 종료코드 **1**(major만)
 → Local/VPS/Grok Bot 설치에서 핸드오프하지 말고 고친 뒤 다시 돈다.

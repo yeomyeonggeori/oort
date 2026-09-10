@@ -4,12 +4,25 @@
 
 - Track UXUI. `chore/2356-sh12c-nits` onto `origin/track/uxui`. IssuedInviteCard 공유 문장 `break-keep`(390px 「화면에서|만」 분절 0). 발급 뒤 채워진 primary는 「계속」, 복사 outline은 Button default/`h-control`(28px `sm` 예외 제거; 플래너 36px는 컨트롤 축에 없어 named `h-control` 32). S2 발급 CTA·복사 라벨은 설정 › 멤버와 초대와 `inviteLabels.ts` 상수 공유. `welcomeKickoff.noActiveAgent` 백스톱 관찰자는 mount 전에 부착해 1프레임 플래시를 센다.
 - runtime-unverified: 실서버 claim→S2 390px 캡처는 design-review 범위(정적 PASS, 픽셀 SKIPPED). 백스톱 플래시는 jsdom MutationObserver.
+## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
+
+- Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.
+- R2: 사실 행 동어반복 해소(H1) · 재개 행 `??` 제거(H2) · 이름 칸 폴백 상수 단일화(M1). 문장 다섯 문장은 불변.
+- R3: 재발급 런치는 원문 이름(`member?.displayName ?? ""`). `OAUTH_CONSENT_AGENT_FALLBACK` 별칭 삭제. 사용량 라벨은 `HOSTED_AGENT_MISSING_NAME`.
+- 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사실 칸 `@handle` · 재개 행 폴백 · 사보타주(문장 폴백을 사실 칸에 / `??` 복구) RED.
+- runtime-unverified: 실스택 hosted 4단계 왕복은 mock·RTL 범위.
+## SH-11d Cloudflare T3 엣지 레시피 (#2386, 2026-09-10)
+
+- Track engine. `feat/2386-cloudflare-edge` onto `origin/track/engine`. T3 앞단만: `infra/cloudflare/`(README 첫 문단 = 「Cloudflare에 oort를 배포」는 없다 · `cloudflared.config.example.yml` 루프백 ingress + 마지막 `http_status:404` · `dns.example.md`). compose/Caddyfile 무수정. `wrangler` 미사용(Workers/Pages CLI).
+- `docs/SELF_HOST_AGENT.md`(+ko) §1 행 · §3.8 · §3.3.11 「상시 = named tunnel」상호 링크. `SELF_HOST.md`(+ko) Platforms 1문단. 정적 시험 `scripts/tests/test_cloudflare_recipe.sh` (사보타주 ①공개IP ingress ②404 제거 ③quick-tunnel ④`--public-origin` 생략 → 전부 RED).
+- runtime-unverified: 성재 Cloudflare 계정·앞단 T1(SH-11b/11c) 실측 E2E(모드 B 101/403/헤더 diff/재부팅 복귀, 모드 A DNS 1레코드). `--public-origin` 생략 시 doctor `public.*` skip은 레시피가 사용자 오류로 단정(doctor 본체 무수정).
 
 ## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
 
 - Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
 - 검증: 정적 계약(mounts·always-on·RAM≥2GiB·ports {80,443}·digest 리터럴 0·README 스크립트 실재·data-root `/data`). `local_gate.sh --profile docs`.
 - runtime-unverified: 소유자 `fly auth login` 실배포·doctor 27/27·재시작 보존(승인 지점 1–4 대기).
+
 ## SH-11c AWS Lightsail/EC2 T1 레시피 (#2377, 2026-09-10)
 
 - Track engine. `feat/2377-aws-t1-recipe` onto `origin/track/engine`. `infra/aws/`: Lightsail 인스턴스 1 + 고정 IP + `/data` 디스크(`prevent_destroy`) + 포트 22/80/443만 + Budgets + EC2 변수 분기. cloud-init는 Docker `data-root=/data/docker`, 시크릿 비생성. IAM 최소권한(루트 금지). `scripts/tests/test_aws_recipe.sh` 정적 계약 + 사보타주 3 RED. terraform 부재 시 SH-11f 선택 도구 skip 1줄.
@@ -27,6 +40,7 @@
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
+>>>>>>> origin/track/uxui
 
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 

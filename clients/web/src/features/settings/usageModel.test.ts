@@ -30,6 +30,7 @@ import {
   type UsageScope,
   type UsageSummary,
 } from "@momo/core/features/settings/usageModel";
+import { HOSTED_AGENT_MISSING_NAME } from "@momo/core/features/hostedAgents/model";
 
 // The three fixtures are the contract shapes the engine ticket (MOMO-615) is
 // implementing in parallel: a populated range, an empty range (200 with zeros,
@@ -521,7 +522,7 @@ describe("breakdown row labels", () => {
     ).toEqual({ text: "김인턴", handle: null });
     // Neither source named it: a plain noun, not 019f94e3-8b21-...
     const nameless = agentRowLabel({ ...intern, displayName: "  " }, null);
-    expect(nameless.text).toBe("이름 없는 에이전트");
+    expect(nameless.text).toBe(HOSTED_AGENT_MISSING_NAME);
     expect(nameless.text).not.toContain(intern.agentMemberId.slice(0, 8));
   });
 
