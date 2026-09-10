@@ -58,15 +58,75 @@ export interface HostedPreset {
   leavesBehind?: string;
 }
 
-/** routine 이름은 결정적이다 (ADR-0162 D6). cleanup 도 이 이름을 찾는다. */
+/**
+ * routine 이름은 결정적이다 (ADR-0162 D6). cleanup 매니페스트가 이 문자열을
+ * 그대로 찾으므로 카피가 아니라 식별자다.
+ *
+ * 핸들이 있으면 출력은 예전과 바이트가 같다. 핸들이 비면 구분자를 끝에 남기지
+ * 않고, member id 의 hex 앞 8자리 단축형(`m-019f9a01`)을 세그먼트로 쓴다
+ * (개정 2026-09-10). 단축형을 쓸 수 없으면 워크스페이스 세그먼트만 남긴다.
+ */
+export const HOSTED_ROUTINE_LABEL_PREFIX = "Oort Inbox: ";
+const HOSTED_ROUTINE_LABEL_SEP = " / ";
+const HOSTED_MEMBER_ID_SHORT_HEX = 8;
+
+/** 레포에 단축 id 헬퍼가 없어 여기가 정본이다. hex 가 8자리 미만이면 없다. */
+export function hostedMemberIdShort(memberId: string): string | null {
+  let hex = "";
+  for (const character of memberId) {
+    const code = character.charCodeAt(0);
+    const isDigit = code >= 48 && code <= 57;
+    const isLowerHex = code >= 97 && code <= 102;
+    const isUpperHex = code >= 65 && code <= 70;
+    if (!isDigit && !isLowerHex && !isUpperHex) continue;
+    hex += isUpperHex ? String.fromCharCode(code + 32) : character;
+    if (hex.length === HOSTED_MEMBER_ID_SHORT_HEX) return `m-${hex}`;
+  }
+  return null;
+}
+
 export function hostedRoutineLabel(
-  workspaceName: string,
-  agentLabel: string
+  workspaceSlug: string,
+  handle: string,
+  memberId?: string
 ): string {
-  return `Oort Inbox: ${boundedLabel(workspaceName, 40)} / ${boundedLabel(
-    agentLabel,
-    40
-  )}`;
+  const workspace = boundedLabel(workspaceSlug, 40);
+  const trimmedHandle = boundedLabel(handle, 40);
+  const identifier =
+    trimmedHandle !== ""
+      ? trimmedHandle
+      : memberId === undefined
+        ? ""
+        : (hostedMemberIdShort(memberId) ?? "");
+  if (identifier === "") {
+    return `${HOSTED_ROUTINE_LABEL_PREFIX}${workspace}`;
+  }
+  return `${HOSTED_ROUTINE_LABEL_PREFIX}${workspace}${HOSTED_ROUTINE_LABEL_SEP}${identifier}`;
+}
+
+export interface ParsedHostedRoutineLabel {
+  workspace: string;
+  /** 핸들, 또는 빈 핸들일 때의 `m-<hex8>`. 세그먼트가 없으면 빈 문자열. */
+  identifier: string;
+}
+
+/**
+ * cleanup 매니페스트·도어벨/스윕 조회가 같은 식별자를 되찾게 하는 파서.
+ * `m-<hex8>` 세그먼트를 핸들과 같은 칸으로 받는다. 끝에 ` / ` 만 있는
+ * 문자열(개정 전의 빈 핸들 버그)은 식별자가 아니므로 거절한다.
+ */
+export function parseHostedRoutineLabel(
+  label: string
+): ParsedHostedRoutineLabel | null {
+  if (!label.startsWith(HOSTED_ROUTINE_LABEL_PREFIX)) return null;
+  const rest = label.slice(HOSTED_ROUTINE_LABEL_PREFIX.length);
+  if (rest === "") return null;
+  const at = rest.lastIndexOf(HOSTED_ROUTINE_LABEL_SEP);
+  if (at === -1) return { workspace: rest, identifier: "" };
+  const workspace = rest.slice(0, at);
+  const identifier = rest.slice(at + HOSTED_ROUTINE_LABEL_SEP.length);
+  if (workspace === "" || identifier === "") return null;
+  return { workspace, identifier };
 }
 
 /** routine 이 시킬 일. ADR-0162 D8 의 template 문장 그대로. */
