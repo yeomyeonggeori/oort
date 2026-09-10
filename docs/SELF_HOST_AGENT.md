@@ -91,17 +91,21 @@ the user's own session → REST with a user token → browser only at a human
 approval point. Env derivation for every row is
 `scripts/self_host_env.sh --platform <name>` reading one table
 (`platform_profiles`): `railway` (T2, alias `--railway`) · `fly` ·
-`aws-lightsail` · `gcp-vm` (T1, same derivation as `--public-origin` plus
-`MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; the canonical 41-key
-set never grows). Local, VPS and the Grok Bot VM have no row — they are
-the compose canon itself.
+`aws-lightsail` · `gcp-vm` · `host-network` (T1; `fly` / `aws-lightsail` /
+`gcp-vm` are the same derivation as `--public-origin` plus
+`MOMO_SELF_HOST_PLATFORM=<name>` outside the heredoc; `host-network` is
+loopback internal URLs + compose `network_mode: host` when Docker
+bridge/iptables are blocked, §3.3.0; the canonical 41-key set never
+grows). Local and VPS have no row — they are the compose canon itself.
+The Grok Bot VM is the compose canon, plus `--platform host-network`
+when §3.3.0 (b)/(c) fail.
 
 | Platform | Tier | Branch · recipe | Operated by | Human approval points | Prerequisites | Edge · URL model | Done means |
 |---|---|---|---|---|---|---|---|
 | **Local machine** | T1 | §3.1 | Shell on this machine (compose). | None. | Docker Engine + Compose v2, git, jq, openssl, curl. ≥ 1 GiB free (2 GiB better). | `local.override.yml` + `Caddyfile.local` (`:80`, no ACME). `http://127.0.0.1:<MOMO_WEB_PORT>` (generator default 8088 if free). | Doctor `summary.verdict=PASS` (`public.*` skip is OK) and a browser (or login API) session as `owner@oort.local`. |
 | **VPS with own domain** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. Provider CLI only if the user already has one logged in. | Provider sign-up/billing; the DNS record for the host. | Same as Local, plus DNS for a host this machine owns. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). Keys `OORT_SITE_ADDRESS` and `OORT_CSP_CONNECT_SRC` are derived by `scripts/self_host_env.sh --public-origin` — do not type them by hand. Operator-declared `https://<host>`. | Doctor PASS including `public.healthz` and `public.websocket`, HTTPS login. |
 | **Fly.io** (single VM + volume) | T1 | §3.5 · provisioning recipe SH-11b (`fly.toml` + volume) | `flyctl` in the user's login → Fly REST with a user token → browser. | Fly sign-up/billing; custom-domain DNS. | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly hostname or custom domain. | Same as VPS. |
-| **AWS Lightsail / EC2** | T1 | §3.6 · provisioning recipe SH-11c (+ minimal Terraform) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS sign-up/billing; IAM consent; the DNS record. | Cloud account; VM + compose + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
+| **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS SSO/login; `terraform apply` (plan resource count); Budgets email; DNS A; `terraform destroy` (data disk). | Cloud account; IAM user/SSO role (not root); VM + extra disk + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
 | **Cloudflare** (edge only) | T3 | Recipe SH-11d — DNS · Tunnel · TLS in front of a T1/T2 row | `wrangler` / MCP `mcp.cloudflare.com` in the user's session → REST with an API token → browser. | Cloudflare sign-up; nameserver delegation at the registrar; Tunnel token creation. | A T1/T2 row already up. Not compute: Containers/Workers are not adopted (ADR-0184 D1). | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS. | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. |
@@ -443,8 +447,7 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 Even if `ip=` is not RFC1918/link-local, continue at §3.3.6. Measured VMs
 have no public inbound.
 
-> **Harness note:** OS Return fails when the Grok Bot window is on another
-> Space. Bring the app forward with `open -a "Grok Bot"`, then Return.
+> Harness (planner/operator only): `scripts/dev/grokbot_cdp/README.md`.
 
 #### 3.3.0 VM Docker preflight and fallbacks
 
@@ -473,24 +476,24 @@ One allowed fallback per failure:
    or the engine will not start on overlayfs): the allowed fallback is the
    `vfs` storage driver. Write `{"storage-driver":"vfs"}` to
    `/etc/docker/daemon.json` and restart Docker. Do not pick a third driver.
-2. **Bridge** (`docker network create --driver bridge` fails): the allowed
-   fallback is compose `network_mode: host` on a VM-local override that is
-   **not** a file in this repository. Do not add or name a repo overlay for
-   this.
+2. **Bridge** (`docker network create --driver bridge` fails): generate env
+   with `--platform host-network` (add that flag to the §3.3.3 command).
+   The generator writes internal URLs as `127.0.0.1:<port>` and
+   `infra/rust/docker-compose.host-network.yml` (`network_mode: host`).
+   `--compose` and `oort_compose` below append that overlay from the stamp.
+   Do not hand-edit env.
 3. **iptables** (`iptables -L` is permission-denied or otherwise unusable):
-   the same allowed fallback as bridge — `network_mode: host`. Do not try
-   to unlock iptables on this VM.
+   the same generator option as bridge — `--platform host-network`. Do not
+   try to unlock iptables on this VM.
 
 **Env hand-edit is not a fallback.** Do not rewrite `DATABASE_URL` /
 `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` / `MIGRATE_DATABASE_URL`
 hosts in `infra/rust/local.secrets.env`. Express a change only through
 generator options (`scripts/self_host_env.sh` flags such as
-`--published-image`, `--platform`, `--public-origin`). This tree has no
-generator option that retargets compose Postgres from `postgres` to
-`127.0.0.1` for host-network. If host-network still needs that host rewrite,
-**do not edit env** — record the bypass in the §3.3.14 handoff message and
-stop: hand the screen to the human (ADR-0184 D2). A generator option for this
-host rewrite is tracked as #2340.
+`--published-image`, `--platform host-network`, `--public-origin`). If a
+§3.3.0 fallback still cannot bring the stack up, **do not edit env** —
+record the bypass in the §3.3.14 handoff message and stop: hand the
+screen to the human (ADR-0184 D2).
 
 #### 3.3.1 Snapshot (no git)
 
@@ -556,6 +559,9 @@ scripts/self_host_env.sh --published-image \
   "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 ```
 
+If §3.3.0 (b) or (c) failed, insert `--platform host-network` before
+`--published-image`. Do not hand-edit the generated env.
+
 The generator always writes `MOMO_INITIAL_OWNER_PASSWORD`. ADR-0166 claim
 mode is **mutually exclusive** (`MOMO_BOOTSTRAP_CLAIM=1` + email only).
 `--compose` requires the password key, so claim boot calls `docker compose`
@@ -592,9 +598,14 @@ claimed file.
 
 ```sh
 oort_compose() {
+  extra=()
+  if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
+    extra+=(-f infra/rust/docker-compose.host-network.yml)
+  fi
   docker compose --env-file "$ENV_FILE" \
     -f infra/rust/docker-compose.rust.yml \
     -f infra/rust/local.override.yml \
+    "${extra[@]}" \
     "$@"
 }
 
@@ -957,7 +968,9 @@ CNAME as an "expert" path.
 #### 3.3.14 User handoff
 
 Reply only after the §3.3.10 gate. Do not send a password. The claim token
-exists only inside the URL, once. TTL 24h, single use.
+exists only inside the URL, once. TTL 24h, single use. If a §3.3.0
+fallback was used (`vfs` and/or `--platform host-network`), say so in
+this message.
 
 Fill the brackets with real values. Do not rewrite `<token>` into this
 file; append `MOMO_CLAIM_PATH` from `/workspace/oort-claim.env` to the
@@ -1535,14 +1548,37 @@ Human approval points: Fly sign-up/billing, custom-domain DNS.
 
 ### 3.6 AWS
 
-T1. The compose procedure is §3.2 on a Lightsail/EC2 VM you own; the
-provisioning recipe (`aws` CLI / AWS MCP in the user's session, minimal
-Terraform) is SH-11c. Env: `--platform aws-lightsail --public-origin
-https://<host>` with the image mode. ACME only for a hostname this VM's
-DNS owns. Human approval points: AWS sign-up/billing, IAM consent, the
-DNS record.
+T1. The compose procedure is §3.2 on a Lightsail/EC2 VM you own. Provisioning
+is [`infra/aws/README.md`](../infra/aws/README.md) (minimal Terraform,
+`aws` CLI in the user's session). Lightsail is the default; EC2 is
+`compute = "ec2"` in the same module. Do not paste access keys. Confirm
+`aws sts get-caller-identity --query Arn --output text` is the user's own
+identity; do not print the account id. Do not use the root user.
 
-**Gate:** `scripts/oort doctor --json` including public checks.
+Human approval points (owner's account and bill — the agent stops and
+hands the screen over):
+
+1. AWS SSO / login in the browser.
+2. `terraform apply` after the plan resource count is shown (Lightsail 7 /
+   EC2 6). Cost starts here.
+3. Budgets alert email.
+4. DNS A record for the operator host → the output IP.
+5. `terraform destroy` and deleting the data disk (`prevent_destroy` makes
+   this two steps).
+
+SSH as `ubuntu`. Env (`IMAGE_REF` read in §2.2, or `/data/oort-image-ref`
+on the VM):
+
+```sh
+scripts/self_host_env.sh --platform aws-lightsail --published-image "$IMAGE_REF" --public-origin https://<host>
+```
+
+Then `scripts/oort up` and the public overlay as §3.2. ACME only for a
+hostname this VM's DNS owns. Port 5432 stays closed. Docker `data-root` is
+`/data/docker` on the extra disk — not the root disk.
+
+**Gate:** `scripts/oort doctor --json` including public checks. Day-2 is
+SSH, same as VPS.
 
 ### 3.7 GCP
 

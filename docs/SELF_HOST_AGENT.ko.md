@@ -84,16 +84,20 @@ tier는 ADR-0184 D1이다. **T1**은 compose 정본을 그대로 돌린다(docto
 브라우저는 사람 승인 지점에서만. 모든 행의 env 파생은
 `scripts/self_host_env.sh --platform <name>`이 표 하나(`platform_profiles`)를
 읽는다: `railway`(T2, 별칭 `--railway`) · `fly` · `aws-lightsail` ·
-`gcp-vm`(T1, `--public-origin` 파생과 같고 heredoc 밖에
-`MOMO_SELF_HOST_PLATFORM=<name>`만 추가; 정본 41키 집합은 늘지 않는다).
-로컬·VPS·Grok Bot VM은 행이 없다 — compose 정본 그 자체다.
+`gcp-vm` · `host-network`(T1; `fly` / `aws-lightsail` / `gcp-vm` 은
+`--public-origin` 파생과 같고 heredoc 밖에
+`MOMO_SELF_HOST_PLATFORM=<name>`만 추가; `host-network` 는 Docker
+bridge/iptables가 막힌 VM의 루프백 내부 URL + compose `network_mode: host`,
+§3.3.0; 정본 41키 집합은 늘지 않는다). 로컬·VPS는 행이 없다 — compose
+정본 그 자체다. Grok Bot VM은 compose 정본이고, §3.3.0 (b)/(c)가
+실패하면 `--platform host-network` 를 붙인다.
 
 | 플랫폼 | Tier | 분기 · 레시피 | 조작 수단 | 사람 승인 지점 | 전제 | 엣지 · URL 모델 | 완료 |
 |---|---|---|---|---|---|---|---|
 | **로컬 머신** | T1 | §3.1 | 이 기계의 셸(compose). | 없음. | Docker Engine + Compose v2, git, jq, openssl, curl. 여유 ≥ 1 GiB (2 GiB 권장). | `local.override.yml` + `Caddyfile.local` (`:80`, ACME 없음). `http://127.0.0.1:<MOMO_WEB_PORT>` (생성기 기본 8088, 비어 있으면). | Doctor `summary.verdict=PASS`(`public.*` skip 은 OK) 그리고 `owner@oort.local` 브라우저(또는 로그인 API) 세션. |
 | **자기 도메인 VPS** (Hetzner, DO, …) | T1 | §3.2 | SSH + compose. 프로바이더 CLI는 사용자가 이미 로그인해 둔 것만. | 프로바이더 가입·결제; 그 호스트의 DNS 레코드. | 로컬과 같음 + 이 기계가 소유한 호스트의 DNS. | `caddy.override.yml` + `Caddyfile` (`{$OORT_SITE_ADDRESS}`). `OORT_SITE_ADDRESS` 와 `OORT_CSP_CONNECT_SRC` 는 `scripts/self_host_env.sh --public-origin` 이 파생한다 — 손으로 적지 마라. 운영자가 선언한 `https://<host>`. | `public.healthz`·`public.websocket` 포함 doctor PASS, HTTPS 로그인. |
 | **Fly.io** (단일 VM + 볼륨) | T1 | §3.5 · 프로비저닝 레시피 SH-11b (`fly.toml` + 볼륨) | 사용자 로그인의 `flyctl` → 사용자 토큰의 Fly REST → 브라우저. | Fly 가입·결제; 커스텀 도메인 DNS. | Fly 계정; 볼륨 달린 VM 1대; 그 위의 T1 도구. | VM 위에서 T1 compose 절차 §3.2; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly 호스트명 또는 커스텀 도메인. | VPS와 같음. |
-| **AWS Lightsail / EC2** | T1 | §3.6 · 프로비저닝 레시피 SH-11c (+ 최소 Terraform) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS 가입·결제; IAM 동의; DNS 레코드. | 클라우드 계정; VM + compose + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
+| **AWS Lightsail / EC2** | T1 | §3.6 · [`infra/aws/README.md`](../infra/aws/README.md) (SH-11c) | 사용자 세션의 `aws` CLI / AWS MCP → REST → 브라우저. | AWS SSO/로그인; `terraform apply`(plan 리소스 수); Budgets 이메일; DNS A; `terraform destroy`(데이터 디스크). | 클라우드 계정; IAM 사용자/SSO 역할(루트 금지); VM + 추가 디스크 + 도메인. | VM 위에서 T1 compose 절차 §3.2; env `--platform aws-lightsail --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **GCP VM** | T1 | §3.7 · SH-11c 패턴의 프로비저닝 레시피 | 사용자 세션의 `gcloud` → REST → 브라우저. | GCP 가입·결제; OAuth 동의; DNS 레코드. | AWS와 같음. | VM 위에서 T1 compose 절차 §3.2; env `--platform gcp-vm --public-origin https://<host>`. 운영자 도메인. | VPS와 같음. |
 | **Railway** | T2 | §3.4 · 에이전트 경로 실측은 SH-11a | 사용자 OAuth 세션의 `railway` CLI(`railway setup agent`) / 원격 MCP `mcp.railway.com` → REST → 브라우저. | Railway 가입·결제; CLI/MCP의 OAuth 로그인; caddy에 공개 도메인 부여. | Railway 계정; Postgres 플러그인; 이 기계에 Docker 불필요(발행 이미지). | 공개 엣지는 Caddy 서비스(`Caddyfile.railway`), api는 내부. env는 `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`에서; 손으로 넣는 키 셋(`infra/railway/README.md`). 플랫폼 호스트명. | 배포 오리진에서 doctor PASS(`public.healthz`, `public.websocket`). Day-2: 이미지 one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2`는 `MOMO_SELF_HOST_PLATFORM`(railway)과 같아야 한다. dump는 `MIGRATE_DATABASE_URL`만. one-off의 플랫폼 CLI/MCP는 SH-11a. |
 | **Cloudflare** (엣지 전용) | T3 | 레시피 SH-11d — T1/T2 행 앞단의 DNS · Tunnel · TLS | 사용자 세션의 `wrangler` / MCP `mcp.cloudflare.com` → API 토큰의 REST → 브라우저. | Cloudflare 가입; 레지스트라의 네임서버 위임; Tunnel 토큰 생성. | 이미 떠 있는 T1/T2 행. 컴퓨트가 아니다: Containers/Workers는 채택하지 않는다(ADR-0184 D1). | 앞에 세운 행을 감싼다; 오리진은 그 행의 엣지와 `/v1/centrifugo/*` 403 순서를 유지. Cloudflare DNS의 공개 호스트명. | 감싼 행과 같고, Cloudflare 호스트명 경유로 `public.*` PASS. |
@@ -431,8 +435,7 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 `ip=` 가 RFC1918/링크로컬이 아니어도 §3.3.6으로 간다. 실측 VM은
 공인 inbound가 없다.
 
-> **하네스 메모:** Grok Bot 창이 다른 Space에 있으면 OS Return이 실패한다.
-> `open -a "Grok Bot"` 으로 앱을 앞으로 가져온 뒤 Return.
+> 하네스(기획/운영자 전용): `scripts/dev/grokbot_cdp/README.md`.
 
 #### 3.3.0 VM Docker 점검·대안
 
@@ -462,23 +465,23 @@ docker network rm oort-preflight-bridge
    스토리지 드라이버다. `/etc/docker/daemon.json` 에
    `{"storage-driver":"vfs"}` 를 쓰고 Docker를 재시작한다. 세 번째
    드라이버를 고르지 마라.
-2. **Bridge** (`docker network create --driver bridge` 실패): 허용된
-   우회는 이 저장소에 **없는** VM-로컬 오버라이드의 compose
-   `network_mode: host` 다. 이 우회용 레포 오버레이를 추가하거나 이름
-   부르지 마라.
+2. **Bridge** (`docker network create --driver bridge` 실패): env 생성에
+   `--platform host-network` 를 붙인다(§3.3.3 명령에 그 플래그를 넣는다).
+   생성기가 내부 URL을 `127.0.0.1:<port>` 로 쓰고
+   `infra/rust/docker-compose.host-network.yml` (`network_mode: host`) 을
+   렌더한다. `--compose` 와 아래 `oort_compose` 가 스탬프를 보고 그
+   오버레이를 붙인다. env를 손으로 고치지 마라.
 3. **iptables** (`iptables -L` 이 permission-denied이거나 쓸 수 없음):
-   bridge와 같은 허용 우회 — `network_mode: host`. 이 VM에서 iptables를
-   풀려고 하지 마라.
+   bridge와 같은 생성기 옵션 — `--platform host-network`. 이 VM에서
+   iptables를 풀려고 하지 마라.
 
 **env 손수정은 우회가 아니다.** `infra/rust/local.secrets.env` 의
 `DATABASE_URL` / `MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` /
 `MIGRATE_DATABASE_URL` 호스트를 다시 쓰지 마라. 변경은 생성기 옵션으로만
 표현한다 (`scripts/self_host_env.sh` 의 `--published-image`,
-`--platform`, `--public-origin` 등). 이 트리는 host-network용으로
-compose Postgres 호스트를 `postgres` 에서 `127.0.0.1` 로 바꾸는 생성기
-옵션이 없다. host-network가 그 호스트 재기록이 필요해도 **env를 고치지
-마라** — 우회를 §3.3.14 핸드오프 메시지에 남기고 멈춘다: 화면을 사람에게
-넘긴다(ADR-0184 D2). 이 호스트 재기록용 생성기 옵션은 #2340 에서 다룬다.
+`--platform host-network`, `--public-origin` 등). §3.3.0 우회로도
+스택이 안 뜨면 **env를 고치지 마라** — 우회를 §3.3.14 핸드오프 메시지에
+남기고 멈춘다: 화면을 사람에게 넘긴다(ADR-0184 D2).
 
 #### 3.3.1 스냅샷 (git 없음)
 
@@ -543,6 +546,9 @@ scripts/self_host_env.sh --published-image \
   "$(jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json)"
 ```
 
+§3.3.0 (b) 또는 (c)가 실패했으면 `--published-image` 앞에
+`--platform host-network` 를 넣는다. 생성된 env를 손으로 고치지 마라.
+
 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를 쓴다. ADR-0166 claim
 모드는 **상호 배타**다 (`MOMO_BOOTSTRAP_CLAIM=1` + 이메일만).
 `--compose` 는 비밀번호 키를 요구하므로, claim 부팅은 같은 canonical
@@ -579,9 +585,14 @@ env를 cat/grep 해서 stdout에 흘리지 않는다. 이미 claim 수술된 파
 
 ```sh
 oort_compose() {
+  extra=()
+  if grep -q '^MOMO_SELF_HOST_PLATFORM=host-network$' "$ENV_FILE"; then
+    extra+=(-f infra/rust/docker-compose.host-network.yml)
+  fi
   docker compose --env-file "$ENV_FILE" \
     -f infra/rust/docker-compose.rust.yml \
     -f infra/rust/local.override.yml \
+    "${extra[@]}" \
     "$@"
 }
 
@@ -940,6 +951,8 @@ cloudflared tunnel --no-autoupdate --url "http://127.0.0.1:${WEB_PORT}"
 
 §3.3.10 게이트를 통과한 뒤에만 회신한다. 비밀번호를 보내지 않는다.
 claim 토큰은 URL 안에만 있고, 이 한 번뿐이다. TTL 24h, 단회 소비.
+§3.3.0 우회를 썼으면 (`vfs` 그리고/또는 `--platform host-network`) 이
+메시지에 적는다.
 
 아래 괄호를 실값으로 바꾼다. `<token>` 원문을 이 파일에 다시 적지 말고,
 `/workspace/oort-claim.env` 의 `MOMO_CLAIM_PATH` 를 터널 주소 뒤에 붙인다.
@@ -1493,13 +1506,35 @@ scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-
 
 ### 3.6 AWS
 
-T1. compose 절차는 소유한 Lightsail/EC2 VM 위의 §3.2다. 프로비저닝
-레시피(사용자 세션의 `aws` CLI / AWS MCP, 최소 Terraform)는 SH-11c. env:
-이미지 모드와 함께 `--platform aws-lightsail --public-origin
-https://<host>`. ACME는 이 VM의 DNS가 소유한 호스트명에만. 사람 승인
-지점: AWS 가입·결제, IAM 동의, DNS 레코드.
+T1. compose 절차는 소유한 Lightsail/EC2 VM 위의 §3.2다. 프로비저닝은
+[`infra/aws/README.md`](../infra/aws/README.md)(최소 Terraform, 사용자
+세션의 `aws` CLI). Lightsail이 기본이고 EC2는 같은 모듈의
+`compute = "ec2"`. 액세스 키를 붙이지 마라.
+`aws sts get-caller-identity --query Arn --output text`가 사용자 본인
+신원인지 확인하고, 계정 ID는 출력하지 않는다. 루트 사용자는 쓰지 않는다.
 
-**게이트:** 공개 검사 포함 `scripts/oort doctor --json`.
+사람 승인 지점(본인 계정·본인 비용 — 에이전트는 멈추고 화면을 넘긴다):
+
+1. 브라우저에서 AWS SSO / 로그인.
+2. plan 리소스 수(Lightsail 7 / EC2 6)를 보여 준 뒤 `terraform apply`.
+   요금이 여기서 발생한다.
+3. Budgets 알림 이메일.
+4. 운영자 호스트의 DNS A 레코드 → 출력 IP.
+5. `terraform destroy`와 데이터 디스크 삭제(`prevent_destroy`라 두 단계).
+
+SSH 사용자는 `ubuntu`. env(`IMAGE_REF`는 §2.2, 또는 VM의
+`/data/oort-image-ref`):
+
+```sh
+scripts/self_host_env.sh --platform aws-lightsail --published-image "$IMAGE_REF" --public-origin https://<host>
+```
+
+이어서 `scripts/oort up`과 §3.2의 공개 오버레이. ACME는 이 VM의 DNS가
+소유한 호스트명에만. 포트 5432는 열지 않는다. Docker `data-root`는 추가
+디스크의 `/data/docker`이지 루트 디스크가 아니다.
+
+**게이트:** 공개 검사 포함 `scripts/oort doctor --json`. day-2는 VPS와 같이
+SSH.
 
 ### 3.7 GCP
 

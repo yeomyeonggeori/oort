@@ -69,7 +69,8 @@ cd "$ROOT"
 # form `label|env templates|compose files`. A rendering is a command an operator
 # or a verifier actually runs, not a hypothetical layering: the sources are
 # infra/rust/README.md §2, docs/cicd/12-push-relay-deploy-runbook.md,
-# docs/runbooks/pgbackrest-pitr.md and docs/SELF_HOST.md. Retired
+# docs/runbooks/pgbackrest-pitr.md, docs/SELF_HOST.md and
+# docs/SELF_HOST_AGENT.md §3.3.0. Retired
 # f399e417:infra/prod renderings and the NCP overlay row are out of this
 # gate (#2142 / ADR-0183).
 #
@@ -83,6 +84,7 @@ RENDERINGS=(
   "rust + push path (docs/cicd/12-push-relay-deploy-runbook.md)|infra/rust/rust-smoke.env.example infra/rust/push-relay.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.push.yml"
   "rust + public-edge overlays (infra/rust caddy/t3/cent-origin)|infra/rust/rust-smoke.env.example infra/rust/overlays.env.example|infra/rust/docker-compose.rust.yml infra/rust/t3.override.yml infra/rust/caddy.override.yml infra/rust/cent-origin.override.yml"
   "rust + local edge (docs/SELF_HOST.md)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml infra/rust/local.override.yml"
+  "rust + host-network overlay (docs/SELF_HOST_AGENT.md §3.3.0)|infra/rust/rust-smoke.env.example|infra/rust/docker-compose.rust.yml infra/rust/local.override.yml infra/rust/docker-compose.host-network.yml"
   "rust + encrypted POSIX backup pre-proof transition (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup-preproof.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
   "rust + encrypted POSIX backup/PITR signed run (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml"
   "rust + S3-compatible backup/PITR seam (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example infra/rust/pgbackrest-s3.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml infra/rust/pgbackrest.s3.override.yml"
@@ -95,7 +97,7 @@ NON_COMPOSE_ENV_TEMPLATES=()
 # -----------------------------------------------------------------------------
 # Platform templates (non-compose) — ADR-0184 D5 / #2297.
 #
-# A managed platform (Railway today; Fly/AWS rows arrive with SH-11b/c) ships
+# A managed platform (Railway; AWS T1 SH-11c; Fly arrives with SH-11b) ships
 # its deployment as a service catalog + edge file + image recipe, not as a
 # compose rendering. Those files sit outside the RENDERINGS table by nature,
 # and until #2297 the only record of that was a prose note inside
@@ -114,6 +116,7 @@ NON_COMPOSE_ENV_TEMPLATES=()
 # -----------------------------------------------------------------------------
 PLATFORM_TEMPLATES=(
   "infra/railway|scripts/tests/test_railway_template.sh|infra/railway/README.md infra/railway/railway.json infra/railway/Caddyfile.railway infra/railway/Dockerfile.caddy"
+  "infra/aws|scripts/tests/test_aws_recipe.sh|infra/aws/README.md infra/aws/cloud-init.yaml infra/aws/iam-policy.json infra/aws/terraform/main.tf infra/aws/terraform/variables.tf infra/aws/terraform/outputs.tf"
 )
 
 # Compose-shaped files under infra/ that no rendering row names, with the

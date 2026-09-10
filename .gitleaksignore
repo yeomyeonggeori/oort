@@ -257,3 +257,5 @@ b97d2240178b601d1f5e9b1183b36c00a5a14641:clients/web/src/features/welcome/freshS
 #   infra/railway/README.md     같은 주소를 백틱으로 인용한 한 줄
 9819c1ca1a8520998c42b175863ad8db9f216eda:infra/railway/railway.json:generic-api-key:66
 9819c1ca1a8520998c42b175863ad8db9f216eda:infra/railway/README.md:generic-api-key:88
+# scripts/tests/test_image_day2_tools.sh:41 — PGDG 공개키 파일(server-rust/apt/ACCC4CF8.asc)의 sha256 핀 상수. 해시 리터럴이지 자격증명이 아님(PR #2372, SH-11e-2).
+9f8aae5d96df3d27b04c80d3518753e656378058:scripts/tests/test_image_day2_tools.sh:generic-api-key:41

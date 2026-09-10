@@ -178,11 +178,14 @@ oort_local_provider_env_keys() {
 #               T2 = managed containers + PG plugin (canonical key set on
 #               stdout, no file, no stamp)
 #   4 origin    public-origin source: `env:<VAR>` reads a platform-provided
-#               host variable; `flag` means the operator passes --public-origin
+#               host variable; `flag` means the operator passes --public-origin;
+#               `none` means T1 without a required public origin at create
+#               (--public-origin still works later as maintenance)
 #   5 database  `env:<VAR>` reads a platform PG URL; `compose` is the postgres
-#               service of the compose canon
+#               service of the compose canon; `loopback` is that same postgres
+#               addressed at 127.0.0.1:<compose port> (host-network)
 #   6 internal  hostname suffix sibling services resolve inside the platform
-#               network (`-` = compose service names)
+#               network (`-` = compose service names; `127.0.0.1` = loopback)
 #   7 hand_keys keys compose interpolates that the generator does NOT emit
 #               (comma list, `-` none) — the operator sets them by hand
 #   8 hosted    1 = MOMO_HOSTED_DELIVERY_ENABLED=true is appended outside the
@@ -196,6 +199,7 @@ railway|Railway|T2|env:RAILWAY_PUBLIC_DOMAIN|env:DATABASE_URL|.railway.internal|
 fly|Fly.io|T1|flag|compose|-|-|1
 aws-lightsail|AWS Lightsail/EC2|T1|flag|compose|-|-|1
 gcp-vm|GCP Compute Engine VM|T1|flag|compose|-|-|1
+host-network|Host network (bridge/iptables blocked)|T1|none|loopback|127.0.0.1|-|1
 EOF
 }
 
@@ -250,10 +254,17 @@ validate_platform_request() {
       REQUESTED_ACTION="platform-env"
       ;;
     T1)
-      [ "$origin_source" = "flag" ] ||
-        fail "platform_profiles 내부 오류: T1 행의 origin 은 flag 여야 한다: $REQUESTED_PLATFORM"
-      [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] ||
-        fail "--platform $REQUESTED_PLATFORM (T1) 은 공개 오리진을 --public-origin 으로 받는다. 함께 지정하라."
+      case "$origin_source" in
+        flag)
+          [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ] ||
+            fail "--platform $REQUESTED_PLATFORM (T1) 은 공개 오리진을 --public-origin 으로 받는다. 함께 지정하라."
+          ;;
+        none)
+          ;;
+        *)
+          fail "platform_profiles 내부 오류: T1 행의 origin 은 flag 또는 none 이어야 한다: $REQUESTED_PLATFORM"
+          ;;
+      esac
       ;;
     *) fail "platform_profiles 내부 오류: 알 수 없는 tier: $PLATFORM_TIER" ;;
   esac
@@ -290,6 +301,59 @@ ensure_platform_stamp() {
   append_platform_stamp
   printf '[self-host] %s 에 MOMO_SELF_HOST_PLATFORM=%s 를 추가했다 (시크릿은 그대로).\n' \
     "$ENV_FILE" "$REQUESTED_PLATFORM" >&2
+}
+
+# #2340 — host-network (T1, database=loopback). Internal URLs use
+# 127.0.0.1:<compose port> and --compose appends
+# infra/rust/docker-compose.host-network.yml (network_mode: host).
+HOST_NETWORK_OVERLAY="infra/rust/docker-compose.host-network.yml"
+
+platform_uses_loopback() {
+  [ -n "$REQUESTED_PLATFORM" ] || return 1
+  [ "$(platform_profile_field "$REQUESTED_PLATFORM" 5)" = "loopback" ]
+}
+
+env_is_host_network() {
+  [ -f "$ENV_FILE" ] || return 1
+  [ "$(env_key_count MOMO_SELF_HOST_PLATFORM)" -eq 1 ] || return 1
+  [ "$(env_value_once MOMO_SELF_HOST_PLATFORM)" = "host-network" ]
+}
+
+# Render the overlay next to the compose files. The committed template is
+# the source; writing it here means a fixture that only copied the script
+# still gets network_mode: host after make_fixture copies the template.
+write_host_network_overlay() {
+  local dest="$HOST_NETWORK_OVERLAY"
+  local src="$SCRIPT_DIR/../infra/rust/docker-compose.host-network.yml"
+  local tmp count
+  [ -f "$src" ] ||
+    fail "host-network overlay template 이 없다: $src"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/oort-host-network-overlay.XXXXXX")"
+  cat "$src" >"$tmp"
+  count="$(grep -c 'network_mode: host' "$tmp" || true)"
+  [ "$count" -ge 1 ] || {
+    rm -f "$tmp"
+    fail "host-network overlay 에 network_mode: host 가 없다."
+  }
+  mkdir -p "$(dirname -- "$dest")"
+  chmod 644 "$tmp"
+  mv "$tmp" "$dest"
+}
+
+# WORKER_DATABASE_URL is compose-hardcoded (@postgres) for other T1 rows, so
+# it is not in the generator heredoc (doctor required-keys / Railway 41 stay
+# put). Host-network is the one row that must emit it as 127.0.0.1 — outside
+# the heredoc, like the platform stamp.
+append_host_network_internal_urls() {
+  platform_uses_loopback || return 0
+  local worker_url
+  worker_url="postgres://momo_worker:${WORKER_PASSWORD}@${PG_HOST}:${PG_PORT}/momo"
+  validate_env_scalar WORKER_DATABASE_URL "$worker_url"
+  {
+    printf '\n# --- host-network 내부 URL (#2340) -------------------------------------\n'
+    printf '# 4번째 롤 URL. compose overlay 가 CENT_API_URL 을 같은 루프백으로 덮는다.\n'
+    printf 'WORKER_DATABASE_URL=%s\n' "$worker_url"
+  } >>"$ENV_FILE"
 }
 
 # Keys the generator heredoc actually writes. Same awk as
@@ -412,8 +476,9 @@ playbook's docker compose helper in claim mode instead of --compose.
 --platform <name> reads one row of platform_profiles (ADR-0184 D3): the
 public-origin source, the PG source, the internal hostname suffix, the keys
 the operator sets by hand, and whether MOMO_HOSTED_DELIVERY_ENABLED is
-emitted. Known names: railway (T2) · fly · aws-lightsail · gcp-vm (T1). An
-unknown name is refused. --railway is an alias for --platform railway.
+emitted. Known names: railway (T2) · fly · aws-lightsail · gcp-vm ·
+host-network (T1). An unknown name is refused. --railway is an alias for
+--platform railway.
   T2 (railway): prints the canonical key set (oort_canonical_env_keys) as
   KEY=value on stdout from platform-provided RAILWAY_PUBLIC_DOMAIN and
   DATABASE_URL. It does not write a file. Both variables are required
@@ -425,6 +490,10 @@ unknown name is refused. --railway is an alias for --platform railway.
   the heredoc. Combine with an image mode to create, or alone with
   --public-origin to maintain an existing env; a different stamp already in
   the file is refused.
+  T1 (host-network): origin is optional (Grok Bot env is created before a
+  public URL exists). database=loopback writes postgres URLs as
+  127.0.0.1:5432 and renders infra/rust/docker-compose.host-network.yml
+  (network_mode: host). --compose appends that overlay from the stamp.
 --allow-local-provider writes AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1 and
 AGENT_PROVIDER_LOCAL_HOSTS=host.docker.internal (canonical names:
 oort_local_provider_env_keys). Without it those two keys are absent
@@ -609,6 +678,17 @@ compose_ambient_keys() {
         }
       ' "$file"
     done
+    if env_is_host_network && [ -f "$HOST_NETWORK_OVERLAY" ]; then
+      awk '
+        {
+          line = $0
+          while (match(line, /\$\{[A-Za-z_][A-Za-z0-9_]*/)) {
+            print substr(line, RSTART + 2, RLENGTH - 2)
+            line = substr(line, RSTART + RLENGTH)
+          }
+        }
+      ' "$HOST_NETWORK_OVERLAY"
+    fi
     for key in "${COMPOSE_CONTROL_KEYS[@]}"; do
       printf '%s\n' "$key"
     done
@@ -1467,6 +1547,12 @@ run_self_host_compose() {
       ;;
     *) fail "저장된 MOMO_SELF_HOST_MODE가 잘못됐다: $mode" ;;
   esac
+  if env_is_host_network; then
+    write_host_network_overlay
+    [ -f "$HOST_NETWORK_OVERLAY" ] ||
+      fail "host-network overlay가 없다: $HOST_NETWORK_OVERLAY"
+    compose_args+=(-f "$HOST_NETWORK_OVERLAY")
+  fi
   env "${unset_args[@]}" "$DOCKER_BIN" compose "${compose_args[@]}" "$@"
 }
 
@@ -1551,6 +1637,10 @@ print_next_steps() {
 [self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
 [self-host] CORS가 필요 없다.
 EOF
+    if env_is_host_network; then
+      printf '[self-host] host-network: claim 기동은 docs/SELF_HOST_AGENT.md §3.3.3 oort_compose 가 %s 를 붙인다.\n' \
+        "$HOST_NETWORK_OVERLAY"
+    fi
     return
   fi
   cat <<EOF
@@ -1577,6 +1667,10 @@ EOF
 [self-host] tauri origin 2종을 기본으로 넣는다(#1607). 브라우저 경로는 같은 오리진이라
 [self-host] CORS가 필요 없다.
 EOF
+  if env_is_host_network; then
+    printf '[self-host] host-network: --compose 가 %s 를 붙인다 (network_mode: host).\n' \
+      "$HOST_NETWORK_OVERLAY"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -1625,6 +1719,9 @@ if [ -e "$ENV_FILE" ]; then
   ensure_local_drive_public_base
   ensure_public_edge_env
   ensure_platform_stamp
+  if env_is_host_network || platform_uses_loopback; then
+    write_host_network_overlay
+  fi
   ensure_local_provider_optin
   warn_if_legacy_localhost_realtime_ws
   warn_if_legacy_localhost_drive_base
@@ -1729,12 +1826,21 @@ if [ "$PUBLIC_ORIGIN_COUNT" -gt 0 ]; then
   DRIVE_LOCAL_BASE="${PUBLIC_ORIGINS[0]}"
 fi
 
+# Compose service DNS (`postgres`) unless the T1 row says loopback (#2340).
+PG_HOST=postgres
+PG_PORT=5432
+if platform_uses_loopback; then
+  PG_HOST=127.0.0.1
+  PG_PORT=5432
+fi
+
 # Keep every interpolation used by the env-file sink on the same scalar guard.
 for key in MODE IMAGE PG_PASSWORD APP_PASSWORD RELAY_PASSWORD WORKER_PASSWORD \
            JWT_SECRET CENT_TOKEN_SECRET CENT_API_SECRET CENT_PROXY_SECRET_VALUE \
            PROVIDER_LINK_SECRET WEB_PORT API_PORT CENT_PORT OWNER_EMAIL \
            SELF_HOST_DESKTOP_CORS_ORIGINS SELF_HOST_DESKTOP_CENTRIFUGO_ORIGINS \
-           CENTRIFUGO_ORIGINS DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE; do
+           CENTRIFUGO_ORIGINS DRIVE_LOCAL_DIR DRIVE_VOLUME DRIVE_LOCAL_BASE \
+           PG_HOST PG_PORT; do
   validate_env_scalar "$key" "${!key}"
 done
 
@@ -1759,7 +1865,7 @@ LOG_LEVEL=info
 POSTGRES_DB=momo
 POSTGRES_USER=momo
 POSTGRES_PASSWORD=$PG_PASSWORD
-MIGRATE_DATABASE_URL=postgres://momo:$PG_PASSWORD@postgres:5432/momo
+MIGRATE_DATABASE_URL=postgres://momo:$PG_PASSWORD@$PG_HOST:$PG_PORT/momo
 DB_VOLUME_NAME=$PROJECT-pgdata
 
 # --- 런타임 롤 (MOMO-554) ---------------------------------------------------
@@ -1767,8 +1873,8 @@ DB_VOLUME_NAME=$PROJECT-pgdata
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
-MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@postgres:5432/momo
-RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@postgres:5432/momo
+MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@$PG_HOST:$PG_PORT/momo
+RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@$PG_HOST:$PG_PORT/momo
 
 # --- 앱 시크릿 --------------------------------------------------------------
 JWT_HMAC=$JWT_SECRET
@@ -1848,6 +1954,10 @@ chmod 600 "$ENV_FILE"
 append_momo_build_sha
 append_hosted_delivery_enabled
 append_platform_stamp
+append_host_network_internal_urls
+if platform_uses_loopback; then
+  write_host_network_overlay
+fi
 ensure_public_edge_env
 ensure_local_provider_optin
 reject_duplicate_env_keys
