@@ -39,7 +39,7 @@
 | git | `git --version` | 문서 승계 |
 | 둘째 사용자를 넣을 **다른 브라우저 프로필**(또는 시크릿 창) | 같은 origin에 운영자 세션이 남아 있으면 조인 화면이 안 뜬다 | 실기동 필요 |
 | (데스크탑 합류) 패키징된 oort 앱 | 스킴 `oort`·`momo` 등록 (`clients/desktop/src-tauri/tauri.conf.json:30`) | code-derived |
-| (⑤ 응답) OpenAI 호환 **외부 `https://` 엔드포인트와 키** | 셀프호스트 env는 `MOMO_ENV=staging`이라 루프백 provider는 거절된다 | code-derived (`scripts/self_host_env.sh:607`, `server-rust/crates/momo-settings/src/provider.rs:193-198,287`) |
+| (⑤ 응답) OpenAI 호환 **외부 `https://` 엔드포인트와 키**, 또는 `--allow-local-provider` 로컬 mock | 기본: `MOMO_ENV=staging` 은 루프백을 거절. opt-in: `--allow-local-provider` + `http://host.docker.internal:<port>/v1` 을 **설정 › AI 연결** / `PUT /v1/provider/link`. 에이전트 만들기 GUI는 비-루프백 `http` 를 계속 `plaintextRemote` 로 거절 | code-derived (`scripts/self_host_env.sh` `--allow-local-provider`, `createModel.agentBaseUrlIssue`, `provider.rs:193-198,287`) |
 
 Rust·Node·`psql`은 설치하지 않는다. 서버·웹이 한 이미지 안에 있다
 (문서 승계: [`SELF_HOST.md`](SELF_HOST.md) 「전제」).
@@ -56,29 +56,69 @@ Rust·Node·`psql`은 설치하지 않는다. 서버·웹이 한 이미지 안�
 
 검증: **문서 승계**(명령) · **code-derived**(키 둘·CORS 기본값).
 
+이 문서의 첫 경로는 claim이다. S1/S2는 `/claim/<token>` 뒤에만 열린다 —
+[`SELF_HOST.md`](SELF_HOST.md) 의 env-비밀번호 ConnectPage는 그 둘을
+**열지 않는다**(§2). 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를
+쓴다. `up` **전에** claim으로 바꾼다. claim과 비밀번호 키는 상호
+배타다(ADR-0166).
+
+### claim 모드 설치
+
 ```sh
 git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
 scripts/self_host_env.sh --local-build
-scripts/self_host_env.sh --compose up -d --build --wait
+```
+
+이 머신의 로컬 mock 게이트웨이를 쓰려면 `--allow-local-provider` 를
+덧붙인다(또는 기존 env에 같은 모드로 그 플래그를 다시 실행). 절차: §6 ·
+§7 과 [`SELF_HOST.md`](SELF_HOST.md) §5.
+
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 과 같은 awk — 비밀번호
+키를 지우고 `MOMO_BOOTSTRAP_CLAIM=1` 을 쓴다. env를 stdout에
+cat/grep 하지 않는다.
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+umask 077
+tmp="${ENV_FILE}.claim"
+awk '
+  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
+  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
+  { print }
+  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
+' "$ENV_FILE" >"$tmp"
+mv "$tmp" "$ENV_FILE"
+chmod 600 "$ENV_FILE"
+```
+
+`--compose` 는 이 env를 거절한다: launcher가 비밀번호 키를 계속
+요구한다(ADR-0166). 여기에 `scripts/self_host_env.sh --compose up …` 를
+붙이지 않는다. 로컬 빌드 기동은 `--compose` 가 썼을 같은 파일 집합을
+직접 호출한다(AGENT §3.3.3 + `docker-compose.rust.build.yml`):
+
+```sh
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
+  -f infra/rust/docker-compose.rust.yml \
+  -f infra/rust/docker-compose.rust.build.yml \
+  -f infra/rust/local.override.yml \
+  up -d --build --wait
 ```
 
 같은 머신에 이미 다른 클론의 셀프호스트 스택이 떠 있으면 이 `up` 은 거절된다.
 두 체크아웃 규칙: [`SELF_HOST.md`](SELF_HOST.md) 「두 체크아웃을 같이 쓸 때」.
 
-공개 digest가 있으면 `--published-image` 경로를 쓸 수 있다. 심화:
-[`SELF_HOST.md`](SELF_HOST.md) §2.
+공개 digest가 있으면 `--published-image` 경로를 쓴 뒤 같은 awk, 그다음
+AGENT §3.3.3 `oort_compose up -d --pull missing --wait`(빌드 오버레이
+없음). 심화: [`SELF_HOST.md`](SELF_HOST.md) §2 ·
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3.
 
-`--wait`가 끝나면 준비가 끝난 것이다. 스크립트가 찍는 로그인 안내는 대략
-이것이다 (`scripts/self_host_env.sh:458-476`):
-
-```
-http://localhost:<MOMO_WEB_PORT>     # 기본 8088
-email    owner@oort.local           # 또는 MOMO_INITIAL_OWNER_EMAIL
-password infra/rust/local.secrets.env 의 MOMO_INITIAL_OWNER_PASSWORD
-```
-
-비밀번호는 stdout에 없다. 파일 권한 600, 커밋 대상 아님.
+`--wait`가 끝나면 준비가 끝난 것이다. 첫 `up` 에서 migrate가 한 번
+찍는 `MOMO_CLAIM_PATH=/claim/<token>` 을 연다(재시작은
+`MOMO_BOOTSTRAP_CLAIM=skipped`). 토큰을 대화에 붙여 넣지 않는다
+(ADR-0004). 생성기의 비밀번호 로그인 안내는 여기 해당 없다 — 이 파일에
+비밀번호 키가 없다. 파일 권한 600, 커밋 대상 아님.
 
 ### 키 둘
 
@@ -93,7 +133,8 @@ password infra/rust/local.secrets.env 의 MOMO_INITIAL_OWNER_PASSWORD
 기존 env에는 그 줄이 없을 수 있다. 같은 모드로 `scripts/self_host_env.sh`를
 다시 실행하면 **그 줄만 덧붙인다** — 시크릿은 다시 만들지 않는다
 (`ensure_operator_allowlist`, `scripts/self_host_env.sh:300-318`). 덧붙인 뒤
-api를 재시작한다: `scripts/self_host_env.sh --compose up -d`.
+api는 설치와 같은 `docker compose --env-file` 파일 집합으로 `up -d`.
+`--compose` 는 claim env를 계속 거절한다(ADR-0166).
 
 확인:
 
@@ -327,10 +368,11 @@ ADR-0185는 그 게이트를 풀지 않는다. 새 테넌트는 온보딩 3스�
 
 ### 첫 실행의 S2
 
-S2가 첫 하루의 초대다: 봉인된 링크 하나(멤버 · 1회 · 24h) 또는
-**나중에**. 복사와 일회 카드는 설정과 같은 컴포넌트이고, S2 카드는
-`copyMode="single"`(**초대 카드 복사**만). 카드 바이트는 아래. skip 또는
-**계속** 뒤 §2의 first-run이 시작된다.
+S2가 첫 하루의 초대다: 봉인된 링크 하나(멤버 · 1회 · 24h) 또는 skip
+**나중에**(POST 0). 발급 뒤 skip **나중에**는 사라지고 프라이머리는
+**계속**이다(`S2_CONTINUE_LABEL`). 복사와 일회 카드는 설정과 같은
+컴포넌트이고, S2 카드는 `copyMode="single"`(**초대 카드 복사**만). 카드
+바이트는 아래. skip 또는 **계속** 뒤 §2의 first-run이 시작된다.
 
 ### 설정 › 멤버와 초대
 
@@ -504,10 +546,17 @@ macOS LaunchServices는 dev/release 스킴 핸들러를 하나만 고른다. 링
 | **모드** | 기본 **외부 provider** 「저장한 주소와 키로 실제 provider에 연결합니다.」 | `:662-668` · `model.ts:25-30` |
 
 주소는 `http://` 또는 `https://`로 시작해야 한다. 아니면 「주소는 http://
-또는 https:// 로 시작해야 합니다.」 (`oauthGrant.ts:234-237`). 서버는
-`MOMO_ENV=staging`에서 루프백을 거절하고, 루프백이 아닌 주소는 **https만**
-받는다 (`provider.rs:193-198,287,319-327`). 노트북의
-`http://127.0.0.1:…` 로컬 모델은 오늘 이 경로로 붙지 않는다.
+또는 https:// 로 시작해야 합니다.」 (`oauthGrant.ts:234-237`).
+`--allow-local-provider` 없으면 서버는 `MOMO_ENV=staging`에서 루프백을
+거절하고, 루프백이 아닌 주소는 **https만** 받는다
+(`provider.rs:193-198,287,319-327`). 노트북의 `http://127.0.0.1:…` 로컬
+모델은 오늘 이 경로로 붙지 않는다.
+
+실제로 답하는 로컬 mock 절차(E2E-B): `--allow-local-provider` 로 생성하고
+mock을 `0.0.0.0` 에 바인드한 뒤, 여기에 또는 REST
+`PUT /v1/provider/link` 에 `http://host.docker.internal:<port>/v1` 을
+넣는다. 그 호스트는 **이** 폼에서는 허용된다. 에이전트 만들기 GUI(§7)에서는
+**허용되지 않는다**.
 
 6. **연결 저장** (이미 연결이 있으면 **연결 교체 저장**, 진행 중 **저장 중**)
    (`AiLinkSection.tsx:777-781`).
@@ -560,8 +609,22 @@ REST로 같은 PUT을 하는 절차는 심화: [`SELF_HOST.md`](SELF_HOST.md) §
 
 폼 아래 고정 문장: 「API 키는 여기에 넣지 않습니다. 프로바이더 자격증명은
 설정의 AI 연결에서 한 번만 등록하고, 에이전트는 그 연결을 통해 실행됩니다.」
-(`:392-397`). **게이트웨이 주소**에는 6단계와 같은 OpenAI 호환 `https://…/v1`를
-넣는다.
+(`:392-397`).
+
+**게이트웨이 주소** (`createModel.agentBaseUrlIssue`): `https://…` 는
+허용, 루프백 `http://localhost` / `http://127.0.0.1` / `http://[::1]` 는
+허용, 그 밖의 `http://` 는 `plaintextRemote`(카피: 「외부 주소는
+https:// 여야 합니다. http는 같은 기기(localhost)에서만 쓸 수
+있습니다.」). `http://host.docker.internal:<port>/v1` 이 마지막 경우다 —
+이 다이얼로그는 받지 않는다. 그 주소는 `--allow-local-provider` 뒤
+**설정 › AI 연결** / REST `PUT /v1/provider/link`(§6,
+[`SELF_HOST.md`](SELF_HOST.md) §5)에 넣는다.
+
+외부 https: **게이트웨이 주소**에 6단계와 같은 OpenAI 호환
+`https://…/v1` 를 넣는다. 로컬 mock(E2E-B): provider는
+`PUT /v1/provider/link` 에 `http://host.docker.internal:<port>/v1`,
+에이전트는 REST `POST /v1/workspaces/{ws}/agents` 에 그 `baseUrl`.
+컨테이너 안의 워커는 호스트를 `127.0.0.1` 로 닿지 못한다.
 
 5. **에이전트 만들기** (진행 중 **에이전트 만드는 중**) (`:434`).
 
@@ -614,8 +677,9 @@ REST로 같은 PUT을 하는 절차는 심화: [`SELF_HOST.md`](SELF_HOST.md) §
 | `NOTICE` | 워커가 실패를 채널에 고지했다. 키 없는 기본 측정값 |
 | `BLOCKED` | 에이전트 메시지가 나타나지 않았다 |
 
-채널에 실패 고지가 뜨면 `scripts/self_host_env.sh --compose logs agent-worker`
-(문서 승계: [`SELF_HOST.md`](SELF_HOST.md) 「막히면」).
+채널에 실패 고지가 뜨면 §1 과 같은 `docker compose --env-file` 파일
+집합으로 `logs agent-worker`(claim env: `--compose` 거절, ADR-0166; 문서
+승계: [`SELF_HOST.md`](SELF_HOST.md) 「막히면」).
 
 ---
 
@@ -629,7 +693,7 @@ REST로 같은 PUT을 하는 절차는 심화: [`SELF_HOST.md`](SELF_HOST.md) §
 | 웹에서 딥링크 `oort://join`을 주소창에 넣는다 | 커스텀 스킴은 브라우저 경로가 아니다. 5A를 탄다 | code-derived |
 | 데스크탑 로그인 뒤 실시간만 안 된다 | REST CORS와 Centrifugo origin은 별개. `CENTRIFUGO_ALLOWED_ORIGINS`에 tauri 2종이 있는지 본다 | code-derived (#1607) |
 | 에이전트를 만들었는데 멘션에 반응이 없다 | 채널에 안 넣었거나(7단계 배치), 키를 안 넣었거나(6단계), 엔드포인트가 거절한다 | code-derived |
-| 루프백 provider 주소가 거절된다 | `MOMO_ENV=staging` + 루프백 금지. 외부 https만 | code-derived |
+| 루프백 provider 주소가 거절된다 | 기본 `MOMO_ENV=staging` + 루프백 금지. 로컬 mock: `--allow-local-provider` + `host.docker.internal` 을 **설정 › AI 연결** / `PUT /v1/provider/link`. 에이전트 만들기 GUI는 `plaintextRemote` | code-derived |
 
 스택 정지·삭제·포트 충돌은 [`SELF_HOST.md`](SELF_HOST.md) 「멈추기 · 지우기」
 「막히면」.
