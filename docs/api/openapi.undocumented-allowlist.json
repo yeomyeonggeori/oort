@@ -47,10 +47,6 @@
     },
     {
       "method": "get",
-      "path": "/v1/workspaces/{}"
-    },
-    {
-      "method": "get",
       "path": "/v1/workspaces/{}/agent-runs/{}"
     },
     {
@@ -72,10 +68,6 @@
     {
       "method": "get",
       "path": "/v1/workspaces/{}/usage/summary"
-    },
-    {
-      "method": "patch",
-      "path": "/v1/workspaces/{}"
     },
     {
       "method": "post",

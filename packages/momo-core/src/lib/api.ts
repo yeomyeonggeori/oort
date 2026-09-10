@@ -2395,9 +2395,10 @@ export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
 }
 
 // ---- 자기 표시 이름 (#1873 / BZ-4e) ----------------------------------------
-// PATCH /v1/workspaces/{ws}/members/me `{displayName}`
-// 사람 본인만. 정규화는 join과 같고, 위반은 400 `displayName is required`.
-// 응답 `{ member }` (login Member 형상). 핸들·역할·아바타는 이 표면의 것이 아니다.
+// PATCH /v1/workspaces/{ws}/members/me `{displayName}` and/or `{handle}`
+// 사람 본인만. 표시명 정규화는 join과 같고, 위반은 400 `displayName is required`.
+// 핸들은 `normalized_requested_handle`; 형식 400, 점유 409 `handle is already in use`.
+// 응답 `{ member }` (login Member 형상). 역할·아바타는 이 표면의 것이 아니다.
 
 /** Change the signed-in human member's display name. */
 export async function changeMyDisplayName(
@@ -2408,6 +2409,20 @@ export async function changeMyDisplayName(
     await request<unknown>(
       `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
       { method: "PATCH", body: JSON.stringify({ displayName }) }
+    )
+  );
+  return memberFromWire(source.member);
+}
+
+/** Change the signed-in human member's handle. Past `@oldhandle` bodies stay. */
+export async function changeMyHandle(
+  workspaceId: string,
+  handle: string
+): Promise<Member> {
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+      { method: "PATCH", body: JSON.stringify({ handle }) }
     )
   );
   return memberFromWire(source.member);

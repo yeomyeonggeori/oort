@@ -15,9 +15,10 @@
 //! is the batch that owns it, and it arrives with the instance-operator gate
 //! (MOMO-583) the surface has always required.
 //!
-//! Still absent: `PATCH /v1/workspaces/{ws}` (the rename write). The web client
-//! does not call it — it is not among the 68 measured pairs — so it stays
-//! recorded as open rather than shipping on the strength of the DTO alone.
+//! Still absent: nothing on this file's write surface. `PATCH /v1/workspaces/{ws}`
+//! (ADR-0185 E1 / #2331) is the rename write the settings panel's `updatedAtMs`
+//! token was always for. Slug is immutable. The web onboarding stage that calls
+//! it is SH-12b-w, out of this ticket.
 //!
 //! **403 vs 404 is a contract, not a detail.** A live workspace the caller is
 //! not in answers 403; a workspace that does not exist answers 404. Collapsing
@@ -37,13 +38,14 @@ use momo_messaging::{
 };
 use momo_settings::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
-    normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
-    workspace_has_another_active_owner, WorkspaceProvisionRejected,
+    normalized_workspace_slug, rename_workspace_in_tx, revoke_member_tokens_in_tx,
+    terminate_workspace_membership_in_tx, workspace_has_another_active_owner,
+    WorkspaceProvisionRejected, WorkspaceRenameRejected,
 };
 
 use crate::dto::{
-    CreateWorkspaceRequest, CreateWorkspaceResponse, MembershipLifecycleResponse, WorkspaceDto,
-    WorkspaceResponse,
+    CreateWorkspaceRequest, CreateWorkspaceResponse, MembershipLifecycleResponse,
+    RenameWorkspaceRequest, WorkspaceDto, WorkspaceResponse,
 };
 use crate::error::ApiError;
 use crate::routes::shared::{
@@ -51,6 +53,9 @@ use crate::routes::shared::{
     workspace_scope, DbRejectable,
 };
 use crate::AppState;
+
+/// Human-only, stated once. An agent's name for a workspace is not this path.
+const HUMANS_RENAME_WORKSPACES: &str = "only a human member can rename a workspace";
 
 fn workspace_dto(workspace: &WorkspaceIdentity) -> WorkspaceDto {
     WorkspaceDto {
@@ -100,6 +105,90 @@ pub async fn get(
         .await;
 
     let workspace = settle_db("workspaces.get", outcome)?;
+    Ok(Json(WorkspaceResponse {
+        workspace: workspace_dto(&workspace),
+    }))
+}
+
+/// `PATCH /v1/workspaces/{ws}` — rename the workspace (ADR-0185 E1 / #2331).
+///
+/// Human owner/admin only. Body `{name, updatedAtMs}`. Name reuses
+/// [`normalized_workspace_name`] (1..=80, control characters refused). The
+/// concurrency token is the `updatedAtMs` GET already returns; a mismatch is
+/// 409. Slug is not in the SET list. Success writes `workspace.renamed` and
+/// answers with the same envelope GET does.
+pub async fn rename(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(workspace): Path<String>,
+    Json(request): Json<RenameWorkspaceRequest>,
+) -> Result<Json<WorkspaceResponse>, ApiError> {
+    require_human(&principal, HUMANS_RENAME_WORKSPACES)?;
+    let workspace_id = workspace_scope(&workspace, &principal)?;
+    let name = normalized_workspace_name(&request.name)
+        .map_err(|error| ApiError::bad_request(error.to_string()))?;
+    let expected_updated_at_ms = request.updated_at_ms;
+    let member_id = principal.member_id;
+    let via_token_id = audit_via_token_id(&principal);
+
+    let outcome: DbRejectable<WorkspaceIdentity> =
+        agent_tenant_tx(&state.pool, workspace_id, move |conn| {
+            Box::pin(async move {
+                let previous = match rename_workspace_in_tx(
+                    conn,
+                    workspace_id,
+                    member_id,
+                    &name,
+                    expected_updated_at_ms,
+                )
+                .await?
+                {
+                    Ok(applied) => applied,
+                    Err(WorkspaceRenameRejected::NotFound) => {
+                        return Ok(Err(ApiError::not_found("workspace not found")))
+                    }
+                    Err(WorkspaceRenameRejected::NotMember) => {
+                        return Ok(Err(ApiError::forbidden("not a workspace member")))
+                    }
+                    Err(WorkspaceRenameRejected::NotOperator) => {
+                        return Ok(Err(ApiError::forbidden(
+                            WorkspaceRenameRejected::NotOperator.to_string(),
+                        )))
+                    }
+                    Err(WorkspaceRenameRejected::Stale) => {
+                        return Ok(Err(ApiError::new(
+                            StatusCode::CONFLICT,
+                            WorkspaceRenameRejected::Stale.to_string(),
+                        )))
+                    }
+                };
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "workspace.renamed")
+                        .by(member_id)
+                        .target("workspace", workspace_id)
+                        .via_token(via_token_id)
+                        .with_schema(
+                            "momo.workspace.renamed.v1",
+                            serde_json::json!({
+                                "old": previous.previous_name,
+                                "new": name,
+                            }),
+                        ),
+                )
+                .await?;
+                match read_workspace_for_active_member(conn, workspace_id, member_id).await? {
+                    WorkspaceRead::Found(workspace) => Ok(Ok(workspace)),
+                    WorkspaceRead::NotMember => {
+                        Ok(Err(ApiError::forbidden("not a workspace member")))
+                    }
+                    WorkspaceRead::NotFound => Ok(Err(ApiError::not_found("workspace not found"))),
+                }
+            })
+        })
+        .await;
+
+    let workspace = settle_db("workspaces.rename", outcome)?;
     Ok(Json(WorkspaceResponse {
         workspace: workspace_dto(&workspace),
     }))
@@ -281,7 +370,28 @@ pub async fn leave(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
+    use momo_auth::PrincipalKind;
     use uuid::Uuid;
+
+    fn principal(kind: PrincipalKind) -> Principal {
+        Principal {
+            member_id: Uuid::from_u128(1),
+            workspace_id: Uuid::from_u128(2),
+            token_id: Some(Uuid::from_u128(3)),
+            scopes: vec![],
+            kind,
+        }
+    }
+
+    #[test]
+    fn an_agent_principal_is_refused_before_any_write() {
+        let error = require_human(&principal(PrincipalKind::Agent), HUMANS_RENAME_WORKSPACES)
+            .expect_err("403");
+        assert_eq!(error.status, StatusCode::FORBIDDEN);
+        assert_eq!(error.message, HUMANS_RENAME_WORKSPACES);
+        assert!(require_human(&principal(PrincipalKind::Human), HUMANS_RENAME_WORKSPACES).is_ok());
+    }
 
     /// `fetchWorkspace` throws when `res.workspace` is missing, so the envelope
     /// is load-bearing — and `updatedAtMs` must survive as a number, since the
