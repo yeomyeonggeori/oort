@@ -6,6 +6,11 @@
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
+## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
+
+- Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
+- 검증: RTL+가짜 타이머(0명 ≤2s FirstAgentStage·백스톱 0 · 1명 hold 회귀+오프너) · 사보타주 2건 RED 후 복구.
+- runtime-unverified: 실셀프호스트 claim→0명 워크스페이스 왕복은 mock 범위.
 ## SH-12d-e 첫 에이전트 활성 전이 오너 킥오프 (#2334, 2026-09-10)
 
 - Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 배달 가능한 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.
