@@ -735,8 +735,13 @@ heredoc + `oort_public_edge_env_keys`, 41키)은 늘지 않는다: T1 행은 her
 `--allow-local-provider`를 거절한다. T1 행은 이미지 모드와 함께 생성하거나
 `--public-origin`만으로 기존 env를 유지보수한다; 파일에 이미 다른 스탬프가
 있으면 거절한다(바꾸려면 볼륨과 env를 지운다). 로컬·VPS·Grok Bot VM은 행이
-없다 — compose 정본 그 자체다. Cloudflare도 행이 없다: 이들 앞단의 T3
-엣지다(레시피 SH-11d).
+없다 — compose 정본 그 자체다. Cloudflare도 `--platform` 행이 없다: T3
+엣지이며 컴퓨트가 아니다(ADR-0184 D1). api·Postgres·Centrifugo를
+Workers/Pages/Containers에 올리지 않는다. doctor PASS인 T1/T2 설치 앞에
+DNS 또는 named tunnel을 붙인다 — 레시피
+[`infra/cloudflare/README.md`](../infra/cloudflare/README.md) (SH-11d,
+에이전트 경로 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.8). 사용자가
+「Cloudflare로」라고 하면 먼저 컴퓨트 tier를 고른다.
 
 ### AWS Lightsail / EC2
 
