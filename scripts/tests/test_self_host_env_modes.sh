@@ -1142,11 +1142,11 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 42개를 stdout에 썼다' "$alias_fixture/platform.err"
+grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform.err"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is the canonical 41 plus the stamp outside the heredoc. No
+# T2 stdout is the canonical 43 plus the stamp outside the heredoc. No
 # hosted-delivery key, no file. --railway is byte-identical by construction.
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
@@ -1255,7 +1255,7 @@ if awk '
   grab && index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { found = 1 }
   END { exit !found }
 ' "$ROOT/scripts/self_host_env.sh"; then
-  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 41-key set would grow" >&2
+  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 43-key set would grow" >&2
   exit 1
 fi
 
@@ -1376,10 +1376,10 @@ hn_overlay="$hn_fixture/infra/rust/docker-compose.host-network.yml"
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=host-network' "$hn_env"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$hn_env")" = "1"
 grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$hn_env"
-# Four internal URL keys (3 heredoc postgres URLs + WORKER outside heredoc).
-hn_url_count="$(grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" | grep -c '127\.0\.0\.1' || true)"
-test "$hn_url_count" -eq 4
-grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" \
+# Five internal URL keys (4 heredoc postgres URLs + WORKER outside heredoc).
+hn_url_count="$(grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|NOTIFIER_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" | grep -c '127\.0\.0\.1' || true)"
+test "$hn_url_count" -eq 5
+grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|NOTIFIER_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" \
   | grep -q '@postgres' && {
   echo "host-network env still has @postgres in an internal URL" >&2
   exit 1
@@ -1387,6 +1387,7 @@ grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|WORKER_
 grep -E '^MIGRATE_DATABASE_URL=postgres://momo:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
 grep -E '^MOMO_APP_DATABASE_URL=postgres://momo_app:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
 grep -E '^RELAY_DATABASE_URL=postgres://momo_relay:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
+grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
 grep -E '^WORKER_DATABASE_URL=postgres://momo_worker:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
 # Overlay render: YAML key `network_mode: host` exactly once per service
 # (12: postgres centrifugo livekit runtime-roles migrate api relay

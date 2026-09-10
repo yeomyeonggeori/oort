@@ -54,15 +54,16 @@ scripts/self_host_env.sh --platform railway > railway.env
 Missing `RAILWAY_PUBLIC_DOMAIN` or `DATABASE_URL` is a hard fail (the
 compose `:?` equivalent). `MOMO_CENTRIFUGO_WS_URL=same-origin`.
 
-Generator stdout (42 keys): canonical 41 + stamp.
+Generator stdout (44 keys): canonical 43 + stamp.
 
 | Key | Source |
 |---|---|
-| heredoc + `OORT_SITE_ADDRESS` + `OORT_CSP_CONNECT_SRC` | generator (41) |
+| heredoc + `OORT_SITE_ADDRESS` + `OORT_CSP_CONNECT_SRC` | generator (43) |
 | `MOMO_SELF_HOST_PLATFORM=railway` | stamp outside the heredoc (#2328). `railway.json` `notes.platformStamp`. |
+| `NOTIFIER_POSTGRES_PASSWORD` / `NOTIFIER_DATABASE_URL` | generator (#2193). Role `momo_notifier`, BYPASSRLS, table-scoped GRANTs. |
 
 Keys compose interpolates that are **not** in the generator file (so
-`--platform railway` does not print them — key-set equality of the 41):
+`--platform railway` does not print them — key-set equality of the 43):
 
 - `CENT_API_URL=http://centrifugo.railway.internal:8000/api` (relay + api)
 - `WORKER_DATABASE_URL=postgres://momo_worker:<WORKER_POSTGRES_PASSWORD>@<PGHOST>:<PGPORT>/<PGDATABASE>` (agent-worker)
@@ -80,7 +81,7 @@ process is either runtime-roles **or** migrations, not both.
 
 ```
 MOMO_RUNTIME_ROLE_PROVISION=1 → bootstrap_runtime_roles.sql, exit
-MOMO_BOOTSTRAP_RUNTIME_ROLES=0 → verify the three roles, apply 001..NNN
+MOMO_BOOTSTRAP_RUNTIME_ROLES=0 → verify the four roles, apply 001..NNN
 ```
 
 `api.preDeployCommand` is those two invocations in order, calling

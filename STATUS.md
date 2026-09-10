@@ -6,6 +6,10 @@
 - R2: oort `bash -n`은 파일별 반복(첫 파일만 검사하던 `bash -n a b c d` 구멍). `shell syntax` 루프는 `bash -n` 실패 시 `exit 1`. hardening 잠금은 주석이 아닌 `add_cmd_once` 행.
 - 문서 결함: 등재 직후 `SELF_HOST.md`(+ko) 공개 오리진 compose가 생성 파일 `infra/rust/local.secrets.env`를 `--env-file` 리터럴로 가리켜 docs-cmd RED. claim-mode와 같이 `ENV_FILE=` + `"$ENV_FILE"`로 정합.
 - runtime-unverified: 없음(정적 게이트).
+## momo_notifier 런타임 롤 (#2193, 2026-09-10)
+
+- Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.
+- runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
 
 ## pgBackRest PITR 계약 시험 attach cleanup (#2157, 2026-09-10)
 

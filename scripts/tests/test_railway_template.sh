@@ -69,7 +69,7 @@ output_keys() {
   awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$1" | LC_ALL=C sort -u
 }
 
-# T2 stdout = canonical 41 + stamp outside the heredoc (#2328).
+# T2 stdout = canonical 43 + stamp outside the heredoc (#2193).
 expected_keys() {
   {
     canonical_keys
@@ -166,7 +166,7 @@ if ! diff -u "$canon" "$got" >"$TMP_ROOT/keys.diff"; then
   fail "key-set diff not empty"
 fi
 key_count="$(wc -l <"$canon" | tr -d ' ')"
-[ "$key_count" = "42" ] || fail "key-set count expected 42 got $key_count"
+[ "$key_count" = "44" ] || fail "key-set count expected 44 got $key_count"
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
   fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
 pass "key-set equality (diff empty) count=$key_count"

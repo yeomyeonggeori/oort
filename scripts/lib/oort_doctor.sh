@@ -150,6 +150,7 @@ oort_doctor_skip_stack() {
   oort_doctor_record stack.agent_port major skip "$why" "$fix"
   oort_doctor_record stack.outbox major skip "$why" "$fix"
   oort_doctor_record stack.migrate_idempotency major skip "$why" "$fix"
+  oort_doctor_record roles.momo_notifier blocker skip "$why" "$fix"
 }
 
 oort_doctor_skip_public() {
@@ -506,6 +507,9 @@ oort_doctor_check_role_passwords() {
   oort_doctor_pair_password RELAY_POSTGRES_PASSWORD RELAY_DATABASE_URL momo_relay
   [ -z "$OORT_DOCTOR_PAIR_PROBLEM" ] || problems="${problems} ${OORT_DOCTOR_PAIR_PROBLEM}"
 
+  oort_doctor_pair_password NOTIFIER_POSTGRES_PASSWORD NOTIFIER_DATABASE_URL momo_notifier
+  [ -z "$OORT_DOCTOR_PAIR_PROBLEM" ] || problems="${problems} ${OORT_DOCTOR_PAIR_PROBLEM}"
+
   if ! oort_doctor_has WORKER_POSTGRES_PASSWORD; then
     problems="${problems} WORKER_POSTGRES_PASSWORD missing"
   else
@@ -529,6 +533,90 @@ oort_doctor_check_role_passwords() {
       "role 비밀번호와 DATABASE_URL 불일치:${problems}" \
       "시크릿을 다시 만들지 마라. URL 안의 비밀번호를 해당 *_POSTGRES_PASSWORD 와 같게 맞추거나 env를 생성기로 다시 만들라 (볼륨 down -v 필요)."
   fi
+}
+
+# Tables named by `GRANT … ON TABLE <name> TO momo_notifier` in the bootstrap
+# SQL. One list — doctor extra/DELETE checks and test_notifier_role_grants.sh.
+oort_notifier_grant_tables() {
+  local sql="${1:-$OORT_ROOT/infra/rust/sql/bootstrap_runtime_roles.sql}"
+  awk '
+    /GRANT / && / ON TABLE / && / TO momo_notifier/ {
+      line = $0
+      sub(/.*ON TABLE /, "", line)
+      sub(/ TO momo_notifier.*/, "", line)
+      gsub(/[[:space:]]/, "", line)
+      if (line ~ /^[a-z][a-z0-9_]*$/) print line
+    }
+  ' "$sql" | LC_ALL=C sort -u
+}
+
+oort_doctor_notifier_role_sql() {
+  local tables sql_list t
+  tables="$(oort_notifier_grant_tables)"
+  sql_list=""
+  while IFS= read -r t; do
+    [ -n "$t" ] || continue
+    if [ -n "$sql_list" ]; then
+      sql_list="${sql_list},"
+    fi
+    sql_list="${sql_list}'${t}'"
+  done <<EOF
+$tables
+EOF
+  [ -n "$sql_list" ] || sql_list="'outbox'"
+  printf '%s' "SELECT CASE \
+WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier') THEN 'missing' \
+WHEN NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'momo_notifier' \
+  AND rolcanlogin AND NOT rolsuper AND rolbypassrls \
+  AND NOT rolcreatedb AND NOT rolcreaterole AND NOT rolreplication) THEN 'unsafe' \
+WHEN EXISTS ( \
+  SELECT 1 FROM unnest(ARRAY[${sql_list}]::text[]) AS t(rel) \
+  WHERE to_regclass('public.' || rel) IS NOT NULL \
+    AND has_table_privilege('momo_notifier', 'public.' || rel, 'DELETE') \
+) THEN 'delete' \
+WHEN EXISTS ( \
+  SELECT 1 FROM information_schema.role_table_grants g \
+  WHERE g.grantee = 'momo_notifier' AND g.table_schema = 'public' \
+    AND g.privilege_type IN ('SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER') \
+    AND g.table_name <> ALL (ARRAY[${sql_list}]::text[]) \
+) THEN 'extra' \
+ELSE 'ok' END;"
+}
+
+oort_doctor_record_notifier_role() {
+  local result="$1" rc="$2"
+  if [ "$rc" -ne 0 ] || [ -z "$result" ]; then
+    oort_doctor_record roles.momo_notifier blocker fail \
+      "momo_notifier 롤을 확인하지 못했다" \
+      "runtime-roles (MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate) 를 돌려라."
+    return
+  fi
+  case "$result" in
+    ok)
+      oort_doctor_record roles.momo_notifier blocker pass \
+        "momo_notifier LOGIN NOSUPERUSER BYPASSRLS" ""
+      ;;
+    missing)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 롤 없음" \
+        "infra/rust/sql/bootstrap_runtime_roles.sql 을 momo-migrate runtime-roles 로 적용하라."
+      ;;
+    delete)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 에 DELETE 가 있다" \
+        "bootstrap_runtime_roles.sql 은 SELECT/INSERT/UPDATE 만 허용한다. DELETE 를 REVOKE 하라."
+      ;;
+    extra)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 허용목록 밖 테이블 GRANT" \
+        "bootstrap_runtime_roles.sql 의 GRANT ON TABLE 목록만 남겨라."
+      ;;
+    *)
+      oort_doctor_record roles.momo_notifier blocker fail \
+        "momo_notifier 롤 자세가 안전하지 않다" \
+        "LOGIN NOSUPERUSER BYPASSRLS 이어야 한다. runtime-roles 를 다시 돌려라."
+      ;;
+  esac
 }
 
 oort_doctor_check_digest() {
@@ -638,7 +726,9 @@ EOF
 # Push drain exists only with the ADR-0120 overlay (infra/rust/docker-compose.push.yml
 # + keys in push-relay.env.example). Self-host compose does not attach that file.
 # "Configured" = overlay env key present, drain enabled, or compose ps lists
-# push-relay / notifier. The messaging service named `relay` is not a push relay.
+# push-relay / notifier. NOTIFIER_DATABASE_URL is a canonical runtime-role URL
+# (#2193), not an overlay signal. The messaging service named `relay` is not a
+# push relay.
 oort_doctor_push_relay_configured() {
   local ps_out="${1:-}" key value trimmed
   if printf '%s\n' "$ps_out" | awk '
@@ -649,7 +739,7 @@ oort_doctor_push_relay_configured() {
   fi
   for key in \
     PUSH_RELAY_URL MOMO_PUSH_RELAY_IMAGE MOMO_APNS_KEY_HOST_PATH \
-    MOMO_RELAY_SIGNING_KEY_HOST_PATH NOTIFIER_DATABASE_URL MOMO_RELAY_SERVERS
+    MOMO_RELAY_SIGNING_KEY_HOST_PATH MOMO_RELAY_SERVERS
   do
     oort_doctor_has "$key" || continue
     value="$(oort_doctor_trim "$(oort_doctor_get "$key")")"
@@ -986,6 +1076,9 @@ except Exception:
     oort_doctor_record stack.migrate_idempotency major fail \
       "MIGRATE_DATABASE_URL 없음 — migrate 원장을 읽지 못했다" \
       "슈퍼유저 URL 을 env 에 넣어라."
+    oort_doctor_record roles.momo_notifier blocker fail \
+      "MIGRATE_DATABASE_URL 없음 — momo_notifier 롤을 확인하지 못했다" \
+      "슈퍼유저 URL (MIGRATE_DATABASE_URL) 을 env 에 넣어라."
     return
   fi
 
@@ -1041,6 +1134,14 @@ EOF
       "schema_migrations 원장 ${result:-empty} (expected count=${expected})" \
       "플랫폼 preDeploy(momo-migrate) 가 모든 NNN_*.sql 을 적용했는지 확인하라."
   fi
+
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-t2-notifier-role.XXXXXX")"
+  set +e
+  result="$(oort_psql_migrate "$(oort_doctor_notifier_role_sql)" 2>"$errf")"
+  outbox_rc=$?
+  set -e
+  rm -f "$errf"
+  oort_doctor_record_notifier_role "$result" "$outbox_rc"
 }
 
 oort_doctor_check_stack() {
@@ -1049,7 +1150,7 @@ oort_doctor_check_stack() {
   local web_port api_port base body hdr code db auth_line
   local pg_user pg_db outbox push_relay pg_line pg_state pg_health
   local outbox_rc outbox_err errf attempt
-  local logs
+  local logs result
 
   ps_out="$(docker compose -p "$project" ps --format '{{.Service}} {{.State}} {{.Health}}' 2>/dev/null || true)"
   if [ -z "$ps_out" ]; then
@@ -1187,6 +1288,17 @@ EOF
       "migrate 로그에 IDEMPOTENCY_OK 없음" \
       "scripts/self_host_env.sh --compose logs migrate 를 보라."
   fi
+
+  errf="$(mktemp "${TMPDIR:-/tmp}/oort-doctor-notifier-role.XXXXXX")"
+  set +e
+  result="$(docker compose -p "$project" exec -T postgres \
+    psql -U "$pg_user" -d "$pg_db" -At --no-psqlrc -v ON_ERROR_STOP=1 \
+    -c "$(oort_doctor_notifier_role_sql)" 2>"$errf")"
+  outbox_rc=$?
+  set -e
+  rm -f "$errf"
+  result="$(printf '%s' "$result" | tr -d '\r' | awk 'NF { print; exit }')"
+  oort_doctor_record_notifier_role "$result" "$outbox_rc"
 }
 
 oort_doctor_check_public() {

@@ -161,6 +161,7 @@ repl = {
     "__TOKEN_APP__": "bb" * 12,
     "__TOKEN_RELAY__": "cc" * 12,
     "__TOKEN_WORKER__": "dd" * 12,
+    "__TOKEN_NOTIFIER__": "99" * 12,
     "__TOKEN_JWT__": "ee" * 12,
     "__TOKEN_CENT_TOKEN__": "ff" * 12,
     "__TOKEN_CENT_API__": "11" * 12,

@@ -127,6 +127,7 @@ PG_PASSWORD="$(secret)"
 APP_PASSWORD="$(secret)"
 RELAY_PASSWORD="$(secret)"
 WORKER_PASSWORD="$(secret)"
+NOTIFIER_PASSWORD="$(secret)"
 JWT="$(secret)"
 CENT_TOKEN="$(secret)"
 CENT_API="$(secret)"
@@ -149,8 +150,10 @@ MIGRATE_DATABASE_URL=postgres://momo:${PG_PASSWORD}@postgres:5432/momo
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
 MOMO_APP_DATABASE_URL=postgres://momo_app:${APP_PASSWORD}@postgres:5432/momo
 RELAY_DATABASE_URL=postgres://momo_relay:${RELAY_PASSWORD}@postgres:5432/momo
+NOTIFIER_DATABASE_URL=postgres://momo_notifier:${NOTIFIER_PASSWORD}@postgres:5432/momo
 JWT_HMAC=$JWT
 CENT_TOKEN_HMAC=$CENT_TOKEN
 CENT_API_KEY=$CENT_API
@@ -183,11 +186,18 @@ MOMO_APNS_STUB_STATUS=200
 MOMO_APNS_STUB_REASON=
 MOMO_APNS_STUB_CAPTURE_PATH=/tmp/apns-capture.jsonl
 MOMO_PUSH_NOTIFIER_ENABLED=1
+MOMO_T3_ENABLED=1
+MOMO_NOTIFIER_SWEEP_INTERVAL_MS=300
 PUSH_RELAY_SERVER_ID=momo-local
 PUSH_RELAY_URL=http://push-relay:28195/v1/push
 MOMO_RELAY_SIGNING_KEY_HOST_PATH=$PRIVATE_KEY
-NOTIFIER_DATABASE_URL=postgres://momo:${PG_PASSWORD}@postgres:5432/momo
 EOF
+
+grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:' "$WORKDIR/rust.env" >/dev/null \
+  || fail "NOTIFIER_DATABASE_URL is not the momo_notifier role"
+if grep -E '^NOTIFIER_DATABASE_URL=postgres://momo:' "$WORKDIR"/*.env >/dev/null; then
+  fail "NOTIFIER_DATABASE_URL still uses the owner URL"
+fi
 
 echo "[test-push-relay-stub-e2e] compose up (project $PROJ)"
 compose up -d --wait
@@ -196,7 +206,71 @@ COMPOSE_UP=1
 API="http://127.0.0.1:${API_PORT}"
 WS="00000000-0000-7000-8000-000000000001"
 CH="00000000-0000-7000-8000-000000000201"
+AGENT="00000000-0000-7000-8000-000000000102"
 SECRET_BODY="sh10-must-not-leak-into-apns-payload"
+
+insert_expired_approval() {
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 <<SQL
+INSERT INTO member (id, workspace_id, kind, status, display_name, handle)
+VALUES (
+  '${AGENT}', '${WS}', 'agent', 'active', 'sweep-agent', 'sweep-agent'
+) ON CONFLICT (id) DO NOTHING;
+INSERT INTO agent (
+  member_id, workspace_id, model, base_url, owner_human_id,
+  max_concurrent_runs, max_run_steps
+) VALUES (
+  '${AGENT}', '${WS}', 'hermes-agent', 'http://127.0.0.1:9/v1',
+  '00000000-0000-7000-8000-000000000101', 1, 12
+) ON CONFLICT (member_id) DO NOTHING;
+INSERT INTO agent_run (
+  workspace_id, agent_member_id, channel_id, status, input
+) VALUES (
+  '${WS}', '${AGENT}', '${CH}', 'awaiting_approval', '{}'::jsonb
+) RETURNING id;
+SQL
+}
+
+approval_status() {
+  local id="$1"
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 \
+    -c "SELECT status::text FROM approval WHERE id = '${id}';"
+}
+
+echo "[test-push-relay-stub-e2e] expired approval sweep (t3 on, ≥3 intervals)"
+RUN_ID="$(insert_expired_approval | tr -d '\r' | grep -E '^[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$RUN_ID" ] || fail "agent_run insert returned empty"
+APPROVAL_A="$(compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 <<SQL
+INSERT INTO approval (
+  workspace_id, run_id, channel_id, requested_by, action_type, payload,
+  status, expires_at
+) VALUES (
+  '${WS}', '${RUN_ID}', '${CH}', '${AGENT}', 'tool_call', '{}'::jsonb,
+  'pending', now() - interval '1 minute'
+) RETURNING id;
+SQL
+)"
+APPROVAL_A="$(printf '%s' "$APPROVAL_A" | tr -d '\r' | grep -E '^[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$APPROVAL_A" ] || fail "expired approval insert returned empty"
+# Default sweep interval is 300ms; three ticks plus slack.
+sleep 2
+DENIED="$(compose logs notifier 2>/dev/null | grep -c 'permission denied' || true)"
+[ "$DENIED" = "0" ] || {
+  compose logs notifier >&2 || true
+  fail "notifier logs contain permission denied (count=${DENIED})"
+}
+expired=""
+for _ in $(seq 1 20); do
+  if [ "$(approval_status "$APPROVAL_A")" = "expired" ]; then
+    expired=1
+    break
+  fi
+  sleep 0.5
+done
+[ "$expired" = "1" ] || {
+  compose logs notifier >&2 || true
+  fail "approval ${APPROVAL_A} status=$(approval_status "$APPROVAL_A") (want expired)"
+}
+echo "PASS: approval sweep expired the overdue row; permission denied count=0"
 
 api() {
   local method="$1" path="$2" token="${3:-}" body="${4:-}"
@@ -300,3 +374,51 @@ APNS_STATUS="$(printf '%s\n' "$LOG_ROW" | awk -F '\t' '{print $2}')"
 test "$APNS_STATUS" = 200
 
 echo "PASS: stub E2E device-register → mention → notifier → id-only capture → push_dispatch_log (Apple never contacted)"
+
+echo "[test-push-relay-stub-e2e] sabotage: REVOKE UPDATE ON approval FROM momo_notifier → RED"
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "REVOKE UPDATE ON TABLE approval FROM momo_notifier;" >/dev/null
+RUN_ID_B="$(insert_expired_approval | tr -d '\r' | grep -E '^[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$RUN_ID_B" ] || fail "agent_run insert B returned empty"
+APPROVAL_B="$(compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 <<SQL
+INSERT INTO approval (
+  workspace_id, run_id, channel_id, requested_by, action_type, payload,
+  status, expires_at
+) VALUES (
+  '${WS}', '${RUN_ID_B}', '${CH}', '${AGENT}', 'tool_call', '{}'::jsonb,
+  'pending', now() - interval '1 minute'
+) RETURNING id;
+SQL
+)"
+APPROVAL_B="$(printf '%s' "$APPROVAL_B" | tr -d '\r' | grep -E '^[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$APPROVAL_B" ] || fail "expired approval insert B returned empty"
+sleep 2
+STATUS_B="$(approval_status "$APPROVAL_B")"
+DENIED_B="$(compose logs notifier 2>/dev/null | grep -c 'permission denied' || true)"
+if [ "$STATUS_B" = "expired" ] && [ "$DENIED_B" = "0" ]; then
+  fail "sabotage REVOKE UPDATE ON approval still expired the row (status=${STATUS_B} denied=${DENIED_B})"
+fi
+echo "PASS: sabotage REVOKE UPDATE ON approval FROM momo_notifier → RED (status=${STATUS_B} denied=${DENIED_B})"
+
+echo "[test-push-relay-stub-e2e] sabotage: DROP ROLE momo_notifier → notifier must fail to start"
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = 'momo_notifier' AND pid <> pg_backend_pid();" \
+  >/dev/null
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "DROP OWNED BY momo_notifier; DROP ROLE momo_notifier;" >/dev/null
+compose stop notifier >/dev/null
+compose up -d --no-deps notifier >/dev/null
+found=0
+for _ in $(seq 1 30); do
+  logs="$(compose logs --tail=80 notifier 2>/dev/null || true)"
+  if printf '%s' "$logs" | grep -Eqi 'role .*momo_notifier.* does not exist|password authentication failed'; then
+    found=1
+    break
+  fi
+  sleep 1
+done
+[ "$found" = 1 ] || {
+  compose logs --tail=80 notifier >&2 || true
+  fail "notifier still started after DROP ROLE momo_notifier"
+}
+echo "PASS: sabotage DROP ROLE momo_notifier → notifier failed to start"
