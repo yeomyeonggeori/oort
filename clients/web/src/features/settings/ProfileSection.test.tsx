@@ -12,6 +12,7 @@ const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
+const changeMyHandle = vi.hoisted(() => vi.fn());
 const fetchRoster = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
@@ -22,6 +23,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
       workspaceId: string,
       displayName: string
     ) => changeMyDisplayName(workspaceId, displayName) as Promise<Member>,
+    changeMyHandle: (workspaceId: string, handle: string) =>
+      changeMyHandle(workspaceId, handle) as Promise<Member>,
     fetchRoster: (workspaceId: string) =>
       fetchRoster(workspaceId) as Promise<RosterMember[]>,
   };
@@ -39,6 +42,7 @@ beforeAll(() => {
 
 beforeEach(() => {
   changeMyDisplayName.mockReset();
+  changeMyHandle.mockReset();
   fetchRoster.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
@@ -180,7 +184,10 @@ describe("ProfileSection", () => {
       )
     ).toBe(false);
     expect(host.querySelector('[data-testid="logout"]')).toBeNull();
-    expect(host.textContent).toContain("@seongjae");
+    expect(
+      (host.querySelector('[data-testid="profile-handle"]') as HTMLInputElement)
+        .value
+    ).toBe("seongjae");
   });
 
   it("낙관 갱신 없이 PATCH가 끝날 때까지 이전 이름을 유지한다", async () => {
@@ -279,5 +286,48 @@ describe("ProfileSection", () => {
       save.click();
     });
     expect(changeMyDisplayName).not.toHaveBeenCalled();
+  });
+
+  it("핸들 저장은 E2 PATCH 1회이고 성공 시에만 세션을 갱신한다", async () => {
+    const member = sessionMember();
+    changeMyHandle.mockResolvedValue({ ...member, handle: "kwak" });
+    const { host, replaceSessionMember } = mountSection();
+    const input = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "kwak"));
+    await act(async () => {
+      (
+        host.querySelector('[data-testid="profile-handle-save"]') as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(changeMyHandle).toHaveBeenCalledTimes(1);
+    });
+    expect(changeMyHandle).toHaveBeenCalledWith(WS, "kwak");
+    expect(replaceSessionMember).toHaveBeenCalledWith({
+      ...member,
+      handle: "kwak",
+    });
+  });
+
+  it("핸들 409는 제품 한국어이고 와이어 문장을 그리지 않는다", async () => {
+    changeMyHandle.mockRejectedValue(new ApiError(409, "handle is already in use"));
+    const { host } = mountSection();
+    const input = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "taken"));
+    await act(async () => {
+      (
+        host.querySelector('[data-testid="profile-handle-save"]') as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(
+        host.querySelector('[data-testid="profile-handle-error"]')?.textContent
+      ).toBe("이미 쓰는 핸들이에요. 다른 핸들을 골라주세요.");
+    });
+    expect(host.textContent).not.toContain("handle is already in use");
   });
 });

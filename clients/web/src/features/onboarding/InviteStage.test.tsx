@@ -198,6 +198,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );
@@ -251,6 +252,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );
@@ -318,6 +320,7 @@ describe("onboarding S2 팀원 초대 (#2333)", () => {
     const host = mount(
       createElement(OwnerOnboarding, {
         session,
+        replaceSessionMember: vi.fn(),
         onFinished: vi.fn(),
       })
     );

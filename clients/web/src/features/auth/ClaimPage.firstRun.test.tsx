@@ -40,8 +40,7 @@ import {
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
 const renameWorkspace = vi.hoisted(() => vi.fn());
-const changeMyHandle = vi.hoisted(() => vi.fn());
-const changeMyDisplayName = vi.hoisted(() => vi.fn());
+const changeMyProfile = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -49,10 +48,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     ...actual,
     claimOwnerPassword: (...args: unknown[]) =>
       claimOwnerPassword(...args) as Promise<LoginResponse>,
-    changeMyHandle: (...args: unknown[]) =>
-      changeMyHandle(...args) as Promise<Member>,
-    changeMyDisplayName: (...args: unknown[]) =>
-      changeMyDisplayName(...args) as Promise<Member>,
+    changeMyProfile: (...args: unknown[]) =>
+      changeMyProfile(...args) as Promise<Member>,
   };
 });
 
@@ -107,8 +104,7 @@ beforeEach(() => {
   claimOwnerPassword.mockReset();
   fetchWorkspace.mockReset();
   renameWorkspace.mockReset();
-  changeMyHandle.mockReset();
-  changeMyDisplayName.mockReset();
+  changeMyProfile.mockReset();
   claimOwnerPassword.mockResolvedValue(session);
   fetchWorkspace.mockResolvedValue({
     id: session.member.workspaceId,
@@ -128,9 +124,9 @@ beforeEach(() => {
     welcomeAgentMemberId: null,
     welcomePrompt: "",
   });
-  changeMyHandle.mockResolvedValue({ ...session.member, handle: "seongjae" });
-  changeMyDisplayName.mockResolvedValue({
+  changeMyProfile.mockResolvedValue({
     ...session.member,
+    handle: "seongjae",
     displayName: "성재",
   });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
@@ -265,7 +261,10 @@ describe("claim → first-run 사다리 (#2301)", () => {
     await vi.waitFor(() => {
       expect(onLoggedIn).toHaveBeenCalledTimes(1);
     });
-    expect(onLoggedIn).toHaveBeenCalledWith(session);
+    expect(onLoggedIn).toHaveBeenCalledWith({
+      ...session,
+      member: { ...session.member, handle: "seongjae", displayName: "성재" },
+    });
     expect(window.location.pathname).toBe("/");
     expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
 

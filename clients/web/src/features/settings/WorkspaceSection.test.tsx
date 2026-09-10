@@ -18,6 +18,8 @@ const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 const AGENT_ID = "00000000-0000-7000-8000-000000000201";
 
 const patchWorkspaceSettings = vi.hoisted(() => vi.fn());
+const renameWorkspace = vi.hoisted(() => vi.fn());
+const fetchWorkspace = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/features/settings/api")>();
@@ -31,6 +33,9 @@ vi.mock("@momo/core/features/settings/api", async (importOriginal) => {
         welcome_prompt?: string;
       }
     ) => patchWorkspaceSettings(workspaceId, body) as Promise<unknown>,
+    renameWorkspace: (...args: unknown[]) =>
+      renameWorkspace(...args) as Promise<WorkspaceIdentity>,
+    fetchWorkspace: (...args: unknown[]) => fetchWorkspace(...args),
   };
 });
 
@@ -46,6 +51,8 @@ beforeAll(() => {
 
 beforeEach(() => {
   patchWorkspaceSettings.mockReset();
+  renameWorkspace.mockReset();
+  fetchWorkspace.mockReset();
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -372,6 +379,69 @@ describe("WelcomeKickoffEditor (#1800 패턴)", () => {
     expect(
       host.querySelector('[data-testid="workspace-welcome-kickoff"]')?.textContent
     ).toContain("기본값 (첫 활성 에이전트)");
+  });
+});
+
+describe("워크스페이스 이름 E1", () => {
+  it("오너는 이름 저장이 E1 PATCH 1회이다", async () => {
+    renameWorkspace.mockResolvedValue({
+      ...workspace({}),
+      name: "여명거리",
+      updatedAtMs: 2,
+    });
+    const host = mountSection({ role: "owner" });
+    const input = host.querySelector(
+      '[data-testid="workspace-rename-name"]'
+    ) as HTMLInputElement | null;
+    expect(input).not.toBeNull();
+    act(() => setInputValue(input!, "여명거리"));
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-save"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(renameWorkspace).toHaveBeenCalledTimes(1);
+    });
+    expect(renameWorkspace).toHaveBeenCalledWith(WS, "여명거리", 0);
+  });
+
+  it("409는 refetch한 이름을 칸에 복사한다", async () => {
+    renameWorkspace.mockRejectedValue(
+      new ApiError(409, "workspace has been updated; refetch and retry")
+    );
+    fetchWorkspace.mockResolvedValue({
+      ...workspace({}),
+      name: "다른 기기에서 바꾼 이름",
+      updatedAtMs: 9,
+    });
+    const host = mountSection({ role: "owner" });
+    const input = host.querySelector(
+      '[data-testid="workspace-rename-name"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "여명거리"));
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-save"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await vi.waitFor(() => {
+      expect(
+        (host.querySelector(
+          '[data-testid="workspace-rename-name"]'
+        ) as HTMLInputElement).value
+      ).toBe("다른 기기에서 바꾼 이름");
+    });
+    expect(host.querySelector('[data-testid="workspace-rename-error"]')?.textContent).toBe(
+      "워크스페이스 이름이 바뀌었습니다. 다시 저장하세요."
+    );
   });
 });
 

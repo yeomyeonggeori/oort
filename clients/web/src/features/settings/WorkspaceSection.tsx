@@ -28,6 +28,7 @@ import {
   createWorkspace,
   fetchWorkspace,
   patchWorkspaceSettings,
+  renameWorkspace,
   type CreatedWorkspace,
 } from "@momo/core/features/settings/api";
 import {
@@ -44,6 +45,7 @@ import {
   slugError,
   workspaceNameError,
 } from "@momo/core/features/settings/model";
+import { workspaceNameSaveMessage } from "@/features/onboarding/identityCopy";
 import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   WELCOME_PROMPT_LIMIT_SENTENCE,
@@ -767,6 +769,147 @@ function WelcomeKickoffEditor({
   );
 }
 
+function WorkspaceRenameField({
+  workspaceId,
+  name,
+  updatedAtMs,
+  offline,
+}: {
+  workspaceId: string;
+  name: string;
+  updatedAtMs: number;
+  offline: boolean;
+}) {
+  const { session } = useSession();
+  const directoryQuery = useDirectory(workspaceId);
+  const client = useQueryClient();
+  const self = memberFor(directoryQuery.directory, session.member.id);
+  const canEdit = isWorkspaceOperator(self?.role);
+  const [draft, setDraft] = useState(name);
+  const [token, setToken] = useState(updatedAtMs);
+  const [fieldError, setFieldError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveStarted = useRef(false);
+
+  useEffect(() => {
+    setDraft(name);
+    setToken(updatedAtMs);
+  }, [name, updatedAtMs]);
+
+  const gate = workspaceNameError(draft);
+  const dirty = draft.trim() !== name;
+  const canSave = canEdit && dirty && !gate && !offline;
+
+  const save = useMutation({
+    mutationFn: () => renameWorkspace(workspaceId, draft.trim(), token),
+    onSuccess: (renamed) => {
+      saveStarted.current = false;
+      setSaveError(null);
+      setToken(renamed.updatedAtMs);
+      setDraft(renamed.name);
+      client.setQueryData(
+        workspaceIdentityKey(workspaceId),
+        (current: { name?: string; updatedAtMs?: number } | undefined) =>
+          current
+            ? { ...current, name: renamed.name, updatedAtMs: renamed.updatedAtMs }
+            : current
+      );
+    },
+    onError: async (error) => {
+      saveStarted.current = false;
+      if (error instanceof ApiError && error.status === 409) {
+        try {
+          const latest = await fetchWorkspace(workspaceId);
+          setToken(latest.updatedAtMs);
+          setDraft(latest.name);
+          client.setQueryData(workspaceIdentityKey(workspaceId), latest);
+          setSaveError("워크스페이스 이름이 바뀌었습니다. 다시 저장하세요.");
+          return;
+        } catch {
+          setSaveError(workspaceNameSaveMessage(error));
+          return;
+        }
+      }
+      if (error instanceof ApiError && error.status === 400) {
+        setSaveError(workspaceNameSaveMessage(error));
+        return;
+      }
+      setSaveError(workspaceNameSaveMessage(error));
+    },
+  });
+
+  const handleSave = () => {
+    if (!canSave || save.isPending || saveStarted.current) return;
+    const nextError = workspaceNameError(draft);
+    setFieldError(nextError);
+    if (nextError) return;
+    saveStarted.current = true;
+    setSaveError(null);
+    save.mutate();
+  };
+
+  const confirmedNonOperator = !canEdit && directoryQuery.isSuccess;
+  if (confirmedNonOperator) {
+    return <h3 className="text-body font-medium text-ink">{name}</h3>;
+  }
+
+  return (
+    <form
+      className="flex flex-col gap-3"
+      onSubmit={(event) => {
+        event.preventDefault();
+        handleSave();
+      }}
+      data-testid="workspace-rename"
+    >
+      <Field
+        label="워크스페이스 이름"
+        htmlFor="workspace-rename-name"
+        error={fieldError}
+      >
+        <Input
+          id="workspace-rename-name"
+          name="workspaceName"
+          value={draft}
+          disabled={offline}
+          aria-invalid={Boolean(fieldError || saveError)}
+          data-testid="workspace-rename-name"
+          onChange={(event) => {
+            setDraft(event.target.value);
+            setFieldError(null);
+            setSaveError(null);
+          }}
+        />
+      </Field>
+      {saveError && (
+        <p
+          className="text-meta text-danger"
+          role="alert"
+          data-testid="workspace-rename-error"
+        >
+          {saveError}
+        </p>
+      )}
+      {offline && canEdit && (
+        <p className="text-meta text-ink-muted">
+          연결이 끊겨 지금은 이름을 저장할 수 없습니다.
+        </p>
+      )}
+      {canEdit && (
+        <div className="flex flex-wrap items-center gap-2">
+          <SaveButton
+            label="이름 저장"
+            canSave={canSave}
+            busy={save.isPending}
+            onSave={handleSave}
+            testId="workspace-rename-save"
+          />
+        </div>
+      )}
+    </form>
+  );
+}
+
 function LeaveWorkspace({
   workspaceId,
   offline,
@@ -905,7 +1048,12 @@ export function WorkspaceSection({
           className="flex flex-col gap-3 rounded-md border border-line bg-surface-raised p-4"
           data-testid="workspace-card"
         >
-          <h3 className="text-body font-medium text-ink">{query.data.name}</h3>
+          <WorkspaceRenameField
+            workspaceId={workspaceId}
+            name={query.data.name}
+            updatedAtMs={query.data.updatedAtMs}
+            offline={offline}
+          />
           <WorkspaceAvatarField
             workspaceId={workspaceId}
             avatarUrl={query.data.avatarUrl}

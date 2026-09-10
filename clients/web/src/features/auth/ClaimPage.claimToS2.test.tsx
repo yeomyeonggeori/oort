@@ -6,7 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LoginResponse, Member } from "@momo/core/lib/api";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
-import { applyLogin, clearSession } from "@/lib/session";
+import { applyLogin, clearSession, getPersistedSession } from "@/lib/session";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
 import { peekFreshSignup } from "@/features/welcome/freshSignup";
 import {
@@ -20,8 +20,7 @@ const restoreSession = vi.hoisted(() => vi.fn());
 const claimOwnerPassword = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
 const renameWorkspace = vi.hoisted(() => vi.fn());
-const changeMyHandle = vi.hoisted(() => vi.fn());
-const changeMyDisplayName = vi.hoisted(() => vi.fn());
+const changeMyProfile = vi.hoisted(() => vi.fn());
 
 vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
@@ -30,10 +29,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
     restoreSession: (...args: unknown[]) => restoreSession(...args),
     claimOwnerPassword: (...args: unknown[]) =>
       claimOwnerPassword(...args) as Promise<LoginResponse>,
-    changeMyHandle: (...args: unknown[]) =>
-      changeMyHandle(...args) as Promise<Member>,
-    changeMyDisplayName: (...args: unknown[]) =>
-      changeMyDisplayName(...args) as Promise<Member>,
+    changeMyProfile: (...args: unknown[]) =>
+      changeMyProfile(...args) as Promise<Member>,
   };
 });
 
@@ -69,7 +66,14 @@ vi.mock("@/app/AppShell", async () => {
   const { createElement: h } = await import("react");
   const { Outlet } = await import("react-router-dom");
   return {
-    AppShell: () => h("div", { "data-testid": "app-shell" }, h(Outlet)),
+    AppShell: (props: { session: LoginResponse }) =>
+      h(
+        "div",
+        { "data-testid": "app-shell" },
+        h("span", { "data-testid": "self-name" }, props.session.member.displayName),
+        h("span", { "data-testid": "self-handle" }, props.session.member.handle),
+        h(Outlet)
+      ),
   };
 });
 
@@ -132,9 +136,17 @@ beforeEach(() => {
   claimOwnerPassword.mockReset();
   fetchWorkspace.mockReset();
   renameWorkspace.mockReset();
-  changeMyHandle.mockReset();
-  changeMyDisplayName.mockReset();
-  restoreSession.mockResolvedValue(session);
+  changeMyProfile.mockReset();
+  restoreSession.mockImplementation(async () => {
+    const persisted = getPersistedSession();
+    if (!persisted) return session;
+    return {
+      ...session,
+      member: persisted.member,
+      refreshToken: persisted.refreshToken,
+      realtimeWebSocketUrl: persisted.realtimeWebSocketUrl,
+    };
+  });
   claimOwnerPassword.mockImplementation(async () => {
     applyLogin(session);
     // Yield so App can enter `restoring` if the page has not held yet.
@@ -160,10 +172,10 @@ beforeEach(() => {
     welcomeAgentMemberId: null,
     welcomePrompt: "",
   });
-  changeMyHandle.mockResolvedValue(session.member);
-  changeMyDisplayName.mockResolvedValue({
+  changeMyProfile.mockResolvedValue({
     ...session.member,
     displayName: "성재",
+    handle: "seongjae",
   });
   window.history.replaceState(null, "", `/claim/${TOKEN}`);
   vi.stubGlobal("matchMedia", (query: string) => ({
@@ -310,11 +322,11 @@ describe("claim → S1 submit → S2", () => {
       "새벽",
       1
     );
-    expect(changeMyHandle).toHaveBeenCalledTimes(1);
-    expect(changeMyHandle).toHaveBeenCalledWith(
-      session.member.workspaceId,
-      "seongjae"
-    );
+    expect(changeMyProfile).toHaveBeenCalledTimes(1);
+    expect(changeMyProfile).toHaveBeenCalledWith(session.member.workspaceId, {
+      handle: "seongjae",
+      displayName: "성재",
+    });
     expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
       "2/2"
     );
@@ -368,5 +380,51 @@ describe("reload during S1 re-enters S1", () => {
     });
     expect(ownerOnboardingIsPending()).toBe(false);
     expect(afterS1.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+    expect(afterS1.querySelector('[data-testid="self-name"]')?.textContent).toBe(
+      "성재"
+    );
+    expect(afterS1.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
+      "seongjae"
+    );
+    expect(getPersistedSession()?.member.displayName).toBe("성재");
+    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+  });
+});
+
+describe("S1 identity survives into the shell (H-2)", () => {
+  it("updates the persisted member so a reload keeps the new name and handle", async () => {
+    const host = await mountApp();
+    await submitClaimFrom(host);
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await submitS1();
+    expect(getPersistedSession()?.member.displayName).toBe("성재");
+    expect(getPersistedSession()?.member.handle).toBe("seongjae");
+    click("onboarding-s2-skip");
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="self-name"]')?.textContent).toBe(
+        "성재"
+      );
+    });
+    expect(host.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
+      "seongjae"
+    );
+
+    unmountApp();
+    const reloaded = await mountApp();
+    await vi.waitFor(() => {
+      expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
+    });
+    expect(reloaded.querySelector('[data-testid="self-name"]')?.textContent).toBe(
+      "성재"
+    );
+    expect(reloaded.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
+      "seongjae"
+    );
   });
 });

@@ -1,6 +1,6 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { LoginResponse } from "@momo/core/lib/api";
+import type { LoginResponse, Member } from "@momo/core/lib/api";
 import { fetchWorkspace } from "@momo/core/features/settings/api";
 import {
   Card,
@@ -29,13 +29,16 @@ import { WorkspaceProfileStage } from "./WorkspaceProfileStage";
 //
 // Table-driven: this file mounts whatever `resolveOwnerOnboardingStage`
 // returns from the pending marker. S1 and S2 share this card chrome; S2
-// stays self-contained.
+// stays self-contained. Skipping S1 after a non-field failure keeps the
+// `workspace-profile` marker so a reload offers S1 again.
 
 export function OwnerOnboarding({
   session,
+  replaceSessionMember,
   onFinished,
 }: {
   session: LoginResponse;
+  replaceSessionMember: (member: Member) => void;
   onFinished: () => void;
 }) {
   const pending = useSyncExternalStore(
@@ -43,7 +46,9 @@ export function OwnerOnboarding({
     readOwnerOnboardingStage,
     readOwnerOnboardingStage
   );
-  const stage = resolveOwnerOnboardingStage(pending);
+  const [s1Escaped, setS1Escaped] = useState(false);
+  const resolved = resolveOwnerOnboardingStage(pending);
+  const stage = s1Escaped ? "invite" : resolved;
   const progress = ownerOnboardingProgressLabel(stage);
   const headingRef = useRef<HTMLHeadingElement>(null);
   const workspace = useQuery({
@@ -66,6 +71,10 @@ export function OwnerOnboarding({
       return;
     }
     onFinished();
+  }
+
+  function handleSkipS1() {
+    setS1Escaped(true);
   }
 
   return (
@@ -101,7 +110,9 @@ export function OwnerOnboarding({
               memberHandle={session.member.handle}
               workspaceName={workspace.data?.name}
               workspaceUpdatedAtMs={workspace.data?.updatedAtMs}
+              replaceSessionMember={replaceSessionMember}
               onComplete={finishStage}
+              onSkip={handleSkipS1}
             />
           )}
           {stage === "invite" && (

@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   defaultWorkspaceName,
   fallbackHandle,
-  handleFieldError,
-  isValidHandle,
+  suggestedHandle,
 } from "./fallbackHandle";
+import { isValidHandle } from "@momo/core/features/settings/model";
 
 describe("fallbackHandle (server fallback_handle 동형)", () => {
   it("derives the handle the way the server does", () => {
@@ -36,14 +36,15 @@ describe("fallbackHandle (server fallback_handle 동형)", () => {
 describe("S1 field defaults", () => {
   it("clears the seed workspace name and keeps any other name", () => {
     expect(defaultWorkspaceName("momo Demo Workspace")).toBe("");
+    expect(defaultWorkspaceName(" momo Demo Workspace ")).toBe("");
     expect(defaultWorkspaceName(undefined)).toBe("");
     expect(defaultWorkspaceName("새벽")).toBe("새벽");
   });
 
-  it("uses the server handle 400 sentence for a bad handle", () => {
-    expect(handleFieldError("!")).toBe(
-      "handle must be 2-32 chars of a-z, 0-9, _ or -"
-    );
-    expect(handleFieldError("seongjae")).toBeNull();
+  it("blanks a seed demo handle and derives from the email local part", () => {
+    expect(suggestedHandle("demo")).toBe("");
+    expect(suggestedHandle("demo@momo.local")).toBe("");
+    expect(suggestedHandle("ada@example.com")).toBe("ada");
+    expect(suggestedHandle("seongjae")).toBe("seongjae");
   });
 });

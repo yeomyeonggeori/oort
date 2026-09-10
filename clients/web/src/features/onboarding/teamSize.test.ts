@@ -68,3 +68,17 @@ describe("S2 skip does not issue", () => {
     expect(skipButton).not.toContain("createInvite");
   });
 });
+
+describe("S1 error copy and identity handoff (H-1/H-2)", () => {
+  it("never paints error.message and always calls replaceSessionMember", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("./WorkspaceProfileStage.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(source).not.toMatch(/setHandleError\(error\.message\)/);
+    expect(source).not.toMatch(/setWorkspaceError\(error\.message\)/);
+    expect(source).not.toMatch(/setDisplayError\(error\.message\)/);
+    expect(source).not.toMatch(/setFormError\(error\.message\)/);
+    expect(source).toContain("replaceSessionMember(member)");
+  });
+});

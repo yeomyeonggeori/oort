@@ -8,16 +8,32 @@ import { ApiError, type LoginResponse, type Member } from "@momo/core/lib/api";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { OwnerOnboarding } from "./OwnerOnboarding";
 import { WorkspaceProfileStage } from "./WorkspaceProfileStage";
-import { clearFreshSignup, peekFreshSignup } from "@/features/welcome/freshSignup";
+import { clearFreshSignup } from "@/features/welcome/freshSignup";
 import {
   clearOwnerOnboardingPending,
   markOwnerOnboardingPending,
   OWNER_ONBOARDING_KEY,
+  readOwnerOnboardingStage,
 } from "./ownerOnboardingStore";
-import { S1_FAILURE, S1_REENTRY, S1_STALE_RETRY, S1_TITLE } from "./s1Copy";
+import { clearS1Draft, readS1Draft } from "./s1Draft";
+import {
+  HANDLE_TAKEN_SENTENCE,
+  handleFieldError,
+  handleSaveMessage,
+} from "./identityCopy";
+import {
+  S1_FAILURE,
+  S1_KEEP_MINE,
+  S1_KEEP_THEIRS,
+  S1_PRIMARY_RETRY,
+  S1_REENTRY,
+  S1_SKIP_LABEL,
+  S1_TITLE,
+} from "./s1Copy";
 
 const renameWorkspace = vi.hoisted(() => vi.fn());
 const fetchWorkspace = vi.hoisted(() => vi.fn());
+const changeMyProfile = vi.hoisted(() => vi.fn());
 const changeMyHandle = vi.hoisted(() => vi.fn());
 const changeMyDisplayName = vi.hoisted(() => vi.fn());
 
@@ -36,6 +52,8 @@ vi.mock("@momo/core/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@momo/core/lib/api")>();
   return {
     ...actual,
+    changeMyProfile: (...args: unknown[]) =>
+      changeMyProfile(...args) as Promise<Member>,
     changeMyHandle: (...args: unknown[]) =>
       changeMyHandle(...args) as Promise<Member>,
     changeMyDisplayName: (...args: unknown[]) =>
@@ -77,6 +95,7 @@ const reactActEnvironment = globalThis as typeof globalThis & {
 
 let mountedRoot: Root | null = null;
 let mountedHost: HTMLElement | null = null;
+const replaceSessionMember = vi.fn();
 
 beforeAll(() => {
   reactActEnvironment.IS_REACT_ACT_ENVIRONMENT = true;
@@ -85,9 +104,12 @@ beforeAll(() => {
 beforeEach(() => {
   clearFreshSignup();
   clearOwnerOnboardingPending();
+  clearS1Draft();
   markOwnerOnboardingPending();
+  replaceSessionMember.mockReset();
   renameWorkspace.mockReset();
   fetchWorkspace.mockReset();
+  changeMyProfile.mockReset();
   changeMyHandle.mockReset();
   changeMyDisplayName.mockReset();
   fetchWorkspace.mockResolvedValue(workspace);
@@ -96,8 +118,11 @@ beforeEach(() => {
     name: "새벽",
     updatedAtMs: UPDATED_AT + 1,
   });
-  changeMyHandle.mockResolvedValue({ ...member, handle: "seongjae" });
-  changeMyDisplayName.mockResolvedValue({ ...member, displayName: "성재" });
+  changeMyProfile.mockResolvedValue({
+    ...member,
+    handle: "seongjae",
+    displayName: "성재",
+  });
   vi.stubGlobal("matchMedia", (query: string) => ({
     matches: false,
     media: query,
@@ -121,6 +146,7 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   clearOwnerOnboardingPending();
+  clearS1Draft();
   vi.unstubAllGlobals();
 });
 
@@ -178,11 +204,37 @@ async function submitFilled(host: HTMLElement) {
   return host;
 }
 
+function mountStage(props?: {
+  memberHandle?: string;
+  onComplete?: () => void;
+  onSkip?: () => void;
+}) {
+  return mount(
+    createElement(WorkspaceProfileStage, {
+      workspaceId: WS,
+      memberHandle: props?.memberHandle ?? "seongjae",
+      workspaceName: "새벽",
+      workspaceUpdatedAtMs: UPDATED_AT,
+      replaceSessionMember,
+      onComplete: props?.onComplete ?? vi.fn(),
+      onSkip: props?.onSkip,
+    })
+  );
+}
+
+function mountOwner() {
+  return mount(
+    createElement(OwnerOnboarding, {
+      session,
+      replaceSessionMember,
+      onFinished: vi.fn(),
+    })
+  );
+}
+
 describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
-  it("renders 1/2 and has no skip", async () => {
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+  it("renders 1/2 and has no skip until a non-field failure", async () => {
+    const host = mountOwner();
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
     });
@@ -199,9 +251,7 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
   });
 
   it("focuses the stage heading on mount", async () => {
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+    const host = mountOwner();
     const heading = host.querySelector('[data-testid="onboarding-s1-title"]');
     expect(heading).not.toBeNull();
     await act(async () => {
@@ -210,10 +260,8 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     expect(document.activeElement).toBe(heading);
   });
 
-  it("submits E1 once with {name, updatedAtMs} and E2 once with handle, then S2", async () => {
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+  it("submits E1 once and E2/E0 as one PATCH, then S2", async () => {
+    const host = mountOwner();
     await vi.waitFor(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
@@ -227,22 +275,28 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     });
     expect(renameWorkspace).toHaveBeenCalledTimes(1);
     expect(renameWorkspace).toHaveBeenCalledWith(WS, "새벽", UPDATED_AT);
-    expect(changeMyHandle).toHaveBeenCalledTimes(1);
-    expect(changeMyHandle).toHaveBeenCalledWith(WS, "seongjae");
-    expect(changeMyDisplayName).toHaveBeenCalledTimes(1);
-    expect(changeMyDisplayName).toHaveBeenCalledWith(WS, "성재");
+    expect(changeMyProfile).toHaveBeenCalledTimes(1);
+    expect(changeMyProfile).toHaveBeenCalledWith(WS, {
+      handle: "seongjae",
+      displayName: "성재",
+    });
+    expect(changeMyHandle).not.toHaveBeenCalled();
+    expect(changeMyDisplayName).not.toHaveBeenCalled();
+    expect(replaceSessionMember).toHaveBeenCalledTimes(1);
+    expect(replaceSessionMember).toHaveBeenCalledWith({
+      ...member,
+      handle: "seongjae",
+      displayName: "성재",
+    });
     expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
       "2/2"
     );
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
-    expect(peekFreshSignup()).toBeNull();
   });
 
-  it("shows handle 409 inline and does not leave S1", async () => {
-    changeMyHandle.mockRejectedValue(new ApiError(409, "handle is already in use"));
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+  it("answers a handle 409 in product Korean with the next move", async () => {
+    changeMyProfile.mockRejectedValue(new ApiError(409, HANDLE_TAKEN_SENTENCE));
+    const host = mountOwner();
     await vi.waitFor(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
@@ -254,20 +308,51 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="onboarding-s1-handle-error"]')).not.toBeNull();
     });
-    expect(host.querySelector('[data-testid="onboarding-s1-handle-error"]')?.textContent).toBe(
-      "handle is already in use"
-    );
+    const text =
+      host.querySelector('[data-testid="onboarding-s1-handle-error"]')?.textContent ??
+      "";
+    expect(text).toBe("이미 쓰는 핸들이에요. 다른 핸들을 골라주세요.");
+    expect(text).toMatch(/다른 핸들/);
+    expect(text).not.toMatch(/[A-Za-z]{3,}|HTTP \d+/);
+    expect(text).not.toContain(HANDLE_TAKEN_SENTENCE);
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
     expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
   });
 
-  it("shows stale 409 retry text after refetch", async () => {
+  it("does not re-send E1 after a handle 409 retry", async () => {
+    changeMyProfile
+      .mockRejectedValueOnce(new ApiError(409, HANDLE_TAKEN_SENTENCE))
+      .mockResolvedValueOnce({
+        ...member,
+        handle: "seongjae2",
+        displayName: "성재",
+      });
+    const host = mountStage({ onComplete: vi.fn() });
+    await submitFilled(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s1-handle-error"]')).not.toBeNull();
+    });
+    expect(renameWorkspace).toHaveBeenCalledTimes(1);
+    fill("onboarding-s1-handle", "seongjae2");
+    await act(async () => {
+      click("onboarding-s1-submit");
+    });
+    await vi.waitFor(() => {
+      expect(changeMyProfile).toHaveBeenCalledTimes(2);
+    });
+    expect(renameWorkspace).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the other name on a stale 409 and offers keep/save", async () => {
     renameWorkspace.mockRejectedValue(
       new ApiError(409, "workspace has been updated; refetch and retry")
     );
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+    fetchWorkspace.mockResolvedValue({
+      ...workspace,
+      name: "다른 기기에서 바꾼 이름",
+      updatedAtMs: UPDATED_AT + 9,
+    });
+    const host = mountOwner();
     await vi.waitFor(() => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
@@ -279,36 +364,37 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     await vi.waitFor(() => {
       expect(host.querySelector('[data-testid="onboarding-s1-stale"]')).not.toBeNull();
     });
-    expect(host.textContent).toContain(S1_STALE_RETRY);
-    expect(changeMyHandle).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("다른 기기에서 바꾼 이름");
+    expect(host.querySelector('[data-testid="onboarding-s1-keep-theirs"]')?.textContent).toBe(
+      S1_KEEP_THEIRS
+    );
+    expect(host.querySelector('[data-testid="onboarding-s1-keep-mine"]')?.textContent).toBe(
+      S1_KEEP_MINE
+    );
+    expect(changeMyProfile).not.toHaveBeenCalled();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
   });
 
-  it("surfaces a 400 as the server sentence", async () => {
+  it("maps a workspace 400 to Korean and does not render the wire sentence", async () => {
     renameWorkspace.mockRejectedValue(
-      new ApiError(400, "name must be 1-80 characters")
+      new ApiError(400, "workspace name must be 1-80 characters")
     );
-    const host = mount(
-      createElement(WorkspaceProfileStage, {
-        workspaceId: WS,
-        memberHandle: "seongjae",
-        workspaceName: "새벽",
-        workspaceUpdatedAtMs: UPDATED_AT,
-        onComplete: vi.fn(),
-      })
-    );
+    const host = mountStage();
     await submitFilled(host);
     await vi.waitFor(() => {
       expect(
         host.querySelector('[data-testid="onboarding-s1-workspace-error"]')
       ).not.toBeNull();
     });
-    expect(
-      host.querySelector('[data-testid="onboarding-s1-workspace-error"]')?.textContent
-    ).toBe("name must be 1-80 characters");
+    const text =
+      host.querySelector('[data-testid="onboarding-s1-workspace-error"]')
+        ?.textContent ?? "";
+    expect(text).toBe("이름은 1~80자예요. 다시 입력해 주세요.");
+    expect(text).not.toContain("workspace name must be 1-80 characters");
+    expect(text).not.toMatch(/[A-Za-z]{3,}/);
   });
 
-  it("names the later redo surface on a generic failure", async () => {
+  it("shows retry and skip on a generic failure and keeps the S1 marker", async () => {
     renameWorkspace.mockRejectedValue(new ApiError(500, "engine boom"));
     const host = mount(
       createElement(WorkspaceProfileStage, {
@@ -316,7 +402,9 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
         memberHandle: "seongjae",
         workspaceName: "새벽",
         workspaceUpdatedAtMs: UPDATED_AT,
+        replaceSessionMember,
         onComplete: vi.fn(),
+        onSkip: vi.fn(),
       })
     );
     await submitFilled(host);
@@ -324,13 +412,64 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       expect(host.querySelector('[data-testid="onboarding-s1-error"]')).not.toBeNull();
     });
     expect(host.textContent).toContain(S1_FAILURE);
-    expect(host.textContent).toContain("설정 › 워크스페이스 / 프로필");
+    expect(host.textContent).not.toContain("engine boom");
+    expect(host.querySelector('[data-testid="onboarding-s1-submit"]')?.textContent).toBe(
+      S1_PRIMARY_RETRY
+    );
+    expect(host.querySelector('[data-testid="onboarding-s1-skip"]')?.textContent).toBe(
+      S1_SKIP_LABEL
+    );
+  });
+
+  it("skip after a non-field failure proceeds to S2 without advancing the marker", async () => {
+    renameWorkspace.mockRejectedValue(new ApiError(500, "engine boom"));
+    const host = mountOwner();
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await submitFilled(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s1-skip"]')).not.toBeNull();
+    });
+    click("onboarding-s1-skip");
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    });
+    expect(readOwnerOnboardingStage()).toBe("workspace-profile");
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+  });
+
+  it("keeps aria-busy on the form and does not disable fields while submitting", async () => {
+    let resolveRename: ((value: WorkspaceIdentity) => void) | undefined;
+    renameWorkspace.mockReturnValue(
+      new Promise<WorkspaceIdentity>((resolve) => {
+        resolveRename = resolve;
+      })
+    );
+    const host = mountStage();
+    fill("onboarding-s1-workspace-name", "새벽");
+    fill("onboarding-s1-display-name", "성재");
+    fill("onboarding-s1-handle", "seongjae");
+    act(() => {
+      click("onboarding-s1-submit");
+    });
+    const form = host.querySelector('[data-testid="onboarding-s1"]');
+    expect(form?.getAttribute("aria-busy")).toBe("true");
+    const handle = host.querySelector(
+      '[data-testid="onboarding-s1-handle"]'
+    ) as HTMLInputElement;
+    expect(handle.disabled).toBe(false);
+    await act(async () => {
+      resolveRename?.({ ...workspace, name: "새벽", updatedAtMs: UPDATED_AT + 1 });
+    });
   });
 
   it("matches S2 card chrome classes", () => {
-    const host = mount(
-      createElement(OwnerOnboarding, { session, onFinished: vi.fn() })
-    );
+    const host = mountOwner();
     const card = host.querySelector(".max-w-sm");
     expect(card).not.toBeNull();
     expect(card?.className).toMatch(/\bmax-w-sm\b/);
@@ -345,13 +484,14 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     expect(lead?.className).toContain("text-ink-muted");
   });
 
-  it("starts the seed workspace name empty", () => {
+  it("starts the seed workspace name and seed handle empty", () => {
     const host = mount(
       createElement(WorkspaceProfileStage, {
         workspaceId: WS,
         memberHandle: "demo",
         workspaceName: "momo Demo Workspace",
         workspaceUpdatedAtMs: UPDATED_AT,
+        replaceSessionMember,
         onComplete: vi.fn(),
       })
     );
@@ -362,10 +502,58 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     const handle = host.querySelector(
       '[data-testid="onboarding-s1-handle"]'
     ) as HTMLInputElement | null;
-    expect(handle?.value).toBe("demo");
+    expect(handle?.value).toBe("");
     const display = host.querySelector(
       '[data-testid="onboarding-s1-display-name"]'
     ) as HTMLInputElement | null;
     expect(display?.value).toBe("");
+  });
+
+  it("keeps the typed draft across a remount", () => {
+    mountStage();
+    fill("onboarding-s1-workspace-name", "여명거리");
+    fill("onboarding-s1-display-name", "성재");
+    fill("onboarding-s1-handle", "SeongJae");
+    expect(readS1Draft()).toEqual({
+      workspaceName: "여명거리",
+      displayName: "성재",
+      handle: "SeongJae",
+    });
+    act(() => mountedRoot?.unmount());
+    mountedRoot = null;
+    const remounted = mountStage();
+    expect(
+      (remounted.querySelector(
+        '[data-testid="onboarding-s1-workspace-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("여명거리");
+    expect(
+      (remounted.querySelector(
+        '[data-testid="onboarding-s1-display-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("성재");
+    expect(
+      (remounted.querySelector('[data-testid="onboarding-s1-handle"]') as HTMLInputElement)
+        .value
+    ).toBe("SeongJae");
+    expect(remounted.querySelector('[data-testid="onboarding-s1-handle-preview"]')?.textContent).toBe(
+      "저장되는 핸들 @seongjae"
+    );
+  });
+});
+
+describe("S1 handle copy (H-1)", () => {
+  it("uses product Korean for a bad handle and never the wire sentence", () => {
+    expect(handleFieldError("!")).toBe(
+      "핸들은 영문 소문자·숫자·하이픈 2~32자예요."
+    );
+    expect(handleFieldError("!")).not.toMatch(/handle must|a-z/);
+    expect(handleFieldError("seongjae")).toBeNull();
+    expect(handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))).toBe(
+      "이미 쓰는 핸들이에요. 다른 핸들을 골라주세요."
+    );
+    expect(
+      handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))
+    ).not.toContain(HANDLE_TAKEN_SENTENCE);
   });
 });

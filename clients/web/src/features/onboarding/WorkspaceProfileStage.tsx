@@ -3,13 +3,11 @@ import {
   useRef,
   useState,
   type FormEvent,
-  type ReactNode,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
-  ApiError,
-  changeMyDisplayName,
-  changeMyHandle,
+  changeMyProfile,
+  type Member,
 } from "@momo/core/lib/api";
 import {
   fetchWorkspace,
@@ -18,84 +16,100 @@ import {
 import {
   displayNameFieldError,
   displayNameSaveMessage,
+  normalizeHandle,
   workspaceNameError,
 } from "@momo/core/features/settings/model";
 import { Button } from "@/design/ui/button";
 import { Input } from "@/design/ui/input";
+import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { HandleField } from "./HandleField";
 import {
   defaultWorkspaceName,
-  fallbackHandle,
-  handleFieldError,
+  suggestedHandle,
 } from "./fallbackHandle";
+import {
+  handleFieldError,
+  handleSaveMessage,
+  isField400,
+  isHandleTaken,
+  isWorkspaceStale,
+  workspaceNameSaveMessage,
+} from "./identityCopy";
+import { clearS1Draft, readS1Draft, writeS1Draft } from "./s1Draft";
 import {
   S1_DISPLAY_ERROR_ID,
   S1_FAILURE,
   S1_HANDLE_ERROR_ID,
+  S1_KEEP_MINE,
+  S1_KEEP_THEIRS,
   S1_LEAD,
   S1_OFFLINE_NOTE_ID,
   S1_OFFLINE_REASON,
   S1_PRIMARY_BUSY,
   S1_PRIMARY_LABEL,
+  S1_PRIMARY_RETRY,
   S1_REENTRY,
-  S1_STALE_RETRY,
+  S1_SKIP_LABEL,
   S1_WORKSPACE_ERROR_ID,
+  s1StaleRetry,
 } from "./s1Copy";
 
 // Reading this as: onboarding S1 (내 워크스페이스·내 이름) for internal team
 // users on web+Tauri, density 6/10, motion 2/10.
 
-const HANDLE_TAKEN = "handle is already in use";
-const WORKSPACE_STALE = "workspace has been updated; refetch and retry";
-
-function FieldLabel({ children }: { children: ReactNode }) {
-  return (
-    <span className="flex items-baseline gap-2">
-      <span className="text-ink-muted">{children}</span>
-      <span className="text-meta text-ink-muted">필수</span>
-    </span>
-  );
-}
-
-function isApiError(error: unknown): error is ApiError {
-  return error instanceof ApiError;
-}
-
 export function WorkspaceProfileStage({
   workspaceId,
   memberHandle,
+  email,
   workspaceName,
   workspaceUpdatedAtMs,
+  replaceSessionMember,
   onComplete,
+  onSkip,
 }: {
   workspaceId: string;
   memberHandle: string;
+  email?: string;
   workspaceName?: string;
   workspaceUpdatedAtMs?: number;
+  replaceSessionMember: (member: Member) => void;
   onComplete: () => void;
+  onSkip?: () => void;
 }) {
   const offline = useBrowserOffline();
   const queryClient = useQueryClient();
   const workspaceEdited = useRef(false);
-  const [workspaceDraft, setWorkspaceDraft] = useState(() =>
-    defaultWorkspaceName(workspaceName)
+  const renamedNameRef = useRef<string | null>(null);
+  const profileSavedRef = useRef(false);
+  const workspaceInputRef = useRef<HTMLInputElement>(null);
+  const displayInputRef = useRef<HTMLInputElement>(null);
+  const handleInputRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
+  const focusNonce = useRef(0);
+  const [focusTick, setFocusTick] = useState(0);
+  const draft = readS1Draft();
+  const [workspaceDraft, setWorkspaceDraft] = useState(
+    () => draft?.workspaceName ?? defaultWorkspaceName(workspaceName)
   );
-  const [displayName, setDisplayName] = useState("");
-  const [handle, setHandle] = useState(() => fallbackHandle(memberHandle));
+  const [displayName, setDisplayName] = useState(() => draft?.displayName ?? "");
+  const [handle, setHandle] = useState(
+    () => draft?.handle ?? suggestedHandle(email ?? memberHandle)
+  );
   const [updatedAtMs, setUpdatedAtMs] = useState(workspaceUpdatedAtMs);
   const [busy, setBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [displayError, setDisplayError] = useState<string | null>(null);
   const [handleError, setHandleError] = useState<string | null>(null);
-  const [staleRetry, setStaleRetry] = useState(false);
+  const [staleName, setStaleName] = useState<string | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (workspaceEdited.current) return;
+    if (workspaceEdited.current || draft?.workspaceName) return;
     setWorkspaceDraft(defaultWorkspaceName(workspaceName));
-  }, [workspaceName]);
+  }, [workspaceName, draft?.workspaceName]);
 
   useEffect(() => {
     if (workspaceUpdatedAtMs !== undefined) {
@@ -103,20 +117,69 @@ export function WorkspaceProfileStage({
     }
   }, [workspaceUpdatedAtMs]);
 
-  async function refetchWorkspaceToken(): Promise<number | undefined> {
+  useEffect(() => {
+    writeS1Draft({
+      workspaceName: workspaceDraft,
+      displayName,
+      handle,
+    });
+  }, [workspaceDraft, displayName, handle]);
+
+  useEffect(() => {
+    if (focusTick === 0) return;
+    if (handleError) {
+      handleInputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (displayError) {
+      displayInputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (workspaceError) {
+      workspaceInputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (formError || staleName) {
+      bannerRef.current?.focus({ preventScroll: true });
+    }
+  }, [focusTick, handleError, displayError, workspaceError, formError, staleName]);
+
+  function requestFocus() {
+    focusNonce.current += 1;
+    setFocusTick(focusNonce.current);
+  }
+
+  async function refetchWorkspaceToken(): Promise<
+    { updatedAtMs: number; name: string } | undefined
+  > {
     try {
       const latest = await fetchWorkspace(workspaceId);
       setUpdatedAtMs(latest.updatedAtMs);
       if (!workspaceEdited.current) {
         setWorkspaceDraft(defaultWorkspaceName(latest.name));
       }
+      queryClient.setQueryData(workspaceIdentityKey(workspaceId), latest);
       await queryClient.invalidateQueries({
         queryKey: workspaceIdentityKey(workspaceId),
       });
-      return latest.updatedAtMs;
+      return { updatedAtMs: latest.updatedAtMs, name: latest.name };
     } catch {
       return undefined;
     }
+  }
+
+  async function persistWorkspace(renamed: {
+    updatedAtMs: number;
+    name: string;
+  }) {
+    setUpdatedAtMs(renamed.updatedAtMs);
+    renamedNameRef.current = renamed.name;
+    queryClient.setQueryData(workspaceIdentityKey(workspaceId), (current) =>
+      current ? { ...current, ...renamed } : current
+    );
+    await queryClient.invalidateQueries({
+      queryKey: workspaceIdentityKey(workspaceId),
+    });
   }
 
   async function attempt() {
@@ -127,54 +190,70 @@ export function WorkspaceProfileStage({
     setDisplayError(nextDisplayError);
     setHandleError(nextHandleError);
     setFormError(null);
-    setStaleRetry(false);
-    if (nextWorkspaceError || nextDisplayError || nextHandleError) return;
+    if (nextWorkspaceError || nextDisplayError || nextHandleError) {
+      requestFocus();
+      return;
+    }
     setBusy(true);
     try {
-      const token = updatedAtMs ?? (await refetchWorkspaceToken());
-      if (token === undefined) {
-        setFormError(S1_FAILURE);
-        return;
+      const nextName = workspaceDraft.trim();
+      const nextHandle = normalizeHandle(handle);
+      const nextDisplay = displayName.trim();
+      if (renamedNameRef.current !== nextName) {
+        const token = updatedAtMs ?? (await refetchWorkspaceToken())?.updatedAtMs;
+        if (token === undefined) {
+          setFormError(S1_FAILURE);
+          requestFocus();
+          return;
+        }
+        const renamed = await renameWorkspace(workspaceId, nextName, token);
+        await persistWorkspace(renamed);
       }
-      const renamed = await renameWorkspace(
-        workspaceId,
-        workspaceDraft.trim(),
-        token
-      );
-      setUpdatedAtMs(renamed.updatedAtMs);
-      await queryClient.invalidateQueries({
-        queryKey: workspaceIdentityKey(workspaceId),
-      });
-      await changeMyHandle(workspaceId, handle.trim().toLowerCase());
-      await changeMyDisplayName(workspaceId, displayName.trim());
+      if (!profileSavedRef.current) {
+        const member = await changeMyProfile(workspaceId, {
+          handle: nextHandle,
+          displayName: nextDisplay,
+        });
+        profileSavedRef.current = true;
+        replaceSessionMember(member);
+      }
+      clearS1Draft();
       onComplete();
     } catch (error) {
-      if (isApiError(error) && error.status === 409 && error.message === HANDLE_TAKEN) {
-        setHandleError(error.message);
+      if (isHandleTaken(error)) {
+        setHandleError(handleSaveMessage(error));
+        requestFocus();
         return;
       }
-      if (
-        isApiError(error) &&
-        error.status === 409 &&
-        error.message === WORKSPACE_STALE
-      ) {
-        await refetchWorkspaceToken();
-        setStaleRetry(true);
+      if (isWorkspaceStale(error)) {
+        const latest = await refetchWorkspaceToken();
+        if (latest) {
+          setStaleName(latest.name);
+          renamedNameRef.current = null;
+        } else {
+          setFormError(S1_FAILURE);
+        }
+        requestFocus();
         return;
       }
-      if (isApiError(error) && error.status === 400) {
-        if (error.message.toLowerCase().includes("handle")) {
-          setHandleError(error.message);
+      if (isField400(error)) {
+        const message = error.message.toLowerCase();
+        if (message.includes("handle")) {
+          setHandleError(handleSaveMessage(error));
+          requestFocus();
           return;
         }
-        if (error.message.toLowerCase().includes("displayname")) {
+        if (message.includes("displayname")) {
           setDisplayError(displayNameSaveMessage(error));
+          requestFocus();
           return;
         }
-        setWorkspaceError(error.message);
+        setWorkspaceError(workspaceNameSaveMessage(error));
+        requestFocus();
         return;
       }
       setFormError(S1_FAILURE);
+      requestFocus();
     } finally {
       setBusy(false);
     }
@@ -182,17 +261,33 @@ export function WorkspaceProfileStage({
 
   function onSubmit(event: FormEvent) {
     event.preventDefault();
+    if (offline || busy) return;
     void attempt();
   }
 
-  const shownWorkspaceError = workspaceError;
-  const shownDisplayError = displayError;
-  const shownHandleError = handleError;
+  const handleKeepTheirs = () => {
+    if (!staleName) return;
+    workspaceEdited.current = true;
+    setWorkspaceDraft(staleName);
+    renamedNameRef.current = staleName;
+    setStaleName(null);
+    setWorkspaceError(null);
+  };
+
+  const handleKeepMine = () => {
+    setStaleName(null);
+    void attempt();
+  };
+
+  const handleSkip = () => {
+    onSkip?.();
+  };
 
   return (
     <form
       className="flex flex-col gap-4"
       data-testid="onboarding-s1"
+      aria-busy={busy || undefined}
       onSubmit={onSubmit}
     >
       <div className="flex break-keep flex-col gap-1">
@@ -212,20 +307,49 @@ export function WorkspaceProfileStage({
         />
       )}
 
-      {staleRetry && (
-        <InlineBanner
-          tone="error"
-          message={S1_STALE_RETRY}
-          testId="onboarding-s1-stale"
-        />
+      {staleName && (
+        <div
+          ref={bannerRef}
+          tabIndex={-1}
+          className="flex flex-col gap-2 focus-visible:focus-ring"
+        >
+          <InlineBanner
+            tone="error"
+            message={s1StaleRetry(staleName)}
+            testId="onboarding-s1-stale"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleKeepTheirs}
+              data-testid="onboarding-s1-keep-theirs"
+            >
+              {S1_KEEP_THEIRS}
+            </Button>
+            <Button
+              type="button"
+              onClick={handleKeepMine}
+              data-testid="onboarding-s1-keep-mine"
+            >
+              {S1_KEEP_MINE}
+            </Button>
+          </div>
+        </div>
       )}
 
       {formError && (
-        <InlineBanner
-          tone="error"
-          message={formError}
-          testId="onboarding-s1-error"
-        />
+        <div
+          ref={bannerRef}
+          tabIndex={-1}
+          className="focus-visible:focus-ring"
+        >
+          <InlineBanner
+            tone="error"
+            message={formError}
+            testId="onboarding-s1-error"
+          />
+        </div>
       )}
 
       <div className="flex flex-col gap-3">
@@ -233,33 +357,34 @@ export function WorkspaceProfileStage({
           htmlFor="onboarding-s1-workspace-name"
           className="flex flex-col gap-1 text-body"
         >
-          <FieldLabel>워크스페이스 이름</FieldLabel>
+          <span className="text-ink-muted">워크스페이스 이름</span>
           <Input
+            ref={workspaceInputRef}
             id="onboarding-s1-workspace-name"
             name="workspaceName"
             value={workspaceDraft}
             autoComplete="organization"
-            disabled={offline || busy}
-            aria-invalid={shownWorkspaceError ? true : undefined}
+            disabled={offline}
+            aria-invalid={workspaceError ? true : undefined}
             aria-describedby={
-              shownWorkspaceError ? S1_WORKSPACE_ERROR_ID : undefined
+              workspaceError ? S1_WORKSPACE_ERROR_ID : undefined
             }
             data-testid="onboarding-s1-workspace-name"
             onChange={(event) => {
               workspaceEdited.current = true;
               setWorkspaceDraft(event.currentTarget.value);
               setWorkspaceError(null);
-              setStaleRetry(false);
+              setStaleName(null);
             }}
           />
-          {shownWorkspaceError ? (
+          {workspaceError ? (
             <p
               id={S1_WORKSPACE_ERROR_ID}
               role="alert"
               className="text-meta text-danger"
               data-testid="onboarding-s1-workspace-error"
             >
-              {shownWorkspaceError}
+              {workspaceError}
             </p>
           ) : null}
         </label>
@@ -268,16 +393,17 @@ export function WorkspaceProfileStage({
           htmlFor="onboarding-s1-display-name"
           className="flex flex-col gap-1 text-body"
         >
-          <FieldLabel>표시 이름</FieldLabel>
+          <span className="text-ink-muted">표시 이름</span>
           <Input
+            ref={displayInputRef}
             id="onboarding-s1-display-name"
             name="displayName"
             value={displayName}
             autoComplete="nickname"
-            disabled={offline || busy}
-            aria-invalid={shownDisplayError ? true : undefined}
+            disabled={offline}
+            aria-invalid={displayError ? true : undefined}
             aria-describedby={
-              shownDisplayError ? S1_DISPLAY_ERROR_ID : undefined
+              displayError ? S1_DISPLAY_ERROR_ID : undefined
             }
             data-testid="onboarding-s1-display-name"
             onChange={(event) => {
@@ -285,66 +411,57 @@ export function WorkspaceProfileStage({
               setDisplayError(null);
             }}
           />
-          {shownDisplayError ? (
+          {displayError ? (
             <p
               id={S1_DISPLAY_ERROR_ID}
               role="alert"
               className="text-meta text-danger"
               data-testid="onboarding-s1-display-error"
             >
-              {shownDisplayError}
+              {displayError}
             </p>
           ) : null}
         </label>
 
-        <label
-          htmlFor="onboarding-s1-handle"
-          className="flex flex-col gap-1 text-body"
-        >
-          <FieldLabel>핸들</FieldLabel>
-          <div className="flex items-center gap-2">
-            <span className="text-ink-muted" aria-hidden="true">
-              @
-            </span>
-            <Input
-              id="onboarding-s1-handle"
-              name="handle"
-              value={handle}
-              autoComplete="username"
-              spellCheck={false}
-              disabled={offline || busy}
-              aria-invalid={shownHandleError ? true : undefined}
-              aria-describedby={
-                shownHandleError ? S1_HANDLE_ERROR_ID : undefined
-              }
-              data-testid="onboarding-s1-handle"
-              onChange={(event) => {
-                setHandle(event.currentTarget.value);
-                setHandleError(null);
-              }}
-            />
-          </div>
-          {shownHandleError ? (
-            <p
-              id={S1_HANDLE_ERROR_ID}
-              role="alert"
-              className="text-meta text-danger"
-              data-testid="onboarding-s1-handle-error"
-            >
-              {shownHandleError}
-            </p>
-          ) : null}
-        </label>
+        <HandleField
+          id="onboarding-s1-handle"
+          value={handle}
+          onChange={(value) => {
+            setHandle(value);
+            setHandleError(null);
+          }}
+          error={handleError}
+          errorId={S1_HANDLE_ERROR_ID}
+          testId="onboarding-s1-handle"
+          errorTestId="onboarding-s1-handle-error"
+          previewTestId="onboarding-s1-handle-preview"
+          offline={offline}
+          inputRef={handleInputRef}
+        />
       </div>
 
-      <Button
-        type="submit"
-        disabled={busy || offline}
-        aria-describedby={offline ? S1_OFFLINE_NOTE_ID : undefined}
-        data-testid="onboarding-s1-submit"
-      >
-        {busy ? S1_PRIMARY_BUSY : S1_PRIMARY_LABEL}
-      </Button>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="submit"
+          aria-disabled={offline || undefined}
+          aria-busy={busy || undefined}
+          aria-describedby={offline ? S1_OFFLINE_NOTE_ID : undefined}
+          className={cn(offline && "opacity-50")}
+          data-testid="onboarding-s1-submit"
+        >
+          {busy ? S1_PRIMARY_BUSY : formError ? S1_PRIMARY_RETRY : S1_PRIMARY_LABEL}
+        </Button>
+        {formError && onSkip ? (
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={handleSkip}
+            data-testid="onboarding-s1-skip"
+          >
+            {S1_SKIP_LABEL}
+          </Button>
+        ) : null}
+      </div>
 
       <p
         className="break-keep text-meta text-ink-muted"

@@ -210,6 +210,7 @@ export function App() {
     return (
       <OwnerOnboarding
         session={session}
+        replaceSessionMember={replaceSessionMember}
         onFinished={() => {
           clearOwnerOnboardingPending();
           bumpFirstRun();

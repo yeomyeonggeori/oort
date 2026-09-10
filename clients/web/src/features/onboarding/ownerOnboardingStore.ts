@@ -17,8 +17,6 @@ import {
 const listeners = new Set<() => void>();
 
 export const OWNER_ONBOARDING_KEY = "oort.onboarding.v1";
-/** @deprecated S1 is first; prefer `readOwnerOnboardingStage`. */
-export const OWNER_ONBOARDING_PENDING_STAGE = "invite";
 
 function sessionStore(): Storage | null {
   try {
