@@ -805,7 +805,8 @@ name it on local. `--compose` cannot change the canonical file set, so on
 the deploy host call compose directly for the public overlay:
 
 ```sh
-docker compose --env-file infra/rust/local.secrets.env \
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
