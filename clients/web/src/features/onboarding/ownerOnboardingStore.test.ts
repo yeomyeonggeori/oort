@@ -78,6 +78,28 @@ describe("owner onboarding pending flags", () => {
     expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(false);
   });
 
+  it("drops leftover settings-door flags when S1 completes (N-R3-2 residue)", () => {
+    markOwnerOnboardingPending();
+    recordOwnerOnboardingSettingsSave("profile");
+    expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(true);
+    clearOwnerOnboardingFlag("workspace-profile");
+    expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(false);
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+      JSON.stringify({ invite: true })
+    );
+  });
+
+  it("both settings doors succeeding remove the door flags from the marker", () => {
+    markOwnerOnboardingPending();
+    clearOwnerOnboardingFlag("invite");
+    recordOwnerOnboardingSettingsSave("workspace");
+    recordOwnerOnboardingSettingsSave("profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(false);
+    expect(hasOwnerOnboardingSettingsDoor("workspace")).toBe(false);
+    expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(false);
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBeNull();
+  });
+
   it("settings save clears the matching S1 draft fields (H-R3-1)", () => {
     markOwnerOnboardingPending();
     writeS1Draft({
