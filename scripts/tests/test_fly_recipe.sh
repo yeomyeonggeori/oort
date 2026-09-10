@@ -3,7 +3,8 @@
 # Mounts, always-on Machine, RAM ≥ 2 GiB, public ports {80,443} only,
 # zero digest literals, README script refs, entrypoint data-root under /data.
 # Sabotages: no mounts → RED; auto_stop_machines=true → RED; data-root
-# outside /data → RED.
+# outside /data → RED; caddy-only compose (no web) → RED; drop README
+# human-approval section → RED.
 set -euo pipefail
 
 fail() {
@@ -229,6 +230,105 @@ print("ok data-root", " ".join(found))
 PY
 }
 
+entrypoint_compose_files() {
+  python3 - "$1" <<'PY'
+import re, sys
+from pathlib import Path
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+files = []
+seen = set()
+for m in re.finditer(r"-f\s+(infra/\S+\.ya?ml)", text):
+    p = m.group(1).strip().strip('"').strip("'")
+    if p not in seen:
+        seen.add(p)
+        files.append(p)
+print("\n".join(files))
+PY
+}
+
+compose_yaml_has_web() {
+  python3 - "$ROOT" "$@" <<'PY'
+import re, sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+files = sys.argv[2:]
+if not files:
+    print("FAIL entrypoint names no compose -f files")
+    sys.exit(1)
+
+def services(path):
+    names = []
+    in_services = False
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if re.match(r"^services:\s*$", line):
+            in_services = True
+            continue
+        if not in_services:
+            continue
+        if re.match(r"^[A-Za-z0-9_.-]+:", line):
+            in_services = False
+            continue
+        m = re.match(r"^  ([A-Za-z0-9_-]+):\s*$", line)
+        if m:
+            names.append(m.group(1))
+    return names
+
+found = []
+missing_files = []
+all_names = []
+for rel in files:
+    path = root / rel
+    if not path.is_file():
+        missing_files.append(rel)
+        continue
+    names = services(path)
+    all_names.extend(names)
+    if "web" in names:
+        found.append(rel)
+if missing_files:
+    print("FAIL compose file missing:", " ".join(missing_files))
+    sys.exit(1)
+if not found:
+    print("FAIL compose file set has no service web (services=%s files=%s)" % (
+        ",".join(sorted(set(all_names))) or "<none>",
+        " ".join(files),
+    ))
+    sys.exit(1)
+print("ok web in", " ".join(found), "files", " ".join(files))
+PY
+}
+
+readme_approval_section() {
+  python3 - "$1" <<'PY'
+import re, sys
+from pathlib import Path
+
+text = Path(sys.argv[1]).read_text(encoding="utf-8")
+m = re.search(r"^## Human approval points\s*$", text, re.M)
+if not m:
+    print("FAIL README missing heading ## Human approval points")
+    sys.exit(1)
+rest = text[m.end():]
+nxt = re.search(r"^## ", rest, re.M)
+body = rest[: nxt.start()] if nxt else rest
+body_l = body.lower()
+items = []
+if re.search(r"account|billing|payment|auth login", body_l):
+    items.append("account/billing")
+if re.search(r"launch|org / app|app creation", body_l):
+    items.append("org/app creation")
+if re.search(r"\bdns\b|certs|certificate|acme", body_l):
+    items.append("DNS/certs")
+if len(items) < 3:
+    print("FAIL approval-points section has %d/3 required items (%s)" % (
+        len(items), ",".join(items) or "<none>",
+    ))
+    sys.exit(1)
+print("ok heading +", " ".join(items))
+PY
+}
+
 # ---------------------------------------------------------------------------
 # ①–④ fly.toml contract
 # ---------------------------------------------------------------------------
@@ -388,5 +488,120 @@ set -e
 grep -Eq 'outside /data|/var/lib/docker' "$TMP_ROOT/root.out" "$TMP_ROOT/root.err" \
   || fail "sabotage data-root did not name the path"
 pass "sabotage docker data-root outside /data → RED"
+
+# ---------------------------------------------------------------------------
+# R2 H — entrypoint compose file set includes service `web`
+# ---------------------------------------------------------------------------
+COMPOSE_FILES=()
+while IFS= read -r _cf; do
+  [ -n "$_cf" ] && COMPOSE_FILES+=("$_cf")
+done <<EOF
+$(entrypoint_compose_files "$ENTRYPOINT")
+EOF
+[ "${#COMPOSE_FILES[@]}" -gt 0 ] || fail "entrypoint names no compose -f files"
+web_out="$TMP_ROOT/web.out"
+set +e
+compose_yaml_has_web "${COMPOSE_FILES[@]}" >"$web_out" 2>"$TMP_ROOT/web.err"
+web_ec=$?
+set -e
+[ "$web_ec" -eq 0 ] || {
+  cat "$web_out" >&2
+  cat "$TMP_ROOT/web.err" >&2
+  fail "entrypoint compose file set missing service web"
+}
+pass "entrypoint compose file set includes service web ($(tr '\n' ' ' <"$web_out"))"
+
+if docker compose version >/dev/null 2>&1; then
+  cfg_args=(
+    --env-file "$ROOT/infra/rust/rust-smoke.env.example"
+    --env-file "$ROOT/infra/rust/overlays.env.example"
+  )
+  for f in "${COMPOSE_FILES[@]}"; do
+    cfg_args+=(-f "$ROOT/$f")
+  done
+  set +e
+  cfg_out="$(
+    CDPATH='' cd -- "$ROOT" && docker compose "${cfg_args[@]}" config --services 2>"$TMP_ROOT/cfg.err"
+  )"
+  cfg_ec=$?
+  set -e
+  [ "$cfg_ec" -eq 0 ] || {
+    printf '%s\n' "$cfg_out" >&2
+    cat "$TMP_ROOT/cfg.err" >&2
+    fail "docker compose config --services failed"
+  }
+  printf '%s\n' "$cfg_out" | grep -Fxq 'web' || {
+    printf '%s\n' "$cfg_out" >&2
+    fail "docker compose config --services did not list web"
+  }
+  pass "docker compose config --services lists web"
+else
+  pass "docker compose config --services skipped (docker not available)"
+fi
+
+python3 - "$ENTRYPOINT" "$TMP_ROOT/entrypoint-caddy-only.sh" <<'PY'
+from pathlib import Path
+import sys
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text(encoding="utf-8")
+old = "    -f infra/rust/local.override.yml \\\n"
+if old not in text:
+    raise SystemExit("could not locate local.override.yml -f line to sabotage")
+dst.write_text(text.replace(old, ""), encoding="utf-8")
+PY
+SAB_FILES=()
+while IFS= read -r _cf; do
+  [ -n "$_cf" ] && SAB_FILES+=("$_cf")
+done <<EOF
+$(entrypoint_compose_files "$TMP_ROOT/entrypoint-caddy-only.sh")
+EOF
+set +e
+compose_yaml_has_web "${SAB_FILES[@]}" >"$TMP_ROOT/caddy-only.out" 2>"$TMP_ROOT/caddy-only.err"
+sab_web=$?
+set -e
+[ "$sab_web" -ne 0 ] || fail "sabotage caddy-only compose still PASS — web check is not load-bearing"
+grep -Fq 'web' "$TMP_ROOT/caddy-only.out" "$TMP_ROOT/caddy-only.err" \
+  || fail "sabotage caddy-only did not name web"
+pass "sabotage caddy-only compose (no web) → RED"
+
+# ---------------------------------------------------------------------------
+# R2 M — README human approval points (packet §4)
+# ---------------------------------------------------------------------------
+ap_out="$TMP_ROOT/approval.out"
+set +e
+readme_approval_section "$README" >"$ap_out" 2>"$TMP_ROOT/approval.err"
+ap_ec=$?
+set -e
+[ "$ap_ec" -eq 0 ] || {
+  cat "$ap_out" >&2
+  cat "$TMP_ROOT/approval.err" >&2
+  fail "README human approval points"
+}
+pass "README human approval points ($(tr '\n' ' ' <"$ap_out"))"
+
+python3 - "$README" "$TMP_ROOT/README.no-approval.md" <<'PY'
+import re, sys
+from pathlib import Path
+src, dst = Path(sys.argv[1]), Path(sys.argv[2])
+text = src.read_text(encoding="utf-8")
+new, n = re.subn(
+    r"^## Human approval points\s*\n.*?(?=^## |\Z)",
+    "",
+    text,
+    count=1,
+    flags=re.M | re.S,
+)
+if n != 1:
+    raise SystemExit("could not delete Human approval points section")
+dst.write_text(new, encoding="utf-8")
+PY
+set +e
+readme_approval_section "$TMP_ROOT/README.no-approval.md" >"$TMP_ROOT/no-ap.out" 2>"$TMP_ROOT/no-ap.err"
+sab_ap=$?
+set -e
+[ "$sab_ap" -ne 0 ] || fail "sabotage drop approval-points section still PASS — heading check is not load-bearing"
+grep -Fq 'Human approval points' "$TMP_ROOT/no-ap.out" "$TMP_ROOT/no-ap.err" \
+  || fail "sabotage drop approval section did not name the heading"
+pass "sabotage drop README human-approval section → RED"
 
 printf '[test-fly-recipe] PASS complete\n'

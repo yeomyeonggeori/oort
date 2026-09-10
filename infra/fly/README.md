@@ -2,8 +2,10 @@
 
 T1 recipe: **one Machine + one volume** runs the compose canon this repo
 already ships. Same images, same public-edge contract as
-`infra/rust/docker-compose.rust.yml` + `caddy.override.yml` + `Caddyfile`.
-This directory is **not** a new compose file.
+`infra/rust/docker-compose.rust.yml` + `local.override.yml` (service `web`,
+the T1 `--compose` set doctor `stack.compose_ps` requires) +
+`caddy.override.yml` + `Caddyfile`. This directory is **not** a new compose
+file.
 
 Image pin: `releases/latest.json` (`images.app.ref` + `images.app.digest_list`),
 read by `entrypoint.sh` at first boot. Do not type a digest into `fly.toml`
@@ -91,6 +93,15 @@ fly ssh console -C "bash -lc 'cd /data/oort && scripts/oort doctor --json'"
 **(Optional) Approval point 3 — custom domain.** `fly certs add` is **not**
 used for (A): Caddy ACME issues the cert. The owner points DNS A/AAAA at
 the dedicated IPv4.
+
+## Human approval points
+
+The agent stops at these; the owner uses a browser. Packet §4:
+
+1. Account / billing — `fly auth login`, then a payment method (volume and dedicated IPv4 are paid).
+2. Org / app creation — `fly launch --no-deploy --copy-config`.
+3. DNS / certs — optional custom-domain DNS A/AAAA. Caddy ACME issues the cert on edge (A); `fly certs add` is not used for (A).
+4. Data destruction — `fly apps destroy` (volume wipe confirmation).
 
 ## Day-2 (T1, inside the VM)
 

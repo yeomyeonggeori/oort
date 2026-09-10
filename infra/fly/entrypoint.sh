@@ -16,6 +16,17 @@ DOCKERD_LOG="/var/log/dockerd.log"
 log() { printf '[oort-fly] %s\n' "$*"; }
 die() { printf '[oort-fly] FAIL %s\n' "$*" >&2; exit 1; }
 
+# T1 file set the generator `--compose` path uses (rust.yml + local.override.yml,
+# which defines service `web` — oort_doctor stack.compose_ps) plus the public
+# overlay (caddy.override.yml) so 80/443 ACME still terminates in-VM.
+compose_stack() {
+  docker compose --env-file "${ENV_FILE}" \
+    -f infra/rust/docker-compose.rust.yml \
+    -f infra/rust/local.override.yml \
+    -f infra/rust/caddy.override.yml \
+    "$@"
+}
+
 wait_docker() {
   local i=0
   while [ "$i" -lt 60 ]; do
@@ -60,10 +71,7 @@ shutdown() {
   if [ -f "${ENV_FILE}" ] && [ -d "${REPO_DIR}" ]; then
     (
       CDPATH='' cd -- "${REPO_DIR}" || exit 0
-      docker compose --env-file "${ENV_FILE}" \
-        -f infra/rust/docker-compose.rust.yml \
-        -f infra/rust/caddy.override.yml \
-        stop || true
+      compose_stack stop || true
     )
   fi
   if [ -n "${DOCKERD_PID}" ]; then
@@ -124,13 +132,10 @@ fi
 
 [ -f "${ENV_FILE}" ] || die "env file missing: ${ENV_FILE}"
 
-# Public overlay is the VPS procedure (SELF_HOST.md / SELF_HOST_AGENT.md §3.2):
-# rust.yml + caddy.override.yml. --compose cannot change that file set.
-log "compose up (canonical public overlay)"
-docker compose --env-file "${ENV_FILE}" \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/caddy.override.yml \
-  up -d
+# rust.yml + local.override.yml (`web`) is the T1 `--compose` set doctor
+# stack.compose_ps reads. caddy.override.yml is the public ACME edge (A).
+log "compose up (T1 web + public overlay)"
+compose_stack up -d
 
 log "stack requested; waiting on dockerd pid=${DOCKERD_PID}"
 wait "${DOCKERD_PID}" || true
