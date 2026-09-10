@@ -7,6 +7,7 @@ import { peekFreshSignup, clearFreshSignup } from "./freshSignup";
 import { settleKickoffHold } from "./firstRunGate";
 import {
   WELCOME_BACKSTOP_MS,
+  countActiveAgents,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isWelcomeDecisionPending,
@@ -71,13 +72,15 @@ export function useWelcomeKickoff(input: {
   const hasUnresolvedAuthor =
     directoryStatus === "success" &&
     messages.some((message) => memberFor(directory, message.authorMemberId) == null);
-
-  if (
-    !lockedRef.current &&
+  const activeAgentCount = countActiveAgents(directory.members);
+  const canDecideZeroAgents =
+    directoryStatus === "success" && activeAgentCount === 0;
+  const canDecideKickoff =
     timelineStatus === "ready" &&
     directoryStatus === "success" &&
-    messagesBelongToChannel(messages, channelId)
-  ) {
+    messagesBelongToChannel(messages, channelId);
+
+  if (!lockedRef.current && (canDecideZeroAgents || canDecideKickoff)) {
     const decision = decideWelcomeMount({
       freshSignup: peekFreshSignup(),
       workspaceId,
@@ -86,6 +89,7 @@ export function useWelcomeKickoff(input: {
       channelName,
       timelineStatus,
       directoryStatus,
+      activeAgentCount,
       hasUnresolvedAuthor,
       hasAgentAuthoredMessage: hasAgentAuthoredMessage(messages, authorKind),
       shown: readShownMarker(workspaceId, memberId),
