@@ -717,6 +717,11 @@ pub async fn confirm(
     Path((workspace, connection)): Path<(String, String)>,
     Json(request): Json<ConfirmHostedAgentConnectionRequest>,
 ) -> Result<Response, ApiError> {
+    // ADR-0185 D-C (c2): confirm leaves the row `detected` and the agent
+    // paused. The owner kickoff is enqueued on the later `active` proof in
+    // `auth::authenticate_and_admit_agent_port_credential` (and the OAuth
+    // code exchange), which is the first moment resolve_welcome_target
+    // can return Some for this agent.
     require_human(&principal, "human workspace admin required")?;
     let workspace_id = workspace_scope(&workspace, &principal)?;
     let connection_id = path_uuid(&connection, "invalid hosted connection id")?;

@@ -1,8 +1,15 @@
 //! Welcome kickoff — resolve the default-channel agent and build the job
-//! (ADR-0181).
+//! (ADR-0181, ADR-0185 D-C c2).
 //!
-//! The route layer composes this with `create_agent_run_in_tx` (the worker
-//! does that, not join) and `emit_outbox`. This module owns **no INSERT**.
+//! Native jobs stay on the worker rail (the worker creates the opener run so a
+//! missing provider can post `ProviderRequired` without consuming the opener
+//! marker). Hosted jobs are a gateway job with the run created in-tx, the same
+//! way mentions are (ADR-0185 R2): otherwise the row is undeliverable and the
+//! opener key is stuck forever.
+//!
+//! The one extra write here is `#general` membership for the opener speaker so
+//! `resolve_welcome_target_in_tx` can return `Some` in the same transaction
+//! (D3: the opener speaks in `#general`).
 
 use momo_db::DbError;
 use serde_json::{json, Map, Value};
@@ -37,6 +44,10 @@ pub struct WelcomeTarget {
     pub config: Value,
     pub max_run_steps: i32,
     pub enabled_tools: Vec<String>,
+    /// Any `hosted_agent_connection` row — worker/REST must not drain this agent.
+    pub is_hosted: bool,
+    pub hosted_active_connection_id: Option<Uuid>,
+    pub hosted_channel_approved: bool,
 }
 
 fn upper(id: Uuid) -> String {
@@ -60,11 +71,141 @@ fn stored_welcome_agent(settings: &Value) -> Option<Uuid> {
         .and_then(|value| Uuid::parse_str(value).ok())
 }
 
+/// ADR-0181 D4 opener marker for one human in one workspace.
+pub fn welcome_opener_idempotency_key(workspace_id: Uuid, member_id: Uuid) -> String {
+    RunTrigger::Welcome {
+        workspace_id,
+        member_id,
+        agent_member_id: Uuid::nil(),
+        channel_id: Uuid::nil(),
+        kind: WelcomeKind::Opener,
+    }
+    .idempotency_key()
+}
+
+/// Earliest-created active human with `workspace_membership.role = 'owner'`.
+/// v1 kickoff target is that one person (ADR-0185 §8).
+pub async fn resolve_welcome_owner_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+) -> Result<Option<Uuid>, DbError> {
+    let owner: Option<Uuid> = sqlx::query_scalar(
+        "SELECT m.id \
+           FROM workspace_membership wm \
+           JOIN member m ON m.id = wm.member_id AND m.workspace_id = wm.workspace_id \
+          WHERE wm.workspace_id = $1 \
+            AND wm.role = 'owner' \
+            AND m.kind = 'human' \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL \
+          ORDER BY m.created_at ASC, m.id ASC \
+          LIMIT 1",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(owner)
+}
+
+/// Serialize first-activation / first-join against one opener key.
+pub async fn lock_welcome_opener_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<(), DbError> {
+    let key = welcome_opener_idempotency_key(workspace_id, member_id);
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtext($1::text))")
+        .bind(&key)
+        .execute(&mut *conn)
+        .await?;
+    Ok(())
+}
+
+/// True when an opener is still in flight, or a run already posted the opener
+/// message. A `provider_required` finish (different run key, done outbox row)
+/// does not consume the opener marker.
+pub async fn welcome_opener_already_queued_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+) -> Result<bool, DbError> {
+    let key = welcome_opener_idempotency_key(workspace_id, member_id);
+    let found: Option<i32> = sqlx::query_scalar(
+        "SELECT 1 WHERE EXISTS ( \
+            SELECT 1 FROM outbox \
+             WHERE workspace_id = $1 \
+               AND kind = 'agent_job' \
+               AND payload->>'idempotency_key' = $2 \
+               AND status IN ('pending', 'processing') \
+         ) OR EXISTS ( \
+            SELECT 1 FROM agent_run r \
+             JOIN message m \
+               ON m.workspace_id = r.workspace_id \
+              AND m.run_id = r.id \
+             WHERE r.workspace_id = $1 \
+               AND r.idempotency_key = $2 \
+               AND COALESCE(m.props->>'welcome_kind', '') = 'opener' \
+         )",
+    )
+    .bind(workspace_id)
+    .bind(&key)
+    .fetch_optional(&mut *conn)
+    .await?;
+    Ok(found.is_some())
+}
+
+/// Put the opener speaker in `#general` (D3). Returns whether this write
+/// created or restored a membership (for the native-create audit count).
+pub async fn ensure_agent_in_general_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    agent_member_id: Uuid,
+) -> Result<bool, DbError> {
+    let already: bool = sqlx::query_scalar(
+        "SELECT EXISTS ( \
+            SELECT 1 FROM membership ms \
+             JOIN channel c ON c.id = ms.channel_id AND c.workspace_id = ms.workspace_id \
+            WHERE ms.workspace_id = $1 \
+              AND ms.member_id = $2 \
+              AND c.kind = 'public' \
+              AND c.name = 'general' \
+              AND c.archived_at IS NULL \
+              AND ms.left_at IS NULL \
+         )",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .fetch_one(&mut *conn)
+    .await?;
+    sqlx::query(
+        "INSERT INTO membership (workspace_id, channel_id, member_id, role) \
+         SELECT $1, id, $2, 'member' \
+           FROM channel \
+          WHERE workspace_id = $1 \
+            AND kind = 'public' \
+            AND name = 'general' \
+            AND archived_at IS NULL \
+          ORDER BY created_at ASC, id ASC \
+          LIMIT 1 \
+         ON CONFLICT (channel_id, member_id) DO UPDATE SET left_at = NULL \
+           WHERE membership.workspace_id = EXCLUDED.workspace_id",
+    )
+    .bind(workspace_id)
+    .bind(agent_member_id)
+    .execute(&mut *conn)
+    .await?;
+    Ok(!already)
+}
+
 /// Default channel `#general`, plus the welcome agent (settings override, else
-/// first active native agent in that channel).
+/// `prefer_agent_member_id`, else first deliverable agent in that channel).
+/// Hosted agents that cannot be delivered (gate closed, not active, or
+/// `#general` unapproved) are skipped so they never consume the opener marker.
 pub async fn resolve_welcome_target_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
+    hosted_delivery_enabled: bool,
+    prefer_agent_member_id: Option<Uuid>,
 ) -> Result<Option<WelcomeTarget>, DbError> {
     let settings: Value = sqlx::query_scalar("SELECT settings FROM workspace WHERE id = $1")
         .bind(workspace_id)
@@ -86,8 +227,15 @@ pub async fn resolve_welcome_target_in_tx(
     let Some(channel_id) = channel_id else {
         return Ok(None);
     };
-    let specified = stored_welcome_agent(&settings);
-    let agent = load_welcome_agent_in_tx(conn, workspace_id, channel_id, specified).await?;
+    let specified = stored_welcome_agent(&settings).or(prefer_agent_member_id);
+    let agent = load_welcome_agent_in_tx(
+        conn,
+        workspace_id,
+        channel_id,
+        specified,
+        hosted_delivery_enabled,
+    )
+    .await?;
     let Some(agent) = agent else {
         return Ok(None);
     };
@@ -101,6 +249,9 @@ pub async fn resolve_welcome_target_in_tx(
         config: agent.config,
         max_run_steps: agent.max_run_steps,
         enabled_tools: agent.enabled_tools,
+        is_hosted: agent.is_hosted,
+        hosted_active_connection_id: agent.hosted_active_connection_id,
+        hosted_channel_approved: agent.hosted_channel_approved,
     }))
 }
 
@@ -112,6 +263,18 @@ struct WelcomeAgent {
     config: Value,
     max_run_steps: i32,
     enabled_tools: Vec<String>,
+    is_hosted: bool,
+    hosted_active_connection_id: Option<Uuid>,
+    hosted_channel_approved: bool,
+}
+
+fn hosted_agent_is_deliverable(agent: &WelcomeAgent, hosted_delivery_enabled: bool) -> bool {
+    if !agent.is_hosted {
+        return true;
+    }
+    hosted_delivery_enabled
+        && agent.hosted_active_connection_id.is_some()
+        && agent.hosted_channel_approved
 }
 
 async fn load_welcome_agent_in_tx(
@@ -119,14 +282,44 @@ async fn load_welcome_agent_in_tx(
     workspace_id: Uuid,
     channel_id: Uuid,
     specified: Option<Uuid>,
+    hosted_delivery_enabled: bool,
 ) -> Result<Option<WelcomeAgent>, DbError> {
-    let row = sqlx::query(
+    let rows = sqlx::query(
         "SELECT m.id, a.model, a.system_prompt, a.max_run_steps, a.tool_schema, a.config, \
                 ap.instructions, ap.enabled_tools, ap.version AS profile_version, \
                 EXISTS (SELECT 1 FROM agent_card_registration acr \
                          WHERE acr.workspace_id = m.workspace_id \
                            AND acr.agent_member_id = m.id \
-                           AND acr.status = 'confirmed') AS is_external_runtime \
+                           AND acr.status = 'confirmed') AS is_external_runtime, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                         WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id) \
+                  AS is_hosted, \
+                (SELECT hc.id FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                  ORDER BY hc.id LIMIT 1) AS hosted_active_connection_id, \
+                EXISTS (SELECT 1 FROM hosted_agent_connection hc \
+                   JOIN token t ON t.workspace_id = hc.workspace_id \
+                                AND t.id = hc.active_token_id \
+                  WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
+                    AND hc.status = 'active' AND hc.proved_at IS NOT NULL \
+                    AND t.kind = 'agent_bearer' \
+                    AND t.credential_class IN ('hosted_active','hosted_oauth_access') \
+                    AND t.revoked_at IS NULL \
+                    AND (t.expires_at IS NULL OR t.expires_at > now()) \
+                    AND t.hosted_connection_id = hc.id \
+                    AND t.actor_member_id = hc.agent_member_id \
+                    AND t.audience = '/v1/mcp/agent-port' \
+                    AND $2 = ANY(hc.approved_channel_ids)) AS hosted_channel_approved \
            FROM member m \
            JOIN agent a ON a.member_id = m.id AND a.workspace_id = m.workspace_id \
            LEFT JOIN agent_profile ap \
@@ -136,10 +329,6 @@ async fn load_welcome_agent_in_tx(
             AND m.status = 'active' \
             AND m.deleted_at IS NULL \
             AND COALESCE(ap.paused, false) = false \
-            AND NOT EXISTS ( \
-                  SELECT 1 FROM hosted_agent_connection hc \
-                   WHERE hc.workspace_id = m.workspace_id AND hc.agent_member_id = m.id \
-                ) \
             AND EXISTS ( \
                   SELECT 1 FROM membership ms \
                    WHERE ms.channel_id = $2 \
@@ -147,46 +336,54 @@ async fn load_welcome_agent_in_tx(
                      AND ms.left_at IS NULL \
                 ) \
             AND ($3::uuid IS NULL OR m.id = $3) \
-          ORDER BY m.created_at ASC, m.id ASC \
-          LIMIT 1",
+          ORDER BY m.created_at ASC, m.id ASC",
     )
     .bind(workspace_id)
     .bind(channel_id)
     .bind(specified)
-    .fetch_optional(&mut *conn)
+    .fetch_all(&mut *conn)
     .await?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let profile_version: Option<i32> = row.try_get("profile_version")?;
-    let instructions: Option<String> = row.try_get("instructions")?;
-    let enabled_tools: Option<Value> = row.try_get("enabled_tools")?;
-    let enabled_tools: Vec<String> = enabled_tools
-        .as_ref()
-        .and_then(Value::as_array)
-        .map(|entries| {
-            entries
-                .iter()
-                .filter_map(|entry| entry.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_default();
-    let base_system_prompt: Option<String> = row.try_get("system_prompt")?;
-    let is_external_runtime: bool = row.try_get("is_external_runtime")?;
-    let profile_instructions = profile_version.map(|_| instructions.unwrap_or_default());
-    Ok(Some(WelcomeAgent {
-        member_id: row.try_get("id")?,
-        model: row.try_get("model")?,
-        system_prompt: effective_system_prompt(
-            base_system_prompt.as_deref(),
-            profile_instructions.as_deref(),
-            !is_external_runtime,
-        ),
-        tool_schema: row.try_get("tool_schema")?,
-        config: row.try_get("config")?,
-        max_run_steps: row.try_get("max_run_steps")?,
-        enabled_tools,
-    }))
+    for row in rows {
+        let profile_version: Option<i32> = row.try_get("profile_version")?;
+        let instructions: Option<String> = row.try_get("instructions")?;
+        let enabled_tools: Option<Value> = row.try_get("enabled_tools")?;
+        let enabled_tools: Vec<String> = enabled_tools
+            .as_ref()
+            .and_then(Value::as_array)
+            .map(|entries| {
+                entries
+                    .iter()
+                    .filter_map(|entry| entry.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let base_system_prompt: Option<String> = row.try_get("system_prompt")?;
+        let is_external_runtime: bool = row.try_get("is_external_runtime")?;
+        let profile_instructions = profile_version.map(|_| instructions.unwrap_or_default());
+        let agent = WelcomeAgent {
+            member_id: row.try_get("id")?,
+            model: row.try_get("model")?,
+            system_prompt: effective_system_prompt(
+                base_system_prompt.as_deref(),
+                profile_instructions.as_deref(),
+                !is_external_runtime,
+            ),
+            tool_schema: row.try_get("tool_schema")?,
+            config: row.try_get("config")?,
+            max_run_steps: row.try_get("max_run_steps")?,
+            enabled_tools,
+            is_hosted: row.try_get("is_hosted")?,
+            hosted_active_connection_id: row.try_get("hosted_active_connection_id")?,
+            hosted_channel_approved: row.try_get("hosted_channel_approved")?,
+        };
+        if hosted_agent_is_deliverable(&agent, hosted_delivery_enabled) {
+            return Ok(Some(agent));
+        }
+        if specified.is_some() {
+            return Ok(None);
+        }
+    }
+    Ok(None)
 }
 
 pub fn welcome_run_input(
@@ -219,6 +416,7 @@ pub fn welcome_job_payload(
     kind: WelcomeKind,
     delivery: &str,
     created_at_ms: i64,
+    run_id: Option<Uuid>,
 ) -> Value {
     let trigger = RunTrigger::Welcome {
         workspace_id,
@@ -255,6 +453,9 @@ pub fn welcome_job_payload(
     payload.insert("welcome_kind".into(), json!(kind.as_key()));
     payload.insert("created_at_ms".into(), json!(created_at_ms));
     payload.insert("idempotency_key".into(), json!(trigger.idempotency_key()));
+    if let Some(run_id) = run_id {
+        payload.insert("run_id".into(), json!(upper(run_id)));
+    }
     if let Some(system_prompt) = target
         .system_prompt
         .as_deref()
@@ -287,6 +488,29 @@ mod tests {
         assert_eq!(
             stored_prompt(&json!({"welcome_prompt": "직접 편집한 프롬프트"})),
             "직접 편집한 프롬프트"
+        );
+    }
+
+    #[test]
+    fn opener_key_is_per_workspace_member_and_ignores_agent() {
+        let workspace = Uuid::from_u128(1);
+        let member = Uuid::from_u128(2);
+        let key = welcome_opener_idempotency_key(workspace, member);
+        assert_eq!(
+            key,
+            RunTrigger::Welcome {
+                workspace_id: workspace,
+                member_id: member,
+                agent_member_id: Uuid::from_u128(99),
+                channel_id: Uuid::from_u128(7),
+                kind: WelcomeKind::Opener,
+            }
+            .idempotency_key()
+        );
+        assert!(key.contains(":opener:v1"));
+        assert_ne!(
+            key,
+            welcome_opener_idempotency_key(workspace, Uuid::from_u128(3))
         );
     }
 }
