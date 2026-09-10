@@ -591,6 +591,18 @@ NOSTAMP_DUMP="$(awk -F': ' '$1 == "[oort backup] path" { print $2; exit }' "$NOS
 assert_no_secret_leak "no stamp tier t2" "$NOSTAMP_OUT" "$NOSTAMP_ERR"
 pass "no stamp + --tier t2 accepted"
 
+LOGS_T2_OUT="$SANDBOX/logs-t2-nostamp.out"
+LOGS_T2_ERR="$SANDBOX/logs-t2-nostamp.err"
+code="$(run_cmd "$LOGS_T2_OUT" "$LOGS_T2_ERR" "$OORT" logs --tier t2 --env "$NOSTAMP")"
+[ "$code" = "0" ] || fail "logs --tier t2 stampless exit $code stdout=$(cat "$LOGS_T2_OUT") stderr=$(cat "$LOGS_T2_ERR")"
+grep -Fq 'T2 로그는 compose 가 아니다. 플랫폼 레시피 CLI/MCP 로 서비스 로그를 보라.' \
+  "$LOGS_T2_OUT" "$LOGS_T2_ERR" || \
+  fail "logs --tier t2 stampless missing platform CLI line: $(cat "$LOGS_T2_OUT") $(cat "$LOGS_T2_ERR")"
+grep -Eqi 'compose logs|docker compose' "$LOGS_T2_OUT" "$LOGS_T2_ERR" && \
+  fail "logs --tier t2 stampless fell into compose logs: $(cat "$LOGS_T2_OUT") $(cat "$LOGS_T2_ERR")"
+assert_no_secret_leak "logs t2 nostamp" "$LOGS_T2_OUT" "$LOGS_T2_ERR"
+pass "logs --tier t2 on stampless env prints platform CLI guidance and exits 0"
+
 # Failed T2 backup must not leave a 0-byte dump.
 SAB_ENV="$SANDBOX/t2-sabotage.env"
 awk -v url="$T2_URL" '
@@ -629,5 +641,30 @@ grep -Eqi '볼륨이 없다|oort_require_volumes|compose pull|compose build|comp
   fail "T2 upgrade invoked compose/volumes: $(cat "$UP_OUT") $(cat "$UP_ERR")"
 assert_no_secret_leak "t2 upgrade" "$UP_OUT" "$UP_ERR"
 pass "T2 upgrade --no-backup prints digest replace; no volume/compose"
+
+T2_DONE_LINE='완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS'
+rest_done="$(grep -h -F "$T2_DONE_LINE" "$T2_REST_OUT" "$T2_REST_ERR" | head -1)"
+up_done="$(grep -h -F "$T2_DONE_LINE" "$UP_OUT" "$UP_ERR" | head -1)"
+[ "$rest_done" = "$T2_DONE_LINE" ] || \
+  fail "T2 restore done line missing/mismatch: ${rest_done}"
+[ "$up_done" = "$T2_DONE_LINE" ] || \
+  fail "T2 upgrade done line missing/mismatch: ${up_done}"
+[ "$rest_done" = "$up_done" ] || \
+  fail "T2 restore done line != upgrade: restore=${rest_done} upgrade=${up_done}"
+literal_files="$(grep -l -F "$T2_DONE_LINE" \
+  "$REPO_ROOT/scripts/lib/pg_dump_custom.sh" \
+  "$REPO_ROOT/scripts/lib/oort_day2.sh" \
+  "$REPO_ROOT/scripts/self_host_pg_restore.sh" || true)"
+printf '%s\n' "$literal_files" | grep -Fq 'pg_dump_custom.sh' || \
+  fail "done-condition literal missing from pg_dump_custom.sh"
+printf '%s\n' "$literal_files" | grep -Fq 'oort_day2.sh' && \
+  fail "done-condition literal leaked into oort_day2.sh (use momo_t2_done_condition_line)"
+printf '%s\n' "$literal_files" | grep -Fq 'self_host_pg_restore.sh' && \
+  fail "done-condition literal leaked into self_host_pg_restore.sh (use momo_t2_done_condition_line)"
+grep -Fq 'momo_t2_done_condition_line' "$REPO_ROOT/scripts/lib/oort_day2.sh" || \
+  fail "oort_day2.sh does not call momo_t2_done_condition_line"
+grep -Fq 'momo_t2_done_condition_line' "$REPO_ROOT/scripts/self_host_pg_restore.sh" || \
+  fail "self_host_pg_restore.sh does not call momo_t2_done_condition_line"
+pass "T2 restore and upgrade share the same done-condition line"
 
 echo "[oort-day2-test] PASS: $CASES case(s)"

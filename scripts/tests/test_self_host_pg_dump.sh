@@ -157,4 +157,27 @@ grep -Fq 'momo_pg_restore_custom_url' "$ROOT/scripts/lib/pg_dump_custom.sh" || \
   fail "momo_pg_restore_custom_url missing from pg_dump_custom.sh"
 pass "URL dump/restore helpers live only in pg_dump_custom.sh"
 
+# 8. URL dump failure passes pg_dump's rc through (not a hardcoded 1).
+fixture="$(make_fixture url-rc)"
+printf '\nMIGRATE_DATABASE_URL=postgres://momo:super-secret-do-not-print@127.0.0.1:1/momo\n' \
+  >>"$fixture/infra/rust/local.secrets.env"
+cat >"$fixture/fake-bin/pg_dump" <<'EOF'
+#!/usr/bin/env sh
+echo "pg_dump: fake fail" >&2
+exit 3
+EOF
+chmod +x "$fixture/fake-bin/pg_dump"
+url_rc=0
+set +e
+run_dump "$fixture" --migrate-url --output-dir "$fixture/url-out" \
+  >"$fixture/url-rc.out" 2>"$fixture/url-rc.err"
+url_rc=$?
+set -e
+[ "$url_rc" = "3" ] || fail "URL dump failure rc=$url_rc want 3 (pg_dump rc); stderr=$(cat "$fixture/url-rc.err")"
+leftover="$(find "$fixture/url-out" -type f -name '*.dump' 2>/dev/null | wc -l | tr -d '[:space:]')"
+[ "$leftover" = "0" ] || fail "failed URL dump left dump file(s): $(ls -la "$fixture/url-out" 2>/dev/null || true)"
+grep -Eqi 'super-secret|password=' "$fixture/url-rc.out" "$fixture/url-rc.err" && \
+  fail "URL dump failure leaked a secret"
+pass "URL dump failure passes pg_dump rc=3; no leftover dump"
+
 echo "PASS: self-host pg_dump contract"

@@ -303,10 +303,13 @@ code="$(run_doctor "$UNK" "$OUT" "$ERR" --json)"
 validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OUT")"
 [ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
   fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
+UNK_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
+[ "$UNK_COUNT" = "33" ] || \
+  fail "unknown platform check id count ${UNK_COUNT} != 33 (env.platform extra on the normal 32)"
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "unknown platform leaked password"
 fi
-pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail"
+pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 33 ids"
 
 # -----------------------------------------------------------------------------
 # 5. outbox oracle: push_candidate|pending is non-failing without a push relay
@@ -426,7 +429,12 @@ printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
 T1_IDS="$SANDBOX/t1.ids"
 jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 # status --json includes the same checks as doctor plus image; ids come from doctor.
+# Normal case is 32. 33 is not the happy path:
+#   - stack.migrate_files (info) when server/Migrations and /opt/momo/migrations
+#     are both missing (see the missing-dir probe above)
+#   - env.platform (fail) when MOMO_SELF_HOST_PLATFORM is not a platform_profiles row
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
+[ "$T1_COUNT" = "32" ] || fail "T1 check id count ${T1_COUNT} != 32 (normal case)"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
@@ -523,8 +531,31 @@ HEALTHZ_BODY="$(curl -sS -m 2 "http://127.0.0.1:${MOCK_PORT}/healthz")"
 printf '%s' "$HEALTHZ_BODY" | jq -e '.status=="ok" and .service=="momo-server" and .database=="ok" and (.schema|type=="object")' >/dev/null || \
   fail "mock /healthz missing schema or original fields: $HEALTHZ_BODY"
 
+# Fixture-side mock: a skip-list host is not a T2 origin. Bind the HTTP
+# server on 127.0.0.1 and rewrite a public fixture hostname via PATH curl.
+T2_FIXTURE_HOST="t2.example.test"
+T2_FIXTURE_ORIGIN="http://${T2_FIXTURE_HOST}:${MOCK_PORT}"
+REAL_CURL="$(command -v curl)"
+mkdir -p "$SANDBOX/bin"
+cat >"$SANDBOX/bin/curl" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+args=()
+for a in "\$@"; do
+  case "\$a" in
+    *://${T2_FIXTURE_HOST}*)
+      a="\${a//${T2_FIXTURE_HOST}/127.0.0.1}"
+      ;;
+  esac
+  args+=("\$a")
+done
+exec "$REAL_CURL" "\${args[@]}"
+EOF
+chmod +x "$SANDBOX/bin/curl"
+export PATH="$SANDBOX/bin:$PATH"
+
 T2_ENV="$SANDBOX/t2.env"
-awk -v url="$T2_URL" -v origin="http://127.0.0.1:${MOCK_PORT}" '
+awk -v url="$T2_URL" -v origin="$T2_FIXTURE_ORIGIN" '
   index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
   index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 {
     print "CENTRIFUGO_ALLOWED_ORIGINS=tauri://localhost http://tauri.localhost " origin
@@ -539,11 +570,39 @@ OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/t2-origin-norm.XXXXXX")"
 export OORT_DOCTOR_ENV_NORM
 oort_doctor_load_env "$T2_ENV"
 picked="$(oort_doctor_t2_http_origin)"
-printf '%s' "$picked" | grep -Fq "http://127.0.0.1:${MOCK_PORT}" || \
-  fail "T2 origin picker want mock origin, got ${picked}"
+[ "$picked" = "$T2_FIXTURE_ORIGIN" ] || \
+  fail "T2 origin picker want fixture origin ${T2_FIXTURE_ORIGIN}, got ${picked}"
 printf '%s' "$picked" | grep -Fq 'tauri.localhost' && \
   fail "T2 origin picker chose tauri: ${picked}"
-pass "T2 origin picker skips tauri:// and http://tauri.localhost"
+printf '%s' "$picked" | grep -Fq '127.0.0.1' && \
+  fail "T2 origin picker chose loopback: ${picked}"
+pass "T2 origin picker skips tauri:// and loopback; fixture origin is picked"
+
+LOOP_ENV="$SANDBOX/t2-loopback-only.env"
+awk -v url="$T2_URL" -v origin="http://127.0.0.1:${MOCK_PORT}" '
+  index($0, "MIGRATE_DATABASE_URL=") == 1 { print "MIGRATE_DATABASE_URL=" url; next }
+  index($0, "CENTRIFUGO_ALLOWED_ORIGINS=") == 1 {
+    print "CENTRIFUGO_ALLOWED_ORIGINS=tauri://localhost http://tauri.localhost http://localhost:18088 " origin
+    next
+  }
+  { print }
+' "$VALID" >"$LOOP_ENV"
+printf '\nMOMO_SELF_HOST_PLATFORM=railway\n' >>"$LOOP_ENV"
+chmod 600 "$LOOP_ENV"
+OORT_DOCTOR_ENV_NORM="$(mktemp "$SANDBOX/t2-loop-norm.XXXXXX")"
+export OORT_DOCTOR_ENV_NORM
+oort_doctor_load_env "$LOOP_ENV"
+picked="$(oort_doctor_t2_http_origin)"
+[ -z "$picked" ] || \
+  fail "loopback-only T2 origin picker must be empty (fail-closed), got ${picked}"
+LOOP_OUT="$SANDBOX/t2-loopback.json"
+LOOP_ERR="$SANDBOX/t2-loopback.err"
+loop_code="$(run_doctor "$LOOP_ENV" "$LOOP_OUT" "$LOOP_ERR" --json --tier t2)"
+[ "$(check_field "$LOOP_OUT" stack.healthz status)" = "fail" ] || \
+  fail "loopback-only T2 healthz want fail, got $(check_field "$LOOP_OUT" stack.healthz status) $(check_field "$LOOP_OUT" stack.healthz detail)"
+printf '%s' "$(check_field "$LOOP_OUT" stack.healthz detail)" | grep -Fq 'T2 공개 오리진 없음' || \
+  fail "loopback-only T2 healthz should name missing public origin: $(check_field "$LOOP_OUT" stack.healthz detail)"
+pass "loopback-only env: T2 origin picker fail-closed (empty); healthz fail (exit ${loop_code})"
 
 OUT="$SANDBOX/t2-doctor.json"
 ERR="$SANDBOX/t2-doctor.err"
@@ -552,6 +611,7 @@ validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
 T2_IDS="$SANDBOX/t2.ids"
 jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
 T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
+[ "$T2_COUNT" = "32" ] || fail "T2 check id count ${T2_COUNT} != 32 (normal case)"
 [ "$T1_COUNT" = "$T2_COUNT" ] || \
   fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
 cmp -s "$T1_IDS" "$T2_IDS" || \
