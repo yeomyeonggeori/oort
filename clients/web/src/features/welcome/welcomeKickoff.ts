@@ -82,6 +82,7 @@ export type WelcomeMountReason =
   | "not-default-channel"
   | "timeline-not-ready"
   | "directory-not-ready"
+  | "no-active-agent"
   | "unresolved-author"
   | "has-agent-message"
   | "already-shown";
@@ -98,6 +99,7 @@ export function decideWelcomeMount(input: {
   channelName?: string;
   timelineStatus: "loading" | "ready" | "error";
   directoryStatus: "pending" | "success" | "error";
+  activeAgentCount: number;
   hasUnresolvedAuthor: boolean;
   hasAgentAuthoredMessage: boolean;
   shown: boolean;
@@ -111,6 +113,12 @@ export function decideWelcomeMount(input: {
   if (!uuidEq(input.freshSignup.memberId, input.memberId)) {
     return { show: false, reason: "wrong-member" };
   }
+  if (input.directoryStatus !== "success") {
+    return { show: false, reason: "directory-not-ready" };
+  }
+  if (input.activeAgentCount === 0) {
+    return { show: false, reason: "no-active-agent" };
+  }
   if (
     !isDefaultWelcomeChannel({
       kind: input.channelKind,
@@ -122,9 +130,6 @@ export function decideWelcomeMount(input: {
   if (input.timelineStatus !== "ready") {
     return { show: false, reason: "timeline-not-ready" };
   }
-  if (input.directoryStatus !== "success") {
-    return { show: false, reason: "directory-not-ready" };
-  }
   if (input.hasUnresolvedAuthor) {
     return { show: false, reason: "unresolved-author" };
   }
@@ -135,6 +140,15 @@ export function decideWelcomeMount(input: {
     return { show: false, reason: "already-shown" };
   }
   return { show: true };
+}
+
+/** Directory members the kickoff already has. Invited/suspended do not count. */
+export function countActiveAgents(
+  members: readonly { kind: string; status: string }[]
+): number {
+  return members.filter(
+    (member) => member.kind === "agent" && member.status === "active"
+  ).length;
 }
 
 export function hasAgentAuthoredMessage(

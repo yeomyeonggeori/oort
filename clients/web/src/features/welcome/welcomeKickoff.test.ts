@@ -10,6 +10,7 @@ import {
   WELCOME_SHOWN_STORAGE_PREFIX,
   WELCOME_STAGE_COPY,
   WELCOME_KICKOFF_SHAPES,
+  countActiveAgents,
   decideWelcomeMount,
   hasAgentAuthoredMessage,
   isDefaultWelcomeChannel,
@@ -41,6 +42,7 @@ function mount(over: Partial<Parameters<typeof decideWelcomeMount>[0]> = {}) {
     channelName: "general",
     timelineStatus: "ready",
     directoryStatus: "success",
+    activeAgentCount: 1,
     hasUnresolvedAuthor: false,
     hasAgentAuthoredMessage: false,
     shown: false,
@@ -159,6 +161,49 @@ describe("decideWelcomeMount early returns", () => {
 
   it("show when every gate holds", () => {
     expect(mount()).toEqual({ show: true });
+  });
+
+  it("no-active-agent releases hold before the opener stage", () => {
+    expect(mount({ activeAgentCount: 0 })).toEqual({
+      show: false,
+      reason: "no-active-agent",
+    });
+  });
+
+  it("no-active-agent does not wait for the default channel or timeline", () => {
+    expect(
+      mount({
+        activeAgentCount: 0,
+        channelName: "엔진",
+        timelineStatus: "loading",
+      })
+    ).toEqual({ show: false, reason: "no-active-agent" });
+  });
+
+  it("one active agent still mounts when every other gate holds", () => {
+    expect(mount({ activeAgentCount: 1 })).toEqual({ show: true });
+  });
+});
+
+describe("countActiveAgents", () => {
+  it("counts only kind=agent and status=active", () => {
+    expect(countActiveAgents([])).toBe(0);
+    expect(
+      countActiveAgents([{ kind: "human", status: "active" }])
+    ).toBe(0);
+    expect(
+      countActiveAgents([{ kind: "agent", status: "invited" }])
+    ).toBe(0);
+    expect(
+      countActiveAgents([{ kind: "agent", status: "active" }])
+    ).toBe(1);
+    expect(
+      countActiveAgents([
+        { kind: "human", status: "active" },
+        { kind: "agent", status: "active" },
+        { kind: "agent", status: "suspended" },
+      ])
+    ).toBe(1);
   });
 });
 
