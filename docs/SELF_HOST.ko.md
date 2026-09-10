@@ -442,7 +442,7 @@ Agent Port 합류([`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.16) 뒤
 닫힘)를 쓰고 **api** 와 **webhook-sender** 를 재시작한다.
 `scripts/self_host_env.sh` 가 만든 신규 env 는 이미 그 줄을 쓴다. 기존
 env 는 백필하지 않는다. `--platform railway`(별칭 `--railway`)는 이 키를
-내지 않는다(41키 집합 유지 — heredoc 에 넣으면 doctor 가 기존 설치마다 그 줄을 요구한다).
+내지 않는다(43키 집합 유지 — heredoc 에 넣으면 doctor 가 기존 설치마다 그 줄을 요구한다).
 게이트 두 줄을 넣는 awk 는
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 에 있다 — 여기다
 붙이지 말고 그 블록을 실행한다.
@@ -720,9 +720,9 @@ day-2 v2를 기다린다); **T3**은 엣지 전용, 컴퓨트가 아니다. 행�
 
 모든 플랫폼의 env 파생은 **생성기 플래그 하나가 표 하나를 읽는다** —
 `scripts/self_host_env.sh`의 `platform_profiles`. 정본 키 집합(생성기
-heredoc + `oort_public_edge_env_keys`, 41키)은 늘지 않는다: T1 행은 heredoc
+heredoc + `oort_public_edge_env_keys`, 43키)은 늘지 않는다: T1 행은 heredoc
 밖에 `MOMO_SELF_HOST_PLATFORM=<name>`을 더하고, T2 행은 정본 집합에 같은
-스탬프를 heredoc 밖에 더한다(stdout 42; doctor `env.required_keys`는 41).
+스탬프를 heredoc 밖에 더한다(stdout 44; doctor `env.required_keys`는 43).
 
 | `--platform` | Tier | 공개 오리진 소스 | Postgres | 손으로 넣는 키 | 출력 |
 |---|---|---|---|---|---|
