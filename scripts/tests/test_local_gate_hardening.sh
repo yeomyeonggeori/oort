@@ -426,3 +426,43 @@ grep -Fq 'no qualified YAML reader' "$SPEC_SANDBOX/none.err" \
 grep -Fq 'ruby  :' "$SPEC_SANDBOX/none.err" || fail "ruby 갈래 실격 사유가 없다"
 grep -Fq 'python:' "$SPEC_SANDBOX/none.err" || fail "python 갈래 실격 사유가 없다"
 echo "[local-gate-hardening-test] PASS spec->json 리더 부재 정직한 실패 (#1185)"
+
+# #1984 / #2124: docs-profile wiring locks. Removing these from local_gate.sh
+# is a coverage hole, not a quieter gate. Locks must match an uncommented
+# add_cmd_once line — a leading `#` is a coverage hole, not a keep (R2).
+LOCAL_GATE="$REPO_ROOT/scripts/local_gate.sh"
+grep -Eq '^[[:space:]]*add_cmd_once "release manifest drift \(#1984\)"' \
+  "$LOCAL_GATE" \
+  || fail "docs profile does not run scripts/check_release_manifest.sh (#1984)"
+grep -Eq '^[[:space:]]*add_cmd_once "release manifest contract"' \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped the release-manifest harness"
+grep -Eq '^[[:space:]]*add_cmd_once "self-host day-2 contract \(#2124\)"' \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped test_oort_day2.sh (#2124)"
+grep -Eq '^[[:space:]]*add_cmd_once "oort doctor contract \(#2124\)"' \
+  "$LOCAL_GATE" \
+  || fail "docs profile dropped test_oort_doctor.sh (#2124)"
+grep -Eq '^[[:space:]]*add_cmd_once "oort dispatcher/day-2 bash -n \+ shellcheck \(#2124\)"' \
+  "$LOCAL_GATE" \
+  || fail "oort dispatcher/libs are not under bash -n + shellcheck in local_gate (#2124)"
+oort_cmd="$(grep -E '^[[:space:]]*add_cmd_once "oort dispatcher/day-2 bash -n \+ shellcheck \(#2124\)"' "$LOCAL_GATE")"
+printf '%s\n' "$oort_cmd" | grep -Fq 'for f in scripts/oort' \
+  || fail "oort bash -n must iterate files — bash -n a b c d parses only the first (R2)"
+printf '%s\n' "$oort_cmd" | grep -Fq 'bash -n "$f"' \
+  || fail "oort bash -n must run per file (R2)"
+printf '%s\n' "$oort_cmd" | grep -Fq 'shellcheck -x scripts/oort' \
+  || fail "shellcheck -x still required on the uncommented oort step (#2124)"
+syntax_cmd="$(grep -E '^[[:space:]]*add_cmd_once "shell syntax"' "$LOCAL_GATE")"
+printf '%s\n' "$syntax_cmd" | grep -Fq 'bash -n "$f" ||' \
+  || fail "shell syntax loop must fail closed on bash -n (R2)"
+for oort_sh in \
+  scripts/oort \
+  scripts/lib/oort_common.sh \
+  scripts/lib/oort_day2.sh \
+  scripts/lib/oort_doctor.sh \
+  scripts/check_release_manifest.sh
+do
+  grep -Fq "$oort_sh" "$LOCAL_GATE" || fail "$oort_sh missing from local_gate allowlist"
+done
+echo "[local-gate-hardening-test] PASS docs profile check_release_manifest live run + oort day-2 wiring (#1984 #2124)"

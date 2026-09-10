@@ -726,7 +726,8 @@ validate` 가 실패한다. 그것이 ACME 오발사 차단의 실체다. 이 �
 호스트에서 compose 를 직접 호출한다:
 
 ```sh
-docker compose --env-file infra/rust/local.secrets.env \
+ENV_FILE=infra/rust/local.secrets.env
+docker compose --env-file "$ENV_FILE" \
   -f infra/rust/docker-compose.rust.yml \
   -f infra/rust/caddy.override.yml up -d
 ```
