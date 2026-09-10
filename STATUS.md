@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## SH-11e-2 런타임 이미지 day-2 도구 (#2346, 2026-09-10)
+
+- Track engine. `feat/2346-image-day2-tools` onto `origin/track/engine`. 선택 A: PGDG `postgresql-client-18=18.6-1.pgdg12+2`(키 ACCC4CF8 sha256 핀, curl|sh 없음) + `python3`(json; `python3-minimal`은 json 없음). apt-layer 실측 47599335 → 59871688 B (**+11.70 MiB**). 풀 이미지 inspect 78807654 → 91229002 B (**+11.85 MiB**, 예산 60 MiB).
+- 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
+- runtime-unverified: Railway one-off 실측은 SH-11a.
+
 ## SH-12d-e 첫 에이전트 활성 전이 오너 킥오프 (#2334, 2026-09-10)
 
 - Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 배달 가능한 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.

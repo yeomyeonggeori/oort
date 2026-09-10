@@ -63,8 +63,11 @@ migrate는 `docker-compose.backup.yml`의 continuous WAL + encrypted pgBackRest 
 `infra/rust/sql/bootstrap_roles.sql`, `infra/rust/sql/bootstrap_runtime_roles.sql`,
 `infra/rust/sql/set_initial_owner.sql`, `infra/rust/sql/bootstrap_owner_if_absent.sql`(#1227),
 LICENSE/NOTICE. 런타임 베이스는
-`debian:bookworm-slim` + **`postgresql-client`** — 마이그레이션 러너가 psql로
-shell-out 하기 때문이다(002/006/012가 psql 메타커맨드 `\if`/`\getenv`를 쓴다. B0 교훈).
+`debian:bookworm-slim` + PGDG **`postgresql-client-18`** (핀 `18.6-1.pgdg12+2`) +
+**`python3`**(json) — 마이그레이션 러너가 psql로 shell-out 하기 때문이고(002/006/012가
+psql 메타커맨드 `\if`/`\getenv`를 쓴다. B0 교훈), T2 이미지 안 `oort backup` /
+`oort doctor --json` 이 PG18 서버에 대해 돌아야 하기 때문이다(#2346). bookworm
+기본 `postgresql-client` 는 15.x 라 `pg_dump` 가 PG18 을 거부한다.
 
 ## 2. 준비
 
@@ -361,9 +364,9 @@ compose는 두 서비스 모두에 이미 이 이름을 넘기고 있었으므�
 ## 8. 트러블슈팅
 
 * 먼저 `scripts/oort doctor` — 셀프호스트 설치 판정(env 조용한 실패·스택 헬스). `--json` 가능.
-* `psql: warning: server 18, client 15` — bookworm의 postgresql-client는 15다. 마이그레이션은
-  서버측 SQL이고 psql은 메타커맨드만 해석하므로 동작에 영향이 없다(prod Swift 이미지는
-  ubuntu 24.04의 16). 경고가 거슬리면 `--build-arg RUNTIME_IMAGE=...`로 베이스를 올린다.
+* `pg_dump: aborting because of server version mismatch` — 런타임 이미지가 PGDG
+  `postgresql-client-18` 을 실어야 한다(#2346). bookworm 기본 클라이언트(15)로
+  PG18 서버를 dump 하면 거부된다. 이미지 안 `pg_dump --version` 이 18.x 인지 확인.
 * `required externally provisioned runtime roles are absent or unsafe` — `runtime-roles`가
   실패했거나 건너뛰어졌다. `momorust logs runtime-roles` 확인.
 * `set JWT_HMAC ...` 로 api가 즉시 종료 — 의도된 fail-fast다. env 파일 경로(`--env-file`)를 확인.
