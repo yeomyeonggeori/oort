@@ -68,7 +68,7 @@ Still no root user.
 
 ## Human approval points (owner's account, owner's bill)
 
-1. AWS login / SSO in the **browser** (the agent stops and hands the screen over).
+1. AWS login / SSO in the **browser** (IAM user or SSO role, not root; the agent stops and hands the screen over).
 2. `terraform apply` after the agent has shown the **plan resource count**
    (Lightsail 7 / EC2 6). This is the moment cost starts.
 3. Budgets notification **email** — open it and confirm the subscription.

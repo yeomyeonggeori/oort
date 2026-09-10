@@ -71,8 +71,14 @@ write_files:
         git clone --depth 1 https://github.com/yeomyeonggeori/oort.git /data/oort
       fi
       VERSION="$(jq -r .version /data/oort/releases/latest.json)"
-      git -C /data/oort fetch --depth 1 origin tag "$VERSION" || git -C /data/oort fetch --depth 1 origin "$VERSION" || true
-      git -C /data/oort checkout "$VERSION" || true
+      git -C /data/oort fetch --depth 1 origin tag "$VERSION" || git -C /data/oort fetch --depth 1 origin "$VERSION" || {
+        log "missing git ref ${VERSION}"
+        exit 1
+      }
+      git -C /data/oort checkout "$VERSION" || {
+        log "missing git ref ${VERSION}"
+        exit 1
+      }
       jq -r '"\(.images.app.ref)@\(.images.app.digest_list)"' /data/oort/releases/latest.json >/data/oort-image-ref
       chown -R ubuntu:ubuntu /data/oort /data/oort-image-ref || true
       log "clone pin $VERSION image-ref $(cat /data/oort-image-ref)"

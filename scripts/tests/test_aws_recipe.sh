@@ -10,7 +10,9 @@ fail() {
   exit 1
 }
 
+CASES=0
 pass() {
+  CASES=$((CASES + 1))
   printf '[test-aws-recipe] PASS %s\n' "$*"
 }
 
@@ -210,55 +212,63 @@ assert_allow_list() {
   python3 - "$tree" <<'PY'
 import pathlib, re, sys
 text = (pathlib.Path(sys.argv[1]) / "terraform/variables.tf").read_text()
-banned = (
-    "nano_3_0", "nano_2_0", "micro_3_0", "micro_2_0",
-    "t3.nano", "t3.micro", "t3a.nano", "t3a.micro",
-    "t4g.nano", "t4g.micro",
-)
+# RAM >= 2 GiB only. nano/micro/t2.nano are intentionally absent.
+KNOWN_RAM_GE_2GIB = {
+    "small_3_0", "medium_3_0", "large_3_0", "xlarge_3_0", "2xlarge_3_0",
+    "small_2_0", "medium_2_0", "large_2_0", "xlarge_2_0", "2xlarge_2_0",
+    "t3.small", "t3.medium", "t3.large",
+    "t3a.small", "t3a.medium", "t3a.large",
+    "t4g.small", "t4g.medium", "t4g.large",
+}
 
-def quoted_in_block(var_name):
+def variable_block(var_name):
     m = re.search(r'variable\s+"%s"\s*\{' % re.escape(var_name), text)
     if not m:
         print("missing variable %s" % var_name, file=sys.stderr)
-        return None, None
+        return None
     start = m.end() - 1
     depth = 0
-    block = None
     for i, ch in enumerate(text[start:], start):
         if ch == "{":
             depth += 1
         elif ch == "}":
             depth -= 1
             if depth == 0:
-                block = text[start : i + 1]
-                break
-    if block is None:
-        return None, None
-    default = re.search(r'default\s*=\s*"([^"]+)"', block)
-    items = re.findall(r'"([^"]+)"', block)
-    return (default.group(1) if default else None), items
+                return text[start : i + 1]
+    print("unclosed variable %s" % var_name, file=sys.stderr)
+    return None
+
+def contains_ids(block):
+    m = re.search(r"contains\(\[([^\]]*)\]", block)
+    if not m:
+        return []
+    return re.findall(r'"([^"]+)"', m.group(1))
 
 failed = 0
-b_default, b_items = quoted_in_block("lightsail_bundle_id")
-t_default, t_items = quoted_in_block("ec2_instance_type")
-if b_default is None or t_default is None:
+b_block = variable_block("lightsail_bundle_id")
+t_block = variable_block("ec2_instance_type")
+if b_block is None or t_block is None:
     sys.exit(1)
-if b_default != "small_3_0":
-    print("default lightsail_bundle_id %s != small_3_0" % b_default, file=sys.stderr)
+b_default = re.search(r'default\s*=\s*"([^"]+)"', b_block)
+t_default = re.search(r'default\s*=\s*"([^"]+)"', t_block)
+if not b_default or b_default.group(1) != "small_3_0":
+    print("default lightsail_bundle_id %s != small_3_0" % (b_default.group(1) if b_default else None), file=sys.stderr)
     failed = 1
-if t_default != "t3.small":
-    print("default ec2_instance_type %s != t3.small" % t_default, file=sys.stderr)
+if not t_default or t_default.group(1) != "t3.small":
+    print("default ec2_instance_type %s != t3.small" % (t_default.group(1) if t_default else None), file=sys.stderr)
     failed = 1
-for item in b_items + t_items:
-    if item in banned or item.startswith("nano_") or item.startswith("micro_"):
-        print("RAM < 2 GiB type in allow-list: %s" % item, file=sys.stderr)
-        failed = 1
+b_items = contains_ids(b_block)
+t_items = contains_ids(t_block)
 if "small_3_0" not in b_items:
     print("small_3_0 missing from lightsail allow-list", file=sys.stderr)
     failed = 1
 if "t3.small" not in t_items:
     print("t3.small missing from ec2 allow-list", file=sys.stderr)
     failed = 1
+for item in b_items + t_items:
+    if item not in KNOWN_RAM_GE_2GIB:
+        print("allow-list id %s is not in the RAM >= 2 GiB set" % item, file=sys.stderr)
+        failed = 1
 sys.exit(failed)
 PY
 }
@@ -329,9 +339,61 @@ missing = [a for a in need if a not in actions]
 if missing:
     print("iam-policy.json missing %s" % ",".join(missing), file=sys.stderr)
     sys.exit(1)
-if any(a == "*" or a.startswith("iam:") or a == "ec2:*" for a in actions):
+forbidden_wild = ("*", "*:*", "lightsail:*", "s3:*", "ec2:*")
+if any(a in forbidden_wild or a.startswith("iam:") for a in actions):
     print("iam-policy.json is not minimum (wildcard or iam/ec2 star)", file=sys.stderr)
     sys.exit(1)
+PY
+}
+
+assert_clone_pin() {
+  local tree="$1"
+  python3 - "$tree" <<'PY'
+import pathlib, re, sys
+text = (pathlib.Path(sys.argv[1]) / "cloud-init.yaml").read_text()
+git_lines = []
+for line in text.splitlines():
+    if re.search(r"\bgit\b", line) and re.search(r"\b(clone|fetch|checkout)\b", line):
+        git_lines.append(line)
+if not git_lines:
+    print("cloud-init has no git clone/fetch/checkout pin lines", file=sys.stderr)
+    sys.exit(1)
+if not any(re.search(r"\bcheckout\b", line) for line in git_lines):
+    print("cloud-init missing git checkout pin", file=sys.stderr)
+    sys.exit(1)
+failed = 0
+for line in git_lines:
+    if re.search(r"\|\|\s*true\b", line):
+        print("cloud-init git pin line has || true: %s" % line.strip(), file=sys.stderr)
+        failed = 1
+sys.exit(failed)
+PY
+}
+
+assert_readme_approval() {
+  local tree="$1"
+  python3 - "$tree" <<'PY'
+import pathlib, re, sys
+text = (pathlib.Path(sys.argv[1]) / "README.md").read_text()
+if "## Human approval points" not in text:
+    print("README missing heading ## Human approval points", file=sys.stderr)
+    sys.exit(1)
+m = re.search(r"^## Human approval points.*?(?=^## |\Z)", text, re.M | re.S)
+if not m:
+    print("README Human approval points section unreadable", file=sys.stderr)
+    sys.exit(1)
+section = m.group(0)
+failed = 0
+if not re.search(r"account|billing|\bbill\b", section, re.I):
+    print("approval section missing account/billing", file=sys.stderr)
+    failed = 1
+if not re.search(r"IAM|credential", section, re.I):
+    print("approval section missing IAM/credentials", file=sys.stderr)
+    failed = 1
+if not re.search(r"DNS|domain", section, re.I):
+    print("approval section missing DNS/domain", file=sys.stderr)
+    failed = 1
+sys.exit(failed)
 PY
 }
 
@@ -345,6 +407,8 @@ assert_recipe() {
   assert_data_root "$tree" || return 1
   assert_no_cloudinit_secrets_or_up "$tree" || return 1
   assert_tags_and_iam "$tree" || return 1
+  assert_clone_pin "$tree" || return 1
+  assert_readme_approval "$tree" || return 1
   return 0
 }
 
@@ -428,8 +492,89 @@ fi
 pass "sabotage data-root /var/lib/docker → RED"
 
 # ---------------------------------------------------------------------------
+# Sabotage ④ clone pin || true → RED (R2 M2)
+# ---------------------------------------------------------------------------
+s4="$TMP_ROOT/s4"
+copy_recipe "$s4"
+python3 - "$s4/cloud-init.yaml" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text()
+old = 'git -C /data/oort checkout "$VERSION"'
+new = 'git -C /data/oort checkout "$VERSION" || true'
+if old not in text:
+    raise SystemExit("could not find git checkout pin line")
+p.write_text(text.replace(old, new, 1))
+PY
+if assert_clone_pin "$s4" >/dev/null 2>"$TMP_ROOT/s4.err"; then
+  fail "sabotage clone-pin || true stayed green"
+fi
+pass "sabotage clone-pin || true → RED"
+
+# ---------------------------------------------------------------------------
+# Sabotage ⑤ delete README approval section → RED (R2 M3)
+# ---------------------------------------------------------------------------
+s5="$TMP_ROOT/s5"
+copy_recipe "$s5"
+python3 - "$s5/README.md" <<'PY'
+import re, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+text = p.read_text()
+new, n = re.subn(r"^## Human approval points.*?(?=^## |\Z)", "", text, count=1, flags=re.M | re.S)
+if n != 1:
+    raise SystemExit("could not delete Human approval points section")
+p.write_text(new)
+PY
+if assert_readme_approval "$s5" >/dev/null 2>"$TMP_ROOT/s5.err"; then
+  fail "sabotage README approval section stayed green"
+fi
+pass "sabotage README approval section deleted → RED"
+
+# ---------------------------------------------------------------------------
+# Sabotage ⑥ IAM lightsail:* → RED (R2 L1)
+# ---------------------------------------------------------------------------
+s6="$TMP_ROOT/s6"
+copy_recipe "$s6"
+python3 - "$s6/iam-policy.json" <<'PY'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+data = json.loads(p.read_text())
+data["Statement"][0]["Action"].insert(0, "lightsail:*")
+p.write_text(json.dumps(data, indent=2) + "\n")
+PY
+if assert_tags_and_iam "$s6" >/dev/null 2>"$TMP_ROOT/s6.err"; then
+  fail "sabotage lightsail:* stayed green"
+fi
+pass "sabotage IAM lightsail:* → RED"
+
+# ---------------------------------------------------------------------------
+# Sabotage ⑦ allow-list t2.nano → RED (R2 L2)
+# ---------------------------------------------------------------------------
+s7="$TMP_ROOT/s7"
+copy_recipe "$s7"
+python3 - "$s7/terraform/variables.tf" <<'PY'
+from pathlib import Path
+import sys
+p = Path(sys.argv[1])
+text = p.read_text()
+needle = '"t3.small",'
+if needle not in text:
+    raise SystemExit("could not find t3.small in allow-list")
+p.write_text(text.replace(needle, '"t3.small",\n      "t2.nano",', 1))
+PY
+if assert_allow_list "$s7" >/dev/null 2>"$TMP_ROOT/s7.err"; then
+  fail "sabotage t2.nano allow-list stayed green"
+fi
+pass "sabotage allow-list t2.nano → RED"
+
+# ---------------------------------------------------------------------------
 # terraform fmt / validate — optional tool (SH-11f)
 # ---------------------------------------------------------------------------
+printf '[test-aws-recipe] PASS %s cases (static + sabotages)\n' "$CASES"
+
 if ! command -v terraform >/dev/null 2>&1; then
   printf '%s\n' \
     "[test-aws-recipe] optional-tool skip: terraform (fmt/validate) — not installed; static assertions still run (SH-11f)"
