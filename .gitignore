@@ -70,3 +70,17 @@ claudedocs/
 .tok
 PAIRING_VALUE.txt
 *.pairing
+
+# Terraform local state and operator values (SH-11c). Credentials stay in the
+# AWS CLI/SSO session; terraform.tfvars is never committed.
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+terraform.tfvars
+*.auto.tfvars
