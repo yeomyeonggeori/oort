@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## S1 온보딩 잔여 nits (#2418, 2026-09-10)
+
+- Track UXUI. `chore/2418-s1-nits` onto `origin/track/uxui`. 설정 › 워크스페이스 초기 `aria-invalid="false"` 미노출. `S1_FAILURE` 「지금은」 1회. `HandleField`/`identityCopy` → `features/profile/shared`, `StaleWorkspaceNameConflict` → `features/workspace/shared`. 시드 워크스페이스명 대소문자 무시. S1 완료 시 settings-door 플래그 잔여 제거.
+- runtime-unverified: 실서버 claim→S1→설정 왕복은 mock·RTL 범위. 시각(픽셀) 변경 없음. `S1_FAILURE` 문구만 두 번째 「지금은」 삭제.
+
 ## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
 
 - Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.

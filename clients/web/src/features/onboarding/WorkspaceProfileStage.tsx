@@ -25,11 +25,7 @@ import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
-import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
-import { HandleField } from "./HandleField";
-import {
-  defaultWorkspaceName,
-} from "./fallbackHandle";
+import { HandleField } from "@/features/profile/shared/HandleField";
 import {
   handleFieldError,
   handleSaveMessage,
@@ -37,9 +33,11 @@ import {
   isHandleTaken,
   isWorkspaceStale,
   workspaceNameSaveMessage,
-} from "./identityCopy";
-import { clearS1Draft, readS1Draft, resolveS1Seeds, writeS1Draft } from "./s1Draft";
-import { StaleWorkspaceNameConflict } from "./StaleWorkspaceNameConflict";
+} from "@/features/profile/shared/identityCopy";
+import { StaleWorkspaceNameConflict } from "@/features/workspace/shared/StaleWorkspaceNameConflict";
+import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { defaultWorkspaceName } from "./fallbackHandle";
+import { hasOwnerOnboardingSettingsDoor } from "./ownerOnboardingStore";
 import {
   S1_DISPLAY_ERROR_ID,
   S1_FAILURE,
@@ -55,9 +53,7 @@ import {
   S1_STALE_MESSAGE_ID,
   S1_WORKSPACE_ERROR_ID,
 } from "./s1Copy";
-import {
-  hasOwnerOnboardingSettingsDoor,
-} from "./ownerOnboardingStore";
+import { clearS1Draft, readS1Draft, resolveS1Seeds, writeS1Draft } from "./s1Draft";
 
 // Reading this as: onboarding S1 (내 워크스페이스·내 이름) for internal team
 // users on web+Tauri, density 6/10, motion 2/10.

@@ -117,7 +117,9 @@ describe("S1 stale 409 shares the settings component", () => {
     expect(s1).toContain("refetchWorkspaceToken(true)");
     expect(settings).not.toContain("setDraft(latest.name)");
     const copy = readFileSync(
-      fileURLToPath(new URL("./StaleWorkspaceNameConflict.tsx", import.meta.url)),
+      fileURLToPath(
+        new URL("../workspace/shared/StaleWorkspaceNameConflict.tsx", import.meta.url)
+      ),
       "utf8"
     );
     expect(copy).toContain("directionParticle");
@@ -140,6 +142,25 @@ describe("settings doors record the S1 flag (M-R3-5)", () => {
     );
     expect(workspace).toContain('recordOwnerOnboardingSettingsSave("workspace")');
     expect(profile).toContain('recordOwnerOnboardingSettingsSave("profile")');
+  });
+
+  it("settings identity sections do not import features/onboarding (N-R2-4)", () => {
+    const workspace = readFileSync(
+      fileURLToPath(new URL("../settings/WorkspaceSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    const profile = readFileSync(
+      fileURLToPath(new URL("../settings/ProfileSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(workspace).not.toMatch(/@\/features\/onboarding\//);
+    expect(profile).not.toMatch(/@\/features\/onboarding\//);
+    expect(profile).toContain("@/features/profile/shared/HandleField");
+    expect(profile).toContain("@/features/profile/shared/onboardingSettingsSave");
+    expect(workspace).toContain(
+      "@/features/workspace/shared/StaleWorkspaceNameConflict"
+    );
+    expect(workspace).toContain("@/features/profile/shared/onboardingSettingsSave");
   });
 });
 
