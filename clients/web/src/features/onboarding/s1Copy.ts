@@ -1,5 +1,3 @@
-import { directionParticle } from "@momo/core/lib/koreanParticle";
-
 export const S1_TITLE = "내 워크스페이스·내 이름";
 export const S1_LEAD = [
   "워크스페이스 이름과 여기서 다른 멤버에게 보이는 이름과 핸들을 정합니다.",
@@ -23,7 +21,3 @@ export const S1_DISPLAY_ERROR_ID = "onboarding-s1-display-error";
 export const S1_STALE_MESSAGE_ID = "onboarding-s1-stale-message";
 export const SEED_WORKSPACE_NAME = "momo Demo Workspace";
 export const SEED_HANDLE = "demo";
-
-export function s1StaleRetry(otherName: string): string {
-  return `워크스페이스 이름이 「${otherName}」${directionParticle(otherName)} 바뀌었습니다.`;
-}

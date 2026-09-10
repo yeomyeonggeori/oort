@@ -99,10 +99,28 @@ describe("S1 stale 409 shares the settings component", () => {
     expect(s1).toContain("refetchWorkspaceToken(true)");
     expect(settings).not.toContain("setDraft(latest.name)");
     const copy = readFileSync(
-      fileURLToPath(new URL("./s1Copy.ts", import.meta.url)),
+      fileURLToPath(new URL("./StaleWorkspaceNameConflict.tsx", import.meta.url)),
       "utf8"
     );
     expect(copy).toContain("directionParticle");
     expect(copy).not.toMatch(/」으로/);
+    expect(copy).not.toMatch(/whitespace-nowrap[^>]*>\s*「\{otherName\}/);
+    expect(copy).toContain("whitespace-nowrap");
+    expect(s1).toContain("staleName ? S1_STALE_MESSAGE_ID");
+  });
+});
+
+describe("settings doors record the S1 flag (M-R3-5)", () => {
+  it("each section calls recordOwnerOnboardingSettingsSave for its door", () => {
+    const workspace = readFileSync(
+      fileURLToPath(new URL("../settings/WorkspaceSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    const profile = readFileSync(
+      fileURLToPath(new URL("../settings/ProfileSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(workspace).toContain('recordOwnerOnboardingSettingsSave("workspace")');
+    expect(profile).toContain('recordOwnerOnboardingSettingsSave("profile")');
   });
 });

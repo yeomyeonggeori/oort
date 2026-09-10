@@ -12,6 +12,11 @@ import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { WorkspaceSection } from "./WorkspaceSection";
+import {
+  clearOwnerOnboardingPending,
+  hasOwnerOnboardingSettingsDoor,
+  markOwnerOnboardingPending,
+} from "@/features/onboarding/ownerOnboardingStore";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -72,6 +77,7 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  clearOwnerOnboardingPending();
   vi.unstubAllGlobals();
 });
 
@@ -409,6 +415,31 @@ describe("워크스페이스 이름 E1", () => {
     expect(renameWorkspace).toHaveBeenCalledWith(WS, "여명거리", WS_TOKEN);
   });
 
+  it("이름 저장은 pending S1 워크스페이스 문을 기록한다 (M-R3-5)", async () => {
+    markOwnerOnboardingPending();
+    renameWorkspace.mockResolvedValue({
+      ...workspace({}),
+      name: "여명거리",
+      updatedAtMs: 2,
+    });
+    const host = mountSection({ role: "owner" });
+    const input = host.querySelector(
+      '[data-testid="workspace-rename-name"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "여명거리"));
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-save"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(renameWorkspace).toHaveBeenCalledTimes(1);
+    });
+    expect(hasOwnerOnboardingSettingsDoor("workspace")).toBe(true);
+  });
+
   it("409는 초안을 유지하고 S1과 같은 stale 조각을 그린다", async () => {
     renameWorkspace.mockRejectedValue(
       new ApiError(409, "workspace has been updated; refetch and retry")
@@ -457,6 +488,16 @@ describe("워크스페이스 이름 E1", () => {
     expect(
       host.querySelector('[data-testid="workspace-rename-name"]')?.getAttribute("aria-describedby")
     ).toContain("workspace-rename-stale-message");
+    expect(host.querySelector('[data-testid="stale-name-particle"]')?.textContent).toBe(
+      "」으로"
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(
+      document.activeElement?.querySelector('[data-testid="workspace-rename-stale"]')
+    ).not.toBeNull();
     act(() => {
       (
         host.querySelector(

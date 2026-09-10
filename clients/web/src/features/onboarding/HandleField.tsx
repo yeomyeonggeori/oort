@@ -23,6 +23,7 @@ export function HandleField({
   inputRef,
   label = "핸들",
   onBlur,
+  reserveErrorSlot = false,
 }: {
   id: string;
   value: string;
@@ -37,6 +38,7 @@ export function HandleField({
   inputRef?: Ref<HTMLInputElement>;
   label?: ReactNode;
   onBlur?: (event: FocusEvent<HTMLInputElement>) => void;
+  reserveErrorSlot?: boolean;
 }) {
   const normalized = normalizeHandle(value);
   const showPreview =
@@ -90,11 +92,12 @@ export function HandleField({
           저장되는 핸들 @{normalized}
         </p>
       ) : null}
-      {error ? (
+      {error || reserveErrorSlot ? (
         <p
-          id={errorId}
-          role="alert"
-          className={cn("text-meta text-danger")}
+          id={error ? errorId : undefined}
+          role={error ? "alert" : undefined}
+          aria-live={reserveErrorSlot && !error ? "polite" : undefined}
+          className={cn("text-meta", error ? "text-danger" : null, reserveErrorSlot && "min-h-6")}
           data-testid={errorTestId}
         >
           {error}

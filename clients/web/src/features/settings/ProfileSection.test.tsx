@@ -7,6 +7,12 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import { ApiError, type Member, type RosterMember } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { ProfileSection } from "./ProfileSection";
+import {
+  clearOwnerOnboardingPending,
+  hasOwnerOnboardingSettingsDoor,
+  markOwnerOnboardingPending,
+} from "@/features/onboarding/ownerOnboardingStore";
+import { clearS1Draft, readS1Draft, writeS1Draft } from "@/features/onboarding/s1Draft";
 
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
@@ -58,6 +64,8 @@ afterEach(() => {
   }
   mountedHost?.remove();
   mountedHost = null;
+  clearOwnerOnboardingPending();
+  clearS1Draft();
   vi.unstubAllGlobals();
 });
 
@@ -256,10 +264,14 @@ describe("ProfileSection", () => {
       ).click();
     });
     await vi.waitFor(() => {
-      expect(host.querySelector("#profile-display-name-error")?.textContent).toBe(
+      expect(host.querySelector('[data-testid="profile-save-error"]')?.textContent).toBe(
         "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요."
       );
     });
+    expect(host.querySelector("#profile-display-name-error")?.textContent ?? "").toBe("");
+    expect(
+      host.querySelector('[data-testid="profile-display-name"]')?.getAttribute("aria-invalid")
+    ).toBeNull();
     expect(host.textContent).not.toContain("engine boom");
   });
 
@@ -338,7 +350,9 @@ describe("ProfileSection", () => {
       '[data-testid="profile-handle"]'
     ) as HTMLInputElement;
     act(() => setInputValue(input, "k"));
-    expect(host.querySelector('[data-testid="profile-handle-error"]')).toBeNull();
+    expect(host.querySelector('[data-testid="profile-handle-error"]')?.textContent ?? "").toBe(
+      ""
+    );
     expect(input.getAttribute("aria-invalid")).toBeNull();
     act(() => {
       input.focus();
@@ -369,5 +383,111 @@ describe("ProfileSection", () => {
       await Promise.resolve();
     });
     expect(document.activeElement).toBe(display);
+  });
+
+  it("표시 이름과 핸들을 같이 바꾸면 PATCH 1회 (M-R3-5)", async () => {
+    changeMyProfile.mockResolvedValue({
+      ...sessionMember("곽성재2"),
+      handle: "kwak",
+    });
+    const { host } = mountSection();
+    const display = host.querySelector(
+      '[data-testid="profile-display-name"]'
+    ) as HTMLInputElement;
+    const handle = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(display, "곽성재2"));
+    act(() => setInputValue(handle, "kwak"));
+    await act(async () => {
+      (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(changeMyProfile).toHaveBeenCalledTimes(1);
+    });
+    expect(changeMyProfile).toHaveBeenCalledWith(WS, {
+      displayName: "곽성재2",
+      handle: "kwak",
+    });
+  });
+
+  it("프로필 500은 배너만 쓰고 표시 이름에 aria-invalid를 달지 않는다 (M-R3-4)", async () => {
+    changeMyProfile.mockRejectedValue(new ApiError(500, "engine boom"));
+    const { host } = mountSection();
+    const display = host.querySelector(
+      '[data-testid="profile-display-name"]'
+    ) as HTMLInputElement;
+    const handle = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(display, "곽성재2"));
+    act(() => setInputValue(handle, "kwak"));
+    await act(async () => {
+      (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="profile-save-error"]')).not.toBeNull();
+    });
+    expect(display.getAttribute("aria-invalid")).toBeNull();
+    expect(handle.getAttribute("aria-invalid")).toBeNull();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).not.toBe(document.body);
+    expect(
+      document.activeElement?.querySelector('[data-testid="profile-save-error"]')
+    ).not.toBeNull();
+  });
+
+  it("핸들 blur 오류 칸은 높이를 남겨 저장 클릭이 제출된다 (M-R3-3)", async () => {
+    const { host } = mountSection();
+    const handle = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    const save = host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement;
+    const slot = host.querySelector('[data-testid="profile-handle-error"]');
+    expect(slot).not.toBeNull();
+    expect(slot?.className).toContain("min-h-6");
+    expect(slot?.textContent ?? "").toBe("");
+    act(() => {
+      handle.focus();
+      setInputValue(handle, "k");
+    });
+    await act(async () => {
+      handle.dispatchEvent(
+        new FocusEvent("blur", { bubbles: true, relatedTarget: save })
+      );
+      save.click();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(changeMyProfile).not.toHaveBeenCalled();
+    expect(handle.getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(handle);
+  });
+
+  it("프로필 저장은 pending S1 플래그와 초안 핸들을 갱신한다 (M-R3-5)", async () => {
+    markOwnerOnboardingPending();
+    writeS1Draft({
+      workspaceName: "여명거리",
+      displayName: "곽성재",
+      handle: "seongjae",
+    });
+    changeMyProfile.mockResolvedValue({ ...sessionMember(), handle: "kwak" });
+    const { host } = mountSection();
+    const input = host.querySelector(
+      '[data-testid="profile-handle"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "kwak"));
+    await act(async () => {
+      (host.querySelector('[data-testid="profile-save"]') as HTMLButtonElement).click();
+    });
+    await vi.waitFor(() => {
+      expect(changeMyProfile).toHaveBeenCalledTimes(1);
+    });
+    expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(true);
+    expect(readS1Draft()?.handle).toBe("");
+    expect(readS1Draft()?.workspaceName).toBe("여명거리");
   });
 });

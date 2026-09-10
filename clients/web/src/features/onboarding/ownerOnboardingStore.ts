@@ -14,6 +14,7 @@ import {
   isOwnerOnboardingStage,
   type OwnerOnboardingStage,
 } from "@/features/auth/onboardingFlow";
+import { clearS1Draft, clearS1DraftFields } from "./s1Draft";
 
 const listeners = new Set<() => void>();
 
@@ -111,8 +112,20 @@ export function hasOwnerOnboardingFlag(flag: OwnerOnboardingStage): boolean {
 export function clearOwnerOnboardingFlag(flag: OwnerOnboardingStage): void {
   const doc = readDoc();
   if (flag === "invite") doc.invite = false;
-  else doc["workspace-profile"] = false;
+  else {
+    doc["workspace-profile"] = false;
+    clearS1Draft();
+  }
   writeDoc(doc);
+}
+
+export function hasOwnerOnboardingSettingsDoor(
+  door: "workspace" | "profile"
+): boolean {
+  const doc = readDoc();
+  return door === "workspace"
+    ? doc["settings-workspace"] === true
+    : doc["settings-profile"] === true;
 }
 
 export function readOwnerOnboardingStage(): OwnerOnboardingStage | null {
@@ -143,11 +156,15 @@ export function finishOwnerOnboardingInvite(): void {
 export function recordOwnerOnboardingSettingsSave(
   door: "workspace" | "profile"
 ): void {
+  if (door === "workspace") clearS1DraftFields(["workspaceName"]);
+  else clearS1DraftFields(["displayName", "handle"]);
   const doc = readDoc();
+  if (!doc["workspace-profile"]) return;
   if (door === "workspace") doc["settings-workspace"] = true;
   else doc["settings-profile"] = true;
   if (doc["settings-workspace"] && doc["settings-profile"]) {
     doc["workspace-profile"] = false;
+    clearS1Draft();
   }
   writeDoc(doc);
 }
@@ -159,6 +176,7 @@ export function clearOwnerOnboardingPending(): void {
   } catch {
     // same as mark
   }
+  clearS1Draft();
   notify();
 }
 

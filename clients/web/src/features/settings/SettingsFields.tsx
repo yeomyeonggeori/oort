@@ -170,12 +170,15 @@ export function Field({
   htmlFor,
   hint,
   error,
+  reserveError = false,
   children,
 }: {
   label: string;
   htmlFor: string;
   hint?: string;
   error?: string | null;
+  /** Keep a one-line slot so a blur error does not move the save control. */
+  reserveError?: boolean;
   children: ReactNode;
 }) {
   const errorId = `${htmlFor}-error`;
@@ -208,11 +211,16 @@ export function Field({
           {hint}
         </p>
       )}
-      {error && (
-        <p className="text-meta text-danger" role="alert" id={errorId}>
+      {error || reserveError ? (
+        <p
+          className={cn("text-meta", error ? "text-danger" : null, reserveError && "min-h-6")}
+          role={error ? "alert" : undefined}
+          aria-live={reserveError && !error ? "polite" : undefined}
+          id={error ? errorId : undefined}
+        >
           {error}
         </p>
-      )}
+      ) : null}
     </div>
   );
 }

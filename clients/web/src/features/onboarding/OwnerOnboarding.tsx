@@ -16,6 +16,8 @@ import {
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { InviteStage } from "./InviteStage";
 import {
+  clearOwnerOnboardingFlag,
+  hasOwnerOnboardingFlag,
   markOwnerOnboardingStage,
   readOwnerOnboardingStage,
   subscribeOwnerOnboarding,
@@ -65,6 +67,11 @@ export function OwnerOnboarding({
   }, [stage]);
 
   function finishStage() {
+    if (stage === "workspace-profile" && !hasOwnerOnboardingFlag("invite")) {
+      clearOwnerOnboardingFlag("workspace-profile");
+      onFinished();
+      return;
+    }
     const next = nextOwnerOnboardingStage(stage);
     if (next) {
       markOwnerOnboardingStage(next);
@@ -108,6 +115,7 @@ export function OwnerOnboarding({
             <WorkspaceProfileStage
               workspaceId={session.member.workspaceId}
               memberHandle={session.member.handle}
+              memberDisplayName={session.member.displayName}
               workspaceName={workspace.data?.name}
               workspaceUpdatedAtMs={workspace.data?.updatedAtMs}
               replaceSessionMember={replaceSessionMember}

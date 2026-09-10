@@ -9,6 +9,9 @@ import { S1_KEEP_MINE, S1_KEEP_THEIRS } from "./s1Copy";
 //
 // S1 and 설정 › 워크스페이스 share this treatment: draft stays, both names
 // are on screen, one filled primary, the sentence is bound via aria-describedby.
+// The NAME wraps; only 」+particle stay glued to the last character (U+2060).
+
+export const WORD_JOINER = "\u2060";
 
 export function StaleWorkspaceNamePhrase({
   otherName,
@@ -18,9 +21,10 @@ export function StaleWorkspaceNamePhrase({
   const particle = directionParticle(otherName);
   return (
     <>
-      워크스페이스 이름이{" "}
-      <span className="whitespace-nowrap break-keep">
-        「{otherName}」{particle}
+      워크스페이스 이름이 「{otherName}
+      {WORD_JOINER}
+      <span className="whitespace-nowrap" data-testid="stale-name-particle">
+        」{particle}
       </span>{" "}
       바뀌었습니다.
     </>
@@ -46,7 +50,7 @@ export function StaleWorkspaceNameConflict({
     <div
       ref={bannerRef}
       tabIndex={-1}
-      className="flex flex-col gap-2 focus-visible:focus-ring"
+      className="flex min-w-0 flex-col gap-2 focus-visible:focus-ring"
     >
       <InlineBanner
         tone="error"

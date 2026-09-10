@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { changeMyProfile } from "@momo/core/lib/api";
 import {
@@ -41,9 +41,11 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   const [busy, setBusy] = useState(false);
   const [displayError, setDisplayError] = useState<string | null>(null);
   const [handleError, setHandleError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const saveStarted = useRef(false);
   const displayInputRef = useRef<HTMLInputElement>(null);
   const handleInputRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setDraft(savedName);
@@ -53,18 +55,31 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     setHandleDraft(savedHandle);
   }, [savedHandle]);
 
+  useEffect(() => {
+    if (!formError) return;
+    bannerRef.current?.focus({ preventScroll: true });
+  }, [formError]);
+
   const displayDirty = draft !== savedName;
   const handleDirty = normalizeHandle(handleDraft) !== savedHandle;
   const dirty = displayDirty || handleDirty;
   const canSave = !offline && !busy && dirty;
 
-  const handleDisplayBlur = () => {
+  const handleDisplayBlur = (event: FocusEvent<HTMLInputElement>) => {
     if (!displayDirty) return;
+    const next = event.relatedTarget;
+    if (next instanceof HTMLElement && next.closest('[data-testid="profile-save"]')) {
+      return;
+    }
     setDisplayError(displayNameFieldError(draft));
   };
 
-  const handleHandleBlur = () => {
+  const handleHandleBlur = (event: FocusEvent<HTMLInputElement>) => {
     if (!handleDirty) return;
+    const next = event.relatedTarget;
+    if (next instanceof HTMLElement && next.closest('[data-testid="profile-save"]')) {
+      return;
+    }
     setHandleError(handleFieldError(handleDraft));
   };
 
@@ -84,6 +99,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     const nextHandleError = handleDirty ? handleFieldError(handleDraft) : null;
     setDisplayError(nextDisplayError);
     setHandleError(nextHandleError);
+    setFormError(null);
     if (nextDisplayError || nextHandleError) {
       focusFirstInvalid(nextDisplayError, nextHandleError);
       return;
@@ -99,6 +115,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
       replaceSessionMember(member);
       setDraft(member.displayName);
       setHandleDraft(member.handle);
+      setFormError(null);
       recordOwnerOnboardingSettingsSave("profile");
     } catch (failure) {
       if (
@@ -117,13 +134,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
         displayInputRef.current?.focus({ preventScroll: true });
         return;
       }
-      if (handleDirty && !displayDirty) {
-        setHandleError(handleSaveMessage(failure));
-        handleInputRef.current?.focus({ preventScroll: true });
-        return;
-      }
-      setDisplayError(displayNameSaveMessage(failure));
-      displayInputRef.current?.focus({ preventScroll: true });
+      setFormError(displayNameSaveMessage(failure));
     } finally {
       saveStarted.current = false;
       setBusy(false);
@@ -154,8 +165,26 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           testId="profile-offline-banner"
         />
       ) : null}
+      {formError ? (
+        <div
+          ref={bannerRef}
+          tabIndex={-1}
+          className="focus-visible:focus-ring"
+        >
+          <InlineBanner
+            tone="error"
+            message={formError}
+            testId="profile-save-error"
+          />
+        </div>
+      ) : null}
       <form className="flex min-w-0 flex-col gap-4" onSubmit={handleSubmit}>
-        <Field label="표시 이름" htmlFor="profile-display-name" error={displayError}>
+        <Field
+          label="표시 이름"
+          htmlFor="profile-display-name"
+          error={displayError}
+          reserveError
+        >
           <Input
             ref={displayInputRef}
             id="profile-display-name"
@@ -176,6 +205,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
             onChange={(event) => {
               setDraft(event.currentTarget.value);
               setDisplayError(null);
+              setFormError(null);
             }}
             onBlur={handleDisplayBlur}
           />
@@ -186,6 +216,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           onChange={(value) => {
             setHandleDraft(value);
             setHandleError(null);
+            setFormError(null);
           }}
           onBlur={handleHandleBlur}
           error={handleError}
@@ -196,6 +227,7 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           previewTestId="profile-handle-preview"
           offline={offline}
           inputRef={handleInputRef}
+          reserveErrorSlot
           label={<span className="text-meta text-ink-muted">핸들</span>}
         />
         <div className="flex flex-wrap items-center gap-2">

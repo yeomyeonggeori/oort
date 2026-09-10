@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { Loader2 } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/design/ui/button";
@@ -803,6 +803,11 @@ function WorkspaceRenameField({
     setToken(updatedAtMs);
   }, [name, updatedAtMs]);
 
+  useEffect(() => {
+    if (!staleName) return;
+    bannerRef.current?.focus({ preventScroll: true });
+  }, [staleName]);
+
   const gate = workspaceNameError(draft);
   const dirty = draft.trim() !== name;
   const canSave = canEdit && dirty && !gate && !offline && !staleName;
@@ -835,7 +840,6 @@ function WorkspaceRenameField({
           client.setQueryData(workspaceIdentityKey(workspaceId), latest);
           setStaleName(latest.name);
           setSaveError(null);
-          bannerRef.current?.focus({ preventScroll: true });
           return;
         } catch {
           setSaveError(workspaceNameSaveMessage(error));
@@ -886,6 +890,14 @@ function WorkspaceRenameField({
     runSave();
   };
 
+  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (!staleName) return;
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+    event.preventDefault();
+    handleKeepMine();
+  };
+
   const confirmedNonOperator = !canEdit && directoryQuery.isSuccess;
   if (confirmedNonOperator) {
     return <h3 className="text-body font-medium text-ink">{name}</h3>;
@@ -898,8 +910,13 @@ function WorkspaceRenameField({
       className="flex flex-col gap-3"
       onSubmit={(event) => {
         event.preventDefault();
+        if (staleName) {
+          handleKeepMine();
+          return;
+        }
         handleSave();
       }}
+      onKeyDown={handleFormKeyDown}
       data-testid="workspace-rename"
     >
       <Field

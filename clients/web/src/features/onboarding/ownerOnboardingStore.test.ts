@@ -6,6 +6,7 @@ import {
   clearOwnerOnboardingPending,
   finishOwnerOnboardingInvite,
   hasOwnerOnboardingFlag,
+  hasOwnerOnboardingSettingsDoor,
   markOwnerOnboardingPending,
   markOwnerOnboardingStage,
   ownerOnboardingIsPending,
@@ -15,6 +16,7 @@ import {
   recordOwnerOnboardingSettingsSave,
   resetOwnerOnboardingLoadState,
 } from "./ownerOnboardingStore";
+import { readS1Draft, writeS1Draft } from "./s1Draft";
 
 afterEach(() => {
   clearOwnerOnboardingPending();
@@ -65,7 +67,32 @@ describe("owner onboarding pending flags", () => {
     clearOwnerOnboardingFlag("invite");
     recordOwnerOnboardingSettingsSave("workspace");
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    expect(hasOwnerOnboardingSettingsDoor("workspace")).toBe(true);
     recordOwnerOnboardingSettingsSave("profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(false);
+  });
+
+  it("does not write settings flags when onboarding is not pending (N-R3-2)", () => {
+    recordOwnerOnboardingSettingsSave("profile");
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBeNull();
+    expect(hasOwnerOnboardingSettingsDoor("profile")).toBe(false);
+  });
+
+  it("settings save clears the matching S1 draft fields (H-R3-1)", () => {
+    markOwnerOnboardingPending();
+    writeS1Draft({
+      workspaceName: "여명거리",
+      displayName: "곽성재",
+      handle: "seongjae",
+    });
+    recordOwnerOnboardingSettingsSave("profile");
+    expect(readS1Draft()).toEqual({
+      workspaceName: "여명거리",
+      displayName: "",
+      handle: "",
+    });
+    recordOwnerOnboardingSettingsSave("workspace");
+    expect(readS1Draft()).toBeNull();
     expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(false);
   });
 });

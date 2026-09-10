@@ -36,8 +36,6 @@
 - 통합: `scripts/tests/test_image_day2_tools.sh` — in-image `doctor --tier t2 --json` 파싱 OK checks=32 stack.* 5 ids, `backup --tier t2` pg_dump 0 dump_bytes=5397 TOC=7. 사보타주: client-18 제거 backup exit 1; python3 제거 `--json` exit 127.
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
->>>>>>> origin/track/uxui
-
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 
 - Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
@@ -54,6 +52,7 @@
 
 - Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2/E0 `changeMyProfile` `{handle, displayName}` 1회. 핸들 409는 제품 한국어, stale 409는 상대 이름+유지/저장, 비필드 실패는 「다시 시도」+「지금은 건너뛰기」. `oort.onboarding.v1` 은 S1(`workspace-profile`)·S2(`invite`) 독립 플래그. S2 skip은 invite만 지운다. 설정 › 워크스페이스·프로필은 S1과 같은 stale 조각·한 PATCH.
 - R3: S2 「나중에」가 S1 재제안을 지우지 않음. 설정 stale 409는 초안 유지+공용 컴포넌트. 방향 조사·검증은 제출/blur. 프로필은 단일 폼.
+- R4: stale 긴 이름은 이름만 줄바꿈(」+조사만 nowrap). 재제안 S1은 서버 멤버/워크스페이스를 우선하고 설정에서 저장한 문은 PATCH하지 않는다. S1 완료가 이미 거절한 S2를 다시 열지 않는다. 설정 409 초점은 effect. 프로필 검증 칸 높이 예약. 500은 배너만.
 - runtime-unverified: 실서버 claim→S1→S2 왕복은 mock·RTL 범위.
 
 ## SH-12c 온보딩 S2 「팀원 초대」 (#2333)

@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
   type FormEvent,
+  type KeyboardEvent,
 } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -28,7 +29,6 @@ import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { HandleField } from "./HandleField";
 import {
   defaultWorkspaceName,
-  suggestedHandle,
 } from "./fallbackHandle";
 import {
   handleFieldError,
@@ -38,7 +38,7 @@ import {
   isWorkspaceStale,
   workspaceNameSaveMessage,
 } from "./identityCopy";
-import { clearS1Draft, readS1Draft, writeS1Draft } from "./s1Draft";
+import { clearS1Draft, readS1Draft, resolveS1Seeds, writeS1Draft } from "./s1Draft";
 import { StaleWorkspaceNameConflict } from "./StaleWorkspaceNameConflict";
 import {
   S1_DISPLAY_ERROR_ID,
@@ -55,6 +55,9 @@ import {
   S1_STALE_MESSAGE_ID,
   S1_WORKSPACE_ERROR_ID,
 } from "./s1Copy";
+import {
+  hasOwnerOnboardingSettingsDoor,
+} from "./ownerOnboardingStore";
 
 // Reading this as: onboarding S1 (내 워크스페이스·내 이름) for internal team
 // users on web+Tauri, density 6/10, motion 2/10.
@@ -62,6 +65,7 @@ import {
 export function WorkspaceProfileStage({
   workspaceId,
   memberHandle,
+  memberDisplayName,
   email,
   workspaceName,
   workspaceUpdatedAtMs,
@@ -71,6 +75,7 @@ export function WorkspaceProfileStage({
 }: {
   workspaceId: string;
   memberHandle: string;
+  memberDisplayName?: string;
   email?: string;
   workspaceName?: string;
   workspaceUpdatedAtMs?: number;
@@ -81,8 +86,12 @@ export function WorkspaceProfileStage({
   const offline = useBrowserOffline();
   const queryClient = useQueryClient();
   const workspaceEdited = useRef(false);
-  const renamedNameRef = useRef<string | null>(null);
-  const profileSavedRef = useRef(false);
+  const profileSaved = hasOwnerOnboardingSettingsDoor("profile");
+  const workspaceSaved = hasOwnerOnboardingSettingsDoor("workspace");
+  const renamedNameRef = useRef<string | null>(
+    workspaceSaved ? (workspaceName?.trim() || null) : null
+  );
+  const profileSavedRef = useRef(profileSaved);
   const workspaceInputRef = useRef<HTMLInputElement>(null);
   const displayInputRef = useRef<HTMLInputElement>(null);
   const handleInputRef = useRef<HTMLInputElement>(null);
@@ -90,13 +99,18 @@ export function WorkspaceProfileStage({
   const focusNonce = useRef(0);
   const [focusTick, setFocusTick] = useState(0);
   const draft = readS1Draft();
-  const [workspaceDraft, setWorkspaceDraft] = useState(
-    () => draft?.workspaceName ?? defaultWorkspaceName(workspaceName)
-  );
-  const [displayName, setDisplayName] = useState(() => draft?.displayName ?? "");
-  const [handle, setHandle] = useState(
-    () => draft?.handle ?? suggestedHandle(email ?? memberHandle)
-  );
+  const seeds = resolveS1Seeds({
+    draft,
+    workspaceName,
+    memberHandle,
+    memberDisplayName,
+    email,
+    profileSaved,
+    workspaceSaved,
+  });
+  const [workspaceDraft, setWorkspaceDraft] = useState(() => seeds.workspaceName);
+  const [displayName, setDisplayName] = useState(() => seeds.displayName);
+  const [handle, setHandle] = useState(() => seeds.handle);
   const [updatedAtMs, setUpdatedAtMs] = useState(workspaceUpdatedAtMs);
   const [busy, setBusy] = useState(false);
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
@@ -106,7 +120,13 @@ export function WorkspaceProfileStage({
   const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (workspaceEdited.current || draft?.workspaceName) return;
+    if (workspaceEdited.current) return;
+    if (hasOwnerOnboardingSettingsDoor("workspace")) {
+      setWorkspaceDraft(defaultWorkspaceName(workspaceName));
+      renamedNameRef.current = workspaceName?.trim() || null;
+      return;
+    }
+    if (draft?.workspaceName) return;
     setWorkspaceDraft(defaultWorkspaceName(workspaceName));
   }, [workspaceName, draft?.workspaceName]);
 
@@ -258,12 +278,6 @@ export function WorkspaceProfileStage({
     }
   }
 
-  function onSubmit(event: FormEvent) {
-    event.preventDefault();
-    if (offline || busy) return;
-    void attempt();
-  }
-
   const handleKeepTheirs = () => {
     if (!staleName) return;
     workspaceEdited.current = true;
@@ -280,6 +294,24 @@ export function WorkspaceProfileStage({
     void attempt();
   };
 
+  function onSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (offline || busy) return;
+    if (staleName) {
+      handleKeepMine();
+      return;
+    }
+    void attempt();
+  }
+
+  function handleFormKeyDown(event: KeyboardEvent<HTMLFormElement>) {
+    if (!staleName) return;
+    if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+    if (!(event.target instanceof HTMLInputElement)) return;
+    event.preventDefault();
+    handleKeepMine();
+  }
+
   const handleSkip = () => {
     onSkip?.();
   };
@@ -290,6 +322,7 @@ export function WorkspaceProfileStage({
       data-testid="onboarding-s1"
       aria-busy={busy || undefined}
       onSubmit={onSubmit}
+      onKeyDown={handleFormKeyDown}
     >
       <div className="flex break-keep flex-col gap-1">
         {S1_LEAD.map((line) => (
@@ -395,6 +428,7 @@ export function WorkspaceProfileStage({
             onChange={(event) => {
               setDisplayName(event.currentTarget.value);
               setDisplayError(null);
+              profileSavedRef.current = false;
             }}
           />
           {displayError ? (
@@ -415,6 +449,7 @@ export function WorkspaceProfileStage({
           onChange={(value) => {
             setHandle(value);
             setHandleError(null);
+            profileSavedRef.current = false;
           }}
           error={handleError}
           errorId={S1_HANDLE_ERROR_ID}
