@@ -1,8 +1,21 @@
 # oort 진행 현황
 
+## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
+
+- Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
+- 검증: RTL+가짜 타이머(0명 ≤2s FirstAgentStage·백스톱 0 · 1명 hold 회귀+오프너) · 사보타주 2건 RED 후 복구.
+- runtime-unverified: 실셀프호스트 claim→0명 워크스페이스 왕복은 mock 범위.
+## SH-12d-e 첫 에이전트 활성 전이 오너 킥오프 (#2334, 2026-09-10)
+
+- Track engine. `feat/2334-kickoff-first-agent` onto `origin/track/engine`. ADR-0185 D-C (c2): `resolve_welcome_target_in_tx`가 처음 배달 가능한 Some이 되는 전이(네이티브 `POST …/agents` · hosted `detected→active`)에서 오프너 마커가 없는 오너 1인에게 웰컴 킥오프 enqueue. 사람 첫 합류 트리거(D2) 유지. 시스템 라인 없음.
+- R2: hosted opener는 mentions와 같은 gateway 레일(run in-tx · inbox · `method=gateway`). 배달 불가면 마커를 쓰지 않음. `pg_advisory_xact_lock(hashtext(opener key))`. provider_required 완료는 opener 마커가 아님. native `#general` join은 오프너 speaker만, audit `channel_memberships_created`가 그 수를 반영.
+- 멱등: `welcome:{ws}:{owner}:opener:v1`. 오너 탐지 = 가장 먼저 만들어진 active human owner.
+- runtime-unverified: 실스택 셀프호스트 first-agent 왕복(웹 SH-12d-w). PG conformance는 로컬 throwaway PG.
+
 ## SH-12b-w 온보딩 S1 「내 워크스페이스·내 이름」 (#2332)
 
-- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2 `changeMyHandle` `{handle}` + E0 `changeMyDisplayName`. 핸들 409 인라인, stale 409 재시도, 실패는 설정 › 워크스페이스 / 프로필. `oort.onboarding.v1` 값이 `workspace-profile`→`invite`. `totalSteps_is_2` 유지. 팀 규모 질문 0.
+- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2/E0 `changeMyProfile` `{handle, displayName}` 1회. 핸들 409는 제품 한국어, stale 409는 상대 이름+유지/저장, 비필드 실패는 「다시 시도」+「지금은 건너뛰기」(마커는 `workspace-profile` 유지). 설정 › 워크스페이스 이름(E1) · 설정 › 프로필 핸들(E2). `oort.onboarding.v1` 값이 `workspace-profile`→`invite`. 팀 규모 질문 0.
+- R2: 필드 오류 한국어+다음 행동, S1 성공 뒤 `replaceSessionMember`+persist, 설정 이름/핸들 컨트롤 신설.
 - runtime-unverified: 실서버 claim→S1→S2 왕복은 mock·RTL 범위.
 
 ## SH-12c 온보딩 S2 「팀원 초대」 (#2333)
@@ -14,6 +27,7 @@
 - Track engine. `feat/2331-workspace-rename-handle` onto `origin/track/engine`. E1 `PATCH /v1/workspaces/{ws}` `{name, updatedAtMs}` (owner/admin, slug immutable, stale 409, audit `workspace.renamed`). E2 `PATCH …/members/me` `handle` (join normalize, `member_handle_uniq` 409 `handle is already in use`, audit `member.handle_changed`, past `@oldhandle` bodies untouched). OpenAPI + `@momo/core` `renameWorkspace` / `changeMyHandle`. No migration.
 - 검증: `workspace_rename_conformance_pg` · `self_rename_conformance_pg` (각 상태코드 단정 + 메시지 본문 diff-0) · `scripts/verify_openapi_contract_rust.sh` · 사보타주 3건 RED 후 복구.
 - runtime-unverified: 없음 (로컬 PG 15432 컨벤션).
+
 ## SH-11e day-2 계약 v2 T2 (#2325, 2026-09-09)
 
 - Track engine. `feat/2325-day2-v2` onto `origin/track/engine`. T2: backup/restore는 `MIGRATE_DATABASE_URL`만, doctor `stack.*`는 SQL-over-URL + 공개 `/healthz`(`schema.{applied,head}` 추가), upgrade는 플랫폼 digest 교체 명령을 인쇄한다. T1 경로 바이트 불변(기존 day2 10·doctor 15 케이스 GREEN 유지, 신규 +6/+3).
