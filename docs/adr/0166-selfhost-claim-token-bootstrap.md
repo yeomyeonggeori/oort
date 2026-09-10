@@ -12,7 +12,7 @@
 현행 부트스트랩 경로(전부 실측 좌표):
 
 - `scripts/self_host_env.sh:729`가 초기 비밀번호를 생성(`openssl rand -hex 12`)해 `:822-823`에서 env 파일(0600)에 `MOMO_INITIAL_OWNER_EMAIL/_PASSWORD` 평문 기록.
-- `server-rust/bins/momo-migrate/src/main.rs:531` `bootstrap_owner`가 migrate 종료 시 `infra/prod/bootstrap_owner_if_absent.sql:20-21`(`\getenv`, 멱등 — 없을 때만 기록)로 첫 owner를 심는다. compose 주입은 `infra/rust/docker-compose.rust.yml:159-160`(migrate 서비스만 소비).
+- `server-rust/bins/momo-migrate/src/main.rs:531` `bootstrap_owner`가 migrate 종료 시 `infra/rust/sql/bootstrap_owner_if_absent.sql:20-21`(`\getenv`, 멱등 — 없을 때만 기록)로 첫 owner를 심는다. compose 주입은 `infra/rust/docker-compose.rust.yml:159-160`(migrate 서비스만 소비).
 - 사람은 `docs/SELF_HOST.md:195` 안내대로 env 파일을 `grep`해 비밀번호를 읽는다. **1회용 claim URL 개념은 현재 부재.**
 
 이 경로는 "설치자=사용자 본인, VM 셸 접근 가능"을 전제한다. 그록봇 파이프라인에서는 전제가 둘 다 깨진다:
@@ -58,3 +58,18 @@ Slack은 이메일 매직 링크(1회용 로그인 링크)로 비밀번호 없�
 ## Accepted 후 구현 티켓에서 봉인할 파라미터
 
 TTL 값(제안 24h), 라우트 경로명, claim 모드 활성 env 이름, per-IP rate limit 예산, claim-pending 상태의 표현(스키마 컬럼 vs 상태값).
+
+## 개정 (2026-09-10, ADR-0185)
+
+본문 Decision 원문은 그대로 둔다. ADR-0185 D-A (3) · D-B (b)가 claim의
+**종점**만 연장한다.
+
+- claim 비밀번호 설정이 끝나면 S1 「내 워크스페이스·내 이름」→ S2 「팀원
+  초대」(「나중에」 skip)가 이어진다. S1이 워크스페이스 **표시 이름**과
+  오너 프로필(표시 이름·핸들)을 덮어쓴다. 토큰 계약(해시 저장, TTL, 단회
+  소비, 무인증 `POST /v1/claim`)은 불변이다.
+- **워크스페이스 생성은 여전히 본 ADR 범위 밖이다.** Decision 항목 6의
+  「첫 owner 1인 전용 / 이후 사용자는 invites」는 유지한다. 시드 행 제거와
+  claim이 테넌트를 만드는 일은 SH-12z까지 미룬다.
+- Context가 인용하던 부트스트랩 SQL 좌표는 `infra/rust/sql/`이다. 파일
+  이동이지 결정 변경이 아니다.

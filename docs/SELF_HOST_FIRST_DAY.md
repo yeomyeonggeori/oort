@@ -4,9 +4,11 @@
 > [`SELF_HOST_FIRST_DAY.ko.md`](SELF_HOST_FIRST_DAY.ko.md).
 >
 > **This document is enough.** From a clean clone: bootstrap (the two keys)
-> → sign-in → workspace → issue a web GUI invite → second user joins (web +
-> desktop `oort://join`) → AI link → first mention. Finish without
-> cross-references. Links are for going deeper.
+> → claim password → S1 「내 워크스페이스·내 이름」 → S2 「팀원 초대」
+> (or 「나중에」) → first-run (kickoff-hold → 「첫 에이전트 연결」 → phone
+> link) → second user joins (web + desktop `oort://join`) → AI link →
+> first mention. Finish without cross-references. Links are for going
+> deeper.
 >
 > The clone→sign-in-only canon is [`SELF_HOST.md`](SELF_HOST.md). This
 > document is the **next day** — the first time the GUI invite path is
@@ -133,167 +135,271 @@ origin it warns on stderr only and does not edit the line (`:348-366`).
 
 ---
 
-## 2. Sign in — enter the seed workspace
+## 2. First run — claim password, then S1 · S2 · first agent · phone link
 
 Verification: **code-derived** (screen) · **needs live run** (click).
 
-Open the address step 1 printed — default **`http://localhost:8088`** — in
-a browser. Screen title is **oort**
-(`clients/web/src/features/auth/ConnectPage.tsx:283-286`). Description:
-「서버를 고른 뒤 로그인합니다。」 (`:287-290`).
+The first day is not ConnectPage login into a demo nameplate. Claim
+password → S1 「내 워크스페이스·내 이름」 (`1/2`) → S2 「팀원 초대」
+(`2/2`, skip 「나중에」) → first-run (kickoff-hold → 「첫 에이전트 연결」
+→ phone link). Claim password is not a counted step
+(`clients/web/src/features/auth/onboardingFlow.ts` `OWNER_ONBOARDING_STAGES`).
 
-There are three fields; fill two of them.
+The env-password ConnectPage path in [`SELF_HOST.md`](SELF_HOST.md) still
+exists when claim is off. That path does **not** open S1/S2. Operator
+vocabulary for capturing `MOMO_CLAIM_PATH`:
+[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.5.
 
-| Field on screen | Mark | Put this |
+### Claim password
+
+Claim is a real path, not a hash route
+(`clients/web/src/features/auth/claimPath.ts`). Open:
+
+```
+http://localhost:<MOMO_WEB_PORT>/claim/<token>
+```
+
+Migrate prints `MOMO_CLAIM_PATH=/claim/<token>` **once** on first `up`.
+Restarts print `MOMO_BOOTSTRAP_CLAIM=skipped`. Do not paste the token into
+chat (ADR-0004).
+
+Screen title **oort**. Description 「첫 비밀번호를 설정합니다。」
+(`ClaimPage.tsx:136-143`). Fields: **새 비밀번호** · **비밀번호 확인**
+(both 「필수」). Submit **비밀번호 설정** (in progress **설정 중…**)
+(`:187-238`). Mismatch: 「두 칸의 비밀번호가 같지 않습니다。」 (`:227`).
+Missing token: 「이 링크는 유효하지 않습니다. 받은 주소를 그대로 여세요。」
+(`:164`). Offline: 「오프라인입니다. 네트워크가 연결되면 다시 시도하세요。」
+(`:150`).
+
+Success writes the first-run markers and the onboarding pending flag, then
+mounts S1 (`ClaimPage.tsx` → `OwnerOnboarding`).
+
+### S1 — 내 워크스페이스·내 이름 (1/2)
+
+Chrome counter **`1/2`**. Title **내 워크스페이스·내 이름**
+(`s1Copy.ts` `S1_TITLE`, `OwnerOnboarding.tsx`). Lead: 「워크스페이스
+이름과 여기서 다른 멤버에게 보이는 이름과 핸들을 정합니다。」
+(`S1_LEAD`).
+
+| Field | Notes | Coordinate |
 |---|---|---|
-| **서버 주소** | 「선택」 next to the label (`ConnectPage.tsx:338`) | **Leave it empty.** Hint: 「비워 두면 이 페이지를 제공한 주소로 연결합니다。」 (`:261-263,378`) |
-| **이메일** | 「필수」 (`:402`) | `owner@oort.local` (or the address the generator printed). Hint: 「워크스페이스에 초대받은 주소」 (`:418`) — first sign-in is the owner themselves, not an invite |
-| **비밀번호** | 「필수」 (`:423`) | `MOMO_INITIAL_OWNER_PASSWORD`. Hint: 「가입할 때 정한 비밀번호」 (`:445`) |
+| **워크스페이스 이름** | Overwrites the seed display name. Not the slug | `WorkspaceProfileStage.tsx` |
+| **표시 이름** | Owner profile | same |
+| **핸들** | `@` lives inside the box (`HandleField.tsx`) | same |
 
-**You do not need to find a workspace field.** It is folded behind 「다른
-워크스페이스로 로그인」 (`ConnectPage.tsx:475`). Expand it and the label is
-**워크스페이스 ID**; the only value it accepts is one UUID (`:483`,
-placeholder `00000000-0000-0000-0000-000000000000`, `:87`). Hint: 「비워
-두면 기본 워크스페이스로 연결합니다。」 (`:500`)
+Submit **이름 저장** (in progress **저장 중**, retry **다시 시도**)
+(`S1_PRIMARY_*`). Re-entry sentence, always: 「나중에 설정 › 워크스페이스
+/ 프로필에서 바꿀 수 있습니다。」 (`S1_REENTRY`). Those doors: **설정 ›
+워크스페이스** field **워크스페이스 이름** / **이름 저장**; **설정 ›
+프로필** editable **표시 이름** + **핸들** / **프로필 저장**
+(`WorkspaceSection.tsx`, `ProfileSection.tsx`).
 
-Press **로그인** (`:264-271,529`).
+A save failure can show **지금은 건너뛰기** (`S1_SKIP_LABEL`) — that is
+not the always-on S2 skip. Offline: 「연결이 끊겨 지금은 이름을 저장할 수
+없습니다. 다시 연결되면 이어서 저장할 수 있습니다。」
 
-Once in, seed channels stand under the sidebar group **채널**. The list
-text is the channel name; `#` is the icon — `general` · `agent-lab`
-(`packages/momo-core/src/features/workspace/directory.ts:180-185`,
-`clients/web/src/features/sidebar/Sidebar.tsx:314-337`,
-`server/Migrations/002_seed.sql:39-40,84-97`). Workspace name **momo Demo
-Workspace**, slug **demo**, fixed id
-`00000000-0000-7000-8000-000000000001`. The first owner adopts that seed
-human (`infra/prod/bootstrap_owner_if_absent.sql:74-75`,
-`email_verified = true`).
+### S2 — 팀원 초대 (2/2)
 
-Self-host env is `MOMO_AGENT_SEED_MODE=none` (`scripts/self_host_env.sh:658`).
-**There is no 김인턴.** You create the agent in step 7.
+Chrome counter **`2/2`**. Title **팀원 초대** (`s2Copy.ts` `S2_TITLE`).
+Lead is the same two sentences as 설정 › 멤버와 초대 (`S2_LEAD` =
+`InviteSection` lines).
 
-Handle that opens settings: the gear at the bottom of the sidebar.
-Accessible name **설정 열기**, tooltip 「설정 (⌘,)」
-(`Sidebar.tsx:687-690`). Shell title **설정**
-(`clients/web/src/features/settings/SettingsRoute.tsx:189`). Left nav
-groups **나** / **워크스페이스** (`:72-93`).
+No role / uses / TTL fields. Sealed defaults: role `member`, max uses `1`,
+TTL 24h (`OWNER_INVITE_*` in `onboardingFlow.ts`). Primary **초대 링크
+만들기** (in progress **만드는 중**) — same labels as settings
+(`inviteLabels.ts`). Ghost **나중에** (`S2_SKIP_LABEL`) is always on until
+an invite is issued. Skip issues **0** codes. Re-entry sentence, always:
+「설정 › 멤버와 초대에서 언제든 이어서 초대할 수 있습니다。」
+(`S2_SKIP_SENTENCE`).
 
-This session's UUID is on the 「워크스페이스 ID」 line of **설정 › 계정**
-(`AccountSection.tsx:19-26`).
+After issue, the one-time card is `IssuedInviteCard` with `copyMode="single"`
+— only **초대 카드 복사**. Then primary becomes **계속**
+(`S2_CONTINUE_LABEL`). Card copy is in §4.
+
+Offline: 「연결이 끊겨 지금은 초대 링크를 만들 수 없습니다. 다시 연결되면
+이어서 만들 수 있습니다。」 (`S2_OFFLINE_REASON` — same sentence as
+settings).
+
+### After onboarding — first-run
+
+Order is already the table: kickoff-hold → first-agent → phone-link
+(`firstAgent.ts` `FIRST_AGENT_STAGE_ORDER`, `firstRunGate.ts`
+`decideFirstRun`).
+
+Self-host env is `MOMO_AGENT_SEED_MODE=none` (`scripts/self_host_env.sh`).
+**There is no 김인턴.** `decideWelcomeMount` reason `no-active-agent`
+releases the hold immediately — no 120s backstop card
+(`welcomeKickoff.ts`). The next stage title is **첫 에이전트 연결**
+(`FIRST_AGENT_TITLE`). Lead 「팀에 붙일 에이전트를 고르세요。」 Skip
+**나중에**; re-entry 「나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수
+있습니다.」 Cards include Claude Code · Codex · Grok · **OpenAI 호환**
+(the last sends you to 설정 › AI 연결 — §6). Native agent + mention is
+still §7.
+
+When the first agent becomes welcome-capable (native create tx **or**
+hosted connection `active`), the server enqueues the opener for the owner
+if none is live yet (`routes/welcome.rs`
+`enqueue_owner_welcome_kickoff_in_tx`). Hosted speakers take the gateway
+rail; native stay on the worker rail. An undeliverable hosted speaker does
+not consume the opener marker.
+
+Then **폰에서도 쓰기** (`PhoneLinkFirstRun.tsx`). Lead: 「같은 계정으로
+폰을 붙이려면 지금 QR을 만들 수 있습니다. 나중에 설정 기기에서도 열 수
+있습니다。」 Ghost **앱으로 들어가기**.
+
+Settings after you are in: profile-card row **설정**, tooltip 「설정
+(⌘,)」 (`ProfileCard.tsx:175-189`). Shell title **설정**
+(`SettingsRoute.tsx:172`). Left nav groups **개인** / **워크스페이스** /
+**연결** (`settingsNav.ts`). This session's UUID is the 「워크스페이스
+ID」 line of **설정 › 계정** (`AccountSection.tsx:22-26`).
+
+### What remains in v0.1.5
+
+Onboarding overwrites the **visible** workspace name and the owner's
+display name + handle. It does **not** remove the seed row (ADR-0185 §6,
+D-B (b)). Still in v0.1.5:
+
+- slug **`demo`**
+- fixed workspace UUID `00000000-0000-7000-8000-000000000001`
+- seeded channel `#agent-lab` next to `#general`
+  (`server/Migrations/002_seed.sql`)
+
+Claim still binds the first owner onto that seed human
+(`infra/rust/sql/bootstrap_owner_if_absent.sql`,
+`bootstrap_owner_claim_if_absent.sql`). Creating a **new** tenant is not
+this first-day path — §3. Seed removal is SH-12z.
 
 ---
 
-## 3. Create a workspace
+## 3. Operator function — create a workspace
 
 Verification: **code-derived** · **needs live run**.
 
-Invites and mentions work with the seed workspace alone. To start a new
-team, only the operator can create a tenant
-(`server-rust/bins/momo-server/src/routes/workspaces.rs:105-115`,
-`require_instance_operator`).
+This is **not** the first-day funnel. Invites and mentions work on the
+workspace S1 just named. `POST /v1/workspaces` stays gated on
+`require_instance_operator`
+(`server-rust/bins/momo-server/src/routes/workspaces.rs:200-216`).
+ADR-0185 does not relax that gate. A new tenant is an extra operator
+action, not step 3 of onboarding.
 
 The form on both entries is the same. Field names are the same.
 
 ### Entry A — settings
 
-1. **설정 열기** → left nav group **워크스페이스** → **워크스페이스**
-   (`SettingsRoute.tsx:81`).
+1. **설정** → left nav group **워크스페이스** → **워크스페이스**
+   (`settingsNav.ts`).
 2. Section title **워크스페이스**. Description: 「지금 열려 있는
    워크스페이스를 확인하고, 새 워크스페이스를 만듭니다。」 / 「새
    워크스페이스는 만든 사람이 오너가 되고 #general 채널 하나로
-   시작합니다。」 (`WorkspaceSection.tsx:347-353`).
-3. Subheading **새 워크스페이스 만들기** (`:385`).
+   시작합니다。」 (`WorkspaceSection.tsx:887-893`).
+3. Subheading **새 워크스페이스 만들기** (`:944`). Above that heading the
+   same section now also shows the current-tenant card (including
+   **워크스페이스 이름** / **이름 저장** — S1's settings door) plus
+   role labels, welcome kickoff, unfurl, and leave.
 
 ### Entry B — rail
 
-**워크스페이스 추가** on the workspace rail (`WorkspaceRail.tsx:111-112`).
-Dialog title **워크스페이스 추가**. Description: 「새 워크스페이스를
-만들거나, 초대를 받았다면 초대 링크로 참여합니다。」
-(`AddWorkspaceDialog.tsx:208-210`).
+**워크스페이스 추가** on the workspace rail (`WorkspaceRail.tsx:113-114`)
+and on the profile-card menu (`ProfileCard.tsx:161-172`). Dialog title
+**워크스페이스 추가**. Description: 「새 워크스페이스를 만들거나, 초대를
+받았다면 초대 링크로 참여합니다。」 (`AddWorkspaceDialog.tsx:214-217`).
 
 ### Fields
 
 | Field | Hint | Coordinate |
 |---|---|---|
-| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다。」 | `WorkspaceSection.tsx:398-401` · `AddWorkspaceDialog.tsx:278-280` |
-| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다。」 | `WorkspaceSection.tsx:416-419` · `AddWorkspaceDialog.tsx:302-304` |
+| **이름** | 「사람이 읽는 이름입니다. 80자까지 쓸 수 있습니다。」 | `WorkspaceSection.tsx:957-960` · `AddWorkspaceDialog.tsx:283-286` |
+| **슬러그** | Settings: 「영문 소문자, 숫자, 하이픈만 쓸 수 있습니다. 서버 전체에서 하나뿐이어야 합니다。」 / Dialog: 「영문 소문자, 숫자, 하이픈만. 서버 전체에서 하나뿐이어야 합니다。」 | `WorkspaceSection.tsx:975-978` · `AddWorkspaceDialog.tsx:307-310` |
 
 Rules (same as the server): empty → 「슬러그를 입력하세요。」 / 「이름을
-입력하세요。」 (`packages/momo-core/src/features/settings/model.ts:308-331`).
+입력하세요。」 (`packages/momo-core/src/features/settings/model.ts:392-412`).
 
 Button: **워크스페이스 만들기** (in progress **만드는 중**)
-(`WorkspaceSection.tsx:457` · `AddWorkspaceDialog.tsx:367`).
+(`WorkspaceSection.tsx:1016` · `AddWorkspaceDialog.tsx:373`).
 
 Success card: 「{이름} 워크스페이스를 만들었습니다。」 then **슬러그** ·
 **워크스페이스 ID**. Then 「새 워크스페이스로는 그 슬러그로 다시
-로그인해서 들어갑니다。」 (`WorkspaceSection.tsx:469-480`). The dialog uses
-the same success sentence plus 「슬러그 {slug}. 새 워크스페이스로는 그
-슬러그로 다시 로그인해서 들어갑니다。」 (`AddWorkspaceDialog.tsx:221-226`).
+로그인해서 들어갑니다。」 (`WorkspaceSection.tsx:1028-1038`). The dialog
+uses the same success sentence plus 「슬러그 {slug}. 새 워크스페이스로는
+그 슬러그로 다시 로그인해서 들어갑니다。」 (`AddWorkspaceDialog.tsx:227-232`).
 
 **There is no session switch.** To enter the new tenant, **로그아웃**
 (`AccountSection.tsx:31-32`) then on the sign-in screen expand 「다른
 워크스페이스로 로그인」 and put the success card's **워크스페이스 ID**
 (UUID). The sign-in form accepts a UUID, not a slug
-(`ConnectPage.tsx:449-500`). An invite is issued to the workspace you are
-**in now**. To invite from the seed workspace, do not make this switch.
+(`ConnectPage.tsx`). An invite is issued to the workspace you are **in
+now**. First-day invites stay on the workspace S1 named — do not make this
+switch.
 
 On 403 the screen replaces the form with: 「새 워크스페이스는 이 서버의
-운영자만 만들 수 있습니다。」 (`WorkspaceSection.tsx:388-390`). Look at
+운영자만 만들 수 있습니다。」 (`WorkspaceSection.tsx:947-949`). Look at
 step 1's `PLATFORM_ADMIN_EMAILS`.
 
 ---
 
-## 4. Issue a web GUI invite
+## 4. Invites — S2 and settings re-entry
 
-Verification: **code-derived** · **needs live run**. This is the first
-document of the GUI invite path. Do not use the ops CLI.
+Verification: **code-derived** · **needs live run**. Do not use the ops
+CLI. S2 and 설정 › 멤버와 초대 share `useIssueInvite` + `IssuedInviteCard`.
 
-1. **설정 열기** → group **워크스페이스** → **멤버와 초대**
-   (`SettingsRoute.tsx:88`).
+### S2 during first run
+
+S2 is the first-day invite: one sealed link (member · 1 use · 24h) or
+**나중에**. Copy and the one-time card are the same component as settings;
+S2's card is `copyMode="single"` (only **초대 카드 복사**). Details of
+the card bytes are below. After skip or **계속**, first-run in §2 starts.
+
+### Settings › 멤버와 초대
+
+Re-entry after S2, and the path that can pick role / uses / TTL.
+
+1. **설정** → group **워크스페이스** → **멤버와 초대** (`settingsNav.ts`).
 2. Section title **멤버와 초대**. Description: 「초대 링크를 발급해 사람을
    이 워크스페이스로 부릅니다。」 / 「코드는 발급 직후 한 번만 보입니다.
-   서버는 해시만 보관합니다。」 (`InviteSection.tsx:135-137,181`).
+   서버는 해시만 보관합니다。」 (`InviteSection.tsx:112-114`).
 3. If none yet, empty state: 「아직 발급한 초대 링크가 없습니다。」 /
-   「아래에서 역할과 사용 횟수를 정하고 링크를 만드세요。」 (`:184-185`).
-4. Form (`:219-316`):
+   「아래에서 역할과 사용 횟수를 정하고 링크를 만드세요。」 (`:150-154`).
+4. Form (`:187-288`):
 
 | Field | Default | Choices · hint | Coordinate |
 |---|---|---|---|
-| **역할** | 멤버 | **멤버** 「채널을 읽고 씁니다。」 · **관리자** 「초대와 워크스페이스 설정을 다룹니다。」 · **게스트** 「초대받은 채널만 봅니다。」 | `InviteSection.tsx:230-237` · `model.ts:249-253` |
-| **사용 횟수** | `1` | 「이 링크로 참여할 수 있는 사람 수입니다。」 1…10000 | `InviteSection.tsx:239-257` |
-| **유효 기간** | 7일 | 1일 · 7일 · 30일. Detail per choice: 「{YYYY-MM-DD}까지 쓸 수 있습니다。」 | `InviteSection.tsx:260-271` · `model.ts:255` |
+| **역할** | 멤버 | **멤버** 「채널을 읽고 씁니다。」 · **관리자** 「초대와 워크스페이스 설정을 다룹니다。」 · **게스트** 「초대받은 채널만 봅니다。」 | `InviteSection.tsx:198-205` · `model.ts:255-258` |
+| **사용 횟수** | `1` | 「이 링크로 참여할 수 있는 사람 수입니다。」 1…10000 | `InviteSection.tsx:207-226` |
+| **유효 기간** | 7일 | 1일 · 7일 · 30일. Detail per choice: 「{YYYY-MM-DD}까지 쓸 수 있습니다。」 | `InviteSection.tsx:228-239` · `model.ts:277` |
 
-5. **초대 링크 만들기** (in progress **만드는 중**) (`InviteSection.tsx:300`).
+5. **초대 링크 만들기** (in progress **만드는 중**) (`inviteLabels.ts`,
+   `InviteSection.tsx:272`).
 
-Issue card (`:318-368`) — the code is visible again **only on this
-screen**:
+Issue card (`IssuedInviteCard.tsx`) — the code is visible again **only on
+this screen**:
 
 - 「초대 링크를 만들었습니다. 코드는 이 화면에서만 볼 수 있으니 지금
-  전달하세요。」 (`:326-328`)
+  전달하세요。」 (`:49-51`)
 - **딥링크** — `oort://join?server=<percent-encoded base URL>&code=<code>`
-  (`:334-336`, assembled `model.ts:355-356`)
+  (`:57-59`, assembled `model.ts:439-440`)
 - **서버 주소** — this page's API origin. Self-host web:
-  `http://localhost:<port>` (`:338`, `resolveServerBaseUrl` →
-  `window.location.origin`, `clients/web/src/lib/serverBase.ts:117-121`)
-- **초대 코드** — plaintext once (`:339`)
-- **만료** — `{YYYY-MM-DD}, {N}명까지` (`:340-344`)
+  `http://localhost:<port>` (`:61`, `resolveServerBaseUrl` →
+  `window.location.origin`, `clients/web/src/lib/serverBase.ts`)
+- **초대 코드** — plaintext once (`:62`)
+- **만료** — `{YYYY-MM-DD}, {N}명까지` (`:63-67`)
 
-Three buttons:
+Settings has three buttons (`copyMode` default `full`):
 
-- **딥링크 복사** (`:349-352`)
-- **초대 카드 복사** (`:354-357`) — card body is
-  `packages/momo-core/src/features/settings/model.ts:378-390`
-- **메일 초안 열기** (`:359-361`)
+- **딥링크 복사** (`IssuedInviteCard.tsx:81-85`)
+- **초대 카드 복사** (`:86-90`) — card body is
+  `packages/momo-core/src/features/settings/model.ts:462-474`
+- **메일 초안 열기** (`:91-93`)
 
 Under the card: 「받는 사람은 앱을 설치한 뒤 딥링크를 열면 서버 주소와
-코드가 채워진 상태로 참여 화면에 도착합니다。」 (`:364-366`) — this is
+코드가 채워진 상태로 참여 화면에 도착합니다。」 (`:98-100`) — this is
 **desktop deeplink** copy. Web join is 5A.
 
 What remains on the list is a preview (last few characters) and a status
 chip only; the plaintext code is not returned again
-(`InviteSection.tsx:198-212`, `model.ts:455-466`).
+(`InviteSection.tsx:163-180`).
 
 Permission denied: 「초대 링크는 워크스페이스 오너나 관리자만 발급할 수
-있습니다。」 (`InviteSection.tsx:152-154`).
+있습니다。」 (`InviteSection.tsx:130`).
 
 ---
 
@@ -568,9 +674,10 @@ Stack stop · wipe · port collision: [`SELF_HOST.md`](SELF_HOST.md)
 | Document | When |
 |---|---|
 | [`SELF_HOST.md`](SELF_HOST.md) | Bring-up failure, secret rotate, putting the key in over REST, outbox query |
+| [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) | Operator claim-path capture (`MOMO_CLAIM_PATH`) |
 | [`onboarding-deeplink.md`](onboarding-deeplink.md) | `oort://join` byte contract |
 | [`infra/rust/README.md`](../infra/rust/README.md) | compose overlays, migration logs |
-| `infra/prod/momo-ops.sh invite-create` | Retired (`f399e417:infra/prod/momo-ops.sh`). Not this document's path |
+| retired ops CLI `invite-create` | Retired (historical Swift prod tree at `f399e417`). Not this document's path |
 | workd / ACP hosting | Retired with LS-1 (#2165). Source: `f399e417:infra/workd` · `f399e417:docs/AGENT_HOSTING_QUICKSTART.md`. Not the self-host first day |
 | `scripts/bench_onboarding.sh` | Wall-clock install→first reply. REST, not GUI |
 
@@ -583,13 +690,19 @@ document that is not on the screen is a defect.
 
 | Surface | File |
 |---|---|
+| Claim password | `clients/web/src/features/auth/ClaimPage.tsx`, `claimPath.ts` |
+| S1 / S2 chrome | `…/onboarding/OwnerOnboarding.tsx`, `s1Copy.ts`, `WorkspaceProfileStage.tsx`, `s2Copy.ts`, `InviteStage.tsx` |
 | Sign-in / join | `clients/web/src/features/auth/ConnectPage.tsx` |
 | Join parser | `packages/momo-core/src/features/auth/deepLink.ts` |
-| Settings nav | `clients/web/src/features/settings/SettingsRoute.tsx` |
+| Settings nav | `clients/web/src/features/settings/settingsNav.ts`, `SettingsRoute.tsx`, `ProfileCard.tsx` |
 | Workspace | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
-| Members and invites | `…/InviteSection.tsx`, `packages/momo-core/src/features/settings/model.ts` |
+| Profile door | `…/ProfileSection.tsx`, `…/onboarding/HandleField.tsx` |
+| Members and invites | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
+| First-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
+| Welcome enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |
 | AI link | `…/AiLinkSection.tsx` |
 | Agent hub | `clients/web/src/features/agentHub/AgentHubRoute.tsx`, `CreateAgentDialog.tsx`, `AgentChannelsSection.tsx` |
 | Channel members | `clients/web/src/features/channels/AddChannelMemberDialog.tsx` |
 | Mention | `packages/momo-core/src/features/chat/composerCopy.ts`, `clients/web/src/features/chat/Composer.tsx` |
 | env / CORS | `scripts/self_host_env.sh` |
+| Owner bootstrap SQL | `infra/rust/sql/bootstrap_owner_if_absent.sql` |

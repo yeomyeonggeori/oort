@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
+
+- Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.
+- runtime-unverified: GUI 클릭 경로는 이 워크트리에서 브라우저를 누르지 않음(기존 FIRST_DAY 규율). S1 카피는 `feat/2332-onboarding-s1`에서 인용(아직 track/engine 미랜딩).
+
 ## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
 
 - Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).
