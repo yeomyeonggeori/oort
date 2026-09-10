@@ -810,6 +810,21 @@ Local, VPS and the Grok Bot VM have no row — they are the compose canon.
 Cloudflare has no row either: it is a T3 edge in front of one of these
 (recipe SH-11d).
 
+### AWS Lightsail / EC2
+
+T1 VM recipe: [`infra/aws/README.md`](../infra/aws/README.md). Canonical
+compose on one Lightsail instance (EC2 is the same module,
+`compute = "ec2"`). Extra disk at `/data`, Docker `data-root=/data/docker`,
+firewall 22/80/443 only (Postgres 5432 stays private). Env:
+
+```sh
+scripts/self_host_env.sh --platform aws-lightsail --public-origin https://<host>
+```
+
+Human approval points (owner's account and bill): AWS login/SSO,
+`terraform apply`, Budgets email, DNS A, `terraform destroy`. Gate:
+`scripts/oort doctor --json`.
+
 ### Railway
 
 Cloud install of the same stack: [`infra/railway/README.md`](../infra/railway/README.md).

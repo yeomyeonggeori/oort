@@ -95,7 +95,7 @@ NON_COMPOSE_ENV_TEMPLATES=()
 # -----------------------------------------------------------------------------
 # Platform templates (non-compose) — ADR-0184 D5 / #2297.
 #
-# A managed platform (Railway today; Fly/AWS rows arrive with SH-11b/c) ships
+# A managed platform (Railway; AWS T1 SH-11c; Fly arrives with SH-11b) ships
 # its deployment as a service catalog + edge file + image recipe, not as a
 # compose rendering. Those files sit outside the RENDERINGS table by nature,
 # and until #2297 the only record of that was a prose note inside
@@ -114,6 +114,7 @@ NON_COMPOSE_ENV_TEMPLATES=()
 # -----------------------------------------------------------------------------
 PLATFORM_TEMPLATES=(
   "infra/railway|scripts/tests/test_railway_template.sh|infra/railway/README.md infra/railway/railway.json infra/railway/Caddyfile.railway infra/railway/Dockerfile.caddy"
+  "infra/aws|scripts/tests/test_aws_recipe.sh|infra/aws/README.md infra/aws/cloud-init.yaml infra/aws/iam-policy.json infra/aws/terraform/main.tf infra/aws/terraform/variables.tf infra/aws/terraform/outputs.tf"
 )
 
 # Compose-shaped files under infra/ that no rendering row names, with the
