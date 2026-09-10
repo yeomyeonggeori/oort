@@ -176,7 +176,8 @@ oort_local_provider_env_keys() {
 #   3 tier      T1 = compose compute (env file, --public-origin derivation,
 #               MOMO_SELF_HOST_PLATFORM stamp outside the heredoc)
 #               T2 = managed containers + PG plugin (canonical key set on
-#               stdout, no file, no stamp)
+#               stdout plus MOMO_SELF_HOST_PLATFORM stamp outside the
+#               heredoc, no file, no hosted-delivery key)
 #   4 origin    public-origin source: `env:<VAR>` reads a platform-provided
 #               host variable; `flag` means the operator passes --public-origin;
 #               `none` means T1 without a required public origin at create
@@ -192,6 +193,7 @@ oort_local_provider_env_keys() {
 #               heredoc on create (T1 file path); 0 = never emitted (T2 stdout
 #               is exactly oort_canonical_env_keys)
 # The canonical key set (oort_canonical_env_keys, 41) never changes here.
+# T2 stdout is that set plus the stamp (42); the stamp is not a heredoc key.
 # docs/SELF_HOST_AGENT.md §1 is the prose view of this table.
 platform_profiles() {
   cat <<'EOF'
@@ -376,7 +378,9 @@ oort_generator_env_keys() {
   ' "$SCRIPT_DIR/self_host_env.sh"
 }
 
-# Railway output must equal this set (generator heredoc + public-edge keys).
+# Canonical 41-key set (generator heredoc + public-edge keys). T2 stdout is
+# this set plus MOMO_SELF_HOST_PLATFORM outside the heredoc (#2328). Doctor
+# env.required_keys reads the heredoc only and stays 41.
 oort_canonical_env_keys() {
   { oort_generator_env_keys; oort_public_edge_env_keys; } | LC_ALL=C sort -u
 }
@@ -485,12 +489,13 @@ the operator sets by hand, and whether MOMO_HOSTED_DELIVERY_ENABLED is
 emitted. Known names: railway (T2) · fly · aws-lightsail · gcp-vm ·
 host-network (T1). An unknown name is refused. --railway is an alias for
 --platform railway.
-  T2 (railway): prints the canonical key set (oort_canonical_env_keys) as
-  KEY=value on stdout from platform-provided RAILWAY_PUBLIC_DOMAIN and
-  DATABASE_URL. It does not write a file. Both variables are required
-  (compose :? equivalent); a missing one is an explicit failure, not a
-  public.* skip. Do not combine with an image mode, --compose,
-  --public-origin, or --allow-local-provider.
+  T2 (railway): prints the canonical key set (oort_canonical_env_keys)
+  as KEY=value on stdout from platform-provided RAILWAY_PUBLIC_DOMAIN and
+  DATABASE_URL, then appends MOMO_SELF_HOST_PLATFORM=<name> outside the
+  heredoc (same stamp rule as T1). It does not write a file. Both
+  variables are required (compose :? equivalent); a missing one is an
+  explicit failure, not a public.* skip. Do not combine with an image
+  mode, --compose, --public-origin, or --allow-local-provider.
   T1 (fly, aws-lightsail, gcp-vm): the same derivation as --public-origin
   (which is required) plus MOMO_SELF_HOST_PLATFORM=<name> appended outside
   the heredoc. Combine with an image mode to create, or alone with
@@ -1201,7 +1206,8 @@ platform_value_for() {
 }
 
 # T2 rows: every value comes from the profile row + platform-provided env.
-# Output is exactly oort_canonical_env_keys (41) — no stamp, no hosted key.
+# Output is oort_canonical_env_keys (41) plus MOMO_SELF_HOST_PLATFORM=<name>
+# appended outside the heredoc (#2328). No hosted-delivery key, no file.
 emit_managed_platform_env() {
   local name="$REQUESTED_PLATFORM" label origin_var db_var internal hand_keys hosted
   local origin raw key value quoted
@@ -1214,7 +1220,7 @@ emit_managed_platform_env() {
   hand_keys="$(platform_profile_field "$name" 7)"
   hosted="$(platform_profile_field "$name" 8)"
   [ "$hosted" = "0" ] ||
-    fail "platform_profiles 내부 오류: T2 행은 hosted 0 이어야 한다 (stdout 은 정본 키 집합뿐): $name"
+    fail "platform_profiles 내부 오류: T2 행은 hosted 0 이어야 한다 (stdout 은 정본 키 + 스탬프): $name"
   raw="${!origin_var:-}"
   [ -n "$raw" ] ||
     fail "${origin_var} 이 없다. ${label} 공개 도메인 없이 env를 만들 수 없다."
@@ -1270,8 +1276,11 @@ emit_managed_platform_env() {
   done <<EOF
 $(oort_canonical_env_keys)
 EOF
+  # Stamp outside the heredoc — doctor env.required_keys stays 41.
+  validate_env_scalar MOMO_SELF_HOST_PLATFORM "$name"
+  printf 'MOMO_SELF_HOST_PLATFORM=%s\n' "$name"
   printf '[self-host] --platform %s 키 %s개를 stdout에 썼다 (파일 없음).\n' \
-    "$name" "$(oort_canonical_env_keys | grep -c .)" >&2
+    "$name" "$(($(oort_canonical_env_keys | grep -c .) + 1))" >&2
   printf '[self-host] 손으로 넣는 키(생성기가 내지 않는다): %s · 내부 호스트 접미사: %s\n' \
     "$hand_keys" "$internal" >&2
 }

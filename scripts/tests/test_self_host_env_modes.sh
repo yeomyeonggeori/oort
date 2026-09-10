@@ -1142,15 +1142,14 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 41개를 stdout에 썼다' "$alias_fixture/platform.err"
+grep -Fq -e '--platform railway 키 42개를 stdout에 썼다' "$alias_fixture/platform.err"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is exactly the canonical set: no stamp, no hosted-delivery key, no file.
-if grep -q '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out"; then
-  echo "--platform railway leaked MOMO_SELF_HOST_PLATFORM into the canonical set" >&2
-  exit 1
-fi
+# T2 stdout is the canonical 41 plus the stamp outside the heredoc. No
+# hosted-delivery key, no file. --railway is byte-identical by construction.
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
 if grep -q '^MOMO_HOSTED_DELIVERY_ENABLED=' "$alias_fixture/platform.out"; then
   echo "--platform railway leaked MOMO_HOSTED_DELIVERY_ENABLED into the canonical set" >&2
   exit 1
