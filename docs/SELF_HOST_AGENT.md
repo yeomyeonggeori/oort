@@ -83,8 +83,9 @@ Do not mix edges (loopback `Caddyfile.local` vs public `Caddyfile`).
 
 Tiers are ADR-0184 D1. **T1** runs the compose canon as-is (doctor
 `stack.*` and every day-2 command work). **T2** is managed containers + a
-PG plugin: image, edge and env are derived from the canon; `stack.*`,
-`oort backup/restore/upgrade` wait for day-2 v2 (SH-11e). **T3** is edge
+PG plugin: image, edge and env are derived from the canon; day-2 v2 (SH-11e)
+runs over `MIGRATE_DATABASE_URL` and the public origin (`scripts/oort
+backup --tier t2`, `restore`, `upgrade`, `doctor --tier t2 --json`). **T3** is edge
 only — never compute. "Operated by" is the §0 order: official CLI/MCP in
 the user's own session → REST with a user token → browser only at a human
 approval point. Env derivation for every row is
@@ -102,7 +103,7 @@ the compose canon itself.
 | **Fly.io** (single VM + volume) | T1 | §3.5 · provisioning recipe SH-11b (`fly.toml` + volume) | `flyctl` in the user's login → Fly REST with a user token → browser. | Fly sign-up/billing; custom-domain DNS. | Fly account; one VM with a volume; the T1 tool set on it. | T1 compose procedure §3.2 on the VM; env `scripts/self_host_env.sh --platform fly --public-origin https://<host>`. Fly hostname or custom domain. | Same as VPS. |
 | **AWS Lightsail / EC2** | T1 | §3.6 · provisioning recipe SH-11c (+ minimal Terraform) | `aws` CLI / AWS MCP in the user's session → REST → browser. | AWS sign-up/billing; IAM consent; the DNS record. | Cloud account; VM + compose + domain. | T1 compose procedure §3.2 on the VM; env `--platform aws-lightsail --public-origin https://<host>`. Operator domain. | Same as VPS. |
 | **GCP VM** | T1 | §3.7 · provisioning recipe SH-11c pattern | `gcloud` in the user's session → REST → browser. | GCP sign-up/billing; OAuth consent; the DNS record. | Same as AWS. | T1 compose procedure §3.2 on the VM; env `--platform gcp-vm --public-origin https://<host>`. Operator domain. | Same as VPS. |
-| **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). `stack.*` and `oort backup/restore/upgrade` are not available until day-2 v2 (SH-11e). |
+| **Railway** | T2 | §3.4 · agent path measured in SH-11a | `railway` CLI (`railway setup agent`) / remote MCP `mcp.railway.com` in the user's OAuth session → REST → browser. | Railway sign-up/billing; the OAuth login for CLI/MCP; assigning the public domain to caddy. | Railway account; Postgres plugin; no Docker on this machine (published images). | Caddy service is the public edge (`Caddyfile.railway`), api internal. Env `scripts/self_host_env.sh --platform railway` (alias `--railway`) from `RAILWAY_PUBLIC_DOMAIN` + `DATABASE_URL`; three keys set by hand (`infra/railway/README.md`). Platform hostname. | Doctor PASS on the deployed origin (`public.healthz`, `public.websocket`). Day-2: image one-off `scripts/oort backup --tier t2 --env <env>`, `scripts/oort restore <dump> --tier t2 --yes --env <env>`, `scripts/oort upgrade --tier t2 --yes --env <env>`, `scripts/oort doctor --tier t2 --json`. `--tier t2` must match `MOMO_SELF_HOST_PLATFORM` (railway). Dump uses `MIGRATE_DATABASE_URL` only. Platform CLI/MCP for the one-off is SH-11a. |
 | **Cloudflare** (edge only) | T3 | Recipe SH-11d — DNS · Tunnel · TLS in front of a T1/T2 row | `wrangler` / MCP `mcp.cloudflare.com` in the user's session → REST with an API token → browser. | Cloudflare sign-up; nameserver delegation at the registrar; Tunnel token creation. | A T1/T2 row already up. Not compute: Containers/Workers are not adopted (ADR-0184 D1). | Fronts the row it protects; the origin keeps that row's edge and `/v1/centrifugo/*` 403 order. Public hostname on Cloudflare DNS. | Same as the fronted row, with `public.*` PASS through the Cloudflare hostname. |
 | **Grok Bot VM** (Tailscale Funnel) | T1 | §3.3 | Shell in the VM (compose) + `tailscale` CLI. | Tailscale login and Funnel enable (4–5 clicks); opening the one-time claim URL. Zero-account + stable URL is **not** something this playbook delivers (RA-7). | curl, tar, Docker Engine + Compose v2, openssl, jq. git is not required. Durable dir `/workspace`. Tailscale account (one). | Loopback Caddy + Tailscale Funnel to the web port. **Do not** start `caddy.override.yml` here (ACME). `--public-origin` still registers the Funnel URL in Centrifugo. `https://<machine>.<tailnet>.ts.net` while Funnel state under `/workspace` lives. | Doctor PASS including public checks against the Funnel origin, one-time claim URL sent to the user, first-day dump on `/workspace`. |
 
@@ -1603,6 +1604,23 @@ scripts/oort restore ./oort-backups/oort-pg.dump --yes
 
 Attachments live on `DRIVE_VOLUME_NAME` (default `oort-drive`). Take that
 volume with the dump. `down -v` deletes the volume this env names.
+
+**T2 (managed PG):** same four commands, `--tier t2`, over
+`MIGRATE_DATABASE_URL`. Image path `/opt/momo/scripts/oort`. Platform
+one-off (Railway CLI/MCP) is SH-11a, not this CLI. Upgrade prints a
+token-free digest-replace command; it does not inspect volumes or
+rewrite compose. Done when `scripts/oort doctor --tier t2 --json` is
+PASS. Until the generator stamps T2 (#2328 tracks it), pass `--tier t2`
+or set the service variable `MOMO_SELF_HOST_PLATFORM=railway`. Runbook:
+[`runbooks/selfhost-pg-dump-restore.md`](runbooks/selfhost-pg-dump-restore.md)
+§ T2.
+
+```sh
+scripts/oort backup --tier t2 --env <env> --out <dir>
+scripts/oort restore <dump> --tier t2 --yes --env <env>
+scripts/oort upgrade --tier t2 --yes --env <env>
+scripts/oort doctor --tier t2 --json
+```
 
 **Logs:** `scripts/oort logs api` (secret values are `***`). Direct
 compose remains valid for claim-mode:

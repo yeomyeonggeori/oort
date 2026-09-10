@@ -25,7 +25,7 @@
 //! on the instance.
 
 use momo_db::DbError;
-use sqlx::PgConnection;
+use sqlx::{PgConnection, Row};
 use uuid::Uuid;
 
 /// What the caller gets back (Swift `CreateWorkspaceResponse`).
@@ -57,6 +57,28 @@ pub enum WorkspaceProvisionRejected {
     OperatorMissing,
     #[error("workspace slug already exists")]
     SlugTaken,
+}
+
+/// In-transaction refusals for `PATCH /v1/workspaces/{ws}` (ADR-0185 E1).
+///
+/// Distinct from [`WorkspaceProvisionRejected`]: rename never mints a tenant,
+/// and a stale concurrency token is a 409 rather than a slug collision.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum WorkspaceRenameRejected {
+    #[error("workspace not found")]
+    NotFound,
+    #[error("not a workspace member")]
+    NotMember,
+    #[error("workspace owner or admin required")]
+    NotOperator,
+    #[error("workspace has been updated; refetch and retry")]
+    Stale,
+}
+
+/// Outcome of a successful rename. Slug is never in the SET list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceRenameApplied {
+    pub previous_name: String,
 }
 
 /// Swift `normalizedName` (:395-404).
@@ -227,6 +249,89 @@ pub async fn create_workspace_in_tx(
         name: name.to_string(),
         owner_member_id: owner_id,
     }))
+}
+
+// ---------------------------------------------------------------------------
+// Workspace rename (ADR-0185 E1 — `PATCH /v1/workspaces/{ws}`)
+// ---------------------------------------------------------------------------
+
+/// Set `workspace.name` (never slug) under the same optimistic-concurrency
+/// token `GET /v1/workspaces/{ws}` already hands out as `updatedAtMs`.
+///
+/// The comparison is the load-bearing 409: a second writer who presents a
+/// stale token must not clobber the first. Owner/admin is decided here, inside
+/// the locked row, so a demotion racing the write cannot sneak through a
+/// route-layer check that already returned.
+pub async fn rename_workspace_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    actor_id: Uuid,
+    name: &str,
+    expected_updated_at_ms: i64,
+) -> Result<Result<WorkspaceRenameApplied, WorkspaceRenameRejected>, DbError> {
+    // Lock the workspace row itself. A LEFT JOIN + `FOR UPDATE OF w` is
+    // illegal (`FOR UPDATE cannot be applied to the nullable side of an
+    // outer join`) and would 500 every write, including the 403/409 paths.
+    let row = sqlx::query(
+        "SELECT name, \
+                floor(extract(epoch from updated_at) * 1000)::bigint AS updated_at_ms \
+           FROM workspace \
+          WHERE id = $1 \
+            AND deleted_at IS NULL \
+          FOR UPDATE",
+    )
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(Err(WorkspaceRenameRejected::NotFound));
+    };
+    let previous_name: String = row.try_get("name")?;
+    let stored_updated_at_ms: i64 = row.try_get("updated_at_ms")?;
+
+    let role: Option<String> = sqlx::query_scalar(
+        "SELECT wm.role::text \
+           FROM workspace_membership wm \
+           JOIN member m \
+             ON m.id = wm.member_id \
+            AND m.workspace_id = wm.workspace_id \
+          WHERE wm.workspace_id = $1 \
+            AND wm.member_id = $2 \
+            AND m.status = 'active' \
+            AND m.deleted_at IS NULL",
+    )
+    .bind(workspace_id)
+    .bind(actor_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(role) = role else {
+        return Ok(Err(WorkspaceRenameRejected::NotMember));
+    };
+    if !matches!(role.as_str(), "owner" | "admin") {
+        return Ok(Err(WorkspaceRenameRejected::NotOperator));
+    }
+    // Load-bearing 409. Sabotage: delete this comparison and the stale test
+    // must go RED — a second writer would otherwise overwrite the first.
+    if stored_updated_at_ms != expected_updated_at_ms {
+        return Ok(Err(WorkspaceRenameRejected::Stale));
+    }
+
+    let updated = sqlx::query(
+        "UPDATE workspace \
+            SET name = $1, \
+                updated_at = now() \
+          WHERE id = $2 \
+            AND deleted_at IS NULL \
+        RETURNING name",
+    )
+    .bind(name)
+    .bind(workspace_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if updated.is_none() {
+        return Ok(Err(WorkspaceRenameRejected::NotFound));
+    }
+    Ok(Ok(WorkspaceRenameApplied { previous_name }))
 }
 
 // ---------------------------------------------------------------------------

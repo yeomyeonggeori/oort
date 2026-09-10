@@ -43,11 +43,20 @@ pub use momo_messaging::MessageAttachment;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Serialize)]
+pub struct HealthSchema {
+    /// Rows in `schema_migrations` (filename PK; momo-migrate / momo-db::migrate).
+    pub applied: i64,
+    /// Lexicographic max `schema_migrations.version`, or empty when none.
+    pub head: String,
+}
+
+#[derive(Debug, Serialize)]
 pub struct HealthResponse {
     pub status: &'static str,
     pub service: &'static str,
     /// `"ok"` once the DB round-trip succeeds — the packet's DB ping.
     pub database: &'static str,
+    pub schema: HealthSchema,
 }
 
 // ---------------------------------------------------------------------------
@@ -70,13 +79,15 @@ pub struct ChangePasswordRequest {
     pub new_password: String,
 }
 
-/// `PATCH /v1/workspaces/{ws}/members/me` (#1873). CamelCase only; unknown
-/// keys (handle, role, avatar, snake_case aliases) are refused so this surface
-/// cannot become a second write for identity fields it does not own.
+/// `PATCH /v1/workspaces/{ws}/members/me` (#1873 + ADR-0185 E2). CamelCase
+/// only. At least one of `displayName` / `handle` is required. Unknown keys
+/// (role, avatar, snake_case aliases) are refused so this surface cannot become
+/// a second write for identity fields it does not own.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RenameSelfMemberRequest {
-    pub display_name: String,
+    pub display_name: Option<String>,
+    pub handle: Option<String>,
 }
 
 /// Envelope for the updated member summary — login/join `Member` shape.
@@ -3244,6 +3255,15 @@ pub struct JoinResponse {
     pub created_member: bool,
 }
 
+/// `PATCH /v1/workspaces/{ws}` body (ADR-0185 E1). `updatedAtMs` is the
+/// optimistic-concurrency token `GET` already returns. Slug is not accepted.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameWorkspaceRequest {
+    pub name: String,
+    pub updated_at_ms: i64,
+}
+
 /// Swift `CreateWorkspaceRequest` (`WorkspaceRoutes.swift`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -4832,6 +4852,36 @@ mod tests {
         );
     }
 
+    /// ADR-0185 E1 — camelCase body, closed world. Slug is not writable here.
+    #[test]
+    fn workspace_rename_request_is_camel_case_and_closed() {
+        let body: RenameWorkspaceRequest = serde_json::from_value(serde_json::json!({
+            "name": "  내 팀  ",
+            "updatedAtMs": 1_700_000_000_123_i64,
+        }))
+        .expect("camelCase decodes");
+        assert_eq!(body.name, "  내 팀  ");
+        assert_eq!(body.updated_at_ms, 1_700_000_000_123);
+
+        assert!(
+            serde_json::from_value::<RenameWorkspaceRequest>(serde_json::json!({
+                "name": "내 팀",
+                "updated_at_ms": 1
+            }))
+            .is_err(),
+            "snake_case is not an alias on this surface"
+        );
+        for smuggled in [
+            serde_json::json!({"name": "내 팀", "updatedAtMs": 1, "slug": "stolen"}),
+            serde_json::json!({"name": "내 팀", "updatedAtMs": 1, "id": "x"}),
+        ] {
+            assert!(
+                serde_json::from_value::<RenameWorkspaceRequest>(smuggled.clone()).is_err(),
+                "unknown key must not decode: {smuggled}"
+            );
+        }
+    }
+
     /// #1873 — camelCase body, closed world. A snake_case alias or a smuggled
     /// handle/role/avatar key must not decode: those fields are out of scope.
     #[test]
@@ -4839,7 +4889,14 @@ mod tests {
         let body: RenameSelfMemberRequest =
             serde_json::from_value(serde_json::json!({"displayName": "  곽성재  "}))
                 .expect("camelCase decodes");
-        assert_eq!(body.display_name, "  곽성재  ");
+        assert_eq!(body.display_name.as_deref(), Some("  곽성재  "));
+        assert_eq!(body.handle, None);
+
+        let handle_only: RenameSelfMemberRequest =
+            serde_json::from_value(serde_json::json!({"handle": "seongjae"}))
+                .expect("handle-only decodes");
+        assert_eq!(handle_only.handle.as_deref(), Some("seongjae"));
+        assert_eq!(handle_only.display_name, None);
 
         assert!(
             serde_json::from_value::<RenameSelfMemberRequest>(serde_json::json!({
@@ -4849,7 +4906,6 @@ mod tests {
             "snake_case is not an alias on this surface"
         );
         for smuggled in [
-            serde_json::json!({"displayName": "곽성재", "handle": "stolen"}),
             serde_json::json!({"displayName": "곽성재", "role": "owner"}),
             serde_json::json!({"displayName": "곽성재", "avatarUrl": "https://example.invalid/a.png"}),
         ] {

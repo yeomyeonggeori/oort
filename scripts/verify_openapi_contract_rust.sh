@@ -2000,6 +2000,55 @@ sample workspace-settings-patch patch \
   '{"allowed_agent_models":["hermes-agent"],"role_labels":{"owner":"마스터"}}' \
   "$ACCESS"
 
+# #2331 / ADR-0185 E1 — identity GET then rename. Restore the original name
+# so later samples that mention the demo workspace title do not drift.
+sample workspace-get get \
+  "/v1/workspaces/{workspaceId}" \
+  "/v1/workspaces/$WS" 200 \
+  "" "$ACCESS"
+guard_jq '.workspace | (.name | type == "string") and (.updatedAtMs | type == "number") and (.slug | type == "string")' \
+  "workspace identity carries name, slug, and the rename token"
+WS_NAME="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workspace.name')"
+WS_SLUG="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workspace.slug')"
+WS_UPDATED_AT_MS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workspace.updatedAtMs')"
+sample workspace-rename patch \
+  "/v1/workspaces/{workspaceId}" \
+  "/v1/workspaces/$WS" 200 \
+  "$(jq -cn --arg n "OpenAPI Gate Rename $RUN_EPOCH" --argjson ms "$WS_UPDATED_AT_MS" \
+      '{name:$n, updatedAtMs:$ms}')" \
+  "$ACCESS"
+guard_jq --arg slug "$WS_SLUG" \
+  '.workspace.slug == $slug and (.workspace.name | startswith("OpenAPI Gate Rename"))' \
+  "rename changes name and leaves slug untouched"
+WS_RENAMED_MS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.workspace.updatedAtMs')"
+api patch "/v1/workspaces/$WS" \
+  "$(jq -cn --arg n "$WS_NAME" --argjson ms "$WS_RENAMED_MS" \
+      '{name:$n, updatedAtMs:$ms}')" \
+  "$ACCESS"
+if [ "$RESPONSE_STATUS" != "200" ]; then
+  gate_fail workspace-rename-restore \
+    "expected HTTP 200 restoring the original name, got $RESPONSE_STATUS" \
+    "$(redacted_body)"
+fi
+
+# #2331 / ADR-0185 E2 — handle on members/me. Restore so later samples keep
+# the gate fixture handle.
+sample self-rename-handle patch \
+  "/v1/workspaces/{workspaceId}/members/me" \
+  "/v1/workspaces/$WS/members/me" 200 \
+  "$(jq -cn --arg h "${GATE_HANDLE}r" '{handle:$h}')" \
+  "$ACCESS"
+guard_jq --arg h "${GATE_HANDLE}r" '.member.handle == $h' \
+  "me reflects the new handle"
+api patch "/v1/workspaces/$WS/members/me" \
+  "$(jq -cn --arg h "$GATE_HANDLE" '{handle:$h}')" \
+  "$ACCESS"
+if [ "$RESPONSE_STATUS" != "200" ]; then
+  gate_fail self-rename-handle-restore \
+    "expected HTTP 200 restoring the original handle, got $RESPONSE_STATUS" \
+    "$(redacted_body)"
+fi
+
 # A malicious Agent Port may reflect the human bearer in an unexpected error
 # header and body. Exercise the exact gate_fail path and require zero registered
 # secret needles in both its persisted failure line and emitted diagnostics.

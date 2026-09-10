@@ -66,11 +66,21 @@ fastlane
 legal/privacy-policy.md
 legal/agent-disclosure.md
 research
-# Exclude script tree contents, then re-include the one scanner the image
-# COPYs. `scripts` as a directory exclude would also hide the exception
+# Exclude script tree contents, then re-include the files the image COPYs.
+# `scripts` as a directory exclude would also hide the exception
 # (Docker cannot un-ignore a file whose parent directory is excluded).
 scripts/**
 !scripts/check_debian_copyrights.sh
+# SH-11e: T2 day-2 one-off (`/opt/momo/scripts/oort`).
+!scripts/oort
+!scripts/self_host_pg_dump.sh
+!scripts/self_host_pg_restore.sh
+!scripts/self_host_env.sh
+!scripts/lib/
+!scripts/lib/oort_common.sh
+!scripts/lib/oort_doctor.sh
+!scripts/lib/oort_day2.sh
+!scripts/lib/pg_dump_custom.sh
 # Retired Swift trees (LS-1 #2165): f399e417:examples f399e417:relay
 # f399e417:services f399e417:workers f399e417:server/Sources
 # f399e417:server/Tests f399e417:infra/eve f399e417:infra/workd
