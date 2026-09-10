@@ -49,6 +49,21 @@ scripts/self_host_pg_dump.sh --output-dir /var/tmp/oort-backups
 
 덤프 구현은 `scripts/lib/pg_dump_custom.sh` 하나다. 리허설 게이트 `scripts/verify_backup_restore_rehearsal.sh` 도 같은 함수를 쓴다.
 
+## T2 (관리형 컨테이너 + PG 플러그인)
+
+T2는 compose postgres 컨테이너가 없다. dump/restore는 `MIGRATE_DATABASE_URL`(슈퍼유저)만 쓴다. `DATABASE_URL`(momo_app, RLS)로 dump하지 않는다. `--tier t2`는 env `MOMO_SELF_HOST_PLATFORM`의 tier와 같아야 한다 — T1 스택을 URL로 백업하지 않는다. 생성기가 T2 스탬프를 찍기 전까지(#2328)는 `--tier t2`를 넘기거나 서비스 변수 `MOMO_SELF_HOST_PLATFORM=railway`를 설정한다.
+
+실행 위치는 이미지 안 one-off다. 스크립트 경로: `/opt/momo/scripts/oort` (Dockerfile COPY). 그 one-off를 플랫폼 CLI/MCP로 띄우는 명령은 SH-11a 레시피 소유다.
+
+```sh
+scripts/oort backup --tier t2 --env <env> --out <dir>
+scripts/oort restore <dump> --tier t2 --yes --env <env>
+```
+
+복원 전 message count=0 전제는 T1과 같다. dest에 런타임 롤(`momo_app`/`momo_relay`/`momo_worker`)이 없으면 compose `runtime-roles`를 돌리지 않고 정지한다. 문장 원문: 플랫폼 preDeploy(`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate`)를 먼저 돌려라.
+
+버전(실측): 호스트 `pg_dump` (Homebrew libpq) **18.4**, 픽스처 서버 `postgres:18`. 이미지 `postgresql-client` major가 서버 PG18보다 낮으면 dump가 거부된다. URL·비밀번호는 stdout/stderr/`--json`에 없다. 예시 호스트는 `db.example.test`만.
+
 ## 복원 (새 oort 스택)
 
 새 머신에서 env를 만들고 postgres만 먼저 올린 뒤 덤프를 넣는다. migrate가 빈 DB에 스키마를 깔기 **전에** 복원하는 경로다.

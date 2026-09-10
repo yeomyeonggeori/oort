@@ -21,6 +21,7 @@ COMPOSE_PROJECT=""
 POSTGRES_USER_FLAG=""
 POSTGRES_DB_FLAG=""
 CLEAN=0
+MIGRATE_URL_MODE=0
 
 fail() { printf '[self-host-restore] %s\n' "$*" >&2; exit 1; }
 
@@ -75,6 +76,10 @@ while [ "$#" -gt 0 ]; do
       CLEAN=1
       shift
       ;;
+    --migrate-url)
+      MIGRATE_URL_MODE=1
+      shift
+      ;;
     -h | --help)
       usage
       exit 0
@@ -88,7 +93,7 @@ done
 
 [ -n "$DUMP_FILE" ] || fail "--dump 가 필요하다."
 [ -s "$DUMP_FILE" ] || fail "덤프 파일이 없거나 비었다."
-command -v docker >/dev/null 2>&1 || fail "docker 없음"
+command -v docker >/dev/null 2>&1 || { [ "$MIGRATE_URL_MODE" = "1" ] || fail "docker 없음"; }
 
 PG_USER="${POSTGRES_USER_FLAG:-}"
 PG_DB="${POSTGRES_DB_FLAG:-}"
@@ -101,18 +106,34 @@ fi
 PG_USER="${PG_USER:-momo}"
 PG_DB="${PG_DB:-momo}"
 
-MOMO_PG_CONTAINER="$CONTAINER"
-MOMO_PG_COMPOSE_PROJECT="$COMPOSE_PROJECT"
-MOMO_PG_ENV_FILE="$ENV_FILE"
-PG_CONTAINER="$(momo_pg_resolve_postgres_container)" || fail "실행 중인 postgres 컨테이너를 찾지 못했다."
-
-if [ "$CLEAN" = "1" ]; then
-  printf '[self-host-restore] --clean: dest 객체를 덤프 내용으로 교체한다.\n'
-  momo_pg_restore_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE" --clean --if-exists
+if [ "$MIGRATE_URL_MODE" = "1" ]; then
+  MIGRATE_URL="$(momo_pg_env_get "$ENV_FILE" MIGRATE_DATABASE_URL || true)"
+  [ -n "$MIGRATE_URL" ] || fail "MIGRATE_DATABASE_URL 이 env 에 없다. DATABASE_URL 로 restore 하지 않는다."
+  if [ "$CLEAN" = "1" ]; then
+    printf '[self-host-restore] --clean: dest 객체를 덤프 내용으로 교체한다.\n'
+    momo_pg_restore_custom_url "$MIGRATE_URL" "$DUMP_FILE" --clean --if-exists
+  else
+    momo_pg_restore_custom_url "$MIGRATE_URL" "$DUMP_FILE"
+  fi
 else
-  momo_pg_restore_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE"
+  MOMO_PG_CONTAINER="$CONTAINER"
+  MOMO_PG_COMPOSE_PROJECT="$COMPOSE_PROJECT"
+  MOMO_PG_ENV_FILE="$ENV_FILE"
+  PG_CONTAINER="$(momo_pg_resolve_postgres_container)" || fail "실행 중인 postgres 컨테이너를 찾지 못했다."
+
+  if [ "$CLEAN" = "1" ]; then
+    printf '[self-host-restore] --clean: dest 객체를 덤프 내용으로 교체한다.\n'
+    momo_pg_restore_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE" --clean --if-exists
+  else
+    momo_pg_restore_custom "$PG_CONTAINER" "$PG_USER" "$PG_DB" "$DUMP_FILE"
+  fi
 fi
 
 printf '[self-host-restore] restore finished\n'
 printf '[self-host-restore] dump: %s\n' "$DUMP_FILE"
-printf '[self-host-restore] 이어서 나머지 서비스를 올린다: scripts/self_host_env.sh --compose up -d --wait\n'
+if [ "$MIGRATE_URL_MODE" = "1" ]; then
+  printf '[self-host-restore] T2 — compose/volume 를 쓰지 않는다. 플랫폼 digest 교체.\n'
+  printf '완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS\n'
+else
+  printf '[self-host-restore] 이어서 나머지 서비스를 올린다: scripts/self_host_env.sh --compose up -d --wait\n'
+fi

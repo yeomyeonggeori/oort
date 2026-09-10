@@ -238,6 +238,15 @@ async fn http_smoke_login_send_list_and_401s() {
     let health: Value = health.json().await.expect("health body");
     assert_eq!(health["status"], json!("ok"));
     assert_eq!(health["database"], json!("ok"), "health includes a DB ping");
+    assert_eq!(health["service"], json!("momo-server"));
+    assert!(
+        health["schema"]["applied"].as_i64().is_some(),
+        "healthz schema.applied is the schema_migrations row count"
+    );
+    assert!(
+        health["schema"]["head"].as_str().is_some(),
+        "healthz schema.head is schema_migrations.version (filename)"
+    );
 
     // ---- login -----------------------------------------------------------
     let response = http
