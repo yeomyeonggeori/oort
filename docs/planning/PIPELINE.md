@@ -3,13 +3,13 @@
 > **레인(역할)과 현재 값(모델·도구)을 분리한다.** 모델·하네스가 바뀌면 이 문서의 §1 표만 갱신하고, 다른 문서는 이 문서를 가리킨다(§4 목록의 문서에 모델명을 다시 적지 않는다). 신설 2026-09-02(편성 정본 P1 — `docs/planning/2026-09-02-launch-program-plan.md` §7).
 > 운영 규율 자체(트랙·머지·게이트·패킷)는 여기가 아니라 `docs/TRACKS.md`·`docs/planning/README.md`·`AGENTS.md`·`docs/MULTI_SESSION_OPS.md`가 정본이다.
 
-## 1. 레인 표 (현재 값 기준일: 2026-09-02)
+## 1. 레인 표 (현재 값 기준일: 2026-09-10)
 
 | 레인 | 역할 | 현재 값 | 계약·스킬 |
 |---|---|---|---|
 | **product-owner** | ADR Accept/Reject · 로드맵 정본 반영 승인 · 우선순위 · track→main 승격 승인 | 메인테이너(성재) | ADR-0100 · `docs/TRACKS.md` §3 |
 | **planner / momo-main** | 리서치 · ADR 기안 · 티켓/패킷 발급 · 워커 검수 재판정 · 순차 머지 · 승격+sync 짝 집행(상시 위임 범위) · CURRENT_STATE/JOURNAL 플러시 | Claude **Fable**(2026-09-04~, 성재 「Fable + opus5으로 가자」 — 한도 소진 시 Opus 5로 강하, `FABLE_DOWNGRADE_ROUTINE.md`). **서브에이전트(design-review 등)는 Opus 5**(`model: opus`). 단일 세션이 planner와 momo-main 겸임 | `CLAUDE.md` · `docs/planning/README.md` · `.claude/skills/momo-planning` |
-| **worker** | goal(=GitHub Issue+패킷) 구현 · 게이트 · PR · 정지 | **grok 4.6 (Cursor CLI, non-fast)** — `cursor-agent --model cursor-grok-4.6-high`. 구 grok build CLI(`~/.grok/bin/grok`)는 **잔액 소진(402)으로 정지**(2026-09-03). | `AGENTS.md` · `~/.claude/skills/grok-fleet`(spawn 계약 — 호출부만 아래 §3으로 대체) |
+| **worker** | goal(=GitHub Issue+패킷) 구현 · 게이트 · PR · 정지 | **grok 4.6 (Grok Build CLI)** — `~/.grok/bin/grok --no-auto-update --permission-mode bypassPermissions -m grok-4.6 --output-format plain -p "$(cat <mission.md>)"`(성재 지시 2026-09-10 「fable orchestrator 모드, grok build grok 4.6 적극 활용」; 잔액 402 해소 실측 09-10). 폴백 = Cursor CLI `cursor-agent --model cursor-grok-4.6-high`(09-03 계약 그대로) | `AGENTS.md` · `~/.claude/skills/grok-fleet`(spawn 계약 — 호출부만 아래 §3으로 대체) |
 | **reviewer-design** | UI 변경의 fresh-context 리뷰(캡처+프리플라이트+루브릭, Blocker 0·High 0 폐곡선) | `.claude/agents/design-review.md` 에이전트 | `.claude/skills/momo-design-taste` 라우터 |
 | **reviewer-code** | 보안·정합·스코프·테스트 정직성 리뷰 · 정책 무결성 감사 | planner 본인(+필요 시 grok 독립 렌즈 "리뷰어 C") | `docs/MULTI_SESSION_OPS.md` §7 · `scripts/verify_policy_integrity_from_base.sh` |
 
@@ -31,6 +31,13 @@
 - **공통 정지 조건**: 머지·이슈 close 금지 · MCP 금지 · `schema_v0.sql` 무접촉 · 게이트/정책 파일(`scripts/**`·`.github/**`) 무수정(허용 시 브리프 명시 + planner 감사) · 시크릿 비유입(ADR-0004).
 - **출력 형식**(마지막 출력): `DONE / COMMITS / GATES / PR / NOTES(계획 이탈)`.
 - **현재 값 명령**:
+- **현재 값(2026-09-10): Grok Build CLI grok-4.6.** 헤드리스 spawn(setsid, 자기 세션):
+  ```sh
+  cd <goal 워크트리> && ~/.grok/bin/grok --no-auto-update --permission-mode bypassPermissions -m grok-4.6 \
+    --output-format plain -p "$(cat <mission.md>)" > <scratch>/grok-<slug>.out 2>&1; echo $? > <scratch>/grok-<slug>.rc
+  ```
+  재개는 같은 cwd에서 **`-c`**(최근 세션). 병렬 상한은 §2 그대로(워커+검수 합산 2; grok build는 refresh 토큰 로테이션 충돌 전례로 동시 1~2). 리뷰어 C(독립 렌즈)도 같은 계약으로 스크래치 워크트리에서 돌린다(사보타주 가능). 아래 Cursor CLI 블록은 **폴백**(grok build 402/장애 시).
+- 폴백(2026-09-03 계약):
   ```sh
   cd <goal 워크트리> && cursor-agent -p "$(cat <mission.md>)" \
     --model cursor-grok-4.6-high -f --output-format text > <scratch>/cursor-<slug>.out 2>&1; echo $? > <scratch>/cursor-<slug>.rc
@@ -50,6 +57,7 @@
 
 | 날짜 | 레인 | 변경 |
 |---|---|---|
+| 2026-09-10 | worker | **grok 4.6 — Grok Build CLI 복귀**(`~/.grok/bin/grok`, 성재 지시 「fable orchestrator 모드, grok build grok 4.6 적극 활용」; 402 해소 실측). Cursor CLI는 폴백. 리뷰어 C도 grok build |
 | 2026-09-03 | worker | **grok 4.6 — Cursor CLI non-fast**(`cursor-grok-4.6-high`, 성재 지시). 구 grok build CLI 잔액 소진(402)으로 교체 |
 | 2026-09-03 | planner/momo-main | **Opus 5**(Fable 한도 소진, 성재가 `/model` 전환) — 서브에이전트도 `model: opus`로 발사 |
 | 2026-09-02 | worker | **grok 4.6**(성재 지시, grok build CLI) |
