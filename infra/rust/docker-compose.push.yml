@@ -128,16 +128,11 @@ services:
     restart: unless-stopped
     environment:
       MOMO_ENV: ${MOMO_ENV:-staging}
-      # A BYPASSRLS connection string — a durable intent must converge whichever
-      # tenant owns it.
-      #
-      # ⚠ PREREQUISITE GAP, not an oversight: the canonical role for this is
-      # `momo_notifier`. `infra/rust/sql/bootstrap_roles.sql` creates it with a
-      # committed dev password (smoke only). `bootstrap_runtime_roles.sql` does
-      # NOT — it provisions momo_app / momo_relay / momo_worker only. There is
-      # no correct production default to write here. For a local stub smoke the
-      # owner URL is acceptable; a real deploy provisions the role separately.
-      NOTIFIER_DATABASE_URL: ${NOTIFIER_DATABASE_URL:-}
+      # BYPASSRLS `momo_notifier` — provisioned by runtime-roles / momo-migrate
+      # (`bootstrap_runtime_roles.sql`). Owner URL is forbidden here.
+      NOTIFIER_DATABASE_URL: ${NOTIFIER_DATABASE_URL:?set NOTIFIER_DATABASE_URL}
+      MOMO_T3_ENABLED: ${MOMO_T3_ENABLED:-0}
+      MOMO_NOTIFIER_SWEEP_INTERVAL_MS: ${MOMO_NOTIFIER_SWEEP_INTERVAL_MS:-300}
       # The drain's own switch. Off by default even inside this overlay: adding
       # the file gets you the processes, turning this on gets you dispatches.
       MOMO_PUSH_NOTIFIER_ENABLED: ${MOMO_PUSH_NOTIFIER_ENABLED:-0}

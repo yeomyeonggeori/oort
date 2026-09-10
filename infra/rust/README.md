@@ -134,7 +134,7 @@ momorust logs migrate
 바뀌고, 둘을 비워 뒀다면 `[migrate] no bootstrap owner requested …`가 대신 나온다 —
 그 경우 스택은 healthy하지만 아무도 로그인할 수 없다(§4-2).
 
-`migrate` 서비스는 `MOMO_BOOTSTRAP_RUNTIME_ROLES=0`으로 돌기 때문에 세 런타임 롤이
+`migrate` 서비스는 `MOMO_BOOTSTRAP_RUNTIME_ROLES=0`으로 돌기 때문에 네 런타임 롤이
 정확한 least-privilege 자세로 존재하지 않으면 **마이그레이션을 거부한다**(prod와 동일).
 즉 `infra/rust/sql/bootstrap_roles.sql`의 공개 dev 비밀번호는 이 스택에 절대 적용되지 않는다.
 

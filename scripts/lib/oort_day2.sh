@@ -232,6 +232,17 @@ oort_upgrade_refresh_plan() {
   esac
 }
 
+# #2193: compose interpolates NOTIFIER_* with :?. Pre-#2193 env is missing
+# those keys; the generator's existing-env branch now backfills them. Call
+# this before `compose build` so a v0.1.5 install upgrades without edits.
+oort_ensure_managed_env_keys() {
+  local envfile="${OORT_DOCTOR_ENV:-}"
+  [ -n "$envfile" ] || oort_die "env 파일이 없다."
+  [ -f "$envfile" ] || oort_die "env 파일이 없다: $envfile"
+  SELF_HOST_ENV_FILE="$envfile" "$OORT_ROOT/scripts/self_host_env.sh" --ensure-managed-keys
+  oort_doctor_load_env "$envfile"
+}
+
 oort_upgrade_refresh() {
   local mode="$1" line
   OORT_UPGRADE_REFRESH_STEP=""
@@ -516,6 +527,8 @@ oort_upgrade() {
   oort_rewrite_image_line "$OORT_DOCTOR_ENV" "$target_image" "$target_mode"
   oort_doctor_load_env "$OORT_DOCTOR_ENV"
 
+  oort_ensure_managed_env_keys
+
   if ! oort_upgrade_refresh "$target_mode"; then
     oort_print_rollback "$previous" "$previous_mode" "$dump_path"
     oort_die "compose ${OORT_UPGRADE_REFRESH_STEP:-refresh} 가 실패했다."
@@ -667,7 +680,7 @@ EOF
 oort_runtime_roles_count() {
   local user db out
   if [ "$(oort_tier)" = "t2" ]; then
-    out="$(oort_psql_migrate "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" || true)"
+    out="$(oort_psql_migrate "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');" || true)"
     if [ -z "$out" ]; then
       return 1
     fi
@@ -680,7 +693,7 @@ oort_runtime_roles_count() {
   [ -n "$db" ] || db=momo
   out="$(oort_compose exec -T postgres \
     psql -U "$user" -d "$db" -At -c \
-    "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker');" \
+    "SELECT count(*)::text FROM pg_roles WHERE rolname IN ('momo_app','momo_relay','momo_worker','momo_notifier');" \
     2>/dev/null || true)"
   out="$(printf '%s' "$out" | tr -d '\r' | awk 'NF { print; exit }')"
   if [ -z "$out" ]; then
@@ -692,20 +705,20 @@ oort_runtime_roles_count() {
 oort_ensure_runtime_roles() {
   local n
   n="$(oort_runtime_roles_count || true)"
-  if [ "$n" = "3" ]; then
+  if [ "$n" = "4" ]; then
     return 0
   fi
   if [ "$(oort_tier)" = "t2" ]; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent (${n:-0}/3). 플랫폼 preDeploy(\`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate\`)를 먼저 돌려라"
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are absent (${n:-0}/4). 플랫폼 preDeploy(\`MOMO_RUNTIME_ROLE_PROVISION=1 momo-migrate\`)를 먼저 돌려라"
   fi
-  printf 'oort restore: runtime roles absent (%s/3); running compose service runtime-roles\n' \
+  printf 'oort restore: runtime roles absent (%s/4); running compose service runtime-roles\n' \
     "${n:-0}"
   if ! oort_compose run --rm runtime-roles; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are absent. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are absent. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
   fi
   n="$(oort_runtime_roles_count || true)"
-  if [ "$n" != "3" ]; then
-    oort_die "runtime roles (momo_app/momo_relay/momo_worker) are still absent after runtime-roles. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
+  if [ "$n" != "4" ]; then
+    oort_die "runtime roles (momo_app/momo_relay/momo_worker/momo_notifier) are still absent after runtime-roles. The destination must complete the stack's runtime-roles step (compose service runtime-roles, MOMO_RUNTIME_ROLE_PROVISION=1) before restore."
   fi
 }
 

@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## momo_notifier 런타임 롤 (#2193, 2026-09-10)
+
+- Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.
+- runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
+
 ## pgBackRest PITR 계약 시험 attach cleanup (#2157, 2026-09-10)
 
 - Track engine. `fix/2157-pgbackrest-pitr-test` onto `origin/track/engine`. 원인은 스크립트 회귀가 아니라 Colima virtiofs: macOS `TMPDIR=/var/folders/...`는 VM에 마운트되지 않아 attach 픽스처 bind-mount가 거부되고 주입된 `docker cp` exit 55에 도달하지 못함 (`56b08078` #1342부터 선재). 픽스처를 워크트리 `.tmp-momo-pitr-contract.*`로 옮김 (`test_image_day2_tools.sh`와 동일).
