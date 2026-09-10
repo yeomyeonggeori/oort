@@ -164,6 +164,48 @@ run_generator() {
   ) >"$output" 2>&1
 }
 
+# Canonical 43 = heredoc KEY= lines + public-edge keys. --claim swaps
+# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 43).
+canonical_keys_from_generator() {
+  {
+    awk '
+      /^cat >"\$ENV_FILE" <<EOF$/ { grab = 1; next }
+      grab && /^EOF$/ { exit }
+      grab && /^[A-Za-z_][A-Za-z0-9_]*=/ {
+        key = $0
+        sub(/=.*/, "", key)
+        print key
+      }
+    ' "$ROOT/scripts/self_host_env.sh"
+    printf '%s\n' 'OORT_SITE_ADDRESS' 'OORT_CSP_CONNECT_SRC'
+  } | LC_ALL=C sort -u
+}
+
+claim_swapped_canonical_keys() {
+  canonical_keys_from_generator | awk '
+    $0 == "MOMO_INITIAL_OWNER_PASSWORD" { print "MOMO_BOOTSTRAP_CLAIM"; next }
+    { print }
+  '
+}
+
+assignment_keys() {
+  awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$1" | LC_ALL=C sort -u
+}
+
+assert_no_password_key() {
+  if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$1"; then
+    echo "$2: password key present" >&2
+    exit 1
+  fi
+}
+
+assert_claim_key() {
+  grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$1" || {
+    echo "$2: missing MOMO_BOOTSTRAP_CLAIM=1" >&2
+    exit 1
+  }
+}
+
 local_fixture="$(make_fixture local)"
 local_output="$local_fixture/output"
 run_generator "$local_fixture" "$local_output" 49100 --local-build
@@ -1042,22 +1084,42 @@ grep -Fq 'ENV_FILE 없음' "$missing_public/output" || grep -Fq '없음' "$missi
 # Existing env without --public-origin still does not rewrite allowed origins.
 test "$public_before" != "$(hash_file "$public_fixture/infra/rust/local.secrets.env")"
 
-# #1790 — claim-mode env (password key removed, MOMO_BOOTSTRAP_CLAIM=1)
-# must reach the --public-origin maintenance path. --compose stays closed.
+# #2438 / #1790 — --claim is first-class. Password key is not written.
+# --public-origin maintenance and --compose are both allowed on claim env.
+# ADR-0166 refuses only when both keys are present.
+canonical_keys_from_generator >"$TMP_ROOT/canonical.keys"
+claim_swapped_canonical_keys >"$TMP_ROOT/claim.canonical.keys"
+canon_count="$(grep -c . "$TMP_ROOT/canonical.keys" | tr -d ' ')"
+claim_canon_count="$(grep -c . "$TMP_ROOT/claim.canonical.keys" | tr -d ' ')"
+[ "$canon_count" = "43" ] || {
+  echo "canonical key set must stay 43, got $canon_count" >&2
+  exit 1
+}
+[ "$claim_canon_count" = "43" ] || {
+  echo "claim-swapped canonical key set must stay 43, got $claim_canon_count" >&2
+  exit 1
+}
+grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP_ROOT/canonical.keys"
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/claim.canonical.keys"
+if grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/canonical.keys"; then
+  echo "default canonical set grew MOMO_BOOTSTRAP_CLAIM" >&2
+  exit 1
+fi
+if grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP_ROOT/claim.canonical.keys"; then
+  echo "claim-swapped set kept the password key" >&2
+  exit 1
+fi
+echo "canonical count=$canon_count claim-swapped count=$claim_canon_count"
+
 claim_fixture="$(make_fixture claim-public-origin)"
-run_generator "$claim_fixture" "$claim_fixture/first-output" 49750 --local-build
+run_generator "$claim_fixture" "$claim_fixture/first-output" 49750 --local-build --claim
 claim_env="$claim_fixture/infra/rust/local.secrets.env"
-awk '
-  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
-  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
-  { print }
-  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
-' "$claim_env" >"$claim_fixture/claim.env"
-mv "$claim_fixture/claim.env" "$claim_env"
-chmod 600 "$claim_env"
-grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$claim_env"
-if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$claim_env"; then
-  echo "claim surgery left a password key" >&2
+assert_claim_key "$claim_env" "--local-build --claim"
+assert_no_password_key "$claim_env" "--local-build --claim"
+grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/first-output"
+grep -Fq 'grep MOMO_CLAIM_PATH' "$claim_fixture/first-output"
+if grep -Fq '비밀번호 키를 요구하므로 거절한다' "$claim_fixture/first-output"; then
+  echo "claim next-steps still said --compose refuses" >&2
   exit 1
 fi
 jwt_claim_before="$(sed -n 's/^JWT_HMAC=//p' "$claim_env")"
@@ -1070,20 +1132,109 @@ grep -Fxq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL=same-origin' "$claim_env"
 test "$(sed -n 's/^JWT_HMAC=//p' "$claim_env")" = "$jwt_claim_before"
 grep -Fq '공개 오리진을 추가했다' "$claim_fixture/origin-output"
 grep -Fq 'MOMO_DRIVE_ARCHIVE_LOCAL_BASE_URL 은 same-origin 이라 그대로 둔다' "$claim_fixture/origin-output"
-if grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/origin-output"; then
-  echo "claim-mode next-steps unexpectedly recommended --compose" >&2
+assert_claim_key "$claim_env" "claim env after --public-origin"
+assert_no_password_key "$claim_env" "claim env after --public-origin"
+# Re-run without --claim keeps claim (no password injected, #2433 backfill).
+run_generator "$claim_fixture" "$claim_fixture/rerun-output" 49750 --local-build
+assert_claim_key "$claim_env" "re-run without --claim"
+assert_no_password_key "$claim_env" "re-run without --claim"
+test "$(sed -n 's/^JWT_HMAC=//p' "$claim_env")" = "$jwt_claim_before"
+grep -Fq 'scripts/self_host_env.sh --compose' "$claim_fixture/origin-output"
+if ! run_generator "$claim_fixture" "$claim_fixture/compose-output" 49750 --compose config; then
+  echo "claim-mode --compose config unexpectedly failed:
+$(cat "$claim_fixture/compose-output")" >&2
   exit 1
 fi
-if grep -Fq '재시작: --compose' "$claim_fixture/origin-output"; then
-  echo "claim-mode origin refresh unexpectedly recommended --compose restart" >&2
+if ! run_generator "$claim_fixture" "$claim_fixture/compose-up-output" 49750 --compose up -d; then
+  echo "claim-mode --compose up -d unexpectedly failed:
+$(cat "$claim_fixture/compose-up-output")" >&2
   exit 1
 fi
-if run_generator "$claim_fixture" "$claim_fixture/compose-output" 49750 --compose up -d; then
-  echo "claim-mode --compose unexpectedly succeeded" >&2
+grep -Fq 'claim 경로는 migrate 로그에 있다' "$claim_fixture/compose-up-output"
+grep -Fq 'grep MOMO_CLAIM_PATH' "$claim_fixture/compose-up-output"
+# Hint names the key, never a token value (ADR-0004).
+if grep -E 'MOMO_CLAIM_PATH=/claim/' "$claim_fixture/compose-up-output"; then
+  echo "compose up hint leaked a claim token" >&2
   exit 1
 fi
-grep -Fq 'claim 모드' "$claim_fixture/compose-output"
-grep -Fq '비밀번호 키를 요구한다' "$claim_fixture/compose-output"
+
+# Existing password env + --claim must refuse (never silently convert).
+password_to_claim="$(make_fixture password-to-claim)"
+run_generator "$password_to_claim" "$password_to_claim/first-output" 49752 --local-build
+if run_generator "$password_to_claim" "$password_to_claim/claim-output" 49752 --claim; then
+  echo "--claim on a password env unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq -- '--claim 으로 조용히 바꾸지 않는다' "$password_to_claim/claim-output"
+grep -q '^MOMO_INITIAL_OWNER_PASSWORD=' "$password_to_claim/infra/rust/local.secrets.env"
+if grep -q '^MOMO_BOOTSTRAP_CLAIM=' "$password_to_claim/infra/rust/local.secrets.env"; then
+  echo "--claim convert-refuse mutated the password env" >&2
+  exit 1
+fi
+
+# (a)(c) red: claim env + password key by hand → --compose refuses.
+# Sabotage of --claim also writing the password key is the same shape.
+printf '\nMOMO_INITIAL_OWNER_PASSWORD=aabbccddeeffaabbccddeeff\n' >>"$claim_env"
+if run_generator "$claim_fixture" "$claim_fixture/both-keys-output" 49750 --compose config; then
+  echo "claim+password --compose unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq '상호 배타다' "$claim_fixture/both-keys-output"
+# Restore claim-only env for later tests that reuse the fixture? This fixture
+# is done. Sabotage copy of the generator: --claim without stripping password.
+claim_sab_gen="$(make_fixture claim-sabotage-generator)"
+# make_fixture already copied the script; punch a hole in apply_claim_key_swap
+# so --claim keeps the password line and still writes claim.
+python3 - "$claim_sab_gen/scripts/self_host_env.sh" <<'PY'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text()
+needle = '    index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }\n'
+if needle not in text:
+    raise SystemExit("apply_claim_key_swap password-skip line missing")
+text = text.replace(needle, "", 1)
+# The leftover-password fail-closed check would catch this sabotage first.
+block = '''  if awk 'index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { found = 1 } END { exit !found }' "$tmp"; then
+    rm -f "$tmp"
+    fail "내부 오류: --claim 이 비밀번호 키를 남겼다."
+  fi
+'''
+if block not in text:
+    raise SystemExit("apply_claim_key_swap leftover-password check missing")
+text = text.replace(block, "", 1)
+path.write_text(text)
+PY
+if run_generator "$claim_sab_gen" "$claim_sab_gen/output" 49754 --local-build --claim; then
+  sab_env="$claim_sab_gen/infra/rust/local.secrets.env"
+  if grep -q '^MOMO_INITIAL_OWNER_PASSWORD=' "$sab_env" && \
+     grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$sab_env"; then
+    echo "sabotage --claim also wrote password (RED as required)"
+  else
+    echo "sabotage generator did not leave both keys" >&2
+    exit 1
+  fi
+else
+  echo "sabotage generator failed before writing:
+$(cat "$claim_sab_gen/output")" >&2
+  exit 1
+fi
+assignment_keys "$claim_sab_gen/infra/rust/local.secrets.env" \
+  >"$claim_sab_gen/got.keys"
+if ! grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$claim_sab_gen/got.keys" || \
+   ! grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$claim_sab_gen/got.keys"; then
+  echo "sabotage did not produce both owner-auth keys" >&2
+  exit 1
+fi
+echo "sabotage --claim also wrote password → key-set RED (both keys present)"
+
+# --claim --compose together is refused.
+claim_compose_combo="$(make_fixture claim-compose-combo)"
+if run_generator "$claim_compose_combo" "$claim_compose_combo/output" 49756 --claim --compose config; then
+  echo "--claim --compose unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq -- '--compose 와 함께 지정할 수 없다' "$claim_compose_combo/output"
 
 # Password absence without the claim marker is still malformed.
 no_claim_fixture="$(make_fixture missing-password-no-claim)"
@@ -1143,6 +1294,46 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
 grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform.err"
+# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 44.
+run_platform_stdout "$alias_fixture" "$alias_fixture/railway-claim.out" \
+  "$alias_fixture/railway-claim.err" --railway --claim || {
+  cat "$alias_fixture/railway-claim.err" >&2
+  echo "--railway --claim failed" >&2
+  exit 1
+}
+run_platform_stdout "$alias_fixture" "$alias_fixture/platform-claim.out" \
+  "$alias_fixture/platform-claim.err" --platform railway --claim || {
+  cat "$alias_fixture/platform-claim.err" >&2
+  echo "--platform railway --claim failed" >&2
+  exit 1
+}
+cmp "$alias_fixture/railway-claim.out" "$alias_fixture/platform-claim.out" || {
+  echo "--platform railway --claim is not byte-identical to --railway --claim" >&2
+  exit 1
+}
+grep -Fxq 'MOMO_BOOTSTRAP_CLAIM=1' "$alias_fixture/platform-claim.out"
+if grep -q '^MOMO_INITIAL_OWNER_PASSWORD=' "$alias_fixture/platform-claim.out"; then
+  echo "--railway --claim wrote the password key" >&2
+  exit 1
+fi
+assignment_keys "$alias_fixture/platform-claim.out" >"$alias_fixture/claim.keys"
+{
+  claim_swapped_canonical_keys
+  printf 'MOMO_SELF_HOST_PLATFORM\n'
+} | LC_ALL=C sort -u >"$alias_fixture/claim.expected.keys"
+if ! diff -u "$alias_fixture/claim.expected.keys" "$alias_fixture/claim.keys" \
+  >"$alias_fixture/claim.keys.diff"; then
+  cat "$alias_fixture/claim.keys.diff" >&2
+  echo "--railway --claim key-set diff not empty" >&2
+  exit 1
+fi
+claim_t2_count="$(grep -c . "$alias_fixture/claim.keys" | tr -d ' ')"
+[ "$claim_t2_count" = "44" ] || {
+  echo "--railway --claim key-set count expected 44 got $claim_t2_count" >&2
+  exit 1
+}
+grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
+echo "T2 --claim stdout count=$claim_t2_count (password variant 44; 1:1 swap)"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
@@ -1440,6 +1631,42 @@ if run_generator "$hn_sab_fixture" "$hn_sab_fixture/output" 49850 \
   exit 1
 fi
 grep -Fq 'network_mode: host 가 없다' "$hn_sab_fixture/output"
+
+# #2438 — --claim composes with every image/platform/opt-in flag.
+claim_pub="$(make_fixture claim-published)"
+run_generator "$claim_pub" "$claim_pub/output" 49770 --published-image "$GOOD_DIGEST" --claim
+assert_claim_key "$claim_pub/infra/rust/local.secrets.env" "--published-image --claim"
+assert_no_password_key "$claim_pub/infra/rust/local.secrets.env" "--published-image --claim"
+grep -Fq -- 'up -d --pull missing --wait' "$claim_pub/output"
+
+claim_origin="$(make_fixture claim-public-origin-create)"
+run_generator "$claim_origin" "$claim_origin/output" 49772 \
+  --local-build --claim --public-origin https://claim.example.test
+assert_claim_key "$claim_origin/infra/rust/local.secrets.env" "--claim --public-origin"
+assert_no_password_key "$claim_origin/infra/rust/local.secrets.env" "--claim --public-origin"
+grep -Fxq 'OORT_SITE_ADDRESS=claim.example.test' "$claim_origin/infra/rust/local.secrets.env"
+
+claim_fly="$(make_fixture claim-fly)"
+run_generator "$claim_fly" "$claim_fly/output" 49774 \
+  --platform fly --local-build --claim --public-origin https://fly-claim.example.test
+assert_claim_key "$claim_fly/infra/rust/local.secrets.env" "--platform fly --claim"
+assert_no_password_key "$claim_fly/infra/rust/local.secrets.env" "--platform fly --claim"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=fly' "$claim_fly/infra/rust/local.secrets.env"
+
+claim_hn="$(make_fixture claim-host-network)"
+run_generator "$claim_hn" "$claim_hn/output" 49776 \
+  --platform host-network --local-build --claim
+assert_claim_key "$claim_hn/infra/rust/local.secrets.env" "--platform host-network --claim"
+assert_no_password_key "$claim_hn/infra/rust/local.secrets.env" "--platform host-network --claim"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=host-network' "$claim_hn/infra/rust/local.secrets.env"
+grep -Fq 'host-network: --compose' "$claim_hn/output"
+
+claim_optin="$(make_fixture claim-local-provider)"
+run_generator "$claim_optin" "$claim_optin/output" 49778 \
+  --local-build --claim --allow-local-provider
+assert_claim_key "$claim_optin/infra/rust/local.secrets.env" "--claim --allow-local-provider"
+assert_no_password_key "$claim_optin/infra/rust/local.secrets.env" "--claim --allow-local-provider"
+grep -Fxq 'AGENT_PROVIDER_ALLOW_LOCAL_LOOPBACK=1' "$claim_optin/infra/rust/local.secrets.env"
 
 echo "self-host image mode contract: PASS"
 

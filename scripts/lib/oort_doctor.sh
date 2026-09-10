@@ -313,6 +313,9 @@ oort_doctor_check_env() {
   fi
   while IFS= read -r key; do
     [ -n "$key" ] || continue
+    # ADR-0166 / #2438: claim key stands in for the password key. Skip the
+    # password requirement when MOMO_BOOTSTRAP_CLAIM=1. Both keys together
+    # are refused below, not here.
     if [ "$key" = "MOMO_INITIAL_OWNER_PASSWORD" ] && [ "$claim" = "1" ]; then
       continue
     fi
@@ -328,9 +331,18 @@ oort_doctor_check_env() {
 $(oort_doctor_generator_keys)
 EOF
   missing="$(oort_doctor_trim "$missing")"
-  if [ -z "$missing" ]; then
-    oort_doctor_record env.required_keys blocker pass \
-      "생성기 키 전수 존재 (scripts/self_host_env.sh 파생)" ""
+  if [ "$claim" = "1" ] && oort_doctor_has MOMO_INITIAL_OWNER_PASSWORD; then
+    oort_doctor_record env.required_keys blocker fail \
+      "ADR-0166: MOMO_INITIAL_OWNER_PASSWORD 와 MOMO_BOOTSTRAP_CLAIM=1 은 상호 배타" \
+      "비밀번호 키를 지우거나 claim 키를 지워 하나만 남겨라."
+  elif [ -z "$missing" ]; then
+    if [ "$claim" = "1" ]; then
+      oort_doctor_record env.required_keys blocker pass \
+        "생성기 키 전수 존재 (claim 키가 비밀번호 키 자리)" ""
+    else
+      oort_doctor_record env.required_keys blocker pass \
+        "생성기 키 전수 존재 (scripts/self_host_env.sh 파생)" ""
+    fi
   else
     oort_doctor_record env.required_keys blocker fail \
       "생성기 키 누락:${missing}" \
