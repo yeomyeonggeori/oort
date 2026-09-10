@@ -42,6 +42,10 @@ import {
   displayNameFieldError,
   displayNameSaveMessage,
   DISPLAY_NAME_MAX_CHARS,
+  handleFieldError,
+  handleSaveMessage,
+  HANDLE_TAKEN_SENTENCE,
+  workspaceNameSaveMessage,
   workTierPolicySaveMessage,
 } from "./model";
 
@@ -418,6 +422,35 @@ describe("프로필 표시 이름 error copy", () => {
       "표시 이름은 100자까지 쓸 수 있습니다."
     );
     expect(displayNameFieldError("가".repeat(101))).not.toMatch(/100자 초과/);
+  });
+});
+
+describe("핸들·워크스페이스 이름 error copy", () => {
+  it("maps handle 409/400 to Korean and never leaks the wire sentence", () => {
+    expect(handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))).toBe(
+      "이미 쓰는 핸들이에요. 다른 핸들을 골라주세요."
+    );
+    expect(handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))).not.toContain(
+      "handle is already"
+    );
+    expect(
+      handleSaveMessage(
+        new ApiError(400, "handle must be 2-32 chars of a-z, 0-9, _ or -")
+      )
+    ).toBe("핸들은 영문 소문자·숫자·하이픈 2~32자예요.");
+    expect(handleFieldError("!")).toBe(
+      "핸들은 영문 소문자·숫자·하이픈 2~32자예요."
+    );
+    expect(handleFieldError("seongjae")).toBeNull();
+  });
+
+  it("maps a workspace 400 to Korean and names the next move", () => {
+    expect(
+      workspaceNameSaveMessage(new ApiError(400, "workspace name must be 1-80 characters"))
+    ).toBe("이름은 1~80자예요. 다시 입력해 주세요.");
+    expect(
+      workspaceNameSaveMessage(new ApiError(400, "workspace name must be 1-80 characters"))
+    ).not.toMatch(/workspace name must/);
   });
 });
 

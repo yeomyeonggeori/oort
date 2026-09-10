@@ -532,6 +532,52 @@ export function displayNameSaveMessage(error: unknown): string {
   return "요청을 끝내지 못했습니다. 잠시 뒤에 다시 시도하세요.";
 }
 
+/** Wire sentence for a taken handle. Never render this; map through handleSaveMessage. */
+export const HANDLE_TAKEN_SENTENCE = "handle is already in use";
+
+const HANDLE_PATTERN = /^[a-z0-9_-]+$/;
+
+export function normalizeHandle(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+export function isValidHandle(value: string): boolean {
+  const length = [...value].length;
+  return length >= 2 && length <= 32 && HANDLE_PATTERN.test(value);
+}
+
+/** Live field gate for S1 and 설정 › 프로필. Product Korean, names the rule. */
+export function handleFieldError(raw: string): string | null {
+  const value = normalizeHandle(raw);
+  if (!isValidHandle(value)) {
+    return "핸들은 영문 소문자·숫자·하이픈 2~32자예요.";
+  }
+  return null;
+}
+
+/** Handle save answers in Korean, not in the wire message. */
+export function handleSaveMessage(error: unknown): string {
+  if (
+    error instanceof ApiError &&
+    error.status === 409 &&
+    error.message === HANDLE_TAKEN_SENTENCE
+  ) {
+    return "이미 쓰는 핸들이에요. 다른 핸들을 골라주세요.";
+  }
+  if (error instanceof ApiError && error.status === 400) {
+    return "핸들은 영문 소문자·숫자·하이픈 2~32자예요.";
+  }
+  return "핸들을 저장하지 못했습니다. 다시 시도해 주세요.";
+}
+
+/** Workspace rename 400 answers in Korean and names the next move. */
+export function workspaceNameSaveMessage(error: unknown): string {
+  if (error instanceof ApiError && error.status === 400) {
+    return "이름은 1~80자예요. 다시 입력해 주세요.";
+  }
+  return "이름을 저장하지 못했습니다. 다시 시도해 주세요.";
+}
+
 /**
  * Server join/PATCH ceiling for `displayName` (Unicode scalar values, not bytes).
  * Mirrors `normalized_join_display_name`: trimmed · non-empty · ≤ 100
