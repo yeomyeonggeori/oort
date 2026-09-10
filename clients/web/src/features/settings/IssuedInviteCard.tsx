@@ -8,6 +8,7 @@ import {
   type InviteCardInput,
 } from "@momo/core/features/settings/model";
 import { resolveServerBaseUrl, type CreatedInvite } from "@momo/core/features/settings/api";
+import { INVITE_COPY_CARD_LABEL } from "./inviteLabels";
 import { CopyButton, KeyValueRows } from "./SettingsFields";
 
 // =============================================================================
@@ -45,7 +46,7 @@ export function IssuedInviteCard({
       role="status"
       data-testid="invite-issued"
     >
-      <p className="text-body text-ink">
+      <p className="break-keep text-body text-ink">
         초대 링크를 만들었습니다. 코드는 이 화면에서만 볼 수 있으니 지금
         전달하세요.
       </p>
@@ -71,8 +72,9 @@ export function IssuedInviteCard({
         {copyMode === "single" ? (
           <CopyButton
             value={inviteCardText(card)}
-            label="링크 복사"
+            label={INVITE_COPY_CARD_LABEL}
             testId="invite-copy-card"
+            size="default"
           />
         ) : (
           <>
@@ -83,7 +85,7 @@ export function IssuedInviteCard({
             />
             <CopyButton
               value={inviteCardText(card)}
-              label="초대 카드 복사"
+              label={INVITE_COPY_CARD_LABEL}
               testId="invite-copy-card"
             />
             <Button asChild variant="outline" size="sm">
@@ -93,7 +95,7 @@ export function IssuedInviteCard({
         )}
       </div>
 
-      <p className="text-meta text-ink-muted">
+      <p className="break-keep text-meta text-ink-muted">
         받는 사람은 앱을 설치한 뒤 딥링크를 열면 서버 주소와 코드가 채워진
         상태로 참여 화면에 도착합니다.
       </p>
