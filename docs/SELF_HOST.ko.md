@@ -738,6 +738,21 @@ heredoc + `oort_public_edge_env_keys`, 41키)은 늘지 않는다: T1 행은 her
 없다 — compose 정본 그 자체다. Cloudflare도 행이 없다: 이들 앞단의 T3
 엣지다(레시피 SH-11d).
 
+### AWS Lightsail / EC2
+
+T1 VM 레시피: [`infra/aws/README.md`](../infra/aws/README.md). Lightsail
+인스턴스 1대에서 compose 정본(EC2는 같은 모듈의 `compute = "ec2"`). 추가
+디스크는 `/data`, Docker `data-root=/data/docker`, 방화벽은 22/80/443만
+(Postgres 5432는 비공개). env:
+
+```sh
+scripts/self_host_env.sh --platform aws-lightsail --public-origin https://<host>
+```
+
+사람 승인 지점(본인 계정·본인 비용): AWS 로그인/SSO, `terraform apply`,
+Budgets 이메일, DNS A, `terraform destroy`. 게이트:
+`scripts/oort doctor --json`.
+
 ### Railway
 
 같은 스택의 클라우드 설치: [`infra/railway/README.md`](../infra/railway/README.md).
