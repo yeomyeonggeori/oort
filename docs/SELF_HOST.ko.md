@@ -721,12 +721,12 @@ day-2 v2를 기다린다); **T3**은 엣지 전용, 컴퓨트가 아니다. 행�
 모든 플랫폼의 env 파생은 **생성기 플래그 하나가 표 하나를 읽는다** —
 `scripts/self_host_env.sh`의 `platform_profiles`. 정본 키 집합(생성기
 heredoc + `oort_public_edge_env_keys`, 41키)은 늘지 않는다: T1 행은 heredoc
-밖에 `MOMO_SELF_HOST_PLATFORM=<name>`을 더하고, T2 행은 정본 집합을 그대로
-출력한다.
+밖에 `MOMO_SELF_HOST_PLATFORM=<name>`을 더하고, T2 행은 정본 집합에 같은
+스탬프를 heredoc 밖에 더한다(stdout 42; doctor `env.required_keys`는 41).
 
 | `--platform` | Tier | 공개 오리진 소스 | Postgres | 손으로 넣는 키 | 출력 |
 |---|---|---|---|---|---|
-| `railway` (별칭 `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | 플러그인 `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | stdout KEY=value, 파일 없음, `MOMO_HOSTED_DELIVERY_ENABLED` 없음 |
+| `railway` (별칭 `--railway`) | T2 | `RAILWAY_PUBLIC_DOMAIN` | 플러그인 `DATABASE_URL` | `CENT_API_URL` · `WORKER_DATABASE_URL` · `CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS` (`infra/railway/README.md`) | stdout KEY=value, 파일 없음, `MOMO_HOSTED_DELIVERY_ENABLED` 없음, 스탬프 `MOMO_SELF_HOST_PLATFORM=railway`는 heredoc 밖 |
 | `fly` | T1 | `--public-origin https://<host>` (필수) | compose `postgres` | 없음 | 로컬 경로와 같은 `infra/rust/local.secrets.env` + `MOMO_SELF_HOST_PLATFORM=fly` |
 | `aws-lightsail` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=aws-lightsail` |
 | `gcp-vm` | T1 | 같음 | compose `postgres` | 없음 | 같음, `MOMO_SELF_HOST_PLATFORM=gcp-vm` |

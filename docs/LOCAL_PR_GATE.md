@@ -44,7 +44,7 @@ The live name list is `scripts/local_gate.sh --help`. Snapshot:
 | `runtime-agent` | agent-worker / hermes |
 | `external-agent-provider` | credentialed external-runtime smoke, opt-in |
 | `m3-dbc` | D/B/C exit evidence |
-| `web` | `clients/web` lint/typecheck/test/build |
+| `web` | `clients/web` lint/typecheck/test/build + `gate:csp-deploy` (docker/caddy 선택 도구: 부재 시 눈에 보이는 skip 줄, 존재 시 실행·실패 RED; #2181/#2328) |
 | `license` | cargo/npm lock or `deny.toml` / GHCR notice bundle |
 | `secrets` | standalone gitleaks lane |
 | `all` | merge-critical/runtime-wide (does not include `runtime-live` or `web`) |

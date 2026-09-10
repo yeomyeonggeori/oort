@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-11g/f 리뷰 잔여 (#2328, 2026-09-10)
+
+- Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
+- runtime-unverified: RELEASING dispatch 실주행의 gate:csp-deploy는 발행 창. T2 스탬프 실서비스 day-2는 SH-11a.
+
 ## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
 
 - Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).
@@ -155,7 +160,7 @@
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
-- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
+- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
 - 검증: `scripts/tests/test_railway_template.sh` (키 집합 diff 0 · JWT_HMAC 사보타주 RED · `caddy adapt` · 403 순서 · 게이트 픽스처 PASS/RED) · `scripts/local_gate.sh --profile docs`.
 - runtime-unverified: `RAILWAY_TOKEN` 없음 — 실배포 `railway up` / 원격 `public.healthz`·`public.websocket`은 planner 수행.
 
