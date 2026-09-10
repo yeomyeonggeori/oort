@@ -218,7 +218,7 @@ migrate는 첫 `up`에서 `MOMO_CLAIM_PATH=/claim/<token>`을 **한 번만**
 (`welcomeKickoff.ts`). 다음 스테이지 제목은 **첫 에이전트 연결**
 (`FIRST_AGENT_TITLE`). 리드 「팀에 붙일 에이전트를 고르세요。」 Skip
 **나중에**; 재진입 「나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수
-있습니다.」 카드는 Claude Code · Codex · Grok · **OpenAI 호환**(마지막은
+있습니다.」 카드는 Claude Code · Codex · Grok Bot · **OpenAI 호환**(마지막은
 설정 › AI 연결 — §6). 네이티브 에이전트 + 멘션은 그대로 §7.
 
 첫 에이전트가 웰컴 발화 가능 상태가 되면(네이티브 생성 tx **또는** hosted

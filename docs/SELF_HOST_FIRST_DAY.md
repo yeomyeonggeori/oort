@@ -232,7 +232,7 @@ releases the hold immediately — no 120s backstop card
 (`welcomeKickoff.ts`). The next stage title is **첫 에이전트 연결**
 (`FIRST_AGENT_TITLE`). Lead 「팀에 붙일 에이전트를 고르세요。」 Skip
 **나중에**; re-entry 「나중에 설정 › 연결 › 에이전트 자격에서 이어갈 수
-있습니다.」 Cards include Claude Code · Codex · Grok · **OpenAI 호환**
+있습니다.」 Cards include Claude Code · Codex · Grok Bot · **OpenAI 호환**
 (the last sends you to 설정 › AI 연결 — §6). Native agent + mention is
 still §7.
 
