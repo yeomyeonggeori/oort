@@ -443,6 +443,55 @@ curl -fsS --max-time 5 https://1.1.1.1/cdn-cgi/trace || true
 Even if `ip=` is not RFC1918/link-local, continue at §3.3.6. Measured VMs
 have no public inbound.
 
+> **Harness note:** OS Return fails when the Grok Bot window is on another
+> Space. Bring the app forward with `open -a "Grok Bot"`, then Return.
+
+#### 3.3.0 VM Docker preflight and fallbacks
+
+Measured on this vendor VM (E2E-A, 2026-09-09): overlayfs may be
+unavailable (storage driver falls to `vfs`), Docker bridge and iptables
+may be blocked (`network_mode: host` is the allowed bypass), and rewriting
+env database hosts by hand is a deviation — not an allowed workaround.
+
+Run these three checks **before** Engine / Compose install (§3.3.1):
+
+```sh
+docker info --format '{{.Driver}}'
+docker network create --driver bridge oort-preflight-bridge
+iptables -L
+```
+
+If `docker network create` succeeds, remove the probe immediately:
+
+```sh
+docker network rm oort-preflight-bridge
+```
+
+One allowed fallback per failure:
+
+1. **Storage driver** (`docker info` Driver is not `overlay2` / `overlay`,
+   or the engine will not start on overlayfs): the allowed fallback is the
+   `vfs` storage driver. Write `{"storage-driver":"vfs"}` to
+   `/etc/docker/daemon.json` and restart Docker. Do not pick a third driver.
+2. **Bridge** (`docker network create --driver bridge` fails): the allowed
+   fallback is compose `network_mode: host` on a VM-local override that is
+   **not** a file in this repository. Do not add or name a repo overlay for
+   this.
+3. **iptables** (`iptables -L` is permission-denied or otherwise unusable):
+   the same allowed fallback as bridge — `network_mode: host`. Do not try
+   to unlock iptables on this VM.
+
+**Env hand-edit is not a fallback.** Do not rewrite `DATABASE_URL` /
+`MOMO_APP_DATABASE_URL` / `RELAY_DATABASE_URL` / `MIGRATE_DATABASE_URL`
+hosts in `infra/rust/local.secrets.env`. Express a change only through
+generator options (`scripts/self_host_env.sh` flags such as
+`--published-image`, `--platform`, `--public-origin`). This tree has no
+generator option that retargets compose Postgres from `postgres` to
+`127.0.0.1` for host-network. If host-network still needs that host rewrite,
+**do not edit env** — record the bypass in the §3.3.14 handoff message and
+stop: hand the screen to the human (ADR-0184 D2). A generator option for this
+host rewrite is tracked as #2340.
+
 #### 3.3.1 Snapshot (no git)
 
 git clone is not required. **curl + tar + Docker Engine + Compose v2 +
@@ -1074,12 +1123,20 @@ playbook uses the same text when creating its own routine. Do not rephrase
 the trigger type (this is the measured webhook wording).
 
 ```text
-Create a routine. Name oort-doorbell / trigger: webhook (external system starts it with HTTP POST) / body: (the production instructions in §3.3.17.4, verbatim) / afterwards tell me the webhook URL, sender key, and whether it is enabled.
+Create a routine. Name oort-doorbell / trigger: webhook (external system starts it with HTTP POST) / body: (the production instructions in §3.3.17.4, verbatim) / enable it. Afterwards tell me only whether it is enabled. Stop there.
 ```
 
-**Gate:** the routine is enabled, and you received an https webhook URL and
-sender key. Do not rewrite URL/key into this file. Take them as env vars
-for §3.3.17.3 only; do not repeat them in later replies or logs.
+**Human approval point (ADR-0184 D2).** Webhook URL and sender key live
+only in the vendor app **Info pane**. The agent cannot read that pane and
+must not claim it will. After the routine exists, the agent **stops and
+hands the screen to the human**, then waits. The human opens Info pane,
+copies the https webhook URL and sender key, and pastes them into this
+chat once. The agent does not continue to §3.3.17.3 until those values
+arrive.
+
+**Gate:** the routine is enabled, and the human pasted an https webhook URL
+and sender key. Do not rewrite URL/key into this file. Take them as env
+vars for §3.3.17.3 only; do not repeat them in later replies or logs.
 
 ##### 3.3.17.2 oort side — open the gates
 
@@ -1277,12 +1334,18 @@ same instructions on a low-frequency cron once more. Both routines share the
 inbox cursor file (`/workspace/oort-inbox.cursor`). Pages after a consumed
 cursor are empty, so duplicate wake is harmless.
 
+The doorbell (§3.3.17.1) is the **primary wake**. The sweep is **secondary**.
+Do not promise spontaneous speech. A scheduled `@every 15m` routine may
+delay (tens of minutes) before its first run — measured E2E-A first fire
+was ~28 minutes. Copy stays at manual-run level (#1361 criterion 3).
+
 ```text
 Create a routine. Name oort-inbox-sweep / trigger: every 15 minutes (cron). Not a webhook. / body: (the same production instructions as oort-doorbell §3.3.17.4, verbatim) / afterwards tell me whether it is enabled.
 ```
 
 **Gate:** the routine is enabled and the period is 15 minutes. Do not lower
-it to 1-minute polling.
+it to 1-minute polling. Do not treat a delayed first run as a failed
+install.
 
 ##### 3.3.17.6 Notices
 
@@ -1324,6 +1387,76 @@ The script refuses a missing `--dump` path. After restore: `oort_compose up
 If Postgres looks empty or login fails, data is gone. Restore from
 `/workspace/oort-backups` if a dump exists. If not, tell the user; do not
 invent a password.
+
+##### 3.3.18.1 Disconnect (HAP-E6)
+
+Leaving the hosted connection is a separate step from the dump above.
+History stays; this path revokes the live bearer and waits for provider
+cleanup. Reuse `ACCESS_TOKEN` / `WS` / `CONN` / `WEB_PORT` from §3.3.17.3.
+
+1. Human admin session starts disconnect. **Gate:** HTTP 200,
+   `connection.status` is `cleanup_pending`, a per-kind manifest is
+   seeded (kind rows plus named items). The live active credential is
+   already revoked (Agent Port discover → 401).
+
+```sh
+curl -sS -o /tmp/oort-disconnect.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  -H 'content-type: application/json' \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/disconnect" \
+  -d '{"artifacts":[{"kind":"routine","externalRef":"oort-doorbell"},{"kind":"routine","externalRef":"oort-inbox-sweep"},{"kind":"secret","externalRef":"active-credential"},{"kind":"bot","externalRef":"grokbot"}]}'
+```
+
+2. One instruction to the agent → **one** cleanup manifest. Do not ask
+   twice. If any line reports `residual` other than `none`, send exactly
+   one follow-up naming those items → one more manifest (two rounds
+   maximum; measured: 4 leftover files, one follow-up). Required line
+   format (measured):
+
+```text
+kind · name · status(deleted/absent/preserved) · residual
+```
+
+Example:
+
+```text
+routine · oort-doorbell · deleted · residual none
+routine · oort-inbox-sweep · deleted · residual none
+secret · oort-active-credential · deleted · residual none
+plugin · (none) · absent · residual none
+bot · grokbot · preserved · residual none
+```
+
+3. Acknowledge each server manifest row (human admin session only — the
+   route is `require_human`) with `{currentStatus, disposition, evidence}`.
+   Read the row ids from the disconnect response:
+   `jq -r '.cleanupArtifacts[]|[.id,.kind,(.externalRef//"-")]|@tsv' /tmp/oort-disconnect.body`
+   and loop `ARTIFACT_ID` over them. **If you send `disposition`,
+   `evidence` is required (1..2000 bytes).** Omitting it is HTTP 400
+   `a manual acknowledgement requires 1..=2000 bytes of evidence`. Paste one
+   bot-manifest line into `evidence`. Measured pairing: `bot` = preserve /
+   `present`; `secret` = revoke / `absent`; everything else = delete /
+   `absent`.
+
+```sh
+curl -sS -o /tmp/oort-ack.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  -H 'content-type: application/json' \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/cleanup-artifacts/${ARTIFACT_ID}/acknowledge" \
+  -d '{"currentStatus":"absent","disposition":"delete","evidence":"routine · oort-doorbell · deleted · residual none"}'
+```
+
+4. When required rows are resolved, complete disconnect. **Gate:** HTTP
+   200, `connection.status` `disconnected`, `remainingRequired` 0.
+
+```sh
+curl -sS -o /tmp/oort-disconnect-complete.body -w '%{http_code}' \
+  -X POST \
+  -H "authorization: Bearer ${ACCESS_TOKEN}" \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/hosted-agent-connections/${CONN}/disconnect/complete"
+```
 
 #### 3.3.19 Do not
 
