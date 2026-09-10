@@ -267,6 +267,14 @@ export function applyLogin(response: LoginResponse): void {
   notify();
 }
 
+/** Keep a server-confirmed self member across reload (same write as login). */
+export function replacePersistedMember(member: LoginResponse["member"]): void {
+  if (!persisted) return;
+  persisted = { ...persisted, member };
+  writeStorage(persisted);
+  notify();
+}
+
 /** Rotation result to a new pair; identity and websocket address are unchanged. */
 export function applyRotation(newAccess: string, newRefresh: string): void {
   if (!persisted) return;

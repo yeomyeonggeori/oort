@@ -2400,18 +2400,29 @@ export async function fetchWorkspaceAvatar(avatarUrl: string): Promise<Blob> {
 // 핸들은 `normalized_requested_handle`; 형식 400, 점유 409 `handle is already in use`.
 // 응답 `{ member }` (login Member 형상). 역할·아바타는 이 표면의 것이 아니다.
 
+/** PATCH /members/me with display name and/or handle in one body. */
+export async function changeMyProfile(
+  workspaceId: string,
+  patch: { displayName?: string; handle?: string }
+): Promise<Member> {
+  const body: Record<string, string> = {};
+  if (patch.displayName !== undefined) body.displayName = patch.displayName;
+  if (patch.handle !== undefined) body.handle = patch.handle;
+  const source = responseRecord(
+    await request<unknown>(
+      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
+      { method: "PATCH", body: JSON.stringify(body) }
+    )
+  );
+  return memberFromWire(source.member);
+}
+
 /** Change the signed-in human member's display name. */
 export async function changeMyDisplayName(
   workspaceId: string,
   displayName: string
 ): Promise<Member> {
-  const source = responseRecord(
-    await request<unknown>(
-      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
-      { method: "PATCH", body: JSON.stringify({ displayName }) }
-    )
-  );
-  return memberFromWire(source.member);
+  return changeMyProfile(workspaceId, { displayName });
 }
 
 /** Change the signed-in human member's handle. Past `@oldhandle` bodies stay. */
@@ -2419,13 +2430,7 @@ export async function changeMyHandle(
   workspaceId: string,
   handle: string
 ): Promise<Member> {
-  const source = responseRecord(
-    await request<unknown>(
-      `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/me`,
-      { method: "PATCH", body: JSON.stringify({ handle }) }
-    )
-  );
-  return memberFromWire(source.member);
+  return changeMyProfile(workspaceId, { handle });
 }
 
 // ---- 워크스페이스 나가기 (ADR-0161 D4) --------------------------------------

@@ -18,6 +18,7 @@ import {
   clearSession,
   getAuthExpired,
   hasPersistedSession,
+  replacePersistedMember,
   subscribeSession,
 } from "@/lib/session";
 import {
@@ -183,6 +184,7 @@ export function useRestoredSession(): SessionLifecycle {
   }, []);
 
   const replaceSessionMember = useCallback((member: Member) => {
+    replacePersistedMember(member);
     setSession((current) =>
       current === null ? null : { ...current, member }
     );
