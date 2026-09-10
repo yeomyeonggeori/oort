@@ -2,6 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   gatewayPrefillFocus,
   initialOnboarding,
+  initialOwnerOnboardingStage,
+  ownerOnboardingProgressLabel,
+  ownerOnboardingTotalSteps,
+  OWNER_ONBOARDING_STAGES,
   progressLabel,
   transitionFor,
 } from "./onboardingFlow";
@@ -69,6 +73,16 @@ describe("onboarding progress", () => {
     expect(progressLabel("gateway")).toBe("2/4");
     expect(progressLabel("account")).toBe("3/4");
     expect(progressLabel("profile")).toBe("4/4");
+  });
+});
+
+describe("owner onboarding stages (ADR-0185)", () => {
+  it("totalSteps_is_2", () => {
+    expect(ownerOnboardingTotalSteps()).toBe(2);
+    expect(OWNER_ONBOARDING_STAGES).toHaveLength(2);
+    expect(ownerOnboardingProgressLabel("workspace-profile")).toBe("1/2");
+    expect(ownerOnboardingProgressLabel("invite")).toBe("2/2");
+    expect(initialOwnerOnboardingStage()).toBe("invite");
   });
 });
 

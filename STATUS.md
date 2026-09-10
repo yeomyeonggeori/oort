@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-12c 온보딩 S2 「팀원 초대」 (#2333)
+
+- Track UXUI. `feat/2333-onboarding-s2-invite` onto `origin/track/uxui`. claim 성공 뒤 S2 「팀원 초대」 1장(카운터 2/2). skip 「나중에」 상시, 재진입 「설정 › 멤버와 초대에서 언제든」. 발급은 기존 `POST /v1/workspaces/{ws}/invites`(TTL 24h·1회). S1(#2332) 미랜딩 — 스테이지 표는 2칸, 마운트는 invite만.
+- runtime-unverified: 실서버 claim→S2 왕복은 mock·RTL 범위. design-review는 PR 이후 fresh context.
+
 ## UX-R2c·SH-6a-w design-review 잔여 (#2256, 2026-09-09)
 
 - Track UXUI. `feat/uxr2c-followup` onto `origin/track/uxui`. UX-R2c R7 M-8/N-13/N-14 + SH-6a-w R7-N4.

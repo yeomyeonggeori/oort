@@ -13,7 +13,12 @@ import { OortMark } from "@/design/brand/OortMark";
 import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
+import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
 import { readClaimToken } from "./claimPath";
+import {
+  holdSessionRestore,
+  releaseSessionRestore,
+} from "./onboardingSessionHold";
 
 // Reading this as: onboarding claim-password form for self-host operators on
 // web+Tauri, density 6/10, motion 2/10.
@@ -45,6 +50,7 @@ export function ClaimPage({
   onLoggedIn: (session: LoginResponse) => void;
 }) {
   const token = readClaimToken(window.location.pathname);
+  const [claimed, setClaimed] = useState<LoginResponse | null>(null);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
@@ -52,6 +58,12 @@ export function ClaimPage({
   const [failure, setFailure] = useState<ClaimFailure | null>(null);
   const offline = useBrowserOffline();
   const landingRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    return () => {
+      releaseSessionRestore();
+    };
+  }, []);
 
   const missingToken = token === null;
   const showForm = !missingToken && (failure === null || failure.keepForm);
@@ -75,12 +87,11 @@ export function ClaimPage({
     setBusy(true);
     try {
       const session = await claimOwnerPassword(token, password);
-      window.history.replaceState(null, "", "/");
-      // invite-join(ConnectPage)과 같은 넷 — 폰 연결 · 첫 에이전트 · fresh-signup ·
-      // 킥오프 홀드. markFreshSignup 하나만 찍던 동안 first-run 게이트는 곧장
-      // "app"이었다(#2301).
-      recordFreshSignupFirstRun(session);
-      onLoggedIn(session);
+      // applyLogin already persisted. Hold restore so App does not unmount
+      // this page into `restoring` while S2 is still on screen (ConnectPage
+      // S3 hold, same reason).
+      holdSessionRestore();
+      setClaimed(session);
     } catch (err) {
       setFailure(claimFailureCopy(err));
     } finally {
@@ -91,6 +102,23 @@ export function ClaimPage({
   function onSubmit(e: FormEvent) {
     e.preventDefault();
     void attempt();
+  }
+
+  function finishOwnerOnboarding(session: LoginResponse) {
+    window.history.replaceState(null, "", "/");
+    // S2 완료/skip 뒤에 first-run 게이트가 연다. 순서는 SH-12a 그대로.
+    recordFreshSignupFirstRun(session);
+    onLoggedIn(session);
+    releaseSessionRestore();
+  }
+
+  if (claimed) {
+    return (
+      <OwnerOnboarding
+        session={claimed}
+        onFinished={() => finishOwnerOnboarding(claimed)}
+      />
+    );
   }
 
   return (

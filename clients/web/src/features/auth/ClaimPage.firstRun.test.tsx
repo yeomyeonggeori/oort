@@ -2,6 +2,7 @@
 
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, type LoginResponse } from "@momo/core/lib/api";
 import { ClaimPage } from "./ClaimPage";
@@ -147,8 +148,20 @@ async function submitClaim(
   document.body.append(host);
   mountedHost = host;
   mountedRoot = createRoot(host);
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
   act(() => {
-    mountedRoot?.render(createElement(ClaimPage, { onLoggedIn }));
+    mountedRoot?.render(
+      createElement(
+        QueryClientProvider,
+        { client },
+        createElement(ClaimPage, { onLoggedIn })
+      )
+    );
   });
   fill("claim-password", PASSWORD);
   fill("claim-confirm", PASSWORD);
@@ -169,10 +182,20 @@ describe("claim → first-run 사다리 (#2301)", () => {
     });
     await submitClaim(onLoggedIn);
     await vi.waitFor(() => {
+      expect(
+        document.querySelector('[data-testid="onboarding-s2"]')
+      ).not.toBeNull();
+    });
+    // S2 는 first-run 앞에 선다. skip 전까지 마커 0, 세션도 아직 넘기지 않는다.
+    expect(onLoggedIn).not.toHaveBeenCalled();
+    expect(peekFreshSignup()).toBeNull();
+    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
+
+    click("onboarding-s2-skip");
+    await vi.waitFor(() => {
       expect(onLoggedIn).toHaveBeenCalledTimes(1);
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
-    expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
     expect(window.location.pathname).toBe("/");
 
     // 마커는 세션을 넘기기 전에 다 찍혀 있다 — App 이 첫 렌더에서 "app" 을 보지 않게.
