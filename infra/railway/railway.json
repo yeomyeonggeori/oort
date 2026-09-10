@@ -9,7 +9,7 @@
   "plugins": ["postgresql"],
   "notes": {
     "composeTable": "Not a docker-compose rendering. scripts/check_compose_env_templates.sh tables infra/rust/*.yml only. This file is a Railway service catalog; env keys come from scripts/self_host_env.sh --platform railway (alias --railway).",
-    "platformStamp": "MOMO_SELF_HOST_PLATFORM=railway — appended outside the generator heredoc so oort_tier() can read T2 from env alone (#2328). Not a heredoc key (doctor env.required_keys stays 41).",
+    "platformStamp": "MOMO_SELF_HOST_PLATFORM=railway — appended outside the generator heredoc so oort_tier() can read T2 from env alone (#2328). Not a heredoc key. Generator stdout is canonical 43 + this stamp (44). Includes NOTIFIER_POSTGRES_PASSWORD and NOTIFIER_DATABASE_URL (#2193).",
     "livekit": "Excluded (huddle deferred). Do not add a LiveKit service.",
     "tls": "Railway terminates HTTPS on the caddy service. Caddyfile.railway is the public Caddyfile with an internal-HTTP listener only — not auto_https off plus a bare :8080 site.",
     "migrate": "Image command migrate does not provision runtime roles and apply 001..NNN in one process. MOMO_RUNTIME_ROLE_PROVISION=1 applies bootstrap_runtime_roles.sql and exits. A second invocation with MOMO_BOOTSTRAP_RUNTIME_ROLES=0 migrates. api.preDeployCommand sequences both against MIGRATE_DATABASE_URL so the running api keeps DATABASE_URL=momo_app (RLS)."

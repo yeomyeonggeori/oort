@@ -71,6 +71,7 @@ TOKEN_PG="$(openssl rand -hex 12)"
 TOKEN_APP="$(openssl rand -hex 12)"
 TOKEN_RELAY="$(openssl rand -hex 12)"
 TOKEN_WORKER="$(openssl rand -hex 12)"
+TOKEN_NOTIFIER="$(openssl rand -hex 12)"
 TOKEN_JWT="$(openssl rand -hex 12)"
 TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
@@ -98,6 +99,7 @@ repl = {
     "__TOKEN_APP__": "${TOKEN_APP}",
     "__TOKEN_RELAY__": "${TOKEN_RELAY}",
     "__TOKEN_WORKER__": "${TOKEN_WORKER}",
+    "__TOKEN_NOTIFIER__": "${TOKEN_NOTIFIER}",
     "__TOKEN_JWT__": "${TOKEN_JWT}",
     "__TOKEN_CENT_TOKEN__": "${TOKEN_CENT_TOKEN}",
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
@@ -122,7 +124,7 @@ assert_no_secret_leak() {
   for file in "$@"; do
     [ -f "$file" ] || continue
     for token in \
-      "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" \
+      "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" "$TOKEN_NOTIFIER" \
       "$TOKEN_JWT" "$TOKEN_CENT_TOKEN" "$TOKEN_CENT_API" "$TOKEN_CENT_PROXY" \
       "$TOKEN_PLINK" "$TOKEN_OWNER"
     do
@@ -475,6 +477,7 @@ CREATE TABLE schema_migrations (
 CREATE ROLE momo_app;
 CREATE ROLE momo_relay;
 CREATE ROLE momo_worker;
+CREATE ROLE momo_notifier;
 SQL
 
 T2_ENV="$SANDBOX/t2.env"
@@ -538,6 +541,7 @@ docker exec -i "$PG_CID" psql -U momo -d momo -v ON_ERROR_STOP=1 <<'SQL'
 DROP ROLE IF EXISTS momo_app;
 DROP ROLE IF EXISTS momo_relay;
 DROP ROLE IF EXISTS momo_worker;
+DROP ROLE IF EXISTS momo_notifier;
 SQL
 T2_NOROLE_OUT="$SANDBOX/t2-norole.out"
 T2_NOROLE_ERR="$SANDBOX/t2-norole.err"

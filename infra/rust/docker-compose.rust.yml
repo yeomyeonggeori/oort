@@ -165,6 +165,7 @@ services:
       MOMO_APP_POSTGRES_PASSWORD: ${MOMO_APP_POSTGRES_PASSWORD:?set MOMO_APP_POSTGRES_PASSWORD}
       RELAY_POSTGRES_PASSWORD: ${RELAY_POSTGRES_PASSWORD:?set RELAY_POSTGRES_PASSWORD}
       WORKER_POSTGRES_PASSWORD: ${WORKER_POSTGRES_PASSWORD:?set WORKER_POSTGRES_PASSWORD}
+      NOTIFIER_POSTGRES_PASSWORD: ${NOTIFIER_POSTGRES_PASSWORD:?set NOTIFIER_POSTGRES_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -204,6 +205,12 @@ services:
       # ADR-0166 opt-in. 1 = claim-pending owner + one-time /claim/<token> print.
       # Mutually exclusive with MOMO_INITIAL_OWNER_PASSWORD.
       MOMO_BOOTSTRAP_CLAIM: ${MOMO_BOOTSTRAP_CLAIM:-}
+      # Post-migrate re-apply of bootstrap_runtime_roles.sql (#2193): table-scoped
+      # GRANTs for momo_notifier need relations that this service just created.
+      MOMO_APP_POSTGRES_PASSWORD: ${MOMO_APP_POSTGRES_PASSWORD:?set MOMO_APP_POSTGRES_PASSWORD}
+      RELAY_POSTGRES_PASSWORD: ${RELAY_POSTGRES_PASSWORD:?set RELAY_POSTGRES_PASSWORD}
+      WORKER_POSTGRES_PASSWORD: ${WORKER_POSTGRES_PASSWORD:?set WORKER_POSTGRES_PASSWORD}
+      NOTIFIER_POSTGRES_PASSWORD: ${NOTIFIER_POSTGRES_PASSWORD:?set NOTIFIER_POSTGRES_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy

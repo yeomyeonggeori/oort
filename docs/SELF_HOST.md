@@ -529,7 +529,7 @@ that list is empty, hosted delivery is closed: set
 are closed) and restart **api** and **webhook-sender**. New env from
 `scripts/self_host_env.sh` already writes that line; existing env is not
 backfilled. `--platform railway` (alias `--railway`) does not emit this
-key (the 41-key set is unchanged — putting it in the heredoc would make doctor require it on
+key (the 43-key canonical set is unchanged by this gate — putting it in the heredoc would make doctor require it on
 every existing install). To add the two gate lines, run the awk block in
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.17.2 — do not paste it
 here.
@@ -720,7 +720,7 @@ is refused ([two checkouts](#using-two-checkouts-at-once)).
 | Judge first whether the install is stuck | `scripts/oort doctor` (`--json` if you need it). Tools, env, and stack as one verdict. If the stack is not up yet those checks skip and only the env side is judged. |
 | Day-2: is this stack healthy, current, behind? | `scripts/oort status` (`--json` if you need it). Same exit codes as doctor, plus image digest vs `releases/latest.json`. |
 | Day-2: read service logs without leaking secrets | `scripts/oort logs` `[service] [--since 10m] [--follow]`. Env secret keys, Bearer tokens, and postgres URL passwords are `***`. |
-| Day-2: replace the image (Update / new digest) | `scripts/oort upgrade` (`--to <image ref pinned by its list digest, read from releases/latest.json>` or `--manifest URL` or `--local-build`). Backs up first, refuses missing env/volumes. Local-build rebuilds (`compose build`, not `pull`) then `up -d --wait`; digest mode still `pull` then `up -d`. Waits for `IDEMPOTENCY_OK`, then doctor PASS. On failure prints a rollback that is not the failed command (local-build: previous-commit checkout or `scripts/oort restore <dump>`); never auto-rolls back; never `down -v`. |
+| Day-2: replace the image (Update / new digest) | `scripts/oort upgrade` (`--to <image ref pinned by its list digest, read from releases/latest.json>` or `--manifest URL` or `--local-build`). Backs up first, refuses missing env/volumes. Before `compose build`/`pull` it backfills missing managed keys (`NOTIFIER_POSTGRES_PASSWORD`, `NOTIFIER_DATABASE_URL`) without rewriting existing values — a v0.1.5 (41-key) env upgrades without hand-edits. Local-build rebuilds (`compose build`, not `pull`) then `up -d --wait`; digest mode still `pull` then `up -d`. Waits for `IDEMPOTENCY_OK`, then doctor PASS. On failure prints a rollback that is not the failed command (local-build: previous-commit checkout or `scripts/oort restore <dump>`); never auto-rolls back; never `down -v`. |
 | Day-2: take or restore a dump | `scripts/oort backup` (`--out DIR`) and `scripts/oort restore <dump>`. Restore refuses a non-empty stack. If `momo_app`/`momo_relay`/`momo_worker` are absent it runs the stack's `runtime-roles` one-shot first, then `scripts/self_host_pg_restore.sh`. |
 | Day-2: invite a human or issue an agent bearer | `scripts/oort member invite` and `scripts/oort member credential --agent <handle>`. The invite code and agent token print once. |
 | Step 3 fails with `port is already allocated` | Something grabbed that port after step 2. `down`, change `MOMO_WEB_PORT` in `local.secrets.env`, `up` again. |
@@ -833,10 +833,10 @@ human approval points (sign-up, billing, DNS delegation, OAuth consent).
 
 Env derivation for every platform is **one generator flag reading one
 table** — `platform_profiles` in `scripts/self_host_env.sh`. The
-canonical key set (generator heredoc + `oort_public_edge_env_keys`, 41
-keys) never grows: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
+canonical key set (generator heredoc + `oort_public_edge_env_keys`, 43
+keys) never grows except by an explicit role/URL key: a T1 row adds `MOMO_SELF_HOST_PLATFORM=<name>` outside
 the heredoc, a T2 row prints the canonical set plus the same stamp
-outside the heredoc (42 on stdout; doctor `env.required_keys` stays 41).
+outside the heredoc (44 on stdout).
 
 | `--platform` | Tier | Public origin from | Postgres | Keys set by hand | Output |
 |---|---|---|---|---|---|

@@ -109,6 +109,7 @@ TOKEN_PG="$(openssl rand -hex 12)"
 TOKEN_APP="$(openssl rand -hex 12)"
 TOKEN_RELAY="$(openssl rand -hex 12)"
 TOKEN_WORKER="$(openssl rand -hex 12)"
+TOKEN_NOTIFIER="$(openssl rand -hex 12)"
 TOKEN_JWT="$(openssl rand -hex 12)"
 TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
@@ -127,6 +128,7 @@ repl = {
     "__TOKEN_APP__": "${TOKEN_APP}",
     "__TOKEN_RELAY__": "${TOKEN_RELAY}",
     "__TOKEN_WORKER__": "${TOKEN_WORKER}",
+    "__TOKEN_NOTIFIER__": "${TOKEN_NOTIFIER}",
     "__TOKEN_JWT__": "${TOKEN_JWT}",
     "__TOKEN_CENT_TOKEN__": "${TOKEN_CENT_TOKEN}",
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
@@ -300,5 +302,161 @@ if grep -Fq 'git checkout' "$ERR" "$OUT"; then
   fail "digest rollback must not switch to checkout: stderr=$(cat "$ERR")"
 fi
 pass "digest --to CLI pulls (no build) and prints --to previous"
+
+# -----------------------------------------------------------------------------
+# 4. #2193 N-1: pre-#2193 41-key env backfills to 43; compose config needs it
+# -----------------------------------------------------------------------------
+GENERATOR="$REPO_ROOT/scripts/self_host_env.sh"
+canonical_keys() {
+  {
+    awk '
+      /^cat >"\$ENV_FILE" <<EOF$/ { grab = 1; next }
+      grab && /^EOF$/ { exit }
+      grab && /^[A-Za-z_][A-Za-z0-9_]*=/ {
+        key = $0
+        sub(/=.*/, "", key)
+        print key
+      }
+    ' "$GENERATOR"
+    awk '
+      /^oort_public_edge_env_keys\(\) \{/,/^}/ {
+        while (match($0, /'\''OORT_[A-Z0-9_]+'\''/)) {
+          token = substr($0, RSTART + 1, RLENGTH - 2)
+          print token
+          $0 = substr($0, RSTART + RLENGTH)
+        }
+      }
+    ' "$GENERATOR"
+  } | LC_ALL=C sort -u
+}
+
+assignment_keys() {
+  awk -F= '/^[A-Za-z_][A-Za-z0-9_]*=/ { print $1 }' "$1" | LC_ALL=C sort -u
+}
+
+file_key_count() {
+  assignment_keys "$1" | grep -c .
+}
+
+canonical_keys >"$SANDBOX/canonical.keys"
+CANON_N="$(grep -c . "$SANDBOX/canonical.keys" | tr -d ' ')"
+[ "$CANON_N" = "43" ] || fail "canonical key set must stay 43, got $CANON_N"
+
+FRESH="$SANDBOX/fresh.env"
+set +e
+SELF_HOST_ENV_FILE="$FRESH" \
+  MOMO_WEB_PORT=18188 MOMO_RUST_API_PORT=18180 CENT_HOST_PORT=18100 \
+  "$GENERATOR" --local-build >"$SANDBOX/gen.out" 2>"$SANDBOX/gen.err"
+gen_rc=$?
+set -e
+[ "$gen_rc" = "0" ] || {
+  cat "$SANDBOX/gen.err" >&2
+  fail "generator --local-build failed rc=$gen_rc"
+}
+[ -f "$FRESH" ] || fail "generator did not write $FRESH"
+
+PRE="$SANDBOX/pre2193.env"
+awk '
+  $0 ~ /^NOTIFIER_POSTGRES_PASSWORD=/ { next }
+  $0 ~ /^NOTIFIER_DATABASE_URL=/ { next }
+  { print }
+' "$FRESH" >"$PRE"
+chmod 600 "$PRE"
+PRE_N="$(file_key_count "$PRE")"
+FRESH_N="$(file_key_count "$FRESH")"
+[ "$FRESH_N" = "43" ] || fail "fresh local-build env key count ${FRESH_N} != 43"
+[ "$PRE_N" = "41" ] || fail "pre-#2193 env key count ${PRE_N} != 41"
+
+compose_config() {
+  local envfile="$1" out="$2" err="$3"
+  set +e
+  docker compose \
+    --project-directory "$REPO_ROOT" \
+    --env-file "$envfile" \
+    -f "$REPO_ROOT/infra/rust/docker-compose.rust.yml" \
+    -f "$REPO_ROOT/infra/rust/docker-compose.rust.build.yml" \
+    -f "$REPO_ROOT/infra/rust/local.override.yml" \
+    config >"$out" 2>"$err"
+  echo $?
+  set -e
+}
+
+if command -v docker >/dev/null 2>&1; then
+  PRE_CFG_OUT="$SANDBOX/pre.config.out"
+  PRE_CFG_ERR="$SANDBOX/pre.config.err"
+  pre_cfg_rc="$(compose_config "$PRE" "$PRE_CFG_OUT" "$PRE_CFG_ERR")"
+  [ "$pre_cfg_rc" != "0" ] || fail "41-key env compose config unexpectedly succeeded"
+  grep -Eq 'NOTIFIER_POSTGRES_PASSWORD' "$PRE_CFG_ERR" "$PRE_CFG_OUT" || \
+    fail "41-key compose config did not name NOTIFIER_POSTGRES_PASSWORD: $(cat "$PRE_CFG_ERR")"
+  pass "sabotage: 41-key env without backfill → compose config RED (NOTIFIER_POSTGRES_PASSWORD)"
+else
+  echo "[oort-upgrade-localbuild-test] docker CLI missing — compose config proof skipped"
+fi
+
+BACKFILL_ERR="$SANDBOX/backfill.err"
+set +e
+SELF_HOST_ENV_FILE="$PRE" "$GENERATOR" --ensure-managed-keys \
+  >"$SANDBOX/backfill.out" 2>"$BACKFILL_ERR"
+backfill_rc=$?
+set -e
+[ "$backfill_rc" = "0" ] || {
+  cat "$BACKFILL_ERR" >&2
+  fail "--ensure-managed-keys failed rc=$backfill_rc"
+}
+grep -Fq '[self-host] env 보강: 2키 추가(NOTIFIER_POSTGRES_PASSWORD NOTIFIER_DATABASE_URL)' \
+  "$BACKFILL_ERR" || \
+  fail "backfill stderr missing exact 보강 line: $(cat "$BACKFILL_ERR")"
+POST_N="$(file_key_count "$PRE")"
+[ "$POST_N" = "43" ] || fail "after backfill key count ${POST_N} != 43"
+grep -E '^NOTIFIER_POSTGRES_PASSWORD=' "$PRE" >/dev/null || fail "missing NOTIFIER_POSTGRES_PASSWORD"
+grep -E '^NOTIFIER_DATABASE_URL=postgres://momo_notifier:' "$PRE" >/dev/null || \
+  fail "missing NOTIFIER_DATABASE_URL"
+
+BEFORE_CKSUM="$(cksum "$PRE")"
+SELF_HOST_ENV_FILE="$PRE" "$GENERATOR" --ensure-managed-keys \
+  >"$SANDBOX/backfill2.out" 2>"$SANDBOX/backfill2.err"
+[ "$(cksum "$PRE")" = "$BEFORE_CKSUM" ] || fail "second backfill rewrote existing values"
+if grep -Fq 'env 보강:' "$SANDBOX/backfill2.err"; then
+  fail "second backfill still printed 보강 (should be a no-op)"
+fi
+pass "41-key env → 43 keys; existing values not rewritten"
+
+if command -v docker >/dev/null 2>&1; then
+  POST_CFG_OUT="$SANDBOX/post.config.out"
+  POST_CFG_ERR="$SANDBOX/post.config.err"
+  post_cfg_rc="$(compose_config "$PRE" "$POST_CFG_OUT" "$POST_CFG_ERR")"
+  [ "$post_cfg_rc" = "0" ] || {
+    cat "$POST_CFG_ERR" >&2
+    fail "43-key env compose config failed"
+  }
+  pass "43-key env compose config OK"
+fi
+
+# Sabotage: remove the upgrade backfill call → this grep RED.
+python3 - "$REPO_ROOT/scripts/lib/oort_day2.sh" <<'PY'
+import pathlib, sys
+text = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
+start = text.find("oort_upgrade()")
+if start < 0:
+    raise SystemExit("oort_upgrade() missing")
+# Next top-level def after oort_upgrade.
+rest = text[start:]
+# Take until a later function at column 0 that is not nested.
+lines = rest.splitlines()
+body = []
+for i, line in enumerate(lines):
+    body.append(line)
+    if i > 0 and line.startswith("oort_") and line.endswith("() {"):
+        body.pop()
+        break
+src = "\n".join(body)
+if "oort_ensure_managed_env_keys" not in src:
+    raise SystemExit("oort_upgrade missing oort_ensure_managed_env_keys")
+ensure_at = src.find("oort_ensure_managed_env_keys")
+refresh_at = src.find("oort_upgrade_refresh")
+if refresh_at < 0 or ensure_at < 0 or ensure_at > refresh_at:
+    raise SystemExit("oort_ensure_managed_env_keys must run before oort_upgrade_refresh")
+PY
+pass "oort_upgrade calls oort_ensure_managed_env_keys before compose refresh"
 
 echo "[oort-upgrade-localbuild-test] PASS: $CASES case(s)"
