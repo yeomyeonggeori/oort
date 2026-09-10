@@ -1,0 +1,43 @@
+# Host image for the Fly.io T1 recipe (SH-11b).
+# Debian + the same tool set as docs/SELF_HOST_AGENT.md §1 Local:
+# docker-ce, Compose v2, git, jq, openssl, curl.
+#
+# The oort app image is NOT baked in. entrypoint.sh reads
+# releases/latest.json from the volume checkout and passes that
+# digest to scripts/self_host_env.sh --published-image.
+
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates \
+      curl \
+      gnupg \
+      git \
+      jq \
+      openssl \
+      iptables \
+      iproute2 \
+      fuse-overlayfs \
+      kmod \
+      procps \
+ && install -m 0755 -d /etc/apt/keyrings \
+ && curl -fsSL https://download.docker.com/linux/debian/gpg \
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+ && chmod a+r /etc/apt/keyrings/docker.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian bookworm stable" \
+      > /etc/apt/sources.list.d/docker.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends \
+      docker-ce \
+      docker-ce-cli \
+      containerd.io \
+      docker-compose-plugin \
+ && rm -rf /var/lib/apt/lists/*
+
+COPY entrypoint.sh /usr/local/bin/oort-fly-entrypoint
+RUN chmod 0755 /usr/local/bin/oort-fly-entrypoint
+
+ENTRYPOINT ["/usr/local/bin/oort-fly-entrypoint"]
