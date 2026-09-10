@@ -807,8 +807,13 @@ An unknown name is refused. A T2 row refuses an image mode, `--compose`,
 image mode, or maintained alone with `--public-origin`; a different stamp
 already in the file is refused (drop the volume and the env to switch).
 Local, VPS and the Grok Bot VM have no row — they are the compose canon.
-Cloudflare has no row either: it is a T3 edge in front of one of these
-(recipe SH-11d).
+Cloudflare has no `--platform` row: it is T3 edge, never compute
+(ADR-0184 D1). Do not put api, Postgres, or Centrifugo on Workers, Pages,
+or Containers. After a T1 or T2 install already has doctor PASS, attach
+DNS or a named tunnel in front of it — recipe
+[`infra/cloudflare/README.md`](../infra/cloudflare/README.md) (SH-11d,
+agent path [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.8). If the user
+says “on Cloudflare”, pick a compute tier first.
 
 ### AWS Lightsail / EC2
 
