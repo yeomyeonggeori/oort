@@ -19,6 +19,7 @@ import {
 } from "@momo/core/features/settings/model";
 import { inviteIssueErrorCopy } from "./inviteIssueError";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
+import { INVITE_CREATE_LABEL } from "./inviteLabels";
 import { IssuedInviteCard } from "./IssuedInviteCard";
 import {
   ChoiceRadios,
@@ -268,7 +269,7 @@ export function InviteSection({
             className={cn(offline && "opacity-50")}
             data-testid="invite-create"
           >
-            {create.isPending ? "만드는 중" : "초대 링크 만들기"}
+            {create.isPending ? "만드는 중" : INVITE_CREATE_LABEL}
           </Button>
           {/* 잠긴 컨트롤은 사유를 든다 (#1542 · design-review #1557 M). 회색이
               혼자 서면 「당신에게는 권한이 없다」로 읽히는데, 이 사람은 발급할 수
