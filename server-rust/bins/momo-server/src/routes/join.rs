@@ -124,6 +124,7 @@ pub async fn join(
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
     let gateway_enabled = state.agent_gateway.enabled();
+    let hosted_delivery_enabled = state.agent_port.config.hosted_delivery_enabled;
 
     // -- 2. which tenant? --------------------------------------------------
     // The locked definer lookup, on a connection with NO tenant GUC — there is
@@ -186,6 +187,8 @@ pub async fn join(
                         workspace_id,
                         outcome.member.id,
                         gateway_enabled,
+                        hosted_delivery_enabled,
+                        None,
                     )
                     .await?;
                 }
