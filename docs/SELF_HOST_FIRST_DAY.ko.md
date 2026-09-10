@@ -58,67 +58,49 @@ Rust·Node·`psql`은 설치하지 않는다. 서버·웹이 한 이미지 안�
 
 이 문서의 첫 경로는 claim이다. S1/S2는 `/claim/<token>` 뒤에만 열린다 —
 [`SELF_HOST.md`](SELF_HOST.md) 의 env-비밀번호 ConnectPage는 그 둘을
-**열지 않는다**(§2). 생성기는 항상 `MOMO_INITIAL_OWNER_PASSWORD` 를
-쓴다. `up` **전에** claim으로 바꾼다. claim과 비밀번호 키는 상호
-배타다(ADR-0166).
+**열지 않는다**(§2). `--claim` 을 넘기면 생성기는
+`MOMO_BOOTSTRAP_CLAIM=1` 을 쓰고 `MOMO_INITIAL_OWNER_PASSWORD` 는 **쓰지
+않는다**. claim과 비밀번호 키는 상호 배타다(ADR-0166). 비밀번호 env를
+손으로 바꾸지 마라.
 
 ### claim 모드 설치
 
 ```sh
 git clone https://github.com/yeomyeonggeori/oort.git oort
 cd oort
-scripts/self_host_env.sh --local-build
+scripts/self_host_env.sh --local-build --claim
 ```
 
 이 머신의 로컬 mock 게이트웨이를 쓰려면 `--allow-local-provider` 를
 덧붙인다(또는 기존 env에 같은 모드로 그 플래그를 다시 실행). 절차: §6 ·
 §7 과 [`SELF_HOST.md`](SELF_HOST.md) §5.
 
-[`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3 과 같은 awk — 비밀번호
-키를 지우고 `MOMO_BOOTSTRAP_CLAIM=1` 을 쓴다. env를 stdout에
-cat/grep 하지 않는다.
+`--claim` 은 1급이다: `--local-build`, `--published-image`,
+`--platform <name>`, `--railway`, `--public-origin`,
+`--allow-local-provider`, `--host-network` 과 조합한다. env를 stdout에
+cat/grep 하지 않는다. 비밀번호 env에 `--claim` 을 다시 돌리면 거절한다
+(조용히 바꾸지 않는다).
 
 ```sh
-ENV_FILE=infra/rust/local.secrets.env
-umask 077
-tmp="${ENV_FILE}.claim"
-awk '
-  index($0, "MOMO_INITIAL_OWNER_PASSWORD=") == 1 { next }
-  index($0, "MOMO_BOOTSTRAP_CLAIM=") == 1 { next }
-  { print }
-  END { print "MOMO_BOOTSTRAP_CLAIM=1" }
-' "$ENV_FILE" >"$tmp"
-mv "$tmp" "$ENV_FILE"
-chmod 600 "$ENV_FILE"
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-`--compose` 는 이 env를 거절한다: launcher가 비밀번호 키를 계속
-요구한다(ADR-0166). 여기에 `scripts/self_host_env.sh --compose up …` 를
-붙이지 않는다. 로컬 빌드 기동은 `--compose` 가 썼을 같은 파일 집합을
-직접 호출한다(AGENT §3.3.3 + `docker-compose.rust.build.yml`):
+`--compose` 는 claim env를 기동한다. **두 키가 함께 있을 때만**
+거절한다(ADR-0166). 같은 머신에 이미 다른 클론의 셀프호스트 스택이 떠
+있으면 이 `up` 은 거절된다. 두 체크아웃 규칙:
+[`SELF_HOST.md`](SELF_HOST.md) 「두 체크아웃을 같이 쓸 때」.
 
-```sh
-ENV_FILE=infra/rust/local.secrets.env
-docker compose --env-file "$ENV_FILE" \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-  up -d --build --wait
-```
-
-같은 머신에 이미 다른 클론의 셀프호스트 스택이 떠 있으면 이 `up` 은 거절된다.
-두 체크아웃 규칙: [`SELF_HOST.md`](SELF_HOST.md) 「두 체크아웃을 같이 쓸 때」.
-
-공개 digest가 있으면 `--published-image` 경로를 쓴 뒤 같은 awk, 그다음
-AGENT §3.3.3 `oort_compose up -d --pull missing --wait`(빌드 오버레이
-없음). 심화: [`SELF_HOST.md`](SELF_HOST.md) §2 ·
+공개 digest가 있으면 `--published-image` 경로에 `--claim` 을 붙인 뒤
+`--compose up -d --pull missing --wait`(빌드 오버레이 없음). 심화:
+[`SELF_HOST.md`](SELF_HOST.md) §2 ·
 [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3.
 
-`--wait`가 끝나면 준비가 끝난 것이다. 첫 `up` 에서 migrate가 한 번
-찍는 `MOMO_CLAIM_PATH=/claim/<token>` 을 연다(재시작은
+`--wait`가 끝나면 준비가 끝난 것이다. launcher가 migrate 로그를 가리키는
+한 줄을 찍는다 (`scripts/self_host_env.sh --compose logs migrate | grep
+MOMO_CLAIM_PATH`). 첫 `up` 에서 migrate가 한 번 찍는
+`MOMO_CLAIM_PATH=/claim/<token>` 을 연다(재시작은
 `MOMO_BOOTSTRAP_CLAIM=skipped`). 토큰을 대화에 붙여 넣지 않는다
-(ADR-0004). 생성기의 비밀번호 로그인 안내는 여기 해당 없다 — 이 파일에
-비밀번호 키가 없다. 파일 권한 600, 커밋 대상 아님.
+(ADR-0004). 이 파일에 비밀번호 키가 없다. 파일 권한 600, 커밋 대상 아님.
 
 ### 키 둘
 
@@ -133,8 +115,8 @@ AGENT §3.3.3 `oort_compose up -d --pull missing --wait`(빌드 오버레이
 기존 env에는 그 줄이 없을 수 있다. 같은 모드로 `scripts/self_host_env.sh`를
 다시 실행하면 **그 줄만 덧붙인다** — 시크릿은 다시 만들지 않는다
 (`ensure_operator_allowlist`, `scripts/self_host_env.sh:300-318`). 덧붙인 뒤
-api는 설치와 같은 `docker compose --env-file` 파일 집합으로 `up -d`.
-`--compose` 는 claim env를 계속 거절한다(ADR-0166).
+api는 `--compose up -d` 로 재시작한다. `--claim` 없이 claim env를 다시
+돌리면 claim으로 남는다(비밀번호 키를 넣지 않는다).
 
 확인:
 
@@ -677,9 +659,8 @@ https:// 여야 합니다. http는 같은 기기(localhost)에서만 쓸 수
 | `NOTICE` | 워커가 실패를 채널에 고지했다. 키 없는 기본 측정값 |
 | `BLOCKED` | 에이전트 메시지가 나타나지 않았다 |
 
-채널에 실패 고지가 뜨면 §1 과 같은 `docker compose --env-file` 파일
-집합으로 `logs agent-worker`(claim env: `--compose` 거절, ADR-0166; 문서
-승계: [`SELF_HOST.md`](SELF_HOST.md) 「막히면」).
+채널에 실패 고지가 뜨면 `scripts/self_host_env.sh --compose logs
+agent-worker`(문서 승계: [`SELF_HOST.md`](SELF_HOST.md) 「막히면」).
 
 ---
 

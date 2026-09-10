@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 생성기 claim 1급 (#2438, 2026-09-11)
+
+- Track engine. `feat/2438-generator-claim` onto `origin/track/engine`. `scripts/self_host_env.sh --claim`이 비밀번호 키를 쓰지 않고 `MOMO_BOOTSTRAP_CLAIM=1`을 기록(키 집합 1:1 스왑, canonical 43 / T2 stdout 44). `--compose`는 claim env를 기동하고, 두 키 동시만 거절(ADR-0166). 기존 비밀번호 env에 `--claim`은 거절(조용히 변환 없음). 문서 awk 수술 은퇴.
+- runtime-unverified: 공개 이미지 실배포 Railway(--claim). 로컬 Colima `up`은 증거 란에 표기.
+
 ## momo_notifier 런타임 롤 (#2193, 2026-09-10)
 
 - Track engine. `fix/2193-notifier-role` onto `origin/track/engine`. `momo_notifier`(LOGIN NOSUPERUSER BYPASSRLS). GRANT는 push 드레인뿐 아니라 approval/control-window/T3 sweep가 만지는 테이블까지 SELECT/INSERT/UPDATE(DELETE·ALL 없음). 기존 env는 `oort upgrade`가 빠진 `NOTIFIER_*` 키만 보강. doctor는 DELETE/허용목록 밖 GRANT도 fail-closed.

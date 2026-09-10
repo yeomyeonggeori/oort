@@ -244,30 +244,23 @@ one-shot bootstrap probe of a truly empty DB, is present.
 
 ### Claim-mode bring-up
 
-`--compose` is the password-path launcher. If the env is claim
-(`MOMO_BOOTSTRAP_CLAIM=1` and no `MOMO_INITIAL_OWNER_PASSWORD` — the awk
-in [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.3, which
-[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md) §1 uses so S1/S2
-open), `--compose` **refuses**. ADR-0166: that launcher still requires
-the password key; claim and the password key are mutually exclusive. The
-generator says the same: 「이 env는 claim 모드다. --compose는 비밀번호
-키를 요구하므로 거절한다.」
-
-Local-build bring-up is the same file set `--compose` would have used,
-called directly:
+Pass `--claim` so the generator writes `MOMO_BOOTSTRAP_CLAIM=1` and does
+**not** write `MOMO_INITIAL_OWNER_PASSWORD`. ADR-0166: the two keys are
+mutually exclusive. `--compose` brings this env up; it refuses only when
+**both** keys are present. Re-running `--claim` on a password env is
+refused (never silently converted). After the first `up` the launcher
+prints one line pointing at migrate logs
+(`scripts/self_host_env.sh --compose logs migrate | grep MOMO_CLAIM_PATH`)
+— never the token (ADR-0004).
 
 ```sh
-ENV_FILE=infra/rust/local.secrets.env
-docker compose --env-file "$ENV_FILE" \
-  -f infra/rust/docker-compose.rust.yml \
-  -f infra/rust/docker-compose.rust.build.yml \
-  -f infra/rust/local.override.yml \
-  up -d --build --wait
+scripts/self_host_env.sh --local-build --claim
+scripts/self_host_env.sh --compose up -d --build --wait
 ```
 
-Digest-mode claim uses AGENT §3.3.3 `oort_compose up -d --pull missing
---wait` (no build overlay). The first-day GUI after claim is
-[`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
+Digest-mode claim is `--published-image … --claim` then
+`--compose up -d --pull missing --wait` (no build overlay). The first-day
+GUI after claim is [`SELF_HOST_FIRST_DAY.md`](SELF_HOST_FIRST_DAY.md).
 
 ## 4. Sign in
 
@@ -377,12 +370,10 @@ the mock. This checkout has no hermes binary; the stand-in is
    those two lines and restart api + agent-worker. Railway / public installs
    do not use this flag (`infra/railway/railway.json` is unchanged).
 
-3. Bring the stack up with the command that matches this env
-   ([§3](#3-bring-up)). Password env: the `--compose` line step 2 printed.
-   Claim env (`MOMO_BOOTSTRAP_CLAIM=1`, no password key): the local-build
-   `docker compose` form in §3 — `--compose` refuses (ADR-0166). Derive the
-   browser port the same way [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4
-   does:
+3. Bring the stack up with the `--compose` line step 2 printed
+   ([§3](#3-bring-up)). Claim env (`MOMO_BOOTSTRAP_CLAIM=1`, no password
+   key) uses the same launcher. Derive the browser port the same way
+   [`SELF_HOST_AGENT.md`](SELF_HOST_AGENT.md) §3.3.4 does:
 
    ```sh
    ENV_FILE=infra/rust/local.secrets.env
