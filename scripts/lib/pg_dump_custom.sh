@@ -14,6 +14,11 @@
 #
 # This file is sourced; callers already set -euo pipefail. Do not `exit` here.
 
+# Shared T2 completion sentence (restore + upgrade). One string, two call sites.
+momo_t2_done_condition_line() {
+  printf '완료 조건: scripts/oort doctor --tier t2 --json 의 summary.verdict=PASS\n'
+}
+
 momo_pg_client_bin() {
   local name="$1" p
   if command -v "$name" >/dev/null 2>&1; then
