@@ -1414,6 +1414,32 @@ if grep -q '^WORKER_DATABASE_URL=' "$t1_fly_env"; then
   exit 1
 fi
 
+# #2328 / #2373 L1: write_host_network_overlay counts anchored YAML keys
+# (`^[[:space:]]*network_mode: host$`). Deleting all 12 keys (comments
+# remain) must RED — unanchored grep counted the header and stayed green.
+hn_sab_fixture="$(make_fixture platform-host-network-sabotage)"
+grep -vE '^[[:space:]]*network_mode: host$' \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" \
+  >"$hn_sab_fixture/infra/rust/docker-compose.host-network.yml.stripped"
+mv "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml.stripped" \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml"
+# Comments that mention the string must still be there (the old hole).
+grep -Fq 'network_mode: host' "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" || {
+  echo "sabotage overlay lost the header comment that unanchored grep counted" >&2
+  exit 1
+}
+if grep -cE '^[[:space:]]*network_mode: host$' \
+  "$hn_sab_fixture/infra/rust/docker-compose.host-network.yml" >/dev/null; then
+  echo "sabotage failed to delete YAML network_mode keys" >&2
+  exit 1
+fi
+if run_generator "$hn_sab_fixture" "$hn_sab_fixture/output" 49850 \
+  --platform host-network --local-build; then
+  echo "host-network overlay with all YAML keys deleted unexpectedly succeeded" >&2
+  exit 1
+fi
+grep -Fq 'network_mode: host 가 없다' "$hn_sab_fixture/output"
+
 echo "self-host image mode contract: PASS"
 
 # Real docker proof is a separate script so local_gate profiles do not each

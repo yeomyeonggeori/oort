@@ -338,7 +338,11 @@ write_host_network_overlay() {
     fail "host-network overlay template 이 없다: $src"
   tmp="$(mktemp "${TMPDIR:-/tmp}/oort-host-network-overlay.XXXXXX")"
   cat "$src" >"$tmp"
-  count="$(grep -c 'network_mode: host' "$tmp" || true)"
+  # Anchored YAML key only (#2328 / #2373 L1). Unanchored grep -c
+  # 'network_mode: host' also counted header comments, so deleting all
+  # 12 keys still passed (≥1 from the prose). POSIX [[:space:]] is the
+  # portable form of \s.
+  count="$(grep -cE '^[[:space:]]*network_mode: host$' "$tmp" || true)"
   [ "$count" -ge 1 ] || {
     rm -f "$tmp"
     fail "host-network overlay 에 network_mode: host 가 없다."
