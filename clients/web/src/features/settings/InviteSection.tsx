@@ -17,6 +17,7 @@ import {
   inviteStatus,
   isOperatorDenied,
 } from "@momo/core/features/settings/model";
+import { inviteIssueErrorCopy } from "./inviteIssueError";
 import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { IssuedInviteCard } from "./IssuedInviteCard";
 import {
@@ -141,6 +142,7 @@ export function InviteSection({
   }
 
   const rows = invites.data;
+  const createError = create.isError ? inviteIssueErrorCopy(create.error) : null;
 
   return (
     <SectionShell title="멤버와 초대" lines={lines}>
@@ -240,9 +242,13 @@ export function InviteSection({
             {formError}
           </p>
         )}
-        {create.isError && (
-          <p className="text-meta text-danger" role="alert">
-            {errorMessage(create.error)}
+        {createError && (
+          <p
+            className="text-meta text-danger"
+            role="alert"
+            title={createError.detail}
+          >
+            {createError.message}
           </p>
         )}
 

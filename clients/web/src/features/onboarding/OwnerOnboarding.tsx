@@ -1,4 +1,7 @@
+import { useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type { LoginResponse } from "@momo/core/lib/api";
+import { fetchWorkspace } from "@momo/core/features/settings/api";
 import {
   Card,
   CardContent,
@@ -9,6 +12,7 @@ import {
   initialOwnerOnboardingStage,
   ownerOnboardingProgressLabel,
 } from "@/features/auth/onboardingFlow";
+import { workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import { InviteStage } from "./InviteStage";
 import { S2_TITLE } from "./s2Copy";
 
@@ -27,10 +31,20 @@ export function OwnerOnboarding({
 }) {
   const stage = initialOwnerOnboardingStage();
   const progress = ownerOnboardingProgressLabel(stage);
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  const workspace = useQuery({
+    queryKey: workspaceIdentityKey(session.member.workspaceId),
+    queryFn: () => fetchWorkspace(session.member.workspaceId),
+    retry: false,
+  });
+
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
 
   return (
     <div className="flex min-h-full items-center justify-center p-6">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-sm">
         <CardHeader>
           <div className="flex items-center justify-between gap-4">
             <h1 className="brand-lockup flex items-center gap-2 font-semibold leading-none tracking-tight">
@@ -45,12 +59,20 @@ export function OwnerOnboarding({
               {progress}
             </p>
           </div>
-          <h2 className="text-title text-ink">{S2_TITLE}</h2>
+          <h2
+            ref={headingRef}
+            tabIndex={-1}
+            className="text-title font-semibold text-ink focus-visible:focus-ring"
+            data-testid="onboarding-s2-title"
+          >
+            {S2_TITLE}
+          </h2>
         </CardHeader>
         <CardContent>
           {stage === "invite" && (
             <InviteStage
               workspaceId={session.member.workspaceId}
+              workspaceName={workspace.data?.name ?? "oort"}
               onSkip={onFinished}
               onContinue={onFinished}
             />

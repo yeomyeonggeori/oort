@@ -186,9 +186,14 @@ describe("claim → first-run 사다리 (#2301)", () => {
         document.querySelector('[data-testid="onboarding-s2"]')
       ).not.toBeNull();
     });
-    // S2 는 first-run 앞에 선다. skip 전까지 마커 0, 세션도 아직 넘기지 않는다.
+    // Markers are written at claim success, before S2 (ConnectPage S3 order).
+    // onLoggedIn still waits for skip/continue so the first-run gate opens then.
     expect(onLoggedIn).not.toHaveBeenCalled();
-    expect(peekFreshSignup()).toBeNull();
+    expect(peekFreshSignup()).toEqual({
+      workspaceId: session.member.workspaceId,
+      memberId: session.member.id,
+    });
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("invite");
     expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
 
     click("onboarding-s2-skip");
@@ -197,6 +202,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
     });
     expect(onLoggedIn).toHaveBeenCalledWith(session);
     expect(window.location.pathname).toBe("/");
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
 
     // 마커는 세션을 넘기기 전에 다 찍혀 있다 — App 이 첫 렌더에서 "app" 을 보지 않게.
     expect(surfacesAtHandoff).toEqual(["kickoff-hold"]);
@@ -234,6 +240,7 @@ describe("claim → first-run 사다리 (#2301)", () => {
     expect(peekFreshSignup()).toBeNull();
     expect(firstAgentIsPending(session.member.workspaceId)).toBe(false);
     expect(phoneLinkFirstRunIsPending()).toBe(false);
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBeNull();
     expect(decide()).toBe("app");
   });
 });

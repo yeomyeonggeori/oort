@@ -20,10 +20,12 @@ export function IssuedInviteCard({
   issued,
   workspaceName,
   issuedRef,
+  copyMode = "full",
 }: {
   issued: CreatedInvite;
   workspaceName: string;
   issuedRef: RefObject<HTMLDivElement>;
+  copyMode?: "full" | "single";
 }) {
   const serverBaseUrl = resolveServerBaseUrl();
   const card: InviteCardInput = {
@@ -66,19 +68,29 @@ export function IssuedInviteCard({
       />
 
       <div className="flex flex-wrap items-center gap-2">
-        <CopyButton
-          value={joinLink}
-          label="딥링크 복사"
-          testId="invite-copy-link"
-        />
-        <CopyButton
-          value={inviteCardText(card)}
-          label="초대 카드 복사"
-          testId="invite-copy-card"
-        />
-        <Button asChild variant="outline" size="sm">
-          <a href={buildInviteMailto(card)}>메일 초안 열기</a>
-        </Button>
+        {copyMode === "single" ? (
+          <CopyButton
+            value={inviteCardText(card)}
+            label="링크 복사"
+            testId="invite-copy-card"
+          />
+        ) : (
+          <>
+            <CopyButton
+              value={joinLink}
+              label="딥링크 복사"
+              testId="invite-copy-link"
+            />
+            <CopyButton
+              value={inviteCardText(card)}
+              label="초대 카드 복사"
+              testId="invite-copy-card"
+            />
+            <Button asChild variant="outline" size="sm">
+              <a href={buildInviteMailto(card)}>메일 초안 열기</a>
+            </Button>
+          </>
+        )}
       </div>
 
       <p className="text-meta text-ink-muted">

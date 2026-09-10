@@ -14,6 +14,10 @@ import { InlineBanner } from "@/features/common/States";
 import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
+import {
+  clearOwnerOnboardingPending,
+  markOwnerOnboardingPending,
+} from "@/features/onboarding/ownerOnboardingStore";
 import { readClaimToken } from "./claimPath";
 import {
   holdSessionRestore,
@@ -86,13 +90,16 @@ export function ClaimPage({
     setFailure(null);
     setBusy(true);
     try {
-      const session = await claimOwnerPassword(token, password);
-      // applyLogin already persisted. Hold restore so App does not unmount
-      // this page into `restoring` while S2 is still on screen (ConnectPage
-      // S3 hold, same reason).
+      // applyLogin fires inside claimOwnerPassword. Hold restore BEFORE the
+      // await so App does not unmount this page into `restoring` (ConnectPage
+      // join → S3, same order).
       holdSessionRestore();
+      const session = await claimOwnerPassword(token, password);
+      recordFreshSignupFirstRun(session);
+      markOwnerOnboardingPending();
       setClaimed(session);
     } catch (err) {
+      releaseSessionRestore();
       setFailure(claimFailureCopy(err));
     } finally {
       setBusy(false);
@@ -106,8 +113,9 @@ export function ClaimPage({
 
   function finishOwnerOnboarding(session: LoginResponse) {
     window.history.replaceState(null, "", "/");
-    // S2 완료/skip 뒤에 first-run 게이트가 연다. 순서는 SH-12a 그대로.
-    recordFreshSignupFirstRun(session);
+    // Markers were written at claim success. onLoggedIn still opens the
+    // first-run gate; clear S2 pending so App does not remount this stage.
+    clearOwnerOnboardingPending();
     onLoggedIn(session);
     releaseSessionRestore();
   }
