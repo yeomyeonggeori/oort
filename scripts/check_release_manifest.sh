@@ -5,8 +5,8 @@
 # 2. docs/SELF_HOST*.md and README.md contain zero `@sha256:` literals
 # 3. manifest version matches the newest Keep-a-Changelog version heading
 #
-# This script is not wired into scripts/local_gate.sh (policy file). The
-# orchestrator lands that separately.
+# Wired into `scripts/local_gate.sh --profile docs` as the live step
+# "release manifest drift (#1984)" (no-arg → committed releases/latest.json).
 set -euo pipefail
 
 ROOT=""

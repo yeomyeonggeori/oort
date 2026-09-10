@@ -85,6 +85,29 @@ GATED_DOCS = [
         "그록봇 셀프호스트 플레이북(#1652). 스스로 '이 문서가 제품이다'고 "
         "선언하고 curl/docker 명령을 그대로 실행한다.",
     ),
+    (
+        "docs/SELF_HOST_AGENT.ko.md",
+        "그록봇 셀프호스트 플레이북 한국어 거울(#2104/#2124). 명령 블록은 "
+        "docs/SELF_HOST_AGENT.md 와 같다.",
+    ),
+    (
+        "docs/SELF_HOST.md",
+        "셀프호스트 사람용 정본(#2105/#2124). 생성기·compose·oort day-2 명령을 "
+        "그대로 실행한다.",
+    ),
+    (
+        "docs/SELF_HOST.ko.md",
+        "SELF_HOST.md 한국어 거울(#2124). 명령 블록은 영문 정본과 같다.",
+    ),
+    (
+        "docs/SELF_HOST_FIRST_DAY.md",
+        "셀프호스트 첫날 사람용 정본(#2105/#2124). claim→S1→S2 경로의 명령을 "
+        "그대로 실행한다.",
+    ),
+    (
+        "docs/SELF_HOST_FIRST_DAY.ko.md",
+        "SELF_HOST_FIRST_DAY.md 한국어 거울(#2124). 명령 블록은 영문 정본과 같다.",
+    ),
 ]
 
 # Every runbook is gated by construction: a runbook is by definition a document
