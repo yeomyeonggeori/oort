@@ -170,11 +170,18 @@ expect_red "untabled env template" "infra/rust/orphan.env.example"
 pass "an env template no rendering uses is red"
 
 tree="$(new_tree missing-allowlisted)"
-# Empty NON_COMPOSE_ENV_TEMPLATES (#2142). Forge a stale exemption in a copy of
-# the guard so the "exemption cannot outlive its file" contract still has a RED.
+# Forge a stale extra exemption in a copy of the guard so the exemption
+# cannot outlive its file. The live table is path|reason (#2328); a gone
+# path is still red.
 guard_copy="$tree/check_compose_env_templates.sh"
-sed 's/^NON_COMPOSE_ENV_TEMPLATES=()$/NON_COMPOSE_ENV_TEMPLATES=("infra\/rust\/gone.env.example")/' \
-  "$GUARD" >"$guard_copy"
+awk '
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ {
+    print
+    print "  \"infra/rust/gone.env.example|stale exemption for the regression harness\","
+    next
+  }
+  { print }
+' "$GUARD" >"$guard_copy"
 chmod +x "$guard_copy"
 set +e
 GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
@@ -182,6 +189,43 @@ GUARD_STATUS=$?
 set -e
 expect_red "stale allowlist" "gone.env.example"
 pass "an allowlisted non-compose template that disappears is red, so the exemption cannot outlive its file"
+
+# #2328: dropping infra/.env.example from the exception table (and not
+# adding a rendering row) is red — Coverage 2 now finds infra/*.env.example.
+tree="$(new_tree drop-root-env-example)"
+guard_copy="$tree/check_compose_env_templates.sh"
+awk '
+  BEGIN { skip = 0 }
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ { print "NON_COMPOSE_ENV_TEMPLATES=()"; skip = 1; next }
+  skip && /^\)/ { skip = 0; next }
+  skip { next }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "root env.example untabled" "infra/.env.example"
+pass "infra/.env.example without a table row or exemption is red"
+
+# A reason-less exemption is not an exemption (#1250 hatch).
+tree="$(new_tree exemption-no-reason)"
+guard_copy="$tree/check_compose_env_templates.sh"
+awk '
+  BEGIN { skip = 0 }
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ { print; print "  \"infra/.env.example\","; skip = 1; next }
+  skip && /^\)/ { print; skip = 0; next }
+  skip { next }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "exemption without reason" "has no reason"
+pass "NON_COMPOSE_ENV_TEMPLATES row without a reason is red"
 
 # =============================================================================
 # Case 7 — the guard must not invent requirements. Two false alarms it would be
@@ -243,5 +287,59 @@ case "$out" in
   *) fail "absent docker did not produce the documented message: $out" ;;
 esac
 pass "an absent docker compose fails the guard instead of silently reducing it"
+
+# =============================================================================
+# Case 10 — Coverage 3 inventories with git ls-files (#2328). gitignored
+# stray files (.DS_Store) must stay green; deleting a tracked listed file
+# is red; reverting the inventory to find makes .DS_Store red (the
+# git ls-files swap is load-bearing).
+# =============================================================================
+init_git_fixture() {
+  local dir="$1"
+  (
+    cd "$dir" || exit 1
+    git init -q
+    printf '%s\n' '.DS_Store' >.gitignore
+    git add -A
+    git -c user.email=compose-env-test@oort.invalid -c user.name=compose-env-test \
+      commit -q -m init
+  )
+}
+
+tree="$(new_tree coverage3-dsstore)"
+init_git_fixture "$tree"
+: >"$tree/infra/railway/.DS_Store"
+run_guard "$tree" --skip-docker
+[ "$GUARD_STATUS" -eq 0 ] || fail "gitignored .DS_Store turned Coverage 3 red
+$GUARD_OUT"
+pass "gitignored .DS_Store in a platform dir is green (git ls-files)"
+
+tree="$(new_tree coverage3-deleted-tracked)"
+init_git_fixture "$tree"
+rm -f "$tree/infra/railway/README.md"
+run_guard "$tree" --skip-docker
+expect_red "deleted tracked platform file" "infra/railway/README.md"
+pass "deleting a tracked listed platform file is red"
+
+tree="$(new_tree coverage3-find-sabotage)"
+init_git_fixture "$tree"
+: >"$tree/infra/railway/.DS_Store"
+guard_copy="$tree/check_compose_env_templates.sh"
+# Revert the inventory to find -type f. .DS_Store must then turn red,
+# proving git ls-files (not find) is what keeps the stray green.
+awk '
+  /ls-files --cached --others --exclude-standard/ {
+    print "    find \"$" "dir\" -type f"
+    next
+  }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "find inventory sees .DS_Store" "infra/railway/.DS_Store"
+pass "sabotage Coverage 3 inventory back to find → .DS_Store RED"
 
 echo "[compose-env-test] PASS: $CASES case(s)"

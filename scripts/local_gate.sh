@@ -891,8 +891,13 @@ add_web_commands() {
   add_cmd "web unit tests (vitest)" '(cd clients/web && npm run test)'
   add_cmd "web build (vite)" '(cd clients/web && npm run build)'
   add_cmd "web dependency license gate (canonical npm roots)" 'out="${LOCAL_GATE_OUTPUT_DIR:-${TMPDIR:-/tmp}/momo-local-gate}/web-licenses-${LOCAL_GATE_RUN_ID:-manual}.md"; NPM_LICENSE_REPORT="$out" node scripts/check_npm_licenses.mjs && echo "license inventory: $out"'
-  add_note_once coverage "#2142 web profile: clients/web npm ci --no-audit --no-fund, lint, typecheck, test, build. License gate uses check_npm_licenses.mjs default roots."
-  add_note_once not_covered "Generated-types, serving smoke, Chromium login smoke, and the Swift OpenAPI pass are retired."
+  # #2181/#2328: gate:csp-deploy needs caddy adapt (PATH caddy or docker).
+  # Absent tools print a visible skip line (silent skip forbidden, not RED).
+  # Present tools run the gate; failure is RED. RELEASING.md pre-publish
+  # does not skip — that checklist is mandatory before dispatch.
+  add_cmd "deploy CSP gate (gate:csp-deploy; optional docker/caddy)" "if ! command -v caddy >/dev/null 2>&1 && ! command -v docker >/dev/null 2>&1; then echo '[local-gate] optional-tool skip: gate:csp-deploy — docker and caddy not on PATH (#2181/#2328)'; exit 0; fi; npm --prefix clients/web run gate:csp-deploy"
+  add_note_once coverage "#2142 web profile: clients/web npm ci --no-audit --no-fund, lint, typecheck, test, build. License gate uses check_npm_licenses.mjs default roots. #2181/#2328 gate:csp-deploy is an optional-tool step (docker or caddy on PATH to run; both absent → visible skip line, not silent, not RED; present → run, failure RED)."
+  add_note_once not_covered "Generated-types, serving smoke, Chromium login smoke, and the Swift OpenAPI pass are retired. gate:csp-deploy is skipped (visible line) when neither docker nor caddy is on PATH — RELEASING.md pre-publish still requires it before dispatch."
 }
 
 add_license_commands() {

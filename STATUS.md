@@ -4,6 +4,10 @@
 
 - Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.
 - runtime-unverified: GUI 클릭 경로는 이 워크트리에서 브라우저를 누르지 않음(기존 FIRST_DAY 규율). S1 카피는 `feat/2332-onboarding-s1`에서 인용(아직 track/engine 미랜딩).
+## SH-11g/f 리뷰 잔여 (#2328, 2026-09-10)
+
+- Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
+- runtime-unverified: RELEASING dispatch 실주행의 gate:csp-deploy는 발행 창. T2 스탬프 실서비스 day-2는 SH-11a.
 
 ## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
 
@@ -160,7 +164,7 @@
 
 ## SH-5a Railway 템플릿 (#2205, 2026-09-08)
 
-- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --railway`가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
+- Track engine. `feat/sh5a-railway-template`. `infra/railway/` 카탈로그(같은 GHCR 이미지 command 분기 4 + Caddy 공개 엣지 + Centrifugo env + Postgres 플러그인, LiveKit 제외). `scripts/self_host_env.sh --platform railway`(별칭 `--railway`)가 생성기 heredoc+`oort_public_edge_env_keys` 키 집합을 Railway 변수로 stdout. `Caddyfile.railway`는 공개 Caddyfile의 내부 HTTP 분기(`http://{$OORT_SITE_ADDRESS}` + `http_port {$PORT}`, `auto_https off`+`:8080` 금지).
 - 검증: `scripts/tests/test_railway_template.sh` (키 집합 diff 0 · JWT_HMAC 사보타주 RED · `caddy adapt` · 403 순서 · 게이트 픽스처 PASS/RED) · `scripts/local_gate.sh --profile docs`.
 - runtime-unverified: `RAILWAY_TOKEN` 없음 — 실배포 `railway up` / 원격 `public.healthz`·`public.websocket`은 planner 수행.
 
