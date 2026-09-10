@@ -1,4 +1,5 @@
 //! ADR-0181 / #1960 — welcome kickoff server half (UX-R2s).
+//! ADR-0185 D-C (c2) / #2334 — first-agent-active owner kickoff.
 //!
 //! Red proofs (brief):
 //!   ① same member joins twice → exactly one opener run
@@ -9,6 +10,9 @@
 //!   ⑤ opener run has a `usage_ledger` row
 //!   ⑥ opener does not count toward the G2 consecutive auto-reply streak
 //!   ⑦ settings validation: inactive agent id → 400, 2001-char prompt → 400
+//!   ⑧ 0 agents → owner claim/seed → 0 jobs; hosted `active` → 1 job;
+//!      second hosted `active` → still 1 job
+//!   ⑨ native `POST …/agents` → 1 job; a second native create stays 1
 //!
 //! `#[ignore]` — needs a real Postgres. Gate PG is the 15432 convention:
 //!
@@ -30,7 +34,7 @@ use momo_db::sqlx;
 use momo_db::sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use momo_db::{with_tenant_tx, PgPool};
 use momo_messaging::agent_auto_reply_streak_in_tx;
-use momo_server::config::RateLimitConfig;
+use momo_server::config::{AgentPortConfig, RateLimitConfig};
 use momo_server::{build_app, AppState};
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -48,6 +52,8 @@ const JOIN_PASSWORD: &str = "welcome-kickoff-join-password";
 const AGENT_MODEL: &str = "hermes-agent";
 const PROVIDER_REQUIRED_BODY: &str = "설정 › AI 연결에서 연결하고 돌아오면 시작해요";
 const CONFIGURED_BEARER: &str = "sk-abcdefghijklmnopqrstuvwxyz012345";
+const MCP_PATH: &str = "/v1/mcp/agent-port";
+const MCP_VERSION: &str = "2026-07-28";
 
 fn database_url() -> String {
     std::env::var("DATABASE_URL").expect("set DATABASE_URL to a pgvector/pg18 superuser DB")
@@ -153,6 +159,15 @@ async fn start_server(pool: PgPool) -> String {
         per_ip_limit: 0,
         claim_per_ip_limit: 0,
         ..RateLimitConfig::default()
+    })
+    .with_agent_port(AgentPortConfig {
+        external_origin: None,
+        window_seconds: 60,
+        per_token_limit: 0,
+        per_agent_limit: 0,
+        per_ip_limit: 0,
+        hosted_delivery_enabled: true,
+        oauth: Default::default(),
     });
     let app = build_app(state);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -160,7 +175,11 @@ async fn start_server(pool: PgPool) -> String {
         .expect("bind momo-server");
     let address: SocketAddr = listener.local_addr().expect("server address");
     tokio::spawn(async move {
-        let _ = axum::serve(listener, app).await;
+        let _ = axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await;
     });
     format!("http://{address}")
 }
@@ -667,5 +686,260 @@ async fn proof_7_settings_reject_inactive_agent_and_overlong_prompt() {
     assert!(
         too_long_msg.contains("2000"),
         "error must name the 2000-character cap: {too_long_msg}"
+    );
+}
+
+async fn welcome_job_authors(su: &PgPool, workspace: Uuid) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT payload->>'author_member_id' FROM outbox \
+          WHERE workspace_id = $1 \
+            AND kind = 'agent_job' \
+            AND payload->>'created_from' = 'server.welcome.kickoff.v1' \
+          ORDER BY id",
+    )
+    .bind(workspace)
+    .fetch_all(su)
+    .await
+    .expect("welcome job authors")
+}
+
+fn mcp_tools_list_body() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "tools/list",
+        "params": {
+            "_meta": {
+                "io.modelcontextprotocol/protocolVersion": MCP_VERSION,
+                "io.modelcontextprotocol/clientCapabilities": {},
+                "io.modelcontextprotocol/clientInfo": {
+                    "name": "welcome-kickoff-conformance",
+                    "version": "1.0.0"
+                }
+            }
+        }
+    })
+}
+
+async fn agent_port_tools_list(http: &reqwest::Client, base: &str, bearer: &str) -> u16 {
+    let response = http
+        .post(format!("{base}{MCP_PATH}"))
+        .header("content-type", "application/json")
+        .header("accept", "application/json, text/event-stream")
+        .header("mcp-protocol-version", MCP_VERSION)
+        .header("mcp-method", "tools/list")
+        .bearer_auth(bearer)
+        .json(&mcp_tools_list_body())
+        .send()
+        .await
+        .expect("agent port tools/list");
+    response.status().as_u16()
+}
+
+async fn activate_hosted_connection(
+    http: &reqwest::Client,
+    base: &str,
+    token: &str,
+    workspace: Uuid,
+    channel: Uuid,
+    handle: &str,
+    display_name: &str,
+) -> Uuid {
+    let created = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/hosted-agent-connections"
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "displayName": display_name,
+            "handle": handle,
+            "authMode": "static_bearer",
+        }))
+        .send()
+        .await
+        .expect("hosted create");
+    let created_status = created.status().as_u16();
+    let created_body: Value = created.json().await.expect("hosted create body");
+    assert_eq!(
+        created_status, 201,
+        "hosted create must be 201: {created_body}"
+    );
+    let connection_id = created_body["connection"]["id"]
+        .as_str()
+        .expect("connection id");
+    let agent_member_id = created_body["connection"]["agentMemberId"]
+        .as_str()
+        .expect("agent member id")
+        .to_string();
+    let pairing = created_body["pairingCredential"]
+        .as_str()
+        .expect("pairing credential");
+
+    let detected = agent_port_tools_list(http, base, pairing).await;
+    assert_eq!(
+        detected, 200,
+        "pairing foundation request detects the agent"
+    );
+
+    let confirm = http
+        .post(format!(
+            "{base}/v1/workspaces/{workspace}/hosted-agent-connections/{connection_id}/confirm"
+        ))
+        .bearer_auth(token)
+        .json(&json!({
+            "agentMemberId": agent_member_id,
+            "audience": momo_auth::HOSTED_AGENT_PORT_AUDIENCE,
+            "approvedChannelIds": [channel.to_string()],
+            "approvedScopes": [
+                "agent:port:connect",
+                "agent:inbox:read",
+                "messages:read",
+                "messages:write",
+                "agent:jobs:read",
+                "agent:runs:callback"
+            ],
+            "authMode": "static_bearer",
+        }))
+        .send()
+        .await
+        .expect("hosted confirm");
+    let confirm_status = confirm.status().as_u16();
+    let confirm_body: Value = confirm.json().await.expect("hosted confirm body");
+    assert_eq!(
+        confirm_status, 201,
+        "hosted confirm must be 201: {confirm_body}"
+    );
+    let credential = confirm_body["credential"]
+        .as_str()
+        .expect("active credential");
+
+    let activated = agent_port_tools_list(http, base, credential).await;
+    assert_eq!(
+        activated, 200,
+        "foundation request activates the connection"
+    );
+    Uuid::parse_str(&agent_member_id).expect("agent member uuid")
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_8_hosted_active_enqueues_owner_once() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "host", false).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        0,
+        "zero agents must leave the kickoff ledger empty"
+    );
+
+    activate_hosted_connection(
+        &http,
+        &base,
+        &token,
+        fixture.workspace,
+        fixture.channel,
+        &format!("hosted-{}", &Uuid::new_v4().simple().to_string()[..8]),
+        "First Hosted",
+    )
+    .await;
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "first hosted active must enqueue the owner opener"
+    );
+    let authors = welcome_job_authors(&su, fixture.workspace).await;
+    assert_eq!(
+        authors,
+        vec![fixture.owner.to_string().to_uppercase()],
+        "target is the workspace owner: {authors:?}"
+    );
+
+    activate_hosted_connection(
+        &http,
+        &base,
+        &token,
+        fixture.workspace,
+        fixture.channel,
+        &format!("hosted-{}", &Uuid::new_v4().simple().to_string()[..8]),
+        "Second Hosted",
+    )
+    .await;
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "a second hosted active must not enqueue a second opener"
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn proof_9_native_create_enqueues_owner_once() {
+    let _guard = test_lock().await;
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    settle_residual_worker_jobs(&su).await;
+    let fixture = seed(&su, "natv", false).await;
+    let base = start_server(momo_app_pool().await).await;
+    let http = reqwest::Client::new();
+    let token = login(&http, &base, fixture.workspace, &fixture.owner_email).await;
+
+    assert_eq!(count_welcome_jobs(&su, fixture.workspace).await, 0);
+
+    let first = http
+        .post(format!("{base}/v1/workspaces/{}/agents", fixture.workspace))
+        .bearer_auth(&token)
+        .json(&json!({
+            "displayName": "hermes",
+            "handle": format!("hermes-{}", &Uuid::new_v4().simple().to_string()[..8]),
+            "model": AGENT_MODEL,
+            "baseUrl": "https://gateway.example.com/v1",
+        }))
+        .send()
+        .await
+        .expect("native create");
+    let first_status = first.status().as_u16();
+    let first_body: Value = first.json().await.expect("native create body");
+    assert_eq!(first_status, 201, "native create must be 201: {first_body}");
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "first native create must enqueue the owner opener"
+    );
+    let authors = welcome_job_authors(&su, fixture.workspace).await;
+    assert_eq!(
+        authors,
+        vec![fixture.owner.to_string().to_uppercase()],
+        "target is the workspace owner: {authors:?}"
+    );
+
+    let second = http
+        .post(format!("{base}/v1/workspaces/{}/agents", fixture.workspace))
+        .bearer_auth(&token)
+        .json(&json!({
+            "displayName": "hermes-two",
+            "handle": format!("hermes-{}", &Uuid::new_v4().simple().to_string()[..8]),
+            "model": AGENT_MODEL,
+            "baseUrl": "https://gateway.example.com/v1",
+        }))
+        .send()
+        .await
+        .expect("second native create");
+    let second_status = second.status().as_u16();
+    let second_body: Value = second.json().await.expect("second native create body");
+    assert_eq!(
+        second_status, 201,
+        "second native create must be 201: {second_body}"
+    );
+    assert_eq!(
+        count_welcome_jobs(&su, fixture.workspace).await,
+        1,
+        "a second native create must not enqueue a second opener"
     );
 }
