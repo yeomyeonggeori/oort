@@ -7,6 +7,17 @@
 - R3: 재발급 런치는 원문 이름(`member?.displayName ?? ""`). `OAUTH_CONSENT_AGENT_FALLBACK` 별칭 삭제. 사용량 라벨은 `HOSTED_AGENT_MISSING_NAME`.
 - 검증: `approvalConsequence` 빈/있는 이름 두 문장 · 위저드 4단계 렌더 · 사실 칸 `@handle` · 재개 행 폴백 · 사보타주(문장 폴백을 사실 칸에 / `??` 복구) RED.
 - runtime-unverified: 실스택 hosted 4단계 왕복은 mock·RTL 범위.
+## SH-11d Cloudflare T3 엣지 레시피 (#2386, 2026-09-10)
+
+- Track engine. `feat/2386-cloudflare-edge` onto `origin/track/engine`. T3 앞단만: `infra/cloudflare/`(README 첫 문단 = 「Cloudflare에 oort를 배포」는 없다 · `cloudflared.config.example.yml` 루프백 ingress + 마지막 `http_status:404` · `dns.example.md`). compose/Caddyfile 무수정. `wrangler` 미사용(Workers/Pages CLI).
+- `docs/SELF_HOST_AGENT.md`(+ko) §1 행 · §3.8 · §3.3.11 「상시 = named tunnel」상호 링크. `SELF_HOST.md`(+ko) Platforms 1문단. 정적 시험 `scripts/tests/test_cloudflare_recipe.sh` (사보타주 ①공개IP ingress ②404 제거 ③quick-tunnel ④`--public-origin` 생략 → 전부 RED).
+- runtime-unverified: 성재 Cloudflare 계정·앞단 T1(SH-11b/11c) 실측 E2E(모드 B 101/403/헤더 diff/재부팅 복귀, 모드 A DNS 1레코드). `--public-origin` 생략 시 doctor `public.*` skip은 레시피가 사용자 오류로 단정(doctor 본체 무수정).
+
+## SH-11b Fly.io T1 레시피 (#2379, 2026-09-10)
+
+- Track engine. `feat/sh11b-fly-recipe` onto `origin/track/engine`. ADR-0184 D1: Machine 1 + 볼륨 `/data`에서 정본 compose(`caddy.override.yml`+`Caddyfile`, TLS 패스스루). `infra/fly/`(fly.toml·Dockerfile.host·entrypoint.sh·README) + `scripts/tests/test_fly_recipe.sh`(사보타주 3건 RED). env는 `--platform fly --public-origin`을 볼륨에만.
+- 검증: 정적 계약(mounts·always-on·RAM≥2GiB·ports {80,443}·digest 리터럴 0·README 스크립트 실재·data-root `/data`). `local_gate.sh --profile docs`.
+- runtime-unverified: 소유자 `fly auth login` 실배포·doctor 27/27·재시작 보존(승인 지점 1–4 대기).
 
 ## SH-11c AWS Lightsail/EC2 T1 레시피 (#2377, 2026-09-10)
 
@@ -26,6 +37,7 @@
 - runtime-unverified: Railway one-off 실측은 SH-11a.
 
 >>>>>>> origin/track/uxui
+
 ## SH-12d-w no-active-agent hold (#2335, 2026-09-10)
 
 - Track UXUI. `fix/2335-no-active-agent-hold` onto `origin/track/uxui`. `decideWelcomeMount`에 `no-active-agent`: 클라 디렉터리 활성 에이전트 0명이면 kickoff-hold를 즉시 풀고 UX-R2c `FirstAgentStage`로 진입(120s 백스톱 0회). ≥1명이면 hold→오프너 불변. 새 API 없음. 순서 `kickoff → first-agent → phone-link` 불변.
