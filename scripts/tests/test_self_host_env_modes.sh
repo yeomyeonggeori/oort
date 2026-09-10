@@ -33,6 +33,8 @@ make_fixture() {
   cp "$ROOT/infra/rust/docker-compose.rust.yml" "$fixture/infra/rust/docker-compose.rust.yml"
   cp "$ROOT/infra/rust/docker-compose.rust.build.yml" "$fixture/infra/rust/docker-compose.rust.build.yml"
   cp "$ROOT/infra/rust/local.override.yml" "$fixture/infra/rust/local.override.yml"
+  cp "$ROOT/infra/rust/docker-compose.host-network.yml" "$fixture/infra/rust/docker-compose.host-network.yml"
+  cp "$ROOT/infra/rust/Caddyfile.host-network" "$fixture/infra/rust/Caddyfile.host-network"
 
   cat >"$fixture/fake-bin/docker" <<'EOF'
 #!/usr/bin/env sh
@@ -1293,6 +1295,58 @@ for name in aws-lightsail gcp-vm; do
   grep -Fxq "OORT_SITE_ADDRESS=$name.example.test" "$row_fixture/infra/rust/local.secrets.env"
   grep -Fxq 'MOMO_SELF_HOST_MODE=published-digest' "$row_fixture/infra/rust/local.secrets.env"
 done
+
+# ---------------------------------------------------------------------------
+# #2340 — host-network T1: loopback internal URLs + network_mode: host overlay.
+# Existing T1/T2 rows stay byte-identical (fly vs plain already diffed above;
+# railway alias already cmp'd; URL host for compose T1 stays `postgres`).
+# ---------------------------------------------------------------------------
+HOST_NETWORK_SERVICES=12
+hn_fixture="$(make_fixture platform-host-network)"
+run_generator "$hn_fixture" "$hn_fixture/output" 49830 \
+  --platform host-network --local-build
+hn_env="$hn_fixture/infra/rust/local.secrets.env"
+hn_overlay="$hn_fixture/infra/rust/docker-compose.host-network.yml"
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=host-network' "$hn_env"
+test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$hn_env")" = "1"
+grep -Fxq 'MOMO_SELF_HOST_MODE=local-build' "$hn_env"
+# Four internal URL keys (3 heredoc postgres URLs + WORKER outside heredoc).
+hn_url_count="$(grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" | grep -c '127\.0\.0\.1' || true)"
+test "$hn_url_count" -eq 4
+grep -E '^(MIGRATE_DATABASE_URL|MOMO_APP_DATABASE_URL|RELAY_DATABASE_URL|WORKER_DATABASE_URL)=' "$hn_env" \
+  | grep -q '@postgres' && {
+  echo "host-network env still has @postgres in an internal URL" >&2
+  exit 1
+}
+grep -E '^MIGRATE_DATABASE_URL=postgres://momo:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
+grep -E '^MOMO_APP_DATABASE_URL=postgres://momo_app:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
+grep -E '^RELAY_DATABASE_URL=postgres://momo_relay:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
+grep -E '^WORKER_DATABASE_URL=postgres://momo_worker:[^@]+@127\.0\.0\.1:5432/momo$' "$hn_env" >/dev/null
+# Overlay render: YAML key `network_mode: host` exactly once per service
+# (12: postgres centrifugo livekit runtime-roles migrate api relay
+# webhook-sender agent-worker drive-init web-init web). Header comments
+# that mention the string are not counted.
+test -f "$hn_overlay"
+hn_nm_count="$(grep -c '^    network_mode: host$' "$hn_overlay" || true)"
+test "$hn_nm_count" -eq "$HOST_NETWORK_SERVICES"
+grep -Fq 'scripts/self_host_env.sh --compose' "$hn_fixture/output"
+grep -Fq 'host-network: --compose' "$hn_fixture/output"
+# Optional --public-origin still works (Grok Bot adds Funnel later).
+hn_pub_fixture="$(make_fixture platform-host-network-origin)"
+run_generator "$hn_pub_fixture" "$hn_pub_fixture/output" 49840 \
+  --platform host-network --published-image "$GOOD_DIGEST" \
+  --public-origin https://hn.example.test
+grep -Fxq 'MOMO_SELF_HOST_PLATFORM=host-network' "$hn_pub_fixture/infra/rust/local.secrets.env"
+grep -Fxq 'OORT_SITE_ADDRESS=hn.example.test' "$hn_pub_fixture/infra/rust/local.secrets.env"
+grep -E '^MIGRATE_DATABASE_URL=.*@127\.0\.0\.1:5432/' "$hn_pub_fixture/infra/rust/local.secrets.env" >/dev/null
+# Regression: compose T1 rows still use the postgres service hostname.
+grep -E '^MIGRATE_DATABASE_URL=.*@postgres:5432/' "$t1_fly_env" >/dev/null
+grep -E '^MOMO_APP_DATABASE_URL=.*@postgres:5432/' "$t1_fly_env" >/dev/null
+grep -E '^RELAY_DATABASE_URL=.*@postgres:5432/' "$t1_fly_env" >/dev/null
+if grep -q '^WORKER_DATABASE_URL=' "$t1_fly_env"; then
+  echo "fly env unexpectedly grew WORKER_DATABASE_URL" >&2
+  exit 1
+fi
 
 echo "self-host image mode contract: PASS"
 

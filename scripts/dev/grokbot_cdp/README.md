@@ -37,6 +37,13 @@ package still prints SKIPPED when the port is closed.
 /opt/homebrew/bin/python3 scripts/dev/grokbot_cdp/clear.py
 ```
 
+## OS Return (planner/operator, this machine)
+
+OS Return fails when the Grok Bot window is on another Space. Bring the
+app forward with `open -a "Grok Bot"` before Return. This is a local
+harness note, not a user playbook step (`docs/SELF_HOST_AGENT.md` §3.3
+points here).
+
 ## App absent
 
 If nothing is listening on `127.0.0.1:9333`, every script prints exactly:
