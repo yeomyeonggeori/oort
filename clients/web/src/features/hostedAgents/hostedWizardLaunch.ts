@@ -15,6 +15,26 @@ export interface HostedWizardLaunch {
 }
 
 /**
+ * 재발급 런치는 입력이다. 렌더 라벨(`memberNameParts` / 없는-이름 문구)을
+ * 시드에 넣으면 위저드 `agentLabel` 이 그 문구를 고유명사로 쓴다 (H-R2-1).
+ * 빈 이름은 빈 문자열로 남긴다.
+ */
+export function regenerateLaunchFromMember(input: {
+  displayName?: string | null;
+  handle?: string | null;
+  connectionId: string;
+  presetId: HostedPresetId;
+}): HostedWizardLaunch {
+  return {
+    presetId: input.presetId,
+    displayName: input.displayName ?? "",
+    handle: input.handle ?? "",
+    connectionId: input.connectionId,
+    autoAdvance: "regenerate",
+  };
+}
+
+/**
  * 원클릭 자동 발급을 지금 쏠지, 기다릴지, 영구히 내릴지.
  *
  * 열림 시점에 온라인이어야 무장한다. 유예됐거나 시드와 다른 초안이면
