@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
+
+- Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).
+- runtime-unverified: Railway one-off 실측은 SH-11a.
+
 ## SH-11d Cloudflare T3 엣지 레시피 (#2386, 2026-09-10)
 
 - Track engine. `feat/2386-cloudflare-edge` onto `origin/track/engine`. T3 앞단만: `infra/cloudflare/`(README 첫 문단 = 「Cloudflare에 oort를 배포」는 없다 · `cloudflared.config.example.yml` 루프백 ingress + 마지막 `http_status:404` · `dns.example.md`). compose/Caddyfile 무수정. `wrangler` 미사용(Workers/Pages CLI).
