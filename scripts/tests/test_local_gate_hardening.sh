@@ -427,22 +427,88 @@ grep -Fq 'ruby  :' "$SPEC_SANDBOX/none.err" || fail "ruby 갈래 실격 사유�
 grep -Fq 'python:' "$SPEC_SANDBOX/none.err" || fail "python 갈래 실격 사유가 없다"
 echo "[local-gate-hardening-test] PASS spec->json 리더 부재 정직한 실패 (#1185)"
 
-# #1984 / #2124: docs-profile wiring locks. Removing these from local_gate.sh
-# is a coverage hole, not a quieter gate. Locks must match an uncommented
-# add_cmd_once line — a leading `#` is a coverage hole, not a keep (R2).
+# #1984 / #2124 / #2157 / #2456: docs-profile wiring locks.
+# Removing these from local_gate.sh is a coverage hole, not a quieter gate.
+# File-wide grep of '^[[:space:]]*add_cmd_once "…"' still PASSed two GREEN
+# holes (#2444 R2 Lock 5/6): the same uncommented line moved into
+# diagnostics), and an uncommented copy sitting inside a heredoc body.
+# Slice the docs arm (case "$PROFILE" in / docs) / ;;) and drop heredoc
+# bodies (<<'TAG' … TAG, matching local_gate.sh's usage()/nanos helpers).
 LOCAL_GATE="$REPO_ROOT/scripts/local_gate.sh"
-grep -Eq '^[[:space:]]*add_cmd_once "release manifest drift \(#1984\)"' \
-  "$LOCAL_GATE" \
+
+docs_arm_code() {
+  awk -v sq="'" '
+    BEGIN { in_case = 0; in_docs = 0; in_heredoc = 0; tag = "" }
+    function heredoc_tag(line,   n, rest, q, eq) {
+      n = index(line, "<<")
+      if (n == 0) return ""
+      rest = substr(line, n + 2)
+      if (substr(rest, 1, 1) == "-") rest = substr(rest, 2)
+      sub(/^[[:space:]]+/, "", rest)
+      if (rest == "") return ""
+      q = substr(rest, 1, 1)
+      if (q == sq || q == "\"") {
+        rest = substr(rest, 2)
+        eq = index(rest, q)
+        if (eq == 0) return ""
+        return substr(rest, 1, eq - 1)
+      }
+      if (match(rest, /^[A-Za-z_][A-Za-z0-9_]*/)) {
+        return substr(rest, RSTART, RLENGTH)
+      }
+      return ""
+    }
+    $0 ~ /^case "\$PROFILE" in$/ { in_case = 1; next }
+    in_case && !in_docs && $0 ~ /^[[:space:]]*docs\)/ { in_docs = 1; next }
+    in_docs {
+      if (in_heredoc) {
+        if ($0 == tag) { in_heredoc = 0; tag = "" }
+        next
+      }
+      if ($0 ~ /^[[:space:]]*;;[[:space:]]*$/) { exit }
+      t = heredoc_tag($0)
+      print
+      if (t != "") { in_heredoc = 1; tag = t }
+    }
+  ' "$1"
+}
+
+docs_arm_cmd_line() {
+  local title_re="$1"
+  local slice
+  slice="$(docs_arm_code "$LOCAL_GATE")"
+  printf '%s\n' "$slice" | grep -E '^[[:space:]]*add_cmd_once "'"${title_re}"'"' || true
+}
+
+docs_arm_has_cmd() {
+  local title_re="$1"
+  local extra="${2:-}"
+  local line
+  line="$(docs_arm_cmd_line "$title_re")"
+  [ -n "$line" ] || return 1
+  if [ -n "$extra" ]; then
+    printf '%s\n' "$line" | grep -Fq "$extra" || return 1
+  fi
+  return 0
+}
+
+docs_arm_has_cmd 'release manifest drift \(#1984\)' 'scripts/check_release_manifest.sh' \
   || fail "docs profile does not run scripts/check_release_manifest.sh (#1984)"
-grep -Eq '^[[:space:]]*add_cmd_once "release manifest contract"' \
-  "$LOCAL_GATE" \
+docs_arm_has_cmd 'release manifest contract' 'scripts/tests/test_release_manifest.sh' \
   || fail "docs profile dropped the release-manifest harness"
-grep -Eq '^[[:space:]]*add_cmd_once "self-host day-2 contract \(#2124\)"' \
-  "$LOCAL_GATE" \
+docs_arm_has_cmd 'self-host day-2 contract \(#2124\)' 'scripts/tests/test_oort_day2.sh' \
   || fail "docs profile dropped test_oort_day2.sh (#2124)"
-grep -Eq '^[[:space:]]*add_cmd_once "oort doctor contract \(#2124\)"' \
-  "$LOCAL_GATE" \
+docs_arm_has_cmd 'oort doctor contract \(#2124\)' 'scripts/tests/test_oort_doctor.sh' \
   || fail "docs profile dropped test_oort_doctor.sh (#2124)"
+docs_arm_has_cmd 'pgBackRest/PITR fail-closed contract \(#2157\)' \
+  'scripts/tests/test_pgbackrest_pitr_contract.sh' \
+  || fail "docs profile does not run test_pgbackrest_pitr_contract.sh (#2157)"
+pitr_cmd="$(docs_arm_cmd_line 'pgBackRest/PITR fail-closed contract \(#2157\)')"
+printf '%s\n' "$pitr_cmd" | grep -Eq 'bash[[:space:]]+-n' \
+  && fail "docs PITR step is bash -n only; #2157 requires a live run"
+
+# Static-block locks stay file-wide: these add_cmd_once lines live in
+# add_static_commands, not the docs) arm.
 grep -Eq '^[[:space:]]*add_cmd_once "oort dispatcher/day-2 bash -n \+ shellcheck \(#2124\)"' \
   "$LOCAL_GATE" \
   || fail "oort dispatcher/libs are not under bash -n + shellcheck in local_gate (#2124)"
@@ -461,8 +527,9 @@ for oort_sh in \
   scripts/lib/oort_common.sh \
   scripts/lib/oort_day2.sh \
   scripts/lib/oort_doctor.sh \
-  scripts/check_release_manifest.sh
+  scripts/check_release_manifest.sh \
+  scripts/tests/test_pgbackrest_pitr_contract.sh
 do
   grep -Fq "$oort_sh" "$LOCAL_GATE" || fail "$oort_sh missing from local_gate allowlist"
 done
-echo "[local-gate-hardening-test] PASS docs profile check_release_manifest live run + oort day-2 wiring (#1984 #2124)"
+echo "[local-gate-hardening-test] PASS docs-arm/heredoc locks + PITR live run wiring (#1984 #2124 #2157 #2456)"
