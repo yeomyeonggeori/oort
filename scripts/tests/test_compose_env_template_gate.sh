@@ -170,11 +170,18 @@ expect_red "untabled env template" "infra/rust/orphan.env.example"
 pass "an env template no rendering uses is red"
 
 tree="$(new_tree missing-allowlisted)"
-# Empty NON_COMPOSE_ENV_TEMPLATES (#2142). Forge a stale exemption in a copy of
-# the guard so the "exemption cannot outlive its file" contract still has a RED.
+# Forge a stale extra exemption in a copy of the guard so the exemption
+# cannot outlive its file. The live table is path|reason (#2328); a gone
+# path is still red.
 guard_copy="$tree/check_compose_env_templates.sh"
-sed 's/^NON_COMPOSE_ENV_TEMPLATES=()$/NON_COMPOSE_ENV_TEMPLATES=("infra\/rust\/gone.env.example")/' \
-  "$GUARD" >"$guard_copy"
+awk '
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ {
+    print
+    print "  \"infra/rust/gone.env.example|stale exemption for the regression harness\","
+    next
+  }
+  { print }
+' "$GUARD" >"$guard_copy"
 chmod +x "$guard_copy"
 set +e
 GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
@@ -182,6 +189,43 @@ GUARD_STATUS=$?
 set -e
 expect_red "stale allowlist" "gone.env.example"
 pass "an allowlisted non-compose template that disappears is red, so the exemption cannot outlive its file"
+
+# #2328: dropping infra/.env.example from the exception table (and not
+# adding a rendering row) is red — Coverage 2 now finds infra/*.env.example.
+tree="$(new_tree drop-root-env-example)"
+guard_copy="$tree/check_compose_env_templates.sh"
+awk '
+  BEGIN { skip = 0 }
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ { print "NON_COMPOSE_ENV_TEMPLATES=()"; skip = 1; next }
+  skip && /^\)/ { skip = 0; next }
+  skip { next }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "root env.example untabled" "infra/.env.example"
+pass "infra/.env.example without a table row or exemption is red"
+
+# A reason-less exemption is not an exemption (#1250 hatch).
+tree="$(new_tree exemption-no-reason)"
+guard_copy="$tree/check_compose_env_templates.sh"
+awk '
+  BEGIN { skip = 0 }
+  /^NON_COMPOSE_ENV_TEMPLATES=\($/ { print; print "  \"infra/.env.example\","; skip = 1; next }
+  skip && /^\)/ { print; skip = 0; next }
+  skip { next }
+  { print }
+' "$GUARD" >"$guard_copy"
+chmod +x "$guard_copy"
+set +e
+GUARD_OUT="$("$guard_copy" --root "$tree" --skip-docker 2>&1)"
+GUARD_STATUS=$?
+set -e
+expect_red "exemption without reason" "has no reason"
+pass "NON_COMPOSE_ENV_TEMPLATES row without a reason is red"
 
 # =============================================================================
 # Case 7 — the guard must not invent requirements. Two false alarms it would be

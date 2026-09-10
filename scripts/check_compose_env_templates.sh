@@ -90,9 +90,19 @@ RENDERINGS=(
   "rust + S3-compatible backup/PITR seam (docs/runbooks/pgbackrest-pitr.md)|infra/rust/rust-smoke.env.example infra/rust/backup.env.example infra/rust/pitr-bindings.env.example infra/rust/pgbackrest-s3.env.example|infra/rust/docker-compose.rust.yml infra/rust/docker-compose.backup.yml infra/rust/pgbackrest.s3.override.yml"
 )
 
-# Env templates under infra/rust that are NOT compose env files in this table.
-# Anything here is exempt from the table; everything else must be in it.
-NON_COMPOSE_ENV_TEMPLATES=()
+# Env templates that are NOT compose env files in this table. Anything here
+# is exempt from the table; everything else under infra/ (maxdepth 1) and
+# infra/rust/ (maxdepth 1) named *.env.example must be in a rendering row
+# or here. Rows are `path|reason` — a reason-less exemption is itself red
+# (the #1250 hatch: opting out costs a sentence).
+#
+# infra/.env.example is the Makefile ENV_FILE fallback
+# (`firstword .env.worktree .env infra/.env.example`) and the AGENTS.md
+# `cp infra/.env.example .env` path. It is not interpolated by any tabled
+# compose file — rust compose uses rust-smoke.env.example.
+NON_COMPOSE_ENV_TEMPLATES=(
+  "infra/.env.example|Makefile ENV_FILE fallback (firstword of .env.worktree .env infra/.env.example) and AGENTS.md cp-to-.env template; not a compose rendering — rust compose interpolates rust-smoke.env.example"
+)
 
 # -----------------------------------------------------------------------------
 # Platform templates (non-compose) — ADR-0184 D5 / #2297.
@@ -252,7 +262,9 @@ tabled_env="$(
     rest="${row#*|}"; tr ' ' '\n' <<<"${rest%%|*}"
   done
   if [ "${#NON_COMPOSE_ENV_TEMPLATES[@]}" -gt 0 ]; then
-    printf '%s\n' "${NON_COMPOSE_ENV_TEMPLATES[@]}"
+    for tpl in "${NON_COMPOSE_ENV_TEMPLATES[@]}"; do
+      printf '%s\n' "${tpl%%|*}"
+    done
   fi
 } | LC_ALL=C sort -u
 )"
@@ -261,11 +273,18 @@ while IFS= read -r tpl; do
   [ -n "$tpl" ] || continue
   grep -qxF "$tpl" <<<"$tabled_env" ||
     fail "$tpl is an env template no rendering uses — add it to a row, or to NON_COMPOSE_ENV_TEMPLATES with the reason it is not a compose env"
-done < <(find infra/rust -maxdepth 1 -type f -name '*.env.example' | LC_ALL=C sort)
+done < <({
+  find infra -maxdepth 1 -type f -name '*.env.example'
+  find infra/rust -maxdepth 1 -type f -name '*.env.example'
+} | LC_ALL=C sort -u)
 
 if [ "${#NON_COMPOSE_ENV_TEMPLATES[@]}" -gt 0 ]; then
   for tpl in "${NON_COMPOSE_ENV_TEMPLATES[@]}"; do
-    [ -f "$tpl" ] || fail "NON_COMPOSE_ENV_TEMPLATES names a file that no longer exists: $tpl"
+    path="${tpl%%|*}"
+    reason="${tpl#*|}"
+    [ -f "$path" ] || fail "NON_COMPOSE_ENV_TEMPLATES names a file that no longer exists: $path"
+    [ "$reason" != "$tpl" ] && [ -n "$reason" ] ||
+      fail "NON_COMPOSE_ENV_TEMPLATES $path has no reason — exemptions require a reason (path|reason)"
   done
 fi
 
