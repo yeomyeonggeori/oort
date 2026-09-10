@@ -53,6 +53,10 @@ grep -Fq "COPY server-rust/apt/ACCC4CF8.asc" "$DOCKERFILE" || \
   fail "Dockerfile does not COPY the committed PGDG key"
 grep -Fq "python3 -c 'import json'" "$DOCKERFILE" || \
   fail "Dockerfile does not prove python3 json at build"
+grep -Fq 'python3=3.11.*' "$DOCKERFILE" || \
+  fail "Dockerfile does not pin python3=3.11.*"
+grep -Fq "python3 --version | grep -E '^Python 3\\.11\\.'" "$DOCKERFILE" || \
+  fail "Dockerfile does not prove python3 3.11 at build"
 grep -Eq '^[[:space:]]+postgresql-client[[:space:]]*\\[[:space:]]*$' "$DOCKERFILE" && \
   fail "Dockerfile still installs unversioned debian postgresql-client"
 pass "Dockerfile contract: PGDG pin, key sha256, no curl|sh, python3 json"
@@ -96,6 +100,7 @@ docker run --rm --entrypoint /bin/sh "$IMAGE" -c '
   set -eu
   pg_dump --version | grep -E "^pg_dump \\(PostgreSQL\\) 18\\." >/dev/null
   test -x /usr/lib/postgresql/18/bin/pg_dump
+  python3 --version | grep -E "^Python 3\\.11\\." >/dev/null
   python3 -c "import json"
   test -x /opt/momo/scripts/oort
   test -s /opt/momo/scripts/lib/oort_doctor.sh

@@ -5,6 +5,15 @@
 - Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
 - runtime-unverified: RELEASING dispatch 실주행의 gate:csp-deploy는 발행 창. T2 스탬프 실서비스 day-2는 SH-11a.
 
+## SH-11e 리뷰 잔여 (#2347, 2026-09-10)
+
+- Track engine. `chore/2347-sh11e-nits` onto `origin/track/engine`. T2 origin picker는 `public.*`와 같은 루프백/tauri 스킵(127.0.0.1 최후 폴백 없음, 루프백-only는 fail-closed). doctor id 정상 32, 미지 스탬프/마이그레이션 dir 부재 시 33. `logs --tier t2`는 플랫폼 CLI 안내 1줄 후 exit 0. URL dump 실패는 pg_dump rc 전달. T2 restore/upgrade 완료 문장 상수화. dump/restore 컨테이너 분기 SC2034는 export. 이미지 `python3=3.11.*` 핀. in-image 증명은 docs 프로파일만(docker 필수, optional-tool skip 없음; `all`은 `bash -n`만).
+- runtime-unverified: Railway one-off 실측은 SH-11a.
+
+## SH-12c design-review 잔여 + kickoff 백스톱 관찰자 (#2356)
+
+- Track UXUI. `chore/2356-sh12c-nits` onto `origin/track/uxui`. IssuedInviteCard 공유 문장 `break-keep`(390px 「화면에서|만」 분절 0). 발급 뒤 채워진 primary는 「계속」, 복사 outline은 Button default/`h-control`(28px `sm` 예외 제거; 플래너 36px는 컨트롤 축에 없어 named `h-control` 32). S2 발급 CTA·복사 라벨은 설정 › 멤버와 초대와 `inviteLabels.ts` 상수 공유. `welcomeKickoff.noActiveAgent` 백스톱 관찰자는 mount 전에 부착해 1프레임 플래시를 센다.
+- runtime-unverified: 실서버 claim→S2 390px 캡처는 design-review 범위(정적 PASS, 픽셀 SKIPPED). 백스톱 플래시는 jsdom MutationObserver.
 ## A6 위저드 4단계 이름 보간 (#2327, 2026-09-10)
 
 - Track UXUI. `fix/2327-wizard-empty-name` onto `origin/track/uxui`. E2E-A v0.1.4 실측 「승인하면 는」은 현행 `track/uxui`에서도 재현(빈 `displayName` + topic 조사). 문장 폴백 「이 에이전트」(`hostedAgentLabel`). 사실 칸은 핸들 아니면 「이름 없는 에이전트」(`hostedAgentFactLabel`). 재개 행은 `memberNameParts`.

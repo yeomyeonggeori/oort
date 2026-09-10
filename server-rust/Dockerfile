@@ -227,6 +227,7 @@ LABEL org.opencontainers.image.title="momo-rust" \
 # `postgresql-client` is 15.x — pg_dump then refuses the dump (#2346 / SH-11e-2).
 # python3 (full, not python3-minimal) is required for `oort doctor --json`
 # (`oort_doctor_emit_json` imports json; measured: python3-minimal has no json).
+# Pin at the 3.11.* series so bookworm does not float to a later python3.
 # curl exists so the api service has a container-local healthcheck.
 #
 # PGDG signing key ACCC4CF8, fingerprint
@@ -246,10 +247,11 @@ RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
       postgresql-client-18=18.6-1.pgdg12+2 \
-      python3; \
+      'python3=3.11.*'; \
     test "$(dpkg-query -W -f='${Version}' postgresql-client-18)" = "18.6-1.pgdg12+2"; \
     pg_dump --version | grep -E '^pg_dump \(PostgreSQL\) 18\.'; \
     test -x /usr/lib/postgresql/18/bin/pg_dump; \
+    python3 --version | grep -E '^Python 3\.11\.'; \
     python3 -c 'import json'; \
     rm -rf /var/lib/apt/lists/*; \
     useradd --system --create-home --uid 10001 momo; \

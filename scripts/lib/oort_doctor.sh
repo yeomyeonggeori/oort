@@ -862,8 +862,10 @@ oort_doctor_migrate_idempotency_sql() {
 }
 
 # Loopback/tauri skip-list shared with public.* (oort_doctor_check_public).
-# T2 additionally never selects wss://. 127.0.0.1 is skipped for public.*
-# but T2 must still accept a fixture/mock origin bound there after tauri tokens.
+# T2 additionally never selects wss://. Loopback (including 127.0.0.1) is
+# never a T2 /healthz origin — a loopback-only env stays fail-closed.
+# Fixture mocks that need a reachable origin must use a non-skip-list host
+# and rewrite it on the test PATH; production has no mock branch.
 oort_doctor_origin_is_loopback_or_tauri() {
   case "$1" in
     http://localhost* | https://localhost* | http://127.0.0.1* | https://127.0.0.1* | \
@@ -875,7 +877,7 @@ oort_doctor_origin_is_loopback_or_tauri() {
 }
 
 oort_doctor_t2_http_origin() {
-  local origins origin="" tok domain http_fallback=""
+  local origins origin="" tok domain http_fallback="" candidate
   if oort_doctor_has CENTRIFUGO_ALLOWED_ORIGINS; then
     origins="$(oort_doctor_get CENTRIFUGO_ALLOWED_ORIGINS)"
     for tok in $origins; do
@@ -883,14 +885,7 @@ oort_doctor_t2_http_origin() {
         http://* | https://*) ;;
         *) continue ;;
       esac
-      if oort_doctor_origin_is_loopback_or_tauri "$tok"; then
-        case "$tok" in
-          http://127.0.0.1* | https://127.0.0.1*)
-            [ -n "$http_fallback" ] || http_fallback="$tok"
-            ;;
-        esac
-        continue
-      fi
+      oort_doctor_origin_is_loopback_or_tauri "$tok" && continue
       case "$tok" in
         https://*)
           origin="$tok"
@@ -909,7 +904,10 @@ oort_doctor_t2_http_origin() {
       domain="$(oort_doctor_trim "$(oort_doctor_get RAILWAY_PUBLIC_DOMAIN)")"
     fi
     if [ -n "$domain" ]; then
-      origin="https://${domain}"
+      candidate="https://${domain}"
+      if ! oort_doctor_origin_is_loopback_or_tauri "$candidate"; then
+        origin="$candidate"
+      fi
     fi
   fi
   printf '%s' "$origin"

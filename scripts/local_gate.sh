@@ -245,6 +245,13 @@ auto_classify_path() {
       # 로컬 런타임 정본(compose/centrifugo.json/e2e roles). staging-smoke는 이
       # 파일들을 기동하지 않으므로(리뷰 blocker: silent coverage loss) all로 확대.
       AUTO_NEED_ALL=1; AUTO_REASONS+=("$1 -> all (local runtime compose surface; widen, do not narrow)") ;;
+    server-rust/Dockerfile|server-rust/apt/*)
+      # #2347: in-image day-2 proof is docs-profile only. Docker is required
+      # there (no optional-tool skip — a skip would hide a python3/pg_dump
+      # float). `all` only bash -n's the test; --auto on this path must
+      # actually run the image build, so classify as docs rather than the
+      # unmapped → all widening.
+      AUTO_REASONS+=("$1 -> docs (#2346/#2347 in-image day-2 tools; docker required in docs, not optional-skip; not wired into all)") ;;
     scripts/*)
       auto_classify_script "$1" ;;
     *)
@@ -968,8 +975,8 @@ case "$PROFILE" in
     add_cmd_once "platform template contract — AWS Lightsail/EC2 T1 (SH-11c · #2377 · ADR-0184 D1)" 'scripts/tests/test_aws_recipe.sh'
     add_cmd_once "platform template contract — Cloudflare T3 (SH-11d · #2386 · ADR-0184 D1)" 'scripts/tests/test_cloudflare_recipe.sh'
     add_cmd_once "release manifest contract" 'scripts/tests/test_release_manifest.sh'
-    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124), in-image T2 doctor/backup tools (#2346: PGDG postgresql-client-18 + python3 json), the Railway platform template contract (#2297: railway.json services/digest pin, --railway key-set equality, Caddyfile.railway caddy adapt + 403 order, public-edge contract on the Caddyfile.railway fixture root), the AWS T1 recipe contract (#2377: prevent_destroy, ports {22,80,443}, Budgets, data-root /data/docker; terraform fmt/validate when terraform is installed, otherwise a visible optional-tool skip line), the Fly T1 recipe contract (SH-11b), the Cloudflare T3 edge recipe contract (SH-11d: loopback ingress, catch-all 404, no quick-tunnel, Mode B --public-origin, approval section) and the release-manifest contract."
-    add_note_once not_covered "Runtime Docker profiles are not run for docs profile. terraform apply on an operator AWS account is not part of this profile (SH-11c approval points 1–5)."
+    add_note_once coverage "Static docs/CI validation plus SH day-2/doctor/public-edge tests (#2124), in-image T2 doctor/backup tools (#2346/#2347: PGDG postgresql-client-18 + python3=3.11.* json; docs profile runs scripts/tests/test_image_day2_tools.sh which docker-builds server-rust/Dockerfile when MOMO_RUST_IMAGE is unset; docker missing is RED, not an optional-tool skip), the Railway platform template contract (#2297: railway.json services/digest pin, --railway key-set equality, Caddyfile.railway caddy adapt + 403 order, public-edge contract on the Caddyfile.railway fixture root), the AWS T1 recipe contract (#2377: prevent_destroy, ports {22,80,443}, Budgets, data-root /data/docker; terraform fmt/validate when terraform is installed, otherwise a visible optional-tool skip line), the Fly T1 recipe contract (SH-11b), the Cloudflare T3 edge recipe contract (SH-11d: loopback ingress, catch-all 404, no quick-tunnel, Mode B --public-origin, approval section) and the release-manifest contract."
+    add_note_once not_covered "Runtime compose profiles (runtime-db/relay/live/agent) are not run for docs profile. The in-image day-2 proof is not wired into profile all (all only bash -n's test_image_day2_tools.sh); --auto on server-rust/Dockerfile selects docs so the proof actually runs. terraform apply on an operator AWS account is not part of this profile (SH-11c approval points 1–5)."
     ;;
   diagnostics)
     add_static_commands
