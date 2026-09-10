@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## SH-12e 첫 하루 문서 제로베이스 (#2336, 2026-09-10)
+
+- Track engine. `docs/2336-first-day-zero-base`. `SELF_HOST_FIRST_DAY`(en+ko) §2~§4를 claim→S1→S2/skip→첫 에이전트→폰 연결로 재작성. §3은 운영자 기능(워크스페이스 만들기). §4는 S2+설정 › 멤버와 초대 재진입. ADR-0166/0181 개정 절, UX 바이블 P5 주석. v0.1.5 잔여(slug `demo`·고정 UUID·`#agent-lab`) 정직 표기.
+- runtime-unverified: GUI 클릭 경로는 이 워크트리에서 브라우저를 누르지 않음(기존 FIRST_DAY 규율). S1 카피는 `feat/2332-onboarding-s1`에서 인용(아직 track/engine 미랜딩).
 ## hostedRoutineLabel 빈 핸들 식별자 (#2395, 2026-09-10)
 
 - Track UXUI. `fix/2395-routine-label-empty-handle` onto `origin/track/uxui`. ADR-0162 D6 결정 (a): 빈 핸들이면 식별자 세그먼트는 `m-<member id hex 8>`(끝에 ` / ` 금지). 비어 있지 않은 핸들 출력은 바이트 불변. `parseHostedRoutineLabel`이 그 세그먼트를 왕복한다. UI 변경 없음.
