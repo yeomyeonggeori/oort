@@ -10,6 +10,9 @@ rust-version.workspace = true
 momo-db = { path = "../momo-db" }         # with_tenant_tx = the sole RLS GUC seam
 momo-outbox = { path = "../momo-outbox" } # emit_outbox = the sole outbox egress
 momo-wire = { path = "../momo-wire" }     # shared broadcast payload DTO
+# Ban table owner. Handle allocation on this crate must ask the same
+# `is_handle_banned_in_tx` join/agents/hosted-agent already call.
+momo-settings = { path = "../momo-settings" }
 
 sqlx.workspace = true
 uuid.workspace = true

@@ -87,8 +87,8 @@ pub use invite::{
     RedeemedInvite, RevokedInvite,
 };
 pub use join::{
-    fallback_handle, is_handle_banned_in_tx, is_identity_banned_in_tx, is_valid_handle,
-    normalized_invite_code, normalized_join_display_name, normalized_join_email,
+    fallback_handle, is_handle_banned_in_tx, is_handle_unique_violation, is_identity_banned_in_tx,
+    is_valid_handle, normalized_invite_code, normalized_join_display_name, normalized_join_email,
     normalized_join_password, normalized_join_time_zone, normalized_requested_handle,
     redeem_invite_in_tx, resolve_invite_workspace, role_rank, JoinError, JoinOutcome,
     JoinRejection, JoinRequestValues, JoinSpecInvalid, JoinedMember, JoinedMembership,
@@ -121,9 +121,10 @@ pub use tier::{
 };
 pub use workspace::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
-    normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
-    workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
-    WorkspaceProvisionRejected, WorkspaceSpecInvalid,
+    normalized_workspace_slug, rename_workspace_in_tx, revoke_member_tokens_in_tx,
+    terminate_workspace_membership_in_tx, workspace_has_another_active_owner, CreatedWorkspace,
+    RevokedTokens, WorkspaceProvisionRejected, WorkspaceRenameApplied, WorkspaceRenameRejected,
+    WorkspaceSpecInvalid,
 };
 pub use workspace_settings::{
     merge_workspace_settings, project_role_labels, read_workspace_settings,
