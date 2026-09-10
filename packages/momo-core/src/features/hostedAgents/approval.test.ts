@@ -196,6 +196,24 @@ describe("RED PROOF ③ 결과 문장은 닫히는 쪽도 말한다", () => {
     );
   });
 
+  it("빈 이름과 있는 이름을 4단계 문장으로 단정한다 (#2327)", () => {
+    const scopes = [
+      "agent:port:connect",
+      "agent:inbox:read",
+      "messages:write",
+    ] as const;
+    const empty = approvalConsequence("", 2, scopes);
+    const named = approvalConsequence("그록봇", 2, scopes);
+    expect(empty).toBe(
+      "승인하면 이 에이전트는 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+    );
+    expect(named).toBe(
+      "승인하면 그록봇은 2개 채널에서 자기를 부른 메시지 읽기, 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+    );
+    expect(empty).not.toMatch(/승인하면\s+는\s/);
+    expect(approvalConsequence("   ", 2, scopes)).toBe(empty);
+  });
+
   it("채널을 하나도 안 고른 것도 결과가 있는 선택이다", () => {
     const sentence = approvalConsequence("김인턴", 0, [
       "agent:port:connect",

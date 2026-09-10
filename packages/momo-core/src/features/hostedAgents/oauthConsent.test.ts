@@ -322,6 +322,17 @@ describe("RED PROOF ⑤ 결과 문장은 닫히는 쪽을 말한다", () => {
     expect(sentence).toContain("접속만 하고");
   });
 
+  it("빈 이름은 조사만 남기지 않는다 (#2327)", () => {
+    const empty = oauthConsentConsequence("", 2, [
+      "agent:port:connect",
+      "messages:write",
+    ]);
+    expect(empty).toBe(
+      "승인하면 이 에이전트는 2개 채널에서 메시지 쓰기를 할 수 있습니다. 승인하지 않은 채널에서는 이 에이전트를 멘션해도 작업이 만들어지지 않습니다."
+    );
+    expect(empty).not.toMatch(/승인하면\s+는\s/);
+  });
+
   it("주어를 두 번 표지하지 않는다 (design-review M1)", () => {
     // 조사는 koreanParticle 이 정한다(라틴 종성 처리). 핵심은 앞에 별도 주어를
     // 덧대 한 대상에 표지가 겹치지 않는 것이다.
