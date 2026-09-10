@@ -42,7 +42,7 @@ export function fallbackHandle(email: string): string {
 
 export function defaultWorkspaceName(current: string | undefined): string {
   if (!current) return "";
-  if (current.trim() === SEED_WORKSPACE_NAME) return "";
+  if (current.trim().toLowerCase() === SEED_WORKSPACE_NAME.toLowerCase()) return "";
   return current;
 }
 

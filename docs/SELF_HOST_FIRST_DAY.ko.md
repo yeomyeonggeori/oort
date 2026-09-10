@@ -727,7 +727,7 @@ https:// 여야 합니다. http는 같은 기기(localhost)에서만 쓸 수
 | 조인 파서 | `packages/momo-core/src/features/auth/deepLink.ts` |
 | 설정 나브 | `clients/web/src/features/settings/settingsNav.ts`, `SettingsRoute.tsx`, `ProfileCard.tsx` |
 | 워크스페이스 | `…/WorkspaceSection.tsx`, `clients/web/src/features/workspace/AddWorkspaceDialog.tsx` |
-| 프로필 문 | `…/ProfileSection.tsx`, `…/onboarding/HandleField.tsx` |
+| 프로필 문 | `…/ProfileSection.tsx`, `…/profile/shared/HandleField.tsx` |
 | 멤버와 초대 | `…/InviteSection.tsx`, `IssuedInviteCard.tsx`, `packages/momo-core/src/features/settings/model.ts` |
 | first-run | `…/welcome/firstRunGate.ts`, `firstAgent.ts`, `FirstAgentStage.tsx`, `PhoneLinkFirstRun.tsx` |
 | 웰컴 enqueue | `server-rust/bins/momo-server/src/routes/welcome.rs` |
