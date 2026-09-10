@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { HOSTED_AGENT_MISSING_NAME } from "@momo/core/features/hostedAgents/model";
 import {
   decideAutoAdvance,
   initialAutoAdvanceArmed,
+  regenerateLaunchFromMember,
   type HostedWizardLaunch,
 } from "./hostedWizardLaunch";
 
@@ -82,6 +84,27 @@ describe("원클릭 자동 발급은 열림 시점 online 에서만 소비한다
         hasConnectionId: false,
       })
     ).toBe("wait");
+  });
+
+  it("재발급 런치는 원문 이름이고 없는-이름 문구가 아니다 (H-R2-1)", () => {
+    const blank = regenerateLaunchFromMember({
+      displayName: "",
+      handle: "kim-intern",
+      connectionId: "00000000-0000-7000-8000-0000000005c1",
+      presetId: "generic",
+    });
+    expect(blank.displayName).toBe("");
+    expect(blank.handle).toBe("kim-intern");
+    expect(blank.autoAdvance).toBe("regenerate");
+    expect(blank.displayName).not.toBe(HOSTED_AGENT_MISSING_NAME);
+
+    const missing = regenerateLaunchFromMember({
+      displayName: undefined,
+      handle: "kim-intern",
+      connectionId: "00000000-0000-7000-8000-0000000005c1",
+      presetId: "generic",
+    });
+    expect(missing.displayName).toBe("");
   });
 
   it("복구 원클릭은 연결 id 가 있으면 regenerate 를 쏜다", () => {

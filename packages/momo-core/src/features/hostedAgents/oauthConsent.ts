@@ -18,7 +18,7 @@ import {
   type HostedScopeChoice,
 } from "./approval";
 import {
-  boundedLabel,
+  hostedAgentLabel,
   isHostedScope,
   HOSTED_AGENT_SCOPES,
   type HostedAgentScope,
@@ -223,7 +223,7 @@ export function oauthConsentConsequence(
   channelCount: number,
   approvedScopes: readonly HostedAgentScope[]
 ): string {
-  const name = attachParticle(boundedLabel(agentLabel), "topic");
+  const name = attachParticle(hostedAgentLabel(agentLabel), "topic");
   const actions = scopeActionList(approvedScopes);
   if (channelCount === 0) {
     return `${name} 접속만 하고 어떤 대화에도 닿지 못합니다. 채널을 하나도 승인하지 않았기 때문입니다.`;
@@ -651,8 +651,6 @@ export const OAUTH_CONSENT_OFFLINE_NOTE =
 export const OAUTH_CONSENT_WORKSPACE_KEY = "워크스페이스";
 export const OAUTH_CONSENT_WORKSPACE_FALLBACK = "이 워크스페이스";
 export const OAUTH_CONSENT_AGENT_KEY = "전용 에이전트";
-/** candidate 를 아직 못 고른 자리의 대체 이름. 결과 문장의 주어로도 쓰인다. */
-export const OAUTH_CONSENT_AGENT_FALLBACK = "전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_LEGEND = "접속을 허용할 전용 에이전트";
 export const OAUTH_CONSENT_CANDIDATE_DETAIL =
   "이 에이전트로 외부 provider의 접속을 허용합니다.";
