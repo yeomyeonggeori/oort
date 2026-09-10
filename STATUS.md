@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## hostedRoutineLabel 빈 핸들 식별자 (#2395, 2026-09-10)
+
+- Track UXUI. `fix/2395-routine-label-empty-handle` onto `origin/track/uxui`. ADR-0162 D6 결정 (a): 빈 핸들이면 식별자 세그먼트는 `m-<member id hex 8>`(끝에 ` / ` 금지). 비어 있지 않은 핸들 출력은 바이트 불변. `parseHostedRoutineLabel`이 그 세그먼트를 왕복한다. UI 변경 없음.
+- 검증: `@momo/core` typecheck+vitest · 사보타주(정규화 제거 / 왕복 파괴) RED.
+- runtime-unverified: 실스택 grok routine 생성·cleanup 매니페스트 왕복.
 ## SH-11g/f 리뷰 잔여 (#2328, 2026-09-10)
 
 - Track engine. `chore/2328-sh11-nits` onto `origin/track/engine`. gate:csp-deploy를 RELEASING 프리퍼블리시 필수 단계 + `local_gate --profile web` 선택 도구(docker/caddy 부재 시 눈에 보이는 skip 줄)로 배선. `infra/.env.example`을 compose-env 예외 표에 사유와 함께 등재. Coverage 3 인벤토리를 `git ls-files`로. 기존 `MOMO_SELF_HOST_PLATFORM` 미지 값 거부. `--platform railway`(별칭 `--railway`). `managed_role_url` 내부명 플랫폼 중립. T2도 스탬프 emit(키 41→42, heredoc·doctor required_keys 불변). host-network overlay 키 카운트 앵커.
