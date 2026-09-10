@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## 제로베이스 E2E-B 문서 이탈 D1~D4 (#2429, 2026-09-10)
+
+- Track engine. `docs/2429-e2ezb-deviations`. `SELF_HOST_FIRST_DAY`(en+ko) §1을 claim 설치 경로로 정합(awk + `docker compose` 직접 호출). `SELF_HOST`(en+ko) §3에 claim 기동 소절(`--compose` 거절, ADR-0166). §5·FIRST_DAY §7: GUI `plaintextRemote` vs `--allow-local-provider` + `host.docker.internal` / `PUT /v1/provider/link`. D4 「계속」 문장 유지.
+- runtime-unverified: 이 워크트리에서 스택 `up` 없음. 생성기 claim 수락은 temp-dir dry-run. GUI 클릭은 E2E-B 실측(`~/projects/e2e-zb/REPORT.md`).
 ## S1 온보딩 잔여 nits (#2418, 2026-09-10)
 
 - Track UXUI. `chore/2418-s1-nits` onto `origin/track/uxui`. 설정 › 워크스페이스 초기 `aria-invalid="false"` 미노출. `S1_FAILURE` 「지금은」 1회. `HandleField`/`identityCopy` → `features/profile/shared`, `StaleWorkspaceNameConflict` → `features/workspace/shared`. 시드 워크스페이스명 대소문자 무시. S1 완료 시 settings-door 플래그 잔여 제거.
