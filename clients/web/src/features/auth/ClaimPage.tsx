@@ -15,7 +15,7 @@ import { useBrowserOffline } from "@/features/common/useOffline";
 import { recordFreshSignupFirstRun } from "@/features/welcome/freshSignupFirstRun";
 import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
 import {
-  clearOwnerOnboardingPending,
+  finishOwnerOnboardingInvite,
   markOwnerOnboardingPending,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { applyLogin } from "@/lib/session";
@@ -128,8 +128,9 @@ export function ClaimPage({
     if (!session) return;
     window.history.replaceState(null, "", "/");
     // Markers were written at claim success. onLoggedIn still opens the
-    // first-run gate; clear pending so App does not remount this stage.
-    clearOwnerOnboardingPending();
+    // first-run gate. Clear ONLY the invite flag so a skipped S1 is
+    // re-offered on the next load (ADR-0185 §5-1).
+    finishOwnerOnboardingInvite();
     onLoggedIn(session);
     releaseSessionRestore();
   }

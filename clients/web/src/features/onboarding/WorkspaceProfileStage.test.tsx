@@ -11,6 +11,7 @@ import { WorkspaceProfileStage } from "./WorkspaceProfileStage";
 import { clearFreshSignup } from "@/features/welcome/freshSignup";
 import {
   clearOwnerOnboardingPending,
+  hasOwnerOnboardingFlag,
   markOwnerOnboardingPending,
   OWNER_ONBOARDING_KEY,
   readOwnerOnboardingStage,
@@ -29,6 +30,7 @@ import {
   S1_REENTRY,
   S1_SKIP_LABEL,
   S1_TITLE,
+  s1StaleRetry,
 } from "./s1Copy";
 
 const renameWorkspace = vi.hoisted(() => vi.fn());
@@ -291,7 +293,9 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
       "2/2"
     );
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+      JSON.stringify({ invite: true })
+    );
   });
 
   it("answers a handle 409 in product Korean with the next move", async () => {
@@ -316,7 +320,13 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
     expect(text).not.toMatch(/[A-Za-z]{3,}|HTTP \d+/);
     expect(text).not.toContain(HANDLE_TAKEN_SENTENCE);
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-testid="onboarding-s1-handle"]')
+    );
   });
 
   it("does not re-send E1 after a handle 409 retry", async () => {
@@ -365,14 +375,82 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       expect(host.querySelector('[data-testid="onboarding-s1-stale"]')).not.toBeNull();
     });
     expect(host.textContent).toContain("다른 기기에서 바꾼 이름");
+    expect(host.textContent).toContain(s1StaleRetry("다른 기기에서 바꾼 이름"));
     expect(host.querySelector('[data-testid="onboarding-s1-keep-theirs"]')?.textContent).toBe(
       S1_KEEP_THEIRS
     );
     expect(host.querySelector('[data-testid="onboarding-s1-keep-mine"]')?.textContent).toBe(
       S1_KEEP_MINE
     );
+    const filled = [...host.querySelectorAll("button")].filter((button) =>
+      button.className.includes("bg-accent")
+    );
+    expect(filled).toHaveLength(1);
+    expect(filled[0]?.textContent).toBe(S1_KEEP_MINE);
+    expect(host.querySelector('[data-testid="onboarding-s1-submit"]')).toBeNull();
+    expect(host.querySelector('[data-testid="onboarding-s1-keep-theirs"]')?.className).not.toContain(
+      "bg-accent"
+    );
+    expect(
+      (host.querySelector(
+        '[data-testid="onboarding-s1-workspace-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("새벽");
+    expect(host.querySelector(".whitespace-nowrap")?.className).toContain("break-keep");
+    expect(host.querySelector(".whitespace-nowrap")?.textContent).toBe(
+      "「다른 기기에서 바꾼 이름」으로"
+    );
     expect(changeMyProfile).not.toHaveBeenCalled();
     expect(host.querySelector('[data-testid="onboarding-s2"]')).toBeNull();
+    click("onboarding-s1-keep-theirs");
+    expect(
+      (host.querySelector(
+        '[data-testid="onboarding-s1-workspace-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("다른 기기에서 바꾼 이름");
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-testid="onboarding-s1-workspace-name"]')
+    );
+  });
+
+  it("keep-mine retries with the refreshed token and does not drop focus to body", async () => {
+    renameWorkspace
+      .mockRejectedValueOnce(
+        new ApiError(409, "workspace has been updated; refetch and retry")
+      )
+      .mockResolvedValueOnce({
+        ...workspace,
+        name: "새벽",
+        updatedAtMs: UPDATED_AT + 10,
+      });
+    fetchWorkspace.mockResolvedValue({
+      ...workspace,
+      name: "다른 기기에서 바꾼 이름",
+      updatedAtMs: UPDATED_AT + 9,
+    });
+    const host = mountOwner();
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await submitFilled(host);
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s1-keep-mine"]')).not.toBeNull();
+    });
+    await act(async () => {
+      click("onboarding-s1-keep-mine");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    });
+    expect(renameWorkspace).toHaveBeenLastCalledWith(WS, "새벽", UPDATED_AT + 9);
+    expect(document.activeElement).not.toBe(document.body);
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-testid="onboarding-s2-title"]')
+    );
   });
 
   it("maps a workspace 400 to Korean and does not render the wire sentence", async () => {
@@ -440,7 +518,8 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
     });
     expect(readOwnerOnboardingStage()).toBe("workspace-profile");
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    expect(hasOwnerOnboardingFlag("invite")).toBe(true);
   });
 
   it("keeps aria-busy on the form and does not disable fields while submitting", async () => {
@@ -540,6 +619,22 @@ describe("onboarding S1 내 워크스페이스·내 이름 (#2332)", () => {
       "저장되는 핸들 @seongjae"
     );
   });
+
+  it("focuses the first invalid field in DOM order", async () => {
+    const host = mountStage();
+    fill("onboarding-s1-workspace-name", "");
+    fill("onboarding-s1-display-name", "");
+    fill("onboarding-s1-handle", "");
+    await act(async () => {
+      click("onboarding-s1-submit");
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-testid="onboarding-s1-workspace-name"]')
+    );
+  });
 });
 
 describe("S1 handle copy (H-1)", () => {
@@ -555,5 +650,14 @@ describe("S1 handle copy (H-1)", () => {
     expect(
       handleSaveMessage(new ApiError(409, HANDLE_TAKEN_SENTENCE))
     ).not.toContain(HANDLE_TAKEN_SENTENCE);
+  });
+
+  it("attaches 로/으로 from directionParticle and does not hard-code 으로", () => {
+    expect(s1StaleRetry("여명거리 스튜디오")).toBe(
+      "워크스페이스 이름이 「여명거리 스튜디오」로 바뀌었습니다."
+    );
+    expect(s1StaleRetry("다른 기기에서 바꾼 이름")).toBe(
+      "워크스페이스 이름이 「다른 기기에서 바꾼 이름」으로 바뀌었습니다."
+    );
   });
 });

@@ -236,7 +236,9 @@ describe("claim → first-run 사다리 (#2301)", () => {
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
-    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("workspace-profile");
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe(
+      JSON.stringify({ "workspace-profile": true, invite: true })
+    );
     expect(claimOwnerPassword).toHaveBeenCalledWith(TOKEN, PASSWORD);
 
     fill("onboarding-s1-workspace-name", "새벽");
@@ -255,7 +257,9 @@ describe("claim → first-run 사다리 (#2301)", () => {
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
     });
-    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe("invite");
+    expect(sessionStorage.getItem("oort.onboarding.v1")).toBe(
+      JSON.stringify({ invite: true })
+    );
 
     click("onboarding-s2-skip");
     await vi.waitFor(() => {

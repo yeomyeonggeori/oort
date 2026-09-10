@@ -46,6 +46,8 @@ import {
   workspaceNameError,
 } from "@momo/core/features/settings/model";
 import { workspaceNameSaveMessage } from "@/features/onboarding/identityCopy";
+import { recordOwnerOnboardingSettingsSave } from "@/features/onboarding/ownerOnboardingStore";
+import { StaleWorkspaceNameConflict } from "@/features/onboarding/StaleWorkspaceNameConflict";
 import { memberFor, useDirectory, workspaceIdentityKey } from "@/features/workspace/useWorkspace";
 import {
   WELCOME_PROMPT_LIMIT_SENTENCE,
@@ -789,22 +791,29 @@ function WorkspaceRenameField({
   const [token, setToken] = useState(updatedAtMs);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [staleName, setStaleName] = useState<string | null>(null);
   const saveStarted = useRef(false);
+  const draftLocked = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const bannerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    if (draftLocked.current) return;
     setDraft(name);
     setToken(updatedAtMs);
   }, [name, updatedAtMs]);
 
   const gate = workspaceNameError(draft);
   const dirty = draft.trim() !== name;
-  const canSave = canEdit && dirty && !gate && !offline;
+  const canSave = canEdit && dirty && !gate && !offline && !staleName;
 
   const save = useMutation({
     mutationFn: () => renameWorkspace(workspaceId, draft.trim(), token),
     onSuccess: (renamed) => {
       saveStarted.current = false;
+      draftLocked.current = false;
       setSaveError(null);
+      setStaleName(null);
       setToken(renamed.updatedAtMs);
       setDraft(renamed.name);
       client.setQueryData(
@@ -814,16 +823,19 @@ function WorkspaceRenameField({
             ? { ...current, name: renamed.name, updatedAtMs: renamed.updatedAtMs }
             : current
       );
+      recordOwnerOnboardingSettingsSave("workspace");
     },
     onError: async (error) => {
       saveStarted.current = false;
       if (error instanceof ApiError && error.status === 409) {
         try {
           const latest = await fetchWorkspace(workspaceId);
+          draftLocked.current = true;
           setToken(latest.updatedAtMs);
-          setDraft(latest.name);
           client.setQueryData(workspaceIdentityKey(workspaceId), latest);
-          setSaveError("워크스페이스 이름이 바뀌었습니다. 다시 저장하세요.");
+          setStaleName(latest.name);
+          setSaveError(null);
+          bannerRef.current?.focus({ preventScroll: true });
           return;
         } catch {
           setSaveError(workspaceNameSaveMessage(error));
@@ -832,26 +844,54 @@ function WorkspaceRenameField({
       }
       if (error instanceof ApiError && error.status === 400) {
         setSaveError(workspaceNameSaveMessage(error));
+        inputRef.current?.focus({ preventScroll: true });
         return;
       }
       setSaveError(workspaceNameSaveMessage(error));
+      inputRef.current?.focus({ preventScroll: true });
     },
   });
 
-  const handleSave = () => {
-    if (!canSave || save.isPending || saveStarted.current) return;
+  const runSave = () => {
+    if (save.isPending || saveStarted.current) return;
     const nextError = workspaceNameError(draft);
     setFieldError(nextError);
-    if (nextError) return;
+    if (nextError) {
+      inputRef.current?.focus({ preventScroll: true });
+      return;
+    }
     saveStarted.current = true;
     setSaveError(null);
     save.mutate();
+  };
+
+  const handleSave = () => {
+    if (!canSave) return;
+    runSave();
+  };
+
+  const handleKeepTheirs = () => {
+    if (!staleName) return;
+    draftLocked.current = true;
+    setDraft(staleName);
+    setStaleName(null);
+    setFieldError(null);
+    setSaveError(null);
+    inputRef.current?.focus({ preventScroll: true });
+  };
+
+  const handleKeepMine = () => {
+    setStaleName(null);
+    inputRef.current?.focus({ preventScroll: true });
+    runSave();
   };
 
   const confirmedNonOperator = !canEdit && directoryQuery.isSuccess;
   if (confirmedNonOperator) {
     return <h3 className="text-body font-medium text-ink">{name}</h3>;
   }
+
+  const staleMessageId = "workspace-rename-stale-message";
 
   return (
     <form
@@ -868,21 +908,44 @@ function WorkspaceRenameField({
         error={fieldError}
       >
         <Input
+          ref={inputRef}
           id="workspace-rename-name"
           name="workspaceName"
           value={draft}
           disabled={offline}
-          aria-invalid={Boolean(fieldError || saveError)}
+          aria-invalid={Boolean(fieldError || saveError || staleName)}
+          aria-describedby={
+            [
+              fieldError ? "workspace-rename-name-error" : null,
+              staleName ? staleMessageId : null,
+              saveError ? "workspace-rename-error" : null,
+            ]
+              .filter(Boolean)
+              .join(" ") || undefined
+          }
           data-testid="workspace-rename-name"
           onChange={(event) => {
+            draftLocked.current = true;
             setDraft(event.target.value);
             setFieldError(null);
             setSaveError(null);
+            setStaleName(null);
           }}
         />
       </Field>
+      {staleName ? (
+        <StaleWorkspaceNameConflict
+          otherName={staleName}
+          onKeepTheirs={handleKeepTheirs}
+          onKeepMine={handleKeepMine}
+          messageId={staleMessageId}
+          testIdPrefix="workspace-rename"
+          bannerRef={bannerRef}
+        />
+      ) : null}
       {saveError && (
         <p
+          id="workspace-rename-error"
           className="text-meta text-danger"
           role="alert"
           data-testid="workspace-rename-error"
@@ -895,7 +958,7 @@ function WorkspaceRenameField({
           연결이 끊겨 지금은 이름을 저장할 수 없습니다.
         </p>
       )}
-      {canEdit && (
+      {canEdit && !staleName && (
         <div className="flex flex-wrap items-center gap-2">
           <SaveButton
             label="이름 저장"

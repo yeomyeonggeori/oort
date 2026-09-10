@@ -39,12 +39,11 @@ import {
   workspaceNameSaveMessage,
 } from "./identityCopy";
 import { clearS1Draft, readS1Draft, writeS1Draft } from "./s1Draft";
+import { StaleWorkspaceNameConflict } from "./StaleWorkspaceNameConflict";
 import {
   S1_DISPLAY_ERROR_ID,
   S1_FAILURE,
   S1_HANDLE_ERROR_ID,
-  S1_KEEP_MINE,
-  S1_KEEP_THEIRS,
   S1_LEAD,
   S1_OFFLINE_NOTE_ID,
   S1_OFFLINE_REASON,
@@ -53,8 +52,8 @@ import {
   S1_PRIMARY_RETRY,
   S1_REENTRY,
   S1_SKIP_LABEL,
+  S1_STALE_MESSAGE_ID,
   S1_WORKSPACE_ERROR_ID,
-  s1StaleRetry,
 } from "./s1Copy";
 
 // Reading this as: onboarding S1 (내 워크스페이스·내 이름) for internal team
@@ -127,16 +126,16 @@ export function WorkspaceProfileStage({
 
   useEffect(() => {
     if (focusTick === 0) return;
-    if (handleError) {
-      handleInputRef.current?.focus({ preventScroll: true });
+    if (workspaceError) {
+      workspaceInputRef.current?.focus({ preventScroll: true });
       return;
     }
     if (displayError) {
       displayInputRef.current?.focus({ preventScroll: true });
       return;
     }
-    if (workspaceError) {
-      workspaceInputRef.current?.focus({ preventScroll: true });
+    if (handleError) {
+      handleInputRef.current?.focus({ preventScroll: true });
       return;
     }
     if (formError || staleName) {
@@ -149,13 +148,13 @@ export function WorkspaceProfileStage({
     setFocusTick(focusNonce.current);
   }
 
-  async function refetchWorkspaceToken(): Promise<
+  async function refetchWorkspaceToken(keepDraft = false): Promise<
     { updatedAtMs: number; name: string } | undefined
   > {
     try {
       const latest = await fetchWorkspace(workspaceId);
       setUpdatedAtMs(latest.updatedAtMs);
-      if (!workspaceEdited.current) {
+      if (!keepDraft && !workspaceEdited.current) {
         setWorkspaceDraft(defaultWorkspaceName(latest.name));
       }
       queryClient.setQueryData(workspaceIdentityKey(workspaceId), latest);
@@ -226,7 +225,7 @@ export function WorkspaceProfileStage({
         return;
       }
       if (isWorkspaceStale(error)) {
-        const latest = await refetchWorkspaceToken();
+        const latest = await refetchWorkspaceToken(true);
         if (latest) {
           setStaleName(latest.name);
           renamedNameRef.current = null;
@@ -272,10 +271,12 @@ export function WorkspaceProfileStage({
     renamedNameRef.current = staleName;
     setStaleName(null);
     setWorkspaceError(null);
+    workspaceInputRef.current?.focus({ preventScroll: true });
   };
 
   const handleKeepMine = () => {
     setStaleName(null);
+    workspaceInputRef.current?.focus({ preventScroll: true });
     void attempt();
   };
 
@@ -308,34 +309,14 @@ export function WorkspaceProfileStage({
       )}
 
       {staleName && (
-        <div
-          ref={bannerRef}
-          tabIndex={-1}
-          className="flex flex-col gap-2 focus-visible:focus-ring"
-        >
-          <InlineBanner
-            tone="error"
-            message={s1StaleRetry(staleName)}
-            testId="onboarding-s1-stale"
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleKeepTheirs}
-              data-testid="onboarding-s1-keep-theirs"
-            >
-              {S1_KEEP_THEIRS}
-            </Button>
-            <Button
-              type="button"
-              onClick={handleKeepMine}
-              data-testid="onboarding-s1-keep-mine"
-            >
-              {S1_KEEP_MINE}
-            </Button>
-          </div>
-        </div>
+        <StaleWorkspaceNameConflict
+          otherName={staleName}
+          onKeepTheirs={handleKeepTheirs}
+          onKeepMine={handleKeepMine}
+          messageId={S1_STALE_MESSAGE_ID}
+          testIdPrefix="onboarding-s1"
+          bannerRef={bannerRef}
+        />
       )}
 
       {formError && (
@@ -365,9 +346,14 @@ export function WorkspaceProfileStage({
             value={workspaceDraft}
             autoComplete="organization"
             disabled={offline}
-            aria-invalid={workspaceError ? true : undefined}
+            aria-invalid={workspaceError || staleName ? true : undefined}
             aria-describedby={
-              workspaceError ? S1_WORKSPACE_ERROR_ID : undefined
+              [
+                workspaceError ? S1_WORKSPACE_ERROR_ID : null,
+                staleName ? S1_STALE_MESSAGE_ID : null,
+              ]
+                .filter(Boolean)
+                .join(" ") || undefined
             }
             data-testid="onboarding-s1-workspace-name"
             onChange={(event) => {
@@ -441,16 +427,18 @@ export function WorkspaceProfileStage({
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <Button
-          type="submit"
-          aria-disabled={offline || undefined}
-          aria-busy={busy || undefined}
-          aria-describedby={offline ? S1_OFFLINE_NOTE_ID : undefined}
-          className={cn(offline && "opacity-50")}
-          data-testid="onboarding-s1-submit"
-        >
-          {busy ? S1_PRIMARY_BUSY : formError ? S1_PRIMARY_RETRY : S1_PRIMARY_LABEL}
-        </Button>
+        {staleName ? null : (
+          <Button
+            type="submit"
+            aria-disabled={offline || undefined}
+            aria-busy={busy || undefined}
+            aria-describedby={offline ? S1_OFFLINE_NOTE_ID : undefined}
+            className={cn(offline && "opacity-50")}
+            data-testid="onboarding-s1-submit"
+          >
+            {busy ? S1_PRIMARY_BUSY : formError ? S1_PRIMARY_RETRY : S1_PRIMARY_LABEL}
+          </Button>
+        )}
         {formError && onSkip ? (
           <Button
             type="button"

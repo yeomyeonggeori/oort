@@ -82,3 +82,27 @@ describe("S1 error copy and identity handoff (H-1/H-2)", () => {
     expect(source).toContain("replaceSessionMember(member)");
   });
 });
+
+describe("S1 stale 409 shares the settings component", () => {
+  it("S1 and settings both mount StaleWorkspaceNameConflict", () => {
+    const s1 = readFileSync(
+      fileURLToPath(new URL("./WorkspaceProfileStage.tsx", import.meta.url)),
+      "utf8"
+    );
+    const settings = readFileSync(
+      fileURLToPath(new URL("../settings/WorkspaceSection.tsx", import.meta.url)),
+      "utf8"
+    );
+    expect(s1).toContain("StaleWorkspaceNameConflict");
+    expect(settings).toContain("StaleWorkspaceNameConflict");
+    expect(s1).not.toContain("S1_KEEP_THEIRS");
+    expect(s1).toContain("refetchWorkspaceToken(true)");
+    expect(settings).not.toContain("setDraft(latest.name)");
+    const copy = readFileSync(
+      fileURLToPath(new URL("./s1Copy.ts", import.meta.url)),
+      "utf8"
+    );
+    expect(copy).toContain("directionParticle");
+    expect(copy).not.toMatch(/」으로/);
+  });
+});

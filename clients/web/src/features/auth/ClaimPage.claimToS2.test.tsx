@@ -4,15 +4,17 @@ import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { LoginResponse, Member } from "@momo/core/lib/api";
+import { ApiError, type LoginResponse, type Member } from "@momo/core/lib/api";
 import type { WorkspaceIdentity } from "@momo/core/features/settings/api";
 import { applyLogin, clearSession, getPersistedSession } from "@/lib/session";
 import { resetKickoffHoldForTests } from "@/features/welcome/firstRunGate";
 import { peekFreshSignup } from "@/features/welcome/freshSignup";
 import {
   clearOwnerOnboardingPending,
+  hasOwnerOnboardingFlag,
   ownerOnboardingIsPending,
   OWNER_ONBOARDING_KEY,
+  resetOwnerOnboardingLoadState,
 } from "@/features/onboarding/ownerOnboardingStore";
 import { releaseSessionRestore } from "@/features/auth/onboardingSessionHold";
 
@@ -283,6 +285,7 @@ function unmountApp() {
   });
   mountedHost?.remove();
   mountedHost = null;
+  resetOwnerOnboardingLoadState();
 }
 
 describe("claim → S1 through App restore hold (B-1)", () => {
@@ -300,7 +303,7 @@ describe("claim → S1 through App restore hold (B-1)", () => {
     expect(host.querySelector('[data-testid="session-restoring"]')).toBeNull();
     expect(restoreSession).not.toHaveBeenCalled();
     expect(ownerOnboardingIsPending()).toBe(true);
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
   });
 });
 
@@ -330,7 +333,9 @@ describe("claim → S1 submit → S2", () => {
     expect(host.querySelector('[data-testid="onboarding-progress"]')?.textContent).toBe(
       "2/2"
     );
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+      JSON.stringify({ invite: true })
+    );
     expect(peekFreshSignup()).toEqual({
       workspaceId: session.member.workspaceId,
       memberId: session.member.id,
@@ -342,7 +347,7 @@ describe("reload during S1 re-enters S1", () => {
   it("reload during S1 re-enters S1; after S1 a reload re-enters S2", async () => {
     const host = await mountApp();
     await submitClaimFrom(host);
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("workspace-profile");
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
 
     unmountApp();
 
@@ -363,7 +368,9 @@ describe("reload during S1 re-enters S1", () => {
     });
     await submitS1();
     expect(reloaded.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
-    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe("invite");
+    expect(sessionStorage.getItem(OWNER_ONBOARDING_KEY)).toBe(
+      JSON.stringify({ invite: true })
+    );
 
     unmountApp();
 
@@ -426,5 +433,49 @@ describe("S1 identity survives into the shell (H-2)", () => {
     expect(reloaded.querySelector('[data-testid="self-handle"]')?.textContent).toBe(
       "seongjae"
     );
+    expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).toBeNull();
+  });
+});
+
+describe("S1 pending survives S2 skip (H-R2-1)", () => {
+  it("non-field failure → skip → S2 skip → remount offers S1 again", async () => {
+    renameWorkspace.mockRejectedValue(new ApiError(500, "engine boom"));
+    const host = await mountApp();
+    await submitClaimFrom(host);
+    await vi.waitFor(() => {
+      expect(fetchWorkspace).toHaveBeenCalled();
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    fill("onboarding-s1-workspace-name", "새벽");
+    fill("onboarding-s1-display-name", "성재");
+    fill("onboarding-s1-handle", "seongjae");
+    await act(async () => {
+      click("onboarding-s1-submit");
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s1-skip"]')).not.toBeNull();
+    });
+    click("onboarding-s1-skip");
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="onboarding-s2"]')).not.toBeNull();
+    });
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    click("onboarding-s2-skip");
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="app-shell"]')).not.toBeNull();
+    });
+    expect(hasOwnerOnboardingFlag("workspace-profile")).toBe(true);
+    expect(hasOwnerOnboardingFlag("invite")).toBe(false);
+
+    unmountApp();
+    const reloaded = await mountApp();
+    await vi.waitFor(() => {
+      expect(reloaded.querySelector('[data-testid="session-restoring"]')).toBeNull();
+    });
+    expect(reloaded.querySelector('[data-testid="onboarding-s1"]')).not.toBeNull();
+    expect(reloaded.querySelector('[data-testid="app-shell"]')).toBeNull();
   });
 });

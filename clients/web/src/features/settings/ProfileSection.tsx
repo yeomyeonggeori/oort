@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { changeMyDisplayName, changeMyHandle } from "@momo/core/lib/api";
+import { changeMyProfile } from "@momo/core/lib/api";
 import {
   displayNameFieldError,
   displayNameSaveMessage,
@@ -13,15 +13,20 @@ import { Input } from "@/design/ui/input";
 import { InlineBanner } from "@/features/common/States";
 import { Avatar } from "@/features/timeline/MessageRow";
 import { HandleField } from "@/features/onboarding/HandleField";
+import {
+  isField400,
+  isHandleTaken,
+} from "@/features/onboarding/identityCopy";
+import { recordOwnerOnboardingSettingsSave } from "@/features/onboarding/ownerOnboardingStore";
 import { memberFor, useDirectory } from "@/features/workspace/useWorkspace";
 import { Field, SaveButton, SectionShell } from "./SettingsFields";
 
 // Design Read: settings / Profile for internal team users on web+Tauri,
 // density 7/10, motion 2/10.
 //
-// 표시 이름과 핸들(E2). 아바타는 현행 표시, 업로드는 서버 표면이 없어
-// 넣지 않는다. 저장은 PATCH 1회씩, 성공 시에만 roster와 세션을 갱신한다
-// (낙관 갱신 없음). 핸들 카피·검증은 S1과 같다.
+// 표시 이름과 핸들(E2)을 S1과 같이 한 폼·한 PATCH로 저장한다. 아바타는
+// 현행 표시, 업로드는 서버 표면이 없어 넣지 않는다. 검증은 제출/blur.
+// 성공 시에만 roster와 세션을 갱신한다 (낙관 갱신 없음).
 
 export function ProfileSection({ offline }: { offline: boolean }) {
   const { session, workspaceId, replaceSessionMember } = useSession();
@@ -34,11 +39,11 @@ export function ProfileSection({ offline }: { offline: boolean }) {
   const [draft, setDraft] = useState(savedName);
   const [handleDraft, setHandleDraft] = useState(savedHandle);
   const [busy, setBusy] = useState(false);
-  const [handleBusy, setHandleBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [displayError, setDisplayError] = useState<string | null>(null);
   const [handleError, setHandleError] = useState<string | null>(null);
   const saveStarted = useRef(false);
-  const handleSaveStarted = useRef(false);
+  const displayInputRef = useRef<HTMLInputElement>(null);
+  const handleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setDraft(savedName);
@@ -48,53 +53,87 @@ export function ProfileSection({ offline }: { offline: boolean }) {
     setHandleDraft(savedHandle);
   }, [savedHandle]);
 
-  const fieldError = displayNameFieldError(draft);
-  const handleGate = handleFieldError(handleDraft);
-  const canSave = !offline && !busy && draft !== savedName && fieldError === null;
-  const canSaveHandle =
-    !offline &&
-    !handleBusy &&
-    normalizeHandle(handleDraft) !== savedHandle &&
-    handleGate === null;
+  const displayDirty = draft !== savedName;
+  const handleDirty = normalizeHandle(handleDraft) !== savedHandle;
+  const dirty = displayDirty || handleDirty;
+  const canSave = !offline && !busy && dirty;
+
+  const handleDisplayBlur = () => {
+    if (!displayDirty) return;
+    setDisplayError(displayNameFieldError(draft));
+  };
+
+  const handleHandleBlur = () => {
+    if (!handleDirty) return;
+    setHandleError(handleFieldError(handleDraft));
+  };
+
+  const focusFirstInvalid = (nextDisplay: string | null, nextHandle: string | null) => {
+    if (nextDisplay) {
+      displayInputRef.current?.focus({ preventScroll: true });
+      return;
+    }
+    if (nextHandle) {
+      handleInputRef.current?.focus({ preventScroll: true });
+    }
+  };
 
   async function save() {
     if (!canSave || saveStarted.current) return;
+    const nextDisplayError = displayDirty ? displayNameFieldError(draft) : null;
+    const nextHandleError = handleDirty ? handleFieldError(handleDraft) : null;
+    setDisplayError(nextDisplayError);
+    setHandleError(nextHandleError);
+    if (nextDisplayError || nextHandleError) {
+      focusFirstInvalid(nextDisplayError, nextHandleError);
+      return;
+    }
     saveStarted.current = true;
-    setError(null);
     setBusy(true);
     try {
-      const member = await changeMyDisplayName(workspaceId, draft);
+      const patch: { displayName?: string; handle?: string } = {};
+      if (displayDirty) patch.displayName = draft.trim();
+      if (handleDirty) patch.handle = normalizeHandle(handleDraft);
+      const member = await changeMyProfile(workspaceId, patch);
       await client.invalidateQueries({ queryKey: ["roster", workspaceId] });
       replaceSessionMember(member);
       setDraft(member.displayName);
+      setHandleDraft(member.handle);
+      recordOwnerOnboardingSettingsSave("profile");
     } catch (failure) {
-      setError(displayNameSaveMessage(failure));
+      if (
+        isHandleTaken(failure) ||
+        (isField400(failure) && failure.message.toLowerCase().includes("handle"))
+      ) {
+        setHandleError(handleSaveMessage(failure));
+        handleInputRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (
+        isField400(failure) &&
+        failure.message.toLowerCase().includes("displayname")
+      ) {
+        setDisplayError(displayNameSaveMessage(failure));
+        displayInputRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      if (handleDirty && !displayDirty) {
+        setHandleError(handleSaveMessage(failure));
+        handleInputRef.current?.focus({ preventScroll: true });
+        return;
+      }
+      setDisplayError(displayNameSaveMessage(failure));
+      displayInputRef.current?.focus({ preventScroll: true });
     } finally {
       saveStarted.current = false;
       setBusy(false);
     }
   }
 
-  async function saveHandle() {
-    if (!canSaveHandle || handleSaveStarted.current) return;
-    handleSaveStarted.current = true;
-    setHandleError(null);
-    setHandleBusy(true);
-    try {
-      const member = await changeMyHandle(
-        workspaceId,
-        normalizeHandle(handleDraft)
-      );
-      await client.invalidateQueries({ queryKey: ["roster", workspaceId] });
-      replaceSessionMember(member);
-      setHandleDraft(member.handle);
-    } catch (failure) {
-      setHandleError(handleSaveMessage(failure));
-    } finally {
-      handleSaveStarted.current = false;
-      setHandleBusy(false);
-    }
-  }
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    void save();
+  };
 
   return (
     <SectionShell
@@ -107,22 +146,6 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           {shownName}
         </p>
       </div>
-      {error ? (
-        <InlineBanner
-          tone="error"
-          message={error}
-          messageId="profile-display-name-error-text"
-          testId="profile-display-name-error"
-        />
-      ) : null}
-      {handleError ? (
-        <InlineBanner
-          tone="error"
-          message={handleError}
-          messageId="profile-handle-error-text"
-          testId="profile-handle-error"
-        />
-      ) : null}
       {offline ? (
         <InlineBanner
           tone="neutral"
@@ -131,64 +154,32 @@ export function ProfileSection({ offline }: { offline: boolean }) {
           testId="profile-offline-banner"
         />
       ) : null}
-      <form
-        className="flex min-w-0 flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void save();
-        }}
-      >
-        <Field label="표시 이름" htmlFor="profile-display-name">
+      <form className="flex min-w-0 flex-col gap-4" onSubmit={handleSubmit}>
+        <Field label="표시 이름" htmlFor="profile-display-name" error={displayError}>
           <Input
+            ref={displayInputRef}
             id="profile-display-name"
             name="displayName"
             value={draft}
             autoComplete="nickname"
             disabled={offline}
-            aria-invalid={error || fieldError ? true : undefined}
+            aria-invalid={displayError ? true : undefined}
             aria-describedby={
               [
                 offline ? "profile-offline-reason" : null,
-                error ? "profile-display-name-error-text" : null,
-                fieldError ? "profile-display-name-field-error" : null,
+                displayError ? "profile-display-name-error" : null,
               ]
                 .filter(Boolean)
                 .join(" ") || undefined
             }
             data-testid="profile-display-name"
-            onChange={(event) => setDraft(event.currentTarget.value)}
-          />
-          {fieldError ? (
-            <p
-              id="profile-display-name-field-error"
-              role="alert"
-              className="text-meta text-danger"
-              data-testid="profile-display-name-field-error"
-            >
-              {fieldError}
-            </p>
-          ) : null}
-        </Field>
-        <div className="flex flex-wrap items-center gap-2">
-          <SaveButton
-            label="표시 이름 저장"
-            canSave={canSave}
-            busy={busy}
-            size="default"
-            onSave={() => {
-              void save();
+            onChange={(event) => {
+              setDraft(event.currentTarget.value);
+              setDisplayError(null);
             }}
-            testId="profile-display-name-save"
+            onBlur={handleDisplayBlur}
           />
-        </div>
-      </form>
-      <form
-        className="flex min-w-0 flex-col gap-4"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void saveHandle();
-        }}
-      >
+        </Field>
         <HandleField
           id="profile-handle"
           value={handleDraft}
@@ -196,32 +187,27 @@ export function ProfileSection({ offline }: { offline: boolean }) {
             setHandleDraft(value);
             setHandleError(null);
           }}
-          error={handleGate}
-          errorId="profile-handle-field-error"
-          describedBy={
-            [
-              offline ? "profile-offline-reason" : null,
-              handleError ? "profile-handle-error-text" : null,
-            ]
-              .filter(Boolean)
-              .join(" ") || undefined
-          }
+          onBlur={handleHandleBlur}
+          error={handleError}
+          errorId="profile-handle-error"
+          describedBy={offline ? "profile-offline-reason" : undefined}
           testId="profile-handle"
-          errorTestId="profile-handle-field-error"
+          errorTestId="profile-handle-error"
           previewTestId="profile-handle-preview"
           offline={offline}
+          inputRef={handleInputRef}
           label={<span className="text-meta text-ink-muted">핸들</span>}
         />
         <div className="flex flex-wrap items-center gap-2">
           <SaveButton
-            label="핸들 저장"
-            canSave={canSaveHandle}
-            busy={handleBusy}
+            label="프로필 저장"
+            canSave={canSave}
+            busy={busy}
             size="default"
             onSave={() => {
-              void saveHandle();
+              void save();
             }}
-            testId="profile-handle-save"
+            testId="profile-save"
           />
         </div>
       </form>

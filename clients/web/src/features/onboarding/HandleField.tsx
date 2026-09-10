@@ -1,4 +1,4 @@
-import type { ChangeEvent, ReactNode, Ref } from "react";
+import type { ChangeEvent, FocusEvent, ReactNode, Ref } from "react";
 import { Input } from "@/design/ui/input";
 import { cn } from "@/design/lib/cn";
 import { handleFieldError, isValidHandle, normalizeHandle } from "./identityCopy";
@@ -22,6 +22,7 @@ export function HandleField({
   offline = false,
   inputRef,
   label = "핸들",
+  onBlur,
 }: {
   id: string;
   value: string;
@@ -35,6 +36,7 @@ export function HandleField({
   offline?: boolean;
   inputRef?: Ref<HTMLInputElement>;
   label?: ReactNode;
+  onBlur?: (event: FocusEvent<HTMLInputElement>) => void;
 }) {
   const normalized = normalizeHandle(value);
   const showPreview =
@@ -77,6 +79,7 @@ export function HandleField({
           className="pl-8"
           data-testid={testId}
           onChange={handleChange}
+          onBlur={onBlur}
         />
       </div>
       {showPreview ? (

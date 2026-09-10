@@ -25,8 +25,8 @@
 
 ## SH-12b-w 온보딩 S1 「내 워크스페이스·내 이름」 (#2332)
 
-- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2/E0 `changeMyProfile` `{handle, displayName}` 1회. 핸들 409는 제품 한국어, stale 409는 상대 이름+유지/저장, 비필드 실패는 「다시 시도」+「지금은 건너뛰기」(마커는 `workspace-profile` 유지). 설정 › 워크스페이스 이름(E1) · 설정 › 프로필 핸들(E2). `oort.onboarding.v1` 값이 `workspace-profile`→`invite`. 팀 규모 질문 0.
-- R2: 필드 오류 한국어+다음 행동, S1 성공 뒤 `replaceSessionMember`+persist, 설정 이름/핸들 컨트롤 신설.
+- Track UXUI. `feat/2332-onboarding-s1` onto `origin/track/uxui`. claim 성공 뒤 S1 필수 1장(워크스페이스 이름·표시 이름·핸들, 카운터 1/2) → 기존 S2(2/2). 제출 = E1 `renameWorkspace` `{name, updatedAtMs}` + E2/E0 `changeMyProfile` `{handle, displayName}` 1회. 핸들 409는 제품 한국어, stale 409는 상대 이름+유지/저장, 비필드 실패는 「다시 시도」+「지금은 건너뛰기」. `oort.onboarding.v1` 은 S1(`workspace-profile`)·S2(`invite`) 독립 플래그. S2 skip은 invite만 지운다. 설정 › 워크스페이스·프로필은 S1과 같은 stale 조각·한 PATCH.
+- R3: S2 「나중에」가 S1 재제안을 지우지 않음. 설정 stale 409는 초안 유지+공용 컴포넌트. 방향 조사·검증은 제출/blur. 프로필은 단일 폼.
 - runtime-unverified: 실서버 claim→S1→S2 왕복은 mock·RTL 범위.
 
 ## SH-12c 온보딩 S2 「팀원 초대」 (#2333)

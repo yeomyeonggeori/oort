@@ -16,6 +16,7 @@ import { WorkspaceSection } from "./WorkspaceSection";
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 const AGENT_ID = "00000000-0000-7000-8000-000000000201";
+const WS_TOKEN = 1_700_000_000_123;
 
 const patchWorkspaceSettings = vi.hoisted(() => vi.fn());
 const renameWorkspace = vi.hoisted(() => vi.fn());
@@ -135,7 +136,7 @@ function workspace(labels: RoleLabels): WorkspaceIdentity {
     id: WS,
     slug: "dawn",
     name: "새벽팀",
-    updatedAtMs: 0,
+    updatedAtMs: WS_TOKEN,
     roleLabels: labels,
     welcomeAgentMemberId: null,
     welcomePrompt: "",
@@ -405,10 +406,10 @@ describe("워크스페이스 이름 E1", () => {
     await vi.waitFor(() => {
       expect(renameWorkspace).toHaveBeenCalledTimes(1);
     });
-    expect(renameWorkspace).toHaveBeenCalledWith(WS, "여명거리", 0);
+    expect(renameWorkspace).toHaveBeenCalledWith(WS, "여명거리", WS_TOKEN);
   });
 
-  it("409는 refetch한 이름을 칸에 복사한다", async () => {
+  it("409는 초안을 유지하고 S1과 같은 stale 조각을 그린다", async () => {
     renameWorkspace.mockRejectedValue(
       new ApiError(409, "workspace has been updated; refetch and retry")
     );
@@ -433,15 +434,89 @@ describe("워크스페이스 이름 E1", () => {
       expect(fetchWorkspace).toHaveBeenCalled();
     });
     await vi.waitFor(() => {
-      expect(
-        (host.querySelector(
-          '[data-testid="workspace-rename-name"]'
-        ) as HTMLInputElement).value
-      ).toBe("다른 기기에서 바꾼 이름");
+      expect(host.querySelector('[data-testid="workspace-rename-stale"]')).not.toBeNull();
     });
-    expect(host.querySelector('[data-testid="workspace-rename-error"]')?.textContent).toBe(
-      "워크스페이스 이름이 바뀌었습니다. 다시 저장하세요."
+    expect(
+      (host.querySelector(
+        '[data-testid="workspace-rename-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("여명거리");
+    expect(host.textContent).toContain("다른 기기에서 바꾼 이름");
+    expect(host.querySelector('[data-testid="workspace-rename-keep-theirs"]')?.textContent).toBe(
+      "이 이름으로 유지"
     );
+    expect(host.querySelector('[data-testid="workspace-rename-keep-mine"]')?.textContent).toBe(
+      "내 이름으로 저장"
+    );
+    const filled = [...host.querySelectorAll('[data-testid="workspace-rename"] button')].filter(
+      (button) => button.className.includes("bg-accent")
+    );
+    expect(filled).toHaveLength(1);
+    expect(filled[0]?.textContent).toBe("내 이름으로 저장");
+    expect(host.querySelector('[data-testid="workspace-rename-save"]')).toBeNull();
+    expect(
+      host.querySelector('[data-testid="workspace-rename-name"]')?.getAttribute("aria-describedby")
+    ).toContain("workspace-rename-stale-message");
+    act(() => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-keep-theirs"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    expect(
+      (host.querySelector(
+        '[data-testid="workspace-rename-name"]'
+      ) as HTMLInputElement).value
+    ).toBe("다른 기기에서 바꾼 이름");
+    expect(document.activeElement).toBe(
+      host.querySelector('[data-testid="workspace-rename-name"]')
+    );
+  });
+
+  it("내 이름으로 저장은 refetch한 토큰으로 초안을 다시 보낸다", async () => {
+    renameWorkspace
+      .mockRejectedValueOnce(
+        new ApiError(409, "workspace has been updated; refetch and retry")
+      )
+      .mockResolvedValueOnce({
+        ...workspace({}),
+        name: "여명거리",
+        updatedAtMs: 11,
+      });
+    fetchWorkspace.mockResolvedValue({
+      ...workspace({}),
+      name: "다른 기기에서 바꾼 이름",
+      updatedAtMs: 9,
+    });
+    const host = mountSection({ role: "owner" });
+    const input = host.querySelector(
+      '[data-testid="workspace-rename-name"]'
+    ) as HTMLInputElement;
+    act(() => setInputValue(input, "여명거리"));
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-save"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(host.querySelector('[data-testid="workspace-rename-keep-mine"]')).not.toBeNull();
+    });
+    expect(renameWorkspace).toHaveBeenCalledWith(WS, "여명거리", WS_TOKEN);
+    await act(async () => {
+      (
+        host.querySelector(
+          '[data-testid="workspace-rename-keep-mine"]'
+        ) as HTMLButtonElement
+      ).click();
+    });
+    await vi.waitFor(() => {
+      expect(renameWorkspace).toHaveBeenCalledTimes(2);
+    });
+    expect(renameWorkspace).toHaveBeenLastCalledWith(WS, "여명거리", 9);
+    expect(document.activeElement).not.toBe(document.body);
   });
 });
 
