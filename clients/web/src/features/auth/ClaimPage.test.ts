@@ -35,6 +35,25 @@ describe("claim page failure landing", () => {
   });
 });
 
+describe("claim page restore hold (ConnectPage order)", () => {
+  it("holds session restore before await claimOwnerPassword", () => {
+    const start = source.indexOf("async function attempt");
+    const body = source.slice(start, source.indexOf("function onSubmit"));
+    const holdAt = body.indexOf("holdSessionRestore()");
+    const awaitAt = body.indexOf("await claimOwnerPassword");
+    expect(holdAt).toBeGreaterThan(0);
+    expect(awaitAt).toBeGreaterThan(0);
+    expect(holdAt).toBeLessThan(awaitAt);
+    expect(body).toContain("releaseSessionRestore()");
+    expect(body.indexOf("recordFreshSignupFirstRun(session)")).toBeLessThan(
+      body.indexOf("setClaimed(session)")
+    );
+    expect(body.indexOf("markOwnerOnboardingPending()")).toBeLessThan(
+      body.indexOf("setClaimed(session)")
+    );
+  });
+});
+
 describe("claim page first-run markers (#2301)", () => {
   it("records first-run through the one helper shared with invite-join", () => {
     const connect = readFileSync(

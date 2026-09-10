@@ -37,6 +37,46 @@ export function progressLabel(step: OnboardingStep): string | null {
 }
 
 /**
+ * Post-claim zero-base stages (ADR-0185 D-A (3), SH-12c).
+ *
+ * Order is the table. Counter text is derived from it, so S2 is always
+ * `2/2` while this list has two slots. S1 (`workspace-profile`, SH-12b-w)
+ * is built in parallel and is not mounted here; inserting it later means
+ * adding it to `OWNER_ONBOARDING_MOUNTED` without changing the S2 component.
+ */
+export const OWNER_ONBOARDING_STAGES = [
+  "workspace-profile",
+  "invite",
+] as const;
+
+export type OwnerOnboardingStage = (typeof OWNER_ONBOARDING_STAGES)[number];
+
+/** Stages this checkout actually mounts. S1 lands in #2332. */
+export const OWNER_ONBOARDING_MOUNTED: readonly OwnerOnboardingStage[] = [
+  "invite",
+];
+
+export function ownerOnboardingTotalSteps(): number {
+  return OWNER_ONBOARDING_STAGES.length;
+}
+
+export function ownerOnboardingProgressLabel(
+  stage: OwnerOnboardingStage
+): string {
+  const index = OWNER_ONBOARDING_STAGES.indexOf(stage);
+  return `${index + 1}/${OWNER_ONBOARDING_STAGES.length}`;
+}
+
+export function initialOwnerOnboardingStage(): OwnerOnboardingStage {
+  return OWNER_ONBOARDING_MOUNTED[0] ?? "invite";
+}
+
+/** ADR-0185 §8 sealed S2 defaults: TTL 24h, uses 1, re-issuable in settings. */
+export const OWNER_INVITE_TTL_MS = 86_400_000;
+export const OWNER_INVITE_MAX_USES = 1;
+export const OWNER_INVITE_ROLE = "member";
+
+/**
  * Where S1 should land the cursor after a deep link (or any prefill that
  * opened the gateway). Email/password live on S2, so the old single-form
  * `prefillFocus` returning those fields is a silent no-op here.

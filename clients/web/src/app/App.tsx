@@ -17,6 +17,12 @@ import {
 } from "@/features/auth/phoneLinkFirstRunStore";
 import { ClaimPage } from "@/features/auth/ClaimPage";
 import { isClaimPath } from "@/features/auth/claimPath";
+import { OwnerOnboarding } from "@/features/onboarding/OwnerOnboarding";
+import {
+  clearOwnerOnboardingPending,
+  ownerOnboardingIsPending,
+  subscribeOwnerOnboarding,
+} from "@/features/onboarding/ownerOnboardingStore";
 import { AppShell } from "@/app/AppShell";
 import { Skeleton } from "@/features/common/States";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
@@ -117,6 +123,11 @@ export function App() {
     useRestoredSession();
   const [firstRunTick, setFirstRunTick] = useState(0);
   useSyncExternalStore(subscribeFirstRun, snapshotFirstRun, snapshotFirstRun);
+  useSyncExternalStore(
+    subscribeOwnerOnboarding,
+    ownerOnboardingIsPending,
+    ownerOnboardingIsPending
+  );
 
   const capturePose = readFirstAgentCapturePoseFromLocation();
   const firstRun = session
@@ -194,6 +205,18 @@ export function App() {
   // ADR-0181 kickoff lives in the welcome channel, so a fresh signup holds the
   // app open first. Then first-agent (#2216), then phone (ADR-0180 D7).
   const bumpFirstRun = () => setFirstRunTick((n) => n + 1);
+
+  if (ownerOnboardingIsPending()) {
+    return (
+      <OwnerOnboarding
+        session={session}
+        onFinished={() => {
+          clearOwnerOnboardingPending();
+          bumpFirstRun();
+        }}
+      />
+    );
+  }
 
   if (capturePose !== null || firstRun === "first-agent") {
     return (
