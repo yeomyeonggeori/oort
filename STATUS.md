@@ -1,10 +1,16 @@
 # oort 진행 현황
 
+## SH-11c AWS Lightsail/EC2 T1 레시피 (#2377, 2026-09-10)
+
+- Track engine. `feat/2377-aws-t1-recipe` onto `origin/track/engine`. `infra/aws/`: Lightsail 인스턴스 1 + 고정 IP + `/data` 디스크(`prevent_destroy`) + 포트 22/80/443만 + Budgets + EC2 변수 분기. cloud-init는 Docker `data-root=/data/docker`, 시크릿 비생성. IAM 최소권한(루트 금지). `scripts/tests/test_aws_recipe.sh` 정적 계약 + 사보타주 3 RED. terraform 부재 시 SH-11f 선택 도구 skip 1줄.
+- runtime-unverified: 성재 계정 `terraform apply` → doctor 27/27 · 5432 거부 · 재부팅 보존은 승인 지점 1 대기(이 런에서 apply 없음).
+
 ## 생성기 `--platform host-network` (#2340, 2026-09-10)
 
 - Track engine. `feat/2340-platform-host-network` onto `origin/track/engine`. `platform_profiles` T1 행 `host-network`: 내부 URL 4키를 `127.0.0.1:<compose port>` 로 파생하고 `infra/rust/docker-compose.host-network.yml` (`network_mode: host`, 서비스당 1회·12) 을 렌더. `--compose` 가 스탬프를 보고 오버레이를 붙인다. 기존 railway/fly/aws-lightsail/gcp-vm 출력 바이트 불변.
 - `docs/SELF_HOST_AGENT.md`(+ko) §3.3.0 대안 (b)/(c)를 `--platform host-network` 로 정정. 하네스 메모는 `scripts/dev/grokbot_cdp/README.md`. §3.3.14 우회 기록 유지.
 - runtime-unverified: Grok Bot VM에서 bridge 차단 + 이 행으로 재설치 e2e (E2E-A 후속). 로컬은 `docker compose … config` 스모크.
+
 ## SH-11e-2 런타임 이미지 day-2 도구 (#2346, 2026-09-10)
 
 - Track engine. `feat/2346-image-day2-tools` onto `origin/track/engine`. 선택 A: PGDG `postgresql-client-18=18.6-1.pgdg12+2`(키 ACCC4CF8 sha256 핀, curl|sh 없음) + `python3`(json; `python3-minimal`은 json 없음). apt-layer 실측 47599335 → 59871688 B (**+11.70 MiB**). 풀 이미지 inspect 78807654 → 91229002 B (**+11.85 MiB**, 예산 60 MiB).
