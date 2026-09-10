@@ -121,9 +121,10 @@ pub use tier::{
 };
 pub use workspace::{
     create_workspace_in_tx, lock_membership_mutation, normalized_workspace_name,
-    normalized_workspace_slug, revoke_member_tokens_in_tx, terminate_workspace_membership_in_tx,
-    workspace_has_another_active_owner, CreatedWorkspace, RevokedTokens,
-    WorkspaceProvisionRejected, WorkspaceSpecInvalid,
+    normalized_workspace_slug, rename_workspace_in_tx, revoke_member_tokens_in_tx,
+    terminate_workspace_membership_in_tx, workspace_has_another_active_owner, CreatedWorkspace,
+    RevokedTokens, WorkspaceProvisionRejected, WorkspaceRenameApplied, WorkspaceRenameRejected,
+    WorkspaceSpecInvalid,
 };
 pub use workspace_settings::{
     merge_workspace_settings, project_role_labels, read_workspace_settings,

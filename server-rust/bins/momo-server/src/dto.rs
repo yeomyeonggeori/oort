@@ -3244,6 +3244,15 @@ pub struct JoinResponse {
     pub created_member: bool,
 }
 
+/// `PATCH /v1/workspaces/{ws}` body (ADR-0185 E1). `updatedAtMs` is the
+/// optimistic-concurrency token `GET` already returns. Slug is not accepted.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RenameWorkspaceRequest {
+    pub name: String,
+    pub updated_at_ms: i64,
+}
+
 /// Swift `CreateWorkspaceRequest` (`WorkspaceRoutes.swift`).
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -4830,6 +4839,36 @@ mod tests {
             json["invite"].get("code").is_none(),
             "the raw code leaves the server exactly once, from the create call: {json}"
         );
+    }
+
+    /// ADR-0185 E1 — camelCase body, closed world. Slug is not writable here.
+    #[test]
+    fn workspace_rename_request_is_camel_case_and_closed() {
+        let body: RenameWorkspaceRequest = serde_json::from_value(serde_json::json!({
+            "name": "  내 팀  ",
+            "updatedAtMs": 1_700_000_000_123_i64,
+        }))
+        .expect("camelCase decodes");
+        assert_eq!(body.name, "  내 팀  ");
+        assert_eq!(body.updated_at_ms, 1_700_000_000_123);
+
+        assert!(
+            serde_json::from_value::<RenameWorkspaceRequest>(serde_json::json!({
+                "name": "내 팀",
+                "updated_at_ms": 1
+            }))
+            .is_err(),
+            "snake_case is not an alias on this surface"
+        );
+        for smuggled in [
+            serde_json::json!({"name": "내 팀", "updatedAtMs": 1, "slug": "stolen"}),
+            serde_json::json!({"name": "내 팀", "updatedAtMs": 1, "id": "x"}),
+        ] {
+            assert!(
+                serde_json::from_value::<RenameWorkspaceRequest>(smuggled.clone()).is_err(),
+                "unknown key must not decode: {smuggled}"
+            );
+        }
     }
 
     /// #1873 — camelCase body, closed world. A snake_case alias or a smuggled
