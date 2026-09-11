@@ -17,6 +17,11 @@ for path in "$RESTORE" "$VERIFY" "$ROOT/infra/rust/pgbackrest.conf"; do
   [ -f "$path" ] || fail "missing path=$path"
 done
 
+# Same fail-closed docker guard as test_oort_day2.sh / test_oort_doctor.sh.
+# Docs profile runs this harness; docker missing is RED, not an optional skip.
+command -v docker >/dev/null 2>&1 || fail "docker is required"
+docker info >/dev/null 2>&1 || fail "docker daemon is required"
+
 # Colima/macOS: default TMPDIR (/var/folders) and /tmp are not bind-mounted
 # into the VM. Keep the fixture under the worktree so the attach bind-mount works.
 fixture="$(mktemp -d "$ROOT/.tmp-momo-pitr-contract.XXXXXX")"
