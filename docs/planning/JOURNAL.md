@@ -3,6 +3,13 @@
 > 세션 종료 시 새 항목을 맨 위에 추가한다(플러시 의무 — `CLAUDE.md`).
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 월초 플러시 때 `momo-main`이 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-11 · Fable · ★v0.1.5 릴리스(803ae7d5) + 밤사이 셀프호스트 하드닝 7건 main — 스냅샷 98
+
+- **v0.1.5**: 성재 dispatch(run 34566962884, main tip 803ae7d5 — 워크플로가 main만 허용해 스냅샷 97의 db5cb8e9가 아님) → 승인 3회 → 앱 `sha256:5481c14e…`·postgres `sha256:c6a5bb84…` list digest, attestation PASS ×2 → **발행 이미지로 제로베이스 E2E-B′(`--published-image`+`--claim`) 12/12 PASS**(이전 D1~D4 소멸, D5=doctor env.digest가 committed manifest v0.1.4와 불일치 → #2469로 해소) → 태그·Release·`releases/latest.json`·CHANGELOG `[0.1.5]`(PR #2469).
+- **랜딩(main)**: #2433 momo_notifier 롤+최소 GRANT+기존 env 백필(#2193, 리뷰 R1→R2: sweep 테이블 GRANT 누락·업그레이드 파손·doctor DELETE) · #2461 GRANT 트림+호출 그래프/INVOKER 트리거 도출 29표+E2E T3 stale 시드(#2448, R2: work_cloud_host_transition) · #2452 생성기 `--claim` 1급(#2438) · #2436 E2E-B 문서 이탈 D1~D4(#2429) · #2443 PITR 계약 시험 Colima 픽스처(#2157) · #2444 게이트 정책 배치 1(#1984 #2124, R1 FAIL: `bash -n a b c d` 첫 파일만) · #2460 정책 배치 2(#2456) · #2428 S1 nits(#2418). #2181은 #2307로 기해소 → 닫음. #2205는 SH-11a 실배포 티켓으로 재범위.
+- **레인**: grok 리뷰어 C 사보타주가 실구멍 4건을 잡음(sweep GRANT 누락·bash -n 파일 인자·잠금 문자열·트리거 읽기 테이블). 기계 수면(02:30~09:30)·네트워크 중단(10:00~14:30)으로 grok 세션 3회 정지 → `-c` 재개/재스폰. 성재 질의 「grok 네이티브 서브에이전트?」 → Claude 모델 한정으로 불가, 하이브리드 결정(메모리·PIPELINE 후속).
+- **다음**: E2E-A 그록봇(발행 이미지) → SH-11a → v0.1.6 편성.
+
 ## 2026-09-10 (낮) · Fable · ★ADR-0185 Accepted 집행 — SH-12 온보딩 5/6 main + SH-11 플랫폼 중립화(e·e-2·b·c·host-network) main + 워커 레인 Grok Build 복귀 — 스냅샷 97
 
 - **성재 결재(09-10)**: ①「결정 없이 재개, 다음 순서 진행」 ②**ADR-0185 권고안 그대로 Accept**(D-A (3) 절충 · D-B (b) 시드 유지+온보딩 덮어쓰기(v0.1.5) · D-C (iii) 첫 에이전트 연결) → #2330 ③「다시 fable orchestrator 모드, **grok build grok 4.6 적극 활용**」 → PIPELINE §1/§3/§5 갱신 #2357(Grok Build CLI 워커·리뷰어 C, Cursor CLI 폴백).
