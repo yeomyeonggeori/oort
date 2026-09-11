@@ -9,6 +9,10 @@
 //!   → { status: pending|consumed|expired, device? }
 //! POST /v1/auth/device-link/{id}/confirm-sas  (issuer session)
 //!   → 200 { status: "confirmed" }
+//! GET  /v1/auth/devices                  (human bearer)
+//!   → { devices: [{ id, label, platform, linkedAt, lastSeenAt?, current }] }
+//! DELETE /v1/auth/devices/{id}           (owner only; current session → 400)
+//!   → 204
 //! ```
 //!
 //! Redeem is public for the same construction reason `/v1/join` and `/v1/claim`
@@ -21,24 +25,29 @@ use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::{Extension, Json};
 use momo_auth::{
     confirm_device_link_sas_in_tx, consume_device_link_in_tx, device_link_status_in_tx,
-    issue_device_link_in_tx, mint_device_link_token, normalized_device_link_token,
-    normalized_device_name, normalized_device_platform, resolve_device_link_workspace,
-    DeviceLinkConfirm, DeviceLinkMutation, DeviceLinkSpecInvalid, DeviceLinkStatusKind, Principal,
+    issue_device_link_in_tx, list_linked_devices_in_tx, mint_device_link_token,
+    normalized_device_link_token, normalized_device_name, normalized_device_platform,
+    resolve_device_link_workspace, revoke_linked_device_in_tx, DeviceLinkConfirm,
+    DeviceLinkMutation, DeviceLinkSpecInvalid, DeviceLinkStatusKind, LinkedDevice,
+    LinkedDeviceRevoke, Principal,
 };
 use momo_db::audit::{write_audit, AuditEntry};
 use momo_db::{with_tenant_tx, DbError};
 
 use crate::dto::{
     DeviceLinkConfirmResponse, DeviceLinkDevice, DeviceLinkIssueResponse, DeviceLinkRedeemRequest,
-    DeviceLinkRedeemResponse, DeviceLinkStatusResponse, MemberDto,
+    DeviceLinkRedeemResponse, DeviceLinkStatusResponse, LinkedDeviceDto, LinkedDeviceListResponse,
+    MemberDto,
 };
 use crate::error::{db_error, ApiError};
 use crate::realtime_advert::{derive_same_origin_http_base, requires_device_link_sas};
 use crate::routes::auth_routes::base_scopes;
-use crate::routes::shared::{path_uuid, require_human};
+use crate::routes::shared::{audit_via_token_id, path_uuid, require_human};
 use crate::AppState;
 
 const HUMAN_ONLY: &str = "device link requires a human bearer";
+const DEVICE_NOT_FOUND: &str = "device not found";
+const CANNOT_REVOKE_CURRENT: &str = "cannot_revoke_current";
 
 fn spec_error(error: DeviceLinkSpecInvalid) -> ApiError {
     ApiError::bad_request(error.to_string())
@@ -314,6 +323,96 @@ pub async fn confirm_sas(
             "device link has not been redeemed",
         )),
         DeviceLinkConfirm::NotFound => Err(ApiError::not_found("device link not found")),
+    }
+}
+
+fn linked_device_dto(device: LinkedDevice) -> LinkedDeviceDto {
+    LinkedDeviceDto {
+        id: device.id.to_string(),
+        label: device.label,
+        platform: device.platform,
+        linked_at: device.linked_at_ms,
+        last_seen_at: device.last_seen_at_ms,
+        current: device.current,
+    }
+}
+
+/// `GET /v1/auth/devices` — this member's live device-link sessions.
+pub async fn list_devices(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+) -> Result<Json<LinkedDeviceListResponse>, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let current_token_id = issuer_token_id(&principal)?;
+    let workspace_id = principal.workspace_id;
+    let member_id = principal.member_id;
+
+    let devices = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            list_linked_devices_in_tx(conn, workspace_id, member_id, current_token_id)
+                .await
+                .map_err(DbError::from)
+        })
+    })
+    .await
+    .map_err(|error| db_error("auth.devices.list", error))?;
+
+    Ok(Json(LinkedDeviceListResponse {
+        devices: devices.into_iter().map(linked_device_dto).collect(),
+    }))
+}
+
+/// `DELETE /v1/auth/devices/{id}` — revoke that device's session pair.
+///
+/// Current-session rule: 400 `cannot_revoke_current` (logout is the path that
+/// ends the calling session). Foreign or unknown ids: 404, no existence leak.
+pub async fn revoke_device(
+    State(state): State<AppState>,
+    Extension(principal): Extension<Principal>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    require_human(&principal, HUMAN_ONLY)?;
+    let current_token_id = issuer_token_id(&principal)?;
+    let device_id = path_uuid(&id, "invalid device id")?;
+    let workspace_id = principal.workspace_id;
+    let member_id = principal.member_id;
+    let via_token = audit_via_token_id(&principal);
+
+    let outcome = with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let outcome = revoke_linked_device_in_tx(
+                conn,
+                workspace_id,
+                member_id,
+                device_id,
+                current_token_id,
+            )
+            .await
+            .map_err(DbError::from)?;
+            if outcome == LinkedDeviceRevoke::Revoked {
+                write_audit(
+                    conn,
+                    &AuditEntry::new(workspace_id, "device.unlinked")
+                        .by(member_id)
+                        .target("device_link_token", device_id)
+                        .via_token(via_token)
+                        .with_schema(
+                            "momo.device.unlinked.v1",
+                            serde_json::json!({ "via": "settings" }),
+                        ),
+                )
+                .await?;
+            }
+            Ok::<_, DbError>(outcome)
+        })
+    })
+    .await
+    .map_err(|error| db_error("auth.devices.revoke", error))?;
+
+    match outcome {
+        LinkedDeviceRevoke::Revoked => Ok(StatusCode::NO_CONTENT),
+        LinkedDeviceRevoke::NotFound => Err(ApiError::not_found(DEVICE_NOT_FOUND)),
+        LinkedDeviceRevoke::CurrentSession => Err(ApiError::bad_request(CANNOT_REVOKE_CURRENT)),
     }
 }
 

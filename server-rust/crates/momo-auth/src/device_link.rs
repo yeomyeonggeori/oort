@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 use crate::issue::{sign_access, sign_refresh, IssuedToken};
 use crate::token_store::{
-    record_session_token_with_device, DeviceSessionRecord, SESSION_LABEL_ACCESS,
-    SESSION_LABEL_REFRESH,
+    record_session_token_with_device, revoke_member_session_tokens_by_ids, DeviceSessionRecord,
+    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 
 /// Sealed TTL (ADR-0180 D1). 120 seconds.
@@ -470,6 +470,199 @@ pub async fn confirm_device_link_sas_in_tx(
     Ok(DeviceLinkConfirm::Confirmed)
 }
 
+/// One live linked device (ADR-0180 D5 / #2029). `id` is the
+/// `device_link_token` row — stable across refresh rebind.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkedDevice {
+    pub id: Uuid,
+    pub label: String,
+    pub platform: String,
+    pub linked_at_ms: i64,
+    pub last_seen_at_ms: Option<i64>,
+    pub current: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkedDeviceRevoke {
+    Revoked,
+    NotFound,
+    CurrentSession,
+}
+
+/// Owner-filtered list of this member's live device-link sessions.
+///
+/// SABOTAGE(owner-filter): drop `d.member_id = $2` (and the matching
+/// `actor_member_id` predicates). The "other member sees 0 rows" assertion
+/// must then go RED.
+const LIST_LINKED_DEVICES_SQL: &str = "SELECT \
+        d.id, \
+        d.device_label, \
+        d.device_platform, \
+        (EXTRACT(EPOCH FROM d.consumed_at) * 1000)::bigint AS linked_at_ms, \
+        (EXTRACT(EPOCH FROM access.last_used_at) * 1000)::bigint AS last_seen_at_ms, \
+        (access.id = $3) AS is_current \
+   FROM device_link_token d \
+   JOIN token access \
+     ON access.id = d.redeemed_access_token_id \
+    AND access.workspace_id = d.workspace_id \
+   JOIN token refresh \
+     ON refresh.id = d.redeemed_refresh_token_id \
+    AND refresh.workspace_id = d.workspace_id \
+  WHERE d.workspace_id = $1 \
+    AND d.member_id = $2 \
+    AND d.consumed_at IS NOT NULL \
+    AND d.device_label IS NOT NULL \
+    AND d.device_platform IS NOT NULL \
+    AND access.kind = 'session' \
+    AND access.label = 'access' \
+    AND access.actor_member_id = $2 \
+    AND refresh.kind = 'session' \
+    AND refresh.label = 'refresh' \
+    AND refresh.actor_member_id = $2 \
+    AND NOT access.pending_sas \
+    AND NOT refresh.pending_sas \
+    AND ( \
+          (access.revoked_at IS NULL \
+           AND (access.expires_at IS NULL OR access.expires_at > now())) \
+       OR (refresh.revoked_at IS NULL \
+           AND (refresh.expires_at IS NULL OR refresh.expires_at > now())) \
+        ) \
+  ORDER BY d.consumed_at DESC";
+
+pub async fn list_linked_devices_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    current_token_id: Uuid,
+) -> Result<Vec<LinkedDevice>, sqlx::Error> {
+    let rows = sqlx::query(LIST_LINKED_DEVICES_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(current_token_id)
+        .fetch_all(&mut *conn)
+        .await?;
+    let mut devices = Vec::with_capacity(rows.len());
+    for row in rows {
+        devices.push(LinkedDevice {
+            id: row.try_get("id")?,
+            label: row.try_get("device_label")?,
+            platform: row.try_get("device_platform")?,
+            linked_at_ms: row.try_get("linked_at_ms")?,
+            last_seen_at_ms: row.try_get("last_seen_at_ms")?,
+            current: row.try_get("is_current")?,
+        });
+    }
+    Ok(devices)
+}
+
+/// Load the consumed link that `member_id` owns. Missing, unconsumed, or
+/// another member's id all collapse to `None` so the route can 404 without
+/// leaking existence.
+async fn owned_linked_device_pair(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    device_id: Uuid,
+) -> Result<Option<(Uuid, Uuid)>, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT redeemed_access_token_id, redeemed_refresh_token_id \
+           FROM device_link_token \
+          WHERE workspace_id = $1 \
+            AND member_id = $2 \
+            AND id = $3 \
+            AND consumed_at IS NOT NULL",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(device_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let access_id: Option<Uuid> = row.try_get("redeemed_access_token_id")?;
+    let refresh_id: Option<Uuid> = row.try_get("redeemed_refresh_token_id")?;
+    match (access_id, refresh_id) {
+        (Some(access), Some(refresh)) => Ok(Some((access, refresh))),
+        _ => Ok(None),
+    }
+}
+
+/// Revoke the access+refresh pair bound to one linked device.
+///
+/// SABOTAGE(revoke-noop): skip `revoke_member_session_tokens_by_ids`. The
+/// "revoked token gets 401" assertion must then go RED.
+pub async fn revoke_linked_device_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    device_id: Uuid,
+    current_token_id: Uuid,
+) -> Result<LinkedDeviceRevoke, sqlx::Error> {
+    let Some((access_id, refresh_id)) =
+        owned_linked_device_pair(conn, workspace_id, member_id, device_id).await?
+    else {
+        return Ok(LinkedDeviceRevoke::NotFound);
+    };
+    if access_id == current_token_id {
+        return Ok(LinkedDeviceRevoke::CurrentSession);
+    }
+    let flipped = revoke_member_session_tokens_by_ids(
+        conn,
+        workspace_id,
+        member_id,
+        &[access_id, refresh_id],
+    )
+    .await?;
+    if flipped == 0 {
+        return Ok(LinkedDeviceRevoke::NotFound);
+    }
+    Ok(LinkedDeviceRevoke::Revoked)
+}
+
+/// Point a consumed link at the rotated session pair and kill the previous
+/// access row. No-op when `old_refresh_id` is not a device-link refresh.
+pub async fn rebind_device_link_session_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    old_refresh_id: Uuid,
+    new_access_id: Uuid,
+    new_refresh_id: Uuid,
+) -> Result<(), sqlx::Error> {
+    let old_access: Option<Uuid> = sqlx::query_scalar(
+        "WITH old AS ( \
+            SELECT id, redeemed_access_token_id AS old_access \
+              FROM device_link_token \
+             WHERE workspace_id = $1 \
+               AND member_id = $2 \
+               AND redeemed_refresh_token_id = $5 \
+         ) \
+         UPDATE device_link_token AS d \
+            SET redeemed_access_token_id = $3, \
+                redeemed_refresh_token_id = $4 \
+           FROM old \
+          WHERE d.id = old.id \
+            AND d.workspace_id = $1 \
+        RETURNING old.old_access",
+    )
+    .bind(workspace_id)
+    .bind(member_id)
+    .bind(new_access_id)
+    .bind(new_refresh_id)
+    .bind(old_refresh_id)
+    .fetch_optional(&mut *conn)
+    .await?;
+    if let Some(old_access) = old_access {
+        if old_access != new_access_id {
+            let _ =
+                revoke_member_session_tokens_by_ids(conn, workspace_id, member_id, &[old_access])
+                    .await?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -494,5 +687,20 @@ mod tests {
         assert!(normalized_device_name(&"한".repeat(65)).is_err());
         assert_eq!(normalized_device_platform(" ios ").as_deref(), Ok("ios"));
         assert!(normalized_device_platform("").is_err());
+    }
+
+    #[test]
+    fn linked_device_list_sql_is_owner_filtered() {
+        for needle in [
+            "d.member_id = $2",
+            "access.actor_member_id = $2",
+            "refresh.actor_member_id = $2",
+            "d.consumed_at IS NOT NULL",
+        ] {
+            assert!(
+                LIST_LINKED_DEVICES_SQL.contains(needle),
+                "list_linked_devices lost `{needle}`"
+            );
+        }
     }
 }
