@@ -70,10 +70,11 @@ use axum::extract::State;
 use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
-    carries_privileged_scope, record_session_token, revoke_privileged_session_tokens, revoke_token,
-    sign_access, sign_refresh, token_state, verify_app_access, verify_app_refresh,
-    without_privileged_scopes, AuthError, IssuedToken, TokenRejection, SESSION_LABEL_ACCESS,
-    SESSION_LABEL_REFRESH,
+    carries_privileged_scope, rebind_device_link_session_in_tx, record_session_token,
+    record_session_token_with_device, revoke_privileged_session_tokens, revoke_token,
+    session_device_label, sign_access, sign_refresh, token_state, verify_app_access,
+    verify_app_refresh, without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken,
+    TokenRejection, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
 use momo_db::{with_tenant_tx, DbError};
 use momo_messaging::{get_member, verify_password_login, PasswordLogin};
@@ -172,6 +173,81 @@ pub(crate) async fn issue_and_record_session(
     })
     .await
     .map_err(|error| db_error(&format!("{context}.record_session"), error))?;
+
+    Ok((access, refresh))
+}
+
+/// Rotate a device-link session: record the new pair with the same label and
+/// rebind `device_link_token.redeemed_*` so list/revoke still name this phone.
+async fn issue_and_record_device_session(
+    state: &AppState,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    scopes: Vec<String>,
+    device_label: String,
+    old_refresh_id: Uuid,
+    context: &str,
+) -> Result<(IssuedToken, IssuedToken), ApiError> {
+    let access = sign_access(member_id, workspace_id, &scopes, &state.jwt_secret)
+        .map_err(|error| ApiError::internal(&format!("{context}.sign_access"), error))?;
+    let refresh = sign_refresh(member_id, workspace_id, &scopes, &state.jwt_secret)
+        .map_err(|error| ApiError::internal(&format!("{context}.sign_refresh"), error))?;
+
+    let session = SessionTokens {
+        member_id,
+        scopes,
+        access_token: access.token.clone(),
+        access_expires_at: access.expires_at,
+        refresh_token: refresh.token.clone(),
+        refresh_expires_at: refresh.expires_at,
+    };
+    with_tenant_tx(&state.pool, workspace_id, move |conn| {
+        Box::pin(async move {
+            let access_id = record_session_token_with_device(
+                conn,
+                workspace_id,
+                session.member_id,
+                DeviceSessionRecord {
+                    raw_token: &session.access_token,
+                    label: SESSION_LABEL_ACCESS,
+                    scopes: &session.scopes,
+                    expires_at_unix: session.access_expires_at,
+                    device_label: Some(&device_label),
+                    pending_sas: false,
+                },
+            )
+            .await
+            .map_err(DbError::from)?;
+            let refresh_id = record_session_token_with_device(
+                conn,
+                workspace_id,
+                session.member_id,
+                DeviceSessionRecord {
+                    raw_token: &session.refresh_token,
+                    label: SESSION_LABEL_REFRESH,
+                    scopes: &session.scopes,
+                    expires_at_unix: session.refresh_expires_at,
+                    device_label: Some(&device_label),
+                    pending_sas: false,
+                },
+            )
+            .await
+            .map_err(DbError::from)?;
+            rebind_device_link_session_in_tx(
+                conn,
+                workspace_id,
+                session.member_id,
+                old_refresh_id,
+                access_id,
+                refresh_id,
+            )
+            .await
+            .map_err(DbError::from)?;
+            Ok::<(), DbError>(())
+        })
+    })
+    .await
+    .map_err(|error| db_error(&format!("{context}.record_device_session"), error))?;
 
     Ok((access, refresh))
 }
@@ -277,7 +353,10 @@ enum RefreshGate {
     /// The atomic single-use gate was lost: this token was already spent.
     AlreadyUsed,
     /// Gate passed — the presented refresh token is now revoked.
-    Rotated,
+    Rotated {
+        old_refresh_id: Uuid,
+        device_label: Option<String>,
+    },
 }
 
 /// Map a verification failure on the refresh path to Swift's wording.
@@ -333,13 +412,18 @@ pub async fn refresh(
 
             // (3) THE single-use gate: exactly one concurrent replay flips the
             // row and may mint a replacement pair (Swift :169-181).
-            if !revoke_token(conn, &presented)
+            let revoke = revoke_token(conn, &presented)
                 .await
-                .map_err(DbError::from)?
-                .revoked_now
-            {
+                .map_err(DbError::from)?;
+            if !revoke.revoked_now {
                 return Ok(RefreshGate::AlreadyUsed);
             }
+            let Some(old_refresh_id) = revoke.id else {
+                return Ok(RefreshGate::AlreadyUsed);
+            };
+            let device_label = session_device_label(conn, old_refresh_id)
+                .await
+                .map_err(DbError::from)?;
 
             // (4) Downgrade sweep: the presented row is already revoked above;
             // kill the sibling privileged rows in the same transaction so the
@@ -351,36 +435,48 @@ pub async fn refresh(
                     .map_err(DbError::from)?;
             }
 
-            Ok(RefreshGate::Rotated)
+            Ok(RefreshGate::Rotated {
+                old_refresh_id,
+                device_label,
+            })
         })
     })
     .await
     .map_err(|error| db_error("auth.refresh", error))?;
 
     match gate {
-        RefreshGate::Rejected(rejection) => {
-            return Err(ApiError::unauthorized(rejection.message()))
+        RefreshGate::Rejected(rejection) => Err(ApiError::unauthorized(rejection.message())),
+        RefreshGate::MemberInactive => Err(ApiError::forbidden(
+            "member is not active in this workspace",
+        )),
+        RefreshGate::AlreadyUsed => Err(ApiError::unauthorized(
+            "refresh token already used or revoked",
+        )),
+        RefreshGate::Rotated {
+            old_refresh_id,
+            device_label,
+        } => {
+            let (access, refresh) = if let Some(device_label) = device_label {
+                issue_and_record_device_session(
+                    &state,
+                    workspace_id,
+                    member_id,
+                    scopes,
+                    device_label,
+                    old_refresh_id,
+                    "auth.refresh",
+                )
+                .await?
+            } else {
+                issue_and_record_session(&state, workspace_id, member_id, scopes, "auth.refresh")
+                    .await?
+            };
+            Ok(Json(RefreshResponse {
+                access_token: access.token,
+                refresh_token: refresh.token,
+            }))
         }
-        RefreshGate::MemberInactive => {
-            return Err(ApiError::forbidden(
-                "member is not active in this workspace",
-            ))
-        }
-        RefreshGate::AlreadyUsed => {
-            return Err(ApiError::unauthorized(
-                "refresh token already used or revoked",
-            ))
-        }
-        RefreshGate::Rotated => {}
     }
-
-    let (access, refresh) =
-        issue_and_record_session(&state, workspace_id, member_id, scopes, "auth.refresh").await?;
-
-    Ok(Json(RefreshResponse {
-        access_token: access.token,
-        refresh_token: refresh.token,
-    }))
 }
 
 // ---------------------------------------------------------------------------

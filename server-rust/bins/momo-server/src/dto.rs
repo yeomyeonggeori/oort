@@ -233,6 +233,26 @@ pub struct DeviceLinkConfirmResponse {
     pub status: &'static str,
 }
 
+/// `GET /v1/auth/devices` item (ADR-0180 D5 / #2029). Distinct from the push
+/// `DeviceDto` under `/v1/workspaces/{ws}/devices`.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedDeviceDto {
+    pub id: String,
+    pub label: String,
+    pub platform: String,
+    pub linked_at: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_seen_at: Option<i64>,
+    pub current: bool,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LinkedDeviceListResponse {
+    pub devices: Vec<LinkedDeviceDto>,
+}
+
 // ---------------------------------------------------------------------------
 // messages
 // ---------------------------------------------------------------------------
