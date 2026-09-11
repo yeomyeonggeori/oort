@@ -263,3 +263,32 @@ opaque bearer뿐이다. Codex/OpenAI OAuth·원본 API 키는 유입하지 않�
 플래그가 켜져 있으면 doctor `env.local_provider`는 major.
 `infra/railway/railway.json`은 이 키를 싣지 않는다.
 
+
+---
+
+## 증보 4 — 셀프호스트 webhook 마스터키 분리 + 설치 단위 rate 예산 (2026-09-11, planner 발제 — DEVIATION 2026-07-17(MOMO-412 / PR #443) 후속, #2066)
+
+- Status: **Proposed** (성재 결재 대기 — D2 택일 포함)
+- 발단: `OUTBOUND_WEBHOOK_MASTER_KEY`가 미설정이면 서버가 `JWT_HMAC`로 폴백한다(`server-rust/bins/momo-server/src/config.rs:85`, `:1475` — Swift 시절 `env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC)`를 byte-for-byte 유지). 인바운드 네이티브 인그레스 시크릿도 `JWT_HMAC`에서 파생된다(`:1466`, `momo-webhook/src/crypto.rs:48` `momo.webhook.native.v1\n` 도메인 분리 — 암호학적으로는 안전). 생성기 `scripts/self_host_env.sh`는 `PROVIDER_LINK_MASTER_KEY`만 독립 생성한다(`:1443`, `:2105`). 결과: **셀프호스트 기본값이 JWT 시크릿 재사용**이고, JWT 회전 시 발급된 모든 네이티브/아웃바운드 webhook secret이 조용히 무효화되는 운영 결합이 남아 있다. `momo-webhook`에는 설치 단위 rate 예산이 없다(토큰 유출 시 채널 flood 상한이 회전/revoke뿐).
+- 경계 판단: 본문 불변식(사용자 provider 자격증명 비유입)은 **변경 없음**. 이 증보는 **서버 시크릿 계층 규칙**(증보 1 D2 "분리 마스터키"와 같은 계급)을 webhook 경로에 확장하는 것이다. 시크릿 정책 변경이므로 ADR-0100에 따라 Accepted 뒤에만 머지한다.
+
+### D1. 키 분리 — 생성기가 독립 생성한다
+- `scripts/self_host_env.sh`가 `OUTBOUND_WEBHOOK_MASTER_KEY`와 인바운드 파생 루트 `WEBHOOK_INGRESS_MASTER_KEY`(이름은 구현 시 확정; 인바운드가 아웃바운드 키에서 파생돼도 무방하면 한 키로 줄인다 — 워커가 `crypto.rs` 도메인 분리 근거로 택일)를 `PROVIDER_LINK_MASTER_KEY`와 같은 managed-key 규율로 독립 생성한다. 정본 키 수 계약은 43→44 또는 45(T2 44→45/46)로 1:1 늘고, `--railway` ≡ `--platform railway` 바이트 동일·`test_self_host_env_modes.sh`·`test_railway_template.sh`·`test_self_host_build_sha.sh`가 같은 커밋에서 갱신된다.
+- 재사용 금지 가드(`config.rs:1353-1356`의 `PROVIDER_LINK_MASTER_KEY` 상호 재사용 거부)를 새 키에도 확장한다: 새 키가 `JWT_HMAC` 또는 서로와 같으면 기동 거부 — **단 D2(a)의 이행 창은 예외**(아래).
+
+### D2. 폴백 처리 — 택일 (권고 (a))
+- **(a) 이행 복사(권고)**: 기존 설치의 `oort upgrade`/생성기 기존-env 분기 백필(#2433 규율)이 새 키를 **현재 유효값(= `JWT_HMAC`)의 명시 복사**로 주입한다. 발급된 webhook secret은 그대로 유효하고(무효화 0), 이 순간부터 두 키는 **독립 변수**가 되어 다음 JWT 회전이 webhook secret을 건드리지 않는다. 두 값이 같은 상태는 `oort doctor`가 `warn`(「webhook 마스터키가 JWT 시크릿과 같다 — 회전 권고」)으로 드러내고, docs SELF_HOST §시크릿 회전이 「webhook 마스터키 회전 = 발급 secret 재발급」 절차를 싣는다. 새 설치는 처음부터 독립 난수. 폴백 코드는 삭제하고, 미설정은 **기동 거부**(fail-closed)로 바꾼다 — 백필이 있으므로 기존 설치가 미설정으로 기동을 시도할 경로는 문서상 「env를 손으로 지운 경우」뿐.
+- **(b) 신규 난수**: 백필이 새 난수를 넣는다. 결합은 즉시 끊기지만 기존 webhook secret 전량 무효화 → 운영자가 재발급해야 한다. 회전 절차가 강제로 실행되는 셈이라 「조용한 무효화」를 「예고된 무효화」로 바꾼 것에 그친다.
+- 기각: **(c) 폴백 유지 + doctor warn만** — 조용한 결합이 문제의 본질이라 경고로는 닫히지 않는다.
+
+### D3. 설치 단위 rate 예산
+- `momo-webhook` 인그레스(`/hooks/*` 네이티브·Slack 호환 포함)에 **설치 단위 토큰 버킷**을 둔다. 기본값은 구현 시 실측으로 확정하되 문서화 의무(예: 분당 600, burst 120; env `MOMO_WEBHOOK_RATE_PER_MIN`·`MOMO_WEBHOOK_RATE_BURST`로 조정). 초과는 `429` + `Retry-After`, 감사 로그 1행(`webhook.rate_limited` — 토큰 지문·본문 비유입, 본문 §Audit 승계). 워크스페이스/토큰 단위 세분화는 후속(ADR-0164 공정사용과 합류).
+
+### D4. 수용 기준(파생 티켓 #2066에 그대로)
+- red proof: 폴백 경로를 되살리면 기동 거부/doctor RED · 두 키 동일(이행 복사 상태)이면 doctor `warn` · 예산 초과 요청이 429 + 감사 행 · 키 수 계약 테스트 갱신 · `schema_v0.sql` 무접촉 · 보호 경로(`scripts/**`) 정책 감사 동반.
+
+### Consequences
+- (+) JWT 회전과 webhook secret 수명이 분리된다 — 회전 절차가 단순해지고 조용한 무효화가 사라진다.
+- (+) 유출 토큰의 피해 상한이 revoke 외에 예산으로도 생긴다.
+- (−) 관리 키가 1~2개 늘고(정본 키 수 계약 갱신), 이행 복사 상태(두 값 동일)는 회전할 때까지 doctor warn이 남는다.
+- (−) fail-closed 전환은 env를 손으로 관리하는 설치에서 기동 실패 문장을 한 번 만나게 한다 — 문장은 다음 행동(백필 명령)을 포함해야 한다.
