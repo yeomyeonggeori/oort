@@ -32,7 +32,7 @@ The live name list is `scripts/local_gate.sh --help`. Snapshot:
 
 | Profile | Use when |
 |---|---|
-| `docs` | docs/spec/script-only changes (static + public-edge contract + SH tests including `test_oort_day2.sh`/`test_oort_doctor.sh` + oort dispatcher/lib `bash -n`/shellcheck (#2124) + live `scripts/check_release_manifest.sh` against `releases/latest.json` (#1984) + GATED_DOCS SELF_HOST family en+ko (#2124) + platform template contract `scripts/tests/test_railway_template.sh` (#2297, ADR-0184 D5) + AWS T1 recipe `scripts/tests/test_aws_recipe.sh` (#2377; terraform is an optional tool) — local/docs-profile only; `pr-ci` has no docs lane, its rust/node lanes skip on infra/scripts-only paths) |
+| `docs` | docs/spec/script-only changes (static + public-edge contract + SH tests including `test_oort_day2.sh`/`test_oort_doctor.sh` + oort dispatcher/lib `bash -n`/shellcheck (#2124) + live `scripts/check_release_manifest.sh` against `releases/latest.json` (#1984) + live `scripts/tests/test_pgbackrest_pitr_contract.sh` (#2157; docker missing is RED, same harness guard as day-2/doctor) + GATED_DOCS SELF_HOST family en+ko (#2124) + platform template contract `scripts/tests/test_railway_template.sh` (#2297, ADR-0184 D5) + AWS T1 recipe `scripts/tests/test_aws_recipe.sh` (#2377; terraform is an optional tool) — local/docs-profile only; `pr-ci` has no docs lane, its rust/node lanes skip on infra/scripts-only paths) |
 | `diagnostics` | diagnostics bundle changes |
 | `staging-smoke` | staging/self-host config without real VPS secrets |
 | `backup` | pgBackRest PITR / migrate-gate changes |
