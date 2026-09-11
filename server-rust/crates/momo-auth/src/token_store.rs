@@ -327,20 +327,69 @@ pub async fn revoke_member_session_tokens(
     workspace_id: Uuid,
     member_id: Uuid,
 ) -> Result<u64, sqlx::Error> {
-    let rows = sqlx::query(
-        "UPDATE token \
-            SET revoked_at = COALESCE(revoked_at, now()) \
-          WHERE workspace_id = $1 \
-            AND actor_member_id = $2 \
-            AND kind = 'session' \
-            AND revoked_at IS NULL \
-        RETURNING id",
-    )
-    .bind(workspace_id)
-    .bind(member_id)
-    .fetch_all(&mut *conn)
-    .await?;
+    let rows = sqlx::query(REVOKE_MEMBER_SESSION_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .fetch_all(&mut *conn)
+        .await?;
     Ok(rows.len() as u64)
+}
+
+/// The bulk member-session sweep, kept as a `const` so unit tests can assert
+/// the owner + kind predicates. ADR-0180 D5's per-device revoke uses the same
+/// `UPDATE` shape, narrowed by id.
+const REVOKE_MEMBER_SESSION_SQL: &str = "UPDATE token \
+        SET revoked_at = COALESCE(revoked_at, now()) \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND revoked_at IS NULL \
+    RETURNING id";
+
+/// Same sweep as [`revoke_member_session_tokens`], restricted to an explicit
+/// id set. The `actor_member_id` predicate is load-bearing: a caller cannot
+/// revoke another member's rows by guessing ids (ADR-0180 D5 / #2029).
+const REVOKE_MEMBER_SESSION_BY_IDS_SQL: &str = "UPDATE token \
+        SET revoked_at = COALESCE(revoked_at, now()) \
+      WHERE workspace_id = $1 \
+        AND actor_member_id = $2 \
+        AND kind = 'session' \
+        AND revoked_at IS NULL \
+        AND id = ANY($3::uuid[]) \
+    RETURNING id";
+
+/// Revoke the still-live **session** tokens in `ids` that belong to `member_id`.
+/// Returns how many rows this call flipped. Foreign ids are silently skipped
+/// (the owner filter), so a 404 mapping belongs at the route.
+pub async fn revoke_member_session_tokens_by_ids(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    ids: &[Uuid],
+) -> Result<u64, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let rows = sqlx::query(REVOKE_MEMBER_SESSION_BY_IDS_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(ids)
+        .fetch_all(&mut *conn)
+        .await?;
+    Ok(rows.len() as u64)
+}
+
+/// `token.device_label` on a session row, when present. Used by refresh to
+/// copy ADR-0180 device metadata onto the rotated pair.
+pub async fn session_device_label(
+    conn: &mut PgConnection,
+    token_id: Uuid,
+) -> Result<Option<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT device_label FROM token WHERE id = $1")
+        .bind(token_id)
+        .fetch_optional(&mut *conn)
+        .await
+        .map(|value| value.flatten())
 }
 
 /// Revoke every still-live **session** token of one member that carries an
@@ -500,6 +549,28 @@ mod tests {
     /// Drift guard: the Rust-side scope predicate and the SQL sweep must name
     /// the same set, or a scope could be stripped from a refreshed token while
     /// its sibling sessions stay alive (or vice versa).
+    #[test]
+    fn member_session_revoke_is_owner_and_kind_scoped() {
+        for needle in [
+            "actor_member_id = $2",
+            "kind = 'session'",
+            "revoked_at IS NULL",
+        ] {
+            assert!(
+                REVOKE_MEMBER_SESSION_SQL.contains(needle),
+                "revoke_member_session_tokens lost `{needle}`"
+            );
+            assert!(
+                REVOKE_MEMBER_SESSION_BY_IDS_SQL.contains(needle),
+                "revoke_member_session_tokens_by_ids lost `{needle}`"
+            );
+        }
+        assert!(
+            REVOKE_MEMBER_SESSION_BY_IDS_SQL.contains("id = ANY($3::uuid[])"),
+            "per-device revoke must name the id set"
+        );
+    }
+
     #[test]
     fn the_sweep_sql_covers_every_privileged_scope() {
         for scope in PRIVILEGED_SCOPES {
