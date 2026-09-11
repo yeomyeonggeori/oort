@@ -9,6 +9,7 @@
 - **랜딩(main)**: #2433 momo_notifier 롤+최소 GRANT+기존 env 백필(#2193, 리뷰 R1→R2: sweep 테이블 GRANT 누락·업그레이드 파손·doctor DELETE) · #2461 GRANT 트림+호출 그래프/INVOKER 트리거 도출 29표+E2E T3 stale 시드(#2448, R2: work_cloud_host_transition) · #2452 생성기 `--claim` 1급(#2438) · #2436 E2E-B 문서 이탈 D1~D4(#2429) · #2443 PITR 계약 시험 Colima 픽스처(#2157) · #2444 게이트 정책 배치 1(#1984 #2124, R1 FAIL: `bash -n a b c d` 첫 파일만) · #2460 정책 배치 2(#2456) · #2428 S1 nits(#2418). #2181은 #2307로 기해소 → 닫음. #2205는 SH-11a 실배포 티켓으로 재범위.
 - **레인**: grok 리뷰어 C 사보타주가 실구멍 4건을 잡음(sweep GRANT 누락·bash -n 파일 인자·잠금 문자열·트리거 읽기 테이블). 기계 수면(02:30~09:30)·네트워크 중단(10:00~14:30)으로 grok 세션 3회 정지 → `-c` 재개/재스폰. 성재 질의 「grok 네이티브 서브에이전트?」 → Claude 모델 한정으로 불가, 하이브리드 결정(메모리·PIPELINE 후속).
 - **다음**: E2E-A 그록봇(발행 이미지) → SH-11a → v0.1.6 편성.
+- **19:1x 보강**: 배치 ct(v0.1.5 매니페스트 #2469)·cu(스냅샷 98 #2470)·cv(ADR-0004 증보 4 Proposed #2473 — webhook 마스터키 분리·D2 택일 (a) 이행 복사 권고·rate 예산, **성재 결재 대기**)·cw(#2468 기기 목록·해제 라우트 → #2029 closed, uxui 후속 #2476) main. uxui 워커: PR #2485(오버레이 층 이름표) 완료·#2476 진행 중. Docker 스크래치 9.5GB 회수. 다음 세션 진입점: `claudedocs/resume-2026-09-07/RESUME.md` 맨 끝 「재개 체크리스트」.
 
 ## 2026-09-10 (낮) · Fable · ★ADR-0185 Accepted 집행 — SH-12 온보딩 5/6 main + SH-11 플랫폼 중립화(e·e-2·b·c·host-network) main + 워커 레인 Grok Build 복귀 — 스냅샷 97
 
