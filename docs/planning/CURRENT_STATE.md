@@ -5,8 +5,8 @@
 > **★ 정본 헤드**: main `f885cb58`(#2461 승격 cs) · 태그 `v0.1.5`=`803ae7d5`. 매니페스트·CHANGELOG는 PR #2469(배치 ct) 랜딩 중.
 > **★ 성재 결재(09-11)**: 네트워크 중단 뒤 「재개」 · publish-images dispatch + release 승인 3회 · grok 활용 방식: 「네이티브 서브에이전트/워크플로」는 Claude 모델 한정이라 불가 → planner 하이브리드(코드/문서 전용=grok-fleet Codex 하네스 경로(브리지 재로그인 필요), Docker/네트워크 헤비=`grok -p` 유지).
 > **★ 릴리스 메모**: dispatch는 main tip만 허용 → 빌드 커밋 db5cb8e9(스냅샷 97)이 아닌 **803ae7d5**. planner 결정: 발행 이미지로 E2E-B′ 재실측(12/12) 뒤 태그. research `2026-09-11-e2e-zero-base-published-run.md`.
-> **★ 진행 중**: #2468(ADR-0180 D5 기기 목록·해제 라우트) 리뷰 C. 잔여 티켓: #2205(SH-11a Railway 실배포 — 성재 계정, 최종 단계) · #2066(webhook master key 분리 — ADR 증보 필요, planner 초안 대기) · #1925 허들 LiveKit 자격(방향 결정) · UX-R* 잔여.
-> **★ 다음**: 스냅샷 98 랜딩 → **E2E-A 그록봇(발행 이미지 v0.1.5, PLAN §A: host-network 프로파일·doctor stack.*·disconnect 잔여 0)** → SH-11a Railway 실배포(성재) → v0.1.6 후보 편성(기기 목록 UI uxui 후속·#2066 ADR 증보).
+> **★ 진행 중(세션 종료 19:1x)**: uxui 워커 2기 — **PR #2485**(오버레이 층 이름표 #2044/#2075/#1919, 워커 완료 → design-review B0·H0 + 리뷰 C 대기) · **#2476**(설정 › 기기 목록·해제 UI, 워커 진행 중 — 완료 시 PR). #2468은 main(배치 cw, #2029 closed). ADR-0004 증보 4 Proposed main(#2473 → 배치 cv). 잔여 티켓: #2205(SH-11a Railway 실배포 — 성재 계정, 최종 단계) · #2066(webhook master key 분리 — ADR 증보 필요, planner 초안 대기) · #1925 허들 LiveKit 자격(방향 결정) · UX-R* 잔여.
+> **★ 다음**: PR #2485 design-review(fresh context) → 리뷰 C → uxui 체인 · #2476 PR → 같은 절차 → **E2E-A 그록봇(발행 이미지 v0.1.5, PLAN §A: host-network 프로파일·doctor stack.*·disconnect 잔여 0)** → SH-11a Railway 실배포(성재) → v0.1.6 후보 편성(기기 목록 UI uxui 후속·#2066 ADR 증보).
 > **★ 재개 진입점**: `claudedocs/resume-2026-09-07/RESUME.md` · 릴리스 산출 `claudedocs/release-v0.1.5-{runbook,digests,release-body}.md` · 스폰 `chain-templates/spawn-grok.sh`.
 
 > 이하 스냅샷 97:
