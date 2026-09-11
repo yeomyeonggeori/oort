@@ -236,6 +236,87 @@ approval_status() {
     -c "SELECT status::text FROM approval WHERE id = '${id}';"
 }
 
+# T3 stale-session seed (#2448 R2 F-1). No unsettled usage → terminate_in_tx
+# returns false → declare_destroy_intent_in_tx UPDATEs work_cloud_host
+# (reconcile.rs:488) → INVOKER trigger 053 SELECTs work_cloud_host_transition.
+# Prints: session_id <tab> cloud_host_id
+insert_stale_t3_session() {
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 <<SQL
+SELECT set_config('app.workspace_id', '${WS}', false);
+WITH human AS (
+  SELECT id
+    FROM member
+   WHERE workspace_id = '${WS}'::uuid
+     AND kind = 'human'
+     AND deleted_at IS NULL
+   ORDER BY created_at
+   LIMIT 1
+), bumped AS (
+  UPDATE channel_seq cs
+     SET last_seq = last_seq + 1
+    FROM human
+   WHERE cs.channel_id = '${CH}'::uuid
+     AND cs.workspace_id = '${WS}'::uuid
+  RETURNING cs.last_seq
+), msg AS (
+  INSERT INTO message (
+    workspace_id, channel_id, seq, hlc_ts, hlc_count, author_member_id, type, body
+  )
+  SELECT '${WS}'::uuid, '${CH}'::uuid, bumped.last_seq,
+         (extract(epoch from now()) * 1000)::bigint, 0, human.id,
+         'system', 't3 stale sweep card'
+    FROM bumped, human
+  RETURNING id
+), host AS (
+  INSERT INTO work_host (
+    workspace_id, scope, owner_member_id, type, display_name, public_key, last_seen_at
+  )
+  SELECT '${WS}'::uuid, 'workspace', human.id, 'cloud', 'stale-t3-host',
+         rpad('A', 43, 'A') || '=',
+         clock_timestamp() - interval '1 day'
+    FROM human
+  RETURNING id
+), cloud AS (
+  INSERT INTO work_cloud_host (
+    workspace_id, requester_member_id, host_id, provider, provider_sandbox_id,
+    state, bootstrap_token_digest, bootstrap_expires_at, bootstrap_consumed_at,
+    unit_rate_micro_usd_second
+  )
+  SELECT '${WS}'::uuid, human.id, host.id, 'byoc',
+         'stale-' || replace(uuidv7()::text, '-', ''),
+         'running',
+         md5(random()::text) || md5(random()::text),
+         now() + interval '1 hour',
+         clock_timestamp(),
+         1
+    FROM human, host
+  RETURNING id
+), sess AS (
+  INSERT INTO work_session (
+    workspace_id, channel_id, member_id, host_id, root_message_id,
+    tool, label, status, host_lost_at
+  )
+  SELECT '${WS}'::uuid, '${CH}'::uuid, human.id, host.id, msg.id,
+         'claude', 'stale t3 sweep', 'running', clock_timestamp()
+    FROM human, host, msg
+  RETURNING id
+)
+SELECT sess.id::text || E'\t' || cloud.id::text FROM sess, cloud;
+SQL
+}
+
+t3_session_status() {
+  local id="$1"
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 \
+    -c "SELECT status::text FROM work_session WHERE id = '${id}';"
+}
+
+t3_cloud_state() {
+  local id="$1"
+  compose exec -T postgres psql -U momo -d momo -At -v ON_ERROR_STOP=1 \
+    -c "SELECT state::text FROM work_cloud_host WHERE id = '${id}';"
+}
+
 echo "[test-push-relay-stub-e2e] expired approval sweep (t3 on, ≥3 intervals)"
 RUN_ID="$(insert_expired_approval | tr -d '\r' | grep -E '^[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
 [ -n "$RUN_ID" ] || fail "agent_run insert returned empty"
@@ -271,6 +352,32 @@ done
   fail "approval ${APPROVAL_A} status=$(approval_status "$APPROVAL_A") (want expired)"
 }
 echo "PASS: approval sweep expired the overdue row; permission denied count=0"
+
+echo "[test-push-relay-stub-e2e] T3 stale-session sweep (t3 on, ≥3 intervals)"
+STALE_ROW="$(insert_stale_t3_session | tr -d '\r' | grep -E $'^[0-9a-f-]{36}\t[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$STALE_ROW" ] || fail "T3 stale seed returned empty (need a human member + channel_seq)"
+STALE_SESSION="$(printf '%s' "$STALE_ROW" | awk -F '\t' '{print $1}')"
+STALE_CLOUD="$(printf '%s' "$STALE_ROW" | awk -F '\t' '{print $2}')"
+sleep 2
+DENIED_T3="$(compose logs notifier 2>/dev/null | grep -c 'permission denied' || true)"
+[ "$DENIED_T3" = "0" ] || {
+  compose logs notifier >&2 || true
+  fail "T3 stale sweep: notifier logs contain permission denied (count=${DENIED_T3})"
+}
+stale_ok=""
+for _ in $(seq 1 20); do
+  if [ "$(t3_session_status "$STALE_SESSION")" = "orphaned" ] && \
+     [ "$(t3_cloud_state "$STALE_CLOUD")" = "destroy_pending" ]; then
+    stale_ok=1
+    break
+  fi
+  sleep 0.5
+done
+[ "$stale_ok" = "1" ] || {
+  compose logs notifier >&2 || true
+  fail "T3 stale session=${STALE_SESSION} status=$(t3_session_status "$STALE_SESSION") cloud=$(t3_cloud_state "$STALE_CLOUD") (want orphaned/destroy_pending)"
+}
+echo "PASS: T3 stale sweep orphaned the session and declared destroy_pending; permission denied count=0"
 
 api() {
   local method="$1" path="$2" token="${3:-}" body="${4:-}"
@@ -374,6 +481,22 @@ APNS_STATUS="$(printf '%s\n' "$LOG_ROW" | awk -F '\t' '{print $2}')"
 test "$APNS_STATUS" = 200
 
 echo "PASS: stub E2E device-register → mention → notifier → id-only capture → push_dispatch_log (Apple never contacted)"
+
+echo "[test-push-relay-stub-e2e] sabotage: REVOKE SELECT ON work_cloud_host_transition FROM momo_notifier → RED"
+compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \
+  "REVOKE SELECT ON TABLE work_cloud_host_transition FROM momo_notifier;" >/dev/null
+STALE_B_ROW="$(insert_stale_t3_session | tr -d '\r' | grep -E $'^[0-9a-f-]{36}\t[0-9a-f-]{36}$' | awk 'NF { print; exit }')"
+[ -n "$STALE_B_ROW" ] || fail "T3 stale seed B returned empty"
+STALE_B_SESSION="$(printf '%s' "$STALE_B_ROW" | awk -F '\t' '{print $1}')"
+STALE_B_CLOUD="$(printf '%s' "$STALE_B_ROW" | awk -F '\t' '{print $2}')"
+sleep 2
+STATUS_T3B="$(t3_session_status "$STALE_B_SESSION")"
+CLOUD_T3B="$(t3_cloud_state "$STALE_B_CLOUD")"
+DENIED_T3B="$(compose logs notifier 2>/dev/null | grep -c 'permission denied' || true)"
+if [ "$STATUS_T3B" = "orphaned" ] && [ "$CLOUD_T3B" = "destroy_pending" ] && [ "$DENIED_T3B" = "0" ]; then
+  fail "sabotage REVOKE SELECT ON work_cloud_host_transition still converged (status=${STATUS_T3B} cloud=${CLOUD_T3B} denied=${DENIED_T3B})"
+fi
+echo "PASS: sabotage REVOKE SELECT ON work_cloud_host_transition FROM momo_notifier → RED (status=${STATUS_T3B} cloud=${CLOUD_T3B} denied=${DENIED_T3B})"
 
 echo "[test-push-relay-stub-e2e] sabotage: REVOKE UPDATE ON approval FROM momo_notifier → RED"
 compose exec -T postgres psql -U momo -d momo -v ON_ERROR_STOP=1 -c \

@@ -131,11 +131,19 @@ BEGIN
   IF to_regclass('public.display_control_window') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE display_control_window TO momo_notifier;
   END IF;
-  IF to_regclass('public.workspace') IS NOT NULL THEN
-    GRANT SELECT ON TABLE workspace TO momo_notifier;
-  END IF;
+  -- `workspace` is not on the notifier call graph (#2448). The only
+  -- `SELECT … FROM workspace` in momo-t3 is `topup_credit_in_tx`
+  -- (billing.rs), called from momo-server credits — not from
+  -- momo-notifier. Do not re-add without a cited reachable statement.
   IF to_regclass('public.work_cloud_host') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE work_cloud_host TO momo_notifier;
+  END IF;
+  -- INVOKER trigger `enforce_work_cloud_host_transition` (053:49-70) SELECTs
+  -- this table on every `UPDATE work_cloud_host` (declare_destroy_intent /
+  -- t3_terminate / confirm). Without SELECT the T3 stale sweep dies:
+  -- `permission denied for table work_cloud_host_transition` (#2448 R2 F-1).
+  IF to_regclass('public.work_cloud_host_transition') IS NOT NULL THEN
+    GRANT SELECT ON TABLE work_cloud_host_transition TO momo_notifier;
   END IF;
   IF to_regclass('public.work_session') IS NOT NULL THEN
     GRANT SELECT, UPDATE ON TABLE work_session TO momo_notifier;
@@ -152,17 +160,37 @@ BEGIN
   IF to_regclass('public.work_host_usage_interval') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE work_host_usage_interval TO momo_notifier;
   END IF;
-  IF to_regclass('public.work_pool') IS NOT NULL THEN
-    GRANT SELECT, INSERT ON TABLE work_pool TO momo_notifier;
-  END IF;
+  -- `work_pool` is not on the notifier call graph (#2448).
+  -- `acquire_row_ladder` INSERT/SELECT is behind `lock_work_pool`; every
+  -- notifier ladder is `T3LockLadder::host` or `.with_workspace_credit()`
+  -- (`lock_work_pool = false`). Slot admission (`reserve_provisioning_slot_in_tx`,
+  -- `acquire_slot_in_tx`) is REST / agent-worker. Do not re-add without a
+  -- cited reachable statement.
   IF to_regclass('public.work_tier_policy') IS NOT NULL THEN
     GRANT SELECT ON TABLE work_tier_policy TO momo_notifier;
   END IF;
+  -- SELECT FOR UPDATE: terminate ladder (`acquire_row_ladder` when
+  -- `lock_workspace_credit`, plus `t3_terminate` 058). INSERT+UPDATE:
+  -- `apply_credit_entry` (045:122-136) runs as the invoker on
+  -- `credit_entry` INSERT from `t3_terminate`. PostgreSQL requires INSERT
+  -- for `INSERT … ON CONFLICT DO UPDATE` even when the existing row takes
+  -- the UPDATE path — do not drop INSERT.
   IF to_regclass('public.workspace_credit') IS NOT NULL THEN
     GRANT SELECT, INSERT, UPDATE ON TABLE workspace_credit TO momo_notifier;
   END IF;
   IF to_regclass('public.credit_entry') IS NOT NULL THEN
     GRANT INSERT ON TABLE credit_entry TO momo_notifier;
+  END IF;
+  -- INVOKER 033: work_session status UPDATE (T3 stale sweep) and message
+  -- INSERT/props UPDATE call enqueue_event_subscription_delivery, which
+  -- `SELECT … FROM event_subscription`. Zero matching rows still need SELECT.
+  IF to_regclass('public.event_subscription') IS NOT NULL THEN
+    GRANT SELECT ON TABLE event_subscription TO momo_notifier;
+  END IF;
+  -- INVOKER 079: AFTER INSERT ON message → enqueue_unfurl_job may
+  -- `INSERT INTO unfurl_job`. Privilege is checked if the body matches.
+  IF to_regclass('public.unfurl_job') IS NOT NULL THEN
+    GRANT INSERT ON TABLE unfurl_job TO momo_notifier;
   END IF;
   IF to_regprocedure('acquire_t3_lifecycle_lock(uuid)') IS NOT NULL THEN
     EXECUTE 'GRANT EXECUTE ON FUNCTION acquire_t3_lifecycle_lock(uuid) TO momo_notifier';
