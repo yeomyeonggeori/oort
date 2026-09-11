@@ -785,7 +785,7 @@ export function ChatShell() {
   // Under 900px the two panes that share this row — the 작업 세션 pane and the
   // 스레드 패널 — stop being a column beside the channel and become a drawer over
   // it (tokens.css `work-pane` / `thread-pane`: position absolute, inset
-  // 0, z-index 20). A surface that is covered has to leave the tab order with
+  // 0, `--layer-overlay-scrim`). A surface that is covered has to leave the tab order with
   // it. Without that, Tab walked straight through the drawer into controls that
   // were not on screen: from the sidebar it took three stops to reach
   // `composer-input`, buried under the drawer with elementFromPoint returning

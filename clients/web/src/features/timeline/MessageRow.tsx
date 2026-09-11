@@ -1046,7 +1046,7 @@ export function MessageRow({
         {rowError && (
           <div
             data-testid="message-action-error-slot"
-            className={cn("relative z-30", ROW_BANNER_STRADDLE_PAD_CLASS)}
+            className={cn("relative layer-content-float", ROW_BANNER_STRADDLE_PAD_CLASS)}
           >
             <InlineBanner
               message={rowError}

@@ -58,6 +58,13 @@ describe("cn", () => {
     expect(cn("rounded-sm", "rounded-md")).toBe("rounded-md");
   });
 
+  it("collapses a leftover z-10 into the named overlay layer", () => {
+    expect(cn("z-10", "layer-content-float")).toBe("layer-content-float");
+    expect(cn("layer-content-float", "layer-overlay-scrim")).toBe(
+      "layer-overlay-scrim"
+    );
+  });
+
   it("knows every type role tokens.css declares", () => {
     // A role added to tokens.css but not to cn.ts would silently disappear the
     // first time someone put a color next to it, so the two lists are pinned
