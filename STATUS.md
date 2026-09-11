@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## local_gate docs 프로파일: PITR 계약 시험 실주행 + hardening docs-arm/heredoc 잠금 (#2456, 2026-09-11)
+
+- Track engine. `policy/2456-local-gate-batch2` onto `origin/track/engine`. `scripts/local_gate.sh --profile docs`가 `scripts/tests/test_pgbackrest_pitr_contract.sh`를 실주행(정적 `bash -n`만이 아님). docker 부재는 RED — day-2/doctor와 같은 `command -v docker` + `docker info` 가드, skip 신설 없음. hardening 잠금은 `case "$PROFILE"`의 `docs)` arm을 잘라 그 안에서 주석 아닌 `add_cmd_once`를 찾고, `<<'TAG'`…`TAG` heredoc 본문은 제외(#2444 R2 Lock 5/6: diagnostics 이동·heredoc 복사본은 RED).
+- 검증: `test_local_gate_hardening.sh` · drift/lint-timeout · `test_docs_commands_gate.sh` · `MOMO_GATE_SKEW_REF=origin/track/engine scripts/local_gate.sh --profile docs`. 기존 스텝 76→77(삭제 0).
+- runtime-unverified: 없음(정적 게이트 + 계약 시험). encrypted PITR closed-loop e2e는 backup 프로파일 유지.
+
 ## 생성기 claim 1급 (#2438, 2026-09-11)
 
 - Track engine. `feat/2438-generator-claim` onto `origin/track/engine`. `scripts/self_host_env.sh --claim`이 비밀번호 키를 쓰지 않고 `MOMO_BOOTSTRAP_CLAIM=1`을 기록(키 집합 1:1 스왑, canonical 43 / T2 stdout 44). `--compose`는 claim env를 기동하고, 두 키 동시만 거절(ADR-0166). 기존 비밀번호 env에 `--claim`은 거절(조용히 변환 없음). 문서 awk 수술 은퇴.
