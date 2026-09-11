@@ -31,6 +31,8 @@ printf '%s\n' "$granted" | grep -Fxq display_control_window || \
   fail "GRANT list missing display_control_window"
 printf '%s\n' "$granted" | grep -Fxq work_session || fail "GRANT list missing work_session"
 printf '%s\n' "$granted" | grep -Fxq work_control || fail "GRANT list missing work_control"
+printf '%s\n' "$granted" | grep -Fxq work_cloud_host_transition || \
+  fail "GRANT list missing work_cloud_host_transition"
 printf '%s\n' "$granted" | grep -Fxq workspace && \
   fail "GRANT list still has workspace (trimmed in #2448; topup_credit is REST-only)"
 printf '%s\n' "$granted" | grep -Fxq work_pool && \
@@ -214,13 +216,28 @@ SCAN_SCOPE = [
         "mode": "sql_function",
         "symbols": ["apply_credit_entry"],
         "why": (
-            "AFTER INSERT ON credit_entry trigger. t3_terminate INSERTs credit_entry "
-            "(058:240) and this function runs as momo_notifier (no SECURITY DEFINER). "
-            "INSERT … ON CONFLICT DO UPDATE on workspace_credit — PG requires INSERT "
-            "privilege even when the existing row takes the UPDATE path."
+            "AFTER INSERT ON credit_entry trigger. Also derived below from "
+            "INSERT/UPDATE tables → CREATE TRIGGER. Kept explicit as the #2448 "
+            "citation for workspace_credit INSERT."
         ),
     },
 ]
+
+# INVOKER triggers on tables the notifier INSERTs/UPDATEs are derived from
+# server/Migrations (not a hand list). SECURITY DEFINER functions are skipped
+# and printed. Helpers called from those trigger bodies (PERFORM/SELECT fn())
+# are included when they are INVOKER migration functions — otherwise 033's
+# event_subscription SELECT is invisible, same hole as F-1.
+LADDER_FILES = [
+    "server-rust/crates/momo-t3/src/reconcile.rs",
+    "server-rust/crates/momo-t3/src/sweep.rs",
+    "server-rust/bins/momo-notifier/src/lib.rs",
+]
+LADDER_SITES = (
+    "reconcile.rs:195 T3LockLadder::host (claim_lifecycle_intent), "
+    "reconcile.rs:302-305 host / .with_workspace_credit (apply_convergence_to_intent), "
+    "sweep.rs:224 host.with_workspace_credit (converge_stale_session)"
+)
 
 NOT_SCANNED = [
     "momo-t3/reattach.rs, terminal_attach.rs, work_control.rs, provision.rs, cloud_host.rs — R2: not on the notifier call graph",
@@ -440,6 +457,103 @@ def public_tables():
     return {n.lower() for n in names}
 
 
+def load_migration_catalog():
+    functions = {}
+    triggers = []
+    for path in sorted((root / "server/Migrations").glob("*.sql")):
+        text = path.read_text(encoding="utf-8")
+        for m in re.finditer(
+            r'CREATE(?:\s+OR\s+REPLACE)?\s+FUNCTION\s+([a-z_][a-z0-9_]*)',
+            text,
+            re.I,
+        ):
+            name = m.group(1).lower()
+            rest = text[m.end():]
+            as_m = re.search(r'\bAS\s+\$\$', rest, re.I)
+            if not as_m:
+                continue
+            header = rest[: as_m.start()]
+            body_start = as_m.end()
+            body_end = rest.find("$$", body_start)
+            if body_end < 0:
+                continue
+            functions[name] = {
+                "body": rest[body_start:body_end],
+                "definer": bool(re.search(r"SECURITY\s+DEFINER", header, re.I)),
+                "file": str(path.relative_to(root)),
+            }
+        for m in re.finditer(
+            r'CREATE\s+TRIGGER\s+(\w+)\s+'
+            r'(BEFORE|AFTER|INSTEAD\s+OF)\s+'
+            r'(.+?)\s+ON\s+(?:ONLY\s+)?(?:public\.)?([a-z][a-z0-9_]*)\s'
+            r'[\s\S]*?EXECUTE\s+(?:FUNCTION|PROCEDURE)\s+([a-z_][a-z0-9_]*)',
+            text,
+            re.I,
+        ):
+            event_s = m.group(3).upper()
+            events = set()
+            if "INSERT" in event_s:
+                events.add("INSERT")
+            if "UPDATE" in event_s:
+                events.add("UPDATE")
+            if "DELETE" in event_s:
+                events.add("DELETE")
+            triggers.append(
+                {
+                    "name": m.group(1),
+                    "events": events,
+                    "table": m.group(4).lower(),
+                    "fn": m.group(5).lower(),
+                    "file": str(path.relative_to(root)),
+                }
+            )
+    return functions, triggers
+
+
+MIGRATION_FNS, MIGRATION_TRIGGERS = load_migration_catalog()
+CALL_RE = re.compile(r"\b([a-z_][a-z0-9_]*)\s*\(", re.I)
+
+
+def invoker_closure(fn_name, seen, definers):
+    name = fn_name.lower()
+    if name in seen:
+        return ""
+    info = MIGRATION_FNS.get(name)
+    if info is None:
+        return ""
+    seen.add(name)
+    if info["definer"]:
+        definers.append((name, info["file"]))
+        return ""
+    chunks = [info["body"]]
+    for called in CALL_RE.findall(info["body"]):
+        chunks.append(invoker_closure(called, seen, definers))
+    return "\n".join(chunks)
+
+
+def derive_trigger_corpus(used):
+    """INVOKER trigger bodies (+ helpers) for INSERT/UPDATE tables in `used`."""
+    write_verbs = {"INSERT", "UPDATE"}
+    included = []
+    definers = []
+    seen_fn = set()
+    bodies = []
+    for trig in MIGRATION_TRIGGERS:
+        table_verbs = used.get(trig["table"], set())
+        if not (table_verbs & write_verbs & trig["events"]):
+            continue
+        info = MIGRATION_FNS.get(trig["fn"])
+        if info is None:
+            continue
+        if info["definer"]:
+            definers.append((trig["fn"], info["file"]))
+            included.append({**trig, "skipped": "SECURITY DEFINER"})
+            continue
+        bodies.append(invoker_closure(trig["fn"], seen_fn, definers))
+        included.append({**trig, "skipped": None})
+    return "\n".join(bodies), included, definers
+
+
 def collect_used(extra_by_path=None):
     used = {}
     deletes = []
@@ -450,6 +564,20 @@ def collect_used(extra_by_path=None):
         deletes.extend(dels)
         for table, vs in verbs.items():
             used.setdefault(table, set()).update(vs)
+    # Fixpoint: new INSERT/UPDATE tables from trigger bodies can grow the set.
+    for _ in range(8):
+        extra_sql, _, _ = derive_trigger_corpus(used)
+        verbs, dels = parse_verbs(extra_sql)
+        deletes.extend(dels)
+        grew = False
+        for table, vs in verbs.items():
+            before = used.get(table, set())
+            merged = before | vs
+            if merged != before:
+                used[table] = merged
+                grew = True
+        if not grew:
+            break
     return used, deletes
 
 
@@ -506,6 +634,24 @@ real = public_tables()
 grants = parse_grants(bootstrap.read_text(encoding="utf-8"))
 used, deletes = collect_used()
 used_real = {t: v for t, v in used.items() if t in real}
+
+_, derived_trigs, derived_definers = derive_trigger_corpus(used)
+print("[test-notifier-role-grants] derived INVOKER triggers:")
+if not derived_trigs:
+    print("  (none)")
+for trig in derived_trigs:
+    ev = ",".join(sorted(trig["events"]))
+    skip = f" SKIP {trig['skipped']}" if trig.get("skipped") else ""
+    print(
+        f"  - {trig['name']} ON {trig['table']} [{ev}] → {trig['fn']} "
+        f"({trig['file']}){skip}"
+    )
+print("[test-notifier-role-grants] SECURITY DEFINER excluded:")
+if derived_definers:
+    for name, path in sorted(set(derived_definers)):
+        print(f"  - {name} ({path})")
+else:
+    print("  (none on notifier INSERT/UPDATE tables)")
 
 if deletes:
     fail("DELETE statements in scan scope: " + ",".join(deletes))
@@ -579,6 +725,38 @@ if not any("over-grant INSERT ON work_control" in p for p in probs_d2):
 print(
     "[test-notifier-role-grants] ok: sabotage GRANT INSERT ON work_control "
     f"→ RED ({[p for p in probs_d2 if 'work_control' in p][0]})"
+)
+
+# N-2: strip_lock_work_pool hides work_pool SQL; a new .with_work_pool() on a
+# notifier ladder must RED. Construction sites: {LADDER_SITES}.
+def ladder_with_work_pool(extra_by_file=None):
+    extra_by_file = extra_by_file or {}
+    hits = []
+    for rel in LADDER_FILES:
+        path = root / rel
+        text = strip_cfg_test(path.read_text(encoding="utf-8"))
+        text += extra_by_file.get(rel, "")
+        for i, line in enumerate(text.splitlines(), 1):
+            if ".with_work_pool(" in line:
+                hits.append(f"{rel}:{i}:{line.strip()}")
+    return hits
+
+
+print(f"[test-notifier-role-grants] T3LockLadder sites (notifier graph): {LADDER_SITES}")
+hits = ladder_with_work_pool()
+if hits:
+    fail("notifier graph calls .with_work_pool(): " + "; ".join(hits))
+print("[test-notifier-role-grants] ok: no .with_work_pool() on notifier ladders")
+hits_sab = ladder_with_work_pool(
+    extra_by_file={
+        "server-rust/crates/momo-t3/src/sweep.rs": "T3LockLadder::host(id).with_work_pool()"
+    }
+)
+if not hits_sab:
+    fail("sabotage .with_work_pool() on sweep ladder stayed GREEN")
+print(
+    "[test-notifier-role-grants] ok: sabotage .with_work_pool() on sweep ladder "
+    f"→ RED ({hits_sab[0]})"
 )
 
 print("[test-notifier-role-grants] used verbs:")

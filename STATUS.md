@@ -2,7 +2,7 @@
 
 ## momo_notifier GRANT 트림 (#2448, 2026-09-11)
 
-- Track engine. `fix/2448-notifier-grant-trim` onto `origin/track/engine`. 호출 그래프 인용으로 `workspace` SELECT·`work_pool` SELECT+INSERT 제거. `workspace_credit` INSERT는 `t3_terminate` → `credit_entry` INSERT가 발화하는 `apply_credit_entry`(045, invoker, `INSERT … ON CONFLICT DO UPDATE`)가 쓰므로 유지(PG는 충돌 경로여도 INSERT 권한 필요). 정적 가드가 문장 동사↔GRANT 동사를 대조하고 스캔 범위를 테스트 상단에 정의.
+- Track engine. `fix/2448-notifier-grant-trim` onto `origin/track/engine`. 호출 그래프 인용으로 `workspace` SELECT·`work_pool` SELECT+INSERT 제거. `workspace_credit` INSERT는 `t3_terminate` → `credit_entry` INSERT가 발화하는 `apply_credit_entry`(045, invoker, `INSERT … ON CONFLICT DO UPDATE`)가 쓰므로 유지. R2: `work_cloud_host_transition` SELECT (053 INVOKER 트리거). 가드가 쓰기 테이블의 INVOKER 트리거 본문을 도출하고, 노티파이어 사다리에 `.with_work_pool()`이 없음을 단정. stub E2E가 T3 stale 경로를 시드.
 - runtime-unverified: 실 APNs·셀프호스트 실배포 notifier 드레인.
 
 ## 생성기 claim 1급 (#2438, 2026-09-11)
