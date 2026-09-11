@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 연결된 기기 목록·해제 (#2029, 2026-09-11)
+
+- Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
+- 검증: `cargo fmt --all --check` · `clippy -p momo-auth -p momo-server -D warnings` · `cargo test -p momo-auth --lib` 86 · `cargo test -p momo-server --lib` 334 · `linked_devices_conformance_pg` 2 ignored PASS(전용 PG 35432, e2e-* 무접촉). `scripts/verify_openapi_contract_rust.sh` PASS 87/87 samples · 84 ops coverage(신규 두 경로는 sampled 목록 밖 — `scripts/**` 비스코프). 사보타주: revoke no-op → 401 단언 RED; list owner filter 제거 → "other member sees 0 rows" RED.
+- runtime-unverified: 실폰 redeem 후 설정 UI(uxui A-46). `scripts/verify_web_generated_types.sh`는 web-legacy 은퇴로 이 트리에 없음.
+
 ## momo_notifier GRANT 트림 (#2448, 2026-09-11)
 
 - Track engine. `fix/2448-notifier-grant-trim` onto `origin/track/engine`. 호출 그래프 인용으로 `workspace` SELECT·`work_pool` SELECT+INSERT 제거. `workspace_credit` INSERT는 `t3_terminate` → `credit_entry` INSERT가 발화하는 `apply_credit_entry`(045, invoker, `INSERT … ON CONFLICT DO UPDATE`)가 쓰므로 유지. R2: `work_cloud_host_transition` SELECT (053 INVOKER 트리거). 가드가 쓰기 테이블의 INVOKER 트리거 본문을 도출하고, 노티파이어 사다리에 `.with_work_pool()`이 없음을 단정. stub E2E가 T3 stale 경로를 시드.

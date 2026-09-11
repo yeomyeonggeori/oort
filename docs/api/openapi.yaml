@@ -64,7 +64,9 @@ servers:
 
 tags:
   - name: auth
-    description: Session token issuance, rotation, revocation, realtime token.
+    description: >
+      Session token issuance, rotation, revocation, realtime token, device-link
+      QR, and linked-device list/disconnect.
   - name: join
     description: Public invite self-signup (no auth required).
   - name: invites
@@ -436,6 +438,83 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "409":
           description: SAS is not required, or the token has not been redeemed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/auth/devices:
+    get:
+      tags: [auth]
+      operationId: listLinkedDevices
+      summary: List the caller's linked devices (ADR-0180 D5).
+      description: >
+        Human bearer only. Returns this member's live session tokens that were
+        issued via device-link redeem (access+refresh pair). `current` is true
+        for the calling access token's device. Labels and platforms are the
+        server-normalized values stored at redeem. Token material is never
+        included. Distinct from the push-token registry at
+        `/v1/workspaces/{workspaceId}/devices`.
+      security:
+        - bearerAuth: []
+      responses:
+        "200":
+          description: Linked devices for this member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LinkedDeviceListResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /v1/auth/devices/{id}:
+    delete:
+      tags: [auth]
+      operationId: revokeLinkedDevice
+      summary: Disconnect a linked device (ADR-0180 D5).
+      description: >
+        Human bearer only. Revokes the access and refresh session tokens bound
+        to this device (`revoke_member_session_tokens` precedent, scoped to
+        the pair). 204 on success. Revoking the calling session is refused
+        with 400 `cannot_revoke_current` — use `POST /v1/auth/logout` instead.
+        Another member's id, an unknown id, or an already-dead device is 404
+        with the same body (existence is not leaked).
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "204":
+          description: Device session revoked.
+        "400":
+          description: >
+            `cannot_revoke_current` — the id is the calling session. Logout
+            ends the current session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Caller is not a human member.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Unknown id, already revoked, or not this member's device.
           content:
             application/json:
               schema:
@@ -8219,6 +8298,47 @@ components:
         status:
           type: string
           enum: [confirmed]
+
+    LinkedDevice:
+      type: object
+      additionalProperties: false
+      required: [id, label, platform, linkedAt, current]
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: >
+            `device_link_token.id`. Stable across refresh rebind of the
+            session pair.
+        label:
+          type: string
+          description: Server-normalized device name stored at redeem.
+        platform:
+          type: string
+          description: Server-normalized platform stored at redeem.
+        linkedAt:
+          type: integer
+          format: int64
+          description: Unix milliseconds when the link token was consumed.
+        lastSeenAt:
+          type: integer
+          format: int64
+          description: >
+            Unix milliseconds of `token.last_used_at` on the live access
+            row, omitted when never touched.
+        current:
+          type: boolean
+          description: True when this device is the calling access token.
+
+    LinkedDeviceListResponse:
+      type: object
+      additionalProperties: false
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/LinkedDevice"
 
     RefreshRequest:
       type: object
