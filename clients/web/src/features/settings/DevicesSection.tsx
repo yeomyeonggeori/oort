@@ -1,15 +1,26 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { SectionShell } from "./SettingsFields";
 import { DeviceLinkCard } from "./DeviceLinkCard";
+import { LinkedDevicesList } from "./LinkedDevicesList";
+import { LINKED_DEVICES_QUERY_KEY } from "./linkedDevicesQuery";
 
-// Linked-device list + revoke are #2029 (GET /v1/auth/devices,
-// DELETE /v1/auth/devices/{id}). This surface only issues a phone-link QR.
 export function DevicesSection({ offline }: { offline: boolean }) {
+  const client = useQueryClient();
   return (
     <SectionShell
       title="기기"
-      lines={["이 계정을 폰에서도 쓰려면 여기서 QR을 만듭니다."]}
+      lines={[
+        "이 계정에 붙어 있는 기기입니다. 최근 활동 미기록.",
+        "이 계정을 폰에서도 쓰려면 아래에서 QR을 만듭니다.",
+      ]}
     >
-      <DeviceLinkCard offline={offline} />
+      <LinkedDevicesList offline={offline} />
+      <DeviceLinkCard
+        offline={offline}
+        onLinked={() => {
+          void client.invalidateQueries({ queryKey: LINKED_DEVICES_QUERY_KEY });
+        }}
+      />
     </SectionShell>
   );
 }

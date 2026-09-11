@@ -52,6 +52,7 @@
     "capture:routing": "npm run build && node scripts/capture-routing.mjs",
     "capture:standalone": "npm run build && node scripts/capture-standalone.mjs",
     "capture:w4b": "npm run build && node scripts/capture-w4b.mjs",
+    "capture:devices": "npm run build && node scripts/capture-devices.mjs",
     "icons:pwa": "node scripts/render-pwa-icons.mjs",
     "extract:emoji": "node scripts/extract-emoji-catalog.mjs"
   },

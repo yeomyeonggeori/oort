@@ -1,5 +1,10 @@
 # oort 진행 현황
 
+## 설정 › 기기 목록·해제 UI (#2476, 2026-09-11)
+
+- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. 설정 › 기기: `GET /v1/auth/devices`를 지속 카드 SoT로 렌더(라벨·플랫폼·연결 시각·`현재 기기` 배지). QR 성공 후 목록 재조회. 해제는 `ConfirmButton` → `DELETE` 낙관 제거(실패 롤백). 현재 기기 해제는 비활성+이유(400 `cannot_revoke_current`). `lastSeenAt`은 미기록 카피만. OpenAPI rust 샘플러는 `scripts/**` 보호라 엔진 후속.
+- runtime-unverified: 실폰 redeem 후 이 화면 e2e. 캡처는 목 REST.
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
