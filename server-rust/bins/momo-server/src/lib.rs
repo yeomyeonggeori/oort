@@ -832,6 +832,16 @@ pub fn build_app(state: AppState) -> Router {
             "/v1/auth/device-link/{id}/confirm-sas",
             post(routes::device_link::confirm_sas),
         )
+        // ADR-0180 D5 / #2029 — linked-device list + disconnect. Distinct from
+        // the push-token registry at `/v1/workspaces/{ws}/devices`.
+        .route(
+            "/v1/auth/devices",
+            get(routes::device_link::list_devices),
+        )
+        .route(
+            "/v1/auth/devices/{id}",
+            delete(routes::device_link::revoke_device),
+        )
         // ADR-0149 (SRV-T2) — 「작성 중」. The first surface on this server whose
         // handler does not go through Postgres, and the pair is what makes that
         // safe: the grant route does the ONE membership read (under RLS, with

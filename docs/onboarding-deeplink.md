@@ -78,3 +78,5 @@ oort://link?server=<percent-encoded base URL>&token=<base64url>
 
 - 발급: 인증된 사람 멤버가 `POST /v1/auth/device-link` (TTL 120s, 1회).
 - 소비: 폰이 `POST /v1/auth/device-link/redeem` (공개, per-IP 레이트리밋). 공개 오리진 모드에서는 4자리 SAS 를 발급자 확인 후에야 세션이 활성화된다(D4).
+- 목록: `GET /v1/auth/devices` — 이 멤버의 활성 연결 기기. `current` 는 호출 세션. 토큰 원문 없음.
+- 해제: `DELETE /v1/auth/devices/{id}` — 해당 기기의 access+refresh 폐기, 204. 현재 세션은 400 `cannot_revoke_current`(로그아웃 경로). 남의 id 는 404.
