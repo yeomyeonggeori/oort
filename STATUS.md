@@ -1,5 +1,12 @@
 # oort 진행 현황
 
+## 연결 기기 refresh/revoke 원자성 (#2498, 2026-09-12)
+
+- Track engine. `fix/2498-serialize-linked-device-refresh-and-revoke`. linked refresh는 `device_link_token` 안정 행을 먼저 잠그고, 현재 pair를 재확인한 뒤 consume·발급·rebind를 같은 tenant tx에서 끝내거나 전부 rollback한다. revoke도 같은 잠금 순서를 쓴다. 일반 로그인 refresh는 기존 경로.
+- 검증(이번 라운드): `cargo fmt --all --check` · `cargo test -p momo-auth --lib` 88 · `cargo test -p momo-server --lib routes::auth_routes` 9. HTTP+PG 경합/rollback 시험과 workspace clippy/test는 다음 라운드.
+- runtime-unverified: refresh 선행·revoke 선행 barrier, 중복 refresh, 중간 실패 rollback.
+
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
