@@ -43,7 +43,7 @@ Process:
    reads as a clean run, and a pre-flight that silently did not run is the failure this whole
    loop exists to prevent.
 4. Walk rubric phases 0-7. Every visual claim cites a screenshot path.
-5. Emit the rubric's output format with a PASS / FAIL(blockers) verdict.
+5. Emit the rubric's output format with a PASS only with Blocker 0 and High 0; otherwise FAIL with actionable findings.
 
 Rules:
 - Problems over prescriptions: state what breaks and why it matters; suggest direction, not

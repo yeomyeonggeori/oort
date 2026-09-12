@@ -33,7 +33,7 @@ scripts/verify_merge_tree.sh
 변경 표면에 맞는 typecheck/test와 게이트를 실행한다. 웹·폰·코어 계약 변경은 브랜치 단독 결과에 더해 병합 트리가 통과해야 한다. 표면별 UI 규칙은 design-taste 라우터를 따른다. 폰에는 web preflight를 적용하지 않는다.
 
 ## 문서·스크립트·runtime
-문서만 바뀌어도 docs 게이트를 수행한다. 이 profile은 순수 문구 검사만이 아니며 일부 Docker 계약 시험도 포함한다.
+문서 PR/통합에도 docs 게이트를 수행한다. 사용자가 요청한 사소한 문서의 로컬 diff 확인만은 AGENTS의 제한된 예외를 따른다. 이 profile은 순수 문구 검사만이 아니며 일부 Docker 계약 시험도 포함한다.
 ```bash
 scripts/local_gate.sh --profile docs
 ```

@@ -20,7 +20,8 @@
 | 출시 준비 | [ROADMAP](ROADMAP.md) 상단 현행 축, [RELEASING](docs/RELEASING.md), [M7 게이트](docs/cicd/03-store-readiness-gate.md) |
 
 ## 실행과 완료
-- **한 이슈 = 한 브랜치·워크트리·PR**. 배치 작업은 Issue+Milestone+Project로 추적한다. 새 작업 전 `scripts/goal_status.sh`로 소유권을 확인하고 `scripts/goal_claim.sh`에 자기 트랙 base를 명시한다.
+- **리포에 반영할 작업은 한 이슈 = 한 브랜치·워크트리·PR**. 배치 작업은 Issue+Milestone+Project로 추적한다. 새 작업 전 `scripts/goal_status.sh`로 소유권을 확인하고 `scripts/goal_claim.sh`에 자기 트랙 base를 명시한다.
+- 사용자가 **사소한 문서의 로컬 수정과 diff 확인까지만** 요청하면, planner가 소유권을 확인한 격리 워크트리에서 직접 수정·구문/링크 확인 후 전달한다. 이 경우에만 새 Issue·worker·PR·전체 docs 게이트를 만들지 않는다. 코드/스크립트/운영 계약 변경이나 PR·통합에는 이 예외를 적용하지 않는다.
 - 오케스트레이터는 맡은 범위의 기획·검수·통합을 끝까지 진행하고, worker는 구현→관련 검증→PR→`scripts/goal_release.sh <issue> --review --pr <url>`로 인계한다. worker의 인계는 오케스트레이터 작업의 완료가 아니다.
 - 이미 승인된 범위의 가역적 로컬 수정·격리 테스트·실패 수리는 재확인 없이 진행한다. 로컬 테스트는 전용 fixture/포트/DB를 사용한다. 기존 사용자 데이터나 다른 작업의 자원을 재사용·정리하지 않는다.
 - 완료는 **수용기준 충족 + 관련 검증 + 독립 검수 + 요청된 전달 단계**다. 첫 구현만 끝났다고 멈추지 않는다. 범위/계약을 바꾸는 판단만 이탈로 기록하고 필요한 결정을 구한다.
@@ -42,7 +43,7 @@
 | Rust 서버 | workspace `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` |
 | 웹·폰·공유 코어 | 해당 트리 typecheck/test 및 해당 표면 게이트, `scripts/verify_merge_tree.sh`로 병합 트리 확인 |
 | SQL·infra·runtime | 실제 적용 가능한 격리 PG/Docker 검증. 외부 의존은 실제 또는 mock으로 범위를 나눠 기록 |
-| 문서·운영 스크립트 | `scripts/local_gate.sh --profile docs` + 변경된 실행 도구의 관련 시험 |
+| 문서·운영 스크립트의 PR/통합 | `scripts/local_gate.sh --profile docs` + 변경된 실행 도구의 관련 시험 |
 | UI | 해당 표면 preflight와 독립 design-review **Blocker 0·High 0**; 미실행 캡처/실기기는 미검증으로 기록 |
 
 - 검증하지 않은 runtime은 `runtime-unverified`로 표기한다. 버그 회귀 시험은 실제 실패를 잡는 증거를 낸다. 모든 문장·단정에 일률적인 변조 시험을 요구하지 않는다.

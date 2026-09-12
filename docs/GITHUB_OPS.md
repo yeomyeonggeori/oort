@@ -75,13 +75,13 @@
                                                    리뷰(보안/품질) ─▶ 최종 테스트 ─▶ merge
                                                                            │
                                                                            ▼
-                                                main local gate ─▶ 로드맵/이슈/마일스톤 정리
+                                                병합 결과 검증 ─▶ 로드맵/이슈/마일스톤 정리
 ```
 - **수동 트리거:** 이슈를 `status:ready`로 두고 워커 레인에 넘긴다.
 - **자동 위임(추정/조직 설정 의존):** triage 규칙에 맞으면 워커에 할당. (추정 — org/플랜 설정 확인)
 - **품질 레버:** 어려운 이슈는 레인 상한 안에서 best-of-N을 쓴다. 정본은 `docs/planning/PIPELINE.md`.
 - **로컬/데스크탑 실행:** `scripts/goal_status.sh`로 ready/in-progress/needs-review/blocked와 branch/PR/worktree 충돌을 확인한 뒤 `scripts/goal_claim.sh <issue>`로 issue assignee/status/branch/worktree를 한 번에 맞춘다. 아직 스크립트가 없는 checkout에서는 수동으로 별도 branch/worktree를 만들고 같은 규칙을 따른다.
-- **완료 기준:** PR 생성이 끝이 아니다. 리뷰 스킬/에이전트 검수 → 최종 테스트 → merge → `main` local gate 확인까지가 한 사이클이다. GitHub Actions를 다시 주 gate로 켠 기간에는 Actions green도 함께 확인한다.
+- **완료 기준:** PR 생성 뒤에도 독립 검수·관련 검증·요청된 통합을 이어간다. 같은 HEAD·환경의 유효 증거는 재사용하고, 변경·병합 결과의 차이는 다시 검증한다. current PR CI와 Policy integrity 및 exact-base 확인은 매 통합 시 필요하다.
 - **대기 시간 사용:** CI를 기다리는 동안 로드맵 위치, 기술스택/중요 결정 변경 여부, 새 리스크나 참고 소스가 생겼는지 점검한다. 변화가 있으면 `STATUS.md`/`ROADMAP.md`/이슈로 반영하거나 후속 이슈를 제안한다.
 
 ### 3.2a PR CI + Local PR Gate
@@ -90,23 +90,7 @@
 
 - 정본: [`docs/LOCAL_PR_GATE.md`](LOCAL_PR_GATE.md), 실행 진입점: `scripts/local_gate.sh`.
 - PR body에는 `scripts/local_gate.sh --profile ...`가 출력하는 `Local Gate: PASS`, 날짜, machine/toolchain, 실행 명령, runtime coverage, 미검증 범위를 붙인다.
-- 기본 실행:
-  ```bash
-  scripts/local_gate.sh --profile docs
-  scripts/local_gate.sh --profile swift
-  scripts/local_gate.sh --profile diagnostics
-  scripts/local_gate.sh --profile runtime-db
-  scripts/local_gate.sh --profile runtime-agent
-  scripts/local_gate.sh --profile macos-ui
-  ```
-- 수동 fallback 명령:
-  ```bash
-  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make build
-  DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer make test
-  python3 -m py_compile adapters/hermes/momo_adapter.py
-  jq empty .github/labels.json infra/centrifugo.json
-  ```
-- runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
+- 실행 명령은 [개발 검증](runbooks/development-validation.md), runtime profile과 실제 커버리지는 [LOCAL_PR_GATE](LOCAL_PR_GATE.md)를 따른다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
 - merge 직전에 현재 PR head의 `PR CI gate`·`Policy integrity gate`와 exact-base wrapper provenance를 모두 확인한다. merge 후에는 실제 병합 결과가 검증된 트리와 일치하는지 확인하고 차이가 생긴 범위를 검증하며 `track-alignment` 결과도 확인한다.
 - 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다.
@@ -309,7 +293,7 @@ scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # �
 - `status:ready` + 의존 충족 + 미할당 = 워커 picker 대상.
 - 가능하면 worktree에서 작업한다. 동시에 여러 작업을 받을 수 있도록 root dirty worktree는 건드리지 않는다.
 - 작업 전 계획 문서를 확인하고, 계획이 미흡하면 추가 리서치부터 한다.
-- PR 이후에는 보안/품질 리뷰, 최종 테스트, merge, `main` local gate 확인까지 완료한다.
-- Actions를 비주요 gate로 두는 기간에는 `docs/LOCAL_PR_GATE.md`의 local evidence + reviewer pass + merge 후 main local gate를 완료 기준으로 사용한다.
-- QA/사용성 게이트(M7) PASS 기록 전에는 M8(스토어/공증 공개 배포) 이슈 착수 금지.
+- PR 이후에는 독립 리뷰, 현재 HEAD/환경의 검증 증거 확인, 요청된 순차 통합과 병합 결과 확인까지 완료한다. 수정·환경·병합 차이가 있으면 해당 검증을 다시 실행한다.
+- local evidence와 reviewer pass는 `docs/LOCAL_PR_GATE.md`를 따른다. current PR CI·Policy integrity·exact-base 검증과 트랙 정렬 확인은 증거 재사용으로 생략하지 않는다.
+- QA/사용성 게이트(M7) PASS 기록 전에는 M8(스토어/공증 공개 배포) 실행 금지. 런북·로컬 검증 등 배포 전 준비와 구분한다.
 - 런타임 미검증은 `status:runtime-unverified` + STATUS.md에 정직 표기. Docker/psql로 가능한 검증은 수행하고, hermes 등 외부 의존은 실제 의존성 또는 mock 준비를 먼저 검토한다.

@@ -10,7 +10,8 @@ Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURREN
 ## 작업 크기에 맞는 계약
 | 작업 | 필요한 입력 |
 |---|---|
-| 작은 수정·기존 결함 수리 | Issue의 Goal / Acceptance / Out of scope. 관련 정본 링크와 검증 범위 |
+| 사소한 문서의 로컬 diff 확인만 | 소유권 확인·격리 워크트리·구문/링크 확인. 새 Issue/worker/PR/전체 게이트 불필요; 코드·운영 계약에는 적용하지 않음 |
+| 리포에 반영할 작은 수정·기존 결함 수리 | Issue의 Goal / Acceptance / Out of scope. 관련 정본 링크와 검증 범위 |
 | 여러 영역·의존 순서가 있는 작업 | Issue + [핸드오프 패킷](HANDOFF_TEMPLATE.md). 파일 맵·지킬 계약·통합 순서 |
 | 공개 API·보안·스키마·방향·스택 변경 | 기존 또는 새 Accepted ADR + 해당 이슈/패킷 |
 | 출시·실서비스 변경 | 승인된 출시 계약과 환경별 런북·검증·owner 승인 |
@@ -20,7 +21,7 @@ Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURREN
 
 ## 역할과 지속성
 - **product-owner**: 방향·우선순위·ADR·출시 권한 결정.
-- **planner/orchestrator**: 기획, 범위 분해, 독립 검수, 후속 수정 지시, 상태 갱신. 실제 구현은 worker에 배정한다. 공용 운영 문서와 검수 기록은 planner가 작성한다.
+- **planner/orchestrator**: 기획, 범위 분해, 독립 검수, 후속 수정 지시, 상태 갱신. 제품·실행 도구 구현은 worker에 배정한다. 공용 운영 문서·검수 기록과 위 로컬 문구 수정은 planner가 작성한다.
 - **worker**: 한 이슈 구현과 관련 시험, PR, 인계. 머지·이슈 close·로드맵 재편성은 하지 않는다.
 - **integrator(momo-main)**: owner가 조율된 세션 하나가 맡는다. 순차 트랙 통합과 승인된 승격을 수행한다. 모델명이나 하네스명이 독점 권한을 만들지 않는다.
 

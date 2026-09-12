@@ -16,7 +16,7 @@ Public-repository `pr-ci` is active for PRs into `main`, `track/engine`, and `tr
 
 필수 검증 등급은 AGENTS.md, 실행 명령은 [개발 검증](runbooks/development-validation.md)에 있다. 같은 HEAD·환경의 유효한 증거는 재사용한다. 리뷰 수정·base/병합 결과·환경 차이가 있으면 관련 검증을 다시 실행한다.
 
-Every PR needs local evidence in the PR body: date and machine/toolchain, commands executed, pass/fail, runtime scope actually exercised, and anything intentionally not covered. Do not mark runtime work complete if the runtime script was not run.
+A local-only prose diff requested for inspection is not a PR and follows the narrow AGENTS exception. Every PR needs local evidence in the PR body: date and machine/toolchain, commands executed, pass/fail, runtime scope actually exercised, and anything intentionally not covered. Do not mark runtime work complete if the runtime script was not run.
 
 ```bash
 scripts/local_gate.sh --profile docs
