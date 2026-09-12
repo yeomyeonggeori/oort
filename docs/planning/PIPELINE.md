@@ -10,7 +10,7 @@
 | **product-owner** | ADR Accept/Reject · 로드맵 정본 반영 승인 · 우선순위 · track→main 승격 승인 | 메인테이너(성재) | ADR-0100 · `docs/TRACKS.md` §3 |
 | **planner / momo-main** | 리서치 · ADR 기안 · 티켓/패킷 발급 · 워커 검수 재판정 · 순차 머지 · 승격+sync 짝 집행(상시 위임 범위) · CURRENT_STATE/JOURNAL 플러시 | Claude **Fable**(2026-09-04~, 성재 「Fable + opus5으로 가자」 — 한도 소진 시 Opus 5로 강하, `FABLE_DOWNGRADE_ROUTINE.md`). **서브에이전트(design-review 등)는 Opus 5**(`model: opus`). 단일 세션이 planner와 momo-main 겸임 | `CLAUDE.md` · `docs/planning/README.md` · `.claude/skills/momo-planning` |
 | **worker** | goal(=GitHub Issue+패킷) 구현 · 게이트 · PR · 정지 | **grok 4.6 (Grok Build CLI)** — `~/.grok/bin/grok --no-auto-update --permission-mode bypassPermissions -m grok-4.6 --output-format plain -p "$(cat <mission.md>)"`(성재 지시 2026-09-10 「fable orchestrator 모드, grok build grok 4.6 적극 활용」; 잔액 402 해소 실측 09-10). 폴백 = Cursor CLI `cursor-agent --model cursor-grok-4.6-high`(09-03 계약 그대로) | `AGENTS.md` · `~/.claude/skills/grok-fleet`(spawn 계약 — 호출부만 아래 §3으로 대체) |
-| **reviewer-design** | UI 변경의 fresh-context 리뷰(캡처+프리플라이트+루브릭, Blocker 0·High 0 폐곡선) | `.claude/agents/design-review.md` 에이전트 | `.claude/skills/momo-design-taste` 라우터 |
+| **reviewer-design** | UI 변경의 fresh-context 리뷰(캡처+프리플라이트+루브릭, Blocker 0·High 0 폐곡선) | `.claude/agents/design-review.md` 에이전트 — **Claude Opus 5 고정**(`model: opus`, 2026-09-12 성재 지시; 그 전엔 세션 모델 상속) | `.claude/skills/momo-design-taste` 라우터 |
 | **reviewer-code** | 보안·정합·스코프·테스트 정직성 리뷰 · 정책 무결성 감사 | planner 본인(+필요 시 grok 독립 렌즈 "리뷰어 C") | `docs/MULTI_SESSION_OPS.md` §7 · `scripts/verify_policy_integrity_from_base.sh` |
 
 ## 2. 상한·경로·승인
@@ -59,6 +59,7 @@
 |---|---|---|
 | 2026-09-10 | worker | **grok 4.6 — Grok Build CLI 복귀**(`~/.grok/bin/grok`, 성재 지시 「fable orchestrator 모드, grok build grok 4.6 적극 활용」; 402 해소 실측). Cursor CLI는 폴백. 리뷰어 C도 grok build |
 | 2026-09-03 | worker | **grok 4.6 — Cursor CLI non-fast**(`cursor-grok-4.6-high`, 성재 지시). 구 grok build CLI 잔액 소진(402)으로 교체 |
+| 2026-09-12 | reviewer-design | **Opus 5 고정**(에이전트 정의 `model: opus`, 성재 지시 — 진행 중이던 2기는 세션 모델로 완주) |
 | 2026-09-03 | planner/momo-main | **Opus 5**(Fable 한도 소진, 성재가 `/model` 전환) — 서브에이전트도 `model: opus`로 발사 |
 | 2026-09-02 | worker | **grok 4.6**(성재 지시, grok build CLI) |
 | 2026-09-01 | worker | Opus 5 Agent 레인(하루 운용, BT-1~5) |
