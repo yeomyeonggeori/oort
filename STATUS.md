@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## Railway app/Caddy 릴리스 pin 정합 (#2499, 2026-09-12)
+
+- Track engine. `fix/2499-synchronize-railway-release-image-pins` onto `origin/track/engine`. `railway.json` `appImage`와 api/relay/webhook-sender/agent-worker image, `Dockerfile.caddy` `ARG OORT_IMAGE`를 `releases/latest.json` v0.1.5 list digest `sha256:5481c14e…`에 동기화. Centrifugo 등 외부 이미지 불변.
+- 검증: `scripts/tests/test_railway_template.sh`가 JSON 필드·Caddy ARG·`AS web` FROM·`COPY --from=web /opt/momo/web /srv/web` 소스를 각각 대조. 스크래치에서 서비스/Caddy ARG/unused-current+stale-web/COPY-redirect를 이전 digest로 하나씩 변조하면 RED. 원본 트리 청결. `local_gate --profile docs`는 Astra 슬롯 대기.
+- runtime-unverified: 실제 Railway 계정 재배포(#2205 미주장).
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
