@@ -655,6 +655,7 @@ PG_PASSWORD="$(rand_hex)"
 APP_PASSWORD="$(rand_hex)"
 RELAY_PASSWORD="$(rand_hex)"
 WORKER_PASSWORD="$(rand_hex)"
+NOTIFIER_PASSWORD="$(rand_hex)"
 JWT_HMAC="$(rand_hex)"
 CENT_TOKEN_HMAC="$(rand_hex)"
 CENT_API_KEY="$(rand_hex)"
@@ -864,7 +865,7 @@ refresh_request_body() {
 for secret_value in \
   "$GATE_PASSWORD" \
   "$JOIN_PASSWORD" "$PG_PASSWORD" "$APP_PASSWORD" "$RELAY_PASSWORD" \
-  "$WORKER_PASSWORD" "$INVITE_CODE" "$JWT_HMAC" "$CENT_TOKEN_HMAC" \
+  "$WORKER_PASSWORD" "$NOTIFIER_PASSWORD" "$INVITE_CODE" "$JWT_HMAC" "$CENT_TOKEN_HMAC" \
   "$CENT_API_KEY" "$CENT_PROXY_SECRET" "$PROVIDER_LINK_MASTER_KEY" \
   "$LIVEKIT_API_KEY" "$LIVEKIT_API_SECRET"; do
   append_secret_with_derivatives "$secret_value" || {
@@ -896,6 +897,7 @@ MIGRATE_DATABASE_URL=postgres://$PG_USER:$PG_PASSWORD@postgres:5432/$PG_DB
 MOMO_APP_POSTGRES_PASSWORD=$APP_PASSWORD
 RELAY_POSTGRES_PASSWORD=$RELAY_PASSWORD
 WORKER_POSTGRES_PASSWORD=$WORKER_PASSWORD
+NOTIFIER_POSTGRES_PASSWORD=$NOTIFIER_PASSWORD
 MOMO_APP_DATABASE_URL=postgres://momo_app:$APP_PASSWORD@postgres:5432/$PG_DB
 RELAY_DATABASE_URL=postgres://momo_relay:$RELAY_PASSWORD@postgres:5432/$PG_DB
 
@@ -2083,6 +2085,106 @@ REALTIME_SECRET="$(printf '%s' "$RESPONSE_BODY" | jq -r '.token // empty')"
 append_secret_with_derivatives "$REALTIME_SECRET"
 guard_jq '.tokenType == "centrifugo.connection.jwt" and (.expiresAtMs | type == "number")' \
   "realtime token is a centrifugo connection jwt"
+
+# ADR-0180 D5 / #2491 — linked-device list + revoke. Login ACCESS is the
+# issuer, not a linked row. Two redeem sessions become the 200 list (one
+# `current: true`). lastSeenAt is omitted until the access row is touched;
+# human session auth does not write last_used_at. Issue/redeem are fixtures
+# (not on the sampled-on-rust list).
+DEVICE_LINK_VOUCHER_FILE="$TMP_DIR/device-link-voucher.txt"
+(umask 077; : >"$DEVICE_LINK_VOUCHER_FILE")
+register_secret_file "$DEVICE_LINK_VOUCHER_FILE" || {
+  echo "[openapi-rust] could not register device-link voucher scratch" >&2
+  exit 1
+}
+DEVICE_LINK_VOUCHER_INDEX=$((${#SECRET_FILES[@]} - 1))
+
+redeem_gate_linked_device() {
+  local fixture="$1" name="$2" platform="$3" voucher
+  expect "$fixture-issue" post "/v1/auth/device-link" 201 "" "$ACCESS"
+  [ "$(file_identity "$DEVICE_LINK_VOUCHER_FILE")" = "${SECRET_IDENTITIES[$DEVICE_LINK_VOUCHER_INDEX]}" ] || {
+    echo "[openapi-rust] device-link voucher scratch identity changed" >&2
+    exit 1
+  }
+  voucher="$(printf '%s' "$RESPONSE_BODY" | jq -er '.token')"
+  printf '%s' "$voucher" >"$DEVICE_LINK_VOUCHER_FILE"
+  append_secret_with_derivatives "$voucher" || {
+    echo "[openapi-rust] could not register device-link voucher" >&2
+    exit 1
+  }
+  expect "$fixture-redeem" post "/v1/auth/device-link/redeem" 200 \
+    "$(jq -cn --rawfile t "$DEVICE_LINK_VOUCHER_FILE" --arg n "$name" --arg p "$platform" \
+        '{token:$t,device:{name:$n,platform:$p}}')"
+  GATE_DEVICE_ACCESS="$(printf '%s' "$RESPONSE_BODY" | jq -er '.accessToken')"
+  GATE_DEVICE_REFRESH="$(printf '%s' "$RESPONSE_BODY" | jq -er '.refreshToken')"
+  append_secret_with_derivatives "$GATE_DEVICE_ACCESS" || {
+    echo "[openapi-rust] could not register linked-device access" >&2
+    exit 1
+  }
+  append_secret_with_derivatives "$GATE_DEVICE_REFRESH" || {
+    echo "[openapi-rust] could not register linked-device refresh" >&2
+    exit 1
+  }
+  if ! printf '%s' "$RESPONSE_BODY" | jq -e '.pendingSas == false' >/dev/null; then
+    echo "[openapi-rust] FAIL fixture $fixture-redeem: pendingSas held on loopback advert" >&2
+    redacted_body >&2
+    exit 1
+  fi
+}
+
+redeem_gate_linked_device device-a "OpenAPI rust phone A" ios
+DEVICE_A_ACCESS="$GATE_DEVICE_ACCESS"
+redeem_gate_linked_device device-b "OpenAPI rust phone B" android
+
+sample list-linked-devices get "/v1/auth/devices" "/v1/auth/devices" 200 \
+  "" "$DEVICE_A_ACCESS"
+guard_jq '
+  (.devices | length) == 2
+  and ([.devices[] | select(.current == true)] | length) == 1
+  and ([.devices[] | select(.current == false)] | length) == 1
+  and any(.devices[]; .label == "OpenAPI rust phone A" and .platform == "ios" and .current == true)
+  and any(.devices[]; .label == "OpenAPI rust phone B" and .platform == "android" and .current == false)
+  and all(.devices[];
+        (.id | type == "string")
+        and (.label | type == "string")
+        and (.platform | type == "string")
+        and (.linkedAt | type == "number")
+        and (.current | type == "boolean")
+        and (has("lastSeenAt") | not))
+  and (tostring | test("accessToken|refreshToken|momo_agent_v1\\.") | not)' \
+  "linked-device list is two rows, one current, lastSeenAt omitted"
+DEVICE_A_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er \
+  '.devices[] | select(.label == "OpenAPI rust phone A") | .id')"
+DEVICE_B_ID="$(printf '%s' "$RESPONSE_BODY" | jq -er \
+  '.devices[] | select(.label == "OpenAPI rust phone B") | .id')"
+canonical_uuid "$DEVICE_A_ID" || {
+  echo "[openapi-rust] list returned a non-canonical current device id" >&2
+  exit 1
+}
+canonical_uuid "$DEVICE_B_ID" || {
+  echo "[openapi-rust] list returned a non-canonical other device id" >&2
+  exit 1
+}
+
+sample revoke-linked-device-current delete \
+  "/v1/auth/devices/{id}" \
+  "/v1/auth/devices/$DEVICE_A_ID" 400 \
+  "" "$DEVICE_A_ACCESS"
+guard_jq '.error.message == "cannot_revoke_current"' \
+  "current session revoke is a named 400"
+
+UNKNOWN_DEVICE_ID="$(lower_uuid)"
+sample revoke-linked-device-unknown delete \
+  "/v1/auth/devices/{id}" \
+  "/v1/auth/devices/$UNKNOWN_DEVICE_ID" 404 \
+  "" "$DEVICE_A_ACCESS"
+guard_jq '.error.message == "device not found"' \
+  "unknown linked-device id is 404 without an existence leak"
+
+sample revoke-linked-device delete \
+  "/v1/auth/devices/{id}" \
+  "/v1/auth/devices/$DEVICE_B_ID" 204 \
+  "" "$DEVICE_A_ACCESS"
 
 # ---------------------------------------------------------------------------
 # generic per-agent bearer — issue from the real HAP-E1 API, then consume the
@@ -4128,7 +4230,8 @@ for request_secret in \
   "$LOGIN_PASSWORD_FILE" \
   "$INVITE_CODE_FILE" \
   "$JOIN_PASSWORD_FILE" \
-  "$INVITE_REDEEM_FILE"; do
+  "$INVITE_REDEEM_FILE" \
+  "$DEVICE_LINK_VOUCHER_FILE"; do
   request_secret_index=-1
   for ((index = 0; index < ${#SECRET_FILES[@]}; index++)); do
     if [ "${SECRET_FILES[$index]}" = "$request_secret" ]; then

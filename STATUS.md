@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## OpenAPI rust 샘플러에 GET/DELETE /v1/auth/devices 샘플 (#2491, 2026-09-12)
+
+- Track engine. `policy/2491-openapi-sampler-devices` onto `origin/track/engine`. `scripts/openapi_sampled_on_rust.txt`에 `GET /v1/auth/devices`·`DELETE /v1/auth/devices/{id}` 등재. 샘플러가 기기 링크 2회 redeem 픽스처 뒤 200(두 행, 하나 `current: true`, `lastSeenAt` 생략)·400 `cannot_revoke_current`·404·204를 왕복. compose 필수 `NOTIFIER_POSTGRES_PASSWORD`를 게이트 env에 추가(기존 검사 삭제 0).
+- 검증: `scripts/verify_openapi_contract_rust.sh` PASS 91/91 samples · 86 ops(이전 87/84). red: OpenAPI에서 `current` 제거 → shape FAIL undeclared `current`; 400 가드 문자열 `cannot_revoke_session` → guard FAIL, 원복. `bash -n` PASS. `cargo test -p momo-server` 334 lib + 24 unignored green(샘플러는 Rust 시험을 구동하지 않음).
+- runtime-unverified: 없음(호스트 스크립트+로컬 compose 부분집합). 실폰 설정 UI는 uxui A-46.
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
