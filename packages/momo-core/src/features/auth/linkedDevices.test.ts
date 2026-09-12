@@ -5,6 +5,8 @@ import { installCoreHost, resetCoreHost, type SessionPort } from "../../runtime/
 import {
   CANNOT_REVOKE_CURRENT,
   isCannotRevokeCurrent,
+  isPhonePlatform,
+  linkedDevicePlatformLabel,
   listLinkedDevices,
   parseLinkedDeviceList,
   revokeLinkedDevice,
@@ -13,7 +15,7 @@ import {
 const CURRENT_ID = "019f9b10-0000-7000-8000-000000000d01";
 const OTHER_ID = "019f9b10-0000-7000-8000-000000000d02";
 
-function installHost(): void {
+function installHost(overrides: Partial<SessionPort> = {}): SessionPort {
   const session: SessionPort = {
     getAccessToken: () => "access-token",
     getRefreshToken: () => null,
@@ -22,6 +24,7 @@ function installHost(): void {
     applyRotation: () => {},
     markAuthExpired: () => {},
     clearSession: () => {},
+    ...overrides,
   };
   installCoreHost({
     apiBase: () => "https://oort.test",
@@ -29,6 +32,7 @@ function installHost(): void {
     buildMode: () => "test",
     session,
   });
+  return session;
 }
 
 afterEach(() => {
@@ -98,6 +102,19 @@ describe("linkedDevices wire", () => {
   });
 });
 
+describe("linkedDevices platform labels", () => {
+  it("maps known wire tokens and treats ipados as a phone", () => {
+    expect(linkedDevicePlatformLabel("ios")).toBe("iOS");
+    expect(linkedDevicePlatformLabel("ipados")).toBe("iPadOS");
+    expect(linkedDevicePlatformLabel("macos")).toBe("macOS");
+    expect(linkedDevicePlatformLabel("android")).toBe("Android");
+    expect(linkedDevicePlatformLabel("windows")).toBe("Windows");
+    expect(isPhonePlatform("ipados")).toBe(true);
+    expect(isPhonePlatform("macos")).toBe(false);
+    expect(linkedDevicePlatformLabel("custom-rig")).toBe("custom-rig");
+  });
+});
+
 describe("linkedDevices client", () => {
   it("GETs the owner list and DELETEs one id", async () => {
     installHost();
@@ -143,5 +160,65 @@ describe("linkedDevices client", () => {
       .catch((caught: unknown) => caught);
     expect(missing).toBeInstanceOf(ApiError);
     expect((missing as ApiError).status).toBe(404);
+  });
+
+  it("rotates once on 401 and retries the list", async () => {
+    const markAuthExpired = vi.fn();
+    const applyRotation = vi.fn();
+    installHost({
+      getRefreshToken: () => "refresh-token",
+      markAuthExpired,
+      applyRotation,
+    });
+    let listGets = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        const path = String(url);
+        if (path.endsWith("/v1/auth/refresh")) {
+          expect(init?.method).toBe("POST");
+          return jsonResponse(
+            { accessToken: "next-access", refreshToken: "next-refresh" },
+            200
+          );
+        }
+        if (path.endsWith("/v1/auth/devices")) {
+          listGets += 1;
+          if (listGets === 1) {
+            return jsonResponse({ error: { message: "expired" } }, 401);
+          }
+          return jsonResponse(TWO, 200);
+        }
+        throw new Error(path);
+      })
+    );
+    const listed = await listLinkedDevices();
+    expect(listed.devices).toHaveLength(2);
+    expect(listGets).toBe(2);
+    expect(applyRotation).toHaveBeenCalledWith("next-access", "next-refresh");
+    expect(markAuthExpired).not.toHaveBeenCalled();
+  });
+
+  it("a 401 that survives rotation ends the session", async () => {
+    const markAuthExpired = vi.fn();
+    installHost({
+      getRefreshToken: () => "refresh-token",
+      markAuthExpired,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        if (String(url).endsWith("/v1/auth/refresh")) {
+          return jsonResponse({ error: { message: "gone" } }, 401);
+        }
+        return jsonResponse({ error: { message: "expired" } }, 401);
+      })
+    );
+    const error = await listLinkedDevices()
+      .then(() => null)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(ApiError);
+    expect((error as ApiError).status).toBe(401);
+    expect(markAuthExpired).toHaveBeenCalled();
   });
 });

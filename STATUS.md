@@ -1,9 +1,9 @@
 # oort 진행 현황
 
-## 설정 › 기기 목록·해제 UI (#2476, 2026-09-11)
+## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
 
-- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. 설정 › 기기: `GET /v1/auth/devices`를 지속 카드 SoT로 렌더(라벨·플랫폼·연결 시각·`현재 기기` 배지). QR 성공 후 목록 재조회. 해제는 `ConfirmButton` → `DELETE` 낙관 제거(실패 롤백). 현재 기기 해제는 비활성+이유(400 `cannot_revoke_current`). `lastSeenAt`은 미기록 카피만. OpenAPI rust 샘플러는 `scripts/**` 보호라 엔진 후속.
-- runtime-unverified: 실폰 redeem 후 이 화면 e2e. 캡처는 목 REST.
+- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. R2: 목록은 `authedRequest`(401 1회 회전, 만료는 `markAuthExpired`). 해제 후 다음 행/QR 만들기 착지 + `role=status` 낭독. 플랫폼은 iOS/iPadOS/Android/macOS/Windows. 빈 상태 한 줄. 「현재 기기」는 메타 문장. 마지막 사용 시각은 아직 기록하지 않습니다.
+- runtime-unverified: 실폰 redeem 후 이 화면 e2e. `current` 행은 폰 세션에서만 실측(웹 비밀번호 세션은 목록에 없음).
 
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 

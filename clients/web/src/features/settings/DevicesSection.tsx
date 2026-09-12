@@ -9,10 +9,7 @@ export function DevicesSection({ offline }: { offline: boolean }) {
   return (
     <SectionShell
       title="기기"
-      lines={[
-        "이 계정에 붙어 있는 기기입니다. 최근 활동 미기록.",
-        "이 계정을 폰에서도 쓰려면 아래에서 QR을 만듭니다.",
-      ]}
+      lines={["이 계정에 QR로 붙인 기기입니다."]}
     >
       <LinkedDevicesList offline={offline} />
       <DeviceLinkCard

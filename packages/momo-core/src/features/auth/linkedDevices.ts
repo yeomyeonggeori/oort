@@ -1,5 +1,7 @@
-// REST client for linked-device list/revoke (ADR-0180 D5 / openapi
-// listLinkedDevices · revokeLinkedDevice).
+// Linked-device list/revoke (ADR-0180 D5 / openapi listLinkedDevices ·
+// revokeLinkedDevice). Transport is the shared rotating client
+// (`authedRequest` in lib/api.ts): a 401 rotates once, and only a 401 that
+// survives rotation is allowed to mean expiry.
 //
 // GET    /v1/auth/devices        { devices: [{ id, label, platform, linkedAt,
 //                                  lastSeenAt?, current }] }
@@ -8,9 +10,7 @@
 // Distinct from the issuer QR flow (`./deviceLink`) and from the push-token
 // registry at `/v1/workspaces/{ws}/devices`. This file does not log.
 
-import { ApiError } from "../../lib/api";
-import { fetchWithDeadline } from "../../lib/http";
-import { apiBase, coreSession } from "../../runtime/host";
+import { ApiError, authedRequest } from "../../lib/api";
 import { arrayField, bool, num, record, str, WireShapeError } from "../../lib/wire";
 
 export const CANNOT_REVOKE_CURRENT = "cannot_revoke_current";
@@ -26,23 +26,6 @@ export interface LinkedDevice {
 
 export interface LinkedDeviceList {
   devices: LinkedDevice[];
-}
-
-async function linkedDevicesRequest(
-  path: string,
-  init: RequestInit = {}
-): Promise<{ status: number; body: unknown }> {
-  const headers = new Headers(init.headers);
-  headers.set("Accept", "application/json");
-  if (init.body) headers.set("Content-Type", "application/json");
-  const token = coreSession().getAccessToken();
-  if (token) headers.set("Authorization", `Bearer ${token}`);
-  const res = await fetchWithDeadline(`${apiBase()}${path}`, { ...init, headers });
-  if (!res.ok) {
-    const body = res.jsonOrNull<{ error?: { message?: string } }>();
-    throw new ApiError(res.status, body?.error?.message ?? `HTTP ${res.status}`);
-  }
-  return { status: res.status, body: res.jsonOrNull<unknown>() };
 }
 
 export function parseLinkedDevice(value: unknown): LinkedDevice {
@@ -76,18 +59,16 @@ export function parseLinkedDeviceList(value: unknown): LinkedDeviceList {
 }
 
 export async function listLinkedDevices(): Promise<LinkedDeviceList> {
-  const { body } = await linkedDevicesRequest("/v1/auth/devices", {
-    cache: "no-store",
-  });
-  return parseLinkedDeviceList(body);
+  const res = await authedRequest("/v1/auth/devices", { cache: "no-store" });
+  return parseLinkedDeviceList(res.json<unknown>());
 }
 
 export async function revokeLinkedDevice(id: string): Promise<void> {
-  const { status } = await linkedDevicesRequest(
+  const res = await authedRequest(
     `/v1/auth/devices/${encodeURIComponent(id)}`,
     { method: "DELETE" }
   );
-  if (status !== 204) throw new WireShapeError();
+  if (res.status !== 204) throw new WireShapeError();
 }
 
 export function isCannotRevokeCurrent(error: unknown): boolean {
@@ -95,5 +76,44 @@ export function isCannotRevokeCurrent(error: unknown): boolean {
     error instanceof ApiError &&
     error.status === 400 &&
     error.message === CANNOT_REVOKE_CURRENT
+  );
+}
+
+/** Product label for a redeem `platform` token. Unknown values pass through. */
+export function linkedDevicePlatformLabel(platform: string): string {
+  const key = platform.trim().toLowerCase();
+  switch (key) {
+    case "ios":
+    case "iphone":
+      return "iOS";
+    case "ipad":
+    case "ipados":
+      return "iPadOS";
+    case "android":
+      return "Android";
+    case "macos":
+    case "darwin":
+    case "mac":
+      return "macOS";
+    case "windows":
+    case "win32":
+      return "Windows";
+    case "linux":
+      return "Linux";
+    case "web":
+      return "웹";
+    default:
+      return platform.trim();
+  }
+}
+
+export function isPhonePlatform(platform: string): boolean {
+  const key = platform.trim().toLowerCase();
+  return (
+    key === "ios" ||
+    key === "iphone" ||
+    key === "ipad" ||
+    key === "ipados" ||
+    key === "android"
   );
 }

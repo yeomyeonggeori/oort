@@ -1,20 +1,18 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Monitor, Smartphone } from "lucide-react";
 import { ApiError } from "@momo/core/lib/api";
 import { NetworkError } from "@momo/core/lib/http";
 import {
   isCannotRevokeCurrent,
+  isPhonePlatform,
+  linkedDevicePlatformLabel,
   revokeLinkedDevice,
   type LinkedDevice,
 } from "@momo/core/features/auth/linkedDevices";
 import { cn } from "@/design/lib/cn";
-import { EmptyInvite, InlineBanner, Skeleton } from "@/features/common/States";
-import {
-  ConfirmButton,
-  StatusChip,
-  Subsection,
-} from "./SettingsFields";
+import { InlineBanner, Skeleton } from "@/features/common/States";
+import { ConfirmButton, Subsection } from "./SettingsFields";
 import {
   LINKED_DEVICES_QUERY_KEY,
   linkedDevicesQuery,
@@ -30,46 +28,35 @@ const LINKED_AT = new Intl.DateTimeFormat("ko-KR", {
 
 const CURRENT_REASON =
   "지금 쓰는 기기는 여기서 끊을 수 없습니다. 이 세션을 끝내려면 로그아웃하세요.";
+const SERVER_CURRENT_REASON =
+  "서버가 이 기기를 지금 쓰는 기기로 봅니다. 이 세션을 끝내려면 로그아웃하세요.";
 const OFFLINE_REASON =
   "연결이 끊겨 지금은 기기를 해제할 수 없습니다. 다시 연결되면 이어서 해제할 수 있습니다.";
-const BUSY_REASON =
-  "앞서 누른 것이 아직 끝나지 않았습니다. 그것이 끝나면 이어서 해제할 수 있습니다.";
 const GONE_NOTICE = "그 기기는 이미 목록에 없습니다.";
 const REVOKE_QUESTION =
   "이 기기 연결을 끊으면 그 기기는 다시 QR을 찍어야 합니다.";
 
 function listFailureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
-  if (error instanceof ApiError) {
-    if (error.status === 401) {
-      return "세션이 만료됐습니다. 다시 로그인한 뒤 이 화면을 여세요.";
-    }
-    if (error.status === 403) {
-      return "사람 계정만 연결된 기기를 볼 수 있습니다.";
-    }
+  if (error instanceof ApiError && error.status === 403) {
+    return "사람 계정만 연결된 기기를 볼 수 있습니다.";
   }
   return "기기 목록을 불러오지 못했습니다. 다시 시도하세요.";
 }
 
 function revokeFailureCopy(error: unknown): string {
   if (error instanceof NetworkError) return error.message;
-  if (isCannotRevokeCurrent(error)) return CURRENT_REASON;
+  if (isCannotRevokeCurrent(error)) return SERVER_CURRENT_REASON;
   if (error instanceof ApiError && error.status === 404) return GONE_NOTICE;
   return "기기를 해제하지 못했습니다. 다시 시도하세요.";
 }
 
-function isPhonePlatform(platform: string): boolean {
-  const key = platform.trim().toLowerCase();
-  return (
-    key === "ios" ||
-    key === "iphone" ||
-    key === "ipad" ||
-    key === "android"
-  );
-}
-
 function linkedAtCopy(linkedAt: number): string {
   return `연결 ${LINKED_AT.format(new Date(linkedAt))}`;
+}
+
+function disconnectTriggerSelector(id: string): string {
+  return `[data-testid="linked-device-row-${id}"] [data-testid="linked-device-disconnect"]`;
 }
 
 export function LinkedDevicesList({ offline }: { offline: boolean }) {
@@ -77,9 +64,28 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
   const list = useQuery(linkedDevicesQuery());
   const currentReasonId = useId();
   const offlineReasonId = useId();
-  const busyReasonId = useId();
   const [rowError, setRowError] = useState<string | null>(null);
   const [goneNotice, setGoneNotice] = useState<string | null>(null);
+  const [removed, setRemoved] = useState("");
+  const listRef = useRef<HTMLUListElement | null>(null);
+  const landing = useRef<string | null>(null);
+
+  const rows = list.data ?? [];
+
+  useEffect(() => {
+    const target = landing.current;
+    if (target === null) return;
+    landing.current = null;
+    if (target === "") {
+      document
+        .querySelector<HTMLElement>('[data-testid="device-link-create"]')
+        ?.focus({ preventScroll: true });
+      return;
+    }
+    listRef.current
+      ?.querySelector<HTMLElement>(disconnectTriggerSelector(target))
+      ?.focus({ preventScroll: true });
+  }, [list.data]);
 
   const revoke = useMutation({
     mutationFn: (id: string) => revokeLinkedDevice(id),
@@ -90,13 +96,21 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
       const previous = client.getQueryData<LinkedDevice[]>(
         LINKED_DEVICES_QUERY_KEY
       );
+      const current = previous ?? [];
+      const gone = current.findIndex((row) => row.id === id);
+      const neighbour = current[gone + 1] ?? current[gone - 1];
+      landing.current = neighbour?.id ?? "";
+      const label = current[gone]?.label;
+      setRemoved(label ? `${label} 연결을 해제했습니다.` : "");
       client.setQueryData<LinkedDevice[]>(
         LINKED_DEVICES_QUERY_KEY,
-        (rows) => (rows ?? []).filter((row) => row.id !== id)
+        (next) => (next ?? []).filter((row) => row.id !== id)
       );
       return { previous };
     },
     onError: (error, _id, ctx) => {
+      landing.current = null;
+      setRemoved("");
       if (error instanceof ApiError && error.status === 404) {
         setGoneNotice(GONE_NOTICE);
         return;
@@ -111,7 +125,6 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
     },
   });
 
-  const rows = list.data ?? [];
   const hasCurrent = rows.some((row) => row.current);
   const revokingId = revoke.isPending ? (revoke.variables ?? null) : null;
   const busy = revoke.isPending;
@@ -119,7 +132,9 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
   return (
     <Subsection
       title="연결된 기기"
-      lines={["QR로 붙인 세션입니다. 비밀번호로 로그인한 이 화면은 여기 없습니다."]}
+      lines={[
+        "QR로 붙인 세션입니다. 마지막 사용 시각은 아직 기록하지 않습니다.",
+      ]}
     >
       {list.isPending && (
         <div role="status" data-testid="linked-devices-loading">
@@ -134,21 +149,23 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
           actionLabel="다시 시도"
           onAction={() => void list.refetch()}
           className="px-0"
+          separator={false}
           testId="linked-devices-error"
         />
       )}
 
       {list.isSuccess && rows.length === 0 && (
-        <EmptyInvite
-          headline="연결된 기기가 없습니다."
-          detail="아래 QR을 만들어 폰에서 찍으면 이 목록에 나타납니다."
-          className="px-0"
-          testId="linked-devices-empty"
-        />
+        <p
+          className="break-keep text-body text-ink-muted"
+          data-testid="linked-devices-empty"
+        >
+          연결된 기기가 없습니다.
+        </p>
       )}
 
       {list.isSuccess && rows.length > 0 && (
         <ul
+          ref={listRef}
           className="flex flex-col overflow-hidden rounded-md border border-line"
           data-testid="linked-devices-list"
         >
@@ -161,7 +178,6 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
               revoking={revokingId === device.id}
               currentReasonId={currentReasonId}
               offlineReasonId={offlineReasonId}
-              busyReasonId={busyReasonId}
               onRevoke={() => revoke.mutate(device.id)}
             />
           ))}
@@ -186,15 +202,14 @@ export function LinkedDevicesList({ offline }: { offline: boolean }) {
           {OFFLINE_REASON}
         </p>
       )}
-      {list.isSuccess && rows.length > 0 && !offline && busy && (
-        <p
-          id={busyReasonId}
-          className="break-keep text-meta text-ink-muted"
-          data-testid="linked-devices-busy"
-        >
-          {BUSY_REASON}
-        </p>
-      )}
+
+      <p
+        className="sr-only"
+        role="status"
+        data-testid="linked-devices-removed"
+      >
+        {removed}
+      </p>
 
       {goneNotice && (
         <p
@@ -225,7 +240,6 @@ function LinkedDeviceRow({
   revoking,
   currentReasonId,
   offlineReasonId,
-  busyReasonId,
   onRevoke,
 }: {
   device: LinkedDevice;
@@ -234,7 +248,6 @@ function LinkedDeviceRow({
   revoking: boolean;
   currentReasonId: string;
   offlineReasonId: string;
-  busyReasonId: string;
   onRevoke: () => void;
 }) {
   const [asking, setAsking] = useState(false);
@@ -244,14 +257,8 @@ function LinkedDeviceRow({
     ? currentReasonId
     : offline
       ? offlineReasonId
-      : busy && !revoking
-        ? busyReasonId
-        : undefined;
-  const badge = device.current ? (
-    <StatusChip tone="accent">
-      <span data-testid="linked-device-current">현재 기기</span>
-    </StatusChip>
-  ) : null;
+      : undefined;
+  const platformLabel = linkedDevicePlatformLabel(device.platform);
 
   return (
     <li
@@ -272,19 +279,17 @@ function LinkedDeviceRow({
             {device.label}
           </p>
           <p className="break-keep text-meta text-ink-muted">
-            {device.platform}, {linkedAtCopy(device.linkedAt)}
+            {device.current ? (
+              <>
+                <span data-testid="linked-device-current">현재 기기</span>
+                {", "}
+              </>
+            ) : null}
+            {platformLabel}, {linkedAtCopy(device.linkedAt)}
           </p>
         </div>
-        {asking ? badge : null}
       </div>
-      <div
-        className={
-          asking
-            ? "min-w-0"
-            : "flex shrink-0 flex-col items-end gap-2"
-        }
-      >
-        {asking ? null : badge}
+      <div className={asking ? "min-w-0" : "shrink-0"}>
         <ConfirmButton
           label="연결 해제"
           subject={device.label}
@@ -296,7 +301,7 @@ function LinkedDeviceRow({
           describedBy={describedBy}
           onAskingChange={setAsking}
           onConfirm={onRevoke}
-          testId={`linked-device-disconnect-${device.id}`}
+          testId="linked-device-disconnect"
         />
       </div>
     </li>

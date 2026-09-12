@@ -23,7 +23,7 @@ const PORT = Number(process.env.CAPTURE_PORT || 5186);
 const ORIGIN = `http://127.0.0.1:${PORT}`;
 const DESKTOP = { width: 1280, height: 800 };
 const PHONE = { width: 390, height: 844 };
-const LINKED_AT = Date.UTC(2024, 5, 15, 3, 0, 0);
+const LINKED_AT = Date.UTC(2026, 8, 10, 3, 0, 0);
 
 const WORKSPACE_ID = "00000000-0000-7000-8000-000000000001";
 const GENERAL_ID = "00000000-0000-7000-8000-000000000201";
@@ -224,9 +224,13 @@ async function main() {
               await page.getByTestId("linked-devices-list").waitFor({
                 state: "visible",
               });
-              await page.getByTestId(`linked-device-disconnect-${OTHER_ID}`).click();
               await page
-                .getByTestId(`linked-device-disconnect-${OTHER_ID}-confirm`)
+                .locator(`[data-testid="linked-device-row-${OTHER_ID}"]`)
+                .getByTestId("linked-device-disconnect")
+                .click();
+              await page
+                .locator(`[data-testid="linked-device-row-${OTHER_ID}"]`)
+                .getByTestId("linked-device-disconnect-confirm")
                 .waitFor({ state: "visible" });
               await page
                 .getByTestId(`linked-device-row-${OTHER_ID}`)
