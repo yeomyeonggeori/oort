@@ -36,6 +36,10 @@ command -v docker >/dev/null 2>&1 || fail "docker 없음"
 command -v openssl >/dev/null 2>&1 || fail "openssl 없음"
 [ -f "$RAILWAY_JSON" ] || fail "infra/railway/railway.json missing"
 [ -f "$CADDYFILE_RAILWAY" ] || fail "infra/railway/Caddyfile.railway missing"
+CADDY_DOCKERFILE="$ROOT/infra/railway/Dockerfile.caddy"
+PIN_CHECKER="$ROOT/scripts/tests/check_railway_release_pins.py"
+[ -f "$CADDY_DOCKERFILE" ] || fail "infra/railway/Dockerfile.caddy missing"
+[ -f "$PIN_CHECKER" ] || fail "scripts/tests/check_railway_release_pins.py missing"
 [ -f "$GENERATOR" ] || fail "scripts/self_host_env.sh missing"
 [ -f "$CONTRACT" ] || fail "scripts/verify_public_edge_centrifugo_contract.sh missing"
 
@@ -97,9 +101,9 @@ run_railway() {
 # ---------------------------------------------------------------------------
 # ① railway.json: required services, startCommand, preDeploy
 # ---------------------------------------------------------------------------
-python3 - "$RAILWAY_JSON" "$LATEST" <<'PY'
+python3 - "$RAILWAY_JSON" <<'PY'
 import json, sys
-path, latest_path = sys.argv[1], sys.argv[2]
+path = sys.argv[1]
 data = json.load(open(path))
 services = data.get("services") or {}
 required = ("api", "relay", "webhook-sender", "agent-worker", "centrifugo", "caddy")
@@ -128,15 +132,37 @@ if services["api"].get("public") is not False:
     raise SystemExit("api must be internal (Caddy is the public edge)")
 if services["caddy"].get("public") is not True:
     raise SystemExit("caddy must be the public service")
-digest = data["appImage"]["digest"]
-latest = json.load(open(latest_path))
-want = latest["images"]["app"]["digest_list"]
-if digest != want:
-    raise SystemExit("railway.json app digest %s != latest.json %s" % (digest, want))
 print("services", ",".join(required))
 print("preDeploy", blob[:120])
 PY
-pass "railway.json services + startCommand + preDeploy + digest pin"
+pass "railway.json services + startCommand + preDeploy"
+
+# ---------------------------------------------------------------------------
+# ①b release pins: appImage, each app service image, Caddy ARG, web stage,
+# and the COPY that ships /srv/web. Compares those sources — not a file-wide
+# digest grep, and not an unused FROM ${OORT_IMAGE}. Scratch copies mutate one
+# source at a time; committed files stay clean.
+# ---------------------------------------------------------------------------
+python3 "$PIN_CHECKER" "$RAILWAY_JSON" "$CADDY_DOCKERFILE" "$LATEST" \
+  --prove-mutations \
+  >"$TMP_ROOT/pins.out" 2>"$TMP_ROOT/pins.err" || {
+  cat "$TMP_ROOT/pins.out" >&2
+  cat "$TMP_ROOT/pins.err" >&2
+  fail "Railway app/Caddy pins drifted from latest.json or mutation proof failed"
+}
+grep -Fq 'want_image' "$TMP_ROOT/pins.out" || fail "pin checker missing want_image"
+grep -Fq 'mutation appImage RED' "$TMP_ROOT/pins.out" || fail "pin checker missing appImage mutation proof"
+grep -Fq 'mutation api RED' "$TMP_ROOT/pins.out" || fail "pin checker missing api mutation proof"
+grep -Fq 'mutation relay RED' "$TMP_ROOT/pins.out" || fail "pin checker missing relay mutation proof"
+grep -Fq 'mutation webhook-sender RED' "$TMP_ROOT/pins.out" || fail "pin checker missing webhook-sender mutation proof"
+grep -Fq 'mutation agent-worker RED' "$TMP_ROOT/pins.out" || fail "pin checker missing agent-worker mutation proof"
+grep -Fq 'mutation caddy RED' "$TMP_ROOT/pins.out" || fail "pin checker missing Caddy ARG mutation proof"
+grep -Fq 'mutation missing-api RED' "$TMP_ROOT/pins.out" || fail "pin checker missing missing-api proof"
+grep -Fq 'mutation missing-caddy-arg RED' "$TMP_ROOT/pins.out" || fail "pin checker missing missing-caddy-arg proof"
+grep -Fq 'mutation caddy-stale-web-stage RED' "$TMP_ROOT/pins.out" || fail "pin checker missing stale web-stage mutation proof"
+grep -Fq 'mutation caddy-copy-from-stale RED' "$TMP_ROOT/pins.out" || fail "pin checker missing COPY --from stale mutation proof"
+grep -Fq 'committed tree still pinned' "$TMP_ROOT/pins.out" || fail "pin checker missing restore proof"
+pass "appImage + four app service images + Caddy web source match latest.json; independent mutations RED"
 
 # ---------------------------------------------------------------------------
 # ② generator --railway key set == canonical; sabotage one key → RED
