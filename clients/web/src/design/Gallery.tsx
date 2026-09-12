@@ -382,7 +382,7 @@ function OverlayExamples() {
                     <div
                       data-gallery-export="DialogOverlay"
                       data-gallery-replica="DialogOverlay"
-                      className="absolute inset-0 bg-scrim"
+                      className="absolute inset-0 bg-scrim scrim-blur layer-overlay-scrim"
                     />
                     <DialogContent
                       container={host}

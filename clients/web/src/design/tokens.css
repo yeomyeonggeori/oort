@@ -207,6 +207,22 @@
    * 스크림 걸린 어떤 표면보다 --surface-raised가 밝아야 한다. */
   --scrim: light-dark(rgb(36 33 28 / 0.24), rgb(9 8 11 / 0.62));
 
+  /* --- overlay layers (#2044 #2075 #1919) --------------------------------
+   * Hit testing, not elevation. `--elevation-float` says the panel is raised;
+   * these four names say which stacking context it occupies. Order is the
+   * contract (design-system §2.6 D6 / §3.4): floating content sits under the
+   * scrim, the scrim under the panel, and ADR-0182 ephemeral confirmation is
+   * the only layer allowed above a floating overlay surface.
+   *
+   * Numbers stay small on purpose: leftover Tailwind `z-10` (UnreadPill's
+   * old class) must paint *above* `--layer-overlay-scrim` if someone reverts
+   * that one class, so the pill-coordinate proof goes red. Surfaces consume
+   * the names (`layer-overlay-scrim`), never the numerals. */
+  --layer-content-float: 1;
+  --layer-overlay-scrim: 2;
+  --layer-overlay-surface: 3;
+  --layer-confirm-ephemeral: 4;
+
   /* --- status ------------------------------------------------------------
    * 위험 위계는 취향이 아니라 순서다: --danger > --warn > --ink-muted. 한 표면에
    * 두 톤이 나란히 서면 더 위험한 쪽이 먼저 눈에 들어와야 한다(MOMO-641). 이
@@ -715,6 +731,27 @@
   --color-onboarding-accent: var(--onboarding-accent);
   --color-onboarding-on-accent: var(--onboarding-on-accent);
   --color-onboarding-line: var(--onboarding-line);
+
+  /* Named overlay layers. `z-content-float` is the Tailwind spelling;
+   * `layer-*` utilities below are the class names surfaces actually write. */
+  --z-index-content-float: var(--layer-content-float);
+  --z-index-overlay-scrim: var(--layer-overlay-scrim);
+  --z-index-overlay-surface: var(--layer-overlay-surface);
+  --z-index-confirm-ephemeral: var(--layer-confirm-ephemeral);
+}
+
+/* Overlay stacking names (#2044). Surfaces write these, never `z-10`/`z-50`. */
+@utility layer-content-float {
+  z-index: var(--layer-content-float);
+}
+@utility layer-overlay-scrim {
+  z-index: var(--layer-overlay-scrim);
+}
+@utility layer-overlay-surface {
+  z-index: var(--layer-overlay-surface);
+}
+@utility layer-confirm-ephemeral {
+  z-index: var(--layer-confirm-ephemeral);
 }
 
 /* =============================================================================
@@ -1125,7 +1162,7 @@
     inset-block: 0;
     inset-inline-start: 0;
     inline-size: var(--w-sidebar-drawer);
-    z-index: 30;
+    z-index: var(--layer-overlay-surface);
     /* 논리 속성이 아닌 이유: transform은 물리 축만 안다. 이 앱은 ko/LTR이고,
      * RTL이 생기면 여기가 뒤집을 자리다. */
     transform: translateX(-100%);
@@ -1144,11 +1181,12 @@
 /* 서랍을 덮은 스크림 (B6). 다이얼로그와 같은 --scrim을 쓰는 이유도 같다: 뒤를
  * 어둡게 해서 앞의 표면이 앞으로 나오게 하는 층이고, 어느 스킴에서든 그래야
  * 한다(tokens.contrast.test.ts가 두 스킴에서 잰다). 셸 안에 있으므로
- * `position: absolute`이고, 서랍(z-index 30)보다 아래, 본문보다 위에 선다. */
+ * `position: absolute`이고, 서랍(`--layer-overlay-surface`)보다 아래,
+ * 본문(`--layer-content-float`)보다 위에 선다. */
 @utility sidebar-scrim {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: var(--layer-overlay-scrim);
   background: var(--scrim);
   /* 진짜 <button>인 탭 정거장 — 보이는 포커스 없는 정거장은 키보드 사용자를
    * 잃게 만든다(design-review B6 M2). 안쪽 링으로 서랍 경계를 침범하지 않는다. */
@@ -1277,7 +1315,7 @@
  * 모션은 없다: prefers-reduced-motion 에서도 같은 즉시 등장. */
 @utility composer-format-tray {
   position: fixed;
-  z-index: 50;
+  z-index: var(--layer-content-float);
   inset-inline-start: var(--composer-format-left, 0px);
   inset-block-start: var(--composer-format-top, 0px);
   max-inline-size: calc(100vw - var(--spacing-6));
@@ -1459,7 +1497,7 @@
     position: absolute;
     inset: 0;
     inline-size: auto;
-    z-index: 20;
+    z-index: var(--layer-overlay-scrim);
   }
 }
 
@@ -1610,14 +1648,14 @@
     position: absolute;
     inset: 0;
     inline-size: auto;
-    z-index: 20;
+    z-index: var(--layer-overlay-scrim);
   }
 
   @media (width < 900px) {
     position: absolute;
     inset: 0;
     inline-size: auto;
-    z-index: 20;
+    z-index: var(--layer-overlay-scrim);
   }
 }
 
@@ -1700,7 +1738,7 @@
     position: absolute;
     inset: 0;
     inline-size: auto;
-    z-index: 20;
+    z-index: var(--layer-overlay-scrim);
   }
 }
 
@@ -1949,12 +1987,10 @@
   inset-inline-start: 0;
   inline-size: 100%;
   max-inline-size: var(--spacing-pane-lg);
-  /* 덮는 표면들과 같은 층(20)이 아니라 그 **한 칸 위**다. 스크림이 20 에 서서
-   * 작업 패널(`work-panel-pane`)과 작업 세션 패널(`work-pane`, 넓게 보기)을
-   * 눌러야 하는데, 그 둘도 20 이라 같은 값이면 순서가 DOM 에 달린다. 서랍만
-   * 21 로 올려 두면 그 셋 중 누가 먼저 그려지든 서랍은 언제나 맨 위다.
-   * 사이드바 서랍(30)은 그대로 이 모두의 위에 선다. */
-  z-index: 21;
+  /* 덮는 표면(스레드·작업 pane)은 `--layer-overlay-scrim` 에 선다. 서랍은
+   * 그 한 칸 위 `--layer-overlay-surface` 라서 DOM 순서에 기대지 않는다.
+   * 사이드바 서랍도 같은 표면 층; 포털된 다이얼로그가 그 위에 선다. */
+  z-index: var(--layer-overlay-surface);
 
   @media (width < 1200px) {
     max-inline-size: none;
@@ -1965,8 +2001,8 @@
  *
  * 사이드바 서랍의 `sidebar-scrim` 과 같은 장치이고 같은 값을 쓴다: `--scrim` 으로
  * 뒤를 눌러 놓고, 진짜 <button> 이라 바깥을 눌러 닫는 것이 마우스 전용 행동이 되지
- * 않는다. 서랍(21)보다 아래, 덮인 표면들과 같은 20 에 서되 DOM 에서 그것들 **뒤**에
- * 있어 위에 그려진다.
+ * 않는다. 서랍(`--layer-overlay-surface`)보다 아래, 덮인 표면들과 같은
+ * `--layer-overlay-scrim` 에 서되 DOM 에서 그것들 **뒤**에 있어 위에 그려진다.
  *
  * 라우트 상자에 `inset: 0` 하므로 작업 패널까지 함께 덮는다. 그것이 의도다 —
  * 서랍이 열려 있는 동안 그 상자 안의 어떤 표면도 받지 않는다는 사실을 한 장으로
@@ -1974,7 +2010,7 @@
 @utility ade-scrim {
   position: absolute;
   inset: 0;
-  z-index: 20;
+  z-index: var(--layer-overlay-scrim);
   background: var(--scrim);
 
   &:focus-visible {

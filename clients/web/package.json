@@ -45,6 +45,7 @@
     "capture:attachment": "npm run build && ATTACH_GATE_SHOTS=1 node gates/gate-attachment.mjs",
     "build:design": "tsc -b && vite build --mode design",
     "capture:design": "npm run build:design && node scripts/capture-screens.mjs",
+    "capture:overlay-layers": "npm run build && node scripts/capture-overlay-layers.mjs",
     "capture:usage": "node scripts/capture-usage.mjs",
     "capture:eventsub": "npm run build && node scripts/capture-eventsub.mjs",
     "capture:honesty": "npm run build && node scripts/capture-honesty.mjs",

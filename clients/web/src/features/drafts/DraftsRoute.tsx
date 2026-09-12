@@ -48,7 +48,7 @@ const DRAFT_ROW_HINT_ID = "drafts-row-hint";
 // MessageActions hover toolbar: raised bowl + muted→ink on hover. The row
 // already washes to `surface-hover`, so the same fill on ⋯ is 1.00:1.
 const overflowBowlClass =
-  "absolute right-2 top-2 z-20 rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
+  "absolute right-2 top-2 layer-content-float rounded-md border border-line-strong bg-surface-raised p-px shadow-lg";
 const overflowTriggerClass =
   "tap-target flex size-control items-center justify-center rounded-sm text-ink-muted press hover:bg-surface-hover hover:text-ink focus-visible:focus-ring data-[state=open]:bg-surface-hover data-[state=open]:text-ink";
 

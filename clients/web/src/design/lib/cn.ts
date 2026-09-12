@@ -79,6 +79,13 @@ export const NAMED_MEASURES = [
   "overflow-bowl",
 ] as const;
 
+const LAYER_NAMES = [
+  "content-float",
+  "overlay-scrim",
+  "overlay-surface",
+  "confirm-ephemeral",
+] as const;
+
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
@@ -89,6 +96,7 @@ const twMerge = extendTailwindMerge({
       h: [{ h: [...NAMED_MEASURES] }],
       "min-h": [{ "min-h": [...NAMED_MEASURES] }],
       "max-h": [{ "max-h": [...NAMED_MEASURES] }],
+      z: [{ z: [...LAYER_NAMES] }, { layer: [...LAYER_NAMES] }],
     },
   },
 });

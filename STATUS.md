@@ -1,10 +1,17 @@
 # oort 진행 현황
 
+## 오버레이 층 이름표 (#2044 #2075 #1919, 2026-09-11)
+
+- Track UXUI. `fix/2044-overlay-layers` onto `origin/track/uxui`. `--layer-content-float` < `--layer-overlay-scrim` < `--layer-overlay-surface` < `--layer-confirm-ephemeral` 를 `tokens.css` 한 곳에 두고 정본 §2.6 D6 / §3.4에 적음. UnreadPill·언펄 X·호버 툴바는 content-float, 다이얼로그/시트/팝오버/⌘K/드로어 스크림·표면은 overlay 층.
+- 검증: Playwright `clients/web/scripts/capture-overlay-layers.mjs` — 다이얼로그·시트·팔레트·드로어에서 `elementFromPoint` 가 오버레이를 돌려줌. UnreadPill 을 `z-10` 으로 되돌리면 필 좌표가 `jump-unread`. 스크림 `z-index: auto` 면 하단 필이 스크림을 뚫음.
+- runtime-unverified: 실서버 타임라인에서 사람 클릭 왕복(캡처 목).
+
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
 - 검증: `cargo fmt --all --check` · `clippy -p momo-auth -p momo-server -D warnings` · `cargo test -p momo-auth --lib` 86 · `cargo test -p momo-server --lib` 334 · `linked_devices_conformance_pg` 2 ignored PASS(전용 PG 35432, e2e-* 무접촉). `scripts/verify_openapi_contract_rust.sh` PASS 87/87 samples · 84 ops coverage(신규 두 경로는 sampled 목록 밖 — `scripts/**` 비스코프). 사보타주: revoke no-op → 401 단언 RED; list owner filter 제거 → "other member sees 0 rows" RED.
 - runtime-unverified: 실폰 redeem 후 설정 UI(uxui A-46). `scripts/verify_web_generated_types.sh`는 web-legacy 은퇴로 이 트리에 없음.
+
 
 ## momo_notifier GRANT 트림 (#2448, 2026-09-11)
 

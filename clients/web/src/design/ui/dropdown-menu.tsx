@@ -69,8 +69,9 @@ export const DropdownMenuContent = React.forwardRef<
       ref={ref}
       sideOffset={sideOffset}
       collisionPadding={8}
+      data-overlay-layer="surface"
       className={cn(
-        "z-50 min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        "layer-overlay-surface min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
         POPOVER_MOTION,
         className
       )}

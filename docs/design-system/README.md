@@ -210,6 +210,17 @@ OmD가 읽는 루트 `DESIGN.md`와 `.omd/system/*`는 이 정본을 Core v2로 
 | `--elevation-rest` | `shadow-sm` | 카드. Tailwind v4 `--shadow-sm` |
 | `--elevation-float` | `shadow-lg` | 떠 있는 표면(팝오버·팔레트·드로어). Tailwind v4 `--shadow-lg` + `backdrop-blur` 5px 스크림 |
 
+**겹침 층은 고도의 다른 축이다** (#2044 · #2075 · #1919). 그림자가 「떴다」를 말하면, 히트 테스트는 층이 말한다. D6 스크림(`scrim-blur` 5px)은 시각이고, 아래 네 이름이 클릭이 어디에 닿는지를 잠근다. 숫자는 `tokens.css` `--layer-*` 한 곳뿐이고, 표면은 `layer-content-float` / `layer-overlay-scrim` / `layer-overlay-surface` / `layer-confirm-ephemeral` 만 적는다. `z-10`·`z-50` 손기입은 이 축에서 금지.
+
+| 이름 | 클래스 | 자리 |
+|---|---|---|
+| `--layer-content-float` | `layer-content-float` | 떠 있는 본문: UnreadPill, 언펄 제거, 호버 툴바 |
+| `--layer-overlay-scrim` | `layer-overlay-scrim` | 다이얼로그·시트·⌘K 팔레트·드로어·팝오버의 스크림 |
+| `--layer-overlay-surface` | `layer-overlay-surface` | 그 위의 판 (다이얼로그·시트·팝오버·팔레트·드로어) |
+| `--layer-confirm-ephemeral` | `layer-confirm-ephemeral` | 떠 있는 표면 위에 남는 **유일한** 층 (ADR-0182 일시 확인) |
+
+순서: 떠 있는 본문 < 오버레이 스크림 < 오버레이 표면 < 일시 확인. `overlayLayers.test.ts`가 값의 순서와 표면이 이름을 쓰는지 잰다.
+
 3단은 들이지 않는다(ADR-0159 D5). 웹 클래스는 그대로 `shadow-sm`/`shadow-lg`이고, 이름은 `clients/web/src/design/motion.css`가 진다. `designSystem.test.ts`가 그 두 이름과 클래스 어휘를 잠근다. 폰: `shadowColor`는 언제나 팔레트 역할(`color.shadow`)이다. 그림자는 색이 아니라 아래 방향이라 두 스킴이 같은 값을 드는 유일한 역할이다.
 
 **모션은 전면 토큰 축이다.** 손기입 `\d+ms`·`duration-[0-9]+`는 `motion.css`(사다리 + 모달 200/150)와 `motion.ts`(클래스 조립)에만 산다. Tailwind 기본 `transition` 은 `@theme`의 `--default-transition-duration: var(--motion-instant)` / `--default-transition-timing-function: var(--motion-ease-standard)` 가 사다리에 묶는다. 그 밖 tsx/css의 리터럴은 프리플라이트 `raw_motion` 위반이다.
@@ -363,6 +374,10 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 
 > 남은 위반 하나 — `button.tsx`의 `secondary` 변형. `--surface` 위에서 경계 `--line`이 라이트 1.32 · 다크 1.43이고 채움(`--surface-raised`)도 라이트 1.07 · 다크 1.10이라 면제에도 걸리지 않는다. 바로 옆 `outline` 변형은 같은 모양의 버튼인데 `--line-strong`(3.59 / 3.56)을 든다. 수리는 **#1210**.
 
+### 3.4 겹침 층 — 떠 있는 본문 < 스크림 < 표면 < 일시 확인
+
+색 위계(§3.1)가 나란한 컨트롤의 채도라면, 겹침 층은 **앞에 선 표면이 뒤를 만지지 못하게** 하는 위계다. 값과 클래스 이름은 §2.6 D6 표. 떠 있는 표면 위에 남는 유일한 층은 ADR-0182 일시 확인뿐이다.
+
 ---
 
 ## 4. 상태 규칙 — 네 상태
@@ -406,6 +421,7 @@ Accepted). 의미가 같은 Lucide 글리프가 있으면 로컬 `<svg>`·CSS �
 | **반경** | `--radius-*: initial`(이름 단계만) + `arbitrary_tw`(`rounded-[9px]`) + `designSystem.test.ts`(3단계·순서) | `designSystem.test.ts` 전수 스윕 | `designSystem.test.ts` — 짝 1 · 분기 1(상한 포함) ✅ (#1211) |
 | **타이포** | `--text-*: initial`(이름 단계만) + `arbitrary_tw`(`text-[13px]`) + `designSystem.test.ts`(롤마다 줄 높이·크기 중복 금지) | `designSystem.test.ts` 전수 스윕(`fontSize`·`lineHeight`) | `designSystem.test.ts` — 짝 1 · 나머지 관계 ✅ (#1211) |
 | **그림자** | `designSystem.test.ts` — `--elevation-rest/float` 이름 + 클래스 두 단 | `designSystem.test.ts` — `shadowColor`는 팔레트에서만 | **대조 불가 축**(§2.6) |
+| **겹침 층** | `overlayLayers.test.ts` — `--layer-*` 순서 + 표면이 이름을 쓰는지. 히트 테스트는 `scripts/capture-overlay-layers.mjs` | ❌ | — |
 | **모션** | `motion.test.ts`(사다리·상수·눌림·reduced-motion) + 프리플라이트 `raw_motion`·`motion_lib_scope`. 데스크톱 사이드바 접기(셸 상태 변화) = `--motion-standard` 240 · 390 오버레이 드로어·스크림(`--elevation-float` 표면) = `--motion-fast` 180 대칭 | ❌ (M1a) | 값 파생은 M1a |
 | **터치 44** | `capture-screens.mjs`의 `assertTapTargets`(**손으로 유지되는 12개 목록**) | `conversationHygiene.test.tsx:148` (렌더 트리 실측) + `conversationA11y.test.tsx:330` + `designSystem.test.ts`(손으로 적은 슬롭 잔량 5, 늘면 빨강) | `designSystem.test.ts` — `TOUCH_TARGET` ↔ `--tap-target` ✅ (#1211) |
 | **컨트롤 경계 3:1** | `tokens.contrast.test.ts`(토큰) + `designSystem.test.ts`(프리미티브 층) | `paletteContrast.test.ts`(토큰) | — |

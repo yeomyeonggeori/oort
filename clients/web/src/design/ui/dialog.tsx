@@ -76,8 +76,13 @@ export const DialogOverlay = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <DialogPrimitive.Overlay
     ref={ref}
-    className={cn("fixed inset-0 bg-scrim scrim-blur", MODAL_OVERLAY_MOTION, className)}
+    className={cn(
+      "fixed inset-0 bg-scrim scrim-blur layer-overlay-scrim",
+      MODAL_OVERLAY_MOTION,
+      className
+    )}
     {...props}
+    data-overlay-layer="scrim"
   />
 ));
 DialogOverlay.displayName = DialogPrimitive.Overlay.displayName;
@@ -127,7 +132,7 @@ export const DialogContent = React.forwardRef<
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
-          "dialog-panel fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
+          "dialog-panel layer-overlay-surface fixed left-1/2 top-8 flex w-full max-w-pane-md -translate-x-1/2 flex-col rounded-lg border border-line bg-surface-raised text-ink shadow-lg",
           MODAL_CONTENT_MOTION,
           className
         )}
@@ -142,6 +147,7 @@ export const DialogContent = React.forwardRef<
           }
         }}
         {...props}
+        data-overlay-layer="surface"
       >
         {children}
       </DialogPrimitive.Content>
