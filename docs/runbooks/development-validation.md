@@ -46,6 +46,13 @@ scripts/local_gate.sh --profile runtime-db
 scripts/local_gate.sh --profile runtime-agent
 ```
 
+기획 복원·소유권 도구를 변경하면 임시 저장소/워크트리 기반 시험을 실행한다(네트워크·기존 작업 자원 무접촉):
+```bash
+scripts/tests/test_planning_session.sh
+scripts/tests/test_planning_context.sh
+scripts/tests/test_goal_status_board.sh
+```
+
 PG18·Centrifugo는 격리 환경에서 실행한다. 구체적 기동 계약은 [infra/rust/README](../../infra/rust/README.md), self-host 절차는 [SELF_HOST](../SELF_HOST.md)를 따른다. 실제 provider/APNs 등의 외부 의존과 mock 결과는 따로 표시한다. DB 없는 skip은 runtime PASS가 아니다.
 
 ## 완료·증거

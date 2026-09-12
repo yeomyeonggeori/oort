@@ -38,7 +38,7 @@ Codex와 Claude Code는 같은 [AGENTS](../../AGENTS.md), [CURRENT_STATE](CURREN
 | ROADMAP·ADR·Issue/패킷 | 각각 계획·결정·수용기준의 정본 |
 | `<git-common-dir>/oort-coordination/` | 같은 로컬 저장소의 워크트리/하네스가 공유하는 owner·중간 체크포인트. 유의미한 작업 경계에 저장 |
 
-로컬 기록은 `scripts/planning_session.py --help`로 관리한다. `integration` 범위는 통합자 한 명만 claim한다. 자기 이슈/기획 범위의 note에 owner/세션, source worktree/HEAD, 이슈·PR, 워커 run/PID/종료 파일, 마지막 검증, 다음 행동과 막힘을 적는다. 시크릿·전체 로그를 넣지 않는다.
+로컬 기록은 `scripts/planning_session.py --help`로 관리한다. `integration` 범위는 통합자 한 명만 claim한다. 자기 이슈/기획 범위의 note에 owner/세션, source worktree/HEAD, 이슈·PR, 워커 run/PID/종료 파일, 마지막 검증, 다음 행동과 막힘을 적는다. checkpoint note는 현재 결과·다음 행동을 담은 완전한 스냅샷으로 교체한다. release/재claim은 마지막 checkpoint의 원래 HEAD를 보존한다. 시크릿·전체 로그를 넣지 않는다.
 
 같은 Git common directory를 사용하는 워크트리끼리 공유된다. **별도 clone이나 다른 머신에는 동기화되지 않는다.** 그 경우 커밋된 CURRENT_STATE와 Issue/PR을 기준으로 인계한다. 등록이 없다고 다른 프로세스도 없다고 단정하지 않는다. 오래됐다는 이유로 owner를 자동 탈취하지 않는다.
 
