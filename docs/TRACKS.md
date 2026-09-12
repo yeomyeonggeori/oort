@@ -1,4 +1,4 @@
-# oort 트랙 파이프라인 (정본, 2026-07-18 성재 지시)
+# oort 트랙 파이프라인 (정본)
 
 > **모든 세션(planner·momo-main·worker — 레인 현재 값은 `docs/planning/PIPELINE.md`)은 작업 시작 전에 이 문서로 자기 트랙을 선언한다.**
 > 관련: `docs/MULTI_SESSION_OPS.md` §4.1(루트 무접촉·clean 유지), `docs/planning/ENGINE_HANDOFF.md`(엔진→UXUI 큐).
@@ -24,18 +24,18 @@
 
 ## 2. 빌드·확인 규칙 — 성재가 보는 것은 항상 트랙 워크트리 빌드
 
-- 성재에게 보여주는 앱은 **반드시 자기 트랙 워크트리에서** 빌드·실행한다(웹 `npm --prefix clients/web run dev`, 데스크톱 Tauri 셸, 폰 `clients/mobile`의 `build:sim`/`lane:phone`. 은퇴 중인 macOS 앱은 `scripts/macos_dev_run.sh`).
+- 성재에게 보여주는 앱은 **반드시 자기 트랙 워크트리에서** 빌드·실행한다(웹 `npm --prefix clients/web run dev`, 데스크톱 Tauri 셸, 폰 `clients/mobile`의 `build:sim`/`lane:phone`).
 - 실행 전 반드시 확인·고지: **"빌드 원본: <워크트리 경로> <브랜치>@<짧은 SHA>"**. main 빌드를 보여주거나, 워크트리에서 작업하고 main 빌드로 확인시키는 것 금지(작업이 사라진 것처럼 보이는 사고의 원인).
 - 게이트/검증도 트랙 워크트리(또는 goal 워크트리) 기준으로 돈다.
 
 ## 3. 머지 규칙 — main은 성재 게이트
 
 1. **작업 → 트랙 브랜치**: 각 트랙은 자기 브랜치까지 자율로 축적한다(리뷰·게이트 규율은 기존 그대로 — 검증 없는 머지 금지).
-2. **트랙 브랜치 → main**: **성재의 명시 승인이 있을 때만.** 두 경로뿐:
+2. **트랙 브랜치 → main**: **성재의 명시 승인이 있을 때만.** 개별 승인 경로와 아래 기록된 상시 위임을 구분한다:
    - 세션이 "main에 머지할까요?"라고 묻고 성재가 승인, 또는
    - 성재가 먼저 "main에 머지하자"라고 말할 때.
-   그 외 어떤 자동 main 머지도 금지. (성재는 특히 UXUI에서 더 다듬고 싶은 경우가 많다 — 머지 재촉 금지.)
-3. main 머지 실행은 통합자(현재 Fable)가 순차 수행하고, 머지 후 **두 트랙 브랜치를 fast-forward하거나 main을 merge commit으로 합류**시켜 드리프트를 막는다. 원격 track의 rebase/history rewrite와 force-push는 금지한다.
+   **기록된 상시 승인(2026-08-27):** 게이트가 그린인 랜딩 단위의 track→main 승격 + main→양 트랙 sync 짝은 통합자가 자율 집행한다. 이미 위임된 범위를 매번 다시 묻지 않는다. 새 방향·다른 owner 작업 인수·release/유료 workflow는 이 위임에 포함되지 않는다. 이 범위 밖의 main 머지는 성재의 별도 명시 승인이 필요하다.
+3. main 머지 실행은 단일 통합자(현재 owner는 공용 integration 기록, 모델은 PIPELINE.md)가 순차 수행하고, 머지 후 **두 트랙 브랜치를 fast-forward하거나 main을 merge commit으로 합류**시켜 드리프트를 막는다. 원격 track의 rebase/history rewrite와 force-push는 금지한다.
 
 ### 3.1 정렬 topology와 기계 가드
 

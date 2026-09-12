@@ -1,50 +1,35 @@
-<!--
-momo PR 템플릿 — AGENTS.md §7 정본. 한 PR = 한 이슈 = 한 goal.
-머지 전 `make build`(cargo build + TS typecheck) green 필수. main 직접 push 금지(브랜치 보호 가정).
-검증 등급: [rust]=fmt/clippy/cargo test green · [web]/[mobile]=트리 게이트 + verify_merge_tree.sh green ·
-[infra]/[sql]=파일 존재+정본 정합 · [python]=py_compile · [xcode]=xcodebuild 산출 ·
-[ci]=워크플로우 syntax/lint · [runtime]=docker/psql 필요(미가용 시 runtime-unverified) · [manual]=사람 1회.
--->
+<!-- 공용 계약: AGENTS.md. 필수 검증 등급/명령: docs/runbooks/development-validation.md.
+한 이슈 = 한 PR. 해당하지 않는 항목은 N/A와 이유를 적고, 실행하지 않은 검증을 체크하지 않는다. -->
 
 Closes #<issue>
 
 ## 한 일
-- <!-- 변경 요약 bullet. 무엇을 done 상태로 만들었나. -->
+<!-- 문제와 변경 후 동작. -->
 
-## Goal / Worktree
-- Issue: #<issue>
-- Branch: `<type>/<issue>-<slug>`
-- Worktree: `<local path>`
-- Worker lane: `<runtime/backend|web·desktop·mobile UX|docs/spec/protocol|infra/devtooling>`
+## 작업 원본
+- Branch / HEAD:
+- Worktree:
+- 담당 / 인계 대상:
 
-## 검증 (등급: [rust]/[web]/[mobile]/[infra]/[sql]/[python]/[xcode]/[ci]/[runtime]/[manual])
-- [ ] Local gate: `scripts/local_gate.sh --profile <docs|web|runtime-db|runtime-agent|license|secrets>` PASS, or scope-specific manual runtime evidence attached
-- [ ] [rust]/[web]/[mobile] 해당 트리 게이트 green: <패키지>
-- [ ] 선행 패키지 빌드 안 깨짐 (`make build`)
-- [ ] [sql] schema_v0.sql 정합 (정본 미수정 — 확장은 server/Migrations/NNN_*.sql 신규 + RLS DO-block ARRAY 등록)
-- [ ] runtime 미검증 부분 정직 표기 (no docker/psql) — `runtime-unverified`
-
-## Local Gate Evidence
-<!-- `scripts/local_gate.sh`가 출력한 ## Local Gate 블록을 붙인다. GitHub Actions disabled/manual-only 기간에는 이 evidence가 primary merge gate다. -->
-
-## Worker handoff / merge boundary
-- [ ] Worker stops at PR + `status:needs-review`; no worker-side merge, issue close, post-merge `main` gate, or roadmap/backlog adjustment
-- [ ] Merge/close/final local gate on `main` is `momo-main` only
+## 검증
+<!-- 변경에 해당하는 등급과 실제 명령·결과·환경. clean HEAD의 Local Gate 원문/로그를 링크한다.
+Rust는 fmt --all / clippy -D warnings / workspace tests.
+웹·폰·코어는 해당 트리와 병합 트리. UI는 독립 design-review B0/H0.
+문서·운영 스크립트는 docs 게이트 및 관련 동작 시험. -->
+- 검증 등급:
+- 실행 결과 / 증거:
+- runtime-unverified / 남은 검증:
 
 ## STATUS 영향
-- <!-- STATUS.md에 반영한 줄(무엇이 추가/변경, 무엇이 여전히 미검증). -->
+<!-- 검증된 변화 1–3줄 또는 STATUS 링크. -->
 
-## 계획 이탈 (Deviation — AGENTS.md §4-10)
-- <!-- 수용기준·ADR·핸드오프 패킷과 다르게 구현한 모든 지점 + 이유. 없으면 "없음". momo-main이 docs/planning/DEVIATION_LOG.md로 환류한다. -->
+## 계획 이탈
+<!-- 수용기준·ADR·패킷과 다른 점 및 영향. 없으면 없음. -->
 
-## 🔒 게이트 / 배포 불변식 (해당 시)
-- [ ] 이 PR은 `release-desktop.yml`을 **트리거하지 않는다** (M7 게이트 PASS + docs/cicd/03 PASS 블록 기록 전까지 release 금지)
-- [ ] (M4/M5 스토어 관련이면) 검수 게이트(M7) 선행 의존 표기
+## 남은 것 / 인계
+- [ ] worker는 PR·검증을 인계하며 merge/close하지 않는다.
+- 후속 작업:
 
-## 남은 것 / 후속 이슈 제안
-- <!-- 스코프 밖이라 새 이슈로 뺀 것. -->
-
----
-- [ ] **ADR 거버넌스(ADR-0100)**: 이 PR이 공개 API·보안 경계·스키마 계약·제품 방향·스택을 바꾸면 근거 ADR 번호 명시 — `ADR-____` / 해당 없으면 "ADR 불필요"
-- [ ] 시크릿 미커밋(.env), `.build/`·`*.resolved`·`DerivedData/` 미포함, 무관한 리팩터 없음 (AGENTS.md §5)
-- [ ] 법무/스토어 정책 관련 텍스트는 1차 출처 링크 + "(추정)" 표기 — **법률 자문 아님**
+<!-- 공개 API/보안/DB/방향/스택 변경 시 Accepted ADR 링크를 적는다.
+통합자는 current PR CI·Policy integrity·exact-base verifier와 local evidence를 확인한다.
+M7/owner 승인 없는 release·스토어·공증·external TestFlight는 진행하지 않는다. -->
