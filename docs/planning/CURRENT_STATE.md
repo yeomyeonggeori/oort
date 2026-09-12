@@ -14,7 +14,7 @@
 ## 작업별 체크포인트
 | 작업 / owner | 저장된 결과 | 다음 |
 |---|---|---|
-| #2501 / Astra, Grok 구현 | `shared-agent-pipeline` worktree. 문서 R2·복원/소유권 집중 시험, 후속 독립 검수 | 최종 게이트·PR/통합 결과와 다음 행동은 공용 checkpoint |
+| #2501 / Astra, Grok 구현 | `shared-agent-pipeline` worktree. 문서·도구 독립 검수와 복원/소유권 집중 시험 | 최종 게이트·PR/통합 결과와 다음 행동은 공용 checkpoint |
 | #2499 / Astra | PR #2500 → engine `0726c8e2`. 집중 검사·Astra docs77·exact-base 정책 검증 PASS, #2501 선행 의존성으로 별도 통합 | 실제 Railway 배포 미검증; 기능 재개와 별개 |
 | #2498 / Astra | `16fcf007`, 로컬 미push. worker fmt/auth88/routes9 PASS | 독립 검수·실제 PG 경합/rollback·전체 Rust 검증·PR |
 | #2485·#2490·#2497 / Fable | 기존 PR 유지. #2490 R2·#2485 디자인 검수 상태 재확인 필요 | 인계 조율 전 중복 작업/통합 금지 |
