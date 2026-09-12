@@ -281,6 +281,8 @@ scripts/publish_next_build.sh --public --version 0.1.0 --dry-run
 `Unnotarized Developer ID` 가 정상. 이 호출은 `0.1.0` 을 next 채널에 올리지
 않는다.
 
+**실공증 전제:** [M7 사용성 게이트](cicd/03-store-readiness-gate.md)의 현재 후보 PASS 기록과 owner 승인을 확인한다. 서버 이미지 발행 승인은 공증 권한을 포함하지 않는다. PASS 전에는 위 dry-run/로컬 준비까지만 진행한다.
+
 ```sh
 # 실공증·스테이플 (맥 앞에서). 업로드는 하지 않는다.
 scripts/publish_next_build.sh --public --version 0.1.0

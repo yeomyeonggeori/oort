@@ -1,6 +1,7 @@
 # oort — 스토어 검수 게이트 (마일스톤, 스토어 제출 선행)
 
-> **이 게이트를 PASS하기 전에는 `release-ios.yml` / `release-macos.yml`를 트리거하지 않는다.**
+> **이 게이트는 스토어·공증·external TestFlight 공개 배포에 적용한다. PASS 기록 없이 실행하지 않는다.** 서버/셀프호스트 이미지 발행은 [RELEASING](../RELEASING.md)의 별도 owner 승인 절차를 따른다. 이 구분은 이미지 발행 권한을 새로 부여하지 않는다.
+> 아래 Swift/Xcode 체크리스트에는 은퇴한 표면이 남아 있다. 현행 Tauri/RN 검수 기준으로 갱신되기 전까지 이 문서를 PASS로 간주하지 않는다.
 > 목적: "빌드 파일이 실제로 사용 가능"함을 빡세게 판명한 뒤에만 스토어/공증 배포로 진행.
 > 현재 상태(STATUS.md): M1 runtime MOMO-001~004는 Docker Desktop으로 검증됨. WebSocket live subscribe/presence/recovery, APNs, packaged app/IPA, QA 실측은 후속. → 이 게이트는 아직 OPEN(미통과).
 >
@@ -48,5 +49,5 @@
 
 ## PASS 판정
 위 **G-0~G-5 및 G-A~G-H 전부 체크 + 증거 첨부** → 게이트 **PASS**. 이 파일 상단에 05 §10 PASS 블록(날짜+커밋해시+빌드#+증거 링크) 기록.
-→ 이후에만 `v*.*.*` 태그로 release 워크플로우 가동. **기록 없는 release 트리거는 규칙 위반.**
+→ 이후에만 승인된 스토어·공증·external TestFlight 배포를 진행한다. **PASS 기록 없는 해당 배포는 규칙 위반이다.** 서버 이미지 태그/발행 절차는 위 별도 계약을 따른다.
 </content>
