@@ -6,7 +6,8 @@ Owner/reviewer: Astra (Codex)
 Track/base: engine, origin/track/engine @ ed26b020
 Implementer: Grok 4.6
 Authorization: 2026-09-12 user explicitly requested simplifying the full pipeline/Markdown structure for interchangeable Astra+Grok4.6 or Fable+Grok4.6 in Codex/Claude Code. This replaces conflicting model-specific stop rules and unnecessary reading/checklist mandates, NOT product/API/security/release decisions.
-Issue binding: added after issue creation. Acceptance authority: this packet.
+Issue binding: #2501. Acceptance authority: this packet.
+Execution split: Astra owns shared contract/Markdown/skill routing; Grok 4.6 owns restore/coordination/status scripts, SessionStart JSON and focused behavior tests. Same issue, disjoint files.
 
 ## Outcome
 Both harnesses recover the same current work, ownership, evidence and next step from this checkout plus a shared local coordination directory. Root instructions are short and task-specific references are loaded only when relevant. Existing beta work (#2498/#2499 and Fable PRs) remains paused; this issue changes operation/docs only.

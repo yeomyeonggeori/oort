@@ -18,7 +18,7 @@ labels: ["status:ready"]
 - 관련 티켓(BUILD_TICKETS.md id):
 
 ## Acceptance (검증 등급 + 체크박스)
-<!-- AGENTS.md §3의 등급으로. 닫으려면 전부 충족. -->
+<!-- docs/runbooks/development-validation.md의 등급으로. 닫으려면 전부 충족. -->
 - [ ] [rust]/[web]/[mobile] 해당 트리 게이트 green: <패키지>
 - [ ] 선행 패키지 빌드 안 깨짐
 - [ ] schema_v0.sql 정합

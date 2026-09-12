@@ -14,7 +14,7 @@
 | **Labels** | 택소노미: `type/status/priority/area/size/gate` | `.github/labels.json` |
 | **Projects (v2)** | roadmap/board 뷰 (iteration으로 일정) | 수동 1회 + §4 |
 | **Issue Types** (org) | 1급 분류(선택, admin:org 필요) | `scripts/github_bootstrap.sh` 주석 §하단 |
-| **AGENTS.md** | 워커 레인 운영 계약(빌드/검증/DoD/picker/PR) | `/AGENTS.md` |
+| **AGENTS.md** | 공용 에이전트 계약(역할별 진입/필수 검증/권한) | `/AGENTS.md` |
 
 일괄 생성: `scripts/github_bootstrap.sh` (idempotent). `scripts/github/bootstrap.sh`와 TSV 파일은 legacy 보존용이며 guard가 걸려 있다.
 
@@ -69,7 +69,7 @@
 이슈 작성(goal+검증등급) ─▶ status:ready ─▶ claim + worktree ─▶ 계획/리서치 검증
         │                                                                │
         ▼                                                                ▼
-  picker 규칙(AGENTS.md §6)                         구현 ─▶ 테스트 ─▶ commit/push ─▶ PR
+  현행 ROADMAP·이슈 의존                         구현 ─▶ 테스트 ─▶ commit/push ─▶ PR
                                                                            │
                                                                            ▼
                                                    리뷰(보안/품질) ─▶ 최종 테스트 ─▶ merge
@@ -108,7 +108,7 @@
   ```
 - runtime 변경은 해당 profile을 사용한다. `runtime-relay`는 `scripts/verify_relay.sh`가 생기기 전까지 PASS를 만들 수 없고, MOMO-002 수동 relay 검증 경로를 PR evidence로 남긴다.
 - 내부 alpha 장애 공유는 `scripts/collect_diagnostics.sh --output-dir /tmp/momo-diagnostics --since 15m`로 redacted bundle을 만들고, diagnostics tooling 변경 PR은 `scripts/local_gate.sh --profile diagnostics` evidence를 붙인다.
-- merge 직전에 현재 PR head의 `PR CI gate`·`Policy integrity gate`와 exact-base wrapper provenance를 모두 확인한다. merge 후에는 `main`을 갱신하고 같은 local gate를 한 번 더 실행하며 `track-alignment` 결과도 확인한다.
+- merge 직전에 현재 PR head의 `PR CI gate`·`Policy integrity gate`와 exact-base wrapper provenance를 모두 확인한다. merge 후에는 실제 병합 결과가 검증된 트리와 일치하는지 확인하고 차이가 생긴 범위를 검증하며 `track-alignment` 결과도 확인한다.
 - 세 canonical branch 보호 상태와 repository Actions 기본 권한은 `scripts/github_track_guardrails.sh --check`로 확인한다. read-only check는 GitHub Actions 공식 App ID와 `main → track/*` 조상 topology를 사용하므로 정상적인 track-ahead 상태에서도 동작한다. workflow 기본 권한은 read·PR 승인 불가다. apply는 기존의 더 강한 check/review/restriction/linear-history 설정을 보존하며, 동시 변경이나 404 이외의 조회 실패에서는 fail-closed하고 부분 적용이면 즉시 `--check`로 남은 드리프트를 확인해 같은 bootstrap 창에서 수리한다.
 
 #### Trusted policy-integrity gate (#1302)
@@ -207,7 +207,7 @@ recovery PR/merge SHA, 임시 protection 변경 actor/time, fresh run IDs, 최�
 복구시각을 추가한다. direct/force push, workflow_dispatch seed, 다른 보호 완화, 비감사
 예외 재사용은 금지한다.
 
-### 3.2b 5개+ session/worktree 운영
+### 3.2b 공유 session/worktree 운영
 
 - 정본: [`docs/MULTI_SESSION_OPS.md`](MULTI_SESSION_OPS.md).
 - `momo-main` thread는 issue picker/review/merge/orchestration 전담.
@@ -235,7 +235,7 @@ recovery PR/merge SHA, 임시 protection 변경 actor/time, fresh run IDs, 최�
   ```
 
 ### 3.3 의존성 표현
-- 이슈 본문 `## Depends on:`에 선행 이슈 title/번호. picker(AGENTS.md §6)는 의존이 **모두 닫혀야** 그 이슈를 고른다.
+- 이슈 본문 `## Depends on:`에 선행 이슈 title/번호. 현행 ROADMAP·이슈 의존 기반 picker는 의존이 **모두 닫혀야** 그 이슈를 고른다.
 - 큰 작업은 **sub-issues**로 분할 가능(GA, 부모당 100개 한도·다단계 그룹핑은 제한적, [community#154148](https://github.com/orgs/community/discussions/154148)).
 - 1차 의존 진실은 `BUILD_TICKETS.md`의 STEPS 표(T01→…→T10 + P1~P6).
 
@@ -283,7 +283,7 @@ scripts/github_bootstrap.sh --org yeomyeonggeori --repo oort --skip-issues   # �
 
 ## 6. AGENTS.md와의 관계
 - 이 문서는 **GitHub 쪽 구조**(마일스톤/라벨/이슈/Project)를 정의한다.
-- `/AGENTS.md`는 **워커가 한 이슈를 받았을 때의 실행 계약**(빌드/검증 명령, DoD, 다음 티켓 선택법 §6, 브랜치/PR §5, 리포맵)을 정의한다.
+- `/AGENTS.md`는 **두 하네스의 공용 운영 계약**이다. 구체적인 빌드 명령은 `docs/runbooks/development-validation.md`, 기획은 `docs/planning/README.md`, 레인 값은 `docs/planning/PIPELINE.md`를 따른다.
 - 하네스가 `AGENTS.md`를 자동 적재하든 브리프가 읽으라고 지시하든 이 파일이 root 계약이다. 패키지별 세부 규칙이 필요하면 해당 디렉터리에 nested `AGENTS.md`를 추가한다.
 
 ---
