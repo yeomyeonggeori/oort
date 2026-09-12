@@ -86,7 +86,6 @@ plus `.claude/skills/momo-design-taste-web/references/tokens.md`.
 Implement against the dialect for your surface, run its mechanical pre-flight
 (`scripts/design_preflight_web.sh` for web; the phone has none — say so in the report rather
 than implying a clean run), capture evidence, then request the `design-review` agent
-(`.claude/agents/design-review.md`) in a **fresh context**. Blockers loop back to the
-implementer automatically; only High-and-below findings go to a human.
+(`.claude/agents/design-review.md`) in a **fresh context**. Blocker and High findings return to the implementer before landing. Medium/Low notes are recorded with their impact.
 
-Gate target (ADR-0133 parity, CLAUDE.md 하드 룰): **Blocker 0.**
+Gate target (AGENTS.md / PIPELINE.md): **Blocker 0 · High 0**. The same threshold applies in both harnesses.

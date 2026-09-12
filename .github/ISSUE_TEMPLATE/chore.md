@@ -5,7 +5,7 @@ title: "[chore] <한 줄 목표>"
 labels: ["type:chore", "status:ready", "agent:codex-ok"]
 ---
 
-> 기능 변경이 아닌 유지보수/툴링/문서/운영 작업. 무관한 리팩터를 끼워넣지 말 것(AGENTS.md §5: 한 이슈 = 한 goal = 한 PR).
+> 기능 변경이 아닌 유지보수/툴링/문서/운영 작업. 무관한 리팩터를 끼워넣지 말 것(AGENTS.md: 한 이슈 = 한 goal = 한 PR).
 > 문서 위주면 `type:docs`로, CI면 `area:ci`로 라벨을 보정한다. Acceptance에 검증 등급(`[ci]=syntax/lint, [infra]=파일 존재+정합, [manual]=사람 1회` 등)을 명시.
 
 ## Goal
