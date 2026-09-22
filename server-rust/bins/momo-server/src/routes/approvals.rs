@@ -65,10 +65,10 @@ use axum::{Extension, Json};
 use chrono::Utc;
 use momo_agent::actions::{
     action_by_id, action_ref, action_result_props, invite_result_body, invite_result_rows,
-    last_attempt_patch, result_client_msg_id, ActionResult, ACTION_APPROVED_AUDIT_SCHEMA,
-    ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION, AUDIT_ACTION_APPROVED,
-    DEFAULT_INVITE_EXPIRES_IN_DAYS, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE, ROLE_REQUIRED,
-    SECRET_ONCE_INVITE_LINK,
+    last_attempt_patch, result_client_msg_id, ActionResult, RequiredRole,
+    ACTION_APPROVED_AUDIT_SCHEMA, ACTION_RESULT_EXECUTED, ACTION_TYPE_WORKSPACE_ACTION,
+    AUDIT_ACTION_APPROVED, DEFAULT_INVITE_EXPIRES_IN_DAYS, LAST_ATTEMPT_PROPS_KEY, REF_TYPE_INVITE,
+    ROLE_REQUIRED, SECRET_ONCE_INVITE_LINK,
 };
 use momo_agent::approval::{
     decided_props_patch, decision_broadcast_payload, decision_event_payload, decision_receipt,
@@ -695,10 +695,18 @@ async fn execute_workspace_action(
     // widened. It is also the same authority the REST route would have applied
     // had this person minted the invite by hand — which is exactly what they
     // are doing, one card removed.
-    if require_admin(conn, input.workspace_id, input.member_id)
-        .await?
-        .is_err()
-    {
+    //
+    // The `match` is exhaustive on purpose: the registry publishes a
+    // `required_role` per action, and calling `require_admin` unconditionally
+    // would make a second action with a different gate silently admin-gated.
+    // Adding a `RequiredRole` variant now fails to compile here, which is where
+    // the decision about its gate belongs.
+    let gate = match action_required_role(&approval.payload) {
+        Some(RequiredRole::Admin) | None => {
+            require_admin(conn, input.workspace_id, input.member_id).await?
+        }
+    };
+    if gate.is_err() {
         // The approval is **not consumed** (ADR-0186 D2): no ledger row, no
         // status change, the run stays parked. What does change is the card — a
         // person who tapped and was refused must be able to see why on the
@@ -1023,6 +1031,22 @@ async fn execute_workspace_action(
             expires_at_ms: created.invite.expires_at_ms,
         }),
     }))
+}
+
+/// The `required_role` the registry publishes for this proposal's action.
+///
+/// `None` when the payload names an action this build no longer carries — the
+/// gate then falls back to the strictest rule v1 has (admin), and the
+/// `action_unavailable` refusal below is what actually answers. Reading the
+/// role before resolving the action keeps the **authority** check first, which
+/// is the order ADR-0186 D2 spells out: a non-admin must not be able to learn
+/// which actions this server still offers by tapping approve.
+fn action_required_role(payload: &Value) -> Option<RequiredRole> {
+    let action_id = payload
+        .get("action")
+        .and_then(|action| action.get("id"))
+        .and_then(Value::as_str)?;
+    action_by_id(action_id).map(|action| action.required_role)
 }
 
 /// `payload.action.args`, or a value the normaliser will refuse.
