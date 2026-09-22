@@ -971,7 +971,8 @@ scripts/oort upgrade            # 또는 scripts/self_host_env.sh --ensure-manag
    — api가 한 번 노출한 secret으로 sender가 서명하기 때문이다.
 
    ```bash
-   docker compose --env-file infra/rust/local.secrets.env \
+   ENV_FILE=infra/rust/local.secrets.env
+   docker compose --env-file "$ENV_FILE" \
      -f infra/rust/docker-compose.rust.yml up -d --wait api webhook-sender
    scripts/oort doctor
    ```
