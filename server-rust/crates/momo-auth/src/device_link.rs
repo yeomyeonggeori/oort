@@ -11,8 +11,9 @@ use uuid::Uuid;
 
 use crate::issue::{sign_access, sign_refresh, IssuedToken};
 use crate::token_store::{
-    record_session_token_with_device, revoke_member_session_tokens_by_ids, DeviceSessionRecord,
-    SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
+    lock_member_session_tokens_by_ids, record_session_token_with_device,
+    revoke_member_session_tokens_by_ids, DeviceSessionRecord, SESSION_LABEL_ACCESS,
+    SESSION_LABEL_REFRESH,
 };
 
 /// Sealed TTL (ADR-0180 D1). 120 seconds.
@@ -489,6 +490,15 @@ pub enum LinkedDeviceRevoke {
     CurrentSession,
 }
 
+/// The consumed link row after `FOR UPDATE`, with the binding re-read under that lock.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LockedLinkedDevice {
+    pub id: Uuid,
+    pub access_id: Uuid,
+    pub refresh_id: Uuid,
+    pub device_label: Option<String>,
+}
+
 /// Owner-filtered list of this member's live device-link sessions.
 ///
 /// SABOTAGE(owner-filter): drop `d.member_id = $2` (and the matching
@@ -555,37 +565,124 @@ pub async fn list_linked_devices_in_tx(
     Ok(devices)
 }
 
-/// Load the consumed link that `member_id` owns. Missing, unconsumed, or
-/// another member's id all collapse to `None` so the route can 404 without
-/// leaking existence.
-async fn owned_linked_device_pair(
+/// Stable-id lookup from the presented refresh. No lock — the caller then
+/// locks that `device_link_token` row and re-reads the current pair.
+const FIND_LINKED_DEVICE_BY_REFRESH_SQL: &str = "SELECT id \
+      FROM device_link_token \
+     WHERE workspace_id = $1 \
+       AND member_id = $2 \
+       AND redeemed_refresh_token_id = $3 \
+       AND consumed_at IS NOT NULL";
+
+/// Device row first (`FOR UPDATE`), then token rows in id order. Refresh and
+/// revoke share this order so they cannot invert `device_link_token` vs `token`.
+const LOCK_LINKED_DEVICE_SQL: &str = "SELECT \
+        id, \
+        redeemed_access_token_id, \
+        redeemed_refresh_token_id, \
+        device_label \
+      FROM device_link_token \
+     WHERE workspace_id = $1 \
+       AND member_id = $2 \
+       AND id = $3 \
+       AND consumed_at IS NOT NULL \
+       FOR UPDATE";
+
+/// Belt-and-braces re-read once the locks are held (READ COMMITTED already
+/// hands `SELECT … FOR UPDATE` the freshly committed version). The effective
+/// guard is the `locked.refresh_id != old_refresh_id` comparison in
+/// `auth_routes.rs`'s refresh path, not this statement.
+const SELECT_LINKED_DEVICE_PAIR_SQL: &str = "SELECT \
+        id, \
+        redeemed_access_token_id, \
+        redeemed_refresh_token_id, \
+        device_label \
+      FROM device_link_token \
+     WHERE workspace_id = $1 \
+       AND member_id = $2 \
+       AND id = $3 \
+       AND consumed_at IS NOT NULL";
+
+const REBIND_LOCKED_DEVICE_SQL: &str = "UPDATE device_link_token \
+        SET redeemed_access_token_id = $4, \
+            redeemed_refresh_token_id = $5 \
+      WHERE workspace_id = $1 \
+        AND member_id = $2 \
+        AND id = $3 \
+        AND redeemed_access_token_id = $6 \
+        AND redeemed_refresh_token_id = $7 \
+    RETURNING id";
+
+fn locked_device_from_row(
+    row: sqlx::postgres::PgRow,
+) -> Result<Option<LockedLinkedDevice>, sqlx::Error> {
+    let access_id: Option<Uuid> = row.try_get("redeemed_access_token_id")?;
+    let refresh_id: Option<Uuid> = row.try_get("redeemed_refresh_token_id")?;
+    match (access_id, refresh_id) {
+        (Some(access_id), Some(refresh_id)) => Ok(Some(LockedLinkedDevice {
+            id: row.try_get("id")?,
+            access_id,
+            refresh_id,
+            device_label: row.try_get("device_label")?,
+        })),
+        _ => Ok(None),
+    }
+}
+
+/// Find the consumed link currently bound to `refresh_id`. Missing, unconsumed,
+/// or another member's refresh all collapse to `None`.
+pub async fn find_linked_device_id_by_refresh_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    refresh_id: Uuid,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(FIND_LINKED_DEVICE_BY_REFRESH_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(refresh_id)
+        .fetch_optional(&mut *conn)
+        .await
+}
+
+/// Lock the stable `device_link_token` row, then its current session pair in
+/// id order, then re-read the binding. Missing / unconsumed / incomplete pair
+/// all collapse to `None`.
+pub async fn lock_linked_device_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
     member_id: Uuid,
     device_id: Uuid,
-) -> Result<Option<(Uuid, Uuid)>, sqlx::Error> {
-    let row = sqlx::query(
-        "SELECT redeemed_access_token_id, redeemed_refresh_token_id \
-           FROM device_link_token \
-          WHERE workspace_id = $1 \
-            AND member_id = $2 \
-            AND id = $3 \
-            AND consumed_at IS NOT NULL",
-    )
-    .bind(workspace_id)
-    .bind(member_id)
-    .bind(device_id)
-    .fetch_optional(&mut *conn)
-    .await?;
+) -> Result<Option<LockedLinkedDevice>, sqlx::Error> {
+    let row = sqlx::query(LOCK_LINKED_DEVICE_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(device_id)
+        .fetch_optional(&mut *conn)
+        .await?;
     let Some(row) = row else {
         return Ok(None);
     };
-    let access_id: Option<Uuid> = row.try_get("redeemed_access_token_id")?;
-    let refresh_id: Option<Uuid> = row.try_get("redeemed_refresh_token_id")?;
-    match (access_id, refresh_id) {
-        (Some(access), Some(refresh)) => Ok(Some((access, refresh))),
-        _ => Ok(None),
-    }
+    let Some(locked) = locked_device_from_row(row)? else {
+        return Ok(None);
+    };
+    lock_member_session_tokens_by_ids(
+        conn,
+        workspace_id,
+        member_id,
+        &[locked.access_id, locked.refresh_id],
+    )
+    .await?;
+    let row = sqlx::query(SELECT_LINKED_DEVICE_PAIR_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(device_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    locked_device_from_row(row)
 }
 
 /// Revoke the access+refresh pair bound to one linked device.
@@ -599,19 +696,18 @@ pub async fn revoke_linked_device_in_tx(
     device_id: Uuid,
     current_token_id: Uuid,
 ) -> Result<LinkedDeviceRevoke, sqlx::Error> {
-    let Some((access_id, refresh_id)) =
-        owned_linked_device_pair(conn, workspace_id, member_id, device_id).await?
+    let Some(locked) = lock_linked_device_in_tx(conn, workspace_id, member_id, device_id).await?
     else {
         return Ok(LinkedDeviceRevoke::NotFound);
     };
-    if access_id == current_token_id {
+    if locked.access_id == current_token_id {
         return Ok(LinkedDeviceRevoke::CurrentSession);
     }
     let flipped = revoke_member_session_tokens_by_ids(
         conn,
         workspace_id,
         member_id,
-        &[access_id, refresh_id],
+        &[locked.access_id, locked.refresh_id],
     )
     .await?;
     if flipped == 0 {
@@ -620,8 +716,45 @@ pub async fn revoke_linked_device_in_tx(
     Ok(LinkedDeviceRevoke::Revoked)
 }
 
+/// Point a locked consumed link at the rotated session pair and kill the
+/// previous access row. Returns `false` when the binding changed under the lock
+/// so the caller can roll the whole rotation back instead of no-op succeeding.
+#[allow(clippy::too_many_arguments)]
+pub async fn rebind_locked_device_link_session_in_tx(
+    conn: &mut PgConnection,
+    workspace_id: Uuid,
+    member_id: Uuid,
+    device_id: Uuid,
+    old_access_id: Uuid,
+    old_refresh_id: Uuid,
+    new_access_id: Uuid,
+    new_refresh_id: Uuid,
+) -> Result<bool, sqlx::Error> {
+    let updated: Option<Uuid> = sqlx::query_scalar(REBIND_LOCKED_DEVICE_SQL)
+        .bind(workspace_id)
+        .bind(member_id)
+        .bind(device_id)
+        .bind(new_access_id)
+        .bind(new_refresh_id)
+        .bind(old_access_id)
+        .bind(old_refresh_id)
+        .fetch_optional(&mut *conn)
+        .await?;
+    if updated.is_none() {
+        return Ok(false);
+    }
+    if old_access_id != new_access_id {
+        let _ =
+            revoke_member_session_tokens_by_ids(conn, workspace_id, member_id, &[old_access_id])
+                .await?;
+    }
+    Ok(true)
+}
+
 /// Point a consumed link at the rotated session pair and kill the previous
-/// access row. No-op when `old_refresh_id` is not a device-link refresh.
+/// access row. No-op when `old_refresh_id` is not a device-link refresh. A
+/// found row whose current binding no longer matches is an error so the
+/// rotation rolls back instead of leaving a live pair on a revoked device.
 pub async fn rebind_device_link_session_in_tx(
     conn: &mut PgConnection,
     workspace_id: Uuid,
@@ -630,35 +763,38 @@ pub async fn rebind_device_link_session_in_tx(
     new_access_id: Uuid,
     new_refresh_id: Uuid,
 ) -> Result<(), sqlx::Error> {
-    let old_access: Option<Uuid> = sqlx::query_scalar(
-        "WITH old AS ( \
-            SELECT id, redeemed_access_token_id AS old_access \
-              FROM device_link_token \
-             WHERE workspace_id = $1 \
-               AND member_id = $2 \
-               AND redeemed_refresh_token_id = $5 \
-         ) \
-         UPDATE device_link_token AS d \
-            SET redeemed_access_token_id = $3, \
-                redeemed_refresh_token_id = $4 \
-           FROM old \
-          WHERE d.id = old.id \
-            AND d.workspace_id = $1 \
-        RETURNING old.old_access",
+    let Some(device_id) =
+        find_linked_device_id_by_refresh_in_tx(conn, workspace_id, member_id, old_refresh_id)
+            .await?
+    else {
+        return Ok(());
+    };
+    let Some(locked) = lock_linked_device_in_tx(conn, workspace_id, member_id, device_id).await?
+    else {
+        return Err(sqlx::Error::Protocol(
+            "linked-device binding changed".to_string(),
+        ));
+    };
+    if locked.refresh_id != old_refresh_id {
+        return Err(sqlx::Error::Protocol(
+            "linked-device binding changed".to_string(),
+        ));
+    }
+    let rebound = rebind_locked_device_link_session_in_tx(
+        conn,
+        workspace_id,
+        member_id,
+        locked.id,
+        locked.access_id,
+        locked.refresh_id,
+        new_access_id,
+        new_refresh_id,
     )
-    .bind(workspace_id)
-    .bind(member_id)
-    .bind(new_access_id)
-    .bind(new_refresh_id)
-    .bind(old_refresh_id)
-    .fetch_optional(&mut *conn)
     .await?;
-    if let Some(old_access) = old_access {
-        if old_access != new_access_id {
-            let _ =
-                revoke_member_session_tokens_by_ids(conn, workspace_id, member_id, &[old_access])
-                    .await?;
-        }
+    if !rebound {
+        return Err(sqlx::Error::Protocol(
+            "linked-device binding changed".to_string(),
+        ));
     }
     Ok(())
 }
@@ -700,6 +836,42 @@ mod tests {
             assert!(
                 LIST_LINKED_DEVICES_SQL.contains(needle),
                 "list_linked_devices lost `{needle}`"
+            );
+        }
+    }
+
+    #[test]
+    fn linked_device_lock_takes_the_stable_row_before_tokens() {
+        for needle in ["member_id = $2", "consumed_at IS NOT NULL", "FOR UPDATE"] {
+            assert!(
+                LOCK_LINKED_DEVICE_SQL.contains(needle),
+                "lock_linked_device lost `{needle}`"
+            );
+        }
+        assert!(
+            FIND_LINKED_DEVICE_BY_REFRESH_SQL.contains("redeemed_refresh_token_id = $3"),
+            "refresh must locate the stable device id from the presented refresh"
+        );
+        assert!(
+            !FIND_LINKED_DEVICE_BY_REFRESH_SQL.contains("FOR UPDATE"),
+            "the id lookup must not lock tokens before the device row"
+        );
+        assert!(
+            SELECT_LINKED_DEVICE_PAIR_SQL.contains("consumed_at IS NOT NULL"),
+            "re-read after lock must still require a consumed link"
+        );
+        assert!(
+            !SELECT_LINKED_DEVICE_PAIR_SQL.contains("FOR UPDATE"),
+            "the post-lock re-read uses the already-held device row"
+        );
+        for needle in [
+            "id = $3",
+            "redeemed_access_token_id = $6",
+            "redeemed_refresh_token_id = $7",
+        ] {
+            assert!(
+                REBIND_LOCKED_DEVICE_SQL.contains(needle),
+                "locked rebind lost `{needle}`"
             );
         }
     }
