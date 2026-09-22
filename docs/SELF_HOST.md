@@ -979,7 +979,7 @@ scripts/oort upgrade            # 또는 scripts/self_host_env.sh --ensure-manag
 
 5. **그 방향의 자격증명을 전부 재발급한다.** 이 단계를 건너뛰면 조용히 깨진 채로
    남는다.
-   - 인바운드: 설치마다 `POST /v1/workspaces/{ws}/webhooks/{id}/rotate` → 새 secret을
+   - 인바운드: 설치마다 `POST /v1/workspaces/{ws}/webhooks/{installation}/rotate` → 새 secret을
      한 번만 보여주므로 그 자리에서 발신 측에 옮긴다.
    - 아웃바운드: 이벤트구독을 지우고 다시 만든다(`POST …/event-subscriptions`).
      doorbell을 쓰면 재등록한다.

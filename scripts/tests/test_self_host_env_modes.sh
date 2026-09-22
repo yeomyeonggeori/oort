@@ -1163,6 +1163,122 @@ if grep -E 'MOMO_CLAIM_PATH=/claim/' "$claim_fixture/compose-up-output"; then
   exit 1
 fi
 
+# ---------------------------------------------------------------------------
+# #2066 / ADR-0004 증보 4 D2(a) — 웹훅 마스터키 이행 복사 백필.
+#
+# 이 티켓 전체가 이 함수의 출력에 걸려 있다. 백필이 JWT_HMAC 의 **원문 그대로**를
+# 넣지 않으면 폴백이 사라지는 순간 발급된 webhook secret 이 전부 무효가 된다.
+# 그래서 여기서 재는 것은 "키가 생겼다"가 아니라 "바이트가 같다"이다.
+# ---------------------------------------------------------------------------
+whk="$(make_fixture webhook-master-key-backfill)"
+whk_env="$whk/infra/rust/local.secrets.env"
+run_generator "$whk" "$whk/create-output" 49770 --local-build
+grep -q '^WEBHOOK_INGRESS_MASTER_KEY=.' "$whk_env" || {
+  echo "fresh install is missing WEBHOOK_INGRESS_MASTER_KEY" >&2
+  exit 1
+}
+grep -q '^OUTBOUND_WEBHOOK_MASTER_KEY=.' "$whk_env" || {
+  echo "fresh install is missing OUTBOUND_WEBHOOK_MASTER_KEY" >&2
+  exit 1
+}
+# 새 설치가 처음부터 독립 난수인지는 이 픽스처가 잴 수 없다 — fake openssl 이
+# 모든 호출에 같은 문자열을 돌려주기 때문이다. 대신 생성기가 두 키를 **서로 다른
+# 변수에서, 각각 따로 뽑은 난수로** 쓴다는 정적 계약을 잰다. 한 변수를 두 줄에
+# 재사용하는 회귀(= 두 키가 항상 같아져 api 기동 거부)가 여기서 빨개진다.
+for whk_contract in \
+  'WEBHOOK_INGRESS_MASTER_KEY=$WEBHOOK_INGRESS_SECRET' \
+  'OUTBOUND_WEBHOOK_MASTER_KEY=$OUTBOUND_WEBHOOK_SECRET' \
+  'WEBHOOK_INGRESS_SECRET="$(gen)"' \
+  'OUTBOUND_WEBHOOK_SECRET="$(gen)"'
+do
+  grep -Fq "$whk_contract" "$ROOT/scripts/self_host_env.sh" || {
+    echo "generator no longer carries: $whk_contract (두 키가 같은 난수를 공유하면 api 기동 거부)" >&2
+    exit 1
+  }
+done
+
+# 업그레이드 전 형상: 두 키가 아예 없고, JWT 는 다른 시크릿과 구분되는 값이다
+# (fake openssl 은 모든 시크릿을 같은 문자열로 만들어 두므로, 여기서 JWT 만
+# 갈아끼워야 "JWT 원문을 복사했다"가 실제로 측정된다).
+whk_jwt='pre-2066-jwt-hmac-value-0a1b2c3d'
+grep -v -e '^WEBHOOK_INGRESS_MASTER_KEY=' -e '^OUTBOUND_WEBHOOK_MASTER_KEY=' \
+  "$whk_env" | sed -e "s/^JWT_HMAC=.*/JWT_HMAC=$whk_jwt/" >"$whk/pre2066.env"
+cp "$whk/pre2066.env" "$whk_env"
+grep -Fxq "JWT_HMAC=$whk_jwt" "$whk_env" || {
+  echo "pre-2066 fixture did not take the distinct JWT_HMAC" >&2
+  exit 1
+}
+run_generator "$whk" "$whk/backfill-output" 49770 --ensure-managed-keys || {
+  echo "--ensure-managed-keys failed:
+$(cat "$whk/backfill-output")" >&2
+  exit 1
+}
+for whk_key in WEBHOOK_INGRESS_MASTER_KEY OUTBOUND_WEBHOOK_MASTER_KEY; do
+  whk_n="$(grep -c "^${whk_key}=" "$whk_env" | tr -d ' ')"
+  [ "$whk_n" = "1" ] || {
+    echo "backfill wrote $whk_key $whk_n times (want exactly 1)" >&2
+    exit 1
+  }
+  whk_got="$(sed -n "s/^${whk_key}=//p" "$whk_env")"
+  [ "$whk_got" = "$whk_jwt" ] || {
+    echo "backfill did not copy the value in use into $whk_key — 발급된 secret 이 무효가 된다" >&2
+    exit 1
+  }
+done
+# 백필은 JWT 도 다른 시크릿도 건드리지 않는다.
+test "$(sed -n 's/^JWT_HMAC=//p' "$whk_env")" = "$whk_jwt" || {
+  echo "backfill changed JWT_HMAC" >&2
+  exit 1
+}
+# 로그는 키 이름과 개수만 말한다 — 값은 절대 아니다.
+grep -Fq '웹훅 마스터키 백필: 2키 추가' "$whk/backfill-output" || {
+  echo "backfill did not report exactly 2 added keys:
+$(cat "$whk/backfill-output")" >&2
+  exit 1
+}
+if grep -Fq "$whk_jwt" "$whk/backfill-output"; then
+  echo "backfill log leaked the master key value" >&2
+  exit 1
+fi
+
+# 멱등: 두 번째 실행은 파일을 한 바이트도 바꾸지 않는다.
+whk_hash_before="$(hash_file "$whk_env")"
+run_generator "$whk" "$whk/backfill-again-output" 49770 --ensure-managed-keys || {
+  echo "second --ensure-managed-keys failed:
+$(cat "$whk/backfill-again-output")" >&2
+  exit 1
+}
+test "$whk_hash_before" = "$(hash_file "$whk_env")" || {
+  echo "second --ensure-managed-keys rewrote the env" >&2
+  exit 1
+}
+
+# add-only: 운영자가 이미 회전해 둔 키는 되돌리지 않는다. 한 키로 줄였다면
+# 바로 이 형상에서 인바운드 secret 이 전량 무효가 됐을 것이다(PR 근거 2줄째).
+whk_hand='hand-rotated-outbound-key-2066'
+grep -v -e '^WEBHOOK_INGRESS_MASTER_KEY=' -e '^OUTBOUND_WEBHOOK_MASTER_KEY=' \
+  "$whk/pre2066.env" >"$whk_env"
+printf 'OUTBOUND_WEBHOOK_MASTER_KEY=%s\n' "$whk_hand" >>"$whk_env"
+run_generator "$whk" "$whk/backfill-partial-output" 49770 --ensure-managed-keys || {
+  echo "--ensure-managed-keys failed on a half-configured env:
+$(cat "$whk/backfill-partial-output")" >&2
+  exit 1
+}
+test "$(sed -n 's/^OUTBOUND_WEBHOOK_MASTER_KEY=//p' "$whk_env")" = "$whk_hand" || {
+  echo "backfill overwrote an operator's rotated key" >&2
+  exit 1
+}
+test "$(sed -n 's/^WEBHOOK_INGRESS_MASTER_KEY=//p' "$whk_env")" = "$whk_jwt" || {
+  echo "backfill did not fill the missing key with the value in use" >&2
+  exit 1
+}
+grep -Fq '웹훅 마스터키 백필: 1키 추가' "$whk/backfill-partial-output" || {
+  echo "half-configured backfill did not report exactly 1 added key:
+$(cat "$whk/backfill-partial-output")" >&2
+  exit 1
+}
+echo "webhook master key backfill: 이행 복사 == JWT_HMAC 원문, add-only, 멱등, 값 비유입"
+
 # Existing password env + --claim must refuse (never silently convert).
 password_to_claim="$(make_fixture password-to-claim)"
 run_generator "$password_to_claim" "$password_to_claim/first-output" 49752 --local-build
