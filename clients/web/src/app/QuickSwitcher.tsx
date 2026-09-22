@@ -6,6 +6,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Command } from "cmdk";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
@@ -84,7 +85,13 @@ import {
   serializeCommandUsage,
   type CommandUsage,
 } from "@momo/core/features/commands/usage";
-import { parseActionsCatalog } from "@momo/core/features/commands/serverActions";
+import {
+  ACTION_DESTINATION_META,
+  actionDestination,
+  fetchActionsCatalog,
+  parseActionsCatalog,
+} from "@momo/core/features/commands/serverActions";
+import { isReachableHref } from "@/features/timeline/ActionResultCard";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
@@ -425,13 +432,15 @@ export function QuickSwitcher({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
-   * `GET /v1/workspaces/{ws}/actions`의 응답 본문이 들어올 자리 (ADR-0186 부록 E).
+   * `GET /v1/workspaces/{ws}/actions`의 응답 본문 (ADR-0186 부록 E).
    *
-   * **이 티켓은 요청을 보내지 않는다.** AX-4(#2510)가 fetch를 붙여 이 값을
-   * 넘긴다. 그때까지 App은 아무것도 넘기지 않으므로 총 파서가 `undefined`를
-   * `null`로 답하고, `null`이면 「워크스페이스 행동」 그룹은 통째로 없다 —
-   * 확신 없는 행동 줄은 세우지 않는다(fail-closed). 그래서 오늘 제품의
-   * 팔레트에는 `[data-action-id]` 줄이 0개다.
+   * AX-2 가 이 자리를 비워 두었고 AX-4(#2510)가 **요청을 붙였다**: 아무것도
+   * 넘기지 않으면 팔레트가 열릴 때 스스로 한 번 묻는다(아래 `actionsQuery`).
+   * 그래서 지금 이 prop 은 **시험이 서버 대신 답하는 자리**다 — 넘기면 그것이
+   * 이기고, 요청은 나가지 않는다.
+   *
+   * 어느 쪽이든 판정은 하나다: 파서가 `null`이면 「워크스페이스 행동」 그룹은
+   * 통째로 없다. 확신 없는 행동 줄은 세우지 않는다(fail-closed).
    */
   actionsResponse?: unknown;
 }) {
@@ -668,11 +677,32 @@ export function QuickSwitcher({
     if (result.closesSurface) onOpenChange(false);
   }
 
-  // 서버 행동 카탈로그 (ADR-0186 부록 E). 이 티켓은 fetch를 붙이지 않으므로
-  // 제품에서는 언제나 `null`이고, `null`이면 그룹 자체가 없다.
+  // ---- 서버 행동 카탈로그 (ADR-0186 부록 E) ---------------------------------
+  //
+  // **팔레트가 열릴 때 한 번만** 묻는다. 세션 캐시는 이 앱의 QueryClient 이고
+  // (`staleTime: Infinity`), 그래서 ⌘K 를 스무 번 열어도 요청은 한 번이다. 실패는
+  // 재시도하지 않는다(`retry: false`): 이 목록은 사람이 요청한 화면이 아니라
+  // 곁들여 서는 줄이라, 없으면 없는 대로 조용한 것이 옳다(코어 `fetchActionsCatalog`
+  // 머리말).
+  //
+  // 캐시 키에 워크스페이스가 들어 있으므로 워크스페이스를 바꾸면 자연히 다시
+  // 묻는다 — 모듈 스코프에 표를 들고 있었다면 이전 워크스페이스의 행동 목록이
+  // 다음 워크스페이스의 팔레트에 서 있었을 것이다.
+  const actionsQuery = useQuery({
+    queryKey: ["workspace-actions", workspaceId],
+    queryFn: () => fetchActionsCatalog(workspaceId),
+    enabled: open && actionsResponse === undefined,
+    staleTime: Infinity,
+    gcTime: Infinity,
+    retry: false,
+  });
+
   const workspaceActions = useMemo(
-    () => parseActionsCatalog(actionsResponse),
-    [actionsResponse]
+    () =>
+      actionsResponse !== undefined
+        ? parseActionsCatalog(actionsResponse)
+        : actionsQuery.data ?? null,
+    [actionsResponse, actionsQuery.data]
   );
 
   // 채널 만들기 다이얼로그와 같은 앵커(left-1/2 top-8 max-w-pane-md)에 번갈아
@@ -834,30 +864,72 @@ export function QuickSwitcher({
             없는 능력을 약속한다(fail-closed). 그리고 지금은 요청을 보내지
             않으므로 제품에서 이 그룹은 언제나 없다.
 
-            줄이 그려질 때에도 **여기서는 실행되지 않는다**: 워크스페이스 행동은
-            제안 → 승인 → 실행이고(D2), 그 세 단계는 전부 AX-4(#2510)가 붙이는
-            카드 위에서 일어난다. 그때까지 줄은 사람 섹션의 선택 불가 이름과
-            같은 규율로 산다 — 이름은 찾히고, Enter는 답하지 않으며, 왜인지가
-            같은 줄에 적혀 있다. */}
+            줄이 그려져도 **여기서 행동이 일어나지는 않는다**: 워크스페이스 행동은
+            제안 → 승인 → 실행이고(D2), 제안하는 쪽은 에이전트다(사람은 채널에서
+            멘션으로 부른다). 그래서 v1 에서 Enter 가 하는 일은 **그 일을 직접 할
+            수 있는 설정 표면으로 가는 것**이고, 목적지는 코어의 표가 답한다
+            (`actionDestination`).
+
+            목적지를 모르거나 이 서버에 실행기가 없으면 줄은 눌리지 않는다.
+            사람 섹션의 선택 불가 이름과 같은 규율이다 — 이름은 찾히고, Enter는
+            답하지 않으며, 왜인지가 같은 줄에 적혀 있다. */}
         {workspaceActions !== null && workspaceActions.length > 0 && (
           <Command.Group heading="워크스페이스 행동">
-            {workspaceActions.map((action) => (
-              <Command.Item
-                role="option"
-                key={action.id}
-                className={itemClass}
-                value={`${action.title} ${action.summary} ${action.id}`}
-                data-testid="switcher-workspace-action"
-                data-action-id={action.id}
-                disabled
-              >
-                <Bot className="size-4 text-agent" aria-hidden="true" />
-                {action.title}
-                <span className="text-meta text-warn">
-                  {action.unavailableReason ?? "승인 필요"}
-                </span>
-              </Command.Item>
-            ))}
+            {workspaceActions.map((action) => {
+              // 목적지를 **알고** 그리로 갈 수 있어야 줄이 열린다 (R2 M-R2-1).
+              // 코어의 표는 행동 id 를 주소로 옮기고, 그 주소에 도착할 수
+              // 있는지는 웹만 안다(데스크톱 전용 섹션·서버 표면 의존). 결과
+              // 카드가 문을 세울 때 묻는 것과 **같은 함수**다.
+              const mapped = action.executable
+                ? actionDestination(action.id)
+                : null;
+              const destination =
+                mapped !== null && isReachableHref(mapped) ? mapped : null;
+              return (
+                <Command.Item
+                  role="option"
+                  key={action.id}
+                  className={itemClass}
+                  value={`${action.title} ${action.summary} ${action.id}`}
+                  data-testid="switcher-workspace-action"
+                  data-action-id={action.id}
+                  {...(destination === null
+                    ? { disabled: true }
+                    : { onSelect: () => go(destination) })}
+                >
+                  {/* ## 글리프가 Enter 의 뜻을 따라온다 (R1 M5 · R2 N-R2-1)
+                      
+                      AX-2 에서 이 줄은 눌리지 않았고, `Bot` + `--agent` 는
+                      「에이전트가 제안할 수 있는 것」이라는 표지로 읽혔다.
+                      AX-4 가 Enter 에 **사람의 이동**을 붙였으므로 그 표지는
+                      이제 거짓이다. §9 는 `--agent` 를 에이전트 정체성
+                      (아바타·배지)에만 허락한다 — 사람이 자기 손으로 가는 줄에
+                      에이전트 잉크를 칠하면 그 토큰의 뜻이 닳는다.
+                      
+                      중립 글리프는 **목적지의** 것이다: 이 줄이 데려가는 곳은
+                      설정 표면이고, 팔레트의 「설정」 명령이 이미 같은 글리프를
+                      쓴다(`COMMAND_ICONS.settings`). 그래서 목적지가 없는 줄은
+                      그 글리프를 들 수 없다 — 열리지 않는 줄에 문 그림을
+                      붙이는 것이라, 사이드바의 잠긴 채널과 같은 `Lock` 을
+                      든다(이 파일이 이미 쓰는 글리프, 새 아이콘 0). */}
+                  {destination === null ? (
+                    <Lock className="size-4 opacity-70" aria-hidden="true" />
+                  ) : (
+                    <Settings className="size-4 opacity-70" aria-hidden="true" />
+                  )}
+                  {action.title}
+                  {destination === null ? (
+                    <span className="text-meta text-warn">
+                      {action.unavailableReason ?? "지금은 열 수 없음"}
+                    </span>
+                  ) : (
+                    <span className="text-meta text-ink-muted">
+                      {ACTION_DESTINATION_META}
+                    </span>
+                  )}
+                </Command.Item>
+              );
+            })}
           </Command.Group>
         )}
 

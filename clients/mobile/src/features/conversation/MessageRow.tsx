@@ -26,6 +26,12 @@ import {
   type AgentCardModel,
 } from '@momo/core/features/timeline/agentCardModel';
 import {
+  ACTION_RESULT_STATUS_LABEL,
+  ACTION_RESULT_STATUS_NOTE,
+  type ActionResultStatus,
+  type AgentActionResultCard,
+} from '@momo/core/features/timeline/actionResultCard';
+import {
   artifactNote,
   isProvisional,
   rowPresentation,
@@ -954,6 +960,66 @@ function CompletionReportCardView({
   );
 }
 
+/**
+ * 워크스페이스 행동 결과 카드 (ADR-0186 부록 B) — **폰 최소판**.
+ *
+ * AX-4(#2510)가 웹에 세운 카드가 코어 모델을 들여오면서 이 파일의 마지막 갈래가
+ * 턴 어휘(`AgentTurnStatus`)로 이 카드를 인덱싱하게 됐다. 그대로 두면 병합 트리의
+ * 폰 타입검사가 무너지고, `card.title` 을 빌려 쓰던 꼬리가 상태 낱말을 찾지 못한다.
+ *
+ * 그래서 **여기서 멈춰 세운다**: 제목·상태 칩·행·한 문장. 결정 컨트롤도, 다음 문도,
+ * 1회 고지도 없다 — 폰 패리티는 AX-7(#2513)이고, 그 티켓이 오기 전에 반쪽짜리
+ * 동선을 세우는 것은 이 배치의 범위 밖이다. 값이 없는 것은 웹과 같다(D4: 1회 값은
+ * 결정 응답에만 있고, 폰에서 결정하면 폰 메모리에만 있다).
+ *
+ * 색은 웹과 같은 규칙이다. `role_required` 가 `warn` 인 것은 실패가 아니라 **때**의
+ * 문제이기 때문이고(웹 `ACTION_RESULT_CHIP_CLASS` 독스트링), 폰에서는 그 역할을
+ * `warn` 한 토큰이 진다(`momo-design-taste` §2: 폰은 두 역할이 겹친다).
+ */
+const ACTION_RESULT_TONE: Readonly<
+  Record<ActionResultStatus, 'ok' | 'warn' | 'danger' | 'muted'>
+> = {
+  executed: 'ok',
+  rejected: 'danger',
+  expired: 'muted',
+  role_required: 'warn',
+};
+
+function ActionResultCardView({
+  card,
+  styles,
+}: {
+  card: AgentActionResultCard;
+  styles: ReturnType<typeof buildStyles>;
+}): React.JSX.Element {
+  return (
+    <View style={styles.card} testID="agent-card">
+      <View style={styles.cardHead}>
+        <Text style={styles.cardTitle} numberOfLines={2}>
+          {card.title}
+        </Text>
+        <StatusChip
+          label={ACTION_RESULT_STATUS_LABEL[card.status]}
+          tone={ACTION_RESULT_TONE[card.status]}
+        />
+      </View>
+      <Text style={styles.cardBody}>
+        {ACTION_RESULT_STATUS_NOTE[card.status]}
+      </Text>
+      {card.rows.length > 0 ? (
+        <View style={styles.detailRows} testID="action-result-rows">
+          {card.rows.map(row => (
+            <Text
+              key={`action-result-${row.label}`}
+              style={styles.cardMeta}
+            >{`${row.label} ${row.value}`}</Text>
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function AgentCard({
   card,
   approvalGates,
@@ -1111,6 +1177,10 @@ function AgentCard({
         toneStyle={completionToneStyle}
       />
     );
+  }
+
+  if (card.kind === 'action_result') {
+    return <ActionResultCardView card={card} styles={styles} />;
   }
 
   const cost = card.kind === 'turn' ? card.cost : null;
