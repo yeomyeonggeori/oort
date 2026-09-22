@@ -8075,6 +8075,32 @@ async function captureScheme(browser, scheme) {
       `[⌘K 명령 그룹 ${scheme}] 인박스 줄에 키캡이 없다 — 단축키 정본과 팔레트가 갈라졌다`
     );
   }
+  // 행 리듬은 키캡이 정하지 않는다 (#2524 R1 H-1). 1차 판본은 키캡 상자가
+  // 줄상자보다 커서 인박스·설정 줄만 34px, 나머지는 30px 이었다. 그 갈림을 재는
+  // 자리는 **여기**다: jsdom 은 배치를 계산하지 않으므로 같은 단정을 시험으로
+  // 옮기면 언제나 통과한다(높이가 전부 0 이다).
+  //
+  // 바로 위 두 단정이 이 단정을 헛돌지 않게 붙든다 — 줄이 5개 이상 있고 그 중
+  // 하나에는 키캡이 있다는 것이 먼저 확인되므로, 「전부 같다」가 빈 목록이나
+  // 키캡 없는 목록으로 참이 되는 길이 없다.
+  const commandRowHeights = await directory.evaluate(() =>
+    [...document.querySelectorAll("[data-command-id]")].map((row) => ({
+      id: row.getAttribute("data-command-id"),
+      h: Math.round(row.getBoundingClientRect().height * 100) / 100,
+      kbd: row.querySelectorAll("kbd").length,
+    }))
+  );
+  console.log(`COMMAND_ROW_HEIGHTS ${scheme}`, JSON.stringify(commandRowHeights));
+  const commandRowHeightSet = [...new Set(commandRowHeights.map((r) => r.h))];
+  if (commandRowHeightSet.length !== 1) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 명령 줄 높이가 ${commandRowHeightSet
+        .sort((a, b) => a - b)
+        .join("/")}px 로 갈린다 — 키캡이 행 높이를 정하고 있다: ${JSON.stringify(
+        commandRowHeights
+      )}`
+    );
+  }
   const commandShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-commands-${scheme}.png`);
   await directory.screenshot({ path: commandShot });
   shots.push(commandShot);

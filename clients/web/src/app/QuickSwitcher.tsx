@@ -314,10 +314,16 @@ function CommandRow({
         <span className="text-meta text-ink-muted">{command.meta}</span>
       )}
       {/* 키캡은 단축키 정본의 `keycaps` 그대로다. 도움말과 같은 상자를 쓴다
-          (`Keycaps`): 두 자리가 각자 적으면 같은 키가 두 모양으로 늙는다. */}
+          (`Keycaps`): 두 자리가 각자 적으면 같은 키가 두 모양으로 늙는다.
+
+          `inline` 이 바꾸는 것은 그 상자의 세로 여백 하나뿐이다(#2524 R1 H-1).
+          도움말의 여백 그대로면 상자가 `text-body` 줄상자보다 커져 **키캡이 달린
+          줄만** 4px 높았다(34 vs 30) — 랭킹으로 그 줄이 위로 오면 목록이 위에서부터
+          들쭉날쭉해진다. 행 높이는 글자가 정하고 키캡은 거기 얹힌다. 캡처 장면
+          3c-2 가 모든 명령 줄의 높이가 하나임을 잰다. */}
       {shortcut && (
         <span className="ml-auto flex shrink-0 items-center gap-1">
-          <Keycaps keycaps={shortcut.keycaps} />
+          <Keycaps keycaps={shortcut.keycaps} variant="inline" />
         </span>
       )}
     </Command.Item>
