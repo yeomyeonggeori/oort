@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   Check,
   ClipboardCheck,
@@ -325,6 +325,9 @@ function ApprovalBody({
     secretOnce?: SecretOnce;
   } | null>(null);
   const [armed, setArmed] = useState<Armed>(null);
+  // 403 뒤 초점이 내려앉을 자리 (R2 H-R2-1). 카드 자신이다 — 이름과 링을
+  // 이미 가진 유일한 조상이고, 방금 생긴 안내 문장이 그 안에 있다.
+  const cardRef = useRef<HTMLElement | null>(null);
   const approvalsProvided = isSurfaceProvided("approvals");
   // 결정은 REST POST로 나간다. 「레일이 붙어 있는가」와 「이 요청이 나갈 수 있는가」는
   // 다른 질문이고, 승인에는 기한이 있으므로 후자를 물어야 한다 — 웹소켓이 잠깐
@@ -360,6 +363,7 @@ function ApprovalBody({
 
   return (
     <CardFrame
+      sectionRef={cardRef}
       icon={<ShieldQuestion className="size-4" aria-hidden="true" />}
       title={card.title}
       chip={<ApprovalChip status={status} />}
@@ -402,6 +406,7 @@ function ApprovalBody({
                 ? roleRequiredCopy(card.action.requiredRole)
                 : null
             }
+            onLandOnCard={() => cardRef.current?.focus()}
             {...(card.action !== null
               ? {
                   // 확정 문장만 갈아 끼운다 (design-review R1 M2). 기본 문장
@@ -1102,6 +1107,7 @@ export function CardFrame({
   keyboard = false,
   onApprove,
   onReject,
+  sectionRef,
 }: {
   icon: React.ReactNode;
   title: string;
@@ -1117,9 +1123,17 @@ export function CardFrame({
   keyboard?: boolean;
   onApprove?: () => void;
   onReject?: () => void;
+  /**
+   * 카드의 `section` 노드. 지금 유일한 소비자는 403 뒤 초점 착지다
+   * (design-review #2540 R2 H-R2-1): 이 요소는 이름(`aria-label={title}`)과
+   * house 링을 이미 갖고 있어서 키보드가 내려앉을 자리로 맞고, 결정 컨트롤은
+   * 그 노드를 스스로 만들지 않으므로 참조가 밖에서 들어와야 한다.
+   */
+  sectionRef?: React.Ref<HTMLElement>;
 }) {
   return (
     <section
+      ref={sectionRef}
       data-testid="agent-card"
       data-card-kind={kind}
       data-status={status}

@@ -292,6 +292,7 @@ export function ApprovalActions({
   execution = null,
   verbs = APPROVAL_VERBS,
   forbiddenCopy = null,
+  onLandOnCard,
 }: {
   approvalId: string;
   armed: Armed;
@@ -339,6 +340,15 @@ export function ApprovalActions({
    * 갈라지고 계약은 하나로 남기는 이 컴포넌트의 규칙 그대로다(`verbs`).
    */
   forbiddenCopy?: string | null;
+  /**
+   * 403 뒤 초점을 어디에 내려놓을지 **호출자가 안다** (R2 H-R2-1 · N-R2-2).
+   *
+   * 이 컨트롤의 컨테이너는 이름 없는 `div` 다. 카드는 이름(`aria-label`)과
+   * house 링을 이미 가진 `section` 을 갖고 있고, 그것이 옳은 착지점이다 —
+   * 그런데 그 노드는 이 컴포넌트가 만들지 않는다. 그래서 목적지를 아는 쪽이
+   * 함수로 건넨다. 없으면 `root` 로 떨어지고, 그 `root` 도 이제 링을 든다.
+   */
+  onLandOnCard?: () => void;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -422,9 +432,24 @@ export function ApprovalActions({
           // 초점도 함께 돌려놓는다 (R1 H2). `disabled={busy}` 가 눌린 버튼을
           // 비활성화한 순간 초점은 이미 body 로 떨어졌고, 여기서 확정 버튼까지
           // 언마운트된다 — 목적지를 적어 두지 않으면 키보드 사용자는 방금 읽을
-          // 문장이 생긴 자리를 잃는다. `root` 는 이 컨트롤의 컨테이너이고,
-          // 안내 문장은 그 안에 있다.
-          focusAfterArmChange.current = "root";
+          // 문장이 생긴 자리를 잃는다.
+          //
+          // ## 목적지가 `root` 에서 **카드**로 옮겨 갔다 (R2 H-R2-1 · N-R2-2)
+          //
+          // R2 는 `root` 착지에서 두 가지를 실측했다. 이 `div` 에는 house 링이
+          // 없어 크로미움 UA 기본 링(이 팔레트 밖의 파랑)이 footer 를 둘렀고
+          // (같은 카드의 성공 착지는 2px accent 였다 — 한 카드에 두 링), 이름도
+          // role 도 없어 스크린리더가 footer 의 textContent 를 통째로 읽었다.
+          //
+          // 카드 `section` 은 그 둘을 이미 갖고 있다: `focus-visible:focus-ring`
+          // 과 `aria-label={title}`. R1 H2 가 적어 둔 방향이기도 하다. 그래서
+          // 착지는 카드이고, 착지한 사람이 듣는 것은 카드 제목이다 — 그 아래에
+          // 방금 생긴 안내 문장이 있다.
+          //
+          // 카드가 없는 표면(인박스 목록)에서는 이 갈래 자체에 들어오지 않지만
+          // (`forbiddenCopy === null`), 들어오더라도 `onLandOnCard` 가 없으면
+          // `root` 로 떨어진다. 그 `root` 도 이제 house 링을 든다(아래).
+          focusAfterArmChange.current = "card";
           setArmed(null);
           return;
         }
@@ -453,7 +478,7 @@ export function ApprovalActions({
   const approveRef = useRef<HTMLButtonElement | null>(null);
   const rejectRef = useRef<HTMLButtonElement | null>(null);
   const focusAfterArmChange = useRef<
-    "commit" | "approve" | "reject" | "root" | null
+    "commit" | "approve" | "reject" | "root" | "card" | null
   >(null);
 
   useEffect(() => {
@@ -463,8 +488,9 @@ export function ApprovalActions({
     if (target === "commit") commitRef.current?.focus();
     else if (target === "approve") approveRef.current?.focus();
     else if (target === "reject") rejectRef.current?.focus();
+    else if (target === "card" && onLandOnCard !== undefined) onLandOnCard();
     else rootRef.current?.focus();
-  }, [armed]);
+  }, [armed, onLandOnCard]);
 
   function arm(next: Exclude<Armed, null>) {
     // 실행할 호스트가 하나도 없으면 승인은 무장조차 하지 않는다. 서버가 409로
@@ -489,7 +515,12 @@ export function ApprovalActions({
 
   return (
     <div
-      className={cn("px-3 py-2", className)}
+      // `tabIndex={-1}` 로 초점을 받는 자리라 링이 있어야 한다 (R2 H-R2-1).
+      // 없으면 크로미움이 자기 기본 링을 그리고, 그것은 이 팔레트 밖 색이다
+      // (§2.2 한 액센트). 프리플라이트의 `naked_focus` 는 링을 **끈** 자리만
+      // 보므로 이렇게 링이 아예 없던 자리는 기계가 잡지 못한다 — 세 줄 아래
+      // `LinkOnce` 와 카드 `section` 이 이미 드는 그 클래스다.
+      className={cn("px-3 py-2 focus-visible:focus-ring", className)}
       ref={rootRef}
       // 확정 뒤 캐럿이 착지할 자리. 목록에서는 이 행이 곧 사라지므로 호출자가
       // 다시 옮기지만(InboxRoute), 카드에서는 여기가 종착지다.

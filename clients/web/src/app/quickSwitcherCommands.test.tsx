@@ -620,6 +620,11 @@ describe("서버 행동 카탈로그는 없으면 숨는다 (ADR-0186 부록 E)"
     ) as HTMLElement;
     expect(row.getAttribute("aria-disabled")).not.toBe("true");
     expect(row.textContent).toContain("설정에서 직접 하기");
+    // 목적지가 있는 줄만 목적지 글리프를 든다 (R1 M5 · R2 N-R2-1).
+    expect(row.querySelector("svg")?.getAttribute("class")).toContain(
+      "lucide-settings"
+    );
+    expect(row.querySelector(".text-agent")).toBeNull();
     await act(async () => {
       row.click();
     });
@@ -661,6 +666,12 @@ describe("서버 행동 카탈로그는 없으면 숨는다 (ADR-0186 부록 E)"
     for (const row of rows) {
       expect(row.getAttribute("aria-disabled")).toBe("true");
       expect(row.textContent).not.toContain("설정에서 직접 하기");
+      // R2 N-R2-1: 열리지 않는 줄은 목적지 글리프를 들지 않는다. 에이전트
+      // 잉크로도 돌아가지 않는다(R1 M5).
+      expect(row.querySelector("svg")?.getAttribute("class")).toContain(
+        "lucide-lock"
+      );
+      expect(row.querySelector(".text-agent")).toBeNull();
     }
     expect(rows[1]?.textContent).toContain("이 서버에는 아직 없습니다.");
     await act(async () => {

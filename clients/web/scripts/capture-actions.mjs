@@ -335,15 +335,87 @@ async function openChannel(context) {
   return page;
 }
 
-/** 무장 → 시간 게이트(400ms) → 확정. 이 레인은 시계를 얼리지 않으므로 열린다. */
+/**
+ * 무장 → 시간 게이트(400ms) → 확정. 이 레인은 시계를 얼리지 않으므로 열린다.
+ *
+ * **키보드로 민다** (design-review R2 H-R2-1). 포인터로 확정하면 착지한 요소가
+ * `:focus-visible` 에 걸리지 않아 링이 그려지지 않고, 그러면 이 배치가 새로 연
+ * 두 키보드 정거장(성공 착지·403 착지)의 링을 사진으로도 실측으로도 잴 수 없다.
+ * 가드는 우회하지 않는다: 무장 뒤 600ms 를 기다리고, Enter 는 한 번씩만 누른다
+ * (반복 keydown 은 `ApprovalActions` 가 거절한다).
+ */
 async function decide(page) {
-  await page.getByTestId("approval-approve").first().click();
+  await page.getByTestId("approval-approve").first().focus();
+  await page.keyboard.press("Enter");
   await page.getByTestId("approval-commit").first().waitFor({ state: "visible" });
   await page.waitForTimeout(600);
-  await page.getByTestId("approval-commit").first().click();
+  await page.keyboard.press("Enter");
 }
 
-async function shoot(browser, { name, scheme, viewport, drive, after, ...mocks }) {
+/** 크로미움 UA 기본 포커스 링. 이 팔레트 밖 색이다(§2.2 한 액센트). */
+const UA_FOCUS_BLUE = ["rgb(0, 95, 204)", "rgb(153, 200, 255)"];
+
+/**
+ * 키보드가 내려앉은 자리의 링을 잰다 (R2 H-R2-1).
+ *
+ * 사진만으로는 「링이 있다」와 「링이 house 것이다」가 구별되지 않는다 — R2 가
+ * 잡은 결함이 정확히 그 차이였다: 403 착지에 링은 있었고, 그 링이 크로미움의
+ * 파란색이었다. 그래서 계산값을 읽는다.
+ */
+async function measureRing(page, label) {
+  const ring = await page.evaluate(() => {
+    const el = document.activeElement;
+    if (el === null || el === document.body) return null;
+    const style = getComputedStyle(el);
+    return {
+      testId: el.getAttribute("data-testid") ?? el.tagName.toLowerCase(),
+      inCard: el.closest('[data-testid="agent-card"]') !== null,
+      focusVisible: el.matches(":focus-visible"),
+      width: style.outlineWidth,
+      style: style.outlineStyle,
+      color: style.outlineColor,
+      name: el.getAttribute("aria-label") ?? el.getAttribute("aria-labelledby"),
+      accent: getComputedStyle(document.documentElement)
+        .getPropertyValue("--accent")
+        .trim(),
+    };
+  });
+  if (ring === null) {
+    throw new Error(`${label}: 초점이 body 로 떨어졌다`);
+  }
+  if (!ring.inCard) {
+    throw new Error(`${label}: 초점이 카드 밖이다 (${ring.testId})`);
+  }
+  if (!ring.focusVisible) {
+    throw new Error(
+      `${label}: 키보드로 밀었는데 :focus-visible 이 아니다 (${ring.testId})`
+    );
+  }
+  if (ring.style !== "solid" || ring.width !== "2px") {
+    throw new Error(
+      `${label}: 링이 house 모양이 아니다 (${ring.width} ${ring.style}) — UA 기본은 auto 1px`
+    );
+  }
+  if (UA_FOCUS_BLUE.includes(ring.color)) {
+    throw new Error(`${label}: UA 기본 파란 링이다 (${ring.color})`);
+  }
+  console.log(
+    `  ${label}: 착지 [${ring.testId}] 링 ${ring.width} ${ring.style} ${ring.color} (--accent ${ring.accent})`
+  );
+  return ring;
+}
+
+/** 한 프레임 안의 두 정거장이 같은 링을 드는지. 서로 다르면 카드가 두 색이다. */
+function assertSameRing(a, b) {
+  if (a.color !== b.color || a.width !== b.width || a.style !== b.style) {
+    throw new Error(
+      `두 키보드 정거장의 링이 다르다: ${a.testId} ${a.width} ${a.color} vs ` +
+        `${b.testId} ${b.width} ${b.color}`
+    );
+  }
+}
+
+async function shoot(browser, { name, scheme, viewport, drive, after, rings, ...mocks }) {
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 2,
@@ -353,7 +425,7 @@ async function shoot(browser, { name, scheme, viewport, drive, after, ...mocks }
   await installMocks(context, mocks);
   const page = await openChannel(context);
   const label = `${name} ${viewport.width}-${scheme}`;
-  await drive(page, { label });
+  await drive(page, { label, rings });
   const path = `${OUT_DIR}/action-${name}-${viewport.width}-${scheme}.png`;
   await page.screenshot({ path });
   // 사진 뒤의 단정. 화면을 바꾸는 검사(새로고침)는 프레임을 더럽히면 안 된다.
@@ -504,11 +576,14 @@ async function raise(page, testId) {
 
 async function captureFrame(browser, frame) {
   const shots = [];
+  // 한 프레임(폭×스킴) 안에서 두 키보드 정거장의 링을 모아 서로 비교한다.
+  const rings = {};
 
   // ① 대기 — 행·사유·결정 권한이 카드 표면에 있다(부록 A).
   shots.push(
     await shoot(browser, {
       ...frame,
+      rings,
       name: "pending",
       messages: MESSAGES,
       drive: async (page) => {
@@ -530,18 +605,18 @@ async function captureFrame(browser, frame) {
   shots.push(
     await shoot(browser, {
       ...frame,
+      rings,
       name: "link-once",
       messages: MESSAGES,
-      drive: async (page, { label }) => {
+      drive: async (page, { label, rings }) => {
         await decide(page);
         await page.getByTestId("approval-link-once").waitFor({ state: "visible" });
-        // 초점이 카드 안에 남는가 (R1 H2). 사진은 초점을 보여 주지 않는다.
-        const focused = await page.evaluate(
-          () =>
-            document.activeElement?.closest('[data-testid="agent-card"]') !== null
-        );
-        if (!focused) {
-          throw new Error(`${label}: 확정 뒤 초점이 카드 밖으로 떨어졌다`);
+        // 초점이 카드 안에 남고(R1 H2), 그 자리의 링이 house 것인가(R2 H-R2-1).
+        rings.settled = await measureRing(page, `${label} 성공 착지`);
+        if (rings.settled.testId !== "approval-link-once") {
+          throw new Error(
+            `${label}: 확정 뒤 착지가 ${rings.settled.testId} 다 — 링크 그룹이어야 한다`
+          );
         }
         await assertSecretNotClipped(page, label);
         await raise(page, "agent-card");
@@ -558,6 +633,7 @@ async function captureFrame(browser, frame) {
   shots.push(
     await shoot(browser, {
       ...frame,
+      rings,
       name: "result",
       messages: RESULT_MESSAGES,
       drive: async (page, { label }) => {
@@ -585,10 +661,11 @@ async function captureFrame(browser, frame) {
   shots.push(
     await shoot(browser, {
       ...frame,
+      rings,
       name: "role-required",
       messages: MESSAGES,
       decisionStatus: 403,
-      drive: async (page, { label }) => {
+      drive: async (page, { label, rings }) => {
         await decide(page);
         const banner = page.getByTestId("approval-error").first();
         await banner.waitFor({ state: "visible" });
@@ -596,7 +673,23 @@ async function captureFrame(browser, frame) {
         if (tone !== "unavailable") {
           throw new Error(`${label}: 403 배너의 격이 ${tone} 이다 — 사고가 아니라 안내다`);
         }
-        // 성공할 수 없는 채움 버튼이 남지 않는다 (R1 M1), 초점은 카드 안 (R1 H2).
+        // 성공할 수 없는 채움 버튼이 남지 않는다 (R1 M1), 초점은 **이름과 링을
+        // 가진 카드**에 앉는다 (R1 H2 · R2 H-R2-1 · N-R2-2).
+        rings.forbidden = await measureRing(page, `${label} 403 착지`);
+        if (rings.forbidden.testId !== "agent-card") {
+          throw new Error(
+            `${label}: 403 착지가 ${rings.forbidden.testId} 다 — 이름 없는 컨테이너다`
+          );
+        }
+        if (!rings.forbidden.name) {
+          throw new Error(`${label}: 403 착지에 접근성 이름이 없다`);
+        }
+        if (rings.settled !== undefined) {
+          assertSameRing(rings.settled, rings.forbidden);
+          console.log(
+            `  ${label}: 두 정거장의 링이 같다 (${rings.forbidden.width} ${rings.forbidden.color})`
+          );
+        }
         const after = await page.evaluate(() => ({
           commits: document.querySelectorAll('[data-testid="approval-commit"]')
             .length,

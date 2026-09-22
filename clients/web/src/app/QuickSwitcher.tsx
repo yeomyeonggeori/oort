@@ -91,6 +91,7 @@ import {
   fetchActionsCatalog,
   parseActionsCatalog,
 } from "@momo/core/features/commands/serverActions";
+import { isReachableHref } from "@/features/timeline/ActionResultCard";
 import { rememberSettingsOpener } from "@/features/settings/settingsFocus";
 import { Dialog, DialogOverlay, DialogPortal } from "@/design/ui/dialog";
 import { MODAL_CONTENT_MOTION } from "@/design/motion";
@@ -874,9 +875,15 @@ export function QuickSwitcher({
         {workspaceActions !== null && workspaceActions.length > 0 && (
           <Command.Group heading="워크스페이스 행동">
             {workspaceActions.map((action) => {
-              const destination = action.executable
+              // 목적지를 **알고** 그리로 갈 수 있어야 줄이 열린다 (R2 M-R2-1).
+              // 코어의 표는 행동 id 를 주소로 옮기고, 그 주소에 도착할 수
+              // 있는지는 웹만 안다(데스크톱 전용 섹션·서버 표면 의존). 결과
+              // 카드가 문을 세울 때 묻는 것과 **같은 함수**다.
+              const mapped = action.executable
                 ? actionDestination(action.id)
                 : null;
+              const destination =
+                mapped !== null && isReachableHref(mapped) ? mapped : null;
               return (
                 <Command.Item
                   role="option"
@@ -889,7 +896,7 @@ export function QuickSwitcher({
                     ? { disabled: true }
                     : { onSelect: () => go(destination) })}
                 >
-                  {/* ## 글리프가 Enter 의 뜻을 따라온다 (design-review R1 M5)
+                  {/* ## 글리프가 Enter 의 뜻을 따라온다 (R1 M5 · R2 N-R2-1)
                       
                       AX-2 에서 이 줄은 눌리지 않았고, `Bot` + `--agent` 는
                       「에이전트가 제안할 수 있는 것」이라는 표지로 읽혔다.
@@ -898,10 +905,17 @@ export function QuickSwitcher({
                       (아바타·배지)에만 허락한다 — 사람이 자기 손으로 가는 줄에
                       에이전트 잉크를 칠하면 그 토큰의 뜻이 닳는다.
                       
-                      중립 글리프는 목적지의 것이다: 이 줄이 데려가는 곳은 설정
-                      표면이고, 팔레트의 「설정」 명령이 이미 같은 글리프를
-                      쓴다(`COMMAND_ICONS.settings`). */}
-                  <Settings className="size-4 opacity-70" aria-hidden="true" />
+                      중립 글리프는 **목적지의** 것이다: 이 줄이 데려가는 곳은
+                      설정 표면이고, 팔레트의 「설정」 명령이 이미 같은 글리프를
+                      쓴다(`COMMAND_ICONS.settings`). 그래서 목적지가 없는 줄은
+                      그 글리프를 들 수 없다 — 열리지 않는 줄에 문 그림을
+                      붙이는 것이라, 사이드바의 잠긴 채널과 같은 `Lock` 을
+                      든다(이 파일이 이미 쓰는 글리프, 새 아이콘 0). */}
+                  {destination === null ? (
+                    <Lock className="size-4 opacity-70" aria-hidden="true" />
+                  ) : (
+                    <Settings className="size-4 opacity-70" aria-hidden="true" />
+                  )}
                   {action.title}
                   {destination === null ? (
                     <span className="text-meta text-warn">

@@ -18,8 +18,6 @@ import { InlineBanner } from "@/features/common/States";
 import { useOffline } from "@/features/common/useOffline";
 import { RenderErrorBoundary } from "@/features/common/RenderErrorBoundary";
 import { IS_TAURI } from "@/lib/env";
-import { isDesktop } from "@/lib/tauri";
-import { isSurfaceProvided } from "@momo/core/features/capabilities/serverSurfaces";
 import { UpdateSection } from "@/features/updates/UpdateSection";
 import { AccountSection } from "./AccountSection";
 import { DevicesSection } from "./DevicesSection";
@@ -39,7 +37,7 @@ import { WorkspaceSection } from "./WorkspaceSection";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_GROUPS,
-  SETTINGS_SECTIONS,
+  reachableSettingsSections,
   type SettingsSectionId,
 } from "./settingsNav";
 
@@ -59,15 +57,10 @@ export function SettingsRoute() {
   // ?section=updates lets the sidebar badge (and a bug report) land on one
   // panel instead of "open 설정 and click the fourth item".
   const [params] = useSearchParams();
-  const sections = useMemo(
-    () =>
-      SETTINGS_SECTIONS.filter(
-        (item) =>
-          (!item.desktopOnly || isDesktop()) &&
-          (item.surface === undefined || isSurfaceProvided(item.surface))
-      ),
-    []
-  );
+  // 걸러진 목록의 정본은 `settingsNav` 다 (R2 M-R2-1). 이 화면이 자기 필터를
+  // 들고 있는 동안, 그 목록으로 문을 세울지 정하는 쪽(결과 카드·팔레트)은
+  // 원표를 읽고 있었고 그래서 `updates`·`code` 에 문이 섰다.
+  const sections = useMemo(() => reachableSettingsSections(), []);
   const requested = params.get("section");
   const [section, setSection] = useState<SettingsSectionId>(() =>
     sections.some((item) => item.id === requested)

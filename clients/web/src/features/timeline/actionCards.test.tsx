@@ -18,6 +18,7 @@ import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { AgentCard } from "./AgentCard";
 import { isInternalHref, isReachableHref } from "./ActionResultCard";
+import { reachableSettingsSections } from "@/features/settings/settingsNav";
 import { actionDestination } from "@momo/core/features/commands/serverActions";
 
 // =============================================================================
@@ -421,11 +422,45 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(byTestId(host, "approval-reject")).toHaveLength(1);
   });
 
-  it("R1 H2: 403 뒤에도 초점이 카드 안에 남는다", async () => {
+  it("R1 H2 · R2 H-R2-1: 403 뒤 초점이 이름과 링을 가진 카드에 앉는다", async () => {
     const host = mountCard(approvalProps());
     await decide(host, jsonResponse({ status: "pending" }, 403));
     expect(host.contains(document.activeElement)).toBe(true);
     expect(document.activeElement).not.toBe(document.body);
+    // 이름 없는 `div` 가 아니라 카드다 — 그 노드는 `aria-label` 과
+    // `focus-visible:focus-ring` 을 이미 갖고 있고, UA 기본 링이 서지 않는다.
+    const card = byTestId(host, "agent-card")[0];
+    expect(document.activeElement).toBe(card);
+    expect(card?.getAttribute("aria-label")).toBe("팀원 초대 링크 만들기");
+    expect(card?.className).toContain("focus-visible:focus-ring");
+  });
+
+  it("R2 H-R2-1: 두 키보드 정거장이 같은 house 링을 든다", async () => {
+    // 하나는 성공 착지(LinkOnce 그룹), 하나는 403 착지(카드). 둘 중 하나라도
+    // 링 클래스가 없으면 크로미움이 자기 파란 링을 그린다 — 한 카드 안에서
+    // 두 정거장이 두 색이 되는 것이 R2 가 High 로 잡은 결함이다.
+    const forbidden = mountCard(approvalProps());
+    await decide(forbidden, jsonResponse({ status: "pending" }, 403));
+    const cardRing = (document.activeElement as HTMLElement).className;
+    unmount();
+
+    const settled = mountCard(approvalProps());
+    await decide(settled, jsonResponse(APPENDIX_C_BODY));
+    const groupRing = (document.activeElement as HTMLElement).className;
+
+    for (const cls of [cardRing, groupRing]) {
+      expect(cls).toContain("focus-visible:focus-ring");
+    }
+  });
+
+  it("R2 H-R2-1: 착지 대안인 컨트롤 컨테이너도 링을 든다", () => {
+    // 카드가 없는 표면(인박스)에서는 `onLandOnCard` 가 없어 `root` 로 떨어진다.
+    // 그 `div` 도 `tabIndex=-1` 로 초점을 받으므로 링이 있어야 한다.
+    const host = mountCard(approvalProps());
+    const root = byTestId(host, "approval-approve")[0]?.closest(
+      "[tabindex='-1']"
+    ) as HTMLElement | null;
+    expect(root?.className).toContain("focus-visible:focus-ring");
   });
 
   it("행동 블록이 없는 승인의 403 은 지금까지의 문장 그대로다", async () => {
@@ -481,6 +516,48 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     const next = byTestId(host, "action-result-next")[0];
     expect(next?.getAttribute("href")).toBe("#/settings?section=members");
     expect(next?.textContent).toBe("설정 › 멤버와 초대에서 보기");
+  });
+
+  it("R2 M-R2-1: 게이트된 섹션에는 문이 서지 않는다", () => {
+    // `updates` 는 데스크톱 셸에만, `code` 는 서버가 그 표면을 실었을 때만
+    // 있다. 웹 브라우저의 설정 목록에는 없으므로 누르면 프로필로 떨어진다 —
+    // `invites` 와 같은 결함의 다른 이름이다.
+    for (const section of ["updates", "code", "invites"]) {
+      const host = mountResult({
+        next: { label: "설정에서 보기", href: `/settings?section=${section}` },
+      });
+      expect(
+        byTestId(host, "action-result-next"),
+        `${section} 에 문이 섰다`
+      ).toHaveLength(0);
+      unmount();
+    }
+    for (const section of ["members", "webhooks", "profile"]) {
+      const host = mountResult({
+        next: { label: "설정에서 보기", href: `/settings?section=${section}` },
+      });
+      expect(
+        byTestId(host, "action-result-next"),
+        `${section} 에 문이 없다`
+      ).toHaveLength(1);
+      unmount();
+    }
+  });
+
+  it("R2 M-R2-1: 도착 가능 판정은 설정 화면의 목록과 같은 함수다", () => {
+    // 세 소비자(설정 셸·결과 카드·팔레트)가 같은 답을 든다. 원표를 직접 읽는
+    // 쪽이 하나라도 남으면 그쪽이 먼저 낡는다.
+    const reachable = reachableSettingsSections().map((item) => item.id);
+    expect(reachable).not.toContain("updates");
+    expect(reachable).not.toContain("code");
+    expect(reachable).toContain("members");
+    expect(reachable).toContain("webhooks");
+    for (const id of reachable) {
+      expect(isReachableHref(`/settings?section=${id}`)).toBe(true);
+    }
+    for (const id of ["updates", "code", "invites"]) {
+      expect(isReachableHref(`/settings?section=${id}`)).toBe(false);
+    }
   });
 
   it("R1 H1: 카드와 팔레트가 같은 질문에 같은 답을 한다", () => {

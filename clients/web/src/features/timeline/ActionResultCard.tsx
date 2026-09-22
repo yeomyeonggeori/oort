@@ -7,7 +7,7 @@ import {
   type AgentActionResultCard,
 } from "@momo/core/features/timeline/actionResultCard";
 import { formatCount } from "@momo/core/features/timeline/agentCardModel";
-import { SETTINGS_SECTIONS } from "@/features/settings/settingsNav";
+import { isReachableSettingsSection } from "@/features/settings/settingsNav";
 import { CardFrame, LabeledRow } from "./AgentCard";
 import { ActionResultChip } from "./StatusChip";
 
@@ -56,16 +56,17 @@ export function isInternalHref(href: string): boolean {
   return href.startsWith("/") && !href.startsWith("//");
 }
 
-const SETTINGS_SECTION_IDS: ReadonlySet<string> = new Set(
-  SETTINGS_SECTIONS.map((section) => section.id)
-);
-
 /**
- * 이 빌드가 **실제로 도착할 수 있는** 주소인가 (R1 H1).
+ * 이 빌드가 **실제로 도착할 수 있는** 주소인가 (R1 H1 · R2 M-R2-1).
  *
- * 설정 경로는 `?section=` 이 실재하는 섹션일 때만 참이다. 섹션 키가 아예 없는
- * `/settings` 는 기본 섹션(프로필)에 도착하므로 참이고, 그것은 조용한 폴백이
- * 아니라 그 주소가 뜻하는 화면 그대로다.
+ * 설정 경로는 `?section=` 이 **걸러진 목록**에 있을 때만 참이다. 원표
+ * (`SETTINGS_SECTIONS`)가 아니라 `isReachableSettingsSection()` 을 묻는 것이
+ * R2 가 고친 자리다: 원표에는 `updates`(데스크톱 전용)와 `code`(서버 표면
+ * 의존)가 있고, 웹 브라우저에서 그 둘로 문을 세우면 누른 사람이 아무 말 없이
+ * 프로필에 도착한다 — R1 이 `invites` 에 대해 닫은 것과 같은 결함이다.
+ *
+ * 섹션 키가 아예 없는 `/settings` 는 기본 섹션(프로필)에 도착하므로 참이고,
+ * 그것은 조용한 폴백이 아니라 그 주소가 뜻하는 화면 그대로다.
  *
  * 설정이 아닌 내부 경로는 지금 이 버전에서 **문이 되지 않는다**. 부록 B 가
  * 상정한 `next` 는 전부 설정 표면이고, 그 밖의 경로를 통과시키면 앱의 라우트
@@ -78,7 +79,7 @@ export function isReachableHref(href: string): boolean {
   const [path, query = ""] = href.split("?", 2);
   if (path !== "/settings") return false;
   const section = new URLSearchParams(query).get("section");
-  return section === null || SETTINGS_SECTION_IDS.has(section);
+  return section === null || isReachableSettingsSection(section);
 }
 
 export function ActionResultBody({
