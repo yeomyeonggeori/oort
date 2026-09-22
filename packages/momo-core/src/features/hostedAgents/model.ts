@@ -64,8 +64,14 @@ export type HostedConnectionStatus =
 /**
  * 닫힌 hosted scope 집합 (openapi `HostedAgentScope`).
  *
- * 순서가 화면의 순서다: 접속이 먼저고, 읽기가 쓰기보다 앞이며, 작업 두 줄이 끝이다.
- * 서버 `HOSTED_AGENT_SCOPES` 와 같은 여섯이고 같은 순서다.
+ * 순서가 화면의 순서다: 접속이 먼저고, 읽기가 쓰기보다 앞이며, 작업 두 줄 다음에
+ * 워크스페이스를 건드리는 줄이 **맨 마지막**에 선다. 서버 `HOSTED_AGENT_SCOPES`
+ * 와 같은 일곱이고 같은 순서다.
+ *
+ * `workspace:propose` 는 ADR-0186 D2 가 더한 일곱 번째다. 앞의 여섯이 대화에
+ * 대한 권한이라면 이것은 워크스페이스에 대한 권한이고, 그래서 목록의 끝에 혼자
+ * 선다 — 다만 그 권한의 내용은 **제안**뿐이다. 실행은 사람이 승인 카드를 눌러야
+ * 일어나고, 그때 실행하는 것은 승인한 사람의 권한이다.
  */
 export const HOSTED_AGENT_SCOPES = [
   "agent:port:connect",
@@ -74,6 +80,7 @@ export const HOSTED_AGENT_SCOPES = [
   "messages:write",
   "agent:jobs:read",
   "agent:runs:callback",
+  "workspace:propose",
 ] as const;
 
 export type HostedAgentScope = (typeof HOSTED_AGENT_SCOPES)[number];

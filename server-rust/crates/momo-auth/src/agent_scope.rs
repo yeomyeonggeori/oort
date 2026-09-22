@@ -64,6 +64,16 @@ pub const SCOPE_AGENT_INBOX_READ: &str = "agent:inbox:read";
 /// Hosted credentials never do — `AgentBearerClass` isolates them before this
 /// table is consulted. Non-default in every credential grant (ADR-0162 / D5).
 pub const SCOPE_MESSAGES_READ: &str = "messages:read";
+/// `oort_action_propose` on the Agent Port (ADR-0186 D2).
+///
+/// **Deliberately absent from [`required_agent_scope`]**, and this is the
+/// strongest absence in the table. The other Agent Port scopes open no REST
+/// route because their tool is the whole surface; this one opens none because
+/// the thing it proposes is served — by `POST …/invites` and its admin gate —
+/// and an agent must never reach it. The scope buys exactly one act: writing a
+/// card a human has to tap. Nothing here, and nothing in ADR-0186, ever puts an
+/// agent on the executing side of a workspace change.
+pub const SCOPE_WORKSPACE_PROPOSE: &str = "workspace:propose";
 
 /// The scope an agent bearer must carry to reach `method path`, or `None` when
 /// no agent credential may reach it at all.
@@ -523,6 +533,52 @@ mod tests {
             assert_ne!(scope, SCOPE_MESSAGES_WRITE);
             assert_ne!(scope, SCOPE_AGENT_PORT_CONNECT);
         }
+    }
+
+    /// **ADR-0186 D2 — `workspace:propose` opens zero REST.**
+    ///
+    /// The table is the closed list of what an agent bearer may reach, so the
+    /// proof is that no method/path pair in this server's surface ever answers
+    /// with this scope — including the very routes the action it proposes will
+    /// eventually execute through. An agent carrying the propose scope can ask
+    /// for an invite and cannot mint one.
+    #[test]
+    fn the_propose_scope_names_no_route_at_all() {
+        for (method, path) in [
+            ("POST", format!("/v1/workspaces/{WS}/invites")),
+            ("GET", format!("/v1/workspaces/{WS}/invites")),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/invites/{AGENT}/regenerate"),
+            ),
+            ("GET", format!("/v1/workspaces/{WS}/actions")),
+            ("POST", format!("/v1/workspaces/{WS}/actions")),
+            ("POST", format!("/v1/workspaces/{WS}/webhooks")),
+            ("POST", format!("/v1/workspaces/{WS}/channels")),
+            ("PATCH", format!("/v1/workspaces/{WS}/members/{AGENT}/role")),
+            (
+                "POST",
+                format!("/v1/workspaces/{WS}/approvals/{RUN}/decision"),
+            ),
+            ("POST", "/v1/mcp/agent-port".to_string()),
+        ] {
+            assert_ne!(
+                required_agent_scope(method, &path),
+                Some(SCOPE_WORKSPACE_PROPOSE),
+                "{method} {path} must never be reachable with the propose scope"
+            );
+        }
+        // The admin surface the proposal targets stays closed to agent bearers
+        // outright — `None`, not "a different scope".
+        assert_eq!(
+            required_agent_scope("POST", &format!("/v1/workspaces/{WS}/invites")),
+            None
+        );
+        assert_eq!(
+            required_agent_scope("GET", &format!("/v1/workspaces/{WS}/actions")),
+            None
+        );
+        assert_ne!(SCOPE_WORKSPACE_PROPOSE, SCOPE_WORK_CONTROL);
     }
 
     #[test]
