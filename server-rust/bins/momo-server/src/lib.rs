@@ -419,11 +419,13 @@ impl AppState {
     /// process-local buckets. This is intentionally independent of `/v1/join`.
     pub fn with_agent_port(mut self, config: AgentPortConfig) -> Self {
         // The envelope key is derived from the app JWT secret rather than taken
-        // from a second env var, the way `OUTBOUND_WEBHOOK_MASTER_KEY` falls
-        // back to `JWT_HMAC`: an operator who configured nothing still gets a
-        // per-instance key instead of a default one, and the derivation is
+        // from a second env var: an operator who configured nothing still gets
+        // a per-instance key instead of a default one, and the derivation is
         // domain-separated inside each codec so a cursor and a lease handle
-        // never share a key.
+        // never share a key. (`OUTBOUND_WEBHOOK_MASTER_KEY` used to be cited
+        // here as the precedent; #2066 removed that fallback, because these
+        // envelopes are short-lived and a webhook secret is not — rotating the
+        // JWT re-mints a cursor and *invalidates* an issued webhook secret.)
         let envelope_secret = format!("oort/agent-port/envelope/v1|{}", self.jwt_secret);
         self.agent_port = Arc::new(AgentPortState {
             config,

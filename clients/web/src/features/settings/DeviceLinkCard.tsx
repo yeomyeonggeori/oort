@@ -103,7 +103,14 @@ function filledCreate(phase: Phase): boolean {
   return phase === "idle" || phase === "expired";
 }
 
-export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
+export function DeviceLinkCard({
+  offline = false,
+  onLinked,
+}: {
+  offline?: boolean;
+  /** Settings list re-fetches GET /v1/auth/devices. The list is the persistent card. */
+  onLinked?: () => void;
+}) {
   const [phase, setPhase] = useState<Phase>("idle");
   const [issued, setIssued] = useState<DeviceLinkIssue | null>(null);
   const [device, setDevice] = useState<DeviceLinkDevice | undefined>(undefined);
@@ -113,6 +120,16 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
   const [confirmed, setConfirmed] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const liveIdRef = useRef<string | null>(null);
+  const onLinkedRef = useRef(onLinked);
+  onLinkedRef.current = onLinked;
+
+  function markLinked(nextDevice?: DeviceLinkDevice): void {
+    writeDeviceLinkLive(null);
+    if (nextDevice) setDevice(nextDevice);
+    setConfirmed(true);
+    setPhase("connected");
+    onLinkedRef.current?.();
+  }
 
   useEffect(() => {
     const live = readDeviceLinkLive();
@@ -125,16 +142,18 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         setIssued(toIssued(live));
         if (status.status === "consumed") {
           setDevice(status.device);
-          persistLiveWithoutVoucher({
-            ...(live.sas ? { sas: live.sas } : {}),
-            ...(live.sas && !live.confirmed ? {} : { confirmed: true }),
-          });
           if (live.sas && !live.confirmed) {
+            persistLiveWithoutVoucher({
+              ...(live.sas ? { sas: live.sas } : {}),
+            });
             setConfirmed(false);
             setPhase("awaitingConfirm");
           } else {
-            setConfirmed(true);
-            setPhase("connected");
+            // Confirmed (or no SAS) belongs on GET /v1/auth/devices. Clearing
+            // live and staying idle is what makes reload read the list, not
+            // a component-local connected card (ADR-0182 D3).
+            writeDeviceLinkLive(null);
+            onLinkedRef.current?.();
           }
         } else if (status.status === "expired" || Date.now() >= live.expiresAt) {
           writeDeviceLinkLive(null);
@@ -176,12 +195,14 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
         delay = DEVICE_LINK_POLL_INTERVAL_MS;
         if (status.status === "consumed") {
           setDevice(status.device);
-          persistLiveWithoutVoucher({
-            ...(issued.sas ? { sas: issued.sas } : {}),
-            ...(issued.sas && !confirmed ? {} : { confirmed: true }),
-          });
-          if (issued.sas && !confirmed) setPhase("awaitingConfirm");
-          else setPhase("connected");
+          if (issued.sas && !confirmed) {
+            persistLiveWithoutVoucher({
+              ...(issued.sas ? { sas: issued.sas } : {}),
+            });
+            setPhase("awaitingConfirm");
+          } else {
+            markLinked(status.device);
+          }
           return;
         }
         if (status.status === "expired") {
@@ -265,12 +286,7 @@ export function DeviceLinkCard({ offline = false }: { offline?: boolean }) {
     setConfirmBusy(true);
     try {
       await confirmDeviceLinkSas(issued.id);
-      setConfirmed(true);
-      setPhase("connected");
-      persistLiveWithoutVoucher({
-        ...(issued.sas ? { sas: issued.sas } : {}),
-        confirmed: true,
-      });
+      markLinked(device);
     } catch (error) {
       setBanner(failureCopy(error));
     } finally {

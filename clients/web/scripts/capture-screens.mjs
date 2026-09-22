@@ -1651,11 +1651,32 @@ const deviceLinkHarness = {
   deepLink: "",
 };
 
+const linkedDevicesHarness = {
+  devices: [],
+};
+
+function rememberCapturedLinkedDevice() {
+  if (linkedDevicesHarness.devices.some((row) => row.id === DEVICE_LINK_CAPTURE_ID)) {
+    return;
+  }
+  linkedDevicesHarness.devices = [
+    ...linkedDevicesHarness.devices,
+    {
+      id: DEVICE_LINK_CAPTURE_ID,
+      label: DEVICE_LINK_CAPTURE_DEVICE,
+      platform: "ios",
+      linkedAt: FIXTURE_NOW,
+      current: false,
+    },
+  ];
+}
+
 function resetDeviceLinkHarness() {
   deviceLinkHarness.sas = "4821";
   deviceLinkHarness.issueStatus = 201;
   deviceLinkHarness.getBody = () => ({ status: "pending" });
   deviceLinkHarness.deepLink = "";
+  linkedDevicesHarness.devices = [];
 }
 
 function deviceLinkIssueBody() {
@@ -1735,10 +1756,29 @@ async function installMocks(context) {
       return json(route, deviceLinkIssueBody(), 201);
     }
     if (method === "POST" && tail.endsWith("/confirm-sas")) {
+      rememberCapturedLinkedDevice();
       return json(route, { status: "confirmed" });
     }
     if (method === "GET") {
-      return json(route, deviceLinkHarness.getBody());
+      const body = deviceLinkHarness.getBody();
+      if (body?.status === "consumed") rememberCapturedLinkedDevice();
+      return json(route, body);
+    }
+    return route.fallback();
+  });
+  await context.route("**/v1/auth/devices**", (route) => {
+    const url = new URL(route.request().url());
+    const method = route.request().method();
+    const tail = url.pathname.split("/devices")[1] ?? "";
+    if (method === "GET" && (tail === "" || tail === "/")) {
+      return json(route, { devices: linkedDevicesHarness.devices });
+    }
+    if (method === "DELETE") {
+      const id = tail.replace(/^\//, "");
+      linkedDevicesHarness.devices = linkedDevicesHarness.devices.filter(
+        (row) => row.id !== id
+      );
+      return route.fulfill({ status: 204, body: "" });
     }
     return route.fallback();
   });

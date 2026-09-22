@@ -167,6 +167,8 @@ repl = {
     "__TOKEN_CENT_API__": "11" * 12,
     "__TOKEN_CENT_PROXY__": "22" * 12,
     "__TOKEN_PLINK__": "33" * 12,
+    "__TOKEN_WHIN__": "55" * 12,
+    "__TOKEN_WHOUT__": "66" * 12,
     "__TOKEN_OWNER__": "44" * 12,
     "__TOKEN_WEB_PORT__": "18088",
     "__TOKEN_API_PORT__": "18080",

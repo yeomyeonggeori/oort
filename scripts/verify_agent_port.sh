@@ -673,14 +673,20 @@ COMMIT;
 SQL
 
 JWT_HMAC="$(openssl rand -hex 32)"
+# #2066 — the api refuses to boot without both webhook derivation roots.
+WEBHOOK_INGRESS_MASTER_KEY="$(openssl rand -hex 32)"
+OUTBOUND_WEBHOOK_MASTER_KEY="$(openssl rand -hex 32)"
 write_private_lines "$TOKEN_NEEDLE_FILE" \
   "$IMAGE_TOKEN" "$IMAGE_TOKEN_HASH" "$IMAGE_SECRET" "${IMAGE_SECRET:0:24}" \
   "$PG_PASSWORD" "$JWT_HMAC" 'momo_app_dev_pw' \
+  "$WEBHOOK_INGRESS_MASTER_KEY" "$OUTBOUND_WEBHOOK_MASTER_KEY" \
   'postgres://momo_app:momo_app_dev_pw@postgres:5432/momo' ||
   fail "could not create private log needle"
 write_private_lines "$API_ENV_FILE" \
   'DATABASE_URL=postgres://momo_app:momo_app_dev_pw@postgres:5432/momo' \
   "JWT_HMAC=$JWT_HMAC" \
+  "WEBHOOK_INGRESS_MASTER_KEY=$WEBHOOK_INGRESS_MASTER_KEY" \
+  "OUTBOUND_WEBHOOK_MASTER_KEY=$OUTBOUND_WEBHOOK_MASTER_KEY" \
   'MOMO_ENV=local' \
   'PORT=8080' \
   'MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:8000/connection/websocket' \

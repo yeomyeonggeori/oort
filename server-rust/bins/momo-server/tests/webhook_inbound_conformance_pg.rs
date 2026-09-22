@@ -36,6 +36,9 @@ use uuid::Uuid;
 
 const TEST_JWT_SECRET: &str = "webhook-conformance-app-signing-secret";
 const TEST_OUTBOUND_MASTER_KEY: &str = "webhook-conformance-outbound-master-key";
+/// #2066: distinct from the outbound key AND from `TEST_JWT_SECRET`, so a
+/// derivation that silently fell back to either one fails these tests.
+const TEST_INGRESS_MASTER_KEY: &str = "webhook-conformance-ingress-master-key";
 const TEST_PASSWORD: &str = "webhook-conformance-password";
 const UNKNOWN: &str = "webhook installation not found";
 
@@ -198,7 +201,8 @@ async fn start_server(pool: PgPool, per_installation_limit: u32) -> String {
         "ws://127.0.0.1:8000/connection/websocket".to_string(),
     )
     .with_webhook(WebhookSettings {
-        outbound_master_key: Some(TEST_OUTBOUND_MASTER_KEY.to_string()),
+        ingress_master_key: TEST_INGRESS_MASTER_KEY.to_string(),
+        outbound_master_key: TEST_OUTBOUND_MASTER_KEY.to_string(),
         allow_development_http: false,
         doorbell_enabled: false,
         per_installation_limit,
@@ -355,6 +359,22 @@ async fn broadcast_count(su: &PgPool, channel: Uuid, message_id: Uuid) -> i64 {
     .fetch_one(su)
     .await
     .expect("count outbox")
+}
+
+/// The `webhook.rate_limited` rows one installation's budget produced, newest
+/// first. ADR-0004 증보 4 D3: one row per burst, and the row names the
+/// installation and the budget — never the credential.
+async fn rate_limited_audit(su: &PgPool, installation: Uuid) -> Vec<Value> {
+    sqlx::query_scalar::<_, Value>(
+        "SELECT detail FROM audit_log \
+          WHERE action = 'webhook.rate_limited' \
+            AND target_type = 'webhook_installation' AND target_id = $1 \
+          ORDER BY created_at DESC",
+    )
+    .bind(installation)
+    .fetch_all(su)
+    .await
+    .expect("read webhook.rate_limited audit rows")
 }
 
 async fn message_seq(su: &PgPool, message_id: Uuid) -> i64 {
@@ -752,4 +772,54 @@ async fn per_installation_rate_limit_is_429() {
     let (status, message) = error_of(limited).await;
     assert_eq!(status, 429);
     assert_eq!(message, "rate limit exceeded");
+
+    // -- ADR-0004 증보 4 D3: the burst leaves exactly one durable row --------
+    let rows = rate_limited_audit(&su, creds.installation).await;
+    assert_eq!(
+        rows.len(),
+        1,
+        "the first denial of a burst writes one webhook.rate_limited row"
+    );
+    let detail = &rows[0];
+    assert_eq!(detail["schema"], "oort.webhook.rate_limited.v1");
+    assert_eq!(detail["mode"], "native");
+    assert_eq!(detail["limit"], 2);
+    assert!(
+        detail["window_seconds"].as_i64().unwrap_or_default() >= 1,
+        "the row must say what window the budget was measured over: {detail}"
+    );
+
+    // The credential must not be recoverable from the record: not the secret,
+    // not the reference it is derived from, not a digest of either.
+    let rendered = detail.to_string();
+    for forbidden in [
+        creds.secret.as_str(),
+        "momo_whsec_v1",
+        "momo_hook_v1",
+        "sha256:",
+    ] {
+        assert!(
+            !rendered.contains(forbidden),
+            "credential material reached audit_log.detail ({forbidden}): {rendered}"
+        );
+    }
+
+    // A second denial in the same burst must NOT add a row — a flood that wrote
+    // one row per request would be the amplification the budget exists to stop.
+    let again = post_native(
+        &http,
+        &base,
+        &creds,
+        "delivery-429-4",
+        unix_now(),
+        br#"{"text":"rate"}"#.to_vec(),
+        None,
+    )
+    .await;
+    assert_eq!(again.status(), 429);
+    assert_eq!(
+        rate_limited_audit(&su, creds.installation).await.len(),
+        1,
+        "one row per burst, not one per refused request"
+    );
 }

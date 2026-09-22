@@ -262,6 +262,20 @@ services:
       # policies production uses (invariant #6).
       DATABASE_URL: ${MOMO_APP_DATABASE_URL:?set MOMO_APP_DATABASE_URL}
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
+      # ADR-0004 증보 4 / #2066 — the two webhook derivation roots, and the
+      # first env this service ever received for them: until now the api
+      # derived BOTH inbound and outbound webhook secrets from JWT_HMAC here,
+      # while `webhook-sender` below signed with OUTBOUND_WEBHOOK_MASTER_KEY if
+      # the operator set one. An operator who set it therefore had an api that
+      # revealed one secret and a sender that signed with another.
+      #
+      # Required `:?` because the fallback is gone: a derived credential must
+      # come from a key the operator chose and keeps, never from one this stack
+      # picked up elsewhere and rotates on its own schedule. Existing installs
+      # are not asked to invent a value — `scripts/oort upgrade` backfills each
+      # key as a copy of the value already in use, so nothing is re-issued.
+      WEBHOOK_INGRESS_MASTER_KEY: ${WEBHOOK_INGRESS_MASTER_KEY:?set WEBHOOK_INGRESS_MASTER_KEY — run scripts/oort upgrade to backfill it (re-issues nothing)}
+      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:?set OUTBOUND_WEBHOOK_MASTER_KEY — run scripts/oort upgrade to backfill it (re-issues nothing)}
       # ADR-0171: exact lowercase `true` only. Unset = doorbell register routes 404.
       MOMO_DOORBELL_ENABLED: ${MOMO_DOORBELL_ENABLED:-}
       # HAP-E6 / ADR-0162: prerequisite of the doorbell. Exact lowercase `true`
@@ -440,11 +454,12 @@ services:
   # cannot publish to the durable rail, and the relay cannot POST to a
   # subscriber. Two workers, two disjoint capabilities.
   #
-  # `OUTBOUND_WEBHOOK_MASTER_KEY` uses the `:-` optional form on purpose. The
-  # outbound signing secret is DERIVED from it, so an unset key must mean "keep
-  # using the one already in use" (the binary falls back to JWT_HMAC, exactly as
-  # the Swift server and relay do) — a required `:?` here would make an operator
-  # invent a new key and silently break every already-installed subscriber.
+  # `OUTBOUND_WEBHOOK_MASTER_KEY` was optional (`:-`) while the binary fell back
+  # to JWT_HMAC. ADR-0004 증보 4 / #2066 made it required on the api, and this
+  # sender MUST hold the same value or every delivery it signs is rejected by a
+  # subscriber holding the secret the api revealed. The migration that makes a
+  # required key safe is the backfill: `scripts/oort upgrade` writes the value
+  # already in use, so no subscriber is broken by this line becoming `:?`.
   webhook-sender:
     image: *rust-image
     command: ["webhook-sender"]
@@ -459,7 +474,7 @@ services:
       RELAY_DATABASE_URL: ${RELAY_DATABASE_URL:?set RELAY_DATABASE_URL}
       WEBHOOK_SENDER_DATABASE_URL: ${WEBHOOK_SENDER_DATABASE_URL:-}
       JWT_HMAC: ${JWT_HMAC:?set JWT_HMAC}
-      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:-}
+      OUTBOUND_WEBHOOK_MASTER_KEY: ${OUTBOUND_WEBHOOK_MASTER_KEY:?set OUTBOUND_WEBHOOK_MASTER_KEY — run scripts/oort upgrade to backfill it (re-issues nothing)}
       WEBHOOK_SENDER_POLL_INTERVAL_MS: ${WEBHOOK_SENDER_POLL_INTERVAL_MS:-300}
       WEBHOOK_SENDER_CLAIM_BATCH: ${WEBHOOK_SENDER_CLAIM_BATCH:-16}
       WEBHOOK_SENDER_MAX_ATTEMPTS: ${WEBHOOK_SENDER_MAX_ATTEMPTS:-8}
