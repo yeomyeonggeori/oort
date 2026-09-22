@@ -4,6 +4,17 @@
 
 - Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. R2: 목록은 `authedRequest`(401 1회 회전, 만료는 `markAuthExpired`). 해제 후 다음 행/QR 만들기 착지 + `role=status` 낭독. 플랫폼은 iOS/iPadOS/Android/macOS/Windows. 빈 상태 한 줄. 「현재 기기」는 메타 문장. 마지막 사용 시각은 아직 기록하지 않습니다.
 - runtime-unverified: 실폰 redeem 후 이 화면 e2e. `current` 행은 폰 세션에서만 실측(웹 비밀번호 세션은 목록에 없음).
+## 두 하네스 공용 파이프라인 (#2501, 2026-09-12)
+
+- Track engine. Astra/Codex 또는 Fable/Claude Code가 같은 AGENTS·planning skill·현재 스냅샷과 Git common-dir의 owner/checkpoint를 사용하고, 구현은 Grok 4.6에 배정한다. 긴 필수 독서·모델별 중복 규칙을 줄이고 기존 기록은 archive에 보존했다.
+- 검증: 문서·스크립트 독립 검수와 격리 복원/소유권/상태표 시험. 실제 SessionStart 명령의 다른 cwd·Git 환경변수 격리, 동시 claim, 손상 기록 거절, checkpoint 원본 HEAD 보존을 확인했다. 최종 docs·CI·정책 게이트의 HEAD/결과는 이슈 PR 증거 참조; 게이트 실행체·DDL 불변.
+- runtime-unverified: 새로운 Fable 네이티브 세션 전체 자동 기동은 별도 미실행(훅 명령 실주행과 문서 진입점 검수 범위). #2498·기존 Fable PR·실제 배포는 대기. 기존 세션은 복원 재실행, 오래된 워크트리는 새 계약이 포함된 기준으로 동기화 후 재개.
+
+## Railway app/Caddy 릴리스 pin 정합 (#2499, 2026-09-12)
+
+- Track engine. `fix/2499-synchronize-railway-release-image-pins` onto `origin/track/engine`. `railway.json` `appImage`와 api/relay/webhook-sender/agent-worker image, `Dockerfile.caddy` `ARG OORT_IMAGE`를 `releases/latest.json` v0.1.5 list digest `sha256:5481c14e…`에 동기화. Centrifugo 등 외부 이미지 불변.
+- 검증: `scripts/tests/test_railway_template.sh`가 JSON 필드·Caddy ARG·`AS web` FROM·`COPY --from=web /opt/momo/web /srv/web` 소스를 각각 대조. 스크래치에서 서비스/Caddy ARG/unused-current+stale-web/COPY-redirect를 이전 digest로 하나씩 변조하면 RED. 원본 트리 청결. `local_gate --profile docs`는 Astra 슬롯 대기.
+- runtime-unverified: 실제 Railway 계정 재배포(#2205 미주장).
 
 ## 연결된 기기 목록·해제 (#2029, 2026-09-11)
 

@@ -59,7 +59,7 @@ worktrees/
 .claude/skills/claude-design/
 .claude/data/
 .claude/hooks/
-.claude/settings.json
+# .claude/settings.json is the shared SessionStart hook; keep local overrides ignored.
 
 # claudedocs/ is session scratch (ADR-0183 D6) — not tracked.
 claudedocs/
