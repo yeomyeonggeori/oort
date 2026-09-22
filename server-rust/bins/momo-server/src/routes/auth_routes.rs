@@ -74,9 +74,10 @@ use axum::http::HeaderMap;
 use axum::Json;
 use momo_auth::{
     carries_privileged_scope, find_linked_device_id_by_refresh_in_tx, lock_linked_device_in_tx,
-    rebind_device_link_session_in_tx, rebind_locked_device_link_session_in_tx,
-    record_session_token, record_session_token_with_device, revoke_privileged_session_tokens,
-    revoke_token, session_device_label, sign_access, sign_refresh, token_state, verify_app_access,
+    lock_member_session_tokens_by_ids, rebind_device_link_session_in_tx,
+    rebind_locked_device_link_session_in_tx, record_session_token,
+    record_session_token_with_device, revoke_privileged_session_tokens, revoke_token,
+    session_device_label, sign_access, sign_refresh, token_state, verify_app_access,
     verify_app_refresh, without_privileged_scopes, AuthError, DeviceSessionRecord, IssuedToken,
     TokenRejection, SESSION_LABEL_ACCESS, SESSION_LABEL_REFRESH,
 };
@@ -664,15 +665,51 @@ pub async fn logout(
     // Both revokes in one transaction (Swift uses two connections): a logout
     // that killed the access half but not the refresh half would leave the
     // session rotatable, which is precisely what logout must prevent.
+    let member_id = principal.member_id;
     let (revoked_access, revoked_refresh) =
         with_tenant_tx(&state.pool, workspace_id, move |conn| {
             Box::pin(async move {
+                // #2498 R3 / H1 — take the SAME id-ordered `token` row locks the
+                // linked-device refresh takes (`lock_linked_device_in_tx` →
+                // `lock_member_session_tokens_by_ids`) BEFORE either `revoke_token`
+                // UPDATE below. Without this, logout's lock order is the semantic
+                // access→refresh, while refresh's is `ORDER BY id`; the two only
+                // agree because `token.id` is `uuidv7()` and the access half is
+                // always INSERTed first. This makes the agreement an invariant of
+                // the code instead of a property of the id generator.
+                //
+                // The two lookups are advisory reads, not the idempotency gate:
+                // an unknown token contributes no id (nothing to lock) and an
+                // already-revoked one still locks its row. Which halves this call
+                // actually flipped is decided by the `revoke_token` UPDATEs, so a
+                // second logout stays a 200 exactly as before.
+                let mut lock_ids: Vec<Uuid> = Vec::with_capacity(2);
+                if let Some(id) = token_state(conn, &raw_access)
+                    .await
+                    .map_err(DbError::from)?
+                    .token_id()
+                {
+                    lock_ids.push(id);
+                }
+                if let Some(raw) = raw_refresh.as_deref() {
+                    if let Some(id) = token_state(conn, raw)
+                        .await
+                        .map_err(DbError::from)?
+                        .token_id()
+                    {
+                        lock_ids.push(id);
+                    }
+                }
+                lock_member_session_tokens_by_ids(conn, workspace_id, member_id, &lock_ids)
+                    .await
+                    .map_err(DbError::from)?;
+
                 let access = revoke_token(conn, &raw_access)
                     .await
                     .map_err(DbError::from)?;
-                let refresh = match raw_refresh {
+                let refresh = match raw_refresh.as_deref() {
                     Some(raw) => {
-                        revoke_token(conn, &raw)
+                        revoke_token(conn, raw)
                             .await
                             .map_err(DbError::from)?
                             .revoked_now

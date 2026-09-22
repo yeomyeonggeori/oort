@@ -588,6 +588,10 @@ const LOCK_LINKED_DEVICE_SQL: &str = "SELECT \
        AND consumed_at IS NOT NULL \
        FOR UPDATE";
 
+/// Belt-and-braces re-read once the locks are held (READ COMMITTED already
+/// hands `SELECT … FOR UPDATE` the freshly committed version). The effective
+/// guard is the `locked.refresh_id != old_refresh_id` comparison in
+/// `auth_routes.rs`'s refresh path, not this statement.
 const SELECT_LINKED_DEVICE_PAIR_SQL: &str = "SELECT \
         id, \
         redeemed_access_token_id, \

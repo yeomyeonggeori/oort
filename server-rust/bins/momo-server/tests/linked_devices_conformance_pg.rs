@@ -1089,3 +1089,321 @@ async fn rotation_on_a_changed_binding_writes_nothing() {
         "only the barrier's write survives"
     );
 }
+
+// ---------------------------------------------------------------------------
+// #2498 R3 / H1 — refresh and logout take `token` row locks in ONE direction
+// ---------------------------------------------------------------------------
+//
+// Independent review C raised a deadlock pair: the linked refresh holds both
+// session rows (`ORDER BY id FOR UPDATE`) until commit, while `logout` UPDATEs
+// access-then-refresh, so a pair with `refresh_id < access_id` would build a
+// cycle (40P01 → 500).
+//
+// Measured premise (asserted below, not assumed): `token.id` is
+// `uuid DEFAULT uuidv7()` (`001_init.sql:335`) and every mint INSERTs the
+// access half before the refresh half, so `access_id < refresh_id` for every
+// pair this server can create — `ORDER BY id` and "access then refresh" are the
+// same direction and the cycle cannot form on this schema. The repair (logout
+// takes `lock_member_session_tokens_by_ids` before its two `revoke_token`
+// UPDATEs) therefore turns an accident of the id generator into an invariant of
+// the code; it is hardening, not a live-bug fix.
+//
+// What this test can and cannot prove, stated so the assertions are not read as
+// more than they are:
+//   * it CAN prove logout parks on the id-ordered row lock rather than on its
+//     own revoke UPDATE, and that both race orders answer without a deadlock;
+//   * it CANNOT produce a 40P01 by deleting the lock call, because the premise
+//     above removes the cycle. No fixture can reverse the ids without rewriting
+//     `token.id` primary keys into a state production cannot reach.
+//
+// RED (sabotage): delete the `lock_member_session_tokens_by_ids` call from
+// `logout` (`auth_routes.rs`). The logout backend then parks on
+// `UPDATE token … SET revoked_at …` instead of `… FROM token … FOR UPDATE`, and
+// the blocked-statement assertion in the "logout first" run fails.
+
+/// Backends blocked on a `token` row lock right now, newest statement last.
+/// `usename` keeps this to the API role, so the barrier's own superuser
+/// connection and this poller are never counted. `FROM token` / `UPDATE token`
+/// exclude the `device_link_token` waits the other tests in this file measure.
+const TOKEN_LOCK_WAITERS_SQL: &str = "SELECT query \
+      FROM pg_stat_activity \
+     WHERE datname = current_database() \
+       AND pid <> $1 \
+       AND pid <> pg_backend_pid() \
+       AND usename = 'momo_app' \
+       AND state = 'active' \
+       AND wait_event_type = 'Lock' \
+       AND (query LIKE '%FROM token%' OR query LIKE '%UPDATE token%') \
+     ORDER BY query_start";
+
+/// A superuser transaction parked on one `token` row.
+struct SessionRowBarrier {
+    tx: sqlx::Transaction<'static, sqlx::Postgres>,
+    pid: i32,
+}
+
+impl SessionRowBarrier {
+    async fn release(self) {
+        self.tx.commit().await.expect("release the token barrier");
+    }
+}
+
+async fn begin_session_token_barrier(su: &PgPool, token_id: Uuid) -> SessionRowBarrier {
+    let mut tx = su
+        .begin()
+        .await
+        .expect("open the token barrier transaction");
+    let pid: i32 = sqlx::query_scalar("SELECT pg_backend_pid()")
+        .fetch_one(&mut *tx)
+        .await
+        .expect("barrier backend pid");
+    let locked: Uuid = sqlx::query_scalar("SELECT id FROM token WHERE id = $1 FOR UPDATE")
+        .bind(token_id)
+        .fetch_one(&mut *tx)
+        .await
+        .expect("barrier takes FOR UPDATE on the session row");
+    assert_eq!(locked, token_id, "barrier locked the requested token row");
+    SessionRowBarrier { tx, pid }
+}
+
+/// Block until exactly `expected` API backends are parked on a `token` row
+/// lock, then hand back the statements they are parked on.
+async fn await_token_lock_waiters(
+    su: &PgPool,
+    barrier: &SessionRowBarrier,
+    expected: usize,
+) -> Vec<String> {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let mut blocked: Vec<String> = Vec::new();
+    while std::time::Instant::now() < deadline {
+        blocked = sqlx::query_scalar::<_, String>(TOKEN_LOCK_WAITERS_SQL)
+            .bind(barrier.pid)
+            .fetch_all(su)
+            .await
+            .expect("read pg_stat_activity");
+        if blocked.len() >= expected {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert_eq!(
+        blocked.len(),
+        expected,
+        "expected {expected} API request(s) blocked on a token row lock \
+         (wait_event_type='Lock'), saw {}: without that wait nothing orders a \
+         linked-device refresh against a logout",
+        blocked.len()
+    );
+    blocked
+}
+
+/// This database's cumulative deadlock counter — the mechanical stand-in for
+/// "no 40P01 was raised", read instead of grepping server stdout.
+async fn deadlock_count(su: &PgPool) -> i64 {
+    sqlx::query_scalar::<_, i64>(
+        "SELECT deadlocks FROM pg_stat_database WHERE datname = current_database()",
+    )
+    .fetch_one(su)
+    .await
+    .expect("read pg_stat_database.deadlocks")
+}
+
+fn spawn_logout(
+    http: &reqwest::Client,
+    base: &str,
+    access: &str,
+    refresh: &str,
+) -> tokio::task::JoinHandle<(u16, String)> {
+    let http = http.clone();
+    let url = format!("{base}/v1/auth/logout");
+    let bearer = format!("Bearer {access}");
+    let body = json!({ "refreshToken": refresh });
+    tokio::spawn(async move {
+        let response = http
+            .post(url)
+            .header("authorization", bearer)
+            .json(&body)
+            .send()
+            .await
+            .expect("logout");
+        let status = response.status().as_u16();
+        let raw = response.text().await.unwrap_or_default();
+        (status, raw)
+    })
+}
+
+/// The id order every pair this server mints actually has. Asserted (not
+/// assumed) because it is the whole reason the pre-repair lock orders agreed.
+async fn assert_access_is_the_lower_id(su: &PgPool, device_id: Uuid) -> (Uuid, Uuid) {
+    let (access_id, refresh_id) = device_binding(su, device_id).await;
+    assert!(
+        access_id < refresh_id,
+        "token.id is uuidv7() and the access half is INSERTed first, so the \
+         id-ordered lock and logout's access-then-refresh order are the same \
+         direction; if this ever flips, the H1 deadlock pair becomes reachable \
+         and this file's premise must be re-derived"
+    );
+    (access_id, refresh_id)
+}
+
+/// #2498 R3 / H1: a linked refresh and a logout of the same device, raced in
+/// both orders on the row they both need. Neither answers 500, the database
+/// records no deadlock, and the surviving token state is the one the winner
+/// implies.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn refresh_and_logout_race_never_deadlocks() {
+    let _lock = test_lock().await;
+
+    // --- Run A: the refresh queues first -----------------------------------
+    let fx = linked_device_fixture("ld-lo1", "Phone Logout Race A").await;
+    let (access_id, _refresh_id) = assert_access_is_the_lower_id(&fx.su, fx.device_id).await;
+    let deadlocks_before = deadlock_count(&fx.su).await;
+
+    let barrier = begin_session_token_barrier(&fx.su, access_id).await;
+    let refresh_call = spawn_refresh(&fx.http, &fx.base, &fx.phone.refresh);
+    await_token_lock_waiters(&fx.su, &barrier, 1).await;
+    let logout_call = spawn_logout(&fx.http, &fx.base, &fx.phone.access, &fx.phone.refresh);
+    await_token_lock_waiters(&fx.su, &barrier, 2).await;
+    barrier.release().await;
+
+    let (refresh_status, refresh_raw) = join_request(refresh_call, "linked refresh").await;
+    let (logout_status, logout_raw) = join_request(logout_call, "logout").await;
+    assert_status(refresh_status, 200);
+    assert_status(logout_status, 200);
+    let rotated: Value = serde_json::from_str(&refresh_raw).expect("refresh body is JSON");
+    let new_access = rotated["accessToken"]
+        .as_str()
+        .expect("rotated access")
+        .to_string();
+    let logged_out: Value = serde_json::from_str(&logout_raw).expect("logout body is JSON");
+    assert_eq!(
+        logged_out["alreadyRevoked"], true,
+        "the logout that lost the race found both halves already rotated away"
+    );
+    assert_eq!(
+        live_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await,
+        2,
+        "refresh first: the rotated pair is what survives"
+    );
+    assert_status(
+        channels_status(&fx.http, &fx.base, fx.workspace, &new_access).await,
+        200,
+    );
+    assert_eq!(
+        deadlock_count(&fx.su).await,
+        deadlocks_before,
+        "the raced pair must not raise 40P01 (a deadlock is a 500 to one caller)"
+    );
+
+    // --- Run B: the logout queues first ------------------------------------
+    let fx = linked_device_fixture("ld-lo2", "Phone Logout Race B").await;
+    let (access_id, _refresh_id) = assert_access_is_the_lower_id(&fx.su, fx.device_id).await;
+    let deadlocks_before = deadlock_count(&fx.su).await;
+
+    let barrier = begin_session_token_barrier(&fx.su, access_id).await;
+    let logout_call = spawn_logout(&fx.http, &fx.base, &fx.phone.access, &fx.phone.refresh);
+    let blocked = await_token_lock_waiters(&fx.su, &barrier, 1).await;
+    // SABOTAGE anchor: with the lock call removed, logout parks on its own
+    // `UPDATE token … SET revoked_at …` instead, and this pair of assertions
+    // goes RED. It is the only statement-level evidence that logout serialises
+    // on the same ordered lock the linked refresh uses.
+    assert!(
+        blocked[0].contains("FOR UPDATE"),
+        "logout must park on the id-ordered session-row lock before revoking"
+    );
+    assert!(
+        !blocked[0].contains("SET revoked_at"),
+        "logout must not reach its revoke UPDATE before taking the ordered lock"
+    );
+    let refresh_call = spawn_refresh(&fx.http, &fx.base, &fx.phone.refresh);
+    await_token_lock_waiters(&fx.su, &barrier, 2).await;
+    barrier.release().await;
+
+    let (logout_status, logout_raw) = join_request(logout_call, "logout").await;
+    let (refresh_status, refresh_raw) = join_request(refresh_call, "linked refresh").await;
+    assert_status(logout_status, 200);
+    assert_status(refresh_status, 401);
+    let logged_out: Value = serde_json::from_str(&logout_raw).expect("logout body is JSON");
+    assert_eq!(
+        logged_out["revokedAccess"], true,
+        "logout killed the access"
+    );
+    assert_eq!(
+        logged_out["revokedRefresh"], true,
+        "logout killed the refresh"
+    );
+    assert!(
+        refresh_raw.contains("refresh token already used or revoked"),
+        "the rotation queued behind a logout is the single-use 401"
+    );
+    assert_eq!(
+        live_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await,
+        0,
+        "logout first: nothing survives on the logged-out device"
+    );
+    assert_eq!(
+        deadlock_count(&fx.su).await,
+        deadlocks_before,
+        "the raced pair must not raise 40P01 (a deadlock is a 500 to one caller)"
+    );
+}
+
+/// #2498 R3 / M2: the runtime counterpart of the `Err → tx rollback` branch.
+///
+/// This is the GREEN half and it is deliberately ordinary: an uncontended
+/// linked refresh commits the whole rotation — two new `token` rows, the
+/// presented refresh consumed, the binding moved. The RED half cannot be
+/// reached from outside the process (nothing but an injected failure can make
+/// the closure return `Err` after the INSERTs), so it is run in a scratch
+/// worktree with `return Err(DbError::Sqlx(Protocol("injected")))` planted
+/// after the second `record_session_token_with_device`; the injected run must
+/// answer 500 with every number on the line below unchanged. Both runs' raw
+/// lines are recorded in STATUS and on the PR — the injection is never
+/// committed.
+#[tokio::test]
+#[ignore = "needs DATABASE_URL to a pgvector/pg18 superuser DB + bootstrap_roles.sql"]
+async fn refresh_mid_flight_failure_rolls_back_everything() {
+    let _lock = test_lock().await;
+    let fx = linked_device_fixture("ld-mf", "Phone Mid Flight").await;
+    let binding_before = device_binding(&fx.su, fx.device_id).await;
+    let recorded_before = recorded_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await;
+    let live_before = live_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await;
+
+    let (status, raw) = refresh_once(&fx.http, &fx.base, &fx.phone.refresh).await;
+
+    let recorded_after = recorded_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await;
+    let live_after = live_device_tokens(&fx.su, fx.workspace, fx.member, &fx.label).await;
+    let binding_after = device_binding(&fx.su, fx.device_id).await;
+    let presented_consumed = token_is_revoked(&fx.su, &fx.phone.refresh).await;
+    // The one line both runs are compared on. Never interpolates a secret.
+    println!(
+        "[#2498 M2] status={status} recorded={recorded_before}->{recorded_after} \
+         live={live_before}->{live_after} presented_refresh_consumed={presented_consumed} \
+         binding_moved={}",
+        binding_after != binding_before
+    );
+
+    assert_status(status, 200);
+    assert!(
+        raw.contains("accessToken") && raw.contains("refreshToken"),
+        "the committed rotation answers with the new pair"
+    );
+    assert_eq!(
+        recorded_after,
+        recorded_before + 2,
+        "the committed rotation recorded exactly the new pair"
+    );
+    assert_eq!(
+        live_after, 2,
+        "one live pair on the device after the commit"
+    );
+    assert!(
+        presented_consumed,
+        "the committed rotation consumed the presented refresh"
+    );
+    assert_ne!(
+        binding_after, binding_before,
+        "the committed rotation moved the binding onto the new pair"
+    );
+}
