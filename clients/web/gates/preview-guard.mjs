@@ -55,6 +55,10 @@ function wait(ms) {
  * @param {object} [options.env]       vite 프로세스 env (기본 process.env)
  * @param {string} [options.portEnvVar] 이 레인의 포트를 옮기는 env 변수 이름 —
  *                                      점유 FAIL 문구의 탈출구 안내에 쓴다
+ * @param {string[]} [options.extraArgs] vite preview 에 덧붙일 인자. 기본은 없음.
+ *                                      `--outDir` 로 dist 아닌 번들을 서빙하는
+ *                                      레인(오버레이 층 M-1 의 ade-gate)만 쓴다.
+ *                                      READY 판정은 주소 한 줄이라 영향 없다.
  * @param {number} [options.timeoutMs] 준비 마감 (기본 30초)
  * @returns {Promise<{origin: string, probe: Response, child: import("node:child_process").ChildProcess, stop: () => Promise<void>}>}
  *   probe 는 준비 신호 **뒤의** 첫 응답이다 — 헤더를 검사하는 레인(csp)이 쓴다.
@@ -67,12 +71,21 @@ export async function startGuardedPreview({
   host = "127.0.0.1",
   env,
   portEnvVar,
+  extraArgs = [],
   timeoutMs = 30_000,
 }) {
   const origin = `http://${host}:${port}`;
   const child = spawn(
     resolve(webRoot, "node_modules/.bin/vite"),
-    ["preview", "--port", String(port), "--strictPort", "--host", host],
+    [
+      "preview",
+      "--port",
+      String(port),
+      "--strictPort",
+      "--host",
+      host,
+      ...extraArgs,
+    ],
     {
       cwd: webRoot,
       env: { ...(env ?? process.env), NO_COLOR: "1" },

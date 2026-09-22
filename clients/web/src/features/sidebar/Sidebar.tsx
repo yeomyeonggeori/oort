@@ -536,6 +536,7 @@ export function Sidebar({
         className={cn("sidebar-drawer flex h-full", asDrawer && "shadow-lg")}
         data-open={asDrawer && drawerOpen ? "" : undefined}
         data-testid="sidebar"
+        data-overlay-layer={asDrawer ? "surface" : undefined}
       >
         <WorkspaceRail
           workspace={{
@@ -1204,6 +1205,7 @@ export function SidebarDrawerScrim({ onClose }: { onClose: () => void }) {
       onClick={onClose}
       aria-label="채널 목록 닫기"
       data-testid="sidebar-scrim"
+      data-overlay-layer="scrim"
     />
   );
 }

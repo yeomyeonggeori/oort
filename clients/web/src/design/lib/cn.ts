@@ -79,6 +79,17 @@ export const NAMED_MEASURES = [
   "overflow-bowl",
 ] as const;
 
+/** Overlay stacking names (#2044). One spelling only: the `layer-*` class.
+ * tokens.css deliberately does not register `--z-index-*` in `@theme`, so
+ * `z-content-float` does not compile and is not taught here either (#2485
+ * R1 N-1). Joining the `z` group is what makes a leftover `z-10` and a named
+ * layer collapse to the later one instead of both surviving the merge. */
+const LAYER_NAMES = [
+  "content-float",
+  "overlay-scrim",
+  "overlay-surface",
+] as const;
+
 const twMerge = extendTailwindMerge({
   extend: {
     classGroups: {
@@ -89,6 +100,7 @@ const twMerge = extendTailwindMerge({
       h: [{ h: [...NAMED_MEASURES] }],
       "min-h": [{ "min-h": [...NAMED_MEASURES] }],
       "max-h": [{ "max-h": [...NAMED_MEASURES] }],
+      z: [{ layer: [...LAYER_NAMES] }],
     },
   },
 });

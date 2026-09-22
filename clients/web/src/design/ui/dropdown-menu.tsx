@@ -70,7 +70,7 @@ export const DropdownMenuContent = React.forwardRef<
       sideOffset={sideOffset}
       collisionPadding={8}
       className={cn(
-        "z-50 min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
+        "layer-overlay-surface min-w-pane-sm rounded-md border border-line bg-surface-raised p-1 text-ink shadow-lg",
         POPOVER_MOTION,
         className
       )}
@@ -78,6 +78,7 @@ export const DropdownMenuContent = React.forwardRef<
       {...({ onOpenAutoFocus } as React.ComponentPropsWithoutRef<
         typeof MenuPrimitive.Content
       >)}
+      data-overlay-layer="surface"
     />
   </MenuPrimitive.Portal>
 ));

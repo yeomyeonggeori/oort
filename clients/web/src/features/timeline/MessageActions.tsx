@@ -408,7 +408,7 @@ export function MessageHoverToolbar({
         straddleBelow
           ? "hover-toolbar-straddle-below"
           : "hover-toolbar-straddle",
-        "absolute right-4 z-20 flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
+        "absolute right-4 layer-content-float flex select-none items-center gap-px rounded-md border border-line-strong bg-surface-raised p-px shadow-lg"
       )}
     >
       {available.react &&
