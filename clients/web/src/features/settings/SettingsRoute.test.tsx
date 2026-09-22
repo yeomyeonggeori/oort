@@ -9,6 +9,16 @@ import type { RosterMember } from "@momo/core/lib/api";
 import { SessionProvider, type SessionContextValue } from "@/app/session";
 import { SettingsRoute } from "./SettingsRoute";
 
+vi.mock("@momo/core/features/auth/linkedDevices", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("@momo/core/features/auth/linkedDevices")>();
+  return {
+    ...actual,
+    listLinkedDevices: vi.fn(async () => ({ devices: [] })),
+    revokeLinkedDevice: vi.fn(),
+  };
+});
+
 const WS = "00000000-0000-7000-8000-000000000001";
 const MEMBER_ID = "00000000-0000-7000-8000-000000000101";
 

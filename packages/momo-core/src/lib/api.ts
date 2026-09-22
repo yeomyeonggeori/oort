@@ -748,11 +748,18 @@ export function refreshSession(): Promise<boolean> {
 }
 
 /**
- * Authenticated request. On 401 it attempts exactly one rotation and retries
- * once; a 401 that survives the rotation ends the session. `init.body` is
- * always a string here, so replaying it on the retry is safe.
+ * Authenticated exchange with exactly one 401 rotation. A 401 that survives
+ * the rotation ends the session (`markAuthExpired`); only that owner may
+ * declare expiry. `init.body` is always a string here, so replaying it on the
+ * retry is safe.
+ *
+ * Exported so sibling modules (linked devices, …) reuse this path instead of
+ * growing a private fetch wrapper that skips rotation.
  */
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+export async function authedRequest(
+  path: string,
+  init: RequestInit = {}
+): Promise<HttpResponse> {
   let res = await rawRequest(path, init, coreSession().getAccessToken());
   if (res.status === 401 && coreSession().getRefreshToken()) {
     if (await refreshSession()) {
@@ -761,6 +768,11 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   }
   if (res.status === 401) coreSession().markAuthExpired();
   if (!res.ok) throw parseError(res);
+  return res;
+}
+
+async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const res = await authedRequest(path, init);
   return responseRecord(res.json<unknown>()) as T;
 }
 
