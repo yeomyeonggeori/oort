@@ -237,6 +237,18 @@ grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$happy_env" || \
   fail "T2 stdout missing MOMO_SELF_HOST_PLATFORM=railway stamp"
 pass "key-set equality (diff empty) count=$key_count"
 
+# #2066 — every key the catalog promises webhook-sender must be one the
+# generator actually emits. A service list naming a key nothing writes is a
+# note, not an injection, and the operator would find out at boot.
+while IFS= read -r key; do
+  [ -n "$key" ] || continue
+  grep -Fxq "$key" "$canon" || \
+    fail "railway.json webhook-sender names ${key}, which --railway does not emit"
+done <<EOF
+$(python3 -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["services"]["webhook-sender"].get("variablesFromGenerator") or []))' "$RAILWAY_JSON")
+EOF
+pass "webhook-sender.variablesFromGenerator ⊆ 생성기 키 집합 (약속한 키를 실제로 낸다)"
+
 # #2438 — --railway --claim swaps password ↔ claim; count stays 46 (#2066: +2).
 claim_env="$TMP_ROOT/railway-claim.env"
 claim_ec="$(
