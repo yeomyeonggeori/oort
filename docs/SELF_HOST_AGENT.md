@@ -1096,6 +1096,64 @@ lines are this section):
 Do not drive the vendor chat app with CDP, scripts, or selectors. The human
 speaks; the agent runs this file in the VM shell.
 
+#### 3.3.16b Asking for `workspace:propose`, and stopping after you ask
+
+ADR-0186 D2 adds a seventh hosted scope, **`workspace:propose`**. It opens one
+Agent Port tool, `oort_action_propose`, and **no REST route at all**. A hosted
+runtime that carries it can ask a person to change the workspace; it cannot
+change one. The change happens when a human taps approve, and it runs with
+**that person's** authority, not the agent's.
+
+Request it only when the runtime is actually meant to offer 「초대 링크 만들어
+줄까요?」. It is **not** in the default pairing request (step 6's confirm screen
+shows it unchecked), so the human ticks it deliberately or it never arrives.
+Add it to `approvedScopes` on the step 6 confirm body and to the credential
+scopes; both halves are required, and narrowing either one closes the tool
+again:
+
+```json
+{"approvedScopes": ["agent:port:connect", "agent:inbox:read", "messages:write", "workspace:propose"]}
+```
+
+**The rule the runtime has to learn: propose, then end the turn.**
+
+```text
+oort_action_propose {handle, actionId, args, rationale}
+  -> {approvalId, status: "pending", expiresAtMs, cardMessageId}
+```
+
+`handle` is the lease handle `oort_jobs_claim` gave you for this job — the same
+value `oort_job_renew` takes. The call parks the run on `awaiting_approval` and
+posts an approval card into the run's channel. After it returns:
+
+- **do not** call `oort_run_complete`. It answers HTTP 409 (JSON-RPC `-32005`)
+  and will keep answering 409 until a human decides. That refusal is the
+  contract, not a transient failure — retrying it is a loop.
+- **do not** call `oort_job_release` either. Same 409, same reason: handing the
+  job back would strand the card.
+- **do** end the turn. Say 「승인을 기다리고 있어요」 in the channel with
+  `oort_message_post` first if the person is waiting on a reply.
+- `oort_job_renew` **is** allowed while a person decides, and is the right way
+  to keep a long-lived lease alive.
+
+The decision arrives as new inbox work, not as a return value from this call.
+An unanswered proposal expires on its own (one hour) and releases the run.
+
+`actionId` is a closed set — read it from the server rather than hard-coding it,
+because a build that does not serve an action refuses it:
+
+```sh
+curl -fsS -H "authorization: Bearer ${ACCESS}" \
+  "http://127.0.0.1:${WEB_PORT}/v1/workspaces/${WS}/actions"
+```
+
+Rows carry `executable`; a `false` row carries `unavailableReason` and cannot be
+proposed. v1 serves `invite.create` with `{role: member|admin, maxUses: 1..100,
+expiresInDays: 1..30}` — narrower than the invite REST surface on purpose. No
+invite code, link, or any other one-time secret is ever returned by the propose
+call or written into the card; the person who approves is the only one who sees
+it, once (ADR-0186 D4).
+
 #### 3.3.17 Doorbell (realtime wake)
 
 Accelerator after join (§3.3.16). Durable inbox remains the canon delivery
