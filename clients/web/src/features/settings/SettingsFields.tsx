@@ -610,6 +610,7 @@ export function CopyButton({
   subject,
   testId,
   size = "sm",
+  className,
 }: {
   value: string;
   label?: string;
@@ -628,6 +629,15 @@ export function CopyButton({
   testId?: string;
   /** Settings rows stay `sm` (28px toolbar). Form-level copy (S2 issued card) uses default = `h-control`. */
   size?: "sm" | "default";
+  /**
+   * 한 자리만을 위한 여백·터치 크기 조정. 지금 유일한 소비자는 타임라인의
+   * 1회 링크(`ApprovalActions.LinkOnce`)이고, 거기서 `tap-target` 을 단다
+   * (design-review #2540 R1 M6): `sm` 은 28px 에서 멈추는데 그 버튼은 그 순간
+   * 사람이 **반드시** 눌러야 하는 하나다. `size="default"` 로 올리지 않는
+   * 이유는 그러면 데스크탑에서도 카드 안에 폼 크기 버튼이 서기 때문이다 —
+   * `tap-target` 은 600px 미만에서만 자란다(`tokens.css`).
+   */
+  className?: string;
 }) {
   const { copied, copy } = useClipboardCopy(value);
 
@@ -644,6 +654,7 @@ export function CopyButton({
       onClick={() => void copy()}
       aria-label={subject ? `${subject} ${text}` : undefined}
       data-testid={testId}
+      className={className}
     >
       {text}
     </Button>

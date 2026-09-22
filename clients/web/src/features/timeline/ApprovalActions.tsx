@@ -163,7 +163,13 @@ export interface DecisionVerbs {
   rejectConfirm: string;
 }
 
-const APPROVAL_VERBS: DecisionVerbs = {
+/**
+ * 승인/거부의 기본 낱말. 행동 승인 카드가 `approveConfirm` 한 칸만 갈아 끼우려고
+ * 이것을 펴서 쓴다(R1 M2), 그래서 내보낸다 — 여섯 낱말을 그쪽에서 다시 적으면
+ * 「거부 확정」이 두 파일에 살게 된다.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- 이 파일의 다른 상수 내보내기와 같은 자리의 어휘표다.
+export const APPROVAL_VERBS: DecisionVerbs = {
   approve: "승인",
   reject: "거부",
   approveCommit: "승인 확정",
@@ -203,29 +209,71 @@ export function LinkOnce({
   testIdPrefix?: string;
   className?: string;
 }) {
+  const leadId = useId();
+  const regionRef = useRef<HTMLDivElement | null>(null);
+
+  // ## 확정이 초점을 버리던 자리 (design-review R1 H2)
+  //
+  // 확정에 성공하면 승인 카드의 footer 가 컨트롤에서 영수증+링크로 바뀌면서
+  // `ApprovalActions` 가 통째로 언마운트된다. 그 순간 초점은 `document.body` 로
+  // 떨어졌고(두 폭 실측), 키보드 사용자는 **링크가 나타난 바로 그 순간** 셸
+  // 처음부터 Tab 으로 되돌아와야 했다. 앞 판에도 같은 유실이 있었지만 그때 그
+  // 자리에는 누를 것이 없었다 — 이 배치가 거기에 복사 버튼을 세웠다.
+  //
+  // 그래서 이 영역이 마운트되면 **자기 자신**으로 초점을 가져온다. 복사 버튼이
+  // 아니라 컨테이너인 이유: 초점이 그룹에 앉으면 접근성 이름(`aria-labelledby`
+  // → lead 문장)이 먼저 읽히고, 그다음 Tab 한 번이 복사 버튼이다. 버튼에 바로
+  // 앉히면 「이 화면에서만 볼 수 있습니다」를 듣기 전에 「복사」부터 듣는다.
+  useEffect(() => {
+    regionRef.current?.focus();
+  }, []);
+
   return (
     <div
-      className={cn("px-3 py-2", className)}
+      ref={regionRef}
+      tabIndex={-1}
+      role="group"
+      aria-labelledby={leadId}
+      className={cn("px-3 py-2 focus-visible:focus-ring", className)}
       data-testid={`${testIdPrefix}-link-once`}
     >
-      {/* 낭독은 이 한 줄이 진다. 값 자체를 `role=status` 로 읽히게 하면
-          스크린리더가 긴 URL 을 통째로 읽고, 그 사이 「이 화면에서만」이라는
-          단 하나의 중요한 사실이 맨 뒤로 밀린다. */}
-      <p role="status" className="break-keep text-body text-ink">
+      {/* `role=status` 가 아니다 (R1 N1). 승인 직후 이 카드에는 영수증 줄이 이미
+          라이브 리전으로 서 있고, 둘이 함께 낭독되면 두 문장이 겹쳐 들린다.
+          이 문장은 **초점이 이 그룹에 앉을 때** 접근성 이름으로 읽힌다 — 같은
+          한 번, 같은 내용, 겹침 없음. */}
+      <p id={leadId} className="break-keep text-body text-ink">
         {LINK_ONCE_LEAD}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        {/* ## 잘린 1회 값은 잘린 것이다 (R1 B1)
+            
+            앞 판은 `truncate` 였고 390 에서 실측 scrollWidth 296 / clientWidth
+            237 로 코드 꼬리가 말줄임에 먹혔다. 「지금 전달하세요」라고 말하면서
+            전달할 값을 보여 주지 않는 화면이다.
+            
+            `break-all` 이 맞는 이유: 이 값은 **라틴 URL** 이다. 스킬 §5.3 이
+            `break-all` 을 경고하는 대상은 한글 본문이고(음절 중간에서 끊긴다),
+            여기서는 끊을 자리가 없는 한 덩어리 ASCII 라 그 경고가 겨냥하는 결함이
+            생기지 않는다. `select-all` 은 복사 버튼을 못 쓰는 경우(클립보드 권한
+            거부)에 한 번의 클릭으로 전체를 고르게 한다.
+            
+            `flex-1` 에서 `w-full` 로 바꾸지 않은 이유: 1280 에서는 값과 버튼이
+            한 줄에 서는 것이 맞고(실측 559/559, 잘리지 않는다), 좁아지면
+            `flex-wrap` 이 버튼을 아랫줄로 내린다. */}
         <span
           data-numeric
           data-testid={`${testIdPrefix}-link-once-value`}
-          className="min-w-0 flex-1 truncate font-mono text-meta text-ink"
+          className="min-w-0 flex-1 select-all break-all font-mono text-meta text-ink"
         >
           {secret.value}
         </span>
+        {/* 600px 미만에서 44px 로 자란다 (R1 M6). 이 버튼은 이 순간 사람이
+            반드시 눌러야 하는 하나이고, `sm` 은 28px 에서 멈춘다. */}
         <CopyButton
           value={secret.value}
           subject="초대 링크"
           testId={`${testIdPrefix}-link-once-copy`}
+          className="tap-target"
         />
       </div>
     </div>
@@ -361,6 +409,23 @@ export function ApprovalActions({
         if (outcome.errorCode === "forbidden" && forbiddenCopy !== null) {
           setErrorTone("unavailable");
           setErrorCopy(forbiddenCopy);
+          // ## 성공할 수 없는 버튼을 세워 두지 않는다 (design-review R1 M1)
+          //
+          // 앞 판은 무장을 유지했다. 그 결과 화면에서 **가장 큰 컨트롤**(채움
+          // 「승인 확정」)이 「관리자가 승인해야 합니다」 바로 위에 서서, 다시
+          // 눌러도 같은 403 을 받는 행동을 위계의 꼭대기에 두었다(§3).
+          //
+          // 무장만 푼다. 카드는 여전히 대기이므로 승인·거부 버튼은 그대로 있고
+          // (다른 사람이 이 화면을 이어받을 수 있다), 이 사람에게 참인 사실은
+          // 바로 아래 안내 문장이 진다.
+          //
+          // 초점도 함께 돌려놓는다 (R1 H2). `disabled={busy}` 가 눌린 버튼을
+          // 비활성화한 순간 초점은 이미 body 로 떨어졌고, 여기서 확정 버튼까지
+          // 언마운트된다 — 목적지를 적어 두지 않으면 키보드 사용자는 방금 읽을
+          // 문장이 생긴 자리를 잃는다. `root` 는 이 컨트롤의 컨테이너이고,
+          // 안내 문장은 그 안에 있다.
+          focusAfterArmChange.current = "root";
+          setArmed(null);
           return;
         }
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");

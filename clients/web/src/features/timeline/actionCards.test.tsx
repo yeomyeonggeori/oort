@@ -17,7 +17,8 @@ import { makeDirectory } from "@momo/core/features/workspace/directory";
 import { agentCardModel } from "@momo/core/features/timeline/agentCardModel";
 import type { Message } from "@momo/core/lib/api";
 import { AgentCard } from "./AgentCard";
-import { isInternalHref } from "./ActionResultCard";
+import { isInternalHref, isReachableHref } from "./ActionResultCard";
+import { actionDestination } from "@momo/core/features/commands/serverActions";
 
 // =============================================================================
 // AX-4 (#2510): 행동 승인 카드 · 1회 링크 · 영속 결과 카드.
@@ -91,7 +92,14 @@ function appendixBProps(over: Record<string, unknown> = {}) {
         { label: "만료", value: "2026-09-29" },
       ],
       secret_shown_once: true,
-      next: { label: "설정 › 멤버와 초대에서 보기", href: "/settings?section=members" },
+      // **부록 B 원문 그대로**(R1 H1). 앞 판은 이 자리를 `members` 로 바꿔 두어
+      // 하네스가 계약 밖 입력으로 초록이었다 — 「하네스 참·제품 거짓」. 이
+      // 클라이언트에 `invites` 섹션은 없으므로(`settingsNav.ts`) 이 픽스처에서
+      // 문이 서지 않는 것이 옳고, 그 fail-closed 가 실제로 도는지를 잰다.
+      next: {
+        label: "설정 › 초대에서 보기",
+        href: "/settings?section=invites",
+      },
       ...over,
     },
   };
@@ -163,6 +171,9 @@ beforeAll(() => {
 beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
+  // R1 S4/M8: 앞 시험이 남긴 hash 가 다음 시험의 「불변」 기준선을 오염시켰다.
+  // 기준선은 매번 깨끗한 자리에서 잡는다.
+  window.location.hash = "";
 });
 
 afterEach(() => {
@@ -301,16 +312,83 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
     expect(window.location.hash).toBe(hashBefore);
+    expect(window.location.href).not.toContain(SECRET);
     // props 는 결정 전과 **한 글자도** 다르지 않다. 카드가 새로고침을 견디게
     // 하려고 값을 메시지에 적어 두는 것이 D4 가 이름으로 금지한 구현이다.
     expect(JSON.stringify(props)).toBe(before);
     expect(before).not.toContain(SECRET);
 
     unmount();
+    // 언마운트 **뒤에도** URL 을 다시 읽는다 (R1 S4/M8). 언마운트 정리 경로가
+    // 값을 주소에 적어 두는 구현이 있다면 그것도 새로고침을 견디는 기록이다.
+    expect(window.location.hash).toBe(hashBefore);
+    expect(window.location.href).not.toContain(SECRET);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
+
     const remounted = mountCard(props);
     expect(remounted.textContent ?? "").not.toContain(SECRET);
     expect(byTestId(remounted, "approval-link-once")).toHaveLength(0);
     expect(document.body.textContent ?? "").not.toContain(SECRET);
+  });
+
+  it("R1 B1: 값은 잘리지 않고 접힌다 — 390 에서 꼬리가 말줄임에 먹히지 않는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse(APPENDIX_C_BODY));
+    const value = byTestId(host, "approval-link-once-value")[0];
+    expect(value?.className).not.toContain("truncate");
+    expect(value?.className).toContain("break-all");
+    expect(value?.className).toContain("select-all");
+    // 값 전체가 DOM 에 있다 — 말줄임은 CSS 가 하는 일이라 문자열로는 잡히지
+    // 않는다. 잘림 여부는 캡처 레인이 scrollWidth 로 잰다.
+    expect(value?.textContent).toBe(SECRET);
+  });
+
+  it("R1 H2: 확정 직후 초점이 카드 안에 남는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse(APPENDIX_C_BODY));
+    const region = byTestId(host, "approval-link-once")[0];
+    expect(document.activeElement).toBe(region);
+    expect(host.contains(document.activeElement)).toBe(true);
+    // 그룹의 접근성 이름이 「이 화면에서만」 문장이다.
+    const labelledBy = region?.getAttribute("aria-labelledby") ?? "";
+    expect(document.getElementById(labelledBy)?.textContent).toContain(
+      "이 화면에서만"
+    );
+  });
+
+  it("R1 N1: 승인 뒤 카드 안 라이브 리전은 하나다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse(APPENDIX_C_BODY));
+    expect(host.querySelectorAll('[role="status"]')).toHaveLength(1);
+  });
+
+  it("R1 M2: 행동 승인의 확정 문장은 에이전트 재개를 약속하지 않는다", () => {
+    const host = mountCard(approvalProps());
+    const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
+    act(() => {
+      approve.click();
+    });
+    const confirm = byTestId(host, "approval-confirm")[0];
+    expect(confirm?.textContent).toContain("승인하면 서버가 관리자 권한으로");
+    expect(confirm?.textContent).not.toContain("에이전트가 이어서");
+  });
+
+  it("R1 M2: 행동 블록이 없으면 확정 문장도 그대로다 (회귀 0)", () => {
+    const host = mountCard({
+      approval_id: APPROVAL_ID,
+      action_type: "shell",
+      tool_name: "shell",
+      title: "빌드 캐시 정리",
+      status: "pending",
+    });
+    const approve = byTestId(host, "approval-approve")[0] as HTMLButtonElement;
+    act(() => {
+      approve.click();
+    });
+    expect(byTestId(host, "approval-confirm")[0]?.textContent).toContain(
+      "승인하면 에이전트가 이어서 진행합니다."
+    );
   });
 
   it("거부로 확정된 결정에는 링크가 서지 않는다", async () => {
@@ -332,6 +410,22 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     // 사고가 아니다: 붉은 alert 이 아니라 조용한 안내로 선다.
     expect(error?.getAttribute("role")).toBe("status");
     expect(error?.dataset.tone).toBe("unavailable");
+  });
+
+  it("R1 M1: 403 뒤 성공할 수 없는 「승인 확정」이 남지 않는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse({ status: "pending" }, 403));
+    expect(byTestId(host, "approval-commit")).toHaveLength(0);
+    // 카드는 여전히 대기다 — 다른 사람이 이어받을 수 있어야 한다.
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+    expect(byTestId(host, "approval-reject")).toHaveLength(1);
+  });
+
+  it("R1 H2: 403 뒤에도 초점이 카드 안에 남는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(host, jsonResponse({ status: "pending" }, 403));
+    expect(host.contains(document.activeElement)).toBe(true);
+    expect(document.activeElement).not.toBe(document.body);
   });
 
   it("행동 블록이 없는 승인의 403 은 지금까지의 문장 그대로다", async () => {
@@ -357,7 +451,7 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     });
   }
 
-  it("행·1회 고지·다음 문을 그린다", () => {
+  it("행·1회 고지를 그린다", () => {
     const host = mountResult();
     expect(byTestId(host, "action-result-row")).toHaveLength(2);
     expect(byTestId(host, "action-result-note")[0]?.textContent).toBe(
@@ -366,8 +460,43 @@ describe("영속 결과 카드 (ADR-0186 부록 B)", () => {
     expect(byTestId(host, "action-result-secret-once")[0]?.textContent).toContain(
       "1회 표시됐습니다"
     );
+  });
+
+  it("R1 H1: 부록 B 원문(`section=invites`)은 이 빌드가 모르는 섹션이라 문이 서지 않는다", () => {
+    const host = mountResult();
+    // 픽스처는 계약 원문 그대로다. 문이 없는 것이 이 빌드의 참이다 —
+    // `SettingsRoute` 가 모르는 섹션을 조용히 프로필로 접기 때문이다.
+    expect(byTestId(host, "action-result-next")).toHaveLength(0);
+    // 카드는 말을 잃지 않는다.
+    expect(byTestId(host, "action-result-note")[0]?.textContent).toBe(
+      "실행을 마쳤습니다."
+    );
+    expect(byTestId(host, "action-result-secret-once")).toHaveLength(1);
+  });
+
+  it("R1 H1: 실재하는 섹션이면 문이 선다", () => {
+    const host = mountResult({
+      next: { label: "설정 › 멤버와 초대에서 보기", href: "/settings?section=members" },
+    });
     const next = byTestId(host, "action-result-next")[0];
     expect(next?.getAttribute("href")).toBe("#/settings?section=members");
+    expect(next?.textContent).toBe("설정 › 멤버와 초대에서 보기");
+  });
+
+  it("R1 H1: 카드와 팔레트가 같은 질문에 같은 답을 한다", () => {
+    // 팔레트는 모르는 행동 id 에 `null`(=줄이 눌리지 않는다)을 답한다. 카드는
+    // 모르는 목적지에 문을 세우지 않는다. 두 규칙이 갈라지면 한 클라이언트가
+    // 같은 질문에 두 가지로 답하게 된다.
+    expect(isReachableHref("/settings?section=invites")).toBe(false);
+    expect(isReachableHref("/settings?section=members")).toBe(true);
+    expect(isReachableHref("/settings")).toBe(true);
+    expect(isReachableHref("/inbox")).toBe(false);
+    expect(isReachableHref("https://evil.test/take")).toBe(false);
+    expect(isReachableHref("//evil.test/take")).toBe(false);
+    expect(actionDestination("invite.create")).toBe(
+      "/settings?section=members"
+    );
+    expect(actionDestination("channel.archive")).toBeNull();
   });
 
   it("카드에는 링크 값이 없다 — 있는 것은 사실과 문 하나뿐이다 (D4)", () => {

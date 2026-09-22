@@ -68,9 +68,15 @@ import {
   StreamCaret,
   TurnChip,
 } from "./StatusChip";
-import { ApprovalActions, LinkOnce, type Armed } from "./ApprovalActions";
+import {
+  APPROVAL_VERBS,
+  ApprovalActions,
+  LinkOnce,
+  type Armed,
+} from "./ApprovalActions";
 import { ActionResultBody } from "./ActionResultCard";
 import {
+  actionApproveConfirmCopy,
   approvalRoleCopy,
   roleRequiredCopy,
 } from "@momo/core/features/approvals/actionRole";
@@ -396,6 +402,21 @@ function ApprovalBody({
                 ? roleRequiredCopy(card.action.requiredRole)
                 : null
             }
+            {...(card.action !== null
+              ? {
+                  // 확정 문장만 갈아 끼운다 (design-review R1 M2). 기본 문장
+                  // 「승인하면 에이전트가 이어서 진행합니다」는 도구 호출 승인의
+                  // 것이고 행동 승인에서는 거짓이다 — 제안한 turn 은 이미
+                  // 끝났고(ADR-0186 D2 run park) 승인하면 **서버가** 실행한다.
+                  // 낱말만 갈라지고 계약은 하나로 남는다(`DecisionVerbs`).
+                  verbs: {
+                    ...APPROVAL_VERBS,
+                    approveConfirm: actionApproveConfirmCopy(
+                      card.action.requiredRole
+                    ),
+                  },
+                }
+              : {})}
             onSettled={(outcome) => {
               const next: {
                 status: ApprovalStatus;

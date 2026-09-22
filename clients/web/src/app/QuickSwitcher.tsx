@@ -889,7 +889,19 @@ export function QuickSwitcher({
                     ? { disabled: true }
                     : { onSelect: () => go(destination) })}
                 >
-                  <Bot className="size-4 text-agent" aria-hidden="true" />
+                  {/* ## 글리프가 Enter 의 뜻을 따라온다 (design-review R1 M5)
+                      
+                      AX-2 에서 이 줄은 눌리지 않았고, `Bot` + `--agent` 는
+                      「에이전트가 제안할 수 있는 것」이라는 표지로 읽혔다.
+                      AX-4 가 Enter 에 **사람의 이동**을 붙였으므로 그 표지는
+                      이제 거짓이다. §9 는 `--agent` 를 에이전트 정체성
+                      (아바타·배지)에만 허락한다 — 사람이 자기 손으로 가는 줄에
+                      에이전트 잉크를 칠하면 그 토큰의 뜻이 닳는다.
+                      
+                      중립 글리프는 목적지의 것이다: 이 줄이 데려가는 곳은 설정
+                      표면이고, 팔레트의 「설정」 명령이 이미 같은 글리프를
+                      쓴다(`COMMAND_ICONS.settings`). */}
+                  <Settings className="size-4 opacity-70" aria-hidden="true" />
                   {action.title}
                   {destination === null ? (
                     <span className="text-meta text-warn">

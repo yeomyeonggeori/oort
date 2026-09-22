@@ -144,9 +144,11 @@ function actionResultProps(over = {}) {
         { label: "만료", value: "2026-09-29" },
       ],
       secret_shown_once: true,
+      // 부록 B 원문(R1 H1). 이 빌드에 `invites` 섹션은 없으므로 문이 서지
+      // 않는 것이 참이고, 아래 장면 ③이 그 fail-closed 를 잰다.
       next: {
-        label: "설정 › 멤버와 초대에서 보기",
-        href: "/settings?section=members",
+        label: "설정 › 초대에서 보기",
+        href: "/settings?section=invites",
       },
       ...over,
     },
@@ -154,6 +156,8 @@ function actionResultProps(over = {}) {
 }
 
 /** ADR-0186 부록 C 그대로. 승인 성공에만 실린다. */
+const SECRET_VALUE = "https://oort.example/join?code=Ab3-_xQ7mK";
+
 const DECISION_OK = {
   approval_id: APPROVAL_ID,
   status: "approved",
@@ -164,7 +168,7 @@ const DECISION_OK = {
     ref: { type: "invite", id: INVITE_ID },
     secretOnce: {
       kind: "invite_link",
-      value: "https://oort.example/join?code=Ab3-_xQ7mK",
+      value: SECRET_VALUE,
       expiresAtMs: BASE_MS + 604_800_000,
     },
   },
@@ -206,6 +210,8 @@ const RESULT_MESSAGES = [
       status: "rejected",
       secret_shown_once: false,
       rows: [{ label: "대상", value: "배포 알림" }],
+      // 실재하는 섹션 — 같은 프레임에 「문이 서는 카드」와 「서지 않는 카드」가
+      // 함께 있어야 fail-closed 가 사진으로 읽힌다.
       next: { label: "설정 › 웹훅에서 보기", href: "/settings?section=webhooks" },
     }),
   },
@@ -337,7 +343,7 @@ async function decide(page) {
   await page.getByTestId("approval-commit").first().click();
 }
 
-async function shoot(browser, { name, scheme, viewport, drive, ...mocks }) {
+async function shoot(browser, { name, scheme, viewport, drive, after, ...mocks }) {
   const context = await browser.newContext({
     viewport,
     deviceScaleFactor: 2,
@@ -346,11 +352,145 @@ async function shoot(browser, { name, scheme, viewport, drive, ...mocks }) {
   });
   await installMocks(context, mocks);
   const page = await openChannel(context);
-  await drive(page);
+  const label = `${name} ${viewport.width}-${scheme}`;
+  await drive(page, { label });
   const path = `${OUT_DIR}/action-${name}-${viewport.width}-${scheme}.png`;
   await page.screenshot({ path });
+  // 사진 뒤의 단정. 화면을 바꾸는 검사(새로고침)는 프레임을 더럽히면 안 된다.
+  if (after) await after(page, { label });
   await context.close();
   return path;
+}
+
+/**
+ * 1회 값이 **새로고침을 견디지 않는가** — 제품 수준 단정 (design-review R1 M8).
+ *
+ * 단위 시험은 bare `AgentCard` 를 재마운트한다. 거기에는 타임라인 스토어도
+ * react-query 도 IndexedDB 도 없어서, 그 층 중 하나가 값을 적어 두는 구현을
+ * 잡을 수 없다 — 「스토어 초기화」라는 조건을 실제로는 밟지 않는다. 여기서는
+ * **secret 이 실제로 실린 화면**에서 진짜 `reload()` 를 걸고 잰다.
+ *
+ * 재는 자리는 넷이다: 렌더 DOM · localStorage · sessionStorage · IndexedDB.
+ * 앞 판의 누출 검사는 secret 이 실린 적 없는 픽스처(장면 ③) 위에서 돌아 아무것도
+ * 증명하지 못했다.
+ */
+async function assertSecretDiesOnReload(page, label) {
+  const before = await page.evaluate(
+    (secret) => document.body.innerText.includes(secret),
+    SECRET_VALUE
+  );
+  if (!before) {
+    throw new Error(`${label}: 새로고침 전에 링크가 화면에 없다 — 잴 것이 없다`);
+  }
+  await page.reload({ waitUntil: "networkidle" });
+  await page.getByTestId("agent-card").first().waitFor({ state: "visible" });
+  const after = await page.evaluate(async (secret) => {
+    const hay = [
+      document.body.innerText,
+      document.documentElement.outerHTML,
+      location.href,
+    ].join("\n");
+    const store = (s) => {
+      const out = [];
+      try {
+        for (let i = 0; i < s.length; i += 1) {
+          const k = s.key(i);
+          out.push(`${k}=${s.getItem(k) ?? ""}`);
+        }
+      } catch {
+        /* blocked storage answers nothing, which is also not a leak */
+      }
+      return out.join("\n");
+    };
+    let idb = "";
+    try {
+      const dbs = (await indexedDB.databases?.()) ?? [];
+      idb = JSON.stringify(dbs);
+      for (const { name } of dbs) {
+        if (!name) continue;
+        idb += await new Promise((resolve) => {
+          const req = indexedDB.open(name);
+          req.onerror = () => resolve("");
+          req.onsuccess = () => {
+            const db = req.result;
+            const names = [...db.objectStoreNames];
+            if (names.length === 0) {
+              db.close();
+              return resolve("");
+            }
+            const tx = db.transaction(names, "readonly");
+            let seen = "";
+            let left = names.length;
+            for (const store of names) {
+              const all = tx.objectStore(store).getAll();
+              all.onsuccess = () => {
+                seen += JSON.stringify(all.result);
+                left -= 1;
+                if (left === 0) {
+                  db.close();
+                  resolve(seen);
+                }
+              };
+              all.onerror = () => {
+                left -= 1;
+                if (left === 0) {
+                  db.close();
+                  resolve(seen);
+                }
+              };
+            }
+          };
+        });
+      }
+    } catch {
+      idb = "";
+    }
+    const haystacks = {
+      dom: hay,
+      localStorage: store(localStorage),
+      sessionStorage: store(sessionStorage),
+      indexedDB: idb,
+    };
+    const leaks = Object.entries(haystacks)
+      .filter(([, text]) => text.includes(secret) || text.includes("code="))
+      .map(([where]) => where);
+    return {
+      leaks,
+      linkNodes: document.querySelectorAll('[data-testid="approval-link-once"]')
+        .length,
+    };
+  }, SECRET_VALUE);
+
+  if (after.leaks.length > 0 || after.linkNodes > 0) {
+    throw new Error(
+      `${label}: 새로고침 뒤 1회 값이 남아 있다 (${after.leaks.join(", ")}` +
+        `${after.linkNodes > 0 ? ", link 노드 " + after.linkNodes : ""}) — ADR-0186 D4 위반`
+    );
+  }
+  console.log(`  ${label}: reload 뒤 DOM·localStorage·sessionStorage·IDB 전부 0`);
+}
+
+/** 390 에서 1회 값이 말줄임에 먹히지 않는가 (design-review R1 B1). */
+async function assertSecretNotClipped(page, label) {
+  const box = await page
+    .getByTestId("approval-link-once-value")
+    .evaluate((el) => ({
+      scrollWidth: el.scrollWidth,
+      clientWidth: el.clientWidth,
+      overflow: getComputedStyle(el).textOverflow,
+      text: el.textContent ?? "",
+    }));
+  if (box.scrollWidth > box.clientWidth) {
+    throw new Error(
+      `${label}: 1회 값이 잘린다 (scrollWidth ${box.scrollWidth} > clientWidth ${box.clientWidth})`
+    );
+  }
+  if (!box.text.endsWith(SECRET_VALUE.slice(-6))) {
+    throw new Error(`${label}: 값의 꼬리가 DOM 에 없다 (${box.text})`);
+  }
+  console.log(
+    `  ${label}: 링크 값 ${box.scrollWidth}/${box.clientWidth} (잘림 0), 꼬리 ${SECRET_VALUE.slice(-6)} 가시`
+  );
 }
 
 /** 카드를 뷰포트 위쪽에 세운다. 최소 이동은 카드를 바닥의 칩 아래로 민다. */
@@ -392,10 +532,24 @@ async function captureFrame(browser, frame) {
       ...frame,
       name: "link-once",
       messages: MESSAGES,
-      drive: async (page) => {
+      drive: async (page, { label }) => {
         await decide(page);
         await page.getByTestId("approval-link-once").waitFor({ state: "visible" });
+        // 초점이 카드 안에 남는가 (R1 H2). 사진은 초점을 보여 주지 않는다.
+        const focused = await page.evaluate(
+          () =>
+            document.activeElement?.closest('[data-testid="agent-card"]') !== null
+        );
+        if (!focused) {
+          throw new Error(`${label}: 확정 뒤 초점이 카드 밖으로 떨어졌다`);
+        }
+        await assertSecretNotClipped(page, label);
         await raise(page, "agent-card");
+      },
+      after: async (page, { label }) => {
+        // 사진을 찍은 **뒤에** 새로고침을 건다 — 장면은 링크가 선 화면이고,
+        // 이 단정은 그 화면이 아무것도 남기지 않았다는 사실이다.
+        await assertSecretDiesOnReload(page, label);
       },
     })
   );
@@ -406,15 +560,21 @@ async function captureFrame(browser, frame) {
       ...frame,
       name: "result",
       messages: RESULT_MESSAGES,
-      drive: async (page) => {
+      drive: async (page, { label }) => {
         await page
           .getByTestId("action-result-secret-once")
           .waitFor({ state: "visible" });
-        const leaked = await page.evaluate(() =>
-          document.body.innerText.includes("code=")
-        );
-        if (leaked) {
-          throw new Error("영속 카드에 1회 값이 새어 있다 (ADR-0186 D4 위반)");
+        // 문은 **도착할 수 있을 때만** 선다 (R1 H1). 첫 카드의 `next.href` 는
+        // 부록 B 원문 `?section=invites` 이고 이 빌드에 그 섹션은 없다;
+        // 둘째 카드는 실재하는 `?section=webhooks` 라 문이 선다. 한 프레임에서
+        // 두 규칙이 같이 보인다.
+        const doors = await page
+          .locator('[data-testid="action-result-next"]')
+          .evaluateAll((els) => els.map((el) => el.getAttribute("href")));
+        if (doors.length !== 1 || doors[0] !== "#/settings?section=webhooks") {
+          throw new Error(
+            `${label}: 문이 ${JSON.stringify(doors)} 다 — 모르는 섹션에 문이 서거나 아는 섹션에 문이 없다`
+          );
         }
         await raise(page, "agent-card");
       },
@@ -428,13 +588,31 @@ async function captureFrame(browser, frame) {
       name: "role-required",
       messages: MESSAGES,
       decisionStatus: 403,
-      drive: async (page) => {
+      drive: async (page, { label }) => {
         await decide(page);
         const banner = page.getByTestId("approval-error").first();
         await banner.waitFor({ state: "visible" });
         const tone = await banner.getAttribute("data-tone");
         if (tone !== "unavailable") {
-          throw new Error(`403 배너의 격이 ${tone} 이다 — 사고가 아니라 안내다`);
+          throw new Error(`${label}: 403 배너의 격이 ${tone} 이다 — 사고가 아니라 안내다`);
+        }
+        // 성공할 수 없는 채움 버튼이 남지 않는다 (R1 M1), 초점은 카드 안 (R1 H2).
+        const after = await page.evaluate(() => ({
+          commits: document.querySelectorAll('[data-testid="approval-commit"]')
+            .length,
+          approves: document.querySelectorAll('[data-testid="approval-approve"]')
+            .length,
+          focusInCard:
+            document.activeElement?.closest('[data-testid="agent-card"]') !== null,
+        }));
+        if (after.commits !== 0) {
+          throw new Error(`${label}: 403 뒤에도 「승인 확정」이 ${after.commits}개 남았다`);
+        }
+        if (after.approves !== 1) {
+          throw new Error(`${label}: 403 뒤 승인 버튼이 ${after.approves}개다 — 카드는 여전히 대기다`);
+        }
+        if (!after.focusInCard) {
+          throw new Error(`${label}: 403 뒤 초점이 카드 밖으로 떨어졌다`);
         }
         await raise(page, "agent-card");
       },
