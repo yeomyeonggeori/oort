@@ -8,8 +8,8 @@ import { describe, expect, it } from "vitest";
 /**
  * Overlay stacking names (#2044 #2075 #1919).
  *
- * The numerals live once in tokens.css. Surfaces write `layer-*`, never
- * `z-10` / `z-50`.
+ * The numerals live once in tokens.css. Surfaces write `layer-*`, never a
+ * hand-written `z-<number>`.
  *
  * What this file can and cannot see (#2485 R1 H-2). Everything here is text:
  * it reads sources and compiles CSS. It cannot resolve a stacking root, so it
@@ -21,9 +21,10 @@ import { describe, expect, it } from "vitest";
  * element outside the named scale resolves a numeric z-index in the document's
  * stacking root). What is left here is the part text can actually hold:
  *
- *   1. the order and the **floor** of the scale (above every Tailwind numeral
- *      a leftover class can still write), so the range can never again be
- *      chosen so that leftovers outrank named layers;
+ *   1. the order and the **floor** of the scale — above every `z-<number>`
+ *      the tree actually writes, read at test time rather than remembered, so
+ *      the range can never again be chosen so that leftovers outrank named
+ *      layers;
  *   2. one spelling per layer;
  *   3. every leftover `z-*` file is a known file **and pairs with `isolate`**
  *      on the owner that scopes it — the mechanical shadow of the runtime
@@ -39,8 +40,15 @@ const DESIGN = dirname(TOKENS_PATH);
 
 const LAYER_ORDER = ["content-float", "overlay-scrim", "overlay-surface"] as const;
 
-/** The top of Tailwind's stock `z-*` scale — what a leftover class can write. */
-const RAW_Z_CEILING = 50;
+/**
+ * Any hand-written `z-<number>` class.
+ *
+ * Not `z-(0|10|…|50)`: Tailwind v4 compiles a bare numeric utility, so `z-60`
+ * and `z-999` are legal classes here (measured — `compile()` emits a rule for
+ * both). A pattern that only knew the old stock steps would have let the one
+ * class that can actually outrank a named layer through.
+ */
+const RAW_Z_CLASS = /\bz-(\d+)\b/g;
 
 const MUST_USE_NAMED_LAYER = [
   "design/ui/dialog.tsx",
@@ -98,12 +106,12 @@ function codeOnly(source: string): string {
     .replace(/(?<!:)\/\/.*$/gm, "");
 }
 
-function sourceFiles(dir: string): string[] {
+function sourceFiles(dir: string, match = /\.tsx?$/): string[] {
   const out: string[] = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = `${dir}/${entry.name}`;
-    if (entry.isDirectory()) out.push(...sourceFiles(full));
-    else if (/\.tsx?$/.test(entry.name)) out.push(full);
+    if (entry.isDirectory()) out.push(...sourceFiles(full, match));
+    else if (match.test(entry.name)) out.push(full);
   }
   return out;
 }
@@ -144,14 +152,28 @@ describe("overlay layer tokens", () => {
     }
   });
 
-  it("puts the whole band above every raw Tailwind z-index", () => {
-    // The R1 blockers in one assertion. If the floor drops back under the
-    // stock scale, a leftover `z-10`/`z-50` outranks the scrim and the panel
-    // again, which is exactly what painted a sticky filename across the ⌘K
-    // palette and cut a nav row in half inside the 390px drawer.
-    for (const name of LAYER_ORDER) {
-      expect(layerValue(name), name).toBeGreaterThan(RAW_Z_CEILING);
+  it("puts the whole band above every raw z-index the tree writes", () => {
+    // The R1 blockers in one assertion, and the ceiling is measured rather
+    // than remembered: every `z-<number>` class still in the tree is read, and
+    // the lowest named layer has to beat the highest of them. If the floor
+    // drops back under them, a leftover outranks the scrim and the panel
+    // again, which is what painted a sticky filename across the ⌘K palette and
+    // cut a nav row in half inside the 390px drawer.
+    const numerals: number[] = [];
+    for (const file of sourceFiles(SRC_DIR)) {
+      if (/\.test\.tsx?$/.test(file)) continue;
+      for (const match of codeOnly(readFileSync(file, "utf8")).matchAll(RAW_Z_CLASS)) {
+        numerals.push(Number(match[1]));
+      }
     }
+    const ceiling = Math.max(0, ...numerals);
+    for (const name of LAYER_ORDER) {
+      expect(layerValue(name), `${name} vs raw ceiling ${ceiling}`).toBeGreaterThan(
+        ceiling
+      );
+    }
+    // And a floor under the floor, so an empty tree cannot make this vacuous.
+    expect(Math.min(...LAYER_ORDER.map(layerValue))).toBeGreaterThanOrEqual(100);
   });
 
   it("names no layer above the floating overlay surface", () => {
@@ -190,20 +212,25 @@ describe("overlay layer tokens", () => {
     }
   });
 
-  it("keeps every numeral in tokens.css on the named scale", () => {
+  it("keeps every z-index in the design CSS on the named scale", () => {
     // The .ts/.tsx sweep below never looked at CSS, and every drawer, pane and
     // scrim writes its z-index there rather than in a class.
-    const raw = CSS.split("\n")
-      .map((line, i) => [i + 1, line] as const)
-      .filter(([, line]) => /^\s*z-index:/.test(line))
-      .filter(([, line]) => !/z-index:\s*var\(--layer-/.test(line));
+    const raw: string[] = [];
+    for (const file of sourceFiles(DESIGN, /\.css$/)) {
+      const text = readFileSync(file, "utf8");
+      text.split("\n").forEach((line, i) => {
+        if (!/^\s*z-index:/.test(line)) return;
+        if (/z-index:\s*var\(--layer-/.test(line)) return;
+        raw.push(`${file.slice(SRC_DIR.length + 1)}:${i + 1} ${line.trim()}`);
+      });
+    }
     expect(raw).toEqual([]);
   });
 
-  it("overlay and floating-timeline files do not write z-10/z-50", () => {
+  it("overlay and floating-timeline files write no raw z-* class", () => {
     for (const rel of MUST_USE_NAMED_LAYER) {
       const code = codeOnly(readFileSync(`${SRC_DIR}/${rel}`, "utf8"));
-      expect(code, rel).not.toMatch(/\bz-(0|10|20|30|40|50)\b/);
+      expect(code, rel).not.toMatch(RAW_Z_CLASS);
     }
   });
 
@@ -258,7 +285,8 @@ describe("overlay layer tokens", () => {
       const rel = file.slice(SRC_DIR.length + 1);
       if (rel.endsWith(".test.ts") || rel.endsWith(".test.tsx")) continue;
       const code = codeOnly(readFileSync(file, "utf8"));
-      if (/\bz-(0|10|20|30|40|50)\b/.test(code)) leftover.push(rel);
+      if (RAW_Z_CLASS.test(code)) leftover.push(rel);
+      RAW_Z_CLASS.lastIndex = 0;
     }
     leftover.sort();
     expect(leftover).toEqual(Object.keys(RAW_Z_ALLOWLIST).sort());

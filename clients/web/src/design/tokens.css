@@ -226,10 +226,13 @@
    * order and the floor) and in the capture lane's root sweep, which is where
    * an assertion belongs — not in a number chosen to lose a race.
    *
-   * 100 clears every Tailwind numeral the codebase can still write
-   * (`z-50` is the top of the stock scale) with room to spare, so a leftover
-   * class can no longer outrank a named layer. Surfaces consume the names
-   * (`layer-overlay-scrim`), never the numerals. */
+   * 100 clears every `z-<number>` the tree writes today with room to spare.
+   * 「스톡 스케일의 천장이 50」은 근거가 아니다 — Tailwind v4 는 맨숫자
+   * 유틸리티라 `z-60`·`z-999` 도 그대로 컴파일된다(실측). 그래서 바닥을
+   * 지키는 것은 이 숫자가 아니라 단정이다: `overlayLayers.test.ts` 가 트리에
+   * 남은 `z-<number>` 를 전부 읽어 그 최댓값보다 낮은 층을 거절하고, 이름 밖의
+   * 새 `z-<number>` 자체를 허용목록 밖에서 거절한다. 표면은 이름만 적는다
+   * (`layer-overlay-scrim`), 숫자는 적지 않는다. */
   --layer-content-float: 100;
   --layer-overlay-scrim: 200;
   --layer-overlay-surface: 300;
@@ -2011,12 +2014,19 @@
    * 앞 판의 주석이 21 이라는 숫자로 지키려던 것이 정확히 이 한 칸이다.
    *
    * 사이드바 서랍이 같은 표면 층인 것은 괜찮다 (#2485 R1 M-1). **둘은 함께 설
-   * 수 없다**: 이 서랍은 라우트 상자를 덮으면서 그 상자를 `inert` 로 만들고,
-   * 「채널 목록 열기」 트리거는 그 상자 안에 산다. 캡처 하네스가 그 사실을
-   * 재는 장면을 든다(`capture-overlay-layers.mjs` two-drawers): 관제 서랍을
-   * 연 뒤 사이드바 트리거를 강제로 눌러도 두 번째 서랍은 열리지 않는다. 그
-   * 결합이 사라져 둘이 함께 서는 날이 오면 같은 장면이 「사이드바 서랍과 그
-   * 스크림이 관제 서랍 위」를 요구하며 빨개진다 — 같은 값이면 실패한다.
+   * 수 없다**, 그리고 그것은 취향이 아니라 코드다: 사이드바 서랍을 여는 길은
+   * `AppShell.openDrawer` 하나뿐이고 그 유일한 호출자는 `SidebarDrawerToggle`
+   * (`data-testid="open-sidebar-drawer"`)이다. 단축키도 ⌘K 명령도 그 길을
+   * 부르지 않는다. 그 토글은 각 라우트 헤더에 살고, 관제 서랍은 라우트 상자를
+   * 덮으면서 그 상자를 `inert` 로 만든다 — 덮인 것이 아니라 죽은 것이라 강제
+   * 클릭도 통하지 않는다. (사이드바가 서랍이 되는 문턱은 600px 이고 토글도
+   * `mobile-only` 라 같은 폭에서만 선다.)
+   *
+   * 캡처 하네스가 그 사실을 장면으로 든다(`capture-overlay-layers.mjs`
+   * two-drawers): 관제 서랍을 연 뒤 사이드바 트리거를 강제로 눌러도 두 번째
+   * 서랍은 열리지 않는다. 그 결합이 사라져 둘이 함께 서는 날이 오면 같은 장면이
+   * 「사이드바 서랍과 그 스크림이 관제 서랍 위」를 요구하며 빨개진다 — 같은
+   * 값이면 실패한다.
    *
    * 포털된 다이얼로그는 같은 표면 층이고 DOM 에서 뒤에 있어 그 위에 선다. */
   z-index: var(--layer-overlay-surface);
