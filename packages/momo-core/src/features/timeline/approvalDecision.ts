@@ -126,14 +126,23 @@ export interface DecisionOutcome {
    *
    *   idempotency_conflict  캐시된 멱등 키를 버리고 새 키로 다시 시도해야 한다.
    *   surface_absent        이 서버에 승인 라우트가 없다. **장애가 아니다.**
-   *   forbidden             이 사람은 이 결정을 내릴 수 없다(HTTP 403).
+   *   role_required         결정자의 역할이 모자라다(ADR-0186 §5).
+   *   forbidden             그 밖의 403. 무엇이 모자란지 서버가 말하지 않았다.
    *
-   * `forbidden` 은 **무엇이 모자란지는 말하지 않는다.** 지금 서버의 오류 봉투에는
-   * 코드 칸이 없고(`ErrorResponse` 는 `{error:{message}}` 뿐), ADR-0186 §5 가
-   * 말하는 `role_required` 를 실어 보내는 필드는 부록 A~C·E 어디에도 고정돼 있지
-   * 않다. 없는 필드를 짐작해 파싱하는 것이 이 저장소가 「발명」이라 부르는 것이다.
-   * 대신 **카드가 이미 아는 사실**로 가른다: 부록 A 의 `action.required_role` 이
-   * 실린 승인의 403 은 역할이 모자란 것이고, 그 판정은 화면이 진다.
+   * ## 코드가 어디로 오는가 (AX-3b #2549 계약 확정)
+   *
+   * `ErrorResponse.code` 가 아니다 — 그 봉투에는 코드 칸이 없다(`{error:{message}}`).
+   * 이 라우트는 **403 도 영수증**으로 답하도록 정의돼 있고(이 파일 머리말의
+   * `receiptStatuses`), 그래서 역할 부족은 영수증의 `status: "role_required"` 로
+   * 온다. 그 값은 `approval_status` PG enum 밖이라 `parseApprovalStatus` 가
+   * `null` 을 답하고, 그것이 옳다: 승인의 **상태**는 여전히 `pending` 이고
+   * (§5: 「approval 은 여전히 pending 이다」) `role_required` 는 이 **결정 시도**에
+   * 일어난 일이다. 두 축을 섞지 않으려고 상태가 아니라 `errorCode` 로 읽는다.
+   *
+   * R1 에서 이 파일은 「없는 필드를 짐작하지 않는다」며 403 을 `forbidden` 하나로
+   * 뭉쳤고, 문장은 카드가 아는 `action.required_role` 로 골랐다. 계약이 확정된
+   * 지금 그 한 줄이 늘었을 뿐 **문장을 고르는 쪽은 그대로다** — 서버는 「역할이
+   * 모자라다」까지 말하고, 「어느 역할인가」는 카드가 부록 A 에서 읽는다.
    *
    * `surface_absent`가 별도의 `kind`가 아니라 여기 있는 이유: 이 결과는
    * `kind: "error"`로 남아야 한다. 결정은 실제로 기록되지 않았고, 그것을
@@ -147,7 +156,11 @@ export interface DecisionOutcome {
    * (features/capabilities/serverSurfaces.ts), 한 화면에서 같은 사실이 두 가지
    * 색을 갖는 일이 없어야 한다.
    */
-  errorCode?: "idempotency_conflict" | "surface_absent" | "forbidden";
+  errorCode?:
+    | "idempotency_conflict"
+    | "surface_absent"
+    | "role_required"
+    | "forbidden";
 }
 
 const SETTLED = new Set<ApprovalStatus>([
@@ -359,6 +372,18 @@ export function interpretReceipt(
     return {
       kind: "error",
       errorCopy: "이 승인 요청을 찾을 수 없습니다. 이미 정리되었을 수 있습니다.",
+    };
+  }
+  // AX-3b #2549: 역할 부족만 영수증이 이름을 댄다. 그 밖의 403 은 지금까지처럼
+  // 「무엇이 모자란지 모르는 거절」이고 문장도 그대로다(도구 호출 승인 회귀 0).
+  if (receipt.status === "role_required") {
+    return {
+      kind: "error",
+      errorCode: "role_required",
+      // 역할 이름 없이도 참인 문장. 어느 역할인지 아는 카드는 이것을 자기
+      // 문장으로 덮는다(`ApprovalActions.forbiddenCopy`).
+      errorCopy:
+        "이 결정을 내릴 수 있는 역할이 아닙니다. 이 요청은 아직 대기 중입니다.",
     };
   }
   return {

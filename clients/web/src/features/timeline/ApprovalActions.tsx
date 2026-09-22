@@ -416,7 +416,17 @@ export function ApprovalActions({
         // 역할이 모자란 403 은 사고가 아니다. 승인은 여전히 대기이고(§5), 사람이
         // 할 수 있는 다음 행동이 있다 — 그래서 붉은 alert 이 아니라 조용한
         // 안내로 서고, 문장은 호출자가 아는 사실에서 온다.
-        if (outcome.errorCode === "forbidden" && forbiddenCopy !== null) {
+        //
+        // 두 갈래가 같은 자리에 선다 (AX-3b #2549). `role_required` 는 서버가
+        // 이름을 댄 것이고, `forbidden` 은 이름 없는 403 이다. 행동 승인 카드는
+        // 어느 쪽에서도 자기 문장을 안다 — 부록 A 가 `required_role` 을 실어
+        // 보냈으니까. 이름 없는 403 에도 이 문장을 쓰는 것은 R1 부터의 판정
+        // 그대로다: 이 카드에서 403 이 뜻할 수 있는 것은 그것 하나다.
+        if (
+          (outcome.errorCode === "role_required" ||
+            outcome.errorCode === "forbidden") &&
+          forbiddenCopy !== null
+        ) {
           setErrorTone("unavailable");
           setErrorCopy(forbiddenCopy);
           // ## 성공할 수 없는 버튼을 세워 두지 않는다 (design-review R1 M1)

@@ -144,11 +144,12 @@ function actionResultProps(over = {}) {
         { label: "만료", value: "2026-09-29" },
       ],
       secret_shown_once: true,
-      // 부록 B 원문(R1 H1). 이 빌드에 `invites` 섹션은 없으므로 문이 서지
-      // 않는 것이 참이고, 아래 장면 ③이 그 fail-closed 를 잰다.
+      // **확정된 계약값** (AX-3b #2549): 서버는 `?section=members` 를 보낸다.
+      // 부록 B 샘플의 `?section=invites` 는 이 클라이언트에 없는 섹션이었고,
+      // 그 값이 오면 어떻게 되는지는 아래 세 번째 카드가 그대로 보여 준다.
       next: {
-        label: "설정 › 초대에서 보기",
-        href: "/settings?section=invites",
+        label: "설정 › 멤버와 초대에서 보기",
+        href: "/settings?section=members",
       },
       ...over,
     },
@@ -210,9 +211,24 @@ const RESULT_MESSAGES = [
       status: "rejected",
       secret_shown_once: false,
       rows: [{ label: "대상", value: "배포 알림" }],
-      // 실재하는 섹션 — 같은 프레임에 「문이 서는 카드」와 「서지 않는 카드」가
-      // 함께 있어야 fail-closed 가 사진으로 읽힌다.
       next: { label: "설정 › 웹훅에서 보기", href: "/settings?section=webhooks" },
+    }),
+  },
+  {
+    author: HERMES,
+    type: "tool_result",
+    body: "채널은 만들지 않았습니다.",
+    // 세 번째 카드가 **fail-closed 를 사진에 세운다** (R1 H1 · R2 M-R2-1).
+    // `?section=invites` 는 이 빌드에 없는 섹션이라 문이 서지 않고, 카드는
+    // 상태 문장만 남긴다. 같은 프레임에 문이 서는 카드 둘과 서지 않는 카드
+    // 하나가 함께 있어야 그 규칙이 사진으로 읽힌다. `role_required` 를 여기
+    // 세우는 것도 같은 이유다 — 이 배치가 들여온 네 상태 중 마지막 하나다.
+    props: actionResultProps({
+      action_id: "channel.create",
+      status: "role_required",
+      secret_shown_once: false,
+      rows: [{ label: "이름", value: "온보딩-2026" }],
+      next: { label: "설정 › 초대에서 보기", href: "/settings?section=invites" },
     }),
   },
 ];
@@ -290,9 +306,11 @@ async function installMocks(context, { messages, decisionStatus }) {
   );
   // 결정. 200 이면 부록 C 를 그대로 돌려주고, 403 이면 영수증 스키마에 여전히
   // `pending` 인 승인을 싣는다(§5: 「approval 은 여전히 pending 이다」).
+  // 403 은 영수증으로 답한다. 역할 부족은 봉투의 코드 칸이 아니라 **영수증의
+  // `status: "role_required"`** 로 온다(AX-3b #2549 계약 확정).
   await context.route("**/v1/workspaces/*/approvals/*/decision", (route) =>
     decisionStatus === 403
-      ? json(route, { approval_id: APPROVAL_ID, status: "pending" }, 403)
+      ? json(route, { approval_id: APPROVAL_ID, status: "role_required" }, 403)
       : json(route, DECISION_OK)
   );
   await context.route("**/v1/workspaces/*/channels/*/messages*", (route) =>
@@ -647,9 +665,14 @@ async function captureFrame(browser, frame) {
         const doors = await page
           .locator('[data-testid="action-result-next"]')
           .evaluateAll((els) => els.map((el) => el.getAttribute("href")));
-        if (doors.length !== 1 || doors[0] !== "#/settings?section=webhooks") {
+        const expected = [
+          "#/settings?section=members",
+          "#/settings?section=webhooks",
+        ];
+        if (JSON.stringify(doors) !== JSON.stringify(expected)) {
           throw new Error(
-            `${label}: 문이 ${JSON.stringify(doors)} 다 — 모르는 섹션에 문이 서거나 아는 섹션에 문이 없다`
+            `${label}: 문이 ${JSON.stringify(doors)} 다 — 확정 계약값(members)과 ` +
+              `webhooks 에는 문이 서고, 계약 밖 invites 에는 서지 않아야 한다`
           );
         }
         await raise(page, "agent-card");

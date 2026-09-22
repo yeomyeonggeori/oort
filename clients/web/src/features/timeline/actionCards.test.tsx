@@ -413,6 +413,33 @@ describe("1회 링크는 결정 응답에서만 그려지고 새로고침을 견
     expect(error?.dataset.tone).toBe("unavailable");
   });
 
+  it("AX-3b #2549: 영수증이 role_required 라고 말하면 같은 안내가 선다", async () => {
+    const host = mountCard(approvalProps());
+    // 계약 확정 모양: `ErrorResponse.code` 가 아니라 **영수증의 status** 다.
+    await decide(
+      host,
+      jsonResponse({ approval_id: APPROVAL_ID, status: "role_required" }, 403)
+    );
+    const error = byTestId(host, "approval-error")[0];
+    expect(error?.textContent).toContain("관리자가 승인해야 합니다.");
+    expect(error?.dataset.tone).toBe("unavailable");
+    expect(error?.getAttribute("role")).toBe("status");
+    // 무장 해제·초점 착지도 같은 갈래를 탄다.
+    expect(byTestId(host, "approval-commit")).toHaveLength(0);
+    expect(document.activeElement).toBe(byTestId(host, "agent-card")[0]);
+  });
+
+  it("AX-3b #2549: role_required 영수증도 승인 상태를 뒤집지 않는다", async () => {
+    const host = mountCard(approvalProps());
+    await decide(
+      host,
+      jsonResponse({ approval_id: APPROVAL_ID, status: "role_required" }, 403)
+    );
+    // 칩은 여전히 「승인 대기」다 — §5: approval 은 여전히 pending 이다.
+    expect(byTestId(host, "agent-status-chip")[0]?.textContent).toBe("승인 대기");
+    expect(byTestId(host, "approval-approve")).toHaveLength(1);
+  });
+
   it("R1 M1: 403 뒤 성공할 수 없는 「승인 확정」이 남지 않는다", async () => {
     const host = mountCard(approvalProps());
     await decide(host, jsonResponse({ status: "pending" }, 403));

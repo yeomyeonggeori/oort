@@ -70,3 +70,36 @@ describe("결정 응답의 result (ADR-0186 부록 C)", () => {
     expect(outcome.errorCode).toBe("forbidden");
   });
 });
+
+describe("403 영수증의 role_required (AX-3b #2549 계약)", () => {
+  it("영수증이 이름을 대면 role_required 다", () => {
+    // 코드는 `ErrorResponse.code` 가 아니라 **영수증의 status** 로 온다.
+    const outcome = interpretReceipt(403, {
+      approval_id: "0199aa11-2222-7000-8000-0000000000a1",
+      status: "role_required",
+    } as never);
+    expect(outcome.kind).toBe("error");
+    expect(outcome.errorCode).toBe("role_required");
+    expect(outcome.errorCopy).toContain("아직 대기 중");
+    // 승인의 **상태**는 뒤집지 않는다 — 여전히 pending 이다(§5). 그 값은
+    // `approval_status` enum 밖이라 상태로 읽히지 않아야 한다.
+    expect(outcome.status).toBeUndefined();
+  });
+
+  it("그 밖의 403 은 기존 forbidden 그대로다 (도구 호출 승인 회귀 0)", () => {
+    const outcome = interpretReceipt(403, { status: "pending" } as never);
+    expect(outcome.errorCode).toBe("forbidden");
+    expect(outcome.errorCopy).toContain("채널 멤버인지 확인하세요");
+  });
+
+  it("role_required 는 200·409 에서 읽지 않는다", () => {
+    // 200/409 는 영수증이 결정을 말하는 자리다. 거기서 같은 글자가 와도
+    // 이 갈래로 떨어지면 성공한 결정이 거절로 읽힌다.
+    expect(
+      interpretReceipt(200, { status: "role_required" } as never).kind
+    ).toBe("committed");
+    expect(
+      interpretReceipt(409, { status: "role_required" } as never).errorCode
+    ).toBe("idempotency_conflict");
+  });
+});
