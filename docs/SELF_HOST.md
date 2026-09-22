@@ -899,6 +899,109 @@ written on the volume only. Live `flyctl` deploy is the owner's login
 |---|---|---|
 | `scripts/verify_public_edge_centrifugo_boundary.sh` | `/opt/momo/scripts/` | 공개 403 · private API 인증 단계 · `CENT_PROXY_SECRET` SHA-256 동일성의 **읽기 전용** 배포 증거 |
 
+## 시크릿 회전 — 웹훅 마스터키 (ADR-0004 증보 4)
+
+웹훅 자격증명은 저장되지 않는다. DB에는 43자 **참조**만 있고, 실제 secret은 요청마다
+`HMAC(마스터키, 도메인 || 참조)`로 다시 계산된다. 그래서 마스터키를 바꾸는 것은
+「키를 바꾸는 일」이 아니라 **그 방향으로 발급한 secret 전부를 한 번에 무효화하는
+일**이다. 키는 방향마다 하나씩 두 개다.
+
+| env | 파생하는 것 | 바꾸면 깨지는 것 |
+|---|---|---|
+| `WEBHOOK_INGRESS_MASTER_KEY` | 인바운드 native ingress secret (`momo_whsec_v1.*`) | 외부 시스템이 우리에게 보내는 서명 — 설치 전원이 401 |
+| `OUTBOUND_WEBHOOK_MASTER_KEY` | 아웃바운드 이벤트구독·doorbell secret (`momo_evtsec_v1.*`) | 우리가 구독자에게 보내는 서명 — 구독자 전원이 검증 실패 |
+
+Slack 호환 `/hooks/<token>` URL은 파생이 아니라 **토큰 자체가 자격증명**이고 해시로
+저장되므로 이 회전의 영향을 받지 않는다.
+
+### 업그레이드 직후 상태: 두 값이 JWT_HMAC과 같다
+
+#2066 이전 설치는 두 secret을 모두 `JWT_HMAC`에서 파생했다. `scripts/oort upgrade`
+(내부적으로 `scripts/self_host_env.sh --ensure-managed-keys`)는 **지금 쓰이는 값의
+복사**를 두 키에 넣는다. 파생 입력이 바이트 동일하므로 **재발급은 0건**이고, 그
+순간부터 세 키는 독립 변수다 — 다음 `JWT_HMAC` 회전은 webhook secret을 건드리지
+않는다. 이것이 이 티켓의 전부다.
+
+이 상태에서 `scripts/oort doctor`는 경고 한 줄을 남긴다(판정은 PASS, 종료코드 0):
+
+```
+info   minor    env.webhook_master_keys   webhook 마스터키가 JWT 시크릿과 같다 — 회전 권고
+```
+
+경고는 「지금 고장났다」가 아니라 「아직 JWT와 같은 값이라 회전 이득을 다 못 받았다」는
+뜻이다. 아래 절차로 닫을 수 있고, 닫지 않아도 기동·서명 모두 정상이다.
+
+키를 지운 채로는 api가 **기동하지 않는다**(폴백 삭제, fail-closed). 손으로 env를 비운
+경우의 복구도 같은 명령이다:
+
+```bash
+scripts/oort upgrade            # 또는 scripts/self_host_env.sh --ensure-managed-keys
+```
+
+### 회전 절차 (방향 하나씩)
+
+무중단 이중 키 기간은 없다. 회전한 방향의 발급 secret은 즉시 전부 무효가 되므로,
+**재발급까지가 한 창**이다.
+
+1. 회전할 방향을 고른다. 두 키를 동시에 바꾸지 않는다 — 실패했을 때 어느 방향이
+   깨졌는지 구분할 수 없게 된다.
+2. 새 값을 만들어 env 파일에 넣는다. 값은 stdout에 내지 않는다.
+
+   ```bash
+   set +x
+   python3 - <<'PY'
+   import os, pathlib, re, secrets
+   key = "OUTBOUND_WEBHOOK_MASTER_KEY"      # 또는 WEBHOOK_INGRESS_MASTER_KEY
+   path = pathlib.Path("infra/rust/local.secrets.env")
+   text = path.read_text(encoding="utf-8")
+   assert re.search(rf"(?m)^{key}=", text), f"{key} 줄이 없다 — 먼저 oort upgrade"
+   tmp = path.with_name(path.name + ".rotate")
+   tmp.write_text(re.sub(rf"(?m)^{key}=.*$", f"{key}={secrets.token_hex(24)}", text),
+                  encoding="utf-8")
+   os.chmod(tmp, 0o600)
+   tmp.replace(path)
+   print(f"{key} rotated (value not printed)")
+   PY
+   ```
+
+3. 두 키가 **서로 같으면 api는 기동을 거부한다**(두 방향의 폭발 반경을 한 값으로
+   합치는 회전은 사고다). 새 값이 다른 키·`JWT_HMAC`·`PROVIDER_LINK_MASTER_KEY`와
+   겹치지 않는지 확인한다.
+4. 재시작한다. 아웃바운드 키는 `api`와 `webhook-sender`가 **같은 값**을 들어야 한다
+   — api가 한 번 노출한 secret으로 sender가 서명하기 때문이다.
+
+   ```bash
+   docker compose --env-file infra/rust/local.secrets.env \
+     -f infra/rust/docker-compose.rust.yml up -d --wait api webhook-sender
+   scripts/oort doctor
+   ```
+
+5. **그 방향의 자격증명을 전부 재발급한다.** 이 단계를 건너뛰면 조용히 깨진 채로
+   남는다.
+   - 인바운드: 설치마다 `POST /v1/workspaces/{ws}/webhooks/{id}/rotate` → 새 secret을
+     한 번만 보여주므로 그 자리에서 발신 측에 옮긴다.
+   - 아웃바운드: 이벤트구독을 지우고 다시 만든다(`POST …/event-subscriptions`).
+     doorbell을 쓰면 재등록한다.
+6. `scripts/oort doctor`가 `env.webhook_master_keys`를 `pass`로 바꾸는지 확인한다.
+
+### 인그레스 예산 (ADR-0004 증보 4 D3)
+
+유출된 토큰의 피해 상한은 revoke만이 아니다. 인그레스에는 **설치 단위 슬라이딩
+윈도우**가 있다.
+
+| env | 기본 | 뜻 |
+|---|---|---|
+| `RATE_LIMIT_WEBHOOK_PER_INSTALLATION` | `60` | 창 하나당 설치별 허용 요청 수. `0`이면 해제 |
+| `RATE_LIMIT_WINDOW_SECONDS` | `60` | 창 길이(초). 이 스택의 다른 공개 표면과 공유한다 |
+
+초과하면 `429` + `Retry-After`가 나가고, **버스트마다 감사 1행**이
+`audit_log(action='webhook.rate_limited')`에 남는다(요청마다가 아니다 — 플러드가
+감사 테이블 증폭이 되면 안 된다). 행에는 설치 id·방언·한도·창만 들어가고 토큰이나
+본문, 그 지문은 들어가지 않는다.
+
+기본값 60/분은 기존 ADR-0115 D3 값을 그대로 이어받은 것이다. 실측으로 올릴 근거가
+생기기 전까지는 바꾸지 않는다.
+
 ## CENT_PROXY_SECRET 회전
 
 `CENT_PROXY_SECRET`은 사용자 자격증명이 아니라 Centrifugo가 compose-private API

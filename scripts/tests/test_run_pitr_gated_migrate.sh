@@ -268,6 +268,8 @@ operator = {
     "POSTGRES_PASSWORD": "owner-password",
     "POSTGRES_USER": "momo",
     "PROVIDER_LINK_MASTER_KEY": "compose-render-provider-master-key",
+    "WEBHOOK_INGRESS_MASTER_KEY": "compose-render-webhook-ingress-key",
+    "OUTBOUND_WEBHOOK_MASTER_KEY": "compose-render-webhook-outbound-key",
     "RELAY_DATABASE_URL": "postgres://momo_relay:relay-password@postgres:5432/momo",
     "RELAY_POSTGRES_PASSWORD": "relay-password",
     "WORKER_POSTGRES_PASSWORD": "worker-password",

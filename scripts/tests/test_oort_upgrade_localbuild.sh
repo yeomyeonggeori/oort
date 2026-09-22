@@ -115,6 +115,10 @@ TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
 TOKEN_CENT_PROXY="$(openssl rand -hex 12)"
 TOKEN_PLINK="$(openssl rand -hex 12)"
+# #2066 — 웹훅 마스터키 2종. 서로 다르고 JWT 와도 다르다: 같은 값이면
+# doctor 가 이행 창 경고를 내므로 정상 경로 픽스처로 쓸 수 없다.
+TOKEN_WHIN="$(openssl rand -hex 12)"
+TOKEN_WHOUT="$(openssl rand -hex 12)"
 TOKEN_OWNER="$(openssl rand -hex 12)"
 
 materialize() {
@@ -134,6 +138,8 @@ repl = {
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
     "__TOKEN_CENT_PROXY__": "${TOKEN_CENT_PROXY}",
     "__TOKEN_PLINK__": "${TOKEN_PLINK}",
+    "__TOKEN_WHIN__": "${TOKEN_WHIN}",
+    "__TOKEN_WHOUT__": "${TOKEN_WHOUT}",
     "__TOKEN_OWNER__": "${TOKEN_OWNER}",
     "__TOKEN_WEB_PORT__": "18088",
     "__TOKEN_API_PORT__": "18080",

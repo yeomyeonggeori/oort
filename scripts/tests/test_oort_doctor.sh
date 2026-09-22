@@ -92,6 +92,10 @@ TOKEN_CENT_TOKEN="$(openssl rand -hex 12)"
 TOKEN_CENT_API="$(openssl rand -hex 12)"
 TOKEN_CENT_PROXY="$(openssl rand -hex 12)"
 TOKEN_PLINK="$(openssl rand -hex 12)"
+# #2066 — 웹훅 마스터키 2종. 서로 다르고 JWT 와도 다르다: 같은 값이면
+# doctor 가 이행 창 경고를 내므로 정상 경로 픽스처로 쓸 수 없다.
+TOKEN_WHIN="$(openssl rand -hex 12)"
+TOKEN_WHOUT="$(openssl rand -hex 12)"
 TOKEN_OWNER="$(openssl rand -hex 12)"
 WEB_PORT="$(pick_port 18088)"
 API_PORT="$(pick_port 18080)"
@@ -114,6 +118,8 @@ repl = {
     "__TOKEN_CENT_API__": "${TOKEN_CENT_API}",
     "__TOKEN_CENT_PROXY__": "${TOKEN_CENT_PROXY}",
     "__TOKEN_PLINK__": "${TOKEN_PLINK}",
+    "__TOKEN_WHIN__": "${TOKEN_WHIN}",
+    "__TOKEN_WHOUT__": "${TOKEN_WHOUT}",
     "__TOKEN_OWNER__": "${TOKEN_OWNER}",
     "__TOKEN_WEB_PORT__": "${WEB_PORT}",
     "__TOKEN_API_PORT__": "${API_PORT}",
@@ -142,7 +148,7 @@ assert_no_secret_leak() {
   for token in \
     "$TOKEN_PG" "$TOKEN_APP" "$TOKEN_RELAY" "$TOKEN_WORKER" "$TOKEN_NOTIFIER" \
     "$TOKEN_JWT" "$TOKEN_CENT_TOKEN" "$TOKEN_CENT_API" "$TOKEN_CENT_PROXY" \
-    "$TOKEN_PLINK" "$TOKEN_OWNER"
+    "$TOKEN_PLINK" "$TOKEN_WHIN" "$TOKEN_WHOUT" "$TOKEN_OWNER"
   do
     if grep -F -- "$token" "$file" >/dev/null 2>&1; then
       fail "$label leaked secret token"
@@ -351,12 +357,12 @@ validate_schema "$OUT" || fail "unknown platform JSON schema: $(head -c 400 "$OU
 [ "$(check_field "$OUT" env.platform status)" = "fail" ] || \
   fail "unknown platform env.platform status=$(check_field "$OUT" env.platform status) detail=$(check_field "$OUT" env.platform detail)"
 UNK_COUNT="$(jq -r '.checks[].id' "$OUT" | wc -l | tr -d '[:space:]')"
-[ "$UNK_COUNT" = "34" ] || \
-  fail "unknown platform check id count ${UNK_COUNT} != 34 (env.platform extra on the normal 33)"
+[ "$UNK_COUNT" = "35" ] || \
+  fail "unknown platform check id count ${UNK_COUNT} != 35 (env.platform extra on the normal 34)"
 if grep -F -- "$TOKEN_PG" "$OUT" "$ERR" >/dev/null; then
   fail "unknown platform leaked password"
 fi
-pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 34 ids"
+pass "unknown MOMO_SELF_HOST_PLATFORM → exit 1 + JSON env.platform fail; 35 ids"
 
 # -----------------------------------------------------------------------------
 # 5. outbox oracle: push_candidate|pending is non-failing without a push relay
@@ -476,12 +482,12 @@ printf '%s' "$SQL_FN" | grep -Eq '^SELECT 1;?$' && \
 T1_IDS="$SANDBOX/t1.ids"
 jq -r '.checks[].id' "$SANDBOX/status.out" | sort >"$T1_IDS"
 # status --json includes the same checks as doctor plus image; ids come from doctor.
-# Normal case is 33. 34 is not the happy path:
+# Normal case is 34 (#2066 added env.webhook_master_keys). 35 is not the happy path:
 #   - stack.migrate_files (info) when server/Migrations and /opt/momo/migrations
 #     are both missing (see the missing-dir probe above)
 #   - env.platform (fail) when MOMO_SELF_HOST_PLATFORM is not a platform_profiles row
 T1_COUNT="$(wc -l <"$T1_IDS" | tr -d '[:space:]')"
-[ "$T1_COUNT" = "33" ] || fail "T1 check id count ${T1_COUNT} != 33 (normal case)"
+[ "$T1_COUNT" = "34" ] || fail "T1 check id count ${T1_COUNT} != 34 (normal case)"
 
 PG_PORT="$(pick_port 25432)"
 MOCK_PORT="$(pick_port 18765)"
@@ -659,7 +665,7 @@ validate_schema "$OUT" || fail "T2 doctor JSON schema: $(head -c 400 "$OUT")"
 T2_IDS="$SANDBOX/t2.ids"
 jq -r '.checks[].id' "$OUT" | sort >"$T2_IDS"
 T2_COUNT="$(wc -l <"$T2_IDS" | tr -d '[:space:]')"
-[ "$T2_COUNT" = "33" ] || fail "T2 check id count ${T2_COUNT} != 33 (normal case)"
+[ "$T2_COUNT" = "34" ] || fail "T2 check id count ${T2_COUNT} != 34 (normal case)"
 [ "$T1_COUNT" = "$T2_COUNT" ] || \
   fail "T2 check id count ${T2_COUNT} != T1 ${T1_COUNT}"
 cmp -s "$T1_IDS" "$T2_IDS" || \

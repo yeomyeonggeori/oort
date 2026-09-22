@@ -164,8 +164,10 @@ run_generator() {
   ) >"$output" 2>&1
 }
 
-# Canonical 43 = heredoc KEY= lines + public-edge keys. --claim swaps
-# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 43).
+# Canonical 45 = heredoc KEY= lines + public-edge keys. --claim swaps
+# MOMO_INITIAL_OWNER_PASSWORD ↔ MOMO_BOOTSTRAP_CLAIM (count stays 45).
+# 43 → 45 at #2066: WEBHOOK_INGRESS_MASTER_KEY + OUTBOUND_WEBHOOK_MASTER_KEY
+# became managed keys (ADR-0004 증보 4 D1).
 canonical_keys_from_generator() {
   {
     awk '
@@ -1091,14 +1093,17 @@ canonical_keys_from_generator >"$TMP_ROOT/canonical.keys"
 claim_swapped_canonical_keys >"$TMP_ROOT/claim.canonical.keys"
 canon_count="$(grep -c . "$TMP_ROOT/canonical.keys" | tr -d ' ')"
 claim_canon_count="$(grep -c . "$TMP_ROOT/claim.canonical.keys" | tr -d ' ')"
-[ "$canon_count" = "43" ] || {
-  echo "canonical key set must stay 43, got $canon_count" >&2
+[ "$canon_count" = "45" ] || {
+  echo "canonical key set must stay 45, got $canon_count" >&2
   exit 1
 }
-[ "$claim_canon_count" = "43" ] || {
-  echo "claim-swapped canonical key set must stay 43, got $claim_canon_count" >&2
+[ "$claim_canon_count" = "45" ] || {
+  echo "claim-swapped canonical key set must stay 45, got $claim_canon_count" >&2
   exit 1
 }
+# #2066 — the two webhook master keys are part of the contract, not incidental.
+grep -Fxq 'WEBHOOK_INGRESS_MASTER_KEY' "$TMP_ROOT/canonical.keys"
+grep -Fxq 'OUTBOUND_WEBHOOK_MASTER_KEY' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_INITIAL_OWNER_PASSWORD' "$TMP_ROOT/canonical.keys"
 grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/claim.canonical.keys"
 if grep -Fxq 'MOMO_BOOTSTRAP_CLAIM' "$TMP_ROOT/canonical.keys"; then
@@ -1293,8 +1298,8 @@ cmp "$alias_fixture/railway.out" "$alias_fixture/platform.out" || {
   exit 1
 }
 grep -Fxq 'OORT_SITE_ADDRESS=platform.example.test' "$alias_fixture/platform.out"
-grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform.err"
-# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 44.
+grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform.err"
+# #2438 — --railway --claim ≡ --platform railway --claim; 1:1 key swap; count 46.
 run_platform_stdout "$alias_fixture" "$alias_fixture/railway-claim.out" \
   "$alias_fixture/railway-claim.err" --railway --claim || {
   cat "$alias_fixture/railway-claim.err" >&2
@@ -1328,16 +1333,16 @@ if ! diff -u "$alias_fixture/claim.expected.keys" "$alias_fixture/claim.keys" \
   exit 1
 fi
 claim_t2_count="$(grep -c . "$alias_fixture/claim.keys" | tr -d ' ')"
-[ "$claim_t2_count" = "44" ] || {
-  echo "--railway --claim key-set count expected 44 got $claim_t2_count" >&2
+[ "$claim_t2_count" = "46" ] || {
+  echo "--railway --claim key-set count expected 46 got $claim_t2_count" >&2
   exit 1
 }
-grep -Fq -e '--platform railway 키 44개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
-echo "T2 --claim stdout count=$claim_t2_count (password variant 44; 1:1 swap)"
+grep -Fq -e '--platform railway 키 46개를 stdout에 썼다' "$alias_fixture/platform-claim.err"
+echo "T2 --claim stdout count=$claim_t2_count (password variant 46; 1:1 swap)"
 # The hand-set keys and the internal hostname suffix come from the same row.
 grep -Fq 'CENT_API_URL,WORKER_DATABASE_URL,CENTRIFUGO_CHANNEL_PROXY_SUBSCRIBE_HTTP_STATIC_HEADERS' "$alias_fixture/platform.err"
 grep -Fq '.railway.internal' "$alias_fixture/platform.err"
-# T2 stdout is the canonical 43 plus the stamp outside the heredoc. No
+# T2 stdout is the canonical 45 plus the stamp outside the heredoc. No
 # hosted-delivery key, no file. --railway is byte-identical by construction.
 grep -Fxq 'MOMO_SELF_HOST_PLATFORM=railway' "$alias_fixture/platform.out"
 test "$(grep -c '^MOMO_SELF_HOST_PLATFORM=' "$alias_fixture/platform.out")" = "1"
@@ -1446,7 +1451,7 @@ if awk '
   grab && index($0, "MOMO_SELF_HOST_PLATFORM=") == 1 { found = 1 }
   END { exit !found }
 ' "$ROOT/scripts/self_host_env.sh"; then
-  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 43-key set would grow" >&2
+  echo "MOMO_SELF_HOST_PLATFORM moved into the heredoc — the canonical 45-key set would grow" >&2
   exit 1
 fi
 
