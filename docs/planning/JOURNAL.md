@@ -3,6 +3,14 @@
 > 세션 종료 시 공용 계약에 따라 짧은 항목을 맨 위에 추가한다.
 > **로테이션(2026-09-01 재편):** 이 파일은 최근 20항목만 담는다. 갱신할 때 초과분을 해당 월의 `docs/planning/archive/JOURNAL-YYYY-MM.md`로 원문 그대로 이동한다.
 
+## 2026-09-22 · Fable · ★진행 브리핑 + 시장 동향(Muse·ZCode·Slack Code·NanoClaw·OpenUI) + AX 에이전트 행동 축 편성 — ADR-0186 Proposed·ADR-0004 증보 4 Accept·이슈 9·브리프 5
+
+- 복원: 09-12 #2501 정합 뒤 랜딩 0(main=engine=uxui 동일 트리). 미랜딩: #2498(로컬)·PR #2485/#2490/#2497·#2066(Proposed)·#2205.
+- 성재 결재(4): AX 첫 실물=ITO 전 초대 1종 · 승인 정책=위험 등급별 · ADR-0004 증보 4 Accept D2(a) · UX-R3a 팔레트 축소 해제. 「나머지는 설계 구체화, 준비가 온전하면 착수」.
+- 산출: `2026-09-22-plan-revision.md`(브리핑·동향·편성) · **ADR-0186**(propose/approve/execute, 선언형 카드, 1회 시크릿=결정 응답에만, DDL 무접촉, run park + `run_complete` 409, 부록 A~E 고정 계약) · 이슈 #2506~#2514 · 브리프 5본(#2066·AX-2·AX-3a·AX-3b·AX-4) · ROADMAP §1 AX 행.
+- 코드 실사: Agent Port 도구 7종은 전부 읽기·발화·run 수명 · 승인 `run_id NOT NULL` → hosted 제안은 claim한 job의 run 안에서 · `run_complete`는 승인 대기 미검사(가드 신설) · invites 라우트 5종·webhooks create/rotate/revoke 존재 · 외양은 localStorage(테마는 클라 명령 카드).
+- 다음: 문서 PR(track/engine) docs 게이트 → 랜딩·승격 → **성재: ADR-0186 Accept + W-A 발사 go(#2066 ∥ AX-2)** → planner #2498 인수·PR 3건 검수.
+
 ## 2026-09-12 · Astra + Grok 4.6 · 공용 파이프라인 경량화 (#2501)
 
 - 한 일: AGENTS 공용 계약·CLAUDE import, 공용 planning skill, 단일 CURRENT_STATE와 필요할 때 읽는 문서 구조. 이전 Fable 스냅샷·저널 원문은 archive 보존.

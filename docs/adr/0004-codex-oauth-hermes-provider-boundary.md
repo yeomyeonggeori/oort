@@ -268,7 +268,7 @@ opaque bearer뿐이다. Codex/OpenAI OAuth·원본 API 키는 유입하지 않�
 
 ## 증보 4 — 셀프호스트 webhook 마스터키 분리 + 설치 단위 rate 예산 (2026-09-11, planner 발제 — DEVIATION 2026-07-17(MOMO-412 / PR #443) 후속, #2066)
 
-- Status: **Proposed** (성재 결재 대기 — D2 택일 포함)
+- Status: **Accepted** (2026-09-22 성재 결재 — **D2 (a) 이행 복사** 채택, D1·D3·D4 권고안 그대로. 구현 티켓 #2066. 결재 문맥: `docs/planning/2026-09-22-plan-revision.md` §5 / ADR-0186 §9. 기안 2026-09-11 planner)
 - 발단: `OUTBOUND_WEBHOOK_MASTER_KEY`가 미설정이면 서버가 `JWT_HMAC`로 폴백한다(`server-rust/bins/momo-server/src/config.rs:85`, `:1475` — Swift 시절 `env("OUTBOUND_WEBHOOK_MASTER_KEY", jwtHMAC)`를 byte-for-byte 유지). 인바운드 네이티브 인그레스 시크릿도 `JWT_HMAC`에서 파생된다(`:1466`, `momo-webhook/src/crypto.rs:48` `momo.webhook.native.v1\n` 도메인 분리 — 암호학적으로는 안전). 생성기 `scripts/self_host_env.sh`는 `PROVIDER_LINK_MASTER_KEY`만 독립 생성한다(`:1443`, `:2105`). 결과: **셀프호스트 기본값이 JWT 시크릿 재사용**이고, JWT 회전 시 발급된 모든 네이티브/아웃바운드 webhook secret이 조용히 무효화되는 운영 결합이 남아 있다. `momo-webhook`에는 설치 단위 rate 예산이 없다(토큰 유출 시 채널 flood 상한이 회전/revoke뿐).
 - 경계 판단: 본문 불변식(사용자 provider 자격증명 비유입)은 **변경 없음**. 이 증보는 **서버 시크릿 계층 규칙**(증보 1 D2 "분리 마스터키"와 같은 계급)을 webhook 경로에 확장하는 것이다. 시크릿 정책 변경이므로 ADR-0100에 따라 Accepted 뒤에만 머지한다.
 
