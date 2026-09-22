@@ -54,6 +54,9 @@ CENT_TOKEN_HMAC=huddle-cent-token-$RUN_ID
 CENT_API_KEY=huddle-cent-api-$RUN_ID
 CENT_PROXY_SECRET=huddle-cent-proxy-$RUN_ID
 PROVIDER_LINK_MASTER_KEY=huddle-provider-link-$RUN_ID
+# ADR-0004 증보 4 (#2066): api·webhook-sender 가 요구하는 웹훅 파생 루트 2종.
+WEBHOOK_INGRESS_MASTER_KEY=huddle-webhook-ingress-$RUN_ID
+OUTBOUND_WEBHOOK_MASTER_KEY=huddle-webhook-outbound-$RUN_ID
 MOMO_CENTRIFUGO_WS_URL=ws://127.0.0.1:$CENT_PORT/connection/websocket
 MOMO_AGENT_SEED_MODE=none
 MIGRATE_IDEMPOTENCY_CHECK=1

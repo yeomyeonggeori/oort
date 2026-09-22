@@ -29,4 +29,9 @@
 - 전달: PR(track/engine) + `scripts/goal_release.sh 2066 --review --pr <url>` + 보고(한 일/커밋/검증/PR/남은 것·이탈, D2 택일 근거 3줄).
 
 ## 체크포인트
-(발사 시 기록)
+- 발사: 2026-09-22 · base tip `e52a9dc7`(track/engine, main 95199a69 sync 후) · 워크트리 `2066-server-security-outbound-webhook-master-key-per-install-rate-jwt-hmac-momo-412-deviation-2026-07-17`.
+- D1 택일: **두 키**(`WEBHOOK_INGRESS_MASTER_KEY` 신설 + `OUTBOUND_WEBHOOK_MASTER_KEY`). 정본 키 수 43→45, T2 44→46. 근거는 PR 본문 3줄.
+- #2433 백필 좌표: `scripts/self_host_env.sh`의 기존-env 분기 — `ensure_managed_role_keys`(`:876`) 옆에 `ensure_webhook_master_keys` 신설, 호출은 `:1921`의 `--ensure-managed-keys` 조기 종료 **앞**. `oort upgrade`가 `scripts/lib/oort_day2.sh:238 oort_ensure_managed_env_keys`(`:530`)로 이 분기를 재실행함을 확인했다 — ADR의 「oort upgrade 백필」은 실재한다.
+- doctor 좌표: `scripts/lib/oort_doctor.sh` `oort_doctor_check_env`(필수키는 `oort_doctor_generator_keys`가 heredoc에서 자동 도출) + 새 `minor` 경고 레코드.
+- 기존 limiter: **있음** — `webhook_ingress.rs:check_install_rate` → `crate::rate_limit::SlidingWindowRateLimiter`, 키 `webhook:{installation_id}`, 한도 `RATE_LIMIT_WEBHOOK_PER_INSTALLATION`(기본 60), 창 `RATE_LIMIT_WINDOW_SECONDS`. 새 버킷을 만들지 않고 **감사 1행만 보강**한다.
+- openapi: `/v1/webhooks/{workspaceId}/{installationId}`·`/hooks/{token}` 모두 이미 `429 → RateLimited` 를 싣는다 — 변경 없음.

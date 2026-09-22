@@ -48,14 +48,18 @@ scripts/self_host_env.sh --platform fly --published-image "$IMAGE_REF" --public-
 `$IMAGE_REF` is `jq -er '"\(.images.app.ref)@\(.images.app.digest_list)"' releases/latest.json`.
 Do not type `OORT_SITE_ADDRESS` / `OORT_CSP_CONNECT_SRC`. Custom domain:
 set `OORT_PUBLIC_ORIGIN=https://<host>` as a Fly secret (the origin URL is
-not one of the nine openssl secrets) **or** pass `--public-origin` over
+not one of the eleven openssl secrets) **or** pass `--public-origin` over
 `fly ssh` before first boot; DNS is human.
 
-The nine openssl secrets live in the volume env file
+The eleven openssl secrets live in the volume env file
 (`POSTGRES_PASSWORD`, `MOMO_APP_POSTGRES_PASSWORD`, `RELAY_POSTGRES_PASSWORD`,
 `WORKER_POSTGRES_PASSWORD`, `JWT_HMAC`, `CENT_TOKEN_HMAC`, `CENT_API_KEY`,
-`CENT_PROXY_SECRET`, `PROVIDER_LINK_MASTER_KEY`). If you use `fly secrets set`,
-set **those nine only** — never the env file. T1 first boot does not need
+`CENT_PROXY_SECRET`, `PROVIDER_LINK_MASTER_KEY`, `WEBHOOK_INGRESS_MASTER_KEY`,
+`OUTBOUND_WEBHOOK_MASTER_KEY`). The last two arrived with ADR-0004 증보 4
+(#2066) and the api **refuses to boot without them** — an install made before
+that gets them from `scripts/oort upgrade`, which copies the value already in
+use and re-issues nothing. If you use `fly secrets set`,
+set **those eleven only** — never the env file. T1 first boot does not need
 Fly secrets: the generator mints them onto the volume.
 
 ## Procedure
