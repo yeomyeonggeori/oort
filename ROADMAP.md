@@ -60,6 +60,7 @@
 | 모바일 | **M0 QR 기기 연결** | ADR-0180 1회용 링크 토큰: 서버 라우트 2 + 웹 QR 카드 + 폰 스캔 화면. **G1 창 안에서 선행**(셀프호스팅 blocker 무관, Railway E2E 마지막 칸) | 편성 완료 |
 | 모바일 | **M1 폰 패리티 · M2 TestFlight internal** | 관전·승인 축 완주 + 웹 전용 축 이관(#1908 #1892 #1876 #1748 #1752 #1604 #1600 #1396) + 폰 온보딩. **G1 이후 ITO와 병렬**. TestFlight internal은 M0 직후(성재 손) | 편성 완료(순서 확정) |
 | 파이프 | **P1~P8** | PIPELINE.md 단일 설정(레인 추상화) · AGENTS.md→AGENTS.md 병합 · `.claude/commands` · worker-lane 스킬 · handoffs archive · planning_context 갱신 | 편성 완료 |
+| 공통 | **AX 에이전트 행동**(2026-09-22 편성, `docs/planning/2026-09-22-plan-revision.md`) | ADR-0186(Proposed): 에이전트 제안→사람 승인→서버 실행 + 선언형 카드 카탈로그. AX-2 레지스트리·팔레트(UX-R3a 축소 해제) → AX-3a/3b 초대 1종 → AX-4 카드 → AX-6 E2E(ITO 전) → AX-5·7·8(ITO 뒤) | 편성 완료·ADR Accept 대기 |
 | 공통 | **런칭 보조축 — Bring your hosted agent** | ADR-0162 축 — 계약·순서는 `BUILD_TICKETS.md` §런칭 보조축(유지). UX-R2c(첫 에이전트 연결 퍼널)·SH-6이 이 축의 UI/서버 잔여를 흡수 | 부분 랜딩 |
 
 ### 게이트
