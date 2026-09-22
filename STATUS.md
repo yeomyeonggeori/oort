@@ -1,5 +1,11 @@
 # oort 진행 현황
 
+## 오버레이 층 이름표 (#2044 #2075 #1919, R2 2026-09-22)
+
+- Track UXUI. `fix/2044-overlay-layers` onto `origin/track/uxui`. `--layer-content-float`(100) < `--layer-overlay-scrim`(200) < `--layer-overlay-surface`(300) 세 이름을 `tokens.css` 한 곳에 두고 정본 §2.6 D6 / §3.4에 적음. 값은 남은 Tailwind `z-*` 잔량(상한 `z-50`) 위 100 단위 — R1 B-1·B-2가 잡은 1/2/3 밴드는 잔량 아래였다. 잔량 셋(`ArtifactCard`·`WorkspaceRail`·`WorkSessionDetail`)은 소유 상자의 `isolate` 로 루트에서 경쟁하지 않는다. body로 포털되는 컴포저 서식 트레이는 떠 있는 **표면**이라 `--layer-overlay-surface`. 소비자 없는 `--layer-confirm-ephemeral` 은 삭제(ADR-0182 세 형은 전부 표면 안/in-flow).
+- 검증: `clients/web/scripts/capture-overlay-layers.mjs` — 다섯 오버레이 종류 히트 테스트 + **루트 스윕**(문서 스태킹 루트에서 이름 밖 수치 z = 0) + R1이 붉게 본 장면 3(880 스레드 트레이·1280 ⌘K 위 아티팩트·390 서랍 위 아티팩트)과 신규 2(두 서랍 M-1·언펄 X↔호버 툴바 M-3)를 두 스킴에서 캡처. 사보타주 4개가 각각 빨강: `artifact-root-z`(isolate 제거 → 루트 스윕 2건)·`tray-content-float`(트레이 hitIsTray=false)·`unread-pill`(z-10 → 루트 스윕 1건)·`scrim`. `overlayLayers.test.ts` 10 시험(순서·바닥·단일 철자·CSS 수치 0·여섯 파일 `data-overlay-layer` 위치·잔량↔isolate 짝). lint 0 오류 / typecheck / `npm test` 269 파일 3066 / `design_preflight_web.sh` PASS.
+- runtime-unverified: 실서버 타임라인에서 사람 클릭 왕복(캡처 목). Tauri WKWebView의 스태킹 해석은 헤드리스 Chromium에서만 측정. 두 서랍이 함께 서는 장면은 앱이 `inert` 로 막아 존재하지 않음 — 하네스가 그 사실을 잰다.
+
 ## 연결 기기 refresh/revoke 원자성 (#2498, 2026-09-12)
 
 - Track engine. `fix/2498-serialize-linked-device-refresh-and-revoke`. linked refresh는 `device_link_token` 안정 행을 먼저 잠그고, 현재 pair를 재확인한 뒤 consume·발급·rebind를 같은 tenant tx에서 끝내거나 전부 rollback한다. revoke도 같은 잠금 순서를 쓴다. 일반 로그인 refresh는 기존 경로.
@@ -38,6 +44,7 @@
 - Track engine. `feat/2029-linked-devices` onto `origin/track/engine`. ADR-0180 D5: `GET /v1/auth/devices` · `DELETE /v1/auth/devices/{id}`. 사람 bearer만. `id`=`device_link_token.id`. 현재 세션 해제는 400 `cannot_revoke_current`(로그아웃 경로). 남의 id는 404(존재 비누설). 스키마 변경 없음 — `token.device_label`+`device_link_token` join. refresh는 라벨을 복사하고 `redeemed_*`를 재결속한다. 푸시 `/v1/workspaces/{ws}/devices`와 별개.
 - 검증: `cargo fmt --all --check` · `clippy -p momo-auth -p momo-server -D warnings` · `cargo test -p momo-auth --lib` 86 · `cargo test -p momo-server --lib` 334 · `linked_devices_conformance_pg` 2 ignored PASS(전용 PG 35432, e2e-* 무접촉). `scripts/verify_openapi_contract_rust.sh` PASS 87/87 samples · 84 ops coverage(신규 두 경로는 sampled 목록 밖 — `scripts/**` 비스코프). 사보타주: revoke no-op → 401 단언 RED; list owner filter 제거 → "other member sees 0 rows" RED.
 - runtime-unverified: 실폰 redeem 후 설정 UI(uxui A-46). `scripts/verify_web_generated_types.sh`는 web-legacy 은퇴로 이 트리에 없음.
+
 
 ## momo_notifier GRANT 트림 (#2448, 2026-09-11)
 
