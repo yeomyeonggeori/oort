@@ -5,6 +5,10 @@ import {
   serverSurface,
 } from "../capabilities/serverSurfaces";
 import { parseApprovalStatus, type ApprovalStatus } from "./agentCardModel";
+import {
+  parseDecisionResult,
+  type DecisionActionResult,
+} from "../approvals/secretOnce";
 
 // =============================================================================
 // Approval decision transport (R-1 §4). Existing landed REST, nothing new:
@@ -58,6 +62,14 @@ export interface ApprovalDecisionReceipt {
   decidedAtMs?: number | null;
   decision_reason?: string | null;
   decisionReason?: string | null;
+  /**
+   * 워크스페이스 행동이 실제로 한 일 (ADR-0186 부록 C). 승인 성공에만 실린다.
+   *
+   * 읽기만 하고 해석은 `features/approvals/secretOnce.ts` 가 진다 — 1회 값의
+   * 규율(D4: 여기 말고는 어디에도 두지 않는다)이 이 전송 파일이 아니라 그
+   * 모듈 하나에 적혀 있어야, 두 번째 소비자(폰 AX-7)가 규율까지 같이 받는다.
+   */
+  result?: unknown;
 }
 
 /**
@@ -97,6 +109,15 @@ export interface DecisionOutcome {
   decidedByMemberId?: string;
   /** Quiet note for `superseded` (decided elsewhere, or expired first). */
   note?: string;
+  /**
+   * 승인 성공에만 있는 행동 결과 (ADR-0186 부록 C).
+   *
+   * **호출자는 이것을 저장하지 않는다.** 안에 든 `secretOnce.value` 는 이
+   * 응답에만 존재하는 1회 값이고(D4), 화면은 그것을 React 상태에 두었다가
+   * 언마운트와 함께 잃는다. props·store·localStorage·URL 에 쓰는 구현은
+   * ADR 이 이름으로 금지한 위반이다.
+   */
+  result?: DecisionActionResult;
   /** User copy for `error`. States what happened and what to do next. */
   errorCopy?: string;
   /**
@@ -105,6 +126,14 @@ export interface DecisionOutcome {
    *
    *   idempotency_conflict  캐시된 멱등 키를 버리고 새 키로 다시 시도해야 한다.
    *   surface_absent        이 서버에 승인 라우트가 없다. **장애가 아니다.**
+   *   forbidden             이 사람은 이 결정을 내릴 수 없다(HTTP 403).
+   *
+   * `forbidden` 은 **무엇이 모자란지는 말하지 않는다.** 지금 서버의 오류 봉투에는
+   * 코드 칸이 없고(`ErrorResponse` 는 `{error:{message}}` 뿐), ADR-0186 §5 가
+   * 말하는 `role_required` 를 실어 보내는 필드는 부록 A~C·E 어디에도 고정돼 있지
+   * 않다. 없는 필드를 짐작해 파싱하는 것이 이 저장소가 「발명」이라 부르는 것이다.
+   * 대신 **카드가 이미 아는 사실**로 가른다: 부록 A 의 `action.required_role` 이
+   * 실린 승인의 403 은 역할이 모자란 것이고, 그 판정은 화면이 진다.
    *
    * `surface_absent`가 별도의 `kind`가 아니라 여기 있는 이유: 이 결과는
    * `kind: "error"`로 남아야 한다. 결정은 실제로 기록되지 않았고, 그것을
@@ -118,7 +147,7 @@ export interface DecisionOutcome {
    * (features/capabilities/serverSurfaces.ts), 한 화면에서 같은 사실이 두 가지
    * 색을 갖는 일이 없어야 한다.
    */
-  errorCode?: "idempotency_conflict" | "surface_absent";
+  errorCode?: "idempotency_conflict" | "surface_absent" | "forbidden";
 }
 
 const SETTLED = new Set<ApprovalStatus>([
@@ -296,6 +325,11 @@ export function interpretReceipt(
 
   if (httpStatus === 200) {
     const outcome: DecisionOutcome = { kind: "committed" };
+    // 부록 C 는 이 블록을 **200 에만** 못박았다("`secretOnce` 는 승인 성공에만
+    // 있다"). 409/403 에서도 읽으면, 재생된 영수증이나 거절 응답에 우연히 실린
+    // 것을 화면이 방금 만들어진 링크로 그리게 된다.
+    const result = parseDecisionResult(receipt.result);
+    if (result !== null) outcome.result = result;
     if (status !== null) outcome.status = status;
     if (decidedAtMs !== undefined) outcome.decidedAtMs = decidedAtMs;
     if (decidedBy !== undefined) outcome.decidedByMemberId = decidedBy;
@@ -329,6 +363,7 @@ export function interpretReceipt(
   }
   return {
     kind: "error",
+    errorCode: "forbidden",
     errorCopy: "이 승인을 결정할 권한이 없습니다. 채널 멤버인지 확인하세요.",
   };
 }

@@ -336,6 +336,7 @@ afterEach(() => {
   mountedHost?.remove();
   mountedHost = null;
   vi.useRealTimers();
+  vi.unstubAllGlobals();
 });
 
 describe("「명령」 그룹은 레지스트리를 그린다", () => {
@@ -504,9 +505,55 @@ describe("명령을 실행하면 표면이 닫힌다", () => {
 });
 
 describe("서버 행동 카탈로그는 없으면 숨는다 (ADR-0186 부록 E)", () => {
-  it("제품 기본값(요청 없음)에서는 행동 줄이 0이다", async () => {
+  it("라우트가 없는 서버(404)에서는 행동 줄이 0이다 — 팔레트가 묻고, 답이 없으면 숨는다", async () => {
+    const fetchMock = vi.fn(
+      async (input: RequestInfo | URL) =>
+        new Response(JSON.stringify({ error: { message: "not found", input } }), {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
     await mount();
+    await settle();
     expect(document.querySelectorAll("[data-action-id]")).toHaveLength(0);
+    // 묻기는 했다. 「요청을 안 보내서 0개」와 「물었는데 없어서 0개」는 다른
+    // 사실이고, AX-4 가 바꾼 것이 정확히 그 차이다.
+    expect(
+      fetchMock.mock.calls.some((call) =>
+        String(call[0]).endsWith(`/v1/workspaces/${WS}/actions`)
+      )
+    ).toBe(true);
+  });
+
+  it("실패는 재시도하지 않는다 — 곁들여 서는 목록이 팔레트를 붙잡지 않는다", async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL) => {
+      throw new TypeError("network down");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    await mount();
+    await settle();
+    await settle();
+    expect(document.querySelectorAll("[data-action-id]")).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.filter((call) =>
+        String(call[0]).endsWith("/actions")
+      )
+    ).toHaveLength(1);
+  });
+
+  it("시험이 본문을 건네면 요청은 나가지 않는다 (prop 은 서버 대신 답하는 자리다)", async () => {
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) => new Response("{}", { status: 200 })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    await mount({ actionsResponse: { actions: [] } });
+    await settle();
+    expect(
+      fetchMock.mock.calls.filter((call) =>
+        String(call[0]).endsWith("/actions")
+      )
+    ).toHaveLength(0);
   });
 
   it("모양이 어긋난 응답도 0이다 — 반쯤 아는 목록은 그리지 않는다", async () => {
@@ -550,6 +597,79 @@ describe("서버 행동 카탈로그는 없으면 숨는다 (ADR-0186 부록 E)"
     expect((rows[0] as HTMLElement).dataset.actionId).toBe("invite.create");
     // 명령 그룹과 섞이지 않는다.
     expect(commandRows().some((row) => row.dataset.actionId)).toBe(false);
+  });
+
+  it("v1 에서 Enter 는 그 일을 직접 할 수 있는 설정 표면으로 데려간다", async () => {
+    await mount({
+      actionsResponse: {
+        actions: [
+          {
+            id: "invite.create",
+            title: "팀원 초대 링크 만들기",
+            summary: "관리자 권한으로 초대 링크를 만듭니다.",
+            risk: "approval",
+            requiredRole: "admin",
+            executable: true,
+            unavailableReason: null,
+          },
+        ],
+      },
+    });
+    const row = document.querySelector(
+      '[data-action-id="invite.create"]'
+    ) as HTMLElement;
+    expect(row.getAttribute("aria-disabled")).not.toBe("true");
+    expect(row.textContent).toContain("설정에서 직접 하기");
+    await act(async () => {
+      row.click();
+    });
+    await settle();
+    expect(currentPath).toBe("/settings?section=members");
+    // 팔레트는 명령과 같은 규율로 닫힌다.
+    expect(openChangeCalls).toContain(false);
+  });
+
+  it("목적지를 모르거나 실행기가 없으면 줄은 눌리지 않는다", async () => {
+    await mount({
+      actionsResponse: {
+        actions: [
+          {
+            id: "channel.archive",
+            title: "채널 보관",
+            summary: "이 빌드가 목적지를 모르는 행동.",
+            risk: "approval",
+            requiredRole: "admin",
+            executable: true,
+            unavailableReason: null,
+          },
+          {
+            id: "invite.create",
+            title: "팀원 초대 링크 만들기",
+            summary: "이 서버에는 실행기가 없다.",
+            risk: "approval",
+            requiredRole: "admin",
+            executable: false,
+            unavailableReason: "이 서버에는 아직 없습니다.",
+          },
+        ],
+      },
+    });
+    const rows = [
+      ...document.querySelectorAll("[data-action-id]"),
+    ] as HTMLElement[];
+    expect(rows).toHaveLength(2);
+    for (const row of rows) {
+      expect(row.getAttribute("aria-disabled")).toBe("true");
+      expect(row.textContent).not.toContain("설정에서 직접 하기");
+    }
+    expect(rows[1]?.textContent).toContain("이 서버에는 아직 없습니다.");
+    await act(async () => {
+      rows[0]?.click();
+    });
+    await settle();
+    // 아무 데도 가지 않았다. 처음 서 있던 자리 그대로다.
+    expect(currentPath).toBe("/inbox");
+    expect(openChangeCalls).not.toContain(false);
   });
 });
 

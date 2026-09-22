@@ -16,6 +16,8 @@ import {
   spawnHostGate,
 } from "@momo/core/features/timeline/spawnHostChoice";
 import { SpawnHostChoice } from "./SpawnHostChoice";
+import { CopyButton } from "@/features/settings/SettingsFields";
+import type { SecretOnce } from "@momo/core/features/approvals/secretOnce";
 
 // =============================================================================
 // 승인 결정 컨트롤 (R-1 §4, goal B5.3b D-5).
@@ -170,6 +172,66 @@ const APPROVAL_VERBS: DecisionVerbs = {
   rejectConfirm: REJECT_CONFIRM,
 };
 
+/**
+ * 1회 값이 사는 **유일한 화면 자리** (ADR-0186 D4 · ADR-0182 ①).
+ *
+ * ## 왜 이 컴포넌트에는 상태가 없는가
+ *
+ * 값은 호출자(`AgentCard` 의 `ApprovalBody`)의 React state 에 있고 이 함수는
+ * 받아서 그린다. 그래야 하는 이유가 이 카드의 생애에 있다: 결정이 확정되면
+ * 승인 카드의 footer 가 컨트롤에서 **영수증 줄**로 바뀌고 `ApprovalActions` 는
+ * 언마운트된다. 값을 여기 두면 그려야 할 바로 그 순간에 사라진다.
+ *
+ * 그리고 그것이 전부다 — props 도 store 도 localStorage 도 URL 도 아니다.
+ * 새로고침하면 호출자의 state 와 함께 사라지고, 그 뒤에 남는 것은 영속 카드의
+ * 「1회 표시됐습니다 · 다시 만드세요」뿐이다(부록 B). 값을 살아남게 만드는
+ * 구현이 D4 가 이름으로 금지한 위반이다.
+ *
+ * 복사 컨트롤은 설정의 것을 그대로 든다(`CopyButton` → `useClipboardCopy` →
+ * `useInlineConfirm`). 두 번째 복사 버튼을 지으면 「복사됨」이 언제 풀리는지가
+ * 두 벌이 되고, ADR-0182 D5 의 1.6s 는 그중 한 벌에만 남는다.
+ */
+export const LINK_ONCE_LEAD =
+  "이 링크는 이 화면에서만 볼 수 있습니다. 지금 전달하세요.";
+
+export function LinkOnce({
+  secret,
+  testIdPrefix = "approval",
+  className,
+}: {
+  secret: SecretOnce;
+  testIdPrefix?: string;
+  className?: string;
+}) {
+  return (
+    <div
+      className={cn("px-3 py-2", className)}
+      data-testid={`${testIdPrefix}-link-once`}
+    >
+      {/* 낭독은 이 한 줄이 진다. 값 자체를 `role=status` 로 읽히게 하면
+          스크린리더가 긴 URL 을 통째로 읽고, 그 사이 「이 화면에서만」이라는
+          단 하나의 중요한 사실이 맨 뒤로 밀린다. */}
+      <p role="status" className="break-keep text-body text-ink">
+        {LINK_ONCE_LEAD}
+      </p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <span
+          data-numeric
+          data-testid={`${testIdPrefix}-link-once-value`}
+          className="min-w-0 flex-1 truncate font-mono text-meta text-ink"
+        >
+          {secret.value}
+        </span>
+        <CopyButton
+          value={secret.value}
+          subject="초대 링크"
+          testId={`${testIdPrefix}-link-once-copy`}
+        />
+      </div>
+    </div>
+  );
+}
+
 export function ApprovalActions({
   approvalId,
   armed,
@@ -181,6 +243,7 @@ export function ApprovalActions({
   reversible = true,
   execution = null,
   verbs = APPROVAL_VERBS,
+  forbiddenCopy = null,
 }: {
   approvalId: string;
   armed: Armed;
@@ -218,6 +281,16 @@ export function ApprovalActions({
    * 재개/중단으로 바꿔 든다 — 낱말만이고 계약은 그대로다(`DecisionVerbs`).
    */
   verbs?: DecisionVerbs;
+  /**
+   * 403 일 때 이 카드가 대신 할 말 (ADR-0186 §5).
+   *
+   * 기본 문장("채널 멤버인지 확인하세요")은 도구 호출 승인의 것이고 지금도
+   * 옳다. 워크스페이스 행동 승인만 다른 사실을 안다 — 부록 A 가 `required_role`
+   * 을 실어 보냈으므로, 이 403 에서 모자란 것은 멤버십이 아니라 **역할**이다.
+   * 그 판정을 이 파일이 지지 않고 호출자가 문장으로 건네는 이유는 낱말만
+   * 갈라지고 계약은 하나로 남기는 이 컴포넌트의 규칙 그대로다(`verbs`).
+   */
+  forbiddenCopy?: string | null;
 }) {
   // workspaceId comes from session context rather than a prop chain: both
   // callers sit several components below the shell.
@@ -282,6 +355,14 @@ export function ApprovalActions({
         setErrorTone(
           outcome.errorCode === "surface_absent" ? "unavailable" : "error"
         );
+        // 역할이 모자란 403 은 사고가 아니다. 승인은 여전히 대기이고(§5), 사람이
+        // 할 수 있는 다음 행동이 있다 — 그래서 붉은 alert 이 아니라 조용한
+        // 안내로 서고, 문장은 호출자가 아는 사실에서 온다.
+        if (outcome.errorCode === "forbidden" && forbiddenCopy !== null) {
+          setErrorTone("unavailable");
+          setErrorCopy(forbiddenCopy);
+          return;
+        }
         setErrorCopy(outcome.errorCopy ?? "결정을 처리하지 못했습니다.");
         return;
       }
