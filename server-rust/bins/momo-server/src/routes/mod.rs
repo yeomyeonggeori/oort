@@ -1,5 +1,7 @@
 //! HTTP routes. Each module owns one Swift route file's parity surface.
 
+/// ADR-0186 D1 — the workspace action catalog and its argument normaliser.
+pub mod actions;
 pub mod agent_credentials;
 pub mod agent_gateway;
 pub mod agent_mentions;

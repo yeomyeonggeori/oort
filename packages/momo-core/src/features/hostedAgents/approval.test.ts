@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { HostedAgentConnection } from "./model";
+import { HOSTED_AGENT_SCOPES, type HostedAgentConnection } from "./model";
 import {
   approvableChannelIds,
   approvalConsequence,
@@ -175,6 +175,68 @@ describe("RED PROOF ④ 접속 권한은 꺼지지 않는다", () => {
       expect(choice.detail.length).toBeGreaterThan(10);
       expect(choice.label.length).toBeGreaterThan(0);
     }
+  });
+
+  // ---- ADR-0186 D2 ---------------------------------------------------------
+
+  it("동의 화면은 서버의 일곱 스코프를 같은 순서로 그린다", () => {
+    // **이 시험이 재는 것과 못 재는 것.**
+    //
+    // 재는 것: 목록(`HOSTED_AGENT_SCOPES`)과 선택지(`HOSTED_SCOPE_CHOICES`)가
+    // 같은 값·같은 순서라는 것. 권한 목록에 있는데 선택지가 없으면 사람은 승인할
+    // 방법이 없고, 선택지에 있는데 목록에 없으면 `normalizeScopes` 가 조용히
+    // 버린다 — 둘 다 화면에서만 드러나는 결함이다.
+    //
+    // **못 재는 것**: 이 배열이 서버·openapi 와 같다는 것. 이 패키지는
+    // `node:fs`·`import.meta` 가 금지(`purity.mjs`)라 vitest 가 openapi.yaml 을
+    // 읽을 수 없어서, 아래는 리터럴 단정이다 — 개수 변화와 마지막 항목 개명은
+    // 잡지만 중간 항목의 개명·재정렬은 통과한다. 서버 쪽 정본 대조는
+    // `routes::actions::the_hosted_scope_vocabulary_is_one_list_everywhere`.
+    expect([...HOSTED_AGENT_SCOPES]).toEqual(
+      HOSTED_SCOPE_CHOICES.map((choice) => choice.id)
+    );
+    expect([...HOSTED_AGENT_SCOPES]).toEqual([
+      "agent:port:connect",
+      "agent:inbox:read",
+      "messages:read",
+      "messages:write",
+      "agent:jobs:read",
+      "agent:runs:callback",
+      "workspace:propose",
+    ]);
+  });
+
+  it("제안 권한은 기본으로 요청하지 않고, 껐다 켤 수 있다", () => {
+    // ADR-0186 D2: 「기본 페어링은 요청하지 않는다」. 워크스페이스를 건드리는
+    // 유일한 줄이 기본값에 섞여 있으면 사람은 그것을 승인한 줄도 모른다.
+    expect(DEFAULT_HOSTED_SCOPES).not.toContain("workspace:propose");
+    const proposal = HOSTED_SCOPE_CHOICES.find(
+      (choice) => choice.id === "workspace:propose"
+    );
+    expect(proposal?.required).toBe(false);
+    expect(normalizeScopes(["workspace:propose"])).toEqual([
+      "agent:port:connect",
+      "workspace:propose",
+    ]);
+  });
+
+  it("제안 권한의 문장은 실행 주체를 말한다", () => {
+    // 이 줄만 읽고 넘기는 사람이 「초대·웹훅이 에이전트 손에 들어간다」로 읽으면
+    // 정확히 반대다. 두 문장 모두 필요하다: 무엇을 할 수 있는가(제안), 그리고
+    // 실제로 실행하는 것이 누구인가(승인한 사람).
+    const proposal = HOSTED_SCOPE_CHOICES.find(
+      (choice) => choice.id === "workspace:propose"
+    );
+    expect(proposal?.detail).toContain("제안할 수 있음(실행은 사람 승인)");
+    expect(proposal?.detail).toContain("승인한 사람의 권한으로 실행");
+    // 결과 문장에서도 「제안」이 떨어지지 않는다 — 여러 줄이 이어 붙어 한 문장이
+    // 되므로 여기서 줄이면 요약이 권한을 과장한다.
+    expect(scopeActionList(["agent:port:connect", "workspace:propose"])).toEqual([
+      "워크스페이스 변경 제안(실행은 사람 승인)",
+    ]);
+    expect(
+      approvalConsequence("hermes", 2, ["agent:port:connect", "workspace:propose"])
+    ).toContain("워크스페이스 변경 제안(실행은 사람 승인)");
   });
 });
 

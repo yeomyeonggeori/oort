@@ -54,6 +54,34 @@ async fn superuser_pool() -> PgPool {
         .expect("connect to the tools conformance DB as superuser")
 }
 
+/// The **`momo_notifier`** pool — the posture `momo-notifier` actually runs its
+/// sweep in.
+///
+/// Not a convenience: step 1 of `sweep_expired_approvals` is a deliberately
+/// cross-tenant read (`workspaces_with_overdue_approvals`) issued with no
+/// `app.workspace_id` bound, because a sweep cannot know which tenants need
+/// visiting until it looks. On a NOBYPASSRLS role that statement does not merely
+/// return nothing — the RLS policy's `current_setting('app.workspace_id',
+/// true)::uuid` casts an empty string and raises `22P02`. `momo_notifier` is one
+/// of the two roles AGENTS.md keeps as a standing BYPASSRLS exception for
+/// exactly this scan, so running the sweep on `momo_app` would be testing a
+/// posture production never uses.
+async fn momo_notifier_pool() -> PgPool {
+    let options: PgConnectOptions = database_url()
+        .parse()
+        .expect("DATABASE_URL parses as a postgres connect string");
+    PgPoolOptions::new()
+        .max_connections(4)
+        .connect_with(
+            options.username("momo_notifier").password(
+                &std::env::var("MOMO_NOTIFIER_PASSWORD")
+                    .unwrap_or_else(|_| "momo_notifier_dev_pw".to_string()),
+            ),
+        )
+        .await
+        .expect("connect as momo_notifier after bootstrap_roles.sql")
+}
+
 async fn momo_app_pool() -> PgPool {
     let options: PgConnectOptions = database_url()
         .parse()
@@ -360,7 +388,7 @@ async fn seed(pool: &PgPool) -> Fixture {
            confirmed_by,confirmed_at,approved_channel_ids,approved_scopes,created_by) \
          VALUES($1,$2,$3,'detected',now(),now(),$4,$4,now(),$5, \
            ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write', \
-                 'agent:jobs:read','agent:runs:callback']::text[],$4)",
+                 'agent:jobs:read','agent:runs:callback','workspace:propose']::text[],$4)",
     )
     .bind(hosted_connection)
     .bind(workspace)
@@ -385,6 +413,10 @@ async fn seed(pool: &PgPool) -> Fixture {
             "messages:write",
             "agent:jobs:read",
             "agent:runs:callback",
+            // ADR-0186 D2 — the fixture's hosted credential carries the propose
+            // scope so the *narrowing* tests below have something to narrow. It
+            // is not a default anywhere in the product.
+            "workspace:propose",
         ],
         human,
     )
@@ -581,6 +613,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
             "oort_job_release",
             "oort_run_event",
             "oort_run_complete",
+            "oort_action_propose",
         ]
     );
 
@@ -620,7 +653,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     sqlx::query(
         "UPDATE hosted_agent_connection SET approved_scopes = \
            ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write', \
-                 'agent:jobs:read','agent:runs:callback']::text[] \
+                 'agent:jobs:read','agent:runs:callback','workspace:propose']::text[] \
          WHERE workspace_id=$1 AND id=$2",
     )
     .bind(fixture.workspace)
@@ -640,7 +673,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
     );
     sqlx::query(
         "UPDATE token SET scopes=ARRAY['agent:port:connect','agent:inbox:read','messages:read', \
-           'messages:write','agent:jobs:read','agent:runs:callback']::text[] \
+           'messages:write','agent:jobs:read','agent:runs:callback','workspace:propose']::text[] \
          WHERE workspace_id=$1 AND id=$2",
     )
     .bind(fixture.workspace)
@@ -667,7 +700,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        8,
+        9,
         "a foundation request proves the binding and re-activates it"
     );
     let reactivated: String = sqlx::query_scalar(
@@ -748,7 +781,7 @@ async fn the_advertised_catalog_follows_the_connection_lifecycle_and_the_scopes(
         list_tools(&client, &base, &fixture.hosted_bearer)
             .await
             .len(),
-        8,
+        9,
         "restoring the connection restores the catalog"
     );
 
@@ -1998,6 +2031,30 @@ async fn the_advertised_argument_schema_is_what_execution_accepts() {
             "oort_run_event",
             json!({"leaseHandle": "momo_lease_v1.AAAA", "status": "succeeded"}),
         ),
+        // ADR-0186: the proposal surface is narrower than the REST surface it
+        // will execute through, and the narrowing is enforced before any
+        // transaction opens — an id outside the registry, a role the card may
+        // not ask for, and a use count past the proposal ceiling that
+        // `POST …/invites` itself would have accepted.
+        (
+            "oort_action_propose",
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "webhook.create", "args": {}}),
+        ),
+        (
+            "oort_action_propose",
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create",
+                   "args": {"role": "guest"}}),
+        ),
+        (
+            "oort_action_propose",
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create",
+                   "args": {"maxUses": 101}}),
+        ),
+        (
+            "oort_action_propose",
+            json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create",
+                   "args": {"maxUse": 1}}),
+        ),
     ] {
         let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, arguments).await;
         assert_eq!(status, 400, "{tool} must refuse: {refused}");
@@ -2111,4 +2168,717 @@ async fn the_advertised_argument_schema_is_what_execution_accepts() {
     .await;
     assert_eq!(status, 400, "{overflow}");
     assert_eq!(error_code(&overflow), -32602);
+}
+
+// ---------------------------------------------------------------------------
+// (8) ADR-0186 D2 — proposing parks the run and nothing else happens
+// ---------------------------------------------------------------------------
+
+/// The whole propose axis, end to end, against the real router.
+///
+/// What this proves that no unit test can: that the approval, the card and the
+/// run transition land in **one** transaction on a real database; that the
+/// parked run is genuinely unreachable by the two verbs that would strand it;
+/// that **no** `agent_job` is enqueued (ADR-0186 §5 — 제안 경로에 resume job 0건);
+/// that a decision on a `workspace_action` is refused without consuming the
+/// approval while AX-3b is unlanded; and that the expiry sweep settles it
+/// instead of tripping over a payload shaped unlike a tool call.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_proposal_parks_the_run_and_opens_no_other_path() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app.clone(), true).await;
+    let client = reqwest::Client::new();
+
+    // ---- the run, from a human mention, exactly as production makes one ----
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{} 초대 링크 하나 만들어줘", hosted_handle(&su, fixture.hosted_agent).await)
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    // ---- red proof 1: the scope, on both halves -----------------------------
+    //
+    // Narrow the credential alone and the tool disappears from the listing and
+    // answers `unknown tool` when called — the same answer a tool that does not
+    // exist gets, so a refusal cannot be used to discover the catalog.
+    sqlx::query(
+        "UPDATE token SET scopes=ARRAY['agent:port:connect','agent:inbox:read','messages:read', \
+           'messages:write','agent:jobs:read','agent:runs:callback']::text[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_token)
+    .execute(&su)
+    .await
+    .unwrap();
+    let narrowed = list_tools(&client, &base, &fixture.hosted_bearer).await;
+    assert!(
+        !narrowed.contains(&"oort_action_propose".to_string()),
+        "a credential without workspace:propose must not see the tool: {narrowed:?}"
+    );
+    let (status, invisible) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": "momo_lease_v1.AAAA", "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 400, "{invisible}");
+    assert_eq!(error_code(&invisible), -32602, "invisible reads as unknown");
+    sqlx::query(
+        "UPDATE token SET scopes=ARRAY['agent:port:connect','agent:inbox:read','messages:read', \
+           'messages:write','agent:jobs:read','agent:runs:callback','workspace:propose']::text[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_token)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // …and the human's half closes it just as completely.
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = \
+           ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write', \
+                 'agent:jobs:read','agent:runs:callback']::text[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+    assert!(
+        !list_tools(&client, &base, &fixture.hosted_bearer)
+            .await
+            .contains(&"oort_action_propose".to_string()),
+        "an unapproved scope closes the tool even when the credential carries it"
+    );
+    sqlx::query(
+        "UPDATE hosted_agent_connection SET approved_scopes = \
+           ARRAY['agent:port:connect','agent:inbox:read','messages:read','messages:write', \
+                 'agent:jobs:read','agent:runs:callback','workspace:propose']::text[] \
+         WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_connection)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // ---- claim, then propose ----------------------------------------------
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let jobs = structured(&claimed)["jobs"].as_array().expect("jobs");
+    assert_eq!(jobs.len(), 1);
+    let handle = jobs[0]["leaseHandle"].as_str().expect("handle").to_string();
+
+    let agent_jobs_before = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+
+    let (status, proposed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({
+            "handle": handle,
+            "actionId": "invite.create",
+            "args": {"role": "member", "maxUses": 2, "expiresInDays": 3},
+            "rationale": "새 팀원 온보딩 요청"
+        }),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    let result = structured(&proposed);
+    assert_eq!(result["status"], json!("pending"));
+    let approval_id = Uuid::parse_str(result["approvalId"].as_str().expect("approvalId"))
+        .expect("approvalId is a uuid");
+    let card_message_id = Uuid::parse_str(result["cardMessageId"].as_str().expect("cardMessageId"))
+        .expect("cardMessageId is a uuid");
+    assert!(result["expiresAtMs"].as_i64().expect("expiresAtMs") > 0);
+    // Nothing internal crosses the wire, here as everywhere else.
+    let rendered = result.to_string();
+    for hidden in ["runId", "run_id", "jobId", "leaseId", "code", "secret"] {
+        assert!(!rendered.contains(hidden), "{hidden} leaked: {rendered}");
+    }
+
+    // ---- red proof 2: one transaction wrote all three things ---------------
+    let (action_type, approval_status, payload, request_message_id, requested_by, channel_id): (
+        String,
+        String,
+        Value,
+        Option<Uuid>,
+        Uuid,
+        Uuid,
+    ) = sqlx::query_as(
+        "SELECT action_type, status::text, payload, request_message_id, requested_by, channel_id \
+           FROM approval WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .expect("the approval row exists");
+    assert_eq!(action_type, "workspace_action");
+    assert_eq!(approval_status, "pending");
+    assert_eq!(requested_by, fixture.hosted_agent, "the agent asked");
+    assert_eq!(channel_id, fixture.channel);
+    assert_eq!(request_message_id, Some(card_message_id), "card ↔ approval");
+    assert_eq!(payload["action"]["id"], json!("invite.create"));
+    // The **normalised** args, not what the agent typed: the card and the
+    // executor must be reading the same numbers.
+    assert_eq!(
+        payload["action"]["args"],
+        json!({"role": "member", "maxUses": 2, "expiresInDays": 3})
+    );
+    assert_eq!(payload["action"]["rationale"], json!("새 팀원 온보딩 요청"));
+    assert_eq!(
+        payload["proposed_by"],
+        json!(fixture.hosted_agent.to_string())
+    );
+    assert_eq!(
+        payload["resume_model"],
+        Value::Null,
+        "a workspace action is never resumed into a model"
+    );
+    assert!(payload.get("tool_call").is_none());
+
+    let (message_type, author, props, message_run_id): (String, Uuid, Value, Option<Uuid>) =
+        sqlx::query_as(
+            "SELECT type::text, author_member_id, props, run_id FROM message \
+              WHERE workspace_id=$1 AND id=$2",
+        )
+        .bind(fixture.workspace)
+        .bind(card_message_id)
+        .fetch_one(&su)
+        .await
+        .expect("the card exists");
+    assert_eq!(message_type, "approval_request");
+    assert_eq!(author, fixture.hosted_agent, "the card is the agent's own");
+    assert!(message_run_id.is_some(), "the card belongs to the run");
+    assert_eq!(props["approval_id"], json!(approval_id.to_string()));
+    assert_eq!(props["action_type"], json!("workspace_action"));
+    assert_eq!(props["status"], json!("pending"));
+    assert_eq!(props["action"]["id"], json!("invite.create"));
+    assert_eq!(props["action"]["required_role"], json!("admin"));
+    assert_eq!(
+        props["action"]["rows"],
+        json!([
+            {"label": "역할", "value": "member"},
+            {"label": "사용 횟수", "value": "2회"},
+            {"label": "만료", "value": "3일"}
+        ])
+    );
+
+    let (run_status, deadline_at): (String, Option<chrono::DateTime<chrono::Utc>>) =
+        sqlx::query_as(
+            "SELECT r.status::text, r.deadline_at FROM agent_run r \
+               JOIN approval a ON a.run_id = r.id \
+              WHERE a.workspace_id=$1 AND a.id=$2",
+        )
+        .bind(fixture.workspace)
+        .bind(approval_id)
+        .fetch_one(&su)
+        .await
+        .expect("the run exists");
+    assert_eq!(run_status, "awaiting_approval");
+    assert!(
+        deadline_at.is_some(),
+        "the hold is bounded — without a deadline one unanswered card silences the agent"
+    );
+
+    // **No new outbox producer.** The card's broadcast is `send_message_in_tx`'s
+    // own; not one extra `agent_job` was enqueued for this agent.
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        agent_jobs_before,
+        "a proposal enqueues no job — the decision executes it, nothing resumes it"
+    );
+
+    // ---- red proof 3: the parked run refuses the two settling verbs --------
+    for (tool, arguments) in [
+        (
+            "oort_run_complete",
+            json!({"leaseHandle": handle, "status": "succeeded", "body": "끝냈습니다"}),
+        ),
+        ("oort_job_release", json!({"leaseHandle": handle})),
+    ] {
+        let (status, refused) = call(&client, &base, &fixture.hosted_bearer, tool, arguments).await;
+        assert_eq!(status, 409, "{tool} must refuse a parked run: {refused}");
+        assert_eq!(error_code(&refused), -32005, "{tool}");
+    }
+    // Renewing while a person decides is exactly right, so it is NOT guarded.
+    let (status, renewed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_job_renew",
+        json!({"leaseHandle": handle}),
+    )
+    .await;
+    assert_eq!(
+        status, 200,
+        "a parked run may still hold its lease: {renewed}"
+    );
+
+    // A second proposal on the same parked run is a conflict, not a second card.
+    let (status, again) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 409, "{again}");
+    assert_eq!(error_code(&again), -32005);
+    let cards: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message WHERE workspace_id=$1 AND type='approval_request'",
+    )
+    .bind(fixture.workspace)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(cards, 1, "one proposal, one card");
+
+    // ---- APPROVE is closed until AX-3b, and closes safely ------------------
+    //
+    // The card is live in a real channel the moment this lands, so the generic
+    // resume path must not take it: that path would requeue the run and enqueue
+    // a `resume_approval` job whose payload has no tool call.
+    let approve_status = decide(&client, &base, &fixture, approval_id, true).await;
+    assert_eq!(
+        approve_status, 409,
+        "approving a workspace action is refused while the executor is unlanded"
+    );
+    let still_pending: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(
+        still_pending, "pending",
+        "the refusal must not consume the approval"
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        agent_jobs_before,
+        "and it must not enqueue a resume job"
+    );
+
+    // ---- REJECT is open, and is the only way to close a proposal -----------
+    //
+    // **ADR-0186 D2: 「거부·만료: 기존 arm 그대로」.** The temporary approve-side
+    // refusal must not take the reject side with it. If it did, a person looking
+    // at their own agent's proposal would have no way to say no: the card stays
+    // pending and the run stays parked, and because `agent.max_concurrent_runs`
+    // defaults to **1** and `awaiting_approval` counts as live, that agent
+    // answers nothing at all until the one-hour TTL expires — with nothing
+    // anywhere saying why.
+    let messages_before = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    let reject_status = decide(&client, &base, &fixture, approval_id, false).await;
+    assert_eq!(
+        reject_status, 200,
+        "rejecting a workspace action must work — the executor is what is unlanded, not the refusal"
+    );
+
+    let rejected: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(approval_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(rejected, "rejected");
+
+    let run_after_reject: String = sqlx::query_scalar(
+        "SELECT r.status::text FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(approval_id)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        run_after_reject, "cancelled",
+        "a rejection releases the concurrency gate"
+    );
+
+    // **The `tool_result` line actually reaches the channel.** This is what the
+    // card's idempotency key was changed for: the rejection line is authored by
+    // the same agent in the same channel and is keyed on `approval.id`, so a
+    // card that had kept `approval.id` too would have collided with it on
+    // `message_client_idem_uniq` and one of the two would have been silently
+    // dropped. Counting rows is what makes that visible — a props assertion
+    // alone would pass on the surviving row.
+    let messages_after = channel_message_count(&su, fixture.workspace, fixture.channel).await;
+    assert_eq!(
+        messages_after - messages_before,
+        1,
+        "the rejection must add exactly one message (the tool_result) beside the card"
+    );
+    let (result_author, result_props): (Uuid, Value) = sqlx::query_as(
+        "SELECT author_member_id, props FROM message \
+          WHERE workspace_id=$1 AND channel_id=$2 AND type='tool_result' \
+          ORDER BY seq DESC LIMIT 1",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.channel)
+    .fetch_one(&su)
+    .await
+    .expect("the rejection tool_result is in the channel");
+    assert_eq!(
+        result_author, fixture.hosted_agent,
+        "the outcome is authored by the agent whose proposal it was"
+    );
+    assert_eq!(result_props["approval_id"], json!(approval_id.to_string()));
+    assert_eq!(result_props["status"], json!("rejected"));
+    // The card and its outcome are two distinct rows with two distinct keys.
+    let card_key: Option<Uuid> =
+        sqlx::query_scalar("SELECT client_msg_id FROM message WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(card_message_id)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_ne!(
+        card_key,
+        Some(approval_id),
+        "the card must not share the approval id with its own outcome line"
+    );
+
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        agent_jobs_before,
+        "a rejection enqueues no resume job — the resume job is approve_run's alone"
+    );
+
+    // ---- the REAL expiry sweep settles a second proposal -------------------
+    //
+    // `momo_notifier::approval_sweep::sweep_expired_approvals` is the production
+    // loop, called here **as itself** rather than re-assembled from the domain
+    // calls it happens to make. Re-assembling it would prove only that the
+    // re-assembly does not panic; the risk this guards is that the real sweep
+    // *skips* a payload with no `tool_call` and leaves the run parked forever.
+    let second = propose_on_a_fresh_run(&client, &base, &su, &fixture).await;
+    let jobs_before_sweep = agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await;
+    sqlx::query(
+        "UPDATE approval SET expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(second)
+    .execute(&su)
+    .await
+    .unwrap();
+
+    // The sweep runs on its own role, exactly as `momo-notifier` does.
+    let notifier = momo_notifier_pool().await;
+    let stats = momo_notifier::approval_sweep::sweep_expired_approvals(&notifier, 50)
+        .await
+        .expect("the production sweep must not fail on a workspace_action payload");
+    assert!(
+        stats.expired >= 1,
+        "the production sweep must settle the overdue workspace action, got {stats:?}"
+    );
+
+    let expired: String =
+        sqlx::query_scalar("SELECT status::text FROM approval WHERE workspace_id=$1 AND id=$2")
+            .bind(fixture.workspace)
+            .bind(second)
+            .fetch_one(&su)
+            .await
+            .unwrap();
+    assert_eq!(expired, "expired");
+    let run_after_sweep: String = sqlx::query_scalar(
+        "SELECT r.status::text FROM agent_run r JOIN approval a ON a.run_id = r.id \
+          WHERE a.workspace_id=$1 AND a.id=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(second)
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        run_after_sweep, "timed_out",
+        "an expired proposal MUST release the concurrency gate — otherwise one \
+         unanswered card silences the agent permanently"
+    );
+    assert_eq!(
+        agent_job_count(&su, fixture.workspace, fixture.hosted_agent).await,
+        jobs_before_sweep,
+        "expiry enqueues no resume job either — all three arms are job-free"
+    );
+    // The sweep's own expiry line reached the channel too, beside its card.
+    let expiry_line: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM message \
+          WHERE workspace_id=$1 AND type='tool_result' AND props->>'approval_id' = $2",
+    )
+    .bind(fixture.workspace)
+    .bind(second.to_string())
+    .fetch_one(&su)
+    .await
+    .unwrap();
+    assert_eq!(
+        expiry_line, 1,
+        "the expiry tool_result must not collide with its own proposal card"
+    );
+}
+
+/// **ADR-0186 D2 — the park belongs to the lease holder.**
+///
+/// `bound_handle` proves identity (workspace, agent, connection, approved
+/// channel) and says nothing about the lease, so a handle whose lease expired
+/// and whose job was re-claimed still decodes and still binds. If proposing
+/// accepted it, a stale worker could park a run out from under the worker that
+/// actually holds the job — and that second worker would then get 409 on every
+/// `oort_run_complete` until the one-hour TTL, unable to finish a turn it owns.
+///
+/// This is the asymmetry the reviewer found: `oort_run_complete` judges the
+/// lease through `complete_gateway_run_in_tx` and proposing did not.
+#[tokio::test]
+#[ignore = "needs verifier-owned isolated PostgreSQL 18"]
+async fn a_stale_lease_handle_cannot_park_a_run_someone_else_owns() {
+    ensure_schema_and_roles();
+    let su = superuser_pool().await;
+    let app = momo_app_pool().await;
+    let fixture = seed(&su).await;
+    let base = start_server(app, true).await;
+    let client = reqwest::Client::new();
+
+    let handle_name = hosted_handle(&su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 초대 링크 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("mention send")
+        .json()
+        .await
+        .expect("mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    // The first worker claims the job and holds a handle.
+    let (status, claimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let stale_handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("handle")
+        .to_string();
+
+    // Its lease lapses and a second worker takes the job over. The first
+    // worker's handle is now stale — but still perfectly well-formed, still
+    // sealed with the live secret, and still bound to this very agent,
+    // connection and approved channel.
+    // Both timestamps move, because `outbox_gateway_lease_shape_ck` requires
+    // `lease_expires_at > lease_acquired_at` — a lapsed lease is one whose whole
+    // window is in the past, not one with an impossible shape.
+    sqlx::query(
+        "UPDATE outbox \
+            SET lease_acquired_at = now() - interval '10 minutes', \
+                lease_expires_at = now() - interval '1 minute' \
+          WHERE workspace_id=$1 AND kind='agent_job' AND partition_key=$2",
+    )
+    .bind(fixture.workspace)
+    .bind(fixture.hosted_agent)
+    .execute(&su)
+    .await
+    .unwrap();
+    let (status, reclaimed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{reclaimed}");
+    let fresh_handle = structured(&reclaimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("the takeover mints a new handle")
+        .to_string();
+    assert_ne!(
+        fresh_handle, stale_handle,
+        "a takeover must mint a new lease, or this test proves nothing"
+    );
+
+    // The stale handle may not park the run.
+    let (status, refused) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": stale_handle, "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 409, "a stale lease must not park a run: {refused}");
+    assert_eq!(error_code(&refused), -32005);
+    let approvals: i64 = sqlx::query_scalar("SELECT count(*) FROM approval WHERE workspace_id=$1")
+        .bind(fixture.workspace)
+        .fetch_one(&su)
+        .await
+        .unwrap();
+    assert_eq!(approvals, 0, "a refused proposal writes nothing");
+
+    // …and the worker that actually holds the lease still can.
+    let (status, proposed) = call(
+        &client,
+        &base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": fresh_handle, "actionId": "invite.create", "args": {}}),
+    )
+    .await;
+    assert_eq!(status, 200, "the live lease holder may park: {proposed}");
+    assert_eq!(structured(&proposed)["status"], json!("pending"));
+}
+
+/// Send one decision as the fixture's human and return the HTTP status.
+async fn decide(
+    client: &reqwest::Client,
+    base: &str,
+    fixture: &Fixture,
+    approval_id: Uuid,
+    approve: bool,
+) -> u16 {
+    client
+        .post(format!(
+            "{base}/v1/workspaces/{}/approvals/{approval_id}/decision",
+            fixture.workspace
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "approvalId": approval_id,
+            "approve": approve,
+            "clientDecisionId": Uuid::new_v4()
+        }))
+        .send()
+        .await
+        .expect("decision responds")
+        .status()
+        .as_u16()
+}
+
+async fn channel_message_count(pool: &PgPool, workspace: Uuid, channel: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM message WHERE workspace_id=$1 AND channel_id=$2")
+        .bind(workspace)
+        .bind(channel)
+        .fetch_one(pool)
+        .await
+        .expect("count channel messages")
+}
+
+/// Raise a second mention, claim it, and propose on it. Returns the approval id.
+///
+/// The expiry arm needs its own parked run because the first one was closed by
+/// the rejection above — and settling two different approvals through two
+/// different paths is exactly what ADR-0186 §5 asks to be measured separately.
+async fn propose_on_a_fresh_run(
+    client: &reqwest::Client,
+    base: &str,
+    su: &PgPool,
+    fixture: &Fixture,
+) -> Uuid {
+    let handle_name = hosted_handle(su, fixture.hosted_agent).await;
+    let trigger: Value = client
+        .post(format!(
+            "{base}/v1/workspaces/{}/channels/{}/messages",
+            fixture.workspace, fixture.channel
+        ))
+        .bearer_auth(&fixture.human_jwt)
+        .json(&json!({
+            "clientMsgId": Uuid::new_v4(),
+            "body": format!("@{handle_name} 하나 더 만들어줘")
+        }))
+        .send()
+        .await
+        .expect("second mention send")
+        .json()
+        .await
+        .expect("second mention body");
+    assert!(trigger["id"].is_string(), "{trigger}");
+
+    let (status, claimed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_jobs_claim",
+        json!({"limit": 10}),
+    )
+    .await;
+    assert_eq!(status, 200, "{claimed}");
+    let handle = structured(&claimed)["jobs"][0]["leaseHandle"]
+        .as_str()
+        .expect("a second lease handle")
+        .to_string();
+
+    let (status, proposed) = call(
+        client,
+        base,
+        &fixture.hosted_bearer,
+        "oort_action_propose",
+        json!({"handle": handle, "actionId": "invite.create", "args": {"role": "member"}}),
+    )
+    .await;
+    assert_eq!(status, 200, "{proposed}");
+    Uuid::parse_str(
+        structured(&proposed)["approvalId"]
+            .as_str()
+            .expect("approvalId"),
+    )
+    .expect("approvalId is a uuid")
+}
+
+/// Every `agent_job` row on this agent's partition key, settled or not.
+async fn agent_job_count(pool: &PgPool, workspace: Uuid, agent: Uuid) -> i64 {
+    sqlx::query_scalar(
+        "SELECT count(*) FROM outbox WHERE workspace_id=$1 AND kind='agent_job' \
+           AND partition_key=$2",
+    )
+    .bind(workspace)
+    .bind(agent)
+    .fetch_one(pool)
+    .await
+    .expect("count agent jobs")
 }
