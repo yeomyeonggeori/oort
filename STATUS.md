@@ -1,5 +1,9 @@
 # oort 진행 현황
 
+## 설정 › 기기 목록·해제 UI (#2476 R2, 2026-09-12)
+
+- Track uxui. `feat/2476-devices-settings` onto `origin/track/uxui`. R2: 목록은 `authedRequest`(401 1회 회전, 만료는 `markAuthExpired`). 해제 후 다음 행/QR 만들기 착지 + `role=status` 낭독. 플랫폼은 iOS/iPadOS/Android/macOS/Windows. 빈 상태 한 줄. 「현재 기기」는 메타 문장. 마지막 사용 시각은 아직 기록하지 않습니다.
+- runtime-unverified: 실폰 redeem 후 이 화면 e2e. `current` 행은 폰 세션에서만 실측(웹 비밀번호 세션은 목록에 없음).
 ## OpenAPI rust 샘플러에 GET/DELETE /v1/auth/devices 샘플 (#2491, 2026-09-12)
 
 - Track engine. `policy/2491-openapi-sampler-devices` onto `origin/track/engine`. `scripts/openapi_sampled_on_rust.txt`에 `GET /v1/auth/devices`·`DELETE /v1/auth/devices/{id}` 등재. 샘플러가 기기 링크 2회 redeem 픽스처 뒤 200(두 행, 하나 `current: true`, `lastSeenAt` 생략)·400 `cannot_revoke_current`·404·204를 왕복. compose 필수 `NOTIFIER_POSTGRES_PASSWORD`를 게이트 env에 추가(기존 검사 삭제 0).

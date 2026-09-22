@@ -437,7 +437,7 @@ describe("DeviceLinkCard R2 proofs", () => {
     expect(testId("device-link-expired").textContent).toMatch(/다시 만들/);
   });
 
-  it("survives remount from the poll status rather than a local flag", async () => {
+  it("does not restore connected from live after remount", async () => {
     getDeviceLink.mockResolvedValue(consumedDevice());
     mount();
     await createLink();
@@ -460,8 +460,9 @@ describe("DeviceLinkCard R2 proofs", () => {
     const remounted = mount();
     await flush();
     await flush();
-    expect(remounted.textContent).toContain("연결됨");
+    expect(remounted.querySelector('[data-testid="device-link-connected"]')).toBeNull();
     expect(document.querySelector('[data-testid="device-link-confirm-sas"]')).toBeNull();
+    expect(sessionStorage.getItem(DEVICE_LINK_LIVE_KEY)).toBeNull();
   });
 
   it("cancels the previous poll when a new code is issued", async () => {
