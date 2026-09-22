@@ -660,6 +660,36 @@ paths:
               schema: {$ref: "#/components/schemas/ErrorResponse"}
         "429": {$ref: "#/components/responses/RateLimited"}
 
+  /v1/workspaces/{workspaceId}/actions:
+    get:
+      tags: [actions]
+      operationId: listWorkspaceActions
+      summary: List the workspace actions that can be proposed (ADR-0186 D1).
+      description: >
+        The catalog three consumers are derived from: this route, the Agent Port
+        tool `oort_action_propose`'s `actionId` enum, and `WorkspaceActionId`
+        below. Any active human member may read it; `requiredRole` names who
+        would have to approve, not who may read. Rows with `executable: false`
+        are capabilities a later batch opens and always carry a non-null
+        `unavailableReason`; they carry no `requiredRole` and no `argsSchema`,
+        because the batch that opens one decides both. Nothing here executes:
+        an agent proposes with `oort_action_propose` and a person's decision is
+        what runs the action, with the approver's own authority.
+      security: [{bearerAuth: []}]
+      parameters:
+        - $ref: "#/components/parameters/WorkspaceId"
+      responses:
+        "200":
+          description: The workspace action catalog.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ListWorkspaceActionsResponse"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403":
+          description: Caller is not an active workspace member, or is not a human bearer.
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/ErrorResponse"}
   /v1/workspaces/{workspaceId}/invites:
     get:
       tags: [invites]
@@ -9204,10 +9234,45 @@ components:
         `agent:inbox:read` -> oort_inbox_read, `messages:read` ->
         oort_conversation_read, `messages:write` -> oort_message_post,
         `agent:jobs:read` -> oort_jobs_claim/oort_job_renew/oort_job_release,
-        `agent:runs:callback` -> oort_run_event/oort_run_complete. A tool is
-        listed and callable only when the connection approval, the credential's
-        current scopes and the server capability all carry its scope.
-      enum: ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "agent:jobs:read", "agent:runs:callback"]
+        `agent:runs:callback` -> oort_run_event/oort_run_complete,
+        `workspace:propose` -> oort_action_propose (ADR-0186 D2: propose only —
+        it opens no REST route at all, and the change it asks for is executed by
+        the approver's own authority or not at all). It is not requested by
+        default. A tool is listed and callable only when the connection
+        approval, the credential's current scopes and the server capability all
+        carry its scope.
+      enum: ["agent:port:connect", "agent:inbox:read", "messages:read", "messages:write", "agent:jobs:read", "agent:runs:callback", "workspace:propose"]
+
+    WorkspaceActionId:
+      type: string
+      description: >
+        The closed set of workspace actions an agent may propose (ADR-0186 D1).
+        The canonical list is `momo_agent::actions::ACTIONS`; this enum, the
+        `actionId` enum of the Agent Port tool `oort_action_propose`, and that
+        registry are held equal by one test
+        (`routes::actions::the_action_ids_are_one_list_in_three_places`).
+      enum: ["invite.create"]
+
+    WorkspaceAction:
+      type: object
+      additionalProperties: false
+      required: [id, title, summary, risk, executable, unavailableReason]
+      properties:
+        id: {type: string, description: A WorkspaceActionId when executable; a declared-not-executable id otherwise.}
+        title: {type: string}
+        summary: {type: string}
+        risk: {type: string, enum: [none, approval], description: "`approval` for every workspace action; `none` belongs to client commands, which this catalog does not serve."}
+        requiredRole: {type: string, enum: [admin], description: The workspace role a decider must hold. Absent while executable is false.}
+        argsSchema: {type: object, description: JSON Schema for the action's args object. Absent while executable is false.}
+        executable: {type: boolean}
+        unavailableReason: {type: string, nullable: true, description: Null when executable; a sentence when not. Never absent.}
+
+    ListWorkspaceActionsResponse:
+      type: object
+      additionalProperties: false
+      required: [actions]
+      properties:
+        actions: {type: array, items: {$ref: "#/components/schemas/WorkspaceAction"}}
 
     HostedAgentConnection:
       type: object

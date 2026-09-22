@@ -822,9 +822,15 @@ export function WorkSessionDetail({
       data-testid="work-detail"
     >
       {/* ONE scroll column. Everything above the ledger scrolls with it; only
-          the two things you steer by stay put. */}
+          the two things you steer by stay put.
+
+          `isolate` (#2485 R1 B-2): the sticky header below carries `z-10` to
+          stay over the ledger rows it scrolls past. Without a stacking context
+          here that 10 resolves against the document root and outranks every
+          named overlay layer. The scrollport is what the header competes
+          inside, so the scrollport owns the context. */}
       <div
-        className="min-h-0 flex-1 overflow-y-auto"
+        className="isolate min-h-0 flex-1 overflow-y-auto"
         data-testid="work-detail-scroll"
       >
         <div className="sticky top-0 z-10 border-b border-line bg-surface">

@@ -18,13 +18,25 @@ pub const HOSTED_AGENT_PORT_AUDIENCE: &str = "/v1/mcp/agent-port";
 pub const HOSTED_PAIRING_TTL_SECONDS: i64 = 15 * 60;
 pub const HOSTED_AGENT_MODEL: &str = "hosted-agent";
 pub const HOSTED_AGENT_INERT_BASE_URL: &str = "https://hosted-agent.invalid/disabled";
-pub const HOSTED_AGENT_SCOPES: [&str; 6] = [
+/// The closed hosted ceiling — the only scopes a human may approve on a hosted
+/// connection and the only ones its credential may carry.
+///
+/// `workspace:propose` (ADR-0186 D2) is the seventh and the first one that is
+/// **not** about reading or speaking. It is here because a scope a human cannot
+/// approve is a tool nobody can ever reach; it is *not* in
+/// `momo_auth::agent_credential`'s grantable set, because generic agent bearers
+/// never reach Agent Port tools at all
+/// ([`resolve_hosted_tool_identity_in_tx`] requires a hosted credential class),
+/// and it is not in the client's default request list (ADR-0186 D2: 기본 페어링은
+/// 요청하지 않는다).
+pub const HOSTED_AGENT_SCOPES: [&str; 7] = [
     "agent:port:connect",
     "agent:inbox:read",
     "messages:read",
     "messages:write",
     "agent:jobs:read",
     "agent:runs:callback",
+    "workspace:propose",
 ];
 
 const SECRET_BYTES: usize = 32;

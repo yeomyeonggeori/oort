@@ -262,6 +262,12 @@ function DiffFileSection({
   const lines = useScrollable<HTMLPreElement>();
   const hidden = file.lineCount - file.lines.length;
   return (
+    // `isolate` (#2485 R1 B-2): the summary below needs a z-index to beat its
+    // own file's code lines, and a bare `z-10` resolved against the *document*
+    // root, where it out-painted every overlay in the app — the sticky filename
+    // bar was measured painting straight across the open ⌘K panel and across
+    // the 390px sidebar drawer, cutting the 「에이전트」 nav row in half. The
+    // file block owns the race, so the file block owns the stacking context.
     <details
       open={open}
       onToggle={(event) => {
@@ -269,6 +275,7 @@ function DiffFileSection({
         setOpen(next);
         remember(OPEN_FILES, storageKey, next, OPEN_FILES_LIMIT);
       }}
+      className="isolate"
       data-testid="artifact-diff-file"
       data-path={file.path}
     >
@@ -276,7 +283,8 @@ function DiffFileSection({
           its own path off the top of the card and leaves the reader scrolling
           code with no idea which file they are in. z-10 because a sticky box
           with no z-index creates no stacking context, and the next file's lines
-          would paint straight over it. */}
+          would paint straight over it. The `isolate` on <details> above keeps
+          that 10 inside this file block. */}
       <summary
         className={cn(
           "sticky top-0 z-10 flex cursor-pointer items-center gap-2 border-b border-line bg-surface-raised px-3 py-1 press hover:bg-surface-hover",

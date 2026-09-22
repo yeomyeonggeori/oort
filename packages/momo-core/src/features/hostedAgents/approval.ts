@@ -105,6 +105,20 @@ export const HOSTED_SCOPE_CHOICES: readonly HostedScopeChoice[] = [
       "가져간 작업의 진행과 결과를 보고합니다. 이 권한이 없으면 작업이 끝났는지 알 수 없습니다.",
     required: false,
   },
+  {
+    // ADR-0186 D2. 목록에서 유일하게 **대화 밖**을 건드리는 줄이라 맨 아래 선다.
+    //
+    // 문장이 「제안할 수 있음」에서 끝나지 않고 괄호까지 가는 이유: 이 줄만 읽고
+    // 넘기는 사람에게 「워크스페이스 변경」은 초대·웹훅·역할이 에이전트 손에
+    // 들어간다는 뜻으로 읽힌다. 실제로는 승인 카드 한 장이 채널에 서는 것이
+    // 전부이고, 초대를 만드는 것은 승인을 누른 사람의 권한이다. 그 두 번째
+    // 문장이 없으면 사람은 자기가 무엇을 허락했는지 정확히 반대로 읽는다.
+    id: "workspace:propose",
+    label: "워크스페이스 변경 제안",
+    detail:
+      "워크스페이스 변경을 제안할 수 있음(실행은 사람 승인). 제안은 채널에 승인 카드로 서고, 승인하면 승인한 사람의 권한으로 실행됩니다.",
+    required: false,
+  },
 ];
 
 /** 서버가 반드시 요구하는 권한 (`validate_hosted_scopes`). */
@@ -256,6 +270,11 @@ function scopeAction(scope: HostedAgentScope): string | null {
       return "작업 가져가기";
     case "agent:runs:callback":
       return "작업 결과 보고";
+    case "workspace:propose":
+      // 「제안」이라는 낱말이 결과 문장에서도 빠지지 않는다. 이 목록은 한 줄에
+      // 하나씩 붙어 한 문장이 되므로, 여기서 「워크스페이스 변경」이라고만 쓰면
+      // 요약 문장이 권한을 과장한다.
+      return "워크스페이스 변경 제안(실행은 사람 승인)";
   }
 }
 

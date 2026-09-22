@@ -59,10 +59,17 @@ export function WorkspaceRail({
           the same "selected" surface a chosen 채널 만들기 range uses, and it
           carries `aria-current` so a screen reader knows which one is current
           without seeing the bar. */}
+      {/* `isolate` (#2485 R1 B-2): the marker below carries `z-10` so it stands
+          over the avatar, and without a stacking context here that 10 resolved
+          against the document root — measured punching through the D6 scrim as
+          the one crisp amber edge in an otherwise blurred strip. The tile is
+          what the marker competes inside, so the tile owns the context. It does
+          not clip (that was the 3R regression the comment below records);
+          `isolation` only scopes z. */}
       <span
         aria-current="true"
         aria-busy={tile.loading || undefined}
-        className="relative flex size-rail-tile items-center justify-center rounded-md bg-accent-soft text-title font-semibold text-ink"
+        className="relative isolate flex size-rail-tile items-center justify-center rounded-md bg-accent-soft text-title font-semibold text-ink"
         title={tile.label}
         aria-label={tile.label}
         data-testid="workspace-current"
