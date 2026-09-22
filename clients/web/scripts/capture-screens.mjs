@@ -8090,6 +8090,71 @@ async function captureScheme(browser, scheme) {
   shots.push(switcherShot);
   await directory.keyboard.press("Escape");
 
+  // 3c-2. ⌘K 「명령」 그룹 (AX-2 #2507, ADR-0186 D1). 질의 없이 막 열린 팔레트가
+  //       이 티켓이 바꾼 화면이다: 「이동」·「만들기」·「에이전트 설정」 세
+  //       머리글이 하나의 「명령」으로 합쳐졌고, 단축키가 있는 줄은 오른쪽에
+  //       키캡(⌘⇧A · ⌘,)을 단다. 키캡은 도움말 다이얼로그와 같은 상자라,
+  //       두 화면을 나란히 놓고 같은 키가 같은 모양인지 볼 수 있다.
+  await sceneClick(directory, directory.getByTestId("open-quick-switcher"));
+  await directory.getByTestId("quick-switcher").waitFor({ state: "visible" });
+  // 질의는 팔레트가 닫혀도 남는다(입력 상태는 팔레트 바깥에 산다). 앞 장면이
+  // 「김」을 쳐 두었으므로 비우지 않으면 이 장면은 사람 두 줄만 찍는다.
+  await directory.getByTestId("quick-switcher-input").fill("");
+  await directory.getByTestId("switcher-inbox").waitFor({ state: "visible" });
+  const commandRows = await directory.locator("[data-command-id]").count();
+  if (commandRows < 5) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 명령 줄이 ${commandRows}개다 — 레지스트리가 비었거나 그룹이 접혔다`
+    );
+  }
+  const commandKeycaps = await directory
+    .locator('[data-command-id="nav.inbox"] kbd')
+    .count();
+  if (commandKeycaps < 1) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 인박스 줄에 키캡이 없다 — 단축키 정본과 팔레트가 갈라졌다`
+    );
+  }
+  // 행 리듬은 키캡이 정하지 않는다 (#2524 R1 H-1). 1차 판본은 키캡 상자가
+  // 줄상자보다 커서 인박스·설정 줄만 34px, 나머지는 30px 이었다. 그 갈림을 재는
+  // 자리는 **여기**다: jsdom 은 배치를 계산하지 않으므로 같은 단정을 시험으로
+  // 옮기면 언제나 통과한다(높이가 전부 0 이다).
+  //
+  // 바로 위 두 단정이 이 단정을 헛돌지 않게 붙든다 — 줄이 5개 이상 있고 그 중
+  // 하나에는 키캡이 있다는 것이 먼저 확인되므로, 「전부 같다」가 빈 목록이나
+  // 키캡 없는 목록으로 참이 되는 길이 없다.
+  const commandRowHeights = await directory.evaluate(() =>
+    [...document.querySelectorAll("[data-command-id]")].map((row) => ({
+      id: row.getAttribute("data-command-id"),
+      h: Math.round(row.getBoundingClientRect().height * 100) / 100,
+      kbd: row.querySelectorAll("kbd").length,
+    }))
+  );
+  console.log(`COMMAND_ROW_HEIGHTS ${scheme}`, JSON.stringify(commandRowHeights));
+  const commandRowHeightSet = [...new Set(commandRowHeights.map((r) => r.h))];
+  if (commandRowHeightSet.length !== 1) {
+    throw new Error(
+      `[⌘K 명령 그룹 ${scheme}] 명령 줄 높이가 ${commandRowHeightSet
+        .sort((a, b) => a - b)
+        .join("/")}px 로 갈린다 — 키캡이 행 높이를 정하고 있다: ${JSON.stringify(
+        commandRowHeights
+      )}`
+    );
+  }
+  const commandShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-commands-${scheme}.png`);
+  await directory.screenshot({ path: commandShot });
+  shots.push(commandShot);
+
+  // 3c-3. 같은 팔레트에 「설정」을 쳐 넣는다. 명령은 **이름으로 찾는** 줄이라
+  //       걸러져야 하고, 검색 두 줄은 forceMount라 남아야 한다 — 한 프레임에서
+  //       두 규칙이 같이 보인다.
+  await directory.getByTestId("quick-switcher-input").fill("설정");
+  await directory.getByTestId("switcher-settings-agents").waitFor({ state: "visible" });
+  const filteredShot = beginSceneFromShotPath(`${OUT_DIR}/quick-switcher-commands-filtered-${scheme}.png`);
+  await directory.screenshot({ path: filteredShot });
+  shots.push(filteredShot);
+  await directory.keyboard.press("Escape");
+
   // 3d. the DM that a directory profile opens: same timeline anatomy as a channel.
   await sceneClick(directory, directory
     .locator('[data-testid="directory-row"][data-member-kind="agent"]')

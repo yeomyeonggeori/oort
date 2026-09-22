@@ -8,6 +8,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError, uuidEq, type RosterMember } from "@momo/core/lib/api";
 import { TERMINAL_DONE_HEADLINE, TERMINAL_HEADLINE } from "@momo/core/features/hostedAgents/disconnect";
+import { visibleCommands } from "@momo/core/features/commands/registry";
 import {
   createHostedConnection,
   disconnectHostedConnection,
@@ -128,8 +129,20 @@ function hostedSectionSource(): string {
   );
 }
 
+/**
+ * ⌘K 줄의 정의가 사는 곳 (ADR-0186 D1).
+ *
+ * 팔레트 파일이 아니라 **명령 레지스트리**다. 이 줄의 이름·경로·testId는
+ * 2026-09-22(AX-2)에 QuickSwitcher.tsx에서 여기로 올라갔고, 팔레트는 이제
+ * 레지스트리를 map한다 — 그래서 「⌘K가 같은 이름으로 여는가」를 묻는 자리도
+ * 함께 옮긴다. 옛 자리를 계속 읽으면 시험은 영영 붉고, 붉지 않게 고치려고
+ * 팔레트에 이름을 다시 적으면 정확히 이 티켓이 없앤 손복사가 돌아온다.
+ */
 function switcherSource(): string {
-  return readFileSync("src/app/QuickSwitcher.tsx", "utf8");
+  return readFileSync(
+    "../../packages/momo-core/src/features/commands/registry.ts",
+    "utf8"
+  );
 }
 
 function human(): RosterMember {
@@ -323,9 +336,19 @@ describe("진입점", () => {
 
   it("⌘K 가 같은 이름으로 연다", () => {
     const source = switcherSource();
-    expect(source).toContain('data-testid="switcher-settings-agents"');
+    expect(source).toContain('testId: "switcher-settings-agents"');
     expect(source).toContain("/settings?section=agents");
     expect(countNeedle(source, "에이전트 자격")).toBeGreaterThanOrEqual(1);
+  });
+
+  it("그 줄이 실제로 레지스트리에서 나온다", () => {
+    const command = visibleCommands({
+      showDrafts: false,
+      canCreateChannel: false,
+      isSurfaceProvided: () => false,
+      agents: [],
+    }).find((entry) => entry.testId === "switcher-settings-agents");
+    expect(command?.title).toBe(SETTINGS_SECTIONS.find((item) => item.id === "agents")?.label);
   });
 });
 
