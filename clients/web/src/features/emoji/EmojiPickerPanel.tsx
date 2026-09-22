@@ -320,7 +320,7 @@ export function EmojiPickerPanel({
               id={skinListId}
               role="listbox"
               aria-label="피부색"
-              className="absolute right-0 z-50 mt-1 flex gap-1 rounded-md border border-line bg-surface-raised p-1 shadow-lg"
+              className="absolute right-0 layer-overlay-surface mt-1 flex gap-1 rounded-md border border-line bg-surface-raised p-1 shadow-lg"
             >
               {SKIN_OPTIONS.map((option) => (
                 <li key={option.tone} role="none">
